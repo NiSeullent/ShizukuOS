@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "date": "2026-09-27",
+  "product": "Windows 98 Shizuku's Second Edition",
+  "archive": "windows98-shizuku-second-edition-usb-configuration-checkpoint.zip",
+  "sha256": "9f4e976e8ea135dc820e7ffe0889e93f3c3b1c161fdf4f0f7bf069683fb0ca0a",
+  "bytes": 891614,
+  "members": 321,
+  "rebuild_commands": [
+    [
+      "python3",
+      "platform/build.py"
+    ],
+    [
+      "python3",
+      "platform/test.py"
+    ],
+    [
+      "python3",
+      "platform/abi32/build.py"
+    ],
+    [
+      "python3",
+      "ntwrapper/vxd/build.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi/build.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi32/build.py"
+    ],
+    [
+      "python3",
+      "drivers/ahci_native/test.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi_ahci/build.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi_ahci/test.py"
+    ],
+    [
+      "python3",
+      "drivers/xhci_native/test.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi_xhci/build.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi_xhci/test.py"
+    ],
+    [
+      "python3",
+      "platform/freestanding/test.py"
+    ],
+    [
+      "python3",
+      "ntwddm/win98/test.py"
+    ],
+    [
+      "python3",
+      "ntwddm/win98/build.py"
+    ],
+    [
+      "python3",
+      "drivers/usb_native/test.py"
+    ],
+    [
+      "python3",
+      "drivers/xhci_usb/test.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi_usb/build.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi_usb/test.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi_usb_config/build.py"
+    ],
+    [
+      "python3",
+      "shizukudos/uefi_usb_config/test.py"
+    ]
+  ],
+  "rebuild_identical": {
+    "build/platform/NTW32.DLL": "a55364068fe00db2637083ea96a25131deb6a40bbd04340cd9dbe4841baaa2b3",
+    "build/platform/NTWPROBE.EXE": "9b764f420933b1ef0b5007f6713f1dfc694a077d5101fc69c04bdf168146bbf2",
+    "build/platform/ntwrapper9x.a": "8fcfd16de948f6fe591c3f83d679ae50b8f8dcc14935df5a6d608674015f0d45",
+    "shizukudos/uefi/build/BOOTX64.EFI": "6b963f36433d7acf82671e90bbeed6f71a55aed29c38d709e24062afd6e737d1",
+    "shizukudos/uefi32/build/BOOTX64.EFI": "0973b5fead3a1fe9e300b8313cf9b898ccd0631bed32af6ce9c353409cc300c6",
+    "shizukudos/uefi32/build/payload.bin": "f0405f6f253cb9ceb53533856977c472aabdb0698605a9c2536191fc62e42621",
+    "shizukudos/uefi32/build/transition.bin": "d2d1058d664f7cf9b0ad52fb075c54887fb907e1f9c7adf859ab2653abd260ed",
+    "ntwrapper/vxd/build/NTWRAP9X.VXD": "aff7acf54cd0323fe4dce9aab7d93da16df7b8cf345220ee9d2dafa95b0bc537",
+    "ntwrapper/vxd/build/NTWQUERY.EXE": "7f8abf3e15d2d7838d921e0aed1e9efb0efd9d7a2d243f968b7b5eca5f71ddb0",
+    "shizukudos/uefi_ahci/build/BOOTX64.EFI": "be234d007749cc1820492bf896f92b454bcd0a456b2785ffcea8eb2fd84dbf86",
+    "shizukudos/uefi_ahci/build/payload.bin": "029900eb8acd85417a1f87606f1f8a6530dc6bb708ec530818e0c3a97c1a0d74",
+    "shizukudos/uefi_ahci/build/transition.bin": "d2d1058d664f7cf9b0ad52fb075c54887fb907e1f9c7adf859ab2653abd260ed",
+    "shizukudos/uefi_xhci/build/BOOTX64.EFI": "8dc6bca6ee5323d7c349378ac35fb2c086edd3b5a3d66909f1413c8c40c8d5d8",
+    "shizukudos/uefi_xhci/build/payload.bin": "5aad00a43e2cede282e198fc787b1f3bf40c19a0c3e1ae1f4d1c950d65818def",
+    "shizukudos/uefi_xhci/build/transition.bin": "d2d1058d664f7cf9b0ad52fb075c54887fb907e1f9c7adf859ab2653abd260ed",
+    "ntwddm/win98/build/NTWGPROB.EXE": "4b6fa2dad7ccc3dd3efa39917354b30cc7bad77ba4d9d167aaa8fc5646e89b53",
+    "shizukudos/uefi_usb/build/BOOTX64.EFI": "60295012d425c3e43166b2a6e403466800160ec0da0fc000df5b2987e09f11ed",
+    "shizukudos/uefi_usb/build/payload.bin": "b6a612b0b87046bf52e3fed44b9c10a86a5fbbaa246cb00f9da9214b21d35bde",
+    "shizukudos/uefi_usb/build/transition.bin": "d2d1058d664f7cf9b0ad52fb075c54887fb907e1f9c7adf859ab2653abd260ed",
+    "shizukudos/uefi_usb_config/build/BOOTX64.EFI": "2dffac0094a08b3062c1f66610ecc4f3d3742ebabfa7848988b6c19f1db32430",
+    "shizukudos/uefi_usb_config/build/payload.bin": "0d3255ad83da366c8de0c69a92b44276d28814b987039d02d21a97ffcbbbe851",
+    "shizukudos/uefi_usb_config/build/transition.bin": "d2d1058d664f7cf9b0ad52fb075c54887fb907e1f9c7adf859ab2653abd260ed"
+  },
+  "guest_reexecuted_during_rebuild": false,
+  "host_tests": "pass",
+  "prior_archives_unchanged": {
+    "windows98-shizuku-second-edition-native-checkpoint.zip": "7ec37d44ba35bf2fc7dff43dff50659a745de538e389ae0bf4ce9c81ba0f73e6",
+    "windows98-shizuku-second-edition-storage-utf-checkpoint.zip": "de87f90db1d7e0950016e22f4cf1bc7fa8e083c7c0a10e535fb050f675efc1fd",
+    "windows98-shizuku-second-edition-xhci-checkpoint.zip": "6ece2a6a9c65ac5c78d07a43a4455c4340ea48be69542f829757fe34585a8478",
+    "windows98-shizuku-second-edition-device-foundation-checkpoint.zip": "b790f2ec4a3dc5ff92ea1a56cdff62a0676d6847280ca3c711b7f845d91b007e",
+    "windows98-shizuku-second-edition-usb-ep0-checkpoint.zip": "7c6f6b921d2289aa0f6b86c19dfd2b669e5614761eac43c27bfdf2864dbd1f52"
+  },
+  "limits": "Original project artifacts only. USB configuration descriptors were read from an emulated device; no SET_CONFIGURATION, HID reports, physical hardware or native Win98 USB claim. Native runner/parser sources included, runner executable delivered on separate original probe CD. Windows media, keys, firmware and installation disks excluded."
+}

@@ -108,13 +108,22 @@ and the final CPU handoff. The captured independent verifier is rerun against
 the captured bytes. Its high-speed tablet result establishes descriptor reads;
 device configuration, HID reports and physical hardware remain outside scope.
 
+The configuration gate additionally binds ten physical evidence files, including
+the complete reserved result page. It independently reconstructs the parsed
+configuration from DMA, checks all four transfer histories and the actual
+34-byte tablet descriptor, and reruns both captured verifier sources. Current
+device-only and configuration guests must both match the shared transport build.
+
 `python3 platform/verify_package.py` extracts a snapshot of that ZIP into a
-separate build directory, validates its file manifest, and runs nineteen build/host
+separate build directory, validates its file manifest, and runs twenty-one build/host
 test commands, including the actual PE32 ABI harness, original AHCI model tests,
 the xHCI model tests, lab clock/inventory tests, compiler memory and USB tests,
-GDI adapter tests/build, and USB EP0 transport/integration/evidence tests. It requires byte-identical
-results for nineteen artifacts: the DLL, three probes, kernel archive, VxD, five EFI
-images, and four 32-bit payload/transition pairs. It does not boot a guest or
+GDI adapter tests/build, and USB device/configuration transport, integration and
+evidence tests. It requires byte-identical results for twenty-two artifacts:
+the DLL, three probes, kernel archive, VxD, six EFI images, and five 32-bit
+payload/transition pairs. The new native supervisor is included as source;
+its executable is supplied separately on the original probe CD. This rebuild
+does not boot a guest or
 install the artifacts.
 Replacing the input ZIP during verification prevents publication of a rebuild
 receipt. These checks establish reproducibility; they do not extend the guest
@@ -156,7 +165,8 @@ The reference baseline is Git commit `1d54ca7`. Host compilers and OVMF are
 present. The registered Win98 VM is an empty placeholder, with no installed OS;
 it has not been modified or booted. Old Windows-host VM results in `vm/README.md`
 are reference history and do not validate these new components. Current exact
-results belong in [the USB EP0 checkpoint](../docs/USB_EP0_CHECKPOINT.md).
+results belong in [the USB configuration checkpoint](../docs/USB_CONFIGURATION_CHECKPOINT.md).
+The [USB EP0 checkpoint](../docs/USB_EP0_CHECKPOINT.md),
 The [device-foundation checkpoint](../docs/DEVICE_FOUNDATION_CHECKPOINT.md),
 The [xHCI checkpoint](../docs/XHCI_CHECKPOINT.md),
 [storage/UTF checkpoint](../docs/STORAGE_UTF_CHECKPOINT.md),
