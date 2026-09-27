@@ -116,6 +116,10 @@ jobs:
           python3 shizukudos/uefi_ahci/build.py
           python3 shizukudos/uefi_ahci/test.py
 
+      - name: Test the original FAT32 reader against synthetic sectors
+        # Host models and freestanding objects only; no Windows media or guest.
+        run: python3 drivers/fat_native/test.py
+
       - name: Test installation-lab storage guards without starting a guest
         timeout-minutes: 3
         run: |

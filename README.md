@@ -13,6 +13,8 @@ python3 platform/test.py
 
 [네이티브 그래픽 시험 프로그램](ntwddm/win98/)은 독자 렌더러를 앱 소유 GDI 비트맵에 연결하며, 현재 빌드·픽셀·수명 관리 호스트 시험을 통과했습니다. [USB descriptor 파서](drivers/usb_native/)도 독자 구현으로 추가했습니다. [독자 EP0 전송 계층](drivers/xhci_usb/)은 실제 QEMU USB 장치에서 장치·구성 서술자를 네 번의 제어 전송으로 읽고 DMA 종료까지 검증했습니다. Windows 98 내부의 GDI·USB 드라이버 실행과 USB 장치 설정·HID 동작은 아직 검증하지 않았습니다.
 
+[독자 FAT32 판독기](drivers/fat_native/)는 최대 512KiB의 루트 파일을 읽으며, 조각난 클러스터·손상·읽기 오류·시간 제한을 GCC·Clang·ASan/UBSan으로 시험했습니다. AHCI 연결과 DOS 부팅 파일 실행은 아직 구현 중입니다.
+
 이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 Windows 98 SE 매체의 해시를 검증해 별도 설치 환경에서 파일 복사 71%까지 진행하고 압축 체크포인트로 저장·복원 검증했습니다. 독자 `NTWRUN.EXE`는 세 네이티브 프로브의 종료 코드와 시간 초과를 기록하도록 준비했습니다. 새 DLL의 Windows 98 실행은 아직 검증하지 않았습니다. UEFI 전환 성공은 Windows 98 GUI 부팅을 뜻하지 않습니다.
 
 ## 기존 경로의 보존 기록
