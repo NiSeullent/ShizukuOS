@@ -46,3 +46,13 @@ Project source code and the KernelEx ABI adaptation are distributed under GPL-2.
 - `integration/core.ini`: copy of KernelEx [`apilibs/core.ini`](https://github.com/metaxor/KernelEx/blob/31cdfc3560fc116637ee8ed7be31b12f3aacf5d1/apilibs/core.ini), its default `contents` extended with the project KERNEL32, Shell, and ADVAPI API libraries, and explicit named-locale, Shell, and ADVAPI routes added in three compatibility profiles. It is a source example, not a replacement for an installed guest's entire configuration.
 
 Wine and ReactOS are not bundled as complete runtimes. Their NT/Unix kernel dependencies are incompatible with direct use in Windows 98. The ISO and installation key supplied for testing remain outside version control.
+## Independent platform path
+
+The new `ntwrapper/`, `ntwin32/`, `ntwddm/`, `drivers/pcie/`,
+`shizukudos/uefi/` and `platform/` sources are independently authored project
+code under GPL-2.0-only. The independent build does not link the legacy
+KernelEx/Wine/ReactOS/LodePNG providers listed above. Public ABI specifications and
+component provenance are recorded in their respective directories. Compiler
+headers and external test firmware/tools are build/test dependencies, not
+project-authored implementations. Existing third-party notices above continue
+to apply to the historical source files and their builds.

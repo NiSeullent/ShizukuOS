@@ -1,0 +1,10 @@
+LIBRARY NTW32.DLL
+EXPORTS
+    InitializeSRWLock=NtwInitializeSRWLock@4
+    AcquireSRWLockExclusive=NtwAcquireSRWLockExclusive@4
+    AcquireSRWLockShared=NtwAcquireSRWLockShared@4
+    ReleaseSRWLockExclusive=NtwReleaseSRWLockExclusive@4
+    ReleaseSRWLockShared=NtwReleaseSRWLockShared@4
+    TryAcquireSRWLockExclusive=NtwTryAcquireSRWLockExclusive@4
+    TryAcquireSRWLockShared=NtwTryAcquireSRWLockShared@4
+    GetTickCount64=NtwGetTickCount64@0

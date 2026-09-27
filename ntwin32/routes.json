@@ -1,0 +1,12 @@
+{
+  "schema": "ntwin32wrapper9x.routes.v1",
+  "provider": "NTW32.DLL",
+  "source_dll": "KERNEL32.DLL",
+  "exports": [
+    "InitializeSRWLock", "AcquireSRWLockExclusive", "AcquireSRWLockShared",
+    "ReleaseSRWLockExclusive", "ReleaseSRWLockShared",
+    "TryAcquireSRWLockExclusive", "TryAcquireSRWLockShared", "GetTickCount64"
+  ],
+  "evidence": "Build/static/host contracts only; no Windows 98 guest result for this provider",
+  "limits": ["GetTickCount64 cannot recover wraps before DLL load or multiple unobserved wraps", "SRW contention uses Sleep(0); no fairness guarantee"]
+}
