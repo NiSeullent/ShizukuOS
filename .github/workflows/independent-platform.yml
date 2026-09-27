@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: independent-platform-${{ github.event.pull_request.number || github.ref }}
+  group: independent-platform-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -76,7 +76,7 @@ jobs:
             -ffreestanding -fno-builtin -fno-stack-protector \
             -Idrivers/pcie/include -c drivers/pcie/src/ntw_pcie.c \
             -o drivers/pcie/build/ntw-pcie-i486.o
-          nm -u drivers/pcie/build/ntw-pcie-i486.o > drivers/pcie/build/undefined-symbols-i486.txt
+          nm -u drivers/pcie/build/ntw-pcie-i486.o | tee drivers/pcie/build/undefined-symbols-i486.txt
           test ! -s drivers/pcie/build/undefined-symbols-i486.txt
 
       - name: Build x64 UEFI and test firmware contracts on the host
