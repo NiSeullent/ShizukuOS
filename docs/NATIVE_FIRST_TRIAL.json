@@ -99,5 +99,16 @@
     "No WDDM or physical PCI-E hardware verification",
     "DLL probe covers only its defined cases",
     "Disk durability is a separate private storage receipt"
-  ]
+  ],
+  "installed_checkpoint": {
+    "durable": true,
+    "archive_sha256": "f67d4bbeef5c3bf0fa8ae8a2c562741869ec8970fb4eac5802eb321fb3e51fb2",
+    "archive_bytes": 147830068,
+    "restored_raw_sha256": "7f33bb59a636748d96f4c0236193d82d7ed821b799149b4edd3a34eeea0daabe",
+    "restored_raw_bytes": 489619456,
+    "independent_qcow_check_errors": 0,
+    "snapshot_count": 7,
+    "clean_installed_snapshot": "windows98-clean-installed",
+    "private_independent_audit_sha256": "bb005e4e0581511caf708ca2fb28b227362d7015cd1dff7392a9ab5b2eaf9e70"
+  }
 }

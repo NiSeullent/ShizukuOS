@@ -40,6 +40,13 @@ supervisor subsequently stopped its owned guest with QEMU exit 0. The installed
 disk initially remained in private RAM because disk-reserve checks refused
 persistence; a stopped process alone is not durable storage evidence.
 
+Persistence subsequently completed after verified lossless archival of the
+older base. A separate standard-library XZ restoration reproduced the complete
+489,619,456-byte qcow2 hash; `qemu-img check` reported zero errors and all seven
+internal snapshots, including `windows98-clean-installed`, remained present.
+The immutable installed archive is 147,830,068 bytes. Its hashes and independent
+audit binding are recorded in the public receipt; the archive remains private.
+
 After both guest and supervisor were absent, a read-only qcow2 conversion and
 FAT file extraction recovered the logs and all six original binaries. The
 source qcow2 hash stayed unchanged, temporary extraction storage was removed,

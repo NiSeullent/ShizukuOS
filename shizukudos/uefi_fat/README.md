@@ -9,11 +9,17 @@ services. It does not load or execute that file. IO.SYS, DOS services, a Windows
 
 The new EFI image builds successfully: 35,840 bytes, SHA-256
 `e714ff7b68b86f0a2b951aa2cb5ac5a4f93e389cfd5ed7e4db6ee420fd200803`.
-Independent host validation passes 23 evidence tests and 1,059,470 checks in
+Independent host validation passes 24 evidence tests and 1,059,470 checks in
 each GCC, Clang and nonrecovering ASan/UBSan variant, including 789 synthetic
-sector reads and six AHCI stub calls. Those are host results, not evidence
-of guest disk DMA or guest filesystem execution. Only a matching successful live guest
-receipt can establish that result; physical hardware is untested. Previous
+sector reads and six AHCI stub calls. The separate actual KVM execution on
+2026-09-27 also passed: 131,195 file bytes across 257 fragmented clusters,
+778 AHCI sector reads, intact guards and destination tail, one DMA allocation
+and release, and restored PCI command state. The complete synthetic disk hash
+was unchanged. The guest stopped normally after 2.100 seconds without firing
+the watchdog. [VALIDATION.json](VALIDATION.json) binds the actual memory,
+registers, controller state, inputs and source hashes;
+[the separate root audit](../../docs/FAT32_ROOT_AUDIT.json) reconstructed the
+FAT chains and file bytes again. Physical hardware remains untested. Previous
 UEFI/AHCI/FAT sources and their frozen evidence remain unchanged.
 
 ## Memory and ownership
@@ -90,6 +96,13 @@ The root directory follows `9 -> 71 -> 15 -> EOC`; the target short name is
 `0xcc`; those bytes must not reach the `0xa5` destination tail. This is synthetic
 test data and contains no Windows file, boot code or product key.
 
+The installed QEMU rejects a read-only backend for its `ide-hd` device. The
+test therefore attaches only this disposable generated SATA image with a
+writable backend, while the ESP and firmware code remain read-only. It verifies
+the complete SATA image hash before and after execution; any changed byte fails
+the test. The original AHCI/FAT payload issues reads only. The host reserves
+20 GiB plus 128 MiB for the entire fixture and evidence captures.
+
 The independent fixture/verifier reconstructs file bytes and metadata, checks
 the whole 512-KiB output and both guard pages, and compares the retained final
 AHCI command/FIS/PRDT, transfer count and bounce sector with the actual fixture
@@ -108,8 +121,8 @@ It uses installed GCC, MinGW, NASM and binutils; writes only the new `build/`
 directory; and does not download, install, start a VM or access a disk device.
 `build/build-result.json` records all linked source hashes and memory spans.
 The peer-owned `test.py`, `fixture.py`, `verify.py` and `test_qemu.py` provide
-separate host and guest validation. No actual guest pass is claimed until their
-matching source-bound evidence is recorded.
+separate host and guest validation. The checked-in guest receipt is tied to
+these exact source and build inputs; later changes require new evidence.
 
 ```sh
 python3 -B shizukudos/uefi_fat/test.py

@@ -220,9 +220,24 @@ class EvidenceTests(unittest.TestCase):
             altered = [new if item == old else item for item in command]
             with self.assertRaises(v.EvidenceError):harness.verify_command(altered,directory)
         with self.assertRaises(v.EvidenceError):harness.verify_command(command+['-usb'],directory)
-        altered = command[:];altered[30]=altered[30].replace('readonly=on','readonly=off')
+        altered = command[:];altered[30]=altered[30].replace('readonly=off','readonly=on')
         with self.assertRaises(v.EvidenceError):harness.verify_command(altered,directory)
         with self.assertRaises(v.EvidenceError):harness.command_for(directory/'bad,name')
+
+    def test_cleanup_preserves_initiating_failure(self):
+        import test_qemu as harness
+        result = {'pass':True}
+        harness.record_failure(result,RuntimeError('initial command mismatch'),'execution')
+        harness.record_failure(result,RuntimeError('unclean shutdown'),'cleanup')
+        self.assertIs(result['pass'],False)
+        self.assertEqual(result['error'],'initial command mismatch')
+        self.assertEqual(result['errors'],[
+            {'stage':'execution','message':'initial command mismatch'},
+            {'stage':'cleanup','message':'unclean shutdown'}])
+        result = {'pass':True}
+        harness.record_failure(result,RuntimeError('bad saved capture'),'saved_evidence')
+        self.assertEqual(result['error'],'bad saved capture')
+        self.assertIs(result['pass'],False)
 
     def test_source_receipt_sets(self):
         import test_qemu as harness
@@ -236,11 +251,11 @@ class EvidenceTests(unittest.TestCase):
         import test_qemu as harness
         directory = Path(self.directory.name);firmware='/firmware.fd'
         specs = [(firmware,True),(str(directory/'OVMF_VARS.fd'),False),
-                 (str(directory/'esp.img'),True),(str(directory/'synthetic-fat.img'),True)]
+                 (str(directory/'esp.img'),True),(str(directory/'synthetic-fat.img'),False)]
         blocks = [{'inserted':{'file':name,'ro':ro,'drv':'raw'}} for name,ro in specs]
         harness.verify_blocks(blocks,directory,firmware)
         for index in (0,2,3):
-            changed = copy.deepcopy(blocks);changed[index]['inserted']['ro']=False
+            changed = copy.deepcopy(blocks);changed[index]['inserted']['ro']=not changed[index]['inserted']['ro']
             with self.assertRaises(v.EvidenceError):harness.verify_blocks(changed,directory,firmware)
         for changed in (blocks[:-1],blocks+[blocks[0]],blocks[:3]+[blocks[0]]):
             with self.assertRaises(v.EvidenceError):harness.verify_blocks(changed,directory,firmware)
@@ -315,10 +330,10 @@ class EvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'Cannot inspect process directory'):
                 harness.check_compatibility_lane(proc/'missing-proc')
 
-    def test_headroom_reserves_unchanged(self):
+    def test_headroom_reserves_full_fixture_and_capture_allowance(self):
         import test_qemu as harness
         memory = (6*1024+512)*1024**2
-        disk = 20*1024**3+32*1024**2
+        disk = 20*1024**3+128*1024**2
         with mock.patch.object(harness,'check_compatibility_lane') as lane:
             for available,free,passes in ((memory,disk,True),(memory-1024,disk,False),(memory,disk-1,False)):
                 with mock.patch.object(Path,'read_text',return_value='MemAvailable: '+str(available//1024)+' kB\n'), \

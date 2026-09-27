@@ -13,7 +13,7 @@ python3 platform/test.py
 
 [네이티브 그래픽 시험 프로그램](ntwddm/win98/)은 독자 렌더러를 앱 소유 GDI 비트맵에 연결하며, 현재 빌드·픽셀·수명 관리 호스트 시험을 통과했습니다. [USB descriptor 파서](drivers/usb_native/)도 독자 구현으로 추가했습니다. [독자 EP0 전송 계층](drivers/xhci_usb/)은 실제 QEMU USB 장치에서 장치·구성 서술자를 네 번의 제어 전송으로 읽고 DMA 종료까지 검증했습니다. Windows 98 내부의 GDI·USB 드라이버 실행과 USB 장치 설정·HID 동작은 아직 검증하지 않았습니다.
 
-[독자 FAT32 판독기](drivers/fat_native/)는 최대 512KiB의 루트 파일을 읽으며, 조각난 클러스터·손상·읽기 오류·시간 제한을 GCC·Clang·ASan/UBSan으로 시험했습니다. [UEFI·AHCI 연결 코드](shizukudos/uefi_fat/)도 빌드와 합성 디스크 호스트 검증을 마쳤습니다. 이 연결의 실제 게스트 실행과 DOS 부팅 파일 실행은 아직 검증하지 않았습니다.
+[독자 FAT32 판독기](drivers/fat_native/)는 최대 512KiB의 루트 파일을 읽으며, 조각난 클러스터·손상·읽기 오류·시간 제한을 GCC·Clang·ASan/UBSan으로 시험했습니다. [UEFI·AHCI 연결 코드](shizukudos/uefi_fat/)는 실제 KVM에서 UEFI 종료 후 257개 클러스터에 흩어진 131,195바이트 파일을 정확히 읽었습니다. 메모리 경계·DMA 해제·디스크 해시도 독립 대조했습니다. DOS 부팅 파일 실행은 아직 구현하지 않았습니다.
 
 이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 매체와 등록 번호로 Windows 98 SE 설치를 완료했습니다. KernelEx가 없는 새 설치본에서 독자 `NTW32.DLL`의 정적 import·동적 조회·동기화·문자 변환 프로브가 종료 코드 0으로 통과했습니다. 이어진 VxD 열기는 오류 2로 실패해 그래픽 프로브는 실행되지 않았으며, 전체 시험은 실패로 기록했습니다. [첫 네이티브 시험 기록](docs/NATIVE_FIRST_TRIAL.md)에 정확한 범위와 해시가 있습니다. 이 설치는 기존 BIOS 경로를 사용했으며 UEFI를 통한 Windows 98 GUI 부팅을 검증한 것은 아닙니다.
 

@@ -152,6 +152,13 @@ def clean_path(path):
     return text
 
 
+def record_failure(result, error, stage):
+    """Keep the initiating failure when cleanup discovers another failure."""
+    result['pass'] = False
+    result.setdefault('error', str(error))
+    result.setdefault('errors', []).append({'stage': stage, 'message': str(error)})
+
+
 def command_for(directory,firmware='/usr/share/edk2/ovmf/OVMF_CODE.fd'):
     directory = Path(directory)
     return ['/usr/libexec/qemu-kvm','-name','ntw-fat-fixture','-machine','q35',
@@ -161,7 +168,7 @@ def command_for(directory,firmware='/usr/share/edk2/ovmf/OVMF_CODE.fd'):
             '-drive','if=pflash,format=raw,unit=1,file='+clean_path(directory/'OVMF_VARS.fd'),
             '-drive','if=none,id=esp,format=raw,readonly=on,file='+clean_path(directory/'esp.img'),
             '-device','virtio-blk-pci,drive=esp,bootindex=1',
-            '-drive','if=none,id=sata,format=raw,readonly=on,file='+clean_path(directory/'synthetic-fat.img'),
+            '-drive','if=none,id=sata,format=raw,readonly=off,file='+clean_path(directory/'synthetic-fat.img'),
             '-device','ide-hd,drive=sata,bus=ide.0',
             '-qmp','unix:'+clean_path(directory/'qmp.sock')+',server=on,wait=off']
 
@@ -236,20 +243,20 @@ def headroom():
     values = dict(line.split(':',1) for line in Path('/proc/meminfo').read_text().splitlines())
     if int(values['MemAvailable'].split()[0])*1024 < (6*1024+512)*1024**2:
         raise RuntimeError('Insufficient 6GiB plus guest/codec RAM headroom')
-    if shutil.disk_usage(BUILD).free < 20*1024**3+32*1024**2:
-        raise RuntimeError('Insufficient 20GiB plus32MiB disk headroom')
+    if shutil.disk_usage(BUILD).free < 20*1024**3+128*1024**2:
+        raise RuntimeError('Insufficient 20GiB plus128MiB disk headroom')
 
 
 def verify_blocks(blocks,directory,firmware):
     expected = {clean_path(firmware):True,clean_path(directory/'OVMF_VARS.fd'):False,
-                clean_path(directory/'esp.img'):True,clean_path(directory/'synthetic-fat.img'):True}
+                clean_path(directory/'esp.img'):True,clean_path(directory/'synthetic-fat.img'):False}
     v.require(isinstance(blocks,list) and len(blocks) == 4,'Unexpected extra/missing QMP block device')
     observed = {}
     for item in blocks:
         inserted = item.get('inserted',{})
         filename = inserted.get('file')
         v.require(filename in expected and filename not in observed and inserted.get('drv') == 'raw' and
-                  inserted.get('ro') is expected[filename], 'QMP disk differs from owned raw/read-only fixture')
+                  inserted.get('ro') is expected[filename], 'QMP disk differs from fixed owned raw fixture')
         observed[filename] = inserted['ro']
     v.require(observed == expected,'Missing QMP owned disk')
 
@@ -370,6 +377,7 @@ def main():
         'firmware_code_sha256':v.digest(firmware_data),'disk_before_sha256':metadata['disk_sha256'],
         'esp_before_sha256':esp_hash,'evidence_directory':str(directory),'network':'none',
         'guest_memory_mib':256,'vcpus':1,'windows_98_driver':'not_tested',
+        'sata_fixture':'disposable original raw image; writable QEMU backend with complete before/after hash verification',
         'physical_hardware':'not_tested','file_execution':False,'clean_quit':False}
     process = qmp = timer = None
     watchdog_fired = threading.Event();started = time.monotonic()
@@ -388,8 +396,8 @@ def main():
             monitor = directory/'qmp.sock';deadline = started+45
             observed = Path('/proc')/str(process.pid)/'cmdline'
             process_command = observed.read_bytes().rstrip(b'\0').decode().split('\0')
-            v.require(process_command == command,'Actual guest process command differs')
             (directory/'process-command.json').write_text(json.dumps(process_command)+'\n')
+            v.require(process_command == command,'Actual guest process command differs')
             while not monitor.exists():
                 if process.poll() is not None:raise RuntimeError('Guest exited before QMP')
                 if time.monotonic() >= deadline:raise RuntimeError('QMP startup timeout')
@@ -435,7 +443,7 @@ def main():
                 time.sleep(.05)
             if not result['pass']:raise RuntimeError('No completed FAT evidence before45s watchdog')
     except Exception as error:
-        result['pass'] = False;result['error'] = str(error)
+        record_failure(result,error,'execution')
         if qmp and process is not None and process.poll() is None:
             try:
                 qmp.call('screendump',{'filename':str(directory/'failure.png'),'format':'png'})
@@ -460,21 +468,21 @@ def main():
             result['disk_after_sha256'] = v.digest(v.read_regular(disk,fixture.DISK_BYTES))
             result['esp_after_sha256'] = v.digest(v.read_regular(esp,16*1024**2))
             v.require(result['disk_after_sha256'] == result['disk_before_sha256'] and
-                      result['esp_after_sha256'] == esp_hash,'Read-only synthetic media changed')
+                      result['esp_after_sha256'] == esp_hash,'Original synthetic media changed')
             for name,data in captured.items():
                 v.require(v.read_regular(ROOT/name,8*1024**2) == data,'Input changed during guest: '+name)
             v.require(result.get('process_stopped') is True and result.get('qemu_returncode') == 0 and
                       not result['watchdog_fired'] and result['clean_quit'] and result['elapsed_seconds'] <= 45,
                       'Guest shutdown was not clean and bounded')
         except Exception as error:
-            result['pass'] = False;result['error'] = str(error)
+            record_failure(result,error,'cleanup')
         encoded = json.dumps(result,indent=2)+'\n'
         (directory/'result.json').write_text(encoded)
         (BUILD/'qemu-result.json').write_text(encoded)
         if result['pass']:
             try:verify_saved_run(BUILD/'qemu-result.json')
             except Exception as error:
-                result['pass'] = False;result['error'] = str(error)
+                record_failure(result,error,'saved_evidence')
                 encoded = json.dumps(result,indent=2)+'\n'
                 (directory/'result.json').write_text(encoded);(BUILD/'qemu-result.json').write_text(encoded)
         print(json.dumps(result,indent=2))
