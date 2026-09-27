@@ -78,6 +78,19 @@ def sparse_copy(source, destination, reserve=0):
         raise
 
 
+def copy_allocation_bound(path):
+    """Upper bound matching sparse_copy's nonzero one-MiB write chunks."""
+    check_extent(path)
+    allocation = 0
+    with Path(path).open('rb') as source:
+        for block in iter(lambda: source.read(MIB), b''):
+            if source.tell() > RAM_DISK_ALLOWANCE:
+                raise RuntimeError('Source grew beyond reserved capacity during allocation scan')
+            if block.count(0) != len(block):
+                allocation += MIB
+    return allocation
+
+
 def check_qcow(path):
     check_extent(path)
     info = json.loads(subprocess.check_output(
@@ -132,10 +145,16 @@ def prepare(original):
     original = Path(original)
     check_qcow(original)
     original_hash = digest(original)
+    allocation = copy_allocation_bound(original)
+    required = ROOT_RESERVE + allocation + WRITE_MARGIN
+    if shutil.disk_usage(original.parent).free < required:
+        raise RuntimeError('Insufficient initial copyback headroom; RAM working copy not started')
     directory = Path(tempfile.mkdtemp(prefix='win98-modern-private-install-', dir='/dev/shm'))
     directory.chmod(0o700)
     record = {'directory': str(directory), 'working_disk': str(directory / 'install-disk.qcow2'),
-              'original_disk': str(original), 'original_sha256': original_hash, 'status': 'preparing'}
+              'original_disk': str(original), 'original_sha256': original_hash, 'status': 'preparing',
+              'initial_copyback_allocation_bound': allocation,
+              'initial_disk_required_bytes': required}
     working, _, _, journal, _, _ = locations(record)
     # Register the private allocation before copying; interrupted preparation is
     # discoverable even before the global supervisor state has been replaced.
@@ -194,9 +213,7 @@ def persist(record, checkpoint=lambda stage: None):
         temporary_valid = temporary.exists() and digest(temporary) == wanted
         if not temporary_valid:
             temporary.unlink(missing_ok=True)
-            with working.open('rb') as source:
-                allocation = sum(MIB for block in iter(lambda: source.read(MIB), b'')
-                                 if block.count(0) != len(block))
+            allocation = copy_allocation_bound(working)
             if shutil.disk_usage(original.parent).free < ROOT_RESERVE + allocation + WRITE_MARGIN:
                 raise RuntimeError('Insufficient persistence headroom; original and RAM copy retained')
             sparse_copy(working, temporary, ROOT_RESERVE + WRITE_MARGIN)

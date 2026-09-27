@@ -50,7 +50,12 @@ loop independently enforces the same bound if its source grows. Reaching this
 limit is a guest failure, not permission to consume additional host resources.
 
 Only the stopped owned qcow2 is copied into a random private 0700 directory;
-the working file is 0600. No mounts or global settings change. The original
+the working file is 0600. Before creating that RAM directory, the helper also
+requires enough disk space to persist the current image's sparse-copy allocation
+while retaining the 20 GiB reserve and 128 MiB margin. It refuses to start if
+even an unchanged guest could not be copied back. Later guest growth and other
+host activity can still reduce headroom, so the final persistence checks remain
+mandatory. No mounts or global settings change. The original
 stays intact throughout the VM run. On exit, the supervisor checks qcow2
 integrity and verifies sufficient host disk space for the actual sparse copy
 plus a 128 MiB margin. It creates an exclusive temporary file, checks its
@@ -90,11 +95,13 @@ Stop at the product-key screen if the owner has not supplied their key through
 a private channel. Never obtain external product keys or pass keys as shell
 arguments. `lab.py text` is for nonsecret installer commands and labels.
 
-The 28 storage tests exercise real sparse file copying and atomic publication in
+The 32 storage tests exercise real sparse file copying and atomic publication in
 private disposable directories, mocked qcow2 validation failure paths, exact
 resource boundaries, eight interrupted persistence boundaries with repeated
 recovery, two-process lock contention, QMP peer rejection, and isolation of the
-child file limit. They start no VM. Synthetic success fixtures mock ample disk
+child file limit. They also check initial copyback headroom before any RAM
+allocation, its exact boundary, sparse/partial chunks, and scan-time growth.
+They start no VM. Synthetic success fixtures mock ample disk
 space so CI capacity does not weaken or accidentally determine production guards.
 Recovery also covers a crash before the first PID/global state is recorded: the
 sole durable journal is used only after a read-only process ownership scan finds

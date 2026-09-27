@@ -81,6 +81,44 @@ class Files(unittest.TestCase):
         with self.assertRaises(FileExistsError):s.sparse_copy(self.working,self.original)
         self.assertEqual(self.original.read_bytes(),b'original')
 
+    def test_prepare_refuses_initial_copyback_shortfall_without_ram_allocation(self):
+        free=s.ROOT_RESERVE+s.WRITE_MARGIN+s.MIB-1
+        with patch.object(s,'check_qcow'),patch.object(s.tempfile,'mkdtemp') as allocate,\
+             patch.object(s.shutil,'disk_usage',return_value=shutil._ntuple_diskusage(100*s.GIB,0,free)):
+            with self.assertRaisesRegex(RuntimeError,'initial copyback headroom'):
+                s.prepare(self.original)
+        allocate.assert_not_called()
+        self.assertEqual(s.pending_journals(self.root),[])
+        self.assertEqual(self.original.read_bytes(),b'original')
+
+    def test_prepare_exact_copyback_boundary_and_persist(self):
+        free=s.ROOT_RESERVE+s.WRITE_MARGIN+s.MIB
+        record=None
+        try:
+            with patch.object(s,'check_qcow'),patch.object(s.shutil,'disk_usage',\
+                    return_value=shutil._ntuple_diskusage(100*s.GIB,0,free)):
+                record=s.prepare(self.original)
+                self.assertEqual(record['initial_copyback_allocation_bound'],s.MIB)
+                self.assertEqual(record['initial_disk_required_bytes'],free)
+                self.assertEqual(Path(record['working_disk']).read_bytes(),b'original')
+                s.persist(record)
+            self.assertEqual(self.original.read_bytes(),b'original')
+            self.assertFalse(Path(record['directory']).exists())
+        finally:
+            if record and Path(record['directory']).exists():shutil.rmtree(record['directory'])
+
+    def test_copyback_bound_accounts_for_sparse_and_partial_chunks(self):
+        self.original.write_bytes(bytes(s.MIB)+b'x'+bytes(s.MIB)+b'y')
+        self.assertEqual(s.copy_allocation_bound(self.original),2*s.MIB)
+        self.original.write_bytes(bytes(s.MIB+1))
+        self.assertEqual(s.copy_allocation_bound(self.original),0)
+
+    def test_copyback_allocation_scan_rejects_growth(self):
+        self.original.write_bytes(b'x'*(2*s.MIB))
+        with patch.object(s,'check_extent'),patch.object(s,'RAM_DISK_ALLOWANCE',s.MIB):
+            with self.assertRaisesRegex(RuntimeError,'grew beyond'):
+                s.copy_allocation_bound(self.original)
+
     def test_copy_reserve_failure_removes_only_temporary(self):
         dest=self.root/'partial'
         with patch.object(s.shutil,'disk_usage',return_value=shutil._ntuple_diskusage(10,9,1)):
