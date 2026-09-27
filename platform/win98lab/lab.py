@@ -19,6 +19,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import storage
 import packed
+import base_archive
 
 REPO = Path(__file__).resolve().parents[2]
 BUILD = REPO / "build" / "win98-lab"
@@ -79,6 +80,16 @@ def digest(path):
 
 def write_state(state):
     storage.durable_json(STATE, state)
+
+
+def harness_sources():
+    return {name: digest(Path(__file__).parent / name)
+            for name in ('lab.py', 'storage.py', 'packed.py', 'base_archive.py')}
+
+
+def assert_harness_sources(expected):
+    if harness_sources() != expected:
+        raise RuntimeError('Lab harness sources changed during the operation')
 
 
 @contextmanager
@@ -164,16 +175,22 @@ def supervise(seconds, resume, ram_copy=False, packed_checkpoint=False):
         if pending and pending.get('status') != 'persisted':
             raise RuntimeError("A prior RAM working copy needs persistence/recovery before another boot")
     ram_copy = ram_copy or packed_checkpoint
+    archived = base_archive.has_archive(DISK)
+    if archived and not packed_checkpoint:
+        raise RuntimeError('An archived base is present; raw access is refused, use --packed-checkpoint')
     if ram_copy and not resume:
         raise RuntimeError("RAM working copies require an existing stopped disk and --resume")
     if packed.has_checkpoint(DISK) and not packed_checkpoint:
         raise RuntimeError('A packed checkpoint is current; resume with --packed-checkpoint to avoid rollback')
-    if DISK.exists() and not resume:
+    if (DISK.exists() or archived) and not resume:
         raise RuntimeError("Existing installation preserved; explicitly --resume to boot it")
-    if resume and not DISK.is_file():
+    if resume and not DISK.is_file() and not archived:
         raise RuntimeError("No existing installation to resume")
+    if archived:
+        packed.current(DISK)
     check = preflight(ram_copy, packed_checkpoint)
-    if not DISK.exists():
+    sources = harness_sources()
+    if not DISK.exists() and not archived:
         subprocess.run(["qemu-img", "create", "-f", "qcow2", str(DISK), "2G"], check=True, timeout=15)
     QMP_PATH.unlink(missing_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
@@ -193,19 +210,19 @@ def supervise(seconds, resume, ram_copy=False, packed_checkpoint=False):
              "command": command, "disk": str(active_disk), "disk_capacity_bytes": 2 * 1024 ** 3,
              "memory_mib": 128, "network": "none", "display": "QMP screenshots only; no VNC",
              "preflight": check, "windows_98_installed": False,
-             "product_key": "No key provided or requested from external sources",
+             "product_key": "Product-key handling is recorded only in private installation evidence; no key is stored here",
              "max_seconds": seconds, "started_utc": stamp}
     if ram_record:
         state['ram_working_copy'] = ram_record
         state['child_file_size_limit_bytes'] = storage.RAM_DISK_ALLOWANCE
-    state['harness_sources_sha256'] = {name: digest(Path(__file__).parent / name)
-                                      for name in ('lab.py', 'storage.py', 'packed.py')}
+    state['harness_sources_sha256'] = sources
     write_state(state)
     process = None
     timer = None
     started = time.monotonic()
     try:
         with log_path.open("wb") as log:
+            assert_harness_sources(sources)
             process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                                        preexec_fn=storage.limit_child_files)
             state["pid"] = process.pid
@@ -320,6 +337,9 @@ def main():
     run.add_argument("--packed-checkpoint", action="store_true",
                      help="resume in RAM and persist byte-exact compressed checkpoints")
     sub.add_parser("persist-ram")
+    archive = sub.add_parser('archive-base', help='verify an immutable base archive and explicitly retire its raw duplicate')
+    archive.add_argument('--expected-packed-sha256', required=True,
+                         help='SHA-256 of the reviewed current packed pointer file')
     sub.add_parser("status")
     snap = sub.add_parser("snapshot"); snap.add_argument("name")
     key = sub.add_parser("key"); key.add_argument("keys", nargs="+")
@@ -332,6 +352,8 @@ def main():
     elif args.command == 'persist-ram':
         with exclusive_lab_lock():
             retry_persistence()
+    elif args.command == 'archive-base':
+        archive_base(args.expected_packed_sha256)
     else:
         action(args)
 
@@ -361,6 +383,8 @@ def retry_persistence():
     if record.get('original_disk') != str(DISK):
         raise RuntimeError('Unexpected persistent disk target')
     backend = storage_backend(record)
+    if backend is storage and base_archive.has_archive(DISK):
+        raise RuntimeError('An archived base is present; raw persistence is refused')
     if backend is storage and packed.has_checkpoint(DISK):
         raise RuntimeError('A packed checkpoint is current; raw persistence would roll back the installation')
     backend.locations(record)
@@ -370,6 +394,62 @@ def retry_persistence():
     state['process_stopped'] = True
     write_state(state)
     print('Verified RAM working copy persisted; previous disk checkpoints retained')
+
+
+def archive_base(expected_packed_sha256):
+    """Explicit, stopped-only base retirement; never starts a guest or creates a disk."""
+    if not isinstance(expected_packed_sha256, str) or not re.fullmatch(r'[0-9a-f]{64}', expected_packed_sha256):
+        raise RuntimeError('A valid reviewed packed pointer SHA-256 is required')
+    with exclusive_lab_lock():
+        sources = harness_sources()
+
+        def guard(stage=None):
+            assert_harness_sources(sources)
+            if storage.pending_journals(BUILD):
+                raise RuntimeError('Unfinished raw RAM journals must be recovered before base archival')
+            pending = packed.pending_journals(BUILD)
+            if len(pending) > 1:
+                raise RuntimeError('Multiple packed journals require explicit recovery review')
+            state = json.loads(STATE.read_text()) if STATE.exists() else {}
+            if state and state.get('owner') != 'win98-modern-isolated-install-v1':
+                raise RuntimeError('Base archival requires known installation ownership')
+            pid = state.get('pid')
+            if pid is not None and (type(pid) is not int or pid <= 0 or Path(f'/proc/{pid}/cmdline').exists()):
+                raise RuntimeError('Recorded guest PID is still present or cannot be verified')
+            record = state.get('ram_working_copy')
+            if pending:
+                saved, _ = packed._json(pending[0])
+                if record and any(record.get(key) != saved.get(key)
+                                  for key in ('mode', 'original_disk', 'working_disk', 'directory')):
+                    raise RuntimeError('Pending packed journal differs from the installation state')
+                record = saved
+            if record:
+                if record.get('original_disk') != str(DISK):
+                    raise RuntimeError('RAM state belongs to a different installation')
+                backend = storage_backend(record)
+                backend.locations(record)
+                if backend is storage and record.get('status') != 'persisted':
+                    raise RuntimeError('Raw RAM state is not durably persisted')
+                if backend is packed and record.get('status') != 'persisted':
+                    packed._generation(record, packed._target(record) if record.get('candidate') else None)
+            assert_no_owned_processes(record or {'original_disk': str(DISK), 'working_disk': str(DISK)})
+            pointer, checksum = packed._load_pointer(DISK)
+            if pointer is None or checksum != expected_packed_sha256:
+                raise RuntimeError('Current packed pointer differs from the reviewed candidate')
+
+        guard()
+        packed.current(DISK)
+        value = base_archive.create(DISK, checkpoint=guard)
+        guard()
+        result = base_archive.retire_raw(DISK, checkpoint=guard)
+        guard()
+        receipt = {'schema': 'ntw.lab.base-archive-operation.v1', 'status': result['status'],
+                   'original_disk': str(DISK), 'base': value,
+                   'packed_pointer_sha256': expected_packed_sha256,
+                   'harness_sources_sha256': sources, 'processes_absent': True}
+        storage.durable_json(BUILD / 'archive-base-result.json', receipt)
+        print(json.dumps(receipt, indent=2))
+        return receipt
 
 
 def assert_no_owned_processes(record, proc_root=Path('/proc')):

@@ -29,12 +29,13 @@ Omit `--resume` only for a first installation with no existing guest disk.
 The supervisor allows 60–1800 seconds and always stops its own child. A
 `snapshot` command records a screenshot; it does not create a VM snapshot.
 Internal snapshots must be saved/restored through the verified owned QMP
-connection. The latest private `install-product-key-gate` snapshot follows
-100% file copying and the first Windows setup boot. Its five key fields are
-empty, and the guest is stopped. The compressed checkpoint was restored into
-a separate private file and passed `qemu-img check` with all six internal
-snapshots intact. Installation and native probe execution remain incomplete;
-the owner's key is required for the next setup step.
+connection. The owner subsequently supplied the registration value and setup
+reached the Windows 98 SE desktop. A private `windows98-clean-installed`
+snapshot preserves the fresh installation without KernelEx. The
+[first native trial](../../docs/NATIVE_FIRST_TRIAL.md) passed the original DLL
+probe, failed opening the VxD with error 2 and consequently did not run GDI.
+Installed-disk persistence is recorded separately; successful setup or a
+stopped QEMU process does not establish durable storage.
 
 ## Optional RAM working copy
 
@@ -100,7 +101,7 @@ byte-exact XZ persistence:
 python3 platform/win98lab/lab.py run --max-seconds 1200 --resume --packed-checkpoint
 ```
 
-This opt-in mode retains the original qcow2 and all earlier backups. Compression
+This opt-in mode retains the original base and all earlier backups. Compression
 preserves the complete qcow2 byte stream, including its internal snapshots.
 Each generation gets an immutable `install-packed-*.qcow2.xz` archive and a
 durable `packed-copy-*.json` journal. After the archive is fsynced and its
@@ -131,6 +132,72 @@ python3 platform/win98lab/test_lab_packed.py -v
 
 These tests use synthetic data and start no guest. Compressed Windows media,
 disks and snapshots remain private under the same rules as raw images.
+
+## Optional immutable base archive
+
+After a verified packed checkpoint exists, the stopped lab can explicitly
+replace its preserved raw **base** with a byte-exact XZ archive. The current
+packed checkpoint remains the installation selected for the next boot. This
+operation compresses the older base; it does not replace the latest checkpoint
+with that older installation or remove any earlier packed generation.
+
+Review `install-packed-current.json` in the private lab directory and obtain
+the checksum of that exact pointer file:
+
+```sh
+sha256sum build/win98-lab/install-packed-current.json
+python3 platform/win98lab/lab.py archive-base --expected-packed-sha256 REVIEWED_64_HEX_SHA256
+```
+
+Replace `REVIEWED_64_HEX_SHA256` with the reviewed lowercase checksum. The command
+requires the same exclusive lab lock, absent recorded PID and a process scan
+that finds no owned guest. The candidate pointer checksum must remain unchanged.
+Pending raw-copy journals block archival. One valid stopped packed-copy journal
+may remain: its original identity and generation are checked, and its newer RAM
+file is retained. This permits base compaction before retrying a packed writeback
+that was refused for insufficient disk space. Multiple or foreign pending
+journals require explicit recovery review.
+
+Archival first writes `install-base-archive-journal.json`, then creates an
+exclusive compressed file, verifies its bounded CRC64 XZ stream, independently
+restores the exact raw bytes into private RAM and checks qcow2 integrity. Only
+then does it publish the immutable `install-base-archive.json` pointer. The raw
+base is unlinked only after a durable retirement state and renewed source,
+checkpoint, process and journal checks. File and directory fsync protect each
+publication boundary. New JSON publication uses Linux `RENAME_NOREPLACE`;
+unsupported hosts refuse publication rather than overwrite an existing record.
+
+The existing 6 GiB RAM and 20 GiB disk reserves, full working-image reservation,
+256 MiB codec allowance and 128 MiB disk margin remain in force. Initial archival
+needs enough space for the complete measured archive while the raw base still
+exists. Low headroom refuses the operation; it does not lower these limits.
+The command binds `lab.py`, `storage.py`, `packed.py` and `base_archive.py` hashes
+in its private `archive-base-result.json` receipt.
+
+After retirement, `--resume --packed-checkpoint` verifies the archived base and
+restores the latest packed generation. An archive pointer counts as an existing
+installation even when the raw path is absent. Every raw launch and raw
+persistence route refuses any base pointer, including a corrupt file or dangling
+symlink. Missing or corrupt archive/history evidence never creates a fresh disk
+or falls back to the older raw file.
+
+After an interruption, repeat `archive-base` with the still-current reviewed
+pointer checksum. The durable journal recognizes completed archive publication
+or raw retirement; unknown partial files remain for review. Once compaction
+completes, retry any stopped pending packed copy with `lab.py persist-ram` before
+starting another guest. No operation automatically deletes older archives.
+
+```sh
+python3 platform/win98lab/test_base_archive.py -v
+python3 platform/win98lab/test_lab_base_archive.py -v
+```
+
+The 32 base-module tests and 24 integration tests use disposable synthetic files.
+They cover byte-exact snapshots, interrupted publication/retirement, archived
+resume and persistence, stale generations, damaged pointers, source changes,
+real lock contention, process refusal and recovery after a durable packed
+candidate is blocked by copyback headroom. They start no VM and use no installed
+Windows disk or media.
 
 ## Private evidence and keys
 
@@ -197,8 +264,9 @@ does not verify executable hashes or child-log contents. Successful log text
 does not replace the media/build hashes, fresh guest provenance and actual exit
 results. The 5,632-byte runner imports only 13 classic KERNEL32 functions and
 links no CRT or KernelEx. Its GCC, Clang and sanitizer models each pass 115,375
-assertions across 537 scenarios with 504 injected faults; native execution is
-still unverified.
+assertions across 537 scenarios with 504 injected faults. Its first actual
+Windows 98 execution correctly recorded DLL exit 0, VxD exit 1 and an overall
+failure; the complete native suite has not passed.
 
 For the original Windows 98 `COMMAND.COM` prompt, `make_probe_media.py --batch`
 adds `RUNTEST.BAT` and writes a third, separate `ntw-native-probes-runner-batch.iso`.

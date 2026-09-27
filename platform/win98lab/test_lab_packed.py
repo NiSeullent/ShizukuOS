@@ -93,7 +93,7 @@ class Integration(unittest.TestCase):
                 self.preflight.assert_called_with(True, is_packed)
                 state = json.loads(lab.STATE.read_text())
                 self.assertEqual(state['ram_working_copy']['status'], 'persisted')
-                self.assertEqual(set(state['harness_sources_sha256']), {'lab.py', 'storage.py', 'packed.py'})
+                self.assertEqual(set(state['harness_sources_sha256']), {'lab.py', 'storage.py', 'packed.py', 'base_archive.py'})
                 self.assertEqual(lab.DISK.read_bytes(), self.original)
 
     def recover(self, record, pending=True):

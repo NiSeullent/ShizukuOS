@@ -18,6 +18,7 @@ import stat
 import tempfile
 
 import storage as s
+import base_archive
 
 ROOT_RESERVE = s.ROOT_RESERVE
 WRITE_MARGIN = s.WRITE_MARGIN
@@ -283,12 +284,21 @@ def _load_pointer(original):
 
 def current(original, verify=True):
     value, _ = _load_pointer(original)
+    if value is None and base_archive.has_archive(original):
+        raise RuntimeError('Archived original requires existing packed checkpoint history')
     if value is not None and verify:
         _codec_headroom()
-        if _raw(original)['raw_sha256'] != value['original_sha256']:
+        if base_identity(original)['raw_sha256'] != value['original_sha256']:
             raise RuntimeError('Preserved original installation disk changed')
         decode(value['archive'], expected=value)
     return value
+
+
+def base_identity(original):
+    """Verify the preserved base, refusing fallback from any archive pointer."""
+    if base_archive.has_archive(original):
+        return base_archive.verify(original)
+    return _raw(original)
 
 
 def locations(record):
@@ -328,9 +338,11 @@ def _target(record):
 
 def _generation(record, target=None):
     _, original, _, _, _, _ = locations(record)
-    if _raw(original)['raw_sha256'] != record['original_sha256']:
+    if base_identity(original)['raw_sha256'] != record['original_sha256']:
         raise RuntimeError('Preserved original disk changed; all versions retained')
     pointer, checksum = _load_pointer(original)
+    if pointer is None and base_archive.has_archive(original):
+        raise RuntimeError('Archived original requires existing packed checkpoint history')
     if target is not None and pointer == target:
         return True
     if checksum != record['source_pointer_sha256']:
@@ -372,10 +384,14 @@ def prepare(original, checkpoint=lambda stage: None):
     original = _original(original)
     check_headroom(available_memory(), shutil.disk_usage(original.parent).free,
                    shutil.disk_usage('/dev/shm').free)
-    s.check_qcow(original)
-    raw = _raw(original)
+    archived = base_archive.has_archive(original)
+    if not archived:
+        s.check_qcow(original)
+    raw = base_identity(original)
     pointer, parent_hash = _load_pointer(original)
     if pointer is None:
+        if archived:
+            raise RuntimeError('Archived original requires existing packed checkpoint history')
         source = encode(original)
         if source['raw_sha256'] != raw['raw_sha256']:
             raise RuntimeError('Original changed while measuring packed checkpoint')

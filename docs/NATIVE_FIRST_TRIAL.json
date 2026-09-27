@@ -1,0 +1,103 @@
+{
+  "schema": "ntw.native.first-trial.v1",
+  "date_utc": "2026-09-27",
+  "source_revision": "564a4e5b7fac3e6b1b9d7e43745012d0d98699ed",
+  "os": {
+    "platform": 1,
+    "major": 4,
+    "minor": 10,
+    "build_raw": 67766446,
+    "build_low": 2222,
+    "kernelex_installed": false
+  },
+  "process_exits": {
+    "NTWPROBE.EXE": 0,
+    "NTWQUERY.EXE": 1,
+    "NTWGPROB.EXE": null,
+    "NTWRUN.EXE": 1
+  },
+  "dll_probe_passed": true,
+  "vxd_probe_passed": false,
+  "vxd_open_error": 2,
+  "gdi_probe_executed": false,
+  "complete_native_suite_passed": false,
+  "collection_sha256": "12c63ac7b0aa7a6267526363711235b20588b282092389c88310c8704e6fd899",
+  "source_qcow_sha256": "7f33bb59a636748d96f4c0236193d82d7ed821b799149b4edd3a34eeea0daabe",
+  "source_unchanged_during_collection": true,
+  "guest_process_stopped": true,
+  "qemu_returncode": 0,
+  "media_receipt_sha256": "a610102f2d004d0d432e38f25d53bde15d72a4aa373ce0dfc9ef18e749eaff00",
+  "files": {
+    "NTW32.DLL": {
+      "bytes": 17151,
+      "sha256": "a55364068fe00db2637083ea96a25131deb6a40bbd04340cd9dbe4841baaa2b3",
+      "matches_original_media": true
+    },
+    "NTWPROBE.EXE": {
+      "bytes": 14336,
+      "sha256": "9b764f420933b1ef0b5007f6713f1dfc694a077d5101fc69c04bdf168146bbf2",
+      "matches_original_media": true
+    },
+    "NTWRAP9X.VXD": {
+      "bytes": 9390,
+      "sha256": "aff7acf54cd0323fe4dce9aab7d93da16df7b8cf345220ee9d2dafa95b0bc537",
+      "matches_original_media": true
+    },
+    "NTWQUERY.EXE": {
+      "bytes": 9327,
+      "sha256": "7f8abf3e15d2d7838d921e0aed1e9efb0efd9d7a2d243f968b7b5eca5f71ddb0",
+      "matches_original_media": true
+    },
+    "NTWGPROB.EXE": {
+      "bytes": 12800,
+      "sha256": "4b6fa2dad7ccc3dd3efa39917354b30cc7bad77ba4d9d167aaa8fc5646e89b53",
+      "matches_original_media": true
+    },
+    "NTWRUN.EXE": {
+      "bytes": 5632,
+      "sha256": "f0cdfffec3190e3300ba251e3cb077e8851f9f6746aca5ac921ebc2c182cfa50",
+      "matches_original_media": true
+    },
+    "RUNTEST.BAT": {
+      "bytes": 533,
+      "sha256": "443a7fb16dea8f37f22eec44686c26f7e92448c0b21adc8045fde45b3e01b6ca",
+      "matches_original_media": true
+    },
+    "NTWRUN.LOG": {
+      "bytes": 400,
+      "sha256": "fd41caf6632218e3853f9eacaa4d317ae66704d63e77e93f81c0af967a23278e"
+    },
+    "NTWPROBE.LOG": {
+      "bytes": 39,
+      "sha256": "abc75bed8caf0008da7e20d943001ad437698ddde713d83926601b5c419160d0"
+    },
+    "NTWQUERY.LOG": {
+      "bytes": 121,
+      "sha256": "f6c80348dc60caa16e0f32c2704456fd9f348620f05497e2cfbdfc2a6b9e6da4"
+    },
+    "NTWEXIT.TXT": {
+      "bytes": 4,
+      "sha256": "2f1c37754e38b4ac70a9559fbfbdbd28feda47f36be9cd9e3ad5bc844ee3feb6"
+    },
+    "GUESTVER.TXT": {
+      "bytes": 36,
+      "sha256": "b40c1c1fdd6570893bf932eb469bbf865a352778f3027c16b311c43938d4d2e3"
+    }
+  },
+  "missing": [
+    "NTWGPROB.LOG"
+  ],
+  "original_probe_logs": {
+    "NTWRUN.LOG": "NTWRUN_VERSION=1\r\nDIRECTORY=C:\\NTWLAB\r\nOS_PLATFORM=1\r\nOS_MAJOR=4\r\nOS_MINOR=10\r\nOS_BUILD_RAW=67766446\r\nOS_BUILD_LOW=2222\r\nWIN98_IDENTIFIED=1\r\nPREFLIGHT=PASS\r\nBEGIN=NTWPROBE.EXE\r\nPROCESS_CREATED=1\r\nWAIT_RESULT=0\r\nEXIT_CODE=0\r\nCLOSE_THREAD=PASS\r\nCLOSE_PROCESS=PASS\r\nEND=NTWPROBE.EXE\r\nBEGIN=NTWQUERY.EXE\r\nPROCESS_CREATED=1\r\nWAIT_RESULT=0\r\nEXIT_CODE=1\r\nCLOSE_THREAD=PASS\r\nCLOSE_PROCESS=PASS\r\nRESULT=FAIL\r\n",
+    "NTWPROBE.LOG": "PASS: NTWin32Wrapper9x static imports\r\n",
+    "NTWQUERY.LOG": "START NTWrapper9x native VxD query ABI 0x00000001\r\nBEGIN load cycle 0x00000001\r\nFAIL CreateFile NTWRAP9X.VXD 0x00000002\r\n",
+    "NTWEXIT.TXT": "1 \r\n"
+  },
+  "limits": [
+    "No successful VxD load or native VMM call",
+    "GDI probe not started",
+    "No WDDM or physical PCI-E hardware verification",
+    "DLL probe covers only its defined cases",
+    "Disk durability is a separate private storage receipt"
+  ]
+}

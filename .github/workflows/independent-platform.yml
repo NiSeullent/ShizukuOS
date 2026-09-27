@@ -132,6 +132,8 @@ jobs:
           python3 platform/win98lab/test_storage.py -v
           python3 platform/win98lab/test_packed.py -v
           python3 platform/win98lab/test_lab_packed.py -v
+          python3 platform/win98lab/test_base_archive.py -v
+          python3 platform/win98lab/test_lab_base_archive.py -v
 
       - name: Build and host-test the original native probe supervisor
         # Fake WinAPI fault models and PE import audit only; no Windows execution.
