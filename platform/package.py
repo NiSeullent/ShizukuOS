@@ -10,7 +10,7 @@ import struct
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_NAME = 'windows98-shizuku-second-edition-device-foundation-checkpoint.zip'
+OUTPUT_NAME = 'windows98-shizuku-second-edition-usb-ep0-checkpoint.zip'
 UTF_SOURCES = tuple('ntwin32/unicode/'+name for name in
                     ('utf.h','utf.c','test_utf.c','test.py','oracle.py'))
 STORAGE_EVIDENCE = ('ahci-proof.bin','dma.bin','handoff.bin','registers.txt','handoff.ppm','handoff.png')
@@ -33,7 +33,8 @@ HANDOFF_FIELDS = ('magic version size stage framebuffer framebuffer_bytes width 
 USB_EVIDENCE = ('xhci-proof.bin','dma.bin','handoff.bin','registers.txt','handoff.ppm','handoff.png')
 USB_BUILD_SOURCES = tuple(name.replace('uefi_ahci','uefi_xhci').replace('ahci_native/ahci','xhci_native/xhci')
                           for name in STORAGE_BUILD_SOURCES) + (
-    'drivers/pcie/src/ntw_pcie.c','drivers/pcie/include/ntw_pcie.h')
+    'drivers/pcie/src/ntw_pcie.c','drivers/pcie/include/ntw_pcie.h',
+    'drivers/xhci_native/xhci_internal.h')
 USB_HOST_SOURCES = tuple('shizukudos/uefi_xhci/'+name for name in
     ('clock.c','layout.h','test_clock.c','test.py','test_qemu.py','test_inventory.py')) + (
     'shizukudos/uefi32/layout.h','shizukudos/uefi32/test_qemu.py')
@@ -69,6 +70,25 @@ MEMORY_COUNTS = {'checks':1024736, 'memmove_cases':162380, 'memcpy_cases':162040
 DESCRIPTOR_COUNTS = {'status':'PASS', 'assertions':576668, 'parse_calls':42179,
     'device_successes':2523, 'configuration_successes':3420, 'rejections':36236,
     'mutation_cases':11008, 'random_cases':31000, 'truncation_cases':43}
+EP0_COUNTS = {'status':'PASS', 'checks':6597254, 'scenarios':1095, 'injected_callbacks':984}
+EP0_DRIVER_SOURCES = tuple('drivers/xhci_usb/'+name for name in
+    ('xhci_usb.c','xhci_usb.h','test_usb_xhci.c','test.py','README.md')) + (
+    'drivers/xhci_native/xhci.c','drivers/xhci_native/xhci.h','drivers/xhci_native/xhci_internal.h',
+    'drivers/usb_native/ntwu_usb.c','drivers/usb_native/ntwu_usb.h')
+EP0_BUILD_SOURCES = tuple(name.replace('uefi_xhci','uefi_usb')
+    if name in ('shizukudos/uefi_xhci/loader.c','shizukudos/uefi_xhci/payload.c',
+                'shizukudos/uefi_xhci/layout.h','shizukudos/uefi_xhci/build.py') else name
+    for name in USB_BUILD_SOURCES) + (
+    'shizukudos/uefi_xhci/layout.h','drivers/xhci_usb/xhci_usb.c','drivers/xhci_usb/xhci_usb.h',
+    'drivers/usb_native/ntwu_usb.c','drivers/usb_native/ntwu_usb.h',
+    'platform/freestanding/memory.c','platform/freestanding/memory.h')
+EP0_HOST_SOURCES = tuple('shizukudos/uefi_usb/'+name for name in
+    ('layout.h','test.py','test_qemu.py','verify.py','test_verify.py')) + tuple(
+    name for name in USB_HOST_SOURCES if name != 'shizukudos/uefi_xhci/test.py')
+EP0_HARNESS_SOURCES = ('shizukudos/uefi_usb/test_qemu.py','shizukudos/uefi_usb/verify.py',
+    'shizukudos/uefi32/test_qemu.py','shizukudos/uefi_xhci/test_qemu.py')
+EP0_EVIDENCE = ('usb-proof.bin','controller-dma.bin','device-dma.bin','mmio.bin',
+    'usb-inventory.txt','handoff.bin','registers.txt','handoff.ppm','handoff.png')
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -388,7 +408,7 @@ def add_usb(inputs, files):
     if any(Path(name).name != name for name in hashes):
         raise RuntimeError('xHCI core source receipt contains nonlocal paths')
     validate_sources(inputs, {'drivers/xhci_native/'+name:expected for name,expected in hashes.items()},
-        ('drivers/xhci_native/'+name for name in ('xhci.c','xhci.h','test_xhci.c','test.py')), 'xHCI core')
+        ('drivers/xhci_native/'+name for name in ('xhci.c','xhci.h','xhci_internal.h','test_xhci.c','test.py')), 'xHCI core')
     for name in ('host-tests.json','host-tests.log','xhci-i486.o'):
         files['drivers/xhci_native/build/'+name] = driver/'build'/name
     folder = ROOT/'shizukudos/uefi_xhci/build'
@@ -457,6 +477,148 @@ def add_usb(inputs, files):
                  'qemu-result.json','host-tests.json','host-tests.log'):
         files['shizukudos/uefi_xhci/build/'+name] = folder/name
 
+def validate_ep0_command(guest, evidence):
+    """Match this bounded emulated fixture; never execute the recorded command."""
+    command = guest.get('command', [])
+    if not command or Path(command[0]).name not in ('qemu-kvm','qemu-system-x86_64'):
+        raise RuntimeError('USB EP0 guest command is not the recorded QEMU fixture')
+    options = {}
+    index = 1
+    while index < len(command):
+        name = command[index]
+        if name in ('-nodefaults','-no-reboot'):
+            value = True
+            index += 1
+        elif name in ('-name','-machine','-accel','-cpu','-m','-smp','-nic','-display',
+                      '-device','-drive','-qmp') and index+1 < len(command):
+            value = command[index+1]
+            index += 2
+        else:
+            raise RuntimeError('USB EP0 guest command contains unexpected options')
+        options.setdefault(name, []).append(value)
+    expected = {'-name':['ntw-xhci-fixture-usbep0'], '-machine':['q35'], '-accel':['kvm'],
+        '-cpu':['host'], '-m':['256M'], '-smp':['1'], '-nic':['none'], '-display':['none'],
+        '-nodefaults':[True], '-no-reboot':[True], '-device':['VGA',
+            'virtio-blk-pci,drive=esp,bootindex=1',
+            'pcie-root-port,id=rp1,chassis=1,slot=1,bus=pcie.0',
+            'qemu-xhci,id=xhci,bus=rp1', 'usb-tablet,bus=xhci.0,port=1,usb_version=2'],
+        '-qmp':['unix:'+str(evidence/'qmp.sock')+',server=on,wait=off']}
+    if any(options.get(name) != values for name,values in expected.items()):
+        raise RuntimeError('USB EP0 guest command differs from the isolated tablet fixture')
+    drives = options.get('-drive', [])
+    if (len(drives) != 3 or not re.fullmatch(
+            r'if=pflash,format=raw,unit=0,readonly=on,file=/[^,\x00\r\n]+', drives[0]) or
+        drives[1] != 'if=pflash,format=raw,unit=1,file='+str(evidence/'OVMF_VARS.fd') or
+        drives[2] != 'if=none,id=esp,format=raw,readonly=on,file='+str(evidence/'esp.img')):
+        raise RuntimeError('USB EP0 guest command lacks isolated firmware/ESP drives')
+
+def add_usb_ep0(inputs, files):
+    driver_prefix = 'drivers/xhci_usb/build/'
+    driver = ROOT/driver_prefix
+    host = inputs.json(driver/'test-result.json')
+    validate_host_variants(host, {}, 'USB EP0 transport')
+    if host.get('hardware_io') != 'none':
+        raise RuntimeError('USB EP0 transport host evidence must not claim hardware execution')
+    validate_sources(inputs, host['sources_sha256'], EP0_DRIVER_SOURCES, 'USB EP0 transport')
+    driver_names = ['test-result.json']
+    for name, variant in host['host'].items():
+        log = inputs.read(driver/(name+'.log'))
+        if (hashlib.sha256(log).hexdigest() != variant.get('log_sha256') or
+            log.decode('utf-8') != variant.get('output') or json.loads(log) != EP0_COUNTS):
+            raise RuntimeError('USB EP0 transport host log/counts differ from the frozen suite')
+        driver_names.append(name+'.log')
+    for compiler, variant in host['i486'].items():
+        name = compiler+'-i486-linked.o'
+        data = inputs.read(driver/name)
+        if (hashlib.sha256(data).hexdigest() != variant.get('linked_object_sha256') or
+            len(data) != variant.get('size_bytes')):
+            raise RuntimeError('USB EP0 transport linked object changed since validation')
+        driver_names.append(name)
+    for name in driver_names:
+        files[driver_prefix+name] = driver/name
+
+    prefix = 'shizukudos/uefi_usb/build/'
+    folder = ROOT/prefix
+    host = inputs.json(folder/'host-tests.json')
+    if (host.get('pass') is not True or host.get('cases_per_variant') != 100031 or
+        host.get('variants') != ['strict','asan_ubsan'] or host.get('inventory_tests') != 6 or
+        host.get('usb_evidence_tests') != 18 or
+        inputs.digest(folder/'host-tests.log') != host.get('log_sha256')):
+        raise RuntimeError('USB EP0 integration lacks matching clock/inventory/evidence host tests')
+    validate_sources(inputs, host['sources_sha256'], EP0_HOST_SOURCES, 'USB EP0 integration host')
+    built = inputs.json(folder/'build-result.json')
+    validate_sources(inputs, built['sources_sha256'], EP0_BUILD_SOURCES, 'USB EP0 integration')
+    for name,key in (('BOOTX64.EFI','efi'),('payload.bin','payload'),('transition.bin','transition')):
+        data = inputs.read(folder/name)
+        if (not data or hashlib.sha256(data).hexdigest() != built[key].get('sha256') or
+            len(data) != built[key].get('bytes')):
+            raise RuntimeError('USB EP0 integration artifact changed since build: '+name)
+    if built['transition']['bytes'] != 0x2800 or not 0 < built['payload']['bytes'] <= 0xf0000:
+        raise RuntimeError('USB EP0 integration image exceeds protected-mode bounds')
+    guest = inputs.json(folder/'qemu-result.json')
+    if (guest.get('pass') is not True or guest.get('process_stopped') is not True or
+        guest.get('qemu_returncode') != 0 or guest.get('watchdog_fired') is not False or
+        guest.get('kvm', {}).get('enabled') is not True or
+        guest.get('artifact_sha256') != built['efi']['sha256'] or
+        guest.get('build_receipt_sha256') != inputs.digest(folder/'build-result.json')):
+        raise RuntimeError('USB EP0 integration lacks matching cleanly stopped KVM guest proof')
+    if (guest.get('windows_98_driver') != 'not_tested' or guest.get('physical_hardware') != 'not_tested' or
+        guest.get('network') != 'none' or guest.get('guest_memory_mib') != 256 or
+        guest.get('usb_devices') != ['emulated usb-tablet; no host passthrough']):
+        raise RuntimeError('USB EP0 guest scope differs from the emulated descriptor fixture')
+    validate_sources(inputs, guest['harness_sources_sha256'], EP0_HARNESS_SOURCES, 'USB EP0 guest harness')
+    evidence = Path(guest['evidence_directory'])
+    if not evidence.resolve().is_relative_to(folder.resolve()):
+        raise RuntimeError('USB EP0 evidence must belong to its isolated build directory')
+    validate_ep0_command(guest, evidence)
+    hashes = guest['evidence_sha256']
+    if set(hashes) != set(EP0_EVIDENCE):
+        raise RuntimeError('USB EP0 evidence hash inventory is incomplete or unexpected')
+    snapshots = {}
+    for name in EP0_EVIDENCE:
+        path = evidence/name
+        if not path.resolve().is_relative_to(folder.resolve()):
+            raise RuntimeError('USB EP0 evidence file escapes its isolated build directory')
+        data = inputs.read(path)
+        if hashlib.sha256(data).hexdigest() != hashes[name]:
+            raise RuntimeError('USB EP0 guest evidence changed: '+name)
+        snapshots[name] = data
+        files['evidence/uefi-usb-'+name] = path
+    if (guest.get('screenshot_sha256') != hashes['handoff.ppm'] or
+        guest.get('usb_inventory') != snapshots['usb-inventory.txt'].decode('utf-8')):
+        raise RuntimeError('USB EP0 screenshot/inventory evidence disagrees with receipt')
+
+    # Execute our pure verifier from the same captured source bytes validated above.
+    # No source is re-imported from disk, and no guest/rebuild command is executed.
+    verifier_path = ROOT/'shizukudos/uefi_usb/verify.py'
+    namespace = {'__name__':'packaged_usb_evidence', '__file__':str(verifier_path)}
+    exec(compile(inputs.read(verifier_path), str(verifier_path), 'exec'), namespace)
+    try:
+        independent = namespace['verify_evidence'](snapshots['usb-proof.bin'],
+            snapshots['controller-dma.bin'], snapshots['device-dma.bin'],
+            built['payload']['dma_address'], built['payload']['device_dma_address'],
+            mmio_bytes=snapshots['mmio.bin'])
+    except ValueError as error:
+        raise RuntimeError('USB EP0 independent physical evidence rejected: '+str(error)) from error
+    proof = {name:value for name,value in independent['proof'].items()
+             if name not in ('descriptor','reserved')}
+    proof['descriptor_hex'] = snapshots['usb-proof.bin'][160:244].hex()
+    if proof != guest['usb'] or independent != guest['independent']:
+        raise RuntimeError('USB EP0 receipt disagrees with independently decoded physical evidence')
+    # QMP logical port 1 is not the physical USB2 companion root-port number.
+    inventory = snapshots['usb-inventory.txt'].decode('utf-8')
+    descriptor = independent['descriptor']
+    if (inventory != '  Device 0.1, Port 1, Speed 480 Mb/s, Product QEMU USB Tablet\r\n' or
+        independent['topology']['port_speed_id'] != 3 or independent['usb_address'] != 1 or
+        descriptor['vendor_id'] != 0x0627 or descriptor['product_id'] != 1 or
+        descriptor['packet_bytes'] != 64 or descriptor['evaluate_context'] is not False):
+        raise RuntimeError('USB EP0 evidence does not match the observed high-speed QEMU tablet fixture')
+    validate_usb_mode(snapshots, guest, built)
+    validate_usb_inventory(guest['pci'], proof)
+    for name in ('BOOTX64.EFI','payload.bin','transition.bin','build-result.json',
+                 'qemu-result.json','host-tests.json','host-tests.log'):
+        files[prefix+name] = folder/name
+
 def main():
     inputs = Inputs()
     digest = inputs.digest
@@ -475,8 +637,9 @@ def main():
             raise RuntimeError(f'Artifact changed since validation: {name}')
     files = {}
     for folder in ('ntwrapper','ntwin32','ntwddm','drivers/pcie','drivers/ahci_native','drivers/xhci_native',
-                   'drivers/usb_native',
-                   'shizukudos/uefi','shizukudos/uefi32','shizukudos/uefi_ahci','shizukudos/uefi_xhci','platform'):
+                   'drivers/usb_native','drivers/xhci_usb',
+                   'shizukudos/uefi','shizukudos/uefi32','shizukudos/uefi_ahci','shizukudos/uefi_xhci',
+                   'shizukudos/uefi_usb','platform'):
         for path in (ROOT/folder).rglob('*'):
             if not path.is_file() or path.is_symlink():
                 continue
@@ -486,7 +649,8 @@ def main():
             files[str(relative)] = path
     for name in ('LICENSE','THIRD_PARTY.md','drivers/README.md','docs/INDEPENDENT_PLATFORM_CHECKPOINT.md',
                  'docs/NATIVE_PLATFORM_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md','docs/XHCI_CHECKPOINT.md',
-                 'docs/DEVICE_FOUNDATION_CHECKPOINT.md','docs/NATIVE_DRIVER_INTEGRATION.md'):
+                 'docs/DEVICE_FOUNDATION_CHECKPOINT.md','docs/NATIVE_DRIVER_INTEGRATION.md',
+                 'docs/USB_EP0_CHECKPOINT.md'):
         files[name] = ROOT/name
     for name in ('NTW32.DLL','NTWPROBE.EXE','ntwrapper9x.a','ntwrapper9x.o',
                  'manifest.json','host-tests.json','prepare-report.json'):
@@ -571,6 +735,7 @@ def main():
     add_memory_support(inputs, files)
     add_usb_descriptors(inputs, files)
     add_native_gdi(inputs, files)
+    add_usb_ep0(inputs, files)
     output = ROOT/'build'/OUTPUT_NAME
     temporary = output.with_suffix('.zip.tmp')
     members = {name:inputs.read(path) for name,path in sorted(files.items())}
@@ -584,11 +749,11 @@ def main():
         for name,data in members.items():
             add(name,data)
         add('FILES-SHA256.json',json.dumps(index,indent=2)+'\n')
-        add('README.txt',"Windows 98 Shizuku's Second Edition — device-foundation checkpoint\n"
-            "Read platform/README.md and docs/DEVICE_FOUNDATION_CHECKPOINT.md.\n"
+        add('README.txt',"Windows 98 Shizuku's Second Edition — USB EP0 checkpoint\n"
+            "Read platform/README.md and docs/USB_EP0_CHECKPOINT.md.\n"
             "Not a complete operating system or installation package.\n"
-            "Includes NTW32 positive-delay contention fix, native GDI probe and USB descriptor parser.\n"
-            "GDI runtime and USB device enumeration remain unverified in native Windows 98.\n"
+            "Includes original USB2 EP0 GET8/GET18 transport and independent QEMU DMA evidence.\n"
+            "USB configuration, HID input and native Windows 98 USB integration remain unfinished.\n"
             "See checkpoint for precise Windows 98 VxD/app validation status.\n"
             "Modern vendor drivers, complete DOS and UEFI-to-Win98 boot remain unfinished.\n"
             "Contains only independently authored source/binaries and development evidence.\n"

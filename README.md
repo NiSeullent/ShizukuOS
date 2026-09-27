@@ -2,18 +2,18 @@
 
 Windows 98를 현대 하드웨어와 애플리케이션에 맞게 확장하는 **개발 중인 운영체제 프로젝트**입니다. 새 개발 경로는 독자 구현인 **NTWrapper9x**(커널 기반), **NTWin32Wrapper9x**(앱 호환성), **NTWDDMWrapper9x**(그래픽), **PCI-E 확장**, **ShizukuDOS UEFI**로 구성합니다. Windows 8.1/10/11 수준의 기능은 목표이며 아직 달성하지 않았습니다.
 
-새 경로의 빌드·시험·현재 한계는 [독립 플랫폼 개발 안내](platform/README.md), [저장장치·UTF 검증 기록](docs/STORAGE_UTF_CHECKPOINT.md), [PCI-E/xHCI 검증 기록](docs/XHCI_CHECKPOINT.md)에 있습니다. 이 빌드는 KernelEx·Wine·ReactOS 구현이나 기존 `m98wrap.dll`을 사용하지 않습니다. `NTW32.DLL`의 기존 Windows 98 네이티브 함수 호출은 유지합니다.
+새 경로의 빌드·시험·현재 한계는 [독립 플랫폼 개발 안내](platform/README.md), [저장장치·UTF 검증 기록](docs/STORAGE_UTF_CHECKPOINT.md), [USB EP0 실제 실행 기록](docs/USB_EP0_CHECKPOINT.md)에 있습니다. 이 빌드는 KernelEx·Wine·ReactOS 구현이나 기존 `m98wrap.dll`을 사용하지 않습니다. `NTW32.DLL`의 기존 Windows 98 네이티브 함수 호출은 유지합니다.
 
 ```sh
 python3 platform/build.py
 python3 platform/test.py
 ```
 
-새 `NTW32.DLL`은 SRW·InitOnce·틱 확장·동적 API 조회·UTF-8 변환 15개 함수를 제공합니다. 실제 DLL의 32비트 호출·재배치 시험을 통과했고, 독자 LE 형식의 `NTWRAP9X.VXD`와 VMM 조회 경로를 구현했습니다. ShizukuDOS는 x64 UEFI를 종료하고 자체 32비트 보호 모드 커널에서 커널 코어·소프트웨어 그래픽·AHCI DMA 디스크 읽기·PCI-E 브리지 뒤 xHCI 명령 링을 실행했습니다.
+새 `NTW32.DLL`은 SRW·InitOnce·틱 확장·동적 API 조회·UTF-8 변환 15개 함수를 제공합니다. 실제 DLL의 32비트 호출·재배치 시험을 통과했고, 독자 LE 형식의 `NTWRAP9X.VXD`와 VMM 조회 경로를 구현했습니다. ShizukuDOS는 x64 UEFI를 종료하고 자체 32비트 보호 모드 커널에서 커널 코어·소프트웨어 그래픽·AHCI DMA 디스크 읽기·PCI-E 브리지 뒤 xHCI 명령 링과 USB2 EP0 descriptor 전송을 실행했습니다.
 
-[네이티브 그래픽 시험 프로그램](ntwddm/win98/)은 독자 렌더러를 앱 소유 GDI 비트맵에 연결하며, 현재 빌드·픽셀·수명 관리 호스트 시험을 통과했습니다. [USB descriptor 파서](drivers/usb_native/)도 독자 구현으로 추가했습니다. 실제 Windows 98의 GDI 실행과 USB 장치 전송·인식은 아직 검증 범위에 포함하지 않습니다.
+[네이티브 그래픽 시험 프로그램](ntwddm/win98/)은 독자 렌더러를 앱 소유 GDI 비트맵에 연결하며, 현재 빌드·픽셀·수명 관리 호스트 시험을 통과했습니다. [USB descriptor 파서](drivers/usb_native/)도 독자 구현으로 추가했습니다. [독자 EP0 전송 계층](drivers/xhci_usb/)은 실제 QEMU USB 장치에서 GET8·GET18 응답을 읽고 DMA 종료까지 검증했습니다. Windows 98 내부의 GDI·USB 드라이버 실행과 USB 장치 설정·HID 동작은 아직 검증하지 않았습니다.
 
-이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 Windows 98 SE 매체의 해시를 검증해 별도 설치 환경을 준비했으며, 새 DLL의 Windows 98 실행은 아직 검증하지 않았습니다. UEFI 전환 성공은 Windows 98 GUI 부팅을 뜻하지 않습니다.
+이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 Windows 98 SE 매체의 해시를 검증해 별도 설치 환경에서 파일 복사 53%까지 진행하고 복구 가능한 상태로 저장했습니다. 새 DLL의 Windows 98 실행은 아직 검증하지 않았습니다. UEFI 전환 성공은 Windows 98 GUI 부팅을 뜻하지 않습니다.
 
 ## 기존 경로의 보존 기록
 

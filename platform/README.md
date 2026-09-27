@@ -12,8 +12,9 @@ capability is the long-term target, not the current compatibility claim.
 | [NTWDDMWrapper9x](../ntwddm/) | Original software core and a built, host-tested [native GDI probe](../ntwddm/win98/) | Native Win98 GDI execution, display-driver binding, GPU memory/scheduling, vendor miniports and D3D |
 | [PCI-E](../drivers/pcie/) | Config transport, topology, ECAM/capabilities/resources/DMA constraints | CONFIGMG/VMM binding, interrupts, real storage/USB/GPU drivers |
 | [AHCI storage](../drivers/ahci_native/) | Original read-only core; post-UEFI 32-bit DMA reads against the disposable QEMU ICH9 fixture | Windows 98 driver binding, physical controllers, reset/recovery, interrupts and wider I/O |
-| [xHCI command rings](../drivers/xhci_native/) | Original core; 130 post-UEFI command completions through a QEMU PCI-E bridge, with independent DMA and BAR checks | USB device/endpoint enumeration and transfers, Windows 98 binding, interrupts and physical controllers |
-| [USB descriptors](../drivers/usb_native/) | Original bounded USB2 device/configuration parser with transactional output | Controller transfers, device selection/configuration, class drivers and native binding |
+| [xHCI command rings](../drivers/xhci_native/) | Original core; 130 post-UEFI command completions through a QEMU PCI-E bridge, with independent DMA and BAR checks | Wider USB endpoint operations, Windows 98 binding, interrupts and physical controllers |
+| [USB EP0](../drivers/xhci_usb/) | Original GET8/GET18 transfers, independent parsing and verified DMA shutdown in a real QEMU USB2 guest | Configuration descriptors, device configuration, class I/O and native Win98 binding |
+| [USB descriptors](../drivers/usb_native/) | Original bounded USB2 device/configuration parser with transactional output | Full configuration transfer, device selection/configuration, class drivers and native binding |
 | [ShizukuDOS UEFI](../shizukudos/uefi32/) | Original EFI program, verified transition from x64 firmware to own 32-bit protected-mode kernel | DOS/runtime/boot bridge capable of reaching Win98 GUI without CSM |
 
 ## Reproduce
@@ -50,6 +51,10 @@ python3 drivers/xhci_native/test.py
 python3 shizukudos/uefi_xhci/build.py
 python3 shizukudos/uefi_xhci/test.py
 python3 shizukudos/uefi_xhci/test_qemu.py
+python3 drivers/xhci_usb/test.py
+python3 shizukudos/uefi_usb/build.py
+python3 shizukudos/uefi_usb/test.py
+python3 shizukudos/uefi_usb/test_qemu.py
 ```
 
 Generated artifacts, firmware variable copies, receipts and images stay in
@@ -58,8 +63,9 @@ with networking disabled. No script installs into the host, changes global
 client settings, flashes firmware or updates an installed Windows system.
 
 After those checks, `python3 platform/package.py` produces
-`build/windows98-shizuku-second-edition-device-foundation-checkpoint.zip`.
+`build/windows98-shizuku-second-edition-usb-ep0-checkpoint.zip`.
 Earlier checkpoint ZIPs are preserved. The allowlist includes original sources,
+the [USB EP0 execution record](../docs/USB_EP0_CHECKPOINT.md),
 the [device foundations](../docs/DEVICE_FOUNDATION_CHECKPOINT.md), all earlier checkpoint documents, build artifacts,
 and the source-bound host and guest evidence. It excludes firmware, Windows
 media, ESP/test disk images, and guest installation files.
@@ -90,13 +96,21 @@ support's strict/sanitized host results and freestanding objects. The GDI probe
 has been compiled, not run on Windows; USB descriptor parsing performs no device
 I/O. These additions do not change the retained AHCI/xHCI guest claims.
 
+The separate USB EP0 gate requires the original transport host results and both
+freestanding linked objects, current integration sources and builds, and a clean
+stopped guest with no watchdog expiry. Nine evidence snapshots bind GET8/GET18,
+context/TRB/event history, physical MMIO topology, DMA detachment, PCI inventory,
+and the final CPU handoff. The captured independent verifier is rerun against
+the captured bytes. Its high-speed tablet result establishes descriptor reads;
+device configuration, HID reports and physical hardware remain outside scope.
+
 `python3 platform/verify_package.py` extracts a snapshot of that ZIP into a
-separate build directory, validates its file manifest, and runs sixteen build/host
+separate build directory, validates its file manifest, and runs nineteen build/host
 test commands, including the actual PE32 ABI harness, original AHCI model tests,
 the xHCI model tests, lab clock/inventory tests, compiler memory and USB tests,
-and GDI adapter tests/build. It requires byte-identical
-results for sixteen artifacts: the DLL, three probes, kernel archive, VxD, four EFI
-images, and three 32-bit payload/transition pairs. It does not boot a guest or
+GDI adapter tests/build, and USB EP0 transport/integration/evidence tests. It requires byte-identical
+results for nineteen artifacts: the DLL, three probes, kernel archive, VxD, five EFI
+images, and four 32-bit payload/transition pairs. It does not boot a guest or
 install the artifacts.
 Replacing the input ZIP during verification prevents publication of a rebuild
 receipt. These checks establish reproducibility; they do not extend the guest
@@ -138,7 +152,8 @@ The reference baseline is Git commit `1d54ca7`. Host compilers and OVMF are
 present. The registered Win98 VM is an empty placeholder, with no installed OS;
 it has not been modified or booted. Old Windows-host VM results in `vm/README.md`
 are reference history and do not validate these new components. Current exact
-results belong in [the device-foundation checkpoint](../docs/DEVICE_FOUNDATION_CHECKPOINT.md).
+results belong in [the USB EP0 checkpoint](../docs/USB_EP0_CHECKPOINT.md).
+The [device-foundation checkpoint](../docs/DEVICE_FOUNDATION_CHECKPOINT.md),
 The [xHCI checkpoint](../docs/XHCI_CHECKPOINT.md),
 [storage/UTF checkpoint](../docs/STORAGE_UTF_CHECKPOINT.md),
 [native checkpoint](../docs/NATIVE_PLATFORM_CHECKPOINT.md) and
@@ -146,4 +161,6 @@ The [xHCI checkpoint](../docs/XHCI_CHECKPOINT.md),
 are retained as historical evidence. The user has since supplied the same
 Korean OEM ISO for this server; its SHA-256 was verified before preparing a
 separate isolated installation experiment. Private media and guest disks remain
-outside every source/artifact package.
+outside every source/artifact package. The separate private installer reached
+53% file copy and was durably stopped; new DLL/VxD/GDI execution inside Windows
+remains unverified.
