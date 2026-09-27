@@ -123,6 +123,12 @@ jobs:
           python3 platform/win98lab/test_packed.py -v
           python3 platform/win98lab/test_lab_packed.py -v
 
+      - name: Build and host-test the original native probe supervisor
+        # Fake WinAPI fault models and PE import audit only; no Windows execution.
+        run: |
+          python3 platform/win98lab/test_native_runner.py
+          python3 platform/win98lab/test_native_logs.py
+
       - name: Test xHCI command rings and build the PCI-E integration
         run: |
           python3 drivers/xhci_native/test.py
@@ -133,12 +139,14 @@ jobs:
         # Bounded parsing only; no controller, USB device, or class-driver I/O.
         run: python3 drivers/usb_native/test.py
 
-      - name: Test original USB EP0 transport and build its firmware integration
+      - name: Test USB device and configuration transport and build firmware integrations
         # Asynchronous host model and hostile-evidence tests; no guest launch.
         run: |
           python3 drivers/xhci_usb/test.py
           python3 shizukudos/uefi_usb/build.py
           python3 shizukudos/uefi_usb/test.py
+          python3 shizukudos/uefi_usb_config/build.py
+          python3 shizukudos/uefi_usb_config/test.py
 
       - name: Record validation scope
         if: always()

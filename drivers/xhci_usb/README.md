@@ -5,9 +5,12 @@ this project's xHCI command/event core and descriptor parser. It also provides a
 bounded configuration-descriptor probe. Strict GCC/Clang and ASan/UBSan host
 checks cover both. The separate [UEFI integration](../../shizukudos/uefi_usb/)
 previously read GET8/GET18 from an actual emulated USB2 device and independently
-checked DMA, MMIO and shutdown; that archived evidence binds the prior source
-revision. The configuration extension and the rebuilt device path require new
-guest evidence. Host receipts do not establish physical-device or native
+checked DMA, MMIO and shutdown. The separate
+[configuration integration](../../shizukudos/uefi_usb_config/) now checks all
+four descriptor reads against an actual emulated USB2 tablet, including its
+34-byte configuration and terminal shutdown. Each guest receipt binds its exact
+source revision and image; historical receipts do not validate later changes.
+Neither host nor emulated-guest evidence establishes physical-device or native
 Windows 98 USB support.
 
 The supported operation resets one directly connected USB2 root-port device,

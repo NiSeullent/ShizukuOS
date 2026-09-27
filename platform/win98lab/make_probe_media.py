@@ -16,13 +16,18 @@ BUILD = ROOT/'build/win98-lab'
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
-def build_media(include_graphics=False):
+def build_media(include_graphics=False, include_runner=False):
+    include_graphics = include_graphics or include_runner
     platform = ROOT/'build/platform'
     vxd = ROOT/'ntwrapper/vxd/build'
     manifests = {platform/'manifest.json': None, vxd/'manifest.json': None}
     graphics = ROOT/'ntwddm/win98/build'
+    runner = ROOT/'platform/win98lab/build/native_runner'
+    runner_sources = {}
     if include_graphics:
         manifests[graphics/'build-result.json'] = None
+    if include_runner:
+        manifests[runner/'build-result.json'] = None
     for path in manifests:
         manifests[path] = path.read_bytes()
     app = json.loads(manifests[platform/'manifest.json'])
@@ -37,6 +42,25 @@ def build_media(include_graphics=False):
             raise RuntimeError('Graphics probe has no successful audited build receipt')
         sources['NTWGPROB.EXE'] = graphics/'NTWGPROB.EXE'
         expected['NTWGPROB.EXE'] = graphic_build['sha256']
+    if include_runner:
+        runner_build = json.loads(manifests[runner/'build-result.json'])
+        if (runner_build.get('schema') != 'ntw.native_runner.build.v1' or
+                runner_build.get('passed') is not True or runner_build.get('artifact') != 'NTWRUN.EXE' or
+                runner_build.get('crt_linked') is not False or runner_build.get('kernelex_linked') is not False):
+            raise RuntimeError('Native runner has no successful original build/import receipt')
+        if set(runner_build.get('sources_sha256', {})) != {
+                'platform/win98lab/native_runner.c', 'platform/win98lab/build_native.py', 'ntwin32/prepare.py'}:
+            raise RuntimeError('Native runner build source receipt is incomplete')
+        for name, expected_source in runner_build['sources_sha256'].items():
+            path = ROOT/name
+            if Path(name).is_absolute() or not path.resolve().is_relative_to(ROOT.resolve()):
+                raise RuntimeError('Invalid native runner source path: '+name)
+            source_bytes = path.read_bytes()
+            if sha(source_bytes) != expected_source:
+                raise RuntimeError('Native runner source changed after its build: '+name)
+            runner_sources[path] = source_bytes
+        sources['NTWRUN.EXE'] = runner/'NTWRUN.EXE'
+        expected['NTWRUN.EXE'] = runner_build['sha256']
     payload = {name:path.read_bytes() for name,path in sources.items()}
     for name,data in payload.items():
         if sha(data) != expected[name]:
@@ -44,7 +68,12 @@ def build_media(include_graphics=False):
     payload['README.TXT'] = (
         "Windows 98 Shizuku's Second Edition - original native probes\r\n"
         "Use a disposable, installed Windows 98 snapshot without KernelEx.\r\n"
-        "Copy all binaries to C:\\NTWLAB and run from that directory:\r\n"
+        "Copy all binaries to fresh C:\\NTWLAB and run from that directory.\r\n" +
+        ("Run NTWRUN.EXE once to capture Windows identity and actual process exits.\r\n"
+         "It launches all three probes in order and refuses existing probe logs.\r\n"
+         "Retain NTWRUN.LOG plus all probe logs; capture the visible GDI window.\r\n"
+         "The following names describe its children; do not run them first.\r\n"
+         if include_runner else "Run the following probes and collect each result:\r\n") +
         "  NTWPROBE.EXE  (writes NTWPROBE.LOG)\r\n"
         "  NTWQUERY.EXE  (loads NTWRAP9X.VXD and writes NTWQUERY.LOG)\r\n" +
         ("  NTWGPROB.EXE (5-second GDI window, writes NTWGPROB.LOG)\r\n"
@@ -72,16 +101,17 @@ def build_media(include_graphics=False):
         for name,path in sources.items():
             if path.read_bytes() != payload[name]:
                 raise RuntimeError('Probe changed during media construction: '+name)
-        for path,data in manifests.items():
+        for path,data in {**manifests, **runner_sources}.items():
             if path.read_bytes() != data:
                 raise RuntimeError('Build manifest changed during media construction')
-        output = BUILD/'ntw-native-probes.iso'
+        output = BUILD/('ntw-native-probes-runner.iso' if include_runner else 'ntw-native-probes.iso')
         image_bytes = image.read_bytes()
         result = {'sha256':sha(image_bytes),'path':str(output),
                   'bytes':len(image_bytes),'contents_sha256':{n:sha(b) for n,b in payload.items()},
                   'source_manifests_sha256':{str(p.relative_to(ROOT)):sha(b) for p,b in manifests.items()},
+                  'runner_sources_sha256':{str(p.relative_to(ROOT)):sha(b) for p,b in runner_sources.items()},
                   'guest_executed':False,'media':'original project probes only; no Windows files'}
-        receipt = BUILD/'probe-media.json'
+        receipt = BUILD/('probe-media-runner.json' if include_runner else 'probe-media.json')
         staged_receipt = temporary/'receipt.json'
         staged_receipt.write_text(json.dumps(result,indent=2)+'\n')
         # A failed publication may leave an image without a receipt, never a
@@ -100,6 +130,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--graphics', action='store_true',
                         help='Include the separately built original native GDI probe')
+    parser.add_argument('--runner', action='store_true',
+                        help='Include the original bounded runner and graphics in a separate CD')
     args = parser.parse_args()
     os.umask(0o077)
     BUILD.mkdir(parents=True, exist_ok=True)
@@ -108,6 +140,6 @@ def main():
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise RuntimeError('Another original probe CD build is running') from error
-        build_media(args.graphics)
+        build_media(args.graphics, args.runner)
 
 if __name__=='__main__':main()

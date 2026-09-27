@@ -1,9 +1,10 @@
 # Windows 98 Shizuku's Second Edition — USB EP0 integration
 
-The [2026-09-27 KVM validation](VALIDATION.json) passed in 1.765 seconds.
-The 46,080-byte EFI image has SHA-256
-`fd11277f84e3baf1493453b8a5c6186fee88fcc7cfe64b1819a3ceab9bd6979c`.
-Its original 28,066-byte i486 payload has no unresolved runtime imports.
+The [2026-09-27 KVM regression](VALIDATION.json) passed in 1.799 seconds after
+adding configuration support to the shared transport. The 47,616-byte EFI has SHA-256
+`60295012d425c3e43166b2a6e403466800160ec0da0fc000df5b2987e09f11ed`.
+Its original 29,410-byte i486 payload has no unresolved runtime imports.
+The earlier 46,080-byte EFI and 1.765-second run remain in the frozen USB EP0 archive.
 The [130-command xHCI regression](../uefi_xhci/) also passed after the shared
 base changed; earlier archives retain their exact historical sources and proofs.
 
@@ -44,8 +45,9 @@ Only the final command starts a guest. It uses one CPU, 256 MiB, a read-only
 listener, and a 45-second watchdog. It checks the laboratory's RAM and disk
 headroom and refuses to start while another owned compatibility guest runs.
 
-Host transport tests pass 6,597,254 assertions across 1,095 scenarios and
-984 callback failures under GCC, Clang and ASan/UBSan. Both i486 linked builds
+The expanded host transport tests pass 13,275,540 assertions across 2,489 scenarios,
+including 984 device and 1,036 configuration callback failures, under GCC, Clang
+and ASan/UBSan. Both i486 linked builds
 have zero unresolved helpers. Eighteen independent evidence tests reject
 malformed or inconsistent physical snapshots.
 

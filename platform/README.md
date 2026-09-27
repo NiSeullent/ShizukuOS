@@ -13,8 +13,8 @@ capability is the long-term target, not the current compatibility claim.
 | [PCI-E](../drivers/pcie/) | Config transport, topology, ECAM/capabilities/resources/DMA constraints | CONFIGMG/VMM binding, interrupts, real storage/USB/GPU drivers |
 | [AHCI storage](../drivers/ahci_native/) | Original read-only core; post-UEFI 32-bit DMA reads against the disposable QEMU ICH9 fixture | Windows 98 driver binding, physical controllers, reset/recovery, interrupts and wider I/O |
 | [xHCI command rings](../drivers/xhci_native/) | Original core; 130 post-UEFI command completions through a QEMU PCI-E bridge, with independent DMA and BAR checks | Wider USB endpoint operations, Windows 98 binding, interrupts and physical controllers |
-| [USB EP0](../drivers/xhci_usb/) | Original GET8/GET18 transfers, independent parsing and verified DMA shutdown in a real QEMU USB2 guest | Configuration descriptors, device configuration, class I/O and native Win98 binding |
-| [USB descriptors](../drivers/usb_native/) | Original bounded USB2 device/configuration parser with transactional output | Full configuration transfer, device selection/configuration, class drivers and native binding |
+| [USB EP0](../drivers/xhci_usb/) | Original device and bounded configuration transfers, independent parsing and verified DMA shutdown in a real QEMU USB2 guest | Device configuration, class I/O and native Win98 binding |
+| [USB descriptors](../drivers/usb_native/) | Original bounded USB2 device/configuration parser, checked against actual EP0 responses | Device selection/configuration, class drivers and native binding |
 | [ShizukuDOS UEFI](../shizukudos/uefi32/) | Original EFI program, verified transition from x64 firmware to own 32-bit protected-mode kernel | DOS/runtime/boot bridge capable of reaching Win98 GUI without CSM |
 
 ## Reproduce
@@ -55,6 +55,9 @@ python3 drivers/xhci_usb/test.py
 python3 shizukudos/uefi_usb/build.py
 python3 shizukudos/uefi_usb/test.py
 python3 shizukudos/uefi_usb/test_qemu.py
+python3 shizukudos/uefi_usb_config/build.py
+python3 shizukudos/uefi_usb_config/test.py
+python3 shizukudos/uefi_usb_config/test_qemu.py
 ```
 
 Generated artifacts, firmware variable copies, receipts and images stay in
@@ -63,9 +66,10 @@ with networking disabled. No script installs into the host, changes global
 client settings, flashes firmware or updates an installed Windows system.
 
 After those checks, `python3 platform/package.py` produces
-`build/windows98-shizuku-second-edition-usb-ep0-checkpoint.zip`.
+`build/windows98-shizuku-second-edition-usb-configuration-checkpoint.zip`.
 Earlier checkpoint ZIPs are preserved. The allowlist includes original sources,
-the [USB EP0 execution record](../docs/USB_EP0_CHECKPOINT.md),
+the [USB configuration execution record](../docs/USB_CONFIGURATION_CHECKPOINT.md),
+the [earlier USB EP0 execution record](../docs/USB_EP0_CHECKPOINT.md),
 the [device foundations](../docs/DEVICE_FOUNDATION_CHECKPOINT.md), all earlier checkpoint documents, build artifacts,
 and the source-bound host and guest evidence. It excludes firmware, Windows
 media, ESP/test disk images, and guest installation files.

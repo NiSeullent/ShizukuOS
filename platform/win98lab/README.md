@@ -29,8 +29,8 @@ Omit `--resume` only for a first installation with no existing guest disk.
 The supervisor allows 60–1800 seconds and always stops its own child. A
 `snapshot` command records a screenshot; it does not create a VM snapshot.
 Internal snapshots must be saved/restored through the verified owned QMP
-connection. The latest private `install-file-copy-continued` snapshot captures
-setup copying files at 53%; installation and native probe execution remain incomplete.
+connection. The latest private `install-file-copy-packed` snapshot captures
+setup copying files at 71%; installation and native probe execution remain incomplete.
 
 ## Optional RAM working copy
 
@@ -170,6 +170,41 @@ and byte. It verifies the inputs stayed unchanged before publishing
 `NTW32.DLL`, `NTWPROBE.EXE`, `NTWRAP9X.VXD`, `NTWQUERY.EXE`, instructions and
 checksums, plus the optional graphics executable. It contains no Windows
 installation files or keys.
+
+For actual process-exit collection, build and host-test the original supervisor:
+
+```sh
+python3 platform/win98lab/test_native_runner.py
+python3 platform/win98lab/make_probe_media.py --runner
+```
+
+`--runner` includes graphics and writes a separate `ntw-native-probes-runner.iso`
+and `probe-media-runner.json`, preserving the earlier CD. Copy all six binaries
+to a fresh, exclusively owned `C:\NTWLAB` directory in installed Windows 98,
+then run `NTWRUN.EXE` from an MS-DOS Prompt inside Windows. Do not run its child
+probes first: the runner preserves and refuses existing probe logs and creates
+its own log exclusively. It checks Windows 98 identity, uses absolute executable
+paths, waits up to 120 seconds per child, records actual DWORD exit codes and
+stops after any failure. A termination request gets a separate bounded wait;
+an unconfirmed termination is logged as unknown. Keep the external VM watchdog.
+
+Collect `NTWRUN.LOG`, the three child logs and the visible GDI window. The runner
+does not verify executable hashes or child-log contents. Successful log text
+does not replace the media/build hashes, fresh guest provenance and actual exit
+results. The 5,632-byte runner imports only 13 classic KERNEL32 functions and
+links no CRT or KernelEx. Its GCC, Clang and sanitizer models each pass 115,375
+assertions across 537 scenarios with 504 injected faults; native execution is
+still unverified.
+
+`verify_native_logs.py LOG_DIRECTORY` checks the exact four log grammars,
+ordered stages, matching Windows identity, child exits and GDI observations.
+Supply `--runner-exit-code` only with the separately captured runner result.
+A missing or nonzero runner result remains incomplete, because the runner can
+fail its final log close after flushing a PASS line. The parser always reports
+`native_execution_verified=false`: it checks guest-reported consistency and
+still requires the independently collected execution evidence. Its 16 synthetic
+tests include all 1,444 byte truncations and 1,444 high-bit mutations; they do
+not constitute native logs or Windows execution.
 
 On a disposable installed Windows 98 snapshot without KernelEx, copy the four
 binaries to `C:\NTWLAB`, run both probes there, and collect their exit codes
