@@ -1,0 +1,127 @@
+{
+  "date": "2026-09-27",
+  "product": "Windows 98 Shizuku's Second Edition",
+  "scope": "original xHCI command/event rings behind PCI-E bridge in CPL0 32-bit kernel after UEFI exit",
+  "artifacts": {
+    "efi": {
+      "machine": "AMD64",
+      "subsystem": "EFI_APPLICATION",
+      "imports": [],
+      "relocations": true,
+      "sha256": "fdcbe313cd1270584582f98033681d4fbd8b20429af487408bcf4132a7b555f5",
+      "bytes": 35840
+    },
+    "payload": {
+      "machine": "i386",
+      "entry": 33619968,
+      "segments": [
+        {
+          "physical": 33619968,
+          "file_bytes": 17686,
+          "memory_bytes": 17686,
+          "flags": 5
+        },
+        {
+          "physical": 33640448,
+          "file_bytes": 0,
+          "memory_bytes": 73728,
+          "flags": 6
+        }
+      ],
+      "dma_address": 33710080,
+      "sha256": "149855c4f4b0a256d51cb177cd57c10203f20bba4cb5b39de25193c5f46b75a6",
+      "bytes": 17686
+    },
+    "transition": {
+      "sha256": "d2d1058d664f7cf9b0ad52fb075c54887fb907e1f9c7adf859ab2653abd260ed",
+      "bytes": 10240
+    }
+  },
+  "source_hashes": {
+    "shizukudos/uefi_xhci/loader.c": "03601acaf1a8b6c7b0f9ae164f7bce1823880f928a8b54ef0e3193d2a4a32339",
+    "shizukudos/uefi_xhci/payload.c": "31100a35443ca86c5d29d75dc45a4cac7986505bcfe8af6017a30a6c7a6525c4",
+    "shizukudos/uefi_xhci/clock.c": "6eafaa483ff214749ca68af52743fa6a74893206213099aec774e816406ce56b",
+    "shizukudos/uefi_xhci/layout.h": "77b93fc001d6517afec2a92857508603432365bdb49bfa00e034d2e7cad7ba86",
+    "shizukudos/uefi_xhci/build.py": "2eb7b871c5d1b26f433e23450616847b054934f26bb72401426cc17e4b52a1e8",
+    "shizukudos/uefi32/build.py": "7db859d4386bf2535b1f0510d3e2de958e56153018771bd3a4150a4ac4f4b01f",
+    "shizukudos/uefi32/contract.c": "4a6e7532851b9a6c664a5e698f48406c7f7a8c51a9e65a6f1446af24076060f1",
+    "shizukudos/uefi32/paging.c": "b5c152dee68a225cc52da0dde265ca419a4a36ed28aec3318c005842fac96012",
+    "shizukudos/uefi32/paging.h": "1b8b6f3e5a5cd333be71d894a8c71d012b9366a2ad2600241170d14ddb91efa8",
+    "shizukudos/uefi32/layout.h": "ed9f2a02da245916a961bcb42128a78bf8fe6b2bb7ba7a3aafb287ba77e7dfd1",
+    "shizukudos/uefi32/transition.asm": "7680447f59ad0461e6f277bfb2d136b1484e6f38ca361d51e11f0676e570dc86",
+    "shizukudos/uefi32/payload.ld": "52d5acc634af884224fae9655b71eb884f816b218846d9e937725fb9632fa990",
+    "drivers/xhci_native/xhci.c": "54cbc46e3e4664032c82d1b0e760c2a7df22ebfe9f6c0db10f9e3d807f4f314e",
+    "drivers/xhci_native/xhci.h": "3d813715276d1f79353ddd331ac729cd3c0e36447b0c1d3ee2f056b13b7e7776",
+    "drivers/pcie/src/ntw_pcie.c": "e06c3a19686239f3b9c09d2975ed17fdea5fc4ebb9a318db233e69bebeba2ea7",
+    "drivers/pcie/include/ntw_pcie.h": "41d5d69834d2b34cc5719da7c5543e353a503cf9940bab10d96fcd9c30474215",
+    "ntwrapper/core.c": "6cd21ae4bc37965eae7ba18f155e03037f16b1a44c3edf112fa142f11373e21a",
+    "ntwrapper/include/ntwrapper.h": "902c72f956a01be2f6a8e3be74986ca13719375697c8e479b2242b88f14a93c3",
+    "ntwddm/src/ntwddm.c": "0000ceaca7a1c7f437db2c60a1a8da5edef61020d80c0ecffad53644b3f6170c",
+    "ntwddm/include/ntwddm.h": "d561123913b531e7e82bef0a2107c44954ecdef237f43a6280eaf9bd39c11950",
+    "shizukudos/uefi/boot.c": "d18e7a0d83a893fccc713c8d92d2f1dfb6eea3385c707b8cb5acfdb70328b52d",
+    "shizukudos/uefi/boot.h": "5c3051618ce69242862ffe6d8ab3594b976d18a5889e6a0c2644c146a4edd636",
+    "shizukudos/uefi/efi.h": "a39edec29479f2dea900ceb986f19d9a1573954835ddffc1a6dc9ef6ec9b94e8"
+  },
+  "guest_receipt_sha256": "885fa99ea40468982f6c02cd204ecddf7953a1828d690308731f0b2002e9fc37",
+  "build_receipt_sha256": "91053caf2819dd593e820572f21aa1e826ed5ff41ee485bfc84121f2cfba4ffd",
+  "host_receipt_sha256": "6258569bdb7d3e8f0fbd07d6b3aab33362fd328ff75734a79e8023d3e06cc64d",
+  "driver_host_receipt_sha256": "348cc1a82f4f83e5e7a53d7944c3a9038c8b4e97cbc486c6ae7ade55fcf18882",
+  "guest": {
+    "pass": true,
+    "kvm": {
+      "enabled": true,
+      "present": true
+    },
+    "pid": 4088910,
+    "process_stopped": true,
+    "elapsed_seconds": 2.284,
+    "xhci": {
+      "magic": 1229146200,
+      "size": 80,
+      "calibrated": 1,
+      "ticks_per_us": 2409,
+      "start_tsc": 4609677459,
+      "stage": 3,
+      "pci_bdf": 256,
+      "mmio": 2164260864,
+      "open_result": 0,
+      "command_result": 0,
+      "close_result": 0,
+      "commands_completed": 130,
+      "bridges": 1,
+      "port_events": 0,
+      "completion_low": 33712272,
+      "completion_high": 0,
+      "last_status": 8,
+      "last_completion_code": 1,
+      "quarantine": 0
+    },
+    "registers": {
+      "EIP": 33621675,
+      "ESP": 35651396,
+      "CR0": 65587,
+      "CR4": 1608,
+      "EFER": 2048
+    },
+    "dma_sha256": "90c1b7f9dcf9548e78f9f401a7db0748b82bc1efdca7db80d47b2f2a3360606f",
+    "evidence_sha256": {
+      "xhci-proof.bin": "a4199cb54ede68f7a2d4f0b8fa9b342e521cf2ece0ebdcd86c1666e04d886dfa",
+      "dma.bin": "90c1b7f9dcf9548e78f9f401a7db0748b82bc1efdca7db80d47b2f2a3360606f",
+      "handoff.bin": "ccc7436cfafd6384fb48c1404d6e59a70dd649b45d3e8cde7d5cc39abb111fea",
+      "registers.txt": "a3aabd555e3b84ce17c5b5d4392bfa3f60cc6ac17a98d8e376c138aba4caf2da",
+      "handoff.ppm": "a4240e83ce31bb5c7d4ec854677f7d0658df4fcabe8f3e2291dc21efbff7315d",
+      "handoff.png": "bc98d0fca69f9c15cce9f35b1512164f67c7cbb74ee4e2cf12306f200c2f66bf"
+    },
+    "harness_sources_sha256": {
+      "shizukudos/uefi_xhci/test_qemu.py": "33ffaf8eb1c54419c6bdf868ca518d2526b0db7a043747d004e835f86819708c",
+      "shizukudos/uefi32/test_qemu.py": "fa84a980d400a1abc786daa9aae52532a432faec5dcfcfe9ff304b0edb9a401c"
+    }
+  },
+  "limitations": [
+    "130 No-Op commands; no attached USB device or USB transfers",
+    "QEMU xHCI, one controller, no scratchpads, coherent identity DMA only",
+    "No native Windows 98 driver binding",
+    "No physical hardware, interrupts, hotplug, power management or general DMA mapping",
+    "No DOS/Windows GUI boot"
+  ]
+}

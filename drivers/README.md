@@ -11,6 +11,7 @@
 - [probe](probe/): AHCI/xHCI의 읽기 전용 capability 레지스터를 해석하는, OS와 무관한 C89 코드. 드라이버가 아니며 물리 MMIO를 스스로 매핑하지 않는다.
 - [pcie](pcie/): 독자 PCI/PCI-E 설정 공간·토폴로지·ECAM·자원·DMA 제약 코어.
 - [ahci_native](ahci_native/): 컨트롤러 소유권·DMA 수명·ATA 식별·단일 섹터 읽기 구현과 실패 주입 시험.
+- [xhci_native](xhci_native/): 컨트롤러 인계·DMA 명령/이벤트 링·No-Op 완료 처리. [별도 실제 게스트](../shizukudos/uefi_xhci/)에서 130개 명령을 검증했으며 USB 장치 기능은 아직 구현하지 않았다.
 
 ## 현재 판단
 

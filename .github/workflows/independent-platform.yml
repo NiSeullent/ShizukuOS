@@ -100,6 +100,12 @@ jobs:
         timeout-minutes: 3
         run: python3 platform/win98lab/test_storage.py -v
 
+      - name: Test xHCI command rings and build the PCI-E integration
+        run: |
+          python3 drivers/xhci_native/test.py
+          python3 shizukudos/uefi_xhci/build.py
+          python3 shizukudos/uefi_xhci/test.py
+
       - name: Record validation scope
         if: always()
         run: |
