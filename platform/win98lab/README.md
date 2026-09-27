@@ -200,6 +200,15 @@ links no CRT or KernelEx. Its GCC, Clang and sanitizer models each pass 115,375
 assertions across 537 scenarios with 504 injected faults; native execution is
 still unverified.
 
+For the original Windows 98 `COMMAND.COM` prompt, `make_probe_media.py --batch`
+adds `RUNTEST.BAT` and writes a third, separate `ntw-native-probes-runner-batch.iso`.
+Copy the script with the binaries and run it once from fresh `C:\NTWLAB`.
+Descending `IF ERRORLEVEL` branches record the runner's expected exit 0..3 in
+`NTWEXIT.TXT`; another code is recorded as `unexpected`. `GUESTVER.TXT` also
+captures the prompt's version report. The batch uses no modern CMD variable
+expansion. Its media bytes are re-extracted and checked; the script itself
+does not establish that the native probes passed.
+
 `verify_native_logs.py LOG_DIRECTORY` checks the exact four log grammars,
 ordered stages, matching Windows identity, child exits and GDI observations.
 Supply `--runner-exit-code` only with the separately captured runner result.

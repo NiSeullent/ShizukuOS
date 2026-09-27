@@ -16,7 +16,8 @@ BUILD = ROOT/'build/win98-lab'
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
-def build_media(include_graphics=False, include_runner=False):
+def build_media(include_graphics=False, include_runner=False, include_batch=False):
+    include_runner = include_runner or include_batch
     include_graphics = include_graphics or include_runner
     platform = ROOT/'build/platform'
     vxd = ROOT/'ntwrapper/vxd/build'
@@ -84,6 +85,19 @@ def build_media(include_graphics=False, include_runner=False):
         "Contains no Windows installation files, firmware or product key.\r\n"
     ).encode('ascii')
     payload['HASHES.TXT'] = ''.join(h+'  '+n+'\r\n' for n,h in sorted(expected.items())).encode('ascii')
+    if include_batch:
+        batch_source = ROOT/'platform/win98lab/run_native.bat'
+        batch_bytes = batch_source.read_bytes()
+        # COMMAND.COM consumes the original ASCII script with DOS line ends.
+        batch = batch_bytes.decode('ascii').replace('\r\n', '\n').replace('\n', '\r\n').encode('ascii')
+        runner_sources[batch_source] = batch_bytes
+        payload['RUNTEST.BAT'] = batch
+        payload['HASHES.TXT'] += (sha(batch)+'  RUNTEST.BAT\r\n').encode('ascii')
+        payload['README.TXT'] += (
+            'Run RUNTEST.BAT from fresh C:\\NTWLAB to record runner exit0..3.\r\n'
+            'The batch records NTWEXIT.TXT and GUESTVER.TXT; retain both.\r\n'
+            'An unexpected exit is not a successful validation.\r\n'
+        ).encode('ascii')
     with tempfile.TemporaryDirectory(prefix='probe-media-',dir=BUILD) as temporary:
         temporary = Path(temporary)
         source = temporary/'source'; source.mkdir()
@@ -104,14 +118,16 @@ def build_media(include_graphics=False, include_runner=False):
         for path,data in {**manifests, **runner_sources}.items():
             if path.read_bytes() != data:
                 raise RuntimeError('Build manifest changed during media construction')
-        output = BUILD/('ntw-native-probes-runner.iso' if include_runner else 'ntw-native-probes.iso')
+        output = BUILD/('ntw-native-probes-runner-batch.iso' if include_batch else
+                       'ntw-native-probes-runner.iso' if include_runner else 'ntw-native-probes.iso')
         image_bytes = image.read_bytes()
         result = {'sha256':sha(image_bytes),'path':str(output),
                   'bytes':len(image_bytes),'contents_sha256':{n:sha(b) for n,b in payload.items()},
                   'source_manifests_sha256':{str(p.relative_to(ROOT)):sha(b) for p,b in manifests.items()},
                   'runner_sources_sha256':{str(p.relative_to(ROOT)):sha(b) for p,b in runner_sources.items()},
                   'guest_executed':False,'media':'original project probes only; no Windows files'}
-        receipt = BUILD/('probe-media-runner.json' if include_runner else 'probe-media.json')
+        receipt = BUILD/('probe-media-runner-batch.json' if include_batch else
+                        'probe-media-runner.json' if include_runner else 'probe-media.json')
         staged_receipt = temporary/'receipt.json'
         staged_receipt.write_text(json.dumps(result,indent=2)+'\n')
         # A failed publication may leave an image without a receipt, never a
@@ -132,6 +148,8 @@ def main():
                         help='Include the separately built original native GDI probe')
     parser.add_argument('--runner', action='store_true',
                         help='Include the original bounded runner and graphics in a separate CD')
+    parser.add_argument('--batch', action='store_true',
+                        help='Include the runner plus a COMMAND.COM exit-code script in a separate CD')
     args = parser.parse_args()
     os.umask(0o077)
     BUILD.mkdir(parents=True, exist_ok=True)
@@ -140,6 +158,6 @@ def main():
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise RuntimeError('Another original probe CD build is running') from error
-        build_media(args.graphics, args.runner)
+        build_media(args.graphics, args.runner, args.batch)
 
 if __name__=='__main__':main()
