@@ -3,13 +3,15 @@
  * Drafted from the public interface and Intel xHCI1.2b/USB2 interface facts,
  * without reading the new EP0 implementation. CPU/device DMA shadows ensure
  * that completion and publication depend on explicit synchronization.
+ * Configuration extensions were added with the corresponding implementation;
+ * they retain this model's separate hardware cursors and byte-level oracle.
  */
 #include "xhci_usb.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static unsigned checks, scenarios, injected;
+static unsigned checks, scenarios, injected, configuration_scenarios, configuration_injected;
 #define CHECK(v) do { ++checks; if(!(v)) { \
     fprintf(stderr,"scenario %u line %u: %s\n",scenarios,(unsigned)__LINE__,#v); \
     exit(1); } } while(0)
@@ -45,7 +47,9 @@ struct model {
     unsigned output_poison,extra_events,allocation_fault,was_running,psceg,released_dcbaa_zero;
     uint64_t hidden_bounce_due;
     unsigned hidden_bounce_seen;
+    unsigned configuration_enabled,configuration_index,configuration_length,header_mutation;
     uint8_t descriptor[18];
+    uint8_t configuration[2048];
 };
 static uint32_t u32(const uint8_t *p)
 { return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
@@ -171,15 +175,19 @@ static void transfer_step(struct model *m)
     if(m->transfer_pending==1) {
         uint8_t *data=dma(m,m->transfer_data,16),*buffer;
         unsigned length=u32(data+8)&0x1ffffu,actual=length;
-        if(mode==SHORT_DATA)actual=length-1;
+        if(m->transfers>2u && actual>m->configuration_length)actual=m->configuration_length;
+        if(mode==SHORT_DATA && actual) --actual;
         buffer=dma(m,u64(data),length+(mode==DMA_OVERRUN?1u:0u));
-        memcpy(buffer,m->descriptor,actual);
+        memcpy(buffer,m->transfers<=2u?m->descriptor:m->configuration,actual);
+        if(m->transfers==4u && m->header_mutation) {
+            CHECK(m->header_mutation<=9u && actual>=9u);buffer[m->header_mutation-1u]^=1u;
+        }
         if(mode==DESCRIPTOR_MISMATCH)buffer[4]^=1;
         if(mode==DESCRIPTOR_INVALID && length==18)buffer[17]=0;
         if(mode==DMA_OVERRUN)buffer[length]^=0x80;
         if(m->disconnect_transfer==m->transfers)m->regs[PORT/4]&=~3u;
         m->transfer_pending=2;
-        if(mode==SHORT_DATA || mode==SHORT_ZERO || mode==DUPLICATE_SHORT) {
+        if(actual<length || mode==SHORT_ZERO || mode==DUPLICATE_SHORT) {
             emit(m,m->transfer_data,(13u<<24)|(length-actual),ctl);return;
         }
     } else if(m->transfer_pending==2 && mode==DUPLICATE_SHORT) {
@@ -191,7 +199,7 @@ static void transfer_step(struct model *m)
     if(mode==WRONG_ENDPOINT)ctl=(ctl&~(31u<<16))|(2u<<16);
     if(mode==EVENT_DATA)ctl|=4;
     if(mode==MISALIGNED)pointer|=1;
-    if(mode==RESIDUE_TOO_LARGE){pointer=m->transfer_data;cc=13;residue=100;}
+    if(mode==RESIDUE_TOO_LARGE){pointer=m->transfer_data;cc=13;residue=(u32(dma(m,m->transfer_data,16)+8)&0x1ffffu)+1u;}
     if(mode==STATUS_RESIDUE)residue=1;
     if(mode==SETUP_ERROR){pointer=m->transfer_setup;cc=6;}
     if(mode==DATA_ERROR){pointer=m->transfer_data;cc=6;}
@@ -242,22 +250,27 @@ static int read32(void *opaque,uint32_t offset,uint32_t *value)
 }
 static void transfer_doorbell(struct model *m,uint32_t value)
 {
-    const uint8_t *setup,*data,*status;uint32_t c;
+    const uint8_t *setup,*data,*status;uint32_t c,length,buffer_offset;
     CHECK(value==1 && m->addressed && !m->transfer_pending);
     CHECK(m->clock-m->address_done>=2000);
     setup=dma(m,m->ep_cursor,48);data=setup+16;status=data+16;
-    CHECK(u32(setup)==0x01000680u);
-    CHECK(u32(setup+4)==((m->transfers==0?8u:18u)<<16));
+    CHECK(m->transfers<(m->configuration_enabled?4u:2u));
+    length=m->transfers==0?8u:m->transfers==1?18u:m->transfers==2?9u:
+           (uint32_t)m->configuration[2]|((uint32_t)m->configuration[3]<<8);
+    buffer_offset=m->transfers==0?8448u:m->transfers==1?8512u:m->transfers==2?8576u:9216u;
+    CHECK(u32(setup)==(m->transfers<2u?0x01000680u:0x02000680u|(m->configuration_index<<16)));
+    CHECK(u32(setup+4)==(length<<16));
     CHECK(u32(setup+8)==8);
     CHECK(u32(setup+12)==((2u<<10)|(3u<<16)|(1u<<6)|m->ep_cycle));
-    CHECK((u32(data+8)&0x1ffffu)==(m->transfers==0?8u:18u));
+    CHECK((u32(data+8)&0x1ffffu)==length);
     CHECK((u32(data+8)&~UINT32_C(0x1ffff))==0);
     c=u32(data+12);
     CHECK(c==((3u<<10)|(1u<<16)|(1u<<2)|m->ep_cycle));
-    CHECK(u64(data)==m->blocks[1].bus+(m->transfers==0?8448u:8512u));
+    CHECK(u64(data)==m->blocks[1].bus+buffer_offset);
+    CHECK((u64(data)&UINT64_C(0xffff))+length<=65536u);
     CHECK(u64(status)==0 && u32(status+8)==0);
     CHECK(u32(status+12)==((4u<<10)|(1u<<5)|m->ep_cycle));
-    CHECK(m->transfers<2 && m->current_packet==(m->transfers?m->packet:(m->speed==3?64u:8u)));
+    CHECK(m->current_packet==(m->transfers?m->packet:(m->speed==3?64u:8u)));
     m->transfer_setup=m->ep_cursor;m->transfer_data=m->ep_cursor+16;m->transfer_status=m->ep_cursor+32;
     m->ep_cursor+=48;m->transfer_pending=1;++m->transfers;
 }
@@ -585,12 +598,215 @@ static void hidden_disconnect(void)
     CHECK(m.reset_count==0 && m.commands==0 && x.state==XHCI_CLOSED);
     CHECK(xhci_close(&x)==0);no_leak(&m);
 }
+static void make_configuration(struct model *m,unsigned length,unsigned index)
+{
+    static const uint8_t tablet[34]={9,2,34,0,1,7,0,0x80,50,
+        9,4,0,0,1,3,0,0,0,9,0x21,0x11,1,0,1,0x22,0x34,0,7,5,0x81,3,8,0,10};
+    unsigned cursor=34;
+    CHECK(length>=34 && length<=2048 && length!=35 && index<255);
+    memset(m->configuration,0,sizeof(m->configuration));memcpy(m->configuration,tablet,34);
+    m->configuration[2]=(uint8_t)length;m->configuration[3]=(uint8_t)(length>>8);
+    m->configuration[33]=m->speed==3?1u:10u;
+    while(cursor<length) {
+        unsigned amount=length-cursor;
+        if(amount>255)amount=amount==256?254u:255u;
+        CHECK(amount>=2);m->configuration[cursor]=(uint8_t)amount;
+        m->configuration[cursor+1]=0x24;cursor+=amount;
+    }
+    m->configuration_length=length;m->configuration_enabled=1;m->configuration_index=index;
+    m->descriptor[17]=(uint8_t)(index+1u);
+}
+static struct xhciu_configuration_request configuration_request(unsigned index)
+{
+    struct xhciu_configuration_request r={sizeof(r),XHCIU_ABI_VERSION,0,index,0};return r;
+}
+static struct xhciu_result configuration_probe(struct model *m,struct xhci_device *x,
+                                               struct xhciu_configuration_descriptor *out)
+{
+    struct xhciu_configuration_request r=configuration_request(m->configuration_index);
+    struct xhciu_configuration_descriptor before;struct xhciu_result result;
+    unsigned i,opaque=0;
+    ++configuration_scenarios;
+    memset(out,0xa5,sizeof(*out));memcpy(&before,out,sizeof(before));
+    result=xhciu_probe_configuration(x,&r,out);
+    if(result.status)CHECK(memcmp(out,&before,sizeof(before))==0);
+    else {
+        CHECK(out->struct_size==3848 && out->abi_version==1 && result.failed_stage==XHCIU_COMPLETE);
+        CHECK(out->configuration_index==m->configuration_index && out->raw_length==m->configuration_length);
+        CHECK(memcmp(out->header,m->configuration,9)==0);
+        CHECK(memcmp(out->raw,m->configuration,m->configuration_length)==0);
+        check_zero(out->raw+m->configuration_length,2048u-m->configuration_length);
+        check_zero(out->reserved,sizeof(out->reserved));
+        CHECK(out->device.struct_size==84 && out->device.abi_version==1);
+        CHECK(out->device.root_port==1 && out->device.slot_id==1);
+        CHECK(out->device.context_bytes==m->stride && out->device.port_speed_id==m->speed);
+        CHECK(out->device.final_ep0_packet==m->packet);
+        CHECK(memcmp(out->device.raw_device,m->descriptor,18)==0);
+        CHECK(memcmp(out->device.first_eight,m->descriptor,8)==0);
+        CHECK(out->parsed.struct_size==1688 && out->parsed.abi_version==1);
+        CHECK(out->parsed.total_length==m->configuration_length && out->parsed.configuration_value==7);
+        CHECK(out->parsed.speed==(m->speed==1?NTWU_FULL_SPEED:m->speed==2?NTWU_LOW_SPEED:NTWU_HIGH_SPEED));
+        CHECK(out->parsed.interface_count==1 && out->parsed.alternate_count==1 && out->parsed.endpoint_count==1);
+        CHECK(out->parsed.alternates[0].offset==9 && out->parsed.alternates[0].number==0);
+        CHECK(out->parsed.alternates[0].class_code==3 && out->parsed.alternates[0].endpoint_count==1);
+        CHECK(out->parsed.endpoints[0].offset==27 && out->parsed.endpoints[0].address==0x81);
+        CHECK(out->parsed.endpoints[0].transfer_type==3 && out->parsed.endpoints[0].max_packet_bytes==8);
+        for(i=0;i<m->configuration_length;) {
+            unsigned amount=m->configuration[i],type=m->configuration[i+1];
+            CHECK(amount>=2 && amount<=m->configuration_length-i);
+            if(type>=0x20) {
+                const struct ntwu_opaque *record=&out->parsed.opaque[opaque++];
+                CHECK(record->offset==i && record->length==amount && record->type==type);
+                CHECK(record->preceding_alternate==0);
+                CHECK(record->preceding_endpoint==(i==18?NTWU_NO_INDEX:0));
+            }
+            i+=amount;
+        }
+        CHECK(opaque==out->parsed.opaque_count);
+        CHECK(x->state==XHCI_CLOSED && m->transfers==4 && m->disables==1 && m->released_dcbaa_zero);
+        CHECK(x->transfers_completed==4 && m->evaluates==(m->speed==1 && m->packet!=8?1u:0u));
+        no_leak(m);
+    }
+    return result;
+}
+static void configuration_success(void)
+{
+    static const unsigned lengths[]={34,63,64,65,255,256,257,511,512,513,2047,2048};
+    unsigned wide,large,which,k;
+    for(wide=0;wide<2;++wide)for(large=0;large<2;++large)for(which=0;which<6;++which)
+    for(k=0;k<sizeof(lengths)/sizeof(lengths[0]);++k) {
+        struct model m;struct xhci_device x={0};struct xhciu_configuration_descriptor out;
+        struct xhci_ops ops;struct xhci_config cfg=configuration();unsigned i;
+        unsigned speed=which<4?1u:which==4?2u:3u,packet=which<4?8u<<which:which==4?8u:64u;
+        initialize(&m,speed,packet,wide,large);make_configuration(&m,lengths[k],k&1u?2u:0u);
+        /* The full receive range remains inside a page even when that page
+         * is the last one before a 64KiB boundary. */
+        m.blocks[1].bus+=0xd000u;ops=callbacks(&m);CHECK(xhci_open_one_slot(&x,&ops,&cfg)==0);
+        if(k==11)for(i=0;i<130;++i)CHECK(xhci_noop(&x)==0);
+        CHECK(configuration_probe(&m,&x,&out).status==0);CHECK(xhci_close(&x)==0);no_leak(&m);
+    }
+}
+static void configuration_failures(void)
+{
+    unsigned mode,which;
+    for(which=3;which<=4;++which)for(mode=1;mode<=DMA_OVERRUN;++mode) {
+        struct model m;struct xhci_device x={0};struct xhciu_configuration_descriptor out;
+        struct xhci_ops ops;struct xhci_config cfg=configuration();struct xhciu_result result;
+        if(mode==DESCRIPTOR_INVALID)continue;
+        initialize(&m,1,64,1,mode&1u);make_configuration(&m,34,0);
+        m.mode=mode;m.mode_transfer=which;ops=callbacks(&m);CHECK(xhci_open_one_slot(&x,&ops,&cfg)==0);
+        result=configuration_probe(&m,&x,&out);
+        if(mode==SHORT_ZERO)CHECK(result.status==0);else CHECK(result.status!=0);
+        CHECK(xhci_close(&x)==0);no_leak(&m);
+    }
+    for(mode=0;mode<21;++mode) {
+        struct model m;struct xhci_device x={0};struct xhciu_configuration_descriptor out;
+        struct xhci_ops ops;struct xhci_config cfg=configuration();struct xhciu_result result;
+        initialize(&m,3,64,0,1);make_configuration(&m,34,0);
+        if(mode==0)m.configuration[0]=8;
+        if(mode==1)m.configuration[0]=10;
+        if(mode==2)m.configuration[1]=7;
+        if(mode==3)m.configuration[2]=8;
+        if(mode==4){m.configuration[2]=1;m.configuration[3]=8;} /* 2049 */
+        if(mode==5)m.configuration[2]=m.configuration[3]=255;
+        if(mode==6){m.configuration[2]=9;m.configuration_length=9;} /* no interface */
+        if(mode==7)m.configuration[4]=0;
+        if(mode==8)m.configuration[5]=0;
+        if(mode==9)m.configuration[29]=0x80; /* forbidden endpoint zero */
+        if(mode==10)m.configuration_length=33; /* actual shorter than wTotalLength */
+        if(mode>=11 && mode<20)m.header_mutation=mode-10;
+        if(mode==20){m.configuration_index=1;m.descriptor[17]=1;}
+        ops=callbacks(&m);CHECK(xhci_open_one_slot(&x,&ops,&cfg)==0);
+        result=configuration_probe(&m,&x,&out);CHECK(result.status!=0);
+        if(mode==4 || mode==5)CHECK(result.status==XHCIU_CONFIGURATION_LIMIT && m.transfers==3);
+        if(mode==20)CHECK(result.status==XHCIU_CONFIGURATION_INDEX && m.transfers==2);
+        if(mode>=6 && mode<=9)CHECK(result.failed_stage==XHCIU_CONFIGURATION_PARSE && result.parser_status!=0);
+        if(mode==10)CHECK(result.status==XHCIU_SHORT_READ);
+        if(mode>=11 && mode<20)CHECK(result.failed_stage==XHCIU_CONFIGURATION_READ);
+        CHECK(xhci_close(&x)==0);no_leak(&m);
+    }
+}
+static void configuration_arguments(void)
+{
+    struct model m;struct xhci_device x={0};struct xhci_ops ops;struct xhci_config cfg=configuration();
+    struct xhciu_configuration_descriptor out,before;struct xhciu_configuration_request r;
+    unsigned mode;
+    initialize(&m,1,64,0,0);make_configuration(&m,34,0);ops=callbacks(&m);
+    CHECK(xhci_open_one_slot(&x,&ops,&cfg)==0);memset(&out,0xa5,sizeof(out));before=out;
+    for(mode=0;mode<11;++mode) {
+        struct xhciu_result result;unsigned calls=m.calls;r=configuration_request(0);
+        if(mode==0)r.struct_size=0;
+        if(mode==1)r.abi_version=2;
+        if(mode==2)r.flags=1;
+        if(mode==3)r.configuration_index=256;
+        if(mode==4)r.root_port=5;
+        if(mode==5)result=xhciu_probe_configuration(NULL,&r,&out);
+        else if(mode==6)result=xhciu_probe_configuration(&x,NULL,&out);
+        else if(mode==7)result=xhciu_probe_configuration(&x,&r,NULL);
+        else if(mode==8)result=xhciu_probe_configuration(&x,&r,(void *)m.blocks[1].cpu);
+        else if(mode==9)result=xhciu_probe_configuration(&x,&r,(void *)&x);
+        else if(mode==10)result=xhciu_probe_configuration(&x,&r,(void *)(UINTPTR_MAX-1023u));
+        else result=xhciu_probe_configuration(&x,&r,&out);
+        CHECK(result.status==XHCI_INVALID && m.calls==calls && x.state==XHCI_READY);
+        CHECK(memcmp(&out,&before,sizeof(out))==0);
+    }
+    {
+        unsigned calls=m.calls;struct xhciu_result result;
+        r=configuration_request(0);memcpy(&out,&r,sizeof(r));before=out;
+        result=xhciu_probe_configuration(&x,(const void *)&out,&out);
+        CHECK(result.status==XHCI_INVALID && m.calls==calls && memcmp(&out,&before,sizeof(out))==0);
+    }
+    CHECK(xhci_close(&x)==0);no_leak(&m);
+}
+static void configuration_faults(void)
+{
+    unsigned count,index,after,mode;
+    {
+        struct model m;struct xhci_device x={0};struct xhciu_configuration_descriptor out;
+        struct xhci_ops ops;struct xhci_config cfg=configuration();
+        initialize(&m,1,64,1,1);make_configuration(&m,2048,0);ops=callbacks(&m);
+        CHECK(xhci_open_one_slot(&x,&ops,&cfg)==0);CHECK(configuration_probe(&m,&x,&out).status==0);
+        count=m.calls;
+    }
+    for(after=0;after<2;++after)for(index=1;index<=count;++index) {
+        struct model m;struct xhci_device x={0};struct xhciu_configuration_descriptor out;
+        struct xhci_ops ops;struct xhci_config cfg=configuration();int result;
+        initialize(&m,1,64,1,1);make_configuration(&m,2048,0);m.fault=index;m.fail_after=after;
+        ops=callbacks(&m);result=xhci_open_one_slot(&x,&ops,&cfg);
+        if(!result)result=configuration_probe(&m,&x,&out).status;
+        CHECK(result!=0);m.fault=0;CHECK(xhci_close(&x)==0);no_leak(&m);++configuration_injected;
+    }
+    for(mode=0;mode<5;++mode) {
+        struct model m;struct xhci_device x={0};struct xhciu_configuration_descriptor out;
+        struct xhci_ops ops;struct xhci_config cfg=configuration();struct xhciu_result result;uint64_t started;
+        initialize(&m,1,64,0,0);make_configuration(&m,34,0);ops=callbacks(&m);
+        if(mode==0)cfg.timeout_us=30000000;
+        CHECK(xhci_open_one_slot(&x,&ops,&cfg)==0);started=m.clock;
+        if(mode==0){m.mode=NO_STATUS;m.mode_transfer=4;}
+        else {
+            if(mode<4)m.configuration[29]=0x80;
+            if(mode==2)m.reset_stuck=1;else m.halt_stuck=1;
+        }
+        result=configuration_probe(&m,&x,&out);
+        if(mode==0) {
+            CHECK(result.status==XHCI_TIMEOUT && result.failed_stage==XHCIU_CONFIGURATION_READ);
+            CHECK(m.clock-started>=10000000 && m.clock-started<=10020000);
+        } else {
+            CHECK(result.status==XHCI_QUARANTINED && m.blocks[0].owned && m.blocks[1].owned && !m.releases);
+            if(mode<4)CHECK(result.parser_status!=0 && result.transport_error==XHCIU_DESCRIPTOR);
+            else CHECK(result.transport_error==XHCI_TIMEOUT && x.operation_error==0 && m.disables==1);
+        }
+        m.halt_stuck=m.reset_stuck=0;CHECK(xhci_close(&x)==0);no_leak(&m);
+    }
+}
 int main(void)
 {
     success_cases();failure_cases();topology_cases();invalid_arguments();faults_and_quarantine();
     deadline_and_diagnostics();
     hidden_disconnect();
-    printf("{\"status\":\"PASS\",\"checks\":%u,\"scenarios\":%u,\"injected_callbacks\":%u}\n",
-           checks,scenarios,injected);
+    configuration_success();configuration_failures();configuration_arguments();configuration_faults();
+    printf("{\"status\":\"PASS\",\"checks\":%u,\"scenarios\":%u,\"injected_callbacks\":%u,"
+           "\"configuration_probes\":%u,\"configuration_injected_callbacks\":%u}\n",
+           checks,scenarios,injected,configuration_scenarios,configuration_injected);
     return 0;
 }

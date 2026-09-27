@@ -1,17 +1,22 @@
 # Windows 98 Shizuku's Second Edition — original USB2 EP0 path
 
 This freestanding module implements one USB2 device-descriptor transaction using
-this project's xHCI command/event core and descriptor parser. Strict GCC/Clang,
-ASan/UBSan and independent asynchronous host-model checks pass. The separate [UEFI integration](../../shizukudos/uefi_usb/) reads GET8/GET18
-from an actual emulated USB2 device and independently checks physical DMA,
-MMIO and shutdown. Host receipts alone do not establish guest execution; neither
-result establishes physical-device or native Windows 98 USB support.
+this project's xHCI command/event core and descriptor parser. It also provides a
+bounded configuration-descriptor probe. Strict GCC/Clang and ASan/UBSan host
+checks cover both. The separate [UEFI integration](../../shizukudos/uefi_usb/)
+previously read GET8/GET18 from an actual emulated USB2 device and independently
+checked DMA, MMIO and shutdown; that archived evidence binds the prior source
+revision. The configuration extension and the rebuilt device path require new
+guest evidence. Host receipts do not establish physical-device or native
+Windows 98 USB support.
 
 The supported operation resets one directly connected USB2 root-port device,
 enables one slot, assigns its address, reads the first eight descriptor bytes,
 evaluates EP0's packet size when needed, reads all eighteen bytes, and parses
-them through `ntwu_parse_device`. It then disables the slot and closes the entire
-controller session. Configuration selection, non-control transfers, hubs,
+them through `ntwu_parse_device`. The configuration variant additionally reads
+one configuration's nine-byte header and full bounded blob through EP0, then
+validates it with `ntwu_parse_configuration`. Both disable the slot and close
+the entire controller session. SET_CONFIGURATION, non-control transfers, hubs,
 transaction translators, SuperSpeed, interrupt delivery, class/HID drivers,
 Win98 USBD/CONFIGMG integration and physical-device qualification are absent.
 
@@ -58,6 +63,26 @@ succeeded. A later explicit `xhci_close` can retry safely. Release callbacks mus
 never reclaim retained memory. Disabling a slot does not relax the module's
 stronger whole-controller shutdown requirement before allocation release.
 
+`xhciu_probe_configuration` accepts a 20-byte `xhciu_configuration_request`
+(`struct_size`, `abi_version`, `root_port`, `configuration_index`, `flags`) and
+returns the same 20-byte diagnostic record. It uses the same one-slot open and
+terminal lifetime. The original device-probe request/84-byte output ABI and
+existing stage values are unchanged; configuration header/read/parse stages are
+appended. Flags remain zero and the index must fit one byte before mutation.
+After the device descriptor is read, the index must be below its advertised
+configuration count; failure at that point still closes the started session.
+
+The new `xhciu_configuration_descriptor` is 3,848 bytes: a 16-byte header,
+the existing 84-byte device result, nine header bytes plus three reserved bytes,
+2,048 raw bytes at offset 112, and the 1,688-byte parsed configuration at offset
+2160. Its raw length names only valid bytes; unused raw bytes and reserved fields
+are zero. Parser offsets refer to this owned raw copy, so no result references
+released DMA. Failure preserves the entire caller record. The configuration
+wrapper uses a private scratch record; the runner records a conservative i486
+sum of all internal function stack frames, bounded to 16 KiB. Platform callback
+and caller frames require additional stack; the existing EFI harness reserves
+64 KiB. The original device-only wrapper does not allocate that large scratch.
+
 ## DMA and publication
 
 The base controller uses its existing 4 KiB allocation. The one-slot open adds a
@@ -75,8 +100,10 @@ bus address by the core.
 | 8192 | 256 | EP0 ring: 15 usable entries and one Link TRB |
 | 8448 | 64 | Eight-byte response followed by `0xa5` guards |
 | 8512 | 64 | Eighteen-byte response followed by `0xa5` guards |
+| 8576 | 64 | Nine-byte configuration header followed by `0xa5` guards |
 | 8704 | 128 reserved | Output slot/EP0 snapshot before Disable Slot |
 | 8832 | 192 reserved | Original Address Device input snapshot |
+| 9216 | 2112 | Up to 2048 configuration bytes plus guards |
 
 Context stride follows CSZ (32 or 64 bytes). Only the input context is software
 modified after Address Device; its final contents are the optional Evaluate
@@ -85,11 +112,19 @@ controller addresses. The output snapshot precedes Disable Slot because live
 context fields can be invalidated by teardown. A Running EP's output dequeue
 pointer is undefined and is never used as a software cursor or success proof.
 
-Two requests consume EP0 entries 0–2 and 3–5. This operation does not wrap or
-reuse the transfer ring. The first Setup ownership bit stays invalid until the
+Device requests consume EP0 entries 0–2 and 3–5; configuration requests add
+entries 6–8 and 9–11. Neither operation wraps or reuses the transfer ring. The
+first Setup ownership bit stays invalid until the
 following Data/Status stages are synchronized, then the Setup cycle bit is
 published and EP0's doorbell rung. Command and event cursor/cycle handling,
 including their wraps, remains the single shared base implementation.
+
+The complete configuration buffer, including 64 trailing guard bytes, stays in
+the final 4 KiB page of the existing allocation. No third allocation or enlarged
+DMA block is needed. Static assertions enforce separation from snapshots and
+ring storage; transfer preparation also checks the full storage range and that
+the requested data does not cross a physical 64 KiB boundary. All unrequested
+bytes in each receive region remain guarded and are checked after completion.
 
 ## Bounded device profile
 
@@ -116,6 +151,22 @@ accepted; a changed packet size uses Evaluate Context A1 before GET18. Low/high
 speed must report their fixed 8/64 limits. The complete response must retain the
 same first eight bytes and pass the unchanged independent USB parser.
 
+For configuration discovery, both extra requests are GET_DESCRIPTOR (request 6,
+type 2), with the zero-based descriptor index in wValue and wIndex zero. This is
+different from GET_CONFIGURATION (request 8), which reports current selection.
+The selected descriptor's nonzero `bConfigurationValue` is preserved as data;
+it is neither assumed equal to index+1 nor sent to the device. Only one selected
+configuration is inspected, not all advertised configurations.
+
+GET9 must return an exact standard header (length 9, type 2) whose little-endian
+total is 9 through 2,048. An oversized total reports
+`XHCIU_CONFIGURATION_LIMIT` before any full-buffer request. GETfull requests
+exactly that total; all nine header bytes must be identical across responses.
+The unchanged parser validates the complete blob using the observed speed.
+Its own 4,096-byte parser limit is unchanged; this transport intentionally has a
+smaller cap. Unsupported endpoints/classes remain parser data or explicit
+unsupported cases; power fields do not authorize bus power or configuration.
+
 Each request uses immediate Setup, one IN Data and OUT Status TRBs. Only Status
 sets IOC; Data sets ISP. Event type, reserved fields, slot, EP0, event-data flag,
 alignment, exact current TRB pointer, completion code and residue are checked.
@@ -124,7 +175,7 @@ Status success: its nonzero residue fails even when Status itself succeeds.
 Zero-residue short notification plus Status success is accepted. Duplicate,
 stale and unrelated transfer events fail. Receive-buffer guards are checked.
 
-The probe allows two descriptor transfers, at most one Evaluate, 256 interleaved
+The probe allows two or four descriptor transfers, at most one Evaluate, 256 interleaved
 port events per wait, a one-million-iteration polling failsafe, per-operation
 timeouts, and a ten-second total probe budget. Cleanup clears that probe budget
 so shutdown still gets its own bounded deadlines. There are no reconnect,
@@ -158,12 +209,27 @@ before/after effects. It also tests aggregate quarantine and retry without
 allocation release while the controller may still own memory. Counts include
 repeated polling checks, not that many distinct scenarios.
 
+Configuration extensions retain the independent model's separate hardware
+cursors and DMA shadows. Their byte-level oracle verifies request type/index,
+length, buffer address, all four Setup/Data/Status sequences, raw output and
+parsed topology. Cases cover both context strides and DMA widths, every EP0
+packet size, boundary-sized blobs, an allocation whose last page borders 64 KiB,
+nonsequential configuration values, every header-byte change, short replies,
+stale events, parser rejection, output aliasing, and every baseline callback
+failure before/after effects. Parser failure combined with halt/reset failure
+must retain both allocations and the initiating diagnostic. These extensions
+were implemented with the transport changes; they do not inherit the original
+model author's independent-implementation provenance automatically.
+
 The separate `shizukudos/uefi_usb` integration owns actual guest execution.
-Planned evidence uses one emulated USB2 device behind an exclusively owned xHC,
+New-revision evidence must use one emulated USB2 device behind an exclusively owned xHC,
 independent physical DMA/context/TRB/event dumps, parser output and stopped-QEMU
 proof. An actual negotiated speed and packet size must be recorded; branches
 not exercised by that guest retain only host-model evidence. No USB passthrough,
-private Windows disk or existing VM belongs in that disposable fixture.
+private Windows disk or existing VM belongs in that disposable fixture. The
+3,848-byte result cannot replace the old 84-byte result inside the old fixed
+proof location: it would overlap the payload. Any configuration integration
+must reserve and verify a separate bounded result region.
 
 ## Primary references and original provenance
 

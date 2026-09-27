@@ -15,7 +15,8 @@ STRICT = ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-Wpedantic',
           '-Wconversion', '-Wsign-conversion', '-Wshadow', '-fno-builtin']
 FREESTANDING = ['-ffreestanding', '-fno-builtin', '-fno-stack-protector',
                 '-fno-pie', '-fno-pic', '-fno-asynchronous-unwind-tables',
-                '-march=i486', '-mno-sse', '-mno-sse2', '-mno-mmx', '-msoft-float']
+                '-march=i486', '-mno-sse', '-mno-sse2', '-mno-mmx', '-msoft-float',
+                '-fstack-usage']
 SOURCES = [ROOT / 'drivers/xhci_native/xhci.c', HERE / 'xhci_usb.c',
            ROOT / 'drivers/usb_native/ntwu_usb.c']
 MANIFEST = SOURCES + [ROOT / 'drivers/xhci_native/xhci.h',
@@ -44,7 +45,9 @@ def main():
     receipt = BUILD / 'test-result.json'
     receipt.unlink(missing_ok=True)
     sources = {str(path.relative_to(ROOT)): digest(path) for path in MANIFEST}
-    result = {'module': 'original xHCI USB2 EP0', 'sources_sha256': sources,
+    result = {'module': 'original xHCI USB2 EP0 device/configuration', 'sources_sha256': sources,
+              'profile': {'configuration_max_bytes': 2048, 'device_result_bytes': 84,
+                          'configuration_result_bytes': 3848, 'set_configuration': False},
               'host': {}, 'i486': {}, 'guest': 'not_run', 'hardware_io': 'none'}
     for compiler, label, extra in (
         ('gcc', 'gcc', []), ('clang', 'clang', []),
@@ -56,25 +59,43 @@ def main():
         environment = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',
                            UBSAN_OPTIONS='halt_on_error=1')
         output = run([executable], environment)
+        counters = json.loads(output)
+        if counters.get('status') != 'PASS' or counters.get('configuration_probes', 0) < 1:
+            raise RuntimeError('Configuration model did not report successful execution')
         (BUILD / (label + '.log')).write_text(output)
         result['host'][label] = {'compiler': run([compiler, '--version']).splitlines()[0],
                                  'passed': True, 'output': output,
+                                 'counters': counters,
                                  'log_sha256': digest(BUILD / (label + '.log'))}
     for compiler, target in (('gcc', ['-m32']),
                              ('clang', ['--target=i386-unknown-none-elf'])):
         objects = []
+        frames = []
         for index, source in enumerate(SOURCES):
             obj = BUILD / (compiler + '-i486-' + str(index) + '.o')
             run([compiler, *STRICT, *FREESTANDING, *target, '-c', source, '-o', obj])
             objects.append(obj)
+            for line in obj.with_suffix('.su').read_text().splitlines():
+                name, size, kind = line.rsplit('\t', 2)
+                if kind not in ('static', 'dynamic,bounded'):
+                    raise RuntimeError('Unbounded freestanding stack frame: ' + line)
+                frames.append({'function': name.replace(str(ROOT) + '/', ''),
+                               'bytes': int(size), 'kind': kind})
         linked = BUILD / (compiler + '-i486-linked.o')
         run(['ld', '-m', 'elf_i386', '-r', *objects, '-o', linked])
         undefined = run(['nm', '-u', linked]).strip()
         if undefined:
             raise RuntimeError('EP0 path requires external runtime helpers: ' + undefined)
+        # All core paths are nonrecursive. Summing every emitted function frame
+        # overbounds any internal call chain; platform callback frames are extra.
+        stack_bound = sum(frame['bytes'] for frame in frames)
+        if not frames or stack_bound > 16384:
+            raise RuntimeError('Conservative internal stack-frame budget exceeded')
         result['i486'][compiler] = {'flags': STRICT + FREESTANDING + target,
                                    'linked_object_sha256': digest(linked),
                                    'size_bytes': linked.stat().st_size,
+                                   'internal_stack_frames_sum': stack_bound,
+                                   'stack_frames': frames,
                                    'undefined_symbols': [], 'passed': True}
     if sources != {str(path.relative_to(ROOT)): digest(path) for path in MANIFEST}:
         raise RuntimeError('EP0 source changed during validation')

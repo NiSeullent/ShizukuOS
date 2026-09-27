@@ -170,8 +170,9 @@ static int output_context(struct xhci_device *x,uint32_t stride,uint32_t speed,u
 }
 static void trb(uint8_t *p,uint64_t parameter,uint32_t status,uint32_t control)
 { xhci_i_put64(p,parameter);xhci_i_put32(p+8,status);xhci_i_put32(p+12,control); }
-static int descriptor_transfer(struct xhci_device *x,uint32_t request_index,uint32_t bytes,
-                               uint32_t buffer_offset,uint32_t speed)
+static int descriptor_transfer(struct xhci_device *x,uint32_t request_index,
+                               uint32_t descriptor_type,uint32_t descriptor_index,uint32_t bytes,
+                               uint32_t buffer_offset,uint32_t buffer_span,uint32_t speed)
 {
     uint8_t *base=x->device_dma.cpu,*ring=base+XHCIU_RING_OFFSET;
     uint32_t start=request_index*3u,offset=XHCIU_RING_OFFSET+start*16u;
@@ -179,11 +180,28 @@ static int descriptor_transfer(struct xhci_device *x,uint32_t request_index,uint
     uint64_t pointer,data_pointer=x->device_dma.bus+offset+16u;
     uint64_t status_pointer=data_pointer+16u;struct xhci_event event;
     struct xhci_deadline d;int result;
-    if(request_index>1u || (bytes!=8u && bytes!=18u)) return XHCI_INVALID;
-    for(i=0;i<64u;++i) ((volatile uint8_t *)base)[buffer_offset+i]=0xa5u;
-    if((result=xhci_i_sync(x,&x->device_dma,buffer_offset,64u,1))!=0) return result;
+    if(request_index>3u || descriptor_index>255u || !bytes || bytes>buffer_span ||
+       buffer_offset>x->device_dma.bytes || buffer_span>x->device_dma.bytes-buffer_offset ||
+       ((x->device_dma.bus+buffer_offset)&UINT64_C(0xffff))+bytes>UINT64_C(65536))
+        return XHCI_INVALID;
+    if(descriptor_type==1u) {
+        if(descriptor_index || request_index>1u || bytes!=(request_index?18u:8u) ||
+           buffer_offset!=(request_index?XHCIU_DEVICE_OFFSET:XHCIU_FIRST_OFFSET) || buffer_span!=64u)
+            return XHCI_INVALID;
+    } else if(descriptor_type==2u) {
+        if(request_index==2u) {
+            if(bytes!=9u || buffer_offset!=XHCIU_CONFIGURATION_HEADER_OFFSET || buffer_span!=64u)
+                return XHCI_INVALID;
+        } else if(request_index==3u) {
+            if(bytes<9u || bytes>XHCIU_CONFIGURATION_MAX || buffer_offset!=XHCIU_CONFIGURATION_OFFSET ||
+               buffer_span!=XHCIU_CONFIGURATION_MAX+64u) return XHCI_INVALID;
+        } else return XHCI_INVALID;
+    } else return XHCI_INVALID;
+    for(i=0;i<buffer_span;++i) ((volatile uint8_t *)base)[buffer_offset+i]=0xa5u;
+    if((result=xhci_i_sync(x,&x->device_dma,buffer_offset,buffer_span,1))!=0) return result;
     /* Each stage is a separate TD; the one Data TRB is also its final TRB. */
-    trb(ring+start*16u,UINT64_C(0x000001000680)|((uint64_t)bytes<<48),8,
+    trb(ring+start*16u,UINT64_C(0x0680)|((uint64_t)descriptor_type<<24)|
+        ((uint64_t)descriptor_index<<16)|((uint64_t)bytes<<48),8,
         (2u<<10)|(3u<<16)|(1u<<6)); /* ownership invalid until the batch is ready */
     trb(ring+(start+1u)*16u,x->device_dma.bus+buffer_offset,bytes,
         (3u<<10)|(1u<<16)|(1u<<2)|1u);
@@ -226,35 +244,43 @@ static int descriptor_transfer(struct xhci_device *x,uint32_t request_index,uint
         if((result=xhci_i_ack(x))!=0 ||
            (result=xhci_i_expired(x,&d,x->timeout_us))!=0) return result;
     }
-    if((result=xhci_i_sync(x,&x->device_dma,buffer_offset,64u,0))!=0) return result;
-    for(i=bytes;i<64u;++i) if(base[buffer_offset+i]!=0xa5u) return XHCI_BAD_EVENT;
+    if((result=xhci_i_sync(x,&x->device_dma,buffer_offset,buffer_span,0))!=0) return result;
+    for(i=bytes;i<buffer_span;++i) if(base[buffer_offset+i]!=0xa5u) return XHCI_BAD_EVENT;
     return XHCI_OK;
 }
-struct xhciu_result xhciu_probe_device(struct xhci_device *x,const struct xhciu_request *request,
-                                      struct xhciu_descriptor *output)
+static struct xhciu_result invalid_result(void)
+{
+    struct xhciu_result result;
+    xhci_i_zero(&result,sizeof(result));result.status=XHCI_INVALID;result.transport_error=XHCI_INVALID;
+    return result;
+}
+static struct xhciu_result probe_common(struct xhci_device *x,const void *request,size_t request_bytes,
+                                       uint32_t root_port,uint32_t configuration_index,
+                                       void *output,size_t output_bytes,
+                                       struct xhciu_configuration_descriptor *configuration)
 {
     struct xhciu_result answer;struct xhciu_descriptor parsed;struct ntwu_result decoded;
-    uint32_t slot_type=0,speed=0,stride=0,packet=0,stage=XHCIU_VALIDATE,i,state;
+    uint32_t slot_type=0,speed=0,stride=0,packet=0,stage=XHCIU_VALIDATE,i,state,total;
     enum ntwu_speed usb_speed=NTWU_FULL_SPEED;uint8_t *memory;int result=XHCI_INVALID,closed;
-    xhci_i_zero(&answer,sizeof(answer));answer.status=XHCI_INVALID;answer.transport_error=XHCI_INVALID;
+    answer=invalid_result();
     if(!x || !request || !output || x->state!=XHCI_READY || x->enabled_slots!=1u ||
-       !x->device_dma_owned || request->struct_size!=sizeof(*request) ||
-       request->abi_version!=XHCIU_ABI_VERSION || request->flags || request->root_port>x->max_ports ||
-       !disjoint(request,sizeof(*request),output,sizeof(*output)) ||
-       !disjoint(x,sizeof(*x),output,sizeof(*output)) ||
-       !disjoint(x,sizeof(*x),request,sizeof(*request)) ||
-       !disjoint(x->dma.cpu,XHCI_DMA_BYTES,output,sizeof(*output)) ||
-       !disjoint(x->device_dma.cpu,XHCI_DEVICE_DMA_BYTES,output,sizeof(*output)) ||
-       !disjoint(x->dma.cpu,XHCI_DMA_BYTES,request,sizeof(*request)) ||
-       !disjoint(x->device_dma.cpu,XHCI_DEVICE_DMA_BYTES,request,sizeof(*request))) return answer;
+       !x->device_dma_owned || root_port>x->max_ports ||
+       !disjoint(request,request_bytes,output,output_bytes) ||
+       !disjoint(x,sizeof(*x),output,output_bytes) ||
+       !disjoint(x,sizeof(*x),request,request_bytes) ||
+       !disjoint(x->dma.cpu,XHCI_DMA_BYTES,output,output_bytes) ||
+       !disjoint(x->device_dma.cpu,XHCI_DEVICE_DMA_BYTES,output,output_bytes) ||
+       !disjoint(x->dma.cpu,XHCI_DMA_BYTES,request,request_bytes) ||
+       !disjoint(x->device_dma.cpu,XHCI_DEVICE_DMA_BYTES,request,request_bytes)) return answer;
     xhci_i_zero(&parsed,sizeof(parsed));memory=x->device_dma.cpu;x->operation_error=0;
+    if(configuration) xhci_i_zero(configuration,sizeof(*configuration));
     x->budget_start=x->ops.now_us(x->ops.context);x->budget_last=x->budget_start;
     x->budget_us=XHCIU_PROBE_US;x->budget_active=1;
     stride=(x->hccparams1&4u)?64u:32u;
 #define STAGE(value) do { stage=(value);x->usb_stage=stage; } while(0)
 #define REQUIRE(expression) do { result=(expression);if(result) goto finish; } while(0)
     STAGE(XHCIU_PROTOCOL);
-    REQUIRE(select_port(x,request->root_port,&x->usb_port,&slot_type));
+    REQUIRE(select_port(x,root_port,&x->usb_port,&slot_type));
     STAGE(XHCIU_RESET);REQUIRE(reset_port(x,x->usb_port,&speed));
     usb_speed=speed==1u?NTWU_FULL_SPEED:speed==2u?NTWU_LOW_SPEED:NTWU_HIGH_SPEED;
     packet=speed==3u?64u:8u;x->usb_initial_mps=packet;x->usb_final_mps=packet;
@@ -268,7 +294,7 @@ struct xhciu_result xhciu_probe_device(struct xhci_device *x,const struct xhciu_
     REQUIRE(xhci_i_command(x,11,x->device_dma.bus+XHCIU_INPUT_OFFSET,1u<<24,0));
     REQUIRE(output_context(x,stride,speed,packet));
     REQUIRE(delay(x,x->usb_port,speed,1,XHCIU_ADDRESS_RECOVERY_US));
-    STAGE(XHCIU_FIRST_READ);REQUIRE(descriptor_transfer(x,0,8,XHCIU_FIRST_OFFSET,speed));
+    STAGE(XHCIU_FIRST_READ);REQUIRE(descriptor_transfer(x,0,1,0,8,XHCIU_FIRST_OFFSET,64,speed));
     xhci_i_copy(parsed.first_eight,memory+XHCIU_FIRST_OFFSET,8);
     packet=parsed.first_eight[7];
     if(parsed.first_eight[0]!=18u || parsed.first_eight[1]!=1u ||
@@ -282,7 +308,7 @@ struct xhciu_result xhciu_probe_device(struct xhci_device *x,const struct xhciu_
         REQUIRE(xhci_i_command(x,13,x->device_dma.bus+XHCIU_INPUT_OFFSET,1u<<24,0));
         ++x->usb_evaluates;REQUIRE(output_context(x,stride,speed,packet));
     }
-    STAGE(XHCIU_DEVICE_READ);REQUIRE(descriptor_transfer(x,1,18,XHCIU_DEVICE_OFFSET,speed));
+    STAGE(XHCIU_DEVICE_READ);REQUIRE(descriptor_transfer(x,1,1,0,18,XHCIU_DEVICE_OFFSET,64,speed));
     xhci_i_copy(parsed.raw_device,memory+XHCIU_DEVICE_OFFSET,18);
     for(i=0;i<8u;++i) if(parsed.raw_device[i]!=parsed.first_eight[i]) {
         result=XHCIU_DESCRIPTOR;goto finish;
@@ -290,6 +316,34 @@ struct xhciu_result xhciu_probe_device(struct xhci_device *x,const struct xhciu_
     STAGE(XHCIU_PARSE);decoded=ntwu_parse_device(parsed.raw_device,18,usb_speed,&parsed.parsed);
     answer.parser_status=decoded.status;answer.parser_offset=decoded.offset;
     if(decoded.status!=NTWU_OK) { result=XHCIU_DESCRIPTOR;goto finish; }
+    if(configuration) {
+        STAGE(XHCIU_CONFIGURATION_HEADER);
+        if(configuration_index>=parsed.parsed.configuration_count) {
+            result=XHCIU_CONFIGURATION_INDEX;goto finish;
+        }
+        REQUIRE(descriptor_transfer(x,2,2,configuration_index,9,
+                                    XHCIU_CONFIGURATION_HEADER_OFFSET,64,speed));
+        xhci_i_copy(configuration->header,memory+XHCIU_CONFIGURATION_HEADER_OFFSET,9);
+        if(configuration->header[0]!=9u || configuration->header[1]!=2u) {
+            result=XHCIU_DESCRIPTOR;goto finish;
+        }
+        total=(uint32_t)configuration->header[2]|((uint32_t)configuration->header[3]<<8);
+        if(total<9u) { result=XHCIU_DESCRIPTOR;goto finish; }
+        if(total>XHCIU_CONFIGURATION_MAX) { result=XHCIU_CONFIGURATION_LIMIT;goto finish; }
+        STAGE(XHCIU_CONFIGURATION_READ);
+        REQUIRE(descriptor_transfer(x,3,2,configuration_index,total,
+                    XHCIU_CONFIGURATION_OFFSET,XHCIU_CONFIGURATION_MAX+64u,speed));
+        xhci_i_copy(configuration->raw,memory+XHCIU_CONFIGURATION_OFFSET,total);
+        for(i=0;i<9u;++i) if(configuration->raw[i]!=configuration->header[i]) {
+            result=XHCIU_DESCRIPTOR;goto finish;
+        }
+        STAGE(XHCIU_CONFIGURATION_PARSE);
+        decoded=ntwu_parse_configuration(configuration->raw,total,usb_speed,&configuration->parsed);
+        answer.parser_status=decoded.status;answer.parser_offset=decoded.offset;
+        if(decoded.status!=NTWU_OK) { result=XHCIU_DESCRIPTOR;goto finish; }
+        configuration->struct_size=sizeof(*configuration);configuration->abi_version=XHCIU_ABI_VERSION;
+        configuration->configuration_index=configuration_index;configuration->raw_length=total;
+    }
     REQUIRE(output_context(x,stride,speed,packet));
     xhci_i_copy(memory+XHCIU_OUTPUT_SNAPSHOT,memory,2u*stride);
     REQUIRE(port_state(x,x->usb_port,speed,1,&state));
@@ -319,9 +373,30 @@ finish:
     answer.status=result;
     if(!result) {
         x->usb_stage=XHCIU_COMPLETE;answer.failed_stage=XHCIU_COMPLETE;
-        xhci_i_copy(output,&parsed,sizeof(parsed));
+        if(configuration) {
+            xhci_i_copy(&configuration->device,&parsed,sizeof(parsed));
+            xhci_i_copy(output,configuration,sizeof(*configuration));
+        } else xhci_i_copy(output,&parsed,sizeof(parsed));
     }
     return answer;
 #undef REQUIRE
 #undef STAGE
+}
+struct xhciu_result xhciu_probe_device(struct xhci_device *x,const struct xhciu_request *request,
+                                      struct xhciu_descriptor *output)
+{
+    if(!request || request->struct_size!=sizeof(*request) ||
+       request->abi_version!=XHCIU_ABI_VERSION || request->flags) return invalid_result();
+    return probe_common(x,request,sizeof(*request),request->root_port,0,output,sizeof(*output),0);
+}
+struct xhciu_result xhciu_probe_configuration(struct xhci_device *x,
+                         const struct xhciu_configuration_request *request,
+                         struct xhciu_configuration_descriptor *output)
+{
+    struct xhciu_configuration_descriptor scratch;
+    if(!request || request->struct_size!=sizeof(*request) ||
+       request->abi_version!=XHCIU_ABI_VERSION || request->flags || request->configuration_index>255u)
+        return invalid_result();
+    return probe_common(x,request,sizeof(*request),request->root_port,request->configuration_index,
+                        output,sizeof(*output),&scratch);
 }
