@@ -115,12 +115,20 @@ After building the platform DLL/probe and VxD/probe, prepare a separate CD:
 python3 platform/win98lab/make_probe_media.py
 ```
 
+After separately building `ntwddm/win98/build.py`, add `--graphics` to include
+its original `NTWGPROB.EXE`. The helper also verifies that executable against
+its successful build/import-audit receipt. Run it in the same writable guest
+directory and collect `NTWGPROB.LOG` plus the visible five-second window;
+[its acceptance contract](../../ntwddm/win98/README.md) distinguishes DIB
+pixel checks, native GDI results and actual Win98 identity.
+
 The helper snapshots the four original binaries, checks their build manifests,
 builds an ISO with `xorriso`, and extracts it again to compare every filename
 and byte. It verifies the inputs stayed unchanged before publishing
 `build/win98-lab/ntw-native-probes.iso` and a hash receipt. The CD contains only
 `NTW32.DLL`, `NTWPROBE.EXE`, `NTWRAP9X.VXD`, `NTWQUERY.EXE`, instructions and
-checksums. It contains no Windows installation files or keys.
+checksums, plus the optional graphics executable. It contains no Windows
+installation files or keys.
 
 On a disposable installed Windows 98 snapshot without KernelEx, copy the four
 binaries to `C:\NTWLAB`, run both probes there, and collect their exit codes

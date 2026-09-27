@@ -11,6 +11,8 @@ python3 platform/test.py
 
 새 `NTW32.DLL`은 SRW·InitOnce·틱 확장·동적 API 조회·UTF-8 변환 15개 함수를 제공합니다. 실제 DLL의 32비트 호출·재배치 시험을 통과했고, 독자 LE 형식의 `NTWRAP9X.VXD`와 VMM 조회 경로를 구현했습니다. ShizukuDOS는 x64 UEFI를 종료하고 자체 32비트 보호 모드 커널에서 커널 코어·소프트웨어 그래픽·AHCI DMA 디스크 읽기·PCI-E 브리지 뒤 xHCI 명령 링을 실행했습니다.
 
+[네이티브 그래픽 시험 프로그램](ntwddm/win98/)은 독자 렌더러를 앱 소유 GDI 비트맵에 연결하며, 현재 빌드·픽셀·수명 관리 호스트 시험을 통과했습니다. [USB descriptor 파서](drivers/usb_native/)도 독자 구현으로 추가했습니다. 실제 Windows 98의 GDI 실행과 USB 장치 전송·인식은 아직 검증 범위에 포함하지 않습니다.
+
 이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 Windows 98 SE 매체의 해시를 검증해 별도 설치 환경을 준비했으며, 새 DLL의 Windows 98 실행은 아직 검증하지 않았습니다. UEFI 전환 성공은 Windows 98 GUI 부팅을 뜻하지 않습니다.
 
 ## 기존 경로의 보존 기록

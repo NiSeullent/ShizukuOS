@@ -70,6 +70,12 @@ jobs:
       - name: Test original freestanding compiler memory support
         run: python3 platform/freestanding/test.py
 
+      - name: Build the native GDI probe and test its software adapter
+        # Build/import audit and host pixel model only; no native GDI execution.
+        run: |
+          python3 ntwddm/win98/test.py
+          python3 ntwddm/win98/build.py
+
       - name: Test PCI configuration and verify the freestanding i486 object
         # Clang may lower aggregate initialization to memset even with
         # -ffreestanding. Resolve it with original project compiler support.
@@ -119,6 +125,10 @@ jobs:
           python3 drivers/xhci_native/test.py
           python3 shizukudos/uefi_xhci/build.py
           python3 shizukudos/uefi_xhci/test.py
+
+      - name: Test original USB descriptor validation and freestanding builds
+        # Bounded parsing only; no controller, USB device, or class-driver I/O.
+        run: python3 drivers/usb_native/test.py
 
       - name: Record validation scope
         if: always()

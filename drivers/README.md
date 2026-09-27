@@ -12,6 +12,8 @@
 - [pcie](pcie/): 독자 PCI/PCI-E 설정 공간·토폴로지·ECAM·자원·DMA 제약 코어.
 - [ahci_native](ahci_native/): 컨트롤러 소유권·DMA 수명·ATA 식별·단일 섹터 읽기 구현과 실패 주입 시험.
 - [xhci_native](xhci_native/): 컨트롤러 인계·DMA 명령/이벤트 링·No-Op 완료 처리. [별도 실제 게스트](../shizukudos/uefi_xhci/)에서 130개 명령을 검증했으며 USB 장치 기능은 아직 구현하지 않았다.
+- [usb_native](usb_native/): USB 2.0 장치·구성 descriptor를 제한된 메모리 안에서 검사하는 독자 파서. 오류 시 출력은 유지하며, 전송·장치 설정·클래스 드라이버는 아직 포함하지 않는다.
+- [Windows 98 연결 계약](../docs/NATIVE_DRIVER_INTEGRATION.md): CONFIGMG·VMM·IOS의 확인된 인터페이스와 추가 확인이 필요한 ABI, 보조 컨트롤러 소유권 및 검증 순서.
 
 ## 현재 판단
 

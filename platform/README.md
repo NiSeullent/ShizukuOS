@@ -9,10 +9,11 @@ capability is the long-term target, not the current compatibility claim.
 | --- | --- | --- |
 | [NTWrapper9x](../ntwrapper/) | Original object/handle/event core, native LE VxD and bounded VMM query bridge | Windows 98 guest load/query, scheduler, memory, interrupts, I/O |
 | [NTWin32Wrapper9x](../ntwin32/) | App-local PE32 provider with 15 exports, original UTF-8 conversion and bounded import preparer; no KernelEx linkage | Clean Win98 static-import guest result, wider NLS/loader/NT service families |
-| [NTWDDMWrapper9x](../ntwddm/) | Original software framebuffer/surface/presentation core | Win98 display binding, GPU memory/scheduling, vendor miniports and D3D |
+| [NTWDDMWrapper9x](../ntwddm/) | Original software core and a built, host-tested [native GDI probe](../ntwddm/win98/) | Native Win98 GDI execution, display-driver binding, GPU memory/scheduling, vendor miniports and D3D |
 | [PCI-E](../drivers/pcie/) | Config transport, topology, ECAM/capabilities/resources/DMA constraints | CONFIGMG/VMM binding, interrupts, real storage/USB/GPU drivers |
 | [AHCI storage](../drivers/ahci_native/) | Original read-only core; post-UEFI 32-bit DMA reads against the disposable QEMU ICH9 fixture | Windows 98 driver binding, physical controllers, reset/recovery, interrupts and wider I/O |
 | [xHCI command rings](../drivers/xhci_native/) | Original core; 130 post-UEFI command completions through a QEMU PCI-E bridge, with independent DMA and BAR checks | USB device/endpoint enumeration and transfers, Windows 98 binding, interrupts and physical controllers |
+| [USB descriptors](../drivers/usb_native/) | Original bounded USB2 device/configuration parser with transactional output | Controller transfers, device selection/configuration, class drivers and native binding |
 | [ShizukuDOS UEFI](../shizukudos/uefi32/) | Original EFI program, verified transition from x64 firmware to own 32-bit protected-mode kernel | DOS/runtime/boot bridge capable of reaching Win98 GUI without CSM |
 
 ## Reproduce
@@ -31,6 +32,10 @@ make -C drivers/pcie test
 make -C drivers/pcie sanitize CC=clang
 make -C ntwddm test freestanding
 make -C ntwddm sanitize CC=clang
+python3 platform/freestanding/test.py
+python3 ntwddm/win98/test.py
+python3 ntwddm/win98/build.py
+python3 drivers/usb_native/test.py
 python3 shizukudos/uefi/build.py
 python3 shizukudos/uefi/test.py
 python3 shizukudos/uefi/test_qemu.py --qemu /usr/libexec/qemu-kvm --firmware-code /usr/share/edk2/ovmf/OVMF_CODE.fd --firmware-vars /usr/share/edk2/ovmf/OVMF_VARS.fd

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Make a private read-only CD of four original probes/providers, never OS media."""
+"""Make a private read-only CD of original probes/providers, never OS media."""
+import argparse
 import hashlib
 import fcntl
 import json
@@ -15,10 +16,13 @@ BUILD = ROOT/'build/win98-lab'
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
-def build_media():
+def build_media(include_graphics=False):
     platform = ROOT/'build/platform'
     vxd = ROOT/'ntwrapper/vxd/build'
     manifests = {platform/'manifest.json': None, vxd/'manifest.json': None}
+    graphics = ROOT/'ntwddm/win98/build'
+    if include_graphics:
+        manifests[graphics/'build-result.json'] = None
     for path in manifests:
         manifests[path] = path.read_bytes()
     app = json.loads(manifests[platform/'manifest.json'])
@@ -27,6 +31,12 @@ def build_media():
     sources.update({name:vxd/name for name in ('NTWRAP9X.VXD','NTWQUERY.EXE')})
     expected = {name:app['artifacts'][name]['sha256'] for name in ('NTW32.DLL','NTWPROBE.EXE')}
     expected.update({'NTWRAP9X.VXD':kernel['sha256'],'NTWQUERY.EXE':kernel['probe']['sha256']})
+    if include_graphics:
+        graphic_build = json.loads(manifests[graphics/'build-result.json'])
+        if not graphic_build['passed'] or graphic_build['artifact'] != 'NTWGPROB.EXE':
+            raise RuntimeError('Graphics probe has no successful audited build receipt')
+        sources['NTWGPROB.EXE'] = graphics/'NTWGPROB.EXE'
+        expected['NTWGPROB.EXE'] = graphic_build['sha256']
     payload = {name:path.read_bytes() for name,path in sources.items()}
     for name,data in payload.items():
         if sha(data) != expected[name]:
@@ -34,9 +44,12 @@ def build_media():
     payload['README.TXT'] = (
         "Windows 98 Shizuku's Second Edition - original native probes\r\n"
         "Use a disposable, installed Windows 98 snapshot without KernelEx.\r\n"
-        "Copy all four binaries to C:\\NTWLAB and run from that directory:\r\n"
+        "Copy all binaries to C:\\NTWLAB and run from that directory:\r\n"
         "  NTWPROBE.EXE  (writes NTWPROBE.LOG)\r\n"
-        "  NTWQUERY.EXE  (loads NTWRAP9X.VXD and writes NTWQUERY.LOG)\r\n"
+        "  NTWQUERY.EXE  (loads NTWRAP9X.VXD and writes NTWQUERY.LOG)\r\n" +
+        ("  NTWGPROB.EXE (5-second GDI window, writes NTWGPROB.LOG)\r\n"
+         "Capture the graphics window while visible; check WIN98_IDENTIFIED=1.\r\n"
+         if include_graphics else "") +
         "Record each exit code and complete log, then stop the guest.\r\n"
         "Do not count this CD build as native Windows execution evidence.\r\n"
         "Contains no Windows installation files, firmware or product key.\r\n"
@@ -84,6 +97,10 @@ def build_media():
     print(json.dumps(result,indent=2))
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--graphics', action='store_true',
+                        help='Include the separately built original native GDI probe')
+    args = parser.parse_args()
     os.umask(0o077)
     BUILD.mkdir(parents=True, exist_ok=True)
     with (BUILD/'probe-media.lock').open('a') as lock:
@@ -91,6 +108,6 @@ def main():
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise RuntimeError('Another original probe CD build is running') from error
-        build_media()
+        build_media(args.graphics)
 
 if __name__=='__main__':main()
