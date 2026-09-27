@@ -19,8 +19,13 @@ valid; 32-bit hosts write supported 64-bit address fields low DWORD first;
 legacy semaphores permit independent byte accesses. Link TRBs and event rings
 use distinct wrap mechanisms. The ERDP contract names the last evaluated event.
 
-The supported policy is deliberately narrower: no scratchpads, USB devices,
-endpoints, transfers, interrupt delivery, suspend/resume, virtualization or vendor
-commands. Host test success is not hardware conformance or a certification.
+The shared one-slot extension additionally uses Device Slot lifecycle commands
+(4.6.3–4.6.7), context storage (6.2) and type-specific Transfer Event fields
+(6.4.2.1). The original USB consumer and its additional references are documented
+in `../xhci_usb/README.md`; this base does not itself issue USB requests.
+
+The supported policy remains deliberately narrower: no scratchpads, class
+drivers, interrupt delivery, suspend/resume, virtualization or vendor commands.
+Host test success is not hardware conformance or a certification.
 Toolchain versions and source/output hashes are generated into
 `build/host-tests.json`; any native binding must add its own execution evidence.

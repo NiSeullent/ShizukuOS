@@ -130,6 +130,13 @@ jobs:
         # Bounded parsing only; no controller, USB device, or class-driver I/O.
         run: python3 drivers/usb_native/test.py
 
+      - name: Test original USB EP0 transport and build its firmware integration
+        # Asynchronous host model and hostile-evidence tests; no guest launch.
+        run: |
+          python3 drivers/xhci_usb/test.py
+          python3 shizukudos/uefi_usb/build.py
+          python3 shizukudos/uefi_usb/test.py
+
       - name: Record validation scope
         if: always()
         run: |

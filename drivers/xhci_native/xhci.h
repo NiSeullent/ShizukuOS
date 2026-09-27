@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #define XHCI_DMA_BYTES 4096u
+#define XHCI_DEVICE_DMA_BYTES 12288u
 #define XHCI_COMMAND_OFFSET 2048u
 #define XHCI_COMMAND_TRBS 16u
 #define XHCI_EVENT_OFFSET 2304u
@@ -55,8 +56,19 @@ struct xhci_device {
     uint32_t dma_owned,dma_published,command_index,command_cycle,event_index,event_cycle;
     uint32_t last_status,last_completion_code,commands_completed,port_events;
     int last_error;
+    /* Optional one-slot session; owned and quarantined with the base DMA. */
+    struct xhci_dma device_dma;
+    uint32_t device_dma_owned,enabled_slots;
+    uint32_t last_event[4];
+    uint32_t transfers_completed,short_events,last_transfer_code,last_transfer_residue;
+    uint32_t usb_slot,usb_port,usb_stage,usb_initial_mps,usb_final_mps,usb_evaluates;
+    uint64_t last_transfer_pointer;
+    uint64_t budget_start,budget_last;
+    uint32_t budget_us,budget_active;
+    int operation_error; /* initiating failure, preserved across close quarantine */
 };
 int xhci_open(struct xhci_device *,const struct xhci_ops *,const struct xhci_config *);
+int xhci_open_one_slot(struct xhci_device *,const struct xhci_ops *,const struct xhci_config *);
 int xhci_noop(struct xhci_device *);
 int xhci_close(struct xhci_device *);
 #endif

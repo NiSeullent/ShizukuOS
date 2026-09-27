@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build the isolated native PCI-E/xHCI command-ring integration, without booting."""
+"""Build the isolated native PCI-E/xHCI USB2 EP0 descriptor integration, without booting."""
 import hashlib
 import importlib.util
 import json
@@ -28,10 +28,14 @@ def main():
     receipt = BUILD/'build-result.json'
     receipt.unlink(missing_ok=True)
     driver = REPO/'drivers/xhci_native'
-    sources = [HERE/n for n in ('loader.c','payload.c','clock.c','layout.h','build.py')]
+    sources = [HERE/n for n in ('loader.c','payload.c','layout.h','build.py')]
     sources += [BASE/n for n in ('build.py','contract.c','paging.c','paging.h','layout.h',
                                 'transition.asm','payload.ld')]
-    sources += [driver/'xhci.c',driver/'xhci.h',driver/'xhci_internal.h',
+    sources += [HERE.parent/'uefi_xhci/clock.c', HERE.parent/'uefi_xhci/layout.h',
+                driver/'xhci.c',driver/'xhci.h',driver/'xhci_internal.h',
+                REPO/'drivers/xhci_usb/xhci_usb.c', REPO/'drivers/xhci_usb/xhci_usb.h',
+                REPO/'drivers/usb_native/ntwu_usb.c', REPO/'drivers/usb_native/ntwu_usb.h',
+                REPO/'platform/freestanding/memory.c', REPO/'platform/freestanding/memory.h',
                 REPO/'drivers/pcie/src/ntw_pcie.c', REPO/'drivers/pcie/include/ntw_pcie.h']
     sources += [REPO/n for n in ('ntwrapper/core.c','ntwrapper/include/ntwrapper.h',
                'ntwddm/src/ntwddm.c','ntwddm/include/ntwddm.h',
@@ -47,19 +51,27 @@ def main():
              '-fno-asynchronous-unwind-tables','-fno-ident','-I',BASE,
              '-I',REPO/'ntwddm/include', '-I',REPO/'drivers/pcie/include']
     objects=[]
-    for i,source in enumerate((HERE/'payload.c',HERE/'clock.c',BASE/'contract.c',
-                               driver/'xhci.c',REPO/'drivers/pcie/src/ntw_pcie.c',
+    for i,source in enumerate((HERE/'payload.c',HERE.parent/'uefi_xhci/clock.c',BASE/'contract.c',
+                               driver/'xhci.c',REPO/'drivers/xhci_usb/xhci_usb.c',
+                               REPO/'drivers/usb_native/ntwu_usb.c',
+                               REPO/'platform/freestanding/memory.c',
+                               REPO/'drivers/pcie/src/ntw_pcie.c',
                                REPO/'ntwrapper/core.c',REPO/'ntwddm/src/ntwddm.c')):
         obj=BUILD/f'payload-{i}.o'
         run(['gcc',*flags,'-c',source,'-o',obj]); objects.append(obj)
     elf=BUILD/'payload.elf'
     run(['ld','-m','elf_i386','-T',BASE/'payload.ld','-o',elf,*objects])
     payload_info=contracts.elf_contract(elf)
-    dma_symbol=re.search(r'^([0-9a-fA-F]+) [bBdD] dma_page$',run(['nm','-n',elf]).stdout,re.M)
-    if not dma_symbol: raise RuntimeError('Missing owned DMA allocation symbol')
-    payload_info['dma_address']=int(dma_symbol.group(1),16)
-    if payload_info['dma_address'] & 4095:
-        raise RuntimeError('DMA storage alignment failed')
+    symbols=run(['nm','-n',elf]).stdout
+    for name,key in (('dma_page','dma_address'),('device_dma_pages','device_dma_address')):
+        matched=re.search(r'^([0-9a-fA-F]+) [bBdD] '+name+r'$',symbols,re.M)
+        if not matched: raise RuntimeError('Missing owned DMA symbol: '+name)
+        payload_info[key]=int(matched.group(1),16)
+        if payload_info[key] & 4095:
+            raise RuntimeError('DMA storage alignment failed: '+name)
+    first,second=payload_info['dma_address'],payload_info['device_dma_address']
+    if not (first+4096<=second or second+12288<=first):
+        raise RuntimeError('DMA regions overlap')
     if run(['nm','-u',elf]).stdout.strip():
         raise RuntimeError('Unexpected 32-bit compiler runtime dependency')
     run(['objcopy','-O','binary',elf,BUILD/'payload.bin'])

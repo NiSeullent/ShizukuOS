@@ -6,10 +6,12 @@ It runs after x64 UEFI exit in the project's own CPL0 32-bit protected-mode
 kernel. No USB device is attached; successful controller commands do not
 establish keyboard, storage, USB transfer or Windows 98 driver support.
 
-The [2026-09-27 validation](VALIDATION.json) passed under actual KVM in 2.284
-seconds. The EFI image is 35,840 bytes, SHA-256
-`fdcbe313cd1270584582f98033681d4fbd8b20429af487408bcf4132a7b555f5`.
-The 17,686-byte payload has no runtime imports. The existing NTWrapper9x core
+The [2026-09-27 validation](VALIDATION.json) passed under actual KVM in 1.310
+seconds. The EFI image is 36,864 bytes, SHA-256
+`8dc6bca6ee5323d7c349378ac35fb2c086edd3b5a3d66909f1413c8c40c8d5d8`.
+The 18,966-byte payload has no runtime imports. This regression uses the shared base after the USB EP0 additions. The original
+35,840-byte image and its earlier evidence remain in the frozen xHCI and
+device-foundation archives. The existing NTWrapper9x core
 and NTWDDMWrapper9x software-presentation tests also pass in the same guest.
 
 ## Device and memory contracts
