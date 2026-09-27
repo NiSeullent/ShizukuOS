@@ -16,6 +16,7 @@ import subprocess
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 BUILD = HERE / 'build' / 'native_runner'
+DIAGNOSTIC_BUILD = HERE / 'build' / 'diagnostic_runner'
 SOURCES = ('platform/win98lab/native_runner.c', 'platform/win98lab/build_native.py',
            'ntwin32/prepare.py')
 ALLOWED = set('CloseHandle CreateFileA CreateProcessA ExitProcess FlushFileBuffers '
@@ -27,14 +28,19 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def build(output_dir=BUILD):
+def build(output_dir=None, diagnostic=False):
+    if output_dir is None:
+        output_dir = DIAGNOSTIC_BUILD if diagnostic else BUILD
     output_dir = Path(output_dir).resolve()
+    if diagnostic and output_dir == BUILD.resolve():
+        raise RuntimeError('Diagnostic variant must not replace the original runner receipt')
     output_dir.mkdir(parents=True, exist_ok=True)
     receipt = output_dir / 'build-result.json'
     receipt.unlink(missing_ok=True)
-    before = {name: sha(ROOT / name) for name in SOURCES}
-    artifact = output_dir / 'NTWRUN.EXE'
-    temporary = output_dir / 'NTWRUN.EXE.tmp'
+    source_names = SOURCES + (('platform/win98lab/run_diagnostic.bat',) if diagnostic else ())
+    before = {name: sha(ROOT / name) for name in source_names}
+    artifact = output_dir / ('NTWDRUN.EXE' if diagnostic else 'NTWRUN.EXE')
+    temporary = artifact.with_name(artifact.name + '.tmp')
     command = ['i686-w64-mingw32-gcc', '-std=c11', '-Os', '-Wall', '-Wextra', '-Werror',
                '-march=i486', '-mno-sse', '-mno-sse2', '-mno-mmx', '-msoft-float',
                '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-mno-stack-arg-probe',
@@ -42,7 +48,8 @@ def build(output_dir=BUILD):
                '-Wl,--subsystem,console:4.10', '-Wl,--major-os-version,4',
                '-Wl,--minor-os-version,10', '-Wl,--disable-dynamicbase',
                '-Wl,--disable-nxcompat', '-Wl,--disable-tsaware', '-Wl,--no-insert-timestamp',
-               '-Wl,--entry,_mainCRTStartup', '-Wl,--strip-all', str(HERE / 'native_runner.c'),
+               '-Wl,--entry,_mainCRTStartup', '-Wl,--strip-all',
+               *(['-DNTWRUN_DIAGNOSTIC'] if diagnostic else []), str(HERE / 'native_runner.c'),
                '-lkernel32', '-o', str(temporary)]
     result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
     spec = importlib.util.spec_from_file_location('ntw_runner_pe', ROOT / 'ntwin32/prepare.py')
@@ -73,7 +80,7 @@ def build(output_dir=BUILD):
     temporary.replace(artifact)
     log = output_dir / 'build.log'
     log.write_text(' '.join(command) + '\n' + result.stdout + result.stderr)
-    record = {'schema': 'ntw.native_runner.build.v1', 'passed': True,
+    record = {'schema': 'ntw.diagnostic_runner.build.v1' if diagnostic else 'ntw.native_runner.build.v1', 'passed': True,
               'artifact': artifact.name, 'sha256': sha(artifact), 'bytes': artifact.stat().st_size,
               'machine': 'i386', 'cpu_flags': 'i486, no SSE/MMX, soft-float',
               'subsystem': 'console 4.10', 'imports': imports, 'sources_sha256': before,
@@ -81,12 +88,19 @@ def build(output_dir=BUILD):
               'native_win98': 'not_tested', 'guest_executed': False,
               'compiler': subprocess.check_output([command[0], '--version'], text=True,
                                                   timeout=10).splitlines()[0]}
+    if diagnostic:
+        record.update(compile_definition='NTWRUN_DIAGNOSTIC', runner_log='NTWDRUN.LOG',
+                      probes=['NTWPROBE.EXE', 'NTWGPROB.EXE', 'NTWVDIAG.EXE'],
+                      probe_logs=['NTWPROBE.LOG', 'NTWGPROB.LOG', 'NTWVDIAG.LOG'],
+                      wait_ms=120000, stop_wait_ms=5000,
+                      batch_source='platform/win98lab/run_diagnostic.bat')
     receipt.write_text(json.dumps(record, indent=2) + '\n')
     return record
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=BUILD)
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--diagnostic', action='store_true', help='Build separate NTWDRUN.EXE, with VxD diagnostic last')
     arguments = parser.parse_args()
-    print(json.dumps(build(arguments.output), indent=2))
+    print(json.dumps(build(arguments.output, diagnostic=arguments.diagnostic), indent=2))

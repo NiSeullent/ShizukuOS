@@ -3,14 +3,18 @@
 """Original deterministic WinAPI fault model; no native Windows execution.
 
 Runs generated host fixtures with strict GCC/Clang and Clang ASan/UBSan,
-then builds/audits the PE32 runner. Writes build/native_runner/ only.
+then builds/audits the PE32 runner. Writes build/native_runner/ by default;
+--diagnostic writes only build/diagnostic_runner/ and preserves old receipts.
 The mock verifies supervisor policy, not actual Win98 API implementation.
 """
+import argparse
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
+import unittest
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -68,6 +72,23 @@ MODEL = r'''
 #include <setjmp.h>
 #include "native_runner_mock.h"
 void mainCRTStartup(void);
+#ifdef NTWRUN_DIAGNOSTIC
+#define MODEL_SELF "C:\\NTWLAB\\NTWDRUN.EXE"
+#define MODEL_LOWER "c:\\ntwlab\\ntwdrun.exe"
+#define MODEL_WRONG "C:\\OTHER\\NTWDRUN.EXE"
+#define MODEL_LOG "C:\\NTWLAB\\NTWDRUN.LOG"
+#define MODEL_APPS {"C:\\NTWLAB\\NTWPROBE.EXE","C:\\NTWLAB\\NTWGPROB.EXE","C:\\NTWLAB\\NTWVDIAG.EXE"}
+#define MODEL_LOGS {"C:\\NTWLAB\\NTWPROBE.LOG","C:\\NTWLAB\\NTWGPROB.LOG","C:\\NTWLAB\\NTWVDIAG.LOG"}
+#define MODEL_LAST_END "END=NTWVDIAG.EXE\r\n"
+#else
+#define MODEL_SELF "C:\\NTWLAB\\NTWRUN.EXE"
+#define MODEL_LOWER "c:\\ntwlab\\ntwrun.exe"
+#define MODEL_WRONG "C:\\OTHER\\NTWRUN.EXE"
+#define MODEL_LOG "C:\\NTWLAB\\NTWRUN.LOG"
+#define MODEL_APPS {"C:\\NTWLAB\\NTWPROBE.EXE","C:\\NTWLAB\\NTWQUERY.EXE","C:\\NTWLAB\\NTWGPROB.EXE"}
+#define MODEL_LOGS {"C:\\NTWLAB\\NTWPROBE.LOG","C:\\NTWLAB\\NTWQUERY.LOG","C:\\NTWLAB\\NTWGPROB.LOG"}
+#define MODEL_LAST_END "END=NTWGPROB.EXE\r\n"
+#endif
 static unsigned long assertions, scenarios, fault_scenarios;
 #define CHECK(x) do { ++assertions; if (!(x)) { fprintf(stderr,"check %u: %s (scenario %lu, call %u, fault %u)\n",__LINE__,#x,scenarios,m.calls,m.fault); exit(1); } } while (0)
 enum { LOCATION_OK, LOCATION_LOWER, LOCATION_WRONG, LOCATION_TRUNCATED, LOCATION_NONUL };
@@ -94,15 +115,15 @@ static void reset(void) {
 static int has(const char *text) { return strstr(m.log,text)!=NULL; }
 DWORD GetLastError(void) { return m.last_error; }
 DWORD GetModuleFileNameA(void *module,char *path,DWORD size) {
-    const char *value=m.location==LOCATION_LOWER ? "c:\\ntwlab\\ntwrun.exe" :
-        m.location==LOCATION_WRONG ? "C:\\OTHER\\NTWRUN.EXE" : "C:\\NTWLAB\\NTWRUN.EXE";
+    const char *value=m.location==LOCATION_LOWER ? MODEL_LOWER :
+        m.location==LOCATION_WRONG ? MODEL_WRONG : MODEL_SELF;
     size_t n=strlen(value); CHECK(module==NULL && size==260);
     if(call())return 0;
     if(m.location==LOCATION_TRUNCATED){memset(path,'X',size);return size;}
     memcpy(path,value,n+1); if(m.location==LOCATION_NONUL)path[n]='X'; return (DWORD)n;
 }
 HANDLE CreateFileA(const char *path,DWORD access,DWORD share,void *sa,DWORD mode,DWORD flags,void *temp) {
-    CHECK(!strcmp(path,"C:\\NTWLAB\\NTWRUN.LOG"));
+    CHECK(!strcmp(path,MODEL_LOG));
     CHECK(access==GENERIC_WRITE && share==FILE_SHARE_READ && !sa && mode==CREATE_NEW && flags==FILE_ATTRIBUTE_NORMAL && !temp);
     if(call())return INVALID_HANDLE_VALUE;
     if(m.own_log_exists){m.last_error=80;return INVALID_HANDLE_VALUE;}
@@ -128,7 +149,7 @@ BOOL GetVersionExA(OSVERSIONINFOA *v) {
     v->dwPlatformId=m.os_platform;v->dwMajorVersion=m.os_major;v->dwMinorVersion=m.os_minor;v->dwBuildNumber=m.os_build;return TRUE;
 }
 DWORD GetFileAttributesA(const char *path) {
-    static const char *const expected[]={"C:\\NTWLAB\\NTWPROBE.LOG","C:\\NTWLAB\\NTWQUERY.LOG","C:\\NTWLAB\\NTWGPROB.LOG"};
+    static const char *const expected[]=MODEL_LOGS;
     CHECK(!m.created && m.preflights<3 && !strcmp(path,expected[m.preflights]));++m.preflights;
     if(call())return INVALID_FILE_ATTRIBUTES;
     if(m.existing_log==m.preflights)return FILE_ATTRIBUTE_NORMAL;
@@ -136,7 +157,7 @@ DWORD GetFileAttributesA(const char *path) {
 }
 BOOL CreateProcessA(const char *app,char *command,void *pa,void *ta,BOOL inherit,DWORD flags,void *env,
                     const char *cwd,STARTUPINFOA *startup,PROCESS_INFORMATION *p) {
-    static const char *const expected[]={"C:\\NTWLAB\\NTWPROBE.EXE","C:\\NTWLAB\\NTWQUERY.EXE","C:\\NTWLAB\\NTWGPROB.EXE"};
+    static const char *const expected[]=MODEL_APPS;
     char quoted[80];unsigned i;
     CHECK(m.created<3 && m.preflights==3 && !strcmp(app,expected[m.created]));
     CHECK(!strcmp(cwd,"C:\\NTWLAB") && !pa && !ta && !inherit && !flags && !env);
@@ -178,7 +199,7 @@ static void run(void) {
     CHECK(m.close_calls[1]<=1);
     if(m.final_exit==0){CHECK(m.created==3 && !m.stops && m.getexits==3);CHECK(has("RESULT=PASS\r\n"));
         CHECK(has("WIN98_IDENTIFIED=1\r\n") && has("OS_BUILD_LOW=2222\r\n"));
-        CHECK(has("END=NTWGPROB.EXE\r\n"));for(i=0;i<32;++i)CHECK(m.live[i]==0);}
+        CHECK(has(MODEL_LAST_END));for(i=0;i<32;++i)CHECK(m.live[i]==0);}
 }
 int main(void) {
     unsigned i, baseline_calls, baseline_writes, timeout_calls, timeout_writes;
@@ -233,11 +254,15 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def main():
+def run_suite(output, diagnostic=False, publish=True):
+    BUILD = Path(output)
     BUILD.mkdir(parents=True, exist_ok=True)
-    receipt = BUILD / 'host-tests.json'
+    receipt = BUILD / ('test-result.json' if diagnostic else 'host-tests.json')
     receipt.unlink(missing_ok=True)
-    before = {name: sha(ROOT / name) for name in SOURCES}
+    source_names = SOURCES + (('platform/win98lab/run_diagnostic.bat',
+                              'platform/win98lab/test_diagnostic_batch.py',
+                              'platform/win98lab/DIAGNOSTIC_RUNNER.md') if diagnostic else ())
+    before = {name: sha(ROOT / name) for name in source_names}
     (BUILD / 'native_runner_mock.h').write_text(HEADER)
     model = BUILD / 'native_runner_model.c'
     model.write_text(MODEL)
@@ -249,6 +274,7 @@ def main():
         executable = BUILD / ('host-' + name)
         command = [compiler, '-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
                    '-Wpedantic', '-Wconversion', '-Wshadow', *flags, '-DNTWRUN_TEST',
+                   *(['-DNTWRUN_DIAGNOSTIC'] if diagnostic else []),
                    '-I', str(BUILD), str(HERE / 'native_runner.c'), str(model), '-o', str(executable)]
         compiled = subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
         tested = subprocess.run([str(executable)], check=True, capture_output=True, text=True, timeout=30)
@@ -267,20 +293,72 @@ def main():
     spec = importlib.util.spec_from_file_location('ntw_build_native', HERE / 'build_native.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    built = module.build(BUILD)
+    built = module.build(BUILD, diagnostic=diagnostic)
     if any(sha(ROOT / name) != digest for name, digest in before.items()):
         raise RuntimeError('Test/build sources changed during run')
-    record = {'schema': 'ntw.native_runner.host.v1', 'passed': True, 'sources_sha256': before,
+    record = {'schema': 'ntw.diagnostic_runner.host.v1' if diagnostic else 'ntw.native_runner.host.v1',
+              'passed': True, 'sources_sha256': before,
               'artifact_sha256': built['sha256'], 'build_receipt_sha256': sha(BUILD / 'build-result.json'),
               'variants': variants, 'native_win98': 'not_tested', 'guest_executed': False,
               'mock_scope': 'original WinAPI supervisor policy, not native OS behavior'}
-    receipt.write_text(json.dumps(record, indent=2) + '\n')
+    if publish:
+        receipt.write_text(json.dumps(record, indent=2) + '\n')
     print('PE/import audit PASS', built['sha256'])
+    return record
+
+
+def main(diagnostic=False):
+    if not diagnostic:
+        return run_suite(BUILD)
+    output = HERE / 'build' / 'diagnostic_runner'
+    preserved = {path: sha(path) for path in (BUILD / 'NTWRUN.EXE', BUILD / 'build-result.json',
+                                             BUILD / 'host-tests.json') if path.exists()}
+    before = {name: sha(ROOT / name) for name in SOURCES + (
+        'platform/win98lab/run_diagnostic.bat', 'platform/win98lab/test_diagnostic_batch.py',
+        'platform/win98lab/DIAGNOSTIC_RUNNER.md')}
+    output.mkdir(parents=True, exist_ok=True)
+    (output / 'test-result.json').unlink(missing_ok=True)
+    regression = run_suite(output / 'default-regression')
+    comparison = {'performed': False, 'reason': 'No same-compiler historical runner artifact available'}
+    old_receipt = BUILD / 'build-result.json'
+    original = BUILD / 'NTWRUN.EXE'
+    if original in preserved and old_receipt in preserved:
+        old = json.loads(old_receipt.read_text())
+        rebuilt = json.loads((output / 'default-regression/build-result.json').read_text())
+        if old['compiler'] == rebuilt['compiler']:
+            if old['sha256'] != preserved[original] or regression['artifact_sha256'] != preserved[original]:
+                raise RuntimeError('Default runner binary changed under the same compiler')
+            comparison = {'performed': True, 'byte_identical': True, 'sha256': preserved[original]}
+    spec = importlib.util.spec_from_file_location('ntw_diagnostic_batch', HERE / 'test_diagnostic_batch.py')
+    batch = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(batch)
+    log = io.StringIO()
+    tested = unittest.TextTestRunner(stream=log, verbosity=2).run(unittest.defaultTestLoader.loadTestsFromModule(batch))
+    (output / 'batch-tests.log').write_text(log.getvalue())
+    if not tested.wasSuccessful() or not tested.testsRun:
+        raise RuntimeError('Diagnostic batch host tests failed: ' + log.getvalue())
+    outcomes = batch.validate_batch((HERE / 'run_diagnostic.bat').read_text())
+    record = run_suite(output, diagnostic=True, publish=False)
+    if any(sha(path) != digest for path, digest in preserved.items()):
+        raise RuntimeError('Original runner artifacts/receipts were changed')
+    if any(sha(ROOT / name) != digest for name, digest in before.items()):
+        raise RuntimeError('Diagnostic regression sources changed')
+    record.update(default_regression=regression, default_binary_comparison=comparison,
+                  preserved_inputs_sha256={str(path.relative_to(ROOT)): digest for path, digest in preserved.items()},
+                  batch_tests={'passed': True, 'tests': tested.testsRun, 'exit_codes': outcomes['tested_exit_codes'],
+                               'log_sha256': sha(output / 'batch-tests.log')},
+                  scope='Host API model only; children are explicit mocks, no VxD fixture or guest execution')
+    (output / 'test-result.json').write_text(json.dumps(record, indent=2) + '\n')
+    print('Diagnostic/default regression and batch PASS', json.dumps(comparison))
+    return record
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--diagnostic', action='store_true', help='Test separate NTWDRUN plus unchanged default and batch')
+    args = parser.parse_args()
     try:
-        main()
+        main(diagnostic=args.diagnostic)
     except subprocess.CalledProcessError as failure:
         print(failure.stdout or '', end='')
         print(failure.stderr or '', end='')

@@ -29,10 +29,17 @@
 #define STOP_WAIT_MS 5000u
 #define STOP_EXIT_CODE 0x4e545701u
 static const char directory[] = "C:\\NTWLAB";
+#ifdef NTWRUN_DIAGNOSTIC
+static const char self_path[] = "C:\\NTWLAB\\NTWDRUN.EXE";
+static const char runner_log[] = "C:\\NTWLAB\\NTWDRUN.LOG";
+static const char *const probes[] = { "NTWPROBE.EXE", "NTWGPROB.EXE", "NTWVDIAG.EXE" };
+static const char *const logs[] = { "NTWPROBE.LOG", "NTWGPROB.LOG", "NTWVDIAG.LOG" };
+#else
 static const char self_path[] = "C:\\NTWLAB\\NTWRUN.EXE";
 static const char runner_log[] = "C:\\NTWLAB\\NTWRUN.LOG";
 static const char *const probes[] = { "NTWPROBE.EXE", "NTWQUERY.EXE", "NTWGPROB.EXE" };
 static const char *const logs[] = { "NTWPROBE.LOG", "NTWQUERY.LOG", "NTWGPROB.LOG" };
+#endif
 
 typedef struct runner { HANDLE log; int io_failed; } runner;
 

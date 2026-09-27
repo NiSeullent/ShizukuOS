@@ -139,6 +139,7 @@ jobs:
         # Fake WinAPI fault models and PE import audit only; no Windows execution.
         run: |
           python3 platform/win98lab/test_native_runner.py
+          python3 platform/win98lab/test_native_runner.py --diagnostic
           python3 platform/win98lab/test_native_logs.py
 
       - name: Test xHCI command rings and build the PCI-E integration
