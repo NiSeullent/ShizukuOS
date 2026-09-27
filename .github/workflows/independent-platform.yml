@@ -120,6 +120,12 @@ jobs:
         # Host models and freestanding objects only; no Windows media or guest.
         run: python3 drivers/fat_native/test.py
 
+      - name: Build FAT32-AHCI firmware integration and test its evidence contracts
+        # Synthetic files and host callback models; test_qemu.py is not run.
+        run: |
+          python3 shizukudos/uefi_fat/build.py
+          python3 shizukudos/uefi_fat/test.py
+
       - name: Test installation-lab storage guards without starting a guest
         timeout-minutes: 3
         run: |

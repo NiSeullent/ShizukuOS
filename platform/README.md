@@ -12,7 +12,7 @@ capability is the long-term target, not the current compatibility claim.
 | [NTWDDMWrapper9x](../ntwddm/) | Original software core and a built, host-tested [native GDI probe](../ntwddm/win98/) | Native Win98 GDI execution, display-driver binding, GPU memory/scheduling, vendor miniports and D3D |
 | [PCI-E](../drivers/pcie/) | Config transport, topology, ECAM/capabilities/resources/DMA constraints | CONFIGMG/VMM binding, interrupts, real storage/USB/GPU drivers |
 | [AHCI storage](../drivers/ahci_native/) | Original read-only core; post-UEFI 32-bit DMA reads against the disposable QEMU ICH9 fixture | Windows 98 driver binding, physical controllers, reset/recovery, interrupts and wider I/O |
-| [FAT32 boot files](../drivers/fat_native/) | Original bounded root short-name reader; fragmented chains, transactional output and fault injection on synthetic sectors | Post-UEFI AHCI binding, then a separate DOS boot-file loader/runtime |
+| [FAT32 boot files](../drivers/fat_native/) | Original bounded root short-name reader, plus a built and host-tested [post-UEFI AHCI integration](../shizukudos/uefi_fat/) | Actual isolated firmware execution, then a separate DOS boot-file loader/runtime |
 | [xHCI command rings](../drivers/xhci_native/) | Original core; 130 post-UEFI command completions through a QEMU PCI-E bridge, with independent DMA and BAR checks | Wider USB endpoint operations, Windows 98 binding, interrupts and physical controllers |
 | [USB EP0](../drivers/xhci_usb/) | Original device and bounded configuration transfers, independent parsing and verified DMA shutdown in a real QEMU USB2 guest | Device configuration, class I/O and native Win98 binding |
 | [USB descriptors](../drivers/usb_native/) | Original bounded USB2 device/configuration parser, checked against actual EP0 responses | Device selection/configuration, class drivers and native binding |
@@ -46,6 +46,8 @@ python3 shizukudos/uefi32/test.py
 python3 shizukudos/uefi32/test_qemu.py --qemu /usr/libexec/qemu-kvm --firmware-code /usr/share/edk2/ovmf/OVMF_CODE.fd --firmware-vars /usr/share/edk2/ovmf/OVMF_VARS.fd
 python3 drivers/ahci_native/test.py
 python3 drivers/fat_native/test.py
+python3 shizukudos/uefi_fat/build.py
+python3 shizukudos/uefi_fat/test.py
 python3 shizukudos/uefi_ahci/build.py
 python3 shizukudos/uefi_ahci/test.py
 python3 shizukudos/uefi_ahci/test_qemu.py
