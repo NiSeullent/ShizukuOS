@@ -1,3 +1,12 @@
+<#
+.SYNOPSIS
+Packages historical Windows 98 Shizuku's Second Edition KernelEx previews.
+.DESCRIPTION
+This script preserves the legacy KernelEx package layout and win98-modern ZIP
+basename for reproducing historical releases. Current independent platform
+releases use platform/package.py; see platform/README.md for the required build
+and validation steps. This script does not package the independent platform.
+#>
 param(
   [Parameter(Mandatory = $true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')][string]$Version
 )

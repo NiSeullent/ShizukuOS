@@ -1,4 +1,8 @@
-# Windows 98 SE용 설치 안내
+# Windows 98 Shizuku's Second Edition — 과거 KernelEx 설치 안내
+
+이 문서는 보존된 0.1.x KernelEx 미리보기의 설치·복구 절차입니다.
+새 독립 계층의 빌드와 시험은 [독립 플랫폼 안내](../platform/README.md)를
+따릅니다. 아래 DLL과 설정 절차는 새 독립 계층의 설치 방법이 아닙니다.
 
 이 ZIP에는 실험용 KernelEx API 라이브러리 `m98wrap.dll`, `M98USER.DLL`, `M98GDI.DLL`, `m98shell.dll`, `m98adv.dll`, KernelEx용 결합 테마 후보 `UXTHEME.DLL`, 안전 범위를 제한한 전환 도구 `KSWITCH.EXE`, 앱 로컬용 `dbghelp.dll`, `dwmapi.dll`, `bcrypt.dll`이 들어 있습니다. **0.1.8-preview ZIP부터** `M98CTLP.DLL`도 들어 있습니다. 0.1.7-preview를 내려받았다면 아래 COMCTL32 절차를 건너뜁니다.
 Windows 98 SE용 KernelEx API 확장 시험을 위한 파일이며 최신 프로그램의 실행을

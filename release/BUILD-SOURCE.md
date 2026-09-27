@@ -1,4 +1,9 @@
-# DLL source and build instructions
+# Windows 98 Shizuku's Second Edition — historical KernelEx builds
+
+This document preserves the source and build instructions for the historical
+0.1.x KernelEx previews. For the current independent components, follow the
+[independent platform guide](../platform/README.md). The build and packaging
+steps below belong to the preserved KernelEx path.
 
 This patch ZIP includes corresponding C source, export definitions, build
 scripts, PE validation scripts, and license notices for `m98wrap.dll`,
