@@ -160,7 +160,7 @@ class Integration(unittest.TestCase):
         state = json.loads(lab.STATE.read_text())
         self.assertEqual(state['ram_working_copy']['status'], 'persisted')
         self.assertEqual(set(state['harness_sources_sha256']),
-                         {'lab.py', 'packed.py', 'storage.py', 'base_archive.py'})
+                         {'lab.py', 'packed.py', 'storage.py', 'base_archive.py', 'trial.py'})
         self.assertIn('private installation evidence', state['product_key'])
         self.assertEqual(p.current(self.original)['raw_sha256'], fixtures.sha(self.latest))
 
@@ -287,7 +287,7 @@ class Integration(unittest.TestCase):
 
     def test_harness_sources_include_actual_base_module_bytes(self):
         bundle = self.root/'source-bundle'; bundle.mkdir()
-        for name in ('lab.py', 'packed.py', 'storage.py', 'base_archive.py'):
+        for name in ('lab.py', 'packed.py', 'storage.py', 'base_archive.py', 'trial.py'):
             (bundle/name).write_bytes(('synthetic '+name).encode())
         with patch.object(lab, '__file__', str(bundle/'lab.py')):
             captured = lab.harness_sources()

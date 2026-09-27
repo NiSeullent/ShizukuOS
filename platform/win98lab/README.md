@@ -291,3 +291,53 @@ On a disposable installed Windows 98 snapshot without KernelEx, copy the four
 binaries to `C:\NTWLAB`, run both probes there, and collect their exit codes
 and `NTWPROBE.LOG` / `NTWQUERY.LOG`. Building this CD is preparation only;
 successful native execution requires those separate guest results.
+## Disposable native QA trials
+
+For repeated diagnostics, `run --ephemeral-qa` restores a reviewed packed
+checkpoint into private RAM. It never encodes a new installation archive or
+changes the current checkpoint pointer. Normal packed/raw installation runs keep
+their existing writeback behavior and resource checks.
+
+```sh
+python3 platform/win98lab/lab.py run --resume --max-seconds 600 \
+  --ephemeral-qa --baseline-pointer-sha256 REVIEWED_CURRENT_POINTER_SHA256
+```
+
+The hash identifies the exact `install-packed-current.json` bytes, not only the
+archive. Inspect that pointer and its checkpoint before selecting it. The QA
+mode retains the normal 6GiB memory and 20GiB disk reserves, full RAM working-copy
+allowance, codec allowance and 128MiB disk margin. It omits the additional full
+compressed-copyback allocation because no copyback occurs.
+
+When the bounded guest stops, its RAM disk remains `stopped_awaiting_evidence`.
+Collect and review logs, actual process exit codes, tested artifact/media hashes,
+supervisor/source receipts and any relevant screenshots. Create a JSON object
+mapping simple evidence filenames to absolute regular-file paths; at most 32
+files and 16MiB total may be sealed. These commands do not interpret a probe's
+success: a failed diagnostic must retain its failure evidence.
+
+```sh
+python3 platform/win98lab/lab.py qa-seal-evidence \
+  --journal /ABSOLUTE/LAB/qa-trial-TOKEN.json --inputs /ABSOLUTE/evidence-inputs.json
+python3 platform/win98lab/lab.py qa-discard \
+  --journal /ABSOLUTE/LAB/qa-trial-TOKEN.json \
+  --evidence-sha256 REVIEWED_SEALED_MANIFEST_SHA256
+```
+
+Discard requires the explicitly reviewed evidence hash, an unchanged baseline,
+unchanged stopped RAM contents/identity, the common lab lock, and proof that no
+owned guest or recorded PID remains. It removes only the owned disposable RAM
+image and its empty private directory. The sealed evidence, journal, baseline
+archive and current pointer remain. A crash during discard can be retried with
+the same verified evidence hash. Unknown files and replacement directories are
+retained.
+
+Pending QA journals block all new installation/QA boots, persistent-copy recovery
+and base archival, including when the main state receipt is missing. After a
+supervisor crash, `qa-record-stopped --journal ...` can record a complete stopped
+image before evidence collection. Partial initial restoration, missing RAM after
+a host reboot, or uncertain ownership requires explicit inspection and recovery;
+it is never silently declared successful or discarded.
+
+The `trial.py` backend and `test_lab_trial.py` routing tests use synthetic files
+and fake processes. Their host passes do not constitute a Windows guest pass.
