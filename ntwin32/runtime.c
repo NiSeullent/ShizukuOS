@@ -3,11 +3,14 @@
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0601
 #include <windows.h>
+#include <limits.h>
 #include "sync.h"
 #include "resolve.h"
 #include "initonce.h"
+#include "unicode/utf.h"
 typedef char pointer_width_must_be_32[(sizeof(void *) == 4) ? 1 : -1];
 typedef char once_matches_win32[(sizeof(ntw_once) == sizeof(INIT_ONCE)) ? 1 : -1];
+typedef char wchar_matches_utf16[(sizeof(WCHAR) == sizeof(uint16_t)) ? 1 : -1];
 static ntw_srw tick_lock;
 static struct ntw_tick_clock tick_clock;
 static HMODULE native_kernel32;
@@ -55,6 +58,81 @@ BOOL WINAPI NtwInitOnceExecuteOnce(PINIT_ONCE once, PINIT_ONCE_FN callback,
     struct once_callback_args args = { callback, parameter };
     return once_result(ntw_once_execute((ntw_once *)once,
         callback ? once_callback : NULL, &args, context, yield_thread));
+}
+
+static int utf_error(DWORD error) { SetLastError(error); return 0; }
+static int utf_result(int status, size_t required) {
+    if (status == NTWU_OK || status == NTWU_INSUFFICIENT) {
+        /* Never truncate a size_t count into the signed Win32 result. */
+        if (required > INT_MAX) return utf_error(ERROR_INVALID_PARAMETER);
+        if (status == NTWU_OK) return (int)required;
+    }
+    if (status == NTWU_INSUFFICIENT) return utf_error(ERROR_INSUFFICIENT_BUFFER);
+    if (status == NTWU_MALFORMED) return utf_error(ERROR_NO_UNICODE_TRANSLATION);
+    if (status == NTWU_INVALID_FLAGS) return utf_error(ERROR_INVALID_FLAGS);
+    return utf_error(ERROR_INVALID_PARAMETER);
+}
+
+/* The caller supplies accessible, stable source storage. Like Win32, these
+ * scans cannot validate mappings or recover from an invalid pointer. The
+ * only bound is representable address extent, not an arbitrary string cap. */
+static int utf8_length(LPCCH source, int supplied, size_t *length) {
+    size_t count = 0, limit;
+    if (!source || supplied == 0 || supplied < -1) return 0;
+    if (supplied > 0) { *length = (size_t)supplied; return 1; }
+    limit = UINTPTR_MAX - (uintptr_t)source;
+    while (count < limit) {
+        if (source[count++] == 0) { *length = count; return 1; }
+    }
+    return 0;
+}
+static int utf16_length(LPCWCH source, int supplied, size_t *length) {
+    size_t count = 0, limit;
+    if (!source || (uintptr_t)source % sizeof(*source) != 0 ||
+        supplied == 0 || supplied < -1) return 0;
+    if (supplied > 0) { *length = (size_t)supplied; return 1; }
+    limit = (UINTPTR_MAX - (uintptr_t)source) / sizeof(*source);
+    while (count < limit) {
+        if (source[count++] == 0) { *length = count; return 1; }
+    }
+    return 0;
+}
+int WINAPI NtwMultiByteToWideChar(UINT page, DWORD flags, LPCCH source,
+                                int source_bytes, LPWSTR destination, int capacity) {
+    size_t length, required = 0;
+    int status;
+    if (page != CP_UTF8)
+        return MultiByteToWideChar(page, flags, source, source_bytes, destination, capacity);
+    if (flags & ~((DWORD)MB_ERR_INVALID_CHARS)) return utf_error(ERROR_INVALID_FLAGS);
+    if (capacity < 0 || (const void *)source == (const void *)destination ||
+        !source || source_bytes == 0 || source_bytes < -1)
+        return utf_error(ERROR_INVALID_PARAMETER);
+    if (capacity > 0 && !destination) return utf_error(ERROR_INSUFFICIENT_BUFFER);
+    if (!utf8_length(source, source_bytes, &length)) return utf_error(ERROR_INVALID_PARAMETER);
+    status = ntwu_utf8_to_utf16((const uint8_t *)source, length,
+        (uint16_t *)destination, (size_t)capacity,
+        flags ? NTWU_STRICT : 0, &required);
+    return utf_result(status, required);
+}
+int WINAPI NtwWideCharToMultiByte(UINT page, DWORD flags, LPCWCH source,
+                                int source_units, LPSTR destination, int capacity,
+                                LPCCH default_char, LPBOOL used_default) {
+    size_t length, required = 0;
+    int status;
+    if (page != CP_UTF8)
+        return WideCharToMultiByte(page, flags, source, source_units,
+                                  destination, capacity, default_char, used_default);
+    if (flags & ~((DWORD)WC_ERR_INVALID_CHARS)) return utf_error(ERROR_INVALID_FLAGS);
+    if (default_char || used_default || capacity < 0 ||
+        (const void *)source == (const void *)destination ||
+        !source || source_units == 0 || source_units < -1)
+        return utf_error(ERROR_INVALID_PARAMETER);
+    if (capacity > 0 && !destination) return utf_error(ERROR_INSUFFICIENT_BUFFER);
+    if (!utf16_length(source, source_units, &length)) return utf_error(ERROR_INVALID_PARAMETER);
+    status = ntwu_utf16_to_utf8((const uint16_t *)source, length,
+        (uint8_t *)destination, (size_t)capacity,
+        flags ? NTWU_STRICT : 0, &required);
+    return utf_result(status, required);
 }
 FARPROC WINAPI NtwGetProcAddress(HMODULE module, LPCSTR name);
 static ntw_proc lookup_owned(void *context, const char *name) {

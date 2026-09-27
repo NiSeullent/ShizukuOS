@@ -28,6 +28,7 @@ def main():
                'ntwin32/sync.c', 'ntwin32/sync.h', 'ntwin32/resolve.c',
                'ntwin32/resolve.h', 'ntwin32/exports.def',
                'ntwin32/initonce.c', 'ntwin32/initonce.h', 'ntwin32/version.rc',
+               'ntwin32/unicode/utf.c', 'ntwin32/unicode/utf.h',
                'ntwin32/routes.json', 'ntwin32/prepare.py', 'platform/tests/probe.c',
                'platform/build.py']
     def source_hashes():
@@ -51,7 +52,8 @@ def main():
         '-Wl,--image-base,0x68000000',
         '-Wl,--subsystem,windows:4.10', '-o', BUILD / 'NTW32.DLL',
         '-I', BUILD, 'ntwin32/runtime.c', 'ntwin32/sync.c', 'ntwin32/resolve.c',
-        'ntwin32/initonce.c', 'ntwin32/exports.def', BUILD/'version.o', '-lkernel32')
+        'ntwin32/initonce.c', 'ntwin32/unicode/utf.c', 'ntwin32/exports.def',
+        BUILD/'version.o', '-lkernel32')
     run(cc, *flags, *link, '-Wl,--entry,_mainCRTStartup', '-o', BUILD / 'probe-original.exe',
         'platform/tests/probe.c', '-lkernel32')
     prepared, report = load_prepare().prepare((BUILD / 'probe-original.exe').read_bytes())

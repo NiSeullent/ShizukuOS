@@ -2,7 +2,7 @@
 
 This harness executes the project's **built `NTW32.DLL` machine code** on the
 host CPU in 32-bit mode. The DLL is embedded in a static Linux ELF32 process;
-five original, explicitly limited service mocks replace its KERNEL32 imports.
+seven original, explicitly limited service mocks replace its KERNEL32 imports.
 This is compiled CPU/ABI evidence. It is **not a Windows 98 guest test**, a
 Windows loader, an application compatibility layer, or a replacement kernel.
 
@@ -38,12 +38,21 @@ Each variant checks:
 - All four InitOnce exports, failed callback retry, actual WINAPI callback
   invocation, context passing, invalid alignment/flags, CHECK_ONLY, async
   winner preservation, and LastError adapter behavior.
+- Both UTF conversion exports with real six/eight-argument stdcall calls:
+  embedded NUL, inclusive `-1` scanning, queries, Korean/non-BMP characters,
+  strict errors and replacement, unchanged output on failure, malformed
+  arguments, flags, overlap/alignment/wrapping ranges, and long strings.
+- Native conversion delegation for ACP, OEM, 1252, UTF-7, and an unknown code
+  page, checking every forwarded argument and both success/failure returns.
 - The imported Sleep stdcall path, using a deterministic mock that completes
   a pending attempt when the DLL yields. This is not an OS scheduler or a
   concurrency test; the separate InitOnce pthread suite tests real contention.
 
 The mocks cover only `GetModuleHandleA`, `GetProcAddress`, `GetTickCount`,
-`SetLastError`, and `Sleep`. Their counters and return values are test fixtures,
+`SetLastError`, `Sleep`, `MultiByteToWideChar`, and `WideCharToMultiByte`.
+The two conversion mocks only record arguments and return configured values;
+all `CP_UTF8` bytes are processed by the actual independent DLL code. Mock
+counters and return values are test fixtures,
 not implementations of those Windows services. Unrecognized imports, forwarder
 exports, TLS, CLR, delay imports, load configuration, and relocation types are
 rejected. The harness does not execute an arbitrary third-party DLL.
@@ -66,11 +75,11 @@ nothing. Unsupported ELF32 execution is a failed/unavailable check, not a pass.
 The input DLL is never modified. All binaries, mapped images, generated headers,
 linker scripts, and reports remain under ignored `platform/abi32/build/`.
 
-The original 2026-09-27 run used DLL SHA-256
-`bb48a8380bb46ae410b0f7a6734c1d35c145fbc73dcfa8510828d4615c1735bd`.
-Both preferred and relocated variants passed **136 checks and 60 actual PE
+The 2026-09-27 UTF integration run used DLL SHA-256
+`2720dcffac234202598de8498cfbf804d9d3cbfb1c6a9c796a8e5e8398055c24`.
+Both preferred and relocated variants passed **379 checks and 135 actual PE
 calls**, with all outer PE call returns restoring ESP. The alternate-base image
-applied a 16 MiB delta at **45 HIGHLOW relocation sites**. Both static ELF32
+applied a 16 MiB delta at **54 HIGHLOW relocation sites**. Both static ELF32
 executables had zero undefined symbols. Twelve packer tests cover inventory,
 malformed images, unsupported imports/relocations, and relocation roundtrips.
 

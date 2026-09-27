@@ -129,7 +129,8 @@ class PrepareTests(unittest.TestCase):
         provider = mod.PE((ROOT / 'build/platform/NTW32.DLL').read_bytes())
         imported = [(d['dll'].upper(), e[1]) for d in provider.imports() for e in d['entries']]
         self.assertEqual(set(imported), {('KERNEL32.DLL', name) for name in
-            ('GetTickCount','Sleep','GetModuleHandleA','GetProcAddress','SetLastError')})
+            ('GetTickCount','Sleep','GetModuleHandleA','GetProcAddress','SetLastError',
+             'MultiByteToWideChar','WideCharToMultiByte')})
         export_rva, _ = provider.directory(0)
         exports = provider.offset(export_rva, 40)
         count = provider.u32(exports+24)

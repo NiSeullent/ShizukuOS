@@ -18,12 +18,14 @@ import sys
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 BUILD = HERE / "build"
-IMPORTS = {"Sleep", "GetTickCount", "GetModuleHandleA", "GetProcAddress", "SetLastError"}
+IMPORTS = {"Sleep", "GetTickCount", "GetModuleHandleA", "GetProcAddress", "SetLastError",
+           "MultiByteToWideChar", "WideCharToMultiByte"}
 EXPORTS = {
     "InitializeSRWLock", "AcquireSRWLockExclusive", "AcquireSRWLockShared",
     "ReleaseSRWLockExclusive", "ReleaseSRWLockShared", "TryAcquireSRWLockExclusive",
     "TryAcquireSRWLockShared", "GetTickCount64", "GetProcAddress",
     "InitOnceInitialize", "InitOnceBeginInitialize", "InitOnceComplete", "InitOnceExecuteOnce",
+    "MultiByteToWideChar", "WideCharToMultiByte",
 }
 
 
@@ -78,7 +80,7 @@ def inspect(data):
                 raise ValueError(f"Unsupported import: {name!r}")
             imports.append((name, iat))
     if {name for name, _ in imports} != IMPORTS:
-        raise ValueError("DLL import inventory differs from the five mock contracts")
+        raise ValueError("DLL import inventory differs from the seven mock contracts")
     export_rva, export_size = pe.directory(0)
     at = pe.offset(export_rva, 40)
     function_count, name_count, functions, names, ordinals = struct.unpack_from("<IIIII", data, at + 20)
@@ -96,7 +98,7 @@ def inspect(data):
         code_rva(rva)
         exports[name] = rva
     if set(exports) != EXPORTS:
-        raise ValueError(f"Need exact 13-export runtime; got {sorted(exports)}")
+        raise ValueError(f"Need exact 15-export runtime; got {sorted(exports)}")
     return pe, image, preferred, entry, imports, exports
 
 

@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Host evidence only: no QEMU, Windows media, guest boot, or package publication.
+name: Independent platform host validation
+
+'on':
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: independent-platform-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    name: Host contracts and original i486/PE32 builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      NTW_SANITIZER_CC: clang
+      NTWU_CC: clang
+    steps:
+      - name: Check out the tested revision without retaining credentials
+        # https://github.com/actions/checkout/releases/tag/v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Install host and cross-compilation tools
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+            gcc-multilib clang lld mingw-w64 nasm make binutils python3
+
+      - name: Build NTWrapper9x and NTWin32Wrapper9x
+        run: python3 platform/build.py
+
+      - name: Test kernel, Win32, UTF, and package evidence contracts
+        # platform/test.py includes the exhaustive Unicode scalar/oracle suite.
+        timeout-minutes: 4
+        run: python3 platform/test.py
+
+      - name: Execute actual PE32 code with host service mocks
+        # Static Linux ELF32 executes original DLL instructions; this is not Windows.
+        run: python3 platform/abi32/build.py
+
+      - name: Build and test the original LE VxD bridge
+        run: |
+          python3 ntwrapper/vxd/build.py
+          python3 ntwrapper/vxd/test.py
+
+      - name: Test graphics and verify freestanding objects
+        run: |
+          make -C ntwddm test freestanding freestanding32
+          make -C ntwddm sanitize CC=clang
+
+      - name: Test PCI configuration and verify the freestanding i486 object
+        # PCI has no freestanding make target; compile its portable core directly.
+        run: |
+          make -C drivers/pcie test
+          make -C drivers/pcie sanitize CC=clang
+          clang --target=i486-none-elf -std=c11 -O2 \
+            -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow \
+            -ffreestanding -fno-builtin -fno-stack-protector \
+            -Idrivers/pcie/include -c drivers/pcie/src/ntw_pcie.c \
+            -o drivers/pcie/build/ntw-pcie-i486.o
+          nm -u drivers/pcie/build/ntw-pcie-i486.o > drivers/pcie/build/undefined-symbols-i486.txt
+          test ! -s drivers/pcie/build/undefined-symbols-i486.txt
+
+      - name: Build x64 UEFI and test firmware contracts on the host
+        run: |
+          python3 shizukudos/uefi/build.py
+          python3 shizukudos/uefi/test.py
+          python3 shizukudos/uefi/test.py --cc clang --sanitize
+
+      - name: Build the 32-bit transition and test layout and paging contracts
+        run: |
+          python3 shizukudos/uefi32/build.py
+          python3 shizukudos/uefi32/test.py
+
+      - name: Test AHCI models and build its standalone integration
+        run: |
+          python3 drivers/ahci_native/test.py
+          python3 shizukudos/uefi_ahci/build.py
+          python3 shizukudos/uefi_ahci/test.py
+
+      - name: Test installation-lab storage guards without starting a guest
+        timeout-minutes: 3
+        run: python3 platform/win98lab/test_storage.py -v
+
+      - name: Record validation scope
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          This workflow checks original host contracts, sanitizer results,
+          freestanding builds, and PE32 execution with explicit service mocks.
+          Individual step outcomes determine whether those checks passed.
+
+          It does not run a Windows guest, execute real VMM calls, test physical
+          drivers, boot firmware, use OS installation media, or publish packages.
+          Native Windows compatibility requires separate guest evidence.
+          SUMMARY

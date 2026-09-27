@@ -5,9 +5,31 @@ SPDX-License-Identifier: GPL-2.0-only
 from pathlib import Path
 import hashlib
 import json
+import re
+import struct
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+OUTPUT_NAME = 'windows98-shizuku-second-edition-storage-utf-checkpoint.zip'
+UTF_SOURCES = tuple('ntwin32/unicode/'+name for name in
+                    ('utf.h','utf.c','test_utf.c','test.py','oracle.py'))
+STORAGE_EVIDENCE = ('ahci-proof.bin','dma.bin','handoff.bin','registers.txt','handoff.ppm','handoff.png')
+STORAGE_BUILD_SOURCES = (
+    'shizukudos/uefi_ahci/loader.c','shizukudos/uefi_ahci/payload.c',
+    'shizukudos/uefi_ahci/clock.c','shizukudos/uefi_ahci/layout.h','shizukudos/uefi_ahci/build.py',
+    'shizukudos/uefi32/build.py','shizukudos/uefi32/contract.c',
+    'shizukudos/uefi32/paging.c','shizukudos/uefi32/paging.h','shizukudos/uefi32/layout.h',
+    'shizukudos/uefi32/transition.asm','shizukudos/uefi32/payload.ld',
+    'drivers/ahci_native/ahci.c','drivers/ahci_native/ahci.h',
+    'ntwrapper/core.c','ntwrapper/include/ntwrapper.h',
+    'ntwddm/src/ntwddm.c','ntwddm/include/ntwddm.h',
+    'shizukudos/uefi/boot.c','shizukudos/uefi/boot.h','shizukudos/uefi/efi.h')
+AHCI_PROOF_FIELDS = ('magic size calibrated ticks_per_us start_tsc stage pci_bdf abar open_result '
+    'read_result close_result sectors_low sectors_high bytes_verified mismatch '
+    'last_is last_tfd last_serr quarantine').split()
+HANDOFF_FIELDS = ('magic version size stage framebuffer framebuffer_bytes width height pitch_pixels pixel_format '
+    'memory_map map_bytes descriptor_bytes descriptor_version region_base region_bytes payload_bytes stack_top '
+    'cr0 cr4 efer cs ss esp core_pass graphics_pass mode_pass exit_attempted').split()
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -35,6 +57,136 @@ class Inputs:
             if digest(path) != expected:
                 raise RuntimeError(f'Input changed before package publication: {path}')
 
+def validate_sources(inputs, hashes, required, label):
+    if not set(required).issubset(hashes):
+        raise RuntimeError(f'{label} source receipt is incomplete')
+    for name, expected in hashes.items():
+        path = ROOT/name
+        if (Path(name).is_absolute() or not path.resolve().is_relative_to(ROOT.resolve()) or
+            inputs.digest(path) != expected):
+            raise RuntimeError(f'{label} source changed since validation: {name}')
+
+def add_unicode(inputs, files, platform_tests):
+    folder = ROOT/'ntwin32/unicode/build'
+    receipt_path = folder/'host-tests.json'
+    receipt = inputs.json(receipt_path)
+    if (platform_tests.get('unicode_receipt_sha256') != inputs.digest(receipt_path) or
+        receipt.get('passed') is not True or receipt.get('unicode_scalars') != 1112064 or
+        receipt.get('strict_host') != 'pass' or receipt.get('asan_ubsan') != 'pass' or
+        receipt.get('i486_undefined_symbols') != [] or
+        receipt.get('independent_host_oracle', {}).get('status') != 'PASS'):
+        raise RuntimeError('UTF core lacks matching exhaustive/sanitized host evidence')
+    validate_sources(inputs, receipt['sources_sha256'], UTF_SOURCES, 'UTF core')
+    if inputs.digest(folder/'utf-i486.o') != receipt['artifacts_sha256']['utf-i486.o']:
+        raise RuntimeError('UTF freestanding object changed since validation')
+    for name in ('host-tests.json','utf-i486.o'):
+        files['ntwin32/unicode/build/'+name] = folder/name
+
+def add_storage(inputs, files):
+    driver = ROOT/'drivers/ahci_native'
+    host = inputs.json(driver/'build/host-tests.json')
+    if (host.get('passed') is not True or host.get('asan_ubsan') is not True or
+        host.get('freestanding_i486_no_runtime_imports') is not True or
+        inputs.digest(driver/'build/ahci-i486.o') != host['i486_object_sha256'] or
+        inputs.digest(driver/'build/host-tests.log') != host['host_log_sha256']):
+        raise RuntimeError('AHCI core lacks matching sanitized/freestanding host evidence')
+    hashes = host['sources_sha256']
+    if any(Path(name).name != name for name in hashes):
+        raise RuntimeError('AHCI core source receipt contains nonlocal paths')
+    validate_sources(inputs, {'drivers/ahci_native/'+name:expected for name,expected in hashes.items()},
+        ('drivers/ahci_native/'+name for name in ('ahci.c','ahci.h','test_ahci.c','test.py')), 'AHCI core')
+    for name in ('host-tests.json','host-tests.log','ahci-i486.o'):
+        files['drivers/ahci_native/build/'+name] = driver/'build'/name
+
+    folder = ROOT/'shizukudos/uefi_ahci/build'
+    clock = inputs.json(folder/'host-tests.json')
+    if (clock.get('pass') is not True or clock.get('cases_per_variant') != 100031 or
+        clock.get('variants') != ['strict','asan_ubsan'] or
+        inputs.digest(folder/'host-tests.log') != clock['log_sha256']):
+        raise RuntimeError('AHCI clock lacks matching strict/sanitized host evidence')
+    validate_sources(inputs, clock['sources_sha256'],
+        ('shizukudos/uefi_ahci/clock.c','shizukudos/uefi_ahci/layout.h',
+         'shizukudos/uefi_ahci/test_clock.c','shizukudos/uefi_ahci/test.py','shizukudos/uefi32/layout.h'),
+        'AHCI clock')
+    built = inputs.json(folder/'build-result.json')
+    validate_sources(inputs, built['sources_sha256'], STORAGE_BUILD_SOURCES, 'AHCI integration')
+    for filename, key in (('BOOTX64.EFI','efi'),('payload.bin','payload'),('transition.bin','transition')):
+        data = inputs.read(folder/filename)
+        if (hashlib.sha256(data).hexdigest() != built[key]['sha256'] or
+            len(data) != built[key]['bytes']):
+            raise RuntimeError(f'AHCI integration artifact changed since build: {filename}')
+    if built['transition']['bytes'] != 0x2800 or not 0 < built['payload']['bytes'] <= 0xf0000:
+        raise RuntimeError('AHCI integration image exceeds fixed transition/payload bounds')
+    guest = inputs.json(folder/'qemu-result.json')
+    if (guest.get('pass') is not True or guest.get('process_stopped') is not True or
+        guest.get('kvm', {}).get('enabled') is not True or
+        guest.get('artifact_sha256') != built['efi']['sha256'] or
+        guest.get('build_receipt_sha256') != inputs.digest(folder/'build-result.json')):
+        raise RuntimeError('AHCI integration lacks matching stopped KVM guest proof')
+    validate_sources(inputs, guest['harness_sources_sha256'],
+        ('shizukudos/uefi_ahci/test_qemu.py','shizukudos/uefi32/test_qemu.py'), 'AHCI guest harness')
+    proof = guest['ahci']
+    if (proof.get('magic') != 0x49434841 or proof.get('size') != 80 or
+        proof.get('calibrated') != 1 or not 10 <= proof.get('ticks_per_us', 0) <= 100000 or
+        proof.get('stage') != 3 or proof.get('bytes_verified') != 1024 or
+        proof.get('sectors_low') != 16384 or proof.get('sectors_high') != 0 or
+        any(proof.get(name) != 0 for name in
+            ('open_result','read_result','close_result','mismatch','quarantine'))):
+        raise RuntimeError('AHCI guest did not prove completed 1024-byte reads and released DMA')
+    evidence = Path(guest['evidence_directory'])
+    if not evidence.resolve().is_relative_to(folder.resolve()):
+        raise RuntimeError('AHCI evidence must belong to its isolated build directory')
+    hashes = guest['evidence_sha256']
+    if set(hashes) != set(STORAGE_EVIDENCE):
+        raise RuntimeError('AHCI guest evidence hash inventory is incomplete or unexpected')
+    snapshots = {}
+    for name in STORAGE_EVIDENCE:
+        data = inputs.read(evidence/name)
+        if hashlib.sha256(data).hexdigest() != hashes[name]:
+            raise RuntimeError(f'AHCI guest evidence changed: {name}')
+        snapshots[name] = data
+        files['evidence/uefi-ahci-'+name] = evidence/name
+    if (guest.get('dma_sha256') != hashes['dma.bin'] or
+        guest.get('screenshot_sha256') != hashes['handoff.ppm']):
+        raise RuntimeError('AHCI guest evidence hash fields disagree')
+    if len(snapshots['ahci-proof.bin']) != 80 or dict(zip(AHCI_PROOF_FIELDS,
+        struct.unpack('<4IQ14I', snapshots['ahci-proof.bin']))) != proof:
+        raise RuntimeError('AHCI physical proof snapshot disagrees with guest receipt')
+    handoff = guest['handoff']
+    if len(snapshots['handoff.bin']) != 112 or dict(zip(HANDOFF_FIELDS,
+        struct.unpack('<28I', snapshots['handoff.bin']))) != handoff:
+        raise RuntimeError('AHCI physical handoff snapshot disagrees with guest receipt')
+    if (handoff.get('magic') != 0x32334453 or handoff.get('version') != 1 or
+        handoff.get('size') != 112 or handoff.get('stage') != 5 or
+        any(handoff.get(name) != 1 for name in ('core_pass','graphics_pass','mode_pass','exit_attempted')) or
+        not handoff['cr0'] & 1 or handoff['cr0'] & 0x80000000 or handoff['cr4'] & 0x21020 or
+        handoff['efer'] & 0x500 or handoff['cs'] != 0x10 or handoff['ss'] != 0x18 or
+        not 0x021f0000 <= handoff['esp'] < 0x02200000):
+        raise RuntimeError('AHCI guest lacks completed protected-mode/core/graphics handoff')
+    registers = snapshots['registers.txt'].decode('ascii')
+    observed = {}
+    for name in ('EIP','ESP','CR0','CR4','EFER'):
+        match = re.search(r'\b'+name+r'=([0-9a-fA-F]+)', registers)
+        if not match:
+            raise RuntimeError('AHCI register snapshot is incomplete')
+        observed[name] = int(match.group(1), 16)
+    if (observed != guest['registers'] or not all(token in registers for token in ('CS32','CPL=0','HLT=1')) or
+        not 0x02010000 <= observed['EIP'] < 0x02100000 or
+        not 0x021f0000 <= observed['ESP'] < 0x02200000 or
+        any(observed[name.upper()] != handoff[name] for name in ('cr0','cr4','efer'))):
+        raise RuntimeError('AHCI independent CPU registers disagree with handoff')
+    dma = snapshots['dma.bin']
+    if (len(dma) != 4096 or dma[2048:2560] != bytes((i*37+0x5a+11*13)&255 for i in range(512)) or
+        struct.unpack_from('<I', dma, 4)[0] != 512):
+        raise RuntimeError('AHCI physical DMA snapshot lacks the final sector and transfer count')
+    before = guest.get('pattern_before_sha256')
+    if (not isinstance(before, str) or len(before) != 64 or
+        before != guest.get('pattern_after_sha256') or inputs.digest(evidence/'pattern.img') != before):
+        raise RuntimeError('AHCI disposable read-only test disk changed')
+    for name in ('BOOTX64.EFI','payload.bin','transition.bin','build-result.json',
+                 'qemu-result.json','host-tests.json','host-tests.log'):
+        files['shizukudos/uefi_ahci/build/'+name] = folder/name
+
 def main():
     inputs = Inputs()
     digest = inputs.digest
@@ -52,8 +204,8 @@ def main():
         if digest(build/name) != info['sha256']:
             raise RuntimeError(f'Artifact changed since validation: {name}')
     files = {}
-    for folder in ('ntwrapper','ntwin32','ntwddm','drivers/pcie','shizukudos/uefi',
-                   'shizukudos/uefi32','platform'):
+    for folder in ('ntwrapper','ntwin32','ntwddm','drivers/pcie','drivers/ahci_native',
+                   'shizukudos/uefi','shizukudos/uefi32','shizukudos/uefi_ahci','platform'):
         for path in (ROOT/folder).rglob('*'):
             if not path.is_file() or path.is_symlink():
                 continue
@@ -61,8 +213,8 @@ def main():
             if any(part in ('build','__pycache__') for part in relative.parts):
                 continue
             files[str(relative)] = path
-    for name in ('LICENSE','THIRD_PARTY.md','docs/INDEPENDENT_PLATFORM_CHECKPOINT.md',
-                 'docs/NATIVE_PLATFORM_CHECKPOINT.md'):
+    for name in ('LICENSE','THIRD_PARTY.md','drivers/README.md','docs/INDEPENDENT_PLATFORM_CHECKPOINT.md',
+                 'docs/NATIVE_PLATFORM_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md'):
         files[name] = ROOT/name
     for name in ('NTW32.DLL','NTWPROBE.EXE','ntwrapper9x.a','ntwrapper9x.o',
                  'manifest.json','host-tests.json','prepare-report.json'):
@@ -85,8 +237,7 @@ def main():
         raise RuntimeError('Screenshot changed since guest validation')
     files['evidence/uefi-handoff.ppm'] = screenshot
     files['evidence/uefi-handoff.png'] = Path(receipt['evidence_directory'])/'handoff.png'
-    # Preserve the first checkpoint archive; this checkpoint adds independently
-    # built LE/VxD, actual PE32 execution and legacy protected-mode handoff.
+    # Earlier checkpoints remain untouched; each generation uses its own name.
     abi = ROOT/'platform/abi32/build/results.json'
     abi_receipt = read_json(abi)
     if abi_receipt['dll_sha256'] != digest(build/'NTW32.DLL') or len(abi_receipt['variants']) != 2:
@@ -141,7 +292,9 @@ def main():
         raise RuntimeError('32-bit handoff screenshot changed since validation')
     for name in ('handoff.ppm','handoff.png','registers.txt','handoff.bin'):
         files['evidence/uefi32-'+name] = pm_evidence/name
-    output = ROOT/'build/windows98-shizuku-second-edition-native-checkpoint.zip'
+    add_unicode(inputs, files, tests)
+    add_storage(inputs, files)
+    output = ROOT/'build'/OUTPUT_NAME
     temporary = output.with_suffix('.zip.tmp')
     members = {name:inputs.read(path) for name,path in sorted(files.items())}
     index = {name:hashlib.sha256(data).hexdigest() for name,data in members.items()}
@@ -154,8 +307,8 @@ def main():
         for name,data in members.items():
             add(name,data)
         add('FILES-SHA256.json',json.dumps(index,indent=2)+'\n')
-        add('README.txt',"Windows 98 Shizuku's Second Edition — native platform checkpoint\n"
-            "Read platform/README.md and docs/NATIVE_PLATFORM_CHECKPOINT.md.\n"
+        add('README.txt',"Windows 98 Shizuku's Second Edition — storage and UTF checkpoint\n"
+            "Read platform/README.md and docs/STORAGE_UTF_CHECKPOINT.md.\n"
             "Not a complete operating system or installation package.\n"
             "See checkpoint for precise Windows 98 VxD/app validation status.\n"
             "Modern vendor drivers, complete DOS and UEFI-to-Win98 boot remain unfinished.\n"

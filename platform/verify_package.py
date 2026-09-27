@@ -11,10 +11,25 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_NAME = 'windows98-shizuku-second-edition-storage-utf-checkpoint.zip'
+REBUILD_COMMANDS = (
+    ('python3','platform/build.py'), ('python3','platform/test.py'),
+    ('python3','platform/abi32/build.py'), ('python3','ntwrapper/vxd/build.py'),
+    ('python3','shizukudos/uefi/build.py'), ('python3','shizukudos/uefi32/build.py'),
+    ('python3','drivers/ahci_native/test.py'), ('python3','shizukudos/uefi_ahci/build.py'),
+    ('python3','shizukudos/uefi_ahci/test.py'))
+REBUILT_ARTIFACTS = (
+    'build/platform/NTW32.DLL','build/platform/NTWPROBE.EXE',
+    'build/platform/ntwrapper9x.a','shizukudos/uefi/build/BOOTX64.EFI',
+    'shizukudos/uefi32/build/BOOTX64.EFI','shizukudos/uefi32/build/payload.bin',
+    'shizukudos/uefi32/build/transition.bin',
+    'ntwrapper/vxd/build/NTWRAP9X.VXD','ntwrapper/vxd/build/NTWQUERY.EXE',
+    'shizukudos/uefi_ahci/build/BOOTX64.EFI','shizukudos/uefi_ahci/build/payload.bin',
+    'shizukudos/uefi_ahci/build/transition.bin')
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 def main():
-    package = ROOT/'build/windows98-shizuku-second-edition-native-checkpoint.zip'
+    package = ROOT/'build'/PACKAGE_NAME
     receipt_path = ROOT/'build/platform/package-rebuild.json'
     receipt_path.unlink(missing_ok=True)
     package_bytes = package.read_bytes()
@@ -31,22 +46,13 @@ def main():
         path=(folder/name).resolve()
         if not path.is_relative_to(folder) or digest(path) != expected:
             raise RuntimeError(f'Extracted file failed manifest validation: {name}')
-    for command in (['python3','platform/build.py'], ['python3','platform/test.py'],
-                    ['python3','platform/abi32/build.py'],
-                    ['python3','ntwrapper/vxd/build.py'],
-                    ['python3','shizukudos/uefi/build.py'],
-                    ['python3','shizukudos/uefi32/build.py']):
+    for command in REBUILD_COMMANDS:
         proc=subprocess.run(command,cwd=folder,capture_output=True,text=True,timeout=90)
         (folder/('rebuild-'+command[1].replace('/','-')+'.log')).write_text(proc.stdout+proc.stderr)
         if proc.returncode:
             raise RuntimeError(f'Package rebuild failed: {command}; logs in {folder}')
     compared={}
-    for name in ('build/platform/NTW32.DLL','build/platform/NTWPROBE.EXE',
-                 'build/platform/ntwrapper9x.a','shizukudos/uefi/build/BOOTX64.EFI',
-                 'shizukudos/uefi32/build/BOOTX64.EFI',
-                 'shizukudos/uefi32/build/payload.bin',
-                 'shizukudos/uefi32/build/transition.bin',
-                 'ntwrapper/vxd/build/NTWRAP9X.VXD','ntwrapper/vxd/build/NTWQUERY.EXE'):
+    for name in REBUILT_ARTIFACTS:
         actual=digest(folder/name)
         if actual != index[name]:
             raise RuntimeError(f'Rebuilt bytes differ: {name} {index[name]} {actual}')
@@ -54,7 +60,8 @@ def main():
     if digest(package) != package_sha256:
         raise RuntimeError('Source package changed during rebuild; no receipt published')
     receipt={'source_package_sha256':package_sha256,'extracted_to':str(folder),
-             'rebuild_identical':compared,'host_tests':'pass'}
+             'rebuild_identical':compared,'host_tests':'pass', 'guest_reexecuted':False,
+             'rebuild_commands':[list(command) for command in REBUILD_COMMANDS]}
     receipt_path.write_text(json.dumps(receipt,indent=2)+'\n')
     print(json.dumps(receipt,indent=2))
 if __name__ == '__main__':

@@ -8,14 +8,16 @@ provider, Unicode tables, KernelEx, Wine, ReactOS or third-party runtime is link
 
 Implemented families: seven pointer-sized SRW operations, four InitOnce
 operations, observed-wrap `GetTickCount64`, and scoped `GetProcAddress`
-redirection: thirteen exports in total. Shared readers and an
+redirection, plus UTF-8 `MultiByteToWideChar`/`WideCharToMultiByte`: fifteen
+exports in total. Shared readers and an
 exclusive writer use 32-bit atomic acquire/release ordering; contention yields
 through native `Sleep(0)`. There is no fairness guarantee, recursive acquisition,
 cross-process use, condition-variable integration or owner tracking.
 `GetTickCount64` serializes 32-bit samples and counts observed wraps. It cannot
 recover wraps before DLL load or multiple wraps between calls; this limitation
-bars a full native-equivalence claim. The five native imports are `Sleep`,
-`GetTickCount`, `GetModuleHandleA`, `GetProcAddress` and `SetLastError`.
+bars a full native-equivalence claim. The seven native imports are `Sleep`,
+`GetTickCount`, `GetModuleHandleA`, `GetProcAddress`, `SetLastError`,
+`MultiByteToWideChar` and `WideCharToMultiByte`.
 There is no CRT dependency.
 
 The original InitOnce implementation provides synchronous and asynchronous
@@ -23,6 +25,33 @@ initialization, publication of an aligned context, and retry after callback
 failure. See [INITONCE.md](INITONCE.md) for concurrency, error-policy and
 native-equivalence limits. A real calling-convention adapter connects the
 portable callback to a Win32 `WINAPI` callback.
+
+The two conversion exports use the [original UTF core](unicode/README.md)
+for `CP_UTF8` (65001). Other code pages, including ACP/OEM/UTF-7, pass every
+argument unchanged to the original KERNEL32 imports; their behavior remains
+that of the installed Windows version. UTF-8 accepts zero flags for U+FFFD
+replacement, or `MB_ERR_INVALID_CHARS` / `WC_ERR_INVALID_CHARS` for strict
+rejection. UTF-16 surrogate pairs and every Unicode scalar are supported.
+The `WideCharToMultiByte` default-character arguments must both be NULL for
+UTF-8. This does not implement locale tables, normalization, or case mapping.
+
+Positive source counts process exactly that many units, including embedded
+NULs; `-1` scans through the first NUL and includes it in the result. Zero and
+other negative source lengths fail. Capacity zero queries the full length;
+other negative capacities fail. Identical source/destination pointers fail
+even for queries, while unrelated destination values are ignored at capacity
+zero. Scanning has no fixed string-length limit, but rejects address/count
+overflow. UTF-16 storage must be naturally aligned; active source/output
+ranges must be disjoint. The caller supplies accessible, stable memory.
+
+UTF errors return zero and set LastError to 1004 (flags), 1113 (malformed
+strict input), 122 (insufficient or incorrectly NULL output), or 87 (invalid
+parameters, overlap, or unrepresentable result). Successful UTF-8 conversion
+preserves LastError. Validation and counting precede output, so failures leave
+the destination unchanged. Output counts above `INT_MAX` are rejected before
+writing. Maximal-subpart replacement, full-range overlap rejection, alignment,
+failure precedence, and extreme-count error mapping are explicit project
+policies whose exact native Windows equivalence remains unverified.
 
 The redirected `GetProcAddress` intercepts only implemented, case-sensitive
 names requested through the real `KERNEL32.DLL` module handle. Other modules,
@@ -42,7 +71,8 @@ python3 ntwin32/prepare.py input.exe prepared.exe
 Put the prepared application beside `build/platform/NTW32.DLL` in a **disposable
 Windows 98 SE guest with no KernelEx installed**. The generated
 `build/platform/NTWPROBE.EXE` tests static imports, dynamic lookup, SRW and
-InitOnce callbacks; success writes
+InitOnce callbacks, UTF-8 strict/replacement/query/NUL behavior, and native
+ACP delegation; success writes
 `NTWPROBE.LOG` in its working directory and returns zero. This repository does
 not contain a new Win98 guest pass for these artifacts yet.
 
@@ -73,12 +103,23 @@ non-destructive writes, retained IAT addresses and the actual linked exports.
 Address/undefined sanitizers cover the C core. Exact artifacts and hashes are
 in ignored `build/platform/manifest.json`.
 
+The UTF suite exhaustively roundtrips all 1,112,064 Unicode scalars, with
+15,578,938 assertions per normal/sanitized run and an independent host-codec
+comparison. `python3 platform/abi32/build.py` additionally executes the actual
+linked DLL's x86 stdcall exports at preferred and relocated bases. Its UTF
+checks include output preservation, errors, dynamic lookup and native import
+forwarding. Host service mocks establish CPU/ABI behavior, not native Windows
+error parity or Windows 98 loading.
+
 Original implementations derive behavior from these public specifications:
 
 - [PE/COFF import format](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)
 - [SRW semantics](https://learn.microsoft.com/en-us/windows/win32/sync/slim-reader-writer--srw--locks)
 - [GetTickCount64](https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-gettickcount64)
 - [GetProcAddress](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress)
+- [MultiByteToWideChar](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-multibytetowidechar)
+- [WideCharToMultiByte](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-widechartomultibyte)
+- [Unicode encoding forms and maximal subparts](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-3/)
 
 Legacy provider code remains in the repository as attributed historical work;
 the independent build does not compile it. Replacing those implementations is

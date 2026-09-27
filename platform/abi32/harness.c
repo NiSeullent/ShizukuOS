@@ -100,6 +100,32 @@ static uintptr_t STDCALL mock_GetProcAddress(uintptr_t module, const char *name)
     return (uintptr_t)&native_function;
 }
 
+static uint32_t native_mb_calls, native_wc_calls, native_mb_args[6], native_wc_args[8];
+static int native_conversion_result;
+static uint32_t native_conversion_error;
+static int STDCALL mock_MultiByteToWideChar(uint32_t page, uint32_t flags,
+    const char *source, int length, uint16_t *destination, int capacity)
+{
+    ++native_mb_calls;
+    native_mb_args[0] = page; native_mb_args[1] = flags;
+    native_mb_args[2] = (uintptr_t)source; native_mb_args[3] = (uint32_t)length;
+    native_mb_args[4] = (uintptr_t)destination; native_mb_args[5] = (uint32_t)capacity;
+    if (!native_conversion_result) last_error = native_conversion_error;
+    return native_conversion_result;
+}
+static int STDCALL mock_WideCharToMultiByte(uint32_t page, uint32_t flags,
+    const uint16_t *source, int length, char *destination, int capacity,
+    const char *default_char, int *used_default)
+{
+    ++native_wc_calls;
+    native_wc_args[0] = page; native_wc_args[1] = flags;
+    native_wc_args[2] = (uintptr_t)source; native_wc_args[3] = (uint32_t)length;
+    native_wc_args[4] = (uintptr_t)destination; native_wc_args[5] = (uint32_t)capacity;
+    native_wc_args[6] = (uintptr_t)default_char; native_wc_args[7] = (uintptr_t)used_default;
+    if (!native_conversion_result) last_error = native_conversion_error;
+    return native_conversion_result;
+}
+
 static void patch_imports(void)
 {
 #include "pe_imports.inc"
@@ -133,6 +159,20 @@ static struct call_result call4(uint32_t rva, uintptr_t a, uintptr_t b, uintptr_
 {
     uint32_t args[] = { a, b, c, d };
     return invoke(rva, 4, args);
+}
+static uint32_t convert_mb(uint32_t page, uint32_t flags, const void *source,
+    int length, void *destination, int capacity)
+{
+    uint32_t args[] = { page, flags, (uintptr_t)source, (uint32_t)length,
+                        (uintptr_t)destination, (uint32_t)capacity };
+    return invoke(RVA_MultiByteToWideChar, 6, args).low;
+}
+static uint32_t convert_wc(uint32_t page, uint32_t flags, const void *source,
+    int length, void *destination, int capacity, const void *default_char, void *used_default)
+{
+    uint32_t args[] = { page, flags, (uintptr_t)source, (uint32_t)length,
+        (uintptr_t)destination, (uint32_t)capacity, (uintptr_t)default_char, (uintptr_t)used_default };
+    return invoke(RVA_WideCharToMultiByte, 8, args).low;
 }
 
 static void srw_and_ticks(void)
@@ -182,6 +222,10 @@ static void dynamic_routing(void)
     CHECK(result.low == PE_BASE + RVA_InitOnceExecuteOnce && native_calls == calls);
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"GetProcAddress");
     CHECK(result.low == PE_BASE + RVA_GetProcAddress);
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"MultiByteToWideChar");
+    CHECK(result.low == PE_BASE + RVA_MultiByteToWideChar && native_calls == calls);
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"WideCharToMultiByte");
+    CHECK(result.low == PE_BASE + RVA_WideCharToMultiByte && native_calls == calls);
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)native_name);
     CHECK(result.low == (uintptr_t)&native_function && native_calls == ++calls);
     CHECK(native_last_module == KERNEL_HANDLE && native_last_name == native_name);
@@ -333,6 +377,146 @@ static void once_explicit(void)
     CHECK(sleep_calls == 1 && sleep_completion == NULL);
 }
 
+static int same_bytes(const void *left, const void *right, uint32_t size)
+{
+    const uint8_t *a = left, *b = right;
+    uint32_t i;
+    for (i = 0; i < size; ++i) if (a[i] != b[i]) return 0;
+    return 1;
+}
+static void fill_bytes(void *buffer, uint32_t size)
+{
+    uint8_t *bytes = buffer;
+    uint32_t i;
+    for (i = 0; i < size; ++i) bytes[i] = 0xa5;
+}
+static int untouched(const void *buffer, uint32_t size)
+{
+    const uint8_t *bytes = buffer;
+    uint32_t i;
+    for (i = 0; i < size; ++i) if (bytes[i] != 0xa5) return 0;
+    return 1;
+}
+
+static void utf_conversion(void)
+{
+    static const uint8_t utf8[] = { 'A', 0, 0xed, 0x95, 0x9c, 0xf0, 0x9f, 0x98, 0x80 };
+    static const uint16_t utf16[] = { 'A', 0, 0xd55c, 0xd83d, 0xde00 };
+    static const uint8_t terminated[] = { 0xed, 0x95, 0x9c, 0xf0, 0x9f, 0x98, 0x80, 0 };
+    static const uint16_t terminated_wide[] = { 0xd55c, 0xd83d, 0xde00, 0 };
+    static const uint8_t malformed[] = { 0xe1, 0x80, 'A' };
+    static const uint8_t surrogate_utf8[] = { 0xed, 0xa0, 0x80 };
+    static const uint16_t malformed_wide[] = { 0xd800, 'A' };
+    static const uint8_t replacement[] = { 0xef, 0xbf, 0xbd, 'A' };
+    static const uint16_t empty[] = { 0 };
+    uint16_t wide[16];
+    uint8_t bytes[32];
+    uint32_t used = 0x1234;
+    fill_bytes(wide, sizeof(wide)); fill_bytes(bytes, sizeof(bytes));
+    last_error = 0x1357;
+    CHECK(convert_mb(65001, 8, utf8, 9, NULL, 0) == 5 && last_error == 0x1357);
+    CHECK(convert_wc(65001, 128, utf16, 5, NULL, 0, NULL, NULL) == 9 && last_error == 0x1357);
+    /* A zero output capacity ignores unrelated destination pointer values. */
+    CHECK(convert_mb(65001, 0, utf8, 9, (void *)(uintptr_t)1, 0) == 5);
+    CHECK(convert_wc(65001, 0, utf16, 5, (void *)(uintptr_t)1, 0, NULL, NULL) == 9);
+    CHECK(convert_mb(65001, 8, utf8, 9, wide, 5) == 5);
+    CHECK(same_bytes(wide, utf16, sizeof(utf16)) && wide[5] == 0xa5a5);
+    CHECK(convert_wc(65001, 128, wide, 5, bytes, 9, NULL, NULL) == 9);
+    CHECK(same_bytes(bytes, utf8, sizeof(utf8)) && bytes[9] == 0xa5);
+    CHECK(last_error == 0x1357);
+    CHECK(convert_mb(65001, 0, terminated, -1, NULL, 0) == 4);
+    CHECK(convert_mb(65001, 0, terminated, -1, wide, 16) == 4);
+    CHECK(same_bytes(wide, terminated_wide, sizeof(terminated_wide)));
+    CHECK(convert_wc(65001, 0, terminated_wide, -1, NULL, 0, NULL, NULL) == 8);
+    CHECK(convert_wc(65001, 0, terminated_wide, -1, bytes, 32, NULL, NULL) == 8);
+    CHECK(same_bytes(bytes, terminated, sizeof(terminated)));
+    CHECK(convert_mb(65001, 0, "", -1, wide, 16) == 1 && wide[0] == 0);
+    CHECK(convert_wc(65001, 0, empty, -1, bytes, 32, NULL, NULL) == 1 && bytes[0] == 0);
+    fill_bytes(wide, sizeof(wide)); fill_bytes(bytes, sizeof(bytes));
+    CHECK(convert_mb(65001, 8, malformed, 3, wide, 16) == 0 && last_error == 1113);
+    CHECK(untouched(wide, sizeof(wide)));
+    CHECK(convert_mb(65001, 8, malformed, 3, NULL, 0) == 0 && last_error == 1113);
+    CHECK(convert_wc(65001, 128, malformed_wide, 2, bytes, 32, NULL, NULL) == 0 && last_error == 1113);
+    CHECK(untouched(bytes, sizeof(bytes)));
+    CHECK(convert_wc(65001, 128, malformed_wide, 2, NULL, 0, NULL, NULL) == 0 && last_error == 1113);
+    CHECK(convert_mb(65001, 0, malformed, 3, wide, 16) == 2);
+    CHECK(wide[0] == 0xfffd && wide[1] == 'A' && wide[2] == 0xa5a5);
+    CHECK(convert_mb(65001, 0, surrogate_utf8, 3, wide, 16) == 3);
+    CHECK(wide[0] == 0xfffd && wide[1] == 0xfffd && wide[2] == 0xfffd);
+    CHECK(convert_wc(65001, 0, malformed_wide, 2, bytes, 32, NULL, NULL) == 4);
+    CHECK(same_bytes(bytes, replacement, 4) && bytes[4] == 0xa5);
+    fill_bytes(wide, sizeof(wide)); fill_bytes(bytes, sizeof(bytes));
+    CHECK(convert_mb(65001, 0, utf8, 9, wide, 4) == 0 && last_error == 122);
+    CHECK(untouched(wide, sizeof(wide)));
+    CHECK(convert_wc(65001, 0, utf16, 5, bytes, 8, NULL, NULL) == 0 && last_error == 122);
+    CHECK(untouched(bytes, sizeof(bytes)));
+    CHECK(convert_mb(65001, 1, utf8, 9, wide, 16) == 0 && last_error == 1004);
+    CHECK(convert_mb(65001, 128, utf8, 9, wide, 16) == 0 && last_error == 1004);
+    CHECK(convert_wc(65001, 8, utf16, 5, bytes, 32, NULL, NULL) == 0 && last_error == 1004);
+    CHECK(convert_wc(65001, 129, utf16, 5, bytes, 32, NULL, NULL) == 0 && last_error == 1004);
+    CHECK(convert_wc(65001, 0, utf16, 5, bytes, 32, "?", NULL) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, utf16, 5, bytes, 32, NULL, &used) == 0 && last_error == 87);
+    CHECK(used == 0x1234 && untouched(bytes, sizeof(bytes)) && untouched(wide, sizeof(wide)));
+    CHECK(convert_mb(65001, 0, NULL, 1, wide, 16) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, NULL, 1, bytes, 32, NULL, NULL) == 0 && last_error == 87);
+    CHECK(convert_mb(65001, 0, utf8, 0, wide, 16) == 0 && last_error == 87);
+    CHECK(convert_mb(65001, 0, utf8, -2, wide, 16) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, utf16, 0, bytes, 32, NULL, NULL) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, utf16, -2, bytes, 32, NULL, NULL) == 0 && last_error == 87);
+    CHECK(convert_mb(65001, 0, utf8, 9, wide, -1) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, utf16, 5, bytes, -1, NULL, NULL) == 0 && last_error == 87);
+    CHECK(convert_mb(65001, 0, utf8, 9, NULL, 1) == 0 && last_error == 122);
+    CHECK(convert_wc(65001, 0, utf16, 5, NULL, 1, NULL, NULL) == 0 && last_error == 122);
+    CHECK(convert_mb(65001, 0, wide, 1, wide, 0) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, wide, 1, wide, 0, NULL, NULL) == 0 && last_error == 87);
+    CHECK(convert_mb(65001, 0, wide, 4, wide + 1, 2) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, wide, 4, wide + 1, 2, NULL, NULL) == 0 && last_error == 87);
+    CHECK(convert_mb(65001, 0, utf8, 9, (uint8_t *)wide + 1, 5) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, (const uint8_t *)utf16 + 1, 1, bytes, 32, NULL, NULL) == 0 && last_error == 87);
+    CHECK(untouched(wide, sizeof(wide)) && untouched(bytes, sizeof(bytes)));
+    /* Wrapping extents are rejected before these deliberately unmapped values
+     * could be read. Actual accessible-memory validation is caller-owned. */
+    CHECK(convert_mb(65001, 0, (const void *)(uintptr_t)UINT32_MAX, 2, NULL, 0) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, (const void *)(uintptr_t)0xfffffffe, 2, NULL, 0, NULL, NULL) == 0 && last_error == 87);
+    CHECK(convert_mb(65001, 0, (const void *)(uintptr_t)UINT32_MAX, -1, NULL, 0) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, (const void *)(uintptr_t)0xfffffffe, -1, NULL, 0, NULL, NULL) == 0 && last_error == 87);
+    CHECK(convert_mb(65001, 0, utf8, 9, (void *)(uintptr_t)0xfffffffe, 2) == 0 && last_error == 87);
+    CHECK(convert_wc(65001, 0, utf16, 5, (void *)(uintptr_t)UINT32_MAX, 1, NULL, NULL) == 0 && last_error == 87);
+    CHECK(native_mb_calls == 0 && native_wc_calls == 0);
+}
+
+static void utf_long_and_native(void)
+{
+    static uint8_t bytes[131073];
+    static uint16_t wide[131073];
+    static const uint32_t pages[] = { 0, 1, 1252, 65000, 999999 };
+    uint32_t i, j;
+    for (i = 0; i < sizeof(bytes) - 1; ++i) bytes[i] = 'a';
+    CHECK(convert_mb(65001, 8, bytes, -1, NULL, 0) == sizeof(bytes));
+    CHECK(convert_mb(65001, 8, bytes, -1, wide, 131073) == sizeof(bytes));
+    CHECK(wide[0] == 'a' && wide[131071] == 'a' && wide[131072] == 0);
+    CHECK(convert_wc(65001, 128, wide, -1, NULL, 0, NULL, NULL) == sizeof(bytes));
+    fill_bytes(bytes, sizeof(bytes));
+    CHECK(convert_wc(65001, 128, wide, -1, bytes, 131073, NULL, NULL) == sizeof(bytes));
+    CHECK(bytes[0] == 'a' && bytes[131071] == 'a' && bytes[131072] == 0);
+    CHECK(native_mb_calls == 0 && native_wc_calls == 0);
+    for (i = 0; i < sizeof(pages) / sizeof(pages[0]); ++i) {
+        uint32_t expected_mb[] = { pages[i], UINT32_MAX, 0, (uint32_t)-2, 0, (uint32_t)-7 };
+        uint32_t expected_wc[] = { pages[i], UINT32_MAX, 0, (uint32_t)-2, 0, (uint32_t)-7, 1, 2 };
+        native_conversion_result = 713;
+        last_error = 0x4242;
+        CHECK(convert_mb(pages[i], UINT32_MAX, NULL, -2, NULL, -7) == 713 && last_error == 0x4242);
+        CHECK(convert_wc(pages[i], UINT32_MAX, NULL, -2, NULL, -7,
+                           (const void *)(uintptr_t)1, (void *)(uintptr_t)2) == 713 && last_error == 0x4242);
+        for (j = 0; j < 6; ++j) CHECK(native_mb_args[j] == expected_mb[j]);
+        for (j = 0; j < 8; ++j) CHECK(native_wc_args[j] == expected_wc[j]);
+        CHECK(native_mb_calls == i * 2 + 1 && native_wc_calls == i * 2 + 1);
+        native_conversion_result = 0; native_conversion_error = 0x7878;
+        CHECK(convert_mb(pages[i], 0, bytes, 1, wide, 1) == 0 && last_error == 0x7878);
+        CHECK(convert_wc(pages[i], 0, wide, 1, bytes, 1, NULL, NULL) == 0 && last_error == 0x7878);
+    }
+}
+
 int harness_main(void)
 {
     patch_imports();
@@ -346,6 +530,8 @@ int harness_main(void)
     dynamic_routing();
     once_callbacks();
     once_explicit();
+    utf_conversion();
+    utf_long_and_native();
     CHECK(call3(PE_ENTRY, PE_BASE, 0, 0).low == 1);
     CHECK(module_calls == 2);
     write_string("PASS NTW32 actual PE32 ABI: ");

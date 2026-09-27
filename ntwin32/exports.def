@@ -13,3 +13,5 @@ EXPORTS
     InitOnceBeginInitialize=NtwInitOnceBeginInitialize@16
     InitOnceComplete=NtwInitOnceComplete@12
     InitOnceExecuteOnce=NtwInitOnceExecuteOnce@16
+    MultiByteToWideChar=NtwMultiByteToWideChar@24
+    WideCharToMultiByte=NtwWideCharToMultiByte@32

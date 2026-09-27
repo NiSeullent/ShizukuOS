@@ -7,13 +7,15 @@
     "ReleaseSRWLockExclusive", "ReleaseSRWLockShared",
     "TryAcquireSRWLockExclusive", "TryAcquireSRWLockShared", "GetTickCount64",
     "GetProcAddress", "InitOnceInitialize", "InitOnceBeginInitialize",
-    "InitOnceComplete", "InitOnceExecuteOnce"
+    "InitOnceComplete", "InitOnceExecuteOnce", "MultiByteToWideChar", "WideCharToMultiByte"
   ],
   "evidence": "Build/static/host contracts only; no Windows 98 guest result for this provider",
   "limits": [
     "GetTickCount64 cannot recover wraps before DLL load or multiple unobserved wraps",
     "SRW contention uses Sleep(0); no fairness guarantee",
     "GetProcAddress only redirects implemented names for the real KERNEL32 handle through prepared calls",
-    "InitOnce has no abandoned-thread or SEH recovery; exact native error parity remains unverified"
+    "InitOnce has no abandoned-thread or SEH recovery; exact native error parity remains unverified",
+    "UTF conversion is independently implemented for CP_UTF8; other code pages delegate to native KERNEL32",
+    "UTF maximal-subpart replacement, strict alignment, full-range overlap rejection and error precedence have no native Windows differential proof"
   ]
 }
