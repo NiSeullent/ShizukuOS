@@ -44,9 +44,12 @@ Each variant checks:
   arguments, flags, overlap/alignment/wrapping ranges, and long strings.
 - Native conversion delegation for ACP, OEM, 1252, UTF-7, and an unknown code
   page, checking every forwarded argument and both success/failure returns.
-- The imported Sleep stdcall path, using a deterministic mock that completes
-  a pending attempt when the DLL yields. This is not an OS scheduler or a
-  concurrency test; the separate InitOnce pthread suite tests real contention.
+- The imported Sleep stdcall path, using a deterministic priority model that
+  releases an SRW owner or completes InitOnce only when the DLL blocks with a
+  finite positive delay. Three conflicting shared/exclusive SRW combinations
+  are checked. Repeated zero-delay polling fails after eight calls. This is
+  not an OS scheduler or a concurrency test; the separate InitOnce pthread
+  suite tests real contention, and native priority behavior remains unverified.
 
 The mocks cover only `GetModuleHandleA`, `GetProcAddress`, `GetTickCount`,
 `SetLastError`, `Sleep`, `MultiByteToWideChar`, and `WideCharToMultiByte`.
@@ -82,6 +85,17 @@ calls**, with all outer PE call returns restoring ESP. The alternate-base image
 applied a 16 MiB delta at **54 HIGHLOW relocation sites**. Both static ELF32
 executables had zero undefined symbols. Twelve packer tests cover inventory,
 malformed images, unsupported imports/relocations, and relocation roundtrips.
+
+The subsequent contention-backoff regression first failed against that DLL:
+the deterministic higher-priority waiter made eight zero-delay yields without
+allowing its owner to complete. After changing the runtime to a finite positive
+Sleep, DLL SHA-256
+`a55364068fe00db2637083ea96a25131deb6a40bbd04340cd9dbe4841baaa2b3`
+passes **406 checks and 147 actual PE calls at each base**, including all three
+conflicting SRW owner/waiter combinations and pending InitOnce completion.
+Both variants still have 54 HIGHLOW sites and zero undefined symbols. This
+establishes the adapter's behavior under the explicit service model; actual
+Win98 priority scheduling and timer latency still need guest tests.
 
 `build/results.json` records the input DLL hash, all four harness source and parser
 hashes in `sources_sha256`, the packer test PASS/count,

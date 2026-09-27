@@ -14,7 +14,10 @@ typedef char wchar_matches_utf16[(sizeof(WCHAR) == sizeof(uint16_t)) ? 1 : -1];
 static ntw_srw tick_lock;
 static struct ntw_tick_clock tick_clock;
 static HMODULE native_kernel32;
-static void yield_thread(void) { Sleep(0); }
+/* A zero-delay yield leaves this waiter runnable. Use a finite blocking wait
+ * so lock/initialization owners can progress at a lower scheduling priority.
+ * Resolution and fairness remain properties of the native scheduler. */
+static void yield_thread(void) { Sleep(1); }
 void WINAPI NtwInitializeSRWLock(void *lock) { ntw_srw_init((ntw_srw *)lock); }
 void WINAPI NtwAcquireSRWLockExclusive(void *lock) { ntw_srw_acquire_exclusive(lock, yield_thread); }
 void WINAPI NtwAcquireSRWLockShared(void *lock) { ntw_srw_acquire_shared(lock, yield_thread); }

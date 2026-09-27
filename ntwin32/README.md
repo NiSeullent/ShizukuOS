@@ -10,8 +10,12 @@ Implemented families: seven pointer-sized SRW operations, four InitOnce
 operations, observed-wrap `GetTickCount64`, and scoped `GetProcAddress`
 redirection, plus UTF-8 `MultiByteToWideChar`/`WideCharToMultiByte`: fifteen
 exports in total. Shared readers and an
-exclusive writer use 32-bit atomic acquire/release ordering; contention yields
-through native `Sleep(0)`. There is no fairness guarantee, recursive acquisition,
+exclusive writer use 32-bit atomic acquire/release ordering; contention blocks
+through native `Sleep(1)`. A zero-delay Sleep leaves a waiter runnable, so it
+cannot be the only backoff when a lower-priority owner needs to run. The
+[documented Sleep contract](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep)
+does not promise an exact one-millisecond delay; the native timer resolution
+can increase contention latency. There is no fairness guarantee, recursive acquisition,
 cross-process use, condition-variable integration or owner tracking.
 `GetTickCount64` serializes 32-bit samples and counts observed wraps. It cannot
 recover wraps before DLL load or multiple wraps between calls; this limitation

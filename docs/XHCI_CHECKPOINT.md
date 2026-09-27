@@ -38,6 +38,14 @@ The expanded source/artifact package is generated as
 `build/windows98-shizuku-second-edition-xhci-checkpoint.zip`; its checksum and
 extraction/rebuild receipt are separate generated outputs.
 
+The frozen archive has 214 files, 511,468 bytes and SHA-256
+`6ece2a6a9c65ac5c78d07a43a4455c4340ea48be69542f829757fe34585a8478`.
+Extraction followed by 12 nonguest build/test commands reproduced all 15
+selected artifacts byte for byte. This archive predates the subsequent
+NTWin32 contention-backoff correction documented in the
+[PE32 execution record](../platform/abi32/README.md); it is retained as
+historical evidence, and current runtime development continues in source.
+
 This is controller infrastructure, with no attached USB device. It does not
 implement slots/endpoints, descriptor requests, keyboard input, USB storage,
 interrupts, hotplug or power management. The first slice rejects nonzero

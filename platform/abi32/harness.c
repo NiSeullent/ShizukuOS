@@ -61,6 +61,7 @@ static int equal(const char *left, const char *right)
 static uint32_t last_error;
 static uint32_t module_available = 1;
 static uint32_t module_calls, native_calls, sleep_calls, tick_calls;
+static uint32_t zero_delay_yields;
 static uintptr_t native_last_module;
 static const char *native_last_name;
 static void (*sleep_completion)(void);
@@ -69,9 +70,17 @@ static void STDCALL mock_SetLastError(uint32_t error) { last_error = error; }
 static void STDCALL mock_Sleep(uint32_t milliseconds)
 {
     void (*complete)(void) = sleep_completion;
-    CHECK(milliseconds == 0);
     ++sleep_calls;
     CHECK(complete != NULL);
+    /* Deterministic priority model: the waiter is runnable at higher priority
+     * than the owner. A zero-delay yield does not make that owner eligible.
+     * Fail promptly if the real DLL keeps polling without ever blocking. */
+    if (milliseconds == 0) {
+        ++zero_delay_yields;
+        CHECK(zero_delay_yields < 8);
+        return;
+    }
+    CHECK(milliseconds != UINT32_MAX);
     sleep_completion = NULL;
     complete();
 }
@@ -204,6 +213,37 @@ static void srw_and_ticks(void)
     CHECK(result.low == 19 && result.high == 1 && tick_calls == 4);
 }
 
+static uintptr_t *blocked_lock;
+static uint32_t blocked_shared_owner;
+static void release_owner_from_mock_sleep(void)
+{
+    (void)call1(blocked_shared_owner ? RVA_ReleaseSRWLockShared :
+                RVA_ReleaseSRWLockExclusive, (uintptr_t)blocked_lock);
+}
+static void srw_waits(void)
+{
+    uintptr_t lock = 0;
+    uint32_t owner_shared, waiter_shared;
+    for (owner_shared = 0; owner_shared < 2; ++owner_shared) {
+        for (waiter_shared = 0; waiter_shared < 2; ++waiter_shared) {
+            uint32_t before = sleep_calls;
+            if (owner_shared && waiter_shared) continue; /* No contention. */
+            (void)call1(owner_shared ? RVA_AcquireSRWLockShared :
+                        RVA_AcquireSRWLockExclusive, (uintptr_t)&lock);
+            blocked_lock = &lock;
+            blocked_shared_owner = owner_shared;
+            sleep_completion = release_owner_from_mock_sleep;
+            (void)call1(waiter_shared ? RVA_AcquireSRWLockShared :
+                        RVA_AcquireSRWLockExclusive, (uintptr_t)&lock);
+            CHECK(sleep_calls == before + 1 && sleep_completion == NULL);
+            CHECK(lock == (waiter_shared ? 2u : 1u));
+            (void)call1(waiter_shared ? RVA_ReleaseSRWLockShared :
+                        RVA_ReleaseSRWLockExclusive, (uintptr_t)&lock);
+            CHECK(lock == 0);
+        }
+    }
+}
+
 static void dynamic_routing(void)
 {
     struct call_result result;
@@ -320,6 +360,7 @@ static void once_explicit(void)
     int pending = 73;
     void *context = (void *)(uintptr_t)0x1000;
     struct call_result result;
+    uint32_t before_sleep = sleep_calls;
     last_error = 0;
     result = call4(RVA_InitOnceBeginInitialize, (uintptr_t)&once, 1,
                     (uintptr_t)&pending, (uintptr_t)&context);
@@ -374,7 +415,7 @@ static void once_explicit(void)
     result = call4(RVA_InitOnceBeginInitialize, (uintptr_t)&once, 0,
                     (uintptr_t)&pending, (uintptr_t)&context);
     CHECK(result.low == 1 && pending == 0 && context == payload);
-    CHECK(sleep_calls == 1 && sleep_completion == NULL);
+    CHECK(sleep_calls == before_sleep + 1 && sleep_completion == NULL);
 }
 
 static int same_bytes(const void *left, const void *right, uint32_t size)
@@ -527,6 +568,7 @@ int harness_main(void)
     CHECK(call3(PE_ENTRY, PE_BASE, 1, 0).low == 1);
     CHECK(module_calls == 2);
     srw_and_ticks();
+    srw_waits();
     dynamic_routing();
     once_callbacks();
     once_explicit();
