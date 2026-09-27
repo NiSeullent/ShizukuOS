@@ -66,8 +66,12 @@ jobs:
           make -C ntwddm test freestanding freestanding32
           make -C ntwddm sanitize CC=clang
 
+      - name: Test original freestanding compiler memory support
+        run: python3 platform/freestanding/test.py
+
       - name: Test PCI configuration and verify the freestanding i486 object
-        # PCI has no freestanding make target; compile its portable core directly.
+        # Clang may lower aggregate initialization to memset even with
+        # -ffreestanding. Resolve it with original project compiler support.
         run: |
           make -C drivers/pcie test
           make -C drivers/pcie sanitize CC=clang
@@ -75,6 +79,15 @@ jobs:
             -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow \
             -ffreestanding -fno-builtin -fno-stack-protector \
             -Idrivers/pcie/include -c drivers/pcie/src/ntw_pcie.c \
+            -o drivers/pcie/build/ntw-pcie-core-i486.o
+          clang --target=i486-none-elf -std=c11 -O2 \
+            -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow \
+            -ffreestanding -fno-builtin -fno-stack-protector \
+            -march=i486 -mno-sse -mno-sse2 -mno-mmx -msoft-float \
+            -fno-pie -fno-pic -c platform/freestanding/memory.c \
+            -o drivers/pcie/build/ntw-memory-i486.o
+          ld -m elf_i386 -r drivers/pcie/build/ntw-pcie-core-i486.o \
+            drivers/pcie/build/ntw-memory-i486.o \
             -o drivers/pcie/build/ntw-pcie-i486.o
           nm -u drivers/pcie/build/ntw-pcie-i486.o | tee drivers/pcie/build/undefined-symbols-i486.txt
           test ! -s drivers/pcie/build/undefined-symbols-i486.txt
