@@ -1,0 +1,133 @@
+{
+  "schema": "ntw.native.gdi-diagnostic-trial.v1",
+  "date_utc": "2026-09-27",
+  "source_revision": "6029a530b085b6e1408dc87928530f23b747f97d",
+  "os": {
+    "platform": 1,
+    "major": 4,
+    "minor": 10,
+    "build_raw": 67766446,
+    "build_low": 2222,
+    "kernelex_installed": false
+  },
+  "clean_snapshot": "windows98-clean-installed",
+  "process_exits": {
+    "NTWPROBE.EXE": 0,
+    "NTWGPROB.EXE": 0,
+    "NTWVDIAG.EXE": 30,
+    "NTWDRUN.EXE": 1
+  },
+  "dll_probe_passed": true,
+  "gdi_probe_passed": true,
+  "vxd_probe_passed": false,
+  "complete_native_suite_passed": false,
+  "gdi": {
+    "pixel_contract_checks": 128014,
+    "successful_paints": 20,
+    "display_bits_per_pixel": 1,
+    "display_planes": 4,
+    "cleanup_passed": true,
+    "visible_sample_checks": 1024,
+    "screenshot_sha256": "418ee88da31ac4a1339d1802227ce4a11365f557d67159a08b56232c3d036d56",
+    "screenshot_sample_receipt_sha256": "793b6a1a2deb30917cb85b729032a5006803eea52b18056b1407612f520da1fe",
+    "scope": "Original renderer and app-owned DIB through native Win98 GDI; software CPU-copy fence only"
+  },
+  "vxd": {
+    "exact_entire_file_preflight_passed": true,
+    "file_bytes": 9390,
+    "absolute_device_path": "\\\\.\\C:\\NTWLAB\\NTWRAP9X.VXD",
+    "failure_stage": 30,
+    "win32_error": 2,
+    "native_kernel_execution_verified": false
+  },
+  "collection_sha256": "3e7097a069750df0b154a356908d7c8afc919e8bc27bc5a74c171438c5f0064b",
+  "source_qcow_sha256": "80af6f007dbc3d22e21cc224ceba8ba771b2b6ddca8f55cea249bd837398574a",
+  "source_unchanged_during_collection": true,
+  "guest_process_stopped": true,
+  "qemu_returncode": 0,
+  "media_iso_sha256": "cc616fbaa10c9e0262b28c997061f13b85cf22a068098a8df1b70415c3d3256a",
+  "media_receipt_sha256": "1b630339658478c4f2ac7c045e9a7f8474dececc52a1a81cf998ffd28a8c04bf",
+  "files": {
+    "NTW32.DLL": {
+      "bytes": 17151,
+      "sha256": "a55364068fe00db2637083ea96a25131deb6a40bbd04340cd9dbe4841baaa2b3",
+      "matches_original_media": true
+    },
+    "NTWPROBE.EXE": {
+      "bytes": 14336,
+      "sha256": "9b764f420933b1ef0b5007f6713f1dfc694a077d5101fc69c04bdf168146bbf2",
+      "matches_original_media": true
+    },
+    "NTWRAP9X.VXD": {
+      "bytes": 9390,
+      "sha256": "aff7acf54cd0323fe4dce9aab7d93da16df7b8cf345220ee9d2dafa95b0bc537",
+      "matches_original_media": true
+    },
+    "NTWVDIAG.EXE": {
+      "bytes": 14336,
+      "sha256": "805b025d2db688d765173752101d225e0348546c96c29dbe59120bd3f8c322ec",
+      "matches_original_media": true
+    },
+    "NTWGPROB.EXE": {
+      "bytes": 12800,
+      "sha256": "4b6fa2dad7ccc3dd3efa39917354b30cc7bad77ba4d9d167aaa8fc5646e89b53",
+      "matches_original_media": true
+    },
+    "NTWDRUN.EXE": {
+      "bytes": 5632,
+      "sha256": "d2d577a27370436d048a47b32bc1cbd5a038c179c4a372ff062457fea40ba5ee",
+      "matches_original_media": true
+    },
+    "RUNDIAG.BAT": {
+      "bytes": 544,
+      "sha256": "f5e9fe6e2e270777ff6dca04f85781f8f7bef53c7c219d726aec206620809f94",
+      "matches_original_media": true
+    },
+    "NTWDRUN.LOG": {
+      "bytes": 525,
+      "sha256": "29c5b424617e8c666947c58bc94d7ec25baa4a5b144aba68d46b32fd3dcd8e4b"
+    },
+    "NTWPROBE.LOG": {
+      "bytes": 39,
+      "sha256": "abc75bed8caf0008da7e20d943001ad437698ddde713d83926601b5c419160d0"
+    },
+    "NTWVDIAG.LOG": {
+      "bytes": 431,
+      "sha256": "368cd13d2e3cc814b0ea25502bfdcfb1e5bd70e64d1412d1c025d8d67e664e58"
+    },
+    "NTWGPROB.LOG": {
+      "bytes": 336,
+      "sha256": "59ce9ea9d6abb4f22606b8c5b094156d9c1b5aea69793f1bf67e877659cabc6d"
+    },
+    "NTWDEXIT.TXT": {
+      "bytes": 4,
+      "sha256": "2f1c37754e38b4ac70a9559fbfbdbd28feda47f36be9cd9e3ad5bc844ee3feb6"
+    },
+    "GUESTVER.TXT": {
+      "bytes": 36,
+      "sha256": "b40c1c1fdd6570893bf932eb469bbf865a352778f3027c16b311c43938d4d2e3"
+    }
+  },
+  "missing": [],
+  "original_probe_logs": {
+    "NTWDRUN.LOG": "NTWRUN_VERSION=1\r\nDIRECTORY=C:\\NTWLAB\r\nOS_PLATFORM=1\r\nOS_MAJOR=4\r\nOS_MINOR=10\r\nOS_BUILD_RAW=67766446\r\nOS_BUILD_LOW=2222\r\nWIN98_IDENTIFIED=1\r\nPREFLIGHT=PASS\r\nBEGIN=NTWPROBE.EXE\r\nPROCESS_CREATED=1\r\nWAIT_RESULT=0\r\nEXIT_CODE=0\r\nCLOSE_THREAD=PASS\r\nCLOSE_PROCESS=PASS\r\nEND=NTWPROBE.EXE\r\nBEGIN=NTWGPROB.EXE\r\nPROCESS_CREATED=1\r\nWAIT_RESULT=0\r\nEXIT_CODE=0\r\nCLOSE_THREAD=PASS\r\nCLOSE_PROCESS=PASS\r\nEND=NTWGPROB.EXE\r\nBEGIN=NTWVDIAG.EXE\r\nPROCESS_CREATED=1\r\nWAIT_RESULT=0\r\nEXIT_CODE=30\r\nCLOSE_THREAD=PASS\r\nCLOSE_PROCESS=PASS\r\nRESULT=FAIL\r\n",
+    "NTWPROBE.LOG": "PASS: NTWin32Wrapper9x static imports\r\n",
+    "NTWGPROB.LOG": "NTWDDMWrapper9x native GDI probe v1\r\nSCOPE=app-owned software DIB; no WDDM/D3D/GPU claim\r\nOS_PLATFORM=1\r\nOS_MAJOR=4\r\nOS_MINOR=10\r\nOS_BUILD=67766446\r\nWIN98_IDENTIFIED=1\r\nDISPLAY_BITSPIXEL=1\r\nDISPLAY_PLANES=4\r\nPIXEL_CONTRACT_CHECKS=128014\r\nPIXEL_CONTRACTS=PASS\r\nFENCE_SCOPE=CPU copy only\r\nSUCCESSFUL_PAINTS=20\r\nCLEANUP=PASS\r\nRESULT=PASS\r\n",
+    "NTWVDIAG.LOG": "START=NTWVDIAG/1\r\nFILE_PATH=C:\\NTWLAB\\NTWRAP9X.VXD\r\nDEVICE_PATH=\\\\.\\C:\\NTWLAB\\NTWRAP9X.VXD\r\nEXPECTED_SHA256=aff7acf54cd0323fe4dce9aab7d93da16df7b8cf345220ee9d2dafa95b0bc537\r\nOS_PLATFORM=0x00000001\r\nOS_MAJOR=0x00000004\r\nOS_MINOR=0x0000000a\r\nOS_BUILD=0x040a08ae\r\nFILE_BYTES=0x000024ae\r\nFILE_BYTES_HIGH=0x00000000\r\nLE_OFFSET=0x00000080\r\nPREFLIGHT=PASS\r\nFAIL_STAGE=0x0000001e\r\nWIN32_ERROR=0x00000002\r\nOBSERVED=0x00000000\r\nRESULT=FAIL\r\n",
+    "NTWDEXIT.TXT": "1 \r\n"
+  },
+  "checkpoint": {
+    "durable": true,
+    "raw_sha256": "80af6f007dbc3d22e21cc224ceba8ba771b2b6ddca8f55cea249bd837398574a",
+    "raw_bytes": 489750528,
+    "archive_sha256": "0c15c1a7b266599eb1834c9c02f87ee9c1d007a6d2b52e4207b5b89df8ee00d8",
+    "archive_bytes": 147917412
+  },
+  "limits": [
+    "No successful VxD load or native VMM call",
+    "No WDDM, Direct3D or hardware GPU acceleration",
+    "No physical PCI-E driver certification",
+    "DLL/GDI results apply only to the defined probes",
+    "Windows 98 GUI uses BIOS; UEFI-to-Windows boot remains unimplemented"
+  ]
+}

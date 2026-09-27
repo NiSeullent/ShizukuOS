@@ -11,11 +11,11 @@ python3 platform/test.py
 
 새 `NTW32.DLL`은 SRW·InitOnce·틱 확장·동적 API 조회·UTF-8 변환 15개 함수를 제공합니다. 실제 DLL의 32비트 호출·재배치 시험을 통과했고, 독자 LE 형식의 `NTWRAP9X.VXD`와 VMM 조회 경로를 구현했습니다. ShizukuDOS는 x64 UEFI를 종료하고 자체 32비트 보호 모드 커널에서 커널 코어·소프트웨어 그래픽·AHCI DMA 디스크 읽기·PCI-E 브리지 뒤 xHCI 명령 링과 USB2 EP0 descriptor 전송을 실행했습니다.
 
-[네이티브 그래픽 시험 프로그램](ntwddm/win98/)은 독자 렌더러를 앱 소유 GDI 비트맵에 연결하며, 현재 빌드·픽셀·수명 관리 호스트 시험을 통과했습니다. [USB descriptor 파서](drivers/usb_native/)도 독자 구현으로 추가했습니다. [독자 EP0 전송 계층](drivers/xhci_usb/)은 실제 QEMU USB 장치에서 장치·구성 서술자를 네 번의 제어 전송으로 읽고 DMA 종료까지 검증했습니다. Windows 98 내부의 GDI·USB 드라이버 실행과 USB 장치 설정·HID 동작은 아직 검증하지 않았습니다.
+[네이티브 그래픽 시험 프로그램](ntwddm/win98/)은 독자 렌더러를 앱 소유 GDI 비트맵에 연결합니다. 실제 Windows 98 SE에서 픽셀 계약 검사 128,014회·화면 그리기 20회·자원 정리와 종료 코드 0을 확인했습니다. 이는 소프트웨어 GDI 경로이며 WDDM·GPU 가속은 아직 아닙니다. [USB descriptor 파서](drivers/usb_native/)도 독자 구현으로 추가했습니다. [독자 EP0 전송 계층](drivers/xhci_usb/)은 실제 QEMU USB 장치에서 장치·구성 서술자를 네 번의 제어 전송으로 읽고 DMA 종료까지 검증했습니다. Windows 98 내부의 USB 드라이버 실행과 USB 장치 설정·HID 동작은 아직 검증하지 않았습니다.
 
 [독자 FAT32 판독기](drivers/fat_native/)는 최대 512KiB의 루트 파일을 읽으며, 조각난 클러스터·손상·읽기 오류·시간 제한을 GCC·Clang·ASan/UBSan으로 시험했습니다. [UEFI·AHCI 연결 코드](shizukudos/uefi_fat/)는 실제 KVM에서 UEFI 종료 후 257개 클러스터에 흩어진 131,195바이트 파일을 정확히 읽었습니다. 메모리 경계·DMA 해제·디스크 해시도 독립 대조했습니다. DOS 부팅 파일 실행은 아직 구현하지 않았습니다.
 
-이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 매체와 등록 번호로 Windows 98 SE 설치를 완료했습니다. KernelEx가 없는 새 설치본에서 독자 `NTW32.DLL`의 정적 import·동적 조회·동기화·문자 변환 프로브가 종료 코드 0으로 통과했습니다. 이어진 VxD 열기는 오류 2로 실패해 그래픽 프로브는 실행되지 않았으며, 전체 시험은 실패로 기록했습니다. [첫 네이티브 시험 기록](docs/NATIVE_FIRST_TRIAL.md)에 정확한 범위와 해시가 있습니다. 이 설치는 기존 BIOS 경로를 사용했으며 UEFI를 통한 Windows 98 GUI 부팅을 검증한 것은 아닙니다.
+이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 매체와 등록 번호로 Windows 98 SE 설치를 완료했습니다. KernelEx가 없는 새 설치본에서 독자 `NTW32.DLL`과 소프트웨어 GDI 프로브가 각각 종료 코드 0으로 통과했습니다. VxD는 전체 파일 바이트 검사 후 절대 경로로 열어도 오류 2가 발생했으며, 전체 진단 묶음은 실패로 기록했습니다. [최신 네이티브 진단](docs/NATIVE_GDI_TRIAL.md)과 [첫 시험 기록](docs/NATIVE_FIRST_TRIAL.md)에 범위·원본 로그·해시가 있습니다. 이 설치는 기존 BIOS 경로를 사용했으며 UEFI를 통한 Windows 98 GUI 부팅을 검증한 것은 아닙니다.
 
 ## 기존 경로의 보존 기록
 
