@@ -128,7 +128,8 @@ class PrepareTests(unittest.TestCase):
     def test_provider_native_imports_and_exports(self):
         provider = mod.PE((ROOT / 'build/platform/NTW32.DLL').read_bytes())
         imported = [(d['dll'].upper(), e[1]) for d in provider.imports() for e in d['entries']]
-        self.assertEqual(set(imported), {('KERNEL32.DLL','GetTickCount'), ('KERNEL32.DLL','Sleep')})
+        self.assertEqual(set(imported), {('KERNEL32.DLL', name) for name in
+            ('GetTickCount','Sleep','GetModuleHandleA','GetProcAddress','SetLastError')})
         export_rva, _ = provider.directory(0)
         exports = provider.offset(export_rva, 40)
         count = provider.u32(exports+24)
@@ -137,6 +138,17 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(observed, set(mod.routes()['exports']))
         self.assertNotIn('get_api_table', observed)
         self.assertEqual((provider.u16(provider.opt+48),provider.u16(provider.opt+50)), (4,10))
+
+    def test_provider_cannot_redirect_its_own_native_loader_imports(self):
+        with self.assertRaisesRegex(mod.PEError, 'self-routing'):
+            mod.prepare((ROOT/'build/platform/NTW32.DLL').read_bytes())
+
+    def test_provider_has_project_version_resource(self):
+        provider = mod.PE((ROOT/'build/platform/NTW32.DLL').read_bytes())
+        rva, size = provider.directory(2)
+        self.assertGreater(size, 0)
+        payload = provider.take(provider.offset(rva, size), size)
+        self.assertIn("Windows 98 Shizuku's Second Edition".encode('utf-16le'), payload)
 
 if __name__ == '__main__':
     unittest.main()

@@ -2,14 +2,16 @@
 
 Windows 98를 현대 하드웨어와 애플리케이션에 맞게 확장하는 **개발 중인 운영체제 프로젝트**입니다. 새 개발 경로는 독자 구현인 **NTWrapper9x**(커널 기반), **NTWin32Wrapper9x**(앱 호환성), **NTWDDMWrapper9x**(그래픽), **PCI-E 확장**, **ShizukuDOS UEFI**로 구성합니다. Windows 8.1/10/11 수준의 기능은 목표이며 아직 달성하지 않았습니다.
 
-새 경로의 빌드·시험·현재 한계는 [독립 플랫폼 개발 안내](platform/README.md)와 [검증 기록](docs/INDEPENDENT_PLATFORM_CHECKPOINT.md)에 있습니다. 이 빌드는 KernelEx·Wine·ReactOS 구현이나 기존 `m98wrap.dll`을 사용하지 않습니다. `NTW32.DLL`의 기존 Windows 98 네이티브 함수 호출은 유지합니다.
+새 경로의 빌드·시험·현재 한계는 [독립 플랫폼 개발 안내](platform/README.md)와 [네이티브 계층 검증 기록](docs/NATIVE_PLATFORM_CHECKPOINT.md)에 있습니다. 이 빌드는 KernelEx·Wine·ReactOS 구현이나 기존 `m98wrap.dll`을 사용하지 않습니다. `NTW32.DLL`의 기존 Windows 98 네이티브 함수 호출은 유지합니다.
 
 ```sh
 python3 platform/build.py
 python3 platform/test.py
 ```
 
-새 커널 코어의 호스트 시험 및 UEFI CPL0 시험, 소프트웨어 그래픽 표시 시험과 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 현 개발 서버의 Windows 98 VM에는 운영체제가 설치되어 있지 않아 새 DLL의 Windows 98 실행은 아직 검증하지 않았습니다. UEFI 부팅 성공은 Windows 98 GUI 부팅을 뜻하지 않습니다.
+새 `NTW32.DLL`은 SRW·InitOnce·틱 확장·동적 API 조회 13개 함수를 제공합니다. 실제 DLL의 32비트 호출·재배치 시험을 통과했고, 독자 LE 형식의 `NTWRAP9X.VXD`와 VMM 조회 경로를 구현했습니다. ShizukuDOS는 x64 UEFI를 종료하고 자체 32비트 보호 모드 커널로 전환해 커널 코어와 소프트웨어 그래픽을 실행했습니다.
+
+이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 Windows 98 SE 매체의 해시를 검증해 별도 설치 환경을 준비했으며, 새 DLL의 Windows 98 실행은 아직 검증하지 않았습니다. UEFI 전환 성공은 Windows 98 GUI 부팅을 뜻하지 않습니다.
 
 ## 기존 경로의 보존 기록
 

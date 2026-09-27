@@ -31,6 +31,20 @@ def main():
         '-fsanitize=address,undefined', '-fno-omit-frame-pointer', *sources,
         '-o', BUILD/'core_test_sanitized')
     run(BUILD/'core_test_sanitized')
+    run(os.environ.get('CC','cc'), *flags, '-O2', 'platform/tests/resolve_test.c',
+        'ntwin32/resolve.c', '-o', BUILD/'resolve_test')
+    run(BUILD/'resolve_test')
+    run(os.environ.get('NTW_SANITIZER_CC','clang'), *flags, '-g', '-O1',
+        '-fsanitize=address,undefined', 'platform/tests/resolve_test.c',
+        'ntwin32/resolve.c', '-o', BUILD/'resolve_test_sanitized')
+    run(BUILD/'resolve_test_sanitized')
+    run(os.environ.get('CC','cc'), *flags, '-O2', 'ntwin32/tests/initonce_test.c',
+        'ntwin32/initonce.c', '-o', BUILD/'initonce_test')
+    run(BUILD/'initonce_test')
+    run(os.environ.get('NTW_SANITIZER_CC','clang'), *flags, '-g', '-O1',
+        '-fsanitize=address,undefined', 'ntwin32/tests/initonce_test.c',
+        'ntwin32/initonce.c', '-o', BUILD/'initonce_test_sanitized')
+    run(BUILD/'initonce_test_sanitized')
     run(sys.executable, '-m', 'unittest', 'discover', '-s', 'platform/tests', '-p', 'test_*.py', '-v')
     # Independent binutils reader also needs to recognize the rebuilt import table.
     output = subprocess.check_output(['i686-w64-mingw32-objdump','-p', str(BUILD/'NTWPROBE.EXE')], text=True)
@@ -39,11 +53,15 @@ def main():
     (BUILD/'pe-objdump.txt').write_text(output)
     (BUILD/'host-tests.json').write_text(json.dumps({'schema':'ntw.host-tests.v1',
         'kernel_lifetime_events':'pass', 'srw_concurrency':'pass', 'sanitizers':'pass',
-        'pe_routing':'pass', 'independent_pe_reader':'pass', 'win98_guest':'not_run',
+        'pe_routing':'pass', 'dynamic_resolver':'pass', 'initonce_concurrency':'pass',
+        'package_evidence':'pass',
+        'independent_pe_reader':'pass', 'win98_guest':'not_run',
         'build_manifest_sha256': hashlib.sha256((BUILD/'manifest.json').read_bytes()).hexdigest(),
         'test_sources_sha256': {name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest()
             for name in ('platform/test.py','platform/tests/core_test.c','platform/tests/test_prepare.py',
-                         'platform/tests/headers.c')}}, indent=2)+'\n')
+                         'platform/tests/headers.c','platform/tests/resolve_test.c',
+                         'ntwin32/tests/initonce_test.c','platform/tests/test_package_evidence.py',
+                         'platform/package.py','platform/verify_package.py')}}, indent=2)+'\n')
     print('PASS: independent platform host contracts; Windows 98 guest not run')
 if __name__ == '__main__':
     main()

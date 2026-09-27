@@ -175,6 +175,15 @@ def routes() -> dict:
 
 def prepare(data: bytes) -> tuple[bytes, dict]:
     pe = PE(data)
+    plan = routes()
+    export_rva, export_size = pe.directory(0)
+    if export_rva:
+        if export_size < 40:
+            raise PEError('invalid export directory')
+        export_at = pe.offset(export_rva, 40)
+        library_name = pe.string(pe.u32(export_at + 12))
+        if library_name.upper() == plan['provider']:
+            raise PEError('provider must retain native imports; self-routing is forbidden')
     for index, label in ((4, 'signed image'), (9, 'static TLS'),
                          (10, 'load configuration'), (13, 'delay imports'), (14, 'CLR')):
         if any(pe.directory(index)):
@@ -190,7 +199,6 @@ def prepare(data: bytes) -> tuple[bytes, dict]:
         raise PEError('no section-header slack')
     if any(pe.take(new_header, 40)):
         raise PEError('section-header slack is in use')
-    plan = routes()
     supported = set(plan['exports'])
     groups, redirected = [], []
     for descriptor in pe.imports():

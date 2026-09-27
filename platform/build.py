@@ -25,13 +25,20 @@ def main():
     BUILD.mkdir(parents=True, exist_ok=True)
     (BUILD / 'manifest.json').unlink(missing_ok=True)
     sources = ['ntwrapper/core.c', 'ntwrapper/include/ntwrapper.h', 'ntwin32/runtime.c',
-               'ntwin32/sync.c', 'ntwin32/sync.h', 'ntwin32/exports.def',
+               'ntwin32/sync.c', 'ntwin32/sync.h', 'ntwin32/resolve.c',
+               'ntwin32/resolve.h', 'ntwin32/exports.def',
+               'ntwin32/initonce.c', 'ntwin32/initonce.h', 'ntwin32/version.rc',
                'ntwin32/routes.json', 'ntwin32/prepare.py', 'platform/tests/probe.c',
                'platform/build.py']
     def source_hashes():
         return {name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in sources}
     before = source_hashes()
     cc = os.environ.get('NTW_CC', 'i686-w64-mingw32-gcc')
+    route_names = json.loads((ROOT/'ntwin32/routes.json').read_text())['exports']
+    if any(not name.isascii() or not name.isidentifier() for name in route_names):
+        raise RuntimeError('Invalid route export identifier')
+    (BUILD/'routes.inc').write_text(''.join(
+        f'NTW_ROUTE("{name}", Ntw{name})\n' for name in sorted(route_names)))
     flags = ['-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', '-march=i486',
              '-fno-builtin', '-ffreestanding', '-fno-stack-protector', '-nostdlib']
     link = ['-Wl,--subsystem,console:4.10', '-Wl,--disable-dynamicbase',
@@ -39,10 +46,12 @@ def main():
             '-Wl,--major-os-version,4', '-Wl,--minor-os-version,10']
     run(cc, *flags, '-c', 'ntwrapper/core.c', '-o', BUILD / 'ntwrapper9x.o')
     run('i686-w64-mingw32-ar', 'rcsD', BUILD / 'ntwrapper9x.a', BUILD / 'ntwrapper9x.o')
+    run('i686-w64-mingw32-windres', '-i', 'ntwin32/version.rc', '-o', BUILD/'version.o', '-O', 'coff')
     run(cc, *flags, *link, '-shared', '-Wl,--entry,_DllMain@12',
         '-Wl,--image-base,0x68000000',
         '-Wl,--subsystem,windows:4.10', '-o', BUILD / 'NTW32.DLL',
-        'ntwin32/runtime.c', 'ntwin32/sync.c', 'ntwin32/exports.def', '-lkernel32')
+        '-I', BUILD, 'ntwin32/runtime.c', 'ntwin32/sync.c', 'ntwin32/resolve.c',
+        'ntwin32/initonce.c', 'ntwin32/exports.def', BUILD/'version.o', '-lkernel32')
     run(cc, *flags, *link, '-Wl,--entry,_mainCRTStartup', '-o', BUILD / 'probe-original.exe',
         'platform/tests/probe.c', '-lkernel32')
     prepared, report = load_prepare().prepare((BUILD / 'probe-original.exe').read_bytes())

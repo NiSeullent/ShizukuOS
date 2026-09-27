@@ -8,3 +8,8 @@ EXPORTS
     TryAcquireSRWLockExclusive=NtwTryAcquireSRWLockExclusive@4
     TryAcquireSRWLockShared=NtwTryAcquireSRWLockShared@4
     GetTickCount64=NtwGetTickCount64@0
+    GetProcAddress=NtwGetProcAddress@8
+    InitOnceInitialize=NtwInitOnceInitialize@4
+    InitOnceBeginInitialize=NtwInitOnceBeginInitialize@16
+    InitOnceComplete=NtwInitOnceComplete@12
+    InitOnceExecuteOnce=NtwInitOnceExecuteOnce@16

@@ -7,11 +7,11 @@ capability is the long-term target, not the current compatibility claim.
 
 | Component | Current implementation | Required next target |
 | --- | --- | --- |
-| [NTWrapper9x](../ntwrapper/) | Original freestanding object/handle/event core | Win98 VxD/VMM binding, scheduler, memory, interrupts, I/O |
+| [NTWrapper9x](../ntwrapper/) | Original object/handle/event core, native LE VxD and bounded VMM query bridge | Windows 98 guest load/query, scheduler, memory, interrupts, I/O |
 | [NTWin32Wrapper9x](../ntwin32/) | App-local PE32 provider and bounded import preparer; no KernelEx linkage | Clean Win98 static-import guest result, loader/Unicode/NT service families |
 | [NTWDDMWrapper9x](../ntwddm/) | Original software framebuffer/surface/presentation core | Win98 display binding, GPU memory/scheduling, vendor miniports and D3D |
 | [PCI-E](../drivers/pcie/) | Config transport, topology, ECAM/capabilities/resources/DMA constraints | CONFIGMG/VMM binding, interrupts, real storage/USB/GPU drivers |
-| [ShizukuDOS UEFI](../shizukudos/uefi/) | Original x64 EFI program and post-firmware handoff | DOS/runtime/boot bridge capable of reaching Win98 GUI without CSM |
+| [ShizukuDOS UEFI](../shizukudos/uefi32/) | Original EFI program, verified transition from x64 firmware to own 32-bit protected-mode kernel | DOS/runtime/boot bridge capable of reaching Win98 GUI without CSM |
 
 ## Reproduce
 
@@ -21,6 +21,10 @@ No dependencies are installed by these commands.
 ```sh
 python3 platform/build.py
 python3 platform/test.py
+python3 platform/abi32/build.py
+python3 platform/abi32/test_packer.py
+python3 ntwrapper/vxd/build.py
+python3 ntwrapper/vxd/test.py
 make -C drivers/pcie test
 make -C drivers/pcie sanitize CC=clang
 make -C ntwddm test freestanding
@@ -28,6 +32,9 @@ make -C ntwddm sanitize CC=clang
 python3 shizukudos/uefi/build.py
 python3 shizukudos/uefi/test.py
 python3 shizukudos/uefi/test_qemu.py --qemu /usr/libexec/qemu-kvm --firmware-code /usr/share/edk2/ovmf/OVMF_CODE.fd --firmware-vars /usr/share/edk2/ovmf/OVMF_VARS.fd
+python3 shizukudos/uefi32/build.py
+python3 shizukudos/uefi32/test.py
+python3 shizukudos/uefi32/test_qemu.py --qemu /usr/libexec/qemu-kvm --firmware-code /usr/share/edk2/ovmf/OVMF_CODE.fd --firmware-vars /usr/share/edk2/ovmf/OVMF_VARS.fd
 ```
 
 Generated artifacts, firmware variable copies, receipts and images stay in
@@ -38,7 +45,8 @@ client settings, flashes firmware or updates an installed Windows system.
 After those checks, `python3 platform/package.py` produces an allowlisted source
 and artifact ZIP. `python3 platform/verify_package.py` extracts it into a separate
 build directory, validates the file manifest, repeats the application/core host
-tests and requires identical rebuilt DLL, probe, archive and EFI bytes. It does
+tests and requires identical rebuilt DLL, probes, archive, VxD and both EFI
+images, including the 32-bit payload and mode-transition blob. It does
 not boot another guest or install the artifacts.
 
 ## Engineering sequence and completion gates
@@ -77,4 +85,9 @@ The reference baseline is Git commit `1d54ca7`. Host compilers and OVMF are
 present. The registered Win98 VM is an empty placeholder, with no installed OS;
 it has not been modified or booted. Old Windows-host VM results in `vm/README.md`
 are reference history and do not validate these new components. Current exact
-results belong in [the independent checkpoint](../docs/INDEPENDENT_PLATFORM_CHECKPOINT.md).
+results belong in [the native checkpoint](../docs/NATIVE_PLATFORM_CHECKPOINT.md).
+The [first independent checkpoint](../docs/INDEPENDENT_PLATFORM_CHECKPOINT.md)
+is retained as historical evidence. The user has since supplied the same
+Korean OEM ISO for this server; its SHA-256 was verified before preparing a
+separate isolated installation experiment. Private media and guest disks remain
+outside every source/artifact package.

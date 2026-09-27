@@ -49,7 +49,7 @@ Wine and ReactOS are not bundled as complete runtimes. Their NT/Unix kernel depe
 ## Independent platform path
 
 The new `ntwrapper/`, `ntwin32/`, `ntwddm/`, `drivers/pcie/`,
-`shizukudos/uefi/` and `platform/` sources are independently authored project
+`shizukudos/uefi/`, `shizukudos/uefi32/` and `platform/` sources are independently authored project
 code under GPL-2.0-only. The independent build does not link the legacy
 KernelEx/Wine/ReactOS/LodePNG providers listed above. Public ABI specifications and
 component provenance are recorded in their respective directories. Compiler

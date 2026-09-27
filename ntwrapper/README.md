@@ -27,12 +27,20 @@ The build produces freestanding i486 COFF object/library files in
 with a live lease, exhaustion, retired generations and simultaneous consumers.
 The separate `shizukudos/uefi` integration can execute this core at CPL0 after
 ExitBootServices; its evidence is a different target from Windows 98.
+The `shizukudos/uefi32` integration additionally executes it after an actual
+x64-to-32-bit protected-mode transition, verified under OVMF/KVM.
+
+The original [native VxD binding](vxd/) now builds `NTWRAP9X.VXD`, with an LE
+packager, DDB/control dispatch, VMM page-validation query bridge and a guest
+load/query probe. Its host and native i386 assembly tests have passed. Actual
+Windows 98 loading and VMM service behavior remain unverified.
 
 Still required for a Windows 98 kernel extension: a verified VxD/LE loader and
 VMM service binding, locked/nonpaged allocations, process-local handle tables,
 safe user/kernel request copying, blocking wait queues and thread cancellation,
 IRQL/interrupt dispatch, page tables and a driver I/O manager. The current
-archive is **not an installable VxD**, an NTOSKRNL replacement, or a driver ABI.
+COFF archive itself is not a VxD, an NTOSKRNL replacement, or a driver ABI;
+the separately built VxD is an experimental binding with a bounded query ABI.
 `ntw_event_try_wait` returning `NTW_PENDING` never parks a thread.
 
 All code here is independently written, GPL-2.0-only. Public interface references:
