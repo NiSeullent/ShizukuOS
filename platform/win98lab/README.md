@@ -29,8 +29,8 @@ Omit `--resume` only for a first installation with no existing guest disk.
 The supervisor allows 60–1800 seconds and always stops its own child. A
 `snapshot` command records a screenshot; it does not create a VM snapshot.
 Internal snapshots must be saved/restored through the verified owned QMP
-connection. The latest private `install-file-copy` snapshot captures setup
-copying files at 20%; installation and native probe execution remain incomplete.
+connection. The latest private `install-file-copy-continued` snapshot captures
+setup copying files at 53%; installation and native probe execution remain incomplete.
 
 ## Optional RAM working copy
 
@@ -86,6 +86,47 @@ as a durable checkpoint.
 RAM working copies are volatile until persistence succeeds; host restart would
 lose their newer state. The original disk and any verified backups remain on
 disk. This option is intended for one coordinated bounded installation attempt.
+
+## Optional compressed checkpoints
+
+An existing installation can instead use a private RAM working copy with
+byte-exact XZ persistence:
+
+```sh
+python3 platform/win98lab/lab.py run --max-seconds 1200 --resume --packed-checkpoint
+```
+
+This opt-in mode retains the original qcow2 and all earlier backups. Compression
+preserves the complete qcow2 byte stream, including its internal snapshots.
+Each generation gets an immutable `install-packed-*.qcow2.xz` archive and a
+durable `packed-copy-*.json` journal. After the archive is fsynced and its
+decoded bytes and checksums are verified, an atomic `install-packed-current.json`
+pointer selects it. The completed journal becomes durable before the RAM copy
+is removed. A later boot restores that selected generation and checks qcow2
+integrity. Raw boot and raw persistence refuse an existing packed pointer to
+prevent silently returning to the older uncompressed installation.
+
+The 6 GiB memory and 20 GiB disk reserves remain enforced. This mode additionally
+reserves 256 MiB for the codec, the full 2.25 GiB working image, the guest
+allowance, and a 128 MiB persistence margin. Before allocating RAM it measures
+the current compressed size and requires enough persistent storage for another
+generation. Persistence rechecks capacity before creating and writing the new
+archive; guest growth or other host activity can still prevent writeback.
+In that case both the old checkpoint and newer RAM working copy are retained,
+and `persist-ram` retries the recorded backend after the guest is proven stopped.
+
+Restoration accepts one bounded CRC64 XZ stream with a 64 MiB decoder memory
+limit. Truncation, trailing or concatenated streams, checksum or length mismatch,
+oversized expansion, changed originals and stale generations stop publication.
+The codec, interruption recovery and supervisor routing have separate host tests:
+
+```sh
+python3 platform/win98lab/test_packed.py -v
+python3 platform/win98lab/test_lab_packed.py -v
+```
+
+These tests use synthetic data and start no guest. Compressed Windows media,
+disks and snapshots remain private under the same rules as raw images.
 
 ## Private evidence and keys
 

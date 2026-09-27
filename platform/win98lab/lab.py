@@ -18,6 +18,7 @@ import threading
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import storage
+import packed
 
 REPO = Path(__file__).resolve().parents[2]
 BUILD = REPO / "build" / "win98-lab"
@@ -94,21 +95,36 @@ def exclusive_lab_lock():
         os.close(fd)
 
 
-def headroom(ram_copy=False):
+def storage_backend(record):
+    mode = record.get('mode')
+    if mode is None:
+        return storage
+    if mode == 'packed':
+        return packed
+    raise RuntimeError('Unknown RAM persistence mode')
+
+
+def pending_journals():
+    return storage.pending_journals(BUILD) + packed.pending_journals(BUILD)
+
+
+def headroom(ram_copy=False, packed_checkpoint=False):
     values = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
     available = int(values["MemAvailable"].split()[0]) * 1024
     free = shutil.disk_usage(BUILD).free
-    limits = storage.check_headroom(available, free, shutil.disk_usage('/dev/shm').free, ram_copy)
+    tmpfs_free = shutil.disk_usage('/dev/shm').free
+    limits = (packed.check_headroom(available, free, tmpfs_free) if packed_checkpoint else
+              storage.check_headroom(available, free, tmpfs_free, ram_copy))
     return {"available_memory_bytes": available, "free_disk_bytes": free, **limits}
 
 
-def preflight(ram_copy=False):
+def preflight(ram_copy=False, packed_checkpoint=False):
     if not ISO.is_file() or digest(ISO) != EXPECTED_ISO:
         raise RuntimeError("Authorized installation media missing or checksum mismatch")
     result = json.loads(subprocess.check_output([sys.executable, str(PREFLIGHT), "preflight"], text=True, timeout=30))
     if not result["ok"] or result["active_compat_vms"] or result["active_direct_compat_pids"]:
         raise RuntimeError("Compatibility lab must have no other active QA guest")
-    result["local_headroom"] = headroom(ram_copy)
+    result["local_headroom"] = headroom(ram_copy, packed_checkpoint)
     return result
 
 
@@ -124,6 +140,8 @@ def assert_owned():
     active_disk = state.get('disk', str(DISK))
     if active_disk != str(DISK) and active_disk != state.get('ram_working_copy', {}).get('working_disk'):
         raise RuntimeError("Unknown working disk")
+    if active_disk != str(DISK):
+        storage_backend(state['ram_working_copy']).locations(state['ram_working_copy'])
     expected_disk = f'file={active_disk},if=ide,index=0,format=qcow2'.encode()
     expected_qmp = f'unix:{QMP_PATH},server=on,wait=off'.encode()
     if expected_disk not in args or expected_qmp not in args:
@@ -131,12 +149,12 @@ def assert_owned():
     return state
 
 
-def supervise(seconds, resume, ram_copy=False):
+def supervise(seconds, resume, ram_copy=False, packed_checkpoint=False):
     if not 60 <= seconds <= 1800:
         raise RuntimeError("Install supervisor must be bounded to 60..1800 seconds")
     os.umask(0o077)
     BUILD.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if storage.pending_journals(BUILD):
+    if pending_journals():
         raise RuntimeError('An unfinished RAM persistence journal requires recovery before another boot')
     if STATE.exists():
         prior = json.loads(STATE.read_text())
@@ -145,19 +163,23 @@ def supervise(seconds, resume, ram_copy=False):
         pending = prior.get('ram_working_copy', {})
         if pending and pending.get('status') != 'persisted':
             raise RuntimeError("A prior RAM working copy needs persistence/recovery before another boot")
+    ram_copy = ram_copy or packed_checkpoint
     if ram_copy and not resume:
         raise RuntimeError("RAM working copies require an existing stopped disk and --resume")
+    if packed.has_checkpoint(DISK) and not packed_checkpoint:
+        raise RuntimeError('A packed checkpoint is current; resume with --packed-checkpoint to avoid rollback')
     if DISK.exists() and not resume:
         raise RuntimeError("Existing installation preserved; explicitly --resume to boot it")
     if resume and not DISK.is_file():
         raise RuntimeError("No existing installation to resume")
-    check = preflight(ram_copy)
+    check = preflight(ram_copy, packed_checkpoint)
     if not DISK.exists():
         subprocess.run(["qemu-img", "create", "-f", "qcow2", str(DISK), "2G"], check=True, timeout=15)
     QMP_PATH.unlink(missing_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     log_path = BUILD / f"qemu-{stamp}.log"
-    ram_record = storage.prepare(DISK) if ram_copy else None
+    backend = packed if packed_checkpoint else storage
+    ram_record = backend.prepare(DISK) if ram_copy else None
     active_disk = Path(ram_record['working_disk']) if ram_record else DISK
     command = ["/usr/libexec/qemu-kvm", "-name", "win98-modern-private-install",
                "-machine", "pc-i440fx-rhel10.0.0,acpi=off,hpet=off", "-accel", "kvm", "-cpu", "qemu64",
@@ -177,7 +199,7 @@ def supervise(seconds, resume, ram_copy=False):
         state['ram_working_copy'] = ram_record
         state['child_file_size_limit_bytes'] = storage.RAM_DISK_ALLOWANCE
     state['harness_sources_sha256'] = {name: digest(Path(__file__).parent / name)
-                                      for name in ('lab.py', 'storage.py')}
+                                      for name in ('lab.py', 'storage.py', 'packed.py')}
     write_state(state)
     process = None
     timer = None
@@ -223,7 +245,7 @@ def supervise(seconds, resume, ram_copy=False):
             state["returncode"] = process.returncode
         if ram_record and (process is None or process.poll() is not None):
             try:
-                storage.persist(ram_record)
+                backend.persist(ram_record)
             except Exception as error:
                 ram_record['status'] = 'persistence_required'
                 ram_record['error'] = str(error)
@@ -295,6 +317,8 @@ def main():
     run.add_argument("--max-seconds", type=int, default=900)
     run.add_argument("--resume", action="store_true")
     run.add_argument("--ram-working-copy", action="store_true")
+    run.add_argument("--packed-checkpoint", action="store_true",
+                     help="resume in RAM and persist byte-exact compressed checkpoints")
     sub.add_parser("persist-ram")
     sub.add_parser("status")
     snap = sub.add_parser("snapshot"); snap.add_argument("name")
@@ -304,7 +328,7 @@ def main():
     args = parser.parse_args()
     if args.command == "run":
         with exclusive_lab_lock():
-            supervise(args.max_seconds, args.resume, args.ram_working_copy)
+            supervise(args.max_seconds, args.resume, args.ram_working_copy, args.packed_checkpoint)
     elif args.command == 'persist-ram':
         with exclusive_lab_lock():
             retry_persistence()
@@ -323,11 +347,11 @@ def retry_persistence():
     # A supervisor crash can leave the last receipt marked running even after
     # its QEMU child stopped. PID absence, the lock and journal permit recovery.
     record = state.get('ram_working_copy')
-    pending = storage.pending_journals(BUILD)
+    pending = pending_journals()
     if not record and not pending:
         # A first recovery may finish and remove RAM, then crash before creating
         # STATE. A sole completed journal still proves the published disk.
-        pending = list(BUILD.glob('ram-copy-*.json'))
+        pending = list(BUILD.glob('ram-copy-*.json')) + list(BUILD.glob('packed-copy-*.json'))
     if pending:
         if len(pending) != 1:
             raise RuntimeError('Multiple persistence journals need explicit review')
@@ -336,13 +360,16 @@ def retry_persistence():
         raise RuntimeError('No RAM copy journal')
     if record.get('original_disk') != str(DISK):
         raise RuntimeError('Unexpected persistent disk target')
-    storage.locations(record)
+    backend = storage_backend(record)
+    if backend is storage and packed.has_checkpoint(DISK):
+        raise RuntimeError('A packed checkpoint is current; raw persistence would roll back the installation')
+    backend.locations(record)
     assert_no_owned_processes(record)
-    storage.persist(record)
+    backend.persist(record)
     state['ram_working_copy'] = record
     state['process_stopped'] = True
     write_state(state)
-    print('Verified RAM working copy persisted; original backup retained')
+    print('Verified RAM working copy persisted; previous disk checkpoints retained')
 
 
 def assert_no_owned_processes(record, proc_root=Path('/proc')):

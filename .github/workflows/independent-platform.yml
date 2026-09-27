@@ -43,7 +43,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-            gcc-multilib clang lld mingw-w64 nasm make binutils python3
+            gcc-multilib clang lld mingw-w64 nasm make binutils python3 qemu-utils
 
       - name: Build NTWrapper9x and NTWin32Wrapper9x
         run: python3 platform/build.py
@@ -118,7 +118,10 @@ jobs:
 
       - name: Test installation-lab storage guards without starting a guest
         timeout-minutes: 3
-        run: python3 platform/win98lab/test_storage.py -v
+        run: |
+          python3 platform/win98lab/test_storage.py -v
+          python3 platform/win98lab/test_packed.py -v
+          python3 platform/win98lab/test_lab_packed.py -v
 
       - name: Test xHCI command rings and build the PCI-E integration
         run: |
