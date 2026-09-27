@@ -11,14 +11,16 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_NAME = 'windows98-shizuku-second-edition-xhci-checkpoint.zip'
+PACKAGE_NAME = 'windows98-shizuku-second-edition-device-foundation-checkpoint.zip'
 REBUILD_COMMANDS = (
     ('python3','platform/build.py'), ('python3','platform/test.py'),
     ('python3','platform/abi32/build.py'), ('python3','ntwrapper/vxd/build.py'),
     ('python3','shizukudos/uefi/build.py'), ('python3','shizukudos/uefi32/build.py'),
     ('python3','drivers/ahci_native/test.py'), ('python3','shizukudos/uefi_ahci/build.py'),
     ('python3','shizukudos/uefi_ahci/test.py'), ('python3','drivers/xhci_native/test.py'),
-    ('python3','shizukudos/uefi_xhci/build.py'), ('python3','shizukudos/uefi_xhci/test.py'))
+    ('python3','shizukudos/uefi_xhci/build.py'), ('python3','shizukudos/uefi_xhci/test.py'),
+    ('python3','platform/freestanding/test.py'), ('python3','ntwddm/win98/test.py'),
+    ('python3','ntwddm/win98/build.py'), ('python3','drivers/usb_native/test.py'))
 REBUILT_ARTIFACTS = (
     'build/platform/NTW32.DLL','build/platform/NTWPROBE.EXE',
     'build/platform/ntwrapper9x.a','shizukudos/uefi/build/BOOTX64.EFI',
@@ -28,7 +30,7 @@ REBUILT_ARTIFACTS = (
     'shizukudos/uefi_ahci/build/BOOTX64.EFI','shizukudos/uefi_ahci/build/payload.bin',
     'shizukudos/uefi_ahci/build/transition.bin',
     'shizukudos/uefi_xhci/build/BOOTX64.EFI','shizukudos/uefi_xhci/build/payload.bin',
-    'shizukudos/uefi_xhci/build/transition.bin')
+    'shizukudos/uefi_xhci/build/transition.bin','ntwddm/win98/build/NTWGPROB.EXE')
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 def main():

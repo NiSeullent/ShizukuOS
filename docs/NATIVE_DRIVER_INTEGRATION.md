@@ -33,8 +33,8 @@ flag entails unloading at suspend and reloading at resume.
 
 The documented configuration callback has five arguments: function,
 subfunction, devnode, reference DWORD and flags. It returns `CONFIGRET`;
-the flags argument is reserved and zero. This prototype does not establish
-the compiler's callback stack-cleanup convention.
+the flags argument is reserved and zero. The archived Win98 header identified
+below explicitly declares this callback `_cdecl`.
 [Microsoft DDK ConfigHandler](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S255E.HTM).
 
 Read the **allocated** logical configuration using
@@ -49,28 +49,63 @@ do not use the requirements list as evidence of allocation.
 [descriptor size](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S2530.HTM),
 [descriptor data](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S252F.HTM).
 
-## Resource layout findings and unresolved ABI values
+## Versioned header findings
 
-The archived **Windows 95 DDK** explicitly describes the following layouts.
-The sizes below are calculated from its WORD/ULONG fields under ordinary i386
-C alignment; they are not a Windows 98 guest measurement.
+A public archive identifies its DDK as synchronized to **Windows98 build
+bld1998.6**. Its CONFIGMG header defaults to version `0x040A`; `WIN40COMPAT`
+selects `0x0400`. The C and assembler declarations agree. This is an identifiable
+archived Microsoft header set, not an authenticated Microsoft download or a
+measurement of the target Windows 98 SE kernel. No headers, inline wrappers,
+sample implementations or libraries were incorporated into this project.
+[Build identifier][ddk-build], [C declarations][ddk-config-h],
+[assembler declarations][ddk-config-inc].
 
-| Descriptor | Documented fields, in order | Calculated size |
+The header includes `pshpack1.h`, which selects one-byte structure packing.
+Offsets below are derived from that declaration and the matching assembler
+DW/DD fields, not from host C `long` sizes.
+
+| Descriptor | Field offsets and widths | Size |
 | --- | --- | --- |
-| `MEM_DES` | WORD count/type, ULONG allocated base/end, WORD flags/reserved | 16 bytes |
-| `MEM_RANGE` | ULONG alignment/byte count/minimum/maximum, WORD flags/reserved | 20 bytes |
-| `IRQ_DES` | WORD flags/allocated IRQ/request mask/allocated mask | 8 bytes |
+| `MEM_DES` | count 0:u16, type 2:u16, allocated base 4:u32, end 8:u32, flags 12:u16, reserved 14:u16 | 16 |
+| `MEM_RANGE` | alignment 0:u32, byte count 4:u32, minimum 8:u32, maximum 12:u32, flags 16:u16, reserved 18:u16 | 20 |
+| `IRQ_DES` | flags 0:u16, allocated IRQ 2:u16, request mask 4:u16, reserved 6:u16 | 8 |
 
-`MEM_RESOURCE` contains that memory header followed by memory ranges;
-`IRQ_RESOURCE` contains only the IRQ header. Memory count/type describe the
-number and byte size of range records; `fIRQD_Share` names the IRQ sharing flag.
-These pages establish field widths and order for the documented version, but
-do not supply its numeric flag value or prove unchanged Win98 definitions.
-[MEM_DES](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S2584.HTM),
-[MEM_RANGE](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S2585.HTM),
-[IRQ_DES](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S2582.HTM),
-[MEM_RESOURCE](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S2586.HTM),
-[IRQ_RESOURCE](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S2583.HTM).
+In particular, Win98's final IRQ word is **reserved**, unlike the allocation-mask
+label in the earlier [Win95 IRQ page](https://techshelps.github.io/MSDN/WIN95DDK/HTML/S2582.HTM).
+Memory ranges follow the memory header; the IRQ resource contains only its
+header. IRQ share/level flags are `1`/`2`. `ResType_All/Mem/IRQ` are `0/1/4`;
+`ALLOC_LOG_CONF` is `2`. Use the allocated base/end fields, not a request range,
+to determine an assigned aperture. These memory fields cannot represent an
+aperture above 4 GiB.
+[Packed declarations][ddk-config-inc], [packing header][ddk-pack].
+
+`VMM.INC` assigns CONFIGMG device ID `0x0033`. Its service-table definitions
+start at zero and form the service identifier from `(device_id << 16) | index`.
+Both CONFIGMG tables have the same 124 entries, including this relevant prefix:
+
+| Service suffix, following `_CONFIGMG_` | Index | Service identifier |
+| --- | --- | --- |
+| `Get_Version` | `0x00` | `0x00330000` |
+| `Register_Device_Driver` | `0x0E` | `0x0033000E` |
+| `Get_First_Log_Conf` | `0x1A` | `0x0033001A` |
+| `Get_Next_Log_Conf` | `0x1B` | `0x0033001B` |
+| `Get_Next_Res_Des` | `0x1F` | `0x0033001F` |
+| `Get_Res_Des_Data_Size` | `0x21` | `0x00330021` |
+| `Get_Res_Des_Data` | `0x22` | `0x00330022` |
+| `Get_Alloc_Log_Conf` | `0x3B` | `0x0033003B` |
+
+These indices were counted from service declarations, not alphabetical API
+documentation. `Get_Alloc_Log_Conf` takes a `CMCONFIG` buffer; it is distinct
+from `Get_First_Log_Conf`, which returns a logical-configuration handle.
+[Service ordering][ddk-config-inc], [device ID and ordinal construction][ddk-vmm].
+
+In the 32-bit declaration, handles, resource IDs, callback arguments and
+`CONFIGRET` are 32-bit; the callback is `_cdecl`. The header describes ordinary
+service results in EAX and permits ECX/EDX clobbering; `Get_Version` is exceptional.
+`CR_SUCCESS`, `CR_NO_MORE_LOG_CONF`, `CR_NO_MORE_RES_DES`, `CR_BUFFER_SMALL`
+are `0`, `0x0E`, `0x0F`, `0x1A`. Native thunk stack/register behavior must still
+be checked with an actual guest before device resources are touched.
+[Native type and result declarations][ddk-config-h].
 
 Do **not** substitute modern `cfgmgr32.h` declarations: Microsoft's current
 `MEM_DES` uses DWORD counters and DWORDLONG addresses, while `IRQ_DES_32`
@@ -80,12 +115,12 @@ of the Win98 ring-zero CONFIGMG ABI.
 [Current MEM_DES](https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/ns-cfgmgr32-mem_des),
 [current IRQ_DES_32](https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/ns-cfgmgr32-irq_des_32).
 
-Still unverified from the primary material inspected: Win98-specific descriptor
-continuity; numeric `ALLOC_LOG_CONF`, resource IDs, registration/message/error
-flags; CONFIGMG device/service identifiers and ordinals; native argument widths,
-callback cleanup and valid call contexts. Alphabetical documentation order is
-not a service table. Obtain version-identified factual header declarations or
-equivalent authoritative documentation before authoring thunks or parsers.
+Still unresolved: independent authentication against the original DDK media,
+target SE service behavior, permitted call contexts, borrowed-handle lifetime,
+driver registration/removal ownership, and cleanup across configuration and
+power transitions. Do not mistake `Free_Log_Conf` or `Free_Res_Des`, which alter
+configuration, for a modern API's handle-only release function. This research
+does not authorize an already-owned PCI device to be rebound.
 
 ## MMIO, DMA and interrupts
 
@@ -144,3 +179,24 @@ The proposed evidence sequence is:
 Each stage needs its own actual Windows 98 receipt. None establishes modern
 vendor-driver compatibility, a complete WDM/WDDM layer, USB device support,
 boot-storage support or physical-hardware compatibility.
+
+## Header-source provenance
+
+Only small public interface files and identifying text were read, in memory.
+All archive links below pin repository commit
+`0c662d32378b9940ed90aee682f4eb5daf816e6a`; SHA-256 values cover the raw bytes.
+The unrelated top-level PowerToys readme was not used as DDK version evidence.
+
+| File under `98DDK/` | SHA-256 |
+| --- | --- |
+| [build.txt][ddk-build] | `beb83e3241c62692cc6809115b43a076e3a977eeb2e9ba46f7bbb5216b66ff1a` |
+| [inc/win98/CONFIGMG.H][ddk-config-h] | `012d6e6c8081f03c1e8eb37a54cfaa56554c52b444ec403c2a7bfd5eea05b000` |
+| [inc/win98/CONFIGMG.INC][ddk-config-inc] | `e688e53a6e5a601375b149b0699f2dd704bbef43c0dd309291a9bbb887394a36` |
+| [inc/win98/VMM.INC][ddk-vmm] | `d640c2994970fabe36c6d4f47ac94b719554d19dc036807c56fe9252ded6d1b2` |
+| [inc/win98/PSHPACK1.H][ddk-pack] | `7b33a921482a4f247721a0f2f4329228b7bac3faabbaf40f4ff4864126a5bb98` |
+
+[ddk-build]: https://github.com/fapablazacl/win98-ddk-toolchain/blob/0c662d32378b9940ed90aee682f4eb5daf816e6a/98DDK/build.txt
+[ddk-config-h]: https://github.com/fapablazacl/win98-ddk-toolchain/blob/0c662d32378b9940ed90aee682f4eb5daf816e6a/98DDK/inc/win98/CONFIGMG.H
+[ddk-config-inc]: https://github.com/fapablazacl/win98-ddk-toolchain/blob/0c662d32378b9940ed90aee682f4eb5daf816e6a/98DDK/inc/win98/CONFIGMG.INC
+[ddk-vmm]: https://github.com/fapablazacl/win98-ddk-toolchain/blob/0c662d32378b9940ed90aee682f4eb5daf816e6a/98DDK/inc/win98/VMM.INC
+[ddk-pack]: https://github.com/fapablazacl/win98-ddk-toolchain/blob/0c662d32378b9940ed90aee682f4eb5daf816e6a/98DDK/inc/win98/PSHPACK1.H

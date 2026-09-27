@@ -49,7 +49,8 @@ class Fixture:
         uefi_source = self.write('shizukudos/uefi/main.c', b'/* synthetic UEFI source */\n')
         pm_source = self.write('shizukudos/uefi32/payload.c', b'/* synthetic PM source */\n')
         for name in ('LICENSE', 'THIRD_PARTY.md', 'drivers/README.md','docs/INDEPENDENT_PLATFORM_CHECKPOINT.md',
-                     'docs/NATIVE_PLATFORM_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md','docs/XHCI_CHECKPOINT.md'):
+                     'docs/NATIVE_PLATFORM_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md','docs/XHCI_CHECKPOINT.md',
+                     'docs/DEVICE_FOUNDATION_CHECKPOINT.md','docs/NATIVE_DRIVER_INTEGRATION.md'):
             self.write(name, ('fixture ' + name).encode())
         artifacts = {}
         for name in ('NTW32.DLL', 'NTWPROBE.EXE', 'ntwrapper9x.a', 'ntwrapper9x.o'):
@@ -66,9 +67,10 @@ class Fixture:
         self.json('build/platform/prepare-report.json', {'fixture': True})
         self.json('platform/abi32/build/results.json', {
             'dll_sha256': artifacts['NTW32.DLL']['sha256'],
-            'variants': [{'stdout': 'PASS NTW32 actual PE32 ABI: fixture'} for _ in range(2)],
-            'packer_tests': {'status': 'PASS'},
-            'sources_sha256': {'platform/abi32/harness.c': sha(abi_source.read_bytes())},
+            'variants': [{'stdout': package.ABI_PASS, 'undefined_symbols':[], 'base':base}
+                         for base in ('0x68000000','0x69000000')],
+            'packer_tests': {'status': 'PASS', 'count':12}, 'windows_guest_verified':False,
+            'sources_sha256': self.sources(package.ABI_SOURCES),
         })
         efi = self.write('shizukudos/uefi/build/BOOTX64.EFI', b'synthetic x64 EFI')
         efi_evidence = root / 'fixture-evidence/uefi'
@@ -118,9 +120,11 @@ class Fixture:
         })
         self.write('build/windows98-shizuku-second-edition-native-checkpoint.zip', b'previous native checkpoint')
         self.write('build/windows98-shizuku-second-edition-storage-utf-checkpoint.zip', b'previous storage UTF checkpoint')
+        self.write('build/windows98-shizuku-second-edition-xhci-checkpoint.zip', b'previous xHCI checkpoint')
         self.unicode()
         self.storage()
         self.usb()
+        self.device_foundations()
 
     def sources(self, names):
         hashes = {}
@@ -130,6 +134,43 @@ class Fixture:
                 self.write(name, ('synthetic source '+name+'\n').encode())
             hashes[name] = sha(path.read_bytes())
         return hashes
+
+    def device_foundations(self):
+        for prefix, sources, counts, kinds in (
+            ('platform/freestanding', package.MEMORY_SOURCES, package.MEMORY_COUNTS, ('memory','linked')),
+            ('drivers/usb_native', package.DESCRIPTOR_SOURCES, package.DESCRIPTOR_COUNTS, ('usb',))):
+            receipt = {'pass':True, 'guest':'not_run', 'hardware_io':'none',
+                'sources_sha256':{Path(name).name:value for name,value in self.sources(sources).items()},
+                'host':{variant:{'passed':True, **counts} for variant in ('gcc','clang','clang_sanitized')},
+                'i486':{}}
+            for compiler in ('gcc','clang'):
+                variant = {'passed':True, 'undefined_symbols':[],
+                           'flags':['-march=i486','-ffreestanding','-fno-builtin']}
+                for kind in kinds:
+                    name = compiler+'-i486-'+kind+'.o'
+                    data = ('synthetic original '+prefix+'/'+name).encode()
+                    self.write(prefix+'/build/'+name, data)
+                    if kind == 'usb':
+                        variant.update(object_sha256=sha(data), size_bytes=len(data))
+                    else:
+                        variant[kind+'_object_sha256'] = sha(data)
+                receipt['i486'][compiler] = variant
+            self.json(prefix+'/build/test-result.json', receipt)
+        host_log = self.write('ntwddm/win98/build/host-tests.log',
+            b'strict\nPASS: 398287 adapter/pixel/lifetime checks; host only\n\n'
+            b'asan_ubsan\nPASS: 398287 adapter/pixel/lifetime checks; host only\n')
+        self.json('ntwddm/win98/build/host-tests.json', {
+            'passed':True, 'variants':['strict','asan_ubsan'], 'native_gdi':'not_executed', 'guest':'not_run',
+            'log_sha256':sha(host_log.read_bytes()), 'sources_sha256':self.sources(package.GDI_HOST_SOURCES)})
+        probe = self.write('ntwddm/win98/build/NTWGPROB.EXE', b'synthetic native GDI probe')
+        build_log = self.write('ntwddm/win98/build/build.log', b'synthetic native GDI build log')
+        self.json('ntwddm/win98/build/build-result.json', {
+            'passed':True, 'artifact':'NTWGPROB.EXE', 'sha256':sha(probe.read_bytes()),
+            'bytes':probe.stat().st_size, 'machine':'i386', 'subsystem':'GUI 4.10',
+            'cpu_flags':'i486, no SSE/MMX, soft-float', 'crt_linked':False, 'kernelex_linked':False,
+            'native_win98':'not_tested', 'imports':package.GDI_IMPORTS,
+            'sources_sha256':self.sources(package.GDI_BUILD_SOURCES),
+            'build_log_sha256':sha(build_log.read_bytes())})
 
     def unicode(self):
         obj = self.write('ntwin32/unicode/build/utf-i486.o', b'synthetic UTF object')
@@ -318,7 +359,15 @@ class PackageEvidenceTests(unittest.TestCase):
                          'drivers/xhci_native/build/xhci-i486.o','drivers/xhci_native/build/host-tests.log',
                          'shizukudos/uefi_xhci/build/BOOTX64.EFI','shizukudos/uefi_xhci/build/payload.bin',
                          'shizukudos/uefi_xhci/build/transition.bin','shizukudos/uefi_xhci/build/host-tests.log',
-                         'docs/XHCI_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md'):
+                         'ntwddm/win98/build/NTWGPROB.EXE','ntwddm/win98/build/build-result.json',
+                         'ntwddm/win98/build/build.log','ntwddm/win98/build/host-tests.json',
+                         'ntwddm/win98/build/host-tests.log','drivers/usb_native/ntwu_usb.c',
+                         'drivers/usb_native/build/test-result.json','drivers/usb_native/build/gcc-i486-usb.o',
+                         'drivers/usb_native/build/clang-i486-usb.o','platform/freestanding/build/test-result.json',
+                         'platform/freestanding/build/gcc-i486-memory.o','platform/freestanding/build/gcc-i486-linked.o',
+                         'platform/freestanding/build/clang-i486-memory.o','platform/freestanding/build/clang-i486-linked.o',
+                         'docs/XHCI_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md',
+                         'docs/DEVICE_FOUNDATION_CHECKPOINT.md','docs/NATIVE_DRIVER_INTEGRATION.md'):
                 self.assertIn(name, index)
             self.assertFalse(any(name.endswith(('pattern.img','esp.img','.fd')) for name in index))
         checksum = self.fixture.output.with_suffix('.zip.sha256').read_text().split()[0]
@@ -327,6 +376,8 @@ class PackageEvidenceTests(unittest.TestCase):
                          b'previous native checkpoint')
         self.assertEqual((self.root/'build/windows98-shizuku-second-edition-storage-utf-checkpoint.zip').read_bytes(),
                          b'previous storage UTF checkpoint')
+        self.assertEqual((self.root/'build/windows98-shizuku-second-edition-xhci-checkpoint.zip').read_bytes(),
+                         b'previous xHCI checkpoint')
 
     def test_source_mutation_between_validation_and_snapshot_is_rejected(self):
         previous = self.previous_package()
@@ -386,6 +437,112 @@ class PackageEvidenceTests(unittest.TestCase):
             self.assertEqual(self.fixture.output.read_bytes(), previous)
         finally:
             path.write_bytes(original)
+
+    def test_current_abi_receipt_requires_backoff_cases_and_both_bases(self):
+        path = 'platform/abi32/build/results.json'
+        self.reject_changed_json(path,
+            lambda data:data['variants'][0].update(stdout=
+                'PASS NTW32 actual PE32 ABI: 382 checks; 139 PE calls with verified ESP; Windows services mocked.'),
+            'current contention/backoff regression evidence')
+        self.reject_changed_json(path,
+            lambda data:data['variants'][1].update(base='0x68000000'), 'both image bases')
+        self.reject_changed_json(path,
+            lambda data:data['sources_sha256'].pop('platform/abi32/harness.c'), 'source receipt is incomplete')
+        self.reject_changed_json(path,
+            lambda data:data['variants'][0].update(undefined_symbols=['Sleep']), 'current contention/backoff')
+
+    def test_foundations_require_all_host_variants_and_complete_case_counts(self):
+        for prefix in ('platform/freestanding','drivers/usb_native'):
+            path = prefix+'/build/test-result.json'
+            for key,value in (('pass',False),('guest','passed')):
+                with self.subTest(prefix=prefix,key=key):
+                    self.reject_changed_json(path, lambda data:data.update({key:value}), 'strict/sanitized host evidence')
+            for variant in ('gcc','clang','clang_sanitized'):
+                with self.subTest(prefix=prefix,variant=variant):
+                    self.reject_changed_json(path, lambda data:data['host'].pop(variant), 'strict/sanitized host evidence')
+                    self.reject_changed_json(path,
+                        lambda data:data['host'][variant].update(passed=False), 'strict/sanitized host evidence')
+            counts = package.MEMORY_COUNTS if prefix == 'platform/freestanding' else package.DESCRIPTOR_COUNTS
+            for key in counts:
+                with self.subTest(prefix=prefix,count=key):
+                    self.reject_changed_json(path,
+                        lambda data:data['host']['clang_sanitized'].update({key:0}), 'strict/sanitized host evidence')
+        self.reject_changed_json('drivers/usb_native/build/test-result.json',
+            lambda data:data.update(hardware_io='claimed native USB enumeration'), 'host parser claim')
+
+    def test_foundations_require_both_standalone_i486_variants(self):
+        for prefix in ('platform/freestanding','drivers/usb_native'):
+            path = prefix+'/build/test-result.json'
+            for compiler in ('gcc','clang'):
+                with self.subTest(prefix=prefix,compiler=compiler):
+                    self.reject_changed_json(path, lambda data:data['i486'].pop(compiler), 'host evidence')
+                    for key,value in (('passed',False),('undefined_symbols',['memcpy']),('flags',['-march=i686'])):
+                        self.reject_changed_json(path,
+                            lambda data:data['i486'][compiler].update({key:value}), 'standalone i486 evidence')
+        self.reject_changed_json('drivers/usb_native/build/test-result.json',
+            lambda data:data['i486']['gcc'].update(size_bytes=1), 'object changed since validation')
+
+    def test_foundation_source_receipts_cannot_omit_dependencies_or_escape(self):
+        for path,source in (
+            ('platform/freestanding/build/test-result.json','memory.c'),
+            ('drivers/usb_native/build/test-result.json','ntwu_usb.c'),
+            ('ntwddm/win98/build/host-tests.json','ntwddm/src/ntwddm.c'),
+            ('ntwddm/win98/build/build-result.json','platform/freestanding/memory.c')):
+            with self.subTest(path=path):
+                self.reject_changed_json(path, lambda data:data['sources_sha256'].pop(source),
+                                         'source receipt is incomplete')
+        for prefix in ('platform/freestanding','drivers/usb_native'):
+            self.reject_changed_json(prefix+'/build/test-result.json',
+                lambda data:data['sources_sha256'].update({'../outside.c':'0'*64}), 'nonlocal paths')
+
+    def test_foundation_artifacts_sources_and_logs_are_hash_bound(self):
+        for name in ('platform/freestanding/memory.c','platform/freestanding/test_memory.c',
+                     'platform/freestanding/build/gcc-i486-memory.o','platform/freestanding/build/gcc-i486-linked.o',
+                     'platform/freestanding/build/clang-i486-memory.o','platform/freestanding/build/clang-i486-linked.o',
+                     'drivers/usb_native/ntwu_usb.c','drivers/usb_native/test_usb.c',
+                     'drivers/usb_native/build/gcc-i486-usb.o','drivers/usb_native/build/clang-i486-usb.o',
+                     'ntwddm/win98/adapter.c','ntwddm/win98/probe.c',
+                     'ntwddm/win98/build/NTWGPROB.EXE','ntwddm/win98/build/host-tests.log',
+                     'ntwddm/win98/build/build.log'):
+            path = self.root/name
+            original = path.read_bytes()
+            previous = self.previous_package()
+            path.write_bytes(original+b'changed')
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(RuntimeError,
+                        'source changed|object changed|artifact changed|host evidence|build evidence'):
+                    self.run_packager()
+                self.assertEqual(self.fixture.output.read_bytes(), previous)
+            finally:
+                path.write_bytes(original)
+
+    def test_gdi_requires_host_only_sanitized_evidence(self):
+        for key,value in (('passed',False),('variants',['strict']),('guest','passed'),('native_gdi','passed')):
+            with self.subTest(key=key):
+                self.reject_changed_json('ntwddm/win98/build/host-tests.json',
+                    lambda data:data.update({key:value}), 'GDI adapter lacks matching.*host evidence')
+
+    def test_gdi_log_requires_actual_completed_counts_even_if_rehashed(self):
+        log = self.root/'ntwddm/win98/build/host-tests.log'
+        log.write_bytes(b'strict\nPASS: 0 adapter/pixel/lifetime checks; host only\n')
+        self.reject_changed_json('ntwddm/win98/build/host-tests.json',
+            lambda data:data.update(log_sha256=sha(log.read_bytes())), 'GDI adapter lacks matching.*host evidence')
+
+    def test_gdi_build_requires_classic_pe32_and_unverified_guest_status(self):
+        for key,value in (('passed',False),('artifact','wrong.exe'),('machine','x64'),('subsystem','GUI 6.0'),
+                          ('cpu_flags','i686'),('crt_linked',True),('kernelex_linked',True),
+                          ('native_win98','passed'),('imports',{'KERNEL32.DLL':['LoadLibraryExW']})):
+            with self.subTest(key=key):
+                self.reject_changed_json('ntwddm/win98/build/build-result.json',
+                    lambda data:data.update({key:value}), 'PE32/classic-import build evidence')
+        self.reject_changed_json('ntwddm/win98/build/build-result.json',
+            lambda data:data.update(bytes=1), 'Native GDI probe artifact changed')
+
+    def test_previous_xhci_archive_survives_device_validation_failure(self):
+        self.reject_changed_json('drivers/usb_native/build/test-result.json',
+            lambda data:data['host']['clang_sanitized'].update(passed=False), 'strict/sanitized host evidence')
+        self.assertEqual((self.root/'build/windows98-shizuku-second-edition-xhci-checkpoint.zip').read_bytes(),
+                         b'previous xHCI checkpoint')
 
     def test_ahci_guest_must_match_exact_build_receipt(self):
         self.reject_changed_json('shizukudos/uefi_ahci/build/build-result.json',
@@ -672,6 +829,7 @@ class RebuildReceiptTests(unittest.TestCase):
         'shizukudos/uefi_ahci/build/transition.bin',
         'shizukudos/uefi_xhci/build/BOOTX64.EFI', 'shizukudos/uefi_xhci/build/payload.bin',
         'shizukudos/uefi_xhci/build/transition.bin',
+        'ntwddm/win98/build/NTWGPROB.EXE',
     )
 
     def setUp(self):
@@ -713,11 +871,11 @@ class RebuildReceiptTests(unittest.TestCase):
     def test_unchanged_snapshot_receives_its_own_hash(self):
         with patch.object(verify.subprocess, 'run', side_effect=self.successful_mock_rebuild) as runner:
             self.run_verifier()
-        self.assertEqual(runner.call_count, 12)
+        self.assertEqual(runner.call_count, 16)
         receipt = json.loads(self.receipt_path.read_text())
         self.assertEqual(receipt['source_package_sha256'], sha(self.original))
         self.assertEqual(set(receipt['rebuild_identical']), set(self.ARTIFACTS))
-        self.assertEqual(len(receipt['rebuild_identical']), 15)
+        self.assertEqual(len(receipt['rebuild_identical']), 16)
         self.assertFalse(receipt['guest_reexecuted'])
         self.assertEqual(receipt['rebuild_commands'], [list(command) for command in verify.REBUILD_COMMANDS])
         self.assertFalse(any('test_qemu.py' in part for command in verify.REBUILD_COMMANDS for part in command))
@@ -731,14 +889,14 @@ class RebuildReceiptTests(unittest.TestCase):
             nonlocal calls
             result = self.successful_mock_rebuild(command, **arguments)
             calls += 1
-            if calls == 12:
+            if calls == 16:
                 self.package_path.write_bytes(replacement)
             return result
 
         with patch.object(verify.subprocess, 'run', side_effect=replace_on_last_rebuild):
             with self.assertRaisesRegex(RuntimeError, 'Source package changed during rebuild'):
                 self.run_verifier()
-        self.assertEqual(calls, 12)
+        self.assertEqual(calls, 16)
         self.assertEqual(self.package_path.read_bytes(), replacement)
         self.assertFalse(self.receipt_path.exists())
 

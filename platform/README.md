@@ -58,9 +58,9 @@ with networking disabled. No script installs into the host, changes global
 client settings, flashes firmware or updates an installed Windows system.
 
 After those checks, `python3 platform/package.py` produces
-`build/windows98-shizuku-second-edition-xhci-checkpoint.zip`.
+`build/windows98-shizuku-second-edition-device-foundation-checkpoint.zip`.
 Earlier checkpoint ZIPs are preserved. The allowlist includes original sources,
-the [xHCI checkpoint](../docs/XHCI_CHECKPOINT.md), all earlier checkpoint documents, build artifacts,
+the [device foundations](../docs/DEVICE_FOUNDATION_CHECKPOINT.md), all earlier checkpoint documents, build artifacts,
 and the source-bound host and guest evidence. It excludes firmware, Windows
 media, ESP/test disk images, and guest installation files.
 
@@ -84,11 +84,18 @@ with the matching 64-bit memory BAR. Protected-mode, core, graphics and CPU
 register evidence must agree. This fixture attaches no USB device: command-ring
 completion does not establish USB device enumeration or data transfers.
 
+The device-foundation gates also bind the GDI probe's audited executable,
+source/build/host receipts and logs, plus the USB parser and compiler memory
+support's strict/sanitized host results and freestanding objects. The GDI probe
+has been compiled, not run on Windows; USB descriptor parsing performs no device
+I/O. These additions do not change the retained AHCI/xHCI guest claims.
+
 `python3 platform/verify_package.py` extracts a snapshot of that ZIP into a
-separate build directory, validates its file manifest, and runs twelve build/host
+separate build directory, validates its file manifest, and runs sixteen build/host
 test commands, including the actual PE32 ABI harness, original AHCI model tests,
-the xHCI model tests, and lab clock/inventory tests. It requires byte-identical
-results for fifteen artifacts: the DLL, two probes, kernel archive, VxD, four EFI
+the xHCI model tests, lab clock/inventory tests, compiler memory and USB tests,
+and GDI adapter tests/build. It requires byte-identical
+results for sixteen artifacts: the DLL, three probes, kernel archive, VxD, four EFI
 images, and three 32-bit payload/transition pairs. It does not boot a guest or
 install the artifacts.
 Replacing the input ZIP during verification prevents publication of a rebuild
@@ -131,8 +138,9 @@ The reference baseline is Git commit `1d54ca7`. Host compilers and OVMF are
 present. The registered Win98 VM is an empty placeholder, with no installed OS;
 it has not been modified or booted. Old Windows-host VM results in `vm/README.md`
 are reference history and do not validate these new components. Current exact
-results belong in [the xHCI checkpoint](../docs/XHCI_CHECKPOINT.md).
-The [storage/UTF checkpoint](../docs/STORAGE_UTF_CHECKPOINT.md),
+results belong in [the device-foundation checkpoint](../docs/DEVICE_FOUNDATION_CHECKPOINT.md).
+The [xHCI checkpoint](../docs/XHCI_CHECKPOINT.md),
+[storage/UTF checkpoint](../docs/STORAGE_UTF_CHECKPOINT.md),
 [native checkpoint](../docs/NATIVE_PLATFORM_CHECKPOINT.md) and
 [first independent checkpoint](../docs/INDEPENDENT_PLATFORM_CHECKPOINT.md)
 are retained as historical evidence. The user has since supplied the same

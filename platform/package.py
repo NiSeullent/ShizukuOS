@@ -10,7 +10,7 @@ import struct
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_NAME = 'windows98-shizuku-second-edition-xhci-checkpoint.zip'
+OUTPUT_NAME = 'windows98-shizuku-second-edition-device-foundation-checkpoint.zip'
 UTF_SOURCES = tuple('ntwin32/unicode/'+name for name in
                     ('utf.h','utf.c','test_utf.c','test.py','oracle.py'))
 STORAGE_EVIDENCE = ('ahci-proof.bin','dma.bin','handoff.bin','registers.txt','handoff.ppm','handoff.png')
@@ -40,6 +40,35 @@ USB_HOST_SOURCES = tuple('shizukudos/uefi_xhci/'+name for name in
 XHCI_PROOF_FIELDS = ('magic size calibrated ticks_per_us start_tsc stage pci_bdf mmio open_result '
     'command_result close_result commands_completed bridges port_events completion_low '
     'completion_high last_status last_completion_code quarantine').split()
+MEMORY_SOURCES = tuple('platform/freestanding/'+name for name in
+    ('memory.c','memory.h','test_memory.c','test.py'))
+DESCRIPTOR_SOURCES = tuple('drivers/usb_native/'+name for name in
+    ('ntwu_usb.c','ntwu_usb.h','test_usb.c','test.py'))
+GDI_HOST_SOURCES = tuple('ntwddm/win98/'+name for name in
+    ('adapter.h','adapter.c','selftest.c','test_adapter.c','test.py')) + (
+    'ntwddm/include/ntwddm.h','ntwddm/src/ntwddm.c')
+GDI_BUILD_SOURCES = tuple('ntwddm/win98/'+name for name in
+    ('probe.c','adapter.c','adapter.h','selftest.c','build.py')) + (
+    'ntwddm/src/ntwddm.c','ntwddm/include/ntwddm.h',
+    'platform/freestanding/memory.c','platform/freestanding/memory.h','ntwin32/prepare.py')
+GDI_IMPORTS = {
+    'KERNEL32.DLL':sorted('CloseHandle CreateFileA ExitProcess GetLastError GetModuleHandleA '
+        'GetProcessHeap GetTickCount GetVersionExA HeapAlloc HeapFree Sleep WriteFile'.split()),
+    'USER32.DLL':sorted('AdjustWindowRect BeginPaint CreateWindowExA DefWindowProcA DestroyWindow '
+        'DispatchMessageA EndPaint GetDC InvalidateRect LoadCursorA PeekMessageA RegisterClassA '
+        'ReleaseDC ShowWindow TranslateMessage UnregisterClassA UpdateWindow'.split()),
+    'GDI32.DLL':sorted('BitBlt CreateCompatibleDC CreateDIBSection DeleteDC DeleteObject '
+        'GdiFlush GetDeviceCaps SelectObject'.split()),
+}
+ABI_SOURCES = ('platform/abi32/build.py','platform/abi32/harness.c','platform/abi32/entry.S',
+               'platform/abi32/test_packer.py','ntwin32/prepare.py')
+ABI_PASS = ('PASS NTW32 actual PE32 ABI: 406 checks; 147 PE calls with verified ESP; '
+            'Windows services mocked.')
+MEMORY_COUNTS = {'checks':1024736, 'memmove_cases':162380, 'memcpy_cases':162040,
+                 'memset_cases':17490, 'memcmp_cases':179216}
+DESCRIPTOR_COUNTS = {'status':'PASS', 'assertions':576668, 'parse_calls':42179,
+    'device_successes':2523, 'configuration_successes':3420, 'rejections':36236,
+    'mutation_cases':11008, 'random_cases':31000, 'truncation_cases':43}
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -75,6 +104,86 @@ def validate_sources(inputs, hashes, required, label):
         if (Path(name).is_absolute() or not path.resolve().is_relative_to(ROOT.resolve()) or
             inputs.digest(path) != expected):
             raise RuntimeError(f'{label} source changed since validation: {name}')
+
+def validate_local_sources(inputs, hashes, folder, required, label):
+    if any(Path(name).name != name for name in hashes):
+        raise RuntimeError(f'{label} source receipt contains nonlocal paths')
+    validate_sources(inputs, {folder+'/'+name:value for name,value in hashes.items()}, required, label)
+
+def validate_host_variants(receipt, counts, label):
+    host = receipt.get('host', {})
+    if (receipt.get('pass') is not True or receipt.get('guest') != 'not_run' or
+        set(host) != {'gcc','clang','clang_sanitized'} or
+        set(receipt.get('i486', {})) != {'gcc','clang'} or
+        any(variant.get('passed') is not True or
+            any(variant.get(key) != value for key,value in counts.items()) for variant in host.values())):
+        raise RuntimeError(f'{label} lacks complete strict/sanitized host evidence')
+    for variant in receipt['i486'].values():
+        if (variant.get('passed') is not True or variant.get('undefined_symbols') != [] or
+            not {'-march=i486','-ffreestanding','-fno-builtin'}.issubset(variant.get('flags', []))):
+            raise RuntimeError(f'{label} lacks standalone i486 evidence')
+
+def add_memory_support(inputs, files):
+    prefix = 'platform/freestanding'
+    folder = ROOT/prefix/'build'
+    receipt = inputs.json(folder/'test-result.json')
+    validate_host_variants(receipt, MEMORY_COUNTS, 'Memory support')
+    validate_local_sources(inputs, receipt['sources_sha256'], prefix, MEMORY_SOURCES, 'Memory support')
+    names = ['test-result.json']
+    for compiler, variant in receipt['i486'].items():
+        for kind in ('memory','linked'):
+            name = compiler+'-i486-'+kind+'.o'
+            if inputs.digest(folder/name) != variant[kind+'_object_sha256']:
+                raise RuntimeError('Memory support object changed since validation: '+name)
+            names.append(name)
+    for name in names:
+        files[prefix+'/build/'+name] = folder/name
+
+def add_usb_descriptors(inputs, files):
+    prefix = 'drivers/usb_native'
+    folder = ROOT/prefix/'build'
+    receipt = inputs.json(folder/'test-result.json')
+    validate_host_variants(receipt, DESCRIPTOR_COUNTS, 'USB descriptors')
+    if receipt.get('hardware_io') != 'none':
+        raise RuntimeError('USB descriptor evidence must remain a host parser claim')
+    validate_local_sources(inputs, receipt['sources_sha256'], prefix, DESCRIPTOR_SOURCES, 'USB descriptors')
+    names = ['test-result.json']
+    for compiler, variant in receipt['i486'].items():
+        name = compiler+'-i486-usb.o'
+        data = inputs.read(folder/name)
+        if hashlib.sha256(data).hexdigest() != variant['object_sha256'] or len(data) != variant['size_bytes']:
+            raise RuntimeError('USB descriptor object changed since validation: '+name)
+        names.append(name)
+    for name in names:
+        files[prefix+'/build/'+name] = folder/name
+
+def add_native_gdi(inputs, files):
+    prefix = 'ntwddm/win98'
+    folder = ROOT/prefix/'build'
+    host = inputs.json(folder/'host-tests.json')
+    log = inputs.read(folder/'host-tests.log')
+    expected_log = ('strict\nPASS: 398287 adapter/pixel/lifetime checks; host only\n\n'
+                    'asan_ubsan\nPASS: 398287 adapter/pixel/lifetime checks; host only\n').encode()
+    if (host.get('passed') is not True or host.get('variants') != ['strict','asan_ubsan'] or
+        host.get('native_gdi') != 'not_executed' or host.get('guest') != 'not_run' or
+        hashlib.sha256(log).hexdigest() != host.get('log_sha256') or log != expected_log):
+        raise RuntimeError('GDI adapter lacks matching strict/sanitized host evidence')
+    validate_sources(inputs, host['sources_sha256'], GDI_HOST_SOURCES, 'GDI adapter')
+    built = inputs.json(folder/'build-result.json')
+    if (built.get('passed') is not True or built.get('artifact') != 'NTWGPROB.EXE' or
+        built.get('machine') != 'i386' or built.get('subsystem') != 'GUI 4.10' or
+        built.get('cpu_flags') != 'i486, no SSE/MMX, soft-float' or
+        built.get('crt_linked') is not False or built.get('kernelex_linked') is not False or
+        built.get('native_win98') != 'not_tested' or built.get('imports') != GDI_IMPORTS or
+        inputs.digest(folder/'build.log') != built.get('build_log_sha256')):
+        raise RuntimeError('Native GDI probe lacks matching PE32/classic-import build evidence')
+    validate_sources(inputs, built['sources_sha256'], GDI_BUILD_SOURCES, 'Native GDI probe')
+    data = inputs.read(folder/'NTWGPROB.EXE')
+    if (not data or hashlib.sha256(data).hexdigest() != built.get('sha256') or
+        len(data) != built.get('bytes')):
+        raise RuntimeError('Native GDI probe artifact changed since build')
+    for name in ('NTWGPROB.EXE','build-result.json','build.log','host-tests.json','host-tests.log'):
+        files[prefix+'/build/'+name] = folder/name
 
 def add_unicode(inputs, files, platform_tests):
     folder = ROOT/'ntwin32/unicode/build'
@@ -366,6 +475,7 @@ def main():
             raise RuntimeError(f'Artifact changed since validation: {name}')
     files = {}
     for folder in ('ntwrapper','ntwin32','ntwddm','drivers/pcie','drivers/ahci_native','drivers/xhci_native',
+                   'drivers/usb_native',
                    'shizukudos/uefi','shizukudos/uefi32','shizukudos/uefi_ahci','shizukudos/uefi_xhci','platform'):
         for path in (ROOT/folder).rglob('*'):
             if not path.is_file() or path.is_symlink():
@@ -375,7 +485,8 @@ def main():
                 continue
             files[str(relative)] = path
     for name in ('LICENSE','THIRD_PARTY.md','drivers/README.md','docs/INDEPENDENT_PLATFORM_CHECKPOINT.md',
-                 'docs/NATIVE_PLATFORM_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md','docs/XHCI_CHECKPOINT.md'):
+                 'docs/NATIVE_PLATFORM_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md','docs/XHCI_CHECKPOINT.md',
+                 'docs/DEVICE_FOUNDATION_CHECKPOINT.md','docs/NATIVE_DRIVER_INTEGRATION.md'):
         files[name] = ROOT/name
     for name in ('NTW32.DLL','NTWPROBE.EXE','ntwrapper9x.a','ntwrapper9x.o',
                  'manifest.json','host-tests.json','prepare-report.json'):
@@ -403,15 +514,16 @@ def main():
     abi_receipt = read_json(abi)
     if abi_receipt['dll_sha256'] != digest(build/'NTW32.DLL') or len(abi_receipt['variants']) != 2:
         raise RuntimeError('Actual PE32 execution receipt does not match this DLL')
-    if abi_receipt['packer_tests']['status'] != 'PASS':
+    if (abi_receipt['packer_tests']['status'] != 'PASS' or abi_receipt['packer_tests'].get('count') != 12 or
+        abi_receipt.get('windows_guest_verified') is not False):
         raise RuntimeError('ABI packer validation did not pass')
-    for name, expected in abi_receipt['sources_sha256'].items():
-        if digest(ROOT/name) != expected:
-            raise RuntimeError(f'ABI harness changed since validation: {name}')
+    validate_sources(inputs, abi_receipt['sources_sha256'], ABI_SOURCES, 'ABI harness')
     files['platform/abi32/build/results.json'] = abi
+    if {variant.get('base') for variant in abi_receipt['variants']} != {'0x68000000','0x69000000'}:
+        raise RuntimeError('PE32 variants do not cover both image bases')
     for variant in abi_receipt['variants']:
-        if not variant['stdout'].startswith('PASS NTW32 actual PE32 ABI:'):
-            raise RuntimeError('PE32 variant did not pass')
+        if variant.get('stdout') != ABI_PASS or variant.get('undefined_symbols') != []:
+            raise RuntimeError('PE32 variant lacks current contention/backoff regression evidence')
     vxd = ROOT/'ntwrapper/vxd/build'
     vxd_manifest = read_json(vxd/'manifest.json')
     if digest(vxd/'NTWRAP9X.VXD') != vxd_manifest['sha256']:
@@ -456,6 +568,9 @@ def main():
     add_unicode(inputs, files, tests)
     add_storage(inputs, files)
     add_usb(inputs, files)
+    add_memory_support(inputs, files)
+    add_usb_descriptors(inputs, files)
+    add_native_gdi(inputs, files)
     output = ROOT/'build'/OUTPUT_NAME
     temporary = output.with_suffix('.zip.tmp')
     members = {name:inputs.read(path) for name,path in sorted(files.items())}
@@ -469,9 +584,11 @@ def main():
         for name,data in members.items():
             add(name,data)
         add('FILES-SHA256.json',json.dumps(index,indent=2)+'\n')
-        add('README.txt',"Windows 98 Shizuku's Second Edition — PCI-E/xHCI checkpoint\n"
-            "Read platform/README.md and docs/XHCI_CHECKPOINT.md.\n"
+        add('README.txt',"Windows 98 Shizuku's Second Edition — device-foundation checkpoint\n"
+            "Read platform/README.md and docs/DEVICE_FOUNDATION_CHECKPOINT.md.\n"
             "Not a complete operating system or installation package.\n"
+            "Includes NTW32 positive-delay contention fix, native GDI probe and USB descriptor parser.\n"
+            "GDI runtime and USB device enumeration remain unverified in native Windows 98.\n"
             "See checkpoint for precise Windows 98 VxD/app validation status.\n"
             "Modern vendor drivers, complete DOS and UEFI-to-Win98 boot remain unfinished.\n"
             "Contains only independently authored source/binaries and development evidence.\n"
