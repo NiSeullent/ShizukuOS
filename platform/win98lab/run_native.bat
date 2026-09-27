@@ -1,3 +1,4 @@
+@rem SPDX-License-Identifier: GPL-2.0-only
 @echo off
 c:\ntwlab\ntwrun.exe
 if errorlevel 4 goto unknown
