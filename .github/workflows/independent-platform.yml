@@ -4,6 +4,7 @@ name: Independent platform host validation
 
 'on':
   push:
+    branches: [main]
   pull_request:
 
 permissions:

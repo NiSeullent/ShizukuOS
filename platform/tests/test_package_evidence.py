@@ -5,6 +5,7 @@ are mocked; these tests never rebuild or alter real platform artifacts.
 SPDX-License-Identifier: GPL-2.0-only
 """
 import contextlib
+import copy
 import hashlib
 import importlib.util
 import io
@@ -48,7 +49,7 @@ class Fixture:
         uefi_source = self.write('shizukudos/uefi/main.c', b'/* synthetic UEFI source */\n')
         pm_source = self.write('shizukudos/uefi32/payload.c', b'/* synthetic PM source */\n')
         for name in ('LICENSE', 'THIRD_PARTY.md', 'drivers/README.md','docs/INDEPENDENT_PLATFORM_CHECKPOINT.md',
-                     'docs/NATIVE_PLATFORM_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md'):
+                     'docs/NATIVE_PLATFORM_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md','docs/XHCI_CHECKPOINT.md'):
             self.write(name, ('fixture ' + name).encode())
         artifacts = {}
         for name in ('NTW32.DLL', 'NTWPROBE.EXE', 'ntwrapper9x.a', 'ntwrapper9x.o'):
@@ -116,8 +117,10 @@ class Fixture:
             'screenshot_sha256': sha((root / 'fixture-evidence/uefi32/handoff.ppm').read_bytes()),
         })
         self.write('build/windows98-shizuku-second-edition-native-checkpoint.zip', b'previous native checkpoint')
+        self.write('build/windows98-shizuku-second-edition-storage-utf-checkpoint.zip', b'previous storage UTF checkpoint')
         self.unicode()
         self.storage()
+        self.usb()
 
     def sources(self, names):
         hashes = {}
@@ -205,6 +208,66 @@ class Fixture:
             'pattern_before_sha256':sha(disk.read_bytes()), 'pattern_after_sha256':sha(disk.read_bytes()),
         })
 
+    def usb(self):
+        sources = self.sources(package.USB_BUILD_SOURCES)
+        driver_sources = self.sources('drivers/xhci_native/'+name for name in
+                                     ('xhci.c','xhci.h','test_xhci.c','test.py'))
+        obj = self.write('drivers/xhci_native/build/xhci-i486.o', b'synthetic xHCI object')
+        log = self.write('drivers/xhci_native/build/host-tests.log', b'synthetic xHCI tests')
+        self.json('drivers/xhci_native/build/host-tests.json', {
+            'passed':True, 'asan_ubsan':True, 'freestanding_i486_no_runtime_imports':True,
+            'sources_sha256':{Path(name).name:digest for name,digest in driver_sources.items()},
+            'i486_object_sha256':sha(obj.read_bytes()), 'host_log_sha256':sha(log.read_bytes()),
+        })
+        log = self.write('shizukudos/uefi_xhci/build/host-tests.log', b'synthetic clock/inventory tests')
+        self.json('shizukudos/uefi_xhci/build/host-tests.json', {
+            'pass':True, 'cases_per_variant':100031, 'variants':['strict','asan_ubsan'],
+            'inventory_tests':6, 'sources_sha256':self.sources(package.USB_HOST_SOURCES),
+            'log_sha256':sha(log.read_bytes()),
+        })
+        artifacts = {}
+        for filename, key in (('BOOTX64.EFI','efi'),('payload.bin','payload'),('transition.bin','transition')):
+            data = bytes(0x2800) if key == 'transition' else ('synthetic xHCI '+filename).encode()
+            self.write('shizukudos/uefi_xhci/build/'+filename, data)
+            artifacts[key] = {'sha256':sha(data), 'bytes':len(data)}
+        artifacts['payload']['dma_address'] = 0x02026000
+        built = self.json('shizukudos/uefi_xhci/build/build-result.json', {
+            **artifacts, 'sources_sha256':sources,
+        })
+        self.xhci_evidence = 'shizukudos/uefi_xhci/build/qemu-fixture/'
+        proof = dict.fromkeys(package.XHCI_PROOF_FIELDS, 0)
+        proof.update(magic=0x49434858, size=80, calibrated=1, ticks_per_us=3000,
+                     start_tsc=1000, stage=3, pci_bdf=0x100, mmio=0x81000000,
+                     commands_completed=130, bridges=1, last_completion_code=1, last_status=8,
+                     completion_low=artifacts['payload']['dma_address']+2048+9*16)
+        self.write(self.xhci_evidence+'xhci-proof.bin',
+                   struct.pack('<4IQ14I', *(proof[name] for name in package.XHCI_PROOF_FIELDS)))
+        old_guest = json.loads((self.root/'shizukudos/uefi_ahci/build/qemu-result.json').read_text())
+        handoff = old_guest['handoff']
+        handoff.update(region_base=0x02000000, region_bytes=0x00200000,
+                       stack_top=0x02200000, payload_bytes=artifacts['payload']['bytes'])
+        self.write(self.xhci_evidence+'handoff.bin',
+                   struct.pack('<28I', *(handoff[name] for name in package.HANDOFF_FIELDS)))
+        for name in ('registers.txt','handoff.ppm','handoff.png'):
+            self.write(self.xhci_evidence+name, (self.root/self.ahci_evidence/name).read_bytes())
+        dma = bytearray(4096)
+        struct.pack_into('<4I', dma, 2304+16, proof['completion_low'], 0, 1<<24, (33<<10)|1)
+        self.write(self.xhci_evidence+'dma.bin', dma)
+        hashes = {name:sha((self.root/self.xhci_evidence/name).read_bytes()) for name in package.USB_EVIDENCE}
+        endpoint = {'bus':1,'slot':0,'function':0,'id':{'vendor':0x1b36,'device':0x000d},
+                    'regions':[{'bar':0,'type':'memory','mem_type_64':True,'size':0x4000,'address':proof['mmio']}]}
+        pci = [{'bus':0,'devices':[{'bus':0,'slot':3,'function':0,
+                'pci_bridge':{'bus':{'number':0,'secondary':1,'subordinate':1},'devices':[endpoint]}}]}]
+        self.json('shizukudos/uefi_xhci/build/qemu-result.json', {
+            'pass':True, 'process_stopped':True, 'kvm':{'enabled':True}, 'qemu_returncode':0,
+            'artifact_sha256':artifacts['efi']['sha256'], 'build_receipt_sha256':sha(built.read_bytes()),
+            'harness_sources_sha256':self.sources(('shizukudos/uefi_xhci/test_qemu.py',
+                                                  'shizukudos/uefi32/test_qemu.py')),
+            'xhci':proof, 'handoff':handoff, 'registers':old_guest['registers'], 'pci':pci,
+            'evidence_directory':str(self.root/self.xhci_evidence), 'evidence_sha256':hashes,
+            'dma_sha256':hashes['dma.bin'], 'screenshot_sha256':hashes['handoff.ppm'],
+        })
+
     def write(self, name, data):
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,17 +308,25 @@ class PackageEvidenceTests(unittest.TestCase):
             self.assertEqual(archive.read('ntwin32/runtime.c'), self.fixture.source.read_bytes())
             for name in package.STORAGE_EVIDENCE:
                 self.assertIn('evidence/uefi-ahci-'+name, index)
+            for name in package.USB_EVIDENCE:
+                self.assertIn('evidence/uefi-xhci-'+name, index)
             for name in ('drivers/ahci_native/build/ahci-i486.o',
                          'shizukudos/uefi_ahci/build/BOOTX64.EFI',
                          'shizukudos/uefi_ahci/build/payload.bin',
                          'shizukudos/uefi_ahci/build/transition.bin',
-                         'ntwin32/unicode/build/host-tests.json','ntwin32/unicode/build/utf-i486.o'):
+                         'ntwin32/unicode/build/host-tests.json','ntwin32/unicode/build/utf-i486.o',
+                         'drivers/xhci_native/build/xhci-i486.o','drivers/xhci_native/build/host-tests.log',
+                         'shizukudos/uefi_xhci/build/BOOTX64.EFI','shizukudos/uefi_xhci/build/payload.bin',
+                         'shizukudos/uefi_xhci/build/transition.bin','shizukudos/uefi_xhci/build/host-tests.log',
+                         'docs/XHCI_CHECKPOINT.md','docs/STORAGE_UTF_CHECKPOINT.md'):
                 self.assertIn(name, index)
             self.assertFalse(any(name.endswith(('pattern.img','esp.img','.fd')) for name in index))
         checksum = self.fixture.output.with_suffix('.zip.sha256').read_text().split()[0]
         self.assertEqual(checksum, sha(self.fixture.output.read_bytes()))
         self.assertEqual((self.root/'build/windows98-shizuku-second-edition-native-checkpoint.zip').read_bytes(),
                          b'previous native checkpoint')
+        self.assertEqual((self.root/'build/windows98-shizuku-second-edition-storage-utf-checkpoint.zip').read_bytes(),
+                         b'previous storage UTF checkpoint')
 
     def test_source_mutation_between_validation_and_snapshot_is_rejected(self):
         previous = self.previous_package()
@@ -427,6 +498,168 @@ class PackageEvidenceTests(unittest.TestCase):
         self.reject_changed_json('ntwin32/unicode/build/host-tests.json',
             lambda data: data.update(passed=False), 'UTF core lacks matching exhaustive/sanitized host evidence')
 
+    def test_xhci_guest_requires_exact_current_build_and_stopped_success(self):
+        self.reject_changed_json('shizukudos/uefi_xhci/build/build-result.json',
+            lambda data: data.update(metadata='another build receipt'), 'matching stopped KVM guest proof')
+        path = 'shizukudos/uefi_xhci/build/qemu-result.json'
+        for key,value in (('pass',False),('process_stopped',False),('qemu_returncode',-15),
+                          ('artifact_sha256',sha(b'different EFI'))):
+            with self.subTest(key=key):
+                self.reject_changed_json(path, lambda data:data.update({key:value}), 'stopped KVM guest proof')
+        self.reject_changed_json(path, lambda data:data['kvm'].update(enabled=False), 'stopped KVM guest proof')
+
+    def test_xhci_requires_130_completed_commands_and_released_dma(self):
+        path = 'shizukudos/uefi_xhci/build/qemu-result.json'
+        for key,value in (('magic',0),('size',79),('calibrated',0),('ticks_per_us',0),
+                          ('stage',2),('commands_completed',129),('commands_completed',131),
+                          ('bridges',0),('last_completion_code',2),('last_status',0x1004),
+                          ('open_result',1),('command_result',1),('close_result',1),
+                          ('port_events',1),('completion_high',1),('quarantine',1)):
+            with self.subTest(key=key,value=value):
+                self.reject_changed_json(path, lambda data:data['xhci'].update({key:value}),
+                                         '130 completed commands and released DMA')
+
+    def test_xhci_build_bounds_and_required_sources(self):
+        path = 'shizukudos/uefi_xhci/build/build-result.json'
+        for value in (0x02026001, 0x02000000, 0x02100000):
+            with self.subTest(dma_address=value):
+                self.reject_changed_json(path, lambda data:data['payload'].update(dma_address=value),
+                                         'image/DMA exceeds fixed protected-mode bounds')
+        for name in ('drivers/xhci_native/xhci.c','drivers/pcie/src/ntw_pcie.c'):
+            with self.subTest(source=name):
+                self.reject_changed_json(path, lambda data:data['sources_sha256'].pop(name),
+                                         'source receipt is incomplete')
+
+    def test_xhci_host_sanitizers_and_inventory_tests_are_required(self):
+        path = 'drivers/xhci_native/build/host-tests.json'
+        for key in ('passed','asan_ubsan','freestanding_i486_no_runtime_imports'):
+            with self.subTest(key=key):
+                self.reject_changed_json(path, lambda data:data.update({key:False}),
+                                         'sanitized/freestanding host evidence')
+        self.reject_changed_json(path, lambda data:data['sources_sha256'].pop('xhci.c'),
+                                 'source receipt is incomplete')
+        self.reject_changed_json(path, lambda data:data['sources_sha256'].update({'../xhci.c':sha(b'x')}),
+                                 'nonlocal paths')
+        path = 'shizukudos/uefi_xhci/build/host-tests.json'
+        for key,value in (('pass',False),('cases_per_variant',0),('variants',['strict']),('inventory_tests',0)):
+            with self.subTest(key=key):
+                self.reject_changed_json(path, lambda data:data.update({key:value}),
+                                         'strict/sanitized/inventory host evidence')
+        self.reject_changed_json(path,
+            lambda data:data['sources_sha256'].pop('shizukudos/uefi_xhci/test_inventory.py'),
+            'source receipt is incomplete')
+
+    def test_xhci_artifacts_sources_logs_and_object_are_bound(self):
+        names = ('drivers/xhci_native/xhci.c','drivers/xhci_native/build/host-tests.log',
+                 'drivers/xhci_native/build/xhci-i486.o','shizukudos/uefi_xhci/clock.c',
+                 'shizukudos/uefi_xhci/test_qemu.py','shizukudos/uefi_xhci/test_inventory.py',
+                 'shizukudos/uefi_xhci/build/host-tests.log','drivers/pcie/src/ntw_pcie.c') + tuple(
+                 'shizukudos/uefi_xhci/build/'+name for name in ('BOOTX64.EFI','payload.bin','transition.bin'))
+        for name in names:
+            path = self.root/name
+            original = path.read_bytes()
+            previous = self.previous_package()
+            path.write_bytes(original+b'changed')
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(RuntimeError,
+                        'source changed|host evidence|artifact changed since build'):
+                    self.run_packager()
+                self.assertEqual(self.fixture.output.read_bytes(), previous)
+            finally:
+                path.write_bytes(original)
+
+    def test_xhci_evidence_inventory_hashes_and_directory_are_bound(self):
+        for name in package.USB_EVIDENCE:
+            path = self.root/self.fixture.xhci_evidence/name
+            original = path.read_bytes()
+            previous = self.previous_package()
+            path.write_bytes(original+b'changed')
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(RuntimeError,'xHCI guest evidence changed'):
+                    self.run_packager()
+                self.assertEqual(self.fixture.output.read_bytes(), previous)
+            finally:
+                path.write_bytes(original)
+        receipt = 'shizukudos/uefi_xhci/build/qemu-result.json'
+        self.reject_changed_json(receipt, lambda data:data['evidence_sha256'].pop('dma.bin'),
+                                 'evidence hash inventory')
+        self.reject_changed_json(receipt,
+            lambda data:data['evidence_sha256'].update({'unexpected.bin':sha(b'x')}),'evidence hash inventory')
+        self.reject_changed_json(receipt, lambda data:data.update(evidence_directory=str(self.root)),
+                                 'isolated build directory')
+        self.reject_changed_json(receipt, lambda data:data.update(dma_sha256=sha(b'other DMA')),
+                                 'evidence hash fields disagree')
+
+    def test_xhci_receipt_matches_physical_snapshots(self):
+        path = 'shizukudos/uefi_xhci/build/qemu-result.json'
+        self.reject_changed_json(path, lambda data:data['xhci'].update(pci_bdf=0x108),
+                                 'physical proof snapshot disagrees')
+        self.reject_changed_json(path, lambda data:data['handoff'].update(stage=4),
+                                 'physical handoff snapshot disagrees')
+        self.reject_changed_json(path, lambda data:data['registers'].update(EIP=0x02020000),
+                                 'CPU registers disagree')
+
+    def reject_changed_usb_evidence(self, name, mutate, message, update_receipt=lambda receipt,data:None):
+        path = self.root/self.fixture.xhci_evidence/name
+        original = path.read_bytes()
+        data = bytearray(original)
+        mutate(data)
+        path.write_bytes(data)
+        def update(receipt):
+            receipt['evidence_sha256'][name] = sha(data)
+            if name == 'dma.bin':receipt['dma_sha256'] = sha(data)
+            update_receipt(receipt, data)
+        try:
+            self.reject_changed_json('shizukudos/uefi_xhci/build/qemu-result.json', update, message)
+        finally:
+            path.write_bytes(original)
+
+    def test_xhci_dma_event_is_checked_even_after_hash_rebinding(self):
+        for offset in (2320,2324,2328,2332):
+            with self.subTest(offset=offset):
+                self.reject_changed_usb_evidence('dma.bin', lambda data:data.__setitem__(offset,data[offset]^1),
+                    'physical DMA snapshot lacks the 130th command completion')
+        self.reject_changed_usb_evidence('xhci-proof.bin', lambda data:struct.pack_into('<I',data,60,1),
+            'physical DMA snapshot lacks the 130th command completion',
+            lambda receipt,data:receipt.update(xhci=dict(zip(package.XHCI_PROOF_FIELDS,struct.unpack('<4IQ14I',data)))))
+
+    def test_xhci_mode_is_checked_even_after_snapshot_rebinding(self):
+        for key,value in (('stage',4),('cr0',0x80000001),('cr4',0x20),('efer',0x400),
+                          ('cs',8),('graphics_pass',0),('payload_bytes',1),('region_bytes',0)):
+            with self.subTest(key=key):
+                self.reject_changed_usb_evidence('handoff.bin',
+                    lambda data:struct.pack_into('<I',data,package.HANDOFF_FIELDS.index(key)*4,value),
+                    'completed protected-mode/core/graphics handoff',
+                    lambda receipt,data:receipt.update(handoff=dict(zip(package.HANDOFF_FIELDS,struct.unpack('<28I',data)))))
+
+    def test_xhci_pci_inventory_must_prove_bridge_and_bar(self):
+        path = 'shizukudos/uefi_xhci/build/qemu-result.json'
+        def endpoint(data):return data['pci'][0]['devices'][0]['pci_bridge']['devices'][0]
+        for key,value in (('size',0x1000),('address',0x82000000),('type','io'),('mem_type_64',False),('bar',1)):
+            with self.subTest(key=key):
+                self.reject_changed_json(path, lambda data:endpoint(data)['regions'][0].update({key:value}),
+                                         'PCI inventory does not match.*BAR')
+        for key,value in (('bus',0),('slot',1),('function',8)):
+            with self.subTest(key=key):
+                self.reject_changed_json(path, lambda data:endpoint(data).update({key:value}), 'PCI inventory')
+        for key,value in (('number',1),('secondary',0),('subordinate',0)):
+            with self.subTest(key=key):
+                self.reject_changed_json(path,
+                    lambda data:data['pci'][0]['devices'][0]['pci_bridge']['bus'].update({key:value}), 'PCI inventory')
+        self.reject_changed_json(path,
+            lambda data:data['pci'][0]['devices'][0]['pci_bridge']['devices'].append(copy.deepcopy(endpoint(data))),
+            'PCI inventory repeats a device')
+        self.reject_changed_json(path,
+            lambda data:data['pci'][0]['devices'][0]['pci_bridge']['devices'].clear(), 'controller/bridge count')
+
+    def test_previous_checkpoint_archives_survive_xhci_validation_failure(self):
+        self.reject_changed_json('shizukudos/uefi_xhci/build/qemu-result.json',
+            lambda data:data.update(process_stopped=False), 'stopped KVM guest proof')
+        self.assertEqual((self.root/'build/windows98-shizuku-second-edition-native-checkpoint.zip').read_bytes(),
+                         b'previous native checkpoint')
+        self.assertEqual((self.root/'build/windows98-shizuku-second-edition-storage-utf-checkpoint.zip').read_bytes(),
+                         b'previous storage UTF checkpoint')
+
 
 class RebuildReceiptTests(unittest.TestCase):
     ARTIFACTS = (
@@ -437,6 +670,8 @@ class RebuildReceiptTests(unittest.TestCase):
         'ntwrapper/vxd/build/NTWQUERY.EXE',
         'shizukudos/uefi_ahci/build/BOOTX64.EFI', 'shizukudos/uefi_ahci/build/payload.bin',
         'shizukudos/uefi_ahci/build/transition.bin',
+        'shizukudos/uefi_xhci/build/BOOTX64.EFI', 'shizukudos/uefi_xhci/build/payload.bin',
+        'shizukudos/uefi_xhci/build/transition.bin',
     )
 
     def setUp(self):
@@ -478,11 +713,11 @@ class RebuildReceiptTests(unittest.TestCase):
     def test_unchanged_snapshot_receives_its_own_hash(self):
         with patch.object(verify.subprocess, 'run', side_effect=self.successful_mock_rebuild) as runner:
             self.run_verifier()
-        self.assertEqual(runner.call_count, 9)
+        self.assertEqual(runner.call_count, 12)
         receipt = json.loads(self.receipt_path.read_text())
         self.assertEqual(receipt['source_package_sha256'], sha(self.original))
         self.assertEqual(set(receipt['rebuild_identical']), set(self.ARTIFACTS))
-        self.assertEqual(len(receipt['rebuild_identical']), 12)
+        self.assertEqual(len(receipt['rebuild_identical']), 15)
         self.assertFalse(receipt['guest_reexecuted'])
         self.assertEqual(receipt['rebuild_commands'], [list(command) for command in verify.REBUILD_COMMANDS])
         self.assertFalse(any('test_qemu.py' in part for command in verify.REBUILD_COMMANDS for part in command))
@@ -496,14 +731,14 @@ class RebuildReceiptTests(unittest.TestCase):
             nonlocal calls
             result = self.successful_mock_rebuild(command, **arguments)
             calls += 1
-            if calls == 9:
+            if calls == 12:
                 self.package_path.write_bytes(replacement)
             return result
 
         with patch.object(verify.subprocess, 'run', side_effect=replace_on_last_rebuild):
             with self.assertRaisesRegex(RuntimeError, 'Source package changed during rebuild'):
                 self.run_verifier()
-        self.assertEqual(calls, 9)
+        self.assertEqual(calls, 12)
         self.assertEqual(self.package_path.read_bytes(), replacement)
         self.assertFalse(self.receipt_path.exists())
 

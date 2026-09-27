@@ -29,8 +29,8 @@ Omit `--resume` only for a first installation with no existing guest disk.
 The supervisor allows 60–1800 seconds and always stops its own child. A
 `snapshot` command records a screenshot; it does not create a VM snapshot.
 Internal snapshots must be saved/restored through the verified owned QMP
-connection. Existing `install-computer-identification` captures the setup
-wizard's computer-name page before a product key has been entered.
+connection. The latest private `install-file-copy` snapshot captures setup
+copying files at 20%; installation and native probe execution remain incomplete.
 
 ## Optional RAM working copy
 
@@ -99,3 +99,23 @@ space so CI capacity does not weaken or accidentally determine production guards
 Recovery also covers a crash before the first PID/global state is recorded: the
 sole durable journal is used only after a read-only process ownership scan finds
 no matching guest. An unreadable process or ambiguous journal stops recovery.
+
+## Original probe CD
+
+After building the platform DLL/probe and VxD/probe, prepare a separate CD:
+
+```sh
+python3 platform/win98lab/make_probe_media.py
+```
+
+The helper snapshots the four original binaries, checks their build manifests,
+builds an ISO with `xorriso`, and extracts it again to compare every filename
+and byte. It verifies the inputs stayed unchanged before publishing
+`build/win98-lab/ntw-native-probes.iso` and a hash receipt. The CD contains only
+`NTW32.DLL`, `NTWPROBE.EXE`, `NTWRAP9X.VXD`, `NTWQUERY.EXE`, instructions and
+checksums. It contains no Windows installation files or keys.
+
+On a disposable installed Windows 98 snapshot without KernelEx, copy the four
+binaries to `C:\NTWLAB`, run both probes there, and collect their exit codes
+and `NTWPROBE.LOG` / `NTWQUERY.LOG`. Building this CD is preparation only;
+successful native execution requires those separate guest results.

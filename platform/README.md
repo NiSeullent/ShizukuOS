@@ -12,6 +12,7 @@ capability is the long-term target, not the current compatibility claim.
 | [NTWDDMWrapper9x](../ntwddm/) | Original software framebuffer/surface/presentation core | Win98 display binding, GPU memory/scheduling, vendor miniports and D3D |
 | [PCI-E](../drivers/pcie/) | Config transport, topology, ECAM/capabilities/resources/DMA constraints | CONFIGMG/VMM binding, interrupts, real storage/USB/GPU drivers |
 | [AHCI storage](../drivers/ahci_native/) | Original read-only core; post-UEFI 32-bit DMA reads against the disposable QEMU ICH9 fixture | Windows 98 driver binding, physical controllers, reset/recovery, interrupts and wider I/O |
+| [xHCI command rings](../drivers/xhci_native/) | Original core; 130 post-UEFI command completions through a QEMU PCI-E bridge, with independent DMA and BAR checks | USB device/endpoint enumeration and transfers, Windows 98 binding, interrupts and physical controllers |
 | [ShizukuDOS UEFI](../shizukudos/uefi32/) | Original EFI program, verified transition from x64 firmware to own 32-bit protected-mode kernel | DOS/runtime/boot bridge capable of reaching Win98 GUI without CSM |
 
 ## Reproduce
@@ -40,6 +41,10 @@ python3 drivers/ahci_native/test.py
 python3 shizukudos/uefi_ahci/build.py
 python3 shizukudos/uefi_ahci/test.py
 python3 shizukudos/uefi_ahci/test_qemu.py
+python3 drivers/xhci_native/test.py
+python3 shizukudos/uefi_xhci/build.py
+python3 shizukudos/uefi_xhci/test.py
+python3 shizukudos/uefi_xhci/test_qemu.py
 ```
 
 Generated artifacts, firmware variable copies, receipts and images stay in
@@ -48,13 +53,13 @@ with networking disabled. No script installs into the host, changes global
 client settings, flashes firmware or updates an installed Windows system.
 
 After those checks, `python3 platform/package.py` produces
-`build/windows98-shizuku-second-edition-storage-utf-checkpoint.zip`.
+`build/windows98-shizuku-second-edition-xhci-checkpoint.zip`.
 Earlier checkpoint ZIPs are preserved. The allowlist includes original sources,
-the [storage/UTF checkpoint](../docs/STORAGE_UTF_CHECKPOINT.md), build artifacts,
+the [xHCI checkpoint](../docs/XHCI_CHECKPOINT.md), all earlier checkpoint documents, build artifacts,
 and the source-bound host and guest evidence. It excludes firmware, Windows
 media, ESP/test disk images, and guest installation files.
 
-Publication requires the AHCI host sanitizer/freestanding results, clock tests,
+Publication retains the AHCI host sanitizer/freestanding results, clock tests,
 matching current EFI/payload/transition bytes, and the exact build receipt used
 by a stopped KVM guest. The guest must have completed both reads, verified 1024
 bytes, closed successfully and released DMA. Six evidence-file hashes are
@@ -63,12 +68,24 @@ sector are compared with the receipt. The disposable disk must still match
 its unchanged before/after hash. Unicode host evidence is bound to the platform
 test receipt. Any validated input changing before publication rejects the ZIP.
 
+The xHCI gate additionally requires its sanitized/freestanding core receipt,
+strict/sanitized clock and PCI inventory tests, all three current integration
+artifacts, and the exact build receipt used by a stopped KVM guest. The physical
+80-byte proof must report 130 completed commands, successful open/command/close,
+and released DMA. Six evidence hashes are checked. The final DMA event must
+identify the expected command address and success code after command/event ring
+wraps; the recorded PCI tree must identify the same controller behind a bridge
+with the matching 64-bit memory BAR. Protected-mode, core, graphics and CPU
+register evidence must agree. This fixture attaches no USB device: command-ring
+completion does not establish USB device enumeration or data transfers.
+
 `python3 platform/verify_package.py` extracts a snapshot of that ZIP into a
-separate build directory, validates its file manifest, and runs nine build/host
+separate build directory, validates its file manifest, and runs twelve build/host
 test commands, including the actual PE32 ABI harness, original AHCI model tests,
-and lab clock tests. It requires byte-identical results for twelve artifacts:
-the DLL, two probes, kernel archive, VxD, three EFI images, and the two 32-bit
-payload/transition pairs. It does not boot a guest or install the artifacts.
+the xHCI model tests, and lab clock/inventory tests. It requires byte-identical
+results for fifteen artifacts: the DLL, two probes, kernel archive, VxD, four EFI
+images, and three 32-bit payload/transition pairs. It does not boot a guest or
+install the artifacts.
 Replacing the input ZIP during verification prevents publication of a rebuild
 receipt. These checks establish reproducibility; they do not extend the guest
 or physical-hardware compatibility claims recorded in the checkpoint.
@@ -109,8 +126,9 @@ The reference baseline is Git commit `1d54ca7`. Host compilers and OVMF are
 present. The registered Win98 VM is an empty placeholder, with no installed OS;
 it has not been modified or booted. Old Windows-host VM results in `vm/README.md`
 are reference history and do not validate these new components. Current exact
-results belong in [the storage/UTF checkpoint](../docs/STORAGE_UTF_CHECKPOINT.md).
-The [native checkpoint](../docs/NATIVE_PLATFORM_CHECKPOINT.md) and
+results belong in [the xHCI checkpoint](../docs/XHCI_CHECKPOINT.md).
+The [storage/UTF checkpoint](../docs/STORAGE_UTF_CHECKPOINT.md),
+[native checkpoint](../docs/NATIVE_PLATFORM_CHECKPOINT.md) and
 [first independent checkpoint](../docs/INDEPENDENT_PLATFORM_CHECKPOINT.md)
 are retained as historical evidence. The user has since supplied the same
 Korean OEM ISO for this server; its SHA-256 was verified before preparing a
