@@ -68,7 +68,7 @@ def main():
         command = [compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
                    '-Wpedantic', '-Wconversion', '-Wshadow', *target, '-march=i486',
                    '-mno-sse', '-mno-sse2', '-mno-mmx', '-msoft-float', '-ffreestanding',
-                   '-fno-builtin', '-fno-stack-protector', '-fno-asynchronous-unwind-tables',
+                   '-fno-builtin', '-fno-pie', '-fno-pic', '-fno-stack-protector', '-fno-asynchronous-unwind-tables',
                    '-fstack-usage', '-c', HERE / 'fat.c', '-o', output]
         compiled = run(command)
         undefined = run(['nm', '-u', output]).stdout.strip()

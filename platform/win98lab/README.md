@@ -29,8 +29,12 @@ Omit `--resume` only for a first installation with no existing guest disk.
 The supervisor allows 60–1800 seconds and always stops its own child. A
 `snapshot` command records a screenshot; it does not create a VM snapshot.
 Internal snapshots must be saved/restored through the verified owned QMP
-connection. The latest private `install-file-copy-packed` snapshot captures
-setup copying files at 71%; installation and native probe execution remain incomplete.
+connection. The latest private `install-product-key-gate` snapshot follows
+100% file copying and the first Windows setup boot. Its five key fields are
+empty, and the guest is stopped. The compressed checkpoint was restored into
+a separate private file and passed `qemu-img check` with all six internal
+snapshots intact. Installation and native probe execution remain incomplete;
+the owner's key is required for the next setup step.
 
 ## Optional RAM working copy
 
