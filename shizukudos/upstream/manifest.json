@@ -164,7 +164,7 @@
     "open-watcom-v2": {
       "kind": "toolchain (not redistributed)",
       "url": "https://github.com/open-watcom/open-watcom-v2/releases/download/Last-CI-build/ow-snapshot.tar.xz",
-      "sha256": "4fdc24c04a02e31ffedae1690fc2c6d53fcb01464f92692adf6b17a7e890af3f",
+      "sha256": "01f690d058c26ee5ba6730661ca56bbbfd401ac856af3fc0f4f2e0e626ed0063",
       "note": "Rolling CI tag: the archive at this URL can be replaced. The sha256 is the reproducibility gate; a mismatch means the toolchain must be re-pinned before results are compared.",
       "license": "Sybase Open Watcom Public License 1.0"
     },
