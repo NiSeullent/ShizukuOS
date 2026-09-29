@@ -634,7 +634,8 @@ class CMakeLite:
             if rest and rest[0] == "IMPORTED":
                 return
             t = Target(tname, kind, srcdir, local["CMAKE_CURRENT_BINARY_DIR"])
-            t.sources = [self._path(x, srcdir, local) for x in rest if x not in ("EXCLUDE_FROM_ALL",)]
+            # a target's source list is a set in CMake: a file listed twice is compiled once
+            t.sources = list(dict.fromkeys(self._path(x, srcdir, local) for x in rest if x not in ("EXCLUDE_FROM_ALL",)))
             t.spec = getattr(self, "pending_spec", {}).get(tname)     # spec2def() usually precedes add_library()
             self.targets[tname] = t
             state["created"].append(t)
@@ -1282,7 +1283,8 @@ def main():
         for n in names:
             prior = results["drivers"].get(n, {})
             if not args.cc and cc == "clang" and prior.get("gcc", {}).get("status") == "built":
-                continue                                      # default mode: clang only where gcc did not build
+                prior.pop("clang", None)                      # default mode: clang only where gcc did not build
+                continue
             try:
                 rec = build_corpus_driver(n, tc, tools, log, args.jobs)
             except Exception as e:                            # noqa: BLE001 - record and continue with the next driver
