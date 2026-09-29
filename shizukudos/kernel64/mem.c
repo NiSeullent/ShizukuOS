@@ -373,6 +373,9 @@ void mem_init(const shz_bootinfo_t *bi)
      * Its PDPT must exist now: every process PML4 copies the kernel half at creation (vm_new_space) and would
      * otherwise miss a slot created later, faulting on window pages while running on that process's tables. */
     KASSERT(walk(kpml4, KWIN_BASE, 1, 0));
+    /* NT driver host image window (NTDRV_VA_BASE, its own PML4 slot 448): reserved here for the same reason, so a
+     * .sys loaded after a process exists (NtLoadDriver from user mode) is mapped in that process's tables too. */
+    KASSERT(walk(kpml4, NTDRV_VA_BASE, 1, 0));
     write_cr3(kpml4);
     phys_base_va = DIRECT_MAP;
     heap_init();

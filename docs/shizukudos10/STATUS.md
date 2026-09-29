@@ -19,6 +19,8 @@
 | `shz.py test --suite host` | — | VERIFIED (5 PASS) |
 | `shz.py test --suite win98-regression` | HOST_TESTED / GUEST_RUN(TCG) | 19 PASS / 0 FAIL / 1 SKIP / 1 BLOCKED |
 | 기존 UEFI x64 부팅, UEFI→32비트 PM 핸드오프 | GUEST_RUN (**TCG**) | PASS |
+| NT 드라이버 호스트: 미수정 x64 `.sys` 3개 로드+DriverEntry, IRP/DPC/타이머/스레드, PCI(edu) BAR/IRQ(공유 INTx 체인)+`pci_claim ntdrv:shzpci`, 사용자 모드 NtLoadDriver→IOCTL (`run_k64_ntdrv.py`) | GUEST_RUN (**TCG**) | PASS 10/10 (provider export 185) |
+| 드라이버 import 커버리지 (`import_coverage.py --ntoskrnl`) | HOST_TESTED | 시험 드라이버 3개 25/25; N2 ReactOS 코퍼스 23개 중 로드 가능 1개(null.sys), ntoskrnl 103/313 |
 
 `win98-regression`의 BLOCKED는 설치된 Windows 98 체크포인트(`build/win98-lab`, 사용자 제공 자산) 부재,
 SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행하지 않음)이다. Notepad++ 성공/실패를 이 문서는 단정하지 않는다.
@@ -315,6 +317,26 @@ CD로 붙인 경우만 돈다(`--install-media`로 다른 매체도 가능). NVM
 Supervisor 경로, Secure Boot(서명 없음), 실제 USB 스틱과 실제 하드웨어, 512 MiB 외의 RAM 크기, 1 vCPU UEFI(C1이 CSMWrap 거부를 확인),
 실제 제3자 드라이버 패키지.
 
+## 2f. 통합 현황 (lead `wip/shizukudos-10-toydzv`, 검증 체인)
+
+각 에이전트 브랜치는 격리 작업트리에서 lead 위에 병합한 뒤, CI host 잡 전 단계 재현, `kbuild.py`, `win64/build.py`,
+`run_k64_standalone.py` 2회, `run_k32_standalone.py`, `run_k64_gui.py`, 그리고 에이전트 자신의 러너를 통과한 경우에만
+lead로 옮겼다(검증 트리 해시 = lead 트리 해시). 모두 QEMU TCG, GUEST_RUN.
+
+| 영역 | 들어온 것 | 대표 증거 |
+| --- | --- | --- |
+| 부팅 | UEFI 부트 매니저(BOOT.INI, Kernel64 직접 부팅, CSMWrap 대체) | `test_bootmgr.py` 17/17, UEFI 부팅 후 상태 화면 스크린샷 |
+| 설치 | SHZSETUP(빈 디스크에 GPT+ESP+ShizukuFS 설치), 설치 디스크 UEFI 재부팅 | `run_install.py --build` 전 셀 PASS(BIOS 재부팅은 C3 병합 시) |
+| 저장장치 | AHCI 읽기/쓰기, FAT32 D: 쓰기, NVMe(MSI-X, 32 in-flight), SD/SDHCI, ShizukuFS(ext4 형식) E: | `run_k64_disk.py`, `run_k64_storage.py`, `run_k64_sfs.py`(e2fsck 깨끗) |
+| 그래픽 | Bochs VBE, virtio-gpu 2D, UEFI GOP 백엔드, user32 485·gdi32 170 export | `run_k64_gui.py`(vga/virtio), `run_k64_gop.py` |
+| 로더/런타임 | 로더 재작성(검색 순서, ASLR, 지연 로드, TLS, CFG), API-set 147계약, ucrtbase 847·vcruntime·msvcp, Wine 11 crypt32/dwrite 외 8종 | 상태 화면: 시스템 DLL 32개 전부 로드 |
+| 드라이버 | PCI 드라이버 바인딩 기록(상태 화면), NT 드라이버 코퍼스(ReactOS 23종 빌드) + INF 저장소 + shzpnp | `test_inf.py`, `T_SHZPNP` 34/34 |
+| 난수 | 커널 엔트로피 풀 + ChaCha20 CSPRNG(`NtShzRandom`), RDRAND 없는 CPU에서도 동작 | 부팅 KAT, qemu64(무 RDRAND)에서 T_WP_CRYPT32 PASS |
+
+Chromium 157 시작 체인(정적 분석, `startup_chain.py`): 적재 시 import 1,346개 중 해결 안 된 것 64개(4.8%, 모두 kernel32).
+**Chromium은 아직 게스트에서 실행되지 않았다.** NT 드라이버 호스트(N1), IPC/프로세스 회수(P-ipc), 하이브리드 설치 ISO(C3)는
+lead 병합 작업 중이다.
+
 ## 3. 이번 세션에서 실행하지 못한 것 (BLOCKED)
 
 | 항목 | 이유 |
@@ -327,4 +349,4 @@ Supervisor 경로, Secure Boot(서명 없음), 실제 USB 스틱과 실제 하�
 
 ## 4. 저장소 반영 상태
 
-브랜치 `wip/shizukudos-10-toydzv`는 원격에 올라가 있고 PR #2로 추적한다. (초기에는 `git push`가 403으로 거부됐고 이후 접근이 복구됐다.)
+브랜치 `wip/shizukudos-10-toydzv`는 원격에 올라가 있다. PR #2, #3이 main에 병합됐고(#3은 squash), 이후 작업은 새 PR로 추적한다.
