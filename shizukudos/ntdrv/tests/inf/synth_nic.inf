@@ -1,0 +1,136 @@
+; SPDX-License-Identifier: GPL-2.0-only
+; Synthetic NDIS miniport package INF in the style of a vendor NIC package (no vendor content).
+; Exercises: decorated Manufacturer lines, SUBSYS-specific and generic models, .NTamd64 DDInstall,
+; CopyFiles/DestinationDirs/SourceDisksFiles, .Services/AddService, service AddReg, .HW, quoted strings
+; with commas and "" escapes, %% literal, line continuation, comments after values.
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Net
+ClassGUID   = {4d36e972-e325-11ce-bfc1-08002be10318}
+Provider    = %Synth%
+DriverVer   = 03/14/2025,12.19.1.32
+CatalogFile = synthnic.cat
+CatalogFile.NTamd64 = synthnic64.cat
+
+[Manufacturer]
+%Synth% = Synth, NTamd64.10.0...16299, NTamd64.10.0, NTamd64, NTx86    ; the build-number form is preferred on Win10 1709+
+
+[Synth.NTx86]
+%SN1.Desc% = SN1.ndi.x86, PCI\VEN_1AF4&DEV_7001&REV_01
+
+[Synth.NTamd64]
+%SN1.Desc% = SN1.ndi.legacy, PCI\VEN_1AF4&DEV_7001&REV_01
+
+[Synth.NTamd64.10.0]
+%SN1.Desc% = SN1.ndi.old, PCI\VEN_1AF4&DEV_7001&REV_01
+
+[Synth.NTamd64.10.0...16299]
+%SN1.Desc%      = SN1.ndi,  PCI\VEN_1AF4&DEV_7001&SUBSYS_00011AF4&REV_01
+%SN1.Desc%      = SN1.ndi,  PCI\VEN_1AF4&DEV_7001&SUBSYS_00011AF4
+%SN1G.Desc%     = SN1.ndi,  PCI\VEN_1AF4&DEV_7001
+%SN2.Desc%      = SN2.ndi,  PCI\VEN_1AF4&DEV_7002, \
+                            PCI\VEN_1AF4&DEV_7002&CC_020000, PCI\CC_0200
+%SN3.Desc%      = SN3.ndi,  PCI\VEN_1AF4&DEV_7003, PCI\VEN_1AF4&DEV_7002
+
+[SN1.ndi.NTamd64]
+Characteristics = 0x84   ; NCF_HAS_UI | NCF_PHYSICAL
+BusType         = 5
+AddReg          = SN1.reg, common.reg
+CopyFiles       = SN1.copy
+*IfType         = 6
+*MediaType      = 0
+*PhysicalMediaType = 14
+
+[SN1.ndi.NTamd64.Services]
+AddService = synthnic, 2, SN1.service, SN1.eventlog
+
+[SN1.ndi.NTamd64.HW]
+AddReg = SN1.hw.reg
+
+[SN1.service]
+DisplayName    = %SN1.Service.Desc%
+ServiceType    = 1        ; SERVICE_KERNEL_DRIVER
+StartType      = 3        ; SERVICE_DEMAND_START
+ErrorControl   = 1        ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\synthnic.sys
+LoadOrderGroup = NDIS
+AddReg         = SN1.service.reg
+
+[SN1.service.reg]
+HKR, Parameters, "Quoted, with comma", 0x00000000, "value ""with"" quotes, and a comma"
+HKR, Parameters, Percent, 0, "100%%"
+
+[SN1.eventlog]
+AddReg = SN1.eventlog.reg
+
+[SN1.eventlog.reg]
+HKR, , EventMessageFile, 0x00020000, "%%SystemRoot%%\System32\netevent.dll;%%SystemRoot%%\System32\drivers\synthnic.sys"
+HKR, , TypesSupported,   0x00010001, 7
+
+[SN1.reg]
+HKR, Ndi,            Service,    0, "synthnic"
+HKR, Ndi\Interfaces, UpperRange, 0, "ndis5"
+HKR, Ndi\Interfaces, LowerRange, 0, "ethernet"
+HKR, Ndi\params\*SpeedDuplex, ParamDesc, 0, %SpeedDuplex%
+HKR, Ndi\params\*SpeedDuplex, default,   0, "0"
+HKR, Ndi\params\*SpeedDuplex, type,      0, "enum"
+
+[common.reg]
+HKR, , Shared, 0x00010001, 1
+
+[SN1.hw.reg]
+HKR, , "MSISupported", 0x00010001, 1
+
+[SN1.copy]
+synthnic.sys,,,2
+
+[SN2.ndi.NTamd64]
+AddReg    = common.reg
+CopyFiles = @synthnic2.sys
+FeatureScore = 0x30
+
+[SN2.ndi.NTamd64.Services]
+AddService = synthnic2, 2, SN2.service
+
+[SN2.service]
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %12%\synthnic2.sys
+
+[SN3.ndi.NT]
+AddReg    = common.reg
+
+[SN3.ndi.NT.Services]
+AddService = synthnic3, 2, SN2.service
+
+[DestinationDirs]
+DefaultDestDir = 12
+SN1.copy       = 12
+
+[SourceDisksNames]
+1 = %DiskId%,,,""
+
+[SourceDisksNames.amd64]
+1 = %DiskId%,,,x64
+
+[SourceDisksFiles]
+synthnic.sys  = 1
+synthnic2.sys = 1,sub
+
+[Strings]
+Synth            = "Synthetic Devices, Inc."
+SN1.Desc         = "Synthetic Gigabit Adapter (subsystem 1)"
+SN1G.Desc        = "Synthetic Gigabit Adapter"
+SN2.Desc         = "Synthetic 10G Adapter"
+SN3.Desc         = "Synthetic Compat Adapter"
+SN1.Service.Desc = "Synthetic NIC Driver"
+SpeedDuplex      = "Speed & Duplex"
+DiskId           = "Synthetic NIC Driver Disk"
+
+[Strings.0409]
+SpeedDuplex      = "Speed && Duplex (en-US)"
+
+[Strings.0407]
+SpeedDuplex      = "Geschwindigkeit und Duplex"

@@ -28,6 +28,45 @@
       "used_by": ["shizukudos/dos16"],
       "build": "Open Watcom + NASM via `build.sh` (XMS swap enabled, language english)",
       "patches": ["shizukudos/dos16/patches/freecom-0001-reproducible-build-stamp.patch"]
+    },
+    "reactos": {
+      "repository": "https://github.com/reactos/reactos.git",
+      "ref": "master",
+      "commit": "f06eace89e11b6513afcf65b653f2d360db7ba77",
+      "license": "GPL-2.0-or-later (COPYING; individual driver sources carry their own SPDX tags, most GPL-2.0-or-later, some LGPL-2.1-or-later or MIT)",
+      "license_files": ["COPYING", "COPYING.LIB"],
+      "execution_mode": "NT kernel-mode driver sources (x64 WDM), compiled unmodified as the NT driver corpus",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "shizukudos/ntdrv/corpus/build.py: each driver's own sources compiled with x86_64-w64-mingw32-gcc against the ReactOS sdk/include headers, linked --subsystem native, imports via generated ntoskrnl/hal/ndis import libraries (no RosBE, no CMake)",
+      "patches": []
+    },
+    "virtio-win": {
+      "repository": "https://github.com/virtio-win/kvm-guest-drivers-windows.git",
+      "ref": "master",
+      "commit": "04e70e76c966fd9247a523e41c1b6c624e9b46eb",
+      "license": "BSD-3-Clause (LICENSE)",
+      "license_files": ["LICENSE"],
+      "execution_mode": "NT kernel-mode driver sources (NetKVM NDIS 6.x, viostor StorPort, vioinput/viogpudo KMDF/WDM)",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "shizukudos/ntdrv/corpus/build.py: per-driver attempt with mingw-w64 DDK headers; results recorded in docs/shizukudos10/DRIVER_CORPUS.md",
+      "patches": []
+    },
+    "windows-driver-frameworks": {
+      "repository": "https://github.com/microsoft/Windows-Driver-Frameworks.git",
+      "ref": "master",
+      "commit": "b6191d9543441329154da32f7ab9bdd97228dd3c",
+      "license": "MIT (LICENSE)",
+      "license_files": ["LICENSE"],
+      "execution_mode": "KMDF (Wdf01000.sys) and UMDF v2 framework sources; assessed, not built",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "not built: assessment in docs/shizukudos10/DRIVER_CORPUS.md",
+      "patches": []
     }
   },
   "tools": {
