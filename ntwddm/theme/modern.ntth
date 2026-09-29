@@ -1,0 +1,12 @@
+name Modern
+class BUTTON
+part 1 state 1 bgtype borderfill bordersize 1 bordercolor 0078D7 filltype solid fillcolor F0F0F0 textcolor 000000
+part 1 state 2 bgtype borderfill bordersize 1 bordercolor 0078D7 filltype solid fillcolor E5F1FB textcolor 000000
+part 1 state 3 bgtype borderfill bordersize 1 bordercolor 005A9E filltype solid fillcolor CCE4F7 textcolor 000000
+part 1 state 4 bgtype borderfill bordersize 1 bordercolor C8C8C8 filltype solid fillcolor F0F0F0 textcolor A0A0A0
+class WINDOW
+part 1 state 1 bgtype borderfill bordersize 1 bordercolor 004578 filltype horzgradient fillcolor 0078D7 gradient1 0078D7 gradient2 005A9E textcolor FFFFFF
+part 1 state 2 bgtype borderfill bordersize 1 bordercolor 666666 filltype solid fillcolor CCCCCC textcolor 333333
+part 7 state 1 bgtype borderfill bordersize 1 bordercolor A0A0A0 filltype solid fillcolor F0F0F0 textcolor 000000
+part 8 state 1 bgtype borderfill bordersize 1 bordercolor A0A0A0 filltype solid fillcolor F0F0F0 textcolor 000000
+part 9 state 1 bgtype borderfill bordersize 1 bordercolor A0A0A0 filltype solid fillcolor F0F0F0 textcolor 000000

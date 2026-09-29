@@ -94,12 +94,17 @@ make -C ntwddm freestanding
 make -C ntwddm freestanding32
 ```
 
+`make test` also runs the theme and present contracts and, when
+`i686-w64-mingw32-gcc` is installed, builds console `build/NTTHPROB.EXE`
+without stripping it. That PE links the host C library. It is not a Windows 98
+guest result.
+
 All generated files are under ignored `ntwddm/build/`. The sanitizer compiler
 must have working AddressSanitizer and UndefinedBehaviorSanitizer runtimes.
 This server's GCC runtime libraries are missing, so Clang is used for that
 check. No package installation is needed for the recorded run.
 
-The 2026-09-27 host run passes **308,637 assertions**, including **50,960
+The software-core host run passes **308,637 assertions**, including **50,960
 exhaustive same-surface copies** covering every nonempty rectangle and valid
 destination of a 7 × 6 surface in each format. The snapshot oracle checks full
 allocation bytes, including untouched padding. Other tests cover all 16 format
@@ -107,8 +112,26 @@ pairs, unaligned framebuffers, real fill/present pixel values, allocator failure
 surface-slot exhaustion/reuse, reference/mapping lifetime, malformed descriptors,
 overflowing bounds, stale handles, unsupported capabilities, cross-context
 fences, rebind/unbind invalidation, and failed completion hooks. The same suite
-passes Clang ASan/UBSan with leak detection. Compile-only host and i386 checks
+passes Clang ASan/UBSan with leak detection. The later theme and present host
+runs add their own checks (88 theme, 53 present on the recorded run) and write
+`build/evidence/`. Compile-only host and i386 checks
 require zero undefined symbols; they are not execution in Windows 98.
+
+## In-process theme and software present
+
+`src/nttheme.c` loads a text visual style in the calling process and paints
+`BUTTON` / `WINDOW` parts into an `NTWG_PIXEL_XRGB8888` buffer. The bundled
+Classic and Modern texts are `theme/classic.ntth` and `theme/modern.ntth`.
+Backgrounds are border-fill, including a two-color linear caption blend.
+Image, radial, and tiled backgrounds fail without writing. Text is a 5×7
+glyph run on a transparent background.
+
+`src/ntwd_present.c` creates a software device and software context around the
+existing core, then presents the device primary. A GPU create flag or GPU node
+returns `NTWG_E_UNSUPPORTED` and does not pretend to present. Host tests save
+the classic/modern comparison, the presented framebuffer, and the app-owned DIB
+under `build/evidence/`. Those images are not a Windows 98 window and not GPU
+scanout. Provenance and the reviewed LGPL sources are in `PROVENANCE.md`.
 
 ## Remaining platform work
 

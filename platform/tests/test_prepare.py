@@ -57,12 +57,25 @@ class PrepareTests(unittest.TestCase):
             mod.prepare(first)
 
     def test_unsupported_execution_paths(self):
-        cases = [(self.pe.pe+4, '<H', 0x8664), (self.pe.opt+48, '<H', 6),
-                 (self.pe.opt+70, '<H', 0x100), (self.pe.opt+32, '<I', 3)]
-        cases += [(self.pe.opt+96+i*8, '<I', 0x1000) for i in (4,9,10,13,14)]
+        cases = [(self.pe.pe+4, '<H', 0x8664), (self.pe.opt+32, '<I', 3),
+                 (self.pe.opt+70, '<H', 0x4000)]
+        cases += [(self.pe.opt+96+i*8, '<I', 0x1000) for i in (4, 9, 10, 13, 14)]
         for offset, fmt, value in cases:
             with self.subTest(offset=offset), self.assertRaises(mod.PEError):
                 mod.prepare(self.changed(offset, fmt, value))
+
+    def test_retains_newer_subsystem_and_nx_without_rewriting(self):
+        data = bytearray(self.changed(self.pe.opt + 48, '<H', 6))
+        struct.pack_into('<H', data, self.pe.opt + 50, 1)
+        struct.pack_into('<H', data, self.pe.opt + 70, 0x100)
+        prepared, report = mod.prepare(bytes(data))
+        new = mod.PE(prepared)
+        self.assertEqual((new.u16(new.opt + 48), new.u16(new.opt + 50)), (6, 1))
+        self.assertEqual(new.u16(new.opt + 70) & 0x100, 0x100)
+        self.assertFalse(report['subsystem_version_downgraded'])
+        self.assertFalse(report['stock_win98_loader_accepts_subsystem'])
+        self.assertFalse(report['nx_enforced'])
+        self.assertFalse(report['browser_functionality_verified'])
 
     def test_header_slack_and_truncation(self):
         with self.assertRaisesRegex(mod.PEError, 'slack'):

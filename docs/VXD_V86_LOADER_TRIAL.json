@@ -1,0 +1,118 @@
+{
+  "schema": "ntw.native.v86-loader-trial.v1",
+  "date": "2026-09-27",
+  "product": "Windows 98 Shizuku's Second Edition",
+  "guest": {
+    "os": "Korean Windows 98 SE OEM",
+    "version": "4.10.2222",
+    "snapshot": "windows98-clean-installed",
+    "kernelex_installed": false,
+    "kvm_enabled": true,
+    "ram_mib": 128,
+    "network_devices": 0
+  },
+  "tool": {
+    "name": "NTWLDR.COM",
+    "bytes": 22176,
+    "sha256": "d203ba8fb79658f633c5647ed8790795ca55e9f5ff9a8365f04fbb642db4d1ff",
+    "host_scenarios": 731,
+    "host_checks": 72827,
+    "build_receipt_sha256": "24ebdd9f788c7bee3bb8bc8f52fe23eb7c68cef0c8293c296ead12f0607b7b99",
+    "test_receipt_sha256": "38e83b7130735f87301caf6bd12a62898372123be8c7e656b48d9ae66a408f90"
+  },
+  "candidate": {
+    "sha256": "83952d5c220272d4dbd724e309e29fcc431d2eefa0e59253d3283a116fc0801e",
+    "bytes": 9390,
+    "baseline_sha256": "aff7acf54cd0323fe4dce9aab7d93da16df7b8cf345220ee9d2dafa95b0bc537",
+    "only_difference": {
+      "offset": 356,
+      "before": 67,
+      "after": 99
+    }
+  },
+  "actual_result": {
+    "complete_byte_and_eof_preflight": true,
+    "entry_segment": "FDA9",
+    "entry_offset": "2087",
+    "version": {
+      "flags": "3246",
+      "ax": "0000",
+      "dx": "040A"
+    },
+    "load": {
+      "flags": "3247",
+      "carry": 1,
+      "ax": "0006",
+      "dx": "04A5",
+      "declared_error": "VXDLDR_ERR_BAD_DEVICE_FILE"
+    },
+    "unload_called": false,
+    "dos_exit": 5,
+    "native_vxd_load_passed": false,
+    "native_vmm_calls_verified": false,
+    "kernel_initialization_proven": false
+  },
+  "logs": {
+    "NTWLDR.LOG": "NTWLDR FORMAT=1\r\nEVIDENCE=GUEST_REPORTED_ONLY\r\nEXPECTED_SHA256=83952d5c220272d4dbd724e309e29fcc431d2eefa0e59253d3283a116fc0801e\r\nENTRY    FLAGS=3246 AX=1684 DX=04F4\r\nENTRY SEG=FDA9 OFF=2087\r\nVERSION  FLAGS=3246 AX=0000 DX=040A\r\nOPEN     FLAGS=3246 AX=0006 DX=04A5\r\nREAD     FLAGS=3246 AX=24AE DX=2AE3\r\nEOF      FLAGS=3246 AX=0000 DX=2AE3\r\nCLOSE    FLAGS=3202 AX=3E00 DX=2AE3\r\nPREFLIGHT=EXACT_9390_BYTES_AND_EOF\r\nLOAD     FLAGS=3247 AX=0006 DX=04A5\r\nRESULT_CODE=0005\r\nEND=BEFORE_LOG_CLOSE\r\n",
+    "NTWLDEX.TXT": "DOS_EXIT=5 \r\n",
+    "GUESTVER.TXT": "\r\nWindows 98 [Version 4.10.2222]\r\n\r\n"
+  },
+  "collection": {
+    "schema": 1,
+    "source_qcow_sha256": "d2af21e8ee036d0c4f9e16f4c5edea6bc8947da0a9dea9b48c86b8392fe6a1a5",
+    "guest_pid_absent": 1939559,
+    "media_receipt_sha256": "10b45015cd8da98c3813f33d00688d6756655a7f86d692f9112908c9142b4cb4",
+    "files": {
+      "NTWLDR.COM": {
+        "bytes": 22176,
+        "sha256": "d203ba8fb79658f633c5647ed8790795ca55e9f5ff9a8365f04fbb642db4d1ff",
+        "matches_original_media": true
+      },
+      "NTWRAP9X.VXD": {
+        "bytes": 9390,
+        "sha256": "83952d5c220272d4dbd724e309e29fcc431d2eefa0e59253d3283a116fc0801e",
+        "matches_original_media": true
+      },
+      "RUNV86.BAT": {
+        "bytes": 22699,
+        "sha256": "df18a3af97d5ea36aeaefe8aeedae7e967a9048cf46c8826323ad933e35132b7",
+        "matches_original_media": true
+      },
+      "NTWLDR.LOG": {
+        "bytes": 489,
+        "sha256": "6b149f472c2ea45c5a596275dad270921914872000a273cbb0be1e99041a71c5"
+      },
+      "NTWLDEX.TXT": {
+        "bytes": 13,
+        "sha256": "389027e07af5414194580813688a8f4272ca77a9b3b0411bc42c2aac7e7ddd18"
+      },
+      "GUESTVER.TXT": {
+        "bytes": 36,
+        "sha256": "b40c1c1fdd6570893bf932eb469bbf865a352778f3027c16b311c43938d4d2e3"
+      }
+    },
+    "missing": [],
+    "native_execution_verified": false,
+    "partition": {
+      "index": 0,
+      "lba": 63,
+      "sectors": 4193217
+    },
+    "qa_trial_token": "jgbrl262",
+    "baseline_pointer_sha256": "d3df8220cde1564ed466567ff28c46dec7e2c9b223c50f8898afd7a28bfd0fd5",
+    "source_unchanged": true,
+    "scratch_removed": true
+  },
+  "qa": {
+    "token": "jgbrl262",
+    "baseline_pointer_sha256": "d3df8220cde1564ed466567ff28c46dec7e2c9b223c50f8898afd7a28bfd0fd5",
+    "baseline_archive_sha256": "0c15c1a7b266599eb1834c9c02f87ee9c1d007a6d2b52e4207b5b89df8ee00d8",
+    "stopped_ram_sha256": "d2af21e8ee036d0c4f9e16f4c5edea6bc8947da0a9dea9b48c86b8392fe6a1a5",
+    "evidence_manifest_sha256": "d9f02a2cb7d115a2a89a71ac528a5651609559da124293b4fe5e3d2adfb65992",
+    "evidence_files": 27,
+    "evidence_bytes": 682077,
+    "qa_ram_discarded": true,
+    "discard_receipt_sha256": "7ed570252345a1af15d40f6c6da48b36a14fa07bd7e37b98e424409c223ce596"
+  },
+  "scope": "Actual Win98 V86 discovery/version/file preflight/native loader failure; no DIOC, VMM service or application compatibility pass."
+}

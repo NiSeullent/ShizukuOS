@@ -3,13 +3,18 @@
 The independent application compatibility path for **Windows 98 Shizuku's
 Second Edition**. The app-local filename is `NTW32.DLL` to fit an 8.3 filename.
 The provider exports ordinary named Win32 functions, not KernelEx tables.
-All new implementation code here is original GPL-2.0-only; no legacy `src/`
-provider, Unicode tables, KernelEx, Wine, ReactOS or third-party runtime is linked.
+The earlier SRW, InitOnce, tick, resolver and UTF exports are original
+GPL-2.0-only code. The vectored-handler exports link the
+[ReactOS-reference registry](exception/README.md) through `k32veh.c`.
+That registry is not a CPU exception hook and does not claim native Win98 VEH.
 
 Implemented families: seven pointer-sized SRW operations, four InitOnce
 operations, observed-wrap `GetTickCount64`, and scoped `GetProcAddress`
-redirection, plus UTF-8 `MultiByteToWideChar`/`WideCharToMultiByte`: fifteen
-exports in total. Shared readers and an
+redirection, plus UTF-8 `MultiByteToWideChar`/`WideCharToMultiByte`, and
+`AddVectoredExceptionHandler` / `RemoveVectoredExceptionHandler`: seventeen
+exports in total. The vectored-handler exports implement first/last order and
+reject a null callback; they are not installed into the CPU exception path.
+Shared readers and an
 exclusive writer use 32-bit atomic acquire/release ordering; contention blocks
 through native `Sleep(1)`. A zero-delay Sleep leaves a waiter runnable, so it
 cannot be the only backoff when a lower-priority owner needs to run. The
@@ -88,10 +93,15 @@ allowlist; exported names and the routing list are tested for equality.
 Unsupported imports remain unresolved by this provider. There is no claim
 that preparation makes an arbitrary modern application run.
 
-The initial subset rejects PE32+, signed images, TLS, load configuration,
-delay imports, CLR, unsupported loader flags, newer subsystem requirements,
-malformed ranges and insufficient section-header slack. No signature removal
-or silent version downgrade occurs. API sets, dependent-DLL recursion and
+The initial subset rejects PE32+, signed images, CLR, malformed TLS, malformed
+load configuration, non-RVA delay imports, unsupported loader flags, and
+Control Flow Guard without a validated function table. A complete 24-byte TLS
+directory, a consistent load-configuration directory, and RVA-based delay
+imports are preserved rather than stripped. Subsystem versions above 4.10 are
+retained and are not rewritten to 4.10; `stock_win98_loader_accepts_subsystem`
+records that the stock Windows 98 loader still rejects them. DYNAMIC_BASE and
+NX_COMPAT are retained. NX is not enforced and ASLR is not implemented.
+No signature removal or silent version downgrade occurs. API sets, dependent-DLL recursion and
 apps that assume NT internals need subsequent work. Preparing `NTW32.DLL`
 itself is rejected: its native loader imports must remain native to avoid
 resolver recursion.

@@ -6,9 +6,47 @@ The completion target is **100% of the Windows API surface and working execution
 
 Use the Microsoft Windows SDK **10.0.28000.2705** (released August 2026) as the initial frozen reference. Its Win32 and WinRT desktop API declarations form the inventory to classify; this includes interface methods as well as DLL exports. The locally installed 10.0.26100.0 SDK can bootstrap the inventory, but a percentage calculated against that older subset must be labeled with its version and must not be called full 28000 coverage. Driver DDIs, .NET APIs, and the independently shipped Windows App SDK are recorded separately because the original project excludes modern application drivers and those interfaces are not all Windows SDK OS APIs. [Windows SDK overview](https://learn.microsoft.com/en-us/windows/apps/windows-sdk/), [SDK release notes](https://learn.microsoft.com/en-us/windows/apps/windows-sdk/release-notes), [desktop API families](https://learn.microsoft.com/en-us/windows/apps/api-reference/).
 
-The inventory must record stable API identity, architecture, minimum OS, interface/contract version, and feature dependencies. A numerator entry requires a guest test for success, failure, memory ownership, thread behavior, and documented edge cases as appropriate. For a native Windows 98 function, this means a guest test of the original API. For a wrapper, this means the same test through KernelEx. No complete denominator or 100% score has been computed yet.
+The inventory must record stable API identity, architecture, minimum OS, interface/contract version, and feature dependencies. A numerator entry requires a guest test for success, failure, memory ownership, thread behavior, and documented edge cases as appropriate. For a native Windows 98 function, this means a guest test of the original API. New wrappers require the same behavioral tests through NTWin32Wrapper9x without KernelEx. Historical KernelEx results below remain a separate lineage. No complete denominator or 100% score has been computed yet.
 
-## User-selected application corpus
+## Current Chromium priority — 2026-09-27
+
+The current target is official **Chromium 156.0.8076.0 x86**, snapshot
+[1705698](https://storage.googleapis.com/chromium-browser-snapshots/Win/1705698/chrome-win.zip),
+identified from the publisher's `Win/LAST_CHANGE` and the actual PE version data.
+The entire 322,979,270-byte ZIP matched Google's MD5 metadata and has SHA-256
+`2ff3b6bafda988752817b4eda7ee74e0842535bc513eb985a8194dfa08bad6c0`.
+All 258 extracted files passed CRC checks. Publisher inputs, binary identities,
+imports and preparation limits are in [the current target receipt](CHROMIUM_CURRENT_TARGET.json).
+Chromium 150 in the historical table below is no longer the latest target.
+
+Both `chrome.exe` and `chrome_elf.dll` are i386 PE32, declare OS/subsystem 10.0,
+and contain static TLS, load configuration and delay imports. A host fixture
+with that same directory shape is now validated and preserved: TLS 24 bytes,
+load configuration 192 bytes, an RVA-based delay import, subsystem 10.0, and
+DLL characteristics `0xC140`. The bytes are not stripped and the subsystem
+version is not rewritten to 4.10. The stock Windows 98 loader still rejects
+subsystem 10.0. The current 17-export provider routes only a small KERNEL32
+subset, including `AddVectoredExceptionHandler` and
+`RemoveVectoredExceptionHandler` as an ordered registry that is not connected
+to a CPU trap. `browser_functionality_verified` remains false. Official
+`browser_functionality_verified` remains false. The official zip was
+checked into ignored `benchmarks/media` (SHA-256 matches the receipt). An i386
+loader maps `chrome.exe` and `chrome_elf.dll` without rewriting subsystem
+10.0, applies HIGHLOW relocations, copies static TLS, installs an FS TEB slot,
+and the TLS `PROCESS_ATTACH` callbacks return. `chrome_elf.dll`'s entry then
+stops on `InitializeCriticalSectionEx`. That is not a browser launch.
+
+The [bounded native observer](../platform/win98lab/app_probe/README.md) records
+actual process creation, loader error, owned windows and full process exit.
+Its own exit 0 can report a correctly observed launch failure. Browser startup,
+rendered local pages, JavaScript, keyboard/mouse input and clean shutdown need
+separate evidence. The initial unchanged-package guest trial is pending.
+
+Follow-on kernel and application work actively references pinned ReactOS source,
+with per-file licenses, authorship and adaptation differences retained. Existing
+independent components and historical KernelEx ports keep their own provenance.
+
+## Historical pinned application corpus
 
 These programs are separate integration probes. Their static PE import coverage and their actual startup/function tests are reported separately from the full-SDK percentage. Versions below are pinned as of 2026-09-23 where the publisher offered a current release.
 

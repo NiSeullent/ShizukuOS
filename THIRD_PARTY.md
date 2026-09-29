@@ -1,5 +1,16 @@
 # Source and license record
 
+The subsequent NTWin32Wrapper9x exception and static-TLS work references ReactOS
+revisions [`cae3c053d47024545c773148185319075eae0202`](https://github.com/reactos/reactos/tree/cae3c053d47024545c773148185319075eae0202)
+for the earlier handler registry and
+[`9dc3ca87209fd8ebabd96c8ea95d439c13e7fdf8`](https://github.com/reactos/reactos/tree/9dc3ca87209fd8ebabd96c8ea95d439c13e7fdf8)
+for loader TLS and `RtlpAddVectoredHandler`. Per-file notes are in
+[ntwin32/exception/PROVENANCE.md](ntwin32/exception/PROVENANCE.md),
+[ntwin32/tls/PROVENANCE.md](ntwin32/tls/PROVENANCE.md) and
+[ntwin32/loader/PROVENANCE.md](ntwin32/loader/PROVENANCE.md). Wine was compared
+and not copied. One-Core-API `ldrinit.c` at
+`9eb3c31de9460c1ccce3f6a10c9c4a704f032514` was not copied.
+
 Project source code and the KernelEx ABI adaptation are distributed under GPL-2.0-only. The Unicode mapping data and adapted Wine algorithms retain their LGPL-2.1-or-later notices; see [Wine license](licenses/Wine-LGPL-2.1.txt). Source versions were pinned on 2026-09-23 and 2026-09-24.
 
 | Project | Version and source | Use here | License |
@@ -56,3 +67,13 @@ component provenance are recorded in their respective directories. Compiler
 headers and external test firmware/tools are build/test dependencies, not
 project-authored implementations. Existing third-party notices above continue
 to apply to the historical source files and their builds.
+
+The NTWDDM theme painter reviewed One-Core-API
+[`dll/win32/uxtheme/draw.c`](https://github.com/shorthorn-project/One-Core-API-Source/blob/9eb3c31de9460c1ccce3f6a10c9c4a704f032514/dll/win32/uxtheme/draw.c)
+at `9eb3c31de9460c1ccce3f6a10c9c4a704f032514` (LGPL-2.1-or-later, the Wine/ReactOS
+painter in that tree), together with the pinned ReactOS and Wine `draw.c` files
+cited above. No line of those files was copied. The software present path
+follows the public Vista `D3DKMT` device/context/present contracts without
+copying `d3dkmthk.h`. Per-file differences are in
+[`ntwddm/PROVENANCE.md`](ntwddm/PROVENANCE.md). This does not change the
+historical KernelEx UXTHEME bridge above.

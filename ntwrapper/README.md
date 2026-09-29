@@ -32,8 +32,12 @@ x64-to-32-bit protected-mode transition, verified under OVMF/KVM.
 
 The original [native VxD binding](vxd/) now builds `NTWRAP9X.VXD`, with an LE
 packager, DDB/control dispatch, VMM page-validation query bridge and a guest
-load/query probe. Its host and native i386 assembly tests have passed. Actual
-Windows 98 loading and VMM service behavior remain unverified.
+load/query probe. Its host and native i386 assembly tests have passed. In the
+[actual Windows 98 V86 loader trial](../docs/VXD_V86_LOADER_TRIAL.md), the frozen
+data-SHARABLE candidate passed byte preflight but was rejected with native
+error 6 (bad device file). Kernel initialization and VMM service behavior have
+no native pass. ReactOS kernel/user exception dependencies for the next binding
+are traced in the [exception port](../ntwin32/exception/NATIVE_BINDING.md).
 
 Still required for a Windows 98 kernel extension: a verified VxD/LE loader and
 VMM service binding, locked/nonpaged allocations, process-local handle tables,

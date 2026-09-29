@@ -144,6 +144,16 @@ jobs:
           python3 platform/win98lab/test_native_runner.py --diagnostic
           python3 platform/win98lab/test_native_logs.py
 
+      - name: Test and build the bounded Chromium launch observer
+        # Synthetic WinAPI models and PE imports only; no browser or guest run.
+        run: |
+          python3 platform/win98lab/app_probe/test.py
+          python3 platform/win98lab/app_probe/test.py --cd-source
+
+      - name: Test the ReactOS-reference exception core
+        # Portable lifetime/concurrency models only; no Win98 exception hook.
+        run: python3 ntwin32/exception/test.py
+
       - name: Test xHCI command rings and build the PCI-E integration
         run: |
           python3 drivers/xhci_native/test.py
@@ -167,7 +177,7 @@ jobs:
         if: always()
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
-          This workflow checks original host contracts, sanitizer results,
+          This workflow checks project host contracts, sanitizer results,
           freestanding builds, and PE32 execution with explicit service mocks.
           Individual step outcomes determine whether those checks passed.
 

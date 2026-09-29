@@ -1,0 +1,14 @@
+--- a/kernel/main.c	2026-09-29 06:52:50.886087056 +0000
++++ b/kernel/main.c	2026-09-29 06:52:50.902756173 +0000
+@@ -434,6 +434,11 @@
+   /* init_call_init_buffers(); done from CONFIG.C   */
+ }
+ 
++/* ShizukuDOS 10.0-dev: use the kernel's own CUSTOM_BRANDING hook. */
++#ifndef CUSTOM_BRANDING
++#define CUSTOM_BRANDING "ShizukuDOS 10.0-dev DOS16 (FreeDOS kernel ke2046)"
++#endif
++
+ STATIC VOID signon()
+ {
+ 	if (InitKernelConfig.Verbose < 0) 

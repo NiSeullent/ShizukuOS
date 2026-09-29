@@ -46,6 +46,8 @@ def main():
         'ntwin32/initonce.c', '-o', BUILD/'initonce_test_sanitized')
     run(BUILD/'initonce_test_sanitized')
     run(sys.executable, 'ntwin32/unicode/test.py')
+    run(sys.executable, '-B', 'ntwin32/tls/test.py')
+    run(sys.executable, '-B', 'ntwin32/loader/test_host.py')
     run(sys.executable, '-m', 'unittest', 'discover', '-s', 'platform/tests', '-p', 'test_*.py', '-v')
     # Independent binutils reader also needs to recognize the rebuilt import table.
     output = subprocess.check_output(['i686-w64-mingw32-objdump','-p', str(BUILD/'NTWPROBE.EXE')], text=True)

@@ -1,0 +1,497 @@
+/* SPDX-License-Identifier: GPL-2.0-only
+ * ntdll x64 structured exception handling: RUNTIME_FUNCTION lookup over the loader database,
+ * RtlVirtualUnwind (Microsoft x64 unwind-code semantics, including epilogue detection and
+ * chained unwind info), RtlUnwindEx, the two-phase exception dispatcher and vectored handlers.
+ *
+ * Written from Microsoft's public documentation of the x64 exception-handling data structures
+ * ("x64 exception handling", UNWIND_INFO / UNWIND_CODE). It is not derived from Windows binaries.
+ */
+#include "nt.h"
+
+#define UWOP_PUSH_NONVOL 0
+#define UWOP_ALLOC_LARGE 1
+#define UWOP_ALLOC_SMALL 2
+#define UWOP_SET_FPREG 3
+#define UWOP_SAVE_NONVOL 4
+#define UWOP_SAVE_NONVOL_FAR 5
+#define UWOP_EPILOG 6
+#define UWOP_SPARE 7
+#define UWOP_SAVE_XMM128 8
+#define UWOP_SAVE_XMM128_FAR 9
+#define UWOP_PUSH_MACHFRAME 10
+
+typedef struct { BYTE ver_flags, prolog, count, frame; BYTE codes[]; } unwind_info_t;
+#define UI_VERSION(i) ((i)->ver_flags & 7)
+#define UI_FLAGS(i) ((i)->ver_flags >> 3)
+
+static DWORD64 *reg_slot(CONTEXT *c, unsigned r) { return &c->Rax + r; }         /* Rax,Rcx,Rdx,Rbx,Rsp,Rbp,Rsi,Rdi,R8..R15 */
+
+/* ---------------------------------------------------------------- function tables */
+typedef struct { PRUNTIME_FUNCTION table; DWORD count; DWORD64 base; int used; } dyn_table_t;
+static dyn_table_t dyn_tables[64];
+
+SHZ_EXPORT BOOLEAN NTAPI RtlAddFunctionTable(PRUNTIME_FUNCTION table, DWORD count, DWORD64 base)
+{
+    unsigned i;
+    for (i = 0; i < 64; ++i)
+        if (!dyn_tables[i].used) {
+            dyn_tables[i] = (dyn_table_t){ table, count, base, 1 };
+            return TRUE;
+        }
+    return FALSE;
+}
+SHZ_EXPORT BOOLEAN NTAPI RtlDeleteFunctionTable(PRUNTIME_FUNCTION table)
+{
+    unsigned i;
+    for (i = 0; i < 64; ++i)
+        if (dyn_tables[i].used && dyn_tables[i].table == table) { dyn_tables[i].used = 0; return TRUE; }
+    return FALSE;
+}
+
+static PRUNTIME_FUNCTION search_table(PRUNTIME_FUNCTION t, DWORD n, DWORD64 base, DWORD64 pc)
+{
+    long lo = 0, hi = (long)n - 1;
+    const DWORD rva = (DWORD)(pc - base);
+    while (lo <= hi) {
+        const long mid = (lo + hi) / 2;
+        if (rva < t[mid].BeginAddress) hi = mid - 1;
+        else if (rva >= t[mid].EndAddress) lo = mid + 1;
+        else return &t[mid];
+    }
+    return 0;
+}
+
+SHZ_EXPORT PVOID NTAPI RtlPcToFileHeader(PVOID pc, PVOID *base)
+{
+    SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
+    LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
+    for (l = head->Flink; l != head; l = l->Flink) {
+        SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
+        if ((uint8_t *)pc >= (uint8_t *)e->DllBase && (uint8_t *)pc < (uint8_t *)e->DllBase + e->SizeOfImage) {
+            *base = e->DllBase;
+            return e->DllBase;
+        }
+    }
+    *base = 0;
+    return 0;
+}
+
+SHZ_EXPORT PRUNTIME_FUNCTION NTAPI RtlLookupFunctionEntry(DWORD64 pc, PDWORD64 image_base, PUNWIND_HISTORY_TABLE hist)
+{
+    PVOID base = 0;
+    unsigned i;
+    (void)hist;
+    for (i = 0; i < 64; ++i)
+        if (dyn_tables[i].used) {
+            PRUNTIME_FUNCTION f = search_table(dyn_tables[i].table, dyn_tables[i].count, dyn_tables[i].base, pc);
+            if (f) { *image_base = dyn_tables[i].base; return f; }
+        }
+    if (!RtlPcToFileHeader((PVOID)pc, &base)) { *image_base = 0; return 0; }
+    {
+        const IMAGE_DOS_HEADER *dos = base;
+        const IMAGE_NT_HEADERS64 *nt = (const IMAGE_NT_HEADERS64 *)((const uint8_t *)base + dos->e_lfanew);
+        const IMAGE_DATA_DIRECTORY *d = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+        *image_base = (DWORD64)(uintptr_t)base;
+        if (!d->VirtualAddress || !d->Size) return 0;
+        return search_table((PRUNTIME_FUNCTION)((uint8_t *)base + d->VirtualAddress), d->Size / sizeof(RUNTIME_FUNCTION),
+                            (DWORD64)(uintptr_t)base, pc);
+    }
+}
+
+/* ---------------------------------------------------------------- epilogue emulation */
+static int in_epilogue(const uint8_t *pc, DWORD64 fn_begin, DWORD64 fn_end, CONTEXT *ctx, int apply)
+{
+    /* Recognised epilogue: [add rsp,imm | lea rsp,[fp+imm]] , pop* , (ret | rep ret | jmp out-of-function). */
+    const uint8_t *p = pc;
+    DWORD64 rsp = ctx->Rsp;
+    CONTEXT tmp = *ctx;
+    if ((p[0] == 0x48 && p[1] == 0x83 && p[2] == 0xc4)) { rsp += (int8_t)p[3]; p += 4; }                        /* add rsp, imm8 */
+    else if (p[0] == 0x48 && p[1] == 0x81 && p[2] == 0xc4) { int32_t v; memcpy(&v, p + 3, 4); rsp += v; p += 7; }  /* add rsp, imm32 */
+    else if ((p[0] & 0xfb) == 0x48 && p[1] == 0x8d && (p[2] & 0xc7) == 0x45 && ((p[2] >> 3) & 7) == 4 && !(p[0] & 4)) {
+        /* lea rsp, [rbp/rbp-like + disp8]: 48 8d 65 xx (rbp) or 49 8d 65 xx (r13) */
+        const unsigned reg = (p[2] & 7) | ((p[0] & 1) ? 8 : 0);
+        rsp = *reg_slot(&tmp, reg) + (int8_t)p[3];
+        p += 4;
+    } else if ((p[0] & 0xfa) == 0x48 && p[1] == 0x8d && (p[2] & 0xc7) == 0x85 && ((p[2] >> 3) & 7) == 4) {
+        const unsigned reg = (p[2] & 7) | ((p[0] & 1) ? 8 : 0);
+        int32_t v; memcpy(&v, p + 3, 4);
+        rsp = *reg_slot(&tmp, reg) + v;
+        p += 7;
+    }
+    for (;;) {                                                            /* pops */
+        unsigned reg;
+        if (p[0] >= 0x58 && p[0] <= 0x5f) { reg = p[0] - 0x58; p += 1; }
+        else if (p[0] == 0x41 && p[1] >= 0x58 && p[1] <= 0x5f) { reg = 8 + p[1] - 0x58; p += 2; }
+        else break;
+        *reg_slot(&tmp, reg) = *(DWORD64 *)rsp;
+        rsp += 8;
+    }
+    if (p[0] == 0xc3 || (p[0] == 0xf3 && p[1] == 0xc3) || (p[0] == 0xc2)) {
+        if (apply) {
+            *ctx = tmp;
+            ctx->Rip = *(DWORD64 *)rsp;
+            ctx->Rsp = rsp + 8;
+        }
+        return 1;
+    }
+    /* tail-call jump out of the function: rex.w jmp r/m64, jmp rel32/rel8, jmp [mem] */
+    if ((p[0] == 0x48 && p[1] == 0xff && (p[2] & 0x38) == 0x20) || p[0] == 0xe9 || p[0] == 0xeb ||
+        (p[0] == 0xff && p[1] == 0x25)) {
+        int outside = 1;
+        if (p[0] == 0xe9) { int32_t rel; memcpy(&rel, p + 1, 4); outside = ((DWORD64)(p + 5 + rel) < fn_begin || (DWORD64)(p + 5 + rel) >= fn_end); }
+        else if (p[0] == 0xeb) { outside = ((DWORD64)(p + 2 + (int8_t)p[1]) < fn_begin || (DWORD64)(p + 2 + (int8_t)p[1]) >= fn_end); }
+        if (outside) {
+            if (apply) {
+                *ctx = tmp;
+                ctx->Rip = *(DWORD64 *)rsp;
+                ctx->Rsp = rsp + 8;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* ---------------------------------------------------------------- RtlVirtualUnwind */
+static void apply_codes(const unwind_info_t *info, CONTEXT *c, DWORD64 control_offset, int all, DWORD64 frame_base,
+                        PKNONVOLATILE_CONTEXT_POINTERS ptrs)
+{
+    unsigned i = 0;
+    const unsigned frame_off = (info->frame >> 4) * 16u;
+    const unsigned frame_reg = info->frame & 15;
+    (void)ptrs;
+    while (i < info->count) {
+        const BYTE off = info->codes[i * 2], b1 = info->codes[i * 2 + 1];
+        const unsigned op = b1 & 15, opinfo = b1 >> 4;
+        unsigned slots = 1;
+        int active = all || control_offset >= off;
+        switch (op) {
+        case UWOP_ALLOC_LARGE: slots = opinfo ? 3 : 2; break;
+        case UWOP_SAVE_NONVOL: case UWOP_SAVE_XMM128: slots = 2; break;
+        case UWOP_SAVE_NONVOL_FAR: case UWOP_SAVE_XMM128_FAR: slots = 3; break;
+        default: slots = 1;
+        }
+        if (active) {
+            switch (op) {
+            case UWOP_PUSH_NONVOL: *reg_slot(c, opinfo) = *(DWORD64 *)c->Rsp; c->Rsp += 8; break;
+            case UWOP_ALLOC_LARGE: {
+                DWORD64 sz = opinfo ? *(const DWORD *)&info->codes[(i + 1) * 2]
+                                    : (DWORD64)*(const WORD *)&info->codes[(i + 1) * 2] * 8;
+                c->Rsp += sz;
+                break;
+            }
+            case UWOP_ALLOC_SMALL: c->Rsp += (DWORD64)opinfo * 8 + 8; break;
+            case UWOP_SET_FPREG: c->Rsp = *reg_slot(c, frame_reg) - frame_off; (void)frame_base; break;
+            case UWOP_SAVE_NONVOL: *reg_slot(c, opinfo) = *(DWORD64 *)(c->Rsp + (DWORD64)*(const WORD *)&info->codes[(i + 1) * 2] * 8); break;
+            case UWOP_SAVE_NONVOL_FAR: *reg_slot(c, opinfo) = *(DWORD64 *)(c->Rsp + *(const DWORD *)&info->codes[(i + 1) * 2]); break;
+            case UWOP_SAVE_XMM128: c->FltSave.XmmRegisters[opinfo] = *(M128A *)(c->Rsp + (DWORD64)*(const WORD *)&info->codes[(i + 1) * 2] * 16); break;
+            case UWOP_SAVE_XMM128_FAR: c->FltSave.XmmRegisters[opinfo] = *(M128A *)(c->Rsp + *(const DWORD *)&info->codes[(i + 1) * 2]); break;
+            case UWOP_PUSH_MACHFRAME: {
+                DWORD64 sp = c->Rsp;
+                if (opinfo) sp += 8;                                            /* skip the hardware error code */
+                c->Rip = *(DWORD64 *)sp;
+                c->EFlags = (DWORD)*(DWORD64 *)(sp + 16);
+                c->Rsp = *(DWORD64 *)(sp + 24);
+                break;
+            }
+            default: break;                                                     /* EPILOG / SPARE */
+            }
+        }
+        i += slots;
+    }
+}
+
+SHZ_EXPORT PEXCEPTION_ROUTINE NTAPI RtlVirtualUnwind(DWORD handler_type, DWORD64 image_base, DWORD64 pc,
+                                                      PRUNTIME_FUNCTION fe, PCONTEXT ctx, PVOID *handler_data,
+                                                      PDWORD64 establisher, PKNONVOLATILE_CONTEXT_POINTERS ptrs)
+{
+    const DWORD64 begin = image_base + fe->BeginAddress, end = image_base + fe->EndAddress;
+    const DWORD64 control_offset = pc - begin;
+    const unwind_info_t *info = (const unwind_info_t *)(image_base + fe->UnwindData);
+    PEXCEPTION_ROUTINE handler = 0;
+    unsigned set_fp_off = 0xffff, i;
+    const unwind_info_t *cur = info;
+    if (handler_data) *handler_data = 0;
+    /* establisher frame: frame register based when established, else the incoming RSP */
+    {
+        const unsigned frame_reg = info->frame & 15, frame_off = (info->frame >> 4) * 16u;
+        for (i = 0; i < info->count;) {
+            const BYTE b1 = info->codes[i * 2 + 1];
+            unsigned slots = 1;
+            switch (b1 & 15) {
+            case UWOP_ALLOC_LARGE: slots = (b1 >> 4) ? 3 : 2; break;
+            case UWOP_SAVE_NONVOL: case UWOP_SAVE_XMM128: slots = 2; break;
+            case UWOP_SAVE_NONVOL_FAR: case UWOP_SAVE_XMM128_FAR: slots = 3; break;
+            default: break;
+            }
+            if ((b1 & 15) == UWOP_SET_FPREG) set_fp_off = info->codes[i * 2];
+            i += slots;
+        }
+        *establisher = frame_reg && control_offset >= set_fp_off ? *reg_slot(ctx, frame_reg) - frame_off : ctx->Rsp;
+    }
+    if (control_offset >= info->prolog && in_epilogue((const uint8_t *)pc, begin, end, ctx, 1))
+        return 0;
+    apply_codes(info, ctx, control_offset, 0, *establisher, ptrs);
+    /* chained unwind info: the parent's operations always complete */
+    while (UI_FLAGS(cur) & UNW_FLAG_CHAININFO) {
+        const RUNTIME_FUNCTION *chain = (const RUNTIME_FUNCTION *)&cur->codes[((cur->count + 1) & ~1u) * 2];
+        cur = (const unwind_info_t *)(image_base + chain->UnwindData);
+        apply_codes(cur, ctx, 0, 1, *establisher, ptrs);
+    }
+    ctx->Rip = *(DWORD64 *)ctx->Rsp;
+    ctx->Rsp += 8;
+    if ((UI_FLAGS(info) & handler_type) && !(UI_FLAGS(info) & UNW_FLAG_CHAININFO) && control_offset >= info->prolog) {
+        const DWORD *h = (const DWORD *)&info->codes[((info->count + 1) & ~1u) * 2];
+        handler = (PEXCEPTION_ROUTINE)(uintptr_t)(image_base + h[0]);
+        if (handler_data) *handler_data = (PVOID)(h + 1);
+    }
+    return handler;
+}
+
+/* ---------------------------------------------------------------- vectored handlers */
+typedef struct veh { struct veh *next; PVECTORED_EXCEPTION_HANDLER fn; } veh_t;
+static veh_t *veh_first, *vch_first;
+static volatile LONG veh_lock;
+static PTOP_LEVEL_EXCEPTION_FILTER g_unhandled_filter;
+
+static void vlock(void) { while (__sync_lock_test_and_set(&veh_lock, 1)) NtYieldExecution(); }
+static void vunlock(void) { __sync_lock_release(&veh_lock); }
+
+static PVOID add_handler(veh_t **head, ULONG first, PVECTORED_EXCEPTION_HANDLER fn)
+{
+    veh_t *v = RtlAllocateHeap(ShzProcessHeap(), 0, sizeof *v);
+    if (!v) return 0;
+    v->fn = fn;
+    vlock();
+    if (first || !*head) { v->next = *head; *head = v; }
+    else { veh_t *t = *head; while (t->next) t = t->next; v->next = 0; t->next = v; }
+    vunlock();
+    return v;
+}
+static ULONG remove_handler(veh_t **head, PVOID h)
+{
+    veh_t **pp;
+    ULONG found = 0;
+    vlock();
+    for (pp = head; *pp; pp = &(*pp)->next)
+        if (*pp == h) { *pp = (*pp)->next; found = 1; break; }
+    vunlock();
+    if (found) RtlFreeHeap(ShzProcessHeap(), 0, h);
+    return found;
+}
+SHZ_EXPORT PVOID NTAPI RtlAddVectoredExceptionHandler(ULONG first, PVECTORED_EXCEPTION_HANDLER fn) { return add_handler(&veh_first, first, fn); }
+SHZ_EXPORT ULONG NTAPI RtlRemoveVectoredExceptionHandler(PVOID h) { return remove_handler(&veh_first, h); }
+SHZ_EXPORT PVOID NTAPI RtlAddVectoredContinueHandler(ULONG first, PVECTORED_EXCEPTION_HANDLER fn) { return add_handler(&vch_first, first, fn); }
+SHZ_EXPORT ULONG NTAPI RtlRemoveVectoredContinueHandler(PVOID h) { return remove_handler(&vch_first, h); }
+SHZ_EXPORT PTOP_LEVEL_EXCEPTION_FILTER NTAPI RtlSetUnhandledExceptionFilter(PTOP_LEVEL_EXCEPTION_FILTER f)
+{
+    PTOP_LEVEL_EXCEPTION_FILTER old = g_unhandled_filter;
+    g_unhandled_filter = f;
+    return old;
+}
+
+static int run_vectored(veh_t *head, PEXCEPTION_RECORD rec, PCONTEXT ctx)
+{
+    EXCEPTION_POINTERS ep = { rec, ctx };
+    veh_t *v;
+    vlock();
+    for (v = head; v; v = v->next) {
+        PVECTORED_EXCEPTION_HANDLER fn = v->fn;
+        LONG r;
+        vunlock();
+        r = fn(&ep);
+        vlock();
+        if (r == EXCEPTION_CONTINUE_EXECUTION) { vunlock(); return 1; }
+    }
+    vunlock();
+    return 0;
+}
+
+/* ---------------------------------------------------------------- frame walking */
+static int stack_ok(DWORD64 sp)
+{
+    uint64_t base, limit;
+    __asm__ volatile("movq %%gs:8, %0" : "=r"(base));
+    __asm__ volatile("movq %%gs:16, %0" : "=r"(limit));
+    return sp >= limit && sp < base && !(sp & 7);
+}
+
+static BOOLEAN dispatch_frames(PEXCEPTION_RECORD rec, PCONTEXT orig)
+{
+    CONTEXT c = *orig;
+    unsigned depth = 0;
+    while (depth++ < 4096) {
+        DWORD64 image_base = 0, establisher = 0;
+        PRUNTIME_FUNCTION fe = RtlLookupFunctionEntry(c.Rip, &image_base, 0);
+        CONTEXT unwound = c;
+        PVOID hdata = 0;
+        PEXCEPTION_ROUTINE handler;
+        if (!stack_ok(c.Rsp) && depth > 1) return FALSE;
+        if (!fe) {                                                  /* leaf: return address is at RSP */
+            if (!stack_ok(c.Rsp)) return FALSE;
+            c.Rip = *(DWORD64 *)c.Rsp;
+            c.Rsp += 8;
+            if (!c.Rip) return FALSE;
+            continue;
+        }
+        handler = RtlVirtualUnwind(UNW_FLAG_EHANDLER, image_base, c.Rip, fe, &unwound, &hdata, &establisher, 0);
+        if (handler) {
+            DISPATCHER_CONTEXT dc;
+            EXCEPTION_DISPOSITION d;
+            memset(&dc, 0, sizeof dc);
+            dc.ControlPc = c.Rip;
+            dc.ImageBase = image_base;
+            dc.FunctionEntry = fe;
+            dc.EstablisherFrame = establisher;
+            dc.ContextRecord = &c;
+            dc.LanguageHandler = handler;
+            dc.HandlerData = hdata;
+            d = handler(rec, (PVOID)establisher, &c, &dc);
+            if (d == ExceptionContinueExecution) {
+                if (rec->ExceptionFlags & EXCEPTION_NONCONTINUABLE) return FALSE;
+                *orig = c;                                          /* handler may have modified the context */
+                return TRUE;
+            }
+            /* ExceptionContinueSearch / nested / collided: keep walking */
+        }
+        c = unwound;
+        if (!c.Rip) return FALSE;
+    }
+    return FALSE;
+}
+
+static BOOLEAN dispatch_exception(PEXCEPTION_RECORD rec, PCONTEXT ctx)
+{
+    if (run_vectored(veh_first, rec, ctx)) return TRUE;
+    if (dispatch_frames(rec, ctx)) return TRUE;
+    /* second chance: top-level filter */
+    if (g_unhandled_filter) {
+        EXCEPTION_POINTERS ep = { rec, ctx };
+        LONG r = g_unhandled_filter(&ep);
+        if (r == EXCEPTION_CONTINUE_EXECUTION) return TRUE;
+        if (r == EXCEPTION_EXECUTE_HANDLER) {
+            RtlExitUserProcess((NTSTATUS)rec->ExceptionCode);
+        }
+    }
+    return FALSE;
+}
+
+/* Entry point for hardware exceptions redirected by the kernel: RCX = record, RDX = context. */
+SHZ_EXPORT VOID NTAPI KiUserExceptionDispatcher(PEXCEPTION_RECORD rec, PCONTEXT ctx)
+{
+    if (dispatch_exception(rec, ctx)) {
+        run_vectored(vch_first, rec, ctx);
+        NtContinue(ctx, FALSE);
+    } else {
+        NtRaiseException(rec, ctx, FALSE);
+    }
+    for (;;) NtTerminateProcess(CURRENT_PROCESS, rec->ExceptionCode);
+}
+
+/* Software exceptions: RaiseException / RtlRaiseException. */
+SHZ_EXPORT VOID NTAPI RtlRaiseException(PEXCEPTION_RECORD rec)
+{
+    CONTEXT ctx;
+    /* The captured RIP/RSP belong to this frame: unwind one level so the exception is reported
+     * (and dispatched) from the caller's frame, as on Windows. */
+    {
+        DWORD64 image_base;
+        PRUNTIME_FUNCTION fe;
+        DWORD64 establisher;
+        PVOID hd;
+        RtlCaptureContext(&ctx);
+        fe = RtlLookupFunctionEntry(ctx.Rip, &image_base, 0);
+        if (fe) RtlVirtualUnwind(0, image_base, ctx.Rip, fe, &ctx, &hd, &establisher, 0);
+    }
+    rec->ExceptionAddress = (PVOID)(uintptr_t)ctx.Rip;
+    if (dispatch_exception(rec, &ctx)) {
+        NtContinue(&ctx, FALSE);
+    } else {
+        NtRaiseException(rec, &ctx, FALSE);
+    }
+}
+
+SHZ_EXPORT VOID NTAPI RtlRaiseStatus(NTSTATUS status)
+{
+    EXCEPTION_RECORD rec;
+    memset(&rec, 0, sizeof rec);
+    rec.ExceptionCode = (DWORD)status;
+    rec.ExceptionFlags = EXCEPTION_NONCONTINUABLE;
+    RtlRaiseException(&rec);
+}
+
+SHZ_EXPORT VOID NTAPI RtlRestoreContext(PCONTEXT ctx, PEXCEPTION_RECORD rec)
+{
+    (void)rec;
+    NtContinue(ctx, FALSE);
+    for (;;) __asm__ volatile("ud2");
+}
+
+/* mingw declares RtlCaptureContext returns_twice; ours is an ordinary call, so -Wclobbered is a false positive. */
+#pragma GCC diagnostic ignored "-Wclobbered"
+/* ---------------------------------------------------------------- RtlUnwindEx */
+SHZ_EXPORT VOID NTAPI RtlUnwindEx(PVOID target_frame, PVOID target_ip, PEXCEPTION_RECORD rec, PVOID return_value,
+                                  PCONTEXT original, PUNWIND_HISTORY_TABLE hist)
+{
+    CONTEXT c;
+    EXCEPTION_RECORD local;
+    unsigned depth = 0;
+    (void)hist;
+    if (original) c = *original; else RtlCaptureContext(&c);
+    if (!rec) {
+        memset(&local, 0, sizeof local);
+        local.ExceptionCode = STATUS_UNWIND;
+        local.ExceptionAddress = (PVOID)(uintptr_t)c.Rip;
+        rec = &local;
+    }
+    rec->ExceptionFlags |= EXCEPTION_UNWINDING | (target_frame ? 0 : EXCEPTION_EXIT_UNWIND);
+    while (depth++ < 4096) {
+        DWORD64 image_base = 0, establisher = 0;
+        PRUNTIME_FUNCTION fe = RtlLookupFunctionEntry(c.Rip, &image_base, 0);
+        CONTEXT unwound = c;
+        PVOID hdata = 0;
+        PEXCEPTION_ROUTINE handler;
+        int final;
+        if (!fe) {
+            if (!stack_ok(c.Rsp)) break;
+            c.Rip = *(DWORD64 *)c.Rsp;
+            c.Rsp += 8;
+            if (!c.Rip) break;
+            continue;
+        }
+        handler = RtlVirtualUnwind(UNW_FLAG_UHANDLER, image_base, c.Rip, fe, &unwound, &hdata, &establisher, 0);
+        final = target_frame && establisher == (DWORD64)(uintptr_t)target_frame;
+        if (target_frame && establisher > (DWORD64)(uintptr_t)target_frame) break;      /* overshot: invalid target */
+        if (final) rec->ExceptionFlags |= EXCEPTION_TARGET_UNWIND;
+        if (handler) {
+            DISPATCHER_CONTEXT dc;
+            memset(&dc, 0, sizeof dc);
+            dc.ControlPc = c.Rip;
+            dc.ImageBase = image_base;
+            dc.FunctionEntry = fe;
+            dc.EstablisherFrame = establisher;
+            dc.TargetIp = (DWORD64)(uintptr_t)target_ip;
+            dc.ContextRecord = &c;
+            dc.LanguageHandler = handler;
+            dc.HandlerData = hdata;
+            handler(rec, (PVOID)establisher, &c, &dc);
+        }
+        if (final) break;
+        c = unwound;
+    }
+    rec->ExceptionFlags &= ~EXCEPTION_TARGET_UNWIND;
+    /* Resume in the target frame: `c` is that frame's own context (its callees were unwound, so its
+     * non-volatile registers and RSP are exactly as they were at the call site). */
+    {
+        CONTEXT target = c;
+        target.Rip = (DWORD64)(uintptr_t)target_ip;
+        target.Rax = (DWORD64)(uintptr_t)return_value;
+        target.ContextFlags = CONTEXT_FULL;
+        NtContinue(&target, FALSE);
+    }
+}
+
+SHZ_EXPORT VOID NTAPI RtlUnwind(PVOID target_frame, PVOID target_ip, PEXCEPTION_RECORD rec, PVOID return_value)
+{
+    RtlUnwindEx(target_frame, target_ip, rec, return_value, 0, 0);
+}

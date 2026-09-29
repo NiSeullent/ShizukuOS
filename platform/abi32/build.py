@@ -26,6 +26,7 @@ EXPORTS = {
     "TryAcquireSRWLockShared", "GetTickCount64", "GetProcAddress",
     "InitOnceInitialize", "InitOnceBeginInitialize", "InitOnceComplete", "InitOnceExecuteOnce",
     "MultiByteToWideChar", "WideCharToMultiByte",
+    "AddVectoredExceptionHandler", "RemoveVectoredExceptionHandler",
 }
 
 

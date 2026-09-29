@@ -1,8 +1,10 @@
 # Windows 98 Shizuku's Second Edition
 
-Windows 98를 현대 하드웨어와 애플리케이션에 맞게 확장하는 **개발 중인 운영체제 프로젝트**입니다. 새 개발 경로는 독자 구현인 **NTWrapper9x**(커널 기반), **NTWin32Wrapper9x**(앱 호환성), **NTWDDMWrapper9x**(그래픽), **PCI-E 확장**, **ShizukuDOS UEFI**로 구성합니다. Windows 8.1/10/11 수준의 기능은 목표이며 아직 달성하지 않았습니다.
+Windows 98를 현대 하드웨어와 애플리케이션에 맞게 확장하는 **개발 중인 운영체제 프로젝트**입니다. 새 개발 경로는 **NTWrapper9x**(커널 기반), **NTWin32Wrapper9x**(앱 호환성), **NTWDDMWrapper9x**(그래픽), **PCI-E 확장**, **ShizukuDOS UEFI**로 구성합니다. Windows 8.1/10/11 수준의 기능은 목표이며 아직 달성하지 않았습니다.
 
 새 경로의 빌드·시험·현재 한계는 [독립 플랫폼 개발 안내](platform/README.md), [저장장치·UTF 검증 기록](docs/STORAGE_UTF_CHECKPOINT.md), [USB 구성 조회 실행 기록](docs/USB_CONFIGURATION_CHECKPOINT.md)에 있습니다. 이 빌드는 KernelEx·Wine·ReactOS 구현이나 기존 `m98wrap.dll`을 사용하지 않습니다. `NTW32.DLL`의 기존 Windows 98 네이티브 함수 호출은 유지합니다.
+
+2026-09-27부터 후속 커널·앱 기능은 ReactOS 소스를 적극 참조해 단계적으로 이식합니다. 기존 독자 구현의 출처를 보존하고, 새 이식에는 원본 리비전·파일별 라이선스·수정 내역을 기록합니다. 앱 검증은 최신 Chromium을 우선하며, 현재 고정한 공식 x86 스냅샷은 **156.0.8076.0 / 1705698**입니다. 과거 Chromium 150의 KernelEx 시험은 이 경로의 실행 성공으로 계산하지 않습니다.
 
 ```sh
 python3 platform/build.py

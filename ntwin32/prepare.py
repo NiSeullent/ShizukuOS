@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Original, non-destructive PE32 import routing for NTWin32Wrapper9x.
 
-The stock loader still owns mapping, relocation, TLS and process creation.
-Only a deliberately bounded, unsigned x86 PE subset is accepted here.
+The stock loader still owns mapping, relocation and process creation.
+A validated static TLS directory, load configuration and RVA-based delay
+import directory are retained. Subsystem versions above 4.10 are not rewritten.
 Specification: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
 SPDX-License-Identifier: GPL-2.0-only
 """
@@ -94,6 +95,30 @@ class PE:
                 return rp + rva - va
         raise PEError('RVA outside file-backed image')
 
+    def image_base(self) -> int:
+        return self.u32(self.opt + 28)
+
+    def map_va(self, va: int, length: int, *, writable: bool = False,
+               executable: bool = False) -> int:
+        base = self.image_base()
+        if length < 0 or va < base or (va - base) + length < (va - base):
+            raise PEError('virtual address is outside the image')
+        rva = va - base
+        for (section_va, _span, raw, raw_size), flags in zip(self.sections, self.section_flags):
+            if section_va <= rva and rva + length <= section_va + raw_size and raw_size:
+                if executable and not flags & 0x20000000:
+                    raise PEError('address is not in an executable section')
+                if writable and (flags & 0x20000020 or not flags & 0x80000000 or not flags & 0x40):
+                    raise PEError('address is not writable initialized data')
+                return raw + rva - section_va
+        raise PEError('virtual address is outside a file-backed section')
+
+    def executable_rva(self, rva: int) -> bool:
+        for (va, span, _raw, _raw_size), flags in zip(self.sections, self.section_flags):
+            if flags & 0x20000000 and va <= rva < va + span:
+                return True
+        return False
+
     def string(self, rva: int) -> str:
         result = bytearray()
         for i in range(4096):
@@ -173,6 +198,146 @@ class PE:
 def routes() -> dict:
     return json.loads(Path(__file__).with_name('routes.json').read_text())
 
+def validate_tls(pe: PE) -> dict | None:
+    """Accept a 24-byte IMAGE_TLS_DIRECTORY32. The directory bytes stay in place."""
+    rva, size = pe.directory(9)
+    if rva == 0 and size == 0:
+        return None
+    if rva == 0 or size < 24:
+        raise PEError('static TLS directory is incomplete')
+    at = pe.offset(rva, 24)
+    start, end, index, callbacks, zero_fill, characteristics = struct.unpack_from('<IIIIII', pe.data, at)
+    align_nibble = (characteristics >> 20) & 0xF
+    if characteristics & ~0x00F00000:
+        raise PEError('static TLS characteristics contain unsupported bits')
+    if align_nibble > 13:
+        raise PEError('static TLS alignment is unsupported')
+    if end < start:
+        raise PEError('static TLS template range is inverted')
+    raw = end - start
+    if raw > 16 * 1024 * 1024 or zero_fill > 16 * 1024 * 1024 or raw + zero_fill > 16 * 1024 * 1024:
+        raise PEError('static TLS block exceeds the compatibility limit')
+    if raw == 0 and zero_fill == 0 and callbacks == 0:
+        raise PEError('static TLS directory has no template or callbacks')
+    if raw:
+        pe.map_va(start, raw)
+    pe.map_va(index, 4, writable=True)
+    callback_count = 0
+    if callbacks:
+        slot = callbacks
+        while callback_count <= 32:
+            target = pe.u32(pe.map_va(slot, 4))
+            if target == 0:
+                break
+            pe.map_va(target, 1, executable=True)
+            callback_count += 1
+            slot += 4
+        else:
+            raise PEError('static TLS callback list is unterminated')
+    return {'bytes': 24, 'directory_bytes': size, 'raw_bytes': raw, 'zero_fill': zero_fill,
+            'callbacks': callback_count, 'alignment': (1 << (align_nibble - 1)) if align_nibble else 1,
+            'preserved': True}
+
+def validate_load_config(pe: PE) -> dict | None:
+    """Validate IMAGE_LOAD_CONFIG_DIRECTORY32 without rewriting it."""
+    rva, size = pe.directory(10)
+    if rva == 0 and size == 0:
+        return None
+    if rva == 0 or size < 64:
+        raise PEError('load configuration directory is incomplete')
+    at = pe.offset(rva, min(size, 64))
+    declared = pe.u32(at)
+    if declared < 64 or declared > size or declared > 256:
+        raise PEError('load configuration size is inconsistent')
+    at = pe.offset(rva, declared)
+    cookie = pe.u32(at + 60) if declared >= 64 else 0
+    seh_table = pe.u32(at + 64) if declared >= 72 else 0
+    seh_count = pe.u32(at + 68) if declared >= 72 else 0
+    guard_check = guard_table = guard_count = guard_flags = 0
+    if declared >= 92:
+        guard_check = pe.u32(at + 72)
+        guard_table = pe.u32(at + 80)
+        guard_count = pe.u32(at + 84)
+        guard_flags = pe.u32(at + 88)
+    if cookie:
+        pe.map_va(cookie, 4, writable=True)
+    if seh_count:
+        if seh_count > 4096 or not seh_table:
+            raise PEError('malformed safe exception handler table')
+        table_at = pe.map_va(seh_table, seh_count * 4)
+        for index in range(seh_count):
+            if not pe.executable_rva(pe.u32(table_at + index * 4)):
+                raise PEError('safe exception handler is outside executable image')
+    instrumented = bool(guard_flags & 0x100)
+    stride_extra = (guard_flags >> 28) & 0xF
+    if stride_extra > 12:
+        raise PEError('unsupported CFG function-table stride')
+    if instrumented or guard_count or guard_table:
+        if declared < 92:
+            raise PEError('CFG metadata exceeds the load configuration')
+        if guard_count > 1000000 or (guard_count and not guard_table):
+            raise PEError('CFG function table is malformed')
+        stride = 4 + stride_extra
+        if guard_count * stride > 16 * 1024 * 1024:
+            raise PEError('CFG function table is too large')
+        if guard_count:
+            table_at = pe.map_va(guard_table, guard_count * stride)
+            for index in range(guard_count):
+                if not pe.executable_rva(pe.u32(table_at + index * stride)):
+                    raise PEError('CFG function is outside executable image')
+        if guard_check:
+            pe.map_va(guard_check, 4, writable=True)
+    return {'bytes': declared, 'cfg_instrumented': instrumented, 'cfg_functions': guard_count,
+            'cfg_stride': 4 + stride_extra if declared >= 92 else 0,
+            'has_security_cookie': bool(cookie), 'preserved': True,
+            'fail_closed': True}
+
+def validate_delay(pe: PE) -> list | None:
+    """Validate RVA-based delay-import descriptors. Bytes are not rewritten."""
+    rva, size = pe.directory(13)
+    if rva == 0 and size == 0:
+        return None
+    if rva == 0 or size < 32 or size % 32 or size > 32 * 64:
+        raise PEError('delay-import directory is malformed')
+    at = pe.offset(rva, size)
+    descriptors = []
+    for index in range(size // 32):
+        fields = struct.unpack_from('<8I', pe.data, at + index * 32)
+        if not any(fields):
+            if index == 0:
+                raise PEError('delay-import directory is empty')
+            return descriptors
+        attrs, dll, module, iat, name_table, _bound, _unload, _stamp = fields
+        if attrs != 1:
+            raise PEError('delay import must be RVA-based with no extra attributes')
+        if not dll or not module or not iat or not name_table:
+            raise PEError('delay import descriptor is incomplete')
+        pe.offset(dll, 1)
+        library = pe.string(dll)
+        if not library:
+            raise PEError('empty delay-import DLL name')
+        pe.map_va(pe.image_base() + module, 4, writable=True)
+        names = 0
+        for slot in range(4096):
+            value = pe.u32(pe.offset(name_table + slot * 4, 4))
+            pe.offset(iat + slot * 4, 4)
+            if value == 0:
+                if slot == 0:
+                    raise PEError('delay import has no names')
+                break
+            if value & 0x80000000:
+                if value & 0x7fff0000:
+                    raise PEError('invalid delay-import ordinal')
+            else:
+                pe.offset(value, 2)
+                if not pe.string(value + 2):
+                    raise PEError('empty delay-import name')
+            names += 1
+        else:
+            raise PEError('unterminated delay-import table')
+        descriptors.append({'dll': library, 'symbols': names, 'preserved': True})
+    raise PEError('delay-import descriptors are unterminated')
+
 def prepare(data: bytes) -> tuple[bytes, dict]:
     pe = PE(data)
     plan = routes()
@@ -184,16 +349,23 @@ def prepare(data: bytes) -> tuple[bytes, dict]:
         library_name = pe.string(pe.u32(export_at + 12))
         if library_name.upper() == plan['provider']:
             raise PEError('provider must retain native imports; self-routing is forbidden')
-    for index, label in ((4, 'signed image'), (9, 'static TLS'),
-                         (10, 'load configuration'), (13, 'delay imports'), (14, 'CLR')):
+    for index, label in ((4, 'signed image'), (14, 'CLR')):
         if any(pe.directory(index)):
             raise PEError(f'{label} requires a separate compatibility path')
+    tls_plan = validate_tls(pe)
+    load_plan = validate_load_config(pe)
+    delay_plan = validate_delay(pe)
     if pe.u16(pe.opt + 68) not in (2, 3):
         raise PEError('only GUI/console applications and their DLLs are supported')
-    if (pe.u16(pe.opt + 48), pe.u16(pe.opt + 50)) > (4, 10):
-        raise PEError('subsystem version exceeds Win98; no silent version downgrade')
-    if pe.u16(pe.opt + 70) & (0x40 | 0x100 | 0x4000):
-        raise PEError('ASLR, NX or CFG flags need a separate execution path')
+    subsystem_version = (pe.u16(pe.opt + 48), pe.u16(pe.opt + 50))
+    dll_flags = pe.u16(pe.opt + 70)
+    # DYNAMIC_BASE and NX_COMPAT are retained. NX_COMPAT means the image can
+    # run with DEP; it is not a demand, and this path does not enforce NX.
+    # GUARD_CF stays rejected unless the load config named a real CFG table.
+    if dll_flags & ~0xC140:
+        raise PEError('unsupported DLL characteristics need a separate execution path')
+    if dll_flags & 0x4000 and not (load_plan and load_plan['cfg_instrumented']):
+        raise PEError('CFG flag requires a validated guard function table')
     new_header = pe.table + pe.count * 40
     if new_header + 40 > min([pe.headers] + [p for _, _, p, n in pe.sections if n]):
         raise PEError('no section-header slack')
@@ -255,11 +427,21 @@ def prepare(data: bytes) -> tuple[bytes, dict]:
     struct.pack_into('<II', out, pe.opt + 96 + 11 * 8, 0, 0)  # unbind
     # Validate all output structures independently before returning anything.
     PE(bytes(out)).imports()
-    return bytes(out), {'schema': 'ntwin32wrapper9x.prepared.v1',
+    return bytes(out), {'schema': 'ntwin32wrapper9x.prepared.v2',
                        'input_sha256': hashlib.sha256(data).hexdigest(),
                        'output_sha256': hashlib.sha256(out).hexdigest(),
                        'provider': plan['provider'], 'redirected': redirected,
-                       'guest_verified': False}
+                       'guest_verified': False,
+                       'browser_functionality_verified': False,
+                       'subsystem_version': list(subsystem_version),
+                       'subsystem_version_downgraded': False,
+                       'stock_win98_loader_accepts_subsystem': subsystem_version <= (4, 10),
+                       'dll_characteristics': f'0x{dll_flags:04x}',
+                       'dynamic_base_requested': bool(dll_flags & 0x40),
+                       'aslr_implemented': False,
+                       'nx_compat_requested': bool(dll_flags & 0x100),
+                       'nx_enforced': False,
+                       'tls': tls_plan, 'load_config': load_plan, 'delay_imports': delay_plan}
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)

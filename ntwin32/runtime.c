@@ -8,6 +8,7 @@
 #include "resolve.h"
 #include "initonce.h"
 #include "unicode/utf.h"
+#include "exception/k32veh.h"
 typedef char pointer_width_must_be_32[(sizeof(void *) == 4) ? 1 : -1];
 typedef char once_matches_win32[(sizeof(ntw_once) == sizeof(INIT_ONCE)) ? 1 : -1];
 typedef char wchar_matches_utf16[(sizeof(WCHAR) == sizeof(uint16_t)) ? 1 : -1];
@@ -138,6 +139,8 @@ int WINAPI NtwWideCharToMultiByte(UINT page, DWORD flags, LPCWCH source,
     return utf_result(status, required);
 }
 FARPROC WINAPI NtwGetProcAddress(HMODULE module, LPCSTR name);
+PVOID WINAPI NtwAddVectoredExceptionHandler(ULONG first, PVECTORED_EXCEPTION_HANDLER handler);
+ULONG WINAPI NtwRemoveVectoredExceptionHandler(PVOID handle);
 static ntw_proc lookup_owned(void *context, const char *name) {
     (void)context;
 #define NTW_ROUTE(exported, implementation) \
@@ -161,6 +164,23 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         native_kernel32 = GetModuleHandleA("KERNEL32.DLL");
         if (!native_kernel32) return FALSE;
+        if (ntw_k32_init() != NTWE_OK) return FALSE;
     }
     return TRUE;
+}
+PVOID WINAPI NtwAddVectoredExceptionHandler(ULONG first, PVECTORED_EXCEPTION_HANDLER handler) {
+    void *registered = NULL;
+    int status = ntw_k32_add(first, (ntw_vectored_handler)handler, &registered);
+    if (status != NTWE_OK) {
+        SetLastError(status == NTWE_NO_MEMORY || status == NTWE_LIMIT
+                     ? ERROR_NOT_ENOUGH_MEMORY : ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+    return registered;
+}
+ULONG WINAPI NtwRemoveVectoredExceptionHandler(PVOID handle) {
+    int status = ntw_k32_remove(handle);
+    if (status == NTWE_OK || status == NTWE_PENDING) return 1;
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return 0;
 }

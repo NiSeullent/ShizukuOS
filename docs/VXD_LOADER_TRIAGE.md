@@ -37,4 +37,9 @@ STATIC 부분의 재로드 간 유지 동작을 설명합니다. 따라서 로�
 아카이브 해시는 같았습니다. 이 저장 절차의 성공을 VxD 실행 성공으로 세지 않습니다.
 
 다음 진단은 Win32에 전달된 오류만으로 추측하지 않고, 공개된 VXDLDR 클라이언트
-인터페이스에서 원래 로더 오류를 관측하는 것입니다. 아직 그 실제 결과는 없습니다.
+인터페이스에서 원래 로더 오류를 관측하는 것이었습니다. 이후 실제 결과는 아래 V86 시험에 기록했습니다.
+# Latest native loader result
+
+The [subsequent DOS/V86 diagnostic](VXD_V86_LOADER_TRIAL.md) obtained native
+VXDLDR error 6 (`BAD_DEVICE_FILE`) after the complete candidate byte/EOF check.
+It narrows the Win32 error below; no native kernel load has passed.

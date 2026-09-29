@@ -63,6 +63,10 @@ static BOOL test_utf(HMODULE kernel32) {
         bytes[0] != 'A' || bytes[1] || used) return FALSE;
     return TRUE;
 }
+static LONG WINAPI ignore_exception(EXCEPTION_POINTERS *info) {
+    (void)info;
+    return EXCEPTION_CONTINUE_SEARCH;
+}
 static void finish(const char *text, DWORD length, DWORD code) {
     DWORD written;
     HANDLE log = CreateFileA("NTWPROBE.LOG", GENERIC_WRITE, 0, NULL,
@@ -110,6 +114,11 @@ void mainCRTStartup(void) {
     Sleep(20);
     after = dynamic_tick();
     if (after < before) goto fail;
+    {
+        PVOID registered = AddVectoredExceptionHandler(1, ignore_exception);
+        if (!registered || !RemoveVectoredExceptionHandler(registered)) goto fail;
+        if (RemoveVectoredExceptionHandler(registered)) goto fail;
+    }
     finish("PASS: NTWin32Wrapper9x static imports\r\n",
            sizeof("PASS: NTWin32Wrapper9x static imports\r\n") - 1, 0);
     return;

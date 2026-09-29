@@ -15,3 +15,5 @@ EXPORTS
     InitOnceExecuteOnce=NtwInitOnceExecuteOnce@16
     MultiByteToWideChar=NtwMultiByteToWideChar@24
     WideCharToMultiByte=NtwWideCharToMultiByte@32
+    AddVectoredExceptionHandler=NtwAddVectoredExceptionHandler@8
+    RemoveVectoredExceptionHandler=NtwRemoveVectoredExceptionHandler@4
