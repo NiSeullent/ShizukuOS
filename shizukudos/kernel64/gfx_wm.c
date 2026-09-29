@@ -347,11 +347,13 @@ static uint64_t wm_activate(gwin_t *top, int raise)
 {
     gqueue_t *q = top->q;
     const uint64_t prev = g_fg_q ? g_fg_q->active : 0;
-    gwin_t *f = wm_lookup(q->focus);
-    q->active = top->handle;
-    if (!f || !wm_is_descendant(top, f)) q->focus = top->handle;
+    q->active = top->handle;                                            /* focus is NOT moved here: user32's DefWindowProc(WM_ACTIVATE) calls SetFocus */
     g_fg_q = q;
     if (raise) raise_top(top);
+    if (prev && prev != top->handle) {                                  /* its caption turns inactive */
+        gwin_t *pw = wm_lookup(prev);
+        if (pw) wm_damage_window(pw);
+    }
     return prev == top->handle ? 0 : prev;
 }
 
@@ -368,7 +370,10 @@ static void wm_fix_activation(void)
         a = wm_lookup(q->active);
         if (a && !wm_is_visible(a)) a = 0;
         if (!a) q->active = 0;
-        if (!wm_lookup(q->focus)) q->focus = 0;
+        {
+            gwin_t *f = wm_lookup(q->focus);
+            if (!f || !wm_is_visible(f)) q->focus = 0;
+        }
         if (!wm_lookup(q->capture)) q->capture = 0;
     }
     if (g_fg_q && g_fg_q->used && g_fg_q->active) return;
@@ -376,8 +381,8 @@ static void wm_fix_activation(void)
     for (w = DESKTOP->child; w; w = w->next)
         if (w->q && wm_is_visible(w) && !(w->exstyle & SHZ_WS_EX_NOACTIVATE) && !(w->style & SHZ_WS_DISABLED)) {
             w->q->active = w->handle;
-            if (!wm_lookup(w->q->focus)) w->q->focus = w->handle;
             g_fg_q = w->q;
+            wm_damage_window(w);                                        /* its caption turns active */
             return;
         }
 }

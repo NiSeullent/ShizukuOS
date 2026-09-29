@@ -227,7 +227,96 @@ def verify_window(img, rep):
               wrong or "all 106,896 client pixels identical")
 
 
-SCENES = {"fb": verify_fb, "window": verify_window}
+# ---------------------------------------------------------------- a small model of the screen for whole-screen comparisons
+class Screen:
+    def __init__(self):
+        self.rows = [bytearray(bytes(DESKTOP) * W) for _ in range(H)]
+
+    def fill(self, l, t, r, b, rgb):
+        l, t, r, b = max(l, 0), max(t, 0), min(r, W), min(b, H)
+        if r <= l or b <= t:
+            return
+        span = bytes(rgb) * (r - l)
+        for y in range(t, b):
+            self.rows[y][l * 3:r * 3] = span
+
+    def put(self, x, y, rgb):
+        if 0 <= x < W and 0 <= y < H:
+            self.rows[y][x * 3:x * 3 + 3] = bytes(rgb)
+
+    def ring(self, l, t, r, b, tl, br):
+        self.fill(l, t, r, t + 1, tl)
+        self.fill(l, t, l + 1, b, tl)
+        self.fill(l, b - 1, r, b, br)
+        self.fill(r - 1, t, r, b, br)
+
+    def window(self, l, t, r, b, active, title, client_rgb):
+        """A WS_OVERLAPPEDWINDOW (4-pixel sizing frame, 19-pixel caption) as documented in kernel64/gfx_wm.c draw_nc."""
+        self.fill(l, t, r, b, FACE)
+        self.ring(l, t, r, b, (192, 192, 192), (0, 0, 0))
+        self.ring(l + 1, t + 1, r - 1, b - 1, (255, 255, 255), (128, 128, 128))
+        self.fill(l + 4, t + 4, r - 4, t + 4 + 18, NAVY if active else GRAY)
+        canvas = {}
+        paint_text(canvas, l + 8, t + 5, title, (255, 255, 255) if active else (192, 192, 192))
+        for (x, y), c in canvas.items():
+            if l + 4 <= x < r - 4 and t + 4 <= y < t + 22:
+                self.put(x, y, c)
+        self.fill(l + 4, t + 23, r - 4, b - 4, client_rgb)
+
+    def data(self):
+        return b"".join(bytes(r) for r in self.rows)
+
+
+def compare_screen(img, rep, name, scr):
+    if (img.w, img.h) != (W, H):
+        rep.check(f"{name}: screendump is 1024x768", False, f"{img.w}x{img.h}")
+        return
+    exp = scr.data()
+    if img.data == exp:
+        rep.check(name, True, "all 786432 pixels identical to the host-computed screen")
+        return
+    bad, first = 0, None
+    for y in range(H):
+        a, b = img.row(y, 0, W), exp[y * W * 3:(y + 1) * W * 3]
+        if a != b:
+            for x in range(W):
+                if a[x * 3:x * 3 + 3] != b[x * 3:x * 3 + 3]:
+                    bad += 1
+                    if first is None:
+                        first = f"first mismatch ({x},{y}) got {tuple(a[x * 3:x * 3 + 3])} want {tuple(b[x * 3:x * 3 + 3])}"
+    rep.check(name, False, f"{bad} pixels differ; {first}")
+
+
+RED, BLUE = (255, 0, 0), (0, 0, 255)
+
+
+def verify_z1(img, rep):
+    s = Screen()
+    s.window(100, 100, 400, 300, False, "Window A", RED)
+    s.window(220, 160, 520, 360, True, "Window B", BLUE)
+    compare_screen(img, rep, "z1: B (blue, active) stacked above A (red, inactive): whole screen matches", s)
+
+
+def verify_z2(img, rep):
+    s = Screen()
+    s.window(220, 160, 520, 360, False, "Window B", BLUE)
+    s.window(100, 100, 400, 300, True, "Window A", RED)
+    compare_screen(img, rep, "z2: after BringWindowToTop(A) A (red, active) is above B (blue, inactive): whole screen matches", s)
+
+
+def verify_z3(img, rep):
+    s = Screen()
+    s.window(100, 100, 400, 300, True, "Window A", RED)
+    compare_screen(img, rep, "z3: B hidden, only A on the desktop: whole screen matches", s)
+
+
+def verify_z4(img, rep):
+    s = Screen()
+    s.window(300, 300, 600, 500, True, "Window A", RED)
+    compare_screen(img, rep, "z4: A moved to (300,300), the vacated area is desktop again: whole screen matches", s)
+
+
+SCENES = {"fb": verify_fb, "window": verify_window, "z1": verify_z1, "z2": verify_z2, "z3": verify_z3, "z4": verify_z4}
 
 
 # ---------------------------------------------------------------- harness

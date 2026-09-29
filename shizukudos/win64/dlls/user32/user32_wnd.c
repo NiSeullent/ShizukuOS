@@ -103,16 +103,22 @@ DLLAPI BOOL WINAPI DestroyWindow(HWND hwnd)
     shz_wnd_t q;
     shz_show_t s;
     int32_t st;
+    HWND fg_before, fg_after, old_focus;
     U32_NEED_GFX(FALSE);
     if (!u32_wq(hwnd, SHZ_WQ_THREAD, 0, &q)) return FALSE;
     if (q.v0 != GetCurrentThreadId()) { SetLastError(ERROR_ACCESS_DENIED); return FALSE; }
+    fg_before = GetForegroundWindow();
+    old_focus = GetFocus();
     memset(&s, 0, sizeof s);
     s.hwnd = H2U(hwnd);
     s.cmd = SW_HIDE;
     NtUserShowWindow(&s);                                          /* leaves the screen before the handlers run */
+    if (old_focus && (old_focus == hwnd || IsChild(hwnd, old_focus))) u32_send(old_focus, WM_KILLFOCUS, 0, 0, 0, 0);
     destroy_tree(hwnd);
     st = NtUserDestroyWindow(H2U(hwnd));
     if (st < 0 && (uint32_t)st != 0xC0000008) { u32_err(st); return FALSE; }
+    fg_after = GetForegroundWindow();
+    if (fg_after && fg_after != fg_before) u32_notify_activation(H2U(fg_after), 0);   /* the next window took over */
     return TRUE;
 }
 
@@ -157,8 +163,11 @@ DLLAPI BOOL WINAPI ShowWindow(HWND hwnd, int cmd)
     uint32_t style;
     int had_client, had_pos;
     int32_t st;
+    HWND fg_before, focus_before;
     U32_NEED_GFX(FALSE);
     if (!u32_style(hwnd, &style, 0)) return FALSE;
+    fg_before = GetForegroundWindow();
+    focus_before = GetFocus();
     if (cmd == SW_HIDE && (style & WS_VISIBLE)) u32_send(hwnd, WM_SHOWWINDOW, FALSE, 0, 0, 0);
     else if (cmd != SW_HIDE && !(style & WS_VISIBLE) && cmd != SW_MINIMIZE && cmd != SW_SHOWMINIMIZED && cmd != SW_SHOWMINNOACTIVE &&
              cmd != SW_FORCEMINIMIZE)
@@ -178,6 +187,11 @@ DLLAPI BOOL WINAPI ShowWindow(HWND hwnd, int cmd)
     else if (cmd == SW_MINIMIZE || cmd == SW_SHOWMINIMIZED || cmd == SW_SHOWMINNOACTIVE || cmd == SW_FORCEMINIMIZE)
         u32_send(hwnd, WM_SIZE, SIZE_MINIMIZED, 0, 0, 0);
     if (s.activated) u32_notify_activation(H2U(hwnd), s.prev_active);
+    else if (cmd == SW_HIDE || cmd == SW_MINIMIZE || cmd == SW_SHOWMINIMIZED || cmd == SW_FORCEMINIMIZE) {
+        HWND fg = GetForegroundWindow();                            /* hiding the active window hands the foreground on */
+        if (focus_before && GetFocus() != focus_before && IsWindow(focus_before)) u32_send(focus_before, WM_KILLFOCUS, 0, 0, 0, 0);
+        if (fg && fg != fg_before) u32_notify_activation(H2U(fg), 0);
+    }
     return s.was_visible != 0;
 }
 
