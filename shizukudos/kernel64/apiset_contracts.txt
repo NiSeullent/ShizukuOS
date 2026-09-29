@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# API-set contract table of the Kernel64 PE32+ loader: the source of kernel64/apiset_table.h.
+# Regenerate with:  python3 shizukudos/win64/tools/gen_apiset_table.py      (--check verifies the header is current)
+#
+# Row:  <contract-lL-M-m>  <windows host>  [<shizuku host>]   [# note]
+#
+#   contract-lL-M-m  the contract name with its level (lL) and highest version (major M, minor m) this row provides.
+#                    An import of the same contract and level resolves through the row with the highest version,
+#                    provided that version is >= the requested one (versions of one level are cumulative):
+#                    l1-1-0 and l1-2-0 are both satisfied by an l1-2-1 row; l1-3-0 is not; l2-1-0 is another contract.
+#   windows host     the DLL hosting the contract in the Windows 10/11 x64 API-set schema. Every row whose contract
+#                    and level also appear in Wine 9.0's apisetschema.dll (dlls/apisetschema, LGPL; only the facts are
+#                    used, no code) carries the same host as Wine records; win64/tests/test_apiset.py verifies that.
+#                    Rows Wine does not list carry a `# src:` note naming the public source.
+#                    Background: learn.microsoft.com "Windows API sets" and "API set loader operation".
+#   shizuku host     the Shizuku DLL that implements the contract, when it differs from the Windows host (for example
+#                    Shizuku has no kernelbase.dll: its functions live in kernel32.dll). Defaults to the windows host,
+#                    after the @provider substitutions below.
+#
+# Resolution only succeeds when the Shizuku host exists and (for load-time imports) exports the imported name;
+# otherwise the import fails and the loader's diagnostic names the contract, the host and the function. A host that
+# Shizuku does not ship (ucrtbase.dll, user32.dll, shcore.dll, ...) makes the contract fail exactly like a missing DLL.
+
+@provider kernelbase.dll kernel32.dll
+
+# ---- ntdll-hosted
+api-ms-win-core-apiquery-l1-1-0            ntdll.dll
+api-ms-win-core-rtlsupport-l1-2-0          ntdll.dll
+
+# ---- kernelbase / kernel32 (Shizuku: kernel32.dll)
+api-ms-win-core-appcompat-l1-1-1           kernelbase.dll
+api-ms-win-core-atoms-l1-1-0               kernel32.dll
+api-ms-win-core-comm-l1-1-0                kernelbase.dll
+api-ms-win-core-console-ansi-l2-1-0        kernel32.dll
+api-ms-win-core-console-l1-2-0             kernelbase.dll
+api-ms-win-core-console-l2-2-0             kernelbase.dll
+api-ms-win-core-console-l3-2-0             kernelbase.dll
+api-ms-win-core-datetime-l1-1-1            kernelbase.dll
+api-ms-win-core-debug-l1-1-1               kernelbase.dll
+api-ms-win-core-delayload-l1-1-1           kernelbase.dll
+api-ms-win-core-enclave-l1-1-1             kernelbase.dll
+api-ms-win-core-errorhandling-l1-1-3       kernelbase.dll
+api-ms-win-core-fibers-l1-1-1              kernelbase.dll
+api-ms-win-core-fibers-l2-1-1              kernelbase.dll
+api-ms-win-core-file-l1-2-2                kernelbase.dll
+api-ms-win-core-file-l2-1-2                kernelbase.dll
+api-ms-win-core-handle-l1-1-0              kernelbase.dll
+api-ms-win-core-heap-l1-2-0                kernelbase.dll
+api-ms-win-core-heap-l2-1-0                kernelbase.dll
+api-ms-win-core-heap-obsolete-l1-1-0       kernel32.dll
+api-ms-win-core-interlocked-l1-2-0         kernelbase.dll
+api-ms-win-core-io-l1-1-1                  kernel32.dll
+api-ms-win-core-job-l1-1-0                 kernelbase.dll
+api-ms-win-core-job-l2-1-0                 kernel32.dll
+api-ms-win-core-kernel32-legacy-ansi-l1-1-0 kernel32.dll
+api-ms-win-core-kernel32-legacy-l1-1-5     kernel32.dll
+api-ms-win-core-largeinteger-l1-1-0        kernelbase.dll
+api-ms-win-core-libraryloader-l1-2-2       kernelbase.dll
+api-ms-win-core-libraryloader-l2-1-0       kernelbase.dll
+api-ms-win-core-localization-ansi-l1-1-0   kernel32.dll
+api-ms-win-core-localization-l1-2-2        kernelbase.dll
+api-ms-win-core-localization-l2-1-0        kernelbase.dll
+api-ms-win-core-localization-obsolete-l1-3-0 kernelbase.dll
+api-ms-win-core-memory-l1-1-4              kernelbase.dll
+api-ms-win-core-namedpipe-ansi-l1-1-0      kernel32.dll
+api-ms-win-core-namedpipe-l1-2-0           kernelbase.dll
+api-ms-win-core-normalization-l1-1-0       kernelbase.dll
+api-ms-win-core-path-l1-1-0                kernelbase.dll
+api-ms-win-core-privateprofile-l1-1-1      kernel32.dll
+api-ms-win-core-processenvironment-ansi-l1-1-0 kernel32.dll
+api-ms-win-core-processenvironment-l1-2-0  kernelbase.dll
+api-ms-win-core-processsecurity-l1-1-0     kernel32.dll
+api-ms-win-core-processsnapshot-l1-1-0     kernelbase.dll
+api-ms-win-core-processthreads-l1-1-3      kernel32.dll
+api-ms-win-core-profile-l1-1-0             kernelbase.dll
+api-ms-win-core-psapi-ansi-l1-1-0          kernelbase.dll
+api-ms-win-core-psapi-l1-1-0               kernelbase.dll
+api-ms-win-core-quirks-l1-1-0              kernelbase.dll
+api-ms-win-core-realtime-l1-1-1            kernelbase.dll   # Wine lists l1-1-0; Electron delay-imports l1-1-1 (QueryUnbiasedInterruptTimePrecise)
+api-ms-win-core-sidebyside-ansi-l1-1-0     kernel32.dll
+api-ms-win-core-sidebyside-l1-1-0          kernelbase.dll
+api-ms-win-core-string-l1-1-0              kernelbase.dll
+api-ms-win-core-string-l2-1-0              kernelbase.dll
+api-ms-win-core-string-obsolete-l1-1-0     kernel32.dll
+api-ms-win-core-stringansi-l1-1-0          kernelbase.dll
+api-ms-win-core-synch-ansi-l1-1-0          kernel32.dll
+api-ms-win-core-synch-l1-2-1               kernelbase.dll
+api-ms-win-core-sysinfo-l1-2-1             kernelbase.dll
+api-ms-win-core-systemtopology-l1-1-0      kernelbase.dll
+api-ms-win-core-threadpool-l1-2-0          kernelbase.dll
+api-ms-win-core-threadpool-legacy-l1-1-0   kernelbase.dll
+api-ms-win-core-timezone-l1-1-0            kernelbase.dll
+api-ms-win-core-toolhelp-l1-1-0            kernel32.dll
+api-ms-win-core-util-l1-1-0                kernel32.dll
+api-ms-win-core-windowserrorreporting-l1-1-1 kernelbase.dll
+api-ms-win-core-wow64-l1-1-1               kernelbase.dll
+api-ms-win-core-xstate-l2-1-0              kernelbase.dll
+
+# ---- kernelbase contracts whose functions Shizuku implements in another DLL
+api-ms-win-core-registry-l1-1-0            kernelbase.dll     advapi32.dll
+api-ms-win-core-registry-l2-3-0            advapi32.dll
+api-ms-win-core-sysinfo-l2-1-0             advapi32.dll
+api-ms-win-core-shlwapi-legacy-l1-1-0      kernelbase.dll     shlwapi.dll
+api-ms-win-core-shlwapi-obsolete-l1-2-0    kernelbase.dll     shlwapi.dll
+api-ms-win-core-url-l1-1-0                 kernelbase.dll     shlwapi.dll
+api-ms-win-core-version-l1-1-1             kernelbase.dll     version.dll
+api-ms-win-core-versionansi-l1-1-0         kernelbase.dll     version.dll
+api-ms-win-eventing-classicprovider-l1-1-0 kernelbase.dll     advapi32.dll
+api-ms-win-eventing-legacy-l1-1-0          advapi32.dll
+api-ms-win-eventing-provider-l1-1-0        kernelbase.dll     advapi32.dll
+api-ms-win-security-base-ansi-l1-1-0       advapi32.dll
+api-ms-win-security-base-l1-2-2            kernelbase.dll     advapi32.dll   # Wine lists l1-2-0; Chromium imports l1-2-2 (DeriveCapabilitySidsFromName)
+api-ms-win-security-lsalookup-l2-1-1       advapi32.dll
+api-ms-win-security-provider-l1-1-0        advapi32.dll
+api-ms-win-security-sddl-ansi-l1-1-0       advapi32.dll
+api-ms-win-security-sddl-l1-1-0            sechost.dll        advapi32.dll
+api-ms-win-security-systemfunctions-l1-1-0 advapi32.dll
+api-ms-win-security-trustee-l1-1-1         advapi32.dll
+
+# ---- COM / WinRT
+api-ms-win-core-com-l1-1-1                 combase.dll        ole32.dll      # Shizuku's Co* functions live in ole32.dll
+api-ms-win-core-com-l2-1-1                 coml2.dll
+api-ms-win-core-winrt-error-l1-1-1         combase.dll
+api-ms-win-core-winrt-l1-1-0               combase.dll
+api-ms-win-core-winrt-registration-l1-1-0  combase.dll
+api-ms-win-core-winrt-robuffer-l1-1-0      wintypes.dll
+api-ms-win-core-winrt-roparameterizediid-l1-1-0 combase.dll
+api-ms-win-core-winrt-string-l1-1-1        combase.dll
+
+# ---- Universal C runtime (ucrtbase.dll: not shipped by Shizuku, so every crt contract fails like a missing DLL)
+api-ms-win-crt-conio-l1-1-0                ucrtbase.dll
+api-ms-win-crt-convert-l1-1-0              ucrtbase.dll
+api-ms-win-crt-environment-l1-1-0          ucrtbase.dll
+api-ms-win-crt-filesystem-l1-1-0           ucrtbase.dll
+api-ms-win-crt-heap-l1-1-0                 ucrtbase.dll
+api-ms-win-crt-locale-l1-1-0               ucrtbase.dll
+api-ms-win-crt-math-l1-1-0                 ucrtbase.dll
+api-ms-win-crt-multibyte-l1-1-0            ucrtbase.dll
+api-ms-win-crt-private-l1-1-0              ucrtbase.dll
+api-ms-win-crt-process-l1-1-0              ucrtbase.dll
+api-ms-win-crt-runtime-l1-1-0              ucrtbase.dll
+api-ms-win-crt-stdio-l1-1-0                ucrtbase.dll
+api-ms-win-crt-string-l1-1-0               ucrtbase.dll
+api-ms-win-crt-time-l1-1-0                 ucrtbase.dll
+api-ms-win-crt-utility-l1-1-0              ucrtbase.dll
+
+# ---- devices, power, multimedia, user interface, shell
+api-ms-win-devices-config-l1-1-1           cfgmgr32.dll
+api-ms-win-devices-swdevice-l1-1-1         cfgmgr32.dll
+api-ms-win-mm-misc-l1-1-1                  winmm.dll
+api-ms-win-mm-mme-l1-1-0                   winmm.dll
+api-ms-win-mm-playsound-l1-1-0             winmm.dll
+api-ms-win-mm-time-l1-1-0                  winmm.dll
+api-ms-win-ntuser-sysparams-l1-1-0         user32.dll
+api-ms-win-power-base-l1-1-0               powrprof.dll
+api-ms-win-power-limitsmanagement-l1-1-0   powrprof.dll
+api-ms-win-power-setting-l1-1-0            powrprof.dll
+api-ms-win-shcore-comhelpers-l1-1-0        shcore.dll
+api-ms-win-shcore-obsolete-l1-1-0          shcore.dll
+api-ms-win-shcore-path-l1-1-0              shcore.dll
+api-ms-win-shcore-registry-l1-1-1          shcore.dll
+api-ms-win-shcore-scaling-l1-1-1           shcore.dll
+api-ms-win-shcore-stream-l1-1-0            shcore.dll
+api-ms-win-shcore-sysinfo-l1-1-0           shcore.dll
+api-ms-win-shcore-thread-l1-1-0            shcore.dll
+api-ms-win-shcore-unicodeansi-l1-1-0       shcore.dll
+api-ms-win-shell-namespace-l1-1-0          windows.storage.dll   # src: SHCreateItemFromParsingName is implemented in windows.storage.dll since Windows 10 (shell32 forwards it there)
+api-ms-win-shell-shdirectory-l1-1-0        shcore.dll
+api-ms-win-shell-shellcom-l1-1-0           shell32.dll
+api-ms-win-shell-shellfolders-l1-1-0       shell32.dll
+ext-ms-win-uiacore-l1-1-3                  uiautomationcore.dll

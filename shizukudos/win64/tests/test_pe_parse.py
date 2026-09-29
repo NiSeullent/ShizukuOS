@@ -44,6 +44,10 @@ def main():
     check = subprocess.run([BUILD / "test_pe", x86, exe], capture_output=True, text=True)
     assert check.returncode != 0, "x86 image must not be accepted by the AMD64 loader"
     print("independent objdump agrees (PE32+, .pdata present); x86 build rejected")
+    # loader host tests that share this parser: API-set contracts
+    sys.path.insert(0, str(HERE))
+    import test_apiset
+    test_apiset.main()
 
 
 if __name__ == "__main__":

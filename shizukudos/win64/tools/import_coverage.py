@@ -4,7 +4,9 @@
 
 Static import audit: every PE32+ under the given paths is parsed for its import and delay-import tables; each imported
 (DLL, function) is checked against the export tables of the ntdll.dll / kernel32.dll this repository builds
-(shizukudos/win64/build.py) and of every extra module built from win64/dlls/, using the same api-ms-* schema the Kernel64 loader uses (kernel64/ldr.c apiset_schema).
+(shizukudos/win64/build.py) and of every extra module built from win64/dlls/, using the same API-set contract table and
+matching rules the Kernel64 loader uses (kernel64/apiset_contracts.txt through gen_apiset_table.lookup, which the host
+tests keep identical to kernel64/apiset.c).
 Imports of DLLs shipped with the application itself are internal and skipped. Everything else is a system DLL
 that must exist for the image to load at all: those without a Shizuku implementation are listed as load blockers.
 
@@ -14,7 +16,6 @@ not a claim that any of these applications runs.
 import argparse
 import collections
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -24,13 +25,12 @@ except ImportError:
     raise SystemExit("pip install pefile")
 
 REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gen_apiset_table as apiset  # noqa: E402
 
 
 def schema():
-    text = (REPO / "shizukudos/kernel64/ldr.c").read_text()
-    block = text[text.index("apiset_schema[]"):]
-    block = block[:block.index("{0, 0}")]
-    return {m.group(1): m.group(2) for m in re.finditer(r'\{"([^"]+)", "([^"]+)"\}', block)}
+    return apiset.parse()
 
 
 def exports(dll):
@@ -40,14 +40,13 @@ def exports(dll):
 
 
 def resolve(name, api_schema):
-    """-> (provider dll or None, kind). kind: ours | apiset-unmapped | system"""
-    n = name.lower()
-    if n.startswith(("api-", "ext-")):
-        for prefix, host in api_schema.items():
-            if n.startswith(prefix + "-"):
-                return host, "apiset"
-        return None, "apiset-unmapped"
-    return n, "direct"
+    """-> (provider dll or None, kind). kind: direct | apiset | apiset-unmapped"""
+    result, row = apiset.lookup(api_schema, name)
+    if result == apiset.NOT_APISET:
+        return name.lower(), "direct"
+    if result == apiset.OK:
+        return row.host, "apiset"
+    return None, "apiset-unmapped"
 
 
 def scan(path, api_schema):
@@ -81,6 +80,7 @@ def main():
     local = {p.name.lower() for p in files}
     per_dll = collections.defaultdict(lambda: collections.defaultdict(set))       # dll -> fn -> importing files
     blockers = collections.defaultdict(set)                                         # missing DLL -> importing files
+    contracts, unmapped = set(), set()                                              # API-set names imported / not in the table
     scanned = 0
     for p in files:
         try:
@@ -92,6 +92,10 @@ def main():
         scanned += 1
         for dll, fn, delayed in imps:
             provider, kind = resolve(dll, api_schema)
+            if kind != "direct":
+                contracts.add(dll.lower())
+                if kind == "apiset-unmapped":
+                    unmapped.add(dll.lower())
             key = provider or dll.lower()
             if key in local:
                 continue                                                            # shipped with the app
@@ -108,7 +112,9 @@ def main():
         hit += ok
     print(f"{scanned} PE32+ images scanned under {args.app}")
     print(f"{total} distinct imported functions from {len(per_dll)} system DLLs; {hit} resolve against "
-          f"the built Shizuku DLLs ({100.0 * hit / max(total, 1):.1f}%)\n")
+          f"the built Shizuku DLLs ({100.0 * hit / max(total, 1):.1f}%)")
+    print(f"{len(contracts)} API-set contracts imported; {len(unmapped)} not in the loader's contract table"
+          + (f": {', '.join(sorted(unmapped))}" if unmapped else "") + "\n")
     print(f"{'system DLL':40} {'imported':>8} {'provided':>9}")
     for dll, n, ok in rows[:args.top]:
         mark = "" if dll in OURS else "  <- no implementation"
@@ -123,6 +129,7 @@ def main():
     if args.json:
         args.json.write_text(json.dumps({
             "images": scanned, "distinct_imports": total, "resolved": hit,
+            "apiset_contracts": sorted(contracts), "apiset_unmapped": sorted(unmapped),
             "system_dlls": {d: {"imported": n, "provided": ok} for d, n, ok in rows},
             "load_blockers": {d: sorted(u) for d, u in blockers.items()},
             "missing": {dll: sorted(fn for fn in per_dll.get(dll, {}) if fn not in ours[dll]) for dll in sorted(OURS) if dll in per_dll}}, indent=1))

@@ -5,9 +5,16 @@
  * for the user-mode ntdll to take over. It does not depend on any user-mode DLL.
  *
  * Image parsing/validation lives in shizukudos/win64/pe_parse.c (shared with host fuzz tests).
+ * API-set contracts resolve through the generated table of kernel64/apiset.c (source: apiset_contracts.txt).
  * Anything the loader cannot verify is rejected with an NTSTATUS; nothing is silently stubbed.
+ *
+ * Diagnostics: a load that fails prints exactly ONE line,
+ *   K64 ldr: <requested image> not loaded: <image> needs <dll>[ = <contract> -> <host>]!<function>: <reason> [<status>]
+ * naming the image whose import failed (the deepest one), the DLL it depends on and the missing function or ordinal.
+ * Modules mapped by a failed attempt are unmapped again, so a later attempt starts from a clean state.
  */
 #include "fs.h"
+#include "apiset.h"
 #include "../win64/pe_parse.h"
 
 #define SYS64_DIR "\\SHZ\\SYS64\\"
@@ -15,8 +22,8 @@
 
 typedef struct module {
     struct module *next;
-    char name[48];                      /* lowercase base name, e.g. "kernel32.dll" */
-    char path[128];
+    char name[64];                      /* lowercase base name, e.g. "kernel32.dll" */
+    char path[160];
     const uint8_t *file;
     uint64_t fsize;
     pe_info_t info;
@@ -31,67 +38,108 @@ typedef struct module {
     int published;
 } module_t;
 
+/* The first (deepest) failure of one load request; printed once by the entry point that started the request. */
+typedef struct {
+    int set;
+    int32_t status;
+    char image[64];                     /* the image whose import (or own mapping) failed */
+    char dll[96];                       /* the DLL name as imported */
+    char contract_host[48];             /* for API-set imports: the host DLL the contract resolved to */
+    char func[96];                      /* function name, "#<ordinal>" or "" */
+    char reason[96];
+} ldr_error_t;
+
+typedef struct {
+    process_t *p;
+    ldr_error_t err;
+    const char *importer;               /* the image whose import table is being walked */
+    const char *import_dll;             /* the DLL name it imports (as written) */
+    const char *import_func;            /* the function being resolved ("" before the first one) */
+    char import_ord[16];
+} ldr_ctx_t;
+
 static char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c; }
 
-/* ---------------------------------------------------------------- API-set contract schema */
-/* Contract name (lowercase, without version suffix match) -> hosting DLL. Only contracts whose
- * exports this system actually implements are listed; an unknown api-ms-* name fails with
- * STATUS_DLL_NOT_FOUND instead of being forwarded blindly to kernel32. */
-static const struct { const char *prefix; const char *dll; } apiset_schema[] = {
-    {"api-ms-win-core-synch-l1", "kernel32.dll"},
-    {"api-ms-win-core-processthreads-l1", "kernel32.dll"},
-    {"api-ms-win-core-libraryloader-l1", "kernel32.dll"},
-    {"api-ms-win-core-memory-l1", "kernel32.dll"},
-    {"api-ms-win-core-file-l1", "kernel32.dll"},
-    {"api-ms-win-core-handle-l1", "kernel32.dll"},
-    {"api-ms-win-core-errorhandling-l1", "kernel32.dll"},
-    {"api-ms-win-core-heap-l1", "kernel32.dll"},
-    {"api-ms-win-core-sysinfo-l1", "kernel32.dll"},
-    {"api-ms-win-core-console-l1", "kernel32.dll"},
-    {"api-ms-win-core-localization-l1", "kernel32.dll"},
-    {"api-ms-win-core-timezone-l1", "kernel32.dll"},
-    {"api-ms-win-core-string-l1", "kernel32.dll"},
-    {"api-ms-win-core-profile-l1", "kernel32.dll"},
-    {"api-ms-win-core-interlocked-l1", "kernel32.dll"},
-    {"api-ms-win-core-rtlsupport-l1", "ntdll.dll"},
-    {"api-ms-win-core-processenvironment-l1", "kernel32.dll"},
-    /* registry / security -> advapi32.dll: entries go directly below this line (only for functions really exported) */
-    {"api-ms-win-core-registry-l1", "advapi32.dll"},
-    {"api-ms-win-core-registry-l2", "advapi32.dll"},
-    {"api-ms-win-security-base-l1", "advapi32.dll"},
-    {"api-ms-win-security-sddl-l1", "advapi32.dll"},
-    {"api-ms-win-eventing-provider-l1", "advapi32.dll"},
-
-    /* graphics / window -> user32.dll, gdi32.dll: */
-
-    /* network -> ws2_32.dll: */
-
-    /* everything else (ole, shell, crypto, version, ...): */
-    {"api-ms-win-core-com-l1", "ole32.dll"},                    /* Co*, GUID text, task allocator: what ole32.dll really exports */
-    {"api-ms-win-core-winrt-l1", "combase.dll"},                /* RoInitialize / RoUninitialize */
-    {"api-ms-win-core-winrt-string-l1", "combase.dll"},         /* HSTRING */
-    {"api-ms-win-core-shlwapi-legacy-l1", "shlwapi.dll"},
-    {"api-ms-win-core-shlwapi-obsolete-l1", "shlwapi.dll"},
-    {"api-ms-win-core-version-l1", "version.dll"},
-    {"api-ms-win-mm-time-l1", "winmm.dll"},                     /* the multimedia timer API */
-
-    {0, 0}
-};
-
-static const char *apiset_resolve(const char *name, int *is_apiset)
+static void scopy(char *d, size_t cap, const char *s)
 {
-    unsigned i, n;
-    *is_apiset = 0;
-    if (!(name[0] == 'a' && name[1] == 'p' && name[2] == 'i' && name[3] == '-') &&
-        !(name[0] == 'e' && name[1] == 'x' && name[2] == 't' && name[3] == '-'))
-        return 0;
-    *is_apiset = 1;
-    for (i = 0; apiset_schema[i].prefix; ++i) {
-        n = (unsigned)strlen(apiset_schema[i].prefix);
-        if (!strncmp(name, apiset_schema[i].prefix, n) && name[n] == '-')
-            return apiset_schema[i].dll;
+    size_t k = 0;
+    if (!cap) return;
+    for (; s && s[k] && k + 1 < cap; ++k) d[k] = s[k];
+    d[k] = 0;
+}
+
+static void sappend(char *d, size_t cap, const char *s)
+{
+    size_t k = strlen(d);
+    for (; s && *s && k + 1 < cap; ++s) d[k++] = *s;
+    d[k] = 0;
+}
+
+static void fmt_dec(char *out, size_t cap, const char *prefix, uint64_t v)
+{
+    char tmp[24];
+    int n = 0;
+    scopy(out, cap, prefix);
+    do { tmp[n++] = (char)('0' + v % 10); v /= 10; } while (v && n < 20);
+    while (n) { char c[2] = { tmp[--n], 0 }; sappend(out, cap, c); }
+}
+
+/* Records the failure unless a deeper one was recorded already. `image`/`dll`/`func` may be NULL for "the import
+ * currently being resolved". */
+static int32_t fail(ldr_ctx_t *c, int32_t st, const char *image, const char *dll, const char *host, const char *func,
+                    const char *reason)
+{
+    if (!c || c->err.set) return st;
+    c->err.set = 1;
+    c->err.status = st;
+    scopy(c->err.image, sizeof c->err.image, image ? image : c->importer);
+    scopy(c->err.dll, sizeof c->err.dll, dll ? dll : c->import_dll);
+    scopy(c->err.contract_host, sizeof c->err.contract_host, host);
+    scopy(c->err.func, sizeof c->err.func, func ? func : (c->import_func ? c->import_func : c->import_ord));
+    scopy(c->err.reason, sizeof c->err.reason, reason);
+    return st;
+}
+
+static void report(ldr_ctx_t *c, const char *what, int32_t st)
+{
+    ldr_error_t *e = &c->err;
+    if (!e->set) {
+        kprintf("K64 ldr: %s not loaded [%x]\n", what, (uint32_t)st);
+        return;
     }
-    return 0;
+    if (!e->dll[0])                                         /* the image itself is unusable */
+        kprintf("K64 ldr: %s not loaded: %s: %s [%x]\n", what, e->image, e->reason, (uint32_t)e->status);
+    else
+        kprintf("K64 ldr: %s not loaded: %s needs %s%s%s%s%s: %s [%x]\n", what, e->image[0] ? e->image : "?", e->dll,
+                e->contract_host[0] ? " -> " : "", e->contract_host, e->func[0] ? "!" : "", e->func, e->reason,
+                (uint32_t)e->status);
+}
+
+/* ---------------------------------------------------------------- API-set contracts */
+/* Maps an imported DLL name onto the DLL to load. Returns STATUS_SUCCESS with `out` = the host (or the name itself
+ * when it is not an API-set name), or an error recorded in the context. */
+static int32_t resolve_dll_name(ldr_ctx_t *c, const char *name, char *out, size_t cap, int *is_apiset)
+{
+    const apiset_entry_t *e = 0;
+    const int r = apiset_lookup(name, &e);
+    *is_apiset = r != APISET_NOT_APISET;
+    if (r == APISET_NOT_APISET || r == APISET_OK) {
+        scopy(out, cap, r == APISET_OK ? e->host : name);
+        return STATUS_SUCCESS;
+    }
+    if (r == APISET_VERSION) {
+        char why[96], v[16];
+        scopy(why, sizeof why, "API-set contract version not provided (table has ");
+        sappend(why, sizeof why, e->contract);
+        fmt_dec(v, sizeof v, "-", e->major);
+        sappend(why, sizeof why, v);
+        fmt_dec(v, sizeof v, "-", e->minor);
+        sappend(why, sizeof why, v);
+        sappend(why, sizeof why, ")");
+        return fail(c, STATUS_DLL_NOT_FOUND, 0, name, 0, 0, why);
+    }
+    return fail(c, STATUS_DLL_NOT_FOUND, 0, name, 0, 0,
+                r == APISET_BAD_NAME ? "malformed API-set name" : "unknown API-set contract");
 }
 
 /* ---------------------------------------------------------------- module registry */
@@ -129,6 +177,7 @@ static fsnode_t *locate_file(const char *name, char *found_path, size_t cap)
     /* search order: system directory, then the root (application directories are searched by the caller) */
     memcpy(path, SYS64_DIR, sizeof SYS64_DIR);
     k = strlen(SYS64_DIR);
+    if (k + strlen(name) + 1 > sizeof path) return 0;
     memcpy(path + k, name, strlen(name) + 1);
     n = fs_lookup(path);
     if (!n) {
@@ -248,148 +297,172 @@ static int32_t map_module(process_t *p, module_t *m)
 }
 
 /* ---------------------------------------------------------------- exports and imports */
-static int32_t load_dll(process_t *p, const char *name, int depth, module_t **out);
+static int32_t load_dll(ldr_ctx_t *c, const char *name, int depth, module_t **out);
 
-static int32_t resolve_export(process_t *p, module_t *m, const char *sym, int ordinal, int depth, uint64_t *va)
+static int32_t resolve_export(ldr_ctx_t *c, module_t *m, const char *sym, int ordinal, int depth, uint64_t *va)
 {
     uint32_t rva;
     char fwd[128];
     int rc;
-    if (depth > 8) return STATUS_ENTRYPOINT_NOT_FOUND;      /* forwarder cycle */
+    if (depth > 8) return fail(c, STATUS_ENTRYPOINT_NOT_FOUND, 0, 0, 0, 0, "forwarder chain too long or circular");
     rc = pe_find_export(m->file, m->fsize, &m->info, sym, ordinal, &rva, fwd, sizeof fwd);
-    if (rc == PE_E_NOT_FOUND) return ordinal >= 0 ? STATUS_ORDINAL_NOT_FOUND : STATUS_ENTRYPOINT_NOT_FOUND;
-    if (rc) return STATUS_INVALID_IMAGE_FORMAT;
+    if (rc == PE_E_NOT_FOUND) {
+        char ord[16], why[96];
+        if (!sym) fmt_dec(ord, sizeof ord, "#", (uint64_t)ordinal);
+        if (depth) {                                        /* reached through a forwarder of the imported DLL */
+            scopy(why, sizeof why, "forwarded to ");
+            sappend(why, sizeof why, m->name);
+            sappend(why, sizeof why, "!");
+            sappend(why, sizeof why, sym ? sym : ord);
+            sappend(why, sizeof why, ", which is not exported");
+        }
+        return fail(c, ordinal >= 0 ? STATUS_ORDINAL_NOT_FOUND : STATUS_ENTRYPOINT_NOT_FOUND, 0, 0, 0,
+                    depth ? 0 : (sym ? sym : ord), depth ? why : "not exported by the DLL");
+    }
+    if (rc) return fail(c, STATUS_INVALID_IMAGE_FORMAT, 0, 0, 0, 0, "malformed export directory of the DLL");
     if (rva) {
         *va = m->base + rva;
         return STATUS_SUCCESS;
     }
-    /* forwarder "DLL.Function" or "DLL.#ordinal" */
+    /* forwarder "DLL.Function" or "DLL.#ordinal"; the DLL part may itself be an API-set contract */
     {
-        char dll[64], fn[80];
+        char dll[96], fn[96], nm[64], host[64];
         unsigned k = 0, j = 0;
         module_t *target;
         int32_t st;
+        int is_api;
         while (fwd[k] && fwd[k] != '.' && k + 5 < sizeof dll) { dll[k] = fwd[k]; ++k; }
-        if (fwd[k] != '.') return STATUS_INVALID_IMAGE_FORMAT;
-        memcpy(dll + k, ".dll", 5);
+        if (fwd[k] != '.' || !k) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, fwd, "malformed forwarder");
+        dll[k] = 0;
         ++k;
         while (fwd[k] && j + 1 < sizeof fn) fn[j++] = fwd[k++];
         fn[j] = 0;
-        {
-            char nm[64];
-            int is_api;
-            const char *host;
-            base_name(dll, nm, sizeof nm);
-            host = apiset_resolve(nm, &is_api);
-            if (is_api) {
-                if (!host) return STATUS_DLL_NOT_FOUND;
-                memcpy(nm, host, strlen(host) + 1);
-            }
-            st = load_dll(p, nm, depth + 1, &target);
-        }
+        base_name(dll, nm, sizeof nm);
+        st = resolve_dll_name(c, nm, host, sizeof host, &is_api);
+        if (st) return st;
+        st = load_dll(c, host, depth + 1, &target);
         if (st) return st;
         if (fn[0] == '#') {
             int ord = 0;
             unsigned q;
-            for (q = 1; fn[q]; ++q) ord = ord * 10 + (fn[q] - '0');
-            return resolve_export(p, target, 0, ord, depth + 1, va);
+            for (q = 1; fn[q] >= '0' && fn[q] <= '9' && ord < 65536; ++q) ord = ord * 10 + (fn[q] - '0');
+            if (fn[q] || q == 1) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, fwd, "malformed forwarder");
+            return resolve_export(c, target, 0, ord, depth + 1, va);
         }
-        return resolve_export(p, target, fn, -1, depth + 1, va);
+        return resolve_export(c, target, fn, -1, depth + 1, va);
     }
 }
 
-struct impctx { process_t *p; module_t *m; int depth; int32_t st; };
-
-static int import_cb(void *c, const char *dll, const char *name, uint16_t hint, int by_ord, uint32_t iat_rva)
+/* After a failure of an API-set import: name the contract as the dependency and the host it resolved to. */
+static void annotate_apiset(ldr_ctx_t *c, const char *importer, const char *contract, const char *host)
 {
-    struct impctx *x = c;
-    char nm[64];
+    if (!c->err.set || strcmp(c->err.image, importer)) return;       /* a deeper image failed: its record stands */
+    if (!strcmp(c->err.dll, host)) {
+        scopy(c->err.dll, sizeof c->err.dll, contract);
+        if (c->err.status == STATUS_DLL_NOT_FOUND) scopy(c->err.reason, sizeof c->err.reason, "API-set host DLL not found");
+    }
+    if (!c->err.contract_host[0]) scopy(c->err.contract_host, sizeof c->err.contract_host, host);
+}
+
+struct impctx { ldr_ctx_t *c; module_t *m; int depth; int32_t st; };
+
+static int import_cb(void *ctx, const char *dll, const char *name, uint16_t hint, int by_ord, uint32_t iat_rva)
+{
+    struct impctx *x = ctx;
+    ldr_ctx_t *c = x->c;
+    char nm[96], host[64];
     module_t *target;
     uint64_t va;
     int is_api;
-    const char *host;
     int32_t st;
-    (void)hint;
+    c->importer = x->m->name;
+    c->import_dll = dll;
+    c->import_func = by_ord ? 0 : name;
+    fmt_dec(c->import_ord, sizeof c->import_ord, "#", hint);
     base_name(dll, nm, sizeof nm);
-    host = apiset_resolve(nm, &is_api);
-    if (is_api) {
-        if (!host) { x->st = STATUS_DLL_NOT_FOUND; return -1; }     /* unknown contract: no blind forwarding */
-        memcpy(nm, host, strlen(host) + 1);
+    st = resolve_dll_name(c, nm, host, sizeof host, &is_api);
+    if (!st) {
+        st = load_dll(c, host, x->depth + 1, &target);
+        if (!st) {
+            /* restore the importer: loading `target` walked its own imports */
+            c->importer = x->m->name;
+            c->import_dll = dll;
+            c->import_func = by_ord ? 0 : name;
+            fmt_dec(c->import_ord, sizeof c->import_ord, "#", hint);
+            st = resolve_export(c, target, name, by_ord ? hint : -1, 0, &va);
+        }
+        if (st && is_api) annotate_apiset(c, x->m->name, dll, host);
     }
-    st = load_dll(x->p, nm, x->depth + 1, &target);
     if (st) { x->st = st; return -1; }
-    st = resolve_export(x->p, target, name, by_ord ? hint : -1, 0, &va);
-    if (st) {
-        kprintf("K64 ldr: %s imports %s!%s -> %x\n", x->m->name, nm, name ? name : "#ordinal", (uint32_t)st);
-        x->st = st;
-        return -1;
-    }
-    if (uwrite64(x->p, x->m->base + iat_rva, va)) { x->st = STATUS_ACCESS_VIOLATION; return -1; }
+    if (uwrite64(c->p, x->m->base + iat_rva, va)) { x->st = fail(c, STATUS_ACCESS_VIOLATION, x->m->name, dll, 0, 0, "IAT not writable"); return -1; }
     return 0;
 }
 
 /* ---------------------------------------------------------------- loading */
 static uint32_t init_counter;
 
-static int32_t link_module(process_t *p, module_t *m, int depth)
+static int32_t link_module(ldr_ctx_t *c, module_t *m, int depth)
 {
-    struct impctx ic = { p, m, depth, 0 };
+    process_t *p = c->p;
+    struct impctx ic = { c, m, depth, 0 };
     int rc = pe_walk_imports(m->file, m->fsize, &m->info, import_cb, &ic);
-    if (rc) return ic.st ? ic.st : STATUS_INVALID_IMAGE_FORMAT;
+    if (rc) return ic.st ? ic.st : fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed import directory");
     /* TLS directory (IMAGE_TLS_DIRECTORY64: start, end, index VA, callbacks VA, zero fill) */
     if (m->info.dir_rva[9]) {
         uint64_t off, avail;
         if (m->info.dir_size[9] < 40 || pe_rva_to_offset(m->file, m->fsize, &m->info, m->info.dir_rva[9], &off, &avail) || avail < 40)
-            return STATUS_INVALID_IMAGE_FORMAT;
+            return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed TLS directory");
         {
             uint64_t v[4];
             uint32_t zero;
             uint64_t pa = vm_lookup(p->pml4, m->base + m->info.dir_rva[9], 0);
-            if (!pa) return STATUS_INVALID_IMAGE_FORMAT;
+            if (!pa) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "TLS directory not mapped");
             memcpy(v, (void *)p2v(pa), 32);
             memcpy(&zero, (void *)p2v(pa + 32), 4);
             m->tls_start = v[0]; m->tls_end = v[1]; m->tls_index_va = v[2]; m->tls_callbacks_va = v[3]; m->tls_zero = zero;
             if (m->tls_end < m->tls_start || m->tls_end - m->tls_start > (1u << 24) ||
                 m->tls_start < m->base || m->tls_end > m->base + m->info.size_of_image ||
                 m->tls_index_va < m->base || m->tls_index_va + 4 > m->base + m->info.size_of_image)
-                return STATUS_INVALID_IMAGE_FORMAT;
+                return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "TLS directory out of the image");
             m->has_tls = 1;
             m->tls_index = p->tls_slots++;
             {
                 uint32_t idx = m->tls_index;
-                if (uwrite(p, m->tls_index_va, &idx, 4)) return STATUS_ACCESS_VIOLATION;
+                if (uwrite(p, m->tls_index_va, &idx, 4)) return fail(c, STATUS_ACCESS_VIOLATION, m->name, "", 0, "", "TLS index not writable");
             }
         }
     }
     return STATUS_SUCCESS;
 }
 
-static int32_t load_module_file(process_t *p, const char *name, fsnode_t *node, const char *path, int depth,
+static int32_t load_module_file(ldr_ctx_t *c, const char *name, fsnode_t *node, const char *path, int depth,
                                 module_t **out)
 {
+    process_t *p = c->p;
     module_t *m = kzalloc(sizeof *m);
     int32_t st;
     int rc;
-    if (!m) return STATUS_NO_MEMORY;
-    memcpy(m->name, name, strlen(name) + 1);
-    {
-        size_t k;
-        for (k = 0; path[k] && k + 1 < sizeof m->path; ++k) m->path[k] = path[k];
-    }
+    if (!m) return fail(c, STATUS_NO_MEMORY, name, "", 0, "", "out of kernel memory");
+    scopy(m->name, sizeof m->name, name);
+    scopy(m->path, sizeof m->path, path);
     m->file = node->data;
     m->fsize = node->size;
     rc = pe_parse(m->file, m->fsize, &m->info);
     if (rc) {
-        kprintf("K64 ldr: %s rejected (pe error %d)\n", name, rc);
+        char why[48];
+        fmt_dec(why, sizeof why, "not a valid AMD64 PE32+ image (pe error -", (uint64_t)-rc);
+        sappend(why, sizeof why, ")");
         kfree(m);
-        return rc == PE_E_MACHINE ? STATUS_INVALID_IMAGE_FORMAT : STATUS_INVALID_IMAGE_FORMAT;
+        return fail(c, STATUS_INVALID_IMAGE_FORMAT, name, "", 0, "", why);
     }
     m->is_dll = (m->info.characteristics & PE_CHAR_DLL) != 0;
     m->state = 0;
     m->next = p->modules;
     p->modules = m;                                             /* visible while loading: circular imports terminate */
     st = map_module(p, m);
-    if (!st) st = link_module(p, m, depth);
+    if (st) return fail(c, st, name, "", 0, "", st == STATUS_CONFLICTING_ADDRESSES ? "fixed-base image and its range is occupied" :
+                        "cannot map the image");
+    st = link_module(c, m, depth);
     if (st) return st;
     m->state = 1;
     m->init_seq = ++init_counter;
@@ -397,16 +470,31 @@ static int32_t load_module_file(process_t *p, const char *name, fsnode_t *node, 
     return STATUS_SUCCESS;
 }
 
-static int32_t load_dll(process_t *p, const char *name, int depth, module_t **out)
+static int32_t load_dll(ldr_ctx_t *c, const char *name, int depth, module_t **out)
 {
-    module_t *m = find_module(p, name);
+    module_t *m = find_module(c->p, name);
     fsnode_t *node;
-    char path[128];
+    char path[160];
     if (m) { if (out) *out = m; return STATUS_SUCCESS; }
-    if (depth > MAX_DEPTH) return STATUS_DLL_NOT_FOUND;
+    if (depth > MAX_DEPTH) return fail(c, STATUS_DLL_NOT_FOUND, 0, name, 0, 0, "import nesting deeper than 24 levels");
     node = locate_file(name, path, sizeof path);
-    if (!node) return STATUS_DLL_NOT_FOUND;
-    return load_module_file(p, name, node, path, depth, out);
+    if (!node) return fail(c, STATUS_DLL_NOT_FOUND, 0, name, 0, 0, "DLL not found");
+    return load_module_file(c, name, node, path, depth, out);
+}
+
+/* Unmaps and forgets every module added after `mark` (the head of the list when the failed request started). */
+static void rollback(process_t *p, module_t *mark, unsigned tls_mark)
+{
+    while (p->modules && p->modules != mark) {
+        module_t *m = p->modules;
+        p->modules = m->next;
+        if (m->base) {
+            uint64_t b = m->base, sz = 0;
+            vad_free(p, &b, &sz, MEM_RELEASE);
+        }
+        kfree(m);
+    }
+    p->tls_slots = tls_mark;
 }
 
 /* ---------------------------------------------------------------- Windows-shaped loader database */
@@ -434,14 +522,14 @@ static int list_append(process_t *p, uint64_t head, uint64_t link)
 static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t strings_va, int in_init_list, int is_exe)
 {
     uint8_t entry[LDR_ENTRY_SIZE];
-    uint16_t wfull[128], wbase[48];
+    uint16_t wfull[160], wbase[64];
     unsigned i, nf = 0, nb = 0;
     struct ustr uf, ub;
     memset(entry, 0, sizeof entry);
-    for (i = 0; m->path[i] && nf < 127; ++i) wfull[nf++] = (uint8_t)m->path[i];
-    for (i = 0; m->name[i] && nb < 47; ++i) wbase[nb++] = (uint8_t)m->name[i];
+    for (i = 0; m->path[i] && nf < 159; ++i) wfull[nf++] = (uint8_t)m->path[i];
+    for (i = 0; m->name[i] && nb < 63; ++i) wbase[nb++] = (uint8_t)m->name[i];
     uf = (struct ustr){ (uint16_t)(nf * 2), (uint16_t)(nf * 2 + 2), 0, strings_va };
-    ub = (struct ustr){ (uint16_t)(nb * 2), (uint16_t)(nb * 2 + 2), 0, strings_va + 256 };
+    ub = (struct ustr){ (uint16_t)(nb * 2), (uint16_t)(nb * 2 + 2), 0, strings_va + 336 };
     *(uint64_t *)(entry + 0x30) = m->base;
     *(uint64_t *)(entry + 0x38) = m->info.entry_rva ? m->base + m->info.entry_rva : 0;
     *(uint32_t *)(entry + 0x40) = m->info.size_of_image;
@@ -451,7 +539,7 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
     *(uint16_t *)(entry + 0x6c) = 1;                         /* load count */
     *(uint16_t *)(entry + 0x6e) = m->has_tls ? (uint16_t)m->tls_index : 0xffff;
     if (uwrite(p, entry_va, entry, sizeof entry) || uwrite(p, strings_va, wfull, nf * 2 + 2) ||
-        uwrite(p, strings_va + 256, wbase, nb * 2 + 2))
+        uwrite(p, strings_va + 336, wbase, nb * 2 + 2))
         return -1;
     if (list_append(p, p->ldr_va + 0x10, entry_va) || list_append(p, p->ldr_va + 0x20, entry_va + 0x10))
         return -1;
@@ -459,6 +547,8 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
     m->published = 1;
     return 0;
 }
+
+#define LDR_SLOT (LDR_ENTRY_SIZE + 512)
 
 /* Publishes every module not yet visible to user mode: the executable first (if requested),
  * then the rest in dependency-completion order for the initialization list. */
@@ -468,14 +558,13 @@ static int32_t publish_all(process_t *p, module_t *exe)
     unsigned n = 0, i, j;
     uint64_t block;
     if (!p->ldr_va) {
-        uint64_t l = alloc_user(p, 4096), init[2];
+        uint64_t l = alloc_user(p, 4096);
         uint8_t hdr[0x50];
         if (!l) return STATUS_NO_MEMORY;
         memset(hdr, 0, sizeof hdr);
         *(uint32_t *)hdr = 0x58;                             /* Length */
         *(uint32_t *)(hdr + 4) = 1;                          /* Initialized */
         uwrite(p, l, hdr, sizeof hdr);
-        init[0] = init[1] = 0;
         p->ldr_va = l;
         uwrite64(p, l + 0x10, l + 0x10); uwrite64(p, l + 0x18, l + 0x10);      /* empty circular lists */
         uwrite64(p, l + 0x20, l + 0x20); uwrite64(p, l + 0x28, l + 0x20);
@@ -490,16 +579,16 @@ static int32_t publish_all(process_t *p, module_t *exe)
     for (i = 0; i < n; ++i)
         for (j = i + 1; j < n; ++j)
             if (order[j]->init_seq < order[i]->init_seq) { m = order[i]; order[i] = order[j]; order[j] = m; }
-    block = alloc_user(p, (uint64_t)n * (LDR_ENTRY_SIZE + 512) + 4096);
+    block = alloc_user(p, (uint64_t)n * LDR_SLOT + 4096);
     if (!block) return STATUS_NO_MEMORY;
     if (exe) {                                               /* the executable leads the load-order list */
         if (publish_module(p, exe, block, block + LDR_ENTRY_SIZE, 0, 1)) return STATUS_ACCESS_VIOLATION;
-        block += LDR_ENTRY_SIZE + 512;
+        block += LDR_SLOT;
     }
     for (i = 0; i < n; ++i) {
         if (order[i] == exe) continue;
         if (publish_module(p, order[i], block, block + LDR_ENTRY_SIZE, 1, 0)) return STATUS_ACCESS_VIOLATION;
-        block += LDR_ENTRY_SIZE + 512;
+        block += LDR_SLOT;
     }
     return STATUS_SUCCESS;
 }
@@ -595,8 +684,23 @@ static uint64_t ntdll_export(process_t *p, const char *sym)
 {
     module_t *m = find_module(p, "ntdll.dll");
     uint64_t va = 0;
-    if (!m || resolve_export(p, m, sym, -1, 0, &va)) return 0;
+    ldr_ctx_t c;
+    memset(&c, 0, sizeof c);
+    c.p = p;
+    if (!m || resolve_export(&c, m, sym, -1, 0, &va)) return 0;
     return va;
+}
+
+/* Frees a process whose creation failed before any thread ran (its address space, VADs, handles, modules). */
+static void destroy_unstarted(process_t *p)
+{
+    rollback(p, 0, 0);
+    handles_close_all(p);
+    vm_free_space(p->pml4);
+    vad_destroy(p);
+    kfree(p->handles);
+    ob_deref(p->object);
+    p->used = 0;
 }
 
 int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
@@ -610,10 +714,13 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     thread_t *t = 0;
     uint32_t h;
     unsigned k;
+    ldr_ctx_t *c;
     if (!node || node->is_dir) return STATUS_OBJECT_NAME_NOT_FOUND;
+    c = kzalloc(sizeof *c);
+    if (!c) return STATUS_NO_MEMORY;
     p = process_create_empty("win64");
-    if (!p) return STATUS_NO_MEMORY;
-    for (k = 0; image_path[k] && k < sizeof p->name - 1; ) { p->name[k] = image_path[k]; ++k; }
+    if (!p) { kfree(c); return STATUS_NO_MEMORY; }
+    c->p = p;
     {
         /* short name for logs: last path component */
         const char *s = image_path, *q;
@@ -626,21 +733,24 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     /* std handles occupy 4, 8 and 12 */
     {
         kobject_t *in = console_object(0), *outo = console_object(1), *err = console_object(1);
-        if (!in || !outo || !err) return STATUS_NO_MEMORY;
+        if (!in || !outo || !err) { st = STATUS_NO_MEMORY; goto failed; }
         handle_insert(p, in, 0x80000000u, &h); ob_deref(in);
         handle_insert(p, outo, 0x40000000u, &h); ob_deref(outo);
         handle_insert(p, err, 0x40000000u, &h); ob_deref(err);
     }
-    st = load_dll(p, "ntdll.dll", 0, 0);
-    if (st) { kprintf("K64 ldr: cannot load ntdll.dll (%x)\n", (uint32_t)st); return st; }
+    st = load_dll(c, "ntdll.dll", 0, 0);
+    if (st) goto report_failed;
     base_name(p->name, nm, sizeof nm);
-    st = load_module_file(p, nm, node, image_path, 0, &exe);
-    if (st) { kprintf("K64 ldr: %s failed to load (%x)\n", image_path, (uint32_t)st); return st; }
-    if (exe->is_dll) return STATUS_INVALID_IMAGE_FORMAT;
-    if (!exe->info.entry_rva) return STATUS_INVALID_IMAGE_FORMAT;
+    st = load_module_file(c, nm, node, image_path, 0, &exe);
+    if (st) goto report_failed;
+    if (exe->is_dll || !exe->info.entry_rva) {
+        st = fail(c, STATUS_INVALID_IMAGE_FORMAT, nm, "", 0, "", exe->is_dll ? "a DLL cannot be started as a process" :
+                  "the executable has no entry point");
+        goto report_failed;
+    }
     st = publish_all(p, exe);
-    if (st) return st;
-    if (build_params(p, image_path, cmdline, cwd)) return STATUS_NO_MEMORY;
+    if (st) goto failed;
+    if (build_params(p, image_path, cmdline, cwd)) { st = STATUS_NO_MEMORY; goto failed; }
     /* PEB fields */
     {
         uint8_t peb[0x130];
@@ -664,32 +774,50 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     p->ntdll_exception_dispatcher = ntdll_export(p, "KiUserExceptionDispatcher");
     if (!p->ntdll_process_start || !p->ntdll_thread_start || !p->ntdll_exception_dispatcher) {
         kprintf("K64 ldr: ntdll.dll lacks the Shizuku process start exports\n");
-        return STATUS_ENTRYPOINT_NOT_FOUND;
+        st = STATUS_ENTRYPOINT_NOT_FOUND;
+        goto failed;
     }
     st = process_start_thread2(p, p->ntdll_process_start, p->entry, 0, exe->info.stack_reserve ? exe->info.stack_reserve : 0x100000, &t);
-    if (st) return STATUS_NO_MEMORY;
+    if (st) { st = STATUS_NO_MEMORY; goto failed; }
+    kfree(c);
     if (out_proc) *out_proc = p;
     if (out_thread) *out_thread = t;
     return STATUS_SUCCESS;
+report_failed:
+    report(c, p->name, st);
+failed:
+    destroy_unstarted(p);
+    kfree(c);
+    return st;
 }
 
 int32_t ldr_load_module_runtime(process_t *p, const char *name, uint64_t *base_out)
 {
-    char nm[64];
-    module_t *m;
+    char nm[96], host[64];
+    module_t *m, *mark = p->modules;
+    const unsigned tls_mark = p->tls_slots;
     int32_t st;
     int is_api;
-    const char *host;
+    ldr_ctx_t *c = kzalloc(sizeof *c);
+    if (!c) return STATUS_NO_MEMORY;
+    c->p = p;
+    c->importer = "LoadLibrary";
+    c->import_dll = name;
+    c->import_func = "";
     base_name(name, nm, sizeof nm);
-    host = apiset_resolve(nm, &is_api);
-    if (is_api) {
-        if (!host) return STATUS_DLL_NOT_FOUND;
-        memcpy(nm, host, strlen(host) + 1);
+    st = resolve_dll_name(c, nm, host, sizeof host, &is_api);
+    if (!st) {
+        st = load_dll(c, host, 0, &m);
+        if (st && is_api) annotate_apiset(c, "LoadLibrary", nm, host);
     }
-    st = load_dll(p, nm, 0, &m);
-    if (st) return st;
-    st = publish_all(p, 0);
-    if (st) return st;
+    if (!st) st = publish_all(p, 0);
+    if (st) {
+        report(c, nm, st);
+        rollback(p, mark, tls_mark);
+        kfree(c);
+        return st;
+    }
+    kfree(c);
     *base_out = m->base;
     return STATUS_SUCCESS;
 }
@@ -698,8 +826,11 @@ uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint
 {
     module_t *m;
     uint64_t va = 0;
+    ldr_ctx_t c;
+    memset(&c, 0, sizeof c);
+    c.p = p;
     for (m = p->modules; m; m = m->next)
-        if (m->base == base && !resolve_export(p, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
+        if (m->base == base && !resolve_export(&c, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
             return va;
     return 0;
 }
