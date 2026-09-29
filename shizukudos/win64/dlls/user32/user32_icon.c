@@ -249,26 +249,48 @@ static HANDLE load_system(LPCWSTR name, int cursor)
     return h;
 }
 
+/* Resources of a module are real, per-call objects; the system images (hinst NULL) are shared. LoadIcon/LoadCursor load
+ * the SM_CXICON/SM_CXCURSOR size from a module (user32_res.c). */
 DLLAPI HICON WINAPI LoadIconW(HINSTANCE inst, LPCWSTR name)
 {
-    if (inst) { SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND); return 0; }
+    if (inst) return u32_icon_from_resource(inst, name, 0, 0, 0);
     return (HICON)load_system(name, 0);
 }
 
 DLLAPI HCURSOR WINAPI LoadCursorW(HINSTANCE inst, LPCWSTR name)
 {
-    if (inst) { SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND); return 0; }
+    if (inst) return (HCURSOR)u32_icon_from_resource(inst, name, 1, 0, 0);
     return (HCURSOR)load_system(name, 1);
 }
 
-/* Only system icons and cursors (hinst NULL, an OIC_/OCR_ identifier or IDI_/IDC_ value) can be loaded; the requested size
- * is ignored: the built-in images are 32x32 and DrawIconEx scales them. */
+HICON u32_icon_from_file(LPCWSTR path, int cursor, int cx, int cy);
+HBITMAP u32_bitmap_from_file(LPCWSTR path);
+HBITMAP WINAPI LoadBitmapW(HINSTANCE inst, LPCWSTR name);
+
+/* System images (hinst NULL): the built-in 32x32 ones, whatever size is asked (DrawIconEx scales). Module resources and
+ * .ico/.cur/.bmp files (LR_LOADFROMFILE) at the requested size (LR_DEFAULTSIZE / 0: the system metric). */
 DLLAPI HANDLE WINAPI LoadImageW(HINSTANCE inst, LPCWSTR name, UINT type, int cx, int cy, UINT flags)
 {
-    (void)cx; (void)cy;
-    if (flags & LR_LOADFROMFILE) { SetLastError(ERROR_FILE_NOT_FOUND); return 0; }
-    if (inst || (type != IMAGE_ICON && type != IMAGE_CURSOR)) { SetLastError(ERROR_RESOURCE_NAME_NOT_FOUND); return 0; }
-    return load_system(name, type == IMAGE_CURSOR);
+    if (type != IMAGE_ICON && type != IMAGE_CURSOR && type != IMAGE_BITMAP) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    if (flags & LR_LOADFROMFILE) {
+        if (!name || IS_INTRESOURCE(name)) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+        if (type == IMAGE_BITMAP) return u32_bitmap_from_file(name);
+        return u32_icon_from_file(name, type == IMAGE_CURSOR, cx, cy);
+    }
+    if (type == IMAGE_BITMAP) return LoadBitmapW(inst, name);
+    if (!inst) return load_system(name, type == IMAGE_CURSOR);
+    if (!cx && !(flags & LR_DEFAULTSIZE)) cx = 0;
+    return u32_icon_from_resource(inst, name, type == IMAGE_CURSOR, cx, cy);
+}
+
+HICON u32_icon_create_argb(uint32_t *argb, int w, int h, int cursor, int hx, int hy)
+{
+    HANDLE r;
+    icon_lock();
+    r = icon_new(argb, w, h, cursor, hx, hy, 0, 0);
+    icon_unlock();
+    if (!r) HeapFree(GetProcessHeap(), 0, argb);
+    return (HICON)r;
 }
 
 /* Converts a bitmap to straight ARGB pixels via GetDIBits (32 bpp, top-down). */
@@ -505,3 +527,12 @@ DLLAPI HCURSOR WINAPI SetCursor(HCURSOR h)
 DLLAPI HCURSOR WINAPI GetCursor(void) { u32_thread_t *t = u32_ts(); return t ? t->cursor : 0; }
 
 DLLAPI int WINAPI ShowCursor(BOOL show) { return u32_cursor_count(show ? 1 : -1); }
+
+int u32_icon_count(void)
+{
+    int i, n = 0;
+    icon_lock();
+    for (i = 0; i < NICONS; ++i) n += g_icons[i].used && !g_icons[i].shared;
+    icon_unlock();
+    return n;
+}

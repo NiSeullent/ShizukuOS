@@ -346,7 +346,9 @@ static void test_icons(void)
     SetLastError(0);
     CHECK(!LoadCursorW(0, MAKEINTRESOURCEW(12345)) && GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND, "an unknown system cursor fails with ERROR_RESOURCE_NAME_NOT_FOUND");
     SetLastError(0);
-    CHECK(!LoadIconW(GetModuleHandleW(0), MAKEINTRESOURCEW(1)) && GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND, "module resources cannot be loaded (no resource loader)");
+    CHECK(!LoadIconW(GetModuleHandleW(0), MAKEINTRESOURCEW(1)) &&
+          (GetLastError() == ERROR_RESOURCE_DATA_NOT_FOUND || GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND),
+          "LoadIconW from a module that has no such icon resource fails (T_GUI_SYS loads real ones)");
     CHECK(!IsWindow((HWND)app), "an icon handle is not a window handle");
 
     clear(RGB(0, 255, 0));

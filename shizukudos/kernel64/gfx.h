@@ -11,6 +11,7 @@
 #define STATUS_NO_SUCH_DEVICE ((int32_t)0xC000000E)
 #define STATUS_NO_QUOTA ((int32_t)0xC0000044)           /* STATUS_QUOTA_EXCEEDED family: message pool full */
 #define STATUS_DEVICE_NOT_READY ((int32_t)0xC00000A3)
+#define STATUS_NOT_FOUND ((int32_t)0xC0000225)
 
 /* ---- gfx_fb.c ---- */
 typedef struct {
@@ -40,7 +41,7 @@ int32_t gfx_syscall_display(process_t *cur, uint64_t out, uint64_t op);
 
 /* ---- window manager objects ---- */
 #define GFX_MAX_WINDOWS 256
-#define GFX_MAX_CLASSES 64
+#define GFX_MAX_CLASSES 256                         /* all processes together (user32 registers its control classes per process) */
 #define GFX_MAX_QUEUES 32
 #define GFX_MAX_TIMERS 16
 #define GFX_MAX_MSGS 2048
@@ -98,6 +99,16 @@ struct gwin {
     int msgonly;                                    /* HWND_MESSAGE window: never visible, only receives messages */
     shz_rect_t restore;                             /* rectangle before maximise/minimise */
     int has_restore;
+    /* layered windows (WS_EX_LAYERED, top-level) and window regions: see "Layers" at the top of gfx_wm.c */
+    uint8_t lmode;                                  /* 0: nothing set yet (not drawn), 1: SetLayeredWindowAttributes, 2: UpdateLayeredWindow */
+    uint8_t lalpha;                                 /* constant alpha 0..255 */
+    uint8_t lppa;                                   /* mode 2: the bitmap has per-pixel (premultiplied) alpha */
+    uint32_t lflags, lkey;                          /* LWA_COLORKEY/LWA_ALPHA or ULW_COLORKEY/ULW_ALPHA/ULW_OPAQUE; key 0x00RRGGBB */
+    uint32_t *layer;                                /* mode 2: lw*lh pixels 0xAARRGGBB (gfx_pages_alloc) covering the window rect */
+    int32_t lw, lh;
+    shz_rect_t *rgn;                                /* SetWindowRgn: disjoint rectangles in window coordinates (kmalloc), 0 = none */
+    uint32_t nrgn;
+    uint32_t affinity;                              /* SetWindowDisplayAffinity (stored; there is no capture API to exclude from) */
 };
 
 typedef struct gmsg gmsg_t;
@@ -116,6 +127,8 @@ struct gsend {
     uint32_t sender_tid;                            /* thread id of the blocked sender */
     int state;
     int64_t result;
+    int nowait;                                     /* SendNotifyMessage / SendMessageCallback: nobody waits for the result */
+    uint64_t cookie;                                /* SendMessageCallback: posted back to the sender with the result (0: none) */
 };
 
 typedef struct { int used; uint64_t hwnd, id, proc; uint32_t elapse; uint64_t due; } gtimer_t;
@@ -214,5 +227,10 @@ void gin_queue_gone(gqueue_t *q);                   /* lock held: the queue's th
 void gin_window_gone(uint64_t hwnd);                /* lock held: hot keys registered for the window */
 int32_t gq_post(gqueue_t *q, uint64_t hwnd, uint32_t message, uint64_t wparam, int64_t lparam);   /* lock held: PostMessage */
 extern int32_t g_ptr_x, g_ptr_y;
+
+/* gfx_clip.c: the clipboard */
+int32_t gfx_syscall_clipboard(process_t *cur, uint64_t arg);
+void gclip_window_gone(uint64_t hwnd);              /* lock held: listeners/owner/open window that is destroyed */
+void gclip_queue_gone(gqueue_t *q);                 /* lock held: the thread that had the clipboard open is gone */
 gwin_t *wm_input_hit(int x, int y);                 /* gfx_wm.c: window that receives mouse input at a screen point */
 #endif

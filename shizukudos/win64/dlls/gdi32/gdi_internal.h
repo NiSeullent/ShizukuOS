@@ -54,6 +54,8 @@ typedef struct dc {
     int bkmode, rop2, polyfill, stretchmode, mapmode, textalign, gfxmode;
     POINT pos;
     POINT win_org, vp_org, brush_org;
+    POINT dev_org;                                          /* window DC from GetWindowDC: device (0,0) = window top-left, */
+                                                            /* i.e. -(client origin); 0 for every other DC */
     COLORREF dcpen, dcbrush;
     struct dc *saved;                                       /* SaveDC stack */
     int dirty_valid; RECT dirty;                            /* window DC: not yet presented */
@@ -108,9 +110,12 @@ dc_t *gdi_dc_get(HDC h);
 bitmap_t *gdi_dc_target(dc_t *dc);                          /* the bitmap drawing goes to (allocates a window backing lazily) */
 const rlist_t *gdi_dc_clip(dc_t *dc);                       /* effective clip in device coordinates, bounded by the target */
 void gdi_dc_touch(dc_t *dc, const RECT *dev);               /* record a changed device rectangle (window DCs) */
-static inline int dc_lx(const dc_t *dc, int x) { return x - dc->win_org.x + dc->vp_org.x; }
-static inline int dc_ly(const dc_t *dc, int y) { return y - dc->win_org.y + dc->vp_org.y; }
+static inline int dc_ox(const dc_t *dc) { return dc->vp_org.x - dc->win_org.x + dc->dev_org.x; }   /* logical -> device offset */
+static inline int dc_oy(const dc_t *dc) { return dc->vp_org.y - dc->win_org.y + dc->dev_org.y; }
+static inline int dc_lx(const dc_t *dc, int x) { return x + dc_ox(dc); }
+static inline int dc_ly(const dc_t *dc, int y) { return y + dc_oy(dc); }
 void gdi_window_flush(backing_t *b);
+void gdi_window_dc_flush(dc_t *dc);
 void gdi_forget_backing(backing_t *b);                      /* detach every DC from a backing that is about to be freed */
 
 /* pixels */

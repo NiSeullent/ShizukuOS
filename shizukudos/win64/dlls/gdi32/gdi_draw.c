@@ -489,7 +489,7 @@ DLLAPI BOOL WINAPI FillRgn(HDC hdc, HRGN hrgn, HBRUSH hbr)
     old = dc->brush;
     dc->brush = hbr;
     if (gctx_begin(&g, dc)) {
-        const int dx = dc->vp_org.x - dc->win_org.x, dy = dc->vp_org.y - dc->win_org.y;
+        const int dx = dc_ox(dc), dy = dc_oy(dc);
         for (i = 0; i < rg->rl.n; ++i)
             fill_rect_brush(&g, rg->rl.r[i].left + dx, rg->rl.r[i].top + dy, rg->rl.r[i].right + dx, rg->rl.r[i].bottom + dy);
         gctx_end(&g);

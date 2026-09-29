@@ -213,6 +213,12 @@ static void servicing_remove(gqueue_t *q, gsend_t *s)
 static void send_finish(gsend_t *s, int state, int64_t result)
 {
     gqueue_t *sq;
+    if (s->nowait) {                                        /* nobody waits: hand the result back as a message, or drop it */
+        if (s->cookie && (sq = queue_by_thread_id(s->sender_tid)) != 0)
+            post_to(sq, 0, SHZ_WM_SENDCB, s->cookie, state == GS_DONE ? result : 0);
+        send_release(s);
+        return;
+    }
     if (s->state == GS_ABANDONED) { send_release(s); return; }
     s->state = state;
     s->result = result;
@@ -275,10 +281,13 @@ static int32_t sys_sendmessage(process_t *cur, uint64_t arg)
         r->target = w->q;
         r->sender_tid = q->thread_id;
         r->state = GS_QUEUED;
+        r->nowait = (s.flags & SHZ_SENDF_NOWAIT) != 0;
+        r->cookie = (s.flags & SHZ_SENDF_CALLBACK) ? s.cookie : 0;
         if (w->q->sent_tail) w->q->sent_tail->next = r; else w->q->sent_head = r;
         w->q->sent_tail = r;
         s.id = r->id;
         gq_kick(w->q);
+        if (r->nowait) { s.result_kind = SHZ_SEND_DONE; s.result = 0; goto out; }
     } else {
         r = send_find(s.id);
         if (!r || r->sender_tid != q->thread_id) { st = STATUS_INVALID_PARAMETER; goto out; }
@@ -856,6 +865,7 @@ void gq_purge_window(gwin_t *w)
         }
     }
     gin_window_gone(w->handle);
+    gclip_window_gone(w->handle);
     if (q->track_hwnd == w->handle) { q->track_hwnd = 0; q->track_flags = 0; }
     for (i = 0; i < GFX_MAX_TIMERS; ++i)
         if (q->timers[i].used && q->timers[i].hwnd == w->handle) q->timers[i].used = 0;
@@ -894,9 +904,11 @@ void gq_reap_dead(void)
         for (m = q->head; m; m = mn) { mn = m->next; msg_release(m); }
         for (m = q->in_head; m; m = mn) { mn = m->next; msg_release(m); }
         gin_queue_gone(q);
+        gclip_queue_gone(q);
         for (k = 0; k < GFX_MAX_SENDS; ++k) {                        /* sends made BY the dead thread */
             gsend_t *x = &g_sends[k];
             if (!x->id || x->sender_tid != q->thread_id) continue;
+            if (x->nowait) { x->cookie = 0; continue; }         /* a notification is still delivered; its callback has nobody to go to */
             if (x->state == GS_QUEUED) { send_list_remove(&x->target->sent_head, &x->target->sent_tail, x); send_release(x); }
             else if (x->state == GS_SERVICING) x->state = GS_ABANDONED;
             else send_release(x);

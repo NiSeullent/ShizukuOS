@@ -30,12 +30,15 @@ void gdi_free_pixels(uint32_t *p, uint64_t n, int big)
 }
 
 /* ---------------------------------------------------------------- handle table */
+static unsigned g_nobjs, g_peak_objs;                          /* live non-stock objects (GetGuiResources) */
+
 HGDIOBJ gdi_obj_new(int type, void *p, int stock)
 {
     unsigned i;
     for (i = 1; i < GDI_MAX_OBJECTS; ++i)
         if (!g_objs[i].type) {
             gobj_t *o = &g_objs[i];
+            if (!stock && ++g_nobjs > g_peak_objs) g_peak_objs = g_nobjs;
             o->gen = (uint8_t)(o->gen + 1);
             o->type = (uint8_t)type;
             o->stock = (uint8_t)stock;
@@ -66,7 +69,18 @@ void *gdi_obj_get(HGDIOBJ h, int type, int *type_out)
     return o->p;
 }
 int gdi_obj_type(HGDIOBJ h) { gobj_t *o = obj_slot(h); return o ? o->type : 0; }
-void gdi_obj_free(HGDIOBJ h) { gobj_t *o = obj_slot(h); if (o) { o->type = 0; o->p = 0; o->stock = 0; } }
+void gdi_obj_free(HGDIOBJ h) { gobj_t *o = obj_slot(h); if (o) { if (!o->stock && g_nobjs) --g_nobjs; o->type = 0; o->p = 0; o->stock = 0; } }
+
+/* Private exports for user32 (not Windows APIs). */
+DLLAPI DWORD WINAPI ShzGdiObjectCount(DWORD *peak)
+{
+    DWORD n;
+    GDI_ENTER();
+    n = g_nobjs;
+    if (peak) *peak = g_peak_objs;
+    GDI_LEAVE();
+    return n;
+}
 static int obj_is_stock(HGDIOBJ h) { gobj_t *o = obj_slot(h); return o && o->stock; }
 
 /* A window backing is being freed (the window is gone): DCs that still point at it must not touch it again. */
@@ -426,7 +440,6 @@ DLLAPI BOOL WINAPI DeleteDC(HDC h)
     dc = gdi_dc_get(h);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
     if (dc->hwnd) {                                                 /* window DC: push what was drawn */
-        extern void gdi_window_dc_flush(dc_t *dc);
         gdi_window_dc_flush(dc);
     }
     if (dc->memdc && dc->hbmp) {
@@ -864,11 +877,14 @@ DLLAPI int WINAPI GetDeviceCaps(HDC h, int index)
     case ASPECTX: case ASPECTY: v = 36; break;
     case ASPECTXY: v = 51; break;
     case LOGPIXELSX: case LOGPIXELSY: v = 96; break;
+    case VREFRESH: v = 1; break;                                    /* "the hardware's default refresh rate": the Bochs VBE has none to report */
     case SIZEPALETTE: case NUMRESERVED: v = 0; break;
     case COLORRES: v = 24; break;
     case PHYSICALWIDTH: v = w; break;
     case PHYSICALHEIGHT: v = hh; break;
-    case SHADEBLENDCAPS: v = 0; break;
+    case SHADEBLENDCAPS: v = SB_CONST_ALPHA | SB_PIXEL_ALPHA | SB_PREMULT_ALPHA; break;   /* GdiAlphaBlend */
+    case DESKTOPHORZRES: v = 1024; break;
+    case DESKTOPVERTRES: v = 768; break;
     default: v = 0;
     }
     RET(v);
@@ -899,4 +915,45 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
         }
     }
     return TRUE;
+}
+
+/* The pixels a DC draws into (UpdateLayeredWindow's source): the selected bitmap of a memory DC or a window DC's backing.
+ * The pointer stays valid while the bitmap stays selected; callers hold no GDI lock while they read it. */
+DLLAPI BOOL WINAPI ShzGdiDCBitmap(HDC hdc, const uint32_t **bits, int *w, int *h, int *topdown)
+{
+    dc_t *dc;
+    bitmap_t *b;
+    GDI_ENTER();
+    dc = gdi_dc_get(hdc);
+    b = dc ? gdi_dc_target(dc) : 0;
+    if (!b || !b->bits) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (dc->hwnd) gdi_window_dc_flush(dc);
+    *bits = b->bits;
+    *w = b->w;
+    *h = b->h;
+    *topdown = b->topdown;
+    RET(TRUE);
+}
+
+DLLAPI HWND WINAPI ShzGdiDCWindow(HDC hdc)
+{
+    dc_t *dc;
+    HWND h;
+    GDI_ENTER();
+    dc = gdi_dc_get(hdc);
+    h = dc ? dc->hwnd : 0;
+    RET(h);
+}
+
+/* GetWindowDC: logical (0,0) is the window's top-left corner while the DC keeps drawing into the client backing. */
+DLLAPI BOOL WINAPI ShzGdiSetDeviceOrigin(HDC hdc, int x, int y)
+{
+    dc_t *dc;
+    GDI_ENTER();
+    dc = gdi_dc_get(hdc);
+    if (!dc || dc->memdc) RET(FALSE);
+    dc->dev_org.x = x;
+    dc->dev_org.y = y;
+    dc->eff_valid = 0;
+    RET(TRUE);
 }

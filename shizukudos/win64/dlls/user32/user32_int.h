@@ -13,6 +13,7 @@
 #include "nt.h"
 #include <wingdi.h>                                /* before winuser.h: several winuser.h structures need _WINGDI_ */
 #include <winuser.h>
+#include <winnls.h>
 #include "shzgfx.h"
 
 /* private gdi32 exports (win64/dlls/gdi32/gdi_win.c, gdi_rgn.c) */
@@ -66,4 +67,26 @@ int u32_cursor_count(int delta);                    /* ShowCursor counter (+1/-1
 int u32_icon_argb32(HICON h, uint32_t *out, int *w, int *hh, int *hx, int *hy);
 LRESULT u32_def_mouse(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, int *handled);   /* DefWindowProc: mouse/keyboard parts */
 void u32_sys_move_size(HWND hwnd, WPARAM cmd);      /* DefWindowProc WM_SYSCOMMAND SC_MOVE / SC_SIZE: the modal loop */
+
+/* user32_sys.c */
+void u32_private_message(const shz_msg_t *m);       /* SHZ_WM_SENDCB / SHZ_WM_ASYNCSHOW / SHZ_WM_WINEVENT, consumed by retrieval */
+int u32_muldiv(int a, int b, int c);                /* MulDiv (kernel32 does not export it) */
+int u32_user_object_count(void);                    /* icons/cursors, menus, accelerator tables, hooks of this process */
+/* user32_hook.c */
+void u32_winevent_deliver(void *rec);
+int u32_hook_count(void);
+int u32_call_msg_hooks(MSG *msg, int remove);       /* WH_GETMESSAGE, WH_KEYBOARD, WH_MOUSE: 1 = the hook discarded the message */
+LRESULT u32_call_wndproc_hooked(uint64_t proc, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);   /* WH_CALLWNDPROC(RET) around a send */
+void u32_winevent(DWORD event, HWND hwnd, LONG obj, LONG child);   /* raise a system WinEvent (NotifyWinEvent) */
+LRESULT u32_cbt(int code, WPARAM wp, LPARAM lp);  /* WH_CBT hooks: nonzero = prevent */
+/* user32_dlg.c */
+void u32_register_controls(void);
+int u32_dlg_remember_focus(HWND ctl);            /* SetFocus in a hidden dialog */
+/* user32_icon.c, user32_menu.c */
+int u32_icon_count(void);
+int u32_menu_count(void);
+int u32_accel_count(void);
+/* user32_res.c: resources of a loaded module (hinst NULL = the executable) */
+const void *u32_find_resource(HINSTANCE inst, LPCWSTR type, LPCWSTR name, DWORD *size);
+HICON u32_icon_from_resource(HINSTANCE inst, LPCWSTR name, int cursor, int cx, int cy);
 #endif

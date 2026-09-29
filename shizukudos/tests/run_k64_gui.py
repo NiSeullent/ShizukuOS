@@ -523,6 +523,28 @@ def verify_input_hwptr(img, rep):
 
 INPUT_SCENES = {"input-ptr", "input-noptr", "input-hwptr"}
 
+
+def verify_sys_layer(img, rep):
+    """T_GUI_SYS: four popups over the desktop. The blend formulas are the ones kernel64/gfx_wm.c documents (integer
+    arithmetic, per channel): UpdateLayeredWindow premultiplied src s with alpha a (constant alpha 255): s + d*(255-a)//255;
+    SetLayeredWindowAttributes(LWA_ALPHA a): (p*a + d*(255-a))//255; LWA_COLORKEY: pixels equal to the key show d."""
+    s = Screen()
+
+    def ulw(src, a, d):
+        return tuple(min(255, sc + dc * (255 - a) // 255) for sc, dc in zip(src, d))
+
+    def const_alpha(p, a, d):
+        return tuple((pc * a + dc * (255 - a)) // 255 for pc, dc in zip(p, d))
+    s.fill(100, 100, 200, 240, ulw((255, 0, 0), 255, DESKTOP))            # opaque premultiplied red
+    s.fill(200, 100, 300, 240, ulw((0, 0, 128), 128, DESKTOP))            # blue at alpha 128, premultiplied
+    s.fill(400, 100, 600, 250, const_alpha((255, 255, 255), 128, DESKTOP))  # white window at LWA_ALPHA 128
+    s.fill(400, 300, 600, 450, (0, 160, 0))                               # green window, magenta square keyed out
+    s.fill(450, 350, 550, 400, DESKTOP)
+    s.fill(100, 300, 300, 350, (255, 0, 0))                               # red window shaped by an L-shaped region
+    s.fill(100, 350, 150, 450, (255, 0, 0))
+    compare_screen(img, rep, "sys-layer: per-pixel alpha, constant alpha, colour key and a window region composed over the desktop: "
+                             "whole screen matches", s)
+
 # US layout, scan code set 1 (what the i8042 delivers with translation on): qcode -> (virtual key, scan, extended, char, shifted char)
 US_KEYS = {"shift": (0x10, 0x2A, 0, None, None), "h": (0x48, 0x23, 0, "h", "H"), "i": (0x49, 0x17, 0, "i", "I"),
            "right": (0x27, 0x4D, 1, None, None), "ret": (0x0D, 0x1C, 0, "\r", "\r")}
@@ -596,7 +618,7 @@ def drive_input(q, what):
                 time.sleep(0.2)
 
 
-SCENES = {"input-ptr": verify_input_ptr, "input-noptr": verify_input_noptr, "input-hwptr": verify_input_hwptr,
+SCENES = {"sys-layer": verify_sys_layer, "input-ptr": verify_input_ptr, "input-noptr": verify_input_noptr, "input-hwptr": verify_input_hwptr,
           "fb": verify_fb, "window": verify_window, "z1": verify_z1, "z2": verify_z2, "z3": verify_z3, "z4": verify_z4,
           "orphan1": verify_orphan1, "orphan2": verify_orphan2, "gdi": verify_gdi,
           "c1": verify_c1, "c2": verify_c2, "c3": verify_c3, "c4": verify_c4}

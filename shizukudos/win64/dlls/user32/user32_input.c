@@ -357,7 +357,7 @@ DLLAPI int WINAPI GetKeyboardType(int what)
     }
 }
 
-DLLAPI UINT WINAPI GetKBCodePage(void) { return 437; }
+DLLAPI UINT WINAPI GetKBCodePage(void) { return GetOEMCP(); }
 
 /* the character a key produces with the given modifier state (US layout); 0 if none */
 static WCHAR key_char(UINT vk, const BYTE *state)
@@ -765,7 +765,9 @@ static void move_size_loop(HWND hwnd, int hit)
     case HTBOTTOMRIGHT: edge = WMSZ_BOTTOMRIGHT; break;
     default: break;
     }
+    if (u32_cbt(HCBT_MOVESIZE, (WPARAM)hwnd, (LPARAM)&orig)) return;   /* a CBT hook vetoed it */
     SetCapture(hwnd);
+    u32_winevent(EVENT_SYSTEM_MOVESIZESTART, hwnd, OBJID_WINDOW, CHILDID_SELF);
     SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0);
     cur = orig;
     while (!done && GetCapture() == hwnd && GetMessageW(&msg, 0, 0, 0)) {
@@ -806,6 +808,7 @@ static void move_size_loop(HWND hwnd, int hit)
     }
     if (GetCapture() == hwnd) ReleaseCapture();
     if (IsWindow(hwnd)) SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+    u32_winevent(EVENT_SYSTEM_MOVESIZEEND, hwnd, OBJID_WINDOW, CHILDID_SELF);
 }
 
 LRESULT u32_def_mouse(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, int *handled)

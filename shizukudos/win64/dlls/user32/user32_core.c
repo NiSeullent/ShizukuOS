@@ -70,7 +70,7 @@ LRESULT u32_call(uint64_t proc, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 static void u32_service(const shz_callback_t *cb)
 {
-    const LRESULT r = u32_call(cb->wndproc, U2H(cb->hwnd), cb->message, cb->wparam, (LPARAM)cb->lparam);
+    const LRESULT r = u32_call_wndproc_hooked(cb->wndproc, U2H(cb->hwnd), cb->message, cb->wparam, (LPARAM)cb->lparam);
     NtUserReplyMessage(cb->id, (uint64_t)r);
 }
 
@@ -89,7 +89,7 @@ LRESULT u32_send(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, DWORD timeout_ms, in
         const int32_t st = NtUserSendMessage(&s);
         if (st < 0) { u32_err(st); if (failed) *failed = 1; return 0; }
         switch (s.result_kind) {
-        case SHZ_SEND_SAME_THREAD: return u32_call(s.wndproc, hwnd, msg, wp, lp);
+        case SHZ_SEND_SAME_THREAD: return u32_call_wndproc_hooked(s.wndproc, hwnd, msg, wp, lp);
         case SHZ_SEND_DONE: return (LRESULT)s.result;
         case SHZ_SEND_CALLBACK:
             u32_service(&s.cb);
@@ -143,6 +143,23 @@ static int retrieve(MSG *msg, HWND hwnd, UINT mn, UINT mx, UINT flags)
         if (st < 0) { u32_err(st); return -1; }
         if (g.result == SHZ_GM_RES_CALLBACK) { u32_service(&g.cb); continue; }
         if (g.result == SHZ_GM_RES_NONE) return 0;
+        if (g.msg.message >= SHZ_WM_WINEVENT && g.msg.message <= SHZ_WM_SENDCB) {   /* user32's own: consume, never return */
+            if (!(flags & PM_REMOVE)) {
+                shz_getmsg_t r;
+                for (;;) {                                        /* take exactly this one out (sent messages are served first) */
+                    memset(&r, 0, sizeof r);
+                    r.hwnd = g.msg.hwnd;
+                    r.min = r.max = g.msg.message;
+                    r.flags = PM_REMOVE;
+                    if (NtUserGetMessage(&r) < 0 || r.result != SHZ_GM_RES_CALLBACK) break;
+                    u32_service(&r.cb);
+                }
+                if (r.result != SHZ_GM_RES_MESSAGE) continue;
+                g.msg = r.msg;
+            }
+            u32_private_message(&g.msg);
+            continue;
+        }
         if (g.msg.pad0 & SHZ_MSGF_MOUSE) {                         /* screen-coordinate mouse input: hit test and translate */
             const int rm = (flags & PM_REMOVE) != 0;
             if (!u32_mouse_translate(&g.msg, rm) || ((mn || mx) && (g.msg.message < mn || g.msg.message > mx))) {
@@ -153,7 +170,15 @@ static int retrieve(MSG *msg, HWND hwnd, UINT mn, UINT mx, UINT flags)
         note_message(&g.msg);
         g.msg.pad0 = 0;
         g.msg.pad1 = 0;
-        if (msg) memcpy(msg, &g.msg, sizeof *msg);
+        {
+            MSG m;
+            memcpy(&m, &g.msg, sizeof m);
+            if (u32_call_msg_hooks(&m, (flags & PM_REMOVE) != 0)) {     /* WH_KEYBOARD / WH_MOUSE discarded it */
+                if (flags & PM_REMOVE) continue;
+                return 0;
+            }
+            if (msg) *msg = m;
+        }
         return 1;
     }
 }
@@ -434,12 +459,15 @@ DLLAPI LRESULT WINAPI DefWindowProcW(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_NCHITTEST: return def_nchittest(hwnd, lp);
     case WM_SETTEXT: {
         shz_wnd_t s;
+        int ok;
         memset(&s, 0, sizeof s);
         s.hwnd = H2U(hwnd);
         s.what = SHZ_WS_SET_TEXT;
         s.buf = (uint64_t)lp;
         s.buf_len = lp ? (uint32_t)wcslen((LPCWSTR)lp) : 0;
-        return NtUserWindowSet(&s) >= 0;
+        ok = NtUserWindowSet(&s) >= 0;
+        if (ok) u32_winevent(EVENT_OBJECT_NAMECHANGE, hwnd, OBJID_WINDOW, CHILDID_SELF);
+        return ok;
     }
     case WM_GETTEXT: {
         shz_wnd_t q;

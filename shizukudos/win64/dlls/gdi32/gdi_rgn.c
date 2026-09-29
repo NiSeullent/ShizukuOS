@@ -376,7 +376,7 @@ int gdi_dc_select_region(dc_t *dc, rgn_t *r)
 {
     rl_free(&dc->userclip);
     rl_copy(&dc->userclip, &r->rl);
-    rl_offset(&dc->userclip, dc->vp_org.x - dc->win_org.x, dc->vp_org.y - dc->win_org.y);
+    rl_offset(&dc->userclip, dc_ox(dc), dc_oy(dc));
     dc->has_userclip = 1;
     dc->eff_valid = 0;
     return rl_type(&dc->userclip);
@@ -470,8 +470,8 @@ DLLAPI int WINAPI GetClipBox(HDC hdc, LPRECT out)
     if (!dc || !out) { SetLastError(ERROR_INVALID_HANDLE); RET(ERROR); }
     c = gdi_dc_clip(dc);
     rl_bbox(c, out);
-    out->left -= dc->vp_org.x - dc->win_org.x; out->right -= dc->vp_org.x - dc->win_org.x;
-    out->top -= dc->vp_org.y - dc->win_org.y; out->bottom -= dc->vp_org.y - dc->win_org.y;
+    out->left -= dc_ox(dc); out->right -= dc_ox(dc);
+    out->top -= dc_oy(dc); out->bottom -= dc_oy(dc);
     ty = rl_type(c);
     RET(ty);
 }
@@ -486,7 +486,7 @@ DLLAPI int WINAPI GetClipRgn(HDC hdc, HRGN h)
     if (!dc || !r) { SetLastError(ERROR_INVALID_HANDLE); RET(-1); }
     if (!dc->has_userclip) RET(0);
     rl_copy(&r->rl, &dc->userclip);
-    rl_offset(&r->rl, dc->win_org.x - dc->vp_org.x, dc->win_org.y - dc->vp_org.y);
+    rl_offset(&r->rl, -dc_ox(dc), -dc_oy(dc));
     RET(1);
 }
 

@@ -95,6 +95,15 @@
 #define WS_EX_LAYERED 0x00080000u
 #define STATUS_HOTKEY_TAKEN ((int32_t)0xC0000235)            /* mapped by user32 to ERROR_HOTKEY_ALREADY_REGISTERED */
 
+#define WM_INPUT_ 0x00FFu
+#define RIDEV_REMOVE_ 0x00000001u
+#define RIDEV_NOLEGACY_ 0x00000030u
+#define RIDEV_INPUTSINK_ 0x00000100u
+#define RIDEV_EXINPUTSINK_ 0x00001000u
+#define RI_KEY_BREAK_ 1u
+#define RI_KEY_E0_ 2u
+#define RI_KEY_E1_ 4u
+
 int32_t g_ptr_x, g_ptr_y;
 static int ptr_live;                                        /* a pointing event happened: the sprite is drawn */
 static uint8_t g_async[256], g_pressed[256];
@@ -347,6 +356,61 @@ static int hotkey_fire(uint8_t vk, int repeat)
     return 0;
 }
 
+/* ---------------------------------------------------------------- raw input (RegisterRawInputDevices) */
+/* Registrations are per process (as on Windows) for the keyboard and the mouse; every event produces one record in a
+ * ring and a WM_INPUT(RIM_INPUT / RIM_INPUTSINK, HRAWINPUT) posted to the registered target window, or to the focus
+ * window of the process when no target was given and it owns the foreground. RIDEV_NOLEGACY suppresses the ordinary
+ * key/mouse messages for the foreground process. Records are kept until GIN_RAWRING newer ones overwrite them. */
+#define GIN_RAWREG 32
+#define GIN_RAWRING 256
+typedef struct { int used; uint32_t pid, dev, flags; uint64_t target; } grawreg_t;
+static grawreg_t g_rawreg[GIN_RAWREG];
+static shz_rawrec_t g_raw[GIN_RAWRING];
+static uint32_t g_raw_ids[GIN_RAWRING];
+static uint32_t g_raw_next = 1;
+static int g_injecting;                                     /* inside SendInput: raw records have no device handle */
+
+static int raw_nolegacy(uint32_t dev)
+{
+    unsigned i;
+    if (!g_fg_q) return 0;
+    for (i = 0; i < GIN_RAWREG; ++i)
+        if (g_rawreg[i].used && g_rawreg[i].dev == dev && g_rawreg[i].pid == g_fg_q->pid && (g_rawreg[i].flags & RIDEV_NOLEGACY_)) return 1;
+    return 0;
+}
+
+static void raw_post(uint32_t dev, shz_rawrec_t *rec)
+{
+    unsigned i;
+    rec->device = g_injecting ? 0 : (dev == SHZ_RAW_KEYBOARD ? SHZ_RAW_HANDLE_KEYBOARD : SHZ_RAW_HANDLE_MOUSE);
+    for (i = 0; i < GIN_RAWREG; ++i) {
+        grawreg_t *r = &g_rawreg[i];
+        const int fg = g_fg_q && g_fg_q->pid == r->pid;
+        gwin_t *w;
+        uint32_t id, slot;
+        if (!r->used || r->dev != dev) continue;
+        if (!fg && !(r->flags & (RIDEV_INPUTSINK_ | RIDEV_EXINPUTSINK_))) continue;
+        w = r->target ? wm_lookup(r->target) : 0;
+        if (r->target && !w) { r->used = 0; continue; }             /* the target window is gone */
+        if (!w && fg) { w = wm_lookup(g_fg_q->focus); if (!w) w = wm_lookup(g_fg_q->active); }
+        if (!w || !w->q) continue;
+        id = g_raw_next++;
+        if (!g_raw_next) g_raw_next = 1;
+        slot = id % GIN_RAWRING;
+        rec->wparam = fg ? 0u : 1u;                                 /* RIM_INPUT / RIM_INPUTSINK */
+        g_raw[slot] = *rec;
+        g_raw_ids[slot] = id;
+        gq_post(w->q, w->handle, WM_INPUT_, rec->wparam, (int64_t)id);
+    }
+}
+
+static void raw_any(uint32_t dev, int *have)
+{
+    unsigned i;
+    *have = 0;
+    for (i = 0; i < GIN_RAWREG; ++i) if (g_rawreg[i].used && g_rawreg[i].dev == dev) *have = 1;
+}
+
 /* ---------------------------------------------------------------- keyboard */
 /* Scan code (set 1, without prefix) -> virtual key, as the keyboard layout (win64/include/shzkbd.h) sees it right now. */
 static uint8_t scan_to_vk(uint8_t sc, int ext)
@@ -390,10 +454,26 @@ static void key_input(uint8_t vk, uint16_t scan, int ext, int up, uint32_t extra
     note_input();
     if (!up) g_pressed[vk] = g_pressed[gen] = 1;
     state_key(g_async, vk, !up);
-    if (!up && hotkey_fire(gen, was_down)) return;
     alt = up ? alt_before : is_down(VK_MENU);
     sys = !is_down(VK_CONTROL) && (alt || gen == VK_F10);
     msg = up ? (sys ? WM_SYSKEYUP : WM_KEYUP) : (sys ? WM_SYSKEYDOWN : WM_KEYDOWN);
+    {
+        int have;
+        raw_any(SHZ_RAW_KEYBOARD, &have);
+        if (have) {
+            shz_rawrec_t r;
+            memset(&r, 0, sizeof r);
+            r.type = 1;
+            r.kb_make = scan & 0xff;
+            r.kb_flags = (uint16_t)((up ? RI_KEY_BREAK_ : 0) | (ext ? RI_KEY_E0_ : 0) | (vk == VK_PAUSE ? RI_KEY_E1_ : 0));
+            r.kb_vkey = gen;
+            r.kb_message = msg;
+            r.extra = extra;
+            raw_post(SHZ_RAW_KEYBOARD, &r);
+        }
+    }
+    if (!up && hotkey_fire(gen, was_down)) return;
+    if (raw_nolegacy(SHZ_RAW_KEYBOARD)) return;
     lp = 1u | ((uint32_t)(scan & 0xff) << 16) | ((uint32_t)(ext != 0) << 24) | ((sys && alt) ? 1u << 29 : 0) |
          ((up || was_down) ? 1u << 30 : 0) | (up ? 1u << 31 : 0);
     post_key(msg, gen, lp, extra);
@@ -521,7 +601,37 @@ static void mouse_input(int32_t dx, int32_t dy, int absolute, uint32_t buttons, 
         { MK_MBUTTON, WM_MBUTTONDOWN, WM_MBUTTONUP, VK_MBUTTON, 0 }, { MK_XBUTTON1, WM_XBUTTONDOWN, WM_XBUTTONUP, VK_XBUTTON1, 1 },
         { MK_XBUTTON2, WM_XBUTTONDOWN, WM_XBUTTONUP, VK_XBUTTON2, 2 } };
     unsigned i;
+    int have, legacy;
     note_input();
+    raw_any(SHZ_RAW_MOUSE, &have);
+    if (have) {                                             /* the event as the device reported it */
+        static const uint16_t rdown[5] = { 0x0001, 0x0004, 0x0010, 0x0040, 0x0100 }, rup[5] = { 0x0002, 0x0008, 0x0020, 0x0080, 0x0200 };
+        static const uint32_t mk[5] = { MK_LBUTTON, MK_RBUTTON, MK_MBUTTON, MK_XBUTTON1, MK_XBUTTON2 };
+        shz_rawrec_t r;
+        memset(&r, 0, sizeof r);
+        r.type = 0;
+        r.ms_flags = absolute ? 1 : 0;                      /* MOUSE_MOVE_ABSOLUTE / MOUSE_MOVE_RELATIVE */
+        r.ms_x = absolute ? (int32_t)(((int64_t)dx << 16) / (int64_t)(g_fb.width ? g_fb.width : 1)) : dx;
+        r.ms_y = absolute ? (int32_t)(((int64_t)dy << 16) / (int64_t)(g_fb.height ? g_fb.height : 1)) : dy;
+        for (i = 0; i < 5; ++i)
+            if (((buttons ^ g_buttons) & mk[i])) r.ms_button_flags |= (buttons & mk[i]) ? rdown[i] : rup[i];
+        if (wheel) { r.ms_button_flags |= 0x0400; r.ms_button_data = (int16_t)wheel; }        /* RI_MOUSE_WHEEL */
+        else if (hwheel) { r.ms_button_flags |= 0x0800; r.ms_button_data = (int16_t)hwheel; } /* RI_MOUSE_HWHEEL */
+        r.ms_buttons = buttons;
+        r.extra = extra;
+        raw_post(SHZ_RAW_MOUSE, &r);
+    }
+    legacy = !raw_nolegacy(SHZ_RAW_MOUSE);
+    if (!legacy) {                                          /* the pointer still moves; no mouse messages are posted */
+        int32_t x = absolute ? dx : g_ptr_x + dx, y = absolute ? dy : g_ptr_y + dy;
+        clamp_pointer(&x, &y);
+        ptr_live = 1;
+        g_ptr_x = x;
+        g_ptr_y = y;
+        pointer_update();
+        g_buttons = buttons;
+        return;
+    }
     move_pointer_to(absolute ? dx : g_ptr_x + dx, absolute ? dy : g_ptr_y + dy, extra);
     for (i = 0; i < 5; ++i) {
         const int now = (buttons & btn[i].mk) != 0;
@@ -670,7 +780,15 @@ void gin_windows_changed(void)
 }
 
 /* ---------------------------------------------------------------- SendInput */
+static void inject_one(const shz_inrec_t *r);
 static void inject(const shz_inrec_t *r)
+{
+    g_injecting = 1;
+    inject_one(r);
+    g_injecting = 0;
+}
+
+static void inject_one(const shz_inrec_t *r)
 {
     if (r->type == 1) {                                     /* keyboard */
         const int up = (r->flags & 2u) != 0;
@@ -871,6 +989,46 @@ int32_t gfx_syscall_input(process_t *cur, uint64_t arg)
         }
         break;
     }
+    case SHZ_IN_RAWREGISTER: {
+        const uint32_t dev = (uint32_t)in.a, pid = (uint32_t)cur->pid;
+        unsigned i;
+        grawreg_t *slot = 0;
+        if (dev != SHZ_RAW_KEYBOARD && dev != SHZ_RAW_MOUSE) { st = STATUS_INVALID_PARAMETER; break; }
+        if (in.c) {
+            gwin_t *w = wm_lookup((uint64_t)in.c);
+            if (!w) { st = STATUS_INVALID_HANDLE; break; }
+            if (w->pid != pid) { st = STATUS_ACCESS_DENIED; break; }
+        } else if (in.b & (RIDEV_INPUTSINK_ | RIDEV_EXINPUTSINK_)) { st = STATUS_INVALID_PARAMETER; break; }   /* a sink needs a target */
+        for (i = 0; i < GIN_RAWREG; ++i) if (g_rawreg[i].used && g_rawreg[i].pid == pid && g_rawreg[i].dev == dev) slot = &g_rawreg[i];
+        if (in.b & RIDEV_REMOVE_) {
+            if (!slot) { st = STATUS_INVALID_PARAMETER; break; }
+            slot->used = 0;
+            break;
+        }
+        for (i = 0; i < GIN_RAWREG && !slot; ++i) if (!g_rawreg[i].used) slot = &g_rawreg[i];
+        if (!slot) { st = STATUS_NO_MEMORY; break; }
+        slot->used = 1; slot->pid = pid; slot->dev = dev; slot->flags = (uint32_t)in.b; slot->target = (uint64_t)in.c;
+        break;
+    }
+    case SHZ_IN_RAWGET: {
+        const uint32_t id = (uint32_t)in.a, slot = id % GIN_RAWRING;
+        if (!id || g_raw_ids[slot] != id) { st = STATUS_INVALID_HANDLE; break; }
+        if (in.buf_len < sizeof(shz_rawrec_t) || copy_to_user(cur, in.buf, &g_raw[slot], sizeof(shz_rawrec_t))) st = STATUS_ACCESS_VIOLATION;
+        break;
+    }
+    case SHZ_IN_RAWLIST: {
+        uint64_t targets[2] = { 0, 0 };
+        unsigned i;
+        for (i = 0; i < GIN_RAWREG; ++i)
+            if (g_rawreg[i].used && g_rawreg[i].pid == (uint32_t)cur->pid) {
+                const int k = g_rawreg[i].dev == SHZ_RAW_MOUSE;
+                in.out0 |= g_rawreg[i].dev;
+                in.out1 |= (uint64_t)g_rawreg[i].flags << (k ? 32 : 0);
+                targets[k] = g_rawreg[i].target;
+            }
+        if (in.buf && (in.buf_len < sizeof targets || copy_to_user(cur, in.buf, targets, sizeof targets))) st = STATUS_ACCESS_VIOLATION;
+        break;
+    }
     default: st = STATUS_INVALID_PARAMETER;
     }
 out:
@@ -893,4 +1051,6 @@ void gin_window_gone(uint64_t hwnd)
     unsigned i;
     for (i = 0; i < GIN_HOTKEYS; ++i)
         if (g_hot[i].used && g_hot[i].hwnd == hwnd) g_hot[i].used = 0;
+    for (i = 0; i < GIN_RAWREG; ++i)
+        if (g_rawreg[i].used && g_rawreg[i].target == hwnd) g_rawreg[i].used = 0;
 }

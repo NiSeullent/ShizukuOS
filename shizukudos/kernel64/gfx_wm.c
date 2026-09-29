@@ -45,8 +45,20 @@
  *  Input.     PS/2 keyboard and mouse (gfx_input.c) are routed as input messages to the focus window / the window under
  *             the pointer (or the capture window); the compositor draws the pointer sprite last.
  *
- *  Not implemented: menus, layered/transparent windows, regions as window shapes, multiple monitors, cross-process
- *  SendMessage, WM_NCCALCSIZE customisation (client size follows shz_nc_insets()).
+ *  Layers.    A top-level WS_EX_LAYERED window is not drawn until it gets content: SetLayeredWindowAttributes (mode 1) draws
+ *             it normally and then mixes it with what lies below it (constant alpha; the colour key makes pixels of the
+ *             window that have exactly that colour transparent), UpdateLayeredWindow (mode 2) replaces the WHOLE window
+ *             rectangle (frame, client and children) by a bitmap the application supplies, blended with its per-pixel
+ *             premultiplied alpha and/or a constant alpha, or keyed. Colour-keyed and fully transparent pixels let mouse
+ *             input through, as does WS_EX_LAYERED|WS_EX_TRANSPARENT. The two modes exclude each other until the layered
+ *             style is removed. Child windows with WS_EX_LAYERED are drawn like ordinary children.
+ *  Regions.   SetWindowRgn clips the window (its frame, client area and children) and its hit testing to a set of
+ *             rectangles in window coordinates.
+ *  Readback.  NtUserWindowOp(PRINT) composes one window alone into a caller buffer (PrintWindow): the compositor draws
+ *             into a selectable target, the back buffer being the usual one.
+ *
+ *  Not implemented: menus, multiple monitors, cross-process SendMessage, WM_NCCALCSIZE customisation (client size
+ *  follows shz_nc_insets()).
  */
 #include "gfx.h"
 
@@ -189,16 +201,24 @@ int wm_screen_rect(gwin_t *w, shz_rect_t *r)
 }
 
 /* ---------------------------------------------------------------- compositor */
+/* Where the compositor draws: the back buffer, or a caller's buffer for NtUserWindowOp(PRINT). Coordinates are target
+ * pixels; every clip rectangle handed down is already inside the target. */
+static uint32_t *tgt_px;
+static uint32_t tgt_w, tgt_h;
+static void tgt_backbuffer(void) { tgt_px = g_fb.back; tgt_w = g_fb.width; tgt_h = g_fb.height; }
+static inline uint32_t *tgt_at(int x, int y) { return tgt_px + (uint64_t)(uint32_t)y * tgt_w + (uint32_t)x; }
+
 static int is_active_root(const gwin_t *w) { return g_fg_q && g_fg_q->active == w->handle; }
 
 static void fillc(int l, int t, int r, int b, uint32_t c, const shz_rect_t *clip)
 {
     shz_rect_t q = { l, t, r, b }, o;
-    int x, y;
+    int y;
     if (!rc_isect(&q, clip, &o)) return;
     for (y = o.top; y < o.bottom; ++y) {
-        uint32_t *p = g_fb.back + (uint64_t)y * g_fb.width + (uint32_t)o.left;
-        for (x = o.left; x < o.right; ++x) *p++ = c;
+        uint32_t *p = tgt_at(o.left, y);
+        uint64_t n = (uint64_t)(o.right - o.left);
+        __asm__ volatile("rep stosl" : "+D"(p), "+c"(n) : "a"(c) : "memory");
     }
 }
 
@@ -237,7 +257,7 @@ static void draw_nc(gwin_t *w, int ox, int oy, const shz_rect_t *clip)
         if (w->title_len) {
             shz_rect_t cap = { cl, ct, cr, cb }, o;
             if (rc_isect(&cap, clip, &o))
-                gfx_text(g_fb.back, (int)g_fb.width, (int)g_fb.width, (int)g_fb.height, cl + 4, ct + 1, w->title, w->title_len,
+                gfx_text(tgt_px, (int)tgt_w, (int)tgt_w, (int)tgt_h, cl + 4, ct + 1, w->title, w->title_len,
                          active ? CAP_TEXT_ACTIVE : CAP_TEXT_INACTIVE, o.left, o.top, o.right, o.bottom);
         }
     }
@@ -254,38 +274,142 @@ static void blit_surface(const uint32_t *src, int sw, int sh, int ox, int oy, co
     if (!src || !rc_isect(&sr, clip, &o)) return;
     for (y = o.top; y < o.bottom; ++y) {
         const uint32_t *s = src + (uint64_t)(y - oy) * (uint32_t)sw + (uint32_t)(o.left - ox);
-        uint32_t *d = g_fb.back + (uint64_t)y * g_fb.width + (uint32_t)o.left;
+        uint32_t *d = tgt_at(o.left, y);
         uint64_t n = (uint64_t)(o.right - o.left);
         __asm__ volatile("rep movsl" : "+D"(d), "+S"(s), "+c"(n) :: "memory");
     }
 }
 
+#define WS_EX_LAYERED_ 0x00080000u
+#define WS_EX_TRANSPARENT_ 0x00000020u
+#define LWA_COLORKEY_ 1u
+#define LWA_ALPHA_ 2u
+#define ULW_COLORKEY_ 1u
+#define ULW_ALPHA_ 2u
+static int is_layered(const gwin_t *w) { return (w->exstyle & WS_EX_LAYERED_) && w->parent == DESKTOP; }
+
+static uint32_t *g_under;                                           /* mode 1: what was below the window (screen sized) */
+
+/* Mode 2: the application's bitmap over the target, blended as UpdateLayeredWindow defines it. */
+static void blend_layer(const gwin_t *w, int ox, int oy, const shz_rect_t *clip)
+{
+    shz_rect_t lr = { ox, oy, ox + w->lw, oy + w->lh }, o;
+    const uint32_t k = (w->lflags & ULW_ALPHA_) ? w->lalpha : 255;
+    int x, y;
+    if (!w->layer || !rc_isect(&lr, clip, &o)) return;
+    for (y = o.top; y < o.bottom; ++y) {
+        const uint32_t *s = w->layer + (uint64_t)(y - oy) * (uint32_t)w->lw + (uint32_t)(o.left - ox);
+        uint32_t *d = tgt_at(o.left, y);
+        for (x = o.left; x < o.right; ++x, ++s, ++d) {
+            const uint32_t p = *s, q = *d;
+            uint32_t a, r, g, b;
+            if ((w->lflags & ULW_COLORKEY_) && (p & 0x00ffffffu) == w->lkey) continue;
+            if (w->lppa) {                                          /* premultiplied: d = s*k + d*(1 - a*k) */
+                a = (p >> 24) * k / 255;
+                r = ((p >> 16) & 255) * k / 255 + ((q >> 16) & 255) * (255 - a) / 255;
+                g = ((p >> 8) & 255) * k / 255 + ((q >> 8) & 255) * (255 - a) / 255;
+                b = (p & 255) * k / 255 + (q & 255) * (255 - a) / 255;
+            } else if (k == 255) {
+                *d = p & 0x00ffffffu;
+                continue;
+            } else {
+                r = (((p >> 16) & 255) * k + ((q >> 16) & 255) * (255 - k)) / 255;
+                g = (((p >> 8) & 255) * k + ((q >> 8) & 255) * (255 - k)) / 255;
+                b = ((p & 255) * k + (q & 255) * (255 - k)) / 255;
+            }
+            *d = (r > 255 ? 255 : r) << 16 | (g > 255 ? 255 : g) << 8 | (b > 255 ? 255 : b);
+        }
+    }
+}
+
+static void compose_plain(gwin_t *w, int ox, int oy, const shz_rect_t *c);
+
+/* one window (and its children) inside `clip`, honouring its region and its layering */
 static void compose_win(gwin_t *w, int ox, int oy, const shz_rect_t *clip)
 {
-    shz_rect_t wr = { ox, oy, ox + w->w, oy + w->h }, c, cr, cc;
-    gwin_t *ch;
-    int cx, cy;
+    shz_rect_t wr = { ox, oy, ox + w->w, oy + w->h }, c;
     if (w->msgonly || !(w->style & SHZ_WS_VISIBLE) || (w->style & SHZ_WS_MINIMIZE)) return;
     if (!rc_isect(clip, &wr, &c)) return;
-    draw_nc(w, ox, oy, &c);
+    if (w->rgn) {                                                   /* SetWindowRgn: compose once per region rectangle */
+        uint32_t i;
+        shz_rect_t *rg = w->rgn;
+        const uint32_t n = w->nrgn;
+        w->rgn = 0;
+        for (i = 0; i < n; ++i) {
+            shz_rect_t rr = { ox + rg[i].left, oy + rg[i].top, ox + rg[i].right, oy + rg[i].bottom }, cc;
+            if (rc_isect(&rr, &c, &cc)) compose_win(w, ox, oy, &cc);
+        }
+        w->rgn = rg;
+        return;
+    }
+    if (is_layered(w) && tgt_px == g_fb.back) {
+        if (w->lmode == 2) { blend_layer(w, ox, oy, &c); return; }
+        if (w->lmode == 1 && g_under) {
+            int x, y;
+            for (y = c.top; y < c.bottom; ++y)
+                memcpy(g_under + (uint64_t)y * g_fb.width + (uint32_t)c.left, tgt_at(c.left, y), (size_t)(c.right - c.left) * 4);
+            compose_plain(w, ox, oy, &c);
+            for (y = c.top; y < c.bottom; ++y) {
+                const uint32_t *u = g_under + (uint64_t)y * g_fb.width + (uint32_t)c.left;
+                uint32_t *d = tgt_at(c.left, y);
+                for (x = c.left; x < c.right; ++x, ++u, ++d) {
+                    const uint32_t p = *d, q = *u, a = w->lalpha;
+                    if ((w->lflags & LWA_COLORKEY_) && (p & 0x00ffffffu) == w->lkey) { *d = q; continue; }
+                    if (!(w->lflags & LWA_ALPHA_) || a == 255) continue;
+                    *d = (((p >> 16 & 255) * a + (q >> 16 & 255) * (255 - a)) / 255) << 16 |
+                         (((p >> 8 & 255) * a + (q >> 8 & 255) * (255 - a)) / 255) << 8 | (((p & 255) * a + (q & 255) * (255 - a)) / 255);
+                }
+            }
+            return;
+        }
+        return;                                                     /* layered without content yet: invisible, as on Windows */
+    }
+    compose_plain(w, ox, oy, &c);
+}
+
+static void compose_plain(gwin_t *w, int ox, int oy, const shz_rect_t *c)
+{
+    shz_rect_t cr, cc;
+    gwin_t *ch;
+    int cx, cy;
+    draw_nc(w, ox, oy, c);
     cx = ox + w->ncl;
     cy = oy + w->nct;
     cr.left = cx; cr.top = cy; cr.right = cx + client_w(w); cr.bottom = cy + client_h(w);
-    if (!rc_isect(&c, &cr, &cc)) return;
+    if (!rc_isect(c, &cr, &cc)) return;
     blit_surface(w->surf, w->sw, w->sh, cx, cy, &cc);
     for (ch = w->child; ch && ch->next; ch = ch->next) { }          /* bottom-most child first */
     for (; ch; ch = ch->prev)
         compose_win(ch, cx + ch->x, cy + ch->y, &cc);
 }
 
+/* Does w, composed normally, paint every pixel of r (screen) opaquely? Then nothing below it needs drawing. */
+static int covers_opaquely(const gwin_t *w, const shz_rect_t *r)
+{
+    if (w->msgonly || !(w->style & SHZ_WS_VISIBLE) || (w->style & SHZ_WS_MINIMIZE) || w->rgn || is_layered(w)) return 0;
+    return r->left >= w->x && r->top >= w->y && r->right <= w->x + w->w && r->bottom <= w->y + w->h;
+}
+
 void wm_damage(const shz_rect_t *r0)
 {
     shz_rect_t scr = { 0, 0, (int32_t)g_fb.width, (int32_t)g_fb.height }, r;
-    gwin_t *w;
+    gwin_t *w, *top = 0;
     if (!g_fb.ready || !rc_isect(r0, &scr, &r)) return;
-    if (DESKTOP->surf) blit_surface(DESKTOP->surf, DESKTOP->sw, DESKTOP->sh, 0, 0, &r);
-    else fillc(r.left, r.top, r.right, r.bottom, SHZ_DESKTOP_RGB, &r);
-    for (w = DESKTOP->child; w && w->next; w = w->next) { }
+    tgt_backbuffer();
+    if (!g_under) {
+        uint64_t i;
+        for (i = 1; i < GFX_MAX_WINDOWS; ++i)
+            if (g_win[i].used && (g_win[i].exstyle & WS_EX_LAYERED_)) { g_under = gfx_pages_alloc((uint64_t)g_fb.width * g_fb.height * 4); break; }
+    }
+    for (w = DESKTOP->child; w; w = w->next)                        /* occlusion: start at the topmost window covering r */
+        if (covers_opaquely(w, &r)) { top = w; break; }
+    if (!top) {
+        if (DESKTOP->surf) blit_surface(DESKTOP->surf, DESKTOP->sw, DESKTOP->sh, 0, 0, &r);
+        else fillc(r.left, r.top, r.right, r.bottom, SHZ_DESKTOP_RGB, &r);
+        for (w = DESKTOP->child; w && w->next; w = w->next) { }
+    } else {
+        w = top;
+    }
     for (; w; w = w->prev)
         compose_win(w, w->x, w->y, &r);
     gin_draw_pointer(&r);
@@ -444,8 +568,18 @@ static void resize_invalidate(gwin_t *w, int32_t ocw, int32_t och, int all)
     if (n) gq_invalidate(w, rc, n, SHZ_INV_ERASE);
 }
 
+static void layer_free(gwin_t *w)
+{
+    if (w->layer) gfx_pages_free(w->layer, (uint64_t)w->lw * (uint64_t)w->lh * 4);
+    w->layer = 0;
+    w->lw = w->lh = 0;
+}
+
 static void free_window_memory(gwin_t *w)
 {
+    layer_free(w);
+    if (w->rgn) kfree(w->rgn);
+    w->rgn = 0;
     if (w->surf) gfx_pages_free(w->surf, (uint64_t)w->sw * (uint64_t)w->sh * 4);
     if (w->title) kfree(w->title);
     if (w->extra) kfree(w->extra);
@@ -873,7 +1007,11 @@ static int32_t sys_wset(process_t *cur, uint64_t arg)
         const int was = wm_is_visible(w) && wm_screen_rect(w, &before);
         const int32_t ocw = client_w(w), och = client_h(w);
         if (s.what == SHZ_WS_SET_STYLE) { s.v1 = w->style; w->style = (uint32_t)s.v0; }
-        else { s.v1 = w->exstyle; w->exstyle = (uint32_t)s.v0; }
+        else {
+            s.v1 = w->exstyle;
+            w->exstyle = (uint32_t)s.v0;
+            if (!(w->exstyle & WS_EX_LAYERED_)) { layer_free(w); w->lmode = 0; w->lflags = 0; }   /* leaving layered mode resets it */
+        }
         if (w->msgonly) w->style &= ~SHZ_WS_VISIBLE;
         st = win_apply_size(w, w->w, w->h, 0);
         if (!st && (client_w(w) != ocw || client_h(w) != och)) resize_invalidate(w, ocw, och, 1);
@@ -1179,6 +1317,33 @@ done:
     return st;
 }
 
+/* The point (x,y) lies in c's rectangle (c at screen (cx,cy)); is c transparent there (window region, layering)? */
+static int hit_transparent(const gwin_t *c, int cx, int cy, int x, int y)
+{
+    const int wx = x - cx, wy = y - cy;
+    if (c->rgn) {
+        uint32_t i;
+        int in = 0;
+        for (i = 0; i < c->nrgn && !in; ++i)
+            in = wx >= c->rgn[i].left && wx < c->rgn[i].right && wy >= c->rgn[i].top && wy < c->rgn[i].bottom;
+        if (!in) return 1;
+    }
+    if (!is_layered(c)) return 0;
+    if (c->lmode == 0) return 1;
+    if (c->lmode == 2) {
+        uint32_t p;
+        if (!c->layer || wx >= c->lw || wy >= c->lh) return 1;
+        p = c->layer[(uint64_t)wy * (uint32_t)c->lw + (uint32_t)wx];
+        if ((c->lflags & ULW_COLORKEY_) && (p & 0x00ffffffu) == c->lkey) return 1;
+        return c->lppa && (p >> 24) == 0;
+    }
+    if ((c->lflags & LWA_ALPHA_) && c->lalpha == 0) return 1;
+    if ((c->lflags & LWA_COLORKEY_) && c->surf && wx >= c->ncl && wy >= c->nct && wx - c->ncl < c->sw && wy - c->nct < c->sh &&
+        (c->surf[(uint64_t)(wy - c->nct) * (uint32_t)c->sw + (uint32_t)(wx - c->ncl)] & 0x00ffffffu) == c->lkey)
+        return 1;                                                   /* the window's own client pixel (children not considered) */
+    return 0;
+}
+
 static gwin_t *hit_test(gwin_t *parent, int ox, int oy, int x, int y)
 {
     gwin_t *c;
@@ -1187,6 +1352,7 @@ static gwin_t *hit_test(gwin_t *parent, int ox, int oy, int x, int y)
         gwin_t *r;
         if (c->msgonly || !(c->style & SHZ_WS_VISIBLE) || (c->style & SHZ_WS_MINIMIZE)) continue;
         if (x < cx || y < cy || x >= cx + c->w || y >= cy + c->h) continue;
+        if (hit_transparent(c, cx, cy, x, y)) continue;
         if (x >= cx + c->ncl && y >= cy + c->nct && x < cx + c->ncl + client_w(c) && y < cy + c->nct + client_h(c) &&
             (r = hit_test(c, cx + c->ncl, cy + c->nct, x, y)))
             return r;
@@ -1197,8 +1363,6 @@ static gwin_t *hit_test(gwin_t *parent, int ox, int oy, int x, int y)
 
 /* The window that gets mouse input at a screen point: like hit_test, but disabled child windows are skipped (the point
  * belongs to what is below them, as on Windows) and WS_EX_LAYERED|WS_EX_TRANSPARENT windows are click-through. */
-#define WS_EX_TRANSPARENT_ 0x00000020u
-#define WS_EX_LAYERED_ 0x00080000u
 static gwin_t *input_hit(gwin_t *parent, int ox, int oy, int x, int y)
 {
     gwin_t *c;
@@ -1209,6 +1373,7 @@ static gwin_t *input_hit(gwin_t *parent, int ox, int oy, int x, int y)
         if ((c->exstyle & (WS_EX_TRANSPARENT_ | WS_EX_LAYERED_)) == (WS_EX_TRANSPARENT_ | WS_EX_LAYERED_)) continue;
         if (parent != DESKTOP && (c->style & SHZ_WS_DISABLED)) continue;
         if (x < cx || y < cy || x >= cx + c->w || y >= cy + c->h) continue;
+        if (hit_transparent(c, cx, cy, x, y)) continue;
         if (x >= cx + c->ncl && y >= cy + c->nct && x < cx + c->ncl + client_w(c) && y < cy + c->nct + client_h(c) &&
             (r = input_hit(c, cx + c->ncl, cy + c->nct, x, y)))
             return r;
@@ -1236,6 +1401,17 @@ static int32_t sys_atom(process_t *cur, uint64_t arg)
     uint16_t nm[64];
     int32_t st;
     if (copy_from_user(cur, &a, arg, sizeof a)) return STATUS_ACCESS_VIOLATION;
+    if (a.op == SHZ_ATOM_GETNAME) {                                    /* atom -> name (GetClipboardFormatName) */
+        const uint32_t i = a.atom - GFX_ATOM_BASE;
+        uint32_t n = 0;
+        mutex_lock(&gfx_lock);
+        if (a.atom < GFX_ATOM_BASE || i >= GFX_MAX_ATOMS || !g_atoms[i].used) st = STATUS_INVALID_PARAMETER;
+        else st = copy_units(cur, a.name, a.name_len, g_atoms[i].name, g_atoms[i].len, &n);
+        mutex_unlock(&gfx_lock);
+        a.name_len = n;
+        if (!st && copy_to_user(cur, arg, &a, sizeof a)) return STATUS_ACCESS_VIOLATION;
+        return st;
+    }
     st = read_name(cur, a.name, a.name_len, nm);
     if (st) return st;
     mutex_lock(&gfx_lock);
@@ -1321,6 +1497,164 @@ int32_t gfx_syscall_present(process_t *cur, uint64_t arg)
     }
 done:
     mutex_unlock(&gfx_lock);
+    return st;
+}
+
+/* ---------------------------------------------------------------- NtUserWindowOp: layers, regions, readback */
+#define WOP_MAX_RGN 256
+#define ULW_POS_MOVE 1u
+#define ULW_POS_SIZE 2u
+#define ULW_POS_PPA 4u
+
+static int32_t winop_update_layered(process_t *cur, gwin_t *w, shz_winop_t *o)
+{
+    shz_rect_t before, after, dirty;
+    const int was = wm_is_visible(w) && wm_screen_rect(w, &before);
+    int32_t nw = w->w, nh = w->h, y;
+    int32_t st;
+    if (!is_layered(w) || w->lmode == 1) return STATUS_INVALID_PARAMETER;   /* not layered, or in attribute mode */
+    if (o->pos_flags & ULW_POS_SIZE) {
+        if (o->w <= 0 || o->h <= 0) return STATUS_INVALID_PARAMETER;
+        nw = o->w; nh = o->h;
+    }
+    if ((uint64_t)nw * (uint64_t)nh * 4 > GFX_MAX_SURF_BYTES) return STATUS_NO_MEMORY;
+    if (!o->bits && (!w->layer || nw != w->lw || nh != w->lh)) return STATUS_INVALID_PARAMETER;   /* a new size needs pixels */
+    if (nw != w->w || nh != w->h) {
+        st = win_apply_size(w, nw, nh, 0);
+        if (st) return st;
+    }
+    if (!w->layer || w->lw != nw || w->lh != nh) {
+        uint32_t *nl = gfx_pages_alloc((uint64_t)nw * (uint64_t)nh * 4);
+        if (!nl) return STATUS_NO_MEMORY;
+        layer_free(w);
+        w->layer = nl;
+        w->lw = nw;
+        w->lh = nh;
+        o->dirty.left = o->dirty.top = o->dirty.right = o->dirty.bottom = 0;   /* a new bitmap: everything is new */
+    }
+    if (o->pos_flags & ULW_POS_MOVE) { w->x = o->x; w->y = o->y; }
+    w->lmode = 2;
+    w->lflags = o->flags;
+    w->lkey = o->key & 0x00ffffffu;
+    w->lalpha = (uint8_t)o->alpha;
+    if (o->bits) {
+        shz_rect_t all = { 0, 0, nw, nh };
+        w->lppa = (o->pos_flags & ULW_POS_PPA) != 0;
+        if (rc_empty(&o->dirty) || !rc_isect(&o->dirty, &all, &dirty)) dirty = all;
+        for (y = dirty.top; y < dirty.bottom; ++y)
+            if (copy_from_user(cur, w->layer + (uint64_t)y * (uint32_t)nw + (uint32_t)dirty.left,
+                               o->bits + (uint64_t)(uint32_t)(o->src_y + y) * o->stride + (uint64_t)(uint32_t)(o->src_x + dirty.left) * 4,
+                               (uint64_t)(dirty.right - dirty.left) * 4))
+                return STATUS_ACCESS_VIOLATION;
+    }
+    if (wm_is_visible(w) && wm_screen_rect(w, &after)) {
+        if (was && (o->pos_flags & (ULW_POS_MOVE | ULW_POS_SIZE))) rc_union(&after, &before);
+        wm_damage(&after);
+    } else if (was) wm_damage(&before);
+    gin_windows_changed();
+    return STATUS_SUCCESS;
+}
+
+static int32_t winop_print(process_t *cur, gwin_t *w, shz_winop_t *o)
+{
+    const int client_only = (o->flags & 1) != 0;
+    const int32_t pw = client_only ? client_w(w) : w->w, ph = client_only ? client_h(w) : w->h;
+    const int32_t cw = o->w < pw ? o->w : pw, chh = o->h < ph ? o->h : ph;
+    uint32_t *buf;
+    int32_t y;
+    if (cw <= 0 || chh <= 0) { o->w = o->h = 0; return STATUS_SUCCESS; }
+    buf = gfx_pages_alloc((uint64_t)pw * (uint64_t)ph * 4);
+    if (!buf) return STATUS_NO_MEMORY;
+    tgt_px = buf; tgt_w = (uint32_t)pw; tgt_h = (uint32_t)ph;
+    {
+        const shz_rect_t all = { 0, 0, pw, ph };
+        if (is_layered(w) && w->lmode == 2 && w->layer && !client_only) {
+            for (y = 0; y < ph && y < w->lh; ++y)
+                memcpy(buf + (uint64_t)y * (uint32_t)pw, w->layer + (uint64_t)y * (uint32_t)w->lw, (size_t)(pw < w->lw ? pw : w->lw) * 4);
+        } else if (client_only) {
+            gwin_t *ch;
+            blit_surface(w->surf, w->sw, w->sh, 0, 0, &all);
+            for (ch = w->child; ch && ch->next; ch = ch->next) { }
+            for (; ch; ch = ch->prev) compose_win(ch, ch->x, ch->y, &all);
+        } else {
+            compose_plain(w, 0, 0, &all);
+        }
+    }
+    tgt_backbuffer();
+    for (y = 0; y < chh; ++y)
+        if (copy_to_user(cur, o->bits + (uint64_t)(uint32_t)y * o->stride, buf + (uint64_t)y * (uint32_t)pw, (uint64_t)cw * 4)) {
+            gfx_pages_free(buf, (uint64_t)pw * (uint64_t)ph * 4);
+            return STATUS_ACCESS_VIOLATION;
+        }
+    gfx_pages_free(buf, (uint64_t)pw * (uint64_t)ph * 4);
+    o->w = cw;
+    o->h = chh;
+    return STATUS_SUCCESS;
+}
+
+static int32_t sys_winop(process_t *cur, uint64_t arg)
+{
+    shz_winop_t o;
+    gwin_t *w;
+    int32_t st = STATUS_SUCCESS;
+    shz_rect_t *rg = 0;
+    if (copy_from_user(cur, &o, arg, sizeof o)) return STATUS_ACCESS_VIOLATION;
+    if (o.op == SHZ_WOP_SET_REGION && o.bits) {                     /* read the rectangles before taking the lock */
+        if (!o.count || o.count > WOP_MAX_RGN) return STATUS_INVALID_PARAMETER;
+        rg = kmalloc(o.count * sizeof *rg);
+        if (!rg) return STATUS_NO_MEMORY;
+        if (copy_from_user(cur, rg, o.bits, o.count * sizeof *rg)) { kfree(rg); return STATUS_ACCESS_VIOLATION; }
+    }
+    mutex_lock(&gfx_lock);
+    w = wm_lookup(o.hwnd);
+    if (!w) { st = STATUS_INVALID_HANDLE; goto done; }
+    if (!wm_owner_ok(cur, w) && o.op != SHZ_WOP_GET_LAYERED && o.op != SHZ_WOP_GET_REGION && o.op != SHZ_WOP_GET_AFFINITY) {
+        st = STATUS_ACCESS_DENIED;
+        goto done;
+    }
+    switch (o.op) {
+    case SHZ_WOP_SET_LAYERED:
+        if (!(w->exstyle & WS_EX_LAYERED_) || w->lmode == 2) { st = STATUS_INVALID_PARAMETER; break; }
+        w->lmode = 1;
+        w->lflags = o.flags & (LWA_COLORKEY_ | LWA_ALPHA_);
+        w->lkey = o.key & 0x00ffffffu;
+        w->lalpha = (uint8_t)o.alpha;
+        wm_damage_window(w);
+        gin_windows_changed();
+        break;
+    case SHZ_WOP_GET_LAYERED:
+        if (!(w->exstyle & WS_EX_LAYERED_) || w->lmode != 1) { st = STATUS_INVALID_PARAMETER; break; }
+        o.flags = w->lflags; o.key = w->lkey; o.alpha = w->lalpha;
+        break;
+    case SHZ_WOP_UPDATE_LAYERED: st = winop_update_layered(cur, w, &o); break;
+    case SHZ_WOP_SET_REGION: {
+        shz_rect_t before, after;
+        const int was = wm_is_visible(w) && wm_screen_rect(w, &before);
+        if (w->rgn) kfree(w->rgn);
+        w->rgn = rg;
+        w->nrgn = rg ? o.count : 0;
+        rg = 0;
+        if (wm_is_visible(w) && wm_screen_rect(w, &after)) { if (was) rc_union(&after, &before); wm_damage(&after); }
+        else if (was) wm_damage(&before);
+        gin_windows_changed();
+        break;
+    }
+    case SHZ_WOP_GET_REGION: {
+        const uint32_t n = w->nrgn < o.count ? w->nrgn : o.count;
+        if (!w->rgn) { st = STATUS_NOT_FOUND; break; }
+        if (n && o.bits && copy_to_user(cur, o.bits, w->rgn, n * sizeof *w->rgn)) { st = STATUS_ACCESS_VIOLATION; break; }
+        o.count = w->nrgn;
+        break;
+    }
+    case SHZ_WOP_PRINT: st = winop_print(cur, w, &o); break;
+    case SHZ_WOP_SET_AFFINITY: w->affinity = o.alpha; break;
+    case SHZ_WOP_GET_AFFINITY: o.alpha = w->affinity; break;
+    default: st = STATUS_INVALID_PARAMETER;
+    }
+done:
+    mutex_unlock(&gfx_lock);
+    if (rg) kfree(rg);
+    if (!st && copy_to_user(cur, arg, &o, sizeof o)) return STATUS_ACCESS_VIOLATION;
     return st;
 }
 
@@ -1416,6 +1750,8 @@ int32_t sys_ext_graphics(process_t *cur, struct regs *r, uint32_t num, uint64_t 
     case SYS_NtUserAtom: return sys_atom(cur, a1);
     case SYS_NtUserProp: return sys_prop(cur, a1);
     case SYS_NtUserInput: return gfx_syscall_input(cur, a1);
+    case SYS_NtUserWindowOp: return sys_winop(cur, a1);
+    case SYS_NtUserClipboard: return gfx_syscall_clipboard(cur, a1);
     case SYS_NtUserPostMessage: case SYS_NtUserSendMessage: case SYS_NtUserGetMessage: case SYS_NtUserReplyMessage:
     case SYS_NtUserThreadOp: case SYS_NtUserTimer: case SYS_NtUserInvalidate: case SYS_NtUserPaint:
         return gfx_syscall_msg(cur, num, a1, a2, a3, a4);
