@@ -41,7 +41,11 @@
 
 #define SYSCALL_LIST_GRAPHICS(X)
 
-#define SYSCALL_LIST_NET(X)
+#define SYSCALL_LIST_NET(X) \
+    X(NtShzSocket, 0x80) X(NtShzSockBind, 0x81) X(NtShzSockListen, 0x82) X(NtShzSockAccept, 0x83) \
+    X(NtShzSockConnect, 0x84) X(NtShzSockSend, 0x85) X(NtShzSockRecv, 0x86) X(NtShzSockShutdown, 0x87) \
+    X(NtShzSockName, 0x88) X(NtShzSockSetOpt, 0x89) X(NtShzSockGetOpt, 0x8a) X(NtShzSockIoctl, 0x8b) \
+    X(NtShzSockPoll, 0x8c) X(NtShzNetResolve, 0x8d) X(NtShzNetQuery, 0x8e) X(NtShzNetPing, 0x8f)
 
 #define SYSCALL_LIST_K32(X)
 

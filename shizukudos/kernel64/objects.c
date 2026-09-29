@@ -137,6 +137,9 @@ int32_t handle_close(process_t *p, uint64_t handle)
     if (o->type == OB_FILE) {
         extern void file_object_closed(kobject_t *o);
         file_object_closed(o);
+    } else if (o->type == OB_SOCKET) {
+        extern void net_socket_handle_closing(kobject_t *o);   /* net_sock.c: tears the socket down with its last handle */
+        net_socket_handle_closing(o);
     }
     ob_deref(o);
     return STATUS_SUCCESS;
