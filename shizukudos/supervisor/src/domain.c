@@ -322,6 +322,13 @@ int hcall_vmcall(domain_t *d)
     case SHZ_HC_ABI_VERSION:
         r[GPR_RBX] = ((uint64_t)SHZ_ABI_MAJOR << 16) | SHZ_ABI_MINOR;
         break;
+    case SHZ_HC_CHANNEL_INFO: {                 /* the Win98 domain's VxD has no bootinfo: it asks for its channels */
+        const uint64_t c = r[GPR_RBX];
+        if (c >= SHZ_MAX_CHANNELS || !d->chan[c].mapped) { status = SHZ_E_NOENT; break; }
+        r[GPR_RBX] = SHZ_IPC_GPA_BASE + c * SHZ_IPC_REGION_SIZE;
+        r[GPR_RCX] = d->chan[c].peer;
+        break;
+    }
     case SHZ_HC_WALLTIME: {
         /* RTC registers are BCD (or binary, per register B bit 2); convert the platform clock. */
         const uint8_t regb = dev_cmos_read(0x0b), bin = (regb >> 2) & 1;
