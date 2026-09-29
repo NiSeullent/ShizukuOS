@@ -847,7 +847,8 @@ def readme_text(media: dict | None, setup: bool) -> bytes:
         "Legacy BIOS -> boot menu (isolinux; also on COM1 115200 8N1):\r\n"
         "  K  Kernel64 + Win64 runtime: the standalone Long Mode kernel runs its\r\n"
         "     self-tests and every Win64 test program in WIN64.IMG (SHZ\\K64).\r\n"
-        + ("  I  Install ShizukuDOS 10: Kernel64 with shz.setup=auto (SHZ\\SETUP).\r\n" if setup else "")
+        + ("  I  Install ShizukuDOS 10 (SHZ\\SETUP): unattended, ERASES the first disk\r\n"
+           "     without a partition table, then powers off. See SHZ\\SETUP\\README.TXT.\r\n" if setup else "")
         + "  D  DOS16: ShizukuDOS 10 FreeDOS profile, the conformance disk image\r\n"
         "     (ShizukuDOS10\\dos16) in RAM through memdisk.\r\n"
         "  1  ShizukuDOS 0.1: the project's own shell, 1.44 MB floppy image\r\n"
@@ -1262,8 +1263,10 @@ def main() -> int:
                         help="copy this driver package unchanged to DRIVERS\\<package>\\ and index its INF "
                              "hardware IDs (repeatable). Use only packages you may redistribute.")
     parser.add_argument("--setup", type=Path, metavar="DIR",
-                        help=f"SHZSETUP files for \\SHZ\\SETUP (default {se_media.rel(se_media.DEFAULT_SETUP_DIR)} "
-                             "when it holds SHZSETUP.EXE); adds the unattended Install menu entry")
+                        help="install/mkpayload.py output directory to ship under \\SHZ\\SETUP (default: built into "
+                             f"{se_media.rel(se_media.DEFAULT_SETUP_DIR)} with the shipped answer file); adds the "
+                             "unattended Install menu entry")
+    parser.add_argument("--no-setup", action="store_true", help="leave the installer and its menu entry off the medium")
     parser.add_argument("--loader", type=Path, help="UEFI loader to ship (default: the shizukudos build)")
     parser.add_argument("--csmwrap", type=Path, help="CSMWRAP.EFI to ship (default: shizukudos/csm/build.py output)")
     parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default="auto",
@@ -1299,7 +1302,14 @@ def main() -> int:
         k64 = se_media.k64_inputs()
         shzdos = se_media.shzdos_inputs()
         syslinux = se_media.syslinux()
-        setup_files, setup_info = se_media.setup_payload(args.setup)
+        if args.no_setup:
+            setup_files, setup_info = {}, {"present": False, "note": "--no-setup"}
+        else:
+            if args.setup is None and not (args.reuse_builds and
+                                           (se_media.DEFAULT_SETUP_DIR / se_media.SETUP_MAIN).is_file()):
+                print("== install/mkpayload.py --out " + se_media.rel(se_media.DEFAULT_SETUP_DIR), flush=True)
+                se_media.build_install_payload()
+            setup_files, setup_info = se_media.setup_payload(args.setup)
         store, store_manifest = se_media.driver_store(args.driver_package)
         artifacts = build_components(work)
         floppy = build_floppy(work, artifacts)

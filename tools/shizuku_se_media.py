@@ -57,8 +57,9 @@ MIB = 1 << 20
 DEFAULT_LOADER = SHZ_BUILD / "supervisor" / "BOOTX64.EFI"
 DEFAULT_CSMWRAP = SHZ_BUILD / "csm" / "CSMWRAP.EFI"
 CSMWRAP_RECEIPT = SHZ_BUILD / "csm" / "build-result.json"
-DEFAULT_SETUP_DIR = SHZ_BUILD / "setup"          # agent I1's SHZSETUP output (not in this tree yet)
-SETUP_MAIN = "SHZSETUP.EXE"
+DEFAULT_SETUP_DIR = SHZ_BUILD / "install-media"  # install/mkpayload.py --out (agent I1's payload, shipped answer file)
+SETUP_MAIN = "INSTALL.IMG"                        # initial RAM archive: Win64 runtime + SHZSETUP.EXE + answer + payload
+SETUP_ISO_DIR = "SHZ/SETUP"
 K64_FILES = {  # name on the media -> build output
     "BOOT.ELF": SHZ_BUILD / "kernel64s" / "boot.elf",
     "KERNEL64S.BIN": SHZ_BUILD / "kernel64s" / "KERNEL64S.BIN",
@@ -162,18 +163,46 @@ def shzdos_inputs() -> dict[str, Input]:
     return {name: Input(f"\\SHZDOS\\{name}", require(path, how), how) for name, path in SHZDOS_FILES.items()}
 
 
-def setup_payload(directory: Path | None, prefix: str = "SHZ/SETUP") -> tuple[dict[str, bytes], dict]:
-    """\\SHZ\\SETUP files from agent I1's installer build, when present (SHZSETUP.EXE is the marker)."""
+def build_install_payload(directory: Path | None = None) -> None:
+    """install/mkpayload.py (agent I1) with the shipped answer file (install/shzsetup.ini) into its own directory, so
+    tests/run_install.py's test payload (build/shizukudos/install) and the media's never overwrite each other."""
+    directory = Path(directory) if directory else DEFAULT_SETUP_DIR
+    subprocess.run([sys.executable, str(ROOT / "shizukudos" / "install" / "mkpayload.py"), "--out", str(directory)],
+                   check=True, timeout=1800, stdout=subprocess.DEVNULL, env=dict(os.environ,
+                                                                                  SOURCE_DATE_EPOCH=str(FIXED_EPOCH)))
+
+
+def setup_payload(directory: Path | None, prefix: str = SETUP_ISO_DIR) -> tuple[dict[str, bytes], dict]:
+    """\\SHZ\\SETUP on the media: INSTALL.IMG from install/mkpayload.py (agent I1) and, for reading, its answer file
+    and receipt. The Install menu entry boots Kernel64 with INSTALL.IMG as its initial RAM image and shz.setup=auto."""
     directory = Path(directory) if directory else DEFAULT_SETUP_DIR
     info = {"directory": rel(directory), "present": False}
-    if not (directory / SETUP_MAIN).is_file():
-        info["note"] = f"{SETUP_MAIN} not found: no \\SHZ\\SETUP and no Install menu entry on this medium"
+    image = directory / SETUP_MAIN
+    if not image.is_file():
+        info["note"] = f"{rel(image)} not found (install/mkpayload.py): no \\SHZ\\SETUP and no Install menu entry"
         return {}, info
-    payload = {}
-    for path in sorted(p for p in directory.rglob("*") if p.is_file()):
-        relative = path.relative_to(directory).as_posix()
-        payload[f"{prefix}/{relative}"] = path.read_bytes()
-    info.update(present=True, files={name: sha256(data) for name, data in payload.items()})
+    receipt = json.loads((directory / "mkpayload-result.json").read_text())
+    if receipt["outputs"]["INSTALL.IMG"]["sha256"] != sha256(image.read_bytes()):
+        raise RuntimeError(f"{image} does not match {directory / 'mkpayload-result.json'}")
+    answer = (directory / "shzsetup.ini").read_bytes()
+    if answer != (ROOT / "shizukudos" / "install" / "shzsetup.ini").read_bytes():
+        raise RuntimeError(f"{directory} was built with another answer file than install/shzsetup.ini; the media ship "
+                           "the product answer file (rebuild with install/mkpayload.py --out)")
+    payload = {f"{prefix}/INSTALL.IMG": image.read_bytes(), f"{prefix}/SHZSETUP.INI": answer,
+               f"{prefix}/MANIFEST.JSON": (directory / "payload" / "manifest.json").read_bytes(),
+               f"{prefix}/README.TXT": (
+                   "\\SHZ\\SETUP - ShizukuDOS 10 installer (SHZSETUP, install/mkpayload.py)\r\n"
+                   "Boot menu entry I: Kernel64 with INSTALL.IMG as its initial RAM image and the\r\n"
+                   "command line shz.setup=auto. SHZSETUP.EXE then installs unattended with the\r\n"
+                   "answer file SHZSETUP.INI packed inside INSTALL.IMG (the copy here is for\r\n"
+                   "reading): it ERASES the first empty disk it finds (AHCI, NVMe, ...) and\r\n"
+                   "writes GPT + EFI System Partition + ShizukuFS; it refuses disks that already\r\n"
+                   "have a partition table. The installed disk boots on UEFI (the Shizuku boot\r\n"
+                   "manager, BOOT.INI mode = kernel64) and on legacy BIOS (syslinux on the ESP).\r\n"
+                   "MANIFEST.JSON lists every file the installer writes, with SHA-256.\r\n"
+                   f"INSTALL.IMG sha256 {sha256(image.read_bytes())}\r\n").encode("ascii")}
+    info.update(present=True, bios_boot=receipt.get("bios_boot"), install_img_sha256=sha256(image.read_bytes()),
+                files={name: sha256(data) for name, data in payload.items()})
     return payload, info
 
 
@@ -232,9 +261,13 @@ def boot_menu(dos16_image: str, shzdos01_image: str, k64_dir: str = "/SHZ/K64", 
         lines += [
             "",
             "LABEL setup",
-            "  MENU LABEL ^Install ShizukuDOS 10 (SHZSETUP, unattended: shz.setup=auto)",
+            "  MENU LABEL ^Install ShizukuDOS 10 (SHZSETUP, unattended: ERASES the first empty disk)",
+            "  TEXT HELP",
+            "  Kernel64 with INSTALL.IMG and shz.setup=auto: SHZSETUP writes GPT + ESP +",
+            "  ShizukuFS to the first disk without a partition table, then powers off.",
+            "  ENDTEXT",
             "  KERNEL mboot.c32",
-            f"  APPEND {k64_dir}/BOOT.ELF shz.setup=auto --- {k64_dir}/KERNEL64S.BIN --- {k64_dir}/WIN64.IMG",
+            f"  APPEND {k64_dir}/BOOT.ELF shz.setup=auto --- {k64_dir}/KERNEL64S.BIN --- /{SETUP_ISO_DIR}/{SETUP_MAIN}",
         ]
     lines += [
         "",

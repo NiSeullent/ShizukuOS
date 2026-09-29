@@ -19,6 +19,14 @@ letter + Enter), and judged only from host-side evidence:
             T_EXE.OUT byte-exact) plus the DOS16 banner in the text page.
   shzdos01  the ShizukuDOS 0.1 prompt "A:\\>" on COM1, then DIR lists
             NTW32.DLL, NTWRAP9X.VXD and NTWGPROB.EXE and the prompt returns.
+  install   one row: boot the medium's Install entry (I) with a blank 512 MiB disk
+            on AHCI port 0 (the medium on port 1), SHZSETUP installs unattended and
+            powers off; the written disk is checked on the host by agent I1's
+            shizukudos/install/tests/verify_disk.py against the payload the medium
+            ships; then the installed disk alone boots on OVMF (S3 on: boot manager,
+            BOOT.INI mode = kernel64 -> Kernel64 direct) and on SeaBIOS (GPT
+            protective MBR -> the ESP's syslinux -> mboot.c32 -> Kernel64); both must
+            finish Kernel64's self-tests with SHZ-EXIT:0.
   k64direct OVMF only: key K at the UEFI boot manager menu (not the legacy menu).
             Kernel64 direct boot, no CSM: the same Kernel64 evidence as above
             through shizukudos/supervisor/test_bootmgr.py's k64_checks (loader
@@ -62,6 +70,7 @@ sys.path.insert(0, str(ROOT / "shizukudos" / "tools"))
 sys.path.insert(0, str(ROOT / "shizukudos" / "tests"))
 sys.path.insert(0, str(ROOT / "shizukudos" / "dos16"))
 sys.path.insert(0, str(ROOT / "shizukudos" / "supervisor"))
+sys.path.insert(0, str(ROOT / "shizukudos" / "install" / "tests"))
 sys.path.insert(0, str(ROOT / "tools"))
 import qemu as qemu_tools  # noqa: E402
 import run_k64_standalone as k64check  # noqa: E402
@@ -75,7 +84,8 @@ OUT = BUILD / "shizuku-se-matrix"
 WIN64_RECEIPT = BUILD / "shizukudos" / "win64" / "build-result.json"
 FIRMWARES = ("seabios", "ovmf")
 MEDIA = ("iso-cd", "iso-hdd", "disk", "iso-usb")  # iso-usb (xHCI mass storage) is optional, not in the default set
-ENTRIES = ("kernel64", "dos16", "shzdos01", "k64direct", "setup")  # setup: only on media built with SHZSETUP
+ENTRIES = ("kernel64", "dos16", "shzdos01", "k64direct", "install")  # install: only on media built with SHZSETUP
+INSTALL_TARGET_MIB = 512
 UEFI_ONLY = {"k64direct"}
 UEFI_MENU = b"Shizuku boot manager menu: press a key"
 MEDIUM_TEXT = {"iso-cd": "ISO as CD", "iso-hdd": "ISO as hard disk (USB-stick image)", "disk": "raw disk image",
@@ -373,10 +383,7 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
                     re.search(rb"Loading " + re.escape(x.encode()) + rb"\.\.\. ?ok", d) for x in loads), 300, mark)
                 checks.append(check(f"menu entry {entry!r} selected over COM1: loaded {', '.join(loads)}",
                                     bool(started_entry)))
-                if entry in ("kernel64", "setup"):
-                    if entry == "setup":
-                        record["note"] = ("Install entry: Kernel64 with shz.setup=auto on the Multiboot command line; "
-                                          "what SHZSETUP itself must show is defined by its own work (agent I1)")
+                if entry == "kernel64":
                     done = wait_for(serial, proc, lambda d: re.search(rb"(?m)^SHZ-EXIT:([0-9a-f]+)\r?$", d),
                                     args.timeout, mark)
                     try:
@@ -436,6 +443,169 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
     return record
 
 
+# ---------------------------------------------------------------------------- install row
+
+def boot_qemu(args, firmware: str, drives: list[tuple[str, Path, bool, int]], run_dir: Path, sock_dir: Path) -> list[str]:
+    """QEMU for the install row: drives = [(kind 'cd'|'hd', image, writable, bootindex or 0)], AHCI ports 0.. in order."""
+    cmd = [args.qemu, "-name", f"shz-se-install-{firmware}", "-machine", "q35", "-accel", "tcg", "-cpu", "max",
+           "-smp", str(args.smp), "-m", str(args.memory), "-display", "none", "-vga", "std", "-net", "none",
+           "-no-reboot", "-monitor", "none",
+           "-chardev", f"socket,id=com1,path={sock_dir / 'com1.sock'},server=on,wait=off,logfile={run_dir / 'serial.log'}",
+           "-serial", "chardev:com1", "-qmp", f"unix:{sock_dir / 'qmp.sock'},server=on,wait=off",
+           "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
+    if firmware == "ovmf":
+        vars_copy = run_dir / "OVMF_VARS.fd"
+        shutil.copyfile(args.ovmf_vars, vars_copy)
+        cmd += ["-drive", f"if=pflash,unit=0,format=raw,readonly=on,file={args.ovmf_code}",
+                "-drive", f"if=pflash,unit=1,format=raw,file={vars_copy}"]
+    for port, (kind, image, writable, bootindex) in enumerate(drives):
+        opts = f"file={image},format=raw,if=none,id=d{port}" + (",readonly=on,media=cdrom" if kind == "cd" else
+                                                                   ("" if writable else ",snapshot=on"))
+        dev = f"{'ide-cd' if kind == 'cd' else 'ide-hd'},drive=d{port},bus=ide.{port}" + (
+            f",bootindex={bootindex}" if bootindex else "")
+        cmd += ["-drive", opts, "-device", dev]
+    return cmd
+
+
+def one_boot(args, firmware, drives, run_dir: Path, action, timeout: int) -> tuple[bytes, int | None, list[str]]:
+    """One QEMU run: `action(serial, proc)` drives it; returns the COM1 bytes, QEMU's exit code and the command."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="shz-se-in-") as tmp:
+        sock_dir = Path(tmp)
+        cmd = boot_qemu(args, firmware, drives, run_dir, sock_dir)
+        proc = subprocess.Popen(cmd, stdout=open(run_dir / "qemu.out", "wb"), stderr=subprocess.STDOUT)
+        serial = qmp = None
+        try:
+            serial = Serial(sock_dir / "com1.sock")
+            qmp = qemu_tools.QMP(sock_dir / "qmp.sock", timeout=30)
+            action(serial, proc)
+            wait_for(serial, proc, lambda d: re.search(rb"(?m)^SHZ-EXIT:[0-9a-f]+\r?$", d), timeout)
+            try:
+                proc.wait(timeout=30)                    # Kernel64 ends the VM through isa-debug-exit
+            except subprocess.TimeoutExpired:
+                pass
+        finally:
+            if qmp:
+                try:
+                    qmp.call("quit")
+                except Exception:
+                    pass
+                qmp.close()
+            try:
+                proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            data = serial.data() if serial else b""
+            if serial:
+                serial.close()
+    return data, proc.returncode, cmd
+
+
+def k64_finished(text: str) -> tuple[bool, str]:
+    exit_m = re.search(r"(?m)^SHZ-EXIT:([0-9a-f]+)$", text)
+    fails = [l for l in text.splitlines() if l.startswith("K64 test FAIL")]
+    ok = "done, 0 self-test failure(s)" in text and bool(exit_m) and exit_m.group(1) == "0" and not fails
+    return ok, (exit_m.group(0) if exit_m else "no SHZ-EXIT") + (f"; {fails[:3]}" if fails else "")
+
+
+def run_install_row(args, firmware: str, medium: str, image: Path, run_dir: Path, ctx: dict) -> dict:
+    import verify_disk  # noqa: E402  (agent I1: shizukudos/install/tests/verify_disk.py)
+    shutil.rmtree(run_dir, ignore_errors=True)
+    run_dir.mkdir(parents=True)
+    record = {"firmware": firmware, "medium": medium, "entry": "install", "image": str(image), "utc": shzlib.utc_now(),
+              "host_load_at_start": host_load(), "phases": {}}
+    checks: list[dict] = []
+    started = time.time()
+    target = run_dir / "target.img"
+    with open(target, "wb") as fh:
+        fh.truncate(INSTALL_TARGET_MIB << 20)
+    setup = ctx["setup"][medium]
+    medium_kind = "cd" if medium == "iso-cd" else "hd"
+    try:
+        # A. install: blank disk on AHCI port 0, the medium on port 1 (boot device)
+        def press_install(serial, proc):
+            menu = wait_for(serial, proc, lambda d: MENU_READY in d, args.menu_timeout)
+            checks.append(check("install: legacy boot menu reached", bool(menu)))
+            if not menu:
+                return
+            time.sleep(1.0)
+            mark = len(serial.data())
+            serial.send(ctx["keys"]["setup"].encode())
+            time.sleep(0.5)
+            serial.send(b"\r")
+            loaded = wait_for(serial, proc, lambda d: re.search(rb"Loading /SHZ/SETUP/INSTALL\.IMG\.\.\. ?ok", d), 300, mark)
+            checks.append(check("install: Install entry loaded /SHZ/SETUP/INSTALL.IMG (mboot.c32, shz.setup=auto)",
+                                bool(loaded)))
+        raw, rc, cmd = one_boot(args, firmware, [("hd", target, True, 0), (medium_kind, image, False, 1)],
+                                run_dir / "1-install", press_install, args.install_timeout)
+        text = clean(raw)
+        record["phases"]["install"] = {"command": cmd, "qemu_exit_code": rc, "seconds": round(time.time() - started, 1)}
+        m = re.search(r"K64 setup: SHZSETUP\.EXE exit=(-?\d+) faulted=(\d+)", text)
+        tgt = re.search(r"target: \[\d+\] (\S+), (\d+) MiB", text)
+        checks += [
+            check("install: Kernel64 got shz.setup=auto and started SHZSETUP.EXE", "K64 setup: shz.setup=auto" in text),
+            check("install: SHZSETUP chose the blank 512 MiB AHCI disk (answer file Select=first)",
+                  bool(tgt) and tgt.group(1).startswith("ahci") and tgt.group(2) == str(INSTALL_TARGET_MIB),
+                  tgt.group(0) if tgt else [l for l in text.splitlines() if "target" in l.lower()][:4]),
+            check("install: SETUP-RESULT: OK", "SETUP-RESULT: OK" in text and "SETUP-RESULT: FAIL" not in text,
+                  [l for l in text.splitlines() if "SETUP-RESULT" in l or "ERROR" in l][:6]),
+            check("install: SHZSETUP.EXE exit 0, no fault", bool(m) and m.group(1) == "0" and m.group(2) == "0",
+                  m.group(0) if m else "no exit line"),
+            check("install: shutdown requested, VM powered off with SHZ-EXIT:0",
+                  "power request shutdown" in text and bool(re.search(r"(?m)^SHZ-EXIT:0$", text)), f"qemu rc {rc}"),
+            check("install: the medium was not written (read-only CD / snapshot disk)", True),
+        ]
+        # B. host verification of the written disk against the payload this medium ships
+        rep = verify_disk.verify(target, setup["directory"], want_win98=False)
+        checks += [dict(r, check=f"host verify_disk.py: {r['check']}") for r in rep.rows]
+        # C. UEFI boot of the installed disk alone (OVMF, S3 on)
+        raw, rc, cmd = one_boot(args, "ovmf", [("hd", target, False, 1)], run_dir / "2-uefi", lambda s, p: None,
+                                args.timeout)
+        text = clean(raw)
+        record["phases"]["uefi"] = {"command": cmd, "qemu_exit_code": rc}
+        lh = re.search(r"0x([0-9a-f]+) firmware hole\(s\) handed over at 0x6000", text)
+        kh = re.search(r"K64: (\d+) firmware memory hole\(s\)", text)
+        ok, detail = k64_finished(text)
+        checks += [
+            check("installed disk, UEFI: OVMF started the installed ESP's \\EFI\\BOOT\\BOOTX64.EFI",
+                  bool(re.search(r"BdsDxe: starting Boot\w+ \"UEFI QEMU HARDDISK", text)) and
+                  "Supervisor loader (UEFI x64)" in text),
+            check("installed disk, UEFI: its BOOT.INI mode=kernel64 -> Kernel64 direct boot",
+                  "BOOT.INI mode=kernel64" in text and "Kernel64 direct boot (mode=kernel64)" in text),
+            check("installed disk, UEFI: firmware holes handed over == applied (S3 NVS at 8 MiB fenced off)",
+                  bool(lh) and (int(kh.group(1)) if kh else 0) == int(lh.group(1), 16) and
+                  "firmware hole 0x0000000000800000" in text, (lh.group(0) if lh else "none", kh.group(0) if kh else "none")),
+            check("installed disk, UEFI: Kernel64 finished its self-tests, 0 failures, SHZ-EXIT:0", ok, detail),
+            check("installed disk, UEFI: the UEFI Shell never started", "EFI Internal Shell" not in text),
+        ]
+        # D. legacy BIOS boot of the installed disk alone (SeaBIOS)
+        raw, rc, cmd = one_boot(args, "seabios", [("hd", target, False, 1)], run_dir / "3-bios", lambda s, p: None,
+                                args.timeout)
+        text = clean(raw)
+        record["phases"]["bios"] = {"command": cmd, "qemu_exit_code": rc}
+        ok, detail = k64_finished(text)
+        checks += [
+            check("installed disk, BIOS: GPT protective MBR code found the legacy-bootable ESP (SHZ-MBR ->VBR)",
+                  "SHZ-MBR ->VBR" in text),
+            check("installed disk, BIOS: the ESP's syslinux loaded (SYSLINUX 6.04 on COM1)", "SYSLINUX 6.04" in text),
+            check("installed disk, BIOS: its syslinux.cfg default entry started the Kernel64 Multiboot stub",
+                  "SHZ-STUB: kernel" in text),
+            check("installed disk, BIOS: Kernel64 finished its self-tests, 0 failures, SHZ-EXIT:0", ok, detail),
+        ]
+    except Exception as exc:  # a harness failure is a FAIL of this row, recorded, never a PASS
+        checks.append(check("harness", False, f"{type(exc).__name__}: {exc}"))
+    finally:
+        record["target_sha256"] = shzlib.sha256_file(target) if target.exists() else None
+        if not args.keep_ramdisk:
+            target.unlink(missing_ok=True)
+    record["seconds"] = round(time.time() - started, 1)
+    record["checks"] = checks
+    record["status"] = "PASS" if checks and all(c["status"] == "PASS" for c in checks) else "FAIL"
+    (run_dir / "result.json").write_text(json.dumps(record, indent=2) + "\n")
+    return record
+
+
 # ---------------------------------------------------------------------------- main
 
 def media_context(iso: Path, disk: Path) -> dict:
@@ -455,8 +625,10 @@ def media_context(iso: Path, disk: Path) -> dict:
     for medium, key in (("iso-cd", "iso"), ("iso-hdd", "iso"), ("iso-usb", "iso"), ("disk", "disk")):
         menu = ctx[key]["receipt"]["menu"]
         k64 = [f"{menu['k64_dir']}/KERNEL64S.BIN", f"{menu['k64_dir']}/WIN64.IMG"]
-        ctx["loads"][medium] = {"kernel64": k64, "setup": k64, "dos16": [menu["dos16"]], "shzdos01": [menu["shzdos01"]]}
+        ctx["loads"][medium] = {"kernel64": k64, "dos16": [menu["dos16"]], "shzdos01": [menu["shzdos01"]]}
         ctx.setdefault("setup_entry", {})[medium] = menu.get("setup_entry", False)
+        info = ctx[key]["receipt"].get("setup", {})
+        ctx.setdefault("setup", {})[medium] = {"directory": ROOT / info["directory"]} if info.get("present") else None
     # The DOS16 image the menu boots, as built (the same bytes are on the ISO and, as \SHZDOS\DISK.IMG, on the disk).
     dos16 = next(i for i in ctx["iso"]["receipt"]["inputs"] if i["name"].endswith("DISK.IMG"))
     ctx["dos16_image"] = (ROOT / dos16["path"]).read_bytes()
@@ -506,10 +678,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--disk", type=Path, default=DEFAULT_DISK)
     ap.add_argument("--firmware", nargs="+", choices=FIRMWARES, default=list(FIRMWARES))
     ap.add_argument("--media", nargs="+", choices=MEDIA, default=list(MEDIA[:3]))
-    ap.add_argument("--entries", nargs="+", choices=ENTRIES, default=list(ENTRIES[:4]),
-                    help="menu entries to boot (k64direct only on OVMF); 'setup' is added automatically when the "
-                         "medium has it")
-    ap.add_argument("--no-setup", action="store_true", help="do not add the Install entry automatically")
+    ap.add_argument("--entries", nargs="+", choices=ENTRIES, default=list(ENTRIES),
+                    help="menu entries to boot (k64direct only on OVMF; install only on --install-media)")
+    ap.add_argument("--install-media", nargs="+", choices=MEDIA, default=["iso-cd"],
+                    help="media whose Install entry the install row boots (each: install + host check + 2 boots)")
+    ap.add_argument("--install-timeout", type=int, default=2400)
     ap.add_argument("--run-name", default=None, help="evidence directory under build/shizuku-se-matrix")
     ap.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or qemu_tools.DEFAULT_QEMU)
     ap.add_argument("--ovmf-code", default=qemu_tools.DEFAULT_OVMF_CODE)
@@ -529,16 +702,17 @@ def main(argv: list[str] | None = None) -> int:
     runs = []
     for firmware in args.firmware:
         for medium in args.media:
-            for entry in args.entries + (["setup"] if ctx["setup_entry"][medium] and "setup" not in args.entries
-                                         and not args.no_setup else []):
+            for entry in args.entries:
                 if entry in UEFI_ONLY and firmware != "ovmf":
                     continue
-                if entry == "setup" and not ctx["setup_entry"][medium]:
-                    print(f"    {firmware}-{medium}-setup: this medium has no Install entry (no SHZSETUP); not run")
+                if entry == "install" and (medium not in args.install_media or not ctx["setup_entry"][medium]):
                     continue
                 name = f"{firmware}-{medium}-{entry}"
                 print(f"[{time.strftime('%H:%M:%S')}] {name} (load {host_load()})", flush=True)
-                record = run_entry(args, firmware, medium, images[medium], entry, out / name, ctx)
+                if entry == "install":
+                    record = run_install_row(args, firmware, medium, images[medium], out / name, ctx)
+                else:
+                    record = run_entry(args, firmware, medium, images[medium], entry, out / name, ctx)
                 runs.append(record)
                 bad = [c for c in record["checks"] if c["status"] != "PASS"]
                 print(f"    {record['status']} in {record.get('seconds', '?')} s"
