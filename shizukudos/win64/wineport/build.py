@@ -136,7 +136,11 @@ def apply_patches(name, tree):
     tree untouched (and the objects fresh) when neither the patches nor the tree changed."""
     pdir = HERE / "patches" / name
     patches = sorted(pdir.glob("*.patch")) if pdir.is_dir() else []
-    digest = hashlib.sha256(b"".join(p.name.encode() + p.read_bytes() for p in patches)).hexdigest()
+    listed = sorted(REPO / p for p in manifest()[name].get("patches", []))
+    if listed != patches:
+        raise SystemExit(f"shizukudos/upstream/manifest.json upstreams.{name}.patches does not list exactly "
+                         f"{pdir.relative_to(REPO)}/*.patch")
+    digest =hashlib.sha256(b"".join(p.name.encode() + p.read_bytes() for p in patches)).hexdigest()
     stamp = tree / ".shizuku-patches"
     if stamp.exists() and stamp.read_text().strip() == digest:
         return patches
