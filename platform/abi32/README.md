@@ -50,9 +50,19 @@ Each variant checks:
   are checked. Repeated zero-delay polling fails after eight calls. This is
   not an OS scheduler or a concurrency test; the separate InitOnce pthread
   suite tests real contention, and native priority behavior remains unverified.
+- The routing policy (docs/NTW32_ROUTING.md), by re-running `DllMain` with
+  mocked `NTW32.INI` bytes, `NTW32_ROUTING` values and a fake KernelEx API
+  library (a data buffer with PE32 headers whose addresses are compared,
+  never called): every mode, module and function overrides, configured
+  `[routing] order=` and `[order]` entries, malformed and oversized
+  configuration, KernelEx attribution, static-export forwarding to native,
+  and the guard against forwarding an export into `NTW32.DLL` itself.
 
 The mocks cover only `GetModuleHandleA`, `GetProcAddress`, `GetTickCount`,
-`SetLastError`, `Sleep`, `MultiByteToWideChar`, and `WideCharToMultiByte`.
+`SetLastError`, `GetLastError`, `Sleep`, `MultiByteToWideChar`,
+`WideCharToMultiByte`, and, for the routing policy, `GetModuleFileNameA`,
+`CreateFileA`, `ReadFile`, `CloseHandle`, `GetEnvironmentVariableA` and
+`OutputDebugStringA`.
 The two conversion mocks only record arguments and return configured values;
 all `CP_UTF8` bytes are processed by the actual independent DLL code. Mock
 counters and return values are test fixtures,
