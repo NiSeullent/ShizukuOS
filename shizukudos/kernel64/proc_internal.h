@@ -26,6 +26,7 @@ typedef struct {
 /* ---- kernel objects ---- */
 enum { OB_NONE = 0, OB_EVENT = 1, OB_MUTANT = 2, OB_SEMAPHORE = 3, OB_THREAD = 4, OB_PROCESS = 5, OB_FILE = 6,
        OB_TIMER = 7, OB_DIRECTORY = 8 };
+#define OB_SOCKET 0x40                  /* socket handle (u.net.sock); closed through net_socket_handle_closing() */
 struct waitblock;
 struct kobject {
     uint32_t type, refs;
@@ -38,6 +39,7 @@ struct kobject {
         struct { thread_t *owner; int recursion; int abandoned; } mutant;
         struct { int count, max; } sem;
         struct { thread_t *t; } thr;
+        struct { void *sock; } net;         /* OB_SOCKET: sock_t * (net_sock.c) */
         struct { process_t *p; } proc;
         struct { void *file; uint32_t access; } file;
         struct { uint64_t due_tick, period_ms; int manual; int armed; } timer;
