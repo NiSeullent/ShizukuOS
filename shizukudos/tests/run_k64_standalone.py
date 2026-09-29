@@ -66,6 +66,14 @@ def evaluate(serial, ev, exit_code, qemu_rc):
                    e(19) == 0x140000000 and e(20) == 1 and e(21) == 2, f"{e(19):#x} {e(20)} {e(21)}"))
     c.append(check("Win64: second process returned every physical page", res != 0 and e(22) == 0, f"delta={e(22)}"))
     c.append(check("Win64 console output reached the serial console", "hello from Win64 PE32+" in serial))
+    # WIN64 subsystem bridge (kernel64/subsys64.c) loopback: slot 31 = 'W4' << 16 | passed << 8 | failed
+    w64 = e(31)
+    c.append(check("WIN64 subsystem bridge loopback: every self-test check passed (no peer domain in this profile)",
+                   w64 >> 16 == 0x5734 and (w64 >> 8) & 0xff >= 24 and w64 & 0xff == 0 and "K64 subsys64 FAIL" not in serial,
+                   f"slot31={w64:#x} passed={(w64 >> 8) & 0xff} failed={w64 & 0xff}; "
+                   + ("; ".join(re.findall(r"K64 subsys64 FAIL: (.*)", serial)) or "no FAIL lines")))
+    c.append(check("WIN64 bridge relayed T_HELLO.EXE and T_W64CON.EXE console streams over the channel",
+                   "K64 subsys64: T_W64CON relay:" in serial and "K64 subsys64: service stopped:" in serial))
     return c
 
 

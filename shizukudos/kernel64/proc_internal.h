@@ -95,6 +95,10 @@ struct process {
     uint64_t ntdll_process_start, ntdll_thread_start, ntdll_exception_dispatcher;
     uint64_t ldr_va;                    /* PEB_LDR_DATA */
     uint64_t params_va;                 /* RTL_USER_PROCESS_PARAMETERS */
+    /* WIN64 subsystem bridge (subsys64.c): console sink the standard handles are relayed to, inherited from the
+     * parent at creation; 0 = the Supervisor/serial console. `console_sink_gen` guards against a recycled slot. */
+    void *console_sink;
+    uint32_t console_sink_gen;
 };
 
 /* vad.c */

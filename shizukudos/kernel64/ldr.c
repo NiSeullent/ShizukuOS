@@ -613,6 +613,8 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     if (!node || node->is_dir) return STATUS_OBJECT_NAME_NOT_FOUND;
     p = process_create_empty("win64");
     if (!p) return STATUS_NO_MEMORY;
+    p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
+    p->console_sink_gen = parent ? parent->console_sink_gen : 0;
     for (k = 0; image_path[k] && k < sizeof p->name - 1; ) { p->name[k] = image_path[k]; ++k; }
     {
         /* short name for logs: last path component */

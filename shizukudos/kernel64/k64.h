@@ -157,6 +157,11 @@ void ipc64_init(const shz_bootinfo_t *bi);
 int ipc64_run_tests(void);
 extern uint32_t ipc64_results[16];
 
+/* ---- subsys64.c: WIN64 subsystem bridge (ABI 1.1 message family 0x200..) ---- */
+void subsys64_start(const shz_bootinfo_t *bi);   /* Supervisor: serve the Win98 channel until SHUTDOWN; standalone: loopback self-test */
+int subsys64_console_write(process_t *p, int stream, const void *data, uint64_t n);   /* 1 = relayed, 0 = not bridged */
+int subsys64_console_read(process_t *p, void *buf, uint64_t cap, uint64_t *got);      /* 1 = handled (*got 0 = EOF), 0 = not bridged */
+
 /* ---- tests.c ---- */
 void run_self_tests(const shz_bootinfo_t *bi);
 unsigned tests_failed(void);
