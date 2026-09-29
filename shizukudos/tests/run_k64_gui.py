@@ -597,6 +597,9 @@ def main():
     rep.check("at least one GUI test program ran", len(apps) > 0, f"{len(apps)} program(s)")
     fails = re.findall(r"\] (FAIL: .*)", serial)
     rep.check("no GUI program printed FAIL:", not fails, "; ".join(fails[:5]))
+    # kernel self-tests that report by line only (e.g. "K64 subsys64 FAIL: ...") do not change the exit code
+    kfails = re.findall(r"^(K64 (?:\S+ )?FAIL:? .*)$", serial, re.M)
+    rep.check("no kernel self-test printed a FAIL line", not kfails, "; ".join(kfails[:5]))
     # only the GUI programs must not skip: this boot has no NIC, so the network tests skip by design
     skips = re.findall(r"\[win64 T_GUI_\S+ pid \d+\] (SKIP: .*)", serial)
     rep.check("no GUI program skipped (the display is present)", not skips, "; ".join(skips[:5]))
