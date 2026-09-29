@@ -50,7 +50,8 @@ def main():
     info['sources'] = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                        for p in (HERE/'control.asm', HERE/'bridge.c', HERE/'bridge.h', HERE/'native.c',
                                  HERE/'link.ld', HERE/'le.py', HERE/'build.py', HERE/'query_probe.c',
-                                 HERE.parent/'core.c', HERE.parent/'include/ntwrapper.h')}
+                                 HERE.parent/'core.c', HERE.parent/'include/ntwrapper.h',
+                                 ROOT/'shizukudos/abi/shz_abi.h', ROOT/'shizukudos/abi/shz_ipc.h')}
     (BUILD/'manifest.json').write_text(json.dumps(info, indent=2)+'\n')
     print(json.dumps(info, indent=2))
     return 0

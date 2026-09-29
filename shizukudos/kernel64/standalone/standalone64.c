@@ -46,6 +46,7 @@ long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
     case SHZ_HC_SET_DOORBELL_VECTOR:
     case SHZ_HC_DOORBELL_ACK:
     case SHZ_HC_DOMAIN_STATE:
+    case SHZ_HC_CHANNEL_INFO:
         st = SHZ_E_UNSUPPORTED;
         break;
     default:

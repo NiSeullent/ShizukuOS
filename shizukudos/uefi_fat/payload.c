@@ -131,7 +131,7 @@ static int storage_test(void)
     const struct ntwf_request request = {sizeof(request), NTWF_ABI_VERSION, 0,
         NTWF_MAX_READS, NTWF_MAX_TIME_US, 0, "NTWBOOT BIN", 0};
     struct ahci_config config = {0x010601, 0, 4096, AHCI_AUTO_PORT,
-        SDFAT_COMMAND_TIMEOUT_US, 1};
+        SDFAT_COMMAND_TIMEOUT_US, 1, 0};   /* read-only: allow_write = 0 */
     struct ntwf_io io = {sizeof(io), NTWF_ABI_VERSION, 512, 0,
         SDFAT_DISK_SECTORS, &binding, sdfat_read_sector, sdfat_fat_now};
     struct ntwf_file_info info;

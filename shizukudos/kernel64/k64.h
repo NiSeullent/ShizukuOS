@@ -17,6 +17,8 @@
 #define PAGE_SIZE 4096ull
 #define K64_VIRT_BASE 0xffffffff80000000ull
 #define DIRECT_MAP 0xffff800000000000ull
+#define KWIN_BASE 0xffffc10000000000ull            /* kernel windows (kwin.c): PML4 slot 386, 512 GiB of virtual space */
+#define KWIN_SIZE 0x0000008000000000ull
 #define USER_TOP 0x00007ffffffef000ull            /* end of the user range (exclusive) */
 #define USER_MIN 0x0000000000010000ull            /* first mappable user address (null guard below) */
 #define VEC_TIMER 0x20
@@ -75,6 +77,7 @@ static inline void cli(void) { __asm__ volatile("cli" ::: "memory"); }
 
 /* ---- mem.c ---- */
 void mem_init(const shz_bootinfo_t *bi);
+uint64_t mem_ram_top(void);                     /* bytes of guest-physical RAM managed */
 uint64_t pmm_alloc(void);                       /* zeroed physical page, 0 on exhaustion */
 void pmm_free(uint64_t pa);
 uint64_t pmm_free_count(void);
@@ -172,6 +175,24 @@ void thread_wake(thread_t *t);
 void ipc64_init(const shz_bootinfo_t *bi);
 int ipc64_run_tests(void);
 extern uint32_t ipc64_results[16];
+
+/* ---- subsys64.c: WIN64 subsystem bridge (ABI 1.1 message family 0x200..) ---- */
+void subsys64_start(const shz_bootinfo_t *bi);   /* Supervisor: serve the Win98 channel until SHUTDOWN; standalone: loopback self-test */
+int subsys64_console_write(process_t *p, int stream, const void *data, uint64_t n);   /* 1 = relayed, 0 = not bridged */
+int subsys64_console_read(process_t *p, void *buf, uint64_t cap, uint64_t *got);      /* 1 = handled (*got 0 = EOF), 0 = not bridged */
+
+/* ---- main.c: boot information (ABI 1.1 tail) ---- */
+/* HOOK for a UEFI GOP display backend (kernel64/gfx_fb.c): the linear framebuffer the UEFI boot manager's direct
+ * Kernel64 boot handed over (shz_bootinfo_t.fb_*). Returns 0 and fills *out, or -1 when there is none (Supervisor,
+ * Multiboot stub, no GOP, or a pixel format other than 32-bit RGBX/BGRX). The range lies outside the direct map:
+ * a backend maps it with mmio_map() (pci.h) before drawing. Nothing calls this yet; the Bochs VBE path is unchanged. */
+typedef struct {
+    uint64_t base, size;                        /* physical */
+    uint32_t width, height, pitch, bpp;         /* pitch in bytes */
+    uint32_t format;                            /* enum shz_fb_format */
+} k64_boot_fb_t;
+int k64_boot_framebuffer(k64_boot_fb_t *out);
+const char *k64_boot_cmdline(void);             /* shz_bootinfo_t.cmdline, "" when absent */
 
 /* ---- tests.c ---- */
 void run_self_tests(const shz_bootinfo_t *bi);

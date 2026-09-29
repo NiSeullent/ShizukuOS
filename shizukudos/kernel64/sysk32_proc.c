@@ -155,13 +155,16 @@ static void sample_peaks(process_t *p)
     irq_restore(f);
 }
 
-/* VirtualLock records: one entry per locked page. */
+/* VirtualLock records: one entry per locked page. The table comes from the kernel heap on the first VirtualLock (it is not
+ * part of .bss, which must stay small: link.ld), so systems that never lock memory do not pay for it. */
 #define MAX_VLOCKS 2048
-static struct { const process_t *p; int pid; uint64_t page; } vlocks[MAX_VLOCKS];        /* p == 0: free */
+typedef struct { const process_t *p; int pid; uint64_t page; } vlock_t;                   /* p == 0: free */
+static vlock_t *vlocks;
 
 static int vlock_find(const process_t *p, uint64_t page)
 {
     int i;
+    if (!vlocks) return -1;
     for (i = 0; i < MAX_VLOCKS; ++i)
         if (vlocks[i].p == p && vlocks[i].pid == p->pid && vlocks[i].page == page) return i;
     return -1;
@@ -170,6 +173,7 @@ static int vlock_find(const process_t *p, uint64_t page)
 static void vlocks_drop(const process_t *p, uint64_t start, uint64_t end)
 {
     int i;
+    if (!vlocks) return;
     for (i = 0; i < MAX_VLOCKS; ++i)
         if (vlocks[i].p == p && (vlocks[i].pid != p->pid || (vlocks[i].page >= start && vlocks[i].page < end))) vlocks[i].p = 0;
 }
@@ -221,6 +225,11 @@ static int32_t mem_op(process_t *p, uint32_t cls, uint64_t base, uint64_t size)
         int i;
         st = range_committed(p, start, end, 1);
         if (st) return st;
+        if (!vlocks) {
+            vlock_t *t = kzalloc(MAX_VLOCKS * sizeof *t);
+            if (!t) return STATUS_NO_MEMORY;
+            if (vlocks) kfree(t); else vlocks = t;                  /* another thread may have won the race meanwhile */
+        }
         for (a = start; a < end; a += PAGE_SIZE) if (vlock_find(p, a) < 0) ++need;
         for (i = 0; i < MAX_VLOCKS; ++i) if (!vlocks[i].p) ++free_slots;
         if (need > free_slots) return STATUS_WORKING_SET_QUOTA;
@@ -260,26 +269,40 @@ static int32_t put_out(process_t *cur, uint64_t buf, uint64_t len, uint64_t retl
     return copy_to_user(cur, buf, v, n) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
 }
 
+/* The index-th module of p copied out with interrupts off: the loader records of another process are freed when that process
+ * is reaped (ldr_release_modules), which can happen at any preemption of the caller. 0 = copied, -1 = no such module. */
+static int module_copy(process_t *p, unsigned index, struct mod_entry *e)
+{
+    uint64_t base, size;
+    const char *name, *path;
+    const uint64_t f = irq_save();
+    int rc = p->used ? ldr_module_at(p, index, &base, &size, &name, &path) : -1;
+    if (!rc) {
+        memset(e, 0, sizeof *e);
+        e->base = base; e->size = size;
+        copy_str(e->name, name, sizeof e->name);
+        copy_str(e->path, path, sizeof e->path);
+    }
+    irq_restore(f);
+    return rc;
+}
+
 static int32_t query_modules(process_t *cur, process_t *p, uint64_t buf, uint64_t len, uint64_t retlen)
 {
     unsigned count = 0, i, k;
-    uint64_t base, size;
-    const char *name, *path;
     struct mod_entry e;
-    while (ldr_module_at(p, count, &base, &size, &name, &path) == 0) ++count;
+    while (module_copy(p, count, &e) == 0) ++count;
     if (retlen) { uint32_t r = count * (uint32_t)sizeof e; if (copy_to_user(cur, retlen, &r, 4)) return STATUS_ACCESS_VIOLATION; }
     if (len < count * sizeof e) return STATUS_BUFFER_TOO_SMALL;
     /* the executable first (as in the PEB load-order list), then the others in load order */
     for (i = 0, k = 0; i < count; ++i) {
-        if (ldr_module_at(p, i, &base, &size, &name, &path)) break;
-        if (base != p->image_base) continue;
-        memset(&e, 0, sizeof e); e.base = base; e.size = size; copy_str(e.name, name, sizeof e.name); copy_str(e.path, path, sizeof e.path);
+        if (module_copy(p, i, &e)) break;
+        if (e.base != p->image_base) continue;
         if (copy_to_user(cur, buf + (uint64_t)k++ * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
     }
     for (i = 0; i < count; ++i) {
-        if (ldr_module_at(p, i, &base, &size, &name, &path)) break;
-        if (base == p->image_base) continue;
-        memset(&e, 0, sizeof e); e.base = base; e.size = size; copy_str(e.name, name, sizeof e.name); copy_str(e.path, path, sizeof e.path);
+        if (module_copy(p, i, &e)) break;
+        if (e.base == p->image_base) continue;
         if (copy_to_user(cur, buf + (uint64_t)k++ * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
     }
     return STATUS_SUCCESS;
@@ -401,14 +424,13 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
         if (retlen) { uint32_t rl = (uint32_t)len; copy_to_user(cur, retlen, &rl, 4); }
         return STATUS_SUCCESS;
     }
-    case K32Q_IMAGE_PATH: {                                     /* the executable's path on C: ("\SHZ\TESTS\T_X.EXE") */
+    case K32Q_IMAGE_PATH: {                                     /* the executable's path: "\SHZ\TESTS\T_X.EXE" (C:) or "D:\..." */
         process_t *p = proc_of_handle(cur, h);
         unsigned i;
-        uint64_t base, size;
-        const char *name, *path;
+        struct mod_entry e;
         if (!p) return STATUS_INVALID_HANDLE;
-        for (i = 0; ldr_module_at(p, i, &base, &size, &name, &path) == 0; ++i)
-            if (base == p->image_base) return put_out(cur, buf, len, retlen, path, strlen(path) + 1);
+        for (i = 0; module_copy(p, i, &e) == 0; ++i)
+            if (e.base == p->image_base) return put_out(cur, buf, len, retlen, e.path, strlen(e.path) + 1);
         return STATUS_INVALID_HANDLE;                             /* not a Win64 process (no executable image) */
     }
     case K32Q_FIRMWARE: {

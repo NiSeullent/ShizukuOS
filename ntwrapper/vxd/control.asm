@@ -2,7 +2,8 @@
 ; Original NASM ABI bridge. Factual constants: REFERENCES.md.
 BITS 32
 GLOBAL ntwv_ddb, ntwv_control, ntwv_irq_enter, ntwv_irq_leave
-GLOBAL ntwv_vmm_check, ntwv_vmm_lock, ntwv_vmm_unlock, ntwv_vmm_ptes
+GLOBAL ntwv_vmm_check, ntwv_vmm_lock, ntwv_vmm_unlock, ntwv_vmm_ptes, ntwv_vmm_map_phys
+GLOBAL ntwv_vmcall, ntwv_cpuid
 EXTERN ntwv_native_init, ntwv_native_exit, ntwv_native_dioc
 
 SECTION .ddb progbits alloc noexec write align=4
@@ -83,6 +84,7 @@ ntwv_irq_leave:
 VMM_THREE ntwv_vmm_check,  0x00010067
 VMM_THREE ntwv_vmm_lock,   0x00010063
 VMM_THREE ntwv_vmm_unlock, 0x00010064
+VMM_THREE ntwv_vmm_map_phys, 0x0001006C   ; _MapPhysToLinear(PhysAddr, nBytes, Flags): linear alias in EAX
 ntwv_vmm_ptes:
     push ebp
     mov ebp, esp
@@ -93,6 +95,52 @@ ntwv_vmm_ptes:
     int 0x20
     dd 0x00010061
     add esp, 16
+    pop ebp
+    ret
+
+; ShizukuDOS Supervisor hypercall (shz_abi.h): int32_t ntwv_vmcall(op, a, b, uint32_t *ebx_out, uint32_t *ecx_out).
+; EAX = opcode, EBX/ECX = arguments; the Supervisor returns the status in EAX and results in EBX/ECX. Only
+; executed after ntwv_cpuid confirmed the hypervisor signature: VMCALL outside a VMX guest raises #UD.
+ntwv_vmcall:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    mov eax, [ebp + 8]
+    mov ebx, [ebp + 12]
+    mov ecx, [ebp + 16]
+    vmcall
+    mov esi, [ebp + 20]
+    test esi, esi
+    jz .no_ebx
+    mov [esi], ebx
+.no_ebx:
+    mov esi, [ebp + 24]
+    test esi, esi
+    jz .no_ecx
+    mov [esi], ecx
+.no_ecx:
+    pop esi
+    pop ebx
+    pop ebp
+    ret
+
+; void ntwv_cpuid(uint32_t leaf, uint32_t regs[4])
+ntwv_cpuid:
+    push ebp
+    mov ebp, esp
+    push ebx
+    push esi
+    mov eax, [ebp + 8]
+    xor ecx, ecx
+    cpuid
+    mov esi, [ebp + 12]
+    mov [esi], eax
+    mov [esi + 4], ebx
+    mov [esi + 8], ecx
+    mov [esi + 12], edx
+    pop esi
+    pop ebx
     pop ebp
     ret
 

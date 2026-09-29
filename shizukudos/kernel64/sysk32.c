@@ -14,6 +14,8 @@
 #define K64_VOLUME_SERIAL 0x53485a31u         /* "SHZ1": the volume serial number of C: (the RAM file system has no on-disk one) */
 
 extern int64_t filetime_now(void);
+extern int disk_volume_info(const fsnode_t *n, uint32_t *serial, char label[12], uint64_t *total_clusters, uint64_t *free_clusters,
+                            uint32_t *sectors_per_cluster, int *writable);                  /* disk.c: FAT32 volumes (D:) */
 
 static file_t *k32_file_of(process_t *p, uint64_t h)
 {
@@ -47,16 +49,23 @@ static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t handle, u
     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
     file_t *f = k32_file_of(p, handle);
     uint8_t out[64];
+    uint32_t dserial = 0, dspc = 0;
+    uint64_t dtotal = 0, dfree = 0;
+    char dlabel[12];
+    int dwritable = 0, disk;
     if (!f) return STATUS_INVALID_HANDLE;
     memset(out, 0, sizeof out);
+    /* A file on a disk volume (disk.c, FAT32) reports that volume: BPB serial number and label, cluster counts, "FAT32". */
+    disk = f->node && disk_volume_info(f->node, &dserial, dlabel, &dtotal, &dfree, &dspc, &dwritable) == 0;
     switch (cls) {
     case 1: {                                                   /* FileFsVolumeInformation */
-        const uint64_t created = (uint64_t)filetime_now() - ticks_now() * 10000ull;         /* the volume comes into existence at boot */
-        const uint32_t label = put_utf16_ascii(out + 18, "SHIZUKU");
+        /* FAT keeps no volume creation time (0 is reported); the RAM volume comes into existence at boot */
+        const uint64_t created = disk ? 0 : (uint64_t)filetime_now() - ticks_now() * 10000ull;
+        const uint32_t label = put_utf16_ascii(out + 18, disk ? dlabel : "SHIZUKU");
         if (f->console) return STATUS_INVALID_DEVICE_REQUEST;
         if (len < 18) return STATUS_INFO_LENGTH_MISMATCH;
         memcpy(out, &created, 8);
-        *(uint32_t *)(out + 8) = K64_VOLUME_SERIAL;
+        *(uint32_t *)(out + 8) = disk ? dserial : K64_VOLUME_SERIAL;
         *(uint32_t *)(out + 12) = label;
         out[16] = 0;                                            /* SupportsObjects: no object ids */
         return put_result(p, iosb, buf, len, out, 18 + label, 18 + label <= len ? STATUS_SUCCESS : STATUS_BUFFER_OVERFLOW);
@@ -68,17 +77,19 @@ static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t handle, u
         const uint64_t total_units = kheap_total() / unit;
         const uint64_t used = kheap_used();
         const uint64_t free_units = used < kheap_total() ? (kheap_total() - used) / unit : 0;
+        const uint64_t total = disk ? dtotal : total_units, avail = disk ? dfree : free_units;
+        const uint32_t spc = disk ? dspc : 8;                   /* a disk volume: its clusters */
         uint32_t n;
         if (f->console) return STATUS_INVALID_DEVICE_REQUEST;
         if (cls == 3) {
             if (len < 24) return STATUS_INFO_LENGTH_MISMATCH;
-            memcpy(out, &total_units, 8); memcpy(out + 8, &free_units, 8);
-            *(uint32_t *)(out + 16) = 8; *(uint32_t *)(out + 20) = 512;
+            memcpy(out, &total, 8); memcpy(out + 8, &avail, 8);
+            *(uint32_t *)(out + 16) = spc; *(uint32_t *)(out + 20) = 512;
             n = 24;
         } else {
             if (len < 32) return STATUS_INFO_LENGTH_MISMATCH;
-            memcpy(out, &total_units, 8); memcpy(out + 8, &free_units, 8); memcpy(out + 16, &free_units, 8);
-            *(uint32_t *)(out + 24) = 8; *(uint32_t *)(out + 28) = 512;
+            memcpy(out, &total, 8); memcpy(out + 8, &avail, 8); memcpy(out + 16, &avail, 8);
+            *(uint32_t *)(out + 24) = spc; *(uint32_t *)(out + 28) = 512;
             n = 32;
         }
         return put_result(p, iosb, buf, len, out, n, STATUS_SUCCESS);
@@ -86,15 +97,18 @@ static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t handle, u
     case 4: {                                                   /* FileFsDeviceInformation */
         if (len < 8) return STATUS_INFO_LENGTH_MISMATCH;
         *(uint32_t *)out = f->console ? 0x50 : 7;               /* FILE_DEVICE_CONSOLE / FILE_DEVICE_DISK */
-        *(uint32_t *)(out + 4) = 0;
+        *(uint32_t *)(out + 4) = disk && !dwritable ? 0x2 : 0;  /* FILE_READ_ONLY_DEVICE */
         return put_result(p, iosb, buf, len, out, 8, STATUS_SUCCESS);
     }
     case 5: {                                                   /* FileFsAttributeInformation */
-        const uint32_t name = put_utf16_ascii(out + 12, "SHZFS");
+        const uint32_t name = put_utf16_ascii(out + 12, disk ? "FAT32" : "SHZFS");
         if (f->console) return STATUS_INVALID_DEVICE_REQUEST;
         if (len < 12) return STATUS_INFO_LENGTH_MISMATCH;
-        *(uint32_t *)out = 0x2 | 0x4;                           /* FILE_CASE_PRESERVED_NAMES | FILE_UNICODE_ON_DISK; lookups ignore case */
-        *(int32_t *)(out + 4) = 95;                             /* longest component: 95 UTF-8 bytes (fsnode.name is 96 bytes with its NUL) */
+        /* FILE_CASE_PRESERVED_NAMES | FILE_UNICODE_ON_DISK (lookups ignore case); a disk volume that cannot be written adds
+         * FILE_READ_ONLY_VOLUME. Longest component: what fsnode.name holds (FS_NAME_MAX UTF-8 bytes with the NUL) on
+         * either volume kind (VFAT itself allows 255 UTF-16 units). */
+        *(uint32_t *)out = 0x2 | 0x4 | (disk && !dwritable ? 0x80000u : 0);
+        *(int32_t *)(out + 4) = FS_NAME_MAX - 1;
         *(uint32_t *)(out + 8) = name;
         return put_result(p, iosb, buf, len, out, 12 + name, 12 + name <= len ? STATUS_SUCCESS : STATUS_BUFFER_OVERFLOW);
     }

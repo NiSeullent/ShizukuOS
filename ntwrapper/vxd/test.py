@@ -45,7 +45,8 @@ def main():
         'log_sha256': digest(BUILD/'host-tests.log'),
         'statuses': {name: ('passed' if passed else 'failed-or-unverified') for name in
                      ('host_bridge_asan_ubsan', 'i386_control_harness', 'static_le_relocations',
-                      'native_contract_constants', 'win32_probe_pe_contract')},
+                      'native_contract_constants', 'win32_probe_pe_contract', 'win64_bridge_dioc_asan_ubsan')},
+        'win64_bridge_supervisor_run': False,
         'guest_loaded': False,
         'native_vmm_calls_verified': False,
         'win98_probe_executed': False,
