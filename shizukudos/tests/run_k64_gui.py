@@ -736,7 +736,8 @@ def main():
     loaded = {m.group(1).lower(): m.group(2) == "1" and m.group(3) == "1"
               for m in re.finditer(r"STATUS-DLL: (\S+) loaded=(\d) exports=\d+ resolved=(\d)", serial)}
     built = json.loads((WIN64 / "build-result.json").read_text())["archive"]["files"]
-    for dll in sorted(f.rsplit("\\", 1)[-1].lower() for f in built if f.upper().startswith("\\SHZ\\SYS64\\")):
+    for dll in sorted(f.rsplit("\\", 1)[-1].lower() for f in built
+                      if f.upper().startswith("\\SHZ\\SYS64\\") and f.upper().endswith(".DLL")):
         rep.check(f"status: {dll} was loaded in the guest and its first export resolved", loaded.get(dll, False),
                   "reported" if dll in loaded else "not reported by T_GUI_STATUS")
     # the display device is listed with the kernel driver bound to it (kernel64 pci_claim)
