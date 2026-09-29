@@ -407,16 +407,19 @@ DLLAPI BOOL WINAPI Rectangle(HDC hdc, int l, int t, int r, int b)
     RET(TRUE);
 }
 
-/* x extents of the ellipse inscribed in [l,r)x[t,b) on row y, in pixels; returns 0 if the row misses it. */
+/* x extents of the ellipse inscribed in [l,r)x[t,b) on row y; returns 0 if the row misses it. A pixel belongs to the row when
+ * its CENTRE lies inside the ellipse, computed in doubled coordinates so that the result is exactly mirror symmetric. */
 static int ellipse_row(int l, int t, int r, int b, int y, int *xl, int *xr)
 {
-    const int64_t A2 = r - l, B2 = b - t;                          /* doubled semi-axes */
+    const int64_t A2 = r - l, B2 = b - t, cx2 = (int64_t)l + r;      /* doubled semi-axes and centre */
     const int64_t dy2 = 2 * (int64_t)(y - t) + 1 - B2;
-    int64_t hx2;
+    int64_t q, dmax;
     if (A2 <= 0 || B2 <= 0 || dy2 * dy2 >= B2 * B2) return 0;
-    hx2 = isqrt64((uint64_t)(A2 * A2 * (B2 * B2 - dy2 * dy2) / (B2 * B2)));
-    *xl = (int)((l + r - hx2 + 1) >> 1);
-    *xr = (int)((l + r + hx2 + 1) >> 1);
+    q = isqrt64((uint64_t)(A2 * A2 * (B2 * B2 - dy2 * dy2) / (B2 * B2)));
+    dmax = ((q ^ (cx2 + 1)) & 1) ? q - 1 : q;                          /* |2x+1-cx2| has the parity of cx2+1 */
+    if (dmax < 0) return 0;
+    *xl = (int)((cx2 - dmax - 1) / 2);
+    *xr = (int)((cx2 + dmax - 1) / 2) + 1;
     return *xr > *xl;
 }
 

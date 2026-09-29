@@ -231,9 +231,11 @@ def verify_window(img, rep):
 class Screen:
     def __init__(self):
         self.rows = [bytearray(bytes(DESKTOP) * W) for _ in range(H)]
+        self.clip = (0, 0, W, H)
 
     def fill(self, l, t, r, b, rgb):
-        l, t, r, b = max(l, 0), max(t, 0), min(r, W), min(b, H)
+        cl, ct, cr, cb = self.clip
+        l, t, r, b = max(l, 0, cl), max(t, 0, ct), min(r, W, cr), min(b, H, cb)
         if r <= l or b <= t:
             return
         span = bytes(rgb) * (r - l)
@@ -241,7 +243,7 @@ class Screen:
             self.rows[y][l * 3:r * 3] = span
 
     def put(self, x, y, rgb):
-        if 0 <= x < W and 0 <= y < H:
+        if self.clip[0] <= x < self.clip[2] and self.clip[1] <= y < self.clip[3] and 0 <= x < W and 0 <= y < H:
             self.rows[y][x * 3:x * 3 + 3] = bytes(rgb)
 
     def ring(self, l, t, r, b, tl, br):
@@ -316,6 +318,152 @@ def verify_z4(img, rep):
     compare_screen(img, rep, "z4: A moved to (300,300), the vacated area is desktop again: whole screen matches", s)
 
 
+def poly_fill_pixels(pts):
+    """even-odd fill of an integer polygon: pixel (x,y) belongs to it when the pixel CENTRE (x+.5, y+.5) is inside; exact
+    arithmetic; a horizontal edge never counts, an edge counts for the rows y in [min(y1,y2), max(y1,y2))"""
+    from fractions import Fraction as Fr
+    import math
+    out = []
+    ys = [p[1] for p in pts]
+    for y in range(min(ys), max(ys)):
+        xs = []
+        for i in range(len(pts)):
+            (x1, y1), (x2, y2) = pts[i], pts[(i + 1) % len(pts)]
+            if y1 == y2 or not (min(y1, y2) <= y < max(y1, y2)):
+                continue
+            xs.append(x1 + Fr(2 * y + 1 - 2 * y1, 2) * Fr(x2 - x1, y2 - y1))
+        xs.sort()
+        for a, b in zip(xs[0::2], xs[1::2]):
+            for x in range(math.ceil(a - Fr(1, 2)), math.ceil(b - Fr(1, 2))):
+                out.append((x, y))
+    return out
+
+
+def verify_gdi(img, rep):
+    OX, OY = 100, 100
+    s = Screen()
+    s.fill(OX, OY, OX + 500, OY + 360, (255, 255, 255))
+
+    def P(x, y, c):
+        s.put(OX + x, OY + y, c)
+
+    def R(l, t, r, b, c):
+        s.fill(OX + l, OY + t, OX + r, OY + b, c)
+    for y in range(64):                                                      # A
+        for x in range(256):
+            P(10 + x, 10 + y, (x, 255 - x, 128))
+    for y in range(32):                                                      # B
+        for x in range(128):
+            sx = x * 256 // 128
+            P(10 + x, 90 + y, (sx, 255 - sx, 128))
+    for y in range(32):                                                      # C
+        for x in range(32):
+            P(300 + x, 10 + y, (60 * (x * 4 // 32), 60 * (y * 4 // 32), 200))
+    for v in range(8):                                                       # D
+        for u in range(8):
+            P(300 + u, 60 + v, (32 * u, 32 * v, 32 * (u ^ v)))
+    R(10, 140, 10 + 6 * 16, 140 + 32, (255, 255, 192))                       # E: "Scale2", scale 2, opaque
+    for i, ch in enumerate("Scale2"):
+        for y in range(32):
+            for x in range(16):
+                if glyph_on(ch, x // 2, y // 2):
+                    P(10 + 16 * i + x, 140 + y, (0, 0, 0))
+    for i, ch in enumerate("Bold"):                                          # E: bold = the glyph OR'ed with itself shifted 1 px right
+        for y in range(16):
+            for x in range(8):
+                if glyph_on(ch, x, y) or (x > 0 and glyph_on(ch, x - 1, y)):
+                    P(10 + 8 * i + x, 180 + y, (0, 0, 0))
+    R(200, 150, 300, 250, (200, 0, 0))                                       # F: the L-shaped clip
+    R(200, 250, 400, 300, (200, 0, 0))
+
+    def stripe(yy):
+        return (0, 0, 255) if ((yy - 240) // 10) % 2 == 0 else (255, 255, 0)
+    for y in range(230, 300):                                                # G: stripes scrolled up by 10, bottom 10 rows untouched
+        R(10, y, 110, y + 1, stripe(y + 10 if y < 290 else y))
+    R(10, 320, 110, 321, (0, 255, 255))                                      # H
+    P(10, 330, (0, 255, 255))
+    P(110, 330, (0, 255, 255))
+    for (x, y) in poly_fill_pixels([(420, 20), (485, 20), (452, 73)]):       # I
+        P(x, y, (255, 128, 0))
+    R(450, 300, 470, 320, (255, 0, 255))                                     # K
+    s.fill(5, 5, 25, 25, (128, 255, 0))                                      # L (on the desktop)
+    # J: the ellipse is checked by its properties below; make the expected screen equal to the real one inside its box
+    el, et, er, eb = OX + 420, OY + 100, OX + 480, OY + 160
+    for y in range(et, eb):
+        s.rows[y][el * 3:er * 3] = img.row(y, el, er)
+    compare_screen(img, rep, "gdi: whole screen (BitBlt/StretchBlt/StretchDIBits/SetDIBitsToDevice/scaled+bold text/clip region/scroll/XOR "
+                             "line/polygon/GetDC boxes/desktop DC) matches the host model outside the ellipse box", s)
+    fillc, inside = (0, 200, 255), 0
+    rows = []
+    for y in range(et, eb):
+        row = [img.px(x, y) == fillc for x in range(el, er)]
+        rows.append(row)
+        inside += sum(row)
+    sym_x = all(r == r[::-1] for r in rows)
+    sym_y = rows == rows[::-1]
+    area = 3.14159265 * 30 * 30
+    rep.check("gdi: ellipse is mirror symmetric, centre filled, corners untouched, area within 2% of pi*a*b",
+              sym_x and sym_y and rows[30][30] and not rows[0][0] and not rows[59][59] and abs(inside - area) < 0.02 * area,
+              f"sym_x={sym_x} sym_y={sym_y} pixels={inside} ideal={area:.0f}")
+
+
+def child_window(s, ox, oy, rect, kind, color, boxes):
+    """a child of the parent at screen client origin (ox,oy), clipped to the parent's client area; kind: 'border' (WS_BORDER),
+    'edge' (WS_EX_CLIENTEDGE) or 'plain'. Non-client drawing as documented in kernel64/gfx_wm.c draw_nc."""
+    l, t, r, b = rect
+    L, T, R, B = ox + l, oy + t, ox + r, oy + b
+    s.fill(L, T, R, B, FACE)
+    if kind == "border":
+        s.ring(L, T, R, B, (0, 0, 0), (0, 0, 0))
+        inset = 1
+    elif kind == "edge":
+        s.ring(L, T, R, B, (128, 128, 128), (255, 255, 255))
+        s.ring(L + 1, T + 1, R - 1, B - 1, (64, 64, 64), (192, 192, 192))
+        inset = 2
+    else:
+        inset = 0
+    s.fill(L + inset, T + inset, R - inset, B - inset, color)
+    for (x0, y0, x1, y1) in boxes:
+        s.fill(L + inset + x0, T + inset + y0, L + inset + x1, T + inset + y1, (255, 255, 255))
+
+
+def child_scene(order):
+    """order: list of (name, rect in parent client coordinates), bottom to top"""
+    s = Screen()
+    s.window(100, 100, 500, 400, True, "Parent", FACE)
+    ox, oy = 104, 123
+    s.clip = (ox, oy, ox + 392, oy + 273)
+    spec = {"C1": ("border", (255, 0, 0), [(5, 5, 15, 15)]), "C2": ("edge", (0, 0, 255), [(5, 5, 15, 15)]),
+            "C3": ("plain", (0, 160, 0), [(5, 5, 15, 15), (80, 80, 95, 95)])}
+    for name, rect in order:
+        kind, color, boxes = spec[name]
+        child_window(s, ox, oy, rect, kind, color, boxes)
+    return s
+
+
+C1R, C2R, C3R = (20, 20, 170, 120), (100, 60, 250, 160), (330, 200, 430, 300)
+
+
+def verify_c1(img, rep):
+    compare_screen(img, rep, "c1: parent with C1 (bordered), C2 (client edge) above it and C3 clipped by the parent: whole screen matches",
+                   child_scene([("C1", C1R), ("C2", C2R), ("C3", C3R)]))
+
+
+def verify_c2(img, rep):
+    compare_screen(img, rep, "c2: BringWindowToTop(C1) puts C1 above C2: whole screen matches",
+                   child_scene([("C2", C2R), ("C3", C3R), ("C1", C1R)]))
+
+
+def verify_c3(img, rep):
+    compare_screen(img, rep, "c3: C2 hidden, C3 moved so its second box is half clipped: whole screen matches",
+                   child_scene([("C3", (300, 150, 400, 250)), ("C1", C1R)]))
+
+
+def verify_c4(img, rep):
+    compare_screen(img, rep, "c4: C1 grown to 200x140, the old content kept and the new strips erased: whole screen matches",
+                   child_scene([("C3", (300, 150, 400, 250)), ("C1", (20, 20, 220, 160))]))
+
+
 def verify_orphan1(img, rep):
     s = Screen()
     s.window(560, 380, 800, 540, True, "Orphan", (0, 128, 0))
@@ -327,7 +475,8 @@ def verify_orphan2(img, rep):
 
 
 SCENES = {"fb": verify_fb, "window": verify_window, "z1": verify_z1, "z2": verify_z2, "z3": verify_z3, "z4": verify_z4,
-          "orphan1": verify_orphan1, "orphan2": verify_orphan2}
+          "orphan1": verify_orphan1, "orphan2": verify_orphan2, "gdi": verify_gdi,
+          "c1": verify_c1, "c2": verify_c2, "c3": verify_c3, "c4": verify_c4}
 
 
 # ---------------------------------------------------------------- harness
