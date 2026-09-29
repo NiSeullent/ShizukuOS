@@ -567,6 +567,11 @@ def main():
                                            "delay": sorted(r for r, x in recs.items() if x["delay"] and not x["load"]),
                                            **({"ordinal": next(x["ordinal"] for x in recs.values() if "ordinal" in x)}
                                               if any("ordinal" in x for x in recs.values()) else {})}
+                    for x in recs.values():
+                        if "ordinal_name" in x:
+                            e["ordinal_name"] = x["ordinal_name"]
+                        if x.get("binds_to_in_shizuku"):
+                            e["binds_to_in_shizuku"] = x["binds_to_in_shizuku"]
         args.matrix.write_text(json.dumps(matrix, indent=0) + "\n")
     if args.json:
         if len(apps) == 1:                                   # v1-compatible keys plus the new ones

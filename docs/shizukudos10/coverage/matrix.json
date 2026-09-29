@@ -33199,7 +33199,8 @@
 ],
 "ordinal": 413
 }
-}
+},
+"ordinal_name": "DefSubclassProc"
 },
 "InitCommonControlsEx": {
 "status": "dll-missing",
@@ -33241,7 +33242,8 @@
 ],
 "ordinal": 412
 }
-}
+},
+"ordinal_name": "RemoveWindowSubclass"
 },
 "#410": {
 "status": "dll-missing",
@@ -33260,7 +33262,8 @@
 ],
 "ordinal": 410
 }
-}
+},
+"ordinal_name": "SetWindowSubclass"
 },
 "#345": {
 "status": "dll-missing",
@@ -33279,7 +33282,8 @@
 ],
 "ordinal": 345
 }
-}
+},
+"ordinal_name": "TaskDialogIndirect"
 }
 }
 },
@@ -36487,7 +36491,8 @@
 ],
 "ordinal": 190
 }
-}
+},
+"ordinal_name": "ILCreateFromPathW"
 },
 "#155": {
 "status": "ordinal-unpinned",
@@ -36515,7 +36520,8 @@
 ],
 "ordinal": 155
 }
-}
+},
+"ordinal_name": "ILFree"
 },
 "SHAddToRecentDocs": {
 "status": "fn-missing",
@@ -36990,7 +36996,8 @@
 "delay": [],
 "ordinal": 102
 }
-}
+},
+"ordinal_name": "SHCoCreateInstance"
 },
 "#680": {
 "status": "ordinal-unpinned",
@@ -37004,7 +37011,8 @@
 ],
 "ordinal": 680
 }
-}
+},
+"ordinal_name": "IsUserAnAdmin"
 },
 "#4": {
 "status": "ordinal-unpinned",
@@ -37016,7 +37024,9 @@
 ],
 "ordinal": 4
 }
-}
+},
+"ordinal_name": "SHChangeNotifyDeregister",
+"binds_to_in_shizuku": "SHGetKnownFolderPath"
 },
 "#2": {
 "status": "ordinal-unpinned",
@@ -37028,7 +37038,9 @@
 ],
 "ordinal": 2
 }
-}
+},
+"ordinal_name": "SHChangeNotifyRegister",
+"binds_to_in_shizuku": "GetCurrentProcessExplicitAppUserModelID"
 },
 "SHCreateAssociationRegistration": {
 "status": "fn-missing",
@@ -37230,7 +37242,8 @@
 ],
 "ordinal": 219
 }
-}
+},
+"ordinal_name": "QISearch"
 },
 "#12": {
 "status": "ordinal-unpinned",
@@ -37256,7 +37269,9 @@
 ],
 "ordinal": 12
 }
-}
+},
+"ordinal_name": "SHCreateMemStream",
+"binds_to_in_shizuku": "PathIsRootW"
 },
 "PathFileExistsW": {
 "status": "provided",
@@ -37314,7 +37329,8 @@
 ],
 "ordinal": 437
 }
-}
+},
+"ordinal_name": "IsOS"
 },
 "UrlCanonicalizeW": {
 "status": "fn-missing",
@@ -38739,7 +38755,8 @@
 ],
 "ordinal": 17
 }
-}
+},
+"ordinal_name": "ActivateAudioInterfaceAsync"
 }
 }
 },
@@ -40825,7 +40842,8 @@
 ],
 "ordinal": 203
 }
-}
+},
+"ordinal_name": "GetDefaultPrinterW"
 },
 "GetPrinterDriverW": {
 "status": "dll-missing",
@@ -41004,7 +41022,8 @@
 ],
 "ordinal": 47
 }
-}
+},
+"ordinal_name": "DrawThemeBackgroundEx"
 },
 "GetThemeBackgroundContentRect": {
 "status": "dll-missing",
@@ -41104,7 +41123,8 @@
 ],
 "ordinal": 101
 }
-}
+},
+"ordinal_name": "D3D12CreateDevice"
 }
 }
 },
@@ -44484,7 +44504,8 @@
 "delay": [],
 "ordinal": 1
 }
-}
+},
+"ordinal_name": "D2D1CreateFactory"
 }
 }
 },
