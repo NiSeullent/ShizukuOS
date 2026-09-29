@@ -34,6 +34,7 @@ struct fsnode {
     void *chain;                        /* FSB_DISK file: extent cache (owned by the volume code) */
     uint64_t ftime_c, ftime_m;          /* FSB_DISK: FILETIME create / write (0 = unknown) */
     void *view;                         /* kernel file view (kwin.c) while the file backs an image: no writes then */
+    char alias[13];                     /* FSB_DISK: 8.3 alias "NAME~1.EXT" when the name has an LFN, else empty */
 };
 
 /* A mounted volume: how its nodes are read, enumerated and (when `write` is set) modified. Mutating operations
@@ -56,6 +57,8 @@ typedef struct {
     int console;                        /* 0 none, 1 input, 2 output */
     int append;
     uint64_t dir_index;                 /* NtQueryDirectoryFile cursor */
+    uint16_t *dir_pattern;              /* NtQueryDirectoryFile FileName filter (heap, NUL-terminated), NULL = all */
+    int dir_started;                    /* the first query fixed the pattern */
 } file_t;
 
 #define FILE_SUPERSEDE 0

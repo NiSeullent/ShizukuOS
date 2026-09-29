@@ -55,6 +55,19 @@ static void *cb_page(void *ctx)
     return pa ? (void *)p2v(pa) : 0;            /* FAT copy pages are never freed: the volume stays mounted */
 }
 
+/* "NAME~1.EXT" from an 11-byte short entry name (stored only for entries that also have a long name); bytes of the
+ * OEM code page (>= 0x80, including the 0x05 escape for a leading 0xE5) become '_' as in fat32.c's 8.3 names. */
+static void set_alias(fsnode_t *c, const uint8_t *sn)
+{
+    unsigned i, n = 0;
+    for (i = 0; i < 8 && sn[i] != ' '; ++i) c->alias[n++] = sn[i] >= 0x80 || (i == 0 && sn[0] == 0x05) ? '_' : (char)sn[i];
+    if (sn[8] != ' ') {
+        c->alias[n++] = '.';
+        for (i = 8; i < 11 && sn[i] != ' '; ++i) c->alias[n++] = sn[i] >= 0x80 ? '_' : (char)sn[i];
+    }
+    c->alias[n] = 0;
+}
+
 /* ---------------------------------------------------------------- fsvol operations */
 /* Extent list of a file, built on first use (caller holds d->lock). */
 static fat32_chain_t *node_chain(disk_vol_t *d, fsnode_t *n)
@@ -166,6 +179,7 @@ static fsnode_t *vol_create(fsvol_t *v, fsnode_t *dir, const char *name, int is_
             c->ftime_c = c->ftime_m = fat32_filetime(date, time, 0);
             c->dir_cluster = e->dir_cluster;
             c->dir_offset = e->dir_offset;
+            if (e->has_lfn) set_alias(c, e->short_name);
             c->populated = 1;                       /* a new directory holds only "." and ".." */
             ++creates_ok;
             ++d->nodes;
@@ -215,6 +229,7 @@ static int vol_populate(fsvol_t *v, fsnode_t *dir)
         c->first_cluster = e->first_cluster;
         c->dir_cluster = e->dir_cluster;
         c->dir_offset = e->dir_offset;
+        if (e->has_lfn) set_alias(c, e->short_name);
         c->size = c->is_dir ? 0 : e->size;
         if (e->attr & FAT32_ATTR_RO) c->readonly = 1;
         c->attrs = e->attr & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_ARCHIVE);

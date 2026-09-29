@@ -82,7 +82,7 @@ def pattern(seed, n):
 FIXED_FILETIME = (FIXED_EPOCH + 11644473600) * 10_000_000
 
 
-def disk_checks(serial, ev, manifest):
+def disk_checks(serial, ev, manifest, image_path):
     """T_DISK.EXE lines (DISK-DIR/CRC/RANGE/NESTED) against the files packed into the image."""
     e = lambda s: ev.get(s, 0)  # noqa: E731
     c = []
@@ -140,6 +140,24 @@ def disk_checks(serial, ev, manifest):
             xor ^= zlib.crc32(data) & 0xffffffff
     c.append(base.check("FAT32: evidence slot 18 = (files hashed << 32 | xor of CRCs)",
                         e(18) == (sum(1 for d in tests.values() if d is not None) << 32) | xor, f"{e(18):#x}"))
+    queries = {}
+    for m in re.finditer(r"^\[win64 T_DISK\.EXE pid \d+\] DISK-QUERY (\d+) (\S+) (.*)\|(.*)$", serial, re.M):
+        queries.setdefault((int(m.group(1)), m.group(2)), []).append((m.group(3), m.group(4)))
+    listing = run(["mdir", "-i", str(image_path), "::TESTS"], env=mtools_env(), capture=True).stdout
+    aliases = {}
+    for line in listing.splitlines():                  # "ALONGM~1 DAT     12293 2026-07-29   0:00  A Long Mixed-Case File Name.dat"
+        mm = re.match(r"^(\S+)\s+(\S{1,3})?\s+(?:<DIR>|\d+)\s+\S+\s+\S+\s+(.+)$", line)
+        if mm:
+            aliases[mm.group(3).strip()] = mm.group(1) + ("." + mm.group(2) if mm.group(2) else "")
+    want = {(12, "*.bin"): sorted((n, "") for n in tests if n.endswith(".bin")),
+            (1, "A*.DAT"): [("A Long Mixed-Case File Name.dat", "")],
+            (3, "*"): sorted((n, aliases.get(n, "")) for n in tests)}
+    got = {k: sorted(v) for k, v in queries.items()}
+    bad = [f"{k}: guest {got.get(k)} host {v}" for k, v in want.items() if got.get(k) != v]
+    if (3, "nomatch*.zzz") in got:
+        bad.append(f"nomatch returned {got[(3, 'nomatch*.zzz')]}")
+    c.append(base.check("NtQueryDirectoryFile: kernel-side patterns, classes 1/3/12 (FileName @64/@94/@12), ShortName = mtools alias",
+                        not bad and len(aliases) >= 2, "; ".join(bad) or f"aliases {aliases}"))
     c.append(base.check("T_DISK.EXE did not SKIP (D: was mounted)", "SKIP:" not in "".join(
         l for l in serial.splitlines() if "T_DISK.EXE" in l) and "t_disk:" in serial))
     m = re.search(r"K64 disk: D: = (\S+), FAT32 \"(\w*)\" id ([0-9a-f]+), (\d+) clusters of (\d+) bytes", serial)
@@ -276,7 +294,7 @@ def main():
     checks.append(base.check("AHCI: guest read sector 0 (crc32 and sector count match the host image)",
                              e(13) == (expect_sectors << 32) | expect_crc0,
                              f"guest={e(13):#x} host=({expect_sectors} << 32 | {expect_crc0:#x})"))
-    checks += disk_checks(serial, ev, manifest)
+    checks += disk_checks(serial, ev, manifest, image)
     checks.insert(len(checks), base.check("host: fsck.fat -n finds the freshly built image clean (baseline)", fsck0.returncode == 0,
                                           f"rc={fsck0.returncode}"))
     checks += write_checks(serial, image, out)

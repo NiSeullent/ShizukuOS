@@ -68,6 +68,56 @@ static int list_dir(const wchar_t *ntpath, dent_t *out, int cap)
     return n;
 }
 
+/* NtQueryDirectoryFile with a FileName pattern and a given information class; prints one line per returned name:
+ * "DISK-QUERY <class> <pattern> <name>|<alias>" (class 3 also carries the ShortName). Returns the count or -1. */
+static int query_pattern(const wchar_t *ntpath, const wchar_t *pattern, const char *pattern_a, unsigned cls, unsigned name_off,
+                         unsigned len_off)
+{
+    static unsigned char buf[4096];
+    N_USTR us, pat;
+    N_OA oa;
+    N_IOSB iosb;
+    HANDLE h;
+    NTSTATUS st;
+    int n = 0, first = 1;
+    unsigned i;
+    for (i = 0; ntpath[i]; ++i) ;
+    us.Buffer = (PWSTR)ntpath; us.Length = (USHORT)(i * 2); us.MaximumLength = us.Length + 2;
+    for (i = 0; pattern[i]; ++i) ;
+    pat.Buffer = (PWSTR)pattern; pat.Length = (USHORT)(i * 2); pat.MaximumLength = pat.Length + 2;
+    memset(&oa, 0, sizeof oa); oa.Length = sizeof oa; oa.ObjectName = &us;
+    st = NtOpenFile(&h, FILE_LIST_DIRECTORY | SYNCHRONIZE, &oa, &iosb, FILE_SHARE_READ, N_FILE_DIRECTORY_FILE);
+    if (st) { printf("FAIL: NtOpenFile for a pattern query: %x\n", (unsigned)st); return -1; }
+    for (;;) {
+        unsigned off = 0;
+        /* the pattern is fixed by the first call; later calls pass none (NT semantics) */
+        st = NtQueryDirectoryFile(h, 0, 0, 0, &iosb, buf, sizeof buf, cls, FALSE, first ? &pat : 0, FALSE);
+        if (st == N_STATUS_NO_MORE_FILES || (first && st == (NTSTATUS)0xC000000F)) break;     /* STATUS_NO_SUCH_FILE */
+        first = 0;
+        if (st) { printf("FAIL: NtQueryDirectoryFile class %u pattern %s: %x\n", cls, pattern_a, (unsigned)st); NtClose(h); return -1; }
+        for (;;) {
+            const unsigned char *e = buf + off;
+            const ULONG next = *(const ULONG *)e, nlen = *(const ULONG *)(e + len_off);
+            const WCHAR *w = (const WCHAR *)(e + name_off);
+            char name[260], alias[16];
+            for (i = 0; i < nlen / 2 && i < 259; ++i) name[i] = w[i] < 0x80 ? (char)w[i] : '?';
+            name[i] = 0;
+            alias[0] = 0;
+            if (cls == 3) {
+                const unsigned slen = e[68];
+                for (i = 0; i < slen / 2 && i < 12; ++i) alias[i] = (char)((const WCHAR *)(e + 70))[i];
+                alias[i] = 0;
+            }
+            printf("DISK-QUERY %u %s %s|%s\n", cls, pattern_a, name, alias);
+            ++n;
+            if (!next) break;
+            off += next;
+        }
+    }
+    NtClose(h);
+    return n;
+}
+
 static uint32_t crc_update(uint32_t crc, const void *data, size_t n)
 {
     const unsigned char *p = data;
@@ -273,6 +323,11 @@ int main(void)
         }
         U_CHECK("case-insensitive lookup on D:", GetFileAttributesA("d:\\tests\\SUB DIRECTORY\\NESTED FILE.TXT") != INVALID_FILE_ATTRIBUTES);
     }
+    /* kernel-side filtering and the other information classes (FileName offsets 64, 12, 94) */
+    U_CHECK("query *.bin (FileNamesInformation)", query_pattern(L"\\??\\D:\\TESTS", L"*.bin", "*.bin", 12, 12, 8) == 2);
+    U_CHECK("query A*.DAT (FileDirectoryInformation)", query_pattern(L"\\??\\D:\\TESTS", L"A*.DAT", "A*.DAT", 1, 64, 60) == 1);
+    U_CHECK("query * (FileBothDirectoryInformation with ShortName)", query_pattern(L"\\??\\D:\\TESTS", L"*", "*", 3, 94, 60) == 6);
+    U_CHECK("query nomatch*.zzz finds nothing", query_pattern(L"\\??\\D:\\TESTS", L"nomatch*.zzz", "nomatch*.zzz", 3, 94, 60) == 0);
     printf("DISK-SUMMARY %u %u %x\n", entries, hashed, xor_crc);
     shz_evidence(18, ((unsigned long long)hashed << 32) | xor_crc);   /* user slots are 16..23 */
     write_tests();
