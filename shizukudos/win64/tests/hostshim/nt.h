@@ -17,7 +17,8 @@ typedef uint8_t BYTE;
 typedef uint16_t WORD;
 typedef uint32_t DWORD;
 typedef int32_t LONG;
-typedef uint32_t ULONG;
+typedef uint32_t ULONG, *PULONG;
+typedef uint16_t USHORT;
 typedef uint64_t DWORD64, ULONG64, ULONG_PTR;
 typedef uint64_t *PDWORD64;
 typedef int BOOLEAN;
@@ -123,4 +124,6 @@ NTSTATUS NTAPI NtRaiseException(PEXCEPTION_RECORD, PCONTEXT, BOOLEAN);
 NTSTATUS NTAPI NtTerminateProcess(PVOID, NTSTATUS);
 VOID NTAPI RtlExitUserProcess(NTSTATUS);
 void RtlCaptureContext(PCONTEXT);
+/* no thread environment on the host: a zeroed TEB whose stack bounds (0x08/0x10) are 0 ends every stack walk at once */
+static inline uint64_t shz_teb(void) { static uint64_t teb[8]; return (uint64_t)(uintptr_t)teb; }
 #endif
