@@ -141,7 +141,19 @@ static const apiset_entry_t apiset_table[] = {
     {"api-ms-win-shell-shdirectory-l1", 1, 0, "shcore.dll", "shcore.dll"},
     {"api-ms-win-shell-shellcom-l1", 1, 0, "shell32.dll", "shell32.dll"},
     {"api-ms-win-shell-shellfolders-l1", 1, 0, "shell32.dll", "shell32.dll"},
+    {"ext-ms-win-gdi-dc-create-l1", 1, 1, "gdi32.dll", "gdi32.dll"},
+    {"ext-ms-win-gdi-dc-l1", 2, 0, "gdi32.dll", "gdi32.dll"},
+    {"ext-ms-win-gdi-devcaps-l1", 1, 0, "gdi32.dll", "gdi32.dll"},
+    {"ext-ms-win-gdi-draw-l1", 1, 1, "gdi32.dll", "gdi32.dll"},
+    {"ext-ms-win-gdi-font-l1", 1, 1, "gdi32.dll", "gdi32.dll"},
+    {"ext-ms-win-gdi-object-l1", 1, 0, "gdi32.dll", "gdi32.dll"},
+    {"ext-ms-win-gdi-render-l1", 1, 0, "gdi32.dll", "gdi32.dll"},
+    {"ext-ms-win-ntuser-message-l1", 1, 1, "user32.dll", "user32.dll"},
+    {"ext-ms-win-ntuser-rectangle-ext-l1", 1, 0, "user32.dll", "user32.dll"},
+    {"ext-ms-win-ntuser-sysparams-ext-l1", 1, 0, "user32.dll", "user32.dll"},
+    {"ext-ms-win-ntuser-window-l1", 1, 4, "user32.dll", "user32.dll"},
+    {"ext-ms-win-ntuser-windowclass-l1", 1, 1, "user32.dll", "user32.dll"},
     {"ext-ms-win-uiacore-l1", 1, 3, "uiautomationcore.dll", "uiautomationcore.dll"},
 };
-#define APISET_TABLE_COUNT 135u
+#define APISET_TABLE_COUNT 147u
 #endif
