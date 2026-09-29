@@ -126,6 +126,10 @@ int ahci_blk_init(void)
     dev.flags = BLK_F_READONLY;                     /* ahci_native is a read-only core: no write command */
     dev.read = ahci_read;
     dev.priv = &disk;
+    dev.driver = "ahci";                            /* storage-track metadata (blk.h extensions) */
+    dev.irq_mode = "poll";
+    dev.queue_depth = 1;
+    dev.max_sectors = 1;
     return blk_register(&dev);
 }
 #else
