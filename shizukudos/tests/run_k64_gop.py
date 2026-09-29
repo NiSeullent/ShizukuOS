@@ -309,7 +309,8 @@ def main():
         raise SystemExit("WIN64.IMG does not match shizukudos/win64 build-result.json")
     files = receipt["archive"]["files"]
     apps = sorted(f.rsplit("\\", 1)[1] for f in files if re.fullmatch(r"\\SHZ\\TESTS\\T_[A-Z0-9_]+\.EXE", f))
-    built_dlls = sorted(f.rsplit("\\", 1)[-1].lower() for f in files if f.upper().startswith("\\SHZ\\SYS64\\"))
+    built_dlls = sorted(f.rsplit("\\", 1)[-1].lower() for f in files
+                        if f.upper().startswith("\\SHZ\\SYS64\\") and f.upper().endswith(".DLL"))   # SYS64 also holds programs
     OUT.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%dT%H%M%S-"), dir=OUT))
     host = gui.Report()
