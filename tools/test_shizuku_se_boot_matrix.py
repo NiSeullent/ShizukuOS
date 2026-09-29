@@ -249,6 +249,13 @@ def judge_dos16(qmp, run_dir: Path, pristine: bytes, keep: bool) -> tuple[list[d
     return checks, info
 
 
+def stutter(literal: str) -> str:
+    """Regex for a literal whose characters may be repeated. CSMWrap's boot CPU and its BIOS-proxy AP both write
+    COM1 while it starts, and its log then shows doubled characters ('BIOS proxy reaady', 'Boot deevice'); the
+    matched text is kept in the check detail, so such garbling stays visible in the evidence."""
+    return "".join(re.escape(ch) + "+" for ch in literal)
+
+
 def boot_path_checks(firmware: str, medium: str, text: str, command: list[str], loader_interim: bool) -> list[dict]:
     banner = "SYSLINUX 6.04" if medium == "disk" else "ISOLINUX 6.04"
     if firmware == "seabios":
@@ -264,11 +271,11 @@ def boot_path_checks(firmware: str, medium: str, text: str, command: list[str], 
                   ("UEFI Shell ran \\STARTUP.NSH, which started CSMWRAP.EFI", r"SHZ-SE: starting fs\d+:\\EFI\\SHIZUKU")]
     else:
         steps += [("Shizuku loader boot manager chose CSMWrap", r"Boot manager: .*mode=")]
-    steps += [("CSMWrap BIOS proxy on a reserved AP", r"BIOS proxy re+ady \(AP \d+\)"),
+    steps += [("CSMWrap BIOS proxy on a reserved AP", stutter("BIOS proxy ready (AP ") + r"\d+\)+"),
               ("CSMWrap boot device = the controller of the medium",
-               r"bootdev: Boot device: PCI " + (r"[0-9a-f]{2}:[0-9a-f]{2}\.\d type=\w+" if medium == "iso-usb"
-                                                else r"00:1f\.2")),
-              (f"SeaBIOS CSM legacy-booted the medium: {banner}", re.escape(banner))]
+               stutter("bootdev: Boot device: PCI ") + (r"[0-9a-f]{2}:[0-9a-f]{2}\.\d" if medium == "iso-usb"
+                                                        else stutter("00:1f.2"))),
+              (f"SeaBIOS CSM legacy-booted the medium: {banner}", stutter(banner))]
     out, pos = [check("UEFI: OVMF in pflash", any("pflash" in c for c in command))], 0
     for name, rx in steps:
         m = re.compile(rx).search(text, pos)

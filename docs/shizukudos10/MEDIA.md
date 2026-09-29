@@ -47,7 +47,7 @@ from how the medium works, not test results.
 
 | | Setting |
 | --- | --- |
-| RAM | 512 MiB recommended; 256 MiB minimum (Kernel64 uses up to 256 MiB; memdisk holds the 32 MiB DOS16 image) |
+| RAM | 512 MiB (every test run used 512 MiB). 256 MiB is a derived minimum, not tested: Kernel64 uses up to 256 MiB (the stub refuses below 64 MiB), memdisk holds the 32 MiB DOS16 image |
 | vCPUs | 1 is enough on legacy BIOS; **2 or more on UEFI** (CSMWrap keeps one logical CPU and refuses with one) |
 | UEFI | **Secure Boot off** (nothing is signed). Supervisor needs nested Intel VT-x; otherwise CSMWrap |
 | Storage for the CSM path | IDE/SATA (AHCI), NVMe, USB, LSI/MPT/PVSCSI/MegaRAID SCSI. Not virtio, not Hyper-V VMBus |
