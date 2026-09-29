@@ -99,7 +99,9 @@ def build_kernel32(ntdll_names):
     src = sorted((W64 / "kernel32").glob("*.c"))
     names = scan_exports(src, "K32API")
     forwards = [f"{n} = ntdll.{n}" for n in ("RtlCaptureContext", "RtlLookupFunctionEntry", "RtlVirtualUnwind", "RtlUnwindEx",
-                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException") if n in ntdll_names or n == "RtlCaptureContext"]
+                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException", "RtlCaptureStackBackTrace",
+                                                 "VerSetConditionMask")
+                if n in ntdll_names or n == "RtlCaptureContext"]
     names = [n for n in names if n not in ("RtlUnwindKernel32",)]
     # Windows kernel32 forwards these to ntdll too (V8 and Chromium import them from kernel32); delay-load resolution is
     # the api-ms-win-core-delayload contract, hosted by kernel32 here (kernelbase on Windows).
@@ -247,7 +249,7 @@ def pack_archive(files):
 
 def main():
     argparse.ArgumentParser(description=__doc__).parse_args()
-    for tool in (CC, DLLTOOL):
+    for tool in (CC, DLLTOOL, WINDRES):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     OUT.mkdir(parents=True, exist_ok=True)

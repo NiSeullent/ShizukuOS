@@ -1018,6 +1018,7 @@ static void rollback(process_t *p, module_t *mark, unsigned tls_mark)
 void ldr_release_modules(process_t *p)
 {
     module_t *m = p->modules, *next;
+    p->modules = 0;                                     /* detached first: sysk32_proc.c reads the list of other processes */
     for (; m; m = next) {
         next = m->next;
         if (m->img) {
@@ -1452,4 +1453,24 @@ uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint
     mutex_unlock(&p->ldr_lock);
     kfree(c);
     return m ? va : 0;
+}
+
+/* kernel32 support (sysk32_proc.c: toolhelp, GetMappedFileName, QueryFullProcessImageName): the index-th mapped module of p
+ * in load order (the executable first). Returns 0 and fills the outputs, or -1 past the last module. */
+int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t *size, const char **name, const char **path)
+{
+    module_t *m;
+    unsigned n = 0, want;
+    for (m = p->modules; m; m = m->next)
+        if (m->state == 1) ++n;
+    if (index >= n) return -1;
+    want = n - 1 - index;                                       /* the list is newest first */
+    for (m = p->modules; m; m = m->next) {
+        if (m->state != 1) continue;
+        if (want-- == 0) {
+            *base = m->base; *size = m->info.size_of_image; *name = m->name; *path = m->path;
+            return 0;
+        }
+    }
+    return -1;
 }

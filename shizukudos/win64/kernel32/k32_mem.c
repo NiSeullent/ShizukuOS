@@ -59,7 +59,7 @@ K32API HANDLE WINAPI HeapCreate(DWORD flags, SIZE_T init, SIZE_T max)
     if (!h) shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY);
     return h;
 }
-K32API BOOL WINAPI HeapDestroy(HANDLE h) { return RtlDestroyHeap(h); }
+K32API BOOL WINAPI HeapDestroy(HANDLE h) { if (RtlDestroyHeap(h)) return TRUE; shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
 K32API LPVOID WINAPI HeapAlloc(HANDLE h, DWORD flags, SIZE_T size)
 {
     PVOID p = RtlAllocateHeap(h, flags, size);
@@ -80,20 +80,117 @@ K32API BOOL WINAPI HeapFree(HANDLE h, DWORD flags, LPVOID p)
 K32API SIZE_T WINAPI HeapSize(HANDLE h, DWORD flags, LPCVOID p) { return RtlSizeHeap(h, flags, (PVOID)p); }
 K32API BOOL WINAPI HeapValidate(HANDLE h, DWORD flags, LPCVOID p) { return RtlValidateHeap(h, flags, (PVOID)p); }
 
-/* Fixed-memory Local and Global allocations only; movable memory (LMEM_MOVEABLE) is not implemented. */
-K32API HLOCAL WINAPI LocalAlloc(UINT flags, SIZE_T size)
+/* ---------------------------------------------------------------- heap enumeration and settings (ntdll heap) */
+ULONG NTAPI RtlGetProcessHeaps(ULONG, PVOID *);
+SIZE_T NTAPI RtlCompactHeap(PVOID, ULONG);
+BOOLEAN NTAPI RtlLockHeap(PVOID);
+BOOLEAN NTAPI RtlUnlockHeap(PVOID);
+NTSTATUS NTAPI RtlWalkHeap(PVOID, PVOID);
+
+K32API DWORD WINAPI GetProcessHeaps(DWORD n, PHANDLE heaps) { return RtlGetProcessHeaps(n, (PVOID *)heaps); }
+
+K32API SIZE_T WINAPI HeapCompact(HANDLE h, DWORD flags)
 {
-    if (flags & LMEM_MOVEABLE) { shz_set_last_error(ERROR_NOT_SUPPORTED); return 0; }
-    return HeapAlloc(ShzProcessHeap(), (flags & LMEM_ZEROINIT) ? HEAP_ZERO_MEMORY : 0, size);
+    SIZE_T n;
+    if (!RtlValidateHeap(h, 0, 0)) { shz_set_last_error(ERROR_INVALID_HANDLE); return 0; }
+    n = RtlCompactHeap(h, flags);
+    if (!n) shz_set_last_error(NO_ERROR);                  /* documented: no free block at all is not an error */
+    return n;
 }
-K32API HLOCAL WINAPI LocalFree(HLOCAL p) { return HeapFree(ShzProcessHeap(), 0, p) ? 0 : p; }
-K32API HLOCAL WINAPI LocalReAlloc(HLOCAL p, SIZE_T size, UINT flags) { return HeapReAlloc(ShzProcessHeap(), (flags & LMEM_ZEROINIT) ? HEAP_ZERO_MEMORY : 0, p, size); }
-K32API HGLOBAL WINAPI GlobalAlloc(UINT flags, SIZE_T size)
+
+K32API BOOL WINAPI HeapLock(HANDLE h) { if (RtlLockHeap(h)) return TRUE; shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
+K32API BOOL WINAPI HeapUnlock(HANDLE h)
 {
-    if (flags & GMEM_MOVEABLE) { shz_set_last_error(ERROR_NOT_SUPPORTED); return 0; }
-    return HeapAlloc(ShzProcessHeap(), (flags & GMEM_ZEROINIT) ? HEAP_ZERO_MEMORY : 0, size);
+    if (RtlUnlockHeap(h)) return TRUE;
+    shz_set_last_error(RtlValidateHeap(h, 0, 0) ? ERROR_NOT_OWNER : ERROR_INVALID_HANDLE);
+    return FALSE;
 }
-K32API HGLOBAL WINAPI GlobalFree(HGLOBAL p) { return HeapFree(ShzProcessHeap(), 0, p) ? 0 : p; }
+
+/* RTL_HEAP_WALK_ENTRY (ntdll) <-> PROCESS_HEAP_ENTRY */
+typedef struct {
+    PVOID DataAddress; SIZE_T DataSize; UCHAR OverheadBytes, SegmentIndex; USHORT Flags;
+    union { struct { SIZE_T Settable; USHORT TagIndex, BackTraceIndex; ULONG Reserved[2]; } Block;
+            struct { ULONG CommittedSize, UnCommittedSize; PVOID FirstEntry, LastEntry; } Segment; } u;
+} rtl_walk_entry;
+
+K32API BOOL WINAPI HeapWalk(HANDLE h, LPPROCESS_HEAP_ENTRY e)
+{
+    rtl_walk_entry r;
+    NTSTATUS st;
+    if (!e) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    memset(&r, 0, sizeof r);
+    r.DataAddress = e->lpData;
+    st = RtlWalkHeap(h, &r);
+    if (st == (NTSTATUS)0x8000001A) { shz_set_last_error(ERROR_NO_MORE_ITEMS); return FALSE; }      /* STATUS_NO_MORE_ENTRIES */
+    if (st) { k32_nt_error(st); return FALSE; }
+    memset(e, 0, sizeof *e);
+    e->lpData = r.DataAddress;
+    e->cbData = (DWORD)r.DataSize;
+    e->cbOverhead = r.OverheadBytes;
+    e->iRegionIndex = r.SegmentIndex;
+    if (r.Flags & 2) {
+        e->wFlags = PROCESS_HEAP_REGION;
+        e->Region.dwCommittedSize = r.u.Segment.CommittedSize;
+        e->Region.dwUnCommittedSize = r.u.Segment.UnCommittedSize;
+        e->Region.lpFirstBlock = r.u.Segment.FirstEntry;
+        e->Region.lpLastBlock = r.u.Segment.LastEntry;
+    } else if (r.Flags & 1) {
+        e->wFlags = PROCESS_HEAP_ENTRY_BUSY;
+    }
+    return TRUE;
+}
+
+K32API BOOL WINAPI HeapSetInformation(HANDLE h, HEAP_INFORMATION_CLASS cls, PVOID info, SIZE_T len)
+{
+    NTSTATUS st = (NTSTATUS)RtlSetHeapInformation(h, cls, info, len);
+    if (st) { k32_nt_error(st); return FALSE; }
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------- page residency (kernel64/sysk32_proc.c) */
+static NTSTATUS range_op(HANDLE proc, ULONG cls, LPCVOID addr, SIZE_T size)
+{
+    ULONG64 r[2];
+    r[0] = (ULONG64)(ULONG_PTR)addr;
+    r[1] = size;
+    return NtShzSetK32(cls, proc, r, sizeof r);
+}
+
+/* Returns a Win32 error code (not through GetLastError). The pages stay committed; their contents are gone (zero on next touch). */
+K32API DWORD WINAPI DiscardVirtualMemory(PVOID addr, SIZE_T size)
+{
+    NTSTATUS st;
+    if (!addr || !size) return ERROR_INVALID_PARAMETER;
+    st = range_op(GetCurrentProcess(), K32S_DISCARD, addr, size);
+    return st ? RtlNtStatusToDosError(st) : ERROR_SUCCESS;
+}
+
+K32API BOOL WINAPI PrefetchVirtualMemory(HANDLE proc, ULONG_PTR n, PWIN32_MEMORY_RANGE_ENTRY ranges, ULONG flags)
+{
+    ULONG_PTR i;
+    if (flags || !n || !ranges) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    for (i = 0; i < n; ++i) {
+        NTSTATUS st = range_op(proc, K32S_PREFETCH, ranges[i].VirtualAddress, ranges[i].NumberOfBytes);
+        if (st) { k32_nt_error(st); return FALSE; }
+    }
+    return TRUE;
+}
+
+K32API BOOL WINAPI VirtualLock(LPVOID addr, SIZE_T size)
+{
+    NTSTATUS st = range_op(GetCurrentProcess(), K32S_LOCK, addr, size);
+    if (st) { k32_nt_error(st); return FALSE; }
+    return TRUE;
+}
+
+K32API BOOL WINAPI VirtualUnlock(LPVOID addr, SIZE_T size)
+{
+    NTSTATUS st = range_op(GetCurrentProcess(), K32S_UNLOCK, addr, size);
+    if (st) { k32_nt_error(st); return FALSE; }
+    return TRUE;
+}
+
+/* Global and Local memory (fixed and movable) live in k32_gmem.c. */
 
 /* ---------------------------------------------------------------- modules */
 static HMODULE find_module_w(LPCWSTR name)

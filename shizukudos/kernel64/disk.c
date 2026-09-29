@@ -321,3 +321,22 @@ void disk_init(void)
         shz_evidence(14, ((uint64_t)n << 32) | dvol.fat.volume_id);
     }
 }
+
+/* Volume properties for NtQueryVolumeInformationFile (sysk32.c). Returns 0 when `n` lives on a disk volume. */
+int disk_volume_info(const fsnode_t *n, uint32_t *serial, char label[12], uint64_t *total_clusters, uint64_t *free_clusters,
+                     uint32_t *sectors_per_cluster, int *writable)
+{
+    disk_vol_t *d;
+    if (!n || n->backing != FSB_DISK || !n->vol || !n->vol->priv) return -1;
+    d = n->vol->priv;
+    mutex_lock(&d->lock);
+    *serial = d->fat.volume_id;
+    memcpy(label, d->fat.label, 12);
+    label[11] = 0;
+    *total_clusters = d->fat.cluster_count;
+    *free_clusters = d->fat.free_clusters;
+    *sectors_per_cluster = d->fat.spc;
+    *writable = n->vol->write != 0;
+    mutex_unlock(&d->lock);
+    return 0;
+}

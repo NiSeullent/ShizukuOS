@@ -45,6 +45,19 @@ static thread_t *pick_next(void)
     return idle_thread;
 }
 
+static inline uint64_t rdtsc(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
+
+thread_t *thread_slot(unsigned i) { return i < MAX_THREADS ? &threads[i] : 0; }
+
+uint64_t thread_cycles_now(thread_t *t)
+{
+    const uint64_t f = irq_save();
+    uint64_t c = t->cycles;
+    if (t == current && t->tsc_in) c += rdtsc() - t->tsc_in;
+    irq_restore(f);
+    return c;
+}
+
 static inline void fx_save(thread_t *t) { __asm__ volatile("fxsave (%0)" :: "r"(t->fx) : "memory"); }
 static inline void fx_restore(thread_t *t) { __asm__ volatile("fxrstor (%0)" :: "r"(t->fx) : "memory"); }
 
@@ -73,6 +86,12 @@ static void schedule(void)
         prev->user_gs_base = rdmsr(MSR_GS_BASE);
         wrmsr(MSR_GS_BASE, next->user_gs_base);
     }
+    {
+        const uint64_t now = rdtsc();                   /* cycle accounting: the slice prev just ran */
+        if (prev->tsc_in) prev->cycles += now - prev->tsc_in;
+        prev->tsc_in = 0;
+        next->tsc_in = now;
+    }
     fx_save(prev);
     fx_restore(next);
     switch_stacks(&prev->rsp, next->rsp);
@@ -81,11 +100,21 @@ static void schedule(void)
 void __attribute__((weak)) sched_check_timeouts(uint64_t now) { (void)now; }       /* objects.c overrides */
 void __attribute__((weak)) thread_object_signal(thread_t *t) { (void)t; }          /* objects.c overrides */
 
+static int tick_from_user;
+
+void sched_tick_from(int user_mode)
+{
+    tick_from_user = user_mode;
+    sched_tick();
+}
+
 void sched_tick(void)
 {
     unsigned i;
     ++jiffies;
     current->run_ticks++;
+    if (tick_from_user) current->user_ticks++; else current->kernel_ticks++;
+    tick_from_user = 0;
     for (i = 0; i < MAX_THREADS; ++i)
         if (threads[i].state == TS_BLOCKED && threads[i].wake_tick && threads[i].wake_tick <= jiffies) {
             threads[i].wake_tick = 0;
@@ -161,6 +190,8 @@ static thread_t *thread_create_state(const char *name, void (*fn)(void *), void 
     t->stack_base = (uint64_t)kmalloc(KSTACK_BYTES);
     if (!t->stack_base) { irq_restore(f); kprintf("K64: no kernel stack for a new thread\n"); return 0; }
     t->id = next_id++;
+    t->create_tick = jiffies;
+    t->mem_priority = 5;                            /* MEMORY_PRIORITY_NORMAL */
     for (k = 0; name[k] && k < sizeof t->name - 1; ++k) t->name[k] = name[k];
     t->fx[0] = 0x7f; t->fx[1] = 0x03;               /* FCW 0x037F */
     t->fx[24] = 0x80; t->fx[25] = 0x1f;             /* MXCSR 0x1F80 */
@@ -211,11 +242,20 @@ void thread_yield(void)
     irq_restore(f);
 }
 
+void __attribute__((weak)) thread_account_exit(thread_t *t) { (void)t; }        /* sysk32.c overrides: process totals */
+
 void thread_exit(int64_t code)
 {
     uint64_t f = irq_save();
     (void)f;
     current->exit_code = code;
+    current->exit_tick = jiffies;
+    if (current->tsc_in) {                          /* close the last slice now: the totals are final from here on */
+        const uint64_t now = rdtsc();
+        current->cycles += now - current->tsc_in;
+        current->tsc_in = 0;
+    }
+    thread_account_exit(current);
     current->state = TS_ZOMBIE;
     thread_object_signal(current);
     for (;;) {

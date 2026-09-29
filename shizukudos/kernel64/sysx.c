@@ -56,7 +56,7 @@ static kobject_t *object_for_handle(process_t *p, uint64_t h)
     }
 }
 
-static int64_t filetime_now(void)
+int64_t filetime_now(void)
 {
     /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform). */
     hcreg_t secs = 0;
@@ -439,6 +439,10 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (t->alerted) { t->alerted = 0; res = STATUS_ALERTED; } else res = STATUS_TIMEOUT;
         irq_restore(f);
         return res;
+    }
+    case SYS_NtGetContextThread: {                          /* (ThreadHandle, PCONTEXT): sysk32.c */
+        extern int32_t k32_get_context_thread(process_t *p, uint64_t handle, uint64_t context_va);
+        return k32_get_context_thread(p, a1, a2);
     }
     case SYS_NtShzGetTeb: return (int32_t)0;
     default: return num >= 0x50 ? sysext_dispatch(p, r, num, a1, a2, a3, a4) : STATUS_NOT_IMPLEMENTED;

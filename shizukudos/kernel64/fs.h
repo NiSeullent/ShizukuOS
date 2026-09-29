@@ -26,6 +26,8 @@ struct fsnode {
     uint8_t *data;                      /* FSB_RAM: heap buffer or a pointer into the initrd */
     uint64_t size, cap;
     uint64_t ctime, mtime;              /* FSB_RAM: kernel ticks (ms) */
+    uint64_t id;                        /* unique, stable for the life of the node (FileInternalInformation.IndexNumber) */
+    int64_t ft_create, ft_access, ft_write;   /* FILETIME values set with NtSetInformationFile; 0 = derive from ctime/mtime */
     uint8_t backing;                    /* FSB_RAM / FSB_DISK */
     uint8_t populated;                  /* FSB_DISK directory: children enumerated */
     uint32_t first_cluster;             /* FSB_DISK: on-volume location */
@@ -92,6 +94,9 @@ uint64_t fs_total_bytes(void);
 /* Mounted volumes: `root` becomes "<letter>:\". 'C' is the RAM root and cannot be replaced. 0 = ok. */
 int fs_mount(char letter, fsnode_t *root);
 fsnode_t *fs_root_of(char letter);                                   /* NULL when nothing is mounted there */
+unsigned fs_volume_number(char letter);                              /* N of \Device\HarddiskVolumeN: C: 1, D: 2, ... (0 = not a letter) */
+char fs_volume_letter(unsigned number);                              /* the inverse (0 = none) */
+char fs_letter_of(const fsnode_t *n);                                /* drive letter of the volume holding n (0 = unmounted) */
 void fs_populate(fsnode_t *dir);                                     /* enumerates a disk directory once (no-op otherwise) */
 void fs_node_times(const fsnode_t *n, uint64_t *create_ft, uint64_t *write_ft);   /* FILETIMEs for any backing */
 

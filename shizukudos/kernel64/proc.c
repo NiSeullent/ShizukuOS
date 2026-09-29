@@ -22,6 +22,8 @@ void count_syscall(void) { ++syscalls; }
 uint64_t proc_pml4(process_t *p) { return p->pml4; }
 process_t *current_process(void) { return thread_current()->proc; }
 
+process_t *process_slot(unsigned i) { return i >= 1 && i <= MAX_PROCS ? &procs[i] : 0; }
+
 process_t *process_by_pid(int pid)
 {
     unsigned i;
@@ -195,6 +197,7 @@ int process_start_thread2(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx
 static void process_reap_signal(process_t *p)
 {
     p->terminated = 1;
+    p->exit_tick = ticks_now();
     p->object->signaled = 1;
     {
         uint64_t f = irq_save();
@@ -281,6 +284,7 @@ int user_page_fault(struct regs *r, uint64_t addr)
     int st;
     if (!p)
         return 0;
+    ++p->page_faults;                                   /* PROCESS_MEMORY_COUNTERS.PageFaultCount */
     st = user_fault_in(p, addr, (r->error & 2) != 0, (r->error & 16) != 0);
     if (st == 0)
         return 1;                                       /* page populated; restart the instruction */
@@ -312,6 +316,8 @@ int user_fault(struct regs *r)
     }
     if (r->vector == 13 && !(r->error & 0xfff))
         code = (uint32_t)STATUS_PRIVILEGED_INSTRUCTION;        /* GP with no selector: privileged/non-canonical */
+    if (r->vector == 3)
+        r->rip -= 1;            /* #BP is a trap (RIP is past the INT3); Windows reports ExceptionAddress and Context.Rip AT the INT3 */
     if (user_exception_dispatch(r, code, r->vector == 14 ? ((r->error & 2) ? 1 : 0) : 0, r->vector == 14 ? read_cr2() : 0))
         return 1;
     kprintf("K64: process %s (pid %d) killed: vector %d error %llx rip %llx cr2 %llx status %x\n", p->name, p->pid,

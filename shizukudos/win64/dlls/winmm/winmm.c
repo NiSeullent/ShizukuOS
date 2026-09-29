@@ -1,7 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * winmm.dll - the multimedia *timer* API only (timeGetTime, timeBeginPeriod/EndPeriod, timeGetDevCaps,
- * timeGetSystemTime, timeSetEvent/timeKillEvent). There is no audio, MIDI or joystick hardware layer, so the wave*, midi*,
- * mixer*, aux* and joy* families are not exported and PlaySound does not exist.
+ * winmm.dll - the multimedia timer API (timeGetTime, timeBeginPeriod/EndPeriod, timeGetDevCaps, timeGetSystemTime,
+ * timeSetEvent/timeKillEvent) and the waveOut/waveIn/midiOut/midiIn device APIs over the audio drivers of this system.
+ *
+ * Kernel64 has no audio or MIDI hardware driver, so the device APIs report exactly that: every *GetNumDevs is 0, opening a
+ * device id fails with MMSYSERR_BADDEVICEID (there is no device with that id), opening the mapper fails with MMSYSERR_NODRIVER
+ * (waveOut) / MIDIERR_NODEVICE (midiOut: "no MIDI port was found", the documented mapper error), and since no device can be
+ * opened, every function that takes a device handle finds none in the table of open devices and fails with
+ * MMSYSERR_INVALHANDLE. The mixer*, aux*, joy* families and PlaySound are not exported.
  *
  * Time base: kernel32 GetTickCount64 (the Kernel64 1 kHz system tick). Kernel64 already ticks at 1 ms, so the
  * timer period range reported by timeGetDevCaps is [1 ms, 1000000 ms] and timeBeginPeriod cannot make anything finer;
@@ -194,6 +199,99 @@ DLLAPI MMRESULT WINAPI timeKillEvent(UINT id)
     }
     return t ? TIMERR_NOERROR : MMSYSERR_INVALPARAM;         /* documented: MMSYSERR_INVALPARAM if the event does not exist */
 }
+
+/* ---------------------------------------------------------------- wave / MIDI devices */
+/* Devices this winmm can drive: none (no audio / MIDI driver exists). An open device would be recorded here with its kind; a
+ * handle is valid only if it is in this table. */
+enum { DEV_WAVEOUT = 1, DEV_WAVEIN, DEV_MIDIOUT, DEV_MIDIIN };
+static struct { HANDLE h; int kind; } g_open[16];
+static const UINT g_num_devs[5] = { 0, 0, 0, 0, 0 };          /* per kind: installed devices (none) */
+
+static int open_handle(HANDLE h, int kind)
+{
+    unsigned i;
+    if (!h) return 0;
+    for (i = 0; i < sizeof g_open / sizeof g_open[0]; ++i)
+        if (g_open[i].h == h && g_open[i].kind == kind) return 1;
+    return 0;
+}
+
+#define CALLBACK_TYPES (CALLBACK_WINDOW | CALLBACK_TASK | CALLBACK_FUNCTION | CALLBACK_EVENT)
+
+DLLAPI UINT WINAPI waveOutGetNumDevs(void) { return g_num_devs[DEV_WAVEOUT]; }
+DLLAPI UINT WINAPI waveInGetNumDevs(void) { return g_num_devs[DEV_WAVEIN]; }
+DLLAPI UINT WINAPI midiOutGetNumDevs(void) { return g_num_devs[DEV_MIDIOUT]; }
+DLLAPI UINT WINAPI midiInGetNumDevs(void) { return g_num_devs[DEV_MIDIIN]; }
+
+DLLAPI MMRESULT WINAPI waveOutOpen(LPHWAVEOUT phwo, UINT id, LPCWAVEFORMATEX fmt, DWORD_PTR cb, DWORD_PTR inst, DWORD flags)
+{
+    (void)cb; (void)inst;
+    if (!fmt || (!phwo && !(flags & WAVE_FORMAT_QUERY))) return MMSYSERR_INVALPARAM;
+    if (flags & ~(DWORD)(CALLBACK_TYPES | WAVE_FORMAT_QUERY | WAVE_ALLOWSYNC | WAVE_MAPPED | WAVE_FORMAT_DIRECT)) return MMSYSERR_INVALFLAG;
+    if (phwo) *phwo = 0;
+    if (id == WAVE_MAPPER) return MMSYSERR_NODRIVER;         /* the mapper needs at least one device driver */
+    return id < g_num_devs[DEV_WAVEOUT] ? MMSYSERR_ERROR : MMSYSERR_BADDEVICEID;
+}
+
+DLLAPI MMRESULT WINAPI waveOutClose(HWAVEOUT h) { return open_handle(h, DEV_WAVEOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI waveOutPause(HWAVEOUT h) { return open_handle(h, DEV_WAVEOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI waveOutRestart(HWAVEOUT h) { return open_handle(h, DEV_WAVEOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI waveOutReset(HWAVEOUT h) { return open_handle(h, DEV_WAVEOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+
+static MMRESULT header_op(HANDLE h, int kind, const void *hdr, UINT cb, UINT need)
+{
+    if (!open_handle(h, kind)) return MMSYSERR_INVALHANDLE;
+    if (!hdr || cb < need) return MMSYSERR_INVALPARAM;
+    return MMSYSERR_ERROR;                                    /* unreachable: no device is ever open */
+}
+
+DLLAPI MMRESULT WINAPI waveOutPrepareHeader(HWAVEOUT h, LPWAVEHDR hdr, UINT cb) { return header_op(h, DEV_WAVEOUT, hdr, cb, sizeof(WAVEHDR)); }
+DLLAPI MMRESULT WINAPI waveOutUnprepareHeader(HWAVEOUT h, LPWAVEHDR hdr, UINT cb) { return header_op(h, DEV_WAVEOUT, hdr, cb, sizeof(WAVEHDR)); }
+DLLAPI MMRESULT WINAPI waveOutWrite(HWAVEOUT h, LPWAVEHDR hdr, UINT cb) { return header_op(h, DEV_WAVEOUT, hdr, cb, sizeof(WAVEHDR)); }
+
+DLLAPI MMRESULT WINAPI midiOutOpen(LPHMIDIOUT phmo, UINT id, DWORD_PTR cb, DWORD_PTR inst, DWORD flags)
+{
+    (void)cb; (void)inst;
+    if (!phmo) return MMSYSERR_INVALPARAM;
+    if (flags & ~(DWORD)(CALLBACK_TYPES | MIDI_IO_STATUS)) return MMSYSERR_INVALFLAG;
+    *phmo = 0;
+    if (id == MIDI_MAPPER) return MIDIERR_NODEVICE;           /* documented mapper error: no MIDI port was found */
+    return id < g_num_devs[DEV_MIDIOUT] ? MMSYSERR_ERROR : MMSYSERR_BADDEVICEID;
+}
+
+DLLAPI MMRESULT WINAPI midiInOpen(LPHMIDIIN phmi, UINT id, DWORD_PTR cb, DWORD_PTR inst, DWORD flags)
+{
+    (void)cb; (void)inst;
+    if (!phmi) return MMSYSERR_INVALPARAM;
+    if (flags & ~(DWORD)(CALLBACK_TYPES | MIDI_IO_STATUS)) return MMSYSERR_INVALFLAG;
+    *phmi = 0;
+    return id < g_num_devs[DEV_MIDIIN] ? MMSYSERR_ERROR : MMSYSERR_BADDEVICEID;      /* MIDI input has no mapper */
+}
+
+static MMRESULT devcaps(UINT_PTR id, int kind, const void *caps, UINT cb)
+{
+    if (!caps || !cb) return MMSYSERR_INVALPARAM;
+    if (kind == DEV_MIDIOUT && id == (UINT_PTR)MIDI_MAPPER) return MMSYSERR_NODRIVER;
+    if (id < g_num_devs[kind]) return MMSYSERR_ERROR;
+    return open_handle((HANDLE)id, kind) ? MMSYSERR_ERROR : MMSYSERR_BADDEVICEID;    /* an id may also be an open handle */
+}
+
+DLLAPI MMRESULT WINAPI midiOutGetDevCapsW(UINT_PTR id, LPMIDIOUTCAPSW caps, UINT cb) { return devcaps(id, DEV_MIDIOUT, caps, cb); }
+DLLAPI MMRESULT WINAPI midiInGetDevCapsW(UINT_PTR id, LPMIDIINCAPSW caps, UINT cb) { return devcaps(id, DEV_MIDIIN, caps, cb); }
+
+DLLAPI MMRESULT WINAPI midiOutClose(HMIDIOUT h) { return open_handle(h, DEV_MIDIOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI midiOutReset(HMIDIOUT h) { return open_handle(h, DEV_MIDIOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI midiOutShortMsg(HMIDIOUT h, DWORD msg) { (void)msg; return open_handle(h, DEV_MIDIOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI midiOutLongMsg(HMIDIOUT h, LPMIDIHDR hdr, UINT cb) { return header_op(h, DEV_MIDIOUT, hdr, cb, sizeof(MIDIHDR)); }
+DLLAPI MMRESULT WINAPI midiOutPrepareHeader(HMIDIOUT h, LPMIDIHDR hdr, UINT cb) { return header_op(h, DEV_MIDIOUT, hdr, cb, sizeof(MIDIHDR)); }
+DLLAPI MMRESULT WINAPI midiOutUnprepareHeader(HMIDIOUT h, LPMIDIHDR hdr, UINT cb) { return header_op(h, DEV_MIDIOUT, hdr, cb, sizeof(MIDIHDR)); }
+
+DLLAPI MMRESULT WINAPI midiInClose(HMIDIIN h) { return open_handle(h, DEV_MIDIIN) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI midiInReset(HMIDIIN h) { return open_handle(h, DEV_MIDIIN) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI midiInStart(HMIDIIN h) { return open_handle(h, DEV_MIDIIN) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
+DLLAPI MMRESULT WINAPI midiInAddBuffer(HMIDIIN h, LPMIDIHDR hdr, UINT cb) { return header_op(h, DEV_MIDIIN, hdr, cb, sizeof(MIDIHDR)); }
+DLLAPI MMRESULT WINAPI midiInPrepareHeader(HMIDIIN h, LPMIDIHDR hdr, UINT cb) { return header_op(h, DEV_MIDIIN, hdr, cb, sizeof(MIDIHDR)); }
+DLLAPI MMRESULT WINAPI midiInUnprepareHeader(HMIDIIN h, LPMIDIHDR hdr, UINT cb) { return header_op(h, DEV_MIDIIN, hdr, cb, sizeof(MIDIHDR)); }
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID res)
 {
