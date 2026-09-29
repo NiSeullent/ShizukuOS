@@ -19,7 +19,8 @@
 unixlib_handle_t __wine_unixlib_handle = 0;
 
 #ifdef SHZW_UNIX_INPROC
-extern const unixlib_entry_t __wine_unix_call_funcs[];
+typedef NTSTATUS (*shzw_unix_entry)(void *args);
+extern const shzw_unix_entry __wine_unix_call_funcs[];
 extern const unsigned int shzw_unix_call_count;
 
 static NTSTATUS WINAPI inproc_dispatcher(unixlib_handle_t handle, unsigned int code, void *args)

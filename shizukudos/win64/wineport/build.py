@@ -87,7 +87,11 @@ def ensure_tree(name):
         dest.mkdir(parents=True, exist_ok=True)
         git(dest, "init", "-q")
         git(dest, "remote", "add", "origin", spec.get("fetch_mirror", spec["repository"]))
-        run(["git", "-C", dest, "fetch", "-q", "--depth", "1", "origin", spec["commit"]], timeout=3600)
+        sparse = spec.get("sparse_paths")
+        run(["git", "-C", dest, "fetch", "-q", "--depth", "1", *(["--filter=blob:none"] if sparse else []), "origin",
+             spec["commit"]], timeout=3600)
+        if sparse:                                     # only these directories of a large repository
+            git(dest, "sparse-checkout", "set", "--no-cone", *sparse)
         git(dest, "checkout", "-q", "FETCH_HEAD")
     head = git(dest, "rev-parse", "HEAD")
     if head != spec["commit"]:
@@ -304,12 +308,15 @@ def build_runtime(wine):
     return {"shzwcrt": shzwcrt, "shzwine0": shzwine0, "crt0": crt0, "glue_flags": glue_flags}
 
 
-def build_extlib(wine, name, cfg):
-    d = wine / cfg["dir"]
-    mk = makefile_vars(d / "Makefile.in")
-    srcs = [d / s for s in mk.get("SOURCES", []) if s.endswith(".c")]
+def build_extlib(tree, wine, name, cfg):
+    """A static library from an upstream tree: the SOURCES of its Wine Makefile.in, or an explicit source list. It is
+    compiled against Wine's C runtime headers so that it uses the same runtime (wineport/crt) as the DLLs."""
+    d = tree / cfg.get("dir", "")
+    mk = makefile_vars(d / "Makefile.in") if (d / "Makefile.in").exists() else {}
+    srcs = [d / s for s in (cfg.get("sources") or [s for s in mk.get("SOURCES", []) if s.endswith(".c")])]
     flags = [*WINE_CFLAGS, *cfg.get("defines", []), *mk.get("EXTRADEFS", []), "-I", d,
-             *[x for i in cfg.get("includes", []) for x in ("-I", wine / i)], "-I", wine / "include",
+             *[x for i in cfg.get("includes", []) for x in ("-I", tree / i)],
+             *[x for i in cfg.get("shizuku_includes", []) for x in ("-I", HERE / i)], "-I", wine / "include",
              "-I", wine / "include/msvcrt", "-w"]
     return build_static(name, srcs, flags, WOUT / "lib")
 
@@ -366,7 +373,7 @@ def def_exports(path):
     return names
 
 
-def build_module(wine, rt, m, base, provided):
+def build_module(wine, rt, m, base, provided, trees):
     name = m["name"]
     d = wine / m.get("dir", f"dlls/{name}")
     mk = makefile_vars(d / "Makefile.in") if (d / "Makefile.in").exists() else {}
@@ -383,10 +390,16 @@ def build_module(wine, rt, m, base, provided):
     flags = [*WINE_CFLAGS, *defines, *[x for i in includes for x in ("-I", i)], "-I", wine / "include",
              "-I", wine / "include/msvcrt"]
     objs = [obj_dir / (s.stem + "_" + hashlib.sha1(str(s).encode()).hexdigest()[:6] + ".o") for s in srcs]
+    # former Unix-side sources ported to PE by the module's patches (m["unix_inproc"]): built with their own includes
+    usrcs = [d / s for s in m.get("unix_sources", [])]
+    uflags = [*flags, *m.get("unix_defines", []),
+              *[x for i in m.get("unix_includes", []) for x in ("-I", trees[i["upstream"]] / i["path"])]]
+    uobjs = [obj_dir / ("unix_" + s.stem + ".o") for s in usrcs]
     unixcall_obj = obj_dir / "shzw_unixcall.o"
     ucflags = [*rt["glue_flags"], *(["-DSHZW_UNIX_INPROC"] if m.get("unix_inproc") else [])]
-    compile_all([*zip(srcs, objs, [flags] * len(srcs)), (HERE / "glue/unixcall.c", unixcall_obj, ucflags)])
-    objs.append(unixcall_obj)
+    compile_all([*zip(srcs, objs, [flags] * len(srcs)), *zip(usrcs, uobjs, [uflags] * len(usrcs)),
+                 (HERE / "glue/unixcall.c", unixcall_obj, ucflags)])
+    objs += [*uobjs, unixcall_obj]
     for rc in rcs:
         objs.append(compile_rc(wine, rc, obj_dir / (rc.stem + "_rc.o"), includes, defines))
     if m.get("dynamic_imports"):
@@ -544,7 +557,10 @@ def build_test_exe(wine, rt, name, exe_name, d, sources, subtests, t, extra_incl
     mk = makefile_vars(d / "Makefile.in") if (d / "Makefile.in").exists() else {}
     names = [Path(s).stem for s in sources]
     obj_dir = WOUT / "obj" / exe_name.lower()
-    flags = [*WINE_CFLAGS, *mk.get("EXTRADEFS", []), "-I", d, *[x for i in extra_includes for x in ("-I", i)],
+    # Wine builds its tests against msvcrt, whose wcstok takes two arguments; the UCRT headers used here provide that
+    # form with _CRT_NON_CONFORMING_WCSTOK
+    flags = [*WINE_CFLAGS, "-D_CRT_NON_CONFORMING_WCSTOK", *mk.get("EXTRADEFS", []), "-I", d,
+             *[x for i in extra_includes for x in ("-I", i)],
              "-I", wine / "include", "-I", wine / "include/msvcrt", *t.get("defines", [])]
     srcs = [d / s for s in sources if Path(s).stem in subtests]
     drv = obj_dir / "driver.c"
@@ -567,7 +583,8 @@ def build_test_exe(wine, rt, name, exe_name, d, sources, subtests, t, extra_incl
         objs.append(obj_dir / "dynimports.o")
     exe = WOUT / exe_name
     cmd = [CC, "-nostdlib", "-Wl,--entry,mainCRTStartup", "-Wl,--subsystem,console", "-Wl,--image-base,0x140000000",
-           "-Wl,--dynamicbase", "-Wl,--disable-auto-import", "-o", exe, rt["crt0"], *objs, "-L", OUT, "-L", WOUT / "lib",
+           "-Wl,--dynamicbase", "-Wl,--disable-auto-import", "-o", exe, rt["crt0"], *objs,
+           *[WOUT / "lib" / f"lib{x}.a" for x in t.get("static", [])], "-L", OUT, "-L", WOUT / "lib",
            "-Wl,--start-group", rt["shzwine0"], rt["shzwcrt"], "-Wl,--end-group",
            *[f"-l{l}" for l in t.get("link", [])], "-lkernel32", "-lntdll", "-lgcc"]
     r = subprocess.run([str(x) for x in cmd], capture_output=True, text=True)
@@ -610,14 +627,15 @@ def build(only=None):
     (WOUT / "lib").mkdir(exist_ok=True)
     rt = build_runtime(wine)
     for name, lcfg in cfg.get("static_libs", {}).items():
-        build_extlib(trees[lcfg.get("upstream", "wine")], name, lcfg)
+        build_extlib(trees[lcfg.get("upstream", "wine")], wine, name, lcfg)
     provided = {p.stem.lower(): def_exports(p) for p in OUT.glob("*.def")}
     base = int(cfg["image_base"], 16)
     modules, tests = {}, {}
     for i, m in enumerate(cfg["modules"]):
         if only and m["name"] not in only:
             continue
-        modules[m["name"]] = build_module(trees[m.get("upstream", "wine")], rt, m, base + i * int(cfg["image_stride"], 16), provided)
+        modules[m["name"]] = build_module(trees[m.get("upstream", "wine")], rt, m, base + i * int(cfg["image_stride"], 16),
+                                          provided, trees)
     for m in cfg["modules"]:
         if m.get("tests") and m["name"] in modules:
             tests.update(build_tests(wine, rt, m))
@@ -630,11 +648,13 @@ def build(only=None):
         "modules": {n: {k: (str(v) if isinstance(v, Path) else v) for k, v in info.items()} for n, info in modules.items()},
         "tests": {n: {k: (str(v) if isinstance(v, Path) else v) for k, v in info.items()} for n, info in tests.items()},
     }
-    shzlib.write_json(WOUT / "wineport-result.json", result)
     files = [(f"\\SHZ\\SYS64\\{n}.dll", info["dll"].read_bytes()) for n, info in sorted(modules.items())]
+    result["image_files"] = {}
     for f in cfg.get("image_files", []):
         src = (trees[f["upstream"]] / f["path"]) if "upstream" in f else (HERE / f["path"])
         files.append((f["image_path"], src.read_bytes()))
+        result["image_files"][f["image_path"]] = str(src)
+    shzlib.write_json(WOUT / "wineport-result.json", result)
     return {"modules": modules, "tests": tests, "files": files}
 
 

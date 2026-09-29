@@ -44,6 +44,30 @@
       "build": "shizukudos/win64/wineport/build.py: host configure (--enable-win64, every optional library disabled) only for widl/wrc and the generated headers, then each DLL with x86_64-w64-mingw32-gcc; exports come from the .spec file minus stub entries",
       "linking_note": "The Wine DLLs are statically linked with Shizuku-original GPL-2.0-only support code (wineport/crt, wineport/glue); the combined DLLs are distributed under GPL-2.0 as LGPL-2.1 section 3 permits.",
       "patches": []
+    },
+    "freetype": {
+      "repository": "https://gitlab.freedesktop.org/freetype/freetype.git",
+      "fetch_mirror": "https://github.com/freetype/freetype.git",
+      "ref": "VER-2-13-3",
+      "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5",
+      "license": "FTL OR GPL-2.0-or-later (dual); used here under GPL-2.0-or-later",
+      "license_files": ["LICENSE.TXT", "docs/FTL.TXT", "docs/GPLv2.TXT"],
+      "execution_mode": "static library linked into the PE dwrite.dll (x86_64, mingw-w64), no platform-specific code",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "shizukudos/win64/wineport/build.py: the module sources listed in wineport/modules.json with a module list header (wineport/freetype/shz_ftmodule.h)",
+      "patches": []
+    },
+    "noto-fonts": {
+      "repository": "https://github.com/google/fonts.git",
+      "ref": "main",
+      "commit": "23e54b51ddffbc7713c583748e3bd86f62b1fa4a",
+      "sparse_paths": ["/ofl/notosans/", "/ofl/notoserif/", "/ofl/notosansmono/"],
+      "license": "OFL-1.1",
+      "license_files": ["ofl/notosans/OFL.txt", "ofl/notoserif/OFL.txt", "ofl/notosansmono/OFL.txt"],
+      "execution_mode": "font data (variable TrueType), packed unmodified into WIN64.IMG as \\SHZ\\FONTS\\*.ttf",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "partial, sparse fetch of the pinned commit (only the three family directories); files are not modified",
+      "patches": []
     }
   },
   "tools": {

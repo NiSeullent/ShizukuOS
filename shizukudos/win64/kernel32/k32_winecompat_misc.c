@@ -476,3 +476,37 @@ K32API DWORD WINAPI FormatMessageA(DWORD flags, LPCVOID source, DWORD id, DWORD 
     LocalFree(wout);
     return an - 1;
 }
+
+/* ---------------------------------------------------------------- file attributes (extended) */
+K32API BOOL WINAPI GetFileAttributesExW(LPCWSTR path, GET_FILEEX_INFO_LEVELS level, LPVOID info)
+{
+    WIN32_FILE_ATTRIBUTE_DATA *data = info;
+    HANDLE h;
+    DWORD attr;
+    if (level != GetFileExInfoStandard || !data || !path) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    if ((attr = GetFileAttributesW(path)) == INVALID_FILE_ATTRIBUTES) return FALSE;
+    memset(data, 0, sizeof *data);
+    data->dwFileAttributes = attr;
+    if (attr & FILE_ATTRIBUTE_DIRECTORY) return TRUE;
+    /* size and times from the open file (FileStandardInformation / FileBasicInformation) */
+    h = CreateFileW(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER size;
+        SHZ_IO_STATUS_BLOCK iosb;
+        struct { LARGE_INTEGER create, access, write, change; ULONG attrs; } basic;
+        if (GetFileSizeEx(h, &size)) { data->nFileSizeLow = size.LowPart; data->nFileSizeHigh = (DWORD)size.HighPart; }
+        if (!NtQueryInformationFile(h, &iosb, &basic, sizeof basic, 4)) {
+            data->ftCreationTime.dwLowDateTime = basic.create.LowPart; data->ftCreationTime.dwHighDateTime = basic.create.HighPart;
+            data->ftLastAccessTime.dwLowDateTime = basic.access.LowPart; data->ftLastAccessTime.dwHighDateTime = basic.access.HighPart;
+            data->ftLastWriteTime.dwLowDateTime = basic.write.LowPart; data->ftLastWriteTime.dwHighDateTime = basic.write.HighPart;
+        }
+        CloseHandle(h);
+    }
+    return TRUE;
+}
+K32API BOOL WINAPI GetFileAttributesExA(LPCSTR path, GET_FILEEX_INFO_LEVELS level, LPVOID info)
+{
+    WCHAR w[MAX_PATH];
+    if (!path || !MultiByteToWideChar(CP_ACP, 0, path, -1, w, MAX_PATH)) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    return GetFileAttributesExW(w, level, info);
+}

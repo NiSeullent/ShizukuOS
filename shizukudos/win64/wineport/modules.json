@@ -1,7 +1,9 @@
 {
  "comment": "Modules built from the pinned Wine tree by wineport/build.py, in dependency order. link: import libraries searched in order (the first that exports a symbol provides it). dynamic_imports: functions resolved at first call because the Shizuku DLL may not export them; the failure value is returned when absent.",
  "upstreams": [
-  "wine"
+  "wine",
+  "freetype",
+  "noto-fonts"
  ],
  "image_base": "0x7ff900000000",
  "image_stride": "0x1000000",
@@ -14,6 +16,56 @@
    ],
    "includes": [
     "libs/tomcrypt/src/headers"
+   ]
+  },
+  "freetype": {
+   "upstream": "freetype",
+   "dir": "",
+   "sources": [
+    "src/base/ftsystem.c",
+    "src/base/ftinit.c",
+    "src/base/ftdebug.c",
+    "src/base/ftbase.c",
+    "src/base/ftbbox.c",
+    "src/base/ftbitmap.c",
+    "src/base/ftglyph.c",
+    "src/base/ftmm.c",
+    "src/base/ftsynth.c",
+    "src/base/fttype1.c",
+    "src/base/ftfstype.c",
+    "src/base/ftgasp.c",
+    "src/base/ftstroke.c",
+    "src/base/ftpatent.c",
+    "src/base/ftcid.c",
+    "src/autofit/autofit.c",
+    "src/truetype/truetype.c",
+    "src/type1/type1.c",
+    "src/cff/cff.c",
+    "src/cid/type1cid.c",
+    "src/sfnt/sfnt.c",
+    "src/psaux/psaux.c",
+    "src/psnames/psnames.c",
+    "src/pshinter/pshinter.c",
+    "src/smooth/smooth.c",
+    "src/raster/raster.c",
+    "src/gzip/ftgzip.c"
+   ],
+   "defines": [
+    "-DFT2_BUILD_LIBRARY",
+    "-DFT_CONFIG_MODULES_H=\"shz_ftmodule.h\""
+   ],
+   "includes": [
+    "include"
+   ],
+   "shizuku_includes": [
+    "freetype"
+   ]
+  },
+  "musl": {
+   "dir": "libs/musl",
+   "includes": [
+    "libs/musl/src/internal",
+    "libs/musl/arch/generic"
    ]
   }
  },
@@ -179,6 +231,114 @@
      ]
     }
    ]
+  },
+  {
+   "name": "dwrite",
+   "link": [
+    "user32",
+    "gdi32",
+    "advapi32"
+   ],
+   "static": [
+    "freetype",
+    "musl"
+   ],
+   "unix_inproc": true,
+   "unix_sources": [
+    "freetype.c"
+   ],
+   "unix_defines": [
+    "-DSHZ_STATIC_FREETYPE"
+   ],
+   "unix_includes": [
+    {
+     "upstream": "freetype",
+     "path": "include"
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "analyzer",
+     "font",
+     "layout"
+    ],
+    "link": [
+     "dwrite",
+     "gdi32",
+     "user32"
+    ],
+    "static": [
+     "musl"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "gdi32.dll",
+      "fail": "0",
+      "functions": [
+       "AddFontMemResourceEx",
+       "GetCharABCWidthsW",
+       "GetGraphicsMode",
+       "GetOutlineTextMetricsW",
+       "GetWorldTransform",
+       "RemoveFontMemResourceEx"
+      ]
+     }
+    ],
+    "shizuku": {
+     "subtests": [
+      "factory"
+     ],
+     "link": [
+      "dwrite",
+      "advapi32"
+     ],
+     "in_plain_image": true
+    }
+   },
+   "dynamic_imports": [
+    {
+     "dll": "gdi32.dll",
+     "fail": "0",
+     "functions": [
+      "GetFontFileData",
+      "GetFontFileInfo",
+      "GetFontRealizationInfo",
+      "BeginPath",
+      "CloseFigure",
+      "EndPath",
+      "FillPath",
+      "PolyBezierTo",
+      "SetWorldTransform"
+     ]
+    }
+   ]
+  }
+ ],
+ "image_files": [
+  {
+   "upstream": "noto-fonts",
+   "path": "ofl/notosans/NotoSans[wdth,wght].ttf",
+   "image_path": "\\SHZ\\FONTS\\NotoSans.ttf"
+  },
+  {
+   "upstream": "noto-fonts",
+   "path": "ofl/notoserif/NotoSerif[wdth,wght].ttf",
+   "image_path": "\\SHZ\\FONTS\\NotoSerif.ttf"
+  },
+  {
+   "upstream": "noto-fonts",
+   "path": "ofl/notosansmono/NotoSansMono[wdth,wght].ttf",
+   "image_path": "\\SHZ\\FONTS\\NotoSansMono.ttf"
+  },
+  {
+   "upstream": "wine",
+   "path": "fonts/tahoma.ttf",
+   "image_path": "\\SHZ\\FONTS\\tahoma.ttf"
+  },
+  {
+   "upstream": "wine",
+   "path": "fonts/tahomabd.ttf",
+   "image_path": "\\SHZ\\FONTS\\tahomabd.ttf"
   }
  ]
 }
