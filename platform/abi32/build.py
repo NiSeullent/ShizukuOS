@@ -20,8 +20,11 @@ ROOT = HERE.parents[1]
 BUILD = HERE / "build"
 IMPORTS = {"Sleep", "GetTickCount", "GetModuleHandleA", "GetProcAddress", "SetLastError",
            "MultiByteToWideChar", "WideCharToMultiByte",
-           # WIN64 subsystem client transport (ntwin32/win64/ntw64.c); exercised by w64_e2e.py
-           "CreateFileA", "DeviceIoControl", "GetLastError"}
+           # routing policy: NTW32.INI beside the DLL, NTW32_ROUTING, diagnostics
+           "GetModuleFileNameA", "CreateFileA", "ReadFile", "CloseHandle",
+           "GetEnvironmentVariableA", "OutputDebugStringA", "GetLastError",
+           # WIN64 subsystem client transport (ntwin32/win64/ntw64.c, with CreateFileA/GetLastError); w64_e2e.py
+           "DeviceIoControl"}
 EXPORTS = {
     "InitializeSRWLock", "AcquireSRWLockExclusive", "AcquireSRWLockShared",
     "ReleaseSRWLockExclusive", "ReleaseSRWLockShared", "TryAcquireSRWLockExclusive",
@@ -87,7 +90,7 @@ def inspect(data):
                 raise ValueError(f"Unsupported import: {name!r}")
             imports.append((name, iat))
     if {name for name, _ in imports} != IMPORTS:
-        raise ValueError("DLL import inventory differs from the ten mock contracts")
+        raise ValueError("DLL import inventory differs from the fifteen mock contracts")
     export_rva, export_size = pe.directory(0)
     at = pe.offset(export_rva, 40)
     function_count, name_count, functions, names, ordinals = struct.unpack_from("<IIIII", data, at + 20)

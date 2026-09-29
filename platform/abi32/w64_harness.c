@@ -308,18 +308,42 @@ static void STDCALL mock_Sleep(uint32_t ms)
     model_exchange(MSG_TICK, &t, sizeof t, 0, 0);
     flush_backlog();
 }
+static int same(const char *a, const char *b) { while (*a && *a == *b) { ++a; ++b; } return *a == *b; }
+/* KERNEL32 is present; KernelEx (KERNELEX.DLL, KEXBASES.DLL, KEXBASEN.DLL), which NTW32's routing policy probes
+ * for at attach, is not: this models a stock Windows 98 SE process. */
 static uintptr_t STDCALL mock_GetModuleHandleA(const char *name)
 {
-    static const char k32[] = "KERNEL32.DLL";
-    CHECK(memcmp(name, k32, sizeof k32) == 0);
-    return KERNEL_HANDLE;
+    if (same(name, "KERNEL32.DLL")) return KERNEL_HANDLE;
+    CHECK(same(name, "KERNELEX.DLL") || same(name, "KEXBASES.DLL") || same(name, "KEXBASEN.DLL"));
+    last_error = 126;
+    return 0;
 }
+/* None of the routed names is native to Windows 98 KERNEL32 in this model, so every route stays with NTW32's
+ * own implementation (the routing policy itself is tested by harness.c and ntwin32/tests). */
 static uintptr_t STDCALL mock_GetProcAddress(uintptr_t module, const char *name)
 {
-    (void)module; (void)name;
+    CHECK(module == KERNEL_HANDLE);
+    (void)name;
     last_error = 127;
     return 0;
 }
+/* Routing configuration at attach: no NTW32_ROUTING variable and no NTW32.INI beside the DLL (defaults). */
+static uint32_t ini_lookups, debug_lines;
+static uint32_t STDCALL mock_GetEnvironmentVariableA(const char *name, char *buffer, uint32_t size)
+{
+    CHECK(same(name, "NTW32_ROUTING") && buffer && size);
+    last_error = 203;
+    return 0;
+}
+static uint32_t STDCALL mock_GetModuleFileNameA(uintptr_t module, char *buffer, uint32_t size)
+{
+    static const char path[] = "C:\\SHIZUKU\\NTW32.DLL";
+    CHECK(module == PE_BASE && size >= sizeof path);
+    memcpy(buffer, path, sizeof path);
+    return sizeof path - 1;
+}
+static uint32_t STDCALL mock_CloseHandle(uintptr_t handle) { (void)handle; fail("unexpected CloseHandle", __LINE__); }
+static void STDCALL mock_OutputDebugStringA(const char *text) { CHECK(text && slen(text) < 512); ++debug_lines; }
 static int STDCALL mock_MultiByteToWideChar(uint32_t page, uint32_t flags, const char *src, int len, uint16_t *dst, int cap)
 {
     int i;
@@ -357,6 +381,12 @@ static uintptr_t STDCALL mock_CreateFileA(const char *name, uint32_t access, uin
 {
     static const char vxd[] = "\\\\.\\NTWRAP9X.VXD";
     static const struct ntw_lock_ops locks = { irq_enter, irq_leave, 0 };
+    if (same(name, "C:\\SHIZUKU\\NTW32.INI")) {                        /* routing policy: absent, defaults */
+        CHECK(access == 0x80000000u && share == 1 && !security && disposition == 3 && flags == 0x80u && !template_file);
+        ++ini_lookups;
+        last_error = 2;
+        return INVALID_HANDLE;
+    }
     ++create_file_calls;
     CHECK(memcmp(name, vxd, sizeof vxd) == 0 && access == 0 && share == 0 && !security && disposition == 3 &&
           flags == 0x04000000u && !template_file);
@@ -451,7 +481,9 @@ static void process_start(void)
     memcpy((void *)(uintptr_t)EXE_BASE, exe_pristine, EXE_IMAGE_SIZE);
     patch_dll();
     patch_exe();
+    const uint32_t lookups = ini_lookups;
     CHECK(call3(PE_ENTRY, PE_BASE, 1, 0) == 1);
+    CHECK(ini_lookups == lookups + 1);                                    /* the routing policy ran at attach */
 }
 /* Process end: DllMain(PROCESS_DETACH), VWIN32 closes the device (DIOC_CLOSEHANDLE) and, the handle being the
  * last FILE_FLAG_DELETE_ON_CLOSE one, unloads the dynamic VxD (ntwv_native_exit: forget the channel, stop). */

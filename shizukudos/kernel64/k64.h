@@ -78,6 +78,7 @@ void mem_init(const shz_bootinfo_t *bi);
 uint64_t pmm_alloc(void);                       /* zeroed physical page, 0 on exhaustion */
 void pmm_free(uint64_t pa);
 uint64_t pmm_free_count(void);
+uint64_t pmm_total_count(void);                /* pages managed by the allocator */
 #define PT_P (1ull << 0)
 #define PT_W (1ull << 1)
 #define PT_U (1ull << 2)
