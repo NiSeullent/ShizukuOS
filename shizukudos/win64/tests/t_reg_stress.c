@@ -55,6 +55,9 @@ static int blob_ok(const BYTE *in, DWORD cb)
 }
 
 static HKEY g_shared;                      /* handle to STRESS\Shared, opened by main before the threads start */
+static HKEY volatile g_hot;                /* phase 6: a handle that thread 0 keeps closing and replacing */
+static volatile LONG g_hot_done;
+static volatile LONG g_hot_uses;
 
 /* ------------------------------------------------------------ workers */
 static DWORD WINAPI worker(LPVOID arg)
@@ -178,6 +181,32 @@ static DWORD WINAPI worker(LPVOID arg)
             }
         }
     }
+
+    /* phase 6: use a handle while another thread closes it and opens a replacement (the handle value may even be reused).
+     * The only acceptable outcomes are success and ERROR_INVALID_HANDLE; the kernel must never fault or hang. */
+    barrier(round++);
+    if (t == 0) {
+        for (j = 0; j < 400; ++j) {
+            HKEY nh = 0, old;
+            if (RegOpenKeyExW(g_shared, NULL, 0, KEY_READ, &nh)) { ++g_errors[t]; break; }
+            old = g_hot;
+            g_hot = nh;
+            if (old) RegCloseKey(old);
+        }
+        g_hot_done = 1;
+    } else {
+        while (!g_hot_done) {
+            HKEY h = g_hot;
+            DWORD cnt = 0, cb = 4, ty = 0, dv = 0;
+            if (!h) continue;
+            e = (t & 1) ? RegQueryInfoKeyW(h, 0, 0, 0, &cnt, 0, 0, 0, 0, 0, 0, 0)
+                        : RegQueryValueExW(h, L"T0_000", 0, &ty, (BYTE *)&dv, &cb);
+            if (e && e != ERROR_INVALID_HANDLE) ++g_errors[t];
+            else if (!e) InterlockedIncrement(&g_hot_uses);
+        }
+    }
+    barrier(round++);
+    if (t == 0 && g_hot) { RegCloseKey(g_hot); g_hot = 0; }
     shz_free(buf);
     g_done[t] = 2;
     return 0;
@@ -236,6 +265,7 @@ int main(void)
         CHECK(created == 150, "phase 1: of NT racing creators exactly one created each of the 150 keys (150 REG_CREATED_NEW_KEY in total)");
         CHECK(errors == 0, "no worker saw an unexpected result in any phase");
         CHECK(reads > 20 && enums > 20, "readers and the enumerator made progress while the writers ran");
+        CHECK(g_hot_uses > 20, "phase 6: handles were used successfully while being closed and replaced under them");
     }
     /* phase 2 verification: nothing was lost */
     e = RegQueryInfoKeyW(g_shared, 0, 0, 0, &cnt, 0, 0, 0, 0, 0, 0, 0);
