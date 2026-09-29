@@ -538,38 +538,101 @@ typedef struct {
     uint32_t rop3;
 } blit_t;
 
+/* 1:1 without mirroring: rows are copied (SRCCOPY copies the whole 32-bit pixel, alpha byte included, as GDI does
+ * for 32 bpp DIBs) or combined without any per-pixel division. Rows go bottom-up when the source lies above the
+ * destination inside the same bitmap, so no snapshot is needed for overlapping copies. */
+static void rop_rect_1to1(gctx_t *g, const blit_t *b, const RECT *o0, int upat)
+{
+    RECT o = *o0;
+    const int ox = b->sx - b->dx, oy = b->sy - b->dy;                /* source = destination + (ox, oy) */
+    int y, y0, y1, step;
+    if (o.left + ox < 0) o.left = -ox;                              /* keep the source inside its bitmap */
+    if (o.top + oy < 0) o.top = -oy;
+    if (o.right + ox > b->src->w) o.right = b->src->w - ox;
+    if (o.bottom + oy > b->src->h) o.bottom = b->src->h - oy;
+    if (o.left >= o.right || o.top >= o.bottom) return;
+    if (b->src == g->bm && oy < 0) { y0 = o.bottom - 1; y1 = o.top - 1; step = -1; } else { y0 = o.top; y1 = o.bottom; step = 1; }
+    for (y = y0; y != y1; y += step) {
+        uint32_t *d = bm_px(g->bm, o.left, y);
+        const uint32_t *sr = bm_px(b->src, o.left + ox, y + oy);
+        const int n = o.right - o.left;
+        int x;
+        if (b->rop3 == 0xcc) { memmove(d, sr, (size_t)n * 4); continue; }
+        for (x = 0; x < n; ++x) {
+            uint32_t p = 0;
+            if (upat) {
+                int drew;
+                p = brush_pixel(g, o.left + x, y, &drew);
+                if (!drew) { if (b->rop3 == 0xf0) continue; p = 0; }
+            }
+            d[x] = gdi_rop3(b->rop3, p, sr[x], d[x]);
+        }
+    }
+    mark(g, o.left, o.top, o.right, o.bottom);
+}
+
 static void rop_rect(gctx_t *g, const blit_t *b)
 {
     int i, y;
     const int upat = rop_uses_pat(b->rop3);
+    int *xmap = 0;
+    int xmap_stack[1024];
     if (upat && g->bkind == 0) return;                              /* NULL_BRUSH: nothing to paint with */
+    if (b->src && b->sw == b->dw && b->sh == b->dh && !b->flipx && !b->flipy) {
+        for (i = 0; i < g->clip->n; ++i) {
+            RECT want, o;
+            want.left = b->dx; want.top = b->dy; want.right = b->dx + b->dw; want.bottom = b->dy + b->dh;
+            if (rc_intersect(&o, &want, &g->clip->r[i])) rop_rect_1to1(g, b, &o, upat);
+        }
+        return;
+    }
+    if (b->src) {                                                   /* stretching: the source column of every destination column, once */
+        int k;
+        xmap = b->dw <= 1024 ? xmap_stack : gdi_alloc((size_t)b->dw * sizeof *xmap);
+        if (!xmap) return;
+        for (k = 0; k < b->dw; ++k) {
+            int ux = (int)(((int64_t)k * b->sw) / b->dw);
+            if (b->flipx) ux = b->sw - 1 - ux;
+            ux += b->sx;
+            xmap[k] = ux >= 0 && ux < b->src->w ? ux : -1;
+        }
+    }
     for (i = 0; i < g->clip->n; ++i) {
         RECT want, o;
         want.left = b->dx; want.top = b->dy; want.right = b->dx + b->dw; want.bottom = b->dy + b->dh;
         if (!rc_intersect(&o, &want, &g->clip->r[i])) continue;
         for (y = o.top; y < o.bottom; ++y) {
-            int x;
-            uint32_t *row = bm_px(g->bm, o.left, y);
-            for (x = o.left; x < o.right; ++x, ++row) {
-                uint32_t p = 0, s = 0;
-                if (b->src) {
-                    int ux = (int)(((int64_t)(x - b->dx) * b->sw) / b->dw), uy = (int)(((int64_t)(y - b->dy) * b->sh) / b->dh);
-                    if (b->flipx) ux = b->sw - 1 - ux;
-                    if (b->flipy) uy = b->sh - 1 - uy;
-                    ux += b->sx; uy += b->sy;
-                    if (ux < 0 || uy < 0 || ux >= b->src->w || uy >= b->src->h) continue;
-                    s = *bm_px(b->src, ux, uy);
+            const uint32_t *srow = 0;
+            if (b->src) {
+                int uy = (int)(((int64_t)(y - b->dy) * b->sh) / b->dh);
+                if (b->flipy) uy = b->sh - 1 - uy;
+                uy += b->sy;
+                if (uy < 0 || uy >= b->src->h) continue;
+                srow = bm_px(b->src, 0, uy);
+            }
+            {
+                int x;
+                uint32_t *row = bm_px(g->bm, o.left, y);
+                for (x = o.left; x < o.right; ++x, ++row) {
+                    uint32_t p = 0, s = 0;
+                    if (srow) {
+                        const int ux = xmap[x - b->dx];
+                        if (ux < 0) continue;
+                        s = srow[ux];
+                        if (b->rop3 == 0xcc) { *row = s; continue; }
+                    }
+                    if (upat) {
+                        int drew;
+                        p = brush_pixel(g, x, y, &drew);
+                        if (!drew) { if (b->rop3 == 0xf0) continue; p = 0; }
+                    }
+                    *row = gdi_rop3(b->rop3, p, s, *row);
                 }
-                if (upat) {
-                    int drew;
-                    p = brush_pixel(g, x, y, &drew);
-                    if (!drew) { if (b->rop3 == 0xf0) continue; p = 0; }
-                }
-                *row = gdi_rop3(b->rop3, p, s, *row);
             }
         }
         mark(g, o.left, o.top, o.right, o.bottom);
     }
+    if (xmap && xmap != xmap_stack) gdi_free(xmap);
 }
 
 static BOOL do_blit(dc_t *dst, int dx, int dy, int dw, int dh, dc_t *src, int sx, int sy, int sw, int sh, DWORD rop)
@@ -587,7 +650,7 @@ static BOOL do_blit(dc_t *dst, int dx, int dy, int dw, int dh, dc_t *src, int sx
         raw = gdi_dc_target(src);
         if (!raw || !raw->bits) return FALSE;
         sx = dc_lx(src, sx); sy = dc_ly(src, sy);
-        if (raw == g.bm) {                                          /* overlapping copy inside one bitmap: work from a snapshot */
+        if (raw == g.bm && !(sw == dw && sh == dh && sw > 0 && sh > 0 && dw > 0 && dh > 0)) {   /* stretched copy inside one bitmap: a snapshot */
             tmp = gdi_alloc(sizeof *tmp);
             if (!tmp) return FALSE;
             *tmp = *raw;
@@ -798,12 +861,31 @@ static uint32_t dib_px(const dib_t *d, int x, int ytop)
     }
 }
 
-/* Source rectangle in DIB coordinates (origin bottom-left for bottom-up DIBs, as GDI defines them). */
+/* one DIB row -> 0x00RRGGBB (0xAARRGGBB for 32 bpp) pixels, columns [x0, x0+n) */
+static void dib_row(const dib_t *d, int ytop, int x0, int n, uint32_t *out)
+{
+    const int row = d->topdown ? ytop : d->ha - 1 - ytop;
+    const uint8_t *p = d->bits + (size_t)row * d->stride;
+    int x;
+    if (d->bpp == 32 && d->rmask == 0x00ff0000 && d->gmask == 0xff00 && d->bmask == 0xff) { memcpy(out, p + (size_t)x0 * 4, (size_t)n * 4); return; }
+    if (d->bpp == 24) {
+        const uint8_t *q = p + (size_t)x0 * 3;
+        for (x = 0; x < n; ++x, q += 3) out[x] = (uint32_t)q[2] << 16 | (uint32_t)q[1] << 8 | q[0];
+        return;
+    }
+    for (x = 0; x < n; ++x) out[x] = dib_px(d, x0 + x, ytop);
+}
+
+/* Source rectangle in DIB coordinates (origin bottom-left for bottom-up DIBs, as GDI defines them). At 1:1 without
+ * mirroring whole rows are converted at once (32 bpp BI_RGB rows are plain copies, the alpha byte included); stretching
+ * maps every destination column to its source column once per call. */
 static int stretch_dib(dc_t *dc, int xd, int yd, int wd, int hd, int xs, int ys, int ws, int hs, const dib_t *d, DWORD rop)
 {
     gctx_t g;
     const uint32_t rop3 = (rop >> 16) & 0xff;
     int i, y, flipx = 0, flipy = 0, ytop;
+    int *xmap = 0, xmap_stack[1024];
+    uint32_t *line = 0, line_stack[1024];
     if (!gctx_begin(&g, dc)) return 1;
     xd = dc_lx(dc, xd); yd = dc_ly(dc, yd);
     if (wd < 0) { xd += wd; wd = -wd; flipx ^= 1; }
@@ -812,27 +894,63 @@ static int stretch_dib(dc_t *dc, int xd, int yd, int wd, int hd, int xs, int ys,
     if (hs < 0) { ys += hs; hs = -hs; flipy ^= 1; }
     if (wd == 0 || hd == 0 || ws == 0 || hs == 0) return 1;
     ytop = d->topdown ? ys : d->ha - ys - hs;
+    if (wd == ws && hd == hs && !flipx && !flipy) {                 /* 1:1 */
+        for (i = 0; i < g.clip->n; ++i) {
+            RECT want, o;
+            want.left = xd; want.top = yd; want.right = xd + wd; want.bottom = yd + hd;
+            if (!rc_intersect(&o, &want, &g.clip->r[i])) continue;
+            if (o.left - xd + xs < 0) o.left = xd - xs;             /* the source columns/rows that exist */
+            if (o.right - xd + xs > d->w) o.right = xd - xs + d->w;
+            if (o.top - yd + ytop < 0) o.top = yd - ytop;
+            if (o.bottom - yd + ytop > d->ha) o.bottom = yd - ytop + d->ha;
+            if (o.left >= o.right || o.top >= o.bottom) continue;
+            for (y = o.top; y < o.bottom; ++y) {
+                uint32_t *row = bm_px(g.bm, o.left, y);
+                const int n = o.right - o.left;
+                if (rop3 == 0xcc) { dib_row(d, y - yd + ytop, o.left - xd + xs, n, row); continue; }
+                {
+                    int x;
+                    if (!line) line = d->w <= 1024 ? line_stack : gdi_alloc((size_t)d->w * 4);
+                    if (!line) break;
+                    dib_row(d, y - yd + ytop, o.left - xd + xs, n, line);
+                    for (x = 0; x < n; ++x) row[x] = gdi_rop3(rop3, g.bkind ? g.bpix : 0, line[x], row[x]);
+                }
+            }
+            mark(&g, o.left, o.top, o.right, o.bottom);
+        }
+        if (line && line != line_stack) gdi_free(line);
+        gctx_end(&g);
+        return 1;
+    }
+    xmap = wd <= 1024 ? xmap_stack : gdi_alloc((size_t)wd * sizeof *xmap);
+    if (!xmap) return 0;
+    for (i = 0; i < wd; ++i) {
+        int ux = (int)((int64_t)i * ws / wd);
+        if (flipx) ux = ws - 1 - ux;
+        ux += xs;
+        xmap[i] = ux >= 0 && ux < d->w ? ux : -1;
+    }
     for (i = 0; i < g.clip->n; ++i) {
         RECT want, o;
         want.left = xd; want.top = yd; want.right = xd + wd; want.bottom = yd + hd;
         if (!rc_intersect(&o, &want, &g.clip->r[i])) continue;
         for (y = o.top; y < o.bottom; ++y) {
-            int x;
+            int x, uy = (int)((int64_t)(y - yd) * hs / hd);
             uint32_t *row = bm_px(g.bm, o.left, y);
+            if (flipy) uy = hs - 1 - uy;
+            uy += ytop;
+            if (uy < 0 || uy >= d->ha) continue;
             for (x = o.left; x < o.right; ++x, ++row) {
-                int ux = (int)((int64_t)(x - xd) * ws / wd), uy = (int)((int64_t)(y - yd) * hs / hd);
+                const int ux = xmap[x - xd];
                 uint32_t s;
-                if (flipx) ux = ws - 1 - ux;
-                if (flipy) uy = hs - 1 - uy;
-                ux += xs;
-                uy += ytop;
-                if (ux < 0 || uy < 0 || ux >= d->w || uy >= d->ha) continue;
+                if (ux < 0) continue;
                 s = dib_px(d, ux, uy);
                 *row = rop3 == 0xcc ? s : gdi_rop3(rop3, g.bkind ? g.bpix : 0, s, *row);
             }
         }
         mark(&g, o.left, o.top, o.right, o.bottom);
     }
+    if (xmap != xmap_stack) gdi_free(xmap);
     gctx_end(&g);
     return 1;
 }

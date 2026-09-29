@@ -116,7 +116,7 @@ static uint32_t g_info;
 /* ---------------------------------------------------------------- pointer image cache */
 #define GIN_CURSORS 16
 typedef struct { int used; uint32_t pid; uint64_t cookie; int w, h, hx, hy; uint32_t ver; uint32_t px[32 * 32]; } gcur_t;
-static gcur_t g_curs[GIN_CURSORS];                          /* slot 0: the built-in arrow (cookie 1) */
+static gcur_t *g_curs;                                      /* [GIN_CURSORS] (gin_tables_init); slot 0: the built-in arrow (cookie 1) */
 static int sh_idx = -1, sh_vis;
 static uint32_t sh_ver;
 static uint64_t sh_cookie = 1;                              /* cookie of the cursor of the pointer's owner (0: SetCursor(NULL)) */
@@ -365,10 +365,17 @@ static int hotkey_fire(uint8_t vk, int repeat)
 #define GIN_RAWRING 256
 typedef struct { int used; uint32_t pid, dev, flags; uint64_t target; } grawreg_t;
 static grawreg_t g_rawreg[GIN_RAWREG];
-static shz_rawrec_t g_raw[GIN_RAWRING];
+static shz_rawrec_t *g_raw;                                 /* [GIN_RAWRING] (gin_tables_init) */
 static uint32_t g_raw_ids[GIN_RAWRING];
 static uint32_t g_raw_next = 1;
 static int g_injecting;                                     /* inside SendInput: raw records have no device handle */
+
+int gin_tables_init(void)
+{
+    if (!g_curs) g_curs = gfx_pages_alloc(sizeof(gcur_t) * GIN_CURSORS);
+    if (!g_raw) g_raw = gfx_pages_alloc(sizeof(shz_rawrec_t) * GIN_RAWRING);
+    return g_curs && g_raw ? 0 : STATUS_NO_MEMORY;
+}
 
 static int raw_nolegacy(uint32_t dev)
 {

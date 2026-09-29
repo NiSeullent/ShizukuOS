@@ -72,35 +72,73 @@ bitmap_t *gdi_dc_target(dc_t *dc)
     return dc->bk ? &dc->bk->bmp : 0;
 }
 
+static int64_t rc_area(const RECT *r) { return (int64_t)(r->right - r->left) * (r->bottom - r->top); }
+static void rc_merge(RECT *a, const RECT *b)
+{
+    if (b->left < a->left) a->left = b->left;
+    if (b->top < a->top) a->top = b->top;
+    if (b->right > a->right) a->right = b->right;
+    if (b->bottom > a->bottom) a->bottom = b->bottom;
+}
+
+/* The changed area of a window backing, kept as up to GDI_DIRTY_RECTS rectangles so scattered small updates are
+ * presented as what they are, not as their bounding box: a rectangle that touches or overlaps a kept one is merged into
+ * it; when the list is full the pair whose merge adds the least area is merged. */
 void gdi_dc_touch(dc_t *dc, const RECT *dev)
 {
     backing_t *b = dc->bk;
+    RECT r = *dev;
+    int i, again = 1;
     if (dc->memdc || !b || rc_is_empty(dev)) return;
-    if (!b->dirty_valid) { b->dirty = *dev; b->dirty_valid = 1; return; }
-    if (dev->left < b->dirty.left) b->dirty.left = dev->left;
-    if (dev->top < b->dirty.top) b->dirty.top = dev->top;
-    if (dev->right > b->dirty.right) b->dirty.right = dev->right;
-    if (dev->bottom > b->dirty.bottom) b->dirty.bottom = dev->bottom;
+    while (again) {                                                   /* absorb every kept rectangle the new one meets */
+        again = 0;
+        for (i = 0; i < b->ndirty; ++i) {
+            const RECT *k = &b->dirty[i];
+            if (k->left <= r.right && r.left <= k->right && k->top <= r.bottom && r.top <= k->bottom) {
+                rc_merge(&r, k);
+                b->dirty[i] = b->dirty[--b->ndirty];
+                again = 1;
+                break;
+            }
+        }
+    }
+    if (b->ndirty == GDI_DIRTY_RECTS) {
+        int best = 0;
+        int64_t cost = -1;
+        for (i = 0; i < b->ndirty; ++i) {
+            RECT m = b->dirty[i];
+            int64_t c;
+            rc_merge(&m, &r);
+            c = rc_area(&m) - rc_area(&b->dirty[i]) - rc_area(&r);
+            if (cost < 0 || c < cost) { cost = c; best = i; }
+        }
+        rc_merge(&b->dirty[best], &r);
+        return;
+    }
+    b->dirty[b->ndirty++] = r;
 }
 
 void gdi_window_flush(backing_t *b)
 {
     shz_present_t p;
     RECT full, r;
-    if (!b->dirty_valid) return;
+    int i;
+    const int n = b->ndirty;
     full.left = full.top = 0;
     full.right = b->bmp.w;
     full.bottom = b->bmp.h;
-    b->dirty_valid = 0;
-    if (!rc_intersect(&r, &b->dirty, &full)) return;
-    memset(&p, 0, sizeof p);
-    p.hwnd = (uint64_t)(uintptr_t)b->hwnd;
-    p.x = r.left; p.y = r.top; p.w = r.right - r.left; p.h = r.bottom - r.top;
-    p.bits = (uint64_t)(uintptr_t)b->bmp.bits;
-    p.stride = (uint32_t)b->bmp.w * 4;
-    p.surf_w = b->bmp.w;
-    p.surf_h = b->bmp.h;
-    NtGdiPresent(&p);          /* fails only if the window vanished or was resized meanwhile: nothing left to update then */
+    b->ndirty = 0;
+    for (i = 0; i < n; ++i) {
+        if (!rc_intersect(&r, &b->dirty[i], &full)) continue;
+        memset(&p, 0, sizeof p);
+        p.hwnd = (uint64_t)(uintptr_t)b->hwnd;
+        p.x = r.left; p.y = r.top; p.w = r.right - r.left; p.h = r.bottom - r.top;
+        p.bits = (uint64_t)(uintptr_t)b->bmp.bits;
+        p.stride = (uint32_t)b->bmp.w * 4;
+        p.surf_w = b->bmp.w;
+        p.surf_h = b->bmp.h;
+        if (NtGdiPresent(&p) < 0) break;   /* the window vanished or was resized meanwhile: nothing left to update */
+    }
 }
 
 void gdi_window_dc_flush(dc_t *dc)

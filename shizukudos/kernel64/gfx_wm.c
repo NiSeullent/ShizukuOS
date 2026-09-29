@@ -63,8 +63,8 @@
 #include "gfx.h"
 
 kmutex_t gfx_lock;
-gwin_t g_win[GFX_MAX_WINDOWS];
-static gclass_t g_cls[GFX_MAX_CLASSES];
+gwin_t *g_win;
+static gclass_t *g_cls;
 gqueue_t *g_fg_q;
 static uint32_t win_gen;
 static int wm_ready;
@@ -1696,6 +1696,14 @@ static void gfxd_main(void *arg)
     }
 }
 
+int gfx_tables_init(void)
+{
+    if (!g_win) g_win = gfx_pages_alloc(sizeof(gwin_t) * GFX_MAX_WINDOWS);
+    if (!g_cls) g_cls = gfx_pages_alloc(sizeof(gclass_t) * GFX_MAX_CLASSES);
+    if (!g_win || !g_cls || gq_tables_init() || gin_tables_init()) return STATUS_NO_MEMORY;
+    return STATUS_SUCCESS;
+}
+
 static int32_t wm_init(void)
 {
     int32_t st;
@@ -1704,6 +1712,7 @@ static int32_t wm_init(void)
     if (st) return st;
     if (wm_ready) return STATUS_SUCCESS;
     mutex_lock(&wm_init_lock);
+    if (!wm_ready && gfx_tables_init()) { mutex_unlock(&wm_init_lock); return STATUS_NO_MEMORY; }
     if (!wm_ready) {
         gwin_t *d = DESKTOP;
         memset(d, 0, sizeof *d);

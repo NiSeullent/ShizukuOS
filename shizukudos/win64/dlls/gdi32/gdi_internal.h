@@ -61,11 +61,12 @@ typedef struct dc {
     int dirty_valid; RECT dirty;                            /* window DC: not yet presented */
 } dc_t;
 
+#define GDI_DIRTY_RECTS 8
 typedef struct backing {
     struct backing *next;
     HWND hwnd;
     bitmap_t bmp;
-    RECT dirty; int dirty_valid;
+    RECT dirty[GDI_DIRTY_RECTS]; int ndirty;                /* not yet presented: separate rectangles, merged when they meet */
 } backing_t;
 
 /* handle table */

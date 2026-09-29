@@ -27,14 +27,21 @@
 #define USER_TIMER_MAXIMUM 0x7fffffffu
 #define WAIT_POLL_TICKS 50u                     /* re-check process termination at least this often (1 tick = 1 ms) */
 
-gqueue_t g_queues[GFX_MAX_QUEUES];
+gqueue_t *g_queues;
 static void gq_kick(gqueue_t *q);
 static void q_sync_event(gqueue_t *q);
-static gmsg_t g_msgs[GFX_MAX_MSGS];
+static gmsg_t *g_msgs;
 static gmsg_t *msg_free;
 static int msg_pool_ready;
 static gsend_t g_sends[GFX_MAX_SENDS];
 static uint64_t next_send_id = 1;
+
+int gq_tables_init(void)
+{
+    if (!g_queues) g_queues = gfx_pages_alloc(sizeof(gqueue_t) * GFX_MAX_QUEUES);
+    if (!g_msgs) g_msgs = gfx_pages_alloc(sizeof(gmsg_t) * GFX_MAX_MSGS);
+    return g_queues && g_msgs ? 0 : STATUS_NO_MEMORY;
+}
 
 uint32_t gq_time(void) { return (uint32_t)(shz_time_ns() / 1000000ull); }     /* GetMessageTime: the GetTickCount clock */
 

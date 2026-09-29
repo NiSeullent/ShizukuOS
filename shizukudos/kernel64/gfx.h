@@ -184,9 +184,14 @@ static inline void rc_union(shz_rect_t *a, const shz_rect_t *b)
 
 /* gfx_wm.c */
 extern kmutex_t gfx_lock;                           /* protects every structure in this file set; never held across a sleep */
-extern gwin_t g_win[GFX_MAX_WINDOWS];               /* slot 0 is the desktop */
+/* The big tables live in graphics-arena pages allocated when the window manager starts (gfx_tables_init), not in .bss:
+ * the kernel image must stay small, and a machine without a display never pays for them. */
+extern gwin_t *g_win;                               /* [GFX_MAX_WINDOWS], slot 0 is the desktop */
 extern gqueue_t *g_fg_q;                            /* queue whose active window is the foreground window */
-extern gqueue_t g_queues[GFX_MAX_QUEUES];
+extern gqueue_t *g_queues;                          /* [GFX_MAX_QUEUES] */
+int gfx_tables_init(void);                          /* wm_init: 0 or STATUS_NO_MEMORY */
+int gq_tables_init(void);                           /* gfx_msg.c: queues and the message pool */
+int gin_tables_init(void);                          /* gfx_input.c: pointer images and raw input records */
 gwin_t *wm_lookup(uint64_t handle);                 /* NULL if stale or destroying */
 gwin_t *wm_desktop(void);
 int wm_is_visible(gwin_t *w);
