@@ -180,6 +180,15 @@ def suite_host(results):
            "PASS" if hashes[0][3] == hashes[1][3] else "FAIL", detail=hashes[0][3][:16])
     manifest = shzlib.load_manifest()
     for name, spec in manifest["upstreams"].items():
+        if spec.get("kind") == "debian-binary-packages":
+            try:
+                shzlib.ensure_deb_upstream(name)
+                ok, detail = True, f"{len(spec['packages'])} packages + source, {len(spec['files'])} files by sha256"
+            except (RuntimeError, OSError) as exc:
+                ok, detail = False, str(exc)[:200]
+            record(results, f"upstream {name} pinned ({spec['distribution']})", "PASS" if ok else "FAIL",
+                   detail=detail)
+            continue
         head = subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name), "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
         subs = {sub: subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name / sub), "rev-parse", "HEAD"],

@@ -68,6 +68,74 @@
       "seabios_version": "578d260b",
       "version_note": "Fixed copies of what `git describe --tags --always` printed for the pinned commits (CSMWrap) and `git describe --always --tags --long` (seabios submodule, no tags fetched) on 2026-09-29; fixed so later upstream tags cannot change the binary.",
       "patches": []
+    },
+    "syslinux": {
+      "kind": "debian-binary-packages",
+      "repository": "https://git.kernel.org/pub/scm/boot/syslinux/syslinux.git",
+      "ref": "6.04-pre (Debian/Ubuntu snapshot git20190206)",
+      "commit": "bf6db5b4",
+      "commit_note": "Abbreviated upstream commit as recorded in the Debian version string; the pin that is checked is the sha256 of every package and source file below.",
+      "distribution": "Ubuntu 24.04 (noble) package version 3:6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3",
+      "license": "GPL-2.0-or-later",
+      "license_note": "Syslinux core, isolinux.bin, ldlinux.c32 and memdisk are GPL-2.0-or-later; most com32 modules (menu.c32, mboot.c32, libcom32.c32, libutil.c32) are MIT (Expat) with some GPL-2.0-or-later files. Full per-file terms: usr/share/doc/syslinux-common/copyright, shipped with the media.",
+      "license_files": [
+        "usr/share/doc/syslinux-common/copyright",
+        "usr/share/doc/isolinux/copyright",
+        "usr/share/doc/syslinux/copyright"
+      ],
+      "packages": {
+        "isolinux": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/universe/s/syslinux/isolinux_6.04%7egit20190206.bf6db5b4%2bdfsg1-3ubuntu3_all.deb",
+          "file": "isolinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3_all.deb",
+          "sha256": "fb7fd5b063ba76be09a7b4b9eecb7ac4637434892639b8f315db7a696d70a722"
+        },
+        "syslinux-common": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/syslinux/syslinux-common_6.04%7egit20190206.bf6db5b4%2bdfsg1-3ubuntu3_all.deb",
+          "file": "syslinux-common_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3_all.deb",
+          "sha256": "0861814acc911f788b65689ae59509bafaf20098e68e25de87a2a27ecc3d3169"
+        },
+        "syslinux": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/universe/s/syslinux/syslinux_6.04%7egit20190206.bf6db5b4%2bdfsg1-3ubuntu3_amd64.deb",
+          "file": "syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3_amd64.deb",
+          "sha256": "7406f58e3998ea38e0e8364692f6f15c35484f190aeb4726fb73adf8a87667d7",
+          "note": "host tool only: the mtools-based FAT installer used by tools/build_shizuku_se_disk.py; not shipped"
+        }
+      },
+      "source": {
+        "dsc": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/syslinux/syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3.dsc",
+          "file": "syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3.dsc",
+          "sha256": "7f20f9b25712baac071eb62f184b443b7a2f78cfea28b1c391bc882b4769e99b"
+        },
+        "orig": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/syslinux/syslinux_6.04~git20190206.bf6db5b4+dfsg1.orig.tar.xz",
+          "file": "syslinux_6.04~git20190206.bf6db5b4+dfsg1.orig.tar.xz",
+          "sha256": "46169f43dabb5f6cb33a3f6fb79a61008179326756481845c0a42d429d0c5bee"
+        },
+        "debian": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/syslinux/syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3.debian.tar.xz",
+          "file": "syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3.debian.tar.xz",
+          "sha256": "1ba18a5bf5aaec57eff55905aa06e878622966f7bf1d12afc3f3713dfe7f5a42"
+        }
+      },
+      "files": {
+        "usr/lib/ISOLINUX/isolinux.bin": "f0f645e52bbe18bf7a4ac07be9afa985e21d8eb8c9c57938bdaf5b868a0e0e7f",
+        "usr/lib/ISOLINUX/isohdpfx.bin": "7b43a4dd2061e95da55af51d57a2385c257d64444ee2a62264bcf634a1d0945b",
+        "usr/lib/syslinux/modules/bios/ldlinux.c32": "714faf7d286cd9d47c045c9e8dc614b509b1babc3bb39c095922974a0a62dddf",
+        "usr/lib/syslinux/modules/bios/libcom32.c32": "591db797691f4704a492d036dc70d3595d022fb49bcace8585b75c0c0680b101",
+        "usr/lib/syslinux/modules/bios/libutil.c32": "293877c867ec6af7f05261cbbfbfd031e6f71e809e31b44cf7755b721b9caa94",
+        "usr/lib/syslinux/modules/bios/menu.c32": "9b32ddeb8d69d5c630b64319510fd4e28948c8bc72bafe0a8f29ed9eb549c27c",
+        "usr/lib/syslinux/modules/bios/mboot.c32": "835546f48a6483675a0339f7f6cbc08fe44c028c060edd1fc5e05940870c79a1",
+        "usr/lib/syslinux/memdisk": "e60be7c7da33d6a938a016d8b1537ea29b11d0afc685217eb9ab4bac478d3623",
+        "usr/lib/syslinux/mbr/mbr.bin": "4746f74bc9b9d3d579c41988a4a29bb7ac932ad1c70470ea779ea161eb799b64",
+        "usr/bin/syslinux": "a32eba063251cfc4858a0da6922a613bdc1bceb9ca1309aa85c7e838c58951e7"
+      },
+      "execution_mode": "legacy BIOS boot loaders: isolinux.bin (El Torito no-emulation, and through isohdpfx.bin when the ISO is written to a disk), syslinux ldlinux.sys on the raw disk's FAT partition; mboot.c32 loads the Kernel64 Multiboot stub, memdisk emulates a BIOS disk from a disk/floppy image in RAM",
+      "used_by": [
+        "tools/build_shizuku_se_iso.py",
+        "tools/build_shizuku_se_disk.py"
+      ],
+      "build": "not built here: the pinned distribution binaries are extracted with dpkg-deb -x (shizukudos/tools/shzlib.py ensure_deb_upstream); the Debian source package (dsc + orig + debian tarballs) is shipped on the media as corresponding source"
     }
   },
   "tools": {
