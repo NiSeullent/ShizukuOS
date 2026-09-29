@@ -25,7 +25,7 @@ typedef struct {
 
 /* ---- kernel objects ---- */
 enum { OB_NONE = 0, OB_EVENT = 1, OB_MUTANT = 2, OB_SEMAPHORE = 3, OB_THREAD = 4, OB_PROCESS = 5, OB_FILE = 6,
-       OB_TIMER = 7, OB_DIRECTORY = 8 };
+       OB_TIMER = 7, OB_DIRECTORY = 8, OB_KEY = 9 };
 struct waitblock;
 struct kobject {
     uint32_t type, refs;
@@ -41,6 +41,7 @@ struct kobject {
         struct { process_t *p; } proc;
         struct { void *file; uint32_t access; } file;
         struct { uint64_t due_tick, period_ms; int manual; int armed; } timer;
+        struct { void *node; } key;             /* registry key node (registry.c); the node's refs count these objects */
     } u;
 };
 
@@ -131,6 +132,9 @@ void ob_deref(kobject_t *o);
 kobject_t *ob_find_named(uint32_t type, const char *name);
 int32_t handle_insert(process_t *p, kobject_t *o, uint32_t access, uint32_t *h_out);
 kobject_t *handle_lookup(process_t *p, uint64_t handle, uint32_t type);
+/* Looks the handle up and takes a reference on the object in one irq-atomic step (the caller ob_deref()s it). Reports
+ * STATUS_INVALID_HANDLE / STATUS_OBJECT_TYPE_MISMATCH; `access` (optional) receives the handle's granted access. */
+int32_t handle_ref(process_t *p, uint64_t handle, uint32_t type, kobject_t **out, uint32_t *access);
 int32_t handle_close(process_t *p, uint64_t handle);
 void handles_close_all(process_t *p);
 int32_t ob_wait(process_t *p, kobject_t **objs, unsigned n, int wait_all, int64_t timeout_100ns, int alertable);

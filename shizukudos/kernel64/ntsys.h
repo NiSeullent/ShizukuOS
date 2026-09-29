@@ -34,7 +34,10 @@
 /* Reserved ranges for subsystems that live in their own kernel64 files and their own sys_ext_*() handler (sysext.c).
  * Each subsystem defines ONLY its own list below (numbers must stay inside its range):
  *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf */
-#define SYSCALL_LIST_REGISTRY(X)
+#define SYSCALL_LIST_REGISTRY(X) \
+    X(NtCreateKey, 0x50) X(NtOpenKey, 0x51) X(NtOpenKeyEx, 0x52) X(NtQueryValueKey, 0x53) X(NtSetValueKey, 0x54) \
+    X(NtDeleteKey, 0x55) X(NtDeleteValueKey, 0x56) X(NtEnumerateKey, 0x57) X(NtEnumerateValueKey, 0x58) \
+    X(NtQueryKey, 0x59) X(NtFlushKey, 0x5a) X(NtQueryObject, 0x5b)
 
 #define SYSCALL_LIST_GRAPHICS(X)
 
@@ -68,6 +71,7 @@ enum {
 #define STATUS_GUARD_PAGE_VIOLATION ((int32_t)0x80000001)
 #define STATUS_BUFFER_OVERFLOW ((int32_t)0x80000005)
 #define STATUS_NO_MORE_FILES ((int32_t)0x80000006)
+#define STATUS_NO_MORE_ENTRIES ((int32_t)0x8000001A)
 #define STATUS_UNSUCCESSFUL ((int32_t)0xC0000001)
 #define STATUS_NOT_IMPLEMENTED ((int32_t)0xC0000002)
 #define STATUS_INVALID_INFO_CLASS ((int32_t)0xC0000003)
@@ -85,6 +89,12 @@ enum {
 #define STATUS_OBJECT_NAME_NOT_FOUND ((int32_t)0xC0000034)
 #define STATUS_OBJECT_NAME_COLLISION ((int32_t)0xC0000035)
 #define STATUS_OBJECT_PATH_NOT_FOUND ((int32_t)0xC000003A)
+#define STATUS_OBJECT_PATH_SYNTAX_BAD ((int32_t)0xC000003B)
+#define STATUS_INFO_LENGTH_MISMATCH ((int32_t)0xC0000004)
+#define STATUS_CANNOT_DELETE ((int32_t)0xC0000121)
+#define STATUS_KEY_DELETED ((int32_t)0xC000017C)
+#define STATUS_CHILD_MUST_BE_VOLATILE ((int32_t)0xC0000181)
+#define STATUS_INSUFFICIENT_RESOURCES ((int32_t)0xC000009A)
 #define STATUS_MUTANT_NOT_OWNED ((int32_t)0xC0000046)
 #define STATUS_SEMAPHORE_LIMIT_EXCEEDED ((int32_t)0xC0000047)
 #define STATUS_INVALID_SYSTEM_SERVICE ((int32_t)0xC000001C)
