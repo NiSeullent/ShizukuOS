@@ -28,13 +28,16 @@ under **QEMU TCG** with QEMU's `edu` PCI device attached, mounts a driver-store 
 | DPC + KTIMER + `PsCreateSystemThread` driver; **pended IRP** completed later from a **timer DPC** (`0xC0FFEE00`) | PASS |
 | PCI driver finds QEMU `edu` via `HalGetBusData`, `MmMapIoSpace`es BAR0, reads identification reg `0x010000ED` | PASS |
 | `IoConnectInterrupt` over `irq_register`; a raised `edu` interrupt fires the driver's ISR (vector 42) | PASS |
-| Provider export surface | 173 `ntoskrnl.exe` + 10 `hal.dll` = **183** |
-| User mode reaches a driver: `NtLoadDriver` → `NtCreateFile("\\??\\ShzEcho")` → `NtDeviceIoControlFile` | PASS |
+| Hosted driver recorded as the `edu` function's owner (`pci_claim` → `ntdrv:shzpci`, seen from user mode via `NtQuerySystemInformation(0x101)`) | PASS |
+| Provider export surface | 173 `ntoskrnl.exe` + 12 `hal.dll` = **185** |
+| User mode reaches a driver: `NtLoadDriver` → `NtCreateFile("\\??\\ShzEcho")` → `NtDeviceIoControlFile`; a second `NtLoadDriver` of the running service → `STATUS_IMAGE_ALREADY_LOADED`; a `%SystemRoot%` REG_EXPAND_SZ `ImagePath` resolves | PASS |
 
 The **default** Kernel64 runs (`run_k64_standalone.py`, `run_k64_net.py`, `run_k64_gui.py`) are
 byte-for-byte unaffected: the driver store ships only in `WIN64_NTDRV.IMG`, and `kmain`'s single
 `ntdrv_selftest()` call is a complete no-op unless `\SHZ\DRIVERS` is present. The plain
-standalone runner remains green (14/14 PASS, `GUEST_RUN` TCG); the host suite is VERIFIED (5/5).
+standalone runner remains green (17/17 PASS, twice, `GUEST_RUN` TCG), as does `run_k64_gui.py`. In that default run
+N2's `T_SHZPNP.EXE` now reaches this host: `shzpnp load synthpnp` → `NtLoadDriver` resolves `\SystemRoot\SYS64\DRIVERS\
+synthpnp.sys` and rejects the non-PE payload (`STATUS_INVALID_IMAGE_FORMAT`, exit 1), as its test requires.
 
 The three drivers are built from `shizukudos/win64/drivers/*.c` with Microsoft's DDK headers and
 the exact command a real Windows driver uses — no Shizuku-specific source changes:
@@ -45,7 +48,13 @@ x86_64-w64-mingw32-gcc -shared -nostdlib -Wl,--subsystem,native -Wl,--entry,Driv
 ```
 
 `import_coverage.py --ntoskrnl` measures any `.sys` package against the build-emitted provider
-tables; for the three test drivers it reports **25/25 (100%)** imports resolved (`HOST_TESTED`).
+tables; for the three test drivers it reports **25/25 (100%)** imports resolved (`HOST_TESTED`). Against drivers nobody
+here wrote — N2's 23 unmodified ReactOS/virtio-win `.sys` built by `shizukudos/ntdrv/corpus/build.py` — it reports
+`ntoskrnl.exe` 103/313 and `hal.dll` 6/12 imports provided, and **1 of 23 images loadable** (`null.sys`); the rest
+need more ntoskrnl (211 missing names: `RtlQueryRegistryValues`, `PoCallDriver`/`PoStartNextPowerIrp`,
+`IoRegisterDeviceInterface`, `IoGetDeviceProperty`, `IoOpenDeviceRegistryKey`, `__C_specific_handler`, …) and the
+class frameworks (`ndis.sys` 0/51, `classpnp.sys` 0/30, `scsiport.sys` 0/28, `storport.sys` 0/11, `wdfldr.sys` 0/4)
+(`HOST_TESTED`, measurement only — `null.sys` has not been run here).
 
 ---
 
@@ -202,9 +211,10 @@ implied by a green IOCTL test.
   resolve 183 `ntoskrnl`/`hal` exports, run `DriverEntry`, service IRPs (incl. pended/async),
   DPCs/timers/threads, map I/O space, connect and take a real interrupt, all reachable from user
   mode. Demonstrated on three drivers written to the DDK, not to Shizuku.
-- **Corpus (Agent N2):** real unmodified drivers (ReactOS, virtio-win) and the INF/driver-store
-  matching pipeline are needed to feed real packages through this host; measured with
-  `import_coverage.py --ntoskrnl`.
+- **Corpus (Agent N2), measured:** of 23 real unmodified drivers only `null.sys` resolves every import today; the
+  next ntoskrnl batch (registry query helpers, power IRPs, device interfaces/properties, SEH `__C_specific_handler`,
+  critical regions, StartIo queues) is ranked by `import_coverage.py --ntoskrnl` over that corpus. N2's `shzpnp`
+  (INF → Services key) → `NtLoadDriver` path is connected end to end.
 - **Framework gap:** KMDF, NDIS 6, StorPort, USB, HID, WDDM are the remaining large blocks. A
   chipset/simple function driver could load once KMDF is built; storage/network/USB/HID need
   their class stack; **graphics needs WDDM and is the farthest.**
