@@ -67,6 +67,16 @@
     "libs/musl/src/internal",
     "libs/musl/arch/generic"
    ]
+  },
+  "uuid": {
+   "dir": "libs/uuid"
+  },
+  "zlib": {
+   "dir": "libs/zlib",
+   "defines": [
+    "-DFAR=",
+    "-DZ_SOLO"
+   ]
   }
  },
  "modules": [
@@ -312,6 +322,309 @@
      ]
     }
    ]
+  },
+  {
+   "name": "propsys",
+   "link": [
+    "ole32",
+    "oleaut32",
+    "advapi32"
+   ],
+   "static": [
+    "uuid"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "oleaut32.dll",
+     "fail": "0",
+     "functions": [
+      "SystemTimeToVariantTime"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "propsys"
+    ],
+    "link": [
+     "propsys",
+     "ole32",
+     "oleaut32"
+    ],
+    "static": [
+     "uuid"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "ole32.dll",
+      "fail": "0x80040154",
+      "functions": [
+       "CoCreateInstance"
+      ]
+     },
+     {
+      "dll": "propsys.dll",
+      "fail": "0x80004001",
+      "functions": [
+       "PSCreatePropertyStoreFromObject",
+       "PropVariantToFileTime",
+       "PropVariantToUInt32Vector",
+       "VariantToGUID"
+      ]
+     },
+     {
+      "dll": "oleaut32.dll",
+      "fail": "0",
+      "functions": [
+       "SystemTimeToVariantTime"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "dwmapi",
+   "link": [
+    "user32"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "user32.dll",
+     "fail": "0",
+     "functions": [
+      "EnumDisplaySettingsExW",
+      "SetThreadDpiAwarenessContext"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "dwmapi"
+    ],
+    "link": [
+     "dwmapi",
+     "user32"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "dwmapi.dll",
+      "fail": "0x80004001",
+      "functions": [
+       "DwmFlush"
+      ]
+     },
+     {
+      "dll": "user32.dll",
+      "fail": "0",
+      "functions": [
+       "EnumDisplaySettingsA"
+      ]
+     },
+     {
+      "dll": "kernel32.dll",
+      "fail": "0",
+      "functions": [
+       "QueueUserAPC"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "userenv",
+   "link": [
+    "advapi32"
+   ],
+   "disabled": "needs process tokens (GetTokenInformation/LookupAccountSidW) and the Rtl*Environment block API, which the Shizuku runtime does not have"
+  },
+  {
+   "name": "uxtheme",
+   "link": [
+    "user32",
+    "gdi32",
+    "advapi32"
+   ],
+   "disabled": "needs GDI/user32 functions Shizuku lacks (AlphaBlend, GradientFill, TransparentBlt, atoms, LoadImageW, DPI APIs) and Wine's private user32 RegisterUserApiHook"
+  },
+  {
+   "name": "imm32",
+   "link": [
+    "user32",
+    "gdi32",
+    "advapi32"
+   ],
+   "disabled": "built on Wine's win32u NtUser* input-context syscalls; there is no equivalent kernel interface"
+  },
+  {
+   "name": "imagehlp",
+   "link": [],
+   "delay_imports": [
+    "dbghelp"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "SetFileTime"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wintrust",
+   "link": [
+    "crypt32",
+    "cryptsp",
+    "cryptbase",
+    "imagehlp",
+    "user32",
+    "advapi32"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "SetFileAttributesW"
+     ]
+    },
+    {
+     "dll": "cryptui.dll",
+     "fail": "0",
+     "functions": [
+      "CryptUIDlgCertMgr"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "asn",
+     "crypt",
+     "register",
+     "softpub"
+    ],
+    "link": [
+     "wintrust",
+     "crypt32",
+     "cryptsp",
+     "cryptbase",
+     "advapi32",
+     "user32"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "kernel32.dll",
+      "fail": "0",
+      "functions": [
+       "SetFileAttributesA",
+       "SetFileAttributesW"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "cryptnet",
+   "link": [
+    "crypt32",
+    "cryptsp",
+    "cryptbase",
+    "shell32",
+    "ole32",
+    "advapi32"
+   ],
+   "delay_imports": [
+    "wininet"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "shell32.dll",
+     "fail": "0",
+     "functions": [
+      "SHCreateDirectoryExW"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "cryptnet"
+    ],
+    "link": [
+     "cryptnet",
+     "crypt32"
+    ]
+   }
+  },
+  {
+   "name": "dbghelp",
+   "link": [],
+   "static": [
+    "zlib"
+   ],
+   "includes": [
+    "libs/zlib"
+   ],
+   "defines": [
+    "-DFAR=",
+    "-DZ_SOLO"
+   ],
+   "disabled": "needs process/thread inspection (ReadProcessMemory, VirtualQueryEx, OpenThread, GetThreadContext, psapi K32*), version resources and Wine's wine_get_dos_file_name/__unDName"
+  },
+  {
+   "name": "cfgmgr32",
+   "link": [
+    "advapi32",
+    "rpcrt4"
+   ],
+   "disabled": "talks to Wine's plugplay service over RPC (wine/plugplay.idl); there is no device manager"
+  },
+  {
+   "name": "setupapi",
+   "link": [
+    "advapi32",
+    "rpcrt4"
+   ],
+   "disabled": "depends on cfgmgr32/plugplay, cabinet and a device database"
+  },
+  {
+   "name": "iphlpapi",
+   "link": [
+    "advapi32",
+    "ws2_32"
+   ],
+   "disabled": "implemented on Wine's nsi.dll/nsiproxy network-store interface, which does not exist here"
+  },
+  {
+   "name": "dnsapi",
+   "link": [],
+   "disabled": "its resolver is entirely in the Unix side (libresolv)"
+  },
+  {
+   "name": "secur32",
+   "link": [
+    "advapi32"
+   ],
+   "disabled": "the Negotiate/NTLM/Kerberos/Schannel providers are in the Unix side (GnuTLS, GSSAPI); no TLS library is ported (BearSSL not pinned)"
+  },
+  {
+   "name": "winhttp",
+   "link": [
+    "user32",
+    "advapi32",
+    "ws2_32"
+   ],
+   "disabled": "HTTPS needs secur32/schannel (not ported); also imports jsproxy"
+  },
+  {
+   "name": "comctl32",
+   "link": [
+    "user32",
+    "gdi32",
+    "advapi32",
+    "oleaut32"
+   ],
+   "disabled": "67k lines of controls needing large parts of user32/gdi32 the Shizuku DLLs do not export yet (not attempted in this round)"
   }
  ],
  "image_files": [

@@ -394,3 +394,5 @@ int __cdecl _waccess(const wchar_t *path, int mode)
     if ((mode & 2) && (a & FILE_ATTRIBUTE_READONLY)) { shzw_set_errno(EACCES); return -1; }
     return 0;
 }
+FILE *__cdecl _wfsopen(const wchar_t *path, const wchar_t *mode, int share) { (void)share; return _wfopen(path, mode); }
+FILE *__cdecl _fsopen(const char *path, const char *mode, int share) { (void)share; return fopen(path, mode); }

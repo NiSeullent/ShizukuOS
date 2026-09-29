@@ -61,7 +61,7 @@ WINE_CONFIGURE = ["--enable-win64", "--disable-tests", "--without-mingw", "--wit
 
 # Wine's PE flags (configure.ac / makedep.c for an x86_64 mingw build), plus what the Shizuku runtime needs.
 WINE_CFLAGS = ["-O2", "-g0", "-D__WINESRC__", "-D__WINE_PE_BUILD", "-D_UCRT", "-D_WIN32", "-D_ACRTIMP=", "-fshort-wchar", "-mabi=ms",
-               "-fno-strict-aliasing", "-mcx16", "-ffunction-sections", "-fno-stack-protector", "-fno-ident",
+               "-fno-strict-aliasing", "-mcx16", "-ffunction-sections", "-fdata-sections", "-fno-stack-protector", "-fno-ident",
                "-Wno-format", "-Wno-attributes", "-Wno-unused", "-Wno-int-to-pointer-cast", "-Wno-pointer-to-int-cast",
                "-Wno-incompatible-pointer-types", "-Wno-array-bounds", "-Wno-stringop-overflow",
                "-Wno-dangling-pointer", "-Wno-misleading-indentation"]
@@ -415,6 +415,15 @@ def build_module(wine, rt, m, base, provided, trees):
         for e in entries:
             if e.kind == "import":
                 e.kind = "real"
+    # "-import" entries re-export a function of an imported DLL (winebuild makes a thunk): export them as forwarders
+    # to the first linked DLL that provides the function
+    for e in entries:
+        if e.kind == "import":
+            target = e.target or e.name
+            for lib in [*m.get("link", []), "kernel32", "ntdll"]:
+                if target in provided.get(lib, set()):
+                    e.kind, e.target = "forward", f"{lib}.{target}"
+                    break
     winespec.classify_entries(entries, srcs)
     for e in entries:                                   # real in Wine, but the work is done by the Unix side we lack
         if e.name in m.get("unported", {}):
@@ -451,6 +460,7 @@ def build_module(wine, rt, m, base, provided, trees):
     entry = m.get("entry", "DllMainCRTStartup")
     libs = [f"-l{l}" for l in m.get("link", [])]
     cmd = [CC, "-shared", "-nostdlib", f"-Wl,--entry,{entry}", f"-Wl,--image-base,{base:#x}", "-Wl,--dynamicbase",
+           "-Wl,--gc-sections",
            "-Wl,--subsystem,windows", "-Wl,--disable-auto-import", "-o", dll, *objs, deffile,
            *[WOUT / "lib" / f"lib{s}.a" for s in m.get("static", [])], "-L", OUT, "-L", WOUT / "lib",
            "-Wl,--start-group", rt["shzwine0"], rt["shzwcrt"], *delay_libs, "-Wl,--end-group", *libs,
@@ -501,7 +511,18 @@ static void read_config(const char *self)
     while (fgets(line, sizeof line, f)) {
         size_t n = strlen(line);
         while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
-        if (!strncmp(line, "WINEDEBUG ", 10)) SetEnvironmentVariableA("WINEDEBUG", line + 10);
+        if (!strncmp(line, "WINEDEBUG ", 10)) {
+            /* children do not inherit the environment on Shizuku: winecrt0 also reads HKCU\\Software\\Wine\\Debug */
+            HMODULE adv = LoadLibraryA("advapi32.dll");
+            LONG (WINAPI *create)(HKEY, LPCSTR, DWORD, LPSTR, DWORD, REGSAM, void *, HKEY *, DWORD *) =
+                adv ? (void *)GetProcAddress(adv, "RegCreateKeyExA") : NULL;
+            LONG (WINAPI *set)(HKEY, LPCSTR, DWORD, DWORD, const BYTE *, DWORD) =
+                adv ? (void *)GetProcAddress(adv, "RegSetValueExA") : NULL;
+            HKEY key;
+            SetEnvironmentVariableA("WINEDEBUG", line + 10);
+            if (create && set && !create(HKEY_CURRENT_USER, "Software\\Wine\\Debug", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &key, NULL))
+                set(key, "WINEDEBUG", 0, REG_SZ, (const BYTE *)line + 10, (DWORD)strlen(line + 10) + 1);
+        }
         else if (!strncmp(line, "%(name)s ", sizeof("%(name)s ") - 1)) {
             unsigned k = 0;
             strcpy(cfg_line, line + sizeof("%(name)s ") - 1);
@@ -631,11 +652,18 @@ def build(only=None):
     provided = {p.stem.lower(): def_exports(p) for p in OUT.glob("*.def")}
     base = int(cfg["image_base"], 16)
     modules, tests = {}, {}
+    probe = os.environ.get("SHZ_WINEPORT_PROBE")          # report every module's unresolved imports, do not stop
+
     for i, m in enumerate(cfg["modules"]):
-        if only and m["name"] not in only:
+        if (only and m["name"] not in only) or (m.get("disabled") and not probe):
             continue
-        modules[m["name"]] = build_module(trees[m.get("upstream", "wine")], rt, m, base + i * int(cfg["image_stride"], 16),
-                                          provided, trees)
+        try:
+            modules[m["name"]] = build_module(trees[m.get("upstream", "wine")], rt, m,
+                                              base + i * int(cfg["image_stride"], 16), provided, trees)
+        except SystemExit as e:
+            if not probe:
+                raise
+            print(f"PROBE {m['name']}: {str(e)[:4000]}")
     for m in cfg["modules"]:
         if m.get("tests") and m["name"] in modules:
             tests.update(build_tests(wine, rt, m))

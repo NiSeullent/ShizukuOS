@@ -510,3 +510,115 @@ K32API BOOL WINAPI GetFileAttributesExA(LPCSTR path, GET_FILEEX_INFO_LEVELS leve
     if (!path || !MultiByteToWideChar(CP_ACP, 0, path, -1, w, MAX_PATH)) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
     return GetFileAttributesExW(w, level, info);
 }
+
+K32API BOOL WINAPI GetFileTime(HANDLE h, LPFILETIME create, LPFILETIME access, LPFILETIME write)
+{
+    SHZ_IO_STATUS_BLOCK iosb;
+    struct { LARGE_INTEGER create, access, write, change; ULONG attrs; } basic;
+    NTSTATUS st = NtQueryInformationFile(h, &iosb, &basic, sizeof basic, 4 /* FileBasicInformation */);
+    if (st) { k32_nt_error(st); return FALSE; }
+    if (create) { create->dwLowDateTime = basic.create.LowPart; create->dwHighDateTime = basic.create.HighPart; }
+    if (access) { access->dwLowDateTime = basic.access.LowPart; access->dwHighDateTime = basic.access.HighPart; }
+    if (write) { write->dwLowDateTime = basic.write.LowPart; write->dwHighDateTime = basic.write.HighPart; }
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------- WOW64: this system runs 64-bit processes only */
+K32API BOOL WINAPI IsWow64Process(HANDLE process, PBOOL wow64)
+{
+    (void)process;
+    if (!wow64) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    *wow64 = FALSE;
+    return TRUE;
+}
+K32API BOOL WINAPI IsWow64Process2(HANDLE process, USHORT *machine, USHORT *native)
+{
+    (void)process;
+    if (!machine) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    *machine = IMAGE_FILE_MACHINE_UNKNOWN;
+    if (native) *native = IMAGE_FILE_MACHINE_AMD64;
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------- SearchPath */
+/* Default order (SearchPathW with a NULL path, safe search mode): the application directory, the system directory,
+ * the Windows directory, the current directory, then PATH. The extension is appended when the name has none. */
+static BOOL try_candidate(const WCHAR *dir, size_t dlen, const WCHAR *name, const WCHAR *ext, WCHAR *out, DWORD cap,
+                          DWORD *need, WCHAR **filepart)
+{
+    WCHAR buf[MAX_PATH * 2];
+    size_t n = 0, i;
+    DWORD attr, full;
+    for (i = 0; i < dlen && n < MAX_PATH; ++i) buf[n++] = dir[i];
+    if (n && buf[n - 1] != '\\' && buf[n - 1] != '/') buf[n++] = '\\';
+    for (i = 0; name[i] && n < MAX_PATH * 2 - 8; ++i) buf[n++] = name[i];
+    for (i = 0; ext && ext[i] && n < MAX_PATH * 2 - 1; ++i) buf[n++] = ext[i];
+    buf[n] = 0;
+    attr = GetFileAttributesW(buf);
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) return FALSE;
+    full = GetFullPathNameW(buf, cap, out, filepart);
+    *need = full;
+    return TRUE;
+}
+
+K32API DWORD WINAPI SearchPathW(LPCWSTR path, LPCWSTR name, LPCWSTR ext, DWORD cap, LPWSTR out, LPWSTR *filepart)
+{
+    WCHAR dirs[4][MAX_PATH], env[2048];
+    const WCHAR *use_ext = NULL, *p;
+    DWORD need = 0, n, i;
+    if (!name || !*name) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    for (p = name; *p; ++p) { }
+    while (p > name && p[-1] != '.' && p[-1] != '\\' && p[-1] != '/') --p;
+    if (!(p > name && p[-1] == '.')) use_ext = ext;
+    /* a name with a directory part is only looked up as given */
+    for (p = name; *p; ++p) if (*p == '\\' || *p == '/' || *p == ':') break;
+    if (*p) {
+        if (try_candidate(L"", 0, name, use_ext, out, cap, &need, filepart)) return need;
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return 0;
+    }
+    if (path) {
+        const WCHAR *s = path;
+        while (*s) {
+            const WCHAR *e = s;
+            while (*e && *e != ';') ++e;
+            if (e > s && try_candidate(s, e - s, name, use_ext, out, cap, &need, filepart)) return need;
+            s = *e ? e + 1 : e;
+        }
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return 0;
+    }
+    n = GetModuleFileNameW(NULL, dirs[0], MAX_PATH);
+    while (n && dirs[0][n - 1] != '\\') --n;
+    dirs[0][n] = 0;
+    GetSystemDirectoryW(dirs[1], MAX_PATH);
+    GetWindowsDirectoryW(dirs[2], MAX_PATH);
+    GetCurrentDirectoryW(MAX_PATH, dirs[3]);
+    for (i = 0; i < 4; ++i)
+        if (dirs[i][0] && try_candidate(dirs[i], lstrlenW(dirs[i]), name, use_ext, out, cap, &need, filepart)) return need;
+    if (GetEnvironmentVariableW(L"PATH", env, ARRAYSIZE(env)))
+        return SearchPathW(env, name, ext, cap, out, filepart);
+    SetLastError(ERROR_FILE_NOT_FOUND);
+    return 0;
+}
+
+K32API DWORD WINAPI SearchPathA(LPCSTR path, LPCSTR name, LPCSTR ext, DWORD cap, LPSTR out, LPSTR *filepart)
+{
+    WCHAR wpath[2048], wname[MAX_PATH], wext[16], wout[MAX_PATH];
+    DWORD r;
+    if (!name) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    if (path) MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, ARRAYSIZE(wpath));
+    MultiByteToWideChar(CP_ACP, 0, name, -1, wname, MAX_PATH);
+    if (ext) MultiByteToWideChar(CP_ACP, 0, ext, -1, wext, ARRAYSIZE(wext));
+    r = SearchPathW(path ? wpath : NULL, wname, ext ? wext : NULL, MAX_PATH, wout, NULL);
+    if (!r || r > MAX_PATH) return r;
+    r = (DWORD)WideCharToMultiByte(CP_ACP, 0, wout, -1, NULL, 0, NULL, NULL);
+    if (r > cap) return r;
+    WideCharToMultiByte(CP_ACP, 0, wout, -1, out, cap, NULL, NULL);
+    if (filepart) {
+        char *s = out, *last = NULL;
+        for (; *s; ++s) if (*s == '\\') last = s;
+        *filepart = last ? last + 1 : out;
+    }
+    return r - 1;
+}

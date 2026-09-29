@@ -186,6 +186,18 @@ index 1b38e78..7110d72 100644
      return NULL;
  }
  
+diff --git a/dlls/crypt32/crypt32_private.h b/dlls/crypt32/crypt32_private.h
+index f5918ef..68fd22f 100644
+--- a/dlls/crypt32/crypt32_private.h
++++ b/dlls/crypt32/crypt32_private.h
+@@ -165,6 +165,7 @@ HCRYPTPROV WINAPI I_CryptGetDefaultCryptProv(ALG_ID);
+ extern HINSTANCE hInstance;
+ 
+ void crypt_oid_init(void);
++void CRYPT_EnsureSystemRegistration(void);
+ void crypt_oid_free(void);
+ void crypt_sip_free(void);
+ void root_store_free(void);
 diff --git a/dlls/crypt32/main.c b/dlls/crypt32/main.c
 index b320c89..e2f489e 100644
 --- a/dlls/crypt32/main.c
@@ -239,6 +251,63 @@ index b320c89..e2f489e 100644
 -    return TRUE;
 +    return protect_memory(data, len, flags, FALSE);
  }
+diff --git a/dlls/crypt32/oid.c b/dlls/crypt32/oid.c
+index 9aa4a3e..aca0187 100644
+--- a/dlls/crypt32/oid.c
++++ b/dlls/crypt32/oid.c
+@@ -179,6 +179,35 @@ static char *CRYPT_GetKeyName(DWORD dwEncodingType, LPCSTR pszFuncName,
+     return szKey;
+ }
+ 
++/* Shizuku (wineport): Windows setup (and wineboot) runs DllRegisterServer of the cryptographic system DLLs, which
++ * registers their OID functions (wintrust: Authenticode encoders/decoders, SIPs, trust providers; cryptnet: revocation
++ * and URL retrieval). The Shizuku registry is volatile and has no setup step, so the first OID or SIP lookup of a
++ * process registers those DLLs that are present, once per boot (the PE file SIP key marks it). */
++void CRYPT_EnsureSystemRegistration(void)
++{
++    static LONG done;
++    static const WCHAR *const dlls[] = { L"wintrust.dll", L"cryptnet.dll" };
++    HRESULT (WINAPI *reg)(void);
++    HMODULE module;
++    HKEY key;
++    unsigned int i;
++
++    if (done || InterlockedCompareExchange(&done, 1, 0)) return;
++    if (!RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\"
++                       L"CryptSIPDllGetSignedDataMsg\\{C689AAB8-8E78-11D0-8C47-00C04FC295EE}", 0, KEY_READ, &key))
++    {
++        RegCloseKey(key);
++        return;
++    }
++    for (i = 0; i < ARRAY_SIZE(dlls); i++)
++    {
++        if (!(module = LoadLibraryW(dlls[i]))) continue;
++        if ((reg = (void *)GetProcAddress(module, "DllRegisterServer")) && FAILED(reg()))
++            ERR("%s: DllRegisterServer failed\n", debugstr_w(dlls[i]));
++        FreeLibrary(module);
++    }
++}
++
+ BOOL WINAPI CryptGetDefaultOIDDllList(HCRYPTOIDFUNCSET hFuncSet,
+  DWORD dwEncodingType, LPWSTR pwszDllList, DWORD *pcchDllList)
+ {
+@@ -190,6 +219,8 @@ BOOL WINAPI CryptGetDefaultOIDDllList(HCRYPTOIDFUNCSET hFuncSet,
+     TRACE("(%p, %ld, %p, %p)\n", hFuncSet, dwEncodingType, pwszDllList,
+      pcchDllList);
+ 
++    CRYPT_EnsureSystemRegistration();
++
+     keyName = CRYPT_GetKeyName(dwEncodingType, set->name, "DEFAULT");
+     rc = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keyName, 0, NULL, 0,
+      KEY_READ, NULL, &key, NULL);
+@@ -382,6 +413,7 @@ BOOL WINAPI CryptGetOIDFunctionAddress(HCRYPTOIDFUNCSET hFuncSet,
+     TRACE("(%p, %ld, %s, %08lx, %p, %p)\n", hFuncSet, dwEncodingType,
+      debugstr_a(pszOID), dwFlags, ppvFuncAddr, phFuncAddr);
+ 
++    CRYPT_EnsureSystemRegistration();
+     *ppvFuncAddr = NULL;
+     if (!(dwFlags & CRYPT_GET_INSTALLED_OID_FUNC_FLAG))
+     {
 diff --git a/dlls/crypt32/protectdata.c b/dlls/crypt32/protectdata.c
 index f7d9f43..2658ff3 100644
 --- a/dlls/crypt32/protectdata.c
@@ -362,3 +431,15 @@ index 3aca97a..28c8e86 100644
  
  done:
      RegCloseKey(key);
+diff --git a/dlls/crypt32/sip.c b/dlls/crypt32/sip.c
+index d9da19b..8da42c0 100644
+--- a/dlls/crypt32/sip.c
++++ b/dlls/crypt32/sip.c
+@@ -665,6 +665,7 @@ BOOL WINAPI CryptSIPLoad
+         SetLastError(ERROR_INVALID_PARAMETER);
+         return FALSE;
+     }
++    CRYPT_EnsureSystemRegistration();
+     if (!CRYPT_IsSIPCached(pgSubject) && !CRYPT_LoadSIP(pgSubject))
+         return FALSE;
+ 

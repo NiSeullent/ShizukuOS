@@ -148,20 +148,68 @@ def _find_bodies(text):
             i += 1
 
 
+def _depth_at(body, pos):
+    """Brace depth of position pos inside a function body (0 = the body's own level); strings are skipped."""
+    depth, i = 0, 0
+    while i < pos:
+        c = body[i]
+        if c == '"' or c == "'":
+            q = c
+            i += 1
+            while i < pos and body[i] != q:
+                i += 2 if body[i] == "\\" else 1
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+        i += 1
+    return depth
+
+
+_NOT_WORK = {"if", "for", "while", "switch", "return", "sizeof", "TRACE", "FIXME", "WARN", "ERR", "TRACE_", "FIXME_",
+             "WARN_", "ERR_", "SetLastError", "debugstr_a", "debugstr_w", "debugstr_guid", "wine_dbgstr_w", "wine_dbgstr_a",
+             "debugstr_an", "debugstr_wn", "wine_dbg_sprintf", "HRESULT_FROM_WIN32", "RtlSetLastWin32Error", "V_VT",
+             "memset", "ZeroMemory", "TRACE_ON", "WINE_TRACE", "WINE_FIXME", "WINE_WARN", "WINE_ERR", "FAILED", "SUCCEEDED"}
+
+
+def _does_work(body):
+    """True when the body calls anything besides logging, SetLastError and trivial helpers."""
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", _strip_strings(body)):
+        if m.group(1) not in _NOT_WORK:
+            return True
+    return False
+
+
+def _strip_strings(text):
+    return re.sub(r'"(?:[^"\\]|\\.)*"', '""', text)
+
+
 def classify_body(body):
-    """-> ("real" | "stub" | "semistub", reason)"""
-    fixmes = re.findall(r"FIXME(?:_\(\w+\))?\s*\(\s*\"((?:[^\"\\]|\\.)*)\"", body)
+    """-> ("real" | "stub" | "semistub", reason)
+    A FIXME that says stub/unimplemented at the body's own level of a short function marks a stub. The same FIXME
+    inside a branch (an unsupported case of a function that does its work in the other branches) marks a partial
+    implementation ("semistub", exported and reported separately); so does a long body with such a FIXME."""
+    fixmes = [(m.group(1), m.start()) for m in
+              re.finditer(r"FIXME(?:_\(\w+\))?\s*\(\s*\"((?:[^\"\\]|\\.)*)\"", body)]
     statements = body.count(";")
-    for msg in fixmes:
+    for msg, _ in fixmes:
         if _SEMI_WORDS.search(msg):
             return "semistub", f'FIXME("{msg[:60]}")'
-    for msg in fixmes:
+    for msg, pos in fixmes:
         if _STUB_WORDS.search(msg):
+            if not _does_work(body):
+                return "stub", f'FIXME("{msg[:60]}"), no other work'
+            in_branch = _depth_at(body, pos) > 0 or re.search(r"\belse\s*$", body[:pos])
+            if in_branch:
+                return "semistub", f'FIXME("{msg[:50]}") in one branch'
             if statements <= 12:
                 return "stub", f'FIXME("{msg[:60]}")'
             return "semistub", f'long body with FIXME("{msg[:50]}")'
-    if statements <= 6 and _NOTIMPL.search(body) and "return" in body:
-        return "stub", "returns " + _NOTIMPL.search(body).group(1)
+    m = _NOTIMPL.search(body)
+    if statements <= 6 and m and "return" in body:
+        if _depth_at(body, m.start()) > 0 and statements > 3:
+            return "semistub", f"returns {m.group(1)} in one branch"
+        return "stub", "returns " + m.group(1)
     return "real", ""
 
 

@@ -85,7 +85,8 @@ def main():
              if not (p.upper().startswith("\\SHZ\\TESTS\\T_") and p.upper() != "\\SHZ\\TESTS\\T_HELLO.EXE")]
     # the freshest Wine DLLs (wineport/build.py may have run after win64/build.py packed WIN64.IMG)
     result = json.loads((WIN64 / "wineport" / "wineport-result.json").read_text())
-    built = result["modules"]
+    names = [m["name"] for m in json.loads((HERE / "modules.json").read_text())["modules"]]
+    built = [n for n in names if (WIN64 / f"{n}.dll").exists()]
     have = {p.upper() for p, _ in files}
     files += [(p, Path(src).read_bytes()) for p, src in result.get("image_files", {}).items() if p.upper() not in have]
     fresh = {f"\\SHZ\\SYS64\\{n.upper()}.DLL": (WIN64 / f"{n}.dll").read_bytes() for n in built}
