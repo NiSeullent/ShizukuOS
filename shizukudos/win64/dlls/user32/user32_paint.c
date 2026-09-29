@@ -381,7 +381,11 @@ int u32_metric(int index)
     case SM_CXDLGFRAME: case SM_CYDLGFRAME: return 3;
     case SM_CXICON: case SM_CYICON: case SM_CXCURSOR: case SM_CYCURSOR: return 32;
     case SM_CYMENU: return 19;
-    case SM_MOUSEPRESENT: return 0;                                 /* there is no pointing device */
+    case SM_MOUSEPRESENT: return (u32_input_info() & SHZ_INFO_MOUSE) != 0;   /* the PS/2 mouse answered (kernel64/gfx_input.c) */
+    case SM_CMOUSEBUTTONS: return (u32_input_info() & SHZ_INFO_MOUSE) ? 3 : 0;
+    case SM_MOUSEWHEELPRESENT: return (u32_input_info() & SHZ_INFO_WHEEL) != 0;
+    case SM_MOUSEHORIZONTALWHEELPRESENT: return 0;
+    case SM_SWAPBUTTON: return 0;
     case SM_CXMIN: return 112;
     case SM_CYMIN: return 27;
     case SM_CXSIZE: case SM_CYSIZE: return 18;

@@ -6,7 +6,8 @@
  * Deliberate simplifications (each one is a gap, not a hidden behaviour): pens wider than one pixel have flat ends and no
  * joins; dashed styles apply to one-pixel pens only (as on Windows for cosmetic pens, wider ones are solid); hatch brushes
  * are approximations of the classic patterns; stretching is nearest-neighbour whatever the stretch mode; there are no
- * arcs, paths, rounded rectangles, palettes or world transforms.
+ * arcs, rounded rectangles or palettes. Paths, Bezier curves and the (translation-only) world transform are in gdi_path.c:
+ * while a path is being recorded, MoveToEx/LineTo/Polyline/Polygon/Rectangle/Ellipse add to it and draw nothing.
  */
 #include "gdi_internal.h"
 
@@ -216,28 +217,34 @@ static uint32_t isqrt64(uint64_t v)
 
 static int iceil(double v) { int i = (int)v; return v > (double)i ? i + 1 : i; }
 
-/* Scanline polygon fill of `n` device-coordinate vertices with a callback that paints [x0,x1) on row y. */
-typedef void (*span_fn)(gctx_t *g, int x0, int x1, int y, void *ctx);
-static void poly_fill(gctx_t *g, const POINT *pts, int n, int winding, span_fn fn, void *ctx)
+/* Scanline fill of `nfig` closed polygons (counts[f] device-coordinate vertices each, stored one after the other) under the
+ * ALTERNATE or WINDING rule, with a callback that paints [x0,x1) on row y. A pixel is inside when its centre is. */
+void gdi_poly_fill(gctx_t *g, const POINT *pts, const int *counts, int nfig, int winding, gdi_span_fn fn, void *ctx)
 {
-    int miny, maxy, y, i, k;
+    int miny, maxy, y, i, k, n = 0, f;
     struct cross { double x; int dir; } *xs;
+    struct edge { POINT a, b; } *es;
+    int ne = 0;
+    for (f = 0; f < nfig; ++f) n += counts[f];
     if (n < 3) return;
     xs = gdi_alloc((size_t)n * sizeof *xs);
-    if (!xs) return;
+    es = gdi_alloc((size_t)n * sizeof *es);
+    if (!xs || !es) { gdi_free(xs); gdi_free(es); return; }
     miny = maxy = pts[0].y;
-    for (i = 1; i < n; ++i) {
-        if (pts[i].y < miny) miny = pts[i].y;
-        if (pts[i].y > maxy) maxy = pts[i].y;
-    }
+    for (f = 0, k = 0; f < nfig; k += counts[f++])
+        for (i = 0; i < counts[f]; ++i) {
+            const POINT a = pts[k + i], b = pts[k + (i + 1) % counts[f]];
+            if (a.y < miny) miny = a.y;
+            if (a.y > maxy) maxy = a.y;
+            if (a.y != b.y) { es[ne].a = a; es[ne].b = b; ++ne; }
+        }
     for (y = miny; y < maxy; ++y) {
         int nx = 0;
         const double yc = y + 0.5;
-        for (i = 0; i < n; ++i) {
-            const POINT a = pts[i], b = pts[(i + 1) % n];
+        for (i = 0; i < ne; ++i) {
+            const POINT a = es[i].a, b = es[i].b;
             double x;
             int j;
-            if (a.y == b.y) continue;
             if (!((a.y <= y && b.y > y) || (b.y <= y && a.y > y))) continue;
             x = a.x + (yc - a.y) * (double)(b.x - a.x) / (double)(b.y - a.y);
             j = nx++;
@@ -256,16 +263,24 @@ static void poly_fill(gctx_t *g, const POINT *pts, int n, int winding, span_fn f
         }
     }
     gdi_free(xs);
+    gdi_free(es);
 }
 
-static void span_pen(gctx_t *g, int x0, int x1, int y, void *ctx) { (void)ctx; if (x0 < x1) gctx_span_rop2(g, x0, x1, y, g->ppix, g->dc->rop2); }
-static void span_br(gctx_t *g, int x0, int x1, int y, void *ctx) { (void)ctx; if (x0 < x1) gctx_span_brush(g, x0, x1, y); }
+static void poly_fill(gctx_t *g, const POINT *pts, int n, int winding, gdi_span_fn fn, void *ctx)
+{
+    gdi_poly_fill(g, pts, &n, 1, winding, fn, ctx);
+}
+
+void gdi_span_pen(gctx_t *g, int x0, int x1, int y, void *ctx) { (void)ctx; if (x0 < x1) gctx_span_rop2(g, x0, x1, y, g->ppix, g->dc->rop2); }
+void gdi_span_brush(gctx_t *g, int x0, int x1, int y, void *ctx) { (void)ctx; if (x0 < x1) gctx_span_brush(g, x0, x1, y); }
+#define span_pen gdi_span_pen
+#define span_br gdi_span_brush
 
 static const uint8_t dash_pat[5][6] = { { 0 }, { 18, 6 }, { 3, 3 }, { 9, 3, 3, 3 }, { 9, 3, 3, 3, 3, 3 } };
 static const uint8_t dash_n[5] = { 0, 2, 2, 4, 6 };
 
 /* Draws a line between device points. `last` includes the end pixel (LineTo excludes it). */
-static void line_dev(gctx_t *g, int x0, int y0, int x1, int y1, int last)
+void gdi_line(gctx_t *g, int x0, int y0, int x1, int y1, int last)
 {
     const int rop2 = g->dc->rop2;
     if (g->pnull) return;
@@ -319,6 +334,8 @@ static void line_dev(gctx_t *g, int x0, int y0, int x1, int y1, int last)
     }
 }
 
+#define line_dev gdi_line
+
 DLLAPI BOOL WINAPI MoveToEx(HDC hdc, int x, int y, LPPOINT old)
 {
     dc_t *dc;
@@ -328,6 +345,7 @@ DLLAPI BOOL WINAPI MoveToEx(HDC hdc, int x, int y, LPPOINT old)
     if (old) *old = dc->pos;
     dc->pos.x = x;
     dc->pos.y = y;
+    if (gdi_path_recording(dc)) gdi_path_moveto(dc);
     RET(TRUE);
 }
 
@@ -348,6 +366,11 @@ DLLAPI BOOL WINAPI LineTo(HDC hdc, int x, int y)
     GDI_ENTER();
     dc = gdi_dc_get(hdc);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (gdi_path_recording(dc)) {
+        const BOOL ok = gdi_path_lineto(dc, x, y);
+        if (ok) { dc->pos.x = x; dc->pos.y = y; }
+        RET(ok);
+    }
     if (gctx_begin(&g, dc)) {
         line_dev(&g, dc_lx(dc, dc->pos.x), dc_ly(dc, dc->pos.y), dc_lx(dc, x), dc_ly(dc, y), 0);
         gctx_end(&g);
@@ -366,6 +389,7 @@ DLLAPI BOOL WINAPI Polyline(HDC hdc, const POINT *pts, int n)
     GDI_ENTER();
     dc = gdi_dc_get(hdc);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (gdi_path_recording(dc)) RET(gdi_path_poly(dc, pts, n, 0));
     if (gctx_begin(&g, dc)) {
         for (i = 0; i + 1 < n; ++i)
             line_dev(&g, dc_lx(dc, pts[i].x), dc_ly(dc, pts[i].y), dc_lx(dc, pts[i + 1].x), dc_ly(dc, pts[i + 1].y), i + 2 == n);
@@ -386,6 +410,7 @@ DLLAPI BOOL WINAPI Rectangle(HDC hdc, int l, int t, int r, int b)
     l = dc_lx(dc, l); r = dc_lx(dc, r); t = dc_ly(dc, t); b = dc_ly(dc, b);
     if (l > r) { int s = l; l = r; r = s; }
     if (t > b) { int s = t; t = b; b = s; }
+    if (gdi_path_recording(dc)) RET(gdi_path_rect_dev(dc, l, t, r, b, 0));
     if (!gctx_begin(&g, dc)) RET(TRUE);
     pw = g.pnull ? 0 : g.pwidth;
     { const int half = ((r - l) < (b - t) ? (r - l) : (b - t)) / 2; if (pw > half) pw = half; }
@@ -434,6 +459,7 @@ DLLAPI BOOL WINAPI Ellipse(HDC hdc, int l, int t, int r, int b)
     l = dc_lx(dc, l); r = dc_lx(dc, r); t = dc_ly(dc, t); b = dc_ly(dc, b);
     if (l > r) { int s = l; l = r; r = s; }
     if (t > b) { int s = t; t = b; b = s; }
+    if (gdi_path_recording(dc)) RET(gdi_path_ellipse_dev(dc, l, t, r, b));
     if (!gctx_begin(&g, dc)) RET(TRUE);
     pw = g.pnull ? 0 : g.pwidth;
     for (y = t; y < b; ++y) {
@@ -463,6 +489,7 @@ DLLAPI BOOL WINAPI Polygon(HDC hdc, const POINT *pts, int n)
     GDI_ENTER();
     dc = gdi_dc_get(hdc);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (gdi_path_recording(dc)) RET(gdi_path_poly(dc, pts, n, 1));
     if (!gctx_begin(&g, dc)) RET(TRUE);
     dv = gdi_alloc((size_t)n * sizeof *dv);
     if (!dv) RET(FALSE);
@@ -489,7 +516,7 @@ DLLAPI BOOL WINAPI FillRgn(HDC hdc, HRGN hrgn, HBRUSH hbr)
     old = dc->brush;
     dc->brush = hbr;
     if (gctx_begin(&g, dc)) {
-        const int dx = dc->vp_org.x - dc->win_org.x, dy = dc->vp_org.y - dc->win_org.y;
+        const int dx = dc_ox(dc), dy = dc_oy(dc);
         for (i = 0; i < rg->rl.n; ++i)
             fill_rect_brush(&g, rg->rl.r[i].left + dx, rg->rl.r[i].top + dy, rg->rl.r[i].right + dx, rg->rl.r[i].bottom + dy);
         gctx_end(&g);
@@ -538,38 +565,101 @@ typedef struct {
     uint32_t rop3;
 } blit_t;
 
+/* 1:1 without mirroring: rows are copied (SRCCOPY copies the whole 32-bit pixel, alpha byte included, as GDI does
+ * for 32 bpp DIBs) or combined without any per-pixel division. Rows go bottom-up when the source lies above the
+ * destination inside the same bitmap, so no snapshot is needed for overlapping copies. */
+static void rop_rect_1to1(gctx_t *g, const blit_t *b, const RECT *o0, int upat)
+{
+    RECT o = *o0;
+    const int ox = b->sx - b->dx, oy = b->sy - b->dy;                /* source = destination + (ox, oy) */
+    int y, y0, y1, step;
+    if (o.left + ox < 0) o.left = -ox;                              /* keep the source inside its bitmap */
+    if (o.top + oy < 0) o.top = -oy;
+    if (o.right + ox > b->src->w) o.right = b->src->w - ox;
+    if (o.bottom + oy > b->src->h) o.bottom = b->src->h - oy;
+    if (o.left >= o.right || o.top >= o.bottom) return;
+    if (b->src == g->bm && oy < 0) { y0 = o.bottom - 1; y1 = o.top - 1; step = -1; } else { y0 = o.top; y1 = o.bottom; step = 1; }
+    for (y = y0; y != y1; y += step) {
+        uint32_t *d = bm_px(g->bm, o.left, y);
+        const uint32_t *sr = bm_px(b->src, o.left + ox, y + oy);
+        const int n = o.right - o.left;
+        int x;
+        if (b->rop3 == 0xcc) { memmove(d, sr, (size_t)n * 4); continue; }
+        for (x = 0; x < n; ++x) {
+            uint32_t p = 0;
+            if (upat) {
+                int drew;
+                p = brush_pixel(g, o.left + x, y, &drew);
+                if (!drew) { if (b->rop3 == 0xf0) continue; p = 0; }
+            }
+            d[x] = gdi_rop3(b->rop3, p, sr[x], d[x]);
+        }
+    }
+    mark(g, o.left, o.top, o.right, o.bottom);
+}
+
 static void rop_rect(gctx_t *g, const blit_t *b)
 {
     int i, y;
     const int upat = rop_uses_pat(b->rop3);
+    int *xmap = 0;
+    int xmap_stack[1024];
     if (upat && g->bkind == 0) return;                              /* NULL_BRUSH: nothing to paint with */
+    if (b->src && b->sw == b->dw && b->sh == b->dh && !b->flipx && !b->flipy) {
+        for (i = 0; i < g->clip->n; ++i) {
+            RECT want, o;
+            want.left = b->dx; want.top = b->dy; want.right = b->dx + b->dw; want.bottom = b->dy + b->dh;
+            if (rc_intersect(&o, &want, &g->clip->r[i])) rop_rect_1to1(g, b, &o, upat);
+        }
+        return;
+    }
+    if (b->src) {                                                   /* stretching: the source column of every destination column, once */
+        int k;
+        xmap = b->dw <= 1024 ? xmap_stack : gdi_alloc((size_t)b->dw * sizeof *xmap);
+        if (!xmap) return;
+        for (k = 0; k < b->dw; ++k) {
+            int ux = (int)(((int64_t)k * b->sw) / b->dw);
+            if (b->flipx) ux = b->sw - 1 - ux;
+            ux += b->sx;
+            xmap[k] = ux >= 0 && ux < b->src->w ? ux : -1;
+        }
+    }
     for (i = 0; i < g->clip->n; ++i) {
         RECT want, o;
         want.left = b->dx; want.top = b->dy; want.right = b->dx + b->dw; want.bottom = b->dy + b->dh;
         if (!rc_intersect(&o, &want, &g->clip->r[i])) continue;
         for (y = o.top; y < o.bottom; ++y) {
-            int x;
-            uint32_t *row = bm_px(g->bm, o.left, y);
-            for (x = o.left; x < o.right; ++x, ++row) {
-                uint32_t p = 0, s = 0;
-                if (b->src) {
-                    int ux = (int)(((int64_t)(x - b->dx) * b->sw) / b->dw), uy = (int)(((int64_t)(y - b->dy) * b->sh) / b->dh);
-                    if (b->flipx) ux = b->sw - 1 - ux;
-                    if (b->flipy) uy = b->sh - 1 - uy;
-                    ux += b->sx; uy += b->sy;
-                    if (ux < 0 || uy < 0 || ux >= b->src->w || uy >= b->src->h) continue;
-                    s = *bm_px(b->src, ux, uy);
+            const uint32_t *srow = 0;
+            if (b->src) {
+                int uy = (int)(((int64_t)(y - b->dy) * b->sh) / b->dh);
+                if (b->flipy) uy = b->sh - 1 - uy;
+                uy += b->sy;
+                if (uy < 0 || uy >= b->src->h) continue;
+                srow = bm_px(b->src, 0, uy);
+            }
+            {
+                int x;
+                uint32_t *row = bm_px(g->bm, o.left, y);
+                for (x = o.left; x < o.right; ++x, ++row) {
+                    uint32_t p = 0, s = 0;
+                    if (srow) {
+                        const int ux = xmap[x - b->dx];
+                        if (ux < 0) continue;
+                        s = srow[ux];
+                        if (b->rop3 == 0xcc) { *row = s; continue; }
+                    }
+                    if (upat) {
+                        int drew;
+                        p = brush_pixel(g, x, y, &drew);
+                        if (!drew) { if (b->rop3 == 0xf0) continue; p = 0; }
+                    }
+                    *row = gdi_rop3(b->rop3, p, s, *row);
                 }
-                if (upat) {
-                    int drew;
-                    p = brush_pixel(g, x, y, &drew);
-                    if (!drew) { if (b->rop3 == 0xf0) continue; p = 0; }
-                }
-                *row = gdi_rop3(b->rop3, p, s, *row);
             }
         }
         mark(g, o.left, o.top, o.right, o.bottom);
     }
+    if (xmap && xmap != xmap_stack) gdi_free(xmap);
 }
 
 static BOOL do_blit(dc_t *dst, int dx, int dy, int dw, int dh, dc_t *src, int sx, int sy, int sw, int sh, DWORD rop)
@@ -587,7 +677,7 @@ static BOOL do_blit(dc_t *dst, int dx, int dy, int dw, int dh, dc_t *src, int sx
         raw = gdi_dc_target(src);
         if (!raw || !raw->bits) return FALSE;
         sx = dc_lx(src, sx); sy = dc_ly(src, sy);
-        if (raw == g.bm) {                                          /* overlapping copy inside one bitmap: work from a snapshot */
+        if (raw == g.bm && !(sw == dw && sh == dh && sw > 0 && sh > 0 && dw > 0 && dh > 0)) {   /* stretched copy inside one bitmap: a snapshot */
             tmp = gdi_alloc(sizeof *tmp);
             if (!tmp) return FALSE;
             *tmp = *raw;
@@ -697,6 +787,43 @@ DLLAPI BOOL WINAPI GdiAlphaBlend(HDC hdcd, int xd, int yd, int wd, int hd, HDC h
     RET(TRUE);
 }
 
+/* Private export for user32's icons and cursors (not a Windows API): draws a top-down sw x sh image of straight
+ * (non-premultiplied) 0xAARRGGBB pixels scaled nearest-neighbour to w x h at logical (x,y), clipped like any primitive.
+ * mode 3 (DI_NORMAL) blends with the per-pixel alpha, mode 2 (DI_IMAGE) copies the colour ignoring alpha, mode 1 (DI_MASK)
+ * blackens the pixels whose alpha is at least 128 (the AND mask) and leaves the others alone. */
+DLLAPI BOOL WINAPI ShzGdiDrawArgb(HDC hdc, int x, int y, int w, int h, const uint32_t *argb, int sw, int sh, int mode)
+{
+    dc_t *d;
+    gctx_t g;
+    int i, py;
+    GDI_ENTER();
+    d = gdi_dc_get(hdc);
+    if (!d || !argb || w <= 0 || h <= 0 || sw <= 0 || sh <= 0 || mode < 1 || mode > 3) { SetLastError(ERROR_INVALID_PARAMETER); RET(FALSE); }
+    if (!gctx_begin(&g, d)) RET(TRUE);
+    x = dc_lx(d, x); y = dc_ly(d, y);
+    for (i = 0; i < g.clip->n; ++i) {
+        RECT want, o;
+        want.left = x; want.top = y; want.right = x + w; want.bottom = y + h;
+        if (!rc_intersect(&o, &want, &g.clip->r[i])) continue;
+        for (py = o.top; py < o.bottom; ++py) {
+            const uint32_t *srow = argb + (size_t)((int64_t)(py - y) * sh / h) * (size_t)sw;
+            uint32_t *px = bm_px(g.bm, o.left, py);
+            int px_x;
+            for (px_x = o.left; px_x < o.right; ++px_x, ++px) {
+                const uint32_t s = srow[(int64_t)(px_x - x) * sw / w], a = s >> 24, d0 = *px;
+                if (mode == 1) { if (a >= 128) *px = d0 & 0xff000000u; continue; }
+                if (mode == 2 || a == 255) { *px = (s & 0x00ffffffu) | (d0 & 0xff000000u); continue; }
+                if (a == 0) continue;
+                *px = (((s >> 16 & 255) * a + (d0 >> 16 & 255) * (255 - a)) / 255) << 16 | (((s >> 8 & 255) * a + (d0 >> 8 & 255) * (255 - a)) / 255) << 8 |
+                      (((s & 255) * a + (d0 & 255) * (255 - a)) / 255) | (d0 & 0xff000000u);
+            }
+        }
+        mark(&g, o.left, o.top, o.right, o.bottom);
+    }
+    gctx_end(&g);
+    RET(TRUE);
+}
+
 /* ---------------------------------------------------------------- DIB transfer */
 typedef struct {
     const BITMAPINFOHEADER *h;
@@ -761,12 +888,31 @@ static uint32_t dib_px(const dib_t *d, int x, int ytop)
     }
 }
 
-/* Source rectangle in DIB coordinates (origin bottom-left for bottom-up DIBs, as GDI defines them). */
+/* one DIB row -> 0x00RRGGBB (0xAARRGGBB for 32 bpp) pixels, columns [x0, x0+n) */
+static void dib_row(const dib_t *d, int ytop, int x0, int n, uint32_t *out)
+{
+    const int row = d->topdown ? ytop : d->ha - 1 - ytop;
+    const uint8_t *p = d->bits + (size_t)row * d->stride;
+    int x;
+    if (d->bpp == 32 && d->rmask == 0x00ff0000 && d->gmask == 0xff00 && d->bmask == 0xff) { memcpy(out, p + (size_t)x0 * 4, (size_t)n * 4); return; }
+    if (d->bpp == 24) {
+        const uint8_t *q = p + (size_t)x0 * 3;
+        for (x = 0; x < n; ++x, q += 3) out[x] = (uint32_t)q[2] << 16 | (uint32_t)q[1] << 8 | q[0];
+        return;
+    }
+    for (x = 0; x < n; ++x) out[x] = dib_px(d, x0 + x, ytop);
+}
+
+/* Source rectangle in DIB coordinates (origin bottom-left for bottom-up DIBs, as GDI defines them). At 1:1 without
+ * mirroring whole rows are converted at once (32 bpp BI_RGB rows are plain copies, the alpha byte included); stretching
+ * maps every destination column to its source column once per call. */
 static int stretch_dib(dc_t *dc, int xd, int yd, int wd, int hd, int xs, int ys, int ws, int hs, const dib_t *d, DWORD rop)
 {
     gctx_t g;
     const uint32_t rop3 = (rop >> 16) & 0xff;
     int i, y, flipx = 0, flipy = 0, ytop;
+    int *xmap = 0, xmap_stack[1024];
+    uint32_t *line = 0, line_stack[1024];
     if (!gctx_begin(&g, dc)) return 1;
     xd = dc_lx(dc, xd); yd = dc_ly(dc, yd);
     if (wd < 0) { xd += wd; wd = -wd; flipx ^= 1; }
@@ -775,27 +921,63 @@ static int stretch_dib(dc_t *dc, int xd, int yd, int wd, int hd, int xs, int ys,
     if (hs < 0) { ys += hs; hs = -hs; flipy ^= 1; }
     if (wd == 0 || hd == 0 || ws == 0 || hs == 0) return 1;
     ytop = d->topdown ? ys : d->ha - ys - hs;
+    if (wd == ws && hd == hs && !flipx && !flipy) {                 /* 1:1 */
+        for (i = 0; i < g.clip->n; ++i) {
+            RECT want, o;
+            want.left = xd; want.top = yd; want.right = xd + wd; want.bottom = yd + hd;
+            if (!rc_intersect(&o, &want, &g.clip->r[i])) continue;
+            if (o.left - xd + xs < 0) o.left = xd - xs;             /* the source columns/rows that exist */
+            if (o.right - xd + xs > d->w) o.right = xd - xs + d->w;
+            if (o.top - yd + ytop < 0) o.top = yd - ytop;
+            if (o.bottom - yd + ytop > d->ha) o.bottom = yd - ytop + d->ha;
+            if (o.left >= o.right || o.top >= o.bottom) continue;
+            for (y = o.top; y < o.bottom; ++y) {
+                uint32_t *row = bm_px(g.bm, o.left, y);
+                const int n = o.right - o.left;
+                if (rop3 == 0xcc) { dib_row(d, y - yd + ytop, o.left - xd + xs, n, row); continue; }
+                {
+                    int x;
+                    if (!line) line = d->w <= 1024 ? line_stack : gdi_alloc((size_t)d->w * 4);
+                    if (!line) break;
+                    dib_row(d, y - yd + ytop, o.left - xd + xs, n, line);
+                    for (x = 0; x < n; ++x) row[x] = gdi_rop3(rop3, g.bkind ? g.bpix : 0, line[x], row[x]);
+                }
+            }
+            mark(&g, o.left, o.top, o.right, o.bottom);
+        }
+        if (line && line != line_stack) gdi_free(line);
+        gctx_end(&g);
+        return 1;
+    }
+    xmap = wd <= 1024 ? xmap_stack : gdi_alloc((size_t)wd * sizeof *xmap);
+    if (!xmap) return 0;
+    for (i = 0; i < wd; ++i) {
+        int ux = (int)((int64_t)i * ws / wd);
+        if (flipx) ux = ws - 1 - ux;
+        ux += xs;
+        xmap[i] = ux >= 0 && ux < d->w ? ux : -1;
+    }
     for (i = 0; i < g.clip->n; ++i) {
         RECT want, o;
         want.left = xd; want.top = yd; want.right = xd + wd; want.bottom = yd + hd;
         if (!rc_intersect(&o, &want, &g.clip->r[i])) continue;
         for (y = o.top; y < o.bottom; ++y) {
-            int x;
+            int x, uy = (int)((int64_t)(y - yd) * hs / hd);
             uint32_t *row = bm_px(g.bm, o.left, y);
+            if (flipy) uy = hs - 1 - uy;
+            uy += ytop;
+            if (uy < 0 || uy >= d->ha) continue;
             for (x = o.left; x < o.right; ++x, ++row) {
-                int ux = (int)((int64_t)(x - xd) * ws / wd), uy = (int)((int64_t)(y - yd) * hs / hd);
+                const int ux = xmap[x - xd];
                 uint32_t s;
-                if (flipx) ux = ws - 1 - ux;
-                if (flipy) uy = hs - 1 - uy;
-                ux += xs;
-                uy += ytop;
-                if (ux < 0 || uy < 0 || ux >= d->w || uy >= d->ha) continue;
+                if (ux < 0) continue;
                 s = dib_px(d, ux, uy);
                 *row = rop3 == 0xcc ? s : gdi_rop3(rop3, g.bkind ? g.bpix : 0, s, *row);
             }
         }
         mark(&g, o.left, o.top, o.right, o.bottom);
     }
+    if (xmap != xmap_stack) gdi_free(xmap);
     gctx_end(&g);
     return 1;
 }

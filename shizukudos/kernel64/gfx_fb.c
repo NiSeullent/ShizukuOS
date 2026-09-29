@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Kernel64 display: mode, back buffer and backend selection. Backends: the paravirtual virtio-gpu (gfx_virtio.c, QEMU
- * `-device virtio-vga`) when present, else Bochs VBE ("BGA", PCI 1234:1111) as provided by QEMU `-machine pc -vga std`.
+ * `-device virtio-vga`) when present, else Bochs VBE ("BGA", PCI 1234:1111) as provided by QEMU `-machine pc -vga std`,
+ * else the UEFI GOP framebuffer a UEFI direct boot handed over (gfx_gop.c). After a UEFI direct boot the firmware's
+ * framebuffer is the active display, so the BGA backend declines and the GOP backend keeps the firmware's mode.
  *
  * Scope and honesty notes
  *  - ONLY the SHZ_STANDALONE profile (QEMU TCG/KVM booted by the standalone stub) has a display device. Under the
@@ -126,7 +128,12 @@ static int bga_probe(gfx_fb_t *fb)
     uint64_t bar_size = 0, bar;
     int is_io = 0;
     uint32_t w, h;
+    k64_boot_fb_t boot;
     if (pci_find(0x1234, 0x1111, &dev) || dev.class_code != 0x03) return -1;
+    if (!k64_boot_framebuffer(&boot)) {                 /* the firmware's framebuffer is on screen: leave the adapter alone */
+        kprintf("K64 gfx: Bochs VBE present, but the UEFI boot framebuffer is the active display: GOP backend\n");
+        return -1;
+    }
     bar = pci_bar(&dev, 0, &bar_size, &is_io);
     if (!bar || is_io || bar_size < (uint64_t)fb->pitch * fb->height) {
         kprintf("K64 gfx: BGA BAR0 unusable (base %llx size %llx io %d)\n", bar, bar_size, is_io);
@@ -176,8 +183,10 @@ static const gfx_backend_t gfx_backend_bga = { "Bochs VBE", SHZ_GPU_BACKEND_BGA,
 
 /* THE backend hook: display drivers in the order they are tried. The paravirtual virtio-gpu (gfx_virtio.c) comes first;
  * it only exists when QEMU runs with -device virtio-vga / virtio-gpu-pci, and then there is no BGA (the VGA-compatible
- * part of virtio-vga has a different PCI id). Anything else falls back to the Bochs VBE linear framebuffer. */
-static const gfx_backend_t *const gfx_backends[] = { &gfx_backend_virtio, &gfx_backend_bga };
+ * part of virtio-vga has a different PCI id). Then the Bochs VBE linear framebuffer, except after a UEFI direct boot (it
+ * declines), and last the UEFI GOP framebuffer (gfx_gop.c), which exists only after a UEFI direct boot: any firmware
+ * display with a linear 32 bpp framebuffer (a PCI adapter in firmware mode, QEMU ramfb, ...). */
+static const gfx_backend_t *const gfx_backends[] = { &gfx_backend_virtio, &gfx_backend_bga, &gfx_backend_gop };
 
 static kmutex_t init_lock;
 static int init_state;                                  /* 0 not tried, 1 ready, -1 failed */
@@ -211,7 +220,8 @@ int gfx_fb_init(void)
     for (i = 0; i < sizeof gfx_backends / sizeof gfx_backends[0] && !g_fb.backend; ++i)
         if (gfx_backends[i]->probe(&g_fb) == 0) g_fb.backend = gfx_backends[i];
     if (!g_fb.backend) {
-        kprintf("K64 gfx: no display device (virtio-gpu 1af4:1050 or Bochs VBE 1234:1111); GUI subsystem inactive\n");
+        kprintf("K64 gfx: no display device (virtio-gpu 1af4:1050, Bochs VBE 1234:1111 or a UEFI GOP framebuffer); "
+                "GUI subsystem inactive\n");
         gfx_pages_free(g_fb.back, bytes);
         g_fb.back = 0;
         goto out;
@@ -219,7 +229,7 @@ int gfx_fb_init(void)
     g_fb.ready = 1;
     init_state = 1;
     kprintf("K64 gfx: display backend %s, %ux%ux32, back buffer %llu KiB\n", g_fb.backend->name, g_fb.width, g_fb.height,
-            bytes >> 10);
+            ((uint64_t)g_fb.pitch * g_fb.height) >> 10);                /* a backend may have adopted another mode (GOP) */
     gfx_fb_present(0, 0, (int)g_fb.width, (int)g_fb.height);
 out:
     mutex_unlock(&init_lock);

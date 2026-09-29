@@ -191,7 +191,15 @@ typedef struct {
     int64_t result;                     /* out: the window procedure's result */
     uint64_t wndproc;                   /* out (SHZ_SEND_SAME_THREAD): call this procedure yourself */
     shz_callback_t cb;                  /* out (SHZ_SEND_CALLBACK): service this, then call again with id set */
+    uint64_t cookie;                    /* in with SHZ_SENDF_CALLBACK: handed back in SHZ_WM_SENDCB */
 } shz_send_t;
+#define SHZ_SENDF_NOWAIT 1u             /* flags: queue the message and return SHZ_SEND_DONE at once (SendNotifyMessage) */
+#define SHZ_SENDF_CALLBACK 2u           /* with NOWAIT: when the receiver replies, post SHZ_WM_SENDCB(wParam = cookie, lParam =
+                                           result) as a thread message to the sender (SendMessageCallback) */
+/* Private messages user32 posts or receives and consumes inside GetMessage/PeekMessage (never dispatched): */
+#define SHZ_WM_SENDCB 0x03FEu           /* thread message: a SendMessageCallback completed */
+#define SHZ_WM_ASYNCSHOW 0x03FDu        /* to a window: ShowWindowAsync(hwnd, wParam) */
+#define SHZ_WM_WINEVENT 0x03FCu         /* thread message: an out-of-context WinEvent (wParam = user32 record) */
 #define SHZ_SEND_DONE 0
 #define SHZ_SEND_SAME_THREAD 1          /* the window belongs to the calling thread: run the procedure in user mode */
 #define SHZ_SEND_CALLBACK 2
@@ -276,8 +284,122 @@ typedef struct {
 typedef struct { uint32_t op, atom; uint64_t name; uint32_t name_len, pad; } shz_atom_t;
 #define SHZ_ATOM_ADD 1
 #define SHZ_ATOM_FIND 2
+#define SHZ_ATOM_GETNAME 3              /* atom -> name (name = buffer, name_len = capacity in, units written out) */
 enum { SHZ_PROP_SET = 1, SHZ_PROP_GET, SHZ_PROP_REMOVE };
 typedef struct { uint32_t op, pad; uint64_t hwnd, key, value; } shz_prop_t;
+
+/* ---- input: NtUserInput (kernel64/gfx_input.c). Keyboard and mouse events (PS/2 hardware or SendInput) are routed by the
+ *      kernel to the queue of the thread that owns the target window and come out of GetMessage/PeekMessage after the posted
+ *      messages. Mouse messages carry SHZ_MSGF_MOUSE in shz_msg_t.pad0 with SCREEN coordinates in lparam and pt: user32
+ *      then asks the window for its hit-test code (WM_NCHITTEST), sends WM_SETCURSOR / WM_MOUSEACTIVATE and turns the message
+ *      into its client (client coordinates) or non-client (WM_NC*, screen coordinates) form, detecting double clicks.
+ *      shz_msg_t.pad1 carries the low 32 bits of the SendInput dwExtraInfo (GetMessageExtraInfo). ---- */
+#define SHZ_MSGF_MOUSE 1u               /* mouse input: needs the hit-test translation described above */
+#define SHZ_MSGF_CAPTURED 2u            /* routed to the capture window: always the client form, no WM_SETCURSOR */
+#define SHZ_MSGF_INPUT 4u               /* keyboard or mouse input (updates the thread key state when removed) */
+enum {
+    SHZ_IN_GETKEYSTATE = 1,             /* a = vk -> out0 = the thread's state byte (0x80 down, 0x01 toggled) */
+    SHZ_IN_GETKEYBOARDSTATE,            /* buf = 256 bytes out */
+    SHZ_IN_SETKEYBOARDSTATE,            /* buf = 256 bytes in (the thread's state only) */
+    SHZ_IN_GETASYNCKEYSTATE,            /* a = vk -> out0 = 0x8000 if down now | 1 if pressed since the previous call */
+    SHZ_IN_GETCURSORPOS,                /* out0 = x, out1 = y */
+    SHZ_IN_SETCURSORPOS,                /* a = x, b = y (clipped; generates a mouse move) */
+    SHZ_IN_SENDINPUT,                   /* buf = shz_inrec_t[a] -> out0 = records injected */
+    SHZ_IN_CLIPCURSOR,                  /* a = 1: confine the pointer to rect; a = 0: release */
+    SHZ_IN_GETCLIPCURSOR,               /* rect out (the screen when not confined) */
+    SHZ_IN_INFO,                        /* out0 = SHZ_INFO_* flags, out1 = last input time (ms, GetTickCount clock) */
+    SHZ_IN_TRACKMOUSE,                  /* a = hwnd, b = TME_* flags, c = hover ms; TME_QUERY returns them in out0/out1 */
+    SHZ_IN_SETCURSOR,                   /* a = cookie (0: no cursor), b = w | h << 16, c = hot x | hot y << 16, buf = w*h ARGB
+                                           (w, h <= 32), d = 1 if the thread's ShowCursor count is below zero */
+    SHZ_IN_CURSORINFO,                  /* out0 = cookie of the cursor now shown (0 = none), out1 = 1 if showing */
+    SHZ_IN_HOTKEY,                      /* a = hwnd, b = id, c = MOD_* | vk << 16, d = 1 register / 0 unregister */
+    SHZ_IN_RAWREGISTER,                 /* a = SHZ_RAW_KEYBOARD|MOUSE, b = RIDEV_* flags (RIDEV_REMOVE unregisters), c = target hwnd */
+    SHZ_IN_RAWGET,                      /* a = HRAWINPUT -> buf = shz_rawrec_t (fails once the record was overwritten) */
+    SHZ_IN_RAWLIST,                     /* -> out0 = SHZ_RAW_* bits registered by this process, out1 = kbd flags | mouse flags << 32,
+                                           buf (16 bytes) = the kbd and mouse target hwnds */
+};
+#define SHZ_RAW_KEYBOARD 1u             /* HID usage page 1, usage 6 */
+#define SHZ_RAW_MOUSE 2u                /* HID usage page 1, usage 2 */
+#define SHZ_RAW_HANDLE_KEYBOARD 1u      /* RAWINPUTHEADER.hDevice of the PS/2 devices (0 for SendInput-injected input) */
+#define SHZ_RAW_HANDLE_MOUSE 2u
+/* One raw input record (what GetRawInputData returns, repacked by user32 into RAWINPUT). */
+typedef struct {
+    uint32_t type;                      /* 0 mouse (RIM_TYPEMOUSE), 1 keyboard (RIM_TYPEKEYBOARD) */
+    uint32_t device;                    /* SHZ_RAW_HANDLE_* or 0 */
+    uint32_t wparam;                    /* RIM_INPUT / RIM_INPUTSINK of the WM_INPUT that carried it */
+    uint16_t kb_make, kb_flags, kb_vkey, pad;
+    uint32_t kb_message;
+    uint16_t ms_flags, ms_button_flags;
+    int16_t ms_button_data, pad2;
+    int32_t ms_x, ms_y;
+    uint32_t ms_buttons;                /* raw button state */
+    uint64_t extra;
+} shz_rawrec_t;
+#define SHZ_INFO_KEYBOARD 1u            /* a PS/2 keyboard answered */
+#define SHZ_INFO_MOUSE 2u               /* a PS/2 mouse answered */
+#define SHZ_INFO_WHEEL 4u               /* ... and speaks the IntelliMouse (wheel) protocol */
+typedef struct {
+    uint32_t op, pad;
+    int64_t a, b, c, d;
+    uint64_t buf;
+    uint32_t buf_len, pad2;
+    uint64_t out0, out1;
+    shz_rect_t rect;
+} shz_input_t;
+/* SendInput record (user32 converts INPUT to this). type 0 = mouse, 1 = keyboard; flags are MOUSEEVENTF_* / KEYEVENTF_*. */
+typedef struct {
+    uint32_t type, flags;
+    int32_t dx, dy, data;               /* mouse: movement (or 0..65535 absolute), mouseData (wheel delta, XBUTTON) */
+    uint16_t vk, scan;                  /* keyboard */
+    uint64_t extra;                     /* dwExtraInfo */
+} shz_inrec_t;
+
+/* ---- NtUserWindowOp (kernel64/gfx_wm.c): layered windows, window regions, reading a window's pixels ---- */
+enum {
+    SHZ_WOP_SET_LAYERED = 1,            /* flags = LWA_COLORKEY|LWA_ALPHA, key, alpha (SetLayeredWindowAttributes) */
+    SHZ_WOP_GET_LAYERED,                /* -> flags, key, alpha; fails (INVALID_PARAMETER) unless attributes were set */
+    SHZ_WOP_UPDATE_LAYERED,             /* UpdateLayeredWindow: flags = ULW_*, key, alpha (SourceConstantAlpha), pos_flags bit 0: move
+                                           to x,y; bit 1: size w,h; bit 2: per-pixel alpha; bits != 0: w x h pixels 0xAARRGGBB
+                                           (premultiplied when per-pixel), stride bytes, taken from (src_x, src_y); dirty = the
+                                           changed part in window coordinates (empty: everything) */
+    SHZ_WOP_SET_REGION,                 /* count rectangles at bits (window coordinates, disjoint); bits == 0: no region */
+    SHZ_WOP_GET_REGION,                 /* count = capacity in, rectangles written out; returns STATUS_NOT_FOUND without a region */
+    SHZ_WOP_PRINT,                      /* the window alone (frame, client, children; or the client only with flags & 1) composed
+                                           into bits (w x h 0x00RRGGBB, stride); w, h out = what was drawn */
+    SHZ_WOP_SET_AFFINITY,               /* alpha = WDA_* value */
+    SHZ_WOP_GET_AFFINITY,
+};
+typedef struct {
+    uint32_t op, flags;
+    uint64_t hwnd;
+    uint32_t key, alpha;
+    int32_t x, y, w, h;
+    uint32_t pos_flags, stride;
+    uint64_t bits;
+    uint32_t count, pad;
+    int32_t src_x, src_y;
+    shz_rect_t dirty;
+} shz_winop_t;
+
+/* ---- NtUserClipboard (kernel64/gfx_clip.c): ONE system-wide clipboard. Data are bytes kept by the kernel per format
+ *      (user32 converts handles such as HBITMAP to bytes); a format set with no data is delay-rendered by its owner. ---- */
+enum {
+    SHZ_CB_OPEN = 1,                    /* hwnd (may be 0) -> fails with ACCESS_DENIED while another thread has it open */
+    SHZ_CB_CLOSE,                       /* -> out0 = 1 if the contents changed while open (listeners have been notified) */
+    SHZ_CB_EMPTY,                       /* must be open: drops all data, the opener's window becomes the owner */
+    SHZ_CB_SET,                         /* must be open: format, buf/size (buf 0: delayed rendering) */
+    SHZ_CB_GET,                         /* format, buf/size capacity -> out0 = data size (copied if it fits), out1 = 1 if delayed */
+    SHZ_CB_ENUM,                        /* format (0 = first) -> out0 = next format (0 = no more) */
+    SHZ_CB_COUNT,                       /* -> out0 */
+    SHZ_CB_INFO,                        /* -> out0 = sequence number, out1 = owner hwnd, out2 = open window */
+    SHZ_CB_LISTEN,                      /* hwnd, format = 1 add / 0 remove (AddClipboardFormatListener) */
+};
+typedef struct {
+    uint32_t op, format;
+    uint64_t hwnd;
+    uint64_t buf, size;
+    uint64_t out0, out1, out2;
+} shz_clip_t;
 
 #ifdef _WIN32
 /* User-mode side: the ntdll stubs generated from SYSCALL_LIST_GRAPHICS. Status is an NTSTATUS (negative = failure). */
@@ -304,6 +426,9 @@ int32_t SHZ_NT NtUserEnumWindows(void *e);
 int32_t SHZ_NT NtUserHitTest(int64_t x, int64_t y, void *hwnd_out);
 int32_t SHZ_NT NtUserAtom(void *a);
 int32_t SHZ_NT NtUserProp(void *p);
+int32_t SHZ_NT NtUserInput(void *i);
+int32_t SHZ_NT NtUserWindowOp(void *o);
+int32_t SHZ_NT NtUserClipboard(void *c);
 #endif
 
 #endif

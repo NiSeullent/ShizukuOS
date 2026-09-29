@@ -48,7 +48,7 @@ void kmain(uint64_t bootinfo_pa)
         kprintf("%s: command line \"%s\"\n", KVER, bootinfo.cmdline);
     if (!k64_boot_framebuffer(&fb))
         kprintf("%s: UEFI GOP framebuffer %ux%u, pitch %u, %s, at %llx (%llu KiB): available through "
-                "k64_boot_framebuffer(); no GOP display backend uses it yet\n", KVER, fb.width, fb.height, fb.pitch,
+                "k64_boot_framebuffer(); the GOP display backend (gfx_gop.c) drives it unless a virtio-gpu is present\n", KVER, fb.width, fb.height, fb.pitch,
                 fb.format == SHZ_FB_BGRX8888 ? "BGRX" : "RGBX", fb.base, fb.size >> 10);
 #ifdef SHZ_STANDALONE
     { extern void pci_log_devices(void); pci_log_devices(); }        /* device inventory; port I/O is only safe without the Supervisor */
