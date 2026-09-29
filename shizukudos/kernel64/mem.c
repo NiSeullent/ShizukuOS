@@ -6,7 +6,7 @@
  *   0xFFFF800000000000  direct map of all guest-physical memory this kernel owns or may touch
  *   0x0000000000010000..0x00007FFFFFFEEFFF  user space (per process)
  * Guest-physical layout: 0..1 MiB boot structures, 1 MiB kernel, 2..6 MiB heap,
- * 6 MiB.. page allocator (initrd range excluded).
+ * 6 MiB.. page allocator (initrd range and firmware holes from bootinfo excluded).
  */
 #include "k64.h"
 
@@ -254,6 +254,20 @@ void mem_init(const shz_bootinfo_t *bi)
         for (i = first_initrd_page; i <= last_initrd_page && i < pmm_pages; ++i) {
             bit_set(i);
             --pmm_free_pages;
+        }
+    }
+    /* Firmware ranges that are not RAM (standalone boot on a firmware memory map with holes, e.g. UEFI +
+     * CSMWrap); the boot stub guarantees they lie above PMM_BASE. A Supervisor domain has none. */
+    if (bi->size >= sizeof *bi) {
+        for (c = 0; c < bi->hole_count && c < SHZ_MAX_HOLES; ++c) {
+            KASSERT(bi->hole[c].gpa >= PMM_BASE);
+            for (off = bi->hole[c].gpa; off < bi->hole[c].gpa + bi->hole[c].size && off < ram_top; off += PAGE_SIZE) {
+                i = (off - PMM_BASE) / PAGE_SIZE;
+                if (!bit_get(i)) {
+                    bit_set(i);
+                    --pmm_free_pages;
+                }
+            }
         }
     }
     /* Build the final tables while still running on the Supervisor's boot mapping, through
