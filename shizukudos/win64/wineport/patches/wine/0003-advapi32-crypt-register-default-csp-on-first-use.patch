@@ -1,0 +1,63 @@
+diff --git a/dlls/advapi32/crypt.c b/dlls/advapi32/crypt.c
+index 50dc786..f3cbfe3 100644
+--- a/dlls/advapi32/crypt.c
++++ b/dlls/advapi32/crypt.c
+@@ -312,6 +312,34 @@ static void CRYPT_CreateMachineGuid(void)
+ }
+ 
+ 
++/* Shizuku: the CSP registry keys that Windows setup (and wineboot) create are made on first use instead, because the
++ * Shizuku registry is volatile and there is no setup step: when no provider type is registered, rsaenh.dll registers
++ * its providers through its own DllRegisterServer (the same .rgs script Wine uses). */
++static void CRYPT_EnsureDefaultProviders(void)
++{
++	static LONG done;
++	HKEY key;
++	HMODULE rsaenh;
++	HRESULT (WINAPI *reg)(void);
++
++	if (done) return;
++	if (!RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Cryptography\\Defaults\\Provider Types\\Type 001",
++			   0, KEY_READ, &key))
++	{
++		RegCloseKey(key);
++		done = 1;
++		return;
++	}
++	if ((rsaenh = LoadLibraryW(L"rsaenh.dll")))
++	{
++		if ((reg = (void *)GetProcAddress(rsaenh, "DllRegisterServer")) && FAILED(reg()))
++			ERR("rsaenh registration failed\n");
++		FreeLibrary(rsaenh);
++	}
++	else ERR("rsaenh.dll not found, no cryptographic service provider is registered\n");
++	done = 1;
++}
++
+ /******************************************************************************
+  * CloseEncryptedFileRaw   (ADVAPI32.@)
+  *
+@@ -368,6 +396,7 @@ BOOL WINAPI CryptAcquireContextW (HCRYPTPROV *phProv, LPCWSTR pszContainer,
+ 		return FALSE;
+ 	}
+ 
++	CRYPT_EnsureDefaultProviders();
+ 	/* Make sure the MachineGuid value exists */
+ 	CRYPT_CreateMachineGuid();
+ 
+@@ -1120,6 +1149,7 @@ BOOL WINAPI CryptEnumProvidersW (DWORD dwIndex, DWORD *pdwReserved,
+ 		return FALSE;
+ 	}
+ 
++	CRYPT_EnsureDefaultProviders();
+ 	if (RegOpenKeyW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Cryptography\\Defaults\\Provider", &hKey))
+ 	{
+ 		SetLastError(NTE_FAIL);
+@@ -1261,6 +1291,7 @@ BOOL WINAPI CryptEnumProviderTypesW (DWORD dwIndex, DWORD *pdwReserved,
+ 		return FALSE;
+ 	}
+ 
++	CRYPT_EnsureDefaultProviders();
+ 	if (RegOpenKeyW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Cryptography\\Defaults\\Provider Types", &hKey))
+ 		return FALSE;
+ 

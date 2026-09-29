@@ -277,8 +277,24 @@ def pack_archive(files):
     return bytes(out + blob)
 
 
+def build_wineport():
+    """DLLs ported from the pinned Wine tree (wineport/build.py): list of (archive path, bytes) plus the result."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("wineport_build", W64 / "wineport" / "build.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    res = mod.build()
+    files = list(res["files"])
+    for name, t in sorted(res["tests"].items()):
+        if t["in_plain_image"]:
+            files.append((f"\\SHZ\\TESTS\\{t['exe'].name.upper()}", t["exe"].read_bytes()))
+    return files, {n: {"exports": m["exports"], "counts": m["counts"]} for n, m in res["modules"].items()}
+
+
 def main():
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--no-wineport", action="store_true", help="do not build/pack the DLLs ported from Wine")
+    args = ap.parse_args()
     for tool in (CC, DLLTOOL, WINDRES):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
@@ -286,6 +302,7 @@ def main():
     ntdll, ntdll_cmd, ntdll_names = build_ntdll()
     k32, k32_cmd, k32_names = build_kernel32(ntdll_names)
     modules = build_modules()
+    wine_files, wine_info = build_wineport() if not args.no_wineport else ([], {})
     apps = build_apps(sorted(modules))
     setup_exe, _ = build_setup(sorted(modules))
     sys_apps = build_sys_apps(sorted(modules))
@@ -293,6 +310,7 @@ def main():
     files = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
         files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
+    files += wine_files
     for name, (exe, _) in sorted(apps.items()):
         files.append((f"\\SHZ\\TESTS\\{exe.name.upper()}", exe.read_bytes()))
     files.append(("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe.read_bytes()))
@@ -312,6 +330,7 @@ def main():
         "kernel32": {"sha256": sha256_file(k32), "exports": len(k32_names)},
         "modules": {n: {"sha256": sha256_file(m["dll"]), "exports": len(m["exports"]), "base": hex(m["base"])} for n, m in modules.items()},
         "apps": {n: sha256_file(e) for n, (e, _) in apps.items()},
+        "wineport": wine_info,
         "setup": {"SHZSETUP.EXE": sha256_file(setup_exe)},
         "sys_apps": {n: sha256_file(e) for n, (e, _) in sys_apps.items()},
         "archive": {"sha256": sha256_file(img), "files": [p for p, _ in files]},

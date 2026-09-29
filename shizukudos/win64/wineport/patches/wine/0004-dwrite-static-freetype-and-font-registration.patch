@@ -1,0 +1,158 @@
+diff --git a/dlls/dwrite/freetype.c b/dlls/dwrite/freetype.c
+index bc8c38f..75c870d 100644
+--- a/dlls/dwrite/freetype.c
++++ b/dlls/dwrite/freetype.c
+@@ -22,10 +22,21 @@
+ #pragma makedep unix
+ #endif
+ 
++/* Shizuku (wineport): with SHZ_STATIC_FREETYPE this file is built as part of the PE dwrite.dll, linked with a static
++ * FreeType, and its unix-call table is dispatched in process (wineport/glue/unixcall.c). */
++#ifdef SHZ_STATIC_FREETYPE
++#define HAVE_FT2BUILD_H 1
++#define SONAME_LIBFREETYPE "static"
++#include <stdarg.h>
++#include "windef.h"
++#include "winternl.h"
++typedef NTSTATUS (*unixlib_entry_t)( void *args );   /* unixlib.h declares it only for WINE_UNIX_LIB builds */
++#else
+ #include "config.h"
+ 
+ #include <sys/types.h>
+ #include <dlfcn.h>
++#endif
+ 
+ #ifdef HAVE_FT2BUILD_H
+ #include <ft2build.h>
+@@ -116,6 +127,9 @@ static NTSTATUS process_attach(void *args)
+ {
+     FT_Version_t FT_Version;
+ 
++#ifdef SHZ_STATIC_FREETYPE
++#define LOAD_FUNCPTR(f) p##f = f;
++#else
+     ft_handle = dlopen(SONAME_LIBFREETYPE, RTLD_NOW);
+     if (!ft_handle)
+     {
+@@ -124,6 +138,7 @@ static NTSTATUS process_attach(void *args)
+     }
+ 
+ #define LOAD_FUNCPTR(f) if((p##f = dlsym(ft_handle, #f)) == NULL){WARN("Can't find symbol %s\n", #f); goto sym_not_found;}
++#endif
+     LOAD_FUNCPTR(FT_Activate_Size)
+     LOAD_FUNCPTR(FT_Done_Face)
+     LOAD_FUNCPTR(FT_Done_FreeType)
+@@ -157,8 +172,10 @@ static NTSTATUS process_attach(void *args)
+     if (pFT_Init_FreeType(&library) != 0)
+     {
+         ERR("Can't init FreeType library\n");
++#ifndef SHZ_STATIC_FREETYPE
+         dlclose(ft_handle);
+         ft_handle = NULL;
++#endif
+         return STATUS_UNSUCCESSFUL;
+     }
+     pFT_Library_Version(library, &FT_Version.major, &FT_Version.minor, &FT_Version.patch);
+@@ -166,11 +183,13 @@ static NTSTATUS process_attach(void *args)
+     TRACE("FreeType version is %d.%d.%d\n", FT_Version.major, FT_Version.minor, FT_Version.patch);
+     return STATUS_SUCCESS;
+ 
++#ifndef SHZ_STATIC_FREETYPE
+ sym_not_found:
+     WINE_MESSAGE("Wine cannot find certain functions that it needs from FreeType library.\n");
+     dlclose(ft_handle);
+     ft_handle = NULL;
+     return STATUS_UNSUCCESSFUL;
++#endif
+ }
+ 
+ static NTSTATUS process_detach(void *args)
+@@ -811,8 +830,11 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
+ };
+ 
+ C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
++#ifdef SHZ_STATIC_FREETYPE
++const unsigned int shzw_unix_call_count = ARRAYSIZE(__wine_unix_call_funcs);
++#endif
+ 
+-#ifdef _WIN64
++#if defined(_WIN64) && !defined(SHZ_STATIC_FREETYPE)  /* no 32-bit callers in process */
+ 
+ typedef ULONG PTR32;
+ 
+diff --git a/dlls/dwrite/main.c b/dlls/dwrite/main.c
+index b343d65..183645d 100644
+--- a/dlls/dwrite/main.c
++++ b/dlls/dwrite/main.c
+@@ -1541,10 +1541,71 @@ static HRESULT WINAPI dwritefactory3_CreateFontFaceReference(IDWriteFactory7 *if
+     return hr;
+ }
+ 
++/* Shizuku (wineport): Windows setup registers the fonts it installs under ...\\CurrentVersion\\Fonts; the Shizuku
++ * registry is volatile and there is no setup step. So when that key does not exist yet, the first process that needs
++ * the system collection registers every font file found in %WINDIR%\\Fonts (value = file name relative to that
++ * directory, as Windows stores it), and maps the common Windows family names to the families shipped with the system
++ * (Noto) through Wine's own replacement table, HKCU\\Software\\Wine\\Fonts\\Replacements. */
++static void register_system_fonts(void)
++{
++    static const struct { const WCHAR *family, *replacement; } replacements[] =
++    {
++        { L"Arial", L"Noto Sans" }, { L"Segoe UI", L"Noto Sans" }, { L"Tahoma", L"Noto Sans" },
++        { L"Verdana", L"Noto Sans" }, { L"Microsoft Sans Serif", L"Noto Sans" }, { L"MS Shell Dlg", L"Noto Sans" },
++        { L"MS Shell Dlg 2", L"Noto Sans" }, { L"Calibri", L"Noto Sans" }, { L"Helvetica", L"Noto Sans" },
++        { L"Times New Roman", L"Noto Serif" }, { L"Georgia", L"Noto Serif" }, { L"Cambria", L"Noto Serif" },
++        { L"Times", L"Noto Serif" }, { L"Courier New", L"Noto Sans Mono" }, { L"Consolas", L"Noto Sans Mono" },
++        { L"Lucida Console", L"Noto Sans Mono" }, { L"Courier", L"Noto Sans Mono" },
++    };
++    WCHAR dir[MAX_PATH], pattern[MAX_PATH];
++    WIN32_FIND_DATAW fd;
++    HANDLE find;
++    HKEY key;
++    DWORD disp;
++    unsigned int i;
++
++    if (!RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Wine\\Fonts\\Replacements", 0, NULL, 0, KEY_ALL_ACCESS, NULL,
++                         &key, &disp))
++    {
++        if (disp == REG_CREATED_NEW_KEY)
++            for (i = 0; i < ARRAY_SIZE(replacements); ++i)
++                RegSetValueExW(key, replacements[i].family, 0, REG_SZ, (const BYTE *)replacements[i].replacement,
++                               (wcslen(replacements[i].replacement) + 1) * sizeof(WCHAR));
++        RegCloseKey(key);
++    }
++
++    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts", 0, NULL, 0,
++                        KEY_ALL_ACCESS, NULL, &key, &disp))
++        return;
++    if (disp == REG_CREATED_NEW_KEY)
++    {
++        GetWindowsDirectoryW(dir, ARRAY_SIZE(dir));
++        wcscat(dir, L"\\fonts\\");
++        swprintf(pattern, ARRAY_SIZE(pattern), L"%s*", dir);
++        if ((find = FindFirstFileW(pattern, &fd)) != INVALID_HANDLE_VALUE)
++        {
++            do
++            {
++                const WCHAR *ext = wcsrchr(fd.cFileName, '.');
++                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY || !ext) continue;
++                if (wcsicmp(ext, L".ttf") && wcsicmp(ext, L".otf") && wcsicmp(ext, L".ttc") && wcsicmp(ext, L".otc"))
++                    continue;
++                TRACE("registering %s\n", debugstr_w(fd.cFileName));
++                RegSetValueExW(key, fd.cFileName, 0, REG_SZ, (const BYTE *)fd.cFileName,
++                               (wcslen(fd.cFileName) + 1) * sizeof(WCHAR));
++            } while (FindNextFileW(find, &fd));
++            FindClose(find);
++        }
++    }
++    RegCloseKey(key);
++}
++
+ static HKEY open_fonts_key(void)
+ {
+     HKEY hkey = NULL;
+ 
++    register_system_fonts();
++
+     RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts",
+             0, GENERIC_READ | KEY_QUERY_VALUE, &hkey);
+ 
