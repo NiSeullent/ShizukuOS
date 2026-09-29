@@ -249,7 +249,8 @@ T_NET_LOOP은 부트 경로와 무관하다.
 - **ISO 하나, 하이브리드:** BIOS El Torito 기본 엔트리 = `isolinux.bin`(no-emulation, boot info table 검증) → `menu.c32`
   메뉴(COM1에도 출력, COM1 키 입력 가능): **K** Kernel64(`mboot.c32 BOOT.ELF --- KERNEL64S.BIN --- WIN64.IMG`),
   **D** DOS16 FreeDOS 프로필(`memdisk harddisk` + hd32 디스크 이미지), **1** ShizukuDOS 0.1(`memdisk floppy`),
-  **I** 설치(SHZSETUP이 있을 때만, Multiboot 명령줄 `shz.setup=auto`). UEFI El Torito FAT 이미지 = `\EFI\BOOT\BOOTX64.EFI`
+  **I** 설치(I1의 SHZSETUP: `BOOT.ELF shz.setup=auto --- KERNEL64S.BIN --- \SHZ\SETUP\INSTALL.IMG`, 배포용 응답 파일
+  `install/shzsetup.ini`로 `mkpayload.py --out build/shizukudos/install-media`가 만든다). UEFI El Torito FAT 이미지 = `\EFI\BOOT\BOOTX64.EFI`
   (C2의 로더 겸 부트 매니저) + `\EFI\SHIZUKU\CSMWRAP.EFI`(C1의 `shizukudos/csm/build.py` 산출물, CSMWRAP.INI) +
   `\EFI\SHIZUKU\BOOT.INI`(`mode = auto`, `auto_kernel64 = no`, `menu_timeout = 5`) + `\SHZDOS\`(KERNEL64S.BIN 포함).
   **UEFI Shell·startup.nsh는 쓰지 않는다**(임시 경로 삭제). isohybrid: `isohdpfx.bin` MBR, MBR 파티션 2(0xEF)와 GPT 항목이 EFI 이미지를
@@ -263,20 +264,31 @@ T_NET_LOOP은 부트 경로와 무관하다.
   `kernel64/standalone/test_memplan.py`(15건 × -m32/64비트 ASan·UBSan, `shz.py` host 스위트). chain1의 힙 3..15 MiB와
   `link.ld`의 3 MiB 검사는 그대로 지킨다(커널 창의 구멍은 거부).
 - **syslinux 고정:** `manifest.json` upstreams 끝의 `syslinux` = Ubuntu noble `3:6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3`.
-- **재현성:** 커밋 ab0b616의 깨끗한 트리에서 전체 재빌드 두 번 → 같은 ISO
-  `83ca6b59e28463f562758962832893f73a4b3c52c9ca959c02f4f8b68b8a867b`(89,128,960바이트). raw 디스크 두 번 →
-  `4f06d42606fcfb1fef707cbc693957c2a118a62d90c1f6490e2d6b805d5eab27`(134,217,728바이트).
+- **설치된 디스크의 BIOS 부팅(I1이 C3에 남긴 BLOCKED 항목):** `install/mkpayload.py`가 고정된 syslinux 6.04를 `esp.img`에
+  설치한다(SHZSETUP이 p1을 쓰는 LBA 2048 자리에서, raw 매체 디스크와 같은 배치). I1의 GPT 보호 MBR 코드 → ESP의 syslinux 부트 섹터
+  → `ldlinux.sys` → `syslinux.cfg` 기본(5초) = Kernel64(`mboot.c32 \SHZDOS\K64STUB.ELF --- KERNEL64S.BIN --- WIN64.IMG`),
+  두 번째 = DOS16(memdisk). I1의 `tests/run_install.py`: **40 PASS / 0 FAIL / 0 BLOCKED**(전에는 2 BLOCKED; UEFI 두 번째 부팅도 S3 켬).
+- **재현성:** 커밋 e43555e의 깨끗한 트리에서 전체 재빌드 두 번 → 같은 ISO
+  `9c8fffec5c6c93c9c8a9749def1120063e876cb7cd104d6917eabd732e671e04`(93,323,264바이트). raw 디스크 두 번 →
+  `60334f734333f802f62f7580d79143cc2126a0c136b25cdbe6aadcab0cc6c14c`(134,217,728바이트). (그 전 ab0b616: ISO `83ca6b59…`, SHZSETUP 없음.)
 
 부팅 매트릭스 (QEMU 8.2.2 TCG, KVM 없음, q35, `-cpu max`, 2 vCPU, 512 MiB, OVMF는 S3 켬(QEMU 기본), 위 ISO/디스크, 한 번에 QEMU 하나):
 
-| 펌웨어 | 매체 | Kernel64(레거시 메뉴) | DOS16 | ShizukuDOS 0.1 | Kernel64 직접(UEFI 메뉴 K) | 판정 |
-| --- | --- | --- | --- | --- | --- | --- |
-| SeaBIOS | ISO를 CD로 | PASS | PASS | PASS | 해당 없음 | PASS |
-| SeaBIOS | ISO를 하드디스크로(USB 스틱 이미지) | PASS | PASS | PASS | 해당 없음 | PASS |
-| SeaBIOS | raw 디스크 | PASS | PASS | PASS | 해당 없음 | PASS |
-| OVMF | ISO를 CD로 | PASS | PASS | PASS | PASS | PASS |
-| OVMF | ISO를 하드디스크로 | PASS | PASS | PASS | PASS | PASS |
-| OVMF | raw 디스크 | PASS | PASS | PASS | PASS | PASS |
+| 펌웨어 | 매체 | Kernel64(레거시 메뉴) | DOS16 | ShizukuDOS 0.1 | Kernel64 직접(UEFI 메뉴 K) | 설치 줄 | 판정 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SeaBIOS | ISO를 CD로 | PASS | PASS | PASS | 해당 없음 | PASS | PASS |
+| SeaBIOS | ISO를 하드디스크로(USB 스틱 이미지) | PASS | PASS | PASS | 해당 없음 | 해당 없음 | PASS |
+| SeaBIOS | raw 디스크 | PASS | PASS | PASS | 해당 없음 | 해당 없음 | PASS |
+| OVMF | ISO를 CD로 | PASS | PASS | PASS | PASS | PASS | PASS |
+| OVMF | ISO를 하드디스크로 | PASS | PASS | PASS | PASS | 해당 없음 | PASS |
+| OVMF | raw 디스크 | PASS | PASS | PASS | PASS | 해당 없음 | PASS |
+
+**설치 줄(요청 2):** ISO를 CD로(AHCI 포트 1) + 빈 512 MiB 디스크(AHCI 포트 0)로 부팅해 메뉴 I를 고른다(OVMF에서는 부트 매니저 → 키 없음
+→ CSM → isolinux). SHZSETUP이 응답 파일 `Select=first`로 `ahci0`를 골라 설치하고 전원을 끈다(`SETUP-RESULT: OK`, `SHZ-EXIT:0`).
+그 디스크를 호스트에서 I1의 `verify_disk.py`로 매체에 실린 페이로드와 대조한다(23행: GPT·CRC, MBR 코드, ESP 바이트 일치·파일별,
+ShizukuFS e2fsck·파일 SHA-256). 이어서 그 디스크만 붙여 **OVMF(S3 켬)**: 설치된 ESP의 로더 → BOOT.INI `mode=kernel64` → Kernel64
+직접, 구멍 3개 인계 = 적용, 자체시험 0 실패, `SHZ-EXIT:0`. **SeaBIOS**: `SHZ-MBR ->VBR` → SYSLINUX 6.04 → 스텁 → Kernel64,
+자체시험 0 실패, `SHZ-EXIT:0`. 설치 부팅 전후 매체의 sha256이 같음도 확인한다.
 
 - 증거(실행마다 `build/shizuku-se-matrix/<run>/<fw>-<medium>-<entry>/`): Kernel64 = COM1 로그를 `run_k64_standalone.py`로 판정 +
   WIN64.IMG의 나머지 T_*.EXE 37개 모두 `exit=0 faulted=0` + 스텁이 넘긴 구멍 수 = 커널이 적용한 구멍 수; DOS16 = `SHZ-EXIT:0` 뒤
@@ -285,19 +297,19 @@ T_NET_LOOP은 부트 경로와 무관하다.
   OVMF 경로는 순서대로 BDS → 로더 → BOOT.INI(auto, menu_timeout=5) → 메뉴 → (키 없음 → CSM → CSMWrap 부팅 장치 → isolinux | K →
   Kernel64 직접)이고, UEFI Shell이 한 번도 뜨지 않았음을 확인한다. OVMF+CSMWrap에서 Kernel64는 구멍 7개(NVS 3개는 힙에서 996 KiB,
   나머지 1492페이지는 할당기 밖)로 510 MiB RAM을 쓰고, Kernel64 직접은 256 MiB 한도 안에서 NVS 구멍 3개만 받는다.
-- 실행 기록(ISO `83ca6b59…`): `chain1-final-2` 21/21 PASS, `suite-2026-09-29T213259Z`(`shz.py test --suite media`, VERIFIED) 21/21 PASS.
+- 실행 기록(ISO `9c8fffec…`, 커밋 e43555e): `final-i1-1` 23/23 PASS(설치 줄 SeaBIOS 69 s, OVMF 192 s),
+  `suite-2026-09-29T222602Z`(`shz.py test --suite media`, VERIFIED) 23/23 PASS.
+  그 전 ISO `83ca6b59…`(ab0b616, SHZSETUP 없음): `chain1-final-2` 21/21 PASS, `suite-2026-09-29T213259Z` 21/21 PASS.
   그 전 ISO(`c7106b60…`, 커밋 a3ba86e)의 `chain1-final-1`은 20/21이었다. OVMF·ISO를 디스크로·Kernel64에서 `subsys64` 자체시험
   "three malformed slots are dropped"가 실패했다(프로토콜 오류 2/3). 같은 메모리 맵의 다른 두 매체에서는 PASS였고, 원인은 시험의 경쟁이었다.
   `inject_bad_slot()`이 링 head를 공개한 뒤에 슬롯을 망가뜨려서 서비스 스레드가 먼저 정상 QUERY로 처리할 수 있었다. 인터럽트를 막고
   넣도록 고쳤다(커밋 ab0b616).
-- 추가(그 전 ISO들): xHCI USB 대용량 저장장치로 붙인 ISO의 Kernel64 PASS(SeaBIOS, OVMF 각 1회). 자리표시 SHZSETUP과 합성 드라이버로
-  만든 별도 ISO에서 설치 엔트리가 부팅됐다(SeaBIOS 1회).
+- 추가(그 전 ISO들): xHCI USB 대용량 저장장치로 붙인 ISO의 Kernel64 PASS(SeaBIOS, OVMF 각 1회).
 - 불안정한 시험(부팅 경로와 무관): `run_k64_standalone.py`(QEMU `-kernel`, 구멍 없음) 3회 중 1회 `T_REG_STRESS.EXE` phase 6
   "handles were used successfully while being closed and replaced under them"가 실패했고 2회는 PASS였다. 그대로 기록한다.
 
-**아직 없는 것:** SHZSETUP(I1)이 이 브랜치에 없어서 실제 ISO에는 `\SHZ\SETUP`과 설치 엔트리가 없고, "빈 VM 디스크에 설치한 뒤
-그 디스크를 UEFI와 BIOS로 부팅"하는 매트릭스 줄도 없다(I1 병합 뒤 추가). UEFI 메뉴에서 Kernel64 직접으로 설치(`shz.setup=auto`)를
-고르는 항목은 없다(`KERNEL64.INI`의 cmdline은 하나).
+**없는 것:** UEFI 메뉴에서 Kernel64 직접으로 설치를 고르는 항목(설치는 레거시 메뉴 I, UEFI에서는 CSM을 거친다). 설치 줄은 ISO를
+CD로 붙인 경우만 돈다(`--install-media`로 다른 매체도 가능). NVMe·eMMC 대상에는 설치해 보지 않았다.
 
 **검증되지 않은 것:** VirtualBox·VMware·Hyper-V 실행(MEDIA.md의 해당 줄은 동작 원리에서 끌어낸 설정), Intel VMX 위의
 Supervisor 경로, Secure Boot(서명 없음), 실제 USB 스틱과 실제 하드웨어, 512 MiB 외의 RAM 크기, 1 vCPU UEFI(C1이 CSMWrap 거부를 확인),

@@ -26,7 +26,7 @@ Boot menu (menu.c32; mirrored on COM1 115200 8N1, which also accepts the keys):
 | K (default, 30 s) | Kernel64 + Win64 runtime | `mboot.c32 /SHZ/K64/BOOT.ELF --- KERNEL64S.BIN --- WIN64.IMG`: the standalone Long Mode kernel (no Supervisor) runs its self-tests and every `T_*.EXE` in WIN64.IMG, then prints `SHZ-EXIT:0` |
 | D | ShizukuDOS 10 DOS16 (FreeDOS profile) | `memdisk harddisk` + `ShizukuDOS10/dos16/shizukudos-dos16-hd32.img` (raw disk: `\SHZDOS\DISK.IMG`): FreeDOS runs the conformance programs, `SHZ-EXIT:0` |
 | 1 | ShizukuDOS 0.1 | `memdisk floppy` + `ShizukuDOS/shizukudos.img` (raw disk: `\SHZ\SHZDOS01.IMG`): the project's own shell, `A:\>` |
-| I | Install ShizukuDOS 10 (only when SHZSETUP is present) | Kernel64 with `shz.setup=auto` on the Multiboot command line; files from `build/shizukudos/setup/` (or `--setup DIR`) under `\SHZ\SETUP\` |
+| I | Install ShizukuDOS 10 (SHZSETUP, agent I1) | `mboot.c32 /SHZ/K64/BOOT.ELF shz.setup=auto --- KERNEL64S.BIN --- /SHZ/SETUP/INSTALL.IMG`: SHZSETUP installs unattended with the shipped answer file (`install/shzsetup.ini`: the first disk without a partition table is ERASED) — GPT, ESP (UEFI boot manager `mode = kernel64` + syslinux for legacy BIOS), ShizukuFS — then powers off. `INSTALL.IMG` comes from `install/mkpayload.py --out build/shizukudos/install-media` (the ISO builder runs it) |
 
 UEFI boot manager menu (C2's loader, menu added by C3; on the console and on COM1, which also takes the key).
 `\EFI\SHIZUKU\BOOT.INI` on the medium: `mode = auto`, `auto_kernel64 = no`, `menu_timeout = 5`
@@ -80,7 +80,7 @@ from how the medium works, not test results.
 | --- | --- |
 | `isolinux/` | pinned syslinux 6.04 (Ubuntu `3:6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3`): isolinux.bin, ldlinux/libcom32/libutil/menu/mboot.c32, memdisk, isolinux.cfg |
 | `SHZ/K64/` | BOOT.ELF (Multiboot stub), KERNEL64S.BIN, WIN64.IMG |
-| `SHZ/SETUP/` | SHZSETUP files, only when present at build time |
+| `SHZ/SETUP/` | `INSTALL.IMG` (Win64 runtime + SHZSETUP.EXE + answer file + payload), `SHZSETUP.INI` and `MANIFEST.JSON` (for reading), `README.TXT` |
 | `ShizukuDOS10/efiboot.img` | the El Torito EFI image (also MBR partition 2 type 0xEF and a GPT entry): `\EFI\BOOT\BOOTX64.EFI`, `\EFI\SHIZUKU\{CSMWRAP.EFI,CSMWRAP.INI,BOOT.INI,README.TXT}`, `\SHZDOS\{DISK.IMG,KERNEL32.BIN,KERNEL64.BIN,KERNEL64S.BIN,WIN64.IMG}` |
 | `ShizukuDOS10/` | build outputs, receipts, `LICENSES/`, `SOURCE/` (FreeDOS, CSMWrap + submodules, syslinux Debian source package, Shizuku source), `GPL-NOTICE.TXT` |
 | `ShizukuDOS/shizukudos.img` | ShizukuDOS 0.1 floppy |
@@ -99,7 +99,7 @@ unchanged; the repository ships none (tests use a synthetic INF only).
 python3 tools/build_shizuku_se_iso.py            # rebuilds CSMWrap + ShizukuDOS 10, then the ISO
 python3 tools/build_shizuku_se_iso.py --reuse-builds   # package existing, receipt-checked outputs
 python3 tools/build_shizuku_se_disk.py           # raw disk from the same outputs
-python3 tools/test_shizuku_se_boot_matrix.py     # 21 QEMU runs, one at a time
+python3 tools/test_shizuku_se_boot_matrix.py     # 21 boots + 2 install rows (3 QEMU runs each), one QEMU at a time
 python3 tools/test_shizuku_se_boot_matrix.py --media iso-usb   # optional: the ISO as xHCI USB mass storage
 python3 shizukudos/tools/shz.py test --suite media
 ```
@@ -121,9 +121,9 @@ GPT GUIDs), fixed FAT volume ids, deterministic tarballs. The receipts
 
 ## Results
 
-Recorded in `docs/shizukudos10/STATUS.md` section 2e: the ISO built from commit ab0b616
-(sha256 `83ca6b59e28463f562758962832893f73a4b3c52c9ca959c02f4f8b68b8a867b`, identical over two
-full rebuilds) and the raw disk (`4f06d42606fcfb1fef707cbc693957c2a118a62d90c1f6490e2d6b805d5eab27`)
-passed all 21 runs of the matrix twice (QEMU 8.2.2 TCG, OVMF with S3 on), OVMF through the
-boot manager without the UEFI Shell. Not yet on the medium: SHZSETUP (agent I1) and the
-"install to a blank disk, then boot it" row.
+Recorded in `docs/shizukudos10/STATUS.md` section 2e: the ISO built from commit e43555e
+(sha256 `9c8fffec5c6c93c9c8a9749def1120063e876cb7cd104d6917eabd732e671e04`, 93,323,264 bytes, identical over
+two full rebuilds) and the raw disk (`60334f734333f802f62f7580d79143cc2126a0c136b25cdbe6aadcab0cc6c14c`)
+passed the whole matrix (QEMU 8.2.2 TCG, OVMF with S3 on): SeaBIOS and OVMF, ISO as CD / as disk / raw disk,
+Kernel64, DOS16, ShizukuDOS 0.1, Kernel64 direct (OVMF), and the install row (install to a blank AHCI disk from
+the ISO, host verification, then the installed disk on OVMF and on SeaBIOS) on both firmwares.

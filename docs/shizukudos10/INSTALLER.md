@@ -149,13 +149,16 @@ Reproduced in this session (QEMU 8.2 TCG, no KVM; `build/shizukudos/install/host
 | Install boot: Multiboot stub → Kernel64 (`shz.setup=auto`) → self-tests 0 failures → `SHZSETUP.EXE` selects the 512 MiB ivshmem RAM disk by serial `IVSHMEM-00:05.0`, installs, verifies, `SETUP-RESULT: OK`, exit 0, shutdown (`SHZ-EXIT:0`); decoy disk still all zero | GUEST_RUN (TCG) | PASS (8 cells), install boot 22–29 s |
 | Host verification of the installed image: GPT primary/backup + CRC32s, MBR boot code, p1 byte-identical to `esp.img` + `fsck.fat` + 9 ESP files via mtools, p2 `e2fsck -fn` exit 0 + 21 files via `debugfs` SHA-256 + directories + generated files + `install.log`, p3 empty FAT32 | HOST_TESTED (on the guest's output) | PASS (25 cells) |
 | Second boot, UEFI (OVMF, installed disk on virtio-blk): firmware starts `\EFI\BOOT\BOOTX64.EFI` from the installed ESP | GUEST_RUN (TCG) | PASS (`ShizukuDOS 10.0-dev Supervisor loader (UEFI x64)`) |
-| Second boot, UEFI: Kernel64 from the installed disk (`BOOT.INI mode = kernel64`) | — | **BLOCKED**: the loader in this tree has no direct Kernel64 boot (agent C2 not merged); it took the Supervisor path and refused (TCG `-cpu max`: "AMD SVM is usable, but the SVM backend is not implemented") |
+| Second boot, UEFI: Kernel64 from the installed disk (`BOOT.INI mode = kernel64`) | GUEST_RUN (TCG) | **PASS** since C2's boot manager and C3's firmware-hole plan: OVMF with S3 on (QEMU's default), the loader hands the 8 MiB ACPI NVS over as a hole (`kernel64/standalone/memholes.h`), Kernel64 finishes its self-tests. Before: BLOCKED (no direct boot in the loader) |
 | Second boot, BIOS (SeaBIOS): MBR code finds the legacy-bootable ESP and runs its boot sector (COM1 `SHZ-MBR ->VBR`; VGA text memory shows the ESP boot sector's own message) | GUEST_RUN (TCG) | PASS (2 cells) |
-| Second boot, BIOS: Kernel64 from the installed disk | — | **BLOCKED**: needs agent C3's disk-installable SYSLINUX variant in the ESP boot sector |
+| Second boot, BIOS: Kernel64 from the installed disk | GUEST_RUN (TCG) | **PASS** since C3: `mkpayload.py` installs the pinned syslinux 6.04 into `esp.img` (boot sector + `\syslinux\`), `GPTMBR.BIN` chains to it, `syslinux.cfg`'s default boots `\SHZDOS\K64STUB.ELF` + `KERNEL64S.BIN` + `WIN64.IMG`; Kernel64 finishes its self-tests with `SHZ-EXIT:0`. Before: BLOCKED |
 
-VM total: 37 PASS, 0 FAIL, 2 BLOCKED (including a check that the generated ntdll stubs put `NtShzSetup*` at
-0xb0–0xb4, outside the NT driver host's 0xe0–0xef). Not run: any AHCI/NVMe/eMMC target (drivers not merged), real hardware,
-the Supervisor (VMX) path.
+VM total (the first run): 37 PASS, 0 FAIL, 2 BLOCKED (including a check that the generated ntdll stubs put `NtShzSetup*` at
+0xb0–0xb4, outside the NT driver host's 0xe0–0xef). After C2 + C3 (commit 2b51fdf): **40 PASS, 0 FAIL, 0 BLOCKED**.
+Not run here: NVMe/eMMC targets, real hardware, the Supervisor (VMX) path. An **AHCI** target is installed by the media's
+boot matrix (`tools/test_shizuku_se_boot_matrix.py`, row `install`, STATUS 2e): the ISO's Install entry with the shipped
+answer file (`Select=first`) installs to a blank 512 MiB AHCI disk, `verify_disk.py` checks it, then it boots on OVMF and
+SeaBIOS.
 
 ## 8. Integration points
 
@@ -169,11 +172,11 @@ the Supervisor (VMX) path.
 
 ## 9. Limits
 
-- Install target in the VM test is a RAM block device (ivshmem); no AHCI/NVMe/eMMC disk has been installed to yet.
+- Install target in `run_install.py` is a RAM block device (ivshmem); the media's boot matrix installs to an AHCI disk
+  (QEMU q35); NVMe/eMMC targets have not been installed to.
 - 512-byte-sector disks only (the ESP image is built for 512-byte sectors at LBA 2048).
 - No interactive UI: unattended only; consent is the answer file's `Confirm=ERASE-TARGET`.
 - `shutdown` ends the standalone kernel (`SHZ-EXIT`); there is no ACPI power-off, so on real hardware the machine halts.
 - ShizukuFS p2 has no journal (interim writer); its root spec for a later boot of the installed system is not defined yet.
-- The raw-sector syscalls are unprivileged. The BIOS boot of the installed disk stops at the ESP boot sector until C3's
-  SYSLINUX variant exists; the UEFI boot reaches the loader, which starts Kernel64 only with C2's boot manager.
+- The raw-sector syscalls are unprivileged.
 - Nothing here ran on real hardware.
