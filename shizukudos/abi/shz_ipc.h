@@ -414,4 +414,185 @@ SHZ_IPC_INLINE void shz_reqtab_reset(shz_reqtab_t *t, uint32_t new_generation)
     SHZ_IPC_MEMSET(t->slot, 0, sizeof t->slot);
     t->peer_generation = new_generation;
 }
+
+/* ================================================================== WIN64 subsystem (ABI 1.1)
+ * Message family 0x200..0x2ff between a 32-bit client (the Windows 98 domain, via NTWRAP9X.VXD and
+ * NTW32.DLL) and the Kernel64 domain, which runs Win64 PE32+ programs. Kernel64 is the server.
+ *
+ *   client -> K64   QUERY           (no payload)                        reply: shz_w64_info_t
+ *   client -> K64   CREATE_PROCESS  shz_w64_create_t + UTF-16 block    reply: shz_w64_event_t (STARTED or FAILED)
+ *                   The block (path, command line, cwd; no terminators) is inline when it fits, otherwise
+ *                   the message carries SHZ_MSGF_BUFFER and the block lives in a pool buffer owned by the
+ *                   sender (shz_pool_alloc) for the duration of the request ("chunked" through the pool).
+ *   K64 -> client   CONSOLE_OUTPUT  shz_w64_console_t + bytes           one-way, ordered per process by seq
+ *   client -> K64   CONSOLE_ACK     shz_w64_console_t (seq = highest consumed)   one-way: flow control. K64
+ *                   never has more than SHZ_W64_CONSOLE_WINDOW unacknowledged OUTPUT messages per process.
+ *   client -> K64   CONSOLE_INPUT   shz_w64_console_t + bytes (flags EOF closes stdin)   reply: status
+ *   K64 -> client   PROCESS_EXITED  shz_w64_event_t                     one-way, sent after the last OUTPUT
+ *   client -> K64   KILL_PROCESS    shz_w64_kill_t                      reply: status
+ *   client -> K64   RELEASE         shz_w64_kill_t (pid only)           reply: status; frees the slot after EXITED
+ *   client -> K64   SHUTDOWN        (no payload)                        reply: status; the service stops
+ *
+ * Every payload is validated by the receiver with the shz_w64_*_check helpers below; nothing in a
+ * payload is a pointer or a handle. The reply to a request echoes its opcode (SHZ_MSGF_REPLY). */
+#define SHZ_W64_OP_BASE 0x200u
+#define SHZ_W64_OP_LAST 0x2ffu
+enum shz_w64_opcode {
+    SHZ_OP_W64_QUERY = 0x200,
+    SHZ_OP_W64_CREATE_PROCESS = 0x201,
+    SHZ_OP_W64_PROCESS_EXITED = 0x202,
+    SHZ_OP_W64_CONSOLE_OUTPUT = 0x203,
+    SHZ_OP_W64_CONSOLE_ACK = 0x204,
+    SHZ_OP_W64_CONSOLE_INPUT = 0x205,
+    SHZ_OP_W64_KILL_PROCESS = 0x206,
+    SHZ_OP_W64_RELEASE = 0x207,
+    SHZ_OP_W64_SHUTDOWN = 0x208
+};
+
+#define SHZ_W64_SUBSYS_VERSION 0x00010000u          /* subsystem 1.0 */
+enum shz_w64_caps {
+    SHZ_W64_CAP_CREATE = 1, SHZ_W64_CAP_CONSOLE_OUTPUT = 2, SHZ_W64_CAP_CONSOLE_INPUT = 4, SHZ_W64_CAP_KILL = 8,
+    SHZ_W64_CAP_POOL_ARGS = 16
+};
+#define SHZ_W64_MAX_ARGS_BYTES 4096u                /* UTF-16 block limit (path + command line + cwd) */
+#define SHZ_W64_CONSOLE_WINDOW 8u                   /* unacknowledged CONSOLE_OUTPUT messages per process */
+#define SHZ_W64_CONSOLE_CHUNK (SHZ_MSG_MAX_INLINE - 16u)   /* 176 bytes per CONSOLE_OUTPUT/INPUT */
+#define SHZ_W64_MAX_PATH_CHARS 260u
+
+typedef struct {
+    uint16_t abi_major, abi_minor;      /* 0x00 */
+    uint32_t subsystem_version;         /* 0x04 SHZ_W64_SUBSYS_VERSION */
+    uint32_t capabilities;              /* 0x08 shz_w64_caps */
+    uint32_t max_processes;             /* 0x0c bridged processes at once */
+    uint32_t max_args_bytes;            /* 0x10 SHZ_W64_MAX_ARGS_BYTES as served */
+    uint32_t console_window;            /* 0x14 */
+    uint32_t console_chunk;             /* 0x18 */
+    uint32_t active_processes;          /* 0x1c */
+    uint64_t uptime_ns;                 /* 0x20 */
+} shz_w64_info_t;
+
+enum shz_w64_create_flags { SHZ_W64_CF_NONE = 0 };
+typedef struct {
+    uint32_t flags;                     /* 0x00 shz_w64_create_flags */
+    uint16_t path_chars;                /* 0x04 UTF-16 code units, no terminator, >= 1 */
+    uint16_t cmdline_chars;             /* 0x06 */
+    uint16_t cwd_chars;                 /* 0x08 */
+    uint16_t reserved;                  /* 0x0a */
+    uint32_t block_bytes;               /* 0x0c 2 * (path + cmdline + cwd) */
+} shz_w64_create_t;                     /* followed by the UTF-16 block (inline or in the pool) */
+
+enum shz_w64_proc_state { SHZ_W64_PS_STARTED = 1, SHZ_W64_PS_EXITED = 2, SHZ_W64_PS_FAILED = 3, SHZ_W64_PS_KILLED = 4 };
+typedef struct {
+    uint32_t pid;                       /* 0x00 Kernel64 process id, 0 when creation failed */
+    uint32_t state;                     /* 0x04 shz_w64_proc_state */
+    int32_t status;                     /* 0x08 NTSTATUS of creation */
+    uint32_t fault_status;              /* 0x0c NTSTATUS of the exception that killed it, 0 = clean exit */
+    int64_t exit_code;                  /* 0x10 */
+    uint32_t console_seq;               /* 0x18 last CONSOLE_OUTPUT sequence number sent for it */
+    uint32_t console_dropped;           /* 0x1c output bytes dropped because the client never acknowledged */
+} shz_w64_event_t;
+
+enum shz_w64_console_flags { SHZ_W64_CONF_EOF = 1 };
+typedef struct {
+    uint32_t pid;                       /* 0x00 */
+    uint32_t seq;                       /* 0x04 OUTPUT: 1-based per process. ACK: highest consumed. INPUT: 0 */
+    uint16_t length;                    /* 0x08 data bytes following this header */
+    uint8_t stream;                     /* 0x0a 0 = stdin, 1 = stdout, 2 = stderr */
+    uint8_t flags;                      /* 0x0b shz_w64_console_flags */
+    uint32_t reserved;                  /* 0x0c */
+} shz_w64_console_t;
+
+typedef struct {
+    uint32_t pid;                       /* 0x00 */
+    int32_t exit_code;                  /* 0x04 KILL: exit code the process reports; RELEASE: ignored */
+} shz_w64_kill_t;
+
+_Static_assert(sizeof(shz_w64_info_t) == 40, "w64 info layout");
+_Static_assert(sizeof(shz_w64_create_t) == 16, "w64 create layout");
+_Static_assert(sizeof(shz_w64_event_t) == 32, "w64 event layout");
+_Static_assert(sizeof(shz_w64_console_t) == 16, "w64 console layout");
+_Static_assert(sizeof(shz_w64_kill_t) == 8, "w64 kill layout");
+_Static_assert(sizeof(shz_w64_create_t) + SHZ_W64_CONSOLE_CHUNK == SHZ_MSG_MAX_INLINE, "w64 inline capacity");
+
+/* Builds a CREATE_PROCESS payload. `inline_out` receives the header (+ block when it fits, see *inline_len);
+ * `block_out`/`block_cap` receive the whole UTF-16 block for the pool path. Returns the block size in bytes
+ * or 0 when the strings are unusable (empty path, over the limits, embedded NUL). *needs_pool tells the caller
+ * whether the block must travel in a pool buffer. */
+SHZ_IPC_INLINE uint32_t shz_w64_create_pack(shz_w64_create_t *hdr, const uint16_t *path, uint32_t path_chars,
+                                            const uint16_t *cmdline, uint32_t cmdline_chars, const uint16_t *cwd,
+                                            uint32_t cwd_chars, uint16_t *block_out, uint32_t block_cap,
+                                            int *needs_pool)
+{
+    uint32_t i, n = 0;
+    const uint32_t total = path_chars + cmdline_chars + cwd_chars;
+    if (!hdr || !path || path_chars == 0 || path_chars > SHZ_W64_MAX_PATH_CHARS || cwd_chars > SHZ_W64_MAX_PATH_CHARS ||
+        (cmdline_chars && !cmdline) || (cwd_chars && !cwd) || total * 2u > SHZ_W64_MAX_ARGS_BYTES ||
+        !block_out || block_cap < total)
+        return 0;
+    for (i = 0; i < path_chars; ++i) { if (!path[i]) return 0; block_out[n++] = path[i]; }
+    for (i = 0; i < cmdline_chars; ++i) { if (!cmdline[i]) return 0; block_out[n++] = cmdline[i]; }
+    for (i = 0; i < cwd_chars; ++i) { if (!cwd[i]) return 0; block_out[n++] = cwd[i]; }
+    SHZ_IPC_MEMSET(hdr, 0, sizeof *hdr);
+    hdr->flags = SHZ_W64_CF_NONE;
+    hdr->path_chars = (uint16_t)path_chars;
+    hdr->cmdline_chars = (uint16_t)cmdline_chars;
+    hdr->cwd_chars = (uint16_t)cwd_chars;
+    hdr->block_bytes = total * 2u;
+    if (needs_pool)
+        *needs_pool = hdr->block_bytes > SHZ_MSG_MAX_INLINE - (uint32_t)sizeof *hdr;
+    return hdr->block_bytes;
+}
+
+/* Receiver-side validation of a CREATE_PROCESS message. `payload` is the inline payload (payload_length bytes).
+ * On success *block receives where the UTF-16 block is: inside the inline payload, or (SHZ_MSGF_BUFFER) at
+ * pool_base + buffer_offset after the caller has passed shz_pool_check(). The caller supplies `pool_base`
+ * (the channel base) or NULL to refuse pool references. */
+SHZ_IPC_INLINE int shz_w64_create_check(const shz_msg_hdr_t *m, const void *payload, const shz_channel_hdr_t *c,
+                                        void *pool_base, shz_w64_create_t *hdr_out, const uint16_t **block)
+{
+    shz_w64_create_t h;
+    uint32_t i, total;
+    const uint16_t *b;
+    if (!m || !payload || !hdr_out || !block || m->payload_length < sizeof h)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&h, payload, sizeof h);
+    total = (uint32_t)h.path_chars + h.cmdline_chars + h.cwd_chars;
+    if (h.flags != SHZ_W64_CF_NONE || h.reserved || h.path_chars == 0 || h.path_chars > SHZ_W64_MAX_PATH_CHARS ||
+        h.cwd_chars > SHZ_W64_MAX_PATH_CHARS || h.block_bytes != total * 2u)
+        return SHZ_E_INVALID;
+    if (h.block_bytes > SHZ_W64_MAX_ARGS_BYTES)
+        return SHZ_E_RANGE;
+    if (m->flags & SHZ_MSGF_BUFFER) {
+        if (!pool_base || !c || m->buffer_length != h.block_bytes || m->payload_length != sizeof h)
+            return SHZ_E_INVALID;
+        if (shz_pool_check(pool_base, c, m, m->src_domain) != SHZ_OK)
+            return SHZ_E_DENIED;
+        b = (const uint16_t *)((const uint8_t *)pool_base + m->buffer_offset);
+    } else {
+        if (m->buffer_length || m->payload_length != sizeof h + h.block_bytes)
+            return SHZ_E_INVALID;
+        b = (const uint16_t *)((const uint8_t *)payload + sizeof h);
+    }
+    for (i = 0; i < total; ++i)
+        if (!b[i])
+            return SHZ_E_INVALID;           /* embedded NUL: never trust string lengths that disagree */
+    *hdr_out = h;
+    *block = b;
+    return SHZ_OK;
+}
+
+SHZ_IPC_INLINE int shz_w64_console_check(const shz_msg_hdr_t *m, const void *payload, shz_w64_console_t *out)
+{
+    shz_w64_console_t h;
+    if (!m || !payload || !out || m->payload_length < sizeof h)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&h, payload, sizeof h);
+    if (h.reserved || h.stream > 2 || (h.flags & ~(uint8_t)SHZ_W64_CONF_EOF) || h.length > SHZ_W64_CONSOLE_CHUNK ||
+        m->payload_length != sizeof h + h.length || m->buffer_length)
+        return SHZ_E_INVALID;
+    *out = h;
+    return SHZ_OK;
+}
+
+SHZ_IPC_INLINE int shz_w64_is_opcode(uint32_t op) { return op >= SHZ_W64_OP_BASE && op <= SHZ_W64_OP_LAST; }
 #endif

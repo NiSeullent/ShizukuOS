@@ -148,5 +148,20 @@
     },
     "nasm": {"kind": "host tool", "min_version": "2.16"},
     "mtools": {"kind": "host tool"}
+  },
+  "vendored": {
+    "virglrenderer-headers": {
+      "version": "1.0.0",
+      "archive": "http://archive.ubuntu.com/ubuntu/pool/main/v/virglrenderer/virglrenderer_1.0.0.orig.tar.bz2",
+      "archive_sha256": "b27b9b84c3a9ab62f87152e624914f150c6e582d0798b06d80d91e4a8aab3705",
+      "path": "shizukudos/third_party/virglrenderer-1.0.0",
+      "files": {"virgl_protocol.h": "bf5c4bade0a550cde8b4fb6e0139f15abec19df57151cb65d902d06be9b15dfe",
+                "virgl_hw.h": "ff5489b1803c109e6a39ec018eba8e8bac8282cbc6d712ed7eb65288d1fceb46",
+                "virglrenderer.h": "9a40026e8317d5610abfb8743f6302f8434480183ea53b425d7f08dc0fc437c1",
+                "COPYING": "3b32caf16e2402c2aff2b716858713f3e1feded85c25e71bf829816ee5009402"},
+      "license": "MIT",
+      "used_by": ["shizukudos/kernel64/host/test_virgl_enc.c", "shizukudos/kernel64/host/test_virgl_exec.c"],
+      "note": "Unmodified copies used by host tests only (see PINNED.txt there); never compiled into the guest."
+    }
   }
 }

@@ -40,10 +40,11 @@ The build produces:
 | `host-tests.log` | unittest and sanitizer result log bound by the receipt |
 
 `test.py` requires artifacts matching the current build manifest. It also detects
-source/artifact changes during testing. Its ten test groups cover actual emitted
+source/artifact changes during testing. Its eleven test groups cover actual emitted
 LE relocations at three independent load-base pairs, cross-page fixup records,
-malformed containers, 1,000 bounded mutations, exact native service constants,
-missing ELF imports, the PE probe contract, and page-operation failure cleanup.
+malformed containers, 1,000 bounded mutations, exact native service constants
+(including the single guarded `VMCALL`/`CPUID`), missing ELF imports, the PE probe
+contract, page-operation failure cleanup, and the WIN64 subsystem bridge model.
 The C bridge tests run under ASan/UBSan. A freestanding i386 user-process harness
 executes the actual assembly control dispatcher with substituted C entrypoints;
 it tests registers, stack balance, direction flag, and carry/result conventions.
@@ -109,6 +110,44 @@ assumes `_CopyPageTable` remains a nonblocking metadata operation in that contex
 The current PTE policy also assumes the normal VMM Win32 private-arena page-directory
 permissions. These native assumptions require actual guest validation. This is
 not an SMP, asynchronous, shared-memory, DMA, or universal safe-copy facility.
+
+## WIN64 subsystem bridge (ShizukuDOS ABI 1.1)
+
+Under the ShizukuDOS Supervisor the Windows 98 installation is one domain among
+several; a Long Mode Kernel64 domain runs Win64 PE32+ programs beside it. The
+VxD is the Win98 domain's endpoint of the shared-memory channel to Kernel64
+(`shizukudos/abi/shz_ipc.h`, message family `0x200..`): it maps the channel
+window the Supervisor exposes at a guest-physical address (`_MapPhysToLinear`),
+pushes frames that `NTW32.DLL` hands it, pops frames for it and rings the peer's
+doorbell with `VMCALL`. The application never sees a channel address, and the
+VxD overwrites the source/destination domain and generation of every frame it
+sends, so a program cannot spoof another domain or reference pool memory it did
+not hand over in the same request.
+
+| Control code | Input | Output | Result |
+| --- | --- | --- | --- |
+| `0x4e540010` `W64_OPEN` | none | 64-byte `struct ntwv_w64_open` (ABI version, channel id, domains, generation, ring depth, pool size, counters) | 50 without the Supervisor signature, 1306 on an ABI major mismatch, 55 when no Kernel64 channel is announced, 8 when the window cannot be mapped, 31 when the window is not a Kernel64/Win98 channel |
+| `0x4e540011` `W64_SEND` | 64-byte header + inline payload (<= 192) [+ up to 3,840 bytes of pool data, at most 4,096 in total] | `int32` status | 87 for inconsistent lengths, 170 when the transmit ring is full or four pool blocks are still awaiting replies, 8 when the pool is exhausted |
+| `0x4e540012` `W64_RECV` | none | one 256-byte slot (header + payload, zero padded) | 259 (`ERROR_NO_MORE_ITEMS`) when the receive ring is empty; malformed slots are consumed, counted and never returned |
+| `0x4e540013` `W64_WAIT` | `uint32` timeout (advisory) | `uint32` doorbell mask | acknowledges the doorbell; **does not block** in this revision |
+
+Pool data attached to a `SEND` is copied into a block the VxD allocates in the
+channel pool (owned by the Win98 domain); the block is released when the reply
+carrying the same request id is received. The user buffers follow the same
+policy as the query: private arena only, no overlap, pinned, PTE-validated under
+disabled interrupts, input copied into kernel memory before any ring or
+hypercall work, and the reply copied out after re-validation. The host test
+`tests/test_w64vxd.c` drives all four codes against a real
+`shz_channel_init()` region and checks every frame with the Kernel64 library,
+injects malformed slots, exhausts the ring and the pool bookkeeping, and fails
+each of the 19 VMM calls of a `SEND` in turn.
+
+Limits: `W64_WAIT` is non-blocking (a blocking wait needs the Supervisor's
+doorbell vector hooked through VPICD); `_MapPhysToLinear` mappings are never
+released; the VxD does not verify that the Win98 domain is really `SHZ_DOM_WIN98`
+beyond the channel header the Supervisor initialised. None of this has run
+inside Windows 98 or under the Supervisor: the only native loader evidence is
+the failed absolute-path load recorded in `docs/VXD_LOADER_TRIAGE.md`.
 
 ## Guest probe
 

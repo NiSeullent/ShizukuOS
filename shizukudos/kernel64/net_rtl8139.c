@@ -121,6 +121,7 @@ int nic_probe_init(uint8_t mac[6])
     k_outw((uint16_t)(io + R_IMR), ISR_ROK | ISR_RER | ISR_RXOVW | ISR_PUN | ISR_FOVW | ISR_SERR);
     standalone_irq_unmask(d.irq_line);
     present = 1;
+    pci_claim(&d, "net_rtl8139");
     kprintf("K64 net: rtl8139 io=%x irq=%u mac=%x:%x:%x:%x:%x:%x link=%d\n", (unsigned)io, (unsigned)d.irq_line, mac[0], mac[1],
             mac[2], mac[3], mac[4], mac[5], nic_link_up());
     return 0;

@@ -37,7 +37,10 @@ PROFILES = {
         "summary": "UEFI x64 -> Supervisor (Intel VMX) -> virtual Real Mode DOS16",
         "steps": ["dos16/build.py", "kbuild.py", "win64/build.py", "supervisor/build.py"],
         "status": "built: DOS16, Kernel32, Kernel64 + Win64 initrd; running them needs Intel VMX in L1 "
-                  "(see `test --suite boot`)",
+                  "(see `test --suite boot`); without VMX the loader's boot manager chain-loads CSMWrap "
+                  "(legacy BIOS profile) when \\EFI\\SHIZUKU\\CSMWRAP.EFI is on the boot volume, or, with "
+                  "BOOT.INI mode=kernel64 / auto_kernel64=yes, boots \\SHZDOS\\KERNEL64S.BIN (standalone "
+                  "Kernel64) directly",
     },
     "bios-multikernel": {
         "summary": "BIOS loader -> Supervisor cold launch -> DOS16 / Win98 / Kernel64",
@@ -226,6 +229,76 @@ def record_domain(results, label, prefix, vmx_reason):
                detail=(f"{bad[0][0]}: {bad[0][2]}" if bad else f"{len(checks)} guest-evidence checks"))
 
 
+BOOTMGR_CASES = {
+    "auto": "OVMF, Intel CPU without VMX, no BOOT.INI -> CSMWrap -> SeaBIOS CSM16 -> FreeDOS, disk verified",
+    "csm": "OVMF, AMD CPU, BOOT.INI mode=csm -> CSMWrap -> FreeDOS, disk verified",
+    "supervisor": "mode=supervisor without VMX refuses and returns to firmware",
+    "missing": "mode=csm with a csm_path that does not exist: clear error, returns to firmware",
+    "missing-default": "no BOOT.INI and no \\EFI\\SHIZUKU\\CSMWRAP.EFI: clear error, returns to firmware",
+    "malformed-key": "BOOT.INI with an unknown key is rejected as a whole, returns to firmware",
+    "malformed-mode": "BOOT.INI with an invalid mode is rejected as a whole, returns to firmware",
+    "not-an-image": "csm_path names a text file: LoadImage() error, returns to firmware",
+    "one-cpu": "-smp 1: CSMWrap's 2-CPU requirement refused before it can hang",
+    "kernel64": "mode=kernel64 + KERNEL64.INI: standalone Kernel64 directly on OVMF (no VMX), run_k64_standalone "
+                "checks + every T_*.EXE exit 0 + ABI 1.1 cmdline/GOP handoff",
+    "auto-kernel64": "mode=auto, auto_kernel64=yes, no VMX: the same direct Kernel64 run",
+    "auto-k64-fallback": "auto_kernel64=yes but OVMF S3 NVS at 8 MiB: Kernel64 refused, auto falls back to CSM -> "
+                         "FreeDOS, disk verified",
+    "kernel64-nvs": "mode=kernel64 with OVMF S3 NVS at 8 MiB: refused before ExitBootServices, returns to firmware",
+    "kernel64-missing": "mode=kernel64 without KERNEL64S.BIN: Not Found, returns to firmware",
+    "kernel64-wrong-image": "Supervisor-profile KERNEL64.BIN as KERNEL64S.BIN: refused, returns to firmware",
+    "kernel64-bad-ini": "KERNEL64.INI with an unknown key: rejected, returns to firmware",
+    "legacy": "the same MBR disk on SeaBIOS legacy BIOS -> FreeDOS, disk verified",
+}
+
+
+def suite_bootmgr(results):
+    """UEFI boot manager (loader BOOT.INI policy, CSMWrap legacy fallback, direct Kernel64 boot) and the vBIOS host
+    checks. Both run under TCG and need no VMX; neither is evidence for the VMX Supervisor path."""
+    label = ("UEFI boot manager [TCG]: no VMX -> CSMWrap/SeaBIOS CSM16 legacy-boots FreeDOS from one MBR disk; "
+             "mode=csm/supervisor, missing/invalid CSM image, malformed BOOT.INI, 1 CPU, same disk on SeaBIOS; "
+             "mode=kernel64 and auto_kernel64=yes boot the standalone Kernel64 directly (run_k64_standalone "
+             "evidence, every T_*.EXE exit 0), S3-NVS/missing/wrong-image/bad-INI refusals, auto fallback to CSM")
+    vlabel = ("vBIOS host checks [TCG + host]: ROM reset path and INT 1Ah RTC/INT 1Eh under QEMU -bios; "
+              "bios.c INT 13h/15h/16h/1Ah back end under ASan/UBSan (not a VMX run)")
+    try:
+        # Kernel64 (standalone) must match its sources for the kernel64 cases; WIN64.IMG is only built when absent.
+        run([sys.executable, SHZ / "kbuild.py"], capture=True, timeout=900)
+        if not (BUILD / "win64" / "WIN64.IMG").exists():
+            run([sys.executable, SHZ / "win64" / "build.py"], capture=True, timeout=1800)
+        run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=900)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
+        for name in (label, vlabel):
+            record(results, name, "FAIL", detail=f"kbuild/win64/supervisor build failed: {str(exc)[-300:]}")
+        return
+    for name, script, result_json, timeout in (
+            (label, "test_bootmgr.py", BUILD / "bootmgr" / "result.json", 3600),
+            (vlabel, "test_vbios.py", BUILD / "supervisor" / "vbios-host-test" / "result.json", 600)):
+        result_json.unlink(missing_ok=True)
+        proc = run([sys.executable, SHZ / "supervisor" / script], capture=True, check=False, timeout=timeout)
+        data = json.loads(result_json.read_text()) if result_json.exists() else {}
+        ok = proc.returncode == 0 and data.get("status") == "PASS"
+        if "summary" in data:
+            detail = ", ".join(f"{k} {v}" for k, v in data["summary"].items())
+        elif data.get("checks"):
+            detail = f"{sum(c['status'] == 'PASS' for c in data['checks'])}/{len(data['checks'])} checks"
+        else:
+            detail = ((proc.stdout or "").strip().splitlines() or ["no output"])[-1]
+        record(results, name, "PASS" if ok else "FAIL", detail=detail, exit_code=proc.returncode,
+               command=f"{sys.executable} shizukudos/supervisor/{script}", evidence=str(result_json))
+        for case in data.get("cases", []):                  # one record per boot-manager case
+            bad = [c for c in case.get("checks", []) if c["status"] != "PASS"]
+            record(results, f"  boot manager [{case['case']}]: {BOOTMGR_CASES.get(case['case'], case['case'])}",
+                   case.get("status", "FAIL"),
+                   detail=f"{case.get('outcome')} in {case.get('seconds')} s, {len(case.get('checks', []))} checks" +
+                          (f"; first failure: {bad[0]['check']} {bad[0]['detail']}"[:300] if bad else ""),
+                   evidence=case.get("run_dir", ""))
+        if "parser-host-test" in data.get("summary", {}):
+            record(results, "  boot manager [parser]: BOOT.INI / KERNEL64.INI strict parsers on the host under "
+                            "ASan/UBSan", data["summary"]["parser-host-test"],
+                   detail=f"{data.get('parser_host_test', {}).get('cases')} cases")
+
+
 def suite_boot(results):
     ok = run_script(results, "DOS16 on legacy BIOS (SeaBIOS, real Real Mode) [KVM]",
                     [SHZ / "dos16" / "test_csm.py", "--accel", "kvm"], expect_marker="PASS")
@@ -242,6 +315,7 @@ def suite_boot(results):
                [SHZ / "csm" / "test_qemu.py", "--accel", "tcg", "--timeout", "300", "--memory", "256", "--smp", "2",
                 *(["--legacy-result", BUILD / "dos16" / "run-csm-dual" / "result.json"] if dual_ok else [])],
                timeout=900, expect_marker="PASS")
+    suite_bootmgr(results)
     run_script(results, "Kernel32 (Protected Mode) on QEMU, standalone stub (no Supervisor/VMX)",
                [SHZ / "tests" / "run_k32_standalone.py"], timeout=300, expect_marker="PASS")
     run_script(results, "Kernel64 (Long Mode) + Win64 apps on QEMU, standalone stub (no Supervisor/VMX)",
@@ -279,6 +353,17 @@ def suite_win64(results):
     run_script(results, "Kernel32/Kernel64 build (separate ELF32/ELF64 images)", [SHZ / "kbuild.py"])
     run_script(results, "Kernel64 + Win64 apps on QEMU (standalone stub, no Supervisor/VMX): self-tests, T_HELLO.EXE exit 7",
                [SHZ / "tests" / "run_k64_standalone.py"], timeout=400, expect_marker="PASS")
+    run_script(results, "virtqueue model, virtio-gpu layout, virgl encoder (+ execution on the host's virglrenderer)",
+               [SHZ / "tests" / "test_virtio_host.py"], timeout=600, expect_marker="PASS")
+    for display in ("vga", "virtio"):
+        run_script(results, f"Kernel64 GUI + GPU on QEMU, display {display}: every scene pixel-exact, GPU traffic checks",
+                   [SHZ / "tests" / "run_k64_gui.py", "--display", display, "--timeout", "600",
+                    "--out", BUILD / "kernel64s" / f"gui-{display}"], timeout=900, expect_marker="PASS")
+    gl = run([sys.executable, SHZ / "tests" / "run_k64_gui.py", "--display", "virtio-gl", "--timeout", "600",
+              "--out", BUILD / "kernel64s" / "gui-virtio-gl"], capture=True, check=False, timeout=900)
+    lines = (gl.stdout or "").strip().splitlines()
+    record(results, "Kernel64 virgl 3D through virtio-gpu-gl (T_GPU_3D triangle on the host GPU)",
+           {0: "PASS", 2: "BLOCKED"}.get(gl.returncode, "FAIL"), detail=lines[-1] if lines else "", exit_code=gl.returncode)
     reason = "needs Intel VMX in L1 (/dev/kvm + kvm_intel nested); run `test --suite boot` on such a host"
     if l1_vmx_available() and not supervisor_checks("Win64: "):
         run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=600)

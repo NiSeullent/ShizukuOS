@@ -33,7 +33,8 @@
 
 /* Reserved ranges for subsystems that live in their own kernel64 files and their own sys_ext_*() handler (sysext.c).
  * Each subsystem defines ONLY its own list below (numbers must stay inside its range):
- *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf */
+ *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf
+ *   gpu 0xd0-0xdf */
 #define SYSCALL_LIST_REGISTRY(X) \
     X(NtCreateKey, 0x50) X(NtOpenKey, 0x51) X(NtOpenKeyEx, 0x52) X(NtQueryValueKey, 0x53) X(NtSetValueKey, 0x54) \
     X(NtDeleteKey, 0x55) X(NtDeleteValueKey, 0x56) X(NtEnumerateKey, 0x57) X(NtEnumerateValueKey, 0x58) \
@@ -56,6 +57,12 @@
 
 #define SYSCALL_LIST_MISC(X)
 
+/* Display/GPU (kernel64/gpu_sys.c; structures in win64/include/shzgpu.h) */
+#define SYSCALL_LIST_GPU(X) \
+    X(NtShzGpuQuery, 0xd0) X(NtShzGpuEdid, 0xd1) X(NtShzGpuCursor, 0xd2) X(NtShzGpuCapset, 0xd3) \
+    X(NtShzGpuCtxCreate, 0xd4) X(NtShzGpuCtxDestroy, 0xd5) X(NtShzGpuResourceCreate, 0xd6) \
+    X(NtShzGpuResourceDestroy, 0xd7) X(NtShzGpuSubmit, 0xd8) X(NtShzGpuTransfer, 0xd9)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
@@ -64,8 +71,9 @@ enum {
     SYSCALL_LIST_NET(X)
     SYSCALL_LIST_K32(X)
     SYSCALL_LIST_MISC(X)
+    SYSCALL_LIST_GPU(X)
 #undef X
-    SYS_MAX = 0xb0
+    SYS_MAX = 0x100                 /* every number below goes to sys_extended(); sysext.c rejects unrouted ranges */
 };
 
 /* NTSTATUS values used by the kernel (subset of ntstatus.h; same numeric values). */

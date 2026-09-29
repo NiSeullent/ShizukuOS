@@ -108,7 +108,7 @@ GPT GUIDs), fixed FAT volume ids, deterministic tarballs. The receipts
 
 ## Results
 
-Recorded in `docs/shizukudos10/STATUS.md` section 2d: the ISO built from commit 116749b
+Recorded in `docs/shizukudos10/STATUS.md` section 2e: the ISO built from commit 116749b
 (sha256 `b645dd8ed479861ee322be85136f737cce8cde3aed89d192a67adf99f502668e`, identical over two
 full rebuilds) and the raw disk (`9cd8825178e2876de9139452be28a34debe621d5060fcbf448f02f4e9e9ef137`)
 passed all 18 runs of the matrix twice (QEMU 8.2.2 TCG); the OVMF cells are interim (UEFI Shell

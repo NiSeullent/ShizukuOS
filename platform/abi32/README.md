@@ -50,9 +50,19 @@ Each variant checks:
   are checked. Repeated zero-delay polling fails after eight calls. This is
   not an OS scheduler or a concurrency test; the separate InitOnce pthread
   suite tests real contention, and native priority behavior remains unverified.
+- The routing policy (docs/NTW32_ROUTING.md), by re-running `DllMain` with
+  mocked `NTW32.INI` bytes, `NTW32_ROUTING` values and a fake KernelEx API
+  library (a data buffer with PE32 headers whose addresses are compared,
+  never called): every mode, module and function overrides, configured
+  `[routing] order=` and `[order]` entries, malformed and oversized
+  configuration, KernelEx attribution, static-export forwarding to native,
+  and the guard against forwarding an export into `NTW32.DLL` itself.
 
 The mocks cover only `GetModuleHandleA`, `GetProcAddress`, `GetTickCount`,
-`SetLastError`, `Sleep`, `MultiByteToWideChar`, and `WideCharToMultiByte`.
+`SetLastError`, `GetLastError`, `Sleep`, `MultiByteToWideChar`,
+`WideCharToMultiByte`, and, for the routing policy, `GetModuleFileNameA`,
+`CreateFileA`, `ReadFile`, `CloseHandle`, `GetEnvironmentVariableA` and
+`OutputDebugStringA`.
 The two conversion mocks only record arguments and return configured values;
 all `CP_UTF8` bytes are processed by the actual independent DLL code. Mock
 counters and return values are test fixtures,
@@ -102,6 +112,33 @@ hashes in `sources_sha256`, the packer test PASS/count,
 mock inventory, export inventory, base/delta, relocation-site count, test
 stdout, and executable hashes. A source or input change during the run prevents
 a completed report. Rebuild and rerun whenever the runtime changes.
+
+## WIN64 subsystem end-to-end run
+
+`w64_e2e.py` (also run by `build.py`) builds a second static ELF32 program,
+`build/w64/w64-e2e`, that maps the actual `NTW32.DLL` at its preferred base and
+the actual `NTW64RUN.EXE` at `0x00400000`, binds the EXE's imports to the DLL's
+exports, and compiles in `ntwrapper/vxd/bridge.c` and `core.c` with the VxD's
+own flags. DeviceIoControl goes into `ntwv_dioc_ex()` as VWIN32 would deliver
+it; the VMM page services are an identity model and the Supervisor hypercalls
+are modeled. The channel is a real `shz_channel_init()` region. On each
+doorbell the harness pops the VxD's frames with `shz_ring_pop()` and sends the
+raw slots (and pool data) to `k64model.py`, a Python model of
+`kernel64/subsys64.c` that decodes them with `shizukudos/abi/test_abi.py`'s
+independent decoder and answers with its encoder; each answer is checked for a
+C-accepted CRC and byte identity with `shz_ring_push()` before it is placed on
+the ring. `w64_gate.S` runs everything on a static stack below `0x80000000`
+because the VxD accepts only Win32 private-arena buffers. Time is simulated
+(`Sleep` advances it and lets the model run).
+
+The run covers the argument checks, the recorded guest failure mode (VxD not
+loadable: error 2), no Supervisor (50), no channel (55), process creation with
+inline and pool-carried arguments up to the 4,016-byte limit, ordered console
+output larger than the 8-frame window with a slow reader, stdin relay and EOF,
+kill, wait timeout, a handle closed on a running process, the four-process
+limit, a corrupted slot, a lost reply, and eleven NTW64RUN.EXE command lines.
+The result is `build/w64/w64-results.json` and `win64_bridge_e2e` in
+`build/results.json`. It is not a Windows 98, VMM, Supervisor or Kernel64 run.
 
 ## What this does not establish
 

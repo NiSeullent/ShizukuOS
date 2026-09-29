@@ -1,9 +1,13 @@
-# Independent native AHCI read path
+# Independent native AHCI read/write path
 
 This original freestanding C implementation takes exclusive ownership of one AHCI
 controller, initializes an active SATA disk port, obtains IDENTIFY data, and reads
-one 512-byte sector using READ DMA EXT. It is a concrete storage path for **Windows
-98 Shizuku's Second Edition**, ready for a separate native guest binding.
+one 512-byte sector using READ DMA EXT. When the caller opts in at open
+(`ahci_config.allow_write = 1`) it also writes one 512-byte sector using WRITE DMA
+EXT and flushes the device write cache using FLUSH CACHE EXT. It is a concrete
+storage path for **Windows 98 Shizuku's Second Edition**, ready for a separate
+native guest binding. Kernel64 (ShizukuDOS 10, standalone profile) links it as its
+AHCI block device through `shizukudos/kernel64/ahci_blk.c`.
 
 **Current evidence here is host-model and i486 compilation only.** The receipt
 does not claim Windows 98 driver registration, QEMU DMA execution, physical
@@ -87,12 +91,22 @@ the command engine. Port multipliers and inherited enabled FIS-based switching
 in standby, COMRESET, command-list override recovery and global HBA reset are
 deliberately absent. A port requiring them returns an error.
 
-Only two ATA opcodes can be submitted: `0xec` IDENTIFY DEVICE and `0x25` READ DMA
-EXT. There is no generic command pass-through and no disk write, flush, trim,
-security, firmware-update or feature-changing command. The command header always
-uses device-to-host direction, a five-DWORD Register H2D FIS and one PRDT for
-exactly 512 bytes. Reads use one sector and validate LBA against both the reported
-capacity and the 48-bit command limit.
+Four ATA opcodes can be submitted: `0xec` IDENTIFY DEVICE, `0x25` READ DMA EXT,
+and, only after an `allow_write = 1` open, `0x35` WRITE DMA EXT and `0xea` FLUSH
+CACHE EXT. There is no generic command pass-through and no trim, security,
+firmware-update or feature-changing command. Every command uses a five-DWORD
+Register H2D FIS. Reads and IDENTIFY use device-to-host direction and one PRDT for
+exactly 512 bytes; a write sets the command header's W bit (host-to-device) and
+one PRDT for exactly 512 bytes copied from the caller before submission; a flush is
+a non-data command with no PRDT whose PRDBC must stay 0. Reads and writes use one
+sector and validate LBA against both the reported capacity and the 48-bit command
+limit. A write buffer must not overlap the DMA block or the device context.
+`ahci_flush` requires IDENTIFY word 83 bit 13 (FLUSH CACHE EXT supported) and
+otherwise returns `AHCI_UNSUPPORTED` without device access, as do writes and
+flushes on a read-only open. IDENTIFY word 85 bit 5 (volatile write cache enabled,
+when word 87 marks words 85..87 valid) is reported as `AHCI_FEATURE_WRITE_CACHE`.
+A write success means the device completed the command; the data is durable only
+after a successful flush. A failed write leaves that sector undefined.
 
 IDENTIFY parsing requires complete ATA data, DMA/LBA support,
 valid LBA48 support and a nonzero bounded capacity. Advertised logical sectors
@@ -143,6 +157,12 @@ cover late completion errors, short transfers, unplug, frozen/backwards clocks,
 stuck-engine retention/retry, BIOS handoff timeout, occupied command slots,
 malformed IDENTIFY/checksum, 32/64-bit DMA limits, sparse port 31, multiple-port
 quiescence, initial status clearing, lifecycle reuse, and unchanged output bounds.
+Write-path cases check the WRITE DMA EXT header (W bit, one PRDT) and the non-data
+FLUSH CACHE EXT header (no PRDT), read-back of written sectors through the model's
+media store, unchanged caller input, bounds and overlap rejection without device
+access, read-only and no-FLUSH-EXT refusals without device access, fault injection
+after each operation of open + write + flush + close, and the same late-error,
+short-transfer, unplug, timeout and clock cases as reads for both write and flush.
 Cold-signature cases reproduce the initial QEMU register state and require FRE
 before delivering SIG `0x101`/TFD `0x130`; ATA success, ATAPI rejection and no-FIS timeout
 are tested, along with rejection of inherited FIS-based switching.
@@ -160,7 +180,9 @@ The intended next fixture uses an exclusively owned QEMU AHCI device and a newly
 created patterned disk, with the EFI boot volume on a different controller. Read
 first/middle/last sectors, compare all 512 bytes, reject one-past-end without
 submitting a command, stop/release successfully, and verify the disk hash did not
-change. This directory does not start that fixture. A native guest pass would
+change. This directory does not start that fixture; the Kernel64 binding is exercised under
+QEMU by `shizukudos/tests/run_k64_disk.py` (reads, writes, flush, host-side image
+verification). A native guest pass would
 still leave Win98 IOS/CONFIGMG binding, interrupts, PnP/hotplug, reset recovery,
 power management, queued/multisector I/O and real hardware support unimplemented.
 

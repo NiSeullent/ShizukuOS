@@ -5,7 +5,7 @@
  * Why: on UEFI + CSMWrap the E820 map that SeaBIOS reports keeps OVMF's ACPI NVS at 8-9 MiB (S3 resume data),
  * so RAM is not one run from 1 MiB. The stub records every gap between usable ranges inside [1 MiB, ram_size),
  * page aligned outward, and Kernel64 keeps those pages out of its page allocator. The stub refuses a hole in the
- * fixed boot/kernel/heap area below 6 MiB or over the initrd, so only allocator pages are ever affected.
+ * fixed boot/kernel/heap area below 15 MiB or over the initrd, so only allocator pages are ever affected.
  */
 #ifndef SHZ_MEMHOLES_H
 #define SHZ_MEMHOLES_H
