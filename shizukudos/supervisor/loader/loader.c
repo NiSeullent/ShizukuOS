@@ -9,19 +9,29 @@
  * UEFI service is ever called.
  *
  * Boot manager: the optional policy file \EFI\SHIZUKU\BOOT.INI (bootini.h) selects
- *   mode=auto        Supervisor when the VMX backend is usable, otherwise CSM (default)
+ *   mode=auto        Supervisor when the Intel VMX backend is usable; otherwise Kernel64
+ *                    direct when auto_kernel64=yes and \SHZDOS\KERNEL64S.BIN exists;
+ *                    otherwise CSM (default)
  *   mode=supervisor  Supervisor only; refuse and return to firmware without VMX
  *   mode=csm         always CSM
+ *   mode=kernel64    the standalone Long Mode Kernel64 directly, no Supervisor, no VMX
  * "CSM" is the legacy BIOS profile: the loader chain-loads CSMWrap (LGPL-2.1,
  * https://github.com/CSMWrap/CSMWrap, which wraps the SeaBIOS CSM16 build) from the
  * same volume with LoadImage/StartImage while boot services are still up. CSMWrap
  * then exits boot services itself and SeaBIOS legacy-boots the MBR of this disk,
  * giving the DOS kernel real PC BIOS interrupt services. The loader never links or
  * copies CSMWrap code; it only starts the separately built image.
+ * "Kernel64 direct" does for bare metal what kernel64/standalone/boot32.c does under a
+ * Multiboot loader: \SHZDOS\KERNEL64S.BIN (built with -DSHZ_STANDALONE, so its
+ * hypercalls are served in-kernel over COM1/PIT/RTC) at physical 1 MiB, \SHZDOS\WIN64.IMG
+ * at 32 MiB, the boot information block (shz_abi.h, ABI 1.1 with the GOP framebuffer
+ * and \SHZDOS\KERNEL64.INI command line) at 0x7000, boot page tables, then Long Mode
+ * entry at 0xFFFFFFFF80100000 with RDI = 0x7000 after ExitBootServices.
  */
 #include "efi_ext.h"
 #include "bootini.h"
 #include "../../uefi/boot.h"
+#include "../../abi/shz_abi.h"
 #include "../include/shz_info.h"
 #include "../src/caps.h"
 #include "images.h"
@@ -275,7 +285,7 @@ static EFI_STATUS load_boot_policy(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, boot
         root->close(root);
         say("Boot manager: no \\EFI\\SHIZUKU\\BOOT.INI; built-in policy mode=auto, csm_path=");
         say(policy->csm_path);
-        say("\n");
+        say(", auto_kernel64=no\n");
         return EFI_SUCCESS;
     }
     if (!EFI_ERROR(status) && size > BOOTINI_MAX_BYTES)
@@ -312,7 +322,8 @@ static EFI_STATUS load_boot_policy(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, boot
     say(bootini_mode_name(policy->mode));
     say(", csm_path=");
     say(policy->csm_path);
-    say(policy->csm_path_set ? "\n" : " (default)\n");
+    say(policy->csm_path_set ? "" : " (default)");
+    say(policy->auto_kernel64 ? ", auto_kernel64=yes\n" : ", auto_kernel64=no\n");
     return EFI_SUCCESS;
 }
 
@@ -496,6 +507,620 @@ static EFI_STATUS csm_boot(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, const bootin
     return EFI_ERROR(status) ? status : EFI_ABORTED;
 }
 
+/* ------------------------------------------------------------------ Kernel64 direct boot
+ * Physical layout (identical to kernel64/standalone/boot32.c and the Supervisor's kdom.c):
+ *   0x1000 PML4, 0x2000 PDPT (low), 0x3000 PD (2 MiB pages), 0x4000 PDPT (high half)
+ *   0x5000 trampoline, 0x5800 GDT, 0x5820 GDTR, 0x6000-0x6fff trampoline stack
+ *   0x7000 shz_bootinfo_t, 1 MiB kernel image (+ bss up to 3 MiB), 32 MiB initrd
+ * Every one of those ranges is taken with AllocatePages(AllocateAddress) before any byte
+ * is written, so the firmware proves nothing live (this loader, its stack, the firmware's
+ * page tables) is there. Kernel64 owns guest-physical [0, ram_size), so ram_size is the end
+ * of the run of memory usable after ExitBootServices that starts at 1 MiB. */
+#define K64_KERNEL_PA 0x100000ull
+#define K64_KERNEL_WINDOW 0x200000ull           /* zeroed [1 MiB, 3 MiB): image + bss, as boot32.c */
+#define K64_KERNEL_MAX 0x100000ull              /* image file limit, as boot32.c */
+#define K64_INITRD_PA 0x2000000ull
+#define K64_INITRD_MAX (64ull << 20)
+#define K64_LOW_PA 0x1000ull
+#define K64_LOW_PAGES 7                         /* [0x1000, 0x8000) */
+#define K64_TRAMP_PA 0x5000ull
+#define K64_GDT_PA 0x5800ull
+#define K64_GDTR_PA 0x5820ull
+#define K64_RAM_MIN (64ull << 20)               /* boot32.c's minimum */
+#define K64_RAM_MAX (256ull << 20)              /* Kernel64 mem.c MAX_PAGES: its page allocator limit */
+#define K64_ENTRY 0xFFFFFFFF80100000ull
+
+/* Runs from its copy at K64_TRAMP_PA, which both the firmware's identity map and the boot page
+ * tables map 1:1. MS x64 call: RCX = boot PML4, RDX = GDTR, R8 = boot info, R9 = kernel entry.
+ * Leaves the CPU as the Multiboot stub does: CR4 = PAE only, flat 64-bit CS 0x08, data 0x10,
+ * interrupts off, RDI = boot info. Kernel64 then sets EFER/CR0/CR4 bits it needs itself. */
+__asm__(".text\n"
+        ".globl shz_k64_tramp_start\n"
+        ".globl shz_k64_tramp_end\n"
+        ".p2align 4\n"
+        "shz_k64_tramp_start:\n"
+        "    movq $0x7000, %rsp\n"
+        "    movq %rcx, %cr3\n"
+        "    movq $0x20, %rax\n"
+        "    movq %rax, %cr4\n"
+        "    clts\n"
+        "    lgdt (%rdx)\n"
+        "    pushq $0x08\n"
+        "    leaq 1f(%rip), %rax\n"
+        "    pushq %rax\n"
+        "    lretq\n"
+        "1:  movw $0x10, %ax\n"
+        "    movw %ax, %ds\n"
+        "    movw %ax, %es\n"
+        "    movw %ax, %ss\n"
+        "    xorl %eax, %eax\n"
+        "    movw %ax, %fs\n"
+        "    movw %ax, %gs\n"
+        "    movq %r8, %rdi\n"
+        "    xorl %ebp, %ebp\n"
+        "    jmpq *%r9\n"
+        "shz_k64_tramp_end:\n");
+extern const uint8_t shz_k64_tramp_start[], shz_k64_tramp_end[];
+
+typedef struct {
+    uint64_t ksize, isize, initrd_pages, ram_size;
+    int low_alloc, kernel_alloc, initrd_alloc;
+    char cmdline[SHZ_CMDLINE_MAX];
+} k64_state_t;
+static k64_state_t g_k64;
+
+static const char *efi_type_name(uint32_t t)
+{
+    static const char *const names[] = {
+        "EfiReservedMemoryType", "EfiLoaderCode", "EfiLoaderData", "EfiBootServicesCode", "EfiBootServicesData",
+        "EfiRuntimeServicesCode", "EfiRuntimeServicesData", "EfiConventionalMemory", "EfiUnusableMemory",
+        "EfiACPIReclaimMemory", "EfiACPIMemoryNVS", "EfiMemoryMappedIO", "EfiMemoryMappedIOPortSpace",
+        "EfiPalCode", "EfiPersistentMemory", "EfiUnacceptedMemoryType"};
+    return t < sizeof names / sizeof names[0] ? names[t] : "OEM/OS-defined type";
+}
+
+/* Memory the OS may use once ExitBootServices has succeeded (UEFI 2.10 table 7-6). */
+static int k64_usable(const EFI_MEMORY_DESCRIPTOR *d)
+{
+    return (d->type == EFI_LOADER_CODE_MEM || d->type == EFI_LOADER_DATA_MEM || d->type == EFI_BS_CODE ||
+            d->type == EFI_BS_DATA || d->type == EFI_CONVENTIONAL) && (d->attributes & EFI_MEMORY_WB);
+}
+
+#define K64_DESC(map, i, stride) ((const EFI_MEMORY_DESCRIPTOR *)((const uint8_t *)(map) + (i) * (stride)))
+#define K64_END(d) ((d)->physical_start + ((d)->pages << 12))
+
+/* End of the run of usable memory that starts at `from`, and the descriptor that ends it
+ * (0 when a hole in the map ends it). The map is not assumed sorted or free of overlaps:
+ * an unusable descriptor overlapping the run cuts it. */
+static uint64_t k64_run(const void *map, size_t count, size_t stride, uint64_t from, const EFI_MEMORY_DESCRIPTOR **stop)
+{
+    uint64_t cur = from;
+    size_t i, pass;
+    int grew = 1;
+    for (pass = 0; grew && pass <= count; ++pass) {
+        grew = 0;
+        for (i = 0; i < count; ++i) {
+            const EFI_MEMORY_DESCRIPTOR *d = K64_DESC(map, i, stride);
+            if (k64_usable(d) && d->physical_start <= cur && K64_END(d) > cur) {
+                cur = K64_END(d);
+                grew = 1;
+            }
+        }
+    }
+    *stop = 0;
+    for (i = 0; i < count; ++i) {
+        const EFI_MEMORY_DESCRIPTOR *d = K64_DESC(map, i, stride);
+        if (!k64_usable(d) && K64_END(d) > from && d->physical_start < cur) {
+            cur = d->physical_start > from ? d->physical_start : from;
+            *stop = d;
+        }
+    }
+    if (!*stop)
+        for (i = 0; i < count; ++i)
+            if (K64_DESC(map, i, stride)->physical_start == cur)
+                *stop = K64_DESC(map, i, stride);
+    return cur;
+}
+
+/* ram_size for Kernel64 from a memory map: 2 MiB aligned, capped at the kernel's limit,
+ * 0 when [0x1000, 0x8000) (boot structures) is not usable. */
+static uint64_t k64_ram_from_map(const void *map, size_t map_size, size_t stride, uint64_t *run_top,
+                                 const EFI_MEMORY_DESCRIPTOR **stop)
+{
+    const size_t count = map_size / stride;
+    const EFI_MEMORY_DESCRIPTOR *low_stop;
+    uint64_t top = k64_run(map, count, stride, K64_KERNEL_PA, stop), ram = top & ~0x1fffffull;
+    *run_top = top;
+    if (k64_run(map, count, stride, K64_LOW_PA, &low_stop) < K64_LOW_PA + ((uint64_t)K64_LOW_PAGES << 12))
+        return 0;
+    return ram > K64_RAM_MAX ? K64_RAM_MAX : ram;
+}
+
+static EFI_STATUS get_memory_map_copy(EFI_BOOT_SERVICES *bs, void **map, size_t *size, size_t *stride)
+{
+    size_t need = 0, key = 0;
+    uint32_t version = 0;
+    EFI_STATUS status;
+    int tries;
+    *map = 0;
+    *stride = 0;
+    status = bs->get_memory_map(&need, 0, &key, stride, &version);
+    for (tries = 0; tries < 4 && status == EFI_BUFFER_TOO_SMALL; ++tries) {
+        if (*map)
+            bs->free_pool(*map);
+        *map = 0;
+        need += 16 * (*stride >= sizeof(EFI_MEMORY_DESCRIPTOR) ? *stride : 64);
+        status = bs->allocate_pool(EFI_LOADER_DATA, need, map);
+        if (EFI_ERROR(status)) {
+            *map = 0;
+            return status;
+        }
+        *size = need;
+        status = bs->get_memory_map(size, *map, &key, stride, &version);
+        need = *size;
+    }
+    if (!EFI_ERROR(status) && (*stride < sizeof(EFI_MEMORY_DESCRIPTOR) || version != 1 || *size % *stride))
+        status = EFI_UNSUPPORTED;
+    if (EFI_ERROR(status) && *map) {
+        bs->free_pool(*map);
+        *map = 0;
+    }
+    return status;
+}
+
+static void say_desc(const EFI_MEMORY_DESCRIPTOR *d)
+{
+    say(efi_type_name(d->type));
+    say(" [");
+    say_hex(d->physical_start);
+    say("-");
+    say_hex(K64_END(d) - 1);
+    say("]");
+}
+
+/* Names what occupies [start, end) when a fixed-address allocation fails. */
+static void say_owner(const void *map, size_t map_size, size_t stride, uint64_t start, uint64_t end)
+{
+    size_t i;
+    for (i = 0; map && i < map_size / stride; ++i) {
+        const EFI_MEMORY_DESCRIPTOR *d = K64_DESC(map, i, stride);
+        if (d->type != EFI_CONVENTIONAL && d->physical_start < end && K64_END(d) > start) {
+            say(" (occupied by ");
+            say_desc(d);
+            say(")");
+            return;
+        }
+    }
+}
+
+static void k64_release(EFI_BOOT_SERVICES *bs)
+{
+    EFI_FREE_PAGES_FN free_pages = (EFI_FREE_PAGES_FN)bs->free_pages;
+    if (g_k64.initrd_alloc)
+        free_pages(K64_INITRD_PA, (size_t)g_k64.initrd_pages);
+    if (g_k64.kernel_alloc)
+        free_pages(K64_KERNEL_PA, (size_t)(K64_KERNEL_WINDOW >> 12));
+    if (g_k64.low_alloc)
+        free_pages(K64_LOW_PA, K64_LOW_PAGES);
+    g_k64.initrd_alloc = g_k64.kernel_alloc = g_k64.low_alloc = 0;
+}
+
+static EFI_STATUS read_all(EFI_FILE_PROTOCOL *file, uint64_t dst, uint64_t bytes)
+{
+    uint64_t done = 0;
+    while (done < bytes) {
+        size_t chunk = (size_t)(bytes - done > (1u << 20) ? (1u << 20) : bytes - done);
+        EFI_STATUS status = file->read(file, &chunk, (uint8_t *)(uintptr_t)(dst + done));
+        if (EFI_ERROR(status))
+            return status;
+        if (!chunk)
+            return EFI_DEVICE_ERROR;
+        done += chunk;
+    }
+    return EFI_SUCCESS;
+}
+
+static inline uint64_t read_cr4(void)
+{
+    uint64_t v;
+    __asm__ volatile("mov %%cr4, %0" : "=r"(v));
+    return v;
+}
+
+/* Present but unreadable, oversized or malformed optional files refuse the boot; absent ones do not. */
+static EFI_STATUS k64_refuse(const char *what, EFI_STATUS status)
+{
+    say("REFUSED: ");
+    say(what);
+    if (status != EFI_SUCCESS)
+        say_status(status);
+    say(".\nNothing was started. Returning to firmware.\n");
+    return EFI_ERROR(status) ? status : EFI_LOAD_ERROR;
+}
+
+static int bytes_contain(const uint8_t *p, uint64_t n, const char *needle)
+{
+    uint64_t i, k;
+    for (i = 0; i < n; ++i) {
+        for (k = 0; needle[k] && i + k < n && p[i + k] == (uint8_t)needle[k]; ++k)
+            ;
+        if (!needle[k])
+            return 1;
+    }
+    return 0;
+}
+
+static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
+{
+    static const CHAR16 kpath[] = {'\\','S','H','Z','D','O','S','\\','K','E','R','N','E','L','6','4','S','.','B','I','N',0};
+    static const CHAR16 ipath[] = {'\\','S','H','Z','D','O','S','\\','W','I','N','6','4','.','I','M','G',0};
+    static const CHAR16 cpath[] = {'\\','S','H','Z','D','O','S','\\','K','E','R','N','E','L','6','4','.','I','N','I',0};
+    static char ini[BOOTINI_MAX_BYTES];
+    EFI_ALLOCATE_PAGES_FN allocate_pages = (EFI_ALLOCATE_PAGES_FN)bs->allocate_pages;
+    EFI_STALL_FN stall = (EFI_STALL_FN)bs->stall;
+    EFI_FILE_PROTOCOL *root = 0, *kfile = 0, *ifile = 0, *cfile = 0;
+    const EFI_MEMORY_DESCRIPTOR *stop = 0;
+    shz_bootinfo_t *bi = (shz_bootinfo_t *)(uintptr_t)SHZ_BOOTINFO_GPA;
+    uint64_t *pml4 = (uint64_t *)(uintptr_t)0x1000, *pdpt_lo = (uint64_t *)(uintptr_t)0x2000,
+             *pd = (uint64_t *)(uintptr_t)0x3000, *pdpt_hi = (uint64_t *)(uintptr_t)0x4000;
+    uint64_t csize = 0, addr, run_top = 0, t0, t1;
+    void *map = 0;
+    size_t map_size = 0, stride = 0, i;
+    EFI_GOP *gop = 0;
+    SD_FRAMEBUFFER fb;
+    EFI_STATUS status;
+    char err[160];
+    int line;
+
+    zero(&g_k64, sizeof g_k64);
+    if (read_cr4() & (1ull << 12))
+        return k64_refuse("the firmware runs with 5-level paging (CR4.LA57); Kernel64 uses 4-level paging and "
+                          "LA57 cannot be cleared in Long Mode", EFI_UNSUPPORTED);
+    status = open_boot_root(image, bs, 0, &root);
+    if (EFI_ERROR(status))
+        return k64_refuse("cannot open the boot volume", status);
+
+    /* Kernel image, initial RAM image, command line. */
+    status = open_regular_file(root, kpath, &kfile, &g_k64.ksize);
+    if (EFI_ERROR(status)) {
+        root->close(root);
+        return k64_refuse(status == EFI_NOT_FOUND ? "\\SHZDOS\\KERNEL64S.BIN not found on the boot volume (build it "
+                                                    "with shizukudos/kbuild.py; it is the -DSHZ_STANDALONE Kernel64)"
+                                                  : "cannot open \\SHZDOS\\KERNEL64S.BIN", status);
+    }
+    if (g_k64.ksize < 64 || g_k64.ksize > K64_KERNEL_MAX) {
+        kfile->close(kfile);
+        root->close(root);
+        say("REFUSED: \\SHZDOS\\KERNEL64S.BIN is ");
+        say_dec(g_k64.ksize);
+        say(" bytes; the kernel image (file + bss) must fit [1 MiB, 3 MiB), at most 1 MiB of file.\n"
+            "Nothing was started. Returning to firmware.\n");
+        return EFI_LOAD_ERROR;
+    }
+    status = open_regular_file(root, ipath, &ifile, &g_k64.isize);
+    if (status == EFI_NOT_FOUND) {
+        g_k64.isize = 0;
+        say("Kernel64 direct boot: no \\SHZDOS\\WIN64.IMG; Kernel64 starts without an initial RAM image.\n");
+    } else if (EFI_ERROR(status) || !g_k64.isize || g_k64.isize > K64_INITRD_MAX) {
+        if (ifile)
+            ifile->close(ifile);
+        kfile->close(kfile);
+        root->close(root);
+        return k64_refuse(EFI_ERROR(status) ? "cannot open \\SHZDOS\\WIN64.IMG"
+                                            : "\\SHZDOS\\WIN64.IMG is empty or larger than 64 MiB",
+                          EFI_ERROR(status) ? status : EFI_SUCCESS);
+    }
+    status = open_regular_file(root, cpath, &cfile, &csize);
+    if (status == EFI_NOT_FOUND) {
+        csize = 0;
+    } else if (EFI_ERROR(status) || csize > sizeof ini || EFI_ERROR(status = read_all(cfile, (uint64_t)(uintptr_t)ini, csize))) {
+        if (cfile)
+            cfile->close(cfile);
+        if (ifile)
+            ifile->close(ifile);
+        kfile->close(kfile);
+        root->close(root);
+        return k64_refuse(csize > sizeof ini ? "\\SHZDOS\\KERNEL64.INI is larger than 4096 bytes"
+                                             : "\\SHZDOS\\KERNEL64.INI exists but cannot be read",
+                          EFI_ERROR(status) ? status : EFI_SUCCESS);
+    }
+    if (cfile) {
+        cfile->close(cfile);
+        line = k64ini_parse(ini, (size_t)csize, g_k64.cmdline, sizeof g_k64.cmdline, err, sizeof err);
+        if (line) {
+            if (ifile)
+                ifile->close(ifile);
+            kfile->close(kfile);
+            root->close(root);
+            say("REFUSED: \\SHZDOS\\KERNEL64.INI line ");
+            say_dec((uint64_t)line);
+            say(": ");
+            say(err);
+            say("\nThe file is rejected as a whole. Nothing was started. Returning to firmware.\n");
+            return EFI_INVALID_PARAMETER;
+        }
+    }
+
+    /* RAM plan from the current map; recomputed from the final map after ExitBootServices. */
+    status = get_memory_map_copy(bs, &map, &map_size, &stride);
+    if (EFI_ERROR(status)) {
+        if (ifile)
+            ifile->close(ifile);
+        kfile->close(kfile);
+        root->close(root);
+        return k64_refuse("GetMemoryMap() failed", status);
+    }
+    g_k64.ram_size = k64_ram_from_map(map, map_size, stride, &run_top, &stop);
+    say("Kernel64 direct boot: usable RAM from 1 MiB runs to ");
+    say_hex(run_top);
+    if (stop) {
+        say(", ended by ");
+        say_desc(stop);
+    } else {
+        say(", ended by a hole in the memory map");
+    }
+    say("; Kernel64 RAM would be [0, ");
+    say_dec(g_k64.ram_size >> 20);
+    say(" MiB) (2 MiB aligned, at most 256 MiB).\n");
+    if (!g_k64.ram_size || g_k64.ram_size < K64_RAM_MIN ||
+        K64_INITRD_PA + g_k64.isize > g_k64.ram_size) {
+        const size_t count = map_size / stride;
+        uint64_t best_start = 0, best_end = 0;
+        const EFI_MEMORY_DESCRIPTOR *ignored;
+        for (i = 0; i < count; ++i) {
+            const EFI_MEMORY_DESCRIPTOR *d = K64_DESC(map, i, stride);
+            if (k64_usable(d)) {
+                const uint64_t end = k64_run(map, count, stride, d->physical_start, &ignored);
+                if (end - d->physical_start > best_end - best_start) {
+                    best_start = d->physical_start;
+                    best_end = end;
+                }
+            }
+        }
+        say("REFUSED: Kernel64 owns guest-physical [0, ram_size) and is linked for 1 MiB, so it needs memory usable "
+            "after ExitBootServices from 1 MiB up to at least ");
+        say_dec((K64_INITRD_PA + g_k64.isize > K64_RAM_MIN ? K64_INITRD_PA + g_k64.isize : K64_RAM_MIN) >> 20);
+        say(" MiB (and [0x1000, 0x8000) for its boot structures). The largest usable range on this machine is [");
+        say_hex(best_start);
+        say(", ");
+        say_hex(best_end);
+        say(").\nNothing was started. Returning to firmware.\n");
+        bs->free_pool(map);
+        if (ifile)
+            ifile->close(ifile);
+        kfile->close(kfile);
+        root->close(root);
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    /* Fixed-address ranges: the firmware guarantees nothing live is there. */
+    addr = K64_LOW_PA;
+    status = allocate_pages(EFI_ALLOCATE_ADDRESS, EFI_MEM_LOADER_DATA, K64_LOW_PAGES, &addr);
+    g_k64.low_alloc = !EFI_ERROR(status);
+    if (!EFI_ERROR(status)) {
+        addr = K64_KERNEL_PA;
+        status = allocate_pages(EFI_ALLOCATE_ADDRESS, EFI_MEM_LOADER_DATA, (size_t)(K64_KERNEL_WINDOW >> 12), &addr);
+        g_k64.kernel_alloc = !EFI_ERROR(status);
+    }
+    if (!EFI_ERROR(status) && g_k64.isize) {
+        addr = K64_INITRD_PA;
+        g_k64.initrd_pages = (g_k64.isize + 4095) >> 12;
+        status = allocate_pages(EFI_ALLOCATE_ADDRESS, EFI_MEM_LOADER_DATA, (size_t)g_k64.initrd_pages, &addr);
+        g_k64.initrd_alloc = !EFI_ERROR(status);
+    }
+    if (EFI_ERROR(status)) {
+        const uint64_t start = !g_k64.low_alloc ? K64_LOW_PA : !g_k64.kernel_alloc ? K64_KERNEL_PA : K64_INITRD_PA;
+        const uint64_t end = !g_k64.low_alloc ? K64_LOW_PA + ((uint64_t)K64_LOW_PAGES << 12)
+                           : !g_k64.kernel_alloc ? K64_KERNEL_PA + K64_KERNEL_WINDOW
+                                                 : K64_INITRD_PA + (g_k64.initrd_pages << 12);
+        say("REFUSED: the firmware still uses physical [");
+        say_hex(start);
+        say(", ");
+        say_hex(end);
+        say(")");
+        say_owner(map, map_size, stride, start, end);
+        say_status(status);
+        say(";\nKernel64's fixed layout (boot structures 0x1000-0x7fff, kernel at 1 MiB, initrd at 32 MiB) cannot be "
+            "placed.\nNothing was started. Returning to firmware.\n");
+        bs->free_pool(map);
+        if (ifile)
+            ifile->close(ifile);
+        kfile->close(kfile);
+        root->close(root);
+        return status;
+    }
+    bs->free_pool(map);
+
+    zero((void *)(uintptr_t)K64_LOW_PA, (size_t)K64_LOW_PAGES << 12);
+    zero((void *)(uintptr_t)K64_KERNEL_PA, (size_t)K64_KERNEL_WINDOW);
+    status = read_all(kfile, K64_KERNEL_PA, g_k64.ksize);
+    kfile->close(kfile);
+    if (!EFI_ERROR(status) && ifile)
+        status = read_all(ifile, K64_INITRD_PA, g_k64.isize);
+    if (ifile)
+        ifile->close(ifile);
+    root->close(root);
+    if (EFI_ERROR(status))
+        return k64_refuse("reading \\SHZDOS\\KERNEL64S.BIN or \\SHZDOS\\WIN64.IMG failed", status);
+    /* A Supervisor-profile KERNEL64.BIN would issue VMCALL (#UD without VMX) on its first line of output. Only the
+     * -DSHZ_STANDALONE build carries the in-kernel COM1 exit path (kcommon/standalone_dev.h). */
+    if (!bytes_contain((const uint8_t *)(uintptr_t)K64_KERNEL_PA, g_k64.ksize, "SHZ-EXIT:"))
+        return k64_refuse("\\SHZDOS\\KERNEL64S.BIN is not the standalone (-DSHZ_STANDALONE) Kernel64 build: its "
+                          "hypercalls would need the Supervisor", EFI_SUCCESS);
+
+    /* Boot page tables: identity [0, ram_size) and 0xFFFFFFFF80000000 -> physical 0, 2 MiB pages. */
+    pml4[0] = 0x2000 | 3;
+    pml4[511] = 0x4000 | 3;
+    pdpt_lo[0] = 0x3000 | 3;
+    pdpt_hi[510] = 0x3000 | 3;
+    for (i = 0; i < 512 && ((uint64_t)i << 21) < g_k64.ram_size; ++i)
+        pd[i] = ((uint64_t)i << 21) | 0x83;
+    {
+        volatile uint64_t *gdt = (volatile uint64_t *)(uintptr_t)K64_GDT_PA;
+        volatile uint8_t *gdtr = (volatile uint8_t *)(uintptr_t)K64_GDTR_PA, *dst = (volatile uint8_t *)(uintptr_t)K64_TRAMP_PA;
+        const size_t n = (size_t)(shz_k64_tramp_end - shz_k64_tramp_start);
+        gdt[0] = 0;
+        gdt[1] = 0x00af9b000000ffffull;         /* 0x08 code, L=1 (boot.asm) */
+        gdt[2] = 0x00cf93000000ffffull;         /* 0x10 data */
+        gdtr[0] = 23;
+        gdtr[1] = 0;
+        for (i = 0; i < 8; ++i)
+            gdtr[2 + i] = (uint8_t)(K64_GDT_PA >> (8 * i));
+        if (n == 0 || n > K64_GDT_PA - K64_TRAMP_PA)
+            return k64_refuse("internal error: trampoline size", EFI_ABORTED);
+        for (i = 0; i < n; ++i)
+            dst[i] = shz_k64_tramp_start[i];
+    }
+
+    /* Boot information (ABI 1.1). ram_size is rewritten from the final memory map after ExitBootServices. */
+    bi->magic = SHZ_BOOTINFO_MAGIC;
+    bi->abi_major = SHZ_ABI_MAJOR;
+    bi->abi_minor = SHZ_ABI_MINOR;
+    bi->size = sizeof *bi;
+    bi->domain_id = SHZ_DOM_KERNEL64;
+    bi->generation = 1;
+    bi->flags = SHZ_BIF_UEFI_DIRECT;
+    bi->ram_size = g_k64.ram_size;
+    bi->kernel_gpa = K64_KERNEL_PA;
+    bi->kernel_size = g_k64.ksize;
+    if (g_k64.isize) {
+        bi->initrd_gpa = K64_INITRD_PA;
+        bi->initrd_size = g_k64.isize;
+    }
+    for (i = 0; g_k64.cmdline[i] && i < SHZ_CMDLINE_MAX - 1; ++i)
+        bi->cmdline[i] = g_k64.cmdline[i];
+    bi->cmdline[i] = 0;
+    bi->cmdline_size = (uint32_t)i;
+    if (!EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) && gop &&
+        !EFI_ERROR(sd_framebuffer_snapshot(gop->mode, &fb))) {
+        bi->fb_base = fb.base;
+        bi->fb_size = fb.size;
+        bi->fb_width = fb.width;
+        bi->fb_height = fb.height;
+        bi->fb_pitch = fb.pitch_pixels * 4;
+        bi->fb_bpp = 32;
+        bi->fb_format = fb.pixel_format == 0 ? SHZ_FB_RGBX8888 : SHZ_FB_BGRX8888;
+    }
+    t0 = rdtsc_now();
+    stall(50000);
+    t1 = rdtsc_now();
+    bi->tsc_hz = (t1 - t0) * 20;
+
+    say("Kernel64 direct boot: \\SHZDOS\\KERNEL64S.BIN ");
+    say_dec(g_k64.ksize);
+    say(" bytes at 1 MiB, \\SHZDOS\\WIN64.IMG ");
+    say_dec(g_k64.isize);
+    say(" bytes at 32 MiB, boot info ABI 1.1 at 0x7000, cmdline '");
+    say(bi->cmdline);
+    say("', GOP ");
+    if (bi->fb_base) {
+        say_dec(bi->fb_width);
+        say("x");
+        say_dec(bi->fb_height);
+        say(bi->fb_format == SHZ_FB_BGRX8888 ? " BGRX at " : " RGBX at ");
+        say_hex(bi->fb_base);
+    } else {
+        say("none");
+    }
+    say(".\n");
+    return EFI_SUCCESS;
+}
+
+static void com1_say(const char *text)
+{
+    unsigned spin;
+    for (; *text; ++text) {
+        for (spin = 0; spin < 100000 && !(port_in8(0x3fd) & 0x20); ++spin)
+            ;
+        port_out8(0x3f8, (uint8_t)*text);
+    }
+}
+
+static void com1_hex(uint64_t v)
+{
+    char text[19] = "0x";
+    int i;
+    for (i = 0; i < 16; ++i)
+        text[2 + i] = "0123456789abcdef"[(v >> (60 - 4 * i)) & 15];
+    text[18] = 0;
+    com1_say(text);
+}
+
+static __attribute__((noreturn)) void k64_halt(const char *why)
+{
+    com1_say("\r\nShizuku boot manager: ");
+    com1_say(why);
+    com1_say("; boot services are gone, the machine is halted.\r\n");
+    for (;;)
+        __asm__ volatile("cli; hlt");
+}
+
+/* Returns only if ExitBootServices could not even be attempted (still in firmware). */
+static EFI_STATUS k64_launch(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
+{
+    shz_bootinfo_t *bi = (shz_bootinfo_t *)(uintptr_t)SHZ_BOOTINFO_GPA;
+    const EFI_MEMORY_DESCRIPTOR *stop = 0;
+    uint64_t run_top = 0, ram;
+    EFI_STATUS status;
+
+    say("Kernel64 direct boot: ExitBootServices, then Long Mode entry at 0xffffffff80100000 with RDI=0x7000.\n");
+    status = sd_exit_boot_services(bs, image, &g_handoff);
+    if (EFI_ERROR(status) && !g_handoff.exit_attempted) {
+        say("REFUSED: ExitBootServices preparation failed");
+        say_status(status);
+        say("; still in firmware. Returning to firmware.\n");
+        return status;
+    }
+    __asm__ volatile("cli" ::: "memory");
+    if (!g_handoff.boot_services_exited)
+        k64_halt("ExitBootServices failed after it was attempted (Kernel64 not started)");
+    /* The final map is authoritative; it can only differ in boot-services memory, but check anyway. */
+    ram = k64_ram_from_map(g_handoff.memory_map, g_handoff.map_size, g_handoff.descriptor_size, &run_top, &stop);
+    if (ram > g_k64.ram_size)
+        ram = g_k64.ram_size;
+    if (ram < K64_RAM_MIN || K64_INITRD_PA + g_k64.isize > ram)
+        k64_halt("the final memory map no longer gives Kernel64 enough contiguous RAM from 1 MiB");
+    bi->ram_size = ram;
+    com1_say("Shizuku boot manager: ExitBootServices done (");
+    com1_hex(g_handoff.exit_calls);
+    com1_say(" call(s)); Kernel64 RAM [0, ");
+    com1_hex(ram);
+    com1_say("); entering Kernel64 at 0xffffffff80100000\r\n");
+    ((void (EFIAPI *)(uint64_t, uint64_t, uint64_t, uint64_t))(uintptr_t)K64_TRAMP_PA)(
+        0x1000, K64_GDTR_PA, SHZ_BOOTINFO_GPA, K64_ENTRY);
+    k64_halt("Kernel64 returned");
+}
+
+/* Kernel64 direct boot: returns only when nothing was started (every path says why). */
+static EFI_STATUS k64_boot(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, const char *why)
+{
+    EFI_STATUS status;
+    say("Kernel64 direct boot (");
+    say(why);
+    say("): the standalone Long Mode Kernel64 without the Supervisor and without VMX.\n");
+    status = k64_prepare(image, bs);
+    if (!EFI_ERROR(status))
+        status = k64_launch(image, bs);
+    k64_release(bs);
+    return status;
+}
+
+/* Does \SHZDOS\KERNEL64S.BIN exist (mode=auto with auto_kernel64=yes)? */
+static int k64_image_present(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
+{
+    static const CHAR16 kpath[] = {'\\','S','H','Z','D','O','S','\\','K','E','R','N','E','L','6','4','S','.','B','I','N',0};
+    EFI_FILE_PROTOCOL *root = 0, *file = 0;
+    uint64_t size = 0;
+    EFI_STATUS status = open_boot_root(image, bs, 0, &root);
+    if (EFI_ERROR(status))
+        return 0;
+    status = open_regular_file(root, kpath, &file, &size);
+    if (!EFI_ERROR(status))
+        file->close(file);
+    root->close(root);
+    return status != EFI_NOT_FOUND;         /* present but unreadable: let k64_boot report it */
+}
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 {
     EFI_BOOT_SERVICES *bs;
@@ -533,9 +1158,12 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         say("REFUSED: CPU lacks Long Mode.\n");
         return EFI_UNSUPPORTED;
     }
+    if (g_policy.mode == BOOT_MODE_KERNEL64)
+        return k64_boot(image, bs, "mode=kernel64");
     if (g_policy.mode == BOOT_MODE_AUTO && (caps.vendor == SHZ_VENDOR_AMD || !caps.vmx_usable)) {
-        /* mode=auto: the Supervisor profile is not available on this machine, so the
-         * DOS kernel gets real BIOS services from the legacy (CSM) profile instead. */
+        /* mode=auto: the Supervisor profile is not available on this machine. With
+         * auto_kernel64=yes the standalone Kernel64 runs directly; otherwise (or when it
+         * cannot be placed) the DOS kernel gets real BIOS services from the CSM profile. */
         say("Supervisor profile not available: ");
         if (caps.vendor == SHZ_VENDOR_AMD) {
             say(caps.svm_usable ? "AMD SVM usable, but the SVM backend is not implemented in this build"
@@ -547,6 +1175,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
             say(caps.vmx_why);
         }
         say("\n");
+        if (g_policy.auto_kernel64) {
+            if (k64_image_present(image, bs)) {
+                status = k64_boot(image, bs, "mode=auto, auto_kernel64=yes, no usable virtualization backend");
+                say("Kernel64 direct boot did not start");
+                say_status(status);
+                say("; falling back to the CSM legacy BIOS profile.\n");
+            } else {
+                say("auto_kernel64=yes, but \\SHZDOS\\KERNEL64S.BIN is not on the boot volume; trying CSM.\n");
+            }
+        }
         return csm_boot(image, bs, &g_policy, "mode=auto, no usable virtualization backend");
     }
     if (caps.vendor == SHZ_VENDOR_AMD) {
@@ -560,7 +1198,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     if (!caps.vmx_usable) {
         say("REFUSED: Intel VMX backend unusable: ");
         say(caps.vmx_why);
-        say("\nEnable Intel VT-x in the firmware setup, or boot the legacy BIOS (CSM) profile.\nReturning to firmware.\n");
+        say("\nEnable Intel VT-x in the firmware setup, or set mode=csm (legacy BIOS profile) or mode=kernel64 in "
+            "\\EFI\\SHIZUKU\\BOOT.INI.\nReturning to firmware.\n");
         return EFI_UNSUPPORTED;
     }
     say("Virtualization: Intel VMX with EPT and Unrestricted Guest available.\n");

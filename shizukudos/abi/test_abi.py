@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Build and run the ABI host model with GCC, Clang ASan/UBSan and Clang TSan, then
 decode a C-produced message independently in Python (struct + zlib CRC-32)."""
+import re
 import struct
 import subprocess
 import sys
@@ -40,7 +41,9 @@ def main():
     (magic, major, minor, hsize, flags, msize, opcode, src, dst, req, gen, status, poff, plen, blen, boff, cap,
      crc) = struct.unpack_from("<IHHHHIIHHQIiHHIQII", slot, 0)
     assert struct.calcsize("<IHHHHIIHHQIiHHIQII") == 64
-    assert magic == 0x43505A53 and (major, minor) == (1, 0) and hsize == 64
+    header = (HERE / "shz_abi.h").read_text()
+    want = tuple(int(re.search(rf"#define SHZ_ABI_{k} (\d+)", header).group(1)) for k in ("MAJOR", "MINOR"))
+    assert magic == 0x43505A53 and (major, minor) == want and hsize == 64, (major, minor, want)
     assert msize == 64 + plen and poff == 64 and plen == 16 and opcode == 0x1234
     assert req == 0x1122334455667788 and gen == 7 and status == -3 and cap == 0xABCD
     assert boff == 0x100000010 and blen == 99, "64-bit buffer offset must not be truncated"

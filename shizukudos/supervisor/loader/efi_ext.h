@@ -77,6 +77,15 @@ typedef EFI_STATUS (EFIAPI *EFI_LOAD_IMAGE_FN)(uint8_t boot_policy, EFI_HANDLE p
 typedef EFI_STATUS (EFIAPI *EFI_START_IMAGE_FN)(EFI_HANDLE image, size_t *exit_data_size, CHAR16 **exit_data);
 typedef EFI_STATUS (EFIAPI *EFI_UNLOAD_IMAGE_FN)(EFI_HANDLE image);
 
+/* UEFI 2.10 7.2 EFI_MEMORY_TYPE and memory attributes (direct Kernel64 boot). */
+enum {
+    EFI_RESERVED_MEMORY = 0, EFI_LOADER_CODE_MEM = 1, EFI_LOADER_DATA_MEM = 2, EFI_BS_CODE = 3, EFI_BS_DATA = 4,
+    EFI_RT_CODE = 5, EFI_RT_DATA = 6, EFI_CONVENTIONAL = 7, EFI_UNUSABLE = 8, EFI_ACPI_RECLAIM = 9,
+    EFI_ACPI_NVS = 10, EFI_MMIO = 11, EFI_MMIO_PORT = 12, EFI_PAL_CODE = 13, EFI_PERSISTENT = 14,
+    EFI_UNACCEPTED = 15
+};
+#define EFI_MEMORY_WB 0x8ull
+
 typedef struct EFI_MP_SERVICES_PROTOCOL {
     EFI_STATUS (EFIAPI *get_number_of_processors)(struct EFI_MP_SERVICES_PROTOCOL *, size_t *total, size_t *enabled);
 } EFI_MP_SERVICES_PROTOCOL;

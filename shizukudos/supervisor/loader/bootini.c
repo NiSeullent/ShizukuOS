@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Strict parser for \EFI\SHIZUKU\BOOT.INI (see bootini.h for the grammar).
- * Original code; no libc so it links into the freestanding UEFI loader.
+ * Strict parsers for \EFI\SHIZUKU\BOOT.INI and \SHZDOS\KERNEL64.INI (see bootini.h for
+ * the grammar). Original code; no libc so it links into the freestanding UEFI loader.
  */
 #include "bootini.h"
 
@@ -13,7 +13,8 @@ static void msg_add(msg_t *m, const char *s)
 {
     while (*s && m->len + 1 < m->cap)
         m->buf[m->len++] = *s++;
-    m->buf[m->len] = 0;
+    if (m->cap)
+        m->buf[m->len] = 0;
 }
 
 /* Appends at most `n` bytes of `s`, replacing anything unprintable, so a hostile
@@ -25,7 +26,8 @@ static void msg_add_n(msg_t *m, const char *s, size_t n)
         const char c = s[i];
         m->buf[m->len++] = (c >= 0x20 && c < 0x7f) ? c : '?';
     }
-    m->buf[m->len] = 0;
+    if (m->cap)
+        m->buf[m->len] = 0;
 }
 
 static int fail(msg_t *m, int line, const char *a, const char *quoted, size_t qlen, const char *b)
@@ -63,12 +65,14 @@ void bootini_defaults(bootini_policy_t *p)
     for (i = 0; d[i]; ++i)
         p->csm_path[i] = d[i];
     p->csm_path[i] = 0;
-    p->mode_set = p->csm_path_set = 0;
+    p->auto_kernel64 = 0;
+    p->mode_set = p->csm_path_set = p->auto_kernel64_set = 0;
 }
 
 const char *bootini_mode_name(int mode)
 {
-    return mode == BOOT_MODE_SUPERVISOR ? "supervisor" : mode == BOOT_MODE_CSM ? "csm" : "auto";
+    return mode == BOOT_MODE_SUPERVISOR ? "supervisor" : mode == BOOT_MODE_CSM ? "csm" :
+           mode == BOOT_MODE_KERNEL64 ? "kernel64" : "auto";
 }
 
 /* An absolute FAT path on the boot volume: \COMPONENT\...\FILE, printable ASCII. */
@@ -97,7 +101,11 @@ static const char *path_problem(const char *v, size_t n)
     return 0;
 }
 
-int bootini_parse(const char *text, size_t len, bootini_policy_t *p, char *err, size_t errlen)
+/* One `key = value` entry, already trimmed; returns 0 or the error line. */
+typedef int (*entry_fn)(void *ctx, msg_t *m, int line, const char *key, size_t klen, const char *val, size_t vlen);
+
+/* The common line grammar: every non-blank, non-comment line is `key = value`. */
+static int parse_lines(const char *text, size_t len, char *err, size_t errlen, entry_fn entry, void *ctx)
 {
     msg_t m;
     size_t pos = 0;
@@ -108,7 +116,6 @@ int bootini_parse(const char *text, size_t len, bootini_policy_t *p, char *err, 
     m.len = 0;
     if (errlen)
         err[0] = 0;
-    bootini_defaults(p);
     if (len > BOOTINI_MAX_BYTES)
         return fail(&m, 1, "file is larger than 4096 bytes", 0, 0, 0);
     if (len >= 2 && (((unsigned char)text[0] == 0xff && (unsigned char)text[1] == 0xfe) ||
@@ -119,7 +126,8 @@ int bootini_parse(const char *text, size_t len, bootini_policy_t *p, char *err, 
         pos = 3;                                        /* UTF-8 byte order mark */
 
     while (pos < len) {
-        size_t start = pos, end, k, kend, v, vend, i;
+        size_t start = pos, end, k, kend, v, i;
+        int r;
         ++line;
         while (pos < len && text[pos] != '\n')
             ++pos;
@@ -151,42 +159,107 @@ int bootini_parse(const char *text, size_t len, bootini_policy_t *p, char *err, 
         v = k + 1;
         while (v < end && is_space(text[v]))
             ++v;
-        vend = end;
         if (kend == start)
             return fail(&m, line, "missing key before '='", 0, 0, 0);
-        if (word_is(text + start, kend - start, "mode")) {
-            if (p->mode_set)
-                return fail(&m, line, "duplicate key 'mode'", 0, 0, 0);
-            if (v == vend)
-                return fail(&m, line, "empty value for 'mode' (expected auto, supervisor or csm)", 0, 0, 0);
-            if (word_is(text + v, vend - v, "auto"))
-                p->mode = BOOT_MODE_AUTO;
-            else if (word_is(text + v, vend - v, "supervisor"))
-                p->mode = BOOT_MODE_SUPERVISOR;
-            else if (word_is(text + v, vend - v, "csm"))
-                p->mode = BOOT_MODE_CSM;
-            else
-                return fail(&m, line, "invalid mode ", text + v, vend - v, " (expected auto, supervisor or csm)");
-            p->mode_set = 1;
-        } else if (word_is(text + start, kend - start, "csm_path")) {
-            const char *why;
-            if (p->csm_path_set)
-                return fail(&m, line, "duplicate key 'csm_path'", 0, 0, 0);
-            if (v == vend)
-                return fail(&m, line, "empty value for 'csm_path'", 0, 0, 0);
-            why = path_problem(text + v, vend - v);
-            if (why) {
-                fail(&m, line, "csm_path ", text + v, vend - v, " ");
-                msg_add(&m, why);
-                return line;
-            }
-            for (i = 0; i < vend - v; ++i)
-                p->csm_path[i] = text[v + i];
-            p->csm_path[i] = 0;
-            p->csm_path_set = 1;
-        } else {
-            return fail(&m, line, "unknown key ", text + start, kend - start, " (allowed: mode, csm_path)");
-        }
+        r = entry(ctx, &m, line, text + start, kend - start, text + v, end - v);
+        if (r)
+            return r;
     }
     return 0;
+}
+
+static int boot_entry(void *ctx, msg_t *m, int line, const char *key, size_t klen, const char *val, size_t vlen)
+{
+    bootini_policy_t *p = ctx;
+    size_t i;
+    if (word_is(key, klen, "mode")) {
+        if (p->mode_set)
+            return fail(m, line, "duplicate key 'mode'", 0, 0, 0);
+        if (!vlen)
+            return fail(m, line, "empty value for 'mode' (expected auto, supervisor, csm or kernel64)", 0, 0, 0);
+        if (word_is(val, vlen, "auto"))
+            p->mode = BOOT_MODE_AUTO;
+        else if (word_is(val, vlen, "supervisor"))
+            p->mode = BOOT_MODE_SUPERVISOR;
+        else if (word_is(val, vlen, "csm"))
+            p->mode = BOOT_MODE_CSM;
+        else if (word_is(val, vlen, "kernel64"))
+            p->mode = BOOT_MODE_KERNEL64;
+        else
+            return fail(m, line, "invalid mode ", val, vlen, " (expected auto, supervisor, csm or kernel64)");
+        p->mode_set = 1;
+    } else if (word_is(key, klen, "csm_path")) {
+        const char *why;
+        if (p->csm_path_set)
+            return fail(m, line, "duplicate key 'csm_path'", 0, 0, 0);
+        if (!vlen)
+            return fail(m, line, "empty value for 'csm_path'", 0, 0, 0);
+        why = path_problem(val, vlen);
+        if (why) {
+            fail(m, line, "csm_path ", val, vlen, " ");
+            msg_add(m, why);
+            return line;
+        }
+        for (i = 0; i < vlen; ++i)
+            p->csm_path[i] = val[i];
+        p->csm_path[i] = 0;
+        p->csm_path_set = 1;
+    } else if (word_is(key, klen, "auto_kernel64")) {
+        if (p->auto_kernel64_set)
+            return fail(m, line, "duplicate key 'auto_kernel64'", 0, 0, 0);
+        if (word_is(val, vlen, "yes"))
+            p->auto_kernel64 = 1;
+        else if (word_is(val, vlen, "no"))
+            p->auto_kernel64 = 0;
+        else
+            return fail(m, line, "invalid auto_kernel64 ", val, vlen, " (expected yes or no)");
+        p->auto_kernel64_set = 1;
+    } else {
+        return fail(m, line, "unknown key ", key, klen, " (allowed: mode, csm_path, auto_kernel64)");
+    }
+    return 0;
+}
+
+int bootini_parse(const char *text, size_t len, bootini_policy_t *p, char *err, size_t errlen)
+{
+    bootini_defaults(p);
+    return parse_lines(text, len, err, errlen, boot_entry, p);
+}
+
+typedef struct {
+    char *cmdline;
+    size_t cap;
+    int set;
+} k64ini_t;
+
+static int k64_entry(void *ctx, msg_t *m, int line, const char *key, size_t klen, const char *val, size_t vlen)
+{
+    k64ini_t *k = ctx;
+    size_t i;
+    if (!word_is(key, klen, "cmdline"))
+        return fail(m, line, "unknown key ", key, klen, " (allowed: cmdline)");
+    if (k->set)
+        return fail(m, line, "duplicate key 'cmdline'", 0, 0, 0);
+    if (vlen + 1 > k->cap)
+        return fail(m, line, "cmdline is too long for the boot information block", 0, 0, 0);
+    for (i = 0; i < vlen; ++i)
+        k->cmdline[i] = val[i];
+    k->cmdline[i] = 0;
+    k->set = 1;
+    return 0;
+}
+
+int k64ini_parse(const char *text, size_t len, char *cmdline, size_t cap, char *err, size_t errlen)
+{
+    k64ini_t k;
+    int r;
+    k.cmdline = cmdline;
+    k.cap = cap;
+    k.set = 0;
+    if (cap)
+        cmdline[0] = 0;
+    r = parse_lines(text, len, err, errlen, k64_entry, &k);
+    if (r && cap)
+        cmdline[0] = 0;
+    return r;
 }
