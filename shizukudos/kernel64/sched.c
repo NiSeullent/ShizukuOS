@@ -32,6 +32,18 @@ thread_t *thread_find_tid(void *process, uint64_t tid)
     return 0;
 }
 
+/* IPC hook (kernel64/ipc_core.c): visits every allocated thread slot with interrupts off (kill wake-ups, reaping the
+ * kernel stacks of exited user threads). */
+void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx)
+{
+    unsigned i;
+    for (i = 0; i < MAX_THREADS; ++i) {
+        const uint64_t f = irq_save();
+        if (threads[i].state != TS_FREE) fn(&threads[i], ctx);
+        irq_restore(f);
+    }
+}
+
 static thread_t *pick_next(void)
 {
     unsigned i, start = current ? (unsigned)(current - threads) : 0;

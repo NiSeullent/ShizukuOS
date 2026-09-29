@@ -106,6 +106,10 @@ void isr_dispatch(struct regs *r)
         standalone_eoi();                   /* PIT IRQ0 through the 8259: acknowledge before any context switch */
 #endif
         sched_tick();
+        if (r->cs & 3) {                    /* IPC hook: a thread preempted in ring 3 of a killed process exits here, so */
+            extern void check_kill(void);   /* TerminateProcess also stops threads that never enter the kernel */
+            check_kill();
+        }
         return;
     case VEC_DOORBELL: {
         extern void ipc64_doorbell_irq(void);

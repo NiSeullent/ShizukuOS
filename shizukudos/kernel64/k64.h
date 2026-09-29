@@ -125,6 +125,7 @@ struct thread {
     uint64_t tid;                               /* Windows-style thread id (multiple of 4), 0 for kernel threads */
     volatile int alerted, alert_wait;           /* NtAlertThreadByThreadId state */
     void *wait_multi;
+    void *ipc;                                  /* ipc_thread_t: user APC queue, IPC wait state (kernel64/ipc_core.c) */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
@@ -150,6 +151,7 @@ uint64_t sched_switch_count(void);
 void sched_set_current_kstack(uint64_t top);
 void thread_block_current(void);                /* mark BLOCKED and switch away (caller holds irq off) */
 void thread_wake(thread_t *t);
+void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx);   /* every non-free slot, interrupts off */
 #define KSTACK_BYTES 32768u
 
 /* ---- ipc64.c ---- */

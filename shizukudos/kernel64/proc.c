@@ -14,6 +14,13 @@ extern void vm_set_demand_range(uint64_t lo, uint64_t hi);
 #define PEB_BYTES 0x1000
 
 static process_t procs[MAX_PROCS + 1];
+
+/* IPC hooks (kernel64/ipc_core.c; no-ops when it is not linked). */
+void __attribute__((weak)) ipc_reap(void) { }                                     /* recycle exited threads' resources */
+void __attribute__((weak)) ipc_thread_exit(thread_t *t) { (void)t; }               /* cancel its I/O, drop its APCs */
+void __attribute__((weak)) ipc_process_terminating(process_t *p) { (void)p; }      /* wake its blocked threads */
+void __attribute__((weak)) ipc_process_teardown(process_t *p) { (void)p; }         /* IRPs, views, job accounting */
+void __attribute__((weak)) ldr_free_modules(process_t *p) { (void)p; }
 static int next_pid = 1;
 static uint64_t syscalls;
 uint64_t user_syscall_count(void) { return syscalls; }
@@ -35,6 +42,7 @@ process_t *process_create_empty(const char *name)
 {
     process_t *p = 0;
     unsigned i, k;
+    ipc_reap();
     for (i = 1; i <= MAX_PROCS; ++i)
         if (!procs[i].used) { p = &procs[i]; break; }
     if (!p)
@@ -122,6 +130,10 @@ static void user_thread_main(void *arg)
     thread_t *t = thread_current();
     process_t *p = t->proc;
     (void)arg;
+    if (p->terminated) {                        /* created suspended and the process was killed before it ever ran */
+        process_thread_gone(p);
+        thread_exit(p->exit_code);
+    }
     write_cr3(p->pml4);
     tss_set_rsp0(t->stack_base + KSTACK_BYTES);
     g_kstack_top = t->stack_base + KSTACK_BYTES;
@@ -130,7 +142,7 @@ static void user_thread_main(void *arg)
 }
 
 static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2,
-                               uint64_t stack_size, thread_t **out)
+                               uint64_t stack_size, int suspended, thread_t **out)
 {
     uint64_t stack_base = 0;
     thread_t *t;
@@ -147,6 +159,7 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     }
     /* Suspended: the timer tick can preempt this function at any instruction, and a READY thread whose proc, user_rip,
      * teb and user_gs_base are still zero would fault in user_thread_main (NULL proc, RIP 0, GS base 0). */
+    ipc_reap();                                 /* exited threads give their slots and kernel stacks back first */
     t = thread_create_suspended(p->name, user_thread_main, 0);
     if (!t) return -1;
     t->proc = p;
@@ -161,31 +174,64 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     tobj = ob_create(OB_THREAD, 0);
     tobj->u.thr.t = t;
     t->object = tobj;
+    ob_ref(p->object);                          /* the thread keeps its process object (and slot) alive until it is reaped */
     ++p->threads_alive;
     p->next_tid += 4;
     if (!p->main_thread) p->main_thread = t;
     thread_user_tls_init(p, t);
     if (out) *out = t;
-    thread_resume(t);                           /* fully initialised: now it may run */
+    if (!suspended)
+        thread_resume(t);                       /* fully initialised: now it may run (CREATE_SUSPENDED: NtResumeThread) */
     return 0;
 }
 
 int process_start_thread(process_t *p, uint64_t rip, uint64_t rsp, uint64_t arg, thread_t **out)
 {
-    return start_thread_common(p, rip, rsp, arg, 0, USER_STACK_BYTES, out);
+    return start_thread_common(p, rip, rsp, arg, 0, USER_STACK_BYTES, 0, out);
+}
+
+int process_start_thread3(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, int suspended,
+                          thread_t **out)
+{
+    if (stack_size < 65536) stack_size = 65536;
+    if (stack_size > (64ull << 20)) stack_size = 64ull << 20;
+    return start_thread_common(p, rip, 0, rcx, rdx, (stack_size + 4095) & ~4095ull, suspended, out);
 }
 
 int process_start_thread2(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, thread_t **out)
 {
-    if (stack_size < 65536) stack_size = 65536;
-    if (stack_size > (64ull << 20)) stack_size = 64ull << 20;
-    return start_thread_common(p, rip, 0, rcx, rdx, (stack_size + 4095) & ~4095ull, out);
+    return process_start_thread3(p, rip, rcx, rdx, stack_size, 0, out);
+}
+
+/* Releases everything a dead process owns except the process object itself (which lives on while handles or threads
+ * reference it, as on NT): pending I/O and mapped views (IPC hook), the handle table, the address space and the loader's
+ * module list. Runs in the context of the process's last exiting thread, or from proc_wait(). Idempotent. */
+void process_teardown(process_t *p)
+{
+    uint64_t f = irq_save(), old;
+    if (p->teardown) { irq_restore(f); return; }
+    p->teardown = 1;
+    irq_restore(f);
+    ipc_process_teardown(p);
+    handles_close_all(p);
+    f = irq_save();
+    old = p->pml4;
+    p->pml4 = kernel_pml4();                    /* the scheduler never switches to the freed tables again */
+    if (read_cr3() == old) write_cr3(kernel_pml4());
+    irq_restore(f);
+    vm_free_space(old);
+    ldr_free_modules(p);
+    p->teardown = 2;
+    if (p->parent_pid)
+        ob_deref(p->object);                    /* created by a user process: drop the creation reference (proc_wait does it
+                                                   for processes the kernel itself started) */
 }
 
 /* Called when a process's last thread has exited. */
 static void process_reap_signal(process_t *p)
 {
     p->terminated = 1;
+    process_teardown(p);                        /* handles are closed before waiters see the process signaled */
     p->object->signaled = 1;
     {
         uint64_t f = irq_save();
@@ -197,6 +243,7 @@ static void process_reap_signal(process_t *p)
 
 void process_thread_gone(process_t *p)
 {
+    ipc_thread_exit(thread_current());
     if (--p->threads_alive <= 0)
         process_reap_signal(p);
 }
@@ -206,7 +253,8 @@ void process_terminate(process_t *p, int64_t code, int faulted)
     p->exit_code = code;
     if (faulted) p->faulted = 1;
     p->terminated = 1;
-    /* Other threads are killed at their next kernel entry/exit (see check_kill). */
+    /* Other threads are killed at their next kernel entry/exit (see check_kill); blocked ones are woken for it. */
+    ipc_process_terminating(p);
 }
 
 void check_kill(void)
@@ -245,19 +293,15 @@ int proc_wait(int pid, int64_t *exit_code, int *faulted)
 {
     process_t *p = process_by_pid(pid);
     if (!p) return -1;
-    while (!p->terminated || p->threads_alive > 0) {
+    while (!p->terminated || p->threads_alive > 0 || p->teardown != 2) {   /* the last thread tears the process down */
         thread_sleep_ms(1);
     }
     thread_sleep_ms(2);                                 /* let the last thread finish thread_exit */
     if (exit_code) *exit_code = p->exit_code;
     if (faulted) *faulted = p->faulted;
-    handles_close_all(p);
-    write_cr3(kernel_pml4());
-    vm_free_space(p->pml4);
-    vad_destroy(p);
-    kfree(p->handles);
-    ob_deref(p->object);
-    p->used = 0;
+    process_teardown(p);                                /* normally already done by the last thread */
+    ob_deref(p->object);                                /* creation reference: the slot is recycled (ipc_object_free) once
+                                                           no handle or thread references the process any more */
     return 0;
 }
 

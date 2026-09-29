@@ -43,6 +43,10 @@ void ob_ref(kobject_t *o) { const uint64_t f = irq_save(); ++o->refs; irq_restor
 /* Registry key objects: drop the key node's reference (registry.c). May block on the registry lock, so it runs after the
  * interrupt-off section below and ob_deref() must not be called with irqs disabled or with the registry lock held. */
 extern void reg_key_object_free(kobject_t *o);
+/* IPC hooks (kernel64/ipc_core.c; no-ops when it is not linked): the last reference of an object is gone / one handle of
+ * an object was closed (ipc_handle_closed runs for every type, before the handle's reference is dropped). */
+void __attribute__((weak)) ipc_object_free(kobject_t *o) { (void)o; }
+void __attribute__((weak)) ipc_handle_closed(process_t *p, kobject_t *o) { (void)p; (void)o; }
 
 void ob_deref(kobject_t *o)
 {
@@ -63,6 +67,7 @@ void ob_deref(kobject_t *o)
     irq_restore(f);
     if (last) {
         if (o->type == OB_KEY) reg_key_object_free(o);
+        else ipc_object_free(o);                    /* IPC hook: sections, pipes, ports, jobs, thread/process slots */
         kfree(o);
     }
 }
@@ -141,6 +146,7 @@ int32_t handle_close(process_t *p, uint64_t handle)
         extern void net_socket_handle_closing(kobject_t *o);   /* net_sock.c: tears the socket down with its last handle */
         net_socket_handle_closing(o);
     }
+    ipc_handle_closed(p, o);
     ob_deref(o);
     return STATUS_SUCCESS;
 }
@@ -160,7 +166,7 @@ static int obj_signaled(kobject_t *o, thread_t *t)
     case OB_EVENT: case OB_THREAD: case OB_PROCESS: case OB_TIMER: return o->signaled;
     case OB_SEMAPHORE: return o->u.sem.count > 0;
     case OB_MUTANT: return o->u.mutant.owner == 0 || o->u.mutant.owner == t;
-    default: return 0;
+    default: return OB_IS_IPC(o->type) ? o->signaled : 0;     /* pipe ends: set when an I/O on them completes */
     }
 }
 

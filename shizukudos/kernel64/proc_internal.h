@@ -28,6 +28,12 @@ enum { OB_NONE = 0, OB_EVENT = 1, OB_MUTANT = 2, OB_SEMAPHORE = 3, OB_THREAD = 4
        OB_TIMER = 7, OB_DIRECTORY = 8 };
 enum { OB_KEY = 0x10 };                 /* registry key (registry.c); a separate enum so other subsystems can add their own types */
 #define OB_SOCKET 0x40                  /* socket handle (u.net.sock); closed through net_socket_handle_closing() */
+/* IPC object types (kernel64/ipc_*.c, npfs.c). OB_NPIPE objects use u.file (file = pipe end, io = I/O context). */
+#define OB_SECTION 0x60
+#define OB_NPIPE 0x61
+#define OB_IOCP 0x62
+#define OB_JOB 0x63
+#define OB_IS_IPC(t) ((t) >= 0x60 && (t) < 0x70)
 struct waitblock;
 struct kobject {
     uint32_t type, refs;
@@ -42,7 +48,7 @@ struct kobject {
         struct { thread_t *t; } thr;
         struct { void *sock; } net;         /* OB_SOCKET: sock_t * (net_sock.c) */
         struct { process_t *p; } proc;
-        struct { void *file; uint32_t access; } file;
+        struct { void *file; uint32_t access; void *io; } file;   /* io: completion port / notification modes (ipc_io.c) */
         struct { uint64_t due_tick, period_ms; int manual; int armed; } timer;
         struct { void *node; } key;             /* registry key node (registry.c); the node's refs count these objects */
     } u;
@@ -95,6 +101,9 @@ struct process {
     uint64_t ntdll_process_start, ntdll_thread_start, ntdll_exception_dispatcher;
     uint64_t ldr_va;                    /* PEB_LDR_DATA */
     uint64_t params_va;                 /* RTL_USER_PROCESS_PARAMETERS */
+    /* IPC / process model (kernel64/ipc_core.c) */
+    int teardown;                       /* 0 running, 1 tearing down, 2 address space and handles released */
+    void *ipc;                          /* ipc_proc_t: mapped views, job membership */
 };
 
 /* vad.c */
@@ -126,7 +135,24 @@ int process_start_thread2(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx
 void proc_alloc_peb(process_t *p);
 void thread_user_tls_init(process_t *p, thread_t *t);
 void process_thread_gone(process_t *p);
+void process_teardown(process_t *p);    /* releases handles, views and the address space of a dead process (idempotent) */
+int process_start_thread3(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, int suspended,
+                          thread_t **out);
 uint64_t proc_alloc_teb(process_t *p, uint64_t stack_base, uint64_t stack_limit);
+
+/* ldr.c: process creation with Win32 CreateProcess parameters (used by kernel64/ipc_proc.c). UTF-16 strings are copied
+ * verbatim into RTL_USER_PROCESS_PARAMETERS; a zero pointer selects the loader's default for that field. */
+typedef struct {
+    const uint16_t *cmdline; uint32_t cmdline_chars;
+    const uint16_t *cwd; uint32_t cwd_chars;
+    const uint16_t *env; uint32_t env_chars;        /* whole block including its terminating empty string */
+    uint64_t std_handles[3]; int use_std_handles;   /* STARTF_USESTDHANDLES values for StandardInput/Output/Error */
+    int suspended;                                  /* CREATE_SUSPENDED: the initial thread waits for NtResumeThread */
+} ldr_create_ex_t;
+int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
+                              const ldr_create_ex_t *ex, process_t **out_proc, thread_t **out_thread);
+uint64_t ldr_ntdll_export(process_t *p, const char *sym);
+void ldr_free_modules(process_t *p);
 
 /* objects.c */
 kobject_t *ob_create(uint32_t type, const char *name);

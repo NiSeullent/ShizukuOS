@@ -33,7 +33,8 @@
 
 /* Reserved ranges for subsystems that live in their own kernel64 files and their own sys_ext_*() handler (sysext.c).
  * Each subsystem defines ONLY its own list below (numbers must stay inside its range):
- *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf */
+ *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf
+ *   IPC / process model 0xb0-0xcf (kernel64/ipc_*.c, npfs.c; 0xa0-0xaf are theirs too) */
 #define SYSCALL_LIST_REGISTRY(X) \
     X(NtCreateKey, 0x50) X(NtOpenKey, 0x51) X(NtOpenKeyEx, 0x52) X(NtQueryValueKey, 0x53) X(NtSetValueKey, 0x54) \
     X(NtDeleteKey, 0x55) X(NtDeleteValueKey, 0x56) X(NtEnumerateKey, 0x57) X(NtEnumerateValueKey, 0x58) \
@@ -49,7 +50,20 @@
 
 #define SYSCALL_LIST_K32(X)
 
-#define SYSCALL_LIST_MISC(X)
+/* IPC and the Windows process model (kernel64/ipc_*.c, npfs.c): sections, named pipes, I/O completion, APCs, jobs. */
+#define SYSCALL_LIST_MISC(X) \
+    X(NtCreateSection, 0xa0) X(NtOpenSection, 0xa1) X(NtMapViewOfSection, 0xa2) X(NtUnmapViewOfSection, 0xa3) \
+    X(NtQuerySection, 0xa4) X(NtFlushVirtualMemory, 0xa5) X(NtCreateNamedPipeFile, 0xa6) X(NtFsControlFile, 0xa7) \
+    X(NtCreateIoCompletion, 0xa8) X(NtSetIoCompletion, 0xa9) X(NtRemoveIoCompletion, 0xaa) \
+    X(NtRemoveIoCompletionEx, 0xab) X(NtQueueApcThread, 0xac) X(NtTestAlert, 0xad) X(NtCancelIoFileEx, 0xae) \
+    X(NtShzCreateUserProcess, 0xaf)
+
+#define SYSCALL_LIST_IPC(X) \
+    X(NtCreateJobObject, 0xb0) X(NtOpenJobObject, 0xb1) X(NtAssignProcessToJobObject, 0xb2) \
+    X(NtSetInformationJobObject, 0xb3) X(NtQueryInformationJobObject, 0xb4) X(NtTerminateJobObject, 0xb5) \
+    X(NtIsProcessInJob, 0xb6) X(NtSetInformationObject, 0xb7) X(NtQueryVolumeInformationFile, 0xb8) \
+    X(NtReadVirtualMemory, 0xb9) X(NtWriteVirtualMemory, 0xba) X(NtShzQueryKernelStats, 0xbb) \
+    X(NtQueryIoCompletion, 0xbc)
 
 enum {
 #define X(name, num) SYS_##name = num,
@@ -59,8 +73,9 @@ enum {
     SYSCALL_LIST_NET(X)
     SYSCALL_LIST_K32(X)
     SYSCALL_LIST_MISC(X)
+    SYSCALL_LIST_IPC(X)
 #undef X
-    SYS_MAX = 0xb0
+    SYS_MAX = 0xd0
 };
 
 /* NTSTATUS values used by the kernel (subset of ntstatus.h; same numeric values). */
