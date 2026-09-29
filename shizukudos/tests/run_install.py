@@ -245,6 +245,10 @@ def main():
         raise SystemExit("INSTALL.IMG was not built with install/tests/install-test.ini (run with --build)")
     shutil.rmtree(OUT, ignore_errors=True)
     OUT.mkdir(parents=True)
+    stubs = (BUILD / "win64" / "nt_stubs.S").read_text()
+    nums = {n: int(v) for n, v in re.findall(r"^(NtShzSetup\w+):\n\s+movq %rcx, %r10\n\s+movl \$(\d+), %eax", stubs, re.M)}
+    check("ntdll stubs: installer syscalls NtShzSetup* are 0xb0-0xb4 (installer range; 0xe0-0xef is the NT driver host's)",
+          sorted(nums.values()) == list(range(0xb0, 0xb5)), {k: hex(v) for k, v in nums.items()})
     target, text = install_boot(args)
     rep = verify_disk.verify(target, INSTALL, want_win98=True)
     for r in rep.rows:

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Kernel64 installer support (SHZSETUP.EXE): block-device enumeration, raw sector I/O and the post-setup power
- * request (syscalls 0xe0-0xef, setup_abi.h), and the `shz.setup=auto` autostart run after the boot self-tests.
+ * request (syscalls 0xb0-0xbf, setup_abi.h), and the `shz.setup=auto` autostart run after the boot self-tests.
  */
 #include "proc_internal.h"
 #include "fs.h"

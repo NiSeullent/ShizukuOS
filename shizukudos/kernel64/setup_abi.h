@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Installer system-call ABI (kernel64/setup_sys.c <-> win64/setup/blkio.c). Numbers: ntsys.h SYSCALL_LIST_SETUP.
+ * Installer system-call ABI (kernel64/setup_sys.c <-> win64/setup/blkio.c). Numbers: ntsys.h SYSCALL_LIST_SETUP,
+ * installer range 0xb0-0xbf (0xe0-0xef belongs to the NT driver host, 0xf0-0xff to the storage track).
  *
- *   NtShzSetupBlkQuery(index, shz_setup_blk_info_t *out, size)   STATUS_NO_MORE_ENTRIES past the last device
- *   NtShzSetupBlkRead(index, lba, count, buffer)                  count sectors (<= SHZ_SETUP_MAX_SECTORS)
- *   NtShzSetupBlkWrite(index, lba, count, buffer)
- *   NtShzSetupBlkFlush(index)
- *   NtShzSetupPower(action)                                       SHZ_SETUP_POWER_*, honoured after SHZSETUP exits
+ *   0xb0 NtShzSetupBlkQuery(index, shz_setup_blk_info_t *out, size)   STATUS_NO_MORE_ENTRIES past the last device
+ *   0xb1 NtShzSetupBlkRead(index, lba, count, buffer)                  count sectors (<= SHZ_SETUP_MAX_SECTORS)
+ *   0xb2 NtShzSetupBlkWrite(index, lba, count, buffer)
+ *   0xb3 NtShzSetupBlkFlush(index)
+ *   0xb4 NtShzSetupPower(action)                                       SHZ_SETUP_POWER_*, honoured after SHZSETUP exits
  *
  * `index` is the position in the kernel's block-device registry (whole devices and partitions, registration order).
  * This is the installer's interim path to raw sectors; the storage track's raw-sector syscalls (0xf0-0xff) replace

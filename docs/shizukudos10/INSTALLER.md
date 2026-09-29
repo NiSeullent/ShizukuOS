@@ -112,7 +112,7 @@ points at half-written partitions.
 | --- | --- | --- |
 | RAM block devices `ram0..3` | `kernel64/blk_ram.c` | QEMU `ivshmem-plain` BAR2 (a host file with `memory-backend-file,share=on`), serial `IVSHMEM-bb:dd.f`; standalone profile only. Interim install target until AHCI/NVMe/eMMC are merged |
 | block API | `kernel64/blk_compat.h` | includes the storage track's `blk.h` when it exists; until then declares the same `blk_dev_t` shape and `blk_register/blk_first/blk_read/blk_write/blk_flush`, implemented by a minimal registry in `blk_ram.c` |
-| syscalls 0xe0–0xe4 | `kernel64/setup_sys.c`, `setup_abi.h`, `ntsys.h` `SYSCALL_LIST_SETUP` | `NtShzSetupBlkQuery/Read/Write/Flush`, `NtShzSetupPower`; 1 MiB per call through a 64 KiB bounce buffer. The storage track's raw-sector syscalls own 0xf0–0xff; `SYS_MAX` is 0x100 |
+| syscalls 0xb0–0xb4 (installer range 0xb0–0xbf) | `kernel64/setup_sys.c`, `setup_abi.h`, `ntsys.h` `SYSCALL_LIST_SETUP` | `NtShzSetupBlkQuery/Read/Write/Flush`, `NtShzSetupPower`; 1 MiB per call through a 64 KiB bounce buffer. Ranges: installer 0xb0–0xbf, gpu 0xd0–0xdf (P-render), NT driver host 0xe0–0xef (N1), storage raw-sector 0xf0–0xff (S1); `SYS_MAX` is 0x100 |
 | `shz.setup=auto` | `setup_autostart()` in `setup_sys.c`, **one call added in `main.c`** after `run_self_tests()` | runs `\SHZ\SETUP\SHZSETUP.EXE /unattend C:\SHZ\SETUP\SHZSETUP.INI`, waits (≤ 60 min), logs `K64 setup: SHZSETUP.EXE exit=… power request …`; `reboot` = keyboard-controller reset (standalone), `shutdown` = kmain ends the domain (standalone: `SHZ-EXIT`, QEMU exits) |
 | kernel command line | `abi/shz_abi.h` 1.1 tail, `kernel64/standalone/boot32.c` | taken **verbatim** from agent C2's boot-manager change (append-only tail: `fb_*` at offset 176, `cmdline_size`, `cmdline[256]` at 216; size 472) so both branches carry the identical edit; the Multiboot stub copies the Multiboot command line |
 
@@ -153,7 +153,8 @@ Reproduced in this session (QEMU 8.2 TCG, no KVM; `build/shizukudos/install/host
 | Second boot, BIOS (SeaBIOS): MBR code finds the legacy-bootable ESP and runs its boot sector (COM1 `SHZ-MBR ->VBR`; VGA text memory shows the ESP boot sector's own message) | GUEST_RUN (TCG) | PASS (2 cells) |
 | Second boot, BIOS: Kernel64 from the installed disk | — | **BLOCKED**: needs agent C3's disk-installable SYSLINUX variant in the ESP boot sector |
 
-VM total: 36 PASS, 0 FAIL, 2 BLOCKED. Not run: any AHCI/NVMe/eMMC target (drivers not merged), real hardware,
+VM total: 37 PASS, 0 FAIL, 2 BLOCKED (including a check that the generated ntdll stubs put `NtShzSetup*` at
+0xb0–0xb4, outside the NT driver host's 0xe0–0xef). Not run: any AHCI/NVMe/eMMC target (drivers not merged), real hardware,
 the Supervisor (VMX) path.
 
 ## 8. Integration points

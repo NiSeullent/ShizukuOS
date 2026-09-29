@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * SHZSETUP: raw block-device access on Kernel64 (plat_t disk callbacks). Today through the installer syscalls
- * (kernel64/setup_abi.h, 0xe0-0xe4); when the storage track's raw-sector syscalls (0xf0-0xff) are merged, only
+ * (kernel64/setup_abi.h, 0xb0-0xb4); when the storage track's raw-sector syscalls (0xf0-0xff) are merged, only
  * blkio.c changes.
  */
 #ifndef SHZ_BLKIO_H
