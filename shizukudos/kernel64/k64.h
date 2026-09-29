@@ -177,4 +177,7 @@ uint64_t user_syscall_count(void);
 uint64_t proc_pml4(process_t *p);
 extern uint64_t g_kstack_top;                   /* read by syscall_entry */
 extern uint64_t g_user_rsp_scratch;
+
+/* ---- setup_sys.c: `shz.setup=auto` on the kernel command line runs \SHZ\SETUP\SHZSETUP.EXE (called by kmain) ---- */
+void setup_autostart(const shz_bootinfo_t *bi);
 #endif

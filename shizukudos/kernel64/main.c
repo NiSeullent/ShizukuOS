@@ -34,6 +34,7 @@ void kmain(uint64_t bootinfo_pa)
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
     sti();
     run_self_tests(&bootinfo);
+    setup_autostart(&bootinfo);
     if (bootinfo.channel_count) {
         ipc64_init(&bootinfo);
         if (ipc64_run_tests())

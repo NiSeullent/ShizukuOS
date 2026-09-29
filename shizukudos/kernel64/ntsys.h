@@ -33,7 +33,8 @@
 
 /* Reserved ranges for subsystems that live in their own kernel64 files and their own sys_ext_*() handler (sysext.c).
  * Each subsystem defines ONLY its own list below (numbers must stay inside its range):
- *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf */
+ *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf
+ *   installer (SHZSETUP) 0xe0-0xef   storage raw-sector interface (S1) 0xf0-0xff */
 #define SYSCALL_LIST_REGISTRY(X) \
     X(NtCreateKey, 0x50) X(NtOpenKey, 0x51) X(NtOpenKeyEx, 0x52) X(NtQueryValueKey, 0x53) X(NtSetValueKey, 0x54) \
     X(NtDeleteKey, 0x55) X(NtDeleteValueKey, 0x56) X(NtEnumerateKey, 0x57) X(NtEnumerateValueKey, 0x58) \
@@ -56,6 +57,12 @@
 
 #define SYSCALL_LIST_MISC(X)
 
+/* Installer (kernel64/setup_sys.c): block-device enumeration and raw sector I/O for SHZSETUP.EXE until the storage
+ * track's raw-sector syscalls (0xf0-0xff) are merged, plus the post-setup power request. See setup_abi.h. */
+#define SYSCALL_LIST_SETUP(X) \
+    X(NtShzSetupBlkQuery, 0xe0) X(NtShzSetupBlkRead, 0xe1) X(NtShzSetupBlkWrite, 0xe2) X(NtShzSetupBlkFlush, 0xe3) \
+    X(NtShzSetupPower, 0xe4)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
@@ -64,8 +71,9 @@ enum {
     SYSCALL_LIST_NET(X)
     SYSCALL_LIST_K32(X)
     SYSCALL_LIST_MISC(X)
+    SYSCALL_LIST_SETUP(X)
 #undef X
-    SYS_MAX = 0xb0
+    SYS_MAX = 0x100
 };
 
 /* NTSTATUS values used by the kernel (subset of ntstatus.h; same numeric values). */
