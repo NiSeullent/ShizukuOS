@@ -58,6 +58,9 @@ static const struct { const char *prefix; const char *dll; } apiset_schema[] = {
     /* registry / security -> advapi32.dll: entries go directly below this line (only for functions really exported) */
     {"api-ms-win-core-registry-l1", "advapi32.dll"},
     {"api-ms-win-core-registry-l2", "advapi32.dll"},
+    {"api-ms-win-security-base-l1", "advapi32.dll"},
+    {"api-ms-win-security-sddl-l1", "advapi32.dll"},
+    {"api-ms-win-eventing-provider-l1", "advapi32.dll"},
 
     /* graphics / window -> user32.dll, gdi32.dll: */
 
