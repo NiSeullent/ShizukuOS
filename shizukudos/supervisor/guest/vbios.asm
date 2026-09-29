@@ -15,8 +15,10 @@
 ; documented interface (Ralf Brown's Interrupt List: INT 1A/AH=02h..05h, INT 1E;
 ; Motorola MC146818A data sheet for the RTC register protocol) and checked against
 ; the behaviour of SeaBIOS src/clock.c:handle_1a02..handle_1a05 and
-; src/floppy.c:diskette_param_table2. No SeaBIOS (LGPL-3.0) code is copied into
-; this GPL-2.0-only file. See docs/shizukudos10/VBIOS_INT_AUDIT.md.
+; src/misc.c:diskette_param_table (F000:EFC7) / src/hw/floppy.c:floppy_setup. No
+; SeaBIOS (LGPL-3.0) code is copied into this GPL-2.0-only file; the behaviour was
+; verified under QEMU by shizukudos/supervisor/test_vbios.py. See
+; docs/shizukudos10/VBIOS_INT_AUDIT.md.
 bits 16
 cpu 386
 org 0
