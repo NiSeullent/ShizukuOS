@@ -235,6 +235,13 @@ jobs:
         timeout-minutes: 15
         run: python3 shizukudos/tests/run_k64_standalone.py --accel tcg --timeout 600
 
+      - name: NT driver host under QEMU TCG (load unmodified .sys, IRP/DPC/timer/PCI + user reachability)
+        timeout-minutes: 15
+        run: python3 shizukudos/tests/run_k64_ntdrv.py --accel tcg --timeout 600
+
+      - name: Measure driver import coverage against the provider export tables
+        run: python3 shizukudos/win64/tools/import_coverage.py build/shizukudos/win64/ntdrv --ntoskrnl build/shizukudos/win64/ntdrv
+
       - name: Host suite (DOS16 reproducibility, upstream pins)
         # Fetches the pinned FreeDOS trees and the Open Watcom snapshot (network).
         timeout-minutes: 20
@@ -247,6 +254,7 @@ jobs:
           name: shizukudos10-tcg-evidence
           path: |
             build/shizukudos/kernel64s/run/
+            build/shizukudos/kernel64s/ntdrv-run/
             build/shizukudos/kernel32s/run/
             build/shizukudos/results/
           if-no-files-found: warn
