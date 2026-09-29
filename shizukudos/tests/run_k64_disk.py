@@ -68,6 +68,83 @@ def make_image(image, size_mib, spc, files, dirs):
         run(["mcopy", "-m", "-i", str(image), str(host), f"::{name}"], env=env, capture=True)
 
 
+def pattern(seed, n):
+    out = bytearray()
+    x = seed & 0xffffffff
+    while len(out) < n:
+        x = (x * 1103515245 + 12345) & 0xffffffff
+        out += x.to_bytes(4, "little")
+    return bytes(out[:n])
+
+
+FIXED_FILETIME = (FIXED_EPOCH + 11644473600) * 10_000_000
+
+
+def disk_checks(serial, ev, manifest):
+    """T_DISK.EXE lines (DISK-DIR/CRC/RANGE/NESTED) against the files packed into the image."""
+    e = lambda s: ev.get(s, 0)  # noqa: E731
+    c = []
+    tests = {rel[len("TESTS/"):]: data for rel, data in manifest.items() if rel.startswith("TESTS/") and "/" not in rel[len("TESTS/"):]}
+    tests["Sub Directory"] = None
+    got_dir = {m.group(1): (int(m.group(2)), int(m.group(3), 16), int(m.group(4), 16))
+               for m in re.finditer(r"^\[win64 T_DISK\.EXE pid \d+\] DISK-DIR (.+?) (\d+) ([0-9a-f]+) ([0-9a-f]{16})$", serial, re.M)}
+    got_crc = {m.group(1): (int(m.group(2)), int(m.group(3), 16))
+               for m in re.finditer(r"^\[win64 T_DISK\.EXE pid \d+\] DISK-CRC (.+?) (\d+) ([0-9a-f]+)$", serial, re.M)}
+    got_range = {m.group(1).rsplit("\\", 1)[-1]: (int(m.group(2)), int(m.group(3)), int(m.group(4), 16))
+                 for m in re.finditer(r"^\[win64 T_DISK\.EXE pid \d+\] DISK-RANGE (.+?) (\d+) (\d+) ([0-9a-f]+)$", serial, re.M)}
+    c.append(base.check("FAT32: D:\\TESTS listing has exactly the packed entries (LFN names, case preserved)",
+                        set(got_dir) == set(tests), f"guest={sorted(got_dir)} host={sorted(tests)}"))
+    bad = []
+    for name, data in tests.items():
+        g = got_dir.get(name)
+        if not g:
+            continue
+        if data is None:
+            if not g[1] & 0x10:
+                bad.append(f"{name}: not a directory ({g[1]:#x})")
+            continue
+        if g[0] != len(data):
+            bad.append(f"{name}: size {g[0]} != {len(data)}")
+        if g[1] & 0x10:
+            bad.append(f"{name}: directory bit set")
+        if g[2] != FIXED_FILETIME:
+            bad.append(f"{name}: mtime {g[2]:#x} != {FIXED_FILETIME:#x}")
+    c.append(base.check("FAT32: sizes, attributes and fixed mtimes match", not bad, "; ".join(bad)))
+    bad = []
+    for name, data in tests.items():
+        if data is None:
+            continue
+        g = got_crc.get(name)
+        if not g:
+            bad.append(f"{name}: no CRC line")
+        elif g != (len(data), zlib.crc32(data) & 0xffffffff):
+            bad.append(f"{name}: guest {g[0]}/{g[1]:#x} host {len(data)}/{zlib.crc32(data) & 0xffffffff:#x}")
+        r = got_range.get(name)
+        if len(data) > 8192:
+            off = max(len(data) // 2 - 1234, 1)
+            want = zlib.crc32(data[off:off + 3000]) & 0xffffffff
+            if not r or r != (off, min(3000, len(data) - off), want):
+                bad.append(f"{name}: range read {r} != ({off}, 3000, {want:#x})")
+    c.append(base.check("FAT32: every file's CRC-32 read by the guest matches the host, sequential and random-offset",
+                        not bad, "; ".join(bad) or f"{len(got_crc)} files, {sum(len(d) for d in tests.values() if d)} bytes"))
+    nested = manifest["TESTS/Sub Directory/nested file.txt"]
+    m = re.search(r"DISK-NESTED (\d+) ([0-9a-f]+)", serial)
+    c.append(base.check("FAT32: nested LFN path D:\\TESTS\\Sub Directory\\nested file.txt read back",
+                        bool(m) and (int(m.group(1)), int(m.group(2), 16)) == (len(nested), zlib.crc32(nested) & 0xffffffff),
+                        m.group(0) if m else "no DISK-NESTED line"))
+    xor = 0
+    for data in tests.values():
+        if data is not None:
+            xor ^= zlib.crc32(data) & 0xffffffff
+    c.append(base.check("FAT32: evidence slot 18 = (files hashed << 32 | xor of CRCs)",
+                        e(18) == (sum(1 for d in tests.values() if d is not None) << 32) | xor, f"{e(18):#x}"))
+    c.append(base.check("T_DISK.EXE did not SKIP (D: was mounted)", "SKIP: no D: volume" not in serial and "t_disk:" in serial))
+    m = re.search(r"K64 disk: D: = (\S+), FAT32 \"(\w*)\" id ([0-9a-f]+), (\d+) clusters of (\d+) bytes", serial)
+    c.append(base.check("Kernel64 mounted the FAT32 volume as D: (label SHZDISK, 4 KiB clusters)",
+                        bool(m) and m.group(2) == "SHZDISK" and m.group(5) == "4096", m.group(0) if m else "no mount line"))
+    return c
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--qemu", default=qemu.DEFAULT_QEMU)
@@ -91,15 +168,29 @@ def main():
     serial_path.unlink(missing_ok=True)
 
     # ---- disk content -------------------------------------------------------------------------------------------
-    files, dirs = [], ["TESTS"]
-    small = out / "small.txt"
-    small.write_bytes(b"hello from the FAT32 volume\r\n")
-    files.append((small, "TESTS/hello.txt"))
+    src = out / "src"
+    src.mkdir(exist_ok=True)
+    files, dirs, manifest = [], ["TESTS", "TESTS/Sub Directory"], {}
+
+    def add(rel, data):
+        host = src / rel.replace("/", "__").replace(" ", "_")
+        host.write_bytes(data)
+        files.append((host, rel))
+        manifest[rel] = data
+
+    add("TESTS/hello.txt", b"hello from the FAT32 volume\r\n")
+    add("TESTS/empty.txt", b"")
+    add("TESTS/pattern_1m.bin", pattern(11, (1 << 20) + 17))
+    add("TESTS/A Long Mixed-Case File Name.dat", pattern(12, 4096 * 3 + 5))
+    add("TESTS/big_4m.bin", pattern(13, (4 << 20) + 13))
+    add("TESTS/Sub Directory/nested file.txt", b"nested content on D:\r\n")
     image = out / "disk.img"
     make_image(image, 256, 8, files, dirs)
     sector0 = image.read_bytes()[:512]
     expect_sectors = image.stat().st_size // 512
     expect_crc0 = zlib.crc32(sector0) & 0xffffffff
+    listing = run(["mdir", "-i", str(image), "::TESTS"], env=mtools_env(), capture=True).stdout
+    (out / "mdir.txt").write_text(listing)
 
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}", "-serial", f"file:{serial_path}",
@@ -123,6 +214,7 @@ def main():
     checks.append(base.check("AHCI: guest read sector 0 (crc32 and sector count match the host image)",
                              e(13) == (expect_sectors << 32) | expect_crc0,
                              f"guest={e(13):#x} host=({expect_sectors} << 32 | {expect_crc0:#x})"))
+    checks += disk_checks(serial, ev, manifest)
     if timed_out:
         checks.insert(0, base.check("run finished before the timeout", False, f"{args.timeout}s, accel={accel}"))
     status = "PASS" if all(x["status"] == "PASS" for x in checks) else "FAIL"
