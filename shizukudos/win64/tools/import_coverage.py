@@ -4,7 +4,7 @@
 
 Static import audit: every PE32+ under the given paths is parsed for its import and delay-import tables; each imported
 (DLL, function) is checked against the export tables of the ntdll.dll / kernel32.dll this repository builds
-(shizukudos/win64/build.py), using the same api-ms-* schema the Kernel64 loader uses (kernel64/ldr.c apiset_schema).
+(shizukudos/win64/build.py) and of every extra module built from win64/dlls/, using the same api-ms-* schema the Kernel64 loader uses (kernel64/ldr.c apiset_schema).
 Imports of DLLs shipped with the application itself are internal and skipped. Everything else is a system DLL
 that must exist for the image to load at all: those without a Shizuku implementation are listed as load blockers.
 
@@ -24,7 +24,6 @@ except ImportError:
     raise SystemExit("pip install pefile")
 
 REPO = Path(__file__).resolve().parents[3]
-OURS = {"ntdll.dll", "kernel32.dll"}
 
 
 def schema():
@@ -76,7 +75,8 @@ def main():
     args = ap.parse_args()
 
     api_schema = schema()
-    ours = {d: exports(args.build / d) for d in OURS}
+    ours = {p.name.lower(): exports(p) for p in sorted(args.build.glob("*.dll"))}     # ntdll, kernel32 and every extra module
+    OURS = set(ours)
     files = sorted(p for p in ([args.app] if args.app.is_file() else args.app.rglob("*")) if p.suffix.lower() in (".exe", ".dll"))
     local = {p.name.lower() for p in files}
     per_dll = collections.defaultdict(lambda: collections.defaultdict(set))       # dll -> fn -> importing files
@@ -107,8 +107,8 @@ def main():
         total += len(fns)
         hit += ok
     print(f"{scanned} PE32+ images scanned under {args.app}")
-    print(f"{total} distinct imported functions from {len(per_dll)} system DLLs; {hit} resolve against Shizuku "
-          f"ntdll/kernel32 ({100.0 * hit / max(total, 1):.1f}%)\n")
+    print(f"{total} distinct imported functions from {len(per_dll)} system DLLs; {hit} resolve against "
+          f"the built Shizuku DLLs ({100.0 * hit / max(total, 1):.1f}%)\n")
     print(f"{'system DLL':40} {'imported':>8} {'provided':>9}")
     for dll, n, ok in rows[:args.top]:
         mark = "" if dll in OURS else "  <- no implementation"
@@ -116,7 +116,7 @@ def main():
     print(f"\nload blockers (DLLs imported at load time with no Shizuku implementation): {len(blockers)}")
     for dll, users in sorted(blockers.items(), key=lambda kv: -len(per_dll[kv[0]]))[:args.top]:
         print(f"  {dll:38} {len(per_dll[dll]):5} functions, needed by {len(users)} image(s)")
-    for dll in sorted(OURS):
+    for dll in sorted(d for d in OURS if d in per_dll):
         missing = sorted(((len(users), fn) for fn, users in per_dll.get(dll, {}).items() if fn not in ours[dll]), reverse=True)
         print(f"\nmissing from Shizuku {dll}: {len(missing)} of {len(per_dll.get(dll, {}))} imported; most widely imported:")
         print("  " + ", ".join(fn for _, fn in missing[:args.top]))
@@ -125,7 +125,7 @@ def main():
             "images": scanned, "distinct_imports": total, "resolved": hit,
             "system_dlls": {d: {"imported": n, "provided": ok} for d, n, ok in rows},
             "load_blockers": {d: sorted(u) for d, u in blockers.items()},
-            "missing": {dll: sorted(fn for fn in per_dll.get(dll, {}) if fn not in ours[dll]) for dll in OURS}}, indent=1))
+            "missing": {dll: sorted(fn for fn in per_dll.get(dll, {}) if fn not in ours[dll]) for dll in sorted(OURS) if dll in per_dll}}, indent=1))
 
 
 if __name__ == "__main__":
