@@ -19,14 +19,16 @@ docs/shizukudos10/MEDIA.md):
                   0.1        memdisk floppy, the ShizukuDOS 0.1 floppy image
                   Install    only when SHZSETUP (\\SHZ\\SETUP) is present: Kernel64
                              with `shz.setup=auto` on the Multiboot command line
-  UEFI         \\EFI\\BOOT\\BOOTX64.EFI = the Shizuku loader (Supervisor with Intel
-               VMX). Its boot manager (\\EFI\\SHIZUKU\\BOOT.INI, mode = auto |
-               supervisor | csm | kernel64) chains \\EFI\\SHIZUKU\\CSMWRAP.EFI when
-               VMX is unusable; CSMWrap (LGPL-2.1, SeaBIOS CSM LGPL-3.0) legacy-boots
-               the SAME medium, i.e. the menu above.
-               Interim, while the loader has no boot manager: it refuses without
-               VMX and returns to the firmware; the UEFI Shell then runs
-               \\STARTUP.NSH, which starts \\EFI\\SHIZUKU\\CSMWRAP.EFI.
+  UEFI         \\EFI\\BOOT\\BOOTX64.EFI = the Shizuku loader and boot manager
+               (supervisor/loader). \\EFI\\SHIZUKU\\BOOT.INI: mode = auto, menu_timeout = 5.
+               Its menu (console and COM1) waits 5 s for a key:
+                  A/Enter or no key  auto: Supervisor with Intel VMX, otherwise CSM
+                  K                  Kernel64 direct: \\SHZDOS\\KERNEL64S.BIN + WIN64.IMG in
+                                     Long Mode, no Supervisor, no VMX, GOP framebuffer
+                  C                  CSM: \\EFI\\SHIZUKU\\CSMWRAP.EFI (LGPL-2.1, SeaBIOS CSM
+                                     LGPL-3.0) legacy-boots the SAME medium, i.e. the menu above
+                  S                  Supervisor only
+               No UEFI Shell and no startup.nsh is involved.
 """
 from __future__ import annotations
 
@@ -66,8 +68,10 @@ SHZDOS_FILES = {  # \SHZDOS files the loader reads from its own volume (supervis
     "DISK.IMG": SHZ_BUILD / "dos16" / "shizukudos-dos16-hd32.img",
     "KERNEL32.BIN": SHZ_BUILD / "kernel32" / "KERNEL32.BIN",
     "KERNEL64.BIN": SHZ_BUILD / "kernel64" / "KERNEL64.BIN",
+    "KERNEL64S.BIN": SHZ_BUILD / "kernel64s" / "KERNEL64S.BIN",   # boot manager: Kernel64 direct (menu key K)
     "WIN64.IMG": SHZ_BUILD / "win64" / "WIN64.IMG",
 }
+MENU_TIMEOUT = 5                  # BOOT.INI menu_timeout: seconds the UEFI boot manager menu waits for a key
 BOOT_MODES = ("auto", "supervisor", "csm", "kernel64")
 
 
@@ -81,7 +85,6 @@ class Input:
     name: str
     path: Path
     origin: str
-    interim: bool = False
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -91,7 +94,7 @@ class Input:
     def record(self) -> dict:
         data = self.data
         return {"name": self.name, "path": rel(self.path), "bytes": len(data), "sha256": sha256(data),
-                "origin": self.origin, "interim": self.interim, "notes": self.notes}
+                "origin": self.origin, "notes": self.notes}
 
 
 def rel(path: Path) -> str:
@@ -107,27 +110,29 @@ def require(path: Path, how: str) -> Path:
     return Path(path)
 
 
-def loader_has_boot_manager(data: bytes) -> bool:
-    """Does the loader binary carry the boot manager (it names \\EFI\\SHIZUKU\\BOOT.INI, UTF-16 or ASCII)?"""
+def loader_features(data: bytes) -> dict[str, bool]:
+    """What the loader binary carries: the boot manager (it opens \\EFI\\SHIZUKU\\BOOT.INI, a UTF-16 path), its
+    menu (BOOT.INI menu_timeout) and the firmware-hole plan for Kernel64 direct (kernel64/standalone/memholes.h)."""
     low = data.lower()
-    needle = "shizuku\\boot.ini"
-    return needle.encode("utf-16-le") in low or needle.encode("ascii") in low
+    return {"boot_manager": "\\efi\\shizuku\\boot.ini".encode("utf-16-le") in low,
+            "menu": b"Shizuku boot manager menu" in data,
+            "memholes": b"firmware hole(s) handed over at 0x6000" in data}
 
 
 def loader_input(path: Path | None = None) -> Input:
     path = Path(path) if path else DEFAULT_LOADER
-    require(path, "python3 shizukudos/tools/shz.py build --profile uefi-multikernel, or pass --loader")
+    require(path, "python3 shizukudos/supervisor/build.py (or shz.py build --profile uefi-multikernel), or pass --loader")
     data = path.read_bytes()
     if data[:2] != b"MZ":
         raise RuntimeError(f"{path} is not a PE image")
-    manager = loader_has_boot_manager(data)
-    note = ("the loader names \\EFI\\SHIZUKU\\BOOT.INI: boot manager present, it chains CSMWRAP.EFI itself"
-            if manager else
-            "INTERIM: this loader has no boot manager. Without Intel VMX it prints REFUSED and returns to the "
-            "firmware; CSMWrap is then reached through \\STARTUP.NSH in the firmware's UEFI Shell")
-    return Input("Shizuku UEFI loader \\EFI\\BOOT\\BOOTX64.EFI", path,
+    features = loader_features(data)
+    missing = [name for name, present in features.items() if not present]
+    if missing:
+        raise RuntimeError(f"{path} lacks {', '.join(missing)}: the media need the UEFI boot manager with its menu and "
+                           "the Kernel64 firmware-hole plan; rebuild it with shizukudos/supervisor/build.py")
+    return Input("Shizuku UEFI loader and boot manager \\EFI\\BOOT\\BOOTX64.EFI", path,
                  "--loader" if path != DEFAULT_LOADER else "shizukudos/supervisor/build.py",
-                 interim=not manager, notes=[note])
+                 notes=["boot manager, menu (BOOT.INI menu_timeout) and Kernel64 firmware-hole plan present"])
 
 
 def csmwrap_input(path: Path | None = None) -> Input:
@@ -255,39 +260,26 @@ def boot_menu(dos16_image: str, shzdos01_image: str, k64_dir: str = "/SHZ/K64", 
 
 # ---------------------------------------------------------------------------- UEFI side
 
-def startup_nsh() -> bytes:
-    """UEFI Shell script: start CSMWrap from whichever file system carries it (interim path)."""
-    return (
-        "@echo -off\r\n"
-        "# Windows 98 Shizuku Second Edition: legacy side through CSMWrap.\r\n"
-        "# The firmware reaches this UEFI Shell script only after \\EFI\\BOOT\\BOOTX64.EFI\r\n"
-        "# returned (no Intel VMX and no boot manager in the loader). It starts\r\n"
-        "# \\EFI\\SHIZUKU\\CSMWRAP.EFI, which legacy-boots this medium (the boot menu).\r\n"
-        "for %i in 0 1 2 3 4 5 6 7 8 9\r\n"
-        "  if exist fs%i:\\EFI\\SHIZUKU\\CSMWRAP.EFI then\r\n"
-        "    fs%i:\r\n"
-        "    echo SHZ-SE: starting fs%i:\\EFI\\SHIZUKU\\CSMWRAP.EFI\r\n"
-        "    \\EFI\\SHIZUKU\\CSMWRAP.EFI\r\n"
-        "  endif\r\n"
-        "endfor\r\n"
-        "echo SHZ-SE: CSMWRAP.EFI did not start a legacy boot\r\n"
-    ).encode("ascii")
-
-
 def csmwrap_ini() -> bytes:
     """CSMWrap's own settings next to the binary: debug log on COM1 (same keys as the DOS16 dual image)."""
     return b"; CSMWrap debug log on COM1\r\nserial=true\r\nserial_port=0x3f8\r\nserial_baud=115200\r\n"
 
 
-def boot_ini(mode: str) -> bytes:
+def boot_ini(mode: str, menu_timeout: int = MENU_TIMEOUT) -> bytes:
     """\\EFI\\SHIZUKU\\BOOT.INI in the boot manager's strict grammar (supervisor/loader/bootini.h)."""
     if mode not in BOOT_MODES:
         raise ValueError(f"boot mode {mode!r} not in {BOOT_MODES}")
+    if not 0 <= menu_timeout <= 30:
+        raise ValueError("menu_timeout must be 0..30 seconds")
     return (
-        "; Shizuku UEFI boot manager policy, read by \\EFI\\BOOT\\BOOTX64.EFI once it has\r\n"
-        "; the boot manager. auto: Supervisor with Intel VMX, else CSMWrap (legacy menu).\r\n"
+        "; Shizuku UEFI boot manager policy (\\EFI\\BOOT\\BOOTX64.EFI).\r\n"
+        "; auto: the Supervisor with Intel VMX, otherwise CSMWrap -> this medium's legacy menu.\r\n"
+        "; The menu waits menu_timeout seconds: A/Enter = mode below, K = Kernel64 direct,\r\n"
+        "; C = CSM legacy BIOS, S = Supervisor. menu_timeout = 0 turns the menu off.\r\n"
         f"mode = {mode}\r\n"
         "csm_path = \\EFI\\SHIZUKU\\CSMWRAP.EFI\r\n"
+        "auto_kernel64 = no\r\n"
+        f"menu_timeout = {menu_timeout}\r\n"
     ).encode("ascii")
 
 
@@ -295,24 +287,23 @@ def efi_readme(loader: Input, csm: Input, mode: str) -> bytes:
     return (
         "\\EFI - UEFI side of the Windows 98 Shizuku Second Edition media\r\n"
         "\r\n"
-        "\\EFI\\BOOT\\BOOTX64.EFI     Shizuku UEFI loader (project code, GPL-2.0-only).\r\n"
-        "  With Intel VMX (EPT, unrestricted guest) it starts the Supervisor.\r\n"
-        "  Its boot manager reads \\EFI\\SHIZUKU\\BOOT.INI and, without VMX, starts\r\n"
-        "  CSMWRAP.EFI. " + ("This loader has the boot manager.\r\n" if not loader.interim else
-                             "INTERIM: this build's loader has NO boot manager yet; without\r\n"
-                             "  VMX it prints REFUSED and returns to the firmware. \\STARTUP.NSH\r\n"
-                             "  then starts CSMWRAP.EFI when the firmware has a UEFI Shell.\r\n") +
+        "\\EFI\\BOOT\\BOOTX64.EFI     Shizuku UEFI loader and boot manager (project code,\r\n"
+        "  GPL-2.0-only). It reads \\EFI\\SHIZUKU\\BOOT.INI and shows a menu on the\r\n"
+        "  console and COM1: A/Enter or no key = BOOT.INI mode (auto: the Supervisor\r\n"
+        "  with Intel VMX, otherwise CSMWRAP.EFI); K = Kernel64 direct (\\SHZDOS\\\r\n"
+        "  KERNEL64S.BIN + WIN64.IMG, Long Mode, no VMX, GOP framebuffer; firmware\r\n"
+        "  holes such as OVMF's S3 ACPI NVS at 8 MiB are kept out of its memory);\r\n"
+        "  C = CSMWRAP.EFI; S = Supervisor only.\r\n" +
         "\\EFI\\SHIZUKU\\CSMWRAP.EFI  CSMWrap (LGPL-2.1) with the SeaBIOS CSM (LGPL-3.0):\r\n"
         "  PC BIOS services on UEFI-only machines; it then legacy-boots THIS\r\n"
         "  medium (El Torito default entry on a CD, the MBR on a disk), i.e. the\r\n"
-        "  same boot menu a legacy BIOS shows. By hand, from a UEFI Shell:\r\n"
-        "    FS0:\\EFI\\SHIZUKU\\CSMWRAP.EFI\r\n"
+        "  same boot menu a legacy BIOS shows.\r\n"
         "  Needs Secure Boot OFF (nothing here is signed) and 2 or more logical\r\n"
         "  CPUs (it keeps one for itself). Source and licences: \\ShizukuDOS10\\ on\r\n"
         "  the ISO.\r\n"
         "\\EFI\\SHIZUKU\\CSMWRAP.INI  CSMWrap settings: debug log on COM1.\r\n"
-        f"\\EFI\\SHIZUKU\\BOOT.INI     boot manager policy, mode = {mode}\r\n"
-        "  (auto | supervisor | csm | kernel64).\r\n"
+        f"\\EFI\\SHIZUKU\\BOOT.INI     boot manager policy, mode = {mode}, menu_timeout = {MENU_TIMEOUT}\r\n"
+        "  (modes: auto | supervisor | csm | kernel64).\r\n"
         "\\SHZDOS\\                   files the loader reads from its own volume.\r\n"
         f"BOOTX64.EFI sha256 {sha256(loader.data)}\r\n"
         f"CSMWRAP.EFI sha256 {sha256(csm.data)}\r\n"
@@ -327,7 +318,6 @@ def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str) 
         "EFI/SHIZUKU/CSMWRAP.INI": csmwrap_ini(),
         "EFI/SHIZUKU/BOOT.INI": boot_ini(mode),
         "EFI/SHIZUKU/README.TXT": efi_readme(loader, csm, mode),
-        "STARTUP.NSH": startup_nsh(),
     }
     for name, item in shzdos.items():
         members[f"SHZDOS/{name}"] = item.data
@@ -451,34 +441,30 @@ def syslinux_payload(prefix: str) -> dict[str, bytes]:
     return payload
 
 
-def vm_profiles_text(loader_interim: bool) -> str:
-    status = ("INTERIM loader (no boot manager yet): on UEFI it refuses without VMX and\r\n"
-              "  returns; the firmware's UEFI Shell then runs \\STARTUP.NSH -> CSMWrap. A\r\n"
-              "  firmware without a UEFI Shell stops at its boot menu instead: start\r\n"
-              "  \\EFI\\SHIZUKU\\CSMWRAP.EFI from a boot entry, or boot the VM as legacy BIOS.\r\n"
-              if loader_interim else
-              "The loader's boot manager starts CSMWrap itself when VMX is unusable.\r\n")
+def vm_profiles_text() -> str:
     return (
         "VM PROFILES - Windows 98 Shizuku Second Edition VM install ISO\r\n"
         "==============================================================\r\n"
         "Tested only in QEMU (TCG, no KVM) by tools/test_shizuku_se_boot_matrix.py:\r\n"
-        "SeaBIOS and OVMF, this ISO as a CD and as a hard disk, and the raw disk\r\n"
-        "image. VirtualBox, VMware and Hyper-V were NOT run; their lines below are\r\n"
-        "settings derived from how the medium works, not test results.\r\n"
+        "SeaBIOS and OVMF (S3 on, QEMU's default), this ISO as a CD and as a hard\r\n"
+        "disk, and the raw disk image. VirtualBox, VMware and Hyper-V were NOT run;\r\n"
+        "their lines below are settings derived from how the medium works, not\r\n"
+        "test results.\r\n"
         "\r\n"
         "All VMs\r\n"
-        "  RAM      512 MiB recommended (256 MiB minimum: Kernel64 uses up to 256\r\n"
-        "           MiB, memdisk keeps the 32 MiB DOS16 image in RAM).\r\n"
-        "  CPU      x86-64. 2 or more vCPUs for the UEFI path: CSMWrap keeps one\r\n"
+        "  RAM      512 MiB (what every test used). Kernel64 needs 64 MiB or more;\r\n"
+        "           memdisk keeps the 32 MiB DOS16 image in RAM.\r\n"
+        "  CPU      x86-64. 2 or more vCPUs for the UEFI CSM path: CSMWrap keeps one\r\n"
         "           logical CPU for itself and refuses to run with one.\r\n"
-        "  Serial   COM1 115200 8N1 mirrors the boot menu and carries every test\r\n"
-        "           result (SHZ-EXIT:0 = success).\r\n"
+        "  Serial   COM1 115200 8N1 mirrors both boot menus, takes their keys and\r\n"
+        "           carries every test result (SHZ-EXIT:0 = success).\r\n"
         "  Legacy BIOS  attach the ISO as a CD (or the raw disk / the ISO file as a\r\n"
         "           disk): the menu offers Kernel64, DOS16 and ShizukuDOS 0.1.\r\n"
-        "  UEFI     Secure Boot OFF (nothing is signed). \\EFI\\BOOT\\BOOTX64.EFI runs\r\n"
-        "           the Supervisor with Intel VMX (nested VT-x in a VM); otherwise\r\n"
-        "           CSMWrap gives the same legacy menu.\r\n"
-        f"  {status}"
+        "  UEFI     Secure Boot OFF (nothing is signed). \\EFI\\BOOT\\BOOTX64.EFI is the\r\n"
+        "           boot manager: its menu waits 5 s (\\EFI\\SHIZUKU\\BOOT.INI). No key:\r\n"
+        "           the Supervisor with Intel VMX (nested VT-x in a VM), otherwise\r\n"
+        "           CSMWrap and the same legacy menu. K: Kernel64 direct (Long Mode,\r\n"
+        "           no VMX, no CSM, GOP framebuffer, at most 256 MiB RAM).\r\n"
         "  CSMWrap boot devices: IDE/SATA(AHCI), NVMe, USB, LSI/MPT/PVSCSI/MegaRAID\r\n"
         "           SCSI. Not virtio-blk/virtio-scsi, not Hyper-V VMBus storage.\r\n"
         "\r\n"
@@ -486,7 +472,7 @@ def vm_profiles_text(loader_interim: bool) -> str:
         "  BIOS  qemu-system-x86_64 -machine q35 -m 512 -smp 2 -cdrom THIS.iso\r\n"
         "  UEFI  add -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd\r\n"
         "        -drive if=pflash,format=raw,file=<copy of OVMF_VARS.fd>\r\n"
-        "        (a non-Secure-Boot OVMF build that includes the UEFI Shell)\r\n"
+        "        (a non-Secure-Boot OVMF build)\r\n"
         "  Disk  -drive file=THIS.iso,format=raw,if=none,id=d0 -device ide-hd,drive=d0\r\n"
         "VirtualBox (not tested)\r\n"
         "  BIOS: DVD on IDE or SATA. EFI: 'Enable EFI', 2+ CPUs, SATA/IDE/NVMe,\r\n"
@@ -497,7 +483,8 @@ def vm_profiles_text(loader_interim: bool) -> str:
         "Hyper-V (not tested)\r\n"
         "  Generation 1 (BIOS, IDE DVD): legacy menu. Generation 2 (UEFI only):\r\n"
         "  Secure Boot off; its storage is VMBus, which SeaBIOS inside CSMWrap\r\n"
-        "  cannot drive, so the CSM path is not expected to work. Use Generation 1.\r\n"
+        "  cannot drive, so the CSM entries are not expected to work there; key K\r\n"
+        "  (Kernel64 direct) does not need the CSM. Use Generation 1 for DOS16.\r\n"
     )
 
 

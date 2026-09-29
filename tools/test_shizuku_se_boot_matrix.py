@@ -19,13 +19,20 @@ letter + Enter), and judged only from host-side evidence:
             T_EXE.OUT byte-exact) plus the DOS16 banner in the text page.
   shzdos01  the ShizukuDOS 0.1 prompt "A:\\>" on COM1, then DIR lists
             NTW32.DLL, NTWRAP9X.VXD and NTWGPROB.EXE and the prompt returns.
+  k64direct OVMF only: key K at the UEFI boot manager menu (not the legacy menu).
+            Kernel64 direct boot, no CSM: the same Kernel64 evidence as above
+            through shizukudos/supervisor/test_bootmgr.py's k64_checks (loader
+            RAM == kernel RAM, ABI 1.1 UEFI-direct boot info, GOP handover, the
+            firmware holes the loader handed over == the holes Kernel64 applied,
+            CSMWrap never ran), plus OVMF's S3 ACPI NVS at 8 MiB fenced off.
 
 Each run also checks the boot path from the COM1 log: legacy BIOS runs show the
 isolinux/syslinux banner with no UEFI firmware in the command line; OVMF runs
-show, in order, BDS starting the medium, the Shizuku loader, CSMWrap's boot
-device and the isolinux/syslinux banner. While the loader has no boot manager
-(C2's work not merged), OVMF runs go loader (refuses: no VMX under TCG) ->
-UEFI Shell -> \\STARTUP.NSH -> CSMWrap, and those cells are marked INTERIM.
+show, in order, BDS starting the medium, the Shizuku loader, BOOT.INI read
+(mode=auto, menu_timeout=5), the boot manager menu, then either no key -> auto
+-> CSM legacy boot -> CSMWrap's boot device -> the isolinux/syslinux banner, or
+key K -> Kernel64 direct. The UEFI Shell must never start (no startup.nsh path).
+OVMF runs keep QEMU's default S3 setting (on), so OVMF reserves ACPI NVS at 8 MiB.
 
 Hardware for every run: q35, TCG, -cpu max, 2 vCPUs (CSMWrap keeps one), 512
 MiB, AHCI port 0 (CD read-only; disks with snapshot=on so the images are never
@@ -54,6 +61,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "shizukudos" / "tools"))
 sys.path.insert(0, str(ROOT / "shizukudos" / "tests"))
 sys.path.insert(0, str(ROOT / "shizukudos" / "dos16"))
+sys.path.insert(0, str(ROOT / "shizukudos" / "supervisor"))
 sys.path.insert(0, str(ROOT / "tools"))
 import qemu as qemu_tools  # noqa: E402
 import run_k64_standalone as k64check  # noqa: E402
@@ -67,7 +75,9 @@ OUT = BUILD / "shizuku-se-matrix"
 WIN64_RECEIPT = BUILD / "shizukudos" / "win64" / "build-result.json"
 FIRMWARES = ("seabios", "ovmf")
 MEDIA = ("iso-cd", "iso-hdd", "disk", "iso-usb")  # iso-usb (xHCI mass storage) is optional, not in the default set
-ENTRIES = ("kernel64", "dos16", "shzdos01", "setup")  # setup: only on media built with SHZSETUP
+ENTRIES = ("kernel64", "dos16", "shzdos01", "k64direct", "setup")  # setup: only on media built with SHZSETUP
+UEFI_ONLY = {"k64direct"}
+UEFI_MENU = b"Shizuku boot manager menu: press a key"
 MEDIUM_TEXT = {"iso-cd": "ISO as CD", "iso-hdd": "ISO as hard disk (USB-stick image)", "disk": "raw disk image",
                "iso-usb": "ISO as USB mass storage (xHCI)"}
 MENU_READY = b"Automatic boot in"
@@ -199,11 +209,25 @@ def judge_kernel64(raw: bytes, qemu_rc) -> list[dict]:
                         not missing and not failed and bool(expected),
                         f"{len(apps)} reported" + (f"; missing {missing}" if missing else "")
                         + (f"; failed {failed}" if failed else "")))
-    holes = re.search(r"K64: (\d+) firmware memory hole\(s\), (\d+) page\(s\)", text)
+    holes = re.search(r"K64: (\d+) firmware memory hole\(s\): (\d+) page\(s\) kept out of the page allocator, "
+                      r"(\d+) KiB of the heap fenced off", text)
     stub_holes = len(re.findall(r"SHZ-STUB: firmware hole", text))
-    checks.append(check("memory map: holes reported by the stub == holes applied by Kernel64",
+    checks.append(check("memory map: holes reported by the Multiboot stub == holes applied by Kernel64",
                         (int(holes.group(1)) if holes else 0) == stub_holes,
                         f"stub {stub_holes}, kernel {holes.group(0) if holes else 'none'}"))
+    return checks
+
+
+def judge_k64direct(raw: bytes, qemu_rc) -> list[dict]:
+    """Kernel64 direct boot: C2's k64_checks (shizukudos/supervisor/test_bootmgr.py) on this run's COM1 log."""
+    import test_bootmgr  # noqa: E402  (shizukudos/supervisor; imported only for these cells)
+    text = raw.decode("latin-1").replace("\r", "")
+    apps = expected_win64_apps()
+    checks = [dict(c, check=c["check"].replace("[k64direct] ", "test_bootmgr.k64_checks: "))
+              for c in test_bootmgr.k64_checks("k64direct", text, qemu_rc, {"cmdline": "", "holes": True}, apps)]
+    checks.append(check("OVMF S3 ACPI NVS at 8 MiB is a firmware hole fenced off in Kernel64's heap (not RAM)",
+                        bool(re.search(r"firmware hole 0x0000000000800000 size 0x[0-9a-f]+ \(occupied by "
+                                       r"EfiACPIMemoryNVS[^\n]*: fenced off in Kernel64's heap", text))))
     return checks
 
 
@@ -256,7 +280,7 @@ def stutter(literal: str) -> str:
     return "".join(re.escape(ch) + "+" for ch in literal)
 
 
-def boot_path_checks(firmware: str, medium: str, text: str, command: list[str], loader_interim: bool) -> list[dict]:
+def boot_path_checks(firmware: str, medium: str, entry: str, text: str, command: list[str]) -> list[dict]:
     banner = "SYSLINUX 6.04" if medium == "disk" else "ISOLINUX 6.04"
     if firmware == "seabios":
         return [check("legacy BIOS: QEMU's SeaBIOS (no UEFI flash in the command line)",
@@ -264,19 +288,30 @@ def boot_path_checks(firmware: str, medium: str, text: str, command: list[str], 
                 check(f"legacy BIOS: {banner} started from the medium", banner in text)]
     steps = [("OVMF BDS starts the medium's UEFI boot option",
               r"BdsDxe: starting Boot\w+ \"UEFI (QEMU (DVD-ROM|HARDDISK)|QEMU QEMU USB HARDDRIVE)"),
-             ("\\EFI\\BOOT\\BOOTX64.EFI = the Shizuku loader started", r"Supervisor loader \(UEFI x64\)")]
-    if loader_interim:
-        steps += [("Shizuku loader ran and refused (no VMX under TCG; interim loader without boot manager)",
-                   r"REFUSED: "),
-                  ("UEFI Shell ran \\STARTUP.NSH, which started CSMWRAP.EFI", r"SHZ-SE: starting fs\d+:\\EFI\\SHIZUKU")]
+             ("\\EFI\\BOOT\\BOOTX64.EFI = the Shizuku loader started", r"Supervisor loader \(UEFI x64\)"),
+             ("boot manager read \\EFI\\SHIZUKU\\BOOT.INI: mode=auto, menu_timeout=5",
+              r"Boot manager: \\EFI\\SHIZUKU\\BOOT\.INI mode=auto, csm_path=\\EFI\\SHIZUKU\\CSMWRAP\.EFI, "
+              r"auto_kernel64=no, menu_timeout=5"),
+             ("boot manager menu shown", r"Shizuku boot manager menu: press a key within 5 seconds")]
+    if entry == "k64direct":
+        steps += [("key K typed on COM1 chose Kernel64 direct", r"Boot manager menu: key 'K': mode=kernel64 for this boot"),
+                  ("Kernel64 direct boot started, no CSM", r"Kernel64 direct boot \(mode=kernel64\)"),
+                  ("loader exited boot services and handed over the firmware holes",
+                   r"ExitBootServices done \(0x[0-9a-f]+ call\(s\)\); Kernel64 RAM \[0, 0x[0-9a-f]+\); "
+                   r"0x[0-9a-f]+ firmware hole\(s\) handed over at 0x6000")]
     else:
-        steps += [("Shizuku loader boot manager chose CSMWrap", r"Boot manager: .*mode=")]
-    steps += [("CSMWrap BIOS proxy on a reserved AP", stutter("BIOS proxy ready (AP ") + r"\d+\)+"),
-              ("CSMWrap boot device = the controller of the medium",
-               stutter("bootdev: Boot device: PCI ") + (r"[0-9a-f]{2}:[0-9a-f]{2}\.\d" if medium == "iso-usb"
-                                                        else stutter("00:1f.2"))),
-              (f"SeaBIOS CSM legacy-booted the medium: {banner}", stutter(banner))]
-    out, pos = [check("UEFI: OVMF in pflash", any("pflash" in c for c in command))], 0
+        steps += [("no key: BOOT.INI policy followed", r"Boot manager menu: no key within 5 seconds; BOOT.INI mode=auto\."),
+                  ("no usable virtualization backend under TCG", r"Supervisor profile not available: "),
+                  ("boot manager chose the CSM legacy boot",
+                   r"CSM legacy boot \(mode=auto, no usable virtualization backend\)"),
+                  ("CSMWrap BIOS proxy on a reserved AP", stutter("BIOS proxy ready (AP ") + r"\d+\)+"),
+                  ("CSMWrap boot device = the controller of the medium",
+                   stutter("bootdev: Boot device: PCI ") + (r"[0-9a-f]{2}:[0-9a-f]{2}\.\d" if medium == "iso-usb"
+                                                            else stutter("00:1f.2"))),
+                  (f"SeaBIOS CSM legacy-booted the medium: {banner}", stutter(banner))]
+    out, pos = [check("UEFI: OVMF in pflash", any("pflash" in c for c in command)),
+                check("the UEFI Shell never started (no startup.nsh path)",
+                      "EFI Internal Shell" not in text and "startup.nsh" not in text.lower())], 0
     for name, rx in steps:
         m = re.compile(rx).search(text, pos)
         out.append(check(f"UEFI path (in order): {name}", bool(m), m.group(0)[:100] if m else "missing / out of order"))
@@ -293,7 +328,7 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
     record = {"firmware": firmware, "medium": medium, "entry": entry, "image": str(image), "utc": shzlib.utc_now(),
               "host_load_at_start": host_load()}
     checks: list[dict] = []
-    key = ctx["keys"][entry]
+    key = ctx["keys"].get(entry, "")  # k64direct uses the UEFI menu key K instead
     with tempfile.TemporaryDirectory(prefix="shz-se-mx-") as tmp:
         sock_dir = Path(tmp)
         command = qemu_command(args, firmware, medium, image, run_dir, sock_dir)
@@ -304,9 +339,29 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
         try:
             serial = Serial(sock_dir / "com1.sock")
             qmp = qemu_tools.QMP(sock_dir / "qmp.sock", timeout=30)
-            menu = wait_for(serial, proc, lambda d: MENU_READY in d, args.menu_timeout)
-            record["menu_seconds"] = round(time.time() - started, 1)
-            checks.append(check("boot menu reached (menu.c32 on COM1)", bool(menu), f"{record['menu_seconds']} s"))
+            if entry == "k64direct":
+                menu = wait_for(serial, proc, lambda d: UEFI_MENU in d, args.menu_timeout)
+                record["menu_seconds"] = round(time.time() - started, 1)
+                checks.append(check("UEFI boot manager menu reached (console mirrored on COM1)", bool(menu),
+                                    f"{record['menu_seconds']} s"))
+                if menu:
+                    mark = len(serial.data())
+                    serial.send(b"k")
+                    done = wait_for(serial, proc, lambda d: re.search(rb"(?m)^SHZ-EXIT:([0-9a-f]+)\r?$", d),
+                                    args.timeout, mark)
+                    try:
+                        proc.wait(timeout=30)  # isa-debug-exit ends the VM right after SHZ-EXIT
+                    except subprocess.TimeoutExpired:
+                        pass
+                    record["seconds"] = round(time.time() - started, 1)
+                    checks.append(check("Kernel64 printed SHZ-EXIT", bool(done),
+                                        done.group(0).decode().strip() if done else "none"))
+                    checks += judge_k64direct(serial.data()[mark:], proc.returncode)
+                menu = None                                   # the legacy menu is not used by this entry
+            else:
+                menu = wait_for(serial, proc, lambda d: MENU_READY in d, args.menu_timeout)
+                record["menu_seconds"] = round(time.time() - started, 1)
+                checks.append(check("boot menu reached (menu.c32 on COM1)", bool(menu), f"{record['menu_seconds']} s"))
             if menu:
                 time.sleep(1.0)
                 mark = len(serial.data())
@@ -374,7 +429,7 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
         record["qemu_exit_code"] = proc.returncode
     log = run_dir / "serial.log"
     text = clean(log.read_bytes()) if log.exists() else ""
-    checks = boot_path_checks(firmware, medium, text, record["command"], ctx["loader_interim"]) + checks
+    checks = boot_path_checks(firmware, medium, entry, text, record["command"]) + checks
     record["checks"] = checks
     record["status"] = "PASS" if checks and all(c["status"] == "PASS" for c in checks) else "FAIL"
     (run_dir / "result.json").write_text(json.dumps(record, indent=2) + "\n")
@@ -395,8 +450,6 @@ def media_context(iso: Path, disk: Path) -> dict:
         if data["sha256"] != digest:
             raise SystemExit(f"{path} does not match its receipt {receipt}")
         ctx[name] = {"path": str(path), "sha256": digest, "bytes": path.stat().st_size, "receipt": data}
-    loader = next(i for i in ctx["iso"]["receipt"]["inputs"] if "BOOTX64" in i["name"])
-    ctx["loader_interim"] = loader["interim"]
     ctx["keys"] = ctx["iso"]["receipt"]["menu"]["keys"]
     ctx["loads"] = {}
     for medium, key in (("iso-cd", "iso"), ("iso-hdd", "iso"), ("iso-usb", "iso"), ("disk", "disk")):
@@ -419,7 +472,6 @@ def write_summary(out: Path, runs: list[dict], ctx: dict, args) -> dict:
             mine = [r for r in runs if r["firmware"] == firmware and r["medium"] == medium]
             status = "PASS" if mine and all(r["status"] == "PASS" for r in mine) else "FAIL"
             cells.append({"firmware": firmware, "medium": medium, "status": status,
-                          "interim": firmware == "ovmf" and ctx["loader_interim"],
                           "entries": {r["entry"]: {"status": r["status"], "seconds": r.get("seconds"),
                                                    "failed": [c["check"] for c in r["checks"] if c["status"] != "PASS"]}
                                       for r in mine}})
@@ -427,7 +479,7 @@ def write_summary(out: Path, runs: list[dict], ctx: dict, args) -> dict:
                "ovmf_code_sha256": shzlib.sha256_file(args.ovmf_code), "hardware": {
                    "machine": "q35", "accel": "tcg", "cpu": "max", "smp": args.smp, "memory_mib": args.memory},
                "media": {k: {x: ctx[k][x] for x in ("path", "sha256", "bytes")} for k in ("iso", "disk")},
-               "loader_interim": ctx["loader_interim"], "cells": cells,
+               "s3": "QEMU default (on) for OVMF", "cells": cells,
                "verdict": "PASS" if cells and all(c["status"] == "PASS" for c in cells) else "FAIL"}
     (out / "matrix.json").write_text(json.dumps(summary, indent=2) + "\n")
     columns = [e for e in ENTRIES if any(r["entry"] == e for r in runs)]
@@ -440,8 +492,9 @@ def write_summary(out: Path, runs: list[dict], ctx: dict, args) -> dict:
         row = [c["firmware"], MEDIUM_TEXT[c["medium"]]]
         for e in columns:
             info = c["entries"].get(e)
-            row.append(f"{info['status']} ({info['seconds']} s)" if info else "not run")
-        row.append(c["status"] + (" (interim: shell startup.nsh -> CSMWrap)" if c["interim"] else ""))
+            row.append(f"{info['status']} ({info['seconds']} s)" if info else
+                       ("n/a" if e in UEFI_ONLY and c["firmware"] != "ovmf" else "not run"))
+        row.append(c["status"])
         lines.append("| " + " | ".join(row) + " |")
     (out / "matrix.md").write_text("\n".join(lines) + "\n")
     return summary
@@ -453,8 +506,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--disk", type=Path, default=DEFAULT_DISK)
     ap.add_argument("--firmware", nargs="+", choices=FIRMWARES, default=list(FIRMWARES))
     ap.add_argument("--media", nargs="+", choices=MEDIA, default=list(MEDIA[:3]))
-    ap.add_argument("--entries", nargs="+", choices=ENTRIES, default=list(ENTRIES[:3]),
-                    help="menu entries to boot; 'setup' is added automatically when the medium has it")
+    ap.add_argument("--entries", nargs="+", choices=ENTRIES, default=list(ENTRIES[:4]),
+                    help="menu entries to boot (k64direct only on OVMF); 'setup' is added automatically when the "
+                         "medium has it")
     ap.add_argument("--no-setup", action="store_true", help="do not add the Install entry automatically")
     ap.add_argument("--run-name", default=None, help="evidence directory under build/shizuku-se-matrix")
     ap.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or qemu_tools.DEFAULT_QEMU)
@@ -477,6 +531,8 @@ def main(argv: list[str] | None = None) -> int:
         for medium in args.media:
             for entry in args.entries + (["setup"] if ctx["setup_entry"][medium] and "setup" not in args.entries
                                          and not args.no_setup else []):
+                if entry in UEFI_ONLY and firmware != "ovmf":
+                    continue
                 if entry == "setup" and not ctx["setup_entry"][medium]:
                     print(f"    {firmware}-{medium}-setup: this medium has no Install entry (no SHZSETUP); not run")
                     continue

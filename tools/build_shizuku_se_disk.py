@@ -13,7 +13,7 @@ that want a plain MBR hard disk with a writable FAT32 file system:
                                menu.c32, libcom32.c32, libutil.c32, mboot.c32,
                                memdisk, syslinux.cfg (the same menu as the ISO)
                   \\EFI\\BOOT\\BOOTX64.EFI, \\EFI\\SHIZUKU\\CSMWRAP.EFI (+ .INI,
-                  BOOT.INI), \\STARTUP.NSH, \\SHZDOS\\ (loader inputs; DISK.IMG
+                  BOOT.INI), \\SHZDOS\\ (loader inputs; DISK.IMG
                   is also what the DOS16 entry boots with memdisk)
                   \\SHZ\\K64\\ (Kernel64 Multiboot files), \\SHZ\\SHZDOS01.IMG
                   (ShizukuDOS 0.1 floppy), \\SHZ\\SETUP\\ (when SHZSETUP exists),
@@ -21,7 +21,7 @@ that want a plain MBR hard disk with a writable FAT32 file system:
 
 Legacy BIOS: MBR -> syslinux VBR -> ldlinux.sys -> menu. UEFI: the firmware
 finds \\EFI\\BOOT\\BOOTX64.EFI on the FAT32 partition; without VMX the loader's
-boot manager (or, interim, the UEFI Shell running \\STARTUP.NSH) starts CSMWrap,
+boot manager (menu: no key = auto, K = Kernel64 direct) starts CSMWrap,
 which legacy-boots this disk's MBR -> the same menu.
 
 Inputs are the existing build outputs (run tools/build_shizuku_se_iso.py or
@@ -108,15 +108,16 @@ def disk_members(loader, csm, shzdos, k64, mode: str, floppy: bytes, artifacts: 
         f"{edition}/NTWin32Wrapper9x/NTWPROBE.EXE": artifacts["NTWPROBE.EXE"].read_bytes(),
         f"{edition}/NTWDDMWrapper9x/NTWGPROB.EXE": artifacts["NTWGPROB.EXE"].read_bytes(),
     })
-    members["VMPROFIL.TXT"] = se_media.vm_profiles_text(loader.interim).encode("ascii")
+    members["VMPROFIL.TXT"] = se_media.vm_profiles_text().encode("ascii")
     members["LIMITS.TXT"] = iso_builder.limits_text()
     members["README.TXT"] = (
         "Windows 98 Shizuku Second Edition - raw disk image (secondary artifact)\r\n"
         "The same boot menu as the VM install ISO: Kernel64 (K), DOS16 (D, boots\r\n"
         "\\SHZDOS\\DISK.IMG with memdisk), ShizukuDOS 0.1 (1, \\SHZ\\SHZDOS01.IMG)"
         + (", Install (I)" if setup_files else "") + ".\r\n"
-        "Legacy BIOS: MBR -> syslinux. UEFI: \\EFI\\BOOT\\BOOTX64.EFI; without VMX\r\n"
-        "CSMWrap legacy-boots this disk. See VMPROFIL.TXT. Licences and source of\r\n"
+        "Legacy BIOS: MBR -> syslinux. UEFI: \\EFI\\BOOT\\BOOTX64.EFI, the boot manager:\r\n"
+        "no key = auto (without VMX CSMWrap legacy-boots this disk), K = Kernel64\r\n"
+        "direct. See VMPROFIL.TXT. Licences and source of\r\n"
         "the third-party parts (FreeDOS, CSMWrap + SeaBIOS, syslinux) are on the\r\n"
         "ISO under ShizukuDOS10\\. Not a Windows 98 installation.\r\n"
     ).encode("ascii")
@@ -207,7 +208,6 @@ def main() -> int:
     receipt = {"disk": str(disk), "bytes": disk.stat().st_size, "sha256": digest,
                "layout": {"part_start": PART_START, "part_type": PART_TYPE, "fs": "FAT32", "disk_signature": DISK_SIGNATURE},
                "inputs": [item.record() for item in inputs],
-               "interim": [f"{item.name}: {' '.join(item.notes)}" for item in inputs if item.interim],
                "syslinux": se_media.syslinux_spec()["distribution"], "setup": setup_info,
                "drivers": [p["package"] for p in store_manifest["packages"]],
                "menu": {"dos16": "/SHZDOS/DISK.IMG", "shzdos01": f"/{SHZDOS01_PATH}", "k64_dir": "/SHZ/K64",
@@ -217,7 +217,7 @@ def main() -> int:
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     shutil.rmtree(work, ignore_errors=True)
     print(f"{disk}\nbytes {disk.stat().st_size}\nsha256 {digest}\n{report}"
-          + "".join(f"INTERIM {line}\n" for line in receipt["interim"]) + f"receipt {receipt_path}")
+          + f"receipt {receipt_path}")
     return 0
 
 
