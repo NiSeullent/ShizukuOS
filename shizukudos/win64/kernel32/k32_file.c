@@ -17,8 +17,6 @@
 #define OPT_DELETE_ON_CLOSE 0x1000
 #define ATTR_DEVICE 0x40
 
-size_t k32_wlen(const WCHAR *s) { size_t n = 0; while (s[n]) ++n; return n; }
-
 /* ---------------------------------------------------------------- current directory */
 static WCHAR g_cwd[260];
 static int g_cwd_init;
@@ -108,8 +106,8 @@ static NTSTATUS open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, UL
 }
 
 static WCHAR *widen_str(const char *s, WCHAR *buf, size_t cap);
-static int utf8_to_wide(const char *s, int n, WCHAR *w, int cap);
-static int wide_to_utf8(const WCHAR *w, int n, char *s, int cap);
+#define utf8_to_wide k32_utf8_to_wide                           /* k32_utf.c */
+#define wide_to_utf8 k32_wide_to_utf8
 
 /* ---------------------------------------------------------------- CreateFile and friends */
 K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp, DWORD flags,
@@ -682,47 +680,4 @@ K32API UINT WINAPI GetConsoleOutputCP(void) { return 65001; }
 K32API BOOL WINAPI SetConsoleOutputCP(UINT cp) { if (cp != 65001 && cp != 437) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; } return cp == 65001; }
 K32API BOOL WINAPI SetConsoleCP(UINT cp) { return cp == 65001; }
 
-/* ---------------------------------------------------------------- UTF-8 <-> UTF-16 helpers used above */
-static int utf8_to_wide(const char *s, int n, WCHAR *w, int cap)
-{
-    int o = 0, i = 0;
-    if (n < 0) { n = 0; while (s[n]) ++n; ++n; }
-    while (i < n) {
-        unsigned c = (unsigned char)s[i++];
-        unsigned cp;
-        if (c < 0x80) cp = c;
-        else if ((c & 0xe0) == 0xc0 && i < n) { cp = ((c & 0x1f) << 6) | (s[i++] & 0x3f); }
-        else if ((c & 0xf0) == 0xe0 && i + 1 < n) { cp = ((c & 0x0f) << 12) | ((s[i] & 0x3f) << 6) | (s[i + 1] & 0x3f); i += 2; }
-        else if ((c & 0xf8) == 0xf0 && i + 2 < n) { cp = ((c & 7) << 18) | ((s[i] & 0x3f) << 12) | ((s[i + 1] & 0x3f) << 6) | (s[i + 2] & 0x3f); i += 3; }
-        else cp = 0xfffd;
-        if (cp >= 0x10000) {
-            if (o + 2 > cap) return 0;
-            cp -= 0x10000;
-            w[o++] = (WCHAR)(0xd800 + (cp >> 10));
-            w[o++] = (WCHAR)(0xdc00 + (cp & 0x3ff));
-        } else {
-            if (o + 1 > cap) return 0;
-            w[o++] = (WCHAR)cp;
-        }
-    }
-    return o;
-}
-static int wide_to_utf8(const WCHAR *w, int n, char *s, int cap)
-{
-    int o = 0, i = 0;
-    if (n < 0) { n = 0; while (w[n]) ++n; ++n; }
-    while (i < n) {
-        unsigned cp = w[i++];
-        if (cp >= 0xd800 && cp < 0xdc00 && i < n && w[i] >= 0xdc00 && w[i] < 0xe000) cp = 0x10000 + ((cp - 0xd800) << 10) + (w[i++] - 0xdc00);
-        if (cp < 0x80) { if (o + 1 > cap) return 0; s[o++] = (char)cp; }
-        else if (cp < 0x800) { if (o + 2 > cap) return 0; s[o++] = (char)(0xc0 | (cp >> 6)); s[o++] = (char)(0x80 | (cp & 0x3f)); }
-        else if (cp < 0x10000) { if (o + 3 > cap) return 0; s[o++] = (char)(0xe0 | (cp >> 12)); s[o++] = (char)(0x80 | ((cp >> 6) & 0x3f)); s[o++] = (char)(0x80 | (cp & 0x3f)); }
-        else { if (o + 4 > cap) return 0; s[o++] = (char)(0xf0 | (cp >> 18)); s[o++] = (char)(0x80 | ((cp >> 12) & 0x3f)); s[o++] = (char)(0x80 | ((cp >> 6) & 0x3f)); s[o++] = (char)(0x80 | (cp & 0x3f)); }
-    }
-    return o;
-}
 static WCHAR *widen_str(const char *s, WCHAR *buf, size_t cap) { int n = utf8_to_wide(s, -1, buf, (int)cap); if (n <= 0) buf[0] = 0; return buf; }
-
-/* exported through k32_misc.c */
-int k32_utf8_to_wide(const char *s, int n, WCHAR *w, int cap) { return utf8_to_wide(s, n, w, cap); }
-int k32_wide_to_utf8(const WCHAR *w, int n, char *s, int cap) { return wide_to_utf8(w, n, s, cap); }

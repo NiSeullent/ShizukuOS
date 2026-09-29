@@ -52,8 +52,13 @@ uint32_t shz_crc32(const void *data, size_t n)
 
 int shz_evidence(unsigned slot, unsigned long long v)
 {
+#ifdef SHZ_NO_EVIDENCE                     /* host builds (tests/host/run_wine_tests.py) run outside Kernel64: no NtShzEvidence */
+    (void)slot; (void)v;
+    return 0;
+#else
     extern unsigned long __stdcall NtShzEvidence(unsigned long, unsigned long long);
     return (int)NtShzEvidence(slot, v);
+#endif
 }
 
 /* ---- printf family ---- */

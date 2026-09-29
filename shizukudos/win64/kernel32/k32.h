@@ -51,4 +51,9 @@ DWORD k32_nt_error(NTSTATUS st);                       /* maps + stores LastErro
 NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap);
 DWORD k32_current_directory(WCHAR *buf, DWORD cap);
 size_t k32_wlen(const WCHAR *s);
+
+/* UTF-8 <-> UTF-16 helpers (k32_file.c). n < 0 means NUL-terminated (the terminator is converted too). Return 0 when the
+ * output buffer is too small. */
+int k32_utf8_to_wide(const char *s, int n, WCHAR *w, int cap);
+int k32_wide_to_utf8(const WCHAR *w, int n, char *s, int cap);
 #endif
