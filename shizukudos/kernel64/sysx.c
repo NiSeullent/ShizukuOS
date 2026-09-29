@@ -234,8 +234,14 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     }
     case SYS_NtDuplicateObject: {                           /* (srcproc, srchandle, dstproc, PHANDLE dst, access, attrs, options) */
         kobject_t *o = object_for_handle(p, a2);
+        uint32_t access = (uint32_t)stack_arg(p, r, 5);
+        const uint32_t options = (uint32_t)stack_arg(p, r, 7);
         if (!o) return STATUS_INVALID_HANDLE;
-        return give_handle(p, o, a4, (uint32_t)stack_arg(p, r, 5));
+        if ((options & 2) && !(a2 & 3))                     /* DUPLICATE_SAME_ACCESS: the source handle's rights (registry keys enforce them) */
+            access = p->handles[a2 / 4 - 1].access;
+        st = give_handle(p, o, a4, access);
+        if (!st && (options & 1) && !(a2 & 3)) handle_close(p, a2);       /* DUPLICATE_CLOSE_SOURCE */
+        return st;
     }
     case SYS_NtCreateThreadEx: {
         /* (PHANDLE, ACCESS, OA, ProcessHandle, StartRoutine, Argument, Flags, ZeroBits, StackSize, MaxStack, Attr) */

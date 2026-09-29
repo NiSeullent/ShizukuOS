@@ -8,6 +8,7 @@
  * Not owner of: Win32 semantics (kernel32.dll), C runtime.
  */
 #include "nt.h"
+#include "ntdll_int.h"
 
 /* ---------------------------------------------------------------- diagnostics */
 void ShzDebugLine(const char *s)
@@ -288,11 +289,17 @@ static const struct { NTSTATUS status; ULONG error; } status_map[] = {
     {STATUS_SHARING_VIOLATION, ERROR_SHARING_VIOLATION}, {STATUS_CANCELLED, ERROR_OPERATION_ABORTED},
     {STATUS_PENDING, ERROR_IO_PENDING}, {STATUS_OBJECT_TYPE_MISMATCH, ERROR_INVALID_HANDLE},
     {STATUS_STACK_OVERFLOW, ERROR_STACK_OVERFLOW}, {STATUS_UNSUCCESSFUL, ERROR_GEN_FAILURE},
+    /* registry (kernel64/sysreg.c) */
+    {STATUS_NO_MORE_ENTRIES, ERROR_NO_MORE_ITEMS}, {STATUS_KEY_DELETED, ERROR_KEY_DELETED},
+    {STATUS_CANNOT_DELETE, ERROR_ACCESS_DENIED}, {STATUS_KEY_HAS_CHILDREN, ERROR_KEY_HAS_CHILDREN},
+    {STATUS_CHILD_MUST_BE_VOLATILE, ERROR_CHILD_MUST_BE_VOLATILE}, {STATUS_OBJECT_PATH_SYNTAX_BAD, ERROR_BAD_PATHNAME},
+    {STATUS_INFO_LENGTH_MISMATCH, ERROR_BAD_LENGTH}, {STATUS_INSUFFICIENT_RESOURCES, ERROR_NO_SYSTEM_RESOURCES},
 };
 
 ULONG NTAPI RtlNtStatusToDosError(NTSTATUS status)
 {
     unsigned i;
+    shz_set_last_status(status);                   /* like Windows: TEB.LastStatusValue follows the last translation */
     for (i = 0; i < sizeof status_map / sizeof status_map[0]; ++i)
         if (status_map[i].status == status) return status_map[i].error;
     if (NT_SUCCESS(status)) return 0;
