@@ -35,7 +35,7 @@ int sfs_dev_write(sfs_fs *fs, uint64_t blk, const void *buf, uint32_t count)
     }
     fs->st.writes++;
     fs->st.write_bytes += bytes;
-    fs->sb_kbytes_written += bytes >> 10;
+    
     return fs->ops.write(fs->ops.ctx, off, buf, bytes) ? SFS_EIO : 0;
 }
 
@@ -135,7 +135,7 @@ static int get_buf(sfs_fs *fs, uint64_t blk, int read, sfs_buf **out)
         if (read && !(b->flags & B_UPTODATE)) {
             rc = sfs_dev_read(fs, blk, b->data, 1);
             if (rc) { b->refs--; return rc; }
-            b->flags |= B_UPTODATE;
+            b->flags = (b->flags & ~(B_VERIFIED | B_COMPUTED)) | B_UPTODATE;
         }
         *out = b;
         return 0;
@@ -170,7 +170,6 @@ static int get_buf(sfs_fs *fs, uint64_t blk, int read, sfs_buf **out)
 
 int sfs_bread(sfs_fs *fs, uint64_t blk, sfs_buf **out)
 {
-    if (!sfs_block_valid(fs, blk) && blk != 0) return SFS_ECORRUPT;
     if (blk >= fs->nblocks) return SFS_ECORRUPT;
     return get_buf(fs, blk, 1, out);
 }
@@ -183,7 +182,7 @@ int sfs_bnew(sfs_fs *fs, uint64_t blk, sfs_buf **out)
     rc = get_buf(fs, blk, 0, &b);
     if (rc) return rc;
     if (!(b->flags & B_NEW)) memset(b->data, 0, fs->bs);       /* was cached: reset the content */
-    b->flags = (b->flags & (B_DIRTY | B_JDIRTY)) | B_UPTODATE;
+    b->flags = (b->flags & (B_DIRTY | B_JDIRTY)) | B_UPTODATE | B_VERIFIED;
     *out = b;
     return 0;
 }
@@ -205,7 +204,8 @@ void sfs_bput(sfs_fs *fs, sfs_buf *b)
 int sfs_bdirty_meta(sfs_fs *fs, sfs_buf *b)
 {
     if (fs->ro) return SFS_EROFS;
-    b->flags &= ~B_NEW;
+    fs->mods++;
+    b->flags &= ~(B_NEW | B_COMPUTED);
     if (b->flags & B_JDIRTY) return 0;
     b->flags |= B_JDIRTY;
     b->tnext = fs->txn.bufs;
@@ -232,11 +232,82 @@ void sfs_bforget(sfs_fs *fs, uint64_t blk)
         b->tnext = 0;
         b->flags &= ~B_JDIRTY;
     }
-    b->flags &= ~(B_DIRTY | B_UPTODATE);
+    b->flags &= ~(B_DIRTY | B_UPTODATE | B_VERIFIED | B_COMPUTED);
     if (b->refs) return;
     lru_unlink(fs, b);
     hash_unlink(fs, b);
     buf_destroy(fs, b);
+}
+
+void sfs_binval_data(sfs_fs *fs, uint64_t blk, uint32_t count)
+{
+    uint32_t i;
+    if (!fs->nbufs) return;
+    for (i = 0; i < count; ++i) {
+        sfs_buf *b = lookup(fs, blk + i);
+        if (!b || (b->flags & B_JDIRTY)) continue;
+        b->flags &= ~(B_DIRTY | B_UPTODATE | B_VERIFIED);
+        if (b->refs) continue;
+        lru_unlink(fs, b);
+        hash_unlink(fs, b);
+        buf_destroy(fs, b);
+    }
+}
+
+void sfs_boverlay(sfs_fs *fs, uint64_t blk, uint32_t count, uint8_t *dst)
+{
+    uint32_t i;
+    if (!fs->nbufs) return;
+    for (i = 0; i < count; ++i) {
+        sfs_buf *b = lookup(fs, blk + i);
+        if (b && (b->flags & (B_UPTODATE | B_DIRTY)) == (B_UPTODATE | B_DIRTY))
+            memcpy(dst + ((size_t)i << fs->bs_bits), b->data, fs->bs);
+    }
+}
+
+void sfs_cache_drop_clean(sfs_fs *fs)
+{
+    sfs_buf *b, *prev;
+    for (b = fs->lru_tail; b; b = prev) {
+        prev = b->lru_prev;
+        if (b->refs || (b->flags & (B_JDIRTY | B_DIRTY))) continue;
+        lru_unlink(fs, b);
+        hash_unlink(fs, b);
+        buf_destroy(fs, b);
+    }
+}
+
+/* Merge sort of the transaction list by block number: checkpoint and journal writes then go out in disk order. */
+static sfs_buf *merge_sorted(sfs_buf *a, sfs_buf *b)
+{
+    sfs_buf head, *t = &head;
+    head.tnext = 0;
+    while (a && b) {
+        if (a->blk <= b->blk) { t->tnext = a; a = a->tnext; }
+        else { t->tnext = b; b = b->tnext; }
+        t = t->tnext;
+    }
+    t->tnext = a ? a : b;
+    return head.tnext;
+}
+
+void sfs_txn_sort(sfs_fs *fs)
+{
+    sfs_buf *runs[48];
+    sfs_buf *b = fs->txn.bufs, *next;
+    unsigned i, n = 0;
+    for (i = 0; i < 48; ++i) runs[i] = 0;
+    while (b) {
+        next = b->tnext;
+        b->tnext = 0;
+        for (i = 0; i < 47 && runs[i]; ++i) { b = merge_sorted(runs[i], b); runs[i] = 0; }
+        runs[i] = runs[i] ? merge_sorted(runs[i], b) : b;
+        if (i + 1 > n) n = i + 1;
+        b = next;
+    }
+    b = 0;
+    for (i = 0; i < n; ++i) if (runs[i]) b = b ? merge_sorted(runs[i], b) : runs[i];
+    fs->txn.bufs = b;
 }
 
 int sfs_cache_write_data(sfs_fs *fs)

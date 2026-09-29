@@ -88,7 +88,7 @@ typedef struct sfs_stat {
     uint32_t atime_ns, mtime_ns, ctime_ns, crtime_ns;
     uint32_t flags;             /* i_flags */
     uint32_t generation;
-} sfs_stat;
+} sfs_stat_t;
 
 typedef struct sfs_dirent {
     uint32_t ino;
@@ -108,7 +108,7 @@ typedef struct sfs_statfs {
     uint32_t ro_reason;         /* SFS_RO_* bit set explaining a forced read-only mount */
     uint8_t uuid[16];
     char label[17];
-} sfs_statfs;
+} sfs_statfs_t;
 
 /* Reasons for a forced read-only mount (bit set, see sfs_statfs.ro_reason). */
 #define SFS_RO_CALLER 0x1u
@@ -142,14 +142,14 @@ typedef struct sfs_stats {
 int sfs_mount(const sfs_ops *ops, unsigned flags, sfs_fs **out);
 int sfs_unmount(sfs_fs *fs);                    /* commits, checkpoints, marks clean, frees everything */
 int sfs_sync(sfs_fs *fs);                       /* commit the running transaction, checkpoint, flush */
-int sfs_statfs(sfs_fs *fs, sfs_statfs *out);
+int sfs_statfs(sfs_fs *fs, sfs_statfs_t *out);
 void sfs_get_stats(sfs_fs *fs, sfs_stats *out);
 int sfs_is_readonly(sfs_fs *fs);
 uint32_t sfs_block_size(sfs_fs *fs);
 
 /* Names are byte strings (UTF-8 on Linux volumes), compared bytewise (case-sensitive). */
 int sfs_lookup(sfs_fs *fs, uint32_t dir, const char *name, size_t len, uint32_t *ino, uint8_t *type);
-int sfs_stat(sfs_fs *fs, uint32_t ino, sfs_stat *st);
+int sfs_stat(sfs_fs *fs, uint32_t ino, sfs_stat_t *st);
 /* Enumerates a directory: *cookie starts at 0; returns 1 with an entry, 0 at the end, < 0 on error. */
 int sfs_readdir(sfs_fs *fs, uint32_t dir, uint64_t *cookie, sfs_dirent *out);
 int sfs_read(sfs_fs *fs, uint32_t ino, uint64_t off, void *buf, uint64_t len, uint64_t *done);
