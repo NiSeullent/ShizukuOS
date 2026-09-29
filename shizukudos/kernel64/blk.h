@@ -60,5 +60,4 @@ int blk_scan_partitions(blk_dev_t *whole);
 
 /* Drivers (each registers its devices; called once from disk_init() in the standalone profile). */
 int ahci_blk_init(void);                        /* ahci_blk.c: 0 when a disk was registered, -1 otherwise (logged) */
-uint32_t ahci_blk_flushes(void);                /* FLUSH CACHE EXT commands completed (diagnostics) */
 #endif

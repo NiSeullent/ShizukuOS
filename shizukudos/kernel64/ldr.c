@@ -13,7 +13,8 @@
  *   and directory pages it touches are read), the image's sections become committed VK_IMAGE descriptors tied to an
  *   image_map_t, and ldr_image_fault() produces each page on its first touch: its bytes are read straight from the
  *   file into a private page, base relocations of that page (and the tail of a relocation straddling in from the
- *   page before) are applied from a per-page index of the .reloc blocks, then it is mapped with the section's
+ *   page before) are applied from a per-page index of the .reloc blocks (built once when an image cannot load at
+ *   its preferred base; building it reads the whole .reloc directory through the view), then it is mapped with the section's
  *   protection. A 334 MB DLL therefore costs the pages that are really touched. Pages are private per process
  *   (no cross-process sharing: FileAlignment 0x200 images do not have page-aligned file data anyway).
  *   The loader writes the IAT and TLS index with image_poke(), which ignores page protection like the Windows
@@ -272,7 +273,8 @@ static void image_orig(image_map_t *im, uint64_t rva, uint8_t *out, uint64_t n)
     }
 }
 
-/* Applies the relocations of block range [lo, hi) that touch the page at page_rva (page content in `pg`). */
+/* Applies the fixups of the .reloc block(s) for page `block_page` that land in the page at page_rva (content in `pg`):
+ * called with the page itself and with the page before it (a fixup starting there may straddle into this page). */
 static void relocate_page(image_map_t *im, uint64_t page_rva, uint8_t *pg, uint32_t block_page)
 {
     uint32_t lo = 0, hi = im->nblocks;
