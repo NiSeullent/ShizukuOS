@@ -2,8 +2,9 @@
 """Deterministic disk images and partition tables for the Kernel64 storage tests.
 
 Independent of the kernel code: a second implementation of MBR/EBR/GPT writing (with zlib's CRC-32) so the guest-side
-scanner (kernel64/blk_part.c) is checked against tables it did not produce. Also the byte patterns the guest writes
-(mirrored in kernel64/blk_test.c and win64/tests/t_blk_raw.c) so the host can verify written sectors after a run.
+scanner (kernel64/blk_part.c) is checked against tables it did not produce. Also the byte pattern the guest writes
+(win64/tests/blktest.h app_fill) so the host can verify written sectors after a run. Tables can be produced as
+(byte offset, bytes) pieces for sparse multi-GiB images that never exist in memory as a whole.
 """
 import random
 import struct
@@ -24,9 +25,11 @@ def content(size, seed):
     return out
 
 
-def write_mbr(img, primaries, extended=None, sector=512):
-    """primaries: [(start, sectors, type, bootable)], extended: (start, sectors, [(rel_start, sectors, type), ...])."""
-    mbr = bytearray(img[:sector])
+def mbr_blobs(primaries, extended=None, sector=512, mbr_head=b""):
+    """primaries: [(start, sectors, type, bootable)], extended: (start, sectors, [(rel_start, sectors, type), ...]).
+    Returns [(byte offset, bytes)]: the MBR sector (boot code area from mbr_head) and one EBR per logical partition."""
+    blobs = []
+    mbr = bytearray(mbr_head[:sector].ljust(sector, b"\0"))
     mbr[446:510] = bytes(64)
     slot = 0
     for start, n, ptype, boot in primaries:
@@ -43,11 +46,30 @@ def write_mbr(img, primaries, extended=None, sector=512):
                 next_rel = (ebr_lba - ext_start) + rel + n
                 ebr[462:478] = struct.pack("<B3sB3sII", 0, b"\xff\xff\xff", 0x05, b"\xff\xff\xff", next_rel, logicals[i + 1][0] + logicals[i + 1][1])
             ebr[510:512] = b"\x55\xaa"
-            img[ebr_lba * sector:(ebr_lba + 1) * sector] = ebr
+            blobs.append((ebr_lba * sector, bytes(ebr)))
             if i + 1 < len(logicals):
                 ebr_lba = ext_start + next_rel
     mbr[510:512] = b"\x55\xaa"
-    img[:sector] = mbr
+    blobs.insert(0, (0, bytes(mbr)))
+    return blobs
+
+
+def mbr_partitions(primaries, extended=None):
+    """The partitions blk_part.c reports for mbr_blobs() input, in its order: [(start, sectors, type)]."""
+    out = [(s, n, t) for s, n, t, _ in primaries]
+    if extended:
+        ext_start, _, logicals = extended
+        ebr = ext_start
+        for i, (rel, n, ptype) in enumerate(logicals):
+            out.append((ebr + rel, n, ptype))
+            ebr = ebr + rel + n
+    return out
+
+
+def write_mbr(img, primaries, extended=None, sector=512):
+    """In-memory variant of mbr_blobs() (keeps the boot code area of img)."""
+    for off, blob in mbr_blobs(primaries, extended, sector, bytes(img[:sector])):
+        img[off:off + len(blob)] = blob
 
 
 def gpt_layout(size, sector, entries=128, entry_size=128):
@@ -67,31 +89,41 @@ def _gpt_header(sector, my_lba, alt_lba, first, last, disk_guid, ent_lba, entrie
     return bytes(h).ljust(sector, b"\0")
 
 
-def write_gpt(img, sector, parts, entries=128, entry_size=128, seed=7):
-    """parts: [(start, sectors, name)] -> protective MBR, primary header/array at LBA 1/2, backup at the end."""
-    size = len(img)
+GUID_ESP = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+GUID_LINUX = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+
+
+def gpt_blobs(size, sector, parts, entries=128, entry_size=128, seed=7):
+    """parts: [(start, sectors, name)] -> [(byte offset, bytes)]: protective MBR, primary header/array at LBA 1/2, backup
+    array and header at the end. The first partition gets the ESP type GUID, the others Linux data."""
     sectors, ent_sectors = gpt_layout(size, sector, entries, entry_size)
     rnd = random.Random(seed)
     disk_guid = uuid.UUID(int=rnd.getrandbits(128)).bytes_le
     arr = bytearray(entries * entry_size)
     for i, (start, n, name) in enumerate(parts):
-        type_guid = uuid.UUID("0FC63DAF-8483-4772-8E79-3D69D8477DE4").bytes_le if i else uuid.UUID("C12A7328-F81F-11D2-BA4B-00A0C93EC93B").bytes_le
+        type_guid = uuid.UUID(GUID_LINUX if i else GUID_ESP).bytes_le
         e = struct.pack("<16s16sQQQ", type_guid, uuid.UUID(int=rnd.getrandbits(128)).bytes_le, start, start + n - 1, 0)
         e += name.encode("utf-16-le").ljust(72, b"\0")
         arr[i * entry_size:i * entry_size + entry_size] = e.ljust(entry_size, b"\0")
     ecrc = zlib.crc32(bytes(arr))
     first, last = 2 + ent_sectors, sectors - 2 - ent_sectors
-    # protective MBR
-    mbr = bytearray(img[:sector])
-    mbr[446:510] = bytes(64)
+    mbr = bytearray(sector)
     mbr[446:462] = struct.pack("<B3sB3sII", 0, b"\x00\x02\x00", 0xEE, b"\xff\xff\xff", 1, min(sectors - 1, 0xFFFFFFFF))
     mbr[510:512] = b"\x55\xaa"
-    img[:sector] = mbr
-    img[sector:2 * sector] = _gpt_header(sector, 1, sectors - 1, first, last, disk_guid, 2, entries, entry_size, ecrc)
-    img[2 * sector:2 * sector + len(arr)] = arr
     back_ent = sectors - 1 - ent_sectors
-    img[back_ent * sector:back_ent * sector + len(arr)] = arr
-    img[(sectors - 1) * sector:sectors * sector] = _gpt_header(sector, sectors - 1, 1, first, last, disk_guid, back_ent, entries, entry_size, ecrc)
+    return [(0, bytes(mbr)),
+            (sector, _gpt_header(sector, 1, sectors - 1, first, last, disk_guid, 2, entries, entry_size, ecrc)),
+            (2 * sector, bytes(arr)),
+            (back_ent * sector, bytes(arr)),
+            ((sectors - 1) * sector, _gpt_header(sector, sectors - 1, 1, first, last, disk_guid, back_ent, entries, entry_size, ecrc))]
+
+
+def write_gpt(img, sector, parts, entries=128, entry_size=128, seed=7):
+    """In-memory variant of gpt_blobs(); the boot code area of the MBR sector is kept."""
+    for off, blob in gpt_blobs(len(img), sector, parts, entries, entry_size, seed):
+        if off == 0:
+            blob = bytes(img[:446]) + blob[446:]
+        img[off:off + len(blob)] = blob
 
 
 def corrupt_gpt_primary(img, sector):
@@ -99,26 +131,15 @@ def corrupt_gpt_primary(img, sector):
     img[sector + 40] ^= 0x5A
 
 
-# --- patterns the guest writes (kernel64/blk_test.c: bench_fill; win64/tests/t_blk_raw.c: app_fill) ---
-def bench_pattern(lba, nbytes, tag):
-    """Kernel bench write pattern: byte i of sector `lba` = (lba*7 + i*13 + tag) & 0xff, sector by sector."""
-    out = bytearray(nbytes)
-    per = 512
-    for s in range(nbytes // per):
-        base = ((lba + s) * 7 + tag) & 0xff
-        row = bytes((base + i * 13) & 0xff for i in range(per))
-        out[s * per:(s + 1) * per] = row
-    return bytes(out)
+# --- the pattern the guest writes (win64/tests/blktest.h: app_fill) ---
+_ROW_OFFS = bytes((i * 17 + (i >> 5)) & 0xff for i in range(512))
+_ROWS = [_ROW_OFFS.translate(bytes((j + b) & 0xff for j in range(256))) for b in range(256)]
 
 
-def app_pattern(lba, nbytes, tag):
-    """T_BLK_RAW write pattern: byte i of sector `lba` = ((lba ^ tag) * 31 + i * 17 + (i >> 5)) & 0xff."""
-    out = bytearray(nbytes)
-    per = 512
-    for s in range(nbytes // per):
-        l = lba + s
-        out[s * per:(s + 1) * per] = bytes((((l ^ tag) * 31) + i * 17 + (i >> 5)) & 0xff for i in range(per))
-    return bytes(out)
+def app_pattern(unit, nbytes, tag):
+    """Byte i of 512-byte unit u (unit = device byte offset / 512): ((u ^ tag) * 31 + i * 17 + (i >> 5)) & 0xff.
+    Every unit is one of 256 precomputed rows, so 64 MiB take well under a second."""
+    return b"".join(_ROWS[(((unit + s) ^ tag) * 31) & 0xff] for s in range(nbytes // 512))
 
 
 def crc32(data):

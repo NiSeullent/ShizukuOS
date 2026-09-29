@@ -131,7 +131,7 @@ static int32_t op_query(process_t *p, uint64_t index, uint64_t out, uint64_t len
     in.scan_result = d->scan_result;
     copy_str(in.name, d->name, sizeof in.name);
     copy_str(in.driver, d->driver ? d->driver : "?", sizeof in.driver);
-    copy_str(in.irq_mode, d->irq_mode ? d->irq_mode : "poll", sizeof in.irq_mode);
+    copy_str(in.irq_mode, blk_whole(d)->irq_mode ? blk_whole(d)->irq_mode : "poll", sizeof in.irq_mode);   /* live mode */
     copy_str(in.model, d->model, sizeof in.model);
     copy_str(in.serial, d->serial, sizeof in.serial);
     copy_str(in.part_name, d->part_name, sizeof in.part_name);
