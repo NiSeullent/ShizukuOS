@@ -197,11 +197,15 @@ DLLAPI MMRESULT WINAPI timeKillEvent(UINT id)
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID res)
 {
-    (void)h; (void)res;
-    if (reason == DLL_PROCESS_ATTACH) InitializeCriticalSection(&g_lock);
-    else if (reason == DLL_PROCESS_DETACH && g_wake) {
-        InterlockedExchange((LONG *)&g_quit, 1);         /* let the worker leave promptly */
+    (void)h;
+    if (reason == DLL_PROCESS_ATTACH) {
+        InitializeCriticalSection(&g_lock);
+    } else if (reason == DLL_PROCESS_DETACH && g_wake) {
+        InterlockedExchange((LONG *)&g_quit, 1);                 /* let the worker leave promptly */
         SetEvent(g_wake);
+        /* Dynamic unload (res == NULL): the worker runs code of this image, so wait until it has left. At process exit
+         * (res != NULL) the system ends the other threads itself. */
+        if (!res && g_thread && GetCurrentThreadId() != g_thread_id) WaitForSingleObject(g_thread, 5000);
     }
     return TRUE;
 }

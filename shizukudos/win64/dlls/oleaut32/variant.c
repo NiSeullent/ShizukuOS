@@ -332,7 +332,8 @@ static int is_blank(OLECHAR c) { return c == ' ' || c == '\t' || c == '\n' || c 
 
 /* Parses [blanks][sign] digits [. digits] [e|E [sign] digits] [blanks] into a decimal string + exponent.
  * Returns S_OK, DISP_E_TYPEMISMATCH (not a number), or E_NOTIMPL (a form we deliberately do not handle). */
-typedef struct { int neg; char digits[64]; int nd; int exp10; int truncated; } dec_t;    /* value = 0.d1d2..dn * 10^exp10 is not used: see below */
+/* value = (-1)^neg * digits[0..nd-1] (as an integer) * 10^exp10; `truncated` records nonzero digits that did not fit the buffer */
+typedef struct { int neg; char digits[64]; int nd; int exp10; int truncated; } dec_t;
 
 static HRESULT parse_decimal(const OLECHAR *s, UINT len, dec_t *out)
 {
