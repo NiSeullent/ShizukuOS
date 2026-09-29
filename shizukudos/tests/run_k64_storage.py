@@ -75,6 +75,9 @@ def fat_volume(path, src):
     add("TESTS/A Long Mixed-Case File Name.dat", fatdisk.pattern(12, 4096 * 3 + 5))
     add("TESTS/big_4m.bin", fatdisk.pattern(13, (4 << 20) + 13))
     add("TESTS/Sub Directory/nested file.txt", b"nested content on D:\r\n")
+    dirs.append("WRITE")                                  # T_DISK.EXE's write tests start from these files (run_k64_disk.py)
+    for rel, data in fatdisk.WRITE_ORIG.items():
+        add(rel, data)
     fatdisk.make_image(path, 256, 8, files, dirs)
     return manifest
 
@@ -395,6 +398,11 @@ def main():
     rc, stats = replay(serial, model)
     checks += rc
     for name in DEVICES:
+        if name == "nvme0n3":
+            # D: is mounted read/write: T_DISK.EXE writes files through the FAT32 driver, which the raw-sector model does not
+            # replay; the volume is checked the way run_k64_disk.py checks it (fsck.fat -n, then every written file read back)
+            checks += fatdisk.write_checks(serial, img[name], out)
+            continue
         ok, detail = files_equal(img[name], model.files[name])
         checks.append(base.check(f"{name}: image file after the run equals the host model (guest writes landed exactly, nothing else changed)",
                                  ok, detail))
