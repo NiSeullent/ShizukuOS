@@ -28,6 +28,22 @@
       "used_by": ["shizukudos/dos16"],
       "build": "Open Watcom + NASM via `build.sh` (XMS swap enabled, language english)",
       "patches": ["shizukudos/dos16/patches/freecom-0001-reproducible-build-stamp.patch"]
+    },
+    "wine": {
+      "repository": "https://gitlab.winehq.org/wine/wine.git",
+      "fetch_mirror": "https://github.com/wine-mirror/wine.git",
+      "ref": "wine-11.0",
+      "commit": "db11d0fe6a169c457e23d007e20404643d067aa8",
+      "license": "LGPL-2.1-or-later",
+      "license_files": ["COPYING.LIB", "LICENSE", "AUTHORS"],
+      "bundled_components_used": {
+        "libs/tomcrypt": {"license": "LibTomCrypt dual licence: public domain dedication OR WTFPL-2.0", "license_files": ["libs/tomcrypt/LICENSE"]}
+      },
+      "execution_mode": "PE32+ user-mode DLLs (x86_64) built with mingw-w64 against Wine's own include/ tree; the Unix side (unixlib) of a DLL is never built",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "shizukudos/win64/wineport/build.py: host configure (--enable-win64, every optional library disabled) only for widl/wrc and the generated headers, then each DLL with x86_64-w64-mingw32-gcc; exports come from the .spec file minus stub entries",
+      "linking_note": "The Wine DLLs are statically linked with Shizuku-original GPL-2.0-only support code (wineport/crt, wineport/glue); the combined DLLs are distributed under GPL-2.0 as LGPL-2.1 section 3 permits.",
+      "patches": []
     }
   },
   "tools": {

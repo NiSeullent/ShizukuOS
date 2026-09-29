@@ -1,0 +1,167 @@
+{
+ "comment": "Modules built from the pinned Wine tree by wineport/build.py, in dependency order. link: import libraries searched in order (the first that exports a symbol provides it). dynamic_imports: functions resolved at first call because the Shizuku DLL may not export them; the failure value is returned when absent.",
+ "upstreams": [
+  "wine"
+ ],
+ "image_base": "0x7ff900000000",
+ "image_stride": "0x1000000",
+ "static_libs": {
+  "tomcrypt": {
+   "dir": "libs/tomcrypt",
+   "defines": [
+    "-DLTC_NO_PROTOTYPES",
+    "-DLTC_SOURCE"
+   ],
+   "includes": [
+    "libs/tomcrypt/src/headers"
+   ]
+  }
+ },
+ "modules": [
+  {
+   "name": "cryptbase",
+   "link": [
+    "advapi32",
+    "bcryptprimitives"
+   ],
+   "static": [
+    "tomcrypt"
+   ],
+   "includes": [
+    "libs/tomcrypt/src/headers"
+   ],
+   "defines": [
+    "-DLTC_NO_PROTOTYPES",
+    "-DLTC_SOURCE"
+   ]
+  },
+  {
+   "name": "cryptsp",
+   "dir": "dlls/cryptsp",
+   "extra_sources": [
+    "dlls/advapi32/crypt.c"
+   ],
+   "import_as_real": true,
+   "link": [
+    "cryptbase",
+    "advapi32",
+    "user32",
+    "rpcrt4"
+   ]
+  },
+  {
+   "name": "crypt32",
+   "link": [
+    "cryptsp",
+    "cryptbase",
+    "user32",
+    "advapi32",
+    "bcrypt"
+   ],
+   "delay_imports": [
+    "cryptnet"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "bcrypt.dll",
+     "fail": "0xc00000bb",
+     "functions": [
+      "BCryptImportKeyPair",
+      "BCryptVerifySignature",
+      "BCryptDestroyKey"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "base64",
+     "cert",
+     "crl",
+     "ctl",
+     "encode",
+     "main",
+     "msg",
+     "object",
+     "oid",
+     "protectdata",
+     "store",
+     "str"
+    ],
+    "link": [
+     "crypt32",
+     "cryptsp",
+     "cryptbase",
+     "advapi32",
+     "user32",
+     "shlwapi",
+     "shell32",
+     "bcrypt"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "bcrypt.dll",
+      "fail": "0xc00000bb",
+      "functions": [
+       "BCryptImportKeyPair",
+       "BCryptVerifySignature",
+       "BCryptDestroyKey"
+      ]
+     }
+    ]
+   },
+   "defines": [
+    "-DSHZ_NO_HOST_ROOTS"
+   ]
+  },
+  {
+   "name": "rsaenh",
+   "link": [
+    "crypt32",
+    "cryptsp",
+    "cryptbase",
+    "advapi32"
+   ],
+   "static": [
+    "tomcrypt"
+   ],
+   "includes": [
+    "libs/tomcrypt/src/headers"
+   ],
+   "defines": [
+    "-DLTC_NO_PROTOTYPES",
+    "-DLTC_SOURCE"
+   ],
+   "tests": {
+    "subtests": [
+     "rsaenh"
+    ],
+    "link": [
+     "cryptsp",
+     "cryptbase",
+     "advapi32"
+    ]
+   },
+   "dynamic_imports": [
+    {
+     "dll": "advapi32.dll",
+     "fail": "120",
+     "functions": [
+      "GetSecurityInfo",
+      "SetSecurityInfo"
+     ]
+    },
+    {
+     "dll": "advapi32.dll",
+     "fail": "0",
+     "functions": [
+      "GetSecurityDescriptorLength",
+      "GetSecurityDescriptorOwner",
+      "GetSecurityDescriptorGroup",
+      "GetSecurityDescriptorDacl",
+      "GetSecurityDescriptorSacl"
+     ]
+    }
+   ]
+  }
+ ]
+}
