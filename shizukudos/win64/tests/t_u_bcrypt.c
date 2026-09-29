@@ -3,8 +3,9 @@
  *   MD5      RFC 1321 appendix A.5           SHA-1 / SHA-2  FIPS 180-4 example values (NIST CSRC)
  *   HMAC     RFC 2202 (MD5, SHA-1), RFC 4231 (SHA-256/384/512)
  *   PBKDF2   RFC 6070 (HMAC-SHA1) and the widely published HMAC-SHA256/512 companions
- * The literal table rows were cross-checked with an independent implementation (Python hashlib / hmac /
- * pbkdf2_hmac, i.e. OpenSSL) by a script that parses this very table, when they were written. */
+ * The literal table rows are cross-checked against an independent implementation (Python hashlib / hmac / pbkdf2_hmac,
+ * i.e. OpenSSL) by tests/u_host_crosscheck.py, which parses this very table; the same script also runs the shipped
+ * dlls/bcrypt/hashes.c natively against OpenSSL on ~2000 random inputs. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
