@@ -317,10 +317,13 @@ def build_shizukudos10(reuse: bool) -> dict[str, Path]:
     if reuse and all(path.is_file() for path in outputs.values()):
         print("== --reuse-builds: packaging the existing build/shizukudos outputs (checked against their receipts)")
     else:
+        # SOURCE_DATE_EPOCH: GNU ld then stamps the Win64 PE images (WIN64.IMG) with the fixed date instead of the
+        # link time, so a rebuild from the same source gives the same bytes (the other steps fix their dates already).
+        env = dict(os.environ, SOURCE_DATE_EPOCH=str(FIXED_EPOCH))
         for command in BUILD_STEPS:
-            print("== " + " ".join(str(c) for c in command), flush=True)
+            print("== SOURCE_DATE_EPOCH=%d " % FIXED_EPOCH + " ".join(str(c) for c in command), flush=True)
             try:
-                subprocess.run(command, cwd=ROOT, check=True, timeout=2400)
+                subprocess.run(command, cwd=ROOT, check=True, timeout=2400, env=env)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
                 raise RuntimeError(f"build step failed ({exc}); refusing to package stale or partial outputs") from exc
     missing = [rel for rel, path in outputs.items() if not path.is_file()]
@@ -373,6 +376,15 @@ def check_shizukudos10_outputs(outputs: dict[str, Path], work: Path) -> str:
     lines.append("supervisor/esp.img holds the same loader and \\SHZDOS files")
     shutil.rmtree(scratch, ignore_errors=True)
     return "\n".join(lines)
+
+
+def shipped_receipt(path: Path) -> bytes:
+    """A build receipt as shipped on the ISO: the build time is the only field that differs between two builds
+    of the same source, so it is left out (build/shizukudos keeps the full receipt)."""
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    if receipt.pop("built_utc", None) is not None:
+        receipt["built_utc_note"] = "removed from the copy on the ISO for a reproducible image"
+    return (json.dumps(receipt, indent=2) + "\n").encode("utf-8")
 
 
 def build_efi_image(work: Path, members: dict[str, bytes]) -> bytes:
@@ -575,7 +587,7 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[s
     for rel in SHZ10_STAGED:
         payload[f"{SHZ10_DIR}/{rel}"] = outputs[rel].read_bytes()
     for rel, name in SHZ10_RECEIPTS.items():
-        payload[f"{SHZ10_DIR}/receipts/{name}"] = outputs[rel].read_bytes()
+        payload[f"{SHZ10_DIR}/receipts/{name}"] = shipped_receipt(outputs[rel])
     for member, staged in ESP_CROSSCHECK.items():  # the EFI image carries exactly the checked bytes
         if efi_members[member] != payload[f"{SHZ10_DIR}/{staged}"]:
             raise RuntimeError(f"EFI image member {member} is not the checked build output {staged}")
