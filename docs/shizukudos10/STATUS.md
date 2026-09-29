@@ -44,6 +44,9 @@ SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행
 
 ## 2b. 통합 Shizuku SE ISO (`tools/build_shizuku_se_iso.py`, 시험: `shz.py test --suite iso`)
 
+> **대체됨:** 이 절의 ISO 구성(BIOS 플로피 에뮬레이션 + UEFI 엔트리, USB 하이브리드 아님)과 `tools/test_shizuku_se_iso.py`는
+> 2d절의 VM 설치 ISO와 부팅 매트릭스로 바뀌었다. 아래 표는 당시 기록으로만 남긴다.
+
 한 ISO에 ShizukuDOS 0.1(자체 구현, BIOS 플로피 에뮬레이션), ShizukuDOS 10.0(외부 FreeDOS 프로필 + Supervisor + Kernel32/64 + WIN64.IMG,
 UEFI El Torito), NTWrapper9x/NTWin32Wrapper9x/NTWDDMWrapper9x 산출물을 담는다. 두 프로필은 서로 다른 디렉터리로 분리 표기한다.
 Microsoft 파일은 넣지 않는다. 사용자 소유 Windows 98 미디어는 `--win98-media`로 별도 `-private` ISO에만 겹쳐 넣고 `build/`(git 무시)에 둔다.
@@ -140,6 +143,68 @@ FreeDOS 사용처는 고정된 ke2046 트리를 grep해 얻었다(`ints.FREEDOS_
 재현 명령은 다음과 같다. `python3 shizukudos/csm/build.py`, `python3 shizukudos/dos16/build.py`, `python3 shizukudos/csm/test_qemu.py`
 (`--accel auto`가 기본이고 legacy 비교와 1 vCPU 음성 시험을 포함한다). 또는 `shz.py build --profile dual-bios-uefi-csm`과
 `shz.py test --suite boot`를 쓴다(두 항목이 추가되었다).
+
+## 2d. VM 설치 ISO 하나 (에이전트 C3 "vm-install-iso")
+
+빌더 `tools/build_shizuku_se_iso.py`(공용 `tools/shizuku_se_media.py`, 드라이버 저장소 `tools/shizuku_se_drivers.py`),
+보조 raw 디스크 `tools/build_shizuku_se_disk.py`, 시험 `tools/test_shizuku_se_boot_matrix.py` = `shz.py test --suite media`
+(`--suite iso`는 이제 같은 것의 별칭). 설명서와 VM 프로필: `docs/shizukudos10/MEDIA.md`(ISO 안에는 `VMPROFIL.TXT`).
+
+- **ISO 하나, 하이브리드:** BIOS El Torito 기본 엔트리 = `isolinux.bin`(no-emulation, boot info table 검증) → `menu.c32`
+  메뉴(COM1에도 출력, COM1 키 입력 가능): **K** Kernel64(`mboot.c32 BOOT.ELF --- KERNEL64S.BIN --- WIN64.IMG`),
+  **D** DOS16 FreeDOS 프로필(`memdisk harddisk` + hd32 디스크 이미지), **1** ShizukuDOS 0.1(`memdisk floppy`),
+  **I** 설치(SHZSETUP이 있을 때만, Multiboot 명령줄 `shz.setup=auto`). UEFI El Torito FAT 이미지 = `\EFI\BOOT\BOOTX64.EFI`
+  로더 + `\EFI\SHIZUKU\CSMWRAP.EFI`(C1의 `shizukudos/csm/build.py` 산출물, CSMWRAP.INI, 부팅 관리자 문법의 BOOT.INI) +
+  `\SHZDOS\` + `\STARTUP.NSH`. isohybrid: `isohdpfx.bin` MBR, MBR 파티션 2(0xEF)와 GPT 항목이 EFI 이미지를 가리킨다.
+  드라이버 저장소 `\DRIVERS\<package>\`(원본 그대로) + `HWIDS.TXT` 색인, Win98 SE 오버레이, SHZSE, 제3자 부분
+  (FreeDOS, CSMWrap+서브모듈, syslinux 데비안 소스 패키지)의 라이선스와 대응 소스.
+- **syslinux 고정:** `manifest.json` upstreams 끝의 `syslinux` = Ubuntu noble `3:6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3`
+  (GPL-2.0-or-later, com32 모듈 다수는 MIT). 패키지·소스·사용 파일을 sha256으로 고정하고 `shzlib.ensure_deb_upstream()`이
+  받아 푼다. raw 디스크의 `ldlinux.sys`/`ldlinux.c32`는 고정된 설치기(mtools판)에 내장된 짝을 쓴다.
+- **Kernel64 변경(표준 독립 스텁):** UEFI + CSMWrap에서는 SeaBIOS가 보고하는 E820에 OVMF의 ACPI NVS(8–9 MiB)가 남아
+  Multiboot `mem_upper`가 7 MiB여서 스텁이 거부했다. 스텁이 Multiboot 메모리 맵으로 RAM과 구멍을 계산하고
+  (`kernel64/standalone/memholes.h`, 0x6000, ABI 구조체 `shz_bootinfo_t`는 그대로), Kernel64 `mem_init`이
+  `SHZ_STANDALONE` 빌드에서 구멍을 페이지 할당기에서 뺀다(`K64: 3 firmware memory hole(s), 249 page(s) ...`).
+  QEMU `-kernel` 경로(`run_k64_standalone.py`)는 구멍 0개, ram 0x0fe00000으로 이전과 같다(PASS).
+- **재현성:** 커밋 116749b의 깨끗한 트리에서 전체 재빌드 두 번 → 같은 ISO
+  `b645dd8ed479861ee322be85136f737cce8cde3aed89d192a67adf99f502668e`(88,080,384바이트). raw 디스크 두 번 →
+  `9cd8825178e2876de9139452be28a34debe621d5060fcbf448f02f4e9e9ef137`(134,217,728바이트). 이를 위해 빌드 단계에
+  `SOURCE_DATE_EPOCH`(Win64 PE 타임스탬프), 스테이지 mtime 고정, ISO에 싣는 영수증에서 `built_utc`와 ISO에 없는
+  `supervisor/esp.img` 해시를 뺐다.
+
+부팅 매트릭스 (QEMU 8.2.2 TCG, KVM 없음, q35, `-cpu max`, 2 vCPU, 512 MiB, 위 ISO/디스크, 한 번에 QEMU 하나):
+
+| 펌웨어 | 매체 | Kernel64 | DOS16 | ShizukuDOS 0.1 | 판정 |
+| --- | --- | --- | --- | --- | --- |
+| SeaBIOS | ISO를 CD로 | PASS | PASS | PASS | PASS |
+| SeaBIOS | ISO를 하드디스크로(USB 스틱 이미지) | PASS | PASS | PASS | PASS |
+| SeaBIOS | raw 디스크 | PASS | PASS | PASS | PASS |
+| OVMF | ISO를 CD로 | PASS | PASS | PASS | PASS (**interim**) |
+| OVMF | ISO를 하드디스크로 | PASS | PASS | PASS | PASS (**interim**) |
+| OVMF | raw 디스크 | PASS | PASS | PASS | PASS (**interim**) |
+
+- 증거(실행마다 `build/shizuku-se-matrix/<run>/<fw>-<medium>-<entry>/`): Kernel64 = COM1 로그를
+  `run_k64_standalone.py`의 parse/evaluate로 판정(`SHZ-EXIT:0`, 자체시험 전부) + WIN64.IMG의 나머지 T_*.EXE 30개 모두
+  `exit=0 faulted=0`; DOS16 = `SHZ-EXIT:0` 뒤 QMP로 게스트 메모리를 읽어 memdisk mBFT(체크섬 검증)가 가리키는 RAM 디스크를
+  떼어 `dos16/verify.py`로 판정(RESULT.TXT, T_COM.OUT, T_EXE.OUT 바이트 일치, 배너); 0.1 = `A:\>`와 `DIR` 목록. OVMF는
+  BDS → 로더 → Shell `STARTUP.NSH` → CSMWrap 부팅 장치 → isolinux 순서도 확인한다.
+- 실행 기록: `final-2` 18/18 PASS, `suite-2026-09-29T185404Z`(`shz.py test --suite media`, 결과 VERIFIED) 18/18 PASS.
+  그 전의 `final-1`은 17/18: OVMF·CD·DOS16 한 건이 CSMWrap 로그 글자 중복(`Boot deevice`, 부팅 CPU와 BIOS 프록시 AP가
+  COM1에 동시에 씀) 때문에 경로 표식 정규식에서 FAIL이었다. 그 실행의 다른 24개 검사는 PASS였다. 표식을 글자 반복
+  허용으로 고친 뒤(커밋 7c55a21) 위 두 번을 다시 돌렸다.
+- 추가: ISO를 xHCI USB 대용량 저장장치로 붙여 Kernel64 PASS(SeaBIOS, OVMF 각 1회, `usb-probe`). 합성 INF 드라이버
+  패키지 2개와 자리표시 SHZSETUP 디렉터리로 만든 별도 ISO에서 `DRIVERS`/`HWIDS.TXT`/`SHZ\SETUP`가 원본과 바이트 일치했고
+  설치 엔트리(`shz.setup=auto`)가 Kernel64로 부팅됐다(SeaBIOS 1회). `--win98-media`는 합성 자리표시 트리로 코드 경로만 확인했다.
+
+**interim(임시):** 현재 로더에는 부팅 관리자가 없다(C2 작업 미병합). OVMF 칸은 로더가 VMX 없음으로 거부(`REFUSED`,
+TCG의 `-cpu max`는 AMD SVM을 보이므로 SVM 백엔드 없음 메시지) → 펌웨어의 UEFI Shell → `\STARTUP.NSH` → CSMWrap 경로다.
+C2의 로더(BOOT.INI `mode=auto`)가 들어오면 Shell 없이 로더가 CSMWrap을 부른다. `BOOT.INI`는 이미 그 문법으로 실려 있다.
+SHZSETUP(I1)은 아직 없어서 실제 ISO에는 `\SHZ\SETUP`과 설치 엔트리가 없다. 현재 스텁은 Multiboot 명령줄을 Kernel64에
+넘기지 않는다(C2가 `shz_bootinfo_t.cmdline`을 추가 중).
+
+**검증되지 않은 것:** VirtualBox·VMware·Hyper-V 실행(MEDIA.md의 해당 줄은 동작 원리에서 끌어낸 설정), Intel VMX 위의
+Supervisor 경로, UEFI Shell이 없는 펌웨어, Secure Boot(서명 없음), 실제 USB 스틱과 실제 하드웨어, 256 MiB RAM(모든 시험은
+512 MiB), 1 vCPU UEFI(C1이 CSMWrap 거부를 확인), 실제 SHZSETUP, 실제 제3자 드라이버 패키지.
 
 ## 3. 이번 세션에서 실행하지 못한 것 (BLOCKED)
 
