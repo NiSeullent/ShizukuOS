@@ -39,6 +39,31 @@ fsnode_t *fs_root_of(char letter)
     return l >= 'A' && l <= 'Z' ? mounts[l - 'A'] : 0;
 }
 
+/* NT device names of the volumes: C: is \Device\HarddiskVolume1, D: 2, ... Z: 24, then A: 25 and B: 26. */
+unsigned fs_volume_number(char letter)
+{
+    const char l = fold(letter);
+    if (l < 'A' || l > 'Z') return 0;
+    return l >= 'C' ? (unsigned)(l - 'B') : (unsigned)(l - 'A') + 25;
+}
+
+char fs_volume_letter(unsigned number)
+{
+    if (number >= 1 && number <= 24) return (char)('B' + number);
+    if (number == 25 || number == 26) return (char)('A' + number - 25);
+    return 0;
+}
+
+char fs_letter_of(const fsnode_t *n)
+{
+    unsigned i;
+    if (!n) return 0;
+    while (n->parent) n = n->parent;
+    for (i = 0; i < 26; ++i)
+        if (mounts[i] == n) return (char)('A' + i);
+    return 0;
+}
+
 void fs_populate(fsnode_t *dir)
 {
     if (dir && dir->is_dir && dir->backing == FSB_DISK && !dir->populated && dir->vol && dir->vol->populate) {
@@ -81,13 +106,21 @@ static fsnode_t *child_named(fsnode_t *dir, const char *name, size_t n)
  * the path has none: it then means C:) goes to *drive. */
 static const char *strip_prefix(const char *p, char *drive)
 {
-    static const char device[] = "\\Device\\HarddiskVolume1";           /* the NT name of volume C: (what QueryDosDevice("C:") returns) */
+    static const char device[] = "\\Device\\HarddiskVolume";            /* + the volume number (fs_volume_number): what QueryDosDevice returns */
     size_t i;
     *drive = 0;
     if (p[0] == '\\' && p[1] == '?' && p[2] == '?' && p[3] == '\\') p += 4;
     for (i = 0; device[i]; ++i)
         if (fold(p[i]) != fold(device[i])) break;
-    if (!device[i] && (p[i] == 0 || p[i] == '\\')) return p + i;
+    if (!device[i] && p[i] >= '1' && p[i] <= '9') {
+        unsigned num = 0;
+        while (p[i] >= '0' && p[i] <= '9' && num < 1000) num = num * 10 + (unsigned)(p[i++] - '0');
+        if (p[i] == 0 || p[i] == '\\') {
+            const char l = fs_volume_letter(num);
+            *drive = l ? l : '#';                                           /* '#': no such volume, resolve() fails */
+            return p + i;
+        }
+    }
     if (p[0] && p[1] == ':') { *drive = p[0]; p += 2; }
     return p;
 }

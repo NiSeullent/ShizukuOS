@@ -383,6 +383,24 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         set_iosb(p, iosb, copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS, 4 + copy);
         return copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
     }
+    case 58: {                                           /* FileVolumeNameInformation: {ULONG DeviceNameLength; WCHAR DeviceName[]} */
+        static const char dev[] = "\\Device\\HarddiskVolume";
+        uint16_t w[32];
+        uint32_t nchars = 0, total, room, copy, num, div;
+        const char l = f->node ? fs_letter_of(f->node) : 0;
+        if (!l) return STATUS_INVALID_PARAMETER;             /* console handles and unmounted nodes have no volume */
+        if (len < 4) return STATUS_BUFFER_TOO_SMALL;
+        for (num = 0; dev[num]; ++num) w[nchars++] = (uint8_t)dev[num];
+        num = fs_volume_number(l);
+        for (div = 10; div <= num; div *= 10) { }
+        for (div /= 10; div; div /= 10) w[nchars++] = (uint16_t)('0' + num / div % 10);
+        total = nchars * 2;
+        room = (uint32_t)len - 4;
+        copy = total < room ? total : room & ~1u;
+        if (copy_to_user(p, buf, &total, 4) || (copy && copy_to_user(p, buf + 4, w, copy))) return STATUS_ACCESS_VIOLATION;
+        set_iosb(p, iosb, copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS, 4 + copy);
+        return copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
+    }
     case 14: {                                           /* FilePositionInformation */
         int64_t pos = (int64_t)f->pos;
         if (len < 8) return STATUS_BUFFER_TOO_SMALL;

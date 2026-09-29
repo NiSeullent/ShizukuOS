@@ -94,6 +94,9 @@ uint64_t fs_total_bytes(void);
 /* Mounted volumes: `root` becomes "<letter>:\". 'C' is the RAM root and cannot be replaced. 0 = ok. */
 int fs_mount(char letter, fsnode_t *root);
 fsnode_t *fs_root_of(char letter);                                   /* NULL when nothing is mounted there */
+unsigned fs_volume_number(char letter);                              /* N of \Device\HarddiskVolumeN: C: 1, D: 2, ... (0 = not a letter) */
+char fs_volume_letter(unsigned number);                              /* the inverse (0 = none) */
+char fs_letter_of(const fsnode_t *n);                                /* drive letter of the volume holding n (0 = unmounted) */
 void fs_populate(fsnode_t *dir);                                     /* enumerates a disk directory once (no-op otherwise) */
 void fs_node_times(const fsnode_t *n, uint64_t *create_ft, uint64_t *write_ft);   /* FILETIMEs for any backing */
 

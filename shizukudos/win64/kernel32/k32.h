@@ -62,6 +62,7 @@ NTSTATUS k32_open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG
 #define OPT_DELETE_ON_CLOSE 0x1000
 #define ATTR_DEVICE 0x40
 size_t k32_wlen(const WCHAR *s);
+size_t k32_volume_device(WCHAR letter, WCHAR *out);          /* k32_volume.c: "\Device\HarddiskVolumeN" of a drive (out: 32 chars) */
 /* CloseHandle hooks: kernel32 state kept next to a kernel handle (toolhelp snapshots, power requests). */
 void k32_snapshot_closing(HANDLE h);
 void k32_power_request_closing(HANDLE h);

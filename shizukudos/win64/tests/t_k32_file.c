@@ -741,6 +741,88 @@ static void test_volumes(void)
     }
 }
 
+/* ================================================================ a second volume
+ * Runs when D: is a fixed disk (Kernel64 with a FAT32 disk: tests/run_k64_disk.py; many Windows machines). Every property is
+ * checked against what the API reports for C: or against another API, so no volume-specific constant is assumed. */
+static void test_second_volume(void)
+{
+    WCHAR cdev[300], ddev[300], cguid[64], dguid[64], names[16], fin[400], label[64], fsn[64], all[600];
+    DWORD cserial = 0, dserial = 0, maxc, flags, n, k, p;
+    ULARGE_INTEGER avail, total, tfree;
+    BY_HANDLE_FILE_INFORMATION bi;
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    int seen_c = 0, seen_d = 0;
+    if (!(GetLogicalDrives() & (1u << ('D' - 'A'))) || GetDriveTypeW(L"D:\\") != DRIVE_FIXED) {
+        printf("NOTE: D: is not a fixed disk here; the second-volume checks do not apply\n");
+        return;
+    }
+    CHECK(GetVolumeInformationW(L"C:\\", NULL, 0, &cserial, NULL, NULL, NULL, 0), "GetVolumeInformationW(C:\\) serial");
+    CHECK(GetVolumeInformationW(L"D:\\", label, 64, &dserial, &maxc, &flags, fsn, 64), "GetVolumeInformationW(D:\\)");
+    CHECK(fsn[0] != 0 && maxc >= 12, "D: reports a file system name and a component length");
+    CHECK(GetDiskFreeSpaceExW(L"D:\\", &avail, &total, &tfree) && total.QuadPart > 0 && tfree.QuadPart <= total.QuadPart,
+          "GetDiskFreeSpaceExW(D:\\): 0 < total, free <= total");
+    n = QueryDosDeviceW(L"C:", cdev, 300);
+    k = QueryDosDeviceW(L"D:", ddev, 300);
+    CHECK_W(n > 0 && k > 0 && wsub(ddev, L"\\Device\\") && !k32t_weq(cdev, ddev), "QueryDosDevice(D:) is a \\Device\\ path other than C:'s");
+    k = QueryDosDeviceW(NULL, all, 600);
+    for (p = 0; k && p < k && all[p]; p += k32t_wlen(all + p) + 1) {
+        if (wieq(all + p, L"C:")) seen_c = 1;
+        if (wieq(all + p, L"D:")) seen_d = 1;
+    }
+    CHECK_W(seen_c && seen_d, "the list of DOS devices has both C: and D:");
+    CHECK(GetVolumeNameForVolumeMountPointW(L"C:\\", cguid, 64) && GetVolumeNameForVolumeMountPointW(L"D:\\", dguid, 64),
+          "GetVolumeNameForVolumeMountPointW(C:\\ and D:\\)");
+    CHECK(guid_ok(dguid, 1) && !k32t_weq(cguid, dguid), "D: has its own \\\\?\\Volume{GUID}\\ name");
+    CHECK(GetVolumePathNamesForVolumeNameW(dguid, names, 16, &n) && k32t_weq(names, L"D:\\") && names[4] == 0,
+          "GetVolumePathNamesForVolumeNameW(D:'s volume) is D:\\");
+    {
+        WCHAR v[64];
+        HANDLE fv = FindFirstVolumeW(v, 64);
+        int c = 0, d = 0;
+        if (fv != INVALID_HANDLE_VALUE) {
+            do { if (k32t_weq(v, cguid)) c = 1; if (k32t_weq(v, dguid)) d = 1; } while (FindNextVolumeW(fv, v, 64));
+            FindVolumeClose(fv);
+        }
+        CHECK(c && d, "FindFirstVolume/FindNextVolume enumerate the volumes of C: and D:");
+    }
+    h = CreateFileW(L"D:\\", FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    CHECK(h != INVALID_HANDLE_VALUE, "the root directory of D: opens");
+    if (h != INVALID_HANDLE_VALUE) {
+        n = GetFinalPathNameByHandleW(h, fin, 400, VOLUME_NAME_DOS);
+        CHECKV_W(n == 7 && k32t_weq(fin, L"\\\\?\\D:\\"), "GetFinalPathNameByHandle(D:\\ root, VOLUME_NAME_DOS) is \\\\?\\D:\\", "n=%u", n);
+        n = GetFinalPathNameByHandleW(h, fin, 400, VOLUME_NAME_NT);
+        CHECK_W(n > 0 && wsub(fin, ddev) && k32t_weq(fin + k32t_wlen(ddev), L"\\"), "... and VOLUME_NAME_NT is QueryDosDevice(D:) + \\");
+        n = GetFinalPathNameByHandleW(h, fin, 400, VOLUME_NAME_GUID);
+        CHECK(n == 49 && k32t_weq(fin, dguid), "... and VOLUME_NAME_GUID is D:'s volume name");
+        CloseHandle(h);
+    }
+    h = FindFirstFileW(L"D:\\*", &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        WCHAR path[300], want[320];
+        int found = 0;
+        do found = !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY); while (!found && FindNextFileW(h, &fd));
+        FindClose(h);
+        if (found && k32t_wlen(fd.cFileName) < 250) {
+            HANDLE f;
+            path[0] = 'D'; path[1] = ':'; path[2] = '\\';
+            memcpy(path + 3, fd.cFileName, (k32t_wlen(fd.cFileName) + 1) * sizeof(WCHAR));
+            f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+            CHECK(f != INVALID_HANDLE_VALUE, "a file in the root of D: opens");
+            if (f != INVALID_HANDLE_VALUE) {
+                CHECK(GetFileInformationByHandle(f, &bi) && bi.dwVolumeSerialNumber == dserial,
+                      "its volume serial number is the one GetVolumeInformation(D:\\) reports");
+                want[0] = '\\'; want[1] = '\\'; want[2] = '?'; want[3] = '\\';
+                memcpy(want + 4, path, (k32t_wlen(path) + 1) * sizeof(WCHAR));
+                n = GetFinalPathNameByHandleW(f, fin, 400, VOLUME_NAME_DOS);
+                CHECK(n > 0 && wieq(fin, want), "GetFinalPathNameByHandle of a D: file is \\\\?\\D:\\<name>");
+                CloseHandle(f);
+            }
+        }
+    }
+    (void)cserial;
+}
+
 /* ================================================================ path names */
 static void test_paths(void)
 {
@@ -857,6 +939,7 @@ int main(void)
     test_replace();
     test_locks_overlapped();
     test_volumes();
+    test_second_volume();
     test_paths();
     SetCurrentDirectoryW(cwd);
     delete_tree(D);

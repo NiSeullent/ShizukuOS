@@ -404,14 +404,21 @@ static BOOL image_path(HANDLE h, char *path, ULONG cap)
     return TRUE;
 }
 
-/* "\SHZ\TESTS\X.EXE" -> "C:\SHZ\TESTS\X.EXE" (Win32) or "\Device\HarddiskVolume1\SHZ\TESTS\X.EXE" (native) */
+/* Loader paths are "\SHZ\TESTS\X.EXE" (volume C:) or "D:\dir\X.EXE" (another volume) -> "C:\SHZ\TESTS\X.EXE" (Win32) or
+ * "\Device\HarddiskVolume1\SHZ\TESTS\X.EXE" (native; k32_volume.c numbering) */
 static int format_path(const char *kpath, int native, WCHAR *out, int cap)
 {
-    static const char dev[] = "\\Device\\HarddiskVolume1";
+    WCHAR dev[32];
     char full[400];
-    size_t n = 0, i;
-    const char *prefix = native ? dev : "C:";
-    for (i = 0; prefix[i]; ++i) full[n++] = prefix[i];
+    size_t n = 0, i, dl;
+    char letter = 'C';
+    if (kpath[0] && kpath[1] == ':') { letter = (char)(kpath[0] & ~0x20); kpath += 2; }
+    if (native) {
+        dl = k32_volume_device((WCHAR)letter, dev);
+        for (i = 0; i < dl; ++i) full[n++] = (char)dev[i];
+    } else {
+        full[n++] = letter; full[n++] = ':';
+    }
     for (i = 0; kpath[i] && n + 1 < sizeof full; ++i) full[n++] = kpath[i];
     full[n] = 0;
     return k32_utf8_to_wide(full, -1, out, cap);            /* includes the NUL; 0 if it does not fit */

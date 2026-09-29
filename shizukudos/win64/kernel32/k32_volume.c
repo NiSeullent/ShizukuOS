@@ -1,21 +1,78 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * kernel32.dll: drives and volumes, path names of files (long/short/final/temporary) and the temporary directory.
  *
- * There is exactly one volume, C:, the RAM file system. Its NT device name is \Device\HarddiskVolume1 (what QueryDosDevice("C:") returns and
- * what NtCreateFile accepts as a path prefix), its volume GUID path is the constant below, and its properties (label, serial number, file
- * system name, sizes, device type) come from NtQueryVolumeInformationFile, i.e. from the kernel. Another drive letter names no device.
+ * The volumes are C:, the RAM file system, and whatever the kernel mounted (D:, a FAT32 disk volume, when a disk is present). A drive exists
+ * when its root opens. The NT device name of a volume is \Device\HarddiskVolumeN with N = 1 for C:, 2 for D:, ... (the kernel's numbering,
+ * fs.c fs_volume_number; what QueryDosDevice returns and what NtCreateFile accepts as a path prefix), its volume GUID path is
+ * \\?\Volume{53485a31-0000-4000-8000-<N as 12 hex digits>}\, and its properties (label, serial number, file system name, sizes, device
+ * type) come from NtQueryVolumeInformationFile, i.e. from the kernel. A drive letter with no mounted volume names no device.
  * The file system keeps no 8.3 aliases, so the short form of a path is its long form (as on an NTFS volume with 8.3 creation disabled);
  * GetLongPathName and GetShortPathName both verify that every component exists (see canonical_path).
  */
 #include "k32.h"
 
-static const WCHAR NT_DEVICE[] = { '\\','D','e','v','i','c','e','\\','H','a','r','d','d','i','s','k','V','o','l','u','m','e','1',0 };
-/* \\?\Volume{GUID}\ : 49 characters */
-static const WCHAR VOLUME_GUID_PATH[] = { '\\','\\','?','\\','V','o','l','u','m','e','{','5','3','4','8','5','a','3','1','-','0','0','0','0','-',
-                                          '4','0','0','0','-','8','0','0','0','-','0','0','0','0','0','0','0','0','0','0','0','1','}','\\',0 };
+static const WCHAR NT_DEVICE[] = { '\\','D','e','v','i','c','e','\\','H','a','r','d','d','i','s','k','V','o','l','u','m','e',0 };
+/* \\?\Volume{GUID}\ : 49 characters; the last 12 hex digits of the GUID are the volume number */
+static const WCHAR VOLUME_GUID_PREFIX[] = { '\\','\\','?','\\','V','o','l','u','m','e','{','5','3','4','8','5','a','3','1','-','0','0','0','0','-',
+                                            '4','0','0','0','-','8','0','0','0','-',0 };
+#define VOLUME_GUID_PREFIX_LEN 35
 #define VOLUME_GUID_LEN 49
 
 static WCHAR up(WCHAR c) { return c >= 'a' && c <= 'z' ? (WCHAR)(c - 32) : c; }
+
+/* The kernel's volume numbering (fs.c): C: 1, D: 2, ... Z: 24, A: 25, B: 26. */
+static unsigned vol_number(WCHAR l)
+{
+    l = up(l);
+    if (l < 'A' || l > 'Z') return 0;
+    return l >= 'C' ? (unsigned)(l - 'B') : (unsigned)(l - 'A') + 25;
+}
+static WCHAR vol_letter(unsigned n)
+{
+    if (n >= 1 && n <= 24) return (WCHAR)('B' + n);
+    if (n == 25 || n == 26) return (WCHAR)('A' + n - 25);
+    return 0;
+}
+
+/* "\Device\HarddiskVolumeN" of a drive letter into out (at least 32 characters); returns its length. */
+size_t k32_volume_device(WCHAR letter, WCHAR *out)
+{
+    const unsigned num = vol_number(letter);
+    size_t n = k32_wlen(NT_DEVICE);
+    unsigned div;
+    memcpy(out, NT_DEVICE, n * sizeof(WCHAR));
+    for (div = 10; div <= num; div *= 10) { }
+    for (div /= 10; div; div /= 10) out[n++] = (WCHAR)('0' + num / div % 10);
+    out[n] = 0;
+    return n;
+}
+
+/* "\\?\Volume{GUID}\" of a drive letter into out (VOLUME_GUID_LEN + 1 characters) */
+static void guid_path(WCHAR letter, WCHAR *out)
+{
+    static const char hex[] = "0123456789abcdef";
+    const unsigned num = vol_number(letter);
+    int i;
+    memcpy(out, VOLUME_GUID_PREFIX, VOLUME_GUID_PREFIX_LEN * sizeof(WCHAR));
+    for (i = 0; i < 12; ++i) out[VOLUME_GUID_PREFIX_LEN + i] = (WCHAR)hex[(num >> (4 * (11 - i))) & 15];
+    out[47] = '}'; out[48] = '\\'; out[49] = 0;
+}
+
+/* The drive letter a "\\?\Volume{GUID}" path (with or without its trailing backslash when `slash_optional`) names, or 0. */
+static WCHAR guid_letter(LPCWSTR s, int slash_optional)
+{
+    WCHAR l;
+    WCHAR g[VOLUME_GUID_LEN + 1];
+    int i;
+    for (l = 'C'; ; l = l == 'Z' ? 'A' : l == 'B' ? 0 : (WCHAR)(l + 1)) {
+        if (!l) return 0;
+        guid_path(l, g);
+        for (i = 0; i < VOLUME_GUID_LEN; ++i)
+            if (up(s[i]) != up(g[i])) break;
+        if (i == VOLUME_GUID_LEN && s[i] == 0) return l;
+        if (slash_optional && i == VOLUME_GUID_LEN - 1 && s[i] == 0) return l;
+    }
+}
 
 /* ---------------------------------------------------------------- drive letters */
 /* The drive a root/path argument names: NULL means the current drive. Returns 0 for anything without a drive letter (UNC, garbage). */
@@ -264,36 +321,43 @@ K32API BOOL WINAPI GetVolumeNameForVolumeMountPointW(LPCWSTR mp, LPWSTR out, DWO
     if (!drive_of(mp, &l) || mp[1] != ':' || mp[2] != '\\' || mp[3]) { shz_set_last_error(ERROR_INVALID_NAME); return FALSE; }
     if (!drive_exists(l)) { shz_set_last_error(ERROR_PATH_NOT_FOUND); return FALSE; }
     if (cap < VOLUME_GUID_LEN + 1) { shz_set_last_error(ERROR_FILENAME_EXCED_RANGE); return FALSE; }
-    memcpy(out, VOLUME_GUID_PATH, (VOLUME_GUID_LEN + 1) * sizeof(WCHAR));
+    guid_path(l, out);
     return TRUE;
-}
-
-static int is_volume_guid_path(LPCWSTR s)
-{
-    size_t i;
-    for (i = 0; i < VOLUME_GUID_LEN; ++i)
-        if (up(s[i]) != up(VOLUME_GUID_PATH[i])) return 0;
-    return s[i] == 0;
 }
 
 K32API BOOL WINAPI GetVolumePathNamesForVolumeNameW(LPCWSTR volume, LPWSTR names, DWORD cap, PDWORD retlen)
 {
+    WCHAR l;
     if (!volume) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
-    if (!is_volume_guid_path(volume)) { shz_set_last_error(ERROR_FILE_NOT_FOUND); return FALSE; }
-    if (retlen) *retlen = 5;                                                         /* "C:\" NUL NUL */
+    l = guid_letter(volume, 0);
+    if (!l || !drive_exists(l)) { shz_set_last_error(ERROR_FILE_NOT_FOUND); return FALSE; }
+    if (retlen) *retlen = 5;                                                         /* "X:\" NUL NUL */
     if (cap < 5 || !names) { shz_set_last_error(ERROR_MORE_DATA); return FALSE; }
-    names[0] = 'C'; names[1] = ':'; names[2] = '\\'; names[3] = 0; names[4] = 0;
+    names[0] = l; names[1] = ':'; names[2] = '\\'; names[3] = 0; names[4] = 0;
     return TRUE;
 }
 
-/* The volumes of this machine: just the one. */
+/* The volumes of this machine, in volume-number order (C:, D:, ...): the enumeration keeps the next number to try. */
 #define VOLFIND_MAGIC 0x564c4f46u
-typedef struct { ULONG magic; int done; } volfind_t;
+typedef struct { ULONG magic; unsigned next; } volfind_t;
 static volfind_t *volfind_of(HANDLE h)
 {
     volfind_t *v = h;
     if (!h || h == INVALID_HANDLE_VALUE || ((uintptr_t)h & 15) || !RtlValidateHeap(ShzProcessHeap(), 0, h) || v->magic != VOLFIND_MAGIC) return 0;
     return v;
+}
+
+/* The next existing volume at or after v->next: its GUID path into out. FALSE when there is none left. */
+static BOOL volfind_step(volfind_t *v, LPWSTR out)
+{
+    for (; v->next <= 26; ++v->next) {
+        const WCHAR l = vol_letter(v->next);
+        if (!drive_exists(l)) continue;
+        guid_path(l, out);                                                           /* \\?\Volume{GUID}\ with its trailing backslash */
+        ++v->next;
+        return TRUE;
+    }
+    return FALSE;
 }
 
 K32API HANDLE WINAPI FindFirstVolumeW(LPWSTR out, DWORD cap)
@@ -303,17 +367,29 @@ K32API HANDLE WINAPI FindFirstVolumeW(LPWSTR out, DWORD cap)
     v = RtlAllocateHeap(ShzProcessHeap(), HEAP_ZERO_MEMORY, sizeof *v);
     if (!v) { shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY); return INVALID_HANDLE_VALUE; }
     v->magic = VOLFIND_MAGIC;
-    memcpy(out, VOLUME_GUID_PATH, (VOLUME_GUID_LEN + 1) * sizeof(WCHAR));           /* \\?\Volume{GUID}\ with its trailing backslash */
+    v->next = 1;
+    if (!volfind_step(v, out)) {                                                     /* C: always exists; kept for completeness */
+        v->magic = 0;
+        RtlFreeHeap(ShzProcessHeap(), 0, v);
+        shz_set_last_error(ERROR_NO_MORE_FILES);
+        return INVALID_HANDLE_VALUE;
+    }
     return v;
 }
 K32API BOOL WINAPI FindNextVolumeW(HANDLE h, LPWSTR out, DWORD cap)
 {
     volfind_t *v = volfind_of(h);
-    (void)out; (void)cap;
+    WCHAR g[VOLUME_GUID_LEN + 1];
+    const unsigned at = v ? v->next : 0;
     if (!v) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
-    v->done = 1;
-    shz_set_last_error(ERROR_NO_MORE_FILES);
-    return FALSE;
+    if (!volfind_step(v, g)) { shz_set_last_error(ERROR_NO_MORE_FILES); return FALSE; }
+    if (!out || cap < VOLUME_GUID_LEN + 1) {                                         /* the same volume is returned by the next call */
+        v->next = at;
+        shz_set_last_error(ERROR_FILENAME_EXCED_RANGE);
+        return FALSE;
+    }
+    memcpy(out, g, (VOLUME_GUID_LEN + 1) * sizeof(WCHAR));
+    return TRUE;
 }
 K32API BOOL WINAPI FindVolumeClose(HANDLE h)
 {
@@ -327,12 +403,18 @@ K32API BOOL WINAPI FindVolumeClose(HANDLE h)
 /* DOS device names: the drive letter of the volume maps to its NT device. Returns the characters stored, including the terminating NULs. */
 K32API DWORD WINAPI QueryDosDeviceW(LPCWSTR name, LPWSTR target, DWORD cap)
 {
-    WCHAR l;
-    const size_t dev = k32_wlen(NT_DEVICE);
-    if (!name) {                                                                     /* every DOS device name: "C:" */
-        if (cap < 4) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return 0; }
-        target[0] = 'C'; target[1] = ':'; target[2] = 0; target[3] = 0;
-        return 4;
+    WCHAR l, device[32];
+    size_t dev;
+    if (!name) {                                                                     /* every DOS device name: "C:" NUL "D:" NUL ... NUL */
+        DWORD n = 0;
+        for (l = 'A'; l <= 'Z'; ++l) {
+            if (!drive_exists(l)) continue;
+            if (n + 4 > cap) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return 0; }
+            target[n++] = l; target[n++] = ':'; target[n++] = 0;
+        }
+        if (n + 1 > cap) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return 0; }
+        target[n++] = 0;
+        return n;
     }
     if (!((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z')) || name[1] != ':' || name[2]) {
         shz_set_last_error(ERROR_FILE_NOT_FOUND);
@@ -340,8 +422,9 @@ K32API DWORD WINAPI QueryDosDeviceW(LPCWSTR name, LPWSTR target, DWORD cap)
     }
     l = up(name[0]);
     if (!drive_exists(l)) { shz_set_last_error(ERROR_FILE_NOT_FOUND); return 0; }
+    dev = k32_volume_device(l, device);
     if (cap < dev + 2) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return 0; }
-    memcpy(target, NT_DEVICE, (dev + 1) * sizeof(WCHAR));
+    memcpy(target, device, (dev + 1) * sizeof(WCHAR));
     target[dev + 1] = 0;
     return (DWORD)dev + 2;
 }
@@ -355,26 +438,44 @@ K32API DWORD WINAPI GetFinalPathNameByHandleW(HANDLE h, LPWSTR out, DWORD cap, D
     NTSTATUS st;
     size_t n = 0, nlen, i;
     const WCHAR *name;
+    WCHAR letter;
     const DWORD vol = flags & 0x7, kind = flags & 0x8;
     if ((flags & ~0xfu) || (vol != 0 && vol != 1 && vol != 2 && vol != 4) || (kind != 0 && kind != 8)) {
         shz_set_last_error(ERROR_INVALID_PARAMETER);
         return 0;
+    }
+    {                                                                                /* the volume: FileVolumeNameInformation "\Device\HarddiskVolumeN" */
+        BYTE vraw[4 + 2 * 40];
+        const size_t pre = k32_wlen(NT_DEVICE);
+        unsigned num = 0;
+        size_t i, vl;
+        st = NtQueryInformationFile(h, &io, vraw, sizeof vraw, 58);
+        if (!NT_SUCCESS(st) || st == STATUS_BUFFER_OVERFLOW) { k32_nt_error(st == STATUS_BUFFER_OVERFLOW ? STATUS_INVALID_PARAMETER : st); return 0; }
+        vl = *(const ULONG *)vraw / 2;
+        name = (const WCHAR *)(vraw + 4);
+        for (i = 0; i < pre && i < vl && up(name[i]) == up(NT_DEVICE[i]); ++i) { }
+        if (i != pre) { shz_set_last_error(ERROR_INVALID_PARAMETER); return 0; }
+        for (; i < vl && name[i] >= '0' && name[i] <= '9' && num < 1000; ++i) num = num * 10 + (unsigned)(name[i] - '0');
+        letter = vol_letter(num);
+        if (i != vl || !letter) { shz_set_last_error(ERROR_INVALID_PARAMETER); return 0; }
     }
     st = NtQueryInformationFile(h, &io, raw, sizeof raw, 9);                          /* volume-relative name: "\dir\file" */
     if (!NT_SUCCESS(st) || st == STATUS_BUFFER_OVERFLOW) { k32_nt_error(st == STATUS_BUFFER_OVERFLOW ? STATUS_NAME_TOO_LONG : st); return 0; }
     nlen = *(const ULONG *)raw / 2;
     name = (const WCHAR *)(raw + 4);
     switch (vol) {
-    case 0:                                                                          /* VOLUME_NAME_DOS: \\?\C:\dir\file */
-        full[n++] = '\\'; full[n++] = '\\'; full[n++] = '?'; full[n++] = '\\'; full[n++] = 'C'; full[n++] = ':';
+    case 0:                                                                          /* VOLUME_NAME_DOS: \\?\X:\dir\file */
+        full[n++] = '\\'; full[n++] = '\\'; full[n++] = '?'; full[n++] = '\\'; full[n++] = letter; full[n++] = ':';
         break;
-    case 1:                                                                          /* VOLUME_NAME_GUID: \\?\Volume{GUID}\dir\file */
-        memcpy(full, VOLUME_GUID_PATH, (VOLUME_GUID_LEN - 1) * sizeof(WCHAR));
+    case 1: {                                                                        /* VOLUME_NAME_GUID: \\?\Volume{GUID}\dir\file */
+        WCHAR g[VOLUME_GUID_LEN + 1];
+        guid_path(letter, g);
+        memcpy(full, g, (VOLUME_GUID_LEN - 1) * sizeof(WCHAR));
         n = VOLUME_GUID_LEN - 1;
         break;
-    case 2:                                                                          /* VOLUME_NAME_NT: \Device\HarddiskVolume1\dir\file */
-        n = k32_wlen(NT_DEVICE);
-        memcpy(full, NT_DEVICE, n * sizeof(WCHAR));
+    }
+    case 2:                                                                          /* VOLUME_NAME_NT: \Device\HarddiskVolumeN\dir\file */
+        n = k32_volume_device(letter, full);
         break;
     default: break;                                                                  /* VOLUME_NAME_NONE: \dir\file */
     }
