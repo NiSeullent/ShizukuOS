@@ -105,6 +105,7 @@ struct nvme_ctrl {
     unsigned nns;
     /* async completions */
     nvme_slot_t *done_head, *done_tail;
+    volatile unsigned async_out;                        /* async commands submitted, callback not yet run */
     ksem_t worker_sem;
     thread_t *worker;
     /* statistics */
@@ -119,7 +120,7 @@ static unsigned nctrl;
 
 /* ---------------------------------------------------------------- helpers */
 static inline uint64_t tsc(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
-static inline uint64_t tsc_ms(uint64_t t0) { return (tsc() - t0) / 1000000u; }   /* nominal 1 GHz TSC (boot32.c) */
+static inline uint64_t tsc_ms(uint64_t t0) { return (tsc() - t0) / blk_tsc_per_ms(); }   /* calibrated (blk.c) */
 static inline void relax(void) { __asm__ volatile("pause" ::: "memory"); }
 static inline void wmb(void) { __asm__ volatile("sfence" ::: "memory"); }
 static inline void mb(void) { __asm__ volatile("mfence" ::: "memory"); }
@@ -670,11 +671,12 @@ static void worker(void *arg)
         nvme_slot_t *s;
         uint64_t f;
         unsigned i;
-        sem_wait_timeout(&c->worker_sem, 20);
+        if (c->async_out) sem_wait_timeout(&c->worker_sem, 20);     /* async commands out: watch their timeouts */
+        else sem_wait(&c->worker_sem);                              /* idle: sleep until the next submission */
         for (;;) {
             f = irq_save();
             s = c->done_head;
-            if (s) { c->done_head = s->next_done; if (!c->done_head) c->done_tail = 0; }
+            if (s) { c->done_head = s->next_done; if (!c->done_head) c->done_tail = 0; if (c->async_out) --c->async_out; }
             irq_restore(f);
             if (!s) break;
             {
@@ -726,6 +728,12 @@ static int ns_async(nvme_ns_t *ns, int write, uint64_t lba, unsigned count, cons
     if (build_prp(s, buf, count << ns->lba_shift)) { slot_put(c, s); return -1; }
     s->cb = done;
     s->cb_ctx = ctx;
+    {
+        const uint64_t f = irq_save();
+        const unsigned was = c->async_out++;
+        irq_restore(f);
+        if (!was) sem_post(&c->worker_sem);                         /* the worker may be in its untimed sleep */
+    }
     io_submit(c, s, 1);
     return 0;
 }

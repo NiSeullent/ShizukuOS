@@ -16,7 +16,7 @@
  *        RCA 1) -> CMD9 -> CMD7 -> CMD8 SEND_EXT_CSD (512 bytes) -> SWITCH(BUS_WIDTH=4 bit) -> CMD16 -> 26 MHz.
  *   Capacity: SD CSD 1.0 (SDSC, byte addressed): (C_SIZE+1) * 2^(C_SIZE_MULT+2) * 2^READ_BL_LEN; CSD 2.0 (SDHC/SDXC,
  *   block addressed, OCR.CCS=1): (C_SIZE+1) * 512 KiB; eMMC: EXT_CSD SEC_COUNT (sector mode) else the CSD formula.
- *   QEMU 8.2 models SD cards only (its "emmc" device arrived in QEMU 9.1), so the MMC branch is written to the JEDEC
+ *   QEMU 8.2 models SD cards only (no "emmc" device; later QEMU releases add one), so the MMC branch is written to the JEDEC
  *   spec and exercised only by tests/run_sdhci_host.py's register-level eMMC model, not by a QEMU run.
  *
  * Data: CMD17/CMD18 read, CMD24/CMD25 write, 512-byte blocks, multi-block with Auto CMD12. Transport: ADMA2 with
@@ -89,7 +89,7 @@ typedef struct {
     uint8_t *bounce;                                    /* one page: SCR / EXT_CSD / misaligned sectors */
     uint64_t bounce_pa;
     kmutex_t lock;
-    uint8_t ext_csd_rev, mmc_bus_width;
+    uint8_t ext_csd_rev, mmc_bus_width, hostctl;   /* hostctl: shadow of host control 1 */
     uint64_t cmds, adma_xfers, pio_xfers, errors, retries, line_resets, timeouts;
     uint32_t last_err, last_r1;
 } sd_host_t;
@@ -105,7 +105,13 @@ static inline uint32_t rd32(sd_host_t *h, unsigned o) { return *(volatile uint32
 static inline void wr8(sd_host_t *h, unsigned o, uint8_t v) { *(volatile uint8_t *)(h->r + o) = v; }
 static inline void wr16(sd_host_t *h, unsigned o, uint16_t v) { *(volatile uint16_t *)(h->r + o) = v; }
 static inline void wr32(sd_host_t *h, unsigned o, uint32_t v) { *(volatile uint32_t *)(h->r + o) = v; }
-static inline uint64_t now_us(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return (((uint64_t)hi << 32) | lo) / 1000u; }
+static inline uint64_t now_us(void)
+{
+    uint32_t lo, hi;
+    const uint64_t per_us = blk_tsc_per_ms() / 1000u;   /* calibrated (blk.c) */
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return (((uint64_t)hi << 32) | lo) / (per_us ? per_us : 1);
+}
 static int can_sleep(void)
 {
     uint64_t f;
@@ -173,7 +179,11 @@ static int set_clock(sd_host_t *h, uint32_t khz)
 }
 
 /* ---------------------------------------------------------------- commands */
-static void clear_status(sd_host_t *h) { wr16(h, R_NORINT, 0xffff); wr16(h, R_ERRINT, 0xffff); }
+/* Register traffic is kept small: every access is a VM exit under a hypervisor and a bus round trip on hardware, so
+ * normal + error status are cleared with one 32-bit write, block size + count and transfer mode + command are written
+ * as 32-bit pairs, and host control 1 is shadowed. */
+static void clear_status(sd_host_t *h) { wr32(h, R_NORINT, 0xffffffffu); }
+static void set_hostctl(sd_host_t *h, uint8_t v) { if (h->hostctl != v) { wr8(h, R_HOSTCTL, v); h->hostctl = v; } }
 
 /* Error path shared by commands and transfers: record, reset the lines, clear the status. */
 static int fail(sd_host_t *h, uint16_t err, int data, const char *what)
@@ -190,7 +200,7 @@ static int fail(sd_host_t *h, uint16_t err, int data, const char *what)
 
 /* Issues one command; for data commands the caller has programmed block size/count and TRNMOD. resp gets 1 dword
  * (R1/R3/R6/R7) or 4 (R2: bits 127:8 of CID/CSD, right-aligned as the controller stores them). */
-static int sd_cmd(sd_host_t *h, unsigned idx, uint32_t arg, unsigned flags, uint32_t *resp)
+static int sd_cmd_tm(sd_host_t *h, unsigned idx, uint32_t arg, unsigned flags, uint32_t *resp, uint16_t tm)
 {
     const uint32_t inhibit = PS_CMD_INHIBIT | (((flags & CMD_DATA) || (flags & 3) == CMD_RESP_48B) ? PS_DAT_INHIBIT : 0);
     uint64_t t0;
@@ -203,7 +213,7 @@ static int sd_cmd(sd_host_t *h, unsigned idx, uint32_t arg, unsigned flags, uint
     clear_status(h);
     ++h->cmds;
     wr32(h, R_ARG, arg);
-    wr16(h, R_CMD, (uint16_t)((idx << 8) | (flags & 0x3f)));
+    wr32(h, R_TRNMOD, tm | ((uint32_t)((idx << 8) | (flags & 0x3f)) << 16));   /* transfer mode + command: issues it */
     t0 = now_us();
     for (;;) {
         ni = rd16(h, R_NORINT);
@@ -233,6 +243,11 @@ static int sd_cmd(sd_host_t *h, unsigned idx, uint32_t arg, unsigned flags, uint
         wr16(h, R_NORINT, NI_XFER);
     }
     return SD_OK;
+}
+
+static int sd_cmd(sd_host_t *h, unsigned idx, uint32_t arg, unsigned flags, uint32_t *resp)
+{
+    return sd_cmd_tm(h, idx, arg, flags, resp, 0);
 }
 
 static int app_cmd(sd_host_t *h, unsigned idx, uint32_t arg, unsigned flags, uint32_t *resp)
@@ -322,14 +337,11 @@ static int data_cmd(sd_host_t *h, unsigned idx, uint32_t arg, int write, void *b
     if (h->adma && !h->force_pio && bsize % 4 == 0 && adma_table(h, buf, bytes) == 0) {
         dma = 1;
         tm |= TM_DMA;
-        wr8(h, R_HOSTCTL, (uint8_t)((rd8(h, R_HOSTCTL) & ~0x18) | 0x10));     /* DMA select: ADMA2 32-bit */
+        set_hostctl(h, (uint8_t)((h->hostctl & ~0x18) | 0x10));              /* DMA select: ADMA2 32-bit */
         wr32(h, R_ADMAADDR, (uint32_t)h->desc_pa);
-        wr32(h, R_ADMAADDR_HI, 0);
     }
-    wr16(h, R_BLKSIZE, (uint16_t)((7u << 12) | bsize));
-    wr16(h, R_BLKCNT, (uint16_t)blocks);
-    wr16(h, R_TRNMOD, tm);
-    rc = sd_cmd(h, idx, arg, RSP_R1 | CMD_DATA, &r1);
+    wr32(h, R_BLKSIZE, ((7u << 12) | bsize) | ((uint32_t)blocks << 16));      /* block size + block count */
+    rc = sd_cmd_tm(h, idx, arg, RSP_R1 | CMD_DATA, &r1, tm);
     h->last_r1 = r1;
     if (rc) return rc;
     if (r1 & R1_ERRORS) {
@@ -502,7 +514,7 @@ static int init_sd(sd_host_t *h, int v2)
         h->dev.sectors = ((uint64_t)bits128(h->csd, 48, 22) + 1) * 1024u;
     }
     if (app_cmd(h, 6, 2, RSP_R1, &r) == SD_OK) {        /* 4-bit bus */
-        wr8(h, R_HOSTCTL, (uint8_t)(rd8(h, R_HOSTCTL) | 2));
+        set_hostctl(h, (uint8_t)(h->hostctl | 2));
         h->bus4 = 1;
     }
     if ((rc = sd_cmd(h, 16, 512, RSP_R1, &r))) return rc;
@@ -554,7 +566,7 @@ static int init_mmc(sd_host_t *h)
         /* SWITCH: write byte BUS_WIDTH (183) = 1 (4 bit) */
         if (sd_cmd(h, 6, (3u << 24) | (183u << 16) | (1u << 8), RSP_R1B, &r) == SD_OK && card_status(h, &r) == SD_OK &&
             !(r & (1u << 7))) {                         /* SWITCH_ERROR clear */
-            wr8(h, R_HOSTCTL, (uint8_t)(rd8(h, R_HOSTCTL) | 2));
+            set_hostctl(h, (uint8_t)(h->hostctl | 2));
             h->bus4 = 1;
             h->mmc_bus_width = 4;
         }
@@ -585,6 +597,8 @@ static int host_init(sd_host_t *h)
     wr16(h, R_ERRSIGEN, 0);
     wr8(h, R_TIMEOUT, 0x0e);
     wr8(h, R_HOSTCTL, 0);
+    h->hostctl = 0;
+    wr32(h, R_ADMAADDR_HI, 0);                          /* 32-bit descriptors: the high half stays 0 */
     if (set_clock(h, 400)) return -1;
     clear_status(h);
     sd_cmd(h, 0, 0, RSP_NONE, 0);                       /* GO_IDLE */

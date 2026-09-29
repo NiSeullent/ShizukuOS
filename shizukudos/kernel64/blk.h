@@ -105,6 +105,10 @@ blk_dev_t *blk_whole(blk_dev_t *d);             /* the whole device under a part
 int blk_scan_partitions(blk_dev_t *whole);
 /* Physical address behind a kernel virtual address (any kernel-half mapping), 0 when unmapped. */
 uint64_t blk_kva_to_pa(const void *kva);
+/* TSC ticks per millisecond for driver deadlines (usable with interrupts off, before the scheduler): measured once
+ * against PIT channel 2 in the standalone profile, else the nominal 1 GHz of boot32.c. Under QEMU TCG the TSC runs at
+ * the host's rate, not at the nominal one, which is why it is measured. */
+uint64_t blk_tsc_per_ms(void);
 
 /* Drivers (each registers its devices; called once from disk_init() in the standalone profile). */
 int ahci_blk_init(void);                        /* ahci_blk.c: 0 when a disk was registered, -1 otherwise (logged) */

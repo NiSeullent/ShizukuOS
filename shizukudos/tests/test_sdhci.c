@@ -428,6 +428,12 @@ void mock_write(volatile uint8_t *regs, unsigned off, uint32_t v, unsigned size)
         }
         return;
     }
+    if (off == 0x30 && size == 4) {                                              /* W1C of normal + error status */
+        w16(0x32, r16(0x32) & ~(uint16_t)(v >> 16));
+        w16(0x30, r16(0x30) & ~(uint16_t)(v & 0x7fff));
+        if (!r16(0x32)) w16(0x30, r16(0x30) & 0x7fff);
+        return;
+    }
     if ((off == 0x30 || off == 0x32) && size == 2) {                            /* W1C; ERR clears with the error bits */
         w16(off, r16(off) & ~(uint16_t)(off == 0x30 ? v & 0x7fff : v));
         if (!r16(0x32)) w16(0x30, r16(0x30) & 0x7fff);
@@ -447,7 +453,7 @@ void mock_write(volatile uint8_t *regs, unsigned off, uint32_t v, unsigned size)
     }
     for (i = 0; i < size; ++i) hc.r[off + i] = (uint8_t)(v >> (8 * i));
     if (off == 0x2c && size == 2 && (v & 1)) hc.r[0x2c] |= 2;                    /* internal clock stable */
-    if (off == 0x0e && size == 2) do_command();
+    if ((off == 0x0e && size == 2) || (off == 0x0c && size == 4)) do_command();   /* the command register's upper byte */
 }
 
 uint64_t mock_now_us(void) { return hc.now; }

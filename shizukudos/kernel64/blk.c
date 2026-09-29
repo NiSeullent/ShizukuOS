@@ -3,6 +3,7 @@
  * partitions found by blk_part.c become devices of their own that bounds-check and forward to the parent.
  */
 #include "blk.h"
+#include "pci.h"
 
 static blk_dev_t *head, *tail;
 static unsigned count;
@@ -150,6 +151,34 @@ uint64_t blk_kva_to_pa(const void *kva)
         t = (const uint64_t *)p2v(e & 0x000ffffffffff000ull);
     }
     return 0;
+}
+
+static inline uint64_t rdtsc64(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
+
+uint64_t blk_tsc_per_ms(void)
+{
+    static uint64_t per_ms;
+    if (per_ms) return per_ms;
+    per_ms = 1000000u;                                  /* nominal 1 GHz */
+#ifdef SHZ_STANDALONE
+    {   /* PIT channel 2, mode 0, 11932 counts = 10 ms: OUT2 (port 0x61 bit 5) rises at terminal count */
+        const uint8_t saved = k_inb(0x61);
+        const uint64_t f = irq_save();
+        uint64_t t0, t1, guard = 0;
+        k_outb(0x61, (uint8_t)((saved & ~0x02) | 0x01));   /* gate on, speaker off */
+        k_outb(0x43, 0xb0);
+        k_outb(0x42, 11932 & 0xff);
+        k_outb(0x42, 11932 >> 8);
+        t0 = rdtsc64();
+        while (!(k_inb(0x61) & 0x20) && ++guard < 50000000u) ;
+        t1 = rdtsc64();
+        k_outb(0x61, saved);
+        irq_restore(f);
+        if (guard < 50000000u && (t1 - t0) / 10 >= 100000u && (t1 - t0) / 10 <= 20000000u) per_ms = (t1 - t0) / 10;
+        kprintf("K64 blk: TSC %llu kHz%s\n", per_ms, per_ms == 1000000u ? " (nominal: PIT calibration unusable)" : " (PIT channel 2)");
+    }
+#endif
+    return per_ms;
 }
 
 /* ---------------------------------------------------------------- partitions */
