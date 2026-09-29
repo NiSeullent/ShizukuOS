@@ -60,6 +60,31 @@ private:
     bool free_;
 };
 class bad_cast : public exception {};
+// msvcp140.dll
+class logic_error : public exception {};
+class length_error : public logic_error {};
+class out_of_range : public logic_error {};
+class runtime_error : public exception {};
+class overflow_error : public runtime_error {};
+class bad_alloc : public exception {};
+[[noreturn]] __declspec(dllimport) void __cdecl _Xlength_error(const char *);
+[[noreturn]] __declspec(dllimport) void __cdecl _Xout_of_range(const char *);
+[[noreturn]] __declspec(dllimport) void __cdecl _Xoverflow_error(const char *);
+[[noreturn]] __declspec(dllimport) void __cdecl _Xbad_alloc();
+}
+extern "C" {
+struct Thrd { void *handle; unsigned id; };
+__declspec(dllimport) void _Mtx_init_in_situ(void *mtx, int flags);
+__declspec(dllimport) int _Mtx_lock(void *mtx);
+__declspec(dllimport) int _Mtx_trylock(void *mtx);
+__declspec(dllimport) int _Mtx_unlock(void *mtx);
+__declspec(dllimport) int _Mtx_current_owns(void *mtx);
+__declspec(dllimport) void _Cnd_init_in_situ(void *cnd);
+__declspec(dllimport) int _Cnd_wait(void *cnd, void *mtx);
+__declspec(dllimport) int _Cnd_broadcast(void *cnd);
+__declspec(dllimport) int _Thrd_start(Thrd *t, unsigned(__stdcall *fn)(void *), void *arg);
+__declspec(dllimport) int _Thrd_join(Thrd t, int *result);
+__declspec(dllimport) unsigned _Thrd_id(void);
 }
 
 // ---------------------------------------------------------------- reporting
@@ -280,6 +305,53 @@ static int t_rtti()
     return r;
 }
 
+// ---------------------------------------------------------------- msvcp140
+static int t_msvcp_exceptions()
+{
+    int r = 0;
+    try { std::_Xlength_error("vector too long"); } catch (std::logic_error &e) { r += streq(e.what(), "vector too long"); }
+    try { std::_Xout_of_range("invalid index"); } catch (std::length_error &) { r += 5; } catch (std::exception &e) { r += 10 * streq(e.what(), "invalid index"); }
+    try { std::_Xoverflow_error("ovf"); } catch (std::runtime_error &e) { r += 100 * streq(e.what(), "ovf"); }
+    try { std::_Xbad_alloc(); } catch (std::bad_alloc &e) { r += 1000 * streq(e.what(), "bad allocation"); }
+    return r;
+}
+alignas(8) static unsigned char g_mtx[80], g_cnd[72], g_rmtx[80];
+static int g_counter, g_done;
+static unsigned __stdcall mtx_worker(void *arg)
+{
+    for (int i = 0; i < 2000; ++i) {
+        _Mtx_lock(g_mtx);
+        ++g_counter;
+        _Mtx_unlock(g_mtx);
+    }
+    _Mtx_lock(g_mtx);
+    ++g_done;
+    _Cnd_broadcast(g_cnd);
+    _Mtx_unlock(g_mtx);
+    return (unsigned)(unsigned long long)arg;
+}
+static int t_msvcp_threads()
+{
+    Thrd t1, t2;
+    int r1 = 0, r2 = 0, ok = 1;
+    _Mtx_init_in_situ(g_mtx, 1);                          // _Mtx_plain
+    _Cnd_init_in_situ(g_cnd);
+    _Mtx_init_in_situ(g_rmtx, 0x101);                     // _Mtx_plain | _Mtx_recursive
+    ok &= _Mtx_lock(g_rmtx) == 0 && _Mtx_trylock(g_rmtx) == 0 && _Mtx_current_owns(g_rmtx);
+    _Mtx_unlock(g_rmtx);
+    ok &= _Mtx_current_owns(g_rmtx) != 0;
+    _Mtx_unlock(g_rmtx);
+    ok &= !_Mtx_current_owns(g_rmtx);
+    if (_Thrd_start(&t1, mtx_worker, (void *)11) || _Thrd_start(&t2, mtx_worker, (void *)22)) return -1;
+    ok &= t1.id != t2.id && t1.id != _Thrd_id();
+    _Mtx_lock(g_mtx);
+    while (g_done < 2) _Cnd_wait(g_cnd, g_mtx);
+    ok &= _Mtx_current_owns(g_mtx) != 0;
+    _Mtx_unlock(g_mtx);
+    ok &= _Thrd_join(t1, &r1) == 0 && _Thrd_join(t2, &r2) == 0 && r1 == 11 && r2 == 22;
+    return ok ? g_counter : -2;
+}
+
 // ---------------------------------------------------------------- threads
 static unsigned long __stdcall thread_body(void *arg)
 {
@@ -374,6 +446,8 @@ extern "C" void ShzCxxStart()
     EXPECT("longjmp from __setjmpex state unwinds through a __finally", t_longjmp(), 13);
     EXPECT("dynamic_cast (cross, down, failing, reference -> bad_cast) and typeid", t_rtti(), 1111);
     EXPECT("two threads throwing and catching concurrently keep separate exception state", t_threads(), 1);
+    EXPECT("msvcp140 std::_X* helpers throw length_error / out_of_range / overflow_error / bad_alloc with their messages", t_msvcp_exceptions(), 1111);
+    EXPECT("msvcp140 _Mtx_* / _Cnd_* / _Thrd_*: recursive mutex, two workers counting under a mutex, condition wait, join", t_msvcp_threads(), 4000);
     unsigned long code = run_child(1);
     check("an exception leaving a noexcept function calls std::terminate (abort: exit code 3)", code == 3, (long long)code);
     code = run_child(2);
