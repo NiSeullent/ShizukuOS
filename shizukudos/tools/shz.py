@@ -183,6 +183,11 @@ def suite_host(results):
            "PASS" if hashes[0][3] == hashes[1][3] else "FAIL", detail=hashes[0][3][:16])
     manifest = shzlib.load_manifest()
     for name, spec in manifest["upstreams"].items():
+        if spec.get("corpus") and not (shzlib.UPSTREAM_DIR / name / ".git").exists():
+            # driver-corpus sources (~650 MB) are fetched only by shizukudos/ntdrv/corpus/build.py, never by the boot builds
+            record(results, f"upstream {name} pinned at {spec['commit'][:12]} (driver corpus)", "SKIP",
+                   detail="not fetched; shizukudos/ntdrv/corpus/build.py fetches it")
+            continue
         head = subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name), "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
         subs = {sub: subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name / sub), "rev-parse", "HEAD"],
@@ -500,9 +505,9 @@ def cmd_package(args):
                 files.append((path, f"source/{path.relative_to(REPO)}"))
     # GPL/LGPL source offer: the exact upstream trees the binaries were built from (submodules included:
     # CSMWrap LGPL-2.1 + SeaBIOS LGPL-3.0 + its BSD/MIT/Apache parts).
-    for upstream in shzlib.load_manifest()["upstreams"]:
+    for upstream, spec in shzlib.load_manifest()["upstreams"].items():
         tree = shzlib.UPSTREAM_DIR / upstream
-        if tree.exists():
+        if tree.exists() and not spec.get("corpus"):          # corpus binaries are not in this bundle
             tar = out / f"{upstream}-{shzlib.load_manifest()['upstreams'][upstream]['commit'][:12]}.tar.gz"
             run(["tar", "--exclude=.git", "-czf", tar, "-C", tree.parent, upstream], timeout=300)
             files.append((tar, f"upstream-source/{tar.name}"))

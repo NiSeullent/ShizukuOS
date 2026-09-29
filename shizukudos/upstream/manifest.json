@@ -68,6 +68,45 @@
       "seabios_version": "578d260b",
       "version_note": "Fixed copies of what `git describe --tags --always` printed for the pinned commits (CSMWrap) and `git describe --always --tags --long` (seabios submodule, no tags fetched) on 2026-09-29; fixed so later upstream tags cannot change the binary.",
       "patches": []
+    },
+    "reactos": {
+      "repository": "https://github.com/reactos/reactos.git",
+      "ref": "master",
+      "commit": "f06eace89e11b6513afcf65b653f2d360db7ba77",
+      "license": "GPL-2.0 (COPYING is the GPLv2 text; the corpus driver sources state GPL-2.0+ or 'GPL - See COPYING'). Third-party components used by the corpus, per media/doc/3rd Party Files.txt: MS-PL (drivers/storage/class/classpnp, disk, cdrom), MIT (sdk/lib/drivers/wdf = Microsoft WDF), BSD-3-Clause (drivers/network/dd/netkvm), BSD (drivers/bus/pcix, COPYING.ARM), UniATA BSD-style licence (drivers/storage/ide/uniata)",
+      "license_files": ["COPYING", "COPYING.LIB"],
+      "execution_mode": "NT kernel-mode driver sources (x64 WDM), compiled unmodified as the NT driver corpus",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "shizukudos/ntdrv/corpus/build.py: each driver built from its own CMakeLists.txt (evaluated by the script) with x86_64-w64-mingw32-gcc (C++: x86_64-w64-mingw32-g++ or clang++) against the ReactOS sdk/include headers, ReactOS host tools (hpp, spec2def, pefixup, geninc, asmpp, widl, gcc_plugin_seh) built from this tree, linked --subsystem native with import libraries generated from the ReactOS .spec files (no RosBE, no CMake)",
+      "patches": []
+    },
+    "virtio-win": {
+      "repository": "https://github.com/virtio-win/kvm-guest-drivers-windows.git",
+      "ref": "master",
+      "commit": "04e70e76c966fd9247a523e41c1b6c624e9b46eb",
+      "license": "BSD-3-Clause (LICENSE)",
+      "license_files": ["LICENSE"],
+      "execution_mode": "NT kernel-mode driver sources (NetKVM NDIS 6.x, viostor StorPort, vioinput/viogpudo KMDF/WDM)",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "shizukudos/ntdrv/corpus/build.py + corpus/vcxproj.py: viostor, NetKVM (NDIS 6.85), vioinput (KMDF), viogpudo (WDDM DOD) attempted from their .vcxproj with the ReactOS headers standing in for the WDK; results in docs/shizukudos10/DRIVER_CORPUS.md",
+      "patches": []
+    },
+    "windows-driver-frameworks": {
+      "repository": "https://github.com/microsoft/Windows-Driver-Frameworks.git",
+      "ref": "master",
+      "commit": "b6191d9543441329154da32f7ab9bdd97228dd3c",
+      "license": "MIT (LICENSE)",
+      "license_files": ["LICENSE"],
+      "execution_mode": "KMDF (Wdf01000.sys) and UMDF v2 framework sources; assessed against the copy ReactOS carries (sdk/lib/drivers/wdf, built by the corpus)",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "not built from this tree (MSBuild/WDK project); the ReactOS copy of the same sources (KMDF 1.17) is built by shizukudos/ntdrv/corpus/build.py (wdf01000, wdfldr); assessment in docs/shizukudos10/DRIVER_CORPUS.md",
+      "patches": []
     }
   },
   "tools": {
