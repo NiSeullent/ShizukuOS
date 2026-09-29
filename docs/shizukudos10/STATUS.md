@@ -86,8 +86,8 @@ UEFI 메모리 맵을 E820으로 바꾸고, ACPI/SMBIOS/MP/$PIR 표를 준비하
 | 항목 | 증거 | 결과 (QEMU 8.2.2 **TCG**, KVM 없음) |
 | --- | --- | --- |
 | `shz.py test --suite host` (CSMWrap·hd32·dual 각 2회 빌드 동일, 서브모듈 핀) | BUILT | VERIFIED 8 PASS |
-| dual.img를 **레거시 BIOS**로 부팅(QEMU SeaBIOS 1.16.3, q35, AHCI, 256 MiB, 2 vCPU): `dos16/test_csm.py --image dual …` | GUEST_RUN | PASS (검사 54개) |
-| 같은 dual.img를 **UEFI**로 부팅(OVMF 2024.02, CSM 없음) → CSMWrap → SeaBIOS CSM16 → 같은 MBR → FreeDOS, 같은 하드웨어: `csm/test_qemu.py` | GUEST_RUN | PASS (검사 72개, SHZ-EXIT까지 약 9초) |
+| dual.img를 **레거시 BIOS**로 부팅(QEMU SeaBIOS 1.16.3, q35, AHCI, 256 MiB, 2 vCPU): `dos16/test_csm.py --image dual …` | GUEST_RUN | PASS (검사 54개). `-machine pc`(i440FX, IDE, 64 MiB, 1 vCPU)에서도 PASS |
+| 같은 dual.img를 **UEFI**로 부팅(OVMF 2024.02, CSM 없음) → CSMWrap → SeaBIOS CSM16 → 같은 MBR → FreeDOS, 같은 하드웨어: `csm/test_qemu.py` | GUEST_RUN | PASS (검사 72개, SHZ-EXIT까지 9–17초, 호스트 부하에 따라) |
 | 두 경로의 DOS16 결과(T_MODE/T_BIOS/T_COM/T_EXE, 종료코드 42)와 host 검사 판정 | GUEST_RUN | 동일. RESULT.TXT 차이는 T_BIOS `EXT`(=INT 15h 88h, 아래 표)뿐 |
 | 1 vCPU UEFI 부팅(음성) | GUEST_RUN | CSMWrap이 `No AP available for BIOS proxy`로 중단하고 DOS는 시작되지 않음 |
 
