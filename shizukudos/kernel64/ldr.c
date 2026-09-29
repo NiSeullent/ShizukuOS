@@ -51,6 +51,7 @@ typedef struct module {
     const uint8_t *file;
     uint64_t fsize;
     image_map_t *img;                   /* lazily mapped (disk-backed) image, else NULL */
+    int32_t fail_status;                /* state -1: why loading failed (returned again instead of a half-loaded module) */
     pe_info_t info;
     uint64_t base;
     int state;                          /* 0 loading, 1 mapped and linked */
@@ -644,8 +645,22 @@ static int32_t load_module_file(process_t *p, const char *name, fsnode_t *node, 
     m->next = p->modules;
     p->modules = m;                                             /* visible while loading: circular imports terminate */
     st = map_module(p, m);
-    if (!st) st = link_module(p, m, depth);
-    if (st) return st;
+    if (!st) {
+        st = link_module(p, m, depth);
+        if (st) {                                               /* mapped but not linkable: give the range back */
+            uint64_t b = m->base, sz = 0;
+            vad_free(p, &b, &sz, MEM_RELEASE);
+        }
+    } else if (m->img && m->base) {                             /* a partial lazy mapping: only our own descriptors */
+        vad_t *v = vad_find(p, m->base);
+        uint64_t b = m->base, sz = 0;
+        if (v && v->img == m->img && v->alloc_base == m->base) vad_free(p, &b, &sz, MEM_RELEASE);
+    }
+    if (st) {
+        m->state = -1;                                          /* stays listed (circular imports saw it) but failed */
+        m->fail_status = st;
+        return st;
+    }
     m->state = 1;
     m->init_seq = ++init_counter;
     if (out) *out = m;
@@ -665,6 +680,7 @@ static int32_t load_dll_from(process_t *p, const char *name, const char *importe
     module_t *m = find_module(p, name);
     fsnode_t *node;
     char path[256];
+    if (m && m->state < 0) return m->fail_status;              /* an earlier attempt failed: same answer, no half module */
     if (m) { if (out) *out = m; return STATUS_SUCCESS; }
     if (depth > MAX_DEPTH) return STATUS_DLL_NOT_FOUND;
     node = locate_file(name, importer_dir, exe_dir(p), path, sizeof path);
@@ -980,7 +996,7 @@ uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint
     module_t *m;
     uint64_t va = 0;
     for (m = p->modules; m; m = m->next)
-        if (m->base == base && !resolve_export(p, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
+        if (m->state == 1 && m->base == base && !resolve_export(p, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
             return va;
     return 0;
 }
