@@ -30,7 +30,7 @@ static int delay_cb(void *c, const pe_delay_desc_t *d, const char *name, uint16_
 {
     struct dctx *x = c;
     (void)name; (void)ord; (void)slot;
-    if (strcmp(x->last, d->dll)) { ++x->descs; strncpy(x->last, d->dll, sizeof x->last - 1); printf("delay-dll %s %u\n", d->dll, d->attributes & 1); }
+    if (strcmp(x->last, d->dll)) { size_t k = 0; ++x->descs; for (; d->dll[k] && k + 1 < sizeof x->last; ++k) x->last[k] = d->dll[k]; x->last[k] = 0; printf("delay-dll %s %u\n", d->dll, d->attributes & 1); }
     ++x->thunks;
     if (by_ord) ++x->ordinals;
     return 0;

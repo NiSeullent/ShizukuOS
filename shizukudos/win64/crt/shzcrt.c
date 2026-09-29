@@ -130,12 +130,11 @@ int shz_printf(const char *fmt, ...)
  * which loads the target DLL, resolves the one import and writes the IAT slot. The module that owns the descriptor is
  * found with RtlPcToFileHeader so this works for an .exe and for a delay-importing .dll alike. */
 PVOID WINAPI ResolveDelayLoadedAPI(PVOID base, PVOID descriptor, PVOID dll_hook, PVOID sys_hook, PVOID thunk, ULONG flags);
-PVOID WINAPI RtlPcToFileHeader(PVOID pc, PVOID *base);
 
 FARPROC WINAPI __delayLoadHelper2(const void *descriptor, FARPROC *iat_slot)
 {
     PVOID base = 0;
-    RtlPcToFileHeader((PVOID)descriptor, &base);
+    RtlPcToFileHeader((PVOID)descriptor, &base);            /* module owning the descriptor (declared in winnt.h) */
     return (FARPROC)ResolveDelayLoadedAPI(base, (PVOID)descriptor, 0, 0, (PVOID)iat_slot, 0);
 }
 

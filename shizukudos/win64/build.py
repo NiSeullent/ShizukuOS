@@ -84,7 +84,7 @@ def build_ntdll():
     stub_exports = gen_stubs()
     names = scan_exports(src, "NTAPI")
     names = [n for n in names if n not in ("ShzInitSync",)]
-    write_def(OUT / "ntdll.def", "ntdll.dll", names + ["RtlCaptureContext"] + stub_exports)
+    write_def(OUT / "ntdll.def", "ntdll.dll", names + ["RtlCaptureContext", "__C_specific_handler"] + stub_exports)
     dll = OUT / "ntdll.dll"
     cmd = [CC, *COMMON, "-DSHZ_NTDLL_BUILD", "-shared", "-nostdlib", "-Wl,--entry,ShzNtdllEntry",
            f"-Wl,--image-base,{NTDLL_BASE}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
@@ -156,6 +156,7 @@ def build_modules():
                    *[f"-l{l}" for l in ["kernel32", "ntdll", *cfg.get("libs", [])]], "-lgcc", "-o", dll]
             run(cmd)
             run([DLLTOOL, "-d", OUT / f"{name}.def", "-l", OUT / f"lib{name}.a", "--kill-at"])
+            run([DLLTOOL, "-d", OUT / f"{name}.def", "-y", OUT / f"lib{name}_delay.a", "--kill-at"])  # delay-import lib
             built[name] = {"dll": dll, "cmd": cmd, "exports": names, "base": base}
             order.append(name)
     return built
@@ -164,6 +165,10 @@ def build_modules():
 # The runners check that T_HELLO.EXE sees its preferred base 0x140000000, so it is linked without DYNAMIC_BASE (a fixed
 # image); every other app is relocatable and receives an ASLR base from the Kernel64 loader.
 FIXED_BASE_APPS = {"t_hello"}
+
+# Apps that link a module through its DELAY-import library instead of its ordinary import library: the functions are
+# resolved lazily on first call (dlltool --output-delaylib + crt/shzcrt.c __delayLoadHelper2 -> ResolveDelayLoadedAPI).
+DELAY_MODULES = {"t_delay": ("winmm", "version")}
 
 
 def build_apps(module_libs=()):
@@ -178,10 +183,12 @@ def build_apps(module_libs=()):
             run([WINDRES, "-O", "coff", "-o", res, rc])
             extra.append(res)
         crt = W64 / "crt"
+        delayed = DELAY_MODULES.get(name, ())
+        libs = [(f"{l}_delay" if l in delayed else l) for l in module_libs]
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
                "-Wl,--image-base,0x140000000", *(["-Wl,--disable-dynamicbase"] if name in FIXED_BASE_APPS else []),
                "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
-               "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+               "-L", OUT, *[f"-l{l}" for l in libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
         run(cmd)
         apps[name] = (exe, cmd)
     return apps

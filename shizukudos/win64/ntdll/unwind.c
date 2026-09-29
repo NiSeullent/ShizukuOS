@@ -602,3 +602,60 @@ SHZ_EXPORT VOID NTAPI RtlUnwind(PVOID target_frame, PVOID target_ip, PEXCEPTION_
 {
     RtlUnwindEx(target_frame, target_ip, rec, return_value, 0, 0);
 }
+
+/* ---------------------------------------------------------------- __C_specific_handler
+ * The language-specific handler that MSVC- and Clang-compiled C code registers for __try/__except/__finally (the
+ * exception directory's UNWIND_INFO names it, and its HandlerData is a SCOPE_TABLE). It is invoked twice by the
+ * dispatcher: in the search phase (evaluate __except filters) and in the unwind phase (run __finally blocks). This is
+ * the documented algorithm ("x64 exception handling", SCOPE_TABLE_AMD64); no Windows code is copied.
+ *
+ * Scope record (RVAs from DispatcherContext->ImageBase): BeginAddress..EndAddress is the guarded region; JumpTarget==0
+ * marks a __finally (HandlerAddress is the termination handler), JumpTarget!=0 marks an __except (HandlerAddress is the
+ * filter, or the constant 1 meaning EXCEPTION_EXECUTE_HANDLER, and JumpTarget is the __except body). */
+typedef struct { DWORD Count; struct { DWORD Begin, End, Handler, Target; } Rec[1]; } c_scope_table_t;
+typedef LONG (*c_filter_t)(PEXCEPTION_POINTERS, PVOID frame);
+typedef void (*c_finally_t)(BOOLEAN abnormal, PVOID frame);
+
+/* winnt.h declares __C_specific_handler dllimport; we define it here and export it by name from the .def, so the
+ * ignored-dllimport attribute is expected. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+EXCEPTION_DISPOSITION __C_specific_handler(PEXCEPTION_RECORD rec, PVOID frame, PCONTEXT ctx,
+                                                     PDISPATCHER_CONTEXT dc)
+{
+    const c_scope_table_t *st = dc->HandlerData;
+    const DWORD64 base = dc->ImageBase;
+    const DWORD control = (DWORD)(dc->ControlPc - base);
+    DWORD i;
+    if (!st) return ExceptionContinueSearch;
+    if (rec->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND)) {
+        /* unwind phase: run every __finally whose scope contains the control PC, except the target scope itself */
+        for (i = 0; i < st->Count; ++i) {
+            const DWORD tgt = st->Rec[i].Target;
+            if (control < st->Rec[i].Begin || control >= st->Rec[i].End) continue;
+            if (tgt) continue;                                  /* an __except, not a __finally */
+            if ((rec->ExceptionFlags & EXCEPTION_TARGET_UNWIND) && dc->TargetIp == base + st->Rec[i].Handler) continue;
+            ((c_finally_t)(uintptr_t)(base + st->Rec[i].Handler))(TRUE, frame);
+        }
+        return ExceptionContinueSearch;
+    }
+    /* search phase: evaluate __except filters */
+    for (i = 0; i < st->Count; ++i) {
+        EXCEPTION_POINTERS ep;
+        LONG r;
+        if (control < st->Rec[i].Begin || control >= st->Rec[i].End || !st->Rec[i].Target) continue;
+        if (st->Rec[i].Handler == 1) r = EXCEPTION_EXECUTE_HANDLER;      /* __except(EXCEPTION_EXECUTE_HANDLER) */
+        else {
+            ep.ExceptionRecord = rec;
+            ep.ContextRecord = ctx;
+            r = ((c_filter_t)(uintptr_t)(base + st->Rec[i].Handler))(&ep, frame);
+        }
+        if (r == EXCEPTION_CONTINUE_EXECUTION) return ExceptionContinueExecution;
+        if (r == EXCEPTION_CONTINUE_SEARCH) continue;
+        /* EXCEPTION_EXECUTE_HANDLER: unwind to the __except body; RtlUnwindEx does not return */
+        RtlUnwindEx(frame, (PVOID)(uintptr_t)(base + st->Rec[i].Target), rec,
+                    (PVOID)(uintptr_t)(ULONG)rec->ExceptionCode, ctx, dc->HistoryTable);
+    }
+    return ExceptionContinueSearch;
+}
+#pragma GCC diagnostic pop
