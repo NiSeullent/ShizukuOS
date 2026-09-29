@@ -161,6 +161,9 @@ def uefi_second_boot(args, target):
     shutil.copyfile(target, disk)
     serial = work / "serial.log"
     cmd = [args.qemu, "-machine", "q35", "-accel", "tcg", "-cpu", "max", "-m", "512",
+           # OVMF with S3 enabled reserves ACPI NVS at 8 MiB, inside the RAM Kernel64 owns from 0; the boot manager then
+           # refuses the direct boot (documented in STATUS 2d, same setting as supervisor/test_bootmgr.py's kernel64 cases)
+           *(["-global", "ICH9-LPC.disable_s3=1"] if direct else []),
            "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
            "-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}",
            "-drive", f"file={disk},format=raw,if=virtio", "-vga", "std", "-display", "none", "-nic", "none",
