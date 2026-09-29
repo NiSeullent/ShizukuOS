@@ -78,6 +78,12 @@
     X(NtShzBlkQuery, 0xf0) X(NtShzBlkRead, 0xf1) X(NtShzBlkWrite, 0xf2) X(NtShzBlkFlush, 0xf3) \
     X(NtShzBlkBatch, 0xf4) X(NtShzBlkControl, 0xf5) X(NtShzBlkDiscard, 0xf6)
 
+/* NT driver host (0xe0-0xef): reaching a loaded .sys from user mode. NtCreateFile("\\??\\Name")
+ * and NtRead/NtWriteFile route to IRPs through the file-object hooks; these two are the device
+ * control and driver-load services the host adds. */
+#define SYSCALL_LIST_NTDRV(X) \
+    X(NtLoadDriver, 0xe0) X(NtDeviceIoControlFile, 0xe1)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
@@ -89,6 +95,7 @@ enum {
     SYSCALL_LIST_GPU(X)
     SYSCALL_LIST_SETUP(X)
     SYSCALL_LIST_BLK(X)
+    SYSCALL_LIST_NTDRV(X)
 #undef X
     SYS_MAX = 0x100                 /* every number below goes to sys_extended(); sysext.c rejects unrouted ranges */
 };

@@ -17,6 +17,7 @@ EXT_WEAK(sys_ext_misc)
 EXT_WEAK(sys_ext_gpu)
 EXT_WEAK(sys_ext_setup)
 EXT_WEAK(sys_ext_blk)
+EXT_WEAK(sys_ext_ntdrv)
 
 int32_t sysext_dispatch(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {
@@ -27,6 +28,7 @@ int32_t sysext_dispatch(process_t *cur, struct regs *r, uint32_t num, uint64_t a
     if (num >= 0xa0 && num < 0xb0) return sys_ext_misc(cur, r, num, a1, a2, a3, a4);
     if (num >= 0xd0 && num < 0xe0) return sys_ext_gpu(cur, r, num, a1, a2, a3, a4);
     if (num >= 0xb0 && num < 0xc0) return sys_ext_setup(cur, r, num, a1, a2, a3, a4);
+    if (num >= 0xe0 && num < 0xf0) return sys_ext_ntdrv(cur, r, num, a1, a2, a3, a4);   /* NT driver host */
     if (num >= 0xf0 && num < 0x100) return sys_ext_blk(cur, r, num, a1, a2, a3, a4);
     return STATUS_INVALID_SYSTEM_SERVICE;
 }
