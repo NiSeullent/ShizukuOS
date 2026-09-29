@@ -95,7 +95,8 @@ def build_loader(payload):
            "-Wl,--subsystem,10", "-Wl,--entry,efi_main", "-Wl,--image-base,0x10000000",
            "-Wl,--enable-reloc-section", "-Wl,--no-insert-timestamp", "-Wl,--strip-all",
            "-I", OUT, "-I", SRC / "loader", "-I", SRC / "src",
-           SRC / "loader" / "loader.c", SRC / "src" / "caps.c", REPO / "shizukudos/uefi/boot.c",
+           SRC / "loader" / "loader.c", SRC / "loader" / "bootini.c", SRC / "src" / "caps.c",
+           REPO / "shizukudos/uefi/boot.c",
            "-o", out]
     run(cmd)
     data = out.read_bytes()

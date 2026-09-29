@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Shizuku Supervisor UEFI loader (x64 PE/COFF).
+ * Shizuku Supervisor UEFI loader (x64 PE/COFF) and boot manager.
  *
  * Before ExitBootServices it can still return to firmware, so every check that can
  * refuse the machine happens here: Long Mode, VMX/SVM capability and firmware
@@ -7,8 +7,20 @@
  * exit boot services with the correct MapKey (retry loop in shizukudos/uefi/boot.c)
  * and enter the Supervisor payload with interrupts disabled. After that point no
  * UEFI service is ever called.
+ *
+ * Boot manager: the optional policy file \EFI\SHIZUKU\BOOT.INI (bootini.h) selects
+ *   mode=auto        Supervisor when the VMX backend is usable, otherwise CSM (default)
+ *   mode=supervisor  Supervisor only; refuse and return to firmware without VMX
+ *   mode=csm         always CSM
+ * "CSM" is the legacy BIOS profile: the loader chain-loads CSMWrap (LGPL-2.1,
+ * https://github.com/CSMWrap/CSMWrap, which wraps the SeaBIOS CSM16 build) from the
+ * same volume with LoadImage/StartImage while boot services are still up. CSMWrap
+ * then exits boot services itself and SeaBIOS legacy-boots the MBR of this disk,
+ * giving the DOS kernel real PC BIOS interrupt services. The loader never links or
+ * copies CSMWrap code; it only starts the separately built image.
  */
 #include "efi_ext.h"
+#include "bootini.h"
 #include "../../uefi/boot.h"
 #include "../include/shz_info.h"
 #include "../src/caps.h"
@@ -23,12 +35,15 @@ static const EFI_GUID acpi2_guid = {0x8868e871,0xe4f1,0x11d3,{0xbc,0x22,0x00,0x8
 static const EFI_GUID loaded_image_guid = {0x5b1b31a1,0x9562,0x11d2,{0x8e,0x3f,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
 static const EFI_GUID sfs_guid = {0x964e5b22,0x6459,0x11d2,{0x8e,0x39,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
 static const EFI_GUID file_info_guid = {0x09576e92,0x6d3f,0x11d2,{0x8e,0x39,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
+static const EFI_GUID device_path_guid = {0x09576e91,0x6d3f,0x11d2,{0x8e,0x39,0x00,0xa0,0xc9,0x69,0x72,0x3b}};
+static EFI_GUID mp_services_guid = {0x3fdda605,0xa76e,0x4f46,{0xad,0x29,0x12,0xf4,0x53,0x1b,0x3d,0x08}};
 
 #define GUEST_RAM_MIB 64
 
 static EFI_SYSTEM_TABLE *g_st;
 static SD_HANDOFF g_handoff;
 static shz_blob_t g_blobs[SHZ_MAX_BLOBS];
+static bootini_policy_t g_policy;
 static uint64_t g_k32_ram, g_k64_ram, g_ipc;
 
 static void say(const char *text)
@@ -157,6 +172,330 @@ static EFI_STATUS alloc_guest_ram(EFI_BOOT_SERVICES *bs, uint64_t mib, uint64_t 
     return EFI_SUCCESS;
 }
 
+/* ------------------------------------------------------------------ boot manager */
+static void say_dec(uint64_t v)
+{
+    char text[21];
+    int i = 20;
+    text[i] = 0;
+    do {
+        text[--i] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v && i);
+    say(text + i);
+}
+
+static void say_status(EFI_STATUS status)
+{
+    say(" (status ");
+    say_hex(status);
+    say(")");
+}
+
+/* ASCII path -> CHAR16 path; returns the number of characters (0 if it does not fit). */
+static size_t ascii_to_char16(const char *in, CHAR16 *out, size_t cap)
+{
+    size_t n;
+    for (n = 0; in[n]; ++n) {
+        if (n + 1 >= cap)
+            return 0;
+        out[n] = (uint8_t)in[n];
+    }
+    out[n] = 0;
+    return n;
+}
+
+/* Root directory of the volume this loader was started from. */
+static EFI_STATUS open_boot_root(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, EFI_LOADED_IMAGE_PROTOCOL **li_out,
+                                 EFI_FILE_PROTOCOL **root)
+{
+    EFI_HANDLE_PROTOCOL_FN handle_protocol = (EFI_HANDLE_PROTOCOL_FN)bs->handle_protocol;
+    EFI_LOADED_IMAGE_PROTOCOL *li = 0;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = 0;
+    EFI_STATUS status = handle_protocol(image, &loaded_image_guid, (void **)&li);
+    if (EFI_ERROR(status) || !li)
+        return EFI_ERROR(status) ? status : EFI_UNSUPPORTED;
+    status = handle_protocol(li->device_handle, &sfs_guid, (void **)&fs);
+    if (EFI_ERROR(status) || !fs)
+        return EFI_ERROR(status) ? status : EFI_UNSUPPORTED;
+    if (li_out)
+        *li_out = li;
+    return fs->open_volume(fs, root);
+}
+
+/* Opens `path` read-only and reports its size; rejects directories. */
+static EFI_STATUS open_regular_file(EFI_FILE_PROTOCOL *root, const CHAR16 *path, EFI_FILE_PROTOCOL **file,
+                                    uint64_t *size)
+{
+    uint8_t infobuf[512];
+    size_t infosize = sizeof infobuf;
+    EFI_STATUS status;
+    *file = 0;
+    status = root->open(root, file, path, EFI_FILE_MODE_READ, 0);
+    if (EFI_ERROR(status) || !*file) {
+        *file = 0;
+        return EFI_ERROR(status) ? status : EFI_DEVICE_ERROR;
+    }
+    status = (*file)->get_info(*file, &file_info_guid, &infosize, infobuf);
+    if (!EFI_ERROR(status) && (((const EFI_FILE_INFO *)infobuf)->attribute & EFI_FILE_DIRECTORY))
+        status = EFI_ACCESS_DENIED;
+    if (EFI_ERROR(status)) {
+        (*file)->close(*file);
+        *file = 0;
+        return status;
+    }
+    *size = ((const EFI_FILE_INFO *)infobuf)->file_size;
+    return EFI_SUCCESS;
+}
+
+/* Reads \EFI\SHIZUKU\BOOT.INI when present. A missing file means the built-in
+ * defaults; a file that exists but cannot be read or parsed stops the boot. */
+static EFI_STATUS load_boot_policy(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, bootini_policy_t *policy)
+{
+    static const CHAR16 ini_path[] = {'\\','E','F','I','\\','S','H','I','Z','U','K','U','\\',
+                                      'B','O','O','T','.','I','N','I',0};
+    static char text[BOOTINI_MAX_BYTES];
+    char err[160];
+    EFI_FILE_PROTOCOL *root = 0, *file = 0;
+    uint64_t size = 0;
+    size_t done = 0;
+    EFI_STATUS status;
+    int line;
+
+    bootini_defaults(policy);
+    status = open_boot_root(image, bs, 0, &root);
+    if (EFI_ERROR(status)) {
+        say("Boot manager: boot volume has no readable file system");
+        say_status(status);
+        say("; using mode=auto.\n");
+        return EFI_SUCCESS;
+    }
+    status = open_regular_file(root, ini_path, &file, &size);
+    if (status == EFI_NOT_FOUND) {
+        root->close(root);
+        say("Boot manager: no \\EFI\\SHIZUKU\\BOOT.INI; built-in policy mode=auto, csm_path=");
+        say(policy->csm_path);
+        say("\n");
+        return EFI_SUCCESS;
+    }
+    if (!EFI_ERROR(status) && size > BOOTINI_MAX_BYTES)
+        status = EFI_BUFFER_TOO_SMALL;
+    while (!EFI_ERROR(status) && done < size) {
+        size_t chunk = (size_t)size - done;
+        status = file->read(file, &chunk, text + done);
+        if (!EFI_ERROR(status) && !chunk)
+            status = EFI_DEVICE_ERROR;
+        done += chunk;
+    }
+    if (file)
+        file->close(file);
+    root->close(root);
+    if (EFI_ERROR(status)) {
+        say("REFUSED: \\EFI\\SHIZUKU\\BOOT.INI exists but cannot be read");
+        if (status == EFI_BUFFER_TOO_SMALL)
+            say(" (larger than 4096 bytes)");
+        else
+            say_status(status);
+        say(".\nNothing was started. Returning to firmware.\n");
+        return status == EFI_BUFFER_TOO_SMALL ? EFI_INVALID_PARAMETER : status;
+    }
+    line = bootini_parse(text, done, policy, err, sizeof err);
+    if (line) {
+        say("REFUSED: \\EFI\\SHIZUKU\\BOOT.INI line ");
+        say_dec((uint64_t)line);
+        say(": ");
+        say(err);
+        say("\nThe boot policy file is rejected as a whole; nothing was started. Returning to firmware.\n");
+        return EFI_INVALID_PARAMETER;
+    }
+    say("Boot manager: \\EFI\\SHIZUKU\\BOOT.INI mode=");
+    say(bootini_mode_name(policy->mode));
+    say(", csm_path=");
+    say(policy->csm_path);
+    say(policy->csm_path_set ? "\n" : " (default)\n");
+    return EFI_SUCCESS;
+}
+
+static inline void port_out8(uint16_t port, uint8_t v) { __asm__ volatile("outb %0,%1" :: "a"(v), "Nd"(port)); }
+static inline uint8_t port_in8(uint16_t port) { uint8_t v; __asm__ volatile("inb %1,%0" : "=a"(v) : "Nd"(port)); return v; }
+
+/* Boot services are gone (CSMWrap called ExitBootServices and then returned), so
+ * the firmware console no longer exists: report on COM1 directly and stop. */
+static __attribute__((noreturn)) void halt_after_foreign_exit(EFI_STATUS status)
+{
+    static const char text[] = "\r\nShizuku boot manager: CSMWrap returned after ExitBootServices; "
+                               "firmware services are gone, the machine is halted.\r\n";
+    const char *p;
+    unsigned spin;
+    (void)status;
+    for (p = text; *p; ++p) {
+        for (spin = 0; spin < 100000 && !(port_in8(0x3fd) & 0x20); ++spin)
+            ;
+        port_out8(0x3f8, (uint8_t)*p);
+    }
+    for (;;)
+        __asm__ volatile("cli; hlt");
+}
+
+/* Legacy BIOS profile: LoadImage/StartImage of CSMWrap from the boot volume.
+ * Returns only when it could not be started (or returned with boot services
+ * intact); every such path says why on the console and returns to firmware. */
+static EFI_STATUS csm_boot(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, const bootini_policy_t *policy, const char *why)
+{
+    EFI_HANDLE_PROTOCOL_FN handle_protocol = (EFI_HANDLE_PROTOCOL_FN)bs->handle_protocol;
+    EFI_LOAD_IMAGE_FN load_image = (EFI_LOAD_IMAGE_FN)bs->load_image;
+    EFI_START_IMAGE_FN start_image = (EFI_START_IMAGE_FN)bs->start_image;
+    EFI_UNLOAD_IMAGE_FN unload_image = (EFI_UNLOAD_IMAGE_FN)bs->unload_image;
+    EFI_LOADED_IMAGE_PROTOCOL *li = 0;
+    EFI_FILE_PROTOCOL *root = 0, *file = 0;
+    EFI_DEVICE_PATH_PROTOCOL *volume_path = 0, *node;
+    EFI_MP_SERVICES_PROTOCOL *mp = 0;
+    CHAR16 path16[BOOTINI_PATH_MAX];
+    uint8_t *full = 0;
+    size_t chars, prefix = 0, node_len, file_node, total, i, exit_size = 0, total_cpus = 0, enabled_cpus = 0;
+    CHAR16 *exit_data = 0;
+    EFI_HANDLE child = 0;
+    uint64_t size = 0;
+    EFI_STATUS status;
+
+    say("CSM legacy boot (");
+    say(why);
+    say("): chain-loading CSMWrap ");
+    say(policy->csm_path);
+    say(" from this volume (SeaBIOS CSM16 legacy BIOS services for the DOS kernel).\n");
+    if (!bs->load_image || !bs->start_image || !bs->unload_image) {
+        say("REFUSED: firmware lacks LoadImage/StartImage. Returning to firmware.\n");
+        return EFI_UNSUPPORTED;
+    }
+
+    /* CSMWrap parks one application processor as its BIOS proxy ("system thread")
+     * and panics (halts) without one, after it has already taken over the machine. */
+    if (!EFI_ERROR(bs->locate_protocol(&mp_services_guid, 0, (void **)&mp)) && mp &&
+        !EFI_ERROR(mp->get_number_of_processors(mp, &total_cpus, &enabled_cpus))) {
+        if (enabled_cpus < 2) {
+            say("REFUSED: CSMWrap needs at least 2 enabled logical processors (it reserves one as its BIOS "
+                "proxy); this machine reports ");
+            say_dec(enabled_cpus);
+            say(".\nReturning to firmware.\n");
+            return EFI_UNSUPPORTED;
+        }
+    } else {
+        say("CSM legacy boot: warning: no MP Services protocol, cannot check the 2-processor requirement.\n");
+    }
+
+    chars = ascii_to_char16(policy->csm_path, path16, sizeof path16 / sizeof path16[0]);
+    if (!chars) {
+        say("REFUSED: csm_path too long. Returning to firmware.\n");
+        return EFI_INVALID_PARAMETER;
+    }
+    status = open_boot_root(image, bs, &li, &root);
+    if (EFI_ERROR(status)) {
+        say("REFUSED: cannot open the boot volume to find CSMWrap");
+        say_status(status);
+        say(".\nReturning to firmware.\n");
+        return status;
+    }
+    status = open_regular_file(root, path16, &file, &size);
+    root->close(root);
+    if (EFI_ERROR(status)) {
+        say("REFUSED: CSM legacy boot image ");
+        say(policy->csm_path);
+        say(status == EFI_NOT_FOUND ? " not found on the boot volume" :
+            status == EFI_ACCESS_DENIED ? " is a directory" : " cannot be opened");
+        say_status(status);
+        say(".\nCopy the x64 CSMWrap image there, or point csm_path in \\EFI\\SHIZUKU\\BOOT.INI at it.\n"
+            "Returning to firmware.\n");
+        return status;
+    }
+    file->close(file);
+    if (size < 64 || size > (64ull << 20)) {
+        say("REFUSED: CSM legacy boot image ");
+        say(policy->csm_path);
+        say(" has an implausible size (");
+        say_dec(size);
+        say(" bytes).\nReturning to firmware.\n");
+        return EFI_LOAD_ERROR;
+    }
+
+    /* Device path = the boot volume's path + one File Path media node + End. */
+    status = handle_protocol(li->device_handle, &device_path_guid, (void **)&volume_path);
+    if (EFI_ERROR(status) || !volume_path) {
+        say("REFUSED: boot volume has no device path");
+        say_status(status);
+        say(".\nReturning to firmware.\n");
+        return EFI_ERROR(status) ? status : EFI_UNSUPPORTED;
+    }
+    for (node = volume_path, i = 0; node->type != EFI_DP_TYPE_END; ++i) {
+        node_len = (size_t)node->length[0] | ((size_t)node->length[1] << 8);
+        if (node_len < 4 || i >= 64 || prefix + node_len > 4096) {
+            say("REFUSED: malformed boot volume device path. Returning to firmware.\n");
+            return EFI_UNSUPPORTED;
+        }
+        prefix += node_len;
+        node = (EFI_DEVICE_PATH_PROTOCOL *)((uint8_t *)node + node_len);
+    }
+    file_node = 4 + (chars + 1) * sizeof(CHAR16);
+    total = prefix + file_node + 4;
+    status = bs->allocate_pool(EFI_LOADER_DATA, total, (void **)&full);
+    if (EFI_ERROR(status) || !full) {
+        say("REFUSED: out of pool memory for the CSMWrap device path. Returning to firmware.\n");
+        return EFI_OUT_OF_RESOURCES;
+    }
+    for (i = 0; i < prefix; ++i)
+        full[i] = ((const uint8_t *)volume_path)[i];
+    full[prefix + 0] = EFI_DP_TYPE_MEDIA;
+    full[prefix + 1] = EFI_DP_SUBTYPE_FILE_PATH;
+    full[prefix + 2] = (uint8_t)file_node;
+    full[prefix + 3] = (uint8_t)(file_node >> 8);
+    for (i = 0; i <= chars; ++i) {
+        full[prefix + 4 + 2 * i] = (uint8_t)path16[i];
+        full[prefix + 5 + 2 * i] = (uint8_t)(path16[i] >> 8);
+    }
+    full[total - 4] = EFI_DP_TYPE_END;
+    full[total - 3] = EFI_DP_SUBTYPE_END_ENTIRE;
+    full[total - 2] = 4;
+    full[total - 1] = 0;
+
+    status = load_image(0, image, (EFI_DEVICE_PATH_PROTOCOL *)full, 0, 0, &child);
+    bs->free_pool(full);
+    if (EFI_ERROR(status)) {
+        say("REFUSED: firmware LoadImage() rejected ");
+        say(policy->csm_path);
+        say_status(status);
+        if (status == EFI_SECURITY_VIOLATION || status == EFI_ACCESS_DENIED)
+            say(".\nSecure Boot refused the image: disable Secure Boot or enroll a signed CSMWrap");
+        else
+            say(".\nThe file is not a loadable x64 UEFI application");
+        say(".\nReturning to firmware.\n");
+        if (status == EFI_SECURITY_VIOLATION && child)
+            unload_image(child);
+        return status;
+    }
+    say("CSM legacy boot: CSMWrap loaded (");
+    say_dec(size);
+    say(" bytes); StartImage. CSMWrap now exits boot services and SeaBIOS boots this disk's MBR.\n");
+
+    status = start_image(child, &exit_size, &exit_data);
+
+    /* Still here. UEFI 2.10 7.4: a successful ExitBootServices clears these fields. */
+    if (!g_st->boot_services || !g_st->console_out)
+        halt_after_foreign_exit(status);
+    say("CSM legacy boot: CSMWrap returned without booting");
+    say_status(status);
+    if (exit_data && exit_size >= sizeof(CHAR16)) {
+        CHAR16 copy[80];
+        for (i = 0; i < 79 && i < exit_size / sizeof(CHAR16) && exit_data[i]; ++i)
+            copy[i] = exit_data[i] >= 0x20 && exit_data[i] < 0x7f ? exit_data[i] : '?';
+        copy[i] = 0;
+        say(": ");
+        g_st->console_out->output_string(g_st->console_out, copy);
+    }
+    say(".\nReturning to firmware.\n");
+    if (exit_data)
+        bs->free_pool(exit_data);
+    return EFI_ERROR(status) ? status : EFI_ABORTED;
+}
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 {
     EFI_BOOT_SERVICES *bs;
@@ -181,11 +520,34 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     say("ShizukuDOS 10.0-dev Supervisor loader (UEFI x64)\n");
     bs->set_watchdog_timer(0, 0, 0, 0);
 
+    /* 0. Boot manager policy (\EFI\SHIZUKU\BOOT.INI); a malformed file stops here. */
+    status = load_boot_policy(image, bs, &g_policy);
+    if (EFI_ERROR(status))
+        return status;
+    if (g_policy.mode == BOOT_MODE_CSM)
+        return csm_boot(image, bs, &g_policy, "mode=csm");
+
     /* 1. Can this machine host the DOS16 domain in virtual Real Mode at all? */
     shz_probe_caps(&caps);
     if (!caps.long_mode) {
         say("REFUSED: CPU lacks Long Mode.\n");
         return EFI_UNSUPPORTED;
+    }
+    if (g_policy.mode == BOOT_MODE_AUTO && (caps.vendor == SHZ_VENDOR_AMD || !caps.vmx_usable)) {
+        /* mode=auto: the Supervisor profile is not available on this machine, so the
+         * DOS kernel gets real BIOS services from the legacy (CSM) profile instead. */
+        say("Supervisor profile not available: ");
+        if (caps.vendor == SHZ_VENDOR_AMD) {
+            say(caps.svm_usable ? "AMD SVM usable, but the SVM backend is not implemented in this build"
+                                : "AMD SVM unusable: ");
+            if (!caps.svm_usable)
+                say(caps.svm_why);
+        } else {
+            say("Intel VMX backend unusable: ");
+            say(caps.vmx_why);
+        }
+        say("\n");
+        return csm_boot(image, bs, &g_policy, "mode=auto, no usable virtualization backend");
     }
     if (caps.vendor == SHZ_VENDOR_AMD) {
         say(caps.svm_usable ? "REFUSED: AMD SVM is usable, but the SVM backend is not implemented in this build.\n"

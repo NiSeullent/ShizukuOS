@@ -37,7 +37,8 @@ PROFILES = {
         "summary": "UEFI x64 -> Supervisor (Intel VMX) -> virtual Real Mode DOS16",
         "steps": ["dos16/build.py", "kbuild.py", "win64/build.py", "supervisor/build.py"],
         "status": "built: DOS16, Kernel32, Kernel64 + Win64 initrd; running them needs Intel VMX in L1 "
-                  "(see `test --suite boot`)",
+                  "(see `test --suite boot`); without VMX the loader's boot manager chain-loads CSMWrap "
+                  "(legacy BIOS profile) when \\EFI\\SHIZUKU\\CSMWRAP.EFI is on the boot volume",
     },
     "bios-multikernel": {
         "summary": "BIOS loader -> Supervisor cold launch -> DOS16 / Win98 / Kernel64",
@@ -195,12 +196,43 @@ def record_domain(results, label, prefix, vmx_reason):
                detail=(f"{bad[0][0]}: {bad[0][2]}" if bad else f"{len(checks)} guest-evidence checks"))
 
 
+def suite_bootmgr(results):
+    """UEFI boot manager (loader BOOT.INI policy + CSMWrap legacy fallback) and the vBIOS host checks.
+    Both run under TCG and need no VMX; neither is evidence for the VMX Supervisor path."""
+    label = ("UEFI boot manager [TCG]: no VMX -> CSMWrap/SeaBIOS CSM16 legacy-boots FreeDOS from one MBR disk; "
+             "mode=csm/supervisor, missing/invalid CSM image, malformed BOOT.INI, 1 CPU, same disk on SeaBIOS")
+    vlabel = ("vBIOS host checks [TCG + host]: ROM reset path and INT 1Ah RTC/INT 1Eh under QEMU -bios; "
+              "bios.c INT 13h/15h/16h/1Ah back end under ASan/UBSan (not a VMX run)")
+    try:
+        run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=900)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
+        for name in (label, vlabel):
+            record(results, name, "FAIL", detail=f"shizukudos/supervisor/build.py failed: {str(exc)[-300:]}")
+        return
+    for name, script, result_json, timeout in (
+            (label, "test_bootmgr.py", BUILD / "bootmgr" / "result.json", 1800),
+            (vlabel, "test_vbios.py", BUILD / "supervisor" / "vbios-host-test" / "result.json", 600)):
+        result_json.unlink(missing_ok=True)
+        proc = run([sys.executable, SHZ / "supervisor" / script], capture=True, check=False, timeout=timeout)
+        data = json.loads(result_json.read_text()) if result_json.exists() else {}
+        ok = proc.returncode == 0 and data.get("status") == "PASS"
+        if "summary" in data:
+            detail = ", ".join(f"{k} {v}" for k, v in data["summary"].items())
+        elif data.get("checks"):
+            detail = f"{sum(c['status'] == 'PASS' for c in data['checks'])}/{len(data['checks'])} checks"
+        else:
+            detail = ((proc.stdout or "").strip().splitlines() or ["no output"])[-1]
+        record(results, name, "PASS" if ok else "FAIL", detail=detail, exit_code=proc.returncode,
+               command=f"{sys.executable} shizukudos/supervisor/{script}", evidence=str(result_json))
+
+
 def suite_boot(results):
     ok = run_script(results, "DOS16 on legacy BIOS (SeaBIOS, real Real Mode) [KVM]",
                     [SHZ / "dos16" / "test_csm.py", "--accel", "kvm"], expect_marker="PASS")
     run_script(results, "DOS16 on legacy BIOS (SeaBIOS) [TCG software CPU]",
                [SHZ / "dos16" / "test_csm.py", "--accel", "tcg", "--timeout", "240"], timeout=400,
                expect_marker="PASS")
+    suite_bootmgr(results)
     run_script(results, "Kernel32 (Protected Mode) on QEMU, standalone stub (no Supervisor/VMX)",
                [SHZ / "tests" / "run_k32_standalone.py"], timeout=300, expect_marker="PASS")
     run_script(results, "Kernel64 (Long Mode) + Win64 apps on QEMU, standalone stub (no Supervisor/VMX)",
