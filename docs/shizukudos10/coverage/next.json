@@ -1,0 +1,4566 @@
+{
+ "schema": "shz.import-coverage.v2",
+ "build": "/home/user/Win98-Modern/.claude/worktrees/agent-ab8a38a5e87a2b65b/build/shizukudos/win64",
+ "shizuku_dlls": {
+  "advapi32.dll": 47,
+  "bcrypt.dll": 11,
+  "bcryptprimitives.dll": 1,
+  "combase.dll": 17,
+  "kernel32.dll": 221,
+  "modtest.dll": 2,
+  "ntdll.dll": 256,
+  "ole32.dll": 23,
+  "oleaut32.dll": 38,
+  "rpcrt4.dll": 12,
+  "shell32.dll": 7,
+  "shlwapi.dll": 44,
+  "version.dll": 3,
+  "winmm.dll": 7,
+  "ws2_32.dll": 57
+ },
+ "apiset_schema": {
+  "api-ms-win-core-synch-l1": "kernel32.dll",
+  "api-ms-win-core-processthreads-l1": "kernel32.dll",
+  "api-ms-win-core-libraryloader-l1": "kernel32.dll",
+  "api-ms-win-core-memory-l1": "kernel32.dll",
+  "api-ms-win-core-file-l1": "kernel32.dll",
+  "api-ms-win-core-handle-l1": "kernel32.dll",
+  "api-ms-win-core-errorhandling-l1": "kernel32.dll",
+  "api-ms-win-core-heap-l1": "kernel32.dll",
+  "api-ms-win-core-sysinfo-l1": "kernel32.dll",
+  "api-ms-win-core-console-l1": "kernel32.dll",
+  "api-ms-win-core-localization-l1": "kernel32.dll",
+  "api-ms-win-core-timezone-l1": "kernel32.dll",
+  "api-ms-win-core-string-l1": "kernel32.dll",
+  "api-ms-win-core-profile-l1": "kernel32.dll",
+  "api-ms-win-core-interlocked-l1": "kernel32.dll",
+  "api-ms-win-core-rtlsupport-l1": "ntdll.dll",
+  "api-ms-win-core-processenvironment-l1": "kernel32.dll",
+  "api-ms-win-core-registry-l1": "advapi32.dll",
+  "api-ms-win-core-registry-l2": "advapi32.dll",
+  "api-ms-win-security-base-l1": "advapi32.dll",
+  "api-ms-win-security-sddl-l1": "advapi32.dll",
+  "api-ms-win-eventing-provider-l1": "advapi32.dll",
+  "api-ms-win-core-com-l1": "ole32.dll",
+  "api-ms-win-core-winrt-l1": "combase.dll",
+  "api-ms-win-core-winrt-string-l1": "combase.dll",
+  "api-ms-win-core-shlwapi-legacy-l1": "shlwapi.dll",
+  "api-ms-win-core-shlwapi-obsolete-l1": "shlwapi.dll",
+  "api-ms-win-core-version-l1": "version.dll",
+  "api-ms-win-mm-time-l1": "winmm.dll"
+ },
+ "ordinal_ref": "/usr/lib/x86_64-linux-gnu/wine/x86_64-windows",
+ "excludes": [
+  "interactive_ui_tests.exe",
+  "*/psreadline/*"
+ ],
+ "apps": [
+  "electron",
+  "vscodium",
+  "chromium"
+ ],
+ "unresolved": 1457,
+ "listed": 300,
+ "next": [
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitializeSListHead",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 62,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 1
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleHandleExW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 60,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 2
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindFirstFileExW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 58,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 3
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LCMapStringW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 58,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 4
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetStringTypeW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 57,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 5
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CompareStringW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 42,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 6
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InterlockedFlushSList",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 42,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 7
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadConsoleW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 34,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 8
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "EnumSystemLocalesW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 33,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 9
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLocaleInfoW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 33,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 10
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultLCID",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 33,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 11
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsValidLocale",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 33,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 12
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FormatMessageA",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 27,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 13
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetConsoleScreenBufferInfo",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 27,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 14
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDateFormatW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 27,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 15
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTimeFormatW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 27,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 16
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FormatMessageW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 25,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 17
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileInformationByHandle",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 25,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 18
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateFileMappingW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 19,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 19
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "MapViewOfFile",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 19,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 20
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "OpenProcess",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 19,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 21
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleTextAttribute",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 19,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 22
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnmapViewOfFile",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 19,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 23
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FreeLibraryAndExitThread",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 18,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 24
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileInformationByHandle",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 17,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 25
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetHandleInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 17,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 26
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileInformationByHandleEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 16,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 27
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessTimes",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 16,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 28
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DeleteProcThreadAttributeList",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 15,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 29
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ExpandEnvironmentStringsW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 15,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 30
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDriveTypeW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 15,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 31
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapQueryInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 15,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 32
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitializeProcThreadAttributeList",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 15,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 33
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UpdateProcThreadAttribute",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 15,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 34
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetTokenInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 14,
+   "images_delay": 5,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 35
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsWow64Process",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 14,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 36
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLogicalProcessorInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 13,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 37
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessId",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 13,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 38
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileAttributesW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 13,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 39
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "OpenProcessToken",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 12,
+   "images_delay": 4,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 40
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateNamedPipeW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 12,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 41
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileAttributesExW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 12,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 42
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleCtrlHandler",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 12,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 43
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SystemTimeToTzSpecificLocalTime",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 12,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 44
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VerSetConditionMask",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 12,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 45
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VerifyVersionInfoW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 12,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 46
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProductInfo",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 47
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32EnumProcessModules",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 48
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetModuleInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 49
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LockFileEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 50
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryThreadCycleTime",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 51
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlCaptureStackBackTrace",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 52
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileTime",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 53
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetThreadInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 54
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnlockFileEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 11,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 55
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateIoCompletionPort",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 10,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 56
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFinalPathNameByHandleW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 10,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 57
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLongPathNameW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 10,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 58
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PostQueuedCompletionStatus",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 10,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 59
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadProcessMemory",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 10,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 60
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ConnectNamedPipe",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 61
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateHardLinkW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 62
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DeviceIoControl",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 63
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLocaleInfoEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 64
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapWalk",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 65
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsThreadAFiber",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 66
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PeekNamedPipe",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 67
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RegisterWaitForSingleObject",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 68
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetNamedPipeHandleState",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 69
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnregisterWaitEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 9,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 70
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AssignProcessToJobObject",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 8,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 71
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CancelIo",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 8,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 72
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetComputerNameExW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 8,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 73
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileTime",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 8,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 74
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadId",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 8,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 75
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapSetInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 8,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 76
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WaitNamedPipeW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 8,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 77
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "IsWindow",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 7,
+   "images_delay": 4,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 78
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AreFileApisANSI",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 79
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateFileMappingA",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 80
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FlushViewOfFile",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 81
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLogicalProcessorInformationEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 82
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleHandleExA",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 83
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetOverlappedResult",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 84
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultLangID",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 85
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetProcessMemoryInfo",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 86
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32QueryWorkingSetEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 87
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReplaceFileW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 88
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileCompletionNotificationModes",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 89
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetProcessShutdownParameters",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 90
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TransactNamedPipe",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 91
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WriteProcessMemory",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 7,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 92
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetClientRect",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 6,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 93
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetDC",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 6,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 94
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "ReleaseDC",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 6,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 95
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertCloseStore",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 96
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateToolhelp32Snapshot",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 97
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateWaitableTimerExW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 98
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DisconnectNamedPipe",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 99
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetHandleInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 100
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessHandleCount",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 101
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessMitigationPolicy",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 102
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetQueuedCompletionStatus",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 103
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadContext",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 104
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetPerformanceInfo",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 105
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "MapViewOfFileEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 106
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryFullProcessImageNameW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 107
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetInformationJobObject",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 108
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetWaitableTimer",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 109
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualQueryEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 110
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertEnumCertificatesInStore",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 111
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertFindCertificateInStore",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 112
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertFreeCertificateContext",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 113
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertOpenStore",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 114
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptProtectData",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 115
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptUnprotectData",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 116
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateJobObjectW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 117
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateRemoteThread",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 118
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindResourceW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 119
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCurrentProcessorNumber",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 120
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNamedPipeClientProcessId",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 121
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNamedPipeServerProcessId",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 122
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPriorityClass",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 123
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemDefaultLCID",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 124
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadLocale",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 125
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultLocaleName",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 126
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetVolumeInformationW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 127
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitOnceBeginInitialize",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 128
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitOnceComplete",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 129
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LoadResource",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 130
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LockResource",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 131
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "Process32FirstW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 132
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "Process32NextW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 133
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetProcessMitigationPolicy",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 134
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TzSpecificLocalTimeToSystemTime",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 135
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualProtectEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 136
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "Wow64GetThreadContext",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 5,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 137
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "CryptAcquireContextW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 4,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 138
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "CryptCreateHash",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 4,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 139
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "CryptDestroyHash",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 4,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 140
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "CryptReleaseContext",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 4,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 141
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "StretchDIBits",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 4,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 142
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "UnregisterClassA",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 2,
+   "images_load": 4,
+   "images_delay": 2,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 143
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertAddCertificateContextToStore",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 144
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetCertificateContextProperty",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 145
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptAcquireCertificatePrivateKey",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 146
+  },
+  {
+   "dll": "dwrite.dll",
+   "fn": "DWriteCreateFactory",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 147
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AttachConsole",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 148
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CancelIoEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 149
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DebugBreak",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 150
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "EnumSystemLocalesEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 151
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetActiveProcessorCount",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 152
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDiskFreeSpaceA",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 153
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDiskFreeSpaceExW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 154
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDiskFreeSpaceW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 155
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDynamicTimeZoneInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 156
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessHeaps",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 157
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetShortPathNameW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 158
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTempFileNameA",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 159
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadPreferredUILanguages",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 160
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadPriorityBoost",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 161
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapCompact",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 162
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InterlockedPushEntrySList",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 163
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LockFile",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 164
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PowerClearRequest",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 165
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PowerCreateRequest",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 166
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PowerSetRequest",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 167
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PrefetchVirtualMemory",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 168
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryInformationJobObject",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 169
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryProcessCycleTime",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 170
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadDirectoryChangesW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 171
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetDefaultDllDirectories",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 172
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetPriorityClass",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 173
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetThreadPriorityBoost",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 174
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SizeofResource",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 175
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TerminateJobObject",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 176
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnlockFile",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 177
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualFreeEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 178
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualLock",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 179
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualUnlock",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 180
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "lstrcmpW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 4,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 181
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "CryptGetHashParam",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 3,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 182
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Locate_DevNodeW",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 3,
+   "images_load": 3,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 183
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Device_IDW",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 1,
+   "images_load": 3,
+   "images_delay": 1,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 184
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "CryptHashData",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 185
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Child",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 186
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_DevNode_Registry_PropertyW",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 187
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_DevNode_Status",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 188
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Device_ID_ListW",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 189
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Device_ID_List_SizeW",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 190
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Sibling",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 191
+  },
+  {
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Open_DevNode_Key",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 192
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertAddEncodedCertificateToStore",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 193
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertAddStoreToCollection",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 194
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertCompareCertificateName",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 195
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertControlStore",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 196
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertFindChainInStore",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 197
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetEnhancedKeyUsage",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 198
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetIntendedKeyUsage",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 199
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetNameStringW",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 200
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertOpenSystemStoreW",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 201
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertVerifyTimeValidity",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 202
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptMsgClose",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 203
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptMsgGetParam",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 204
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptProtectMemory",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 205
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptQueryObject",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 206
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptUnprotectMemory",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 207
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptVerifyCertificateSignatureEx",
+   "status": "dll-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 208
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AllocConsole",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 209
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CheckRemoteDebuggerPresent",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 210
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ClearCommError",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 211
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ConvertFiberToThread",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 212
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ConvertThreadToFiberEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 213
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateFiberEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 214
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateRemoteThreadEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 215
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DeleteFiber",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 216
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DiscardVirtualMemory",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 217
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "EnumResourceNamesW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 218
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "EscapeCommFunction",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 219
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindFirstFileExA",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 220
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCommModemStatus",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 221
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCommState",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 222
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCurrencyFormatEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 223
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDateFormatEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 224
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetGeoInfoW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 225
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetMaximumProcessorCount",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 226
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetMaximumProcessorGroupCount",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 227
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNumberFormatEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 228
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPackagePathByFullName",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 229
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPackagesByPackageFamily",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 230
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPrivateProfileStringW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 231
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 232
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemPowerStatus",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 233
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadGroupAffinity",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 234
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadTimes",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 235
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTimeFormatEx",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 236
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultUILanguage",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 237
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserGeoID",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 238
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetVolumePathNameW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 239
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GlobalLock",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 240
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GlobalSize",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 241
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GlobalUnlock",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 242
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapLock",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 243
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapUnlock",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 244
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LCIDToLocaleName",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 245
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LocaleNameToLCID",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 246
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "OpenThread",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 247
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ProcessIdToSessionId",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 248
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PurgeComm",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 249
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ResolveLocaleName",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 250
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlAddFunctionTable",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 251
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlDeleteFunctionTable",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 252
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetCommState",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 253
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetCommTimeouts",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 254
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetProcessInformation",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 255
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SwitchToFiber",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 256
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnregisterWait",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 257
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WTSGetActiveConsoleSessionId",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 258
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInAddBuffer",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 259
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInClose",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 260
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInGetDevCapsW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 261
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInGetNumDevs",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 262
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInOpen",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 263
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInPrepareHeader",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 264
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInReset",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 265
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInStart",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 266
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInUnprepareHeader",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 267
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutClose",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 268
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutGetDevCapsW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 269
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutGetNumDevs",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 270
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutLongMsg",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 271
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutOpen",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 272
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutPrepareHeader",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 273
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutReset",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 274
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutShortMsg",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 275
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutUnprepareHeader",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 276
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveInGetNumDevs",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 277
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutClose",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 278
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutGetNumDevs",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 279
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutOpen",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 280
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutPause",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 281
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutPrepareHeader",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 282
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutReset",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 283
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutRestart",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 284
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutUnprepareHeader",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 285
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutWrite",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 286
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "FreeAddrInfoExW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 287
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "GetAddrInfoExCancel",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 288
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "GetAddrInfoExW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 289
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSADuplicateSocketW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 290
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSAEnumProtocolsW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 291
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSAGetOverlappedResult",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 292
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSALookupServiceBeginW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 293
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSALookupServiceEnd",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 294
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSALookupServiceNextW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 295
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSASetServiceW",
+   "status": "fn-missing",
+   "apps_load": 3,
+   "apps_delay": 0,
+   "images_load": 3,
+   "images_delay": 0,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 296
+  },
+  {
+   "dll": "ole32.dll",
+   "fn": "CoCreateInstance",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 3,
+   "images_load": 8,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 297
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "SetNamedSecurityInfoW",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 3,
+   "images_load": 7,
+   "images_delay": 5,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 298
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetNamedSecurityInfoW",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 3,
+   "images_load": 6,
+   "images_delay": 5,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 299
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetSecurityDescriptorDacl",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 3,
+   "images_load": 6,
+   "images_delay": 5,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 300
+  }
+ ]
+}

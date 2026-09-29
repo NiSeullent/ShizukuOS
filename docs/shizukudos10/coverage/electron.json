@@ -1,0 +1,3921 @@
+{
+ "schema": "shz.import-coverage.v2",
+ "app": "electron",
+ "root": "/tmp/claude-0/-home-user-Win98-Modern/31f1e8e6-646b-5a42-ab0f-36694df325e9/scratchpad/electron/tree",
+ "images": 7,
+ "skipped": {},
+ "distinct_imports": 1308,
+ "resolved": 332,
+ "coverage_pct": 25.4,
+ "image_list": {
+  "electron.exe": {
+   "size": 246032896,
+   "is_dll": false,
+   "subsystem": "GUI",
+   "size_of_image": 247459840,
+   "sections": 15,
+   "system_dlls_load": [
+    "crypt32.dll",
+    "dwrite.dll",
+    "kernel32.dll",
+    "ntdll.dll",
+    "version.dll",
+    "winmm.dll",
+    "ws2_32.dll"
+   ],
+   "system_dlls_delay": [
+    "advapi32.dll",
+    "api-ms-win-core-realtime-l1",
+    "api-ms-win-power-base-l1",
+    "api-ms-win-shcore-scaling-l1",
+    "bcryptprimitives.dll",
+    "bthprops.cpl",
+    "cfgmgr32.dll",
+    "combase.dll",
+    "comctl32.dll",
+    "comdlg32.dll",
+    "cryptui.dll",
+    "d3d11.dll",
+    "d3d12.dll",
+    "dbghelp.dll",
+    "dcomp.dll",
+    "dhcpcsvc.dll",
+    "dwmapi.dll",
+    "dxgi.dll",
+    "gdi32.dll",
+    "hid.dll",
+    "iphlpapi.dll",
+    "mf.dll",
+    "mfplat.dll",
+    "mfreadwrite.dll",
+    "mmdevapi.dll",
+    "ncrypt.dll",
+    "ole32.dll",
+    "oleacc.dll",
+    "oleaut32.dll",
+    "pdh.dll",
+    "propsys.dll",
+    "rpcrt4.dll",
+    "secur32.dll",
+    "setupapi.dll",
+    "shell32.dll",
+    "shlwapi.dll",
+    "tbs.dll",
+    "uiautomationcore.dll",
+    "urlmon.dll",
+    "user32.dll",
+    "userenv.dll",
+    "uxtheme.dll",
+    "wevtapi.dll",
+    "winhttp.dll",
+    "winspool.drv",
+    "wintrust.dll",
+    "winusb.dll",
+    "wtsapi32.dll"
+   ],
+   "ordinal_imports": 12,
+   "delay_imports": 747,
+   "load_imports": 537
+  },
+  "dxcompiler.dll": {
+   "size": 25745408,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "size_of_image": 25788416,
+   "sections": 9,
+   "system_dlls_load": [
+    "advapi32.dll",
+    "kernel32.dll",
+    "ole32.dll",
+    "oleaut32.dll",
+    "user32.dll"
+   ],
+   "system_dlls_delay": [],
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 145
+  },
+  "vk_swiftshader.dll": {
+   "size": 5520384,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "size_of_image": 5619712,
+   "sections": 9,
+   "system_dlls_load": [
+    "gdi32.dll",
+    "kernel32.dll",
+    "user32.dll"
+   ],
+   "system_dlls_delay": [],
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 133
+  },
+  "d3dcompiler_47.dll": {
+   "size": 4741488,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "size_of_image": 4771840,
+   "sections": 8,
+   "system_dlls_load": [
+    "advapi32.dll",
+    "kernel32.dll",
+    "rpcrt4.dll"
+   ],
+   "system_dlls_delay": [],
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 131
+  },
+  "ffmpeg.dll": {
+   "size": 3113472,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "size_of_image": 4673536,
+   "sections": 8,
+   "system_dlls_load": [
+    "kernel32.dll"
+   ],
+   "system_dlls_delay": [],
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 100
+  },
+  "dxil.dll": {
+   "size": 1509760,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "size_of_image": 1523712,
+   "sections": 6,
+   "system_dlls_load": [
+    "advapi32.dll",
+    "api-ms-win-crt-convert-l1",
+    "api-ms-win-crt-heap-l1",
+    "api-ms-win-crt-math-l1",
+    "api-ms-win-crt-runtime-l1",
+    "api-ms-win-crt-stdio-l1",
+    "api-ms-win-crt-string-l1",
+    "api-ms-win-crt-utility-l1",
+    "kernel32.dll",
+    "ole32.dll"
+   ],
+   "system_dlls_delay": [],
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 127
+  },
+  "vulkan-1.dll": {
+   "size": 939520,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "size_of_image": 974848,
+   "sections": 9,
+   "system_dlls_load": [
+    "advapi32.dll",
+    "cfgmgr32.dll",
+    "kernel32.dll"
+   ],
+   "system_dlls_delay": [],
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 120
+  }
+ },
+ "features": {
+  "delay_load_dir": [
+   "electron.exe"
+  ],
+  "tls_dir": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "exception_dir": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "guard_cf": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "high_entropy_va": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "dynamic_base": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "nx_compat": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "large_image": [
+   "electron.exe"
+  ],
+  "clr_header": [],
+  "resources": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "bound_imports": [],
+  "authenticode": [
+   "d3dcompiler_47.dll",
+   "dxil.dll"
+  ],
+  "cet_compat": [
+   "d3dcompiler_47.dll",
+   "dxil.dll"
+  ],
+  "relocations": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "load_config": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "security_cookie": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "appcontainer": [],
+  "tls_callbacks_total": 7,
+  "unwind_entries_total": 546318,
+  "ordinal_imports": [
+   "electron.exe"
+  ],
+  "max_size_of_image": 247459840,
+  "max_stack_reserve": 8388608,
+  "max_sections": 15,
+  "dependent_load_flags": [],
+  "guard_flags_seen": [
+   "cf_export_suppression_info_present",
+   "cf_function_table_present",
+   "cf_instrumented",
+   "cf_longjump_table_present",
+   "delayload_iat_in_its_own_section",
+   "eh_continuation_table_present",
+   "protect_delayload_iat"
+  ],
+  "os_versions": [
+   "10.0",
+   "6.0"
+  ],
+  "no_relocations": []
+ },
+ "image_features": {
+  "d3dcompiler_47.dll": {
+   "size": 4741488,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "image_base": "0x180000000",
+   "size_of_image": 4771840,
+   "sections": 8,
+   "os_version": "10.0",
+   "subsystem_version": "6.2",
+   "stack_reserve": 262144,
+   "stack_commit": 4096,
+   "heap_reserve": 1048576,
+   "entry_point": true,
+   "dll_characteristics": "0x4160",
+   "relocations": true,
+   "reloc_dir_size": 35272,
+   "exception_dir": true,
+   "unwind_entries": 10562,
+   "tls_dir": true,
+   "tls_callbacks": 0,
+   "delay_load_dir": false,
+   "resources": true,
+   "resource_dir_size": 1088,
+   "clr_header": false,
+   "bound_imports": false,
+   "authenticode": true,
+   "exports": true,
+   "load_config": true,
+   "large_image": false,
+   "high_entropy_va": true,
+   "dynamic_base": true,
+   "force_integrity": false,
+   "nx_compat": true,
+   "no_seh": false,
+   "appcontainer": false,
+   "guard_cf": true,
+   "terminal_server_aware": false,
+   "guard_flags": "0x10417500",
+   "guard": [
+    "cf_export_suppression_info_present",
+    "cf_function_table_present",
+    "cf_instrumented",
+    "cf_longjump_table_present",
+    "delayload_iat_in_its_own_section",
+    "eh_continuation_table_present",
+    "protect_delayload_iat"
+   ],
+   "guard_cf_functions": 3367,
+   "dependent_load_flags": "0x0",
+   "security_cookie": true,
+   "eh_continuation_entries": 1334,
+   "cet_compat": true,
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 131
+  },
+  "dxcompiler.dll": {
+   "size": 25745408,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "image_base": "0x180000000",
+   "size_of_image": 25788416,
+   "sections": 9,
+   "os_version": "10.0",
+   "subsystem_version": "10.0",
+   "stack_reserve": 1048576,
+   "stack_commit": 4096,
+   "heap_reserve": 1048576,
+   "entry_point": true,
+   "dll_characteristics": "0x4160",
+   "relocations": true,
+   "reloc_dir_size": 73784,
+   "exception_dir": true,
+   "unwind_entries": 52997,
+   "tls_dir": true,
+   "tls_callbacks": 0,
+   "delay_load_dir": false,
+   "resources": true,
+   "resource_dir_size": 1016,
+   "clr_header": false,
+   "bound_imports": false,
+   "authenticode": false,
+   "exports": true,
+   "load_config": true,
+   "large_image": false,
+   "high_entropy_va": true,
+   "dynamic_base": true,
+   "force_integrity": false,
+   "nx_compat": true,
+   "no_seh": false,
+   "appcontainer": false,
+   "guard_cf": true,
+   "terminal_server_aware": false,
+   "guard_flags": "0x10500",
+   "guard": [
+    "cf_function_table_present",
+    "cf_instrumented",
+    "cf_longjump_table_present"
+   ],
+   "guard_cf_functions": 4337,
+   "dependent_load_flags": "0x0",
+   "security_cookie": true,
+   "eh_continuation_entries": 0,
+   "cet_compat": false,
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 145
+  },
+  "dxil.dll": {
+   "size": 1509760,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "image_base": "0x180000000",
+   "size_of_image": 1523712,
+   "sections": 6,
+   "os_version": "6.0",
+   "subsystem_version": "6.0",
+   "stack_reserve": 1048576,
+   "stack_commit": 4096,
+   "heap_reserve": 1048576,
+   "entry_point": true,
+   "dll_characteristics": "0x4160",
+   "relocations": true,
+   "reloc_dir_size": 7108,
+   "exception_dir": true,
+   "unwind_entries": 3872,
+   "tls_dir": true,
+   "tls_callbacks": 0,
+   "delay_load_dir": false,
+   "resources": true,
+   "resource_dir_size": 1432,
+   "clr_header": false,
+   "bound_imports": false,
+   "authenticode": true,
+   "exports": true,
+   "load_config": true,
+   "large_image": false,
+   "high_entropy_va": true,
+   "dynamic_base": true,
+   "force_integrity": false,
+   "nx_compat": true,
+   "no_seh": false,
+   "appcontainer": false,
+   "guard_cf": true,
+   "terminal_server_aware": false,
+   "guard_flags": "0x10017500",
+   "guard": [
+    "cf_export_suppression_info_present",
+    "cf_function_table_present",
+    "cf_instrumented",
+    "cf_longjump_table_present",
+    "delayload_iat_in_its_own_section",
+    "protect_delayload_iat"
+   ],
+   "guard_cf_functions": 485,
+   "dependent_load_flags": "0x0",
+   "security_cookie": true,
+   "eh_continuation_entries": 0,
+   "cet_compat": true,
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 127
+  },
+  "electron.exe": {
+   "size": 246032896,
+   "is_dll": false,
+   "subsystem": "GUI",
+   "image_base": "0x140000000",
+   "size_of_image": 247459840,
+   "sections": 15,
+   "os_version": "10.0",
+   "subsystem_version": "10.0",
+   "stack_reserve": 8388608,
+   "stack_commit": 4096,
+   "heap_reserve": 1048576,
+   "entry_point": true,
+   "dll_characteristics": "0xc160",
+   "relocations": true,
+   "reloc_dir_size": 1226016,
+   "exception_dir": true,
+   "unwind_entries": 465616,
+   "tls_dir": true,
+   "tls_callbacks": 6,
+   "delay_load_dir": true,
+   "resources": true,
+   "resource_dir_size": 99072,
+   "clr_header": false,
+   "bound_imports": false,
+   "authenticode": false,
+   "exports": true,
+   "load_config": true,
+   "large_image": true,
+   "high_entropy_va": true,
+   "dynamic_base": true,
+   "force_integrity": false,
+   "nx_compat": true,
+   "no_seh": false,
+   "appcontainer": false,
+   "guard_cf": true,
+   "terminal_server_aware": true,
+   "guard_flags": "0x10500",
+   "guard": [
+    "cf_function_table_present",
+    "cf_instrumented",
+    "cf_longjump_table_present"
+   ],
+   "guard_cf_functions": 207090,
+   "dependent_load_flags": "0x0",
+   "security_cookie": true,
+   "eh_continuation_entries": 0,
+   "cet_compat": false,
+   "ordinal_imports": 12,
+   "delay_imports": 747,
+   "load_imports": 537
+  },
+  "ffmpeg.dll": {
+   "size": 3113472,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "image_base": "0x180000000",
+   "size_of_image": 4673536,
+   "sections": 8,
+   "os_version": "10.0",
+   "subsystem_version": "10.0",
+   "stack_reserve": 1048576,
+   "stack_commit": 4096,
+   "heap_reserve": 1048576,
+   "entry_point": true,
+   "dll_characteristics": "0x4160",
+   "relocations": true,
+   "reloc_dir_size": 13912,
+   "exception_dir": true,
+   "unwind_entries": 3457,
+   "tls_dir": true,
+   "tls_callbacks": 0,
+   "delay_load_dir": false,
+   "resources": false,
+   "resource_dir_size": 0,
+   "clr_header": false,
+   "bound_imports": false,
+   "authenticode": false,
+   "exports": true,
+   "load_config": true,
+   "large_image": false,
+   "high_entropy_va": true,
+   "dynamic_base": true,
+   "force_integrity": false,
+   "nx_compat": true,
+   "no_seh": false,
+   "appcontainer": false,
+   "guard_cf": true,
+   "terminal_server_aware": false,
+   "guard_flags": "0x10500",
+   "guard": [
+    "cf_function_table_present",
+    "cf_instrumented",
+    "cf_longjump_table_present"
+   ],
+   "guard_cf_functions": 2323,
+   "dependent_load_flags": "0x0",
+   "security_cookie": true,
+   "eh_continuation_entries": 0,
+   "cet_compat": false,
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 100
+  },
+  "vk_swiftshader.dll": {
+   "size": 5520384,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "image_base": "0x180000000",
+   "size_of_image": 5619712,
+   "sections": 9,
+   "os_version": "10.0",
+   "subsystem_version": "10.0",
+   "stack_reserve": 1048576,
+   "stack_commit": 4096,
+   "heap_reserve": 1048576,
+   "entry_point": true,
+   "dll_characteristics": "0x4160",
+   "relocations": true,
+   "reloc_dir_size": 25984,
+   "exception_dir": true,
+   "unwind_entries": 7565,
+   "tls_dir": true,
+   "tls_callbacks": 1,
+   "delay_load_dir": false,
+   "resources": true,
+   "resource_dir_size": 1240,
+   "clr_header": false,
+   "bound_imports": false,
+   "authenticode": false,
+   "exports": true,
+   "load_config": true,
+   "large_image": false,
+   "high_entropy_va": true,
+   "dynamic_base": true,
+   "force_integrity": false,
+   "nx_compat": true,
+   "no_seh": false,
+   "appcontainer": false,
+   "guard_cf": true,
+   "terminal_server_aware": false,
+   "guard_flags": "0x10500",
+   "guard": [
+    "cf_function_table_present",
+    "cf_instrumented",
+    "cf_longjump_table_present"
+   ],
+   "guard_cf_functions": 4384,
+   "dependent_load_flags": "0x0",
+   "security_cookie": true,
+   "eh_continuation_entries": 0,
+   "cet_compat": false,
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 133
+  },
+  "vulkan-1.dll": {
+   "size": 939520,
+   "is_dll": true,
+   "subsystem": "CUI",
+   "image_base": "0x180000000",
+   "size_of_image": 974848,
+   "sections": 9,
+   "os_version": "10.0",
+   "subsystem_version": "10.0",
+   "stack_reserve": 1048576,
+   "stack_commit": 4096,
+   "heap_reserve": 1048576,
+   "entry_point": true,
+   "dll_characteristics": "0x4160",
+   "relocations": true,
+   "reloc_dir_size": 3420,
+   "exception_dir": true,
+   "unwind_entries": 2249,
+   "tls_dir": true,
+   "tls_callbacks": 0,
+   "delay_load_dir": false,
+   "resources": true,
+   "resource_dir_size": 648,
+   "clr_header": false,
+   "bound_imports": false,
+   "authenticode": false,
+   "exports": true,
+   "load_config": true,
+   "large_image": false,
+   "high_entropy_va": true,
+   "dynamic_base": true,
+   "force_integrity": false,
+   "nx_compat": true,
+   "no_seh": false,
+   "appcontainer": false,
+   "guard_cf": true,
+   "terminal_server_aware": false,
+   "guard_flags": "0x10500",
+   "guard": [
+    "cf_function_table_present",
+    "cf_instrumented",
+    "cf_longjump_table_present"
+   ],
+   "guard_cf_functions": 1212,
+   "dependent_load_flags": "0x0",
+   "security_cookie": true,
+   "eh_continuation_entries": 0,
+   "cet_compat": false,
+   "ordinal_imports": 0,
+   "delay_imports": 0,
+   "load_imports": 120
+  }
+ },
+ "load_closure": {
+  "electron.exe": {
+   "shipped_modules": [
+    "electron.exe"
+   ],
+   "system_dlls": {
+    "crypt32.dll": {
+     "images": [
+      "electron.exe"
+     ],
+     "have_dll": false,
+     "functions": 28,
+     "unresolved": 28
+    },
+    "dwrite.dll": {
+     "images": [
+      "electron.exe"
+     ],
+     "have_dll": false,
+     "functions": 1,
+     "unresolved": 1
+    },
+    "kernel32.dll": {
+     "images": [
+      "electron.exe"
+     ],
+     "have_dll": true,
+     "functions": 409,
+     "unresolved": 227
+    },
+    "ntdll.dll": {
+     "images": [
+      "electron.exe"
+     ],
+     "have_dll": true,
+     "functions": 11,
+     "unresolved": 2
+    },
+    "version.dll": {
+     "images": [
+      "electron.exe"
+     ],
+     "have_dll": true,
+     "functions": 3,
+     "unresolved": 0
+    },
+    "winmm.dll": {
+     "images": [
+      "electron.exe"
+     ],
+     "have_dll": true,
+     "functions": 31,
+     "unresolved": 28
+    },
+    "ws2_32.dll": {
+     "images": [
+      "electron.exe"
+     ],
+     "have_dll": true,
+     "functions": 54,
+     "unresolved": 11
+    }
+   }
+  }
+ },
+ "host_exe_imports": {},
+ "system_dlls": {
+  "kernel32.dll": {
+   "imported": 424,
+   "provided": 188,
+   "have_dll": true,
+   "load_time_images": [
+    "d3dcompiler_47.dll",
+    "dxcompiler.dll",
+    "dxil.dll",
+    "electron.exe",
+    "ffmpeg.dll",
+    "vk_swiftshader.dll",
+    "vulkan-1.dll"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "user32.dll": {
+   "imported": 215,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "dxcompiler.dll",
+    "vk_swiftshader.dll"
+   ],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "gdi32.dll": {
+   "imported": 95,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "vk_swiftshader.dll"
+   ],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "advapi32.dll": {
+   "imported": 85,
+   "provided": 33,
+   "have_dll": true,
+   "load_time_images": [
+    "d3dcompiler_47.dll",
+    "dxcompiler.dll",
+    "dxil.dll",
+    "vulkan-1.dll"
+   ],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "ws2_32.dll": {
+   "imported": 54,
+   "provided": 43,
+   "have_dll": true,
+   "load_time_images": [
+    "electron.exe"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "ole32.dll": {
+   "imported": 33,
+   "provided": 14,
+   "have_dll": true,
+   "load_time_images": [
+    "dxcompiler.dll",
+    "dxil.dll"
+   ],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "winmm.dll": {
+   "imported": 31,
+   "provided": 3,
+   "have_dll": true,
+   "load_time_images": [
+    "electron.exe"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "crypt32.dll": {
+   "imported": 28,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "electron.exe"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "shell32.dll": {
+   "imported": 24,
+   "provided": 6,
+   "have_dll": true,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 2,
+   "kind": "dll"
+  },
+  "mfplat.dll": {
+   "imported": 23,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "oleaut32.dll": {
+   "imported": 22,
+   "provided": 20,
+   "have_dll": true,
+   "load_time_images": [
+    "dxcompiler.dll"
+   ],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "api-ms-win-crt-stdio-l1": {
+   "imported": 15,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "dxil.dll"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "api-ms-win-crt-runtime-l1": {
+   "imported": 14,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "dxil.dll"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "dbghelp.dll": {
+   "imported": 14,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "winhttp.dll": {
+   "imported": 14,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "iphlpapi.dll": {
+   "imported": 13,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "ntdll.dll": {
+   "imported": 11,
+   "provided": 9,
+   "have_dll": true,
+   "load_time_images": [
+    "electron.exe"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "hid.dll": {
+   "imported": 11,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "ncrypt.dll": {
+   "imported": 11,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "cfgmgr32.dll": {
+   "imported": 11,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "vulkan-1.dll"
+   ],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "bthprops.cpl": {
+   "imported": 11,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "setupapi.dll": {
+   "imported": 10,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "uiautomationcore.dll": {
+   "imported": 9,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "winusb.dll": {
+   "imported": 9,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "combase.dll": {
+   "imported": 8,
+   "provided": 6,
+   "have_dll": true,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "winspool.drv": {
+   "imported": 8,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 1,
+   "kind": "dll"
+  },
+  "api-ms-win-crt-string-l1": {
+   "imported": 7,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "dxil.dll"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "shlwapi.dll": {
+   "imported": 7,
+   "provided": 4,
+   "have_dll": true,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 2,
+   "kind": "dll"
+  },
+  "secur32.dll": {
+   "imported": 7,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "wintrust.dll": {
+   "imported": 6,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "uxtheme.dll": {
+   "imported": 6,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 1,
+   "kind": "dll"
+  },
+  "comctl32.dll": {
+   "imported": 5,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 4,
+   "kind": "dll"
+  },
+  "dwmapi.dll": {
+   "imported": 5,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "pdh.dll": {
+   "imported": 5,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "wevtapi.dll": {
+   "imported": 5,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "oleacc.dll": {
+   "imported": 5,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "wtsapi32.dll": {
+   "imported": 4,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "userenv.dll": {
+   "imported": 4,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "api-ms-win-crt-heap-l1": {
+   "imported": 3,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "dxil.dll"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "version.dll": {
+   "imported": 3,
+   "provided": 3,
+   "have_dll": true,
+   "load_time_images": [
+    "electron.exe"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "propsys.dll": {
+   "imported": 3,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "api-ms-win-shcore-scaling-l1": {
+   "imported": 3,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "rpcrt4.dll": {
+   "imported": 2,
+   "provided": 2,
+   "have_dll": true,
+   "load_time_images": [
+    "d3dcompiler_47.dll"
+   ],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "api-ms-win-crt-math-l1": {
+   "imported": 2,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "dxil.dll"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "dxgi.dll": {
+   "imported": 2,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "mf.dll": {
+   "imported": 2,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "api-ms-win-power-base-l1": {
+   "imported": 2,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "dcomp.dll": {
+   "imported": 2,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "dhcpcsvc.dll": {
+   "imported": 2,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "api-ms-win-crt-utility-l1": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "dxil.dll"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "api-ms-win-crt-convert-l1": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "dxil.dll"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "dwrite.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [
+    "electron.exe"
+   ],
+   "delay_only_images": [],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "cryptui.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "d3d11.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "mmdevapi.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 1,
+   "kind": "dll"
+  },
+  "mfreadwrite.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "api-ms-win-core-realtime-l1": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "apiset-unmapped"
+  },
+  "tbs.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "d3d12.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 1,
+   "kind": "dll"
+  },
+  "bcryptprimitives.dll": {
+   "imported": 1,
+   "provided": 1,
+   "have_dll": true,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "comdlg32.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  },
+  "urlmon.dll": {
+   "imported": 1,
+   "provided": 0,
+   "have_dll": false,
+   "load_time_images": [],
+   "delay_only_images": [
+    "electron.exe"
+   ],
+   "ordinal_imports": 0,
+   "kind": "dll"
+  }
+ },
+ "load_blockers": {
+  "user32.dll": [
+   "dxcompiler.dll",
+   "vk_swiftshader.dll"
+  ],
+  "gdi32.dll": [
+   "vk_swiftshader.dll"
+  ],
+  "crypt32.dll": [
+   "electron.exe"
+  ],
+  "api-ms-win-crt-stdio-l1": [
+   "dxil.dll"
+  ],
+  "api-ms-win-crt-runtime-l1": [
+   "dxil.dll"
+  ],
+  "cfgmgr32.dll": [
+   "vulkan-1.dll"
+  ],
+  "api-ms-win-crt-string-l1": [
+   "dxil.dll"
+  ],
+  "api-ms-win-crt-heap-l1": [
+   "dxil.dll"
+  ],
+  "api-ms-win-crt-math-l1": [
+   "dxil.dll"
+  ],
+  "api-ms-win-crt-utility-l1": [
+   "dxil.dll"
+  ],
+  "api-ms-win-crt-convert-l1": [
+   "dxil.dll"
+  ],
+  "dwrite.dll": [
+   "electron.exe"
+  ]
+ },
+ "apiset_unmapped": {
+  "api-ms-win-crt-stdio-l1": {
+   "functions": 15,
+   "images": [
+    "dxil.dll"
+   ],
+   "load_time": true,
+   "suggested_host": "ucrtbase.dll",
+   "names": [
+    "__acrt_iob_func",
+    "__stdio_common_vsnprintf_s",
+    "__stdio_common_vsprintf",
+    "__stdio_common_vsprintf_s",
+    "_chsize",
+    "_close",
+    "_fileno",
+    "_get_osfhandle",
+    "_lseek",
+    "_open_osfhandle",
+    "_read",
+    "_setmode",
+    "_write",
+    "_wsopen_dispatch",
+    "fwrite"
+   ]
+  },
+  "api-ms-win-crt-runtime-l1": {
+   "functions": 14,
+   "images": [
+    "dxil.dll"
+   ],
+   "load_time": true,
+   "suggested_host": "ucrtbase.dll",
+   "names": [
+    "_cexit",
+    "_configure_narrow_argv",
+    "_crt_atexit",
+    "_errno",
+    "_execute_onexit_table",
+    "_initialize_narrow_environment",
+    "_initialize_onexit_table",
+    "_initterm",
+    "_initterm_e",
+    "_invalid_parameter_noinfo_noreturn",
+    "_register_onexit_function",
+    "_seh_filter_dll",
+    "abort",
+    "terminate"
+   ]
+  },
+  "api-ms-win-crt-string-l1": {
+   "functions": 7,
+   "images": [
+    "dxil.dll"
+   ],
+   "load_time": true,
+   "suggested_host": "ucrtbase.dll",
+   "names": [
+    "isalnum",
+    "isalpha",
+    "isdigit",
+    "isprint",
+    "strcpy_s",
+    "toupper",
+    "wcsncmp"
+   ]
+  },
+  "api-ms-win-crt-heap-l1": {
+   "functions": 3,
+   "images": [
+    "dxil.dll"
+   ],
+   "load_time": true,
+   "suggested_host": "ucrtbase.dll",
+   "names": [
+    "calloc",
+    "free",
+    "malloc"
+   ]
+  },
+  "api-ms-win-shcore-scaling-l1": {
+   "functions": 3,
+   "images": [
+    "electron.exe"
+   ],
+   "load_time": false,
+   "suggested_host": "shcore.dll",
+   "names": [
+    "GetDpiForMonitor",
+    "GetScaleFactorForMonitor",
+    "SetProcessDpiAwareness"
+   ]
+  },
+  "api-ms-win-crt-math-l1": {
+   "functions": 2,
+   "images": [
+    "dxil.dll"
+   ],
+   "load_time": true,
+   "suggested_host": "ucrtbase.dll",
+   "names": [
+    "_fpclass",
+    "ceilf"
+   ]
+  },
+  "api-ms-win-power-base-l1": {
+   "functions": 2,
+   "images": [
+    "electron.exe"
+   ],
+   "load_time": false,
+   "suggested_host": "powrprof.dll",
+   "names": [
+    "CallNtPowerInformation",
+    "PowerDeterminePlatformRoleEx"
+   ]
+  },
+  "api-ms-win-crt-utility-l1": {
+   "functions": 1,
+   "images": [
+    "dxil.dll"
+   ],
+   "load_time": true,
+   "suggested_host": "ucrtbase.dll",
+   "names": [
+    "qsort"
+   ]
+  },
+  "api-ms-win-crt-convert-l1": {
+   "functions": 1,
+   "images": [
+    "dxil.dll"
+   ],
+   "load_time": true,
+   "suggested_host": "ucrtbase.dll",
+   "names": [
+    "atoi"
+   ]
+  },
+  "api-ms-win-core-realtime-l1": {
+   "functions": 1,
+   "images": [
+    "electron.exe"
+   ],
+   "load_time": false,
+   "suggested_host": "kernel32.dll",
+   "names": [
+    "QueryUnbiasedInterruptTimePrecise"
+   ]
+  }
+ },
+ "missing": {
+  "advapi32.dll": [
+   {
+    "fn": "CryptAcquireContextW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "CryptCreateHash",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "CryptDestroyHash",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "CryptGetHashParam",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "CryptReleaseContext",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetTokenInformation",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "OpenProcessToken",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "CryptHashData",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "AccessCheck",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "AddConditionalAce",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "AddMandatoryAce",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "AdjustTokenPrivileges",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "BuildExplicitAccessWithNameW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "BuildSecurityDescriptorW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "BuildTrusteeWithSidW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CheckTokenMembership",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CloseServiceHandle",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CreateProcessAsUserW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CreateRestrictedToken",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CryptGenRandom",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CryptGetProvParam",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CryptSetHashParam",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CryptSignHashW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "DuplicateTokenEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetAce",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetNamedSecurityInfoW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetSecurityDescriptorControl",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetSecurityDescriptorDacl",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetSecurityDescriptorGroup",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetSecurityDescriptorOwner",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetSecurityDescriptorSacl",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetSecurityInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ImpersonateAnonymousToken",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ImpersonateNamedPipeClient",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "InitializeAcl",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "InitializeSecurityDescriptor",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "IsValidAcl",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "IsValidSecurityDescriptor",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "LookupPrivilegeValueW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "OpenSCManagerW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "OpenServiceW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "OpenThreadToken",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "QueryServiceStatus",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RevertToSelf",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetEntriesInAclW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetNamedSecurityInfoW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetSecurityDescriptorDacl",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetSecurityInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetThreadToken",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetTokenInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SystemFunction036",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "combase.dll": [
+   {
+    "fn": "RoActivateInstance",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RoGetActivationFactory",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "kernel32.dll": [
+   {
+    "fn": "InitializeSListHead",
+    "status": "fn-missing",
+    "images": 7,
+    "load_time": true
+   },
+   {
+    "fn": "CompareStringW",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "EnumSystemLocalesW",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "FindFirstFileExW",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "GetLocaleInfoW",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "GetModuleHandleExW",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "GetStringTypeW",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "GetUserDefaultLCID",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "InterlockedFlushSList",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "IsValidLocale",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "LCMapStringW",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "ReadConsoleW",
+    "status": "fn-missing",
+    "images": 6,
+    "load_time": true
+   },
+   {
+    "fn": "GetDateFormatW",
+    "status": "fn-missing",
+    "images": 5,
+    "load_time": true
+   },
+   {
+    "fn": "GetTimeFormatW",
+    "status": "fn-missing",
+    "images": 5,
+    "load_time": true
+   },
+   {
+    "fn": "CreateFileMappingW",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "FormatMessageA",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "FreeLibraryAndExitThread",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "GetConsoleScreenBufferInfo",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "GetFileInformationByHandle",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "HeapQueryInformation",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "MapViewOfFile",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "SetConsoleTextAttribute",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "UnmapViewOfFile",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "CreateHardLinkW",
+    "status": "fn-missing",
+    "images": 3,
+    "load_time": true
+   },
+   {
+    "fn": "GetProcessTimes",
+    "status": "fn-missing",
+    "images": 3,
+    "load_time": true
+   },
+   {
+    "fn": "HeapWalk",
+    "status": "fn-missing",
+    "images": 3,
+    "load_time": true
+   },
+   {
+    "fn": "SetFileTime",
+    "status": "fn-missing",
+    "images": 3,
+    "load_time": true
+   },
+   {
+    "fn": "CreateFileMappingA",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "DeleteProcThreadAttributeList",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "DeviceIoControl",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "ExpandEnvironmentStringsW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetDriveTypeW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetFileAttributesExW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetLocaleInfoEx",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetLogicalProcessorInformationEx",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetModuleHandleExA",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "InitOnceBeginInitialize",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "InitOnceComplete",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "InitializeProcThreadAttributeList",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "IsWow64Process",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "MapViewOfFileEx",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "SetFileAttributesW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "SystemTimeToTzSpecificLocalTime",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "UpdateProcThreadAttribute",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "VerSetConditionMask",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "VerifyVersionInfoW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "AllocConsole",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "AreFileApisANSI",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "AssignProcessToJobObject",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "AttachConsole",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CancelIo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CancelIoEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CancelSynchronousIo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CheckRemoteDebuggerPresent",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ClearCommError",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ConnectNamedPipe",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ConvertFiberToThread",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ConvertThreadToFiberEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateFiberEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateIoCompletionPort",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateJobObjectW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateNamedPipeA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateNamedPipeW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreatePipe",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateRemoteThread",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateRemoteThreadEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateSymbolicLinkW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateToolhelp32Snapshot",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateWaitableTimerExW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "DebugBreak",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "DeleteFiber",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "DiscardVirtualMemory",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "DisconnectNamedPipe",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "EnumResourceNamesW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "EnumSystemLocalesEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "EscapeCommFunction",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ExpandEnvironmentStringsA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "FillConsoleOutputAttribute",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "FillConsoleOutputCharacterW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "FindFirstFileExA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "FindResourceA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "FindResourceW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "FlushViewOfFile",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "FormatMessageW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetActiveProcessorCount",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetCommModemStatus",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetCommState",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetComputerNameExW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetConsoleCursorInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetCurrencyFormatEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetCurrentPackageFullName",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetCurrentProcessorNumber",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetDateFormatEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetDiskFreeSpaceA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetDiskFreeSpaceExW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetDiskFreeSpaceW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetDynamicTimeZoneInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetErrorMode",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetFileInformationByHandleEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetFileTime",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetFinalPathNameByHandleW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetGeoInfoW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetHandleInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetLogicalProcessorInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetLongPathNameW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetMaximumProcessorCount",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetMaximumProcessorGroupCount",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetNamedPipeClientProcessId",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetNamedPipeHandleStateW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetNamedPipeServerProcessId",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetNumberFormatEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetNumberOfConsoleInputEvents",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetOverlappedResult",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetPackageFamilyName",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetPackagePathByFullName",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetPackagesByPackageFamily",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetPriorityClass",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetPrivateProfileStringW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetProcessHandleCount",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetProcessHeaps",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetProcessId",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetProcessInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetProcessIoCounters",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetProcessMitigationPolicy",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetProductInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetQueuedCompletionStatus",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetQueuedCompletionStatusEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetShortPathNameW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetSystemDefaultLCID",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetSystemPowerStatus",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetTempFileNameA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetThreadContext",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetThreadGroupAffinity",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetThreadId",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetThreadLocale",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetThreadPreferredUILanguages",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetThreadPriorityBoost",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetThreadTimes",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetTimeFormatEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetUserDefaultLangID",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetUserDefaultLocaleName",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetUserDefaultUILanguage",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetUserGeoID",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetVolumeInformationW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetVolumePathNameW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GlobalLock",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GlobalSize",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GlobalUnlock",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "HeapCompact",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "HeapLock",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "HeapSetInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "HeapUnlock",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "InterlockedPushEntrySList",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "IsThreadAFiber",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "K32EnumProcessModules",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "K32GetModuleBaseNameW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "K32GetModuleInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "K32GetPerformanceInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "K32GetProcessMemoryInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "K32QueryWorkingSetEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LCIDToLocaleName",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LoadResource",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LocaleNameToLCID",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LockFile",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LockFileEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LockResource",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "NeedCurrentDirectoryForExePathW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "OpenFileMappingW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "OpenProcess",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "OpenThread",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PeekNamedPipe",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PostQueuedCompletionStatus",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PowerClearRequest",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PowerCreateRequest",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PowerSetRequest",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PrefetchVirtualMemory",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "Process32FirstW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "Process32NextW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ProcessIdToSessionId",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PurgeComm",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "QueryFullProcessImageNameW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "QueryInformationJobObject",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "QueryProcessCycleTime",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "QueryThreadCycleTime",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "QueueUserWorkItem",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ReOpenFile",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ReadConsoleInputW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ReadDirectoryChangesW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ReadProcessMemory",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "RegisterApplicationRestart",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "RegisterWaitForSingleObject",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ReplaceFileW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ResolveLocaleName",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "RtlAddFunctionTable",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "RtlCaptureStackBackTrace",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "RtlDeleteFunctionTable",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetCommState",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetCommTimeouts",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetConsoleCtrlHandler",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetConsoleCursorInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetConsoleCursorPosition",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetConsoleTitleW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetDefaultDllDirectories",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetFileCompletionNotificationModes",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetFileInformationByHandle",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetHandleInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetInformationJobObject",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetNamedPipeHandleState",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetPriorityClass",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetProcessInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetProcessMitigationPolicy",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetProcessShutdownParameters",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetThreadInformation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetThreadPriorityBoost",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetWaitableTimer",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SizeofResource",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SwitchToFiber",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "TerminateJobObject",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "TransactNamedPipe",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "TzSpecificLocalTimeToSystemTime",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "UnlockFile",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "UnlockFileEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "UnregisterWait",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "UnregisterWaitEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "VirtualFreeEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "VirtualLock",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "VirtualProtectEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "VirtualQueryEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "VirtualUnlock",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WTSGetActiveConsoleSessionId",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WaitNamedPipeW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "Wow64GetThreadContext",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WriteConsoleInputW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WriteProcessMemory",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "lstrcmpW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CompareObjectHandles",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "ntdll.dll": [
+   {
+    "fn": "LdrLockLoaderLock",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LdrUnlockLoaderLock",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   }
+  ],
+  "ole32.dll": [
+   {
+    "fn": "CoCreateFreeThreadedMarshaler",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CoCreateInstance",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CoGetInterfaceAndReleaseStream",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CoMarshalInterThreadInterfaceInStream",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CoRegisterClassObject",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CoResumeClassObjects",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CoRevokeClassObject",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CoSetProxyBlanket",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CreateILockBytesOnHGlobal",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CreateStreamOnHGlobal",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "DoDragDrop",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetHGlobalFromILockBytes",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetHGlobalFromStream",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "OleDuplicateData",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RegisterDragDrop",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ReleaseStgMedium",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RevokeDragDrop",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RoGetAgileReference",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "StgCreateDocfileOnILockBytes",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "oleaut32.dll": [
+   {
+    "fn": "LoadRegTypeLib",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "VarBstrCmp",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "shell32.dll": [
+   {
+    "fn": "#155",
+    "status": "ordinal-unpinned",
+    "images": 1,
+    "load_time": false,
+    "ordinal_name": "ILFree",
+    "binds_to_in_shizuku": null
+   },
+   {
+    "fn": "#190",
+    "status": "ordinal-unpinned",
+    "images": 1,
+    "load_time": false,
+    "ordinal_name": "ILCreateFromPathW",
+    "binds_to_in_shizuku": null
+   },
+   {
+    "fn": "DragQueryFileW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHAddToRecentDocs",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHAppBarMessage",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHChangeNotify",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHCreateItemFromParsingName",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHGetDesktopFolder",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHGetFileInfoW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHGetPathFromIDListW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHGetPropertyStoreForWindow",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHGetStockIconInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHOpenFolderAndSelectItems",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SHParseDisplayName",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ShellExecuteExW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ShellExecuteW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "Shell_NotifyIconGetRect",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "Shell_NotifyIconW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "shlwapi.dll": [
+   {
+    "fn": "#12",
+    "status": "ordinal-unpinned",
+    "images": 1,
+    "load_time": false,
+    "ordinal_name": "SHCreateMemStream",
+    "binds_to_in_shizuku": "PathIsRootW"
+   },
+   {
+    "fn": "#219",
+    "status": "ordinal-unpinned",
+    "images": 1,
+    "load_time": false,
+    "ordinal_name": "QISearch",
+    "binds_to_in_shizuku": null
+   },
+   {
+    "fn": "AssocQueryStringW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "winmm.dll": [
+   {
+    "fn": "midiInAddBuffer",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiInClose",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiInGetDevCapsW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiInGetNumDevs",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiInOpen",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiInPrepareHeader",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiInReset",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiInStart",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiInUnprepareHeader",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutClose",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutGetDevCapsW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutGetNumDevs",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutLongMsg",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutOpen",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutPrepareHeader",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutReset",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutShortMsg",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "midiOutUnprepareHeader",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveInGetNumDevs",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutClose",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutGetNumDevs",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutOpen",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutPause",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutPrepareHeader",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutReset",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutRestart",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutUnprepareHeader",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "waveOutWrite",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   }
+  ],
+  "ws2_32.dll": [
+   {
+    "fn": "FreeAddrInfoExW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetAddrInfoExCancel",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetAddrInfoExW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetNameInfoW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WSADuplicateSocketW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WSAEnumProtocolsW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WSAGetOverlappedResult",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WSALookupServiceBeginW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WSALookupServiceEnd",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WSALookupServiceNextW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WSASetServiceW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   }
+  ]
+ }
+}
