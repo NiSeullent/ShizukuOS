@@ -34,10 +34,13 @@ enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32
 enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
        K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10 };
 
+/* FILETIME of a scheduler tick: the wall clock at the first query minus the ticks counted by then gives the boot instant once,
+ * so a thread's creation or exit time reads the same on every query. */
 static uint64_t tick_to_filetime(uint64_t tick)
 {
-    const uint64_t now = ticks_now();
-    return (uint64_t)filetime_now() - (now > tick ? now - tick : 0) * TICK_100NS;
+    static uint64_t boot_ft;
+    if (!boot_ft) boot_ft = (uint64_t)filetime_now() - ticks_now() * TICK_100NS;
+    return boot_ft + tick * TICK_100NS;
 }
 
 static process_t *proc_of_handle(process_t *cur, uint64_t h)
@@ -55,7 +58,9 @@ static process_t *proc_of_handle(process_t *cur, uint64_t h)
 void thread_account_exit(thread_t *t)
 {
     process_t *p = t->proc;
-    if (!p) return;
+    /* The last thread of a process can be preempted between process_thread_gone() and thread_exit(); by then proc_wait() may
+     * have released the process slot and a new process may own it: only charge the process the thread was created in. */
+    if (!p || !p->used || !t->object || t->object->u.thr.pid != (uint64_t)p->pid) return;
     p->dead_user_ticks += t->user_ticks;
     p->dead_kernel_ticks += t->kernel_ticks;
     p->dead_cycles += t->cycles;
@@ -138,12 +143,16 @@ static uint64_t system_commit(void)
     return n;
 }
 
+/* Interrupts off: descriptor arrays and page tables of any process may change under a preempted walk (another thread growing its
+ * descriptor array, a process being torn down). The walks are short. */
 static void sample_peaks(process_t *p)
 {
+    const uint64_t f = irq_save();
     const uint64_t ws = vm_count_user_pages(p->pml4), pc = private_commit(p), sc = system_commit();
     if (ws > p->peak_ws_pages) p->peak_ws_pages = ws;
     if (pc > p->peak_commit) p->peak_commit = pc;
     if (sc > g_peak_system_commit) g_peak_system_commit = sc;
+    irq_restore(f);
 }
 
 /* VirtualLock records: one entry per locked page. */
@@ -345,9 +354,12 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
                  uint32_t processes, threads, handles, pad; } s;
         unsigned i;
         process_t *q;
+        uint64_t f;
         memset(&s, 0, sizeof s);
         s.total_pages = pmm_total_count(); s.free_pages = pmm_free_count();
+        f = irq_save();
         s.commit_bytes = system_commit();
+        irq_restore(f);
         if (s.commit_bytes > g_peak_system_commit) g_peak_system_commit = s.commit_bytes;
         s.peak_commit_bytes = g_peak_system_commit;
         s.kheap_total = kheap_total(); s.kheap_used = kheap_used();
@@ -358,11 +370,13 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
     }
     case K32Q_PROCESS_MEMORY: {
         process_t *p = proc_of_handle(cur, h);
-        uint64_t m[5];
+        uint64_t m[5], f;
         if (!p) return STATUS_INVALID_HANDLE;
         sample_peaks(p);
+        f = irq_save();
         m[0] = p->page_faults; m[1] = vm_count_user_pages(p->pml4) * PAGE_SIZE; m[2] = p->peak_ws_pages * PAGE_SIZE;
         m[3] = private_commit(p); m[4] = p->peak_commit;
+        irq_restore(f);
         return put_out(cur, buf, len, retlen, m, sizeof m);
     }
     case K32Q_WORKING_SET_EX: {                                 /* in/out array of {VirtualAddress, attributes} */

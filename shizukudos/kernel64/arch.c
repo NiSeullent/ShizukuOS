@@ -65,7 +65,7 @@ void arch_init(void)
         idt[i].hi = (uint32_t)(h >> 32);
         idt[i].sel = 0x08;
         idt[i].ist = i == 8 ? 1 : 0;
-        idt[i].type = 0x8e;
+        idt[i].type = i == 3 ? 0xee : 0x8e;         /* #BP gate DPL 3: INT3 in ring 3 is a breakpoint (a DPL-0 gate turns it into #GP) */
         idt[i].zero = 0;
     }
     idtr.limit = sizeof idt - 1;

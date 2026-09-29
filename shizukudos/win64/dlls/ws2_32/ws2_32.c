@@ -1390,6 +1390,7 @@ DLLAPI INT WSAAPI WSALookupServiceNextW(HANDLE hLookup, DWORD dwControlFlags, LP
         off += sizeof(BLOB);
         off = (off + 7) & ~7u;
         h = (BYTE *)r + off;
+        r->lpBlob = b;
         b->pBlobData = h;
         boff = 32;                                          /* struct hostent (x64): name, aliases, type, length, addr list */
         *(ULONG_PTR *)(h + 8) = boff;                       /* h_aliases -> empty list */
