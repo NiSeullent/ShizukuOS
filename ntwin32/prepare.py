@@ -195,8 +195,96 @@ class PE:
             result.append({'dll': library, 'entries': entries})
         raise PEError('unterminated import descriptors')
 
+ROUTES_SCHEMA = 'ntwin32wrapper9x.routes.v2'
+PROVIDERS = ('native', 'own', 'kernelex')
+PROVIDER_MACRO = {'native': 'NTW_PROVIDER_NATIVE', 'own': 'NTW_PROVIDER_OWN',
+                  'kernelex': 'NTW_PROVIDER_KERNELEX'}
+MODES = ('auto', 'own', 'kernelex', 'native')
+
+def _identifier(value) -> bool:
+    return isinstance(value, str) and value.isascii() and value.isidentifier() and len(value) < 64
+
+def validate_routes(plan) -> dict:
+    """Reject any routing table the C consumers could misread. Returns the plan."""
+    if not isinstance(plan, dict) or plan.get('schema') != ROUTES_SCHEMA:
+        raise PEError('routes.json must declare schema ' + ROUTES_SCHEMA)
+    for key in ('provider', 'source_dll'):
+        value = plan.get(key)
+        if not isinstance(value, str) or not value or value != value.upper() or not value.isascii():
+            raise PEError(f'routes.json {key} must be an upper-case ASCII module name')
+    if plan.get('providers') != list(PROVIDERS):
+        raise PEError('routes.json providers must list native, own and kernelex')
+    order = plan.get('default_order')
+    if not isinstance(order, list) or sorted(order) != sorted(PROVIDERS):
+        raise PEError('routes.json default_order must be a permutation of the providers')
+    modes = plan.get('modes')
+    if not isinstance(modes, dict) or set(modes) != set(MODES):
+        raise PEError('routes.json modes must describe auto, own, kernelex and native')
+    if modes['own'] != ['own', 'native'] or modes['kernelex'] != ['kernelex', 'native', 'own']:
+        raise PEError('routes.json fixed mode orders do not match the resolver')
+    exports = plan.get('exports')
+    if not isinstance(exports, list) or not exports:
+        raise PEError('routes.json exports must be a non-empty list')
+    names = []
+    for entry in exports:
+        if not isinstance(entry, dict) or not _identifier(entry.get('name')):
+            raise PEError('routes.json export entries need an ASCII identifier name')
+        name = entry['name']
+        if name in names:
+            raise PEError(f'routes.json duplicate export {name}')
+        names.append(name)
+        entry_order = entry.get('order')
+        if not isinstance(entry_order, list) or len(entry_order) != len(set(entry_order)) or \
+                not entry_order or any(p not in PROVIDERS for p in entry_order) or 'own' not in entry_order:
+            raise PEError(f'routes.json export {name} needs a unique provider order that includes own')
+        if not isinstance(entry.get('native_win98se'), bool):
+            raise PEError(f'routes.json export {name} must state native_win98se')
+        if entry['native_win98se'] and (entry_order[0] != 'own' or not isinstance(entry.get('reason'), str)
+                                        or not entry['reason']):
+            raise PEError(f'routes.json export {name} exists natively; own-first order needs a reason')
+    stubs = plan.get('stubs')
+    if not isinstance(stubs, list):
+        raise PEError('routes.json stubs must be a list')
+    seen = set()
+    for stub in stubs:
+        if not isinstance(stub, dict):
+            raise PEError('routes.json stub entries must be objects')
+        module, name, provider = stub.get('module'), stub.get('name'), stub.get('provider')
+        if not isinstance(module, str) or module != module.upper() or not module.isascii() or \
+                not 0 < len(module) < 32 or any(c in module for c in '/\\: '):
+            raise PEError('routes.json stub module must be an upper-case ASCII file name')
+        if not _identifier(name):
+            raise PEError('routes.json stub name must be an ASCII identifier')
+        if provider not in ('native', 'kernelex'):
+            raise PEError(f'routes.json stub {name} provider must be native or kernelex')
+        if provider == 'native' and name in names:
+            raise PEError(f'routes.json stub {name}: an own export cannot be its own native stub entry')
+        if not isinstance(stub.get('evidence'), str) or not stub['evidence']:
+            raise PEError(f'routes.json stub {name} needs evidence')
+        key = (module, name, provider)
+        if key in seen:
+            raise PEError(f'routes.json duplicate stub {name}')
+        seen.add(key)
+    return plan
+
 def routes() -> dict:
-    return json.loads(Path(__file__).with_name('routes.json').read_text())
+    return validate_routes(json.loads(Path(__file__).with_name('routes.json').read_text()))
+
+def route_names(plan: dict) -> list[str]:
+    return [entry['name'] for entry in plan['exports']]
+
+def order_macro(order: list[str]) -> str:
+    return f'NTW_ORDER{len(order)}(' + ', '.join(PROVIDER_MACRO[p] for p in order) + ')'
+
+def render_routes_inc(plan: dict) -> str:
+    """The generated C include consumed by ntwin32/runtime.c."""
+    lines = ['/* Generated from ntwin32/routes.json by ntwin32/prepare.py; do not edit. */\n']
+    for entry in sorted(plan['exports'], key=lambda e: e['name']):
+        lines.append(f'NTW_ROUTE("{entry["name"]}", Ntw{entry["name"]}, {order_macro(entry["order"])})\n')
+    for stub in sorted(plan['stubs'], key=lambda s: (s['module'], s['name'], s['provider'])):
+        lines.append(f'NTW_STUB("{stub["module"]}", "{stub["name"]}", {PROVIDER_MACRO[stub["provider"]]})\n')
+    lines.append(f'#define NTW_DEFAULT_ORDER {order_macro(plan["default_order"])}\n')
+    return ''.join(lines)
 
 def validate_tls(pe: PE) -> dict | None:
     """Accept a 24-byte IMAGE_TLS_DIRECTORY32. The directory bytes stay in place."""
@@ -371,7 +459,7 @@ def prepare(data: bytes) -> tuple[bytes, dict]:
         raise PEError('no section-header slack')
     if any(pe.take(new_header, 40)):
         raise PEError('section-header slack is in use')
-    supported = set(plan['exports'])
+    supported = set(route_names(plan))
     groups, redirected = [], []
     for descriptor in pe.imports():
         for val, symbol, iat in descriptor['entries']:
