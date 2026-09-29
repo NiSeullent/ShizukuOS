@@ -169,6 +169,7 @@ LF/CRLF, 최대 4096바이트, 줄당 255자다. 모르는 키, 중복 키, 섹�
 | | `kernel64` | 독립 실행형 Long Mode Kernel64를 **VMX 없이** 직접 부팅 |
 | `csm_path` | `\EFI\SHIZUKU\CSMWRAP.EFI`(기본) | 절대 FAT 경로만(`/`, `.`/`..`, 와일드카드, 드라이브 문자 거부) |
 | `auto_kernel64` | `yes` / `no`(기본) | 위 `auto` 설명 참고 |
+| `menu_timeout` | `0`(기본, 메뉴 없음) – `30` | 초. 콘솔(OVMF는 COM1에도)에 한 글자 메뉴를 띄운다: A/Enter = 위 정책, K = Kernel64 직접, C = CSM, S = Supervisor. 키가 없으면 정책대로 간다(C3, 커밋 d4b8ce9) |
 
 `\SHZDOS\KERNEL64.INI`(선택)는 같은 문법에 `cmdline = <출력 가능 ASCII>` 키 하나만 받는다. 값은 잘라내지 않는다(너무 길면 거부).
 
@@ -176,18 +177,19 @@ LF/CRLF, 최대 4096바이트, 줄당 255자다. 모르는 키, 중복 키, 섹�
 `\SHZDOS\KERNEL64S.BIN`(`kbuild.py`의 `-DSHZ_STANDALONE` 빌드, 하이퍼콜을 커널 안에서 COM1/PIT/RTC로 처리)을 물리 1 MiB에,
 `\SHZDOS\WIN64.IMG`를 32 MiB에 읽는다. 0x1000–0x4FFF에 부트 페이지 표(항등 + 상위 절반, 2 MiB 페이지), 0x7000에 부트 정보를 둔다.
 이 고정 범위는 쓰기 전에 모두 `AllocatePages(AllocateAddress)`로 확보한다. 그래서 펌웨어가 그곳에 살아 있는 것(로더, 스택, 펌웨어
-페이지 표)이 없음을 보장한다. Kernel64는 물리 [0, ram_size) 전체를 소유하므로 `ram_size`는 **1 MiB에서 시작해 ExitBootServices 뒤
-쓸 수 있는 메모리(Loader/BootServices Code·Data, Conventional, WB)가 끊기지 않는 구간의 끝**이다. 2 MiB 단위로 내리고 커널 한도
-256 MiB로 자른다. 부팅 전에 GetMemoryMap으로 계획하고, `uefi/boot.c`의 재시도(맵 키가 바뀌면 다시 읽음)로 ExitBootServices를 한 뒤
+페이지 표)이 없음을 보장한다. `ram_size`와 펌웨어 구멍은 Multiboot 스텁과 **같은 계획**(`kernel64/standalone/memholes.h`, C3, 커밋 d4b8ce9)으로 정한다.
+ExitBootServices 뒤 쓸 수 있는 메모리(Loader/BootServices Code·Data, Conventional, WB)에서 부트 페이지, 커널 창 [1, 3) MiB, initrd는
+반드시 RAM이어야 한다. 힙 창 [3, 15) MiB 안의 구멍은 힙에서 울타리로 막고(8 MiB 이상 남아야 함), 그 위의 구멍은 페이지 할당기에서 뺀다.
+구멍 목록은 0x6000에 넘긴다. RAM 끝은 256 MiB 한도 아래에서 쓸 수 있는 가장 높은 주소(2 MiB 단위, 맨 위 페이지가 RAM)다. 부팅 전에 GetMemoryMap으로 계획하고, `uefi/boot.c`의 재시도(맵 키가 바뀌면 다시 읽음)로 ExitBootServices를 한 뒤
 **최종 맵으로 다시 계산**한다. 그다음 0x5000에 복사한 트램펄린이 CR3/GDT를 바꾸고 CR4=PAE로 맞춘 뒤 RDI=0x7000으로
 0xFFFFFFFF80100000에 진입한다. ExitBootServices 전의 거부 사유는 5단계 페이징(LA57), 파일 없음·크기, KERNEL64.INI 오류, RAM 부족
 (이때 가장 큰 사용 가능 구간도 출력), 고정 범위를 펌웨어가 점유(점유한 descriptor 출력), Supervisor용 `KERNEL64.BIN`을 잘못 둔 경우다.
 모두 펌웨어로 돌아간다.
 
-**OVMF와 S3.** OVMF는 S3가 켜져 있으면 SEC/PEI 임시 RAM(0x800000부터)을 `EfiACPIMemoryNVS`로 예약한다. Kernel64는 이 구간을
-덮을 수 없다. 그러면 1 MiB부터의 연속 RAM이 8 MiB에서 끝나므로 로더가 **거부**한다(NVS를 덮지 않는다). `-global ICH9-LPC.disable_s3=1`이면
-연속 구간이 약 236 MiB다(256 MiB 게스트, 끝은 `EfiRuntimeServicesData`). 실제 PC 펌웨어가 1 MiB 위 낮은 곳에 NVS/예약 구간을 두면
-같은 이유로 거부된다. Kernel64가 구멍 있는 메모리 맵을 받게 하는 것은 커널 쪽 작업이며 이번 범위 밖이다.
+**OVMF와 S3.** OVMF는 S3가 켜져 있으면(QEMU 기본) SEC/PEI 임시 RAM(0x800000부터)을 `EfiACPIMemoryNVS`로 예약한다. Kernel64는 이
+구간을 덮지 않는다. 처음 구현은 1 MiB부터의 연속 구간이 8 MiB에서 끝나서 **거부**했다. C3(커밋 d4b8ce9)부터는 이 NVS가 힙 창 안의 구멍
+3개(0x800000+0x8000, 0x80b000+0x1000, 0x810000+0xf0000, 996 KiB)가 되어 힙에서 울타리로 막히고 Kernel64가 그대로 뜬다(`kernel64-s3`).
+S3를 끄면 이 구멍은 없고, 맨 위 `EfiRuntimeServicesData` 두 곳만 페이지 할당기에서 빠진다(RAM 236 → 254 MiB).
 
 **ABI 1.1(`abi/shz_abi.h`, `SHZ_ABI_MINOR` 0→1).** `shz_bootinfo_t` **끝에만** 추가했다(1.0 접두부 176바이트는 그대로, 새 크기 472).
 추가 필드는 `fb_base, fb_size, fb_width, fb_height, fb_pitch(바이트), fb_format(SHZ_FB_RGBX8888/BGRX8888), fb_bpp, cmdline_size,
@@ -200,14 +202,15 @@ cmdline[256]`이고 플래그 `SHZ_BIF_UEFI_DIRECT`를 더했다. 읽는 쪽은 
 
 | 항목 (`supervisor/test_bootmgr.py`, QEMU 8.2.2 **TCG**, OVMF 2024.02 실행마다 VARS 사본, 256 MiB) | 증거 | 결과 |
 | --- | --- | --- |
-| BOOT.INI/KERNEL64.INI 파서 호스트 시험 65건(ASan/UBSan) | HOST | PASS |
+| BOOT.INI/KERNEL64.INI 파서 호스트 시험 65건(ASan/UBSan). C3 뒤 78건(`menu_timeout` 13건 추가) | HOST | PASS |
 | `auto`: Intel(VMX 없음), BOOT.INI 없음 → CSMWrap → SeaBIOS CSM16 → FreeDOS, 실행 후 디스크를 `dos16/verify.py`로 검증 | GUEST_RUN | PASS ×2 (최종 실행 2회) |
 | `csm`(AMD, CRLF·주석·대소문자 혼합 BOOT.INI), `legacy`(같은 MBR 디스크를 SeaBIOS 레거시로) | GUEST_RUN | PASS ×2 (최종 실행 2회) |
 | `supervisor`(VMX 없음 → 거부·복귀), `missing`/`missing-default`(CSMWrap 없음), `malformed-key`/`malformed-mode`, `not-an-image`, `one-cpu` | GUEST_RUN (OVMF `BdsDxe: failed to start … <상태>`로 복귀 확인) | PASS ×2 |
 | `kernel64`: BOOT.INI `mode=kernel64` + KERNEL64.INI, S3 끔 → Kernel64 직접 실행. `tests/run_k64_standalone.py`의 파서·판정 그대로 + WIN64.IMG 영수증의 T_*.EXE 30개 모두 exit 0 + 로더가 최종 맵으로 계산한 RAM = 커널이 본 RAM + ABI 1.1(472바이트, UEFI-direct 플래그) + cmdline 그대로 + GOP 모드 양쪽 일치 | GUEST_RUN | PASS ×2 (최종 실행 2회) |
 | `auto-kernel64`: `auto_kernel64=yes`, VMX 없음 → 같은 Kernel64 실행 | GUEST_RUN | PASS ×2 (최종 실행 2회) |
-| `auto-k64-fallback`: S3 켬 → NVS 때문에 Kernel64 거부(ExitBootServices 전) → CSM → FreeDOS 검증 | GUEST_RUN | PASS ×2 (최종 실행 2회) |
-| `kernel64-nvs` / `-missing` / `-wrong-image` / `-bad-ini`: 거부 후 펌웨어 복귀(Out of Resources / Not Found / Load Error / Invalid Parameter) | GUEST_RUN | PASS ×2 (최종 실행 2회) |
+| `auto-k64-fallback`: S3 켬 → NVS 때문에 Kernel64 거부(ExitBootServices 전) → CSM → FreeDOS 검증. **C3 뒤:** NVS는 더 이상 거부 사유가 아니므로 Supervisor용 `KERNEL64.BIN`을 `KERNEL64S.BIN` 자리에 두어 거부시킨다 | GUEST_RUN | PASS ×2 (최종 실행 2회), C3 뒤 PASS |
+| `kernel64-nvs` / `-missing` / `-wrong-image` / `-bad-ini`: 거부 후 펌웨어 복귀(Out of Resources / Not Found / Load Error / Invalid Parameter). **C3 뒤:** `kernel64-nvs`는 `kernel64-s3`(S3 켬, Kernel64 실행, 구멍 5개 중 NVS 3개는 힙에서 996 KiB 울타리, 로더와 커널의 구멍 수 일치)로 바뀌었다 | GUEST_RUN | PASS ×2 (최종 실행 2회), C3 뒤 PASS |
+| `menu-timeout`(C3): `menu_timeout=1`, 키 없음 → 정책 `auto` → CSM → FreeDOS 검증. 키 K로 고르는 경로는 `tools/test_shizuku_se_boot_matrix.py`의 `k64direct`가 COM1로 입력해 시험한다 | GUEST_RUN | PASS |
 | vBIOS 감사(`docs/shizukudos10/VBIOS_INT_AUDIT.md`)와 `supervisor/test_vbios.py`(ROM을 QEMU `-bios`로 + `bios.c` 호스트) | HOST + TCG | 53/53 PASS. Supervisor 안의 실행은 **BLOCKED**(VMX 없음) |
 
 최종 상태(커밋 뒤 코드 변경 없음)로 두 번 실행했다.
@@ -219,12 +222,15 @@ cmdline[256]`이고 플래그 `SHZ_BIF_UEFI_DIRECT`를 더했다. 읽는 쪽은 
 
 이보다 앞선 개발 중 실행 한 번에서는 `auto-kernel64`가 `T_NET_LOOP.EXE` 때문에 FAIL이었다(아래 불안정한 시험 항목).
 T_NET_LOOP은 부트 경로와 무관하다.
+3. C3 변경 뒤(커밋 ab0b616, 세션 `…/runs/20260929T214222-2l0hbqxe`): 18/18 PASS, 파서 78/78 PASS. 그 전의 C3 개발 중 전체 실행
+   (d4b8ce9 직전)은 17/18이었다. `kernel64`(S3 끔)에서 `T_NET_LOOP.EXE`의 "no physical page leak across 2 socket rounds"(57907 → 57898)가
+   실패했고, 같은 사례를 두 번 더 돌린 결과는 PASS였다(아래 불안정한 시험 항목).
 
 한계와 BLOCKED 항목은 다음과 같다.
 - **VMX 경로는 실행하지 않았다.** `mode=auto`에서 VMX가 있을 때 Supervisor를 고르는 분기와 `mode=supervisor` 성공 경로는 이 컨테이너에서
   BLOCKED다(`/dev/kvm` 없음). TCG만 썼고 KVM과 실제 PC에서는 실행하지 않았다. Secure Boot는 꺼져 있어야 한다(로더와 CSMWrap 모두 서명 없음).
-- Kernel64 직접 부팅은 연속 RAM이 1 MiB부터 64 MiB 이상 있어야 한다. OVMF에서는 S3를 꺼야 한다(위 설명). AP는 펌웨어가 세워 둔 상태로 남는다
-  (Kernel64는 CPU 1개만 쓴다).
+- Kernel64 직접 부팅은 부트 페이지·커널 창 [1, 3) MiB·initrd가 RAM이고, 힙 창에 8 MiB 이상, 전체 64 MiB 이상이 있어야 한다(위 설명).
+  OVMF의 S3는 켜도 된다(C3). AP는 펌웨어가 세워 둔 상태로 남는다(Kernel64는 CPU 1개만 쓴다).
 - **불안정한 시험(부트 경로와 무관)**: `T_NET_LOOP.EXE`가 가끔 실패한다. 로더 없이 기존 Multiboot 경로(`run_k64_standalone.py --accel tcg`)
   에서도 4회 중 1회 접근 위반(`c0000005 at 7ffb000015a8`)으로 죽었고, UEFI 직접 부팅에서는 3회 중 1회 `a socket with a full send buffer is not
   writable` 검사가 실패했다. 나머지 T_*.EXE 29개와 커널 자체시험은 같은 실행에서 모두 PASS였다. 이 시험이 실패하면 `kernel64`/`auto-kernel64`
@@ -238,63 +244,64 @@ T_NET_LOOP은 부트 경로와 무관하다.
 
 빌더 `tools/build_shizuku_se_iso.py`(공용 `tools/shizuku_se_media.py`, 드라이버 저장소 `tools/shizuku_se_drivers.py`),
 보조 raw 디스크 `tools/build_shizuku_se_disk.py`, 시험 `tools/test_shizuku_se_boot_matrix.py` = `shz.py test --suite media`
-(`--suite iso`는 이제 같은 것의 별칭). 설명서와 VM 프로필: `docs/shizukudos10/MEDIA.md`(ISO 안에는 `VMPROFIL.TXT`).
+(`--suite iso`는 같은 것의 별칭). 설명서와 VM 프로필: `docs/shizukudos10/MEDIA.md`(ISO 안에는 `VMPROFIL.TXT`).
 
 - **ISO 하나, 하이브리드:** BIOS El Torito 기본 엔트리 = `isolinux.bin`(no-emulation, boot info table 검증) → `menu.c32`
   메뉴(COM1에도 출력, COM1 키 입력 가능): **K** Kernel64(`mboot.c32 BOOT.ELF --- KERNEL64S.BIN --- WIN64.IMG`),
   **D** DOS16 FreeDOS 프로필(`memdisk harddisk` + hd32 디스크 이미지), **1** ShizukuDOS 0.1(`memdisk floppy`),
   **I** 설치(SHZSETUP이 있을 때만, Multiboot 명령줄 `shz.setup=auto`). UEFI El Torito FAT 이미지 = `\EFI\BOOT\BOOTX64.EFI`
-  로더 + `\EFI\SHIZUKU\CSMWRAP.EFI`(C1의 `shizukudos/csm/build.py` 산출물, CSMWRAP.INI, 부팅 관리자 문법의 BOOT.INI) +
-  `\SHZDOS\` + `\STARTUP.NSH`. isohybrid: `isohdpfx.bin` MBR, MBR 파티션 2(0xEF)와 GPT 항목이 EFI 이미지를 가리킨다.
-  드라이버 저장소 `\DRIVERS\<package>\`(원본 그대로) + `HWIDS.TXT` 색인, Win98 SE 오버레이, SHZSE, 제3자 부분
+  (C2의 로더 겸 부트 매니저) + `\EFI\SHIZUKU\CSMWRAP.EFI`(C1의 `shizukudos/csm/build.py` 산출물, CSMWRAP.INI) +
+  `\EFI\SHIZUKU\BOOT.INI`(`mode = auto`, `auto_kernel64 = no`, `menu_timeout = 5`) + `\SHZDOS\`(KERNEL64S.BIN 포함).
+  **UEFI Shell·startup.nsh는 쓰지 않는다**(임시 경로 삭제). isohybrid: `isohdpfx.bin` MBR, MBR 파티션 2(0xEF)와 GPT 항목이 EFI 이미지를
+  가리킨다. 드라이버 저장소 `\DRIVERS\<package>\`(원본 그대로) + `HWIDS.TXT` 색인, Win98 SE 오버레이, SHZSE, 제3자 부분
   (FreeDOS, CSMWrap+서브모듈, syslinux 데비안 소스 패키지)의 라이선스와 대응 소스.
-- **syslinux 고정:** `manifest.json` upstreams 끝의 `syslinux` = Ubuntu noble `3:6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3`
-  (GPL-2.0-or-later, com32 모듈 다수는 MIT). 패키지·소스·사용 파일을 sha256으로 고정하고 `shzlib.ensure_deb_upstream()`이
-  받아 푼다. raw 디스크의 `ldlinux.sys`/`ldlinux.c32`는 고정된 설치기(mtools판)에 내장된 짝을 쓴다.
-- **Kernel64 변경(표준 독립 스텁):** UEFI + CSMWrap에서는 SeaBIOS가 보고하는 E820에 OVMF의 ACPI NVS(8–9 MiB)가 남아
-  Multiboot `mem_upper`가 7 MiB여서 스텁이 거부했다. 스텁이 Multiboot 메모리 맵으로 RAM과 구멍을 계산하고
-  (`kernel64/standalone/memholes.h`, 0x6000, ABI 구조체 `shz_bootinfo_t`는 그대로), Kernel64 `mem_init`이
-  `SHZ_STANDALONE` 빌드에서 구멍을 페이지 할당기에서 뺀다(`K64: 3 firmware memory hole(s), 249 page(s) ...`).
-  QEMU `-kernel` 경로(`run_k64_standalone.py`)는 구멍 0개, ram 0x0fe00000으로 이전과 같다(PASS).
-- **재현성:** 커밋 116749b의 깨끗한 트리에서 전체 재빌드 두 번 → 같은 ISO
-  `b645dd8ed479861ee322be85136f737cce8cde3aed89d192a67adf99f502668e`(88,080,384바이트). raw 디스크 두 번 →
-  `9cd8825178e2876de9139452be28a34debe621d5060fcbf448f02f4e9e9ef137`(134,217,728바이트). 이를 위해 빌드 단계에
-  `SOURCE_DATE_EPOCH`(Win64 PE 타임스탬프), 스테이지 mtime 고정, ISO에 싣는 영수증에서 `built_utc`와 ISO에 없는
-  `supervisor/esp.img` 해시를 뺐다.
+- **UEFI 부트 매니저 메뉴(C3, 로더에 추가):** `BOOT.INI menu_timeout`(0–30초) 동안 한 글자를 기다린다. 키 없음/A/Enter = 정책
+  (`auto`: VMX가 있으면 Supervisor, 없으면 CSM → 같은 매체의 레거시 메뉴), **K = Kernel64 직접**, C = CSM, S = Supervisor.
+- **OVMF S3와 Kernel64(요청 1의 조정):** Multiboot 스텁과 부트 매니저가 같은 RAM 계획 `kernel64/standalone/memholes.h`를 쓴다
+  (위 2d절). S3 NVS(8–9 MiB)는 힙 창 [3, 15) MiB 안의 구멍으로 힙에서 울타리로 막고(`mem.c heap_init`: 쓰지 않는 보초 블록),
+  그 위 구멍은 페이지 할당기에서 뺀다. 구멍이 16개를 넘으면 실패 대신 RAM을 그 아래에서 끝낸다. 호스트 시험
+  `kernel64/standalone/test_memplan.py`(15건 × -m32/64비트 ASan·UBSan, `shz.py` host 스위트). chain1의 힙 3..15 MiB와
+  `link.ld`의 3 MiB 검사는 그대로 지킨다(커널 창의 구멍은 거부).
+- **syslinux 고정:** `manifest.json` upstreams 끝의 `syslinux` = Ubuntu noble `3:6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3`.
+- **재현성:** 커밋 ab0b616의 깨끗한 트리에서 전체 재빌드 두 번 → 같은 ISO
+  `83ca6b59e28463f562758962832893f73a4b3c52c9ca959c02f4f8b68b8a867b`(89,128,960바이트). raw 디스크 두 번 →
+  `4f06d42606fcfb1fef707cbc693957c2a118a62d90c1f6490e2d6b805d5eab27`(134,217,728바이트).
 
-부팅 매트릭스 (QEMU 8.2.2 TCG, KVM 없음, q35, `-cpu max`, 2 vCPU, 512 MiB, 위 ISO/디스크, 한 번에 QEMU 하나):
+부팅 매트릭스 (QEMU 8.2.2 TCG, KVM 없음, q35, `-cpu max`, 2 vCPU, 512 MiB, OVMF는 S3 켬(QEMU 기본), 위 ISO/디스크, 한 번에 QEMU 하나):
 
-| 펌웨어 | 매체 | Kernel64 | DOS16 | ShizukuDOS 0.1 | 판정 |
-| --- | --- | --- | --- | --- | --- |
-| SeaBIOS | ISO를 CD로 | PASS | PASS | PASS | PASS |
-| SeaBIOS | ISO를 하드디스크로(USB 스틱 이미지) | PASS | PASS | PASS | PASS |
-| SeaBIOS | raw 디스크 | PASS | PASS | PASS | PASS |
-| OVMF | ISO를 CD로 | PASS | PASS | PASS | PASS (**interim**) |
-| OVMF | ISO를 하드디스크로 | PASS | PASS | PASS | PASS (**interim**) |
-| OVMF | raw 디스크 | PASS | PASS | PASS | PASS (**interim**) |
+| 펌웨어 | 매체 | Kernel64(레거시 메뉴) | DOS16 | ShizukuDOS 0.1 | Kernel64 직접(UEFI 메뉴 K) | 판정 |
+| --- | --- | --- | --- | --- | --- | --- |
+| SeaBIOS | ISO를 CD로 | PASS | PASS | PASS | 해당 없음 | PASS |
+| SeaBIOS | ISO를 하드디스크로(USB 스틱 이미지) | PASS | PASS | PASS | 해당 없음 | PASS |
+| SeaBIOS | raw 디스크 | PASS | PASS | PASS | 해당 없음 | PASS |
+| OVMF | ISO를 CD로 | PASS | PASS | PASS | PASS | PASS |
+| OVMF | ISO를 하드디스크로 | PASS | PASS | PASS | PASS | PASS |
+| OVMF | raw 디스크 | PASS | PASS | PASS | PASS | PASS |
 
-- 증거(실행마다 `build/shizuku-se-matrix/<run>/<fw>-<medium>-<entry>/`): Kernel64 = COM1 로그를
-  `run_k64_standalone.py`의 parse/evaluate로 판정(`SHZ-EXIT:0`, 자체시험 전부) + WIN64.IMG의 나머지 T_*.EXE 30개 모두
-  `exit=0 faulted=0`; DOS16 = `SHZ-EXIT:0` 뒤 QMP로 게스트 메모리를 읽어 memdisk mBFT(체크섬 검증)가 가리키는 RAM 디스크를
-  떼어 `dos16/verify.py`로 판정(RESULT.TXT, T_COM.OUT, T_EXE.OUT 바이트 일치, 배너); 0.1 = `A:\>`와 `DIR` 목록. OVMF는
-  BDS → 로더 → Shell `STARTUP.NSH` → CSMWrap 부팅 장치 → isolinux 순서도 확인한다.
-- 실행 기록: `final-2` 18/18 PASS, `suite-2026-09-29T185404Z`(`shz.py test --suite media`, 결과 VERIFIED) 18/18 PASS.
-  그 전의 `final-1`은 17/18: OVMF·CD·DOS16 한 건이 CSMWrap 로그 글자 중복(`Boot deevice`, 부팅 CPU와 BIOS 프록시 AP가
-  COM1에 동시에 씀) 때문에 경로 표식 정규식에서 FAIL이었다. 그 실행의 다른 24개 검사는 PASS였다. 표식을 글자 반복
-  허용으로 고친 뒤(커밋 7c55a21) 위 두 번을 다시 돌렸다.
-- 추가: ISO를 xHCI USB 대용량 저장장치로 붙여 Kernel64 PASS(SeaBIOS, OVMF 각 1회, `usb-probe`). 합성 INF 드라이버
-  패키지 2개와 자리표시 SHZSETUP 디렉터리로 만든 별도 ISO에서 `DRIVERS`/`HWIDS.TXT`/`SHZ\SETUP`가 원본과 바이트 일치했고
-  설치 엔트리(`shz.setup=auto`)가 Kernel64로 부팅됐다(SeaBIOS 1회). `--win98-media`는 합성 자리표시 트리로 코드 경로만 확인했다.
+- 증거(실행마다 `build/shizuku-se-matrix/<run>/<fw>-<medium>-<entry>/`): Kernel64 = COM1 로그를 `run_k64_standalone.py`로 판정 +
+  WIN64.IMG의 나머지 T_*.EXE 37개 모두 `exit=0 faulted=0` + 스텁이 넘긴 구멍 수 = 커널이 적용한 구멍 수; DOS16 = `SHZ-EXIT:0` 뒤
+  QMP로 memdisk mBFT → RAM 디스크를 떼어 `dos16/verify.py`로 판정; 0.1 = `A:\>`와 `DIR` 목록; Kernel64 직접 = C2의
+  `test_bootmgr.k64_checks`(로더 RAM = 커널 RAM, ABI 1.1 UEFI-direct, GOP, 구멍 일치, CSMWrap 안 돔) + 8 MiB NVS가 힙에서 막힘.
+  OVMF 경로는 순서대로 BDS → 로더 → BOOT.INI(auto, menu_timeout=5) → 메뉴 → (키 없음 → CSM → CSMWrap 부팅 장치 → isolinux | K →
+  Kernel64 직접)이고, UEFI Shell이 한 번도 뜨지 않았음을 확인한다. OVMF+CSMWrap에서 Kernel64는 구멍 7개(NVS 3개는 힙에서 996 KiB,
+  나머지 1492페이지는 할당기 밖)로 510 MiB RAM을 쓰고, Kernel64 직접은 256 MiB 한도 안에서 NVS 구멍 3개만 받는다.
+- 실행 기록(ISO `83ca6b59…`): `chain1-final-2` 21/21 PASS, `suite-2026-09-29T213259Z`(`shz.py test --suite media`, VERIFIED) 21/21 PASS.
+  그 전 ISO(`c7106b60…`, 커밋 a3ba86e)의 `chain1-final-1`은 20/21이었다. OVMF·ISO를 디스크로·Kernel64에서 `subsys64` 자체시험
+  "three malformed slots are dropped"가 실패했다(프로토콜 오류 2/3). 같은 메모리 맵의 다른 두 매체에서는 PASS였고, 원인은 시험의 경쟁이었다.
+  `inject_bad_slot()`이 링 head를 공개한 뒤에 슬롯을 망가뜨려서 서비스 스레드가 먼저 정상 QUERY로 처리할 수 있었다. 인터럽트를 막고
+  넣도록 고쳤다(커밋 ab0b616).
+- 추가(그 전 ISO들): xHCI USB 대용량 저장장치로 붙인 ISO의 Kernel64 PASS(SeaBIOS, OVMF 각 1회). 자리표시 SHZSETUP과 합성 드라이버로
+  만든 별도 ISO에서 설치 엔트리가 부팅됐다(SeaBIOS 1회).
+- 불안정한 시험(부팅 경로와 무관): `run_k64_standalone.py`(QEMU `-kernel`, 구멍 없음) 3회 중 1회 `T_REG_STRESS.EXE` phase 6
+  "handles were used successfully while being closed and replaced under them"가 실패했고 2회는 PASS였다. 그대로 기록한다.
 
-**interim(임시):** 현재 로더에는 부팅 관리자가 없다(C2 작업 미병합). OVMF 칸은 로더가 VMX 없음으로 거부(`REFUSED`,
-TCG의 `-cpu max`는 AMD SVM을 보이므로 SVM 백엔드 없음 메시지) → 펌웨어의 UEFI Shell → `\STARTUP.NSH` → CSMWrap 경로다.
-C2의 로더(BOOT.INI `mode=auto`)가 들어오면 Shell 없이 로더가 CSMWrap을 부른다. `BOOT.INI`는 이미 그 문법으로 실려 있다.
-SHZSETUP(I1)은 아직 없어서 실제 ISO에는 `\SHZ\SETUP`과 설치 엔트리가 없다. 현재 스텁은 Multiboot 명령줄을 Kernel64에
-넘기지 않는다(C2가 `shz_bootinfo_t.cmdline`을 추가 중).
+**아직 없는 것:** SHZSETUP(I1)이 이 브랜치에 없어서 실제 ISO에는 `\SHZ\SETUP`과 설치 엔트리가 없고, "빈 VM 디스크에 설치한 뒤
+그 디스크를 UEFI와 BIOS로 부팅"하는 매트릭스 줄도 없다(I1 병합 뒤 추가). UEFI 메뉴에서 Kernel64 직접으로 설치(`shz.setup=auto`)를
+고르는 항목은 없다(`KERNEL64.INI`의 cmdline은 하나).
 
 **검증되지 않은 것:** VirtualBox·VMware·Hyper-V 실행(MEDIA.md의 해당 줄은 동작 원리에서 끌어낸 설정), Intel VMX 위의
-Supervisor 경로, UEFI Shell이 없는 펌웨어, Secure Boot(서명 없음), 실제 USB 스틱과 실제 하드웨어, 256 MiB RAM(모든 시험은
-512 MiB), 1 vCPU UEFI(C1이 CSMWrap 거부를 확인), 실제 SHZSETUP, 실제 제3자 드라이버 패키지.
+Supervisor 경로, Secure Boot(서명 없음), 실제 USB 스틱과 실제 하드웨어, 512 MiB 외의 RAM 크기, 1 vCPU UEFI(C1이 CSMWrap 거부를 확인),
+실제 제3자 드라이버 패키지.
 
 ## 3. 이번 세션에서 실행하지 못한 것 (BLOCKED)
 

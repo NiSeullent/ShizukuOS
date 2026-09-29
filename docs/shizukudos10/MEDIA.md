@@ -15,8 +15,9 @@ boots both in QEMU and judges every run from host-side evidence.
 | Legacy BIOS, CD | El Torito default entry = `isolinux.bin` (no emulation) | boot menu |
 | Legacy BIOS, USB/HDD (ISO) | `isohdpfx.bin` MBR → `isolinux.bin` (isohybrid) | boot menu |
 | Legacy BIOS, raw disk | syslinux `mbr.bin` → FAT32 VBR → `ldlinux.sys` | boot menu |
-| UEFI | `\EFI\BOOT\BOOTX64.EFI` = Shizuku loader → Supervisor | needs Intel VMX (EPT, unrestricted guest) |
-| UEFI without VMX | loader boot manager → `\EFI\SHIZUKU\CSMWRAP.EFI` → SeaBIOS CSM → the same medium's legacy boot | boot menu |
+| UEFI | `\EFI\BOOT\BOOTX64.EFI` = Shizuku loader and boot manager → its menu (5 s) → no key: Supervisor | needs Intel VMX (EPT, unrestricted guest) |
+| UEFI without VMX | boot manager (no key) → `\EFI\SHIZUKU\CSMWRAP.EFI` → SeaBIOS CSM → the same medium's legacy boot | boot menu |
+| UEFI, key K | boot manager → Kernel64 direct: `\SHZDOS\KERNEL64S.BIN` + `WIN64.IMG` in Long Mode | Kernel64 + Win64 runtime, no CSM, no VMX, GOP framebuffer, at most 256 MiB |
 
 Boot menu (menu.c32; mirrored on COM1 115200 8N1, which also accepts the keys):
 
@@ -27,18 +28,27 @@ Boot menu (menu.c32; mirrored on COM1 115200 8N1, which also accepts the keys):
 | 1 | ShizukuDOS 0.1 | `memdisk floppy` + `ShizukuDOS/shizukudos.img` (raw disk: `\SHZ\SHZDOS01.IMG`): the project's own shell, `A:\>` |
 | I | Install ShizukuDOS 10 (only when SHZSETUP is present) | Kernel64 with `shz.setup=auto` on the Multiboot command line; files from `build/shizukudos/setup/` (or `--setup DIR`) under `\SHZ\SETUP\` |
 
-**Interim (until the loader's boot manager is merged):** the current loader has no boot
-manager. Without VMX it prints `REFUSED` and returns to the firmware; the firmware then
-starts its UEFI Shell, which runs `\STARTUP.NSH` from the EFI volume, and that starts
-`\EFI\SHIZUKU\CSMWRAP.EFI`. A firmware without a UEFI Shell stops at its boot menu instead:
-add a boot entry for `\EFI\SHIZUKU\CSMWRAP.EFI`, or boot the VM as legacy BIOS.
-`\EFI\SHIZUKU\BOOT.INI` (`mode = auto`, `csm_path = \EFI\SHIZUKU\CSMWRAP.EFI`) is already on
-the medium in the boot manager's grammar (`--boot-mode` chooses the mode).
+UEFI boot manager menu (C2's loader, menu added by C3; on the console and on COM1, which also takes the key).
+`\EFI\SHIZUKU\BOOT.INI` on the medium: `mode = auto`, `auto_kernel64 = no`, `menu_timeout = 5`
+(`--boot-mode` chooses the mode):
 
-Kernel64 on UEFI + CSMWrap: SeaBIOS reports CSMWrap's E820 map, which keeps OVMF's ACPI NVS
-at 8–9 MiB. The Multiboot stub (`shizukudos/kernel64/standalone/boot32.c`) takes RAM from the
-Multiboot memory map and hands the gaps to Kernel64 (`standalone/memholes.h`), which keeps
-them out of its page allocator (`K64: 3 firmware memory hole(s), 249 page(s) kept out ...`).
+| Key | What runs |
+| --- | --- |
+| none within 5 s, A or Enter | the BOOT.INI policy: `auto` = the Supervisor with Intel VMX, otherwise CSMWrap and the legacy boot menu above |
+| K | Kernel64 direct: the standalone Long Mode kernel from `\SHZDOS\KERNEL64S.BIN` with `WIN64.IMG`, ABI 1.1 boot info with the GOP framebuffer |
+| C | CSM legacy BIOS (CSMWrap) |
+| S | Supervisor only (refuses without Intel VMX) |
+
+No UEFI Shell and no `startup.nsh` is involved (the interim Shell path of the first version is gone).
+
+Kernel64 and firmware memory holes (both boot paths): OVMF with S3 on (QEMU's default) keeps
+ACPI NVS at 8–9 MiB, both in its UEFI map and in the E820 map SeaBIOS reports under CSMWrap.
+The Multiboot stub (`shizukudos/kernel64/standalone/boot32.c`) and the boot manager's direct
+boot plan RAM the same way (`standalone/memholes.h`): holes in Kernel64's heap window
+[3, 15) MiB are fenced off in the heap, holes above it are kept out of the page allocator,
+holes in the kernel window [1, 3) MiB or over the initrd are refused. Under OVMF + CSMWrap
+with 512 MiB: `K64: 7 firmware memory hole(s): 1492 page(s) kept out of the page allocator,
+996 KiB of the heap fenced off`.
 
 ## VM profiles
 
@@ -47,7 +57,7 @@ from how the medium works, not test results.
 
 | | Setting |
 | --- | --- |
-| RAM | 512 MiB (every test run used 512 MiB). 256 MiB is a derived minimum, not tested: Kernel64 uses up to 256 MiB (the stub refuses below 64 MiB), memdisk holds the 32 MiB DOS16 image |
+| RAM | 512 MiB (every test run used 512 MiB). Kernel64 needs 64 MiB or more (the Multiboot path uses what there is below 3.5 GiB, Kernel64 direct at most 256 MiB); memdisk holds the 32 MiB DOS16 image. Other sizes were not tested |
 | vCPUs | 1 is enough on legacy BIOS; **2 or more on UEFI** (CSMWrap keeps one logical CPU and refuses with one) |
 | UEFI | **Secure Boot off** (nothing is signed). Supervisor needs nested Intel VT-x; otherwise CSMWrap |
 | Storage for the CSM path | IDE/SATA (AHCI), NVMe, USB, LSI/MPT/PVSCSI/MegaRAID SCSI. Not virtio, not Hyper-V VMBus |
@@ -55,7 +65,7 @@ from how the medium works, not test results.
 
 - **QEMU (tested):** `-machine q35 -m 512 -smp 2 -cdrom THIS.iso` (legacy BIOS). UEFI: add
   `-drive if=pflash,format=raw,readonly=on,file=OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=<copy of OVMF_VARS_4M.fd>`
-  (a non-Secure-Boot build with the UEFI Shell). As a disk:
+  (a non-Secure-Boot build; S3 may stay on). As a disk:
   `-drive file=THIS.iso,format=raw,if=none,id=d0 -device ide-hd,drive=d0`.
 - **VirtualBox (not tested):** BIOS VM with the DVD on IDE/SATA. EFI VM: *Enable EFI*, 2+ CPUs,
   SATA/IDE/NVMe controller, Secure Boot off.
@@ -71,7 +81,7 @@ from how the medium works, not test results.
 | `isolinux/` | pinned syslinux 6.04 (Ubuntu `3:6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3`): isolinux.bin, ldlinux/libcom32/libutil/menu/mboot.c32, memdisk, isolinux.cfg |
 | `SHZ/K64/` | BOOT.ELF (Multiboot stub), KERNEL64S.BIN, WIN64.IMG |
 | `SHZ/SETUP/` | SHZSETUP files, only when present at build time |
-| `ShizukuDOS10/efiboot.img` | the El Torito EFI image (also MBR partition 2 type 0xEF and a GPT entry): `\EFI\BOOT\BOOTX64.EFI`, `\EFI\SHIZUKU\{CSMWRAP.EFI,CSMWRAP.INI,BOOT.INI,README.TXT}`, `\SHZDOS\{DISK.IMG,KERNEL32.BIN,KERNEL64.BIN,WIN64.IMG}`, `\STARTUP.NSH` |
+| `ShizukuDOS10/efiboot.img` | the El Torito EFI image (also MBR partition 2 type 0xEF and a GPT entry): `\EFI\BOOT\BOOTX64.EFI`, `\EFI\SHIZUKU\{CSMWRAP.EFI,CSMWRAP.INI,BOOT.INI,README.TXT}`, `\SHZDOS\{DISK.IMG,KERNEL32.BIN,KERNEL64.BIN,KERNEL64S.BIN,WIN64.IMG}` |
 | `ShizukuDOS10/` | build outputs, receipts, `LICENSES/`, `SOURCE/` (FreeDOS, CSMWrap + submodules, syslinux Debian source package, Shizuku source), `GPL-NOTICE.TXT` |
 | `ShizukuDOS/shizukudos.img` | ShizukuDOS 0.1 floppy |
 | `Windows 98 Shizuku Second Edition/`, `SHZSE/` | NTWrapper9x, NTWin32Wrapper9x, NTWDDMWrapper9x binaries; SHZSE overlay installer |
@@ -89,17 +99,20 @@ unchanged; the repository ships none (tests use a synthetic INF only).
 python3 tools/build_shizuku_se_iso.py            # rebuilds CSMWrap + ShizukuDOS 10, then the ISO
 python3 tools/build_shizuku_se_iso.py --reuse-builds   # package existing, receipt-checked outputs
 python3 tools/build_shizuku_se_disk.py           # raw disk from the same outputs
-python3 tools/test_shizuku_se_boot_matrix.py     # 18 QEMU runs, one at a time
+python3 tools/test_shizuku_se_boot_matrix.py     # 21 QEMU runs, one at a time
 python3 tools/test_shizuku_se_boot_matrix.py --media iso-usb   # optional: the ISO as xHCI USB mass storage
 python3 shizukudos/tools/shz.py test --suite media
 ```
 
-The harness selects menu entries over COM1 (letter + Enter) and judges each run only from
+The harness selects menu entries over COM1 (letter + Enter; key K at the UEFI menu for
+`k64direct`, OVMF only) and judges each run only from
 host-side evidence: the Kernel64 COM1 log through `shizukudos/tests/run_k64_standalone.py`'s
 parser plus every `T_*.EXE` of WIN64.IMG; for DOS16 memdisk's mBFT table in guest memory gives
 the live RAM disk, which `shizukudos/dos16/verify.py` checks (RESULT.TXT, T_COM.OUT,
-T_EXE.OUT byte-exact); for 0.1 the `A:\>` prompt and a `DIR` listing. OVMF runs also check the
-ordered boot path (BDS → loader → Shell `STARTUP.NSH` → CSMWrap boot device → isolinux).
+T_EXE.OUT byte-exact); for 0.1 the `A:\>` prompt and a `DIR` listing; for Kernel64 direct C2's
+`test_bootmgr.k64_checks` (RAM, ABI 1.1, GOP, holes) plus the NVS hole fenced off. OVMF runs
+also check the ordered boot path (BDS → loader → BOOT.INI → menu → CSM → CSMWrap boot device →
+isolinux, or menu → K → Kernel64 direct) and that the UEFI Shell never starts.
 When a medium carries SHZSETUP, the Install entry is booted too.
 
 Both builders are reproducible: fixed `SOURCE_DATE_EPOCH` for xorriso and mtools (dates and
@@ -108,8 +121,9 @@ GPT GUIDs), fixed FAT volume ids, deterministic tarballs. The receipts
 
 ## Results
 
-Recorded in `docs/shizukudos10/STATUS.md` section 2e: the ISO built from commit 116749b
-(sha256 `b645dd8ed479861ee322be85136f737cce8cde3aed89d192a67adf99f502668e`, identical over two
-full rebuilds) and the raw disk (`9cd8825178e2876de9139452be28a34debe621d5060fcbf448f02f4e9e9ef137`)
-passed all 18 runs of the matrix twice (QEMU 8.2.2 TCG); the OVMF cells are interim (UEFI Shell
-`STARTUP.NSH` path) until the loader's boot manager is merged.
+Recorded in `docs/shizukudos10/STATUS.md` section 2e: the ISO built from commit ab0b616
+(sha256 `83ca6b59e28463f562758962832893f73a4b3c52c9ca959c02f4f8b68b8a867b`, identical over two
+full rebuilds) and the raw disk (`4f06d42606fcfb1fef707cbc693957c2a118a62d90c1f6490e2d6b805d5eab27`)
+passed all 21 runs of the matrix twice (QEMU 8.2.2 TCG, OVMF with S3 on), OVMF through the
+boot manager without the UEFI Shell. Not yet on the medium: SHZSETUP (agent I1) and the
+"install to a blank disk, then boot it" row.
