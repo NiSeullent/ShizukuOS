@@ -127,6 +127,51 @@ static void test_errors(void)
     CHECK(GlobalLock(NULL) == NULL, "GlobalLock(NULL) fails");
     CHECK_W(GetLastError() == ERROR_INVALID_HANDLE, "GlobalLock(NULL): ERROR_INVALID_HANDLE");
     CHECK((GlobalFlags((HGLOBAL)(ULONG_PTR)0x1234) & GMEM_INVALID_HANDLE) != 0, "GlobalFlags of a bogus handle reports GMEM_INVALID_HANDLE");
+    {
+        unsigned char stack_block[64] __attribute__((aligned(16)));
+        CHECK_W((GlobalFlags((HGLOBAL)stack_block) & GMEM_INVALID_HANDLE) != 0, "GlobalFlags of a 16-byte aligned stack address reports GMEM_INVALID_HANDLE");
+        CHECK_W((LocalFlags((HLOCAL)(stack_block + 32)) & LMEM_INVALID_HANDLE) != 0, "LocalFlags of another stack address reports LMEM_INVALID_HANDLE");
+    }
+}
+
+/* HeapValidate / HeapSize / HeapReAlloc on the process heap: documented results for valid, freed and foreign blocks. */
+static void test_heap(void)
+{
+    HANDLE heap = GetProcessHeap();
+    unsigned char stack_block[64] __attribute__((aligned(16)));
+    unsigned char *p, *q, *big;
+    size_t i;
+    int intact;
+    p = HeapAlloc(heap, 0, 200);
+    CHECK(p != NULL && HeapSize(heap, 0, p) == 200, "HeapAlloc(200): HeapSize is 200");
+    CHECK(HeapValidate(heap, 0, p), "HeapValidate accepts a live block");
+    CHECK(HeapValidate(heap, 0, NULL), "HeapValidate(heap, 0, NULL) validates the whole heap");
+    CHECK(!HeapValidate(heap, 0, stack_block), "HeapValidate rejects a stack address");
+    for (i = 0; i < 200; ++i) p[i] = (unsigned char)i;
+    q = HeapReAlloc(heap, HEAP_REALLOC_IN_PLACE_ONLY, p, 100);
+    CHECK(q == p, "shrinking with HEAP_REALLOC_IN_PLACE_ONLY keeps the block where it is");
+    CHECK(HeapSize(heap, 0, p) == 100, "and HeapSize reports the new size");
+    for (i = 0, intact = 1; i < 100; ++i) if (p[i] != (unsigned char)i) intact = 0;
+    CHECK(intact, "the leading bytes are unchanged");
+    q = HeapReAlloc(heap, HEAP_ZERO_MEMORY, p, 5000);
+    CHECK(q != NULL && HeapSize(heap, 0, q) == 5000, "growing to 5000 bytes");
+    for (i = 0, intact = 1; q && i < 100; ++i) if (q[i] != (unsigned char)i) intact = 0;
+    CHECK(intact, "growing keeps the contents");
+    for (i = 100, intact = 1; q && i < 5000; ++i) if (q[i]) intact = 0;
+    CHECK(intact, "HEAP_ZERO_MEMORY zeroes the added bytes");
+    CHECK(q && HeapFree(heap, 0, q), "HeapFree");
+    CHECK(q && !HeapValidate(heap, 0, q), "HeapValidate rejects a freed block");
+    big = HeapAlloc(heap, HEAP_ZERO_MEMORY, 3 << 20);
+    CHECK(big != NULL && HeapSize(heap, 0, big) == (SIZE_T)3 << 20, "a 3 MiB block has HeapSize 3 MiB");
+    CHECK(big && big[0] == 0 && big[(3 << 20) - 1] == 0, "HEAP_ZERO_MEMORY on the 3 MiB block");
+    CHECK(big && HeapValidate(heap, 0, big), "HeapValidate accepts the large block");
+    CHECK(big && !HeapValidate(heap, 0, big + 4096), "HeapValidate rejects a pointer into the middle of it");
+    CHECK(big && HeapFree(heap, 0, big), "HeapFree of the large block");
+    p = GlobalAlloc(GMEM_FIXED, 256);
+    q = GlobalReAlloc(p, 64, 0);
+    CHECK(p != NULL && q == p, "GlobalReAlloc of fixed memory to a smaller size without GMEM_MOVEABLE stays in place");
+    CHECK(q && GlobalSize(q) >= 64 && GlobalSize(q) < 256, "and the size shrinks");
+    if (q) GlobalFree(q);
 }
 
 int main(void)
@@ -135,5 +180,6 @@ int main(void)
     test_movable();
     test_many();
     test_errors();
+    test_heap();
     return k32t_finish("t_k32_mem");
 }

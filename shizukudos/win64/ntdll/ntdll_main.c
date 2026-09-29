@@ -21,7 +21,10 @@ void ShzEvidence(unsigned slot, unsigned long long v) { NtShzEvidence(slot, v); 
 
 /* ---------------------------------------------------------------- heap */
 /* Segment-based first-fit allocator with coalescing. Blocks are 16-byte aligned; the heap
- * handle is the address of the heap descriptor. Large requests get their own reservation. */
+ * handle is the address of the heap descriptor. Large requests get their own reservation, kept on a
+ * list of the heap. Every function that takes a block pointer first checks that it is the payload of a
+ * live block of that heap (inside one of its segments, or one of its large reservations) and only then
+ * reads the block header, so a foreign or stale pointer is refused instead of dereferenced. */
 #define HEAP_MAGIC 0x50414548u             /* "HEAP" */
 #define BLOCK_MAGIC 0x4b4c4231u
 #define BLOCK_FREE 0
@@ -39,6 +42,7 @@ typedef struct blk {
 } blk_t;                                    /* 32 bytes: payload stays 16-byte aligned */
 
 typedef struct seg { struct seg *next; uint64_t size; } seg_t;
+typedef struct large { struct large *next, *prev; uint64_t total, pad; } large_t;      /* 32 bytes, followed by the blk_t */
 
 typedef struct heap {
     uint32_t magic;
@@ -46,6 +50,7 @@ typedef struct heap {
     uint32_t flags;
     seg_t *segments;
     uint64_t allocated, count;
+    large_t *large;                        /* dedicated reservations of large blocks */
 } heap_t;
 
 static heap_t *g_process_heap;
@@ -108,15 +113,24 @@ PVOID NTAPI RtlAllocateHeap(PVOID hp, ULONG flags, SIZE_T size)
     if (!h || h->magic != HEAP_MAGIC) return 0;
     need = (size + 15) & ~15ull;
     if (!need) need = 16;
-    if (need > LARGE_THRESHOLD) {                         /* dedicated reservation */
+    if (need > LARGE_THRESHOLD) {                         /* dedicated reservation: large_t, blk_t, payload */
         PVOID base = 0;
-        SIZE_T total = need + sizeof(blk_t) + 4096;
+        SIZE_T total = need + sizeof(large_t) + sizeof(blk_t);
+        large_t *l;
         blk_t *b;
         total = (total + 4095) & ~4095ull;
         if (NtAllocateVirtualMemory(CURRENT_PROCESS, &base, 0, &total, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)) return 0;
-        b = base;
-        b->magic = BLOCK_MAGIC; b->state = BLOCK_LARGE; b->size = need; b->user_size = size; b->prev_phys = (blk_t *)total;
-        return b + 1;
+        l = base;
+        l->total = total;
+        b = (blk_t *)(l + 1);
+        b->magic = BLOCK_MAGIC; b->state = BLOCK_LARGE; b->size = need; b->user_size = size; b->prev_phys = 0;
+        heap_lock(h);
+        l->prev = 0;
+        l->next = h->large;
+        if (h->large) h->large->prev = l;
+        h->large = l;
+        heap_unlock(h);
+        return b + 1;                                     /* the memory is fresh from the kernel: already zero */
     }
     heap_lock(h);
     for (;;) {
@@ -154,33 +168,61 @@ PVOID NTAPI RtlAllocateHeap(PVOID hp, ULONG flags, SIZE_T size)
     }
 }
 
-static seg_t *segment_of(heap_t *h, blk_t *b)
+/* Heap lock held. The header of `p` if `p` is the payload of a live block of heap `h` (segment or large reservation), else 0.
+ * Only addresses inside the heap's own committed memory are read. *seg_out receives the segment (0 for a large block). */
+static blk_t *live_block(heap_t *h, const void *p, seg_t **seg_out, large_t **large_out)
 {
+    const uintptr_t a = (uintptr_t)p;
     seg_t *s;
-    for (s = h->segments; s; s = s->next)
-        if ((uint8_t *)b >= (uint8_t *)s && (uint8_t *)b < (uint8_t *)s + s->size) return s;
+    large_t *l;
+    if (!p || (a & 15)) return 0;
+    for (s = h->segments; s; s = s->next) {
+        if (a >= (uintptr_t)(first_block(s) + 1) && a < (uintptr_t)s + s->size) {
+            blk_t *b = (blk_t *)p - 1;
+            if (b->magic != BLOCK_MAGIC || b->state != BLOCK_USED) return 0;      /* free, merged away or not a block start */
+            if (seg_out) *seg_out = s;
+            return b;
+        }
+    }
+    for (l = h->large; l; l = l->next) {
+        blk_t *b = (blk_t *)(l + 1);
+        if ((uintptr_t)(b + 1) == a) {
+            if (b->magic != BLOCK_MAGIC || b->state != BLOCK_LARGE) return 0;
+            if (seg_out) *seg_out = 0;
+            if (large_out) *large_out = l;
+            return b;
+        }
+    }
     return 0;
+}
+
+static heap_t *valid_heap(PVOID hp)
+{
+    heap_t *h = hp;
+    return h && h->magic == HEAP_MAGIC ? h : 0;
 }
 
 BOOLEAN NTAPI RtlFreeHeap(PVOID hp, ULONG flags, PVOID p)
 {
-    heap_t *h = hp;
+    heap_t *h = valid_heap(hp);
     blk_t *b, *n;
-    seg_t *s;
+    seg_t *s = 0;
+    large_t *l = 0;
     (void)flags;
     if (!p) return TRUE;
-    if (!h || h->magic != HEAP_MAGIC) return FALSE;
-    b = (blk_t *)p - 1;
-    if (b->magic != BLOCK_MAGIC) return FALSE;
-    if (b->state == BLOCK_LARGE) {
-        PVOID base = b;
+    if (!h) return FALSE;
+    heap_lock(h);
+    b = live_block(h, p, &s, &l);
+    if (!b) { heap_unlock(h); return FALSE; }                                        /* foreign pointer or double free */
+    if (l) {
+        PVOID base = l;
         SIZE_T zero = 0;
+        if (l->prev) l->prev->next = l->next; else h->large = l->next;
+        if (l->next) l->next->prev = l->prev;
         b->magic = 0;
+        heap_unlock(h);
         return NtFreeVirtualMemory(CURRENT_PROCESS, &base, &zero, MEM_RELEASE) == 0;
     }
-    heap_lock(h);
-    s = segment_of(h, b);
-    if (!s || b->state != BLOCK_USED) { heap_unlock(h); return FALSE; }        /* foreign pointer or double free */
     b->state = BLOCK_FREE;
     --h->count;
     h->allocated -= b->size;
@@ -205,20 +247,40 @@ BOOLEAN NTAPI RtlFreeHeap(PVOID hp, ULONG flags, PVOID p)
 
 SIZE_T NTAPI RtlSizeHeap(PVOID hp, ULONG flags, PVOID p)
 {
+    heap_t *h = valid_heap(hp);
     blk_t *b;
-    (void)hp; (void)flags;
-    if (!p) return (SIZE_T)-1;
-    b = (blk_t *)p - 1;
-    return b->magic == BLOCK_MAGIC && b->state != BLOCK_FREE ? b->user_size : (SIZE_T)-1;
+    SIZE_T n;
+    (void)flags;
+    if (!h || !p) return (SIZE_T)-1;
+    heap_lock(h);
+    b = live_block(h, p, 0, 0);
+    n = b ? b->user_size : (SIZE_T)-1;
+    heap_unlock(h);
+    return n;
 }
 
+/* A block grows or shrinks in place when the new size fits the payload it already has; otherwise it moves, unless
+ * HEAP_REALLOC_IN_PLACE_ONLY forbids that (then the call fails and the block is unchanged). */
 PVOID NTAPI RtlReAllocateHeap(PVOID hp, ULONG flags, PVOID p, SIZE_T size)
 {
+    heap_t *h = valid_heap(hp);
     PVOID n;
     SIZE_T old;
-    if (!p) return RtlAllocateHeap(hp, flags, size);
-    old = RtlSizeHeap(hp, flags, p);
-    if (old == (SIZE_T)-1) return 0;
+    blk_t *b;
+    if (!p) return (flags & HEAP_REALLOC_IN_PLACE_ONLY) ? 0 : RtlAllocateHeap(hp, flags, size);
+    if (!h) return 0;
+    heap_lock(h);
+    b = live_block(h, p, 0, 0);
+    if (!b) { heap_unlock(h); return 0; }
+    old = b->user_size;
+    if (size <= b->size) {
+        b->user_size = size;
+        heap_unlock(h);
+        if ((flags & HEAP_ZERO_MEMORY) && size > old) memset((uint8_t *)p + old, 0, size - old);
+        return p;
+    }
+    heap_unlock(h);
+    if (flags & HEAP_REALLOC_IN_PLACE_ONLY) return 0;
     n = RtlAllocateHeap(hp, flags, size);
     if (!n) return 0;
     {
@@ -235,9 +297,15 @@ BOOLEAN NTAPI RtlLockHeap(PVOID hp) { heap_lock(hp); return TRUE; }
 BOOLEAN NTAPI RtlUnlockHeap(PVOID hp) { heap_unlock(hp); return TRUE; }
 BOOLEAN NTAPI RtlValidateHeap(PVOID hp, ULONG flags, PVOID p)
 {
+    heap_t *h = valid_heap(hp);
+    BOOLEAN ok;
     (void)flags;
-    if (!hp || ((heap_t *)hp)->magic != HEAP_MAGIC) return FALSE;
-    return !p || ((blk_t *)p - 1)->magic == BLOCK_MAGIC;
+    if (!h) return FALSE;
+    if (!p) return TRUE;
+    heap_lock(h);
+    ok = live_block(h, p, 0, 0) != 0;
+    heap_unlock(h);
+    return ok;
 }
 
 void ShzInitHeap(void)

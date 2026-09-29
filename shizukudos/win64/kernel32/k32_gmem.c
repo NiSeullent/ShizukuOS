@@ -4,9 +4,11 @@
  * Fixed memory (GMEM_FIXED) is a block of the process heap and its handle is its address. Movable memory (GMEM_MOVEABLE) has a
  * handle that is the address of a slot in a private table (one 1 MiB reservation, 32 bytes per slot, 32768 slots); the slot holds
  * the data pointer, the size and the lock count. Whether a value is a handle is decided by its address alone, which is how
- * GlobalFree, GlobalLock and friends tell the two apart. GlobalLock counts up to 255. GlobalReAlloc of fixed memory may move
- * the block only with GMEM_MOVEABLE (the heap has no in-place growth); a locked movable block is reallocated regardless of its lock
- * count (its data pointer may change). GMEM_DISCARDABLE is stored and reported by GlobalFlags but memory is never discarded.
+ * GlobalFree, GlobalLock and friends tell the two apart. Anything else must be a live block of the process heap: that is checked
+ * with RtlValidateHeap (which only reads the heap's own memory) before the heap is asked about it, so a bogus or stale value fails
+ * with ERROR_INVALID_HANDLE instead of being dereferenced. GlobalLock counts up to 255. GlobalReAlloc of fixed memory without
+ * GMEM_MOVEABLE resizes in place or fails; a locked movable block is reallocated regardless of its lock count (its data pointer may
+ * change). GMEM_DISCARDABLE is stored and reported by GlobalFlags but memory is never discarded.
  */
 #include "k32.h"
 
@@ -62,7 +64,8 @@ static void gh_release(gh_t *s)
     gl_unlock();
 }
 
-static int fixed_valid(const void *p) { return p && RtlSizeHeap(ShzProcessHeap(), 0, (PVOID)p) != (SIZE_T)-1; }
+/* A fixed block is a live allocation of the process heap; heap payloads are 16-byte aligned. */
+static int fixed_valid(const void *p) { return p && !((uintptr_t)p & 15) && RtlValidateHeap(ShzProcessHeap(), 0, (PVOID)p); }
 
 static HGLOBAL mem_alloc(UINT flags, SIZE_T size)
 {
@@ -165,10 +168,10 @@ static HGLOBAL mem_realloc(HGLOBAL h, SIZE_T size, UINT flags)
     if (!fixed_valid(h)) { shz_set_last_error(ERROR_INVALID_HANDLE); return 0; }
     if (flags & GMEM_MODIFY) return h;                                    /* nothing to change for fixed memory */
     if (size == RtlSizeHeap(ShzProcessHeap(), 0, h)) return h;
-    if (!(flags & GMEM_MOVEABLE)) { shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY); return 0; }      /* cannot grow or shrink in place */
     {
-        PVOID n = RtlReAllocateHeap(ShzProcessHeap(), (flags & GMEM_ZEROINIT) ? HEAP_ZERO_MEMORY : 0, h, size);
-        if (!n) shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY);
+        const ULONG hf = ((flags & GMEM_ZEROINIT) ? HEAP_ZERO_MEMORY : 0) | ((flags & GMEM_MOVEABLE) ? 0 : HEAP_REALLOC_IN_PLACE_ONLY);
+        PVOID n = RtlReAllocateHeap(ShzProcessHeap(), hf, h, size);
+        if (!n) shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY);                            /* without GMEM_MOVEABLE: cannot resize in place */
         return n;
     }
 }
