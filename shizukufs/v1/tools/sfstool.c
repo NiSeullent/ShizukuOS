@@ -27,7 +27,7 @@
 
 static sfs_fs *g_fs;
 static host_dev g_dev;
-static int g_quiet;
+static int g_quiet, g_times;
 
 static int fail(const char *what, int rc)
 {
@@ -77,24 +77,35 @@ static int write_pattern(uint32_t ino, uint64_t off, uint64_t len, uint64_t seed
     return rc;
 }
 
+/* Content fingerprint used by the tests: SHA-256 over (le64 offset || block) for every 4 KiB block that is not
+ * all zero, then le64 size. Equal for equal contents, and cheap for large sparse files on both sides. */
 static int hash_file(uint32_t ino, uint64_t size, char hex[65])
 {
     sha256_ctx c;
-    uint8_t d[32];
+    uint8_t d[32], le[8];
     size_t chunk = 1 << 20;
     uint8_t *buf = malloc(chunk);
+    static const uint8_t zero[4096];
     uint64_t off = 0;
-    int rc = 0;
+    int rc = 0, i;
     sha256_init(&c);
     while (off < size) {
-        uint64_t done;
+        uint64_t done, b;
         size_t n = size - off < chunk ? (size_t)(size - off) : chunk;
         rc = sfs_read(g_fs, ino, off, buf, n, &done);
         if (rc) break;
         if (done != n) { rc = SFS_EIO; break; }
-        sha256_update(&c, buf, n);
+        for (b = 0; b < n; b += 4096) {
+            size_t k = n - b < 4096 ? n - b : 4096;
+            if (!memcmp(buf + b, zero, k)) continue;
+            for (i = 0; i < 8; ++i) le[i] = (uint8_t)((off + b) >> (8 * i));
+            sha256_update(&c, le, 8);
+            sha256_update(&c, buf + b, k);
+        }
         off += n;
     }
+    for (i = 0; i < 8; ++i) le[i] = (uint8_t)(size >> (8 * i));
+    sha256_update(&c, le, 8);
     free(buf);
     sha256_final(&c, d);
     sha256_hex(d, hex);
@@ -122,7 +133,8 @@ static int tree_walk(uint32_t dir, const char *prefix, int depth)
             char hex[65];
             rc = hash_file(de.ino, st.size, hex);
             if (rc) { fprintf(stderr, "read %s: %s\n", path, sfs_strerror(rc)); return rc; }
-            printf("f %04o %llu %u %s %s\n", st.mode & 07777, (unsigned long long)st.size, st.links, hex, path);
+            if (g_times) printf("f %04o %llu %u %s @%lld %s\n", st.mode & 07777, (unsigned long long)st.size, st.links, hex, (long long)st.mtime, path);
+            else printf("f %04o %llu %u %s %s\n", st.mode & 07777, (unsigned long long)st.size, st.links, hex, path);
         } else if ((st.mode & SFS_S_IFMT) == SFS_S_IFLNK) {
             char t[4097];
             size_t n;
@@ -599,7 +611,7 @@ static int run_cmd(int argc, char **argv)
     }
     if (!strcmp(c, "rm") || !strcmp(c, "rmdir")) {
         rc = resolve_parent(argv[1], &dir, &leaf, &ll);
-        if (!rc) rc = c[1] == 'm' ? sfs_unlink(g_fs, dir, leaf, ll) : sfs_rmdir(g_fs, dir, leaf, ll);
+        if (!rc) rc = !strcmp(c, "rm") ? sfs_unlink(g_fs, dir, leaf, ll) : sfs_rmdir(g_fs, dir, leaf, ll);
         return rc ? fail(c, rc) : 0;
     }
     if (argc < 3) { fprintf(stderr, "%s: missing argument\n", c); return 2; }
@@ -646,9 +658,37 @@ static int run_cmd(int argc, char **argv)
         if (!rc) rc = sfs_symlink(g_fs, dir, leaf, ll, argv[1], strlen(argv[1]), &ino);
         return rc ? fail("symlink", rc) : 0;
     }
+    if (!strcmp(c, "settime")) {
+        int64_t t = strtoll(argv[2], 0, 0);
+        rc = resolve(argv[1], &ino);
+        if (!rc) rc = sfs_set_times(g_fs, ino, &t, &t);
+        return rc ? fail("settime", rc) : 0;
+    }
     if (!strcmp(c, "crashverify")) return cmd_crashverify(argv[1], strtoull(argv[2], 0, 0));
     if (argc < 4) { fprintf(stderr, "%s: missing argument\n", c); return 2; }
     if (!strcmp(c, "crashload")) return cmd_crashload(argv[1], strtoull(argv[2], 0, 0), atoi(argv[3]));
+    if (!strcmp(c, "putat")) {
+        int fd = open(argv[1], O_RDONLY);
+        uint8_t *buf;
+        uint64_t off = strtoull(argv[3], 0, 0);
+        ssize_t n;
+        if (fd < 0) { perror(argv[1]); return 1; }
+        rc = resolve(argv[2], &ino);
+        if (rc == SFS_ENOENT) {
+            rc = resolve_parent(argv[2], &dir, &leaf, &ll);
+            if (!rc) rc = sfs_create(g_fs, dir, leaf, ll, 0644, &ino);
+        }
+        buf = malloc(1 << 20);
+        while (!rc && (n = read(fd, buf, 1 << 20)) > 0) {
+            uint64_t done;
+            rc = sfs_write(g_fs, ino, off, buf, (uint64_t)n, &done);
+            if (!rc && done != (uint64_t)n) rc = SFS_ENOSPC;
+            off += (uint64_t)n;
+        }
+        free(buf);
+        close(fd);
+        return rc ? fail("putat", rc) : 0;
+    }
     if (!strcmp(c, "pattern") && argc >= 5) {
         rc = resolve(argv[1], &ino);
         if (rc == SFS_ENOENT) {
@@ -671,8 +711,9 @@ int main(int argc, char **argv)
     uint64_t cut = 0;
     uint32_t cut_seed = 1;
     int volatile_cache = 0, do_fsync = 0;
-    while ((opt = getopt(argc, argv, "rc:NFqVK:S:")) != -1) {
+    while ((opt = getopt(argc, argv, "rc:NFqVK:S:T")) != -1) {
         switch (opt) {
+        case 'T': g_times = 1; break;
         case 'r': ro = 1; break;
         case 'c': cache = (uint32_t)strtoul(optarg, 0, 0); break;
         case 'N': flags |= SFS_MOUNT_NAIVE; break;

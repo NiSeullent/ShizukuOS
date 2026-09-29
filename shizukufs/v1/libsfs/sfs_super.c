@@ -741,6 +741,14 @@ int sfs_mount(const sfs_ops *ops, unsigned flags, sfs_fs **out)
         rc = SFS_ECORRUPT;
         goto fail;
     }
+    /* Transaction size: a quarter of the journal (so a commit never has to wait for log space), bounded by the
+     * memory pinned buffers may take. Without a journal, metadata is written in place in batches of this size. */
+    if (fs->jnl.present) {
+        uint32_t cap = sfs_journal_capacity(fs) / 4;
+        fs->txn_soft = cap < 16 ? 16 : cap > 4096 ? 4096 : cap;
+    } else {
+        fs->txn_soft = 1024;
+    }
     if (!fs->ro) {
         uint64_t now = sfs_now(fs);
         uint8_t *s = fs->sbraw;

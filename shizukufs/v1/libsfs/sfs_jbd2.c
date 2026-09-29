@@ -308,7 +308,11 @@ static int write_jsb(sfs_fs *fs, uint32_t start, uint32_t seq)
     if (rc) return rc;
     wrbe32(b, JS_start, start);
     wrbe32(b, JS_sequence, seq);
-    wrbe32(b, JS_feature_compat, fs->jnl.feat_compat);
+    if (rdbe32(b, JH_blocktype) == JBD2_SUPERBLOCK_V2) {
+        wrbe32(b, JS_feature_compat, fs->jnl.feat_compat);
+        wrbe32(b, JS_feature_incompat, fs->jnl.feat_incompat);
+        if (fs->jnl.csum_v2 || fs->jnl.csum_v3) b[JS_checksum_type] = JBD2_CRC32C_CHKSUM;
+    }
     if (fs->jnl.csum_v2 || fs->jnl.csum_v3) wrbe32(b, JS_checksum, jsb_csum(b));
     rc = jwrite(fs, 0, b);
     if (!rc) fs->jnl.disk_start = start;
@@ -413,9 +417,27 @@ int sfs_journal_load(sfs_fs *fs, int replay)
         j->disk_start = 0;
         return 1;
     }
-    /* A v1 journal checksum (crc32 in the commit block) is not produced here: drop the compat flag when writing. */
-    j->feat_compat &= ~JBD2_COMPAT_CHECKSUM;
     j->present = 1;
+    if (replay && type == JBD2_SUPERBLOCK_V2) {
+        /* Writing: set the journal features the way the Linux ext4 driver does at mount (revoke records, 64-bit
+         * block numbers on 64bit volumes, v3 checksums with metadata_csum). The log is empty, so this is safe. */
+        uint32_t inc = j->feat_incompat | JBD2_INCOMPAT_REVOKE;
+        uint32_t comp = j->feat_compat & ~JBD2_COMPAT_CHECKSUM;   /* v1 crc32 commit checksums are not produced */
+        if (fs->has64) inc |= JBD2_INCOMPAT_64BIT;
+        if (fs->csum) inc = (inc | JBD2_INCOMPAT_CSUM_V3) & ~JBD2_INCOMPAT_CSUM_V2;
+        if (inc != j->feat_incompat || comp != j->feat_compat) {
+            j->feat_incompat = inc;
+            j->feat_compat = comp;
+            j->csum_v2 = !!(inc & JBD2_INCOMPAT_CSUM_V2);
+            j->csum_v3 = !!(inc & JBD2_INCOMPAT_CSUM_V3);
+            j->has64 = !!(inc & JBD2_INCOMPAT_64BIT);
+            if (j->csum_v2 || j->csum_v3) j->csum_seed = sfs_crc32c(0xFFFFFFFFu, j->uuid, 16);
+            j->tag_bytes = j->csum_v3 ? 16 : 8 + (j->csum_v2 ? 2u : 0u) + (j->has64 ? 4u : 0u);
+            rc = write_jsb(fs, 0, j->next_seq);
+            if (!rc) rc = sfs_dev_flush(fs);
+            if (rc) return rc;
+        }
+    }
     return 0;
 }
 
