@@ -338,9 +338,16 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
             struct { uint32_t reserved, timer_res, page_size, phys_pages, low_page, high_page, alloc_gran; uint64_t min_addr, max_addr, affinity; uint8_t nproc; } b;
             if (a3 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
             memset(&b, 0, sizeof b);
-            b.timer_res = 10000; b.page_size = 4096; b.phys_pages = 8192; b.alloc_gran = 65536;
+            b.timer_res = 10000; b.page_size = 4096; b.phys_pages = (uint32_t)(mem_ram_top() / 4096); b.alloc_gran = 65536;
             b.min_addr = 0x10000; b.max_addr = 0x7ffffffeffffull; b.affinity = 1; b.nproc = 1;
             return copy_to_user(p, a2, &b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+        }
+        if (a1 == 0x100) {                                  /* Shizuku: {total, free} physical pages (GlobalMemoryStatusEx) */
+            uint64_t q[2];
+            if (a3 < sizeof q) return STATUS_BUFFER_TOO_SMALL;
+            q[0] = mem_ram_top() / 4096;
+            q[1] = pmm_free_count();
+            return copy_to_user(p, a2, q, sizeof q) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
         return STATUS_INVALID_INFO_CLASS;
     }
