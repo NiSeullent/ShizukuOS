@@ -348,20 +348,22 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (st) return st;
         return copy_to_user(p, a2, &base, 8) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
     }
-    case SYS_NtQuerySystemInformation: {                    /* class 0 basic: processors=1, page size */
+    case SYS_NtQuerySystemInformation: {                    /* class 0 basic: processors=1, page size; 0x100 Shizuku memory */
         if (a1 == 0) {
             struct { uint32_t reserved, timer_res, page_size, phys_pages, low_page, high_page, alloc_gran; uint64_t min_addr, max_addr, affinity; uint8_t nproc; } b;
             if (a3 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
             memset(&b, 0, sizeof b);
-            b.timer_res = 10000; b.page_size = 4096; b.phys_pages = 8192; b.alloc_gran = 65536;
+            b.timer_res = 10000; b.page_size = 4096; b.phys_pages = (uint32_t)pmm_total_count(); b.alloc_gran = 65536;
+            b.low_page = 1; b.high_page = (uint32_t)pmm_total_count();
             b.min_addr = 0x10000; b.max_addr = 0x7ffffffeffffull; b.affinity = 1; b.nproc = 1;
             return copy_to_user(p, a2, &b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
-        if (a1 == 0x100) {                                  /* Shizuku class: {total, free} pages of the page allocator (GlobalMemoryStatusEx) */
-            uint64_t b[2];
-            if (a3 < sizeof b) return STATUS_INFO_LENGTH_MISMATCH;
-            b[0] = pmm_total_count(); b[1] = pmm_free_count();
-            return copy_to_user(p, a2, b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+        if (a1 == 0x100) {                                  /* private: {total pages, free pages} for GlobalMemoryStatusEx */
+            uint64_t m[2];
+            if (a3 < sizeof m) return STATUS_BUFFER_TOO_SMALL;
+            m[0] = pmm_total_count();
+            m[1] = pmm_free_count();
+            return copy_to_user(p, a2, m, sizeof m) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
         return STATUS_INVALID_INFO_CLASS;
     }

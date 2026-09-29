@@ -2,6 +2,7 @@
 SPDX-License-Identifier: GPL-2.0-only
 """
 import importlib.util
+import json
 from pathlib import Path
 import random
 import struct
@@ -29,7 +30,7 @@ class PrepareTests(unittest.TestCase):
     def test_routing_preserves_native_loader_iat(self):
         result, report = mod.prepare(self.original)
         new = mod.PE(result)
-        supported = set(mod.routes()['exports'])
+        supported = set(mod.route_names(mod.routes()))
         self.assertEqual(set(report['redirected']), supported)
         old_slots = {}
         for desc in self.pe.imports():
@@ -141,15 +142,21 @@ class PrepareTests(unittest.TestCase):
     def test_provider_native_imports_and_exports(self):
         provider = mod.PE((ROOT / 'build/platform/NTW32.DLL').read_bytes())
         imported = [(d['dll'].upper(), e[1]) for d in provider.imports() for e in d['entries']]
-        self.assertEqual(set(imported), {('KERNEL32.DLL', name) for name in
-            ('GetTickCount','Sleep','GetModuleHandleA','GetProcAddress','SetLastError',
-             'MultiByteToWideChar','WideCharToMultiByte')})
+        expected = ('GetTickCount','Sleep','GetModuleHandleA','GetProcAddress','SetLastError',
+                    'GetLastError','MultiByteToWideChar','WideCharToMultiByte',
+                    # routing policy: NTW32.INI beside the DLL, NTW32_ROUTING, diagnostics
+                    'GetModuleFileNameA','CreateFileA','ReadFile','CloseHandle',
+                    'GetEnvironmentVariableA','OutputDebugStringA')
+        self.assertEqual(set(imported), {('KERNEL32.DLL', name) for name in expected})
+        # Every import exists in the pinned Windows 98 SE OEM KERNEL32 export manifest.
+        manifest = json.loads((ROOT / 'benchmarks/win98se-ko-oem-native-exports-v1.json').read_text())
+        self.assertTrue(set(expected) <= set(manifest['dlls']['KERNEL32.DLL']))
         export_rva, _ = provider.directory(0)
         exports = provider.offset(export_rva, 40)
         count = provider.u32(exports+24)
         names = provider.u32(exports+32)
         observed = {provider.string(provider.u32(provider.offset(names+i*4,4))) for i in range(count)}
-        self.assertEqual(observed, set(mod.routes()['exports']))
+        self.assertEqual(observed, set(mod.route_names(mod.routes())))
         self.assertNotIn('get_api_table', observed)
         self.assertEqual((provider.u16(provider.opt+48),provider.u16(provider.opt+50)), (4,10))
 
