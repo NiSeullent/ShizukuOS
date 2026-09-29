@@ -9,6 +9,8 @@ struct objattr { uint32_t length, pad; uint64_t root, name; uint32_t attributes,
 struct iosb { uint64_t status; uint64_t information; };
 
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
+extern int k32_lock_conflict(const file_t *f, uint64_t off, uint64_t len, int write);       /* sysk32.c: byte-range locks */
+extern void k32_locks_release(const file_t *f);
 
 #define IO_OPENED 1
 #define IO_CREATED 2
@@ -22,6 +24,51 @@ extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 #define GENERIC_READ 0x80000000u
 #define GENERIC_WRITE 0x40000000u
 #define DELETE_ACCESS 0x10000u
+#define FILE_WRITE_ATTRIBUTES 0x100u
+#define GENERIC_ALL 0x10000000u
+#ifndef STATUS_FILE_LOCK_CONFLICT
+#define STATUS_FILE_LOCK_CONFLICT ((int32_t)0xC0000054)
+#endif
+#ifndef STATUS_MEDIA_WRITE_PROTECTED
+#define STATUS_MEDIA_WRITE_PROTECTED ((int32_t)0xC00000A2)
+#endif
+
+extern int64_t filetime_now(void);                  /* wall-clock FILETIME (sysx.c, the same clock as NtQuerySystemTime) */
+
+/* File times are kept as the millisecond tick count of the moment they happened; they become FILETIMEs of the real wall clock by adding
+ * the wall-clock FILETIME of tick 0, taken from the Supervisor RTC the first time a time is needed. */
+static uint64_t ft_of_ticks(uint64_t ticks)
+{
+    static uint64_t base;
+    if (!base) base = (uint64_t)filetime_now() - ticks_now() * 10000ull;
+    return base + ticks * 10000ull;
+}
+
+/* A node is write-protected if it lives in the read-only initrd or carries FILE_ATTRIBUTE_READONLY. */
+static int node_ro(const fsnode_t *n) { return n->readonly || (n->attrs & FILE_ATTRIBUTE_READONLY); }
+
+/* Times explicitly set with FileBasicInformation win; otherwise a disk node reports its directory entry's times (FAT has no
+ * separate access time: the write time is reported) and a RAM node the ticks of its creation / last change. */
+static uint64_t node_time(const fsnode_t *n, int which)              /* 0 creation, 1 last access, 2 last write */
+{
+    uint64_t c, w;
+    if (which == 0 && n->ft_create) return (uint64_t)n->ft_create;
+    if (which == 1 && n->ft_access) return (uint64_t)n->ft_access;
+    if (which != 0 && n->ft_write) return (uint64_t)n->ft_write;
+    if (n->backing == FSB_DISK) {
+        fs_node_times(n, &c, &w);
+        return which == 0 ? c : w;
+    }
+    return ft_of_ticks(which == 0 ? n->ctime : n->mtime);
+}
+
+/* FileInternalInformation.IndexNumber and the FileId of the directory classes: the same value for one file. A disk node
+ * is identified by where its directory entry lives (stable across mounts); the volume root and RAM nodes by their node id. */
+static uint64_t node_file_id(const fsnode_t *n)
+{
+    if (n->backing == FSB_DISK && n->dir_cluster) return (uint64_t)n->dir_cluster << 32 | n->dir_offset;
+    return n->id;
+}
 
 static int set_iosb(process_t *p, uint64_t user, int32_t status, uint64_t info)
 {
@@ -68,6 +115,7 @@ void file_object_closed(kobject_t *o)
     if (o->refs != 1) return;                           /* other handles remain */
     f = o->u.file.file;
     if (!f) return;
+    k32_locks_release(f);                               /* closing the last handle drops the byte-range locks of the file object */
     if (f->node) {
         if (f->node->open_count) --f->node->open_count;
         if (f->node->delete_pending && f->node->open_count == 0)
@@ -76,6 +124,23 @@ void file_object_closed(kobject_t *o)
     if (f->dir_pattern) kfree(f->dir_pattern);
     kfree(f);
     o->u.file.file = 0;
+}
+
+/* Status for a path that does not exist: STATUS_OBJECT_PATH_NOT_FOUND when its directory is missing (or is not a directory),
+ * STATUS_OBJECT_NAME_NOT_FOUND when only the last component is. */
+static int32_t missing_status(const char *path)
+{
+    char dir[300];
+    size_t n = strlen(path), cut = n;
+    fsnode_t *d;
+    if (n >= sizeof dir) return STATUS_OBJECT_PATH_NOT_FOUND;
+    while (cut && path[cut - 1] == '\\') --cut;                   /* ignore a trailing separator */
+    while (cut && path[cut - 1] != '\\') --cut;
+    if (!cut) return STATUS_OBJECT_NAME_NOT_FOUND;
+    memcpy(dir, path, cut);
+    dir[cut] = 0;
+    d = fs_lookup(dir);
+    return d && d->is_dir && !d->delete_pending ? STATUS_OBJECT_NAME_NOT_FOUND : STATUS_OBJECT_PATH_NOT_FOUND;
 }
 
 /* NtCreateFile(h, access, oa, iosb, alloc_size, attrs, share, disposition, options, ea, ea_len) and
@@ -100,6 +165,9 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     if (!oa.name) return STATUS_OBJECT_NAME_INVALID;
     st = read_ustr(p, oa.name, path, sizeof path);
     if (st) return st;
+    /* A drive letter without a mounted volume names no device (Windows: the \??\Z: link is missing, so the path is not found). */
+    if (path[0] == '\\' && path[1] == '?' && path[2] == '?' && path[3] == '\\' && path[4] && path[5] == ':' && !fs_root_of(path[4]))
+        return STATUS_OBJECT_PATH_NOT_FOUND;
     /* console pseudo-devices */
     if (!strcmp(path, "\\??\\CONOUT$") || !strcmp(path, "\\??\\CONIN$")) {
         o = console_object(path[6] == 'O');
@@ -114,9 +182,9 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     n = fs_lookup(path);
     if (n && n->delete_pending) n = 0;
     switch (disposition) {
-    case FILE_OPEN: if (!n) { set_iosb(p, a4, STATUS_OBJECT_NAME_NOT_FOUND, IO_DOES_NOT_EXIST); return STATUS_OBJECT_NAME_NOT_FOUND; } break;
+    case FILE_OPEN: if (!n) { st = missing_status(path); set_iosb(p, a4, st, IO_DOES_NOT_EXIST); return st; } break;
     case FILE_CREATE: if (n) { set_iosb(p, a4, STATUS_OBJECT_NAME_COLLISION, IO_EXISTS); return STATUS_OBJECT_NAME_COLLISION; } break;
-    case FILE_OVERWRITE: if (!n) return STATUS_OBJECT_NAME_NOT_FOUND; break;
+    case FILE_OVERWRITE: if (!n) return missing_status(path); break;
     case FILE_SUPERSEDE: case FILE_OPEN_IF: case FILE_OVERWRITE_IF: break;
     default: return STATUS_INVALID_PARAMETER;
     }
@@ -128,14 +196,15 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
         if ((options & FILE_DIRECTORY_FILE) && !n->is_dir) return STATUS_NOT_A_DIRECTORY;
         if ((options & FILE_NON_DIRECTORY_FILE) && n->is_dir) return STATUS_FILE_IS_A_DIRECTORY;
         if (!n->is_dir && (disposition == FILE_OVERWRITE || disposition == FILE_OVERWRITE_IF || disposition == FILE_SUPERSEDE)) {
-            if (n->readonly) return STATUS_ACCESS_DENIED;
+            if (node_ro(n)) return STATUS_ACCESS_DENIED;
             fs_truncate(n, 0);
             info = disposition == FILE_SUPERSEDE ? IO_SUPERSEDED : IO_OVERWRITTEN;
         }
     }
-    if ((a2 & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE_ACCESS)) && n->readonly && !created)
+    if ((a2 & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE_ACCESS)) && node_ro(n) && !created)
         return STATUS_ACCESS_DENIED;
-    if ((options & FILE_DELETE_ON_CLOSE) && n->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;   /* no delete on disk */
+    if ((options & FILE_DELETE_ON_CLOSE) && n->backing == FSB_DISK && !(n->vol && n->vol->remove))
+        return STATUS_NOT_SUPPORTED;                                                        /* volume cannot delete */
     if (n->is_dir && (a2 & (GENERIC_WRITE | FILE_WRITE_DATA))) return STATUS_FILE_IS_A_DIRECTORY;
     f = kzalloc(sizeof *f);
     o = ob_create(OB_FILE, 0);
@@ -211,7 +280,7 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
         return STATUS_END_OF_FILE;
     }
     if (!f->node || f->node->is_dir) return STATUS_INVALID_PARAMETER;
-    if (write ? !(f->access & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA)) : !(f->access & (GENERIC_READ | FILE_READ_DATA | 0x120089)))
+    if (write ? !(f->access & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA)) : !(f->access & (GENERIC_READ | GENERIC_ALL | FILE_READ_DATA)))
         return STATUS_ACCESS_DENIED;
     if (off_ptr) {
         if (copy_from_user(p, &off, off_ptr, 8)) return STATUS_ACCESS_VIOLATION;
@@ -220,6 +289,7 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
         off = f->pos;
     }
     if (write && f->append) off = f->node->size;
+    if (len && k32_lock_conflict(f, off, len, write)) return STATUS_FILE_LOCK_CONFLICT;      /* byte-range locks held through other handles */
     tmp = kmalloc(len > 65536 ? 65536 : len ? len : 1);
     if (!tmp) return STATUS_NO_MEMORY;
     {
@@ -266,8 +336,9 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         struct basicinfo b;
         if (len < sizeof b) return STATUS_BUFFER_TOO_SMALL;
         memset(&b, 0, sizeof b);
-        if (f->node) { fs_node_times(f->node, &b.create, &b.write); b.access = b.write; b.change = b.write; b.attrs = f->node->attrs; }
-        else b.attrs = FILE_ATTRIBUTE_NORMAL;
+        if (f->node) { b.create = node_time(f->node, 0); b.write = node_time(f->node, 2); b.access = node_time(f->node, 1);
+                       b.change = b.write; b.attrs = f->node->attrs; }
+        else b.attrs = f->console ? 0x40 : FILE_ATTRIBUTE_NORMAL;      /* console pseudo-device: FILE_ATTRIBUTE_DEVICE marks it for GetFileType */
         if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
         set_iosb(p, iosb, STATUS_SUCCESS, sizeof b);
         return STATUS_SUCCESS;
@@ -281,6 +352,55 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         if (copy_to_user(p, buf, &s, sizeof s)) return STATUS_ACCESS_VIOLATION;
         set_iosb(p, iosb, STATUS_SUCCESS, sizeof s);
         return STATUS_SUCCESS;
+    }
+    case 6: {                                            /* FileInternalInformation: {LARGE_INTEGER IndexNumber} */
+        int64_t idx = f->node ? (int64_t)node_file_id(f->node) : 0;
+        if (len < 8) return STATUS_BUFFER_TOO_SMALL;
+        if (copy_to_user(p, buf, &idx, 8)) return STATUS_ACCESS_VIOLATION;
+        set_iosb(p, iosb, STATUS_SUCCESS, 8);
+        return STATUS_SUCCESS;
+    }
+    case 9: {                                            /* FileNameInformation: {ULONG FileNameLength; WCHAR FileName[]}, volume-relative */
+        uint16_t w[512];
+        const fsnode_t *chain[24];
+        uint32_t depth = 0, nchars = 0, total, room, copy;
+        const fsnode_t *n;
+        if (!f->node) return STATUS_INVALID_PARAMETER;
+        if (len < 4) return STATUS_BUFFER_TOO_SMALL;
+        for (n = f->node; n && n->parent && depth < 24; n = n->parent) chain[depth++] = n;
+        if (!depth) { w[nchars++] = '\\'; }
+        while (depth) {
+            const fsnode_t *c = chain[--depth];
+            if (nchars + 1 >= 512) return STATUS_OBJECT_NAME_INVALID;
+            w[nchars++] = '\\';
+            const int wn = utf8_to_utf16(c->name, w + nchars, 512 - nchars);
+            if (wn < 0) return STATUS_OBJECT_NAME_INVALID;
+            nchars += (uint32_t)wn;
+        }
+        total = nchars * 2;
+        room = (uint32_t)len - 4;
+        copy = total < room ? total : room & ~1u;
+        if (copy_to_user(p, buf, &total, 4) || (copy && copy_to_user(p, buf + 4, w, copy))) return STATUS_ACCESS_VIOLATION;
+        set_iosb(p, iosb, copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS, 4 + copy);
+        return copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
+    }
+    case 58: {                                           /* FileVolumeNameInformation: {ULONG DeviceNameLength; WCHAR DeviceName[]} */
+        static const char dev[] = "\\Device\\HarddiskVolume";
+        uint16_t w[32];
+        uint32_t nchars = 0, total, room, copy, num, div;
+        const char l = f->node ? fs_letter_of(f->node) : 0;
+        if (!l) return STATUS_INVALID_PARAMETER;             /* console handles and unmounted nodes have no volume */
+        if (len < 4) return STATUS_BUFFER_TOO_SMALL;
+        for (num = 0; dev[num]; ++num) w[nchars++] = (uint8_t)dev[num];
+        num = fs_volume_number(l);
+        for (div = 10; div <= num; div *= 10) { }
+        for (div /= 10; div; div /= 10) w[nchars++] = (uint16_t)('0' + num / div % 10);
+        total = nchars * 2;
+        room = (uint32_t)len - 4;
+        copy = total < room ? total : room & ~1u;
+        if (copy_to_user(p, buf, &total, 4) || (copy && copy_to_user(p, buf + 4, w, copy))) return STATUS_ACCESS_VIOLATION;
+        set_iosb(p, iosb, copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS, 4 + copy);
+        return copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
     }
     case 14: {                                           /* FilePositionInformation */
         int64_t pos = (int64_t)f->pos;
@@ -329,14 +449,36 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         fsnode_t *dst, *dir;
         char leaf[96];
         uint32_t chars;
-        if (f->node && f->node->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;            /* no rename on disk volumes */
-        if (!f->node || f->node->readonly || len < 20 || copy_from_user(p, hdr, buf, 20)) return STATUS_ACCESS_DENIED;
+        if (f->node && f->node->backing == FSB_DISK && !(f->node->vol && f->node->vol->rename))
+            return STATUS_NOT_SUPPORTED;                                                     /* volume cannot rename */
+        if (!f->node || node_ro(f->node) || len < 20 || copy_from_user(p, hdr, buf, 20)) return STATUS_ACCESS_DENIED;
         chars = *(uint32_t *)(hdr + 16) / 2;
         if (chars >= 260 || len < 20 + chars * 2ull || copy_from_user(p, w, buf + 20, chars * 2ull)) return STATUS_INVALID_PARAMETER;
         if (utf16_to_utf8(w, chars, newpath, sizeof newpath) < 0) return STATUS_OBJECT_NAME_INVALID;
+        {                                                /* the target directory must be on the file's volume (a disk volume refuses renames above) */
+            char dpath[300];
+            size_t cut = strlen(newpath);
+            const fsnode_t *a, *b;
+            while (cut && newpath[cut - 1] != '\\') --cut;
+            memcpy(dpath, newpath, cut);
+            dpath[cut] = 0;
+            a = cut ? fs_lookup(dpath) : 0;
+            b = f->node;
+            if (a) {
+                while (a->parent) a = a->parent;
+                while (b->parent) b = b->parent;
+                if (a != b) return (int32_t)0xC00000D4;              /* STATUS_NOT_SAME_DEVICE */
+            }
+        }
+        if (f->node->backing == FSB_DISK) {                  /* on-disk rename/move (ShizukuFS) */
+            const int rc = fs_rename(f->node, newpath, hdr[0] != 0);
+            if (rc) return rc == -3 ? STATUS_OBJECT_NAME_COLLISION : rc == -2 ? STATUS_DISK_FULL : STATUS_ACCESS_DENIED;
+            set_iosb(p, iosb, STATUS_SUCCESS, 0);
+            return STATUS_SUCCESS;
+        }
         dst = fs_lookup(newpath);
         if (dst && dst != f->node) {
-            if (!hdr[0] || dst->is_dir || dst->readonly) return STATUS_OBJECT_NAME_COLLISION;
+            if (!hdr[0] || dst->is_dir || node_ro(dst)) return STATUS_OBJECT_NAME_COLLISION;
             fs_remove(dst);
         }
         dir = fs_create(newpath, f->node->is_dir, 0);       /* create the destination entry (empty) ... */
@@ -346,6 +488,9 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
             dir->child = f->node->child;
             { fsnode_t *c; for (c = dir->child; c; c = c->sibling) c->parent = dir; }
             dir->open_count = f->node->open_count;
+            dir->id = f->node->id;                            /* a rename keeps the file's identity, times and attributes */
+            dir->ctime = f->node->ctime; dir->mtime = f->node->mtime;
+            dir->ft_create = f->node->ft_create; dir->ft_access = f->node->ft_access; dir->ft_write = f->node->ft_write;
             f->node->data = 0; f->node->size = f->node->cap = 0; f->node->child = 0;
             f->node->delete_pending = 1;
             fs_remove(f->node);
@@ -355,16 +500,48 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     }
+    case 4: {                                            /* FileBasicInformation: times (0 and -1 leave a time alone) and attributes (0 = unchanged) */
+        struct basicinfo b;
+        uint32_t a;
+        if (!f->node || len < sizeof b || copy_from_user(p, &b, buf, sizeof b)) return STATUS_ACCESS_VIOLATION;
+        if (!(f->access & (FILE_WRITE_ATTRIBUTES | GENERIC_WRITE | GENERIC_ALL))) return STATUS_ACCESS_DENIED;   /* handle lacks FILE_WRITE_ATTRIBUTES */
+        if (f->node->readonly) return STATUS_MEDIA_WRITE_PROTECTED;                                 /* initrd files live on read-only media */
+        /* The disk volume code (disk.c) has no operation that rewrites a directory entry's attributes or times, and keeping them
+         * only in the node would report values the media does not hold: a disk node accepts the request only when it changes nothing. */
+        if (f->node->backing == FSB_DISK &&
+            (b.attrs || (b.create && b.create != ~0ull) || (b.access && b.access != ~0ull) || (b.write && b.write != ~0ull)))
+            return STATUS_NOT_SUPPORTED;
+        if (b.attrs) {
+            a = b.attrs & (FILE_ATTRIBUTE_READONLY | 0x2 | 0x4 | 0x20 | 0x100 | 0x1000 | 0x2000);   /* readonly, hidden, system, archive, temporary, offline, not indexed */
+            if (b.attrs & ~(a | FILE_ATTRIBUTE_NORMAL | FILE_ATTRIBUTE_DIRECTORY)) return STATUS_INVALID_PARAMETER;
+            f->node->attrs = f->node->is_dir ? (a | FILE_ATTRIBUTE_DIRECTORY) : (a ? a : FILE_ATTRIBUTE_NORMAL);
+        }
+        if (b.create && b.create != ~0ull) f->node->ft_create = (int64_t)b.create;
+        if (b.access && b.access != ~0ull) f->node->ft_access = (int64_t)b.access;
+        if (b.write && b.write != ~0ull) f->node->ft_write = (int64_t)b.write;
+        set_iosb(p, iosb, STATUS_SUCCESS, 0);
+        return STATUS_SUCCESS;
+    }
     case 13: {                                           /* FileDispositionInformation */
         uint8_t del;
         if (!f->node || copy_from_user(p, &del, buf, 1)) return STATUS_ACCESS_VIOLATION;
-        if (f->node->readonly) return STATUS_ACCESS_DENIED;
-        if (del && f->node->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;                /* no delete on disk volumes */
-        if (del && f->node->is_dir && f->node->child) return STATUS_DIRECTORY_NOT_EMPTY;
+        if (node_ro(f->node)) return STATUS_ACCESS_DENIED;
+        if (del && f->node->backing == FSB_DISK && !(f->node->vol && f->node->vol->remove))
+            return STATUS_NOT_SUPPORTED;                                                     /* volume cannot delete */
+        if (del && f->node->is_dir) {
+            fs_populate(f->node);                            /* disk directories: know the children first */
+            if (f->node->child) return STATUS_DIRECTORY_NOT_EMPTY;
+        }
         f->node->delete_pending = del != 0;
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     }
+    case 11:                                             /* FileLinkInformation (CreateHardLink) */
+        /* A file of this RAM file system is one directory entry with its own payload (fsnode), so a second name for the same
+         * file cannot exist. The volume does not report FILE_SUPPORTS_HARD_LINKS (sysk32.c FileFsAttributeInformation) and, like
+         * FAT, refuses the request as an invalid device request. */
+        if (!f->node) return STATUS_INVALID_PARAMETER;
+        return (int32_t)0xC0000010;                      /* STATUS_INVALID_DEVICE_REQUEST */
     default: return STATUS_INVALID_INFO_CLASS;
     }
 }
@@ -480,12 +657,10 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
         *(uint32_t *)(entry + 4) = (uint32_t)idx;                              /* FileIndex */
         *(uint32_t *)(entry + len_off) = nchars * 2;                           /* FileNameLength */
         if (cls != 12) {
-            uint64_t create_ft, write_ft;
-            fs_node_times(c, &create_ft, &write_ft);
-            *(uint64_t *)(entry + 8) = create_ft;
-            *(uint64_t *)(entry + 16) = write_ft;                              /* LastAccessTime */
-            *(uint64_t *)(entry + 24) = write_ft;
-            *(uint64_t *)(entry + 32) = write_ft;                              /* ChangeTime */
+            *(uint64_t *)(entry + 8) = node_time(c, 0);
+            *(uint64_t *)(entry + 16) = node_time(c, 1);                       /* LastAccessTime */
+            *(uint64_t *)(entry + 24) = node_time(c, 2);
+            *(uint64_t *)(entry + 32) = node_time(c, 2);                       /* ChangeTime */
             *(uint64_t *)(entry + 40) = c->size;
             *(uint64_t *)(entry + 48) = (c->size + 4095) & ~4095ull;
             *(uint32_t *)(entry + 56) = c->attrs;
@@ -495,9 +670,8 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
             for (k = 0; c->alias[k] && k < 12; ++k) *(uint16_t *)(entry + 70 + 2 * k) = (uint8_t)c->alias[k];
             entry[68] = (uint8_t)(k * 2);
         }
-        if (cls == 37 || cls == 38)                                            /* FileId: stable per node */
-            *(uint64_t *)(entry + (cls == 37 ? 96 : 72)) = c->backing == FSB_DISK ?
-                ((uint64_t)c->dir_cluster << 32 | c->dir_offset) : (uint64_t)(uintptr_t)c;
+        if (cls == 37 || cls == 38)                                            /* FileId: FileInternalInformation's IndexNumber */
+            *(uint64_t *)(entry + (cls == 37 ? 96 : 72)) = node_file_id(c);
         memcpy(entry + name_off, wname, nchars * 2);
         size = (uint32_t)(name_off + nchars * 2);
         size = (size + 7) & ~7u;
@@ -550,6 +724,10 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
         set_iosb(p, a2, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     }
+    case SYS_NtCancelIoFile:                             /* (FileHandle, IoStatusBlock): every request completes before the call returns, so none is pending */
+        if (!file_of(p, a1, 0)) return STATUS_INVALID_HANDLE;
+        set_iosb(p, a2, STATUS_SUCCESS, 0);
+        return STATUS_SUCCESS;
     default: *handled = 0; return 0;
     }
 }

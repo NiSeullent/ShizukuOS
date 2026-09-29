@@ -252,6 +252,7 @@ static int vol_populate(fsvol_t *v, fsnode_t *dir)
 static int try_mount(blk_dev_t *dev)
 {
     int rc;
+    if (dev->sector_size != FAT32_SECTOR) return -1;    /* fat32.c reads 512-byte sectors (4 KiB NVMe formats: no) */
     memset(&dvol.fat, 0, sizeof dvol.fat);
     dvol.fat.read = cb_read; dvol.fat.alloc = cb_alloc; dvol.fat.free = cb_free; dvol.fat.alloc_page = cb_page;
     dvol.fat.write = dev->write && !(dev->flags & BLK_F_READONLY) ? cb_write : 0;
@@ -278,6 +279,7 @@ static int try_mount(blk_dev_t *dev)
     dvol.root.vol = &dvol.vol;
     dvol.root.first_cluster = dvol.fat.root_cluster;
     if (fs_mount('D', &dvol.root)) return -1;
+    dev->flags |= BLK_F_MOUNTED;                        /* raw user-mode writes to it are refused (sysblk.c) */
     kprintf("K64 disk: D: = %s, FAT32 \"%s\" id %x, %u clusters of %u bytes, %u free, %u FAT page(s), %u sector reads, %s\n",
             dev->name, dvol.fat.label, dvol.fat.volume_id, dvol.fat.cluster_count, dvol.fat.bytes_per_cluster,
             dvol.fat.free_clusters, dvol.fat.fat_npages, dvol.fat.sector_reads, dvol.fat.write ? "read/write" : "read-only");
@@ -289,14 +291,16 @@ void disk_init(void)
     blk_dev_t *d, *whole = 0;
     uint8_t *sector;
     int mounted = -1;
-    if (ahci_blk_init()) return;                /* NVMe / SDHCI drivers register here too once they exist */
+    const int ahci = ahci_blk_init();
+    const int nvme = nvme_blk_init(), sd = sdhci_blk_init();   /* storage track: nvme.c, sdhci.c */
+    if (ahci && nvme <= 0 && sd <= 0) return;
     for (d = blk_first(); d; d = d->next)
         if (!(d->flags & BLK_F_PARTITION)) { whole = d; break; }
     if (!whole) return;
-    sector = kmalloc(512);
+    sector = kmalloc(whole->sector_size);
     KASSERT(sector);
     if (blk_read(whole, 0, 1, sector) == 0) {
-        const uint32_t crc = k64_crc32(sector, 512);
+        const uint32_t crc = k64_crc32(sector, whole->sector_size);
         kprintf("K64 disk: %s sector 0 crc32 %x, bytes 510..511 %x %x\n", whole->name, crc, sector[510], sector[511]);
         shz_evidence(13, (whole->sectors << 32) | crc);
     }
@@ -312,6 +316,10 @@ void disk_init(void)
     for (d = blk_first(); d && mounted; d = d->next)   /* superfloppy: the whole device holds the volume */
         if (!(d->flags & BLK_F_PARTITION))
             mounted = try_mount(d);
+    {   /* ShizukuFS (ext4 format) volumes on the other partitions: next free drive letters (sfs_mount.c) */
+        extern int sfs_probe_all(blk_dev_t *skip);
+        sfs_probe_all(mounted ? 0 : dvol.dev);
+    }
     if (mounted) { kprintf("K64 disk: no FAT32 volume found\n"); return; }
     fs_populate(&dvol.root);
     {
@@ -320,4 +328,23 @@ void disk_init(void)
         for (c = dvol.root.child; c; c = c->sibling) ++n;
         shz_evidence(14, ((uint64_t)n << 32) | dvol.fat.volume_id);
     }
+}
+
+/* Volume properties for NtQueryVolumeInformationFile (sysk32.c). Returns 0 when `n` lives on a disk volume. */
+int disk_volume_info(const fsnode_t *n, uint32_t *serial, char label[12], uint64_t *total_clusters, uint64_t *free_clusters,
+                     uint32_t *sectors_per_cluster, int *writable)
+{
+    disk_vol_t *d;
+    if (!n || n->backing != FSB_DISK || !n->vol || !n->vol->priv) return -1;
+    d = n->vol->priv;
+    mutex_lock(&d->lock);
+    *serial = d->fat.volume_id;
+    memcpy(label, d->fat.label, 12);
+    label[11] = 0;
+    *total_clusters = d->fat.cluster_count;
+    *free_clusters = d->fat.free_clusters;
+    *sectors_per_cluster = d->fat.spc;
+    *writable = n->vol->write != 0;
+    mutex_unlock(&d->lock);
+    return 0;
 }

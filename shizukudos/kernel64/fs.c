@@ -3,6 +3,7 @@
 
 static fsnode_t root;
 static uint64_t total_bytes;
+static uint64_t next_node_id = 2;               /* the root is node 1 */
 static fsnode_t *mounts[26];                    /* drive letters A..Z; C is the RAM root */
 
 fsnode_t *fs_root(void) { return &root; }
@@ -14,9 +15,11 @@ void fs_init(void)
     root.name[0] = 0;
     root.is_dir = 1;
     root.attrs = FILE_ATTRIBUTE_DIRECTORY;
+    root.id = 1;
     total_bytes = 0;
     memset(mounts, 0, sizeof mounts);
     mounts['C' - 'A'] = &root;
+    fs_create("\\TEMP", 1, 0);                  /* C:\TEMP: the loader exports it as %TEMP% and %TMP% */
 }
 
 static char fold(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
@@ -26,6 +29,7 @@ int fs_mount(char letter, fsnode_t *r)
     const char l = fold(letter);
     if (l < 'A' || l > 'Z' || l == 'C' || !r || !r->is_dir || mounts[l - 'A']) return -1;
     mounts[l - 'A'] = r;
+    if (!r->id) r->id = next_node_id++;         /* volume roots are not made by fs_new_child */
     return 0;
 }
 
@@ -33,6 +37,31 @@ fsnode_t *fs_root_of(char letter)
 {
     const char l = fold(letter);
     return l >= 'A' && l <= 'Z' ? mounts[l - 'A'] : 0;
+}
+
+/* NT device names of the volumes: C: is \Device\HarddiskVolume1, D: 2, ... Z: 24, then A: 25 and B: 26. */
+unsigned fs_volume_number(char letter)
+{
+    const char l = fold(letter);
+    if (l < 'A' || l > 'Z') return 0;
+    return l >= 'C' ? (unsigned)(l - 'B') : (unsigned)(l - 'A') + 25;
+}
+
+char fs_volume_letter(unsigned number)
+{
+    if (number >= 1 && number <= 24) return (char)('B' + number);
+    if (number == 25 || number == 26) return (char)('A' + number - 25);
+    return 0;
+}
+
+char fs_letter_of(const fsnode_t *n)
+{
+    unsigned i;
+    if (!n) return 0;
+    while (n->parent) n = n->parent;
+    for (i = 0; i < 26; ++i)
+        if (mounts[i] == n) return (char)('A' + i);
+    return 0;
 }
 
 void fs_populate(fsnode_t *dir)
@@ -77,8 +106,21 @@ static fsnode_t *child_named(fsnode_t *dir, const char *name, size_t n)
  * the path has none: it then means C:) goes to *drive. */
 static const char *strip_prefix(const char *p, char *drive)
 {
+    static const char device[] = "\\Device\\HarddiskVolume";            /* + the volume number (fs_volume_number): what QueryDosDevice returns */
+    size_t i;
     *drive = 0;
     if (p[0] == '\\' && p[1] == '?' && p[2] == '?' && p[3] == '\\') p += 4;
+    for (i = 0; device[i]; ++i)
+        if (fold(p[i]) != fold(device[i])) break;
+    if (!device[i] && p[i] >= '1' && p[i] <= '9') {
+        unsigned num = 0;
+        while (p[i] >= '0' && p[i] <= '9' && num < 1000) num = num * 10 + (unsigned)(p[i++] - '0');
+        if (p[i] == 0 || p[i] == '\\') {
+            const char l = fs_volume_letter(num);
+            *drive = l ? l : '#';                                           /* '#': no such volume, resolve() fails */
+            return p + i;
+        }
+    }
     if (p[0] && p[1] == ':') { *drive = p[0]; p += 2; }
     return p;
 }
@@ -138,6 +180,7 @@ fsnode_t *fs_new_child(fsnode_t *dir, const char *name, int is_dir)
     for (pp = &dir->child; *pp; pp = &(*pp)->sibling) ;   /* append: listings keep creation / on-disk order */
     *pp = n;
     n->ctime = n->mtime = ticks_now();
+    n->id = next_node_id++;
     return n;
 }
 
@@ -204,6 +247,7 @@ int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len)
     memcpy(n->data + off, buf, len);
     if (off + len > n->size) n->size = off + len;
     n->mtime = ticks_now();
+    n->ft_write = 0;                            /* a write supersedes an explicitly set last-write time */
     return 0;
 }
 
@@ -224,17 +268,57 @@ int fs_truncate(fsnode_t *n, uint64_t size)
         memset(n->data + n->size, 0, size - n->size);
     }
     n->size = size;
+    n->mtime = ticks_now();
+    n->ft_write = 0;
     return 0;
+}
+
+static void detach(fsnode_t *n)
+{
+    fsnode_t **pp;
+    for (pp = &n->parent->child; *pp; pp = &(*pp)->sibling)
+        if (*pp == n) { *pp = n->sibling; break; }
+    n->sibling = 0;
 }
 
 void fs_remove(fsnode_t *n)
 {
-    fsnode_t **pp;
-    if (!n->parent || n->backing == FSB_DISK) return;
-    for (pp = &n->parent->child; *pp; pp = &(*pp)->sibling)
-        if (*pp == n) { *pp = n->sibling; break; }
+    if (!n->parent) return;
+    if (n->backing == FSB_DISK) {
+        /* volumes that can delete (vol->remove) do it on disk first; a refused delete keeps the node visible */
+        if (!n->vol || !n->vol->remove || n->vol->remove(n->vol, n)) { n->delete_pending = 0; return; }
+        detach(n);
+        kfree(n);
+        return;
+    }
+    detach(n);
     if (n->data && !n->readonly) { total_bytes -= n->cap; kfree(n->data); }
     kfree(n);
+}
+
+int fs_rename(fsnode_t *n, const char *newpath, int replace)
+{
+    char leaf[FS_NAME_MAX];
+    fsnode_t *dir = resolve(newpath, 1, leaf, sizeof leaf), *dst, *a;
+    int rc;
+    if (n->backing != FSB_DISK || !n->vol || !n->vol->rename || !n->parent) return -1;
+    if (!dir || !dir->is_dir || !leaf[0] || dir->backing != FSB_DISK || dir->vol != n->vol) return -1;
+    for (a = dir; a; a = a->parent) if (a == n) return -1;          /* into its own subtree */
+    dst = child_named(dir, leaf, strlen(leaf));
+    if (dst == n && !strcmp(n->name, leaf)) return 0;
+    if (dst && dst != n && (!replace || dst->open_count)) return -3;
+    rc = n->vol->rename(n->vol, n, dir, leaf, replace);
+    if (rc) return rc;
+    if (dst && dst != n) { detach(dst); kfree(dst); }
+    detach(n);
+    memcpy(n->name, leaf, strlen(leaf) + 1);
+    n->parent = dir;
+    {
+        fsnode_t **pp;
+        for (pp = &dir->child; *pp; pp = &(*pp)->sibling) ;
+        *pp = n;
+    }
+    return 0;
 }
 
 /* ---------------------------------------------------------------- initrd */

@@ -83,7 +83,7 @@ NTSTATUS NTAPI NtQueryDirectoryFile(HANDLE, HANDLE, PVOID, PVOID, SHZ_IO_STATUS_
 NTSTATUS NTAPI NtSetInformationThread(HANDLE, ULONG, PVOID, ULONG);
 NTSTATUS NTAPI NtCreateProcessEx(PHANDLE, PHANDLE, SHZ_UNICODE_STRING *, SHZ_UNICODE_STRING *, SHZ_UNICODE_STRING *);
 NTSTATUS NTAPI NtQuerySystemInformation(ULONG, PVOID, ULONG, PULONG);
-NTSTATUS NTAPI NtLoadImage(SHZ_UNICODE_STRING *, PULONG64);
+NTSTATUS NTAPI NtLoadImage(SHZ_UNICODE_STRING *, PULONG64, ULONG, SHZ_UNICODE_STRING *);   /* name, base, flags, dirs (ldr_search.c) */
 NTSTATUS NTAPI NtShzDebugPrint(const char *, ULONG);
 NTSTATUS NTAPI NtShzEvidence(ULONG, ULONG64);
 NTSTATUS NTAPI NtCreateTimer(PHANDLE, ACCESS_MASK, PVOID, ULONG);
@@ -91,6 +91,36 @@ NTSTATUS NTAPI NtSetTimer(HANDLE, PLARGE_INTEGER, PVOID, PVOID, BOOLEAN, LONG, P
 NTSTATUS NTAPI NtCancelTimer(HANDLE, PBOOLEAN);
 NTSTATUS NTAPI NtWaitForAlertByThreadId(PVOID, PLARGE_INTEGER);
 NTSTATUS NTAPI NtAlertThreadByThreadId(ULONG_PTR);
+NTSTATUS NTAPI NtQueryVolumeInformationFile(HANDLE, SHZ_IO_STATUS_BLOCK *, PVOID, ULONG, ULONG);
+NTSTATUS NTAPI NtLockFile(HANDLE, HANDLE, PVOID, PVOID, SHZ_IO_STATUS_BLOCK *, PLARGE_INTEGER, PLARGE_INTEGER, ULONG, BOOLEAN, BOOLEAN);
+NTSTATUS NTAPI NtUnlockFile(HANDLE, SHZ_IO_STATUS_BLOCK *, PLARGE_INTEGER, PLARGE_INTEGER, ULONG);
+NTSTATUS NTAPI NtCancelIoFile(HANDLE, SHZ_IO_STATUS_BLOCK *);
+NTSTATUS NTAPI NtGetContextThread(HANDLE, PCONTEXT);
+/* kernel32 support calls (kernel64/sysk32_proc.c; the class numbers are the kernel's K32Q_* / K32S_*) */
+NTSTATUS NTAPI NtShzQueryK32(ULONG cls, HANDLE h, PVOID buf, ULONG len, PULONG ret);
+NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
+#define K32Q_THREAD_TIMES 1         /* {create FILETIME, exit FILETIME, kernel 100ns, user 100ns, cycles} (5 x ULONG64) */
+#define K32Q_PROCESS_TIMES 2        /* same layout, all threads of the process (exited ones included) */
+#define K32Q_PROCESS_INFO 3         /* ULONG {handles, threads, pid, parent pid, priority class, 0} */
+#define K32Q_PROCESS_LIST 4         /* array of {ULONG pid, ppid, threads, priority class; char name[32]} */
+#define K32Q_MODULE_LIST 5          /* h = process id (0: caller): array of {ULONG64 base, size; char name[48]; char path[128]} */
+#define K32Q_SYSTEM_PERF 7          /* {total pages, free pages, commit, peak commit, kernel heap total, used; ULONG procs, threads, handles, 0} */
+#define K32Q_PROCESS_MEMORY 8       /* ULONG64 {page faults, working set, peak working set, private bytes, peak private bytes} */
+#define K32Q_WORKING_SET_EX 9       /* in/out array of PSAPI_WORKING_SET_EX_INFORMATION */
+#define K32Q_IMAGE_PATH 10          /* the executable's path on C: as a NUL-terminated byte string */
+#define K32Q_FIRMWARE 11            /* ULONG FIRMWARE_TYPE */
+#define K32Q_THREAD_SETTINGS 12     /* ULONG {priority boost disabled, memory priority, power throttling control, state} */
+#define K32Q_PROCESS_SETTINGS 13    /* ULONG {memory priority, power throttling control, state} */
+#define K32S_PRIORITY_CLASS 1       /* ULONG class value (process handle) */
+#define K32S_THREAD_BOOST 2         /* ULONG disable (thread handle) */
+#define K32S_THREAD_MEM_PRIORITY 3  /* ULONG 1..5 (thread handle) */
+#define K32S_DISCARD 4              /* ULONG64 {base, size}: contents discarded, pages stay committed */
+#define K32S_LOCK 5                 /* ULONG64 {base, size}: VirtualLock */
+#define K32S_UNLOCK 6               /* ULONG64 {base, size}: VirtualUnlock */
+#define K32S_PREFETCH 7             /* ULONG64 {base, size}: fault committed pages in */
+#define K32S_THREAD_POWER 8         /* ULONG {control mask, state mask} (thread handle) */
+#define K32S_PROCESS_MEM_PRIORITY 9 /* ULONG 1..5 (process handle) */
+#define K32S_PROCESS_POWER 10       /* ULONG {control mask, state mask} (process handle) */
 
 #define CURRENT_PROCESS ((HANDLE)(LONG_PTR)-1)
 #define CURRENT_THREAD ((HANDLE)(LONG_PTR)-2)

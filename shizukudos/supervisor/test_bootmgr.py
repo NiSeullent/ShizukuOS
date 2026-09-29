@@ -538,6 +538,17 @@ def k64_checks(name, text, qemu_rc, case, apps):
     return checks
 
 
+def save_png(ppm):
+    """PNG next to the PPM screendump when Pillow is installed; returns the path kept."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return ppm
+    png = ppm.with_suffix(".png")
+    Image.open(ppm).save(png)
+    return png
+
+
 def run_case(case, base_disk, args, session, apps):
     name = case["name"]
     run_dir = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=session))
@@ -589,11 +600,27 @@ def run_case(case, base_disk, args, session, apps):
         proc = qemu.launch(command, run_dir)
         qmp = None
         screen, regs, outcome = [], "", "timeout"
+        shots, shot_at = [], 0
         try:
             qmp = qemu.QMP(sock, timeout=30)
             deadline = started + case.get("timeout", args.timeout)
             while time.time() < deadline and proc.poll() is None:
                 text = serial.read_bytes() if serial.exists() else b""
+                if case["expect"] == K64_RUN:
+                    # every GUI scene the Win64 test programs show: pause, dump the real screen, resume
+                    for m in re.finditer(rb"GUI-READY: (\S+)\r?\n", text[shot_at:]):
+                        scene = m.group(1).decode(errors="replace")
+                        ppm = run_dir / f"shot-{scene}.ppm"
+                        try:
+                            qmp.call("stop")
+                            try:
+                                qmp.call("screendump", {"filename": str(ppm)})
+                            finally:
+                                qmp.call("cont")
+                            shots.append(save_png(ppm))
+                        except Exception as exc:   # a missed picture is reported, never fatal to the boot case
+                            rec.setdefault("screenshot_errors", []).append(f"{scene}: {exc!r}")
+                    shot_at = text.rfind(b"\n") + 1           # only whole lines are consumed
                 if b"SHZ-EXIT:" in text:
                     outcome = "k64-exit" if case["expect"] == K64_RUN else "dos-exit"
                     time.sleep(1.0)            # let the guest reach its final HLT / QEMU finish isa-debug-exit
@@ -631,6 +658,7 @@ def run_case(case, base_disk, args, session, apps):
             except Exception:
                 proc.kill()                        # only the QEMU this harness started
                 proc.wait(timeout=20)
+        rec["screenshots"] = [str(x) for x in shots]
         rec["seconds"] = round(time.time() - started, 1)
         rec["outcome"] = outcome
         rec["qemu_rc"] = qemu_rc

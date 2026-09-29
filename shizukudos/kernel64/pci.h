@@ -42,4 +42,35 @@ void standalone_irq_unmask(unsigned irq);
 void standalone_irq_mask(unsigned irq);
 unsigned standalone_irq_vector(unsigned irq);
 #endif
+
+/* ---- capabilities, MSI-X and shared INTx (storage track; standalone profile) ----------------------------------------
+ * MSI-X: the table/PBA BAR is mapped uncached, every entry starts masked. pci_msix_bind() takes a free IDT vector
+ * (0x40..0xef), points the entry at the local APIC of the boot CPU (fixed delivery, edge) and routes the vector to
+ * fn(ctx). The first bind software-enables the local APIC (SVR, spurious vector 0xff) so it accepts MSI writes; LINT0
+ * stays ExtINT, so the 8259 path of the timer and INTx devices is unchanged. fn runs in interrupt context (IF=0, must
+ * not block); the trampoline writes the local APIC EOI afterwards. (arch.c also sends its 8259 EOI for any device
+ * vector: no 8259 interrupt is in service while a handler runs, so that non-specific EOI is a no-op.)
+ * INTx: legacy lines are level-triggered and may be shared between functions, so pci_intx_attach() chains up to four
+ * handlers per line behind one trampoline; each handler must check its own device's status and return quietly when it
+ * did not interrupt. The 8259 is programmed by the first timer call in kmain(), after disk_init(): pci_intx_ready()
+ * says whether lines can be attached yet (drivers attach lazily from the first request made with interrupts on). */
+typedef void (*pci_irq_fn)(void *ctx);
+typedef struct {
+    pci_dev_t dev;
+    unsigned cap;                               /* config offset of the MSI-X capability (0: none) */
+    unsigned entries;                           /* table size */
+    volatile uint32_t *table;                   /* 4 dwords per entry: address lo, address hi, data, vector control */
+    volatile uint64_t *pba;
+    uint8_t vector[32];                         /* IDT vector bound to each of the first 32 entries (0 = none) */
+} pci_msix_t;
+unsigned pci_find_cap(const pci_dev_t *d, unsigned id);          /* config offset, 0 when absent */
+int pci_msix_init(const pci_dev_t *d, pci_msix_t *m);            /* 0: capability found and table mapped (still disabled) */
+int pci_msix_bind(pci_msix_t *m, unsigned entry, pci_irq_fn fn, void *ctx);    /* vector, or -1 */
+void pci_msix_enable(pci_msix_t *m, int on);                     /* on: enable + function unmask + INTx disable */
+void pci_msix_mask(pci_msix_t *m, unsigned entry, int masked);
+void pci_intx_disable(const pci_dev_t *d, int disabled);         /* command register bit 10 */
+int pci_intx_ready(void);
+int pci_intx_attach(const pci_dev_t *d, pci_irq_fn fn, void *ctx);   /* the legacy line (0..15), or -1 */
+void pci_intx_detach(const pci_dev_t *d, pci_irq_fn fn, void *ctx);
+uint64_t pci_irq_count(unsigned vector);                         /* interrupts routed through the trampolines */
 #endif

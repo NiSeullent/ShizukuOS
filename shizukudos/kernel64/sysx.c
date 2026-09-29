@@ -13,7 +13,7 @@ extern void ob_register_timer(kobject_t *o);
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
 extern int32_t sysext_dispatch(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
-extern int32_t ldr_load_module_runtime(process_t *p, const char *name, uint64_t *base_out);
+extern int32_t ldr_load_module_runtime(process_t *p, const char *name, uint32_t flags, const char *dirs, uint64_t *base_out);
 extern uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint64_t ordinal);
 
 struct objattr { uint32_t length, pad; uint64_t root, name; uint32_t attributes, pad2; uint64_t sd, sqos; };
@@ -56,7 +56,7 @@ static kobject_t *object_for_handle(process_t *p, uint64_t h)
     }
 }
 
-static int64_t filetime_now(void)
+int64_t filetime_now(void)
 {
     /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform). */
     hcreg_t secs = 0;
@@ -337,15 +337,30 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         }
         return st;
     }
-    case SYS_NtLoadImage: {                                 /* (PUNICODE name, PULONG64 base_out): runtime LoadLibrary */
+    case SYS_NtLoadImage: {
+        /* (PUNICODE name, PULONG64 base_out, ULONG flags, PUNICODE dirs): runtime LoadLibrary. flags: LoadLibraryExW
+         * flags plus the ntdll search bits of kernel64/ldr.c; dirs: ';'-separated user directories or NULL. */
         struct ustr u;
         uint16_t w[260];
-        char name[300];
+        char name[300], *dirs = 0;
         uint64_t base = 0;
         if (copy_from_user(p, &u, a1, sizeof u) || u.length > sizeof w - 2) return STATUS_ACCESS_VIOLATION;
         if (u.length && copy_from_user(p, w, u.buffer, u.length)) return STATUS_ACCESS_VIOLATION;
         if (utf16_to_utf8(w, u.length / 2, name, sizeof name) < 0) return STATUS_OBJECT_NAME_INVALID;
-        st = ldr_load_module_runtime(p, name, &base);
+        if (a4) {
+            uint16_t *wd;
+            if (copy_from_user(p, &u, a4, sizeof u) || u.length > 1024) return STATUS_ACCESS_VIOLATION;
+            wd = kzalloc(1026);
+            dirs = kzalloc(1040);
+            if (!wd || !dirs) { kfree(wd); kfree(dirs); return STATUS_NO_MEMORY; }
+            if ((u.length && copy_from_user(p, wd, u.buffer, u.length)) || utf16_to_utf8(wd, u.length / 2, dirs, 1040) < 0) {
+                kfree(wd); kfree(dirs);
+                return STATUS_OBJECT_NAME_INVALID;
+            }
+            kfree(wd);
+        }
+        st = ldr_load_module_runtime(p, name, (uint32_t)a3, dirs, &base);
+        kfree(dirs);
         if (st) return st;
         return copy_to_user(p, a2, &base, 8) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
     }
@@ -424,6 +439,10 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (t->alerted) { t->alerted = 0; res = STATUS_ALERTED; } else res = STATUS_TIMEOUT;
         irq_restore(f);
         return res;
+    }
+    case SYS_NtGetContextThread: {                          /* (ThreadHandle, PCONTEXT): sysk32.c */
+        extern int32_t k32_get_context_thread(process_t *p, uint64_t handle, uint64_t context_va);
+        return k32_get_context_thread(p, a1, a2);
     }
     case SYS_NtShzGetTeb: return (int32_t)0;
     default: return num >= 0x50 ? sysext_dispatch(p, r, num, a1, a2, a3, a4) : STATUS_NOT_IMPLEMENTED;

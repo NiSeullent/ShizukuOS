@@ -1,0 +1,39 @@
+diff --git a/dlls/wintrust/register.c b/dlls/wintrust/register.c
+index 49b8ce0..f49e75b 100644
+--- a/dlls/wintrust/register.c
++++ b/dlls/wintrust/register.c
+@@ -791,6 +791,26 @@ BOOL WINAPI WintrustAddDefaultForUsage(const char *pszUsageOID,
+     return TRUE;
+ }
+ 
++/* Shizuku (wineport): the provider keys Windows setup creates are registered on first use (volatile registry, no
++ * setup step): when the software publisher provider is not registered, wintrust runs its own DllRegisterServer. */
++HRESULT WINAPI DllRegisterServer(void);
++
++static void WINTRUST_EnsureRegistered(void)
++{
++    static LONG done;
++    HKEY key;
++
++    if (done || InterlockedCompareExchange( &done, 1, 0 )) return;
++    if (!RegOpenKeyExW( HKEY_LOCAL_MACHINE,
++                        L"Software\\Microsoft\\Cryptography\\Providers\\Trust\\Initialization\\{00AAC56B-CD44-11D0-8CC2-00C04FC295EE}",
++                        0, KEY_READ, &key ))
++    {
++        RegCloseKey( key );
++        return;
++    }
++    if (FAILED(DllRegisterServer())) ERR("DllRegisterServer failed\n");
++}
++
+ static FARPROC WINTRUST_ReadProviderFromReg(WCHAR *GuidString, const WCHAR *FunctionType)
+ {
+     WCHAR ProvKey[MAX_PATH], DllName[MAX_PATH];
+@@ -871,6 +891,7 @@ BOOL WINAPI WintrustLoadFunctionPointers( GUID* pgActionID,
+ 
+     TRACE("(%s %p)\n", debugstr_guid(pgActionID), pPfns);
+ 
++    WINTRUST_EnsureRegistered();
+     if (!pPfns) return FALSE;
+     if (!pgActionID)
+     {

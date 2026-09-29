@@ -4,7 +4,13 @@
  * baseline, 3 below). CreateFont* always succeeds and always selects this font; the requested height only picks an
  * integer scale of 1..4 (height 16 = 1, 32 = 2, ...), weight >= 600 is faked by a one-pixel smear, italic and rotation
  * are ignored, underline/strike-out are drawn as lines. Characters above 0x7f draw as '?'. No kerning, no Unicode, no
- * ClearType: a glyph is either on or off. */
+ * ClearType: a glyph is either on or off. Inside a path bracket, text adds the exact outline of its pixels (one rectangle
+ * per run of set pixels in each glyph row) instead of drawing.
+ *
+ * Font queries answer for this font: it is a raster font, so it has no TrueType tables (GetFontData fails with GDI_ERROR)
+ * and no outline metrics (GetOutlineTextMetrics returns 0, as Windows does for raster fonts). GetCharABCWidths reports its
+ * real metrics (no overhang: A = C = 0) although Windows refuses the call for raster fonts. Fonts cannot be added from
+ * memory (AddFontMemResourceEx fails: there is no TrueType rasteriser to use them with). */
 #include "gdi_internal.h"
 #include "../../../supervisor/src/font8x8_basic.h"
 
@@ -39,6 +45,27 @@ static void draw_glyph(gctx_t *g, int x, int y, unsigned ch, int scale, uint32_t
     }
 }
 
+/* the pixels draw_glyph would set, as path rectangles (device coordinates) */
+static BOOL glyph_path(dc_t *dc, int x, int y, unsigned ch, int scale, int bold)
+{
+    int fr, c, c0;
+    if (ch >= 0x80) ch = '?';
+    if (ch < 0x20) ch = 0x20;
+    for (fr = 0; fr < CELL_H / 2; ++fr) {                          /* each font row covers two cell rows */
+        const uint8_t bits = font8x8_basic[ch][fr];
+        const int t = y + fr * 2 * scale, b = t + 2 * scale;
+        for (c = 0; c < CELL_W * scale;) {
+            #define ON(cc) (((bits >> ((cc) / scale)) & 1) || (bold && (cc) > 0 && ((bits >> (((cc) - 1) / scale)) & 1)))
+            if (!ON(c)) { ++c; continue; }
+            c0 = c;
+            while (c < CELL_W * scale && ON(c)) ++c;
+            #undef ON
+            if (!gdi_path_rect_dev(dc, x + c0, t, x + c, b, 1)) return FALSE;
+        }
+    }
+    return TRUE;
+}
+
 static BOOL text_out(dc_t *dc, int x, int y, UINT options, const RECT *rc, const WCHAR *s, UINT n, const INT *dx)
 {
     gctx_t g;
@@ -48,8 +75,27 @@ static BOOL text_out(dc_t *dc, int x, int y, UINT options, const RECT *rc, const
     const int updatecp = (align & TA_UPDATECP) != 0;
     rlist_t saved;
     int had_user = 0;
-    if (!gctx_begin(&g, dc)) return TRUE;
     if (updatecp) { x = dc->pos.x; y = dc->pos.y; }
+    if (gdi_path_recording(dc)) {
+        font_t *f = gdi_obj_get((HGDIOBJ)dc->font, OBJ_FONT, 0);
+        const int bold = font_bold(dc);
+        for (i = 0; i < (int)n; ++i) width += dx ? dx[i] : cw;
+        if ((align & 6) == TA_CENTER) x -= width / 2;
+        else if ((align & 6) == TA_RIGHT) x -= width;
+        if ((align & TA_BASELINE) == TA_BASELINE) y -= ASCENT * scale;
+        else if (align & TA_BOTTOM) y -= ch;
+        tx = dc_lx(dc, x);
+        ty = dc_ly(dc, y);
+        for (i = 0; i < (int)n; ++i) {
+            if (!glyph_path(dc, tx, ty, s[i], scale, bold)) return FALSE;
+            tx += dx ? dx[i] : cw;
+        }
+        if (f && f->lf.lfUnderline && !gdi_path_rect_dev(dc, dc_lx(dc, x), ty + (ASCENT + 1) * scale, dc_lx(dc, x) + width, ty + (ASCENT + 2) * scale, 1)) return FALSE;
+        if (f && f->lf.lfStrikeOut && !gdi_path_rect_dev(dc, dc_lx(dc, x), ty + 8 * scale, dc_lx(dc, x) + width, ty + 9 * scale, 1)) return FALSE;
+        if (updatecp) dc->pos.x = x + width;
+        return TRUE;
+    }
+    if (!gctx_begin(&g, dc)) return TRUE;
     for (i = 0; i < (int)n; ++i) width += dx ? dx[i] : cw;
     if ((align & 6) == TA_CENTER) x -= width / 2;
     else if ((align & 6) == TA_RIGHT) x -= width;
@@ -259,4 +305,139 @@ DLLAPI int WINAPI EnumFontFamiliesExW(HDC hdc, LPLOGFONTW lf, FONTENUMPROCW proc
     tm.ntmTm.tmPitchAndFamily = FF_MODERN;
     tm.ntmTm.tmCharSet = ANSI_CHARSET;
     return proc(&e.elfLogFont, (const TEXTMETRICW *)&tm, RASTER_FONTTYPE, lparam);
+}
+
+/* the ANSI view of the same enumeration: the face name is ASCII, so the conversion is a narrowing copy */
+DLLAPI int WINAPI EnumFontFamiliesExA(HDC hdc, LPLOGFONTA lf, FONTENUMPROCA proc, LPARAM lparam, DWORD flags)
+{
+    ENUMLOGFONTEXA e;
+    NEWTEXTMETRICEXA tm;
+    unsigned i;
+    (void)flags;
+    if (!gdi_dc_get(hdc) || !proc) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    if (lf && lf->lfCharSet != DEFAULT_CHARSET && lf->lfCharSet != ANSI_CHARSET) return 1;
+    if (lf && lf->lfFaceName[0]) {
+        for (i = 0; face_name[i]; ++i)
+            if ((lf->lfFaceName[i] | 0x20) != (char)(face_name[i] | 0x20)) return 1;
+        if (lf->lfFaceName[i]) return 1;
+    }
+    memset(&e, 0, sizeof e);
+    memset(&tm, 0, sizeof tm);
+    e.elfLogFont.lfHeight = CELL_H;
+    e.elfLogFont.lfWidth = CELL_W;
+    e.elfLogFont.lfWeight = FW_NORMAL;
+    e.elfLogFont.lfCharSet = ANSI_CHARSET;
+    e.elfLogFont.lfPitchAndFamily = FF_MODERN;
+    for (i = 0; face_name[i]; ++i) { e.elfLogFont.lfFaceName[i] = (CHAR)face_name[i]; e.elfFullName[i] = (BYTE)face_name[i]; }
+    tm.ntmTm.tmHeight = CELL_H;
+    tm.ntmTm.tmAscent = ASCENT;
+    tm.ntmTm.tmDescent = CELL_H - ASCENT;
+    tm.ntmTm.tmAveCharWidth = CELL_W;
+    tm.ntmTm.tmMaxCharWidth = CELL_W;
+    tm.ntmTm.tmWeight = FW_NORMAL;
+    tm.ntmTm.tmFirstChar = 0x20;
+    tm.ntmTm.tmLastChar = 0x7e;
+    tm.ntmTm.tmDefaultChar = '?';
+    tm.ntmTm.tmBreakChar = ' ';
+    tm.ntmTm.tmPitchAndFamily = FF_MODERN;
+    tm.ntmTm.tmCharSet = ANSI_CHARSET;
+    return proc(&e.elfLogFont, (const TEXTMETRICA *)&tm, RASTER_FONTTYPE, lparam);
+}
+
+DLLAPI BOOL WINAPI GetCharABCWidthsW(HDC hdc, UINT first, UINT last, LPABC abc)
+{
+    dc_t *dc;
+    UINT i;
+    int scale;
+    GDI_ENTER();
+    dc = gdi_dc_get(hdc);
+    if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (!abc || last < first) { SetLastError(ERROR_INVALID_PARAMETER); RET(FALSE); }
+    scale = gdi_font_scale(dc);
+    for (i = first; i <= last; ++i) {                              /* every glyph fills its cell: no overhang either side */
+        abc[i - first].abcA = 0;
+        abc[i - first].abcB = (UINT)(CELL_W * scale);
+        abc[i - first].abcC = 0;
+    }
+    RET(TRUE);
+}
+
+DLLAPI DWORD WINAPI GetFontData(HDC hdc, DWORD table, DWORD offset, LPVOID buf, DWORD size)
+{
+    (void)table; (void)offset; (void)buf; (void)size;
+    if (!gdi_dc_get(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return GDI_ERROR; }
+    SetLastError(ERROR_CAN_NOT_COMPLETE);                          /* a raster font has no TrueType tables */
+    return GDI_ERROR;
+}
+
+/* glyph index = character code for the glyphs the font has (0x20..0x7e) */
+DLLAPI DWORD WINAPI GetGlyphIndicesW(HDC hdc, LPCWSTR s, int n, LPWORD out, DWORD flags)
+{
+    int i;
+    if (!gdi_dc_get(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return GDI_ERROR; }
+    if (n < 0 || (n && (!s || !out))) { SetLastError(ERROR_INVALID_PARAMETER); return GDI_ERROR; }
+    for (i = 0; i < n; ++i)
+        out[i] = s[i] >= 0x20 && s[i] <= 0x7e ? s[i] : (flags & GGI_MARK_NONEXISTING_GLYPHS) ? 0xffff : '?';
+    return (DWORD)n;
+}
+
+DLLAPI UINT WINAPI GetOutlineTextMetricsW(HDC hdc, UINT size, LPOUTLINETEXTMETRICW otm)
+{
+    (void)size; (void)otm;
+    if (!gdi_dc_get(hdc)) SetLastError(ERROR_INVALID_HANDLE);
+    return 0;                                                      /* raster font: no outline metrics */
+}
+
+DLLAPI HANDLE WINAPI AddFontMemResourceEx(PVOID data, DWORD size, PVOID reserved, DWORD *count)
+{
+    (void)size; (void)reserved;
+    if (!data || !count) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    *count = 0;
+    SetLastError(ERROR_NOT_SUPPORTED);                             /* no TrueType/OpenType rasteriser */
+    return 0;
+}
+
+DLLAPI BOOL WINAPI RemoveFontMemResourceEx(HANDLE h)
+{
+    (void)h;
+    SetLastError(ERROR_INVALID_HANDLE);                            /* AddFontMemResourceEx never returned one */
+    return FALSE;
+}
+
+/* The charset / code page / font-signature bit correspondence of Windows (bit i of fsCsb[0] is entry i). */
+static const struct { BYTE charset; UINT acp; } g_tci[32] = {
+    { ANSI_CHARSET, 1252 }, { EASTEUROPE_CHARSET, 1250 }, { RUSSIAN_CHARSET, 1251 }, { GREEK_CHARSET, 1253 },
+    { TURKISH_CHARSET, 1254 }, { HEBREW_CHARSET, 1255 }, { ARABIC_CHARSET, 1256 }, { BALTIC_CHARSET, 1257 },
+    { VIETNAMESE_CHARSET, 1258 }, { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 },
+    { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 },
+    { THAI_CHARSET, 874 }, { SHIFTJIS_CHARSET, 932 }, { GB2312_CHARSET, 936 }, { HANGEUL_CHARSET, 949 },
+    { CHINESEBIG5_CHARSET, 950 }, { JOHAB_CHARSET, 1361 }, { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 },
+    { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 },
+    { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 }, { DEFAULT_CHARSET, 0 }, { SYMBOL_CHARSET, 42 /* CP_SYMBOL */ } };
+
+DLLAPI BOOL WINAPI TranslateCharsetInfo(DWORD *src, LPCHARSETINFO cs, DWORD flags)
+{
+    unsigned i = 0;
+    if (!cs) return FALSE;
+    switch (flags) {
+    case TCI_SRCFONTSIG:
+        if (!src) return FALSE;
+        while (i < 32 && !((*src >> i) & 1)) ++i;
+        break;
+    case TCI_SRCCODEPAGE:
+        while (i < 32 && (UINT)(ULONG_PTR)src != g_tci[i].acp) ++i;
+        break;
+    case TCI_SRCCHARSET:
+        while (i < 32 && (UINT)(ULONG_PTR)src != g_tci[i].charset) ++i;
+        break;
+    default:
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    if (i >= 32 || g_tci[i].charset == DEFAULT_CHARSET) return FALSE;
+    memset(cs, 0, sizeof *cs);
+    cs->ciCharset = g_tci[i].charset;
+    cs->ciACP = g_tci[i].acp;
+    cs->fs.fsCsb[0] = 1u << i;
+    return TRUE;
 }

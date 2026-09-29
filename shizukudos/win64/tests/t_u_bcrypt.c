@@ -24,13 +24,6 @@ typedef struct { const char *s; unsigned n; int fill; } bs_t;
 #define S(str) { str, (unsigned)sizeof(str) - 1, 0 }
 #define F(b, cnt) { 0, cnt, b }
 
-static int has_rdrand(void)
-{
-    unsigned a = 1, b = 0, c = 0, d = 0;
-    __asm__ volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
-    return (c >> 30) & 1;
-}
-
 static const WCHAR *alg_id(const char *name)
 {
     if (!strcmp(name, "MD5")) return L"MD5";
@@ -385,13 +378,7 @@ int main(void)
     }
 
     /* ---------------- random numbers ---------------- */
-    if (!has_rdrand()) {
-        unsigned char r[16];
-        memset(r, 0x5a, sizeof r);
-        st = BCryptGenRandom(0, r, sizeof r, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-        U_CHECK("no RDRAND: BCryptGenRandom refuses with STATUS_NOT_SUPPORTED", st == ST_NOT_SUPPORTED);
-        U_CHECK("no RDRAND: ProcessPrng returns FALSE", ProcessPrng(r, sizeof r) == FALSE);
-    } else {
+    {                                   /* the kernel RNG (krandom.c) serves every CPU, with or without RDRAND */
         static unsigned char buf[4096], buf2[4096];
         static unsigned hist[256];
         unsigned ones = 0, sz;

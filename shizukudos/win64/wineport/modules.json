@@ -1,0 +1,657 @@
+{
+ "comment": "Modules built from the pinned Wine tree by wineport/build.py, in dependency order. link: import libraries searched in order (the first that exports a symbol provides it). dynamic_imports: functions resolved at first call because the Shizuku DLL may not export them; the failure value is returned when absent.",
+ "upstreams": [
+  "wine",
+  "freetype",
+  "noto-fonts"
+ ],
+ "image_base": "0x7ff900000000",
+ "image_stride": "0x1000000",
+ "static_libs": {
+  "tomcrypt": {
+   "dir": "libs/tomcrypt",
+   "defines": [
+    "-DLTC_NO_PROTOTYPES",
+    "-DLTC_SOURCE"
+   ],
+   "includes": [
+    "libs/tomcrypt/src/headers"
+   ]
+  },
+  "freetype": {
+   "upstream": "freetype",
+   "dir": "",
+   "sources": [
+    "src/base/ftsystem.c",
+    "src/base/ftinit.c",
+    "src/base/ftdebug.c",
+    "src/base/ftbase.c",
+    "src/base/ftbbox.c",
+    "src/base/ftbitmap.c",
+    "src/base/ftglyph.c",
+    "src/base/ftmm.c",
+    "src/base/ftsynth.c",
+    "src/base/fttype1.c",
+    "src/base/ftfstype.c",
+    "src/base/ftgasp.c",
+    "src/base/ftstroke.c",
+    "src/base/ftpatent.c",
+    "src/base/ftcid.c",
+    "src/autofit/autofit.c",
+    "src/truetype/truetype.c",
+    "src/type1/type1.c",
+    "src/cff/cff.c",
+    "src/cid/type1cid.c",
+    "src/sfnt/sfnt.c",
+    "src/psaux/psaux.c",
+    "src/psnames/psnames.c",
+    "src/pshinter/pshinter.c",
+    "src/smooth/smooth.c",
+    "src/raster/raster.c",
+    "src/gzip/ftgzip.c"
+   ],
+   "defines": [
+    "-DFT2_BUILD_LIBRARY",
+    "-DFT_CONFIG_MODULES_H=\"shz_ftmodule.h\""
+   ],
+   "includes": [
+    "include"
+   ],
+   "shizuku_includes": [
+    "freetype"
+   ]
+  },
+  "musl": {
+   "dir": "libs/musl",
+   "includes": [
+    "libs/musl/src/internal",
+    "libs/musl/arch/generic"
+   ]
+  },
+  "uuid": {
+   "dir": "libs/uuid"
+  },
+  "zlib": {
+   "dir": "libs/zlib",
+   "defines": [
+    "-DFAR=",
+    "-DZ_SOLO"
+   ]
+  }
+ },
+ "modules": [
+  {
+   "name": "cryptbase",
+   "link": [
+    "advapi32",
+    "bcryptprimitives"
+   ],
+   "static": [
+    "tomcrypt"
+   ],
+   "includes": [
+    "libs/tomcrypt/src/headers"
+   ],
+   "defines": [
+    "-DLTC_NO_PROTOTYPES",
+    "-DLTC_SOURCE"
+   ]
+  },
+  {
+   "name": "cryptsp",
+   "dir": "dlls/cryptsp",
+   "extra_sources": [
+    "dlls/advapi32/crypt.c"
+   ],
+   "import_as_real": true,
+   "link": [
+    "cryptbase",
+    "advapi32",
+    "user32",
+    "rpcrt4"
+   ]
+  },
+  {
+   "name": "crypt32",
+   "link": [
+    "cryptsp",
+    "cryptbase",
+    "user32",
+    "advapi32",
+    "bcrypt"
+   ],
+   "delay_imports": [
+    "cryptnet"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "bcrypt.dll",
+     "fail": "0xc00000bb",
+     "functions": [
+      "BCryptImportKeyPair",
+      "BCryptVerifySignature",
+      "BCryptDestroyKey"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "base64",
+     "cert",
+     "crl",
+     "ctl",
+     "encode",
+     "main",
+     "msg",
+     "object",
+     "oid",
+     "protectdata",
+     "store",
+     "str"
+    ],
+    "link": [
+     "crypt32",
+     "cryptsp",
+     "cryptbase",
+     "advapi32",
+     "user32",
+     "shlwapi",
+     "shell32",
+     "bcrypt"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "bcrypt.dll",
+      "fail": "0xc00000bb",
+      "functions": [
+       "BCryptImportKeyPair",
+       "BCryptVerifySignature",
+       "BCryptDestroyKey"
+      ]
+     },
+     {
+      "dll": "crypt32.dll",
+      "fail": "0",
+      "functions": [
+       "PFXImportCertStore"
+      ]
+     }
+    ],
+    "shizuku": {
+     "subtests": [
+      "chrome",
+      "dpapi"
+     ],
+     "in_plain_image": true
+    }
+   },
+   "defines": [
+    "-DSHZ_NO_HOST_ROOTS"
+   ],
+   "unported": {
+    "PFXImportCertStore": "PKCS#12 import runs in crypt32's Unix side (GnuTLS), which is not built"
+   }
+  },
+  {
+   "name": "rsaenh",
+   "link": [
+    "crypt32",
+    "cryptsp",
+    "cryptbase",
+    "advapi32"
+   ],
+   "static": [
+    "tomcrypt"
+   ],
+   "includes": [
+    "libs/tomcrypt/src/headers"
+   ],
+   "defines": [
+    "-DLTC_NO_PROTOTYPES",
+    "-DLTC_SOURCE"
+   ],
+   "tests": {
+    "subtests": [
+     "rsaenh"
+    ],
+    "link": [
+     "cryptsp",
+     "cryptbase",
+     "advapi32"
+    ]
+   },
+   "dynamic_imports": [
+    {
+     "dll": "advapi32.dll",
+     "fail": "120",
+     "functions": [
+      "GetSecurityInfo",
+      "SetSecurityInfo"
+     ]
+    },
+    {
+     "dll": "advapi32.dll",
+     "fail": "0",
+     "functions": [
+      "GetSecurityDescriptorLength",
+      "GetSecurityDescriptorOwner",
+      "GetSecurityDescriptorGroup",
+      "GetSecurityDescriptorDacl",
+      "GetSecurityDescriptorSacl"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "dwrite",
+   "link": [
+    "user32",
+    "gdi32",
+    "advapi32"
+   ],
+   "static": [
+    "freetype",
+    "musl"
+   ],
+   "unix_inproc": true,
+   "unix_sources": [
+    "freetype.c"
+   ],
+   "unix_defines": [
+    "-DSHZ_STATIC_FREETYPE"
+   ],
+   "unix_includes": [
+    {
+     "upstream": "freetype",
+     "path": "include"
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "analyzer",
+     "font",
+     "layout"
+    ],
+    "link": [
+     "dwrite",
+     "gdi32",
+     "user32"
+    ],
+    "static": [
+     "musl"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "gdi32.dll",
+      "fail": "0",
+      "functions": [
+       "AddFontMemResourceEx",
+       "GetCharABCWidthsW",
+       "GetGraphicsMode",
+       "GetOutlineTextMetricsW",
+       "GetWorldTransform",
+       "RemoveFontMemResourceEx"
+      ]
+     }
+    ],
+    "shizuku": {
+     "subtests": [
+      "factory"
+     ],
+     "link": [
+      "dwrite",
+      "advapi32"
+     ],
+     "in_plain_image": true
+    }
+   },
+   "dynamic_imports": [
+    {
+     "dll": "gdi32.dll",
+     "fail": "0",
+     "functions": [
+      "GetFontFileData",
+      "GetFontFileInfo",
+      "GetFontRealizationInfo",
+      "BeginPath",
+      "CloseFigure",
+      "EndPath",
+      "FillPath",
+      "PolyBezierTo",
+      "SetWorldTransform"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "propsys",
+   "link": [
+    "ole32",
+    "oleaut32",
+    "advapi32"
+   ],
+   "static": [
+    "uuid"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "oleaut32.dll",
+     "fail": "0",
+     "functions": [
+      "SystemTimeToVariantTime"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "propsys"
+    ],
+    "link": [
+     "propsys",
+     "ole32",
+     "oleaut32"
+    ],
+    "static": [
+     "uuid"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "ole32.dll",
+      "fail": "0x80040154",
+      "functions": [
+       "CoCreateInstance"
+      ]
+     },
+     {
+      "dll": "propsys.dll",
+      "fail": "0x80004001",
+      "functions": [
+       "PSCreatePropertyStoreFromObject",
+       "PropVariantToFileTime",
+       "PropVariantToUInt32Vector",
+       "VariantToGUID"
+      ]
+     },
+     {
+      "dll": "oleaut32.dll",
+      "fail": "0",
+      "functions": [
+       "SystemTimeToVariantTime"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "dwmapi",
+   "link": [
+    "user32"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "user32.dll",
+     "fail": "0",
+     "functions": [
+      "EnumDisplaySettingsExW",
+      "SetThreadDpiAwarenessContext"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "dwmapi"
+    ],
+    "link": [
+     "dwmapi",
+     "user32"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "dwmapi.dll",
+      "fail": "0x80004001",
+      "functions": [
+       "DwmFlush"
+      ]
+     },
+     {
+      "dll": "user32.dll",
+      "fail": "0",
+      "functions": [
+       "EnumDisplaySettingsA"
+      ]
+     },
+     {
+      "dll": "kernel32.dll",
+      "fail": "0",
+      "functions": [
+       "QueueUserAPC"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "userenv",
+   "link": [
+    "advapi32"
+   ],
+   "disabled": "needs process tokens (GetTokenInformation/LookupAccountSidW) and the Rtl*Environment block API, which the Shizuku runtime does not have"
+  },
+  {
+   "name": "uxtheme",
+   "link": [
+    "user32",
+    "gdi32",
+    "advapi32"
+   ],
+   "disabled": "needs GDI/user32 functions Shizuku lacks (AlphaBlend, GradientFill, TransparentBlt, atoms, LoadImageW, DPI APIs) and Wine's private user32 RegisterUserApiHook"
+  },
+  {
+   "name": "imm32",
+   "link": [
+    "user32",
+    "gdi32",
+    "advapi32"
+   ],
+   "disabled": "built on Wine's win32u NtUser* input-context syscalls; there is no equivalent kernel interface"
+  },
+  {
+   "name": "imagehlp",
+   "link": [],
+   "delay_imports": [
+    "dbghelp"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "SetFileTime"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "wintrust",
+   "link": [
+    "crypt32",
+    "cryptsp",
+    "cryptbase",
+    "imagehlp",
+    "user32",
+    "advapi32"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "SetFileAttributesW"
+     ]
+    },
+    {
+     "dll": "cryptui.dll",
+     "fail": "0",
+     "functions": [
+      "CryptUIDlgCertMgr"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "asn",
+     "crypt",
+     "register",
+     "softpub"
+    ],
+    "link": [
+     "wintrust",
+     "crypt32",
+     "cryptsp",
+     "cryptbase",
+     "advapi32",
+     "user32"
+    ],
+    "dynamic_imports": [
+     {
+      "dll": "kernel32.dll",
+      "fail": "0",
+      "functions": [
+       "SetFileAttributesA",
+       "SetFileAttributesW"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "cryptnet",
+   "link": [
+    "crypt32",
+    "cryptsp",
+    "cryptbase",
+    "shell32",
+    "ole32",
+    "advapi32"
+   ],
+   "delay_imports": [
+    "wininet"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "shell32.dll",
+     "fail": "0",
+     "functions": [
+      "SHCreateDirectoryExW"
+     ]
+    }
+   ],
+   "tests": {
+    "subtests": [
+     "cryptnet"
+    ],
+    "link": [
+     "cryptnet",
+     "crypt32"
+    ]
+   }
+  },
+  {
+   "name": "dbghelp",
+   "link": [],
+   "static": [
+    "zlib"
+   ],
+   "includes": [
+    "libs/zlib"
+   ],
+   "defines": [
+    "-DFAR=",
+    "-DZ_SOLO"
+   ],
+   "disabled": "needs process/thread inspection (ReadProcessMemory, VirtualQueryEx, OpenThread, GetThreadContext, psapi K32*), version resources and Wine's wine_get_dos_file_name/__unDName"
+  },
+  {
+   "name": "cfgmgr32",
+   "link": [
+    "advapi32",
+    "rpcrt4"
+   ],
+   "disabled": "talks to Wine's plugplay service over RPC (wine/plugplay.idl); there is no device manager"
+  },
+  {
+   "name": "setupapi",
+   "link": [
+    "advapi32",
+    "rpcrt4"
+   ],
+   "disabled": "depends on cfgmgr32/plugplay, cabinet and a device database"
+  },
+  {
+   "name": "iphlpapi",
+   "link": [
+    "advapi32",
+    "ws2_32"
+   ],
+   "disabled": "implemented on Wine's nsi.dll/nsiproxy network-store interface, which does not exist here"
+  },
+  {
+   "name": "dnsapi",
+   "link": [],
+   "disabled": "its resolver is entirely in the Unix side (libresolv)"
+  },
+  {
+   "name": "secur32",
+   "link": [
+    "advapi32"
+   ],
+   "disabled": "the Negotiate/NTLM/Kerberos/Schannel providers are in the Unix side (GnuTLS, GSSAPI); no TLS library is ported (BearSSL not pinned)"
+  },
+  {
+   "name": "winhttp",
+   "link": [
+    "user32",
+    "advapi32",
+    "ws2_32"
+   ],
+   "disabled": "HTTPS needs secur32/schannel (not ported); also imports jsproxy"
+  },
+  {
+   "name": "comctl32",
+   "link": [
+    "user32",
+    "gdi32",
+    "advapi32",
+    "oleaut32"
+   ],
+   "disabled": "67k lines of controls needing large parts of user32/gdi32 the Shizuku DLLs do not export yet (not attempted in this round)"
+  }
+ ],
+ "image_files": [
+  {
+   "upstream": "noto-fonts",
+   "path": "ofl/notosans/NotoSans[wdth,wght].ttf",
+   "image_path": "\\SHZ\\FONTS\\NotoSans.ttf"
+  },
+  {
+   "upstream": "noto-fonts",
+   "path": "ofl/notoserif/NotoSerif[wdth,wght].ttf",
+   "image_path": "\\SHZ\\FONTS\\NotoSerif.ttf"
+  },
+  {
+   "upstream": "noto-fonts",
+   "path": "ofl/notosansmono/NotoSansMono[wdth,wght].ttf",
+   "image_path": "\\SHZ\\FONTS\\NotoSansMono.ttf"
+  },
+  {
+   "upstream": "wine",
+   "path": "fonts/tahoma.ttf",
+   "image_path": "\\SHZ\\FONTS\\tahoma.ttf"
+  },
+  {
+   "upstream": "wine",
+   "path": "fonts/tahomabd.ttf",
+   "image_path": "\\SHZ\\FONTS\\tahomabd.ttf"
+  }
+ ]
+}

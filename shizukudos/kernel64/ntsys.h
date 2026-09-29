@@ -46,7 +46,8 @@
     X(NtUserWindowQuery, 0x64) X(NtUserWindowSet, 0x65) X(NtUserShowWindow, 0x66) X(NtUserSetWindowPos, 0x67) \
     X(NtUserPostMessage, 0x68) X(NtUserSendMessage, 0x69) X(NtUserGetMessage, 0x6a) X(NtUserReplyMessage, 0x6b) \
     X(NtUserThreadOp, 0x6c) X(NtUserTimer, 0x6d) X(NtUserInvalidate, 0x6e) X(NtUserPaint, 0x6f) X(NtGdiPresent, 0x70) \
-    X(NtUserFocusOp, 0x71) X(NtUserEnumWindows, 0x72) X(NtUserHitTest, 0x73) X(NtUserAtom, 0x74) X(NtUserProp, 0x75)
+    X(NtUserFocusOp, 0x71) X(NtUserEnumWindows, 0x72) X(NtUserHitTest, 0x73) X(NtUserAtom, 0x74) X(NtUserProp, 0x75) \
+    X(NtUserInput, 0x76) X(NtUserWindowOp, 0x77) X(NtUserClipboard, 0x78)
 
 #define SYSCALL_LIST_NET(X) \
     X(NtShzSocket, 0x80) X(NtShzSockBind, 0x81) X(NtShzSockListen, 0x82) X(NtShzSockAccept, 0x83) \
@@ -54,9 +55,11 @@
     X(NtShzSockName, 0x88) X(NtShzSockSetOpt, 0x89) X(NtShzSockGetOpt, 0x8a) X(NtShzSockIoctl, 0x8b) \
     X(NtShzSockPoll, 0x8c) X(NtShzNetResolve, 0x8d) X(NtShzNetQuery, 0x8e) X(NtShzNetPing, 0x8f)
 
-#define SYSCALL_LIST_K32(X)
+#define SYSCALL_LIST_K32(X) \
+    X(NtQueryVolumeInformationFile, 0x90) X(NtLockFile, 0x91) X(NtUnlockFile, 0x92) X(NtShzQueryK32, 0x93) X(NtShzSetK32, 0x94)
 
-#define SYSCALL_LIST_MISC(X)
+#define SYSCALL_LIST_MISC(X) \
+    X(NtShzRandom, 0xa0)                /* kernel/krandom.c: system RNG (ProcessPrng, BCryptGenRandom, RtlGenRandom) */
 
 /* Display/GPU (kernel64/gpu_sys.c; structures in win64/include/shzgpu.h) */
 #define SYSCALL_LIST_GPU(X) \
@@ -70,6 +73,11 @@
     X(NtShzSetupBlkQuery, 0xb0) X(NtShzSetupBlkRead, 0xb1) X(NtShzSetupBlkWrite, 0xb2) X(NtShzSetupBlkFlush, 0xb3) \
     X(NtShzSetupPower, 0xb4)
 
+/* Raw block devices 0xf0-0xff (kernel64/sysblk.c) */
+#define SYSCALL_LIST_BLK(X) \
+    X(NtShzBlkQuery, 0xf0) X(NtShzBlkRead, 0xf1) X(NtShzBlkWrite, 0xf2) X(NtShzBlkFlush, 0xf3) \
+    X(NtShzBlkBatch, 0xf4) X(NtShzBlkControl, 0xf5) X(NtShzBlkDiscard, 0xf6)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
@@ -80,6 +88,7 @@ enum {
     SYSCALL_LIST_MISC(X)
     SYSCALL_LIST_GPU(X)
     SYSCALL_LIST_SETUP(X)
+    SYSCALL_LIST_BLK(X)
 #undef X
     SYS_MAX = 0x100                 /* every number below goes to sys_extended(); sysext.c rejects unrouted ranges */
 };

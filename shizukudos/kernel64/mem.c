@@ -168,11 +168,26 @@ static void free_level(uint64_t table_pa, int level)
 
 void vm_free_space(uint64_t pml4) { free_level(pml4, 4); }
 
+static uint64_t count_level(uint64_t table_pa, int level)
+{
+    const uint64_t *t = table_at(table_pa);
+    uint64_t n = 0;
+    unsigned i;
+    for (i = 0; i < (level == 4 ? 256u : 512u); ++i) {
+        if (!(t[i] & PT_P) || !(t[i] & PT_U))
+            continue;
+        n += level == 1 ? 1 : count_level(t[i] & 0x000ffffffffff000ull, level - 1);
+    }
+    return n;
+}
+
+uint64_t vm_count_user_pages(uint64_t pml4) { return count_level(pml4, 4); }
+
 /* ---------------------------------------------------------------- heap */
 struct hblock { uint64_t size; uint64_t used; struct hblock *next; uint64_t magic; };
 #define HMAGIC 0x4b48454150363421ull
 static struct hblock *heap_head;
-static size_t heap_used_bytes;
+static size_t heap_used_bytes, heap_total_bytes;
 
 /* One free block per usable segment of the heap window [HEAP_PA, HEAP_PA + HEAP_BYTES). Firmware holes (standalone
  * builds only) split the window: each segment before a hole ends in a used, never-freed sentinel block (header
@@ -216,6 +231,7 @@ static void heap_init(void)
             else
                 heap_head = b;
             prev = sentinel ? sentinel : b;
+            heap_total_bytes += b->size;
         }
         seg = stop < window_end ? resume : window_end;
     }
@@ -274,6 +290,7 @@ void kfree(void *p)
 }
 
 size_t kheap_used(void) { return heap_used_bytes; }
+size_t kheap_total(void) { return heap_total_bytes; }   /* HEAP_BYTES minus block headers and fenced firmware holes */
 
 /* ---------------------------------------------------------------- init */
 static void map_2m(uint64_t pml4, uint64_t va, uint64_t pa, uint64_t flags)

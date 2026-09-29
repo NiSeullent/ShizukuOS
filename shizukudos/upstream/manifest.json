@@ -175,6 +175,57 @@
       "shallow": true,
       "build": "not built from this tree (MSBuild/WDK project); the ReactOS copy of the same sources (KMDF 1.17) is built by shizukudos/ntdrv/corpus/build.py (wdf01000, wdfldr); assessment in docs/shizukudos10/DRIVER_CORPUS.md",
       "patches": []
+    },
+    "wine": {
+      "repository": "https://gitlab.winehq.org/wine/wine.git",
+      "fetch_mirror": "https://github.com/wine-mirror/wine.git",
+      "ref": "wine-11.0",
+      "commit": "db11d0fe6a169c457e23d007e20404643d067aa8",
+      "license": "LGPL-2.1-or-later",
+      "license_files": ["COPYING.LIB", "LICENSE", "AUTHORS"],
+      "bundled_components_used": {
+        "libs/tomcrypt": {"license": "LibTomCrypt dual licence: public domain dedication OR WTFPL-2.0", "license_files": ["libs/tomcrypt/LICENSE"]}
+      },
+      "execution_mode": "PE32+ user-mode DLLs (x86_64) built with mingw-w64 against Wine's own include/ tree; the Unix side (unixlib) of a DLL is never built",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "shizukudos/win64/wineport/build.py: host configure (--enable-win64, every optional library disabled) only for widl/wrc and the generated headers, then each DLL with x86_64-w64-mingw32-gcc; exports come from the .spec file minus stub entries",
+      "linking_note": "The Wine DLLs are statically linked with Shizuku-original GPL-2.0-only support code (wineport/crt, wineport/glue); the combined DLLs are distributed under GPL-2.0 as LGPL-2.1 section 3 permits.",
+      "data_files_used": {
+        "fonts/tahoma.ttf": "Wine's own Tahoma replacement (LGPL-2.1-or-later), packed unmodified as \\SHZ\\FONTS\\tahoma.ttf",
+        "fonts/tahomabd.ttf": "Wine's own Tahoma Bold replacement (LGPL-2.1-or-later), packed unmodified as \\SHZ\\FONTS\\tahomabd.ttf"
+      },
+      "patches": [
+        "shizukudos/win64/wineport/patches/wine/0001-cryptbase-system-rng-and-memory-encryption.patch",
+        "shizukudos/win64/wineport/patches/wine/0002-crypt32-shizuku.patch",
+        "shizukudos/win64/wineport/patches/wine/0003-advapi32-crypt-register-default-csp-on-first-use.patch",
+        "shizukudos/win64/wineport/patches/wine/0004-dwrite-static-freetype-and-font-registration.patch",
+        "shizukudos/win64/wineport/patches/wine/0005-winecrt0-debug-options-from-registry.patch",
+        "shizukudos/win64/wineport/patches/wine/0006-wintrust-register-providers-on-first-use.patch"
+      ]
+    },
+    "freetype": {
+      "repository": "https://gitlab.freedesktop.org/freetype/freetype.git",
+      "fetch_mirror": "https://github.com/freetype/freetype.git",
+      "ref": "VER-2-13-3",
+      "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5",
+      "license": "FTL OR GPL-2.0-or-later (dual); used here under GPL-2.0-or-later",
+      "license_files": ["LICENSE.TXT", "docs/FTL.TXT", "docs/GPLv2.TXT"],
+      "execution_mode": "static library linked into the PE dwrite.dll (x86_64, mingw-w64), no platform-specific code",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "shizukudos/win64/wineport/build.py: the module sources listed in wineport/modules.json with a module list header (wineport/freetype/shz_ftmodule.h)",
+      "patches": []
+    },
+    "noto-fonts": {
+      "repository": "https://github.com/google/fonts.git",
+      "ref": "main",
+      "commit": "23e54b51ddffbc7713c583748e3bd86f62b1fa4a",
+      "sparse_paths": ["/ofl/notosans/", "/ofl/notoserif/", "/ofl/notosansmono/"],
+      "license": "OFL-1.1",
+      "license_files": ["ofl/notosans/OFL.txt", "ofl/notoserif/OFL.txt", "ofl/notosansmono/OFL.txt"],
+      "execution_mode": "font data (variable TrueType), packed unmodified into WIN64.IMG as \\SHZ\\FONTS\\*.ttf",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "partial, sparse fetch of the pinned commit (only the three family directories); files are not modified",
+      "patches": []
     }
   },
   "tools": {

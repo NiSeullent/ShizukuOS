@@ -55,7 +55,8 @@ int user_exception_dispatch(struct regs *r, uint32_t code, uint64_t info0, uint6
         put64(rec, 0x20, info0);                                              /* 0 read, 1 write, 8 execute */
         put64(rec, 0x28, info1);                                              /* faulting address */
     }
-    /* Faults that resume at the same RIP after the handler runs (breakpoint reports the next RIP already). */
+    /* Faults resume at the same RIP after the handler runs; a breakpoint arrives here with RIP backed up onto the INT3
+     * (proc.c user_fault), as on Windows, so a handler that continues must step over it (Rip + 1). */
 
     sp = (r->rsp - 0x80) & ~0xfull;                                           /* stay clear of the interrupted frame */
     sp -= CONTEXT_SIZE;
