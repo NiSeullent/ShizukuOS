@@ -267,6 +267,11 @@ void mem_init(const shz_bootinfo_t *bi)
     for (c = 0; c < bi->channel_count; ++c)                          /* IPC windows above RAM */
         for (off = 0; off < bi->channel[c].size; off += PAGE_SIZE)
             KASSERT(vm_map(kpml4, DIRECT_MAP + bi->channel[c].gpa + off, bi->channel[c].gpa + off, PT_W | PT_NX) == 0);
+    /* NT driver host image window (0xffffe000_00000000, one PML4 entry): materialise its top-level
+     * table now so every later-created user address space shares it (a new address space copies the
+     * kernel-half PML4 entries by value, so a mapping added under this entry after a process exists is
+     * still visible to it). Nothing is loaded here; only the shared PDPT/PD skeleton is reserved. */
+    KASSERT(walk(kpml4, 0xffffe00000000000ull, 1, 0) != 0);
     write_cr3(kpml4);
     phys_base_va = DIRECT_MAP;
     heap_init();

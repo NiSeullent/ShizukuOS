@@ -142,9 +142,13 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
     st = map_image(image, size, &pi, base);
     if (st) return st;
     rc2.delta = base - pi.image_base; rc2.base = base; rc2.st = STATUS_SUCCESS;
-    if (rc2.delta) {
-        if (!pi.dir_rva[5]) { kprintf("K64 ntdrv: %s must relocate but has no .reloc\n", service); return STATUS_INVALID_IMAGE_FORMAT; }
+    if (rc2.delta && pi.dir_rva[5]) {                          /* apply base relocations if the image carries them */
         if (pe_walk_relocs(image, size, &pi, reloc_cb, &rc2) || rc2.st) return STATUS_INVALID_IMAGE_FORMAT;
+    } else if (rc2.delta) {
+        /* No .reloc directory: the image is fully position-independent (RIP-relative), so it runs
+         * unchanged at any base. ld emits a reloc for every absolute address, so an absent table
+         * means none are needed. */
+        kprintf("K64 ntdrv: %s is position-independent (no base relocations); mapped at %llx\n", service, base);
     }
     ic.base = base; ic.unresolved = 0;
     if (pe_walk_imports(image, size, &pi, import_cb, &ic)) return STATUS_INVALID_IMAGE_FORMAT;

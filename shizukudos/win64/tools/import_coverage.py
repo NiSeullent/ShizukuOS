@@ -66,13 +66,72 @@ def scan(path, api_schema):
     return found
 
 
+def ntoskrnl_mode(args):
+    """Kernel-driver coverage: measure a .sys package's ntoskrnl.exe/hal.dll (etc.) imports against
+    the driver host's export tables, emitted by the build (gen_ntoskrnl_exports.py) from
+    kernel64/ntdrv_prov.c -- i.e. exactly what DriverEntry resolves against at load time."""
+    js = args.ntoskrnl if args.ntoskrnl.is_file() else args.ntoskrnl / "ntoskrnl-exports.json"
+    tables = {k.lower(): set(v) for k, v in json.loads(js.read_text()).items()}
+    OURS = set(tables)
+    files = sorted(p for p in ([args.app] if args.app.is_file() else args.app.rglob("*"))
+                   if p.suffix.lower() in (".sys", ".dll", ".exe"))
+    per_dll = collections.defaultdict(lambda: collections.defaultdict(set))
+    blockers = collections.defaultdict(set)
+    scanned = 0
+    for p in files:
+        try:
+            imps = scan(p, {})
+        except pefile.PEFormatError:
+            continue
+        if imps is None:
+            continue
+        scanned += 1
+        for dll, fn, delayed in imps:
+            key = dll.lower()
+            per_dll[key][fn].add(p.name)
+            if key not in OURS and not delayed:
+                blockers[key].add(p.name)
+    rows, total, hit = [], 0, 0
+    for dll, fns in sorted(per_dll.items(), key=lambda kv: -len(kv[1])):
+        have = tables.get(dll)
+        ok = sum(1 for f in fns if have and f in have)
+        rows.append((dll, len(fns), ok))
+        total += len(fns)
+        hit += ok
+    print(f"{scanned} kernel image(s) scanned under {args.app}")
+    print(f"{total} distinct imported functions from {len(per_dll)} kernel DLLs; {hit} resolve against "
+          f"the driver host's provider tables ({100.0 * hit / max(total, 1):.1f}%)\n")
+    print(f"{'kernel DLL':24} {'imported':>8} {'provided':>9}")
+    for dll, n, ok in rows[:args.top]:
+        mark = "" if dll in OURS else "  <- no provider table (framework not yet implemented)"
+        print(f"{dll:24} {n:8} {ok:9}{mark}")
+    for dll in sorted(d for d in OURS if d in per_dll):
+        missing = sorted(fn for fn in per_dll[dll] if fn not in tables[dll])
+        if missing:
+            print(f"\nmissing from provider {dll}: {len(missing)} of {len(per_dll[dll])} imported:")
+            print("  " + ", ".join(missing[:args.top]))
+    if args.json:
+        args.json.write_text(json.dumps({
+            "mode": "ntoskrnl", "images": scanned, "distinct_imports": total, "resolved": hit,
+            "kernel_dlls": {d: {"imported": n, "provided": ok} for d, n, ok in rows},
+            "unbacked_dlls": {d: sorted(u) for d, u in blockers.items()},
+            "missing": {dll: sorted(fn for fn in per_dll[dll] if fn not in tables[dll]) for dll in OURS if dll in per_dll}},
+            indent=1))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("app", type=Path, help="directory (or file) of the application, scanned recursively for .exe/.dll")
     ap.add_argument("--build", type=Path, default=REPO / "build/shizukudos/win64")
+    ap.add_argument("--ntoskrnl", type=Path, help="kernel-driver mode: path to ntoskrnl-exports.json (or its directory), "
+                    "measuring .sys imports against the driver host's provider tables")
     ap.add_argument("--json", type=Path)
     ap.add_argument("--top", type=int, default=25)
     args = ap.parse_args()
+
+    if args.ntoskrnl:
+        return ntoskrnl_mode(args)
 
     api_schema = schema()
     ours = {p.name.lower(): exports(p) for p in sorted(args.build.glob("*.dll"))}     # ntdll, kernel32 and every extra module

@@ -36,11 +36,20 @@ DEVICE_OBJECT *ntdrv_find_device(const char *name)
         if (!strcmp(n->name, name)) return n->dev;
     return 0;
 }
+/* "\??\X" and "\DosDevices\X" name the same object-manager entry: reduce both to the leaf "X". */
+static const char *dos_leaf(const char *n)
+{
+    if (!strncmp(n, "\\??\\", 4)) return n + 4;
+    if (!strncmp(n, "\\DosDevices\\", 12)) return n + 12;
+    if (!strncmp(n, "\\Global??\\", 10)) return n + 10;
+    return n;
+}
 DEVICE_OBJECT *ntdrv_resolve_symlink(const char *dosname)
 {
     ntdrv_symlink_t *s;
+    const char *leaf = dos_leaf(dosname);
     for (s = symlinks; s; s = s->next)
-        if (!strcmp(s->link, dosname)) return ntdrv_find_device(s->target);
+        if (!strcmp(s->link, leaf)) return ntdrv_find_device(s->target);
     return 0;
 }
 
@@ -94,8 +103,14 @@ void NTAPI IoDeleteDevice(DEVICE_OBJECT *dev)
 NTSTATUS NTAPI IoCreateSymbolicLink(UNICODE_STRING *link, UNICODE_STRING *target)
 {
     ntdrv_symlink_t *s = kzalloc(sizeof *s);
+    char full[96];
+    const char *leaf;
+    unsigned i;
     if (!s) return STATUS_INSUFFICIENT_RESOURCES;
-    ntdrv_wide_to_ascii(link->Buffer, link->Length / 2, s->link, sizeof s->link);
+    ntdrv_wide_to_ascii(link->Buffer, link->Length / 2, full, sizeof full);
+    leaf = dos_leaf(full);                                     /* store by leaf so \??\ and \DosDevices\ both match */
+    for (i = 0; leaf[i] && i + 1 < sizeof s->link; ++i) s->link[i] = leaf[i];
+    s->link[i] = 0;
     ntdrv_wide_to_ascii(target->Buffer, target->Length / 2, s->target, sizeof s->target);
     s->next = symlinks; symlinks = s;
     return STATUS_SUCCESS;
@@ -104,8 +119,10 @@ NTSTATUS NTAPI IoDeleteSymbolicLink(UNICODE_STRING *link)
 {
     char name[96];
     ntdrv_symlink_t **pp = &symlinks;
+    const char *leaf;
     ntdrv_wide_to_ascii(link->Buffer, link->Length / 2, name, sizeof name);
-    while (*pp) { if (!strcmp((*pp)->link, name)) { ntdrv_symlink_t *s = *pp; *pp = s->next; kfree(s); } else pp = &(*pp)->next; }
+    leaf = dos_leaf(name);
+    while (*pp) { if (!strcmp((*pp)->link, leaf)) { ntdrv_symlink_t *s = *pp; *pp = s->next; kfree(s); } else pp = &(*pp)->next; }
     return STATUS_SUCCESS;
 }
 
@@ -446,15 +463,8 @@ int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, 
     kobject_t *o;
     uint32_t h;
     int32_t st;
-    if (!strncmp(path, "\\??\\", 4) || !strncmp(path, "\\DosDevices\\", 12)) {
-        const char *dos = path[2] == '?' ? path : path;       /* keep the leading form for lookup */
-        char norm[96];
-        unsigned i = 0;
-        if (path[2] == '?') { norm[i++] = '\\'; norm[i++] = '?'; norm[i++] = '?'; norm[i++] = '\\'; }
-        else { memcpy(norm, "\\DosDevices\\", 12); i = 12; }
-        { unsigned j = (path[2] == '?') ? 4 : 12; for (; path[j] && i + 1 < sizeof norm; ++j) norm[i++] = path[j]; norm[i] = 0; }
-        dev = ntdrv_resolve_symlink(norm);
-        (void)dos;
+    if (!strncmp(path, "\\??\\", 4) || !strncmp(path, "\\DosDevices\\", 12) || !strncmp(path, "\\Global??\\", 10)) {
+        dev = ntdrv_resolve_symlink(path);                    /* \??\Name / \DosDevices\Name -> device */
     } else if (!strncmp(path, "\\Device\\", 8)) {
         dev = ntdrv_find_device(path);
     } else {
