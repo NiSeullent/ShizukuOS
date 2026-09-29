@@ -27,11 +27,13 @@ $(B)/sfsfuzz: $(LIB) $(HOST) tests/sfsfuzz.c $(HDRS) | $(B)
 $(B)/sfsperf: $(LIB) $(HOST) tests/sfsperf.c $(HDRS) | $(B)
 	$(CC) $(WARN) -O2 -g -o $@ $(LIB) $(HOST) tests/sfsperf.c
 
-# Freestanding: no libc headers beyond stddef/stdint, no red zone, no SSE (kernel code model).
+# Freestanding: exactly the Kernel64 compiler flags (shizukudos/kbuild.py K64_FLAGS, -Werror included).
+K64_FLAGS := -m64 -std=gnu11 -O2 -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-pic -fno-pie -mcmodel=kernel \
+             -mno-red-zone -mgeneral-regs-only -fno-stack-protector -fno-asynchronous-unwind-tables -fno-ident \
+             -fno-common -fwrapv -fno-strict-aliasing -fno-tree-loop-distribute-patterns
 freestanding: $(LIB) $(HDRS) | $(B)
-	@for f in $(LIB); do $(CC) $(WARN) -O2 -ffreestanding -fno-builtin -nostdinc -isystem $$($(CC) -print-file-name=include) \
-	   -mno-red-zone -mno-sse -mno-mmx -fno-stack-protector -mcmodel=kernel -fno-pic -c $$f -o $(B)/fs_$$(basename $$f .c).o || exit 1; done
-	@echo "freestanding compile OK"
+	@for f in $(LIB); do $(CC) $(K64_FLAGS) -c $$f -o $(B)/fs_$$(basename $$f .c).o || exit 1; done
+	@echo "freestanding compile OK (Kernel64 flags)"
 
 clean:
 	rm -rf $(B)

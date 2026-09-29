@@ -135,7 +135,8 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     }
     if ((a2 & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE_ACCESS)) && n->readonly && !created)
         return STATUS_ACCESS_DENIED;
-    if ((options & FILE_DELETE_ON_CLOSE) && n->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;   /* no delete on disk */
+    if ((options & FILE_DELETE_ON_CLOSE) && n->backing == FSB_DISK && !(n->vol && n->vol->remove))
+        return STATUS_NOT_SUPPORTED;                                                        /* volume cannot delete */
     if (n->is_dir && (a2 & (GENERIC_WRITE | FILE_WRITE_DATA))) return STATUS_FILE_IS_A_DIRECTORY;
     f = kzalloc(sizeof *f);
     o = ob_create(OB_FILE, 0);
@@ -315,11 +316,18 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         fsnode_t *dst, *dir;
         char leaf[96];
         uint32_t chars;
-        if (f->node && f->node->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;            /* no rename on disk volumes */
+        if (f->node && f->node->backing == FSB_DISK && !(f->node->vol && f->node->vol->rename))
+            return STATUS_NOT_SUPPORTED;                                                     /* volume cannot rename */
         if (!f->node || f->node->readonly || len < 20 || copy_from_user(p, hdr, buf, 20)) return STATUS_ACCESS_DENIED;
         chars = *(uint32_t *)(hdr + 16) / 2;
         if (chars >= 260 || len < 20 + chars * 2ull || copy_from_user(p, w, buf + 20, chars * 2ull)) return STATUS_INVALID_PARAMETER;
         if (utf16_to_utf8(w, chars, newpath, sizeof newpath) < 0) return STATUS_OBJECT_NAME_INVALID;
+        if (f->node->backing == FSB_DISK) {                  /* on-disk rename/move (ShizukuFS) */
+            const int rc = fs_rename(f->node, newpath, hdr[0] != 0);
+            if (rc) return rc == -3 ? STATUS_OBJECT_NAME_COLLISION : rc == -2 ? STATUS_DISK_FULL : STATUS_ACCESS_DENIED;
+            set_iosb(p, iosb, STATUS_SUCCESS, 0);
+            return STATUS_SUCCESS;
+        }
         dst = fs_lookup(newpath);
         if (dst && dst != f->node) {
             if (!hdr[0] || dst->is_dir || dst->readonly) return STATUS_OBJECT_NAME_COLLISION;
@@ -345,8 +353,12 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         uint8_t del;
         if (!f->node || copy_from_user(p, &del, buf, 1)) return STATUS_ACCESS_VIOLATION;
         if (f->node->readonly) return STATUS_ACCESS_DENIED;
-        if (del && f->node->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;                /* no delete on disk volumes */
-        if (del && f->node->is_dir && f->node->child) return STATUS_DIRECTORY_NOT_EMPTY;
+        if (del && f->node->backing == FSB_DISK && !(f->node->vol && f->node->vol->remove))
+            return STATUS_NOT_SUPPORTED;                                                     /* volume cannot delete */
+        if (del && f->node->is_dir) {
+            fs_populate(f->node);                            /* disk directories: know the children first */
+            if (f->node->child) return STATUS_DIRECTORY_NOT_EMPTY;
+        }
         f->node->delete_pending = del != 0;
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;

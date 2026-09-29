@@ -48,6 +48,11 @@ struct fsvol {
     fsnode_t *(*create)(fsvol_t *v, fsnode_t *dir, const char *name, int is_dir);                 /* NULL on failure */
     int (*flush)(fsvol_t *v);                                                                      /* device cache to media */
     void *priv;
+    /* optional (NULL: not supported on this volume): delete a file / empty directory; rename or move within the
+     * volume (replace: an existing file of that name may be overwritten). 0, -1, -2 as above, -3 name exists or
+     * directory not empty. */
+    int (*remove)(fsvol_t *v, fsnode_t *n);
+    int (*rename)(fsvol_t *v, fsnode_t *n, fsnode_t *newdir, const char *newname, int replace);
 };
 
 typedef struct {
@@ -86,7 +91,8 @@ int fs_read(fsnode_t *n, uint64_t off, void *buf, uint64_t len, uint64_t *done);
 int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len);
 int fs_truncate(fsnode_t *n, uint64_t size);
 int fs_flush(fsnode_t *n);                                           /* disk nodes: device write cache to media */
-void fs_remove(fsnode_t *n);
+void fs_remove(fsnode_t *n);                                         /* disk nodes: through vol->remove when present */
+int fs_rename(fsnode_t *n, const char *newpath, int replace);        /* disk nodes with vol->rename; 0 / -1 / -3 exists */
 fsnode_t *fs_root(void);
 uint64_t fs_total_bytes(void);
 /* Mounted volumes: `root` becomes "<letter>:\". 'C' is the RAM root and cannot be replaced. 0 = ok. */

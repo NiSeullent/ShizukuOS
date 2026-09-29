@@ -73,6 +73,7 @@ static uint32_t dx_limit_for(sfs_fs *fs, uint32_t cl) { return (fs->bs - cl - (f
 
 static uint32_t dx_csum(sfs_fs *fs, sfs_inode *dir, const uint8_t *blk, uint32_t cl)
 {
+    (void)fs;
     static const uint8_t zero4[4] = {0, 0, 0, 0};
     uint32_t limit = rd16(blk, cl), count = rd16(blk, cl + 2);
     uint32_t c = sfs_crc32c(dir->csum_seed, blk, cl + count * DXE_SIZE);

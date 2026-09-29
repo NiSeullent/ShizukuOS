@@ -367,10 +367,17 @@ static int sb_write_direct(sfs_fs *fs)
 }
 
 /* ---- transactions ---- */
+static int set_mounted_state(sfs_fs *fs, int dirty);
+
 int sfs_op_begin(sfs_fs *fs)
 {
     if (fs->dead) return SFS_EIO;
     if (fs->ro) return SFS_EROFS;
+    if (!fs->mounted_dirty) {
+        /* the last sfs_sync() left the volume clean (SFS_MOUNT_CLEAN_ON_SYNC): mark it in use again first */
+        int rc = set_mounted_state(fs, 1);
+        if (rc) return rc;
+    }
     fs->in_op++;
     fs->op_mods = fs->mods;
     return 0;
@@ -752,13 +759,15 @@ int sfs_mount(const sfs_ops *ops, unsigned flags, sfs_fs **out)
     if (!fs->ro) {
         uint64_t now = sfs_now(fs);
         uint8_t *s = fs->sbraw;
-        if (fs->jnl.present) fs->feat_incompat |= INCOMPAT_RECOVER;
-        else wr16(s, SB_state, (uint16_t)(rd16(s, SB_state) & ~SB_STATE_VALID));
         wr16(s, SB_mnt_count, (uint16_t)(rd16(s, SB_mnt_count) + 1));
         if (now) { wr32(s, SB_mtime, (uint32_t)now); s[SB_mtime_hi] = (uint8_t)(now >> 32); }
-        rc = sb_write_direct(fs);
-        if (rc) goto fail;
-        fs->mounted_dirty = 1;
+        if ((fs->mflags & SFS_MOUNT_CLEAN_ON_SYNC) && !fs->last_orphan) {
+            /* stays clean on disk until the first update (sfs_op_begin marks it) */
+            fs->mounted_dirty = 0;
+        } else {
+            rc = set_mounted_state(fs, 1);
+            if (rc) goto fail;
+        }
         if (fs->last_orphan) {
             rc = sfs_orphan_cleanup(fs);
             if (rc) goto fail;
@@ -771,6 +780,25 @@ fail:
     return rc;
 }
 
+/* In use: needs_recovery set (journal) or VALID_FS cleared (no journal); clean: the opposite, journal empty. */
+static int set_mounted_state(sfs_fs *fs, int dirty)
+{
+    uint8_t *s = fs->sbraw;
+    int rc = 0;
+    if (!dirty && fs->jnl.present) rc = sfs_journal_mark_clean(fs);
+    if (rc) return rc;
+    if (fs->jnl.present) {
+        if (dirty) fs->feat_incompat |= INCOMPAT_RECOVER;
+        else fs->feat_incompat &= ~INCOMPAT_RECOVER;
+    } else {
+        uint16_t st = rd16(s, SB_state);
+        wr16(s, SB_state, (uint16_t)(dirty ? st & ~SB_STATE_VALID : st | SB_STATE_VALID));
+    }
+    rc = sb_write_direct(fs);
+    if (!rc) fs->mounted_dirty = dirty;
+    return rc;
+}
+
 int sfs_sync(sfs_fs *fs)
 {
     int rc;
@@ -778,7 +806,7 @@ int sfs_sync(sfs_fs *fs)
     if (fs->ro) return 0;
     rc = sfs_commit(fs);
     if (!rc) rc = sfs_dev_flush(fs);
-    if (!rc && (fs->mflags & SFS_MOUNT_CLEAN_ON_SYNC) && fs->jnl.present) rc = sfs_journal_mark_clean(fs);
+    if (!rc && (fs->mflags & SFS_MOUNT_CLEAN_ON_SYNC) && fs->mounted_dirty) rc = set_mounted_state(fs, 0);
     return rc;
 }
 
@@ -790,13 +818,10 @@ int sfs_unmount(sfs_fs *fs)
         uint8_t *s = fs->sbraw;
         uint32_t i;
         for (i = 0; i < PA_MAX; ++i) fs->pa->w[i].len = 0;
+        (void)s;
         rc = sfs_commit(fs);
         if (!rc && fs->jnl.present) rc = sfs_journal_mark_clean(fs);
-        if (!rc && fs->mounted_dirty) {
-            fs->feat_incompat &= ~INCOMPAT_RECOVER;
-            if (!fs->jnl.present) wr16(s, SB_state, (uint16_t)(rd16(s, SB_state) | SB_STATE_VALID));
-            rc = sb_write_direct(fs);
-        }
+        if (!rc && fs->mounted_dirty) rc = set_mounted_state(fs, 0);
     }
     fs_release(fs);
     return rc;

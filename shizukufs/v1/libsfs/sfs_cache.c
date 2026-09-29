@@ -216,6 +216,7 @@ int sfs_bdirty_meta(sfs_fs *fs, sfs_buf *b)
 
 void sfs_bdirty_data(sfs_fs *fs, sfs_buf *b)
 {
+    (void)fs;
     b->flags = (b->flags & ~B_NEW) | B_DIRTY;
 }
 
