@@ -11,15 +11,13 @@
  *    (`-device virtio-vga-gl -display egl-headless`), which requires a DRM render node (see docs/shizukudos10/GPU.md).
  * The library is loaded with dlopen so the build needs no -dev package; if it is missing the test exits 77 (not run).
  *
- * Expected image, computed here from the documented Gallium semantics (not read back from anything): row 0 of the
- * render target is the top row; the viewport maps NDC (x, y) to window (x+1)*W/2, (y+1)*H/2; a pixel is covered when
- * its centre (i+0.5, j+0.5) is inside the triangle. Pixels whose centre lies within 1/64 pixel of an edge are not
- * compared (sub-pixel snapping of the rasteriser decides those); every other pixel must match exactly: the clear
- * colour outside, a covered pixel inside whose colour is the barycentric blend of the three vertex colours (+-2/255).
+ * Expected image: shz_virgl_check_triangle() computes it from the geometry with the documented Gallium semantics (row 0
+ * of the render target is the top row, viewport (x+1)*W/2, (y+1)*H/2, pixel-centre coverage), never from a renderer:
+ * clear colour outside, barycentric blend of the vertex colours (+-2/255) inside, pixels within 1/64 px of an edge not
+ * compared. T_GPU_3D.EXE uses the same checker on what it reads back through the guest.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,9 +55,6 @@ static void log_cb(enum virgl_log_level_flags level, const char *msg, void *user
 }
 static void write_fence(void *cookie, uint32_t fence) { (void)cookie; (void)fence; }
 
-/* edge function of (a, b) at p: > 0 when p is left of a->b in a y-down frame */
-static double edge(const double *a, const double *b, double px, double py) { return (b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0]); }
-
 int main(void)
 {
     static const float clear[4] = { 0.2f, 0.4f, 0.6f, 1.0f };
@@ -76,8 +71,7 @@ int main(void)
     struct virgl_caps_v2 *caps;
     shz_virgl_cs_t cs;
     void *lib = dlopen("libvirglrenderer.so.1", RTLD_NOW);
-    int r, x, y, covered = 0, ambiguous = 0, inside_ok = 0, outside_ok = 0;
-    double v[3][2], area;
+    int r;
     if (!lib) {
         printf("NOT RUN: libvirglrenderer.so.1 is not installed (%s)\n", dlerror());
         return 77;
@@ -144,47 +138,32 @@ int main(void)
     r = vr.transfer_read_iov(1, 1, 0, W * 4, 0, &box, 0, NULL, 0);
     CHECK(r == 0, "transfer_read_iov -> %d", r);
 
-    for (i = 0; i < 3; ++i) {
-        v[i][0] = ((double)verts[i * 8] + 1.0) * W / 2;
-        v[i][1] = ((double)verts[i * 8 + 1] + 1.0) * H / 2;
-    }
-    area = edge(v[0], v[1], v[2][0], v[2][1]);
-    for (y = 0; y < H; ++y)
-        for (x = 0; x < W; ++x) {
-            const double px = x + 0.5, py = y + 0.5;
-            double e[3], l[3];
-            const uint32_t got = pix[y * W + x];
-            const unsigned gb = got & 0xff, gg = (got >> 8) & 0xff, gr = (got >> 16) & 0xff;
-            int in, near = 0, k;
-            e[0] = edge(v[1], v[2], px, py) / area;          /* barycentric weight of v0 */
-            e[1] = edge(v[2], v[0], px, py) / area;
-            e[2] = edge(v[0], v[1], px, py) / area;
-            for (k = 0; k < 3; ++k) {
-                const double *a = v[(k + 1) % 3], *b = v[(k + 2) % 3];
-                const double len = sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]));
-                l[k] = e[k] * fabs(area) / len;              /* signed distance in pixels to the opposite edge */
-                if (fabs(l[k]) < 1.0 / 64) near = 1;
-            }
-            in = e[0] > 0 && e[1] > 0 && e[2] > 0;
-            if (near) { ++ambiguous; continue; }
-            if (in) {
-                const double wr = 255 * e[0], wg = 255 * e[1], wb = 255 * e[2];
-                ++covered;
-                if (fabs(gr - wr) <= 2.0 && fabs(gg - wg) <= 2.0 && fabs(gb - wb) <= 2.0 && got >> 24 == 0xff) ++inside_ok;
-                else if (covered - inside_ok <= 3)
-                    printf("  inside (%d,%d): got %08x, want ~ r %.1f g %.1f b %.1f\n", x, y, got, wr, wg, wb);
-            } else {
-                if (got == 0xff336699u) ++outside_ok;           /* A=1.0 R=0.2 G=0.4 B=0.6 as B8G8R8A8 bytes */
-                else if ((y * W + x - covered - outside_ok) < 3)
-                    printf("  outside (%d,%d): got %08x, want ff336699\n", x, y, got);
-            }
+    {
+        shz_virgl_tri_check_t t;
+        shz_virgl_check_triangle(pix, W, H, clear, verts, &t);
+        printf("  %d covered pixels (%d with the interpolated colour), %d outside (%d with the clear colour), %d on an edge "
+               "(not compared)\n", t.covered, t.inside_ok, t.outside, t.outside_ok, t.edge);
+        CHECK(t.covered > 500 && t.inside_ok == t.covered, "triangle interior: %d of %d pixels right", t.inside_ok, t.covered);
+        CHECK(t.outside > 500 && t.outside_ok == t.outside, "clear colour outside the triangle: %d of %d", t.outside_ok, t.outside);
+        CHECK(t.edge < 64, "%d pixel centres within 1/64 px of an edge", t.edge);
+        /* the checker itself must notice damage: one wrong pixel inside and one outside */
+        for (i = 0; i < (uint32_t)W * H; ++i) {
+            shz_virgl_tri_check_t u;
+            if (pix[i] == 0xff336699u) continue;
+            pix[i] ^= 0x00404040u;
+            shz_virgl_check_triangle(pix, W, H, clear, verts, &u);
+            pix[i] ^= 0x00404040u;
+            CHECK(u.inside_ok == t.inside_ok - 1 || u.edge != t.edge, "checker missed a corrupted covered pixel");
+            break;
         }
-    printf("  %d covered pixels (%d with the interpolated colour), %d outside (%d with the clear colour), %d on an edge "
-           "(not compared)\n", covered, inside_ok, W * H - covered - ambiguous, outside_ok, ambiguous);
-    CHECK(covered > 500 && inside_ok == covered, "triangle interior: %d of %d pixels right", inside_ok, covered);
-    CHECK(outside_ok == W * H - covered - ambiguous, "clear colour outside the triangle: %d of %d", outside_ok,
-          W * H - covered - ambiguous);
-    CHECK(ambiguous < 64, "%d pixel centres within 1/64 px of an edge", ambiguous);
+        pix[0] ^= 1;
+        {
+            shz_virgl_tri_check_t u;
+            shz_virgl_check_triangle(pix, W, H, clear, verts, &u);
+            CHECK(u.outside_ok == t.outside_ok - 1, "checker missed a corrupted clear pixel");
+        }
+        pix[0] ^= 1;
+    }
     /* a corrupted packet must be refused by the decoder (and not crash it) */
     {
         uint32_t bad[3] = { shz_virgl_hdr(SHZ_VIRGL_CCMD_DRAW_VBO, 0, 2), 0, 3 };   /* DRAW_VBO with 2 instead of 12 dwords */

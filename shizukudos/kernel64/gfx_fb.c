@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Kernel64 display driver: Bochs VBE ("BGA", PCI 1234:1111) as provided by QEMU `-machine pc -vga std`.
+ * Kernel64 display: mode, back buffer and backend selection. Backends: the paravirtual virtio-gpu (gfx_virtio.c, QEMU
+ * `-device virtio-vga`) when present, else Bochs VBE ("BGA", PCI 1234:1111) as provided by QEMU `-machine pc -vga std`.
  *
  * Scope and honesty notes
  *  - ONLY the SHZ_STANDALONE profile (QEMU TCG/KVM booted by the standalone stub) has a display device. Under the
@@ -7,10 +8,12 @@
  *    gfx_fb_init() returns STATUS_NO_SUCH_DEVICE without touching any port and the whole GUI stack stays inert.
  *  - Initialisation is lazy: the first GUI system call probes the PCI bus, programs the mode and allocates the back
  *    buffer. (kmain is not touched; a machine without the device simply never pays for any of this.)
- *  - Mode: 1024x768, 32 bits per pixel, linear framebuffer = PCI BAR 0. A pixel is a little-endian dword 0x00RRGGBB
- *    (blue in the lowest byte), which is what the BGA scans out at 32 bpp.
- *  - The framebuffer is mapped uncached (mmio_map has no write-combining); every drawing operation goes to a normal
- *    RAM back buffer and only changed rectangles are copied out by gfx_fb_present().
+ *  - Mode: 1024x768, 32 bits per pixel. A pixel is a little-endian dword 0x00RRGGBB (blue in the lowest byte), which is
+ *    what the BGA scans out at 32 bpp and what virtio-gpu calls B8G8R8X8_UNORM.
+ *  - Every drawing operation goes to a normal RAM back buffer and only changed rectangles are made visible by
+ *    gfx_fb_present(): the BGA backend copies them into its uncached linear framebuffer (mmio_map has no write-combining);
+ *    the virtio-gpu backend uses the back buffer itself as the guest backing of the host-side scanout resource and sends
+ *    TRANSFER_TO_HOST_2D + RESOURCE_FLUSH for the rectangle.
  *  - The single font is the public-domain 8x8 IBM VGA lineage font (supervisor/src/font8x8_basic.h, ASCII 0..127),
  *    each row doubled to form an 8x16 cell. Nothing else exists: no other sizes, no bold/italic, no non-ASCII.
  */
@@ -112,10 +115,68 @@ uint64_t gfx_pages_in_use(void)
     return n;
 }
 
-/* ---------------------------------------------------------------- BGA programming */
+/* ---------------------------------------------------------------- Bochs VBE backend */
 #ifdef SHZ_STANDALONE
 static void bga_write(uint16_t idx, uint16_t v) { k_outw(BGA_PORT_INDEX, idx); k_outw(BGA_PORT_DATA, v); }
 static uint16_t bga_read(uint16_t idx) { k_outw(BGA_PORT_INDEX, idx); return k_inw(BGA_PORT_DATA); }
+
+static int bga_probe(gfx_fb_t *fb)
+{
+    pci_dev_t dev;
+    uint64_t bar_size = 0, bar;
+    int is_io = 0;
+    uint32_t w, h;
+    if (pci_find(0x1234, 0x1111, &dev) || dev.class_code != 0x03) return -1;
+    bar = pci_bar(&dev, 0, &bar_size, &is_io);
+    if (!bar || is_io || bar_size < (uint64_t)fb->pitch * fb->height) {
+        kprintf("K64 gfx: BGA BAR0 unusable (base %llx size %llx io %d)\n", bar, bar_size, is_io);
+        return -1;
+    }
+    pci_enable(&dev, 1, 1, 0);
+    bga_write(BGA_INDEX_ID, 0xb0c5);
+    fb->bga_version = bga_read(BGA_INDEX_ID);
+    if (fb->bga_version < 0xb0c2) {                     /* 0xB0C2 is the first revision with a 32 bpp linear framebuffer */
+        kprintf("K64 gfx: BGA revision %x too old\n", fb->bga_version);
+        return -1;
+    }
+    bga_write(BGA_INDEX_ENABLE, 0);
+    bga_write(BGA_INDEX_XRES, (uint16_t)fb->width);
+    bga_write(BGA_INDEX_YRES, (uint16_t)fb->height);
+    bga_write(BGA_INDEX_BPP, 32);
+    bga_write(BGA_INDEX_ENABLE, BGA_ENABLED | BGA_LFB_ENABLED);
+    w = bga_read(BGA_INDEX_XRES);
+    h = bga_read(BGA_INDEX_YRES);
+    if (w != fb->width || h != fb->height || bga_read(BGA_INDEX_BPP) != 32 || !(bga_read(BGA_INDEX_ENABLE) & BGA_LFB_ENABLED)) {
+        kprintf("K64 gfx: BGA refused %ux%ux32 (got %ux%u bpp %u)\n", fb->width, fb->height, w, h, bga_read(BGA_INDEX_BPP));
+        return -1;
+    }
+    fb->lfb_pa = bar;
+    fb->lfb = mmio_map(bar, (uint64_t)fb->pitch * h);
+    if (!fb->lfb) {
+        kprintf("K64 gfx: cannot map the BGA framebuffer\n");
+        return -1;
+    }
+    kprintf("K64 gfx: BGA %x %ux%ux32 LFB %llx (%llu KiB)\n", fb->bga_version, w, h, bar, bar_size >> 10);
+    return 0;
+}
+
+static void bga_present(int x, int y, int w, int h)
+{
+    int row;
+    for (row = y; row < y + h; ++row) {
+        const uint32_t *src = g_fb.back + (uint64_t)row * g_fb.width + x;
+        volatile uint32_t *dst = g_fb.lfb + (uint64_t)row * g_fb.width + x;
+        uint64_t n = (uint64_t)w;
+        __asm__ volatile("rep movsl" : "+D"(dst), "+S"(src), "+c"(n) :: "memory");
+    }
+}
+
+static const gfx_backend_t gfx_backend_bga = { "Bochs VBE", SHZ_GPU_BACKEND_BGA, bga_probe, bga_present };
+
+/* THE backend hook: display drivers in the order they are tried. The paravirtual virtio-gpu (gfx_virtio.c) comes first;
+ * it only exists when QEMU runs with -device virtio-vga / virtio-gpu-pci, and then there is no BGA (the VGA-compatible
+ * part of virtio-vga has a different PCI id). Anything else falls back to the Bochs VBE linear framebuffer. */
+static const gfx_backend_t *const gfx_backends[] = { &gfx_backend_virtio, &gfx_backend_bga };
 
 static kmutex_t init_lock;
 static int init_state;                                  /* 0 not tried, 1 ready, -1 failed */
@@ -125,10 +186,8 @@ static int32_t init_status = STATUS_NO_SUCH_DEVICE;
 int gfx_fb_init(void)
 {
 #ifdef SHZ_STANDALONE
-    pci_dev_t dev;
-    uint64_t bar_size = 0, bar;
-    int is_io = 0;
-    uint32_t w, h;
+    unsigned i;
+    uint64_t bytes;
     mutex_lock(&init_lock);
     if (init_state) {
         mutex_unlock(&init_lock);
@@ -136,57 +195,31 @@ int gfx_fb_init(void)
     }
     init_state = -1;
     init_status = STATUS_NO_SUCH_DEVICE;
-    if (pci_find(0x1234, 0x1111, &dev) || dev.class_code != 0x03) {
-        kprintf("K64 gfx: no Bochs VBE display (PCI 1234:1111); GUI subsystem inactive\n");
-        goto out;
-    }
-    bar = pci_bar(&dev, 0, &bar_size, &is_io);
-    if (!bar || is_io || bar_size < (uint64_t)GFX_WIDTH * GFX_HEIGHT * 4) {
-        kprintf("K64 gfx: BGA BAR0 unusable (base %llx size %llx io %d)\n", bar, bar_size, is_io);
-        goto out;
-    }
-    pci_enable(&dev, 1, 1, 0);
-    bga_write(BGA_INDEX_ID, 0xb0c5);
-    g_fb.bga_version = bga_read(BGA_INDEX_ID);
-    if (g_fb.bga_version < 0xb0c2) {                    /* 0xB0C2 is the first revision with a 32 bpp linear framebuffer */
-        kprintf("K64 gfx: BGA revision %x too old\n", g_fb.bga_version);
-        goto out;
-    }
-    bga_write(BGA_INDEX_ENABLE, 0);
-    bga_write(BGA_INDEX_XRES, GFX_WIDTH);
-    bga_write(BGA_INDEX_YRES, GFX_HEIGHT);
-    bga_write(BGA_INDEX_BPP, 32);
-    bga_write(BGA_INDEX_ENABLE, BGA_ENABLED | BGA_LFB_ENABLED);
-    w = bga_read(BGA_INDEX_XRES);
-    h = bga_read(BGA_INDEX_YRES);
-    if (w != GFX_WIDTH || h != GFX_HEIGHT || bga_read(BGA_INDEX_BPP) != 32 ||
-        !(bga_read(BGA_INDEX_ENABLE) & BGA_LFB_ENABLED)) {
-        kprintf("K64 gfx: BGA refused %ux%ux32 (got %ux%u bpp %u)\n", GFX_WIDTH, GFX_HEIGHT, w, h, bga_read(BGA_INDEX_BPP));
-        goto out;
-    }
-    g_fb.width = w;
-    g_fb.height = h;
+    g_fb.width = GFX_WIDTH;
+    g_fb.height = GFX_HEIGHT;
     g_fb.bpp = 32;
-    g_fb.pitch = w * 4;
-    g_fb.lfb_pa = bar;
-    g_fb.lfb = mmio_map(bar, (uint64_t)g_fb.pitch * h);
-    g_fb.back = gfx_pages_alloc((uint64_t)g_fb.pitch * h);
-    if (!g_fb.lfb || !g_fb.back) {
-        kprintf("K64 gfx: cannot map the framebuffer or allocate the back buffer\n");
-        if (g_fb.back) gfx_pages_free(g_fb.back, (uint64_t)g_fb.pitch * h);
-        g_fb.back = 0;
+    g_fb.pitch = GFX_WIDTH * 4;
+    bytes = (uint64_t)g_fb.pitch * g_fb.height;
+    g_fb.back = gfx_pages_alloc(bytes);
+    if (!g_fb.back) {
+        kprintf("K64 gfx: cannot allocate the back buffer\n");
         init_status = STATUS_NO_MEMORY;
         goto out;
     }
-    {
-        uint32_t i;
-        for (i = 0; i < w * h; ++i) g_fb.back[i] = SHZ_DESKTOP_RGB;
+    for (i = 0; i < g_fb.width * g_fb.height; ++i) g_fb.back[i] = SHZ_DESKTOP_RGB;
+    for (i = 0; i < sizeof gfx_backends / sizeof gfx_backends[0] && !g_fb.backend; ++i)
+        if (gfx_backends[i]->probe(&g_fb) == 0) g_fb.backend = gfx_backends[i];
+    if (!g_fb.backend) {
+        kprintf("K64 gfx: no display device (virtio-gpu 1af4:1050 or Bochs VBE 1234:1111); GUI subsystem inactive\n");
+        gfx_pages_free(g_fb.back, bytes);
+        g_fb.back = 0;
+        goto out;
     }
     g_fb.ready = 1;
     init_state = 1;
-    kprintf("K64 gfx: BGA %x %ux%ux32 LFB %llx (%llu KiB), back buffer %llu KiB\n", g_fb.bga_version, w, h, bar,
-            bar_size >> 10, (uint64_t)g_fb.pitch * h >> 10);
-    gfx_fb_present(0, 0, (int)w, (int)h);
+    kprintf("K64 gfx: display backend %s, %ux%ux32, back buffer %llu KiB\n", g_fb.backend->name, g_fb.width, g_fb.height,
+            bytes >> 10);
+    gfx_fb_present(0, 0, (int)g_fb.width, (int)g_fb.height);
 out:
     mutex_unlock(&init_lock);
     return init_state > 0 ? 0 : init_status;
@@ -197,19 +230,15 @@ out:
 
 void gfx_fb_present(int x, int y, int w, int h)
 {
-    int row;
     if (!g_fb.ready) return;
     if (x < 0) { w += x; x = 0; }
     if (y < 0) { h += y; y = 0; }
     if (x + w > (int)g_fb.width) w = (int)g_fb.width - x;
     if (y + h > (int)g_fb.height) h = (int)g_fb.height - y;
     if (w <= 0 || h <= 0) return;
-    for (row = y; row < y + h; ++row) {
-        const uint32_t *src = g_fb.back + (uint64_t)row * g_fb.width + x;
-        volatile uint32_t *dst = g_fb.lfb + (uint64_t)row * g_fb.width + x;
-        uint64_t n = (uint64_t)w;
-        __asm__ volatile("rep movsl" : "+D"(dst), "+S"(src), "+c"(n) :: "memory");
-    }
+    ++g_fb.stat_presents;
+    g_fb.stat_present_pixels += (uint64_t)w * (uint64_t)h;
+    g_fb.backend->present(x, y, w, h);
 }
 
 /* Kernel-drawn test pattern: what the host-side check expects, computed independently there.
@@ -274,7 +303,7 @@ int32_t gfx_syscall_display(process_t *cur, uint64_t out, uint64_t op)
     else if (op != SHZ_DISP_QUERY) return STATUS_INVALID_PARAMETER;
     memset(&info, 0, sizeof info);
     info.size = sizeof info;
-    info.flags = 1;
+    info.flags = 1u | (g_fb.backend && g_fb.backend->id == SHZ_GPU_BACKEND_VIRTIO ? SHZ_DISP_FLAG_PARAVIRT : 0u);
     info.width = g_fb.width;
     info.height = g_fb.height;
     info.bpp = g_fb.bpp;

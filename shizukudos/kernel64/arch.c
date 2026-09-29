@@ -35,6 +35,7 @@ static void (*irq_handlers[256])(struct regs *);
 /* Device interrupt handlers (standalone profile: legacy PIC vectors 0x20..0x2f). The handler runs with interrupts off in
  * the interrupted thread's context; the PIC EOI is sent after it returns, so it must not schedule away. */
 void irq_register(unsigned vector, void (*handler)(struct regs *)) { if (vector < 256) irq_handlers[vector] = handler; }
+irq_handler_t irq_handler_get(unsigned vector) { return vector < 256 ? irq_handlers[vector] : 0; }
 
 void tss_set_rsp0(uint64_t rsp0) { tss.rsp[0] = rsp0; }
 uint64_t arch_timer_irqs(void) { return timer_irqs; }

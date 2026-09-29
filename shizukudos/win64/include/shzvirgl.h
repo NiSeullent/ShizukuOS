@@ -348,4 +348,66 @@ static inline void shz_virgl_encode_triangle(shz_virgl_cs_t *cs, uint32_t rt_res
     shz_virgl_clear(cs, SHZ_PIPE_CLEAR_COLOR0, clear_rgba, 1.0, 0);
     shz_virgl_draw_arrays(cs, SHZ_PIPE_PRIM_TRIANGLES, 0, 3);
 }
+
+/* Checks a read-back image of the reference scene against the geometry, computed independently of any renderer:
+ * pixels are w*h dwords 0xAARRGGBB (B8G8R8A8 bytes), row 0 = top (Gallium). Window position of a vertex is
+ * ((x+1)*w/2, (y+1)*h/2) (the viewport above); a pixel is covered when its centre (i+.5, j+.5) is strictly inside the
+ * triangle. Pixels whose centre is within 1/64 pixel of an edge are counted in `edge` and not compared (the rasteriser's
+ * sub-pixel snapping decides those). Covered pixels must carry the barycentric blend of the vertex colours (+-2/255,
+ * alpha 255); the others the clear colour exactly. */
+typedef struct { int covered, inside_ok, outside, outside_ok, edge; } shz_virgl_tri_check_t;
+
+static inline double shz_virgl_edge(const double *a, const double *b, double px, double py)
+{
+    return (b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0]);
+}
+
+static inline uint32_t shz_virgl_unorm8(float c) { return c <= 0.0f ? 0u : c >= 1.0f ? 255u : (uint32_t)(c * 255.0f + 0.5f); }
+
+static inline void shz_virgl_check_triangle(const uint32_t *pix, uint32_t w, uint32_t h, const float clear[4],
+                                            const float verts[24], shz_virgl_tri_check_t *r)
+{
+    const uint32_t want_clear = shz_virgl_unorm8(clear[3]) << 24 | shz_virgl_unorm8(clear[0]) << 16 |
+                                shz_virgl_unorm8(clear[1]) << 8 | shz_virgl_unorm8(clear[2]);
+    double v[3][2], area, len2[3];
+    uint32_t x, y;
+    int k;
+    r->covered = r->inside_ok = r->outside = r->outside_ok = r->edge = 0;
+    for (k = 0; k < 3; ++k) {
+        v[k][0] = ((double)verts[k * 8] + 1.0) * w / 2;
+        v[k][1] = ((double)verts[k * 8 + 1] + 1.0) * h / 2;
+    }
+    area = shz_virgl_edge(v[0], v[1], v[2][0], v[2][1]);
+    for (k = 0; k < 3; ++k) {
+        const double *a = v[(k + 1) % 3], *b = v[(k + 2) % 3];
+        len2[k] = (b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]);
+    }
+    for (y = 0; y < h; ++y)
+        for (x = 0; x < w; ++x) {
+            const double px = x + 0.5, py = y + 0.5;
+            const uint32_t got = pix[y * w + x];
+            double e[3];
+            int on_edge = 0;
+            e[0] = shz_virgl_edge(v[1], v[2], px, py) / area;      /* barycentric weight of vertex 0 */
+            e[1] = shz_virgl_edge(v[2], v[0], px, py) / area;
+            e[2] = shz_virgl_edge(v[0], v[1], px, py) / area;
+            for (k = 0; k < 3; ++k)                                /* distance e*|area|/len < 1/64, squared */
+                if (e[k] * e[k] * area * area * 4096.0 < len2[k]) on_edge = 1;
+            if (on_edge) { ++r->edge; continue; }
+            if (e[0] > 0 && e[1] > 0 && e[2] > 0) {
+                double want[3], d;
+                int c, ok = (got >> 24) == 0xff;
+                ++r->covered;
+                for (c = 0; c < 3; ++c)                            /* r, g, b of the vertex colours at [4..6] */
+                    want[c] = 255.0 * (e[0] * verts[4 + c] + e[1] * verts[12 + c] + e[2] * verts[20 + c]);
+                d = (double)((got >> 16) & 0xff) - want[0]; if (d > 2.0 || d < -2.0) ok = 0;
+                d = (double)((got >> 8) & 0xff) - want[1]; if (d > 2.0 || d < -2.0) ok = 0;
+                d = (double)(got & 0xff) - want[2]; if (d > 2.0 || d < -2.0) ok = 0;
+                r->inside_ok += ok;
+            } else {
+                ++r->outside;
+                r->outside_ok += got == want_clear;
+            }
+        }
+}
 #endif

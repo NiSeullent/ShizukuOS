@@ -80,10 +80,14 @@ int virtio_pci_negotiate(virtio_dev_t *d, uint64_t wanted);
  * and enables it. NULL when the queue does not exist or memory is exhausted. Call between negotiate and driver_ok. */
 virtq_t *virtio_pci_queue_setup(virtio_dev_t *d, unsigned index, unsigned max_size);
 void virtio_pci_driver_ok(virtio_dev_t *d);
+/* Writes device_status = 0: the device stops using every ring and buffer it was given (the queues' memory is not freed). */
+void virtio_pci_reset(virtio_dev_t *d);
 /* Writes the queue index to its notification address; call when virtq_kick_prepare() returned 1. */
 void virtio_pci_notify(virtio_dev_t *d, const virtq_t *q);
 /* Legacy INTx through the PIC: `cb` runs in interrupt context (interrupts off; no sleeping, no mutexes) with the ISR
- * status bits (bit 0 queue, bit 1 configuration change) after the line has been deasserted. */
+ * status bits (bit 0 queue, bit 1 configuration change) after the line has been deasserted. Returns -1 (the caller must
+ * poll the used ring instead) when the function has no usable line or the line's vector already belongs to a non-virtio
+ * driver: vectors carry a single handler, so taking a shared line would silence the other device. */
 int virtio_pci_irq_enable(virtio_dev_t *d, void (*cb)(void *arg, uint8_t isr_status), void *arg);
 uint8_t virtio_pci_status(const virtio_dev_t *d);
 uint32_t virtio_pci_cfg_read32(const virtio_dev_t *d, unsigned off);

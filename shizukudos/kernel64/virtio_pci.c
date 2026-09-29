@@ -8,6 +8,7 @@ int virtio_pci_find(uint32_t virtio_id, virtio_dev_t *d) { (void)virtio_id; (voi
 int virtio_pci_negotiate(virtio_dev_t *d, uint64_t wanted) { (void)d; (void)wanted; return -1; }
 virtq_t *virtio_pci_queue_setup(virtio_dev_t *d, unsigned index, unsigned max_size) { (void)d; (void)index; (void)max_size; return 0; }
 void virtio_pci_driver_ok(virtio_dev_t *d) { (void)d; }
+void virtio_pci_reset(virtio_dev_t *d) { (void)d; }
 void virtio_pci_notify(virtio_dev_t *d, const virtq_t *q) { (void)d; (void)q; }
 int virtio_pci_irq_enable(virtio_dev_t *d, void (*cb)(void *, uint8_t), void *arg) { (void)d; (void)cb; (void)arg; return -1; }
 uint8_t virtio_pci_status(const virtio_dev_t *d) { (void)d; return 0; }
@@ -194,6 +195,15 @@ virtq_t *virtio_pci_queue_setup(virtio_dev_t *d, unsigned index, unsigned max_si
 
 void virtio_pci_driver_ok(virtio_dev_t *d) { set_status(d, VIRTIO_STATUS_DRIVER_OK); }
 
+void virtio_pci_reset(virtio_dev_t *d)
+{
+    unsigned spin;
+    if (!d->common) return;
+    wr8(d->common, C_DEVICE_STATUS, 0);
+    for (spin = 0; spin < 1000000 && rd8(d->common, C_DEVICE_STATUS) != 0; ++spin)
+        ;
+}
+
 void virtio_pci_notify(virtio_dev_t *d, const virtq_t *q)
 {
     uint32_t off;
@@ -233,10 +243,16 @@ int virtio_pci_irq_enable(virtio_dev_t *d, void (*cb)(void *, uint8_t), void *ar
     for (i = 0; i < 4 && irq_devs[i] && irq_devs[i] != d; ++i)
         ;
     if (i == 4) return -1;
+    d->irq_vector = standalone_irq_vector(d->irq_line);
+    if (irq_handler_get(d->irq_vector) && irq_handler_get(d->irq_vector) != virtio_isr) {
+        /* One handler per vector and no chaining: the line belongs to another driver (e.g. the NIC). Taking it would
+         * silence that device, so this one stays without interrupts and its driver polls. */
+        kprintf("K64 virtio: IRQ %u already has a non-virtio handler; completions will be polled\n", d->irq_line);
+        return -1;
+    }
     d->irq_cb = cb;
     d->irq_arg = arg;
     irq_devs[i] = d;
-    d->irq_vector = standalone_irq_vector(d->irq_line);
     irq_register(d->irq_vector, virtio_isr);                              /* several virtio functions may share the line */
     standalone_irq_unmask(d->irq_line);
     return 0;
