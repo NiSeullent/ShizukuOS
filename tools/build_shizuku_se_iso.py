@@ -314,6 +314,17 @@ BUILD_STEPS = (
     [sys.executable, "shizukudos/tools/shz.py", "build", "--profile", "uefi-multikernel"],
 )
 MIB = 1024 * 1024
+# Third-party code whose binaries are on the media (FreeDOS in the DOS16 image, CSMWrap + SeaBIOS, syslinux). Only
+# these get licences and corresponding source on the ISO; other manifest upstreams (e.g. the driver corpus) are not
+# shipped and not required to be fetched.
+MEDIA_UPSTREAMS = ("freedos-kernel", "freedos-freecom", "csmwrap", "syslinux")
+
+
+def media_upstreams(manifest: dict) -> dict:
+    missing = [name for name in MEDIA_UPSTREAMS if name not in manifest["upstreams"]]
+    if missing:
+        raise RuntimeError(f"upstream/manifest.json lacks {missing}, which the media ship")
+    return {name: manifest["upstreams"][name] for name in MEDIA_UPSTREAMS}
 
 
 def build_shizukudos10(reuse: bool) -> dict[str, Path]:
@@ -541,7 +552,7 @@ def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], 
         "",
         "External (third-party) programs on this disc:",
     ]
-    for name, spec in manifest["upstreams"].items():
+    for name, spec in media_upstreams(manifest).items():
         lines += [
             f"  {name}: {spec['ref']}, commit {spec['commit']}",
             f"    licence {spec['license']}, {spec['repository']}",
@@ -617,7 +628,7 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[s
     ).encode("ascii")
     # Licence texts, patches, pinned upstream sources and the Shizuku source.
     tar_names: dict[str, str] = {}
-    for name, spec in manifest["upstreams"].items():
+    for name, spec in media_upstreams(manifest).items():
         if spec.get("kind") == "debian-binary-packages":
             payload.update(se_media.syslinux_payload(SHZ10_DIR) if name == "syslinux" else {})
             if name != "syslinux":

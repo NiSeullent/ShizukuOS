@@ -522,6 +522,7 @@ def run_install_row(args, firmware: str, medium: str, image: Path, run_dir: Path
         fh.truncate(INSTALL_TARGET_MIB << 20)
     setup = ctx["setup"][medium]
     medium_kind = "cd" if medium == "iso-cd" else "hd"
+    medium_before = shzlib.sha256_file(image)
     try:
         # A. install: blank disk on AHCI port 0, the medium on port 1 (boot device)
         def press_install(serial, proc):
@@ -541,6 +542,8 @@ def run_install_row(args, firmware: str, medium: str, image: Path, run_dir: Path
                                 run_dir / "1-install", press_install, args.install_timeout)
         text = clean(raw)
         record["phases"]["install"] = {"command": cmd, "qemu_exit_code": rc, "seconds": round(time.time() - started, 1)}
+        checks += [dict(c, check=f"install boot path: {c['check']}") for c in boot_path_checks(firmware, medium, "install",
+                                                                                              text, cmd)]
         m = re.search(r"K64 setup: SHZSETUP\.EXE exit=(-?\d+) faulted=(\d+)", text)
         tgt = re.search(r"target: \[\d+\] (\S+), (\d+) MiB", text)
         checks += [
@@ -554,7 +557,8 @@ def run_install_row(args, firmware: str, medium: str, image: Path, run_dir: Path
                   m.group(0) if m else "no exit line"),
             check("install: shutdown requested, VM powered off with SHZ-EXIT:0",
                   "power request shutdown" in text and bool(re.search(r"(?m)^SHZ-EXIT:0$", text)), f"qemu rc {rc}"),
-            check("install: the medium was not written (read-only CD / snapshot disk)", True),
+            check("install: the medium was not written (sha256 before == after the install boot)",
+                  shzlib.sha256_file(image) == medium_before, medium_before[:16]),
         ]
         # B. host verification of the written disk against the payload this medium ships
         rep = verify_disk.verify(target, setup["directory"], want_win98=False)
