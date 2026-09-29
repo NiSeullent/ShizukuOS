@@ -30,6 +30,13 @@ With --matrix the full app x DLL x function matrix is written; with --summary-di
 prints the N highest-ranked unresolved functions (rank: apps importing at load time, images importing at load time,
 then the same for delay-load).
 
+--startup-chain EXE (repeatable) runs tools/startup_chain.py on one executable (or DLL) and folds its result in: the
+images the loader maps eagerly, the load-time imports that would fail per image and, distinct across the chain, per
+DLL; plus what the static walk cannot catch (load-time imports by ordinal into a Shizuku DLL, whose numbering is not
+pinned) and, per chain image, the system DLLs it delay-loads with their Shizuku coverage (the wall after the load).
+Written to <summary-dir>/startup_chain.json; the union over all chains, ranked by the number of chains that need
+each function, is the milestone-1 work list.
+
 This measures loader-level coverage only. It says nothing about whether the functions behave correctly, and it is
 not a claim that any of these applications runs.
 """
@@ -38,7 +45,9 @@ import collections
 import fnmatch
 import json
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
@@ -47,7 +56,9 @@ except ImportError:
     raise SystemExit("pip install pefile")
 
 REPO = Path(__file__).resolve().parents[3]
+CHAIN_TOOL = Path(__file__).resolve().parent / "startup_chain.py"
 SCHEMA_VERSION = "shz.import-coverage.v2"
+CHAIN_SCHEMA_VERSION = "shz.startup-chain-summary.v1"
 IMAGE_EXTS = (".exe", ".dll", ".node", ".cpl", ".drv", ".ocx")
 LARGE_IMAGE = 64 << 20                                      # SizeOfImage above this is flagged (Kernel64 copies every page)
 DEFAULT_ORDINAL_REF = Path("/usr/lib/x86_64-linux-gnu/wine/x86_64-windows")
@@ -504,6 +515,121 @@ def print_app(app, summary, ours, top):
     print()
 
 
+def run_startup_chain(exe, build):
+    """startup_chain.py's JSON report for one executable and its exit status (0: every load-time import resolves)."""
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "chain.json"
+        p = subprocess.run([sys.executable, str(CHAIN_TOOL), str(exe), "--build", str(build), "--json", str(out)],
+                           capture_output=True, text=True)
+        if not out.exists():
+            raise SystemExit(f"startup_chain.py failed on {exe}: {(p.stderr or p.stdout).strip()}")
+        return json.loads(out.read_text()), p.returncode
+
+
+def chain_reason(why):
+    """startup_chain.py's failure text -> the import_coverage status vocabulary."""
+    if why.startswith("not exported"):
+        return "fn-missing"
+    return {"DLL not found": "dll-missing", "api set contract not mapped": "apiset-unmapped"}.get(why, why)
+
+
+def startup_chain_summary(exe, build, api_schema, ours, ordinal_ref):
+    rep, rc = run_startup_chain(exe, build)
+    appdir = {c.name.lower(): c for c in exe.parent.iterdir()}
+
+    def where(name):                                        # the order startup_chain.py (and its docstring) uses
+        n = name.lower()
+        if n in appdir:
+            return appdir[n], "app"
+        return (build / n, "system") if (build / n).exists() else (None, None)
+
+    images, distinct = {}, collections.defaultdict(lambda: {"reason": None, "functions": set(), "images": set()})
+    ordinal_hazards, delay_walls, fn_images = [], {}, collections.defaultdict(set)
+    for name, r in rep["images"].items():
+        path, loc = where(name)
+        per_dll = collections.Counter()
+        for key, fns in r["by_dll"].items():
+            dll, _, why = key.partition(" [")
+            why = why.rstrip("]")
+            d = distinct[dll]
+            d["reason"] = chain_reason(why)
+            d["functions"].update(fns)
+            d["images"].add(name)
+            per_dll[dll] += len(fns)
+            for fn in fns:
+                fn_images[(dll, fn)].add(name)
+        images[name] = {"from": loc, "load_time_imports": r["load_time_imports"], "delay_imports": r["delay_imports"],
+                        "missing": r["missing"], "missing_by_dll": dict(per_dll.most_common())}
+        if loc != "app" or path is None:                    # Shizuku's own DLLs: their imports are in the chain report
+            continue
+        imps, _ = scan(path)
+        wall = collections.defaultdict(lambda: {"functions": 0, "provided": 0, "have_dll": False, "kind": "dll"})
+        for dll, fn, ordinal, delayed in imps or []:
+            provider, kind = resolve(dll, api_schema)
+            target = (provider or dll).lower()
+            if target in appdir:
+                continue                                    # shipped with the application
+            if not delayed:
+                if ordinal is not None and target in ours:
+                    ordinal_hazards.append({"image": name, "dll": target, "ordinal": ordinal,
+                                            "windows_name": ordinal_ref.name(target, ordinal),
+                                            "binds_to_in_shizuku": ours[target]["by_ordinal"].get(ordinal)})
+                continue
+            key = provider or contract_prefix(dll)
+            w = wall[key]
+            w["functions"] += 1
+            w["have_dll"] = key in ours
+            w["kind"] = "apiset-unmapped" if kind == "apiset-unmapped" else "dll"
+            w["provided"] += ordinal is None and key in ours and fn in ours[key]["names"]
+        delay_walls[name] = dict(sorted(wall.items(), key=lambda kv: -kv[1]["functions"]))
+    total = sum(r["load_time_imports"] for r in rep["images"].values())
+    failing = sum(r["missing"] for r in rep["images"].values())
+    return {
+        "exe": exe.name, "path": str(exe), "loads": rc == 0 and not ordinal_hazards, "chain": rep["chain"],
+        "load_time_imports": total, "failing_imports": failing,
+        "failing_pct": round(100.0 * failing / max(total, 1), 1),
+        "distinct_missing": sum(len(d["functions"]) for d in distinct.values()),
+        "missing_by_dll": {k: {"reason": d["reason"], "count": len(d["functions"]), "images": sorted(d["images"]),
+                               "functions": sorted(d["functions"])}
+                           for k, d in sorted(distinct.items(), key=lambda kv: -len(kv[1]["functions"]))},
+        "ordinal_hazards": ordinal_hazards,
+        "images": images,
+        "delay_loaded_system_dlls": delay_walls,
+        "fn_images": fn_images,                             # (dll, fn) -> chain images; internal, not written
+    }
+
+
+def chain_worklist(chains):
+    """Union of every chain's failing (dll, function), ranked by chains needing it, then chain images importing it."""
+    agg = {}
+    for c in chains:
+        for dll, d in c["missing_by_dll"].items():
+            for fn in d["functions"]:
+                a = agg.setdefault((dll, fn), {"dll": dll, "fn": fn, "reason": d["reason"], "chains": [], "images": set()})
+                a["chains"].append(c["exe"])
+                a["images"].update(c["fn_images"][(dll, fn)])
+    rows = sorted(agg.values(), key=lambda a: (-len(a["chains"]), -len(a["images"]), a["dll"], a["fn"]))
+    for i, a in enumerate(rows, 1):
+        a["rank"], a["images"] = i, len(a["images"])
+    return rows
+
+
+def print_chains(chains, worklist, top):
+    for c in chains:
+        print(f"== startup chain of {c['exe']}: {' -> '.join(c['chain'])}")
+        print(f"   load-time imports {c['load_time_imports']}, failing {c['failing_imports']} ({c['failing_pct']:.1f}%), "
+              f"distinct (DLL, function) failing {c['distinct_missing']}; ordinal hazards {len(c['ordinal_hazards'])}; "
+              f"{'LOADS' if c['loads'] else 'does not load'}")
+        for dll, d in c["missing_by_dll"].items():
+            print(f"   {d['count']:5}  {dll} [{d['reason']}]")
+        for name, wall in c["delay_loaded_system_dlls"].items():
+            if wall:
+                print(f"   delay-loaded by {name}: " + ", ".join(
+                    f"{k} {w['provided']}/{w['functions']}{'' if w['have_dll'] else ' (absent)'}" for k, w in list(wall.items())[:top]))
+    print(f"\nstartup-chain work list (union of {len(chains)} chains): {len(worklist)} distinct (DLL, function); "
+          f"needed by every chain: {sum(1 for a in worklist if len(a['chains']) == len(chains))}\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("apps", nargs="+", metavar="APP",
@@ -518,6 +644,8 @@ def main():
                     help="skip images whose relative path or file name matches (repeatable)")
     ap.add_argument("--ordinal-ref", type=Path, default=DEFAULT_ORDINAL_REF if DEFAULT_ORDINAL_REF.is_dir() else None,
                     help="directory of reference PE DLLs used to name ordinal imports (default: Wine's PE build, if installed)")
+    ap.add_argument("--startup-chain", action="append", default=[], type=Path, metavar="EXE",
+                    help="also run startup_chain.py on this executable (repeatable); written to <summary-dir>/startup_chain.json")
     args = ap.parse_args()
 
     api_schema = schema()
@@ -549,6 +677,18 @@ def main():
     meta = {"schema": SCHEMA_VERSION, "build": str(args.build), "shizuku_dlls": {k: len(v["names"]) for k, v in ours.items()},
             "apiset_schema": api_schema, "ordinal_ref": str(ordinal_ref.dir) if ordinal_ref.dir else None,
             "excludes": args.exclude}
+    chains = [startup_chain_summary(exe, args.build, api_schema, ours, ordinal_ref) for exe in args.startup_chain]
+    worklist = chain_worklist(chains)
+    if chains:
+        print_chains(chains, worklist, args.top)
+    for c in chains:
+        c.pop("fn_images")
+    if chains and args.summary_dir:
+        args.summary_dir.mkdir(parents=True, exist_ok=True)
+        (args.summary_dir / "startup_chain.json").write_text(json.dumps(
+            {"schema": CHAIN_SCHEMA_VERSION, "tool": "shizukudos/win64/tools/startup_chain.py", "build": str(args.build),
+             "shizuku_dlls": meta["shizuku_dlls"], "chains": {c["exe"]: c for c in chains},
+             "worklist_distinct": len(worklist), "worklist": worklist}, indent=1) + "\n")
     if args.summary_dir:
         args.summary_dir.mkdir(parents=True, exist_ok=True)
         for name, s in summaries.items():

@@ -6,14 +6,16 @@
 "bcrypt.dll": 11,
 "bcryptprimitives.dll": 1,
 "combase.dll": 17,
+"gdi32.dll": 107,
 "kernel32.dll": 221,
 "modtest.dll": 2,
-"ntdll.dll": 256,
+"ntdll.dll": 300,
 "ole32.dll": 23,
 "oleaut32.dll": 38,
 "rpcrt4.dll": 12,
 "shell32.dll": 7,
 "shlwapi.dll": 44,
+"user32.dll": 129,
 "version.dll": 3,
 "winmm.dll": 7,
 "ws2_32.dll": 57
@@ -41,6 +43,18 @@
 "api-ms-win-security-base-l1": "advapi32.dll",
 "api-ms-win-security-sddl-l1": "advapi32.dll",
 "api-ms-win-eventing-provider-l1": "advapi32.dll",
+"ext-ms-win-ntuser-window-l1": "user32.dll",
+"ext-ms-win-ntuser-message-l1": "user32.dll",
+"ext-ms-win-ntuser-windowclass-l1": "user32.dll",
+"ext-ms-win-ntuser-rectangle-ext-l1": "user32.dll",
+"ext-ms-win-ntuser-sysparams-ext-l1": "user32.dll",
+"ext-ms-win-gdi-dc-l1": "gdi32.dll",
+"ext-ms-win-gdi-dc-create-l1": "gdi32.dll",
+"ext-ms-win-gdi-draw-l1": "gdi32.dll",
+"ext-ms-win-gdi-font-l1": "gdi32.dll",
+"ext-ms-win-gdi-devcaps-l1": "gdi32.dll",
+"ext-ms-win-gdi-object-l1": "gdi32.dll",
+"ext-ms-win-gdi-render-l1": "gdi32.dll",
 "api-ms-win-core-com-l1": "ole32.dll",
 "api-ms-win-core-winrt-l1": "combase.dll",
 "api-ms-win-core-winrt-string-l1": "combase.dll",
@@ -112,7 +126,7 @@
 ]
 },
 "chromium": {
-"root": "/tmp/claude-0/-home-user-Win98-Modern/31f1e8e6-646b-5a42-ab0f-36694df325e9/scratchpad/chromium/chrome-win",
+"root": "/tmp/claude-0/-home-user-Win98-Modern/31f1e8e6-646b-5a42-ab0f-36694df325e9/scratchpad/chromium-full/chrome-win",
 "images": [
 "D3DCompiler_47.dll",
 "chrome.dll",
@@ -20602,10 +20616,10 @@
 }
 },
 "user32.dll": {
-"have_dll": false,
+"have_dll": true,
 "functions": {
 "UnregisterClassA": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [
@@ -20633,7 +20647,7 @@
 }
 },
 "AddClipboardFormatListener": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20656,7 +20670,7 @@
 }
 },
 "AdjustWindowRectEx": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -20681,7 +20695,7 @@
 }
 },
 "AllowSetForegroundWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -20713,7 +20727,7 @@
 }
 },
 "BeginPaint": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -20739,7 +20753,7 @@
 }
 },
 "BringWindowToTop": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -20762,7 +20776,7 @@
 }
 },
 "CallNextHookEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20789,7 +20803,7 @@
 }
 },
 "ChangeWindowMessageFilterEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20806,7 +20820,7 @@
 }
 },
 "CharUpperA": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20823,7 +20837,7 @@
 }
 },
 "CharUpperW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -20849,7 +20863,7 @@
 }
 },
 "ClientToScreen": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -20875,7 +20889,7 @@
 }
 },
 "ClipCursor": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20898,7 +20912,7 @@
 }
 },
 "CloseClipboard": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20923,7 +20937,7 @@
 }
 },
 "CloseDesktop": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20947,7 +20961,7 @@
 }
 },
 "CloseTouchInputHandle": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20970,7 +20984,7 @@
 }
 },
 "CloseWindowStation": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -20994,7 +21008,7 @@
 }
 },
 "CopyIcon": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21011,7 +21025,7 @@
 }
 },
 "CreateDesktopW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21035,7 +21049,7 @@
 }
 },
 "CreateIconIndirect": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21058,7 +21072,7 @@
 }
 },
 "CreateWindowExA": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21081,7 +21095,7 @@
 }
 },
 "CreateWindowExW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21112,7 +21126,7 @@
 }
 },
 "CreateWindowStationW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21136,7 +21150,7 @@
 }
 },
 "DefRawInputProc": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21159,7 +21173,7 @@
 }
 },
 "DefWindowProcW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21190,7 +21204,7 @@
 }
 },
 "DestroyIcon": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21215,7 +21229,7 @@
 }
 },
 "DestroyWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21246,7 +21260,7 @@
 }
 },
 "DispatchMessageW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21275,7 +21289,7 @@
 }
 },
 "DisplayConfigGetDeviceInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21298,7 +21312,7 @@
 }
 },
 "DrawEdge": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21321,7 +21335,7 @@
 }
 },
 "DrawFocusRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21344,7 +21358,7 @@
 }
 },
 "DrawFrameControl": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21367,7 +21381,7 @@
 }
 },
 "DrawIconEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21390,7 +21404,7 @@
 }
 },
 "EmptyClipboard": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21415,7 +21429,7 @@
 }
 },
 "EnableMenuItem": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21440,7 +21454,7 @@
 }
 },
 "EnableWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21463,7 +21477,7 @@
 }
 },
 "EndPaint": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21489,7 +21503,7 @@
 }
 },
 "EnumChildWindows": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21512,7 +21526,7 @@
 }
 },
 "EnumClipboardFormats": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21535,7 +21549,7 @@
 }
 },
 "EnumDisplayDevicesW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21558,7 +21572,7 @@
 }
 },
 "EnumDisplayMonitors": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21581,7 +21595,7 @@
 }
 },
 "EnumDisplaySettingsExW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21604,7 +21618,7 @@
 }
 },
 "EnumDisplaySettingsW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21627,7 +21641,7 @@
 }
 },
 "EnumThreadWindows": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21650,7 +21664,7 @@
 }
 },
 "EnumWindows": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21673,7 +21687,7 @@
 }
 },
 "EqualRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21696,7 +21710,7 @@
 }
 },
 "FillRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21722,7 +21736,7 @@
 }
 },
 "FindWindowExW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21746,7 +21760,7 @@
 }
 },
 "FindWindowW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21769,7 +21783,7 @@
 }
 },
 "FlashWindowEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21792,7 +21806,7 @@
 }
 },
 "FrameRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21815,7 +21829,7 @@
 }
 },
 "GetActiveWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21843,7 +21857,7 @@
 }
 },
 "GetAncestor": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21868,7 +21882,7 @@
 }
 },
 "GetAsyncKeyState": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21891,7 +21905,7 @@
 }
 },
 "GetCapture": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21914,7 +21928,7 @@
 }
 },
 "GetCaretBlinkTime": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -21939,7 +21953,7 @@
 }
 },
 "GetClassInfoExW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21964,7 +21978,7 @@
 }
 },
 "GetClassInfoW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -21987,7 +22001,7 @@
 }
 },
 "GetClassLongPtrW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22010,7 +22024,7 @@
 }
 },
 "GetClassNameW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22035,7 +22049,7 @@
 }
 },
 "GetClientRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [
@@ -22067,7 +22081,7 @@
 }
 },
 "GetClipboardData": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22092,7 +22106,7 @@
 }
 },
 "GetClipboardFormatNameW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22115,7 +22129,7 @@
 }
 },
 "GetClipboardSequenceNumber": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22138,7 +22152,7 @@
 }
 },
 "GetCursorInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22161,7 +22175,7 @@
 }
 },
 "GetCursorPos": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22186,7 +22200,7 @@
 }
 },
 "GetDC": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [
@@ -22218,7 +22232,7 @@
 }
 },
 "GetDesktopWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22244,7 +22258,7 @@
 }
 },
 "GetDisplayConfigBufferSizes": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22267,7 +22281,7 @@
 }
 },
 "GetDoubleClickTime": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22292,7 +22306,7 @@
 }
 },
 "GetFocus": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22317,7 +22331,7 @@
 }
 },
 "GetForegroundWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22344,7 +22358,7 @@
 }
 },
 "GetGuiResources": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22367,7 +22381,7 @@
 }
 },
 "GetIconInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22392,7 +22406,7 @@
 }
 },
 "GetKeyState": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22417,7 +22431,7 @@
 }
 },
 "GetKeyboardLayout": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22443,7 +22457,7 @@
 }
 },
 "GetKeyboardLayoutList": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22466,7 +22480,7 @@
 }
 },
 "GetKeyboardLayoutNameW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22489,7 +22503,7 @@
 }
 },
 "GetKeyboardState": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22514,7 +22528,7 @@
 }
 },
 "GetLastInputInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22537,7 +22551,7 @@
 }
 },
 "GetLayeredWindowAttributes": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22560,7 +22574,7 @@
 }
 },
 "GetMenuItemInfoW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22583,7 +22597,7 @@
 }
 },
 "GetMessageExtraInfo": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22606,7 +22620,7 @@
 }
 },
 "GetMessagePos": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22629,7 +22643,7 @@
 }
 },
 "GetMessageTime": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22652,7 +22666,7 @@
 }
 },
 "GetMessageW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22680,7 +22694,7 @@
 }
 },
 "GetMonitorInfoA": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22703,7 +22717,7 @@
 }
 },
 "GetMonitorInfoW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22728,7 +22742,7 @@
 }
 },
 "GetParent": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22753,7 +22767,7 @@
 }
 },
 "GetPointerDevice": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22776,7 +22790,7 @@
 }
 },
 "GetPointerDevices": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22799,7 +22813,7 @@
 }
 },
 "GetPointerPenInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22822,7 +22836,7 @@
 }
 },
 "GetPointerType": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22845,7 +22859,7 @@
 }
 },
 "GetProcessWindowStation": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22871,7 +22885,7 @@
 }
 },
 "GetPropW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22894,7 +22908,7 @@
 }
 },
 "GetQueueStatus": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -22920,7 +22934,7 @@
 }
 },
 "GetRawInputData": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22943,7 +22957,7 @@
 }
 },
 "GetRawInputDeviceInfoW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22966,7 +22980,7 @@
 }
 },
 "GetRawInputDeviceList": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -22989,7 +23003,7 @@
 }
 },
 "GetSysColor": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23015,7 +23029,7 @@
 }
 },
 "GetSysColorBrush": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23038,7 +23052,7 @@
 }
 },
 "GetSystemMenu": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23063,7 +23077,7 @@
 }
 },
 "GetSystemMetrics": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23088,7 +23102,7 @@
 }
 },
 "GetThreadDesktop": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23112,7 +23126,7 @@
 }
 },
 "GetUserObjectInformationW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23138,7 +23152,7 @@
 }
 },
 "GetWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23163,7 +23177,7 @@
 }
 },
 "GetWindowDC": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23186,7 +23200,7 @@
 }
 },
 "GetWindowLongPtrW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23216,7 +23230,7 @@
 }
 },
 "GetWindowLongW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23242,7 +23256,7 @@
 }
 },
 "GetWindowPlacement": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23265,7 +23279,7 @@
 }
 },
 "GetWindowRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23291,7 +23305,7 @@
 }
 },
 "GetWindowRgn": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23314,7 +23328,7 @@
 }
 },
 "GetWindowTextLengthW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23339,7 +23353,7 @@
 }
 },
 "GetWindowTextW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23364,7 +23378,7 @@
 }
 },
 "GetWindowThreadProcessId": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23395,7 +23409,7 @@
 }
 },
 "InflateRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23418,7 +23432,7 @@
 }
 },
 "IntersectRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23441,7 +23455,7 @@
 }
 },
 "InvalidateRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23467,7 +23481,7 @@
 }
 },
 "InvertRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23492,7 +23506,7 @@
 }
 },
 "IsChild": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23517,7 +23531,7 @@
 }
 },
 "IsClipboardFormatAvailable": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23540,7 +23554,7 @@
 }
 },
 "IsIconic": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23566,7 +23580,7 @@
 }
 },
 "IsRectEmpty": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23589,7 +23603,7 @@
 }
 },
 "IsWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [
@@ -23623,7 +23637,7 @@
 }
 },
 "IsWindowArranged": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23646,7 +23660,7 @@
 }
 },
 "IsWindowEnabled": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23669,7 +23683,7 @@
 }
 },
 "IsWindowVisible": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23694,7 +23708,7 @@
 }
 },
 "IsZoomed": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23719,7 +23733,7 @@
 }
 },
 "KillTimer": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23747,7 +23761,7 @@
 }
 },
 "LoadCursorW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23774,7 +23788,7 @@
 }
 },
 "LoadIconW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23801,7 +23815,7 @@
 }
 },
 "LoadImageW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23826,7 +23840,7 @@
 }
 },
 "LoadStringW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23849,7 +23863,7 @@
 }
 },
 "MapVirtualKeyExW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23874,7 +23888,7 @@
 }
 },
 "MapVirtualKeyW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23900,7 +23914,7 @@
 }
 },
 "MapWindowPoints": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23925,7 +23939,7 @@
 }
 },
 "MessageBeep": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23948,7 +23962,7 @@
 }
 },
 "MessageBoxW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -23975,7 +23989,7 @@
 }
 },
 "MonitorFromPoint": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -23998,7 +24012,7 @@
 }
 },
 "MonitorFromRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24023,7 +24037,7 @@
 }
 },
 "MonitorFromWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24051,7 +24065,7 @@
 }
 },
 "MsgWaitForMultipleObjectsEx": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24077,7 +24091,7 @@
 }
 },
 "NotifyWinEvent": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24102,7 +24116,7 @@
 }
 },
 "OffsetRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24127,7 +24141,7 @@
 }
 },
 "OpenClipboard": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24152,7 +24166,7 @@
 }
 },
 "OpenInputDesktop": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24175,7 +24189,7 @@
 }
 },
 "PeekMessageW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24201,7 +24215,7 @@
 }
 },
 "PostMessageW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24231,7 +24245,7 @@
 }
 },
 "PostQuitMessage": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24257,7 +24271,7 @@
 }
 },
 "PostThreadMessageW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24282,7 +24296,7 @@
 }
 },
 "PrintWindow": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24305,7 +24319,7 @@
 }
 },
 "PtInRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24328,7 +24342,7 @@
 }
 },
 "QueryDisplayConfig": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24351,7 +24365,7 @@
 }
 },
 "RedrawWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24376,7 +24390,7 @@
 }
 },
 "RegisterClassExW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24405,7 +24419,7 @@
 }
 },
 "RegisterClassW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24435,7 +24449,7 @@
 }
 },
 "RegisterClipboardFormatW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24460,7 +24474,7 @@
 }
 },
 "RegisterDeviceNotificationW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24483,7 +24497,7 @@
 }
 },
 "RegisterHotKey": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24506,7 +24520,7 @@
 }
 },
 "RegisterPointerDeviceNotifications": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24529,7 +24543,7 @@
 }
 },
 "RegisterPowerSettingNotification": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24552,7 +24566,7 @@
 }
 },
 "RegisterRawInputDevices": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24575,7 +24589,7 @@
 }
 },
 "RegisterSuspendResumeNotification": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24598,7 +24612,7 @@
 }
 },
 "RegisterWindowMessageW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24623,7 +24637,7 @@
 }
 },
 "ReleaseCapture": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24649,7 +24663,7 @@
 }
 },
 "ReleaseDC": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [
@@ -24681,7 +24695,7 @@
 }
 },
 "RemoveClipboardFormatListener": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24704,7 +24718,7 @@
 }
 },
 "RemovePropW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24727,7 +24741,7 @@
 }
 },
 "ScreenToClient": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24753,7 +24767,7 @@
 }
 },
 "SendInput": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24778,7 +24792,7 @@
 }
 },
 "SendMessageTimeoutW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24804,7 +24818,7 @@
 }
 },
 "SendMessageW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24832,7 +24846,7 @@
 }
 },
 "SetCapture": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24858,7 +24872,7 @@
 }
 },
 "SetClassLongPtrW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24875,7 +24889,7 @@
 }
 },
 "SetClipboardData": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24900,7 +24914,7 @@
 }
 },
 "SetCursor": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24923,7 +24937,7 @@
 }
 },
 "SetCursorPos": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -24946,7 +24960,7 @@
 }
 },
 "SetFocus": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24972,7 +24986,7 @@
 }
 },
 "SetForegroundWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -24997,7 +25011,7 @@
 }
 },
 "SetKeyboardState": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25020,7 +25034,7 @@
 }
 },
 "SetLayeredWindowAttributes": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25039,7 +25053,7 @@
 }
 },
 "SetMenuDefaultItem": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25062,7 +25076,7 @@
 }
 },
 "SetParent": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25085,7 +25099,7 @@
 }
 },
 "SetProcessDPIAware": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25108,7 +25122,7 @@
 }
 },
 "SetProcessWindowStation": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25132,7 +25146,7 @@
 }
 },
 "SetPropW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25155,7 +25169,7 @@
 }
 },
 "SetRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25178,7 +25192,7 @@
 }
 },
 "SetRectEmpty": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25195,7 +25209,7 @@
 }
 },
 "SetThreadDesktop": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25218,7 +25232,7 @@
 }
 },
 "SetTimer": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25246,7 +25260,7 @@
 }
 },
 "SetWinEventHook": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25269,7 +25283,7 @@
 }
 },
 "SetWindowDisplayAffinity": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25292,7 +25306,7 @@
 }
 },
 "SetWindowLongPtrW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25322,7 +25336,7 @@
 }
 },
 "SetWindowLongW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25348,7 +25362,7 @@
 }
 },
 "SetWindowPlacement": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25371,7 +25385,7 @@
 }
 },
 "SetWindowPos": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25397,7 +25411,7 @@
 }
 },
 "SetWindowRgn": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25420,7 +25434,7 @@
 }
 },
 "SetWindowTextW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25446,7 +25460,7 @@
 }
 },
 "SetWindowsHookExW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25474,7 +25488,7 @@
 }
 },
 "ShowCursor": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25497,7 +25511,7 @@
 }
 },
 "ShowWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25522,7 +25536,7 @@
 }
 },
 "SystemParametersInfoW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25545,7 +25559,7 @@
 }
 },
 "ToUnicodeEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25570,7 +25584,7 @@
 }
 },
 "TrackMouseEvent": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25593,7 +25607,7 @@
 }
 },
 "TrackPopupMenu": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25616,7 +25630,7 @@
 }
 },
 "TranslateMessage": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25643,7 +25657,7 @@
 }
 },
 "UnhookWinEvent": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25666,7 +25680,7 @@
 }
 },
 "UnhookWindowsHookEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25694,7 +25708,7 @@
 }
 },
 "UnregisterClassW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25724,7 +25738,7 @@
 }
 },
 "UnregisterDeviceNotification": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25747,7 +25761,7 @@
 }
 },
 "UnregisterHotKey": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25770,7 +25784,7 @@
 }
 },
 "UnregisterPowerSettingNotification": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25793,7 +25807,7 @@
 }
 },
 "UnregisterSuspendResumeNotification": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25816,7 +25830,7 @@
 }
 },
 "UpdateLayeredWindow": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25839,7 +25853,7 @@
 }
 },
 "WindowFromDC": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -25862,7 +25876,7 @@
 }
 },
 "WindowFromPoint": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -25885,7 +25899,7 @@
 }
 },
 "CharNextW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [],
@@ -25896,7 +25910,7 @@
 }
 },
 "GetWindowDisplayAffinity": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [],
@@ -25913,7 +25927,7 @@
 }
 },
 "DestroyAcceleratorTable": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -25924,7 +25938,7 @@
 }
 },
 "CreateAcceleratorTableW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -25935,7 +25949,7 @@
 }
 },
 "GetDlgItem": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -25946,7 +25960,7 @@
 }
 },
 "MoveWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -25965,7 +25979,7 @@
 }
 },
 "CallWindowProcW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -25976,7 +25990,7 @@
 }
 },
 "InvalidateRgn": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -25987,7 +26001,7 @@
 }
 },
 "DialogBoxParamW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -25999,7 +26013,7 @@
 }
 },
 "EndDialog": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26011,7 +26025,7 @@
 }
 },
 "IsProcessDPIAware": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26022,7 +26036,7 @@
 }
 },
 "ActivateKeyboardLayout": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26033,7 +26047,7 @@
 }
 },
 "GetKeyboardLayoutNameA": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26044,7 +26058,7 @@
 }
 },
 "ToUnicode": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26055,7 +26069,7 @@
 }
 },
 "LoadKeyboardLayoutW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26066,7 +26080,7 @@
 }
 },
 "ScrollDC": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26077,7 +26091,7 @@
 }
 },
 "ScrollWindowEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26088,7 +26102,7 @@
 }
 },
 "CopyImage": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26099,7 +26113,7 @@
 }
 },
 "VkKeyScanW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26110,7 +26124,7 @@
 }
 },
 "CheckRadioButton": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26121,7 +26135,7 @@
 }
 },
 "CheckDlgButton": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26132,7 +26146,7 @@
 }
 },
 "SetDlgItemTextW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26143,7 +26157,7 @@
 }
 },
 "SendDlgItemMessageW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26154,7 +26168,7 @@
 }
 },
 "GetDlgItemTextW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26165,7 +26179,7 @@
 }
 },
 "IsDlgButtonChecked": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26176,7 +26190,7 @@
 }
 },
 "EnableScrollBar": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26187,7 +26201,7 @@
 }
 },
 "SetScrollInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26198,7 +26212,7 @@
 }
 },
 "GetDpiForWindow": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26209,7 +26223,7 @@
 }
 },
 "TrackPopupMenuEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26220,7 +26234,7 @@
 }
 },
 "SendNotifyMessageW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26231,7 +26245,7 @@
 }
 },
 "LoadMenuW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26242,7 +26256,7 @@
 }
 },
 "AppendMenuW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26253,7 +26267,7 @@
 }
 },
 "SetMenuItemInfoW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26270,7 +26284,7 @@
 }
 },
 "GetWindowInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26281,7 +26295,7 @@
 }
 },
 "IsWinEventHookInstalled": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26292,7 +26306,7 @@
 }
 },
 "ShowWindowAsync": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26303,7 +26317,7 @@
 }
 },
 "SetActiveWindow": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -26314,7 +26328,7 @@
 }
 },
 "PrivateExtractIconsW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -26325,7 +26339,7 @@
 }
 },
 "CharToOemBuffW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26336,7 +26350,7 @@
 }
 },
 "CreatePopupMenu": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26347,7 +26361,7 @@
 }
 },
 "DdeClientTransaction": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26358,7 +26372,7 @@
 }
 },
 "DdeConnect": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26369,7 +26383,7 @@
 }
 },
 "DdeCreateStringHandleW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26380,7 +26394,7 @@
 }
 },
 "DdeDisconnect": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26391,7 +26405,7 @@
 }
 },
 "DdeFreeStringHandle": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26402,7 +26416,7 @@
 }
 },
 "DdeGetLastError": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26413,7 +26427,7 @@
 }
 },
 "DdeInitializeW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26424,7 +26438,7 @@
 }
 },
 "DdeUninitialize": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26435,7 +26449,7 @@
 }
 },
 "DestroyMenu": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26446,7 +26460,7 @@
 }
 },
 "GetMenuInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26457,7 +26471,7 @@
 }
 },
 "GetMenuItemCount": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26468,7 +26482,7 @@
 }
 },
 "GetShellWindow": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [
@@ -26481,7 +26495,7 @@
 }
 },
 "InsertMenuItemW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26492,7 +26506,7 @@
 }
 },
 "OemToCharA": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26503,7 +26517,7 @@
 }
 },
 "OemToCharBuffA": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -26514,7 +26528,7 @@
 }
 },
 "SetMenuInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "chromium": {
 "load": [],
@@ -33998,10 +34012,10 @@
 }
 },
 "gdi32.dll": {
-"have_dll": false,
+"have_dll": true,
 "functions": {
 "BeginPath": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34024,7 +34038,7 @@
 }
 },
 "BitBlt": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34050,7 +34064,7 @@
 }
 },
 "CancelDC": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34073,7 +34087,7 @@
 }
 },
 "ChoosePixelFormat": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34096,7 +34110,7 @@
 }
 },
 "CloseEnhMetaFile": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34119,7 +34133,7 @@
 }
 },
 "CloseFigure": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34142,7 +34156,7 @@
 }
 },
 "CombineRgn": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34165,7 +34179,7 @@
 }
 },
 "CreateBitmap": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34188,7 +34202,7 @@
 }
 },
 "CreateCompatibleBitmap": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34214,7 +34228,7 @@
 }
 },
 "CreateCompatibleDC": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34240,7 +34254,7 @@
 }
 },
 "CreateDCW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34263,7 +34277,7 @@
 }
 },
 "CreateDIBSection": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34286,7 +34300,7 @@
 }
 },
 "CreateEnhMetaFileW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34309,7 +34323,7 @@
 }
 },
 "CreateFontA": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34332,7 +34346,7 @@
 }
 },
 "CreateFontIndirectA": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34357,7 +34371,7 @@
 }
 },
 "CreateFontIndirectW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34382,7 +34396,7 @@
 }
 },
 "CreatePen": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34405,7 +34419,7 @@
 }
 },
 "CreateRectRgn": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34428,7 +34442,7 @@
 }
 },
 "CreateRectRgnIndirect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34451,7 +34465,7 @@
 }
 },
 "CreateSolidBrush": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34477,7 +34491,7 @@
 }
 },
 "DeleteDC": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34503,7 +34517,7 @@
 }
 },
 "DeleteEnhMetaFile": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34526,7 +34540,7 @@
 }
 },
 "DeleteObject": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34552,7 +34566,7 @@
 }
 },
 "DescribePixelFormat": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34575,7 +34589,7 @@
 }
 },
 "EndDoc": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34598,7 +34612,7 @@
 }
 },
 "EndPage": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34621,7 +34635,7 @@
 }
 },
 "EndPath": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34644,7 +34658,7 @@
 }
 },
 "EnumEnhMetaFile": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34667,7 +34681,7 @@
 }
 },
 "EnumFontFamiliesExA": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34690,7 +34704,7 @@
 }
 },
 "EnumFontFamiliesExW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34713,7 +34727,7 @@
 }
 },
 "EqualRgn": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34736,7 +34750,7 @@
 }
 },
 "ExtCreatePen": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34761,7 +34775,7 @@
 }
 },
 "ExtEscape": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34784,7 +34798,7 @@
 }
 },
 "FillPath": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34807,7 +34821,7 @@
 }
 },
 "GdiAlphaBlend": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34830,7 +34844,7 @@
 }
 },
 "GdiComment": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -34853,7 +34867,7 @@
 }
 },
 "GetCharWidthW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34876,7 +34890,7 @@
 }
 },
 "GetClipBox": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34899,7 +34913,7 @@
 }
 },
 "GetClipRgn": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34922,7 +34936,7 @@
 }
 },
 "GetCurrentObject": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34945,7 +34959,7 @@
 }
 },
 "GetDIBits": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34968,7 +34982,7 @@
 }
 },
 "GetDeviceCaps": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -34993,7 +35007,7 @@
 }
 },
 "GetEnhMetaFileBits": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35016,7 +35030,7 @@
 }
 },
 "GetEnhMetaFileHeader": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35039,7 +35053,7 @@
 }
 },
 "GetFontData": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35062,7 +35076,7 @@
 }
 },
 "GetICMProfileW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35085,7 +35099,7 @@
 }
 },
 "GetObjectType": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35108,7 +35122,7 @@
 }
 },
 "GetObjectW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35134,7 +35148,7 @@
 }
 },
 "GetOutlineTextMetricsW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35159,7 +35173,7 @@
 }
 },
 "GetPixelFormat": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35182,7 +35196,7 @@
 }
 },
 "GetRegionData": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35205,7 +35219,7 @@
 }
 },
 "GetRgnBox": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35228,7 +35242,7 @@
 }
 },
 "GetStockObject": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35254,7 +35268,7 @@
 }
 },
 "GetTextFaceA": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35277,7 +35291,7 @@
 }
 },
 "GetTextMetricsW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35302,7 +35316,7 @@
 }
 },
 "GetWorldTransform": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35325,7 +35339,7 @@
 }
 },
 "IntersectClipRect": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35350,7 +35364,7 @@
 }
 },
 "LineTo": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35375,7 +35389,7 @@
 }
 },
 "ModifyWorldTransform": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35400,7 +35414,7 @@
 }
 },
 "MoveToEx": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35425,7 +35439,7 @@
 }
 },
 "PlayEnhMetaFile": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35448,7 +35462,7 @@
 }
 },
 "PlayEnhMetaFileRecord": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35471,7 +35485,7 @@
 }
 },
 "PolyBezierTo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35494,7 +35508,7 @@
 }
 },
 "RestoreDC": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35517,7 +35531,7 @@
 }
 },
 "SaveDC": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35540,7 +35554,7 @@
 }
 },
 "SelectClipPath": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35563,7 +35577,7 @@
 }
 },
 "SelectClipRgn": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35588,7 +35602,7 @@
 }
 },
 "SelectObject": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35614,7 +35628,7 @@
 }
 },
 "SetAbortProc": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35637,7 +35651,7 @@
 }
 },
 "SetArcDirection": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35660,7 +35674,7 @@
 }
 },
 "SetBkColor": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35685,7 +35699,7 @@
 }
 },
 "SetBkMode": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35708,7 +35722,7 @@
 }
 },
 "SetBrushOrgEx": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35731,7 +35745,7 @@
 }
 },
 "SetDCBrushColor": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35756,7 +35770,7 @@
 }
 },
 "SetDCPenColor": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35779,7 +35793,7 @@
 }
 },
 "SetDIBits": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35802,7 +35816,7 @@
 }
 },
 "SetDIBitsToDevice": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35825,7 +35839,7 @@
 }
 },
 "SetEnhMetaFileBits": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35848,7 +35862,7 @@
 }
 },
 "SetGraphicsMode": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35873,7 +35887,7 @@
 }
 },
 "SetMiterLimit": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35896,7 +35910,7 @@
 }
 },
 "SetPixelFormat": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -35919,7 +35933,7 @@
 }
 },
 "SetPolyFillMode": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35942,7 +35956,7 @@
 }
 },
 "SetROP2": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35965,7 +35979,7 @@
 }
 },
 "SetRectRgn": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -35988,7 +36002,7 @@
 }
 },
 "SetStretchBltMode": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -36013,7 +36027,7 @@
 }
 },
 "SetTextColor": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -36038,7 +36052,7 @@
 }
 },
 "SetWorldTransform": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -36063,7 +36077,7 @@
 }
 },
 "StartDocW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -36086,7 +36100,7 @@
 }
 },
 "StartPage": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -36109,7 +36123,7 @@
 }
 },
 "StretchBlt": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [],
@@ -36132,7 +36146,7 @@
 }
 },
 "StretchDIBits": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "electron": {
 "load": [
@@ -36162,7 +36176,7 @@
 }
 },
 "StrokeAndFillPath": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -36185,7 +36199,7 @@
 }
 },
 "StrokePath": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -36208,7 +36222,7 @@
 }
 },
 "SwapBuffers": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -36231,7 +36245,7 @@
 }
 },
 "WidenPath": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "electron": {
 "load": [],
@@ -36254,7 +36268,7 @@
 }
 },
 "GetCharWidth32W": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -36265,7 +36279,7 @@
 }
 },
 "GetTextFaceW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -36276,7 +36290,7 @@
 }
 },
 "TranslateCharsetInfo": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -36287,7 +36301,7 @@
 }
 },
 "PolyBezier": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -36298,7 +36312,7 @@
 }
 },
 "AddFontMemResourceEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -36309,7 +36323,7 @@
 }
 },
 "PatBlt": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -36320,7 +36334,7 @@
 }
 },
 "GdiFlush": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -36331,7 +36345,7 @@
 }
 },
 "GetGlyphIndicesW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -36342,7 +36356,7 @@
 }
 },
 "RemoveFontMemResourceEx": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -36353,7 +36367,7 @@
 }
 },
 "GetCharABCWidthsW": {
-"status": "dll-missing",
+"status": "fn-missing",
 "apps": {
 "vscodium": {
 "load": [
@@ -36364,7 +36378,7 @@
 }
 },
 "GetTextExtentPoint32W": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [
@@ -36375,7 +36389,7 @@
 }
 },
 "ExtTextOutW": {
-"status": "dll-missing",
+"status": "provided",
 "apps": {
 "vscodium": {
 "load": [

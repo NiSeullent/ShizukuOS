@@ -6,14 +6,16 @@
   "bcrypt.dll": 11,
   "bcryptprimitives.dll": 1,
   "combase.dll": 17,
+  "gdi32.dll": 107,
   "kernel32.dll": 221,
   "modtest.dll": 2,
-  "ntdll.dll": 256,
+  "ntdll.dll": 300,
   "ole32.dll": 23,
   "oleaut32.dll": 38,
   "rpcrt4.dll": 12,
   "shell32.dll": 7,
   "shlwapi.dll": 44,
+  "user32.dll": 129,
   "version.dll": 3,
   "winmm.dll": 7,
   "ws2_32.dll": 57
@@ -41,6 +43,18 @@
   "api-ms-win-security-base-l1": "advapi32.dll",
   "api-ms-win-security-sddl-l1": "advapi32.dll",
   "api-ms-win-eventing-provider-l1": "advapi32.dll",
+  "ext-ms-win-ntuser-window-l1": "user32.dll",
+  "ext-ms-win-ntuser-message-l1": "user32.dll",
+  "ext-ms-win-ntuser-windowclass-l1": "user32.dll",
+  "ext-ms-win-ntuser-rectangle-ext-l1": "user32.dll",
+  "ext-ms-win-ntuser-sysparams-ext-l1": "user32.dll",
+  "ext-ms-win-gdi-dc-l1": "gdi32.dll",
+  "ext-ms-win-gdi-dc-create-l1": "gdi32.dll",
+  "ext-ms-win-gdi-draw-l1": "gdi32.dll",
+  "ext-ms-win-gdi-font-l1": "gdi32.dll",
+  "ext-ms-win-gdi-devcaps-l1": "gdi32.dll",
+  "ext-ms-win-gdi-object-l1": "gdi32.dll",
+  "ext-ms-win-gdi-render-l1": "gdi32.dll",
   "api-ms-win-core-com-l1": "ole32.dll",
   "api-ms-win-core-winrt-l1": "combase.dll",
   "api-ms-win-core-winrt-string-l1": "combase.dll",
@@ -59,7 +73,7 @@
   "vscodium",
   "chromium"
  ],
- "unresolved": 1457,
+ "unresolved": 1287,
  "listed": 300,
  "next": [
   {
@@ -1218,21 +1232,6 @@
    "rank": 77
   },
   {
-   "dll": "user32.dll",
-   "fn": "IsWindow",
-   "status": "dll-missing",
-   "apps_load": 3,
-   "apps_delay": 3,
-   "images_load": 7,
-   "images_delay": 4,
-   "apps": [
-    "chromium",
-    "electron",
-    "vscodium"
-   ],
-   "rank": 78
-  },
-  {
    "dll": "kernel32.dll",
    "fn": "AreFileApisANSI",
    "status": "fn-missing",
@@ -1245,7 +1244,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 79
+   "rank": 78
   },
   {
    "dll": "kernel32.dll",
@@ -1260,7 +1259,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 80
+   "rank": 79
   },
   {
    "dll": "kernel32.dll",
@@ -1275,7 +1274,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 81
+   "rank": 80
   },
   {
    "dll": "kernel32.dll",
@@ -1290,7 +1289,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 82
+   "rank": 81
   },
   {
    "dll": "kernel32.dll",
@@ -1305,7 +1304,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 83
+   "rank": 82
   },
   {
    "dll": "kernel32.dll",
@@ -1320,7 +1319,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 84
+   "rank": 83
   },
   {
    "dll": "kernel32.dll",
@@ -1335,7 +1334,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 85
+   "rank": 84
   },
   {
    "dll": "kernel32.dll",
@@ -1350,7 +1349,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 86
+   "rank": 85
   },
   {
    "dll": "kernel32.dll",
@@ -1365,7 +1364,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 87
+   "rank": 86
   },
   {
    "dll": "kernel32.dll",
@@ -1380,7 +1379,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 88
+   "rank": 87
   },
   {
    "dll": "kernel32.dll",
@@ -1395,7 +1394,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 89
+   "rank": 88
   },
   {
    "dll": "kernel32.dll",
@@ -1410,7 +1409,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 90
+   "rank": 89
   },
   {
    "dll": "kernel32.dll",
@@ -1425,7 +1424,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 91
+   "rank": 90
   },
   {
    "dll": "kernel32.dll",
@@ -1440,52 +1439,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 92
-  },
-  {
-   "dll": "user32.dll",
-   "fn": "GetClientRect",
-   "status": "dll-missing",
-   "apps_load": 3,
-   "apps_delay": 3,
-   "images_load": 6,
-   "images_delay": 3,
-   "apps": [
-    "chromium",
-    "electron",
-    "vscodium"
-   ],
-   "rank": 93
-  },
-  {
-   "dll": "user32.dll",
-   "fn": "GetDC",
-   "status": "dll-missing",
-   "apps_load": 3,
-   "apps_delay": 3,
-   "images_load": 6,
-   "images_delay": 3,
-   "apps": [
-    "chromium",
-    "electron",
-    "vscodium"
-   ],
-   "rank": 94
-  },
-  {
-   "dll": "user32.dll",
-   "fn": "ReleaseDC",
-   "status": "dll-missing",
-   "apps_load": 3,
-   "apps_delay": 3,
-   "images_load": 6,
-   "images_delay": 3,
-   "apps": [
-    "chromium",
-    "electron",
-    "vscodium"
-   ],
-   "rank": 95
+   "rank": 91
   },
   {
    "dll": "crypt32.dll",
@@ -1500,7 +1454,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 96
+   "rank": 92
   },
   {
    "dll": "kernel32.dll",
@@ -1515,7 +1469,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 97
+   "rank": 93
   },
   {
    "dll": "kernel32.dll",
@@ -1530,7 +1484,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 98
+   "rank": 94
   },
   {
    "dll": "kernel32.dll",
@@ -1545,7 +1499,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 99
+   "rank": 95
   },
   {
    "dll": "kernel32.dll",
@@ -1560,7 +1514,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 100
+   "rank": 96
   },
   {
    "dll": "kernel32.dll",
@@ -1575,7 +1529,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 101
+   "rank": 97
   },
   {
    "dll": "kernel32.dll",
@@ -1590,7 +1544,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 102
+   "rank": 98
   },
   {
    "dll": "kernel32.dll",
@@ -1605,7 +1559,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 103
+   "rank": 99
   },
   {
    "dll": "kernel32.dll",
@@ -1620,7 +1574,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 104
+   "rank": 100
   },
   {
    "dll": "kernel32.dll",
@@ -1635,7 +1589,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 105
+   "rank": 101
   },
   {
    "dll": "kernel32.dll",
@@ -1650,7 +1604,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 106
+   "rank": 102
   },
   {
    "dll": "kernel32.dll",
@@ -1665,7 +1619,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 107
+   "rank": 103
   },
   {
    "dll": "kernel32.dll",
@@ -1680,7 +1634,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 108
+   "rank": 104
   },
   {
    "dll": "kernel32.dll",
@@ -1695,7 +1649,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 109
+   "rank": 105
   },
   {
    "dll": "kernel32.dll",
@@ -1710,7 +1664,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 110
+   "rank": 106
   },
   {
    "dll": "crypt32.dll",
@@ -1725,7 +1679,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 111
+   "rank": 107
   },
   {
    "dll": "crypt32.dll",
@@ -1740,7 +1694,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 112
+   "rank": 108
   },
   {
    "dll": "crypt32.dll",
@@ -1755,7 +1709,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 113
+   "rank": 109
   },
   {
    "dll": "crypt32.dll",
@@ -1770,7 +1724,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 114
+   "rank": 110
   },
   {
    "dll": "crypt32.dll",
@@ -1785,7 +1739,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 115
+   "rank": 111
   },
   {
    "dll": "crypt32.dll",
@@ -1800,7 +1754,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 116
+   "rank": 112
   },
   {
    "dll": "kernel32.dll",
@@ -1815,7 +1769,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 117
+   "rank": 113
   },
   {
    "dll": "kernel32.dll",
@@ -1830,7 +1784,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 118
+   "rank": 114
   },
   {
    "dll": "kernel32.dll",
@@ -1845,7 +1799,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 119
+   "rank": 115
   },
   {
    "dll": "kernel32.dll",
@@ -1860,7 +1814,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 120
+   "rank": 116
   },
   {
    "dll": "kernel32.dll",
@@ -1875,7 +1829,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 121
+   "rank": 117
   },
   {
    "dll": "kernel32.dll",
@@ -1890,7 +1844,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 122
+   "rank": 118
   },
   {
    "dll": "kernel32.dll",
@@ -1905,7 +1859,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 123
+   "rank": 119
   },
   {
    "dll": "kernel32.dll",
@@ -1920,7 +1874,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 124
+   "rank": 120
   },
   {
    "dll": "kernel32.dll",
@@ -1935,7 +1889,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 125
+   "rank": 121
   },
   {
    "dll": "kernel32.dll",
@@ -1950,7 +1904,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 126
+   "rank": 122
   },
   {
    "dll": "kernel32.dll",
@@ -1965,7 +1919,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 127
+   "rank": 123
   },
   {
    "dll": "kernel32.dll",
@@ -1980,7 +1934,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 128
+   "rank": 124
   },
   {
    "dll": "kernel32.dll",
@@ -1995,7 +1949,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 129
+   "rank": 125
   },
   {
    "dll": "kernel32.dll",
@@ -2010,7 +1964,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 130
+   "rank": 126
   },
   {
    "dll": "kernel32.dll",
@@ -2025,7 +1979,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 131
+   "rank": 127
   },
   {
    "dll": "kernel32.dll",
@@ -2040,7 +1994,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 132
+   "rank": 128
   },
   {
    "dll": "kernel32.dll",
@@ -2055,7 +2009,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 133
+   "rank": 129
   },
   {
    "dll": "kernel32.dll",
@@ -2070,7 +2024,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 134
+   "rank": 130
   },
   {
    "dll": "kernel32.dll",
@@ -2085,7 +2039,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 135
+   "rank": 131
   },
   {
    "dll": "kernel32.dll",
@@ -2100,7 +2054,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 136
+   "rank": 132
   },
   {
    "dll": "kernel32.dll",
@@ -2115,7 +2069,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 137
+   "rank": 133
   },
   {
    "dll": "advapi32.dll",
@@ -2130,7 +2084,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 138
+   "rank": 134
   },
   {
    "dll": "advapi32.dll",
@@ -2145,7 +2099,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 139
+   "rank": 135
   },
   {
    "dll": "advapi32.dll",
@@ -2160,7 +2114,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 140
+   "rank": 136
   },
   {
    "dll": "advapi32.dll",
@@ -2175,27 +2129,12 @@
     "electron",
     "vscodium"
    ],
-   "rank": 141
-  },
-  {
-   "dll": "gdi32.dll",
-   "fn": "StretchDIBits",
-   "status": "dll-missing",
-   "apps_load": 3,
-   "apps_delay": 3,
-   "images_load": 4,
-   "images_delay": 3,
-   "apps": [
-    "chromium",
-    "electron",
-    "vscodium"
-   ],
-   "rank": 142
+   "rank": 137
   },
   {
    "dll": "user32.dll",
    "fn": "UnregisterClassA",
-   "status": "dll-missing",
+   "status": "fn-missing",
    "apps_load": 3,
    "apps_delay": 2,
    "images_load": 4,
@@ -2205,7 +2144,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 143
+   "rank": 138
   },
   {
    "dll": "crypt32.dll",
@@ -2220,7 +2159,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 144
+   "rank": 139
   },
   {
    "dll": "crypt32.dll",
@@ -2235,7 +2174,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 145
+   "rank": 140
   },
   {
    "dll": "crypt32.dll",
@@ -2250,7 +2189,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 146
+   "rank": 141
   },
   {
    "dll": "dwrite.dll",
@@ -2265,7 +2204,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 147
+   "rank": 142
   },
   {
    "dll": "kernel32.dll",
@@ -2280,7 +2219,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 148
+   "rank": 143
   },
   {
    "dll": "kernel32.dll",
@@ -2295,7 +2234,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 149
+   "rank": 144
   },
   {
    "dll": "kernel32.dll",
@@ -2310,7 +2249,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 150
+   "rank": 145
   },
   {
    "dll": "kernel32.dll",
@@ -2325,7 +2264,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 151
+   "rank": 146
   },
   {
    "dll": "kernel32.dll",
@@ -2340,7 +2279,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 152
+   "rank": 147
   },
   {
    "dll": "kernel32.dll",
@@ -2355,7 +2294,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 153
+   "rank": 148
   },
   {
    "dll": "kernel32.dll",
@@ -2370,7 +2309,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 154
+   "rank": 149
   },
   {
    "dll": "kernel32.dll",
@@ -2385,7 +2324,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 155
+   "rank": 150
   },
   {
    "dll": "kernel32.dll",
@@ -2400,7 +2339,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 156
+   "rank": 151
   },
   {
    "dll": "kernel32.dll",
@@ -2415,7 +2354,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 157
+   "rank": 152
   },
   {
    "dll": "kernel32.dll",
@@ -2430,7 +2369,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 158
+   "rank": 153
   },
   {
    "dll": "kernel32.dll",
@@ -2445,7 +2384,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 159
+   "rank": 154
   },
   {
    "dll": "kernel32.dll",
@@ -2460,7 +2399,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 160
+   "rank": 155
   },
   {
    "dll": "kernel32.dll",
@@ -2475,7 +2414,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 161
+   "rank": 156
   },
   {
    "dll": "kernel32.dll",
@@ -2490,7 +2429,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 162
+   "rank": 157
   },
   {
    "dll": "kernel32.dll",
@@ -2505,7 +2444,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 163
+   "rank": 158
   },
   {
    "dll": "kernel32.dll",
@@ -2520,7 +2459,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 164
+   "rank": 159
   },
   {
    "dll": "kernel32.dll",
@@ -2535,7 +2474,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 165
+   "rank": 160
   },
   {
    "dll": "kernel32.dll",
@@ -2550,7 +2489,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 166
+   "rank": 161
   },
   {
    "dll": "kernel32.dll",
@@ -2565,7 +2504,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 167
+   "rank": 162
   },
   {
    "dll": "kernel32.dll",
@@ -2580,7 +2519,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 168
+   "rank": 163
   },
   {
    "dll": "kernel32.dll",
@@ -2595,7 +2534,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 169
+   "rank": 164
   },
   {
    "dll": "kernel32.dll",
@@ -2610,7 +2549,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 170
+   "rank": 165
   },
   {
    "dll": "kernel32.dll",
@@ -2625,7 +2564,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 171
+   "rank": 166
   },
   {
    "dll": "kernel32.dll",
@@ -2640,7 +2579,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 172
+   "rank": 167
   },
   {
    "dll": "kernel32.dll",
@@ -2655,7 +2594,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 173
+   "rank": 168
   },
   {
    "dll": "kernel32.dll",
@@ -2670,7 +2609,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 174
+   "rank": 169
   },
   {
    "dll": "kernel32.dll",
@@ -2685,7 +2624,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 175
+   "rank": 170
   },
   {
    "dll": "kernel32.dll",
@@ -2700,7 +2639,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 176
+   "rank": 171
   },
   {
    "dll": "kernel32.dll",
@@ -2715,7 +2654,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 177
+   "rank": 172
   },
   {
    "dll": "kernel32.dll",
@@ -2730,7 +2669,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 178
+   "rank": 173
   },
   {
    "dll": "kernel32.dll",
@@ -2745,7 +2684,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 179
+   "rank": 174
   },
   {
    "dll": "kernel32.dll",
@@ -2760,7 +2699,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 180
+   "rank": 175
   },
   {
    "dll": "kernel32.dll",
@@ -2775,7 +2714,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 181
+   "rank": 176
   },
   {
    "dll": "advapi32.dll",
@@ -2790,7 +2729,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 182
+   "rank": 177
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2805,7 +2744,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 183
+   "rank": 178
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2820,7 +2759,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 184
+   "rank": 179
   },
   {
    "dll": "advapi32.dll",
@@ -2835,7 +2774,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 185
+   "rank": 180
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2850,7 +2789,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 186
+   "rank": 181
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2865,7 +2804,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 187
+   "rank": 182
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2880,7 +2819,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 188
+   "rank": 183
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2895,7 +2834,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 189
+   "rank": 184
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2910,7 +2849,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 190
+   "rank": 185
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2925,7 +2864,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 191
+   "rank": 186
   },
   {
    "dll": "cfgmgr32.dll",
@@ -2940,7 +2879,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 192
+   "rank": 187
   },
   {
    "dll": "crypt32.dll",
@@ -2955,7 +2894,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 193
+   "rank": 188
   },
   {
    "dll": "crypt32.dll",
@@ -2970,7 +2909,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 194
+   "rank": 189
   },
   {
    "dll": "crypt32.dll",
@@ -2985,7 +2924,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 195
+   "rank": 190
   },
   {
    "dll": "crypt32.dll",
@@ -3000,7 +2939,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 196
+   "rank": 191
   },
   {
    "dll": "crypt32.dll",
@@ -3015,7 +2954,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 197
+   "rank": 192
   },
   {
    "dll": "crypt32.dll",
@@ -3030,7 +2969,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 198
+   "rank": 193
   },
   {
    "dll": "crypt32.dll",
@@ -3045,7 +2984,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 199
+   "rank": 194
   },
   {
    "dll": "crypt32.dll",
@@ -3060,7 +2999,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 200
+   "rank": 195
   },
   {
    "dll": "crypt32.dll",
@@ -3075,7 +3014,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 201
+   "rank": 196
   },
   {
    "dll": "crypt32.dll",
@@ -3090,7 +3029,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 202
+   "rank": 197
   },
   {
    "dll": "crypt32.dll",
@@ -3105,7 +3044,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 203
+   "rank": 198
   },
   {
    "dll": "crypt32.dll",
@@ -3120,7 +3059,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 204
+   "rank": 199
   },
   {
    "dll": "crypt32.dll",
@@ -3135,7 +3074,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 205
+   "rank": 200
   },
   {
    "dll": "crypt32.dll",
@@ -3150,7 +3089,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 206
+   "rank": 201
   },
   {
    "dll": "crypt32.dll",
@@ -3165,7 +3104,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 207
+   "rank": 202
   },
   {
    "dll": "crypt32.dll",
@@ -3180,7 +3119,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 208
+   "rank": 203
   },
   {
    "dll": "kernel32.dll",
@@ -3195,7 +3134,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 209
+   "rank": 204
   },
   {
    "dll": "kernel32.dll",
@@ -3210,7 +3149,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 210
+   "rank": 205
   },
   {
    "dll": "kernel32.dll",
@@ -3225,7 +3164,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 211
+   "rank": 206
   },
   {
    "dll": "kernel32.dll",
@@ -3240,7 +3179,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 212
+   "rank": 207
   },
   {
    "dll": "kernel32.dll",
@@ -3255,7 +3194,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 213
+   "rank": 208
   },
   {
    "dll": "kernel32.dll",
@@ -3270,7 +3209,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 214
+   "rank": 209
   },
   {
    "dll": "kernel32.dll",
@@ -3285,7 +3224,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 215
+   "rank": 210
   },
   {
    "dll": "kernel32.dll",
@@ -3300,7 +3239,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 216
+   "rank": 211
   },
   {
    "dll": "kernel32.dll",
@@ -3315,7 +3254,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 217
+   "rank": 212
   },
   {
    "dll": "kernel32.dll",
@@ -3330,7 +3269,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 218
+   "rank": 213
   },
   {
    "dll": "kernel32.dll",
@@ -3345,7 +3284,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 219
+   "rank": 214
   },
   {
    "dll": "kernel32.dll",
@@ -3360,7 +3299,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 220
+   "rank": 215
   },
   {
    "dll": "kernel32.dll",
@@ -3375,7 +3314,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 221
+   "rank": 216
   },
   {
    "dll": "kernel32.dll",
@@ -3390,7 +3329,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 222
+   "rank": 217
   },
   {
    "dll": "kernel32.dll",
@@ -3405,7 +3344,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 223
+   "rank": 218
   },
   {
    "dll": "kernel32.dll",
@@ -3420,7 +3359,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 224
+   "rank": 219
   },
   {
    "dll": "kernel32.dll",
@@ -3435,7 +3374,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 225
+   "rank": 220
   },
   {
    "dll": "kernel32.dll",
@@ -3450,7 +3389,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 226
+   "rank": 221
   },
   {
    "dll": "kernel32.dll",
@@ -3465,7 +3404,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 227
+   "rank": 222
   },
   {
    "dll": "kernel32.dll",
@@ -3480,7 +3419,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 228
+   "rank": 223
   },
   {
    "dll": "kernel32.dll",
@@ -3495,7 +3434,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 229
+   "rank": 224
   },
   {
    "dll": "kernel32.dll",
@@ -3510,7 +3449,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 230
+   "rank": 225
   },
   {
    "dll": "kernel32.dll",
@@ -3525,7 +3464,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 231
+   "rank": 226
   },
   {
    "dll": "kernel32.dll",
@@ -3540,7 +3479,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 232
+   "rank": 227
   },
   {
    "dll": "kernel32.dll",
@@ -3555,7 +3494,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 233
+   "rank": 228
   },
   {
    "dll": "kernel32.dll",
@@ -3570,7 +3509,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 234
+   "rank": 229
   },
   {
    "dll": "kernel32.dll",
@@ -3585,7 +3524,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 235
+   "rank": 230
   },
   {
    "dll": "kernel32.dll",
@@ -3600,7 +3539,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 236
+   "rank": 231
   },
   {
    "dll": "kernel32.dll",
@@ -3615,7 +3554,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 237
+   "rank": 232
   },
   {
    "dll": "kernel32.dll",
@@ -3630,7 +3569,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 238
+   "rank": 233
   },
   {
    "dll": "kernel32.dll",
@@ -3645,7 +3584,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 239
+   "rank": 234
   },
   {
    "dll": "kernel32.dll",
@@ -3660,7 +3599,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 240
+   "rank": 235
   },
   {
    "dll": "kernel32.dll",
@@ -3675,7 +3614,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 241
+   "rank": 236
   },
   {
    "dll": "kernel32.dll",
@@ -3690,7 +3629,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 242
+   "rank": 237
   },
   {
    "dll": "kernel32.dll",
@@ -3705,7 +3644,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 243
+   "rank": 238
   },
   {
    "dll": "kernel32.dll",
@@ -3720,7 +3659,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 244
+   "rank": 239
   },
   {
    "dll": "kernel32.dll",
@@ -3735,7 +3674,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 245
+   "rank": 240
   },
   {
    "dll": "kernel32.dll",
@@ -3750,7 +3689,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 246
+   "rank": 241
   },
   {
    "dll": "kernel32.dll",
@@ -3765,7 +3704,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 247
+   "rank": 242
   },
   {
    "dll": "kernel32.dll",
@@ -3780,7 +3719,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 248
+   "rank": 243
   },
   {
    "dll": "kernel32.dll",
@@ -3795,7 +3734,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 249
+   "rank": 244
   },
   {
    "dll": "kernel32.dll",
@@ -3810,7 +3749,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 250
+   "rank": 245
   },
   {
    "dll": "kernel32.dll",
@@ -3825,7 +3764,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 251
+   "rank": 246
   },
   {
    "dll": "kernel32.dll",
@@ -3840,7 +3779,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 252
+   "rank": 247
   },
   {
    "dll": "kernel32.dll",
@@ -3855,7 +3794,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 253
+   "rank": 248
   },
   {
    "dll": "kernel32.dll",
@@ -3870,7 +3809,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 254
+   "rank": 249
   },
   {
    "dll": "kernel32.dll",
@@ -3885,7 +3824,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 255
+   "rank": 250
   },
   {
    "dll": "kernel32.dll",
@@ -3900,7 +3839,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 256
+   "rank": 251
   },
   {
    "dll": "kernel32.dll",
@@ -3915,7 +3854,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 257
+   "rank": 252
   },
   {
    "dll": "kernel32.dll",
@@ -3930,7 +3869,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 258
+   "rank": 253
   },
   {
    "dll": "winmm.dll",
@@ -3945,7 +3884,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 259
+   "rank": 254
   },
   {
    "dll": "winmm.dll",
@@ -3960,7 +3899,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 260
+   "rank": 255
   },
   {
    "dll": "winmm.dll",
@@ -3975,7 +3914,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 261
+   "rank": 256
   },
   {
    "dll": "winmm.dll",
@@ -3990,7 +3929,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 262
+   "rank": 257
   },
   {
    "dll": "winmm.dll",
@@ -4005,7 +3944,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 263
+   "rank": 258
   },
   {
    "dll": "winmm.dll",
@@ -4020,7 +3959,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 264
+   "rank": 259
   },
   {
    "dll": "winmm.dll",
@@ -4035,7 +3974,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 265
+   "rank": 260
   },
   {
    "dll": "winmm.dll",
@@ -4050,7 +3989,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 266
+   "rank": 261
   },
   {
    "dll": "winmm.dll",
@@ -4065,7 +4004,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 267
+   "rank": 262
   },
   {
    "dll": "winmm.dll",
@@ -4080,7 +4019,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 268
+   "rank": 263
   },
   {
    "dll": "winmm.dll",
@@ -4095,7 +4034,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 269
+   "rank": 264
   },
   {
    "dll": "winmm.dll",
@@ -4110,7 +4049,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 270
+   "rank": 265
   },
   {
    "dll": "winmm.dll",
@@ -4125,7 +4064,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 271
+   "rank": 266
   },
   {
    "dll": "winmm.dll",
@@ -4140,7 +4079,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 272
+   "rank": 267
   },
   {
    "dll": "winmm.dll",
@@ -4155,7 +4094,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 273
+   "rank": 268
   },
   {
    "dll": "winmm.dll",
@@ -4170,7 +4109,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 274
+   "rank": 269
   },
   {
    "dll": "winmm.dll",
@@ -4185,7 +4124,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 275
+   "rank": 270
   },
   {
    "dll": "winmm.dll",
@@ -4200,7 +4139,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 276
+   "rank": 271
   },
   {
    "dll": "winmm.dll",
@@ -4215,7 +4154,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 277
+   "rank": 272
   },
   {
    "dll": "winmm.dll",
@@ -4230,7 +4169,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 278
+   "rank": 273
   },
   {
    "dll": "winmm.dll",
@@ -4245,7 +4184,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 279
+   "rank": 274
   },
   {
    "dll": "winmm.dll",
@@ -4260,7 +4199,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 280
+   "rank": 275
   },
   {
    "dll": "winmm.dll",
@@ -4275,7 +4214,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 281
+   "rank": 276
   },
   {
    "dll": "winmm.dll",
@@ -4290,7 +4229,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 282
+   "rank": 277
   },
   {
    "dll": "winmm.dll",
@@ -4305,7 +4244,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 283
+   "rank": 278
   },
   {
    "dll": "winmm.dll",
@@ -4320,7 +4259,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 284
+   "rank": 279
   },
   {
    "dll": "winmm.dll",
@@ -4335,7 +4274,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 285
+   "rank": 280
   },
   {
    "dll": "winmm.dll",
@@ -4350,7 +4289,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 286
+   "rank": 281
   },
   {
    "dll": "ws2_32.dll",
@@ -4365,7 +4304,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 287
+   "rank": 282
   },
   {
    "dll": "ws2_32.dll",
@@ -4380,7 +4319,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 288
+   "rank": 283
   },
   {
    "dll": "ws2_32.dll",
@@ -4395,7 +4334,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 289
+   "rank": 284
   },
   {
    "dll": "ws2_32.dll",
@@ -4410,7 +4349,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 290
+   "rank": 285
   },
   {
    "dll": "ws2_32.dll",
@@ -4425,7 +4364,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 291
+   "rank": 286
   },
   {
    "dll": "ws2_32.dll",
@@ -4440,7 +4379,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 292
+   "rank": 287
   },
   {
    "dll": "ws2_32.dll",
@@ -4455,7 +4394,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 293
+   "rank": 288
   },
   {
    "dll": "ws2_32.dll",
@@ -4470,7 +4409,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 294
+   "rank": 289
   },
   {
    "dll": "ws2_32.dll",
@@ -4485,7 +4424,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 295
+   "rank": 290
   },
   {
    "dll": "ws2_32.dll",
@@ -4500,7 +4439,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 296
+   "rank": 291
   },
   {
    "dll": "ole32.dll",
@@ -4515,7 +4454,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 297
+   "rank": 292
   },
   {
    "dll": "advapi32.dll",
@@ -4530,7 +4469,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 298
+   "rank": 293
   },
   {
    "dll": "advapi32.dll",
@@ -4545,7 +4484,7 @@
     "electron",
     "vscodium"
    ],
-   "rank": 299
+   "rank": 294
   },
   {
    "dll": "advapi32.dll",
@@ -4554,6 +4493,80 @@
    "apps_load": 2,
    "apps_delay": 3,
    "images_load": 6,
+   "images_delay": 5,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 295
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "SetEntriesInAclW",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 3,
+   "images_load": 6,
+   "images_delay": 5,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 296
+  },
+  {
+   "dll": "shell32.dll",
+   "fn": "ShellExecuteExW",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 3,
+   "images_load": 6,
+   "images_delay": 3,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 297
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetQueuedCompletionStatusEx",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 0,
+   "images_load": 6,
+   "images_delay": 0,
+   "apps": [
+    "electron",
+    "vscodium"
+   ],
+   "rank": 298
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "CheckTokenMembership",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 3,
+   "images_load": 5,
+   "images_delay": 5,
+   "apps": [
+    "chromium",
+    "electron",
+    "vscodium"
+   ],
+   "rank": 299
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+   "status": "fn-missing",
+   "apps_load": 2,
+   "apps_delay": 3,
+   "images_load": 5,
    "images_delay": 5,
    "apps": [
     "chromium",

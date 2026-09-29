@@ -15,8 +15,8 @@
   "resources/app/node_modules.asar.unpacked/@vscode/ripgrep-universal/bin/win32-ia32/rg.exe": "machine i386 (not AMD64)"
  },
  "distinct_imports": 1686,
- "resolved": 373,
- "coverage_pct": 22.1,
+ "resolved": 543,
+ "coverage_pct": 32.2,
  "image_list": {
   "VSCodium.exe": {
    "size": 222056960,
@@ -3551,8 +3551,8 @@
   },
   "user32.dll": {
    "imported": 253,
-   "provided": 0,
-   "have_dll": false,
+   "provided": 109,
+   "have_dll": true,
    "load_time_images": [
     "bin/codium-tunnel.exe",
     "dxcompiler.dll",
@@ -3601,8 +3601,8 @@
   },
   "gdi32.dll": {
    "imported": 107,
-   "provided": 0,
-   "have_dll": false,
+   "provided": 61,
+   "have_dll": true,
    "load_time_images": [
     "libGLESv2.dll",
     "resources/app/extensions/microsoft-authentication/dist/msalruntime.dll",
@@ -4790,23 +4790,6 @@
   }
  },
  "load_blockers": {
-  "user32.dll": [
-   "bin/codium-tunnel.exe",
-   "dxcompiler.dll",
-   "libGLESv2.dll",
-   "resources/app/extensions/microsoft-authentication/dist/msal-node-runtime.node",
-   "resources/app/extensions/microsoft-authentication/dist/msalruntime.dll",
-   "resources/app/node_modules.asar.unpacked/@vscodium/native-keymap/build/Release/keymapping.node",
-   "resources/app/node_modules.asar.unpacked/node-pty/build/Release/conpty/OpenConsole.exe",
-   "resources/app/node_modules.asar.unpacked/windows-foreground-love/build/Release/foreground_love.node",
-   "vk_swiftshader.dll"
-  ],
-  "gdi32.dll": [
-   "libGLESv2.dll",
-   "resources/app/extensions/microsoft-authentication/dist/msalruntime.dll",
-   "resources/app/node_modules.asar.unpacked/node-pty/build/Release/conpty/OpenConsole.exe",
-   "vk_swiftshader.dll"
-  ],
   "crypt32.dll": [
    "VSCodium.exe",
    "bin/codium-tunnel.exe",
@@ -6093,6 +6076,284 @@
    },
    {
     "fn": "RoActivateInstance",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "gdi32.dll": [
+   {
+    "fn": "GetOutlineTextMetricsW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "ModifyWorldTransform",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "SetWorldTransform",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "AddFontMemResourceEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ChoosePixelFormat",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "DescribePixelFormat",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetCharABCWidthsW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetGlyphIndicesW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetPixelFormat",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PolyBezier",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "RemoveFontMemResourceEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetPixelFormat",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SwapBuffers",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "TranslateCharsetInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "BeginPath",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CancelDC",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CloseEnhMetaFile",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CloseFigure",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CreateEnhMetaFileW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "DeleteEnhMetaFile",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EndDoc",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EndPage",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EndPath",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EnumEnhMetaFile",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EnumFontFamiliesExA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ExtEscape",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "FillPath",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GdiComment",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetEnhMetaFileBits",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetEnhMetaFileHeader",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetFontData",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetICMProfileW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetWorldTransform",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "PlayEnhMetaFile",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "PlayEnhMetaFileRecord",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "PolyBezierTo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SelectClipPath",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetAbortProc",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetArcDirection",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetEnhMetaFileBits",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetMiterLimit",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "StartDocW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "StartPage",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "StrokeAndFillPath",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "StrokePath",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "WidenPath",
     "status": "fn-missing",
     "images": 1,
     "load_time": false
@@ -8069,6 +8330,872 @@
    },
    {
     "fn": "AssocQueryStringW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   }
+  ],
+  "user32.dll": [
+   {
+    "fn": "LoadCursorW",
+    "status": "fn-missing",
+    "images": 4,
+    "load_time": true
+   },
+   {
+    "fn": "GetKeyboardLayout",
+    "status": "fn-missing",
+    "images": 3,
+    "load_time": true
+   },
+   {
+    "fn": "MapVirtualKeyW",
+    "status": "fn-missing",
+    "images": 3,
+    "load_time": true
+   },
+   {
+    "fn": "SetWindowsHookExW",
+    "status": "fn-missing",
+    "images": 3,
+    "load_time": true
+   },
+   {
+    "fn": "UnhookWindowsHookEx",
+    "status": "fn-missing",
+    "images": 3,
+    "load_time": true
+   },
+   {
+    "fn": "CallNextHookEx",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "CloseClipboard",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "DestroyIcon",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "DialogBoxParamW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "EmptyClipboard",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "EnableMenuItem",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "EndDialog",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetCaretBlinkTime",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetClipboardData",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetCursorPos",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetDoubleClickTime",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetIconInfo",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetKeyState",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetKeyboardState",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetProcessWindowStation",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetSystemMenu",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "GetUserObjectInformationW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "LoadIconW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "LoadImageW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "MapVirtualKeyExW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "MessageBoxW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "NotifyWinEvent",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "OpenClipboard",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "RegisterClipboardFormatW",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "SetClipboardData",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "SetLayeredWindowAttributes",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "ToUnicodeEx",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "UnregisterClassA",
+    "status": "fn-missing",
+    "images": 2,
+    "load_time": true
+   },
+   {
+    "fn": "ActivateKeyboardLayout",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "AppendMenuW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CheckDlgButton",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CheckRadioButton",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CopyImage",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateAcceleratorTableW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "CreateWindowExA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "DestroyAcceleratorTable",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "EnableScrollBar",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetDlgItem",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetDlgItemTextW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetDpiForWindow",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetKeyboardLayoutNameA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "GetWindowInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "IsDlgButtonChecked",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "IsProcessDPIAware",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "IsWinEventHookInstalled",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LoadKeyboardLayoutW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "LoadMenuW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "PrivateExtractIconsW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ScrollDC",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ScrollWindowEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SendDlgItemMessageW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SendNotifyMessageW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetDlgItemTextW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetMenuItemInfoW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "SetScrollInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ShowWindowAsync",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "ToUnicode",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "TrackPopupMenuEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "VkKeyScanW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "WindowFromDC",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": true
+   },
+   {
+    "fn": "AddClipboardFormatListener",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ChangeWindowMessageFilterEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CharNextW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CharUpperA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ClipCursor",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CloseDesktop",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CloseTouchInputHandle",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CloseWindowStation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CopyIcon",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CreateDesktopW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CreateIconIndirect",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "CreateWindowStationW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "DefRawInputProc",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "DisplayConfigGetDeviceInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "DrawEdge",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "DrawFrameControl",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "DrawIconEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EnumClipboardFormats",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EnumDisplayDevicesW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EnumDisplaySettingsExW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "EnumDisplaySettingsW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "FlashWindowEx",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetAsyncKeyState",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetClipboardFormatNameW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetClipboardSequenceNumber",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetCursorInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetDisplayConfigBufferSizes",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetGuiResources",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetKeyboardLayoutList",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetKeyboardLayoutNameW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetLastInputInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetLayeredWindowAttributes",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetMenuItemInfoW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetMonitorInfoA",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetPointerDevice",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetPointerDevices",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetPointerPenInfo",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetPointerType",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetRawInputData",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetRawInputDeviceInfoW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetRawInputDeviceList",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetThreadDesktop",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetWindowDC",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetWindowDisplayAffinity",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "GetWindowRgn",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "IsClipboardFormatAvailable",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "IsWindowArranged",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "LoadStringW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "MessageBeep",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "OpenInputDesktop",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "PrintWindow",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "QueryDisplayConfig",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RegisterDeviceNotificationW",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RegisterHotKey",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RegisterPointerDeviceNotifications",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RegisterPowerSettingNotification",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RegisterRawInputDevices",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RegisterSuspendResumeNotification",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "RemoveClipboardFormatListener",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SendInput",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetCursor",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetCursorPos",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetKeyboardState",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetMenuDefaultItem",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetProcessDPIAware",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetProcessWindowStation",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetThreadDesktop",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetWinEventHook",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetWindowDisplayAffinity",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "SetWindowRgn",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "ShowCursor",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "TrackMouseEvent",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "TrackPopupMenu",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "UnhookWinEvent",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "UnregisterDeviceNotification",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "UnregisterHotKey",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "UnregisterPowerSettingNotification",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "UnregisterSuspendResumeNotification",
+    "status": "fn-missing",
+    "images": 1,
+    "load_time": false
+   },
+   {
+    "fn": "UpdateLayeredWindow",
     "status": "fn-missing",
     "images": 1,
     "load_time": false
