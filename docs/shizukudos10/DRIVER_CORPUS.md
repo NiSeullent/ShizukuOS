@@ -60,7 +60,8 @@ SEH (`"seh"` in build-result.json). C++ (uniata, wdf01000, cdrom, hdaudbus) is c
 (`cxx_compiler`). All linking is GNU ld. The compiler support library `libgcc.a` is on the link line so that
 `___chkstk_ms` would resolve if a driver needed it; `libgcc_chkstk` records whether it was used (never, so far).
 
-Toolchain of the recorded run: x86_64-w64-mingw32-gcc 13-win32, clang 18.1.3.
+Toolchain of the recorded run: x86_64-w64-mingw32-gcc/g++ 13-win32 (all C and C++ of the ReactOS table), clang 18.1.3
+(only used for the virtio-win retries).
 
 ## Result: ReactOS drivers
 
@@ -129,7 +130,7 @@ unmodified, and then needs the union of their ntoskrnl/hal imports (313 + 12).
 
 The export list of the driver host is not merged yet, so the committed numbers are raw lists. A dated snapshot, for
 orientation only: fed with the 170 ntoskrnl and 10 hal exports of the NT-driver-host work in progress
-(`ntdrv_prov.c`, 2026-09-29), 96 of the ntoskrnl imports and 4 of the hal imports resolve; `null.sys` misses one
+(`ntdrv_prov.c`, 2026-09-29), 101 of the 313 ntoskrnl imports and 4 of the 12 hal imports resolve; `null.sys` misses one
 function (`MmPageEntireDriver`), everything else misses more. Re-run with `--exports` when the export JSON lands.
 
 ## virtio-win
@@ -203,7 +204,7 @@ kernel and runtime contracts changes that; the framebuffer path Kernel64 has tod
   provides it; ReactOS's is 5.x), StorPort with extended SRBs (ReactOS's lacks them), KMDF above 1.17 (ReactOS's
   runtime is 1.17; the Microsoft source has no build), SpbCx/GpioClx/UCX/PortCls, and for graphics WDDM 2.x. Even the
   ReactOS corpus, built for exactly the ntoskrnl/hal ABI, needs 313 ntoskrnl and 12 hal functions; the host's work in
-  progress resolves 96 of them.
+  progress resolves 101 of them.
 * **Run: not measured.** Nothing here has executed a driver; loading the corpus drivers under the host is the next
   measurement, starting with null.sys (one missing import) and the NDIS 5 / StorPort / KMDF 1.17 clients whose
   providers are in the corpus.
