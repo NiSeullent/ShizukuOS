@@ -172,6 +172,10 @@ int ahci_blk_init(void)
     dev.write = ahci_write;
     dev.flush = ahci_flush_dev;
     dev.priv = &disk;
+    dev.driver = "ahci";                            /* storage-track metadata (blk.h extensions) */
+    dev.irq_mode = "poll";
+    dev.queue_depth = 1;
+    dev.max_sectors = 1;
     return blk_register(&dev);
 }
 #else

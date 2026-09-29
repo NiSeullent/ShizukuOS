@@ -72,6 +72,11 @@
     X(NtShzSetupBlkQuery, 0xb0) X(NtShzSetupBlkRead, 0xb1) X(NtShzSetupBlkWrite, 0xb2) X(NtShzSetupBlkFlush, 0xb3) \
     X(NtShzSetupPower, 0xb4)
 
+/* Raw block devices 0xf0-0xff (kernel64/sysblk.c) */
+#define SYSCALL_LIST_BLK(X) \
+    X(NtShzBlkQuery, 0xf0) X(NtShzBlkRead, 0xf1) X(NtShzBlkWrite, 0xf2) X(NtShzBlkFlush, 0xf3) \
+    X(NtShzBlkBatch, 0xf4) X(NtShzBlkControl, 0xf5) X(NtShzBlkDiscard, 0xf6)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
@@ -82,6 +87,7 @@ enum {
     SYSCALL_LIST_MISC(X)
     SYSCALL_LIST_GPU(X)
     SYSCALL_LIST_SETUP(X)
+    SYSCALL_LIST_BLK(X)
 #undef X
     SYS_MAX = 0x100                 /* every number below goes to sys_extended(); sysext.c rejects unrouted ranges */
 };
