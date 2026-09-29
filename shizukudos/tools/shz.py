@@ -23,19 +23,21 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import qemu as qemu_tools  # noqa: E402
 import shzlib  # noqa: E402
 from shzlib import BUILD, REPO, SHZ, run, sha256_file  # noqa: E402
 
 PROFILES = {
     "bios-legacy": {
         "summary": "Legacy BIOS/CSM -> real Real Mode -> FreeDOS DOS16",
-        "steps": ["dos16"],
-        "status": "implemented (DOS16 only; Kernel32 entry not implemented)",
+        "steps": ["dos16/build.py"],
+        "status": "implemented (DOS16 only; no Kernel32/Kernel64 entry on the legacy BIOS path)",
     },
     "uefi-multikernel": {
         "summary": "UEFI x64 -> Supervisor (Intel VMX) -> virtual Real Mode DOS16",
-        "steps": ["dos16", "supervisor"],
-        "status": "partial: DOS16 domain only; Kernel32/Kernel64 domains and Win64 not implemented",
+        "steps": ["dos16/build.py", "kbuild.py", "win64/build.py", "supervisor/build.py"],
+        "status": "built: DOS16, Kernel32, Kernel64 + Win64 initrd; running them needs Intel VMX in L1 "
+                  "(see `test --suite boot`)",
     },
     "bios-multikernel": {
         "summary": "BIOS loader -> Supervisor cold launch -> DOS16 / Win98 / Kernel64",
@@ -69,8 +71,8 @@ def cmd_doctor(args):
                         ("mformat", ("--version",)), ("mkfs.vfat", ("--help",)), ("python3", ("--version",)),
                         ("make", ("--version",)), ("git", ("--version",))):
         tools[name] = shzlib.tool_version(name, vargs)
-    for name, path in (("qemu-kvm", qemu_path()), ("ovmf_code", "/usr/share/edk2/ovmf/OVMF_CODE.fd"),
-                       ("ovmf_vars", "/usr/share/edk2/ovmf/OVMF_VARS.fd")):
+    for name, path in (("qemu-kvm", qemu_path()), ("ovmf_code", qemu_tools.DEFAULT_OVMF_CODE),
+                       ("ovmf_vars", qemu_tools.DEFAULT_OVMF_VARS)):
         tools[name] = {"path": path, "present": Path(path).exists()}
     ow = shzlib.TOOLS_DIR / "ow" / "binl64" / "wcc"
     tools["open-watcom"] = {"path": str(ow), "present": ow.exists(),
@@ -91,7 +93,7 @@ def cmd_doctor(args):
 
 
 def qemu_path():
-    return "/usr/libexec/qemu-kvm" if Path("/usr/libexec/qemu-kvm").exists() else (shutil.which("qemu-system-x86_64") or "")
+    return qemu_tools.DEFAULT_QEMU if Path(qemu_tools.DEFAULT_QEMU).exists() else (shutil.which("qemu-system-x86_64") or "")
 
 
 def guest_capabilities():
@@ -121,7 +123,7 @@ def cmd_build(args):
         print("BLOCKED: this profile has no implementation yet")
         return 2
     for step in profile["steps"]:
-        script = SHZ / step / "build.py"
+        script = SHZ / step
         print(f"== build {step}")
         run([sys.executable, script], timeout=900)
     return 0
@@ -167,17 +169,43 @@ def suite_host(results):
                detail=head[:12])
 
 
+def l1_vmx_available():
+    nested = Path("/sys/module/kvm_intel/parameters/nested")
+    return Path("/dev/kvm").exists() and nested.exists() and nested.read_text().strip() in ("Y", "1")
+
+
+def supervisor_checks(prefix):
+    """Checks named `prefix*` from the last Supervisor run, as (name, status, detail); None if it never ran."""
+    rj = BUILD / "supervisor" / "run-uefi-vreal" / "result.json"
+    if not rj.exists():
+        return None
+    return [(c["check"], c["status"], c.get("detail", "")) for c in json.loads(rj.read_text()).get("checks", [])
+            if c["check"].startswith(prefix)]
+
+
+def record_domain(results, label, prefix, vmx_reason):
+    checks = supervisor_checks(prefix)
+    if checks is None:
+        record(results, label, "BLOCKED", detail=vmx_reason)
+    elif not checks:
+        record(results, label, "FAIL", detail=f"the Supervisor run contains no `{prefix}` checks (domain not started)")
+    else:
+        bad = [c for c in checks if c[1] != "PASS"]
+        record(results, label, "FAIL" if bad else "PASS",
+               detail=(f"{bad[0][0]}: {bad[0][2]}" if bad else f"{len(checks)} guest-evidence checks"))
+
+
 def suite_boot(results):
     ok = run_script(results, "DOS16 on legacy BIOS (SeaBIOS, real Real Mode) [KVM]",
                     [SHZ / "dos16" / "test_csm.py", "--accel", "kvm"], expect_marker="PASS")
     run_script(results, "DOS16 on legacy BIOS (SeaBIOS) [TCG software CPU]",
                [SHZ / "dos16" / "test_csm.py", "--accel", "tcg", "--timeout", "240"], timeout=400,
                expect_marker="PASS")
-    l1_vmx = Path("/sys/module/kvm_intel/parameters/nested").exists() and \
-        Path("/sys/module/kvm_intel/parameters/nested").read_text().strip() in ("Y", "1")
-    if not l1_vmx:
-        record(results, "UEFI Supervisor: DOS16 in virtual Real Mode (Intel VMX)", "BLOCKED",
-               detail="L0 lacks nested VMX; a TCG boot would not exercise the VMX backend")
+    if not l1_vmx_available():
+        reason = "L0 lacks /dev/kvm or nested VMX; a TCG boot would not exercise the VMX backend"
+        for label in ("UEFI Supervisor: DOS16 in virtual Real Mode (Intel VMX)", "Kernel32 (Protected Mode) domain",
+                      "Kernel64 (Long Mode) domain"):
+            record(results, label, "BLOCKED", detail=reason)
         return
     build_ok = (BUILD / "supervisor" / "esp.img").exists()
     if not build_ok:
@@ -187,8 +215,8 @@ def suite_boot(results):
     run_script(results, "negative: VMX hidden from L1 -> loader refuses and returns to firmware",
                [SHZ / "supervisor" / "test_qemu.py", "--no-vmx", "--timeout", "40"], timeout=200, expect_marker="PASS")
     record(results, "AMD SVM backend", "BLOCKED", detail="loader detects SVM; backend not implemented, no AMD host")
-    record(results, "Kernel32 (Protected Mode) domain", "BLOCKED", detail="not implemented")
-    record(results, "Kernel64 (Long Mode) domain", "BLOCKED", detail="not implemented")
+    record_domain(results, "Kernel32 (Protected Mode) domain", "K32 ", "no Supervisor result")
+    record_domain(results, "Kernel64 (Long Mode) domain", "K64 ", "no Supervisor result")
 
 
 def suite_interkernel(results):
@@ -201,8 +229,15 @@ def suite_interkernel(results):
 
 
 def suite_win64(results):
-    for name in ("PE32+ loader host tests", "Kernel64 user-mode process", "Win64 console app", "external Win64 app"):
-        record(results, name, "BLOCKED", detail="Win64 subsystem not implemented")
+    run_script(results, "PE32+ loader host tests (parser, fuzz, ASan/UBSan)", [SHZ / "win64" / "tests" / "test_pe_parse.py"])
+    run_script(results, "Win64 runtime build: ntdll.dll + kernel32.dll + test apps (-Werror)", [SHZ / "win64" / "build.py"])
+    run_script(results, "Kernel32/Kernel64 build (separate ELF32/ELF64 images)", [SHZ / "kbuild.py"])
+    reason = "needs Intel VMX in L1 (/dev/kvm + kvm_intel nested); run `test --suite boot` on such a host"
+    if l1_vmx_available() and not supervisor_checks("Win64: "):
+        run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=600)
+        run([sys.executable, SHZ / "supervisor" / "test_qemu.py"], capture=True, check=False, timeout=400)
+    record_domain(results, "Kernel64 user-mode process + Win64 console app (T_HELLO.EXE from WIN64.IMG)", "Win64: ", reason)
+    record(results, "external Win64 app", "BLOCKED", detail="no third-party PE32+ application is supplied or run")
 
 
 REGRESSION_STEPS = [
@@ -224,8 +259,8 @@ REGRESSION_STEPS = [
     ("USB EP0 transfers", ["drivers/xhci_usb/test.py"]),
 ]
 REGRESSION_QEMU = [
-    ("UEFI x64 boot under KVM (existing ShizukuDOS UEFI)", "shizukudos/uefi/test_qemu.py"),
-    ("UEFI x64 -> 32-bit PM handoff under KVM", "shizukudos/uefi32/test_qemu.py"),
+    ("UEFI x64 boot (existing ShizukuDOS UEFI)", "shizukudos/uefi/test_qemu.py"),
+    ("UEFI x64 -> 32-bit PM handoff", "shizukudos/uefi32/test_qemu.py"),
 ]
 
 
@@ -257,10 +292,12 @@ def suite_win98_regression(results):
         last = (proc.stdout or "").strip().splitlines()[-1:] or [""]
         record(results, f"existing regression: {name}", "PASS" if proc.returncode == 0 else "FAIL",
                detail=last[0][:160], exit_code=proc.returncode, command=f"python3 {argv[0]}")
-    if Path(qemu_path()).exists() and Path("/usr/share/edk2/ovmf/OVMF_CODE.fd").exists():
+    if Path(qemu_path()).exists() and Path(qemu_tools.DEFAULT_OVMF_CODE).exists():
+        accel = "kvm" if Path("/dev/kvm").exists() else "tcg"      # neither test needs VMX; the accelerator is recorded
         for name, script in REGRESSION_QEMU:
-            argv = [tree / script, "--qemu", qemu_path(), "--firmware-code", "/usr/share/edk2/ovmf/OVMF_CODE.fd",
-                    "--firmware-vars", "/usr/share/edk2/ovmf/OVMF_VARS.fd"]
+            name = f"{name} [{accel.upper()}]"
+            argv = [tree / script, "--qemu", qemu_path(), "--firmware-code", qemu_tools.DEFAULT_OVMF_CODE,
+                    "--firmware-vars", qemu_tools.DEFAULT_OVMF_VARS, "--accel", accel]
             if not argv[0].exists():
                 record(results, f"existing regression: {name}", "SKIP", detail="script absent")
                 continue

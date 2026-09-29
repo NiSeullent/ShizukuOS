@@ -3,11 +3,15 @@
  * state and published through SHZ_HC_EVIDENCE for independent verification by the host.
  */
 #include "proc_internal.h"
+#include "fs.h"
 
 extern void vm_set_demand_range(uint64_t lo, uint64_t hi);
 extern uint64_t demand_faults;
 extern uint64_t arch_timer_irqs(void);
 extern uint32_t arch_exception_count(unsigned v);
+extern int initrd_files;                                  /* main.c: files mounted from WIN64.IMG, -1 = none */
+extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
+                                  process_t **out_proc, thread_t **out_thread);
 
 static unsigned failures;
 #define CHECK(name, cond) do { if (cond) kprintf("K64 test PASS: %s\n", name); \
@@ -129,6 +133,44 @@ static void test_user(void)
     CHECK("no physical pages leaked by five processes", pmm_free_count() == free_before);
 }
 
+/* Win64 end to end: initrd file system -> PE32+ loader -> user-mode ntdll/kernel32 -> console app -> exit code.
+ * T_HELLO.EXE returns 7 and reports through evidence slots 19..21 (image base, PROCESSOR_ARCHITECTURE, argc).
+ * The first run warms the kernel heap, so the page count of the second run must return to its starting value. */
+#define WIN64_TEST_EXE "\\SHZ\\TESTS\\T_HELLO.EXE"
+static int win64_run(int64_t *code, int *faulted)
+{
+    process_t *p = 0;
+    thread_t *t = 0;
+    int32_t st = ldr_create_process(0, WIN64_TEST_EXE, "T_HELLO.EXE first", "C:\\SHZ\\TESTS", &p, &t);
+    if (st) {
+        kprintf("K64 win64: ldr_create_process failed (%x)\n", (uint32_t)st);
+        return -1;
+    }
+    return proc_wait(p->pid, code, faulted);
+}
+
+static void test_win64(void)
+{
+    int64_t code1 = -1, code2 = -1;
+    int f1 = 1, f2 = 1, ran1, ran2;
+    uint64_t free_before;
+    CHECK("initrd mounted with ntdll, kernel32 and the Win64 test app",
+          initrd_files > 0 && fs_lookup("\\SHZ\\SYS64\\ntdll.dll") && fs_lookup("\\SHZ\\SYS64\\kernel32.dll") &&
+          fs_lookup(WIN64_TEST_EXE));
+    shz_evidence(23, initrd_files > 0 ? (uint64_t)initrd_files : 0);
+    if (initrd_files <= 0 || !fs_lookup(WIN64_TEST_EXE))
+        return;
+    ran1 = win64_run(&code1, &f1);
+    free_before = pmm_free_count();
+    ran2 = win64_run(&code2, &f2);
+    shz_evidence(22, free_before - pmm_free_count());
+    shz_evidence(30, (uint64_t)(uint32_t)code2 | ((uint64_t)(f1 | f2) << 32) | ((uint64_t)(ran1 == 0 && ran2 == 0) << 33) |
+                         ((uint64_t)((uint32_t)code1 == (uint32_t)code2) << 34));
+    CHECK("Win64 console app runs to exit code 7 twice without a fault",
+          ran1 == 0 && ran2 == 0 && code1 == 7 && code2 == 7 && !f1 && !f2);
+    CHECK("second Win64 process returns every physical page", pmm_free_count() == free_before);
+}
+
 void run_self_tests(const shz_bootinfo_t *bi)
 {
     (void)bi;
@@ -140,6 +182,7 @@ void run_self_tests(const shz_bootinfo_t *bi)
     test_mutex();
     test_heap_and_demand();
     test_user();
+    test_win64();
 }
 
 unsigned tests_failed(void) { return failures; }

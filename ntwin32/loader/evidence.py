@@ -4,8 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
-FONT = "/usr/share/fonts/google-droid-sans-fonts/DroidSans.ttf"
-FONT_BOLD = "/usr/share/fonts/google-droid-sans-fonts/DroidSans-Bold.ttf"
+_FONTS = (("/usr/share/fonts/google-droid-sans-fonts/DroidSans.ttf", "/usr/share/fonts/google-droid-sans-fonts/DroidSans-Bold.ttf"),
+          ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+          ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+           "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"))
+FONT, FONT_BOLD = next((pair for pair in _FONTS if all(Path(f).exists() for f in pair)), _FONTS[0])
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:

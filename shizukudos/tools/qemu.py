@@ -10,9 +10,16 @@ import subprocess
 import time
 from pathlib import Path
 
-DEFAULT_QEMU = "/usr/libexec/qemu-kvm"
-DEFAULT_OVMF_CODE = "/usr/share/edk2/ovmf/OVMF_CODE.fd"
-DEFAULT_OVMF_VARS = "/usr/share/edk2/ovmf/OVMF_VARS.fd"
+def _first_existing(candidates, fallback):
+    return next((c for c in candidates if Path(c).exists()), fallback)
+
+
+# Fedora/RHEL layout first (the reference host), then Debian/Ubuntu.
+DEFAULT_QEMU = _first_existing(["/usr/libexec/qemu-kvm", "/usr/bin/qemu-system-x86_64"], "/usr/libexec/qemu-kvm")
+DEFAULT_OVMF_CODE = _first_existing(["/usr/share/edk2/ovmf/OVMF_CODE.fd", "/usr/share/OVMF/OVMF_CODE_4M.fd",
+                                     "/usr/share/OVMF/OVMF_CODE.fd"], "/usr/share/edk2/ovmf/OVMF_CODE.fd")
+DEFAULT_OVMF_VARS = _first_existing(["/usr/share/edk2/ovmf/OVMF_VARS.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd",
+                                     "/usr/share/OVMF/OVMF_VARS.fd"], "/usr/share/edk2/ovmf/OVMF_VARS.fd")
 
 
 class QMP:

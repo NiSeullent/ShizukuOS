@@ -108,6 +108,26 @@ def check_kernel64(d):
                    full > 0 and sent >= 30 and ev(d, 15) == sent, f"sent={sent} full={full} replies={ev(d, 15)}"))
     c.append(check("K64 shared-buffer bytes verified by the peer", ev(d, 25) >= 14000, str(ev(d, 25))))
     c.append(check("K64 completion marker and zero self-test failures", ev(d, 29) == 0x4b363421 and ev(d, 28) == 0))
+    c += check_win64(d)
+    return c
+
+
+def check_win64(d):
+    """Win64 app run by Kernel64's self-test: PE32+ loader + user-mode ntdll/kernel32 from WIN64.IMG.
+    Slot 30: bits 0..31 exit code of run 2, bit 32 any fault, bit 33 both runs created and reaped,
+    bit 34 both runs returned the same code. Slots 19..21 are written by the app itself, 22/23 by the kernel."""
+    res = ev(d, 30)
+    c = []
+    c.append(check("Win64: Kernel64 mounted WIN64.IMG (ntdll, kernel32, test app)", ev(d, 23) >= 3,
+                   f"files={ev(d, 23)}"))
+    c.append(check("Win64: T_HELLO.EXE ran twice under the PE32+ loader, exit code 7, no fault",
+                   res & 0xffffffff == 7 and not res >> 32 & 1 and bool(res >> 33 & 1) and bool(res >> 34 & 1),
+                   f"slot30={res:#x}"))
+    c.append(check("Win64: app saw image base 0x140000000 (above 4 GiB), PROCESSOR_ARCHITECTURE=AMD64, argc=2",
+                   ev(d, 19) == 0x140000000 and ev(d, 20) == 1 and ev(d, 21) == 2,
+                   f"base={ev(d, 19):#x} arch_ok={ev(d, 20)} argc={ev(d, 21)}"))
+    c.append(check("Win64: second process returned every physical page", res != 0 and ev(d, 22) == 0,
+                   f"delta={ev(d, 22)} pages"))
     return c
 
 
