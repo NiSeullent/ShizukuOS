@@ -36,7 +36,8 @@
  *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf */
 #define SYSCALL_LIST_REGISTRY(X)
 
-#define SYSCALL_LIST_GRAPHICS(X)
+#define SYSCALL_LIST_GRAPHICS(X) \
+    X(NtUserQueryDisplay, 0x60)
 
 #define SYSCALL_LIST_NET(X)
 
