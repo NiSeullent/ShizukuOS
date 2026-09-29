@@ -1,5 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * ShizukuDOS 10.0 inter-kernel ABI, version 1.0.
+ * ShizukuDOS 10.0 inter-kernel ABI, version 1.1.
+ *
+ * 1.1 adds the WIN64 subsystem message family (shz_ipc.h, opcodes 0x200..0x2ff): a 32-bit
+ * Windows 98 program starts, feeds and observes a Win64 process running in the Kernel64
+ * domain. Version 1.0 receivers still accept every 1.1 frame (same major, same header).
  *
  * Everything on the wire is fixed-width, little-endian and naturally aligned so the
  * same header compiles identically for 16-bit-real-mode assemblers (as offsets), for
@@ -17,7 +21,7 @@
 #include <stdint.h>
 
 #define SHZ_ABI_MAJOR 1
-#define SHZ_ABI_MINOR 0
+#define SHZ_ABI_MINOR 1
 
 /* ---------------------------------------------------------------- domains */
 enum shz_domain_id {
