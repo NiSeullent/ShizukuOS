@@ -74,6 +74,7 @@ int32_t irp_prepare(process_t *p, kobject_t *fobj, uint64_t event_h, uint64_t ap
     if (io && (io->notify & 2)) irp->flags |= IRPF_NO_EVENT_ON_HANDLE;
     if (ev) ob_reset_event(ev);
     if (!(irp->flags & IRPF_NO_EVENT_ON_HANDLE)) fobj->signaled = 0;
+    irp->refs = 1;                                      /* the issuer's, dropped by irp_finish() */
     ++ipc_stat_irps;
     *out = irp;
     return STATUS_SUCCESS;
@@ -89,10 +90,22 @@ void irp_free(irp_t *irp)
     kfree(irp);
 }
 
+/* IRP lifetime: the issuing system call holds one reference until irp_finish(); a pending IRP's queue holds another
+ * until the IRP completes. So a request that another thread completes (and would free) the moment the issuer lets go of
+ * the interrupt lock is never freed under the issuer, and vice versa. */
+void irp_put(irp_t *irp)
+{
+    const uint64_t f = irq_save();
+    const int last = --irp->refs == 0;
+    irq_restore(f);
+    if (last) irp_free(irp);
+}
+
 void irp_mark_pending(irp_t *irp)
 {
     const uint64_t f = irq_save();
     irp->pended = 1;
+    ++irp->refs;                                        /* the queue's reference, dropped when it completes */
     irp->all_next = all_irps;
     all_irps = irp;
     irq_restore(f);
@@ -136,9 +149,8 @@ void irp_complete(irp_t *irp, int32_t status, uint64_t info)
     if (irp->sync) {
         thread_t *w = irp->thread;
         if (w && w->state == TS_BLOCKED && irp->pended) thread_wake(w);
-    } else if (irp->pended) {
-        irp_free(irp);                                  /* nobody waits for an asynchronous pending IRP */
     }
+    if (irp->pended && --irp->refs == 0) irp_free(irp);  /* the queue's reference; the issuer may already be gone */
     irq_restore(f);
 }
 
@@ -148,7 +160,8 @@ int32_t irp_finish(irp_t *irp)
     int32_t st;
     if (!irp->completed && !irp->sync) {
         irq_restore(f);
-        return STATUS_PENDING;                          /* now owned by its queue; freed by irp_complete */
+        irp_put(irp);                                   /* the queue keeps it until it completes */
+        return STATUS_PENDING;
     }
     if (!irp->completed) {                              /* synchronous file object: wait for the completion */
         thread_t *t = thread_current();
@@ -166,7 +179,7 @@ int32_t irp_finish(irp_t *irp)
     }
     st = irp->status;
     irq_restore(f);
-    irp_free(irp);
+    irp_put(irp);
     return st;
 }
 
@@ -203,7 +216,7 @@ restart:
         irp->completed = 1;
         irp->pended = 0;
         if (irp->port) { ob_deref(irp->port); irp->port = 0; }
-        irp_free(irp);
+        if (--irp->refs == 0) irp_free(irp);             /* the queue's reference (the issuing threads are gone) */
         goto restart;
     }
     irq_restore(f);
@@ -645,9 +658,14 @@ void ipc_file_created(process_t *p, uint64_t h, uint32_t options)
 {
     kobject_t *o;
     ioctx_t *io;
-    if (!(options & 0x30u) || handle_ref(p, h, OB_FILE, &o, 0)) return;
+    if (handle_ref(p, h, OB_FILE, &o, 0)) return;
     io = ipc_ioctx(o, 1);
-    if (io) io->sync = 1;
+    if (io) {
+        const uint64_t f = irq_save();
+        io->sync = (options & 0x30u) != 0;
+        if (!io->handles) io->handles = 1;              /* the handle NtCreateFile / NtOpenFile just made */
+        irq_restore(f);
+    }
     ob_deref(o);
 }
 

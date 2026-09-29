@@ -650,3 +650,32 @@ K32API BOOL WINAPI CreatePipe(PHANDLE rd, PHANDLE wr, LPSECURITY_ATTRIBUTES sa, 
     *wr = w;
     return TRUE;
 }
+
+/* ---------------------------------------------------------------- directory change notification */
+/* ReadDirectoryChangesW: FILE_NOTIFY_INFORMATION records for changes in a directory opened with FILE_LIST_DIRECTORY
+ * (and FILE_FLAG_BACKUP_SEMANTICS). Synchronous calls wait for a change; overlapped ones return TRUE at once and
+ * complete through the OVERLAPPED (event / port) or the completion routine. A zero byte count means the change buffer
+ * overflowed: the caller should rescan the directory. */
+K32API BOOL WINAPI ReadDirectoryChangesW(HANDLE dir, LPVOID buf, DWORD len, BOOL subtree, DWORD filter, LPDWORD ret,
+                                         LPOVERLAPPED ov, LPOVERLAPPED_COMPLETION_ROUTINE fn)
+{
+    NTSTATUS st;
+    if (!filter || !buf || !len) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    if (ov) {
+        ov->Internal = STATUS_PENDING;
+        ov->InternalHigh = 0;
+        st = fn ? NtNotifyChangeDirectoryFile(dir, 0, (PVOID)io_completion_apc, (PVOID)fn, (SHZ_IO_STATUS_BLOCK *)ov, buf, len,
+                                              filter, subtree != 0)
+                : NtNotifyChangeDirectoryFile(dir, ov_event(ov), 0, ov_context(ov), (SHZ_IO_STATUS_BLOCK *)ov, buf, len, filter,
+                                              subtree != 0);
+        if (NT_ERROR(st)) { k32_nt_error(st); return FALSE; }
+        return TRUE;                                            /* pending or already complete: the OVERLAPPED says which */
+    } else {
+        SHZ_IO_STATUS_BLOCK iosb;
+        memset(&iosb, 0, sizeof iosb);
+        st = sync_wait(dir, NtNotifyChangeDirectoryFile(dir, 0, 0, 0, &iosb, buf, len, filter, subtree != 0), &iosb);
+        if (ret) *ret = st == STATUS_NOTIFY_ENUM_DIR ? 0 : (DWORD)iosb.Information;
+        if (NT_ERROR(st)) { k32_nt_error(st); return FALSE; }
+        return TRUE;
+    }
+}

@@ -51,6 +51,10 @@ int fs_read(fsnode_t *n, uint64_t off, void *buf, uint64_t len, uint64_t *done);
 int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len);
 int fs_truncate(fsnode_t *n, uint64_t size);
 void fs_remove(fsnode_t *n);
+/* Directory change notification hooks (kernel64/ipc_notify.c). */
+void fs_notify(fsnode_t *n, uint32_t action, uint32_t what);
+void fs_notify_rename(fsnode_t *from, fsnode_t *to);
+extern int fs_notify_suppress;
 fsnode_t *fs_root(void);
 uint64_t fs_total_bytes(void);
 

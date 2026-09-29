@@ -100,6 +100,7 @@ ipc_proc_t *ipc_proc(process_t *p, int create);
 void ipc_process_terminating(process_t *p);    /* wakes the process's blocked threads (except the caller) so they die */
 void ipc_reap(void);
 void ipc_wake_to_die(thread_t *t);               /* interrupts off */
+unsigned ipc_live_threads(process_t *p, thread_t *except);
 ipc_thread_t *ipc_thread(thread_t *t, int create);
 
 /* ---------------------------------------------------------------- handles and objects */
@@ -134,6 +135,7 @@ struct irp {
     uint64_t key;
     int sync;                           /* the issuer waits inside the system call */
     int completed, pended;
+    int refs;                           /* the issuer's reference (until irp_finish) + the queue's while pending */
     int32_t status;
     uint64_t info;
     void *owner;                        /* object whose queue holds the IRP, for cancellation */
@@ -148,6 +150,7 @@ typedef struct {
     uint64_t key;
     uint32_t notify;                    /* FILE_SKIP_COMPLETION_PORT_ON_SUCCESS 1 | FILE_SKIP_SET_EVENT_ON_HANDLE 2 */
     int sync;                           /* FILE_SYNCHRONOUS_IO_*: the object has a current position, I/O waits */
+    uint32_t handles;                   /* open handles of a file object (directory watches end with the last one) */
 } ioctx_t;
 
 ioctx_t *ipc_ioctx(kobject_t *fobj, int create);
@@ -155,6 +158,7 @@ ioctx_t *ipc_ioctx(kobject_t *fobj, int create);
 int32_t irp_prepare(process_t *p, kobject_t *fobj, uint64_t event_h, uint64_t apc_routine, uint64_t apc_context,
                     uint64_t iosb, uint32_t major, irp_t **out);
 void irp_free(irp_t *irp);
+void irp_put(irp_t *irp);               /* drops one reference; the last one frees the IRP */
 /* Queues the IRP as pending on its owner (the caller linked it into its owner's queue and set irp->cancel). */
 void irp_mark_pending(irp_t *irp);
 /* Completes an IRP (interrupts off): IOSB, event, file object, APC or completion packet, sync waiter. */
@@ -186,6 +190,12 @@ int32_t ipc_proc_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1
                          int *handled);
 int32_t npfs_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
                      int *handled);
+int32_t ipc_timer_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+                          int *handled);
+void timer_free(kobject_t *o);
+int32_t ipc_notify_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+                           int *handled);
+void notify_handle_closed(kobject_t *o);
 
 /* sections */
 void section_free(kobject_t *o);

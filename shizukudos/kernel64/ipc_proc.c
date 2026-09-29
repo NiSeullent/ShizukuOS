@@ -47,7 +47,9 @@ int32_t process_terminate_others(process_t *p, int32_t code)
     p->exit_owner = me;
     p->exit_code = code;                                /* the victims' exit code (reported once the process ends) */
     irq_restore(f);
-    while (p->threads_alive > 1 && !p->terminated) {
+    /* until every victim has completed thread_exit() - not merely left the thread count - so its thread object is
+     * signaled before DLL_PROCESS_DETACH can look at it */
+    while ((p->threads_alive > 1 || ipc_live_threads(p, me)) && !p->terminated) {
         ipc_process_terminating(p);                     /* repeated: a victim may block again before it notices */
         thread_sleep_ms(1);
     }

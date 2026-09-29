@@ -82,6 +82,11 @@ static fsnode_t *resolve(const char *path, int want_parent, char *leaf, size_t l
 
 fsnode_t *fs_lookup(const char *path) { return resolve(path, 0, 0, 0); }
 
+/* Directory change notification (kernel64/ipc_notify.c; no-op when it is not linked): `n` was added (1), removed (2) or
+ * modified (3); `what` holds the FILE_NOTIFY_CHANGE_* bits the change matches. */
+void __attribute__((weak)) fs_notify(fsnode_t *n, uint32_t action, uint32_t what) { (void)n; (void)action; (void)what; }
+#define NOTIFY_NAME(n) ((n)->is_dir ? 0x2u : 0x1u)            /* FILE_NOTIFY_CHANGE_DIR_NAME / FILE_NAME */
+
 fsnode_t *fs_create(const char *path, int is_dir, int *created)
 {
     char leaf[96];
@@ -100,6 +105,7 @@ fsnode_t *fs_create(const char *path, int is_dir, int *created)
     dir->child = n;
     n->ctime = n->mtime = ticks_now();
     if (created) *created = 1;
+    fs_notify(n, 1, NOTIFY_NAME(n) | 0x40u);                  /* FILE_ACTION_ADDED; CREATION */
     return n;
 }
 
@@ -144,6 +150,7 @@ int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len)
     memcpy(n->data + off, buf, len);
     if (off + len > n->size) n->size = off + len;
     n->mtime = ticks_now();
+    fs_notify(n, 3, 0x18u);                                    /* FILE_ACTION_MODIFIED; SIZE | LAST_WRITE */
     return 0;
 }
 
@@ -157,6 +164,7 @@ int fs_truncate(fsnode_t *n, uint64_t size)
         memset(n->data + n->size, 0, size - n->size);
     }
     n->size = size;
+    fs_notify(n, 3, 0x18u);
     return 0;
 }
 
@@ -164,6 +172,7 @@ void fs_remove(fsnode_t *n)
 {
     fsnode_t **pp;
     if (!n->parent) return;
+    fs_notify(n, 2, NOTIFY_NAME(n));                           /* FILE_ACTION_REMOVED */
     for (pp = &n->parent->child; *pp; pp = &(*pp)->sibling)
         if (*pp == n) { *pp = n->sibling; break; }
     if (n->data && !n->readonly) { total_bytes -= n->cap; kfree(n->data); }

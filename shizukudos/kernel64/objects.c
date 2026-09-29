@@ -328,9 +328,12 @@ void ob_register_timer(kobject_t *o)
     if (timer_count < 16) timers_head[timer_count++] = o;
 }
 
+void __attribute__((weak)) ipc_timer_tick(uint64_t now) { (void)now; }   /* waitable timers (ipc_timer.c) */
+
 void sched_check_timeouts(uint64_t now)
 {
     unsigned i;
+    ipc_timer_tick(now);
     for (i = 0; i < timer_count; ++i) {
         kobject_t *o = timers_head[i];
         if (o->u.timer.armed && o->u.timer.due_tick <= now) {

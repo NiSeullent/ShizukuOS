@@ -79,6 +79,13 @@ int32_t ipc_name_from_oa(process_t *p, uint64_t oa_va, char *out, size_t cap, ui
 void ipc_handle_opened(kobject_t *o)
 {
     switch (o->type) {
+    case OB_FILE: {
+        ioctx_t *io = o->u.file.io;
+        const uint64_t f = irq_save();
+        if (io) ++io->handles;
+        irq_restore(f);
+        break;
+    }
     case OB_NPIPE: case OB_IOCP: case OB_JOB: {
         uint32_t *count = o->u.file.file;               /* each private struct starts with its handle count */
         const uint64_t f = irq_save();
@@ -163,6 +170,14 @@ void ipc_handle_closed(process_t *p, kobject_t *o)
     uint64_t f;
     int last;
     (void)p;
+    if (o->type == OB_FILE) {                           /* counted since ipc_file_created(); others are not tracked */
+        ioctx_t *io = o->u.file.io;
+        f = irq_save();
+        last = io && io->handles && --io->handles == 0;
+        irq_restore(f);
+        if (last) notify_handle_closed(o);
+        return;
+    }
     if (o->type != OB_NPIPE && o->type != OB_IOCP && o->type != OB_JOB) return;
     count = o->u.file.file;
     if (!count) return;
@@ -182,6 +197,7 @@ void ipc_object_free(kobject_t *o)
     case OB_NPIPE: npfs_free(o); ioctx_free(o); break;
     case OB_IOCP: iocp_free(o); break;
     case OB_JOB: job_free(o); break;
+    case OB_TIMER: timer_free(o); break;
     case OB_FILE: ioctx_free(o); break;
     case OB_THREAD: {                                   /* the exited thread's slot and its process reference */
         thread_t *t = o->u.thr.t;
@@ -252,6 +268,21 @@ static void kill_wake(thread_t *t, void *ctx)
 }
 
 void ipc_process_terminating(process_t *p) { sched_for_each_thread(kill_wake, p); }
+
+struct live_count { process_t *p; thread_t *except; unsigned n; };
+static void count_live(thread_t *t, void *ctx)
+{
+    struct live_count *c = ctx;
+    if (t->proc == c->p && t != c->except && t->state != TS_ZOMBIE && t->state != TS_FREE) ++c->n;
+}
+
+/* Threads of `p` other than `except` that have not finished thread_exit() (their thread objects are not signaled yet). */
+unsigned ipc_live_threads(process_t *p, thread_t *except)
+{
+    struct live_count c = { p, except, 0 };
+    sched_for_each_thread(count_live, &c);
+    return c.n;
+}
 
 void ipc_process_teardown(process_t *p)
 {
@@ -544,6 +575,10 @@ static int32_t route(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     st = ipc_io_syscall(p, r, num, a1, a2, a3, a4, handled);
     if (*handled) return st;
     st = ipc_proc_syscall(p, r, num, a1, a2, a3, a4, handled);
+    if (*handled) return st;
+    st = ipc_timer_syscall(p, r, num, a1, a2, a3, a4, handled);
+    if (*handled) return st;
+    st = ipc_notify_syscall(p, r, num, a1, a2, a3, a4, handled);
     if (*handled) return st;
     return ipc_section_syscall(p, r, num, a1, a2, a3, a4, handled);
 }
