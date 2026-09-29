@@ -19,13 +19,9 @@ extern uint64_t ticks_now(void);
 
 uint32_t ipc_stat_sections, ipc_stat_views, ipc_stat_pipes, ipc_stat_irps, ipc_stat_packets, ipc_stat_jobs;
 
-/* Current time as a FILETIME (100 ns since 1601), from the platform's wall clock. */
-int64_t shz_filetime_now_ipc(void)
-{
-    hcreg_t secs = 0;
-    shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
-    return (int64_t)(secs + 11644473600ull) * 10000000ll + (int64_t)((shz_time_ns() % 1000000000ull) / 100);
-}
+/* Current time as a FILETIME (100 ns since 1601): the clock NtQuerySystemTime reports (sysx.c). */
+extern int64_t filetime_now(void);
+int64_t shz_filetime_now_ipc(void) { return filetime_now(); }
 
 /* ---------------------------------------------------------------- per-process / per-thread state */
 ipc_proc_t *ipc_proc(process_t *p, int create)

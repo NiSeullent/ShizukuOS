@@ -61,10 +61,23 @@ static kobject_t *object_for_handle(process_t *p, uint64_t h)
 
 int64_t filetime_now(void)
 {
-    /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform). */
-    hcreg_t secs = 0;
-    shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
-    return (int64_t)(secs + 11644473600ull) * 10000000ll + (int64_t)((shz_time_ns() % 1000000000ull) / 100);
+    /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform), read once: the time then advances
+     * with the monotonic nanosecond clock. Adding that clock's sub-second part to each fresh whole-second RTC reading made
+     * the result jump by up to a second either way (the two clocks' seconds do not start together), so a time taken later
+     * could read earlier. */
+    static int64_t base;                                /* FILETIME at shz_time_ns() == 0 */
+    const uint64_t ns = shz_time_ns();
+    if (!base) {
+        hcreg_t secs = 0;
+        int64_t b;
+        uint64_t f;
+        shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
+        b = (int64_t)(secs + 11644473600ull) * 10000000ll - (int64_t)(ns / 100);
+        f = irq_save();
+        if (!base) base = b;
+        irq_restore(f);
+    }
+    return base + (int64_t)(ns / 100);
 }
 
 int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)

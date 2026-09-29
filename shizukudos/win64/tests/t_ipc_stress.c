@@ -93,11 +93,15 @@ typedef struct {
     int done, broken, killed;
 } peer_t;
 
+/* 1: a completion packet will come (pending, or completed at once with success). 0: the request failed at once - as on
+ * Windows no packet is queued for that - e.g. ERROR_BROKEN_PIPE when the client end is already closed. */
 static int start_read(peer_t *c)
 {
     memset(&c->ov_read, 0, sizeof c->ov_read);
     if (ReadFile(c->pipe, (char *)&c->in + c->have, sizeof c->in - c->have, 0, &c->ov_read)) return 1;
-    return GetLastError() == ERROR_IO_PENDING || GetLastError() == ERROR_BROKEN_PIPE;  /* broken: its packet still comes */
+    if (GetLastError() == ERROR_IO_PENDING) return 1;
+    c->broken = GetLastError() == ERROR_BROKEN_PIPE;
+    return 0;
 }
 
 /* One round; returns the number of failed checks. */
@@ -142,7 +146,14 @@ static int run_round(unsigned round, unsigned *served)
         BOOL ok = GetQueuedCompletionStatus(port, &n, &key, &ov, 15000);
         const DWORD err = ok ? 0 : GetLastError();
         peer_t *c;
-        if (!ov) { ++hangs; break; }                           /* no completion within 15 s: something hangs */
+        if (!ov) {                                              /* no completion within 15 s: something hangs */
+            ++hangs;
+            for (i = 0; i < NCHILD; ++i)
+                if (!peers[i].done)
+                    printf("  round %u: peer %u still active: %u served, %u bytes pending, child sent %d acked %d\n", round, i,
+                           peers[i].expect, (unsigned)peers[i].have, (int)slots[i].sent, (int)slots[i].acked);
+            break;
+        }
         if (key >= NCHILD) { ++bad_msgs; continue; }
         c = &peers[key];
         if (ov == &c->ov_conn) {
