@@ -238,6 +238,17 @@ def suite_win64(results):
     run_script(results, "Kernel32/Kernel64 build (separate ELF32/ELF64 images)", [SHZ / "kbuild.py"])
     run_script(results, "Kernel64 + Win64 apps on QEMU (standalone stub, no Supervisor/VMX): self-tests, T_HELLO.EXE exit 7",
                [SHZ / "tests" / "run_k64_standalone.py"], timeout=400, expect_marker="PASS")
+    run_script(results, "virtqueue model, virtio-gpu layout, virgl encoder (+ execution on the host's virglrenderer)",
+               [SHZ / "tests" / "test_virtio_host.py"], timeout=600, expect_marker="PASS")
+    for display in ("vga", "virtio"):
+        run_script(results, f"Kernel64 GUI + GPU on QEMU, display {display}: every scene pixel-exact, GPU traffic checks",
+                   [SHZ / "tests" / "run_k64_gui.py", "--display", display, "--timeout", "600",
+                    "--out", BUILD / "kernel64s" / f"gui-{display}"], timeout=900, expect_marker="PASS")
+    gl = run([sys.executable, SHZ / "tests" / "run_k64_gui.py", "--display", "virtio-gl", "--timeout", "600",
+              "--out", BUILD / "kernel64s" / "gui-virtio-gl"], capture=True, check=False, timeout=900)
+    lines = (gl.stdout or "").strip().splitlines()
+    record(results, "Kernel64 virgl 3D through virtio-gpu-gl (T_GPU_3D triangle on the host GPU)",
+           {0: "PASS", 2: "BLOCKED"}.get(gl.returncode, "FAIL"), detail=lines[-1] if lines else "", exit_code=gl.returncode)
     reason = "needs Intel VMX in L1 (/dev/kvm + kvm_intel nested); run `test --suite boot` on such a host"
     if l1_vmx_available() and not supervisor_checks("Win64: "):
         run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=600)
