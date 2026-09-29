@@ -1215,7 +1215,8 @@ def qemu_uefi(iso_path: Path, evidence: Path, tag: str = "") -> str:
         try:
             monitor = connect_unix(monitor_path, 5)
             save_png(monitor, evidence / "uefi.ppm", BUILD / f"windows98-shizuku-second-edition{tag}-uefi.png")
-            png = f"PNG {BUILD / f'windows98-shizuku-second-edition{tag}-uefi.png'}\n"
+            png = (f"PNG {BUILD / f'windows98-shizuku-second-edition{tag}-uefi.png'} "
+                   "(taken after the loader returned to firmware: it shows the firmware, not the loader text)\n")
         except Exception as exc:  # the screenshot is a convenience, the serial text is the evidence
             png = f"no UEFI screenshot ({exc})\n"
         seen = [line.strip() for line in text.splitlines()
