@@ -432,10 +432,35 @@ index 3aca97a..28c8e86 100644
  done:
      RegCloseKey(key);
 diff --git a/dlls/crypt32/sip.c b/dlls/crypt32/sip.c
-index d9da19b..8da42c0 100644
+index d9da19b..ad56ca5 100644
 --- a/dlls/crypt32/sip.c
 +++ b/dlls/crypt32/sip.c
-@@ -665,6 +665,7 @@ BOOL WINAPI CryptSIPLoad
+@@ -605,18 +605,21 @@ static BOOL CRYPT_LoadSIP(const GUID *pgSubject)
+         goto error;
+     FreeLibrary(temp);
+     temp = NULL;
++    /* Shizuku: Create/Verify/Remove are optional. The Wine providers (wintrust) implement them as FIXME stubs, which
++     * the Shizuku build does not export; a SIP that provides Get/Put still loads, and the dispatchers below fail with
++     * ERROR_NOT_SUPPORTED for a missing entry point instead of pretending. */
+     sip.pfCreate = CRYPT_LoadSIPFunc(pgSubject, L"CreateIndirectData\\", &temp);
+-    if (!sip.pfCreate || temp != lib)
++    if (sip.pfCreate && temp != lib)
+         goto error;
+     FreeLibrary(temp);
+     temp = NULL;
+     sip.pfVerify = CRYPT_LoadSIPFunc(pgSubject, L"VerifyIndirectData\\", &temp);
+-    if (!sip.pfVerify || temp != lib)
++    if (sip.pfVerify && temp != lib)
+         goto error;
+     FreeLibrary(temp);
+     temp = NULL;
+     sip.pfRemove = CRYPT_LoadSIPFunc(pgSubject, L"RemoveSignedDataMsg\\", &temp);
+-    if (!sip.pfRemove || temp != lib)
++    if (sip.pfRemove && temp != lib)
+         goto error;
+     FreeLibrary(temp);
+     sip.hSIP = lib;
+@@ -665,6 +668,7 @@ BOOL WINAPI CryptSIPLoad
          SetLastError(ERROR_INVALID_PARAMETER);
          return FALSE;
      }
@@ -443,3 +468,39 @@ index d9da19b..8da42c0 100644
      if (!CRYPT_IsSIPCached(pgSubject) && !CRYPT_LoadSIP(pgSubject))
          return FALSE;
  
+@@ -695,7 +699,10 @@ BOOL WINAPI CryptSIPCreateIndirectData(SIP_SUBJECTINFO* pSubjectInfo, DWORD* pcb
+         return FALSE;
+     }
+     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
+-        ret = sip->info.pfCreate(pSubjectInfo, pcbIndirectData, pIndirectData);
++    {
++        if (sip->info.pfCreate) ret = sip->info.pfCreate(pSubjectInfo, pcbIndirectData, pIndirectData);
++        else SetLastError(ERROR_NOT_SUPPORTED);
++    }
+     TRACE("returning %d\n", ret);
+     return ret;
+ }
+@@ -750,7 +757,10 @@ BOOL WINAPI CryptSIPRemoveSignedDataMsg(SIP_SUBJECTINFO* pSubjectInfo,
+     TRACE("(%p %ld)\n", pSubjectInfo, dwIndex);
+ 
+     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
+-        ret = sip->info.pfRemove(pSubjectInfo, dwIndex);
++    {
++        if (sip->info.pfRemove) ret = sip->info.pfRemove(pSubjectInfo, dwIndex);
++        else SetLastError(ERROR_NOT_SUPPORTED);
++    }
+     TRACE("returning %d\n", ret);
+     return ret;
+ }
+@@ -767,7 +777,10 @@ BOOL WINAPI CryptSIPVerifyIndirectData(SIP_SUBJECTINFO* pSubjectInfo,
+     TRACE("(%p %p)\n", pSubjectInfo, pIndirectData);
+ 
+     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
+-        ret = sip->info.pfVerify(pSubjectInfo, pIndirectData);
++    {
++        if (sip->info.pfVerify) ret = sip->info.pfVerify(pSubjectInfo, pIndirectData);
++        else SetLastError(ERROR_NOT_SUPPORTED);
++    }
+     TRACE("returning %d\n", ret);
+     return ret;
+ }

@@ -6,6 +6,7 @@
  * PAGE_READONLY / PAGE_WRITECOPY (or the EXECUTE variants) and views with FILE_MAP_READ / FILE_MAP_COPY. A view is
  * a private copy of the file range read at MapViewOfFile time (read-only pages for FILE_MAP_READ, writable private
  * pages for FILE_MAP_COPY), which is what those protections mean as long as nobody writes the file while it is mapped.
+ * The file position is saved and restored around that read (not atomic against another thread using the same handle).
  * Everything else - page-file backed or named sections, writable shared views - fails with ERROR_NOT_SUPPORTED: that
  * needs kernel support and is not emulated. Mapping handles are closed through CloseHandle as usual.
  */
@@ -94,7 +95,8 @@ HANDLE WINAPI CreateFileMappingA(HANDLE file, SECURITY_ATTRIBUTES *sa, DWORD pro
 void *WINAPI MapViewOfFileEx(HANDLE h, DWORD access, DWORD off_high, DWORD off_low, SIZE_T bytes, void *addr)
 {
     ULONGLONG off = ((ULONGLONG)off_high << 32) | off_low;
-    LARGE_INTEGER pos;
+    LARGE_INTEGER pos, zero, saved;
+    BOOL have_saved;
     BYTE *base;
     SIZE_T done = 0;
     DWORD old;
@@ -122,6 +124,10 @@ void *WINAPI MapViewOfFileEx(HANDLE h, DWORD access, DWORD off_high, DWORD off_l
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
         return NULL;
     }
+    /* the duplicated handle shares the file object, hence its position: a real mapping does not move the file
+     * pointer (wintrust maps a file and then reads it from where the caller left it), so it is restored */
+    zero.QuadPart = 0;
+    have_saved = SetFilePointerEx(mappings[i].file, zero, &saved, FILE_CURRENT);
     pos.QuadPart = off;
     if (SetFilePointerEx(mappings[i].file, pos, NULL, FILE_BEGIN))
         while (done < bytes)
@@ -130,6 +136,7 @@ void *WINAPI MapViewOfFileEx(HANDLE h, DWORD access, DWORD off_high, DWORD off_l
             if (!ReadFile(mappings[i].file, base + done, want, &got, NULL) || !got) break;
             done += got;
         }
+    if (have_saved) SetFilePointerEx(mappings[i].file, saved, NULL, FILE_BEGIN);
     if (done != bytes)
     {
         VirtualFree(base, 0, MEM_RELEASE);
