@@ -606,6 +606,9 @@ def main():
     for dll in sorted(f.rsplit("\\", 1)[-1].lower() for f in built if f.upper().startswith("\\SHZ\\SYS64\\")):
         rep.check(f"status: {dll} was loaded in the guest and its first export resolved", loaded.get(dll, False),
                   "reported" if dll in loaded else "not reported by T_GUI_STATUS")
+    pci = re.findall(r"STATUS-PCI: \S+ 1234:1111 class 03\S* irq \d+ driver=(.*)", serial)
+    rep.check("status: the Bochs VBE display (PCI 1234:1111) is listed as bound to the gfx_fb kernel driver",
+              any(d.startswith("gfx_fb") for d in pci), "; ".join(pci) or "not listed")
     for scene in sorted(SCENES):
         rep.check(f"scene {scene} was shown and verified", scene in seen)
     status = "PASS" if all(x["status"] == "PASS" for x in rep.items) else "FAIL"
