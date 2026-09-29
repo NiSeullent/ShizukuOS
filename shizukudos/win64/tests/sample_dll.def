@@ -1,0 +1,6 @@
+LIBRARY sample_dll.dll
+EXPORTS
+  shz_add
+  shz_value DATA
+  shz_fwd = kernel32.Sleep
+  shz_ord_fn @7 NONAME

@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Run host validation and bind its receipt to exact source/artifact hashes.
+SPDX-License-Identifier: GPL-2.0-only
+"""
+from pathlib import Path
+import hashlib
+import json
+import subprocess
+import sys
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
+BUILD = HERE / 'build'
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+def main():
+    paths = [p for p in HERE.rglob('*') if p.is_file() and
+             'build' not in p.relative_to(HERE).parts and
+             '__pycache__' not in p.relative_to(HERE).parts]
+    paths += [HERE.parent/'core.c', HERE.parent/'include/ntwrapper.h',
+              BUILD/'NTWRAP9X.VXD', BUILD/'NTWRAP9X.elf', BUILD/'NTWQUERY.EXE', BUILD/'manifest.json']
+    before = {str(p.relative_to(ROOT)): digest(p) for p in sorted(paths)}
+    manifest = json.loads((BUILD/'manifest.json').read_text())
+    for name, expected in manifest['sources'].items():
+        if digest(ROOT/name) != expected:
+            raise SystemExit('Build inputs changed; rebuild before testing: '+name)
+    if digest(BUILD/'NTWRAP9X.VXD') != manifest['sha256'] or digest(BUILD/'NTWQUERY.EXE') != manifest['probe']['sha256']:
+        raise SystemExit('Build artifact hash does not match manifest')
+    result = subprocess.run([sys.executable, '-B', '-m', 'unittest', 'discover',
+                             '-s', str(HERE/'tests'), '-v'], cwd=ROOT,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    print(result.stdout, end='')
+    (BUILD/'host-tests.log').write_text(result.stdout)
+    unchanged = all(p.is_file() and digest(p) == before[str(p.relative_to(ROOT))] for p in paths)
+    passed = result.returncode == 0 and unchanged
+    report = {
+        'schema': 1,
+        'passed': passed,
+        'inputs_unchanged_during_test': unchanged,
+        'artifact_sha256': manifest['sha256'],
+        'probe_sha256': manifest['probe']['sha256'],
+        'hashes': before,
+        'log_sha256': digest(BUILD/'host-tests.log'),
+        'statuses': {name: ('passed' if passed else 'failed-or-unverified') for name in
+                     ('host_bridge_asan_ubsan', 'i386_control_harness', 'static_le_relocations',
+                      'native_contract_constants', 'win32_probe_pe_contract')},
+        'guest_loaded': False,
+        'native_vmm_calls_verified': False,
+        'win98_probe_executed': False,
+        'scope': 'Host ABI/model evidence only; not Windows VMM or loader execution.'
+    }
+    (BUILD/'host-tests.json').write_text(json.dumps(report, indent=2)+'\n')
+    return 0 if passed else 1
+
+if __name__ == '__main__':
+    sys.exit(main())

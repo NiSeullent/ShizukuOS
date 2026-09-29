@@ -1,0 +1,63 @@
+{
+  "full_clone": false,
+  "native_execution_verified": false,
+  "reactos": {
+    "commit": "cae3c053d47024545c773148185319075eae0202",
+    "commit_date": "2026-09-27T12:41:06Z",
+    "files": [
+      {
+        "bytes": 10784,
+        "license": "GPL version2 via root COPYING",
+        "path": "sdk/lib/rtl/vectoreh.c",
+        "sha256": "c0d2356dc5194151f11984402d4996a7c6cf2d32f9e05830f2732c20460ad4bf",
+        "url": "https://raw.githubusercontent.com/reactos/reactos/cae3c053d47024545c773148185319075eae0202/sdk/lib/rtl/vectoreh.c",
+        "use": "runtime algorithm reference/derivative"
+      },
+      {
+        "bytes": 5933,
+        "license": "GPL version2 via root COPYING",
+        "path": "dll/ntdll/dispatch/i386/dispatch.S",
+        "sha256": "44827f34c5bff67f192d5a2127fbf9b9b39185c84ded1cd1269c6e35f6f8390b",
+        "url": "https://raw.githubusercontent.com/reactos/reactos/cae3c053d47024545c773148185319075eae0202/dll/ntdll/dispatch/i386/dispatch.S",
+        "use": "user entry dependency reference only"
+      },
+      {
+        "bytes": 13676,
+        "license": "GPL version2 via root COPYING",
+        "path": "sdk/lib/rtl/i386/except.c",
+        "sha256": "6b0d16cd1f1e8645f042ec03dc1e816edfbe5c03933bb48028bd43cd36eabed4",
+        "url": "https://raw.githubusercontent.com/reactos/reactos/cae3c053d47024545c773148185319075eae0202/sdk/lib/rtl/i386/except.c",
+        "use": "VEH/SEH/continue dispatch ordering reference only"
+      },
+      {
+        "bytes": 36085,
+        "license": "GPL version2 via root COPYING",
+        "path": "ntoskrnl/ke/i386/exp.c",
+        "sha256": "913d04cae9473e2e4b83f6c1e136d98edbbc986cab35db4b507f325b82297d00",
+        "url": "https://raw.githubusercontent.com/reactos/reactos/cae3c053d47024545c773148185319075eae0202/ntoskrnl/ke/i386/exp.c",
+        "use": "kernel trap/context/first-chance/user-stack dependency reference only"
+      },
+      {
+        "bytes": 18556,
+        "license": "GPL version2 via root COPYING",
+        "path": "COPYING",
+        "sha256": "5dd08524bb37f07b4a6f548439ffcd8ec0444bc0ae92e0fe929ea70185cdbc62",
+        "url": "https://raw.githubusercontent.com/reactos/reactos/cae3c053d47024545c773148185319075eae0202/COPYING",
+        "use": "verbatim license text retained"
+      }
+    ],
+    "repository": "https://github.com/reactos/reactos"
+  },
+  "schema": 1,
+  "upstream_scripts_executed": false,
+  "wine": {
+    "bytes": 35388,
+    "commit": "4e819f054dd2d9ee855ee3f1e30d8c1bb8f80fcf",
+    "commit_date": "2026-09-25T19:29:21Z",
+    "license": "LGPL-2.1-or-later",
+    "path": "dlls/ntdll/exception.c",
+    "repository": "https://github.com/wine-mirror/wine",
+    "sha256": "91cee0bdf8baac8c464e88f5120e8396b0bc8fb162f0b62af72191fc70b7de73",
+    "use": "comparison only; no Wine implementation copied"
+  }
+}

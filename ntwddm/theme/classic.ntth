@@ -1,0 +1,12 @@
+name Classic
+class BUTTON
+part 1 state 1 bgtype borderfill bordersize 1 bordercolor 808080 filltype solid fillcolor C0C0C0 textcolor 000000
+part 1 state 2 bgtype borderfill bordersize 1 bordercolor 000080 filltype solid fillcolor D4D0C8 textcolor 000000
+part 1 state 3 bgtype borderfill bordersize 1 bordercolor 000000 filltype solid fillcolor A0A0A0 textcolor 000000
+part 1 state 4 bgtype borderfill bordersize 1 bordercolor 808080 filltype solid fillcolor C0C0C0 textcolor 808080
+class WINDOW
+part 1 state 1 bgtype borderfill bordersize 1 bordercolor 000040 filltype solid fillcolor 000080 textcolor FFFFFF
+part 1 state 2 bgtype borderfill bordersize 1 bordercolor 404040 filltype solid fillcolor 808080 textcolor C0C0C0
+part 7 state 1 bgtype borderfill bordersize 1 bordercolor 808080 filltype solid fillcolor C0C0C0 textcolor 000000
+part 8 state 1 bgtype borderfill bordersize 1 bordercolor 808080 filltype solid fillcolor C0C0C0 textcolor 000000
+part 9 state 1 bgtype borderfill bordersize 1 bordercolor 808080 filltype solid fillcolor C0C0C0 textcolor 000000

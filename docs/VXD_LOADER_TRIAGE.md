@@ -1,0 +1,45 @@
+# VxD 로더 실패의 비교 진단
+
+Windows 98 SE에서 원본 VxD와 데이터 공유 속성 한 비트만 바꾼 후보 모두
+장치 열기 단계에서 Win32 오류 2로 실패했습니다. 두 경우 모두 절대 경로의
+파일 전체 바이트·MZ·LE 검사는 통과했습니다. 공유 비트 추가만으로 이번 실패를
+해결하지 못했으며, 아직 운영용 VxD 수정으로 채택하지 않았습니다.
+
+| 산출물 | 코드 객체 속성 | 데이터 객체 속성 | 실제 결과 |
+| --- | --- | --- | --- |
+| 원본 `aff7acf5…bc537` | `0x2245` | `0x2243` | CreateFile 단계 30, Win32 오류 2 |
+| 비교 후보 `83952d5c…0801e` | `0x2245` | `0x2263` | 동일 단계·오류 |
+
+후보는 9,390바이트 원본에서 파일 오프셋 `0x164`의 `0x43 → 0x63`만
+다릅니다. 별도 진단 EXE에 후보 전체 바이트를 넣었으며, 동일한 KernelEx 없는
+설치 스냅샷에서 시험했습니다. 독자 DLL과 GDI 프로브는 이 시험에서도 각각
+종료 코드 0을 기록했습니다. VxD 진단은 30, 감독 프로그램은 1로 종료했습니다.
+[정확한 해시·원본 로그·비교 결과](VXD_SHARED_FLAG_TRIAL.json)를 함께 보존합니다.
+
+`SHARABLE=0x20`의 인코딩은 공개
+[LE 형식 선언](https://github.com/open-watcom/open-watcom-v2/blob/master/bld/watcom/h/exeflat.h)으로
+확인했습니다. 데이터 공유 속성이 로더 분류에 영향을 줄 수 있다는 가설은
+[초기 VXDLDR의 직접 분석](https://www.geoffchappell.com/notes/windows/archive/vxdldr.htm)에서
+출발했지만, 그 자료는 Windows for Workgroups 3.11 대상입니다. 이번 Win98의
+실제 실패 결과보다 강한 증거로 취급하지 않습니다.
+
+비교 후보는 변수 하나를 분리하기 위해 기존 `RESIDENT=0x200` 속성을 유지했습니다.
+공유 속성과 언로드 이후 메모리 회수는 별도 문제입니다. Microsoft의
+[VxD 작성 설명](https://techshelps.github.io/MSDN/TECHART/html/msdn_chicvxd.htm)은
+STATIC 부분의 재로드 간 유지 동작을 설명합니다. 따라서 로딩에 성공하더라도
+완전한 자원 회수는 별도 검증이 필요합니다.
+
+이 비교에는 새 임시 QA 경로를 사용했습니다. 기준 설치본을 RAM으로 복원하고,
+종료된 디스크에서 로그·바이너리를 추출한 뒤 진단 CD·감독 기록·소스·스크린샷을
+포함한 27개 파일을 해시로 고정했습니다. 기준 아카이브와 현재 포인터는 바뀌지
+않았습니다. 보존한 증거의 전체 해시와 종료된 RAM 디스크를 독립 대조한 뒤,
+명시한 증거 해시로 임시 RAM 사본만 폐기했습니다. 폐기 후에도 기준 포인터와
+아카이브 해시는 같았습니다. 이 저장 절차의 성공을 VxD 실행 성공으로 세지 않습니다.
+
+다음 진단은 Win32에 전달된 오류만으로 추측하지 않고, 공개된 VXDLDR 클라이언트
+인터페이스에서 원래 로더 오류를 관측하는 것이었습니다. 이후 실제 결과는 아래 V86 시험에 기록했습니다.
+# Latest native loader result
+
+The [subsequent DOS/V86 diagnostic](VXD_V86_LOADER_TRIAL.md) obtained native
+VXDLDR error 6 (`BAD_DEVICE_FILE`) after the complete candidate byte/EOF check.
+It narrows the Win32 error below; no native kernel load has passed.

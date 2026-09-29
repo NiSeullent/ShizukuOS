@@ -1,0 +1,89 @@
+{
+  "freestanding_i486": [
+    {
+      "bytes": 3760,
+      "compiler": "gcc",
+      "log_sha256": "123c63878761dc23e41742551909750ad7cf8afccd8301b4edac42698f9d1188",
+      "sha256": "0dc8bb376bce2a2c0513d278931c6de200bf5ce5f3840d168315214b67ba37e9",
+      "undefined_symbols": []
+    },
+    {
+      "bytes": 2372,
+      "compiler": "clang",
+      "log_sha256": "7d32a8bbf20da92f84f2ce26f3119319a7999e260dd068790e8342977658e10f",
+      "sha256": "aac72e36046c0242dda68fe5b99cb32112c0640541eb4bb5e45c44517cf1cee6",
+      "undefined_symbols": []
+    }
+  ],
+  "independent_source_review": {
+    "confirmed_blockers": [],
+    "reviewer": "root integrator",
+    "scope": "Registry lifetime, callback outside locks, concurrent remove/close and bounded snapshot references; this does not verify native Windows semantics or exception ingress."
+  },
+  "native_execution_verified": false,
+  "passed": true,
+  "reactos_commit": "cae3c053d47024545c773148185319075eae0202",
+  "schema": "ntw.exception.reference-port.host.v1",
+  "sources_sha256": {
+    "COPYING.ReactOS": "5dd08524bb37f07b4a6f548439ffcd8ec0444bc0ae92e0fe929ea70185cdbc62",
+    "NATIVE_BINDING.md": "50371271b605d79f87be9877b8d4aed723a2a80f2c8573e1b5163551d43f7576",
+    "PROVENANCE.md": "58671753f1cf290c8e91ce9a6d6f5aaaefc9b59f0a309cd5ba1b0a4e02483cc8",
+    "README.md": "e93a4614167aab567a32cac3e5db15f31e7304f4af30666d1c9547b36db9fb94",
+    "provenance.json": "a2d0547f2066305860e9bd0f8a74e1d8b46d062d69c6573ab1d1ea39ba50110b",
+    "test.py": "5de7e989db8e25c8d257b9a6dd803eaa0eb35de8f5911a11c1878747cabe93b8",
+    "test_veh.c": "2a46b5a7a110c7f1fc585559fa1e70ccfa8c5d8910aae3e0cf49ab9b8e1277a5",
+    "veh.c": "35b17d92d86562ca9f187f9bcea51f68e8e59e82a0a9f7c085b4eedd6fa509dc",
+    "veh.h": "520e3cea92ea931b13ad9df8539a593f543f08eadaf57aaa1ac9651d523feb9b"
+  },
+  "toolchains": {
+    "clang": "clang version 21.1.8 (AlmaLinux OS Foundation 21.1.8-1.el10.alma.1)",
+    "gcc": "gcc (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "nm": "GNU nm version 2.41-63.el10.alma.1"
+  },
+  "variants": [
+    {
+      "binary_sha256": "a42b85bde2639ba4083836d2bcd8ede95fb74160de04141dfa4dc2fcbbb4dc5d",
+      "counts": {
+        "allocations": 2158,
+        "callbacks": 2987,
+        "checks": 81392,
+        "passed": true,
+        "releases": 2158,
+        "stress_iterations_each": 500,
+        "stress_threads": 4
+      },
+      "log_sha256": "18e905e75a8554dd3391618421b0470b73e2a668242fca5464bc965087239d1f",
+      "name": "gcc"
+    },
+    {
+      "binary_sha256": "efa3cb6b3e9ce2c3372845e9281a8c9a3a94ed7c7ca027b50d54731137f81280",
+      "counts": {
+        "allocations": 2158,
+        "callbacks": 2908,
+        "checks": 81001,
+        "passed": true,
+        "releases": 2158,
+        "stress_iterations_each": 500,
+        "stress_threads": 4
+      },
+      "log_sha256": "97ba240d037b12a94f852e203c535a1b9ce069a94780d0c7e21b1e8ab23a5a0a",
+      "name": "clang"
+    },
+    {
+      "binary_sha256": "c97c509493f7b6b3775cab831f2e7abda83bcff4ddb6c4937781c167da3a64be",
+      "counts": {
+        "allocations": 2158,
+        "callbacks": 2971,
+        "checks": 81392,
+        "passed": true,
+        "releases": 2158,
+        "stress_iterations_each": 500,
+        "stress_threads": 4
+      },
+      "log_sha256": "b94989a1e7a99d53e47d210fb1843534d6707f4c34006390463a8284f45a6a15",
+      "name": "asan_ubsan"
+    }
+  ],
+  "win98_veh_compatible": false,
+  "wine_comparison_commit": "4e819f054dd2d9ee855ee3f1e30d8c1bb8f80fcf"
+}

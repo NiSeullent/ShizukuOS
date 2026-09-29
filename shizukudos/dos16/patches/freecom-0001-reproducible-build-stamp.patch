@@ -1,0 +1,15 @@
+--- a/shell/ver.c	2026-09-29 07:03:41.867625575 +0000
++++ b/shell/ver.c	2026-09-29 07:03:41.882467760 +0000
+@@ -56,7 +56,11 @@
+ 	" - XMS_Swap"
+ #endif
+ ;
+-static const char shelldate[] = __DATE__ " " __TIME__;
++/* ShizukuDOS: reproducible build; the upstream default embeds the compile time. */
++#ifndef SHZ_BUILD_STAMP
++#define SHZ_BUILD_STAMP "reproducible"
++#endif
++static const char shelldate[] = SHZ_BUILD_STAMP;
+ const char shellname[] = "FreeCom";
+ 
+ #if 0

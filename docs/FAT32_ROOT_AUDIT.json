@@ -1,0 +1,18 @@
+{
+  "schema": "shizukudos.uefi_fat.root-audit.v1",
+  "passed": true,
+  "guest_result_sha256": "4bf89c761338cd93bcb2790feb8f8e61ac2a16badf0d84ca9006dda7993b63d5",
+  "pid_absent": 1398732,
+  "qemu_returncode": 0,
+  "evidence_files": 19,
+  "independent_fat_chain_decode": true,
+  "independent_file_bytes": 131195,
+  "independent_file_sha256": "d0e65b96d03372d5456925af4d36cff956841febef25525057f866e100ac0481",
+  "clusters": 257,
+  "guard_and_entire_destination_tail_checked": true,
+  "dma_allocation_released": true,
+  "PCI_command_restored": 7,
+  "disk_sha256_unchanged": "0d37c4e1f18f42847269dce1f08f0785df28855d2a29cf14aa70edee1b4dd04f",
+  "file_executed": false,
+  "Windows_boot_tested": false
+}

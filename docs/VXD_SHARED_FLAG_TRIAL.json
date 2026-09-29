@@ -1,0 +1,126 @@
+{
+  "schema": "ntw.vxd.shared-flag-trial.v1",
+  "date_utc": "2026-09-27",
+  "source_revision": "1ad8d3ed58e3237a33774cc17c26b93d8140da8e",
+  "os": {
+    "platform": 1,
+    "major": 4,
+    "minor": 10,
+    "build_low": 2222,
+    "kernelex_installed": false
+  },
+  "baseline_vxd_sha256": "aff7acf54cd0323fe4dce9aab7d93da16df7b8cf345220ee9d2dafa95b0bc537",
+  "candidate_vxd_sha256": "83952d5c220272d4dbd724e309e29fcc431d2eefa0e59253d3283a116fc0801e",
+  "diagnostic_sha256": "6ec9f1f8669bb0fc2b5e8447e9da866aa603b72d2f5ff991863bd23bf64d9a68",
+  "candidate_manifest_sha256": "2ec6d1bf593351728507739acd3a4ca2314043a073f12385164f2cfe36686e4b",
+  "exact_vxd_difference": [
+    {
+      "file_offset": 356,
+      "before": 67,
+      "after": 99,
+      "xor": 32
+    }
+  ],
+  "code_flags": 8773,
+  "data_flags_before": 8771,
+  "data_flags_after": 8803,
+  "production_patch": false,
+  "process_exits": {
+    "NTWPROBE.EXE": 0,
+    "NTWGPROB.EXE": 0,
+    "NTWVDIAG.EXE": 30,
+    "NTWDRUN.EXE": 1
+  },
+  "vxd_byte_preflight_passed": true,
+  "vxd_open_passed": false,
+  "vxd_open_win32_error": 2,
+  "native_kernel_execution_verified": false,
+  "overall_passed": false,
+  "original_logs": {
+    "NTWDRUN.LOG": "NTWRUN_VERSION=1\r\nDIRECTORY=C:\\NTWLAB\r\nOS_PLATFORM=1\r\nOS_MAJOR=4\r\nOS_MINOR=10\r\nOS_BUILD_RAW=67766446\r\nOS_BUILD_LOW=2222\r\nWIN98_IDENTIFIED=1\r\nPREFLIGHT=PASS\r\nBEGIN=NTWPROBE.EXE\r\nPROCESS_CREATED=1\r\nWAIT_RESULT=0\r\nEXIT_CODE=0\r\nCLOSE_THREAD=PASS\r\nCLOSE_PROCESS=PASS\r\nEND=NTWPROBE.EXE\r\nBEGIN=NTWGPROB.EXE\r\nPROCESS_CREATED=1\r\nWAIT_RESULT=0\r\nEXIT_CODE=0\r\nCLOSE_THREAD=PASS\r\nCLOSE_PROCESS=PASS\r\nEND=NTWGPROB.EXE\r\nBEGIN=NTWVDIAG.EXE\r\nPROCESS_CREATED=1\r\nWAIT_RESULT=0\r\nEXIT_CODE=30\r\nCLOSE_THREAD=PASS\r\nCLOSE_PROCESS=PASS\r\nRESULT=FAIL\r\n",
+    "NTWPROBE.LOG": "PASS: NTWin32Wrapper9x static imports\r\n",
+    "NTWVDIAG.LOG": "START=NTWVDIAG/1\r\nFILE_PATH=C:\\NTWLAB\\NTWRAP9X.VXD\r\nDEVICE_PATH=\\\\.\\C:\\NTWLAB\\NTWRAP9X.VXD\r\nEXPECTED_SHA256=83952d5c220272d4dbd724e309e29fcc431d2eefa0e59253d3283a116fc0801e\r\nOS_PLATFORM=0x00000001\r\nOS_MAJOR=0x00000004\r\nOS_MINOR=0x0000000a\r\nOS_BUILD=0x040a08ae\r\nFILE_BYTES=0x000024ae\r\nFILE_BYTES_HIGH=0x00000000\r\nLE_OFFSET=0x00000080\r\nPREFLIGHT=PASS\r\nFAIL_STAGE=0x0000001e\r\nWIN32_ERROR=0x00000002\r\nOBSERVED=0x00000000\r\nRESULT=FAIL\r\n",
+    "NTWGPROB.LOG": "NTWDDMWrapper9x native GDI probe v1\r\nSCOPE=app-owned software DIB; no WDDM/D3D/GPU claim\r\nOS_PLATFORM=1\r\nOS_MAJOR=4\r\nOS_MINOR=10\r\nOS_BUILD=67766446\r\nWIN98_IDENTIFIED=1\r\nDISPLAY_BITSPIXEL=1\r\nDISPLAY_PLANES=4\r\nPIXEL_CONTRACT_CHECKS=128014\r\nPIXEL_CONTRACTS=PASS\r\nFENCE_SCOPE=CPU copy only\r\nSUCCESSFUL_PAINTS=20\r\nCLEANUP=PASS\r\nRESULT=PASS\r\n",
+    "NTWDEXIT.TXT": "1 \r\n"
+  },
+  "files": {
+    "NTW32.DLL": {
+      "bytes": 17151,
+      "sha256": "a55364068fe00db2637083ea96a25131deb6a40bbd04340cd9dbe4841baaa2b3",
+      "matches_original_media": true
+    },
+    "NTWPROBE.EXE": {
+      "bytes": 14336,
+      "sha256": "9b764f420933b1ef0b5007f6713f1dfc694a077d5101fc69c04bdf168146bbf2",
+      "matches_original_media": true
+    },
+    "NTWRAP9X.VXD": {
+      "bytes": 9390,
+      "sha256": "83952d5c220272d4dbd724e309e29fcc431d2eefa0e59253d3283a116fc0801e",
+      "matches_original_media": true
+    },
+    "NTWVDIAG.EXE": {
+      "bytes": 14336,
+      "sha256": "6ec9f1f8669bb0fc2b5e8447e9da866aa603b72d2f5ff991863bd23bf64d9a68",
+      "matches_original_media": true
+    },
+    "NTWGPROB.EXE": {
+      "bytes": 12800,
+      "sha256": "4b6fa2dad7ccc3dd3efa39917354b30cc7bad77ba4d9d167aaa8fc5646e89b53",
+      "matches_original_media": true
+    },
+    "NTWDRUN.EXE": {
+      "bytes": 5632,
+      "sha256": "d2d577a27370436d048a47b32bc1cbd5a038c179c4a372ff062457fea40ba5ee",
+      "matches_original_media": true
+    },
+    "RUNDIAG.BAT": {
+      "bytes": 544,
+      "sha256": "f5e9fe6e2e270777ff6dca04f85781f8f7bef53c7c219d726aec206620809f94",
+      "matches_original_media": true
+    },
+    "NTWDRUN.LOG": {
+      "bytes": 525,
+      "sha256": "29c5b424617e8c666947c58bc94d7ec25baa4a5b144aba68d46b32fd3dcd8e4b"
+    },
+    "NTWPROBE.LOG": {
+      "bytes": 39,
+      "sha256": "abc75bed8caf0008da7e20d943001ad437698ddde713d83926601b5c419160d0"
+    },
+    "NTWVDIAG.LOG": {
+      "bytes": 431,
+      "sha256": "81a197698e831036bf110f100f4e7d4aec2b591f43616baf741b2b38d3e9281e"
+    },
+    "NTWGPROB.LOG": {
+      "bytes": 336,
+      "sha256": "59ce9ea9d6abb4f22606b8c5b094156d9c1b5aea69793f1bf67e877659cabc6d"
+    },
+    "NTWDEXIT.TXT": {
+      "bytes": 4,
+      "sha256": "2f1c37754e38b4ac70a9559fbfbdbd28feda47f36be9cd9e3ad5bc844ee3feb6"
+    },
+    "GUESTVER.TXT": {
+      "bytes": 36,
+      "sha256": "b40c1c1fdd6570893bf932eb469bbf865a352778f3027c16b311c43938d4d2e3"
+    }
+  },
+  "collection_sha256": "5327a23110487e9555b661db7b69ab5b393d03cb0701ce50aec50d725ae70c6c",
+  "media_sha256": "bfb6bc8c0c0aa8056225f15be315e81f9c0156ee97125225b65e82fa4006e0ad",
+  "source_qcow_sha256": "1f65f00c95d3b48ccb4d9a7cb94bf3d27bac2535d6b1f12647658491089464d3",
+  "qa_evidence_manifest_sha256": "6f9ba1593feffb89d09b7adcf59bf3897a09ab5ad3f949f0f92e59d0e7649e71",
+  "qa_evidence_files": 27,
+  "qa_evidence_bytes": 721854,
+  "qa_baseline_pointer_sha256": "d3df8220cde1564ed466567ff28c46dec7e2c9b223c50f8898afd7a28bfd0fd5",
+  "qa_baseline_archive_sha256": "0c15c1a7b266599eb1834c9c02f87ee9c1d007a6d2b52e4207b5b89df8ee00d8",
+  "qa_baseline_unchanged": true,
+  "qa_writeback_performed": false,
+  "qa_ram_discarded": true,
+  "limits": [
+    "Adding SHARABLE alone did not resolve this exact Windows 98 SE loader failure",
+    "Win32 error 2 does not identify the internal VXDLDR rejection stage",
+    "Resident bits retained for a single-variable experiment; no full unload/reclamation proof",
+    "No successful native VxD/VMM execution or production format correction"
+  ],
+  "qa_discard_receipt_sha256": "2763b3f6c7370653465612b65d585cf8a2b81588a0af612f1fd146a25e7e3313",
+  "qa_baseline_unchanged_after_discard": true
+}

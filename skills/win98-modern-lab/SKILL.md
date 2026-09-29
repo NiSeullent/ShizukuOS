@@ -3,7 +3,7 @@ name: win98-modern-lab
 description: Engineer Windows 98 Shizuku's Second Edition through Wine/ReactOS API porting, accelerated guest tests, ShizukuDOS and ShizukuFS, multicore and PAE memory work, CSM NVMe/SATA/xHCI, and local prebuilt plus patch release paths. Use for work in the Win98-Modern repository, not general Windows troubleshooting.
 ---
 
-# Win98 Modern Lab
+# Windows 98 Shizuku's Second Edition Lab
 
 Find the repository root from the current worktree and inspect its current state before acting. `README.md`, `docs/TARGET_APPS.md`, `docs/COMPATIBILITY.md`, `vm/README.md`, and the actual source and test results outrank this skill's historical details, except that the user's latest explicit target supersedes older numeric targets: **100% of the defined Windows API surface and all five selected apps actually running**. Keep the full goal intact: a new Win98 SE modernization project, direct Win98 installation and guest tests, newly built ShizukuDOS in place of FreeDOS, usable multicore execution, app-specific CPU modes, VT-x/AMD-V acceleration, PAE with all usable RAM on modern CSM systems, CSM-era boot and Skylake-class SATA/xHCI support, GitHub source, and an owner-only installation/download site. Work on a concrete part without treating it as completion of the whole.
 

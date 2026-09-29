@@ -1,0 +1,199 @@
+{
+  "component": "Windows 98 Shizuku's Second Edition original USB configuration experiment",
+  "status": "actual_kvm_configuration_descriptor_verified",
+  "efi": {
+    "machine": "AMD64",
+    "subsystem": "EFI_APPLICATION",
+    "imports": [],
+    "relocations": true,
+    "sha256": "2dffac0094a08b3062c1f66610ecc4f3d3742ebabfa7848988b6c19f1db32430",
+    "bytes": 47616
+  },
+  "configuration_result": {
+    "address": 33607680,
+    "bytes": 3848,
+    "page_bytes": 4096,
+    "maximum_blob_bytes": 2048
+  },
+  "host": {
+    "configuration_evidence_tests": 12,
+    "inventory_tests": 6,
+    "clock_cases_per_variant": 100031,
+    "clock_variants": [
+      "strict",
+      "asan_ubsan"
+    ]
+  },
+  "driver_checks_per_variant": {
+    "status": "PASS",
+    "checks": 13275540,
+    "scenarios": 2489,
+    "injected_callbacks": 984,
+    "configuration_probes": 1315,
+    "configuration_injected_callbacks": 1036
+  },
+  "receipts_sha256": {
+    "shizukudos/uefi_usb_config/build/build-result.json": "31e501238c047d90b536a0b9ff4dfd0ead90bf7be6f527489119b399a2846b54",
+    "shizukudos/uefi_usb_config/build/host-tests.json": "096c8130ba1c71a7b6c385ddc89d6ac49292a316fbeb5a5e88e168ce959f4158",
+    "drivers/xhci_usb/build/test-result.json": "3fd3357c503fc3511f9a5ed23195549ca73b7a7576fd7ce4a4267a6695377adb",
+    "shizukudos/uefi_usb_config/build/qemu-result.json": "dab2e05a62164c0e9c54feb3c3b611b4c2d128a964a1876b7234d9a5ceb7151d"
+  },
+  "sources_sha256": {
+    "shizukudos/uefi_usb_config/loader.c": "aa0eaa18e4c6f30fbb90b78058d2fef849611d886be0f6520d49d70b8a4fb62c",
+    "shizukudos/uefi_usb_config/payload.c": "213978e7ec87ad61e25fcc73064e166a59340580fc7353b549fcfc181f7eeb0d",
+    "shizukudos/uefi_usb_config/layout.h": "64fc74946b6684a95d63bfd86f51fcf135bdd3aa090cac1786d14a96061cfb5c",
+    "shizukudos/uefi_usb_config/build.py": "3f39d502128b76fccd6af02031c67b4fb8343dcd3e85aecc3374e8a9bcce68b7",
+    "shizukudos/uefi_usb/loader.c": "dfd50c7bb2786ab4020d7d9e5e1bea07301d3dc8e3161828f712063aad6c56b9",
+    "shizukudos/uefi_usb/layout.h": "8b1bf581efbba713d41a2a39b82d65b76bebf224599d6d3106bcec83d6be95cc",
+    "shizukudos/uefi32/build.py": "7db859d4386bf2535b1f0510d3e2de958e56153018771bd3a4150a4ac4f4b01f",
+    "shizukudos/uefi32/contract.c": "4a6e7532851b9a6c664a5e698f48406c7f7a8c51a9e65a6f1446af24076060f1",
+    "shizukudos/uefi32/paging.c": "b5c152dee68a225cc52da0dde265ca419a4a36ed28aec3318c005842fac96012",
+    "shizukudos/uefi32/paging.h": "1b8b6f3e5a5cd333be71d894a8c71d012b9366a2ad2600241170d14ddb91efa8",
+    "shizukudos/uefi32/layout.h": "ed9f2a02da245916a961bcb42128a78bf8fe6b2bb7ba7a3aafb287ba77e7dfd1",
+    "shizukudos/uefi32/transition.asm": "7680447f59ad0461e6f277bfb2d136b1484e6f38ca361d51e11f0676e570dc86",
+    "shizukudos/uefi32/payload.ld": "52d5acc634af884224fae9655b71eb884f816b218846d9e937725fb9632fa990",
+    "shizukudos/uefi_xhci/clock.c": "6eafaa483ff214749ca68af52743fa6a74893206213099aec774e816406ce56b",
+    "shizukudos/uefi_xhci/layout.h": "77b93fc001d6517afec2a92857508603432365bdb49bfa00e034d2e7cad7ba86",
+    "drivers/xhci_native/xhci.c": "7024e5dca32f08d29b1b0cf2a04e9b02fa51ef1c18cc6752027216affa6af277",
+    "drivers/xhci_native/xhci.h": "abe09154388f0c336950433b6063c7fe0f774e1e559882dea81c268895a8303d",
+    "drivers/xhci_native/xhci_internal.h": "f67712f46e9fe78d54397216300a924fe0932cb2bb39ba1b843af1863ccf262a",
+    "drivers/xhci_usb/xhci_usb.c": "99712d63c1645226a289c8cb60415c5e347c9b33b922ce77f71af0459fa29d54",
+    "drivers/xhci_usb/xhci_usb.h": "a65f5be27ce0840e1a38242a355f0e41588a1fdbe1325131656d695b52f0948a",
+    "drivers/usb_native/ntwu_usb.c": "9edb3be9ca02db358da0d5c132922f452db87b2f52e9286a1c03b87316a94cdc",
+    "drivers/usb_native/ntwu_usb.h": "19d161b21cdfb1fce5d6d8b41215cb6c4dc836c78d9f4f56a38eb3a3e7202daa",
+    "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
+    "platform/freestanding/memory.h": "fca39e400632604dafd3895fed60674a1171f66245094f898e9f425c41c64c92",
+    "drivers/pcie/src/ntw_pcie.c": "e06c3a19686239f3b9c09d2975ed17fdea5fc4ebb9a318db233e69bebeba2ea7",
+    "drivers/pcie/include/ntw_pcie.h": "41d5d69834d2b34cc5719da7c5543e353a503cf9940bab10d96fcd9c30474215",
+    "ntwrapper/core.c": "6cd21ae4bc37965eae7ba18f155e03037f16b1a44c3edf112fa142f11373e21a",
+    "ntwrapper/include/ntwrapper.h": "902c72f956a01be2f6a8e3be74986ca13719375697c8e479b2242b88f14a93c3",
+    "ntwddm/src/ntwddm.c": "0000ceaca7a1c7f437db2c60a1a8da5edef61020d80c0ecffad53644b3f6170c",
+    "ntwddm/include/ntwddm.h": "d561123913b531e7e82bef0a2107c44954ecdef237f43a6280eaf9bd39c11950",
+    "shizukudos/uefi/boot.c": "d18e7a0d83a893fccc713c8d92d2f1dfb6eea3385c707b8cb5acfdb70328b52d",
+    "shizukudos/uefi/boot.h": "5c3051618ce69242862ffe6d8ab3594b976d18a5889e6a0c2644c146a4edd636",
+    "shizukudos/uefi/efi.h": "a39edec29479f2dea900ceb986f19d9a1573954835ddffc1a6dc9ef6ec9b94e8",
+    "shizukudos/uefi_usb_config/test.py": "794ec8bb196e2590b0daa13565f12789cab53e613829849735a32097e76d9455",
+    "shizukudos/uefi_usb_config/test_qemu.py": "64e73b03a209cc49ee35da60cd1847ed20a80720a17d96c1266ef4a93a5a6a80",
+    "shizukudos/uefi_usb_config/verify.py": "60fd0f0ffdbe52235ea26e4ca57f0446c7b1c65fb2298c45ebc8debe98f7da86",
+    "shizukudos/uefi_usb_config/test_verify.py": "56b7ba7ef250bc53c69fde16200c5a4152d74c9bd5a1095179d03926a23d130d",
+    "shizukudos/uefi_usb_config/README.md": "7641c5dc70e80aaac4b72e2809fd106aa10f4edf628f13014c2fef3aed5cb77b",
+    "shizukudos/uefi_usb/verify.py": "52c955243035f4beacc1d54323bc31c5a6e75fd732ff1d58460ccf4b4c9381f2",
+    "shizukudos/uefi_usb/test_verify.py": "39cf2d9a8966cbc73328aca29d9d23ecdce842bb8a37e1caea752e2bb974c2c1",
+    "shizukudos/uefi_xhci/test_clock.c": "4b58c2beebcc6979b040c9879ebe923cf8ceb1c6ebc37bc2b6c16606584f910f",
+    "shizukudos/uefi_xhci/test_qemu.py": "33ffaf8eb1c54419c6bdf868ca518d2526b0db7a043747d004e835f86819708c",
+    "shizukudos/uefi_xhci/test_inventory.py": "728369bda0d4b2a29f8e7d96bead976a1e8a1ab16baec82cabec493e9afb1181",
+    "shizukudos/uefi32/test_qemu.py": "fa84a980d400a1abc786daa9aae52532a432faec5dcfcfe9ff304b0edb9a401c",
+    "drivers/xhci_usb/test_usb_xhci.c": "79e9fdcd781bd8ee419ae46b649e4f2ce1ffac7f70894fa56df519c578541eeb",
+    "drivers/xhci_usb/test.py": "fcd1963fe506f5594ae71f5a26281950a1aab0b3c63ae5dbc5bc15e16ad3a758",
+    "drivers/xhci_usb/README.md": "bc0f134fecbd121bc7df33af903daaaed207a185cd5ed462926e49d8bc7053f5"
+  },
+  "guest": {
+    "pass": true,
+    "kvm": {
+      "enabled": true,
+      "present": true
+    },
+    "pid": 788938,
+    "process_stopped": true,
+    "qemu_returncode": 0,
+    "watchdog_fired": false,
+    "elapsed_seconds": 1.879,
+    "guest_memory_mib": 256,
+    "network": "none",
+    "evidence_directory": "/root/Win98-Modern/shizukudos/uefi_usb_config/build/qemu-86spuyol",
+    "descriptor": {
+      "vendor_id": 1575,
+      "product_id": 1,
+      "usb_bcd": 512,
+      "device_bcd": 0,
+      "raw_device": "120100020000004027060100000001030a01",
+      "first_eight": "1201000200000040",
+      "packet_bytes": 64,
+      "initial_packet_bytes": 64,
+      "evaluate_context": false
+    },
+    "configuration": {
+      "total_length": 34,
+      "configuration_value": 1,
+      "interfaces": 1,
+      "alternates": 1,
+      "endpoints": 1,
+      "opaque_descriptors": 1,
+      "raw_hex": "09022200010107a032090400000103000000092101000001224a0007058103080004",
+      "index": 0
+    },
+    "topology": {
+      "context_bytes": 32,
+      "max_ports": 8,
+      "root_port": 5,
+      "port_speed_id": 3,
+      "slot_type": 0,
+      "portsc": 134881,
+      "version": 256
+    },
+    "rings": {
+      "command_count": 3,
+      "port_event_count": 1,
+      "zero_residue_short_events": 0,
+      "events": [
+        {
+          "kind": "command",
+          "pointer": 33736704
+        },
+        {
+          "kind": "command",
+          "pointer": 33736720
+        },
+        {
+          "kind": "status",
+          "pointer": 33730592
+        },
+        {
+          "kind": "status",
+          "pointer": 33730640
+        },
+        {
+          "kind": "status",
+          "pointer": 33730688
+        },
+        {
+          "kind": "status",
+          "pointer": 33730736
+        },
+        {
+          "kind": "command",
+          "pointer": 33736736
+        }
+      ]
+    },
+    "allocations": 2,
+    "releases": 2,
+    "dma_retained": false,
+    "set_configuration_sent": false,
+    "firmware_code_sha256": "090b9b1872b725cd698d41d9d8987ad3d08ffbe6ea5dab28b973ad7f7b846498",
+    "harness_sources_sha256": {
+      "shizukudos/uefi_usb_config/test_qemu.py": "64e73b03a209cc49ee35da60cd1847ed20a80720a17d96c1266ef4a93a5a6a80",
+      "shizukudos/uefi_usb_config/verify.py": "60fd0f0ffdbe52235ea26e4ca57f0446c7b1c65fb2298c45ebc8debe98f7da86",
+      "shizukudos/uefi_usb/verify.py": "52c955243035f4beacc1d54323bc31c5a6e75fd732ff1d58460ccf4b4c9381f2",
+      "shizukudos/uefi32/test_qemu.py": "fa84a980d400a1abc786daa9aae52532a432faec5dcfcfe9ff304b0edb9a401c",
+      "shizukudos/uefi_xhci/test_qemu.py": "33ffaf8eb1c54419c6bdf868ca518d2526b0db7a043747d004e835f86819708c"
+    },
+    "evidence_sha256": {
+      "usb-proof.bin": "f7739e28696b78e1c7e40c113f657f24417f78eb17847a1c8a88c7395d9bb66c",
+      "configuration-result.bin": "c4f3b93c809805a8717c107c5154c5779f92e2caceb7540c3d3147b952d4a78d",
+      "controller-dma.bin": "c6816b794b84e1e7d24a11636ba69b24c0fd13cbffeb100c17fb4cb423c82337",
+      "device-dma.bin": "7f53650d80307dc213aeb355f0c67a6fa3d1069938119c484b3593acc1f4b65a",
+      "mmio.bin": "5a3f7d65e4af7051ef9c859a00d21f9216c657c69fa8255c31d07dfbf9565318",
+      "usb-inventory.txt": "c65fcff7348a4066e68fa9801e2367d99af4d340bda4c0b785b8397c5416696c",
+      "handoff.bin": "10e29e356818fda48abbf8049aa8c7b3ca1b435f6f41af8de84d425faed061a6",
+      "registers.txt": "d40ece355591a6eb1b801355fc38a220994dc1c19793239846435873fa27adde",
+      "handoff.ppm": "147ba7d8d26f9d7fcef341e2b465e84c8a6e2a1c47aed181cf1a4e46632e999e",
+      "handoff.png": "b1acc5133fdc043dc4d2cfdb1f596714b7ea414f53d36d3ece4949cc07c27fce"
+    }
+  },
+  "native_windows_98_usb_driver": "not_implemented",
+  "hid_reports": "not_implemented",
+  "set_configuration": "not_implemented",
+  "physical_hardware": "not_tested",
+  "evaluate_context_guest": "not_exercised; host tests only"
+}

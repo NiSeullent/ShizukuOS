@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Host evidence only: no QEMU, Windows media, guest boot, or package publication.
+name: Independent platform host validation
+
+'on':
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: independent-platform-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    name: Host contracts and original i486/PE32 builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      NTW_SANITIZER_CC: clang
+      NTWU_CC: clang
+    steps:
+      - name: Check out the tested revision without retaining credentials
+        # https://github.com/actions/checkout/releases/tag/v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Install host and cross-compilation tools
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+            gcc-multilib clang lld mingw-w64 nasm make binutils python3 python3-pil fonts-dejavu-core qemu-utils
+
+      - name: Build NTWrapper9x and NTWin32Wrapper9x
+        run: python3 platform/build.py
+
+      - name: Test kernel, Win32, UTF, and package evidence contracts
+        # platform/test.py includes the exhaustive Unicode scalar/oracle suite.
+        timeout-minutes: 4
+        run: python3 platform/test.py
+
+      - name: Execute actual PE32 code with host service mocks
+        # Static Linux ELF32 executes original DLL instructions; this is not Windows.
+        run: python3 platform/abi32/build.py
+
+      - name: Build and test the original LE VxD bridge
+        run: |
+          python3 ntwrapper/vxd/build.py
+          python3 ntwrapper/vxd/test.py
+
+      - name: Test graphics and verify freestanding objects
+        run: |
+          make -C ntwddm test freestanding freestanding32
+          make -C ntwddm sanitize CC=clang
+
+      - name: Test original freestanding compiler memory support
+        run: python3 platform/freestanding/test.py
+
+      - name: Build the native GDI probe and test its software adapter
+        # Build/import audit and host pixel model only; no native GDI execution.
+        run: |
+          python3 ntwddm/win98/test.py
+          python3 ntwddm/win98/build.py
+
+      - name: Test PCI configuration and verify the freestanding i486 object
+        # Clang may lower aggregate initialization to memset even with
+        # -ffreestanding. Resolve it with original project compiler support.
+        run: |
+          make -C drivers/pcie test
+          make -C drivers/pcie sanitize CC=clang
+          clang --target=i486-none-elf -std=c11 -O2 \
+            -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow \
+            -ffreestanding -fno-builtin -fno-stack-protector \
+            -Idrivers/pcie/include -c drivers/pcie/src/ntw_pcie.c \
+            -o drivers/pcie/build/ntw-pcie-core-i486.o
+          clang --target=i486-none-elf -std=c11 -O2 \
+            -Wall -Wextra -Werror -Wpedantic -Wconversion -Wshadow \
+            -ffreestanding -fno-builtin -fno-stack-protector \
+            -march=i486 -mno-sse -mno-sse2 -mno-mmx -msoft-float \
+            -fno-pie -fno-pic -c platform/freestanding/memory.c \
+            -o drivers/pcie/build/ntw-memory-i486.o
+          ld -m elf_i386 -r drivers/pcie/build/ntw-pcie-core-i486.o \
+            drivers/pcie/build/ntw-memory-i486.o \
+            -o drivers/pcie/build/ntw-pcie-i486.o
+          nm -u drivers/pcie/build/ntw-pcie-i486.o | tee drivers/pcie/build/undefined-symbols-i486.txt
+          test ! -s drivers/pcie/build/undefined-symbols-i486.txt
+
+      - name: Build x64 UEFI and test firmware contracts on the host
+        run: |
+          python3 shizukudos/uefi/build.py
+          python3 shizukudos/uefi/test.py
+          python3 shizukudos/uefi/test.py --cc clang --sanitize
+
+      - name: Build the 32-bit transition and test layout and paging contracts
+        run: |
+          python3 shizukudos/uefi32/build.py
+          python3 shizukudos/uefi32/test.py
+
+      - name: Test AHCI models and build its standalone integration
+        run: |
+          python3 drivers/ahci_native/test.py
+          python3 shizukudos/uefi_ahci/build.py
+          python3 shizukudos/uefi_ahci/test.py
+
+      - name: Test the original FAT32 reader against synthetic sectors
+        # Host models and freestanding objects only; no Windows media or guest.
+        run: python3 drivers/fat_native/test.py
+
+      - name: Build FAT32-AHCI firmware integration and test its evidence contracts
+        # Synthetic files and host callback models; test_qemu.py is not run.
+        run: |
+          python3 shizukudos/uefi_fat/build.py
+          python3 shizukudos/uefi_fat/test.py
+
+      - name: Test installation-lab storage guards without starting a guest
+        timeout-minutes: 3
+        run: |
+          python3 platform/win98lab/test_storage.py -v
+          python3 platform/win98lab/test_packed.py -v
+          python3 platform/win98lab/test_lab_packed.py -v
+          python3 platform/win98lab/test_base_archive.py -v
+          python3 platform/win98lab/test_lab_base_archive.py -v
+          python3 platform/win98lab/test_trial.py -v
+          python3 platform/win98lab/test_lab_trial.py -v
+
+      - name: Build and host-test the original native probe supervisor
+        # Fake WinAPI fault models and PE import audit only; no Windows execution.
+        run: |
+          python3 platform/win98lab/test_native_runner.py
+          python3 platform/win98lab/test_native_runner.py --diagnostic
+          python3 platform/win98lab/test_native_logs.py
+
+      - name: Test and build the bounded Chromium launch observer
+        # Synthetic WinAPI models and PE imports only; no browser or guest run.
+        run: |
+          python3 platform/win98lab/app_probe/test.py
+          python3 platform/win98lab/app_probe/test.py --cd-source
+
+      - name: Test the ReactOS-reference exception core
+        # Portable lifetime/concurrency models only; no Win98 exception hook.
+        run: python3 ntwin32/exception/test.py
+
+      - name: Test xHCI command rings and build the PCI-E integration
+        run: |
+          python3 drivers/xhci_native/test.py
+          python3 shizukudos/uefi_xhci/build.py
+          python3 shizukudos/uefi_xhci/test.py
+
+      - name: Test original USB descriptor validation and freestanding builds
+        # Bounded parsing only; no controller, USB device, or class-driver I/O.
+        run: python3 drivers/usb_native/test.py
+
+      - name: Test USB device and configuration transport and build firmware integrations
+        # Asynchronous host model and hostile-evidence tests; no guest launch.
+        run: |
+          python3 drivers/xhci_usb/test.py
+          python3 shizukudos/uefi_usb/build.py
+          python3 shizukudos/uefi_usb/test.py
+          python3 shizukudos/uefi_usb_config/build.py
+          python3 shizukudos/uefi_usb_config/test.py
+
+      - name: Record validation scope
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          This workflow checks project host contracts, sanitizer results,
+          freestanding builds, and PE32 execution with explicit service mocks.
+          Individual step outcomes determine whether those checks passed.
+
+          It does not run a Windows guest, execute real VMM calls, test physical
+          drivers, boot firmware, use OS installation media, or publish packages.
+          Native Windows compatibility requires separate guest evidence.
+          SUMMARY

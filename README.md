@@ -1,6 +1,27 @@
-# Windows 98 Shizuku's Second Edition — Modernization Lab
+# Windows 98 Shizuku's Second Edition
 
-한국어 Windows 98 SE를 직접 설치해 검증하는 **실험용** 프로젝트입니다. 새 DOS 기반 후보인 ShizukuDOS와 Windows 98용 KernelEx API 라이브러리(`m98wrap.dll`)를 개발하고, Wine·ReactOS의 일부 사용자 모드 구현을 Win9x 환경에 맞게 이식합니다. 최종 목표는 아래의 전체 API 호환성과 필수 앱의 실제 구동이며, 아직 달성하지 않았습니다.
+Windows 98를 현대 하드웨어와 애플리케이션에 맞게 확장하는 **개발 중인 운영체제 프로젝트**입니다. 새 개발 경로는 **NTWrapper9x**(커널 기반), **NTWin32Wrapper9x**(앱 호환성), **NTWDDMWrapper9x**(그래픽), **PCI-E 확장**, **ShizukuDOS UEFI**로 구성합니다. Windows 8.1/10/11 수준의 기능은 목표이며 아직 달성하지 않았습니다.
+
+새 경로의 빌드·시험·현재 한계는 [독립 플랫폼 개발 안내](platform/README.md), [저장장치·UTF 검증 기록](docs/STORAGE_UTF_CHECKPOINT.md), [USB 구성 조회 실행 기록](docs/USB_CONFIGURATION_CHECKPOINT.md)에 있습니다. 이 빌드는 KernelEx·Wine·ReactOS 구현이나 기존 `m98wrap.dll`을 사용하지 않습니다. `NTW32.DLL`의 기존 Windows 98 네이티브 함수 호출은 유지합니다.
+
+2026-09-27부터 후속 커널·앱 기능은 ReactOS 소스를 적극 참조해 단계적으로 이식합니다. 기존 독자 구현의 출처를 보존하고, 새 이식에는 원본 리비전·파일별 라이선스·수정 내역을 기록합니다. 앱 검증은 최신 Chromium을 우선하며, 현재 고정한 공식 x86 스냅샷은 **156.0.8076.0 / 1705698**입니다. 과거 Chromium 150의 KernelEx 시험은 이 경로의 실행 성공으로 계산하지 않습니다.
+
+```sh
+python3 platform/build.py
+python3 platform/test.py
+```
+
+새 `NTW32.DLL`은 SRW·InitOnce·틱 확장·동적 API 조회·UTF-8 변환 15개 함수를 제공합니다. 실제 DLL의 32비트 호출·재배치 시험을 통과했고, 독자 LE 형식의 `NTWRAP9X.VXD`와 VMM 조회 경로를 구현했습니다. ShizukuDOS는 x64 UEFI를 종료하고 자체 32비트 보호 모드 커널에서 커널 코어·소프트웨어 그래픽·AHCI DMA 디스크 읽기·PCI-E 브리지 뒤 xHCI 명령 링과 USB2 EP0 descriptor 전송을 실행했습니다.
+
+[네이티브 그래픽 시험 프로그램](ntwddm/win98/)은 독자 렌더러를 앱 소유 GDI 비트맵에 연결합니다. 실제 Windows 98 SE에서 픽셀 계약 검사 128,014회·화면 그리기 20회·자원 정리와 종료 코드 0을 확인했습니다. 이는 소프트웨어 GDI 경로이며 WDDM·GPU 가속은 아직 아닙니다. [USB descriptor 파서](drivers/usb_native/)도 독자 구현으로 추가했습니다. [독자 EP0 전송 계층](drivers/xhci_usb/)은 실제 QEMU USB 장치에서 장치·구성 서술자를 네 번의 제어 전송으로 읽고 DMA 종료까지 검증했습니다. Windows 98 내부의 USB 드라이버 실행과 USB 장치 설정·HID 동작은 아직 검증하지 않았습니다.
+
+[독자 FAT32 판독기](drivers/fat_native/)는 최대 512KiB의 루트 파일을 읽으며, 조각난 클러스터·손상·읽기 오류·시간 제한을 GCC·Clang·ASan/UBSan으로 시험했습니다. [UEFI·AHCI 연결 코드](shizukudos/uefi_fat/)는 실제 KVM에서 UEFI 종료 후 257개 클러스터에 흩어진 131,195바이트 파일을 정확히 읽었습니다. 메모리 경계·DMA 해제·디스크 해시도 독립 대조했습니다. DOS 부팅 파일 실행은 아직 구현하지 않았습니다.
+
+이 증거와 실제 Windows 98의 VxD/앱 시험은 별도로 기록합니다. 사용자 제공 매체와 등록 번호로 Windows 98 SE 설치를 완료했습니다. KernelEx가 없는 새 설치본에서 독자 `NTW32.DLL`과 소프트웨어 GDI 프로브가 각각 종료 코드 0으로 통과했습니다. VxD는 전체 파일 바이트 검사 후 절대 경로로 열어도 오류 2가 발생했으며, 전체 진단 묶음은 실패로 기록했습니다. [최신 네이티브 진단](docs/NATIVE_GDI_TRIAL.md)과 [첫 시험 기록](docs/NATIVE_FIRST_TRIAL.md)에 범위·원본 로그·해시가 있습니다. 이 설치는 기존 BIOS 경로를 사용했으며 UEFI를 통한 Windows 98 GUI 부팅을 검증한 것은 아닙니다.
+
+## 기존 경로의 보존 기록
+
+아래는 참고 저장소에서 이어받은 **KernelEx 기반 경로와 과거 Windows 호스트의 시험 기록**입니다. 기존 라이선스·출처·재현 자료를 보존하며, 새 독립 계층의 구현이나 실행 증거로 합산하지 않습니다. 기존 `build.ps1`은 이 경로의 회귀 시험용입니다.
 
 ## 현재 구현
 

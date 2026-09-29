@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "product": "ShizukuDOS 10.0-dev",
+  "policy": "Upstream trees are fetched at the pinned commit into build/upstream (ignored by git). Local changes are only carried as patches under the consuming component's patches/ directory. Nothing listed here is an original Shizuku implementation.",
+  "upstreams": {
+    "freedos-kernel": {
+      "repository": "https://github.com/FDOS/kernel.git",
+      "ref": "ke2046",
+      "commit": "5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3",
+      "submodules": {
+        "country": {"repository": "https://github.com/FDOS/country.git", "commit": "7f83e041d00f78b3912c761246930f3b437440f6"},
+        "share": {"repository": "https://github.com/FDOS/share.git", "commit": "47f3d42527256fa46a00fe84cdb46d90f2e66f50"}
+      },
+      "license": "GPL-2.0-or-later",
+      "license_files": ["COPYING"],
+      "execution_mode": "real-mode 16-bit (i8086/i386 instruction set, FAT12/16/32); not a protected-mode kernel",
+      "used_by": ["shizukudos/dos16"],
+      "build": "Open Watcom + NASM via `make all XCPU=386 XFAT=32` (mkfiles/owlinux.mak)",
+      "patches": ["shizukudos/dos16/patches/0001-shizukudos-branding.patch"]
+    },
+    "freedos-freecom": {
+      "repository": "https://github.com/FDOS/freecom.git",
+      "ref": "master",
+      "commit": "04fc21a9f6792abe9048598e8f2d048b4f6cd0e5",
+      "license": "GPL-2.0-or-later",
+      "license_files": ["license/*"],
+      "execution_mode": "real-mode 16-bit COMMAND.COM",
+      "used_by": ["shizukudos/dos16"],
+      "build": "Open Watcom + NASM via `build.sh` (XMS swap enabled, language english)",
+      "patches": ["shizukudos/dos16/patches/freecom-0001-reproducible-build-stamp.patch"]
+    }
+  },
+  "tools": {
+    "open-watcom-v2": {
+      "kind": "toolchain (not redistributed)",
+      "url": "https://github.com/open-watcom/open-watcom-v2/releases/download/Last-CI-build/ow-snapshot.tar.xz",
+      "sha256": "4fdc24c04a02e31ffedae1690fc2c6d53fcb01464f92692adf6b17a7e890af3f",
+      "note": "Rolling CI tag: the archive at this URL can be replaced. The sha256 is the reproducibility gate; a mismatch means the toolchain must be re-pinned before results are compared.",
+      "license": "Sybase Open Watcom Public License 1.0"
+    },
+    "nasm": {"kind": "host tool", "min_version": "2.16"},
+    "mtools": {"kind": "host tool"}
+  }
+}

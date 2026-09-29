@@ -1,6 +1,6 @@
-# Windows 98 SE / Skylake 드라이버 트랙
+# Windows 98 Shizuku's Second Edition — 드라이버
 
-**상태: 설계와 읽기 전용 하드웨어 탐색 코드만 있음. AHCI/xHCI 드라이버 바이너리는 없으며, 디스크나 USB 장치를 구동한다는 주장은 하지 않는다.**
+독자 구현 [AHCI 코어](ahci_native/)가 실제 QEMU 컨트롤러에서 디스크 식별과 DMA 섹터 읽기를 통과했습니다. [ShizukuDOS 시험 경로](../shizukudos/uefi_ahci/)는 UEFI 종료 후 자체 32비트 커널에서 이 코어를 실행합니다. Windows 98 저장장치 스택 연결, USB 장치 구동과 실기기 검증은 아직 남아 있습니다.
 
 목표는 Windows 98 SE가 Intel 6세대 Core(100-series PCH) 수준의 SATA AHCI 저장 장치와 xHCI USB 컨트롤러를 사용할 수 있도록, Windows 98용 드라이버를 새로 구현하고 실제 게스트 및 실기기에서 검증하는 것이다. 구동할 보드 모델, BIOS 설정, PCI ID는 아직 정해지지 않았다.
 
@@ -9,6 +9,12 @@
 - [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md): 하드웨어 경계, Win9x 통합 경로, 단계별 완료 기준과 테스트.
 - [EVIDENCE.md](EVIDENCE.md): 계획의 근거가 되는 1차 문서와 확인할 사항.
 - [probe](probe/): AHCI/xHCI의 읽기 전용 capability 레지스터를 해석하는, OS와 무관한 C89 코드. 드라이버가 아니며 물리 MMIO를 스스로 매핑하지 않는다.
+- [pcie](pcie/): 독자 PCI/PCI-E 설정 공간·토폴로지·ECAM·자원·DMA 제약 코어.
+- [ahci_native](ahci_native/): 컨트롤러 소유권·DMA 수명·ATA 식별·단일 섹터 읽기 구현과 실패 주입 시험.
+- [fat_native](fat_native/): 독자 FAT32 루트 파일 판독기. 조각난 클러스터 연결·경계·중복을 검사하고 실패 시 출력을 보존한다. [UEFI·AHCI 연결](../shizukudos/uefi_fat/)도 합성 디스크 호스트 검증을 통과했으며 실제 게스트와 부팅 파일 실행은 후속 단계이다.
+- [xhci_native](xhci_native/): 컨트롤러 인계·DMA 명령/이벤트 링·No-Op 완료 처리. [별도 실제 게스트](../shizukudos/uefi_xhci/)에서 130개 명령을 검증했으며 USB 장치 기능은 아직 구현하지 않았다.
+- [usb_native](usb_native/): USB 2.0 장치·구성 descriptor를 제한된 메모리 안에서 검사하는 독자 파서. 오류 시 출력은 유지하며, 전송·장치 설정·클래스 드라이버는 아직 포함하지 않는다.
+- [Windows 98 연결 계약](../docs/NATIVE_DRIVER_INTEGRATION.md): CONFIGMG·VMM·IOS의 확인된 인터페이스와 추가 확인이 필요한 ABI, 보조 컨트롤러 소유권 및 검증 순서.
 
 ## 현재 판단
 
