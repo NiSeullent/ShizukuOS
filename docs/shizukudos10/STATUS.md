@@ -42,6 +42,23 @@ SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행
    `t_hello`는 슬롯 16–18(ring-3 "high" 시험 사용)과 충돌하지 않게 19–21로 옮겼다.
 9. 이식성: QEMU/OVMF 경로 탐색(Fedora·Debian/Ubuntu), `ntwin32/loader/evidence.py` 글꼴 대체.
 
+## 2b. 통합 Shizuku SE ISO (`tools/build_shizuku_se_iso.py`, 시험: `shz.py test --suite iso`)
+
+한 ISO에 ShizukuDOS 0.1(자체 구현, BIOS 플로피 에뮬레이션), ShizukuDOS 10.0(외부 FreeDOS 프로필 + Supervisor + Kernel32/64 + WIN64.IMG,
+UEFI El Torito), NTWrapper9x/NTWin32Wrapper9x/NTWDDMWrapper9x 산출물을 담는다. 두 프로필은 서로 다른 디렉터리로 분리 표기한다.
+Microsoft 파일은 넣지 않는다. 사용자 소유 Windows 98 미디어는 `--win98-media`로 별도 `-private` ISO에만 겹쳐 넣고 `build/`(git 무시)에 둔다.
+
+| 항목 | 증거 | 결과 (QEMU TCG, KVM 없음) |
+| --- | --- | --- |
+| El Torito 2엔트리(BIOS fd1.4 + UEFI 0xEF), 부팅 이미지 바이트 일치, EFI 이미지 FAT + `BOOTX64.EFI` | GUEST_RUN/HOST_TESTED | PASS 6 |
+| BIOS(SeaBIOS)로 ISO 부팅 → `A:\>` 프롬프트, `DIR`에 NTW32.DLL/NTWRAP9X.VXD/NTWGPROB.EXE | GUEST_RUN | PASS 4 |
+| UEFI(OVMF)로 ISO 부팅 → Supervisor 로더 시작, VMX 없음을 보고하고 펌웨어로 복귀 | GUEST_RUN | PASS 3 (**멀티커널 부팅이 아니라 VMX 불가 경로**) |
+| Supervisor 위의 DOS16/Kernel32/Kernel64/Win64 도메인 | — | BLOCKED (Intel VMX 필요) |
+| Windows 98 설치 완료 | — | **BLOCKED, 검증되지 않음** (미디어 없음). `INSTALL.BAT`은 실행하지 못했다 |
+
+전체: 14 PASS / 0 FAIL / 5 BLOCKED → INCOMPLETE. ISO는 CD/DVD 전용(USB 하이브리드 아님). `--win98-media` 경로는 표식된 합성 자리표시 파일로
+코드 경로만 시험했으며 Windows가 설치된다는 증거가 아니다.
+
 ## 3. 이번 세션에서 실행하지 못한 것 (BLOCKED)
 
 | 항목 | 이유 |
@@ -54,5 +71,4 @@ SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행
 
 ## 4. 저장소 반영 상태
 
-로컬 커밋 `8b39e93`, `67cc3e0`은 이 컨테이너에서 `git push`가 403(“Claude에게 NiSeullent/Win98-Modern 접근 권한 없음”)으로 거부돼
-**원격에 올라가지 않았다.** GitHub 연결/앱 설치가 필요하다.
+브랜치 `wip/shizukudos-10-toydzv`는 원격에 올라가 있고 PR #2로 추적한다. (초기에는 `git push`가 403으로 거부됐고 이후 접근이 복구됐다.)

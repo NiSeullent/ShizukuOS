@@ -324,8 +324,23 @@ def suite_win98_regression(results):
            detail="USER_REPORTED only; no guest run performed by this suite")
 
 
+def suite_iso(results):
+    """Integrated Shizuku SE ISO: build if absent, then boot it (BIOS El Torito, UEFI El Torito) and record every check."""
+    iso = REPO / "build" / "windows98-shizuku-second-edition.iso"
+    if not iso.exists():
+        run_script(results, "build the integrated Shizuku SE ISO", [REPO / "tools" / "build_shizuku_se_iso.py", "--skip-qemu"],
+                   timeout=1800)
+    run([sys.executable, REPO / "tools" / "test_shizuku_se_iso.py"], capture=True, check=False, timeout=900)
+    rj = REPO / "build" / "shizuku-se-iso-tests" / "result.json"
+    if not rj.exists():
+        record(results, "ISO boot harness", "FAIL", detail="tools/test_shizuku_se_iso.py produced no result.json")
+        return
+    for r in json.loads(rj.read_text())["results"]:
+        record(results, f"iso {r['group']}: {r['test']}", r["status"], detail=(r.get("detail") or "")[:200])
+
+
 SUITES = {"host": suite_host, "boot": suite_boot, "interkernel": suite_interkernel, "win64": suite_win64,
-          "win98-regression": suite_win98_regression}
+          "win98-regression": suite_win98_regression, "iso": suite_iso}
 
 
 def cmd_test(args):
