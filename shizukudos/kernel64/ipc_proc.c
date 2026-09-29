@@ -265,24 +265,6 @@ static int32_t sys_create_job(process_t *p, uint64_t ph, uint64_t access, uint64
     return ipc_give_handle(p, o, (uint32_t)access, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
 }
 
-static int32_t sys_open_job(process_t *p, uint64_t ph, uint64_t access, uint64_t oa)
-{
-    char name[48];
-    uint32_t oattrs = 0;
-    kobject_t *o;
-    uint64_t f;
-    int32_t st = ipc_name_from_oa(p, oa, name, sizeof name, &oattrs);
-    if (st) return st;
-    if (!name[0]) return STATUS_OBJECT_NAME_INVALID;
-    f = irq_save();
-    o = ob_find_named(OB_JOB, name);
-    if (o) ob_ref(o);
-    irq_restore(f);
-    if (!o) return STATUS_OBJECT_NAME_NOT_FOUND;
-    if (o->type != OB_JOB) { ob_deref(o); return STATUS_OBJECT_TYPE_MISMATCH; }
-    return ipc_give_handle(p, o, (uint32_t)access, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
-}
-
 static int32_t get_job(process_t *p, uint64_t h, uint32_t need, kobject_t **o)
 {
     uint32_t access = 0;
@@ -693,6 +675,7 @@ static kobject_t *thread_object_by_tid(uint64_t tid)
     kobject_t *o = 0;
     uint64_t f;
     if (!tid) return 0;
+    ipc_reap();                                          /* an exited thread whose last handle is gone is no longer found */
     sched_for_each_thread(find_tid_cb, &s);
     f = irq_save();
     if (s.found && s.found->tid == tid && s.found->object) { o = s.found->object; ob_ref(o); }
@@ -1058,7 +1041,7 @@ int32_t ipc_proc_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1
     case SYS_NtCreateEvent: case SYS_NtCreateMutant: case SYS_NtCreateSemaphore:
         return create_with_inherit(p, r, num, a1, a2, a3, a4);
     case SYS_NtCreateJobObject: return sys_create_job(p, a1, a2, a3);
-    case SYS_NtOpenJobObject: return sys_open_job(p, a1, a2, a3);
+    case SYS_NtOpenJobObject: return ipc_open_named(p, OB_JOB, a1, a2, a3);
     case SYS_NtAssignProcessToJobObject: return sys_assign_job(p, a1, a2);
     case SYS_NtSetInformationJobObject: return sys_set_job(p, a1, a2, a3, a4);
     case SYS_NtQueryInformationJobObject: return sys_query_job(p, r, a1, a2, a3, a4);

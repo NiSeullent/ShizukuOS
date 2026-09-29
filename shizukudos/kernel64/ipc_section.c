@@ -315,25 +315,6 @@ static int32_t sys_create_section(process_t *p, struct regs *r, uint64_t ph, uin
     return ipc_give_handle(p, o, (uint32_t)access, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
 }
 
-/* NtOpenSection(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES) */
-static int32_t sys_open_section(process_t *p, uint64_t ph, uint64_t access, uint64_t oa)
-{
-    char name[48];
-    uint32_t oattrs = 0;
-    kobject_t *o;
-    uint64_t f;
-    int32_t st = ipc_name_from_oa(p, oa, name, sizeof name, &oattrs);
-    if (st) return st;
-    if (!name[0]) return STATUS_OBJECT_NAME_INVALID;
-    f = irq_save();
-    o = ob_find_named(OB_SECTION, name);
-    if (o) ob_ref(o);
-    irq_restore(f);
-    if (!o) return STATUS_OBJECT_NAME_NOT_FOUND;
-    if (o->type != OB_SECTION) { ob_deref(o); return STATUS_OBJECT_TYPE_MISMATCH; }
-    return ipc_give_handle(p, o, (uint32_t)access, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
-}
-
 /* NtMapViewOfSection(Section, Process, PVOID *Base, ULONG_PTR ZeroBits, SIZE_T CommitSize, PLARGE_INTEGER Offset,
  *                    PSIZE_T ViewSize, SECTION_INHERIT, ULONG AllocationType, ULONG Win32Protect) */
 static int32_t sys_map_view(process_t *p, struct regs *r, uint64_t hsec, uint64_t hproc, uint64_t pbase, uint64_t zero_bits)
@@ -490,7 +471,7 @@ int32_t ipc_section_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t
     *handled = 1;
     switch (num) {
     case SYS_NtCreateSection: return sys_create_section(p, r, a1, a2, a3, a4);
-    case SYS_NtOpenSection: return sys_open_section(p, a1, a2, a3);
+    case SYS_NtOpenSection: return ipc_open_named(p, OB_SECTION, a1, a2, a3);
     case SYS_NtMapViewOfSection: return sys_map_view(p, r, a1, a2, a3, a4);
     case SYS_NtUnmapViewOfSection: return sys_unmap_view(p, a1, a2);
     case SYS_NtQuerySection: return sys_query_section(p, r, a1, a2, a3, a4);

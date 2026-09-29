@@ -112,6 +112,7 @@ int32_t ipc_give_handle(process_t *p, kobject_t *o, uint32_t access, int inherit
 int32_t ipc_ref_handle(process_t *p, uint64_t h, uint32_t type, kobject_t **out, uint32_t *access);
 int32_t ipc_ref_process(process_t *cur, uint64_t h, uint32_t need_access, process_t **out, kobject_t **obj);
 void ipc_handle_opened(kobject_t *o);   /* counts handles of IPC objects (pipe ends, ports, jobs) */
+int32_t ipc_open_named(process_t *p, uint32_t type, uint64_t ph, uint64_t access, uint64_t oa);
 
 /* ---------------------------------------------------------------- IRPs and completion (ipc_io.c) */
 enum { IRP_READ = 1, IRP_WRITE, IRP_LISTEN, IRP_TRANSCEIVE, IRP_FLUSH };

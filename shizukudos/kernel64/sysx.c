@@ -31,6 +31,9 @@ static int32_t object_name(process_t *p, uint64_t oa_va, char *out, size_t cap)
     if (copy_from_user(p, &u, oa.name, sizeof u)) return STATUS_ACCESS_VIOLATION;
     if (u.length / 2 >= 64) return STATUS_OBJECT_NAME_INVALID;
     if (u.length && copy_from_user(p, tmp, u.buffer, u.length)) return STATUS_ACCESS_VIOLATION;
+    if (u.length / 2 > 6 && (tmp[0] | 32) == 'l' && (tmp[1] | 32) == 'o' && (tmp[2] | 32) == 'c' && (tmp[3] | 32) == 'a' &&
+        (tmp[4] | 32) == 'l' && tmp[5] == '\\')          /* "Local\" is this single session's namespace: "x" == "Local\x" */
+        return utf16_to_utf8(tmp + 6, u.length / 2 - 6, out, cap) < 0 ? STATUS_OBJECT_NAME_INVALID : STATUS_SUCCESS;
     return utf16_to_utf8(tmp, u.length / 2, out, cap) < 0 ? STATUS_OBJECT_NAME_INVALID : STATUS_SUCCESS;
 }
 

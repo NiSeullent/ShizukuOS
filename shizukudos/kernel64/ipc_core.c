@@ -136,6 +136,26 @@ int32_t ipc_ref_process(process_t *cur, uint64_t h, uint32_t need_access, proces
     return STATUS_SUCCESS;
 }
 
+/* NtOpenEvent / NtOpenMutant / NtOpenSemaphore / NtOpenTimer / NtOpenSection / NtOpenJobObject / NtOpenIoCompletion
+ * (PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES): an existing named object of that type, never a new one. */
+int32_t ipc_open_named(process_t *p, uint32_t type, uint64_t ph, uint64_t access, uint64_t oa)
+{
+    char name[48];
+    uint32_t oattrs = 0;
+    kobject_t *o;
+    uint64_t f;
+    int32_t st = ipc_name_from_oa(p, oa, name, sizeof name, &oattrs);
+    if (st) return st;
+    if (!name[0]) return STATUS_OBJECT_NAME_INVALID;
+    f = irq_save();
+    o = ob_find_named(type, name);
+    if (o) ob_ref(o);
+    irq_restore(f);
+    if (!o) return STATUS_OBJECT_NAME_NOT_FOUND;
+    if (o->type != type) { ob_deref(o); return STATUS_OBJECT_TYPE_MISMATCH; }
+    return ipc_give_handle(p, o, (uint32_t)access, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
+}
+
 /* ---------------------------------------------------------------- object / handle hooks (objects.c) */
 void ipc_handle_closed(process_t *p, kobject_t *o)
 {
@@ -578,6 +598,10 @@ static int32_t ext_common(process_t *p, struct regs *r, uint32_t num, uint64_t a
     case SYS_NtTestAlert:
         return apc_pending(thread_current()) ? apc_deliver(p, r, STATUS_SUCCESS) : STATUS_SUCCESS;
     case SYS_NtShzQueryKernelStats: return sys_kernel_stats(p, a1, a2);
+    case SYS_NtOpenEvent: return ipc_open_named(p, OB_EVENT, a1, a2, a3);
+    case SYS_NtOpenMutant: return ipc_open_named(p, OB_MUTANT, a1, a2, a3);
+    case SYS_NtOpenSemaphore: return ipc_open_named(p, OB_SEMAPHORE, a1, a2, a3);
+    case SYS_NtOpenIoCompletion: return ipc_open_named(p, OB_IOCP, a1, a2, a3);
     case SYS_NtSetInformationObject:                    /* (HANDLE, CLASS, PVOID, ULONG) */
         if (a2 != 4) return STATUS_INVALID_INFO_CLASS;
         return handle_flags(p, a1, a3, a4, 0, 1);
