@@ -62,7 +62,20 @@ static const struct { const char *prefix; const char *dll; } apiset_schema[] = {
     {"api-ms-win-security-sddl-l1", "advapi32.dll"},
     {"api-ms-win-eventing-provider-l1", "advapi32.dll"},
 
-    /* graphics / window -> user32.dll, gdi32.dll: */
+    /* graphics / window -> user32.dll, gdi32.dll: contracts whose functions this system exports (the loader still resolves every
+     * imported NAME against the DLL, so a function that is not exported fails with STATUS_ENTRYPOINT_NOT_FOUND, never a stub) */
+    {"ext-ms-win-ntuser-window-l1", "user32.dll"},
+    {"ext-ms-win-ntuser-message-l1", "user32.dll"},
+    {"ext-ms-win-ntuser-windowclass-l1", "user32.dll"},
+    {"ext-ms-win-ntuser-rectangle-ext-l1", "user32.dll"},
+    {"ext-ms-win-ntuser-sysparams-ext-l1", "user32.dll"},
+    {"ext-ms-win-gdi-dc-l1", "gdi32.dll"},
+    {"ext-ms-win-gdi-dc-create-l1", "gdi32.dll"},
+    {"ext-ms-win-gdi-draw-l1", "gdi32.dll"},
+    {"ext-ms-win-gdi-font-l1", "gdi32.dll"},
+    {"ext-ms-win-gdi-devcaps-l1", "gdi32.dll"},
+    {"ext-ms-win-gdi-object-l1", "gdi32.dll"},
+    {"ext-ms-win-gdi-render-l1", "gdi32.dll"},
 
     /* network -> ws2_32.dll: */
 
