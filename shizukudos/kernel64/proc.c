@@ -113,8 +113,10 @@ uint64_t proc_alloc_teb(process_t *p, uint64_t stack_base, uint64_t stack_limit)
     t->stack_base = stack_base;
     t->stack_limit = stack_limit;
     /* DeallocationStack (x64 TEB +0x1478): base of the stack reservation, read by GetCurrentThreadStackLimits. The whole
-     * reservation is committed here, so it equals StackLimit. */
-    *(uint64_t *)((uint8_t *)t + 0x1478) = stack_limit;
+     * reservation is committed here, so it equals StackLimit. It lies in the TEB's second page, which is a different
+     * physical page: written through that page's own mapping, never at t + 0x1478 (that is the page after the first
+     * one in physical memory, which belongs to someone else). */
+    *(uint64_t *)p2v(vm_lookup(p->pml4, base + 0x1478, 0)) = stack_limit;
     t->client_pid = (uint64_t)p->pid;
     t->client_tid = p->next_tid;
     t->peb = p->peb;
