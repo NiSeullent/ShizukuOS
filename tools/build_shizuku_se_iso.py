@@ -1,71 +1,61 @@
 #!/usr/bin/env python3
-"""Build a bootable Windows 98 Shizuku Second Edition project ISO.
+"""Build the Windows 98 Shizuku Second Edition VM install ISO (one hybrid image).
 
-One ISO carries two separate boot profiles. They are never mixed under one
-label (docs/shizukudos10/BASELINE.md section 5):
+One ISO, bootable as a CD and, written to a USB stick or attached as a disk, as a
+hard disk, on legacy BIOS and on UEFI:
 
-- BIOS, El Torito default entry: ShizukuDOS 0.1, the project's own FAT12 1.44
-  MiB floppy image (media type 2, floppy emulation).
-- UEFI x64, El Torito EFI entry (platform 0xEF, no emulation): ShizukuDOS
-  10.0-dev, the external FreeDOS profile. The EFI image is a FAT image holding
-  EFI/BOOT/BOOTX64.EFI (the Shizuku Supervisor loader) plus the \\SHZDOS files
-  the loader reads from its own volume (DISK.IMG, KERNEL32.BIN, KERNEL64.BIN,
-  WIN64.IMG). The multikernel domains need Intel VMX; the loader refuses
-  otherwise. ShizukuDOS 10.0 is rebuilt with
-  `shizukudos/tools/shz.py build --profile uefi-multikernel` on every run.
+- BIOS, El Torito default entry: isolinux.bin (no emulation, boot info table),
+  pinned syslinux 6.04 (shizukudos/upstream/manifest.json "syslinux"). menu.c32
+  offers, also on COM1:
+    Kernel64  mboot.c32 loads the Multiboot stub SHZ/K64/BOOT.ELF with module 0
+              KERNEL64S.BIN and module 1 WIN64.IMG (standalone Kernel64 + Win64).
+    DOS16     memdisk boots ShizukuDOS10/dos16/shizukudos-dos16-hd32.img, the
+              ShizukuDOS 10 DOS16 FreeDOS-profile disk, from RAM.
+    0.1       memdisk boots ShizukuDOS/shizukudos.img, the ShizukuDOS 0.1 floppy.
+    Install   only when SHZSETUP (agent I1) is present under SHZ/SETUP: Kernel64
+              with shz.setup=auto on its Multiboot command line.
+- UEFI, El Torito EFI entry (platform 0xEF): ShizukuDOS10/efiboot.img, a FAT
+  image with \\EFI\\BOOT\\BOOTX64.EFI (Shizuku loader), \\EFI\\SHIZUKU\\CSMWRAP.EFI
+  (+ CSMWRAP.INI, BOOT.INI), \\SHZDOS\\ (loader inputs) and \\STARTUP.NSH. Without
+  Intel VMX the path is loader boot manager (or, interim, the UEFI Shell running
+  STARTUP.NSH) -> CSMWrap -> SeaBIOS CSM -> the El Torito default entry, i.e. the
+  same menu as legacy BIOS.
+- isohybrid: isohdpfx.bin MBR code in the system area, MBR partition 1 (0x00,
+  active, whole image) for BIOS disk boot, MBR partition 2 (0xEF) and a GPT
+  entry for the EFI image so UEFI finds \\EFI\\BOOT\\BOOTX64.EFI on a disk.
 
-The ISO9660/Joliet tree also carries the Second Edition payload (built
-NTWrapper9x, NTWin32Wrapper9x and NTWDDMWrapper9x artifacts), the SHZSE
-overlay installer for an already installed Windows 98, and the GPL license
-and corresponding-source files for the FreeDOS parts. Neither profile
-replaces IO.SYS or installs the Windows 98 GUI.
+The ISO 9660/Joliet/Rock Ridge tree also carries the Win98 SE overlay
+(NTWrapper9x, NTWin32Wrapper9x, NTWDDMWrapper9x, SHZSE installer), the
+driver store (DRIVERS\\<package>\\ + HWIDS.TXT index; --driver-package DIR copies
+a user-supplied package unchanged), VMPROFIL.TXT, and the licences and
+corresponding source of every third-party part (FreeDOS, CSMWrap + SeaBIOS,
+syslinux). Microsoft files are never packaged by default: --win98-media PATH
+overlays the builder's OWN Windows 98 media under WIN98/ in a separate
+-private ISO (git-ignored build/ only).
 
-Microsoft installation files are never packaged by default. `--win98-media
-PATH` overlays the builder's OWN Windows 98 ISO or extracted directory under
-WIN98/ in a separate, private ISO (git-ignored build/ only; do not share it).
-
-Layout sources recorded in SOURCES.TXT on the image:
-- "El Torito" Bootable CD-ROM Format Specification 1.0 (Phoenix/IBM, 1995),
-  media type 2 = 1.44 MB floppy emulation.
-  https://pdos.csail.mit.edu/6.828/2018/readings/boot-cdrom.pdf
-- Microsoft KB Q167685 (media byte 0x02 is a 1.44 MB floppy).
-  https://helparchive.huntertur.net/document/106908
-- ECMA-119 / ISO 9660.
-  https://ecma-international.org/publications-and-standards/standards/ecma-119/
-- xorriso mkisofs emulation: a 1440 KiB -b image selects floppy emulation.
-  Do not pass -no-emul-boot or -boot-info-table; the info table would
-  overwrite FAT BPB bytes at offset 8.
-  https://wiki.osdev.org/Mkisofs
-  https://wiki.osdev.org/El-Torito
-- Windows 98 installation CDs boot that embedded floppy as drive A. Reading
-  the rest of the CD still needs a CD-ROM driver, which ShizukuDOS does not
-  implement. https://www.vogons.org/viewtopic.php?t=102014
-- FAT12 geometry matches shizukudos/boot.asm: 512-byte sectors, 2880 sectors,
-  18 sectors/track, 2 heads (1.44 MiB). Microsoft FAT specification:
-  https://www.win.tue.nl/~aeb/linux/fs/fat/fatgen103.pdf
+Reproducible: fixed SOURCE_DATE_EPOCH for xorriso and mtools, fixed FAT volume
+ids, deterministic tarballs; building twice from the same inputs gives the same
+bytes (the receipt records the sha256). Boot evidence comes from
+tools/test_shizuku_se_boot_matrix.py, not from this builder.
 """
 from __future__ import annotations
 
 import argparse
 import filecmp
-import gzip
 import hashlib
 import importlib.util
-import io
 import json
 import os
 import re
 import shutil
-import socket
 import struct
 import subprocess
 import sys
-import tarfile
-import time
-import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+import shizuku_se_media as se_media  # noqa: E402
 BUILD = ROOT / "build"
 STAGE_ROOT = BUILD / "shizuku-second-edition-stage"
 ISO_NAME = "windows98-shizuku-second-edition.iso"
@@ -80,32 +70,6 @@ SHZSE_FILES = ("NTW32.DLL", "NTWRAP9X.VXD", "NTWQUERY.EXE", "NTWPROBE.EXE", "NTW
 EFI_IMAGE = f"{SHZ10_DIR}/efiboot.img"
 # Fixed so that the EFI FAT image and the source tarballs are reproducible.
 FIXED_EPOCH = 1785283200
-
-
-def load_qemu_tools():
-    """Portable QEMU/OVMF discovery shared with ShizukuDOS 10.0 (shizukudos/tools/qemu.py)."""
-    path = SHZ10 / "tools" / "qemu.py"
-    spec = importlib.util.spec_from_file_location("shizuku_qemu_tools", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-qemu_tools = load_qemu_tools()
-
-
-def find_qemu() -> Path:
-    """shizukudos/tools/qemu.py DEFAULT_QEMU, else any qemu-system-x86_64 on PATH."""
-    candidate = Path(qemu_tools.DEFAULT_QEMU)
-    if candidate.is_file():
-        return candidate
-    found = shutil.which("qemu-system-x86_64")
-    return Path(found) if found else candidate
-
-
-QEMU = find_qemu()
 
 
 def sha256(data: bytes) -> str:
@@ -191,13 +155,14 @@ def build_components(work: Path) -> dict[str, Path]:
 
 
 def edition_text() -> bytes:
+    """EDITION.TXT inside the ShizukuDOS 0.1 floppy (8.3 FAT12 root, 40-column friendly)."""
     return (
         "Windows 98 Shizuku Second Edition\r\n"
-        "Two SEPARATE boot profiles are on this disc. Different code.\r\n"
-        "1. BIOS boot: ShizukuDOS 0.1 (own code) = this FAT12 floppy image.\r\n"
-        "2. UEFI x64 boot: ShizukuDOS 10.0-dev (external FreeDOS profile).\r\n"
-        "   Not on this floppy. It needs Intel VMX to run its multikernel\r\n"
-        "   domains; without VMX the UEFI loader refuses and returns.\r\n"
+        "This floppy is ShizukuDOS 0.1, the project's own real-mode shell.\r\n"
+        "The VM install ISO boots it from its menu (memdisk floppy). The\r\n"
+        "same menu offers ShizukuDOS 10 DOS16 (external FreeDOS profile) and\r\n"
+        "the standalone Kernel64 + Win64 runtime; on UEFI the Shizuku loader\r\n"
+        "(Supervisor with Intel VMX) or CSMWrap leads to the same menu.\r\n"
         "Embedded on this floppy: NTW32.DLL NTWRAP9X.VXD NTWGPROB.EXE\r\n"
         "ShizukuDOS does not replace IO.SYS and does not install or boot the\r\n"
         "Windows 98 GUI. No completed Windows 98 installation is claimed.\r\n"
@@ -208,13 +173,17 @@ def edition_text() -> bytes:
 def limits_text() -> bytes:
     return (
         "LIMITS\r\n"
-        "ShizukuDOS 0.1 (BIOS, this floppy): reads FAT12 root files and runs\r\n"
-        "one 8.3 COM program. No MS-DOS 7.1, MSCDEX or CD-ROM driver.\r\n"
-        "BOOT and BOOTC only chainload an existing hard-disk boot sector.\r\n"
-        "ShizukuDOS 10.0-dev (UEFI x64, FreeDOS profile, see the disc):\r\n"
-        "the loader needs Intel VMX with EPT and unrestricted guest. AMD SVM\r\n"
-        "is detected but has no backend. A VM without nested VMX is refused.\r\n"
-        "Its DOS16 disk is a conformance test disk, not a Windows installer.\r\n"
+        "ShizukuDOS 0.1 (menu entry 0.1, floppy image in RAM): reads FAT12 root\r\n"
+        "files and runs one 8.3 COM program. No MS-DOS 7.1, no CD-ROM driver.\r\n"
+        "ShizukuDOS 10 DOS16 (menu entry DOS16): FreeDOS kernel + FreeCOM\r\n"
+        "(external, GPL) on a 32 MiB conformance disk held in RAM by memdisk;\r\n"
+        "it runs its test programs and stops. Changes are not written back.\r\n"
+        "Kernel64 (menu entry Kernel64): the standalone Long Mode kernel and\r\n"
+        "Win64 runtime run their self-tests and Win64 test programs and stop.\r\n"
+        "It is not the Supervisor; it has no Win98 or DOS domain.\r\n"
+        "UEFI: the Supervisor needs Intel VMX with EPT and unrestricted guest.\r\n"
+        "AMD SVM is detected but has no backend. Without VMX the legacy menu is\r\n"
+        "reached through CSMWrap (needs 2+ logical CPUs, Secure Boot off).\r\n"
         "Neither profile replaces IO.SYS or installs or boots the Win98 GUI.\r\n"
         "This is not a completed Windows 98 installation.\r\n"
         "NTWRAP9X.VXD: the project docs record a failed VxD load on Windows 98\r\n"
@@ -225,42 +194,41 @@ def limits_text() -> bytes:
 def sources_text() -> bytes:
     return (
         "Layout sources checked while building this image\r\n"
-        "1. El Torito Bootable CD-ROM Format Specification 1.0, Phoenix/IBM, 1995.\r\n"
-        "   Media type 2 is 1.44 MB floppy emulation. Boot indicator 0x88.\r\n"
+        "1. El Torito Bootable CD-ROM Format Specification 1.0, Phoenix/IBM, 1995:\r\n"
+        "   boot catalog, validation entry, default entry, section entries.\r\n"
         "   https://pdos.csail.mit.edu/6.828/2018/readings/boot-cdrom.pdf\r\n"
-        "2. Microsoft KB Q167685. Media byte 0x02 is a 1.44 MB floppy.\r\n"
-        "   https://helparchive.huntertur.net/document/106908\r\n"
-        "3. ECMA-119, volume and file structure of CD-ROM (ISO 9660).\r\n"
+        "2. ECMA-119 (ISO 9660): the 32 KiB system area is free for the MBR/GPT.\r\n"
         "   https://ecma-international.org/publications-and-standards/standards/ecma-119/\r\n"
-        "4. xorriso -as mkisofs. A 1440 KiB -b image uses floppy emulation.\r\n"
-        "   -boot-info-table is not used because it overwrites BPB offset 8.\r\n"
-        "   https://wiki.osdev.org/Mkisofs\r\n"
-        "   https://wiki.osdev.org/El-Torito\r\n"
-        "5. Windows 98 bootable CDs expose the embedded floppy as drive A.\r\n"
-        "   CD directory access still requires a CD-ROM driver.\r\n"
-        "   https://www.vogons.org/viewtopic.php?t=102014\r\n"
-        "6. FAT12 BPB geometry is the ShizukuDOS boot sector: 512x2880, 18x2.\r\n"
-        "   https://www.win.tue.nl/~aeb/linux/fs/fat/fatgen103.pdf\r\n"
-        "7. UEFI boot entry, checked on the build host with the local tools:\r\n"
-        "   xorriso 1.5.x -eltorito-alt-boot -e IMAGE -no-emul-boot writes an\r\n"
-        "   El Torito section with platform id 0xEF. For an image over 65535\r\n"
-        "   512-byte sectors xorriso records sector count 0 (\"extend the ESP to\r\n"
-        "   end-of-medium\"), as its own warning states. The ISO parser in\r\n"
-        "   tools/build_shizuku_se_iso.py reads the catalog bytes directly.\r\n"
-        "8. What the UEFI loader reads from its own volume: in the project tree,\r\n"
+        "3. xorriso -as mkisofs (1.5.x, on the build host): -b isolinux.bin\r\n"
+        "   -no-emul-boot -boot-load-size 4 -boot-info-table, -eltorito-alt-boot -e\r\n"
+        "   IMAGE -no-emul-boot (platform 0xEF), -isohybrid-mbr isohdpfx.bin and\r\n"
+        "   -isohybrid-gpt-basdat (MBR partition 0xEF + GPT entry for the EFI\r\n"
+        "   image). For an EFI image over 65535 sectors xorriso records sector\r\n"
+        "   count 0 ('extend to end of medium'); the parser here reads the catalog.\r\n"
+        "4. Syslinux 6.04 documentation in the pinned packages (doc/isolinux.txt,\r\n"
+        "   doc/menu.txt, doc/mboot.txt, doc/memdisk.txt): SERIAL, MENU LABEL ^key,\r\n"
+        "   mboot.c32 KERNEL --- MODULE --- MODULE, memdisk harddisk/floppy.\r\n"
+        "   isolinux.bin reads Rock Ridge names (core/fs/iso9660/susp_rr.c).\r\n"
+        "5. Multiboot 0.6.96: module list order, memory map (flags bit 6); the\r\n"
+        "   Kernel64 stub takes module 0 = kernel, module 1 = initrd.\r\n"
+        "6. What the UEFI loader reads from its own volume: in the project tree,\r\n"
         "   shizukudos/supervisor/loader/loader.c load_file() and\r\n"
         "   shizukudos/supervisor/build.py build_esp(): \\SHZDOS\\DISK.IMG,\r\n"
         "   KERNEL32.BIN, KERNEL64.BIN, WIN64.IMG next to EFI\\BOOT\\BOOTX64.EFI.\r\n"
+        "7. CSMWrap (build/upstream/csmwrap at the pinned commit): src/bootdev.c\r\n"
+        "   boots the PCI device CSMWRAP.EFI was loaded from; SeaBIOS cdrom.c boots\r\n"
+        "   the El Torito default entry, boot.c a disk through its MBR.\r\n"
+        "8. EDK2 UEFI Shell: startup.nsh is searched on the mapped file systems\r\n"
+        "   (observed with the build host's OVMF 2024.02).\r\n"
         "9. Windows 98 guest procedure for SHZSE: platform/win98lab/README.md,\r\n"
         "   ntwrapper/vxd/README.md, docs/NATIVE_FIRST_TRIAL.md,\r\n"
         "   docs/NATIVE_GDI_TRIAL.md, docs/VXD_V86_LOADER_TRIAL.md.\r\n"
+        "10. INF syntax for the driver store index: Microsoft 'General Syntax Rules\r\n"
+        "   for INF Files', 'INF Manufacturer Section', 'INF Models Section'.\r\n"
         "\r\n"
-        "Referenced but NOT re-read while building (uefi.org and other hosts are\r\n"
-        "unreachable from the build container; verify before relying on them):\r\n"
+        "Referenced but NOT re-read while building (verify before relying on them):\r\n"
         "- UEFI Specification 2.10, chapter 13 (El Torito, platform id 0xEF, the\r\n"
         "  boot image is a FAT file system). https://uefi.org/specs/UEFI/2.10/\r\n"
-        "- GNU GPL version 2. The texts shipped on this disc are the copies from\r\n"
-        "  the pinned FreeDOS trees (ShizukuDOS10\\LICENSES).\r\n"
     ).encode("ascii")
 
 
@@ -303,7 +271,7 @@ def build_floppy(work: Path, artifacts: dict[str, Path]) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# ShizukuDOS 10.0-dev (external FreeDOS profile): build, stage, EFI image
+# ShizukuDOS 10.0-dev: build, stage, EFI image, licences and source
 # ---------------------------------------------------------------------------
 
 # Build outputs (relative to build/shizukudos) that are staged under ShizukuDOS10/.
@@ -313,51 +281,56 @@ SHZ10_STAGED = (
     "kernel64/KERNEL64.BIN",
     "win64/WIN64.IMG",
     "supervisor/BOOTX64.EFI",
+    "csm/CSMWRAP.EFI",
 )
-# supervisor/esp.img (96 MiB, same five files) is only cross-checked, not shipped:
-# the ISO carries a size-fitted EFI image built from the very same bytes.
+# The DOS16 disk image the BIOS menu's DOS16 entry boots with memdisk (ISO 9660 path).
+DOS16_ISO_PATH = f"{SHZ10_DIR}/dos16/shizukudos-dos16-hd32.img"
+# supervisor/esp.img (96 MiB) is only cross-checked, not shipped: the ISO carries a
+# size-fitted EFI image built from the very same bytes plus CSMWrap and STARTUP.NSH.
 SHZ10_ESP = "supervisor/esp.img"
 SHZ10_RECEIPTS = {
     "dos16/build-result.json": "dos16-build-result.json",
     "supervisor/build-result.json": "supervisor-build-result.json",
     "kernels-build-result.json": "kernels-build-result.json",
+    "win64/build-result.json": "win64-build-result.json",
+    "csm/build-result.json": "csm-build-result.json",
 }
-# Path inside the EFI FAT volume -> path of the same bytes in the ISO tree.
-# The loader reads \SHZDOS\DISK.IMG, KERNEL32.BIN, KERNEL64.BIN, WIN64.IMG from
-# the volume it was loaded from (shizukudos/supervisor/loader/loader.c) and
-# shizukudos/supervisor/build.py build_esp() lays them out the same way.
-EFI_MEMBERS = {
-    "EFI/BOOT/BOOTX64.EFI": f"{SHZ10_DIR}/supervisor/BOOTX64.EFI",
-    "SHZDOS/DISK.IMG": f"{SHZ10_DIR}/dos16/shizukudos-dos16-hd32.img",
-    "SHZDOS/KERNEL32.BIN": f"{SHZ10_DIR}/kernel32/KERNEL32.BIN",
-    "SHZDOS/KERNEL64.BIN": f"{SHZ10_DIR}/kernel64/KERNEL64.BIN",
-    "SHZDOS/WIN64.IMG": f"{SHZ10_DIR}/win64/WIN64.IMG",
+# Files of supervisor/esp.img that the EFI image of the ISO must carry unchanged.
+ESP_CROSSCHECK = {
+    "EFI/BOOT/BOOTX64.EFI": "supervisor/BOOTX64.EFI",
+    "SHZDOS/DISK.IMG": "dos16/shizukudos-dos16-hd32.img",
+    "SHZDOS/KERNEL32.BIN": "kernel32/KERNEL32.BIN",
+    "SHZDOS/KERNEL64.BIN": "kernel64/KERNEL64.BIN",
+    "SHZDOS/WIN64.IMG": "win64/WIN64.IMG",
 }
+BUILD_STEPS = (
+    [sys.executable, "shizukudos/csm/build.py"],
+    [sys.executable, "shizukudos/tools/shz.py", "build", "--profile", "uefi-multikernel"],
+)
 MIB = 1024 * 1024
 
 
-def build_shizukudos10() -> dict[str, Path]:
-    """Rebuild ShizukuDOS 10.0-dev and return its outputs. Any failure is fatal."""
-    command = [sys.executable, "shizukudos/tools/shz.py", "build", "--profile", "uefi-multikernel"]
-    print("== " + " ".join(command), flush=True)
-    try:
-        subprocess.run(command, cwd=ROOT, check=True, timeout=1800)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(
-            f"ShizukuDOS 10.0 build failed ({exc}); refusing to package stale or partial outputs"
-        ) from exc
+def build_shizukudos10(reuse: bool) -> dict[str, Path]:
+    """Rebuild CSMWrap and ShizukuDOS 10.0-dev (or, with reuse, take existing outputs). Failures are fatal."""
     outputs = {rel: SHZ10_BUILD / rel for rel in (*SHZ10_STAGED, SHZ10_ESP, *SHZ10_RECEIPTS)}
+    outputs.update({f"kernel64s/{name}": path for name, path in se_media.K64_FILES.items()})
+    if reuse and all(path.is_file() for path in outputs.values()):
+        print("== --reuse-builds: packaging the existing build/shizukudos outputs (checked against their receipts)")
+    else:
+        for command in BUILD_STEPS:
+            print("== " + " ".join(str(c) for c in command), flush=True)
+            try:
+                subprocess.run(command, cwd=ROOT, check=True, timeout=2400)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                raise RuntimeError(f"build step failed ({exc}); refusing to package stale or partial outputs") from exc
     missing = [rel for rel, path in outputs.items() if not path.is_file()]
     if missing:
-        raise RuntimeError("ShizukuDOS 10.0 build did not produce: " + ", ".join(missing))
+        raise RuntimeError("the ShizukuDOS 10.0 build did not produce: " + ", ".join(missing))
     return outputs
 
 
 def mtools_env() -> dict[str, str]:
-    env = dict(os.environ)
-    env["MTOOLS_SKIP_CHECK"] = "1"
-    env["SOURCE_DATE_EPOCH"] = str(FIXED_EPOCH)
-    return env
+    return se_media.mtools_env()
 
 
 def mcopy_out(image: Path, member: str, destination: Path) -> bytes:
@@ -369,7 +342,7 @@ def mcopy_out(image: Path, member: str, destination: Path) -> bytes:
 
 
 def check_shizukudos10_outputs(outputs: dict[str, Path], work: Path) -> str:
-    """The staged files must be the ones the build receipt and the prebuilt esp.img describe."""
+    """The staged files must be the ones the build receipts and the prebuilt esp.img describe."""
     receipt = json.loads(outputs["supervisor/build-result.json"].read_text(encoding="utf-8"))["artifacts"]
     receipt_keys = {
         "supervisor/BOOTX64.EFI": "BOOTX64.EFI",
@@ -385,47 +358,29 @@ def check_shizukudos10_outputs(outputs: dict[str, Path], work: Path) -> str:
         if key not in receipt or receipt[key]["sha256"] != actual:
             raise RuntimeError(f"{rel} does not match supervisor/build-result.json ({key}); the outputs are inconsistent")
         lines.append(f"{rel} matches supervisor/build-result.json")
-    # The prebuilt ESP must hold exactly the bytes that are about to be staged.
+    csm = json.loads(outputs["csm/build-result.json"].read_text(encoding="utf-8"))["artifacts"]["CSMWRAP.EFI"]
+    if csm["sha256"] != sha256_path(outputs["csm/CSMWRAP.EFI"]):
+        raise RuntimeError("csm/CSMWRAP.EFI does not match csm/build-result.json")
+    lines.append("csm/CSMWRAP.EFI matches csm/build-result.json")
+    archive = json.loads(outputs["win64/build-result.json"].read_text(encoding="utf-8"))["archive"]
+    if archive["sha256"] != sha256_path(outputs["win64/WIN64.IMG"]):
+        raise RuntimeError("win64/WIN64.IMG does not match win64/build-result.json")
+    lines.append(f"win64/WIN64.IMG matches win64/build-result.json ({len(archive['files'])} files)")
     scratch = work / "esp-crosscheck"
-    for member, staged in EFI_MEMBERS.items():
-        rel = staged[len(SHZ10_DIR) + 1:]
-        if mcopy_out(outputs[SHZ10_ESP], member, scratch / member) != outputs[rel].read_bytes():
-            raise RuntimeError(f"supervisor/esp.img ::/{member} differs from {rel}")
-    lines.append("supervisor/esp.img holds the same five files")
+    for member, staged in ESP_CROSSCHECK.items():
+        if mcopy_out(outputs[SHZ10_ESP], member, scratch / member) != outputs[staged].read_bytes():
+            raise RuntimeError(f"supervisor/esp.img ::/{member} differs from {staged}")
+    lines.append("supervisor/esp.img holds the same loader and \\SHZDOS files")
     shutil.rmtree(scratch, ignore_errors=True)
     return "\n".join(lines)
 
 
 def build_efi_image(work: Path, members: dict[str, bytes]) -> bytes:
-    """FAT16 image (1 KiB clusters) sized to its content. members: FAT path -> bytes."""
+    """FAT16 El Torito EFI image sized to its content (reproducible: fixed volume id and dates)."""
     total = sum(len(data) for data in members.values())
     size_mib = -(-(total + 3 * MIB) // MIB)
-    source = work / "efi-src"
-    if source.exists():
-        shutil.rmtree(source)
     image = work / "efiboot.img"
-    image.unlink(missing_ok=True)
-    with open(image, "wb") as handle:
-        handle.truncate(size_mib * MIB)
-    mkfs = ["mkfs.vfat", "-F", "16", "-s", "2", "-n", "SHZESP", "-i", "53485A45"]
-    help_text = subprocess.run(["mkfs.vfat", "--help"], capture_output=True, text=True)
-    if "--invariant" in (help_text.stdout + help_text.stderr):
-        mkfs.insert(1, "--invariant")  # constant timestamps: reproducible image
-    subprocess.run([*mkfs, str(image)], check=True, stdout=subprocess.DEVNULL, env=mtools_env())
-    env = mtools_env()
-    directories = sorted({str(Path(name).parent.as_posix()) for name in members} | {"EFI", "SHZDOS"},
-                         key=lambda d: (d.count("/"), d))
-    subprocess.run(["mmd", "-i", str(image), *[f"::/{d}" for d in directories if d != "."]], check=True, env=env)
-    for name, data in members.items():
-        local = source / name
-        local.parent.mkdir(parents=True, exist_ok=True)
-        local.write_bytes(data)
-        subprocess.run(["mcopy", "-i", str(image), str(local), f"::/{name}"], check=True, env=env)
-    shutil.rmtree(source)
-    if shutil.which("fsck.vfat"):
-        check = subprocess.run(["fsck.vfat", "-n", str(image)], capture_output=True, text=True)
-        if check.returncode != 0:
-            raise RuntimeError("fsck.vfat rejects the EFI image:\n" + check.stdout + check.stderr)
+    se_media.make_fat(image, members, size_mib, 16, "SHZESP", "53485A45", work / "efi-fat")
     return image.read_bytes()
 
 
@@ -444,22 +399,17 @@ def tar_entries(base: Path, prefix: str) -> list[tuple[str, Path]]:
     return entries
 
 
+def tracked_entries(tree: Path, prefix: str) -> list[tuple[str, Path]]:
+    """Every git-tracked file of the checked-out commit, submodules included (the corresponding source)."""
+    listing = subprocess.run(["git", "-C", str(tree), "ls-files", "--recurse-submodules", "-z"],
+                             capture_output=True, check=True).stdout.decode("utf-8")
+    names = sorted(name for name in listing.split("\0") if name and (tree / name).is_file()
+                   and not (tree / name).is_symlink())
+    return [(f"{prefix}/{name}", tree / name) for name in names]
+
+
 def deterministic_tar_gz(entries: list[tuple[str, Path]]) -> bytes:
-    buffer = io.BytesIO()
-    with gzip.GzipFile(filename="", mode="wb", fileobj=buffer, compresslevel=9, mtime=0) as gz:
-        with tarfile.open(fileobj=gz, mode="w", format=tarfile.GNU_FORMAT) as tar:
-            for arcname, path in entries:
-                info = tar.gettarinfo(str(path), arcname)
-                info.uid = info.gid = 0
-                info.uname = info.gname = ""
-                info.mtime = FIXED_EPOCH
-                info.mode = 0o755 if (info.isdir() or info.mode & 0o111) else 0o644
-                if info.isreg():
-                    with open(path, "rb") as handle:
-                        tar.addfile(info, handle)
-                else:
-                    tar.addfile(info)
-    return buffer.getvalue()
+    return se_media.deterministic_tar_gz(entries)
 
 
 def git_output(*args: str, cwd: Path = ROOT) -> str:
@@ -468,26 +418,35 @@ def git_output(*args: str, cwd: Path = ROOT) -> str:
 
 
 def pinned_upstream_tree(name: str, spec: dict) -> Path:
-    """The pinned upstream tree the FreeDOS binaries were built from, unmodified."""
+    """The pinned upstream tree the binaries were built from, unmodified (submodules at their pins)."""
     tree = BUILD / "upstream" / name
     if not tree.is_dir():
-        raise RuntimeError(f"upstream tree {tree} is missing; the GPL source cannot be shipped")
+        raise RuntimeError(f"upstream tree {tree} is missing; its source cannot be shipped")
     head = git_output("rev-parse", "HEAD", cwd=tree)
     if head != spec["commit"]:
         raise RuntimeError(f"{tree} is at {head or 'unknown'}, manifest pins {spec['commit']}")
     if git_output("status", "--porcelain", cwd=tree):
         raise RuntimeError(f"{tree} has local modifications; the shipped source would not match commit {spec['commit']}")
+    for sub, info in spec.get("submodules", {}).items():
+        got = git_output("rev-parse", "HEAD", cwd=tree / sub)
+        if got != info["commit"]:
+            raise RuntimeError(f"{tree}/{sub} is at {got or 'unknown'}, manifest pins {info['commit']}")
     return tree
 
 
 def license_files(tree: Path, spec: dict) -> list[Path]:
+    """Licence files of an upstream and of each of its submodules."""
     found: list[Path] = []
-    for pattern in spec.get("license_files", []):
-        found += [p for p in sorted(tree.glob(pattern)) if p.is_file()]
-        if not found and "/" in pattern:  # "license/*" but the upstream license is a plain file "license"
+    patterns = list(spec.get("license_files", []))
+    for info in spec.get("submodules", {}).values():
+        patterns += info.get("license_files", [])
+    for pattern in patterns:
+        matched = [p for p in sorted(tree.glob(pattern)) if p.is_file()]
+        if not matched and "/" in pattern:  # "license/*" but the upstream license is a plain file "license"
             plain = tree / pattern.rsplit("/", 1)[0]
             if plain.is_file():
-                found.append(plain)
+                matched.append(plain)
+        found += [p for p in matched if p not in found]
     if not found:
         raise RuntimeError(f"no license file found in {tree} for {spec.get('license_files')}")
     return found
@@ -496,25 +455,27 @@ def license_files(tree: Path, spec: dict) -> list[Path]:
 def shz10_readme(outputs: dict[str, Path], efi_size: int) -> bytes:
     digests = {rel: sha256_path(outputs[rel]) for rel in SHZ10_STAGED}
     return (
-        "ShizukuDOS 10.0-dev - EXTERNAL-CODE profile (FreeDOS based)\r\n"
-        "==========================================================\r\n"
+        "ShizukuDOS 10.0-dev\r\n"
+        "===================\r\n"
         "\r\n"
         "This directory is a different product from ShizukuDOS 0.1, which is\r\n"
-        "the project's own from-scratch code (..\\ShizukuDOS\\shizukudos.img,\r\n"
-        "the BIOS El Torito entry). The two are not mixed under one label\r\n"
-        "(docs/shizukudos10/BASELINE.md section 5, in SOURCE\\).\r\n"
+        "the project's own from-scratch code (..\\ShizukuDOS\\shizukudos.img).\r\n"
+        "The two are not mixed under one label (docs/shizukudos10/BASELINE.md\r\n"
+        "section 5, in SOURCE\\).\r\n"
         "\r\n"
-        "Built by:  python3 shizukudos/tools/shz.py build --profile uefi-multikernel\r\n"
-        "Boot path: UEFI x64 (El Torito EFI entry, platform 0xEF, no emulation)\r\n"
-        "           -> EFI\\BOOT\\BOOTX64.EFI (Supervisor loader) -> Supervisor\r\n"
-        "           (Intel VMX) -> virtual Real Mode DOS16 / Kernel32 / Kernel64.\r\n"
+        "Built by:  python3 shizukudos/csm/build.py and\r\n"
+        "           python3 shizukudos/tools/shz.py build --profile uefi-multikernel\r\n"
+        "Boot paths on this disc (see VMPROFIL.TXT at the root):\r\n"
+        "  UEFI x64  El Torito EFI entry -> efiboot.img: \\EFI\\BOOT\\BOOTX64.EFI\r\n"
+        "            (Supervisor loader) -> Supervisor (Intel VMX) -> virtual Real\r\n"
+        "            Mode DOS16 / Kernel32 / Kernel64. Without VMX: CSMWrap\r\n"
+        "            (\\EFI\\SHIZUKU\\CSMWRAP.EFI) -> the legacy boot menu.\r\n"
+        "  BIOS      isolinux menu: DOS16 boots dos16\\shizukudos-dos16-hd32.img\r\n"
+        "            with memdisk; Kernel64 boots \\SHZ\\K64 (standalone, no VMX).\r\n"
         "\r\n"
         "Files\r\n"
-        "  efiboot.img                        FAT16 image used by the El Torito EFI\r\n"
-        "                                     entry. It holds EFI\\BOOT\\BOOTX64.EFI and\r\n"
-        "                                     SHZDOS\\DISK.IMG, KERNEL32.BIN,\r\n"
-        "                                     KERNEL64.BIN, WIN64.IMG, which the loader\r\n"
-        "                                     reads from its own volume. See EFIBOOT.TXT.\r\n"
+        "  efiboot.img                        FAT16 image of the El Torito EFI entry\r\n"
+        "                                     (see EFIBOOT.TXT for its contents).\r\n"
         "  dos16\\shizukudos-dos16-hd32.img    32 MiB hard-disk image: FreeDOS kernel\r\n"
         "                                     ke2046 + FreeCOM (external, GPL-2.0-or-\r\n"
         "                                     later, built from pinned source with\r\n"
@@ -527,68 +488,72 @@ def shz10_readme(outputs: dict[str, Path], efi_size: int) -> bytes:
         "  kernel32\\KERNEL32.BIN              Kernel32 guest (own code, GPL-2.0-only)\r\n"
         "  kernel64\\KERNEL64.BIN              Kernel64 guest (own code, GPL-2.0-only)\r\n"
         "  win64\\WIN64.IMG                    Win64 runtime + test apps (own code)\r\n"
-        "  receipts\\                          build receipts of the three build steps\r\n"
-        "  LICENSES\\, SOURCE\\, GPL-NOTICE.TXT license texts and corresponding source\r\n"
+        "  csm\\CSMWRAP.EFI                    CSMWrap + SeaBIOS CSM (external, LGPL)\r\n"
+        "  receipts\\                          build receipts of every build step\r\n"
+        "  LICENSES\\, SOURCE\\, GPL-NOTICE.TXT licence texts and corresponding source\r\n"
+        "                                     (FreeDOS, CSMWrap + submodules, syslinux)\r\n"
         "\r\n"
         "Requirements and limits\r\n"
-        "  - UEFI x64 firmware with a GOP framebuffer.\r\n"
-        "  - Intel VMX with EPT and unrestricted guest, enabled in firmware\r\n"
-        "    setup. In a VM that means nested Intel VMX. Otherwise the loader\r\n"
-        "    prints REFUSED and returns to the firmware.\r\n"
-        "  - AMD SVM is detected, but no SVM backend exists: the loader refuses.\r\n"
-        "  - A software CPU (QEMU TCG) has no VMX, so it only reaches that\r\n"
-        "    refusal. Running the domains was not exercised when this disc was\r\n"
-        "    built unless the build report says so.\r\n"
+        "  - Supervisor: Intel VMX with EPT and unrestricted guest (nested VMX in\r\n"
+        "    a VM). AMD SVM is detected but has no backend: the loader refuses.\r\n"
+        "  - CSMWrap: Secure Boot off, 2 or more logical CPUs.\r\n"
         "  - This profile does not replace IO.SYS and does not install or boot\r\n"
         "    the Windows 98 GUI. No Windows 98 installation is claimed.\r\n"
         "\r\n"
         "SHA-256 of the staged files (see also the HASHES.TXT at the disc root)\r\n"
         + "".join(f"  {digest}  {rel}\r\n" for rel, digest in digests.items())
         + f"  EFI image size {efi_size} bytes\r\n"
-        "  supervisor/esp.img (96 MiB, same files) was cross-checked at build\r\n"
-        "  time and is not shipped.\r\n"
+        "  supervisor/esp.img (96 MiB, same loader inputs) was cross-checked at\r\n"
+        "  build time and is not shipped.\r\n"
     ).encode("ascii")
 
 
 def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], revision: dict) -> bytes:
     lines = [
-        "ShizukuDOS 10.0-dev - license and source notice",
+        "ShizukuDOS 10.0-dev - licence and source notice",
         "===============================================",
         "",
-        "External (third-party) programs on this disc, inside",
-        "dos16/shizukudos-dos16-hd32.img and its copy SHZDOS\\DISK.IMG in",
-        "efiboot.img:",
+        "External (third-party) programs on this disc:",
     ]
     for name, spec in manifest["upstreams"].items():
         lines += [
             f"  {name}: {spec['ref']}, commit {spec['commit']}",
-            f"    license {spec['license']}, {spec['repository']}",
+            f"    licence {spec['license']}, {spec['repository']}",
         ]
+        if spec.get("distribution"):
+            lines.append(f"    binaries: {spec['distribution']}, unmodified")
         for sub, info in spec.get("submodules", {}).items():
-            lines.append(f"    submodule {sub}: commit {info['commit']} ({info['repository']})")
+            lines.append(f"    submodule {sub}: commit {info['commit']} ({info['repository']})"
+                         + (f", {info['license']}" if info.get("license") else ""))
     lines += [
         "",
-        "These binaries were built from source with local patches. FreeDOS is",
-        "licensed under GPL-2.0-or-later. The license texts are in LICENSES\\.",
+        "Where they are: FreeDOS kernel + FreeCOM inside dos16\\shizukudos-dos16-",
+        "hd32.img (and its copy SHZDOS\\DISK.IMG in efiboot.img); CSMWrap with",
+        "SeaBIOS CSM in csm\\CSMWRAP.EFI (and \\EFI\\SHIZUKU\\CSMWRAP.EFI in",
+        "efiboot.img); syslinux in \\isolinux\\ at the disc root.",
+        "FreeDOS is built from source with local patches, CSMWrap from the pinned",
+        "tree without patches, syslinux is the unmodified Ubuntu build. Licence",
+        "texts are in LICENSES\\.",
         "",
-        "Corresponding source (GPL-2.0 section 3a), on this disc in SOURCE\\:",
+        "Corresponding source, on this disc in SOURCE\\:",
     ]
     for name, tar_name in tar_names.items():
-        lines.append(f"  {tar_name}   pinned upstream tree of {name}, without .git")
-    lines.append("  patches\\   applied in this order:")
+        lines.append(f"  {tar_name}   {name}")
+    lines.append("  patches\\   FreeDOS patches, applied in this order:")
     lines += [f"    {patch}" for patch in patches]
     lines += [
-        "  upstream-manifest.json   pinned commits, licenses and build recipes",
+        "  upstream-manifest.json   pinned commits, licences and build recipes",
         "  shizukudos-source.tar.gz   the Shizuku source that builds everything else",
-        "                             here (build scripts, loader, Supervisor, kernels)",
+        "                             here (build scripts, loader, Supervisor, kernels,",
+        "                             media builders)",
         "",
         "Build toolchain: Open Watcom v2 snapshot, SHA-256",
         f"  {manifest['tools']['open-watcom-v2']['sha256']}",
-        "  (Sybase Open Watcom Public License 1.0), NASM and mtools. The toolchain",
-        "  itself is not redistributed on this disc.",
+        "  (Sybase Open Watcom Public License 1.0), NASM, mtools, gcc. The",
+        "  toolchain itself is not redistributed on this disc.",
         "",
         "Project code (Supervisor, UEFI loader, Kernel32, Kernel64, Win64 runtime,",
-        "test programs, build scripts) is GPL-2.0-only; the license text is",
+        "test programs, build scripts) is GPL-2.0-only; the licence text is",
         "LICENSES\\Shizuku-LICENSE-GPL-2.0.txt. The 8x8 font is public domain",
         "(Daniel Hepper / IBM VGA lineage, header kept in the sources).",
         "",
@@ -596,14 +561,13 @@ def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], 
         "Working tree modified when built: " + ("yes" if revision["dirty"] else "no")
         + ". shizukudos-source.tar.gz holds the working-tree files that were built.",
         "",
-        "This notice covers ShizukuDOS10\\ only. No Microsoft code is in this",
-        "directory.",
+        "No Microsoft code is in this directory.",
         "",
     ]
     return "\r\n".join(lines).encode("ascii")
 
 
-def stage_shizukudos10(work: Path, outputs: dict[str, Path]) -> tuple[dict[str, bytes], str]:
+def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[str, bytes]) -> tuple[dict[str, bytes], str]:
     """Everything that goes under ShizukuDOS10/, including the EFI boot image."""
     consistency = check_shizukudos10_outputs(outputs, work)
     manifest = json.loads((SHZ10 / "upstream" / "manifest.json").read_text(encoding="utf-8"))
@@ -612,25 +576,34 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path]) -> tuple[dict[str, 
         payload[f"{SHZ10_DIR}/{rel}"] = outputs[rel].read_bytes()
     for rel, name in SHZ10_RECEIPTS.items():
         payload[f"{SHZ10_DIR}/receipts/{name}"] = outputs[rel].read_bytes()
-    # The EFI FAT image is made from exactly the bytes staged above.
-    members = {member: payload[staged] for member, staged in EFI_MEMBERS.items()}
-    efi = build_efi_image(work, members)
+    for member, staged in ESP_CROSSCHECK.items():  # the EFI image carries exactly the checked bytes
+        if efi_members[member] != payload[f"{SHZ10_DIR}/{staged}"]:
+            raise RuntimeError(f"EFI image member {member} is not the checked build output {staged}")
+    efi = build_efi_image(work, efi_members)
     payload[EFI_IMAGE] = efi
     payload[f"{SHZ10_DIR}/EFIBOOT.TXT"] = (
-        "EFI boot image ShizukuDOS10\\efiboot.img (El Torito EFI entry)\r\n"
+        "EFI boot image ShizukuDOS10\\efiboot.img (El Torito EFI entry; also GPT/MBR\r\n"
+        "partition 2 when this ISO is used as a disk)\r\n"
         f"FAT16, label SHZESP, {len(efi)} bytes, sha256 {sha256(efi)}\r\n"
-        "Contents (the loader reads the SHZDOS files from its own volume):\r\n"
-        + "".join(f"  {member}  {len(data)} bytes  sha256 {sha256(data)}\r\n" for member, data in members.items())
-        + "Not a USB hybrid image: write it to CD/DVD or attach it as a CD.\r\n"
+        "Contents:\r\n"
+        + "".join(f"  {member}  {len(data)} bytes  sha256 {sha256(data)}\r\n"
+                  for member, data in sorted(efi_members.items()))
     ).encode("ascii")
-    # GPL: license texts, patches, pinned upstream trees and the Shizuku source.
+    # Licence texts, patches, pinned upstream sources and the Shizuku source.
     tar_names: dict[str, str] = {}
     for name, spec in manifest["upstreams"].items():
+        if spec.get("kind") == "debian-binary-packages":
+            payload.update(se_media.syslinux_payload(SHZ10_DIR) if name == "syslinux" else {})
+            if name != "syslinux":
+                raise RuntimeError(f"no source staging for the debian-binary-packages upstream {name}")
+            tar_names[name] = f"{name}\\ (Debian source package: .dsc, .orig.tar.xz, .debian.tar.xz)"
+            continue
         tree = pinned_upstream_tree(name, spec)
         for path in license_files(tree, spec):
-            payload[f"{SHZ10_DIR}/LICENSES/{name}-{path.name}.txt"] = path.read_bytes()
+            label = path.relative_to(tree).as_posix().replace("/", "-")
+            payload[f"{SHZ10_DIR}/LICENSES/{name}-{label}.txt"] = path.read_bytes()
         tar_name = f"{name}-{spec['commit'][:12]}.tar.gz"
-        payload[f"{SHZ10_DIR}/SOURCE/{tar_name}"] = deterministic_tar_gz(tar_entries(tree, name))
+        payload[f"{SHZ10_DIR}/SOURCE/{tar_name}"] = deterministic_tar_gz(tracked_entries(tree, f"{name}-{spec['commit'][:12]}"))
         tar_names[name] = tar_name
     payload[f"{SHZ10_DIR}/LICENSES/Shizuku-LICENSE-GPL-2.0.txt"] = (ROOT / "LICENSE").read_bytes()
     patches = sorted((SHZ10 / "dos16" / "patches").glob("*.patch"))
@@ -644,8 +617,11 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path]) -> tuple[dict[str, 
         (top, ROOT), (f"{top}/docs", ROOT / "docs"), (f"{top}/tools", ROOT / "tools")]
     for relative in ("shizukudos", "docs/shizukudos10", "licenses", "tools/shizuku_se"):
         source_entries += tar_entries(ROOT / relative, f"{top}/{relative}")
-    for relative in ("LICENSE", "tools/build_shizuku_se_iso.py"):
-        source_entries.append((f"{top}/{relative}", ROOT / relative))
+    for relative in ("LICENSE", "tools/build_shizuku_se_iso.py", "tools/build_shizuku_se_disk.py",
+                     "tools/shizuku_se_media.py", "tools/shizuku_se_drivers.py",
+                     "tools/test_shizuku_se_boot_matrix.py"):
+        if (ROOT / relative).is_file():
+            source_entries.append((f"{top}/{relative}", ROOT / relative))
     payload[f"{SHZ10_DIR}/SOURCE/shizukudos-source.tar.gz"] = deterministic_tar_gz(source_entries)
     revision = {"revision": git_output("rev-parse", "HEAD"), "branch": git_output("rev-parse", "--abbrev-ref", "HEAD"),
                 "dirty": bool(git_output("status", "--porcelain"))}
@@ -835,33 +811,40 @@ def media_summary(info: dict) -> str:
     )
 
 
-def readme_text(media: dict | None) -> bytes:
+def readme_text(media: dict | None, setup: bool, loader_interim: bool) -> bytes:
     text = (
-        "Windows 98 Shizuku Second Edition project disc\r\n"
+        "Windows 98 Shizuku Second Edition - VM install ISO\r\n"
         "\r\n"
-        "El Torito boot entries, in this order:\r\n"
-        "  1. BIOS (default): ShizukuDOS 0.1, the project's own code, as a 1.44\r\n"
-        "     MiB FAT12 floppy image (ShizukuDOS\\shizukudos.img).\r\n"
-        "  2. UEFI x64: ShizukuDOS 10.0-dev, the external FreeDOS profile\r\n"
-        "     (ShizukuDOS10\\efiboot.img: EFI\\BOOT\\BOOTX64.EFI Supervisor loader\r\n"
-        "     and the \\SHZDOS files it reads). It needs Intel VMX to run its\r\n"
-        "     multikernel domains and otherwise refuses and returns to firmware.\r\n"
-        "The two profiles are separate products. They are not mixed under one\r\n"
-        "label. See ShizukuDOS10\\README.TXT.\r\n"
+        "One hybrid image: boot it as a CD, or write it raw to a USB stick / attach\r\n"
+        "it as a hard disk. Legacy BIOS and UEFI (see VMPROFIL.TXT).\r\n"
         "\r\n"
+        "Legacy BIOS -> boot menu (isolinux; also on COM1 115200 8N1):\r\n"
+        "  K  Kernel64 + Win64 runtime: the standalone Long Mode kernel runs its\r\n"
+        "     self-tests and every Win64 test program in WIN64.IMG (SHZ\\K64).\r\n"
+        + ("  I  Install ShizukuDOS 10: Kernel64 with shz.setup=auto (SHZ\\SETUP).\r\n" if setup else "")
+        + "  D  DOS16: ShizukuDOS 10 FreeDOS profile, the conformance disk image\r\n"
+        "     (ShizukuDOS10\\dos16) in RAM through memdisk.\r\n"
+        "  1  ShizukuDOS 0.1: the project's own shell, 1.44 MB floppy image\r\n"
+        "     (ShizukuDOS\\shizukudos.img) in RAM through memdisk.\r\n"
+        "UEFI x64 -> \\EFI\\BOOT\\BOOTX64.EFI, the Shizuku loader: the Supervisor with\r\n"
+        "  Intel VMX; without VMX CSMWrap gives the same legacy boot menu.\r\n"
+        + ("  INTERIM: this loader has no boot manager yet; without VMX it returns\r\n"
+           "  to the firmware and the UEFI Shell runs \\STARTUP.NSH -> CSMWrap.\r\n" if loader_interim else "")
+        + "\r\n"
         "Other contents\r\n"
         "  Windows 98 Shizuku Second Edition\\  NTWrapper9x, NTWin32Wrapper9x and\r\n"
-        "     NTWDDMWrapper9x binaries. The same binaries are in the 0.1 floppy.\r\n"
+        "     NTWDDMWrapper9x binaries (also inside the 0.1 floppy).\r\n"
         "  SHZSE\\   overlay installer for an ALREADY INSTALLED Windows 98 (copies\r\n"
         "     the probe binaries to C:\\NTWLAB). Read SHZSE\\README.TXT first: the\r\n"
         "     VxD load is a recorded, unfixed failure.\r\n"
-        "  HASHES.TXT, SOURCES.TXT, LIMITS.TXT\r\n"
+        "  DRIVERS\\ driver store: DRIVERS\\<package>\\ as shipped, HWIDS.TXT index.\r\n"
+        "  ShizukuDOS10\\  ShizukuDOS 10 build outputs, receipts, licences, source.\r\n"
+        "  VMPROFIL.TXT, HASHES.TXT, SOURCES.TXT, LIMITS.TXT\r\n"
         "\r\n"
         "What this disc does not do\r\n"
         "  ShizukuDOS (either profile) cannot replace IO.SYS and cannot install or\r\n"
         "  boot the Windows 98 GUI. This disc is not a Windows 98 installation and\r\n"
-        "  no completed Windows 98 installation is claimed. It is not a USB hybrid\r\n"
-        "  image.\r\n"
+        "  no completed Windows 98 installation is claimed.\r\n"
     )
     if media is None:
         text += (
@@ -885,31 +868,54 @@ def msbase_text(media: dict) -> bytes:
         "were not modified. Do not redistribute this image. Only sizes and\r\n"
         "hashes of the source are recorded here:\r\n"
         + "".join(line + "\r\n" for line in media_summary(media).splitlines())
-        + "The BIOS entry still boots ShizukuDOS 0.1, not Windows 98 Setup.\r\n"
+        + "The boot menu still offers the ShizukuDOS entries, not Windows 98 Setup.\r\n"
         "The builder did not run Setup and installed nothing.\r\n"
     ).encode("ascii")
 
 
-def stage_tree(stage: Path, floppy: bytes, artifacts: dict[str, Path],
-               extra: dict[str, bytes] | None = None, media: dict | None = None) -> dict[str, bytes]:
+ISOLINUX_DIR = "isolinux"
+K64_DIR = "SHZ/K64"
+
+
+def boot_payload(syslinux: dict[str, Path], k64: dict[str, "se_media.Input"], setup: bool) -> dict[str, bytes]:
+    """isolinux + modules + menu, and the Kernel64 Multiboot files the menu loads."""
+    payload = {f"{ISOLINUX_DIR}/isolinux.bin": syslinux["isolinux.bin"].read_bytes(),
+               f"{ISOLINUX_DIR}/memdisk": syslinux["memdisk"].read_bytes()}
+    for name in se_media.SYSLINUX_MODULES:
+        payload[f"{ISOLINUX_DIR}/{name}"] = syslinux[name].read_bytes()
+    payload[f"{ISOLINUX_DIR}/isolinux.cfg"] = se_media.boot_menu(
+        dos16_image=f"/{DOS16_ISO_PATH}", shzdos01_image="/ShizukuDOS/shizukudos.img", k64_dir=f"/{K64_DIR}",
+        setup=setup)
+    for name, item in k64.items():
+        payload[f"{K64_DIR}/{name}"] = item.data
+    payload[f"{K64_DIR}/README.TXT"] = (
+        "SHZ\\K64 - standalone Kernel64 + Win64 runtime (boot menu entry K)\r\n"
+        "BOOT.ELF       Multiboot (ELF32) stub; loaded by mboot.c32 or by QEMU:\r\n"
+        "               qemu-system-x86_64 -kernel BOOT.ELF -initrd KERNEL64S.BIN,WIN64.IMG\r\n"
+        "KERNEL64S.BIN  Kernel64 built with SHZ_STANDALONE (module 0)\r\n"
+        "WIN64.IMG      ntdll, kernel32 and the other Win64 DLLs + T_*.EXE (module 1)\r\n"
+        "No Supervisor and no VMX: this is Kernel64 on its own. The stub takes RAM\r\n"
+        "and firmware holes from the Multiboot memory map; results go to COM1\r\n"
+        "(SHZ-EXIT:0 = every self-test and every Win64 test program passed).\r\n"
+        + "".join(f"{name:14} sha256 {sha256(item.data)}\r\n" for name, item in k64.items())
+    ).encode("ascii")
+    return payload
+
+
+def stage_tree(stage: Path, floppy: bytes, artifacts: dict[str, Path], extra: dict[str, bytes],
+               media: dict | None, setup: bool, loader_interim: bool) -> dict[str, bytes]:
     if stage.exists():
         rmtree_force(stage)
-    edition = stage / "Windows 98 Shizuku Second Edition"
-    dos = stage / "ShizukuDOS"
-    (edition / "NTWrapper9x").mkdir(parents=True)
-    (edition / "NTWin32Wrapper9x").mkdir(parents=True)
-    (edition / "NTWDDMWrapper9x").mkdir(parents=True)
-    dos.mkdir(parents=True)
+    stage.mkdir(parents=True)
     payload: dict[str, bytes] = {
-        "README.TXT": readme_text(media),
+        "README.TXT": readme_text(media, setup, loader_interim),
+        "VMPROFIL.TXT": se_media.vm_profiles_text(loader_interim).encode("ascii"),
         "SOURCES.TXT": sources_text(),
         "LIMITS.TXT": limits_text(),
     }
     if media is None:
         payload["NOMSBASE.TXT"] = (
             "Microsoft base omitted\r\n"
-            "vm/Win98-SE-ko-OEM.iso is not in this tree.\r\n"
-            "build/win98-lab/win98se-ko-oem.iso does not resolve to a readable ISO.\r\n"
             "This image does not redistribute the Windows 98 file tree.\r\n"
             "Missing for a Microsoft setup: IO.SYS, MSDOS.SYS, COMMAND.COM,\r\n"
             "WIN98 cabinet files, and the OEM boot floppy drivers.\r\n"
@@ -917,23 +923,24 @@ def stage_tree(stage: Path, floppy: bytes, artifacts: dict[str, Path],
         ).encode("ascii")
     else:
         payload["MSBASE.TXT"] = msbase_text(media)
-    copies = {
+    edition = "Windows 98 Shizuku Second Edition"
+    payload.update({
         "ShizukuDOS/shizukudos.img": floppy,
-        "Windows 98 Shizuku Second Edition/EDITION.TXT": edition_text(),
-        "Windows 98 Shizuku Second Edition/LIMITS.TXT": limits_text(),
-        "Windows 98 Shizuku Second Edition/NTWrapper9x/NTWRAP9X.VXD": artifacts["NTWRAP9X.VXD"].read_bytes(),
-        "Windows 98 Shizuku Second Edition/NTWrapper9x/NTWQUERY.EXE": artifacts["NTWQUERY.EXE"].read_bytes(),
-        "Windows 98 Shizuku Second Edition/NTWin32Wrapper9x/NTW32.DLL": artifacts["NTW32.DLL"].read_bytes(),
-        "Windows 98 Shizuku Second Edition/NTWin32Wrapper9x/NTWPROBE.EXE": artifacts["NTWPROBE.EXE"].read_bytes(),
-        "Windows 98 Shizuku Second Edition/NTWDDMWrapper9x/NTWGPROB.EXE": artifacts["NTWGPROB.EXE"].read_bytes(),
-        "Windows 98 Shizuku Second Edition/NTWDDMWrapper9x/ntwddm-i386.o": artifacts["ntwddm-i386.o"].read_bytes(),
-    }
-    payload.update(copies)
-    payload.update(extra or {})
+        f"{edition}/EDITION.TXT": edition_text(),
+        f"{edition}/LIMITS.TXT": limits_text(),
+        f"{edition}/NTWrapper9x/NTWRAP9X.VXD": artifacts["NTWRAP9X.VXD"].read_bytes(),
+        f"{edition}/NTWrapper9x/NTWQUERY.EXE": artifacts["NTWQUERY.EXE"].read_bytes(),
+        f"{edition}/NTWin32Wrapper9x/NTW32.DLL": artifacts["NTW32.DLL"].read_bytes(),
+        f"{edition}/NTWin32Wrapper9x/NTWPROBE.EXE": artifacts["NTWPROBE.EXE"].read_bytes(),
+        f"{edition}/NTWDDMWrapper9x/NTWGPROB.EXE": artifacts["NTWGPROB.EXE"].read_bytes(),
+        f"{edition}/NTWDDMWrapper9x/ntwddm-i386.o": artifacts["ntwddm-i386.o"].read_bytes(),
+    })
+    clash = set(payload) & set(extra)
+    if clash:
+        raise RuntimeError(f"two parts of the ISO want the same paths: {sorted(clash)[:5]}")
+    payload.update(extra)
     lines = ["sha256  bytes  path\r\n"]
     for name in sorted(payload):
-        if name.endswith("HASHES.TXT"):
-            continue
         data = payload[name]
         lines.append(f"{sha256(data)}  {len(data)}  {name}\r\n")
     payload["HASHES.TXT"] = "".join(lines).encode("ascii")
@@ -947,27 +954,40 @@ def stage_tree(stage: Path, floppy: bytes, artifacts: dict[str, Path],
     return payload
 
 
-def write_iso(stage: Path, iso_path: Path) -> None:
+VOLUME_ID = "W98SHIZUKU2"
+
+
+def pin_stage_times(stage: Path) -> None:
+    """Every file and directory of the stage gets the fixed epoch as mtime/atime: ISO 9660, Joliet and Rock
+    Ridge directory records carry them, and SOURCE_DATE_EPOCH alone only fixes the volume dates."""
+    for dirpath, dirnames, filenames in os.walk(stage, topdown=False):
+        for name in filenames + dirnames:
+            os.utime(os.path.join(dirpath, name), (FIXED_EPOCH, FIXED_EPOCH), follow_symlinks=False)
+    os.utime(stage, (FIXED_EPOCH, FIXED_EPOCH))
+
+
+def write_iso(stage: Path, iso_path: Path, isohdpfx: Path) -> None:
     iso_path.parent.mkdir(parents=True, exist_ok=True)
+    pin_stage_times(stage)
     temporary = iso_path.with_suffix(".iso.partial")
-    if temporary.exists():
-        temporary.unlink()
+    temporary.unlink(missing_ok=True)
     env = dict(os.environ)
-    env["SOURCE_DATE_EPOCH"] = str(FIXED_EPOCH)  # fixed ISO timestamps (the build receipts still carry build times)
+    env["SOURCE_DATE_EPOCH"] = str(FIXED_EPOCH)  # fixed ISO timestamps and GPT GUIDs (build receipts carry build times)
     run([
         "xorriso", "-as", "mkisofs",
-        "-iso-level", "3",
-        "-J", "-R",
-        "-V", "W98SHIZUKU2",
+        "-iso-level", "3", "-J", "-joliet-long", "-R",
+        "-V", VOLUME_ID,
         "-publisher", "Win98-Modern project",
-        # Entry 1 (default, BIOS): 1.44 MiB floppy emulation. Neither -no-emul-boot
-        # nor -boot-info-table here: the info table would overwrite FAT BPB bytes.
-        "-b", "ShizukuDOS/shizukudos.img",
-        "-c", "ShizukuDOS/boot.cat",
-        # Entry 2 (EFI, platform 0xEF): a FAT image, no emulation.
+        # Legacy BIOS: isolinux, no emulation, 4 x 512 bytes loaded, boot info table patched in.
+        "-c", f"{ISOLINUX_DIR}/boot.cat",
+        "-b", f"{ISOLINUX_DIR}/isolinux.bin",
+        "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table",
+        # Written to a disk: isohdpfx.bin MBR code, MBR partition 1 = the whole image.
+        "-isohybrid-mbr", str(isohdpfx),
+        # UEFI: the FAT image as El Torito platform 0xEF, and as MBR (0xEF) + GPT partition on a disk.
         "-eltorito-alt-boot",
-        "-e", EFI_IMAGE,
-        "-no-emul-boot",
+        "-e", EFI_IMAGE, "-no-emul-boot",
+        "-isohybrid-gpt-basdat",
         "-o", str(temporary),
         str(stage),
     ], env=env)
@@ -1016,22 +1036,33 @@ def el_torito_entries(iso: bytes) -> tuple[int, list[dict]]:
     return catalog_lba, entries
 
 
-def parse_el_torito(iso: bytes) -> str:
+def check_boot_info_table(iso: bytes, lba: int, isolinux: bytes) -> str:
+    """isolinux.bin at the default entry's LBA, byte-identical except the 56-byte boot info table at 8,
+    whose fields (El Torito / mkisofs convention) must describe this very file."""
+    found = iso[lba * 2048:lba * 2048 + len(isolinux)]
+    if found[:8] != isolinux[:8] or found[64:] != isolinux[64:]:
+        raise RuntimeError("the BIOS boot image is not the pinned isolinux.bin")
+    pvd, file_lba, length, checksum = struct.unpack_from("<IIII", found, 8)
+    words = found[64:] + b"\0" * (-(len(found) - 64) % 4)
+    expect = sum(struct.unpack(f"<{len(words) // 4}I", words)) & 0xFFFFFFFF
+    if (pvd, file_lba, length, checksum) != (16, lba, len(isolinux), expect):
+        raise RuntimeError(f"boot info table wrong: pvd {pvd} lba {file_lba} length {length} checksum {checksum:#x} "
+                           f"(expected 16, {lba}, {len(isolinux)}, {expect:#x})")
+    return (f"isolinux.bin at LBA {lba}: pinned bytes (sha256 {sha256(isolinux)}), boot info table "
+            f"PVD 16, file LBA {lba}, length {length}, checksum {checksum:#010x} (recomputed)\n")
+
+
+def parse_el_torito(iso: bytes, isolinux: bytes) -> tuple[str, dict]:
     catalog_lba, entries = el_torito_entries(iso)
     default = entries[0]
-    if not default["bootable"]:
-        raise RuntimeError("default El Torito entry is not bootable")
-    if default["media"] != 2:
-        raise RuntimeError(f"expected 1.44MB floppy emulation, media type is {default['media']}")
-    if default["platform"] != 0:
-        raise RuntimeError(f"default entry is not the BIOS (80x86) platform: 0x{default['platform']:02x}")
-    report = (
-        f"El Torito catalog LBA {catalog_lba}\n"
-        f"boot indicator 0x88, platform 0x{default['platform']:02x}, media type {default['media']} "
-        f"({MEDIA_NAMES[default['media']]})\n"
-        f"load segment 0x{default['load_segment']:04x} (0 means 0x07C0), boot image LBA {default['lba']}\n"
-        f"boot image OEM {iso[default['lba'] * 2048 + 3:default['lba'] * 2048 + 11]!r}\n"
-    )
+    if not default["bootable"] or default["platform"] != 0 or default["media"] != 0:
+        raise RuntimeError(f"default El Torito entry must be a bootable BIOS no-emulation image: {default}")
+    if default["sector_count"] != 4:
+        raise RuntimeError(f"isolinux entry should load 4 sectors, catalog says {default['sector_count']}")
+    report = (f"El Torito catalog LBA {catalog_lba}\n"
+              f"default entry: boot indicator 0x88, platform 0x00 (BIOS), media type 0 (no emulation), "
+              f"load segment 0x{default['load_segment']:04x} (0 = 0x07C0), 4 sectors, LBA {default['lba']}\n")
+    report += check_boot_info_table(iso, default["lba"], isolinux)
     efi = [e for e in entries[1:] if e["platform"] == 0xEF]
     if len(efi) != 1:
         raise RuntimeError(f"expected exactly one EFI (platform 0xEF) El Torito entry, found {len(efi)}")
@@ -1041,16 +1072,70 @@ def parse_el_torito(iso: bytes) -> str:
     boot_sector = iso[efi["lba"] * 2048:efi["lba"] * 2048 + 512]
     if len(boot_sector) != 512 or boot_sector[510:512] != b"\x55\xaa" or boot_sector[0] not in (0xEB, 0xE9):
         raise RuntimeError("the EFI El Torito image is not a FAT volume (no jump/0x55AA boot sector)")
-    report += (
-        f"boot indicator 0x88, platform 0x{efi['platform']:02x} (EFI), media type {efi['media']} "
-        f"({MEDIA_NAMES[efi['media']]}), sector count {efi['sector_count']} "
-        f"(0 = extend to end of medium), image LBA {efi['lba']}\n"
-        f"EFI image FAT OEM {boot_sector[3:11]!r}\n"
-    )
-    return report
+    report += (f"section entry: boot indicator 0x88, platform 0xEF (EFI), media type 0 (no emulation), sector count "
+               f"{efi['sector_count']} (0 = to end of medium), image LBA {efi['lba']}, FAT OEM {boot_sector[3:11]!r}\n")
+    return report, efi
 
 
-def verify_efi_image(iso: bytes, iso_efi: dict, payload: dict[str, bytes], evidence: Path) -> str:
+def mbr_entries(sector0: bytes) -> list[dict]:
+    out = []
+    for index in range(4):
+        raw = sector0[446 + 16 * index:462 + 16 * index]
+        start, count = struct.unpack_from("<II", raw, 8)
+        if count:
+            out.append({"n": index + 1, "status": raw[0], "type": raw[4], "start": start, "sectors": count})
+    return out
+
+
+def check_hybrid(iso: bytes, isohdpfx: bytes, efi_lba: int, efi_len: int) -> str:
+    """isohybrid: MBR boot code, MBR partitions 1 (whole image, active) and 2 (0xEF = the EFI image), GPT."""
+    import zlib
+    sector0 = iso[:512]
+    if sector0[:432] != isohdpfx[:432] or sector0[510:512] != b"\x55\xaa":
+        raise RuntimeError("sector 0 does not carry the pinned isohdpfx.bin MBR code")
+    parts = mbr_entries(sector0)
+    total = len(iso) // 512
+    efi_start, efi_sectors = efi_lba * 4, efi_len // 512
+    p1 = next((p for p in parts if p["n"] == 1), None)
+    p2 = next((p for p in parts if p["n"] == 2), None)
+    if not p1 or p1["status"] != 0x80 or p1["start"] != 0 or p1["sectors"] != total:
+        raise RuntimeError(f"MBR partition 1 must be the active whole image (0..{total}): {parts}")
+    if not p2 or p2["type"] != 0xEF or p2["start"] != efi_start or p2["sectors"] != efi_sectors:
+        raise RuntimeError(f"MBR partition 2 must be type 0xEF at {efi_start}+{efi_sectors} (the EFI image): {parts}")
+    header = iso[512:1024]
+    if header[:8] != b"EFI PART":
+        raise RuntimeError("no GPT header in sector 1")
+    hsize, hcrc = struct.unpack_from("<II", header, 12)
+    check = bytearray(header[:hsize])
+    check[16:20] = b"\0\0\0\0"
+    if zlib.crc32(bytes(check)) != hcrc:
+        raise RuntimeError("GPT header CRC32 mismatch")
+    array_lba, count, entry_size, array_crc = struct.unpack_from("<QIII", header, 72)
+    array = iso[array_lba * 512:array_lba * 512 + count * entry_size]
+    if zlib.crc32(array) != array_crc:
+        raise RuntimeError("GPT partition array CRC32 mismatch")
+    backup_lba = struct.unpack_from("<Q", header, 32)[0]
+    if iso[backup_lba * 512:backup_lba * 512 + 8] != b"EFI PART":
+        raise RuntimeError(f"no backup GPT header at LBA {backup_lba}")
+    gpt = []
+    for index in range(count):
+        raw = array[index * entry_size:(index + 1) * entry_size]
+        if raw[:16] == b"\0" * 16:
+            continue
+        first, last = struct.unpack_from("<QQ", raw, 32)
+        gpt.append({"n": index + 1, "first": first, "last": last,
+                    "name": raw[56:128].decode("utf-16-le").rstrip("\0")})
+    if not any(p["first"] == efi_start and p["last"] == efi_start + efi_sectors - 1 for p in gpt):
+        raise RuntimeError(f"no GPT partition covers the EFI image {efi_start}..{efi_start + efi_sectors - 1}: {gpt}")
+    return (f"isohybrid MBR: isohdpfx.bin code (sha256 {sha256(isohdpfx)}), partitions "
+            + "; ".join(f"{p['n']}: status 0x{p['status']:02x} type 0x{p['type']:02x} LBA {p['start']}+{p['sectors']}"
+                        for p in parts)
+            + f"\nGPT: header and array CRC32 valid, backup header at LBA {backup_lba}, entries "
+            + "; ".join(f"{p['n']} {p['name']} {p['first']}..{p['last']}" for p in gpt) + "\n")
+
+
+def verify_efi_image(iso: bytes, iso_efi: dict, payload: dict[str, bytes], members: dict[str, bytes],
+                     evidence: Path) -> str:
     """The EFI image found through the boot catalog must equal the staged one, file by file."""
     expected = payload[EFI_IMAGE]
     from_catalog = iso[iso_efi["lba"] * 2048:iso_efi["lba"] * 2048 + len(expected)]
@@ -1058,19 +1143,14 @@ def verify_efi_image(iso: bytes, iso_efi: dict, payload: dict[str, bytes], evide
         raise RuntimeError("EFI image read via the El Torito catalog LBA differs from the staged image")
     image = evidence / "efiboot-from-catalog.img"
     image.write_bytes(from_catalog)
-    lines = [f"EFI image via catalog LBA {iso_efi['lba']}: {len(expected)} bytes, byte-identical to the staged image "
-             f"(sha256 {sha256(expected)})"]
-    for member, staged in EFI_MEMBERS.items():
-        data = mcopy_out(image, member, evidence / "efi-members" / member)
-        if data != payload[staged]:
-            raise RuntimeError(f"::/{member} inside the EFI image differs from {staged}")
-        lines.append(f"  ::/{member} == {staged} ({len(data)} bytes)")
-    if shutil.which("fsck.vfat"):
-        check = subprocess.run(["fsck.vfat", "-n", str(image)], capture_output=True, text=True)
-        if check.returncode != 0:
-            raise RuntimeError("fsck.vfat rejects the EFI image found through the catalog:\n" + check.stdout)
-        lines.append("  fsck.vfat -n: " + check.stdout.strip().splitlines()[-1])
-    return "\n".join(lines) + "\n"
+    count = se_media.verify_fat_members(str(image), members, evidence / "efi-readback")
+    check = subprocess.run(["fsck.vfat", "-n", str(image)], capture_output=True, text=True)
+    if check.returncode != 0:
+        raise RuntimeError("fsck.vfat rejects the EFI image found through the catalog:\n" + check.stdout)
+    image.unlink()
+    return (f"EFI image via catalog LBA {iso_efi['lba']}: {len(expected)} bytes, byte-identical to the staged image "
+            f"(sha256 {sha256(expected)}); {count} members read back identical: "
+            + ", ".join(sorted(members)) + "\n  fsck.vfat -n: " + check.stdout.strip().splitlines()[-1] + "\n")
 
 
 def trees_identical(expected: Path, actual: Path) -> int:
@@ -1086,56 +1166,47 @@ def trees_identical(expected: Path, actual: Path) -> int:
     return len(left)
 
 
-def verify_iso(iso_path: Path, payload: dict[str, bytes], evidence: Path, media_stage: Path | None = None) -> str:
+def verify_iso(iso_path: Path, payload: dict[str, bytes], efi_members: dict[str, bytes], syslinux: dict[str, Path],
+               evidence: Path, media_stage: Path | None = None) -> str:
     iso = iso_path.read_bytes()
-    report = parse_el_torito(iso)
-    _lba, entries = el_torito_entries(iso)
-    listing = subprocess.check_output(
-        ["xorriso", "-indev", str(iso_path), "-find", "/", "-type", "f"],
-        text=True,
-    )
-    eltorito = subprocess.check_output(
-        ["xorriso", "-indev", str(iso_path), "-report_el_torito", "plain"],
-        text=True,
-        stderr=subprocess.STDOUT,
-    )
-    if not (re.search(r"boot img\s*:\s*1\s+BIOS\s+y\s+fd1\.4", eltorito)
-            and re.search(r"boot img\s*:\s*2\s+UEFI\s+y\s+none", eltorito)):
-        raise RuntimeError("xorriso -report_el_torito does not show the BIOS floppy entry 1 and the UEFI entry 2:\n"
-                           + eltorito)
-    # Every file on the ISO must be a known payload file, and the reverse.
+    report, efi_entry = parse_el_torito(iso, syslinux["isolinux.bin"].read_bytes())
+    report += check_hybrid(iso, syslinux["isohdpfx.bin"].read_bytes(), efi_entry["lba"], len(payload[EFI_IMAGE]))
+    listing = subprocess.check_output(["xorriso", "-indev", str(iso_path), "-find", "/", "-type", "f"], text=True,
+                                      stderr=subprocess.DEVNULL)
+    system = subprocess.check_output(["xorriso", "-indev", str(iso_path), "-report_el_torito", "plain",
+                                      "-report_system_area", "plain"], text=True, stderr=subprocess.STDOUT)
+    if not (re.search(r"El Torito boot img\s*:\s*1\s+BIOS\s+y\s+none", system)
+            and re.search(r"El Torito boot img\s*:\s*2\s+UEFI\s+y\s+none", system)
+            and "isohybrid" in system and "GPT" in system):
+        raise RuntimeError("xorriso does not report BIOS entry 1, UEFI entry 2, isohybrid MBR and GPT:\n" + system)
     on_iso = {line[2:-1] for line in listing.splitlines() if line.startswith("'/") and line.endswith("'")}
     overlay = {name for name in on_iso if name.startswith("WIN98/")}
     if media_stage is None and overlay:
         raise RuntimeError("the public image unexpectedly contains WIN98/ files")
-    unexpected = sorted(on_iso - overlay - set(payload) - {"ShizukuDOS/boot.cat"})
+    unexpected = sorted(on_iso - overlay - set(payload) - {f"{ISOLINUX_DIR}/boot.cat"})
     absent = sorted(set(payload) - on_iso)
     if unexpected or absent:
         raise RuntimeError(f"ISO file list differs from the payload: unexpected {unexpected}, missing {absent}")
     extracted = evidence / "extracted"
-    if extracted.exists():
-        rmtree_force(extracted)
+    rmtree_force(extracted)
     extracted.mkdir(parents=True)
-    tops = sorted({name.split("/", 1)[0] for name in payload})
     command = ["xorriso", "-osirrox", "on", "-indev", str(iso_path)]
-    for top in tops:
+    for top in sorted({name.split("/", 1)[0] for name in payload}):
         command += ["-extract", f"/{top}", str(extracted / top)]
-    subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for relative, data in payload.items():
         found = extracted / relative
         if not found.is_file():
             raise RuntimeError(f"ISO is missing {relative}")
-        if found.read_bytes() != data:
+        got = found.read_bytes()
+        if relative == f"{ISOLINUX_DIR}/isolinux.bin":
+            got = got[:8] + data[8:64] + got[64:]  # the boot info table is patched in by design (checked above)
+        if got != data:
             raise RuntimeError(f"ISO payload mismatch for {relative}")
-    efi_entry = next(e for e in entries[1:] if e["platform"] == 0xEF)
-    efi_report = verify_efi_image(iso, efi_entry, payload, evidence)
-    boot = (extracted / "ShizukuDOS/shizukudos.img").read_bytes()
-    report += f"embedded floppy sha256 {sha256(boot)}\n"
+    rmtree_force(extracted)
+    report += verify_efi_image(iso, efi_entry, payload, efi_members, evidence)
     report += f"all {len(payload)} payload files extracted from the ISO are byte-identical to the staged files\n"
-    report += efi_report
     if media_stage is not None:
-        # xorriso -compare_r also compares timestamps, which the fixed-date ISO does not keep,
-        # so extract the overlay again and compare the bytes of every file.
         check = evidence / "win98-overlay-check"
         rmtree_force(check)
         try:
@@ -1145,7 +1216,7 @@ def verify_iso(iso_path: Path, payload: dict[str, bytes], evidence: Path, media_
         finally:
             rmtree_force(check)
         report += f"WIN98/ overlay: {compared} files extracted from the ISO are byte-identical to the staged media copy\n"
-    report += "xorriso -report_el_torito plain:\n" + eltorito
+    report += "xorriso -report_el_torito / -report_system_area plain:\n" + system
     if media_stage is None:
         report += "\nfiles:\n" + listing
     else:
@@ -1155,217 +1226,40 @@ def verify_iso(iso_path: Path, payload: dict[str, bytes], evidence: Path, media_
     return report
 
 
-def strip_ansi(data: bytes) -> str:
-    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", data.decode("latin-1")).replace("\r", "")
-
-
-def qemu_uefi(iso_path: Path, evidence: Path, tag: str = "") -> str:
-    """Boot the ISO through OVMF and read the loader's console output from the serial port.
-
-    This QEMU run is TCG (no /dev/kvm here): it has no Intel VMX, so the expected result
-    is the loader's own refusal. It does not run the DOS16/Kernel32/Kernel64 domains.
-    """
-    code = Path(qemu_tools.DEFAULT_OVMF_CODE)
-    vars_source = Path(qemu_tools.DEFAULT_OVMF_VARS)
-    if not QEMU.is_file():
-        return f"QEMU binary {QEMU} is not present; UEFI boot was not exercised."
-    if not code.is_file() or not vars_source.is_file():
-        return f"OVMF firmware ({code}, {vars_source}) not found; UEFI boot was not exercised."
-    vars_copy = evidence / "OVMF_VARS.fd"
-    shutil.copyfile(vars_source, vars_copy)
-    serial_log = evidence / "uefi-serial.txt"
-    monitor_path = evidence / "uefi-monitor.sock"
-    for path in (serial_log, monitor_path):
-        path.unlink(missing_ok=True)
-    process = subprocess.Popen(
-        [
-            str(QEMU),
-            "-machine", "q35",
-            "-accel", "tcg",
-            "-cpu", "Nehalem",  # an Intel model: TCG has no VMX, the loader must refuse on the Intel path
-            "-m", "512",
-            "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
-            "-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}",
-            "-cdrom", str(iso_path),
-            "-vga", "std",
-            "-display", "none",
-            "-nic", "none",
-            "-serial", f"file:{serial_log}",
-            "-monitor", f"unix:{monitor_path},server=on,wait=off",
-            "-no-reboot",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=open(evidence / "uefi-qemu.stderr", "wb"),
-    )
-    banner = "Supervisor loader (UEFI x64)"
-    deadline = time.time() + 240
-    text = ""
-    try:
-        while time.time() < deadline:
-            if process.poll() is not None:
-                break
-            if serial_log.is_file():
-                text = strip_ansi(serial_log.read_bytes())
-                if banner in text and ("REFUSED" in text or "Handing over to the Supervisor" in text):
-                    break
-            time.sleep(0.5)
-        if banner not in text:
-            return ("UEFI boot did NOT reach the Shizuku Supervisor loader within 240 s "
-                    f"(serial log {serial_log}, {len(text)} characters).\n")
-        try:
-            monitor = connect_unix(monitor_path, 5)
-            save_png(monitor, evidence / "uefi.ppm", BUILD / f"windows98-shizuku-second-edition{tag}-uefi.png")
-            png = (f"PNG {BUILD / f'windows98-shizuku-second-edition{tag}-uefi.png'} "
-                   "(taken after the loader returned to firmware: it shows the firmware, not the loader text)\n")
-        except Exception as exc:  # the screenshot is a convenience, the serial text is the evidence
-            png = f"no UEFI screenshot ({exc})\n"
-        seen = [line.strip() for line in text.splitlines()
-                if any(key in line for key in ("Shizuku", "Virtualization", "REFUSED", "Handing over", "Enable Intel"))]
-        outcome = ("the loader refused, as designed, for the reason quoted above (a software CPU has no "
-                   "Intel VMX); the DOS16/Kernel32/Kernel64 domains were NOT run"
-                   if "REFUSED" in text else
-                   "the loader handed over to the Supervisor (VMX was available)")
-        return (
-            "QEMU TCG + OVMF booted the ISO through its El Torito EFI entry and ran BOOTX64.EFI from it:\n"
-            + "".join(f"  serial: {line}\n" for line in seen)
-            + f"Result: {outcome}.\n" + png
-        )
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-
-
-def qemu_frames(iso_path: Path, evidence: Path, tag: str = "") -> str:
-    if not QEMU.is_file():
-        return f"QEMU binary {QEMU} is not present; no PNG captured."
-    serial_path = evidence / "serial.sock"
-    monitor_path = evidence / "monitor.sock"
-    for path in (serial_path, monitor_path):
-        if path.exists():
-            path.unlink()
-    serial_log = evidence / "serial.txt"
-    boot_png = BUILD / f"windows98-shizuku-second-edition{tag}-boot.png"
-    dir_png = BUILD / f"windows98-shizuku-second-edition{tag}-dir.png"
-    process = subprocess.Popen(
-        [
-            str(QEMU),
-            "-machine", "pc",
-            "-accel", "tcg",
-            "-m", "64",
-            "-boot", "order=d,menu=off",
-            "-cdrom", str(iso_path),
-            "-vga", "std",
-            "-display", "none",
-            "-serial", f"unix:{serial_path},server=on,wait=off",
-            "-monitor", f"unix:{monitor_path},server=on,wait=off",
-            "-no-reboot",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-    )
-    try:
-        serial = connect_unix(serial_path, 10)
-        monitor = connect_unix(monitor_path, 10)
-        prompt = read_until(serial, b"A:\\> ", 30)
-        save_png(monitor, evidence / "boot.ppm", boot_png)
-        serial.sendall(b"DIR\r")
-        # The shell prints 8.3 names with space padding: "NTW32   .DLL".
-        prompt += read_until(serial, b"NTW32   .DLL", 10)
-        prompt += read_until(serial, b"NTWRAP9X.VXD", 10)
-        prompt += read_until(serial, b"NTWGPROB.EXE", 10)
-        prompt += read_until(serial, b"A:\\> ", 10)
-        save_png(monitor, evidence / "dir.ppm", dir_png)
-        serial_log.write_bytes(prompt)
-        return (
-            "QEMU TCG (BIOS, El Torito default entry) reached the ShizukuDOS 0.1 prompt and DIR listed the embedded files.\n"
-            f"PNG {boot_png}\n"
-            f"PNG {dir_png}\n"
-        )
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-
-
-def connect_unix(path: Path, timeout: float) -> socket.socket:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if path.exists():
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            try:
-                sock.connect(str(path))
-                sock.settimeout(2)
-                return sock
-            except OSError:
-                sock.close()
-        time.sleep(0.1)
-    raise TimeoutError(f"socket not ready: {path}")
-
-
-def read_until(sock: socket.socket, marker: bytes, timeout: float) -> bytes:
-    deadline = time.time() + timeout
-    data = bytearray()
-    while time.time() < deadline:
-        if marker in data:
-            return bytes(data)
-        try:
-            chunk = sock.recv(4096)
-        except socket.timeout:
-            continue
-        if not chunk:
-            break
-        data.extend(chunk)
-    raise TimeoutError(f"did not see {marker!r}; got {bytes(data[-400:])!r}")
-
-
-def save_png(monitor: socket.socket, ppm: Path, png: Path) -> None:
-    command = f"screendump {ppm}\n".encode()
-    try:
-        monitor.recv(4096)
-    except socket.timeout:
-        pass
-    monitor.sendall(command)
-    deadline = time.time() + 10
-    reply = bytearray()
-    while time.time() < deadline:
-        if b"(qemu)" in reply and ppm.is_file() and ppm.stat().st_size > 0:
-            break
-        try:
-            chunk = monitor.recv(4096)
-        except socket.timeout:
-            continue
-        if not chunk:
-            break
-        reply.extend(chunk)
-    from PIL import Image
-    Image.open(ppm).save(png)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--skip-qemu", action="store_true")
     parser.add_argument(
         "--win98-media", type=Path, metavar="PATH",
         help="your OWN Windows 98 ISO or extracted directory; overlaid under WIN98/ in a separate PRIVATE "
              "image (never the public one). IO.SYS, MSDOS.SYS, COMMAND.COM and a WIN98 cabinet folder "
              "are required. Nothing Microsoft is copied into the repository.")
+    parser.add_argument("--driver-package", action="append", default=[], metavar="DIR|PACKAGE=DIR",
+                        help="copy this driver package unchanged to DRIVERS\\<package>\\ and index its INF "
+                             "hardware IDs (repeatable). Use only packages you may redistribute.")
+    parser.add_argument("--setup", type=Path, metavar="DIR",
+                        help=f"SHZSETUP files for \\SHZ\\SETUP (default {se_media.rel(se_media.DEFAULT_SETUP_DIR)} "
+                             "when it holds SHZSETUP.EXE); adds the unattended Install menu entry")
+    parser.add_argument("--loader", type=Path, help="UEFI loader to ship (default: the shizukudos build)")
+    parser.add_argument("--csmwrap", type=Path, help="CSMWRAP.EFI to ship (default: shizukudos/csm/build.py output)")
+    parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default="auto",
+                        help="mode written to \\EFI\\SHIZUKU\\BOOT.INI (read by the loader's boot manager)")
+    parser.add_argument("--reuse-builds", action="store_true",
+                        help="package the existing build/shizukudos outputs instead of rebuilding them "
+                             "(they are still checked against their build receipts)")
     parser.add_argument("--output", type=Path, metavar="ISO", help="output ISO path (default under build/)")
+    parser.add_argument("--skip-qemu", action="store_true",
+                        help="accepted for compatibility; the builder runs no QEMU. Boot evidence: "
+                             "tools/test_shizuku_se_boot_matrix.py")
     args = parser.parse_args()
     private = args.win98_media is not None
     tag = PRIVATE_SUFFIX if private else ""
     stage_root = BUILD / f"shizuku-second-edition{tag}-stage" if private else STAGE_ROOT
     media_work = BUILD / "shizuku-second-edition-media-work"
-    work = BUILD / "shizuku-second-edition-work"
+    work = BUILD / f"shizuku-second-edition{tag}-work"
     evidence = BUILD / f"shizuku-second-edition-evidence{tag}"
-    iso_path = args.output or BUILD / (ISO_NAME.replace(".iso", f"{tag}.iso") if private else ISO_NAME)
+    iso_path = (args.output or BUILD / (ISO_NAME.replace(".iso", f"{tag}.iso") if private else ISO_NAME)).resolve()
     summary_path = BUILD / f"windows98-shizuku-second-edition{tag}.txt"
+    receipt_path = BUILD / f"windows98-shizuku-second-edition{tag}.json"
     media = None
     try:
         if private:
@@ -1374,34 +1268,50 @@ def main() -> int:
             require_git_ignored(stage_root / "WIN98" / "IO.SYS")
             media = inspect_win98_media(args.win98_media, media_work)
         evidence.mkdir(parents=True, exist_ok=True)
-        outputs = build_shizukudos10()
+        outputs = build_shizukudos10(args.reuse_builds)
+        loader = se_media.loader_input(args.loader)
+        csm = se_media.csmwrap_input(args.csmwrap)
+        k64 = se_media.k64_inputs()
+        shzdos = se_media.shzdos_inputs()
+        syslinux = se_media.syslinux()
+        setup_files, setup_info = se_media.setup_payload(args.setup)
+        store, store_manifest = se_media.driver_store(args.driver_package)
         artifacts = build_components(work)
         floppy = build_floppy(work, artifacts)
         (work / "shizukudos.img").write_bytes(floppy)
-        shz10_payload, consistency = stage_shizukudos10(work, outputs)
-        extra = {**shz10_payload, **shzse_payload(artifacts)}
-        payload = stage_tree(stage_root, floppy, artifacts, extra, media)
-        write_iso(stage_root, iso_path)
-        report = verify_iso(iso_path, payload, evidence, stage_root if media else None)
+        efi_members = se_media.efi_members(loader, csm, shzdos, args.boot_mode)
+        shz10_payload, consistency = stage_shizukudos10(work, outputs, efi_members)
+        extra = {**shz10_payload, **shzse_payload(artifacts), **store, **setup_files,
+                 **boot_payload(syslinux, k64, bool(setup_files))}
+        payload = stage_tree(stage_root, floppy, artifacts, extra, media, bool(setup_files), loader.interim)
+        write_iso(stage_root, iso_path, syslinux["isohdpfx.bin"])
+        report = verify_iso(iso_path, payload, efi_members, syslinux, evidence, stage_root if media else None)
         digest = sha256_path(iso_path)
         size = iso_path.stat().st_size
-        qemu_report = "QEMU boot was skipped.\n"
-        if not args.skip_qemu:
-            try:
-                qemu_report = qemu_frames(iso_path, evidence, tag)
-            except Exception:
-                qemu_report = "QEMU BIOS boot did not produce the expected frames:\n" + traceback.format_exc()
-            try:
-                qemu_report += qemu_uefi(iso_path, evidence, tag)
-            except Exception:
-                qemu_report += "QEMU UEFI boot did not produce the expected output:\n" + traceback.format_exc()
-    except Win98MediaError as exc:
+    except (Win98MediaError, se_media.drivers.DriverPackageError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     finally:
         if private:  # no second copy of the user's files is left lying around
             rmtree_force(stage_root)
             rmtree_force(media_work)
+    inputs = [loader, csm, *k64.values(), *shzdos.values()]
+    receipt = {
+        "iso": str(iso_path), "bytes": size, "sha256": digest, "private": private,
+        "volume_id": VOLUME_ID, "source_date_epoch": FIXED_EPOCH, "boot_mode": args.boot_mode,
+        "git": {"revision": git_output("rev-parse", "HEAD"), "dirty": bool(git_output("status", "--porcelain"))},
+        "inputs": [item.record() for item in inputs],
+        "interim": [f"{item.name}: {' '.join(item.notes)}" for item in inputs if item.interim],
+        "syslinux": se_media.syslinux_spec()["distribution"],
+        "setup": setup_info,
+        "drivers": [{"package": p["package"], "files": len(p["files"]), "hardware_ids": len(p["hardware_ids"])}
+                    for p in store_manifest["packages"]],
+        "menu": {"dos16": f"/{DOS16_ISO_PATH}", "shzdos01": "/ShizukuDOS/shizukudos.img", "k64_dir": f"/{K64_DIR}",
+                 "keys": se_media.MENU_KEYS, "setup_entry": bool(setup_files)},
+        "efi_members": {name: {"bytes": len(data), "sha256": sha256(data)} for name, data in sorted(efi_members.items())},
+        "payload_files": len(payload),
+    }
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     private_note = (
         "PRIVATE image: it contains the builder's own Windows 98 files. Do not distribute it.\n"
         "Windows 98 media (only hashes and sizes are recorded):\n" + media_summary(media)
@@ -1412,13 +1322,16 @@ def main() -> int:
         f"bytes {size}\n"
         f"sha256 {digest}\n"
         f"{private_note}"
-        "ShizukuDOS 10.0-dev rebuilt with: python3 shizukudos/tools/shz.py build --profile uefi-multikernel\n"
+        + "".join(f"INTERIM {line}\n" for line in receipt["interim"])
+        + f"SHZSETUP: {'present, ' + str(len(setup_info['files'])) + ' files' if setup_info['present'] else setup_info['note']}\n"
+        f"driver packages: {len(store_manifest['packages'])}\n"
         f"{consistency}\n"
         f"{report}\n"
-        f"{qemu_report}\n"
+        f"receipt {receipt_path}\n"
+        "Boot evidence: python3 tools/test_shizuku_se_boot_matrix.py\n"
     )
     summary_path.write_text(summary, encoding="utf-8")
-    print(summary)
+    print(summary[:4000])
     return 0
 
 

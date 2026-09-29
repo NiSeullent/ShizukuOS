@@ -4,7 +4,7 @@
 
     shz.py doctor [--guest]
     shz.py build --profile {bios-legacy,uefi-multikernel,bios-multikernel,dual-bios-uefi-csm}
-    shz.py test  --suite {host,boot,interkernel,win64,win98-regression}
+    shz.py test  --suite {host,boot,interkernel,win64,win98-regression,media}
     shz.py package --channel dev
 
 Results are PASS / FAIL / SKIP / BLOCKED. A prerequisite that is missing, or a
@@ -365,23 +365,34 @@ def suite_win98_regression(results):
            detail="USER_REPORTED only; no guest run performed by this suite")
 
 
-def suite_iso(results):
-    """Integrated Shizuku SE ISO: build if absent, then boot it (BIOS El Torito, UEFI El Torito) and record every check."""
+def suite_media(results):
+    """VM install ISO + raw disk: build them if absent, then the boot matrix {SeaBIOS, OVMF} x {ISO as CD,
+    ISO as hard disk, raw disk} x {Kernel64, DOS16, ShizukuDOS 0.1} (tools/test_shizuku_se_boot_matrix.py)."""
     iso = REPO / "build" / "windows98-shizuku-second-edition.iso"
-    if not iso.exists():
-        run_script(results, "build the integrated Shizuku SE ISO", [REPO / "tools" / "build_shizuku_se_iso.py", "--skip-qemu"],
-                   timeout=1800)
-    run([sys.executable, REPO / "tools" / "test_shizuku_se_iso.py"], capture=True, check=False, timeout=900)
-    rj = REPO / "build" / "shizuku-se-iso-tests" / "result.json"
-    if not rj.exists():
-        record(results, "ISO boot harness", "FAIL", detail="tools/test_shizuku_se_iso.py produced no result.json")
+    disk = REPO / "build" / "windows98-shizuku-second-edition-disk.img"
+    if not (iso.exists() and iso.with_suffix(".json").exists()):
+        run_script(results, "build the VM install ISO", [REPO / "tools" / "build_shizuku_se_iso.py"], timeout=3600)
+    if not (disk.exists() and disk.with_suffix(".json").exists()):
+        run_script(results, "build the raw disk image", [REPO / "tools" / "build_shizuku_se_disk.py"], timeout=1800)
+    run_name = "suite-" + shzlib.utc_now().replace(":", "")
+    run([sys.executable, REPO / "tools" / "test_shizuku_se_boot_matrix.py", "--run-name", run_name],
+        capture=True, check=False, timeout=8 * 3600)
+    mj = REPO / "build" / "shizuku-se-matrix" / run_name / "matrix.json"
+    if not mj.exists():
+        record(results, "media boot matrix", "FAIL", detail="tools/test_shizuku_se_boot_matrix.py produced no matrix.json")
         return
-    for r in json.loads(rj.read_text())["results"]:
-        record(results, f"iso {r['group']}: {r['test']}", r["status"], detail=(r.get("detail") or "")[:200])
+    summary = json.loads(mj.read_text())
+    for cell in summary["cells"]:
+        for entry, info in cell["entries"].items():
+            name = f"media {cell['firmware']} {cell['medium']} {entry}" + (
+                " (interim: UEFI Shell startup.nsh -> CSMWrap)" if cell["interim"] else "")
+            record(results, name, info["status"], detail=f"{info['seconds']} s" + (
+                f"; failed: {info['failed'][:3]}" if info["failed"] else ""), evidence=str(mj.parent))
 
 
 SUITES = {"host": suite_host, "boot": suite_boot, "interkernel": suite_interkernel, "win64": suite_win64,
-          "win98-regression": suite_win98_regression, "iso": suite_iso}
+          "win98-regression": suite_win98_regression, "media": suite_media,
+          "iso": suite_media}  # "iso": the earlier name of the ISO boot suite, now the media matrix
 
 
 def cmd_test(args):
