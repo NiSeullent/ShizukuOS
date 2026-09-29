@@ -33,11 +33,19 @@ bindings, statically checked in the emitted code, are:
 | `_LinPageLock` | `0x63` | `0x00010063` | page, count, PAGEMAPGLOBAL |
 | `_LinPageUnLock` | `0x64` | `0x00010064` | returned alias page, count, PAGEMAPGLOBAL |
 | `_PageCheckLinRange` | `0x67` | `0x00010067` | page, count, flags=0 |
+| `_MapPhysToLinear` | `0x6C` | `0x0001006C` | physical address, byte count, flags=0; returns a system linear alias (WIN64 bridge channel window) |
 
 These are C services: the original assembly wrapper re-pushes arguments so its own
 near return address cannot be mistaken for an argument, then performs caller stack
-cleanup. The test suite verifies the four encoded calls. It does not execute them
-against Windows VMM. The DDB uses the Windows 4.10 SDK value, unassigned device ID,
+cleanup. The test suite verifies the five encoded calls. It does not execute them
+against Windows VMM.
+
+The WIN64 subsystem bridge additionally uses two CPU instructions whose contracts come
+from the [Intel SDM](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html):
+`CPUID` (leaf 1 ECX bit 31 "hypervisor present", vendor leaf `0x40000000`) and
+`VMCALL`, which raises #UD outside a VMX guest and is therefore only executed after the
+ShizukuDOS Supervisor signature (`SSHZ`/`uVMM`/`v-10`, `shizukudos/supervisor/src/domain.c`)
+was read. The hypercall register convention is the project's own (`shizukudos/abi/shz_abi.h`). The DDB uses the Windows 4.10 SDK value, unassigned device ID,
 an eight-byte `NTWRAP9X` name, and the Windows 4.x 80-byte layout.
 
 `build/manifest.json` records compiler versions and exact build-source/artifact

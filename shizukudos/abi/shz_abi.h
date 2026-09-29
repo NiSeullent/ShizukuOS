@@ -1,5 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * ShizukuDOS 10.0 inter-kernel ABI, version 1.0.
+ * ShizukuDOS 10.0 inter-kernel ABI, version 1.1.
+ *
+ * 1.1 adds the WIN64 subsystem message family (shz_ipc.h, opcodes 0x200..0x2ff): a 32-bit
+ * Windows 98 program starts, feeds and observes a Win64 process running in the Kernel64
+ * domain. Version 1.0 receivers still accept every 1.1 frame (same major, same header).
  *
  * Everything on the wire is fixed-width, little-endian and naturally aligned so the
  * same header compiles identically for 16-bit-real-mode assemblers (as offsets), for
@@ -17,7 +21,7 @@
 #include <stdint.h>
 
 #define SHZ_ABI_MAJOR 1
-#define SHZ_ABI_MINOR 0
+#define SHZ_ABI_MINOR 1
 
 /* ---------------------------------------------------------------- domains */
 enum shz_domain_id {
@@ -45,7 +49,9 @@ enum shz_hcall {
     SHZ_HC_EVIDENCE = 9,        /* rbx = slot (0..31), rcx = value: harness-visible, guest-generated */
     SHZ_HC_DOMAIN_STATE = 10,   /* rbx = domain id; rbx <- state, rcx <- generation */
     SHZ_HC_ABI_VERSION = 11,    /* rbx <- (major << 16) | minor */
-    SHZ_HC_WALLTIME = 12        /* rbx <- seconds since 1970-01-01 UTC from the platform RTC */
+    SHZ_HC_WALLTIME = 12,       /* rbx <- seconds since 1970-01-01 UTC from the platform RTC */
+    SHZ_HC_CHANNEL_INFO = 13    /* ABI 1.1: rbx = channel index; rbx <- guest-physical base, rcx <- peer domain, or E_NOENT.
+                                 * For domains that receive no bootinfo (the Win98 domain's VxD). */
 };
 
 enum shz_status {

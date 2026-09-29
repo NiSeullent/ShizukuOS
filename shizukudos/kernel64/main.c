@@ -39,6 +39,7 @@ void kmain(uint64_t bootinfo_pa)
         if (ipc64_run_tests())
             kprintf("K64: IPC tests reported failures\n");
     }
+    subsys64_start(&bootinfo);                  /* WIN64 subsystem bridge: serves a Win98 peer, or its loopback self-test when standalone */
     report_final();
     kprintf("%s: done, %u self-test failure(s)\n", KVER, tests_failed());
     shz_exit(tests_failed() ? 1 : 0);
