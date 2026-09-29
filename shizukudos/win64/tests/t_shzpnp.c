@@ -159,8 +159,19 @@ int main(void)
           "quoted string with comma and doubled quotes");
     CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, DEV, L"Service", REG_SZ, L"synthpnp"), "device key Service = the SPSVCINST_ASSOCSERVICE service");
     CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, DEV, L"Driver", REG_SZ, L"{4d36e972-e325-11ce-bfc1-08002be10318}\\0000"), "device key Driver = {ClassGUID}\\0000");
-    t = 0; sz = sizeof raw;
-    CHECK(q_raw(HKEY_LOCAL_MACHINE, DEV, L"HardwareID", &t, raw, &sz) && t == REG_MULTI_SZ && sz > 90, "HardwareID is a REG_MULTI_SZ list");
+    {   /* the six PCI hardware IDs in the documented order, as REG_MULTI_SZ ("a\0b\0...\0\0") */
+        static WCHAR hw[800];
+        DWORD hl = sizeof hw;
+        static const WCHAR first[] = L"PCI\\VEN_1AF4&DEV_7001&SUBSYS_00011AF4&REV_01";
+        static const WCHAR last[] = L"PCI\\VEN_1AF4&DEV_7001&CC_0200";
+        size_t total = 0, cnt = 0, pos = 0, lastpos = 0;
+        t = 0;
+        if (q_raw(HKEY_LOCAL_MACHINE, DEV, L"HardwareID", &t, (BYTE *)hw, &hl) && t == REG_MULTI_SZ) {
+            while (pos < hl / 2 && hw[pos]) { lastpos = pos; ++cnt; pos += wl(hw + pos) + 1; }
+            total = pos + 1;
+        }
+        CHECK(cnt == 6 && weq(hw, first) && weq(hw + lastpos, last) && total * 2 == hl, "HardwareID: REG_MULTI_SZ of the 6 PCI hardware IDs, double-NUL terminated");
+    }
     CHECK(q_dword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Enum\\PCI\\VEN_1AF4&DEV_7001&SUBSYS_00011AF4&REV_01\\SHZ0000\\Device Parameters",
                   L"MSISupported") == 1, ".HW AddReg lands in Device Parameters");
     CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0000\\Ndi",

@@ -249,9 +249,10 @@ static void set_multi(HKEY k, const char *name, const char *joined, int n)
     wl = MultiByteToWideChar(CP_UTF8, 0, tmp, (int)len + (n ? 2 : 1), 0, 0);
     w = (WCHAR *)malloc(sizeof(WCHAR) * (size_t)(wl + 2));
     MultiByteToWideChar(CP_UTF8, 0, tmp, (int)len + (n ? 2 : 1), w, wl);
-    if (!n) { w[0] = 0; wl = 1; }
+    if (!n) { w[0] = 0; wl = 1; }                    /* empty list: a single terminating NUL */
     w[wl] = 0;
-    if (RegSetValueExW(k, wn, 0, REG_MULTI_SZ, (const BYTE *)w, (DWORD)((size_t)(n ? wl : 1) * sizeof(WCHAR) + sizeof(WCHAR)))) ++g_errors;
+    /* wl counts every string's NUL plus the final empty string: "a\0b\0\0" */
+    if (RegSetValueExW(k, wn, 0, REG_MULTI_SZ, (const BYTE *)w, (DWORD)((size_t)wl * sizeof(WCHAR)))) ++g_errors;
     free(tmp);
     free(wn);
     free(w);

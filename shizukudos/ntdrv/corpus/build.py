@@ -88,6 +88,7 @@ CORPUS_DRIVERS = {
     "netkvm":    ("drivers/network/dd/netkvm", "virtio-net NDIS 5.1 miniport (older virtio-win NetKVM, as carried by ReactOS)"),
     "storahci":  ("drivers/storage/port/storahci", "AHCI StorPort miniport"),
     "uniata":    ("drivers/storage/ide/uniata", "IDE/SATA SCSI-port miniport (C++)"),
+    "ndis":      ("drivers/network/ndis", "NDIS library ndis.sys (framework provider, NDIS 5.x)"),
     "storport":  ("drivers/storage/port/storport", "StorPort port driver (framework provider)"),
     "scsiport":  ("drivers/storage/port/scsiport", "SCSI port driver (framework provider)"),
     "classpnp":  ("drivers/storage/class/classpnp", "storage class library (framework provider, Microsoft sample code)"),
