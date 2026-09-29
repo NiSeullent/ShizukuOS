@@ -54,11 +54,20 @@ void reg_lock(void)
 void reg_unlock(void) { mutex_unlock(&reg_mutex); }
 regkey_t *reg_root(void) { return g_root; }
 
+/* FILETIME for LastWriteTime. The wall clock (a hypercall) is read once; afterwards time advances with the scheduler tick
+ * (TICK_US), so a registry write costs no hypercall. Resolution is one tick. Always called with the registry lock held. */
 uint64_t reg_filetime_now(void)
 {
-    hcreg_t secs = 0;
-    shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
-    return (secs + 11644473600ull) * 10000000ull + (shz_time_ns() % 1000000000ull) / 100;
+    static uint64_t base_ft, base_tick;
+    static int have_base;
+    if (!have_base) {
+        hcreg_t secs = 0;
+        shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
+        base_ft = (secs + 11644473600ull) * 10000000ull + (shz_time_ns() % 1000000000ull) / 100;
+        base_tick = ticks_now();
+        have_base = 1;
+    }
+    return base_ft + (ticks_now() - base_tick) * (TICK_US * 10ull);          /* one tick = TICK_US microseconds = TICK_US * 10 x 100 ns */
 }
 
 /* ---------------------------------------------------------------- names */
@@ -116,6 +125,89 @@ static regkey_t *key_alloc(const uint16_t *name, uint32_t nchars, const uint16_t
     return k;
 }
 
+/* ---------------------------------------------------------------- change notification */
+typedef struct regnotify regnotify_t;
+struct regnotify {
+    regnotify_t *next;
+    regkey_t *key;
+    kobject_t *key_obj;                 /* the key object the registration was made on (not referenced) */
+    kobject_t *event;                   /* referenced; may be NULL when only the IO_STATUS_BLOCK is polled */
+    process_t *proc;
+    uint64_t iosb;                      /* user address of an IO_STATUS_BLOCK, or 0 */
+    uint32_t filter;
+    int subtree;
+};
+static regnotify_t *g_notify;
+static uint32_t g_notify_count;
+
+/* Registry lock held. Completes and frees `n` (already unlinked). */
+static void notify_complete(regnotify_t *n, int32_t status)
+{
+    if (n->iosb) {
+        const uint64_t iosb[2] = { (uint64_t)(int64_t)status, 0 };
+        copy_to_user(n->proc, n->iosb, iosb, sizeof iosb);
+    }
+    if (n->event) {
+        ob_signal_event(n->event);
+        ob_deref(n->event);             /* an event object: never takes the registry lock */
+    }
+    kfree(n);
+    --g_notify_count;
+}
+
+int32_t reg_notify_add(regkey_t *k, kobject_t *key_obj, kobject_t *event, process_t *p, uint64_t iosb_va, uint32_t filter, int subtree)
+{
+    regnotify_t *n;
+    if (k->flags & RK_DELETED) return STATUS_KEY_DELETED;
+    if (g_notify_count >= REG_NOTIFY_MAX_REGISTRATIONS) return STATUS_NO_MEMORY;
+    n = kzalloc(sizeof *n);
+    if (!n) return STATUS_NO_MEMORY;
+    n->key = k;
+    n->key_obj = key_obj;
+    n->event = event;
+    if (event) ob_ref(event);
+    n->proc = p;
+    n->iosb = iosb_va;
+    n->filter = filter;
+    n->subtree = subtree;
+    n->next = g_notify;
+    g_notify = n;
+    ++g_notify_count;
+    return STATUS_SUCCESS;
+}
+
+/* Something in `changed` happened (`what` is one REG_NOTIFY_CHANGE_* bit): complete every matching registration on the key
+ * itself and every sub-tree registration on one of its ancestors. */
+static void notify_fire(regkey_t *changed, uint32_t what)
+{
+    regnotify_t **pp = &g_notify;
+    while (*pp) {
+        regnotify_t *n = *pp;
+        int match = 0;
+        if (n->filter & what) {
+            if (n->key == changed) match = 1;
+            else if (n->subtree) {
+                regkey_t *a;
+                for (a = changed->parent; a; a = a->parent)
+                    if (a == n->key) { match = 1; break; }
+            }
+        }
+        if (match) { *pp = n->next; notify_complete(n, STATUS_SUCCESS); }
+        else pp = &n->next;
+    }
+}
+
+/* Completes every registration made on key `k` (the key is going away) or on key object `obj` (the object is destroyed). */
+static void notify_drop(regkey_t *k, kobject_t *obj, int32_t status)
+{
+    regnotify_t **pp = &g_notify;
+    while (*pp) {
+        regnotify_t *n = *pp;
+        if ((k && n->key == k) || (obj && n->key_obj == obj)) { *pp = n->next; notify_complete(n, status); }
+        else pp = &n->next;
+    }
+}
+
 /* ---------------------------------------------------------------- tree */
 static regkey_t *find_child(regkey_t *k, const uint16_t *name, uint32_t chars)
 {
@@ -138,6 +230,7 @@ static void link_child(regkey_t *parent, regkey_t *c)
     c->parent = parent;
     ++parent->nsubkeys;
     parent->last_write = reg_filetime_now();
+    if (g_seeded) notify_fire(parent, REG_NOTIFY_CHANGE_NAME);
 }
 
 static uint32_t key_depth(regkey_t *k)
@@ -230,6 +323,8 @@ int32_t reg_delete_key(regkey_t *k)
     regkey_t **pp;
     if (k->flags & RK_DELETED) return STATUS_KEY_DELETED;
     if ((k->flags & RK_FIXED) || k->child) return STATUS_CANNOT_DELETE;   /* hive roots; keys with sub-keys */
+    notify_fire(k->parent, REG_NOTIFY_CHANGE_NAME);            /* watchers of the parent (and sub-tree watchers above it) */
+    notify_drop(k, 0, STATUS_SUCCESS);                        /* watchers of the deleted key itself complete */
     for (pp = &k->parent->child; *pp; pp = &(*pp)->sibling)
         if (*pp == k) { *pp = k->sibling; break; }
     --k->parent->nsubkeys;
@@ -255,7 +350,14 @@ void reg_key_object_free(kobject_t *o)
 {
     regkey_t *k = o->u.key.node;
     o->u.key.node = 0;
-    if (k) reg_key_release(k);
+    reg_lock();
+    notify_drop(0, o, STATUS_NOTIFY_CLEANUP);                 /* the handle is gone: its pending notifications complete */
+    if (k) {
+        KASSERT(k->refs > 0);
+        if (--k->refs == 0 && (k->flags & RK_DELETED))
+            key_free_now(k);
+    }
+    reg_unlock();
 }
 
 uint32_t reg_key_path(regkey_t *k, uint16_t *out, uint32_t cap)
@@ -297,6 +399,7 @@ int32_t reg_set_value(regkey_t *k, const uint16_t *name, uint32_t chars, uint32_
         v->type = type;
         if (len) memcpy(regval_data(v), data, len);
         k->last_write = reg_filetime_now();
+        notify_fire(k, REG_NOTIFY_CHANGE_LAST_SET);
         return STATUS_SUCCESS;
     }
     if (v) { name = regval_name(v); chars = v->name_len; credit = v->alloc_size; }   /* an existing value keeps its name */
@@ -321,6 +424,7 @@ int32_t reg_set_value(regkey_t *k, const uint16_t *name, uint32_t chars, uint32_
         ++k->nvalues;
     }
     k->last_write = reg_filetime_now();
+    notify_fire(k, REG_NOTIFY_CHANGE_LAST_SET);
     return STATUS_SUCCESS;
 }
 
@@ -336,6 +440,7 @@ int32_t reg_delete_value(regkey_t *k, const uint16_t *name, uint32_t chars)
     --k->nvalues;
     reg_free(v, v->alloc_size);
     k->last_write = reg_filetime_now();
+    notify_fire(k, REG_NOTIFY_CHANGE_LAST_SET);
     return STATUS_SUCCESS;
 }
 

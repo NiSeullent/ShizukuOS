@@ -37,7 +37,7 @@
 #define SYSCALL_LIST_REGISTRY(X) \
     X(NtCreateKey, 0x50) X(NtOpenKey, 0x51) X(NtOpenKeyEx, 0x52) X(NtQueryValueKey, 0x53) X(NtSetValueKey, 0x54) \
     X(NtDeleteKey, 0x55) X(NtDeleteValueKey, 0x56) X(NtEnumerateKey, 0x57) X(NtEnumerateValueKey, 0x58) \
-    X(NtQueryKey, 0x59) X(NtFlushKey, 0x5a) X(NtQueryObject, 0x5b)
+    X(NtQueryKey, 0x59) X(NtFlushKey, 0x5a) X(NtQueryObject, 0x5b) X(NtNotifyChangeKey, 0x5c)
 
 #define SYSCALL_LIST_GRAPHICS(X)
 
@@ -68,6 +68,7 @@ enum {
 #define STATUS_TIMEOUT ((int32_t)0x00000102)
 #define STATUS_INVALID_CID ((int32_t)0xC000000B)
 #define STATUS_PENDING ((int32_t)0x00000103)
+#define STATUS_NOTIFY_CLEANUP ((int32_t)0x0000010B)
 #define STATUS_GUARD_PAGE_VIOLATION ((int32_t)0x80000001)
 #define STATUS_BUFFER_OVERFLOW ((int32_t)0x80000005)
 #define STATUS_NO_MORE_FILES ((int32_t)0x80000006)

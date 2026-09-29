@@ -11,6 +11,10 @@
  *    a simplification: Windows presents HKCR as a merged view of HKCU and HKLM class data. HKEY_PERFORMANCE_DATA,
  *    HKEY_DYN_DATA and HKEY_CURRENT_USER_LOCAL_SETTINGS are not supported (ERROR_NOT_SUPPORTED). Predefined handles are not
  *    cached: each call opens the native key it needs and closes it again, so RegDisablePredefinedCache has nothing to do.
+ *  - RegNotifyChangeKeyValue: one-shot notifications on key handles, asynchronous (event) or blocking. Notifications on the
+ *    predefined keys use a native handle kept open for the life of the process (opened on first use), because a notification
+ *    dies with the handle it was registered on. REG_NOTIFY_THREAD_AGNOSTIC is implied: a notification is not tied to the
+ *    registering thread.
  *  - There is one registry view: KEY_WOW64_32KEY / KEY_WOW64_64KEY are accepted and change nothing (no Wow6432Node).
  *  - Security attributes are ignored, the registry is volatile (see kernel64/registry.c for the whole list of limits).
  *  - "ANSI" means the process ANSI code page as kernel32 reports it (UTF-8 on this system).
@@ -829,4 +833,50 @@ DLLAPI LONG WINAPI RegQueryInfoKeyW(HKEY hKey, LPWSTR lpClass, LPDWORD lpcchClas
     if (lpftLastWriteTime) { lpftLastWriteTime->dwLowDateTime = (DWORD)fi->LastWriteTime; lpftLastWriteTime->dwHighDateTime = (DWORD)((ULONGLONG)fi->LastWriteTime >> 32); }
     FREE(fi);
     return ERROR_SUCCESS;
+}
+
+/* ---------------------------------------------------------------- change notification */
+static HANDLE g_notify_roots[8];           /* native handles behind predefined keys, for notifications only */
+
+static LONG notify_handle(HKEY hkey, HANDLE *out)
+{
+    unsigned idx;
+    if (!hkey) return ERROR_INVALID_HANDLE;
+    if (!is_predef(hkey, &idx)) { *out = (HANDLE)hkey; return ERROR_SUCCESS; }
+    if (!g_notify_roots[idx]) {
+        objname_t n;
+        HANDLE h = 0;
+        LONG e = objname_init(&n, hkey, 0);
+        NTSTATUS st;
+        if (e) return e;
+        st = NtOpenKey(&h, KEY_NOTIFY | KEY_QUERY_VALUE, &n.oa);
+        objname_free(&n);
+        if (st) return werr(st);
+        if (__sync_val_compare_and_swap(&g_notify_roots[idx], (HANDLE)0, h)) NtClose(h);      /* another thread opened it first */
+    }
+    *out = g_notify_roots[idx];
+    return ERROR_SUCCESS;
+}
+
+DLLAPI LONG WINAPI RegNotifyChangeKeyValue(HKEY hKey, BOOL bWatchSubtree, DWORD dwNotifyFilter, HANDLE hEvent, BOOL fAsynchronous)
+{
+    HANDLE kh = 0, ev = 0;
+    NTSTATUS st;
+    LONG e;
+    const DWORD any = REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_ATTRIBUTES | REG_NOTIFY_CHANGE_LAST_SET | REG_NOTIFY_CHANGE_SECURITY;
+    if (dwNotifyFilter & ~(DWORD)REG_LEGAL_CHANGE_FILTER) return ERROR_INVALID_PARAMETER;
+    if (!(dwNotifyFilter & any)) return ERROR_INVALID_PARAMETER;          /* at least one kind of change to watch for */
+    if (fAsynchronous && !hEvent) return ERROR_INVALID_PARAMETER;
+    e = notify_handle(hKey, &kh);
+    if (e) return e;
+    if (fAsynchronous) {
+        st = NtNotifyChangeKey(kh, hEvent, 0, 0, 0, dwNotifyFilter, (BOOLEAN)(bWatchSubtree != 0), 0, 0, TRUE);
+        return st == STATUS_PENDING ? ERROR_SUCCESS : werr(st);
+    }
+    st = NtCreateEvent(&ev, EVENT_ALL_ACCESS, 0, 0 /* NotificationEvent */, FALSE);
+    if (st) return werr(st);
+    st = NtNotifyChangeKey(kh, ev, 0, 0, 0, dwNotifyFilter, (BOOLEAN)(bWatchSubtree != 0), 0, 0, TRUE);
+    if (st == STATUS_PENDING) st = NtWaitForSingleObject(ev, FALSE, 0);   /* returns on a change, key deletion or handle close */
+    NtClose(ev);
+    return NT_SUCCESS(st) ? ERROR_SUCCESS : werr(st);
 }

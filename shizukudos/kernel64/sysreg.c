@@ -560,6 +560,45 @@ static int32_t query_object(process_t *pr, uint64_t h, uint32_t cls, uint64_t bu
     return st;
 }
 
+/* ---------------------------------------------------------------- NtNotifyChangeKey */
+/* NtNotifyChangeKey(KeyHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, CompletionFilter, WatchTree, Buffer, BufferSize,
+ * Asynchronous). Only the asynchronous form exists: the call registers and returns STATUS_PENDING; the event is signaled and
+ * the IO_STATUS_BLOCK completed once, when a change matching the filter happens (or the key object is closed). The blocking
+ * form is built by advapi32 from an event and a wait. APCs and the change-data buffer are not supported. */
+static int32_t notify_change(process_t *pr, struct regs *r, uint64_t h, uint64_t ev_h, uint64_t apc)
+{
+    const uint64_t iosb = (uint64_t)stack_arg(pr, r, 5), buffer = (uint64_t)stack_arg(pr, r, 8);
+    const uint32_t filter = (uint32_t)stack_arg(pr, r, 6), buflen = (uint32_t)stack_arg(pr, r, 9);
+    const int subtree = (stack_arg(pr, r, 7) & 0xff) != 0, async = (stack_arg(pr, r, 10) & 0xff) != 0;
+    kobject_t *ko, *ev = 0;
+    int32_t st;
+    if (apc || buffer || buflen) return STATUS_NOT_SUPPORTED;
+    if (!async) return STATUS_NOT_SUPPORTED;
+    if (!filter || (filter & ~(REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_ATTRIBUTES | REG_NOTIFY_CHANGE_LAST_SET |
+                               REG_NOTIFY_CHANGE_SECURITY | REG_NOTIFY_THREAD_AGNOSTIC)))
+        return STATUS_INVALID_PARAMETER;
+    st = key_of(pr, h, KEY_NOTIFY, &ko, 0);
+    if (st) return st;
+    if (ev_h) {
+        st = handle_ref(pr, ev_h, OB_EVENT, &ev, 0);
+        if (st) { ob_deref(ko); return st; }
+        ob_reset_event(ev);                             /* like every asynchronous operation: the event starts non-signaled */
+    }
+    if (iosb) {
+        const uint64_t pending[2] = { (uint64_t)(int64_t)STATUS_PENDING, 0 };
+        if (copy_to_user(pr, iosb, pending, sizeof pending)) st = STATUS_ACCESS_VIOLATION;
+    }
+    if (!st) {
+        reg_lock();
+        st = ko->u.key.node ? reg_notify_add(ko->u.key.node, ko, ev, pr, iosb, filter & ~REG_NOTIFY_THREAD_AGNOSTIC, subtree)
+                            : STATUS_INVALID_HANDLE;
+        reg_unlock();
+    }
+    if (ev) ob_deref(ev);                               /* the registration holds its own reference */
+    ob_deref(ko);
+    return st ? st : STATUS_PENDING;
+}
+
 /* ---------------------------------------------------------------- dispatch */
 int32_t sys_ext_registry(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {
@@ -591,6 +630,7 @@ int32_t sys_ext_registry(process_t *cur, struct regs *r, uint32_t num, uint64_t 
         ob_deref(ko);
         return STATUS_SUCCESS;
     }
+    case SYS_NtNotifyChangeKey: return notify_change(cur, r, a1, a2, a3);
     case SYS_NtQueryObject:                             /* (HANDLE, CLASS, PVOID, ULONG, PULONG) */
         return query_object(cur, a1, (uint32_t)a2, a3, (uint32_t)a4, (uint64_t)stack_arg(cur, r, 5));
     default: return STATUS_INVALID_SYSTEM_SERVICE;

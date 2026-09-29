@@ -101,6 +101,17 @@ regval_t *reg_nth_value(regkey_t *k, uint32_t index);
  * most `cap`. */
 uint32_t reg_key_path(regkey_t *k, uint16_t *out, uint32_t cap);
 uint64_t reg_filetime_now(void);
+
+/* Change notification (NtNotifyChangeKey). A registration watches one key (optionally its whole sub-tree) for the changes in
+ * its filter and completes exactly once: it signals the event, stores the status in the IO_STATUS_BLOCK (if any) and
+ * disappears. It also completes, with STATUS_NOTIFY_CLEANUP, when the key object it was made on is destroyed. */
+#define REG_NOTIFY_CHANGE_NAME 0x1u             /* sub-key created or deleted */
+#define REG_NOTIFY_CHANGE_ATTRIBUTES 0x2u
+#define REG_NOTIFY_CHANGE_LAST_SET 0x4u         /* value set or deleted */
+#define REG_NOTIFY_CHANGE_SECURITY 0x8u
+#define REG_NOTIFY_THREAD_AGNOSTIC 0x10000000u
+#define REG_NOTIFY_MAX_REGISTRATIONS 512u
+int32_t reg_notify_add(regkey_t *k, kobject_t *key_obj, kobject_t *event, process_t *p, uint64_t iosb_va, uint32_t filter, int subtree);
 uint32_t reg_upcase_char(uint16_t c);
 
 #endif

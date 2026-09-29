@@ -31,6 +31,8 @@ NTSTATUS NTAPI NtEnumerateValueKey(HANDLE, ULONG Index, ULONG InfoClass, PVOID, 
 NTSTATUS NTAPI NtQueryKey(HANDLE, ULONG InfoClass, PVOID, ULONG, PULONG ResultLength);
 NTSTATUS NTAPI NtFlushKey(HANDLE);
 NTSTATUS NTAPI NtQueryObject(HANDLE, ULONG InfoClass, PVOID, ULONG, PULONG ResultLength);
+NTSTATUS NTAPI NtNotifyChangeKey(HANDLE, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, SHZ_IO_STATUS_BLOCK *, ULONG CompletionFilter,
+                                 BOOLEAN WatchTree, PVOID Buffer, ULONG BufferSize, BOOLEAN Asynchronous);
 
 /* KEY_INFORMATION_CLASS */
 #define SHZ_KeyBasicInformation 0
