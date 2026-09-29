@@ -347,7 +347,11 @@ int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr)
         if (im->relocs_applied != before) ++im->reloc_pages;
         if (im->view->io_errors) { pmm_free(pa); return STATUS_IN_PAGE_ERROR; }
     }
-    if (vm_lookup(p->pml4, va, 0)) { pmm_free(pa); return 0; }      /* another thread won while we were reading */
+    /* The reads may have blocked (volume mutex): another thread of the process may have faulted the page in, or changed
+     * or freed the range (the descriptor array can even have been reallocated), so look the descriptor up again. */
+    if (vm_lookup(p->pml4, va, 0)) { pmm_free(pa); return 0; }
+    v = vad_find(p, va);
+    if (!v || v->img != im || v->state != VAD_COMMITTED) { pmm_free(pa); return STATUS_ACCESS_VIOLATION; }
     if (vm_map(p->pml4, va, pa, prot_to_ptflags(v->prot))) { pmm_free(pa); return STATUS_NO_MEMORY; }
     ++im->pages_in;
     im->bytes_read += n;

@@ -392,6 +392,7 @@ def main():
     image = out / "disk.img"
     make_image(image, 640, 8, files, dirs)
     fsck0 = subprocess.run(["fsck.fat", "-n", str(image)], capture_output=True, text=True)
+    image_sha256 = hashlib.sha256(image.read_bytes()).hexdigest()       # deterministic: same inputs, same image
     sector0 = image.read_bytes()[:512]
     expect_sectors = image.stat().st_size // 512
     expect_crc0 = zlib.crc32(sector0) & 0xffffffff
@@ -418,10 +419,13 @@ def main():
     record = {"profile": "kernel64-standalone + AHCI FAT32 disk (no Supervisor, no VMX)", "accel": accel, "status": status,
               "checks": checks, "seconds": round(time.time() - started, 1),
               "evidence": {str(k): hex(v) for k, v in sorted(ev.items())}, "command": cmd, "qemu_output": qemu_out[-1500:],
-              "serial_tail": serial[-4000:], "chromium_probe": chromium, "utc": shzlib.utc_now(), "git": shzlib.git_state()}
+              "serial_tail": serial[-4000:], "image_sha256_before_boot": image_sha256,
+              "image_sha256_after_boot": hashlib.sha256(image.read_bytes()).hexdigest(), "chromium_probe": chromium,
+              "utc": shzlib.utc_now(), "git": shzlib.git_state()}
     shzlib.write_json(out / "result.json", record)
     for x in checks:
         print(f"  [{x['status']}] {x['check']}  {x['detail']}")
+    print(f"  [INFO] image sha256 before boot {image_sha256}")
     if args.chromium:
         print(f"  [INFO] Chromium probe: {chromium.get('status')}")
         for k in ("chrome_dll_result", "chrome_dll_first_failure", "chrome_exe_result", "chrome_exe_first_failure"):
