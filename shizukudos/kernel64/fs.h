@@ -1,24 +1,45 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Kernel64 in-memory file system (C:\), backed by kernel heap memory, plus a read-only
- * view of the initial RAM archive. NT-style path resolution: case-insensitive components
- * separated by backslashes; names are stored as UTF-8 and compared with ASCII case folding.
+ * Kernel64 file-system name space: an in-memory file system (C:\), backed by kernel heap memory, plus a read-only
+ * view of the initial RAM archive, plus mounted read-only disk volumes (D:\ ... from disk.c: FAT32 over the block
+ * registry). NT-style path resolution: case-insensitive components separated by backslashes; names are stored as
+ * UTF-8 and compared with ASCII case folding. Disk directories are enumerated into fsnodes on first use, so every
+ * consumer (lookup, NtQueryDirectoryFile, the loader) sees one node type; disk data is read through the volume's
+ * fsvol_t operations instead of a heap buffer.
  */
 #ifndef K64_FS_H
 #define K64_FS_H
 #include "proc_internal.h"
 
+#define FS_NAME_MAX 128                     /* UTF-8 bytes including the terminator (VFAT: up to 255 UTF-16 units) */
+enum { FSB_RAM = 0, FSB_DISK = 1 };         /* fsnode backing */
+
 typedef struct fsnode fsnode_t;
+typedef struct fsvol fsvol_t;
 struct fsnode {
-    char name[96];
+    char name[FS_NAME_MAX];
     int is_dir;
-    int readonly;                       /* initrd files */
+    int readonly;                       /* initrd files and every disk node */
     int delete_pending;
     uint32_t open_count;
     uint32_t attrs;                     /* FILE_ATTRIBUTE_* */
     fsnode_t *parent, *child, *sibling;
-    uint8_t *data;
+    uint8_t *data;                      /* FSB_RAM: heap buffer or a pointer into the initrd */
     uint64_t size, cap;
-    uint64_t ctime, mtime;
+    uint64_t ctime, mtime;              /* FSB_RAM: kernel ticks (ms) */
+    uint8_t backing;                    /* FSB_RAM / FSB_DISK */
+    uint8_t populated;                  /* FSB_DISK directory: children enumerated */
+    uint32_t first_cluster;             /* FSB_DISK: on-volume location */
+    fsvol_t *vol;                       /* FSB_DISK: the volume */
+    void *chain;                        /* FSB_DISK file: extent cache (owned by the volume code) */
+    uint64_t ftime_c, ftime_m;          /* FSB_DISK: FILETIME create / write (0 = unknown) */
+};
+
+/* A mounted read-only volume: how its nodes are read and enumerated. */
+struct fsvol {
+    char letter;                        /* 'D' ... */
+    int (*read)(fsvol_t *v, fsnode_t *n, uint64_t off, void *buf, uint64_t len, uint64_t *done);   /* 0 = ok (short at EOF) */
+    int (*populate)(fsvol_t *v, fsnode_t *dir);                                                    /* creates the children */
+    void *priv;
 };
 
 typedef struct {
@@ -40,22 +61,32 @@ typedef struct {
 #define FILE_NON_DIRECTORY_FILE 0x40
 #define FILE_DELETE_ON_CLOSE 0x1000
 #define FILE_ATTRIBUTE_READONLY 1
+#define FILE_ATTRIBUTE_HIDDEN 2
+#define FILE_ATTRIBUTE_SYSTEM 4
 #define FILE_ATTRIBUTE_DIRECTORY 0x10
+#define FILE_ATTRIBUTE_ARCHIVE 0x20
 #define FILE_ATTRIBUTE_NORMAL 0x80
 
 void fs_init(void);
 int fs_load_archive(const uint8_t *archive, uint64_t size);          /* returns file count or -1 */
-fsnode_t *fs_lookup(const char *path_utf8);                          /* "C:\a\b" or "\a\b" */
+fsnode_t *fs_lookup(const char *path_utf8);                          /* "C:\a\b", "\??\D:\a" or "\a\b" (= C:) */
 fsnode_t *fs_create(const char *path_utf8, int is_dir, int *created); /* creates parents' leaf only */
+fsnode_t *fs_new_child(fsnode_t *dir, const char *name, int is_dir); /* bare node appended to dir (no checks) */
 int fs_read(fsnode_t *n, uint64_t off, void *buf, uint64_t len, uint64_t *done);
 int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len);
 int fs_truncate(fsnode_t *n, uint64_t size);
 void fs_remove(fsnode_t *n);
 fsnode_t *fs_root(void);
 uint64_t fs_total_bytes(void);
+/* Mounted volumes: `root` becomes "<letter>:\". 'C' is the RAM root and cannot be replaced. 0 = ok. */
+int fs_mount(char letter, fsnode_t *root);
+fsnode_t *fs_root_of(char letter);                                   /* NULL when nothing is mounted there */
+void fs_populate(fsnode_t *dir);                                     /* enumerates a disk directory once (no-op otherwise) */
+void fs_node_times(const fsnode_t *n, uint64_t *create_ft, uint64_t *write_ft);   /* FILETIMEs for any backing */
 
 /* UTF-16 <-> UTF-8 helpers used by the syscall layer. */
 int utf16_to_utf8(const uint16_t *src, uint64_t chars, char *dst, uint64_t cap);
+int utf8_to_utf16(const char *src, uint16_t *dst, uint64_t cap_chars);           /* returns UTF-16 units, -1 if it does not fit */
 
 /* Archive format produced by tools/mkinitrd.py:
  *   "SHZARC01", u32 count, u32 reserved; count x { char path[120]; u64 offset; u64 size } ; file data. */

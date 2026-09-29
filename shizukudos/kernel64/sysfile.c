@@ -245,8 +245,7 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         struct basicinfo b;
         if (len < sizeof b) return STATUS_BUFFER_TOO_SMALL;
         memset(&b, 0, sizeof b);
-        if (f->node) { b.create = 132000000000000000ull + f->node->ctime * 10000; b.write = 132000000000000000ull + f->node->mtime * 10000;
-                       b.access = b.write; b.change = b.write; b.attrs = f->node->attrs; }
+        if (f->node) { fs_node_times(f->node, &b.create, &b.write); b.access = b.write; b.change = b.write; b.attrs = f->node->attrs; }
         else b.attrs = FILE_ATTRIBUTE_NORMAL;
         if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
         set_iosb(p, iosb, STATUS_SUCCESS, sizeof b);
@@ -347,14 +346,15 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
     }
 }
 
-struct dirinfo {                                         /* FILE_BOTH_DIR_INFORMATION prefix */
+struct __attribute__((packed)) dirinfo {                 /* FILE_BOTH_DIR_INFORMATION prefix: FileName is at offset 94 */
     uint32_t next_entry, file_index;
     uint64_t create, access, write, change, eof, alloc;
     uint32_t attrs, name_len, ea_size;
     uint8_t short_len, pad;
     uint16_t short_name[12];
-    /* WCHAR FileName[] follows */
+    /* WCHAR FileName[] follows at 94 (the documented Windows offset: sizeof is 96 only because of tail padding) */
 };
+_Static_assert(sizeof(struct dirinfo) == 94, "FILE_BOTH_DIR_INFORMATION FileName offset");
 
 static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb_unused)
 {
@@ -370,21 +370,25 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
     if (!f->node->is_dir) return STATUS_NOT_A_DIRECTORY;
     if (cls != 1 && cls != 3 && cls != 12) return STATUS_INVALID_INFO_CLASS;
     if (restart) f->dir_index = 0;
+    fs_populate(f->node);                                /* disk directory: enumerate on first use */
     for (c = f->node->child; c; c = c->sibling) {
-        uint8_t entry[sizeof(struct dirinfo) + 96 * 2 + 8];
+        uint8_t entry[sizeof(struct dirinfo) + FS_NAME_MAX * 2 + 8];
         struct dirinfo *d = (struct dirinfo *)entry;
         uint16_t *wname = (uint16_t *)(entry + sizeof *d);
         uint32_t nchars = 0, size;
+        int wn;
         if (c->delete_pending) continue;
         if (idx++ < f->dir_index) continue;
+        wn = utf8_to_utf16(c->name, wname, FS_NAME_MAX);
+        nchars = wn < 0 ? 0 : (uint32_t)wn;
         {
-            const char *s = c->name;
-            while (*s && nchars < 95) wname[nchars++] = (uint8_t)*s++;
+            uint64_t create_ft, write_ft;
+            fs_node_times(c, &create_ft, &write_ft);
+            memset(d, 0, sizeof *d);
+            d->file_index = (uint32_t)idx;
+            d->create = create_ft;
+            d->write = d->change = d->access = write_ft;
         }
-        memset(d, 0, sizeof *d);
-        d->file_index = (uint32_t)idx;
-        d->create = 132000000000000000ull + c->ctime * 10000;
-        d->write = d->change = d->access = 132000000000000000ull + c->mtime * 10000;
         d->eof = c->size;
         d->alloc = (c->size + 4095) & ~4095ull;
         d->attrs = c->attrs;

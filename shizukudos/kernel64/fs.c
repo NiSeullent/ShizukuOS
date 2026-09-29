@@ -3,6 +3,7 @@
 
 static fsnode_t root;
 static uint64_t total_bytes;
+static fsnode_t *mounts[26];                    /* drive letters A..Z; C is the RAM root */
 
 fsnode_t *fs_root(void) { return &root; }
 uint64_t fs_total_bytes(void) { return total_bytes; }
@@ -14,9 +15,44 @@ void fs_init(void)
     root.is_dir = 1;
     root.attrs = FILE_ATTRIBUTE_DIRECTORY;
     total_bytes = 0;
+    memset(mounts, 0, sizeof mounts);
+    mounts['C' - 'A'] = &root;
 }
 
 static char fold(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
+
+int fs_mount(char letter, fsnode_t *r)
+{
+    const char l = fold(letter);
+    if (l < 'A' || l > 'Z' || l == 'C' || !r || !r->is_dir || mounts[l - 'A']) return -1;
+    mounts[l - 'A'] = r;
+    return 0;
+}
+
+fsnode_t *fs_root_of(char letter)
+{
+    const char l = fold(letter);
+    return l >= 'A' && l <= 'Z' ? mounts[l - 'A'] : 0;
+}
+
+void fs_populate(fsnode_t *dir)
+{
+    if (dir && dir->is_dir && dir->backing == FSB_DISK && !dir->populated && dir->vol && dir->vol->populate) {
+        dir->populated = 1;                     /* set first: a failed enumeration is not retried on every lookup */
+        dir->vol->populate(dir->vol, dir);
+    }
+}
+
+void fs_node_times(const fsnode_t *n, uint64_t *create_ft, uint64_t *write_ft)
+{
+    if (n->backing == FSB_DISK) {
+        *create_ft = n->ftime_c ? n->ftime_c : n->ftime_m;
+        *write_ft = n->ftime_m;
+    } else {
+        *create_ft = 132000000000000000ull + n->ctime * 10000;
+        *write_ft = 132000000000000000ull + n->mtime * 10000;
+    }
+}
 
 static int name_eq(const char *a, const char *b, size_t n)
 {
@@ -30,24 +66,29 @@ static int name_eq(const char *a, const char *b, size_t n)
 static fsnode_t *child_named(fsnode_t *dir, const char *name, size_t n)
 {
     fsnode_t *c;
+    fs_populate(dir);
     for (c = dir->child; c; c = c->sibling)
         if (!c->delete_pending && strlen(c->name) == n && name_eq(c->name, name, n))
             return c;
     return 0;
 }
 
-/* Splits "C:\a\b" / "\??\C:\a\b" / "\a\b"; returns the component start after the drive. */
-static const char *strip_prefix(const char *p)
+/* Splits "C:\a\b" / "\??\C:\a\b" / "\a\b"; returns the component start after the drive, whose letter (0 when
+ * the path has none: it then means C:) goes to *drive. */
+static const char *strip_prefix(const char *p, char *drive)
 {
+    *drive = 0;
     if (p[0] == '\\' && p[1] == '?' && p[2] == '?' && p[3] == '\\') p += 4;
-    if (p[0] && p[1] == ':') p += 2;
+    if (p[0] && p[1] == ':') { *drive = p[0]; p += 2; }
     return p;
 }
 
 static fsnode_t *resolve(const char *path, int want_parent, char *leaf, size_t leaf_cap)
 {
-    fsnode_t *cur = &root;
-    const char *p = strip_prefix(path);
+    char drive;
+    const char *p = strip_prefix(path, &drive);
+    fsnode_t *cur = drive ? fs_root_of(drive) : &root;
+    if (!cur) return 0;                             /* no volume mounted at that letter */
     while (*p == '\\' || *p == '/') ++p;
     while (*p) {
         const char *s = p;
@@ -82,23 +123,34 @@ static fsnode_t *resolve(const char *path, int want_parent, char *leaf, size_t l
 
 fsnode_t *fs_lookup(const char *path) { return resolve(path, 0, 0, 0); }
 
+fsnode_t *fs_new_child(fsnode_t *dir, const char *name, int is_dir)
+{
+    fsnode_t *n = kzalloc(sizeof *n), **pp;
+    const size_t len = strlen(name);
+    if (!n || len >= FS_NAME_MAX) { kfree(n); return 0; }
+    memcpy(n->name, name, len + 1);
+    n->is_dir = is_dir;
+    n->attrs = is_dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+    n->parent = dir;
+    n->backing = dir->backing;
+    n->vol = dir->vol;
+    n->readonly = dir->backing == FSB_DISK;
+    for (pp = &dir->child; *pp; pp = &(*pp)->sibling) ;   /* append: listings keep creation / on-disk order */
+    *pp = n;
+    n->ctime = n->mtime = ticks_now();
+    return n;
+}
+
 fsnode_t *fs_create(const char *path, int is_dir, int *created)
 {
-    char leaf[96];
+    char leaf[FS_NAME_MAX];
     fsnode_t *dir = resolve(path, 1, leaf, sizeof leaf), *n;
     if (created) *created = 0;
     if (!dir || !dir->is_dir || !leaf[0] || dir->readonly) return 0;
     n = child_named(dir, leaf, strlen(leaf));
     if (n) return n;
-    n = kzalloc(sizeof *n);
+    n = fs_new_child(dir, leaf, is_dir);
     if (!n) return 0;
-    memcpy(n->name, leaf, strlen(leaf) + 1);
-    n->is_dir = is_dir;
-    n->attrs = is_dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
-    n->parent = dir;
-    n->sibling = dir->child;
-    dir->child = n;
-    n->ctime = n->mtime = ticks_now();
     if (created) *created = 1;
     return n;
 }
@@ -106,6 +158,10 @@ fsnode_t *fs_create(const char *path, int is_dir, int *created)
 int fs_read(fsnode_t *n, uint64_t off, void *buf, uint64_t len, uint64_t *done)
 {
     if (n->is_dir) return -1;
+    if (n->backing == FSB_DISK) {
+        if (!n->vol || !n->vol->read) { *done = 0; return -1; }
+        return n->vol->read(n->vol, n, off, buf, len, done);
+    }
     if (off >= n->size) { *done = 0; return 0; }
     if (len > n->size - off) len = n->size - off;
     memcpy(buf, n->data + off, len);
@@ -163,7 +219,7 @@ int fs_truncate(fsnode_t *n, uint64_t size)
 void fs_remove(fsnode_t *n)
 {
     fsnode_t **pp;
-    if (!n->parent) return;
+    if (!n->parent || n->backing == FSB_DISK) return;
     for (pp = &n->parent->child; *pp; pp = &(*pp)->sibling)
         if (*pp == n) { *pp = n->sibling; break; }
     if (n->data && !n->readonly) { total_bytes -= n->cap; kfree(n->data); }
@@ -223,6 +279,36 @@ int utf16_to_utf8(const uint16_t *src, uint64_t chars, char *dst, uint64_t cap)
         else if (c < 0x800) { if (o + 2 >= cap) return -1; dst[o++] = (char)(0xc0 | (c >> 6)); dst[o++] = (char)(0x80 | (c & 63)); }
         else if (c < 0x10000) { if (o + 3 >= cap) return -1; dst[o++] = (char)(0xe0 | (c >> 12)); dst[o++] = (char)(0x80 | ((c >> 6) & 63)); dst[o++] = (char)(0x80 | (c & 63)); }
         else { if (o + 4 >= cap) return -1; dst[o++] = (char)(0xf0 | (c >> 18)); dst[o++] = (char)(0x80 | ((c >> 12) & 63)); dst[o++] = (char)(0x80 | ((c >> 6) & 63)); dst[o++] = (char)(0x80 | (c & 63)); }
+    }
+    dst[o] = 0;
+    return (int)o;
+}
+
+int utf8_to_utf16(const char *src, uint16_t *dst, uint64_t cap_chars)
+{
+    uint64_t o = 0;
+    const uint8_t *s = (const uint8_t *)src;
+    while (*s) {
+        uint32_t c;
+        unsigned extra;
+        if (*s < 0x80) { c = *s++; extra = 0; }
+        else if ((*s & 0xe0) == 0xc0) { c = *s++ & 0x1f; extra = 1; }
+        else if ((*s & 0xf0) == 0xe0) { c = *s++ & 0x0f; extra = 2; }
+        else if ((*s & 0xf8) == 0xf0) { c = *s++ & 0x07; extra = 3; }
+        else { c = '?'; ++s; extra = 0; }
+        while (extra--) {
+            if ((*s & 0xc0) != 0x80) { c = '?'; break; }
+            c = (c << 6) | (*s++ & 0x3f);
+        }
+        if (c >= 0x10000) {
+            if (o + 2 >= cap_chars) return -1;
+            c -= 0x10000;
+            dst[o++] = (uint16_t)(0xd800 + (c >> 10));
+            dst[o++] = (uint16_t)(0xdc00 + (c & 0x3ff));
+        } else {
+            if (o + 1 >= cap_chars) return -1;
+            dst[o++] = (uint16_t)c;
+        }
     }
     dst[o] = 0;
     return (int)o;
