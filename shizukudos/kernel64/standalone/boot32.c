@@ -11,7 +11,7 @@
 #define MAX_RAM (128u << 20)                       /* Kernel32's page allocator limit (mem.c MAX_PAGES) */
 #else
 #define STUB_DOMAIN SHZ_DOM_KERNEL64
-#define MAX_RAM (256u << 20)                       /* Kernel64's page allocator limit (mem.c MAX_PAGES) */
+#define MAX_RAM 0xE0000000u                        /* 3.5 GiB: the most a QEMU pc guest has below 4 GiB; mem.c manages up to 4 GiB */
 #endif
 #define KERNEL_GPA 0x100000u
 #define INITRD_GPA 0x2000000u
@@ -46,8 +46,9 @@ static void zero(uint32_t dst, uint32_t n)
 
 void stub_prepare(uint32_t magic, const struct mbi *mbi)
 {
+    static char cmdline[SHZ_CMDLINE_MAX];          /* stub .bss (above 4 MiB), untouched by the copies below */
     const struct mod *mods;
-    uint32_t ksize, isize = 0, ram, i;
+    uint32_t ksize, isize = 0, ram, i, cmdline_len = 0;
     volatile shz_bootinfo_t *bi = (volatile shz_bootinfo_t *)SHZ_BOOTINFO_GPA;
     volatile uint32_t *pml4 = (volatile uint32_t *)0x1000, *pdpt_lo = (volatile uint32_t *)0x2000,
                       *pd = (volatile uint32_t *)0x3000, *pdpt_hi = (volatile uint32_t *)0x4000;
@@ -58,7 +59,8 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     mods = (const struct mod *)mbi->mods_addr;
     ksize = mods[0].end - mods[0].start;
     if (mbi->mods_count > 1) isize = mods[1].end - mods[1].start;
-    ram = (mbi->mem_upper + 1024u) << 10;          /* bytes of RAM below 4 GiB */
+    /* mem_upper: KiB of contiguous RAM above 1 MiB (below 4 GiB; memory above 4 GiB is not used: no E820 walk here) */
+    ram = mbi->mem_upper >= 0x3FFC00u ? 0xFFF00000u : (mbi->mem_upper + 1024u) << 10;
     ram &= ~0x1fffffu;
     if (ram > MAX_RAM) ram = MAX_RAM;
     if (ram < (64u << 20)) fail("need at least 64 MiB, have ", ram);
@@ -68,6 +70,13 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     }
     if (ksize == 0 || ksize > 0x100000u) fail("kernel image size (file + bss must stay below 3 MiB), ", ksize);
     if (INITRD_GPA + isize > ram) fail("initrd does not fit in RAM, size=", isize);
+    if (mbi->flags & 4) {                          /* Multiboot command line, copied verbatim (QEMU and GRUB put the image
+                                                      path first) before any copy below can overwrite it; unprintable
+                                                      bytes become '?', anything past 255 bytes is dropped */
+        const volatile char *src = (const volatile char *)mbi->cmdline;
+        for (cmdline_len = 0; cmdline_len < SHZ_CMDLINE_MAX - 1 && src[cmdline_len]; ++cmdline_len)
+            cmdline[cmdline_len] = (src[cmdline_len] >= 0x20 && src[cmdline_len] < 0x7f) ? src[cmdline_len] : '?';
+    }
 
     zero(KERNEL_GPA, 0x300000u - KERNEL_GPA);      /* bss of the kernel image reads as zero, as after the Supervisor's memset */
     copy(KERNEL_GPA, mods[0].start, ksize);
@@ -100,8 +109,12 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
         bi->initrd_size = isize;
     }
     bi->tsc_hz = 1000000000u;                      /* nominal; QEMU TCG's TSC runs at 1 GHz. Only logged by Kernel64. */
+    for (i = 0; i < cmdline_len; ++i)              /* ABI 1.1 tail; the framebuffer fields stay zero (no GOP here) */
+        bi->cmdline[i] = cmdline[i];
+    bi->cmdline_size = cmdline_len;
     say("SHZ-STUB: kernel ");  hex(ksize);
     say(" initrd ");           hex(isize);
     say(" ram ");              hex(ram);
+    say(" cmdline ");          hex(bi->cmdline_size);
     say("\n");
 }

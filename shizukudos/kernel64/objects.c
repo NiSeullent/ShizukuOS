@@ -317,6 +317,18 @@ void thread_object_signal(thread_t *t)
     }
 }
 
+/* sched.c reclaims an exited user thread (interrupts off): its object keeps the exit status for GetExitCodeThread and
+ * waits (it is already signalled), and loses the reference the thread held on it since creation. */
+void thread_object_detach(thread_t *t)
+{
+    kobject_t *o = t->object;
+    if (!o) return;
+    o->u.thr.exit_code = t->exit_code;
+    o->u.thr.t = 0;
+    t->object = 0;
+    ob_deref(o);
+}
+
 void ob_register_timer(kobject_t *o)
 {
     if (timer_count < 16) timers_head[timer_count++] = o;

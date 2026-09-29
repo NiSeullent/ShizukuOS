@@ -16,12 +16,13 @@
 /* ---- display ---- */
 typedef struct {
     uint32_t size;                      /* sizeof(shz_display_info_t), filled in by the caller */
-    uint32_t flags;                     /* bit 0: the framebuffer is live */
+    uint32_t flags;                     /* bit 0: the framebuffer is live; SHZ_DISP_FLAG_PARAVIRT */
     uint32_t width, height, bpp, pitch; /* pitch in bytes; pixels are 0x00RRGGBB dwords */
-    uint32_t bga_version;               /* Bochs VBE dispi ID register (0xB0C0..0xB0C5) */
+    uint32_t bga_version;               /* Bochs VBE dispi ID register (0xB0C0..0xB0C5); 0 on virtio-gpu */
     uint32_t desktop_rgb;               /* solid desktop colour drawn where no window covers the screen (0x00RRGGBB) */
-    uint64_t lfb_pa;                    /* guest-physical address of the linear framebuffer (BAR 0) */
+    uint64_t lfb_pa;                    /* guest-physical address of the linear framebuffer (BAR 0); 0 on virtio-gpu */
 } shz_display_info_t;
+#define SHZ_DISP_FLAG_PARAVIRT 2u       /* virtio-gpu: host-side scanout resource, no linear framebuffer (see shzgpu.h) */
 #define SHZ_DISP_QUERY 0                /* initialise the display on first use, return the info */
 #define SHZ_DISP_TESTPATTERN 1          /* draw the kernel test pattern (see gfx_fb.c) and present it, bypassing the compositor */
 #define SHZ_DISP_RECOMPOSE 2            /* redraw the whole screen from the window tree (undoes the test pattern) */

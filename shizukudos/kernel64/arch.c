@@ -35,6 +35,7 @@ static void (*irq_handlers[256])(struct regs *);
 /* Device interrupt handlers (standalone profile: legacy PIC vectors 0x20..0x2f). The handler runs with interrupts off in
  * the interrupted thread's context; the PIC EOI is sent after it returns, so it must not schedule away. */
 void irq_register(unsigned vector, void (*handler)(struct regs *)) { if (vector < 256) irq_handlers[vector] = handler; }
+irq_handler_t irq_handler_get(unsigned vector) { return vector < 256 ? irq_handlers[vector] : 0; }
 
 void tss_set_rsp0(uint64_t rsp0) { tss.rsp[0] = rsp0; }
 uint64_t arch_timer_irqs(void) { return timer_irqs; }
@@ -131,6 +132,11 @@ void isr_dispatch(struct regs *r)
     }
     if (r->vector == 14) {
         const uint64_t addr = read_cr2();
+        if (!(r->cs & 3) && addr >= KWIN_BASE && addr < KWIN_BASE + KWIN_SIZE && !(r->error & 1)) {
+            extern int kwin_fault(uint64_t addr);       /* kernel file view page (kwin.c) */
+            if (kwin_fault(addr))
+                return;
+        }
         if (!(r->cs & 3) && addr >= demand_lo && addr < demand_hi && !(r->error & 1)) {
             const uint64_t pa = pmm_alloc();
             KASSERT(pa);

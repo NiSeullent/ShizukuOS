@@ -156,7 +156,7 @@ static uintptr_t STDCALL mock_GetProcAddress(uintptr_t module, const char *name)
     static const char *const inventory[] = {
         "Sleep", "GetTickCount", "GetModuleHandleA", "SetLastError", "GetLastError",
         "GetModuleFileNameA", "CreateFileA", "ReadFile", "CloseHandle",
-        "GetEnvironmentVariableA", "OutputDebugStringA", "CompareStringW" };
+        "GetEnvironmentVariableA", "OutputDebugStringA", "DeviceIoControl", "CompareStringW" };
     uint32_t i;
     ++native_calls;
     native_last_module = module;
@@ -272,6 +272,16 @@ static void build_kex_image(void)
     put16(kex_image + 0x84, 0x14c);                 /* i386 */
     put16(kex_image + 0x80 + 24, 0x10b);            /* PE32 */
     put32(kex_image + 0x80 + 24 + 56, 0x2000);      /* SizeOfImage: whole buffer */
+}
+
+/* The WIN64 subsystem client's VxD transport. This harness never calls those exports (w64_harness.c does,
+ * against the VxD bridge and the Kernel64 model); reaching this mock here is a failure. */
+static uint32_t STDCALL mock_DeviceIoControl(uintptr_t device, uint32_t code, void *input, uint32_t input_bytes,
+    void *output, uint32_t output_bytes, uint32_t *returned, void *overlapped)
+{
+    (void)device; (void)code; (void)input; (void)input_bytes; (void)output; (void)output_bytes;
+    (void)returned; (void)overlapped;
+    fail("unexpected DeviceIoControl", __LINE__);
 }
 
 static void patch_imports(void)

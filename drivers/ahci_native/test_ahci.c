@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only -- original asynchronous HBA model. */
+/* SPDX-License-Identifier: GPL-2.0-only -- original asynchronous HBA model (read, write, flush). */
 #include "ahci.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +19,9 @@ struct model {
     unsigned cpu_sync,device_sync,opcode;
     uint32_t selected_base;
     uint32_t cold_signature,delivered_signature;
+    /* media written through WRITE DMA EXT (reads of these LBAs return the stored bytes) */
+    uint64_t written_lba[8]; uint8_t written[8][512]; unsigned nwritten,writes_done,flushes;
+    uint8_t pending_data[512];
 };
 static uint32_t u32(const uint8_t *p)
 { return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
@@ -30,13 +33,25 @@ static int failed(struct model *m)
 { return ++m->calls==m->fault; }
 static uint8_t pattern(uint64_t lba,unsigned i)
 { return (uint8_t)(lba^(lba>>16)^(lba>>32)^(i*13u)); }
+static int stored(const struct model *m,uint64_t lba)
+{ unsigned i; for(i=0;i<m->nwritten;++i) if(m->written_lba[i]==lba) return (int)i; return -1; }
 static void finish_command(struct model *m)
 {
-    unsigned i; uint32_t base=m->selected_base;
+    unsigned i; uint32_t base=m->selected_base; int k;
     CHECK(m->allocation && m->pending);
     if(m->opcode==0xec) memcpy(m->allocation+2048,m->identify,512);
+    else if(m->opcode==0x35) {
+        /* The device consumes the DMA data when the command completes successfully. */
+        if(!m->late_error && !m->short_transfer && !m->unplug) {
+            k=stored(m,m->lba);
+            if(k<0) { CHECK(m->nwritten<8); k=(int)m->nwritten++; m->written_lba[k]=m->lba; }
+            memcpy(m->written[k],m->pending_data,512); ++m->writes_done;
+        }
+    } else if(m->opcode==0xea) {
+        if(!m->late_error && !m->unplug) ++m->flushes;
+    } else if((k=stored(m,m->lba))>=0) memcpy(m->allocation+2048,m->written[k],512);
     else for(i=0;i<512;++i)m->allocation[2048+i]=pattern(m->lba,i);
-    w32(m->allocation+4,m->short_transfer?256:512);
+    w32(m->allocation+4,m->opcode==0xea?(m->short_transfer?512u:0u):m->short_transfer?256:512);
     m->regs[(base+CI)/4]=0;
     m->regs[(base+TFD)/4]=0x50;
     if(m->late_error==1) { m->regs[(base+PIS)/4]|=1u<<30; m->regs[(base+TFD)/4]=0x51; }
@@ -72,18 +87,27 @@ static void issue_command(struct model *m,uint32_t value)
     CHECK(m->regs[(base+CLB)/4]==(uint32_t)m->bus && m->regs[(base+CLBU)/4]==(uint32_t)(m->bus>>32));
     CHECK(m->regs[(base+FB)/4]==(uint32_t)(m->bus+1024));
     CHECK(m->regs[(base+FBU)/4]==(uint32_t)((m->bus+1024)>>32));
-    CHECK(u32(header)==0x10005 && u32(header+4)==0);
+    CHECK(table[0]==0x27 && table[1]==0x80 &&
+          (table[2]==0xec || table[2]==0x25 || table[2]==0x35 || table[2]==0xea));
+    /* DW0: CFL 5, W (bit 6) only for the host-to-device write, one PRDT except for the non-data flush */
+    CHECK(u32(header)==(table[2]==0xea?0x5u:table[2]==0x35?0x10045u:0x10005u) && u32(header+4)==0);
     table_bus=(uint64_t)u32(header+8)|((uint64_t)u32(header+12)<<32);
-    data_bus=(uint64_t)u32(table+128)|((uint64_t)u32(table+132)<<32);
-    CHECK(table_bus==m->bus+1280 && data_bus==m->bus+2048);
-    CHECK(u32(table+136)==0 && u32(table+140)==511);
-    CHECK(table[0]==0x27 && table[1]==0x80 && (table[2]==0xec || table[2]==0x25));
+    CHECK(table_bus==m->bus+1280);
+    if(table[2]!=0xea) {
+        data_bus=(uint64_t)u32(table+128)|((uint64_t)u32(table+132)<<32);
+        CHECK(data_bus==m->bus+2048);
+        CHECK(u32(table+136)==0 && u32(table+140)==511);
+    } else {
+        for(i=128;i<144;++i) CHECK(table[i]==0);
+    }
     CHECK(m->device_sync>=3);
     m->opcode=table[2]; m->lba=0;
     for(i=0;i<3;++i) m->lba|=(uint64_t)table[4+i]<<(i*8);
     for(i=0;i<3;++i) m->lba|=(uint64_t)table[8+i]<<((i+3)*8);
-    if(m->opcode==0x25) CHECK(table[7]==0x40 && table[12]==1 && table[13]==0);
+    if(m->opcode==0x25 || m->opcode==0x35) CHECK(table[7]==0x40 && table[12]==1 && table[13]==0);
+    else if(m->opcode==0xea) CHECK(m->lba==0 && table[7]==0x40 && table[12]==0 && table[13]==0);
     else CHECK(m->lba==0 && table[7]==0 && table[12]==0);
+    if(m->opcode==0x35) memcpy(m->pending_data,header+2048,512);   /* what the HBA fetches over DMA */
     m->pending=1;++m->commands;m->cpu_sync=m->device_sync=0;
 }
 static int write32(void *opaque,uint32_t offset,uint32_t value)
@@ -155,7 +179,7 @@ static struct ahci_ops callbacks(struct model *m)
 }
 static struct ahci_config config(void)
 {
-    const struct ahci_config cfg={0x010601,6,0x1000,AHCI_AUTO_PORT,1000000,1};return cfg;
+    const struct ahci_config cfg={0x010601,6,0x1000,AHCI_AUTO_PORT,1000000,1,0};return cfg;
 }
 static void reset(struct model *m)
 {
@@ -363,9 +387,99 @@ static void qemu_identify_contract(void)
     w16(m.identify+152,0);CHECK(ahci_parse_identify(m.identify,&id)==0);
     w16(m.identify+152,0xffff);CHECK(ahci_parse_identify(m.identify,&id)==0);
 }
+static struct ahci_config config_rw(void)
+{
+    struct ahci_config cfg=config();cfg.allow_write=1;return cfg;
+}
+static void write_read_flush(void)
+{
+    struct model m;struct ahci_device a={0};struct ahci_ops ops;struct ahci_config cfg=config_rw();
+    uint8_t in[512],copy_in[512],out[512];unsigned i,calls;
+    const uint64_t lba=UINT64_C(0x123400000777);
+    reset(&m);w16(m.identify+166,0x6400);ops=callbacks(&m);
+    CHECK(ahci_open(&a,&ops,&cfg)==AHCI_OK && a.writable==1 && (a.identity.features&AHCI_FEATURE_FLUSH_EXT));
+    for(i=0;i<512;++i) in[i]=(uint8_t)(i*7u+3u);
+    memcpy(copy_in,in,512);
+    CHECK(ahci_read_sector(&a,lba,out,512)==AHCI_OK && out[5]==pattern(lba,5));
+    CHECK(ahci_write_sector(&a,lba,in,512)==AHCI_OK);
+    CHECK(!memcmp(in,copy_in,512) && m.writes_done==1 && m.nwritten==1 && m.written_lba[0]==lba);
+    CHECK(!memcmp(m.written[0],in,512));
+    memset(out,0,512);
+    CHECK(ahci_read_sector(&a,lba,out,512)==AHCI_OK && !memcmp(out,in,512));
+    CHECK(ahci_read_sector(&a,lba+1,out,512)==AHCI_OK && out[9]==pattern(lba+1,9));
+    CHECK(ahci_flush(&a)==AHCI_OK && m.flushes==1);
+    CHECK(ahci_write_sector(&a,a.identity.sectors-1,in,512)==AHCI_OK && m.nwritten==2);
+    calls=m.calls;
+    CHECK(ahci_write_sector(&a,a.identity.sectors,in,512)==AHCI_INVALID);
+    CHECK(ahci_write_sector(&a,UINT64_MAX,in,512)==AHCI_INVALID);
+    CHECK(ahci_write_sector(&a,0,in,511)==AHCI_INVALID);
+    CHECK(ahci_write_sector(&a,0,in,513)==AHCI_INVALID);
+    CHECK(ahci_write_sector(&a,0,NULL,512)==AHCI_INVALID);
+    CHECK(ahci_write_sector(&a,0,(uint8_t *)a.dma.cpu+2048,512)==AHCI_INVALID);
+    CHECK(ahci_write_sector(&a,0,&a,512)==AHCI_INVALID && m.calls==calls);
+    CHECK(ahci_close(&a)==AHCI_OK);no_leaks(&m);
+    CHECK(ahci_write_sector(&a,0,in,512)==AHCI_INVALID && ahci_flush(&a)==AHCI_INVALID);
+    /* read-only open: writes and flushes are refused without touching the device */
+    reset(&m);memset(&a,0,sizeof(a));w16(m.identify+166,0x6400);ops=callbacks(&m);cfg=config();
+    CHECK(ahci_open(&a,&ops,&cfg)==AHCI_OK && a.writable==0);calls=m.calls;
+    CHECK(ahci_write_sector(&a,1,in,512)==AHCI_UNSUPPORTED && ahci_flush(&a)==AHCI_UNSUPPORTED);
+    CHECK(m.calls==calls && m.commands==1 && a.state==AHCI_READY);
+    CHECK(ahci_close(&a)==AHCI_OK);no_leaks(&m);
+    /* no FLUSH CACHE EXT in IDENTIFY: refused before any command */
+    reset(&m);memset(&a,0,sizeof(a));ops=callbacks(&m);cfg=config_rw();
+    CHECK(ahci_open(&a,&ops,&cfg)==AHCI_OK && !(a.identity.features&AHCI_FEATURE_FLUSH_EXT));calls=m.calls;
+    CHECK(ahci_flush(&a)==AHCI_UNSUPPORTED && m.calls==calls && a.state==AHCI_READY);
+    CHECK(ahci_write_sector(&a,2,in,512)==AHCI_OK && m.writes_done==1);
+    CHECK(ahci_close(&a)==AHCI_OK);no_leaks(&m);
+    /* allow_write must be 0 or 1 */
+    reset(&m);memset(&a,0,sizeof(a));ops=callbacks(&m);cfg=config();cfg.allow_write=2;
+    CHECK(ahci_open(&a,&ops,&cfg)==AHCI_INVALID && !m.calls);
+}
+static void write_callback_failures(void)
+{
+    struct model m;struct ahci_device a={0};struct ahci_ops ops;struct ahci_config cfg=config_rw();
+    unsigned total,which;uint8_t in[512];int result;
+    memset(in,0x5a,sizeof(in));
+    reset(&m);w16(m.identify+166,0x6400);ops=callbacks(&m);CHECK(ahci_open(&a,&ops,&cfg)==0);
+    CHECK(ahci_write_sector(&a,9,in,512)==0);CHECK(ahci_flush(&a)==0);CHECK(ahci_close(&a)==0);total=m.calls;no_leaks(&m);
+    for(which=1;which<=total;++which) {
+        memset(&a,0,sizeof(a));reset(&m);w16(m.identify+166,0x6400);m.fault=which;ops=callbacks(&m);
+        result=ahci_open(&a,&ops,&cfg);
+        if(!result) result=ahci_write_sector(&a,9,in,512);
+        if(!result) result=ahci_flush(&a);
+        if(!result) result=ahci_close(&a);
+        CHECK(result!=AHCI_OK);
+        if(a.state==AHCI_RETAINED) { CHECK(m.allocation);CHECK(ahci_close(&a)==AHCI_OK); }
+        no_leaks(&m);
+    }
+    printf("Write path: fault injected after each of %u MMIO/allocation/sync operations\n",total);
+}
+static void write_command_errors(void)
+{
+    struct model m;struct ahci_device a;struct ahci_ops ops;struct ahci_config cfg=config_rw();
+    uint8_t in[512];unsigned mode,op;int result;
+    memset(in,0x3c,sizeof(in));
+    for(op=0;op<2;++op) for(mode=0;mode<8;++mode) {
+        memset(&a,0,sizeof(a));reset(&m);w16(m.identify+166,0x6400);ops=callbacks(&m);CHECK(ahci_open(&a,&ops,&cfg)==0);
+        if(mode==0)m.late_error=1;
+        if(mode==1)m.short_transfer=1;
+        if(mode==2)m.unplug=1;
+        if(mode>=3 && mode<6)m.never_complete=1;
+        if(mode==4)m.freeze_time=1;
+        if(mode==5){m.reverse_time=1;m.clock=100;}
+        if(mode==6)m.late_error=2;
+        if(mode==7)m.late_error=3;
+        result=op?ahci_flush(&a):ahci_write_sector(&a,4,in,512);
+        CHECK(result==((mode<2 || mode>=6)?AHCI_DEVICE_ERROR:mode==2?AHCI_NO_DEVICE:mode==5?AHCI_CLOCK:AHCI_TIMEOUT));
+        CHECK(a.state==AHCI_CLOSED);
+        if(op==0 && mode>=3 && mode<6) CHECK(m.nwritten==0);
+        no_leaks(&m);
+    }
+}
 int main(void)
 {
     success_and_bounds();callback_failures();command_errors();capability_and_dma_errors();identify_errors();
+    write_read_flush();write_callback_failures();write_command_errors();
     sparse_ports_and_initial_state();
     cold_signature_and_fbs();
     qemu_identify_contract();

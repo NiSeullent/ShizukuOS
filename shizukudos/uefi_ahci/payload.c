@@ -97,7 +97,7 @@ static int storage_test(void)
 {
     const struct ahci_ops ops = {0, mmio_read, mmio_write, dma_allocate,
         dma_release, dma_sync, now_us, relax_cpu};
-    struct ahci_config config = {0x010601, 0, 4096, AHCI_AUTO_PORT, 1000000, 1};
+    struct ahci_config config = {0x010601, 0, 4096, AHCI_AUTO_PORT, 1000000, 1, 0};   /* read-only: allow_write = 0 */
     uint8_t sector[512];
     const uint32_t lbas[2] = {7, 11};
     uint32_t bdf, original = 0, bar, i, n;
