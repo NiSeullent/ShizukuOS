@@ -6,7 +6,7 @@
  * (CO_E_CLASSSTRING otherwise); a string that does not start with '{' is a ProgID, which needs the registry: there is no
  * registry here, so it fails with CO_E_CLASSSTRING (what a ProgID that is not registered gets). IIDFromString accepts
  * only the braced form (CO_E_IIDSTRING otherwise) and maps NULL to IID_NULL.
- * CoCreateGuid is UuidCreate (RFC 4122 version 4, RDRAND); it fails without hardware entropy instead of faking it.
+ * CoCreateGuid is UuidCreate (RFC 4122 version 4, bits from the kernel RNG).
  */
 #include "ole32_int.h"
 

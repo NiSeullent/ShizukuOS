@@ -100,6 +100,8 @@ void isr_dispatch(struct regs *r)
 {
     if (r->vector < 32)
         ++exception_count[r->vector];
+    else
+        krandom_irq(r->vector, r->rip);            /* interrupt arrival times feed the entropy pool */
     switch (r->vector) {
     case VEC_TIMER:
         ++timer_irqs;

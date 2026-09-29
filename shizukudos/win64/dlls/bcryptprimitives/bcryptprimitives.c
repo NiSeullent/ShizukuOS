@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * bcryptprimitives.dll - only ProcessPrng, the entry point the Rust standard library and Chromium's base use to
- * obtain random bytes. Backed by the CPU's RDRAND instruction (shz_rand.h). Real Windows always returns TRUE; this
- * system has no other entropy source, so without RDRAND it zeroes the buffer and returns FALSE rather than pretend.
+ * obtain random bytes, from the kernel RNG (shz_rand.h -> NtShzRandom). Like Windows it returns TRUE; only a buffer the
+ * kernel cannot write makes it zero what it can and return FALSE.
  */
 #include "nt.h"
 #include "shz_rand.h"

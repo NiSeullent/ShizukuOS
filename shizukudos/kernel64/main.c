@@ -40,6 +40,7 @@ void kmain(uint64_t bootinfo_pa)
     bootinfo.cmdline[SHZ_CMDLINE_MAX - 1] = 0;
     arch_init();
     mem_init(&bootinfo);
+    krandom_init(&bootinfo, sizeof bootinfo);       /* before anything that needs random bytes (ASLR, user RNG) */
     kprintf("%s: Long Mode kernel starting, %u MiB RAM, rip above 4 GiB, tsc %u kHz\n", KVER,
             (uint32_t)(bootinfo.ram_size >> 20), (uint32_t)(bootinfo.tsc_hz / 1000));
     kprintf("%s: boot info ABI %u.%u, %u bytes%s\n", KVER, bootinfo.abi_major, bootinfo.abi_minor, bootinfo.size,

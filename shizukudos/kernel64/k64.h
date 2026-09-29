@@ -84,6 +84,10 @@ uint64_t pmm_alloc(void);                       /* zeroed physical page, 0 on ex
 void pmm_free(uint64_t pa);
 uint64_t pmm_free_count(void);
 uint64_t pmm_total_count(void);                 /* pages the page allocator manages */
+/* krandom.c: entropy pool + ChaCha20 CSPRNG (seeded at boot, fed by every interrupt) */
+void krandom_init(const void *boot_data, size_t boot_len);
+void krandom_irq(uint64_t vector, uint64_t rip);
+void krandom_get(void *buf, size_t n);
 #define PT_P (1ull << 0)
 #define PT_W (1ull << 1)
 #define PT_U (1ull << 2)
