@@ -42,8 +42,11 @@
  *             frees classes of processes that are gone. Blocking waits also poll process termination every 50 ms so a
  *             process killed from outside cannot leave a thread asleep forever.
  *
- *  Not implemented: input devices (no keyboard/mouse), menus, layered/transparent windows, regions as window shapes,
- *  multiple monitors, cross-process messages, WM_NCCALCSIZE customisation (client size follows shz_nc_insets()).
+ *  Input.     PS/2 keyboard and mouse (gfx_input.c) are routed as input messages to the focus window / the window under
+ *             the pointer (or the capture window); the compositor draws the pointer sprite last.
+ *
+ *  Not implemented: menus, layered/transparent windows, regions as window shapes, multiple monitors, cross-process
+ *  SendMessage, WM_NCCALCSIZE customisation (client size follows shz_nc_insets()).
  */
 #include "gfx.h"
 
@@ -285,6 +288,7 @@ void wm_damage(const shz_rect_t *r0)
     for (w = DESKTOP->child; w && w->next; w = w->next) { }
     for (; w; w = w->prev)
         compose_win(w, w->x, w->y, &r);
+    gin_draw_pointer(&r);
     gfx_fb_present(r.left, r.top, r.right - r.left, r.bottom - r.top);
 }
 
@@ -720,7 +724,7 @@ static int32_t sys_destroywindow(process_t *cur, uint64_t hwnd)
     w = wm_lookup(hwnd);
     if (!w) st = STATUS_INVALID_HANDLE;
     else if (!wm_owner_ok(cur, w)) st = STATUS_ACCESS_DENIED;
-    else { wm_destroy_tree(w); wm_fix_activation(); }
+    else { wm_destroy_tree(w); wm_fix_activation(); gin_windows_changed(); }
     mutex_unlock(&gfx_lock);
     return st;
 }
@@ -1006,6 +1010,7 @@ static int32_t sys_showwindow(process_t *cur, uint64_t arg)
     if (wm_is_visible(w) && wm_screen_rect(w, &after)) { if (before.right > before.left) rc_union(&after, &before); wm_damage(&after); }
     else if (before.right > before.left) wm_damage(&before);
     if (!wm_is_visible(w)) wm_fix_activation();
+    gin_windows_changed();
 done:
     mutex_unlock(&gfx_lock);
     if (!st && copy_to_user(cur, arg, &s, sizeof s)) return STATUS_ACCESS_VIOLATION;
@@ -1070,6 +1075,7 @@ static int32_t sys_setwindowpos(process_t *cur, uint64_t arg)
     if (wm_is_visible(w) && wm_screen_rect(w, &after)) { if (was_vis) rc_union(&after, &before); wm_damage(&after); }
     else if (was_vis) wm_damage(&before);
     if (!wm_is_visible(w)) wm_fix_activation();
+    gin_windows_changed();
 done:
     mutex_unlock(&gfx_lock);
     if (!st && copy_to_user(cur, arg, &p, sizeof p)) return STATUS_ACCESS_VIOLATION;
@@ -1188,6 +1194,30 @@ static gwin_t *hit_test(gwin_t *parent, int ox, int oy, int x, int y)
     }
     return 0;
 }
+
+/* The window that gets mouse input at a screen point: like hit_test, but disabled child windows are skipped (the point
+ * belongs to what is below them, as on Windows) and WS_EX_LAYERED|WS_EX_TRANSPARENT windows are click-through. */
+#define WS_EX_TRANSPARENT_ 0x00000020u
+#define WS_EX_LAYERED_ 0x00080000u
+static gwin_t *input_hit(gwin_t *parent, int ox, int oy, int x, int y)
+{
+    gwin_t *c;
+    for (c = parent->child; c; c = c->next) {
+        const int cx = ox + c->x, cy = oy + c->y;
+        gwin_t *r;
+        if (c->msgonly || !(c->style & SHZ_WS_VISIBLE) || (c->style & SHZ_WS_MINIMIZE)) continue;
+        if ((c->exstyle & (WS_EX_TRANSPARENT_ | WS_EX_LAYERED_)) == (WS_EX_TRANSPARENT_ | WS_EX_LAYERED_)) continue;
+        if (parent != DESKTOP && (c->style & SHZ_WS_DISABLED)) continue;
+        if (x < cx || y < cy || x >= cx + c->w || y >= cy + c->h) continue;
+        if (x >= cx + c->ncl && y >= cy + c->nct && x < cx + c->ncl + client_w(c) && y < cy + c->nct + client_h(c) &&
+            (r = input_hit(c, cx + c->ncl, cy + c->nct, x, y)))
+            return r;
+        return c;
+    }
+    return 0;
+}
+
+gwin_t *wm_input_hit(int x, int y) { return input_hit(DESKTOP, 0, 0, x, y); }
 
 static int32_t sys_hittest(process_t *cur, int64_t x, int64_t y, uint64_t out)
 {
@@ -1316,6 +1346,7 @@ static void gfxd_main(void *arg)
         thread_sleep_ms(20);
         mutex_lock(&gfx_lock);
         gq_reap_dead();
+        gin_tick();
         for (i = 0; i < GFX_MAX_CLASSES; ++i) {
             gclass_t *c = &g_cls[i];
             process_t *p;
@@ -1326,6 +1357,7 @@ static void gfxd_main(void *arg)
             memset(c, 0, sizeof *c);
         }
         wm_fix_activation();
+        gin_windows_changed();
         mutex_unlock(&gfx_lock);
     }
 }
@@ -1349,7 +1381,7 @@ static int32_t wm_init(void)
         d->h = (int32_t)g_fb.height;
         win_gen = 1;
         if (!thread_create("gfxd", gfxd_main, 0)) st = STATUS_NO_MEMORY;
-        else wm_ready = 1;
+        else { gin_init(); wm_ready = 1; }
     }
     mutex_unlock(&wm_init_lock);
     return st;
@@ -1383,6 +1415,7 @@ int32_t sys_ext_graphics(process_t *cur, struct regs *r, uint32_t num, uint64_t 
     case SYS_NtUserHitTest: return sys_hittest(cur, (int64_t)a1, (int64_t)a2, a3);
     case SYS_NtUserAtom: return sys_atom(cur, a1);
     case SYS_NtUserProp: return sys_prop(cur, a1);
+    case SYS_NtUserInput: return gfx_syscall_input(cur, a1);
     case SYS_NtUserPostMessage: case SYS_NtUserSendMessage: case SYS_NtUserGetMessage: case SYS_NtUserReplyMessage:
     case SYS_NtUserThreadOp: case SYS_NtUserTimer: case SYS_NtUserInvalidate: case SYS_NtUserPaint:
         return gfx_syscall_msg(cur, num, a1, a2, a3, a4);

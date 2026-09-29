@@ -135,6 +135,15 @@ struct gqueue {
     gtimer_t timers[GFX_MAX_TIMERS];
     uint64_t next_timer_id;
     uint64_t focus, active, capture;
+    gmsg_t *in_head, *in_tail;                      /* keyboard/mouse input routed to this thread (gfx_input.c), after posted ones */
+    uint32_t nin;
+    uint8_t keys[256];                              /* GetKeyState: updated as input messages are removed from the queue */
+    int cursor;                                     /* index in the pointer image cache (gfx_input.c), -1 = no cursor (SetCursor(NULL)) */
+    int cursor_hidden;                              /* ShowCursor count below zero */
+    uint64_t track_hwnd;                            /* TrackMouseEvent */
+    uint32_t track_flags, hover_ms;
+    int32_t hover_x, hover_y;
+    uint64_t hover_since;
     volatile int in_wait;                           /* blocked inside a GUI wait: only then may thread_wake() be used */
     kobject_t *event;                               /* NtUserThreadOp(QUEUEEVENT): signalled while the queue has something to retrieve */
     uint32_t event_handle;                          /* its handle in the owning process (0 if never handed out) */
@@ -190,4 +199,20 @@ int32_t gfx_syscall_msg(process_t *cur, uint32_t num, uint64_t a1, uint64_t a2, 
 int32_t gq_invalidate(gwin_t *w, const shz_rect_t *rects, uint32_t n, uint32_t flags);
 uint32_t gq_time(void);
 uint64_t gfx_pending_sends(void);
+int32_t gq_post_input(gqueue_t *q, const shz_msg_t *m, int coalesce);   /* lock held: append (or merge a mouse move) */
+
+/* gfx_input.c: PS/2 keyboard and mouse (i8042), system input state, routing to queues, the pointer sprite */
+#define GFX_MAX_INPUT 256                           /* unretrieved input messages per queue; more are dropped, as on Windows */
+void gin_init(void);                                /* wm_init: probe the i8042, start the input thread (standalone profile only) */
+void gin_queue_init(gqueue_t *q);                   /* lock held: a new queue starts with the system key state */
+void gin_message_removed(gqueue_t *q, const shz_msg_t *m);   /* lock held: keep q->keys in step with retrieved input */
+void gin_draw_pointer(const shz_rect_t *clip);      /* compositor: the pointer sprite over the composed back buffer */
+void gin_windows_changed(void);                     /* lock held: the window under the pointer may have changed */
+void gin_tick(void);                                /* gfxd, lock held: mouse-hover tracking */
+int32_t gfx_syscall_input(process_t *cur, uint64_t arg);
+void gin_queue_gone(gqueue_t *q);                   /* lock held: the queue's thread is gone (hot keys) */
+void gin_window_gone(uint64_t hwnd);                /* lock held: hot keys registered for the window */
+int32_t gq_post(gqueue_t *q, uint64_t hwnd, uint32_t message, uint64_t wparam, int64_t lparam);   /* lock held: PostMessage */
+extern int32_t g_ptr_x, g_ptr_y;
+gwin_t *wm_input_hit(int x, int y);                 /* gfx_wm.c: window that receives mouse input at a screen point */
 #endif

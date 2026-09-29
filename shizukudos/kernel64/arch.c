@@ -109,6 +109,13 @@ void isr_dispatch(struct regs *r)
         return;
     case VEC_DOORBELL: {
         extern void ipc64_doorbell_irq(void);
+#ifdef SHZ_STANDALONE
+        if (irq_handlers[r->vector]) {      /* standalone: 0x21 = PIC base + 1 is IRQ 1 (the i8042 keyboard), no doorbell exists */
+            irq_handlers[r->vector](r);
+            standalone_eoi_irq(r->vector);
+            return;
+        }
+#endif
         ipc64_doorbell_irq();
         return;
     }

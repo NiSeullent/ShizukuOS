@@ -14,6 +14,7 @@
  * records the thread's current cursor. */
 #include "user32_int.h"
 #include "../../../supervisor/src/font8x8_basic.h"
+#include "shzpointer.h"
 
 BOOL WINAPI ShzGdiDrawArgb(HDC hdc, int x, int y, int w, int h, const uint32_t *argb, int sw, int sh, int mode);
 
@@ -89,10 +90,7 @@ static void icon_app(uint32_t *a)
     for (x = 6; x < 20; ++x) px(a, x, 16, 0xff808080u);
 }
 
-static const char *const arrow[19] = {
-    "X           ", "XX          ", "X.X         ", "X..X        ", "X...X       ", "X....X      ", "X.....X     ", "X......X    ",
-    "X.......X   ", "X........X  ", "X.....XXXXX ", "X..X..X     ", "X.X X..X    ", "XX  X..X    ", "X    X..X   ", "     X..X   ",
-    "      X..X  ", "      X..X  ", "       XX   " };
+#define arrow shz_arrow_art
 
 static void from_art(uint32_t *a, const char *const *art, int rows, int ox, int oy)
 {
@@ -471,7 +469,27 @@ DLLAPI BOOL WINAPI DrawIconEx(HDC hdc, int x, int y, HICON h, int cx, int cy, UI
 DLLAPI BOOL WINAPI DrawIcon(HDC hdc, int x, int y, HICON h) { return DrawIconEx(hdc, x, y, h, 0, 0, 0, 0, DI_NORMAL | DI_DEFAULTSIZE); }
 
 /* ---------------------------------------------------------------- the thread's cursor (per thread, as the per-queue state
- * of Windows; nothing draws it yet) */
+ * of Windows). The kernel draws it while the pointer is over a window of this thread (user32_input.c pushes it). */
+int u32_icon_argb32(HICON h, uint32_t *out, int *w, int *hh, int *hx, int *hy)
+{
+    uicon_t *ic;
+    int x, y, ow, oh;
+    icon_lock();
+    ic = icon_of(h);
+    if (!ic) { icon_unlock(); return 0; }
+    ow = ic->w > 32 ? 32 : ic->w;
+    oh = ic->h > 32 ? 32 : ic->h;
+    for (y = 0; y < oh; ++y)
+        for (x = 0; x < ow; ++x)
+            out[y * ow + x] = ic->argb[(size_t)(y * ic->h / oh) * (size_t)ic->w + (size_t)(x * ic->w / ow)];
+    *w = ow;
+    *hh = oh;
+    *hx = ic->hot_x * ow / ic->w;
+    *hy = ic->hot_y * oh / ic->h;
+    icon_unlock();
+    return 1;
+}
+
 DLLAPI HCURSOR WINAPI SetCursor(HCURSOR h)
 {
     u32_thread_t *t = u32_ts();
@@ -480,14 +498,10 @@ DLLAPI HCURSOR WINAPI SetCursor(HCURSOR h)
     if (!t) return 0;
     old = t->cursor;
     t->cursor = h;
+    if (old != h || !t->cursor_init) u32_cursor_push();
     return old;
 }
 
 DLLAPI HCURSOR WINAPI GetCursor(void) { u32_thread_t *t = u32_ts(); return t ? t->cursor : 0; }
 
-DLLAPI int WINAPI ShowCursor(BOOL show)
-{
-    u32_thread_t *t = u32_ts();
-    if (!t) return 0;
-    return show ? ++t->cursor_count : --t->cursor_count;
-}
+DLLAPI int WINAPI ShowCursor(BOOL show) { return u32_cursor_count(show ? 1 : -1); }

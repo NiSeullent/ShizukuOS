@@ -44,7 +44,8 @@
     X(NtUserWindowQuery, 0x64) X(NtUserWindowSet, 0x65) X(NtUserShowWindow, 0x66) X(NtUserSetWindowPos, 0x67) \
     X(NtUserPostMessage, 0x68) X(NtUserSendMessage, 0x69) X(NtUserGetMessage, 0x6a) X(NtUserReplyMessage, 0x6b) \
     X(NtUserThreadOp, 0x6c) X(NtUserTimer, 0x6d) X(NtUserInvalidate, 0x6e) X(NtUserPaint, 0x6f) X(NtGdiPresent, 0x70) \
-    X(NtUserFocusOp, 0x71) X(NtUserEnumWindows, 0x72) X(NtUserHitTest, 0x73) X(NtUserAtom, 0x74) X(NtUserProp, 0x75)
+    X(NtUserFocusOp, 0x71) X(NtUserEnumWindows, 0x72) X(NtUserHitTest, 0x73) X(NtUserAtom, 0x74) X(NtUserProp, 0x75) \
+    X(NtUserInput, 0x76)
 
 #define SYSCALL_LIST_NET(X) \
     X(NtShzSocket, 0x80) X(NtShzSockBind, 0x81) X(NtShzSockListen, 0x82) X(NtShzSockAccept, 0x83) \

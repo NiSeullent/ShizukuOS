@@ -4,8 +4,8 @@
  * WM_TIMER and WM_QUIT messages, plus the reaper that cleans up after threads that no longer exist.
  *
  * Message priority inside one retrieval, as on Windows: (1) messages sent by other threads, (2) posted messages in
- * order, (3) WM_QUIT, (4) WM_PAINT for the first window of the thread with a non-empty update region, (5) WM_TIMER for
- * the first due timer. A retrieved WM_PAINT does not clear the update region (BeginPaint/validation does), so a window
+ * order, (3) WM_QUIT, (4) keyboard and mouse input (gfx_input.c) in order, (5) WM_PAINT for the first window of the thread
+ * with a non-empty update region, (6) WM_TIMER for the first due timer. A retrieved WM_PAINT does not clear the update region (BeginPaint/validation does), so a window
  * procedure that ignores WM_PAINT is asked again, exactly like the real thing.
  */
 #include "gfx.h"
@@ -14,6 +14,9 @@
 #define WM_PAINT 0x000fu
 #define WM_TIMER 0x0113u
 #define PM_REMOVE 1u
+#define QS_KEY 0x0001u
+#define QS_MOUSEMOVE 0x0002u
+#define QS_MOUSEBUTTON 0x0004u
 #define QS_POSTMESSAGE 0x0008u
 #define QS_TIMER 0x0010u
 #define QS_PAINT 0x0020u
@@ -33,7 +36,7 @@ static int msg_pool_ready;
 static gsend_t g_sends[GFX_MAX_SENDS];
 static uint64_t next_send_id = 1;
 
-uint32_t gq_time(void) { return (uint32_t)ticks_now(); }
+uint32_t gq_time(void) { return (uint32_t)(shz_time_ns() / 1000000ull); }     /* GetMessageTime: the GetTickCount clock */
 
 uint64_t gfx_pending_sends(void)
 {
@@ -67,6 +70,7 @@ gqueue_t *gq_current(int create)
     q->proc = t->proc;
     q->pid = (uint32_t)t->proc->pid;
     q->next_timer_id = 1;
+    gin_queue_init(q);
     return q;
 }
 
@@ -130,9 +134,38 @@ static int32_t post_to(gqueue_t *q, uint64_t hwnd, uint32_t message, uint64_t wp
     m->m.wparam = wparam;
     m->m.lparam = lparam;
     m->m.time = gq_time();
+    m->m.pt.x = g_ptr_x;                                     /* GetMessagePos: the pointer when the message was posted */
+    m->m.pt.y = g_ptr_y;
     if (q->tail) q->tail->next = m; else q->head = m;
     q->tail = m;
     ++q->nposted;
+    gq_kick(q);
+    return STATUS_SUCCESS;
+}
+
+int32_t gq_post(gqueue_t *q, uint64_t hwnd, uint32_t message, uint64_t wparam, int64_t lparam)
+{
+    return post_to(q, hwnd, message, wparam, lparam);
+}
+
+/* Keyboard/mouse input for q (gfx_input.c). A mouse move directly following an unretrieved mouse move of the same kind
+ * replaces it (Windows coalesces moves too); beyond GFX_MAX_INPUT unretrieved messages input is dropped. */
+int32_t gq_post_input(gqueue_t *q, const shz_msg_t *mm, int coalesce)
+{
+    gmsg_t *m;
+    if (coalesce && q->in_tail && q->in_tail->m.message == mm->message && q->in_tail->m.hwnd == mm->hwnd &&
+        q->in_tail->m.wparam == mm->wparam && q->in_tail->m.pad0 == mm->pad0) {
+        q->in_tail->m = *mm;
+        gq_kick(q);
+        return STATUS_SUCCESS;
+    }
+    if (q->nin >= GFX_MAX_INPUT) return STATUS_NO_QUOTA;
+    m = msg_alloc();
+    if (!m) return STATUS_NO_QUOTA;
+    m->m = *mm;
+    if (q->in_tail) q->in_tail->next = m; else q->in_head = m;
+    q->in_tail = m;
+    ++q->nin;
     gq_kick(q);
     return STATUS_SUCCESS;
 }
@@ -531,12 +564,38 @@ static int filter_ok(uint64_t hf, uint32_t mn, uint32_t mx, uint64_t hwnd, uint3
     return 1;
 }
 
+/* Input filter: a mouse message also matches through the forms user32 may turn it into (WM_NC*, double clicks). */
+static int input_filter_ok(uint64_t hf, uint32_t mn, uint32_t mx, const shz_msg_t *m)
+{
+    uint32_t forms[4], n = 0, i;
+    forms[n++] = m->message;
+    if ((m->pad0 & SHZ_MSGF_MOUSE) && m->message >= 0x200u && m->message <= 0x20Du) {
+        const int down = m->message == 0x201u || m->message == 0x204u || m->message == 0x207u || m->message == 0x20Bu;
+        forms[n++] = m->message - 0x200u + 0xA0u;
+        if (down) { forms[n++] = m->message + 2; forms[n++] = m->message - 0x200u + 0xA0u + 2; }
+    }
+    for (i = 0; i < n; ++i)
+        if (filter_ok(hf, mn, mx, m->hwnd, forms[i])) return 1;
+    return 0;
+}
+
+static uint32_t input_kind(const shz_msg_t *m)
+{
+    if (m->message >= 0x100u && m->message <= 0x109u) return QS_KEY;
+    if (m->message == 0x200u) return QS_MOUSEMOVE;
+    return QS_MOUSEBUTTON;                                    /* buttons and the wheels */
+}
+
 static uint32_t qs_pending(gqueue_t *q)
 {
     uint32_t f = 0, i;
     const uint64_t now = ticks_now();
     if (q->sent_head) f |= QS_SENDMESSAGE;
     if (q->head || q->quit) f |= QS_POSTMESSAGE;
+    {
+        gmsg_t *m;
+        for (m = q->in_head; m; m = m->next) f |= input_kind(&m->m);
+    }
     for (i = 0; i < GFX_MAX_TIMERS; ++i)
         if (q->timers[i].used && q->timers[i].due <= now) f |= QS_TIMER;
     for (i = 1; i < GFX_MAX_WINDOWS; ++i)
@@ -587,6 +646,23 @@ static void try_get(gqueue_t *q, shz_getmsg_t *g)
             g->msg.wparam = (uint64_t)q->quit_code;
             g->msg.time = (uint32_t)now;
             if (remove) q->quit = 0;
+            g->result = SHZ_GM_RES_MESSAGE;
+            return;
+        }
+    }
+    if (qs & (QS_KEY | QS_MOUSEMOVE | QS_MOUSEBUTTON)) {
+        prev = 0;
+        for (m = q->in_head; m; prev = m, m = m->next) {
+            if (m->m.hwnd && !wm_lookup(m->m.hwnd)) continue;
+            if (!(qs & input_kind(&m->m)) || !input_filter_ok(g->hwnd, g->min, g->max, &m->m)) continue;
+            g->msg = m->m;
+            if (remove) {
+                if (prev) prev->next = m->next; else q->in_head = m->next;
+                if (q->in_tail == m) q->in_tail = prev;
+                --q->nin;
+                gin_message_removed(q, &g->msg);
+                msg_release(m);
+            }
             g->result = SHZ_GM_RES_MESSAGE;
             return;
         }
@@ -767,6 +843,20 @@ void gq_purge_window(gwin_t *w)
             prev = m;
         }
     }
+    prev = 0;
+    for (m = q->in_head; m; m = next) {
+        next = m->next;
+        if (m->m.hwnd == w->handle) {
+            if (prev) prev->next = next; else q->in_head = next;
+            if (q->in_tail == m) q->in_tail = prev;
+            --q->nin;
+            msg_release(m);
+        } else {
+            prev = m;
+        }
+    }
+    gin_window_gone(w->handle);
+    if (q->track_hwnd == w->handle) { q->track_hwnd = 0; q->track_flags = 0; }
     for (i = 0; i < GFX_MAX_TIMERS; ++i)
         if (q->timers[i].used && q->timers[i].hwnd == w->handle) q->timers[i].used = 0;
     {
@@ -802,6 +892,8 @@ void gq_reap_dead(void)
         for (s = q->sent_head; s; s = n) { n = s->next; s->next = 0; send_finish(s, GS_FAILED, 0); }
         for (s = q->servicing; s; s = n) { n = s->next; s->next = 0; send_finish(s, GS_FAILED, 0); }
         for (m = q->head; m; m = mn) { mn = m->next; msg_release(m); }
+        for (m = q->in_head; m; m = mn) { mn = m->next; msg_release(m); }
+        gin_queue_gone(q);
         for (k = 0; k < GFX_MAX_SENDS; ++k) {                        /* sends made BY the dead thread */
             gsend_t *x = &g_sends[k];
             if (!x->id || x->sender_tid != q->thread_id) continue;

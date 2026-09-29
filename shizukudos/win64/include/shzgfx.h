@@ -278,6 +278,51 @@ typedef struct { uint32_t op, atom; uint64_t name; uint32_t name_len, pad; } shz
 enum { SHZ_PROP_SET = 1, SHZ_PROP_GET, SHZ_PROP_REMOVE };
 typedef struct { uint32_t op, pad; uint64_t hwnd, key, value; } shz_prop_t;
 
+/* ---- input: NtUserInput (kernel64/gfx_input.c). Keyboard and mouse events (PS/2 hardware or SendInput) are routed by the
+ *      kernel to the queue of the thread that owns the target window and come out of GetMessage/PeekMessage after the posted
+ *      messages. Mouse messages carry SHZ_MSGF_MOUSE in shz_msg_t.pad0 with SCREEN coordinates in lparam and pt: user32
+ *      then asks the window for its hit-test code (WM_NCHITTEST), sends WM_SETCURSOR / WM_MOUSEACTIVATE and turns the message
+ *      into its client (client coordinates) or non-client (WM_NC*, screen coordinates) form, detecting double clicks.
+ *      shz_msg_t.pad1 carries the low 32 bits of the SendInput dwExtraInfo (GetMessageExtraInfo). ---- */
+#define SHZ_MSGF_MOUSE 1u               /* mouse input: needs the hit-test translation described above */
+#define SHZ_MSGF_CAPTURED 2u            /* routed to the capture window: always the client form, no WM_SETCURSOR */
+#define SHZ_MSGF_INPUT 4u               /* keyboard or mouse input (updates the thread key state when removed) */
+enum {
+    SHZ_IN_GETKEYSTATE = 1,             /* a = vk -> out0 = the thread's state byte (0x80 down, 0x01 toggled) */
+    SHZ_IN_GETKEYBOARDSTATE,            /* buf = 256 bytes out */
+    SHZ_IN_SETKEYBOARDSTATE,            /* buf = 256 bytes in (the thread's state only) */
+    SHZ_IN_GETASYNCKEYSTATE,            /* a = vk -> out0 = 0x8000 if down now | 1 if pressed since the previous call */
+    SHZ_IN_GETCURSORPOS,                /* out0 = x, out1 = y */
+    SHZ_IN_SETCURSORPOS,                /* a = x, b = y (clipped; generates a mouse move) */
+    SHZ_IN_SENDINPUT,                   /* buf = shz_inrec_t[a] -> out0 = records injected */
+    SHZ_IN_CLIPCURSOR,                  /* a = 1: confine the pointer to rect; a = 0: release */
+    SHZ_IN_GETCLIPCURSOR,               /* rect out (the screen when not confined) */
+    SHZ_IN_INFO,                        /* out0 = SHZ_INFO_* flags, out1 = last input time (ms, GetTickCount clock) */
+    SHZ_IN_TRACKMOUSE,                  /* a = hwnd, b = TME_* flags, c = hover ms; TME_QUERY returns them in out0/out1 */
+    SHZ_IN_SETCURSOR,                   /* a = cookie (0: no cursor), b = w | h << 16, c = hot x | hot y << 16, buf = w*h ARGB
+                                           (w, h <= 32), d = 1 if the thread's ShowCursor count is below zero */
+    SHZ_IN_CURSORINFO,                  /* out0 = cookie of the cursor now shown (0 = none), out1 = 1 if showing */
+    SHZ_IN_HOTKEY,                      /* a = hwnd, b = id, c = MOD_* | vk << 16, d = 1 register / 0 unregister */
+};
+#define SHZ_INFO_KEYBOARD 1u            /* a PS/2 keyboard answered */
+#define SHZ_INFO_MOUSE 2u               /* a PS/2 mouse answered */
+#define SHZ_INFO_WHEEL 4u               /* ... and speaks the IntelliMouse (wheel) protocol */
+typedef struct {
+    uint32_t op, pad;
+    int64_t a, b, c, d;
+    uint64_t buf;
+    uint32_t buf_len, pad2;
+    uint64_t out0, out1;
+    shz_rect_t rect;
+} shz_input_t;
+/* SendInput record (user32 converts INPUT to this). type 0 = mouse, 1 = keyboard; flags are MOUSEEVENTF_* / KEYEVENTF_*. */
+typedef struct {
+    uint32_t type, flags;
+    int32_t dx, dy, data;               /* mouse: movement (or 0..65535 absolute), mouseData (wheel delta, XBUTTON) */
+    uint16_t vk, scan;                  /* keyboard */
+    uint64_t extra;                     /* dwExtraInfo */
+} shz_inrec_t;
+
 #ifdef _WIN32
 /* User-mode side: the ntdll stubs generated from SYSCALL_LIST_GRAPHICS. Status is an NTSTATUS (negative = failure). */
 #define SHZ_NT __stdcall
@@ -303,6 +348,7 @@ int32_t SHZ_NT NtUserEnumWindows(void *e);
 int32_t SHZ_NT NtUserHitTest(int64_t x, int64_t y, void *hwnd_out);
 int32_t SHZ_NT NtUserAtom(void *a);
 int32_t SHZ_NT NtUserProp(void *p);
+int32_t SHZ_NT NtUserInput(void *i);
 #endif
 
 #endif

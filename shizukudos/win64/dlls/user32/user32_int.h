@@ -47,6 +47,23 @@ typedef struct {
     DWORD time; POINT pt; LPARAM extra;             /* the last retrieved message: GetMessageTime/Pos/ExtraInfo */
     HCURSOR cursor;                                 /* SetCursor/GetCursor */
     int cursor_count;                               /* ShowCursor display counter */
+    int cursor_init;                                /* cursor_count initialised (0 with a mouse, -1 without) */
+    UINT dbl_msg;                                   /* the last button-down, for double-click detection */
+    HWND dbl_hwnd;
+    DWORD dbl_time;
+    POINT dbl_pt;
+    WPARAM dbl_x;
+    int dbl_client;
 } u32_thread_t;
 u32_thread_t *u32_ts(void);
+
+/* user32_input.c */
+int u32_mouse_translate(shz_msg_t *m, int remove);  /* a mouse input message (SHZ_MSGF_MOUSE): 0 = swallowed */
+uint32_t u32_input_info(void);                      /* SHZ_INFO_* flags (0 without a display) */
+void u32_cursor_push(void);                         /* tell the kernel the thread's cursor and ShowCursor state */
+int u32_cursor_count(int delta);                    /* ShowCursor counter (+1/-1/0), pushes the visibility change */
+/* user32_icon.c: the image of an icon/cursor as straight ARGB, at most 32x32 (larger ones are scaled down, hot spot too) */
+int u32_icon_argb32(HICON h, uint32_t *out, int *w, int *hh, int *hx, int *hy);
+LRESULT u32_def_mouse(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, int *handled);   /* DefWindowProc: mouse/keyboard parts */
+void u32_sys_move_size(HWND hwnd, WPARAM cmd);      /* DefWindowProc WM_SYSCOMMAND SC_MOVE / SC_SIZE: the modal loop */
 #endif
