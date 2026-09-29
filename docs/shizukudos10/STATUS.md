@@ -23,6 +23,16 @@
 `win98-regression`의 BLOCKED는 설치된 Windows 98 체크포인트(`build/win98-lab`, 사용자 제공 자산) 부재,
 SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행하지 않음)이다. Notepad++ 성공/실패를 이 문서는 단정하지 않는다.
 
+### 1b. 실구동 스크린샷 (`docs/shizukudos10/screenshots/`, GUEST_RUN TCG)
+
+`run_k64_gui.py --png`가 찍은 실제 QEMU screendump다. 각 장면은 호스트 계산값과 비교를 통과한 뒤에만 저장한다.
+`k64-status.png`(T_GUI_STATUS): `C:\SHZ\SYS64`의 시스템 DLL **17개 전부**를 한 프로세스에서 `LoadLibraryW`로 올리고
+DLL마다 첫 export를 `GetProcAddress`로 해석한다(러너가 패킹된 DLL 목록과 대조해 하나라도 빠지면 FAIL).
+`RtlGetVersion` 10.0.22631, 물리 메모리, PCI 기능별 바인딩된 커널 드라이버(`gfx_fb`, `net_rtl8139`)도 같은 화면에 나온다.
+이 화면을 만들며 고친 결함: `NtQueryDirectoryFile`의 FileName 오프셋이 커널 96·kernel32 92로 어긋나 `FindFirstFileW`가
+아무 파일도 찾지 못했다(→ Windows 오프셋, 클래스 1/2/3/12/37/38). `GlobalMemoryStatusEx`가 쓰는 정보 클래스 0x100이 커널에
+없어 물리 메모리가 0이었다. 아직 이 화면에 없는 것: Chromium·Electron, NT 커널 드라이버 호스트, Windows 98 본체.
+
 ## 2. 이번 세션에서 고친 결함 (원인 → 수정)
 
 1. `RtlExitUserProcess`/`RtlExitUserThread`: `nt.h`에 `noreturn`이 이미 선언돼 있다. 생성 코드로 확인함
