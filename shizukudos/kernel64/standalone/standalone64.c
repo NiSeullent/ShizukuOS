@@ -14,6 +14,10 @@
 
 extern uint64_t arch_timer_irqs(void);
 void standalone_eoi(void) { sa_eoi(); }
+void standalone_eoi_irq(unsigned vector) { sa_eoi_irq(vector - sa_irq_vector(0)); }
+void standalone_irq_unmask(unsigned irq) { sa_irq_unmask(irq); }
+void standalone_irq_mask(unsigned irq) { sa_irq_mask(irq); }
+unsigned standalone_irq_vector(unsigned irq) { return sa_irq_vector(irq); }
 
 long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
 {

@@ -10,6 +10,7 @@ extern void syscall_entry(void);
 extern const uint64_t isr_stub_table[256];
 #ifdef SHZ_STANDALONE
 extern void standalone_eoi(void);
+extern void standalone_eoi_irq(unsigned vector);
 #endif
 
 struct __attribute__((packed)) dtr { uint16_t limit; uint64_t base; };
@@ -29,6 +30,11 @@ static struct idt_gate idt[256];
 static uint8_t df_stack[8192] __attribute__((aligned(16)));
 static uint32_t exception_count[32];
 static uint64_t timer_irqs;
+static void (*irq_handlers[256])(struct regs *);
+
+/* Device interrupt handlers (standalone profile: legacy PIC vectors 0x20..0x2f). The handler runs with interrupts off in
+ * the interrupted thread's context; the PIC EOI is sent after it returns, so it must not schedule away. */
+void irq_register(unsigned vector, void (*handler)(struct regs *)) { if (vector < 256) irq_handlers[vector] = handler; }
 
 void tss_set_rsp0(uint64_t rsp0) { tss.rsp[0] = rsp0; }
 uint64_t arch_timer_irqs(void) { return timer_irqs; }
@@ -107,6 +113,13 @@ void isr_dispatch(struct regs *r)
         return;
     }
     default:
+        if (r->vector >= 0x20 && irq_handlers[r->vector]) {
+            irq_handlers[r->vector](r);
+#ifdef SHZ_STANDALONE
+            standalone_eoi_irq(r->vector);
+#endif
+            return;
+        }
         break;
     }
     if (r->vector == 14) {

@@ -57,6 +57,7 @@ static inline void sa_evidence(unsigned slot, uint64_t value)
 
 /* ---- 8259 + PIT: vector base = the timer vector (must be a multiple of 8) so IRQ0 arrives as `vector`. ---- */
 static int sa_pic_ready;
+static unsigned sa_pic_base;
 static inline long sa_timer_set(unsigned vector, uint32_t period_us)
 {
     uint32_t div;
@@ -68,6 +69,7 @@ static inline long sa_timer_set(unsigned vector, uint32_t period_us)
         sa_outb(0x21, 0x04); sa_outb(0xa1, 0x02);
         sa_outb(0x21, 0x01); sa_outb(0xa1, 0x01);
         sa_outb(0x21, 0xff); sa_outb(0xa1, 0xff);
+        sa_pic_base = vector;
         sa_pic_ready = 1;
     }
     if (!period_us) {
@@ -83,6 +85,28 @@ static inline long sa_timer_set(unsigned vector, uint32_t period_us)
     return SHZ_OK;
 }
 static inline void sa_eoi(void) { sa_outb(0x20, 0x20); }
+/* Per-line control for device IRQs (0..15). The timer call above initialises the PIC first. Lines >= 8 sit behind the
+ * cascade on IRQ2, which is unmasked together with the first slave line. */
+static uint8_t sa_irq_mask_m = 0xfe, sa_irq_mask_s = 0xff;
+static inline void sa_irq_unmask(unsigned irq)
+{
+    if (irq < 8) {
+        sa_irq_mask_m &= (uint8_t)~(1u << irq);
+    } else {
+        sa_irq_mask_s &= (uint8_t)~(1u << (irq - 8));
+        sa_irq_mask_m &= (uint8_t)~(1u << 2);
+    }
+    sa_outb(0x21, sa_irq_mask_m);
+    sa_outb(0xa1, sa_irq_mask_s);
+}
+static inline void sa_irq_mask(unsigned irq)
+{
+    if (irq < 8) sa_irq_mask_m |= (uint8_t)(1u << irq); else sa_irq_mask_s |= (uint8_t)(1u << (irq - 8));
+    sa_outb(0x21, sa_irq_mask_m);
+    sa_outb(0xa1, sa_irq_mask_s);
+}
+static inline void sa_eoi_irq(unsigned irq) { if (irq >= 8) sa_outb(0xa0, 0x20); sa_outb(0x20, 0x20); }
+static inline unsigned sa_irq_vector(unsigned irq) { return sa_pic_base + irq; }
 
 /* ---- CMOS RTC -> seconds since 1970 (32-bit arithmetic only) ---- */
 static inline uint8_t sa_cmos(uint8_t reg) { sa_outb(0x70, reg); return sa_inb(0x71); }

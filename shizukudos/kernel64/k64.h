@@ -50,6 +50,7 @@ void kpanic(const char *fmt, ...) __attribute__((noreturn));
 
 /* ---- arch.c ---- */
 void arch_init(void);
+void irq_register(unsigned vector, void (*handler)(struct regs *));      /* device IRQ vector >= 0x20 (see arch.c) */
 void tss_set_rsp0(uint64_t rsp0);
 static inline uint64_t read_cr0(void) { uint64_t v; __asm__ volatile("mov %%cr0, %0" : "=r"(v)); return v; }
 static inline uint64_t read_cr2(void) { uint64_t v; __asm__ volatile("mov %%cr2, %0" : "=r"(v)); return v; }
