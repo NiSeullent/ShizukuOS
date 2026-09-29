@@ -185,3 +185,64 @@ jobs:
           drivers, boot firmware, use OS installation media, or publish packages.
           Native Windows compatibility requires separate guest evidence.
           SUMMARY
+
+  shizukudos10-tcg:
+    name: ShizukuDOS 10 standalone kernels and Win64 apps under QEMU TCG
+    # Host evidence only: QEMU software CPU, no KVM, no VMX (the Supervisor path stays unverified here).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the tested revision without retaining credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Install cross-compilers, QEMU and image tools
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+            gcc gcc-multilib clang libclang-rt-18-dev mingw-w64 nasm make binutils python3 python3-pil \
+            qemu-system-x86 ovmf mtools dosfstools xorriso
+
+      - name: Host models (PE32+ parser, inter-kernel ABI)
+        run: |
+          python3 shizukudos/win64/tests/test_pe_parse.py
+          python3 shizukudos/abi/test_abi.py
+
+      - name: Build Kernel32, Kernel64 (Supervisor + standalone) and the Win64 runtime
+        run: |
+          python3 shizukudos/win64/build.py
+          python3 shizukudos/kbuild.py
+
+      - name: Boot Kernel32 standalone (QEMU TCG) and check its guest evidence
+        timeout-minutes: 6
+        run: python3 shizukudos/tests/run_k32_standalone.py --accel tcg
+
+      - name: Boot Kernel64 standalone under QEMU TCG with self-tests and every T_*.EXE Win64 app
+        timeout-minutes: 15
+        run: python3 shizukudos/tests/run_k64_standalone.py --accel tcg --timeout 600
+
+      - name: Host suite (DOS16 reproducibility, upstream pins)
+        # Fetches the pinned FreeDOS trees and the Open Watcom snapshot (network).
+        timeout-minutes: 20
+        run: python3 shizukudos/tools/shz.py test --suite host
+
+      - name: Keep the guest serial logs and results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: shizukudos10-tcg-evidence
+          path: |
+            build/shizukudos/kernel64s/run/
+            build/shizukudos/kernel32s/run/
+            build/shizukudos/results/
+          if-no-files-found: warn
