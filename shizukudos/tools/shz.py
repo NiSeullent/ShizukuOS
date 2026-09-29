@@ -3,7 +3,7 @@
 """ShizukuDOS 10.0 build / test / package driver.
 
     shz.py doctor [--guest]
-    shz.py build --profile {bios-legacy,uefi-multikernel,bios-multikernel}
+    shz.py build --profile {bios-legacy,uefi-multikernel,bios-multikernel,dual-bios-uefi-csm}
     shz.py test  --suite {host,boot,interkernel,win64,win98-regression}
     shz.py package --channel dev
 
@@ -43,6 +43,13 @@ PROFILES = {
         "summary": "BIOS loader -> Supervisor cold launch -> DOS16 / Win98 / Kernel64",
         "steps": [],
         "status": "not implemented",
+    },
+    "dual-bios-uefi-csm": {
+        "summary": "One disk (dual.img): legacy BIOS -> MBR -> FreeDOS DOS16, and UEFI -> CSMWrap (external, "
+                   "LGPL-2.1) -> SeaBIOS CSM16 (LGPL-3.0) -> the same MBR -> FreeDOS DOS16",
+        "steps": ["csm/build.py", "dos16/build.py"],
+        "status": "implemented (DOS16 only); the UEFI path needs >= 2 logical CPUs because CSMWrap keeps one AP "
+                  "as its system thread",
     },
 }
 
@@ -153,20 +160,35 @@ def suite_host(results):
         record(results, "shz_info_t layout matches C compiler", "FAIL", detail=str(exc))
     run_script(results, "interkernel ABI host model", [SHZ / "abi" / "test_abi.py"]) if (SHZ / "abi" / "test_abi.py").exists() \
         else record(results, "interkernel ABI host model", "BLOCKED", detail="abi/ not implemented")
+    # Determinism: rebuilding CSMWrap twice must give identical bytes (fixed BUILD_VERSION, no git describe).
+    hashes = []
+    for _ in range(2):
+        run([sys.executable, SHZ / "csm" / "build.py"], capture=True, timeout=1800)
+        hashes.append(tuple(sha256_file(BUILD / "csm" / f) for f in ("CSMWRAP.EFI", "Csm16.bin", "vgabios.bin")))
+    record(results, "CSMWrap build is reproducible (CSMWRAP.EFI, Csm16.bin, vgabios.bin)",
+           "PASS" if hashes[0] == hashes[1] else "FAIL", detail=hashes[0][0][:16])
     # Determinism: rebuilding DOS16 twice must give identical bytes.
     hashes = []
     for _ in range(2):
         run([sys.executable, SHZ / "dos16" / "build.py"], capture=True, timeout=600)
         hashes.append((sha256_file(BUILD / "dos16" / "command.com"), sha256_file(BUILD / "dos16" / "kernel.sys"),
-                       sha256_file(BUILD / "dos16" / "shizukudos-dos16-hd32.img")))
-    record(results, "DOS16 build is reproducible (kernel, shell, image)", "PASS" if hashes[0] == hashes[1] else "FAIL",
+                       sha256_file(BUILD / "dos16" / "shizukudos-dos16-hd32.img"),
+                       sha256_file(BUILD / "dos16" / "shizukudos-dos16-dual.img")))
+    record(results, "DOS16 build is reproducible (kernel, shell, image)", "PASS" if hashes[0][:3] == hashes[1][:3] else "FAIL",
            detail=hashes[0][2][:16])
+    record(results, "DOS16 dual BIOS/UEFI image is reproducible (hd32 content + T_INTS + CSMWrap ESP files)",
+           "PASS" if hashes[0][3] == hashes[1][3] else "FAIL", detail=hashes[0][3][:16])
     manifest = shzlib.load_manifest()
     for name, spec in manifest["upstreams"].items():
         head = subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name), "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
-        record(results, f"upstream {name} pinned at {spec['commit'][:12]}", "PASS" if head == spec["commit"] else "FAIL",
-               detail=head[:12])
+        subs = {sub: subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name / sub), "rev-parse", "HEAD"],
+                                    capture_output=True, text=True).stdout.strip() == info["commit"]
+                for sub, info in spec.get("submodules", {}).items()}
+        ok = head == spec["commit"] and all(subs.values())
+        record(results, f"upstream {name} pinned at {spec['commit'][:12]}" + (f" (+{len(subs)} submodules)" if subs else ""),
+               "PASS" if ok else "FAIL", detail=head[:12] + ("" if all(subs.values()) else
+                                                             f" submodule drift: {[k for k, v in subs.items() if not v]}"))
 
 
 def l1_vmx_available():
@@ -201,6 +223,16 @@ def suite_boot(results):
     run_script(results, "DOS16 on legacy BIOS (SeaBIOS) [TCG software CPU]",
                [SHZ / "dos16" / "test_csm.py", "--accel", "tcg", "--timeout", "240"], timeout=400,
                expect_marker="PASS")
+    # One disk, two firmware paths (TCG, identical q35/AHCI/256 MiB/2 vCPU hardware; only the firmware differs).
+    dual_ok = run_script(results, "DOS16 dual image on legacy BIOS (QEMU SeaBIOS, q35/AHCI) + T_INTS [TCG]",
+                         [SHZ / "dos16" / "test_csm.py", "--image", "dual", "--machine", "q35", "--memory", "256",
+                          "--smp", "2", "--accel", "tcg", "--timeout", "240", "--run-name", "run-csm-dual"],
+                         timeout=400, expect_marker="PASS")
+    run_script(results, "DOS16 dual image on UEFI (OVMF, no CSM) -> CSMWrap -> SeaBIOS CSM16, T_INTS compared with "
+                        "the legacy run [TCG]",
+               [SHZ / "csm" / "test_qemu.py", "--accel", "tcg", "--timeout", "300", "--memory", "256", "--smp", "2",
+                *(["--legacy-result", BUILD / "dos16" / "run-csm-dual" / "result.json"] if dual_ok else [])],
+               timeout=900, expect_marker="PASS")
     run_script(results, "Kernel32 (Protected Mode) on QEMU, standalone stub (no Supervisor/VMX)",
                [SHZ / "tests" / "run_k32_standalone.py"], timeout=300, expect_marker="PASS")
     run_script(results, "Kernel64 (Long Mode) + Win64 apps on QEMU, standalone stub (no Supervisor/VMX)",
@@ -367,20 +399,22 @@ def cmd_package(args):
     out.mkdir(parents=True, exist_ok=True)
     zpath = out / f"{name}.zip"
     files = []
-    for sub in ("dos16", "supervisor"):
+    for sub in ("dos16", "csm", "supervisor"):
         base = BUILD / sub
         for item in ("build-result.json", "BOOTX64.EFI", "esp.img", "kernel.sys", "command.com",
-                     "shizukudos-dos16-hd32.img", "vbios.bin", "payload.bin"):
+                     "shizukudos-dos16-hd32.img", "shizukudos-dos16-dual.img", "csmwrap.ini", "CSMWRAP.EFI",
+                     "Csm16.bin", "vgabios.bin", "vbios.bin", "payload.bin"):
             if (base / item).exists():
                 files.append((base / item, f"artifacts/{sub}/{item}"))
         for result in base.glob("run-*/result.json"):
             files.append((result, f"evidence/{sub}/{result.parent.name}-result.json"))
-    for item in ("shizukudos/dos16", "shizukudos/supervisor", "shizukudos/tools", "shizukudos/upstream",
+    for item in ("shizukudos/dos16", "shizukudos/csm", "shizukudos/supervisor", "shizukudos/tools", "shizukudos/upstream",
                  "docs/shizukudos10", "licenses"):
         for path in sorted((REPO / item).rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 files.append((path, f"source/{path.relative_to(REPO)}"))
-    # GPL source offer: the exact upstream trees the binaries were built from.
+    # GPL/LGPL source offer: the exact upstream trees the binaries were built from (submodules included:
+    # CSMWrap LGPL-2.1 + SeaBIOS LGPL-3.0 + its BSD/MIT/Apache parts).
     for upstream in shzlib.load_manifest()["upstreams"]:
         tree = shzlib.UPSTREAM_DIR / upstream
         if tree.exists():
