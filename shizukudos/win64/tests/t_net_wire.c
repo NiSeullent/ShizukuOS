@@ -201,30 +201,6 @@ static void test_many(void)
     for (i = 0; i < N; ++i) if (s[i] != INVALID_SOCKET) closesocket(s[i]);
 }
 
-/* 512 KiB upload to a port on which the lossy proxy imposes a total outage in the middle of the transfer (all frames dropped for
- * 2.5 s): the sender must back off exponentially, then resume and deliver every byte. In the direct boot there is no outage. */
-static void test_outage(void)
-{
-    const int n = 512 * 1024;
-    int err;
-    SOCKET s = tcp_to(17007, &err);
-    unsigned char *data = xmalloc((size_t)n);
-    unsigned resp[2] = {0, 0}, crc;
-    DWORD t0 = GetTickCount();
-    ULONG r0 = net_stat(NST_TCP_RETRANS);
-    fill_pat(data, (size_t)n, 9000000);
-    crc = shz_crc32(data, (size_t)n);
-    CHECK(s != INVALID_SOCKET, "connect to the outage port");
-    CHECK(send_all(s, data, n) == n, "uploaded %d bytes across the outage", n);
-    shutdown(s, SD_SEND);
-    CHECK(recv_all(s, resp, 8) == 8, "sink replied after the outage");
-    printf("WIRE outage_upload n=%d start=9000000 crc=%08x server_crc=%08x server_n=%u ms=%u retrans=%u\n", n, crc, resp[0], resp[1],
-           (unsigned)(GetTickCount() - t0), (unsigned)(net_stat(NST_TCP_RETRANS) - r0));
-    CHECK(resp[0] == crc && resp[1] == (unsigned)n, "all %d bytes arrived intact (CRC %08x)", n, crc);
-    closesocket(s);
-    free(data);
-}
-
 static void test_keepalive(void)
 {
     int err, on = 1, idle = 1, intvl = 1;
@@ -239,9 +215,9 @@ static void test_keepalive(void)
           setsockopt(s, IPPROTO_TCP, 17, (const char *)&intvl, sizeof intvl) == 0, "SO_KEEPALIVE with TCP_KEEPIDLE=1 s and TCP_KEEPINTVL=1 s");
     send_all(s, "0123456789", 10);
     recv_all(s, b, 10);
-    Sleep(3600);
+    Sleep(2600);
     printf("WIRE keepalive sport=%u probes=%u\n", ntohs(la.sin_port), (unsigned)(net_stat(NST_TCP_KEEPALIVE_TX) - k0));
-    CHECK(net_stat(NST_TCP_KEEPALIVE_TX) - k0 >= 2, "an idle connection sent %u keep-alive probes in 3.6 s", (unsigned)(net_stat(NST_TCP_KEEPALIVE_TX) - k0));
+    CHECK(net_stat(NST_TCP_KEEPALIVE_TX) - k0 >= 2, "an idle connection sent %u keep-alive probes in 2.6 s", (unsigned)(net_stat(NST_TCP_KEEPALIVE_TX) - k0));
     CHECK(send_all(s, "after", 5) == 5 && recv_all(s, b, 5) == 5 && !memcmp(b, "after", 5), "the connection is still usable after the probes were answered");
     closesocket(s);
 }
@@ -407,23 +383,6 @@ static void test_addrinfo_wire(void)
     }
 }
 
-static void test_connect_timeout(void)
-{
-    struct sockaddr_in a;
-    SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
-    DWORD t0 = GetTickCount(), dt;
-    ULONG retr0 = net_stat(NST_TCP_RETRANS);
-    int r;
-    addr_of(&a, HOST_BE, 17006);
-    r = connect(s, (struct sockaddr *)&a, sizeof a);
-    dt = GetTickCount() - t0;
-    CHECK(r == SOCKET_ERROR && WSAGetLastError() == WSAETIMEDOUT && dt >= 12000 && dt < 30000,
-          "connect to a blackholed port gives up with WSAETIMEDOUT (10060) after %u ms (SYN retransmissions at 1, 3, 7 s)", (unsigned)dt);
-    CHECK(net_stat(NST_TCP_RETRANS) - retr0 == 3, "exactly 3 SYN retransmissions (%u)", (unsigned)(net_stat(NST_TCP_RETRANS) - retr0));
-    printf("WIRE connect_timeout ms=%u syn_retrans=%u\n", (unsigned)dt, (unsigned)(net_stat(NST_TCP_RETRANS) - retr0));
-    closesocket(s);
-}
-
 int main(void)
 {
     struct shz_net_info in;
@@ -443,15 +402,12 @@ int main(void)
     test_errors();
     test_half_close();
     test_many();
-    test_outage();
     test_keepalive();
     test_udp();
     test_nonblocking();
     test_addrinfo_wire();
     test_dns(&in);
     test_dns_slirp(&in);
-    if (g_lossy)
-        test_connect_timeout();
     printf("WIRE stats retrans=%u fast_retrans=%u ooo=%u dupack_tx=%u bad_csum=%u tcp_tx=%u tcp_rx=%u\n",
            (unsigned)(net_stat(NST_TCP_RETRANS) - retrans0), (unsigned)(net_stat(NST_TCP_FAST_RETRANS) - fast0),
            (unsigned)(net_stat(NST_TCP_OOO) - ooo0), (unsigned)net_stat(NST_TCP_DUPACK_TX), (unsigned)(net_stat(NST_TCP_BAD_CSUM) - badcs0),

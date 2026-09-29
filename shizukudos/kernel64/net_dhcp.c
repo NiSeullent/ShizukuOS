@@ -34,7 +34,7 @@ static uint32_t build(uint8_t *b, uint8_t type, ip4_t ciaddr, ip4_t req_ip, ip4_
     b[236] = 0x63; b[237] = 0x82; b[238] = 0x53; b[239] = 0x63;
     b[o++] = 53; b[o++] = 1; b[o++] = type;
     b[o++] = 61; b[o++] = 7; b[o++] = 1; memcpy(b + o, g_net.mac, 6); o += 6;
-    b[o++] = 12; b[o++] = 7; memcpy(b + o, "shizuku", 7); o += 7;
+    b[o++] = 12; b[o++] = 7; memcpy(b + o, "SHZ-K64", 7); o += 7;               /* same name as COMPUTERNAME in the process environment */
     if (req_ip) { b[o++] = 50; b[o++] = 4; wr32(b + o, req_ip); o += 4; }
     if (server_id) { b[o++] = 54; b[o++] = 4; wr32(b + o, server_id); o += 4; }
     b[o++] = 55; b[o++] = sizeof params; memcpy(b + o, params, sizeof params); o += sizeof params;

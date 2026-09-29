@@ -51,6 +51,7 @@ HOST_IP = "10.0.2.2"
 
 # host ports (mirrored in win64/tests/t_net_wire.c)
 P_MODE, P_ECHO, P_SINK, P_SOURCE, P_CTRL, P_UDP, P_BLACKHOLE, P_OUTAGE, P_DNS = 17000, 17001, 17002, 17003, 17004, 17005, 17006, 17007, 17053
+P_MODE2 = 17008                                 # second banner port, used by t_net_lossy (the proxy's injection trigger is P_MODE)
 VMAC = bytes.fromhex("52550a000263")            # the proxy's virtual host (lossy boot only): 10.0.2.99
 VIP = "10.0.2.99"
 GUEST_IP = "10.0.2.15"
@@ -293,6 +294,7 @@ class Servers:
 
     def start(self):
         self._tcp_server(P_MODE, self.h_mode)
+        self._tcp_server(P_MODE2, self.h_mode)
         self._tcp_server(P_ECHO, self.h_echo)
         self._tcp_server(P_SINK, self.h_sink)
         self._tcp_server(P_OUTAGE, self.h_sink)
@@ -720,12 +722,13 @@ def verify(run, mode, ck):
     servers = run["servers"]
     ck.add(f"[{mode}] guest run finished before the timeout", not run["timed_out"], f"{run['seconds']:.1f} s, accel={run['accel']}")
     ck.add(f"[{mode}] Kernel64 finished its self-tests with exit 0", "SHZ-EXIT:0" in s and "0 self-test failure(s)" in s)
-    for app in ("T_NET_NIC.EXE", "T_NET_LOOP.EXE", "T_NET_WIRE.EXE"):
+    for app in ("T_NET_NIC.EXE", "T_NET_LOOP.EXE", "T_NET_WIRE.EXE", "T_NET_LOSSY.EXE"):
         m = re.search(r"K64 win64 app: " + re.escape(app) + r" exit=(-?\d+) faulted=(\d)", s)
         fails = [l for l in guest_lines(s, app) if l.startswith("FAIL")]
         passes = [l for l in guest_lines(s, app) if l.startswith("PASS")]
+        skips = [l for l in guest_lines(s, app) if l.startswith("SKIP")]
         ck.add(f"[{mode}] guest {app} exits 0 without a fault, no FAIL line", bool(m) and m.group(1) == "0" and m.group(2) == "0" and not fails,
-               f"{len(passes)} PASS, {len(fails)} FAIL" + ("; " + "; ".join(fails[:3]) if fails else ""))
+               f"{len(passes)} PASS, {len(fails)} FAIL" + ("; " + "; ".join(fails[:3]) if fails else "") + ("; " + skips[0] if skips else ""))
     nic = guest_lines(s, "T_NET_NIC.EXE")
     wl = guest_lines(s, "T_NET_WIRE.EXE")
     info = next((dict(kv.split("=", 1) for kv in l.split()[1:] if "=" in kv) for l in nic if l.startswith("NETINFO ")), None)
@@ -996,6 +999,7 @@ def verify_lossy(run, ck, cap):
     st = proxy.stats
     ck.add(f"[lossy] proxy really disturbed the traffic: {st}", st["dropped_data"] >= 5 and st["blackholed"] >= 3 and (st["duplicated"] + st["reordered"]) >= 1)
     wl = guest_lines(run["serial"], "T_NET_WIRE.EXE")
+    ll = guest_lines(run["serial"], "T_NET_LOSSY.EXE")
     stats = next((d for d, _ in wire_kv(wl, "stats")), {})
     tcp = cap.tcp()
     # retransmissions visible in the guest-side capture: same (sport, seq) with payload sent more than once
@@ -1017,9 +1021,9 @@ def verify_lossy(run, ck, cap):
                len(syn) == 4 and 0.9 <= gaps[0] <= 1.6 and 1.8 <= gaps[1] <= 2.6 and 3.8 <= gaps[2] <= 4.6)
     else:
         ck.add("[lossy] SYN retransmission schedule captured", False, f"{len(syn)} SYNs")
-    verify_outage(run, cap, ck, wl)
+    verify_outage(run, cap, ck, ll)
     verify_injection(run, cap, ck, wl)
-    ct = [d for d, _ in wire_kv(wl, "connect_timeout")]
+    ct = [d for d, _ in wire_kv(ll, "connect_timeout")]
     ck.add(f"[lossy] guest connect() to the blackholed port failed with WSAETIMEDOUT after {ct[0]['ms'] if ct else '?'} ms with {ct[0]['syn_retrans'] if ct else '?'} SYN retransmissions",
            bool(ct) and 12000 <= int(ct[0]["ms"]) < 30000 and int(ct[0]["syn_retrans"]) == 3)
 
