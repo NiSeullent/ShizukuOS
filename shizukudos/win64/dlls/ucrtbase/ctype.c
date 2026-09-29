@@ -75,20 +75,29 @@ DLLAPI const unsigned short *CRTAPI __pwctype_func(void) { build_tables(); retur
 DLLAPI int CRTAPI _isctype(int c, int mask) { return narrow_class(c) & mask; }
 DLLAPI int CRTAPI _isctype_l(int c, int mask, void *l) { (void)l; return _isctype(c, mask); }
 
-#define NARROW_IS(name, mask)                                                                                          \
-    DLLAPI int CRTAPI name(int c) { return narrow_class(c) & (mask); }                                                 \
-    DLLAPI int CRTAPI _##name##_l(int c, void *l) { (void)l; return narrow_class(c) & (mask); }
-NARROW_IS(isalpha, C_ALPHA)
-NARROW_IS(isupper, C_UPPER)
-NARROW_IS(islower, C_LOWER)
-NARROW_IS(isdigit, C_DIGIT)
-NARROW_IS(isxdigit, C_HEX)
-NARROW_IS(isspace, C_SPACE)
-NARROW_IS(ispunct, C_PUNCT)
-NARROW_IS(isalnum, C_ALPHA | C_DIGIT)
-NARROW_IS(isprint, C_ALPHA | C_DIGIT | C_PUNCT | C_BLANK)
-NARROW_IS(isgraph, C_ALPHA | C_DIGIT | C_PUNCT)
-NARROW_IS(iscntrl, C_CONTROL)
+/* (written out: the export list is generated from lines that start with DLLAPI) */
+DLLAPI int CRTAPI isalpha(int c) { return narrow_class(c) & (C_ALPHA); }
+DLLAPI int CRTAPI _isalpha_l(int c, void *l) { (void)l; return narrow_class(c) & (C_ALPHA); }
+DLLAPI int CRTAPI isupper(int c) { return narrow_class(c) & (C_UPPER); }
+DLLAPI int CRTAPI _isupper_l(int c, void *l) { (void)l; return narrow_class(c) & (C_UPPER); }
+DLLAPI int CRTAPI islower(int c) { return narrow_class(c) & (C_LOWER); }
+DLLAPI int CRTAPI _islower_l(int c, void *l) { (void)l; return narrow_class(c) & (C_LOWER); }
+DLLAPI int CRTAPI isdigit(int c) { return narrow_class(c) & (C_DIGIT); }
+DLLAPI int CRTAPI _isdigit_l(int c, void *l) { (void)l; return narrow_class(c) & (C_DIGIT); }
+DLLAPI int CRTAPI isxdigit(int c) { return narrow_class(c) & (C_HEX); }
+DLLAPI int CRTAPI _isxdigit_l(int c, void *l) { (void)l; return narrow_class(c) & (C_HEX); }
+DLLAPI int CRTAPI isspace(int c) { return narrow_class(c) & (C_SPACE); }
+DLLAPI int CRTAPI _isspace_l(int c, void *l) { (void)l; return narrow_class(c) & (C_SPACE); }
+DLLAPI int CRTAPI ispunct(int c) { return narrow_class(c) & (C_PUNCT); }
+DLLAPI int CRTAPI _ispunct_l(int c, void *l) { (void)l; return narrow_class(c) & (C_PUNCT); }
+DLLAPI int CRTAPI isalnum(int c) { return narrow_class(c) & (C_ALPHA | C_DIGIT); }
+DLLAPI int CRTAPI _isalnum_l(int c, void *l) { (void)l; return narrow_class(c) & (C_ALPHA | C_DIGIT); }
+DLLAPI int CRTAPI isprint(int c) { return narrow_class(c) & (C_ALPHA | C_DIGIT | C_PUNCT | C_BLANK); }
+DLLAPI int CRTAPI _isprint_l(int c, void *l) { (void)l; return narrow_class(c) & (C_ALPHA | C_DIGIT | C_PUNCT | C_BLANK); }
+DLLAPI int CRTAPI isgraph(int c) { return narrow_class(c) & (C_ALPHA | C_DIGIT | C_PUNCT); }
+DLLAPI int CRTAPI _isgraph_l(int c, void *l) { (void)l; return narrow_class(c) & (C_ALPHA | C_DIGIT | C_PUNCT); }
+DLLAPI int CRTAPI iscntrl(int c) { return narrow_class(c) & (C_CONTROL); }
+DLLAPI int CRTAPI _iscntrl_l(int c, void *l) { (void)l; return narrow_class(c) & (C_CONTROL); }
 DLLAPI int CRTAPI isblank(int c) { return c == '\t' ? C_BLANK : narrow_class(c) & C_BLANK; }
 DLLAPI int CRTAPI _isblank_l(int c, void *l) { (void)l; return isblank(c); }
 int crt_isspace_c(int c) { return narrow_class(c) & C_SPACE; }
@@ -116,21 +125,30 @@ DLLAPI crt_wint CRTAPI _towlower_l(crt_wint c, void *l) { (void)l; return towlow
 DLLAPI int CRTAPI iswctype(crt_wint c, unsigned short mask) { return (int)(wide_class(c) & mask); }
 DLLAPI int CRTAPI _iswctype_l(crt_wint c, unsigned short mask, void *l) { (void)l; return iswctype(c, mask); }
 DLLAPI int CRTAPI is_wctype(crt_wint c, unsigned short mask) { return iswctype(c, mask); }
-#define WIDE_IS(name, mask)                                                                                            \
-    DLLAPI int CRTAPI name(crt_wint c) { return (int)(wide_class(c) & (mask)); }                                       \
-    DLLAPI int CRTAPI _##name##_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (mask)); }
-WIDE_IS(iswalpha, C_ALPHA)
-WIDE_IS(iswupper, C_UPPER)
-WIDE_IS(iswlower, C_LOWER)
-WIDE_IS(iswdigit, C_DIGIT)
-WIDE_IS(iswxdigit, C_HEX)
-WIDE_IS(iswspace, C_SPACE)
-WIDE_IS(iswpunct, C_PUNCT)
-WIDE_IS(iswalnum, C_ALPHA | C_DIGIT)
-WIDE_IS(iswprint, C_ALPHA | C_DIGIT | C_PUNCT | C_BLANK)
-WIDE_IS(iswgraph, C_ALPHA | C_DIGIT | C_PUNCT)
-WIDE_IS(iswcntrl, C_CONTROL)
-WIDE_IS(iswblank, C_BLANK)
+DLLAPI int CRTAPI iswalpha(crt_wint c) { return (int)(wide_class(c) & (C_ALPHA)); }
+DLLAPI int CRTAPI _iswalpha_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_ALPHA)); }
+DLLAPI int CRTAPI iswupper(crt_wint c) { return (int)(wide_class(c) & (C_UPPER)); }
+DLLAPI int CRTAPI _iswupper_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_UPPER)); }
+DLLAPI int CRTAPI iswlower(crt_wint c) { return (int)(wide_class(c) & (C_LOWER)); }
+DLLAPI int CRTAPI _iswlower_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_LOWER)); }
+DLLAPI int CRTAPI iswdigit(crt_wint c) { return (int)(wide_class(c) & (C_DIGIT)); }
+DLLAPI int CRTAPI _iswdigit_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_DIGIT)); }
+DLLAPI int CRTAPI iswxdigit(crt_wint c) { return (int)(wide_class(c) & (C_HEX)); }
+DLLAPI int CRTAPI _iswxdigit_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_HEX)); }
+DLLAPI int CRTAPI iswspace(crt_wint c) { return (int)(wide_class(c) & (C_SPACE)); }
+DLLAPI int CRTAPI _iswspace_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_SPACE)); }
+DLLAPI int CRTAPI iswpunct(crt_wint c) { return (int)(wide_class(c) & (C_PUNCT)); }
+DLLAPI int CRTAPI _iswpunct_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_PUNCT)); }
+DLLAPI int CRTAPI iswalnum(crt_wint c) { return (int)(wide_class(c) & (C_ALPHA | C_DIGIT)); }
+DLLAPI int CRTAPI _iswalnum_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_ALPHA | C_DIGIT)); }
+DLLAPI int CRTAPI iswprint(crt_wint c) { return (int)(wide_class(c) & (C_ALPHA | C_DIGIT | C_PUNCT | C_BLANK)); }
+DLLAPI int CRTAPI _iswprint_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_ALPHA | C_DIGIT | C_PUNCT | C_BLANK)); }
+DLLAPI int CRTAPI iswgraph(crt_wint c) { return (int)(wide_class(c) & (C_ALPHA | C_DIGIT | C_PUNCT)); }
+DLLAPI int CRTAPI _iswgraph_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_ALPHA | C_DIGIT | C_PUNCT)); }
+DLLAPI int CRTAPI iswcntrl(crt_wint c) { return (int)(wide_class(c) & (C_CONTROL)); }
+DLLAPI int CRTAPI _iswcntrl_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_CONTROL)); }
+DLLAPI int CRTAPI iswblank(crt_wint c) { return (int)(wide_class(c) & (C_BLANK)); }
+DLLAPI int CRTAPI _iswblank_l(crt_wint c, void *l) { (void)l; return (int)(wide_class(c) & (C_BLANK)); }
 DLLAPI int CRTAPI iswascii(crt_wint c) { return c < 0x80; }
 DLLAPI int CRTAPI __iswcsymf(crt_wint c) { return iswalpha(c) || c == '_'; }
 DLLAPI int CRTAPI __iswcsym(crt_wint c) { return iswalnum(c) || c == '_'; }

@@ -113,6 +113,7 @@ static fdinfo *fd_get(int fd)
         if (!e) { *crt_doserrno_ptr() = 0; crt_set_errno(CRT_EBADF); crt_invalid_parameter(); return (ret); }          \
     } while (0)
 
+static os_handle find_first_full(const wchar16 *spec, os_find_dataw *d);
 static int fd_new(os_handle h, int flags, int textmode)
 {
     int b, i;
@@ -714,18 +715,17 @@ DLLAPI crt_errno_t CRTAPI _access_s(const char *path, int mode)
 DLLAPI int CRTAPI _waccess(const wchar16 *path, int mode) { return _waccess_s(path, mode) ? -1 : 0; }
 DLLAPI int CRTAPI _access(const char *path, int mode) { return _access_s(path, mode) ? -1 : 0; }
 
-#define WIDE_WRAP1(NAME, WNAME)                                                                                        \
-    DLLAPI int CRTAPI NAME(const char *p)                                                                              \
-    {                                                                                                                  \
-        wchar16 *w;                                                                                                    \
-        int r;                                                                                                         \
-        CRT_VALIDATE(p != 0, CRT_EINVAL, -1);                                                                          \
-        w = path_to_wide(p);                                                                                           \
-        if (!w) return -1;                                                                                             \
-        r = WNAME(w);                                                                                                  \
-        crt_free(w);                                                                                                   \
-        return r;                                                                                                      \
-    }
+static int wide_wrap1(const char *p, int (CRTAPI *fn)(const wchar16 *))
+{
+    wchar16 *w;
+    int r;
+    CRT_VALIDATE(p != 0, CRT_EINVAL, -1);
+    w = path_to_wide(p);
+    if (!w) return -1;
+    r = fn(w);
+    crt_free(w);
+    return r;
+}
 DLLAPI int CRTAPI _wunlink(const wchar16 *p)
 {
     CRT_VALIDATE(p != 0, CRT_EINVAL, -1);
@@ -751,11 +751,11 @@ DLLAPI int CRTAPI _wchdir(const wchar16 *p)
     if (!SetCurrentDirectoryW(p)) { crt_dosmaperr(GetLastError()); return -1; }
     return 0;
 }
-WIDE_WRAP1(_unlink, _wunlink)
-WIDE_WRAP1(remove, _wremove)
-WIDE_WRAP1(_mkdir, _wmkdir)
-WIDE_WRAP1(_rmdir, _wrmdir)
-WIDE_WRAP1(_chdir, _wchdir)
+DLLAPI int CRTAPI _unlink(const char *p) { return wide_wrap1(p, _wunlink); }
+DLLAPI int CRTAPI remove(const char *p) { return wide_wrap1(p, _wremove); }
+DLLAPI int CRTAPI _mkdir(const char *p) { return wide_wrap1(p, _wmkdir); }
+DLLAPI int CRTAPI _rmdir(const char *p) { return wide_wrap1(p, _wrmdir); }
+DLLAPI int CRTAPI _chdir(const char *p) { return wide_wrap1(p, _wchdir); }
 DLLAPI int CRTAPI _wrename(const wchar16 *a, const wchar16 *b)
 {
     CRT_VALIDATE(a != 0 && b != 0, CRT_EINVAL, -1);
@@ -909,7 +909,7 @@ static int wstat_core(const wchar16 *path, struct crt_stat64 *st)
     if (!n) { crt_set_errno(CRT_ENOENT); *crt_doserrno_ptr() = 2; return -1; }
     attrs = GetFileAttributesW(path);
     if (attrs == OS_INVALID_FILE_ATTRIBUTES) { crt_dosmaperr(GetLastError()); if (crt_get_errno() == CRT_EINVAL) crt_set_errno(CRT_ENOENT); return -1; }
-    if (!is_root_like(path) && (h = FindFirstFileW(path, &fd)) != OS_INVALID_HANDLE) {
+    if (!is_root_like(path) && (h = find_first_full(path, &fd)) != OS_INVALID_HANDLE) {
         FindClose(h);
         st->st_size = (long long)(((uint64_t)fd.nFileSizeHigh << 32) | fd.nFileSizeLow);
         st->st_atime = ft_to_time(&fd.ftLastAccessTime);
@@ -994,6 +994,14 @@ DLLAPI int CRTAPI _fstat64i32(int fd, struct crt_stat64i32 *st)
 /* ---------------------------------------------------------------- _findfirst / _findnext (64-bit time, 64-bit size) */
 struct crt_finddata64 { unsigned attrib; long long time_create, time_access, time_write, size; char name[260]; };
 struct crt_wfinddata64 { unsigned attrib; long long time_create, time_access, time_write, size; wchar16 name[260]; };
+/* FindFirstFileW with the path made absolute first (this system's kernel32 resolves relative patterns less generally
+ * than Windows does) */
+static os_handle find_first_full(const wchar16 *spec, os_find_dataw *d)
+{
+    wchar16 full[300];
+    const os_dword n = GetFullPathNameW(spec, 300, full, 0);
+    return FindFirstFileW(n && n < 300 ? full : spec, d);
+}
 static void fill_wfind(struct crt_wfinddata64 *o, const os_find_dataw *d)
 {
     o->attrib = d->dwFileAttributes == OS_FILE_ATTRIBUTE_NORMAL ? 0 : d->dwFileAttributes;
@@ -1014,7 +1022,7 @@ DLLAPI intptr_t CRTAPI _wfindfirst64(const wchar16 *spec, struct crt_wfinddata64
     os_find_dataw d;
     os_handle h;
     CRT_VALIDATE(spec != 0 && out != 0, CRT_EINVAL, -1);
-    h = FindFirstFileW(spec, &d);
+    h = find_first_full(spec, &d);
     if (h == OS_INVALID_HANDLE) {
         const os_dword e = GetLastError();
         crt_dosmaperr(e);

@@ -87,6 +87,19 @@ static const struct { const char *prefix; const char *dll; } apiset_schema[] = {
     {"api-ms-win-core-shlwapi-obsolete-l1", "shlwapi.dll"},
     {"api-ms-win-core-version-l1", "version.dll"},
     {"api-ms-win-mm-time-l1", "winmm.dll"},                     /* the multimedia timer API */
+    /* Universal CRT contracts -> ucrtbase.dll (win64/dlls/ucrtbase): the contracts it exports functions of; conio,
+     * multibyte (_mbs...), process (_spawn..., _exec...) and private are not implemented and stay unmapped */
+    {"api-ms-win-crt-runtime-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-stdio-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-string-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-heap-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-math-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-convert-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-locale-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-utility-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-time-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-environment-l1", "ucrtbase.dll"},
+    {"api-ms-win-crt-filesystem-l1", "ucrtbase.dll"},
 
     {0, 0}
 };

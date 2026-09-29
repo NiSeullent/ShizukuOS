@@ -204,7 +204,7 @@ DLLAPI void CRTAPI _swab(char *src, char *dst, int n)
 
 /* ---------------------------------------------------------------- _splitpath / _makepath */
 #define DEFINE_SPLIT(NAME, CH)                                                                                         \
-    DLLAPI crt_errno_t CRTAPI NAME(const CH *path, CH *drive, size_t dn, CH *dir, size_t dirn, CH *fname, size_t fn,   \
+    static crt_errno_t NAME(const CH *path, CH *drive, size_t dn, CH *dir, size_t dirn, CH *fname, size_t fn,   \
                                    CH *ext, size_t en)                                                                 \
     {                                                                                                                  \
         const CH *p = path, *last_sep = 0, *dot = 0, *end;                                                             \
@@ -243,8 +243,17 @@ DLLAPI void CRTAPI _swab(char *src, char *dst, int n)
         if (ext) ext[0] = 0;                                                                                           \
         CRT_VALIDATE(0, CRT_ERANGE, CRT_ERANGE);                                                                       \
     }
-DEFINE_SPLIT(_splitpath_s, char)
-DEFINE_SPLIT(_wsplitpath_s, wchar16)
+DEFINE_SPLIT(split_narrow, char)
+DEFINE_SPLIT(split_wide, wchar16)
+DLLAPI crt_errno_t CRTAPI _splitpath_s(const char *p, char *d, size_t dn, char *dir, size_t dirn, char *f, size_t fn, char *e, size_t en)
+{
+    return split_narrow(p, d, dn, dir, dirn, f, fn, e, en);
+}
+DLLAPI crt_errno_t CRTAPI _wsplitpath_s(const wchar16 *p, wchar16 *d, size_t dn, wchar16 *dir, size_t dirn, wchar16 *f, size_t fn, wchar16 *e,
+                                        size_t en)
+{
+    return split_wide(p, d, dn, dir, dirn, f, fn, e, en);
+}
 DLLAPI void CRTAPI _splitpath(const char *p, char *d, char *dir, char *f, char *e)
 {
     _splitpath_s(p, d, d ? 3 : 0, dir, dir ? 256 : 0, f, f ? 256 : 0, e, e ? 256 : 0);
@@ -255,7 +264,7 @@ DLLAPI void CRTAPI _wsplitpath(const wchar16 *p, wchar16 *d, wchar16 *dir, wchar
 }
 
 #define DEFINE_MAKE(NAME, CH)                                                                                          \
-    DLLAPI crt_errno_t CRTAPI NAME(CH *out, size_t n, const CH *drive, const CH *dir, const CH *fname, const CH *ext)  \
+    static crt_errno_t NAME(CH *out, size_t n, const CH *drive, const CH *dir, const CH *fname, const CH *ext)  \
     {                                                                                                                  \
         size_t k = 0;                                                                                                  \
         const CH *s;                                                                                                   \
@@ -280,8 +289,16 @@ DLLAPI void CRTAPI _wsplitpath(const wchar16 *p, wchar16 *d, wchar16 *dir, wchar
         out[0] = 0;                                                                                                    \
         CRT_VALIDATE(0, CRT_ERANGE, CRT_ERANGE);                                                                       \
     }
-DEFINE_MAKE(_makepath_s, char)
-DEFINE_MAKE(_wmakepath_s, wchar16)
+DEFINE_MAKE(make_narrow, char)
+DEFINE_MAKE(make_wide, wchar16)
+DLLAPI crt_errno_t CRTAPI _makepath_s(char *o, size_t n, const char *d, const char *dir, const char *f, const char *e)
+{
+    return make_narrow(o, n, d, dir, f, e);
+}
+DLLAPI crt_errno_t CRTAPI _wmakepath_s(wchar16 *o, size_t n, const wchar16 *d, const wchar16 *dir, const wchar16 *f, const wchar16 *e)
+{
+    return make_wide(o, n, d, dir, f, e);
+}
 DLLAPI void CRTAPI _makepath(char *out, const char *d, const char *dir, const char *f, const char *e) { _makepath_s(out, 260, d, dir, f, e); }
 DLLAPI void CRTAPI _wmakepath(wchar16 *out, const wchar16 *d, const wchar16 *dir, const wchar16 *f, const wchar16 *e)
 {

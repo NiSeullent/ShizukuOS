@@ -496,7 +496,7 @@ DLLAPI crt_errno_t CRTAPI _get_wpgmptr(wchar16 **p)
 
 /* WinMain's lpCmdLine: the command line after the program name and the blanks that follow it */
 #define DEFINE_WINMAIN(NAME, CH, GET)                                                                                  \
-    DLLAPI CH *CRTAPI NAME(void)                                                                                       \
+    static CH *NAME(void)                                                                                              \
     {                                                                                                                  \
         CH *p = GET();                                                                                                 \
         int inq = 0;                                                                                                   \
@@ -508,8 +508,10 @@ DLLAPI crt_errno_t CRTAPI _get_wpgmptr(wchar16 **p)
         while (*p == ' ' || *p == '\t') ++p;                                                                           \
         return p;                                                                                                      \
     }
-DEFINE_WINMAIN(_get_narrow_winmain_command_line, char, GetCommandLineA)
-DEFINE_WINMAIN(_get_wide_winmain_command_line, wchar16, GetCommandLineW)
+DEFINE_WINMAIN(winmain_narrow, char, GetCommandLineA)
+DEFINE_WINMAIN(winmain_wide, wchar16, GetCommandLineW)
+DLLAPI char *CRTAPI _get_narrow_winmain_command_line(void) { return winmain_narrow(); }
+DLLAPI wchar16 *CRTAPI _get_wide_winmain_command_line(void) { return winmain_wide(); }
 
 /* ---------------------------------------------------------------- environment */
 static char **g_environ, **g_initial_environ;
