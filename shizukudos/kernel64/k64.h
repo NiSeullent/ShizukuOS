@@ -126,12 +126,16 @@ struct thread {
     uint64_t tid;                               /* Windows-style thread id (multiple of 4), 0 for kernel threads */
     volatile int alerted, alert_wait;           /* NtAlertThreadByThreadId state */
     void *wait_multi;
+    int creator_hold;                           /* user thread: its creator may still read `object` (see sched.c reaping) */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
 thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg);   /* TS_NEW until thread_resume */
 void thread_resume(thread_t *t);
 void thread_discard(thread_t *t);                                                     /* frees a TS_NEW thread that was never resumed */
+/* Exited user threads are reclaimed automatically (next thread creation); these two cover the creator's side: */
+void thread_creator_release(thread_t *t);       /* the creator no longer reads t (t->object): it may be reclaimed once exited */
+void thread_reap_process(const void *proc);     /* reclaim every exited thread of a finished process now (proc_wait) */
 thread_t *thread_current(void);
 thread_t *thread_find_tid(void *process, uint64_t tid);
 void thread_yield(void);

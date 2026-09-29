@@ -577,8 +577,10 @@ def main():
     rep.check("at least one GUI test program ran", len(apps) > 0, f"{len(apps)} program(s)")
     fails = re.findall(r"\] (FAIL: .*)", serial)
     rep.check("no GUI program printed FAIL:", not fails, "; ".join(fails[:5]))
-    skips = re.findall(r"\] (SKIP: .*)", serial)
-    rep.check("no GUI program skipped (the display is present)", not skips, "; ".join(skips[:5]))
+    # Only the GUI programs must not skip here (the display is present). Other programs may legitimately skip in this
+    # profile, e.g. the T_NET_* NIC tests ("SKIP: no NIC": this runner attaches no network card).
+    skips = re.findall(r"\[win64 (T_GUI_\S+) pid \d+\] (SKIP: .*)", serial)
+    rep.check("no GUI program skipped (the display is present)", not skips, "; ".join(f"{n}: {s}" for n, s in skips[:5]))
     for scene in sorted(SCENES):
         rep.check(f"scene {scene} was shown and verified", scene in seen)
     status = "PASS" if all(x["status"] == "PASS" for x in rep.items) else "FAIL"

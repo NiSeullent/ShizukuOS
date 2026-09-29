@@ -682,7 +682,8 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     st = process_start_thread2(p, p->ntdll_process_start, p->entry, 0, exe->info.stack_reserve ? exe->info.stack_reserve : 0x100000, &t);
     if (st) return STATUS_NO_MEMORY;
     if (out_proc) *out_proc = p;
-    if (out_thread) *out_thread = t;
+    if (out_thread) *out_thread = t;            /* the caller holds t until thread_creator_release() or proc_wait() */
+    else thread_creator_release(t);
     return STATUS_SUCCESS;
 }
 
