@@ -399,29 +399,56 @@ static int user_page(process_t *p, uint64_t uva, int write, uint64_t *kva)
     return 0;
 }
 
-/* The loader's write into an image (IAT, TLS index): the page is produced like a read fault, then written through the
- * direct map whatever its protection (an IAT in a read-only .rdata is normal for MSVC images). */
-int image_poke(process_t *p, uint64_t va, const void *src, uint64_t n)
+/* The loader's single access path to a process's memory (IAT binding, base-relocation fixups of RAM images, TLS index
+ * and arrays, security cookie, CFG pointers, the mapped header). The page is produced exactly like a fault would
+ * produce it - a file-backed image page is read and relocated by ldr_image_fault(), any other committed page is
+ * demand-zero - and then accessed through the direct map WHATEVER ITS PROTECTION, as the Windows loader does with a
+ * temporary unprotect (an IAT inside read-only .rdata is normal for MSVC-linked images). A NOACCESS page is populated
+ * without user access, so a later VirtualProtect finds its content. Returns the kernel address of the page, or NULL
+ * when `va` is not committed memory of the process. */
+uint8_t *image_kpage(process_t *p, uint64_t va)
 {
-    const uint8_t *s = src;
+    const uint64_t page = va & PAGE_MASK;
+    uint64_t pa;
+    if (va < USER_MIN || va >= USER_TOP) return 0;
+    pa = vm_lookup(p->pml4, page, 0);
+    if (!pa) {
+        vad_t *v = vad_find(p, page);
+        if (!v || v->state != VAD_COMMITTED) return 0;
+        if (v->img) {
+            if (ldr_image_fault(p, v, page)) return 0;
+        } else {
+            pa = pmm_alloc();                                   /* zeroed */
+            if (!pa) return 0;
+            if (vm_map(p->pml4, page, pa, (v->prot & 0xff) == PAGE_NOACCESS ? 0 : prot_to_ptflags(v->prot))) {
+                pmm_free(pa);
+                return 0;
+            }
+        }
+        pa = vm_lookup(p->pml4, page, 0);
+        if (!pa) return 0;
+    }
+    return (uint8_t *)p2v(pa & PAGE_MASK);
+}
+
+static int image_access(process_t *p, uint64_t va, void *buf, uint64_t n, int write)
+{
+    uint8_t *b = buf;
     if (va + n < va) return -1;
     while (n) {
-        uint64_t chunk = PAGE_SIZE - (va & 0xfff), pa;
+        uint8_t *pg = image_kpage(p, va);
+        uint64_t chunk = PAGE_SIZE - (va & 0xfff);
+        if (!pg) return -1;
         if (chunk > n) chunk = n;
-        if (va < USER_MIN || va >= USER_TOP) return -1;
-        pa = vm_lookup(p->pml4, va, 0);
-        if (!pa) {
-            vad_t *v = vad_find(p, va & PAGE_MASK);
-            if (!v || v->state != VAD_COMMITTED || (v->prot & 0xff) == PAGE_NOACCESS) return -1;
-            if (user_fault_in(p, va, 0, 0)) return -1;
-            pa = vm_lookup(p->pml4, va, 0);
-            if (!pa) return -1;
-        }
-        memcpy((void *)p2v(pa), s, chunk);
-        s += chunk; va += chunk; n -= chunk;
+        if (write) memcpy(pg + (va & 0xfff), b, chunk);
+        else memcpy(b, pg + (va & 0xfff), chunk);
+        b += chunk; va += chunk; n -= chunk;
     }
     return 0;
 }
+
+int image_poke(process_t *p, uint64_t va, const void *src, uint64_t n) { return image_access(p, va, (void *)src, n, 1); }
+int image_peek(process_t *p, uint64_t va, void *dst, uint64_t n) { return image_access(p, va, dst, n, 0); }
 
 int copy_from_user(process_t *p, void *dst, uint64_t uva, uint64_t n)
 {

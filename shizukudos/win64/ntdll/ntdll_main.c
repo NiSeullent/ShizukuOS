@@ -460,15 +460,23 @@ SHZ_EXPORT NTSTATUS NTAPI LdrGetDllHandle(PWSTR path, PULONG flags, SHZ_UNICODE_
 
 SHZ_EXPORT NTSTATUS NTAPI LdrLoadDll(PWSTR path, PULONG flags, SHZ_UNICODE_STRING *name, PVOID *handle)
 {
+    /* search order, loader lock: ldr_search.c. `path` carries LoadLibraryExW flags or a search path (see there). */
+    extern NTSTATUS ShzLdrLoadImage(PWSTR, SHZ_UNICODE_STRING *, ULONG64 *);
+    extern void ShzLoaderLock(void), ShzLoaderUnlock(void);
     ULONG64 base = 0;
     NTSTATUS st;
-    SHZ_LDR_ENTRY *e = find_entry_by_name(name);
-    (void)path; (void)flags;
-    if (e) { ++e->LoadCount; *handle = e->DllBase; return STATUS_SUCCESS; }       /* already loaded: bump the count */
-    st = NtLoadImage(name, &base);
+    SHZ_LDR_ENTRY *e;
+    (void)flags;
+    ShzLoaderLock();
+    e = find_entry_by_name(name);
+    if (e) { ++e->LoadCount; *handle = e->DllBase; ShzLoaderUnlock(); return STATUS_SUCCESS; }   /* already loaded */
+    st = ShzLdrLoadImage(path, name, &base);
+    if (!st) {
+        *handle = (PVOID)(uintptr_t)base;
+        ShzRunInitRoutines(DLL_PROCESS_ATTACH, 0);                                 /* only entries still marked NEEDS_INIT */
+    }
+    ShzLoaderUnlock();
     if (st) return st;
-    *handle = (PVOID)(uintptr_t)base;
-    ShzRunInitRoutines(DLL_PROCESS_ATTACH, 0);                                     /* only entries still marked NEEDS_INIT */
     return STATUS_SUCCESS;
 }
 
@@ -546,7 +554,14 @@ found:
         st = LdrLoadDll(0, 0, &us, &hmod);
         if (st) return st;
         as2.Buffer = fn; as2.Length = (USHORT)f; as2.MaximumLength = (USHORT)(f + 1);
-        return fn[0] == '#' ? STATUS_ENTRYPOINT_NOT_FOUND : LdrGetProcedureAddress(hmod, &as2, 0, address);
+        if (fn[0] == '#') {                                                        /* "DLL.#ordinal" */
+            ULONG ord = 0;
+            unsigned q;
+            for (q = 1; fn[q] >= '0' && fn[q] <= '9' && ord < 65536; ++q) ord = ord * 10 + (ULONG)(fn[q] - '0');
+            if (q == 1 || fn[q]) return STATUS_INVALID_IMAGE_FORMAT;
+            return LdrGetProcedureAddress(hmod, 0, ord, address);
+        }
+        return LdrGetProcedureAddress(hmod, &as2, 0, address);
     }
     *address = (PVOID)(base + rva);
     return STATUS_SUCCESS;

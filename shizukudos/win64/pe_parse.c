@@ -51,8 +51,13 @@ int pe_parse(const uint8_t *f, uint64_t size, pe_info_t *o)
         o->dir_size[i] = rd32(f + opt + 116 + i * 8);
     }
     if (!pow2(o->section_alignment) || !pow2(o->file_alignment) || o->file_alignment < 512 || o->file_alignment > 65536 ||
-        o->section_alignment < o->file_alignment || o->section_alignment < 4096)
-        return PE_E_ALIGN;                                          /* page-aligned sections only: no legacy <4K images */
+        o->section_alignment < o->file_alignment)
+        return PE_E_ALIGN;
+    if (o->section_alignment < 4096) {
+        /* Low-alignment image: only valid when sections sit in the file exactly where they sit in memory. */
+        if (o->section_alignment != o->file_alignment) return PE_E_ALIGN;
+        o->low_alignment = 1;
+    }
     if (o->image_base & 0xffff) return PE_E_ALIGN;
     if (o->image_base >= (1ull << 47) || o->image_base + o->size_of_image > (1ull << 47)) return PE_E_ALIGN;
     sec = opt + opt_size;
@@ -77,6 +82,7 @@ int pe_parse(const uint8_t *f, uint64_t size, pe_info_t *o)
             if (s.raw_off % o->file_alignment && s.raw_off % 512) return PE_E_SECTION_RANGE;
             if (!in_range(s.raw_off, s.raw_size, size)) return PE_E_SECTION_RANGE;
             if (s.raw_off < o->size_of_headers) return PE_E_SECTION_RANGE;
+            if (o->low_alignment && s.raw_off != s.rva) return PE_E_SECTION_RANGE;
         }
         for (j = 0; j < i; ++j) {                                   /* virtual ranges must not overlap */
             pe_section_t t;
@@ -246,6 +252,16 @@ int pe_walk_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_impo
     }
 }
 
+static unsigned reloc_width(unsigned type)
+{
+    switch (type) {
+    case 1: case 2: case 4: return 2;                               /* HIGH, LOW, HIGHADJ: one 16-bit half */
+    case 3: return 4;                                               /* HIGHLOW */
+    case 10: return 8;                                              /* DIR64 */
+    default: return 0;                                              /* MIPS/ARM/RISC-V specific types: not on AMD64 */
+    }
+}
+
 int pe_walk_relocs(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_reloc_fn fn, void *ctx)
 {
     uint32_t rva = o->dir_rva[5], remaining = o->dir_size[5];
@@ -261,12 +277,16 @@ int pe_walk_relocs(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_reloc
         count = (block - 8) / 2;
         for (i = 0; i < count; ++i) {
             const uint16_t e = rd16(f + off + 8 + i * 2);
-            const unsigned type = e >> 12;
+            unsigned type = e >> 12;
             const uint32_t at = page + (e & 0xfff);
+            const unsigned width = reloc_width(type);
             int rc;
             if (type == 0) continue;
-            if (type != 3 && type != 10) return PE_E_RELOC;          /* HIGHLOW and DIR64 only on AMD64 */
-            if (!in_range(at, type == 10 ? 8 : 4, o->size_of_image)) return PE_E_RELOC;
+            if (!width || !in_range(at, width, o->size_of_image)) return PE_E_RELOC;
+            if (type == 4) {                                        /* HIGHADJ: the next entry is the low half */
+                if (++i >= count) return PE_E_RELOC;
+                type |= (unsigned)rd16(f + off + 8 + i * 2) << 16;
+            }
             rc = fn(ctx, at, type);
             if (rc) return rc;
         }
@@ -274,4 +294,207 @@ int pe_walk_relocs(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_reloc
         remaining -= block;
     }
     return remaining ? PE_E_RELOC : PE_OK;
+}
+
+/* ---------------------------------------------------------------- relocation */
+struct apply_ctx {
+    pe_page_fn page;
+    void *ctx;
+    uint64_t delta, applied;
+    uint32_t cur_rva, next_rva;
+    uint8_t *cur, *next;
+    int failed;
+};
+
+/* Byte `i` (0..4095+8) relative to the current page: the fixup may run into the following page. */
+static uint8_t *fix_byte(struct apply_ctx *a, uint32_t rva)
+{
+    const uint32_t pg = rva & ~0xfffu;
+    if (pg == a->cur_rva && a->cur) return a->cur + (rva & 0xfff);
+    if (!a->next || a->next_rva != pg) {
+        a->next = a->page(a->ctx, pg);
+        a->next_rva = pg;
+        if (!a->next) return 0;
+    }
+    return a->next + (rva & 0xfff);
+}
+
+static int apply_one(void *c, uint32_t rva, unsigned type)
+{
+    struct apply_ctx *a = c;
+    const unsigned width = reloc_width(type & 15);
+    uint8_t *p[8];
+    uint64_t v = 0;
+    unsigned k;
+    if ((rva & ~0xfffu) != a->cur_rva) {                            /* new block page (blocks are per page) */
+        a->cur_rva = rva & ~0xfffu;
+        a->cur = a->page(a->ctx, a->cur_rva);
+        if (!a->cur) { a->failed = 1; return PE_E_RELOC; }
+    }
+    for (k = 0; k < width; ++k) {
+        p[k] = fix_byte(a, rva + k);
+        if (!p[k]) { a->failed = 1; return PE_E_RELOC; }
+        v |= (uint64_t)*p[k] << (8 * k);
+    }
+    switch (type & 15) {
+    case 10: v += a->delta; break;
+    case 3: v = (uint32_t)((uint32_t)v + (uint32_t)a->delta); break;
+    case 1: v = (uint16_t)((uint16_t)v + (uint16_t)(a->delta >> 16)); break;
+    case 2: v = (uint16_t)((uint16_t)v + (uint16_t)a->delta); break;
+    case 4: {                                                       /* HIGHADJ: high half of a 32-bit value, rounded */
+        int64_t t = (int64_t)(int16_t)(uint16_t)v * 65536 + (int16_t)(uint16_t)(type >> 16);
+        t += (int32_t)(uint32_t)a->delta;
+        t += 0x8000;
+        v = (uint16_t)((uint64_t)t >> 16);
+        break;
+    }
+    default: return PE_E_RELOC;
+    }
+    for (k = 0; k < width; ++k) *p[k] = (uint8_t)(v >> (8 * k));
+    ++a->applied;
+    return 0;
+}
+
+int pe_apply_relocs(const uint8_t *f, uint64_t size, const pe_info_t *o, uint64_t delta, pe_page_fn page, void *ctx,
+                    uint64_t *applied)
+{
+    struct apply_ctx a;
+    int rc;
+    a.page = page; a.ctx = ctx; a.delta = delta; a.applied = 0;
+    a.cur_rva = a.next_rva = 0xffffffffu; a.cur = a.next = 0; a.failed = 0;
+    rc = pe_walk_relocs(f, size, o, apply_one, &a);
+    if (applied) *applied = a.applied;
+    return rc || a.failed ? PE_E_RELOC : PE_OK;
+}
+
+/* ---------------------------------------------------------------- delay-load imports */
+int pe_walk_delay_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_delay_fn fn, void *ctx)
+{
+    uint32_t d = o->dir_rva[13];
+    unsigned guard = 0;
+    if (!d) return PE_OK;
+    for (;; d += 32) {
+        uint64_t off, avail;
+        pe_delay_desc_t dd;
+        uint32_t idx;
+        if (++guard > 1024) return PE_E_DELAY;
+        if (pe_rva_to_offset(f, size, o, d, &off, &avail) || avail < 32) return PE_E_DELAY;
+        dd.attributes = rd32(f + off);
+        dd.name_rva = rd32(f + off + 4);
+        dd.module_handle_rva = rd32(f + off + 8);
+        dd.iat_rva = rd32(f + off + 12);
+        dd.int_rva = rd32(f + off + 16);
+        dd.bound_iat_rva = rd32(f + off + 20);
+        dd.unload_iat_rva = rd32(f + off + 24);
+        dd.timestamp = rd32(f + off + 28);
+        if (!dd.name_rva && !dd.iat_rva && !dd.int_rva) return PE_OK;       /* terminator */
+        if (!(dd.attributes & 1)) {
+            /* Legacy VA-based descriptor (Visual C++ 6): fields hold VAs. Converted when they fit the image. */
+            uint32_t *fields[] = { &dd.name_rva, &dd.module_handle_rva, &dd.iat_rva, &dd.int_rva, &dd.bound_iat_rva, &dd.unload_iat_rva };
+            unsigned k;
+            for (k = 0; k < 6; ++k)
+                if (*fields[k]) {
+                    const uint64_t va = *fields[k];
+                    if (va < o->image_base || va - o->image_base >= o->size_of_image) return PE_E_DELAY;
+                    *fields[k] = (uint32_t)(va - o->image_base);
+                }
+        }
+        if (!dd.name_rva || !dd.iat_rva || !dd.int_rva || !dd.module_handle_rva) return PE_E_DELAY;
+        if (!in_range(dd.module_handle_rva, 8, o->size_of_image)) return PE_E_DELAY;
+        if (pe_read_string(f, size, o, dd.name_rva, dd.dll, sizeof dd.dll)) return PE_E_DELAY;
+        for (idx = 0;; ++idx) {
+            uint64_t toff, tavail, thunk;
+            int rc;
+            if (idx > 65536) return PE_E_DELAY;
+            if (pe_rva_to_offset(f, size, o, dd.int_rva + idx * 8, &toff, &tavail) || tavail < 8) return PE_E_DELAY;
+            thunk = rd64(f + toff);
+            if (!thunk) break;
+            if (!in_range((uint64_t)dd.iat_rva + idx * 8, 8, o->size_of_image)) return PE_E_DELAY;
+            if (thunk >> 63) {
+                rc = fn(ctx, &dd, 0, (uint16_t)(thunk & 0xffff), 1, dd.iat_rva + idx * 8);
+            } else {
+                char sym[160];
+                uint64_t hoff, havail;
+                uint32_t hn = (uint32_t)thunk;
+                if (!(dd.attributes & 1)) {
+                    if (thunk < o->image_base || thunk - o->image_base >= o->size_of_image) return PE_E_DELAY;
+                    hn = (uint32_t)(thunk - o->image_base);
+                } else if (thunk >> 31) {
+                    return PE_E_DELAY;
+                }
+                if (pe_rva_to_offset(f, size, o, hn, &hoff, &havail) || havail < 3) return PE_E_DELAY;
+                if (pe_read_string(f, size, o, hn + 2, sym, sizeof sym)) return PE_E_DELAY;
+                rc = fn(ctx, &dd, sym, rd16(f + hoff), 0, dd.iat_rva + idx * 8);
+            }
+            if (rc) return rc;
+        }
+    }
+}
+
+/* ---------------------------------------------------------------- load configuration */
+int pe_load_config(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_load_config_t *c)
+{
+    uint64_t off, avail;
+    uint32_t n;
+    *c = (pe_load_config_t){0};
+    if (!o->dir_rva[10]) return PE_OK;
+    if (pe_rva_to_offset(f, size, o, o->dir_rva[10], &off, &avail) || avail < 4) return PE_E_LOADCFG;
+    n = rd32(f + off);
+    if (n < 4 || n > avail || n > 0x10000) return PE_E_LOADCFG;
+#define LC64(at) ((at) + 8 <= n ? rd64(f + off + (at)) : 0)
+#define LC32(at) ((at) + 4 <= n ? rd32(f + off + (at)) : 0)
+#define LC16(at) ((at) + 2 <= n ? rd16(f + off + (at)) : 0)
+    c->size = n;
+    c->dependent_load_flags = (uint16_t)LC16(0x4e);
+    c->security_cookie = LC64(0x58);
+    c->se_handler_table = LC64(0x60);
+    c->se_handler_count = LC64(0x68);
+    c->guard_cf_check_fptr = LC64(0x70);
+    c->guard_cf_dispatch_fptr = LC64(0x78);
+    c->guard_cf_function_table = LC64(0x80);
+    c->guard_cf_function_count = LC64(0x88);
+    c->guard_flags = LC32(0x90);
+    c->guard_iat_table = LC64(0xa0);
+    c->guard_iat_count = LC64(0xa8);
+    c->guard_longjump_table = LC64(0xb0);
+    c->guard_longjump_count = LC64(0xb8);
+    c->dynamic_value_reloc_table = LC64(0xc0);
+    c->guard_rf_failure_fptr = LC64(0xd8);
+    c->dynamic_value_reloc_offset = LC32(0xe0);
+    c->dynamic_value_reloc_section = (uint16_t)LC16(0xe4);
+    c->guard_rf_verify_sp_fptr = LC64(0xe8);
+    c->guard_ehcont_table = LC64(0x108);
+    c->guard_ehcont_count = LC64(0x110);
+    c->guard_xfg_check_fptr = LC64(0x118);
+    c->guard_xfg_dispatch_fptr = LC64(0x120);
+    c->guard_xfg_table_dispatch_fptr = LC64(0x128);
+    c->guard_memcpy_fptr = LC64(0x138);
+#undef LC64
+#undef LC32
+#undef LC16
+    {
+        /* every pointer the loader may write through must be an 8-byte slot inside the image */
+        const uint64_t lo = o->image_base, hi = o->image_base + o->size_of_image;
+        const uint64_t slots[] = { c->security_cookie, c->guard_cf_check_fptr, c->guard_cf_dispatch_fptr,
+                                   c->guard_xfg_check_fptr, c->guard_xfg_dispatch_fptr, c->guard_xfg_table_dispatch_fptr,
+                                   c->guard_rf_failure_fptr, c->guard_rf_verify_sp_fptr, c->guard_memcpy_fptr };
+        unsigned k;
+        for (k = 0; k < sizeof slots / sizeof slots[0]; ++k)
+            if (slots[k] && (slots[k] < lo || slots[k] > hi - 8 || (slots[k] & 7))) return PE_E_LOADCFG;
+        /* tables (read by the CFG/EH-continuation checks): entries of 4 bytes + the stride byte count in GuardFlags */
+        {
+            const uint64_t stride = 4 + ((c->guard_flags & PE_GUARD_CF_FUNCTION_TABLE_SIZE_MASK) >> PE_GUARD_CF_FUNCTION_TABLE_SIZE_SHIFT);
+            const uint64_t tabs[][2] = { { c->guard_cf_function_table, c->guard_cf_function_count },
+                                         { c->guard_iat_table, c->guard_iat_count },
+                                         { c->guard_longjump_table, c->guard_longjump_count },
+                                         { c->guard_ehcont_table, c->guard_ehcont_count } };
+            for (k = 0; k < 4; ++k) {
+                if (!tabs[k][0] && !tabs[k][1]) continue;
+                if (!tabs[k][0] || tabs[k][0] < lo || tabs[k][0] >= hi || tabs[k][1] > (1ull << 32) ||
+                    tabs[k][1] * stride > hi - tabs[k][0])
+                    return PE_E_LOADCFG;
+            }
+        }
+    }
+    return PE_OK;
 }

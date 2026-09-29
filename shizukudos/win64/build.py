@@ -84,7 +84,7 @@ def build_ntdll():
     stub_exports = gen_stubs()
     names = scan_exports(src, "NTAPI")
     names = [n for n in names if n not in ("ShzInitSync",)]
-    write_def(OUT / "ntdll.def", "ntdll.dll", names + ["RtlCaptureContext"] + stub_exports)
+    write_def(OUT / "ntdll.def", "ntdll.dll", names + ["RtlCaptureContext", "__C_specific_handler"] + stub_exports)
     dll = OUT / "ntdll.dll"
     cmd = [CC, *COMMON, "-DSHZ_NTDLL_BUILD", "-shared", "-nostdlib", "-Wl,--entry,ShzNtdllEntry",
            f"-Wl,--image-base,{NTDLL_BASE}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
@@ -101,6 +101,13 @@ def build_kernel32(ntdll_names):
     forwards = [f"{n} = ntdll.{n}" for n in ("RtlCaptureContext", "RtlLookupFunctionEntry", "RtlVirtualUnwind", "RtlUnwindEx",
                                                  "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException") if n in ntdll_names or n == "RtlCaptureContext"]
     names = [n for n in names if n not in ("RtlUnwindKernel32",)]
+    # Windows kernel32 forwards these to ntdll too (V8 and Chromium import them from kernel32); delay-load resolution is
+    # the api-ms-win-core-delayload contract, hosted by kernel32 here (kernelbase on Windows).
+    forwards += [f"{n} = ntdll.{t}" for n, t in (
+        ("RtlAddFunctionTable", "RtlAddFunctionTable"), ("RtlDeleteFunctionTable", "RtlDeleteFunctionTable"),
+        ("RtlInstallFunctionTableCallback", "RtlInstallFunctionTableCallback"), ("RtlRestoreContext", "RtlRestoreContext"),
+        ("ResolveDelayLoadedAPI", "LdrResolveDelayLoadedAPI"), ("ResolveDelayLoadsFromDll", "LdrResolveDelayLoadsFromDll"))
+        if t in ntdll_names]
     write_def(OUT / "kernel32.def", "kernel32.dll", names, forwards)
     dll = OUT / "kernel32.dll"
     cmd = [CC, *COMMON, "-shared", "-nostdlib", "-Wl,--entry,ShzKernel32Entry", f"-Wl,--image-base,{K32_BASE}",
@@ -149,9 +156,20 @@ def build_modules():
                    *[f"-l{l}" for l in ["kernel32", "ntdll", *cfg.get("libs", [])]], "-lgcc", "-o", dll]
             run(cmd)
             run([DLLTOOL, "-d", OUT / f"{name}.def", "-l", OUT / f"lib{name}.a", "--kill-at"])
+            run([DLLTOOL, "-d", OUT / f"{name}.def", "-y", OUT / f"lib{name}_delay.a", "--kill-at"])  # delay-import lib
             built[name] = {"dll": dll, "cmd": cmd, "exports": names, "base": base}
             order.append(name)
     return built
+
+
+# The runners check that T_HELLO.EXE sees its preferred base 0x140000000, so it is linked without DYNAMIC_BASE (a fixed
+# image); T_LAZY.EXE is fixed at 0x140000000 too, so D:\LAZY\BIGRELOC.DLL (same preferred base) must be relocated.
+# Every other app is relocatable and receives an ASLR base from the Kernel64 loader.
+FIXED_BASE_APPS = {"t_hello", "t_lazy"}
+
+# Apps that link a module through its DELAY-import library instead of its ordinary import library: the functions are
+# resolved lazily on first call (dlltool --output-delaylib + crt/shzcrt.c __delayLoadHelper2 -> ResolveDelayLoadedAPI).
+DELAY_MODULES = {"t_delay": ("winmm", "version")}
 
 
 def build_apps(module_libs=()):
@@ -166,9 +184,12 @@ def build_apps(module_libs=()):
             run([WINDRES, "-O", "coff", "-o", res, rc])
             extra.append(res)
         crt = W64 / "crt"
+        delayed = DELAY_MODULES.get(name, ())
+        libs = [(f"{l}_delay" if l in delayed else l) for l in module_libs]
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
-               "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
-               "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+               "-Wl,--image-base,0x140000000", *(["-Wl,--disable-dynamicbase"] if name in FIXED_BASE_APPS else []),
+               "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
+               "-L", OUT, *[f"-l{l}" for l in libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
         run(cmd)
         apps[name] = (exe, cmd)
     return apps
