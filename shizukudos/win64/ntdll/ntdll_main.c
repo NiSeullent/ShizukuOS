@@ -239,12 +239,11 @@ BOOLEAN NTAPI RtlValidateHeap(PVOID hp, ULONG flags, PVOID p)
     if (!hp || ((heap_t *)hp)->magic != HEAP_MAGIC) return FALSE;
     return !p || ((blk_t *)p - 1)->magic == BLOCK_MAGIC;
 }
-PVOID ShzProcessHeap(void) { return g_process_heap; }
 
 void ShzInitHeap(void)
 {
     g_process_heap = RtlCreateHeap(0, 0, 0, 0, 0, 0);
-    if (g_process_heap) *(PVOID *)(shz_peb() + 0x30) = g_process_heap;
+    if (g_process_heap) PEB_PROCESS_HEAP(shz_peb()) = g_process_heap;
     else NtTerminateProcess(CURRENT_PROCESS, STATUS_NO_MEMORY);
 }
 

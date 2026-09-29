@@ -53,14 +53,19 @@ def gen_stubs():
     return exports
 
 
+EXPORT_PATTERNS = {
+    # SHZ_EXPORT <type> NTAPI Name(   (the SHZ_EXPORT prefix is optional; NTAPI/__cdecl names the calling convention)
+    "NTAPI": r"^(?:SHZ_EXPORT\s+)?[A-Za-z_][\w\s\*]*?\b(?:NTAPI|__cdecl)\s+\**(\w+)\s*\(",
+    # K32API <type> WINAPI Name(      (the name is the last identifier before the parameter list)
+    "K32API": r"^K32API\s[^;{()]*?\b(\w+)\s*\(",
+}
+
+
 def scan_exports(paths, marker):
     names = []
     for path in paths:
         text = path.read_text()
-        markers = "(?:NTAPI|__cdecl)" if marker == "NTAPI" else marker
-        for m in re.finditer(r"^(?:%s\s+)?[A-Za-z_][\w\s\*]*?\b%s\s+\**(\w+)\s*\(" % ("SHZ_EXPORT" if marker == "NTAPI" else "K32API", markers),
-                             text, re.M):
-            names.append(m.group(1))
+        names += [m.group(1) for m in re.finditer(EXPORT_PATTERNS[marker], text, re.M)]
     return sorted(set(names))
 
 

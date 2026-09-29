@@ -46,7 +46,6 @@ BOOLEAN NTAPI RtlDestroyHeap(PVOID);
 BOOLEAN NTAPI RtlValidateHeap(PVOID, ULONG, PVOID);
 
 DWORD k32_nt_error(NTSTATUS st);                       /* maps + stores LastError, returns the Win32 code */
-extern PVOID k32_process_heap(void);
 
 /* Windows path <-> NT path conversion (k32_file.c) */
 NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap);

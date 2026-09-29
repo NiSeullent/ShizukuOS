@@ -334,6 +334,14 @@ K32API BOOL WINAPI InitOnceExecuteOnce(PINIT_ONCE once, PINIT_ONCE_FN fn, PVOID 
 K32API VOID WINAPI InitOnceInitialize(PINIT_ONCE once) { once->Ptr = 0; }
 
 /* ---------------------------------------------------------------- interlocked (real exports) */
+/* mingw-w64's winnt.h renames these to compiler intrinsics (InterlockedIncrement -> _InterlockedIncrement); kernel32 must
+ * define and export the real Win32 names. */
+#undef InterlockedIncrement
+#undef InterlockedDecrement
+#undef InterlockedExchange
+#undef InterlockedExchangeAdd
+#undef InterlockedCompareExchange
+#undef InterlockedCompareExchange64
 K32API LONG WINAPI InterlockedIncrement(LONG volatile *p) { return __sync_add_and_fetch(p, 1); }
 K32API LONG WINAPI InterlockedDecrement(LONG volatile *p) { return __sync_sub_and_fetch(p, 1); }
 K32API LONG WINAPI InterlockedExchange(LONG volatile *p, LONG v) { return __sync_lock_test_and_set(p, v); }

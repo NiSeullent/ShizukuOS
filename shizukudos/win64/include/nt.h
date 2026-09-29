@@ -126,7 +126,8 @@ PVOID NTAPI RtlAllocateHeap(PVOID heap, ULONG flags, SIZE_T size);
 BOOLEAN NTAPI RtlFreeHeap(PVOID heap, ULONG flags, PVOID p);
 SIZE_T NTAPI RtlSizeHeap(PVOID heap, ULONG flags, PVOID p);
 PVOID NTAPI RtlReAllocateHeap(PVOID heap, ULONG flags, PVOID p, SIZE_T size);
-PVOID ShzProcessHeap(void);
+/* The process heap handle lives in PEB.ProcessHeap; ntdll publishes it there, every module reads it from there. */
+static inline PVOID ShzProcessHeap(void) { return PEB_PROCESS_HEAP(shz_peb()); }
 ULONG NTAPI RtlNtStatusToDosError(NTSTATUS status);
 void ShzRunInitRoutines(int reason, void *reserved);
 void ShzRunThreadAttach(int reason);

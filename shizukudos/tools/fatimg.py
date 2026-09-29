@@ -19,6 +19,7 @@ def _mtools_env():
     env = dict(os.environ)
     env["MTOOLS_SKIP_CHECK"] = "1"
     env["TZ"] = "UTC"
+    env["SOURCE_DATE_EPOCH"] = str(FIXED_EPOCH)   # mformat stamps the volume-label entry with "now" otherwise
     return env
 
 

@@ -2,8 +2,6 @@
  * kernel32.dll: virtual memory, heaps, module loading and process environment. */
 #include "k32.h"
 
-#define ShzProcessHeap() (*(PVOID *)(shz_peb() + 0x30))
-
 int k32_utf8_to_wide(const char *s, int n, WCHAR *w, int cap);
 int k32_wide_to_utf8(const WCHAR *w, int n, char *s, int cap);
 

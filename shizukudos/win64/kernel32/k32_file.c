@@ -7,8 +7,6 @@
  */
 #include "k32.h"
 
-#define ShzProcessHeap() (*(PVOID *)(shz_peb() + 0x30))
-
 #define FILE_OPEN_D 1
 #define FILE_CREATE_D 2
 #define FILE_OPEN_IF_D 3

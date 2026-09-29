@@ -34,7 +34,7 @@ __asm__(".globl ___chkstk_ms\n___chkstk_ms:\n push %rcx\n push %rax\n cmp $0x100
 
 /* ---- heap ---- */
 void *shz_malloc(size_t n) { return HeapAlloc(GetProcessHeap(), 0, n ? n : 1); }
-void *shz_calloc(size_t n, size_t m) { if (m && n > (size_t)-1 / m) return 0; return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, n * m ? n * m : 1); }
+void *shz_calloc(size_t n, size_t m) { if (m && n > (size_t)-1 / m) return 0; return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (n && m) ? n * m : 1); }
 void *shz_realloc(void *p, size_t n) { return p ? HeapReAlloc(GetProcessHeap(), 0, p, n ? n : 1) : shz_malloc(n); }
 void shz_free(void *p) { if (p) HeapFree(GetProcessHeap(), 0, p); }
 

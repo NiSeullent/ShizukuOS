@@ -80,7 +80,9 @@ def main():
             raise SystemExit(f"required tool missing: {tool}")
     results = {}
     k32 = build_kernel("kernel32", "kernel32", K32_FLAGS, "elf32", "elf_i386", "KERNEL32.BIN")
-    k64 = build_kernel("kernel64", "kernel64", K64_FLAGS, "elf64", "elf_x86_64", "KERNEL64.BIN")
+    # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.
+    k64 = build_kernel("kernel64", "kernel64", K64_FLAGS, "elf64", "elf_x86_64", "KERNEL64.BIN",
+                       extra_c=[SHZ / "win64" / "pe_parse.c"])
     for name, r in (("kernel32", k32), ("kernel64", k64)):
         results[name] = {"bytes": r["bytes"], "sha256": r["sha256"], "elf_sha256": r["elf_sha256"],
                          "commands": [[str(x) for x in c] for c in r["commands"]]}
