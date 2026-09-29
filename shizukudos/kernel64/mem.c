@@ -5,20 +5,23 @@
  *   0xFFFFFFFF80000000  kernel image alias (physical 0, first 1 GiB, 2 MiB pages)
  *   0xFFFF800000000000  direct map of all guest-physical memory this kernel owns or may touch
  *   0x0000000000010000..0x00007FFFFFFEEFFF  user space (per process)
- * Guest-physical layout: 0..1 MiB boot structures, 1 MiB kernel, 2..6 MiB heap,
- * 6 MiB.. page allocator (initrd range excluded).
+ * Guest-physical layout: 0..1 MiB boot structures, 1 MiB kernel, 2..14 MiB heap,
+ * 14 MiB.. page allocator (initrd range excluded). RAM up to MAX_PAGES (4 GiB of guest-physical) is managed;
+ * the standalone stub caps what it reports below 4 GiB (boot32.c MAX_RAM), 256 MiB configurations still work.
+ * The direct map is built for all of RAM with 2 MiB pages (a 3.5 GiB guest costs 4 page directories).
  */
 #include "k64.h"
 
 #define HEAP_PA 0x200000ull
-#define HEAP_BYTES 0x400000ull
-#define PMM_BASE 0x600000ull
-#define MAX_PAGES (256ull * 1024 * 1024 / PAGE_SIZE)
+#define HEAP_BYTES 0xC00000ull
+#define PMM_BASE 0xE00000ull
+#define MAX_PAGES (4096ull * 1024 * 1024 / PAGE_SIZE)
 
 static uint8_t page_map[MAX_PAGES / 8];
 static uint64_t pmm_pages, pmm_free_pages, pmm_hint;
 static uint64_t kpml4;
 static uint64_t ram_top;
+extern int mem_probe_ok;
 
 uint64_t kernel_pml4(void) { return kpml4; }
 
@@ -267,9 +270,26 @@ void mem_init(const shz_bootinfo_t *bi)
     for (c = 0; c < bi->channel_count; ++c)                          /* IPC windows above RAM */
         for (off = 0; off < bi->channel[c].size; off += PAGE_SIZE)
             KASSERT(vm_map(kpml4, DIRECT_MAP + bi->channel[c].gpa + off, bi->channel[c].gpa + off, PT_W | PT_NX) == 0);
+    /* Kernel windows (kwin.c: lazily populated file views and large kernel buffers) live in their own PML4 slot.
+     * Its PDPT must exist now: every process PML4 copies the kernel half at creation (vm_new_space) and would
+     * otherwise miss a slot created later, faulting on window pages while running on that process's tables. */
+    KASSERT(walk(kpml4, KWIN_BASE, 1, 0));
     write_cr3(kpml4);
     phys_base_va = DIRECT_MAP;
     heap_init();
+    /* Probe the top of RAM through the direct map (exercises page directories beyond 1 GiB on big guests). */
+    {
+        volatile uint64_t *top = (volatile uint64_t *)p2v(ram_top - PAGE_SIZE);
+        const uint64_t pattern = 0x5348495a554b3634ull ^ ram_top;
+        uint64_t saved = top[0];
+        top[0] = pattern;
+        mem_probe_ok = top[0] == pattern;
+        top[0] = saved;
+        shz_evidence(10, (ram_top >> 20) | ((uint64_t)mem_probe_ok << 32) | (pmm_free_pages << 33));
+    }
 }
+
+int mem_probe_ok;
+uint64_t mem_ram_top(void) { return ram_top; }
 
 uint64_t phys_base_va = K64_VIRT_BASE;
