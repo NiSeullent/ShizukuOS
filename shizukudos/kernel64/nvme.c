@@ -795,6 +795,26 @@ static int nv_control(blk_dev_t *d, unsigned op, uint64_t arg, uint64_t *out)
     case BLK_CTL_STATS:
         if (out) { out[0] = c->irqs; out[1] = c->timeouts; out[2] = c->resets; out[3] = c->max_inflight; }
         return 0;
+    case BLK_CTL_ERROR_TEST: {                          /* READ past the namespace end: expect LBA Out of Range (0/80h) */
+        nvme_slot_t *s = slot_get(c);
+        uint16_t st;
+        uint8_t *b = kmalloc(1u << ns->lba_shift);
+        if (!s || !b) { if (s) slot_put(c, s); kfree(b); return -1; }
+        prep_rw(ns, s, 0, d->sectors + 8, 1);
+        rc = build_prp(s, b, 1u << ns->lba_shift);
+        if (!rc) {
+            io_submit(c, s, 1);
+            rc = wait_slot(c, s);
+        }
+        st = s->status;
+        slot_put(c, s);
+        if (!rc) rc = ns_rw(ns, 0, 0, 1, b);            /* the queue must still work afterwards */
+        kfree(b);
+        kprintf("K64 nvme%u: error self-test: out-of-range read -> sct %x sc %x, then read of LBA 0 -> %d\n", c->idx,
+                (st >> 8) & 7, st & 0xff, rc);
+        if (out) { out[0] = st; out[1] = (uint64_t)(int64_t)rc; }
+        return (!rc && (st & 0x7ff) == 0x0080) ? 0 : -1;          /* DNR (bit 14) may be set */
+    }
     case BLK_CTL_SET_TIMEOUT_MS:
         if (arg < 10 || arg > 600000) return -1;
         c->timeout_ms = (uint32_t)arg;

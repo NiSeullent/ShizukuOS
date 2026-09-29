@@ -14,8 +14,14 @@ GPT_SIG = b"EFI PART"
 
 
 def content(size, seed):
-    """Image body: seeded pseudo-random bytes (C-implemented Mersenne Twister, ~1 s per 256 MiB)."""
-    return bytearray(random.Random(seed).randbytes(size))
+    """Image body: seeded pseudo-random bytes (C-implemented Mersenne Twister, ~1 s per 256 MiB), generated in 16 MiB
+    steps (randbytes() of more than 2^31 bits at once overflows)."""
+    rnd = random.Random(seed)
+    out = bytearray()
+    step = 16 << 20
+    while len(out) < size:
+        out += rnd.randbytes(min(step, size - len(out)))
+    return out
 
 
 def write_mbr(img, primaries, extended=None, sector=512):

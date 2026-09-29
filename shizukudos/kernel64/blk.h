@@ -79,8 +79,11 @@ enum {
     BLK_CTL_RESET = 1,                          /* controller reset + recovery while idle; out = resets so far */
     BLK_CTL_TIMEOUT_TEST = 2,                   /* NVMe: lose a command on purpose, detect the timeout, recover */
     BLK_CTL_IRQ_MODE = 3,                       /* arg: 0 = best (MSI-X), 1 = INTx, 2 = poll; out = mode now in use */
-    BLK_CTL_STATS = 4,                          /* out[0..3]: interrupts, timeouts, resets, max in flight */
-    BLK_CTL_SET_TIMEOUT_MS = 5                  /* per-command timeout (default 5000 ms NVMe / 2000 ms SD) */
+    BLK_CTL_STATS = 4,                          /* out[0..3]: NVMe interrupts, timeouts, resets, max in flight;
+                                                   SDHCI ADMA2 transfers, timeouts, line resets, PIO transfers */
+    BLK_CTL_SET_TIMEOUT_MS = 5,                 /* per-command timeout (default 5000 ms NVMe / 2000 ms SD) */
+    BLK_CTL_XFER_MODE = 6,                      /* SDHCI: arg 0 = ADMA2 when possible, 1 = force PIO; out = 1 if ADMA2 */
+    BLK_CTL_ERROR_TEST = 7                      /* send a command addressing past the end: must fail and leave the device usable */
 };
 
 int blk_register(blk_dev_t *d);                 /* adds to the registry (name must be unique); 0 = ok */
