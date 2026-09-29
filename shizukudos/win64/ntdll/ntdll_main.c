@@ -358,11 +358,32 @@ static const struct { NTSTATUS status; ULONG error; } status_map[] = {
     {STATUS_STACK_OVERFLOW, ERROR_STACK_OVERFLOW}, {STATUS_UNSUCCESSFUL, ERROR_GEN_FAILURE},
 };
 
+/* File-system, locking and device statuses (values from ntstatus.h, errors from winerror.h). */
+static const struct { NTSTATUS status; ULONG error; } status_map_io[] = {
+    {(NTSTATUS)0xC0000004, ERROR_BAD_LENGTH},            /* STATUS_INFO_LENGTH_MISMATCH */
+    {(NTSTATUS)0xC0000010, ERROR_INVALID_FUNCTION},      /* STATUS_INVALID_DEVICE_REQUEST */
+    {(NTSTATUS)0xC0000013, ERROR_NOT_READY},             /* STATUS_NO_MEDIA_IN_DEVICE */
+    {(NTSTATUS)0xC000002A, ERROR_NOT_LOCKED},            /* STATUS_NOT_LOCKED */
+    {(NTSTATUS)0xC000003B, ERROR_BAD_PATHNAME},          /* STATUS_OBJECT_PATH_SYNTAX_BAD */
+    {(NTSTATUS)0xC0000054, ERROR_LOCK_VIOLATION},        /* STATUS_FILE_LOCK_CONFLICT */
+    {(NTSTATUS)0xC0000055, ERROR_LOCK_VIOLATION},        /* STATUS_LOCK_NOT_GRANTED */
+    {(NTSTATUS)0xC0000056, ERROR_ACCESS_DENIED},         /* STATUS_DELETE_PENDING */
+    {(NTSTATUS)0xC000007E, ERROR_NOT_LOCKED},            /* STATUS_RANGE_NOT_LOCKED */
+    {(NTSTATUS)0xC0000098, ERROR_FILE_INVALID},          /* STATUS_FILE_INVALID */
+    {(NTSTATUS)0xC000009A, ERROR_NO_SYSTEM_RESOURCES},   /* STATUS_INSUFFICIENT_RESOURCES */
+    {(NTSTATUS)0xC00000A2, ERROR_WRITE_PROTECT},         /* STATUS_MEDIA_WRITE_PROTECTED */
+    {(NTSTATUS)0xC00000D4, ERROR_NOT_SAME_DEVICE},       /* STATUS_NOT_SAME_DEVICE */
+    {(NTSTATUS)0xC0000106, ERROR_FILENAME_EXCED_RANGE},  /* STATUS_NAME_TOO_LONG */
+    {(NTSTATUS)0xC0000121, ERROR_ACCESS_DENIED},         /* STATUS_CANNOT_DELETE */
+};
+
 ULONG NTAPI RtlNtStatusToDosError(NTSTATUS status)
 {
     unsigned i;
     for (i = 0; i < sizeof status_map / sizeof status_map[0]; ++i)
         if (status_map[i].status == status) return status_map[i].error;
+    for (i = 0; i < sizeof status_map_io / sizeof status_map_io[0]; ++i)
+        if (status_map_io[i].status == status) return status_map_io[i].error;
     if (NT_SUCCESS(status)) return 0;
     return ERROR_MR_MID_NOT_FOUND;                 /* 317: unmapped status, never silently "success" */
 }

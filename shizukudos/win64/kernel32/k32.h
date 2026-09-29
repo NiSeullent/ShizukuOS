@@ -50,6 +50,17 @@ DWORD k32_nt_error(NTSTATUS st);                       /* maps + stores LastErro
 /* Windows path <-> NT path conversion (k32_file.c) */
 NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap);
 DWORD k32_current_directory(WCHAR *buf, DWORD cap);
+/* Opens a DOS path through NtCreateFile (file.c). disposition: FILE_*_D, options: OPT_*. */
+NTSTATUS k32_open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG options, HANDLE *h, ULONG_PTR *info);
+#define FILE_OPEN_D 1
+#define FILE_CREATE_D 2
+#define FILE_OPEN_IF_D 3
+#define FILE_OVERWRITE_D 4
+#define FILE_OVERWRITE_IF_D 5
+#define OPT_DIRECTORY 1
+#define OPT_NON_DIRECTORY 0x40
+#define OPT_DELETE_ON_CLOSE 0x1000
+#define ATTR_DEVICE 0x40
 size_t k32_wlen(const WCHAR *s);
 
 /* UTF-8 <-> UTF-16 helpers (k32_file.c). n < 0 means NUL-terminated (the terminator is converted too). Return 0 when the

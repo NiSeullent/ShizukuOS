@@ -11,6 +11,7 @@ extern void process_thread_gone(process_t *p);
 extern void ob_register_timer(kobject_t *o);
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
+extern int32_t sysext_dispatch(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
 extern int32_t ldr_load_module_runtime(process_t *p, const char *name, uint64_t *base_out);
 extern uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint64_t ordinal);
 
@@ -54,7 +55,7 @@ static kobject_t *object_for_handle(process_t *p, uint64_t h)
     }
 }
 
-static int64_t filetime_now(void)
+int64_t filetime_now(void)
 {
     /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform). */
     hcreg_t secs = 0;
@@ -371,6 +372,6 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         return res;
     }
     case SYS_NtShzGetTeb: return (int32_t)0;
-    default: return STATUS_NOT_IMPLEMENTED;
+    default: return num >= 0x50 ? sysext_dispatch(p, r, num, a1, a2, a3, a4) : STATUS_NOT_IMPLEMENTED;
     }
 }

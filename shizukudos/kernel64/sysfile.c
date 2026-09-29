@@ -8,6 +8,8 @@ struct objattr { uint32_t length, pad; uint64_t root, name; uint32_t attributes,
 struct iosb { uint64_t status; uint64_t information; };
 
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
+extern int k32_lock_conflict(const file_t *f, uint64_t off, uint64_t len, int write);       /* sysk32.c: byte-range locks */
+extern void k32_locks_release(const file_t *f);
 
 #define IO_OPENED 1
 #define IO_CREATED 2
@@ -21,6 +23,57 @@ extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 #define GENERIC_READ 0x80000000u
 #define GENERIC_WRITE 0x40000000u
 #define DELETE_ACCESS 0x10000u
+#define FILE_WRITE_ATTRIBUTES 0x100u
+#define GENERIC_ALL 0x10000000u
+#ifndef STATUS_FILE_LOCK_CONFLICT
+#define STATUS_FILE_LOCK_CONFLICT ((int32_t)0xC0000054)
+#endif
+#ifndef STATUS_MEDIA_WRITE_PROTECTED
+#define STATUS_MEDIA_WRITE_PROTECTED ((int32_t)0xC00000A2)
+#endif
+
+extern int64_t filetime_now(void);                  /* wall-clock FILETIME (sysx.c, the same clock as NtQuerySystemTime) */
+
+/* File times are kept as the millisecond tick count of the moment they happened; they become FILETIMEs of the real wall clock by adding
+ * the wall-clock FILETIME of tick 0, taken from the Supervisor RTC the first time a time is needed. */
+static uint64_t ft_of_ticks(uint64_t ticks)
+{
+    static uint64_t base;
+    if (!base) base = (uint64_t)filetime_now() - ticks_now() * 10000ull;
+    return base + ticks * 10000ull;
+}
+
+/* A node is write-protected if it lives in the read-only initrd or carries FILE_ATTRIBUTE_READONLY. */
+static int node_ro(const fsnode_t *n) { return n->readonly || (n->attrs & FILE_ATTRIBUTE_READONLY); }
+
+static uint64_t node_time(const fsnode_t *n, int which)              /* 0 creation, 1 last access, 2 last write */
+{
+    if (which == 0) return n->ft_create ? (uint64_t)n->ft_create : ft_of_ticks(n->ctime);
+    if (which == 1 && n->ft_access) return (uint64_t)n->ft_access;
+    return n->ft_write ? (uint64_t)n->ft_write : ft_of_ticks(n->mtime);
+}
+
+/* UTF-8 -> UTF-16 (names are stored as UTF-8); returns the number of UTF-16 units written (at most cap). */
+static uint32_t utf8_to_utf16(const char *s, uint16_t *w, uint32_t cap)
+{
+    uint32_t o = 0;
+    while (*s) {
+        uint32_t c = (uint8_t)*s++;
+        if (c >= 0xf0 && s[0] && s[1] && s[2]) { c = ((c & 7) << 18) | ((s[0] & 0x3f) << 12) | ((s[1] & 0x3f) << 6) | (s[2] & 0x3f); s += 3; }
+        else if (c >= 0xe0 && s[0] && s[1]) { c = ((c & 15) << 12) | ((s[0] & 0x3f) << 6) | (s[1] & 0x3f); s += 2; }
+        else if (c >= 0xc0 && s[0]) { c = ((c & 31) << 6) | (s[0] & 0x3f); s += 1; }
+        if (c >= 0x10000) {
+            if (o + 2 > cap) break;
+            c -= 0x10000;
+            w[o++] = (uint16_t)(0xd800 + (c >> 10));
+            w[o++] = (uint16_t)(0xdc00 + (c & 0x3ff));
+        } else {
+            if (o + 1 > cap) break;
+            w[o++] = (uint16_t)c;
+        }
+    }
+    return o;
+}
 
 static int set_iosb(process_t *p, uint64_t user, int32_t status, uint64_t info)
 {
@@ -67,6 +120,7 @@ void file_object_closed(kobject_t *o)
     if (o->refs != 1) return;                           /* other handles remain */
     f = o->u.file.file;
     if (!f) return;
+    k32_locks_release(f);                               /* closing the last handle drops the byte-range locks of the file object */
     if (f->node) {
         if (f->node->open_count) --f->node->open_count;
         if (f->node->delete_pending && f->node->open_count == 0)
@@ -74,6 +128,23 @@ void file_object_closed(kobject_t *o)
     }
     kfree(f);
     o->u.file.file = 0;
+}
+
+/* Status for a path that does not exist: STATUS_OBJECT_PATH_NOT_FOUND when its directory is missing (or is not a directory),
+ * STATUS_OBJECT_NAME_NOT_FOUND when only the last component is. */
+static int32_t missing_status(const char *path)
+{
+    char dir[300];
+    size_t n = strlen(path), cut = n;
+    fsnode_t *d;
+    if (n >= sizeof dir) return STATUS_OBJECT_PATH_NOT_FOUND;
+    while (cut && path[cut - 1] == '\\') --cut;                   /* ignore a trailing separator */
+    while (cut && path[cut - 1] != '\\') --cut;
+    if (!cut) return STATUS_OBJECT_NAME_NOT_FOUND;
+    memcpy(dir, path, cut);
+    dir[cut] = 0;
+    d = fs_lookup(dir);
+    return d && d->is_dir && !d->delete_pending ? STATUS_OBJECT_NAME_NOT_FOUND : STATUS_OBJECT_PATH_NOT_FOUND;
 }
 
 static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
@@ -94,6 +165,9 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     if (!oa.name) return STATUS_OBJECT_NAME_INVALID;
     st = read_ustr(p, oa.name, path, sizeof path);
     if (st) return st;
+    /* Only volume C: exists: another drive letter names no device (Windows: the \??\Z: link is missing, so the path is not found). */
+    if (path[0] == '\\' && path[1] == '?' && path[2] == '?' && path[3] == '\\' && path[4] && path[5] == ':' && (path[4] | 32) != 'c')
+        return STATUS_OBJECT_PATH_NOT_FOUND;
     /* console pseudo-devices */
     if (!strcmp(path, "\\??\\CONOUT$") || !strcmp(path, "\\??\\CONIN$")) {
         o = console_object(path[6] == 'O');
@@ -108,9 +182,9 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     n = fs_lookup(path);
     if (n && n->delete_pending) n = 0;
     switch (disposition) {
-    case FILE_OPEN: if (!n) { set_iosb(p, a4, STATUS_OBJECT_NAME_NOT_FOUND, IO_DOES_NOT_EXIST); return STATUS_OBJECT_NAME_NOT_FOUND; } break;
+    case FILE_OPEN: if (!n) { st = missing_status(path); set_iosb(p, a4, st, IO_DOES_NOT_EXIST); return st; } break;
     case FILE_CREATE: if (n) { set_iosb(p, a4, STATUS_OBJECT_NAME_COLLISION, IO_EXISTS); return STATUS_OBJECT_NAME_COLLISION; } break;
-    case FILE_OVERWRITE: if (!n) return STATUS_OBJECT_NAME_NOT_FOUND; break;
+    case FILE_OVERWRITE: if (!n) return missing_status(path); break;
     case FILE_SUPERSEDE: case FILE_OPEN_IF: case FILE_OVERWRITE_IF: break;
     default: return STATUS_INVALID_PARAMETER;
     }
@@ -122,12 +196,12 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
         if ((options & FILE_DIRECTORY_FILE) && !n->is_dir) return STATUS_NOT_A_DIRECTORY;
         if ((options & FILE_NON_DIRECTORY_FILE) && n->is_dir) return STATUS_FILE_IS_A_DIRECTORY;
         if (!n->is_dir && (disposition == FILE_OVERWRITE || disposition == FILE_OVERWRITE_IF || disposition == FILE_SUPERSEDE)) {
-            if (n->readonly) return STATUS_ACCESS_DENIED;
+            if (node_ro(n)) return STATUS_ACCESS_DENIED;
             fs_truncate(n, 0);
             info = disposition == FILE_SUPERSEDE ? IO_SUPERSEDED : IO_OVERWRITTEN;
         }
     }
-    if ((a2 & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE_ACCESS)) && n->readonly && !created)
+    if ((a2 & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE_ACCESS)) && node_ro(n) && !created)
         return STATUS_ACCESS_DENIED;
     if (n->is_dir && (a2 & (GENERIC_WRITE | FILE_WRITE_DATA))) return STATUS_FILE_IS_A_DIRECTORY;
     f = kzalloc(sizeof *f);
@@ -190,7 +264,7 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
         return STATUS_END_OF_FILE;
     }
     if (!f->node || f->node->is_dir) return STATUS_INVALID_PARAMETER;
-    if (write ? !(f->access & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA)) : !(f->access & (GENERIC_READ | FILE_READ_DATA | 0x120089)))
+    if (write ? !(f->access & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA)) : !(f->access & (GENERIC_READ | GENERIC_ALL | FILE_READ_DATA)))
         return STATUS_ACCESS_DENIED;
     if (off_ptr) {
         if (copy_from_user(p, &off, off_ptr, 8)) return STATUS_ACCESS_VIOLATION;
@@ -199,6 +273,7 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
         off = f->pos;
     }
     if (write && f->append) off = f->node->size;
+    if (len && k32_lock_conflict(f, off, len, write)) return STATUS_FILE_LOCK_CONFLICT;      /* byte-range locks held through other handles */
     tmp = kmalloc(len > 65536 ? 65536 : len ? len : 1);
     if (!tmp) return STATUS_NO_MEMORY;
     {
@@ -245,9 +320,9 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         struct basicinfo b;
         if (len < sizeof b) return STATUS_BUFFER_TOO_SMALL;
         memset(&b, 0, sizeof b);
-        if (f->node) { b.create = 132000000000000000ull + f->node->ctime * 10000; b.write = 132000000000000000ull + f->node->mtime * 10000;
-                       b.access = b.write; b.change = b.write; b.attrs = f->node->attrs; }
-        else b.attrs = FILE_ATTRIBUTE_NORMAL;
+        if (f->node) { b.create = node_time(f->node, 0); b.write = node_time(f->node, 2); b.access = node_time(f->node, 1);
+                       b.change = b.write; b.attrs = f->node->attrs; }
+        else b.attrs = f->console ? 0x40 : FILE_ATTRIBUTE_NORMAL;      /* console pseudo-device: FILE_ATTRIBUTE_DEVICE marks it for GetFileType */
         if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
         set_iosb(p, iosb, STATUS_SUCCESS, sizeof b);
         return STATUS_SUCCESS;
@@ -261,6 +336,35 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         if (copy_to_user(p, buf, &s, sizeof s)) return STATUS_ACCESS_VIOLATION;
         set_iosb(p, iosb, STATUS_SUCCESS, sizeof s);
         return STATUS_SUCCESS;
+    }
+    case 6: {                                            /* FileInternalInformation: {LARGE_INTEGER IndexNumber} */
+        int64_t idx = f->node ? (int64_t)f->node->id : 0;
+        if (len < 8) return STATUS_BUFFER_TOO_SMALL;
+        if (copy_to_user(p, buf, &idx, 8)) return STATUS_ACCESS_VIOLATION;
+        set_iosb(p, iosb, STATUS_SUCCESS, 8);
+        return STATUS_SUCCESS;
+    }
+    case 9: {                                            /* FileNameInformation: {ULONG FileNameLength; WCHAR FileName[]}, volume-relative */
+        uint16_t w[512];
+        const fsnode_t *chain[24];
+        uint32_t depth = 0, nchars = 0, total, room, copy;
+        const fsnode_t *n;
+        if (!f->node) return STATUS_INVALID_PARAMETER;
+        if (len < 4) return STATUS_BUFFER_TOO_SMALL;
+        for (n = f->node; n && n->parent && depth < 24; n = n->parent) chain[depth++] = n;
+        if (!depth) { w[nchars++] = '\\'; }
+        while (depth) {
+            const fsnode_t *c = chain[--depth];
+            if (nchars + 1 >= 512) return STATUS_OBJECT_NAME_INVALID;
+            w[nchars++] = '\\';
+            nchars += utf8_to_utf16(c->name, w + nchars, 512 - nchars);
+        }
+        total = nchars * 2;
+        room = (uint32_t)len - 4;
+        copy = total < room ? total : room & ~1u;
+        if (copy_to_user(p, buf, &total, 4) || (copy && copy_to_user(p, buf + 4, w, copy))) return STATUS_ACCESS_VIOLATION;
+        set_iosb(p, iosb, copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS, 4 + copy);
+        return copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
     }
     case 14: {                                           /* FilePositionInformation */
         int64_t pos = (int64_t)f->pos;
@@ -309,13 +413,13 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         fsnode_t *dst, *dir;
         char leaf[96];
         uint32_t chars;
-        if (!f->node || f->node->readonly || len < 20 || copy_from_user(p, hdr, buf, 20)) return STATUS_ACCESS_DENIED;
+        if (!f->node || node_ro(f->node) || len < 20 || copy_from_user(p, hdr, buf, 20)) return STATUS_ACCESS_DENIED;
         chars = *(uint32_t *)(hdr + 16) / 2;
         if (chars >= 260 || len < 20 + chars * 2ull || copy_from_user(p, w, buf + 20, chars * 2ull)) return STATUS_INVALID_PARAMETER;
         if (utf16_to_utf8(w, chars, newpath, sizeof newpath) < 0) return STATUS_OBJECT_NAME_INVALID;
         dst = fs_lookup(newpath);
         if (dst && dst != f->node) {
-            if (!hdr[0] || dst->is_dir || dst->readonly) return STATUS_OBJECT_NAME_COLLISION;
+            if (!hdr[0] || dst->is_dir || node_ro(dst)) return STATUS_OBJECT_NAME_COLLISION;
             fs_remove(dst);
         }
         dir = fs_create(newpath, f->node->is_dir, 0);       /* create the destination entry (empty) ... */
@@ -325,6 +429,9 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
             dir->child = f->node->child;
             { fsnode_t *c; for (c = dir->child; c; c = c->sibling) c->parent = dir; }
             dir->open_count = f->node->open_count;
+            dir->id = f->node->id;                            /* a rename keeps the file's identity, times and attributes */
+            dir->ctime = f->node->ctime; dir->mtime = f->node->mtime;
+            dir->ft_create = f->node->ft_create; dir->ft_access = f->node->ft_access; dir->ft_write = f->node->ft_write;
             f->node->data = 0; f->node->size = f->node->cap = 0; f->node->child = 0;
             f->node->delete_pending = 1;
             fs_remove(f->node);
@@ -334,10 +441,27 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     }
+    case 4: {                                            /* FileBasicInformation: times (0 and -1 leave a time alone) and attributes (0 = unchanged) */
+        struct basicinfo b;
+        uint32_t a;
+        if (!f->node || len < sizeof b || copy_from_user(p, &b, buf, sizeof b)) return STATUS_ACCESS_VIOLATION;
+        if (!(f->access & (FILE_WRITE_ATTRIBUTES | GENERIC_WRITE | GENERIC_ALL))) return STATUS_ACCESS_DENIED;   /* handle lacks FILE_WRITE_ATTRIBUTES */
+        if (f->node->readonly) return STATUS_MEDIA_WRITE_PROTECTED;                                 /* initrd files live on read-only media */
+        if (b.attrs) {
+            a = b.attrs & (FILE_ATTRIBUTE_READONLY | 0x2 | 0x4 | 0x20 | 0x100 | 0x1000 | 0x2000);   /* readonly, hidden, system, archive, temporary, offline, not indexed */
+            if (b.attrs & ~(a | FILE_ATTRIBUTE_NORMAL | FILE_ATTRIBUTE_DIRECTORY)) return STATUS_INVALID_PARAMETER;
+            f->node->attrs = f->node->is_dir ? (a | FILE_ATTRIBUTE_DIRECTORY) : (a ? a : FILE_ATTRIBUTE_NORMAL);
+        }
+        if (b.create && b.create != ~0ull) f->node->ft_create = (int64_t)b.create;
+        if (b.access && b.access != ~0ull) f->node->ft_access = (int64_t)b.access;
+        if (b.write && b.write != ~0ull) f->node->ft_write = (int64_t)b.write;
+        set_iosb(p, iosb, STATUS_SUCCESS, 0);
+        return STATUS_SUCCESS;
+    }
     case 13: {                                           /* FileDispositionInformation */
         uint8_t del;
         if (!f->node || copy_from_user(p, &del, buf, 1)) return STATUS_ACCESS_VIOLATION;
-        if (f->node->readonly) return STATUS_ACCESS_DENIED;
+        if (node_ro(f->node)) return STATUS_ACCESS_DENIED;
         if (del && f->node->is_dir && f->node->child) return STATUS_DIRECTORY_NOT_EMPTY;
         f->node->delete_pending = del != 0;
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
@@ -347,7 +471,9 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
     }
 }
 
-struct dirinfo {                                         /* FILE_BOTH_DIR_INFORMATION prefix */
+/* FILE_BOTH_DIR_INFORMATION prefix. Packed so that FileName starts at offset 94 as in the documented NT layout (without packing the
+ * compiler pads the structure to 96 and user-mode readers of the NT layout would see a name shifted by two characters). */
+struct __attribute__((packed)) dirinfo {
     uint32_t next_entry, file_index;
     uint64_t create, access, write, change, eof, alloc;
     uint32_t attrs, name_len, ea_size;
@@ -377,14 +503,12 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
         uint32_t nchars = 0, size;
         if (c->delete_pending) continue;
         if (idx++ < f->dir_index) continue;
-        {
-            const char *s = c->name;
-            while (*s && nchars < 95) wname[nchars++] = (uint8_t)*s++;
-        }
+        nchars = utf8_to_utf16(c->name, wname, 95);
         memset(d, 0, sizeof *d);
         d->file_index = (uint32_t)idx;
-        d->create = 132000000000000000ull + c->ctime * 10000;
-        d->write = d->change = d->access = 132000000000000000ull + c->mtime * 10000;
+        d->create = node_time(c, 0);
+        d->write = d->change = node_time(c, 2);
+        d->access = node_time(c, 1);
         d->eof = c->size;
         d->alloc = (c->size + 4095) & ~4095ull;
         d->attrs = c->attrs;
@@ -428,6 +552,10 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
         if (a1 == CURRENT_PROCESS_HANDLE || a1 == CURRENT_THREAD_HANDLE) return STATUS_SUCCESS;
         return handle_close(p, a1);
     case SYS_NtFlushBuffersFile: return file_of(p, a1, 0) ? STATUS_SUCCESS : STATUS_INVALID_HANDLE;
+    case SYS_NtCancelIoFile:                             /* (FileHandle, IoStatusBlock): every request completes before the call returns, so none is pending */
+        if (!file_of(p, a1, 0)) return STATUS_INVALID_HANDLE;
+        set_iosb(p, a2, STATUS_SUCCESS, 0);
+        return STATUS_SUCCESS;
     default: *handled = 0; return 0;
     }
 }

@@ -219,6 +219,7 @@ void kfree(void *p)
 }
 
 size_t kheap_used(void) { return heap_used_bytes; }
+size_t kheap_total(void) { return HEAP_BYTES - sizeof(struct hblock); }
 
 /* ---------------------------------------------------------------- init */
 static void map_2m(uint64_t pml4, uint64_t va, uint64_t pa, uint64_t flags)

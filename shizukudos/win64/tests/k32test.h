@@ -24,6 +24,16 @@ static int k32t_checks, k32t_failed;
 #define CHECK_W(cond, what) CHECK(cond, what)
 #define CHECKV_W(cond, what, ...) CHECKV(cond, what, __VA_ARGS__)
 #endif
+/* CHECK_N / CHECKV_N: expectations that hold on Windows and on Kernel64 but where Wine's NT layer (ntdll, also underneath the Shizuku
+ * kernel32 sources in the developer harness; -DK32T_UNDER_WINE is given in both harness modes) is known to differ: skipped under Wine and
+ * enforced in the Kernel64 run. */
+#if defined(K32T_UNDER_WINE)
+#define CHECK_N(cond, what) do { (void)(cond); ++k32t_checks; printf("PASS: %s (skipped: Wine's NT layer differs from Windows here)\n", what); } while (0)
+#define CHECKV_N(cond, what, ...) CHECK_N(cond, what)
+#else
+#define CHECK_N(cond, what) CHECK(cond, what)
+#define CHECKV_N(cond, what, ...) CHECKV(cond, what, __VA_ARGS__)
+#endif
 /* GetLastError() must equal `err` (checked right after a failing call) */
 #define CHECK_ERR(err, what) CHECKV(GetLastError() == (DWORD)(err), what, "GetLastError=%u expected %u", (unsigned)GetLastError(), (unsigned)(err))
 

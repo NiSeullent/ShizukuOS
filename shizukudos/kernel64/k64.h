@@ -94,6 +94,7 @@ void *kmalloc(size_t n);
 void *kzalloc(size_t n);
 void kfree(void *p);
 size_t kheap_used(void);
+size_t kheap_total(void);                       /* bytes the kernel heap can hand out */
 
 /* ---- sched.c ---- */
 typedef struct thread thread_t;

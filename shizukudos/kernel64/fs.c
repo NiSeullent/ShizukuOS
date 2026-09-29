@@ -3,6 +3,7 @@
 
 static fsnode_t root;
 static uint64_t total_bytes;
+static uint64_t next_node_id = 2;               /* the root is node 1 */
 
 fsnode_t *fs_root(void) { return &root; }
 uint64_t fs_total_bytes(void) { return total_bytes; }
@@ -13,7 +14,9 @@ void fs_init(void)
     root.name[0] = 0;
     root.is_dir = 1;
     root.attrs = FILE_ATTRIBUTE_DIRECTORY;
+    root.id = 1;
     total_bytes = 0;
+    fs_create("\\TEMP", 1, 0);                  /* C:\TEMP: the loader exports it as %TEMP% and %TMP% */
 }
 
 static char fold(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
@@ -39,7 +42,12 @@ static fsnode_t *child_named(fsnode_t *dir, const char *name, size_t n)
 /* Splits "C:\a\b" / "\??\C:\a\b" / "\a\b"; returns the component start after the drive. */
 static const char *strip_prefix(const char *p)
 {
+    static const char device[] = "\\Device\\HarddiskVolume1";           /* the NT name of volume C: (what QueryDosDevice("C:") returns) */
+    size_t i;
     if (p[0] == '\\' && p[1] == '?' && p[2] == '?' && p[3] == '\\') p += 4;
+    for (i = 0; device[i]; ++i)
+        if (fold(p[i]) != fold(device[i])) break;
+    if (!device[i] && (p[i] == 0 || p[i] == '\\')) return p + i;
     if (p[0] && p[1] == ':') p += 2;
     return p;
 }
@@ -99,6 +107,7 @@ fsnode_t *fs_create(const char *path, int is_dir, int *created)
     n->sibling = dir->child;
     dir->child = n;
     n->ctime = n->mtime = ticks_now();
+    n->id = next_node_id++;
     if (created) *created = 1;
     return n;
 }
@@ -144,6 +153,7 @@ int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len)
     memcpy(n->data + off, buf, len);
     if (off + len > n->size) n->size = off + len;
     n->mtime = ticks_now();
+    n->ft_write = 0;                            /* a write supersedes an explicitly set last-write time */
     return 0;
 }
 
@@ -157,6 +167,8 @@ int fs_truncate(fsnode_t *n, uint64_t size)
         memset(n->data + n->size, 0, size - n->size);
     }
     n->size = size;
+    n->mtime = ticks_now();
+    n->ft_write = 0;
     return 0;
 }
 

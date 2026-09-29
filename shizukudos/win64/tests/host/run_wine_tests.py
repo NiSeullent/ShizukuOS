@@ -38,9 +38,12 @@ GROUPS = {
     "t_k32_module": ["k32_module.c", "k32_utf.c", "../ntdll/unwind.c", "../ntdll/ntdll_asm.S"],
     "t_k32_fmt": ["k32_fmt.c", "k32_module.c", "k32_utf.c", "k32_gmem.c"],
     "t_k32_mem": ["k32_gmem.c"],
+    "t_k32_file": ["k32_file.c", "k32_find.c", "k32_fileinfo.c", "k32_volume.c", "k32_utf.c", "nls_core.c"],
 }
 DEFINES = {                                       # per-test compiler defines (ntdll sources bind the Rtl* calls of the test to them)
     "t_k32_module": ["-DSHZ_NTDLL_BUILD", "-D_NTSYSTEM_="],
+    # Wine's NtLockFile/NtUnlockFile reject a non-NULL IoStatusBlock (real NT requires one): route them through the shim
+    "t_k32_file": ["-DNtLockFile=shz_wine_NtLockFile", "-DNtUnlockFile=shz_wine_NtUnlockFile"],
 }
 SHIM = HERE / "wine_shim.c"                       # k32_nt_error over Wine's ntdll
 WINDRES = "x86_64-w64-mingw32-windres"
@@ -48,7 +51,7 @@ WINDRES = "x86_64-w64-mingw32-windres"
 
 def build(test, shizuku):
     exe = OUT / f"{test}.{'shizuku' if shizuku else 'reference'}.exe"
-    cmd = [CC, *COMMON, "-DSHZ_NO_EVIDENCE", "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console",
+    cmd = [CC, *COMMON, "-DSHZ_NO_EVIDENCE", "-DK32T_UNDER_WINE", "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console",
            "-Wl,--image-base,0x140000000", "-I", str(W64 / "include"), "-I", str(W64 / "crt")]
     if shizuku:
         cmd += ["-D_KERNEL32_="] + DEFINES.get(test, [])
