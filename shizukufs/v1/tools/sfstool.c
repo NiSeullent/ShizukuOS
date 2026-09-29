@@ -490,8 +490,10 @@ static int cmd_crashverify(const char *logpath, uint64_t seed)
                 sfs_stat(g_fs, ino, &st);
                 rc = read_all(ino, st.size, &data);
                 if (rc) { fprintf(stderr, "VERIFY: read %s: %s\n", f->path, sfs_strerror(rc)); errors++; free(data); continue; }
-                for (b = 0; b < st.size; b += 4096) {
-                    uint64_t n = st.size - b < 4096 ? st.size - b : 4096, z;
+                /* granularity = the volume's block: each block is an independent device write */
+                const uint64_t vbs = sfs_block_size(g_fs);
+                for (b = 0; b < st.size; b += vbs) {
+                    uint64_t n = st.size - b < vbs ? st.size - b : vbs, z;
                     int ok = 0;
                     if (f->live && b + n <= f->size && !memcmp(data + b, f->data + b, n)) ok = 1;
                     for (k = 0; k < nv && !ok; ++k)
@@ -505,7 +507,7 @@ static int cmd_crashverify(const char *logpath, uint64_t seed)
                         for (k = 0; k < w->n && !ok; ++k)
                             if (w->f[k].live && w->f[k].data && b + n <= w->f[k].size && !memcmp(data + b, w->f[k].data + b, n)) ok = 1;
                     }
-                    if (!ok) { fprintf(stderr, "VERIFY: %s block %llu holds data from no version\n", f->path, (unsigned long long)(b / 4096)); errors++; break; }
+                    if (!ok) { fprintf(stderr, "VERIFY: %s block %llu holds data from no version\n", f->path, (unsigned long long)(b / vbs)); errors++; break; }
                 }
                 free(data);
                 checked_loose++;

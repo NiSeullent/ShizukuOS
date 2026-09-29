@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Kernel64 file-system name space: an in-memory file system (C:\), backed by kernel heap memory, plus a read-only
  * view of the initial RAM archive, plus mounted disk volumes (D:\ ... from disk.c: FAT32 over the block registry;
- * read/write when the device and the volume allow it: create, write, extend, truncate, flush; no delete/rename). NT-style path resolution: case-insensitive components separated by backslashes; names are stored as
+ * read/write when the device and the volume allow it: create, write, extend, truncate, flush; no delete/rename;
+ * ShizukuFS/ext4 volumes from sfs_mount.c on the next letters, which also delete and rename through the optional
+ * fsvol remove/rename operations). NT-style path resolution: case-insensitive components separated by backslashes; names are stored as
  * UTF-8 and compared with ASCII case folding. Disk directories are enumerated into fsnodes on first use, so every
  * consumer (lookup, NtQueryDirectoryFile, the loader) sees one node type; disk data is read through the volume's
  * fsvol_t operations instead of a heap buffer.
