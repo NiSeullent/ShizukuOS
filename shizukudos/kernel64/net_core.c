@@ -824,6 +824,11 @@ static void ip_input(const uint8_t *p, uint32_t len, const uint8_t *smac)
     dst = rd32(p + 16);
     if (src == 0xffffffffu || (src >> 28) == 0xe || p[8] == 0)
         return;
+    /* RFC 1122 3.2.1.3: loopback addresses never legitimately arrive from the wire; neither does our own address as a source.
+     * ICMP errors are the one exception kept: SLIRP quotes 127.0.0.1 as the source of the errors it relays from the host, and
+     * we only use the quoted header (not the sender address) to find the socket. */
+    if (smac && ((dst >> 24) == 127 || (g_net.ip && src == g_net.ip) || ((src >> 24) == 127 && p[9] != IPPROTO_ICMP_)))
+        return;
     local = ip_is_local(dst);
     if (!local && !ip_is_broadcast(dst)) {
         /* Unconfigured host accepting the DHCP server's unicast reply (RFC 2131 4.1: it may arrive before we own the address). */
@@ -916,8 +921,12 @@ void net_arp_flush(void)
     }
 }
 
+static volatile int init_done;
+
 int net_ensure_init(void)
 {
+    if (init_done)
+        return 0;
     mutex_lock(&init_mtx);
     if (!g_net.stack_up) {
         sem_init(&g_nic_kick, 0);
@@ -947,6 +956,7 @@ int net_ensure_init(void)
             net_unlock();
         }
     }
+    init_done = 1;                                          /* after the DHCP wait: later callers see a configured interface */
     mutex_unlock(&init_mtx);
     return 0;
 }

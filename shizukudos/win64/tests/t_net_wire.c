@@ -201,6 +201,30 @@ static void test_many(void)
     for (i = 0; i < N; ++i) if (s[i] != INVALID_SOCKET) closesocket(s[i]);
 }
 
+/* 512 KiB upload to a port on which the lossy proxy imposes a total outage in the middle of the transfer (all frames dropped for
+ * 2.5 s): the sender must back off exponentially, then resume and deliver every byte. In the direct boot there is no outage. */
+static void test_outage(void)
+{
+    const int n = 512 * 1024;
+    int err;
+    SOCKET s = tcp_to(17007, &err);
+    unsigned char *data = xmalloc((size_t)n);
+    unsigned resp[2] = {0, 0}, crc;
+    DWORD t0 = GetTickCount();
+    ULONG r0 = net_stat(NST_TCP_RETRANS);
+    fill_pat(data, (size_t)n, 9000000);
+    crc = shz_crc32(data, (size_t)n);
+    CHECK(s != INVALID_SOCKET, "connect to the outage port");
+    CHECK(send_all(s, data, n) == n, "uploaded %d bytes across the outage", n);
+    shutdown(s, SD_SEND);
+    CHECK(recv_all(s, resp, 8) == 8, "sink replied after the outage");
+    printf("WIRE outage_upload n=%d start=9000000 crc=%08x server_crc=%08x server_n=%u ms=%u retrans=%u\n", n, crc, resp[0], resp[1],
+           (unsigned)(GetTickCount() - t0), (unsigned)(net_stat(NST_TCP_RETRANS) - r0));
+    CHECK(resp[0] == crc && resp[1] == (unsigned)n, "all %d bytes arrived intact (CRC %08x)", n, crc);
+    closesocket(s);
+    free(data);
+}
+
 static void test_keepalive(void)
 {
     int err, on = 1, idle = 1, intvl = 1;
@@ -419,6 +443,7 @@ int main(void)
     test_errors();
     test_half_close();
     test_many();
+    test_outage();
     test_keepalive();
     test_udp();
     test_nonblocking();
@@ -431,8 +456,14 @@ int main(void)
            (unsigned)(net_stat(NST_TCP_RETRANS) - retrans0), (unsigned)(net_stat(NST_TCP_FAST_RETRANS) - fast0),
            (unsigned)(net_stat(NST_TCP_OOO) - ooo0), (unsigned)net_stat(NST_TCP_DUPACK_TX), (unsigned)(net_stat(NST_TCP_BAD_CSUM) - badcs0),
            (unsigned)net_stat(NST_TCP_TX), (unsigned)net_stat(NST_TCP_RX));
+    printf("WIRE stats_abs ip_bad=%u udp_bad=%u tcp_bad=%u echo_rx=%u echo_tx=%u arp_rep_tx=%u arp_req_rx=%u unreach_tx=%u rst_tx=%u reasm=%u frag_tx=%u\n",
+           (unsigned)net_stat(NST_IP_BAD_CSUM), (unsigned)net_stat(NST_UDP_BAD_CSUM), (unsigned)net_stat(NST_TCP_BAD_CSUM), (unsigned)net_stat(NST_ICMP_ECHO_RX),
+           (unsigned)net_stat(NST_ICMP_ECHO_TX), (unsigned)net_stat(NST_ARP_REP_TX), (unsigned)net_stat(NST_ARP_REQ_RX), (unsigned)net_stat(NST_ICMP_UNREACH_TX),
+           (unsigned)net_stat(NST_TCP_RST_TX), (unsigned)net_stat(NST_IP_REASM), (unsigned)net_stat(NST_IP_FRAG_TX));
     if (g_lossy)
         CHECK(net_stat(NST_TCP_RETRANS) - retrans0 > 0, "the lossy path forced TCP retransmissions (%u) and every transfer still verified", (unsigned)(net_stat(NST_TCP_RETRANS) - retrans0));
+    if (g_lossy)
+        Sleep(2500);                                        /* let the proxy's injected frames (ARP/ICMP/fragments/RST probes) arrive and be answered */
     Sleep(100);
     net_census(m1);
     CHECK(m1[3] <= m0[3] + 2, "no socket objects leaked by the wire tests (%llu live before, %llu after)", m0[3], m1[3]);
