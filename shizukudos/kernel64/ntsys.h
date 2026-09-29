@@ -34,7 +34,9 @@
 /* Reserved ranges for subsystems that live in their own kernel64 files and their own sys_ext_*() handler (sysext.c).
  * Each subsystem defines ONLY its own list below (numbers must stay inside its range):
  *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf
- *   IPC / process model 0xb0-0xcf (kernel64/ipc_*.c, npfs.c; 0xa0-0xaf are theirs too) */
+ *   installer (SHZSETUP) 0xb0-0xbf   gpu (P-render) 0xd0-0xdf   NT driver host (N1) 0xe0-0xef
+ *   storage raw-sector interface (S1) 0xf0-0xff
+ *   IPC / process model (kernel64/ipc_*.c, npfs.c): misc 0xa0-0xaf plus 0xc0-0xcf and 0x100-0x10f */
 #define SYSCALL_LIST_REGISTRY(X) \
     X(NtCreateKey, 0x50) X(NtOpenKey, 0x51) X(NtOpenKeyEx, 0x52) X(NtQueryValueKey, 0x53) X(NtSetValueKey, 0x54) \
     X(NtDeleteKey, 0x55) X(NtDeleteValueKey, 0x56) X(NtEnumerateKey, 0x57) X(NtEnumerateValueKey, 0x58) \
@@ -65,13 +67,25 @@
     X(NtShzCreateUserProcess, 0xaf)
 
 #define SYSCALL_LIST_IPC(X) \
-    X(NtCreateJobObject, 0xb0) X(NtOpenJobObject, 0xb1) X(NtAssignProcessToJobObject, 0xb2) \
-    X(NtSetInformationJobObject, 0xb3) X(NtQueryInformationJobObject, 0xb4) X(NtTerminateJobObject, 0xb5) \
-    X(NtIsProcessInJob, 0xb6) X(NtSetInformationObject, 0xb7) \
-    X(NtReadVirtualMemory, 0xb9) X(NtWriteVirtualMemory, 0xba) X(NtShzQueryKernelStats, 0xbb) \
-    X(NtQueryIoCompletion, 0xbc) X(NtOpenEvent, 0xbd) X(NtOpenMutant, 0xbe) X(NtOpenSemaphore, 0xbf) \
-    X(NtOpenTimer, 0xc0) X(NtOpenIoCompletion, 0xc1) X(NtDeviceIoControlFile, 0xc2) \
-    X(NtNotifyChangeDirectoryFile, 0xc3) X(NtQueryTimer, 0xc4)
+    X(NtCreateJobObject, 0xc0) X(NtOpenJobObject, 0xc1) X(NtAssignProcessToJobObject, 0xc2) \
+    X(NtSetInformationJobObject, 0xc3) X(NtQueryInformationJobObject, 0xc4) X(NtTerminateJobObject, 0xc5) \
+    X(NtIsProcessInJob, 0xc6) X(NtSetInformationObject, 0xc7) \
+    X(NtReadVirtualMemory, 0xc8) X(NtWriteVirtualMemory, 0xc9) X(NtShzQueryKernelStats, 0xca) \
+    X(NtQueryIoCompletion, 0xcb) X(NtOpenEvent, 0xcc) X(NtOpenMutant, 0xcd) X(NtOpenSemaphore, 0xce) \
+    X(NtOpenTimer, 0xcf) X(NtOpenIoCompletion, 0x100) X(NtDeviceIoControlFile, 0x101) \
+    X(NtNotifyChangeDirectoryFile, 0x102) X(NtQueryTimer, 0x103)
+
+/* Display/GPU (kernel64/gpu_sys.c; structures in win64/include/shzgpu.h) */
+#define SYSCALL_LIST_GPU(X) \
+    X(NtShzGpuQuery, 0xd0) X(NtShzGpuEdid, 0xd1) X(NtShzGpuCursor, 0xd2) X(NtShzGpuCapset, 0xd3) \
+    X(NtShzGpuCtxCreate, 0xd4) X(NtShzGpuCtxDestroy, 0xd5) X(NtShzGpuResourceCreate, 0xd6) \
+    X(NtShzGpuResourceDestroy, 0xd7) X(NtShzGpuSubmit, 0xd8) X(NtShzGpuTransfer, 0xd9)
+
+/* Installer 0xb0-0xbf (kernel64/setup_sys.c): block-device enumeration and raw sector I/O for SHZSETUP.EXE until the
+ * storage track's raw-sector syscalls (0xf0-0xff) are merged, plus the post-setup power request. See setup_abi.h. */
+#define SYSCALL_LIST_SETUP(X) \
+    X(NtShzSetupBlkQuery, 0xb0) X(NtShzSetupBlkRead, 0xb1) X(NtShzSetupBlkWrite, 0xb2) X(NtShzSetupBlkFlush, 0xb3) \
+    X(NtShzSetupPower, 0xb4)
 
 enum {
 #define X(name, num) SYS_##name = num,
@@ -81,9 +95,11 @@ enum {
     SYSCALL_LIST_NET(X)
     SYSCALL_LIST_K32(X)
     SYSCALL_LIST_MISC(X)
+    SYSCALL_LIST_GPU(X)
+    SYSCALL_LIST_SETUP(X)
     SYSCALL_LIST_IPC(X)
 #undef X
-    SYS_MAX = 0xd0
+    SYS_MAX = 0x110                 /* every number below goes to sys_extended(); sysext.c rejects unrouted ranges */
 };
 
 /* NTSTATUS values used by the kernel (subset of ntstatus.h; same numeric values). */

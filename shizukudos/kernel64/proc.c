@@ -8,7 +8,7 @@
 extern void enter_user(uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2);
 extern void vm_set_demand_range(uint64_t lo, uint64_t hi);
 
-#define MAX_PROCS 16
+#define MAX_PROCS 64                    /* a dead process's slot is recycled once no thread or handle refers to it (ipc_core.c) */
 #define USER_STACK_BYTES (1024 * 1024)
 #define TEB_BYTES 0x2000
 #define PEB_BYTES 0x1000
@@ -52,8 +52,10 @@ process_t *process_create_empty(const char *name)
     thread_reap_exited();                       /* exited threads drop their process references: dead processes' slots */
     for (i = 1; i <= MAX_PROCS; ++i)
         if (!procs[i].used) { p = &procs[i]; break; }
-    if (!p)
+    if (!p) {
+        kprintf("K64: process table full (%u slots)\n", (unsigned)MAX_PROCS);
         return 0;
+    }
     memset(p, 0, sizeof *p);
     p->pml4 = vm_new_space();
     if (!p->pml4)

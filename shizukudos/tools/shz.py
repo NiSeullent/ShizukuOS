@@ -183,6 +183,11 @@ def suite_host(results):
            "PASS" if hashes[0][3] == hashes[1][3] else "FAIL", detail=hashes[0][3][:16])
     manifest = shzlib.load_manifest()
     for name, spec in manifest["upstreams"].items():
+        if spec.get("corpus") and not (shzlib.UPSTREAM_DIR / name / ".git").exists():
+            # driver-corpus sources (~650 MB) are fetched only by shizukudos/ntdrv/corpus/build.py, never by the boot builds
+            record(results, f"upstream {name} pinned at {spec['commit'][:12]} (driver corpus)", "SKIP",
+                   detail="not fetched; shizukudos/ntdrv/corpus/build.py fetches it")
+            continue
         head = subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name), "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
         subs = {sub: subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name / sub), "rev-parse", "HEAD"],
@@ -344,6 +349,17 @@ def suite_win64(results):
     run_script(results, "Kernel32/Kernel64 build (separate ELF32/ELF64 images)", [SHZ / "kbuild.py"])
     run_script(results, "Kernel64 + Win64 apps on QEMU (standalone stub, no Supervisor/VMX): self-tests, T_HELLO.EXE exit 7",
                [SHZ / "tests" / "run_k64_standalone.py"], timeout=400, expect_marker="PASS")
+    run_script(results, "virtqueue model, virtio-gpu layout, virgl encoder (+ execution on the host's virglrenderer)",
+               [SHZ / "tests" / "test_virtio_host.py"], timeout=600, expect_marker="PASS")
+    for display in ("vga", "virtio"):
+        run_script(results, f"Kernel64 GUI + GPU on QEMU, display {display}: every scene pixel-exact, GPU traffic checks",
+                   [SHZ / "tests" / "run_k64_gui.py", "--display", display, "--timeout", "600",
+                    "--out", BUILD / "kernel64s" / f"gui-{display}"], timeout=900, expect_marker="PASS")
+    gl = run([sys.executable, SHZ / "tests" / "run_k64_gui.py", "--display", "virtio-gl", "--timeout", "600",
+              "--out", BUILD / "kernel64s" / "gui-virtio-gl"], capture=True, check=False, timeout=900)
+    lines = (gl.stdout or "").strip().splitlines()
+    record(results, "Kernel64 virgl 3D through virtio-gpu-gl (T_GPU_3D triangle on the host GPU)",
+           {0: "PASS", 2: "BLOCKED"}.get(gl.returncode, "FAIL"), detail=lines[-1] if lines else "", exit_code=gl.returncode)
     reason = "needs Intel VMX in L1 (/dev/kvm + kvm_intel nested); run `test --suite boot` on such a host"
     if l1_vmx_available() and not supervisor_checks("Win64: "):
         run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=600)
@@ -489,9 +505,9 @@ def cmd_package(args):
                 files.append((path, f"source/{path.relative_to(REPO)}"))
     # GPL/LGPL source offer: the exact upstream trees the binaries were built from (submodules included:
     # CSMWrap LGPL-2.1 + SeaBIOS LGPL-3.0 + its BSD/MIT/Apache parts).
-    for upstream in shzlib.load_manifest()["upstreams"]:
+    for upstream, spec in shzlib.load_manifest()["upstreams"].items():
         tree = shzlib.UPSTREAM_DIR / upstream
-        if tree.exists():
+        if tree.exists() and not spec.get("corpus"):          # corpus binaries are not in this bundle
             tar = out / f"{upstream}-{shzlib.load_manifest()['upstreams'][upstream]['commit'][:12]}.tar.gz"
             run(["tar", "--exclude=.git", "-czf", tar, "-C", tree.parent, upstream], timeout=300)
             files.append((tar, f"upstream-source/{tar.name}"))

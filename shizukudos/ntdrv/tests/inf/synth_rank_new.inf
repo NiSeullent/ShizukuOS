@@ -1,0 +1,39 @@
+; SPDX-License-Identifier: GPL-2.0-only
+; Ranking fixture B: newer DriverVer, only generic (VEN&DEV) hardware IDs.
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=Net
+ClassGuid={4d36e972-e325-11ce-bfc1-08002be10318}
+Provider=%P%
+DriverVer=06/15/2023,2.0.0.0
+
+[Manufacturer]
+%P%=M,NTamd64
+
+[M.NTamd64]
+%D1%=J1, PCI\VEN_1AF4&DEV_7001
+%D2%=J2, PCI\VEN_1AF4&DEV_7002
+%D3%=J3, PCI\VEN_1AF4&DEV_7005&SUBSYS_00051AF4
+
+[J1.NT]
+[J2.NT]
+[J3.NT]
+[J1.NT.Services]
+AddService=newA,,S
+[J2.NT.Services]
+AddService=newB,,S
+[J3.NT.Services]
+AddService=newC,,S
+
+[S]
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\new.sys
+
+[Strings]
+P="Synthetic"
+D1="New generic 7001"
+D2="New generic 7002"
+D3="New subsys 7005"

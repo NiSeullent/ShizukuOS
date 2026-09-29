@@ -176,6 +176,38 @@ def build_apps(module_libs=()):
     return apps
 
 
+def build_setup(module_libs=()):
+    """SHZSETUP.EXE, the installer (win64/setup/*.c; its portable core is shared with the host tests in
+    shizukudos/install/tests). Packed as \\SHZ\\SETUP\\SHZSETUP.EXE; Kernel64 runs it when booted with shz.setup=auto."""
+    src = sorted((W64 / "setup").glob("*.c"))
+    exe = OUT / "SHZSETUP.EXE"
+    crt = W64 / "crt"
+    cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
+           "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", W64 / "setup", *src, crt / "shzcrt.c",
+           "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+    run(cmd)
+    return exe, cmd
+
+
+def build_sys_apps(module_libs=()):
+    """System programs: every win64/apps/<name>/ containing *.c builds <name>.exe, packed as \\SHZ\\SYS64\\<NAME>.EXE
+    (not a T_*.EXE self-check: the kernel's test run does not start it)."""
+    apps = {}
+    root = W64 / "apps"
+    for d in sorted(root.glob("*")) if root.is_dir() else []:
+        src = sorted(d.glob("*.c"))
+        if not d.is_dir() or not src:
+            continue
+        exe = OUT / f"{d.name}.exe"
+        crt = W64 / "crt"
+        cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
+               "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", d, *src, crt / "shzcrt.c",
+               "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+        run(cmd)
+        apps[d.name] = (exe, cmd)
+    return apps
+
+
 def pack_archive(files):
     """SHZARC01: header, entries {char path[120]; u64 offset; u64 size}, then file data (16-byte aligned)."""
     entries = []
@@ -204,11 +236,16 @@ def main():
     k32, k32_cmd, k32_names = build_kernel32(ntdll_names)
     modules = build_modules()
     apps = build_apps(sorted(modules))
+    setup_exe, _ = build_setup(sorted(modules))
+    sys_apps = build_sys_apps(sorted(modules))
     files = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
         files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
     for name, (exe, _) in sorted(apps.items()):
         files.append((f"\\SHZ\\TESTS\\{exe.name.upper()}", exe.read_bytes()))
+    files.append(("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe.read_bytes()))
+    for name, (exe, _) in sorted(sys_apps.items()):
+        files.append((f"\\SHZ\\SYS64\\{exe.name.upper()}", exe.read_bytes()))
     data_dir = W64 / "tests" / "data"
     if data_dir.exists():
         for f in sorted(data_dir.iterdir()):
@@ -223,6 +260,8 @@ def main():
         "kernel32": {"sha256": sha256_file(k32), "exports": len(k32_names)},
         "modules": {n: {"sha256": sha256_file(m["dll"]), "exports": len(m["exports"]), "base": hex(m["base"])} for n, m in modules.items()},
         "apps": {n: sha256_file(e) for n, (e, _) in apps.items()},
+        "setup": {"SHZSETUP.EXE": sha256_file(setup_exe)},
+        "sys_apps": {n: sha256_file(e) for n, (e, _) in sys_apps.items()},
         "archive": {"sha256": sha256_file(img), "files": [p for p, _ in files]},
         "commands": {"ntdll": [str(x) for x in ntdll_cmd], "kernel32": [str(x) for x in k32_cmd]},
     })
