@@ -7,17 +7,6 @@
  */
 #include "k32.h"
 
-#define FILE_OPEN_D 1
-#define FILE_CREATE_D 2
-#define FILE_OPEN_IF_D 3
-#define FILE_OVERWRITE_D 4
-#define FILE_OVERWRITE_IF_D 5
-#define OPT_DIRECTORY 1
-#define OPT_NON_DIRECTORY 0x40
-#define OPT_DELETE_ON_CLOSE 0x1000
-#define ATTR_DEVICE 0x40
-
-size_t k32_wlen(const WCHAR *s) { size_t n = 0; while (s[n]) ++n; return n; }
 
 /* ---------------------------------------------------------------- current directory */
 static WCHAR g_cwd[260];
@@ -61,6 +50,8 @@ K32API DWORD WINAPI GetCurrentDirectoryA(DWORD cap, LPSTR buf)
 }
 
 /* ---------------------------------------------------------------- path conversion */
+/* As RtlDosPathNameToNtPathName: a \\?\ path is taken verbatim; any other path is made absolute and its "." and ".." components
+ * are resolved (GetFullPathName) before the \??\ prefix is put in front, since the NT layer does not interpret them. */
 NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap)
 {
     size_t n = 0, i;
@@ -70,16 +61,11 @@ NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap)
     cwd_init();
     if (dos[0] == '\\' && dos[1] == '\\' && dos[2] == '?' && dos[3] == '\\') {       /* \\?\ verbatim */
         for (i = 4; dos[i] && t < 298; ++i) tmp[t++] = dos[i];
-    } else if (dos[0] && dos[1] == ':') {
-        for (i = 0; dos[i] && t < 298; ++i) tmp[t++] = dos[i];
-    } else if (dos[0] == '\\' || dos[0] == '/') {                                    /* rooted on the current drive */
-        tmp[t++] = 'C'; tmp[t++] = ':';
-        for (i = 0; dos[i] && t < 298; ++i) tmp[t++] = dos[i];
+        tmp[t] = 0;
     } else {
-        for (i = 0; g_cwd[i] && t < 298; ++i) tmp[t++] = g_cwd[i];
-        for (i = 0; dos[i] && t < 298; ++i) tmp[t++] = dos[i];
+        t = GetFullPathNameW(dos, 300, tmp, 0);
+        if (!t) return STATUS_OBJECT_NAME_INVALID;
     }
-    tmp[t] = 0;
     if (t >= 298) return STATUS_OBJECT_NAME_INVALID;
     for (i = 0; prefix[i]; ++i) nt[n++] = prefix[i];
     for (i = 0; tmp[i] && n + 1 < cap; ++i) nt[n++] = tmp[i] == '/' ? '\\' : tmp[i];
@@ -87,7 +73,8 @@ NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap)
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG options, HANDLE *h, ULONG_PTR *info)
+#define open_path k32_open_path
+NTSTATUS k32_open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG options, HANDLE *h, ULONG_PTR *info)
 {
     WCHAR nt[320];
     SHZ_UNICODE_STRING us;
@@ -102,14 +89,16 @@ static NTSTATUS open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, UL
     oa.Length = sizeof oa;
     oa.ObjectName = &us;
     memset(&iosb, 0, sizeof iosb);
-    st = NtCreateFile(h, access, &oa, &iosb, 0, FILE_ATTRIBUTE_NORMAL, 3, disposition, options, 0, 0);
+    /* As CreateFile does for a handle that is not overlapped: SYNCHRONIZE access and FILE_SYNCHRONOUS_IO_NONALERT (0x20), so that
+     * requests on the handle complete before the call returns. */
+    st = NtCreateFile(h, access | SYNCHRONIZE, &oa, &iosb, 0, FILE_ATTRIBUTE_NORMAL, 3, disposition, options | 0x20, 0, 0);
     if (info) *info = iosb.Information;
     return st;
 }
 
 static WCHAR *widen_str(const char *s, WCHAR *buf, size_t cap);
-static int utf8_to_wide(const char *s, int n, WCHAR *w, int cap);
-static int wide_to_utf8(const WCHAR *w, int n, char *s, int cap);
+#define utf8_to_wide k32_utf8_to_wide                           /* k32_utf.c */
+#define wide_to_utf8 k32_wide_to_utf8
 
 /* ---------------------------------------------------------------- CreateFile and friends */
 K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp, DWORD flags,
@@ -154,7 +143,11 @@ K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECU
     } else {
         st = open_path(name, access ? access : 0, d, opts, &h, &info);
     }
-    if (st) { k32_nt_error(st); return INVALID_HANDLE_VALUE; }
+    if (st) {
+        if (st == STATUS_OBJECT_NAME_COLLISION) shz_set_last_error(ERROR_FILE_EXISTS);        /* CREATE_NEW on an existing file (CreateDirectory keeps 183) */
+        else k32_nt_error(st);
+        return INVALID_HANDLE_VALUE;
+    }
     shz_set_last_error((info == 1 && (disp == CREATE_ALWAYS || disp == OPEN_ALWAYS)) || info == 3 ? ERROR_ALREADY_EXISTS : 0);
     return h;
 }
@@ -187,7 +180,12 @@ static NTSTATUS rw_file(HANDLE h, void *buf, DWORD len, DWORD *done, LPOVERLAPPE
 K32API BOOL WINAPI ReadFile(HANDLE h, LPVOID buf, DWORD len, LPDWORD done, LPOVERLAPPED ov)
 {
     NTSTATUS st = rw_file(h, buf, len, done, ov, 0);
-    if (st == STATUS_END_OF_FILE) { if (done) *done = 0; shz_set_last_error(0); return TRUE; }   /* EOF is success with 0 bytes */
+    if (st == STATUS_END_OF_FILE) {                                     /* EOF: success with 0 bytes, but ERROR_HANDLE_EOF for an overlapped request */
+        if (done) *done = 0;
+        if (ov) { shz_set_last_error(ERROR_HANDLE_EOF); return FALSE; }
+        shz_set_last_error(0);
+        return TRUE;
+    }
     if (st) { k32_nt_error(st); return FALSE; }
     return TRUE;
 }
@@ -281,7 +279,9 @@ K32API DWORD WINAPI GetFileAttributesW(LPCWSTR name)
     HANDLE h;
     struct { ULONGLONG c, a, w, ch; ULONG attrs, pad; } b;
     SHZ_IO_STATUS_BLOCK iosb;
-    NTSTATUS st = open_path(name, FILE_READ_ATTRIBUTES, FILE_OPEN_D, 0, &h, 0);
+    NTSTATUS st;
+    if (!name || !name[0]) { shz_set_last_error(name ? ERROR_PATH_NOT_FOUND : ERROR_INVALID_PARAMETER); return INVALID_FILE_ATTRIBUTES; }
+    st = open_path(name, FILE_READ_ATTRIBUTES, FILE_OPEN_D, 0, &h, 0);
     if (st) { k32_nt_error(st); return INVALID_FILE_ATTRIBUTES; }
     st = NtQueryInformationFile(h, &iosb, &b, sizeof b, 4);
     NtClose(h);
@@ -396,119 +396,7 @@ K32API BOOL WINAPI SetCurrentDirectoryW(LPCWSTR dir)
     return TRUE;
 }
 
-/* ---------------------------------------------------------------- FindFirstFile */
-typedef struct {
-    HANDLE dir;
-    WCHAR pattern[260];
-    BYTE buf[4096];
-    ULONG used, avail;
-    int done;
-} find_t;
-
-static int wild_match(const WCHAR *p, const WCHAR *s)
-{
-    for (;;) {
-        WCHAR pc = *p, sc = *s;
-        if (pc == '*') { while (*p == '*') ++p; if (!*p) return 1; for (; *s; ++s) if (wild_match(p, s)) return 1; return wild_match(p, s); }
-        if (!pc) return !sc;
-        if (!sc) return 0;
-        if (pc != '?' && (pc | 32) != (sc | 32)) return 0;
-        ++p; ++s;
-    }
-}
-
-static BOOL fill_find(find_t *f, LPWIN32_FIND_DATAW out)
-{
-    for (;;) {
-        SHZ_IO_STATUS_BLOCK iosb;
-        NTSTATUS st;
-        if (f->used >= f->avail) {
-            if (f->done) return FALSE;
-            memset(&iosb, 0, sizeof iosb);
-            st = NtQueryDirectoryFile(f->dir, 0, 0, 0, &iosb, f->buf, sizeof f->buf, 3, 0, 0, 0);
-            if (st) { f->done = 1; shz_set_last_error(st == STATUS_NO_MORE_FILES || st == STATUS_NO_SUCH_FILE ? ERROR_NO_MORE_FILES : RtlNtStatusToDosError(st)); return FALSE; }
-            f->used = 0;
-            f->avail = (ULONG)iosb.Information;
-        }
-        {
-            const BYTE *e = f->buf + f->used;
-            const ULONG next = *(const ULONG *)e;
-            const ULONGLONG create = *(const ULONGLONG *)(e + 8), wr = *(const ULONGLONG *)(e + 24), eof = *(const ULONGLONG *)(e + 40);
-            const ULONG attrs = *(const ULONG *)(e + 56), nlen = *(const ULONG *)(e + 60);
-            const WCHAR *name = (const WCHAR *)(e + 92);
-            WCHAR tmp[260];
-            ULONG i, n = nlen / 2;
-            if (n > 259) n = 259;
-            for (i = 0; i < n; ++i) tmp[i] = name[i];
-            tmp[n] = 0;
-            f->used = next ? f->used + next : f->avail;
-            if (!wild_match(f->pattern, tmp)) continue;
-            memset(out, 0, sizeof *out);
-            out->dwFileAttributes = attrs;
-            out->ftCreationTime.dwLowDateTime = (DWORD)create; out->ftCreationTime.dwHighDateTime = (DWORD)(create >> 32);
-            out->ftLastWriteTime.dwLowDateTime = (DWORD)wr; out->ftLastWriteTime.dwHighDateTime = (DWORD)(wr >> 32);
-            out->ftLastAccessTime = out->ftLastWriteTime;
-            out->nFileSizeLow = (DWORD)eof; out->nFileSizeHigh = (DWORD)(eof >> 32);
-            memcpy(out->cFileName, tmp, (n + 1) * sizeof(WCHAR));
-            return TRUE;
-        }
-    }
-}
-
-K32API HANDLE WINAPI FindFirstFileW(LPCWSTR spec, LPWIN32_FIND_DATAW out)
-{
-    WCHAR dirpart[300];
-    size_t n = k32_wlen(spec), cut = n, i;
-    find_t *f;
-    NTSTATUS st;
-    if (n >= 300) { shz_set_last_error(ERROR_FILENAME_EXCED_RANGE); return INVALID_HANDLE_VALUE; }
-    while (cut && spec[cut - 1] != '\\' && spec[cut - 1] != '/' && spec[cut - 1] != ':') --cut;
-    memcpy(dirpart, spec, cut * sizeof(WCHAR));
-    if (!cut) { dirpart[0] = '.'; dirpart[1] = 0; } else dirpart[cut] = 0;
-    f = RtlAllocateHeap(ShzProcessHeap(), HEAP_ZERO_MEMORY, sizeof *f);
-    if (!f) { shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY); return INVALID_HANDLE_VALUE; }
-    for (i = 0; cut + i <= n && i < 259; ++i) f->pattern[i] = spec[cut + i];
-    st = open_path(dirpart, FILE_LIST_DIRECTORY | SYNCHRONIZE, FILE_OPEN_D, OPT_DIRECTORY, &f->dir, 0);
-    if (st) { RtlFreeHeap(ShzProcessHeap(), 0, f); k32_nt_error(st == STATUS_OBJECT_NAME_NOT_FOUND ? STATUS_OBJECT_PATH_NOT_FOUND : st); return INVALID_HANDLE_VALUE; }
-    if (!fill_find(f, out)) {
-        DWORD e = shz_last_error();
-        NtClose(f->dir); RtlFreeHeap(ShzProcessHeap(), 0, f);
-        shz_set_last_error(e == ERROR_NO_MORE_FILES ? ERROR_FILE_NOT_FOUND : e);
-        return INVALID_HANDLE_VALUE;
-    }
-    return f;
-}
-K32API BOOL WINAPI FindNextFileW(HANDLE h, LPWIN32_FIND_DATAW out) { return fill_find((find_t *)h, out); }
-K32API BOOL WINAPI FindClose(HANDLE h)
-{
-    find_t *f = (find_t *)h;
-    if (!f || f == INVALID_HANDLE_VALUE) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
-    NtClose(f->dir);
-    RtlFreeHeap(ShzProcessHeap(), 0, f);
-    return TRUE;
-}
-K32API HANDLE WINAPI FindFirstFileA(LPCSTR spec, LPWIN32_FIND_DATAA out)
-{
-    WCHAR w[300];
-    WIN32_FIND_DATAW fw;
-    HANDLE h;
-    if (utf8_to_wide(spec, -1, w, 300) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
-    h = FindFirstFileW(w, &fw);
-    if (h == INVALID_HANDLE_VALUE) return h;
-    memcpy(out, &fw, offsetof(WIN32_FIND_DATAW, cFileName));
-    wide_to_utf8(fw.cFileName, -1, out->cFileName, MAX_PATH);
-    out->cAlternateFileName[0] = 0;
-    return h;
-}
-K32API BOOL WINAPI FindNextFileA(HANDLE h, LPWIN32_FIND_DATAA out)
-{
-    WIN32_FIND_DATAW fw;
-    if (!FindNextFileW(h, &fw)) return FALSE;
-    memcpy(out, &fw, offsetof(WIN32_FIND_DATAW, cFileName));
-    wide_to_utf8(fw.cFileName, -1, out->cFileName, MAX_PATH);
-    out->cAlternateFileName[0] = 0;
-    return TRUE;
-}
+/* FindFirstFile and friends live in k32_find.c. */
 
 /* ---------------------------------------------------------------- paths */
 K32API DWORD WINAPI GetFullPathNameW(LPCWSTR name, DWORD cap, LPWSTR buf, LPWSTR *part)
@@ -516,7 +404,13 @@ K32API DWORD WINAPI GetFullPathNameW(LPCWSTR name, DWORD cap, LPWSTR buf, LPWSTR
     WCHAR tmp[320], out[320];
     size_t n = 0, i, o = 0;
     cwd_init();
-    if (name[0] && name[1] == ':') { for (i = 0; name[i] && n < 318; ++i) tmp[n++] = name[i] == '/' ? '\\' : name[i]; }
+    if (name[0] && name[1] == ':' && name[2] != '\\' && name[2] != '/') {           /* drive-relative "X:name" */
+        const WCHAR d = (WCHAR)(name[0] >= 'a' && name[0] <= 'z' ? name[0] - 32 : name[0]);
+        if (d == (g_cwd[0] >= 'a' && g_cwd[0] <= 'z' ? g_cwd[0] - 32 : g_cwd[0])) { for (i = 0; g_cwd[i] && n < 300; ++i) tmp[n++] = g_cwd[i]; }
+        else { tmp[n++] = name[0]; tmp[n++] = ':'; tmp[n++] = '\\'; }
+        for (i = 2; name[i] && n < 318; ++i) tmp[n++] = name[i] == '/' ? '\\' : name[i];
+    }
+    else if (name[0] && name[1] == ':') { for (i = 0; name[i] && n < 318; ++i) tmp[n++] = name[i] == '/' ? '\\' : name[i]; }
     else if (name[0] == '\\' || name[0] == '/') { tmp[n++] = 'C'; tmp[n++] = ':'; for (i = 0; name[i] && n < 318; ++i) tmp[n++] = name[i] == '/' ? '\\' : name[i]; }
     else { for (i = 0; g_cwd[i] && n < 300; ++i) tmp[n++] = g_cwd[i]; for (i = 0; name[i] && n < 318; ++i) tmp[n++] = name[i] == '/' ? '\\' : name[i]; }
     tmp[n] = 0;
@@ -553,20 +447,7 @@ K32API DWORD WINAPI GetFullPathNameA(LPCSTR name, DWORD cap, LPSTR buf, LPSTR *p
     if (part) { DWORD k = n; while (k && buf[k - 1] != '\\') --k; *part = buf[n - 1] != '\\' ? buf + k : 0; }
     return n;
 }
-K32API DWORD WINAPI GetTempPathW(DWORD cap, LPWSTR buf)
-{
-    static const WCHAR t[] = { 'C', ':', '\\', 'T', 'E', 'M', 'P', '\\', 0 };
-    if (cap <= 8) return 9;
-    memcpy(buf, t, sizeof t);
-    return 8;
-}
-K32API DWORD WINAPI GetTempPathA(DWORD cap, LPSTR buf)
-{
-    static const char t[] = "C:\\TEMP\\";
-    if (cap <= 8) return 9;
-    memcpy(buf, t, sizeof t);
-    return 8;
-}
+/* GetTempPath lives in k32_volume.c. */
 K32API UINT WINAPI GetWindowsDirectoryA(LPSTR buf, UINT cap) { static const char t[] = "C:\\SHZ"; if (cap < sizeof t) return sizeof t; memcpy(buf, t, sizeof t); return sizeof t - 1; }
 K32API UINT WINAPI GetSystemDirectoryA(LPSTR buf, UINT cap) { static const char t[] = "C:\\SHZ\\SYS64"; if (cap < sizeof t) return sizeof t; memcpy(buf, t, sizeof t); return sizeof t - 1; }
 K32API UINT WINAPI GetWindowsDirectoryW(LPWSTR buf, UINT cap) { char a[16]; UINT n = GetWindowsDirectoryA(a, sizeof a); DWORD i; if (cap <= n) return n + 1; for (i = 0; i <= n; ++i) buf[i] = a[i]; return n; }
@@ -682,47 +563,4 @@ K32API UINT WINAPI GetConsoleOutputCP(void) { return 65001; }
 K32API BOOL WINAPI SetConsoleOutputCP(UINT cp) { if (cp != 65001 && cp != 437) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; } return cp == 65001; }
 K32API BOOL WINAPI SetConsoleCP(UINT cp) { return cp == 65001; }
 
-/* ---------------------------------------------------------------- UTF-8 <-> UTF-16 helpers used above */
-static int utf8_to_wide(const char *s, int n, WCHAR *w, int cap)
-{
-    int o = 0, i = 0;
-    if (n < 0) { n = 0; while (s[n]) ++n; ++n; }
-    while (i < n) {
-        unsigned c = (unsigned char)s[i++];
-        unsigned cp;
-        if (c < 0x80) cp = c;
-        else if ((c & 0xe0) == 0xc0 && i < n) { cp = ((c & 0x1f) << 6) | (s[i++] & 0x3f); }
-        else if ((c & 0xf0) == 0xe0 && i + 1 < n) { cp = ((c & 0x0f) << 12) | ((s[i] & 0x3f) << 6) | (s[i + 1] & 0x3f); i += 2; }
-        else if ((c & 0xf8) == 0xf0 && i + 2 < n) { cp = ((c & 7) << 18) | ((s[i] & 0x3f) << 12) | ((s[i + 1] & 0x3f) << 6) | (s[i + 2] & 0x3f); i += 3; }
-        else cp = 0xfffd;
-        if (cp >= 0x10000) {
-            if (o + 2 > cap) return 0;
-            cp -= 0x10000;
-            w[o++] = (WCHAR)(0xd800 + (cp >> 10));
-            w[o++] = (WCHAR)(0xdc00 + (cp & 0x3ff));
-        } else {
-            if (o + 1 > cap) return 0;
-            w[o++] = (WCHAR)cp;
-        }
-    }
-    return o;
-}
-static int wide_to_utf8(const WCHAR *w, int n, char *s, int cap)
-{
-    int o = 0, i = 0;
-    if (n < 0) { n = 0; while (w[n]) ++n; ++n; }
-    while (i < n) {
-        unsigned cp = w[i++];
-        if (cp >= 0xd800 && cp < 0xdc00 && i < n && w[i] >= 0xdc00 && w[i] < 0xe000) cp = 0x10000 + ((cp - 0xd800) << 10) + (w[i++] - 0xdc00);
-        if (cp < 0x80) { if (o + 1 > cap) return 0; s[o++] = (char)cp; }
-        else if (cp < 0x800) { if (o + 2 > cap) return 0; s[o++] = (char)(0xc0 | (cp >> 6)); s[o++] = (char)(0x80 | (cp & 0x3f)); }
-        else if (cp < 0x10000) { if (o + 3 > cap) return 0; s[o++] = (char)(0xe0 | (cp >> 12)); s[o++] = (char)(0x80 | ((cp >> 6) & 0x3f)); s[o++] = (char)(0x80 | (cp & 0x3f)); }
-        else { if (o + 4 > cap) return 0; s[o++] = (char)(0xf0 | (cp >> 18)); s[o++] = (char)(0x80 | ((cp >> 12) & 0x3f)); s[o++] = (char)(0x80 | ((cp >> 6) & 0x3f)); s[o++] = (char)(0x80 | (cp & 0x3f)); }
-    }
-    return o;
-}
 static WCHAR *widen_str(const char *s, WCHAR *buf, size_t cap) { int n = utf8_to_wide(s, -1, buf, (int)cap); if (n <= 0) buf[0] = 0; return buf; }
-
-/* exported through k32_misc.c */
-int k32_utf8_to_wide(const char *s, int n, WCHAR *w, int cap) { return utf8_to_wide(s, n, w, cap); }
-int k32_wide_to_utf8(const WCHAR *w, int n, char *s, int cap) { return wide_to_utf8(w, n, s, cap); }

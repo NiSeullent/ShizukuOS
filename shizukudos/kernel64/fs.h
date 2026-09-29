@@ -19,6 +19,8 @@ struct fsnode {
     uint8_t *data;
     uint64_t size, cap;
     uint64_t ctime, mtime;
+    uint64_t id;                        /* unique, stable for the life of the node (FileInternalInformation.IndexNumber) */
+    int64_t ft_create, ft_access, ft_write;   /* FILETIME values set with NtSetInformationFile; 0 = derive from ctime/mtime */
 };
 
 typedef struct {

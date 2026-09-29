@@ -99,7 +99,8 @@ def build_kernel32(ntdll_names):
     src = sorted((W64 / "kernel32").glob("*.c"))
     names = scan_exports(src, "K32API")
     forwards = [f"{n} = ntdll.{n}" for n in ("RtlCaptureContext", "RtlLookupFunctionEntry", "RtlVirtualUnwind", "RtlUnwindEx",
-                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException") if n in ntdll_names or n == "RtlCaptureContext"]
+                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException", "RtlCaptureStackBackTrace")
+                if n in ntdll_names or n == "RtlCaptureContext"]
     names = [n for n in names if n not in ("RtlUnwindKernel32",)]
     write_def(OUT / "kernel32.def", "kernel32.dll", names, forwards)
     dll = OUT / "kernel32.dll"
@@ -194,7 +195,7 @@ def pack_archive(files):
 
 def main():
     argparse.ArgumentParser(description=__doc__).parse_args()
-    for tool in (CC, DLLTOOL):
+    for tool in (CC, DLLTOOL, WINDRES):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     OUT.mkdir(parents=True, exist_ok=True)

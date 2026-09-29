@@ -22,7 +22,10 @@ void ShzEvidence(unsigned slot, unsigned long long v) { NtShzEvidence(slot, v); 
 
 /* ---------------------------------------------------------------- heap */
 /* Segment-based first-fit allocator with coalescing. Blocks are 16-byte aligned; the heap
- * handle is the address of the heap descriptor. Large requests get their own reservation. */
+ * handle is the address of the heap descriptor. Large requests get their own reservation, kept on a
+ * list of the heap. Every function that takes a block pointer first checks that it is the payload of a
+ * live block of that heap (inside one of its segments, or one of its large reservations) and only then
+ * reads the block header, so a foreign or stale pointer is refused instead of dereferenced. */
 #define HEAP_MAGIC 0x50414548u             /* "HEAP" */
 #define BLOCK_MAGIC 0x4b4c4231u
 #define BLOCK_FREE 0
@@ -40,6 +43,7 @@ typedef struct blk {
 } blk_t;                                    /* 32 bytes: payload stays 16-byte aligned */
 
 typedef struct seg { struct seg *next; uint64_t size; } seg_t;
+typedef struct large { struct large *next, *prev; uint64_t total, pad; } large_t;      /* 32 bytes, followed by the blk_t */
 
 typedef struct heap {
     uint32_t magic;
@@ -47,6 +51,7 @@ typedef struct heap {
     uint32_t flags;
     seg_t *segments;
     uint64_t allocated, count;
+    large_t *large;                        /* dedicated reservations of large blocks */
 } heap_t;
 
 static heap_t *g_process_heap;
@@ -109,15 +114,24 @@ PVOID NTAPI RtlAllocateHeap(PVOID hp, ULONG flags, SIZE_T size)
     if (!h || h->magic != HEAP_MAGIC) return 0;
     need = (size + 15) & ~15ull;
     if (!need) need = 16;
-    if (need > LARGE_THRESHOLD) {                         /* dedicated reservation */
+    if (need > LARGE_THRESHOLD) {                         /* dedicated reservation: large_t, blk_t, payload */
         PVOID base = 0;
-        SIZE_T total = need + sizeof(blk_t) + 4096;
+        SIZE_T total = need + sizeof(large_t) + sizeof(blk_t);
+        large_t *l;
         blk_t *b;
         total = (total + 4095) & ~4095ull;
         if (NtAllocateVirtualMemory(CURRENT_PROCESS, &base, 0, &total, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)) return 0;
-        b = base;
-        b->magic = BLOCK_MAGIC; b->state = BLOCK_LARGE; b->size = need; b->user_size = size; b->prev_phys = (blk_t *)total;
-        return b + 1;
+        l = base;
+        l->total = total;
+        b = (blk_t *)(l + 1);
+        b->magic = BLOCK_MAGIC; b->state = BLOCK_LARGE; b->size = need; b->user_size = size; b->prev_phys = 0;
+        heap_lock(h);
+        l->prev = 0;
+        l->next = h->large;
+        if (h->large) h->large->prev = l;
+        h->large = l;
+        heap_unlock(h);
+        return b + 1;                                     /* the memory is fresh from the kernel: already zero */
     }
     heap_lock(h);
     for (;;) {
@@ -155,33 +169,61 @@ PVOID NTAPI RtlAllocateHeap(PVOID hp, ULONG flags, SIZE_T size)
     }
 }
 
-static seg_t *segment_of(heap_t *h, blk_t *b)
+/* Heap lock held. The header of `p` if `p` is the payload of a live block of heap `h` (segment or large reservation), else 0.
+ * Only addresses inside the heap's own committed memory are read. *seg_out receives the segment (0 for a large block). */
+static blk_t *live_block(heap_t *h, const void *p, seg_t **seg_out, large_t **large_out)
 {
+    const uintptr_t a = (uintptr_t)p;
     seg_t *s;
-    for (s = h->segments; s; s = s->next)
-        if ((uint8_t *)b >= (uint8_t *)s && (uint8_t *)b < (uint8_t *)s + s->size) return s;
+    large_t *l;
+    if (!p || (a & 15)) return 0;
+    for (s = h->segments; s; s = s->next) {
+        if (a >= (uintptr_t)(first_block(s) + 1) && a < (uintptr_t)s + s->size) {
+            blk_t *b = (blk_t *)p - 1;
+            if (b->magic != BLOCK_MAGIC || b->state != BLOCK_USED) return 0;      /* free, merged away or not a block start */
+            if (seg_out) *seg_out = s;
+            return b;
+        }
+    }
+    for (l = h->large; l; l = l->next) {
+        blk_t *b = (blk_t *)(l + 1);
+        if ((uintptr_t)(b + 1) == a) {
+            if (b->magic != BLOCK_MAGIC || b->state != BLOCK_LARGE) return 0;
+            if (seg_out) *seg_out = 0;
+            if (large_out) *large_out = l;
+            return b;
+        }
+    }
     return 0;
+}
+
+static heap_t *valid_heap(PVOID hp)
+{
+    heap_t *h = hp;
+    return h && h->magic == HEAP_MAGIC ? h : 0;
 }
 
 BOOLEAN NTAPI RtlFreeHeap(PVOID hp, ULONG flags, PVOID p)
 {
-    heap_t *h = hp;
+    heap_t *h = valid_heap(hp);
     blk_t *b, *n;
-    seg_t *s;
+    seg_t *s = 0;
+    large_t *l = 0;
     (void)flags;
     if (!p) return TRUE;
-    if (!h || h->magic != HEAP_MAGIC) return FALSE;
-    b = (blk_t *)p - 1;
-    if (b->magic != BLOCK_MAGIC) return FALSE;
-    if (b->state == BLOCK_LARGE) {
-        PVOID base = b;
+    if (!h) return FALSE;
+    heap_lock(h);
+    b = live_block(h, p, &s, &l);
+    if (!b) { heap_unlock(h); return FALSE; }                                        /* foreign pointer or double free */
+    if (l) {
+        PVOID base = l;
         SIZE_T zero = 0;
+        if (l->prev) l->prev->next = l->next; else h->large = l->next;
+        if (l->next) l->next->prev = l->prev;
         b->magic = 0;
+        heap_unlock(h);
         return NtFreeVirtualMemory(CURRENT_PROCESS, &base, &zero, MEM_RELEASE) == 0;
     }
-    heap_lock(h);
-    s = segment_of(h, b);
-    if (!s || b->state != BLOCK_USED) { heap_unlock(h); return FALSE; }        /* foreign pointer or double free */
     b->state = BLOCK_FREE;
     --h->count;
     h->allocated -= b->size;
@@ -206,20 +248,40 @@ BOOLEAN NTAPI RtlFreeHeap(PVOID hp, ULONG flags, PVOID p)
 
 SIZE_T NTAPI RtlSizeHeap(PVOID hp, ULONG flags, PVOID p)
 {
+    heap_t *h = valid_heap(hp);
     blk_t *b;
-    (void)hp; (void)flags;
-    if (!p) return (SIZE_T)-1;
-    b = (blk_t *)p - 1;
-    return b->magic == BLOCK_MAGIC && b->state != BLOCK_FREE ? b->user_size : (SIZE_T)-1;
+    SIZE_T n;
+    (void)flags;
+    if (!h || !p) return (SIZE_T)-1;
+    heap_lock(h);
+    b = live_block(h, p, 0, 0);
+    n = b ? b->user_size : (SIZE_T)-1;
+    heap_unlock(h);
+    return n;
 }
 
+/* A block grows or shrinks in place when the new size fits the payload it already has; otherwise it moves, unless
+ * HEAP_REALLOC_IN_PLACE_ONLY forbids that (then the call fails and the block is unchanged). */
 PVOID NTAPI RtlReAllocateHeap(PVOID hp, ULONG flags, PVOID p, SIZE_T size)
 {
+    heap_t *h = valid_heap(hp);
     PVOID n;
     SIZE_T old;
-    if (!p) return RtlAllocateHeap(hp, flags, size);
-    old = RtlSizeHeap(hp, flags, p);
-    if (old == (SIZE_T)-1) return 0;
+    blk_t *b;
+    if (!p) return (flags & HEAP_REALLOC_IN_PLACE_ONLY) ? 0 : RtlAllocateHeap(hp, flags, size);
+    if (!h) return 0;
+    heap_lock(h);
+    b = live_block(h, p, 0, 0);
+    if (!b) { heap_unlock(h); return 0; }
+    old = b->user_size;
+    if (size <= b->size) {
+        b->user_size = size;
+        heap_unlock(h);
+        if ((flags & HEAP_ZERO_MEMORY) && size > old) memset((uint8_t *)p + old, 0, size - old);
+        return p;
+    }
+    heap_unlock(h);
+    if (flags & HEAP_REALLOC_IN_PLACE_ONLY) return 0;
     n = RtlAllocateHeap(hp, flags, size);
     if (!n) return 0;
     {
@@ -236,9 +298,15 @@ BOOLEAN NTAPI RtlLockHeap(PVOID hp) { heap_lock(hp); return TRUE; }
 BOOLEAN NTAPI RtlUnlockHeap(PVOID hp) { heap_unlock(hp); return TRUE; }
 BOOLEAN NTAPI RtlValidateHeap(PVOID hp, ULONG flags, PVOID p)
 {
+    heap_t *h = valid_heap(hp);
+    BOOLEAN ok;
     (void)flags;
-    if (!hp || ((heap_t *)hp)->magic != HEAP_MAGIC) return FALSE;
-    return !p || ((blk_t *)p - 1)->magic == BLOCK_MAGIC;
+    if (!h) return FALSE;
+    if (!p) return TRUE;
+    heap_lock(h);
+    ok = live_block(h, p, 0, 0) != 0;
+    heap_unlock(h);
+    return ok;
 }
 
 void ShzInitHeap(void)
@@ -296,12 +364,33 @@ static const struct { NTSTATUS status; ULONG error; } status_map[] = {
     {STATUS_INFO_LENGTH_MISMATCH, ERROR_BAD_LENGTH}, {STATUS_INSUFFICIENT_RESOURCES, ERROR_NO_SYSTEM_RESOURCES},
 };
 
+/* File-system, locking and device statuses (values from ntstatus.h, errors from winerror.h). */
+static const struct { NTSTATUS status; ULONG error; } status_map_io[] = {
+    {(NTSTATUS)0xC0000004, ERROR_BAD_LENGTH},            /* STATUS_INFO_LENGTH_MISMATCH */
+    {(NTSTATUS)0xC0000010, ERROR_INVALID_FUNCTION},      /* STATUS_INVALID_DEVICE_REQUEST */
+    {(NTSTATUS)0xC0000013, ERROR_NOT_READY},             /* STATUS_NO_MEDIA_IN_DEVICE */
+    {(NTSTATUS)0xC000002A, ERROR_NOT_LOCKED},            /* STATUS_NOT_LOCKED */
+    {(NTSTATUS)0xC000003B, ERROR_BAD_PATHNAME},          /* STATUS_OBJECT_PATH_SYNTAX_BAD */
+    {(NTSTATUS)0xC0000054, ERROR_LOCK_VIOLATION},        /* STATUS_FILE_LOCK_CONFLICT */
+    {(NTSTATUS)0xC0000055, ERROR_LOCK_VIOLATION},        /* STATUS_LOCK_NOT_GRANTED */
+    {(NTSTATUS)0xC0000056, ERROR_ACCESS_DENIED},         /* STATUS_DELETE_PENDING */
+    {(NTSTATUS)0xC000007E, ERROR_NOT_LOCKED},            /* STATUS_RANGE_NOT_LOCKED */
+    {(NTSTATUS)0xC0000098, ERROR_FILE_INVALID},          /* STATUS_FILE_INVALID */
+    {(NTSTATUS)0xC000009A, ERROR_NO_SYSTEM_RESOURCES},   /* STATUS_INSUFFICIENT_RESOURCES */
+    {(NTSTATUS)0xC00000A2, ERROR_WRITE_PROTECT},         /* STATUS_MEDIA_WRITE_PROTECTED */
+    {(NTSTATUS)0xC00000D4, ERROR_NOT_SAME_DEVICE},       /* STATUS_NOT_SAME_DEVICE */
+    {(NTSTATUS)0xC0000106, ERROR_FILENAME_EXCED_RANGE},  /* STATUS_NAME_TOO_LONG */
+    {(NTSTATUS)0xC0000121, ERROR_ACCESS_DENIED},         /* STATUS_CANNOT_DELETE */
+};
+
 ULONG NTAPI RtlNtStatusToDosError(NTSTATUS status)
 {
     unsigned i;
     shz_set_last_status(status);                   /* like Windows: TEB.LastStatusValue follows the last translation */
     for (i = 0; i < sizeof status_map / sizeof status_map[0]; ++i)
         if (status_map[i].status == status) return status_map[i].error;
+    for (i = 0; i < sizeof status_map_io / sizeof status_map_io[0]; ++i)
+        if (status_map_io[i].status == status) return status_map_io[i].error;
     if (NT_SUCCESS(status)) return 0;
     return ERROR_MR_MID_NOT_FOUND;                 /* 317: unmapped status, never silently "success" */
 }
@@ -472,16 +561,34 @@ SHZ_EXPORT NTSTATUS NTAPI LdrLoadDll(PWSTR path, PULONG flags, SHZ_UNICODE_STRIN
     return STATUS_SUCCESS;
 }
 
+#define LDR_PINNED 0xFFFFu                                  /* LoadCount of a pinned module: never released */
+
 SHZ_EXPORT NTSTATUS NTAPI LdrUnloadDll(PVOID handle)
 {
-    /* FreeLibrary drops the reference count; the image stays mapped (documented limitation). */
+    /* FreeLibrary drops the reference count; the image stays mapped (documented limitation). A pinned module keeps its count. */
     SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
     LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
     for (l = head->Flink; l != head; l = l->Flink) {
         SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
-        if (e->DllBase == handle) { if (e->LoadCount) --e->LoadCount; return STATUS_SUCCESS; }
+        if (e->DllBase == handle) { if (e->LoadCount && e->LoadCount != LDR_PINNED) --e->LoadCount; return STATUS_SUCCESS; }
     }
     return STATUS_INVALID_PARAMETER;
+}
+
+/* Flags: LDR_ADDREF_DLL_PIN (1) pins the module for the life of the process, otherwise the reference count grows by one. */
+SHZ_EXPORT NTSTATUS NTAPI LdrAddRefDll(ULONG flags, PVOID handle)
+{
+    SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
+    LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
+    if (flags & ~1u) return STATUS_INVALID_PARAMETER;
+    for (l = head->Flink; l != head; l = l->Flink) {
+        SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
+        if (e->DllBase != handle) continue;
+        if (flags & 1u) e->LoadCount = LDR_PINNED;
+        else if (e->LoadCount < LDR_PINNED - 1) __sync_add_and_fetch(&e->LoadCount, 1);
+        return STATUS_SUCCESS;
+    }
+    return STATUS_DLL_NOT_FOUND;
 }
 
 static int str_eq(const char *a, const char *b) { while (*a && *a == *b) { ++a; ++b; } return *a == *b; }

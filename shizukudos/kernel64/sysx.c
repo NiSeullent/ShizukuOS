@@ -55,7 +55,7 @@ static kobject_t *object_for_handle(process_t *p, uint64_t h)
     }
 }
 
-static int64_t filetime_now(void)
+int64_t filetime_now(void)
 {
     /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform). */
     hcreg_t secs = 0;

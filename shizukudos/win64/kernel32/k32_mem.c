@@ -80,20 +80,7 @@ K32API BOOL WINAPI HeapFree(HANDLE h, DWORD flags, LPVOID p)
 K32API SIZE_T WINAPI HeapSize(HANDLE h, DWORD flags, LPCVOID p) { return RtlSizeHeap(h, flags, (PVOID)p); }
 K32API BOOL WINAPI HeapValidate(HANDLE h, DWORD flags, LPCVOID p) { return RtlValidateHeap(h, flags, (PVOID)p); }
 
-/* Fixed-memory Local and Global allocations only; movable memory (LMEM_MOVEABLE) is not implemented. */
-K32API HLOCAL WINAPI LocalAlloc(UINT flags, SIZE_T size)
-{
-    if (flags & LMEM_MOVEABLE) { shz_set_last_error(ERROR_NOT_SUPPORTED); return 0; }
-    return HeapAlloc(ShzProcessHeap(), (flags & LMEM_ZEROINIT) ? HEAP_ZERO_MEMORY : 0, size);
-}
-K32API HLOCAL WINAPI LocalFree(HLOCAL p) { return HeapFree(ShzProcessHeap(), 0, p) ? 0 : p; }
-K32API HLOCAL WINAPI LocalReAlloc(HLOCAL p, SIZE_T size, UINT flags) { return HeapReAlloc(ShzProcessHeap(), (flags & LMEM_ZEROINIT) ? HEAP_ZERO_MEMORY : 0, p, size); }
-K32API HGLOBAL WINAPI GlobalAlloc(UINT flags, SIZE_T size)
-{
-    if (flags & GMEM_MOVEABLE) { shz_set_last_error(ERROR_NOT_SUPPORTED); return 0; }
-    return HeapAlloc(ShzProcessHeap(), (flags & GMEM_ZEROINIT) ? HEAP_ZERO_MEMORY : 0, size);
-}
-K32API HGLOBAL WINAPI GlobalFree(HGLOBAL p) { return HeapFree(ShzProcessHeap(), 0, p) ? 0 : p; }
+/* Global and Local memory (fixed and movable) live in k32_gmem.c. */
 
 /* ---------------------------------------------------------------- modules */
 static HMODULE find_module_w(LPCWSTR name)
