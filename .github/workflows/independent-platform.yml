@@ -43,7 +43,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-            gcc-multilib clang lld mingw-w64 nasm make binutils python3 qemu-utils
+            gcc-multilib clang lld mingw-w64 nasm make binutils python3 python3-pil fonts-dejavu-core qemu-utils
 
       - name: Build NTWrapper9x and NTWin32Wrapper9x
         run: python3 platform/build.py
