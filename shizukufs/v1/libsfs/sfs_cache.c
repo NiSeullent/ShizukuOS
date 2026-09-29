@@ -149,7 +149,7 @@ static int evict_one(sfs_fs *fs)
 {
     sfs_buf *b;
     for (b = fs->lru_tail; b; b = b->lru_prev) {
-        if (b->refs || (b->flags & B_JDIRTY)) continue;
+        if (b->refs || (b->flags & (B_JDIRTY | B_LATE))) continue;
         if (b->flags & B_DIRTY) {
             int rc = write_buf(fs, b);
             if (rc) return rc;
@@ -221,7 +221,7 @@ int sfs_bnew(sfs_fs *fs, uint64_t blk, sfs_buf **out)
     rc = get_buf(fs, blk, 0, &b);
     if (rc) return rc;
     if (!(b->flags & B_NEW)) memset(b->data, 0, fs->bs);       /* was cached: reset the content */
-    b->flags = (b->flags & (B_DIRTY | B_JDIRTY)) | B_UPTODATE | B_VERIFIED;
+    b->flags = (b->flags & (B_DIRTY | B_JDIRTY | B_LATE)) | B_UPTODATE | B_VERIFIED;
     *out = b;
     return 0;
 }
@@ -259,24 +259,53 @@ void sfs_bdirty_data(sfs_fs *fs, sfs_buf *b)
     b->flags = (b->flags & ~B_NEW) | B_DIRTY;
 }
 
+void sfs_bdirty_late(sfs_fs *fs, sfs_buf *b)
+{
+    b->flags = (b->flags & ~B_NEW) | B_DIRTY;
+    if (b->flags & (B_LATE | B_JDIRTY)) return;
+    b->flags |= B_LATE;
+    b->tnext = fs->txn.late;
+    fs->txn.late = b;
+}
+
+void sfs_release_late(sfs_fs *fs)
+{
+    sfs_buf *b, *next;
+    for (b = fs->txn.late; b; b = next) {
+        next = b->tnext;
+        b->tnext = 0;
+        b->flags &= ~B_LATE;
+    }
+    fs->txn.late = 0;
+}
+
 /* A block was freed: its cached content is meaningless. Drop it from the running transaction (its old on-disk
  * content stays valid if the transaction never commits) and from the cache. Pinned buffers are only marked. */
 void sfs_bforget(sfs_fs *fs, uint64_t blk)
 {
     sfs_buf *b = lookup(fs, blk);
     if (!b) return;
-    if (b->flags & B_JDIRTY) {
-        sfs_buf **pp = &fs->txn.bufs;
+    if (b->flags & (B_JDIRTY | B_LATE)) {
+        sfs_buf **pp = (b->flags & B_JDIRTY) ? &fs->txn.bufs : &fs->txn.late;
         while (*pp && *pp != b) pp = &(*pp)->tnext;
-        if (*pp) { *pp = b->tnext; fs->txn.nbufs--; }
+        if (*pp) { *pp = b->tnext; if (b->flags & B_JDIRTY) fs->txn.nbufs--; }
         b->tnext = 0;
-        b->flags &= ~B_JDIRTY;
+        b->flags &= ~(B_JDIRTY | B_LATE);
     }
     b->flags &= ~(B_DIRTY | B_UPTODATE | B_VERIFIED | B_COMPUTED);
     if (b->refs) return;
     lru_unlink(fs, b);
     hash_unlink(fs, b);
     buf_destroy(fs, b);
+}
+
+static void late_unlink(sfs_fs *fs, sfs_buf *b)
+{
+    sfs_buf **pp = &fs->txn.late;
+    while (*pp && *pp != b) pp = &(*pp)->tnext;
+    if (*pp) *pp = b->tnext;
+    b->tnext = 0;
+    b->flags &= ~B_LATE;
 }
 
 void sfs_binval_data(sfs_fs *fs, uint64_t blk, uint32_t count)
@@ -286,6 +315,7 @@ void sfs_binval_data(sfs_fs *fs, uint64_t blk, uint32_t count)
     for (i = 0; i < count; ++i) {
         sfs_buf *b = lookup(fs, blk + i);
         if (!b || (b->flags & B_JDIRTY)) continue;
+        if (b->flags & B_LATE) late_unlink(fs, b);
         b->flags &= ~(B_DIRTY | B_UPTODATE | B_VERIFIED);
         if (b->refs) continue;
         lru_unlink(fs, b);
@@ -357,7 +387,7 @@ int sfs_cache_write_data(sfs_fs *fs)
     const uint32_t cap = SFS_MAX_ALLOC / sizeof(sfs_buf *);
     if (!arr) {
         for (; b; b = b->lru_prev) {
-            if ((b->flags & (B_DIRTY | B_UPTODATE)) == (B_DIRTY | B_UPTODATE)) {
+            if ((b->flags & (B_DIRTY | B_UPTODATE | B_LATE)) == (B_DIRTY | B_UPTODATE)) {
                 int rc = write_buf(fs, b);
                 if (rc) return rc;
             }
@@ -369,7 +399,7 @@ int sfs_cache_write_data(sfs_fs *fs)
         sfs_wrun run;
         int rc = 0;
         for (; b && n < cap; b = b->lru_prev)
-            if ((b->flags & (B_DIRTY | B_UPTODATE)) == (B_DIRTY | B_UPTODATE)) arr[n++] = b;
+            if ((b->flags & (B_DIRTY | B_UPTODATE | B_LATE)) == (B_DIRTY | B_UPTODATE)) arr[n++] = b;
         for (gap = n / 2; gap; gap /= 2)                       /* shell sort by block number */
             for (i = gap; i < n; ++i) {
                 sfs_buf *t = arr[i];
@@ -416,6 +446,7 @@ void sfs_cache_destroy(sfs_fs *fs)
         buf_destroy(fs, b);
     }
     fs->lru_head = fs->lru_tail = 0;
+    fs->txn.late = 0;
     if (fs->hash) sfs_free(fs, fs->hash, BUF_HASH * sizeof(sfs_buf *));
     fs->hash = 0;
 }

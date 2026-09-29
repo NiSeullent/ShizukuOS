@@ -281,21 +281,44 @@ static int zero_tail(sfs_fs *fs, sfs_inode *in, uint64_t size)
     rc = sfs_bread(fs, pblk, &b);
     if (rc) return rc;
     memset(b->data + boff, 0, fs->bs - boff);
-    sfs_bdirty_data(fs, b);
+    /* The zeroed tail lies inside the old size: it may reach the disk only once the smaller size is committed,
+     * otherwise a crash could leave the old size with a zeroed hole (a torn truncate). */
+    sfs_bdirty_late(fs, b);
+    fs->txn.force_commit = 1;
     sfs_bput(fs, b);
     return 0;
 }
 
-static int truncate_blocks(sfs_fs *fs, sfs_inode *in, uint64_t old_size, uint64_t size, int meta)
+static int last_cb(void *ctx, uint32_t lblk, uint64_t pblk, uint32_t len, int unwritten)
+{
+    uint64_t *end = ctx;
+    (void)pblk; (void)unwritten;
+    if ((uint64_t)lblk + len > *end) *end = (uint64_t)lblk + len;
+    return 0;
+}
+
+/* One past the last mapped logical block (0 for an empty tree). */
+static int mapped_end(sfs_fs *fs, sfs_inode *in, uint64_t *end)
+{
+    *end = 0;
+    return (in->flags & IFL_EXTENTS) ? sfs_ext_iterate(fs, in, last_cb, end) : 0;
+}
+
+/* Frees every block at or beyond byte `size`, in steps bounded by the journal; with `on_list` the inode is already
+ * on the orphan list (the caller keeps it there), otherwise a multi-step run adds it for the duration. */
+static int truncate_blocks_ex(sfs_fs *fs, sfs_inode *in, uint64_t old_size, uint64_t size, int meta, int on_list)
 {
     uint64_t first = (size + fs->bs - 1) >> fs->bs_bits;
-    uint64_t end = (old_size + fs->bs - 1) >> fs->bs_bits;
-    uint64_t step = (uint64_t)fs->bpg * 8;
+    uint64_t end = (old_size + fs->bs - 1) >> fs->bs_bits, mend;
+    uint64_t step = (fs->mflags & SFS_MOUNT_SMALL_TXN) ? 256 : (uint64_t)fs->bpg * 8;
     int rc = 0, orphan = 0;
     if (first > EXT_MAX_LBLK) return 0;
+    rc = mapped_end(fs, in, &mend);
+    if (rc) return rc;
+    if (mend > end) end = mend;
     if (in->last_lblk >= first) { in->last_lblk = 0; in->last_pblk = 0; }
     sfs_pa_release(fs, in->ino);
-    if (end > first + step && in->links) {
+    if (end > first + step && in->links && !on_list) {
         rc = sfs_orphan_add(fs, in);
         if (rc) return rc;
         orphan = 1;
@@ -314,6 +337,18 @@ static int truncate_blocks(sfs_fs *fs, sfs_inode *in, uint64_t old_size, uint64_
     rc = sfs_ext_truncate(fs, in, (uint32_t)first, meta);
     if (!rc && orphan) rc = sfs_orphan_del(fs, in);
     return rc;
+}
+
+static int truncate_blocks(sfs_fs *fs, sfs_inode *in, uint64_t old_size, uint64_t size, int meta)
+{
+    return truncate_blocks_ex(fs, in, old_size, size, meta, 0);
+}
+
+/* Orphan recovery of a truncate: i_size is already the new size, blocks beyond it may remain. */
+int sfs_file_trim_orphan(sfs_fs *fs, sfs_inode *in)
+{
+    if (!sfs_is_reg(in) || !(in->flags & IFL_EXTENTS)) return 0;
+    return truncate_blocks_ex(fs, in, in->size, in->size, 0, 1);
 }
 
 int sfs_file_truncate(sfs_fs *fs, sfs_inode *in, uint64_t size)
@@ -400,8 +435,7 @@ int sfs_inode_release_all(sfs_fs *fs, sfs_inode *in)
     if (in->flags & IFL_INLINE_DATA) {
         /* nothing outside the inode (and its xattr block) */
     } else if (in->flags & IFL_EXTENTS) {
-        rc = sfs_is_reg(in) ? truncate_blocks(fs, in, in->size > ((uint64_t)in->nblocks << fs->bs_bits) ? in->size : ((uint64_t)in->nblocks << fs->bs_bits), 0, 0)
-                            : sfs_ext_truncate(fs, in, 0, meta);
+        rc = sfs_is_reg(in) ? truncate_blocks(fs, in, in->size, 0, 0) : sfs_ext_truncate(fs, in, 0, meta);
         if (!rc) rc = sfs_ext_truncate(fs, in, 0, meta);
     } else if (!fast_link) {
         rc = sfs_bmap_release(fs, in, meta);

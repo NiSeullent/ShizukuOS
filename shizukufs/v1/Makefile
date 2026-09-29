@@ -35,7 +35,18 @@ freestanding: $(LIB) $(HDRS) | $(B)
 	@for f in $(LIB); do $(CC) $(K64_FLAGS) -c $$f -o $(B)/fs_$$(basename $$f .c).o || exit 1; done
 	@echo "freestanding compile OK (Kernel64 flags)"
 
+# Host test suites (need e2fsprogs: mkfs.ext4, e2fsck, debugfs, dumpe2fs, e2image). SFS_TMP picks the scratch dir.
+test: all
+	python3 tests/run_clean_sync.py
+	python3 tests/run_jbd2_interop.py
+	python3 tests/run_matrix.py
+	python3 tests/run_crash.py --trials 8
+	python3 tests/run_fuzz.py --iterations 1500
+
+perf: $(B)/sfsperf
+	python3 tests/run_perf.py --size-mib 1024 --files 100000
+
 clean:
 	rm -rf $(B)
 
-.PHONY: all clean freestanding
+.PHONY: all clean freestanding test perf

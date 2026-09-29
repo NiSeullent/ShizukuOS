@@ -16,7 +16,7 @@ Each interrupted image is then checked two ways:
            and every later-touched file made only of blocks from its own history (no stale/foreign data);
   libsfs   libsfs mounts the image read-write (its own jbd2 replay + orphan cleanup), `crashverify` must pass,
            and `e2fsck -fn` on the result must exit 0 with no problems.
-Usage: run_crash.py [--trials N] [--mode kill|cut|both] [--seed S] [--mkfs "-b 1024 ..."]
+Usage: run_crash.py [--trials N] [--mode kill|cut|both] [--seed S] [--mkfs "-b 1024 ..."] | --orphan
 """
 import os
 import random
@@ -34,6 +34,8 @@ TOOL = os.path.join(HERE, "..", "build", "sfstool")
 ALLOWED_FSCK = [
     r"^e2fsck \d", r"^Pass \d", r": recovering journal$", r"^Clearing orphaned inode", r"^Truncating orphaned inode",
     r"^\s*$", r"FILE SYSTEM WAS MODIFIED", r"^\S+: \d+/\d+ files", r"^Journal transaction \d+ was corrupt, replay was aborted\.$",
+    # e2fsck's own orphan truncation (ext2fs_punch) leaves a small depth-1 tree it then offers to collapse
+    r"extent tree \(at level \d+\) could be (shorter|narrower)\.  Optimize\? yes$", r"^Pass 1E: Optimizing extent trees$",
 ]
 
 
@@ -87,8 +89,52 @@ def verify(img, log, seed, tmp, tag):
     return errs, info
 
 
+def orphan_sweep(tmp):
+    """Multi-step unlink / truncate of a 20 MB file on a volume with 256-block groups, mounted with small
+    transactions (SFS_MOUNT_SMALL_TXN) so the operation commits mid-way with the inode on the orphan list; a crash
+    after every k-th device write. e2fsck must finish the orphan (and nothing else), libsfs must finish it at mount,
+    and the file must end up either untouched or completely deleted / truncated."""
+    base = os.path.join(tmp, "orph.img")
+    subprocess.run(["mkfs.ext4", "-q", "-F", "-b", "1024", "-g", "256", base, "64M"], check=True, capture_output=True)
+    subprocess.run([TOOL, "-q", base, "pattern", "/big", "0", "20000000", "1"], check=True, capture_output=True)
+    full = run([TOOL, "-q", "-r", base, "tree"]).stdout.split()[4]
+    fails, orphans_e2fsck, orphans_libsfs, cases = 0, 0, 0, 0
+    for op in (["rm", "/big"], ["truncate", "/big", "1000"]):
+        for k in list(range(10, 400, 13)):
+            img = os.path.join(tmp, "o.img")
+            subprocess.run(["cp", "--sparse=always", base, img], check=True)
+            run([TOOL, "-q", "-s", "-K", str(k), img] + op)
+            a, b = img + ".a", img + ".b"
+            subprocess.run(["cp", "--sparse=always", img, a], check=True)
+            subprocess.run(["cp", "--sparse=always", img, b], check=True)
+            p = run(["e2fsck", "-fy", a])
+            orphans_e2fsck += p.stdout.count("orphaned inode")
+            bad = problems(p.stdout + p.stderr)
+            q = run(["e2fsck", "-fn", a])
+            r = run([TOOL, b, "stats"])
+            orphans_libsfs += r.stderr.count("orphan inode")
+            t = run(["e2fsck", "-fn", b])
+            tree = run([TOOL, "-q", "-r", b, "tree"]).stdout.split()
+            state = "absent" if "/big" not in tree else ("full" if tree[4] == full else "size %s" % tree[2])
+            ok_state = state in ("absent", "full") if op[0] == "rm" else state in ("full", "size 1000")
+            cases += 1
+            if bad or q.returncode or r.returncode or t.returncode or not ok_state:
+                fails += 1
+                print("  orphan %s cut@%d: e2fsck problems %s, -fn %d; libsfs rc %d, -fn %d; file %s" % (
+                    op[0], k, bad[:4], q.returncode, r.returncode, t.returncode, state))
+    print("orphan sweep: %d/%d crash points passed (e2fsck processed %d orphans, libsfs %d)" % (
+        cases - fails, cases, orphans_e2fsck, orphans_libsfs))
+    return fails
+
+
 def main():
     trials = int(sys.argv[sys.argv.index("--trials") + 1]) if "--trials" in sys.argv else 10
+    if "--orphan" in sys.argv:
+        tmp = tempfile.mkdtemp(prefix="sfsorphan-", dir=os.environ.get("SFS_TMP"))
+        try:
+            return 1 if orphan_sweep(tmp) else 0
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
     mode = sys.argv[sys.argv.index("--mode") + 1] if "--mode" in sys.argv else "both"
     base_seed = int(sys.argv[sys.argv.index("--seed") + 1]) if "--seed" in sys.argv else 1
     rng = random.Random(base_seed)

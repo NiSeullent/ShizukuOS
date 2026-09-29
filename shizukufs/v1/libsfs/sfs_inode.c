@@ -386,7 +386,12 @@ int sfs_iflush_all(sfs_fs *fs)
 void sfs_iforget(sfs_fs *fs, uint32_t ino)
 {
     sfs_inode *in = ilookup(fs, ino);
-    if (in && !in->refs) idestroy(fs, in);
+    if (!in || in->refs) return;
+    if (in->dirty && sfs_iflush(fs, in)) {
+        sfs_logu(fs, "sfs: could not write back inode before dropping it: ", ino);
+        return;                                          /* keep it: the next commit retries */
+    }
+    idestroy(fs, in);
 }
 
 void sfs_icache_destroy(sfs_fs *fs)

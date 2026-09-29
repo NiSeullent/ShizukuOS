@@ -407,7 +407,7 @@ int sfs_op_end(sfs_fs *fs, int rc)
          * holds the last committed state) and stop writing. */
         if (fs->mods != fs->op_mods) return sfs_fail(fs, rc);
     }
-    if (txn_weight(fs) >= fs->txn_soft) {
+    if (txn_weight(fs) >= fs->txn_soft || fs->txn.force_commit) {
         int c = sfs_commit(fs);
         if (!rc) rc = c;
     }
@@ -429,6 +429,12 @@ int sfs_fail(sfs_fs *fs, int rc)
     }
     fs->txn.bufs = 0;
     fs->txn.nbufs = 0;
+    for (b = fs->txn.late; b; b = next) {
+        next = b->tnext;
+        b->tnext = 0;
+        b->flags &= ~(B_LATE | B_DIRTY | B_UPTODATE | B_VERIFIED);
+    }
+    fs->txn.late = 0;
     sfs_runpage_free(fs, &fs->txn.frees);
     sfs_runpage_free(fs, &fs->txn.revokes);
     fs->txn.nfrees = fs->txn.nrevokes = 0;
@@ -465,6 +471,8 @@ int sfs_commit(sfs_fs *fs)
     sfs_runpage_free(fs, &fs->txn.revokes);
     fs->txn.nrevokes = 0;
     if (rc) return sfs_fail(fs, rc);
+    sfs_release_late(fs);                                 /* what they depended on is committed now */
+    fs->txn.force_commit = 0;
     return 0;
 }
 
@@ -506,6 +514,9 @@ int sfs_orphan_del(sfs_fs *fs, sfs_inode *in)
     return SFS_ECORRUPT;
 }
 
+/* Finishes what the orphan list records: inodes without links are released and freed, truncated files lose
+ * their blocks beyond i_size. An inode stays on the list (at its head) until its work is complete, so a crash
+ * during the cleanup is recovered again by the next mount or e2fsck. */
 int sfs_orphan_cleanup(sfs_fs *fs)
 {
     uint32_t guard = 0;
@@ -523,26 +534,25 @@ int sfs_orphan_cleanup(sfs_fs *fs)
         if (rc) return rc;
         rc = sfs_iget(fs, ino, &in);
         if (rc) {
+            sfs_log(fs, "sfs: unreadable orphan inode, list dropped");
             fs->last_orphan = 0;
             fs->txn.sb_dirty = 1;
             return sfs_op_end(fs, 0);
         }
-        fs->last_orphan = in->dtime;
-        fs->txn.sb_dirty = 1;
-        in->dtime = 0;
         if (in->links == 0) {
             sfs_logu(fs, "sfs: releasing orphan inode ", ino);
             rc = sfs_inode_release_all(fs, in);
+            if (!rc) rc = sfs_orphan_del(fs, in);
             if (!rc) {
                 in->dtime = (uint32_t)sfs_now(fs);
                 if (!in->dtime) in->dtime = 1;
                 sfs_idirty(fs, in);
                 rc = sfs_free_inode(fs, ino, sfs_is_dir(in));
             }
-        } else if (sfs_is_reg(in)) {
+        } else {
             sfs_logu(fs, "sfs: finishing truncate of orphan inode ", ino);
-            rc = sfs_file_truncate(fs, in, in->size);
-            sfs_idirty(fs, in);
+            rc = sfs_file_trim_orphan(fs, in);
+            if (!rc) rc = sfs_orphan_del(fs, in);
         }
         sfs_iput(fs, in);
         if (!rc) sfs_iforget(fs, ino);
@@ -767,6 +777,7 @@ int sfs_mount(const sfs_ops *ops, unsigned flags, sfs_fs **out)
     } else {
         fs->txn_soft = 1024;
     }
+    if (fs->mflags & SFS_MOUNT_SMALL_TXN) fs->txn_soft = 64;
     if (!fs->ro) {
         uint64_t now = sfs_now(fs);
         uint8_t *s = fs->sbraw;

@@ -49,6 +49,7 @@ enum {
 #define SFS_MOUNT_CLEAN_ON_SYNC 4u     /* after every sfs_sync() leave the volume in the "cleanly unmounted" state
                                           (and do not mark it in use at mount: the first update does) */
 #define SFS_MOUNT_NAIVE 8u             /* benchmark baseline: no preallocation, no extent cache, tiny block cache */
+#define SFS_MOUNT_SMALL_TXN 16u        /* tests: commit at 64 journal blocks, so multi-step operations commit mid-way */
 
 /* Callback table filled by the host/kernel glue. Byte offsets are always multiples of the volume block size. */
 typedef struct sfs_ops {

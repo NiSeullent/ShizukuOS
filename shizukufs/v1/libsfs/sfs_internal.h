@@ -38,6 +38,7 @@ uint16_t sfs_crc16(uint16_t crc, const void *data, size_t len);      /* CRC-16 (
 #define B_NEW 0x8u              /* freshly allocated, never read from disk */
 #define B_VERIFIED 0x10u        /* checksum/structure verified since it was read (cleared on every re-read) */
 #define B_COMPUTED 0x20u        /* content computed in memory (uninitialised bitmap), not what the disk holds */
+#define B_LATE 0x40u            /* dirty data that must not reach the disk before the running transaction commits */
 typedef struct sfs_buf {
     uint64_t blk;
     uint8_t *data;
@@ -119,6 +120,8 @@ typedef struct sfs_txn {
     sfs_runpage *revokes;       /* metadata blocks freed: revoke records */
     uint32_t nrevokes;
     int sb_dirty;
+    int force_commit;           /* commit at the end of the current operation */
+    sfs_buf *late;              /* B_LATE buffers (linked through tnext) */
 } sfs_txn;
 
 /* Journal extent map (journal inode logical block -> physical). */
@@ -209,6 +212,8 @@ sfs_buf *sfs_bfind(sfs_fs *fs, uint64_t blk);                          /* cached
 void sfs_bput(sfs_fs *fs, sfs_buf *b);
 int sfs_bdirty_meta(sfs_fs *fs, sfs_buf *b);                          /* join the running transaction */
 void sfs_bdirty_data(sfs_fs *fs, sfs_buf *b);
+void sfs_bdirty_late(sfs_fs *fs, sfs_buf *b);                          /* dirty data held back until the next commit */
+void sfs_release_late(sfs_fs *fs);                                     /* after a commit: late buffers become ordinary */
 void sfs_bforget(sfs_fs *fs, uint64_t blk);                            /* drop a freed block from the cache/transaction */
 void sfs_binval_data(sfs_fs *fs, uint64_t blk, uint32_t count);        /* direct I/O overwrote these data blocks */
 void sfs_boverlay(sfs_fs *fs, uint64_t blk, uint32_t count, uint8_t *dst);  /* copy newer cached content over dst */
@@ -312,6 +317,7 @@ uint8_t sfs_mode_to_ft(uint16_t mode);
 int sfs_file_read(sfs_fs *fs, sfs_inode *in, uint64_t off, void *buf, uint64_t len, uint64_t *done);
 int sfs_file_write(sfs_fs *fs, sfs_inode *in, uint64_t off, const void *buf, uint64_t len, uint64_t *done);
 int sfs_file_truncate(sfs_fs *fs, sfs_inode *in, uint64_t size);
+int sfs_file_trim_orphan(sfs_fs *fs, sfs_inode *in);                 /* blocks beyond i_size of a truncate orphan */
 int sfs_inode_release_all(sfs_fs *fs, sfs_inode *in);                 /* frees everything (data, tree, xattr block) */
 int sfs_symlink_read(sfs_fs *fs, sfs_inode *in, char *buf, size_t cap, size_t *len);
 int sfs_inline_read(sfs_fs *fs, sfs_inode *in, uint64_t off, void *buf, uint64_t len, uint64_t *done);

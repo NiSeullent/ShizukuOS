@@ -349,6 +349,15 @@ static int nop_apply(void *ctx, int kind, cw_file *a, cw_file *b, uint64_t off, 
     return 0;
 }
 
+static int print_apply(void *ctx, int kind, cw_file *a, cw_file *b, uint64_t off, uint64_t len, uint64_t seed)
+{
+    static const char *const names[] = {"create", "append", "overwrite", "trunc", "delete", "rename", "mkdir", "rmdir"};
+    (void)ctx; (void)seed;
+    printf("  %-9s %s%s%s off %llu len %llu (size now %llu)\n", names[kind], a->path, b ? " -> " : "", b ? b->path : "",
+           (unsigned long long)off, (unsigned long long)len, (unsigned long long)(b ? b->size : a->size));
+    return 0;
+}
+
 static cw *cw_new(uint64_t seed)
 {
     cw *w = calloc(1, sizeof *w);
@@ -401,6 +410,29 @@ static int read_all(uint32_t ino, uint64_t size, uint8_t **out)
     return rc;
 }
 
+typedef struct ver { char path[64]; uint8_t *data; uint64_t size; int deleted; } ver;
+typedef struct snap_ctx { ver *vs; int nv; } snap_ctx;
+
+static void snap_one(snap_ctx *sc, cw_file *f)
+{
+    ver *v;
+    if (sc->nv >= 65536) return;
+    v = &sc->vs[sc->nv++];
+    memcpy(v->path, f->path, 64);
+    v->size = f->size;
+    v->deleted = !f->live;
+    v->data = f->live && !f->is_dir ? malloc(f->size ? f->size : 1) : 0;
+    if (v->data && f->size) memcpy(v->data, f->data, f->size);
+}
+
+static int snap_apply(void *ctx, int kind, cw_file *a, cw_file *b, uint64_t off, uint64_t len, uint64_t seed)
+{
+    (void)kind; (void)off; (void)len; (void)seed;
+    snap_one(ctx, a);
+    if (b) snap_one(ctx, b);
+    return 0;
+}
+
 static int cmd_crashverify(const char *logpath, uint64_t seed)
 {
     FILE *lf = fopen(logpath, "r");
@@ -416,24 +448,17 @@ static int cmd_crashverify(const char *logpath, uint64_t seed)
     hist = cw_new(seed);
     for (r = 0; r <= last; ++r) cw_round(hist, r, nop_apply, 0);
     {
-        /* collect later versions per path */
-        typedef struct ver { char path[64]; uint8_t *data; uint64_t size; int deleted; } ver;
-        ver *vs = calloc(65536, sizeof *vs);
-        int nv = 0, rr;
-        for (rr = last + 1; rr <= last + 2; ++rr) {
-            int before = hist->n;
-            (void)before;
-            cw_round(hist, rr, nop_apply, 0);
-            for (i = 0; i < hist->n && nv < 65536; ++i) {
-                if (hist->f[i].touched_round != rr) continue;
-                memcpy(vs[nv].path, hist->f[i].path, 64);
-                vs[nv].size = hist->f[i].size;
-                vs[nv].deleted = !hist->f[i].live;
-                vs[nv].data = hist->f[i].live && !hist->f[i].is_dir ? malloc(vs[nv].size ? vs[nv].size : 1) : 0;
-                if (vs[nv].data && vs[nv].size) memcpy(vs[nv].data, hist->f[i].data, vs[nv].size);
-                nv++;
-            }
-        }
+        /* every state each path passes through after the last logged sync (per operation, so intermediate states
+         * inside a round count too) */
+        snap_ctx sc;
+        int rr;
+        ver *vs;
+        int nv;
+        sc.vs = calloc(65536, sizeof *sc.vs);
+        sc.nv = 0;
+        for (rr = last + 1; rr <= last + 2; ++rr) cw_round(hist, rr, snap_apply, &sc);
+        vs = sc.vs;
+        nv = sc.nv;
         for (i = 0; i < w->n; ++i) {
             cw_file *f = &w->f[i];
             int touched = 0, k;
@@ -574,7 +599,8 @@ static int run_cmd(int argc, char **argv)
         uint64_t cookie = 0;
         sfs_dirent de;
         rc = resolve(argv[1], &ino);
-        while (!rc && (rc = sfs_readdir(g_fs, ino, &cookie, &de)) == 1) printf("%u %u %s\n", de.ino, de.type, de.name);
+        if (!rc)
+            while ((rc = sfs_readdir(g_fs, ino, &cookie, &de)) == 1) printf("%u %u %s\n", de.ino, de.type, de.name);
         return rc < 0 ? fail("ls", rc) : 0;
     }
     if (!strcmp(c, "stat")) {
@@ -677,6 +703,16 @@ static int run_cmd(int argc, char **argv)
         return rc ? fail("settime", rc) : 0;
     }
     if (!strcmp(c, "crashverify")) return cmd_crashverify(argv[1], strtoull(argv[2], 0, 0));
+    if (!strcmp(c, "crashtrace")) {                       /* the model's ops of rounds FROM..TO */
+        cw *w = cw_new(strtoull(argv[1], 0, 0));
+        int r, from = atoi(argv[2]), to = argc > 3 ? atoi(argv[3]) : from;
+        for (r = 0; r <= to; ++r) {
+            if (r >= from) printf("round %d\n", r);
+            cw_round(w, r, r >= from ? print_apply : nop_apply, 0);
+        }
+        cw_free(w);
+        return 0;
+    }
     if (argc < 4) { fprintf(stderr, "%s: missing argument\n", c); return 2; }
     if (!strcmp(c, "crashload")) return cmd_crashload(argv[1], strtoull(argv[2], 0, 0), atoi(argv[3]));
     if (!strcmp(c, "putat")) {
@@ -723,8 +759,9 @@ int main(int argc, char **argv)
     uint64_t cut = 0;
     uint32_t cut_seed = 1;
     int volatile_cache = 0, do_fsync = 0;
-    while ((opt = getopt(argc, argv, "rc:NFqVK:S:TC")) != -1) {
+    while ((opt = getopt(argc, argv, "rc:NFqVK:S:TCs")) != -1) {
         switch (opt) {
+        case 's': flags |= SFS_MOUNT_SMALL_TXN; break;
         case 'C': flags |= SFS_MOUNT_CLEAN_ON_SYNC; break;
         case 'T': g_times = 1; break;
         case 'r': ro = 1; break;
