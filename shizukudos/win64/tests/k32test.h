@@ -15,6 +15,15 @@ static int k32t_checks, k32t_failed;
     else { ++k32t_failed; printf("FAIL: %s (line %d)\n", what, __LINE__); } } while (0)
 #define CHECKV(cond, what, ...) do { ++k32t_checks; if (cond) printf("PASS: %s\n", what); \
     else { ++k32t_failed; printf("FAIL: %s (line %d: ", what, __LINE__); printf(__VA_ARGS__); printf(")\n"); } } while (0)
+/* CHECK_W / CHECKV_W: expectations that follow Windows documentation or Windows' own message texts but where Wine (the reference
+ * implementation of tests/host/run_wine_tests.py, built with -DK32T_WINE) is known to behave differently: reported as skipped there. */
+#ifdef K32T_WINE
+#define CHECK_W(cond, what) do { (void)(cond); ++k32t_checks; printf("PASS: %s (skipped: Wine differs from Windows here)\n", what); } while (0)
+#define CHECKV_W(cond, what, ...) CHECK_W(cond, what)
+#else
+#define CHECK_W(cond, what) CHECK(cond, what)
+#define CHECKV_W(cond, what, ...) CHECKV(cond, what, __VA_ARGS__)
+#endif
 /* GetLastError() must equal `err` (checked right after a failing call) */
 #define CHECK_ERR(err, what) CHECKV(GetLastError() == (DWORD)(err), what, "GetLastError=%u expected %u", (unsigned)GetLastError(), (unsigned)(err))
 

@@ -119,7 +119,7 @@ def build_apps():
         rc = src.with_suffix(".rc")                 # optional resources for the program (tests/<name>.rc)
         if rc.exists():
             res = OUT / f"{name}_res.o"
-            run([WINDRES, "-O", "coff", "-i", rc, "-o", res])
+            run([WINDRES, "-O", "coff", "-I", src.parent, "-i", rc, "-o", res])
             extra.append(res)
         crt = W64 / "crt"
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",

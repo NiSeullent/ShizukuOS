@@ -108,32 +108,42 @@ K32API BOOL WINAPI K32GetModuleInformation(HANDLE proc, HMODULE m, LPMODULEINFO 
     return TRUE;
 }
 
-static DWORD module_string(HANDLE proc, HMODULE m, const SHZ_UNICODE_STRING *(*pick)(const SHZ_LDR_ENTRY *), LPWSTR buf, DWORD cap)
+/* A view of a module's path: the whole FullDllName, or its last component. The base name is taken from the full name, not from the
+ * loader's BaseDllName, so it has the case of the file name as stored (Kernel64 keeps BaseDllName lower-cased for lookups). */
+typedef void (*pick_fn)(const SHZ_LDR_ENTRY *, const WCHAR **, DWORD *);
+static void pick_full(const SHZ_LDR_ENTRY *e, const WCHAR **s, DWORD *n) { *s = e->FullDllName.Buffer; *n = e->FullDllName.Length / 2; }
+static void pick_base(const SHZ_LDR_ENTRY *e, const WCHAR **s, DWORD *n)
+{
+    DWORD len = e->FullDllName.Length / 2, i = len;
+    const WCHAR *full = e->FullDllName.Buffer;
+    while (i && full[i - 1] != '\\' && full[i - 1] != '/') --i;
+    *s = full + i;
+    *n = len - i;
+}
+
+static DWORD module_string(HANDLE proc, HMODULE m, pick_fn pick, LPWSTR buf, DWORD cap)
 {
     const SHZ_LDR_ENTRY *e;
-    const SHZ_UNICODE_STRING *s;
+    const WCHAR *s;
     DWORD n;
     if (!is_current_process(proc)) return 0;
     e = find_entry(m);
     if (!e) { shz_set_last_error(ERROR_INVALID_HANDLE); return 0; }
-    s = pick(e);
-    n = s->Length / 2;
+    pick(e, &s, &n);
     if (n >= cap) {
-        if (cap) { memcpy(buf, s->Buffer, (cap - 1) * sizeof(WCHAR)); buf[cap - 1] = 0; }
+        if (cap) { memcpy(buf, s, (cap - 1) * sizeof(WCHAR)); buf[cap - 1] = 0; }
         shz_set_last_error(ERROR_INSUFFICIENT_BUFFER);
         return cap ? cap - 1 : 0;
     }
-    memcpy(buf, s->Buffer, n * sizeof(WCHAR));
+    memcpy(buf, s, n * sizeof(WCHAR));
     buf[n] = 0;
     return n;
 }
-static const SHZ_UNICODE_STRING *pick_full(const SHZ_LDR_ENTRY *e) { return &e->FullDllName; }
-static const SHZ_UNICODE_STRING *pick_base(const SHZ_LDR_ENTRY *e) { return &e->BaseDllName; }
 
 K32API DWORD WINAPI K32GetModuleFileNameExW(HANDLE proc, HMODULE m, LPWSTR buf, DWORD cap) { return module_string(proc, m, pick_full, buf, cap); }
 K32API DWORD WINAPI K32GetModuleBaseNameW(HANDLE proc, HMODULE m, LPWSTR buf, DWORD cap) { return module_string(proc, m, pick_base, buf, cap); }
 
-static DWORD module_string_a(HANDLE proc, HMODULE m, const SHZ_UNICODE_STRING *(*pick)(const SHZ_LDR_ENTRY *), LPSTR buf, DWORD cap)
+static DWORD module_string_a(HANDLE proc, HMODULE m, pick_fn pick, LPSTR buf, DWORD cap)
 {
     WCHAR w[300];
     DWORD n = module_string(proc, m, pick, w, 300);

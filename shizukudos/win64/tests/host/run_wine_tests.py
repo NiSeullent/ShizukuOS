@@ -36,6 +36,8 @@ GROUPS = {
     "t_k32_nls": ["k32_nls.c", "nls_core.c", "nls_fmt.c", "k32_utf.c"],
     "t_k32_slist": ["k32_slist.c"],
     "t_k32_module": ["k32_module.c", "k32_utf.c", "../ntdll/unwind.c", "../ntdll/ntdll_asm.S"],
+    "t_k32_fmt": ["k32_fmt.c", "k32_module.c", "k32_utf.c", "k32_gmem.c"],
+    "t_k32_mem": ["k32_gmem.c"],
 }
 DEFINES = {                                       # per-test compiler defines (ntdll sources bind the Rtl* calls of the test to them)
     "t_k32_module": ["-DSHZ_NTDLL_BUILD", "-D_NTSYSTEM_="],
@@ -50,11 +52,13 @@ def build(test, shizuku):
            "-Wl,--image-base,0x140000000", "-I", str(W64 / "include"), "-I", str(W64 / "crt")]
     if shizuku:
         cmd += ["-D_KERNEL32_="] + DEFINES.get(test, [])
+    else:
+        cmd += ["-DK32T_WINE"]
     cmd += [str(W64 / "tests" / f"{test}.c"), str(W64 / "crt" / "shzcrt.c")]
     rc = W64 / "tests" / f"{test}.rc"
     if rc.exists():
         res = OUT / f"{test}_res.o"
-        subprocess.run([WINDRES, "-O", "coff", "-i", str(rc), "-o", str(res)], check=True)
+        subprocess.run([WINDRES, "-O", "coff", "-I", str(rc.parent), "-i", str(rc), "-o", str(res)], check=True)
         cmd.append(str(res))
     if shizuku:
         cmd += [str(K32 / s) for s in GROUPS[test]] + [str(SHIM)]
