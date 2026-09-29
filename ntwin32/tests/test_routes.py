@@ -80,8 +80,8 @@ class RoutesSchemaTests(unittest.TestCase):
         self.assertEqual(self.plan['configuration'], {'file': 'NTW32.INI', 'environment': 'NTW32_ROUTING',
                                                       'document': 'docs/NTW32_ROUTING.md'})
         document = (ROOT / 'docs/NTW32_ROUTING.md').read_text()
-        for needle in ('NTW32.INI', 'NTW32_ROUTING', '[routing]', '[modules]', '[functions]', 'mode=',
-                       'log=', 'KERNELEX.DLL', 'KEXBASES.DLL', 'KEXBASEN.DLL', 'get_api_table',
+        for needle in ('NTW32.INI', 'NTW32_ROUTING', '[routing]', '[modules]', '[functions]', '[order]',
+                       'mode=', 'log=', 'order=', 'KERNELEX.DLL', 'KEXBASES.DLL', 'KEXBASEN.DLL', 'get_api_table',
                        'USER_REPORTED', 'HOST_TESTED'):
             self.assertIn(needle, document)
         for mode in mod.MODES:

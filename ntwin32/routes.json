@@ -5,7 +5,7 @@
   "providers": ["native", "own", "kernelex"],
   "default_order": ["native", "own", "kernelex"],
   "modes": {
-    "auto": "per-export order below (default_order for names without an entry); a provider listed under stubs for the name is tried only as the last resort",
+    "auto": "per-export order below (default_order for names without an entry) unless NTW32.INI configures one ([order] entry for the name, then [routing] order=); a provider listed under stubs for the name is tried only as the last resort",
     "own": ["own", "native"],
     "kernelex": ["kernelex", "native", "own"],
     "native": "passthrough: the native loader's answer, no diagnostics"
@@ -73,6 +73,7 @@
     "Routing: only KERNEL32.DLL names are routed; other modules and ordinal imports pass through in every mode",
     "Routing: a KernelEx-supplied pointer is recognised only when it lies inside a KernelEx API library that GetModuleHandleA can see in this process; otherwise it counts as native",
     "Routing: static exports already bound to NTW32.DLL forward to native or KernelEx when the policy selects them; when nothing else exists the own implementation stays bound",
-    "Routing: the KernelEx module names and the probing behaviour are host-tested against mocks only; no KernelEx installation was observed here"
+    "Routing: the KernelEx module names and the probing behaviour are host-tested against mocks only; no KernelEx installation was observed here",
+    "Routing: a configured order replaces the orders above for mode auto only and may leave out providers; a left-out provider is never tried for that name"
   ]
 }

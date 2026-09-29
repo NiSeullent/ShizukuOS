@@ -118,10 +118,11 @@ static void say3(const char *a, const char *b, const char *c) {
     OutputDebugStringA(buffer);
 }
 
-/* KernelEx presence: the core and its API libraries are looked up by name
- * with GetModuleHandleA only (nothing is loaded). An API library counts when
- * it exports get_api_table. Its mapped image range, read from its own PE
- * headers, is what attributes a native-loader result to KernelEx. */
+/* KernelEx presence: the core and its API libraries are looked up by file
+ * name with GetModuleHandleA only (nothing is loaded). An API library counts
+ * when the resolver's native lookup finds its get_api_table export. Its
+ * mapped image range, read from its own PE headers, is what attributes a
+ * native-loader result to KernelEx. Requires resolver.native to be set. */
 static void detect_kernelex(void) {
     static const char *const libraries[2] = { "KEXBASES.DLL", "KEXBASEN.DLL" };
     HMODULE core = GetModuleHandleA("KERNELEX.DLL");
@@ -131,7 +132,7 @@ static void detect_kernelex(void) {
         HMODULE library = GetModuleHandleA(libraries[i]);
         uint32_t size;
         if (!library) continue;
-        if (!GetProcAddress(library, "get_api_table")) {
+        if (!resolver.native(resolver.context, (uintptr_t)library, "get_api_table")) {
             say3("NTW32: ", libraries[i], " is mapped without get_api_table; ignored");
             continue;
         }
@@ -216,6 +217,9 @@ static void summarize(void) {
     ntw_text_add_uint(&text, policy.warnings);
     ntw_text_add(&text, " kernelex=");
     ntw_text_add(&text, ntw_route_kernelex_name(kernelex_state));
+    ntw_text_add(&text, " order=");
+    if (policy.order) ntw_text_add_order(&text, policy.order);
+    else ntw_text_add(&text, "routes.json");
     OutputDebugStringA(buffer);
 }
 
@@ -240,7 +244,10 @@ static void bind_forwards(void) {
             target = (ntw_proc)0;
         }
         forward[i] = (target && provider != NTW_PROVIDER_OWN) ? target : (ntw_proc)0;
-        if (!target && policy.log)
+        /* Outside mode Native the resolver has just reported the name as
+         * unresolved; say what the already-bound export does instead. */
+        if (!target && (policy.log ||
+                        ntw_route_effective_mode(&policy, "KERNEL32.DLL", route_entries[i].name) != NTW_MODE_NATIVE))
             say3("NTW32: static export ", route_entries[i].name, " keeps the own implementation");
     }
 }
@@ -259,7 +266,7 @@ static void configure(HINSTANCE instance) {
     else
         own_end = own_base + 0x1000;
     load_configuration(instance);
-    detect_kernelex();
+    (void)ntw_route_check(&policy, "KERNEL32.DLL", route_log, 0);
     resolver.kernel32_module = (uintptr_t)native_kernel32;
     resolver.owned = lookup_owned;
     resolver.native = lookup_native;
@@ -267,8 +274,9 @@ static void configure(HINSTANCE instance) {
     resolver.table = &route_table;
     resolver.policy = &policy;
     resolver.kernelex_owns = kernelex_owns;
-    resolver.kernelex_state = kernelex_state;
     resolver.log = route_log;
+    detect_kernelex();
+    resolver.kernelex_state = kernelex_state;
     if (policy.log) summarize();
     bind_forwards();
 }

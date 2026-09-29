@@ -54,18 +54,22 @@ struct ntw_route_table {
 #define NTW_ROUTE_MAX_OVERRIDES 32u
 #define NTW_ROUTE_MESSAGE_MAX 200u
 
-enum { NTW_OVERRIDE_MODULE = 1, NTW_OVERRIDE_FUNCTION = 2 };
+/* MODULE and FUNCTION entries set a mode; an ORDER entry ([order] section)
+ * sets the provider order one function uses while its effective mode is Auto. */
+enum { NTW_OVERRIDE_MODULE = 1, NTW_OVERRIDE_FUNCTION = 2, NTW_OVERRIDE_ORDER = 3 };
 enum { NTW_ROUTE_SOURCE_DEFAULT = 0, NTW_ROUTE_SOURCE_INI = 1, NTW_ROUTE_SOURCE_ENV = 2 };
 
 struct ntw_route_override {
     unsigned char kind;   /* NTW_OVERRIDE_* */
-    unsigned char mode;   /* NTW_MODE_* */
+    unsigned char mode;   /* NTW_MODE_* (module and function entries) */
+    unsigned char order;  /* packed provider order (order entries; never 0 there) */
     char name[NTW_ROUTE_NAME_MAX];  /* modules stored upper-case; functions exact */
 };
 struct ntw_route_policy {
     unsigned char mode;      /* process mode */
     unsigned char log;       /* 1 traces every routing decision */
     unsigned char source;    /* NTW_ROUTE_SOURCE_* */
+    unsigned char order;     /* [routing] order=: Auto order for every name; 0 keeps routes.json */
     unsigned warnings;       /* rejected lines and values, cumulative */
     unsigned override_count;
     struct ntw_route_override overrides[NTW_ROUTE_MAX_OVERRIDES];
@@ -91,11 +95,28 @@ void ntw_route_policy_init(struct ntw_route_policy *);
  * warning through `log` (which may be NULL). Returns the warnings added. */
 unsigned ntw_route_parse(struct ntw_route_policy *, const char *text, size_t length,
                          char separator, ntw_route_log log, void *context);
+/* After parsing: report entries that cannot take effect because only
+ * `routed_module` is routed ([modules] naming another module) or because the
+ * effective mode there is not Auto ([order] entries, [routing] order=). The
+ * entries stay stored and harmless; each report counts as a warning. Returns
+ * the warnings added. */
+unsigned ntw_route_check(struct ntw_route_policy *, const char *routed_module, ntw_route_log log, void *context);
 /* Function override, then module override (case-insensitive), then the process
  * mode. A NULL policy is mode Own. */
 unsigned ntw_route_effective_mode(const struct ntw_route_policy *, const char *module, const char *name);
-/* The packed provider order a mode tries for a name. */
+/* The packed provider order a mode tries for a name according to the table. */
 unsigned ntw_route_order(unsigned mode, const struct ntw_route_table *, const char *name);
+/* The order the resolver uses. In mode Auto: the [order] entry for the name,
+ * else the [routing] order, else ntw_route_order. Own, KernelEx and Native
+ * keep their fixed orders. A NULL policy means ntw_route_order. */
+unsigned ntw_route_effective_order(const struct ntw_route_policy *, const struct ntw_route_table *,
+                                   unsigned mode, const char *name);
+/* One to three distinct provider names separated by commas, case-insensitive,
+ * blanks around a name allowed ("native, own"). Returns 0 and leaves `order`
+ * unchanged for anything else. */
+int ntw_route_parse_order(const char *text, size_t length, unsigned *order);
+/* Appends "native,own,kernelex" for a packed order ("none" when empty). */
+void ntw_text_add_order(struct ntw_text *, unsigned order);
 int ntw_route_is_stub(const struct ntw_route_table *, const char *module, const char *name, unsigned provider);
 int ntw_route_parse_mode(const char *text, size_t length, unsigned *mode);
 const char *ntw_route_mode_name(unsigned mode);

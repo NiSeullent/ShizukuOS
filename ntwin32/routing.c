@@ -96,17 +96,59 @@ int ntw_route_parse_mode(const char *text, size_t length, unsigned *mode) {
     return 0;
 }
 
+int ntw_route_parse_order(const char *text, size_t length, unsigned *order) {
+    unsigned packed = 0, count = 0, seen = 0;
+    size_t start = 0, i;
+    if (!text || !order || length == 0 || length > NTW_ROUTE_LINE_MAX) return 0;
+    for (i = 0; i <= length; ++i) {
+        size_t first, end;
+        unsigned provider, match = NTW_PROVIDER_NONE;
+        if (i < length && text[i] != ',') continue;
+        first = start;
+        end = i;
+        start = i + 1;
+        while (first < end && is_space(text[first])) ++first;
+        while (end > first && is_space(text[end - 1])) --end;
+        if (first == end || count == NTW_ORDER_SLOTS) return 0;
+        for (provider = NTW_PROVIDER_NATIVE; provider <= NTW_PROVIDER_KERNELEX; ++provider) {
+            const char *name = ntw_route_provider_name(provider);
+            size_t k;
+            for (k = 0; first + k < end && name[k] && lower(text[first + k]) == name[k]; ++k) { }
+            if (first + k == end && name[k] == 0) { match = provider; break; }
+        }
+        if (match == NTW_PROVIDER_NONE || (seen & (1u << match))) return 0;
+        seen |= 1u << match;
+        packed |= match << (2u * count);
+        ++count;
+    }
+    *order = packed;
+    return 1;
+}
+
+void ntw_text_add_order(struct ntw_text *text, unsigned order) {
+    unsigned slot;
+    if (NTW_ORDER_AT(order, 0) == NTW_PROVIDER_NONE) { ntw_text_add(text, "none"); return; }
+    for (slot = 0; slot < NTW_ORDER_SLOTS; ++slot) {
+        unsigned provider = NTW_ORDER_AT(order, slot);
+        if (provider == NTW_PROVIDER_NONE) break;
+        if (slot) ntw_text_add(text, ",");
+        ntw_text_add(text, ntw_route_provider_name(provider));
+    }
+}
+
 void ntw_route_policy_init(struct ntw_route_policy *policy) {
     unsigned i, j;
     if (!policy) return;
     policy->mode = NTW_MODE_AUTO;
     policy->log = 0;
     policy->source = NTW_ROUTE_SOURCE_DEFAULT;
+    policy->order = 0;
     policy->warnings = 0;
     policy->override_count = 0;
     for (i = 0; i < NTW_ROUTE_MAX_OVERRIDES; ++i) {
         policy->overrides[i].kind = 0;
         policy->overrides[i].mode = NTW_MODE_AUTO;
+        policy->overrides[i].order = 0;
         for (j = 0; j < NTW_ROUTE_NAME_MAX; ++j) policy->overrides[i].name[j] = 0;
     }
 }
@@ -117,7 +159,7 @@ struct parser {
     void *context;
     unsigned line;
     unsigned warnings;
-    int saw_mode, saw_log;
+    int saw_mode, saw_log, saw_order;
 };
 
 static void warn(struct parser *p, const char *what, const char *detail, size_t detail_length) {
@@ -166,7 +208,7 @@ static void add_override(struct parser *p, unsigned kind, const char *key, size_
                          const char *value, size_t value_length) {
     struct ntw_route_policy *policy = p->policy;
     struct ntw_route_override *slot;
-    unsigned mode, i;
+    unsigned mode = NTW_MODE_AUTO, order = 0, i;
     size_t j;
     if (kind == NTW_OVERRIDE_MODULE ? !valid_module_name(key, key_length)
                                     : !valid_function_name(key, key_length)) {
@@ -174,7 +216,12 @@ static void add_override(struct parser *p, unsigned kind, const char *key, size_
              key, key_length);
         return;
     }
-    if (!ntw_route_parse_mode(value, value_length, &mode)) {
+    if (kind == NTW_OVERRIDE_ORDER) {
+        if (!ntw_route_parse_order(value, value_length, &order)) {
+            warn(p, "invalid provider order", value, value_length);
+            return;
+        }
+    } else if (!ntw_route_parse_mode(value, value_length, &mode)) {
         warn(p, "unknown mode", value, value_length);
         return;
     }
@@ -197,13 +244,21 @@ static void add_override(struct parser *p, unsigned kind, const char *key, size_
     slot = &policy->overrides[policy->override_count];
     slot->kind = (unsigned char)kind;
     slot->mode = (unsigned char)mode;
+    slot->order = (unsigned char)order;
     for (j = 0; j < key_length; ++j)
         slot->name[j] = kind == NTW_OVERRIDE_MODULE ? upper(key[j]) : key[j];
     slot->name[key_length] = 0;
     ++policy->override_count;
 }
 
-enum { SECTION_NONE, SECTION_ROUTING, SECTION_MODULES, SECTION_FUNCTIONS, SECTION_UNKNOWN };
+enum { SECTION_NONE, SECTION_ROUTING, SECTION_MODULES, SECTION_FUNCTIONS, SECTION_ORDER, SECTION_UNKNOWN };
+
+/* Case-insensitive comparison of a slice with a lower-case literal. */
+static int slice_is(const char *s, size_t n, const char *literal) {
+    size_t i;
+    for (i = 0; i < n && literal[i] && lower(s[i]) == literal[i]; ++i) { }
+    return i == n && literal[i] == 0;
+}
 
 static void parse_line(struct parser *p, const char *line, size_t length, unsigned *section) {
     size_t equals, key_end, value_start;
@@ -218,16 +273,10 @@ static void parse_line(struct parser *p, const char *line, size_t length, unsign
         while (length && is_space(line[0])) { ++line; --length; }
         name_end = length;
         while (name_end && is_space(line[name_end - 1])) --name_end;
-        if (name_end == 7 && lower(line[0]) == 'r' && lower(line[1]) == 'o' && lower(line[2]) == 'u' &&
-            lower(line[3]) == 't' && lower(line[4]) == 'i' && lower(line[5]) == 'n' && lower(line[6]) == 'g')
-            *section = SECTION_ROUTING;
-        else if (name_end == 7 && lower(line[0]) == 'm' && lower(line[1]) == 'o' && lower(line[2]) == 'd' &&
-                 lower(line[3]) == 'u' && lower(line[4]) == 'l' && lower(line[5]) == 'e' && lower(line[6]) == 's')
-            *section = SECTION_MODULES;
-        else if (name_end == 9 && lower(line[0]) == 'f' && lower(line[1]) == 'u' && lower(line[2]) == 'n' &&
-                 lower(line[3]) == 'c' && lower(line[4]) == 't' && lower(line[5]) == 'i' && lower(line[6]) == 'o' &&
-                 lower(line[7]) == 'n' && lower(line[8]) == 's')
-            *section = SECTION_FUNCTIONS;
+        if (slice_is(line, name_end, "routing")) *section = SECTION_ROUTING;
+        else if (slice_is(line, name_end, "modules")) *section = SECTION_MODULES;
+        else if (slice_is(line, name_end, "functions")) *section = SECTION_FUNCTIONS;
+        else if (slice_is(line, name_end, "order")) *section = SECTION_ORDER;
         else { *section = SECTION_UNKNOWN; warn(p, "unknown section", line, name_end); }
         return;
     }
@@ -241,8 +290,7 @@ static void parse_line(struct parser *p, const char *line, size_t length, unsign
     if (value_start == length) { warn(p, "empty value", line, key_end); return; }
     switch (*section) {
     case SECTION_ROUTING:
-        if (key_end == 4 && lower(line[0]) == 'm' && lower(line[1]) == 'o' &&
-            lower(line[2]) == 'd' && lower(line[3]) == 'e') {
+        if (slice_is(line, key_end, "mode")) {
             unsigned mode;
             if (p->saw_mode) { warn(p, "duplicate mode ignored", line + value_start, length - value_start); return; }
             p->saw_mode = 1;
@@ -251,12 +299,22 @@ static void parse_line(struct parser *p, const char *line, size_t length, unsign
                 return;
             }
             p->policy->mode = (unsigned char)mode;
-        } else if (key_end == 3 && lower(line[0]) == 'l' && lower(line[1]) == 'o' && lower(line[2]) == 'g') {
+        } else if (slice_is(line, key_end, "log")) {
             if (p->saw_log) { warn(p, "duplicate log ignored", line + value_start, length - value_start); return; }
             p->saw_log = 1;
             if (length - value_start == 1 && (line[value_start] == '0' || line[value_start] == '1'))
                 p->policy->log = (unsigned char)(line[value_start] - '0');
             else warn(p, "log must be 0 or 1", line + value_start, length - value_start);
+        } else if (slice_is(line, key_end, "order")) {
+            unsigned order;
+            if (p->saw_order) { warn(p, "duplicate order ignored", line + value_start, length - value_start); return; }
+            p->saw_order = 1;
+            if (!ntw_route_parse_order(line + value_start, length - value_start, &order)) {
+                warn(p, "invalid provider order; routes.json order retained",
+                     line + value_start, length - value_start);
+                return;
+            }
+            p->policy->order = (unsigned char)order;
         } else warn(p, "unknown key", line, key_end);
         return;
     case SECTION_MODULES:
@@ -264,6 +322,9 @@ static void parse_line(struct parser *p, const char *line, size_t length, unsign
         return;
     case SECTION_FUNCTIONS:
         add_override(p, NTW_OVERRIDE_FUNCTION, line, key_end, line + value_start, length - value_start);
+        return;
+    case SECTION_ORDER:
+        add_override(p, NTW_OVERRIDE_ORDER, line, key_end, line + value_start, length - value_start);
         return;
     case SECTION_UNKNOWN:
         warn(p, "key under unknown section ignored", line, key_end);
@@ -281,7 +342,7 @@ unsigned ntw_route_parse(struct ntw_route_policy *policy, const char *text, size
     size_t start, i;
     if (!policy) return 0;
     p.policy = policy; p.log = log; p.context = context;
-    p.line = 0; p.warnings = 0; p.saw_mode = 0; p.saw_log = 0;
+    p.line = 0; p.warnings = 0; p.saw_mode = 0; p.saw_log = 0; p.saw_order = 0;
     if (!text || length > NTW_ROUTE_TEXT_MAX) {
         warn(&p, "configuration missing or longer than 4096 bytes; ignored", 0, 0);
         return p.warnings;
@@ -301,6 +362,48 @@ unsigned ntw_route_parse(struct ntw_route_policy *policy, const char *text, size
         }
     }
     return p.warnings;
+}
+
+static unsigned check_report(struct ntw_route_policy *policy, ntw_route_log log, void *context,
+                             const char *a, const char *name, const char *b, unsigned mode) {
+    char buffer[NTW_ROUTE_MESSAGE_MAX];
+    struct ntw_text text;
+    ++policy->warnings;
+    if (!log) return 1;
+    ntw_text_start(&text, buffer, sizeof buffer);
+    ntw_text_add(&text, "NTW32: routing config: ");
+    ntw_text_add(&text, a);
+    if (name) ntw_text_add_bounded(&text, name, NTW_ROUTE_NAME_MAX);
+    ntw_text_add(&text, b);
+    if (mode <= NTW_MODE_NATIVE) ntw_text_add(&text, ntw_route_mode_name(mode));
+    log(context, buffer);
+    return 1;
+}
+
+unsigned ntw_route_check(struct ntw_route_policy *policy, const char *routed_module, ntw_route_log log, void *context) {
+    unsigned i, added = 0, reaches_auto, module_mode;
+    if (!policy || !routed_module) return 0;
+    /* No function override matches the empty name: this is the module's mode. */
+    module_mode = ntw_route_effective_mode(policy, routed_module, "");
+    reaches_auto = module_mode == NTW_MODE_AUTO;
+    for (i = 0; i < policy->override_count && i < NTW_ROUTE_MAX_OVERRIDES; ++i) {
+        const struct ntw_route_override *o = &policy->overrides[i];
+        unsigned mode;
+        if (o->kind == NTW_OVERRIDE_MODULE && !ntw_route_name_iequal(o->name, routed_module)) {
+            added += check_report(policy, log, context, "[modules] ", o->name,
+                                  " is not routed by this provider; entry has no effect", 99);
+        } else if (o->kind == NTW_OVERRIDE_FUNCTION && o->mode == NTW_MODE_AUTO) {
+            reaches_auto = 1;
+        } else if (o->kind == NTW_OVERRIDE_ORDER &&
+                   (mode = ntw_route_effective_mode(policy, routed_module, o->name)) != NTW_MODE_AUTO) {
+            added += check_report(policy, log, context, "[order] ", o->name,
+                                  " has no effect: the effective mode is ", mode);
+        }
+    }
+    if (policy->order && !reaches_auto)
+        added += check_report(policy, log, context, "[routing] order", 0,
+                              " has no effect: no name is routed in mode auto; the mode is ", module_mode);
+    return added;
 }
 
 unsigned ntw_route_effective_mode(const struct ntw_route_policy *policy, const char *module, const char *name) {
@@ -330,6 +433,21 @@ unsigned ntw_route_order(unsigned mode, const struct ntw_route_table *table, con
             if (ntw_route_name_equal(table->routes[i].name, name)) return table->routes[i].order;
     }
     return table && table->default_order ? table->default_order : NTW_ORDER_DEFAULT;
+}
+
+unsigned ntw_route_effective_order(const struct ntw_route_policy *policy, const struct ntw_route_table *table,
+                                   unsigned mode, const char *name) {
+    unsigned i;
+    /* Configured orders refine Auto only; the other modes are fixed orders. */
+    if (policy && mode != NTW_MODE_OWN && mode != NTW_MODE_KERNELEX && mode != NTW_MODE_NATIVE) {
+        for (i = 0; i < policy->override_count && i < NTW_ROUTE_MAX_OVERRIDES; ++i) {
+            const struct ntw_route_override *o = &policy->overrides[i];
+            if (o->kind == NTW_OVERRIDE_ORDER && o->order && ntw_route_name_equal(o->name, name))
+                return o->order;
+        }
+        if (policy->order) return policy->order;
+    }
+    return ntw_route_order(mode, table, name);
 }
 
 int ntw_route_is_stub(const struct ntw_route_table *table, const char *module, const char *name, unsigned provider) {

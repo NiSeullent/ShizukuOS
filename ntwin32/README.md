@@ -79,8 +79,9 @@ with the modes `auto` (default), `own`, `kernelex` and `native`, overridable
 per module and per function from `NTW32.INI` beside the DLL or, for tests,
 the `NTW32_ROUTING` variable. `auto` prefers a native export, then the own
 implementation, then a detected KernelEx API library, and demotes providers
-that `routes.json` lists as known stubs; `own` never consults KernelEx;
-`native` is a pure passthrough. Unresolved imports are reported by module
+that `routes.json` lists as known stubs; the Auto order is configurable
+per process (`[routing] order=`) and per function (`[order]`); `own` never
+consults KernelEx; `native` is a pure passthrough. Unresolved imports are reported by module
 and function through `OutputDebugStringA`. KernelEx is detected only by
 module presence and its `get_api_table` export through the native loader;
 nothing is loaded and no address is hard-coded. The exact semantics,
@@ -136,7 +137,8 @@ invalid object/lifetime states, wrap detection, all 65,536 ordinal lookup
 values, 72 eight-thread InitOnce contention rounds, malformed PE inputs,
 non-destructive writes, retained IAT addresses, the actual linked exports,
 and the routing policy (every mode, override, stub demotion, KernelEx
-attribution and malformed configuration; 1,323 host checks plus the abi32
+attribution, configured order and malformed configuration; 1,422 host
+checks plus the abi32
 scenarios that re-attach the real DLL with mocked `NTW32.INI` contents).
 Address/undefined sanitizers cover the C core. Exact artifacts and hashes are
 in ignored `build/platform/manifest.json`.

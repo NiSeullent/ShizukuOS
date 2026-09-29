@@ -86,7 +86,7 @@ ntw_proc ntw_resolve_named(const struct ntw_resolver *r, const char *name, unsig
         if (provider && found) *provider = NTW_PROVIDER_NATIVE;
         return found;
     }
-    order = ntw_route_order(mode, r->table, name);
+    order = ntw_route_effective_order(r->policy, r->table, mode, name);
     /* Pass 0 tries providers in order, skipping any listed as a known stub for
      * this name; pass 1 accepts a stub provider only as the last resort. */
     for (pass = 0; pass < 2; ++pass) {

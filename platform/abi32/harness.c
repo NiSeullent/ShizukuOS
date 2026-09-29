@@ -610,7 +610,63 @@ static void routing_policy(void)
     expect_own_srw();
     native_self_alias = 0;
 
+    /* 12. A configured Auto order: [routing] order= for every name, an
+     *     [order] entry for one name. KernelEx first, then own, then native. */
+    kex_core_present = 1; kex_bases_present = 1; kex_hook_initonce = 1; kex_hook_sleep = 1;
+    env_text = "[routing]|order=kernelex,own,native|log=1|[order]|InitOnceExecuteOnce=own,native";
+    reattach();
+    CHECK(log_contains("NTW32: routing mode=auto source=NTW32_ROUTING overrides=1 warnings=0 kernelex=active order=kernelex,own,native"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)sleep_name);
+    CHECK(result.low == (uintptr_t)kex_image + UINT32_C(0x1000));
+    CHECK(log_contains("NTW32: KERNEL32.DLL!Sleep -> kernelex (mode auto)"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)once_name);
+    CHECK(result.low == PE_BASE + RVA_InitOnceExecuteOnce);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!InitOnceExecuteOnce -> own (mode auto)"));
+    calls = native_calls;
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
+    CHECK(result.low == PE_BASE + RVA_GetTickCount64 && native_calls == calls + 1);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!GetTickCount64 -> own (mode auto)"));
+    /* The configured order also replaces the own-first routes.json entry of
+     * MultiByteToWideChar: KernelEx does not have it, own does. */
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"MultiByteToWideChar");
+    CHECK(result.low == PE_BASE + RVA_MultiByteToWideChar);
+    expect_own_srw();
+    /* An order that leaves out own: a name only own provides is unresolved. */
+    env_text = "[routing]|order=native,kernelex";
+    reattach();
+    CHECK(log_contains("NTW32: KERNEL32.DLL!InitializeSRWLock unresolved (mode auto; native absent; own not consulted; kernelex active)"));
+    CHECK(log_contains("NTW32: static export InitializeSRWLock keeps the own implementation"));
+    clear_log();
+    last_error = 0;
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
+    CHECK(result.low == 0 && last_error == 127);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!GetTickCount64 unresolved (mode auto; native absent; own not consulted; kernelex active)"));
+    expect_own_srw();   /* static exports keep the own implementation */
+    kex_core_present = 0; kex_bases_present = 0; kex_hook_initonce = 0; kex_hook_sleep = 0;
+
+    /* 13. Malformed orders and entries that cannot take effect are reported;
+     *     the defaults for those items remain. */
+    env_text = "[routing]|mode=own|order=native|log=1|[modules]|USER32.DLL=native|"
+               "[order]|Bogus-Name=own|Sleep=auto|Sleep=own,own";
+    reattach();
+    CHECK(log_contains("NTW32: routing config line 8: invalid function name 'Bogus-Name'"));
+    CHECK(log_contains("NTW32: routing config line 9: invalid provider order 'auto'"));
+    CHECK(log_contains("NTW32: routing config line 10: invalid provider order 'own,own'"));
+    CHECK(log_contains("NTW32: routing config: [modules] USER32.DLL is not routed by this provider; entry has no effect"));
+    CHECK(log_contains("NTW32: routing config: [routing] order has no effect: no name is routed in mode auto; the mode is own"));
+    CHECK(log_contains("NTW32: routing mode=own source=NTW32_ROUTING overrides=1 warnings=5 kernelex=not-detected order=native"));
+    calls = native_calls;
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
+    CHECK(result.low == PE_BASE + RVA_GetTickCount64 && native_calls == calls);
+    env_text = "[routing]|order=turbo";
+    reattach();
+    CHECK(log_contains("NTW32: routing config line 2: invalid provider order; routes.json order retained 'turbo'"));
+    calls = native_calls;
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"MultiByteToWideChar");
+    CHECK(result.low == PE_BASE + RVA_MultiByteToWideChar && native_calls == calls);   /* routes.json: own first */
+
     /* Back to the defaults for the remaining checks. */
+    env_text = NULL;
     reattach();
     CHECK(debug_messages == 0);
 }

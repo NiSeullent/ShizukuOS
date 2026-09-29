@@ -546,6 +546,169 @@ static void resolution_matrix(void) {
     }
 }
 
+/* ---- configurable provider order --------------------------------------- */
+static void order_text(unsigned order, const char *expected) {
+    char buffer[40];
+    struct ntw_text t;
+    ntw_text_start(&t, buffer, sizeof buffer);
+    ntw_text_add_order(&t, order);
+    CHECK(!strcmp(buffer, expected));
+}
+static int order_is(const char *text, unsigned expected) {
+    unsigned order = 0xdead;
+    return ntw_route_parse_order(text, strlen(text), &order) && order == expected;
+}
+static int order_rejected(const char *text) {
+    unsigned order = 0xdead;
+    return !ntw_route_parse_order(text, strlen(text), &order) && order == 0xdead;
+}
+static unsigned parse_env(struct ntw_route_policy *policy, const char *text) {
+    return ntw_route_parse(policy, text, strlen(text), '|', capture, (void *)0x51);
+}
+static void configured_order(void) {
+    const unsigned N = NTW_PROVIDER_NATIVE, O = NTW_PROVIDER_OWN, K = NTW_PROVIDER_KERNELEX;
+    struct ntw_route_policy policy;
+    struct mocks m = {0, 0, 0, 0, 0, 0, 0, 0};
+    struct ntw_resolver r;
+    unsigned p, order = 0;
+    char long_value[NTW_ROUTE_LINE_MAX + 2];
+
+    /* Grammar of a provider list. */
+    CHECK(order_is("native,own,kernelex", NTW_ORDER3(N, O, K)));
+    CHECK(order_is("KernelEx , OWN,\tnative", NTW_ORDER3(K, O, N)));
+    CHECK(order_is("own, kernelex", NTW_ORDER2(O, K)));
+    CHECK(order_is(" kernelex ", NTW_ORDER1(K)));
+    CHECK(order_rejected("") && order_rejected(",") && order_rejected("own,") && order_rejected(",own"));
+    CHECK(order_rejected("own,,native") && order_rejected("own,own") && order_rejected("own,OWN"));
+    CHECK(order_rejected("own;native") && order_rejected("own native") && order_rejected("nativ"));
+    CHECK(order_rejected("natives") && order_rejected("own,native,kernelex,own") && order_rejected("auto"));
+    CHECK(order_rejected("none") && order_rejected("own,native,kernelex,"));
+    CHECK(!ntw_route_parse_order(NULL, 3, &order) && !ntw_route_parse_order("own", 3, NULL));
+    memset(long_value, ' ', sizeof long_value);
+    memcpy(long_value, "own", 3);
+    CHECK(ntw_route_parse_order(long_value, NTW_ROUTE_LINE_MAX, &order) && order == NTW_ORDER1(O));
+    CHECK(!ntw_route_parse_order(long_value, NTW_ROUTE_LINE_MAX + 1, &order));   /* bounded */
+    order_text(NTW_ORDER3(N, O, K), "native,own,kernelex");
+    order_text(NTW_ORDER2(K, N), "kernelex,native");
+    order_text(0, "none");
+
+    /* [routing] order= and [order] entries are parsed, one per key. */
+    {
+        static const char text[] =
+            "[routing]\n"
+            "order = kernelex, own, native\n"   /* 2 */
+            "[order]\n"
+            "MultiByteToWideChar=native\n"      /* 4 */
+            "Sleep = own ,kernelex\n";          /* 5 */
+        ntw_route_policy_init(&policy);
+        CHECK(policy.order == 0);
+        reset_log();
+        CHECK(ntw_route_parse(&policy, text, sizeof text - 1, '\n', capture, (void *)0x51) == 0);
+        CHECK(policy.order == NTW_ORDER3(K, O, N) && policy.mode == NTW_MODE_AUTO && policy.override_count == 2);
+        CHECK(policy.overrides[0].kind == NTW_OVERRIDE_ORDER && policy.overrides[0].order == NTW_ORDER1(N));
+        CHECK(!strcmp(policy.overrides[1].name, "Sleep") && policy.overrides[1].order == NTW_ORDER2(O, K));
+        /* Order entries never change a mode. */
+        CHECK(ntw_route_effective_mode(&policy, module_name, "MultiByteToWideChar") == NTW_MODE_AUTO);
+    }
+    /* Precedence in Auto: [order] entry, then [routing] order, then the table. */
+    CHECK(ntw_route_effective_order(&policy, &table, NTW_MODE_AUTO, "MultiByteToWideChar") == NTW_ORDER1(N));
+    CHECK(ntw_route_effective_order(&policy, &table, NTW_MODE_AUTO, "GetTickCount64") == NTW_ORDER3(K, O, N));
+    CHECK(ntw_route_effective_order(&policy, &table, NTW_MODE_AUTO, "sleep") == NTW_ORDER3(K, O, N));
+    CHECK(ntw_route_effective_order(&policy, &table, NTW_MODE_AUTO, "Sleep") == NTW_ORDER2(O, K));
+    /* The fixed modes ignore every configured order. */
+    CHECK(ntw_route_effective_order(&policy, &table, NTW_MODE_OWN, "Sleep") == NTW_ORDER2(O, N));
+    CHECK(ntw_route_effective_order(&policy, &table, NTW_MODE_KERNELEX, "Sleep") == NTW_ORDER3(K, N, O));
+    CHECK(ntw_route_effective_order(&policy, &table, NTW_MODE_NATIVE, "Sleep") == NTW_ORDER1(N));
+    CHECK(ntw_route_effective_order(NULL, &table, NTW_MODE_AUTO, "MultiByteToWideChar") == entries[1].order);
+    policy.order = 0;
+    CHECK(ntw_route_effective_order(&policy, &table, NTW_MODE_AUTO, "GetTickCount64") == entries[0].order);
+    CHECK(ntw_route_effective_order(&policy, NULL, NTW_MODE_AUTO, "Other") == NTW_ORDER_DEFAULT);
+    policy.order = (unsigned char)NTW_ORDER3(K, O, N);
+
+    /* Through the resolver: the configured order is what is tried. */
+    r = make(&m, NTW_MODE_AUTO, &table, 1);
+    policies[NTW_MODE_AUTO] = policy;
+    CHECK(resolve(&r, &m, 1, 0, 1, "Owned", &p) == kernelex_code && p == NTW_PROVIDER_KERNELEX);
+    CHECK(resolve(&r, &m, 1, 1, 0, "Owned", &p) == own_code && p == NTW_PROVIDER_OWN);
+    m.native_calls = 0;
+    CHECK(resolve(&r, &m, 1, 1, 0, "MultiByteToWideChar", &p) == native_code && p == NTW_PROVIDER_NATIVE);
+    CHECK(m.native_calls == 1);
+    /* An order that omits a provider never falls back to it. */
+    CHECK(resolve(&r, &m, 1, 0, 0, "MultiByteToWideChar", &p) == NULL && p == NTW_PROVIDER_NONE);
+    CHECK(logged_exactly("NTW32: KERNEL32.DLL!MultiByteToWideChar unresolved (mode auto; native absent; own not consulted; kernelex active)"));
+    CHECK(resolve(&r, &m, 0, 1, 0, "Sleep", &p) == NULL);
+    /* The KernelEx probe asked the loader, so the diagnostic shows that
+     * native had the name but the configured order excluded it. */
+    CHECK(logged_exactly("NTW32: KERNEL32.DLL!Sleep unresolved (mode auto; native present but not selected; own absent; kernelex active)"));
+    /* Stub demotion still applies: GetTickCount64 is a KernelEx stub in this
+     * table, so a KernelEx-first order still prefers own and native. */
+    CHECK(resolve(&r, &m, 1, 1, 1, "GetTickCount64", &p) == own_code && p == NTW_PROVIDER_OWN);
+    CHECK(resolve(&r, &m, 0, 0, 1, "GetTickCount64", &p) == kernelex_code);
+    CHECK(logged("GetTickCount64 -> known-stub provider used as last resort: kernelex (mode auto)"));
+    /* A [functions] override to a fixed mode wins over any order. */
+    reset_log();
+    CHECK(parse_env(&policies[NTW_MODE_AUTO], "[functions]|Owned=own") == 0);
+    m.native_calls = 0;
+    CHECK(resolve(&r, &m, 1, 1, 1, "Owned", &p) == own_code && m.native_calls == 0);
+
+    /* Rejections keep the defaults, each with a warning. */
+    {
+        static const char text[] =
+            "[routing]\n"
+            "order=own,own\n"              /* 2: duplicate provider */
+            "order=native\n"               /* 3: duplicate key (first, rejected, counts) */
+            "[order]\n"
+            "Sleep=auto\n"                 /* 5: a mode is not an order */
+            "Get.Tick=own\n"               /* 6 */
+            "Sleep=own,native,kernelex\n"  /* 7 */
+            "Sleep=own\n"                  /* 8: duplicate */
+            "KERNEL32.DLL=own\n";          /* 9: module names are not function names */
+        ntw_route_policy_init(&policy);
+        reset_log();
+        CHECK(ntw_route_parse(&policy, text, sizeof text - 1, '\n', capture, (void *)0x51) == 6);
+        CHECK(logged_exactly("NTW32: routing config line 2: invalid provider order; routes.json order retained 'own,own'"));
+        CHECK(logged_exactly("NTW32: routing config line 3: duplicate order ignored 'native'"));
+        CHECK(logged_exactly("NTW32: routing config line 5: invalid provider order 'auto'"));
+        CHECK(logged_exactly("NTW32: routing config line 6: invalid function name 'Get.Tick'"));
+        CHECK(logged_exactly("NTW32: routing config line 8: duplicate override ignored 'Sleep'"));
+        CHECK(logged_exactly("NTW32: routing config line 9: invalid function name 'KERNEL32.DLL'"));
+        CHECK(policy.order == 0 && policy.override_count == 1 && policy.overrides[0].order == NTW_ORDER3(O, N, K));
+    }
+
+    /* Post-parse check: entries that cannot take effect are reported. */
+    {
+        static const char text[] =
+            "[routing]|mode=own|order=kernelex|[modules]|user32.dll=native|KERNEL32.DLL=own|"
+            "[functions]|Sleep=kernelex|[order]|Sleep=own|GetTickCount64=native";
+        ntw_route_policy_init(&policy);
+        reset_log();
+        CHECK(ntw_route_parse(&policy, text, sizeof text - 1, '|', capture, (void *)0x51) == 0);
+        CHECK(ntw_route_check(&policy, module_name, capture, (void *)0x51) == 4 && policy.warnings == 4);
+        CHECK(captured_count == 4);
+        CHECK(logged_exactly("NTW32: routing config: [modules] USER32.DLL is not routed by this provider; entry has no effect"));
+        CHECK(logged_exactly("NTW32: routing config: [order] Sleep has no effect: the effective mode is kernelex"));
+        CHECK(logged_exactly("NTW32: routing config: [order] GetTickCount64 has no effect: the effective mode is own"));
+        CHECK(logged_exactly("NTW32: routing config: [routing] order has no effect: no name is routed in mode auto; the mode is own"));
+        /* A single function in Auto makes both kinds of order meaningful. */
+        CHECK(parse_env(&policy, "[functions]|GetTickCount64=auto") == 0);
+        reset_log();
+        CHECK(ntw_route_check(&policy, module_name, capture, (void *)0x51) == 2 && captured_count == 2);
+        CHECK(!logged("[routing] order") && !logged("[order] GetTickCount64"));
+        /* A module override to Auto under another process mode, too. */
+        ntw_route_policy_init(&policy);
+        CHECK(parse_env(&policy, "[routing]|mode=native|order=own|[modules]|kernel32.dll=auto|[order]|Sleep=own") == 0);
+        reset_log();
+        CHECK(ntw_route_check(&policy, module_name, capture, (void *)0x51) == 0 && captured_count == 0);
+        /* Defaults and tolerated NULLs. */
+        ntw_route_policy_init(&policy);
+        CHECK(ntw_route_check(&policy, module_name, capture, (void *)0x51) == 0);
+        CHECK(ntw_route_check(NULL, module_name, capture, (void *)0x51) == 0);
+        CHECK(ntw_route_check(&policy, NULL, capture, (void *)0x51) == 0);
+        CHECK(ntw_route_parse(&policy, "[modules]|GDI32.DLL=own", 23, '|', NULL, NULL) == 0);
+        CHECK(ntw_route_check(&policy, module_name, NULL, NULL) == 1 && policy.warnings == 1);
+    }
+}
+
 int main(void) {
     text_builder();
     names_and_modes();
@@ -554,7 +717,8 @@ int main(void) {
     order_and_stubs();
     image_size();
     resolution_matrix();
-    printf("PASS: routing policy modes, overrides, stub demotion, KernelEx attribution, "
-           "bounded INI parsing; %u checks; host mocks only, no Windows 98 guest\n", checks);
+    configured_order();
+    printf("PASS: routing policy modes, overrides, configured order, stub demotion, KernelEx "
+           "attribution, bounded INI parsing; %u checks; host mocks only, no Windows 98 guest\n", checks);
     return 0;
 }
