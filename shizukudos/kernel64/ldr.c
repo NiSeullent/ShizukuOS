@@ -67,6 +67,13 @@ static const struct { const char *prefix; const char *dll; } apiset_schema[] = {
     /* network -> ws2_32.dll: */
 
     /* everything else (ole, shell, crypto, version, ...): */
+    {"api-ms-win-core-com-l1", "ole32.dll"},                    /* Co*, GUID text, task allocator: what ole32.dll really exports */
+    {"api-ms-win-core-winrt-l1", "combase.dll"},                /* RoInitialize / RoUninitialize */
+    {"api-ms-win-core-winrt-string-l1", "combase.dll"},         /* HSTRING */
+    {"api-ms-win-core-shlwapi-legacy-l1", "shlwapi.dll"},
+    {"api-ms-win-core-shlwapi-obsolete-l1", "shlwapi.dll"},
+    {"api-ms-win-core-version-l1", "version.dll"},
+    {"api-ms-win-mm-time-l1", "winmm.dll"},                     /* the multimedia timer API */
 
     {0, 0}
 };
