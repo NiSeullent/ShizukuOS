@@ -145,7 +145,9 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
         stack_base = rsp - 0x10000;
         stack_size = 0x10000;
     }
-    t = thread_create(p->name, user_thread_main, 0);
+    /* Suspended: the timer tick can preempt this function at any instruction, and a READY thread whose proc, user_rip,
+     * teb and user_gs_base are still zero would fault in user_thread_main (NULL proc, RIP 0, GS base 0). */
+    t = thread_create_suspended(p->name, user_thread_main, 0);
     if (!t) return -1;
     t->proc = p;
     t->user_rip = rip;
@@ -154,7 +156,7 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     t->user_arg2 = arg2;
     t->tid = p->next_tid;                       /* the TEB reports this same id in ClientId */
     t->teb = proc_alloc_teb(p, stack_base + stack_size, stack_base);
-    if (!t->teb) return -1;
+    if (!t->teb) { thread_discard(t); return -1; }
     t->user_gs_base = t->teb;
     tobj = ob_create(OB_THREAD, 0);
     tobj->u.thr.t = t;
@@ -164,6 +166,7 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     if (!p->main_thread) p->main_thread = t;
     thread_user_tls_init(p, t);
     if (out) *out = t;
+    thread_resume(t);                           /* fully initialised: now it may run */
     return 0;
 }
 

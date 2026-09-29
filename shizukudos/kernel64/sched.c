@@ -104,7 +104,7 @@ void sched_tick(void)
     schedule();
 }
 
-thread_t *thread_create(const char *name, void (*fn)(void *), void *arg)
+static thread_t *thread_create_state(const char *name, void (*fn)(void *), void *arg, uint32_t state)
 {
     uint64_t f = irq_save(), *sp;
     thread_t *t = 0;
@@ -129,9 +129,34 @@ thread_t *thread_create(const char *name, void (*fn)(void *), void *arg)
     *--sp = 0;                                      /* r14 */
     *--sp = 0;                                      /* r15 */
     t->rsp = (uint64_t)sp;
-    t->state = TS_READY;
+    t->state = state;
     irq_restore(f);
     return t;
+}
+
+thread_t *thread_create(const char *name, void (*fn)(void *), void *arg) { return thread_create_state(name, fn, arg, TS_READY); }
+thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg)
+{
+    /* Never picked by pick_next() (READY only) until thread_resume(). */
+    return thread_create_state(name, fn, arg, TS_NEW);
+}
+
+void thread_resume(thread_t *t)
+{
+    const uint64_t f = irq_save();
+    if (t->state == TS_NEW)
+        t->state = TS_READY;
+    irq_restore(f);
+}
+
+void thread_discard(thread_t *t)
+{
+    const uint64_t f = irq_save();
+    if (t->state == TS_NEW) {
+        kfree((void *)t->stack_base);
+        t->state = TS_FREE;
+    }
+    irq_restore(f);
 }
 
 void thread_yield(void)

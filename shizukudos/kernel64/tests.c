@@ -149,6 +149,62 @@ static int win64_run(int64_t *code, int *faulted)
     return proc_wait(p->pid, code, faulted);
 }
 
+/* Every other T_*.EXE in \\SHZ\\TESTS is a self-checking Win64 program: it must exit 0 without a fault. It prints its own
+ * PASS/FAIL lines through the console; a hung program is killed after WIN64_APP_TIMEOUT_MS. */
+#define WIN64_APP_TIMEOUT_MS 60000u
+#define WIN64_MAX_APPS 64
+static void win64_run_others(void)
+{
+    static char names[WIN64_MAX_APPS][32];
+    unsigned n = 0, i, j;
+    fsnode_t *dir = fs_lookup("\\SHZ\\TESTS"), *c;
+    if (!dir)
+        return;
+    for (c = dir->child; c && n < WIN64_MAX_APPS; c = c->sibling) {
+        const size_t len = strlen(c->name);
+        if (c->is_dir || len < 7 || len >= sizeof names[0] || strncmp(c->name, "T_", 2) || strcmp(c->name + len - 4, ".EXE") ||
+            !strcmp(c->name, "T_HELLO.EXE"))
+            continue;
+        memcpy(names[n++], c->name, len + 1);
+    }
+    for (i = 1; i < n; ++i) {                                   /* insertion sort: deterministic order */
+        char tmp[32];
+        memcpy(tmp, names[i], sizeof tmp);
+        for (j = i; j > 0 && strcmp(names[j - 1], tmp) > 0; --j) memcpy(names[j], names[j - 1], sizeof tmp);
+        memcpy(names[j], tmp, sizeof tmp);
+    }
+    kprintf("K64 win64: %u self-checking app(s) besides T_HELLO.EXE\n", n);
+    for (i = 0; i < n; ++i) {
+        char path[64], cmd[40], label[80];
+        process_t *p = 0;
+        thread_t *t = 0;
+        int64_t code = -1;
+        int faulted = 1, reaped = -1;
+        int32_t st;
+        uint64_t waited = 0;
+        memcpy(path, "\\SHZ\\TESTS\\", 12);
+        memcpy(path + 12, names[i], strlen(names[i]) + 1);
+        memcpy(cmd, names[i], strlen(names[i]) + 1);
+        st = ldr_create_process(0, path, cmd, "C:\\SHZ\\TESTS", &p, &t);
+        if (st == 0) {
+            while (!(p->terminated && p->threads_alive == 0) && waited++ < WIN64_APP_TIMEOUT_MS)
+                thread_sleep_ms(1);
+            if (!p->terminated) {
+                kprintf("K64 win64: %s timed out after %u ms, terminating\n", names[i], WIN64_APP_TIMEOUT_MS);
+                process_terminate(p, 0x102, 1);
+            }
+            reaped = proc_wait(p->pid, &code, &faulted);
+        } else {
+            kprintf("K64 win64: %s failed to start (%x)\n", names[i], (uint32_t)st);
+        }
+        kprintf("K64 win64 app: %s exit=%d faulted=%d\n", names[i], (int)code, faulted);
+        memcpy(label, "Win64 app ", 10);
+        memcpy(label + 10, names[i], strlen(names[i]) + 1);
+        memcpy(label + 10 + strlen(names[i]), " exits 0 without a fault", 25);
+        CHECK(label, st == 0 && reaped == 0 && code == 0 && !faulted);
+    }
+}
+
 static void test_win64(void)
 {
     int64_t code1 = -1, code2 = -1;
@@ -169,6 +225,7 @@ static void test_win64(void)
     CHECK("Win64 console app runs to exit code 7 twice without a fault",
           ran1 == 0 && ran2 == 0 && code1 == 7 && code2 == 7 && !f1 && !f2);
     CHECK("second Win64 process returns every physical page", pmm_free_count() == free_before);
+    win64_run_others();
 }
 
 void run_self_tests(const shz_bootinfo_t *bi)

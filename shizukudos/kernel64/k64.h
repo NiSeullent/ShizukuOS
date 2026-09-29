@@ -101,7 +101,8 @@ typedef struct process process_t;
 typedef struct kobject kobject_t;
 typedef struct { volatile int locked; thread_t *owner; thread_t *waiters; } kmutex_t;
 typedef struct { volatile int count; thread_t *waiters; } ksem_t;
-enum { TS_FREE = 0, TS_READY = 1, TS_RUNNING = 2, TS_BLOCKED = 3, TS_ZOMBIE = 4 };
+/* TS_NEW: allocated but still being initialised; never scheduled until thread_resume() (see start_thread_common). */
+enum { TS_FREE = 0, TS_READY = 1, TS_RUNNING = 2, TS_BLOCKED = 3, TS_ZOMBIE = 4, TS_NEW = 5 };
 struct thread {
     uint64_t rsp;                               /* saved kernel stack pointer */
     uint32_t id, state;
@@ -126,6 +127,9 @@ struct thread {
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
+thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg);   /* TS_NEW until thread_resume */
+void thread_resume(thread_t *t);
+void thread_discard(thread_t *t);                                                     /* frees a TS_NEW thread that was never resumed */
 thread_t *thread_current(void);
 thread_t *thread_find_tid(void *process, uint64_t tid);
 void thread_yield(void);
