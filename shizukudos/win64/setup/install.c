@@ -129,6 +129,18 @@ static void hex(const uint8_t *d, size_t n, char *out)
     out[2 * n] = 0;
 }
 
+static void uuid_format(const uint8_t u[16], char out[37])                  /* RFC 4122 byte order (ext4 s_uuid) */
+{
+    static const char h[] = "0123456789abcdef";
+    int i, o = 0;
+    for (i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) out[o++] = '-';
+        out[o++] = h[u[i] >> 4];
+        out[o++] = h[u[i] & 15];
+    }
+    out[o] = 0;
+}
+
 static void iso_time(uint64_t t, char out[24])
 {
     /* days -> civil date (proleptic Gregorian), Howard Hinnant's algorithm */
@@ -478,10 +490,13 @@ static int plan_layout(ctx_t *C)
 {
     const uint64_t align = MIB / C->ss, first = gpt_first_usable(C->ss), last = gpt_last_usable(C->ss, C->di.sectors);
     const uint64_t end = (last + 1) / align * align;                      /* aligned exclusive end */
-    uint64_t esp_bytes = 0, p2_start, p2_end, sys_sectors;
+    uint64_t esp_bytes = 0, esp_lba = 0, p2_start, p2_end, sys_sectors;
     json_u64(json_get(C->man.root, "esp"), "bytes", &esp_bytes);
     C->pfirst[0] = align;
     if (C->pfirst[0] < first) return failf(C, "unexpected GPT geometry");
+    if (!json_u64(json_get(C->man.root, "esp"), "first_lba", &esp_lba) && esp_lba != C->pfirst[0])
+        return failf(C, "esp.img was built for p1 at LBA %llu (BPB hidden sectors), this layout starts p1 at LBA %llu",
+                     (unsigned long long)esp_lba, (unsigned long long)C->pfirst[0]);
     C->plast[0] = C->pfirst[0] + esp_bytes / C->ss - 1;
     p2_start = (C->plast[0] + 1 + align - 1) / align * align;
     if (C->cfg.system_mib) {
@@ -713,7 +728,7 @@ static int plan_system(ctx_t *C, sfsw_t **wout, uint32_t **handles, uint32_t *lo
         return failf(C, "p2: add install.log: %s", sfsw_strerror(err));
     if ((err = sfsw_layout(w))) return failf(C, "p2: layout: %s", sfsw_strerror(err));
     sfsw_get_info(w, &info);
-    gpt_guid_format(C->fs_uuid, uuid);
+    uuid_format(C->fs_uuid, uuid);
     say(C, "p2: ShizukuFS v1 (ext4 on-disk format): %llu blocks of 4 KiB, %u group(s), %u inodes, uuid %s",
         (unsigned long long)info.blocks, info.groups, info.inodes, uuid);
     say(C, "p2: %u payload file(s), %llu bytes, %u director(ies) incl. generated", n, (unsigned long long)nbytes, info.dirs);
@@ -972,7 +987,7 @@ static char *build_system_ini(ctx_t *C, uint64_t *len)
         o = append(o, end, keys[i]);
         o = append(o, end, g);
     }
-    gpt_guid_format(C->fs_uuid, g);
+    uuid_format(C->fs_uuid, g);
     o = append(o, end, "\r\nSystemVolumeUuid=");
     o = append(o, end, g);
     o = append(o, end, "\r\nDriverPackages=");
