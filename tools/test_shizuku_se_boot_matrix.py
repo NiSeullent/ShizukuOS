@@ -66,9 +66,10 @@ DEFAULT_DISK = BUILD / "windows98-shizuku-second-edition-disk.img"
 OUT = BUILD / "shizuku-se-matrix"
 WIN64_RECEIPT = BUILD / "shizukudos" / "win64" / "build-result.json"
 FIRMWARES = ("seabios", "ovmf")
-MEDIA = ("iso-cd", "iso-hdd", "disk")
-ENTRIES = ("kernel64", "dos16", "shzdos01")
-MEDIUM_TEXT = {"iso-cd": "ISO as CD", "iso-hdd": "ISO as hard disk (USB-stick image)", "disk": "raw disk image"}
+MEDIA = ("iso-cd", "iso-hdd", "disk", "iso-usb")  # iso-usb (xHCI mass storage) is optional, not in the default set
+ENTRIES = ("kernel64", "dos16", "shzdos01", "setup")  # setup: only on media built with SHZSETUP
+MEDIUM_TEXT = {"iso-cd": "ISO as CD", "iso-hdd": "ISO as hard disk (USB-stick image)", "disk": "raw disk image",
+               "iso-usb": "ISO as USB mass storage (xHCI)"}
 MENU_READY = b"Automatic boot in"
 ANSI = re.compile(r"\x1b\[[0-9;?=]*[A-Za-z]|\x1b[()][A-Z0-9]|[\x0e\x0f]")
 
@@ -166,6 +167,9 @@ def qemu_command(args, firmware: str, medium: str, image: Path, run_dir: Path, s
     if medium == "iso-cd":
         cmd += ["-drive", f"file={image},format=raw,if=none,id=boot,readonly=on,media=cdrom",
                 "-device", "ide-cd,drive=boot,bus=ide.0,bootindex=1"]
+    elif medium == "iso-usb":
+        cmd += ["-device", "qemu-xhci,id=xhci", "-drive", f"file={image},format=raw,if=none,id=boot,snapshot=on",
+                "-device", "usb-storage,bus=xhci.0,drive=boot,bootindex=1"]
     else:
         cmd += ["-drive", f"file={image},format=raw,if=none,id=boot,snapshot=on",
                 "-device", "ide-hd,drive=boot,bus=ide.0,bootindex=1"]
@@ -252,7 +256,7 @@ def boot_path_checks(firmware: str, medium: str, text: str, command: list[str], 
                       not any("pflash" in c for c in command)),
                 check(f"legacy BIOS: {banner} started from the medium", banner in text)]
     steps = [("OVMF BDS starts the medium's UEFI boot option",
-              r"BdsDxe: starting Boot\w+ \"UEFI QEMU (DVD-ROM|HARDDISK)"),
+              r"BdsDxe: starting Boot\w+ \"UEFI (QEMU (DVD-ROM|HARDDISK)|QEMU QEMU USB HARDDRIVE)"),
              ("\\EFI\\BOOT\\BOOTX64.EFI = the Shizuku loader started", r"Supervisor loader \(UEFI x64\)")]
     if loader_interim:
         steps += [("Shizuku loader ran and refused (no VMX under TCG; interim loader without boot manager)",
@@ -261,7 +265,9 @@ def boot_path_checks(firmware: str, medium: str, text: str, command: list[str], 
     else:
         steps += [("Shizuku loader boot manager chose CSMWrap", r"Boot manager: .*mode=")]
     steps += [("CSMWrap BIOS proxy on a reserved AP", r"BIOS proxy re+ady \(AP \d+\)"),
-              ("CSMWrap boot device = the AHCI controller of the medium", r"bootdev: Boot device: PCI 00:1f\.2"),
+              ("CSMWrap boot device = the controller of the medium",
+               r"bootdev: Boot device: PCI " + (r"[0-9a-f]{2}:[0-9a-f]{2}\.\d type=\w+" if medium == "iso-usb"
+                                                else r"00:1f\.2")),
               (f"SeaBIOS CSM legacy-booted the medium: {banner}", re.escape(banner))]
     out, pos = [check("UEFI: OVMF in pflash", any("pflash" in c for c in command))], 0
     for name, rx in steps:
@@ -305,7 +311,10 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
                     re.search(rb"Loading " + re.escape(x.encode()) + rb"\.\.\. ?ok", d) for x in loads), 300, mark)
                 checks.append(check(f"menu entry {entry!r} selected over COM1: loaded {', '.join(loads)}",
                                     bool(started_entry)))
-                if entry == "kernel64":
+                if entry in ("kernel64", "setup"):
+                    if entry == "setup":
+                        record["note"] = ("Install entry: Kernel64 with shz.setup=auto on the Multiboot command line; "
+                                          "what SHZSETUP itself must show is defined by its own work (agent I1)")
                     done = wait_for(serial, proc, lambda d: re.search(rb"(?m)^SHZ-EXIT:([0-9a-f]+)\r?$", d),
                                     args.timeout, mark)
                     try:
@@ -383,10 +392,11 @@ def media_context(iso: Path, disk: Path) -> dict:
     ctx["loader_interim"] = loader["interim"]
     ctx["keys"] = ctx["iso"]["receipt"]["menu"]["keys"]
     ctx["loads"] = {}
-    for medium, key in (("iso-cd", "iso"), ("iso-hdd", "iso"), ("disk", "disk")):
+    for medium, key in (("iso-cd", "iso"), ("iso-hdd", "iso"), ("iso-usb", "iso"), ("disk", "disk")):
         menu = ctx[key]["receipt"]["menu"]
-        ctx["loads"][medium] = {"kernel64": [f"{menu['k64_dir']}/KERNEL64S.BIN", f"{menu['k64_dir']}/WIN64.IMG"],
-                                "dos16": [menu["dos16"]], "shzdos01": [menu["shzdos01"]]}
+        k64 = [f"{menu['k64_dir']}/KERNEL64S.BIN", f"{menu['k64_dir']}/WIN64.IMG"]
+        ctx["loads"][medium] = {"kernel64": k64, "setup": k64, "dos16": [menu["dos16"]], "shzdos01": [menu["shzdos01"]]}
+        ctx.setdefault("setup_entry", {})[medium] = menu.get("setup_entry", False)
     # The DOS16 image the menu boots, as built (the same bytes are on the ISO and, as \SHZDOS\DISK.IMG, on the disk).
     dos16 = next(i for i in ctx["iso"]["receipt"]["inputs"] if i["name"].endswith("DISK.IMG"))
     ctx["dos16_image"] = (ROOT / dos16["path"]).read_bytes()
@@ -413,14 +423,15 @@ def write_summary(out: Path, runs: list[dict], ctx: dict, args) -> dict:
                "loader_interim": ctx["loader_interim"], "cells": cells,
                "verdict": "PASS" if cells and all(c["status"] == "PASS" for c in cells) else "FAIL"}
     (out / "matrix.json").write_text(json.dumps(summary, indent=2) + "\n")
+    columns = [e for e in ENTRIES if any(r["entry"] == e for r in runs)]
     lines = [f"# Shizuku SE boot matrix {summary['utc']}", "",
              f"ISO sha256 `{ctx['iso']['sha256']}`, disk sha256 `{ctx['disk']['sha256']}`; QEMU TCG q35, -cpu max, "
              f"{args.smp} vCPUs, {args.memory} MiB.", "",
-             "| firmware | medium | " + " | ".join(args.entries) + " | cell |",
-             "|---|---|" + "---|" * len(args.entries) + "---|"]
+             "| firmware | medium | " + " | ".join(columns) + " | cell |",
+             "|---|---|" + "---|" * len(columns) + "---|"]
     for c in cells:
         row = [c["firmware"], MEDIUM_TEXT[c["medium"]]]
-        for e in args.entries:
+        for e in columns:
             info = c["entries"].get(e)
             row.append(f"{info['status']} ({info['seconds']} s)" if info else "not run")
         row.append(c["status"] + (" (interim: shell startup.nsh -> CSMWrap)" if c["interim"] else ""))
@@ -434,8 +445,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--iso", type=Path, default=DEFAULT_ISO)
     ap.add_argument("--disk", type=Path, default=DEFAULT_DISK)
     ap.add_argument("--firmware", nargs="+", choices=FIRMWARES, default=list(FIRMWARES))
-    ap.add_argument("--media", nargs="+", choices=MEDIA, default=list(MEDIA))
-    ap.add_argument("--entries", nargs="+", choices=ENTRIES, default=list(ENTRIES))
+    ap.add_argument("--media", nargs="+", choices=MEDIA, default=list(MEDIA[:3]))
+    ap.add_argument("--entries", nargs="+", choices=ENTRIES, default=list(ENTRIES[:3]),
+                    help="menu entries to boot; 'setup' is added automatically when the medium has it")
+    ap.add_argument("--no-setup", action="store_true", help="do not add the Install entry automatically")
     ap.add_argument("--run-name", default=None, help="evidence directory under build/shizuku-se-matrix")
     ap.add_argument("--qemu", default=shutil.which("qemu-system-x86_64") or qemu_tools.DEFAULT_QEMU)
     ap.add_argument("--ovmf-code", default=qemu_tools.DEFAULT_OVMF_CODE)
@@ -450,11 +463,16 @@ def main(argv: list[str] | None = None) -> int:
     run_name = args.run_name or "run-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     out = OUT / run_name
     out.mkdir(parents=True, exist_ok=True)
-    images = {"iso-cd": args.iso.resolve(), "iso-hdd": args.iso.resolve(), "disk": args.disk.resolve()}
+    images = {"iso-cd": args.iso.resolve(), "iso-hdd": args.iso.resolve(), "iso-usb": args.iso.resolve(),
+              "disk": args.disk.resolve()}
     runs = []
     for firmware in args.firmware:
         for medium in args.media:
-            for entry in args.entries:
+            for entry in args.entries + (["setup"] if ctx["setup_entry"][medium] and "setup" not in args.entries
+                                         and not args.no_setup else []):
+                if entry == "setup" and not ctx["setup_entry"][medium]:
+                    print(f"    {firmware}-{medium}-setup: this medium has no Install entry (no SHZSETUP); not run")
+                    continue
                 name = f"{firmware}-{medium}-{entry}"
                 print(f"[{time.strftime('%H:%M:%S')}] {name} (load {host_load()})", flush=True)
                 record = run_entry(args, firmware, medium, images[medium], entry, out / name, ctx)

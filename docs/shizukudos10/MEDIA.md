@@ -90,8 +90,17 @@ python3 tools/build_shizuku_se_iso.py            # rebuilds CSMWrap + ShizukuDOS
 python3 tools/build_shizuku_se_iso.py --reuse-builds   # package existing, receipt-checked outputs
 python3 tools/build_shizuku_se_disk.py           # raw disk from the same outputs
 python3 tools/test_shizuku_se_boot_matrix.py     # 18 QEMU runs, one at a time
+python3 tools/test_shizuku_se_boot_matrix.py --media iso-usb   # optional: the ISO as xHCI USB mass storage
 python3 shizukudos/tools/shz.py test --suite media
 ```
+
+The harness selects menu entries over COM1 (letter + Enter) and judges each run only from
+host-side evidence: the Kernel64 COM1 log through `shizukudos/tests/run_k64_standalone.py`'s
+parser plus every `T_*.EXE` of WIN64.IMG; for DOS16 memdisk's mBFT table in guest memory gives
+the live RAM disk, which `shizukudos/dos16/verify.py` checks (RESULT.TXT, T_COM.OUT,
+T_EXE.OUT byte-exact); for 0.1 the `A:\>` prompt and a `DIR` listing. OVMF runs also check the
+ordered boot path (BDS → loader → Shell `STARTUP.NSH` → CSMWrap boot device → isolinux).
+When a medium carries SHZSETUP, the Install entry is booted too.
 
 Both builders are reproducible: fixed `SOURCE_DATE_EPOCH` for xorriso and mtools (dates and
 GPT GUIDs), fixed FAT volume ids, deterministic tarballs. The receipts

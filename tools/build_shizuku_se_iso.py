@@ -1258,8 +1258,8 @@ def main() -> int:
     work = BUILD / f"shizuku-second-edition{tag}-work"
     evidence = BUILD / f"shizuku-second-edition-evidence{tag}"
     iso_path = (args.output or BUILD / (ISO_NAME.replace(".iso", f"{tag}.iso") if private else ISO_NAME)).resolve()
-    summary_path = BUILD / f"windows98-shizuku-second-edition{tag}.txt"
-    receipt_path = BUILD / f"windows98-shizuku-second-edition{tag}.json"
+    summary_path = iso_path.with_suffix(".txt")   # receipt and summary sit next to the ISO they describe
+    receipt_path = iso_path.with_suffix(".json")
     media = None
     try:
         if private:
