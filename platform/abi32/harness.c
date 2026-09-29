@@ -73,7 +73,7 @@ static void (*sleep_completion)(void);
 #define INI_HANDLE UINT32_C(0x77770004)
 __attribute__((aligned(4096))) static unsigned char kex_image[8192];
 static uint32_t kex_probe_calls, kex_core_present, kex_bases_present;
-static uint32_t kex_hook_initonce, kex_hook_sleep;
+static uint32_t kex_hook_initonce, kex_hook_sleep, native_self_alias;
 static const char *ini_text;
 static uint32_t ini_length, ini_opened, ini_closed, ini_reads;
 static const char *env_text;
@@ -167,6 +167,8 @@ static uintptr_t STDCALL mock_GetProcAddress(uintptr_t module, const char *name)
         return equal(name, "get_api_table") ? (uintptr_t)kex_image + UINT32_C(0x800) : 0;
     }
     if (module != KERNEL_HANDLE) return (uintptr_t)&native_function;
+    /* Hostile loader model: answer with the provider's own export. */
+    if (native_self_alias && equal(name, "InitializeSRWLock")) return PE_BASE + RVA_InitializeSRWLock;
     /* A KernelEx-hooked loader answers with code inside its API library. */
     if ((kex_hook_initonce && equal(name, "InitOnceExecuteOnce")) ||
         (kex_hook_sleep && equal(name, "Sleep")))
@@ -598,8 +600,17 @@ static void routing_policy(void)
     reattach();
     CHECK(log_contains("NTW32: NTW32_ROUTING longer than 4096 bytes; ignored"));
 
-    /* Back to the defaults for the remaining checks. */
+    /* 11. A loader answer inside NTW32.DLL itself never becomes a forward
+     *     target; without this guard the export would recurse until the
+     *     stack overflowed. */
     env_text = NULL; ini_text = NULL;
+    native_self_alias = 1;
+    reattach();
+    CHECK(log_contains("NTW32: static export InitializeSRWLock resolved into NTW32.DLL itself; own implementation kept"));
+    expect_own_srw();
+    native_self_alias = 0;
+
+    /* Back to the defaults for the remaining checks. */
     reattach();
     CHECK(debug_messages == 0);
 }

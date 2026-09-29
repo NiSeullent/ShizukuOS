@@ -76,6 +76,7 @@ static struct ntw_resolver resolver;
 static ntw_proc forward[NTW_ROUTE_COUNT];   /* non-own provider chosen for a static export */
 static struct { uintptr_t base, end; } kernelex_images[2];
 static unsigned kernelex_image_count;
+static uintptr_t own_base, own_end;   /* this DLL's image, for the self-forward guard */
 static unsigned kernelex_state;
 static char config_text[NTW_ROUTE_TEXT_MAX + 1];
 static char config_path[MAX_PATH + 16];
@@ -230,6 +231,14 @@ static void bind_forwards(void) {
          * forwarded; a mode Native lookup is still a pure passthrough there. */
         if (i == NTW_INDEX_NtwGetProcAddress) { forward[i] = (ntw_proc)0; continue; }
         target = ntw_resolve_named(&resolver, route_entries[i].name, &provider);
+        /* A loader answer inside this DLL would make the export call itself
+         * forever; such an answer is this implementation, so keep it bound. */
+        if (target && provider != NTW_PROVIDER_OWN &&
+            (uintptr_t)target >= own_base && (uintptr_t)target < own_end) {
+            say3("NTW32: static export ", route_entries[i].name,
+                 " resolved into NTW32.DLL itself; own implementation kept");
+            target = (ntw_proc)0;
+        }
         forward[i] = (target && provider != NTW_PROVIDER_OWN) ? target : (ntw_proc)0;
         if (!target && policy.log)
             say3("NTW32: static export ", route_entries[i].name, " keeps the own implementation");
@@ -238,7 +247,17 @@ static void bind_forwards(void) {
 
 static void configure(HINSTANCE instance) {
     unsigned i;
+    uint32_t size;
     for (i = 0; i < NTW_ROUTE_COUNT; ++i) forward[i] = (ntw_proc)0;
+    own_base = (uintptr_t)instance;
+    own_end = own_base;
+    /* Headers of the loaded image are mapped; without a readable size the
+     * guard still covers the first page, where no forward target can lie. */
+    if (!(own_base & 0xfff) && ntw_route_image_size((const unsigned char *)instance, 0x1000, &size) &&
+        own_base + size > own_base)
+        own_end = own_base + size;
+    else
+        own_end = own_base + 0x1000;
     load_configuration(instance);
     detect_kernelex();
     resolver.kernel32_module = (uintptr_t)native_kernel32;

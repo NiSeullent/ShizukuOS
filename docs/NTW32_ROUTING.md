@@ -63,7 +63,12 @@ imports reach the native loader unchanged in every mode):
    (`... -> known-stub provider used as last resort: <provider>`).
 5. The first provider that answers wins. A `native` or `kernelex` winner of a
    static export becomes that export's forward target; an `own` winner
-   leaves the implementation bound.
+   leaves the implementation bound. A winner whose address lies inside the
+   `NTW32.DLL` image itself (a loader that answers with this provider's own
+   export) is never used as a forward target, because the export would call
+   itself without end; the own implementation stays bound and
+   `NTW32: static export <name> resolved into NTW32.DLL itself; own
+   implementation kept` is reported.
 6. **Unresolved**: `GetProcAddress` returns `NULL`, sets
    `ERROR_PROC_NOT_FOUND` (127) and emits
    `NTW32: KERNEL32.DLL!<name> unresolved (mode <m>; native <state>; own
@@ -195,7 +200,8 @@ source.
   `auto` with KernelEx, `kernelex` with and without KernelEx, `core-only`,
   `native` (dynamic passthrough, static forward to native
   `MultiByteToWideChar`, own SRW retained), INI overrides, nine malformed
-  lines, oversized and non-ASCII INI, oversized variable. The mock loader
+  lines, oversized and non-ASCII INI, oversized variable, and a loader that
+  answers with an `NTW32.DLL` export (self-forward guard). The mock loader
   models the Windows 98 SE KERNEL32 export inventory for the names involved.
 
 ## Not verified
