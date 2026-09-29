@@ -97,6 +97,7 @@ static int vol_read(fsvol_t *v, fsnode_t *n, uint64_t off, void *buf, uint64_t l
 }
 
 static uint32_t writes_ok, creates_ok;
+extern uint32_t ahci_blk_flushes(void);         /* ahci_blk.c diagnostics (kept out of the shared blk.h) */
 
 /* Current time as a FAT date/time (the RTC is UTC; FAT stores local time, UTC is used as the local zone). */
 static void now_dos(uint16_t *date, uint16_t *time)

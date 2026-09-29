@@ -53,6 +53,8 @@ void kpanic(const char *fmt, ...) __attribute__((noreturn));
 /* ---- arch.c ---- */
 void arch_init(void);
 void irq_register(unsigned vector, void (*handler)(struct regs *));      /* device IRQ vector >= 0x20 (see arch.c) */
+typedef void (*irq_handler_t)(struct regs *);
+irq_handler_t irq_handler_get(unsigned vector);                         /* current handler (NULL if none): lets a driver avoid stealing a shared line */
 void tss_set_rsp0(uint64_t rsp0);
 static inline uint64_t read_cr0(void) { uint64_t v; __asm__ volatile("mov %%cr0, %0" : "=r"(v)); return v; }
 static inline uint64_t read_cr2(void) { uint64_t v; __asm__ volatile("mov %%cr2, %0" : "=r"(v)); return v; }
@@ -81,6 +83,7 @@ uint64_t mem_ram_top(void);                     /* bytes of guest-physical RAM m
 uint64_t pmm_alloc(void);                       /* zeroed physical page, 0 on exhaustion */
 void pmm_free(uint64_t pa);
 uint64_t pmm_free_count(void);
+uint64_t pmm_total_count(void);                /* pages managed by the allocator */
 #define PT_P (1ull << 0)
 #define PT_W (1ull << 1)
 #define PT_U (1ull << 2)
@@ -128,12 +131,16 @@ struct thread {
     uint64_t tid;                               /* Windows-style thread id (multiple of 4), 0 for kernel threads */
     volatile int alerted, alert_wait;           /* NtAlertThreadByThreadId state */
     void *wait_multi;
+    int creator_hold;                           /* user thread: its creator may still read `object` (see sched.c reaping) */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
 thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg);   /* TS_NEW until thread_resume */
 void thread_resume(thread_t *t);
 void thread_discard(thread_t *t);                                                     /* frees a TS_NEW thread that was never resumed */
+/* Exited user threads are reclaimed automatically (next thread creation); these two cover the creator's side: */
+void thread_creator_release(thread_t *t);       /* the creator no longer reads t (t->object): it may be reclaimed once exited */
+void thread_reap_process(const void *proc);     /* reclaim every exited thread of a finished process now (proc_wait) */
 thread_t *thread_current(void);
 thread_t *thread_find_tid(void *process, uint64_t tid);
 void thread_yield(void);
@@ -160,6 +167,24 @@ void ipc64_init(const shz_bootinfo_t *bi);
 int ipc64_run_tests(void);
 extern uint32_t ipc64_results[16];
 
+/* ---- subsys64.c: WIN64 subsystem bridge (ABI 1.1 message family 0x200..) ---- */
+void subsys64_start(const shz_bootinfo_t *bi);   /* Supervisor: serve the Win98 channel until SHUTDOWN; standalone: loopback self-test */
+int subsys64_console_write(process_t *p, int stream, const void *data, uint64_t n);   /* 1 = relayed, 0 = not bridged */
+int subsys64_console_read(process_t *p, void *buf, uint64_t cap, uint64_t *got);      /* 1 = handled (*got 0 = EOF), 0 = not bridged */
+
+/* ---- main.c: boot information (ABI 1.1 tail) ---- */
+/* HOOK for a UEFI GOP display backend (kernel64/gfx_fb.c): the linear framebuffer the UEFI boot manager's direct
+ * Kernel64 boot handed over (shz_bootinfo_t.fb_*). Returns 0 and fills *out, or -1 when there is none (Supervisor,
+ * Multiboot stub, no GOP, or a pixel format other than 32-bit RGBX/BGRX). The range lies outside the direct map:
+ * a backend maps it with mmio_map() (pci.h) before drawing. Nothing calls this yet; the Bochs VBE path is unchanged. */
+typedef struct {
+    uint64_t base, size;                        /* physical */
+    uint32_t width, height, pitch, bpp;         /* pitch in bytes */
+    uint32_t format;                            /* enum shz_fb_format */
+} k64_boot_fb_t;
+int k64_boot_framebuffer(k64_boot_fb_t *out);
+const char *k64_boot_cmdline(void);             /* shz_bootinfo_t.cmdline, "" when absent */
+
 /* ---- tests.c ---- */
 void run_self_tests(const shz_bootinfo_t *bi);
 unsigned tests_failed(void);
@@ -180,4 +205,7 @@ uint64_t user_syscall_count(void);
 uint64_t proc_pml4(process_t *p);
 extern uint64_t g_kstack_top;                   /* read by syscall_entry */
 extern uint64_t g_user_rsp_scratch;
+
+/* ---- setup_sys.c: `shz.setup=auto` on the kernel command line runs \SHZ\SETUP\SHZSETUP.EXE (called by kmain) ---- */
+void setup_autostart(const shz_bootinfo_t *bi);
 #endif

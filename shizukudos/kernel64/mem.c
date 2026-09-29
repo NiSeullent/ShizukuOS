@@ -5,16 +5,16 @@
  *   0xFFFFFFFF80000000  kernel image alias (physical 0, first 1 GiB, 2 MiB pages)
  *   0xFFFF800000000000  direct map of all guest-physical memory this kernel owns or may touch
  *   0x0000000000010000..0x00007FFFFFFEEFFF  user space (per process)
- * Guest-physical layout: 0..1 MiB boot structures, 1 MiB kernel, 2..14 MiB heap,
- * 14 MiB.. page allocator (initrd range excluded). RAM up to MAX_PAGES (4 GiB of guest-physical) is managed;
+ * Guest-physical layout: 0..1 MiB boot structures, 1..3 MiB kernel image + bss (every loader zeroes exactly this
+ * window; link.ld refuses an image that outgrows it), 3..15 MiB heap, 15 MiB.. page allocator (initrd range excluded). RAM up to MAX_PAGES (4 GiB of guest-physical) is managed;
  * the standalone stub caps what it reports below 4 GiB (boot32.c MAX_RAM), 256 MiB configurations still work.
  * The direct map is built for all of RAM with 2 MiB pages (a 3.5 GiB guest costs 4 page directories).
  */
 #include "k64.h"
 
-#define HEAP_PA 0x200000ull
+#define HEAP_PA 0x300000ull                    /* = end of the kernel window [1 MiB, 3 MiB) */
 #define HEAP_BYTES 0xC00000ull
-#define PMM_BASE 0xE00000ull
+#define PMM_BASE 0xF00000ull
 #define MAX_PAGES (4096ull * 1024 * 1024 / PAGE_SIZE)
 
 static uint8_t page_map[MAX_PAGES / 8];
@@ -59,6 +59,7 @@ void pmm_free(uint64_t pa)
 }
 
 uint64_t pmm_free_count(void) { return pmm_free_pages; }
+uint64_t pmm_total_count(void) { return pmm_pages; }
 
 /* ---------------------------------------------------------------- paging */
 static uint64_t *table_at(uint64_t pa) { return (uint64_t *)p2v(pa); }

@@ -3,6 +3,7 @@
  * creation. Structures use the Windows x64 layouts the ntdll layer expects.
  */
 #include "fs.h"
+#include "pci.h"
 
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 extern int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -255,11 +256,11 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (process_start_thread2(target, target->ntdll_thread_start, start, arg, (uint64_t)stack_arg(p, r, 9), &t))
             return STATUS_NO_MEMORY;
         {
-            extern void thread_user_tls_init(process_t *p, thread_t *t);
-            }
-        ob_ref(t->object);
-        st = give_handle(p, t->object, a1, (uint32_t)a2);
-        return st;
+            kobject_t *to = t->object;
+            ob_ref(to);
+            thread_creator_release(t);                      /* from here on only the object is used */
+            return give_handle(p, to, a1, (uint32_t)a2);
+        }
     }
     case SYS_NtQuerySystemTime: {
         int64_t t = filetime_now();
@@ -282,13 +283,23 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     }
     case SYS_NtQueryInformationThread: {
         thread_t *t = a1 == CURRENT_THREAD_HANDLE ? thread_current() : 0;
-        if (!t) { kobject_t *o = handle_lookup(p, a1, OB_THREAD); t = o ? o->u.thr.t : 0; }
-        if (!t) return STATUS_INVALID_HANDLE;
+        kobject_t *to = 0;
+        if (!t && !(to = handle_lookup(p, a1, OB_THREAD))) return STATUS_INVALID_HANDLE;
         if (a2 == 0) {                                      /* ThreadBasicInformation */
             struct { int64_t exit_status; uint64_t teb; uint64_t pid, tid; uint64_t affinity; int32_t prio, base; } b;
+            uint64_t f;
             if (a4 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
-            b.exit_status = t->state == TS_ZOMBIE ? t->exit_code : 0x103;
-            b.teb = t->teb; b.pid = (uint64_t)p->pid; b.tid = t->id * 4ull; b.affinity = 1; b.prio = 8; b.base = 8;
+            f = irq_save();                                 /* an exited thread may be reclaimed (sched.c) at any preemption */
+            if (to) t = to->u.thr.t;
+            if (t) {
+                b.exit_status = t->state == TS_ZOMBIE ? t->exit_code : 0x103;
+                b.teb = t->teb; b.pid = (uint64_t)p->pid; b.tid = t->id * 4ull;
+            } else {                                        /* exited and reclaimed: the object kept what is still defined */
+                b.exit_status = to->u.thr.exit_code;
+                b.teb = 0; b.pid = to->u.thr.pid; b.tid = to->u.thr.tid;
+            }
+            irq_restore(f);
+            b.affinity = 1; b.prio = 8; b.base = 8;
             if (copy_to_user(p, a3, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
             return STATUS_SUCCESS;
         }
@@ -315,10 +326,15 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         }
         st = ldr_create_process(p, path, cmd, cwd, &np, &nt);
         if (st) return st;
-        ob_ref(np->object);
-        st = give_handle(p, np->object, a1, 0x1fffff);
-        if (st) return st;
-        if (a2) { ob_ref(nt->object); st = give_handle(p, nt->object, a2, 0x1fffff); }
+        {
+            kobject_t *to = nt->object;
+            ob_ref(to);
+            thread_creator_release(nt);                     /* from here on only the thread object is used */
+            ob_ref(np->object);
+            st = give_handle(p, np->object, a1, 0x1fffff);
+            if (!st && a2) { ob_ref(to); st = give_handle(p, to, a2, 0x1fffff); }
+            ob_deref(to);
+        }
         return st;
     }
     case SYS_NtLoadImage: {                                 /* (PUNICODE name, PULONG64 base_out): runtime LoadLibrary */
@@ -333,21 +349,46 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (st) return st;
         return copy_to_user(p, a2, &base, 8) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
     }
-    case SYS_NtQuerySystemInformation: {                    /* class 0 basic: processors=1, page size */
+    case SYS_NtQuerySystemInformation: {                    /* class 0 basic: processors=1, page size; 0x100 Shizuku memory */
         if (a1 == 0) {
             struct { uint32_t reserved, timer_res, page_size, phys_pages, low_page, high_page, alloc_gran; uint64_t min_addr, max_addr, affinity; uint8_t nproc; } b;
             if (a3 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
             memset(&b, 0, sizeof b);
             b.timer_res = 10000; b.page_size = 4096; b.phys_pages = (uint32_t)(mem_ram_top() / 4096); b.alloc_gran = 65536;
+            b.low_page = 1; b.high_page = (uint32_t)(mem_ram_top() / 4096);
             b.min_addr = 0x10000; b.max_addr = 0x7ffffffeffffull; b.affinity = 1; b.nproc = 1;
             return copy_to_user(p, a2, &b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
-        if (a1 == 0x100) {                                  /* Shizuku: {total, free} physical pages (GlobalMemoryStatusEx) */
-            uint64_t q[2];
-            if (a3 < sizeof q) return STATUS_BUFFER_TOO_SMALL;
-            q[0] = mem_ram_top() / 4096;
-            q[1] = pmm_free_count();
-            return copy_to_user(p, a2, q, sizeof q) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+        if (a1 == 0x100) {                                  /* private: {total pages, free pages} for GlobalMemoryStatusEx */
+            uint64_t m[2];
+            if (a3 < sizeof m) return STATUS_BUFFER_TOO_SMALL;
+            m[0] = mem_ram_top() / 4096;                    /* RAM the machine has, not only the allocator pool */
+            m[1] = pmm_free_count();
+            return copy_to_user(p, a2, m, sizeof m) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+        }
+        if (a1 == 0x101) {                                  /* private: PCI functions and the kernel driver bound to each */
+            uint32_t n = 0;
+#ifdef SHZ_STANDALONE                                       /* under the Supervisor the config ports trap: nothing to list */
+            struct { uint8_t bus, dev, fn, class_code, subclass, prog_if, irq, pad; uint16_t vendor, device; uint32_t pad2;
+                     char driver[24]; } e;
+            pci_dev_t all[32];
+            const unsigned cnt = pci_enumerate(all, 32);
+            unsigned i;
+            for (i = 0; i < cnt; ++i) {
+                const char *drv = pci_claimed_by(&all[i]);
+                unsigned k = 0;
+                if ((uint64_t)(n + 1) * sizeof e > a3) return STATUS_BUFFER_TOO_SMALL;
+                memset(&e, 0, sizeof e);
+                e.bus = all[i].bus; e.dev = all[i].dev; e.fn = all[i].fn;
+                e.class_code = all[i].class_code; e.subclass = all[i].subclass; e.prog_if = all[i].prog_if;
+                e.irq = all[i].irq_line; e.vendor = all[i].vendor; e.device = all[i].device;
+                while (drv && drv[k] && k < sizeof e.driver - 1) { e.driver[k] = drv[k]; ++k; }
+                if (copy_to_user(p, a2 + (uint64_t)n * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
+                ++n;
+            }
+#endif
+            if (a4 && copy_to_user(p, a4, &n, 4)) return STATUS_ACCESS_VIOLATION;   /* ReturnLength = entry count */
+            return STATUS_SUCCESS;
         }
         return STATUS_INVALID_INFO_CLASS;
     }

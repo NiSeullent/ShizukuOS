@@ -3,7 +3,7 @@
 """ShizukuDOS 10.0 build / test / package driver.
 
     shz.py doctor [--guest]
-    shz.py build --profile {bios-legacy,uefi-multikernel,bios-multikernel}
+    shz.py build --profile {bios-legacy,uefi-multikernel,bios-multikernel,dual-bios-uefi-csm}
     shz.py test  --suite {host,boot,interkernel,win64,win98-regression}
     shz.py package --channel dev
 
@@ -37,12 +37,22 @@ PROFILES = {
         "summary": "UEFI x64 -> Supervisor (Intel VMX) -> virtual Real Mode DOS16",
         "steps": ["dos16/build.py", "kbuild.py", "win64/build.py", "supervisor/build.py"],
         "status": "built: DOS16, Kernel32, Kernel64 + Win64 initrd; running them needs Intel VMX in L1 "
-                  "(see `test --suite boot`)",
+                  "(see `test --suite boot`); without VMX the loader's boot manager chain-loads CSMWrap "
+                  "(legacy BIOS profile) when \\EFI\\SHIZUKU\\CSMWRAP.EFI is on the boot volume, or, with "
+                  "BOOT.INI mode=kernel64 / auto_kernel64=yes, boots \\SHZDOS\\KERNEL64S.BIN (standalone "
+                  "Kernel64) directly",
     },
     "bios-multikernel": {
         "summary": "BIOS loader -> Supervisor cold launch -> DOS16 / Win98 / Kernel64",
         "steps": [],
         "status": "not implemented",
+    },
+    "dual-bios-uefi-csm": {
+        "summary": "One disk (dual.img): legacy BIOS -> MBR -> FreeDOS DOS16, and UEFI -> CSMWrap (external, "
+                   "LGPL-2.1) -> SeaBIOS CSM16 (LGPL-3.0) -> the same MBR -> FreeDOS DOS16",
+        "steps": ["csm/build.py", "dos16/build.py"],
+        "status": "implemented (DOS16 only); the UEFI path needs >= 2 logical CPUs because CSMWrap keeps one AP "
+                  "as its system thread",
     },
 }
 
@@ -153,20 +163,35 @@ def suite_host(results):
         record(results, "shz_info_t layout matches C compiler", "FAIL", detail=str(exc))
     run_script(results, "interkernel ABI host model", [SHZ / "abi" / "test_abi.py"]) if (SHZ / "abi" / "test_abi.py").exists() \
         else record(results, "interkernel ABI host model", "BLOCKED", detail="abi/ not implemented")
+    # Determinism: rebuilding CSMWrap twice must give identical bytes (fixed BUILD_VERSION, no git describe).
+    hashes = []
+    for _ in range(2):
+        run([sys.executable, SHZ / "csm" / "build.py"], capture=True, timeout=1800)
+        hashes.append(tuple(sha256_file(BUILD / "csm" / f) for f in ("CSMWRAP.EFI", "Csm16.bin", "vgabios.bin")))
+    record(results, "CSMWrap build is reproducible (CSMWRAP.EFI, Csm16.bin, vgabios.bin)",
+           "PASS" if hashes[0] == hashes[1] else "FAIL", detail=hashes[0][0][:16])
     # Determinism: rebuilding DOS16 twice must give identical bytes.
     hashes = []
     for _ in range(2):
         run([sys.executable, SHZ / "dos16" / "build.py"], capture=True, timeout=600)
         hashes.append((sha256_file(BUILD / "dos16" / "command.com"), sha256_file(BUILD / "dos16" / "kernel.sys"),
-                       sha256_file(BUILD / "dos16" / "shizukudos-dos16-hd32.img")))
-    record(results, "DOS16 build is reproducible (kernel, shell, image)", "PASS" if hashes[0] == hashes[1] else "FAIL",
+                       sha256_file(BUILD / "dos16" / "shizukudos-dos16-hd32.img"),
+                       sha256_file(BUILD / "dos16" / "shizukudos-dos16-dual.img")))
+    record(results, "DOS16 build is reproducible (kernel, shell, image)", "PASS" if hashes[0][:3] == hashes[1][:3] else "FAIL",
            detail=hashes[0][2][:16])
+    record(results, "DOS16 dual BIOS/UEFI image is reproducible (hd32 content + T_INTS + CSMWrap ESP files)",
+           "PASS" if hashes[0][3] == hashes[1][3] else "FAIL", detail=hashes[0][3][:16])
     manifest = shzlib.load_manifest()
     for name, spec in manifest["upstreams"].items():
         head = subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name), "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
-        record(results, f"upstream {name} pinned at {spec['commit'][:12]}", "PASS" if head == spec["commit"] else "FAIL",
-               detail=head[:12])
+        subs = {sub: subprocess.run(["git", "-C", str(shzlib.UPSTREAM_DIR / name / sub), "rev-parse", "HEAD"],
+                                    capture_output=True, text=True).stdout.strip() == info["commit"]
+                for sub, info in spec.get("submodules", {}).items()}
+        ok = head == spec["commit"] and all(subs.values())
+        record(results, f"upstream {name} pinned at {spec['commit'][:12]}" + (f" (+{len(subs)} submodules)" if subs else ""),
+               "PASS" if ok else "FAIL", detail=head[:12] + ("" if all(subs.values()) else
+                                                             f" submodule drift: {[k for k, v in subs.items() if not v]}"))
 
 
 def l1_vmx_available():
@@ -195,12 +220,93 @@ def record_domain(results, label, prefix, vmx_reason):
                detail=(f"{bad[0][0]}: {bad[0][2]}" if bad else f"{len(checks)} guest-evidence checks"))
 
 
+BOOTMGR_CASES = {
+    "auto": "OVMF, Intel CPU without VMX, no BOOT.INI -> CSMWrap -> SeaBIOS CSM16 -> FreeDOS, disk verified",
+    "csm": "OVMF, AMD CPU, BOOT.INI mode=csm -> CSMWrap -> FreeDOS, disk verified",
+    "supervisor": "mode=supervisor without VMX refuses and returns to firmware",
+    "missing": "mode=csm with a csm_path that does not exist: clear error, returns to firmware",
+    "missing-default": "no BOOT.INI and no \\EFI\\SHIZUKU\\CSMWRAP.EFI: clear error, returns to firmware",
+    "malformed-key": "BOOT.INI with an unknown key is rejected as a whole, returns to firmware",
+    "malformed-mode": "BOOT.INI with an invalid mode is rejected as a whole, returns to firmware",
+    "not-an-image": "csm_path names a text file: LoadImage() error, returns to firmware",
+    "one-cpu": "-smp 1: CSMWrap's 2-CPU requirement refused before it can hang",
+    "kernel64": "mode=kernel64 + KERNEL64.INI: standalone Kernel64 directly on OVMF (no VMX), run_k64_standalone "
+                "checks + every T_*.EXE exit 0 + ABI 1.1 cmdline/GOP handoff",
+    "auto-kernel64": "mode=auto, auto_kernel64=yes, no VMX: the same direct Kernel64 run",
+    "auto-k64-fallback": "auto_kernel64=yes but OVMF S3 NVS at 8 MiB: Kernel64 refused, auto falls back to CSM -> "
+                         "FreeDOS, disk verified",
+    "kernel64-nvs": "mode=kernel64 with OVMF S3 NVS at 8 MiB: refused before ExitBootServices, returns to firmware",
+    "kernel64-missing": "mode=kernel64 without KERNEL64S.BIN: Not Found, returns to firmware",
+    "kernel64-wrong-image": "Supervisor-profile KERNEL64.BIN as KERNEL64S.BIN: refused, returns to firmware",
+    "kernel64-bad-ini": "KERNEL64.INI with an unknown key: rejected, returns to firmware",
+    "legacy": "the same MBR disk on SeaBIOS legacy BIOS -> FreeDOS, disk verified",
+}
+
+
+def suite_bootmgr(results):
+    """UEFI boot manager (loader BOOT.INI policy, CSMWrap legacy fallback, direct Kernel64 boot) and the vBIOS host
+    checks. Both run under TCG and need no VMX; neither is evidence for the VMX Supervisor path."""
+    label = ("UEFI boot manager [TCG]: no VMX -> CSMWrap/SeaBIOS CSM16 legacy-boots FreeDOS from one MBR disk; "
+             "mode=csm/supervisor, missing/invalid CSM image, malformed BOOT.INI, 1 CPU, same disk on SeaBIOS; "
+             "mode=kernel64 and auto_kernel64=yes boot the standalone Kernel64 directly (run_k64_standalone "
+             "evidence, every T_*.EXE exit 0), S3-NVS/missing/wrong-image/bad-INI refusals, auto fallback to CSM")
+    vlabel = ("vBIOS host checks [TCG + host]: ROM reset path and INT 1Ah RTC/INT 1Eh under QEMU -bios; "
+              "bios.c INT 13h/15h/16h/1Ah back end under ASan/UBSan (not a VMX run)")
+    try:
+        # Kernel64 (standalone) must match its sources for the kernel64 cases; WIN64.IMG is only built when absent.
+        run([sys.executable, SHZ / "kbuild.py"], capture=True, timeout=900)
+        if not (BUILD / "win64" / "WIN64.IMG").exists():
+            run([sys.executable, SHZ / "win64" / "build.py"], capture=True, timeout=1800)
+        run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=900)
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
+        for name in (label, vlabel):
+            record(results, name, "FAIL", detail=f"kbuild/win64/supervisor build failed: {str(exc)[-300:]}")
+        return
+    for name, script, result_json, timeout in (
+            (label, "test_bootmgr.py", BUILD / "bootmgr" / "result.json", 3600),
+            (vlabel, "test_vbios.py", BUILD / "supervisor" / "vbios-host-test" / "result.json", 600)):
+        result_json.unlink(missing_ok=True)
+        proc = run([sys.executable, SHZ / "supervisor" / script], capture=True, check=False, timeout=timeout)
+        data = json.loads(result_json.read_text()) if result_json.exists() else {}
+        ok = proc.returncode == 0 and data.get("status") == "PASS"
+        if "summary" in data:
+            detail = ", ".join(f"{k} {v}" for k, v in data["summary"].items())
+        elif data.get("checks"):
+            detail = f"{sum(c['status'] == 'PASS' for c in data['checks'])}/{len(data['checks'])} checks"
+        else:
+            detail = ((proc.stdout or "").strip().splitlines() or ["no output"])[-1]
+        record(results, name, "PASS" if ok else "FAIL", detail=detail, exit_code=proc.returncode,
+               command=f"{sys.executable} shizukudos/supervisor/{script}", evidence=str(result_json))
+        for case in data.get("cases", []):                  # one record per boot-manager case
+            bad = [c for c in case.get("checks", []) if c["status"] != "PASS"]
+            record(results, f"  boot manager [{case['case']}]: {BOOTMGR_CASES.get(case['case'], case['case'])}",
+                   case.get("status", "FAIL"),
+                   detail=f"{case.get('outcome')} in {case.get('seconds')} s, {len(case.get('checks', []))} checks" +
+                          (f"; first failure: {bad[0]['check']} {bad[0]['detail']}"[:300] if bad else ""),
+                   evidence=case.get("run_dir", ""))
+        if "parser-host-test" in data.get("summary", {}):
+            record(results, "  boot manager [parser]: BOOT.INI / KERNEL64.INI strict parsers on the host under "
+                            "ASan/UBSan", data["summary"]["parser-host-test"],
+                   detail=f"{data.get('parser_host_test', {}).get('cases')} cases")
+
+
 def suite_boot(results):
     ok = run_script(results, "DOS16 on legacy BIOS (SeaBIOS, real Real Mode) [KVM]",
                     [SHZ / "dos16" / "test_csm.py", "--accel", "kvm"], expect_marker="PASS")
     run_script(results, "DOS16 on legacy BIOS (SeaBIOS) [TCG software CPU]",
                [SHZ / "dos16" / "test_csm.py", "--accel", "tcg", "--timeout", "240"], timeout=400,
                expect_marker="PASS")
+    # One disk, two firmware paths (TCG, identical q35/AHCI/256 MiB/2 vCPU hardware; only the firmware differs).
+    dual_ok = run_script(results, "DOS16 dual image on legacy BIOS (QEMU SeaBIOS, q35/AHCI) + T_INTS [TCG]",
+                         [SHZ / "dos16" / "test_csm.py", "--image", "dual", "--machine", "q35", "--memory", "256",
+                          "--smp", "2", "--accel", "tcg", "--timeout", "240", "--run-name", "run-csm-dual"],
+                         timeout=400, expect_marker="PASS")
+    run_script(results, "DOS16 dual image on UEFI (OVMF, no CSM) -> CSMWrap -> SeaBIOS CSM16, T_INTS compared with "
+                        "the legacy run [TCG]",
+               [SHZ / "csm" / "test_qemu.py", "--accel", "tcg", "--timeout", "300", "--memory", "256", "--smp", "2",
+                *(["--legacy-result", BUILD / "dos16" / "run-csm-dual" / "result.json"] if dual_ok else [])],
+               timeout=900, expect_marker="PASS")
+    suite_bootmgr(results)
     run_script(results, "Kernel32 (Protected Mode) on QEMU, standalone stub (no Supervisor/VMX)",
                [SHZ / "tests" / "run_k32_standalone.py"], timeout=300, expect_marker="PASS")
     run_script(results, "Kernel64 (Long Mode) + Win64 apps on QEMU, standalone stub (no Supervisor/VMX)",
@@ -238,6 +344,17 @@ def suite_win64(results):
     run_script(results, "Kernel32/Kernel64 build (separate ELF32/ELF64 images)", [SHZ / "kbuild.py"])
     run_script(results, "Kernel64 + Win64 apps on QEMU (standalone stub, no Supervisor/VMX): self-tests, T_HELLO.EXE exit 7",
                [SHZ / "tests" / "run_k64_standalone.py"], timeout=400, expect_marker="PASS")
+    run_script(results, "virtqueue model, virtio-gpu layout, virgl encoder (+ execution on the host's virglrenderer)",
+               [SHZ / "tests" / "test_virtio_host.py"], timeout=600, expect_marker="PASS")
+    for display in ("vga", "virtio"):
+        run_script(results, f"Kernel64 GUI + GPU on QEMU, display {display}: every scene pixel-exact, GPU traffic checks",
+                   [SHZ / "tests" / "run_k64_gui.py", "--display", display, "--timeout", "600",
+                    "--out", BUILD / "kernel64s" / f"gui-{display}"], timeout=900, expect_marker="PASS")
+    gl = run([sys.executable, SHZ / "tests" / "run_k64_gui.py", "--display", "virtio-gl", "--timeout", "600",
+              "--out", BUILD / "kernel64s" / "gui-virtio-gl"], capture=True, check=False, timeout=900)
+    lines = (gl.stdout or "").strip().splitlines()
+    record(results, "Kernel64 virgl 3D through virtio-gpu-gl (T_GPU_3D triangle on the host GPU)",
+           {0: "PASS", 2: "BLOCKED"}.get(gl.returncode, "FAIL"), detail=lines[-1] if lines else "", exit_code=gl.returncode)
     reason = "needs Intel VMX in L1 (/dev/kvm + kvm_intel nested); run `test --suite boot` on such a host"
     if l1_vmx_available() and not supervisor_checks("Win64: "):
         run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=600)
@@ -367,20 +484,22 @@ def cmd_package(args):
     out.mkdir(parents=True, exist_ok=True)
     zpath = out / f"{name}.zip"
     files = []
-    for sub in ("dos16", "supervisor"):
+    for sub in ("dos16", "csm", "supervisor"):
         base = BUILD / sub
         for item in ("build-result.json", "BOOTX64.EFI", "esp.img", "kernel.sys", "command.com",
-                     "shizukudos-dos16-hd32.img", "vbios.bin", "payload.bin"):
+                     "shizukudos-dos16-hd32.img", "shizukudos-dos16-dual.img", "csmwrap.ini", "CSMWRAP.EFI",
+                     "Csm16.bin", "vgabios.bin", "vbios.bin", "payload.bin"):
             if (base / item).exists():
                 files.append((base / item, f"artifacts/{sub}/{item}"))
         for result in base.glob("run-*/result.json"):
             files.append((result, f"evidence/{sub}/{result.parent.name}-result.json"))
-    for item in ("shizukudos/dos16", "shizukudos/supervisor", "shizukudos/tools", "shizukudos/upstream",
+    for item in ("shizukudos/dos16", "shizukudos/csm", "shizukudos/supervisor", "shizukudos/tools", "shizukudos/upstream",
                  "docs/shizukudos10", "licenses"):
         for path in sorted((REPO / item).rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
                 files.append((path, f"source/{path.relative_to(REPO)}"))
-    # GPL source offer: the exact upstream trees the binaries were built from.
+    # GPL/LGPL source offer: the exact upstream trees the binaries were built from (submodules included:
+    # CSMWrap LGPL-2.1 + SeaBIOS LGPL-3.0 + its BSD/MIT/Apache parts).
     for upstream in shzlib.load_manifest()["upstreams"]:
         tree = shzlib.UPSTREAM_DIR / upstream
         if tree.exists():

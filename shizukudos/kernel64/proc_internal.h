@@ -40,7 +40,8 @@ struct kobject {
         struct { int manual; } event;
         struct { thread_t *owner; int recursion; int abandoned; } mutant;
         struct { int count, max; } sem;
-        struct { thread_t *t; } thr;
+        /* t is 0 once the exited thread was reclaimed (sched.c); exit_code/tid/pid then answer queries */
+        struct { thread_t *t; int64_t exit_code; uint64_t tid; uint64_t pid; } thr;
         struct { void *sock; } net;         /* OB_SOCKET: sock_t * (net_sock.c) */
         struct { process_t *p; } proc;
         struct { void *file; uint32_t access; } file;
@@ -96,6 +97,10 @@ struct process {
     uint64_t ntdll_process_start, ntdll_thread_start, ntdll_exception_dispatcher;
     uint64_t ldr_va;                    /* PEB_LDR_DATA */
     uint64_t params_va;                 /* RTL_USER_PROCESS_PARAMETERS */
+    /* WIN64 subsystem bridge (subsys64.c): console sink the standard handles are relayed to, inherited from the
+     * parent at creation; 0 = the Supervisor/serial console. `console_sink_gen` guards against a recycled slot. */
+    void *console_sink;
+    uint32_t console_sink_gen;
 };
 
 /* vad.c */

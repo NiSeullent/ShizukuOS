@@ -169,10 +169,15 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
         if (write) {
             char line[128];
             uint64_t left = len, at = buf;
+            const int bridged = p->console_sink != 0;           /* WIN64 subsystem bridge (subsys64.c) */
             while (left) {
                 chunk = left > sizeof line - 1 ? sizeof line - 1 : left;
                 if (copy_from_user(p, line, at, chunk)) return STATUS_ACCESS_VIOLATION;
                 line[chunk] = 0;
+                if (bridged && subsys64_console_write(p, handle == 12 ? 2 : 1, line, chunk)) {
+                    left -= chunk; at += chunk;
+                    continue;
+                }
                 {
                     /* console output goes to the Supervisor console, tagged with the process */
                     static char pending[256];
@@ -194,7 +199,16 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
             set_iosb(p, iosb, STATUS_SUCCESS, len);
             return STATUS_SUCCESS;
         }
-        set_iosb(p, iosb, STATUS_END_OF_FILE, 0);          /* no console input source yet */
+        if (p->console_sink && len) {                       /* bridged stdin: blocks until data, EOF or termination */
+            uint8_t tmp[256];
+            uint64_t got = 0;
+            if (subsys64_console_read(p, tmp, len > sizeof tmp ? sizeof tmp : len, &got)) {
+                if (got && copy_to_user(p, buf, tmp, got)) return STATUS_ACCESS_VIOLATION;
+                set_iosb(p, iosb, got ? STATUS_SUCCESS : STATUS_END_OF_FILE, got);
+                return got ? STATUS_SUCCESS : STATUS_END_OF_FILE;
+            }
+        }
+        set_iosb(p, iosb, STATUS_END_OF_FILE, 0);          /* no console input source without the bridge */
         return STATUS_END_OF_FILE;
     }
     if (!f->node || f->node->is_dir) return STATUS_INVALID_PARAMETER;

@@ -104,17 +104,62 @@ void sched_tick(void)
     schedule();
 }
 
+void __attribute__((weak)) thread_object_detach(thread_t *t) { (void)t; }          /* objects.c overrides */
+
+/* Interrupts must be disabled. A user thread that has exited (TS_ZOMBIE with an owning process) is never joined, so without
+ * this its slot and its 32 KiB kernel stack would stay taken for the rest of the boot and the table would eventually fill
+ * (CreateThread then fails). Once such a zombie is not `current`, nothing runs on its kernel stack any more (it left through
+ * schedule() with interrupts off and is never picked again). Its waitable thread object keeps the exit status (objects.c).
+ * `creator_hold` keeps a thread whose creator may still read t->object (start_thread_common until the creator released it,
+ * see thread_creator_release). Kernel threads (proc == 0) stay zombies until thread_join(). `only` limits it to one process. */
+static void reap_user_zombies(const void *only, int drop_holds)
+{
+    unsigned i;
+    for (i = 0; i < MAX_THREADS; ++i) {
+        thread_t *t = &threads[i];
+        if (t->state != TS_ZOMBIE || !t->proc || t == current || (only && t->proc != only)) continue;
+        if (drop_holds) t->creator_hold = 0;
+        if (t->creator_hold) continue;
+        thread_object_detach(t);
+        kfree((void *)t->stack_base);
+        t->stack_base = 0;
+        t->object = 0;
+        t->state = TS_FREE;
+    }
+}
+
+void thread_reap_process(const void *proc)
+{
+    const uint64_t f = irq_save();
+    reap_user_zombies(proc, 1);
+    irq_restore(f);
+}
+
+void thread_creator_release(thread_t *t)
+{
+    const uint64_t f = irq_save();
+    t->creator_hold = 0;
+    irq_restore(f);
+}
+
 static thread_t *thread_create_state(const char *name, void (*fn)(void *), void *arg, uint32_t state)
 {
     uint64_t f = irq_save(), *sp;
     thread_t *t = 0;
     unsigned i, k;
+    reap_user_zombies(0, 0);
     for (i = 0; i < MAX_THREADS; ++i)
         if (threads[i].state == TS_FREE) { t = &threads[i]; break; }
-    if (!t) { irq_restore(f); return 0; }
+    if (!t) {
+        unsigned z = 0;
+        for (i = 0; i < MAX_THREADS; ++i) z += threads[i].state == TS_ZOMBIE;
+        irq_restore(f);
+        kprintf("K64: thread table full (%u slots, %u exited but not reclaimable)\n", MAX_THREADS, z);
+        return 0;
+    }
     memset(t, 0, sizeof *t);
     t->stack_base = (uint64_t)kmalloc(KSTACK_BYTES);
-    if (!t->stack_base) { irq_restore(f); return 0; }
+    if (!t->stack_base) { irq_restore(f); kprintf("K64: no kernel stack for a new thread\n"); return 0; }
     t->id = next_id++;
     for (k = 0; name[k] && k < sizeof t->name - 1; ++k) t->name[k] = name[k];
     t->fx[0] = 0x7f; t->fx[1] = 0x03;               /* FCW 0x037F */
