@@ -90,6 +90,22 @@ static int32_t sys_query_vm(process_t *cur, uint64_t hproc, uint64_t addr, uint6
     struct mbi m;
     int32_t st;
     if (!p) return STATUS_INVALID_HANDLE;
+    if (cls == 4) {                                     /* MemoryWorkingSetExInformation: {VirtualAddress, attributes}[] */
+        uint64_t i, n = len / 16;
+        if (!n) return STATUS_INFO_LENGTH_MISMATCH;
+        for (i = 0; i < n; ++i) {
+            uint64_t va, attr = 0, flags = 0;
+            if (copy_from_user(cur, &va, buf + i * 16, 8)) return STATUS_ACCESS_VIOLATION;
+            if (va >= USER_MIN && va < USER_TOP && vm_lookup(p->pml4, va, &flags) && (flags & PT_U)) {
+                const vad_t *v = vad_find(p, va & ~(PAGE_SIZE - 1));
+                attr = 1 | (1ull << 1);                     /* Valid, ShareCount 1 (pages are private) */
+                if (v) attr |= (uint64_t)(v->prot & 0x7ff) << 4;   /* Win32Protection */
+            }
+            if (copy_to_user(cur, buf + i * 16 + 8, &attr, 8)) return STATUS_ACCESS_VIOLATION;
+        }
+        if (pret) { uint64_t r = n * 16; if (copy_to_user(cur, pret, &r, 8)) return STATUS_ACCESS_VIOLATION; }
+        return STATUS_SUCCESS;
+    }
     if (cls != 0) return STATUS_INVALID_INFO_CLASS;
     if (len < sizeof m) return STATUS_BUFFER_TOO_SMALL;
     memset(&m, 0, sizeof m);

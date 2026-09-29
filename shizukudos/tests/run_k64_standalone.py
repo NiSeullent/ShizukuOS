@@ -39,10 +39,29 @@ def parse(serial):
     return ev, exit_code
 
 
-def evaluate(serial, ev, exit_code, qemu_rc):
+def memory_mib(arg):
+    """QEMU -m argument -> MiB (plain number = MiB; suffixes M/G accepted)."""
+    a = str(arg).strip().lower()
+    if a.endswith("g"):
+        return int(float(a[:-1]) * 1024)
+    if a.endswith("m"):
+        return int(a[:-1])
+    return int(a)
+
+
+def evaluate(serial, ev, exit_code, qemu_rc, memory=None):
     e = lambda s: ev.get(s, 0)  # noqa: E731
     c = [check("Kernel64 reached the end of its self-tests and exited 0", exit_code == 0 and e(29) == 0x4b363421,
                f"exit={exit_code} marker={e(29):#x} qemu_rc={qemu_rc}")]
+    if memory is not None:
+        # The stub uses the RAM below 4 GiB. QEMU pc puts all of -m there below 3.5 GiB; from 3.5 GiB on it splits
+        # at 3 GiB (gigabyte alignment) and the rest lies above 4 GiB, which is not used (no E820 walk).
+        mib = memory_mib(memory)
+        want = mib if mib < 3584 else 3072
+        got = e(10) & 0xffffffff                      # multiboot mem_upper excludes the first MiB, rounded down to 2 MiB
+        c.append(check(f"Kernel64 manages {want} MiB of RAM and read back the top page through its direct map",
+                       want - 2 <= got <= want and e(10) >> 32 & 1 == 1 and (e(10) >> 33) * 4096 > (want - 64) * 1048576,
+                       f"slot10={e(10):#x}: {e(10) & 0xffffffff} MiB, probe={e(10) >> 32 & 1}, free pages={e(10) >> 33}"))
     c.append(check("no Kernel64 self-test reported FAIL", "K64 test FAIL" not in serial and e(28) == 0,
                    "; ".join(re.findall(r"K64 test FAIL: (.*)", serial)) or f"failures={e(28)}"))
     c.append(check("CR0 has PE|WP|PG and CR3 is page aligned", e(0) & 0x80010001 == 0x80010001 and e(1) & 0xfff == 0 and e(1) != 0,
@@ -101,7 +120,7 @@ def main():
     qemu_out = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     ev, exit_code = parse(serial)
-    checks = evaluate(serial, ev, exit_code, proc.returncode)
+    checks = evaluate(serial, ev, exit_code, proc.returncode, memory=args.memory)
     if timed_out:
         checks.insert(0, check("run finished before the timeout", False, f"{args.timeout}s, accel={accel}"))
     status = "PASS" if all(x["status"] == "PASS" for x in checks) else "FAIL"

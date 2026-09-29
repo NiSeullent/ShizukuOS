@@ -17,6 +17,8 @@
 #define PAGE_SIZE 4096ull
 #define K64_VIRT_BASE 0xffffffff80000000ull
 #define DIRECT_MAP 0xffff800000000000ull
+#define KWIN_BASE 0xffffc10000000000ull            /* kernel windows (kwin.c): PML4 slot 386, 512 GiB of virtual space */
+#define KWIN_SIZE 0x0000008000000000ull
 #define USER_TOP 0x00007ffffffef000ull            /* end of the user range (exclusive) */
 #define USER_MIN 0x0000000000010000ull            /* first mappable user address (null guard below) */
 #define VEC_TIMER 0x20
@@ -75,6 +77,7 @@ static inline void cli(void) { __asm__ volatile("cli" ::: "memory"); }
 
 /* ---- mem.c ---- */
 void mem_init(const shz_bootinfo_t *bi);
+uint64_t mem_ram_top(void);                     /* bytes of guest-physical RAM managed */
 uint64_t pmm_alloc(void);                       /* zeroed physical page, 0 on exhaustion */
 void pmm_free(uint64_t pa);
 uint64_t pmm_free_count(void);

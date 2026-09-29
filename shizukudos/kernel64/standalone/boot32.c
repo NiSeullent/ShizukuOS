@@ -11,7 +11,7 @@
 #define MAX_RAM (128u << 20)                       /* Kernel32's page allocator limit (mem.c MAX_PAGES) */
 #else
 #define STUB_DOMAIN SHZ_DOM_KERNEL64
-#define MAX_RAM (256u << 20)                       /* Kernel64's page allocator limit (mem.c MAX_PAGES) */
+#define MAX_RAM 0xE0000000u                        /* 3.5 GiB: the most a QEMU pc guest has below 4 GiB; mem.c manages up to 4 GiB */
 #endif
 #define KERNEL_GPA 0x100000u
 #define INITRD_GPA 0x2000000u
@@ -58,7 +58,8 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     mods = (const struct mod *)mbi->mods_addr;
     ksize = mods[0].end - mods[0].start;
     if (mbi->mods_count > 1) isize = mods[1].end - mods[1].start;
-    ram = (mbi->mem_upper + 1024u) << 10;          /* bytes of RAM below 4 GiB */
+    /* mem_upper: KiB of contiguous RAM above 1 MiB (below 4 GiB; memory above 4 GiB is not used: no E820 walk here) */
+    ram = mbi->mem_upper >= 0x3FFC00u ? 0xFFF00000u : (mbi->mem_upper + 1024u) << 10;
     ram &= ~0x1fffffu;
     if (ram > MAX_RAM) ram = MAX_RAM;
     if (ram < (64u << 20)) fail("need at least 64 MiB, have ", ram);
