@@ -25,6 +25,7 @@ W64 = SHZ / "win64"
 OUT = BUILD / "win64"
 CC = "x86_64-w64-mingw32-gcc"
 DLLTOOL = "x86_64-w64-mingw32-dlltool"
+WINDRES = "x86_64-w64-mingw32-windres"
 NTSYS = SHZ / "kernel64" / "ntsys.h"
 
 COMMON = ["-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
@@ -159,6 +160,11 @@ def build_apps(module_libs=()):
         name = src.stem
         exe = OUT / f"{name}.exe"
         extra = []
+        rc = src.with_suffix(".rc")                       # optional resource script (e.g. a VERSIONINFO fixture)
+        if rc.exists():
+            res = OUT / f"{name}_res.o"
+            run([WINDRES, "-O", "coff", "-o", res, rc])
+            extra.append(res)
         crt = W64 / "crt"
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
                "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
