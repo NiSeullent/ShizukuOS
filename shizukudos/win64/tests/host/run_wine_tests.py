@@ -34,6 +34,7 @@ COMMON = ["-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin"
 # test -> Shizuku kernel32 sources that provide the group (everything else comes from Wine's kernel32/ntdll)
 GROUPS = {
     "t_k32_nls": ["k32_nls.c", "nls_core.c", "nls_fmt.c", "k32_utf.c"],
+    "t_k32_slist": ["k32_slist.c"],
 }
 
 
