@@ -16,6 +16,7 @@ typedef struct {
     uint32_t kind;
     uint32_t alloc_prot;                /* protection at reservation (AllocationProtect) */
     uint64_t alloc_base;                /* AllocationBase */
+    void *img;                          /* VK_IMAGE backed lazily by a file (ldr.c image_map_t), else NULL */
 } vad_t;
 
 typedef struct {
@@ -104,6 +105,9 @@ struct process {
 /* vad.c */
 int32_t vad_insert_fixed(process_t *p, uint64_t start, uint64_t size, uint32_t state, uint32_t prot, uint32_t kind,
                          uint64_t alloc_base);
+/* A committed VK_IMAGE descriptor whose pages are produced on first touch by ldr_image_fault(img). */
+int32_t vad_insert_image(process_t *p, uint64_t start, uint64_t size, uint32_t prot, uint64_t alloc_base, void *img);
+int image_poke(process_t *p, uint64_t va, const void *src, uint64_t n);   /* loader write ignoring page protection */
 int vad_range_is_free(process_t *p, uint64_t start, uint64_t size);
 void vad_init(process_t *p);
 void vad_destroy(process_t *p);
@@ -118,6 +122,10 @@ int user_fault_in(process_t *p, uint64_t addr, int write, int exec);   /* demand
 int copy_from_user(process_t *p, void *dst, uint64_t uva, uint64_t n);
 int copy_to_user(process_t *p, uint64_t uva, const void *src, uint64_t n);
 int user_string_len(process_t *p, uint64_t uva, uint64_t max, uint64_t *len);
+
+/* ldr.c */
+int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr);          /* page-in of a lazily mapped image page; 0 = ok */
+void ldr_release_modules(process_t *p);                             /* frees the loader's per-process records */
 
 /* proc.c */
 process_t *current_process(void);

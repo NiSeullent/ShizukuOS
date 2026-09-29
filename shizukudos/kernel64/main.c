@@ -62,6 +62,7 @@ void kmain(uint64_t bootinfo_pa)
             kprintf("%s: initrd mounted, %d file(s)\n", KVER, files);
         initrd_files = files;
     }
+    { extern void disk_init(void); disk_init(); }   /* standalone profile: AHCI disk -> FAT32 volume as D:\ (disk.c) */
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
     sti();
