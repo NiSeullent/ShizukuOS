@@ -244,8 +244,10 @@ static int32_t vad_free_locked(process_t *p, uint64_t *base, uint64_t *size, uin
     vad_t *v;
     if (!base || !size || !*base)
         return STATUS_INVALID_PARAMETER;
+    v = vad_find(p, *base);
+    if (v && v->kind == VK_VIEW)
+        return (int32_t)0xC000001B;                     /* STATUS_UNABLE_TO_DELETE_SECTION: a view is unmapped, not freed */
     if (type == MEM_RELEASE) {
-        v = vad_find(p, *base);
         if (!v)
             return STATUS_UNABLE_TO_FREE_VM;
         if (v->alloc_base != *base)
@@ -310,6 +312,11 @@ static int32_t vad_protect_locked(process_t *p, uint64_t *base, uint64_t *size, 
         vad_t *w = vad_find(p, a);
         uint64_t va;
         w->prot = new_prot;
+        if (w->kind == VK_VIEW) {                       /* the section owns the pages: drop the mappings, view_fault */
+            for (va = w->start; va < w->end; va += PAGE_SIZE)   /* maps them again with the new protection */
+                vm_unmap(p->pml4, va, 0);
+            continue;
+        }
         for (va = w->start; va < w->end; va += PAGE_SIZE)
             if (vm_lookup(p->pml4, va, 0)) {
                 if ((new_prot & 0xff) == PAGE_NOACCESS || (new_prot & 0x100)) {
@@ -346,7 +353,7 @@ static int32_t vad_query_locked(process_t *p, uint64_t addr, uint64_t *base, uin
     *base = v->start; *alloc_base = v->alloc_base; *alloc_prot = v->alloc_prot; *size = v->end - v->start;
     *state = v->state == VAD_COMMITTED ? MEM_COMMIT : MEM_RESERVE;
     *prot = v->state == VAD_COMMITTED ? v->prot : 0;
-    *type = v->kind == VK_IMAGE ? MEM_IMAGE : MEM_PRIVATE;
+    *type = v->kind == VK_IMAGE ? MEM_IMAGE : v->kind == VK_VIEW ? MEM_MAPPED : MEM_PRIVATE;
     return STATUS_SUCCESS;
 }
 
@@ -361,6 +368,8 @@ static int user_fault_in_locked(process_t *p, uint64_t addr, int write, int exec
         return STATUS_ACCESS_VIOLATION;         /* the address space is being (or has been) released */
     if (addr < USER_MIN || addr >= USER_TOP || !v || v->state != VAD_COMMITTED)
         return STATUS_ACCESS_VIOLATION;
+    if (v->kind == VK_VIEW)
+        return view_fault(p, v, addr, write, exec);
     if (base == PAGE_NOACCESS)
         return STATUS_ACCESS_VIOLATION;
     if (v->prot & 0x100) {                      /* PAGE_GUARD: one-shot, then normal protection */
@@ -503,4 +512,25 @@ int user_fault_in(process_t *p, uint64_t addr, int write, int exec)
     const int st = user_fault_in_locked(p, addr, write, exec);
     irq_restore(f);
     return st;
+}
+
+/* Removes the descriptors of the view mapped at `base` (its pages must already be unmapped: they belong to the section). */
+int32_t vad_remove_view(process_t *p, uint64_t base)
+{
+    const uint64_t f = irq_save();
+    unsigned i = vad_lower(p, base);
+    int found = 0;
+    while (i < p->vads.count && p->vads.v[i].alloc_base == base && p->vads.v[i].kind == VK_VIEW) {
+        vad_remove_at(p, i);
+        found = 1;
+    }
+    irq_restore(f);
+    return found ? STATUS_SUCCESS : (int32_t)0xC0000019;   /* STATUS_NOT_MAPPED_VIEW */
+}
+
+/* No section support linked in: a view descriptor cannot exist, but fail safely. */
+int __attribute__((weak)) view_fault(process_t *p, vad_t *v, uint64_t addr, int write, int exec)
+{
+    (void)p; (void)v; (void)addr; (void)write; (void)exec;
+    return STATUS_ACCESS_VIOLATION;
 }

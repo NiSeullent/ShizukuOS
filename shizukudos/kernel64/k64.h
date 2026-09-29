@@ -126,6 +126,11 @@ struct thread {
     volatile int alerted, alert_wait;           /* NtAlertThreadByThreadId state */
     void *wait_multi;
     void *ipc;                                  /* ipc_thread_t: user APC queue, IPC wait state (kernel64/ipc_core.c) */
+    volatile int kill_pending;                  /* NtTerminateThread by another thread: dies with kill_code at the next exit */
+    int64_t kill_code;
+    volatile int suspend_count;                 /* NtSuspendThread: >0 stops the thread at its next return to user mode */
+    volatile int suspended;                     /* parked in that stop (a resume or a kill wakes it) */
+    uint64_t user_stack;                        /* allocation base of the user stack the kernel reserved for it (0: none) */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);

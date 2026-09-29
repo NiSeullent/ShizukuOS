@@ -8,7 +8,7 @@
 
 /* ---- virtual address descriptors ---- */
 enum { VAD_FREE = 0, VAD_RESERVED = 1, VAD_COMMITTED = 2 };
-enum { VK_PRIVATE = 0, VK_IMAGE = 1, VK_STACK = 2, VK_TEB = 3 };
+enum { VK_PRIVATE = 0, VK_IMAGE = 1, VK_STACK = 2, VK_TEB = 3, VK_VIEW = 4 };  /* VK_VIEW: section view (ipc_section.c) */
 typedef struct {
     uint64_t start, end;                /* [start, end), page aligned */
     uint32_t state;                     /* VAD_RESERVED / VAD_COMMITTED */
@@ -122,6 +122,10 @@ int32_t vad_query(process_t *p, uint64_t addr, uint64_t *base, uint64_t *alloc_b
                   uint64_t *size, uint32_t *state, uint32_t *prot, uint32_t *type);
 uint64_t prot_to_ptflags(uint32_t prot);                  /* PT_* flags (with PT_U) for a PAGE_* value */
 int user_fault_in(process_t *p, uint64_t addr, int write, int exec);   /* demand-zero commit; 0 = ok */
+/* Section views (kernel64/ipc_section.c): their pages belong to a section object, so faults are resolved by view_fault
+ * (interrupts off) and the descriptor is removed only through vad_remove_view, after the view's pages were unmapped. */
+int view_fault(process_t *p, vad_t *v, uint64_t addr, int write, int exec);
+int32_t vad_remove_view(process_t *p, uint64_t base);
 int copy_from_user(process_t *p, void *dst, uint64_t uva, uint64_t n);
 int copy_to_user(process_t *p, uint64_t uva, const void *src, uint64_t n);
 int user_string_len(process_t *p, uint64_t uva, uint64_t max, uint64_t *len);
@@ -141,7 +145,7 @@ void process_thread_gone(process_t *p);
  * process (ExitProcess ends every other thread before DLL_PROCESS_DETACH). Blocking kernel paths poll this. */
 int thread_must_die(thread_t *t);
 int current_thread_must_die(void);
-int32_t process_terminate_others(process_t *p);  /* NtTerminateProcess(NULL): ipc_proc.c */
+int32_t process_terminate_others(process_t *p, int32_t code);  /* NtTerminateProcess(NULL): ipc_proc.c */
 int32_t process_terminate_handle(process_t *p, uint64_t h, int32_t code);   /* NtTerminateProcess(h): ipc_proc.c */
 void process_teardown(process_t *p);    /* releases handles, views and the address space of a dead process (idempotent) */
 int process_start_thread3(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, int suspended,
@@ -156,6 +160,8 @@ typedef struct {
     const uint16_t *env; uint32_t env_chars;        /* whole block including its terminating empty string */
     uint64_t std_handles[3]; int use_std_handles;   /* STARTF_USESTDHANDLES values for StandardInput/Output/Error */
     int suspended;                                  /* CREATE_SUSPENDED: the initial thread waits for NtResumeThread */
+    int32_t (*prepare)(process_t *child, void *ctx);  /* runs before the loader's own handles exist (handle inheritance) */
+    void *prepare_ctx;
 } ldr_create_ex_t;
 int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                               const ldr_create_ex_t *ex, process_t **out_proc, thread_t **out_thread);

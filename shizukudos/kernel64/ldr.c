@@ -573,7 +573,8 @@ static uint64_t put_wraw(process_t *p, uint64_t at, const uint16_t *s, uint32_t 
     return at + chars * 2ull + 2;
 }
 
-static int build_params(process_t *p, const char *image, const char *cmdline, const char *cwd, const ldr_create_ex_t *ex)
+static int build_params(process_t *p, const char *image, const char *cmdline, const char *cwd, const ldr_create_ex_t *ex,
+                        const uint32_t std_h[3])
 {
     const uint64_t extra = ex ? (ex->env_chars + ex->cmdline_chars + ex->cwd_chars) * 2ull : 0;
     uint64_t base = alloc_user(p, (16384 + extra + 4095) & ~4095ull), at, env_va;
@@ -600,9 +601,9 @@ static int build_params(process_t *p, const char *image, const char *cmdline, co
     *(uint32_t *)(hdr + 0x00) = 0x400;                      /* MaximumLength */
     *(uint32_t *)(hdr + 0x04) = 0x400;                      /* Length */
     *(uint32_t *)(hdr + 0x08) = 1;                          /* Flags: normalized */
-    *(uint64_t *)(hdr + 0x20) = 4;                          /* StandardInput  (first handle in the table) */
-    *(uint64_t *)(hdr + 0x28) = 8;                          /* StandardOutput */
-    *(uint64_t *)(hdr + 0x30) = 12;                         /* StandardError */
+    *(uint64_t *)(hdr + 0x20) = std_h[0];                   /* StandardInput  (the process's console objects) */
+    *(uint64_t *)(hdr + 0x28) = std_h[1];                   /* StandardOutput */
+    *(uint64_t *)(hdr + 0x30) = std_h[2];                   /* StandardError */
     if (ex && ex->use_std_handles) {
         *(uint64_t *)(hdr + 0x20) = ex->std_handles[0];
         *(uint64_t *)(hdr + 0x28) = ex->std_handles[1];
@@ -692,7 +693,7 @@ static int32_t ldr_create_process_body(process_t *parent, const char *image_path
     int32_t st;
     char nm[64];
     thread_t *t = 0;
-    uint32_t h;
+    uint32_t std_h[3] = { 4, 8, 12 };
     unsigned k;
     for (k = 0; image_path[k] && k < sizeof p->name - 1; ) { p->name[k] = image_path[k]; ++k; }
     {
@@ -704,13 +705,17 @@ static int32_t ldr_create_process_body(process_t *parent, const char *image_path
     }
     (void)parent;
     proc_alloc_peb(p);
-    /* std handles occupy 4, 8 and 12 */
+    if (ex && ex->prepare) {                        /* IPC process creation: inherited handles keep their values, jobs */
+        st = ex->prepare(p, ex->prepare_ctx);
+        if (st) return st;
+    }
+    /* console standard handles: 4, 8 and 12 unless inherited handles already hold those values */
     {
         kobject_t *in = console_object(0), *outo = console_object(1), *err = console_object(1);
         if (!in || !outo || !err) return STATUS_NO_MEMORY;
-        handle_insert(p, in, 0x80000000u, &h); ob_deref(in);
-        handle_insert(p, outo, 0x40000000u, &h); ob_deref(outo);
-        handle_insert(p, err, 0x40000000u, &h); ob_deref(err);
+        handle_insert(p, in, 0x80000000u, &std_h[0]); ob_deref(in);
+        handle_insert(p, outo, 0x40000000u, &std_h[1]); ob_deref(outo);
+        handle_insert(p, err, 0x40000000u, &std_h[2]); ob_deref(err);
     }
     st = load_dll(p, "ntdll.dll", 0, 0);
     if (st) { kprintf("K64 ldr: cannot load ntdll.dll (%x)\n", (uint32_t)st); return st; }
@@ -721,7 +726,7 @@ static int32_t ldr_create_process_body(process_t *parent, const char *image_path
     if (!exe->info.entry_rva) return STATUS_INVALID_IMAGE_FORMAT;
     st = publish_all(p, exe);
     if (st) return st;
-    if (build_params(p, image_path, cmdline, cwd, ex)) return STATUS_NO_MEMORY;
+    if (build_params(p, image_path, cmdline, cwd, ex, std_h)) return STATUS_NO_MEMORY;
     /* PEB fields */
     {
         uint8_t peb[0x130];

@@ -19,6 +19,14 @@ extern uint64_t ticks_now(void);
 
 uint32_t ipc_stat_sections, ipc_stat_views, ipc_stat_pipes, ipc_stat_irps, ipc_stat_packets, ipc_stat_jobs;
 
+/* Current time as a FILETIME (100 ns since 1601), from the platform's wall clock. */
+int64_t shz_filetime_now_ipc(void)
+{
+    hcreg_t secs = 0;
+    shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
+    return (int64_t)(secs + 11644473600ull) * 10000000ll + (int64_t)((shz_time_ns() % 1000000000ull) / 100);
+}
+
 /* ---------------------------------------------------------------- per-process / per-thread state */
 ipc_proc_t *ipc_proc(process_t *p, int create)
 {
@@ -204,14 +212,23 @@ void ipc_thread_exit(thread_t *t)
     if (t->ipc) { kfree(t->ipc); t->ipc = 0; }
 }
 
-static void kill_wake(thread_t *t, void *ctx)
+/* Wakes `t` (interrupts off) if it is parked in an interruptible wait - object waits, delays, alert-by-thread-id, IPC and
+ * port waits, a suspension - or never ran yet, so it reaches check_kill() and dies. Kernel-internal waits (kmutex/ksem
+ * waiter lists) are left alone: waking them would leave them linked on those lists; they die when that wait ends. */
+void ipc_wake_to_die(thread_t *t)
 {
     ipc_thread_t *it = t->ipc;
-    if (t->proc != ctx || t == thread_current()) return;
     if (t->state == TS_NEW) { thread_resume(t); return; }          /* exits at its first instruction (user_thread_main) */
     if (t->state != TS_BLOCKED) return;
-    if ((it && (it->waiting || it->alertable)) || t->wait_multi || t->alert_wait || (!t->wait_sem && t->wake_tick))
+    if ((it && (it->waiting || it->alertable)) || t->wait_multi || t->alert_wait || t->suspended ||
+        (!t->wait_sem && t->wake_tick))
         thread_wake(t);                                              /* returns to the syscall exit, where check_kill ends it */
+}
+
+static void kill_wake(thread_t *t, void *ctx)
+{
+    if (t->proc != ctx || t == thread_current()) return;
+    ipc_wake_to_die(t);
 }
 
 void ipc_process_terminating(process_t *p) { sched_for_each_thread(kill_wake, p); }

@@ -99,6 +99,7 @@ typedef struct {
 ipc_proc_t *ipc_proc(process_t *p, int create);
 void ipc_process_terminating(process_t *p);    /* wakes the process's blocked threads (except the caller) so they die */
 void ipc_reap(void);
+void ipc_wake_to_die(thread_t *t);               /* interrupts off */
 ipc_thread_t *ipc_thread(thread_t *t, int create);
 
 /* ---------------------------------------------------------------- handles and objects */

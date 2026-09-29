@@ -303,6 +303,11 @@ ULONG NTAPI RtlNtStatusToDosError(NTSTATUS status)
     shz_set_last_status(status);                   /* like Windows: TEB.LastStatusValue follows the last translation */
     for (i = 0; i < sizeof status_map / sizeof status_map[0]; ++i)
         if (status_map[i].status == status) return status_map[i].error;
+    {
+        extern ULONG NTAPI ShzIpcStatusToDosError(NTSTATUS);          /* ipc_ntdll.c: section/pipe/job/process statuses */
+        const ULONG e = ShzIpcStatusToDosError(status);
+        if (e != (ULONG)-1) return e;
+    }
     if (NT_SUCCESS(status)) return 0;
     return ERROR_MR_MID_NOT_FOUND;                 /* 317: unmapped status, never silently "success" */
 }

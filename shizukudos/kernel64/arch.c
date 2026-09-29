@@ -108,8 +108,8 @@ void isr_dispatch(struct regs *r)
         sched_tick();
         if (r->cs & 3) {                    /* a thread preempted in ring 3 of a killed/exiting process ends here, so */
             extern void check_kill(void);   /* TerminateProcess also stops threads that never enter the kernel */
-            extern int current_thread_must_die(void);
-            if (current_thread_must_die()) {
+            extern int current_thread_must_stop(void);
+            if (current_thread_must_stop()) {   /* die, or park while suspended (NtSuspendThread) */
                 sti();                      /* like a system call: teardown work runs preemptible (the frame is ring 3) */
                 check_kill();
             }

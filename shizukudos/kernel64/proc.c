@@ -21,7 +21,14 @@ void __attribute__((weak)) ipc_thread_exit(thread_t *t) { (void)t; }            
 void __attribute__((weak)) ipc_process_terminating(process_t *p) { (void)p; }      /* wake its blocked threads */
 void __attribute__((weak)) ipc_process_teardown(process_t *p) { (void)p; }         /* IRPs, views, job accounting */
 void __attribute__((weak)) ldr_free_modules(process_t *p) { (void)p; }
-static int next_pid = 1;
+static uint64_t next_cid = 4;       /* process and thread ids share one namespace (NT's client-id table): unique ids */
+static uint64_t alloc_client_id(void)
+{
+    const uint64_t f = irq_save(), v = next_cid;
+    next_cid += 4;
+    irq_restore(f);
+    return v;
+}
 static uint64_t syscalls;
 uint64_t user_syscall_count(void) { return syscalls; }
 void count_syscall(void) { ++syscalls; }
@@ -54,7 +61,7 @@ process_t *process_create_empty(const char *name)
     p->handles = kzalloc(sizeof(handle_entry_t) * MAX_HANDLES);
     if (!p->handles) { vm_free_space(p->pml4); return 0; }
     vad_init(p);
-    p->pid = next_pid++ * 4;
+    p->pid = (int)alloc_client_id();
     for (k = 0; name[k] && k < sizeof p->name - 1; ++k) p->name[k] = name[k];
     sem_init(&p->exited, 0);
     p->object = ob_create(OB_PROCESS, 0);
@@ -131,8 +138,9 @@ static void user_thread_main(void *arg)
     process_t *p = t->proc;
     (void)arg;
     if (thread_must_die(t)) {                   /* created suspended and the process was killed before it ever ran */
+        t->exit_code = t->kill_pending && !p->terminated && !p->exit_owner ? t->kill_code : p->exit_code;
         process_thread_gone(p);
-        thread_exit(p->exit_code);
+        thread_exit(t->exit_code);
     }
     write_cr3(p->pml4);
     tss_set_rsp0(t->stack_base + KSTACK_BYTES);
@@ -144,12 +152,13 @@ static void user_thread_main(void *arg)
 static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2,
                                uint64_t stack_size, int suspended, thread_t **out)
 {
-    uint64_t stack_base = 0;
+    uint64_t stack_base = 0, user_stack = 0;
     thread_t *t;
     kobject_t *tobj;
     if (rsp == 0) {
         if (vad_alloc(p, &stack_base, &stack_size, MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN, PAGE_READWRITE, VK_STACK))
             return -1;
+        user_stack = stack_base;
         rsp = stack_base + stack_size - 0x40;   /* leaves shadow space + alignment headroom */
         rsp &= ~0xfull;
         rsp -= 8;                               /* as if entered by CALL: RSP % 16 == 8 */
@@ -167,6 +176,8 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     t = thread_create_suspended(p->name, user_thread_main, 0);
     if (!t) return -1;
     t->proc = p;
+    t->user_stack = user_stack;
+    p->next_tid = alloc_client_id();            /* proc_alloc_teb and the thread record use this id */
     t->user_rip = rip;
     t->user_rsp = rsp;
     t->user_arg = arg;
@@ -180,12 +191,13 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     t->object = tobj;
     ob_ref(p->object);                          /* the thread keeps its process object (and slot) alive until it is reaped */
     ++p->threads_alive;
-    p->next_tid += 4;
     if (!p->main_thread) p->main_thread = t;
     thread_user_tls_init(p, t);
     if (out) *out = t;
-    if (!suspended)
-        thread_resume(t);                       /* fully initialised: now it may run (CREATE_SUSPENDED: NtResumeThread) */
+    if (suspended)
+        t->suspend_count = 1;                   /* CREATE_SUSPENDED: NtResumeThread to zero releases it (ipc_proc.c) */
+    else
+        thread_resume(t);                       /* fully initialised: now it may run */
     return 0;
 }
 
@@ -245,11 +257,28 @@ static void process_reap_signal(process_t *p)
     sem_post(&p->exited);
 }
 
+/* An exiting thread of a process that lives on gives back its user stack, its TEB and its static-TLS block (Windows
+ * frees a terminated thread's stack and TEB too); the last thread leaves that to process_teardown(). */
+static void release_thread_user_memory(process_t *p, thread_t *t)
+{
+    uint64_t tls = 0, b, z;
+    if (!t->teb || p->teardown) return;
+    if (!copy_from_user(p, &tls, t->teb + 0x58, 8) && tls) { b = tls; z = 0; vad_free(p, &b, &z, MEM_RELEASE); }
+    if (t->user_stack) { b = t->user_stack; z = 0; vad_free(p, &b, &z, MEM_RELEASE); t->user_stack = 0; }
+    b = t->teb; z = 0;
+    vad_free(p, &b, &z, MEM_RELEASE);                   /* t->teb keeps its value: ipc_reap() recognises user threads by it */
+}
+
 void process_thread_gone(process_t *p)
 {
-    ipc_thread_exit(thread_current());
-    if (--p->threads_alive <= 0)
+    thread_t *t = thread_current();
+    ipc_thread_exit(t);
+    if (--p->threads_alive <= 0) {
+        if (!p->terminated) p->exit_code = t->exit_code;   /* the last thread's code is the process's */
         process_reap_signal(p);
+    } else {
+        release_thread_user_memory(p, t);
+    }
 }
 
 void process_terminate(process_t *p, int64_t code, int faulted)
@@ -264,18 +293,42 @@ void process_terminate(process_t *p, int64_t code, int faulted)
 int thread_must_die(thread_t *t)
 {
     const process_t *p = t->proc;
-    return p && (p->terminated || (p->exit_owner && p->exit_owner != t));
+    return p && (p->terminated || (p->exit_owner && p->exit_owner != t) || t->kill_pending);
 }
 
 int current_thread_must_die(void) { return thread_must_die(thread_current()); }
+
+/* Must the current thread stop before it returns to user mode (die, or wait while suspended)? Timer-interrupt path. */
+int current_thread_must_stop(void)
+{
+    thread_t *t = thread_current();
+    return t->proc && (thread_must_die(t) || t->suspend_count > 0);
+}
+
+/* NtSuspendThread: the thread parks here, on its way back to user mode, until its suspend count drops to zero or it has
+ * to die (process termination wakes it like any interruptible wait). */
+static void suspend_wait(thread_t *t)
+{
+    const uint64_t f = irq_save();
+    while (t->suspend_count > 0 && !thread_must_die(t)) {
+        t->suspended = 1;
+        thread_block_current();
+        t->suspended = 0;
+    }
+    irq_restore(f);
+}
 
 void check_kill(void)
 {
     thread_t *t = thread_current();
     process_t *p = t->proc;
+    if (!p) return;
+    if (t->suspend_count > 0 && !thread_must_die(t))
+        suspend_wait(t);
     if (thread_must_die(t)) {
+        t->exit_code = p->terminated || (p->exit_owner && p->exit_owner != t) ? p->exit_code : t->kill_code;
         process_thread_gone(p);
-        thread_exit(p->exit_code);
+        thread_exit(t->exit_code);
     }
 }
 

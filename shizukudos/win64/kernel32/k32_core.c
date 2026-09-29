@@ -69,26 +69,7 @@ K32API BOOL WINAPI GetExitCodeThread(HANDLE h, LPDWORD code)
     return TRUE;
 }
 
-K32API HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stack, LPTHREAD_START_ROUTINE start, LPVOID param,
-                                  DWORD flags, LPDWORD tid)
-{
-    HANDLE h = 0;
-    NTSTATUS st;
-    struct { LONG64 exit_status; ULONG64 teb, pid, tid, aff; LONG prio, base; } b;
-    (void)sa;
-    if (flags & CREATE_SUSPENDED) { shz_set_last_error(ERROR_NOT_SUPPORTED); return 0; }     /* not implemented yet */
-    st = NtCreateThreadEx(&h, THREAD_ALL_ACCESS, 0, CURRENT_PROCESS, (PVOID)start, param, 0, 0, stack, 0, 0);
-    if (st) { k32_nt_error(st); return 0; }
-    if (tid) {
-        if (NtQueryInformationThread(h, 0, &b, sizeof b, 0) == 0) *tid = (DWORD)b.tid; else *tid = 0;
-    }
-    return h;
-}
-
 K32API BOOL WINAPI SwitchToThread(void) { return NtYieldExecution() != STATUS_NO_YIELD_PERFORMED; }
-K32API BOOL WINAPI TerminateThread(HANDLE h, DWORD code) { (void)h; (void)code; shz_set_last_error(ERROR_NOT_SUPPORTED); return FALSE; }
-K32API DWORD WINAPI SuspendThread(HANDLE h) { (void)h; shz_set_last_error(ERROR_NOT_SUPPORTED); return (DWORD)-1; }
-K32API DWORD WINAPI ResumeThread(HANDLE h) { (void)h; shz_set_last_error(ERROR_NOT_SUPPORTED); return (DWORD)-1; }
 K32API int WINAPI GetThreadPriority(HANDLE h) { (void)h; return THREAD_PRIORITY_NORMAL; }
 K32API BOOL WINAPI SetThreadPriority(HANDLE h, int p)
 {
@@ -117,6 +98,7 @@ static DWORD wait_result(NTSTATUS st, DWORD count)
 {
     (void)count;
     if (st == STATUS_TIMEOUT) return WAIT_TIMEOUT;
+    if (st == STATUS_USER_APC) return WAIT_IO_COMPLETION;          /* an alertable wait ran queued APCs */
     if (st >= 0 && st < 64) return (DWORD)st;                          /* WAIT_OBJECT_0 + index */
     if (st >= STATUS_ABANDONED_WAIT_0 && st < STATUS_ABANDONED_WAIT_0 + 64) return WAIT_ABANDONED_0 + (DWORD)(st - STATUS_ABANDONED_WAIT_0);
     k32_nt_error(st);
@@ -162,7 +144,6 @@ K32API VOID WINAPI Sleep(DWORD ms)
     if (ms == 0) { NtYieldExecution(); return; }
     NtDelayExecution(FALSE, &li);
 }
-K32API DWORD WINAPI SleepEx(DWORD ms, BOOL alertable) { (void)alertable; Sleep(ms); return 0; }
 
 /* ---------------------------------------------------------------- events, mutexes, semaphores */
 static WCHAR *widen(const char *s, WCHAR *buf, size_t cap)
@@ -173,10 +154,11 @@ static WCHAR *widen(const char *s, WCHAR *buf, size_t cap)
     return buf;
 }
 
-static NTSTATUS named_attr(LPCWSTR name, SHZ_OBJECT_ATTRIBUTES *oa, SHZ_UNICODE_STRING *us)
+static NTSTATUS named_attr_sa(LPCWSTR name, LPSECURITY_ATTRIBUTES sa, SHZ_OBJECT_ATTRIBUTES *oa, SHZ_UNICODE_STRING *us)
 {
     memset(oa, 0, sizeof *oa);
     oa->Length = sizeof *oa;
+    if (sa && sa->nLength >= sizeof *sa && sa->bInheritHandle) oa->Attributes |= 2;    /* OBJ_INHERIT */
     if (name && name[0]) {
         size_t n = 0;
         while (name[n]) ++n;
@@ -195,8 +177,7 @@ K32API HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES sa, BOOL manual, BOOL in
     SHZ_UNICODE_STRING us;
     HANDLE h = 0;
     NTSTATUS st;
-    (void)sa;
-    if (named_attr(name, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
+    if (named_attr_sa(name, sa, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
     st = NtCreateEvent(&h, EVENT_ALL_ACCESS, &oa, manual ? 0 : 1, initial != 0);
     if (st == 0x40000000) { shz_set_last_error(ERROR_ALREADY_EXISTS); return h; }
     if (st) { k32_nt_error(st); return 0; }
@@ -217,8 +198,7 @@ K32API HANDLE WINAPI CreateMutexW(LPSECURITY_ATTRIBUTES sa, BOOL owner, LPCWSTR 
     SHZ_UNICODE_STRING us;
     HANDLE h = 0;
     NTSTATUS st;
-    (void)sa;
-    if (named_attr(name, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
+    if (named_attr_sa(name, sa, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
     st = NtCreateMutant(&h, MUTANT_ALL_ACCESS, &oa, owner != 0);
     if (st == 0x40000000) { shz_set_last_error(ERROR_ALREADY_EXISTS); return h; }
     if (st) { k32_nt_error(st); return 0; }
@@ -238,8 +218,7 @@ K32API HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES sa, LONG initial, LO
     SHZ_UNICODE_STRING us;
     HANDLE h = 0;
     NTSTATUS st;
-    (void)sa;
-    if (named_attr(name, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
+    if (named_attr_sa(name, sa, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
     st = NtCreateSemaphore(&h, SEMAPHORE_ALL_ACCESS, &oa, initial, max);
     if (st == 0x40000000) { shz_set_last_error(ERROR_ALREADY_EXISTS); return h; }
     if (st) { k32_nt_error(st); return 0; }
