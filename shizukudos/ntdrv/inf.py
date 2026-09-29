@@ -8,7 +8,8 @@ Implements the documented INF file syntax as Windows 10 SetupAPI reads it for a 
   * `%token%` substitution from [Strings] / [Strings.<lang>] (undefined tokens and numeric dirids stay literal);
   * [Version] (Signature, Class, ClassGuid, Provider, DriverVer, CatalogFile.*);
   * [Manufacturer] with TargetOSVersion decorations (NTamd64, NTamd64.10.0, NTamd64.10.0...16299, NT.6.1, ...):
-    the applicable decoration with the highest version wins (Microsoft "INF Manufacturer Section");
+    the applicable decoration with the highest version wins (Microsoft "INF Manufacturer Section"); for non-x86
+    targets the decoration must name the architecture and undecorated models sections are not used;
   * models sections: description = DDInstall-section, hardware-id [, compatible-id ...];
   * DDInstall decoration search (X.NTamd64 > X.NT > X) and the .Services / .HW / .CoInstallers / .Wdf extensions;
   * CopyFiles (@file and file-list sections), DestinationDirs / dirids, SourceDisksFiles;
@@ -16,11 +17,13 @@ Implements the documented INF file syntax as Windows 10 SetupAPI reads it for a 
   * AddService / service-install sections (ServiceType, StartType, ErrorControl, ServiceBinary, LoadOrderGroup, ...);
   * KmdfService / KmdfLibraryVersion (WDF version the driver needs);
   * PCI hardware/compatible ID generation (Microsoft "Identifiers for PCI devices") and driver ranking
-    (Microsoft "How Windows Ranks Drivers": hardware-ID matches before compatible-ID matches, the device's
-    more specific IDs before the less specific ones, INF FeatureScore and signature class as higher rank bits).
+    (Microsoft "How Windows Ranks Drivers": rank 0xSSGGTHHH = signature score, FeatureScore, identifier score;
+    identifier score per "Identifier Score (Windows Vista and later)"; equal ranks broken by DriverVer date, then
+    version).
 
-It is a static tool: nothing here installs anything. The runtime counterpart (C, freestanding) is
-shizukudos/ntdrv/infc/ntdrv_inf.c; tests/test_inf.py cross-checks both on the same INF files.
+It is a static tool: nothing here installs anything. The runtime counterpart is the Win64 CLI shzpnp
+(shizukudos/win64/apps/shzpnp/), which implements the same rules in C; tests/test_inf.py checks this module against
+the documented rules and shizukudos/ntdrv/tests/test_shzpnp.py checks shzpnp against this module.
 """
 import argparse
 import json
@@ -36,16 +39,19 @@ class Target:
     arch: str = "amd64"          # amd64 | x86 | arm64 | arm | ia64
     major: int = 10
     minor: int = 0
-    build: int = 19041           # Windows 10 2004
+    build: int = 22631           # the version Kernel64 reports (registry CurrentBuild, PEB): 10.0.22631
     product_type: int = 1        # 1 workstation, 2 domain controller, 3 server
     suite: int = 0
+    # Windows x64 ignores arch-less and undecorated Models sections. ReactOS's setupapi accepts them, and ReactOS's own
+    # INFs rely on that; legacy=True reproduces that leniency (never the default: it is not Windows behaviour).
+    legacy: bool = False
 
     @property
     def nt_decoration(self):
         return "NT" + self.arch
 
 
-TARGET_WIN10_AMD64 = Target()
+TARGET_WIN10_AMD64 = Target()                                 # the ShizukuDOS 10 profile
 
 _ARCHES = ("amd64", "x86", "arm64", "arm", "ia64")
 
@@ -80,6 +86,8 @@ def decoration_applies(dec, target):
         return None
     if d["arch"] and d["arch"] != target.arch:
         return None
+    if not d["arch"] and target.arch != "x86" and not target.legacy:
+        return None                                          # "Architecture must be specified ... for non-x86" (since 2003 SP1)
     if d["major"] is not None and d["minor"] is None:
         d["minor"] = 0                                       # NTamd64.10 means 10.0
     if d["major"] is not None:
@@ -359,8 +367,11 @@ class Inf:
             decorations = [d.strip() for d in ln.values[1:] if d.strip()]
             chosen = None
             if not decorations:
-                chosen = base                                # undecorated models section (Windows accepts it for x86 only; kept lenient)
-                self.warnings.append(f"{self.name}: manufacturer '{ln.key}' has no TargetOSVersion decoration")
+                if target.arch == "x86" or target.legacy:
+                    chosen = base                            # undecorated models section: x86 only (or legacy mode)
+                else:
+                    self.warnings.append(f"{self.name}: manufacturer '{ln.key}' has no TargetOSVersion decoration: "
+                                         f"not used on {target.arch}")
             else:
                 best = None
                 for d in decorations:
@@ -648,8 +659,10 @@ class Device:
     description: str = ""
 
     @classmethod
-    def pci(cls, vendor, device, subsys=None, rev=None, class_code=None, instance=None):
-        """Microsoft "Identifiers for PCI devices": the exact ID strings and their order. class_code is 24-bit ccsspp."""
+    def pci(cls, vendor, device, subsys=None, rev=None, class_code=None, instance=None, dt=None):
+        """Microsoft "Identifiers for PCI devices": the exact ID strings and their order. subsys is PCI config dword
+        0x2C (subsystem id << 16 | subsystem vendor), printed as SUBSYS_s(4)n(4); class_code is 24-bit ccsspp;
+        dt is the PCI Express device/port type (compatible IDs PCI\CC_..&DT_.., PCI Express only)."""
         v, d = f"{vendor:04X}", f"{device:04X}"
         hw, cp = [], []
         if subsys is not None:
@@ -668,7 +681,13 @@ class Device:
         cp.append(f"PCI\\VEN_{v}&DEV_{d}")
         if class_code is not None:
             cc = f"{class_code:06X}"
-            cp += [f"PCI\\VEN_{v}&CC_{cc}", f"PCI\\VEN_{v}&CC_{cc[:4]}", f"PCI\\VEN_{v}", f"PCI\\CC_{cc}", f"PCI\\CC_{cc[:4]}"]
+            cp += [f"PCI\\VEN_{v}&CC_{cc}", f"PCI\\VEN_{v}&CC_{cc[:4]}", f"PCI\\VEN_{v}"]
+            if dt is not None:
+                cp.append(f"PCI\\CC_{cc}&DT_{dt:04X}")
+            cp.append(f"PCI\\CC_{cc}")
+            if dt is not None:
+                cp.append(f"PCI\\CC_{cc[:4]}&DT_{dt:04X}")
+            cp.append(f"PCI\\CC_{cc[:4]}")
         else:
             cp.append(f"PCI\\VEN_{v}")
         inst = instance or f"PCI\\VEN_{v}&DEV_{d}"
@@ -697,36 +716,67 @@ class Device:
 
 # ------------------------------------------------------------------------------------------------------------ ranking
 
-# "How Windows Ranks Drivers (Windows Vista and later)": identifier score = match-kind base + index of the device ID.
+# "How Windows Ranks Drivers (Windows Vista and later)": rank = 0xSSGGTHHH, lower is better.
+#   SS  signature score. Windows ranks trusted-signed packages best, then unsigned packages whose DDInstall section has
+#       an .NT platform extension, then unsigned undecorated ones, then unknown signing state; it does not publish the
+#       byte values. ShizukuDOS verifies no signatures, so every package is "unsigned"; the two unsigned classes are
+#       kept, with our own byte values (only their order is Windows').
+#   GG  FeatureScore directive of the DDInstall section (0x00-0xFF), 0xFF when absent.
+#   THHH identifier score ("Identifier Score (Windows Vista and later)"), positions zero-based:
+#       device hardware ID   = INF hardware ID    0x0000 + position of the device hardware ID
+#       device hardware ID   = INF compatible ID  0x1000 + position of the device hardware ID
+#       device compatible ID = INF hardware ID    0x2000 + position of the device compatible ID
+#       device compatible ID = INF compatible ID  0x3000 + j + k*0x100 (j: device compatible ID position,
+#                                                  k: position of the compatible ID in the INF Models entry)
 RANK_HW_HW, RANK_HW_CP, RANK_CP_HW, RANK_CP_CP = 0x0000, 0x1000, 0x2000, 0x3000
-# Signature score (high bits): 0x0000 inbox/WHQL-class ... Every package a user adds here is unsigned from the point of view of
-# this system (there is no signature verification), so the score is a constant; it is kept in the formula for documentation.
-SIGNATURE_SCORE_UNVERIFIED = 0x8000_0000
+SIGNATURE_TRUSTED = 0x00                                      # never produced: no signature verification here
+SIGNATURE_UNSIGNED_NT = 0x80                                  # unsigned, DDInstall with .NT/.NT<arch> extension
+SIGNATURE_UNSIGNED = 0xC0                                     # unsigned, undecorated DDInstall
 FEATURE_SCORE_DEFAULT = 0xFF
+MATCH_KINDS = {RANK_HW_HW: "hardware-id/hardware-id", RANK_HW_CP: "device-hardware-id/inf-compatible-id",
+               RANK_CP_HW: "device-compatible-id/inf-hardware-id", RANK_CP_CP: "compatible-id/compatible-id"}
+
+
+def identifier_score(device, model):
+    """Best (lowest) identifier score of one Models entry for a device: (score, kind, inf_id, device_id) or None."""
+    best = None
+
+    def consider(score, kind, inf_id, dev_id):
+        nonlocal best
+        if best is None or score < best[0]:
+            best = (score, kind, inf_id, dev_id)
+    dev_hw = {d.lower(): i for i, d in reversed(list(enumerate(device.hwids)))}
+    dev_cp = {d.lower(): j for j, d in reversed(list(enumerate(device.compat_ids)))}
+    for inf_id in model["hwids"]:
+        low = inf_id.lower()
+        if low in dev_hw:
+            consider(RANK_HW_HW + dev_hw[low], RANK_HW_HW, inf_id, device.hwids[dev_hw[low]])
+        if low in dev_cp:
+            consider(RANK_CP_HW + dev_cp[low], RANK_CP_HW, inf_id, device.compat_ids[dev_cp[low]])
+    for k, inf_id in enumerate(model["compat_ids"]):
+        low = inf_id.lower()
+        if low in dev_hw:
+            consider(RANK_HW_CP + dev_hw[low], RANK_HW_CP, inf_id, device.hwids[dev_hw[low]])
+        if low in dev_cp:
+            consider(RANK_CP_CP + dev_cp[low] + k * 0x100, RANK_CP_CP, inf_id, device.compat_ids[dev_cp[low]])
+    return best
 
 
 def match_device(device, inf, target=TARGET_WIN10_AMD64):
     """Every model line of `inf` that matches `device`, each with its rank (lower is better) and why."""
     hits = []
     for m in inf.models(target):
-        best = None
-        for kind_base, inf_ids in ((0, m["hwids"]), (0x1000, m["compat_ids"])):
-            for inf_id in inf_ids:
-                low = inf_id.lower()
-                for dev_base, dev_ids in ((0, device.hwids), (0x2000, device.compat_ids)):
-                    for i, dev_id in enumerate(dev_ids):
-                        if dev_id.lower() == low:
-                            score = kind_base + dev_base + i
-                            if best is None or score < best[0]:
-                                best = (score, inf_id, dev_id, i, kind_base, dev_base)
-        if best:
-            inst = inf.install(m["install"], target)
-            fs = inst["feature_score"] if inst["feature_score"] is not None else FEATURE_SCORE_DEFAULT
-            rank = SIGNATURE_SCORE_UNVERIFIED | (fs << 16) | best[0]
-            hits.append({"rank": rank, "identifier_score": best[0], "feature_score": fs, "inf_id": best[1], "device_id": best[2],
-                         "match": {0: "hardware-id/hardware-id", 0x1000: "device-hardware-id/inf-compatible-id",
-                                   0x2000: "device-compatible-id/inf-hardware-id", 0x3000: "compatible-id/compatible-id"}[best[4] + best[5]],
-                         "model": m, "install": inst, "inf": inf.name, "driverver": inf.version["DriverVer"]})
+        best = identifier_score(device, m)
+        if not best:
+            continue
+        inst = inf.install(m["install"], target)
+        fs = inst["feature_score"] if inst["feature_score"] is not None else FEATURE_SCORE_DEFAULT
+        decorated = bool(inst["section"]) and inst["section"].lower() != m["install"].lower()
+        sig = SIGNATURE_UNSIGNED_NT if decorated else SIGNATURE_UNSIGNED
+        rank = (sig << 24) | ((fs & 0xFF) << 16) | best[0]
+        hits.append({"rank": rank, "signature_score": sig, "identifier_score": best[0], "feature_score": fs,
+                     "inf_id": best[2], "device_id": best[3], "match": MATCH_KINDS[best[1]], "model": m, "install": inst,
+                     "inf": inf.name, "driverver": inst["driverver"] or inf.version["DriverVer"]})
     hits.sort(key=lambda h: (h["rank"], h["model"]["lineno"]))
     return hits
 
@@ -777,7 +827,7 @@ def resolve_dirid(spec, package_dir="C:\\DRIVERS\\<package>"):
 # -------------------------------------------------------------------------------------------------------------- CLI
 
 def _target_from_args(args):
-    return Target(arch=args.arch, major=args.os_major, minor=args.os_minor, build=args.os_build)
+    return Target(arch=args.arch, major=args.os_major, minor=args.os_minor, build=args.os_build, legacy=args.legacy)
 
 
 def main(argv=None):
@@ -785,7 +835,8 @@ def main(argv=None):
     ap.add_argument("--arch", default="amd64", choices=_ARCHES)
     ap.add_argument("--os-major", type=int, default=10)
     ap.add_argument("--os-minor", type=int, default=0)
-    ap.add_argument("--os-build", type=int, default=19041)
+    ap.add_argument("--os-build", type=int, default=Target.build)
+    ap.add_argument("--legacy", action="store_true", help="accept arch-less / undecorated Models sections (ReactOS setupapi behaviour)")
     ap.add_argument("--locale", default="0409")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("dump", help="parse an INF and print its version, models, install actions and services as JSON")

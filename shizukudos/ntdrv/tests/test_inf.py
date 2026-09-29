@@ -17,7 +17,8 @@ sys.path.insert(0, str(HERE.parent))
 import inf as I  # noqa: E402
 
 FIX = HERE / "inf"
-T10 = I.Target()                                              # amd64, 10.0 build 19041, workstation
+T10 = I.Target(build=19041)                                   # amd64, 10.0 build 19041 (2004), workstation
+TSHZ = I.Target()                                             # the ShizukuDOS 10 profile: 10.0.22631
 T61 = I.Target(major=6, minor=1, build=7601)
 T63 = I.Target(major=6, minor=3, build=9600)
 T10_1607 = I.Target(build=14393)
@@ -92,13 +93,17 @@ def test_decoration_selection():
     def chosen(target):
         return sorted(m["install"] for m in inf.models(target))
 
-    assert chosen(T10) == ["I_19041", "I_plain"]                              # build form is the most specific applicable
-    assert chosen(T10_1607) == ["I_100", "I_plain"]                           # 14393 < 16299... but the 19041 form does not apply
-    assert chosen(T63) == ["I_63", "I_plain"]
-    assert chosen(T61) == ["I_61", "I_plain"]                                 # NT.6.1 (any arch) applies to amd64 6.1
-    assert chosen(I.Target(major=6, minor=0, build=6002)) == ["I_any", "I_plain"]
-    assert chosen(T10_SRV) == ["I_19041", "I_plain"]                          # see test_server_product_type_precedence
-    assert chosen(TX86) == ["I_61", "I_plain", "I_x86"]                       # NT.6.1 has no architecture: applies to x86 too
+    # amd64: only decorations naming the architecture apply ("Architecture must be specified ... for non-x86"), and
+    # the undecorated [Plain] models section is not used; the highest applicable version wins
+    assert chosen(T10) == ["I_19041"]                                         # build form: highest applicable version
+    assert chosen(TSHZ) == ["I_19041"]                                        # 22631 > 19041: the build form still applies
+    assert chosen(T10_1607) == ["I_100"]                                      # 14393 < 19041: that form does not apply
+    assert chosen(T63) == ["I_63"]
+    assert chosen(T61) == ["I_any"]                                           # NT.6.1 has no architecture: not for amd64
+    assert chosen(I.Target(major=6, minor=0, build=6002)) == ["I_any"]
+    assert chosen(T10_SRV) == ["I_19041"]                                     # see test_server_product_type_precedence
+    assert chosen(TX86) == ["I_61", "I_plain", "I_x86"]                       # x86: arch-less and undecorated forms apply
+    assert any("not used on amd64" in w for w in inf.warnings)
 
 
 def test_server_product_type_precedence():
@@ -108,7 +113,7 @@ def test_server_product_type_precedence():
     # neither ordering explicitly; we pick the higher build first (a later OS release is a more specific statement).
     inf = load("synth_versions.inf")
     got = sorted(m["install"] for m in inf.models(I.Target(product_type=3)))
-    assert got == ["I_server", "I_plain"] or got == ["I_19041", "I_plain"], got
+    assert got == ["I_server"] or got == ["I_19041"], got
 
 
 def test_nic_models_amd64():
@@ -252,9 +257,10 @@ def test_feature_score_in_rank():
     d2 = I.Device.pci(0x1AF4, 0x7001, subsys=0x00011AF4, rev=0x01, class_code=0x020000)
     h = I.match_device(d2, inf, T10)
     # The documented purpose of FeatureScore: a package with a lower feature score outranks a better identifier match.
-    # SN2's compatible ID PCI\CC_0200 matches device 7001 only at compatible/compatible (0x3006), yet its 0x30 beats the
+    # SN2's compatible ID PCI\CC_0200 (second compatible ID of its Models entry: k = 1) matches the device's compatible
+    # ID PCI\CC_0200 (j = 6) only at compatible/compatible: 0x3000 + 6 + 1*0x100 = 0x3106, yet its 0x30 beats the
     # exact SUBSYS+REV hardware-ID match (0x0000) of SN1, whose feature score is the default 0xFF.
-    assert h[0]["model"]["install"] == "SN2.ndi" and h[0]["identifier_score"] == 0x3006 and h[0]["feature_score"] == 0x30
+    assert h[0]["model"]["install"] == "SN2.ndi" and h[0]["identifier_score"] == 0x3106 and h[0]["feature_score"] == 0x30
     assert h[1]["model"]["install"] == "SN1.ndi" and h[1]["identifier_score"] == 0 and h[1]["feature_score"] == I.FEATURE_SCORE_DEFAULT
     assert [x["identifier_score"] for x in h[1:]] == [0, 1, 3]                 # then the three SN1 lines, most specific first
     # SN3 lists 7002 as a *compatible* ID: for device 7002 that is device-hw-id/inf-compatible-id (0x1000 + index)
@@ -262,6 +268,53 @@ def test_feature_score_in_rank():
     kinds = {x["model"]["install"]: x["match"] for x in h}
     assert kinds["SN2.ndi"] == "hardware-id/hardware-id" and kinds["SN3.ndi"] == "device-hardware-id/inf-compatible-id"
     assert h[0]["model"]["install"] == "SN2.ndi"
+
+
+def test_identifier_score_compat_compat_k_term():
+    # "Identifier Score": compatible/compatible = 0x3000 + j + k*0x100 (k: position in the INF Models entry's
+    # compatible IDs). Same device compatible ID (PCI\CC_0200, j = 6) listed first (k=0) or third (k=2).
+    inf = I.Inf('[Version]\nSignature="$WINDOWS NT$"\n[Manufacturer]\nM=M,NTamd64\n[M.NTamd64]\n'
+                'A=IA, ROOT\\NOMATCH1, PCI\\CC_0200\nB=IB, ROOT\\NOMATCH2, PCI\\X, PCI\\Y, PCI\\CC_0200\n'
+                '[IA.NT]\n[IB.NT]\n')
+    dev = I.Device.pci(0x8086, 0x1533, subsys=0x00008086, rev=3, class_code=0x020000)
+    hits = I.match_device(dev, inf, T10)
+    assert [(h["model"]["install"], h["identifier_score"]) for h in hits] == [("IA", 0x3006), ("IB", 0x3206)]
+    # device hardware ID vs INF compatible ID: 0x1000 + device position, no k term
+    inf2 = I.Inf('[Manufacturer]\nM=M,NTamd64\n[M.NTamd64]\nC=IC, ROOT\\NOMATCH, PCI\\X, PCI\\VEN_8086&DEV_1533\n[IC.NT]\n')
+    h = I.match_device(dev, inf2, T10)[0]
+    assert h["identifier_score"] == 0x1003 and h["match"] == "device-hardware-id/inf-compatible-id"
+    # device compatible ID vs INF hardware ID: 0x2000 + device compatible position
+    inf3 = I.Inf('[Manufacturer]\nM=M,NTamd64\n[M.NTamd64]\nD=ID, PCI\\VEN_8086&CC_0200\n[ID.NT]\n')
+    h = I.match_device(dev, inf3, T10)[0]
+    assert h["identifier_score"] == 0x2003 and h["match"] == "device-compatible-id/inf-hardware-id"
+
+
+def test_pcie_device_type_ids():
+    d = I.Device.pci(0x8086, 0x15B8, subsys=0x06DB1028, rev=0x10, class_code=0x020000, dt=0)
+    assert d.compat_ids[-4:] == ["PCI\\CC_020000&DT_0000", "PCI\\CC_020000", "PCI\\CC_0200&DT_0000", "PCI\\CC_0200"]
+    assert d.hwids[0] == "PCI\\VEN_8086&DEV_15B8&SUBSYS_06DB1028&REV_10"
+
+
+def test_signature_score_classes_and_rank_layout():
+    dev = I.Device.pci(0x1AF4, 0x7001, subsys=0x00011AF4, rev=0x01, class_code=0x020000)
+    h = I.match_device(dev, load("synth_nic.inf"), T10)
+    sn1 = [x for x in h if x["model"]["install"] == "SN1.ndi"][0]
+    assert sn1["signature_score"] == I.SIGNATURE_UNSIGNED_NT and sn1["rank"] == 0x80FF0000     # 0xSSGGTHHH
+    kdev = I.Device.pci(0x1AF4, 0x1052)
+    k = I.match_device(kdev, load("synth_kmdf.inf"), T10)[0]
+    assert k["install"]["section"] == "SynthKmdf_Device" and k["signature_score"] == I.SIGNATURE_UNSIGNED
+    assert k["rank"] == (0xC0 << 24) | (0x40 << 16) | 0x0000                   # FeatureScore 0x40, VEN&DEV is hw ID 0
+    k3 = I.match_device(I.Device.pci(0x1AF4, 0x1052, subsys=0x11001AF4, rev=1), load("synth_kmdf.inf"), T10)[0]
+    assert k3["identifier_score"] == 3                                          # after SUBSYS&REV, SUBSYS, REV forms
+
+
+def test_driverver_tiebreak_date_then_version():
+    base = '[Version]\nSignature="$WINDOWS NT$"\nDriverVer=%s\n[Manufacturer]\nM=M,NTamd64\n[M.NTamd64]\nX=I%s, PCI\\VEN_1AF4&DEV_7002\n[I%s.NT]\n'
+    a = I.Inf(base % ("06/15/2023,2.0.0.0", "a", "a"), path="a.inf")
+    b = I.Inf(base % ("06/15/2023,2.0.10.0", "b", "b"), path="b.inf")
+    c = I.Inf(base % ("01/01/2024,1.0.0.0", "c", "c"), path="c.inf")
+    dev = I.Device.pci(0x1AF4, 0x7002)
+    assert [h["inf"] for h in I.rank_candidates(dev, [a, b, c], T10)] == ["c.inf", "b.inf", "a.inf"]
 
 
 def test_summary_json_roundtrip():
@@ -288,19 +341,22 @@ def check_corpus():
     if not paths:
         print("corpus: build/upstream not fetched (run shizukudos/ntdrv/corpus/fetch.py); skipped")
         return 0
-    n_models = n_svc = 0
+    n_models = n_legacy = n_svc = 0
     failed = 0
+    legacy = I.Target(legacy=True)
     for p in paths:
         try:
             inf = I.Inf.load(p)
-            ms = inf.models(T10)
+            ms = inf.models(TSHZ)
             n_models += len(ms)
-            for m in ms:
-                n_svc += len(inf.install(m["install"], T10)["services"])
+            n_legacy += len(inf.models(legacy))
+            for m in inf.models(legacy):
+                n_svc += len(inf.install(m["install"], legacy)["services"])
         except Exception as e:                                                # noqa: BLE001
             failed += 1
             print(f"FAIL: {p}: {e}")
-    print(f"corpus: {len(paths)} INF files parsed, {failed} failed, {n_models} amd64 Win10 model lines, {n_svc} services")
+    print(f"corpus: {len(paths)} INF files parsed, {failed} failed; {n_models} model lines apply to amd64 under Windows "
+          f"rules, {n_legacy} with the ReactOS-style undecorated fallback ({n_svc} services)")
     return failed
 
 
