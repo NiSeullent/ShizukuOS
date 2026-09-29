@@ -62,6 +62,11 @@ NTSTATUS k32_open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG
 #define OPT_DELETE_ON_CLOSE 0x1000
 #define ATTR_DEVICE 0x40
 size_t k32_wlen(const WCHAR *s);
+/* CloseHandle hooks: kernel32 state kept next to a kernel handle (toolhelp snapshots, power requests). */
+void k32_snapshot_closing(HANDLE h);
+void k32_power_request_closing(HANDLE h);
+/* Console state (k32_console.c): whether the process is attached to the console (FreeConsole / AllocConsole / AttachConsole). */
+int k32_console_attached(void);
 
 /* UTF-8 <-> UTF-16 helpers (k32_file.c). n < 0 means NUL-terminated (the terminator is converted too). Return 0 when the
  * output buffer is too small. */

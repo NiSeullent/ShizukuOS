@@ -52,12 +52,43 @@ typedef struct heap {
     seg_t *segments;
     uint64_t allocated, count;
     large_t *large;                        /* dedicated reservations of large blocks */
+    volatile DWORD owner;                  /* thread id holding `lock` (the lock is recursive, like the NT heap lock) */
+    uint32_t recursion;
 } heap_t;
 
 static heap_t *g_process_heap;
 
-static void heap_lock(heap_t *h) { while (__sync_lock_test_and_set(&h->lock, 1)) NtYieldExecution(); }
-static void heap_unlock(heap_t *h) { __sync_lock_release(&h->lock); }
+/* Every heap of the process (RtlGetProcessHeaps); slot 0 is the process heap. */
+#define MAX_HEAPS 64
+static heap_t *g_heaps[MAX_HEAPS];
+static volatile LONG g_heaps_lock;
+/* HeapEnableTerminationOnCorruption: once set (it cannot be cleared), a corrupt heap or a pointer that is not a live block of
+ * the heap it is handed to ends the process with STATUS_HEAP_CORRUPTION instead of failing the call. */
+static volatile LONG g_terminate_on_corruption;
+#define STATUS_HEAP_CORRUPTION_ ((NTSTATUS)0xC0000374)
+#ifndef STATUS_NO_MORE_ENTRIES
+#define STATUS_NO_MORE_ENTRIES ((NTSTATUS)0x8000001A)
+#endif
+
+static void heap_lock(heap_t *h)
+{
+    const DWORD me = shz_tid();
+    if (h->owner == me) { ++h->recursion; return; }
+    while (__sync_lock_test_and_set(&h->lock, 1)) NtYieldExecution();
+    h->owner = me;
+    h->recursion = 1;
+}
+static void heap_unlock(heap_t *h)
+{
+    if (--h->recursion) return;
+    h->owner = 0;
+    __sync_lock_release(&h->lock);
+}
+
+static void heap_corrupt(void)
+{
+    if (g_terminate_on_corruption) NtTerminateProcess(CURRENT_PROCESS, STATUS_HEAP_CORRUPTION_);
+}
 
 static blk_t *next_phys(seg_t *s, blk_t *b)
 {
@@ -92,11 +123,21 @@ PVOID NTAPI RtlCreateHeap(ULONG flags, PVOID base, SIZE_T reserve, SIZE_T commit
     PVOID mem = 0;
     SIZE_T size = 4096;
     heap_t *h;
+    unsigned i;
     (void)base; (void)reserve; (void)commit; (void)lock; (void)params;
     if (NtAllocateVirtualMemory(CURRENT_PROCESS, &mem, 0, &size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)) return 0;
     h = mem;
     h->magic = HEAP_MAGIC;
     h->flags = flags;
+    while (__sync_lock_test_and_set(&g_heaps_lock, 1)) NtYieldExecution();
+    for (i = 0; i < MAX_HEAPS && g_heaps[i]; ++i) { }
+    if (i < MAX_HEAPS) g_heaps[i] = h;
+    __sync_lock_release(&g_heaps_lock);
+    if (i == MAX_HEAPS) {                                 /* the table is full: refuse rather than hand out an unlisted heap */
+        SIZE_T zero = 0;
+        NtFreeVirtualMemory(CURRENT_PROCESS, &mem, &zero, MEM_RELEASE);
+        return 0;
+    }
     return h;
 }
 
@@ -138,7 +179,7 @@ PVOID NTAPI RtlAllocateHeap(PVOID hp, ULONG flags, SIZE_T size)
         for (s = h->segments; s; s = s->next) {
             blk_t *b;
             for (b = first_block(s); b; b = next_phys(s, b)) {
-                if (b->magic != BLOCK_MAGIC) { heap_unlock(h); return 0; }      /* corruption: refuse to continue */
+                if (b->magic != BLOCK_MAGIC) { heap_unlock(h); heap_corrupt(); return 0; }      /* corruption: refuse to continue */
                 if (b->state == BLOCK_FREE && b->size >= need) {
                     if (b->size >= need + sizeof(blk_t) + 32) {
                         blk_t *rest = (blk_t *)((uint8_t *)(b + 1) + need);
@@ -214,7 +255,7 @@ BOOLEAN NTAPI RtlFreeHeap(PVOID hp, ULONG flags, PVOID p)
     if (!h) return FALSE;
     heap_lock(h);
     b = live_block(h, p, &s, &l);
-    if (!b) { heap_unlock(h); return FALSE; }                                        /* foreign pointer or double free */
+    if (!b) { heap_unlock(h); heap_corrupt(); return FALSE; }                        /* foreign pointer or double free */
     if (l) {
         PVOID base = l;
         SIZE_T zero = 0;
@@ -272,7 +313,7 @@ PVOID NTAPI RtlReAllocateHeap(PVOID hp, ULONG flags, PVOID p, SIZE_T size)
     if (!h) return 0;
     heap_lock(h);
     b = live_block(h, p, 0, 0);
-    if (!b) { heap_unlock(h); return 0; }
+    if (!b) { heap_unlock(h); heap_corrupt(); return 0; }
     old = b->user_size;
     if (size <= b->size) {
         b->user_size = size;
@@ -292,10 +333,190 @@ PVOID NTAPI RtlReAllocateHeap(PVOID hp, ULONG flags, PVOID p, SIZE_T size)
     return n;
 }
 
-BOOLEAN NTAPI RtlDestroyHeap(PVOID hp) { (void)hp; return TRUE; }
-ULONG NTAPI RtlGetProcessHeaps(ULONG n, PVOID *out) { if (n && out) out[0] = g_process_heap; return 1; }
-BOOLEAN NTAPI RtlLockHeap(PVOID hp) { heap_lock(hp); return TRUE; }
-BOOLEAN NTAPI RtlUnlockHeap(PVOID hp) { heap_unlock(hp); return TRUE; }
+/* Returns TRUE when the heap is gone (its segments, large blocks and descriptor are released). The process heap cannot be
+ * destroyed. */
+BOOLEAN NTAPI RtlDestroyHeap(PVOID hp)
+{
+    heap_t *h = valid_heap(hp);
+    seg_t *s, *sn;
+    large_t *l, *ln;
+    PVOID base;
+    SIZE_T zero;
+    unsigned i;
+    if (!h || h == g_process_heap) return FALSE;
+    while (__sync_lock_test_and_set(&g_heaps_lock, 1)) NtYieldExecution();
+    for (i = 0; i < MAX_HEAPS; ++i) if (g_heaps[i] == h) g_heaps[i] = 0;
+    __sync_lock_release(&g_heaps_lock);
+    h->magic = 0;
+    for (s = h->segments; s; s = sn) { sn = s->next; base = s; zero = 0; NtFreeVirtualMemory(CURRENT_PROCESS, &base, &zero, MEM_RELEASE); }
+    for (l = h->large; l; l = ln) { ln = l->next; base = l; zero = 0; NtFreeVirtualMemory(CURRENT_PROCESS, &base, &zero, MEM_RELEASE); }
+    base = h; zero = 0;
+    NtFreeVirtualMemory(CURRENT_PROCESS, &base, &zero, MEM_RELEASE);
+    return TRUE;
+}
+
+/* Number of heaps of the process; the first min(n, count) handles are stored (the process heap first). */
+ULONG NTAPI RtlGetProcessHeaps(ULONG n, PVOID *out)
+{
+    ULONG count = 0;
+    unsigned i;
+    while (__sync_lock_test_and_set(&g_heaps_lock, 1)) NtYieldExecution();
+    for (i = 0; i < MAX_HEAPS; ++i)
+        if (g_heaps[i]) { if (out && count < n) out[count] = g_heaps[i]; ++count; }
+    __sync_lock_release(&g_heaps_lock);
+    return count;
+}
+
+BOOLEAN NTAPI RtlLockHeap(PVOID hp) { heap_t *h = valid_heap(hp); if (!h) return FALSE; heap_lock(h); return TRUE; }
+BOOLEAN NTAPI RtlUnlockHeap(PVOID hp)
+{
+    heap_t *h = valid_heap(hp);
+    if (!h || h->owner != shz_tid()) return FALSE;         /* not locked by this thread */
+    heap_unlock(h);
+    return TRUE;
+}
+
+/* Heap lock held: releases segments that hold nothing (one free block spanning the segment) except the last one, and returns
+ * the largest free block that remains. */
+static SIZE_T compact_locked(heap_t *h)
+{
+    seg_t **pp = &h->segments, *s;
+    SIZE_T largest = 0;
+    while ((s = *pp) != 0) {
+        blk_t *b = first_block(s);
+        if (b->state == BLOCK_FREE && !next_phys(s, b) && (s != h->segments || s->next)) {
+            PVOID base = s;
+            SIZE_T zero = 0;
+            *pp = s->next;
+            NtFreeVirtualMemory(CURRENT_PROCESS, &base, &zero, MEM_RELEASE);
+            continue;
+        }
+        for (; b; b = next_phys(s, b))
+            if (b->state == BLOCK_FREE && b->size > largest) largest = b->size;
+        pp = &s->next;
+    }
+    return largest;
+}
+
+SIZE_T NTAPI RtlCompactHeap(PVOID hp, ULONG flags)
+{
+    heap_t *h = valid_heap(hp);
+    SIZE_T n;
+    (void)flags;
+    if (!h) return 0;
+    heap_lock(h);
+    n = compact_locked(h);
+    heap_unlock(h);
+    return n;
+}
+
+/* RTL_HEAP_WALK_ENTRY (x64 layout). Flags: RTL_HEAP_BUSY 1, RTL_HEAP_SEGMENT 2. */
+typedef struct {
+    PVOID DataAddress;
+    SIZE_T DataSize;
+    UCHAR OverheadBytes, SegmentIndex;
+    USHORT Flags;
+    union {
+        struct { SIZE_T Settable; USHORT TagIndex, AllocatorBackTraceIndex; ULONG Reserved[2]; } Block;
+        struct { ULONG CommittedSize, UnCommittedSize; PVOID FirstEntry, LastEntry; } Segment;
+    } u;
+} SHZ_HEAP_WALK_ENTRY;
+
+static void walk_segment(SHZ_HEAP_WALK_ENTRY *e, seg_t *s, unsigned index)
+{
+    blk_t *b = first_block(s), *last = b, *n;
+    while ((n = next_phys(s, last)) != 0) last = n;
+    memset(e, 0, sizeof *e);
+    e->DataAddress = s;
+    e->DataSize = s->size;
+    e->SegmentIndex = (UCHAR)index;
+    e->Flags = 2;
+    e->u.Segment.CommittedSize = (ULONG)s->size;          /* segments are committed whole */
+    e->u.Segment.FirstEntry = b + 1;
+    e->u.Segment.LastEntry = (uint8_t *)(last + 1) + last->size;
+}
+
+static void walk_block(SHZ_HEAP_WALK_ENTRY *e, blk_t *b, unsigned index)
+{
+    memset(e, 0, sizeof *e);
+    e->DataAddress = b + 1;
+    e->DataSize = b->state == BLOCK_FREE ? b->size : b->user_size;
+    e->OverheadBytes = (UCHAR)(sizeof(blk_t) + (b->state == BLOCK_FREE ? 0 : b->size - b->user_size));
+    e->SegmentIndex = (UCHAR)index;
+    e->Flags = b->state == BLOCK_FREE ? 0 : 1;
+}
+
+/* Enumerates the heap: every segment (Flags RTL_HEAP_SEGMENT) followed by its blocks in address order, then the large blocks
+ * (each in its own reservation). Start with DataAddress == NULL; STATUS_NO_MORE_ENTRIES after the last entry. */
+NTSTATUS NTAPI RtlWalkHeap(PVOID hp, PVOID entry)
+{
+    heap_t *h = valid_heap(hp);
+    SHZ_HEAP_WALK_ENTRY *e = entry;
+    seg_t *s;
+    large_t *l;
+    unsigned index = 0;
+    NTSTATUS st = STATUS_NO_MORE_ENTRIES;
+    if (!h || !e) return STATUS_INVALID_PARAMETER;
+    heap_lock(h);
+    if (!e->DataAddress) {
+        if (h->segments) { walk_segment(e, h->segments, 0); st = 0; }
+        else if (h->large) { walk_block(e, (blk_t *)(h->large + 1), 0); st = 0; }
+        heap_unlock(h);
+        return st;
+    }
+    for (s = h->segments; s; s = s->next, ++index) {
+        blk_t *b;
+        if (e->DataAddress == (PVOID)s) { walk_block(e, first_block(s), index); heap_unlock(h); return 0; }
+        for (b = first_block(s); b; b = next_phys(s, b)) {
+            if ((PVOID)(b + 1) != e->DataAddress) continue;
+            if ((b = next_phys(s, b)) != 0) walk_block(e, b, index);
+            else if (s->next) walk_segment(e, s->next, index + 1);
+            else if (h->large) walk_block(e, (blk_t *)(h->large + 1), index + 1);
+            else { heap_unlock(h); return STATUS_NO_MORE_ENTRIES; }
+            heap_unlock(h);
+            return 0;
+        }
+    }
+    for (l = h->large; l; l = l->next)
+        if ((PVOID)((blk_t *)(l + 1) + 1) == e->DataAddress) {
+            if (l->next) { walk_block(e, (blk_t *)(l->next + 1), index); st = 0; }
+            heap_unlock(h);
+            return st;
+        }
+    heap_unlock(h);
+    return STATUS_INVALID_PARAMETER;                       /* DataAddress is no entry of this heap (it changed under the walk) */
+}
+
+/* Classes: 0 HeapCompatibilityInformation (ULONG: 0 standard; this allocator is not a low-fragmentation heap, so 2 is refused),
+ * 1 HeapEnableTerminationOnCorruption (process wide, cannot be undone), 3 HeapOptimizeResources ({Version 1, Flags 0}: compacts
+ * every heap of the process). */
+DWORD NTAPI RtlSetHeapInformation(PVOID hp, HEAP_INFORMATION_CLASS cls, PVOID info, SIZE_T len)   /* returns an NTSTATUS (winnt.h type) */
+{
+    unsigned i;
+    switch ((int)cls) {
+    case 0:
+        if (!valid_heap(hp)) return STATUS_INVALID_HANDLE;
+        if (!info || len < sizeof(ULONG)) return STATUS_BUFFER_TOO_SMALL;
+        if (*(ULONG *)info == 0) return 0;
+        return *(ULONG *)info == 2 ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+    case 1:
+        g_terminate_on_corruption = 1;
+        return 0;
+    case 3:
+        if (!info || len != 8) return STATUS_BUFFER_TOO_SMALL;
+        if (((ULONG *)info)[0] != 1 || ((ULONG *)info)[1] != 0) return STATUS_INVALID_PARAMETER;
+        for (i = 0; i < MAX_HEAPS; ++i) {
+            heap_t *h = g_heaps[i];
+            if (!h) continue;
+            heap_lock(h);
+            compact_locked(h);
+            heap_unlock(h);
+        }
+        return 0;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+}
 BOOLEAN NTAPI RtlValidateHeap(PVOID hp, ULONG flags, PVOID p)
 {
     heap_t *h = valid_heap(hp);
@@ -314,6 +535,18 @@ void ShzInitHeap(void)
     g_process_heap = RtlCreateHeap(0, 0, 0, 0, 0, 0);
     if (g_process_heap) PEB_PROCESS_HEAP(shz_peb()) = g_process_heap;
     else NtTerminateProcess(CURRENT_PROCESS, STATUS_NO_MEMORY);
+}
+
+/* ---------------------------------------------------------------- version conditions */
+/* Each VER_* type bit (1 << i) owns the 3-bit condition field at bit 3 * i; when several type bits are passed, the highest one
+ * receives the condition (Windows behaves the same way). kernel32.VerSetConditionMask forwards here. */
+ULONGLONG NTAPI VerSetConditionMask(ULONGLONG mask, DWORD type, BYTE cond)
+{
+    int i;
+    if (!type || !cond) return mask;
+    for (i = 7; i >= 0; --i)
+        if (type & (1u << i)) return mask | ((ULONGLONG)(cond & 7) << (3 * i));
+    return mask;
 }
 
 /* ---------------------------------------------------------------- strings and status */

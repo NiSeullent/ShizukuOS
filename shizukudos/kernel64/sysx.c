@@ -357,6 +357,12 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
             b.min_addr = 0x10000; b.max_addr = 0x7ffffffeffffull; b.affinity = 1; b.nproc = 1;
             return copy_to_user(p, a2, &b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
+        if (a1 == 0x100) {                                  /* Shizuku class: {total, free} pages of the page allocator (GlobalMemoryStatusEx) */
+            uint64_t b[2];
+            if (a3 < sizeof b) return STATUS_INFO_LENGTH_MISMATCH;
+            b[0] = pmm_total_count(); b[1] = pmm_free_count();
+            return copy_to_user(p, a2, b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+        }
         return STATUS_INVALID_INFO_CLASS;
     }
     case SYS_NtContinue: case SYS_NtRaiseException: {
@@ -391,6 +397,10 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (t->alerted) { t->alerted = 0; res = STATUS_ALERTED; } else res = STATUS_TIMEOUT;
         irq_restore(f);
         return res;
+    }
+    case SYS_NtGetContextThread: {                          /* (ThreadHandle, PCONTEXT): sysk32.c */
+        extern int32_t k32_get_context_thread(process_t *p, uint64_t handle, uint64_t context_va);
+        return k32_get_context_thread(p, a1, a2);
     }
     case SYS_NtShzGetTeb: return (int32_t)0;
     default: return num >= 0x50 ? sysext_dispatch(p, r, num, a1, a2, a3, a4) : STATUS_NOT_IMPLEMENTED;

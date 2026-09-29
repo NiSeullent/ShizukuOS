@@ -467,6 +467,12 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     }
+    case 11:                                             /* FileLinkInformation (CreateHardLink) */
+        /* A file of this RAM file system is one directory entry with its own payload (fsnode), so a second name for the same
+         * file cannot exist. The volume does not report FILE_SUPPORTS_HARD_LINKS (sysk32.c FileFsAttributeInformation) and, like
+         * FAT, refuses the request as an invalid device request. */
+        if (!f->node) return STATUS_INVALID_PARAMETER;
+        return (int32_t)0xC0000010;                      /* STATUS_INVALID_DEVICE_REQUEST */
     default: return STATUS_INVALID_INFO_CLASS;
     }
 }

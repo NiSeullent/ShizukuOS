@@ -99,7 +99,8 @@ def build_kernel32(ntdll_names):
     src = sorted((W64 / "kernel32").glob("*.c"))
     names = scan_exports(src, "K32API")
     forwards = [f"{n} = ntdll.{n}" for n in ("RtlCaptureContext", "RtlLookupFunctionEntry", "RtlVirtualUnwind", "RtlUnwindEx",
-                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException", "RtlCaptureStackBackTrace")
+                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException", "RtlCaptureStackBackTrace",
+                                                 "VerSetConditionMask")
                 if n in ntdll_names or n == "RtlCaptureContext"]
     names = [n for n in names if n not in ("RtlUnwindKernel32",)]
     write_def(OUT / "kernel32.def", "kernel32.dll", names, forwards)

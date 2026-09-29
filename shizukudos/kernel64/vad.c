@@ -119,10 +119,15 @@ static int prot_valid(uint32_t prot)
            base == PAGE_EXECUTE_WRITECOPY;
 }
 
+/* sysk32.c: records the working-set / commit peak (the moment before memory goes away); `released` also drops the
+ * VirtualLock locks of the range (its pages are freed). */
+extern void k32_before_unmap(process_t *p, uint64_t start, uint64_t end, int released);
+
 /* Free the physical pages and unmap [start, end). */
 static void unmap_pages(process_t *p, uint64_t start, uint64_t end)
 {
     uint64_t a, pa;
+    k32_before_unmap(p, start, end, 1);
     for (a = start; a < end; a += PAGE_SIZE)
         if (vm_unmap(p->pml4, a, &pa) == 0)
             pmm_free(pa);
@@ -297,6 +302,8 @@ int32_t vad_protect(process_t *p, uint64_t *base, uint64_t *size, uint32_t new_p
         *old_prot = v->prot;
     if (vad_split(p, start) || vad_split(p, end))
         return STATUS_NO_MEMORY;
+    if ((new_prot & 0xff) == PAGE_NOACCESS || (new_prot & 0x100))
+        k32_before_unmap(p, start, end, 0);             /* parked pages leave the working set */
     for (a = start; a < end; a = vad_find(p, a)->end) {
         vad_t *w = vad_find(p, a);
         uint64_t va;

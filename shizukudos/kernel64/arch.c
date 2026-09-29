@@ -105,7 +105,7 @@ void isr_dispatch(struct regs *r)
 #ifdef SHZ_STANDALONE
         standalone_eoi();                   /* PIT IRQ0 through the 8259: acknowledge before any context switch */
 #endif
-        sched_tick();
+        sched_tick_from((r->cs & 3) == 3);  /* CPU-time accounting charges the tick to user or kernel mode */
         return;
     case VEC_DOORBELL: {
         extern void ipc64_doorbell_irq(void);

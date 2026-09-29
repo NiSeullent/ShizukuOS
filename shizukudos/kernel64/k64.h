@@ -78,6 +78,7 @@ void mem_init(const shz_bootinfo_t *bi);
 uint64_t pmm_alloc(void);                       /* zeroed physical page, 0 on exhaustion */
 void pmm_free(uint64_t pa);
 uint64_t pmm_free_count(void);
+uint64_t pmm_total_count(void);                 /* pages the page allocator manages */
 #define PT_P (1ull << 0)
 #define PT_W (1ull << 1)
 #define PT_U (1ull << 2)
@@ -86,6 +87,7 @@ uint64_t pmm_free_count(void);
 #define PT_NX (1ull << 63)
 uint64_t vm_new_space(void);                    /* new PML4 sharing the kernel half */
 void vm_free_space(uint64_t pml4);              /* frees every user page and table */
+uint64_t vm_count_user_pages(uint64_t pml4);    /* present user-accessible pages (the working set) */
 int vm_map(uint64_t pml4, uint64_t va, uint64_t pa, uint64_t flags);
 int vm_unmap(uint64_t pml4, uint64_t va, uint64_t *pa_out);
 int vm_protect(uint64_t pml4, uint64_t va, uint64_t flags);
@@ -127,6 +129,12 @@ struct thread {
     volatile int alerted, alert_wait;           /* NtAlertThreadByThreadId state */
     void *wait_multi;
     int creator_hold;                           /* user thread: its creator may still read `object` (see sched.c reaping) */
+    /* CPU accounting (sched.c): timer ticks charged while this thread was current, split by the mode the tick interrupted,
+     * TSC cycles between being switched in and out, and the tick numbers of creation and exit. */
+    uint64_t user_ticks, kernel_ticks, cycles, tsc_in, create_tick, exit_tick;
+    int boost_disabled;                         /* SetThreadPriorityBoost setting (the scheduler never boosts) */
+    uint32_t mem_priority;                      /* SetThreadInformation(ThreadMemoryPriority) setting, 1..5 */
+    uint32_t power_control, power_state;        /* SetThreadInformation(ThreadPowerThrottling) setting (no scheduler effect) */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
@@ -136,6 +144,9 @@ void thread_discard(thread_t *t);                                               
 /* Exited user threads are reclaimed automatically (next thread creation); these two cover the creator's side: */
 void thread_creator_release(thread_t *t);       /* the creator no longer reads t (t->object): it may be reclaimed once exited */
 void thread_reap_process(const void *proc);     /* reclaim every exited thread of a finished process now (proc_wait) */
+thread_t *thread_slot(unsigned i);              /* i-th scheduler slot (any state) or 0 past the end: read with interrupts off */
+uint64_t thread_cycles_now(thread_t *t);        /* t->cycles including the running slice of the current thread */
+void sched_tick_from(int user_mode);            /* timer tick; user_mode: the tick interrupted ring 3 */
 thread_t *thread_current(void);
 thread_t *thread_find_tid(void *process, uint64_t tid);
 void thread_yield(void);

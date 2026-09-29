@@ -1,0 +1,528 @@
+/* SPDX-License-Identifier: GPL-2.0-only
+ * Kernel64 support for kernel32 process, thread and memory information (system calls NtShzQueryK32 0x93 and NtShzSetK32 0x94,
+ * routed through sysk32.c, plus NtGetContextThread). Everything reported here is measured by the kernel:
+ *
+ *  - CPU time: sched.c charges every 1 ms timer tick to the thread it interrupted, as user time when the tick came from ring 3
+ *    and kernel time otherwise; cycles are TSC deltas between switching a thread in and out. A process adds up its live threads
+ *    and the totals of the threads that already exited (thread_account_exit).
+ *  - Working set: the present user pages of the address space (page-table walk). Private bytes: committed non-image memory of
+ *    the descriptors. Both peaks are exact: a working set / commit only shrinks when memory is unmapped, and the value is
+ *    measured right before every unmap (k32_before_unmap) and at every query, so no maximum is missed.
+ *  - VirtualLock: pages are made present and recorded per process; freeing the memory unlocks them. Nothing is ever paged out
+ *    by Kernel64, so a locked page stays resident as documented.
+ *  - Process and module lists come from the process table and the loader's module list.
+ */
+#include "fs.h"
+
+extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
+extern int64_t filetime_now(void);
+extern int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t *size, const char **name, const char **path);
+
+#ifndef STATUS_NOT_LOCKED
+#define STATUS_NOT_LOCKED ((int32_t)0xC000002A)
+#endif
+#ifndef STATUS_WORKING_SET_QUOTA
+#define STATUS_WORKING_SET_QUOTA ((int32_t)0xC00000A1)
+#endif
+
+#define TICK_100NS ((uint64_t)TICK_US * 10u)
+
+/* query classes (NtShzQueryK32) and set classes (NtShzSetK32); the same numbers are in win64/include/nt.h */
+enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32Q_PROCESS_LIST = 4, K32Q_MODULE_LIST = 5,
+       K32Q_SYSTEM_PERF = 7, K32Q_PROCESS_MEMORY = 8, K32Q_WORKING_SET_EX = 9, K32Q_IMAGE_PATH = 10, K32Q_FIRMWARE = 11,
+       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13 };
+enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
+       K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10 };
+
+static uint64_t tick_to_filetime(uint64_t tick)
+{
+    const uint64_t now = ticks_now();
+    return (uint64_t)filetime_now() - (now > tick ? now - tick : 0) * TICK_100NS;
+}
+
+static process_t *proc_of_handle(process_t *cur, uint64_t h)
+{
+    kobject_t *o;
+    process_t *t;
+    if (h == CURRENT_PROCESS_HANDLE) return cur;
+    o = handle_lookup(cur, h, OB_PROCESS);
+    if (!o) return 0;
+    t = o->u.proc.p;
+    return t && t->used && t->object == o ? t : 0;            /* the slot of a reaped process may already be reused */
+}
+
+/* ---------------------------------------------------------------- CPU accounting */
+void thread_account_exit(thread_t *t)
+{
+    process_t *p = t->proc;
+    if (!p) return;
+    p->dead_user_ticks += t->user_ticks;
+    p->dead_kernel_ticks += t->kernel_ticks;
+    p->dead_cycles += t->cycles;
+}
+
+struct times { uint64_t create_ft, exit_ft, kernel_100ns, user_100ns, cycles; };
+
+static int32_t thread_times(process_t *cur, uint64_t h, struct times *out, uint32_t *settings)
+{
+    thread_t *t = 0;
+    kobject_t *o = 0;
+    uint64_t f, create, exit_tick = 0, ut, kt, cyc;
+    if (h == CURRENT_THREAD_HANDLE) t = thread_current();
+    else if (!(o = handle_lookup(cur, h, OB_THREAD))) return STATUS_INVALID_HANDLE;
+    f = irq_save();                                             /* an exited thread may be reclaimed at any preemption */
+    if (o) t = o->u.thr.t;
+    if (t) {
+        create = t->create_tick; ut = t->user_ticks; kt = t->kernel_ticks; cyc = thread_cycles_now(t);
+        if (t->state == TS_ZOMBIE) exit_tick = t->exit_tick;
+        if (settings) { settings[0] = (uint32_t)t->boost_disabled; settings[1] = t->mem_priority; settings[2] = t->power_control;
+                        settings[3] = t->power_state; }
+    } else {
+        create = o->u.thr.create_tick; ut = o->u.thr.user_ticks; kt = o->u.thr.kernel_ticks; cyc = o->u.thr.cycles;
+        exit_tick = o->u.thr.exit_tick;
+        if (settings) { settings[0] = 0; settings[1] = 5; settings[2] = 0; settings[3] = 0; }
+    }
+    irq_restore(f);
+    if (out) {
+        out->create_ft = tick_to_filetime(create);
+        out->exit_ft = exit_tick ? tick_to_filetime(exit_tick) : 0;
+        out->kernel_100ns = kt * TICK_100NS;
+        out->user_100ns = ut * TICK_100NS;
+        out->cycles = cyc;
+    }
+    return STATUS_SUCCESS;
+}
+
+static unsigned live_threads(process_t *p, uint64_t *ut, uint64_t *kt, uint64_t *cyc)
+{
+    unsigned i, n = 0;
+    thread_t *t;
+    const uint64_t f = irq_save();
+    for (i = 0; (t = thread_slot(i)) != 0; ++i) {
+        if (t->state == TS_FREE || t->state == TS_ZOMBIE || (p && t->proc != p)) continue;
+        ++n;
+        if (ut) { *ut += t->user_ticks; *kt += t->kernel_ticks; *cyc += thread_cycles_now(t); }
+    }
+    irq_restore(f);
+    return n;
+}
+
+/* ---------------------------------------------------------------- memory statistics */
+static uint64_t private_commit(process_t *p)
+{
+    uint64_t n = 0;
+    unsigned i;
+    for (i = 0; i < p->vads.count; ++i)
+        if (p->vads.v[i].state == VAD_COMMITTED && p->vads.v[i].kind != VK_IMAGE) n += p->vads.v[i].end - p->vads.v[i].start;
+    return n;
+}
+
+static uint64_t all_commit(process_t *p)
+{
+    uint64_t n = 0;
+    unsigned i;
+    for (i = 0; i < p->vads.count; ++i)
+        if (p->vads.v[i].state == VAD_COMMITTED) n += p->vads.v[i].end - p->vads.v[i].start;
+    return n;
+}
+
+static uint64_t g_peak_system_commit;
+
+static uint64_t system_commit(void)
+{
+    uint64_t n = 0;
+    unsigned i;
+    process_t *q;
+    for (i = 1; (q = process_slot(i)) != 0; ++i)
+        if (q->used && q->vads.v) n += all_commit(q);
+    return n;
+}
+
+static void sample_peaks(process_t *p)
+{
+    const uint64_t ws = vm_count_user_pages(p->pml4), pc = private_commit(p), sc = system_commit();
+    if (ws > p->peak_ws_pages) p->peak_ws_pages = ws;
+    if (pc > p->peak_commit) p->peak_commit = pc;
+    if (sc > g_peak_system_commit) g_peak_system_commit = sc;
+}
+
+/* VirtualLock records: one entry per locked page. */
+#define MAX_VLOCKS 2048
+static struct { const process_t *p; int pid; uint64_t page; } vlocks[MAX_VLOCKS];        /* p == 0: free */
+
+static int vlock_find(const process_t *p, uint64_t page)
+{
+    int i;
+    for (i = 0; i < MAX_VLOCKS; ++i)
+        if (vlocks[i].p == p && vlocks[i].pid == p->pid && vlocks[i].page == page) return i;
+    return -1;
+}
+
+static void vlocks_drop(const process_t *p, uint64_t start, uint64_t end)
+{
+    int i;
+    for (i = 0; i < MAX_VLOCKS; ++i)
+        if (vlocks[i].p == p && (vlocks[i].pid != p->pid || (vlocks[i].page >= start && vlocks[i].page < end))) vlocks[i].p = 0;
+}
+
+void k32_before_unmap(process_t *p, uint64_t start, uint64_t end, int released)
+{
+    sample_peaks(p);
+    if (released) vlocks_drop(p, start, end);
+}
+
+static int32_t range_committed(process_t *p, uint64_t start, uint64_t end, int need_access)
+{
+    uint64_t a = start;
+    while (a < end) {
+        vad_t *v = vad_find(p, a);
+        if (!v || v->state != VAD_COMMITTED) return STATUS_INVALID_PARAMETER;
+        if (need_access && ((v->prot & 0xff) == PAGE_NOACCESS || (v->prot & 0x100))) return STATUS_ACCESS_VIOLATION;
+        a = v->end;
+    }
+    return STATUS_SUCCESS;
+}
+
+static int32_t mem_op(process_t *p, uint32_t cls, uint64_t base, uint64_t size)
+{
+    const uint64_t start = base & ~(PAGE_SIZE - 1), end = (base + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    uint64_t a;
+    int32_t st;
+    if (!size || end <= start || start < USER_MIN || end > USER_TOP) return STATUS_INVALID_PARAMETER;
+    switch (cls) {
+    case K32S_DISCARD:                                          /* contents become undefined: the pages go, the commitment stays */
+        st = range_committed(p, start, end, 0);
+        if (st) return st;
+        sample_peaks(p);
+        vlocks_drop(p, start, end);
+        for (a = start; a < end; a += PAGE_SIZE) {
+            uint64_t pa;
+            if (vm_unmap(p->pml4, a, &pa) == 0) pmm_free(pa);
+        }
+        return STATUS_SUCCESS;
+    case K32S_PREFETCH:                                         /* bring committed, accessible pages in; skip everything else */
+        for (a = start; a < end; a += PAGE_SIZE) {
+            vad_t *v = vad_find(p, a);
+            if (v && v->state == VAD_COMMITTED && (v->prot & 0xff) != PAGE_NOACCESS && !(v->prot & 0x100))
+                user_fault_in(p, a, 0, 0);
+        }
+        return STATUS_SUCCESS;
+    case K32S_LOCK: {
+        unsigned need = 0, free_slots = 0;
+        int i;
+        st = range_committed(p, start, end, 1);
+        if (st) return st;
+        for (a = start; a < end; a += PAGE_SIZE) if (vlock_find(p, a) < 0) ++need;
+        for (i = 0; i < MAX_VLOCKS; ++i) if (!vlocks[i].p) ++free_slots;
+        if (need > free_slots) return STATUS_WORKING_SET_QUOTA;
+        for (a = start; a < end; a += PAGE_SIZE) {
+            if (user_fault_in(p, a, 0, 0)) return STATUS_NO_MEMORY;
+            if (vlock_find(p, a) >= 0) continue;
+            for (i = 0; i < MAX_VLOCKS && vlocks[i].p; ++i) { }
+            vlocks[i].p = p; vlocks[i].pid = p->pid; vlocks[i].page = a;
+        }
+        return STATUS_SUCCESS;
+    }
+    case K32S_UNLOCK:
+        for (a = start; a < end; a += PAGE_SIZE)
+            if (vlock_find(p, a) < 0) return STATUS_NOT_LOCKED;
+        for (a = start; a < end; a += PAGE_SIZE) vlocks[vlock_find(p, a)].p = 0;
+        return STATUS_SUCCESS;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+}
+
+/* ---------------------------------------------------------------- queries */
+struct proc_entry { uint32_t pid, ppid, threads, priority_class; char name[32]; };
+struct mod_entry { uint64_t base, size; char name[48]; char path[128]; };
+
+static void copy_str(char *dst, const char *src, unsigned cap)
+{
+    unsigned i;
+    for (i = 0; src[i] && i + 1 < cap; ++i) dst[i] = src[i];
+    dst[i] = 0;
+}
+
+static int32_t put_out(process_t *cur, uint64_t buf, uint64_t len, uint64_t retlen, const void *v, uint64_t n)
+{
+    if (retlen) { uint32_t r = (uint32_t)n; if (copy_to_user(cur, retlen, &r, 4)) return STATUS_ACCESS_VIOLATION; }
+    if (len < n) return STATUS_BUFFER_TOO_SMALL;
+    return copy_to_user(cur, buf, v, n) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+}
+
+static int32_t query_modules(process_t *cur, process_t *p, uint64_t buf, uint64_t len, uint64_t retlen)
+{
+    unsigned count = 0, i, k;
+    uint64_t base, size;
+    const char *name, *path;
+    struct mod_entry e;
+    while (ldr_module_at(p, count, &base, &size, &name, &path) == 0) ++count;
+    if (retlen) { uint32_t r = count * (uint32_t)sizeof e; if (copy_to_user(cur, retlen, &r, 4)) return STATUS_ACCESS_VIOLATION; }
+    if (len < count * sizeof e) return STATUS_BUFFER_TOO_SMALL;
+    /* the executable first (as in the PEB load-order list), then the others in load order */
+    for (i = 0, k = 0; i < count; ++i) {
+        if (ldr_module_at(p, i, &base, &size, &name, &path)) break;
+        if (base != p->image_base) continue;
+        memset(&e, 0, sizeof e); e.base = base; e.size = size; copy_str(e.name, name, sizeof e.name); copy_str(e.path, path, sizeof e.path);
+        if (copy_to_user(cur, buf + (uint64_t)k++ * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
+    }
+    for (i = 0; i < count; ++i) {
+        if (ldr_module_at(p, i, &base, &size, &name, &path)) break;
+        if (base == p->image_base) continue;
+        memset(&e, 0, sizeof e); e.base = base; e.size = size; copy_str(e.name, name, sizeof e.name); copy_str(e.path, path, sizeof e.path);
+        if (copy_to_user(cur, buf + (uint64_t)k++ * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
+    }
+    return STATUS_SUCCESS;
+}
+
+/* NtShzQueryK32(ULONG class, HANDLE handle, PVOID buffer, ULONG length, PULONG return_length) */
+int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len)
+{
+    const uint64_t retlen = (uint64_t)stack_arg(cur, r, 5);
+    switch (cls) {
+    case K32Q_THREAD_TIMES: {
+        struct times t;
+        int32_t st = thread_times(cur, h, &t, 0);
+        return st ? st : put_out(cur, buf, len, retlen, &t, sizeof t);
+    }
+    case K32Q_THREAD_SETTINGS: {
+        uint32_t s[4];
+        int32_t st = thread_times(cur, h, 0, s);
+        return st ? st : put_out(cur, buf, len, retlen, s, sizeof s);
+    }
+    case K32Q_PROCESS_TIMES: {
+        process_t *p = proc_of_handle(cur, h);
+        struct times t;
+        uint64_t ut, kt, cyc;
+        if (!p) return STATUS_INVALID_HANDLE;
+        ut = p->dead_user_ticks; kt = p->dead_kernel_ticks; cyc = p->dead_cycles;
+        live_threads(p, &ut, &kt, &cyc);
+        t.create_ft = tick_to_filetime(p->create_tick);
+        t.exit_ft = p->terminated && p->exit_tick ? tick_to_filetime(p->exit_tick) : 0;
+        t.kernel_100ns = kt * TICK_100NS; t.user_100ns = ut * TICK_100NS; t.cycles = cyc;
+        return put_out(cur, buf, len, retlen, &t, sizeof t);
+    }
+    case K32Q_PROCESS_INFO: {                                   /* {handles, threads, pid, ppid, priority class, reserved} */
+        process_t *p = proc_of_handle(cur, h);
+        uint32_t v[6];
+        if (!p) return STATUS_INVALID_HANDLE;
+        v[0] = p->handle_count; v[1] = live_threads(p, 0, 0, 0); v[2] = (uint32_t)p->pid; v[3] = (uint32_t)p->parent_pid;
+        v[4] = p->priority_class ? p->priority_class : 0x20; v[5] = 0;
+        return put_out(cur, buf, len, retlen, v, sizeof v);
+    }
+    case K32Q_PROCESS_SETTINGS: {                               /* {memory priority, power throttling control, state} */
+        process_t *p = proc_of_handle(cur, h);
+        uint32_t v[3];
+        if (!p) return STATUS_INVALID_HANDLE;
+        v[0] = p->mem_priority ? p->mem_priority : 5; v[1] = p->power_control; v[2] = p->power_state;
+        return put_out(cur, buf, len, retlen, v, sizeof v);
+    }
+    case K32Q_PROCESS_LIST: {
+        unsigned i, n = 0;
+        process_t *q;
+        struct proc_entry e;
+        for (i = 1; (q = process_slot(i)) != 0; ++i) if (q->used && !q->terminated) ++n;
+        if (retlen) { uint32_t rl = n * (uint32_t)sizeof e; if (copy_to_user(cur, retlen, &rl, 4)) return STATUS_ACCESS_VIOLATION; }
+        if (len < n * sizeof e) return STATUS_BUFFER_TOO_SMALL;
+        for (i = 1, n = 0; (q = process_slot(i)) != 0; ++i) {
+            if (!q->used || q->terminated) continue;
+            memset(&e, 0, sizeof e);
+            e.pid = (uint32_t)q->pid; e.ppid = (uint32_t)q->parent_pid; e.threads = live_threads(q, 0, 0, 0);
+            e.priority_class = q->priority_class ? q->priority_class : 0x20;
+            copy_str(e.name, q->name, sizeof e.name);
+            if (copy_to_user(cur, buf + (uint64_t)n++ * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
+        }
+        return STATUS_SUCCESS;
+    }
+    case K32Q_MODULE_LIST: {                                    /* handle = process id, 0 = the caller */
+        process_t *p = h ? process_by_pid((int)h) : cur;
+        if (!p || p->terminated) return STATUS_INVALID_CID;
+        return query_modules(cur, p, buf, len, retlen);
+    }
+    case K32Q_SYSTEM_PERF: {
+        struct { uint64_t total_pages, free_pages, commit_bytes, peak_commit_bytes, kheap_total, kheap_used;
+                 uint32_t processes, threads, handles, pad; } s;
+        unsigned i;
+        process_t *q;
+        memset(&s, 0, sizeof s);
+        s.total_pages = pmm_total_count(); s.free_pages = pmm_free_count();
+        s.commit_bytes = system_commit();
+        if (s.commit_bytes > g_peak_system_commit) g_peak_system_commit = s.commit_bytes;
+        s.peak_commit_bytes = g_peak_system_commit;
+        s.kheap_total = kheap_total(); s.kheap_used = kheap_used();
+        for (i = 1; (q = process_slot(i)) != 0; ++i)
+            if (q->used && !q->terminated) { ++s.processes; s.handles += q->handle_count; }
+        s.threads = live_threads(0, 0, 0, 0);
+        return put_out(cur, buf, len, retlen, &s, sizeof s);
+    }
+    case K32Q_PROCESS_MEMORY: {
+        process_t *p = proc_of_handle(cur, h);
+        uint64_t m[5];
+        if (!p) return STATUS_INVALID_HANDLE;
+        sample_peaks(p);
+        m[0] = p->page_faults; m[1] = vm_count_user_pages(p->pml4) * PAGE_SIZE; m[2] = p->peak_ws_pages * PAGE_SIZE;
+        m[3] = private_commit(p); m[4] = p->peak_commit;
+        return put_out(cur, buf, len, retlen, m, sizeof m);
+    }
+    case K32Q_WORKING_SET_EX: {                                 /* in/out array of {VirtualAddress, attributes} */
+        process_t *p = proc_of_handle(cur, h);
+        uint64_t n = len / 16, i;
+        if (!p) return STATUS_INVALID_HANDLE;
+        if (!n || len % 16) return STATUS_INFO_LENGTH_MISMATCH;
+        for (i = 0; i < n; ++i) {
+            uint64_t e[2], flags = 0;
+            vad_t *v;
+            if (copy_from_user(cur, e, buf + i * 16, 16)) return STATUS_ACCESS_VIOLATION;
+            e[1] = 0;
+            v = e[0] < USER_TOP ? vad_find(p, e[0] & ~(PAGE_SIZE - 1)) : 0;
+            if (v && vm_lookup(p->pml4, e[0], &flags) && (flags & PT_U)) {
+                e[1] = 1ull                                        /* Valid */
+                     | (1ull << 1)                                 /* ShareCount 1: only this process maps the page */
+                     | ((uint64_t)(v->prot & 0x7ff) << 4);         /* Win32Protection */
+                if (vlock_find(p, e[0] & ~(PAGE_SIZE - 1)) >= 0) e[1] |= 1ull << 22;       /* Locked */
+            }
+            if (copy_to_user(cur, buf + i * 16, e, 16)) return STATUS_ACCESS_VIOLATION;
+        }
+        if (retlen) { uint32_t rl = (uint32_t)len; copy_to_user(cur, retlen, &rl, 4); }
+        return STATUS_SUCCESS;
+    }
+    case K32Q_IMAGE_PATH: {                                     /* the executable's path on C: ("\SHZ\TESTS\T_X.EXE") */
+        process_t *p = proc_of_handle(cur, h);
+        unsigned i;
+        uint64_t base, size;
+        const char *name, *path;
+        if (!p) return STATUS_INVALID_HANDLE;
+        for (i = 0; ldr_module_at(p, i, &base, &size, &name, &path) == 0; ++i)
+            if (base == p->image_base) return put_out(cur, buf, len, retlen, path, strlen(path) + 1);
+        return STATUS_INVALID_HANDLE;                             /* not a Win64 process (no executable image) */
+    }
+    case K32Q_FIRMWARE: {
+        /* Kernel64 is started by the Supervisor or by a boot stub; neither reports which firmware interface (BIOS or UEFI) the
+         * machine has, so the honest answer is FirmwareTypeUnknown (0). */
+        const uint32_t v = 0;
+        return put_out(cur, buf, len, retlen, &v, sizeof v);
+    }
+    default:
+        return STATUS_INVALID_INFO_CLASS;
+    }
+}
+
+/* NtShzSetK32(ULONG class, HANDLE handle, PVOID buffer, ULONG length) */
+int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len)
+{
+    switch (cls) {
+    case K32S_PRIORITY_CLASS: {
+        process_t *p = proc_of_handle(cur, h);
+        uint32_t v;
+        if (!p) return STATUS_INVALID_HANDLE;
+        if (len < 4 || copy_from_user(cur, &v, buf, 4)) return STATUS_ACCESS_VIOLATION;
+        if (v != 0x40 && v != 0x4000 && v != 0x20 && v != 0x8000 && v != 0x80 && v != 0x100) return STATUS_INVALID_PARAMETER;
+        p->priority_class = v;
+        return STATUS_SUCCESS;
+    }
+    case K32S_PROCESS_MEM_PRIORITY: case K32S_PROCESS_POWER: {
+        process_t *p = proc_of_handle(cur, h);
+        uint32_t v[2] = { 0, 0 };
+        if (!p) return STATUS_INVALID_HANDLE;
+        if (len < (cls == K32S_PROCESS_POWER ? 8u : 4u) || copy_from_user(cur, v, buf, cls == K32S_PROCESS_POWER ? 8 : 4))
+            return STATUS_ACCESS_VIOLATION;
+        if (cls == K32S_PROCESS_MEM_PRIORITY) {
+            if (v[0] < 1 || v[0] > 5) return STATUS_INVALID_PARAMETER;
+            p->mem_priority = v[0];
+        } else {
+            p->power_control = v[0]; p->power_state = v[1];
+        }
+        return STATUS_SUCCESS;
+    }
+    case K32S_THREAD_BOOST: case K32S_THREAD_MEM_PRIORITY: case K32S_THREAD_POWER: {
+        thread_t *t = 0;
+        kobject_t *o = 0;
+        uint32_t v, v2 = 0;
+        uint64_t f;
+        if (len < 4 || copy_from_user(cur, &v, buf, 4)) return STATUS_ACCESS_VIOLATION;
+        if (cls == K32S_THREAD_POWER && (len < 8 || copy_from_user(cur, &v2, buf + 4, 4))) return STATUS_ACCESS_VIOLATION;
+        if (cls == K32S_THREAD_MEM_PRIORITY && (v < 1 || v > 5)) return STATUS_INVALID_PARAMETER;
+        if (h == CURRENT_THREAD_HANDLE) t = thread_current();
+        else if (!(o = handle_lookup(cur, h, OB_THREAD))) return STATUS_INVALID_HANDLE;
+        f = irq_save();
+        if (o) t = o->u.thr.t;
+        if (t && t->state != TS_ZOMBIE) {
+            if (cls == K32S_THREAD_BOOST) t->boost_disabled = v != 0;
+            else if (cls == K32S_THREAD_MEM_PRIORITY) t->mem_priority = v;
+            else { t->power_control = v; t->power_state = v2; }
+        }
+        irq_restore(f);
+        return t ? STATUS_SUCCESS : STATUS_THREAD_IS_TERMINATING;
+    }
+    case K32S_DISCARD: case K32S_LOCK: case K32S_UNLOCK: case K32S_PREFETCH: {
+        process_t *p = proc_of_handle(cur, h);
+        uint64_t range[2];
+        if (!p) return STATUS_INVALID_HANDLE;
+        if (len < sizeof range || copy_from_user(cur, range, buf, sizeof range)) return STATUS_ACCESS_VIOLATION;
+        if (p != cur && cls != K32S_PREFETCH) return STATUS_ACCESS_DENIED;          /* these act on the caller's own memory only */
+        return mem_op(p, (uint32_t)cls, range[0], range[1]);
+    }
+    default:
+        return STATUS_INVALID_INFO_CLASS;
+    }
+}
+
+/* ---------------------------------------------------------------- NtGetContextThread(ThreadHandle, PCONTEXT) */
+#define CTX_SIZE 0x4d0
+#define CTX_AMD64 0x100000u
+
+static void put64(uint8_t *c, unsigned off, uint64_t v) { memcpy(c + off, &v, 8); }
+
+int32_t k32_get_context_thread(process_t *p, uint64_t handle, uint64_t context_va)
+{
+    uint8_t ctx[CTX_SIZE];
+    struct regs frame;
+    uint8_t fx[512] __attribute__((aligned(16)));
+    thread_t *t = 0;
+    kobject_t *o = 0;
+    uint32_t flags;
+    uint64_t f;
+    int have_frame;
+    if (handle == CURRENT_THREAD_HANDLE) t = thread_current();
+    else if (!(o = handle_lookup(p, handle, OB_THREAD))) return STATUS_INVALID_HANDLE;
+    if (copy_from_user(p, ctx, context_va, sizeof ctx)) return STATUS_ACCESS_VIOLATION;
+    flags = *(uint32_t *)(ctx + 0x30);
+    if ((flags & CTX_AMD64) != CTX_AMD64) return STATUS_INVALID_PARAMETER;
+    f = irq_save();
+    if (o) t = o->u.thr.t;
+    if (!t || t->state == TS_ZOMBIE || !t->teb) { irq_restore(f); return STATUS_THREAD_IS_TERMINATING; }
+    /* A thread that has run is inside the kernel whenever it is not running (a system call or an interrupt from ring 3), and its
+     * user-mode register frame sits at the top of its kernel stack; the current thread is in this very system call. A thread that
+     * never ran has no frame yet: its context is the initial one the kernel will enter user mode with. */
+    memcpy(&frame, (const void *)(t->stack_base + KSTACK_BYTES - sizeof frame), sizeof frame);
+    have_frame = (t == thread_current() || t->cycles) && frame.cs == 0x23 && frame.ss == 0x1b;
+    if (t == thread_current()) __asm__ volatile("fxsave (%0)" :: "r"(fx) : "memory");       /* live user FPU state */
+    else memcpy(fx, t->fx, sizeof fx);
+    if (!have_frame) {
+        memset(&frame, 0, sizeof frame);
+        frame.rip = t->user_rip; frame.rsp = t->user_rsp; frame.rcx = t->user_arg; frame.rdx = t->user_arg2; frame.rflags = 0x202;
+    }
+    irq_restore(f);
+    if ((flags & (CTX_AMD64 | 1)) == (CTX_AMD64 | 1)) {           /* CONTEXT_CONTROL */
+        *(uint16_t *)(ctx + 0x38) = 0x23; *(uint16_t *)(ctx + 0x42) = 0x1b;
+        *(uint32_t *)(ctx + 0x44) = (uint32_t)frame.rflags;
+        put64(ctx, 0x98, frame.rsp); put64(ctx, 0xf8, frame.rip);
+    }
+    if ((flags & (CTX_AMD64 | 2)) == (CTX_AMD64 | 2)) {           /* CONTEXT_INTEGER */
+        put64(ctx, 0x78, frame.rax); put64(ctx, 0x80, frame.rcx); put64(ctx, 0x88, frame.rdx); put64(ctx, 0x90, frame.rbx);
+        put64(ctx, 0xa0, frame.rbp); put64(ctx, 0xa8, frame.rsi); put64(ctx, 0xb0, frame.rdi);
+        put64(ctx, 0xb8, frame.r8); put64(ctx, 0xc0, frame.r9); put64(ctx, 0xc8, frame.r10); put64(ctx, 0xd0, frame.r11);
+        put64(ctx, 0xd8, frame.r12); put64(ctx, 0xe0, frame.r13); put64(ctx, 0xe8, frame.r14); put64(ctx, 0xf0, frame.r15);
+    }
+    if ((flags & (CTX_AMD64 | 4)) == (CTX_AMD64 | 4)) {           /* CONTEXT_SEGMENTS: flat user data selectors */
+        *(uint16_t *)(ctx + 0x3a) = 0x1b; *(uint16_t *)(ctx + 0x3c) = 0x1b; *(uint16_t *)(ctx + 0x3e) = 0x1b; *(uint16_t *)(ctx + 0x40) = 0x1b;
+    }
+    if ((flags & (CTX_AMD64 | 8)) == (CTX_AMD64 | 8)) {           /* CONTEXT_FLOATING_POINT */
+        *(uint32_t *)(ctx + 0x34) = *(uint32_t *)(fx + 24);
+        memcpy(ctx + 0x100, fx, 512);
+    }
+    if ((flags & (CTX_AMD64 | 0x10)) == (CTX_AMD64 | 0x10))       /* CONTEXT_DEBUG_REGISTERS: none are ever armed */
+        memset(ctx + 0x48, 0, 6 * 8);
+    return copy_to_user(p, context_va, ctx, sizeof ctx) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+}

@@ -208,6 +208,14 @@ int32_t sys_ext_k32(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, u
     case SYS_NtQueryVolumeInformationFile: return sys_query_volume(cur, r, a1, a2, a3, a4);
     case SYS_NtLockFile: return sys_lock_file(cur, r, a1);
     case SYS_NtUnlockFile: return sys_unlock_file(cur, r, a1, a2, a3, a4);
+    case SYS_NtShzQueryK32: {                   /* process, thread and memory information: sysk32_proc.c */
+        extern int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len);
+        return k32_query(cur, r, a1, a2, a3, a4);
+    }
+    case SYS_NtShzSetK32: {
+        extern int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len);
+        return k32_set(cur, a1, a2, a3, a4);
+    }
     default: return STATUS_INVALID_SYSTEM_SERVICE;
     }
 }
