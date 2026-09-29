@@ -176,6 +176,19 @@ def build_apps(module_libs=()):
     return apps
 
 
+def build_setup(module_libs=()):
+    """SHZSETUP.EXE, the installer (win64/setup/*.c; its portable core is shared with the host tests in
+    shizukudos/install/tests). Packed as \\SHZ\\SETUP\\SHZSETUP.EXE; Kernel64 runs it when booted with shz.setup=auto."""
+    src = sorted((W64 / "setup").glob("*.c"))
+    exe = OUT / "SHZSETUP.EXE"
+    crt = W64 / "crt"
+    cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
+           "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", W64 / "setup", *src, crt / "shzcrt.c",
+           "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+    run(cmd)
+    return exe, cmd
+
+
 def pack_archive(files):
     """SHZARC01: header, entries {char path[120]; u64 offset; u64 size}, then file data (16-byte aligned)."""
     entries = []
@@ -221,12 +234,14 @@ def main():
     modules = build_modules()
     wine_files, wine_info = build_wineport() if not args.no_wineport else ([], {})
     apps = build_apps(sorted(modules))
+    setup_exe, _ = build_setup(sorted(modules))
     files = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
         files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
     files += wine_files
     for name, (exe, _) in sorted(apps.items()):
         files.append((f"\\SHZ\\TESTS\\{exe.name.upper()}", exe.read_bytes()))
+    files.append(("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe.read_bytes()))
     data_dir = W64 / "tests" / "data"
     if data_dir.exists():
         for f in sorted(data_dir.iterdir()):
@@ -242,6 +257,7 @@ def main():
         "modules": {n: {"sha256": sha256_file(m["dll"]), "exports": len(m["exports"]), "base": hex(m["base"])} for n, m in modules.items()},
         "apps": {n: sha256_file(e) for n, (e, _) in apps.items()},
         "wineport": wine_info,
+        "setup": {"SHZSETUP.EXE": sha256_file(setup_exe)},
         "archive": {"sha256": sha256_file(img), "files": [p for p, _ in files]},
         "commands": {"ntdll": [str(x) for x in ntdll_cmd], "kernel32": [str(x) for x in k32_cmd]},
     })
