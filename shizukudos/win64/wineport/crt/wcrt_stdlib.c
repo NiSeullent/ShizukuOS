@@ -396,8 +396,10 @@ char *__cdecl getenv(const char *name)
     DWORD n;
     struct env_cache *e;
     char *ret = NULL;
+    DWORD last = GetLastError();                          /* getenv never changes the Win32 last error */
     if (!name) return NULL;
     n = GetEnvironmentVariableA(name, small, sizeof small);
+    SetLastError(last);
     if (!n) return NULL;
     if (n >= sizeof small) {
         if (!(buf = malloc(n))) return NULL;
@@ -421,8 +423,10 @@ wchar_t *__cdecl _wgetenv(const wchar_t *name)
     DWORD n;
     struct env_cache *e;
     wchar_t *ret = NULL;
+    DWORD last = GetLastError();
     if (!name) return NULL;
     n = GetEnvironmentVariableW(name, small, ARRAY_SIZE(small));
+    SetLastError(last);
     if (!n) return NULL;
     if (n >= ARRAY_SIZE(small)) {
         if (!(buf = malloc(n * sizeof(wchar_t)))) return NULL;

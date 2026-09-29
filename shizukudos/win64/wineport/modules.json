@@ -106,12 +106,29 @@
        "BCryptVerifySignature",
        "BCryptDestroyKey"
       ]
+     },
+     {
+      "dll": "crypt32.dll",
+      "fail": "0",
+      "functions": [
+       "PFXImportCertStore"
+      ]
      }
-    ]
+    ],
+    "shizuku": {
+     "subtests": [
+      "chrome",
+      "dpapi"
+     ],
+     "in_plain_image": true
+    }
    },
    "defines": [
     "-DSHZ_NO_HOST_ROOTS"
-   ]
+   ],
+   "unported": {
+    "PFXImportCertStore": "PKCS#12 import runs in crypt32's Unix side (GnuTLS), which is not built"
+   }
   },
   {
    "name": "rsaenh",

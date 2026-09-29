@@ -264,7 +264,7 @@ static int compare_level(const WCHAR *a, int an, const WCHAR *b, int bn, DWORD f
     for (;;) {
         int p = next_unit(&x, flags, level), q = next_unit(&y, flags, level);
         if (p < 0 || q < 0) return p < 0 ? (q < 0 ? 0 : -1) : 1;
-        if (level == 0) { p = wupper((WCHAR)p); q = wupper((WCHAR)q); }
+        if (level == 0 || (level == 2 && (flags & NORM_IGNORECASE))) { p = wupper((WCHAR)p); q = wupper((WCHAR)q); }
         else if (level == 1) {
             if (flags & NORM_IGNORECASE) { p = wupper((WCHAR)p); q = wupper((WCHAR)q); }
             else if (wupper((WCHAR)p) == wupper((WCHAR)q) && p != q) return wlower((WCHAR)p) == p ? -1 : 1;  /* lower first */

@@ -191,7 +191,7 @@ def def_lines(library, entries, forward_ok):
     out = [f"LIBRARY {library}", "EXPORTS"]
     kept = []
     for e in entries:
-        if e.kind in ("stub", "import"):
+        if e.kind in ("stub", "import", "unported", "missing"):
             continue
         if e.kind == "forward":
             if not forward_ok(e.target):
