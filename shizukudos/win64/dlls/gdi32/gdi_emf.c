@@ -153,8 +153,12 @@ DLLAPI HDC WINAPI CreateEnhMetaFileW(HDC ref, LPCWSTR file, const RECT *frame, L
     if (ref && !gdi_dc_get(ref)) { SetLastError(ERROR_INVALID_HANDLE); return 0; }
     r = gdi_alloc(sizeof *r);
     if (!r) return 0;
-    r->dev_px.cx = ref ? GetDeviceCaps(ref, HORZRES) : 1024;
-    r->dev_px.cy = ref ? GetDeviceCaps(ref, VERTRES) : 768;
+    {                                                               /* the reference device: `ref`, else the screen */
+        HDC probe = ref ? ref : CreateCompatibleDC(0);
+        r->dev_px.cx = GetDeviceCaps(probe, ref ? HORZRES : DESKTOPHORZRES);
+        r->dev_px.cy = GetDeviceCaps(probe, ref ? VERTRES : DESKTOPVERTRES);
+        if (!ref) DeleteDC(probe);
+    }
     if (r->dev_px.cx <= 0) r->dev_px.cx = 1;
     if (r->dev_px.cy <= 0) r->dev_px.cy = 1;
     r->dev_mm.cx = r->dev_px.cx * 254 / 960;                          /* 96 dpi */

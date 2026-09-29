@@ -866,13 +866,32 @@ DLLAPI COLORREF WINAPI GetDCBrushColor(HDC h)
     RET(c);
 }
 
+/* The screen size (the display mode the kernel reports; it depends on the display backend). Without a display device the
+ * nominal 1024x768 of the Bochs VBE mode stands in for it, so that memory-DC programs still get consistent answers. */
+static void screen_size(int *w, int *h)
+{
+    static int sw, sh;
+    if (!sw) {
+        shz_display_info_t info;
+        memset(&info, 0, sizeof info);
+        info.size = sizeof info;
+        if (NtUserQueryDisplay(&info, SHZ_DISP_QUERY) >= 0 && info.width && info.height) { sw = (int)info.width; sh = (int)info.height; }
+        else { sw = 1024; sh = 768; }
+    }
+    *w = sw;
+    *h = sh;
+}
+
 DLLAPI int WINAPI GetDeviceCaps(HDC h, int index)
 {
     dc_t *dc;
-    int w = 1024, hh = 768, v = 0;
+    int w, hh, v = 0, sw, sh;
     GDI_ENTER();
     dc = gdi_dc_get(h);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(0); }
+    screen_size(&sw, &sh);
+    w = sw;
+    hh = sh;
     if (dc->memdc) {
         bitmap_t *b = gdi_obj_get((HGDIOBJ)dc->hbmp, OBJ_BITMAP, 0);
         w = b ? b->w : 1;
@@ -883,8 +902,8 @@ DLLAPI int WINAPI GetDeviceCaps(HDC h, int index)
     switch (index) {
     case DRIVERVERSION: v = 0x0400; break;
     case TECHNOLOGY: v = DT_RASDISPLAY; break;
-    case HORZSIZE: v = 1024 * 254 / 960; break;                    /* 96 dpi */
-    case VERTSIZE: v = 768 * 254 / 960; break;
+    case HORZSIZE: v = sw * 254 / 960; break;                      /* the screen at 96 dpi, in millimetres */
+    case VERTSIZE: v = sh * 254 / 960; break;
     case HORZRES: v = w; break;
     case VERTRES: v = hh; break;
     case BITSPIXEL: v = 32; break;
@@ -904,8 +923,8 @@ DLLAPI int WINAPI GetDeviceCaps(HDC h, int index)
     case PHYSICALWIDTH: v = w; break;
     case PHYSICALHEIGHT: v = hh; break;
     case SHADEBLENDCAPS: v = SB_CONST_ALPHA | SB_PIXEL_ALPHA | SB_PREMULT_ALPHA; break;   /* GdiAlphaBlend */
-    case DESKTOPHORZRES: v = 1024; break;
-    case DESKTOPVERTRES: v = 768; break;
+    case DESKTOPHORZRES: v = sw; break;
+    case DESKTOPVERTRES: v = sh; break;
     default: v = 0;
     }
     RET(v);
