@@ -31,15 +31,15 @@ K64_FLAGS = ["-m64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffree
 STUB_DIR = SHZ / "kernel64" / "standalone"
 
 
-def build_standalone_stub():
-    """Multiboot ELF32 boot stub (see kernel64/standalone/boot32.c) for running Kernel64 without the Supervisor."""
-    out = BUILD / "kernel64s"
+def build_standalone_stub(k32=False):
+    """Multiboot ELF32 boot stub (see kernel64/standalone/boot32.c) for running a guest kernel without the Supervisor."""
+    out = BUILD / ("kernel32s" if k32 else "kernel64s")
     out.mkdir(parents=True, exist_ok=True)
     asm_o, c_o, elf = out / "boot.asm.o", out / "boot32.o", out / "boot.elf"
-    run(["nasm", "-f", "elf32", "-w+all", "-o", asm_o, STUB_DIR / "boot.asm"])
+    run(["nasm", "-f", "elf32", "-w+all", "-o", asm_o, STUB_DIR / ("boot_pm.asm" if k32 else "boot.asm")])
     run(["gcc", "-m32", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin", "-fno-pic",
          "-fno-pie", "-fno-stack-protector", "-mno-sse", "-mno-mmx", "-fno-asynchronous-unwind-tables", "-fno-ident",
-         "-fno-tree-loop-distribute-patterns", "-c", STUB_DIR / "boot32.c", "-o", c_o])
+         "-fno-tree-loop-distribute-patterns", *(["-DSTUB_K32"] if k32 else []), "-c", STUB_DIR / "boot32.c", "-o", c_o])
     run(["ld", "-m", "elf_i386", "-nostdlib", "-z", "noexecstack", "--no-warn-rwx-segments", "-T", STUB_DIR / "boot.ld",
          "-o", elf, asm_o, c_o])
     assert not run(["nm", "-u", elf], capture=True).stdout.strip(), "boot stub has unresolved symbols"
@@ -105,6 +105,9 @@ def main():
     k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"], "elf64", "elf_x86_64",
                         "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c"])
     stub = build_standalone_stub()
+    k32s = build_kernel("kernel32s", "kernel32", K32_FLAGS + ["-DSHZ_STANDALONE"], "elf32", "elf_i386", "KERNEL32S.BIN",
+                        extra_c=[SHZ / "kernel32" / "standalone" / "standalone32.c"])
+    stub32 = build_standalone_stub(k32=True)
     for name, r in (("kernel32", k32), ("kernel64", k64)):
         results[name] = {"bytes": r["bytes"], "sha256": r["sha256"], "elf_sha256": r["elf_sha256"],
                          "commands": [[str(x) for x in c] for c in r["commands"]]}
@@ -116,6 +119,9 @@ def main():
     results["kernel64-standalone"] = {"bytes": k64s["bytes"], "sha256": k64s["sha256"], "elf_sha256": k64s["elf_sha256"],
                                       "stub_sha256": stub["sha256"],
                                       "commands": [[str(x) for x in c] for c in k64s["commands"]]}
+    results["kernel32-standalone"] = {"bytes": k32s["bytes"], "sha256": k32s["sha256"], "elf_sha256": k32s["elf_sha256"],
+                                      "stub_sha256": stub32["sha256"],
+                                      "commands": [[str(x) for x in c] for c in k32s["commands"]]}
     shzlib.write_json(BUILD / "kernels-build-result.json", {
         "built_utc": shzlib.utc_now(), "git": shzlib.git_state(), "kernels": results,
         "kernel32_machine": "EM_386 ELF32", "kernel64_machine": "EM_X86_64 ELF64",

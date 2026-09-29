@@ -1,15 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Kernel64 "standalone" services: the hypercall ABI (abi/shz_abi.h) served by the kernel itself so the
- * Long Mode kernel and its Win64 processes can run without the Supervisor, e.g. under QEMU TCG where Intel VMX
- * does not exist. This is a test/bring-up profile: it is NOT the multikernel product path and never claims
- * Supervisor or VMX behaviour.  Devices: kcommon/standalone_dev.h.
- *
- *   console   -> COM1            exit     -> "SHZ-EXIT:<code>" on COM1, then QEMU isa-debug-exit (0xF4)
- *   evidence  -> "SHZ-EV <slot> <hex>" on COM1, parsed by tests/run_k*_standalone.py
- *   timer     -> PIT ch.0 via the 8259 (IRQ0 = VEC_TIMER)     time -> timer ticks     walltime -> CMOS RTC
- *   doorbells/notify -> SHZ_E_UNSUPPORTED (single domain, no peers)
+ * Kernel32 "standalone" services: the hypercall ABI served by the kernel itself so the Protected Mode kernel can run
+ * under QEMU TCG without the Supervisor (no Intel VMX needed). Bring-up/test profile only; see
+ * kernel64/standalone/standalone64.c and kcommon/standalone_dev.h. Time is timer ticks truncated to 32 bits by the
+ * 32-bit hypercall ABI (khc.h), so measured intervals are only valid below ~4.29 s.
  */
-#include "k64.h"
+#include "k32.h"
 #include "../../kcommon/standalone_dev.h"
 
 extern uint64_t arch_timer_irqs(void);
@@ -21,8 +16,8 @@ long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
     long st = SHZ_OK;
     switch (op) {
     case SHZ_HC_CONSOLE_WRITE: {
-        const char *s = (const char *)p2v(a);
-        uint64_t i;
+        const char *s = (const char *)(uintptr_t)a;                 /* identity mapped */
+        hcreg_t i;
         if (b > 512) { st = SHZ_E_RANGE; break; }
         for (i = 0; i < b; ++i)
             sa_serial_putc(s[i]);
@@ -31,7 +26,7 @@ long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
     case SHZ_HC_EXIT: sa_exit((unsigned)a);
     case SHZ_HC_TIMER_SET: st = sa_timer_set((unsigned)a, (uint32_t)b); break;
     case SHZ_HC_WAIT: __asm__ volatile("sti; hlt"); break;
-    case SHZ_HC_TIME: v = arch_timer_irqs() * TICK_US * 1000ull; break;
+    case SHZ_HC_TIME: v = (hcreg_t)(arch_timer_irqs() * TICK_US * 1000u); break;
     case SHZ_HC_EVIDENCE:
         if (a > 31) { st = SHZ_E_RANGE; break; }
         sa_evidence((unsigned)a, b);

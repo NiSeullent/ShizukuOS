@@ -31,6 +31,13 @@ static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_ou
 #endif
 #else
 typedef uint32_t hcreg_t;
+#ifdef SHZ_STANDALONE
+long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out);      /* kernel32/standalone/standalone32.c */
+static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
+{
+    return shz_standalone_hcall(op, a, b, value_out);
+}
+#else
 static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
 {
     hcreg_t status, value;
@@ -39,6 +46,7 @@ static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_ou
         *value_out = value;
     return (long)(int32_t)status;
 }
+#endif
 #endif
 
 /* The guest-physical address of a kernel-virtual buffer must be supplied by the caller

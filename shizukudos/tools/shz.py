@@ -201,10 +201,14 @@ def suite_boot(results):
     run_script(results, "DOS16 on legacy BIOS (SeaBIOS) [TCG software CPU]",
                [SHZ / "dos16" / "test_csm.py", "--accel", "tcg", "--timeout", "240"], timeout=400,
                expect_marker="PASS")
+    run_script(results, "Kernel32 (Protected Mode) on QEMU, standalone stub (no Supervisor/VMX)",
+               [SHZ / "tests" / "run_k32_standalone.py"], timeout=300, expect_marker="PASS")
+    run_script(results, "Kernel64 (Long Mode) + Win64 apps on QEMU, standalone stub (no Supervisor/VMX)",
+               [SHZ / "tests" / "run_k64_standalone.py"], timeout=400, expect_marker="PASS")
     if not l1_vmx_available():
         reason = "L0 lacks /dev/kvm or nested VMX; a TCG boot would not exercise the VMX backend"
-        for label in ("UEFI Supervisor: DOS16 in virtual Real Mode (Intel VMX)", "Kernel32 (Protected Mode) domain",
-                      "Kernel64 (Long Mode) domain"):
+        for label in ("UEFI Supervisor: DOS16 in virtual Real Mode (Intel VMX)", "Supervisor-run Kernel32 domain (Intel VMX)",
+                      "Supervisor-run Kernel64 domain (Intel VMX)"):
             record(results, label, "BLOCKED", detail=reason)
         return
     build_ok = (BUILD / "supervisor" / "esp.img").exists()
@@ -215,8 +219,8 @@ def suite_boot(results):
     run_script(results, "negative: VMX hidden from L1 -> loader refuses and returns to firmware",
                [SHZ / "supervisor" / "test_qemu.py", "--no-vmx", "--timeout", "40"], timeout=200, expect_marker="PASS")
     record(results, "AMD SVM backend", "BLOCKED", detail="loader detects SVM; backend not implemented, no AMD host")
-    record_domain(results, "Kernel32 (Protected Mode) domain", "K32 ", "no Supervisor result")
-    record_domain(results, "Kernel64 (Long Mode) domain", "K64 ", "no Supervisor result")
+    record_domain(results, "Supervisor-run Kernel32 domain (Intel VMX)", "K32 ", "no Supervisor result")
+    record_domain(results, "Supervisor-run Kernel64 domain (Intel VMX)", "K64 ", "no Supervisor result")
 
 
 def suite_interkernel(results):

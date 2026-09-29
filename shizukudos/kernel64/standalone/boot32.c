@@ -6,9 +6,15 @@
 #include <stdint.h>
 #include "../../abi/shz_abi.h"
 
+#ifdef STUB_K32                                    /* Kernel32: 32-bit Protected Mode, paging off, EBX = bootinfo */
+#define STUB_DOMAIN SHZ_DOM_KERNEL32
+#define MAX_RAM (128u << 20)                       /* Kernel32's page allocator limit (mem.c MAX_PAGES) */
+#else
+#define STUB_DOMAIN SHZ_DOM_KERNEL64
+#define MAX_RAM (256u << 20)                       /* Kernel64's page allocator limit (mem.c MAX_PAGES) */
+#endif
 #define KERNEL_GPA 0x100000u
 #define INITRD_GPA 0x2000000u
-#define MAX_RAM (256u << 20)                       /* Kernel64's page allocator limit (mem.c MAX_PAGES) */
 #define MB_MAGIC 0x2BADB002u
 
 extern char stub_end[];                            /* boot.ld: end of the stub image including its stack */
@@ -67,6 +73,7 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     copy(KERNEL_GPA, mods[0].start, ksize);
     if (isize) copy(INITRD_GPA, mods[1].start, isize);
 
+#ifndef STUB_K32
     zero(0x1000, 0x4000);
     pml4[0] = 0x2000 | 3;                          /* PML4[0]   -> PDPT_LO */
     pml4[2 * 511] = 0x4000 | 3;                    /* PML4[511] -> PDPT_HI (64-bit entries: low dword index *2) */
@@ -74,13 +81,16 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     pdpt_hi[2 * 510] = 0x3000 | 3;                 /* 0xFFFFFFFF80000000 -> PD (physical 0) */
     for (i = 0; i < 512 && ((uint64_t)i << 21) < ram; ++i)
         pd[2 * i] = (i << 21) | 0x83;              /* present, writable, 2 MiB */
+#else
+    (void)pml4; (void)pdpt_lo; (void)pd; (void)pdpt_hi;
+#endif
 
     zero(SHZ_BOOTINFO_GPA, sizeof(shz_bootinfo_t));
     bi->magic = SHZ_BOOTINFO_MAGIC;
     bi->abi_major = SHZ_ABI_MAJOR;
     bi->abi_minor = SHZ_ABI_MINOR;
     bi->size = sizeof(shz_bootinfo_t);
-    bi->domain_id = SHZ_DOM_KERNEL64;
+    bi->domain_id = STUB_DOMAIN;
     bi->generation = 1;
     bi->ram_size = ram;
     bi->kernel_gpa = KERNEL_GPA;

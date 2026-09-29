@@ -79,6 +79,12 @@ void isr_dispatch(struct regs *r)
     switch (r->vector) {
     case VEC_TIMER:
         ++timer_irqs;
+#ifdef SHZ_STANDALONE
+        {
+            extern void standalone_eoi(void);
+            standalone_eoi();                   /* 8259 EOI before a possible context switch */
+        }
+#endif
         sched_tick();
         return;
     case VEC_DOORBELL: {
