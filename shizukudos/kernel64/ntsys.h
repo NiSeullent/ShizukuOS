@@ -56,6 +56,12 @@
 
 #define SYSCALL_LIST_MISC(X)
 
+/* NT driver host (0xe0-0xef): reaching a loaded .sys from user mode. NtCreateFile("\\??\\Name")
+ * and NtRead/NtWriteFile route to IRPs through the file-object hooks; these two are the device
+ * control and driver-load services the host adds. */
+#define SYSCALL_LIST_NTDRV(X) \
+    X(NtLoadDriver, 0xe0) X(NtDeviceIoControlFile, 0xe1)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
@@ -64,8 +70,9 @@ enum {
     SYSCALL_LIST_NET(X)
     SYSCALL_LIST_K32(X)
     SYSCALL_LIST_MISC(X)
+    SYSCALL_LIST_NTDRV(X)
 #undef X
-    SYS_MAX = 0xb0
+    SYS_MAX = 0xf0
 };
 
 /* NTSTATUS values used by the kernel (subset of ntstatus.h; same numeric values). */

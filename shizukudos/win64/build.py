@@ -174,6 +174,54 @@ def build_apps(module_libs=()):
     return apps
 
 
+DDK_CANDIDATES = ["/usr/share/mingw-w64/include/ddk", "/usr/x86_64-w64-mingw32/include/ddk",
+                  "/usr/x86_64-w64-mingw32/sys-root/mingw/include/ddk", "/usr/local/x86_64-w64-mingw32/include/ddk"]
+DRV_FLAGS = ["-O2", "-Wall", "-Wextra", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-mno-red-zone",
+             "-fno-ident", "-fno-asynchronous-unwind-tables", "-D_WIN64"]
+
+
+def find_ddk():
+    for c in DDK_CANDIDATES:
+        if (Path(c) / "wdm.h").exists():
+            return c
+    raise SystemExit("mingw-w64 DDK headers (ddk/wdm.h) not found; install mingw-w64 with the DDK headers")
+
+
+def build_ntdrv_host():
+    """Build the NT-driver-host artifacts: the ABI cross-check (fails the build on any offset drift),
+    the ntoskrnl.exe/hal.dll export tables + import libraries, and the unmodified test .sys drivers."""
+    ddk = find_ddk()
+    ntdir = OUT / "ntdrv"
+    ntdir.mkdir(parents=True, exist_ok=True)
+    # 1. Prove kernel64/ntddk.h matches Microsoft's wdm.h (compile-only; a mismatch is a failed _Static_assert).
+    run([CC, "-fsyntax-only", "-D_WIN64", "-I", ddk, "-I", SHZ / "kernel64", W64 / "tools" / "ntddk_abi_check.c"])
+    # 2. Emit the export surface from kernel64/ntdrv_prov.c and make import libraries whose LIBRARY names are the DLLs.
+    run([sys.executable, str(W64 / "tools" / "gen_ntoskrnl_exports.py"), "--out", str(ntdir)])
+    run([DLLTOOL, "-d", ntdir / "ntoskrnl.def", "-l", ntdir / "libntoskrnl.a"])
+    run([DLLTOOL, "-d", ntdir / "hal.def", "-l", ntdir / "libhal.a"])
+    exports = json.loads((ntdir / "ntoskrnl-exports.json").read_text())
+    drivers = {}
+    for src in sorted((W64 / "drivers").glob("*.c")):
+        name = src.stem
+        obj, sysf = ntdir / (name + ".o"), ntdir / (name + ".sys")
+        run([CC, *DRV_FLAGS, "-I", ddk, "-c", src, "-o", obj])
+        run([CC, "-shared", "-nostdlib", "-Wl,--subsystem,native", "-Wl,--entry,DriverEntry",
+             "-Wl,--image-base,0x1c0000000", "-Wl,--dynamicbase", "-Wl,--kill-at",
+             "-o", sysf, obj, "-L", ntdir, "-lntoskrnl", "-lhal", "-lgcc"])
+        drivers[name] = sysf
+    return ntdir, drivers, exports
+
+
+def build_ntdrv_app(module_libs):
+    crt = W64 / "crt"
+    src = W64 / "ntdrv" / "t_ntdrv.c"
+    exe = OUT / "t_ntdrv.exe"
+    run([CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
+         "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c",
+         "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe])
+    return exe
+
+
 def pack_archive(files):
     """SHZARC01: header, entries {char path[120]; u64 offset; u64 size}, then file data (16-byte aligned)."""
     entries = []
@@ -213,7 +261,21 @@ def main():
             files.append((f"\\SHZ\\TESTS\\{f.name.upper()}", f.read_bytes()))
     img = OUT / "WIN64.IMG"
     img.write_bytes(pack_archive(files))
-    shutil.copy2(img, BUILD / "win64" / "WIN64.IMG") if False else None
+
+    # NT driver host: separate initrd with the driver store, so the default WIN64.IMG (and every
+    # suite that boots it) is byte-for-byte unaffected. tests/run_k64_ntdrv.py mounts this one.
+    ntdir, drivers, nt_exports = build_ntdrv_host()
+    ntapp = build_ntdrv_app(sorted(modules))
+    ntfiles = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
+    for name, m in sorted(modules.items()):
+        ntfiles.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
+    for name, sysf in sorted(drivers.items()):
+        ntfiles.append((f"\\SHZ\\DRIVERS\\{name.upper()}.SYS", sysf.read_bytes()))
+    ntfiles.append(("\\SHZ\\TESTS\\T_NTDRV.EXE", ntapp.read_bytes()))
+    ntfiles.append(("\\SHZ\\TESTS\\T_HELLO.EXE", apps["t_hello"][0].read_bytes()))
+    ntimg = OUT / "WIN64_NTDRV.IMG"
+    ntimg.write_bytes(pack_archive(ntfiles))
+
     shzlib.write_json(OUT / "build-result.json", {
         "built_utc": shzlib.utc_now(), "git": shzlib.git_state(),
         "toolchain": {"mingw": shzlib.tool_version(CC)},
@@ -222,10 +284,17 @@ def main():
         "modules": {n: {"sha256": sha256_file(m["dll"]), "exports": len(m["exports"]), "base": hex(m["base"])} for n, m in modules.items()},
         "apps": {n: sha256_file(e) for n, (e, _) in apps.items()},
         "archive": {"sha256": sha256_file(img), "files": [p for p, _ in files]},
+        "ntdrv": {
+            "ntoskrnl_exports": len(nt_exports["ntoskrnl.exe"]), "hal_exports": len(nt_exports["hal.dll"]),
+            "drivers": {n: sha256_file(s) for n, s in sorted(drivers.items())},
+            "app": sha256_file(ntapp), "archive": {"sha256": sha256_file(ntimg), "files": [p for p, _ in ntfiles]},
+        },
         "commands": {"ntdll": [str(x) for x in ntdll_cmd], "kernel32": [str(x) for x in k32_cmd]},
     })
     print(json.dumps({"ntdll_exports": len(ntdll_names), "kernel32_exports": len(k32_names), "modules": sorted(modules), "apps": sorted(apps),
-                      "WIN64.IMG": sha256_file(img)}, indent=2))
+                      "WIN64.IMG": sha256_file(img),
+                      "ntdrv": {"providers": len(nt_exports["ntoskrnl.exe"]) + len(nt_exports["hal.dll"]),
+                                "drivers": sorted(drivers), "WIN64_NTDRV.IMG": sha256_file(ntimg)}}, indent=2))
 
 
 if __name__ == "__main__":

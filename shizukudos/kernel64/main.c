@@ -34,6 +34,10 @@ void kmain(uint64_t bootinfo_pa)
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
     sti();
     run_self_tests(&bootinfo);
+    /* NT driver host: the single init call. A complete no-op unless the initrd carries
+     * \SHZ\DRIVERS (only tests/run_k64_ntdrv.py mounts such an image), so default runs are
+     * unaffected. See docs/shizukudos10/NTDRV.md and kernel64/ntdrv_*.c. */
+    { extern void ntdrv_selftest(void); ntdrv_selftest(); }
     if (bootinfo.channel_count) {
         ipc64_init(&bootinfo);
         if (ipc64_run_tests())
