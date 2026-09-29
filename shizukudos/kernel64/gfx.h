@@ -7,21 +7,35 @@
 #define K64_GFX_H
 #include "proc_internal.h"
 #include "../win64/include/shzgfx.h"
+#include "../win64/include/shzgpu.h"
 
 #define STATUS_NO_SUCH_DEVICE ((int32_t)0xC000000E)
 #define STATUS_NO_QUOTA ((int32_t)0xC0000044)           /* STATUS_QUOTA_EXCEEDED family: message pool full */
 #define STATUS_DEVICE_NOT_READY ((int32_t)0xC00000A3)
 
 /* ---- gfx_fb.c ---- */
+typedef struct gfx_fb gfx_fb_t;
+/* A display backend. gfx_fb_init() tries them in a fixed order (gfx_fb.c) with g_fb already describing the mode and the
+ * back buffer; `probe` returns 0 when its device drives the screen from then on, and `present` makes a back-buffer
+ * rectangle (already clipped, non-empty) visible. */
 typedef struct {
+    const char *name;
+    uint32_t id;                                    /* SHZ_GPU_BACKEND_* (shzgpu.h) */
+    int (*probe)(gfx_fb_t *fb);
+    void (*present)(int x, int y, int w, int h);
+} gfx_backend_t;
+struct gfx_fb {
     int ready;
     uint32_t width, height, bpp, pitch;             /* pitch in bytes */
     uint16_t bga_version;
     uint64_t lfb_pa;
-    volatile uint32_t *lfb;                         /* uncached mapping of the linear framebuffer */
+    volatile uint32_t *lfb;                         /* uncached mapping of the linear framebuffer (BGA only) */
     uint32_t *back;                                 /* kernel back buffer, width*height dwords, 0x00RRGGBB */
-} gfx_fb_t;
+    const gfx_backend_t *backend;
+    uint64_t stat_presents, stat_present_pixels;
+};
 extern gfx_fb_t g_fb;
+extern const gfx_backend_t gfx_backend_virtio;      /* gfx_virtio.c */
 
 int gfx_fb_init(void);                              /* idempotent; 0 = display ready, else an NTSTATUS */
 void gfx_fb_present(int x, int y, int w, int h);    /* copy a back-buffer rectangle to the framebuffer (clipped) */
