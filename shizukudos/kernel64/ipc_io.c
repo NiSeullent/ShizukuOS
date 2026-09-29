@@ -561,34 +561,28 @@ static int32_t file_rw(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
 #define FILE_DEVICE_CONSOLE_T 0x50u
 #define STATUS_NOT_A_REPARSE_POINT_T ((int32_t)0xC0000275)
 
-/* NtQueryVolumeInformationFile(Handle, IOSB, Buffer, Length, Class): FileFsDeviceInformation (4) tells files, consoles,
- * pipes and sockets apart (GetFileType). */
-static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t h, uint64_t piosb, uint64_t buf, uint64_t len)
+/* NtQueryVolumeInformationFile(Handle, IOSB, Buffer, Length, Class) on pipes and sockets: FileFsDeviceInformation (4) tells
+ * them apart from files (GetFileType); other classes are invalid for them. Files and consoles stay with sysk32.c: returns 0
+ * with *mine = 0 for those. */
+static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t h, uint64_t piosb, uint64_t buf, uint64_t len, int *mine)
 {
     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
     kobject_t *o;
     uint32_t v[2] = { 0, 0 };
     int32_t st;
-    if (cls != 4) return STATUS_INVALID_INFO_CLASS;
-    if (len < 8) return STATUS_INFO_LENGTH_MISMATCH;
-    st = ipc_ref_handle(p, h, 0, &o, 0);
-    if (st) return st;
-    switch (o->type) {
-    case OB_FILE: {
-        const file_t *f = o->u.file.file;
-        v[0] = f && f->console ? FILE_DEVICE_CONSOLE_T : FILE_DEVICE_DISK_T;
-        v[1] = f && f->console ? 0 : 0x20u;             /* FILE_DEVICE_IS_MOUNTED */
-        break;
-    }
-    case OB_NPIPE: v[0] = FILE_DEVICE_NAMED_PIPE_T; break;
-    case OB_SOCKET: v[0] = FILE_DEVICE_NETWORK_T; break;
-    default: st = STATUS_OBJECT_TYPE_MISMATCH; break;
-    }
+    *mine = 0;
+    if (h == CURRENT_PROCESS_HANDLE || h == CURRENT_THREAD_HANDLE) return 0;
+    if (ipc_ref_handle(p, h, 0, &o, 0)) return 0;          /* invalid handles: sysk32.c reports them */
+    if (o->type != OB_NPIPE && o->type != OB_SOCKET) { ob_deref(o); return 0; }
+    *mine = 1;
+    v[0] = o->type == OB_NPIPE ? FILE_DEVICE_NAMED_PIPE_T : FILE_DEVICE_NETWORK_T;
     ob_deref(o);
-    if (st) return st;
+    if (cls != 4) return STATUS_INVALID_DEVICE_REQUEST;
+    if (len < 8) return STATUS_INFO_LENGTH_MISMATCH;
     if (copy_to_user(p, buf, v, 8)) return STATUS_ACCESS_VIOLATION;
     if (piosb) { struct ipc_iosb io = { 0, 8 }; copy_to_user(p, piosb, &io, sizeof io); }
-    return STATUS_SUCCESS;
+    st = STATUS_SUCCESS;
+    return st;
 }
 
 /* NtFsControlFile on RAM-disk files (pipes: npfs.c) and NtDeviceIoControlFile, both (Handle, Event, ApcRoutine, ApcContext,
@@ -720,7 +714,12 @@ int32_t ipc_io_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
         if (iosb_out) { struct ipc_iosb v = { 0, 0 }; if (copy_to_user(p, iosb_out, &v, sizeof v)) return STATUS_ACCESS_VIOLATION; }
         return STATUS_SUCCESS;
     }
-    case SYS_NtQueryVolumeInformationFile: return sys_query_volume(p, r, a1, a2, a3, a4);
+    case SYS_NtQueryVolumeInformationFile: {
+        int mine;
+        const int32_t st = sys_query_volume(p, r, a1, a2, a3, a4, &mine);
+        if (mine) return st;
+        break;
+    }
     case SYS_NtFsControlFile: case SYS_NtDeviceIoControlFile: return file_control(p, r, num, a1, a2, a3, a4);
     case SYS_NtCreateIoCompletion: return sys_create_port(p, a1, a2, a3, a4);
     case SYS_NtSetIoCompletion: return sys_set_port(p, a1, a2, a3, a4, (uint64_t)stack_arg(p, r, 5));

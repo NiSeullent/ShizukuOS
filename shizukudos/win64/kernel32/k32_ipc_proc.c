@@ -358,65 +358,7 @@ K32API DWORD WINAPI GetProcessIdOfThread(HANDLE h)
     return (DWORD)b.pid;
 }
 
-K32API BOOL WINAPI QueryFullProcessImageNameW(HANDLE h, DWORD flags, LPWSTR buf, PDWORD size)
-{
-    union { SHZ_UNICODE_STRING us; BYTE raw[16 + 520]; } u;
-    ULONG ret = 0;
-    DWORD n;
-    NTSTATUS st;
-    if (!buf || !size || (flags & ~1u)) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
-    st = NtQueryInformationProcess(h, (flags & 1) ? 27 : 43, &u, sizeof u, &ret);    /* PROCESS_NAME_NATIVE */
-    if (st) { k32_nt_error(st); return FALSE; }
-    n = u.us.Length / 2;
-    if (n >= *size) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return FALSE; }
-    memcpy(buf, u.us.Buffer, n * sizeof(WCHAR));
-    buf[n] = 0;
-    *size = n;
-    return TRUE;
-}
-
-K32API BOOL WINAPI QueryFullProcessImageNameA(HANDLE h, DWORD flags, LPSTR buf, PDWORD size)
-{
-    WCHAR w[300];
-    DWORD n = 300;
-    int r;
-    if (!buf || !size) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
-    if (!QueryFullProcessImageNameW(h, flags, w, &n)) return FALSE;
-    r = k32_wide_to_utf8(w, (int)n + 1, buf, (int)*size);
-    if (r <= 0) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return FALSE; }
-    *size = (DWORD)r - 1;
-    return TRUE;
-}
-
-K32API BOOL WINAPI GetProcessTimes(HANDLE h, LPFILETIME create, LPFILETIME exit_t, LPFILETIME kernel, LPFILETIME user)
-{
-    LONG64 t[4];
-    NTSTATUS st = NtQueryInformationProcess(h, 4, t, sizeof t, 0);
-    if (st) { k32_nt_error(st); return FALSE; }
-    if (create) { create->dwLowDateTime = (DWORD)t[0]; create->dwHighDateTime = (DWORD)(t[0] >> 32); }
-    if (exit_t) { exit_t->dwLowDateTime = (DWORD)t[1]; exit_t->dwHighDateTime = (DWORD)(t[1] >> 32); }
-    if (kernel) { kernel->dwLowDateTime = (DWORD)t[2]; kernel->dwHighDateTime = (DWORD)(t[2] >> 32); }
-    if (user) { user->dwLowDateTime = (DWORD)t[3]; user->dwHighDateTime = (DWORD)(t[3] >> 32); }
-    return TRUE;
-}
-
-K32API BOOL WINAPI GetProcessHandleCount(HANDLE h, PDWORD count)
-{
-    ULONG n = 0;
-    NTSTATUS st = NtQueryInformationProcess(h, 20, &n, sizeof n, 0);
-    if (st) { k32_nt_error(st); return FALSE; }
-    *count = n;
-    return TRUE;
-}
-
-K32API BOOL WINAPI ProcessIdToSessionId(DWORD pid, DWORD *session)
-{
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!h) return FALSE;
-    CloseHandle(h);
-    *session = 0;                                               /* one session */
-    return TRUE;
-}
+/* QueryFullProcessImageName, GetProcessTimes, GetProcessHandleCount and ProcessIdToSessionId: k32_procinfo.c. */
 
 /* ---------------------------------------------------------------- cross-process memory */
 K32API BOOL WINAPI ReadProcessMemory(HANDLE h, LPCVOID addr, LPVOID buf, SIZE_T n, SIZE_T *done)

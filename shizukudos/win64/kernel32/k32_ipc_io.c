@@ -96,7 +96,11 @@ K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECU
     memset(&iosb, 0, sizeof iosb);
     st = NtCreateFile(&h, access | SYNCHRONIZE | FILE_READ_ATTRIBUTES, &oa, &iosb, 0, flags & 0xffffu & ~FILE_ATTRIBUTE_DIRECTORY,
                       share, d, opts, 0, 0);
-    if (st) { k32_nt_error(st); return INVALID_HANDLE_VALUE; }
+    if (st) {
+        if (st == STATUS_OBJECT_NAME_COLLISION) shz_set_last_error(ERROR_FILE_EXISTS);   /* CREATE_NEW on an existing file */
+        else k32_nt_error(st);
+        return INVALID_HANDLE_VALUE;
+    }
     shz_set_last_error((iosb.Information == 1 && (disp == CREATE_ALWAYS || disp == OPEN_ALWAYS)) || iosb.Information == 3
                        ? ERROR_ALREADY_EXISTS : 0);
     return h;
@@ -153,10 +157,22 @@ K32API BOOL WINAPI ReadFile(HANDLE h, LPVOID buf, DWORD len, LPDWORD done, LPOVE
     return rw(h, buf, len, done, ov, 0);
 }
 
+/* Is h the process's standard output or error handle (RTL_USER_PROCESS_PARAMETERS StandardOutput / StandardError)? */
+static int is_std_output(HANDLE h)
+{
+    const uint8_t *params = PEB_PARAMS(shz_peb());
+    return h == *(HANDLE *)(params + 0x28) || h == *(HANDLE *)(params + 0x30);
+}
+
 K32API BOOL WINAPI WriteFile(HANDLE h, LPCVOID buf, DWORD len, LPDWORD done, LPOVERLAPPED ov)
 {
+    DWORD n = 0;
+    BOOL ok;
     if (done && !ov) *done = 0;
-    return rw(h, (void *)buf, len, done, ov, 1);
+    ok = rw(h, (void *)buf, len, ov ? done : &n, ov, 1);
+    if (!ov && done) *done = n;
+    if (ok && !ov && is_std_output(h) && k32_console_attached()) k32_console_track(buf, n);   /* console screen buffer model */
+    return ok;
 }
 
 /* ReadFileEx / WriteFileEx: the completion routine runs as an APC of the calling thread (ApcContext = the routine). */
@@ -194,7 +210,9 @@ K32API BOOL WINAPI WriteFileEx(HANDLE h, LPCVOID buf, DWORD len, LPOVERLAPPED ov
 
 K32API BOOL WINAPI GetOverlappedResultEx(HANDLE h, LPOVERLAPPED ov, LPDWORD done, DWORD ms, BOOL alertable)
 {
-    volatile ULONG_PTR *status = &ov->Internal;
+    volatile ULONG_PTR *status;
+    if (!ov) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    status = &ov->Internal;
     if (*status == (ULONG_PTR)STATUS_PENDING) {
         HANDLE w = ov_event(ov) ? ov_event(ov) : h;
         DWORD r;
@@ -322,7 +340,12 @@ K32API BOOL WINAPI SetFileCompletionNotificationModes(HANDLE h, UCHAR flags)
 {
     SHZ_IO_STATUS_BLOCK iosb;
     ULONG v = flags;
-    NTSTATUS st = NtSetInformationFile(h, &iosb, &v, sizeof v, 41 /* FileIoCompletionNotificationInformation */);
+    NTSTATUS st;
+    if (flags & ~(UCHAR)(FILE_SKIP_COMPLETION_PORT_ON_SUCCESS | FILE_SKIP_SET_EVENT_ON_HANDLE)) {
+        shz_set_last_error(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    st = NtSetInformationFile(h, &iosb, &v, sizeof v, 41 /* FileIoCompletionNotificationInformation */);
     return st ? k32_ipc_fail(st) : TRUE;
 }
 

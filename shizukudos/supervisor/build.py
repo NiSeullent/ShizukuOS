@@ -95,7 +95,8 @@ def build_loader(payload):
            "-Wl,--subsystem,10", "-Wl,--entry,efi_main", "-Wl,--image-base,0x10000000",
            "-Wl,--enable-reloc-section", "-Wl,--no-insert-timestamp", "-Wl,--strip-all",
            "-I", OUT, "-I", SRC / "loader", "-I", SRC / "src",
-           SRC / "loader" / "loader.c", SRC / "src" / "caps.c", REPO / "shizukudos/uefi/boot.c",
+           SRC / "loader" / "loader.c", SRC / "loader" / "bootini.c", SRC / "src" / "caps.c",
+           REPO / "shizukudos/uefi/boot.c",
            "-o", out]
     run(cmd)
     data = out.read_bytes()
@@ -107,9 +108,10 @@ def build_loader(payload):
 
 
 def guest_kernel_files():
-    """Optional guest kernel images built by shizukudos/kbuild.py and the Win64 initrd."""
+    """Optional guest kernel images built by shizukudos/kbuild.py and the Win64 initrd. KERNEL64S.BIN (standalone
+    Kernel64) is only used by the boot manager's mode=kernel64; the Supervisor ignores it."""
     found = []
-    for rel in ("kernel32/KERNEL32.BIN", "kernel64/KERNEL64.BIN", "win64/WIN64.IMG"):
+    for rel in ("kernel32/KERNEL32.BIN", "kernel64/KERNEL64.BIN", "kernel64s/KERNEL64S.BIN", "win64/WIN64.IMG"):
         path = BUILD / rel
         if path.exists():
             found.append(path)
@@ -145,7 +147,9 @@ def main():
     payload, payload_cmds = build_payload()
     loader, loader_cmd = build_loader(payload)
     esp = build_esp(loader, disk)
-    sources = sorted(p for p in SRC.rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld"))
+    sources = sorted([p for p in SRC.rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")] +
+                     [SHZ / "abi" / "shz_abi.h", REPO / "shizukudos/uefi/boot.c", REPO / "shizukudos/uefi/boot.h",
+                      REPO / "shizukudos/uefi/efi.h"])
     receipt = {
         "profile": "uefi-supervisor-vmx",
         "built_utc": shzlib.utc_now(),

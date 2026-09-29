@@ -6,19 +6,53 @@
  *
  * Image parsing/validation lives in shizukudos/win64/pe_parse.c (shared with host fuzz tests).
  * Anything the loader cannot verify is rejected with an NTSTATUS; nothing is silently stubbed.
+ *
+ * Two mapping strategies:
+ *   RAM-backed files (C:\, the initrd): every page is copied and relocated at load time (eager).
+ *   Disk-backed files (D:\ ...): lazy. The parser reads the file through a kernel file view (kwin.c: only the header
+ *   and directory pages it touches are read), the image's sections become committed VK_IMAGE descriptors tied to an
+ *   image_map_t, and ldr_image_fault() produces each page on its first touch: its bytes are read straight from the
+ *   file into a private page, base relocations of that page (and the tail of a relocation straddling in from the
+ *   page before) are applied from a per-page index of the .reloc blocks (built once when an image cannot load at
+ *   its preferred base; building it reads the whole .reloc directory through the view), then it is mapped with the section's
+ *   protection. A 334 MB DLL therefore costs the pages that are really touched. Pages are private per process
+ *   (no cross-process sharing: FileAlignment 0x200 images do not have page-aligned file data anyway).
+ *   The loader writes the IAT and TLS index with image_poke(), which ignores page protection like the Windows
+ *   loader's temporary unprotect (an IAT inside read-only .rdata is normal for MSVC-linked images).
+ * Search order for a DLL name: the directory of the importing module, the executable's directory, \SHZ\SYS64,
+ * then the root of C:. A name with a path (LoadLibrary("D:\\dir\\x.dll")) is opened as given.
  */
 #include "fs.h"
+#include "kwin.h"
 #include "../win64/pe_parse.h"
 
 #define SYS64_DIR "\\SHZ\\SYS64\\"
 #define MAX_DEPTH 24
 
+typedef struct { uint32_t page, count; uint64_t off; } reloc_block_t;   /* one .reloc block: page RVA, entries, file offset */
+
+typedef struct image_map {
+    fsnode_t *node;                     /* the file (disk-backed) */
+    kview_t *view;                      /* its kernel view (parser, relocation blocks) */
+    const uint8_t *file;                /* view->base */
+    uint64_t fsize;
+    pe_info_t info;
+    uint64_t base, delta;               /* mapped base; base - preferred */
+    reloc_block_t *blocks;              /* sorted by page (relocated images only) */
+    uint32_t nblocks;
+    uint64_t pages_in, reloc_pages, relocs_applied, bytes_read;
+    char name[48];
+} image_map_t;
+
 typedef struct module {
     struct module *next;
     char name[48];                      /* lowercase base name, e.g. "kernel32.dll" */
     char path[128];
+    char dir[128];                      /* directory of the file ("D:\\chrome\\"), searched first for its imports */
     const uint8_t *file;
     uint64_t fsize;
+    image_map_t *img;                   /* lazily mapped (disk-backed) image, else NULL */
+    int32_t fail_status;                /* state -1: why loading failed (returned again instead of a half-loaded module) */
     pe_info_t info;
     uint64_t base;
     int state;                          /* 0 loading, 1 mapped and linked */
@@ -134,31 +168,48 @@ static module_t *find_module(process_t *p, const char *name)
     return 0;
 }
 
-static fsnode_t *locate_file(const char *name, char *found_path, size_t cap)
+/* Directory part of a path including the trailing backslash ("" when there is none). */
+static void dir_of(const char *path, char *out, size_t cap)
 {
-    char path[160];
+    size_t k, last = 0;
+    for (k = 0; path[k]; ++k) if (path[k] == '\\' || path[k] == '/') last = k + 1;
+    if (last >= cap) last = 0;
+    memcpy(out, path, last);
+    out[last] = 0;
+}
+
+static fsnode_t *try_dir(const char *dir, const char *name, char *path, size_t cap)
+{
+    const size_t a = strlen(dir), b = strlen(name);
     fsnode_t *n;
-    size_t k;
-    /* search order: system directory, then the root (application directories are searched by the caller) */
-    memcpy(path, SYS64_DIR, sizeof SYS64_DIR);
-    k = strlen(SYS64_DIR);
-    memcpy(path + k, name, strlen(name) + 1);
+    if (a + b + 1 > cap) return 0;
+    memcpy(path, dir, a);
+    memcpy(path + a, name, b + 1);
     n = fs_lookup(path);
-    if (!n) {
-        path[0] = '\\';
-        memcpy(path + 1, name, strlen(name) + 1);
-        n = fs_lookup(path);
-    }
+    return n && !n->is_dir ? n : 0;
+}
+
+/* Search order: the importing module's directory, the executable's directory, \SHZ\SYS64, the root of C:. */
+static fsnode_t *locate_file(const char *name, const char *importer_dir, const char *exe_dir, char *found_path, size_t cap)
+{
+    char path[256];
+    fsnode_t *n = 0;
+    size_t k;
+    if (importer_dir && importer_dir[0]) n = try_dir(importer_dir, name, path, sizeof path);
+    if (!n && exe_dir && exe_dir[0]) n = try_dir(exe_dir, name, path, sizeof path);
+    if (!n) n = try_dir(SYS64_DIR, name, path, sizeof path);
+    if (!n) n = try_dir("\\", name, path, sizeof path);
     if (n && found_path) {
         for (k = 0; path[k] && k + 1 < cap; ++k) found_path[k] = path[k];
         found_path[k] = 0;
     }
-    return n && !n->is_dir ? n : 0;
+    return n;
 }
 
 /* ---------------------------------------------------------------- user memory helpers */
 static int uwrite(process_t *p, uint64_t va, const void *src, uint64_t n) { return copy_to_user(p, va, src, n); }
 static int uwrite64(process_t *p, uint64_t va, uint64_t v) { return copy_to_user(p, va, &v, 8); }
+static int ipoke64(process_t *p, uint64_t va, uint64_t v) { return image_poke(p, va, &v, 8); }
 static int uread64(process_t *p, uint64_t va, uint64_t *v) { return copy_from_user(p, v, va, 8); }
 
 static uint32_t prot_from_section(uint32_t ch)
@@ -168,6 +219,193 @@ static uint32_t prot_from_section(uint32_t ch)
     if (w) return PAGE_READWRITE;
     if (r) return PAGE_READONLY;
     return PAGE_NOACCESS;
+}
+
+/* ---------------------------------------------------------------- lazy (file-backed) mapping */
+static int block_cmp_less(const reloc_block_t *a, const reloc_block_t *b) { return a->page < b->page || (a->page == b->page && a->off < b->off); }
+
+/* Index of the .reloc blocks (page RVA -> file offset of its entries), read through the view. */
+static int32_t build_reloc_index(image_map_t *im)
+{
+    const pe_info_t *o = &im->info;
+    uint32_t rva = o->dir_rva[5], remaining = o->dir_size[5], cap = 0, n = 0, i;
+    reloc_block_t *b = 0;
+    while (remaining >= 8) {
+        uint64_t off, avail;
+        uint32_t page, size;
+        if (pe_rva_to_offset(im->file, im->fsize, o, rva, &off, &avail) || avail < 8) break;
+        page = *(const uint32_t *)(im->file + off);
+        size = *(const uint32_t *)(im->file + off + 4);
+        if (size < 8 || size > remaining || (size & 1) || page >= o->size_of_image || (page & 0xfff) || avail < size) break;
+        if (n == cap) {
+            const uint32_t ncap = cap ? cap * 2 : 64;
+            reloc_block_t *nb = kmalloc((size_t)ncap * sizeof *nb);
+            if (!nb) { kfree(b); return STATUS_NO_MEMORY; }
+            if (b) { memcpy(nb, b, (size_t)n * sizeof *nb); kfree(b); }
+            b = nb; cap = ncap;
+        }
+        b[n].page = page; b[n].count = (size - 8) / 2; b[n].off = off + 8;
+        ++n;
+        rva += size; remaining -= size;
+    }
+    if (remaining) { kfree(b); return STATUS_INVALID_IMAGE_FORMAT; }
+    for (i = 1; i < n; ++i)                                        /* linkers emit ascending pages; keep it robust */
+        if (block_cmp_less(&b[i], &b[i - 1])) {
+            uint32_t j, k;
+            for (j = 1; j < n; ++j)                                 /* insertion sort, only for unsorted input */
+                for (k = j; k > 0 && block_cmp_less(&b[k], &b[k - 1]); --k) { reloc_block_t t = b[k]; b[k] = b[k - 1]; b[k - 1] = t; }
+            break;
+        }
+    for (i = 0; i < n; ++i) {                                       /* entry types must be ABSOLUTE, HIGHLOW or DIR64 */
+        uint32_t e;
+        for (e = 0; e < b[i].count; ++e) {
+            const uint16_t v = *(const uint16_t *)(im->file + b[i].off + 2ull * e);
+            const unsigned type = v >> 12;
+            if (type && type != 3 && type != 10) { kfree(b); return STATUS_INVALID_IMAGE_FORMAT; }
+            if (type && (uint64_t)b[i].page + (v & 0xfff) + (type == 10 ? 8 : 4) > o->size_of_image) { kfree(b); return STATUS_INVALID_IMAGE_FORMAT; }
+        }
+    }
+    im->blocks = b;
+    im->nblocks = n;
+    return im->file && im->view->io_errors ? STATUS_IN_PAGE_ERROR : STATUS_SUCCESS;
+}
+
+/* Original (file) bytes of the image at [rva, rva+n): headers, raw section data, zeros elsewhere. */
+static void image_orig(image_map_t *im, uint64_t rva, uint8_t *out, uint64_t n)
+{
+    while (n) {
+        uint64_t off, avail, take;
+        if (rva < 0x100000000ull && !pe_rva_to_offset(im->file, im->fsize, &im->info, (uint32_t)rva, &off, &avail) && avail) {
+            take = avail < n ? avail : n;
+            memcpy(out, im->file + off, take);
+        } else {
+            take = 1;
+            *out = 0;
+        }
+        out += take; rva += take; n -= take;
+    }
+}
+
+/* Applies the fixups of the .reloc block(s) for page `block_page` that land in the page at page_rva (content in `pg`):
+ * called with the page itself and with the page before it (a fixup starting there may straddle into this page). */
+static void relocate_page(image_map_t *im, uint64_t page_rva, uint8_t *pg, uint32_t block_page)
+{
+    uint32_t lo = 0, hi = im->nblocks;
+    while (lo < hi) {                                               /* first block with page >= block_page */
+        const uint32_t mid = (lo + hi) / 2;
+        if (im->blocks[mid].page < block_page) lo = mid + 1; else hi = mid;
+    }
+    for (; lo < im->nblocks && im->blocks[lo].page == block_page; ++lo) {
+        const reloc_block_t *b = &im->blocks[lo];
+        uint32_t e;
+        for (e = 0; e < b->count; ++e) {
+            const uint16_t v = *(const uint16_t *)(im->file + b->off + 2ull * e);
+            const unsigned type = v >> 12, width = type == 10 ? 8 : 4;
+            const uint64_t at = (uint64_t)b->page + (v & 0xfff);
+            uint8_t val[8];
+            uint64_t x = 0, k;
+            if (!type) continue;
+            if (at + width <= page_rva || at >= page_rva + PAGE_SIZE) continue;      /* not in this page */
+            if (at >= page_rva && at + width <= page_rva + PAGE_SIZE)
+                memcpy(val, pg + (at - page_rva), width);           /* still the original: fixups never overlap */
+            else
+                image_orig(im, at, val, width);                     /* straddles the page edge: file bytes via the view */
+            memcpy(&x, val, width);
+            x = width == 8 ? x + im->delta : (uint64_t)(uint32_t)((uint32_t)x + (uint32_t)im->delta);
+            memcpy(val, &x, width);
+            for (k = 0; k < width; ++k)
+                if (at + k >= page_rva && at + k < page_rva + PAGE_SIZE) pg[at + k - page_rva] = val[k];
+            ++im->relocs_applied;
+        }
+    }
+}
+
+int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr)
+{
+    image_map_t *im = v->img;
+    const uint64_t va = addr & ~(PAGE_SIZE - 1), rva = va - im->base;
+    const pe_info_t *o = &im->info;
+    uint64_t pa, file_off = 0, n = 0, done = 0;
+    uint8_t *pg;
+    unsigned i;
+    if (va < im->base || rva >= o->size_of_image) return STATUS_ACCESS_VIOLATION;
+    if (rva < ((o->size_of_headers + 4095ull) & ~4095ull)) {       /* headers */
+        file_off = rva;
+        n = o->size_of_headers - rva < PAGE_SIZE ? o->size_of_headers - rva : PAGE_SIZE;
+    } else {
+        for (i = 0; i < o->nsections; ++i) {
+            pe_section_t s;
+            uint64_t vlen, raw;
+            pe_get_section(im->file, o, i, &s);
+            vlen = ((uint64_t)(s.vsize ? s.vsize : s.raw_size) + 4095ull) & ~4095ull;
+            if (rva < s.rva || rva >= s.rva + vlen) continue;
+            raw = s.raw_size < (s.vsize ? s.vsize : s.raw_size) ? s.raw_size : (s.vsize ? s.vsize : s.raw_size);
+            if (rva - s.rva < raw) {
+                file_off = s.raw_off + (rva - s.rva);
+                n = raw - (rva - s.rva) < PAGE_SIZE ? raw - (rva - s.rva) : PAGE_SIZE;
+            }
+            break;
+        }
+    }
+    pa = pmm_alloc();                                               /* zeroed: bss tails and gaps read as zero */
+    if (!pa) return STATUS_NO_MEMORY;
+    pg = (uint8_t *)p2v(pa);
+    if (n && (fs_read(im->node, file_off, pg, n, &done) || done != n)) {
+        pmm_free(pa);
+        kprintf("K64 ldr: %s: page rva %llx: read of %llu bytes at file offset %llx failed\n", im->name, rva, n, file_off);
+        return STATUS_IN_PAGE_ERROR;
+    }
+    if (im->delta && im->nblocks) {
+        const uint64_t before = im->relocs_applied;
+        relocate_page(im, rva, pg, (uint32_t)rva);
+        if (rva) relocate_page(im, rva, pg, (uint32_t)(rva - PAGE_SIZE));   /* DIR64/HIGHLOW straddling in */
+        if (im->relocs_applied != before) ++im->reloc_pages;
+        if (im->view->io_errors) { pmm_free(pa); return STATUS_IN_PAGE_ERROR; }
+    }
+    /* The reads may have blocked (volume mutex): another thread of the process may have faulted the page in, or changed
+     * or freed the range (the descriptor array can even have been reallocated), so look the descriptor up again. */
+    if (vm_lookup(p->pml4, va, 0)) { pmm_free(pa); return 0; }
+    v = vad_find(p, va);
+    if (!v || v->img != im || v->state != VAD_COMMITTED) { pmm_free(pa); return STATUS_ACCESS_VIOLATION; }
+    if (vm_map(p->pml4, va, pa, prot_to_ptflags(v->prot))) { pmm_free(pa); return STATUS_NO_MEMORY; }
+    ++im->pages_in;
+    im->bytes_read += n;
+    return 0;
+}
+
+static int32_t map_module_lazy(process_t *p, module_t *m, uint64_t base)
+{
+    const pe_info_t *pi = &m->info;
+    image_map_t *im = m->img;
+    unsigned i;
+    int32_t st;
+    uint64_t end;
+    im->base = base;
+    im->delta = base - pi->image_base;
+    if (im->delta && pi->dir_rva[5] && pi->dir_size[5]) {
+        st = build_reloc_index(im);
+        if (st) return st;
+    }
+    st = vad_insert_image(p, base, pi->size_of_headers, PAGE_READONLY, base, im);
+    if (st) return st;
+    end = pi->size_of_headers;
+    for (i = 0; i < pi->nsections; ++i) {
+        pe_section_t s;
+        uint64_t vlen;
+        pe_get_section(m->file, pi, i, &s);
+        vlen = ((uint64_t)(s.vsize ? s.vsize : s.raw_size) + 4095ull) & ~4095ull;
+        if (!vlen) continue;
+        st = vad_insert_image(p, base + s.rva, vlen, prot_from_section(s.characteristics), base, im);
+        if (st) return st;
+        if (s.rva + vlen > end) end = s.rva + vlen;
+    }
+    end = (end + 4095ull) & ~4095ull;
+    if (end < pi->size_of_image)
+        vad_insert_fixed(p, base + end, pi->size_of_image - end, VAD_RESERVED, PAGE_NOACCESS, VK_IMAGE, base);
+    kprintf("K64 ldr: %s mapped lazily from %s at %llx (preferred %llx%s), %u pages in %u sections, %llu of %llu file "
+            "pages read by the parser\n", m->name, m->path, base, pi->image_base, im->delta ? ", relocated per page" : "",
+            pi->size_of_image / 4096, pi->nsections, im->view->resident, im->view->npages);
+    return STATUS_SUCCESS;
 }
 
 /* ---------------------------------------------------------------- mapping */
@@ -195,6 +433,7 @@ static int32_t map_module(process_t *p, module_t *m)
         relocate = 1;
     }
     m->base = base;
+    if (m->img) return map_module_lazy(p, m, base);
 
     /* headers, then each section, as separate descriptors sharing one allocation base */
     st = vad_insert_fixed(p, base, pi->size_of_headers, VAD_COMMITTED, PAGE_READONLY, VK_IMAGE, base);
@@ -262,6 +501,7 @@ static int32_t map_module(process_t *p, module_t *m)
 
 /* ---------------------------------------------------------------- exports and imports */
 static int32_t load_dll(process_t *p, const char *name, int depth, module_t **out);
+static int32_t load_dll_from(process_t *p, const char *name, const char *importer_dir, int depth, module_t **out);
 
 static int32_t resolve_export(process_t *p, module_t *m, const char *sym, int ordinal, int depth, uint64_t *va)
 {
@@ -298,7 +538,7 @@ static int32_t resolve_export(process_t *p, module_t *m, const char *sym, int or
                 if (!host) return STATUS_DLL_NOT_FOUND;
                 memcpy(nm, host, strlen(host) + 1);
             }
-            st = load_dll(p, nm, depth + 1, &target);
+            st = load_dll_from(p, nm, m->dir, depth + 1, &target);
         }
         if (st) return st;
         if (fn[0] == '#') {
@@ -329,15 +569,19 @@ static int import_cb(void *c, const char *dll, const char *name, uint16_t hint, 
         if (!host) { x->st = STATUS_DLL_NOT_FOUND; return -1; }     /* unknown contract: no blind forwarding */
         memcpy(nm, host, strlen(host) + 1);
     }
-    st = load_dll(x->p, nm, x->depth + 1, &target);
-    if (st) { x->st = st; return -1; }
+    st = load_dll_from(x->p, nm, x->m->dir, x->depth + 1, &target);
+    if (st) {
+        kprintf("K64 ldr: %s imports %s: cannot load it (%x)\n", x->m->name, nm, (uint32_t)st);
+        x->st = st;
+        return -1;
+    }
     st = resolve_export(x->p, target, name, by_ord ? hint : -1, 0, &va);
     if (st) {
         kprintf("K64 ldr: %s imports %s!%s -> %x\n", x->m->name, nm, name ? name : "#ordinal", (uint32_t)st);
         x->st = st;
         return -1;
     }
-    if (uwrite64(x->p, x->m->base + iat_rva, va)) { x->st = STATUS_ACCESS_VIOLATION; return -1; }
+    if (ipoke64(x->p, x->m->base + iat_rva, va)) { x->st = STATUS_ACCESS_VIOLATION; return -1; }
     return 0;
 }
 
@@ -357,10 +601,10 @@ static int32_t link_module(process_t *p, module_t *m, int depth)
         {
             uint64_t v[4];
             uint32_t zero;
-            uint64_t pa = vm_lookup(p->pml4, m->base + m->info.dir_rva[9], 0);
-            if (!pa) return STATUS_INVALID_IMAGE_FORMAT;
-            memcpy(v, (void *)p2v(pa), 32);
-            memcpy(&zero, (void *)p2v(pa + 32), 4);
+            uint8_t dir[36];
+            if (copy_from_user(p, dir, m->base + m->info.dir_rva[9], sizeof dir)) return STATUS_INVALID_IMAGE_FORMAT;
+            memcpy(v, dir, 32);
+            memcpy(&zero, dir + 32, 4);
             m->tls_start = v[0]; m->tls_end = v[1]; m->tls_index_va = v[2]; m->tls_callbacks_va = v[3]; m->tls_zero = zero;
             if (m->tls_end < m->tls_start || m->tls_end - m->tls_start > (1u << 24) ||
                 m->tls_start < m->base || m->tls_end > m->base + m->info.size_of_image ||
@@ -370,7 +614,7 @@ static int32_t link_module(process_t *p, module_t *m, int depth)
             m->tls_index = p->tls_slots++;
             {
                 uint32_t idx = m->tls_index;
-                if (uwrite(p, m->tls_index_va, &idx, 4)) return STATUS_ACCESS_VIOLATION;
+                if (image_poke(p, m->tls_index_va, &idx, 4)) return STATUS_ACCESS_VIOLATION;
             }
         }
     }
@@ -389,37 +633,83 @@ static int32_t load_module_file(process_t *p, const char *name, fsnode_t *node, 
         size_t k;
         for (k = 0; path[k] && k + 1 < sizeof m->path; ++k) m->path[k] = path[k];
     }
-    m->file = node->data;
+    dir_of(path, m->dir, sizeof m->dir);
+    if (node->backing == FSB_DISK) {                            /* lazy: parse through the file view */
+        kview_t *v = kview_get(node);
+        if (!v) { kfree(m); return STATUS_NO_MEMORY; }
+        m->img = kzalloc(sizeof *m->img);
+        if (!m->img) { kfree(m); return STATUS_NO_MEMORY; }
+        m->img->node = node;
+        m->img->view = v;
+        m->img->file = (const uint8_t *)v->base;
+        m->img->fsize = node->size;
+        memcpy(m->img->name, m->name, sizeof m->img->name);
+        m->file = m->img->file;
+    } else {
+        m->file = node->data;
+    }
     m->fsize = node->size;
     rc = pe_parse(m->file, m->fsize, &m->info);
+    if (!rc && m->img && m->img->view->io_errors) rc = PE_E_TRUNCATED;
     if (rc) {
+        const int32_t why = m->img && m->img->view->io_errors ? STATUS_IN_PAGE_ERROR : STATUS_INVALID_IMAGE_FORMAT;
         kprintf("K64 ldr: %s rejected (pe error %d)\n", name, rc);
+        kfree(m->img);
         kfree(m);
-        return rc == PE_E_MACHINE ? STATUS_INVALID_IMAGE_FORMAT : STATUS_INVALID_IMAGE_FORMAT;
+        return why;
     }
+    if (m->img) m->img->info = m->info;
     m->is_dll = (m->info.characteristics & PE_CHAR_DLL) != 0;
     m->state = 0;
     m->next = p->modules;
     p->modules = m;                                             /* visible while loading: circular imports terminate */
     st = map_module(p, m);
-    if (!st) st = link_module(p, m, depth);
-    if (st) return st;
+    if (!st) {
+        st = link_module(p, m, depth);
+        if (st) {                                               /* mapped but not linkable: give the range back */
+            uint64_t b = m->base, sz = 0;
+            vad_free(p, &b, &sz, MEM_RELEASE);
+        }
+    } else if (m->img && m->base) {                             /* a partial lazy mapping: only our own descriptors */
+        vad_t *v = vad_find(p, m->base);
+        uint64_t b = m->base, sz = 0;
+        if (v && v->img == m->img && v->alloc_base == m->base) vad_free(p, &b, &sz, MEM_RELEASE);
+    }
+    if (st) {
+        m->state = -1;                                          /* stays listed (circular imports saw it) but failed */
+        m->fail_status = st;
+        return st;
+    }
     m->state = 1;
     m->init_seq = ++init_counter;
     if (out) *out = m;
     return STATUS_SUCCESS;
 }
 
-static int32_t load_dll(process_t *p, const char *name, int depth, module_t **out)
+static const char *exe_dir(process_t *p)
+{
+    module_t *m;
+    for (m = p->modules; m; m = m->next)
+        if (!m->is_dll) return m->dir;                          /* the executable is the process's only non-DLL image */
+    return 0;
+}
+
+static int32_t load_dll_from(process_t *p, const char *name, const char *importer_dir, int depth, module_t **out)
 {
     module_t *m = find_module(p, name);
     fsnode_t *node;
-    char path[128];
+    char path[256];
+    if (m && m->state < 0) return m->fail_status;              /* an earlier attempt failed: same answer, no half module */
     if (m) { if (out) *out = m; return STATUS_SUCCESS; }
     if (depth > MAX_DEPTH) return STATUS_DLL_NOT_FOUND;
-    node = locate_file(name, path, sizeof path);
+    node = locate_file(name, importer_dir, exe_dir(p), path, sizeof path);
     if (!node) return STATUS_DLL_NOT_FOUND;
     return load_module_file(p, name, node, path, depth, out);
+}
+
+static int32_t load_dll(process_t *p, const char *name, int depth, module_t **out)
+{
+    return load_dll_from(p, name, 0, depth, out);
 }
 
 /* ---------------------------------------------------------------- Windows-shaped loader database */
@@ -640,18 +930,6 @@ static uint64_t ntdll_export(process_t *p, const char *sym)
 
 uint64_t ldr_ntdll_export(process_t *p, const char *sym) { return ntdll_export(p, sym); }
 
-/* Frees the loader's module records of a torn-down process (proc.c: process_teardown). */
-void ldr_free_modules(process_t *p)
-{
-    module_t *m = p->modules;
-    while (m) {
-        module_t *n = m->next;
-        kfree(m);
-        m = n;
-    }
-    p->modules = 0;
-}
-
 static int32_t ldr_create_process_body(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                        const ldr_create_ex_t *ex, process_t *p, thread_t **out_thread);
 
@@ -672,6 +950,8 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
     p = process_create_empty("win64");
     if (!p) return STATUS_NO_MEMORY;
     p->parent_pid = parent ? (uint64_t)parent->pid : 0;
+    p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
+    p->console_sink_gen = parent ? parent->console_sink_gen : 0;
     st = ldr_create_process_body(parent, image_path, cmdline, cwd, ex, p, out_thread);
     if (st) {
         process_terminate(p, st, 0);
@@ -755,7 +1035,8 @@ static int32_t ldr_create_process_body(process_t *parent, const char *image_path
     st = process_start_thread3(p, p->ntdll_process_start, p->entry, 0, exe->info.stack_reserve ? exe->info.stack_reserve : 0x100000,
                                ex && ex->suspended, &t);
     if (st) return STATUS_NO_MEMORY;
-    if (out_thread) *out_thread = t;
+    if (out_thread) *out_thread = t;            /* the caller holds t until thread_creator_release() or proc_wait() */
+    else thread_creator_release(t);
     return STATUS_SUCCESS;
 }
 
@@ -765,14 +1046,27 @@ int32_t ldr_load_module_runtime(process_t *p, const char *name, uint64_t *base_o
     module_t *m;
     int32_t st;
     int is_api;
-    const char *host;
+    const char *host, *q;
+    int has_path = 0;
+    for (q = name; *q; ++q) if (*q == '\\' || *q == '/' || *q == ':') has_path = 1;
     base_name(name, nm, sizeof nm);
     host = apiset_resolve(nm, &is_api);
     if (is_api) {
         if (!host) return STATUS_DLL_NOT_FOUND;
         memcpy(nm, host, strlen(host) + 1);
     }
-    st = load_dll(p, nm, 0, &m);
+    if (has_path && !is_api && !find_module(p, nm)) {           /* LoadLibrary("D:\\dir\\x.dll"): that file */
+        fsnode_t *node = fs_lookup(name);
+        char path[256];
+        size_t k;
+        if (!node || node->is_dir) return STATUS_DLL_NOT_FOUND;
+        for (k = 0; name[k] && k + 1 < sizeof path; ++k) path[k] = name[k];
+        path[k] = 0;
+        st = load_module_file(p, nm, node, path, 0, &m);
+        if (st) kprintf("K64 ldr: LoadLibrary %s failed (%x)\n", name, (uint32_t)st);
+    } else {
+        st = load_dll(p, nm, 0, &m);
+    }
     if (st) return st;
     st = publish_all(p, 0);
     if (st) return st;
@@ -785,7 +1079,47 @@ uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint
     module_t *m;
     uint64_t va = 0;
     for (m = p->modules; m; m = m->next)
-        if (m->base == base && !resolve_export(p, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
+        if (m->state == 1 && m->base == base && !resolve_export(p, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
             return va;
     return 0;
+}
+
+/* kernel32 support (sysk32_proc.c: toolhelp, GetMappedFileName, QueryFullProcessImageName): the index-th mapped module of p
+ * in load order (the executable first). Returns 0 and fills the outputs, or -1 past the last module. */
+int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t *size, const char **name, const char **path)
+{
+    module_t *m;
+    unsigned n = 0, want;
+    for (m = p->modules; m; m = m->next)
+        if (m->state == 1) ++n;
+    if (index >= n) return -1;
+    want = n - 1 - index;                                       /* the list is newest first */
+    for (m = p->modules; m; m = m->next) {
+        if (m->state != 1) continue;
+        if (want-- == 0) {
+            *base = m->base; *size = m->info.size_of_image; *name = m->name; *path = m->path;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* ---------------------------------------------------------------- teardown */
+void ldr_release_modules(process_t *p)
+{
+    module_t *m = p->modules, *next;
+    p->modules = 0;                                     /* detached first: sysk32_proc.c reads the list of other processes */
+    for (; m; m = next) {
+        next = m->next;
+        if (m->img) {
+            kprintf("K64 ldr: %s (pid %d): %llu of %u image pages were made resident (%llu bytes read, %llu relocated "
+                    "pages, %llu fixups); file view %llu of %llu pages\n", m->name, p->pid, m->img->pages_in,
+                    m->info.size_of_image / 4096, m->img->bytes_read, m->img->reloc_pages, m->img->relocs_applied,
+                    m->img->view->resident, m->img->view->npages);
+            kfree(m->img->blocks);
+            kfree(m->img);
+        }
+        kfree(m);
+    }
+    p->modules = 0;
 }

@@ -653,6 +653,7 @@ static int32_t sys_create_user_process(process_t *p, uint64_t arg)
             if (ht) handle_close(p, ht);
             if (nt->suspend_count) { nt->suspend_count = 0; thread_resume(nt); }   /* lets a suspended child die */
         }
+        thread_creator_release(nt);                      /* from here on only the thread object is used */
     }
     for (i = 0; i < ctx.job_count; ++i) ob_deref(ctx.jobs[i]);
     if (parent_obj) ob_deref(parent_obj);
@@ -677,7 +678,8 @@ static kobject_t *thread_object_by_tid(uint64_t tid)
     kobject_t *o = 0;
     uint64_t f;
     if (!tid) return 0;
-    ipc_reap();                                          /* an exited thread whose last handle is gone is no longer found */
+    thread_reap_exited();                                /* exited threads are no longer found by id (their objects keep
+                                                            answering through open handles) */
     sched_for_each_thread(find_tid_cb, &s);
     f = irq_save();
     if (s.found && s.found->tid == tid && s.found->object) { o = s.found->object; ob_ref(o); }
@@ -698,9 +700,13 @@ static int32_t sys_open_process(process_t *p, uint64_t ph, uint64_t access, uint
     if (oa && copy_from_user(p, &a, oa, sizeof a)) return STATUS_ACCESS_VIOLATION;
     if (cid.tid) {                                       /* by thread id: that thread's process (must match pid if given) */
         kobject_t *to = thread_object_by_tid(cid.tid);
-        thread_t *th = to ? to->u.thr.t : 0;
-        if (th && th->proc && (!cid.pid || (uint64_t)th->proc->pid == cid.pid)) { o = th->proc->object; ob_ref(o); }
-        if (to) ob_deref(to);
+        if (to) {
+            const uint64_t f = irq_save();              /* the thread may be reclaimed at any preemption: its object keeps the pid */
+            thread_t *th = to->u.thr.t;
+            if (th && th->proc && (!cid.pid || to->u.thr.pid == cid.pid)) { o = th->proc->object; ob_ref(o); }
+            irq_restore(f);
+            ob_deref(to);
+        }
     } else {
         const uint64_t f = irq_save();
         process_t *t = cid.pid > 0 && cid.pid < 0x7fffffffull ? process_by_pid((int)cid.pid) : 0;
@@ -717,14 +723,12 @@ static int32_t sys_open_thread(process_t *p, uint64_t ph, uint64_t access, uint6
     struct client_id cid;
     struct ipc_objattr a;
     kobject_t *o;
-    thread_t *t;
     if (!pcid || copy_from_user(p, &cid, pcid, sizeof cid)) return STATUS_ACCESS_VIOLATION;
     memset(&a, 0, sizeof a);
     if (oa && copy_from_user(p, &a, oa, sizeof a)) return STATUS_ACCESS_VIOLATION;
     o = thread_object_by_tid(cid.tid);
     if (!o) return STATUS_INVALID_CID;
-    t = o->u.thr.t;
-    if (cid.pid && (!t || !t->proc || (uint64_t)t->proc->pid != cid.pid)) { ob_deref(o); return STATUS_INVALID_CID; }
+    if (cid.pid && o->u.thr.pid != cid.pid) { ob_deref(o); return STATUS_INVALID_CID; }
     return ipc_give_handle(p, o, max_allowed((uint32_t)access, THREAD_ALL_ACCESS), (a.attributes & OBJ_INHERIT_ATTR) != 0, ph, 0);
 }
 
@@ -772,6 +776,7 @@ static int32_t sys_create_thread(process_t *p, struct regs *r, uint64_t ph, uint
     process_t *t;
     kobject_t *po;
     thread_t *nt = 0;
+    kobject_t *to;
     uint64_t size;
     int32_t st;
     if (!start) return STATUS_INVALID_PARAMETER;
@@ -789,23 +794,30 @@ static int32_t sys_create_thread(process_t *p, struct regs *r, uint64_t ph, uint
         return st;
     }
     ob_deref(po);
-    ob_ref(nt->object);
-    return ipc_give_handle(p, nt->object, max_allowed((uint32_t)access ? (uint32_t)access : THREAD_ALL_ACCESS, THREAD_ALL_ACCESS),
+    to = nt->object;
+    ob_ref(to);
+    thread_creator_release(nt);                          /* from here on only the thread object is used */
+    return ipc_give_handle(p, to, max_allowed((uint32_t)access ? (uint32_t)access : THREAD_ALL_ACCESS, THREAD_ALL_ACCESS),
                            (a.attributes & OBJ_INHERIT_ATTR) != 0, ph, 0);
 }
 
-static int32_t ref_thread(process_t *p, uint64_t h, uint32_t need, thread_t **out, kobject_t **obj)
+/* A thread handle with `need` access; referenced. The object's thread (u.thr.t) is reclaimed once it has exited (sched.c) at
+ * any preemption, so callers read it with interrupts off: attached_thread(). */
+static int32_t ref_thread(process_t *p, uint64_t h, uint32_t need, kobject_t **obj)
 {
     uint32_t access = 0;
     int32_t st = ipc_ref_handle(p, h, OB_THREAD, obj, &access);
     if (st) return st;
     if ((access & need) != need) { ob_deref(*obj); return STATUS_ACCESS_DENIED; }
-    *out = (*obj)->u.thr.t;
-    if (!*out) { ob_deref(*obj); return STATUS_INVALID_HANDLE; }
     return STATUS_SUCCESS;
 }
 
-static int thread_gone(thread_t *t) { return t->state == TS_ZOMBIE || t->state == TS_FREE || !t->proc; }
+/* Interrupts off: the object's thread while it has not finished exiting, else 0. */
+static thread_t *attached_thread(kobject_t *o)
+{
+    thread_t *t = o->u.thr.t;
+    return t && t->state != TS_ZOMBIE && t->state != TS_FREE && t->proc ? t : 0;
+}
 
 /* NtSuspendThread / NtResumeThread(Thread, PULONG PreviousSuspendCount) */
 static int32_t sys_suspend_resume(process_t *p, uint64_t h, uint64_t pprev, int suspend)
@@ -814,10 +826,11 @@ static int32_t sys_suspend_resume(process_t *p, uint64_t h, uint64_t pprev, int 
     kobject_t *o;
     uint32_t prev;
     uint64_t f;
-    int32_t st = ref_thread(p, h, THREAD_SUSPEND_RESUME, &t, &o);
+    int32_t st = ref_thread(p, h, THREAD_SUSPEND_RESUME, &o);
     if (st) return st;
     f = irq_save();
-    if (thread_gone(t) || thread_must_die(t)) { irq_restore(f); ob_deref(o); return STATUS_THREAD_IS_TERMINATING; }
+    t = attached_thread(o);
+    if (!t || thread_must_die(t)) { irq_restore(f); ob_deref(o); return STATUS_THREAD_IS_TERMINATING; }
     prev = (uint32_t)t->suspend_count;
     if (suspend) {
         if (prev >= MAX_SUSPEND) { irq_restore(f); ob_deref(o); return STATUS_SUSPEND_COUNT_EXCEEDED; }
@@ -841,16 +854,18 @@ static int32_t sys_terminate_thread(process_t *p, uint64_t h, int32_t code)
     thread_t *t;
     kobject_t *o;
     uint64_t f;
-    int32_t st = ref_thread(p, h, THREAD_TERMINATE, &t, &o);
+    int32_t st = ref_thread(p, h, THREAD_TERMINATE, &o);
     if (st) return st;
-    if (t == thread_current()) {
+    if (o->u.thr.t == thread_current()) {
+        t = thread_current();
         ob_deref(o);
         t->exit_code = code;
         process_thread_gone(p);
         thread_exit(code);
     }
     f = irq_save();
-    if (!thread_gone(t) && !t->kill_pending) {
+    t = attached_thread(o);
+    if (t && !t->kill_pending) {
         t->kill_code = code;
         t->kill_pending = 1;
         ipc_wake_to_die(t);
@@ -919,12 +934,20 @@ static int32_t sys_query_thread(process_t *p, struct regs *r, uint64_t h, uint64
     if (len < sizeof b) return STATUS_INFO_LENGTH_MISMATCH;
     st = ipc_ref_handle(p, h, OB_THREAD, &o, 0);
     if (st) return st;
-    t = o->u.thr.t;
     memset(&b, 0, sizeof b);
-    b.exit_status = !t || t->state == TS_ZOMBIE || t->state == TS_FREE ? (t ? t->exit_code : 0) : 0x103;
-    b.teb = t ? t->teb : 0;
-    b.pid = t && t->proc ? (uint64_t)t->proc->pid : 0;
-    b.tid = t ? t->tid : 0;
+    {
+        const uint64_t f = irq_save();                   /* an exited thread is reclaimed at any preemption (sched.c) */
+        t = o->u.thr.t;
+        if (t) {
+            b.exit_status = t->state == TS_ZOMBIE || t->state == TS_FREE ? t->exit_code : 0x103;
+            b.teb = t->state == TS_ZOMBIE ? 0 : t->teb;
+        } else {
+            b.exit_status = o->u.thr.exit_code;          /* reclaimed: the object kept the exit status and the ids */
+        }
+        b.pid = o->u.thr.pid;
+        b.tid = o->u.thr.tid;
+        irq_restore(f);
+    }
     b.affinity = 1; b.prio = 8; b.base = 8;
     ob_deref(o);
     if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;

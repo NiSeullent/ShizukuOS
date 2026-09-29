@@ -53,7 +53,8 @@
     X(NtShzSockName, 0x88) X(NtShzSockSetOpt, 0x89) X(NtShzSockGetOpt, 0x8a) X(NtShzSockIoctl, 0x8b) \
     X(NtShzSockPoll, 0x8c) X(NtShzNetResolve, 0x8d) X(NtShzNetQuery, 0x8e) X(NtShzNetPing, 0x8f)
 
-#define SYSCALL_LIST_K32(X)
+#define SYSCALL_LIST_K32(X) \
+    X(NtQueryVolumeInformationFile, 0x90) X(NtLockFile, 0x91) X(NtUnlockFile, 0x92) X(NtShzQueryK32, 0x93) X(NtShzSetK32, 0x94)
 
 /* IPC and the Windows process model (kernel64/ipc_*.c, npfs.c): sections, named pipes, I/O completion, APCs, jobs. */
 #define SYSCALL_LIST_MISC(X) \
@@ -66,7 +67,7 @@
 #define SYSCALL_LIST_IPC(X) \
     X(NtCreateJobObject, 0xb0) X(NtOpenJobObject, 0xb1) X(NtAssignProcessToJobObject, 0xb2) \
     X(NtSetInformationJobObject, 0xb3) X(NtQueryInformationJobObject, 0xb4) X(NtTerminateJobObject, 0xb5) \
-    X(NtIsProcessInJob, 0xb6) X(NtSetInformationObject, 0xb7) X(NtQueryVolumeInformationFile, 0xb8) \
+    X(NtIsProcessInJob, 0xb6) X(NtSetInformationObject, 0xb7) \
     X(NtReadVirtualMemory, 0xb9) X(NtWriteVirtualMemory, 0xba) X(NtShzQueryKernelStats, 0xbb) \
     X(NtQueryIoCompletion, 0xbc) X(NtOpenEvent, 0xbd) X(NtOpenMutant, 0xbe) X(NtOpenSemaphore, 0xbf) \
     X(NtOpenTimer, 0xc0) X(NtOpenIoCompletion, 0xc1) X(NtDeviceIoControlFile, 0xc2) \

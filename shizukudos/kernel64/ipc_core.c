@@ -4,8 +4,8 @@
  *
  * Lifetimes follow NT: a process's address space and handle table are released when its last thread exits (before the
  * process object is signaled), while the process object - and with it the pid, exit status and slot - lives until the
- * last handle and the last thread object referencing it are gone. An exited thread gives its kernel stack back at the
- * next reap point; its slot stays until its thread object is freed, so thread handles keep reporting the exit code.
+ * last handle and the last thread referencing it are gone. An exited thread's slot and kernel stack are reclaimed by the
+ * scheduler (sched.c reap_user_zombies); its thread object keeps the exit status, ids and times for open handles.
  *
  * APCs: a user APC is delivered when its thread performs an alertable wait (NtWaitForSingleObject/Multiple, NtDelayExecution,
  * NtRemoveIoCompletionEx with Alertable) or NtTestAlert. Delivery rewrites the system call's return frame: the interrupted
@@ -199,19 +199,6 @@ void ipc_object_free(kobject_t *o)
     case OB_JOB: job_free(o); break;
     case OB_TIMER: timer_free(o); break;
     case OB_FILE: ioctx_free(o); break;
-    case OB_THREAD: {                                   /* the exited thread's slot and its process reference */
-        thread_t *t = o->u.thr.t;
-        process_t *pp;
-        uint64_t f;
-        if (!t) break;
-        pp = t->proc;
-        f = irq_save();
-        t->object = 0;
-        if (t->state == TS_ZOMBIE && !t->stack_base) t->state = TS_FREE;
-        irq_restore(f);
-        if (pp) ob_deref(pp->object);
-        break;
-    }
     case OB_PROCESS: {                                  /* nothing references the process any more: recycle its slot */
         process_t *pp = o->u.proc.p;
         if (!pp || pp->teardown != 2) {
@@ -229,18 +216,6 @@ void ipc_object_free(kobject_t *o)
 }
 
 /* ---------------------------------------------------------------- thread / process lifecycle hooks (proc.c) */
-static void reap_one(thread_t *t, void *ctx)
-{
-    (void)ctx;
-    if (t->state != TS_ZOMBIE || !t->teb || t == thread_current() || !t->stack_base) return;
-    kfree((void *)t->stack_base);                       /* it never runs again: its kernel stack is free */
-    t->stack_base = 0;
-    if (t->object) ob_deref(t->object);                 /* the thread's own reference; the slot follows the object */
-    else t->state = TS_FREE;
-}
-
-void ipc_reap(void) { sched_for_each_thread(reap_one, 0); }
-
 void ipc_thread_exit(thread_t *t)
 {
     ipc_io_thread_exit(t);
@@ -500,15 +475,16 @@ static int32_t sys_queue_apc(process_t *p, struct regs *r, uint64_t h, uint64_t 
     int32_t st = ipc_ref_handle(p, h, OB_THREAD, &o, &access);
     if (st) return st;
     if (!(access & THREAD_SET_CONTEXT)) { ob_deref(o); return STATUS_ACCESS_DENIED; }
-    t = o->u.thr.t;
     if (!routine) { ob_deref(o); return STATUS_INVALID_PARAMETER; }
-    if (!t || t->state == TS_ZOMBIE || t->state == TS_FREE || !t->proc || t->proc->terminated) {
-        ob_deref(o);
-        return STATUS_UNSUCCESSFUL;
+    {
+        const uint64_t f = irq_save();                  /* an exited thread is reclaimed (u.thr.t = 0) at any preemption */
+        t = o->u.thr.t;
+        st = !t || t->state == TS_ZOMBIE || t->state == TS_FREE || !t->proc || t->proc->terminated ? STATUS_UNSUCCESSFUL : 0;
+        if (!st) apc_queue(t, routine, a1, a2, a3);
+        irq_restore(f);
     }
-    apc_queue(t, routine, a1, a2, a3);
     ob_deref(o);
-    return STATUS_SUCCESS;
+    return st;
 }
 
 /* ---------------------------------------------------------------- kernel statistics (leak checks in the tests) */
@@ -526,7 +502,7 @@ static int32_t sys_kernel_stats(process_t *p, uint64_t buf, uint64_t len)
 {
     struct kstats k;
     if (len < sizeof k) return STATUS_INFO_LENGTH_MISMATCH;
-    ipc_reap();
+    thread_reap_exited();
     memset(&k, 0, sizeof k);
     sched_for_each_thread(count_thread, &k);
     k.pmm_free = pmm_free_count();

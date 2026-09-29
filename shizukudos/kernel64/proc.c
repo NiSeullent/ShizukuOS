@@ -16,11 +16,9 @@ extern void vm_set_demand_range(uint64_t lo, uint64_t hi);
 static process_t procs[MAX_PROCS + 1];
 
 /* IPC hooks (kernel64/ipc_core.c; no-ops when it is not linked). */
-void __attribute__((weak)) ipc_reap(void) { }                                     /* recycle exited threads' resources */
 void __attribute__((weak)) ipc_thread_exit(thread_t *t) { (void)t; }               /* cancel its I/O, drop its APCs */
 void __attribute__((weak)) ipc_process_terminating(process_t *p) { (void)p; }      /* wake its blocked threads */
 void __attribute__((weak)) ipc_process_teardown(process_t *p) { (void)p; }         /* IRPs, views, job accounting */
-void __attribute__((weak)) ldr_free_modules(process_t *p) { (void)p; }
 static uint64_t next_cid = 4;       /* process and thread ids share one namespace (NT's client-id table): unique ids */
 static uint64_t alloc_client_id(void)
 {
@@ -36,6 +34,8 @@ void count_syscall(void) { ++syscalls; }
 uint64_t proc_pml4(process_t *p) { return p->pml4; }
 process_t *current_process(void) { return thread_current()->proc; }
 
+process_t *process_slot(unsigned i) { return i >= 1 && i <= MAX_PROCS ? &procs[i] : 0; }
+
 process_t *process_by_pid(int pid)
 {
     unsigned i;
@@ -49,7 +49,7 @@ process_t *process_create_empty(const char *name)
 {
     process_t *p = 0;
     unsigned i, k;
-    ipc_reap();
+    thread_reap_exited();                       /* exited threads drop their process references: dead processes' slots */
     for (i = 1; i <= MAX_PROCS; ++i)
         if (!procs[i].used) { p = &procs[i]; break; }
     if (!p)
@@ -172,7 +172,6 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     }
     /* Suspended: the timer tick can preempt this function at any instruction, and a READY thread whose proc, user_rip,
      * teb and user_gs_base are still zero would fault in user_thread_main (NULL proc, RIP 0, GS base 0). */
-    ipc_reap();                                 /* exited threads give their slots and kernel stacks back first */
     t = thread_create_suspended(p->name, user_thread_main, 0);
     if (!t) return -1;
     t->proc = p;
@@ -187,9 +186,14 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     if (!t->teb) { thread_discard(t); return -1; }
     t->user_gs_base = t->teb;
     tobj = ob_create(OB_THREAD, 0);
+    if (!tobj) { thread_discard(t); return -1; }
     tobj->u.thr.t = t;
+    tobj->u.thr.tid = t->tid;                   /* the id queries report once the thread was reclaimed */
+    tobj->u.thr.pid = (uint64_t)p->pid;
     t->object = tobj;
-    ob_ref(p->object);                          /* the thread keeps its process object (and slot) alive until it is reaped */
+    ob_ref(p->object);                          /* the thread keeps its process object (and slot) until it is reaped (objects.c
+                                                   thread_object_detach drops it) */
+    t->creator_hold = out != 0;                 /* the caller reads t->object after the thread may already have run */
     ++p->threads_alive;
     if (!p->main_thread) p->main_thread = t;
     thread_user_tls_init(p, t);
@@ -236,7 +240,7 @@ void process_teardown(process_t *p)
     if (read_cr3() == old) write_cr3(kernel_pml4());
     irq_restore(f);
     vm_free_space(old);
-    ldr_free_modules(p);
+    ldr_release_modules(p);                     /* loader records (and lazily mapped image statistics) */
     p->teardown = 2;
     if (p->parent_pid)
         ob_deref(p->object);                    /* created by a user process: drop the creation reference (proc_wait does it
@@ -247,6 +251,7 @@ void process_teardown(process_t *p)
 static void process_reap_signal(process_t *p)
 {
     p->terminated = 1;
+    p->exit_tick = ticks_now();
     process_teardown(p);                        /* handles are closed before waiters see the process signaled */
     p->object->signaled = 1;
     {
@@ -266,7 +271,7 @@ static void release_thread_user_memory(process_t *p, thread_t *t)
     if (!copy_from_user(p, &tls, t->teb + 0x58, 8) && tls) { b = tls; z = 0; vad_free(p, &b, &z, MEM_RELEASE); }
     if (t->user_stack) { b = t->user_stack; z = 0; vad_free(p, &b, &z, MEM_RELEASE); t->user_stack = 0; }
     b = t->teb; z = 0;
-    vad_free(p, &b, &z, MEM_RELEASE);                   /* t->teb keeps its value: ipc_reap() recognises user threads by it */
+    vad_free(p, &b, &z, MEM_RELEASE);
 }
 
 void process_thread_gone(process_t *p)
@@ -365,6 +370,7 @@ int proc_wait(int pid, int64_t *exit_code, int *faulted)
     if (exit_code) *exit_code = p->exit_code;
     if (faulted) *faulted = p->faulted;
     process_teardown(p);                                /* normally already done by the last thread */
+    thread_reap_process(p);                             /* its exited threads' slots, kernel stacks and process references */
     ob_deref(p->object);                                /* creation reference: the slot is recycled (ipc_object_free) once
                                                            no handle or thread references the process any more */
     return 0;
@@ -379,6 +385,7 @@ int user_page_fault(struct regs *r, uint64_t addr)
     int st;
     if (!p)
         return 0;
+    ++p->page_faults;                                   /* PROCESS_MEMORY_COUNTERS.PageFaultCount */
     st = user_fault_in(p, addr, (r->error & 2) != 0, (r->error & 16) != 0);
     if (st == 0)
         return 1;                                       /* page populated; restart the instruction */
@@ -410,6 +417,8 @@ int user_fault(struct regs *r)
     }
     if (r->vector == 13 && !(r->error & 0xfff))
         code = (uint32_t)STATUS_PRIVILEGED_INSTRUCTION;        /* GP with no selector: privileged/non-canonical */
+    if (r->vector == 3)
+        r->rip -= 1;            /* #BP is a trap (RIP is past the INT3); Windows reports ExceptionAddress and Context.Rip AT the INT3 */
     if (user_exception_dispatch(r, code, r->vector == 14 ? ((r->error & 2) ? 1 : 0) : 0, r->vector == 14 ? read_cr2() : 0))
         return 1;
     kprintf("K64: process %s (pid %d) killed: vector %d error %llx rip %llx cr2 %llx status %x\n", p->name, p->pid,

@@ -17,3 +17,11 @@ EXPORTS
     WideCharToMultiByte=NtwWideCharToMultiByte@32
     AddVectoredExceptionHandler=NtwAddVectoredExceptionHandler@8
     RemoveVectoredExceptionHandler=NtwRemoveVectoredExceptionHandler@4
+    NtwQuerySubsystem64=NtwQuerySubsystem64@4
+    NtwCreateProcess64W=NtwCreateProcess64W@16
+    NtwWaitProcess64=NtwWaitProcess64@12
+    NtwReadConsole64=NtwReadConsole64@16
+    NtwWriteConsole64=NtwWriteConsole64@16
+    NtwCloseConsole64=NtwCloseConsole64@4
+    NtwKillProcess64=NtwKillProcess64@8
+    NtwCloseProcess64=NtwCloseProcess64@4

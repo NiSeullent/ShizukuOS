@@ -82,7 +82,10 @@ K32API BOOL WINAPI DisableThreadLibraryCalls(HMODULE m) { (void)m; return TRUE; 
 /* ---------------------------------------------------------------- handles and waiting */
 K32API BOOL WINAPI CloseHandle(HANDLE h)
 {
-    NTSTATUS st = NtClose(h);
+    NTSTATUS st;
+    k32_snapshot_closing(h);                                   /* kernel32 data kept next to some handles (k32_procinfo.c, */
+    k32_power_request_closing(h);                              /* k32_sysinfo.c) goes with the handle */
+    st = NtClose(h);
     if (st) { k32_nt_error(st); return FALSE; }
     return TRUE;
 }
@@ -311,6 +314,67 @@ K32API BOOL WINAPI InitOnceExecuteOnce(PINIT_ONCE once, PINIT_ONCE_FN fn, PVOID 
     }
 }
 K32API VOID WINAPI InitOnceInitialize(PINIT_ONCE once) { once->Ptr = 0; }
+
+/* Same state word as InitOnceExecuteOnce: low bits 0 new, 1 synchronous initialisation running, 2 done (the rest is the
+ * context), 3 asynchronous initialisation running (any number of threads may race; the first InitOnceComplete wins). */
+K32API BOOL WINAPI InitOnceBeginInitialize(LPINIT_ONCE once, DWORD flags, PBOOL pending, LPVOID *ctx)
+{
+    volatile LONG64 *state = (volatile LONG64 *)&once->Ptr;
+    if (!pending || (flags & ~(DWORD)(INIT_ONCE_CHECK_ONLY | INIT_ONCE_ASYNC))) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    if (flags & INIT_ONCE_CHECK_ONLY) {
+        LONG64 s = *state;
+        if (flags & INIT_ONCE_ASYNC) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+        if ((s & 3) != 2) { shz_set_last_error(ERROR_GEN_FAILURE); return FALSE; }
+        if (ctx) *ctx = (LPVOID)(s & ~3ll);
+        *pending = FALSE;
+        return TRUE;
+    }
+    for (;;) {
+        LONG64 s = *state;
+        switch (s & 3) {
+        case 0:
+            if (__sync_bool_compare_and_swap(state, 0, (flags & INIT_ONCE_ASYNC) ? 3 : 1)) { *pending = TRUE; return TRUE; }
+            break;
+        case 1:                                                /* someone else initialises synchronously: wait for it */
+            if (flags & INIT_ONCE_ASYNC) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+            { LONG64 seen = s; RtlWaitOnAddress(state, &seen, 8, 0); }
+            break;
+        case 2:
+            if (ctx) *ctx = (LPVOID)(s & ~3ll);
+            *pending = FALSE;
+            return TRUE;
+        default:                                               /* 3: asynchronous initialisation in progress */
+            if (!(flags & INIT_ONCE_ASYNC)) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+            *pending = TRUE;
+            return TRUE;
+        }
+    }
+}
+
+K32API BOOL WINAPI InitOnceComplete(LPINIT_ONCE once, DWORD flags, LPVOID ctx)
+{
+    volatile LONG64 *state = (volatile LONG64 *)&once->Ptr;
+    LONG64 v;
+    if (((ULONG_PTR)ctx & 3) || (flags & ~(DWORD)(INIT_ONCE_ASYNC | INIT_ONCE_INIT_FAILED))) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    if (flags & INIT_ONCE_INIT_FAILED) {
+        if (ctx || (flags & INIT_ONCE_ASYNC)) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+        v = 0;                                                 /* back to "new": the next caller initialises again */
+    } else {
+        v = (LONG64)(ULONG_PTR)ctx | 2;
+    }
+    for (;;) {
+        LONG64 s = *state;
+        if ((s & 3) == 1) {
+            if (__sync_bool_compare_and_swap(state, s, v)) { RtlWakeAddressAll((PVOID)state); return TRUE; }
+        } else if ((s & 3) == 3) {
+            if (!(flags & INIT_ONCE_ASYNC)) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+            if (__sync_bool_compare_and_swap(state, s, v)) { RtlWakeAddressAll((PVOID)state); return TRUE; }
+        } else {
+            shz_set_last_error(ERROR_GEN_FAILURE);             /* not being initialised (or another thread completed first) */
+            return FALSE;
+        }
+    }
+}
 
 /* ---------------------------------------------------------------- interlocked (real exports) */
 /* mingw-w64's winnt.h renames these to compiler intrinsics (InterlockedIncrement -> _InterlockedIncrement); kernel32 must

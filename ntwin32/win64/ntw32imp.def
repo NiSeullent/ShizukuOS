@@ -1,0 +1,12 @@
+; Import definitions for programs that call the NTW32.DLL WIN64 subsystem API (ntw64.h) directly.
+; dlltool -k keeps the stdcall decoration on the import symbols and drops it from the imported names.
+LIBRARY NTW32.DLL
+EXPORTS
+    NtwQuerySubsystem64@4
+    NtwCreateProcess64W@16
+    NtwWaitProcess64@12
+    NtwReadConsole64@16
+    NtwWriteConsole64@16
+    NtwCloseConsole64@4
+    NtwKillProcess64@8
+    NtwCloseProcess64@4

@@ -59,7 +59,7 @@ static kobject_t *object_for_handle(process_t *p, uint64_t h)
     }
 }
 
-static int64_t filetime_now(void)
+int64_t filetime_now(void)
 {
     /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform). */
     hcreg_t secs = 0;
@@ -259,11 +259,11 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (process_start_thread2(target, target->ntdll_thread_start, start, arg, (uint64_t)stack_arg(p, r, 9), &t))
             return STATUS_NO_MEMORY;
         {
-            extern void thread_user_tls_init(process_t *p, thread_t *t);
-            }
-        ob_ref(t->object);
-        st = give_handle(p, t->object, a1, (uint32_t)a2);
-        return st;
+            kobject_t *to = t->object;
+            ob_ref(to);
+            thread_creator_release(t);                      /* from here on only the object is used */
+            return give_handle(p, to, a1, (uint32_t)a2);
+        }
     }
     case SYS_NtQuerySystemTime: {
         int64_t t = filetime_now();
@@ -286,13 +286,23 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     }
     case SYS_NtQueryInformationThread: {
         thread_t *t = a1 == CURRENT_THREAD_HANDLE ? thread_current() : 0;
-        if (!t) { kobject_t *o = handle_lookup(p, a1, OB_THREAD); t = o ? o->u.thr.t : 0; }
-        if (!t) return STATUS_INVALID_HANDLE;
+        kobject_t *to = 0;
+        if (!t && !(to = handle_lookup(p, a1, OB_THREAD))) return STATUS_INVALID_HANDLE;
         if (a2 == 0) {                                      /* ThreadBasicInformation */
             struct { int64_t exit_status; uint64_t teb; uint64_t pid, tid; uint64_t affinity; int32_t prio, base; } b;
+            uint64_t f;
             if (a4 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
-            b.exit_status = t->state == TS_ZOMBIE ? t->exit_code : 0x103;
-            b.teb = t->teb; b.pid = (uint64_t)p->pid; b.tid = t->id * 4ull; b.affinity = 1; b.prio = 8; b.base = 8;
+            f = irq_save();                                 /* an exited thread may be reclaimed (sched.c) at any preemption */
+            if (to) t = to->u.thr.t;
+            if (t) {
+                b.exit_status = t->state == TS_ZOMBIE ? t->exit_code : 0x103;
+                b.teb = t->teb; b.pid = (uint64_t)p->pid; b.tid = t->id * 4ull;
+            } else {                                        /* exited and reclaimed: the object kept what is still defined */
+                b.exit_status = to->u.thr.exit_code;
+                b.teb = 0; b.pid = to->u.thr.pid; b.tid = to->u.thr.tid;
+            }
+            irq_restore(f);
+            b.affinity = 1; b.prio = 8; b.base = 8;
             if (copy_to_user(p, a3, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
             return STATUS_SUCCESS;
         }
@@ -319,10 +329,15 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         }
         st = ldr_create_process(p, path, cmd, cwd, &np, &nt);
         if (st) return st;
-        ob_ref(np->object);
-        st = give_handle(p, np->object, a1, 0x1fffff);
-        if (st) return st;
-        if (a2) { ob_ref(nt->object); st = give_handle(p, nt->object, a2, 0x1fffff); }
+        {
+            kobject_t *to = nt->object;
+            ob_ref(to);
+            thread_creator_release(nt);                     /* from here on only the thread object is used */
+            ob_ref(np->object);
+            st = give_handle(p, np->object, a1, 0x1fffff);
+            if (!st && a2) { ob_ref(to); st = give_handle(p, to, a2, 0x1fffff); }
+            ob_deref(to);
+        }
         return st;
     }
     case SYS_NtLoadImage: {                                 /* (PUNICODE name, PULONG64 base_out): runtime LoadLibrary */
@@ -342,15 +357,15 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
             struct { uint32_t reserved, timer_res, page_size, phys_pages, low_page, high_page, alloc_gran; uint64_t min_addr, max_addr, affinity; uint8_t nproc; } b;
             if (a3 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
             memset(&b, 0, sizeof b);
-            b.timer_res = 10000; b.page_size = 4096; b.phys_pages = (uint32_t)pmm_total_count(); b.alloc_gran = 65536;
-            b.low_page = 1; b.high_page = (uint32_t)pmm_total_count();
+            b.timer_res = 10000; b.page_size = 4096; b.phys_pages = (uint32_t)(mem_ram_top() / 4096); b.alloc_gran = 65536;
+            b.low_page = 1; b.high_page = (uint32_t)(mem_ram_top() / 4096);
             b.min_addr = 0x10000; b.max_addr = 0x7ffffffeffffull; b.affinity = 1; b.nproc = 1;
             return copy_to_user(p, a2, &b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
         if (a1 == 0x100) {                                  /* private: {total pages, free pages} for GlobalMemoryStatusEx */
             uint64_t m[2];
             if (a3 < sizeof m) return STATUS_BUFFER_TOO_SMALL;
-            m[0] = pmm_total_count();
+            m[0] = mem_ram_top() / 4096;                    /* RAM the machine has, not only the allocator pool */
             m[1] = pmm_free_count();
             return copy_to_user(p, a2, m, sizeof m) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
@@ -412,6 +427,10 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (t->alerted) { t->alerted = 0; res = STATUS_ALERTED; } else res = STATUS_TIMEOUT;
         irq_restore(f);
         return res;
+    }
+    case SYS_NtGetContextThread: {                          /* (ThreadHandle, PCONTEXT): sysk32.c */
+        extern int32_t k32_get_context_thread(process_t *p, uint64_t handle, uint64_t context_va);
+        return k32_get_context_thread(p, a1, a2);
     }
     case SYS_NtShzGetTeb: return (int32_t)0;
     default: return num >= 0x50 ? sysext_dispatch(p, r, num, a1, a2, a3, a4) : STATUS_NOT_IMPLEMENTED;

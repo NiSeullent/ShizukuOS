@@ -16,6 +16,7 @@ typedef struct {
     uint32_t kind;
     uint32_t alloc_prot;                /* protection at reservation (AllocationProtect) */
     uint64_t alloc_base;                /* AllocationBase */
+    void *img;                          /* VK_IMAGE backed lazily by a file (ldr.c image_map_t), else NULL */
 } vad_t;
 
 typedef struct {
@@ -45,7 +46,9 @@ struct kobject {
         struct { int manual; } event;
         struct { thread_t *owner; int recursion; int abandoned; } mutant;
         struct { int count, max; } sem;
-        struct { thread_t *t; } thr;
+        /* t is 0 once the exited thread was reclaimed (sched.c); the other fields then answer queries */
+        struct { thread_t *t; int64_t exit_code; uint64_t tid; uint64_t pid;
+                 uint64_t create_tick, exit_tick, user_ticks, kernel_ticks, cycles; } thr;
         struct { void *sock; } net;         /* OB_SOCKET: sock_t * (net_sock.c) */
         struct { process_t *p; } proc;
         struct { void *file; uint32_t access; void *io; } file;   /* io: completion port / notification modes (ipc_io.c) */
@@ -106,11 +109,24 @@ struct process {
     void *ipc;                          /* ipc_proc_t: mapped views, job membership */
     thread_t *exit_owner;               /* thread that called NtTerminateProcess(NULL) (ExitProcess): every other thread of
                                            the process ends, no new thread starts; compared only, never dereferenced */
+    /* kernel32 support (sysk32.c): CPU time of the threads that have exited, exit tick, settings and memory statistics */
+    uint64_t dead_user_ticks, dead_kernel_ticks, dead_cycles, exit_tick;
+    uint32_t priority_class;            /* PROCESS_PRIORITY_CLASS value (GetPriorityClass); 0 = never set: NORMAL */
+    uint64_t page_faults;               /* user-mode page faults taken (demand-zero and access faults) */
+    uint64_t peak_ws_pages, peak_commit;        /* maxima measured before each unmap and at each query (sysk32.c) */
+    uint32_t mem_priority, power_control, power_state;  /* SetProcessInformation settings (0 priority = never set: 5) */
+    /* WIN64 subsystem bridge (subsys64.c): console sink the standard handles are relayed to, inherited from the
+     * parent at creation; 0 = the Supervisor/serial console. `console_sink_gen` guards against a recycled slot. */
+    void *console_sink;
+    uint32_t console_sink_gen;
 };
 
 /* vad.c */
 int32_t vad_insert_fixed(process_t *p, uint64_t start, uint64_t size, uint32_t state, uint32_t prot, uint32_t kind,
                          uint64_t alloc_base);
+/* A committed VK_IMAGE descriptor whose pages are produced on first touch by ldr_image_fault(img). */
+int32_t vad_insert_image(process_t *p, uint64_t start, uint64_t size, uint32_t prot, uint64_t alloc_base, void *img);
+int image_poke(process_t *p, uint64_t va, const void *src, uint64_t n);   /* loader write ignoring page protection */
 int vad_range_is_free(process_t *p, uint64_t start, uint64_t size);
 void vad_init(process_t *p);
 void vad_destroy(process_t *p);
@@ -130,9 +146,14 @@ int copy_from_user(process_t *p, void *dst, uint64_t uva, uint64_t n);
 int copy_to_user(process_t *p, uint64_t uva, const void *src, uint64_t n);
 int user_string_len(process_t *p, uint64_t uva, uint64_t max, uint64_t *len);
 
+/* ldr.c */
+int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr);          /* page-in of a lazily mapped image page; 0 = ok */
+void ldr_release_modules(process_t *p);                             /* frees the loader's per-process records */
+
 /* proc.c */
 process_t *current_process(void);
 process_t *process_by_pid(int pid);
+process_t *process_slot(unsigned i);            /* process table slot i (1-based; check ->used), 0 past the end */
 void process_terminate(process_t *p, int64_t code, int faulted);
 process_t *process_create_empty(const char *name);
 int process_start_thread(process_t *p, uint64_t rip, uint64_t rsp, uint64_t arg, thread_t **out);
@@ -166,7 +187,6 @@ typedef struct {
 int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                               const ldr_create_ex_t *ex, process_t **out_proc, thread_t **out_thread);
 uint64_t ldr_ntdll_export(process_t *p, const char *sym);
-void ldr_free_modules(process_t *p);
 
 /* objects.c */
 kobject_t *ob_create(uint32_t type, const char *name);
