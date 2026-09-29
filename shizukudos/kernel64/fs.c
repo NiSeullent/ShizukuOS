@@ -134,7 +134,7 @@ fsnode_t *fs_new_child(fsnode_t *dir, const char *name, int is_dir)
     n->parent = dir;
     n->backing = dir->backing;
     n->vol = dir->vol;
-    n->readonly = dir->backing == FSB_DISK;
+    n->readonly = dir->backing == FSB_DISK && (!dir->vol || !dir->vol->write);
     for (pp = &dir->child; *pp; pp = &(*pp)->sibling) ;   /* append: listings keep creation / on-disk order */
     *pp = n;
     n->ctime = n->mtime = ticks_now();
@@ -149,7 +149,10 @@ fsnode_t *fs_create(const char *path, int is_dir, int *created)
     if (!dir || !dir->is_dir || !leaf[0] || dir->readonly) return 0;
     n = child_named(dir, leaf, strlen(leaf));
     if (n) return n;
-    n = fs_new_child(dir, leaf, is_dir);
+    if (dir->backing == FSB_DISK)                   /* on-disk directory entry first; the volume adds the node */
+        n = dir->vol && dir->vol->create ? dir->vol->create(dir->vol, dir, leaf, is_dir) : 0;
+    else
+        n = fs_new_child(dir, leaf, is_dir);
     if (!n) return 0;
     if (created) *created = 1;
     return n;
@@ -194,6 +197,7 @@ int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len)
     int rc;
     if (n->is_dir || n->readonly) return -1;
     if (off + len < off) return -1;
+    if (n->backing == FSB_DISK) return n->vol && n->vol->write ? n->vol->write(n->vol, n, off, buf, len) : -1;
     rc = reserve(n, off + len);
     if (rc) return rc;
     if (off > n->size) memset(n->data + n->size, 0, off - n->size);
@@ -203,10 +207,17 @@ int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len)
     return 0;
 }
 
+int fs_flush(fsnode_t *n)
+{
+    if (n->backing != FSB_DISK) return 0;           /* heap-backed: nothing below */
+    return n->vol && n->vol->flush ? n->vol->flush(n->vol) : 0;
+}
+
 int fs_truncate(fsnode_t *n, uint64_t size)
 {
     int rc;
     if (n->is_dir || n->readonly) return -1;
+    if (n->backing == FSB_DISK) return n->vol && n->vol->truncate ? n->vol->truncate(n->vol, n, size) : -1;
     if (size > n->size) {
         rc = reserve(n, size);
         if (rc) return rc;

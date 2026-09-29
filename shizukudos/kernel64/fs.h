@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Kernel64 file-system name space: an in-memory file system (C:\), backed by kernel heap memory, plus a read-only
- * view of the initial RAM archive, plus mounted read-only disk volumes (D:\ ... from disk.c: FAT32 over the block
- * registry). NT-style path resolution: case-insensitive components separated by backslashes; names are stored as
+ * view of the initial RAM archive, plus mounted disk volumes (D:\ ... from disk.c: FAT32 over the block registry;
+ * read/write when the device and the volume allow it: create, write, extend, truncate, flush; no delete/rename). NT-style path resolution: case-insensitive components separated by backslashes; names are stored as
  * UTF-8 and compared with ASCII case folding. Disk directories are enumerated into fsnodes on first use, so every
  * consumer (lookup, NtQueryDirectoryFile, the loader) sees one node type; disk data is read through the volume's
  * fsvol_t operations instead of a heap buffer.
@@ -29,16 +29,23 @@ struct fsnode {
     uint8_t backing;                    /* FSB_RAM / FSB_DISK */
     uint8_t populated;                  /* FSB_DISK directory: children enumerated */
     uint32_t first_cluster;             /* FSB_DISK: on-volume location */
+    uint32_t dir_cluster, dir_offset;   /* FSB_DISK: where the node's directory entry lives (for size/time updates) */
     fsvol_t *vol;                       /* FSB_DISK: the volume */
     void *chain;                        /* FSB_DISK file: extent cache (owned by the volume code) */
     uint64_t ftime_c, ftime_m;          /* FSB_DISK: FILETIME create / write (0 = unknown) */
+    void *view;                         /* kernel file view (kwin.c) while the file backs an image: no writes then */
 };
 
-/* A mounted read-only volume: how its nodes are read and enumerated. */
+/* A mounted volume: how its nodes are read, enumerated and (when `write` is set) modified. Mutating operations
+ * return 0, -1 (I/O error, name refused, read-only) or -2 (volume full). */
 struct fsvol {
     char letter;                        /* 'D' ... */
     int (*read)(fsvol_t *v, fsnode_t *n, uint64_t off, void *buf, uint64_t len, uint64_t *done);   /* 0 = ok (short at EOF) */
     int (*populate)(fsvol_t *v, fsnode_t *dir);                                                    /* creates the children */
+    int (*write)(fsvol_t *v, fsnode_t *n, uint64_t off, const void *buf, uint64_t len);           /* NULL: read-only */
+    int (*truncate)(fsvol_t *v, fsnode_t *n, uint64_t size);
+    fsnode_t *(*create)(fsvol_t *v, fsnode_t *dir, const char *name, int is_dir);                 /* NULL on failure */
+    int (*flush)(fsvol_t *v);                                                                      /* device cache to media */
     void *priv;
 };
 
@@ -75,6 +82,7 @@ fsnode_t *fs_new_child(fsnode_t *dir, const char *name, int is_dir); /* bare nod
 int fs_read(fsnode_t *n, uint64_t off, void *buf, uint64_t len, uint64_t *done);
 int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len);
 int fs_truncate(fsnode_t *n, uint64_t size);
+int fs_flush(fsnode_t *n);                                           /* disk nodes: device write cache to media */
 void fs_remove(fsnode_t *n);
 fsnode_t *fs_root(void);
 uint64_t fs_total_bytes(void);

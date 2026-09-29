@@ -4,9 +4,11 @@
 
 Profile: the same standalone profile as run_k64_standalone.py (QEMU -kernel stub, no Supervisor, TCG or KVM) plus
 `-device ahci` + `ide-hd` carrying a raw FAT32 image built here with mkfs.vfat --invariant and mtools (deterministic
-timestamps). Kernel64 drives the disk through the original AHCI core (drivers/ahci_native) and mounts the volume
-read-only as D:\\ (kernel64/blk.c, fat32.c, disk.c). Everything the guest reports (sector-0 CRC, directory listing,
-file CRCs, resident-page counts) is recomputed or checked independently here from the image and its source files.
+timestamps). Kernel64 drives the disk through the original AHCI core (drivers/ahci_native: READ/WRITE DMA EXT, FLUSH
+CACHE EXT) and mounts the volume read/write as D:\\ (kernel64/blk.c, ahci_blk.c, fat32.c, disk.c). Everything the
+guest reports (sector-0 CRC, directory listing, file CRCs, written-file CRCs) is recomputed or checked independently
+here from the image and its source files; after QEMU exits the image itself is checked: fsck.fat -n must find it
+clean and mtools must read the guest-written files back with exactly the expected bytes.
 
 All checks of run_k64_standalone.py must still pass in this configuration (same self-tests, same Win64 apps).
 """
@@ -138,10 +140,66 @@ def disk_checks(serial, ev, manifest):
             xor ^= zlib.crc32(data) & 0xffffffff
     c.append(base.check("FAT32: evidence slot 18 = (files hashed << 32 | xor of CRCs)",
                         e(18) == (sum(1 for d in tests.values() if d is not None) << 32) | xor, f"{e(18):#x}"))
-    c.append(base.check("T_DISK.EXE did not SKIP (D: was mounted)", "SKIP: no D: volume" not in serial and "t_disk:" in serial))
+    c.append(base.check("T_DISK.EXE did not SKIP (D: was mounted)", "SKIP:" not in "".join(
+        l for l in serial.splitlines() if "T_DISK.EXE" in l) and "t_disk:" in serial))
     m = re.search(r"K64 disk: D: = (\S+), FAT32 \"(\w*)\" id ([0-9a-f]+), (\d+) clusters of (\d+) bytes", serial)
     c.append(base.check("Kernel64 mounted the FAT32 volume as D: (label SHZDISK, 4 KiB clusters)",
                         bool(m) and m.group(2) == "SHZDISK" and m.group(5) == "4096", m.group(0) if m else "no mount line"))
+    return c
+
+
+WRITE_ORIG = {"WRITE/existing file.bin": pattern(41, 20000), "WRITE/TRUNC.BIN": pattern(42, 50000)}
+
+
+def expected_writes():
+    """What T_DISK.EXE's write_tests() leaves on D: (volume path -> bytes)."""
+    existing = bytearray(WRITE_ORIG["WRITE/existing file.bin"])
+    existing[5000:8000] = pattern(32, 3000)
+    existing += pattern(33, 1000)
+    return {"OUT/Guest Written File.bin": pattern(31, 300000),
+            "OUT/Sub Dir/small.txt": b"written by T_DISK.EXE inside a new directory\r\n",
+            "WRITE/existing file.bin": bytes(existing),
+            "WRITE/TRUNC.BIN": WRITE_ORIG["WRITE/TRUNC.BIN"][:777]}
+
+
+def write_checks(serial, image, out):
+    """Guest read-back lines, then the image after QEMU exited: fsck.fat -n and mtools read-back."""
+    c = []
+    want = expected_writes()
+    got = {m.group(1).replace("D:\\", "").replace("\\", "/"): (int(m.group(2)), int(m.group(3), 16))
+           for m in re.finditer(r"^\[win64 T_DISK\.EXE pid \d+\] DISK-WRITE (.+?) (\d+) ([0-9a-f]+)$", serial, re.M)}
+    bad = [f"{k}: guest {got.get(k)} host {(len(v), zlib.crc32(v) & 0xffffffff)}" for k, v in want.items()
+           if got.get(k) != (len(v), zlib.crc32(v) & 0xffffffff)]
+    c.append(base.check("FAT32 write: the guest read back what it wrote (create, odd-chunk write, overwrite, append, truncate)",
+                        not bad, "; ".join(bad) or f"{len(got)} files"))
+    fsck = subprocess.run(["fsck.fat", "-n", "-v", str(image)], capture_output=True, text=True)
+    (out / "fsck.txt").write_text(fsck.stdout + fsck.stderr)
+    problems = [l for l in fsck.stdout.splitlines() if not l.startswith("Checking") and any(
+        k in l.lower() for k in ("wrong", "lost", "invalid", "differ", "bad ", "orphan", "reclaim", "unused",
+                                 "free cluster summary", "has no", "starts with", "contains"))]
+    summary = [l for l in fsck.stdout.splitlines() if " files, " in l]
+    c.append(base.check("FAT32 write: fsck.fat -n finds the image clean after the guest's writes",
+                        fsck.returncode == 0 and not problems, f"rc={fsck.returncode} {problems or summary}"))
+    tmp = out / "readback.bin"
+    bad = []
+    for rel, data in want.items():
+        tmp.unlink(missing_ok=True)
+        r = subprocess.run(["mcopy", "-n", "-i", str(image), f"::{rel}", str(tmp)], env=mtools_env(), capture_output=True)
+        if r.returncode or tmp.read_bytes() != data:
+            bad.append(f"{rel}: rc={r.returncode} {tmp.stat().st_size if tmp.exists() else 0} bytes")
+    c.append(base.check("FAT32 write: mtools reads every guest-written file back from the image, byte for byte",
+                        not bad, "; ".join(bad) or ", ".join(f"{k} {len(v)}" for k, v in want.items())))
+    listing = run(["mdir", "-i", str(image), "::OUT"], env=mtools_env(), capture=True).stdout
+    (out / "mdir-out.txt").write_text(listing)
+    c.append(base.check("FAT32 write: long names and generated 8.3 aliases in D:\\OUT (mdir)",
+                        "Guest Written File.bin" in listing and "GUESTW~1 BIN" in " ".join(listing.split()) and "Sub Dir" in listing,
+                        " | ".join(l.strip() for l in listing.splitlines() if "~" in l)))
+    m = [x for x in re.finditer(r"K64 disk: flush (\S+): rc (-?\d+); (\S+): (\d+) sectors read, (\d+) written, (\d+) cache flush"
+                                r"\(es\); D: (\d+) write\(s\), (\d+) create\(s\), (\d+) sector writes", serial)]
+    last = m[-1] if m else None
+    c.append(base.check("AHCI write path: WRITE DMA EXT sectors and FLUSH CACHE EXT commands completed (kernel counters)",
+                        bool(last) and last.group(2) == "0" and int(last.group(5)) > 600 and int(last.group(6)) >= 2 and
+                        int(last.group(7)) >= 5 and int(last.group(8)) == 4, last.group(0) if last else "no flush line"))
     return c
 
 
@@ -184,8 +242,12 @@ def main():
     add("TESTS/A Long Mixed-Case File Name.dat", pattern(12, 4096 * 3 + 5))
     add("TESTS/big_4m.bin", pattern(13, (4 << 20) + 13))
     add("TESTS/Sub Directory/nested file.txt", b"nested content on D:\r\n")
+    dirs.append("WRITE")
+    for rel, data in WRITE_ORIG.items():
+        add(rel, data)
     image = out / "disk.img"
     make_image(image, 256, 8, files, dirs)
+    fsck0 = subprocess.run(["fsck.fat", "-n", str(image)], capture_output=True, text=True)
     sector0 = image.read_bytes()[:512]
     expect_sectors = image.stat().st_size // 512
     expect_crc0 = zlib.crc32(sector0) & 0xffffffff
@@ -195,7 +257,7 @@ def main():
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}", "-serial", f"file:{serial_path}",
            "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
-           "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
+           "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw",
            "-device", "ide-hd,drive=d0,bus=ahci0.0"]
     started = time.time()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -215,6 +277,9 @@ def main():
                              e(13) == (expect_sectors << 32) | expect_crc0,
                              f"guest={e(13):#x} host=({expect_sectors} << 32 | {expect_crc0:#x})"))
     checks += disk_checks(serial, ev, manifest)
+    checks.insert(len(checks), base.check("host: fsck.fat -n finds the freshly built image clean (baseline)", fsck0.returncode == 0,
+                                          f"rc={fsck0.returncode}"))
+    checks += write_checks(serial, image, out)
     if timed_out:
         checks.insert(0, base.check("run finished before the timeout", False, f"{args.timeout}s, accel={accel}"))
     status = "PASS" if all(x["status"] == "PASS" for x in checks) else "FAIL"

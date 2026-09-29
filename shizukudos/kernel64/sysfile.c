@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * File-related system calls over the in-memory file system (NT structures and semantics).
+ * File-related system calls over the Kernel64 file systems (fs.c: RAM C:\, initrd, disk volumes; NT structures and
+ * semantics).
  */
 #include "fs.h"
 
@@ -129,6 +130,7 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     }
     if ((a2 & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE_ACCESS)) && n->readonly && !created)
         return STATUS_ACCESS_DENIED;
+    if ((options & FILE_DELETE_ON_CLOSE) && n->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;   /* no delete on disk */
     if (n->is_dir && (a2 & (GENERIC_WRITE | FILE_WRITE_DATA))) return STATUS_FILE_IS_A_DIRECTORY;
     f = kzalloc(sizeof *f);
     o = ob_create(OB_FILE, 0);
@@ -308,6 +310,7 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         fsnode_t *dst, *dir;
         char leaf[96];
         uint32_t chars;
+        if (f->node && f->node->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;            /* no rename on disk volumes */
         if (!f->node || f->node->readonly || len < 20 || copy_from_user(p, hdr, buf, 20)) return STATUS_ACCESS_DENIED;
         chars = *(uint32_t *)(hdr + 16) / 2;
         if (chars >= 260 || len < 20 + chars * 2ull || copy_from_user(p, w, buf + 20, chars * 2ull)) return STATUS_INVALID_PARAMETER;
@@ -337,6 +340,7 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         uint8_t del;
         if (!f->node || copy_from_user(p, &del, buf, 1)) return STATUS_ACCESS_VIOLATION;
         if (f->node->readonly) return STATUS_ACCESS_DENIED;
+        if (del && f->node->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;                /* no delete on disk volumes */
         if (del && f->node->is_dir && f->node->child) return STATUS_DIRECTORY_NOT_EMPTY;
         f->node->delete_pending = del != 0;
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
@@ -431,7 +435,13 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
     case SYS_NtClose:
         if (a1 == CURRENT_PROCESS_HANDLE || a1 == CURRENT_THREAD_HANDLE) return STATUS_SUCCESS;
         return handle_close(p, a1);
-    case SYS_NtFlushBuffersFile: return file_of(p, a1, 0) ? STATUS_SUCCESS : STATUS_INVALID_HANDLE;
+    case SYS_NtFlushBuffersFile: {
+        file_t *f = file_of(p, a1, 0);
+        if (!f) return STATUS_INVALID_HANDLE;
+        if (f->node && fs_flush(f->node)) { set_iosb(p, a2, (int32_t)0xC0000185, 0); return (int32_t)0xC0000185; }  /* STATUS_IO_DEVICE_ERROR */
+        set_iosb(p, a2, STATUS_SUCCESS, 0);
+        return STATUS_SUCCESS;
+    }
     default: *handled = 0; return 0;
     }
 }

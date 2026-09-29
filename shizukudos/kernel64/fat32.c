@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Read-only FAT32 volume reader (see fat32.h). Freestanding: no libc, no kernel headers; all I/O and memory come
+ * FAT32 volume reader/writer (see fat32.h). Freestanding: no libc, no kernel headers; all I/O and memory come
  * through the callbacks in fat32_vol_t, so shizukudos/tests/test_fat32.c runs the same code on the host.
  */
 #include "fat32.h"
@@ -9,6 +9,8 @@
 
 static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
+static void wr16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void wr32(uint8_t *p, uint32_t v) { wr16(p, v); wr16(p + 2, v >> 16); }
 static void f32_copy(void *d, const void *s, uint64_t n) { uint8_t *dd = d; const uint8_t *ss = s; while (n--) *dd++ = *ss++; }
 static void f32_zero(void *d, uint64_t n) { uint8_t *dd = d; while (n--) *dd++ = 0; }
 
@@ -59,6 +61,7 @@ int fat32_mount(fat32_vol_t *v)
     int rc;
     if (!v->read || !v->alloc || !v->free || !v->alloc_page || !v->disk_sectors) return FAT32_E_FORMAT;
     v->fat_pages = 0; v->fat_npages = 0; v->part_lba = 0; v->part_sectors = 0; v->sector_reads = 0; v->sector_lba = ~0ull;
+    v->sector_writes = 0; v->fat_dirty = 0; v->fsinfo_sector = 0; v->fsinfo_dirty = 0; v->free_clusters = 0; v->alloc_hint = 2;
     if ((rc = read_sector(v, 0, s))) return rc;
     if (looks_like_fat32_vbr(s)) {
         v->part_lba = 0;
@@ -95,6 +98,9 @@ int fat32_mount(fat32_vol_t *v)
     v->root_cluster = root; v->first_data = (uint32_t)first_data; v->cluster_count = clusters;
     v->bytes_per_cluster = spc * FAT32_SECTOR;
     v->volume_id = s[66] == 0x29 ? rd32(s + 67) : 0;
+    if (rd16(s + 40) & 0x80) v->write = 0;                  /* FAT mirroring disabled: FAT 0 may not be active, no writes */
+    v->fsinfo_sector = rd16(s + 48);
+    if (!v->fsinfo_sector || v->fsinfo_sector >= reserved) v->fsinfo_sector = 0;
     f32_zero(v->label, sizeof v->label);
     if (s[66] == 0x29) { f32_copy(v->label, s + 71, 11); for (i = 11; i > 0 && v->label[i - 1] == ' '; --i) v->label[i - 1] = 0; }
     /* copy the (first) FAT: only the entries that exist (clusters + 2) matter */
@@ -122,6 +128,18 @@ int fat32_mount(fat32_vol_t *v)
         fat32_unmount(v);
         return FAT32_E_CORRUPT;
     }
+    for (i = 2; i < clusters + 2; ++i)
+        if (!fat32_fat_entry(v, i)) ++v->free_clusters;
+    if (v->write) {
+        v->fat_dirty = v->alloc(v->ctx, (uint64_t)v->fat_npages * 8 / 8 + 1);
+        if (!v->fat_dirty) { fat32_unmount(v); return FAT32_E_NOMEM; }
+        if (v->fsinfo_sector) {                              /* FSInfo: lead/struct signatures, else ignored */
+            if ((rc = read_sector(v, v->part_lba + v->fsinfo_sector, s))) { fat32_unmount(v); return rc; }
+            if (rd32(s) != 0x41615252u || rd32(s + 484) != 0x61417272u) v->fsinfo_sector = 0;
+            else if (rd32(s + 492) >= 2 && rd32(s + 492) < clusters + 2) v->alloc_hint = rd32(s + 492);
+            v->fsinfo_dirty = v->fsinfo_sector && rd32(s + 488) != v->free_clusters;
+        }
+    }
     return FAT32_OK;
 }
 
@@ -133,6 +151,8 @@ void fat32_unmount(fat32_vol_t *v)
             if (v->fat_pages[i]) v->free(v->ctx, v->fat_pages[i], 4096);
         v->free(v->ctx, v->fat_pages, (uint64_t)v->fat_npages * sizeof(uint32_t *));
     }
+    if (v->fat_dirty) v->free(v->ctx, v->fat_dirty, (uint64_t)v->fat_npages * 8 / 8 + 1);
+    v->fat_dirty = 0;
     v->fat_pages = 0;
     v->fat_npages = 0;
 }
@@ -224,6 +244,8 @@ int fat32_dir_next(fat32_vol_t *v, fat32_dir_t *d, fat32_dirent_t *out)
         if (attr & FAT32_ATTR_LABEL) { lfn_valid = 0; continue; }         /* volume label */
         if (e[0] == '.' ) { lfn_valid = 0; continue; }                     /* "." and ".." (the RAM fs lists neither) */
         f32_zero(out, sizeof *out);
+        out->dir_cluster = d->cluster;
+        out->dir_offset = d->offset - 32;
         f32_copy(out->short_name, e, 11);
         out->attr = attr;
         out->first_cluster = ((uint32_t)rd16(e + 20) << 16) | rd16(e + 26);
@@ -246,6 +268,29 @@ int fat32_dir_next(fat32_vol_t *v, fat32_dir_t *d, fat32_dirent_t *out)
 }
 
 /* ---------------------------------------------------------------- files */
+/* Appends cluster `cur` as the chain's next cluster (extends the last run when contiguous). */
+static int chain_add(fat32_vol_t *v, fat32_chain_t *c, uint32_t cur)
+{
+    if (c->nruns && c->runs[c->nruns - 1].start + c->runs[c->nruns - 1].count == cur) {
+        ++c->runs[c->nruns - 1].count;
+    } else {
+        if (c->nruns == c->cap) {
+            const uint32_t ncap = c->cap ? c->cap * 2 : 8;
+            fat32_run_t *nr = v->alloc(v->ctx, (uint64_t)ncap * sizeof *nr);
+            if (!nr) return FAT32_E_NOMEM;
+            if (c->runs) { f32_copy(nr, c->runs, (uint64_t)c->nruns * sizeof *nr); v->free(v->ctx, c->runs, (uint64_t)c->cap * sizeof *nr); }
+            c->runs = nr;
+            c->cap = ncap;
+        }
+        c->runs[c->nruns].start = cur;
+        c->runs[c->nruns].count = 1;
+        c->runs[c->nruns].first_index = c->total_clusters;
+        ++c->nruns;
+    }
+    ++c->total_clusters;
+    return FAT32_OK;
+}
+
 int fat32_chain_build(fat32_vol_t *v, uint32_t first_cluster, fat32_chain_t *c)
 {
     uint32_t cur = first_cluster, n = 0;
@@ -253,23 +298,7 @@ int fat32_chain_build(fat32_vol_t *v, uint32_t first_cluster, fat32_chain_t *c)
     if (!first_cluster) return FAT32_OK;                                   /* empty file */
     while (cur < EOC) {
         if (!valid_cluster(v, cur) || ++n > v->cluster_count) { fat32_chain_free(v, c); return FAT32_E_CORRUPT; }
-        if (c->nruns && c->runs[c->nruns - 1].start + c->runs[c->nruns - 1].count == cur) {
-            ++c->runs[c->nruns - 1].count;
-        } else {
-            if (c->nruns == c->cap) {
-                const uint32_t ncap = c->cap ? c->cap * 2 : 8;
-                fat32_run_t *nr = v->alloc(v->ctx, (uint64_t)ncap * sizeof *nr);
-                if (!nr) { fat32_chain_free(v, c); return FAT32_E_NOMEM; }
-                if (c->runs) { f32_copy(nr, c->runs, (uint64_t)c->nruns * sizeof *nr); v->free(v->ctx, c->runs, (uint64_t)c->cap * sizeof *nr); }
-                c->runs = nr;
-                c->cap = ncap;
-            }
-            c->runs[c->nruns].start = cur;
-            c->runs[c->nruns].count = 1;
-            c->runs[c->nruns].first_index = c->total_clusters;
-            ++c->nruns;
-        }
-        ++c->total_clusters;
+        if (chain_add(v, c, cur)) { fat32_chain_free(v, c); return FAT32_E_NOMEM; }
         cur = fat32_fat_entry(v, cur);
     }
     return FAT32_OK;
@@ -336,4 +365,429 @@ uint64_t fat32_filetime(uint16_t date, uint16_t time, uint8_t tenth)
     days += day - 1;
     unix_s = days * 86400 + hour * 3600 + min * 60 + sec + tenth / 100;
     return (unix_s + 11644473600ull) * 10000000ull + (uint64_t)(tenth % 100) * 100000ull;
+}
+
+void fat32_dostime(uint64_t t, uint16_t *date, uint16_t *time)
+{
+    static const uint8_t mdays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    uint64_t days = t / 86400, rem = t % 86400;
+    uint32_t year = 1970, mon = 0, leap;
+    if (t < 315532800ull) { *date = (1 << 5) | 1; *time = 0; return; }           /* before 1980: 1980-01-01 */
+    for (;;) {
+        leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        if (days < 365u + leap) break;
+        days -= 365u + leap;
+        ++year;
+    }
+    while (mon < 12) {
+        const uint32_t md = mdays[mon] + (mon == 1 ? leap : 0);
+        if (days < md) break;
+        days -= md;
+        ++mon;
+    }
+    if (year > 2107) { *date = (uint16_t)((127u << 9) | (12u << 5) | 31u); *time = (uint16_t)((23u << 11) | (59u << 5) | 29u); return; }
+    *date = (uint16_t)(((year - 1980) << 9) | ((mon + 1) << 5) | (uint32_t)(days + 1));
+    *time = (uint16_t)(((rem / 3600) << 11) | (((rem / 60) % 60) << 5) | ((rem % 60) / 2));
+}
+
+/* ---------------------------------------------------------------- writing */
+static int write_sector(fat32_vol_t *v, uint64_t lba, const void *buf)
+{
+    if (!v->write) return FAT32_E_RDONLY;
+    if (lba < v->part_lba || lba >= v->disk_sectors) return FAT32_E_RANGE;
+    ++v->sector_writes;
+    if (v->write(v->ctx, lba, buf)) {
+        if (v->sector_lba == lba) v->sector_lba = ~0ull;                /* content unknown after a failed write */
+        return FAT32_E_IO;
+    }
+    if (v->sector_lba == lba && buf != v->sector) f32_copy(v->sector, buf, FAT32_SECTOR);   /* keep the cache coherent */
+    return FAT32_OK;
+}
+
+static void fat_set(fat32_vol_t *v, uint32_t cluster, uint32_t value)
+{
+    uint32_t *e = &v->fat_pages[cluster >> 10][cluster & 1023];
+    const uint32_t sec = cluster / (FAT32_SECTOR / 4);
+    if (!(*e & 0x0fffffffu) && value) --v->free_clusters;
+    else if ((*e & 0x0fffffffu) && !value) ++v->free_clusters;
+    *e = (*e & 0xf0000000u) | (value & 0x0fffffffu);                /* the top four bits are reserved: preserved */
+    v->fat_dirty[sec >> 3] |= (uint8_t)(1u << (sec & 7));
+    v->fsinfo_dirty = 1;
+}
+
+int fat32_sync(fat32_vol_t *v)
+{
+    uint32_t sec, k;
+    int rc;
+    if (!v->write || !v->fat_dirty) return FAT32_E_RDONLY;
+    for (sec = 0; sec < v->fat_sectors && sec < v->fat_npages * 8; ++sec) {
+        if (!(v->fat_dirty[sec >> 3] & (1u << (sec & 7)))) continue;
+        for (k = 0; k < v->nfats; ++k)
+            if ((rc = write_sector(v, v->part_lba + v->reserved + (uint64_t)k * v->fat_sectors + sec,
+                                   (const uint8_t *)v->fat_pages[sec / 8] + (sec % 8) * FAT32_SECTOR)))
+                return rc;
+        v->fat_dirty[sec >> 3] &= (uint8_t)~(1u << (sec & 7));
+    }
+    if (v->fsinfo_sector && v->fsinfo_dirty) {
+        const uint64_t lba = v->part_lba + v->fsinfo_sector;
+        if ((rc = bounce(v, lba))) return rc;
+        wr32(v->sector + 488, v->free_clusters);
+        wr32(v->sector + 492, v->alloc_hint);
+        if ((rc = write_sector(v, lba, v->sector))) return rc;
+        v->fsinfo_dirty = 0;
+    }
+    return FAT32_OK;
+}
+
+/* A free cluster marked end-of-chain, 0 when the volume is full. */
+static uint32_t alloc_cluster(fat32_vol_t *v)
+{
+    uint32_t i;
+    for (i = 0; i < v->cluster_count; ++i) {
+        const uint32_t c = 2 + (v->alloc_hint - 2 + i) % v->cluster_count;
+        if (!fat32_fat_entry(v, c)) {
+            fat_set(v, c, 0x0fffffffu);
+            v->alloc_hint = c + 1 < v->cluster_count + 2 ? c + 1 : 2;
+            return c;
+        }
+    }
+    return 0;
+}
+
+static int zero_cluster(fat32_vol_t *v, uint32_t cluster)
+{
+    uint8_t z[FAT32_SECTOR];
+    uint32_t i;
+    int rc;
+    f32_zero(z, sizeof z);
+    for (i = 0; i < v->spc; ++i)
+        if ((rc = write_sector(v, fat32_cluster_lba(v, cluster) + i, z))) return rc;
+    return FAT32_OK;
+}
+
+/* Grows the chain to at least `need` clusters (new clusters linked behind the last one). */
+static int grow_chain(fat32_vol_t *v, fat32_chain_t *c, uint32_t *first_cluster, uint32_t need)
+{
+    while (c->total_clusters < need) {
+        const uint32_t n = alloc_cluster(v);
+        int rc;
+        if (!n) return FAT32_E_FULL;
+        if (c->total_clusters) {
+            const fat32_run_t *r = &c->runs[c->nruns - 1];
+            fat_set(v, r->start + r->count - 1, n);
+        } else {
+            *first_cluster = n;
+        }
+        if ((rc = chain_add(v, c, n))) return rc;
+    }
+    return FAT32_OK;
+}
+
+/* Writes [off, off+len) inside the chain (which must already cover it); buf NULL writes zeros. */
+static int write_range(fat32_vol_t *v, const fat32_chain_t *c, uint64_t off, const uint8_t *buf, uint64_t len)
+{
+    uint8_t z[FAT32_SECTOR];
+    f32_zero(z, sizeof z);
+    while (len) {
+        const uint32_t idx = (uint32_t)(off / v->bytes_per_cluster), in_cluster = (uint32_t)(off % v->bytes_per_cluster);
+        const uint32_t cluster = chain_cluster(c, idx), in_sec = in_cluster % FAT32_SECTOR;
+        uint64_t lba, n;
+        int rc;
+        if (!cluster) return FAT32_E_CORRUPT;
+        lba = fat32_cluster_lba(v, cluster) + in_cluster / FAT32_SECTOR;
+        n = FAT32_SECTOR - in_sec;
+        if (n > len) n = len;
+        if (n == FAT32_SECTOR) {
+            if ((rc = write_sector(v, lba, buf ? buf : z))) return rc;
+        } else {
+            if ((rc = bounce(v, lba))) return rc;
+            if (buf) f32_copy(v->sector + in_sec, buf, n); else f32_zero(v->sector + in_sec, n);
+            if ((rc = write_sector(v, lba, v->sector))) return rc;
+        }
+        if (buf) buf += n;
+        off += n; len -= n;
+    }
+    return FAT32_OK;
+}
+
+int fat32_write(fat32_vol_t *v, fat32_chain_t *c, uint32_t *first_cluster, uint32_t *size, uint64_t off, const void *buf,
+                uint64_t len)
+{
+    const uint64_t end = off + len;
+    int rc, rc2;
+    if (!v->write) return FAT32_E_RDONLY;
+    if (!len) return FAT32_OK;
+    if (end < off || end > 0xffffffffull) return FAT32_E_RANGE;
+    rc = grow_chain(v, c, first_cluster, (uint32_t)((end + v->bytes_per_cluster - 1) / v->bytes_per_cluster));
+    if (!rc && off > *size) rc = write_range(v, c, *size, 0, off - *size);          /* the gap reads as zero */
+    if (!rc) rc = write_range(v, c, off, buf, len);
+    if (!rc && end > *size) *size = (uint32_t)end;
+    rc2 = fat32_sync(v);
+    return rc ? rc : rc2;
+}
+
+int fat32_truncate(fat32_vol_t *v, fat32_chain_t *c, uint32_t *first_cluster, uint32_t *size, uint32_t new_size)
+{
+    int rc = FAT32_OK, rc2;
+    if (!v->write) return FAT32_E_RDONLY;
+    if (new_size > *size) {
+        rc = grow_chain(v, c, first_cluster, (uint32_t)(((uint64_t)new_size + v->bytes_per_cluster - 1) / v->bytes_per_cluster));
+        if (!rc) rc = write_range(v, c, *size, 0, new_size - *size);
+        if (!rc) *size = new_size;
+    } else if (new_size < *size || c->total_clusters * (uint64_t)v->bytes_per_cluster >= (uint64_t)new_size + v->bytes_per_cluster) {
+        const uint32_t keep = (uint32_t)(((uint64_t)new_size + v->bytes_per_cluster - 1) / v->bytes_per_cluster);
+        uint32_t cur, guard = 0;
+        if (keep == 0) {
+            cur = *first_cluster;
+            *first_cluster = 0;
+        } else {
+            const uint32_t last = chain_cluster(c, keep - 1);
+            if (!last) return FAT32_E_CORRUPT;
+            cur = fat32_fat_entry(v, last);
+            fat_set(v, last, 0x0fffffffu);
+        }
+        while (cur >= 2 && cur < EOC) {                                  /* release the tail */
+            const uint32_t next = fat32_fat_entry(v, cur);
+            if (!valid_cluster(v, cur) || ++guard > v->cluster_count) { rc = FAT32_E_CORRUPT; break; }
+            fat_set(v, cur, 0);
+            cur = next;
+        }
+        fat32_chain_free(v, c);
+        if (!rc) rc = fat32_chain_build(v, *first_cluster, c);
+        if (!rc) *size = new_size;
+    }
+    rc2 = fat32_sync(v);
+    return rc ? rc : rc2;
+}
+
+int fat32_set_entry(fat32_vol_t *v, uint32_t dir_cluster, uint32_t dir_offset, uint32_t first_cluster, uint32_t size,
+                    uint16_t date, uint16_t time)
+{
+    uint64_t lba;
+    uint8_t *e;
+    int rc;
+    if (!v->write) return FAT32_E_RDONLY;
+    if (!valid_cluster(v, dir_cluster) || dir_offset >= v->bytes_per_cluster || (dir_offset & 31)) return FAT32_E_RANGE;
+    lba = fat32_cluster_lba(v, dir_cluster) + dir_offset / FAT32_SECTOR;
+    if ((rc = bounce(v, lba))) return rc;
+    e = v->sector + (dir_offset % FAT32_SECTOR);
+    if (e[0] == 0 || e[0] == 0xe5 || (e[11] & 0x3f) == FAT32_ATTR_LFN) return FAT32_E_CORRUPT;   /* not a live short entry */
+    wr16(e + 20, first_cluster >> 16);
+    wr16(e + 26, first_cluster & 0xffff);
+    if (!(e[11] & FAT32_ATTR_DIR)) { wr32(e + 28, size); e[11] |= FAT32_ATTR_ARCHIVE; }
+    wr16(e + 22, time); wr16(e + 24, date); wr16(e + 18, date);
+    return write_sector(v, lba, v->sector);
+}
+
+/* ---- creation ---- */
+static uint16_t up16(uint16_t c) { return c >= 'a' && c <= 'z' ? (uint16_t)(c - 32) : c; }
+
+static int short_char_ok(uint16_t c)
+{
+    if (c >= 'A' && c <= 'Z') return 1;
+    if (c >= '0' && c <= '9') return 1;
+    return c == '$' || c == '%' || c == '\'' || c == '-' || c == '_' || c == '@' || c == '~' || c == '`' || c == '!' ||
+           c == '(' || c == ')' || c == '{' || c == '}' || c == '^' || c == '#' || c == '&';
+}
+
+/* Exact upper-case 8.3 name: returns 1 and fills sn[11]. */
+static int exact_short(const uint16_t *name, unsigned n, uint8_t sn[11])
+{
+    unsigned i, dot = n, base, ext;
+    for (i = 0; i < n; ++i) if (name[i] == '.') { if (dot != n) return 0; dot = i; }
+    base = dot; ext = dot < n ? n - dot - 1 : 0;
+    if (!base || base > 8 || ext > 3 || (dot < n && !ext)) return 0;
+    for (i = 0; i < 11; ++i) sn[i] = ' ';
+    for (i = 0; i < base; ++i) { if (!short_char_ok(name[i])) return 0; sn[i] = (uint8_t)name[i]; }
+    for (i = 0; i < ext; ++i) { if (!short_char_ok(name[dot + 1 + i])) return 0; sn[8 + i] = (uint8_t)name[dot + 1 + i]; }
+    if (sn[0] == 0xe5) return 0;
+    return 1;
+}
+
+/* Basis name for an alias: upper case, invalid characters -> '_', spaces and embedded dots dropped. */
+static void basis_name(const uint16_t *name, unsigned n, uint8_t sn[11], unsigned *base_len)
+{
+    unsigned i, last_dot = n, b = 0, e = 0, start = 0;
+    for (i = 0; i < 11; ++i) sn[i] = ' ';
+    while (start < n && (name[start] == '.' || name[start] == ' ')) ++start;
+    for (i = start; i < n; ++i) if (name[i] == '.') last_dot = i;
+    for (i = start; i < last_dot && b < 8; ++i) {
+        const uint16_t c = up16(name[i]);
+        if (c == ' ' || c == '.') continue;
+        sn[b++] = (uint8_t)(short_char_ok(c) ? c : '_');
+    }
+    for (i = last_dot + 1; i < n && e < 3; ++i) {
+        const uint16_t c = up16(name[i]);
+        if (c == ' ' || c == '.') continue;
+        sn[8 + e++] = (uint8_t)(short_char_ok(c) ? c : '_');
+    }
+    if (!b) sn[b++] = '_';
+    *base_len = b;
+}
+
+static int name_valid(const uint16_t *name, unsigned n)
+{
+    unsigned i;
+    if (!n || n > 255) return 0;
+    if ((n == 1 && name[0] == '.') || (n == 2 && name[0] == '.' && name[1] == '.')) return 0;
+    if (name[n - 1] == ' ' || name[n - 1] == '.') return 0;
+    for (i = 0; i < n; ++i) {
+        const uint16_t c = name[i];
+        if (c < 0x20 || c == '"' || c == '*' || c == '/' || c == ':' || c == '<' || c == '>' || c == '?' || c == '\\' || c == '|')
+            return 0;
+    }
+    return 1;
+}
+
+static int names_equal_ci(const uint16_t *a, unsigned an, const uint16_t *b, unsigned bn)
+{
+    unsigned i;
+    if (an != bn) return 0;
+    for (i = 0; i < an; ++i) if (up16(a[i]) != up16(b[i])) return 0;
+    return 1;
+}
+
+static int short_equal(const uint8_t *a, const uint8_t *b)
+{
+    unsigned i;
+    for (i = 0; i < 11; ++i) if (a[i] != b[i]) return 0;
+    return 1;
+}
+
+/* 1 when `sn` (or, with name != NULL, the long/short name `name`) is already used in the directory. */
+static int dir_has(fat32_vol_t *v, uint32_t dir_first, const uint8_t *sn, const uint16_t *name, unsigned n, int *err)
+{
+    fat32_dir_t d;
+    fat32_dirent_t e;
+    int rc;
+    fat32_dir_open(v, dir_first, &d);
+    while ((rc = fat32_dir_next(v, &d, &e)) == 1) {
+        if (sn && short_equal(e.short_name, sn)) return 1;
+        if (name && names_equal_ci(e.name, e.name_len, name, n)) return 1;
+    }
+    *err = rc;
+    return 0;
+}
+
+int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *name, unsigned name_len, int is_dir,
+                 uint16_t date, uint16_t time, fat32_dirent_t *out)
+{
+    uint8_t sn[11], ent[32];
+    uint32_t pos_cluster[21], pos_offset[21], cl, off, guard = 0, newdir = 0;
+    unsigned nlfn = 0, need, run = 0, i, base_len, k;
+    const uint32_t dir_first = dir_first_cluster ? dir_first_cluster : v->root_cluster;
+    int err = 0, rc, rc2;
+    if (!v->write) return FAT32_E_RDONLY;
+    if (!name_valid(name, name_len)) return FAT32_E_NAME;
+    if (dir_has(v, dir_first_cluster, 0, name, name_len, &err)) return FAT32_E_EXISTS;
+    if (err < 0) return err;
+    if (!exact_short(name, name_len, sn)) {
+        basis_name(name, name_len, sn, &base_len);
+        for (k = 1; k < 1000000; ++k) {                       /* BASIS~N, unique in this directory */
+            char tail[8];
+            unsigned t = 0, keep, x = k;
+            char digits[7];
+            unsigned nd = 0;
+            while (x) { digits[nd++] = (char)('0' + x % 10); x /= 10; }
+            tail[t++] = '~';
+            while (nd) tail[t++] = digits[--nd];
+            keep = base_len + t > 8 ? 8 - t : base_len;
+            for (i = keep; i < 8; ++i) sn[i] = ' ';
+            for (i = 0; i < t; ++i) sn[keep + i] = (uint8_t)tail[i];
+            if (!dir_has(v, dir_first_cluster, sn, 0, 0, &err)) { if (err < 0) return err; break; }
+        }
+        if (k == 1000000) return FAT32_E_EXISTS;
+        nlfn = (name_len + 12) / 13;
+    } else if (dir_has(v, dir_first_cluster, sn, 0, 0, &err)) {
+        return FAT32_E_EXISTS;
+    }
+    if (err < 0) return err;
+    need = nlfn + 1;
+    /* find `need` consecutive free slots (deleted or past the end marker); grow the directory by a cluster if none */
+    cl = dir_first; off = 0;
+    for (;;) {
+        const uint8_t *e;
+        if (!valid_cluster(v, cl) || ++guard > 65536 * 32) return FAT32_E_CORRUPT;
+        if (off >= v->bytes_per_cluster) {
+            uint32_t next = fat32_fat_entry(v, cl);
+            if (next >= EOC) {
+                next = alloc_cluster(v);
+                if (!next) { fat32_sync(v); return FAT32_E_FULL; }
+                fat_set(v, cl, next);
+                if ((rc = zero_cluster(v, next))) { fat32_sync(v); return rc; }
+            }
+            cl = next; off = 0;
+            continue;
+        }
+        if ((rc = bounce(v, fat32_cluster_lba(v, cl) + off / FAT32_SECTOR))) return rc;
+        e = v->sector + (off % FAT32_SECTOR);
+        if (e[0] == 0 || e[0] == 0xe5) {
+            pos_cluster[run] = cl; pos_offset[run] = off;
+            if (++run == need) break;
+        } else {
+            run = 0;
+        }
+        off += 32;
+    }
+    if (is_dir) {                                             /* the new directory's first cluster: ".", ".." */
+        newdir = alloc_cluster(v);
+        if (!newdir) { fat32_sync(v); return FAT32_E_FULL; }
+        if ((rc = zero_cluster(v, newdir))) { fat32_sync(v); return rc; }
+        f32_zero(ent, sizeof ent);
+        for (i = 0; i < 11; ++i) ent[i] = ' ';
+        ent[0] = '.'; ent[11] = FAT32_ATTR_DIR;
+        wr16(ent + 14, time); wr16(ent + 16, date); wr16(ent + 18, date); wr16(ent + 22, time); wr16(ent + 24, date);
+        wr16(ent + 20, newdir >> 16); wr16(ent + 26, newdir & 0xffff);
+        if ((rc = bounce(v, fat32_cluster_lba(v, newdir)))) return rc;
+        f32_copy(v->sector, ent, 32);
+        ent[1] = '.';
+        {
+            const uint32_t parent = dir_first == v->root_cluster ? 0 : dir_first;    /* ".." of a root child is 0 */
+            wr16(ent + 20, parent >> 16); wr16(ent + 26, parent & 0xffff);
+        }
+        f32_copy(v->sector + 32, ent, 32);
+        if ((rc = write_sector(v, fat32_cluster_lba(v, newdir), v->sector))) { fat32_sync(v); return rc; }
+    }
+    /* long-name entries, highest sequence first, then the short entry */
+    {
+        const uint8_t sum = short_checksum(sn);
+        for (k = 0; k < nlfn; ++k) {
+            const unsigned seq = nlfn - k, start = (seq - 1) * 13;
+            static const uint8_t at[13] = { 1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30 };
+            f32_zero(ent, sizeof ent);
+            ent[0] = (uint8_t)(seq | (k == 0 ? 0x40 : 0));
+            ent[11] = FAT32_ATTR_LFN;
+            ent[13] = sum;
+            for (i = 0; i < 13; ++i) {
+                const unsigned c = start + i;
+                const uint32_t ch = c < name_len ? name[c] : c == name_len ? 0 : 0xffff;
+                wr16(ent + at[i], ch);
+            }
+            if ((rc = bounce(v, fat32_cluster_lba(v, pos_cluster[k]) + pos_offset[k] / FAT32_SECTOR))) { fat32_sync(v); return rc; }
+            f32_copy(v->sector + pos_offset[k] % FAT32_SECTOR, ent, 32);
+            if ((rc = write_sector(v, fat32_cluster_lba(v, pos_cluster[k]) + pos_offset[k] / FAT32_SECTOR, v->sector))) { fat32_sync(v); return rc; }
+        }
+        f32_zero(ent, sizeof ent);
+        f32_copy(ent, sn, 11);
+        ent[11] = is_dir ? FAT32_ATTR_DIR : FAT32_ATTR_ARCHIVE;
+        wr16(ent + 14, time); wr16(ent + 16, date); wr16(ent + 18, date); wr16(ent + 22, time); wr16(ent + 24, date);
+        wr16(ent + 20, newdir >> 16); wr16(ent + 26, newdir & 0xffff);
+        if ((rc = bounce(v, fat32_cluster_lba(v, pos_cluster[nlfn]) + pos_offset[nlfn] / FAT32_SECTOR))) { fat32_sync(v); return rc; }
+        f32_copy(v->sector + pos_offset[nlfn] % FAT32_SECTOR, ent, 32);
+        rc = write_sector(v, fat32_cluster_lba(v, pos_cluster[nlfn]) + pos_offset[nlfn] / FAT32_SECTOR, v->sector);
+    }
+    rc2 = fat32_sync(v);
+    if (rc || rc2) return rc ? rc : rc2;
+    f32_zero(out, sizeof *out);
+    f32_copy(out->name, name, (uint64_t)name_len * 2);
+    out->name_len = (uint16_t)name_len;
+    out->has_lfn = nlfn != 0;
+    out->attr = ent[11];
+    out->first_cluster = newdir;
+    out->cdate = out->mdate = out->adate = date;
+    out->ctime = out->mtime = time;
+    f32_copy(out->short_name, sn, 11);
+    out->dir_cluster = pos_cluster[nlfn];
+    out->dir_offset = pos_offset[nlfn];
+    return FAT32_OK;
 }

@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * D:\ (read-only FAT32 volume on the AHCI disk, standalone profile) seen from user mode through kernel32:
- * directory enumeration, file attributes/sizes/times, sequential and random-offset reads, CRC-32 of every file in
- * D:\TESTS. Every value is printed as a "DISK-..." line for tests/run_k64_disk.py, which recomputes it from the
- * files it packed into the image. Without a D: volume (plain run_k64_standalone.py, Supervisor profile) the test
- * prints SKIP and exits 0, so the app list stays green in both runners. */
+ * D:\ (FAT32 volume on the AHCI disk, standalone profile) seen from user mode through kernel32: directory
+ * enumeration, file attributes/sizes/times, sequential and random-offset reads, CRC-32 of every file in D:\TESTS;
+ * then writes: a new directory and files with long names, an in-place overwrite plus append of a host file, a
+ * truncation, read-back in the guest and NtFlushBuffersFile (FLUSH CACHE EXT). Every value is printed as a "DISK-..."
+ * line for tests/run_k64_disk.py, which recomputes it from the files it packed and, after QEMU exits, reads the
+ * written files back out of the image with mtools and runs fsck.fat on it. Without D:\TESTS (plain
+ * run_k64_standalone.py, the Supervisor profile, the Chromium probe disk) the test prints SKIP and exits 0. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "u_check.h"
@@ -18,6 +20,7 @@ typedef struct { ULONG_PTR Status; ULONG_PTR Information; } N_IOSB;
 NTSTATUS NTAPI NtOpenFile(PHANDLE, ACCESS_MASK, N_OA *, N_IOSB *, ULONG, ULONG);
 NTSTATUS NTAPI NtQueryDirectoryFile(HANDLE, HANDLE, PVOID, PVOID, N_IOSB *, PVOID, ULONG, ULONG, BOOLEAN, N_USTR *, BOOLEAN);
 NTSTATUS NTAPI NtClose(HANDLE);
+NTSTATUS NTAPI NtFlushBuffersFile(HANDLE, N_IOSB *);    /* kernel32's FlushFileBuffers only validates the handle */
 #define N_FILE_DIRECTORY_FILE 1
 #define N_STATUS_NO_MORE_FILES ((NTSTATUS)0x80000006)
 
@@ -108,6 +111,113 @@ static uint32_t hash_file(const char *path, unsigned long long *size_out, int *o
     return crc;
 }
 
+/* The host's pattern(seed, n) (tests/run_k64_disk.py): an LCG emitting 4 little-endian bytes per step. */
+static void pattern(uint32_t seed, unsigned char *out, size_t n)
+{
+    uint32_t x = seed;
+    size_t i;
+    for (i = 0; i < n; i += 4) {
+        size_t k;
+        x = x * 1103515245u + 12345u;
+        for (k = 0; k < 4 && i + k < n; ++k) out[i + k] = (unsigned char)(x >> (8 * k));
+    }
+}
+
+static int write_all(HANDLE h, const unsigned char *p, DWORD n, int odd_chunks)
+{
+    DWORD chunk = 1, done = 0, got;
+    while (done < n) {
+        DWORD c = odd_chunks ? chunk : n - done;
+        if (c > n - done) c = n - done;
+        if (!WriteFile(h, p + done, c, &got, 0) || got != c) return 0;
+        done += c;
+        chunk = chunk * 3 + 511;
+        if (chunk > 70000) chunk = 1;
+    }
+    return 1;
+}
+
+/* CRC-32 and size of a file read back through the kernel (after the writes, straight from the disk). */
+static int readback(const char *path, unsigned long long *size, uint32_t *crc)
+{
+    static unsigned char buf[65536];
+    HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    DWORD got;
+    *size = 0; *crc = 0;
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    for (;;) {
+        if (!ReadFile(h, buf, sizeof buf, &got, 0)) { CloseHandle(h); return 0; }
+        if (!got) break;
+        *crc = crc_update(*crc, buf, got);
+        *size += got;
+    }
+    CloseHandle(h);
+    return 1;
+}
+
+static void write_tests(void)
+{
+    static unsigned char buf[300000];
+    HANDLE h;
+    DWORD got;
+    LARGE_INTEGER off;
+    N_IOSB iosb;
+    unsigned long long size;
+    uint32_t crc;
+    NTSTATUS st;
+    static const char *const outs[] = { "D:\\OUT\\Guest Written File.bin", "D:\\OUT\\Sub Dir\\small.txt",
+                                        "D:\\WRITE\\existing file.bin", "D:\\WRITE\\TRUNC.BIN" };
+    unsigned i;
+    U_CHECK("CreateDirectory D:\\OUT", CreateDirectoryA("D:\\OUT", 0));
+    U_CHECK("CreateDirectory D:\\OUT\\Sub Dir", CreateDirectoryA("D:\\OUT\\Sub Dir", 0));
+    U_CHECK("CreateDirectory D:\\OUT again fails (exists)", !CreateDirectoryA("D:\\OUT", 0) && GetLastError() == ERROR_ALREADY_EXISTS);
+    /* a new 300000-byte file (73.2 clusters of 4 KiB) written in odd-sized chunks */
+    pattern(31, buf, 300000);
+    h = CreateFileA(outs[0], GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_NEW, 0, 0);
+    U_CHECK("CreateFile CREATE_NEW D:\\OUT\\Guest Written File.bin", h != INVALID_HANDLE_VALUE);
+    if (h != INVALID_HANDLE_VALUE) {
+        U_CHECK("WriteFile 300000 bytes in odd chunks", write_all(h, buf, 300000, 1));
+        st = NtFlushBuffersFile(h, &iosb);
+        U_CHECKF("NtFlushBuffersFile (FLUSH CACHE EXT)", st == 0, "status %x", (unsigned)st);
+        CloseHandle(h);
+    }
+    h = CreateFileA(outs[1], GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+    U_CHECK("CreateFile D:\\OUT\\Sub Dir\\small.txt", h != INVALID_HANDLE_VALUE);
+    if (h != INVALID_HANDLE_VALUE) {
+        static const char text[] = "written by T_DISK.EXE inside a new directory\r\n";
+        U_CHECK("WriteFile small.txt", WriteFile(h, text, sizeof text - 1, &got, 0) && got == sizeof text - 1);
+        CloseHandle(h);
+    }
+    /* in place: 3000 bytes at 5000 of a 20000-byte host file, then 1000 bytes appended at its end */
+    h = CreateFileA(outs[2], GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
+    U_CHECK("open D:\\WRITE\\existing file.bin for writing", h != INVALID_HANDLE_VALUE);
+    if (h != INVALID_HANDLE_VALUE) {
+        pattern(32, buf, 3000);
+        off.QuadPart = 5000;
+        U_CHECK("overwrite 3000 bytes at 5000", SetFilePointerEx(h, off, 0, FILE_BEGIN) && write_all(h, buf, 3000, 0));
+        pattern(33, buf, 1000);
+        off.QuadPart = 0;
+        U_CHECK("append 1000 bytes", SetFilePointerEx(h, off, 0, FILE_END) && write_all(h, buf, 1000, 0));
+        CloseHandle(h);
+    }
+    /* truncation of a 50000-byte host file to 777 bytes (frees 12 of 13 clusters) */
+    h = CreateFileA(outs[3], GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
+    U_CHECK("open D:\\WRITE\\TRUNC.BIN", h != INVALID_HANDLE_VALUE);
+    if (h != INVALID_HANDLE_VALUE) {
+        off.QuadPart = 777;
+        U_CHECK("SetEndOfFile at 777", SetFilePointerEx(h, off, 0, FILE_BEGIN) && SetEndOfFile(h));
+        st = NtFlushBuffersFile(h, &iosb);
+        U_CHECKF("NtFlushBuffersFile after the last write", st == 0, "status %x", (unsigned)st);
+        CloseHandle(h);
+    }
+    U_CHECK("delete on D: is refused (not supported)", !DeleteFileA(outs[1]));
+    for (i = 0; i < sizeof outs / sizeof outs[0]; ++i) {
+        int ok = readback(outs[i], &size, &crc);
+        U_CHECK("read back a written file", ok);
+        printf("DISK-WRITE %s %llu %x\n", outs[i], size, crc);
+    }
+}
+
 int main(void)
 {
     static dent_t ents[64];
@@ -119,12 +229,13 @@ int main(void)
         printf("SKIP: no D: volume (GetFileAttributes error %u)\n", (unsigned)GetLastError());
         return 0;
     }
+    if (GetFileAttributesA("D:\\TESTS") == INVALID_FILE_ATTRIBUTES) {
+        printf("SKIP: D: has no TESTS directory (not the disk test image)\n");
+        return 0;
+    }
     U_CHECK("D:\\ is a directory", attrs & FILE_ATTRIBUTE_DIRECTORY);
-    U_CHECK("D:\\TESTS exists", GetFileAttributesA("D:\\TESTS") != INVALID_FILE_ATTRIBUTES);
     U_CHECK("D:\\NOSUCH does not exist", GetFileAttributesA("D:\\NOSUCH") == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_FILE_NOT_FOUND);
     U_CHECK("E:\\ is not mounted", GetFileAttributesA("E:\\") == INVALID_FILE_ATTRIBUTES);
-    U_CHECK("D: is read-only: CreateFile for writing fails",
-            CreateFileA("D:\\TESTS\\new.txt", GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0) == INVALID_HANDLE_VALUE);
     n = list_dir(L"\\??\\D:\\TESTS", ents, 64);
     U_CHECK("NtQueryDirectoryFile on D:\\TESTS", n > 0);
     for (i = 0; i < n; ++i) {
@@ -164,5 +275,6 @@ int main(void)
     }
     printf("DISK-SUMMARY %u %u %x\n", entries, hashed, xor_crc);
     shz_evidence(18, ((unsigned long long)hashed << 32) | xor_crc);   /* user slots are 16..23 */
+    write_tests();
     return u_finish("t_disk");
 }
