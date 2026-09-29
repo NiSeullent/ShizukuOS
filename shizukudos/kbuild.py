@@ -28,6 +28,24 @@ K64_FLAGS = ["-m64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffree
              "-fwrapv", "-fno-strict-aliasing", "-fno-tree-loop-distribute-patterns"]
 
 
+STUB_DIR = SHZ / "kernel64" / "standalone"
+
+
+def build_standalone_stub():
+    """Multiboot ELF32 boot stub (see kernel64/standalone/boot32.c) for running Kernel64 without the Supervisor."""
+    out = BUILD / "kernel64s"
+    out.mkdir(parents=True, exist_ok=True)
+    asm_o, c_o, elf = out / "boot.asm.o", out / "boot32.o", out / "boot.elf"
+    run(["nasm", "-f", "elf32", "-w+all", "-o", asm_o, STUB_DIR / "boot.asm"])
+    run(["gcc", "-m32", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin", "-fno-pic",
+         "-fno-pie", "-fno-stack-protector", "-mno-sse", "-mno-mmx", "-fno-asynchronous-unwind-tables", "-fno-ident",
+         "-fno-tree-loop-distribute-patterns", "-c", STUB_DIR / "boot32.c", "-o", c_o])
+    run(["ld", "-m", "elf_i386", "-nostdlib", "-z", "noexecstack", "--no-warn-rwx-segments", "-T", STUB_DIR / "boot.ld",
+         "-o", elf, asm_o, c_o])
+    assert not run(["nm", "-u", elf], capture=True).stdout.strip(), "boot stub has unresolved symbols"
+    return {"elf": elf, "sha256": sha256_file(elf), "bytes": elf.stat().st_size}
+
+
 def sources(directory, suffix):
     return sorted((SHZ / directory).glob(f"*{suffix}"))
 
@@ -83,6 +101,10 @@ def main():
     # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.
     k64 = build_kernel("kernel64", "kernel64", K64_FLAGS, "elf64", "elf_x86_64", "KERNEL64.BIN",
                        extra_c=[SHZ / "win64" / "pe_parse.c"])
+    # Same sources with SHZ_STANDALONE: hypercalls served in-kernel over COM1/PIT/RTC so it boots under QEMU TCG.
+    k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"], "elf64", "elf_x86_64",
+                        "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c"])
+    stub = build_standalone_stub()
     for name, r in (("kernel32", k32), ("kernel64", k64)):
         results[name] = {"bytes": r["bytes"], "sha256": r["sha256"], "elf_sha256": r["elf_sha256"],
                          "commands": [[str(x) for x in c] for c in r["commands"]]}
@@ -91,6 +113,9 @@ def main():
     elf64 = k64["elf"].read_bytes()[:20]
     assert elf32[4] == 1 and elf32[18:20] == b"\x03\x00", "Kernel32 must be ELF32/i386"
     assert elf64[4] == 2 and elf64[18:20] == b"\x3e\x00", "Kernel64 must be ELF64/x86-64"
+    results["kernel64-standalone"] = {"bytes": k64s["bytes"], "sha256": k64s["sha256"], "elf_sha256": k64s["elf_sha256"],
+                                      "stub_sha256": stub["sha256"],
+                                      "commands": [[str(x) for x in c] for c in k64s["commands"]]}
     shzlib.write_json(BUILD / "kernels-build-result.json", {
         "built_utc": shzlib.utc_now(), "git": shzlib.git_state(), "kernels": results,
         "kernel32_machine": "EM_386 ELF32", "kernel64_machine": "EM_X86_64 ELF64",

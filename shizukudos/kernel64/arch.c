@@ -8,6 +8,9 @@ extern void load_gdt(void *gdtr, uint16_t tss_sel);
 extern void load_idt(void *idtr);
 extern void syscall_entry(void);
 extern const uint64_t isr_stub_table[256];
+#ifdef SHZ_STANDALONE
+extern void standalone_eoi(void);
+#endif
 
 struct __attribute__((packed)) dtr { uint16_t limit; uint64_t base; };
 struct __attribute__((packed)) idt_gate { uint16_t lo, sel; uint8_t ist, type; uint16_t mid; uint32_t hi, zero; };
@@ -73,7 +76,8 @@ void arch_init(void)
     wrmsr(MSR_SFMASK, 0x40700);
     /* SSE for user threads: OSFXSR | OSXMMEXCPT, and clear CR0.EM / set MP. */
     write_cr4(read_cr4() | (1ull << 9) | (1ull << 10));
-    write_cr0((read_cr0() & ~4ull) | 2ull);
+    /* CR0.WP: ring 0 must honour read-only pages (copy_to_user, protection faults) whatever the loader left set. */
+    write_cr0((read_cr0() & ~4ull) | 2ull | (1ull << 16));
 }
 
 static const char *const names[32] = {
@@ -92,6 +96,9 @@ void isr_dispatch(struct regs *r)
     switch (r->vector) {
     case VEC_TIMER:
         ++timer_irqs;
+#ifdef SHZ_STANDALONE
+        standalone_eoi();                   /* PIT IRQ0 through the 8259: acknowledge before any context switch */
+#endif
         sched_tick();
         return;
     case VEC_DOORBELL: {

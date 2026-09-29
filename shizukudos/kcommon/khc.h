@@ -11,6 +11,15 @@
 #if defined(__x86_64__)
 typedef uint64_t hcreg_t;
 #define HC_REGS_OUT "=a"(status), "=b"(value)
+#ifdef SHZ_STANDALONE
+/* Kernel64 booted without the Supervisor (QEMU multiboot stub): the same hypercall ABI is served in-kernel
+ * by kernel64/standalone/standalone64.c over COM1, PIT/PIC, the RTC and QEMU's isa-debug-exit port. */
+long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out);
+static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
+{
+    return shz_standalone_hcall(op, a, b, value_out);
+}
+#else
 static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
 {
     hcreg_t status, value;
@@ -19,6 +28,7 @@ static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_ou
         *value_out = value;
     return (long)status;
 }
+#endif
 #else
 typedef uint32_t hcreg_t;
 static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)

@@ -232,6 +232,8 @@ def suite_win64(results):
     run_script(results, "PE32+ loader host tests (parser, fuzz, ASan/UBSan)", [SHZ / "win64" / "tests" / "test_pe_parse.py"])
     run_script(results, "Win64 runtime build: ntdll.dll + kernel32.dll + test apps (-Werror)", [SHZ / "win64" / "build.py"])
     run_script(results, "Kernel32/Kernel64 build (separate ELF32/ELF64 images)", [SHZ / "kbuild.py"])
+    run_script(results, "Kernel64 + Win64 apps on QEMU (standalone stub, no Supervisor/VMX): self-tests, T_HELLO.EXE exit 7",
+               [SHZ / "tests" / "run_k64_standalone.py"], timeout=400, expect_marker="PASS")
     reason = "needs Intel VMX in L1 (/dev/kvm + kvm_intel nested); run `test --suite boot` on such a host"
     if l1_vmx_available() and not supervisor_checks("Win64: "):
         run([sys.executable, SHZ / "supervisor" / "build.py"], capture=True, timeout=600)
