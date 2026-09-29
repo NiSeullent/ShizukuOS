@@ -69,6 +69,23 @@ does not manufacture handles or replace the system DLL. An application must
 have its resolver import prepared to use this route; calls originating in
 unprepared dependencies still use the native resolver.
 
+## WIN64 subsystem client (ShizukuDOS)
+
+`NTW32.DLL` also exports eight NTW32-specific functions, listed separately as
+`provider_api` in `routes.json` (they are never routed from KERNEL32 imports):
+`NtwQuerySubsystem64`, `NtwCreateProcess64W`, `NtwWaitProcess64`,
+`NtwReadConsole64`, `NtwWriteConsole64`, `NtwCloseConsole64`,
+`NtwKillProcess64` and `NtwCloseProcess64` (`win64/ntw64.h`). They let a
+Windows 98 program run a Win64 PE32+ program in the ShizukuDOS Kernel64 domain
+through `NTWRAP9X.VXD` and the inter-domain channel; the build also produces the
+console front end `NTW64RUN.EXE`. This adds three native imports (`CreateFileA`,
+`DeviceIoControl`, `GetLastError`). The design, message table and the exact
+verified/BLOCKED split are in
+[docs/shizukudos10/WIN64_SUBSYSTEM.md](../docs/shizukudos10/WIN64_SUBSYSTEM.md):
+the code runs end to end on the host (`platform/abi32/w64_e2e.py`) but has not
+run inside Windows 98 or under the Supervisor, and the VxD's last guest load
+attempt failed.
+
 ## Build and prepare
 
 ```sh
