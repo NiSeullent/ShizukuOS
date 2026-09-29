@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * gdi32 self-test on memory DCs: needs no display, so it runs (and must pass) in the plain standalone runner too.
+ * gdi32 self-test on memory DCs (plus user32's icons and cursors, which draw through gdi32): needs no display, so it runs
+ * (and must pass) in the plain standalone runner too.
  * Expected values are written down here from the documented Win32 behaviour, not read back from the implementation. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -329,6 +330,87 @@ static void test_alpha(void)
     DeleteDC(src);
 }
 
+/* user32 icons: the built-in IDI_APPLICATION image is a black-framed box at [3,29)x[4,28) with a navy title band (rows 5-8
+ * inside the frame), a white body and grey "text" lines on rows 12 and 16; everything outside the frame is transparent. */
+static void test_icons(void)
+{
+    HICON app = LoadIconW(0, MAKEINTRESOURCEW(32512)), app2 = LoadIconW(0, MAKEINTRESOURCEW(32512)), mine, copy;
+    HCURSOR arrow = LoadCursorW(0, MAKEINTRESOURCEW(32512)), hand = LoadCursorW(0, MAKEINTRESOURCEW(32649));
+    ICONINFO ii;
+    BITMAPINFO bi;
+    unsigned *bits = 0;
+    HBITMAP color, mask;
+    BITMAP bm;
+    int x, y, ok;
+    CHECK(app && app == app2 && arrow && hand && arrow != hand && (HANDLE)app != (HANDLE)arrow, "system icons and cursors load, shared (same handle twice)");
+    SetLastError(0);
+    CHECK(!LoadCursorW(0, MAKEINTRESOURCEW(12345)) && GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND, "an unknown system cursor fails with ERROR_RESOURCE_NAME_NOT_FOUND");
+    SetLastError(0);
+    CHECK(!LoadIconW(GetModuleHandleW(0), MAKEINTRESOURCEW(1)) && GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND, "module resources cannot be loaded (no resource loader)");
+    CHECK(!IsWindow((HWND)app), "an icon handle is not a window handle");
+
+    clear(RGB(0, 255, 0));
+    CHECK(DrawIconEx(g_dc, 0, 0, app, 0, 0, 0, 0, DI_NORMAL), "DrawIconEx(DI_NORMAL) at natural size");
+    CHECK(GetPixel(g_dc, 3, 4) == RGB(0, 0, 0) && GetPixel(g_dc, 28, 27) == RGB(0, 0, 0), "frame corners are black");
+    CHECK(GetPixel(g_dc, 10, 6) == RGB(0, 0, 128) && GetPixel(g_dc, 10, 20) == RGB(255, 255, 255) && GetPixel(g_dc, 10, 12) == RGB(128, 128, 128), "title band, body and text line");
+    CHECK(GetPixel(g_dc, 1, 1) == RGB(0, 255, 0) && GetPixel(g_dc, 30, 30) == RGB(0, 255, 0) && GetPixel(g_dc, 40, 10) == RGB(0, 255, 0), "transparent pixels keep the background");
+    clear(RGB(0, 255, 0));
+    DrawIconEx(g_dc, 0, 0, app, 64, 64, 0, 0, DI_NORMAL);
+    CHECK(GetPixel(g_dc, 6, 8) == RGB(0, 0, 0) && GetPixel(g_dc, 5, 8) == RGB(0, 255, 0) && GetPixel(g_dc, 20, 12) == RGB(0, 0, 128), "scaled 2x: every source pixel becomes a 2x2 block");
+    clear(RGB(0, 255, 0));
+    DrawIconEx(g_dc, 0, 0, app, 0, 0, 0, 0, DI_MASK);
+    CHECK(GetPixel(g_dc, 10, 20) == RGB(0, 0, 0) && GetPixel(g_dc, 1, 1) == RGB(0, 255, 0), "DI_MASK blackens the opaque area only");
+    {
+        HBRUSH red = CreateSolidBrush(RGB(255, 0, 0));
+        clear(RGB(0, 255, 0));
+        DrawIconEx(g_dc, 0, 0, app, 0, 0, 0, red, DI_NORMAL);
+        CHECK(GetPixel(g_dc, 1, 1) == RGB(255, 0, 0) && GetPixel(g_dc, 31, 31) == RGB(255, 0, 0) && GetPixel(g_dc, 32, 32) == RGB(0, 255, 0), "hbrFlickerFreeDraw fills the icon rectangle first");
+        DeleteObject(red);
+    }
+
+    memset(&bi, 0, sizeof bi);                                                  /* a 4x4 icon from a 32 bpp alpha bitmap */
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = 4;
+    bi.bmiHeader.biHeight = -4;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    color = CreateDIBSection(g_dc, &bi, DIB_RGB_COLORS, (void **)&bits, 0, 0);
+    for (y = 0; y < 4; ++y)
+        for (x = 0; x < 4; ++x) bits[y * 4 + x] = x == 0 ? 0 : x == 1 ? 0xff0000ffu : x == 2 ? 0x80ff0000u : 0xffffffffu;
+    mask = CreateCompatibleBitmap(g_dc, 4, 4);
+    memset(&ii, 0, sizeof ii);
+    ii.fIcon = TRUE;
+    ii.hbmColor = color;
+    ii.hbmMask = mask;
+    mine = CreateIconIndirect(&ii);
+    CHECK(mine != 0, "CreateIconIndirect from a 32 bpp bitmap with alpha");
+    clear(RGB(255, 255, 255));
+    DrawIconEx(g_dc, 8, 8, mine, 0, 0, 0, 0, DI_NORMAL);
+    {
+        const COLORREF half = GetPixel(g_dc, 10, 8);
+        CHECK(GetPixel(g_dc, 8, 8) == RGB(255, 255, 255) && GetPixel(g_dc, 9, 8) == RGB(0, 0, 255) && GetPixel(g_dc, 11, 11) == RGB(255, 255, 255), "alpha 0 keeps, alpha 255 replaces");
+        CHECK(GetRValue(half) == 255 && GetGValue(half) >= 126 && GetGValue(half) <= 128 && GetBValue(half) == GetGValue(half), "alpha 128 red over white blends to (255,127,127)");
+    }
+    memset(&ii, 0, sizeof ii);
+    ok = GetIconInfo(mine, &ii);
+    CHECK(ok && ii.fIcon && ii.xHotspot == 2 && ii.yHotspot == 2 && ii.hbmColor && ii.hbmMask, "GetIconInfo: icon, hot spot at the centre, two new bitmaps");
+    CHECK(ok && GetObjectW(ii.hbmColor, sizeof bm, &bm) == sizeof bm && bm.bmWidth == 4 && bm.bmHeight == 4, "the colour bitmap is 4x4");
+    if (ok) { DeleteObject(ii.hbmColor); DeleteObject(ii.hbmMask); }
+    copy = CopyIcon(mine);
+    CHECK(copy && copy != mine, "CopyIcon makes a new handle");
+    CHECK(DestroyIcon(mine) && !DestroyIcon(mine) && GetLastError() == ERROR_INVALID_CURSOR_HANDLE, "DestroyIcon frees; a second call fails");
+    clear(RGB(255, 255, 255));
+    CHECK(DrawIconEx(g_dc, 0, 0, copy, 0, 0, 0, 0, DI_NORMAL) && GetPixel(g_dc, 1, 0) == RGB(0, 0, 255), "the copy survives the original");
+    DestroyIcon(copy);
+    DeleteObject(color);
+    DeleteObject(mask);
+    CHECK(DestroyIcon(app) && LoadIconW(0, MAKEINTRESOURCEW(32512)) == app, "shared system icons survive DestroyIcon");
+
+    CHECK(GetCursor() == 0 && SetCursor(arrow) == 0 && GetCursor() == arrow && SetCursor(hand) == arrow, "SetCursor/GetCursor keep the thread's cursor");
+    SetCursor(0);
+}
+
 int main(void)
 {
     if (!setup()) { printf("FAIL: cannot create the memory DC and DIB section\n"); return 1; }
@@ -341,6 +423,7 @@ int main(void)
     test_dib();
     test_alpha();
     test_objects();
+    test_icons();
     SelectObject(g_dc, GetStockObject(BLACK_PEN));
     printf("%s: gdi32 memory-DC tests\n", bad ? "FAIL" : "PASS");
     return bad ? 1 : 0;

@@ -697,6 +697,43 @@ DLLAPI BOOL WINAPI GdiAlphaBlend(HDC hdcd, int xd, int yd, int wd, int hd, HDC h
     RET(TRUE);
 }
 
+/* Private export for user32's icons and cursors (not a Windows API): draws a top-down sw x sh image of straight
+ * (non-premultiplied) 0xAARRGGBB pixels scaled nearest-neighbour to w x h at logical (x,y), clipped like any primitive.
+ * mode 3 (DI_NORMAL) blends with the per-pixel alpha, mode 2 (DI_IMAGE) copies the colour ignoring alpha, mode 1 (DI_MASK)
+ * blackens the pixels whose alpha is at least 128 (the AND mask) and leaves the others alone. */
+DLLAPI BOOL WINAPI ShzGdiDrawArgb(HDC hdc, int x, int y, int w, int h, const uint32_t *argb, int sw, int sh, int mode)
+{
+    dc_t *d;
+    gctx_t g;
+    int i, py;
+    GDI_ENTER();
+    d = gdi_dc_get(hdc);
+    if (!d || !argb || w <= 0 || h <= 0 || sw <= 0 || sh <= 0 || mode < 1 || mode > 3) { SetLastError(ERROR_INVALID_PARAMETER); RET(FALSE); }
+    if (!gctx_begin(&g, d)) RET(TRUE);
+    x = dc_lx(d, x); y = dc_ly(d, y);
+    for (i = 0; i < g.clip->n; ++i) {
+        RECT want, o;
+        want.left = x; want.top = y; want.right = x + w; want.bottom = y + h;
+        if (!rc_intersect(&o, &want, &g.clip->r[i])) continue;
+        for (py = o.top; py < o.bottom; ++py) {
+            const uint32_t *srow = argb + (size_t)((int64_t)(py - y) * sh / h) * (size_t)sw;
+            uint32_t *px = bm_px(g.bm, o.left, py);
+            int px_x;
+            for (px_x = o.left; px_x < o.right; ++px_x, ++px) {
+                const uint32_t s = srow[(int64_t)(px_x - x) * sw / w], a = s >> 24, d0 = *px;
+                if (mode == 1) { if (a >= 128) *px = d0 & 0xff000000u; continue; }
+                if (mode == 2 || a == 255) { *px = (s & 0x00ffffffu) | (d0 & 0xff000000u); continue; }
+                if (a == 0) continue;
+                *px = (((s >> 16 & 255) * a + (d0 >> 16 & 255) * (255 - a)) / 255) << 16 | (((s >> 8 & 255) * a + (d0 >> 8 & 255) * (255 - a)) / 255) << 8 |
+                      (((s & 255) * a + (d0 & 255) * (255 - a)) / 255) | (d0 & 0xff000000u);
+            }
+        }
+        mark(&g, o.left, o.top, o.right, o.bottom);
+    }
+    gctx_end(&g);
+    RET(TRUE);
+}
+
 /* ---------------------------------------------------------------- DIB transfer */
 typedef struct {
     const BITMAPINFOHEADER *h;

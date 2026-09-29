@@ -41,4 +41,12 @@ void u32_send_size_move(HWND hwnd, int moved, int sized);
 int u32_metric(int index);
 COLORREF u32_syscolor(int index);
 HBRUSH u32_sysbrush(int index);
+
+/* per-thread user32 state (TLS, allocated on first use; 0 only if the heap is exhausted) */
+typedef struct {
+    DWORD time; POINT pt; LPARAM extra;             /* the last retrieved message: GetMessageTime/Pos/ExtraInfo */
+    HCURSOR cursor;                                 /* SetCursor/GetCursor */
+    int cursor_count;                               /* ShowCursor display counter */
+} u32_thread_t;
+u32_thread_t *u32_ts(void);
 #endif

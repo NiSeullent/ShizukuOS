@@ -104,11 +104,9 @@ LRESULT u32_send(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, DWORD timeout_ms, in
     }
 }
 
-/* per-thread record of the last retrieved message (GetMessageTime/Pos/ExtraInfo) */
-typedef struct { DWORD time; POINT pt; LPARAM extra; } msginfo_t;
-static msginfo_t *msginfo(void)
+u32_thread_t *u32_ts(void)
 {
-    msginfo_t *m;
+    u32_thread_t *m;
     if (g_tls == TLS_OUT_OF_INDEXES) return 0;
     m = TlsGetValue(g_tls);
     if (!m) {
@@ -119,7 +117,7 @@ static msginfo_t *msginfo(void)
 }
 static void note_message(const shz_msg_t *m)
 {
-    msginfo_t *i = msginfo();
+    u32_thread_t *i = u32_ts();
     if (i) { i->time = m->time; i->pt.x = m->pt.x; i->pt.y = m->pt.y; }
 }
 
@@ -234,11 +232,11 @@ DLLAPI BOOL WINAPI InSendMessage(void)
     return NtUserThreadOp(&t) >= 0 && t.out0;
 }
 
-DLLAPI LONG WINAPI GetMessageTime(void) { msginfo_t *i = msginfo(); return i ? (LONG)i->time : 0; }
-DLLAPI LPARAM WINAPI GetMessageExtraInfo(void) { msginfo_t *i = msginfo(); return i ? i->extra : 0; }
+DLLAPI LONG WINAPI GetMessageTime(void) { u32_thread_t *i = u32_ts(); return i ? (LONG)i->time : 0; }
+DLLAPI LPARAM WINAPI GetMessageExtraInfo(void) { u32_thread_t *i = u32_ts(); return i ? i->extra : 0; }
 DLLAPI DWORD WINAPI GetMessagePos(void)
 {
-    msginfo_t *i = msginfo();
+    u32_thread_t *i = u32_ts();
     return i ? MAKELONG((WORD)i->pt.x, (WORD)i->pt.y) : 0;
 }
 
