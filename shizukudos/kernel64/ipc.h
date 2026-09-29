@@ -163,6 +163,7 @@ void irp_complete(irp_t *irp, int32_t status, uint64_t info);
 int32_t irp_finish(irp_t *irp);
 void irp_cancel_matching(process_t *p, thread_t *t, kobject_t *fobj, uint64_t iosb, int *found);
 void ipc_io_teardown(process_t *p);
+void ipc_file_created(process_t *p, uint64_t h, uint32_t options);
 void ipc_io_thread_exit(thread_t *t);
 /* Posts a completion packet to a port (interrupts off). */
 int32_t iocp_post(kobject_t *port, uint64_t key, uint64_t apc_context, int32_t status, uint64_t info);

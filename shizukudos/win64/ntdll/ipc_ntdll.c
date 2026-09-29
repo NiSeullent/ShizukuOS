@@ -64,7 +64,8 @@ static const struct { NTSTATUS status; ULONG error; } ipc_map[] = {
     {(NTSTATUS)0xC000010A, ERROR_ACCESS_DENIED},               /* STATUS_PROCESS_IS_TERMINATING */
     {(NTSTATUS)0xC000004B, ERROR_ACCESS_DENIED},               /* STATUS_THREAD_IS_TERMINATING */
     {(NTSTATUS)0xC0000128, ERROR_INVALID_HANDLE},              /* STATUS_FILE_CLOSED */
-    {(NTSTATUS)0xC0000062, ERROR_INVALID_NAME},                /* STATUS_NAME_TOO_LONG */
+    {(NTSTATUS)0xC0000275, ERROR_NOT_A_REPARSE_POINT},         /* STATUS_NOT_A_REPARSE_POINT */
+    {(NTSTATUS)0xC0000106, ERROR_FILENAME_EXCED_RANGE},       /* STATUS_NAME_TOO_LONG */
 };
 
 /* Win32 error for the statuses of this subsystem, (ULONG)-1 when it is not one of them (RtlNtStatusToDosError). */

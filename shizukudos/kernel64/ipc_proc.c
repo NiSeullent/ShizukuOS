@@ -1004,8 +1004,10 @@ static int32_t create_with_inherit(process_t *p, struct regs *r, uint32_t num, u
     int32_t st = sys_extended(p, r, num, a1, a2, a3, a4);
     uint64_t h = 0;
     if ((st != STATUS_SUCCESS && st != STATUS_OBJECT_NAME_EXISTS) || !a3) return st;
-    if (copy_from_user(p, &a, a3, sizeof a) || !(a.attributes & OBJ_INHERIT_ATTR)) return st;
     if (copy_from_user(p, &h, a1, 8) || !h || (h & 3) || h > MAX_HANDLES * 4ull) return st;
+    if (num == SYS_NtCreateFile || num == SYS_NtOpenFile)
+        ipc_file_created(p, h, (uint32_t)stack_arg(p, r, num == SYS_NtOpenFile ? 6 : 9));
+    if (copy_from_user(p, &a, a3, sizeof a) || !(a.attributes & OBJ_INHERIT_ATTR)) return st;
     {
         const uint64_t f = irq_save();
         if (p->handles[h / 4 - 1].obj) p->handles[h / 4 - 1].inherit |= HANDLE_FLAG_INHERIT_BIT;
@@ -1038,7 +1040,7 @@ int32_t ipc_proc_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1
     case SYS_NtQueryInformationProcess:
         if (a2 != 0 && a2 != 4 && a2 != 20 && a2 != 24 && a2 != 27 && a2 != 43) break;
         return sys_query_process(p, r, a1, a2, a3, a4);
-    case SYS_NtCreateEvent: case SYS_NtCreateMutant: case SYS_NtCreateSemaphore:
+    case SYS_NtCreateEvent: case SYS_NtCreateMutant: case SYS_NtCreateSemaphore: case SYS_NtCreateFile: case SYS_NtOpenFile:
         return create_with_inherit(p, r, num, a1, a2, a3, a4);
     case SYS_NtCreateJobObject: return sys_create_job(p, a1, a2, a3);
     case SYS_NtOpenJobObject: return ipc_open_named(p, OB_JOB, a1, a2, a3);

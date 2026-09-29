@@ -69,7 +69,8 @@
     X(NtIsProcessInJob, 0xb6) X(NtSetInformationObject, 0xb7) X(NtQueryVolumeInformationFile, 0xb8) \
     X(NtReadVirtualMemory, 0xb9) X(NtWriteVirtualMemory, 0xba) X(NtShzQueryKernelStats, 0xbb) \
     X(NtQueryIoCompletion, 0xbc) X(NtOpenEvent, 0xbd) X(NtOpenMutant, 0xbe) X(NtOpenSemaphore, 0xbf) \
-    X(NtOpenTimer, 0xc0) X(NtOpenIoCompletion, 0xc1)
+    X(NtOpenTimer, 0xc0) X(NtOpenIoCompletion, 0xc1) X(NtDeviceIoControlFile, 0xc2) \
+    X(NtNotifyChangeDirectoryFile, 0xc3) X(NtQueryTimer, 0xc4)
 
 enum {
 #define X(name, num) SYS_##name = num,

@@ -26,6 +26,15 @@ static inline DWORD k32_ipc_oa(LPCWSTR name, BOOL inherit, BOOL openif, SHZ_OBJE
 }
 
 static inline BOOL k32_ipc_fail(NTSTATUS st) { k32_nt_error(st); return FALSE; }
+#ifndef NT_ERROR
+#define NT_ERROR(s) ((ULONG)(s) >= 0xC0000000u)
+#endif
+#ifndef FILE_DEVICE_FILE_SYSTEM
+#define FILE_DEVICE_FILE_SYSTEM 0x00000009u
+#endif
+#ifndef FILE_DEVICE_NAMED_PIPE
+#define FILE_DEVICE_NAMED_PIPE 0x00000011u
+#endif
 
 /* UTF-8 (the "ANSI" code page of this system) <-> UTF-16, k32_file.c */
 int k32_utf8_to_wide(const char *s, int n, WCHAR *w, int cap);

@@ -541,6 +541,116 @@ static int32_t file_rw(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
     return irp_finish(irp);
 }
 
+/* ---------------------------------------------------------------- volume / device information, FSCTLs and IOCTLs */
+#define FILE_DEVICE_DISK_T 0x07u
+#define FILE_DEVICE_NAMED_PIPE_T 0x11u
+#define FILE_DEVICE_NETWORK_T 0x12u
+#define FILE_DEVICE_CONSOLE_T 0x50u
+#define STATUS_NOT_A_REPARSE_POINT_T ((int32_t)0xC0000275)
+
+/* NtQueryVolumeInformationFile(Handle, IOSB, Buffer, Length, Class): FileFsDeviceInformation (4) tells files, consoles,
+ * pipes and sockets apart (GetFileType). */
+static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t h, uint64_t piosb, uint64_t buf, uint64_t len)
+{
+    const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
+    kobject_t *o;
+    uint32_t v[2] = { 0, 0 };
+    int32_t st;
+    if (cls != 4) return STATUS_INVALID_INFO_CLASS;
+    if (len < 8) return STATUS_INFO_LENGTH_MISMATCH;
+    st = ipc_ref_handle(p, h, 0, &o, 0);
+    if (st) return st;
+    switch (o->type) {
+    case OB_FILE: {
+        const file_t *f = o->u.file.file;
+        v[0] = f && f->console ? FILE_DEVICE_CONSOLE_T : FILE_DEVICE_DISK_T;
+        v[1] = f && f->console ? 0 : 0x20u;             /* FILE_DEVICE_IS_MOUNTED */
+        break;
+    }
+    case OB_NPIPE: v[0] = FILE_DEVICE_NAMED_PIPE_T; break;
+    case OB_SOCKET: v[0] = FILE_DEVICE_NETWORK_T; break;
+    default: st = STATUS_OBJECT_TYPE_MISMATCH; break;
+    }
+    ob_deref(o);
+    if (st) return st;
+    if (copy_to_user(p, buf, v, 8)) return STATUS_ACCESS_VIOLATION;
+    if (piosb) { struct ipc_iosb io = { 0, 8 }; copy_to_user(p, piosb, &io, sizeof io); }
+    return STATUS_SUCCESS;
+}
+
+/* NtFsControlFile on RAM-disk files (pipes: npfs.c) and NtDeviceIoControlFile, both (Handle, Event, ApcRoutine, ApcContext,
+ * IOSB, Code, InBuffer, InLength, OutBuffer, OutLength). They complete at once, through the normal IRP completion. */
+static int32_t file_control(process_t *p, struct regs *r, uint32_t num, uint64_t h, uint64_t event, uint64_t apc, uint64_t apc_ctx)
+{
+    const uint64_t iosb = (uint64_t)stack_arg(p, r, 5);
+    const uint32_t code = (uint32_t)stack_arg(p, r, 6);
+    const uint64_t in_buf = (uint64_t)stack_arg(p, r, 7), in_len = (uint64_t)(uint32_t)stack_arg(p, r, 8);
+    const uint64_t out_buf = (uint64_t)stack_arg(p, r, 9), out_len = (uint64_t)(uint32_t)stack_arg(p, r, 10);
+    kobject_t *o;
+    irp_t *irp;
+    file_t *f;
+    int32_t st = ipc_ref_handle(p, h, 0, &o, 0);
+    uint64_t info = 0;
+    if (st) return st;
+    if (o->type != OB_FILE && o->type != OB_NPIPE && o->type != OB_SOCKET) { ob_deref(o); return STATUS_OBJECT_TYPE_MISMATCH; }
+    if (o->type != OB_FILE) { ob_deref(o); return STATUS_INVALID_DEVICE_REQUEST; }   /* no device IOCTLs on pipes/sockets */
+    st = irp_prepare(p, o, event, apc, apc_ctx, iosb, IRP_FLUSH, &irp);
+    if (st) { ob_deref(o); return st; }
+    f = o->u.file.file;
+    st = STATUS_INVALID_DEVICE_REQUEST;
+    if (num == SYS_NtFsControlFile && f && f->node && !f->console) {
+        switch (code) {
+        case 0x900a8u: st = STATUS_NOT_A_REPARSE_POINT_T; break;          /* FSCTL_GET_REPARSE_POINT */
+        case 0x900c4u: st = STATUS_SUCCESS; break;                         /* FSCTL_SET_SPARSE: every RAM file is sparse-capable */
+        case 0x9003cu: {                                                   /* FSCTL_GET_COMPRESSION: COMPRESSION_FORMAT_NONE */
+            const uint16_t none = 0;
+            if (out_len < 2) { st = STATUS_INVALID_PARAMETER; break; }
+            st = copy_to_user(p, out_buf, &none, 2) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+            info = 2;
+            break;
+        }
+        case 0x940cfu: {                                                   /* FSCTL_QUERY_ALLOCATED_RANGES: all of it */
+            int64_t q[2], rng[2];
+            if (in_len < 16 || out_len < 16 || copy_from_user(p, q, in_buf, 16)) { st = STATUS_INVALID_PARAMETER; break; }
+            rng[0] = q[0];
+            rng[1] = q[0] < (int64_t)f->node->size ? ((int64_t)f->node->size - q[0] < q[1] ? (int64_t)f->node->size - q[0] : q[1]) : 0;
+            if (rng[1] <= 0) { info = 0; st = STATUS_SUCCESS; break; }
+            st = copy_to_user(p, out_buf, rng, 16) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+            info = 16;
+            break;
+        }
+        case 0x980c8u: {                                                   /* FSCTL_SET_ZERO_DATA {FileOffset, BeyondFinalZero} */
+            int64_t z[2];
+            static const uint8_t zeros[512];
+            uint64_t at;
+            if (in_len < 16 || copy_from_user(p, z, in_buf, 16) || z[0] < 0 || z[1] < z[0]) { st = STATUS_INVALID_PARAMETER; break; }
+            if ((uint64_t)z[1] > f->node->size) z[1] = (int64_t)f->node->size;
+            for (at = (uint64_t)z[0], st = STATUS_SUCCESS; at < (uint64_t)z[1] && !st; at += sizeof zeros) {
+                const uint64_t n = (uint64_t)z[1] - at < sizeof zeros ? (uint64_t)z[1] - at : sizeof zeros;
+                if (fs_write(f->node, at, zeros, n)) st = STATUS_ACCESS_DENIED;
+            }
+            break;
+        }
+        default: break;
+        }
+    }
+    irp_complete(irp, st, info);
+    ob_deref(o);
+    return irp_finish(irp);
+}
+
+/* A file handle opened for synchronous I/O (FILE_SYNCHRONOUS_IO_*) waits inside its I/O calls and cannot be bound to a
+ * completion port; called after NtCreateFile / NtOpenFile created handle `h`. */
+void ipc_file_created(process_t *p, uint64_t h, uint32_t options)
+{
+    kobject_t *o;
+    ioctx_t *io;
+    if (!(options & 0x30u) || handle_ref(p, h, OB_FILE, &o, 0)) return;
+    io = ipc_ioctx(o, 1);
+    if (io) io->sync = 1;
+    ob_deref(o);
+}
+
 /* ---------------------------------------------------------------- routing */
 int32_t ipc_io_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
                        int *handled)
@@ -592,6 +702,8 @@ int32_t ipc_io_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
         if (iosb_out) { struct ipc_iosb v = { 0, 0 }; if (copy_to_user(p, iosb_out, &v, sizeof v)) return STATUS_ACCESS_VIOLATION; }
         return STATUS_SUCCESS;
     }
+    case SYS_NtQueryVolumeInformationFile: return sys_query_volume(p, r, a1, a2, a3, a4);
+    case SYS_NtFsControlFile: case SYS_NtDeviceIoControlFile: return file_control(p, r, num, a1, a2, a3, a4);
     case SYS_NtCreateIoCompletion: return sys_create_port(p, a1, a2, a3, a4);
     case SYS_NtSetIoCompletion: return sys_set_port(p, a1, a2, a3, a4, (uint64_t)stack_arg(p, r, 5));
     case SYS_NtRemoveIoCompletion: return sys_remove_port(p, r, a1, a2, a3, a4);
