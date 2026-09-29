@@ -163,3 +163,14 @@ vBIOS는 앞의 것들을 `bios.c bios_prepare_guest_memory`·`video.c video_ini
 - **VMX 없음(부트 매니저 `mode=auto`/`csm`)**: 로더가 CSMWrap을 체인로드하고 SeaBIOS CSM16이 실제 PC BIOS 서비스를 제공한다.
   `shizukudos/supervisor/test_bootmgr.py`가 OVMF(TCG)에서 FreeDOS 적합성 프로그램(T_MODE/T_BIOS/T_COM/T_EXE, 종료코드 42)을
   끝까지 실행하고 디스크의 `RESULT.TXT` 등을 호스트에서 검증한다. 이 경로의 BIOS 서비스는 위 표의 SeaBIOS 열이다.
+  같은 SeaBIOS CSM16 경로의 레지스터 수준 비교(레거시 SeaBIOS ↔ UEFI+CSMWrap, `dos16/tests/t_ints.asm`)는 STATUS.md 2c절 T_INTS에 있다.
+- **`mode=kernel64`**: DOS16 도메인이 없으므로 BIOS 인터럽트를 쓰지 않는다(vBIOS·CSM 모두 무관).
+
+## 5. 검증 상태 요약
+
+| 항목 | 상태 |
+| --- | --- |
+| 표의 FreeDOS 사용처(grep, ke2046 + FreeCOM) | 확인함. 예: `dsk.c`의 `LBA_VERIFY 0x4400`/`LBA_WRITE_VERIFY`, `wratclk.asm WriteATClock`, `initclk.c` |
+| 새 vBIOS 코드(ROM의 INT 1Ah 02h–05h, INT 1Eh 표) | QEMU TCG `-bios`로 실제 실행해 PASS (`test_vbios.py`) |
+| 새 Supervisor 백엔드 코드(`bios.c` INT 13h 44h/47h/48h) | 호스트 하니스(ASan/UBSan)로 PASS — 게스트 실행 아님 |
+| Supervisor(VMX) 안에서 FreeDOS가 이 vBIOS로 부팅 | **BLOCKED**: 이 컨테이너에 `/dev/kvm`(L1 VMX)이 없다 |
