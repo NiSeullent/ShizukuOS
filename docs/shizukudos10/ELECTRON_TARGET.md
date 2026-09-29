@@ -4,7 +4,7 @@ Companion to `BASELINE.md` and `STATUS.md` (same evidence vocabulary: `SOURCE` Â
 Everything numeric in this document is `HOST_TESTED`: a static PE audit of three real Win64 products against the DLLs
 this tree builds, produced by `shizukudos/win64/tools/startup_chain.py` and `shizukudos/win64/tools/import_coverage.py`
 and committed under `docs/shizukudos10/coverage/`. Nothing here is a claim that any of these applications runs on
-Kernel64; no guest run of them exists (section 13). The dynamic data points (section 10) come from Wine on the Linux host
+Kernel64; no guest run of them exists (sections 13 and 14). The dynamic data points (section 10) come from Wine on the Linux host
 and are labelled as such.
 
 Measured at tree revision `e14d7e4` (this branch after merging `wip/shizukudos-10-toydzv` at `41156d4`, which brings
@@ -1412,7 +1412,7 @@ Per-product counts:
 | L10 | CLR header | none among the AMD64 images | rejected with `PE_E_CLR` (win64/pe_parse.c:97) | none |
 | L11 | Authenticode / checksum | 2/7, 10/39, 1/17 images signed (the Microsoft-built ones); electron.exe/chrome.dll unsigned | ignored | none |
 | L12 | CET shadow stack marker | 2/7, 11/39, 11/17 images carry `IMAGE_DLLCHARACTERISTICS_EX_CET_COMPAT` | no shadow stacks in Kernel64 | none (opt-in) |
-| L13 | Ordinal imports | 1/7, 3/39, 2/17 images; 18 ordinals into 9 DLLs, none at load time in a startup chain (section 8) | export lookup by ordinal is implemented; Shizuku exports are not numbered like Windows' | pin ordinals in `build.py` (S), before M2 |
+| L13 | Ordinal imports | 1/7, 3/39, 2/17 images; 18 ordinals into 8 DLLs, none at load time in a startup chain (section 8) | export lookup by ordinal is implemented; Shizuku exports are not numbered like Windows' | pin ordinals in `build.py` (S), before M2 |
 | L14 | GUI subsystem and std handles | `electron.exe`, `VSCodium.exe`, `chrome.exe` are subsystem 2 (GUI); `--dump-dom` and `--version` print through the CRT to the process' standard output handle | `ldr_create_process` gives every process std handles 4/8/12 on the serial console object (ldr.c:639-646) regardless of subsystem | none; the M2 output reaches the serial log |
 | L15 | Loader database limits | the chrome.exe + chrome.dll process reaches 7 chain images plus up to 55 delay-loaded system DLLs | `publish_all` publishes at most 128 modules per call (ldr.c:480, 501), `MAX_DEPTH` 24 (ldr.c:14) | adequate for M1â€“M3 |
 | L16 | System information the images read at start-up | `NumberOfProcessors`, physical memory, OS version | PEB reports 10.0 build 22631 and one processor (ldr.c:665-668); `NtQuerySystemInformation` class 0 reports 8192 physical pages = 32 MiB (sysx.c:341), which `GlobalMemoryStatusEx` feeds to Chromium's memory heuristics | report the real page count (S) |
