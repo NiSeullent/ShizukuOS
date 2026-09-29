@@ -176,6 +176,7 @@ int ahci_blk_init(void)
     dev.irq_mode = "poll";
     dev.queue_depth = 1;
     dev.max_sectors = 1;
+    pci_claim(d, "ahci_blk (AHCI SATA)");
     return blk_register(&dev);
 }
 #else

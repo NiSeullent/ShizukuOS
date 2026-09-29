@@ -685,6 +685,7 @@ int sdhci_blk_init(void)
         if (!h->r) continue;
         ++nhosts;
         if (host_setup(h)) { kprintf("K64 sdhci%u: no usable card\n", h->idx); continue; }
+        pci_claim(&all[i], "sdhci (SD/eMMC)");
         if (!blk_register(&h->dev)) ++registered;
     }
     if (!nhosts) kprintf("K64 sdhci: no SD host controller (class 0805) on PCI bus 0\n");

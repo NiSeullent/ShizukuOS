@@ -1014,6 +1014,7 @@ int nvme_blk_init(void)
         memset(c, 0, sizeof *c);
         c->idx = nctrl;
         if (ctrl_init(c, &all[i])) { kprintf("K64 nvme%u: initialisation failed\n", c->idx); continue; }
+        pci_claim(&all[i], "nvme (NVMe)");
         ++nctrl;
         for (k = 0; k < c->nns; ++k)
             if (!blk_register(&c->ns[k].dev)) ++registered;
