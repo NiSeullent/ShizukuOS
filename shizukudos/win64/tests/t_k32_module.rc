@@ -1,0 +1,29 @@
+/* Resources of t_k32_module.exe: integer and string ids, a custom string type, two languages and a language-neutral entry.
+ * LANGUAGE takes the numeric LANGID parts (0x09 = LANG_ENGLISH, 0x01 = SUBLANG_ENGLISH_US; 0x07 = LANG_GERMAN, 0x01 = SUBLANG_GERMAN). */
+LANGUAGE 0x09, 0x01
+100 RCDATA
+BEGIN
+    "SHZ-RES-100\0"
+END
+
+STRNAME RCDATA
+BEGIN
+    0x1122, 0x3344, 0x5566
+END
+
+200 SHZTYPE
+BEGIN
+    "custom type data"
+END
+
+LANGUAGE 0x07, 0x01
+100 RCDATA
+BEGIN
+    "SHZ-RES-100-DE\0"
+END
+
+LANGUAGE 0x00, 0x00
+300 RCDATA
+BEGIN
+    "neutral-only"
+END

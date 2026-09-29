@@ -52,9 +52,9 @@ D(WRITE_REGISTER_UCHAR) D(WRITE_REGISTER_USHORT) D(WRITE_REGISTER_ULONG)
 D(IoCreateDevice) D(IoCreateDeviceSecure) D(IoDeleteDevice) D(IoCreateSymbolicLink) D(IoDeleteSymbolicLink)
 D(IoAttachDeviceToDeviceStack) D(IoDetachDevice) D(IoGetAttachedDeviceReference) D(IoGetAttachedDevice)
 D(IoInitializeIrp) D(IoAllocateIrp) D(IoFreeIrp) D(IofCallDriver) D(IofCompleteRequest)
-D(IoGetRemainingStackSize) D(IoGetRelatedDeviceObject) D(IoStartNextPacket)
+D(IoGetRemainingStackSize) D(IoGetRelatedDeviceObject)
 D(IoBuildDeviceIoControlRequest) D(IoBuildSynchronousFsdRequest) D(IoConnectInterrupt) D(IoDisconnectInterrupt)
-D(IoAllocateWorkItem) D(IoFreeWorkItem) D(IoQueueWorkItem) D(IoGetDriverObjectExtension)
+D(IoAllocateWorkItem) D(IoFreeWorkItem) D(IoQueueWorkItem)
 D(ZwOpenKey) D(ZwCreateKey) D(ZwQueryValueKey) D(ZwSetValueKey) D(ZwClose)
 D(ZwCreateFile) D(ZwReadFile) D(ZwWriteFile)
 D(ObReferenceObjectByHandle) D(ObDereferenceObject) D(ObfDereferenceObject) D(ObfReferenceObject)
@@ -110,9 +110,9 @@ const ntdrv_export_t ntdrv_ntoskrnl_exports[] = {
     E(IoCreateDevice), E(IoCreateDeviceSecure), E(IoDeleteDevice), E(IoCreateSymbolicLink), E(IoDeleteSymbolicLink),
     E(IoAttachDeviceToDeviceStack), E(IoDetachDevice), E(IoGetAttachedDeviceReference), E(IoGetAttachedDevice),
     E(IoInitializeIrp), E(IoAllocateIrp), E(IoFreeIrp), E(IofCallDriver), E(IofCompleteRequest),
-    E(IoGetRemainingStackSize), E(IoGetRelatedDeviceObject), E(IoStartNextPacket),
+    E(IoGetRemainingStackSize), E(IoGetRelatedDeviceObject),
     E(IoBuildDeviceIoControlRequest), E(IoBuildSynchronousFsdRequest), E(IoConnectInterrupt), E(IoDisconnectInterrupt),
-    E(IoAllocateWorkItem), E(IoFreeWorkItem), E(IoQueueWorkItem), E(IoGetDriverObjectExtension),
+    E(IoAllocateWorkItem), E(IoFreeWorkItem), E(IoQueueWorkItem),
     E(ZwOpenKey), E(ZwCreateKey), E(ZwQueryValueKey), E(ZwSetValueKey), E(ZwClose),
     E(ZwCreateFile), E(ZwReadFile), E(ZwWriteFile),
     E(ObReferenceObjectByHandle), E(ObDereferenceObject), E(ObfDereferenceObject), E(ObfReferenceObject),

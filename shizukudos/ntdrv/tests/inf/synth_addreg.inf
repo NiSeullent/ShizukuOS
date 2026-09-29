@@ -1,0 +1,46 @@
+; SPDX-License-Identifier: GPL-2.0-only
+; Every documented FLG_ADDREG_* value type plus the modifier flags, and every registry root.
+
+[Version]
+Signature="$Windows NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%P%
+DriverVer=06/07/2020,2.0.0.1
+
+[Manufacturer]
+%P%=Models,NTamd64
+
+[Models.NTamd64]
+"Literal description" = Inst, ROOT\SYNTHREG
+
+[Inst.NTamd64]
+AddReg = Types
+DelReg = Gone
+
+[Types]
+HKR,,               sz_default,,               "plain"
+HKR,,               sz_explicit,    0x00000000, "explicit sz"
+HKR,,               expand,         0x00020000, "%%SystemRoot%%\x"
+HKR,,               multi,          0x00010000, "one", "two", "three"
+HKR,,               dword_hex,      0x00010001, 0x1234ABCD
+HKR,,               dword_dec,      0x00010001, 4660
+HKR,,               binary,         0x00000001, 01, 02, ff, 7F
+HKR,,               none,           0x00020001, aa, bb
+HKR,,               qword,          0x000B0001, 0x0102030405060708
+HKR,,               keyonly_sub,    0x00000010
+HKR, Sub\Deeper,    noclobber,      0x00000002, "keep"
+HKR, Sub,           appended,       0x00010008, "more"
+HKLM, SYSTEM\CurrentControlSet\Services\synth\Parameters, Flag, 0x00010001, 1
+HKCR, .synth,       ,               0, "synthfile"
+HKU,  .DEFAULT\Software\Synth, Marker, 0x00000000, "u"
+HKCU, Software\Synth, Marker, 0x00000000, "cu"
+HKR,,               empty_sz,       0x00000000
+HKR,,               comma_in_quotes, 0, "a,b"
+BOGUS,, x, 0, "ignored root"
+
+[Gone]
+HKR,, obsolete
+
+[Strings]
+P="Synthetic"

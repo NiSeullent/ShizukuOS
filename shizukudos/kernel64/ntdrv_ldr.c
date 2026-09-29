@@ -6,6 +6,7 @@
  * pe_parse.c the host fuzz tests hammer; anything it cannot verify is rejected, never stubbed.
  */
 #include "ntdrv.h"
+#include "fs.h"
 #include "../win64/pe_parse.h"
 
 extern NTSTATUS NTAPI ntdrv_default_dispatch(DEVICE_OBJECT *dev, IRP *irp);   /* ntdrv_io.c */
@@ -173,6 +174,7 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
         drv->MajorFunction[i] = ntdrv_default_dispatch;
     d->next = driver_list; driver_list = d;
 
+    ntdrv_ke_init();                                          /* DPC/timer service threads, on the first load only */
     entry = (void *)(base + pi.entry_rva);
     ntdrv_set_current_driver(d);
     kprintf("K64 ntdrv: %s mapped at %llx (%u bytes), calling DriverEntry\n", service, base, pi.size_of_image);
@@ -188,6 +190,33 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
     d->started = 1;
     if (out) *out = d;
     return STATUS_SUCCESS;
+}
+
+ntdrv_driver_t *ntdrv_find_driver(const char *service)
+{
+    ntdrv_driver_t *d;
+    for (d = driver_list; d; d = d->next)
+        if (d->started && !strcmp(d->name, service)) return d;
+    return 0;
+}
+
+/* Load from a file-system node: initrd/RAM files are used in place; disk-backed files (D:, E: ...) are read into a
+ * temporary buffer, which the loader no longer needs once the image is mapped (sections are copied into place). */
+#define NTDRV_MAX_IMAGE (8ull << 20)
+int32_t ntdrv_load_node(fsnode_t *n, const char *service, ntdrv_driver_t **out)
+{
+    uint8_t *buf;
+    uint64_t got = 0;
+    int32_t st;
+    if (!n || n->is_dir) return STATUS_OBJECT_NAME_NOT_FOUND;
+    if (n->backing == FSB_RAM && n->data) return ntdrv_load_image(n->data, n->size, service, out);
+    if (!n->size || n->size > NTDRV_MAX_IMAGE) return STATUS_INVALID_IMAGE_FORMAT;
+    buf = kmalloc(n->size);
+    if (!buf) return STATUS_INSUFFICIENT_RESOURCES;
+    if (fs_read(n, 0, buf, n->size, &got) || got != n->size) { kfree(buf); return STATUS_IN_PAGE_ERROR; }
+    st = ntdrv_load_image(buf, n->size, service, out);
+    kfree(buf);
+    return st;
 }
 
 int32_t ntdrv_unload(ntdrv_driver_t *d)

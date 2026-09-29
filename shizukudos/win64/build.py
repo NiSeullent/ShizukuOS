@@ -84,7 +84,7 @@ def build_ntdll():
     stub_exports = gen_stubs()
     names = scan_exports(src, "NTAPI")
     names = [n for n in names if n not in ("ShzInitSync",)]
-    write_def(OUT / "ntdll.def", "ntdll.dll", names + ["RtlCaptureContext"] + stub_exports)
+    write_def(OUT / "ntdll.def", "ntdll.dll", names + ["RtlCaptureContext", "__C_specific_handler"] + stub_exports)
     dll = OUT / "ntdll.dll"
     cmd = [CC, *COMMON, "-DSHZ_NTDLL_BUILD", "-shared", "-nostdlib", "-Wl,--entry,ShzNtdllEntry",
            f"-Wl,--image-base,{NTDLL_BASE}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
@@ -99,8 +99,17 @@ def build_kernel32(ntdll_names):
     src = sorted((W64 / "kernel32").glob("*.c"))
     names = scan_exports(src, "K32API")
     forwards = [f"{n} = ntdll.{n}" for n in ("RtlCaptureContext", "RtlLookupFunctionEntry", "RtlVirtualUnwind", "RtlUnwindEx",
-                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException") if n in ntdll_names or n == "RtlCaptureContext"]
+                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException", "RtlCaptureStackBackTrace",
+                                                 "VerSetConditionMask")
+                if n in ntdll_names or n == "RtlCaptureContext"]
     names = [n for n in names if n not in ("RtlUnwindKernel32",)]
+    # Windows kernel32 forwards these to ntdll too (V8 and Chromium import them from kernel32); delay-load resolution is
+    # the api-ms-win-core-delayload contract, hosted by kernel32 here (kernelbase on Windows).
+    forwards += [f"{n} = ntdll.{t}" for n, t in (
+        ("RtlAddFunctionTable", "RtlAddFunctionTable"), ("RtlDeleteFunctionTable", "RtlDeleteFunctionTable"),
+        ("RtlInstallFunctionTableCallback", "RtlInstallFunctionTableCallback"), ("RtlRestoreContext", "RtlRestoreContext"),
+        ("ResolveDelayLoadedAPI", "LdrResolveDelayLoadedAPI"), ("ResolveDelayLoadsFromDll", "LdrResolveDelayLoadsFromDll"))
+        if t in ntdll_names]
     write_def(OUT / "kernel32.def", "kernel32.dll", names, forwards)
     dll = OUT / "kernel32.dll"
     cmd = [CC, *COMMON, "-shared", "-nostdlib", "-Wl,--entry,ShzKernel32Entry", f"-Wl,--image-base,{K32_BASE}",
@@ -149,9 +158,20 @@ def build_modules():
                    *[f"-l{l}" for l in ["kernel32", "ntdll", *cfg.get("libs", [])]], "-lgcc", "-o", dll]
             run(cmd)
             run([DLLTOOL, "-d", OUT / f"{name}.def", "-l", OUT / f"lib{name}.a", "--kill-at"])
+            run([DLLTOOL, "-d", OUT / f"{name}.def", "-y", OUT / f"lib{name}_delay.a", "--kill-at"])  # delay-import lib
             built[name] = {"dll": dll, "cmd": cmd, "exports": names, "base": base}
             order.append(name)
     return built
+
+
+# The runners check that T_HELLO.EXE sees its preferred base 0x140000000, so it is linked without DYNAMIC_BASE (a fixed
+# image); T_LAZY.EXE is fixed at 0x140000000 too, so D:\LAZY\BIGRELOC.DLL (same preferred base) must be relocated.
+# Every other app is relocatable and receives an ASLR base from the Kernel64 loader.
+FIXED_BASE_APPS = {"t_hello", "t_lazy"}
+
+# Apps that link a module through its DELAY-import library instead of its ordinary import library: the functions are
+# resolved lazily on first call (dlltool --output-delaylib + crt/shzcrt.c __delayLoadHelper2 -> ResolveDelayLoadedAPI).
+DELAY_MODULES = {"t_delay": ("winmm", "version")}
 
 
 def build_apps(module_libs=()):
@@ -166,9 +186,74 @@ def build_apps(module_libs=()):
             run([WINDRES, "-O", "coff", "-o", res, rc])
             extra.append(res)
         crt = W64 / "crt"
+        delayed = DELAY_MODULES.get(name, ())
+        libs = [(f"{l}_delay" if l in delayed else l) for l in module_libs]
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
-               "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
+               "-Wl,--image-base,0x140000000", *(["-Wl,--disable-dynamicbase"] if name in FIXED_BASE_APPS else []),
+               "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
+               "-L", OUT, *[f"-l{l}" for l in libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+        run(cmd)
+        apps[name] = (exe, cmd)
+    return apps
+
+
+def build_setup(module_libs=()):
+    """SHZSETUP.EXE, the installer (win64/setup/*.c; its portable core is shared with the host tests in
+    shizukudos/install/tests). Packed as \\SHZ\\SETUP\\SHZSETUP.EXE; Kernel64 runs it when booted with shz.setup=auto."""
+    src = sorted((W64 / "setup").glob("*.c"))
+    exe = OUT / "SHZSETUP.EXE"
+    crt = W64 / "crt"
+    cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
+           "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", W64 / "setup", *src, crt / "shzcrt.c",
+           "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+    run(cmd)
+    return exe, cmd
+
+
+def build_sys_apps(module_libs=()):
+    """System programs: every win64/apps/<name>/ containing *.c builds <name>.exe, packed as \\SHZ\\SYS64\\<NAME>.EXE
+    (not a T_*.EXE self-check: the kernel's test run does not start it)."""
+    apps = {}
+    root = W64 / "apps"
+    for d in sorted(root.glob("*")) if root.is_dir() else []:
+        src = sorted(d.glob("*.c"))
+        if not d.is_dir() or not src:
+            continue
+        exe = OUT / f"{d.name}.exe"
+        crt = W64 / "crt"
+        cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
+               "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", d, *src, crt / "shzcrt.c",
                "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+        run(cmd)
+        apps[d.name] = (exe, cmd)
+    return apps
+
+
+CLANGXX = "clang++"
+LLD_LINK = "lld-link"
+CXX_FLAGS = ["--target=x86_64-pc-windows-msvc", "-std=c++20", "-O1", "-fms-extensions", "-fexceptions", "-fcxx-exceptions",
+             "-fno-stack-protector", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter"]
+
+
+def build_cxx_apps(module_libs=()):
+    """MSVC-ABI C++ tests (tests/t_*.cpp): clang++ -target x86_64-pc-windows-msvc emits Microsoft's x64 C++ exception
+    tables (FH3) and runtime calls, and lld-link imports them from the Shizuku DLLs through their import libraries, so
+    each executable has the shape of an MSVC-built one. Entry point: ShzCxxStart."""
+    apps = {}
+    srcs = sorted((W64 / "tests").glob("t_*.cpp"))
+    if not srcs:
+        return apps
+    for tool in (CLANGXX, LLD_LINK):
+        if not shutil.which(tool):
+            raise SystemExit(f"required tool missing: {tool}")
+    first = [m for m in ("vcruntime140", "vcruntime140_1", "msvcp140", "ucrtbase") if m in module_libs]
+    libs = [*first, *[m for m in module_libs if m not in first], "kernel32", "ntdll"]     # the CRT resolves first, as with MSVC
+    for src in srcs:
+        name = src.stem
+        obj, exe = OUT / f"{name}.obj", OUT / f"{name}.exe"
+        run([CLANGXX, *CXX_FLAGS, "-c", src, "-o", obj])
+        cmd = [LLD_LINK, "/nologo", "/entry:ShzCxxStart", "/subsystem:console", "/nodefaultlib", "/base:0x140000000",
+               f"/out:{exe}", obj, *[OUT / f"lib{lib}.a" for lib in libs]]
         run(cmd)
         apps[name] = (exe, cmd)
     return apps
@@ -240,21 +325,45 @@ def pack_archive(files):
     return bytes(out + blob)
 
 
+def build_wineport():
+    """DLLs ported from the pinned Wine tree (wineport/build.py): list of (archive path, bytes) plus the result."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("wineport_build", W64 / "wineport" / "build.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    res = mod.build()
+    files = list(res["files"])
+    for name, t in sorted(res["tests"].items()):
+        if t["in_plain_image"]:
+            files.append((f"\\SHZ\\TESTS\\{t['exe'].name.upper()}", t["exe"].read_bytes()))
+    return files, {n: {"exports": m["exports"], "counts": m["counts"]} for n, m in res["modules"].items()}
+
+
 def main():
-    argparse.ArgumentParser(description=__doc__).parse_args()
-    for tool in (CC, DLLTOOL):
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--no-wineport", action="store_true", help="do not build/pack the DLLs ported from Wine")
+    args = ap.parse_args()
+    for tool in (CC, DLLTOOL, WINDRES):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     OUT.mkdir(parents=True, exist_ok=True)
     ntdll, ntdll_cmd, ntdll_names = build_ntdll()
     k32, k32_cmd, k32_names = build_kernel32(ntdll_names)
     modules = build_modules()
+    wine_files, wine_info = build_wineport() if not args.no_wineport else ([], {})
     apps = build_apps(sorted(modules))
+    setup_exe, _ = build_setup(sorted(modules))
+    sys_apps = build_sys_apps(sorted(modules))
+    apps.update(build_cxx_apps(sorted(modules)))
     files = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
         files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
+    files += wine_files
     for name, (exe, _) in sorted(apps.items()):
         files.append((f"\\SHZ\\TESTS\\{exe.name.upper()}", exe.read_bytes()))
+    files.append(("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe.read_bytes()))
+    for name, (exe, _) in sorted(sys_apps.items()):
+        files.append((f"\\SHZ\\SYS64\\{exe.name.upper()}", exe.read_bytes()))
     data_dir = W64 / "tests" / "data"
     if data_dir.exists():
         for f in sorted(data_dir.iterdir()):
@@ -262,8 +371,9 @@ def main():
     img = OUT / "WIN64.IMG"
     img.write_bytes(pack_archive(files))
 
-    # NT driver host: separate initrd with the driver store, so the default WIN64.IMG (and every
-    # suite that boots it) is byte-for-byte unaffected. tests/run_k64_ntdrv.py mounts this one.
+    # NT driver host: a separate initrd carries the driver store (\SHZ\DRIVERS), so the default WIN64.IMG has none and
+    # Kernel64's ntdrv_selftest() stays a no-op there (ntdll still exports NtLoadDriver for SHZPNP.EXE's `load`).
+    # tests/run_k64_ntdrv.py mounts this one.
     ntdir, drivers, nt_exports = build_ntdrv_host()
     ntapp = build_ntdrv_app(sorted(modules))
     ntfiles = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
@@ -283,6 +393,9 @@ def main():
         "kernel32": {"sha256": sha256_file(k32), "exports": len(k32_names)},
         "modules": {n: {"sha256": sha256_file(m["dll"]), "exports": len(m["exports"]), "base": hex(m["base"])} for n, m in modules.items()},
         "apps": {n: sha256_file(e) for n, (e, _) in apps.items()},
+        "wineport": wine_info,
+        "setup": {"SHZSETUP.EXE": sha256_file(setup_exe)},
+        "sys_apps": {n: sha256_file(e) for n, (e, _) in sys_apps.items()},
         "archive": {"sha256": sha256_file(img), "files": [p for p, _ in files]},
         "ntdrv": {
             "ntoskrnl_exports": len(nt_exports["ntoskrnl.exe"]), "hal_exports": len(nt_exports["hal.dll"]),

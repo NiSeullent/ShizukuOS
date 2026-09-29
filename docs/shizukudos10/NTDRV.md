@@ -93,10 +93,18 @@ Windows agree field-for-field. `sizeof(IRP)==0xD0`, `IO_STACK_LOCATION==0x48`,
 - `IoBuildDeviceIoControlRequest`/`IoBuildSynchronousFsdRequest` and a synchronous kernel-buffer
   engine used by both the self-test and the user syscall path; **pended IRPs** (`IoMarkIrpPending`
   → `STATUS_PENDING` → later `IoCompleteRequest`) wake the waiter — demonstrated from a timer DPC.
-- `IoConnectInterrupt`/`IoConnectInterruptEx`/`IoDisconnectInterrupt` register a System-V
-  trampoline through the kernel's `irq_register`, calling the driver's `KSERVICE_ROUTINE`;
-  `HalGetInterruptVector` maps a bus IRQ line to a system vector; `KeSynchronizeExecution`
+- `IoConnectInterrupt`/`IoDisconnectInterrupt`: a PCI legacy line joins the kernel's **shared, level-triggered INTx
+  chain** (`pci_intx_attach`, the same one AHCI/NVMe/NIC use), so a hosted driver never steals a line from a native
+  one; any other vector is taken only when it is free (`irq_handler_get`). The chain calls the driver's
+  `KSERVICE_ROUTINE`; `HalGetInterruptVector` maps a bus IRQ line to a system vector; `KeSynchronizeExecution`
   excludes the ISR. Buffered / direct (MDL) / neither I/O methods are all handled.
+- **PCI ownership:** without a PnP start IRP the host decides from what the driver does — an `MmMapIoSpace` inside a
+  function's memory BAR (config BARs read, never size-probed on a live device) or connecting that function's line —
+  and records it with `pci_claim(dev, "ntdrv:<service>")`, so user mode (`NtQuerySystemInformation` 0x101,
+  `T_GUI_STATUS`, `shzpnp enum`) lists the function as driven by the hosted `.sys`.
+- Work items (`IoAllocateWorkItem`/`IoQueueWorkItem`/`IoFreeWorkItem`) run on a system worker thread at
+  PASSIVE_LEVEL. `IoStartNextPacket` (StartIo queues) and `IoGetDriverObjectExtension` are **not** exported yet: a
+  driver importing them is refused with one diagnostic line per missing import, never given a stub.
 
 ### 2.4 Ke / Ex runtime — `ntdrv_ke.c`
 DPCs (queue + dedicated dispatch worker), KTIMERs (a 1 ms timer thread arms/fires them and
@@ -127,12 +135,18 @@ kernel-mode handle table backing `ZwOpenKey`/`ZwCreateKey`/`ZwQueryValueKey`/`Zw
 
 ### 2.7 User-mode reachability
 Syscall range `0xE0–0xEF` ("ntdrv"): `sysext.c` routes it to a strong `sys_ext_ntdrv()`.
-`NtLoadDriver(RegistryPath)` reads the service key's `ImagePath` and loads the `.sys`;
+`NtLoadDriver(RegistryPath)` reads the service key's `ImagePath` with the service control manager's rules
+(absent → `\SystemRoot\SYS64\DRIVERS\<service>.sys`; `%SystemRoot%`/`\SystemRoot\` → `C:\SHZ\`; `\??\X:\`,
+`X:\` and `\x` as is; relative → under SystemRoot), loads the file from any volume (initrd/RAM in place, disk-backed
+D:/E: read through `fs_read`) and returns `STATUS_IMAGE_ALREADY_LOADED` for a service already running. This is the
+call N2's `SHZPNP.EXE load <service>` makes after `add-driver --install` wrote the service key;
 `NtCreateFile("\\??\\Name")` opens a device (issuing `IRP_MJ_CREATE`);
 `NtDeviceIoControlFile`/`NtReadFile`/`NtWriteFile` become buffered/direct/neither IRPs, with async
 completion when the driver pends. Shared-file hooks are minimal: the syscall range in `ntsys.h`,
-one routing line in `sysext.c`, device hooks in `sysfile.c`/`objects.c`, and a single reserved
-kernel PML4 entry in `mem.c` so a driver mapped after a process exists is visible to it.
+one routing line in `sysext.c`, device hooks in `sysfile.c`/`objects.c`, and one reserved kernel PML4 slot
+(`NTDRV_VA_BASE` = `0xFFFF_E000_0000_0000`, slot 448, declared in `k64.h` next to `KWIN_BASE`, slot 386) whose
+PDPT `mem_init` materialises like the kernel-window slot, so a driver mapped after a process exists is visible to
+it. Contiguous/non-cached driver memory comes from the kernel heap (physical 3–15 MiB, direct-mapped).
 
 ### 2.8 Registry `Services` keys
 `\Registry\Machine\System\CurrentControlSet\Services\<name>` with `ImagePath` and `Type`, created

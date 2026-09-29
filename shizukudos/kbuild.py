@@ -99,11 +99,16 @@ def main():
     results = {}
     k32 = build_kernel("kernel32", "kernel32", K32_FLAGS, "elf32", "elf_i386", "KERNEL32.BIN")
     # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.
+    # ShizukuFS v1 (ext4 format, jbd2): the portable libsfs sources are linked freestanding (kernel64/sfs_mount.c).
+    libsfs = sorted((REPO / "shizukufs" / "v1" / "libsfs").glob("*.c"))
     k64 = build_kernel("kernel64", "kernel64", K64_FLAGS, "elf64", "elf_x86_64", "KERNEL64.BIN",
-                       extra_c=[SHZ / "win64" / "pe_parse.c"])
+                       extra_c=[SHZ / "win64" / "pe_parse.c", *libsfs])
     # Same sources with SHZ_STANDALONE: hypercalls served in-kernel over COM1/PIT/RTC so it boots under QEMU TCG.
+    # The standalone profile is the only one with a disk: the original AHCI core (drivers/ahci_native) is linked
+    # behind kernel64/ahci_blk.c; under the Supervisor no device is passed through and the block registry stays empty.
     k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"], "elf64", "elf_x86_64",
-                        "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c"])
+                        "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c",
+                                                  REPO / "drivers" / "ahci_native" / "ahci.c", *libsfs])
     stub = build_standalone_stub()
     k32s = build_kernel("kernel32s", "kernel32", K32_FLAGS + ["-DSHZ_STANDALONE"], "elf32", "elf_i386", "KERNEL32S.BIN",
                         extra_c=[SHZ / "kernel32" / "standalone" / "standalone32.c"])

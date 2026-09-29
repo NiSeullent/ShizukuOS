@@ -1,0 +1,46 @@
+diff --git a/dlls/winecrt0/debug.c b/dlls/winecrt0/debug.c
+index a7bf864..e15bade 100644
+--- a/dlls/winecrt0/debug.c
++++ b/dlls/winecrt0/debug.c
+@@ -25,6 +25,7 @@
+ #include <stdlib.h>
+ #include "windef.h"
+ #include "winbase.h"
++#include "winreg.h"
+ #include "wine/debug.h"
+ 
+ WINE_DECLARE_DEBUG_CHANNEL(pid);
+@@ -150,13 +151,33 @@ static void parse_options( const char *str )
+     free( options );
+ }
+ 
++/* Shizuku (wineport): child processes do not inherit the environment there, so when WINEDEBUG is not set the
++ * options are also read from HKCU\\Software\\Wine\\Debug, value WINEDEBUG (same syntax). */
++static char *registry_options(void)
++{
++    static char buffer[512];
++    LONG (WINAPI *get_value)(HKEY, LPCSTR, LPCSTR, DWORD, DWORD *, void *, DWORD *);
++    DWORD size = sizeof(buffer);
++    HMODULE advapi32 = LoadLibraryW( L"advapi32.dll" );
++
++    if (!advapi32) return NULL;
++    get_value = (void *)GetProcAddress( advapi32, "RegGetValueA" );
++    if (!get_value || get_value( HKEY_CURRENT_USER, "Software\\Wine\\Debug", "WINEDEBUG", 0x0002 /* RRF_RT_REG_SZ */,
++                                 NULL, buffer, &size ))
++        return NULL;
++    return buffer;
++}
++
+ /* initialize all options at startup */
+ static void init_options(void)
+ {
++    DWORD err = GetLastError();
+     char *wine_debug = getenv("WINEDEBUG");
+ 
+     nb_debug_options = 0;
++    if (!wine_debug) wine_debug = registry_options();
+     if (wine_debug) parse_options( wine_debug );
++    SetLastError( err );
+ }
+ 
+ /* FIXME: this is not 100% thread-safe */

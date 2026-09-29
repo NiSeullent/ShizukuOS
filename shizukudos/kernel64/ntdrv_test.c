@@ -18,12 +18,16 @@ static int load_from_store(const char *file, const char *service, ntdrv_driver_t
     fsnode_t *n;
     unsigned i = 0, j;
     const char *pfx = "\\SHZ\\DRIVERS\\";
+    if ((*out = ntdrv_find_driver(service)) != 0) {           /* already loaded (e.g. by T_NTDRV.EXE's NtLoadDriver) */
+        kprintf("K64 ntdrv-test: %s already loaded, reusing it\n", service);
+        return 0;
+    }
     for (j = 0; pfx[j]; ++j) path[i++] = pfx[j];
     for (j = 0; file[j]; ++j) path[i++] = file[j];
     path[i] = 0;
     n = fs_lookup(path);
     if (!n || n->is_dir) { kprintf("K64 ntdrv-test: %s not present\n", path); return -1; }
-    return ntdrv_load_image(n->data, n->size, service, out) == 0 ? 0 : -1;
+    return ntdrv_load_node(n, service, out) == 0 ? 0 : -1;
 }
 
 void ntdrv_selftest(void)

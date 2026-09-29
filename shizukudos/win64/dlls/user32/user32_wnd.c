@@ -26,6 +26,7 @@ DLLAPI HWND WINAPI CreateWindowExW(DWORD exstyle, LPCWSTR cls, LPCWSTR title, DW
     LRESULT r;
     if (!cls) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
     U32_NEED_GFX(0);
+    u32_register_controls();                                        /* the system classes (Button, Static, #32770) */
     u32_display(&di);
     if (!(style & WS_CHILD)) {
         const int n = (int)(InterlockedIncrement(&cascade) - 1) % 10;
@@ -56,6 +57,17 @@ DLLAPI HWND WINAPI CreateWindowExW(DWORD exstyle, LPCWSTR cls, LPCWSTR title, DW
     memset(&cs, 0, sizeof cs);
     cs.lpCreateParams = param; cs.hInstance = inst; cs.hMenu = menu; cs.hwndParent = parent;
     cs.cy = h; cs.cx = w; cs.y = y; cs.x = x; cs.style = (LONG)style; cs.lpszName = title; cs.lpszClass = cls; cs.dwExStyle = exstyle;
+    {
+        CBT_CREATEWNDW cc;
+        cc.lpcs = &cs;
+        cc.hwndInsertAfter = HWND_TOP;
+        if (u32_cbt(HCBT_CREATEWND, (WPARAM)hwnd, (LPARAM)&cc)) {      /* a CBT hook vetoed the creation */
+            ShzGdiWindowGone(hwnd);
+            NtUserDestroyWindow(H2U(hwnd));
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return 0;
+        }
+    }
     r = u32_send(hwnd, WM_NCCREATE, 0, (LPARAM)&cs, 0, 0);
     if (!r) {
         u32_send(hwnd, WM_NCDESTROY, 0, 0, 0, 0);
@@ -74,6 +86,7 @@ DLLAPI HWND WINAPI CreateWindowExW(DWORD exstyle, LPCWSTR cls, LPCWSTR title, DW
         return 0;
     }
     if (!IsWindow(hwnd)) return 0;                                  /* the WM_CREATE handler destroyed it */
+    u32_winevent(EVENT_OBJECT_CREATE, hwnd, OBJID_WINDOW, CHILDID_SELF);
     u32_send_size_move(hwnd, 1, 1);
     if (style & WS_VISIBLE) ShowWindow(hwnd, SW_SHOW);
     return hwnd;
@@ -107,6 +120,8 @@ DLLAPI BOOL WINAPI DestroyWindow(HWND hwnd)
     U32_NEED_GFX(FALSE);
     if (!u32_wq(hwnd, SHZ_WQ_THREAD, 0, &q)) return FALSE;
     if (q.v0 != GetCurrentThreadId()) { SetLastError(ERROR_ACCESS_DENIED); return FALSE; }
+    if (u32_cbt(HCBT_DESTROYWND, (WPARAM)hwnd, 0)) return FALSE;       /* a CBT hook vetoed it */
+    u32_winevent(EVENT_OBJECT_DESTROY, hwnd, OBJID_WINDOW, CHILDID_SELF);
     fg_before = GetForegroundWindow();
     old_focus = GetFocus();
     memset(&s, 0, sizeof s);
@@ -146,6 +161,7 @@ void u32_send_size_move(HWND hwnd, int moved, int sized)
 
 void u32_notify_activation(uint64_t now, uint64_t prev)
 {
+    if (now && now != prev) u32_winevent(EVENT_SYSTEM_FOREGROUND, U2H(now), OBJID_WINDOW, CHILDID_SELF);
     if (prev && prev != now && IsWindow(U2H(prev))) {
         u32_send(U2H(prev), WM_NCACTIVATE, FALSE, 0, 0, 0);
         u32_send(U2H(prev), WM_ACTIVATE, WA_INACTIVE, (LPARAM)now, 0, 0);
@@ -166,6 +182,9 @@ DLLAPI BOOL WINAPI ShowWindow(HWND hwnd, int cmd)
     HWND fg_before, focus_before;
     U32_NEED_GFX(FALSE);
     if (!u32_style(hwnd, &style, 0)) return FALSE;
+    if ((cmd == SW_MINIMIZE || cmd == SW_SHOWMINIMIZED || cmd == SW_SHOWMINNOACTIVE || cmd == SW_FORCEMINIMIZE || cmd == SW_MAXIMIZE ||
+         cmd == SW_RESTORE) && u32_cbt(HCBT_MINMAX, (WPARAM)hwnd, cmd))
+        return (style & WS_VISIBLE) != 0;                               /* a CBT hook vetoed it */
     fg_before = GetForegroundWindow();
     focus_before = GetFocus();
     if (cmd == SW_HIDE && (style & WS_VISIBLE)) u32_send(hwnd, WM_SHOWWINDOW, FALSE, 0, 0, 0);
@@ -186,6 +205,8 @@ DLLAPI BOOL WINAPI ShowWindow(HWND hwnd, int cmd)
         u32_send_size_move(hwnd, 0, 1);
     else if (cmd == SW_MINIMIZE || cmd == SW_SHOWMINIMIZED || cmd == SW_SHOWMINNOACTIVE || cmd == SW_FORCEMINIMIZE)
         u32_send(hwnd, WM_SIZE, SIZE_MINIMIZED, 0, 0, 0);
+    if (!s.was_visible && cmd != SW_HIDE) u32_winevent(EVENT_OBJECT_SHOW, hwnd, OBJID_WINDOW, CHILDID_SELF);
+    else if (s.was_visible && cmd == SW_HIDE) u32_winevent(EVENT_OBJECT_HIDE, hwnd, OBJID_WINDOW, CHILDID_SELF);
     if (s.activated) u32_notify_activation(H2U(hwnd), s.prev_active);
     else if (cmd == SW_HIDE || cmd == SW_MINIMIZE || cmd == SW_SHOWMINIMIZED || cmd == SW_FORCEMINIMIZE) {
         HWND fg = GetForegroundWindow();                            /* hiding the active window hands the foreground on */
@@ -222,6 +243,7 @@ DLLAPI BOOL WINAPI SetWindowPos(HWND hwnd, HWND after, int x, int y, int cx, int
     if (p.changed & SHZ_POS_SHOWN) wp.flags |= SWP_SHOWWINDOW;
     if (p.changed & SHZ_POS_HIDDEN) wp.flags |= SWP_HIDEWINDOW;
     if (IsWindow(hwnd) && p.changed) u32_send(hwnd, WM_WINDOWPOSCHANGED, 0, (LPARAM)&wp, 0, 0);
+    if (p.changed & (SHZ_POS_MOVED | SHZ_POS_SIZED)) u32_winevent(EVENT_OBJECT_LOCATIONCHANGE, hwnd, OBJID_WINDOW, CHILDID_SELF);
     if (p.prev_active) u32_notify_activation(H2U(hwnd), p.prev_active);
     return TRUE;
 }
@@ -713,8 +735,14 @@ DLLAPI HWND WINAPI SetFocus(HWND hwnd)
     shz_focus_t f;
     int32_t st;
     U32_NEED_GFX(0);
+    if (hwnd && u32_cbt(HCBT_SETFOCUS, (WPARAM)hwnd, (LPARAM)GetFocus())) return 0;   /* a CBT hook vetoed it */
     st = focus_op(SHZ_FOCUS_SETFOCUS, hwnd, &f);
-    if (st < 0) { u32_err(st); return 0; }
+    if (st < 0) {
+        if (hwnd && u32_dlg_remember_focus(hwnd)) return 0;            /* a dialog that is not shown yet */
+        u32_err(st);
+        return 0;
+    }
+    if (hwnd && f.result != H2U(hwnd)) u32_winevent(EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, CHILDID_SELF);
     if (f.result != H2U(hwnd)) {
         if (f.result && IsWindow(U2H(f.result))) u32_send(U2H(f.result), WM_KILLFOCUS, (WPARAM)hwnd, 0, 0, 0);
         if (hwnd && IsWindow(hwnd)) u32_send(hwnd, WM_SETFOCUS, (WPARAM)U2H(f.result), 0, 0, 0);

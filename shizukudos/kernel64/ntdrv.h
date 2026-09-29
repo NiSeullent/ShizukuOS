@@ -22,13 +22,12 @@
 #define STATUS_INVALID_DEVICE_STATE ((int32_t)0xC0000184)
 #define STATUS_DEVICE_CONFIGURATION_ERROR ((int32_t)0xC0000182)
 #define STATUS_MORE_PROCESSING_REQUIRED ((int32_t)0xC0000016)
-#define STATUS_INSUFFICIENT_RESOURCES2 ((int32_t)0xC000009A)
+#define STATUS_IMAGE_ALREADY_LOADED ((int32_t)0xC000010E)
 
 /* Driver image VA window (kernel half, above the direct map, below the image alias). Each
  * loaded .sys gets a naturally sized, page-granular slice; images are mapped, relocated and
  * import-resolved here, never in any user address space. */
-#define NTDRV_VA_BASE 0xffffe00000000000ull
-#define NTDRV_VA_END  0xffffe00040000000ull      /* 1 GiB of driver image space */
+#define NTDRV_VA_END  (NTDRV_VA_BASE + 0x40000000ull)   /* 1 GiB of driver image space; NTDRV_VA_BASE is in k64.h */
 
 /* ---- provider export tables (ntdrv_prov.c) ---- */
 typedef struct { const char *name; void *fn; } ntdrv_export_t;
@@ -47,6 +46,7 @@ typedef struct ntdrv_driver {
     UNICODE_STRING regpath;             /* \Registry\Machine\System\...\Services\<name> */
     WCHAR regpath_buf[160];
     int started;                        /* DriverEntry returned STATUS_SUCCESS */
+    char claim[72];                     /* "ntdrv:<service>": pci_claim() owner string for functions it drives */
 } ntdrv_driver_t;
 
 /* device object bookkeeping kept beside the Windows DEVICE_OBJECT the driver sees */
@@ -76,7 +76,13 @@ void ntdrv_set_current_driver(ntdrv_driver_t *d);
  * and the driver record). *out receives the driver record. */
 int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *service, ntdrv_driver_t **out);
 int32_t ntdrv_unload(ntdrv_driver_t *d);
+ntdrv_driver_t *ntdrv_find_driver(const char *service);           /* a started driver of that service, or NULL */
+struct fsnode;
+int32_t ntdrv_load_node(struct fsnode *n, const char *service, ntdrv_driver_t **out);   /* RAM or disk-backed file */
 uint64_t ntdrv_alloc_image_va(uint64_t bytes);                    /* reserve a slice of the driver VA window */
+
+/* ---- PCI ownership (ntdrv_io.c): MmMapIoSpace inside a function's memory BAR claims it for the current driver ---- */
+void ntdrv_pci_note_mmio(uint64_t pa, uint64_t size);
 
 /* ---- IRP engine (ntdrv_io.c) ---- */
 /* Synchronous device control entirely on kernel buffers: builds an IRP, IoCallDriver()s the

@@ -7,21 +7,37 @@
 #define K64_GFX_H
 #include "proc_internal.h"
 #include "../win64/include/shzgfx.h"
+#include "../win64/include/shzgpu.h"
 
 #define STATUS_NO_SUCH_DEVICE ((int32_t)0xC000000E)
 #define STATUS_NO_QUOTA ((int32_t)0xC0000044)           /* STATUS_QUOTA_EXCEEDED family: message pool full */
 #define STATUS_DEVICE_NOT_READY ((int32_t)0xC00000A3)
+#define STATUS_NOT_FOUND ((int32_t)0xC0000225)
 
 /* ---- gfx_fb.c ---- */
+typedef struct gfx_fb gfx_fb_t;
+/* A display backend. gfx_fb_init() tries them in a fixed order (gfx_fb.c) with g_fb already describing the mode and the
+ * back buffer; `probe` returns 0 when its device drives the screen from then on, and `present` makes a back-buffer
+ * rectangle (already clipped, non-empty) visible. */
 typedef struct {
+    const char *name;
+    uint32_t id;                                    /* SHZ_GPU_BACKEND_* (shzgpu.h) */
+    int (*probe)(gfx_fb_t *fb);
+    void (*present)(int x, int y, int w, int h);
+} gfx_backend_t;
+struct gfx_fb {
     int ready;
     uint32_t width, height, bpp, pitch;             /* pitch in bytes */
     uint16_t bga_version;
     uint64_t lfb_pa;
-    volatile uint32_t *lfb;                         /* uncached mapping of the linear framebuffer */
+    volatile uint32_t *lfb;                         /* uncached mapping of the linear framebuffer (BGA only) */
     uint32_t *back;                                 /* kernel back buffer, width*height dwords, 0x00RRGGBB */
-} gfx_fb_t;
+    const gfx_backend_t *backend;
+    uint64_t stat_presents, stat_present_pixels;
+};
 extern gfx_fb_t g_fb;
+extern const gfx_backend_t gfx_backend_virtio;      /* gfx_virtio.c */
+extern const gfx_backend_t gfx_backend_gop;         /* gfx_gop.c: the UEFI boot framebuffer */
 
 int gfx_fb_init(void);                              /* idempotent; 0 = display ready, else an NTSTATUS */
 void gfx_fb_present(int x, int y, int w, int h);    /* copy a back-buffer rectangle to the framebuffer (clipped) */
@@ -40,7 +56,7 @@ int32_t gfx_syscall_display(process_t *cur, uint64_t out, uint64_t op);
 
 /* ---- window manager objects ---- */
 #define GFX_MAX_WINDOWS 256
-#define GFX_MAX_CLASSES 64
+#define GFX_MAX_CLASSES 256                         /* all processes together (user32 registers its control classes per process) */
 #define GFX_MAX_QUEUES 32
 #define GFX_MAX_TIMERS 16
 #define GFX_MAX_MSGS 2048
@@ -98,6 +114,16 @@ struct gwin {
     int msgonly;                                    /* HWND_MESSAGE window: never visible, only receives messages */
     shz_rect_t restore;                             /* rectangle before maximise/minimise */
     int has_restore;
+    /* layered windows (WS_EX_LAYERED, top-level) and window regions: see "Layers" at the top of gfx_wm.c */
+    uint8_t lmode;                                  /* 0: nothing set yet (not drawn), 1: SetLayeredWindowAttributes, 2: UpdateLayeredWindow */
+    uint8_t lalpha;                                 /* constant alpha 0..255 */
+    uint8_t lppa;                                   /* mode 2: the bitmap has per-pixel (premultiplied) alpha */
+    uint32_t lflags, lkey;                          /* LWA_COLORKEY/LWA_ALPHA or ULW_COLORKEY/ULW_ALPHA/ULW_OPAQUE; key 0x00RRGGBB */
+    uint32_t *layer;                                /* mode 2: lw*lh pixels 0xAARRGGBB (gfx_pages_alloc) covering the window rect */
+    int32_t lw, lh;
+    shz_rect_t *rgn;                                /* SetWindowRgn: disjoint rectangles in window coordinates (kmalloc), 0 = none */
+    uint32_t nrgn;
+    uint32_t affinity;                              /* SetWindowDisplayAffinity (stored; there is no capture API to exclude from) */
 };
 
 typedef struct gmsg gmsg_t;
@@ -116,6 +142,8 @@ struct gsend {
     uint32_t sender_tid;                            /* thread id of the blocked sender */
     int state;
     int64_t result;
+    int nowait;                                     /* SendNotifyMessage / SendMessageCallback: nobody waits for the result */
+    uint64_t cookie;                                /* SendMessageCallback: posted back to the sender with the result (0: none) */
 };
 
 typedef struct { int used; uint64_t hwnd, id, proc; uint32_t elapse; uint64_t due; } gtimer_t;
@@ -135,6 +163,15 @@ struct gqueue {
     gtimer_t timers[GFX_MAX_TIMERS];
     uint64_t next_timer_id;
     uint64_t focus, active, capture;
+    gmsg_t *in_head, *in_tail;                      /* keyboard/mouse input routed to this thread (gfx_input.c), after posted ones */
+    uint32_t nin;
+    uint8_t keys[256];                              /* GetKeyState: updated as input messages are removed from the queue */
+    int cursor;                                     /* index in the pointer image cache (gfx_input.c), -1 = no cursor (SetCursor(NULL)) */
+    int cursor_hidden;                              /* ShowCursor count below zero */
+    uint64_t track_hwnd;                            /* TrackMouseEvent */
+    uint32_t track_flags, hover_ms;
+    int32_t hover_x, hover_y;
+    uint64_t hover_since;
     volatile int in_wait;                           /* blocked inside a GUI wait: only then may thread_wake() be used */
     kobject_t *event;                               /* NtUserThreadOp(QUEUEEVENT): signalled while the queue has something to retrieve */
     uint32_t event_handle;                          /* its handle in the owning process (0 if never handed out) */
@@ -162,9 +199,14 @@ static inline void rc_union(shz_rect_t *a, const shz_rect_t *b)
 
 /* gfx_wm.c */
 extern kmutex_t gfx_lock;                           /* protects every structure in this file set; never held across a sleep */
-extern gwin_t g_win[GFX_MAX_WINDOWS];               /* slot 0 is the desktop */
+/* The big tables live in graphics-arena pages allocated when the window manager starts (gfx_tables_init), not in .bss:
+ * the kernel image must stay small, and a machine without a display never pays for them. */
+extern gwin_t *g_win;                               /* [GFX_MAX_WINDOWS], slot 0 is the desktop */
 extern gqueue_t *g_fg_q;                            /* queue whose active window is the foreground window */
-extern gqueue_t g_queues[GFX_MAX_QUEUES];
+extern gqueue_t *g_queues;                          /* [GFX_MAX_QUEUES] */
+int gfx_tables_init(void);                          /* wm_init: 0 or STATUS_NO_MEMORY */
+int gq_tables_init(void);                           /* gfx_msg.c: queues and the message pool */
+int gin_tables_init(void);                          /* gfx_input.c: pointer images and raw input records */
 gwin_t *wm_lookup(uint64_t handle);                 /* NULL if stale or destroying */
 gwin_t *wm_desktop(void);
 int wm_is_visible(gwin_t *w);
@@ -190,4 +232,25 @@ int32_t gfx_syscall_msg(process_t *cur, uint32_t num, uint64_t a1, uint64_t a2, 
 int32_t gq_invalidate(gwin_t *w, const shz_rect_t *rects, uint32_t n, uint32_t flags);
 uint32_t gq_time(void);
 uint64_t gfx_pending_sends(void);
+int32_t gq_post_input(gqueue_t *q, const shz_msg_t *m, int coalesce);   /* lock held: append (or merge a mouse move) */
+
+/* gfx_input.c: PS/2 keyboard and mouse (i8042), system input state, routing to queues, the pointer sprite */
+#define GFX_MAX_INPUT 256                           /* unretrieved input messages per queue; more are dropped, as on Windows */
+void gin_init(void);                                /* wm_init: probe the i8042, start the input thread (standalone profile only) */
+void gin_queue_init(gqueue_t *q);                   /* lock held: a new queue starts with the system key state */
+void gin_message_removed(gqueue_t *q, const shz_msg_t *m);   /* lock held: keep q->keys in step with retrieved input */
+void gin_draw_pointer(const shz_rect_t *clip);      /* compositor: the pointer sprite over the composed back buffer */
+void gin_windows_changed(void);                     /* lock held: the window under the pointer may have changed */
+void gin_tick(void);                                /* gfxd, lock held: mouse-hover tracking */
+int32_t gfx_syscall_input(process_t *cur, uint64_t arg);
+void gin_queue_gone(gqueue_t *q);                   /* lock held: the queue's thread is gone (hot keys) */
+void gin_window_gone(uint64_t hwnd);                /* lock held: hot keys registered for the window */
+int32_t gq_post(gqueue_t *q, uint64_t hwnd, uint32_t message, uint64_t wparam, int64_t lparam);   /* lock held: PostMessage */
+extern int32_t g_ptr_x, g_ptr_y;
+
+/* gfx_clip.c: the clipboard */
+int32_t gfx_syscall_clipboard(process_t *cur, uint64_t arg);
+void gclip_window_gone(uint64_t hwnd);              /* lock held: listeners/owner/open window that is destroyed */
+void gclip_queue_gone(gqueue_t *q);                 /* lock held: the thread that had the clipboard open is gone */
+gwin_t *wm_input_hit(int x, int y);                 /* gfx_wm.c: window that receives mouse input at a screen point */
 #endif

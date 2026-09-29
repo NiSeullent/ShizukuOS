@@ -12,6 +12,22 @@ in this file, never read back from the guest or from the implementation under te
 
 It also requires every T_GUI_* program to exit 0 without a fault and to print no FAIL: line. It does not test the
 Supervisor path (there is no display there) and says nothing about real hardware.
+
+Input (T_GUI_INPUT): when the program prints `INPUT-WAIT: keys|mouse X Y|wheel`, this runner types on QEMU's PS/2 keyboard
+(QMP `send-key`) or moves/clicks/scrolls QEMU's PS/2 mouse (QMP `input-send-event`); the program echoes every input
+message it receives as an `INPUT:` line and the runner compares those lines with the messages it computes HERE from its own
+US scan-code table. The pointer sprite is part of the verified pixels (spec: win64/include/shzpointer.h); once the program
+parks the pointer at the bottom-right pixel (`INPUT-PARKED`), later scenes are checked with the sprite there.
+
+--display selects the display device and therefore the kernel's display backend (kernel64/gfx_fb.c):
+  vga        Bochs VBE (-vga std): the CPU copies damaged rectangles into the linear framebuffer.
+  virtio     paravirtual virtio-gpu in 2D mode (-device virtio-vga): the desktop is a host-side resource updated with
+             TRANSFER_TO_HOST_2D + RESOURCE_FLUSH per damaged rectangle. Every scene must look exactly as with vga. QEMU's
+             own trace of the virtio-gpu commands it processed (-trace virtio_gpu_*) is recorded; T_GPU_2D's small
+             invalidation must show up there as the same few TRANSFER_TO_HOST_2D commands the guest counted.
+  virtio-gl  virtio-gpu with virgl 3D (-device virtio-vga-gl -display egl-headless): additionally T_GPU_3D must render and
+             read back its triangle through the host GPU driver. QEMU needs a DRM render node (/dev/dri/renderD*) for
+             this; without one QEMU refuses to start and the run is reported BLOCKED (exit 2), never PASS.
 """
 import argparse
 import json
@@ -33,6 +49,11 @@ K64S = BUILD / "kernel64s"
 WIN64 = BUILD / "win64"
 W, H = 1024, 768
 DESKTOP = (0x00, 0x80, 0x80)
+DISPLAYS = {
+    "vga": ["-vga", "std", "-display", "none"],
+    "virtio": ["-vga", "none", "-device", "virtio-vga,xres=1024,yres=768", "-display", "none"],
+    "virtio-gl": ["-vga", "none", "-device", "virtio-vga-gl,xres=1024,yres=768", "-display", "egl-headless"],
+}
 
 
 # ---------------------------------------------------------------- PPM access
@@ -227,6 +248,17 @@ def verify_window(img, rep):
               wrong or "all 106,896 client pixels identical")
 
 
+# ---------------------------------------------------------------- the pointer sprite (spec: win64/include/shzpointer.h)
+def load_arrow():
+    text = (HERE.parent / "win64" / "include" / "shzpointer.h").read_text()
+    rows = re.findall(r'^\s*"([X. ]+)",\s*$', text, re.M)
+    assert len(rows) == 19 and all(len(r) == 12 for r in rows), rows
+    return rows
+
+
+ARROW = load_arrow()
+
+
 # ---------------------------------------------------------------- a small model of the screen for whole-screen comparisons
 class Screen:
     def __init__(self):
@@ -264,6 +296,13 @@ class Screen:
             if l + 4 <= x < r - 4 and t + 4 <= y < t + 22:
                 self.put(x, y, c)
         self.fill(l + 4, t + 23, r - 4, b - 4, client_rgb)
+
+    def pointer(self, x, y):
+        """the arrow with its hot spot (0,0) at (x,y): 'X' black, '.' white, ' ' transparent"""
+        for dy, row in enumerate(ARROW):
+            for dx, ch in enumerate(row):
+                if ch != " " and 0 <= x + dx < W and 0 <= y + dy < H:
+                    self.rows[y + dy][(x + dx) * 3:(x + dx) * 3 + 3] = bytes((0, 0, 0) if ch == "X" else (255, 255, 255))
 
     def data(self):
         return b"".join(bytes(r) for r in self.rows)
@@ -474,12 +513,244 @@ def verify_orphan2(img, rep):
     compare_screen(img, rep, "orphan2: after its process died the kernel removed the window: bare desktop (whole screen matches)", Screen())
 
 
-SCENES = {"fb": verify_fb, "window": verify_window, "z1": verify_z1, "z2": verify_z2, "z3": verify_z3, "z4": verify_z4,
+def verify_status(img, rep):
+    """T_GUI_STATUS: the frame of its full-screen window; its content (one row per loaded DLL) is checked through the
+    STATUS-DLL serial lines against the DLLs this build produced, the screendump is kept as the visible record."""
+    L, T, R, B = 8, 8, 1016, 760
+    check_outside_is_desktop(img, rep, "status", [(L, T, R, B)])
+    frame_checks(img, rep, "status", L, T, R, B, True, "Shizuku Win64 runtime status")
+
+
+def gpu2d_screen(patched):
+    """T_GPU_2D.EXE: window (300,200)-(700,500), white client, blue [20,120)x[20,80), after the update a yellow
+    [40,72)x[40,56) (client coordinates; client origin = window + (4, 23))"""
+    s = Screen()
+    s.window(300, 200, 700, 500, True, "GPU 2D", (255, 255, 255))
+    ox, oy = 304, 223
+    s.fill(ox + 20, oy + 20, ox + 120, oy + 80, BLUE)
+    if patched:
+        s.fill(ox + 40, oy + 40, ox + 72, oy + 56, (255, 255, 0))
+    return s
+
+
+def verify_gpu2d_a(img, rep):
+    compare_screen(img, rep, "gpu2d-a: GPU 2D window (white client, blue rectangle): whole screen matches", gpu2d_screen(False))
+
+
+def verify_gpu2d_b(img, rep):
+    compare_screen(img, rep, "gpu2d-b: after the 32x16 invalidation only that rectangle turned yellow: whole screen matches",
+                   gpu2d_screen(True))
+
+
+def input_scene(ptr):
+    s = Screen()
+    s.window(200, 150, 600, 450, True, "Input Test", (255, 255, 255))
+    if ptr:
+        s.pointer(*ptr)
+    return s
+
+
+def verify_input_ptr(img, rep):
+    compare_screen(img, rep, "input-ptr: the arrow pointer (class cursor) drawn at (404,323) over the window: whole screen matches",
+                   input_scene((404, 323)))
+
+
+def verify_input_noptr(img, rep):
+    compare_screen(img, rep, "input-noptr: ShowCursor(FALSE) hides the pointer over the thread's window: whole screen matches",
+                   input_scene(None))
+
+
+def verify_input_hwptr(img, rep):
+    compare_screen(img, rep, "input-hwptr: after the PS/2 mouse moved (+40,+30) the pointer is drawn at (444,353): whole screen matches",
+                   input_scene((444, 353)))
+
+
+INPUT_SCENES = {"input-ptr", "input-noptr", "input-hwptr"}
+
+
+def verify_sys_layer(img, rep):
+    """T_GUI_SYS: four popups over the desktop. The blend formulas are the ones kernel64/gfx_wm.c documents (integer
+    arithmetic, per channel): UpdateLayeredWindow premultiplied src s with alpha a (constant alpha 255): s + d*(255-a)//255;
+    SetLayeredWindowAttributes(LWA_ALPHA a): (p*a + d*(255-a))//255; LWA_COLORKEY: pixels equal to the key show d."""
+    s = Screen()
+
+    def ulw(src, a, d):
+        return tuple(min(255, sc + dc * (255 - a) // 255) for sc, dc in zip(src, d))
+
+    def const_alpha(p, a, d):
+        return tuple((pc * a + dc * (255 - a)) // 255 for pc, dc in zip(p, d))
+    s.fill(100, 100, 200, 240, ulw((255, 0, 0), 255, DESKTOP))            # opaque premultiplied red
+    s.fill(200, 100, 300, 240, ulw((0, 0, 128), 128, DESKTOP))            # blue at alpha 128, premultiplied
+    s.fill(400, 100, 600, 250, const_alpha((255, 255, 255), 128, DESKTOP))  # white window at LWA_ALPHA 128
+    s.fill(400, 300, 600, 450, (0, 160, 0))                               # green window, magenta square keyed out
+    s.fill(450, 350, 550, 400, DESKTOP)
+    s.fill(100, 300, 300, 350, (255, 0, 0))                               # red window shaped by an L-shaped region
+    s.fill(100, 350, 150, 450, (255, 0, 0))
+    compare_screen(img, rep, "sys-layer: per-pixel alpha, constant alpha, colour key and a window region composed over the desktop: "
+                             "whole screen matches", s)
+
+# US layout, scan code set 1 (what the i8042 delivers with translation on): qcode -> (virtual key, scan, extended, char, shifted char)
+US_KEYS = {"shift": (0x10, 0x2A, 0, None, None), "h": (0x48, 0x23, 0, "h", "H"), "i": (0x49, 0x17, 0, "i", "I"),
+           "right": (0x27, 0x4D, 1, None, None), "ret": (0x0D, 0x1C, 0, "\r", "\r")}
+HOST_KEYS = [["shift", "h"], ["i"], ["right"], ["ret"]]
+
+
+def expected_key_echo():
+    """the WM_KEYDOWN / WM_CHAR / WM_KEYUP lines T_GUI_INPUT must print for HOST_KEYS, computed from US_KEYS"""
+    out = []
+    for combo in HOST_KEYS:
+        shift = "shift" in combo
+        for k in combo:                                                     # pressed in order ...
+            vk, sc, ext, ch, sch = US_KEYS[k]
+            lp = 1 | sc << 16 | ext << 24
+            out.append(f"KEYDOWN wp={vk:x} lp={lp:08x}")
+            c = sch if shift else ch
+            if c is not None:
+                out.append(f"CHAR wp={ord(c):x} lp={lp:08x}")
+        for k in reversed(combo):                                           # ... released in reverse order (QMP send-key)
+            vk, sc, ext, _, _ = US_KEYS[k]
+            out.append(f"KEYUP wp={vk:x} lp={(1 | sc << 16 | ext << 24 | 3 << 30):08x}")
+    return out
+
+
+def verify_input_echo(serial, rep):
+    lines = re.findall(r"\[win64 T_GUI_INPUT\S* pid \d+\] (INPUT(?:-WAIT)?: .*)", serial)
+    if not lines:
+        return
+    phases, cur = {}, None
+    for ln in lines:
+        if ln.startswith("INPUT-WAIT: "):
+            cur = ln.split()[1]
+            phases[cur] = []
+        elif cur:
+            phases[cur].append(ln[len("INPUT: "):].strip())
+    got = phases.get("keys", [])
+    want = expected_key_echo()
+    rep.check("input: PS/2 keyboard messages echoed by the guest equal the host's own US-layout expectation",
+              got == want, f"got {got[:16]} want {want}")
+    mv = phases.get("mouse", [])
+    cl = 444 - 204 | (353 - 173) << 16
+    downs = [x for x in mv if x.startswith("LDOWN")]
+    ups = [x for x in mv if x.startswith("LUP")]
+    moves = [x for x in mv if x.startswith("MOVE")]
+    rep.check("input: PS/2 mouse: moves then LDOWN/LUP at client (240,180) = pointer (404,323) + (40,30) - client origin (204,173)",
+              bool(moves) and moves[-1] == f"MOVE wp=0 lp={cl:08x}" and downs == [f"LDOWN wp=1 lp={cl:08x}"] and ups == [f"LUP wp=0 lp={cl:08x}"] and
+              mv.index(downs[0]) > mv.index(moves[-1]), f"{mv}")
+    wh = phases.get("wheel", [])
+    scr = 444 | 353 << 16
+    rep.check("input: PS/2 wheel: WM_MOUSEWHEEL +120 then -120 with screen coordinates",
+              wh == [f"WHEEL wp=780000 lp={scr:08x}", f"WHEEL wp=ff880000 lp={scr:08x}"], f"{wh}")
+
+
+def drive_input(q, what):
+    """act on an INPUT-WAIT marker: type or move/click/scroll through QEMU's PS/2 devices"""
+    if what == "keys":
+        for combo in HOST_KEYS:
+            q.call("send-key", {"keys": [{"type": "qcode", "data": k} for k in combo]})
+            time.sleep(0.4)
+    elif what == "mouse":
+        q.call("input-send-event", {"events": [{"type": "rel", "data": {"axis": "x", "value": 40}},
+                                               {"type": "rel", "data": {"axis": "y", "value": 30}}]})
+        time.sleep(0.3)
+        for down in (True, False):
+            q.call("input-send-event", {"events": [{"type": "btn", "data": {"down": down, "button": "left"}}]})
+            time.sleep(0.2)
+    elif what == "wheel":
+        for b in ("wheel-up", "wheel-down"):
+            for down in (True, False):
+                q.call("input-send-event", {"events": [{"type": "btn", "data": {"down": down, "button": b}}]})
+                time.sleep(0.2)
+
+
+SCENES = {"gpu2d-a": verify_gpu2d_a, "gpu2d-b": verify_gpu2d_b, "status": verify_status, "sys-layer": verify_sys_layer, "input-ptr": verify_input_ptr, "input-noptr": verify_input_noptr, "input-hwptr": verify_input_hwptr,
+          "fb": verify_fb, "window": verify_window, "z1": verify_z1, "z2": verify_z2, "z3": verify_z3, "z4": verify_z4,
           "orphan1": verify_orphan1, "orphan2": verify_orphan2, "gdi": verify_gdi,
           "c1": verify_c1, "c2": verify_c2, "c3": verify_c3, "c4": verify_c4}
 
 
+# ---------------------------------------------------------------- GPU checks (T_GPU_2D.EXE / T_GPU_3D.EXE output + QEMU trace)
+# QEMU trace-event formats (hw/display/trace-events): the device's own record of what it executed.
+TRACE_XFER = re.compile(r"virtio_gpu_cmd_res_xfer_toh_2d res 0x([0-9a-f]+)")
+TRACE_FLUSH = re.compile(r"virtio_gpu_cmd_res_flush res 0x([0-9a-f]+), w (\d+), h (\d+), x (\d+), y (\d+)")
+TRACE_CURSOR = re.compile(r"virtio_gpu_update_cursor scanout (\d+), x (\d+), y (\d+), (\w+), res 0x([0-9a-f]+)")
+FB_RES = 1                                                  # kernel64/gfx_virtio.c VG_FB_RES
+
+
+def trace_summary(trace):
+    counts = {}
+    for m in re.finditer(r"(virtio_gpu_\w+)", trace):
+        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    return counts
+
+
+def gpu_line(serial, tag):
+    m = re.search(rf"\] {tag}: (.*)$", serial, re.M)
+    return dict(re.findall(r"(\w+)=(\S+)", m.group(1))) if m else None
+
+
+def verify_gpu(rep, display, serial, trace, trace_at):
+    info, delta, cur = gpu_line(serial, "GPU-INFO"), gpu_line(serial, "GPU-2D-DELTA"), gpu_line(serial, "GPU-CURSOR")
+    if not rep.check("T_GPU_2D reported backend, update counters and cursor results", bool(info and delta and cur),
+                     f"info={info} delta={delta} cursor={cur}"):
+        return
+    virtio = display != "vga"
+    rep.check(f"display backend is {'virtio-gpu' if virtio else 'Bochs VBE'}", info["backend"] == ("2" if virtio else "1"),
+              f"backend={info['backend']} features={info['features']}")
+    d = {k: int(v) for k, v in delta.items()}
+    rep.check("the 32x16 (512 px) invalidation reached the display as <= 2 rectangles, 512..1024 px (full frame = 786432)",
+              1 <= d["presents"] <= 2 and 512 <= d["pixels"] <= 1024, str(d))
+    g3 = re.search(r"\] GPU-3D: (unavailable|triangle verified)", serial)
+    if display == "virtio-gl":
+        rep.check("T_GPU_3D rendered the triangle on the host GPU and read it back pixel-exact", bool(g3 and g3.group(1) == "triangle verified"),
+                  g3.group(0)[2:] if g3 else "no GPU-3D line")
+    else:
+        rep.check("T_GPU_3D: without VIRGL every 3D call is refused (STATUS_NOT_SUPPORTED)", bool(g3 and g3.group(1) == "unavailable"),
+                  g3.group(0)[2:] if g3 else "no GPU-3D line")
+    if not virtio:
+        rep.check("BGA: no virtio-gpu commands were counted", d["transfers"] == 0 and d["flushes"] == 0, str(d))
+        rep.check("BGA: cursor calls refused with STATUS_NOT_SUPPORTED", all(cur[k] == "c00000bb" for k in ("shape", "move", "hide")), str(cur))
+        return
+    feats = int(info["features"], 16)
+    rep.check("virtio-gpu: 2D, cursor and EDID; display info and EDID preferred mode = the 1024x768 given to QEMU",
+              feats & 7 == 7 and info["host"] == "1024x768" and info["pref"] == "1024x768" and info["vendor"] != "-",
+              f"features={info['features']} host={info['host']} edid={info['edid']} vendor={info['vendor']} pref={info['pref']}")
+    rep.check("virtio-gpu: guest sent one TRANSFER_TO_HOST_2D (4 bytes/px) + one RESOURCE_FLUSH per rectangle",
+              d["transfers"] == d["presents"] == d["flushes"] and d["bytes"] == 4 * d["pixels"], str(d))
+    a, b = trace_at.get("gpu2d-a"), trace_at.get("gpu2d-b")
+    if not rep.check("QEMU trace captured at the gpu2d-a and gpu2d-b markers", a is not None and b is not None and b >= a,
+                     f"offsets {a}..{b} of {len(trace)} bytes"):
+        return
+    seg = trace[a:b]
+    xf = [r for r in TRACE_XFER.findall(seg) if int(r, 16) == FB_RES]
+    fl = [(int(w), int(h), int(x), int(y)) for r, w, h, x, y in TRACE_FLUSH.findall(seg) if int(r, 16) == FB_RES]
+    rep.check("QEMU executed exactly the TRANSFER_TO_HOST_2D/RESOURCE_FLUSH the guest counted for the small update, and "
+              "flushed only small rectangles", len(xf) == d["transfers"] and len(fl) == d["flushes"] and
+              all(w * h <= 1024 for w, h, _, _ in fl),
+              f"trace: {len(xf)} transfer(s), flushes {fl}; guest: {d['transfers']} transfer(s)")
+    total_xf = len([r for r in TRACE_XFER.findall(trace) if int(r, 16) == FB_RES])
+    full = len([1 for r, w, h, x, y in TRACE_FLUSH.findall(trace) if int(r, 16) == FB_RES and (int(w), int(h)) == (W, H)])
+    rep.check("whole run: the desktop resource was updated by rectangles (full-frame flushes are rare)",
+              total_xf > 0 and full <= max(3, total_xf // 10), f"{total_xf} transfers, {full} of them full-frame")
+    rep.check("virtio-gpu: cursor define, move and hide returned STATUS_SUCCESS", all(cur[k] == "00000000" for k in ("shape", "move", "hide")),
+              str(cur))
+    cursor = [(int(s), int(x), int(y), t, int(r, 16)) for s, x, y, t, r in TRACE_CURSOR.findall(trace[b:])]
+    want = [(0, 700, 300, "update", 2), (0, 720, 310, "move", 2), (0, 0, 0, "update", 0)]
+    got = [(s, x, y, t, r) for s, x, y, t, r in cursor]
+    ok = len(got) >= 3 and got[0] == want[0] and got[1][:4] == want[1][:4] and got[2][3:] == want[2][3:]
+    rep.check("QEMU received the cursor plane commands: define at (700,300) with resource 2, move to (720,310), hide (resource 0)",
+              ok, f"trace: {got[:4]}")
+
+
 # ---------------------------------------------------------------- harness
+def save_png(ppm):
+    try:
+        from PIL import Image as PILImage
+    except ImportError:
+        return
+    PILImage.open(ppm).save(ppm.with_suffix(".png"))
+
+
+
 def parse_serial(serial):
     exit_code = None
     m = re.search(r"^SHZ-EXIT:([0-9a-f]+)$", serial, re.M)
@@ -496,6 +767,10 @@ def main():
     ap.add_argument("--memory", default="256")
     ap.add_argument("--out", default=str(BUILD / "kernel64s" / "gui-run"))
     ap.add_argument("--keep-shots", action="store_true", help="keep the screendump of every scene (PPM)")
+    ap.add_argument("--png", action="store_true", help="also write every screendump as PNG next to result.json (needs Pillow)")
+    ap.add_argument("--display", choices=tuple(DISPLAYS), default="vga",
+                    help="vga: Bochs VBE (-vga std); virtio: paravirtual virtio-gpu 2D (-device virtio-vga); virtio-gl: "
+                         "virtio-gpu with virgl 3D (-device virtio-vga-gl -display egl-headless; needs a DRM render node)")
     args = ap.parse_args()
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
     for f in (stub, kernel, initrd):
@@ -508,13 +783,17 @@ def main():
     serial_path.unlink(missing_ok=True)
     sockdir = Path(tempfile.mkdtemp(prefix="shzgui"))     # AF_UNIX paths are limited to ~100 bytes: keep the socket somewhere short
     sock = sockdir / "qmp.sock"
-    cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-vga", "std",
-           "-display", "none", "-kernel", str(stub), "-initrd", f"{kernel},{initrd}", "-serial", f"file:{serial_path}",
+    trace_path = out / "qemu-trace.log"
+    trace_path.unlink(missing_ok=True)
+    cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults",
+           *DISPLAYS[args.display], "-kernel", str(stub), "-initrd", f"{kernel},{initrd}", "-serial", f"file:{serial_path}",
            "-qmp", f"unix:{sock},server=on,wait=off", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot"]
+    if args.display != "vga":                             # host-side record of every virtio-gpu command QEMU processed
+        cmd += ["-trace", "enable=virtio_gpu_*", "-D", str(trace_path)]
     rep = Report()
     started = time.time()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    seen, timed_out = set(), False
+    seen, timed_out, parked, driven, trace_at = set(), False, None, [], {}
     try:
         q = qemu.QMP(sock, timeout=15)
         consumed = 0
@@ -526,7 +805,7 @@ def main():
                 break
             text = serial_path.read_text(errors="replace") if serial_path.exists() else ""
             hit = None
-            for m in re.finditer(r"GUI-READY: (\S+)", text):
+            for m in re.finditer(r"(GUI-READY|INPUT-WAIT|INPUT-PARKED): (\S+)[^\n]*\n", text):     # complete lines only
                 if m.end() > consumed:
                     hit = m
                     break
@@ -534,12 +813,20 @@ def main():
                 time.sleep(0.02)
                 continue
             consumed = hit.end()
-            scene = hit.group(1)
+            if hit.group(1) == "INPUT-WAIT":
+                drive_input(q, hit.group(2))
+                driven.append(hit.group(2))
+                continue
+            if hit.group(1) == "INPUT-PARKED":
+                parked = tuple(int(v) for v in re.findall(r"\d+", hit.group(0).split(":", 1)[1])[:2])
+                continue
+            scene = hit.group(2)
             shot = out / f"shot-{scene}.ppm"
             shot.unlink(missing_ok=True)
             q.call("stop")                              # freeze the guest: the scene cannot change while we look
             try:
                 q.call("screendump", {"filename": str(shot)})
+                trace_at[scene] = trace_path.stat().st_size if trace_path.exists() else 0
             finally:
                 q.call("cont")
             seen.add(scene)
@@ -548,11 +835,21 @@ def main():
             except (ValueError, OSError) as e:
                 rep.check(f"{scene}: screendump readable", False, str(e))
                 continue
+            if parked and scene not in INPUT_SCENES:
+                # the pointer stays where T_GUI_INPUT parked it; only its hot-spot pixel (black) is on screen there
+                px, py = parked
+                rep.check(f"{scene}: the parked pointer's hot-spot pixel ({px},{py}) is black", img.px(px, py) == (0, 0, 0), f"{img.px(px, py)}")
+                d = bytearray(img.data)
+                o = (py * img.w + px) * 3
+                d[o:o + 3] = bytes(DESKTOP)
+                img.data = bytes(d)
             fn = SCENES.get(scene)
             if fn is None:
                 rep.check(f"{scene}: known scene", False, "no host-side expectation for this scene")
             else:
                 fn(img, rep)
+            if args.png:
+                save_png(shot)
             if not args.keep_shots:
                 shot.unlink(missing_ok=True)
     except (RuntimeError, OSError, ValueError) as e:
@@ -567,24 +864,58 @@ def main():
     qemu_out = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     exit_code = parse_serial(serial)
+    if args.display == "virtio-gl" and proc.returncode not in (0, None) and not seen and not serial.strip():
+        # QEMU refused the GL display before the guest ran: an environment limit, not a result of the code under test
+        record = {"profile": "kernel64-standalone + virtio-vga-gl (virgl)", "display": args.display, "accel": accel,
+                  "status": "BLOCKED", "reason": qemu_out.strip()[-800:], "command": cmd, "utc": shzlib.utc_now(),
+                  "git": shzlib.git_state(),
+                  "needed": "QEMU with virglrenderer and a GL-capable display backend: -display egl-headless (or gtk/sdl/dbus "
+                            "with gl=on) needs a DRM render node /dev/dri/renderD* (a host GPU, or vgem/virtio-gpu in the host)"}
+        shzlib.write_json(out / "result.json", record)
+        print("BLOCKED: QEMU could not start the virgl (3D) device on this host:")
+        print("  " + qemu_out.strip().replace("\n", "\n  "))
+        print("  needed: " + record["needed"])
+        return 2
+    trace = trace_path.read_text(errors="replace") if trace_path.exists() else ""
     if timed_out:
         rep.check("run finished before the timeout", False, f"{args.timeout}s, accel={accel}")
     rep.check("Kernel64 finished all self-tests and exited 0", exit_code == 0 and "K64 test FAIL" not in serial,
               f"exit={exit_code}")
-    apps = re.findall(r"K64 win64 app: (T_GUI_\S+\.EXE) exit=(-?\d+) faulted=(\d)", serial)
+    apps = re.findall(r"K64 win64 app: (T_G(?:UI|PU)_\S+\.EXE) exit=(-?\d+) faulted=(\d)", serial)
     for name, code, faulted in apps:
         rep.check(f"{name} exits 0 without a fault", code == "0" and faulted == "0", f"exit={code} faulted={faulted}")
     rep.check("at least one GUI test program ran", len(apps) > 0, f"{len(apps)} program(s)")
     fails = re.findall(r"\] (FAIL: .*)", serial)
     rep.check("no GUI program printed FAIL:", not fails, "; ".join(fails[:5]))
-    skips = re.findall(r"\] (SKIP: .*)", serial)
-    rep.check("no GUI program skipped (the display is present)", not skips, "; ".join(skips[:5]))
+    # kernel self-tests that report by line only (e.g. "K64 subsys64 FAIL: ...") do not change the exit code
+    kfails = re.findall(r"^(K64 (?:\S+ )?FAIL:? .*)$", serial, re.M)
+    rep.check("no kernel self-test printed a FAIL line", not kfails, "; ".join(kfails[:5]))
+    # only the display programs must not skip (T_NET_* legitimately skip here: this profile has no NIC)
+    skips = re.findall(r"\[win64 (T_G(?:UI|PU)_\S+) pid \d+\] (SKIP: .*)", serial)
+    rep.check("no GUI/GPU program skipped (the display is present)", not skips, "; ".join(f"{a}: {b}" for a, b in skips[:5]))
+    loaded = {m.group(1).lower(): m.group(2) == "1" and m.group(3) == "1"
+              for m in re.finditer(r"STATUS-DLL: (\S+) loaded=(\d) exports=\d+ resolved=(\d)", serial)}
+    built = json.loads((WIN64 / "build-result.json").read_text())["archive"]["files"]
+    for dll in sorted(f.rsplit("\\", 1)[-1].lower() for f in built
+                      if f.upper().startswith("\\SHZ\\SYS64\\") and f.upper().endswith(".DLL")):
+        rep.check(f"status: {dll} was loaded in the guest and its first export resolved", loaded.get(dll, False),
+                  "reported" if dll in loaded else "not reported by T_GUI_STATUS")
+    # the display device is listed with the kernel driver bound to it (kernel64 pci_claim)
+    want_dev, want_drv = ("1234:1111", "gfx_fb") if args.display == "vga" else ("1af4:1050", "gfx_virtio")
+    pci = re.findall(rf"STATUS-PCI: \S+ {want_dev} class 03\S* irq \d+ driver=(.*)", serial)
+    rep.check(f"status: the display (PCI {want_dev}) is listed as bound to the {want_drv} kernel driver",
+              any(d.startswith(want_drv) for d in pci), "; ".join(pci) or "not listed")
+    verify_gpu(rep, args.display, serial, trace, trace_at)
     for scene in sorted(SCENES):
         rep.check(f"scene {scene} was shown and verified", scene in seen)
+    rep.check("the input program asked for keyboard, mouse and wheel input and got it", driven == ["keys", "mouse", "wheel"], f"{driven}")
+    verify_input_echo(serial, rep)
     status = "PASS" if all(x["status"] == "PASS" for x in rep.items) else "FAIL"
-    record = {"profile": "kernel64-standalone + bochs vga (no Supervisor, no VMX)", "accel": accel, "status": status,
+    record = {"profile": f"kernel64-standalone + {DISPLAYS[args.display][-3] if args.display != 'vga' else 'bochs vga'} "
+                         "(no Supervisor, no VMX)", "display": args.display, "accel": accel, "status": status,
               "checks": rep.items, "seconds": round(time.time() - started, 1), "command": cmd, "qemu_output": qemu_out[-1500:],
-              "serial_tail": serial[-4000:], "utc": shzlib.utc_now(), "git": shzlib.git_state()}
+              "serial_tail": serial[-4000:], "trace_summary": trace_summary(trace), "utc": shzlib.utc_now(),
+              "git": shzlib.git_state()}
     shzlib.write_json(out / "result.json", record)
     for x in rep.items:
         print(f"  [{x['status']}] {x['check']}  {x['detail']}")

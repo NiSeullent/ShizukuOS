@@ -28,9 +28,15 @@ LARGE_INTEGER NTAPI MmGetPhysicalAddress(void *va)
 void *NTAPI MmMapIoSpace(LARGE_INTEGER pa, uint64_t size, uint32_t cache)
 {
     (void)cache;
+    ntdrv_pci_note_mmio((uint64_t)pa.QuadPart, size);          /* a BAR mapping binds that PCI function to the driver */
     return mmio_map((uint64_t)pa.QuadPart, size);
 }
-void *NTAPI MmMapIoSpaceEx(LARGE_INTEGER pa, uint64_t size, uint32_t prot) { (void)prot; return mmio_map((uint64_t)pa.QuadPart, size); }
+void *NTAPI MmMapIoSpaceEx(LARGE_INTEGER pa, uint64_t size, uint32_t prot)
+{
+    (void)prot;
+    ntdrv_pci_note_mmio((uint64_t)pa.QuadPart, size);
+    return mmio_map((uint64_t)pa.QuadPart, size);
+}
 void NTAPI MmUnmapIoSpace(void *va, uint64_t size) { (void)va; (void)size; /* direct-map MMIO windows persist for the boot */ }
 
 void *NTAPI MmAllocateContiguousMemory(uint64_t bytes, LARGE_INTEGER highest)

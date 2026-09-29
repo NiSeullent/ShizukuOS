@@ -28,6 +28,136 @@
       "used_by": ["shizukudos/dos16"],
       "build": "Open Watcom + NASM via `build.sh` (XMS swap enabled, language english)",
       "patches": ["shizukudos/dos16/patches/freecom-0001-reproducible-build-stamp.patch"]
+    },
+    "csmwrap": {
+      "repository": "https://github.com/CSMWrap/CSMWrap.git",
+      "ref": "main",
+      "commit": "7f30b740c352ee952eb596bf10ae263a8a5da4c7",
+      "submodules": {
+        "seabios": {"repository": "https://github.com/CSMWrap/seabios-csmwrap.git",
+                    "commit": "578d260b94f62150bf6ab9149784287bd1154f06",
+                    "license": "LGPL-3.0-only", "license_files": ["seabios/COPYING.LESSER", "seabios/COPYING"],
+                    "note": "SeaBIOS CSM build (Csm16.bin) and SeaVGABIOS (vgabios.bin), linked into the EFI image as byte arrays. Source headers: 'distributed under the terms of the GNU LGPLv3 license'; build scripts (not in the binary) are GPLv3."},
+        "picoefi": {"repository": "https://github.com/PicoEFI/PicoEFI.git",
+                    "commit": "af14129ec21ba482873289e36311ec02f1e19964",
+                    "license": "BSD-2-Clause AND BSD-2-Clause-Patent AND BSD-3-Clause AND MIT AND LicenseRef-scancode-bsd-no-disclaimer-unmodified",
+                    "license_files": ["picoefi/COPYING", "picoefi/LICENSES/*"]},
+        "uACPI": {"repository": "https://github.com/uACPI/uACPI.git",
+                  "commit": "338dc389ef38c5264e317c61d8121aace5ac865d",
+                  "license": "MIT", "license_files": ["uACPI/LICENSE"]},
+        "flanterm": {"repository": "https://github.com/Mintsuki/Flanterm.git",
+                     "commit": "dfa1922c0749faf64c4423a81b233a20c08a7db7",
+                     "license": "BSD-2-Clause", "license_files": ["flanterm/LICENSE"]},
+        "nanoprintf": {"repository": "https://github.com/charlesnicholson/nanoprintf.git",
+                       "commit": "526cbca59d23fcb4e4aee3a93beaf22bc63e67a5",
+                       "license": "Unlicense OR 0BSD", "license_files": ["nanoprintf/LICENSE"]},
+        "cc-runtime": {"repository": "https://github.com/osdev0/cc-runtime.git",
+                       "commit": "dae79833b57a01b9fd3e359ee31def69f5ae899b",
+                       "license": "Apache-2.0 WITH LLVM-exception", "license_files": ["cc-runtime/LICENSE.TXT"]},
+        "freestnd-c-hdrs": {"repository": "https://github.com/osdev0/freestnd-c-hdrs-0bsd.git",
+                            "commit": "097259a899d30f0a4b7a694de2de5fdda942e923",
+                            "license": "0BSD", "license_files": ["freestnd-c-hdrs/LICENSE"]}
+      },
+      "license": "LGPL-2.1-only",
+      "license_files": ["LICENSE"],
+      "license_note": "CSMWrap's own code is LGPL-2.1 (LICENSE). Files under src/edk2 carry SPDX BSD-2-Clause-Patent headers (TianoCore EDK2). Each submodule keeps its own license (see submodules).",
+      "execution_mode": "UEFI x86-64 application: exits boot services, installs SeaBIOS CSM16 below 1 MiB and legacy-boots the MBR of the disk it was loaded from; a BIOS proxy runs on one reserved AP",
+      "used_by": ["shizukudos/csm", "shizukudos/dos16 (dual BIOS/UEFI image)"],
+      "build": "GNU make + gcc + nasm + xxd via `make BUILD_VERSION=<build_version> all` in a .git-free copy (shizukudos/csm/build.py)",
+      "build_version": "3.1.2-25-g7f30b74",
+      "seabios_version": "578d260b",
+      "version_note": "Fixed copies of what `git describe --tags --always` printed for the pinned commits (CSMWrap) and `git describe --always --tags --long` (seabios submodule, no tags fetched) on 2026-09-29; fixed so later upstream tags cannot change the binary.",
+      "patches": []
+    },
+    "reactos": {
+      "repository": "https://github.com/reactos/reactos.git",
+      "ref": "master",
+      "commit": "f06eace89e11b6513afcf65b653f2d360db7ba77",
+      "license": "GPL-2.0 (COPYING is the GPLv2 text; the corpus driver sources state GPL-2.0+ or 'GPL - See COPYING'). Third-party components used by the corpus, per media/doc/3rd Party Files.txt: MS-PL (drivers/storage/class/classpnp, disk, cdrom), MIT (sdk/lib/drivers/wdf = Microsoft WDF), BSD-3-Clause (drivers/network/dd/netkvm), BSD (drivers/bus/pcix, COPYING.ARM), UniATA BSD-style licence (drivers/storage/ide/uniata)",
+      "license_files": ["COPYING", "COPYING.LIB"],
+      "execution_mode": "NT kernel-mode driver sources (x64 WDM), compiled unmodified as the NT driver corpus",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "shizukudos/ntdrv/corpus/build.py: each driver built from its own CMakeLists.txt (evaluated by the script) with x86_64-w64-mingw32-gcc (C++: x86_64-w64-mingw32-g++ or clang++) against the ReactOS sdk/include headers, ReactOS host tools (hpp, spec2def, pefixup, geninc, asmpp, widl, gcc_plugin_seh) built from this tree, linked --subsystem native with import libraries generated from the ReactOS .spec files (no RosBE, no CMake)",
+      "patches": []
+    },
+    "virtio-win": {
+      "repository": "https://github.com/virtio-win/kvm-guest-drivers-windows.git",
+      "ref": "master",
+      "commit": "04e70e76c966fd9247a523e41c1b6c624e9b46eb",
+      "license": "BSD-3-Clause (LICENSE)",
+      "license_files": ["LICENSE"],
+      "execution_mode": "NT kernel-mode driver sources (NetKVM NDIS 6.x, viostor StorPort, vioinput/viogpudo KMDF/WDM)",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "shizukudos/ntdrv/corpus/build.py + corpus/vcxproj.py: viostor, NetKVM (NDIS 6.85), vioinput (KMDF), viogpudo (WDDM DOD) attempted from their .vcxproj with the ReactOS headers standing in for the WDK; results in docs/shizukudos10/DRIVER_CORPUS.md",
+      "patches": []
+    },
+    "windows-driver-frameworks": {
+      "repository": "https://github.com/microsoft/Windows-Driver-Frameworks.git",
+      "ref": "master",
+      "commit": "b6191d9543441329154da32f7ab9bdd97228dd3c",
+      "license": "MIT (LICENSE)",
+      "license_files": ["LICENSE"],
+      "execution_mode": "KMDF (Wdf01000.sys) and UMDF v2 framework sources; assessed against the copy ReactOS carries (sdk/lib/drivers/wdf, built by the corpus)",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "not built from this tree (MSBuild/WDK project); the ReactOS copy of the same sources (KMDF 1.17) is built by shizukudos/ntdrv/corpus/build.py (wdf01000, wdfldr); assessment in docs/shizukudos10/DRIVER_CORPUS.md",
+      "patches": []
+    },
+    "wine": {
+      "repository": "https://gitlab.winehq.org/wine/wine.git",
+      "fetch_mirror": "https://github.com/wine-mirror/wine.git",
+      "ref": "wine-11.0",
+      "commit": "db11d0fe6a169c457e23d007e20404643d067aa8",
+      "license": "LGPL-2.1-or-later",
+      "license_files": ["COPYING.LIB", "LICENSE", "AUTHORS"],
+      "bundled_components_used": {
+        "libs/tomcrypt": {"license": "LibTomCrypt dual licence: public domain dedication OR WTFPL-2.0", "license_files": ["libs/tomcrypt/LICENSE"]}
+      },
+      "execution_mode": "PE32+ user-mode DLLs (x86_64) built with mingw-w64 against Wine's own include/ tree; the Unix side (unixlib) of a DLL is never built",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "shizukudos/win64/wineport/build.py: host configure (--enable-win64, every optional library disabled) only for widl/wrc and the generated headers, then each DLL with x86_64-w64-mingw32-gcc; exports come from the .spec file minus stub entries",
+      "linking_note": "The Wine DLLs are statically linked with Shizuku-original GPL-2.0-only support code (wineport/crt, wineport/glue); the combined DLLs are distributed under GPL-2.0 as LGPL-2.1 section 3 permits.",
+      "data_files_used": {
+        "fonts/tahoma.ttf": "Wine's own Tahoma replacement (LGPL-2.1-or-later), packed unmodified as \\SHZ\\FONTS\\tahoma.ttf",
+        "fonts/tahomabd.ttf": "Wine's own Tahoma Bold replacement (LGPL-2.1-or-later), packed unmodified as \\SHZ\\FONTS\\tahomabd.ttf"
+      },
+      "patches": [
+        "shizukudos/win64/wineport/patches/wine/0001-cryptbase-system-rng-and-memory-encryption.patch",
+        "shizukudos/win64/wineport/patches/wine/0002-crypt32-shizuku.patch",
+        "shizukudos/win64/wineport/patches/wine/0003-advapi32-crypt-register-default-csp-on-first-use.patch",
+        "shizukudos/win64/wineport/patches/wine/0004-dwrite-static-freetype-and-font-registration.patch",
+        "shizukudos/win64/wineport/patches/wine/0005-winecrt0-debug-options-from-registry.patch",
+        "shizukudos/win64/wineport/patches/wine/0006-wintrust-register-providers-on-first-use.patch"
+      ]
+    },
+    "freetype": {
+      "repository": "https://gitlab.freedesktop.org/freetype/freetype.git",
+      "fetch_mirror": "https://github.com/freetype/freetype.git",
+      "ref": "VER-2-13-3",
+      "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5",
+      "license": "FTL OR GPL-2.0-or-later (dual); used here under GPL-2.0-or-later",
+      "license_files": ["LICENSE.TXT", "docs/FTL.TXT", "docs/GPLv2.TXT"],
+      "execution_mode": "static library linked into the PE dwrite.dll (x86_64, mingw-w64), no platform-specific code",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "shizukudos/win64/wineport/build.py: the module sources listed in wineport/modules.json with a module list header (wineport/freetype/shz_ftmodule.h)",
+      "patches": []
+    },
+    "noto-fonts": {
+      "repository": "https://github.com/google/fonts.git",
+      "ref": "main",
+      "commit": "23e54b51ddffbc7713c583748e3bd86f62b1fa4a",
+      "sparse_paths": ["/ofl/notosans/", "/ofl/notoserif/", "/ofl/notosansmono/"],
+      "license": "OFL-1.1",
+      "license_files": ["ofl/notosans/OFL.txt", "ofl/notoserif/OFL.txt", "ofl/notosansmono/OFL.txt"],
+      "execution_mode": "font data (variable TrueType), packed unmodified into WIN64.IMG as \\SHZ\\FONTS\\*.ttf",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "partial, sparse fetch of the pinned commit (only the three family directories); files are not modified",
+      "patches": []
     }
   },
   "tools": {
@@ -40,5 +170,20 @@
     },
     "nasm": {"kind": "host tool", "min_version": "2.16"},
     "mtools": {"kind": "host tool"}
+  },
+  "vendored": {
+    "virglrenderer-headers": {
+      "version": "1.0.0",
+      "archive": "http://archive.ubuntu.com/ubuntu/pool/main/v/virglrenderer/virglrenderer_1.0.0.orig.tar.bz2",
+      "archive_sha256": "b27b9b84c3a9ab62f87152e624914f150c6e582d0798b06d80d91e4a8aab3705",
+      "path": "shizukudos/third_party/virglrenderer-1.0.0",
+      "files": {"virgl_protocol.h": "bf5c4bade0a550cde8b4fb6e0139f15abec19df57151cb65d902d06be9b15dfe",
+                "virgl_hw.h": "ff5489b1803c109e6a39ec018eba8e8bac8282cbc6d712ed7eb65288d1fceb46",
+                "virglrenderer.h": "9a40026e8317d5610abfb8743f6302f8434480183ea53b425d7f08dc0fc437c1",
+                "COPYING": "3b32caf16e2402c2aff2b716858713f3e1feded85c25e71bf829816ee5009402"},
+      "license": "MIT",
+      "used_by": ["shizukudos/kernel64/host/test_virgl_enc.c", "shizukudos/kernel64/host/test_virgl_exec.c"],
+      "note": "Unmodified copies used by host tests only (see PINNED.txt there); never compiled into the guest."
+    }
   }
 }

@@ -13,6 +13,14 @@
  *  - gethostbyname, inet_ntoa use process-wide static buffers (Windows uses per-thread ones).
  *  - getaddrinfo: numeric hosts, "localhost", and A-record DNS lookups; service names come from a small built-in table.
  *  - Winsock error codes are the standard values; the kernel reports them as NTSTATUS 0xE0A0xxxx (net.h NET_ERR).
+ *  - Catalog: one transport provider built into this DLL ("Shizuku Tcpip", entries TCP/IPv4 and UDP/IPv4) and one namespace
+ *    provider (NS_DNS, the kernel resolver). WSAEnumProtocols / WSCEnumProtocols / WSCGetProviderPath / WSAEnumNameSpaceProviders
+ *    describe exactly these. The DNS namespace answers host-name lookups (WSALookupService*, GetAddrInfoExW) and cannot register
+ *    services (WSASetService fails with WSAEOPNOTSUPP); other namespaces (NLA, NTDS, ...) have no provider.
+ *  - GetAddrInfoExW: synchronous, or asynchronous with an OVERLAPPED event (a worker thread resolves; GetAddrInfoExCancel,
+ *    GetAddrInfoExOverlappedResult). A completion routine would have to run as an APC in the caller's thread, which this system
+ *    cannot queue: it is refused with WSAEOPNOTSUPP.
+ *  - WSADuplicateSocketW duplicates for the calling process only (Kernel64 offers no handle duplication into another process).
  */
 #define WIN32_LEAN_AND_MEAN
 #define WINSOCK_API_LINKAGE
@@ -353,6 +361,13 @@ DLLAPI SOCKET WSAAPI WSASocketW(int af, int type, int protocol, LPWSAPROTOCOL_IN
     (void)g; (void)dwFlags;                                 /* WSA_FLAG_OVERLAPPED is accepted; overlapped *I/O* is refused later */
     NEED_INIT(INVALID_SOCKET);
     if (lpProtocolInfo) {
+        if (lpProtocolInfo->dwProviderReserved) {           /* from WSADuplicateSocketW: the duplicated handle of that socket */
+            ULONG v = 0, n = 4;
+            const SOCKET dup = (SOCKET)lpProtocolInfo->dwProviderReserved;
+            if (NtShzSockGetOpt(dup, SOL_SOCKET, SO_TYPE, &v, &n)) { SetLastError(WSAEINVAL); return INVALID_SOCKET; }
+            lpProtocolInfo->dwProviderReserved = 0;         /* the handle now belongs to the caller */
+            return dup;
+        }
         af = lpProtocolInfo->iAddressFamily; type = lpProtocolInfo->iSocketType; protocol = lpProtocolInfo->iProtocol;
     }
     if (af == AF_UNSPEC && protocol) {
@@ -967,4 +982,458 @@ DLLAPI struct hostent *WSAAPI gethostbyname(const char *name)
     he.h_length = 4;
     he.h_addr_list = addr_list;
     return &he;
+}
+
+/* ---------------------------------------------------------------- catalog: transport and namespace providers */
+/* {53485A31-5443-5049-8000-5443502F4950} "SHZ1" "TCPIP": the transport provider built into this ws2_32 */
+static const GUID g_provider = { 0x53485a31, 0x5443, 0x5049, { 0x80, 0x00, 0x54, 0x43, 0x50, 0x2f, 0x49, 0x50 } };
+/* {53485A31-4E53-4453-8000-444E53000001} "SHZ1" "NS DNS": the namespace provider (Kernel64 resolver) */
+static const GUID g_ns_provider = { 0x53485a31, 0x4e53, 0x4453, { 0x80, 0x00, 0x44, 0x4e, 0x53, 0x00, 0x00, 0x01 } };
+
+static void wcopy(WCHAR *d, const char *s, size_t cap) { size_t i; for (i = 0; s[i] && i + 1 < cap; ++i) d[i] = (WCHAR)(unsigned char)s[i]; d[i] = 0; }
+
+static void protocol_info(WSAPROTOCOL_INFOW *p, int tcp)
+{
+    memset(p, 0, sizeof *p);
+    p->dwServiceFlags1 = tcp ? XP1_GUARANTEED_DELIVERY | XP1_GUARANTEED_ORDER | XP1_GRACEFUL_CLOSE
+                             : XP1_CONNECTIONLESS | XP1_MESSAGE_ORIENTED | XP1_SUPPORT_BROADCAST;
+    p->dwProviderFlags = PFL_MATCHES_PROTOCOL_ZERO;
+    p->ProviderId = g_provider;
+    p->dwCatalogEntryId = tcp ? 1001 : 1002;
+    p->ProtocolChain.ChainLen = BASE_PROTOCOL;
+    p->iVersion = 2;
+    p->iAddressFamily = AF_INET;
+    p->iMaxSockAddr = sizeof(struct sockaddr_in);
+    p->iMinSockAddr = sizeof(struct sockaddr_in);
+    p->iSocketType = tcp ? SOCK_STREAM : SOCK_DGRAM;
+    p->iProtocol = tcp ? IPPROTO_TCP : IPPROTO_UDP;
+    p->iNetworkByteOrder = BIGENDIAN;
+    p->iSecurityScheme = SECURITY_PROTOCOL_NONE;
+    p->dwMessageSize = tcp ? 0 : 65507;                     /* the largest datagram the kernel stack sends (IPv4 limit) */
+    wcopy(p->szProtocol, tcp ? "Shizuku Tcpip [TCP/IP]" : "Shizuku Tcpip [UDP/IP]", WSAPROTOCOL_LEN + 1);
+}
+
+/* -> number of entries (0 or more), or -1 with *err set */
+static int enum_protocols(const INT *filter, WSAPROTOCOL_INFOW *buf, DWORD *len, int *err)
+{
+    static const int protos[2] = { IPPROTO_TCP, IPPROTO_UDP };
+    int pick[2], n = 0, i;
+    if (!len) { *err = WSAEFAULT; return -1; }
+    for (i = 0; i < 2; ++i) {
+        int want = !filter, k;
+        for (k = 0; filter && filter[k]; ++k) if (filter[k] == protos[i]) want = 1;
+        if (want) pick[n++] = i;
+    }
+    if (!buf || *len < n * sizeof *buf) { *len = (DWORD)(n * sizeof *buf); *err = WSAENOBUFS; return -1; }
+    for (i = 0; i < n; ++i) protocol_info(&buf[i], pick[i] == 0);
+    *len = (DWORD)(n * sizeof *buf);
+    return n;
+}
+
+DLLAPI int WSAAPI WSAEnumProtocolsW(LPINT lpiProtocols, LPWSAPROTOCOL_INFOW lpProtocolBuffer, LPDWORD lpdwBufferLength)
+{
+    int err = 0, n;
+    NEED_INIT(SOCKET_ERROR);
+    n = enum_protocols(lpiProtocols, lpProtocolBuffer, lpdwBufferLength, &err);
+    return n < 0 ? fail_code(err) : n;
+}
+
+DLLAPI int WSAAPI WSCEnumProtocols(LPINT lpiProtocols, LPWSAPROTOCOL_INFOW lpProtocolBuffer, LPDWORD lpdwBufferLength, LPINT lpErrno)
+{
+    int err = 0, n = enum_protocols(lpiProtocols, lpProtocolBuffer, lpdwBufferLength, &err);
+    if (n < 0) { if (lpErrno) *lpErrno = err; return SOCKET_ERROR; }
+    return n;
+}
+
+/* The provider's DLL is this module itself. */
+DLLAPI int WSAAPI WSCGetProviderPath(LPGUID lpProviderId, WCHAR *lpszProviderDllPath, LPINT lpProviderDllPathLen, LPINT lpErrno)
+{
+    WCHAR path[MAX_PATH];
+    HMODULE self = 0;
+    DWORD n;
+    if (!lpErrno) return SOCKET_ERROR;
+    if (!lpProviderId || !lpProviderDllPathLen) { *lpErrno = WSAEFAULT; return SOCKET_ERROR; }
+    if (memcmp(lpProviderId, &g_provider, sizeof(GUID))) { *lpErrno = WSAEINVAL; return SOCKET_ERROR; }
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)(void *)WSCGetProviderPath, &self) ||
+        !(n = GetModuleFileNameW(self, path, MAX_PATH))) { *lpErrno = WSAEINVAL; return SOCKET_ERROR; }
+    if (!lpszProviderDllPath || *lpProviderDllPathLen < (int)n + 1) { *lpProviderDllPathLen = (int)n + 1; *lpErrno = WSAEFAULT; return SOCKET_ERROR; }
+    memcpy(lpszProviderDllPath, path, (n + 1) * sizeof(WCHAR));
+    *lpProviderDllPathLen = (int)n + 1;
+    return 0;
+}
+
+DLLAPI INT WSAAPI WSAEnumNameSpaceProvidersW(LPDWORD lpdwBufferLength, LPWSANAMESPACE_INFOW lpnspBuffer)
+{
+    static const char ident[] = "Shizuku DNS (Kernel64 resolver)";
+    const DWORD need = sizeof(WSANAMESPACE_INFOW) + sizeof ident * sizeof(WCHAR);
+    NEED_INIT(SOCKET_ERROR);
+    if (!lpdwBufferLength) return fail_code(WSAEFAULT);
+    if (!lpnspBuffer || *lpdwBufferLength < need) { *lpdwBufferLength = need; return fail_code(WSAEFAULT); }
+    memset(lpnspBuffer, 0, sizeof *lpnspBuffer);
+    lpnspBuffer->NSProviderId = g_ns_provider;
+    lpnspBuffer->dwNameSpace = NS_DNS;
+    lpnspBuffer->fActive = TRUE;
+    lpnspBuffer->dwVersion = 1;
+    lpnspBuffer->lpszIdentifier = (LPWSTR)(lpnspBuffer + 1);
+    wcopy(lpnspBuffer->lpszIdentifier, ident, sizeof ident);
+    return 1;
+}
+
+/* ---------------------------------------------------------------- socket duplication and overlapped results */
+DLLAPI int WSAAPI WSADuplicateSocketW(SOCKET s, DWORD dwProcessId, LPWSAPROTOCOL_INFOW lpProtocolInfo)
+{
+    ULONG type = 0, n = 4;
+    HANDLE dup = 0;
+    NTSTATUS st;
+    NEED_INIT(SOCKET_ERROR);
+    if (!lpProtocolInfo) return fail_code(WSAEFAULT);
+    st = NtShzSockGetOpt(s, SOL_SOCKET, SO_TYPE, &type, &n);
+    if (st) return fail(st);
+    if (dwProcessId != GetCurrentProcessId()) return fail_code(WSAEINVAL);      /* no handle duplication into other processes */
+    if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)s, GetCurrentProcess(), &dup, 0, FALSE, DUPLICATE_SAME_ACCESS)) return fail_code(WSAENOBUFS);
+    protocol_info(lpProtocolInfo, type == SOCK_STREAM);
+    lpProtocolInfo->dwProviderReserved = (DWORD)(ULONG_PTR)dup;         /* WSASocketW(FROM_PROTOCOL_INFO) picks it up */
+    return 0;
+}
+
+DLLAPI BOOL WSAAPI WSAGetOverlappedResult(SOCKET s, LPWSAOVERLAPPED ov, LPDWORD transferred, BOOL wait, LPDWORD flags)
+{
+    ULONG type = 0, n = 4;
+    NTSTATUS st;
+    if (!g_started) { SetLastError(WSANOTINITIALISED); return FALSE; }
+    if (!ov || !transferred || !flags) { SetLastError(WSAEFAULT); return FALSE; }
+    st = NtShzSockGetOpt(s, SOL_SOCKET, SO_TYPE, &type, &n);
+    if (st) { SetLastError((DWORD)map_status(st)); return FALSE; }
+    while ((NTSTATUS)ov->Internal == (NTSTATUS)0x103) {     /* STATUS_PENDING */
+        if (!wait) { SetLastError(WSA_IO_INCOMPLETE); return FALSE; }
+        if (!ov->hEvent || WaitForSingleObject(ov->hEvent, INFINITE) == WAIT_FAILED) { SetLastError(WSA_INVALID_HANDLE); return FALSE; }
+    }
+    *transferred = (DWORD)ov->InternalHigh;
+    *flags = 0;
+    if ((NTSTATUS)ov->Internal) { SetLastError((DWORD)map_status((NTSTATUS)ov->Internal)); return FALSE; }
+    return TRUE;
+}
+
+/* ---------------------------------------------------------------- GetAddrInfoExW */
+static PADDRINFOEXW build_addrinfoex(const struct ai_plan *p, int *err)
+{
+    PADDRINFOEXW head = 0, *tail = &head;
+    unsigned a, k;
+    for (a = 0; a < p->naddr; ++a)
+        for (k = 0; k < p->nsock; ++k) {
+            size_t canon_len = p->canon && !head ? strlen(p->canon) + 1 : 0, i;
+            PADDRINFOEXW ai = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *ai + sizeof(struct sockaddr_in) + sizeof(GUID) + canon_len * sizeof(WCHAR));
+            if (!ai) { FreeAddrInfoExW(head); *err = WSA_NOT_ENOUGH_MEMORY; return 0; }
+            ai->ai_family = AF_INET;
+            ai->ai_socktype = p->socks[k].type;
+            ai->ai_protocol = p->socks[k].proto;
+            ai->ai_addrlen = sizeof(struct sockaddr_in);
+            ai->ai_addr = (struct sockaddr *)(ai + 1);
+            fill_sockaddr((struct sockaddr_in *)ai->ai_addr, p->addrs[a], p->port);
+            ai->ai_provider = (LPGUID)((char *)ai->ai_addr + sizeof(struct sockaddr_in));
+            *ai->ai_provider = g_ns_provider;
+            if (canon_len) {
+                WCHAR *cn = (WCHAR *)((char *)ai->ai_provider + sizeof(GUID));
+                for (i = 0; i < canon_len; ++i) cn[i] = (WCHAR)(unsigned char)p->canon[i];
+                ai->ai_canonname = cn;
+            }
+            *tail = ai;
+            tail = &ai->ai_next;
+        }
+    *err = 0;
+    return head;
+}
+
+DLLAPI void WSAAPI FreeAddrInfoExW(PADDRINFOEXW pAddrInfo)
+{
+    while (pAddrInfo) {
+        PADDRINFOEXW next = pAddrInfo->ai_next;
+        HeapFree(GetProcessHeap(), 0, pAddrInfo);
+        pAddrInfo = next;
+    }
+}
+
+typedef struct aix {                                        /* one asynchronous GetAddrInfoExW request */
+    struct aix *next;
+    WCHAR name[260], service[64];
+    int have_name, have_service, flags, family, socktype, protocol;
+    PADDRINFOEXW *result;
+    LPOVERLAPPED ov;
+    volatile LONG cancelled, done;
+} aix_t;
+static aix_t *g_aix;
+static SRWLOCK g_aix_lock = SRWLOCK_INIT;
+
+static int resolve_ex(const WCHAR *name, const WCHAR *service, int flags, int family, int socktype, int protocol, PADDRINFOEXW *out)
+{
+    char node[260], serv[64];
+    struct ai_plan p;
+    int nn = narrow(name, node, sizeof node), sn = narrow(service, serv, sizeof serv), rc;
+    if (nn < 0 || sn < 0) return WSAHOST_NOT_FOUND;         /* non-ASCII names would need IDNA */
+    rc = plan_addrinfo(nn && node[0] ? node : 0, sn ? serv : 0, flags, family, socktype, protocol, &p);
+    if (rc) return rc;
+    *out = build_addrinfoex(&p, &rc);
+    return rc;
+}
+
+static DWORD WINAPI aix_worker(LPVOID arg)
+{
+    aix_t *r = arg;
+    PADDRINFOEXW res = 0;
+    const int rc = resolve_ex(r->have_name ? r->name : 0, r->have_service ? r->service : 0, r->flags, r->family, r->socktype, r->protocol, &res);
+    HANDLE ev;
+    AcquireSRWLockExclusive(&g_aix_lock);
+    if (r->cancelled) { FreeAddrInfoExW(res); res = 0; }
+    *r->result = res;
+    r->ov->InternalHigh = 0;
+    r->ov->Internal = (ULONG_PTR)(r->cancelled ? WSA_E_CANCELLED : rc);   /* GetAddrInfoExOverlappedResult reads it */
+    ev = r->ov->hEvent;
+    r->done = 1;
+    {                                                       /* the request is finished: drop it from the list */
+        aix_t **pp;
+        for (pp = &g_aix; *pp; pp = &(*pp)->next) if (*pp == r) { *pp = r->next; break; }
+    }
+    ReleaseSRWLockExclusive(&g_aix_lock);
+    if (ev) SetEvent(ev);
+    HeapFree(GetProcessHeap(), 0, r);
+    return 0;
+}
+
+static void wcopyw(WCHAR *d, const WCHAR *s, size_t cap) { size_t i; for (i = 0; s[i] && i + 1 < cap; ++i) d[i] = s[i]; d[i] = 0; }
+
+DLLAPI int WSAAPI GetAddrInfoExW(PCWSTR pName, PCWSTR pServiceName, DWORD dwNameSpace, LPGUID lpNspId, const ADDRINFOEXW *hints,
+                                 PADDRINFOEXW *ppResult, PTIMEVAL timeout, LPOVERLAPPED lpOverlapped,
+                                 LPLOOKUPSERVICE_COMPLETION_ROUTINE lpCompletionRoutine, LPHANDLE lpNameHandle)
+{
+    const int flags = hints ? hints->ai_flags : 0, family = hints ? hints->ai_family : 0;
+    const int socktype = hints ? hints->ai_socktype : 0, protocol = hints ? hints->ai_protocol : 0;
+    int rc;
+    if (!g_started) { SetLastError(WSANOTINITIALISED); return WSANOTINITIALISED; }
+    if (!ppResult) { SetLastError(WSAEINVAL); return WSAEINVAL; }
+    *ppResult = 0;
+    if (dwNameSpace != NS_ALL && dwNameSpace != NS_DNS) { SetLastError(WSAEINVAL); return WSAEINVAL; }    /* no provider for it */
+    if (lpNspId && memcmp(lpNspId, &g_ns_provider, sizeof(GUID))) { SetLastError(WSAEINVAL); return WSAEINVAL; }
+    if (hints && (hints->ai_addrlen || hints->ai_canonname || hints->ai_addr || hints->ai_blob || hints->ai_bloblen || hints->ai_provider ||
+                  hints->ai_next)) { SetLastError(WSAEINVAL); return WSAEINVAL; }
+    if (lpCompletionRoutine) { SetLastError(WSAEOPNOTSUPP); return WSAEOPNOTSUPP; }    /* would need an APC to the caller */
+    if (!lpOverlapped) {
+        if (timeout || lpNameHandle) { SetLastError(WSAEINVAL); return WSAEINVAL; }     /* both only apply to asynchronous calls */
+        rc = resolve_ex(pName, pServiceName, flags, family, socktype, protocol, ppResult);
+        if (rc) SetLastError((DWORD)rc);
+        return rc;
+    }
+    {
+        aix_t *r = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *r);
+        HANDLE th;
+        if (!r) { SetLastError(WSA_NOT_ENOUGH_MEMORY); return WSA_NOT_ENOUGH_MEMORY; }
+        if (pName) { wcopyw(r->name, pName, 260); r->have_name = 1; }
+        if (pServiceName) { wcopyw(r->service, pServiceName, 64); r->have_service = 1; }
+        r->flags = flags; r->family = family; r->socktype = socktype; r->protocol = protocol;
+        r->result = ppResult;
+        r->ov = lpOverlapped;
+        lpOverlapped->Internal = (ULONG_PTR)WSA_IO_PENDING;
+        AcquireSRWLockExclusive(&g_aix_lock);
+        r->next = g_aix;
+        g_aix = r;
+        ReleaseSRWLockExclusive(&g_aix_lock);
+        if (lpNameHandle) *lpNameHandle = (HANDLE)r;
+        th = CreateThread(0, 0, aix_worker, r, 0, 0);
+        if (!th) {
+            AcquireSRWLockExclusive(&g_aix_lock);
+            { aix_t **pp; for (pp = &g_aix; *pp; pp = &(*pp)->next) if (*pp == r) { *pp = r->next; break; } }
+            ReleaseSRWLockExclusive(&g_aix_lock);
+            HeapFree(GetProcessHeap(), 0, r);
+            if (lpNameHandle) *lpNameHandle = 0;
+            SetLastError(WSA_NOT_ENOUGH_MEMORY);
+            return WSA_NOT_ENOUGH_MEMORY;
+        }
+        CloseHandle(th);
+        SetLastError(WSA_IO_PENDING);
+        return WSA_IO_PENDING;
+    }
+}
+
+DLLAPI int WSAAPI GetAddrInfoExCancel(LPHANDLE lpHandle)
+{
+    aix_t *r;
+    if (!lpHandle) return WSA_INVALID_HANDLE;
+    AcquireSRWLockExclusive(&g_aix_lock);
+    for (r = g_aix; r && (HANDLE)r != *lpHandle; r = r->next) { }
+    if (r) InterlockedExchange(&r->cancelled, 1);           /* the worker frees the result and reports WSA_E_CANCELLED */
+    ReleaseSRWLockExclusive(&g_aix_lock);
+    return r ? NO_ERROR : WSA_INVALID_HANDLE;               /* unknown or already completed */
+}
+
+DLLAPI INT WSAAPI GetAddrInfoExOverlappedResult(LPOVERLAPPED lpOverlapped)
+{
+    if (!lpOverlapped) return WSAEINVAL;
+    return (INT)lpOverlapped->Internal;                     /* WSA_IO_PENDING while running, then the result code */
+}
+
+/* ---------------------------------------------------------------- RnR: WSALookupService* and WSASetService */
+/* SVCID_HOSTNAME {0002a800-...}, SVCID_INET_HOSTADDRBYNAME {0002a803-...}, SVCID_INET_HOSTADDRBYINETSTRING {0002a801-...} */
+static int svcid_is(const GUID *g, unsigned short low)
+{
+    static const BYTE tail[8] = { 0xC0, 0, 0, 0, 0, 0, 0, 0x46 };
+    return g->Data1 == 0x0002a800u + (low - 0xa800) && g->Data2 == 0 && g->Data3 == 0 && !memcmp(g->Data4, tail, 8);
+}
+
+typedef struct lookup {
+    struct lookup *next;
+    DWORD flags;
+    GUID cls;
+    char name[256];
+    ULONG addrs[8];
+    unsigned naddr;
+    int delivered;
+} lookup_t;
+static lookup_t *g_lookups;
+static SRWLOCK g_lookup_lock = SRWLOCK_INIT;
+
+DLLAPI INT WSAAPI WSALookupServiceBeginW(LPWSAQUERYSETW q, DWORD flags, LPHANDLE lphLookup)
+{
+    lookup_t *l;
+    char name[256];
+    int rc;
+    NEED_INIT(SOCKET_ERROR);
+    if (!q || !lphLookup || q->dwSize < sizeof *q) return fail_code(WSAEFAULT);
+    if (!q->lpServiceClassId) return fail_code(WSAEINVAL);
+    if (q->dwNameSpace != NS_ALL && q->dwNameSpace != NS_DNS) return fail_code(WSASERVICE_NOT_FOUND);   /* no provider for it */
+    if (q->lpNSProviderId && memcmp(q->lpNSProviderId, &g_ns_provider, sizeof(GUID))) return fail_code(WSASERVICE_NOT_FOUND);
+    if (!svcid_is(q->lpServiceClassId, 0xa800) && !svcid_is(q->lpServiceClassId, 0xa803) && !svcid_is(q->lpServiceClassId, 0xa801))
+        return fail_code(WSASERVICE_NOT_FOUND);             /* the DNS namespace knows host names only */
+    if (q->lpszServiceInstanceName) {
+        if (narrow(q->lpszServiceInstanceName, name, sizeof name) < 0) return fail_code(WSAHOST_NOT_FOUND);
+    } else if (gethostname(name, sizeof name)) {
+        return SOCKET_ERROR;
+    }
+    l = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *l);
+    if (!l) return fail_code(WSA_NOT_ENOUGH_MEMORY);
+    rc = resolve_node(name, svcid_is(q->lpServiceClassId, 0xa801) ? AI_NUMERICHOST : 0, l->addrs, &l->naddr);
+    if (rc) { HeapFree(GetProcessHeap(), 0, l); return fail_code(rc); }
+    l->flags = flags;
+    l->cls = *q->lpServiceClassId;
+    memcpy(l->name, name, strlen(name) + 1);
+    AcquireSRWLockExclusive(&g_lookup_lock);
+    l->next = g_lookups;
+    g_lookups = l;
+    ReleaseSRWLockExclusive(&g_lookup_lock);
+    *lphLookup = (HANDLE)l;
+    return 0;
+}
+
+static lookup_t *lookup_find(HANDLE h)
+{
+    lookup_t *l;
+    for (l = g_lookups; l && (HANDLE)l != h; l = l->next) { }
+    return l;
+}
+
+DLLAPI INT WSAAPI WSALookupServiceNextW(HANDLE hLookup, DWORD dwControlFlags, LPDWORD lpdwBufferLength, LPWSAQUERYSETW r)
+{
+    lookup_t *l;
+    DWORD need, flags, off;
+    size_t nlen;
+    unsigned i;
+    NEED_INIT(SOCKET_ERROR);
+    if (!lpdwBufferLength) return fail_code(WSAEFAULT);
+    AcquireSRWLockExclusive(&g_lookup_lock);
+    l = lookup_find(hLookup);
+    if (!l) { ReleaseSRWLockExclusive(&g_lookup_lock); return fail_code(WSA_INVALID_HANDLE); }
+    if (l->delivered) { ReleaseSRWLockExclusive(&g_lookup_lock); return fail_code(WSA_E_NO_MORE); }
+    flags = l->flags | dwControlFlags;
+    nlen = strlen(l->name) + 1;
+    need = sizeof *r;
+    if (flags & LUP_RETURN_NAME) need += (DWORD)(nlen * sizeof(WCHAR));
+    if (flags & LUP_RETURN_TYPE) need += sizeof(GUID);
+    if (flags & LUP_RETURN_ADDR) need += l->naddr * (DWORD)(sizeof(CSADDR_INFO) + 2 * sizeof(struct sockaddr_in));
+    if (flags & LUP_RETURN_BLOB) need += sizeof(BLOB) + 32 + 8 + (l->naddr + 1) * 8 + l->naddr * 4 + (DWORD)nlen + 8;
+    need = (need + 7) & ~7u;
+    if (!r || *lpdwBufferLength < need) { ReleaseSRWLockExclusive(&g_lookup_lock); *lpdwBufferLength = need; return fail_code(WSAEFAULT); }
+    memset(r, 0, need);
+    r->dwSize = sizeof *r;
+    r->dwNameSpace = NS_DNS;
+    off = sizeof *r;
+    if (flags & LUP_RETURN_NAME) {
+        r->lpszServiceInstanceName = (LPWSTR)((char *)r + off);
+        for (i = 0; i < nlen; ++i) r->lpszServiceInstanceName[i] = (WCHAR)(unsigned char)l->name[i];
+        off += (DWORD)(nlen * sizeof(WCHAR));
+    }
+    off = (off + 7) & ~7u;
+    if (flags & LUP_RETURN_TYPE) {
+        r->lpServiceClassId = (LPGUID)((char *)r + off);
+        *r->lpServiceClassId = l->cls;
+        off += sizeof(GUID);
+    }
+    if ((flags & LUP_RETURN_ADDR) && l->naddr) {
+        CSADDR_INFO *cs = (CSADDR_INFO *)((char *)r + off);
+        struct sockaddr_in *sa = (struct sockaddr_in *)(cs + l->naddr);
+        r->lpcsaBuffer = cs;
+        r->dwNumberOfCsAddrs = l->naddr;
+        for (i = 0; i < l->naddr; ++i) {
+            fill_sockaddr(&sa[2 * i], INADDR_ANY, 0);       /* local address: any */
+            fill_sockaddr(&sa[2 * i + 1], l->addrs[i], 0);  /* remote address: the host's */
+            cs[i].LocalAddr.lpSockaddr = (LPSOCKADDR)&sa[2 * i];
+            cs[i].LocalAddr.iSockaddrLength = sizeof(struct sockaddr_in);
+            cs[i].RemoteAddr.lpSockaddr = (LPSOCKADDR)&sa[2 * i + 1];
+            cs[i].RemoteAddr.iSockaddrLength = sizeof(struct sockaddr_in);
+            cs[i].iSocketType = SOCK_STREAM;
+            cs[i].iProtocol = IPPROTO_TCP;
+        }
+        off += l->naddr * (DWORD)(sizeof(CSADDR_INFO) + 2 * sizeof(struct sockaddr_in));
+    }
+    if (flags & LUP_RETURN_BLOB) {                          /* a hostent with offsets relative to the blob, as RnR returns it */
+        BLOB *b = (BLOB *)((char *)r + off);
+        BYTE *h;
+        ULONG_PTR *list;
+        DWORD boff;
+        off += sizeof(BLOB);
+        off = (off + 7) & ~7u;
+        h = (BYTE *)r + off;
+        r->lpBlob = b;
+        b->pBlobData = h;
+        boff = 32;                                          /* struct hostent (x64): name, aliases, type, length, addr list */
+        *(ULONG_PTR *)(h + 8) = boff;                       /* h_aliases -> empty list */
+        *(ULONG_PTR *)(h + boff) = 0;
+        boff += 8;
+        *(short *)(h + 16) = AF_INET;
+        *(short *)(h + 18) = 4;
+        *(ULONG_PTR *)(h + 24) = boff;                      /* h_addr_list */
+        list = (ULONG_PTR *)(h + boff);
+        boff += (l->naddr + 1) * 8;
+        for (i = 0; i < l->naddr; ++i) { list[i] = boff; memcpy(h + boff, &l->addrs[i], 4); boff += 4; }
+        list[l->naddr] = 0;
+        *(ULONG_PTR *)h = boff;                             /* h_name */
+        memcpy(h + boff, l->name, nlen);
+        boff += (DWORD)nlen;
+        b->cbSize = boff;
+    }
+    l->delivered = 1;
+    ReleaseSRWLockExclusive(&g_lookup_lock);
+    *lpdwBufferLength = need;
+    return 0;
+}
+
+DLLAPI INT WSAAPI WSALookupServiceEnd(HANDLE hLookup)
+{
+    lookup_t **pp, *l = 0;
+    NEED_INIT(SOCKET_ERROR);
+    AcquireSRWLockExclusive(&g_lookup_lock);
+    for (pp = &g_lookups; *pp; pp = &(*pp)->next)
+        if ((HANDLE)*pp == hLookup) { l = *pp; *pp = l->next; break; }
+    ReleaseSRWLockExclusive(&g_lookup_lock);
+    if (!l) return fail_code(WSA_INVALID_HANDLE);
+    HeapFree(GetProcessHeap(), 0, l);
+    return 0;
+}
+
+DLLAPI INT WSAAPI WSASetServiceW(LPWSAQUERYSETW lpqsRegInfo, WSAESETSERVICEOP essoperation, DWORD dwControlFlags)
+{
+    (void)dwControlFlags;
+    NEED_INIT(SOCKET_ERROR);
+    if (!lpqsRegInfo || lpqsRegInfo->dwSize < sizeof *lpqsRegInfo) return fail_code(WSAEFAULT);
+    if (essoperation != RNRSERVICE_REGISTER && essoperation != RNRSERVICE_DEREGISTER && essoperation != RNRSERVICE_DELETE)
+        return fail_code(WSAEINVAL);
+    if (lpqsRegInfo->dwNameSpace != NS_ALL && lpqsRegInfo->dwNameSpace != NS_DNS) return fail_code(WSAEINVAL);   /* no provider */
+    return fail_code(WSAEOPNOTSUPP);                        /* the DNS namespace answers queries; it cannot register services */
 }

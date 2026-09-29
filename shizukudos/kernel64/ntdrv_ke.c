@@ -469,9 +469,10 @@ void NTAPI ExFreePoolWithTag(void *p, uint32_t tag) { (void)tag; kfree(p); }
 void NTAPI ExInitializeSListHead(void *h) { memset(h, 0, 16); }
 void NTAPI KeInitializeDeviceQueue(void *q) { memset(q, 0, 0x28); }
 
-void ntdrv_ke_init(void)
+void ntdrv_ke_init(void)                        /* idempotent: the first driver load (kernel or NtLoadDriver) starts it */
 {
     thread_t *w, *tt;
+    if (ke_ready) return;
     sem_init(&dpc_sem, 0);
     g_irql = PASSIVE_LEVEL;
     w = thread_create("ntdrv-dpc", dpc_worker, 0);

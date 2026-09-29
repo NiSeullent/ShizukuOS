@@ -1,0 +1,16 @@
+Vendored, unmodified files from virglrenderer 1.0.0 (MIT license, see COPYING in this directory).
+
+Source archive : http://archive.ubuntu.com/ubuntu/pool/main/v/virglrenderer/virglrenderer_1.0.0.orig.tar.bz2
+                 (the upstream 1.0.0 release as packaged by Debian/Ubuntu; the same version as the host's libvirglrenderer1 1.0.0-1ubuntu2)
+Archive sha256 : b27b9b84c3a9ab62f87152e624914f150c6e582d0798b06d80d91e4a8aab3705
+
+File                          sha256                                                            path in the archive
+virgl_protocol.h              bf5c4bade0a550cde8b4fb6e0139f15abec19df57151cb65d902d06be9b15dfe  virglrenderer-1.0.0/src/virgl_protocol.h
+virgl_hw.h                    ff5489b1803c109e6a39ec018eba8e8bac8282cbc6d712ed7eb65288d1fceb46  virglrenderer-1.0.0/src/virgl_hw.h
+virglrenderer.h               9a40026e8317d5610abfb8743f6302f8434480183ea53b425d7f08dc0fc437c1  virglrenderer-1.0.0/src/virglrenderer.h
+COPYING                       3b32caf16e2402c2aff2b716858713f3e1feded85c25e71bf829816ee5009402  virglrenderer-1.0.0/COPYING
+
+Use: HOST TESTS ONLY. kernel64/host/test_virgl_enc.c compares the independently written constants and packet layout of
+win64/include/shzvirgl.h with virgl_protocol.h / virgl_hw.h; kernel64/host/test_virgl_exec.c uses virglrenderer.h to
+call the host library. Nothing here is compiled into the guest kernel or the Win64 DLLs.
+tests/test_virtio_host.py re-hashes these files and fails if they no longer match the table above.

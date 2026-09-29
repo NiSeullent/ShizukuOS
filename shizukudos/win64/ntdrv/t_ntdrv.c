@@ -13,6 +13,7 @@
 
 /* Two services the driver host adds (ntsys.h SYSCALL_LIST_NTDRV); declared here so nt.h stays untouched. */
 NTSTATUS NTAPI NtLoadDriver(SHZ_UNICODE_STRING *RegistryPath);
+NTSTATUS NTAPI NtQuerySystemInformation(ULONG, PVOID, ULONG, PULONG);
 NTSTATUS NTAPI NtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext,
                                      SHZ_IO_STATUS_BLOCK *IoStatusBlock, ULONG IoControlCode,
                                      PVOID InputBuffer, ULONG InputBufferLength,
@@ -25,6 +26,10 @@ NTSTATUS NTAPI NtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event, PVOID ApcR
 #ifndef FILE_OPEN
 #define FILE_OPEN 1u
 #endif
+
+#define STATUS_IMAGE_ALREADY_LOADED_ 0xC000010Eu
+/* NtQuerySystemInformation class 0x101 row (kernel64/sysx.c; the layout T_GUI_STATUS reads). */
+struct pci_row { BYTE bus, dev, fn, cls, sub, pif, irq, pad; WORD vendor, device; DWORD pad2; char driver[24]; };
 
 static int g_fail;
 #define CHK(cond, name) do { if (cond) printf("PASS: %s\n", (name)); else { ++g_fail; printf("FAIL: %s\n", (name)); } } while (0)
@@ -86,6 +91,43 @@ int main(void)
         CHK(st == 0, "NtDeviceIoControlFile(IOCTL_SHZ_ECHO)");
         CHK(iosb.Information == sizeof in - 1 && !memcmp(in, out, sizeof in - 1), "device echoed the input buffer");
         NtClose(h);
+    }
+
+    /* 5) one image per service: loading a running service again is refused, as on Windows */
+    winit(&us, SVCPATH);
+    st = NtLoadDriver(&us);
+    CHK((ULONG)st == STATUS_IMAGE_ALREADY_LOADED_, "NtLoadDriver of a running service returns STATUS_IMAGE_ALREADY_LOADED");
+
+    /* 6) a PCI driver through the service control manager's ImagePath rules (REG_EXPAND_SZ %SystemRoot%), then the
+     *    kernel's PCI inventory must show the hosted .sys as the function's driver when the edu device is present */
+    {
+        static const WCHAR PIMG[] = L"%SystemRoot%\\DRIVERS\\PCIEDU.SYS";
+        static WCHAR PSVC[] = L"\\Registry\\Machine\\SYSTEM\\CurrentControlSet\\Services\\shzpci";
+        static struct pci_row rows[32];
+        ULONG n = 0, k;
+        int edu = -1;
+        e = RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\shzpci", 0, 0, 0,
+                            KEY_ALL_ACCESS, 0, &svc, &disp);
+        CHK(e == ERROR_SUCCESS, "create Services\\shzpci key");
+        if (e == ERROR_SUCCESS) {
+            RegSetValueExW(svc, L"ImagePath", 0, REG_EXPAND_SZ, (const BYTE *)PIMG, sizeof PIMG);
+            RegSetValueExW(svc, L"Type", 0, REG_DWORD, (const BYTE *)&type, 4);
+            RegCloseKey(svc);
+        }
+        winit(&us, PSVC);
+        st = NtLoadDriver(&us);
+        CHK(st == 0, "NtLoadDriver(shzpci) via %SystemRoot% ImagePath");
+        st = NtQuerySystemInformation(0x101, rows, sizeof rows, &n);
+        CHK(st == 0, "NtQuerySystemInformation(0x101) lists the PCI functions");
+        for (k = 0; st == 0 && k < n && k < 32; ++k)
+            if (rows[k].vendor == 0x1234 && rows[k].device == 0x11e8) edu = (int)k;
+        if (edu < 0) {
+            printf("SKIP: no QEMU edu device in this machine; PCI ownership not checked\n");
+        } else {
+            printf("t_ntdrv: edu %02x:%02x.%x driver=%s\n", rows[edu].bus, rows[edu].dev, rows[edu].fn,
+                   rows[edu].driver[0] ? rows[edu].driver : "-");
+            CHK(!strcmp(rows[edu].driver, "ntdrv:shzpci"), "kernel PCI inventory shows the edu function driven by ntdrv:shzpci");
+        }
     }
 
     printf("t_ntdrv: %s\n", g_fail ? "FAIL" : "PASS");

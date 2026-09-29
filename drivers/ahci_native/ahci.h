@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-only -- independent AHCI read-only core. */
+/* SPDX-License-Identifier: GPL-2.0-only -- independent AHCI core: read, and opt-in write + cache flush. */
 #ifndef NTW_AHCI_NATIVE_H
 #define NTW_AHCI_NATIVE_H
 #include <stddef.h>
@@ -43,10 +43,14 @@ struct ahci_config {
     uint32_t port;            /* 0..31 or AHCI_AUTO_PORT */
     uint32_t command_timeout_us; /* 1..30,000,000; engine stop gets 500 ms */
     uint32_t exclusive;       /* must be 1: whole HBA belongs to this caller */
+    uint32_t allow_write;     /* 0: read-only (writes/flushes AHCI_UNSUPPORTED); 1: WRITE DMA EXT + FLUSH CACHE EXT */
 };
+#define AHCI_FEATURE_FLUSH_EXT 1u   /* IDENTIFY word 83 bit 13: FLUSH CACHE EXT supported */
+#define AHCI_FEATURE_WRITE_CACHE 2u /* IDENTIFY word 85 bit 5: volatile write cache enabled */
 struct ahci_identity {
     uint64_t sectors;
     uint32_t sector_bytes;
+    uint32_t features;        /* AHCI_FEATURE_* */
     char model[41];
 };
 /* Zero initialize. No copying, concurrent calls, IRQ reentry or direct field
@@ -56,7 +60,7 @@ struct ahci_device {
     struct ahci_dma dma;
     struct ahci_identity identity;
     uint32_t state, cap, ports, version, port, port_base, abar_bytes;
-    uint32_t timeout_us, dma_owned, dma_published, ownership_acquired;
+    uint32_t timeout_us, dma_owned, dma_published, ownership_acquired, writable;
     uint32_t last_is, last_tfd, last_serr;
     int last_error;
 };
@@ -66,6 +70,13 @@ struct ahci_device {
 int ahci_open(struct ahci_device *, const struct ahci_ops *, const struct ahci_config *);
 /* Only one 512-byte sector is supported. Output changes only after completion. */
 int ahci_read_sector(struct ahci_device *, uint64_t lba, void *output, size_t bytes);
+/* Exactly one 512-byte sector (bytes must be 512). Needs allow_write=1 at open, else AHCI_UNSUPPORTED with no
+ * device access. Success means the device reported completion; data may sit in a volatile write cache until
+ * ahci_flush(). A failed write leaves the sector's content undefined (as on any interrupted ATA write). */
+int ahci_write_sector(struct ahci_device *, uint64_t lba, const void *input, size_t bytes);
+/* FLUSH CACHE EXT: returns after the device reports its write cache written to media. AHCI_UNSUPPORTED without
+ * allow_write or when IDENTIFY does not advertise the command (no device access in either case). */
+int ahci_flush(struct ahci_device *);
 /* On AHCI_QUARANTINED, DMA remains owned: retain context and call close again
  * after external recovery. Never release/reset the allocation behind this API. */
 int ahci_close(struct ahci_device *);

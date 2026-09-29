@@ -55,6 +55,8 @@ def evaluate(serial, ev):
                    (e(15) & 0xffffffff) == 1, f"slot15={e(15):#x}"))
     c.append(check("edu PCI driver found the device and read identification 0x010000ed",
                    (e(26) >> 32) == 1 and e(25) == 0x010000ed, f"found={e(26) >> 32} ident={e(25):#x}"))
+    c.append(check("hosted driver recorded as the edu function's owner (pci_claim ntdrv:shzpci)",
+                   bool(re.search(r"K64 ntdrv: shzpci owns PCI [0-9a-f]+:[0-9a-f]+\.[0-9a-f]+ \(1234:11e8\)", serial))))
     c.append(check("edu interrupt connected over IoConnectInterrupt and the ISR fired",
                    (e(26) & 0xffffffff) >= 1, f"isr={e(26) & 0xffffffff}"))
     c.append(check("kernel driver-host self-test overall PASS", (e(27) >> 32) == 1, f"slot27={e(27):#x}"))
