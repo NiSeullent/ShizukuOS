@@ -84,6 +84,44 @@ static void batch_check(int i, unsigned long long base_lba, unsigned tag)
     CHECK(st == 0 && !memcmp(buf, buf2, 16 * 4096), "%s: batch read-back of the 16 writes (%x)", dev[i].name, (unsigned)st);
 }
 
+/* Three threads read disjoint 1 MiB ranges of one device at the same time; each must see the CRCs a single thread saw. */
+typedef struct { int dev; unsigned long long lba; unsigned crc[4]; unsigned char *buf; int bad; } conc_t;
+static DWORD WINAPI conc_worker(LPVOID arg)
+{
+    conc_t *c = arg;
+    const unsigned ss = dev[c->dev].sector_size, n = (1u << 20) / ss;
+    unsigned round, k;
+    for (round = 0; round < 3; ++round)
+        for (k = 0; k < 4; ++k) {
+            if (NtShzBlkRead((ULONG)c->dev, c->lba + (unsigned long long)k * n, n, c->buf)) { ++c->bad; continue; }
+            if (crc32_update(0, c->buf, 1u << 20) != c->crc[k]) ++c->bad;
+        }
+    return 0;
+}
+
+static void concurrency_check(int i)
+{
+    static conc_t c[3];
+    HANDLE th[3];
+    const unsigned ss = dev[i].sector_size, n = (1u << 20) / ss;
+    unsigned k, t, bad = 0;
+    for (t = 0; t < 3; ++t) {
+        c[t].dev = i;
+        c[t].lba = (unsigned long long)(t * 4) * n;
+        c[t].buf = buf2 + (size_t)t * (1u << 20);
+        c[t].bad = 0;
+        for (k = 0; k < 4; ++k) crc_range(i, c[t].lba + (unsigned long long)k * n, n, &c[t].crc[k]);
+    }
+    for (t = 0; t < 3; ++t) th[t] = CreateThread(0, 65536, conc_worker, &c[t], 0, 0);
+    for (t = 0; t < 3; ++t) {
+        if (!th[t]) { ++bad; continue; }
+        WaitForSingleObject(th[t], 50000);
+        CloseHandle(th[t]);
+        bad += (unsigned)c[t].bad;
+    }
+    CHECK(bad == 0, "%s: 3 threads x 12 concurrent 1 MiB reads return the single-thread data (%u mismatches)", dev[i].name, bad);
+}
+
 static void nvme_extras(int i, unsigned long long area)
 {
     const unsigned ss = dev[i].sector_size;
@@ -212,7 +250,15 @@ int main(void)
         unsigned long long area;
         int j;
         if (!is_storage_driver(d) || (d->flags & BLKF_PARTITION)) continue;
-        if (d->flags & (BLKF_READONLY | BLKF_MOUNTED)) { printf("%s: read-only or mounted, no write tests\n", d->name); continue; }
+        if (d->queue_depth > 1) concurrency_check(i);
+        if (d->flags & BLKF_MOUNTED) {                   /* a file system owns it: raw writes must be refused */
+            memset(buf, 0, 4096);
+            st = NtShzBlkWrite((ULONG)i, 0, 1, buf);
+            CHECK(st == (NTSTATUS)0xC0000022, "%s: raw write to the mounted device refused with STATUS_ACCESS_DENIED (%x)", d->name, (unsigned)st);
+            printf("BLK-MOUNTED %s %x\n", d->name, (unsigned)st);
+            continue;
+        }
+        if (d->flags & BLKF_READONLY) { printf("%s: read-only, no write tests\n", d->name); continue; }
         area = ((d->sectors * ss / 4 * 3) >> 20 << 20) / ss;
         write_check(i, area, (256u << 10) / ss, tag ^ 0x11, "256 KiB");
         write_check(i, area + (4ull << 20) / ss + 1, 3, tag ^ 0x66, "odd-sized");

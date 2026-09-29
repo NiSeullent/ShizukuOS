@@ -3,7 +3,8 @@
 """Boot standalone Kernel64 with NVMe and SD cards attached and verify the storage path from the host side.
 
 Profile: the standalone profile of run_k64_standalone.py (QEMU -kernel stub, no Supervisor, TCG or KVM) plus
-  -device nvme (one controller, two namespaces: 256 MiB with 512-byte LBAs + GPT, 64 MiB with 4096-byte LBAs + MBR/EBR)
+  -device nvme with three namespaces: 256 MiB with 512-byte LBAs + GPT, 64 MiB with 4096-byte LBAs + MBR/EBR, and
+   256 MiB holding the FAT32 volume of run_k64_disk.py (so D:\ is mounted from NVMe and T_DISK.EXE checks it)
   -device sdhci-pci + sd-card twice (128 MiB SDSC card with an MBR, 4 GiB SDHC card with a GPT, sparse)
 Every image is generated here from fixed seeds (tests/blk_images.py) and attached writable (no snapshot), NVMe with
 discard=unmap. The guest programs T_BLK_PERF.EXE and T_BLK_RAW.EXE (win64/tests/t_blk_*.c) run as part of the normal
@@ -36,6 +37,7 @@ import shzlib  # noqa: E402
 from shzlib import BUILD  # noqa: E402
 import run_k64_standalone as base  # noqa: E402
 import blk_images  # noqa: E402
+import run_k64_disk as fatdisk  # noqa: E402
 
 K64S = BUILD / "kernel64s"
 WIN64 = BUILD / "win64"
@@ -49,12 +51,37 @@ DEVICES = {
     "nvme0n2": {"size": 64 * MiB, "ss": 4096, "seed": 102,
                 "mbr": ([(256, 2048, 0x83, True), (2304, 2048, 0xDA, False)], (4352, 4096, [(16, 1024, 0x83), (16, 1024, 0x83)]))},
     "mmcblk0": {"size": 128 * MiB, "ss": 512, "seed": 103, "mbr": ([(2048, 32768, 0x83, False), (34816, 65536, 0xDA, False)], None)},
+    "nvme0n3": {"size": 256 * MiB, "ss": 512, "fat": True},
     "mmcblk1": {"size": 4 * GiB, "ss": 512, "seed": 104, "sparse": [(0, 16 * MiB), (1 * GiB, 4 * MiB), (4 * GiB - 2 * MiB, 2 * MiB)],
                 "gpt": [(2048, 131072, "SD-DATA"), (2097152, 1048576, "SD-BIG")]},
 }
+NVME_NS = ("nvme0n1", "nvme0n2", "nvme0n3")
+
+
+def fat_volume(path, src):
+    """The FAT32 superfloppy of run_k64_disk.py (same files, same fixed timestamps); returns its manifest."""
+    src.mkdir(parents=True, exist_ok=True)
+    files, dirs, manifest = [], ["TESTS", "TESTS/Sub Directory"], {}
+
+    def add(rel, data):
+        host = src / rel.replace("/", "__").replace(" ", "_")
+        host.write_bytes(data)
+        files.append((host, rel))
+        manifest[rel] = data
+
+    add("TESTS/hello.txt", b"hello from the FAT32 volume\r\n")
+    add("TESTS/empty.txt", b"")
+    add("TESTS/pattern_1m.bin", fatdisk.pattern(11, (1 << 20) + 17))
+    add("TESTS/A Long Mixed-Case File Name.dat", fatdisk.pattern(12, 4096 * 3 + 5))
+    add("TESTS/big_4m.bin", fatdisk.pattern(13, (4 << 20) + 13))
+    add("TESTS/Sub Directory/nested file.txt", b"nested content on D:\r\n")
+    fatdisk.make_image(path, 256, 8, files, dirs)
+    return manifest
 
 
 def expected_partitions(name, d):
+    if "fat" in d:
+        return []
     if "gpt" in d:
         return [(s, n, 2, 0xEE, nm) for s, n, nm in d["gpt"]]
     prim, ext = d["mbr"]
@@ -62,7 +89,9 @@ def expected_partitions(name, d):
 
 
 def build_image(path, d):
-    """Writes the image (sparse where declared) and returns it."""
+    """Writes the image (sparse where declared); a FAT volume image returns its file manifest."""
+    if d.get("fat"):
+        return fat_volume(path, path.parent / "fat_src")
     path.unlink(missing_ok=True)
     with open(path, "wb") as fh:
         fh.truncate(d["size"])
@@ -226,11 +255,14 @@ def device_checks(serial):
         extra = [n for n in got if n.startswith(name + "p") and n not in {f"{name}p{k + 1}" for k in range(len(expected_partitions(name, d)))}]
         if extra:
             bad.append(f"{name}: unexpected partitions {extra}")
-    c.append(base.check("guest enumerates nvme0n1 (512 B) / nvme0n2 (4 KiB LBA) / mmcblk0 (SDSC) / mmcblk1 (SDHC) with their exact "
-                        "sizes and every GPT, MBR and EBR partition the host wrote", not bad, "; ".join(bad[:8]) or f"{len(got)} devices"))
-    nv = [got.get(n, {}) for n in ("nvme0n1", "nvme0n2")]
+    c.append(base.check("guest enumerates nvme0n1 (512 B) / nvme0n2 (4 KiB LBA) / nvme0n3 / mmcblk0 (SDSC) / mmcblk1 (SDHC) with "
+                        "their exact sizes and every GPT, MBR and EBR partition the host wrote", not bad, "; ".join(bad[:8]) or f"{len(got)} devices"))
+    nv = [got.get(n, {}) for n in NVME_NS]
     c.append(base.check("NVMe: completion by MSI-X, queue depth 32", all(x.get("irq") == "msix" and x.get("qd") == 32 for x in nv),
                         str([(x.get("irq"), x.get("qd")) for x in nv])))
+    c.append(base.check("nvme0n3 carries the mounted D: volume (BLK_F_MOUNTED) and a raw write to it is refused with "
+                        "STATUS_ACCESS_DENIED", got.get("nvme0n3", {}).get("flags", 0) & 8 != 0 and
+                        bool(line(serial, r"BLK-MOUNTED nvme0n3 c0000022$")), str(got.get("nvme0n3", {}).get("flags"))))
     return c, got
 
 
@@ -269,6 +301,9 @@ def driver_checks(serial):
     sd = line(serial, r"K64 sdhci(\d): .*card (SDSC|SDHC/SDXC) .* (\d+) sectors \(\d+ MiB\), (byte|block) addressing, 4-bit bus")
     c.append(base.check("SDHCI: 128 MiB SDSC card (CSD 1.0, byte addressing) and 4 GiB SDHC card (CSD 2.0, block addressing), 4-bit bus",
                         sorted((k, int(n), a) for _, k, n, a in sd) == [("SDHC/SDXC", 8388608, "block"), ("SDSC", 262144, "byte")], str(sd)))
+    conc = line(serial, r"PASS: (\S+): 3 threads x 12 concurrent 1 MiB reads return the single-thread data")
+    c.append(base.check("NVMe: three threads reading at once get the data one thread got (every namespace)",
+                        set(conc) >= set(NVME_NS), str(conc)))
     c.append(base.check("T_BLK_RAW.EXE and T_BLK_PERF.EXE ran (no SKIP) and exited 0",
                         bool(line(serial, r"K64 win64 app: T_BLK_RAW\.EXE exit=0 faulted=0")) and
                         bool(line(serial, r"K64 win64 app: T_BLK_PERF\.EXE exit=0 faulted=0")) and "SKIP: no NVMe/SDHCI" not in serial))
@@ -305,10 +340,15 @@ def main():
     serial_path = out / "serial.log"
     serial_path.unlink(missing_ok=True)
 
+    for tool in ("mkfs.vfat", "mcopy", "mmd"):
+        if not shutil.which(tool):
+            raise SystemExit(f"required tool missing: {tool}")
     t_img = time.time()
     model = Model(out)
+    manifest = None
     for name, d in DEVICES.items():
-        build_image(out / f"{name}.img", d)
+        m = build_image(out / f"{name}.img", d)
+        manifest = m or manifest
         copy_sparse(out / f"{name}.img", model.files[name])
     t_img = time.time() - t_img
     sector0 = (out / "nvme0n1.img").read_bytes()[:512]
@@ -322,6 +362,8 @@ def main():
            "-device", "nvme,id=nvme0,serial=SHZNVME0",
            "-device", "nvme-ns,drive=nv1,bus=nvme0,nsid=1",
            "-device", "nvme-ns,drive=nv2,bus=nvme0,nsid=2,logical_block_size=4096,physical_block_size=4096",
+           "-drive", f"if=none,id=nv3,file={img['nvme0n3']},format=raw",
+           "-device", "nvme-ns,drive=nv3,bus=nvme0,nsid=3",
            "-drive", f"if=none,id=sd0,file={img['mmcblk0']},format=raw",
            "-drive", f"if=none,id=sd1,file={img['mmcblk1']},format=raw",
            "-device", "sdhci-pci,id=sdhci0", "-device", "sd-card,drive=sd0,bus=/i440FX-pcihost/pci.0/sdhci0/sd-bus",
@@ -346,6 +388,10 @@ def main():
     dc, _ = device_checks(serial)
     checks += dc
     checks += driver_checks(serial)
+    checks += fatdisk.disk_checks(serial, ev, manifest)          # T_DISK.EXE against the files packed into nvme0n3
+    m = re.search(r"K64 disk: D: = (\S+), FAT32", serial)
+    checks.append(base.check("D: is the FAT32 volume on NVMe namespace 3 (FAT32 reader over NVMe through blk.h)",
+                             bool(m) and m.group(1) == "nvme0n3", m.group(0) if m else "no mount line"))
     rc, stats = replay(serial, model)
     checks += rc
     for name in DEVICES:

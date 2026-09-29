@@ -12,7 +12,8 @@
  * I/O: 64-entry I/O SQ/CQ (one physically contiguous page each), NVME_SLOTS commands in flight (CID = slot); each
  * slot owns a PRP-list page, so one command moves up to min(MDTS, 1 MiB). A request bigger than that is split and the
  * pieces are submitted back to back (queue depth > 1); concurrent callers and read_async/write_async share the slots.
- * Buffers are kernel virtual (blk_kva_to_pa per page), 4-byte aligned as PRP1 requires.
+ * Buffers are kernel virtual (blk_kva_to_pa per page); one that is not 4-byte aligned (PRP1 needs dword alignment) is
+ * bounced through per-slot pages, 4 KiB per command, still pipelined.
  *
  * Completion: MSI-X when the function has it (entry 0 admin CQ, entry 1 I/O CQ, both reap both CQs), else INTx on the
  * shared legacy line (attached lazily: the 8259 is programmed after disk_init()), else polling. Waiters sleep on a
@@ -70,6 +71,7 @@ struct nvme_slot {
     unsigned retries;
     uint64_t *prp;                                      /* PRP list page (also the DSM range buffer) */
     uint64_t prp_pa;
+    uint8_t *bounce;                                    /* one page for buffers that are not 4-byte aligned */
     nvme_slot_t *next_done;
 };
 
@@ -547,33 +549,58 @@ static int finish(nvme_ctrl_t *c, nvme_slot_t *s, const char *what, uint64_t lba
     return st ? -1 : 0;
 }
 
-/* Synchronous read/write: splits into commands of at most max_sectors and keeps them all in flight. */
+/* Is every byte of [buf, buf+bytes) in the kernel mappings? (a PRP needs the physical address of each page) */
+static int kva_mapped(const void *buf, uint64_t bytes)
+{
+    uint64_t va = (uint64_t)buf & ~0xfffull;
+    const uint64_t end = (uint64_t)buf + bytes;
+    for (; va < end; va += PAGE_SIZE)
+        if (!blk_kva_to_pa((const void *)va)) return 0;
+    return 1;
+}
+
+/* Synchronous read/write: splits into commands of at most max_sectors and keeps them all in flight. A buffer that is
+ * not 4-byte aligned (PRP1 requires it; the FAT32 reader reads whole sectors to odd offsets of a heap buffer) goes
+ * through the slots' bounce pages, one page per command, still pipelined. */
 static int ns_rw(nvme_ns_t *ns, int write, uint64_t lba, unsigned count, const void *buf)
 {
     nvme_ctrl_t *c = ns->c;
     nvme_slot_t *fl[NVME_SLOTS];
     uint64_t fl_lba[NVME_SLOTS];
+    uint8_t *fl_dst[NVME_SLOTS];
+    uint32_t fl_bytes[NVME_SLOTS];
     unsigned head = 0, n = 0, done_sectors = 0;
     int rc = 0;
     const uint8_t *p = buf;
-    if (c->dead) return -1;
-    if ((uint64_t)buf & 3) return -1;
+    const int bounce = ((uint64_t)buf & 3) != 0;
+    const unsigned per_cmd = bounce ? (unsigned)(PAGE_SIZE >> ns->lba_shift) : ns->max_sectors;
+    if (c->dead || !per_cmd) return -1;
+    if (!kva_mapped(buf, (uint64_t)count << ns->lba_shift)) {
+        kprintf("K64 nvme%u: buffer %p is not a mapped kernel address\n", c->idx, buf);
+        return -1;
+    }
     arm_intx(c);
     while (done_sectors < count || n) {
         nvme_slot_t *s = 0;
         if (done_sectors < count && !rc) s = n ? slot_try(c) : slot_get(c);
         if (s) {
-            const unsigned chunk = count - done_sectors < ns->max_sectors ? count - done_sectors : ns->max_sectors;
+            const unsigned chunk = count - done_sectors < per_cmd ? count - done_sectors : per_cmd;
+            const uint32_t bytes = chunk << ns->lba_shift;
+            uint8_t *src = (uint8_t *)p + ((uint64_t)done_sectors << ns->lba_shift);
+            const unsigned k = (head + n) % NVME_SLOTS;
             prep_rw(ns, s, write, lba + done_sectors, chunk);
-            if (build_prp(s, p + ((uint64_t)done_sectors << ns->lba_shift), chunk << ns->lba_shift)) {
-                kprintf("K64 nvme%u: unmapped or misaligned buffer %p\n", c->idx, buf);
+            if (bounce && write) memcpy(s->bounce, src, bytes);
+            if (build_prp(s, bounce ? s->bounce : src, bytes)) {
+                kprintf("K64 nvme%u: cannot describe buffer %p for DMA\n", c->idx, buf);
                 slot_put(c, s);
                 rc = -1;
                 continue;
             }
             io_submit(c, s, 1);
-            fl[(head + n) % NVME_SLOTS] = s;
-            fl_lba[(head + n) % NVME_SLOTS] = lba + done_sectors;
+            fl[k] = s;
+            fl_lba[k] = lba + done_sectors;
+            fl_dst[k] = (bounce && !write) ? src : 0;
+            fl_bytes[k] = bytes;
             ++n;
             done_sectors += chunk;
             continue;
@@ -582,6 +609,7 @@ static int ns_rw(nvme_ns_t *ns, int write, uint64_t lba, unsigned count, const v
         s = fl[head];
         if (wait_slot(c, s)) { s->status = 0xffff; }
         if (finish(c, s, write ? "write" : "read", fl_lba[head])) rc = -1;
+        else if (fl_dst[head]) memcpy(fl_dst[head], s->bounce, fl_bytes[head]);
         slot_put(c, s);
         head = (head + 1) % NVME_SLOTS;
         --n;
@@ -919,9 +947,11 @@ static int ctrl_init(nvme_ctrl_t *c, const pci_dev_t *pd)
     if (!c->idbuf_pa) return -1;
     c->idbuf = (uint64_t *)p2v(c->idbuf_pa);
     for (i = 0; i < NVME_SLOTS; ++i) {
+        const uint64_t bpa = pmm_alloc();
         c->slot[i].prp_pa = pmm_alloc();
-        if (!c->slot[i].prp_pa) return -1;
+        if (!c->slot[i].prp_pa || !bpa) return -1;
         c->slot[i].prp = (uint64_t *)p2v(c->slot[i].prp_pa);
+        c->slot[i].bounce = (uint8_t *)p2v(bpa);
     }
     c->free_mask = NVME_SLOTS >= 32 ? 0xffffffffu : (1u << NVME_SLOTS) - 1;
     if (ctrl_enable(c)) return -1;
