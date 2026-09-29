@@ -669,7 +669,8 @@ def write_summary(out: Path, runs: list[dict], ctx: dict, args) -> dict:
         for e in columns:
             info = c["entries"].get(e)
             row.append(f"{info['status']} ({info['seconds']} s)" if info else
-                       ("n/a" if e in UEFI_ONLY and c["firmware"] != "ovmf" else "not run"))
+                       ("n/a" if (e in UEFI_ONLY and c["firmware"] != "ovmf") or
+                        (e == "install" and c["medium"] not in args.install_media) else "not run"))
         row.append(c["status"])
         lines.append("| " + " | ".join(row) + " |")
     (out / "matrix.md").write_text("\n".join(lines) + "\n")
