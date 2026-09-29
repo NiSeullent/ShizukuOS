@@ -289,6 +289,7 @@ static const struct { NTSTATUS status; ULONG error; } status_map[] = {
     {STATUS_SHARING_VIOLATION, ERROR_SHARING_VIOLATION}, {STATUS_CANCELLED, ERROR_OPERATION_ABORTED},
     {STATUS_PENDING, ERROR_IO_PENDING}, {STATUS_OBJECT_TYPE_MISMATCH, ERROR_INVALID_HANDLE},
     {STATUS_STACK_OVERFLOW, ERROR_STACK_OVERFLOW}, {STATUS_UNSUCCESSFUL, ERROR_GEN_FAILURE},
+    {STATUS_PROCESS_IS_TERMINATING, ERROR_ACCESS_DENIED}, {STATUS_THREAD_IS_TERMINATING, ERROR_ACCESS_DENIED},
     /* registry (kernel64/sysreg.c) */
     {STATUS_NO_MORE_ENTRIES, ERROR_NO_MORE_ITEMS}, {STATUS_KEY_DELETED, ERROR_KEY_DELETED},
     {STATUS_CANNOT_DELETE, ERROR_ACCESS_DENIED}, {STATUS_KEY_HAS_CHILDREN, ERROR_KEY_HAS_CHILDREN},
@@ -376,9 +377,25 @@ void ShzRunThreadAttach(int reason)
 /* ---------------------------------------------------------------- process and thread start */
 extern void ShzInitSync(void);
 
+static volatile LONG g_shutdown_in_progress;
+
+/* DLL_PROCESS_DETACH for every initialised module (reverse initialisation order), Reserved != NULL: process exit. */
+SHZ_EXPORT NTSTATUS NTAPI LdrShutdownProcess(void)
+{
+    g_shutdown_in_progress = 1;
+    ShzRunInitRoutines(DLL_PROCESS_DETACH, (void *)1);
+    return STATUS_SUCCESS;
+}
+
+SHZ_EXPORT BOOLEAN NTAPI RtlDllShutdownInProgress(void) { return g_shutdown_in_progress != 0; }
+
+/* Windows order: NtTerminateProcess(NULL) first ends every other thread of the process (and returns once they are gone),
+ * then the loader runs DLL_PROCESS_DETACH with the caller as the only thread, then the process ends. Detach code therefore
+ * never races with worker threads still running in (or on the stacks of) the modules being shut down. */
 SHZ_EXPORT void NTAPI RtlExitUserProcess(NTSTATUS code)
 {
-    ShzRunInitRoutines(DLL_PROCESS_DETACH, (void *)1);
+    NtTerminateProcess(0, code);
+    LdrShutdownProcess();
     NtTerminateProcess(CURRENT_PROCESS, code);
     for (;;) __asm__ volatile("hlt");
 }

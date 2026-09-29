@@ -141,17 +141,10 @@ int syscall_dispatch(struct regs *r)
     case SYS_NtShzEvidence:
         if (a1 >= 16 && a1 < 24) { shz_evidence(a1, a2); st = STATUS_SUCCESS; } else st = STATUS_INVALID_PARAMETER;
         break;
-    case SYS_NtTerminateProcess: {
-        process_t *t = a1 == 0 ? p : proc_from_handle(p, a1);
-        if (!t) { st = STATUS_INVALID_HANDLE; break; }
-        process_terminate(t, (int64_t)(int32_t)a2, 0);
-        if (t == p) {
-            process_thread_gone(p);
-            thread_exit((int32_t)a2);
-        }
-        st = STATUS_SUCCESS;
+    case SYS_NtTerminateProcess:
+        if (a1 == 0) st = process_terminate_others(p);           /* NULL: every thread except the caller (ExitProcess) */
+        else st = process_terminate_handle(p, a1, (int32_t)a2);  /* ipc_proc.c; does not return when it ends the caller */
         break;
-    }
     case SYS_NtTerminateThread:
         if (a1 == 0 || a1 == CURRENT_THREAD_HANDLE) {
             process_thread_gone(p);

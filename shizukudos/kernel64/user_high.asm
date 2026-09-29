@@ -59,7 +59,7 @@ start:
     mov eax, 0x31
     syscall
 .fail:
-    xor r10d, r10d
+    mov r10, -1
     mov edx, 0xfa11
     mov eax, NtTerminateProcess
     syscall

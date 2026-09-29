@@ -154,7 +154,7 @@ int32_t irp_finish(irp_t *irp)
         thread_t *t = thread_current();
         ipc_thread_t *it = ipc_thread(t, 1);
         while (!irp->completed) {
-            if (t->proc->terminated || !it) {
+            if (thread_must_die(t) || !it) {
                 if (irp->cancel) irp->cancel(irp);
                 irp_complete(irp, STATUS_CANCELLED, irp->done);
                 break;
@@ -324,6 +324,7 @@ static int32_t port_remove(process_t *p, kobject_t *port, packet_t **out, unsign
     port_waiter_t w;
     uint64_t f, deadline = 0;
     int32_t st = STATUS_SUCCESS;
+    (void)p;
     *n = 0;
     if (!it) return STATUS_NO_MEMORY;
     if (timeout != INT64_MAX && timeout != 0) {
@@ -342,7 +343,7 @@ static int32_t port_remove(process_t *p, kobject_t *port, packet_t **out, unsign
         }
         if (q->closed) { st = STATUS_ABANDONED_WAIT_0; break; }
         if (timeout == 0 || (deadline && ticks_now() >= deadline)) { st = STATUS_TIMEOUT; break; }
-        if (p->terminated) { st = STATUS_THREAD_IS_TERMINATING; break; }
+        if (thread_must_die(t)) { st = STATUS_THREAD_IS_TERMINATING; break; }
         w.t = t;
         w.got = 0;
         w.next = q->waiters;

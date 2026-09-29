@@ -357,7 +357,7 @@ static int32_t wait_alertable(process_t *p, struct regs *r, kobject_t **objs, un
         irq_restore(f);
         if (st != STATUS_TIMEOUT) return st;
         if (apc_pending(t)) return apc_deliver(p, r, STATUS_USER_APC);
-        if (p->terminated || timeout == 0) return st;
+        if (thread_must_die(t) || timeout == 0) return st;
         to = remaining_100ns(deadline);
         if (to == 0) return st;
     }
@@ -384,7 +384,7 @@ static int32_t delay_alertable(process_t *p, struct regs *r, uint64_t pinterval)
         it->alertable = 0;
         irq_restore(f);
         if (apc_pending(t)) return apc_deliver(p, r, STATUS_USER_APC);
-        if (p->terminated || (deadline && ticks_now() >= deadline)) return STATUS_SUCCESS;
+        if (thread_must_die(t) || (deadline && ticks_now() >= deadline)) return STATUS_SUCCESS;
     }
 }
 

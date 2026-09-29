@@ -130,7 +130,7 @@ static void user_thread_main(void *arg)
     thread_t *t = thread_current();
     process_t *p = t->proc;
     (void)arg;
-    if (p->terminated) {                        /* created suspended and the process was killed before it ever ran */
+    if (thread_must_die(t)) {                   /* created suspended and the process was killed before it ever ran */
         process_thread_gone(p);
         thread_exit(p->exit_code);
     }
@@ -156,6 +156,10 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     } else {
         stack_base = rsp - 0x10000;
         stack_size = 0x10000;
+    }
+    if (p->terminated || p->exit_owner) {       /* no new thread in a process that is exiting */
+        if (stack_base) { uint64_t b = stack_base, z = 0; vad_free(p, &b, &z, MEM_RELEASE); }
+        return -1;
     }
     /* Suspended: the timer tick can preempt this function at any instruction, and a READY thread whose proc, user_rip,
      * teb and user_gs_base are still zero would fault in user_thread_main (NULL proc, RIP 0, GS base 0). */
@@ -257,11 +261,19 @@ void process_terminate(process_t *p, int64_t code, int faulted)
     ipc_process_terminating(p);
 }
 
+int thread_must_die(thread_t *t)
+{
+    const process_t *p = t->proc;
+    return p && (p->terminated || (p->exit_owner && p->exit_owner != t));
+}
+
+int current_thread_must_die(void) { return thread_must_die(thread_current()); }
+
 void check_kill(void)
 {
     thread_t *t = thread_current();
     process_t *p = t->proc;
-    if (p && p->terminated) {
+    if (thread_must_die(t)) {
         process_thread_gone(p);
         thread_exit(p->exit_code);
     }

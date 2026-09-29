@@ -2,6 +2,12 @@
  * Kernel64 user virtual memory: a sorted set of address descriptors with Windows-style
  * reserve / commit / decommit / release / protect / query semantics, demand-zero page
  * population and user-memory copy helpers that validate against the descriptors.
+ *
+ * Concurrency: the kernel is preemptible and the threads of one process (and, for cross-process memory access, other
+ * processes) use one descriptor set, so every public entry point below runs its descriptor and page-table work with
+ * interrupts disabled (the uniprocessor kernel's lock; nothing in here sleeps). Unserialised, two threads calling
+ * NtAllocateVirtualMemory / NtFreeVirtualMemory at once corrupted the set - a live thread stack's descriptor vanished and
+ * the thread faulted on its own stack. A torn-down address space (process_teardown) is never touched again.
  */
 #include "proc_internal.h"
 
@@ -128,7 +134,7 @@ static void unmap_pages(process_t *p, uint64_t start, uint64_t end)
             pmm_free(pa);
 }
 
-int32_t vad_alloc(process_t *p, uint64_t *base, uint64_t *size, uint32_t type, uint32_t prot, uint32_t kind)
+static int32_t vad_alloc_locked(process_t *p, uint64_t *base, uint64_t *size, uint32_t type, uint32_t prot, uint32_t kind)
 {
     uint64_t start, end, len;
     const int commit = (type & MEM_COMMIT) != 0;
@@ -210,7 +216,7 @@ int32_t vad_alloc(process_t *p, uint64_t *base, uint64_t *size, uint32_t type, u
 
 /* Inserts a descriptor at a fixed address with an explicit allocation base (image sections
  * belong to one allocation whose base is the image base). */
-int32_t vad_insert_fixed(process_t *p, uint64_t start, uint64_t size, uint32_t state, uint32_t prot, uint32_t kind,
+static int32_t vad_insert_fixed_locked(process_t *p, uint64_t start, uint64_t size, uint32_t state, uint32_t prot, uint32_t kind,
                          uint64_t alloc_base)
 {
     vad_t n;
@@ -226,10 +232,13 @@ int32_t vad_insert_fixed(process_t *p, uint64_t start, uint64_t size, uint32_t s
 
 int vad_range_is_free(process_t *p, uint64_t start, uint64_t size)
 {
-    return range_free(p, start, start + up(size));
+    const uint64_t f = irq_save();
+    const int r = range_free(p, start, start + up(size));
+    irq_restore(f);
+    return r;
 }
 
-int32_t vad_free(process_t *p, uint64_t *base, uint64_t *size, uint32_t type)
+static int32_t vad_free_locked(process_t *p, uint64_t *base, uint64_t *size, uint32_t type)
 {
     uint64_t start, end;
     vad_t *v;
@@ -278,7 +287,7 @@ int32_t vad_free(process_t *p, uint64_t *base, uint64_t *size, uint32_t type)
     return STATUS_INVALID_PARAMETER;
 }
 
-int32_t vad_protect(process_t *p, uint64_t *base, uint64_t *size, uint32_t new_prot, uint32_t *old_prot)
+static int32_t vad_protect_locked(process_t *p, uint64_t *base, uint64_t *size, uint32_t new_prot, uint32_t *old_prot)
 {
     uint64_t start = *base & PAGE_MASK, end = up(*base + *size), a;
     vad_t *v;
@@ -319,7 +328,7 @@ int32_t vad_protect(process_t *p, uint64_t *base, uint64_t *size, uint32_t new_p
     return STATUS_SUCCESS;
 }
 
-int32_t vad_query(process_t *p, uint64_t addr, uint64_t *base, uint64_t *alloc_base, uint32_t *alloc_prot,
+static int32_t vad_query_locked(process_t *p, uint64_t addr, uint64_t *base, uint64_t *alloc_base, uint32_t *alloc_prot,
                   uint64_t *size, uint32_t *state, uint32_t *prot, uint32_t *type)
 {
     vad_t *v;
@@ -343,11 +352,13 @@ int32_t vad_query(process_t *p, uint64_t addr, uint64_t *base, uint64_t *alloc_b
 
 /* Demand-zero population of one committed page. Returns 0 when the access is legitimate
  * and the page is now mapped, nonzero (an NTSTATUS) otherwise. */
-int user_fault_in(process_t *p, uint64_t addr, int write, int exec)
+static int user_fault_in_locked(process_t *p, uint64_t addr, int write, int exec)
 {
     vad_t *v = vad_find(p, addr & PAGE_MASK);
     uint64_t pa, flags = 0;
     const uint32_t base = v ? v->prot & 0xff : 0;
+    if (p->teardown)
+        return STATUS_ACCESS_VIOLATION;         /* the address space is being (or has been) released */
     if (addr < USER_MIN || addr >= USER_TOP || !v || v->state != VAD_COMMITTED)
         return STATUS_ACCESS_VIOLATION;
     if (base == PAGE_NOACCESS)
@@ -376,11 +387,11 @@ int user_fault_in(process_t *p, uint64_t addr, int write, int exec)
 static int user_page(process_t *p, uint64_t uva, int write, uint64_t *kva)
 {
     uint64_t flags = 0, pa;
-    if (uva < USER_MIN || uva >= USER_TOP)
+    if (uva < USER_MIN || uva >= USER_TOP || p->teardown)
         return -1;
     pa = vm_lookup(p->pml4, uva, &flags);
     if (!pa || !(flags & PT_U) || (write && !(flags & PT_W))) {
-        if (user_fault_in(p, uva, write, 0))
+        if (user_fault_in_locked(p, uva, write, 0))
             return -1;
         pa = vm_lookup(p->pml4, uva, &flags);
         if (!pa || !(flags & PT_U) || (write && !(flags & PT_W)))
@@ -398,9 +409,10 @@ int copy_from_user(process_t *p, void *dst, uint64_t uva, uint64_t n)
     while (n) {
         uint64_t kva, chunk = PAGE_SIZE - (uva & 0xfff);
         if (chunk > n) chunk = n;
-        if (user_page(p, uva, 0, &kva))
-            return -1;
+        const uint64_t f = irq_save();
+        if (user_page(p, uva, 0, &kva)) { irq_restore(f); return -1; }
         memcpy(d, (void *)kva, chunk);
+        irq_restore(f);
         d += chunk; uva += chunk; n -= chunk;
     }
     return 0;
@@ -414,9 +426,10 @@ int copy_to_user(process_t *p, uint64_t uva, const void *src, uint64_t n)
     while (n) {
         uint64_t kva, chunk = PAGE_SIZE - (uva & 0xfff);
         if (chunk > n) chunk = n;
-        if (user_page(p, uva, 1, &kva))
-            return -1;
+        const uint64_t f = irq_save();
+        if (user_page(p, uva, 1, &kva)) { irq_restore(f); return -1; }
         memcpy((void *)kva, s, chunk);
+        irq_restore(f);
         s += chunk; uva += chunk; n -= chunk;
     }
     return 0;
@@ -427,13 +440,67 @@ int user_string_len(process_t *p, uint64_t uva, uint64_t max, uint64_t *len)
     uint64_t n = 0;
     while (n < max) {
         uint64_t kva;
-        if (user_page(p, uva + n, 0, &kva))
-            return -1;
-        if (*(char *)kva == 0) {
+        const uint64_t f = irq_save();
+        char c;
+        if (user_page(p, uva + n, 0, &kva)) { irq_restore(f); return -1; }
+        c = *(char *)kva;
+        irq_restore(f);
+        if (c == 0) {
             *len = n;
             return 0;
         }
         ++n;
     }
     return -1;
+}
+
+/* ---------------------------------------------------------------- serialised entry points (see the header comment) */
+int32_t vad_alloc(process_t *p, uint64_t *base, uint64_t *size, uint32_t type, uint32_t prot, uint32_t kind)
+{
+    const uint64_t f = irq_save();
+    const int32_t st = vad_alloc_locked(p, base, size, type, prot, kind);
+    irq_restore(f);
+    return st;
+}
+
+int32_t vad_insert_fixed(process_t *p, uint64_t start, uint64_t size, uint32_t state, uint32_t prot, uint32_t kind,
+                         uint64_t alloc_base)
+{
+    const uint64_t f = irq_save();
+    const int32_t st = vad_insert_fixed_locked(p, start, size, state, prot, kind, alloc_base);
+    irq_restore(f);
+    return st;
+}
+
+int32_t vad_free(process_t *p, uint64_t *base, uint64_t *size, uint32_t type)
+{
+    const uint64_t f = irq_save();
+    const int32_t st = vad_free_locked(p, base, size, type);
+    irq_restore(f);
+    return st;
+}
+
+int32_t vad_protect(process_t *p, uint64_t *base, uint64_t *size, uint32_t new_prot, uint32_t *old_prot)
+{
+    const uint64_t f = irq_save();
+    const int32_t st = vad_protect_locked(p, base, size, new_prot, old_prot);
+    irq_restore(f);
+    return st;
+}
+
+int32_t vad_query(process_t *p, uint64_t addr, uint64_t *base, uint64_t *alloc_base, uint32_t *alloc_prot,
+                  uint64_t *size, uint32_t *state, uint32_t *prot, uint32_t *type)
+{
+    const uint64_t f = irq_save();
+    const int32_t st = vad_query_locked(p, addr, base, alloc_base, alloc_prot, size, state, prot, type);
+    irq_restore(f);
+    return st;
+}
+
+int user_fault_in(process_t *p, uint64_t addr, int write, int exec)
+{
+    const uint64_t f = irq_save();
+    const int st = user_fault_in_locked(p, addr, write, exec);
+    irq_restore(f);
+    return st;
 }

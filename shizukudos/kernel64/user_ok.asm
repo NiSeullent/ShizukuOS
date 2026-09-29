@@ -37,12 +37,12 @@ start:
     mov edx, 0x600d
     mov eax, NtShzEvidence
     syscall
-    xor r10d, r10d
+    mov r10, -1                         ; NtCurrentProcess() (NULL would end only the other threads)
     mov edx, 42
     mov eax, NtTerminateProcess
     syscall
 .corrupt:
-    xor r10d, r10d
+    mov r10, -1
     mov edx, 0xbad
     mov eax, NtTerminateProcess
     syscall

@@ -104,6 +104,8 @@ struct process {
     /* IPC / process model (kernel64/ipc_core.c) */
     int teardown;                       /* 0 running, 1 tearing down, 2 address space and handles released */
     void *ipc;                          /* ipc_proc_t: mapped views, job membership */
+    thread_t *exit_owner;               /* thread that called NtTerminateProcess(NULL) (ExitProcess): every other thread of
+                                           the process ends, no new thread starts; compared only, never dereferenced */
 };
 
 /* vad.c */
@@ -135,6 +137,12 @@ int process_start_thread2(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx
 void proc_alloc_peb(process_t *p);
 void thread_user_tls_init(process_t *p, thread_t *t);
 void process_thread_gone(process_t *p);
+/* Nonzero when `t` must not return to user mode: its process was terminated, or another of its threads is exiting the
+ * process (ExitProcess ends every other thread before DLL_PROCESS_DETACH). Blocking kernel paths poll this. */
+int thread_must_die(thread_t *t);
+int current_thread_must_die(void);
+int32_t process_terminate_others(process_t *p);  /* NtTerminateProcess(NULL): ipc_proc.c */
+int32_t process_terminate_handle(process_t *p, uint64_t h, int32_t code);   /* NtTerminateProcess(h): ipc_proc.c */
 void process_teardown(process_t *p);    /* releases handles, views and the address space of a dead process (idempotent) */
 int process_start_thread3(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, int suspended,
                           thread_t **out);
