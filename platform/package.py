@@ -66,7 +66,7 @@ GDI_IMPORTS = {
 }
 ABI_SOURCES = ('platform/abi32/build.py','platform/abi32/harness.c','platform/abi32/entry.S',
                'platform/abi32/test_packer.py','ntwin32/prepare.py')
-ABI_PASS = ('PASS NTW32 actual PE32 ABI: 406 checks; 147 PE calls with verified ESP; '
+ABI_PASS = ('PASS NTW32 actual PE32 ABI: 762 checks; 183 PE calls with verified ESP; '
             'Windows services mocked.')
 MEMORY_COUNTS = {'checks':1024736, 'memmove_cases':162380, 'memcpy_cases':162040,
                  'memset_cases':17490, 'memcmp_cases':179216}

@@ -1,24 +1,78 @@
 {
-  "schema": "ntwin32wrapper9x.routes.v1",
+  "schema": "ntwin32wrapper9x.routes.v2",
   "provider": "NTW32.DLL",
   "source_dll": "KERNEL32.DLL",
+  "providers": ["native", "own", "kernelex"],
+  "default_order": ["native", "own", "kernelex"],
+  "modes": {
+    "auto": "per-export order below (default_order for names without an entry); a provider listed under stubs for the name is tried only as the last resort",
+    "own": ["own", "native"],
+    "kernelex": ["kernelex", "native", "own"],
+    "native": "passthrough: the native loader's answer, no diagnostics"
+  },
   "exports": [
-    "InitializeSRWLock", "AcquireSRWLockExclusive", "AcquireSRWLockShared",
-    "ReleaseSRWLockExclusive", "ReleaseSRWLockShared",
-    "TryAcquireSRWLockExclusive", "TryAcquireSRWLockShared", "GetTickCount64",
-    "GetProcAddress", "InitOnceInitialize", "InitOnceBeginInitialize",
-    "InitOnceComplete", "InitOnceExecuteOnce",     "MultiByteToWideChar", "WideCharToMultiByte",
-    "AddVectoredExceptionHandler", "RemoveVectoredExceptionHandler"
+    {"name": "InitializeSRWLock", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "AcquireSRWLockExclusive", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "AcquireSRWLockShared", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "ReleaseSRWLockExclusive", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "ReleaseSRWLockShared", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "TryAcquireSRWLockExclusive", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "TryAcquireSRWLockShared", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "GetTickCount64", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "GetProcAddress", "order": ["own", "native", "kernelex"], "native_win98se": true,
+     "reason": "the own export applies this routing table to dynamic lookups and delegates every other request to native; native first would disable dynamic routing"},
+    {"name": "InitOnceInitialize", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "InitOnceBeginInitialize", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "InitOnceComplete", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "InitOnceExecuteOnce", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "MultiByteToWideChar", "order": ["own", "native", "kernelex"], "native_win98se": true,
+     "reason": "the own export implements CP_UTF8 itself and passes every other code page unchanged to native KERNEL32 (ntwin32/unicode/README.md)"},
+    {"name": "WideCharToMultiByte", "order": ["own", "native", "kernelex"], "native_win98se": true,
+     "reason": "the own export implements CP_UTF8 itself and passes every other code page unchanged to native KERNEL32 (ntwin32/unicode/README.md)"},
+    {"name": "AddVectoredExceptionHandler", "order": ["native", "own", "kernelex"], "native_win98se": false},
+    {"name": "RemoveVectoredExceptionHandler", "order": ["native", "own", "kernelex"], "native_win98se": false}
   ],
-  "evidence": "Build/static/host contracts only; no Windows 98 guest result for this provider",
+  "stubs": [
+    {"module": "KERNEL32.DLL", "name": "CompareStringW", "provider": "native", "category": "guest_observed_stub",
+     "evidence": "docs/NLS_EX_PORT.md: static CompareStringEx bound to the original Win98 CompareStringW returned 0 with ERROR_CALL_NOT_IMPLEMENTED (120); recorded guest observation from the KernelEx-era work, not re-run here"},
+    {"module": "KERNEL32.DLL", "name": "CreateHardLinkA", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "CreateHardLinkW", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "GetComputerNameExA", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "GetComputerNameExW", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "GetProcessIoCounters", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "GetStringTypeW", "provider": "kernelex", "category": "suspicious_stub_body", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "GetVolumePathNameA", "provider": "kernelex", "category": "suspicious_stub_body", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "InterlockedFlushSList", "provider": "kernelex", "category": "suspicious_stub_body", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "IsValidLanguageGroup", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "ReplaceFileA", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "ReplaceFileW", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"},
+    {"module": "KERNEL32.DLL", "name": "RtlCaptureStackBackTrace", "provider": "kernelex", "category": "explicit_unimplemented_macro", "evidence": "docs/KERNELEX_STUB_AUDIT.md; benchmarks/kernelex-source-body-audit-v1.json"}
+  ],
+  "stub_sources": {
+    "kernelex": "benchmarks/kernelex-source-body-audit-v1.json rows for KERNEL32.DLL whose source_category is explicit_unimplemented_macro, explicit_stub_body or suspicious_stub_body (lexical source triage of the pinned KernelEx tree; not a guest result)",
+    "native": "only names with a recorded Windows 98 observation in docs/; the OEM export manifest benchmarks/win98se-ko-oem-native-exports-v1.json lists names, not behaviour"
+  },
+  "native_export_manifest": {"path": "benchmarks/win98se-ko-oem-native-exports-v1.json", "module": "KERNEL32.DLL"},
+  "kernelex_modules": {
+    "core": "KERNELEX.DLL",
+    "api_libraries": ["KEXBASES.DLL", "KEXBASEN.DLL"],
+    "api_library_export": "get_api_table",
+    "note": "presence is probed with GetModuleHandleA and GetProcAddress only; NTW32 never loads a library and never decodes get_api_table"
+  },
+  "configuration": {"file": "NTW32.INI", "environment": "NTW32_ROUTING", "document": "docs/NTW32_ROUTING.md"},
+  "evidence": "Build/static/host contracts only; no Windows 98 guest result for this provider or for its routing policy",
   "limits": [
     "GetTickCount64 cannot recover wraps before DLL load or multiple unobserved wraps",
-    "SRW contention uses Sleep(0); no fairness guarantee",
+    "SRW contention uses Sleep(1); no fairness guarantee",
     "GetProcAddress only redirects implemented names for the real KERNEL32 handle through prepared calls",
     "InitOnce has no abandoned-thread or SEH recovery; exact native error parity remains unverified",
     "UTF conversion is independently implemented for CP_UTF8; other code pages delegate to native KERNEL32",
     "UTF maximal-subpart replacement, strict alignment, full-range overlap rejection and error precedence have no native Windows differential proof",
     "AddVectoredExceptionHandler order is host-tested; it is not connected to a CPU trap or the Win98 SEH chain",
-    "RemoveVectoredExceptionHandler returns 0 for an unknown handle and does not pretend success"
+    "RemoveVectoredExceptionHandler returns 0 for an unknown handle and does not pretend success",
+    "Routing: only KERNEL32.DLL names are routed; other modules and ordinal imports pass through in every mode",
+    "Routing: a KernelEx-supplied pointer is recognised only when it lies inside a KernelEx API library that GetModuleHandleA can see in this process; otherwise it counts as native",
+    "Routing: static exports already bound to NTW32.DLL forward to native or KernelEx when the policy selects them; when nothing else exists the own implementation stays bound",
+    "Routing: the KernelEx module names and the probing behaviour are host-tested against mocks only; no KernelEx installation was observed here"
   ]
 }

@@ -66,7 +66,22 @@ static uintptr_t native_last_module;
 static const char *native_last_name;
 static void (*sleep_completion)(void);
 
+/* Routing-policy scenario state. The fake KernelEx API library is a data
+ * buffer with valid PE32 headers; addresses inside it are compared, never
+ * called. KERNELEX.DLL's handle is an opaque value that is never read. */
+#define KEX_CORE_HANDLE UINT32_C(0x5a000000)
+#define INI_HANDLE UINT32_C(0x77770004)
+__attribute__((aligned(4096))) static unsigned char kex_image[8192];
+static uint32_t kex_probe_calls, kex_core_present, kex_bases_present;
+static uint32_t kex_hook_initonce, kex_hook_sleep;
+static const char *ini_text;
+static uint32_t ini_length, ini_opened, ini_closed, ini_reads;
+static const char *env_text;
+static char debug_log[16384];
+static uint32_t debug_length, debug_messages, reattaches;
+
 static void STDCALL mock_SetLastError(uint32_t error) { last_error = error; }
+static uint32_t STDCALL mock_GetLastError(void) { return last_error; }
 static void STDCALL mock_Sleep(uint32_t milliseconds)
 {
     void (*complete)(void) = sleep_completion;
@@ -92,22 +107,18 @@ static uint32_t STDCALL mock_GetTickCount(void)
 }
 static uintptr_t STDCALL mock_GetModuleHandleA(const char *name)
 {
-    CHECK(equal(name, "KERNEL32.DLL"));
-    ++module_calls;
-    return module_available ? KERNEL_HANDLE : 0;
+    if (equal(name, "KERNEL32.DLL")) {
+        ++module_calls;
+        return module_available ? KERNEL_HANDLE : 0;
+    }
+    /* KernelEx presence is probed by name only; nothing is ever loaded. */
+    ++kex_probe_calls;
+    if (equal(name, "KERNELEX.DLL")) return kex_core_present ? KEX_CORE_HANDLE : 0;
+    if (equal(name, "KEXBASES.DLL")) return kex_bases_present ? (uintptr_t)kex_image : 0;
+    CHECK(equal(name, "KEXBASEN.DLL"));
+    return 0;
 }
 static uint32_t STDCALL native_function(void) { return UINT32_C(0xcafe1234); }
-static uintptr_t STDCALL mock_GetProcAddress(uintptr_t module, const char *name)
-{
-    ++native_calls;
-    native_last_module = module;
-    native_last_name = name;
-    if ((uintptr_t)name > UINT32_C(0xffff) && equal(name, "NoSuchSymbol")) {
-        mock_SetLastError(127);
-        return 0;
-    }
-    return (uintptr_t)&native_function;
-}
 
 static uint32_t native_mb_calls, native_wc_calls, native_mb_args[6], native_wc_args[8];
 static int native_conversion_result;
@@ -133,6 +144,132 @@ static int STDCALL mock_WideCharToMultiByte(uint32_t page, uint32_t flags,
     native_wc_args[6] = (uintptr_t)default_char; native_wc_args[7] = (uintptr_t)used_default;
     if (!native_conversion_result) last_error = native_conversion_error;
     return native_conversion_result;
+}
+
+/* The native KERNEL32 export inventory this mock models: the DLL's own
+ * imports (all present in the Windows 98 SE OEM manifest) plus CompareStringW,
+ * a natively exported name that routes.json lists as a known native stub.
+ * Every other KERNEL32 name is absent, as the SRW/InitOnce/tick/VEH names are
+ * on Windows 98. Other module handles export everything (foreign DLL model). */
+static uintptr_t STDCALL mock_GetProcAddress(uintptr_t module, const char *name)
+{
+    static const char *const inventory[] = {
+        "Sleep", "GetTickCount", "GetModuleHandleA", "SetLastError", "GetLastError",
+        "GetModuleFileNameA", "CreateFileA", "ReadFile", "CloseHandle",
+        "GetEnvironmentVariableA", "OutputDebugStringA", "CompareStringW" };
+    uint32_t i;
+    ++native_calls;
+    native_last_module = module;
+    native_last_name = name;
+    if ((uintptr_t)name <= UINT32_C(0xffff)) return (uintptr_t)&native_function;
+    if (module == (uintptr_t)kex_image) {
+        /* Like the documented KernelEx API libraries, only get_api_table is exported. */
+        return equal(name, "get_api_table") ? (uintptr_t)kex_image + UINT32_C(0x800) : 0;
+    }
+    if (module != KERNEL_HANDLE) return (uintptr_t)&native_function;
+    /* A KernelEx-hooked loader answers with code inside its API library. */
+    if ((kex_hook_initonce && equal(name, "InitOnceExecuteOnce")) ||
+        (kex_hook_sleep && equal(name, "Sleep")))
+        return (uintptr_t)kex_image + UINT32_C(0x1000);
+    if (equal(name, "GetProcAddress")) return (uintptr_t)&mock_GetProcAddress;
+    if (equal(name, "MultiByteToWideChar")) return (uintptr_t)&mock_MultiByteToWideChar;
+    if (equal(name, "WideCharToMultiByte")) return (uintptr_t)&mock_WideCharToMultiByte;
+    for (i = 0; i < sizeof inventory / sizeof inventory[0]; ++i)
+        if (equal(name, inventory[i])) return (uintptr_t)&native_function;
+    mock_SetLastError(127);
+    return 0;
+}
+
+static uint32_t STDCALL mock_GetModuleFileNameA(uintptr_t module, char *buffer, uint32_t size)
+{
+    static const char path[] = "C:\\APP\\NTW32.DLL";
+    uint32_t i;
+    CHECK(module == PE_BASE && size >= sizeof path);
+    for (i = 0; i < sizeof path; ++i) buffer[i] = path[i];
+    return sizeof path - 1;
+}
+static uintptr_t STDCALL mock_CreateFileA(const char *path, uint32_t access, uint32_t share,
+    void *security, uint32_t disposition, uint32_t flags, uintptr_t template_file)
+{
+    CHECK(equal(path, "C:\\APP\\NTW32.INI"));
+    CHECK(access == UINT32_C(0x80000000) && share == 1 && security == NULL);
+    CHECK(disposition == 3 && flags == UINT32_C(0x80) && template_file == 0);
+    if (!ini_text) { mock_SetLastError(2); return UINT32_MAX; }
+    ++ini_opened;
+    ini_reads = 0;
+    return INI_HANDLE;
+}
+static int STDCALL mock_ReadFile(uintptr_t handle, void *buffer, uint32_t bytes,
+    uint32_t *read, void *overlapped)
+{
+    uint32_t i, count = ini_length < bytes ? ini_length : bytes;
+    CHECK(handle == INI_HANDLE && overlapped == NULL && read != NULL);
+    CHECK(ini_reads++ == 0);
+    for (i = 0; i < count; ++i) ((char *)buffer)[i] = ini_text[i];
+    *read = count;
+    return 1;
+}
+static int STDCALL mock_CloseHandle(uintptr_t handle)
+{
+    CHECK(handle == INI_HANDLE);
+    ++ini_closed;
+    return 1;
+}
+static uint32_t STDCALL mock_GetEnvironmentVariableA(const char *name, char *buffer, uint32_t size)
+{
+    uint32_t length = 0, i;
+    CHECK(equal(name, "NTW32_ROUTING"));
+    if (!env_text) { mock_SetLastError(203); return 0; }
+    while (env_text[length]) ++length;
+    if (length >= size) return length + 1;   /* documented: required size including NUL */
+    for (i = 0; i <= length; ++i) buffer[i] = env_text[i];
+    return length;
+}
+static void STDCALL mock_OutputDebugStringA(const char *text)
+{
+    uint32_t i, length = 0;
+    ++debug_messages;
+    while (text[length]) ++length;
+    CHECK(length < 200 && debug_length + length + 2 < sizeof debug_log);
+    for (i = 0; i < length; ++i) debug_log[debug_length++] = text[i];
+    debug_log[debug_length++] = '\n';
+    debug_log[debug_length] = 0;
+}
+static int log_contains(const char *needle)
+{
+    uint32_t start, i;
+    for (start = 0; start < debug_length; ++start) {
+        for (i = 0; needle[i] && start + i < debug_length && debug_log[start + i] == needle[i]; ++i) { }
+        if (!needle[i]) return 1;
+    }
+    return 0;
+}
+static void clear_log(void)
+{
+    debug_length = 0;
+    debug_messages = 0;
+    debug_log[0] = 0;
+}
+static void put16(unsigned char *at, uint32_t value)
+{
+    at[0] = (unsigned char)(value & 0xffu);
+    at[1] = (unsigned char)((value >> 8) & 0xffu);
+}
+static void put32(unsigned char *at, uint32_t value)
+{
+    put16(at, value & 0xffffu);
+    put16(at + 2, value >> 16);
+}
+static void build_kex_image(void)
+{
+    uint32_t i;
+    for (i = 0; i < sizeof kex_image; ++i) kex_image[i] = 0;
+    kex_image[0] = 'M'; kex_image[1] = 'Z';
+    put32(kex_image + 60, 0x80);                    /* e_lfanew */
+    put32(kex_image + 0x80, UINT32_C(0x00004550));  /* PE\0\0 */
+    put16(kex_image + 0x84, 0x14c);                 /* i386 */
+    put16(kex_image + 0x80 + 24, 0x10b);            /* PE32 */
+    put32(kex_image + 0x80 + 24 + 56, 0x2000);      /* SizeOfImage: whole buffer */
 }
 
 static void patch_imports(void)
@@ -252,16 +389,22 @@ static void dynamic_routing(void)
     static const char bad_case[] = "gettickcount64";
     static const char missing[] = "NoSuchSymbol";
     uint32_t calls = native_calls;
+    clear_log();
     last_error = UINT32_C(0xabcd);
+    /* Default mode Auto: a name Windows 98 lacks is probed natively first,
+     * then answered by the own implementation; the failed probe's last error
+     * does not leak into the successful lookup. */
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
-    CHECK(result.low == PE_BASE + RVA_GetTickCount64 && native_calls == calls);
+    CHECK(result.low == PE_BASE + RVA_GetTickCount64 && native_calls == ++calls);
+    CHECK(native_last_module == KERNEL_HANDLE && native_last_name == tick_name);
     CHECK(last_error == UINT32_C(0xabcd));
     result = call0(result.low - PE_BASE);
     CHECK(result.low == 35 && result.high == 1);
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"InitOnceExecuteOnce");
-    CHECK(result.low == PE_BASE + RVA_InitOnceExecuteOnce && native_calls == calls);
+    CHECK(result.low == PE_BASE + RVA_InitOnceExecuteOnce && native_calls == ++calls);
+    /* Own-first entries in routes.json never touch the native loader. */
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"GetProcAddress");
-    CHECK(result.low == PE_BASE + RVA_GetProcAddress);
+    CHECK(result.low == PE_BASE + RVA_GetProcAddress && native_calls == calls);
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"MultiByteToWideChar");
     CHECK(result.low == PE_BASE + RVA_MultiByteToWideChar && native_calls == calls);
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)"WideCharToMultiByte");
@@ -269,8 +412,12 @@ static void dynamic_routing(void)
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)native_name);
     CHECK(result.low == (uintptr_t)&native_function && native_calls == ++calls);
     CHECK(native_last_module == KERNEL_HANDLE && native_last_name == native_name);
+    CHECK(debug_messages == 0);   /* log=0: successful routes are silent */
+    /* A case-different name is unknown everywhere: unresolved, with a
+     * diagnostic naming module and function, and the loader's error code. */
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)bad_case);
-    CHECK(result.low == (uintptr_t)&native_function && native_calls == ++calls);
+    CHECK(result.low == 0 && native_calls == ++calls && last_error == 127);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!gettickcount64 unresolved (mode auto; native absent; own absent; kernelex not-detected)"));
     result = call2(RVA_GetProcAddress, OTHER_HANDLE, (uintptr_t)tick_name);
     CHECK(result.low == (uintptr_t)&native_function && native_calls == ++calls);
     CHECK(native_last_module == OTHER_HANDLE && native_last_name == tick_name);
@@ -279,6 +426,182 @@ static void dynamic_routing(void)
     CHECK((uintptr_t)native_last_name == 42);
     result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)missing);
     CHECK(result.low == 0 && native_calls == ++calls && last_error == 127);
+    CHECK(log_contains("KERNEL32.DLL!NoSuchSymbol unresolved"));
+}
+
+static void reattach(void)
+{
+    clear_log();
+    ++reattaches;
+    CHECK(call3(PE_ENTRY, PE_BASE, 1, 0).low == 1);
+}
+static void expect_own_srw(void)
+{
+    uintptr_t lock = UINT32_MAX;
+    (void)call1(RVA_InitializeSRWLock, (uintptr_t)&lock);
+    CHECK(lock == 0);
+    CHECK((call1(RVA_TryAcquireSRWLockExclusive, (uintptr_t)&lock).low & 255u) == 1);
+    (void)call1(RVA_ReleaseSRWLockExclusive, (uintptr_t)&lock);
+    CHECK(lock == 0);
+}
+
+/* Every routing mode, exercised by re-attaching the actual DLL with mocked
+ * NTW32.INI / NTW32_ROUTING contents and mocked KernelEx presence. */
+static void routing_policy(void)
+{
+    static const char tick_name[] = "GetTickCount64";
+    static const char once_name[] = "InitOnceExecuteOnce";
+    static const char compare_name[] = "CompareStringW";
+    static const char sleep_name[] = "Sleep";
+    static char big_text[4098];   /* 4097 configuration bytes plus a terminator */
+    static const uint8_t sample[] = { 'A', 0, 0xed, 0x95, 0x9c };
+    struct call_result result;
+    uint32_t calls, mb_before, i;
+    uint16_t wide[8];
+    for (i = 0; i + 1 < sizeof big_text; ++i) big_text[i] = (i % 64 == 63) ? '\n' : ';';
+    big_text[sizeof big_text - 1] = 0;
+
+    /* 1. Defaults: no file, no variable, no KernelEx. Nothing is logged, and
+     *    a natively exported known stub is still used when nothing else can. */
+    env_text = NULL; ini_text = NULL;
+    reattach();
+    CHECK(ini_opened == 0 && debug_messages == 0 && kex_probe_calls == 3 * (1 + reattaches));
+    calls = native_calls;
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)compare_name);
+    CHECK(result.low == (uintptr_t)&native_function && native_calls == calls + 1);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!CompareStringW -> known-stub provider used as last resort: native (mode auto)"));
+
+    /* 2. The variable replaces the file: mode Own with tracing. */
+    env_text = "[routing]|mode=own|log=1";
+    reattach();
+    CHECK(ini_opened == 0);
+    CHECK(log_contains("NTW32: routing mode=own source=NTW32_ROUTING overrides=0 warnings=0 kernelex=not-detected"));
+    calls = native_calls;
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
+    CHECK(result.low == PE_BASE + RVA_GetTickCount64 && native_calls == calls);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!GetTickCount64 -> own (mode own)"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)sleep_name);
+    CHECK(result.low == (uintptr_t)&native_function && native_calls == calls + 1);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!Sleep -> native (mode own)"));
+
+    /* 3. Own never accepts an answer attributed to a KernelEx API library. */
+    kex_core_present = 1; kex_bases_present = 1; kex_hook_initonce = 1; kex_hook_sleep = 1;
+    reattach();
+    CHECK(log_contains("kernelex=active"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)once_name);
+    CHECK(result.low == PE_BASE + RVA_InitOnceExecuteOnce);
+    last_error = 0;
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)sleep_name);
+    CHECK(result.low == 0 && last_error == 127);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!Sleep unresolved (mode own; native result attributed to KernelEx and rejected; own absent; kernelex active)"));
+
+    /* 4. Auto with KernelEx active: own beats a KernelEx-attributed pointer;
+     *    KernelEx is the last resort for a name nobody else provides. */
+    env_text = "[routing]|mode=auto|log=1";
+    reattach();
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)once_name);
+    CHECK(result.low == PE_BASE + RVA_InitOnceExecuteOnce);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!InitOnceExecuteOnce -> own (mode auto)"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)sleep_name);
+    CHECK(result.low == (uintptr_t)kex_image + UINT32_C(0x1000));
+    CHECK(log_contains("NTW32: KERNEL32.DLL!Sleep -> kernelex (mode auto)"));
+
+    /* 5. KernelEx mode takes the KernelEx answer even for an owned name and
+     *    forwards the already-bound static export to it (not called: the
+     *    fake library is data). Names KernelEx lacks fall to native, then own. */
+    env_text = "[routing]|mode=kernelex|log=1";
+    reattach();
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)once_name);
+    CHECK(result.low == (uintptr_t)kex_image + UINT32_C(0x1000));
+    CHECK(log_contains("NTW32: KERNEL32.DLL!InitOnceExecuteOnce -> kernelex (mode kernelex)"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
+    CHECK(result.low == PE_BASE + RVA_GetTickCount64);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!GetTickCount64 -> own (mode kernelex)"));
+    expect_own_srw();
+
+    /* 6. KernelEx mode without KernelEx degrades to native, then own. */
+    kex_core_present = 0; kex_bases_present = 0; kex_hook_initonce = 0; kex_hook_sleep = 0;
+    reattach();
+    CHECK(log_contains("kernelex=not-detected"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)once_name);
+    CHECK(result.low == PE_BASE + RVA_InitOnceExecuteOnce);
+    kex_core_present = 1;
+    reattach();
+    CHECK(log_contains("kernelex=core-only"));
+    kex_core_present = 0;
+
+    /* 7. Native mode: dynamic lookups pass through silently; a static export
+     *    forwards to native when native has the name, and otherwise keeps
+     *    the own implementation. */
+    env_text = "[routing]|mode=native|log=1";
+    reattach();
+    CHECK(log_contains("NTW32: static export GetTickCount64 keeps the own implementation"));
+    calls = native_calls;
+    last_error = UINT32_C(0x5151);
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
+    CHECK(result.low == 0 && native_calls == calls + 1 && last_error == 127);
+    CHECK(!log_contains("unresolved"));
+    mb_before = native_mb_calls;
+    native_conversion_result = 555;
+    CHECK(convert_mb(65001, 0, sample, 5, wide, 8) == 555 && native_mb_calls == mb_before + 1);
+    CHECK(native_mb_args[0] == 65001 && native_mb_args[2] == (uintptr_t)sample && native_mb_args[5] == 8);
+    expect_own_srw();
+
+    /* 8. NTW32.INI beside the DLL: process mode plus module and function
+     *    overrides; a function override wins over a module override. */
+    env_text = NULL;
+    ini_text = "[routing]\r\nmode=own\r\nlog=1\r\n\r\n; overrides\r\n[modules]\r\n"
+               "kernel32.dll = auto\r\n[functions]\r\nGetTickCount64=native\r\nSleep=own\r\n";
+    for (ini_length = 0; ini_text[ini_length]; ++ini_length) { }
+    reattach();
+    CHECK(ini_opened == 1 && ini_closed == 1);
+    CHECK(log_contains("NTW32: routing mode=own source=NTW32.INI overrides=3 warnings=0 kernelex=not-detected"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
+    CHECK(result.low == 0 && !log_contains("GetTickCount64 unresolved"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)sleep_name);
+    CHECK(result.low == (uintptr_t)&native_function);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!Sleep -> native (mode own)"));
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)once_name);
+    CHECK(result.low == PE_BASE + RVA_InitOnceExecuteOnce);
+    CHECK(log_contains("NTW32: KERNEL32.DLL!InitOnceExecuteOnce -> own (mode auto)"));
+
+    /* 9. Malformed lines are reported one by one; Auto and defaults remain. */
+    ini_text = "[routing]\r\nmode=turbo\r\nlog=1\r\nlog=yes\r\nbogus\r\n[weird]\r\nx=1\r\n"
+               "[functions]\r\n9bad=own\r\nGetTickCount64=maybe\r\nGetTickCount64=own\r\n"
+               "GetTickCount64=native\r\n[modules]\r\nKERNEL32.DLL=own\r\nkernel32.dll=native\r\n";
+    for (ini_length = 0; ini_text[ini_length]; ++ini_length) { }
+    reattach();
+    CHECK(log_contains("NTW32: routing config line 2: unknown mode; Auto retained 'turbo'"));
+    CHECK(log_contains("NTW32: routing config line 4: duplicate log ignored 'yes'"));
+    CHECK(log_contains("NTW32: routing config line 5: expected key=value 'bogus'"));
+    CHECK(log_contains("NTW32: routing config line 6: unknown section 'weird'"));
+    CHECK(log_contains("NTW32: routing config line 7: key under unknown section ignored 'x'"));
+    CHECK(log_contains("NTW32: routing config line 9: invalid function name '9bad'"));
+    CHECK(log_contains("NTW32: routing config line 10: unknown mode 'maybe'"));
+    CHECK(log_contains("NTW32: routing config line 12: duplicate override ignored 'GetTickCount64'"));
+    CHECK(log_contains("NTW32: routing config line 15: duplicate override ignored 'kernel32.dll'"));
+    CHECK(log_contains("NTW32: routing mode=auto source=NTW32.INI overrides=2 warnings=9 kernelex=not-detected"));
+
+    /* 10. Oversized or non-ASCII configuration is ignored as a whole. */
+    ini_text = big_text; ini_length = sizeof big_text - 1;
+    reattach();
+    CHECK(log_contains("NTW32: NTW32.INI longer than 4096 bytes; ignored"));
+    ini_text = "[routing]\r\nmode=own\r\n\x80";
+    for (ini_length = 0; ini_text[ini_length]; ++ini_length) { }
+    reattach();
+    CHECK(log_contains("NTW32: routing config: control or non-ASCII byte; configuration ignored"));
+    calls = native_calls;
+    result = call2(RVA_GetProcAddress, KERNEL_HANDLE, (uintptr_t)tick_name);
+    CHECK(result.low == PE_BASE + RVA_GetTickCount64 && native_calls == calls + 1);
+    ini_text = NULL;
+    env_text = big_text;
+    reattach();
+    CHECK(log_contains("NTW32: NTW32_ROUTING longer than 4096 bytes; ignored"));
+
+    /* Back to the defaults for the remaining checks. */
+    env_text = NULL; ini_text = NULL;
+    reattach();
+    CHECK(debug_messages == 0);
 }
 
 static uint32_t payload[4] = { 10, 20, 30, 40 };
@@ -561,12 +884,13 @@ static void utf_long_and_native(void)
 int harness_main(void)
 {
     patch_imports();
+    build_kex_image();
     module_available = 0;
     CHECK(call3(PE_ENTRY, PE_BASE, 1, 0).low == 0);
-    CHECK(module_calls == 1);
+    CHECK(module_calls == 1 && kex_probe_calls == 0);
     module_available = 1;
     CHECK(call3(PE_ENTRY, PE_BASE, 1, 0).low == 1);
-    CHECK(module_calls == 2);
+    CHECK(module_calls == 2 && kex_probe_calls == 3 && ini_opened == 0 && debug_messages == 0);
     srw_and_ticks();
     srw_waits();
     dynamic_routing();
@@ -574,8 +898,9 @@ int harness_main(void)
     once_explicit();
     utf_conversion();
     utf_long_and_native();
+    routing_policy();
     CHECK(call3(PE_ENTRY, PE_BASE, 0, 0).low == 1);
-    CHECK(module_calls == 2);
+    CHECK(module_calls == 2 + reattaches);
     write_string("PASS NTW32 actual PE32 ABI: ");
     write_number(checks); write_string(" checks; "); write_number(export_calls);
     write_string(" PE calls with verified ESP; Windows services mocked.\n");
