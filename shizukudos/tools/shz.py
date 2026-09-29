@@ -163,6 +163,9 @@ def suite_host(results):
         record(results, "shz_info_t layout matches C compiler", "FAIL", detail=str(exc))
     run_script(results, "interkernel ABI host model", [SHZ / "abi" / "test_abi.py"]) if (SHZ / "abi" / "test_abi.py").exists() \
         else record(results, "interkernel ABI host model", "BLOCKED", detail="abi/ not implemented")
+    run_script(results, "Kernel64 standalone RAM plan with firmware holes (memholes.h, stub -m32 and loader/kernel "
+                        "64-bit, ASan/UBSan)", [SHZ / "kernel64" / "standalone" / "test_memplan.py"],
+               expect_marker="\nPASS")
     # Determinism: rebuilding CSMWrap twice must give identical bytes (fixed BUILD_VERSION, no git describe).
     hashes = []
     for _ in range(2):
@@ -242,9 +245,11 @@ BOOTMGR_CASES = {
     "kernel64": "mode=kernel64 + KERNEL64.INI: standalone Kernel64 directly on OVMF (no VMX), run_k64_standalone "
                 "checks + every T_*.EXE exit 0 + ABI 1.1 cmdline/GOP handoff",
     "auto-kernel64": "mode=auto, auto_kernel64=yes, no VMX: the same direct Kernel64 run",
-    "auto-k64-fallback": "auto_kernel64=yes but OVMF S3 NVS at 8 MiB: Kernel64 refused, auto falls back to CSM -> "
-                         "FreeDOS, disk verified",
-    "kernel64-nvs": "mode=kernel64 with OVMF S3 NVS at 8 MiB: refused before ExitBootServices, returns to firmware",
+    "auto-k64-fallback": "auto_kernel64=yes but KERNEL64S.BIN is the Supervisor-profile image: Kernel64 refused, "
+                         "auto falls back to CSM -> FreeDOS, disk verified",
+    "kernel64-s3": "mode=kernel64 with OVMF S3 on: its ACPI NVS at 8 MiB is a firmware hole fenced off in Kernel64's "
+                   "heap (memholes.h); Kernel64 runs, same holes on both sides",
+    "menu-timeout": "BOOT.INI menu_timeout=1: menu shown, no key, policy mode=auto followed -> CSM -> FreeDOS verified",
     "kernel64-missing": "mode=kernel64 without KERNEL64S.BIN: Not Found, returns to firmware",
     "kernel64-wrong-image": "Supervisor-profile KERNEL64.BIN as KERNEL64S.BIN: refused, returns to firmware",
     "kernel64-bad-ini": "KERNEL64.INI with an unknown key: rejected, returns to firmware",
@@ -258,7 +263,8 @@ def suite_bootmgr(results):
     label = ("UEFI boot manager [TCG]: no VMX -> CSMWrap/SeaBIOS CSM16 legacy-boots FreeDOS from one MBR disk; "
              "mode=csm/supervisor, missing/invalid CSM image, malformed BOOT.INI, 1 CPU, same disk on SeaBIOS; "
              "mode=kernel64 and auto_kernel64=yes boot the standalone Kernel64 directly (run_k64_standalone "
-             "evidence, every T_*.EXE exit 0), S3-NVS/missing/wrong-image/bad-INI refusals, auto fallback to CSM")
+             "evidence, every T_*.EXE exit 0), also with OVMF S3 on (NVS hole fenced off); missing/wrong-image/"
+             "bad-INI refusals, auto fallback to CSM, boot menu timeout")
     vlabel = ("vBIOS host checks [TCG + host]: ROM reset path and INT 1Ah RTC/INT 1Eh under QEMU -bios; "
               "bios.c INT 13h/15h/16h/1Ah back end under ASan/UBSan (not a VMX run)")
     try:
@@ -452,7 +458,8 @@ def suite_win98_regression(results):
 
 def suite_media(results):
     """VM install ISO + raw disk: build them if absent, then the boot matrix {SeaBIOS, OVMF} x {ISO as CD,
-    ISO as hard disk, raw disk} x {Kernel64, DOS16, ShizukuDOS 0.1} (tools/test_shizuku_se_boot_matrix.py)."""
+    ISO as hard disk, raw disk} x {Kernel64, DOS16, ShizukuDOS 0.1} + OVMF Kernel64 direct (UEFI boot manager
+    key K) (tools/test_shizuku_se_boot_matrix.py)."""
     iso = REPO / "build" / "windows98-shizuku-second-edition.iso"
     disk = REPO / "build" / "windows98-shizuku-second-edition-disk.img"
     if not (iso.exists() and iso.with_suffix(".json").exists()):
@@ -469,8 +476,7 @@ def suite_media(results):
     summary = json.loads(mj.read_text())
     for cell in summary["cells"]:
         for entry, info in cell["entries"].items():
-            name = f"media {cell['firmware']} {cell['medium']} {entry}" + (
-                " (interim: UEFI Shell startup.nsh -> CSMWrap)" if cell["interim"] else "")
+            name = f"media {cell['firmware']} {cell['medium']} {entry}"
             record(results, name, info["status"], detail=f"{info['seconds']} s" + (
                 f"; failed: {info['failed'][:3]}" if info["failed"] else ""), evidence=str(mj.parent))
 

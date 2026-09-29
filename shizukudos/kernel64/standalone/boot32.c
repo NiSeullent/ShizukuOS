@@ -16,10 +16,8 @@
 #endif
 #define KERNEL_GPA 0x100000u
 #define INITRD_GPA 0x2000000u
-#define FIXED_END 0xF00000u                        /* Kernel64 mem.c: kernel image and heap at fixed addresses below 15 MiB */
 #define MB_MAGIC 0x2BADB002u
 #define MB_INFO_MEM_MAP 0x40u
-#define MAX_RANGES 64
 
 extern char stub_end[];                            /* boot.ld: end of the stub image including its stack */
 
@@ -52,68 +50,48 @@ static void zero(uint32_t dst, uint32_t n)
     __asm__ volatile("rep stosb" : "+D"(dst), "+c"(n) : "a"(0) : "memory");
 }
 
-static uint64_t hole_gpa[SHZ_MEMHOLES_MAX], hole_size[SHZ_MEMHOLES_MAX];
-static uint32_t hole_count;
+static shz_memplan_result_t plan;
 
-/* RAM size and the non-RAM holes below it, from the Multiboot memory map (the firmware's E820).
- * Without a map: the classic mem_upper (contiguous RAM from 1 MiB), no holes. With one: RAM ends where the
- * highest usable range below 4 GiB ends; the gaps between usable ranges above 1 MiB are holes. Under legacy
- * BIOS/QEMU there are none; under UEFI + CSMWrap the map keeps e.g. OVMF's ACPI NVS at 8-9 MiB. */
+/* RAM size and the firmware holes below it (memholes.h: the same plan the UEFI boot manager uses for its direct
+ * Kernel64 boot). Without a Multiboot memory map: the classic mem_upper, contiguous RAM from 1 MiB, no holes. */
 static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
 {
-    static uint64_t base[MAX_RANGES], end[MAX_RANGES];
-    uint32_t n = 0, i, j, off, ram;
-    uint64_t top = 0, cursor;
+    static shz_memplan_t runs;
+    uint32_t off, ram, i;
 
+    shz_memplan_init(&runs);
     if (!(mbi->flags & MB_INFO_MEM_MAP) || !mbi->mmap_length) {
-        /* mem_upper: KiB of contiguous RAM above 1 MiB (below 4 GiB) */
+        /* mem_upper: KiB of contiguous RAM above 1 MiB (below 4 GiB); low memory as on every PC */
         ram = mbi->mem_upper >= 0x3FFC00u ? 0xFFF00000u : (mbi->mem_upper + 1024u) << 10;
-        ram &= ~0x1fffffu;
-        return ram > MAX_RAM ? MAX_RAM : ram;
-    }
-    for (off = 0; off + 24 <= mbi->mmap_length; off += ((const struct mmap_entry *)(mbi->mmap_addr + off))->size + 4) {
-        const struct mmap_entry *e = (const struct mmap_entry *)(mbi->mmap_addr + off);
-        uint64_t b = e->base, x = e->base + e->length;
-        if (e->type != 1 || !e->length || b >= (1ull << 32))
-            continue;
-        if (x > (1ull << 32)) x = 1ull << 32;
-        if (n == MAX_RANGES) fail("too many memory map entries, max", MAX_RANGES);
-        for (i = n++; i > 0 && base[i - 1] > b; --i) {    /* insertion sort by base */
-            base[i] = base[i - 1];
-            end[i] = end[i - 1];
+        shz_memplan_add(&runs, 0, (uint64_t)mbi->mem_lower << 10);
+        shz_memplan_add(&runs, KERNEL_GPA, ram);
+    } else {
+        for (off = 0; off + 24 <= mbi->mmap_length; off += ((const struct mmap_entry *)(mbi->mmap_addr + off))->size + 4) {
+            const struct mmap_entry *e = (const struct mmap_entry *)(mbi->mmap_addr + off);
+            uint64_t b = e->base, x = e->base + e->length;
+            if (e->type != 1 || !e->length || b >= (1ull << 32))
+                continue;
+            if (x > (1ull << 32)) x = 1ull << 32;
+            shz_memplan_add(&runs, b, x);
         }
-        base[i] = b;
-        end[i] = x;
-        if (x > top) top = x;
     }
-    if (top > MAX_RAM) top = MAX_RAM;
-    ram = (uint32_t)top & ~0x1fffffu;
-    /* Gaps in [1 MiB, ram) not covered by any usable range. */
-    cursor = KERNEL_GPA;
-    for (i = 0; i <= n && cursor < ram; ++i) {
-        uint64_t next = i < n ? base[i] : ram;
-        if (next > ram) next = ram;
-        if (next > cursor) {
-            uint64_t a = cursor & ~0xfffull, z = (next + 0xfff) & ~0xfffull;
-            if (hole_count == SHZ_MEMHOLES_MAX) fail("too many holes in the memory map, max", SHZ_MEMHOLES_MAX);
+    if (!shz_memplan_solve(&runs, MAX_RAM, 64u << 20, INITRD_GPA, isize, &plan))
+        fail(plan.why, (uint32_t)plan.at);
 #ifdef STUB_K32
-            fail("Kernel32 needs contiguous RAM from 1 MiB; hole at", (uint32_t)a);
+    if (plan.count) fail("Kernel32 needs contiguous RAM from 1 MiB; firmware hole at", (uint32_t)plan.gpa[0]);
 #endif
-            if (a < FIXED_END) fail("hole in the fixed kernel/heap area below 15 MiB at", (uint32_t)a);
-            if (a < INITRD_GPA + isize && z > INITRD_GPA) fail("hole where the initrd goes, at", (uint32_t)a);
-            hole_gpa[hole_count] = a;
-            hole_size[hole_count++] = z - a;
-            say("SHZ-STUB: firmware hole "); hex((uint32_t)a); say(" size "); hex((uint32_t)(z - a)); say(" kept out of the page allocator\n");
-        }
-        if (i < n && end[i] > cursor) cursor = end[i];
+    for (i = 0; i < plan.count; ++i) {
+        say("SHZ-STUB: firmware hole "); hex((uint32_t)plan.gpa[i]); say(" size "); hex((uint32_t)plan.size[i]);
+        say(plan.gpa[i] < SHZ_K64_PMM_GPA ? " fenced off in the kernel heap\n" : " kept out of the page allocator\n");
     }
-    for (j = 0; j < 3; ++j) {                      /* page tables 0x1000-0x5000, holes 0x6000, bootinfo 0x7000 */
-        uint64_t need = j == 2 ? SHZ_BOOTINFO_GPA : j ? SHZ_MEMHOLES_GPA : 0x1000;
-        for (i = 0; i < n && !(base[i] <= need && end[i] >= need + 0x1000); ++i)
-            ;
-        if (i == n) fail("low boot page is not RAM:", (uint32_t)need);
+    if (plan.cut) {
+        say("SHZ-STUB: more than 16 firmware holes; RAM ends below the hole at "); hex((uint32_t)plan.cut); say("\n");
     }
-    return ram;
+    if (runs.dropped) {
+        say("SHZ-STUB: memory map has more than 64 separate usable ranges; ignored above the 64th: "); hex(runs.dropped);
+        say("\n");
+    }
+    return (uint32_t)plan.ram;
 }
 
 void stub_prepare(uint32_t magic, const struct mbi *mbi)
@@ -162,13 +140,7 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     {                                              /* after every read of the Multiboot data, which may sit in low memory */
         volatile shz_memholes_t *holes = (volatile shz_memholes_t *)SHZ_MEMHOLES_GPA;
         zero(SHZ_MEMHOLES_GPA, sizeof(shz_memholes_t));
-        holes->magic = SHZ_MEMHOLES_MAGIC;
-        holes->count = hole_count;
-        for (i = 0; i < hole_count; ++i) {
-            holes->hole[i].gpa = hole_gpa[i];
-            holes->hole[i].size = hole_size[i];
-        }
-        holes->check = shz_memholes_sum(holes);
+        shz_memholes_write(holes, &plan);
     }
 #else
     (void)pml4; (void)pdpt_lo; (void)pd; (void)pdpt_hi;

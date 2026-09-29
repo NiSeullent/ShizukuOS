@@ -22,6 +22,13 @@
 #define PMM_BASE 0xF00000ull
 #define MAX_PAGES (4096ull * 1024 * 1024 / PAGE_SIZE)
 
+#ifdef SHZ_STANDALONE
+_Static_assert(HEAP_PA == SHZ_K64_HEAP_GPA && PMM_BASE == SHZ_K64_PMM_GPA && HEAP_PA + HEAP_BYTES == PMM_BASE,
+               "standalone/memholes.h plans holes for this layout");
+static uint64_t hole_gpa[SHZ_MEMHOLES_MAX], hole_end[SHZ_MEMHOLES_MAX];
+static unsigned hole_count;
+#endif
+
 static uint8_t page_map[MAX_PAGES / 8];
 static uint64_t pmm_pages, pmm_free_pages, pmm_hint;
 static uint64_t kpml4;
@@ -167,13 +174,52 @@ struct hblock { uint64_t size; uint64_t used; struct hblock *next; uint64_t magi
 static struct hblock *heap_head;
 static size_t heap_used_bytes;
 
+/* One free block per usable segment of the heap window [HEAP_PA, HEAP_PA + HEAP_BYTES). Firmware holes (standalone
+ * builds only) split the window: each segment before a hole ends in a used, never-freed sentinel block (header
+ * only, size 0), so kfree's merging of neighbouring free blocks never reaches across the hole, and nothing is ever
+ * written inside it. Without holes this is the single block it always was. */
 static void heap_init(void)
 {
-    heap_head = (struct hblock *)p2v(HEAP_PA);
-    heap_head->size = HEAP_BYTES - sizeof *heap_head;
-    heap_head->used = 0;
-    heap_head->next = 0;
-    heap_head->magic = HMAGIC;
+    const uint64_t window_end = HEAP_PA + HEAP_BYTES, hdr = sizeof(struct hblock);
+    uint64_t seg = HEAP_PA;
+    struct hblock *prev = 0;
+
+    heap_head = 0;
+    while (seg < window_end) {
+        uint64_t stop = window_end, resume = window_end;
+        struct hblock *b, *sentinel = 0;
+#ifdef SHZ_STANDALONE
+        unsigned h;
+        for (h = 0; h < hole_count; ++h)        /* the nearest hole at or after seg */
+            if (hole_end[h] > seg && hole_gpa[h] < stop) {
+                stop = hole_gpa[h] > seg ? hole_gpa[h] : seg;
+                resume = hole_end[h];
+            }
+#endif
+        if (stop - seg >= 2 * hdr + 64) {
+            b = (struct hblock *)p2v(seg);
+            b->used = 0;
+            b->magic = HMAGIC;
+            b->next = 0;
+            b->size = stop - seg - hdr;
+            if (stop < window_end) {
+                sentinel = (struct hblock *)p2v(stop - hdr);
+                sentinel->size = 0;
+                sentinel->used = 1;
+                sentinel->next = 0;
+                sentinel->magic = HMAGIC;
+                b->size -= hdr;
+                b->next = sentinel;
+            }
+            if (prev)
+                prev->next = b;
+            else
+                heap_head = b;
+            prev = sentinel ? sentinel : b;
+        }
+        seg = stop < window_end ? resume : window_end;
+    }
+    KASSERT(heap_head);
 }
 
 void *kmalloc(size_t n)
@@ -266,14 +312,21 @@ void mem_init(const shz_bootinfo_t *bi)
         }
     }
 #ifdef SHZ_STANDALONE
-    {   /* Firmware ranges that are not RAM (standalone/memholes.h: e.g. OVMF's ACPI NVS under UEFI + CSMWrap).
-         * The Multiboot stub guarantees they lie above PMM_BASE; still read through the boot mapping here. */
+    {   /* Firmware ranges that are not RAM (standalone/memholes.h: e.g. OVMF's S3 ACPI NVS at 8 MiB), written by the
+         * Multiboot stub or by the UEFI boot manager's direct boot; both refuse holes below the heap window or over
+         * the initrd. Read through the boot mapping (physical memory below 1 GiB at K64_VIRT_BASE). */
         const shz_memholes_t *h = (const shz_memholes_t *)(K64_VIRT_BASE + SHZ_MEMHOLES_GPA);
         if (h->magic == SHZ_MEMHOLES_MAGIC && h->count <= SHZ_MEMHOLES_MAX && h->check == shz_memholes_sum(h)) {
             const uint64_t before = pmm_free_pages;
+            uint64_t heap_fenced = 0;
             for (c = 0; c < h->count; ++c) {
-                KASSERT(h->hole[c].gpa >= PMM_BASE);
-                for (off = h->hole[c].gpa; off < h->hole[c].gpa + h->hole[c].size && off < ram_top; off += PAGE_SIZE) {
+                const uint64_t a = h->hole[c].gpa, z = h->hole[c].gpa + h->hole[c].size;
+                KASSERT(a >= HEAP_PA && z > a && !(a & 0xfff) && !(z & 0xfff));
+                hole_gpa[hole_count] = a;
+                hole_end[hole_count++] = z;
+                if (a < PMM_BASE)
+                    heap_fenced += (z < PMM_BASE ? z : PMM_BASE) - a;
+                for (off = a > PMM_BASE ? a : PMM_BASE; off < z && off < ram_top; off += PAGE_SIZE) {
                     i = (off - PMM_BASE) / PAGE_SIZE;
                     if (!bit_get(i)) {
                         bit_set(i);
@@ -282,8 +335,9 @@ void mem_init(const shz_bootinfo_t *bi)
                 }
             }
             if (h->count)
-                kprintf("K64: %u firmware memory hole(s), %u page(s) kept out of the page allocator\n",
-                        h->count, (uint32_t)(before - pmm_free_pages));
+                kprintf("K64: %u firmware memory hole(s): %u page(s) kept out of the page allocator, "
+                        "%u KiB of the heap fenced off\n", h->count, (uint32_t)(before - pmm_free_pages),
+                        (uint32_t)(heap_fenced >> 10));
         }
     }
 #endif
