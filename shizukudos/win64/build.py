@@ -25,6 +25,7 @@ W64 = SHZ / "win64"
 OUT = BUILD / "win64"
 CC = "x86_64-w64-mingw32-gcc"
 DLLTOOL = "x86_64-w64-mingw32-dlltool"
+WINDRES = "x86_64-w64-mingw32-windres"
 NTSYS = SHZ / "kernel64" / "ntsys.h"
 
 COMMON = ["-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
@@ -96,7 +97,8 @@ def build_kernel32(ntdll_names):
     src = sorted((W64 / "kernel32").glob("*.c"))
     names = scan_exports(src, "K32API")
     forwards = [f"{n} = ntdll.{n}" for n in ("RtlCaptureContext", "RtlLookupFunctionEntry", "RtlVirtualUnwind", "RtlUnwindEx",
-                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException") if n in ntdll_names or n == "RtlCaptureContext"]
+                                                 "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException", "RtlCaptureStackBackTrace")
+                if n in ntdll_names or n == "RtlCaptureContext"]
     names = [n for n in names if n not in ("RtlUnwindKernel32",)]
     write_def(OUT / "kernel32.def", "kernel32.dll", names, forwards)
     dll = OUT / "kernel32.dll"
@@ -114,6 +116,11 @@ def build_apps():
         name = src.stem
         exe = OUT / f"{name}.exe"
         extra = []
+        rc = src.with_suffix(".rc")                 # optional resources for the program (tests/<name>.rc)
+        if rc.exists():
+            res = OUT / f"{name}_res.o"
+            run([WINDRES, "-O", "coff", "-i", rc, "-o", res])
+            extra.append(res)
         crt = W64 / "crt"
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
                "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
@@ -143,7 +150,7 @@ def pack_archive(files):
 
 def main():
     argparse.ArgumentParser(description=__doc__).parse_args()
-    for tool in (CC, DLLTOOL):
+    for tool in (CC, DLLTOOL, WINDRES):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     OUT.mkdir(parents=True, exist_ok=True)

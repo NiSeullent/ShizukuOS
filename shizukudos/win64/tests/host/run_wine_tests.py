@@ -35,7 +35,13 @@ COMMON = ["-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin"
 GROUPS = {
     "t_k32_nls": ["k32_nls.c", "nls_core.c", "nls_fmt.c", "k32_utf.c"],
     "t_k32_slist": ["k32_slist.c"],
+    "t_k32_module": ["k32_module.c", "k32_utf.c", "../ntdll/unwind.c", "../ntdll/ntdll_asm.S"],
 }
+DEFINES = {                                       # per-test compiler defines (ntdll sources bind the Rtl* calls of the test to them)
+    "t_k32_module": ["-DSHZ_NTDLL_BUILD", "-D_NTSYSTEM_="],
+}
+SHIM = HERE / "wine_shim.c"                       # k32_nt_error over Wine's ntdll
+WINDRES = "x86_64-w64-mingw32-windres"
 
 
 def build(test, shizuku):
@@ -43,10 +49,15 @@ def build(test, shizuku):
     cmd = [CC, *COMMON, "-DSHZ_NO_EVIDENCE", "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console",
            "-Wl,--image-base,0x140000000", "-I", str(W64 / "include"), "-I", str(W64 / "crt")]
     if shizuku:
-        cmd += ["-D_KERNEL32_="]
+        cmd += ["-D_KERNEL32_="] + DEFINES.get(test, [])
     cmd += [str(W64 / "tests" / f"{test}.c"), str(W64 / "crt" / "shzcrt.c")]
+    rc = W64 / "tests" / f"{test}.rc"
+    if rc.exists():
+        res = OUT / f"{test}_res.o"
+        subprocess.run([WINDRES, "-O", "coff", "-i", str(rc), "-o", str(res)], check=True)
+        cmd.append(str(res))
     if shizuku:
-        cmd += [str(K32 / s) for s in GROUPS[test]]
+        cmd += [str(K32 / s) for s in GROUPS[test]] + [str(SHIM)]
     cmd += ["-lgcc", "-lkernel32", "-lntdll", "-o", str(exe)]
     subprocess.run(cmd, check=True)
     return exe

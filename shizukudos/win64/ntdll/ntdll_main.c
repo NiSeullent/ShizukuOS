@@ -465,16 +465,34 @@ SHZ_EXPORT NTSTATUS NTAPI LdrLoadDll(PWSTR path, PULONG flags, SHZ_UNICODE_STRIN
     return STATUS_SUCCESS;
 }
 
+#define LDR_PINNED 0xFFFFu                                  /* LoadCount of a pinned module: never released */
+
 SHZ_EXPORT NTSTATUS NTAPI LdrUnloadDll(PVOID handle)
 {
-    /* FreeLibrary drops the reference count; the image stays mapped (documented limitation). */
+    /* FreeLibrary drops the reference count; the image stays mapped (documented limitation). A pinned module keeps its count. */
     SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
     LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
     for (l = head->Flink; l != head; l = l->Flink) {
         SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
-        if (e->DllBase == handle) { if (e->LoadCount) --e->LoadCount; return STATUS_SUCCESS; }
+        if (e->DllBase == handle) { if (e->LoadCount && e->LoadCount != LDR_PINNED) --e->LoadCount; return STATUS_SUCCESS; }
     }
     return STATUS_INVALID_PARAMETER;
+}
+
+/* Flags: LDR_ADDREF_DLL_PIN (1) pins the module for the life of the process, otherwise the reference count grows by one. */
+SHZ_EXPORT NTSTATUS NTAPI LdrAddRefDll(ULONG flags, PVOID handle)
+{
+    SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
+    LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
+    if (flags & ~1u) return STATUS_INVALID_PARAMETER;
+    for (l = head->Flink; l != head; l = l->Flink) {
+        SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
+        if (e->DllBase != handle) continue;
+        if (flags & 1u) e->LoadCount = LDR_PINNED;
+        else if (e->LoadCount < LDR_PINNED - 1) __sync_add_and_fetch(&e->LoadCount, 1);
+        return STATUS_SUCCESS;
+    }
+    return STATUS_DLL_NOT_FOUND;
 }
 
 static int str_eq(const char *a, const char *b) { while (*a && *a == *b) { ++a; ++b; } return *a == *b; }
