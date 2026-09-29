@@ -19,6 +19,8 @@
 | `shz.py test --suite host` | — | VERIFIED (5 PASS) |
 | `shz.py test --suite win98-regression` | HOST_TESTED / GUEST_RUN(TCG) | 19 PASS / 0 FAIL / 1 SKIP / 1 BLOCKED |
 | 기존 UEFI x64 부팅, UEFI→32비트 PM 핸드오프 | GUEST_RUN (**TCG**) | PASS |
+| NT 드라이버 호스트: 미수정 x64 `.sys` 3개 로드+DriverEntry, IRP/DPC/타이머/스레드, PCI(edu) BAR/IRQ(공유 INTx 체인)+`pci_claim ntdrv:shzpci`, 사용자 모드 NtLoadDriver→IOCTL (`run_k64_ntdrv.py`) | GUEST_RUN (**TCG**) | PASS 10/10 (provider export 185) |
+| 드라이버 import 커버리지 (`import_coverage.py --ntoskrnl`) | HOST_TESTED | 시험 드라이버 3개 25/25; N2 ReactOS 코퍼스 23개 중 로드 가능 1개(null.sys), ntoskrnl 103/313 |
 
 `win98-regression`의 BLOCKED는 설치된 Windows 98 체크포인트(`build/win98-lab`, 사용자 제공 자산) 부재,
 SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행하지 않음)이다. Notepad++ 성공/실패를 이 문서는 단정하지 않는다.

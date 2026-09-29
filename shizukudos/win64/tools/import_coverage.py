@@ -40,7 +40,8 @@ each function, is the milestone-1 work list.
 
 With --providers the scan covers kernel-mode images instead (.sys/.dll with the native subsystem) and groups their
 imports by provider module (ntoskrnl, hal, ndis, storport, wdfldr/Wdf01000, dxgkrnl, ...); --exports <json> checks them
-against the NT driver host's export list.
+against the NT driver host's export list. --ntoskrnl DIR is the shorthand for --providers --exports
+DIR/ntoskrnl-exports.json, the list win64/build.py emits from kernel64/ntdrv_prov.c (exactly what the loader resolves).
 
 This measures loader-level coverage only. It says nothing about whether the functions behave correctly, and it is
 not a claim that any of these applications runs.
@@ -740,6 +741,9 @@ def main():
     ap.add_argument("--providers", action="store_true", help="kernel-mode images (.sys): imports grouped by provider module")
     ap.add_argument("--exports", type=Path, help="with --providers: export JSON of the NT driver host")
     ap.add_argument("--build", type=Path, default=REPO / "build/shizukudos/win64")
+    ap.add_argument("--ntoskrnl", type=Path, metavar="DIR|JSON",
+                    help="shorthand for --providers --exports <DIR/ntoskrnl-exports.json>: the NT driver host's export list "
+                    "as emitted by win64/build.py (gen_ntoskrnl_exports.py from kernel64/ntdrv_prov.c)")
     ap.add_argument("--json", type=Path, help="combined report (single app: the per-app summary)")
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--next", type=int, default=0, help="print the N highest-ranked unresolved functions across all apps")
@@ -752,6 +756,9 @@ def main():
     ap.add_argument("--startup-chain", action="append", default=[], type=Path, metavar="EXE",
                     help="also run startup_chain.py on this executable (repeatable); written to <summary-dir>/startup_chain.json")
     args = ap.parse_args()
+    if args.ntoskrnl:
+        args.providers = True
+        args.exports = args.ntoskrnl if args.ntoskrnl.is_file() else args.ntoskrnl / "ntoskrnl-exports.json"
     if args.providers:
         return providers_main(args)
 
