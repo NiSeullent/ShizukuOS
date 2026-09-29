@@ -31,6 +31,10 @@ void pci_enable(const pci_dev_t *d, int io, int mem, int bus_master);
 /* Maps [pa, pa+size) uncached at DIRECT_MAP + pa (kernel only) and returns the virtual address; NULL on failure. */
 void *mmio_map(uint64_t pa, uint64_t size);
 void pci_log_devices(void);
+/* Driver binding record: a kernel driver calls pci_claim() once it owns the function, so user mode can list which device
+ * each driver drives (NtQuerySystemInformation class 0x101). pci_claimed_by() returns the driver name or NULL. */
+void pci_claim(const pci_dev_t *d, const char *driver);
+const char *pci_claimed_by(const pci_dev_t *d);
 /* Standalone-profile PIC control for a device's legacy IRQ line (0..15, PCI config byte 0x3c). standalone_irq_vector(irq) is
  * the IDT vector to pass to irq_register(); the kernel sends the EOI after the handler returns. */
 #ifdef SHZ_STANDALONE
