@@ -202,7 +202,9 @@ typedef struct {
  * QUEUEEVENT: out0 = a handle (valid in this process) of a manual-reset event that is signalled exactly while the calling
  * thread's queue has anything to retrieve (sent/posted messages, WM_QUIT, an update region, ...). Timers do not signal it: they
  * are time-based, so waiters combine it with the out1 delay above (user32's MsgWaitForMultipleObjectsEx does). */
-enum { SHZ_TOP_POSTQUIT = 1, SHZ_TOP_POSTTHREAD, SHZ_TOP_QUEUESTATUS, SHZ_TOP_INSEND, SHZ_TOP_QUEUEEVENT };
+enum { SHZ_TOP_POSTQUIT = 1, SHZ_TOP_POSTTHREAD, SHZ_TOP_QUEUESTATUS, SHZ_TOP_INSEND, SHZ_TOP_QUEUEEVENT, SHZ_TOP_STATS };
+/* STATS (diagnostics, used by the leak tests): out0 = live windows (desktop excluded) | classes << 16 | queues << 32 | pending sends << 48;
+ * out1 = pages held by window surfaces and the back buffer | free physical pages << 32. */
 typedef struct {
     uint32_t op, pad;
     uint64_t a, b, c, d;

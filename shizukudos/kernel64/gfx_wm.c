@@ -1294,6 +1294,19 @@ done:
     return st;
 }
 
+/* Diagnostics for the leak tests (NtUserThreadOp STATS). Called with gfx_lock held. */
+uint64_t gfx_stats(uint64_t *pages)
+{
+    uint64_t w = 0, c = 0, q = 0, s = 0;
+    unsigned i;
+    for (i = 1; i < GFX_MAX_WINDOWS; ++i) w += g_win[i].used;
+    for (i = 0; i < GFX_MAX_CLASSES; ++i) c += g_cls[i].used;
+    for (i = 0; i < GFX_MAX_QUEUES; ++i) q += g_queues[i].used;
+    s = gfx_pending_sends();
+    *pages = gfx_pages_in_use() | (pmm_free_count() << 32);
+    return w | (c << 16) | (q << 32) | (s << 48);
+}
+
 /* ---------------------------------------------------------------- housekeeping thread */
 static void gfxd_main(void *arg)
 {
@@ -1319,7 +1332,9 @@ static void gfxd_main(void *arg)
 
 static int32_t wm_init(void)
 {
-    int32_t st = gfx_fb_init();
+    int32_t st;
+    if (wm_ready && g_fb.ready) return STATUS_SUCCESS;                  /* fast path: every GUI system call comes through here */
+    st = gfx_fb_init();
     if (st) return st;
     if (wm_ready) return STATUS_SUCCESS;
     mutex_lock(&wm_init_lock);

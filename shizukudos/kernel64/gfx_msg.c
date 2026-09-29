@@ -35,6 +35,14 @@ static uint64_t next_send_id = 1;
 
 uint32_t gq_time(void) { return (uint32_t)ticks_now(); }
 
+uint64_t gfx_pending_sends(void)
+{
+    uint64_t n = 0;
+    unsigned i;
+    for (i = 0; i < GFX_MAX_SENDS; ++i) n += g_sends[i].id != 0;
+    return n;
+}
+
 /* ---------------------------------------------------------------- queues */
 int gq_thread_dead(gqueue_t *q)
 {
@@ -695,6 +703,9 @@ static int32_t sys_threadop(process_t *cur, uint64_t arg)
         t.out1 = !due ? 0xffffffffull : due <= ticks_now() ? 0 : due - ticks_now();
         break;
     }
+    case SHZ_TOP_STATS:
+        t.out0 = gfx_stats(&t.out1);
+        break;
     case SHZ_TOP_QUEUEEVENT:
         q = gq_current(1);
         if (!q) { st = STATUS_NO_MEMORY; break; }

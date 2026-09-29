@@ -69,6 +69,17 @@ int gdi_obj_type(HGDIOBJ h) { gobj_t *o = obj_slot(h); return o ? o->type : 0; }
 void gdi_obj_free(HGDIOBJ h) { gobj_t *o = obj_slot(h); if (o) { o->type = 0; o->p = 0; o->stock = 0; } }
 static int obj_is_stock(HGDIOBJ h) { gobj_t *o = obj_slot(h); return o && o->stock; }
 
+/* A window backing is being freed (the window is gone): DCs that still point at it must not touch it again. */
+void gdi_forget_backing(backing_t *b)
+{
+    unsigned i;
+    for (i = 1; i < GDI_MAX_OBJECTS; ++i)
+        if ((g_objs[i].type == OBJ_DC || g_objs[i].type == OBJ_MEMDC) && g_objs[i].p) {
+            dc_t *dc = g_objs[i].p;
+            if (!dc->memdc && dc->bk == b) { dc->bk = 0; dc->wcx = dc->wcy = 0; dc->eff_valid = 0; }
+        }
+}
+
 /* ---------------------------------------------------------------- pens, brushes, fonts */
 static HPEN make_pen(int style, int width, COLORREF c, int ext)
 {

@@ -111,6 +111,7 @@ void gdi_dc_touch(dc_t *dc, const RECT *dev);               /* record a changed 
 static inline int dc_lx(const dc_t *dc, int x) { return x - dc->win_org.x + dc->vp_org.x; }
 static inline int dc_ly(const dc_t *dc, int y) { return y - dc->win_org.y + dc->vp_org.y; }
 void gdi_window_flush(backing_t *b);
+void gdi_forget_backing(backing_t *b);                      /* detach every DC from a backing that is about to be freed */
 
 /* pixels */
 static inline uint32_t *bm_px(const bitmap_t *b, int x, int y)

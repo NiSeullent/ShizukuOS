@@ -30,6 +30,7 @@ void gfx_fb_test_pattern(void);
  * PMM mapped contiguously at a reserved kernel address range. Zeroed. */
 void *gfx_pages_alloc(uint64_t bytes);
 void gfx_pages_free(void *p, uint64_t bytes);
+uint64_t gfx_pages_in_use(void);
 /* 8x16 text (the only font): draws `n` UTF-16 code units, glyphs >= 0x80 as '?', clipped to [cx0,cx1)x[cy0,cy1). */
 #define GFX_FONT_W 8
 #define GFX_FONT_H 16
@@ -184,7 +185,9 @@ void gq_wake(gqueue_t *q);                          /* lock held */
 void gq_purge_window(gwin_t *w);                    /* lock held: drop queued messages/timers for a destroyed window */
 void gq_reap_dead(void);                            /* lock held: destroy windows/queues of threads that no longer exist */
 int gq_thread_dead(gqueue_t *q);
+uint64_t gfx_stats(uint64_t *pages);                /* gfx_wm.c: windows | classes<<16 | queues<<32 | sends<<48; pages = arena pages | free PMM pages<<32 */
 int32_t gfx_syscall_msg(process_t *cur, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
 int32_t gq_invalidate(gwin_t *w, const shz_rect_t *rects, uint32_t n, uint32_t flags);
 uint32_t gq_time(void);
+uint64_t gfx_pending_sends(void);
 #endif

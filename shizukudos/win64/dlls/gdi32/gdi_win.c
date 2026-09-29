@@ -162,6 +162,7 @@ DLLAPI VOID WINAPI ShzGdiWindowGone(HWND hwnd)
     for (pp = &g_backings; (b = *pp); pp = &b->next)
         if (b->hwnd == hwnd) {
             *pp = b->next;
+            gdi_forget_backing(b);
             gdi_free_pixels(b->bmp.bits, (uint64_t)b->bmp.w * (uint64_t)b->bmp.h, b->bmp.big);
             gdi_free(b);
             break;

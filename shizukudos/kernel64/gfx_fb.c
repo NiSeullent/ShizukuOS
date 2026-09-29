@@ -101,6 +101,17 @@ void gfx_pages_free(void *p, uint64_t bytes)
     mutex_unlock(&arena_lock);
 }
 
+uint64_t gfx_pages_in_use(void)
+{
+    uint64_t n = 0;
+    uint32_t i;
+    for (i = 0; i < ARENA_PAGES / 32; ++i) {
+        uint32_t v = arena_bits[i];
+        while (v) { v &= v - 1; ++n; }
+    }
+    return n;
+}
+
 /* ---------------------------------------------------------------- BGA programming */
 #ifdef SHZ_STANDALONE
 static void bga_write(uint16_t idx, uint16_t v) { k_outw(BGA_PORT_INDEX, idx); k_outw(BGA_PORT_DATA, v); }
