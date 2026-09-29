@@ -141,6 +141,86 @@ FreeDOS 사용처는 고정된 ke2046 트리를 grep해 얻었다(`ints.FREEDOS_
 (`--accel auto`가 기본이고 legacy 비교와 1 vCPU 음성 시험을 포함한다). 또는 `shz.py build --profile dual-bios-uefi-csm`과
 `shz.py test --suite boot`를 쓴다(두 항목이 추가되었다).
 
+## 2d. UEFI 부트 매니저: BOOT.INI 정책, CSMWrap 대체, Kernel64 직접 부팅 (uefi-bootmgr, `shizukudos/supervisor/loader`)
+
+`\EFI\BOOT\BOOTX64.EFI`(Supervisor 로더, `supervisor/build.py`)가 이제 부트 매니저 역할도 한다. 정책 파일은 `\EFI\SHIZUKU\BOOT.INI`이고
+엄격 파서(`loader/bootini.c`, libc 없음, 호스트에서 ASan/UBSan으로 시험)를 쓴다. 문법은 `key = value` 한 줄에 하나, `;`/`#` 주석 줄,
+LF/CRLF, 최대 4096바이트, 줄당 255자다. 모르는 키, 중복 키, 섹션, 인라인 주석, 제어·비ASCII 바이트, 잘못된 값이 있으면 **파일 전체를
+거부**하고 줄 번호와 이유를 출력한 뒤 아무것도 시작하지 않고 펌웨어로 돌아간다. 파일이 없으면 내장 정책(`mode=auto`)을 쓴다.
+
+| 키 | 값 | 동작 |
+| --- | --- | --- |
+| `mode` | `auto`(기본) | Intel VMX 백엔드를 쓸 수 있으면 Supervisor. 아니면 `auto_kernel64=yes`이고 `\SHZDOS\KERNEL64S.BIN`이 있을 때 Kernel64 직접 부팅(ExitBootServices 전에 거부되면 CSM으로 넘어감). 그 밖에는 CSM |
+| | `supervisor` | Supervisor만. VMX가 없으면 이유를 출력하고 펌웨어로 복귀 |
+| | `csm` | 항상 CSM: 같은 볼륨의 CSMWrap을 `LoadImage`/`StartImage`(ExitBootServices 전). 파일 없음·이미지 아님·Secure Boot 거부·CPU 1개는 각각 이유를 출력하고 복귀 |
+| | `kernel64` | 독립 실행형 Long Mode Kernel64를 **VMX 없이** 직접 부팅 |
+| `csm_path` | `\EFI\SHIZUKU\CSMWRAP.EFI`(기본) | 절대 FAT 경로만(`/`, `.`/`..`, 와일드카드, 드라이브 문자 거부) |
+| `auto_kernel64` | `yes` / `no`(기본) | 위 `auto` 설명 참고 |
+
+`\SHZDOS\KERNEL64.INI`(선택)는 같은 문법에 `cmdline = <출력 가능 ASCII>` 키 하나만 받는다. 값은 잘라내지 않는다(너무 길면 거부).
+
+**Kernel64 직접 부팅(`mode=kernel64`).** `kernel64/standalone/boot32.c`(Multiboot 스텁)가 하는 일을 UEFI에서 한다.
+`\SHZDOS\KERNEL64S.BIN`(`kbuild.py`의 `-DSHZ_STANDALONE` 빌드, 하이퍼콜을 커널 안에서 COM1/PIT/RTC로 처리)을 물리 1 MiB에,
+`\SHZDOS\WIN64.IMG`를 32 MiB에 읽는다. 0x1000–0x4FFF에 부트 페이지 표(항등 + 상위 절반, 2 MiB 페이지), 0x7000에 부트 정보를 둔다.
+이 고정 범위는 쓰기 전에 모두 `AllocatePages(AllocateAddress)`로 확보한다. 그래서 펌웨어가 그곳에 살아 있는 것(로더, 스택, 펌웨어
+페이지 표)이 없음을 보장한다. Kernel64는 물리 [0, ram_size) 전체를 소유하므로 `ram_size`는 **1 MiB에서 시작해 ExitBootServices 뒤
+쓸 수 있는 메모리(Loader/BootServices Code·Data, Conventional, WB)가 끊기지 않는 구간의 끝**이다. 2 MiB 단위로 내리고 커널 한도
+256 MiB로 자른다. 부팅 전에 GetMemoryMap으로 계획하고, `uefi/boot.c`의 재시도(맵 키가 바뀌면 다시 읽음)로 ExitBootServices를 한 뒤
+**최종 맵으로 다시 계산**한다. 그다음 0x5000에 복사한 트램펄린이 CR3/GDT를 바꾸고 CR4=PAE로 맞춘 뒤 RDI=0x7000으로
+0xFFFFFFFF80100000에 진입한다. ExitBootServices 전의 거부 사유는 5단계 페이징(LA57), 파일 없음·크기, KERNEL64.INI 오류, RAM 부족
+(이때 가장 큰 사용 가능 구간도 출력), 고정 범위를 펌웨어가 점유(점유한 descriptor 출력), Supervisor용 `KERNEL64.BIN`을 잘못 둔 경우다.
+모두 펌웨어로 돌아간다.
+
+**OVMF와 S3.** OVMF는 S3가 켜져 있으면 SEC/PEI 임시 RAM(0x800000부터)을 `EfiACPIMemoryNVS`로 예약한다. Kernel64는 이 구간을
+덮을 수 없다. 그러면 1 MiB부터의 연속 RAM이 8 MiB에서 끝나므로 로더가 **거부**한다(NVS를 덮지 않는다). `-global ICH9-LPC.disable_s3=1`이면
+연속 구간이 약 236 MiB다(256 MiB 게스트, 끝은 `EfiRuntimeServicesData`). 실제 PC 펌웨어가 1 MiB 위 낮은 곳에 NVS/예약 구간을 두면
+같은 이유로 거부된다. Kernel64가 구멍 있는 메모리 맵을 받게 하는 것은 커널 쪽 작업이며 이번 범위 밖이다.
+
+**ABI 1.1(`abi/shz_abi.h`, `SHZ_ABI_MINOR` 0→1).** `shz_bootinfo_t` **끝에만** 추가했다(1.0 접두부 176바이트는 그대로, 새 크기 472).
+추가 필드는 `fb_base, fb_size, fb_width, fb_height, fb_pitch(바이트), fb_format(SHZ_FB_RGBX8888/BGRX8888), fb_bpp, cmdline_size,
+cmdline[256]`이고 플래그 `SHZ_BIF_UEFI_DIRECT`를 더했다. 읽는 쪽은 `SHZ_BOOTINFO_HAS(bi, field)`로 작성자의 `size`를 확인한다.
+- Supervisor(`kdom.c`)는 같은 구조체를 0으로 채워 쓴다.
+- `boot32.c`는 Multiboot 명령줄을 그대로 복사한다(QEMU/GRUB은 이미지 경로를 앞에 붙인다).
+- Kernel64 `main.c`는 작성자의 `size`만큼만 복사하고, 명령줄과 GOP 프레임버퍼를 로그로 남긴다.
+- 창 관리자 GOP 백엔드용 **훅**은 `k64_boot_framebuffer()`(`kernel64/k64.h`)다. `gfx_fb.c`가 부를 수 있으며 아직 호출자는 없다.
+  Bochs VBE 경로는 바뀌지 않았다. 프레임버퍼는 direct map 밖에 있으므로 `mmio_map()`으로 매핑해야 한다.
+
+| 항목 (`supervisor/test_bootmgr.py`, QEMU 8.2.2 **TCG**, OVMF 2024.02 실행마다 VARS 사본, 256 MiB) | 증거 | 결과 |
+| --- | --- | --- |
+| BOOT.INI/KERNEL64.INI 파서 호스트 시험 65건(ASan/UBSan) | HOST | PASS |
+| `auto`: Intel(VMX 없음), BOOT.INI 없음 → CSMWrap → SeaBIOS CSM16 → FreeDOS, 실행 후 디스크를 `dos16/verify.py`로 검증 | GUEST_RUN | PASS ×2 (최종 실행 2회) |
+| `csm`(AMD, CRLF·주석·대소문자 혼합 BOOT.INI), `legacy`(같은 MBR 디스크를 SeaBIOS 레거시로) | GUEST_RUN | PASS ×2 (최종 실행 2회) |
+| `supervisor`(VMX 없음 → 거부·복귀), `missing`/`missing-default`(CSMWrap 없음), `malformed-key`/`malformed-mode`, `not-an-image`, `one-cpu` | GUEST_RUN (OVMF `BdsDxe: failed to start … <상태>`로 복귀 확인) | PASS ×2 |
+| `kernel64`: BOOT.INI `mode=kernel64` + KERNEL64.INI, S3 끔 → Kernel64 직접 실행. `tests/run_k64_standalone.py`의 파서·판정 그대로 + WIN64.IMG 영수증의 T_*.EXE 30개 모두 exit 0 + 로더가 최종 맵으로 계산한 RAM = 커널이 본 RAM + ABI 1.1(472바이트, UEFI-direct 플래그) + cmdline 그대로 + GOP 모드 양쪽 일치 | GUEST_RUN | PASS ×2 (최종 실행 2회) |
+| `auto-kernel64`: `auto_kernel64=yes`, VMX 없음 → 같은 Kernel64 실행 | GUEST_RUN | PASS ×2 (최종 실행 2회) |
+| `auto-k64-fallback`: S3 켬 → NVS 때문에 Kernel64 거부(ExitBootServices 전) → CSM → FreeDOS 검증 | GUEST_RUN | PASS ×2 (최종 실행 2회) |
+| `kernel64-nvs` / `-missing` / `-wrong-image` / `-bad-ini`: 거부 후 펌웨어 복귀(Out of Resources / Not Found / Load Error / Invalid Parameter) | GUEST_RUN | PASS ×2 (최종 실행 2회) |
+| vBIOS 감사(`docs/shizukudos10/VBIOS_INT_AUDIT.md`)와 `supervisor/test_vbios.py`(ROM을 QEMU `-bios`로 + `bios.c` 호스트) | HOST + TCG | 53/53 PASS. Supervisor 안의 실행은 **BLOCKED**(VMX 없음) |
+
+최종 상태(커밋 뒤 코드 변경 없음)로 두 번 실행했다.
+1. `shz.py test --suite boot`(세션 `build/shizukudos/bootmgr/runs/20260929T173252-t98y7b6t`): 부트 매니저 17개 사례와 파서가 모두 PASS(검사 290개).
+   같은 스위트에서 vBIOS 53/53, Kernel32·Kernel64 Multiboot 독립 실행(바뀐 `boot32.c` 포함)도 PASS였다. 스위트 전체는
+   25 PASS / 1 FAIL / 3 BLOCKED이다. FAIL 1건은 `DOS16 … [KVM]`으로, `/dev/kvm`이 없어서 생긴 기존 항목이다.
+2. `supervisor/test_bootmgr.py` 단독 실행(세션 `…/runs/20260929T173949-s_2g6s1l`): 17/17 PASS, 파서 65/65 PASS.
+   Kernel64 직접 부팅은 호스트 부하에 따라 SHZ-EXIT까지 39–67초 걸렸다.
+
+이보다 앞선 개발 중 실행 한 번에서는 `auto-kernel64`가 `T_NET_LOOP.EXE` 때문에 FAIL이었다(아래 불안정한 시험 항목).
+T_NET_LOOP은 부트 경로와 무관하다.
+
+한계와 BLOCKED 항목은 다음과 같다.
+- **VMX 경로는 실행하지 않았다.** `mode=auto`에서 VMX가 있을 때 Supervisor를 고르는 분기와 `mode=supervisor` 성공 경로는 이 컨테이너에서
+  BLOCKED다(`/dev/kvm` 없음). TCG만 썼고 KVM과 실제 PC에서는 실행하지 않았다. Secure Boot는 꺼져 있어야 한다(로더와 CSMWrap 모두 서명 없음).
+- Kernel64 직접 부팅은 연속 RAM이 1 MiB부터 64 MiB 이상 있어야 한다. OVMF에서는 S3를 꺼야 한다(위 설명). AP는 펌웨어가 세워 둔 상태로 남는다
+  (Kernel64는 CPU 1개만 쓴다).
+- **불안정한 시험(부트 경로와 무관)**: `T_NET_LOOP.EXE`가 가끔 실패한다. 로더 없이 기존 Multiboot 경로(`run_k64_standalone.py --accel tcg`)
+  에서도 4회 중 1회 접근 위반(`c0000005 at 7ffb000015a8`)으로 죽었고, UEFI 직접 부팅에서는 3회 중 1회 `a socket with a full send buffer is not
+  writable` 검사가 실패했다. 나머지 T_*.EXE 29개와 커널 자체시험은 같은 실행에서 모두 PASS였다. 이 시험이 실패하면 `kernel64`/`auto-kernel64`
+  사례는 FAIL로 기록되며, 가리지 않는다.
+
+재현: `python3 shizukudos/kbuild.py && python3 shizukudos/win64/build.py && python3 shizukudos/dos16/build.py && python3 shizukudos/csm/build.py
+&& python3 shizukudos/supervisor/build.py && python3 shizukudos/supervisor/test_bootmgr.py`(`--case <이름>` 반복 가능).
+`shz.py test --suite boot`는 사례마다 기록을 하나씩 남긴다.
+
 ## 3. 이번 세션에서 실행하지 못한 것 (BLOCKED)
 
 | 항목 | 이유 |
