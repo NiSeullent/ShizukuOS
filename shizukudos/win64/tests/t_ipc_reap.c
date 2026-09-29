@@ -15,7 +15,7 @@ typedef struct { USHORT Length, MaximumLength; PWSTR Buffer; } reap_ustr_t;
 extern LONG WINAPI NtCreateProcessEx(HANDLE *, HANDLE *, reap_ustr_t *, reap_ustr_t *, reap_ustr_t *);
 
 #define ROUNDS 70           /* each loop alone needs more processes than the kernel's 64 slots */
-#define KILL_ROUNDS 20
+#define KILL_ROUNDS 40
 #define KEEP 6              /* exited children whose process handles stay open throughout */
 
 static DWORD WINAPI parked(LPVOID p) { (void)p; Sleep(INFINITE); return 0; }
@@ -78,6 +78,7 @@ int main(int argc, char **argv)
     unsigned i, ok, spawned, waited, codes, ids, killed_ok;
     int have0, have1;
     char args[32];
+    DWORD t_start;
     if (argc >= 3 && !strcmp(argv[1], "child")) return (int)ipc_atou(argv[2]);
     if (argc >= 3 && !strcmp(argv[1], "threads")) return child_threads(ipc_atou(argv[2]));
     if (argc >= 2 && !strcmp(argv[1], "block")) {
@@ -86,6 +87,7 @@ int main(int argc, char **argv)
         return 1;
     }
     printf("T_IPC_REAP: %d + %d + %d child processes (the kernel has 64 process slots)\n", ROUNDS, ROUNDS, KILL_ROUNDS);
+    t_start = GetTickCount();
 
     /* warm-up child: first-use allocations (loader caches, kernel32 state) are not counted as leaks */
     {
@@ -142,10 +144,13 @@ int main(int argc, char **argv)
         HANDLE h = ipc_spawn_self("block", 0, FALSE, 0, 0);
         DWORD code = 0;
         if (!h) { printf("  kill round %u: CreateProcessW failed, error %u\n", i, (unsigned)GetLastError()); break; }
-        Sleep(i & 3);                                   /* sometimes before, sometimes after the child starts waiting */
-        if (TerminateProcess(h, 77 + i) && WaitForSingleObject(h, 20000) == WAIT_OBJECT_0 && GetExitCodeProcess(h, &code) &&
-            code == 77 + i)
-            ++killed_ok;
+        Sleep(i % 6);                                   /* during start-up, while entering the waits, or after */
+        {
+            const BOOL term = TerminateProcess(h, 77 + i);
+            const DWORD w = term ? WaitForSingleObject(h, 20000) : WAIT_FAILED;
+            if (w == WAIT_OBJECT_0 && GetExitCodeProcess(h, &code) && code == 77 + i) ++killed_ok;
+            else printf("  kill round %u: TerminateProcess %d, wait %u, exit code 0x%x\n", i, term, (unsigned)w, (unsigned)code);
+        }
         CloseHandle(h);
     }
     CHECK(killed_ok == KILL_ROUNDS, "%u of %u blocked children killed with TerminateProcess report the given code", killed_ok,
@@ -190,6 +195,6 @@ int main(int argc, char **argv)
         CHECK(dheap < 16384, "kernel heap back within 16 KiB (%lld bytes)", dheap);
         CHECK(dpages < 8, "physical pages back within 8 (%lld)", dpages);
     }
-    printf("T_IPC_REAP: %d failure(s)\n", g_bad);
+    printf("T_IPC_REAP: %d failure(s), %u ms\n", g_bad, (unsigned)(GetTickCount() - t_start));
     return g_bad;
 }

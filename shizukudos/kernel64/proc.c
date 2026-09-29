@@ -200,10 +200,17 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     if (!p->main_thread) p->main_thread = t;
     thread_user_tls_init(p, t);
     if (out) *out = t;
-    if (suspended)
-        t->suspend_count = 1;                   /* CREATE_SUSPENDED: NtResumeThread to zero releases it (ipc_proc.c) */
-    else
-        thread_resume(t);                       /* fully initialised: now it may run */
+    {
+        /* Published last, with interrupts off: process termination (ipc_wake_to_die) resumes a TS_NEW thread only once it
+         * carries a suspend count, i.e. is fully built and counted in threads_alive. A thread still under construction is
+         * left to this function, which resumes it (it then dies at its first instruction if the process is ending). */
+        const uint64_t f = irq_save();
+        if (suspended)
+            t->suspend_count = 1;               /* CREATE_SUSPENDED: NtResumeThread to zero releases it (ipc_proc.c) */
+        else
+            thread_resume(t);                   /* fully initialised: now it may run */
+        irq_restore(f);
+    }
     return 0;
 }
 

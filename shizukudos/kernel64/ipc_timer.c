@@ -39,6 +39,7 @@ static ktimer_t *timer_of(kobject_t *o)
 void ipc_timer_tick(uint64_t now)
 {
     ktimer_t *t;
+    ipc_kill_sweep_tick();                                              /* victims that blocked after their wake-up */
     for (t = g_timers; t; t = t->next) {
         kobject_t *o = t->obj;
         if (!t->armed || t->due_tick > now) continue;

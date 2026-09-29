@@ -868,6 +868,7 @@ static int32_t sys_terminate_thread(process_t *p, uint64_t h, int32_t code)
     if (t && !t->kill_pending) {
         t->kill_code = code;
         t->kill_pending = 1;
+        ipc_kill_started();
         ipc_wake_to_die(t);
     }
     irq_restore(f);

@@ -225,7 +225,10 @@ void ipc_thread_exit(thread_t *t)
 void ipc_wake_to_die(thread_t *t)
 {
     ipc_thread_t *it = t->ipc;
-    if (t->state == TS_NEW) { thread_resume(t); return; }          /* exits at its first instruction (user_thread_main) */
+    if (t->state == TS_NEW) {                                         /* created suspended: exits at its first instruction */
+        if (t->suspend_count > 0) thread_resume(t);                   /* (one still being built is resumed by its creator) */
+        return;
+    }
     if (t->state != TS_BLOCKED) return;
     if ((it && (it->waiting || it->alertable)) || t->wait_multi || t->alert_wait || t->suspended ||
         (!t->wait_sem && t->wake_tick))
@@ -238,7 +241,34 @@ static void kill_wake(thread_t *t, void *ctx)
     ipc_wake_to_die(t);
 }
 
-void ipc_process_terminating(process_t *p) { sched_for_each_thread(kill_wake, p); }
+/* A victim can miss the wake-up above: a thread that has entered a system call but not yet blocked (thread_sleep_ms() and
+ * other waits do not look at the kill flags) is not BLOCKED when it is visited and then blocks - for Sleep(INFINITE), for
+ * good. So once a termination has started, every scheduler tick wakes the victims that are blocked in an interruptible wait
+ * again (ipc_kill_sweep_tick), until no thread that must die is left. */
+static volatile int g_kill_sweep;
+
+void ipc_kill_started(void) { g_kill_sweep = 1; }
+
+static void sweep_one(thread_t *t, void *ctx)
+{
+    if (!t->proc || t->state == TS_ZOMBIE || t->state == TS_FREE || !thread_must_die(t)) return;
+    ++*(unsigned *)ctx;
+    ipc_wake_to_die(t);
+}
+
+void ipc_kill_sweep_tick(void)                          /* interrupts off (ipc_timer_tick) */
+{
+    unsigned victims = 0;
+    if (!g_kill_sweep) return;
+    sched_for_each_thread(sweep_one, &victims);
+    if (!victims) g_kill_sweep = 0;
+}
+
+void ipc_process_terminating(process_t *p)
+{
+    g_kill_sweep = 1;
+    sched_for_each_thread(kill_wake, p);
+}
 
 struct live_count { process_t *p; thread_t *except; unsigned n; };
 static void count_live(thread_t *t, void *ctx)
