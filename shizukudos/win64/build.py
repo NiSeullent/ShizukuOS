@@ -229,6 +229,36 @@ def build_sys_apps(module_libs=()):
     return apps
 
 
+CLANGXX = "clang++"
+LLD_LINK = "lld-link"
+CXX_FLAGS = ["--target=x86_64-pc-windows-msvc", "-std=c++20", "-O1", "-fms-extensions", "-fexceptions", "-fcxx-exceptions",
+             "-fno-stack-protector", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter"]
+
+
+def build_cxx_apps(module_libs=()):
+    """MSVC-ABI C++ tests (tests/t_*.cpp): clang++ -target x86_64-pc-windows-msvc emits Microsoft's x64 C++ exception
+    tables (FH3) and runtime calls, and lld-link imports them from the Shizuku DLLs through their import libraries, so
+    each executable has the shape of an MSVC-built one. Entry point: ShzCxxStart."""
+    apps = {}
+    srcs = sorted((W64 / "tests").glob("t_*.cpp"))
+    if not srcs:
+        return apps
+    for tool in (CLANGXX, LLD_LINK):
+        if not shutil.which(tool):
+            raise SystemExit(f"required tool missing: {tool}")
+    first = [m for m in ("vcruntime140", "vcruntime140_1", "msvcp140", "ucrtbase") if m in module_libs]
+    libs = [*first, *[m for m in module_libs if m not in first], "kernel32", "ntdll"]     # the CRT resolves first, as with MSVC
+    for src in srcs:
+        name = src.stem
+        obj, exe = OUT / f"{name}.obj", OUT / f"{name}.exe"
+        run([CLANGXX, *CXX_FLAGS, "-c", src, "-o", obj])
+        cmd = [LLD_LINK, "/nologo", "/entry:ShzCxxStart", "/subsystem:console", "/nodefaultlib", "/base:0x140000000",
+               f"/out:{exe}", obj, *[OUT / f"lib{lib}.a" for lib in libs]]
+        run(cmd)
+        apps[name] = (exe, cmd)
+    return apps
+
+
 def pack_archive(files):
     """SHZARC01: header, entries {char path[120]; u64 offset; u64 size}, then file data (16-byte aligned)."""
     entries = []
@@ -259,6 +289,7 @@ def main():
     apps = build_apps(sorted(modules))
     setup_exe, _ = build_setup(sorted(modules))
     sys_apps = build_sys_apps(sorted(modules))
+    apps.update(build_cxx_apps(sorted(modules)))
     files = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
         files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))

@@ -127,7 +127,7 @@ api-ms-win-core-winrt-robuffer-l1-1-0      wintypes.dll
 api-ms-win-core-winrt-roparameterizediid-l1-1-0 combase.dll
 api-ms-win-core-winrt-string-l1-1-1        combase.dll
 
-# ---- Universal C runtime (ucrtbase.dll: not shipped by Shizuku, so every crt contract fails like a missing DLL)
+# ---- Universal C runtime (ucrtbase.dll, win64/dlls/ucrtbase; imports of names it does not export still fail per name)
 api-ms-win-crt-conio-l1-1-0                ucrtbase.dll
 api-ms-win-crt-convert-l1-1-0              ucrtbase.dll
 api-ms-win-crt-environment-l1-1-0          ucrtbase.dll
