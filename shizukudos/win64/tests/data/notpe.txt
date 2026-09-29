@@ -1,0 +1,2 @@
+This file is not a PE image.
+It exists so that version.dll can be shown to reject non-executable input.
