@@ -379,7 +379,9 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
         process_t *q;
         uint64_t f;
         memset(&s, 0, sizeof s);
-        s.total_pages = pmm_total_count(); s.free_pages = pmm_free_count();
+        /* PhysicalTotal: the RAM the machine has, as GlobalMemoryStatusEx reports it (NtQuerySystemInformation 0x100), not
+         * only the page allocator's pool (which starts above the kernel image and heap) */
+        s.total_pages = mem_ram_top() / 4096; s.free_pages = pmm_free_count();
         f = irq_save();
         s.commit_bytes = system_commit();
         irq_restore(f);
