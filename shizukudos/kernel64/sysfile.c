@@ -347,14 +347,26 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
     }
 }
 
-struct dirinfo {                                         /* FILE_BOTH_DIR_INFORMATION prefix */
-    uint32_t next_entry, file_index;
-    uint64_t create, access, write, change, eof, alloc;
-    uint32_t attrs, name_len, ea_size;
-    uint8_t short_len, pad;
-    uint16_t short_name[12];
-    /* WCHAR FileName[] follows */
-};
+/* NtQueryDirectoryFile information classes, laid out as the Windows ABI defines them (x64 offsets of FileName):
+ *   1 FileDirectoryInformation 64, 2 FileFullDirectoryInformation 68, 3 FileBothDirectoryInformation 94,
+ *   12 FileNamesInformation 12, 37 FileIdBothDirectoryInformation 104, 38 FileIdFullDirectoryInformation 80.
+ * Common prefix (all but 12): NextEntryOffset 0, FileIndex 4, Creation/LastAccess/LastWrite/Change 8..39, EndOfFile 40,
+ * AllocationSize 48, FileAttributes 56, FileNameLength 60; EaSize 64 (2,3,37,38); FileId 96 (37) or 72 (38). */
+static uint32_t dirinfo_name_offset(uint32_t cls)
+{
+    switch (cls) {
+    case 1: return 64;
+    case 2: return 68;
+    case 3: return 94;
+    case 12: return 12;
+    case 37: return 104;
+    case 38: return 80;
+    default: return 0;
+    }
+}
+
+static void put32(uint8_t *e, uint32_t off, uint32_t v) { memcpy(e + off, &v, 4); }
+static void put64(uint8_t *e, uint32_t off, uint64_t v) { memcpy(e + off, &v, 8); }
 
 static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb_unused)
 {
@@ -362,18 +374,18 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
     const uint64_t len = (uint64_t)(uint32_t)stack_arg(p, r, 7);
     const uint32_t cls = (uint32_t)stack_arg(p, r, 8);
     const int single = (int)(stack_arg(p, r, 9) & 0xff), restart = (int)(stack_arg(p, r, 11) & 0xff);
+    const uint32_t name_off = dirinfo_name_offset(cls);
     file_t *f = file_of(p, handle, 0);
     fsnode_t *c;
     uint64_t idx = 0, written = 0, prev_at = 0;
     (void)iosb_unused;
     if (!f || !f->node) return STATUS_INVALID_HANDLE;
     if (!f->node->is_dir) return STATUS_NOT_A_DIRECTORY;
-    if (cls != 1 && cls != 3 && cls != 12) return STATUS_INVALID_INFO_CLASS;
+    if (!name_off) return STATUS_INVALID_INFO_CLASS;
     if (restart) f->dir_index = 0;
     for (c = f->node->child; c; c = c->sibling) {
-        uint8_t entry[sizeof(struct dirinfo) + 96 * 2 + 8];
-        struct dirinfo *d = (struct dirinfo *)entry;
-        uint16_t *wname = (uint16_t *)(entry + sizeof *d);
+        uint8_t entry[104 + 96 * 2 + 8];
+        uint16_t wname[96];
         uint32_t nchars = 0, size;
         if (c->delete_pending) continue;
         if (idx++ < f->dir_index) continue;
@@ -381,15 +393,25 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
             const char *s = c->name;
             while (*s && nchars < 95) wname[nchars++] = (uint8_t)*s++;
         }
-        memset(d, 0, sizeof *d);
-        d->file_index = (uint32_t)idx;
-        d->create = 132000000000000000ull + c->ctime * 10000;
-        d->write = d->change = d->access = 132000000000000000ull + c->mtime * 10000;
-        d->eof = c->size;
-        d->alloc = (c->size + 4095) & ~4095ull;
-        d->attrs = c->attrs;
-        d->name_len = nchars * 2;
-        size = (uint32_t)(sizeof *d + nchars * 2);
+        memset(entry, 0, name_off);
+        put32(entry, 4, (uint32_t)idx);
+        if (cls == 12) {
+            put32(entry, 8, nchars * 2);
+        } else {
+            const uint64_t mt = 132000000000000000ull + c->mtime * 10000;
+            put64(entry, 8, 132000000000000000ull + c->ctime * 10000);
+            put64(entry, 16, mt);
+            put64(entry, 24, mt);
+            put64(entry, 32, mt);
+            put64(entry, 40, c->size);
+            put64(entry, 48, (c->size + 4095) & ~4095ull);
+            put32(entry, 56, c->attrs);
+            put32(entry, 60, nchars * 2);
+            if (cls == 37) put64(entry, 96, idx);
+            if (cls == 38) put64(entry, 72, idx);
+        }
+        memcpy(entry + name_off, wname, nchars * 2);
+        size = name_off + nchars * 2;
         size = (size + 7) & ~7u;
         if (written + size > len) {
             if (!written) return STATUS_BUFFER_OVERFLOW;
@@ -399,7 +421,7 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
             uint32_t next = (uint32_t)(written - prev_at);
             if (copy_to_user(p, buf + prev_at, &next, 4)) return STATUS_ACCESS_VIOLATION;
         }
-        if (copy_to_user(p, buf + written, entry, sizeof *d + nchars * 2)) return STATUS_ACCESS_VIOLATION;
+        if (copy_to_user(p, buf + written, entry, name_off + nchars * 2)) return STATUS_ACCESS_VIOLATION;
         prev_at = written;
         written += size;
         ++f->dir_index;
