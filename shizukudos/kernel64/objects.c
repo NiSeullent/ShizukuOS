@@ -145,6 +145,9 @@ int32_t handle_close(process_t *p, uint64_t handle)
     } else if (o->type == OB_SOCKET) {
         extern void net_socket_handle_closing(kobject_t *o);   /* net_sock.c: tears the socket down with its last handle */
         net_socket_handle_closing(o);
+    } else if (o->type == 0x50 /* OB_DEVICE */) {
+        extern void ntdrv_device_handle_closing(kobject_t *o); /* ntdrv_io.c: IRP_MJ_CLOSE on the last handle */
+        ntdrv_device_handle_closing(o);
     }
     ipc_handle_closed(p, o);
     ob_deref(o);

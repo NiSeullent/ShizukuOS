@@ -77,7 +77,7 @@
     X(NtIsProcessInJob, 0xc6) X(NtSetInformationObject, 0xc7) \
     X(NtReadVirtualMemory, 0xc8) X(NtWriteVirtualMemory, 0xc9) X(NtShzQueryKernelStats, 0xca) \
     X(NtQueryIoCompletion, 0xcb) X(NtOpenEvent, 0xcc) X(NtOpenMutant, 0xcd) X(NtOpenSemaphore, 0xce) \
-    X(NtOpenTimer, 0xcf) X(NtOpenIoCompletion, 0x100) X(NtDeviceIoControlFile, 0x101) \
+    X(NtOpenTimer, 0xcf) X(NtOpenIoCompletion, 0x100) /* 0x101: NtDeviceIoControlFile is the NT driver host's 0xe1 */ \
     X(NtNotifyChangeDirectoryFile, 0x102) X(NtQueryTimer, 0x103) X(NtCreateSection, 0x104)
 
 /* Display/GPU (kernel64/gpu_sys.c; structures in win64/include/shzgpu.h) */
@@ -97,6 +97,12 @@
     X(NtShzBlkQuery, 0xf0) X(NtShzBlkRead, 0xf1) X(NtShzBlkWrite, 0xf2) X(NtShzBlkFlush, 0xf3) \
     X(NtShzBlkBatch, 0xf4) X(NtShzBlkControl, 0xf5) X(NtShzBlkDiscard, 0xf6)
 
+/* NT driver host (0xe0-0xef): reaching a loaded .sys from user mode. NtCreateFile("\\??\\Name")
+ * and NtRead/NtWriteFile route to IRPs through the file-object hooks; these two are the device
+ * control and driver-load services the host adds. */
+#define SYSCALL_LIST_NTDRV(X) \
+    X(NtLoadDriver, 0xe0) X(NtDeviceIoControlFile, 0xe1)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
@@ -108,6 +114,7 @@ enum {
     SYSCALL_LIST_GPU(X)
     SYSCALL_LIST_SETUP(X)
     SYSCALL_LIST_BLK(X)
+    SYSCALL_LIST_NTDRV(X)
     SYSCALL_LIST_IPC_MISC(X)
     SYSCALL_LIST_IPC(X)
 #undef X

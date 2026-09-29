@@ -11,6 +11,11 @@ struct iosb { uint64_t status; uint64_t information; };
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 extern int k32_lock_conflict(const file_t *f, uint64_t off, uint64_t len, int write);       /* sysk32.c: byte-range locks */
 extern void k32_locks_release(const file_t *f);
+/* NT driver host hooks (ntdrv_io.c): open a \Device / \??\ device file, and route reads/writes
+ * on a device handle to the IRP path. ntdrv_open_device_file returns 0x7fff0002 for a name that
+ * is not a device, so the normal file-system path continues. */
+extern int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, uint64_t phandle, uint64_t iosb);
+extern int ntdrv_file_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t handle, int32_t *st_out);
 
 #define IO_OPENED 1
 #define IO_CREATED 2
@@ -178,6 +183,10 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
         if (copy_to_user(p, a1, &(uint64_t){h}, 8)) return STATUS_ACCESS_VIOLATION;
         set_iosb(p, a4, STATUS_SUCCESS, IO_OPENED);
         return STATUS_SUCCESS;
+    }
+    {   /* NT driver host: a "\Device\..." / "\??\..." / "\DosDevices\..." name opens a device (IRP_MJ_CREATE) */
+        int32_t dst = ntdrv_open_device_file(p, path, (uint32_t)a2, a1, a4);
+        if (dst != (int32_t)0x7fff0002) return dst;
     }
     n = fs_lookup(path);
     if (n && n->delete_pending) n = 0;
@@ -711,6 +720,10 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
                          int *handled)
 {
     *handled = 1;
+    if (num == SYS_NtReadFile || num == SYS_NtWriteFile) {      /* device handle? -> IRP path */
+        int32_t dst;
+        if (ntdrv_file_dispatch(p, r, num, a1, &dst)) return dst;
+    }
     switch (num) {
     case SYS_NtCreateFile: return sys_create_file(p, r, a1, a2, a3, a4, 0);
     case SYS_NtOpenFile: return sys_create_file(p, r, a1, a2, a3, a4, 1);

@@ -720,7 +720,16 @@ int32_t ipc_io_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
         if (mine) return st;
         break;
     }
-    case SYS_NtFsControlFile: case SYS_NtDeviceIoControlFile: return file_control(p, r, num, a1, a2, a3, a4);
+    case SYS_NtFsControlFile: return file_control(p, r, num, a1, a2, a3, a4);
+    case SYS_NtDeviceIoControlFile: {                   /* files, pipes and sockets here; driver devices: ntdrv_io.c */
+        kobject_t *o;
+        uint32_t type;
+        if (a1 == CURRENT_PROCESS_HANDLE || a1 == CURRENT_THREAD_HANDLE || ipc_ref_handle(p, a1, 0, &o, 0)) break;
+        type = o->type;
+        ob_deref(o);
+        if (type != OB_FILE && type != OB_NPIPE && type != OB_SOCKET) break;
+        return file_control(p, r, num, a1, a2, a3, a4);
+    }
     case SYS_NtCreateIoCompletion: return sys_create_port(p, a1, a2, a3, a4);
     case SYS_NtSetIoCompletion: return sys_set_port(p, a1, a2, a3, a4, (uint64_t)stack_arg(p, r, 5));
     case SYS_NtRemoveIoCompletion: return sys_remove_port(p, r, a1, a2, a3, a4);

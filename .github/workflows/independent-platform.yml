@@ -211,7 +211,11 @@ jobs:
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
             gcc gcc-multilib clang libclang-rt-18-dev mingw-w64 nasm make binutils python3 python3-pil \
-            qemu-system-x86 ovmf mtools dosfstools xorriso
+            qemu-system-x86 ovmf mtools dosfstools xorriso \
+            python3-pefile lld llvm flex bison
+          # python3-pefile: independent PE reader for test_pe_real.py; lld: lld-link for the MSVC-ABI C++ tests
+          # (tests/t_*.cpp) and test_pe_real's fixtures; llvm: llvm-dlltool (test_pe_real); flex/bison: Wine's host
+          # configure (widl/wrc) for the Wine DLL ports
 
       - name: Host models (PE32+ parser, inter-kernel ABI)
         run: |
@@ -231,6 +235,13 @@ jobs:
         timeout-minutes: 15
         run: python3 shizukudos/tests/run_k64_standalone.py --accel tcg --timeout 600
 
+      - name: NT driver host under QEMU TCG (load unmodified .sys, IRP/DPC/timer/PCI + user reachability)
+        timeout-minutes: 15
+        run: python3 shizukudos/tests/run_k64_ntdrv.py --accel tcg --timeout 600
+
+      - name: Measure driver import coverage against the provider export tables
+        run: python3 shizukudos/win64/tools/import_coverage.py build/shizukudos/win64/ntdrv --ntoskrnl build/shizukudos/win64/ntdrv
+
       - name: Host suite (DOS16 reproducibility, upstream pins)
         # Fetches the pinned FreeDOS trees and the Open Watcom snapshot (network).
         timeout-minutes: 20
@@ -243,6 +254,7 @@ jobs:
           name: shizukudos10-tcg-evidence
           path: |
             build/shizukudos/kernel64s/run/
+            build/shizukudos/kernel64s/ntdrv-run/
             build/shizukudos/kernel32s/run/
             build/shizukudos/results/
           if-no-files-found: warn
