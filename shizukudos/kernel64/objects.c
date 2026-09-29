@@ -36,13 +36,21 @@ kobject_t *ob_create(uint32_t type, const char *name)
     return o;
 }
 
-void ob_ref(kobject_t *o) { ++o->refs; }
+/* Reference counts and handle-table slots are updated with interrupts off: the kernel is preemptible, and several threads
+ * of one process (or of different processes sharing an object) may race on them. */
+void ob_ref(kobject_t *o) { const uint64_t f = irq_save(); ++o->refs; irq_restore(f); }
+
+/* Registry key objects: drop the key node's reference (registry.c). May block on the registry lock, so it runs after the
+ * interrupt-off section below and ob_deref() must not be called with irqs disabled or with the registry lock held. */
+extern void reg_key_object_free(kobject_t *o);
 
 void ob_deref(kobject_t *o)
 {
     uint64_t f = irq_save();
+    int last;
     KASSERT(o->refs > 0);
-    if (--o->refs == 0) {
+    last = --o->refs == 0;
+    if (last) {
         kobject_t **pp;
         for (pp = &named_head; *pp; pp = &(*pp)->next_named)
             if (*pp == o) { *pp = o->next_named; break; }
@@ -51,9 +59,12 @@ void ob_deref(kobject_t *o)
             for (i = 0; i < timer_count; ++i)
                 if (timers_head[i] == o) { timers_head[i] = timers_head[--timer_count]; break; }
         }
-        kfree(o);
     }
     irq_restore(f);
+    if (last) {
+        if (o->type == OB_KEY) reg_key_object_free(o);
+        kfree(o);
+    }
 }
 
 kobject_t *ob_find_named(uint32_t type, const char *name)
@@ -71,17 +82,20 @@ kobject_t *ob_find_named(uint32_t type, const char *name)
 /* ---------------------------------------------------------------- handles */
 int32_t handle_insert(process_t *p, kobject_t *o, uint32_t access, uint32_t *h_out)
 {
+    const uint64_t f = irq_save();
     unsigned i;
     for (i = 0; i < MAX_HANDLES; ++i)
         if (!p->handles[i].obj) {
             p->handles[i].obj = o;
             p->handles[i].access = access;
             p->handles[i].inherit = 0;
-            ob_ref(o);
+            ++o->refs;
             ++p->handle_count;
             *h_out = (i + 1) * 4;
+            irq_restore(f);
             return STATUS_SUCCESS;
         }
+    irq_restore(f);
     return STATUS_NO_MEMORY;
 }
 
@@ -94,15 +108,38 @@ kobject_t *handle_lookup(process_t *p, uint64_t handle, uint32_t type)
     return o;
 }
 
+int32_t handle_ref(process_t *p, uint64_t handle, uint32_t type, kobject_t **out, uint32_t *access)
+{
+    const uint64_t f = irq_save();
+    kobject_t *o = 0;
+    if (!(handle & 3) && handle && handle <= MAX_HANDLES * 4ull)
+        o = p->handles[handle / 4 - 1].obj;
+    if (!o) { irq_restore(f); return STATUS_INVALID_HANDLE; }
+    if (type && o->type != type) { irq_restore(f); return STATUS_OBJECT_TYPE_MISMATCH; }
+    ++o->refs;
+    if (access) *access = p->handles[handle / 4 - 1].access;
+    irq_restore(f);
+    *out = o;
+    return STATUS_SUCCESS;
+}
+
 int32_t handle_close(process_t *p, uint64_t handle)
 {
-    kobject_t *o = handle_lookup(p, handle, 0);
-    if (!o) return STATUS_INVALID_HANDLE;
-    p->handles[handle / 4 - 1].obj = 0;
+    kobject_t *o;
+    const uint64_t f = irq_save();
+    o = 0;
+    if (!(handle & 3) && handle && handle <= MAX_HANDLES * 4ull)
+        o = p->handles[handle / 4 - 1].obj;
+    if (!o) { irq_restore(f); return STATUS_INVALID_HANDLE; }
+    p->handles[handle / 4 - 1].obj = 0;                 /* the slot is free before anything else can look at it */
     --p->handle_count;
+    irq_restore(f);
     if (o->type == OB_FILE) {
         extern void file_object_closed(kobject_t *o);
         file_object_closed(o);
+    } else if (o->type == OB_SOCKET) {
+        extern void net_socket_handle_closing(kobject_t *o);   /* net_sock.c: tears the socket down with its last handle */
+        net_socket_handle_closing(o);
     }
     ob_deref(o);
     return STATUS_SUCCESS;
