@@ -209,7 +209,7 @@ def main():
     qemu_out = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     ev, exit_code = base.parse(serial)
-    checks = base.evaluate(serial, ev, exit_code, proc.returncode)
+    checks = base.evaluate(serial, ev, exit_code, proc.returncode, memory=args.memory)
     e = lambda s: ev.get(s, 0)  # noqa: E731
     checks.append(base.check("AHCI: guest read sector 0 (crc32 and sector count match the host image)",
                              e(13) == (expect_sectors << 32) | expect_crc0,
