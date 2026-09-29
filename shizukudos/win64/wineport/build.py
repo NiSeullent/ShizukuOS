@@ -99,13 +99,39 @@ def ensure_tree(name):
     return dest
 
 
-def ensure_wine_host(wine):
-    """Host configure + the tools and generated headers the PE build needs (widl, wrc, include/*.h from *.idl)."""
+def wine_keep_paths(cfg):
+    """The part of the Wine working tree the PE build reads (git sparse-checkout --no-cone patterns): the root files
+    (licences, VERSION), include/, tools/, nls/ (the code page tables wrc loads), winecrt0, the .spec of each
+    delay-imported DLL, and the directories and files of the enabled modules, static libraries and image files that
+    come from Wine."""
+    keep = ["/*", "!/*/", "/include/", "/tools/", "/nls/", "/dlls/winecrt0/"]     # nls/: wrc's code page tables
+    for lib in cfg.get("static_libs", {}).values():
+        if lib.get("upstream", "wine") == "wine":
+            keep.append(f"/{lib['dir']}/")
+    for m in cfg["modules"]:
+        if m.get("upstream", "wine") == "wine" and not m.get("disabled"):
+            keep.append(f"/{m.get('dir', 'dlls/' + m['name'])}/")
+            keep += [f"/dlls/{d}/{d}.spec" for d in m.get("delay_imports", [])]
+            for f in m.get("extra_sources", []):             # the file and the headers next to it
+                keep += [f"/{f}", f"/{f.rsplit('/', 1)[0]}/*.h"]
+    keep += [f"/{f['path']}" for f in cfg.get("image_files", []) if f.get("upstream", "wine") == "wine"]
+    return keep
+
+
+def ensure_wine_host(wine, keep):
+    """Host configure + the tools and generated headers the PE build needs (widl, wrc, include/*.h from *.idl), then
+    the working tree is reduced to `keep` (about 60 MB instead of 415 MB). Wine's configure runs makedep over every
+    directory's sources, so configure and the tool build see the full checkout (restored from the local objects of the
+    shallow clone if it was reduced before); nothing later needs the rest of the tree."""
+    need = [wine / "tools/widl/widl", wine / "tools/wrc/wrc", wine / "include/dwrite_3.h", wine / "include/wincrypt.h"]
+    sparse = git(wine, "config", "--bool", "core.sparseCheckout", check=False) == "true"
+    if sparse and (not (wine / "Makefile").exists() or not all(p.exists() for p in need)):
+        git(wine, "sparse-checkout", "disable")
+        sparse = False
     if not (wine / "Makefile").exists():
         log = UPSTREAM / "wine-configure.log"
         with open(log, "w") as f:
             subprocess.run(["./configure", *WINE_CONFIGURE], cwd=wine, stdout=f, stderr=subprocess.STDOUT, check=True)
-    need = [wine / "tools/widl/widl", wine / "tools/wrc/wrc", wine / "include/dwrite_3.h", wine / "include/wincrypt.h"]
     if not all(p.exists() for p in need):
         log = UPSTREAM / "wine-headers.log"
         with open(log, "w") as f:
@@ -113,6 +139,8 @@ def ensure_wine_host(wine):
                            stderr=subprocess.STDOUT, check=True)
             idls = sorted(p.relative_to(wine).with_suffix(".h") for p in (wine / "include").glob("*.idl"))
             subprocess.run(["make", f"-j{JOBS}", "-k", *map(str, idls)], cwd=wine, stdout=f, stderr=subprocess.STDOUT)
+    if not sparse or git(wine, "sparse-checkout", "list", check=False).splitlines() != keep:
+        git(wine, "sparse-checkout", "set", "--no-cone", *keep)
 
 
 def patch_files(patch):
@@ -646,7 +674,7 @@ def build(only=None):
     for up in cfg.get("upstreams", ["wine"]):
         trees[up] = ensure_tree(up)
     wine = trees["wine"]
-    ensure_wine_host(wine)
+    ensure_wine_host(wine, wine_keep_paths(cfg))
     patches = {up: apply_patches(up, tree) for up, tree in trees.items()}
     WOUT.mkdir(parents=True, exist_ok=True)
     (WOUT / "lib").mkdir(exist_ok=True)
