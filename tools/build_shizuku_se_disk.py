@@ -168,7 +168,8 @@ def main() -> int:
     parser.add_argument("--loader", type=Path)
     parser.add_argument("--csmwrap", type=Path)
     parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default="auto")
-    parser.add_argument("--size-mib", type=int, default=DISK_MIB)
+    parser.add_argument("--size-mib", type=int, default=0,
+                        help=f"disk size (default: fitted to the content in 32 MiB steps, at least {DISK_MIB} MiB)")
     args = parser.parse_args()
     disk = (args.output or BUILD / DISK_NAME).resolve()
     work = BUILD / "shizuku-second-edition-disk-work"
@@ -188,7 +189,9 @@ def main() -> int:
     artifacts = iso_builder.build_components(work / "components")
     floppy = iso_builder.build_floppy(work / "components", artifacts)
     members = disk_members(loader, csm, shzdos, k64, args.boot_mode, floppy, artifacts, setup_files, store, syslinux)
-    need = sum(len(d) for d in members.values()) + 8 * se_media.MIB
+    need = sum(len(d) for d in members.values()) * 11 // 10 + 8 * se_media.MIB   # + FAT32 overhead and slack
+    if not args.size_mib:
+        args.size_mib = max(DISK_MIB, -(-(need + se_media.MIB) // (32 * se_media.MIB)) * 32)
     if need > (args.size_mib - 1) * se_media.MIB:
         raise RuntimeError(f"content needs about {need >> 20} MiB; use --size-mib larger than {args.size_mib}")
     partial = disk.with_suffix(".img.partial")

@@ -43,6 +43,8 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import gzip
+import io
 import hashlib
 import importlib.util
 import json
@@ -318,13 +320,58 @@ MIB = 1024 * 1024
 # these get licences and corresponding source on the ISO; other manifest upstreams (e.g. the driver corpus) are not
 # shipped and not required to be fetched.
 MEDIA_UPSTREAMS = ("freedos-kernel", "freedos-freecom", "csmwrap", "syslinux")
+# Shipped only when WIN64.IMG contains the Wine port (shizukudos/win64/wineport): Wine-derived DLLs (LGPL-2.1-or-later,
+# combined under GPL-2.0), FreeType inside dwrite.dll (GPL-2.0-or-later), Noto fonts (OFL-1.1) and Wine's Tahoma fonts.
+WINEPORT_UPSTREAMS = ("wine", "freetype", "noto-fonts")
+# These trees are patched and built in place (wineport/build.py), so their source comes from the pinned commit's git
+# objects (git archive: unmodified files), not from the working tree. Wine: the files the build checks out (its
+# sparse-checkout set) plus the FontForge sources of the two fonts it ships. Noto: OFL fonts shipped unmodified, so the
+# licence texts only.
+GIT_ARCHIVE_EXTRA = {"wine": ["fonts/tahoma.sfd", "fonts/tahomabd.sfd"]}
+LICENCE_ONLY = {"noto-fonts"}
+
+
+def wineport_shipped() -> bool:
+    receipt = json.loads((SHZ10_BUILD / "win64" / "build-result.json").read_text(encoding="utf-8"))
+    return bool(receipt.get("wineport"))
 
 
 def media_upstreams(manifest: dict) -> dict:
-    missing = [name for name in MEDIA_UPSTREAMS if name not in manifest["upstreams"]]
+    names = MEDIA_UPSTREAMS + (WINEPORT_UPSTREAMS if wineport_shipped() else ())
+    missing = [name for name in names if name not in manifest["upstreams"]]
     if missing:
         raise RuntimeError(f"upstream/manifest.json lacks {missing}, which the media ship")
-    return {name: manifest["upstreams"][name] for name in MEDIA_UPSTREAMS}
+    return {name: manifest["upstreams"][name] for name in names}
+
+
+def git_blob(tree: Path, path: str) -> bytes:
+    return subprocess.run(["git", "-C", str(tree), "show", f"HEAD:{path}"], capture_output=True, check=True).stdout
+
+
+def pristine_upstream(name: str, spec: dict) -> tuple[dict[str, bytes], bytes | None]:
+    """Licence files and (unless LICENCE_ONLY) a source tarball of an upstream that is patched/built in place: both from
+    the pinned commit's objects, so local patches and build products never enter them."""
+    tree = BUILD / "upstream" / name
+    head = git_output("rev-parse", "HEAD", cwd=tree)
+    if head != spec["commit"]:
+        raise RuntimeError(f"{tree} is at {head or 'unknown'}, manifest pins {spec['commit']}")
+    licences = {}
+    paths = list(spec.get("license_files", []))
+    for info in spec.get("bundled_components_used", {}).values():
+        paths += info.get("license_files", [])
+    for path in paths:
+        licences[path] = git_blob(tree, path)
+    if name in LICENCE_ONLY:
+        return licences, None
+    listing = subprocess.run(["git", "-C", str(tree), "ls-files", "-t", "-z"], capture_output=True, check=True).stdout
+    files = sorted(entry[2:].decode() for entry in listing.split(b"\0") if entry.startswith(b"H "))  # checked out
+    files += [f for f in GIT_ARCHIVE_EXTRA.get(name, []) if f not in files]
+    tar = subprocess.run(["git", "-C", str(tree), "archive", "--format=tar", f"--prefix={name}-{spec['commit'][:12]}/",
+                          "HEAD", "--", *files], capture_output=True, check=True).stdout
+    buffer = io.BytesIO()
+    with gzip.GzipFile(filename="", mode="wb", fileobj=buffer, compresslevel=9, mtime=0) as gz:
+        gz.write(tar)
+    return licences, buffer.getvalue()
 
 
 def build_shizukudos10(reuse: bool) -> dict[str, Path]:
@@ -571,6 +618,20 @@ def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], 
         "FreeDOS is built from source with local patches, CSMWrap from the pinned",
         "tree without patches, syslinux is the unmodified Ubuntu build. Licence",
         "texts are in LICENSES\\.",
+    ]
+    if "wine" in tar_names:
+        lines += [
+            "",
+            "WIN64.IMG (win64\\WIN64.IMG, SHZ\\K64\\WIN64.IMG, SHZDOS\\WIN64.IMG in efiboot.img)",
+            "also carries the Wine port (shizukudos/win64/wineport): system DLLs built",
+            "from the pinned Wine tree with local patches (LGPL-2.1-or-later; linked",
+            "with GPL-2.0-only Shizuku support code, the combined DLLs are under",
+            "GPL-2.0 as LGPL-2.1 section 3 permits), FreeType inside dwrite.dll (used",
+            "under GPL-2.0-or-later), Wine's Tahoma fonts (LGPL-2.1-or-later, sources",
+            "fonts/tahoma*.sfd in the Wine tarball) and Noto Sans/Serif/Sans Mono",
+            "(OFL-1.1, unmodified) under \\SHZ\\FONTS.",
+        ]
+    lines += [
         "",
         "Corresponding source, on this disc in SOURCE\\:",
     ]
@@ -635,6 +696,19 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[s
                 raise RuntimeError(f"no source staging for the debian-binary-packages upstream {name}")
             tar_names[name] = f"{name}\\ (Debian source package: .dsc, .orig.tar.xz, .debian.tar.xz)"
             continue
+        if name in WINEPORT_UPSTREAMS:
+            licences, tarball = pristine_upstream(name, spec)
+            for path, data in licences.items():
+                payload[f"{SHZ10_DIR}/LICENSES/{name}-{path.replace('/', '-')}.txt"] = data
+            if tarball is None:
+                tar_names[name] = "(none needed: OFL-1.1 fonts shipped unmodified; licence texts in LICENSES\\)"
+            else:
+                tar_name = f"{name}-{spec['commit'][:12]}.tar.gz"
+                payload[f"{SHZ10_DIR}/SOURCE/{tar_name}"] = tarball
+                tar_names[name] = tar_name + (" (the files the Wine port build reads, and the fonts' .sfd sources; "
+                                              "patches in shizukudos-source.tar.gz: shizukudos/win64/wineport/patches)"
+                                              if name == "wine" else "")
+            continue
         tree = pinned_upstream_tree(name, spec)
         for path in license_files(tree, spec):
             label = path.relative_to(tree).as_posix().replace("/", "-")
@@ -652,7 +726,10 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[s
     top = "win98-modern-shizukudos10-source"
     source_entries: list[tuple[str, Path]] = [
         (top, ROOT), (f"{top}/docs", ROOT / "docs"), (f"{top}/tools", ROOT / "tools")]
-    for relative in ("shizukudos", "docs/shizukudos10", "licenses", "tools/shizuku_se"):
+    source_entries.append((f"{top}/drivers", ROOT / "drivers"))
+    # drivers/ahci_native (linked into the standalone Kernel64) and shizukufs (libsfs, Kernel64's ShizukuFS driver)
+    for relative in ("shizukudos", "docs/shizukudos10", "licenses", "tools/shizuku_se", "drivers/ahci_native",
+                     "shizukufs"):
         source_entries += tar_entries(ROOT / relative, f"{top}/{relative}")
     for relative in ("LICENSE", "tools/build_shizuku_se_iso.py", "tools/build_shizuku_se_disk.py",
                      "tools/shizuku_se_media.py", "tools/shizuku_se_drivers.py",
