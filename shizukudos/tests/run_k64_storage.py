@@ -401,7 +401,12 @@ def main():
         if name == "nvme0n3":
             # D: is mounted read/write: T_DISK.EXE writes files through the FAT32 driver, which the raw-sector model does not
             # replay; the volume is checked the way run_k64_disk.py checks it (fsck.fat -n, then every written file read back)
-            checks += fatdisk.write_checks(serial, img[name], out)
+            # its AHCI counter check (FLUSH CACHE EXT > 0) does not apply: QEMU's NVMe has no volatile write cache, so a
+            # FLUSH completes without counting a cache flush; NVMe must instead show the file writes as sector writes
+            checks += [c for c in fatdisk.write_checks(serial, img[name], out) if not c["check"].startswith("AHCI write path")]
+            mw = re.search(r"nvme0n3: \d+ sectors read, (\d+) written", serial)
+            checks.append(base.check("NVMe write path: D: file writes reached nvme0n3 as sector writes (kernel counters)",
+                                     bool(mw) and int(mw.group(1)) > 0, mw.group(0) if mw else "no counter line"))
             continue
         ok, detail = files_equal(img[name], model.files[name])
         checks.append(base.check(f"{name}: image file after the run equals the host model (guest writes landed exactly, nothing else changed)",
