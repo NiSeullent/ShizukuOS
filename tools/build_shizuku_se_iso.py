@@ -384,6 +384,10 @@ def shipped_receipt(path: Path) -> bytes:
     receipt = json.loads(path.read_text(encoding="utf-8"))
     if receipt.pop("built_utc", None) is not None:
         receipt["built_utc_note"] = "removed from the copy on the ISO for a reproducible image"
+    if receipt.get("artifacts", {}).pop(SHZ10_ESP.split("/")[1], None) is not None:
+        # supervisor/esp.img is a build intermediate that is not on the ISO (its FAT dates follow the build time);
+        # the ISO carries the same loader and \SHZDOS bytes in its own EFI image, checked at build time.
+        receipt["artifacts_note"] = "esp.img (not on this ISO) omitted from the copy on the ISO"
     return (json.dumps(receipt, indent=2) + "\n").encode("utf-8")
 
 
