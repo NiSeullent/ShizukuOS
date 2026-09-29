@@ -19,9 +19,19 @@ The following primary documents were consulted for factual interfaces on
 | [T13 command-set working draft, archived at Harvard](https://read.seas.harvard.edu/cs161/2024/pdf/ata-atapi-8.pdf) | Indexed primary-document excerpts distinguish optional SATA identification words from the 48-bit command feature set. Direct PDF retrieval timed out. Word 76 speed bits are not used as an extra command prerequisite: the driver requires DMA/LBA48 and independently establishes the live AHCI ATA transport. The observed QEMU word `0x0100` is covered as a compatibility policy, not presented as full SATA identification conformance. |
 | [QEMU 10.1.0 AHCI model, official source tag](https://github.com/qemu/qemu/blob/v10.1.0/hw/ide/ahci.c) | Consulted while diagnosing actual guest initialization: reset gives a disk status `0x30` with error register 1; the initial D2H FIS is delivered when reception becomes available, and updates SIG. This explains observed TFD `0x130`, which must not be treated as an issued-command result. Only this emulator behavior was used as regression input; no emulator implementation was copied. |
 
+The write path added later uses further public interface facts from the same
+kinds of primary documents (the ATA8-ACS command set and AHCI 1.3.1; they were not
+re-fetched for this change): WRITE DMA EXT is opcode `0x35` with the same 48-bit
+LBA/count register layout as READ DMA EXT; FLUSH CACHE EXT is the non-data opcode
+`0xea`; IDENTIFY word 83 bit 13 advertises FLUSH CACHE EXT, word 85 bit 5 reports an
+enabled volatile write cache and word 87 bits 15:14 = `01` mark words 85..87 valid;
+the AHCI command header's DW0 bit 6 (W) selects host-to-device transfer direction
+and PRDTL 0 describes a command without data. QEMU's AHCI model accepts these
+commands; the Kernel64 fixture verifies the written bytes in the host image file.
+
 The exact supported policy is narrower than those specifications: active ATA
 SATA links, complete IDENTIFY, LBA48, 512-byte logical sectors, coherent DMA,
-one slot, one PRDT, one read sector, serialized polling and exclusive HBA ownership.
+one slot, one PRDT, one read or written sector per command, serialized polling and exclusive HBA ownership.
 Larger sectors, NCQ, ATAPI, port multipliers, power sequencing and automatic reset
 recovery are not silently approximated. Specification access and interface
 research do not constitute hardware conformance or vendor certification.

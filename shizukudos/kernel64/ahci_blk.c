@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Kernel64 AHCI driver: the original AHCI core (drivers/ahci_native/ahci.c, linked unmodified into the
+ * Kernel64 AHCI driver: the original AHCI core (drivers/ahci_native/ahci.c, linked as is into the
  * SHZ_STANDALONE kernel only) registered as block device "ahci0" in the generic registry (blk.h).
  * STANDALONE PROFILE ONLY: under the Supervisor no disk is passed through and port I/O is trapped, so
  * ahci_blk_init() reports "no device" there. QEMU fixture: -device ahci + ide-hd (ICH9 8086:2922, class 010601).
  *
  * ahci_native's contract: callbacks return nonzero on success; one 512-byte sector per command; the core polls
  * PxCI/PxTFD with now_us() as its deadline clock (the TSC here, so it also works with interrupts masked) and never
- * touches memory outside the one 4 KiB DMA block it was given.
+ * touches memory outside the one 4 KiB DMA block it was given. The disk is opened with allow_write=1: blk_write()
+ * issues WRITE DMA EXT per sector and blk_flush() FLUSH CACHE EXT when IDENTIFY advertises it (QEMU's disks do);
+ * without that command blk_flush() has nothing to issue and returns success (the legacy FLUSH CACHE is not used).
  */
 #include "blk.h"
 #include "pci.h"
@@ -90,6 +92,47 @@ static int ahci_read(blk_dev_t *d, uint64_t lba, unsigned count, void *buf)
     return rc == AHCI_OK ? 0 : -1;
 }
 
+static int ahci_write(blk_dev_t *d, uint64_t lba, unsigned count, const void *buf)
+{
+    const uint8_t *b = buf;
+    int rc = AHCI_OK;
+    (void)d;
+    if (!ready) return -1;
+    mutex_lock(&blk_lock);
+    while (count--) {
+        rc = ahci_write_sector(&disk, lba, b, 512);
+        if (rc != AHCI_OK) {
+            kprintf("K64 ahci: write lba %llu failed (%d) is=%x tfd=%x serr=%x\n", lba, rc, disk.last_is, disk.last_tfd, disk.last_serr);
+            if (disk.state != AHCI_READY) ready = 0;
+            break;
+        }
+        ++lba;
+        b += 512;
+    }
+    mutex_unlock(&blk_lock);
+    return rc == AHCI_OK ? 0 : -1;
+}
+
+static uint32_t flushes;
+static int ahci_flush_dev(blk_dev_t *d)
+{
+    int rc;
+    (void)d;
+    if (!ready) return -1;
+    if (!(disk.identity.features & AHCI_FEATURE_FLUSH_EXT)) return 0;
+    mutex_lock(&blk_lock);
+    rc = ahci_flush(&disk);
+    if (rc != AHCI_OK) {
+        kprintf("K64 ahci: FLUSH CACHE EXT failed (%d) is=%x tfd=%x serr=%x\n", rc, disk.last_is, disk.last_tfd, disk.last_serr);
+        if (disk.state != AHCI_READY) ready = 0;
+    } else {
+        ++flushes;
+    }
+    mutex_unlock(&blk_lock);
+    return rc == AHCI_OK ? 0 : -1;
+}
+uint32_t ahci_blk_flushes(void) { return flushes; }
+
 int ahci_blk_init(void)
 {
     pci_dev_t all[32], *d = 0;
@@ -98,7 +141,7 @@ int ahci_blk_init(void)
     uint64_t bar, size;
     int is_io, rc;
     struct ahci_ops ops = { 0, mmio_read, mmio_write, dma_allocate, dma_release, dma_sync, tsc_now_us, relax };
-    struct ahci_config cfg = { 0x010601, 0, 0, AHCI_AUTO_PORT, 5000000, 1 };
+    struct ahci_config cfg = { 0x010601, 0, 0, AHCI_AUTO_PORT, 5000000, 1, 1 };
     mutex_init(&blk_lock);
     for (i = 0; i < n; ++i)
         if (all[i].class_code == 1 && all[i].subclass == 6 && all[i].prog_if == 1) { d = &all[i]; break; }
@@ -117,17 +160,21 @@ int ahci_blk_init(void)
         return -1;
     }
     ready = 1;
-    kprintf("K64 ahci: %x:%x.%x %x:%x abar %llx port %u: \"%s\" %llu sectors (%llu MiB)\n", d->bus, d->dev, d->fn,
-            d->vendor, d->device, bar, disk.port, disk.identity.model, disk.identity.sectors, disk.identity.sectors / 2048);
+    kprintf("K64 ahci: %x:%x.%x %x:%x abar %llx port %u: \"%s\" %llu sectors (%llu MiB), flush-ext %u, write cache %u\n",
+            d->bus, d->dev, d->fn, d->vendor, d->device, bar, disk.port, disk.identity.model, disk.identity.sectors,
+            disk.identity.sectors / 2048, (disk.identity.features & AHCI_FEATURE_FLUSH_EXT) != 0,
+            (disk.identity.features & AHCI_FEATURE_WRITE_CACHE) != 0);
     memset(&dev, 0, sizeof dev);
     memcpy(dev.name, "ahci0", 6);
     dev.sector_size = 512;
     dev.sectors = disk.identity.sectors;
-    dev.flags = BLK_F_READONLY;                     /* ahci_native is a read-only core: no write command */
     dev.read = ahci_read;
+    dev.write = ahci_write;
+    dev.flush = ahci_flush_dev;
     dev.priv = &disk;
     return blk_register(&dev);
 }
 #else
 int ahci_blk_init(void) { return -1; }              /* Supervisor profile: no passed-through disk */
+uint32_t ahci_blk_flushes(void) { return 0; }
 #endif
