@@ -95,6 +95,9 @@ uint64_t proc_alloc_teb(process_t *p, uint64_t stack_base, uint64_t stack_limit)
     t->self = base;
     t->stack_base = stack_base;
     t->stack_limit = stack_limit;
+    /* DeallocationStack (x64 TEB +0x1478): base of the stack reservation, read by GetCurrentThreadStackLimits. The whole
+     * reservation is committed here, so it equals StackLimit. */
+    *(uint64_t *)((uint8_t *)t + 0x1478) = stack_limit;
     t->client_pid = (uint64_t)p->pid;
     t->client_tid = p->next_tid;
     t->peb = p->peb;

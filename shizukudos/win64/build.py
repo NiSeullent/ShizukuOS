@@ -101,6 +101,13 @@ def build_kernel32(ntdll_names):
     forwards = [f"{n} = ntdll.{n}" for n in ("RtlCaptureContext", "RtlLookupFunctionEntry", "RtlVirtualUnwind", "RtlUnwindEx",
                                                  "RtlUnwind", "RtlPcToFileHeader", "RtlRaiseException") if n in ntdll_names or n == "RtlCaptureContext"]
     names = [n for n in names if n not in ("RtlUnwindKernel32",)]
+    # Windows kernel32 forwards these to ntdll too (V8 and Chromium import them from kernel32); delay-load resolution is
+    # the api-ms-win-core-delayload contract, hosted by kernel32 here (kernelbase on Windows).
+    forwards += [f"{n} = ntdll.{t}" for n, t in (
+        ("RtlAddFunctionTable", "RtlAddFunctionTable"), ("RtlDeleteFunctionTable", "RtlDeleteFunctionTable"),
+        ("RtlInstallFunctionTableCallback", "RtlInstallFunctionTableCallback"), ("RtlRestoreContext", "RtlRestoreContext"),
+        ("ResolveDelayLoadedAPI", "LdrResolveDelayLoadedAPI"), ("ResolveDelayLoadsFromDll", "LdrResolveDelayLoadsFromDll"))
+        if t in ntdll_names]
     write_def(OUT / "kernel32.def", "kernel32.dll", names, forwards)
     dll = OUT / "kernel32.dll"
     cmd = [CC, *COMMON, "-shared", "-nostdlib", "-Wl,--entry,ShzKernel32Entry", f"-Wl,--image-base,{K32_BASE}",
@@ -154,6 +161,11 @@ def build_modules():
     return built
 
 
+# The runners check that T_HELLO.EXE sees its preferred base 0x140000000, so it is linked without DYNAMIC_BASE (a fixed
+# image); every other app is relocatable and receives an ASLR base from the Kernel64 loader.
+FIXED_BASE_APPS = {"t_hello"}
+
+
 def build_apps(module_libs=()):
     apps = {}
     for src in sorted((W64 / "tests").glob("t_*.c")):
@@ -167,7 +179,8 @@ def build_apps(module_libs=()):
             extra.append(res)
         crt = W64 / "crt"
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
-               "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
+               "-Wl,--image-base,0x140000000", *(["-Wl,--disable-dynamicbase"] if name in FIXED_BASE_APPS else []),
+               "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
                "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
         run(cmd)
         apps[name] = (exe, cmd)

@@ -1,15 +1,45 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Kernel64 "stage 0" PE32+ loader: maps AMD64 images into a process, applies base
- * relocations, resolves imports (including forwarders and API-set contracts), assigns TLS
- * indices and publishes a Windows-shaped loader database (PEB_LDR_DATA / LDR_DATA_TABLE_ENTRY)
- * for the user-mode ntdll to take over. It does not depend on any user-mode DLL.
+ * Kernel64 "stage 0" PE32+ loader: maps AMD64 images into a process, applies base relocations, resolves imports
+ * (including forwarders and API-set contracts), validates delay-load directories, initialises the load configuration
+ * (security cookie, Control Flow Guard pointers), assigns TLS indices and publishes a Windows-shaped loader database
+ * (PEB_LDR_DATA / LDR_DATA_TABLE_ENTRY) for the user-mode ntdll to take over. It does not depend on any user-mode DLL.
  *
- * Image parsing/validation lives in shizukudos/win64/pe_parse.c (shared with host fuzz tests).
+ * Image parsing/validation lives in shizukudos/win64/pe_parse.c (shared with host fuzz tests and the load simulator).
  * API-set contracts resolve through the generated table of kernel64/apiset.c (source: apiset_contracts.txt).
  * Anything the loader cannot verify is rejected with an NTSTATUS; nothing is silently stubbed.
  *
+ * Mapping: headers and the file-backed part of every section are copied into fresh pages; the rest of a section
+ * (uninitialised data, VirtualSize > SizeOfRawData) is committed demand-zero, so an image with a 1 GiB .bss costs only
+ * the pages it touches. Gaps between sections stay reserved (no other allocation can land inside an image).
+ * Images with SectionAlignment < 4 KiB (FileAlignment == SectionAlignment) are mapped as one flat copy of the file.
+ *
+ * ASLR: an image with IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE and a relocation directory is placed at a random 64 KiB
+ * aligned base (RDRAND), per process. Windows-like entropy (Windows Internals 7th ed., part 1, ch. 5 "Address space
+ * layout randomization"): HIGH_ENTROPY_VA DLLs 19 bits in [0x7ff8'0000'0000, 0x7fff'0000'0000), HIGH_ENTROPY_VA
+ * executables 17 bits in [0x7ff6'0000'0000, 0x7ff8'0000'0000), other relocatable images 8 bits in
+ * [0x7ff5'0000'0000, 0x7ff6'0000'0000); images that are not LARGE_ADDRESS_AWARE or carry 32-bit (HIGHLOW) fixups stay
+ * below 2 GiB (8 bits in [0x1000'0000, 0x8000'0000)). Without RDRAND (or when no random slot is free) the preferred
+ * base is used, and a relocatable image whose preferred range is occupied goes to the first free range.
+ *
+ * Load configuration (IMAGE_LOAD_CONFIG_DIRECTORY64): a security cookie that still holds the compiler's default value
+ * (0x00002B992DDFA232) is replaced by a 48-bit RDRAND value, as the Windows loader does before the image runs (the MSVC
+ * CRT then derives __security_cookie_complement from it); without RDRAND it stays default and the CRT generates one.
+ * For CFG-instrumented images (GuardFlags & IMAGE_GUARD_CF_INSTRUMENTED) the GuardCFCheckFunctionPointer,
+ * GuardCFDispatchFunctionPointer and the XFG counterparts receive ntdll!ShzGuardCheckICall / ShzGuardDispatchICall:
+ * a real, NON-ENFORCING check (ntdll/cfg.c) that validates the target against the GuardCFFunctionTable of its image,
+ * counts and reports violations, and always lets the call proceed. Dynamic value relocations (DVRT) are optional
+ * patches of already valid code and are ignored.
+ *
+ * DLL search order (the directories of one load request; LoadLibraryExW flags arrive through NtLoadImage):
+ *   - a name with a path component is opened as given;
+ *   - KnownDLLs (the Windows 11 KnownDLLs registry list below) and API-set hosts come from the system directory only;
+ *   - LOAD_LIBRARY_SEARCH_* flags: [DLL load dir] [application dir] [user dirs (AddDllDirectory)] [system dir];
+ *   - otherwise (SafeDllSearchMode): application dir (or the DLL's own dir with LOAD_WITH_ALTERED_SEARCH_PATH),
+ *     [SetDllDirectory dir], system dir (\SHZ\SYS64), Windows dir (\SHZ), current dir (not with SetDllDirectory),
+ *     PATH is not searched. Dependencies of the requested DLL are searched the same way.
+ *
  * Diagnostics: a load that fails prints exactly ONE line,
- *   K64 ldr: <requested image> not loaded: <image> needs <dll>[ = <contract> -> <host>]!<function>: <reason> [<status>]
+ *   K64 ldr: <requested image> not loaded: <image> needs <dll>[ -> <host>]!<function>: <reason> [<status>]
  * naming the image whose import failed (the deepest one), the DLL it depends on and the missing function or ordinal.
  * Modules mapped by a failed attempt are unmapped again, so a later attempt starts from a clean state.
  */
@@ -17,13 +47,31 @@
 #include "apiset.h"
 #include "../win64/pe_parse.h"
 
-#define SYS64_DIR "\\SHZ\\SYS64\\"
+#define SYS64_DIR "\\SHZ\\SYS64"
+#define WINDOWS_DIR "\\SHZ"
 #define MAX_DEPTH 24
+#define PATH_CAP 160
+
+/* LoadLibraryExW flags the loader interprets (winbase.h / libloaderapi.h values) */
+#define LLF_ALTERED_SEARCH_PATH 0x00000008u
+#define LLF_SEARCH_DLL_LOAD_DIR 0x00000100u
+#define LLF_SEARCH_APPLICATION_DIR 0x00000200u
+#define LLF_SEARCH_USER_DIRS 0x00000400u
+#define LLF_SEARCH_SYSTEM32 0x00000800u
+#define LLF_SEARCH_DEFAULT_DIRS 0x00001000u
+#define LLF_SEARCH_MASK 0x00001f00u
+/* ntdll -> kernel only (NtLoadImage flags, high bits) */
+#define LDRS_DLL_DIRECTORY 0x80000000u      /* `dirs` is SetDllDirectory's directory (standard search order) */
+#define LDRS_NO_CWD 0x40000000u             /* SetDllDirectory(""): the current directory is not searched */
+
+#define PE_CHAR_RELOCS_STRIPPED 0x0001
+#define PE_CHAR_LARGE_ADDRESS_AWARE 0x0020
 
 typedef struct module {
     struct module *next;
     char name[64];                      /* lowercase base name, e.g. "kernel32.dll" */
-    char path[160];
+    char path[PATH_CAP];
+    char dir[PATH_CAP];                 /* directory of `path` (no trailing backslash) */
     const uint8_t *file;
     uint64_t fsize;
     pe_info_t info;
@@ -31,10 +79,11 @@ typedef struct module {
     int state;                          /* 0 loading, 1 mapped and linked */
     int is_dll;
     int has_tls;
-    uint32_t tls_index;
+    uint32_t tls_index, tls_align;
     uint64_t tls_start, tls_end, tls_index_va, tls_callbacks_va;
     uint32_t tls_zero;
     uint32_t init_seq;
+    uint32_t delay_imports;             /* thunks in the (validated) delay-load directory */
     int published;
 } module_t;
 
@@ -56,6 +105,13 @@ typedef struct {
     const char *import_dll;             /* the DLL name it imports (as written) */
     const char *import_func;            /* the function being resolved ("" before the first one) */
     char import_ord[16];
+    /* search order of this request */
+    uint32_t flags;                     /* LLF_* | LDRS_* */
+    char app_dir[PATH_CAP];
+    char load_dir[PATH_CAP];            /* directory of the DLL named by path (DLL_LOAD_DIR / ALTERED_SEARCH_PATH) */
+    const char *dep_dir;                /* DLL_LOAD_DIR: directory of the image whose imports are being resolved */
+    char dirs[520];                     /* ';'-separated user directories (AddDllDirectory list or SetDllDirectory dir) */
+    char cwd[PATH_CAP];
 } ldr_ctx_t;
 
 static char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c; }
@@ -115,6 +171,28 @@ static void report(ldr_ctx_t *c, const char *what, int32_t st)
                 (uint32_t)e->status);
 }
 
+/* ---------------------------------------------------------------- hardware randomness */
+/* RDRAND (CPUID.1:ECX bit 30) with the 10-attempt retry of Intel's DRNG guide. Returns 0 when unavailable. */
+static int k_rdrand64(uint64_t *out)
+{
+    static int have = -1;
+    unsigned i;
+    if (have < 0) {
+        uint32_t a = 1, b = 0, c = 0, d = 0;
+        __asm__ volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
+        have = (int)((c >> 30) & 1u);
+        if (!have) kprintf("K64 ldr: no RDRAND: images load at their preferred bases, security cookies stay default\n");
+    }
+    if (!have) return 0;
+    for (i = 0; i < 10; ++i) {
+        uint64_t v;
+        unsigned char ok;
+        __asm__ volatile("rdrand %0; setc %1" : "=r"(v), "=qm"(ok) : : "cc");
+        if (ok) { *out = v; return 1; }
+    }
+    return 0;
+}
+
 /* ---------------------------------------------------------------- API-set contracts */
 /* Maps an imported DLL name onto the DLL to load. Returns STATUS_SUCCESS with `out` = the host (or the name itself
  * when it is not an API-set name), or an error recorded in the context. */
@@ -143,22 +221,40 @@ static int32_t resolve_dll_name(ldr_ctx_t *c, const char *name, char *out, size_
 }
 
 /* ---------------------------------------------------------------- module registry */
+static int has_path(const char *s)
+{
+    for (; *s; ++s)
+        if (*s == '\\' || *s == '/' || *s == ':') return 1;
+    return 0;
+}
+
 static void base_name(const char *in, char *out, size_t cap)
 {
     const char *s = in, *p;
     size_t n = 0;
     int has_ext = 0;
     for (p = in; *p; ++p)
-        if (*p == '\\' || *p == '/') s = p + 1;
+        if (*p == '\\' || *p == '/' || *p == ':') s = p + 1;
     for (p = s; *p && n + 5 < cap; ++p) {
         out[n++] = lower(*p);
         if (*p == '.') has_ext = 1;
     }
-    if (!has_ext) {
+    if (n && out[n - 1] == '.') { --n; has_ext = 1; }       /* "name." means "no extension" */
+    else if (!has_ext) {
         memcpy(out + n, ".dll", 4);
         n += 4;
     }
     out[n] = 0;
+}
+
+static void dir_of(const char *path, char *out, size_t cap)
+{
+    size_t k, last = 0;
+    for (k = 0; path[k]; ++k)
+        if (path[k] == '\\' || path[k] == '/') last = k;
+    if (last >= cap) last = cap - 1;
+    memcpy(out, path, last);
+    out[last] = 0;
 }
 
 static module_t *find_module(process_t *p, const char *name)
@@ -169,30 +265,148 @@ static module_t *find_module(process_t *p, const char *name)
     return 0;
 }
 
-static fsnode_t *locate_file(const char *name, char *found_path, size_t cap)
+/* Windows 11 KnownDLLs (HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs, plus ntdll and kernelbase that
+ * the section directory always holds): never taken from an application directory. */
+static const char *const known_dlls[] = {
+    "ntdll.dll", "kernel32.dll", "kernelbase.dll", "advapi32.dll", "clbcatq.dll", "combase.dll", "comdlg32.dll",
+    "coml2.dll", "difxapi.dll", "gdi32.dll", "gdiplus.dll", "imagehlp.dll", "imm32.dll", "msctf.dll", "msvcrt.dll",
+    "normaliz.dll", "nsi.dll", "ole32.dll", "oleaut32.dll", "psapi.dll", "rpcrt4.dll", "sechost.dll", "setupapi.dll",
+    "shcore.dll", "shell32.dll", "shlwapi.dll", "user32.dll", "wldap32.dll", "ws2_32.dll", 0
+};
+
+static int is_known_dll(const char *name)
 {
-    char path[160];
-    fsnode_t *n;
-    size_t k;
-    /* search order: system directory, then the root (application directories are searched by the caller) */
-    memcpy(path, SYS64_DIR, sizeof SYS64_DIR);
-    k = strlen(SYS64_DIR);
-    if (k + strlen(name) + 1 > sizeof path) return 0;
-    memcpy(path + k, name, strlen(name) + 1);
-    n = fs_lookup(path);
-    if (!n) {
-        path[0] = '\\';
-        memcpy(path + 1, name, strlen(name) + 1);
-        n = fs_lookup(path);
-    }
-    if (n && found_path) {
-        for (k = 0; path[k] && k + 1 < cap; ++k) found_path[k] = path[k];
-        found_path[k] = 0;
-    }
-    return n && !n->is_dir ? n : 0;
+    unsigned i;
+    for (i = 0; known_dlls[i]; ++i)
+        if (!strcmp(known_dlls[i], name)) return 1;
+    return 0;
 }
 
-/* ---------------------------------------------------------------- user memory helpers */
+static fsnode_t *try_dir(const char *dir, size_t dlen, const char *name, char *found, size_t cap)
+{
+    char path[PATH_CAP];
+    fsnode_t *n;
+    if (!dlen || dlen + strlen(name) + 2 > sizeof path) return 0;
+    memcpy(path, dir, dlen);
+    path[dlen] = 0;
+    if (path[dlen - 1] != '\\' && path[dlen - 1] != '/') sappend(path, sizeof path, "\\");
+    sappend(path, sizeof path, name);
+    n = fs_lookup(path);
+    if (!n || n->is_dir) return 0;
+    scopy(found, cap, path);
+    return n;
+}
+
+static fsnode_t *try_list(const char *list, const char *name, char *found, size_t cap)
+{
+    const char *s = list;
+    while (s && *s) {
+        const char *e = s;
+        fsnode_t *n;
+        while (*e && *e != ';') ++e;
+        n = try_dir(s, (size_t)(e - s), name, found, cap);
+        if (n) return n;
+        s = *e ? e + 1 : e;
+    }
+    return 0;
+}
+
+#define TRY(dir) do { if ((n = try_dir((dir), strlen(dir), name, found, cap))) return n; } while (0)
+
+/* Finds the file of DLL `name` (a base name or a path) with the search order of request `c`. `system_only`: API-set
+ * hosts and KnownDLLs. */
+static fsnode_t *locate_file(ldr_ctx_t *c, const char *name, int system_only, char *found, size_t cap)
+{
+    fsnode_t *n;
+    const uint32_t f = c->flags;
+    if (has_path(name)) {
+        const int absolute = name[0] == '\\' || name[0] == '/' || (name[0] && name[1] == ':');
+        if (!absolute) {                                    /* relative path: current directory, then application dir */
+            if (c->cwd[0]) TRY(c->cwd);
+            TRY(c->app_dir);
+            return 0;
+        }
+        n = fs_lookup(name);
+        if (!n || n->is_dir) return 0;
+        scopy(found, cap, name);
+        return n;
+    }
+    if (system_only || is_known_dll(name)) {
+        TRY(SYS64_DIR);
+        return 0;
+    }
+    if (f & LLF_SEARCH_MASK) {
+        const uint32_t s = (f & LLF_SEARCH_DEFAULT_DIRS) ?
+                           (f | LLF_SEARCH_APPLICATION_DIR | LLF_SEARCH_USER_DIRS | LLF_SEARCH_SYSTEM32) : f;
+        if (s & LLF_SEARCH_DLL_LOAD_DIR) {
+            if (c->dep_dir && c->dep_dir[0]) TRY(c->dep_dir);
+            else if (c->load_dir[0]) TRY(c->load_dir);
+        }
+        if (s & LLF_SEARCH_APPLICATION_DIR) TRY(c->app_dir);
+        if ((s & LLF_SEARCH_USER_DIRS) && (n = try_list(c->dirs, name, found, cap))) return n;
+        if (s & LLF_SEARCH_SYSTEM32) TRY(SYS64_DIR);
+        return 0;
+    }
+    if ((f & LLF_ALTERED_SEARCH_PATH) && c->load_dir[0]) TRY(c->load_dir);
+    else TRY(c->app_dir);
+    if ((f & LDRS_DLL_DIRECTORY) && (n = try_list(c->dirs, name, found, cap))) return n;
+    TRY(SYS64_DIR);
+    TRY(WINDOWS_DIR);
+    if (!(f & (LDRS_DLL_DIRECTORY | LDRS_NO_CWD)) && c->cwd[0]) TRY(c->cwd);
+    return 0;
+}
+#undef TRY
+
+/* ---------------------------------------------------------------- image memory (kernel access) */
+/* Kernel view of the page holding user address `va` in process `p`. A committed page that is not present yet
+ * (demand-zero) is populated with the protection of its descriptor; protection is not checked: the loader writes
+ * IATs, fixups and load-configuration slots that live in read-only sections. */
+static uint8_t *kpage(process_t *p, uint64_t va)
+{
+    const uint64_t page = va & ~0xfffull;
+    uint64_t pa = vm_lookup(p->pml4, page, 0);
+    if (!pa) {
+        vad_t *v = vad_find(p, page);
+        if (!v || v->state != VAD_COMMITTED) return 0;
+        pa = pmm_alloc();
+        if (!pa) return 0;
+        if (vm_map(p->pml4, page, pa, (v->prot & 0xff) == PAGE_NOACCESS ? 0 : prot_to_ptflags(v->prot))) {
+            pmm_free(pa);
+            return 0;
+        }
+    }
+    return (uint8_t *)p2v(pa & ~0xfffull);
+}
+
+static int kread(process_t *p, uint64_t va, void *dst, uint64_t n)
+{
+    uint8_t *d = dst;
+    while (n) {
+        uint8_t *pg = kpage(p, va);
+        uint64_t chunk = PAGE_SIZE - (va & 0xfff);
+        if (!pg) return -1;
+        if (chunk > n) chunk = n;
+        memcpy(d, pg + (va & 0xfff), chunk);
+        d += chunk; va += chunk; n -= chunk;
+    }
+    return 0;
+}
+
+static int kwrite(process_t *p, uint64_t va, const void *src, uint64_t n)
+{
+    const uint8_t *s = src;
+    while (n) {
+        uint8_t *pg = kpage(p, va);
+        uint64_t chunk = PAGE_SIZE - (va & 0xfff);
+        if (!pg) return -1;
+        if (chunk > n) chunk = n;
+        memcpy(pg + (va & 0xfff), s, chunk);
+        s += chunk; va += chunk; n -= chunk;
+    }
+    return 0;
+}
+
+static int kwrite64(process_t *p, uint64_t va, uint64_t v) { return kwrite(p, va, &v, 8); }
 static int uwrite(process_t *p, uint64_t va, const void *src, uint64_t n) { return copy_to_user(p, va, src, n); }
 static int uwrite64(process_t *p, uint64_t va, uint64_t v) { return copy_to_user(p, va, &v, 8); }
 static int uread64(process_t *p, uint64_t va, uint64_t *v) { return copy_from_user(p, v, va, 8); }
@@ -206,98 +420,154 @@ static uint32_t prot_from_section(uint32_t ch)
     return PAGE_NOACCESS;
 }
 
-/* ---------------------------------------------------------------- mapping */
-static int32_t map_module(process_t *p, module_t *m)
+/* ---------------------------------------------------------------- base selection (ASLR) */
+struct reloc_census { uint64_t highlow, total; };
+static int census_cb(void *ctx, uint32_t rva, unsigned type)
+{
+    struct reloc_census *r = ctx;
+    (void)rva;
+    ++r->total;
+    if ((type & 15) != 10) ++r->highlow;                    /* 32- or 16-bit absolute fixup */
+    return 0;
+}
+
+static uint64_t aslr_pick(process_t *p, const module_t *m, int low_only)
 {
     const pe_info_t *pi = &m->info;
-    uint64_t base = pi->image_base, off, pa;
+    const uint64_t size = ((uint64_t)pi->size_of_image + 0xffff) & ~0xffffull;
+    uint64_t lo, hi, positions, slots, stride, r;
+    unsigned bits, tries;
+    if (low_only) { lo = 0x10000000ull; hi = 0x80000000ull; bits = 8; }
+    else if (pi->dll_characteristics & PE_DLLCHAR_HIGH_ENTROPY_VA) {
+        if (m->is_dll) { lo = 0x7ff800000000ull; hi = 0x7fff00000000ull; bits = 19; }
+        else { lo = 0x7ff600000000ull; hi = 0x7ff800000000ull; bits = 17; }
+    } else { lo = 0x7ff500000000ull; hi = 0x7ff600000000ull; bits = 8; }
+    if (size >= hi - lo) return 0;
+    positions = ((hi - lo - size) >> 16) + 1;               /* 64 KiB aligned bases that fit */
+    slots = positions < (1ull << bits) ? positions : (1ull << bits);
+    stride = positions / slots;
+    for (tries = 0; tries < 32; ++tries) {
+        uint64_t cand;
+        if (!k_rdrand64(&r)) return 0;
+        cand = lo + ((r % slots) * stride << 16);
+        if (vad_range_is_free(p, cand, size)) return cand;
+    }
+    return 0;
+}
+
+/* ---------------------------------------------------------------- mapping */
+struct page_ctx { process_t *p; uint64_t base; };
+static uint8_t *reloc_page(void *ctx, uint32_t page_rva)
+{
+    struct page_ctx *x = ctx;
+    return kpage(x->p, x->base + page_rva);
+}
+
+/* Maps pages [va, va + len) as copies of file bytes [src, src + raw) (raw may be shorter than len: the rest is
+ * demand-zero). NOACCESS pages are kept but not user-accessible, so a later VirtualProtect finds the data. */
+static int32_t map_bytes(process_t *p, uint64_t va, uint64_t len, const uint8_t *src, uint64_t raw, uint32_t prot)
+{
+    uint64_t off;
+    for (off = 0; off < len && off < raw; off += PAGE_SIZE) {
+        const uint64_t n = raw - off < PAGE_SIZE ? raw - off : PAGE_SIZE;
+        const uint64_t pa = pmm_alloc();
+        if (!pa) return STATUS_NO_MEMORY;
+        memcpy((void *)p2v(pa), src + off, n);
+        if (vm_map(p->pml4, va + off, pa, (prot & 0xff) == PAGE_NOACCESS ? 0 : prot_to_ptflags(prot))) {
+            pmm_free(pa);
+            return STATUS_NO_MEMORY;
+        }
+    }
+    return STATUS_SUCCESS;
+}
+
+static int32_t map_module(ldr_ctx_t *c, module_t *m)
+{
+    process_t *p = c->p;
+    const pe_info_t *pi = &m->info;
+    uint64_t base = 0;
     unsigned i;
     int32_t st;
-    int relocate = 0;
+    const int relocatable = (pi->dll_characteristics & PE_DLLCHAR_DYNAMIC_BASE) && pi->dir_rva[5] && pi->dir_size[5] &&
+                            !(pi->characteristics & PE_CHAR_RELOCS_STRIPPED);
 
-    if (!vad_range_is_free(p, base, pi->size_of_image)) {
-        if (!(pi->dll_characteristics & PE_DLLCHAR_DYNAMIC_BASE) || !pi->dir_rva[5])
-            return STATUS_CONFLICTING_ADDRESSES;             /* cannot move an image without relocations */
-        {
-            uint64_t sz = pi->size_of_image, b = 0;
-            st = vad_alloc(p, &b, &sz, MEM_RESERVE, PAGE_READONLY, VK_IMAGE);
-            if (st) return st;
+    if (relocatable) {
+        struct reloc_census rc = { 0, 0 };
+        if (pe_walk_relocs(m->file, m->fsize, pi, census_cb, &rc))
+            return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed base relocation directory");
+        base = aslr_pick(p, m, rc.highlow || !(pi->characteristics & PE_CHAR_LARGE_ADDRESS_AWARE));
+    }
+    if (!base) {
+        if (vad_range_is_free(p, pi->image_base, pi->size_of_image)) base = pi->image_base;
+        else if (!relocatable) return fail(c, STATUS_CONFLICTING_ADDRESSES, m->name, "", 0, "", "fixed-base image and its range is occupied");
+        else {
+            uint64_t sz = pi->size_of_image, b = 0, fs = 0;
+            st = vad_alloc(p, &b, &sz, MEM_RESERVE | MEM_TOP_DOWN, PAGE_READONLY, VK_IMAGE);
+            if (st) return fail(c, st, m->name, "", 0, "", "no free address range for the image");
             base = b;
-            {
-                uint64_t fb = b, fs = 0;
-                vad_free(p, &fb, &fs, MEM_RELEASE);          /* only used to pick a free 64 KiB-aligned range */
-            }
+            vad_free(p, &b, &fs, MEM_RELEASE);                /* only used to pick a free 64 KiB aligned range */
         }
-        relocate = 1;
     }
     m->base = base;
 
-    /* headers, then each section, as separate descriptors sharing one allocation base */
-    st = vad_insert_fixed(p, base, pi->size_of_headers, VAD_COMMITTED, PAGE_READONLY, VK_IMAGE, base);
-    if (st) return st;
-    for (off = 0; off < ((pi->size_of_headers + 4095ull) & ~4095ull); off += PAGE_SIZE) {
-        uint64_t n = pi->size_of_headers - off < PAGE_SIZE ? pi->size_of_headers - off : PAGE_SIZE;
-        pa = pmm_alloc();
-        if (!pa || vm_map(p->pml4, base + off, pa, prot_to_ptflags(PAGE_READONLY))) return STATUS_NO_MEMORY;
-        memcpy((void *)p2v(pa), m->file + off, n);
-    }
-    for (i = 0; i < pi->nsections; ++i) {
-        pe_section_t s;
-        uint64_t vlen, raw;
-        uint32_t prot;
-        pe_get_section(m->file, pi, i, &s);
-        vlen = s.vsize ? s.vsize : s.raw_size;
-        vlen = (vlen + 4095ull) & ~4095ull;
-        if (!vlen) continue;
-        prot = prot_from_section(s.characteristics);
-        st = vad_insert_fixed(p, base + s.rva, vlen, VAD_COMMITTED, prot, VK_IMAGE, base);
-        if (st) return st;
-        raw = s.raw_size < (s.vsize ? s.vsize : s.raw_size) ? s.raw_size : (s.vsize ? s.vsize : s.raw_size);
-        for (off = 0; off < vlen; off += PAGE_SIZE) {
-            pa = pmm_alloc();
-            if (!pa) return STATUS_NO_MEMORY;
-            if (off < raw) {
-                const uint64_t n = raw - off < PAGE_SIZE ? raw - off : PAGE_SIZE;
-                memcpy((void *)p2v(pa), m->file + s.raw_off + off, n);
-            }
-            /* NOACCESS sections stay unmapped; their pages are released with the process. */
-            if ((prot & 0xff) == PAGE_NOACCESS) { pmm_free(pa); continue; }
-            if (vm_map(p->pml4, base + s.rva + off, pa, prot_to_ptflags(prot))) return STATUS_NO_MEMORY;
-        }
-    }
-    /* padding between the last section and SizeOfImage stays reserved but inaccessible */
-    {
-        uint64_t end = pi->size_of_headers;
-        for (i = 0; i < pi->nsections; ++i) {
+    if (pi->low_alignment) {
+        /* one flat view of the file: every section sits at its file offset */
+        const uint64_t len = ((uint64_t)pi->size_of_image + 4095) & ~4095ull;
+        st = vad_insert_fixed(p, base, len, VAD_COMMITTED, PAGE_EXECUTE_READWRITE, VK_IMAGE, base);
+        if (!st) st = map_bytes(p, base, len, m->file, m->fsize < pi->size_of_image ? m->fsize : pi->size_of_image,
+                                PAGE_EXECUTE_READWRITE);
+        if (st) return fail(c, st, m->name, "", 0, "", "cannot map the image");
+    } else {
+        /* headers, each section, then reserved gaps: descriptors sharing one allocation base */
+        uint64_t hdr = ((uint64_t)pi->size_of_headers + 4095) & ~4095ull, cursor, end;
+        st = vad_insert_fixed(p, base, hdr, VAD_COMMITTED, PAGE_READONLY, VK_IMAGE, base);
+        if (!st) st = map_bytes(p, base, hdr, m->file, pi->size_of_headers, PAGE_READONLY);
+        for (i = 0; !st && i < pi->nsections; ++i) {
             pe_section_t s;
-            uint64_t e;
+            uint64_t vlen, raw;
+            uint32_t prot;
             pe_get_section(m->file, pi, i, &s);
-            e = s.rva + (((s.vsize ? s.vsize : s.raw_size) + 4095ull) & ~4095ull);
-            if (e > end) end = e;
+            vlen = (((uint64_t)(s.vsize ? s.vsize : s.raw_size)) + 4095) & ~4095ull;
+            if (!vlen) continue;
+            prot = prot_from_section(s.characteristics);
+            raw = s.raw_size < (s.vsize ? s.vsize : s.raw_size) ? s.raw_size : (s.vsize ? s.vsize : s.raw_size);
+            st = vad_insert_fixed(p, base + s.rva, vlen, VAD_COMMITTED, prot, VK_IMAGE, base);
+            if (!st) st = map_bytes(p, base + s.rva, vlen, m->file + s.raw_off, raw, prot);
         }
-        end = (end + 4095ull) & ~4095ull;
-        if (end < pi->size_of_image)
-            vad_insert_fixed(p, base + end, pi->size_of_image - end, VAD_RESERVED, PAGE_NOACCESS, VK_IMAGE, base);
+        if (st) return fail(c, st, m->name, "", 0, "", "cannot map the image (overlapping sections or out of memory)");
+        /* every hole of [base, base + SizeOfImage) stays reserved and inaccessible */
+        end = base + (((uint64_t)pi->size_of_image + 4095) & ~4095ull);
+        for (cursor = base; cursor < end;) {
+            vad_t *v = vad_find(p, cursor);
+            if (v) { cursor = v->end; continue; }
+            {
+                uint64_t stop = cursor + PAGE_SIZE;
+                while (stop < end && !vad_find(p, stop)) stop += PAGE_SIZE;
+                if (vad_insert_fixed(p, cursor, stop - cursor, VAD_RESERVED, PAGE_NOACCESS, VK_IMAGE, base))
+                    return fail(c, STATUS_NO_MEMORY, m->name, "", 0, "", "cannot reserve the image range");
+                cursor = stop;
+            }
+        }
     }
 
-    if (relocate) {
-        struct rctx { process_t *p; uint64_t delta, base; int32_t st; } rc = { p, base - pi->image_base, base, 0 };
-        int cb(void *c, uint32_t rva, unsigned type) {
-            struct rctx *x = c;
-            uint64_t v;
-            uint64_t pa2 = vm_lookup(x->p->pml4, x->base + rva, 0);
-            if (!pa2) { x->st = STATUS_INVALID_IMAGE_FORMAT; return -1; }
-            if (type == 10) { memcpy(&v, (void *)p2v(pa2), 8); v += x->delta; memcpy((void *)p2v(pa2), &v, 8); }
-            else { uint32_t w; memcpy(&w, (void *)p2v(pa2), 4); w += (uint32_t)x->delta; memcpy((void *)p2v(pa2), &w, 4); }
-            return 0;
-        }
-        if (pe_walk_relocs(m->file, m->fsize, pi, cb, &rc)) return STATUS_INVALID_IMAGE_FORMAT;
+    if (base != pi->image_base) {
+        struct page_ctx pc = { p, base };
+        uint64_t applied = 0, hb = base;
+        if (!relocatable)
+            return fail(c, STATUS_CONFLICTING_ADDRESSES, m->name, "", 0, "", "image cannot be relocated");
+        if (pe_apply_relocs(m->file, m->fsize, pi, base - pi->image_base, reloc_page, &pc, &applied))
+            return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "base relocation outside the image");
+        /* the mapped header reports the actual base, as on Windows (OptionalHeader.ImageBase) */
+        if (kwrite(p, base + pi->nt_offset + 24 + 24, &hb, 8))
+            return fail(c, STATUS_NO_MEMORY, m->name, "", 0, "", "cannot update the mapped header");
     }
     return STATUS_SUCCESS;
 }
 
 /* ---------------------------------------------------------------- exports and imports */
-static int32_t load_dll(ldr_ctx_t *c, const char *name, int depth, module_t **out);
+static int32_t load_dll(ldr_ctx_t *c, const char *name, int system_only, int depth, module_t **out);
+
+static uint64_t ntdll_export(process_t *p, const char *sym);
 
 static int32_t resolve_export(ldr_ctx_t *c, module_t *m, const char *sym, int ordinal, int depth, uint64_t *va)
 {
@@ -331,8 +601,11 @@ static int32_t resolve_export(ldr_ctx_t *c, module_t *m, const char *sym, int or
         module_t *target;
         int32_t st;
         int is_api;
-        while (fwd[k] && fwd[k] != '.' && k + 5 < sizeof dll) { dll[k] = fwd[k]; ++k; }
-        if (fwd[k] != '.' || !k) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, fwd, "malformed forwarder");
+        /* the DLL name ends at the LAST dot: "api-ms-win-core-x-l1-1-0.Function" has dots only there */
+        unsigned dot = 0, q;
+        for (q = 0; fwd[q]; ++q) if (fwd[q] == '.') dot = q;
+        if (!dot || dot + 5 >= sizeof dll) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, fwd, "malformed forwarder");
+        for (k = 0; k < dot; ++k) dll[k] = fwd[k];
         dll[k] = 0;
         ++k;
         while (fwd[k] && j + 1 < sizeof fn) fn[j++] = fwd[k++];
@@ -340,11 +613,10 @@ static int32_t resolve_export(ldr_ctx_t *c, module_t *m, const char *sym, int or
         base_name(dll, nm, sizeof nm);
         st = resolve_dll_name(c, nm, host, sizeof host, &is_api);
         if (st) return st;
-        st = load_dll(c, host, depth + 1, &target);
+        st = load_dll(c, host, is_api, depth + 1, &target);
         if (st) return st;
         if (fn[0] == '#') {
             int ord = 0;
-            unsigned q;
             for (q = 1; fn[q] >= '0' && fn[q] <= '9' && ord < 65536; ++q) ord = ord * 10 + (fn[q] - '0');
             if (fn[q] || q == 1) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, fwd, "malformed forwarder");
             return resolve_export(c, target, 0, ord, depth + 1, va);
@@ -382,7 +654,10 @@ static int import_cb(void *ctx, const char *dll, const char *name, uint16_t hint
     base_name(dll, nm, sizeof nm);
     st = resolve_dll_name(c, nm, host, sizeof host, &is_api);
     if (!st) {
-        st = load_dll(c, host, x->depth + 1, &target);
+        const char *saved_dir = c->dep_dir;
+        c->dep_dir = x->m->dir;                             /* DLL_LOAD_DIR: dependencies of this image */
+        st = load_dll(c, host, is_api, x->depth + 1, &target);
+        c->dep_dir = saved_dir;
         if (!st) {
             /* restore the importer: loading `target` walked its own imports */
             c->importer = x->m->name;
@@ -394,8 +669,50 @@ static int import_cb(void *ctx, const char *dll, const char *name, uint16_t hint
         if (st && is_api) annotate_apiset(c, x->m->name, dll, host);
     }
     if (st) { x->st = st; return -1; }
-    if (uwrite64(c->p, x->m->base + iat_rva, va)) { x->st = fail(c, STATUS_ACCESS_VIOLATION, x->m->name, dll, 0, 0, "IAT not writable"); return -1; }
+    /* the IAT may live in a read-only section (.rdata of MSVC images): written through the kernel mapping */
+    if (kwrite64(c->p, x->m->base + iat_rva, va)) { x->st = fail(c, STATUS_ACCESS_VIOLATION, x->m->name, dll, 0, 0, "IAT not mapped"); return -1; }
     return 0;
+}
+
+static int delay_count_cb(void *ctx, const pe_delay_desc_t *d, const char *name, uint16_t ord, int by_ord, uint32_t slot)
+{
+    (void)d; (void)name; (void)ord; (void)by_ord; (void)slot;
+    ++*(uint32_t *)ctx;
+    return 0;
+}
+
+/* Security cookie and Control Flow Guard pointers (see the header comment). */
+static int32_t apply_load_config(ldr_ctx_t *c, module_t *m)
+{
+    process_t *p = c->p;
+    pe_load_config_t lc;
+    const uint64_t pref = m->info.image_base;
+    if (pe_load_config(m->file, m->fsize, &m->info, &lc))
+        return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed load configuration directory");
+    if (!lc.size) return STATUS_SUCCESS;
+    if (lc.security_cookie && !(lc.guard_flags & PE_GUARD_SECURITY_COOKIE_UNUSED)) {
+        const uint64_t at = m->base + (lc.security_cookie - pref);
+        uint64_t v = 0, r;
+        if (kread(p, at, &v, 8)) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "security cookie not mapped");
+        if (v == PE_DEFAULT_SECURITY_COOKIE_64 && k_rdrand64(&r)) {
+            r &= 0x0000ffffffffffffull;                     /* x64 cookies keep the top 16 bits clear */
+            if (r == PE_DEFAULT_SECURITY_COOKIE_64 || !r) r ^= 0x0000a5a5a5a5a5a5ull;
+            kwrite64(p, at, r);
+        }
+    }
+    if (lc.guard_flags & PE_GUARD_CF_INSTRUMENTED) {
+        const uint64_t check = ntdll_export(p, "ShzGuardCheckICall"), dispatch = ntdll_export(p, "ShzGuardDispatchICall");
+        const struct { uint64_t slot, fn; } w[] = {
+            { lc.guard_cf_check_fptr, check }, { lc.guard_cf_dispatch_fptr, dispatch },
+            { lc.guard_xfg_check_fptr, check }, { lc.guard_xfg_dispatch_fptr, dispatch },
+            { lc.guard_xfg_table_dispatch_fptr, dispatch },
+        };
+        unsigned k;
+        for (k = 0; k < sizeof w / sizeof w[0]; ++k)
+            if (w[k].slot && w[k].fn && kwrite64(p, m->base + (w[k].slot - pref), w[k].fn))
+                return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "CFG pointer not mapped");
+    }
+    return STATUS_SUCCESS;
 }
 
 /* ---------------------------------------------------------------- loading */
@@ -405,31 +722,38 @@ static int32_t link_module(ldr_ctx_t *c, module_t *m, int depth)
 {
     process_t *p = c->p;
     struct impctx ic = { c, m, depth, 0 };
-    int rc = pe_walk_imports(m->file, m->fsize, &m->info, import_cb, &ic);
+    int rc;
+    int32_t st = apply_load_config(c, m);
+    if (st) return st;
+    m->delay_imports = 0;
+    if (pe_walk_delay_imports(m->file, m->fsize, &m->info, delay_count_cb, &m->delay_imports))
+        return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed delay-load import directory");
+    rc = pe_walk_imports(m->file, m->fsize, &m->info, import_cb, &ic);
     if (rc) return ic.st ? ic.st : fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed import directory");
-    /* TLS directory (IMAGE_TLS_DIRECTORY64: start, end, index VA, callbacks VA, zero fill) */
+    /* TLS directory (IMAGE_TLS_DIRECTORY64: start, end, index VA, callbacks VA, zero fill, characteristics), read from
+     * the mapped (relocated) image */
     if (m->info.dir_rva[9]) {
-        uint64_t off, avail;
-        if (m->info.dir_size[9] < 40 || pe_rva_to_offset(m->file, m->fsize, &m->info, m->info.dir_rva[9], &off, &avail) || avail < 40)
+        uint64_t v[4];
+        uint32_t tail[2];
+        if (m->info.dir_size[9] < 40 || kread(p, m->base + m->info.dir_rva[9], v, 32) ||
+            kread(p, m->base + m->info.dir_rva[9] + 32, tail, 8))
             return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed TLS directory");
+        m->tls_start = v[0]; m->tls_end = v[1]; m->tls_index_va = v[2]; m->tls_callbacks_va = v[3]; m->tls_zero = tail[0];
         {
-            uint64_t v[4];
-            uint32_t zero;
-            uint64_t pa = vm_lookup(p->pml4, m->base + m->info.dir_rva[9], 0);
-            if (!pa) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "TLS directory not mapped");
-            memcpy(v, (void *)p2v(pa), 32);
-            memcpy(&zero, (void *)p2v(pa + 32), 4);
-            m->tls_start = v[0]; m->tls_end = v[1]; m->tls_index_va = v[2]; m->tls_callbacks_va = v[3]; m->tls_zero = zero;
-            if (m->tls_end < m->tls_start || m->tls_end - m->tls_start > (1u << 24) ||
-                m->tls_start < m->base || m->tls_end > m->base + m->info.size_of_image ||
-                m->tls_index_va < m->base || m->tls_index_va + 4 > m->base + m->info.size_of_image)
-                return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "TLS directory out of the image");
-            m->has_tls = 1;
-            m->tls_index = p->tls_slots++;
-            {
-                uint32_t idx = m->tls_index;
-                if (uwrite(p, m->tls_index_va, &idx, 4)) return fail(c, STATUS_ACCESS_VIOLATION, m->name, "", 0, "", "TLS index not writable");
-            }
+            const unsigned a = (tail[1] >> 20) & 15;        /* IMAGE_SCN_ALIGN_* encoding: 2^(a-1) bytes */
+            m->tls_align = a ? 1u << (a - 1) : 16;
+            if (m->tls_align < 64) m->tls_align = 64;
+            if (m->tls_align > 8192) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "TLS alignment too large");
+        }
+        if (m->tls_end < m->tls_start || m->tls_end - m->tls_start > (1u << 24) || m->tls_zero > (1u << 24) ||
+            m->tls_start < m->base || m->tls_end > m->base + m->info.size_of_image ||
+            m->tls_index_va < m->base || m->tls_index_va + 4 > m->base + m->info.size_of_image)
+            return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "TLS directory out of the image");
+        m->has_tls = 1;
+        m->tls_index = p->tls_slots++;
+        {
+            uint32_t idx = m->tls_index;
+            if (kwrite(p, m->tls_index_va, &idx, 4)) return fail(c, STATUS_ACCESS_VIOLATION, m->name, "", 0, "", "TLS index not mapped");
         }
     }
     return STATUS_SUCCESS;
@@ -445,6 +769,7 @@ static int32_t load_module_file(ldr_ctx_t *c, const char *name, fsnode_t *node, 
     if (!m) return fail(c, STATUS_NO_MEMORY, name, "", 0, "", "out of kernel memory");
     scopy(m->name, sizeof m->name, name);
     scopy(m->path, sizeof m->path, path);
+    dir_of(m->path, m->dir, sizeof m->dir);
     m->file = node->data;
     m->fsize = node->size;
     rc = pe_parse(m->file, m->fsize, &m->info);
@@ -459,9 +784,8 @@ static int32_t load_module_file(ldr_ctx_t *c, const char *name, fsnode_t *node, 
     m->state = 0;
     m->next = p->modules;
     p->modules = m;                                             /* visible while loading: circular imports terminate */
-    st = map_module(p, m);
-    if (st) return fail(c, st, name, "", 0, "", st == STATUS_CONFLICTING_ADDRESSES ? "fixed-base image and its range is occupied" :
-                        "cannot map the image");
+    st = map_module(c, m);
+    if (st) return st;
     st = link_module(c, m, depth);
     if (st) return st;
     m->state = 1;
@@ -470,16 +794,18 @@ static int32_t load_module_file(ldr_ctx_t *c, const char *name, fsnode_t *node, 
     return STATUS_SUCCESS;
 }
 
-static int32_t load_dll(ldr_ctx_t *c, const char *name, int depth, module_t **out)
+static int32_t load_dll(ldr_ctx_t *c, const char *name, int system_only, int depth, module_t **out)
 {
-    module_t *m = find_module(c->p, name);
+    char key[64], path[PATH_CAP];
+    module_t *m;
     fsnode_t *node;
-    char path[160];
+    base_name(name, key, sizeof key);
+    m = find_module(c->p, key);
     if (m) { if (out) *out = m; return STATUS_SUCCESS; }
-    if (depth > MAX_DEPTH) return fail(c, STATUS_DLL_NOT_FOUND, 0, name, 0, 0, "import nesting deeper than 24 levels");
-    node = locate_file(name, path, sizeof path);
-    if (!node) return fail(c, STATUS_DLL_NOT_FOUND, 0, name, 0, 0, "DLL not found");
-    return load_module_file(c, name, node, path, depth, out);
+    if (depth > MAX_DEPTH) return fail(c, STATUS_DLL_NOT_FOUND, 0, key, 0, 0, "import nesting deeper than 24 levels");
+    node = locate_file(c, name, system_only, path, sizeof path);
+    if (!node) return fail(c, STATUS_DLL_NOT_FOUND, 0, key, 0, 0, has_path(name) ? "file not found" : "DLL not found");
+    return load_module_file(c, key, node, path, depth, out);
 }
 
 /* Unmaps and forgets every module added after `mark` (the head of the list when the failed request started). */
@@ -522,11 +848,11 @@ static int list_append(process_t *p, uint64_t head, uint64_t link)
 static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t strings_va, int in_init_list, int is_exe)
 {
     uint8_t entry[LDR_ENTRY_SIZE];
-    uint16_t wfull[160], wbase[64];
+    uint16_t wfull[PATH_CAP], wbase[64];
     unsigned i, nf = 0, nb = 0;
     struct ustr uf, ub;
     memset(entry, 0, sizeof entry);
-    for (i = 0; m->path[i] && nf < 159; ++i) wfull[nf++] = (uint8_t)m->path[i];
+    for (i = 0; m->path[i] && nf < PATH_CAP - 1; ++i) wfull[nf++] = (uint8_t)m->path[i];
     for (i = 0; m->name[i] && nb < 63; ++i) wbase[nb++] = (uint8_t)m->name[i];
     uf = (struct ustr){ (uint16_t)(nf * 2), (uint16_t)(nf * 2 + 2), 0, strings_va };
     ub = (struct ustr){ (uint16_t)(nb * 2), (uint16_t)(nb * 2 + 2), 0, strings_va + 336 };
@@ -554,9 +880,10 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
  * then the rest in dependency-completion order for the initialization list. */
 static int32_t publish_all(process_t *p, module_t *exe)
 {
-    module_t *m, *order[128];
-    unsigned n = 0, i, j;
+    module_t *m, **order;
+    unsigned n = 0, total = 0, i, j;
     uint64_t block;
+    int32_t st = STATUS_SUCCESS;
     if (!p->ldr_va) {
         uint64_t l = alloc_user(p, 4096);
         uint8_t hdr[0x50];
@@ -573,53 +900,86 @@ static int32_t publish_all(process_t *p, module_t *exe)
             uwrite64(p, p->peb + 0x18, l);
         }
     }
+    for (m = p->modules; m; m = m->next) ++total;
+    order = kzalloc(sizeof *order * (total + 1));
+    if (!order) return STATUS_NO_MEMORY;
     for (m = p->modules; m; m = m->next)
-        if (!m->published && m->state == 1 && n < 128) order[n++] = m;
+        if (!m->published && m->state == 1) order[n++] = m;
     /* sort ascending by init_seq (dependency completion order) */
     for (i = 0; i < n; ++i)
         for (j = i + 1; j < n; ++j)
             if (order[j]->init_seq < order[i]->init_seq) { m = order[i]; order[i] = order[j]; order[j] = m; }
     block = alloc_user(p, (uint64_t)n * LDR_SLOT + 4096);
-    if (!block) return STATUS_NO_MEMORY;
-    if (exe) {                                               /* the executable leads the load-order list */
-        if (publish_module(p, exe, block, block + LDR_ENTRY_SIZE, 0, 1)) return STATUS_ACCESS_VIOLATION;
-        block += LDR_SLOT;
-    }
-    for (i = 0; i < n; ++i) {
+    if (!block) { kfree(order); return STATUS_NO_MEMORY; }
+    if (exe && publish_module(p, exe, block, block + LDR_ENTRY_SIZE, 0, 1)) st = STATUS_ACCESS_VIOLATION;
+    else if (exe) block += LDR_SLOT;
+    for (i = 0; !st && i < n; ++i) {
         if (order[i] == exe) continue;
-        if (publish_module(p, order[i], block, block + LDR_ENTRY_SIZE, 1, 0)) return STATUS_ACCESS_VIOLATION;
+        if (publish_module(p, order[i], block, block + LDR_ENTRY_SIZE, 1, 0)) st = STATUS_ACCESS_VIOLATION;
         block += LDR_SLOT;
     }
-    return STATUS_SUCCESS;
+    kfree(order);
+    return st;
 }
 
-/* ---------------------------------------------------------------- TLS for threads */
-void thread_user_tls_init(process_t *p, thread_t *t)
+/* ---------------------------------------------------------------- TLS */
+/* Builds a ThreadLocalStoragePointer array with p->tls_slots entries: the first `keep` pointers are copied from the
+ * thread's current array `old`, every TLS module whose index is >= keep gets a fresh copy of its template (the zero
+ * fill stays demand-zero). Returns the array's address or 0. Loader lock held. */
+static uint64_t build_tls_array(process_t *p, uint64_t old, unsigned keep)
 {
     module_t *m;
-    uint64_t array, cursor;
-    unsigned slots = p->tls_slots;
-    uint64_t total = 4096, sz;
-    if (!slots || !t->teb) return;
+    const unsigned slots = p->tls_slots;
+    uint64_t total = ((uint64_t)slots * 8 + 63) & ~63ull, array, cursor;
+    unsigned i;
     for (m = p->modules; m; m = m->next)
-        if (m->has_tls) total += ((m->tls_end - m->tls_start + m->tls_zero) + 63) & ~63ull;
-    sz = ((uint64_t)slots * 8 + total + 4095) & ~4095ull;
-    array = alloc_user(p, sz);
-    if (!array) return;
-    cursor = array + ((uint64_t)slots * 8 + 63) / 64 * 64;
+        if (m->has_tls && m->tls_index >= keep)
+            total += m->tls_align + ((m->tls_end - m->tls_start + m->tls_zero + 63) & ~63ull);
+    array = alloc_user(p, total);
+    if (!array) return 0;
+    for (i = 0; old && i < keep && i < slots; ++i) {
+        uint64_t v = 0;
+        if (kread(p, old + (uint64_t)i * 8, &v, 8) || kwrite64(p, array + (uint64_t)i * 8, v)) return 0;
+    }
+    cursor = array + (((uint64_t)slots * 8 + 63) & ~63ull);
     for (m = p->modules; m; m = m->next) {
-        uint64_t len, i;
+        uint64_t len, off;
         uint8_t chunk[256];
-        if (!m->has_tls) continue;
+        if (!m->has_tls || m->tls_index < keep) continue;
+        cursor = (cursor + m->tls_align - 1) & ~((uint64_t)m->tls_align - 1);
         len = m->tls_end - m->tls_start;
-        for (i = 0; i < len; i += sizeof chunk) {
-            const uint64_t n = len - i < sizeof chunk ? len - i : sizeof chunk;
-            if (copy_from_user(p, chunk, m->tls_start + i, n) || copy_to_user(p, cursor + i, chunk, n)) return;
+        for (off = 0; off < len; off += sizeof chunk) {
+            const uint64_t n = len - off < sizeof chunk ? len - off : sizeof chunk;
+            if (kread(p, m->tls_start + off, chunk, n) || kwrite(p, cursor + off, chunk, n)) return 0;
         }
-        uwrite64(p, array + (uint64_t)m->tls_index * 8, cursor);
+        if (kwrite64(p, array + (uint64_t)m->tls_index * 8, cursor)) return 0;
         cursor += (len + m->tls_zero + 63) & ~63ull;
     }
-    uwrite64(p, t->teb + 0x58, array);
+    return array;
+}
+
+void thread_user_tls_init(process_t *p, thread_t *t)
+{
+    uint64_t array;
+    if (!t->teb) return;
+    mutex_lock(&p->ldr_lock);
+    if (p->tls_slots && (array = build_tls_array(p, 0, 0)) != 0) kwrite64(p, t->teb + 0x58, array);
+    mutex_unlock(&p->ldr_lock);
+}
+
+/* After a runtime load assigned TLS indices >= old_slots: every existing thread gets an array that also covers them
+ * (the old array stays valid for code that already read the pointer; it is released with the process). */
+static void tls_extend_threads(process_t *p, unsigned old_slots)
+{
+    uint64_t tid;
+    if (p->tls_slots == old_slots) return;
+    for (tid = 4; tid < p->next_tid; tid += 4) {
+        thread_t *t = thread_find_tid(p, tid);
+        uint64_t old = 0, array;
+        if (!t || !t->teb || kread(p, t->teb + 0x58, &old, 8)) continue;
+        array = build_tls_array(p, old, old ? old_slots : 0);
+        if (array) kwrite64(p, t->teb + 0x58, array);
+    }
 }
 
 /* ---------------------------------------------------------------- process parameters */
@@ -677,6 +1037,21 @@ static int build_params(process_t *p, const char *image, const char *cmdline, co
     return 0;
 }
 
+/* The current directory of the process: RTL_USER_PROCESS_PARAMETERS.CurrentDirectory.DosPath (UTF-16, ASCII kept). */
+static void current_directory(process_t *p, char *out, size_t cap)
+{
+    struct ustr u;
+    uint16_t w[PATH_CAP];
+    unsigned i, n;
+    out[0] = 0;
+    if (!p->params_va || copy_from_user(p, &u, p->params_va + 0x38, sizeof u)) return;
+    n = u.length / 2;
+    if (!n || n >= PATH_CAP || n >= cap || copy_from_user(p, w, u.buffer, n * 2ull)) return;
+    for (i = 0; i < n; ++i) out[i] = w[i] < 0x80 ? (char)w[i] : '?';
+    out[n] = 0;
+    if (n > 3 && (out[n - 1] == '\\' || out[n - 1] == '/')) out[n - 1] = 0;
+}
+
 extern kobject_t *console_object(int output);
 
 /* ---------------------------------------------------------------- entry points */
@@ -684,10 +1059,13 @@ static uint64_t ntdll_export(process_t *p, const char *sym)
 {
     module_t *m = find_module(p, "ntdll.dll");
     uint64_t va = 0;
-    ldr_ctx_t c;
-    memset(&c, 0, sizeof c);
-    c.p = p;
-    if (!m || resolve_export(&c, m, sym, -1, 0, &va)) return 0;
+    ldr_ctx_t *c;
+    if (!m || m->state != 1) return 0;
+    c = kzalloc(sizeof *c);
+    if (!c) return 0;
+    c->p = p;
+    if (resolve_export(c, m, sym, -1, 0, &va)) va = 0;
+    kfree(c);
     return va;
 }
 
@@ -720,6 +1098,7 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     if (!c) return STATUS_NO_MEMORY;
     p = process_create_empty("win64");
     if (!p) { kfree(c); return STATUS_NO_MEMORY; }
+    mutex_init(&p->ldr_lock);
     c->p = p;
     {
         /* short name for logs: last path component */
@@ -728,6 +1107,8 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
         for (k = 0; s[k] && k < sizeof p->name - 1; ++k) p->name[k] = s[k];
         p->name[k] = 0;
     }
+    dir_of(image_path, c->app_dir, sizeof c->app_dir);          /* application directory: the executable's */
+    scopy(c->cwd, sizeof c->cwd, cwd);
     p->parent_pid = parent ? (uint64_t)parent->pid : 0;
     proc_alloc_peb(p);
     /* std handles occupy 4, 8 and 12 */
@@ -738,7 +1119,7 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
         handle_insert(p, outo, 0x40000000u, &h); ob_deref(outo);
         handle_insert(p, err, 0x40000000u, &h); ob_deref(err);
     }
-    st = load_dll(c, "ntdll.dll", 0, 0);
+    st = load_dll(c, "ntdll.dll", 1, 0, 0);
     if (st) goto report_failed;
     base_name(p->name, nm, sizeof nm);
     st = load_module_file(c, nm, node, image_path, 0, &exe);
@@ -791,32 +1172,53 @@ failed:
     return st;
 }
 
-int32_t ldr_load_module_runtime(process_t *p, const char *name, uint64_t *base_out)
+/* Runtime LoadLibrary (NtLoadImage). `flags`: LoadLibraryExW flags plus LDRS_*; `dirs`: ';'-separated directories
+ * (AddDllDirectory list, or SetDllDirectory's directory with LDRS_DLL_DIRECTORY), may be NULL. */
+int32_t ldr_load_module_runtime(process_t *p, const char *name, uint32_t flags, const char *dirs, uint64_t *base_out)
 {
     char nm[96], host[64];
-    module_t *m, *mark = p->modules;
-    const unsigned tls_mark = p->tls_slots;
+    module_t *m = 0, *mark;
+    unsigned tls_mark;
     int32_t st;
     int is_api;
     ldr_ctx_t *c = kzalloc(sizeof *c);
     if (!c) return STATUS_NO_MEMORY;
+    if ((flags & LLF_SEARCH_DLL_LOAD_DIR) && !(name[0] == '\\' || (name[0] && name[1] == ':'))) {
+        kfree(c);
+        return STATUS_INVALID_PARAMETER;                    /* LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR needs an absolute path */
+    }
+    mutex_lock(&p->ldr_lock);
+    mark = p->modules;
+    tls_mark = p->tls_slots;
     c->p = p;
     c->importer = "LoadLibrary";
     c->import_dll = name;
     c->import_func = "";
+    c->flags = flags;
+    scopy(c->dirs, sizeof c->dirs, dirs);
+    {
+        module_t *exe = p->modules;
+        for (; exe && exe->base != p->image_base; exe = exe->next) {}
+        if (exe) scopy(c->app_dir, sizeof c->app_dir, exe->dir);
+    }
+    current_directory(p, c->cwd, sizeof c->cwd);
+    if (has_path(name)) dir_of(name, c->load_dir, sizeof c->load_dir);
     base_name(name, nm, sizeof nm);
     st = resolve_dll_name(c, nm, host, sizeof host, &is_api);
     if (!st) {
-        st = load_dll(c, host, 0, &m);
+        st = load_dll(c, is_api ? host : name, is_api, 0, &m);
         if (st && is_api) annotate_apiset(c, "LoadLibrary", nm, host);
     }
     if (!st) st = publish_all(p, 0);
     if (st) {
         report(c, nm, st);
         rollback(p, mark, tls_mark);
+        mutex_unlock(&p->ldr_lock);
         kfree(c);
         return st;
     }
+    tls_extend_threads(p, tls_mark);
+    mutex_unlock(&p->ldr_lock);
     kfree(c);
     *base_out = m->base;
     return STATUS_SUCCESS;
@@ -826,11 +1228,14 @@ uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint
 {
     module_t *m;
     uint64_t va = 0;
-    ldr_ctx_t c;
-    memset(&c, 0, sizeof c);
-    c.p = p;
+    ldr_ctx_t *c = kzalloc(sizeof *c);
+    if (!c) return 0;
+    c->p = p;
+    mutex_lock(&p->ldr_lock);
     for (m = p->modules; m; m = m->next)
-        if (m->base == base && !resolve_export(&c, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
-            return va;
-    return 0;
+        if (m->base == base && !resolve_export(c, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
+            break;
+    mutex_unlock(&p->ldr_lock);
+    kfree(c);
+    return m ? va : 0;
 }

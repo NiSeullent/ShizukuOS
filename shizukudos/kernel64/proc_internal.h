@@ -92,6 +92,7 @@ struct process {
     /* loader state */
     void *modules;                      /* module_t list, see ldr.c */
     unsigned tls_slots;                 /* TLS indices handed out to loaded modules */
+    kmutex_t ldr_lock;                  /* serialises runtime loads and TLS array (re)building (ldr.c) */
     uint64_t ntdll_process_start, ntdll_thread_start, ntdll_exception_dispatcher;
     uint64_t ldr_va;                    /* PEB_LDR_DATA */
     uint64_t params_va;                 /* RTL_USER_PROCESS_PARAMETERS */
