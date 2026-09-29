@@ -259,7 +259,10 @@ static void test_mouse(void)
     i = find(WM_MOUSEMOVE, 0);
     CHECK(i >= 0 && LPX(g_ev[i].lp) == 110 && LPY(g_ev[i].lp) == 105, "relative SendInput move (+10,+5)");
     reset();
-    mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 404 * 64, 27563, 0, 0);            /* 65536ths of the screen: (404,323) */
+    {                                                                               /* 65536ths of the screen: (404,323) */
+        const int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+        mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, (404 * 65536 + sw - 1) / sw, (323 * 65536 + sh - 1) / sh, 0, 0);
+    }
     drain();
     i = find(WM_MOUSEMOVE, 0);
     CHECK(i >= 0 && LPX(g_ev[i].lp) == 404 - CX0 && LPY(g_ev[i].lp) == 323 - CY0 && GetCursorPos(&p) && p.x == 404 && p.y == 323,
@@ -342,7 +345,8 @@ static void test_mouse(void)
     r.left = 250; r.top = 200; r.right = 300; r.bottom = 250;
     CHECK(ClipCursor(&r) && SetCursorPos(0, 0) && GetCursorPos(&p) && p.x == 250 && p.y == 200 && SetCursorPos(1000, 700) && GetCursorPos(&p) &&
           p.x == 299 && p.y == 249, "ClipCursor confines the pointer");
-    CHECK(GetClipCursor(&r) && r.left == 250 && r.bottom == 250 && ClipCursor(0) && GetClipCursor(&r) && r.right == 1024 && r.bottom == 768,
+    CHECK(GetClipCursor(&r) && r.left == 250 && r.bottom == 250 && ClipCursor(0) && GetClipCursor(&r) && r.right == GetSystemMetrics(SM_CXSCREEN) &&
+          r.bottom == GetSystemMetrics(SM_CYSCREEN),
           "GetClipCursor / releasing the clip");
 
     reset();
@@ -430,6 +434,7 @@ int main(void)
     WNDCLASSEXW wc;
     HINSTANCE inst = GetModuleHandleW(0);
     CURSORINFO ci;
+    POINT p;
     if (GetSystemMetrics(SM_CXSCREEN) == 0) { printf("SKIP: no display device\n"); return 0; }
     CHECK(GetSystemMetrics(SM_MOUSEPRESENT) && GetSystemMetrics(SM_CMOUSEBUTTONS) == 3 && GetSystemMetrics(SM_MOUSEWHEELPRESENT),
           "the PS/2 mouse (with wheel) was detected");
@@ -463,9 +468,10 @@ int main(void)
 
     test_host();
 
-    SetCursorPos(1023, 767);
+    SetCursorPos(GetSystemMetrics(SM_CXSCREEN) - 1, GetSystemMetrics(SM_CYSCREEN) - 1);   /* the bottom-right pixel */
     drain();
-    printf("INPUT-PARKED: 1023 767\n");
+    GetCursorPos(&p);
+    printf("INPUT-PARKED: %ld %ld\n", (long)p.x, (long)p.y);
     CHECK(DestroyWindow(g_hwnd), "DestroyWindow");
     printf("%s: input test\n", bad ? "FAIL" : "PASS");
     return bad ? 1 : 0;

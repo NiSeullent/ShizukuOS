@@ -482,7 +482,12 @@ static void test_hooks(void)
 
 /* ---------------------------------------------------------------- DPI, display, monitors */
 static int g_monitors;
-static BOOL CALLBACK mon_cb(HMONITOR m, HDC dc, LPRECT r, LPARAM l) { (void)m; (void)dc; (void)l; if (r->right == 1024 && r->bottom == 768) ++g_monitors; return TRUE; }
+static BOOL CALLBACK mon_cb(HMONITOR m, HDC dc, LPRECT r, LPARAM l)
+{
+    (void)m; (void)dc; (void)l;
+    if (r->left == 0 && r->top == 0 && r->right == GetSystemMetrics(SM_CXSCREEN) && r->bottom == GetSystemMetrics(SM_CYSCREEN)) ++g_monitors;
+    return TRUE;
+}
 
 static void test_display(void)
 {
@@ -493,21 +498,22 @@ static void test_display(void)
     DISPLAYCONFIG_PATH_INFO paths[2];
     DISPLAYCONFIG_MODE_INFO modes[4];
     RECT r = { 0, 0, 100, 100 };
+    const int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
     CHECK(GetDpiForWindow(g_main) == 96 && GetDpiForSystem() == 96, "GetDpiForWindow / GetDpiForSystem: 96");
     CHECK(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2), "SetProcessDpiAwarenessContext(PMv2)");
     CHECK(!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE) && GetLastError() == ERROR_ACCESS_DENIED, "it can be set only once");
     CHECK(AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(), DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) && IsProcessDPIAware(),
           "the thread follows the process context");
     CHECK(GetAwarenessFromDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE) == DPI_AWARENESS_SYSTEM_AWARE, "GetAwarenessFromDpiAwarenessContext");
-    CHECK(GetSystemMetricsForDpi(SM_CXVSCROLL, 192) == 34 && GetSystemMetricsForDpi(SM_CXSCREEN, 192) == 1024, "GetSystemMetricsForDpi scales sizes, not the screen");
+    CHECK(GetSystemMetricsForDpi(SM_CXVSCROLL, 192) == 34 && GetSystemMetricsForDpi(SM_CXSCREEN, 192) == sw, "GetSystemMetricsForDpi scales sizes, not the screen");
     CHECK(AdjustWindowRectExForDpi(&r, WS_OVERLAPPEDWINDOW, FALSE, 0, 96) && r.left == -4 && r.top == -23 && r.right == 104, "AdjustWindowRectExForDpi");
     memset(&dm, 0, sizeof dm);
     dm.dmSize = sizeof dm;
-    CHECK(EnumDisplaySettingsW(0, ENUM_CURRENT_SETTINGS, &dm) && dm.dmPelsWidth == 1024 && dm.dmPelsHeight == 768 && dm.dmBitsPerPel == 32,
-          "EnumDisplaySettingsW: the current mode, 1024x768x32");
+    CHECK(EnumDisplaySettingsW(0, ENUM_CURRENT_SETTINGS, &dm) && (int)dm.dmPelsWidth == sw && (int)dm.dmPelsHeight == sh && dm.dmBitsPerPel == 32,
+          "EnumDisplaySettingsW: the current mode (the screen size), 32 bpp");
     CHECK(!EnumDisplaySettingsW(0, 1, &dm), "exactly one mode is listed");
     CHECK(ChangeDisplaySettingsW(&dm, 0) == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsW to the current mode succeeds");
-    dm.dmPelsWidth = 800;
+    dm.dmPelsWidth = (DWORD)sw + 16;
     CHECK(ChangeDisplaySettingsW(&dm, CDS_TEST) == DISP_CHANGE_BADMODE, "any other mode is DISP_CHANGE_BADMODE");
     memset(&dd, 0, sizeof dd);
     dd.cb = sizeof dd;
@@ -516,7 +522,7 @@ static void test_display(void)
     CHECK(GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &np, &nm) == ERROR_SUCCESS && np == 1 && nm == 2, "GetDisplayConfigBufferSizes");
     np = 2; nm = 4;
     CHECK(QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &np, paths, &nm, modes, 0) == ERROR_SUCCESS && np == 1 &&
-          modes[paths[0].sourceInfo.modeInfoIdx].sourceMode.width == 1024, "QueryDisplayConfig");
+          (int)modes[paths[0].sourceInfo.modeInfoIdx].sourceMode.width == sw, "QueryDisplayConfig");
     {
         DISPLAYCONFIG_SOURCE_DEVICE_NAME sn;
         memset(&sn, 0, sizeof sn);
@@ -527,7 +533,7 @@ static void test_display(void)
         CHECK(DisplayConfigGetDeviceInfo(&sn.header) == ERROR_SUCCESS && sn.viewGdiDeviceName[11] == '1', "DisplayConfigGetDeviceInfo(source name)");
     }
     mi.cbSize = sizeof mi;
-    CHECK(GetMonitorInfoW(MonitorFromWindow(g_main, MONITOR_DEFAULTTONULL), (LPMONITORINFO)&mi) && mi.rcMonitor.right == 1024 && (mi.dwFlags & MONITORINFOF_PRIMARY),
+    CHECK(GetMonitorInfoW(MonitorFromWindow(g_main, MONITOR_DEFAULTTONULL), (LPMONITORINFO)&mi) && mi.rcMonitor.right == sw && (mi.dwFlags & MONITORINFOF_PRIMARY),
           "MonitorFromWindow / GetMonitorInfoW");
     CHECK(EnumDisplayMonitors(0, 0, mon_cb, 0) && g_monitors == 1, "EnumDisplayMonitors: one monitor");
 }
@@ -754,8 +760,8 @@ int main(void)
     start_job(3, 0, 0, 0);
     wait_job();
     DestroyWindow(g_main);
-    SetCursorPos(1023, 767);                                            /* the pointer back where T_GUI_INPUT parked it */
-    printf("INPUT-PARKED: 1023 767\n");
+    SetCursorPos(GetSystemMetrics(SM_CXSCREEN) - 1, GetSystemMetrics(SM_CYSCREEN) - 1);   /* back where T_GUI_INPUT parked it */
+    printf("INPUT-PARKED: %d %d\n", GetSystemMetrics(SM_CXSCREEN) - 1, GetSystemMetrics(SM_CYSCREEN) - 1);
     printf("%s: system test\n", bad ? "FAIL" : "PASS");
     return bad ? 1 : 0;
 }

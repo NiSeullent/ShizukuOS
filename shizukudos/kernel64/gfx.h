@@ -37,6 +37,7 @@ struct gfx_fb {
 };
 extern gfx_fb_t g_fb;
 extern const gfx_backend_t gfx_backend_virtio;      /* gfx_virtio.c */
+extern const gfx_backend_t gfx_backend_gop;         /* gfx_gop.c: the UEFI boot framebuffer */
 
 int gfx_fb_init(void);                              /* idempotent; 0 = display ready, else an NTSTATUS */
 void gfx_fb_present(int x, int y, int w, int h);    /* copy a back-buffer rectangle to the framebuffer (clipped) */

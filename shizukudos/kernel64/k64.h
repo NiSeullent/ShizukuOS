@@ -176,7 +176,8 @@ int subsys64_console_read(process_t *p, void *buf, uint64_t cap, uint64_t *got);
 /* HOOK for a UEFI GOP display backend (kernel64/gfx_fb.c): the linear framebuffer the UEFI boot manager's direct
  * Kernel64 boot handed over (shz_bootinfo_t.fb_*). Returns 0 and fills *out, or -1 when there is none (Supervisor,
  * Multiboot stub, no GOP, or a pixel format other than 32-bit RGBX/BGRX). The range lies outside the direct map:
- * a backend maps it with mmio_map() (pci.h) before drawing. Nothing calls this yet; the Bochs VBE path is unchanged. */
+ * a backend maps it with mmio_map() (pci.h) before drawing. Used by the GOP display backend (gfx_gop.c) and by the Bochs VBE
+ * backend, which declines to reprogram the adapter when a boot framebuffer is on screen. */
 typedef struct {
     uint64_t base, size;                        /* physical */
     uint32_t width, height, pitch, bpp;         /* pitch in bytes */
