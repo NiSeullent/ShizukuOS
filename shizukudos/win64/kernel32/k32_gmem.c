@@ -90,6 +90,7 @@ static HGLOBAL mem_alloc(UINT flags, SIZE_T size)
 
 static HGLOBAL mem_free(HGLOBAL h)
 {
+    if (!h) return 0;                                   /* GlobalFree(NULL)/LocalFree(NULL): no-op, LastError untouched (as Windows) */
     if (gh_is_handle(h)) {
         gh_t *s = h;
         if (s->data) RtlFreeHeap(ShzProcessHeap(), 0, s->data);
