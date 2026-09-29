@@ -189,10 +189,12 @@ K32API BOOL WINAPI ReadFile(HANDLE h, LPVOID buf, DWORD len, LPDWORD done, LPOVE
     if (st) { k32_nt_error(st); return FALSE; }
     return TRUE;
 }
+static int std_index(HANDLE h);
 K32API BOOL WINAPI WriteFile(HANDLE h, LPCVOID buf, DWORD len, LPDWORD done, LPOVERLAPPED ov)
 {
     NTSTATUS st = rw_file(h, (void *)buf, len, done, ov, 1);
     if (st) { k32_nt_error(st); return FALSE; }
+    if (!ov && std_index(h) >= 1 && k32_console_attached()) k32_console_track(buf, done ? *done : len);   /* console screen buffer model */
     return TRUE;
 }
 
@@ -508,11 +510,19 @@ K32API BOOL WINAPI SetStdHandle(DWORD which, HANDLE h)
     default: shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE;
     }
 }
-static int is_console(HANDLE h)
+static int is_console_device(HANDLE h)
 {
     struct { ULONGLONG c, a, w, ch; ULONG attrs, pad; } b;
     SHZ_IO_STATUS_BLOCK iosb;
     return NtQueryInformationFile(h, &iosb, &b, sizeof b, 4) == 0 && (b.attrs & ATTR_DEVICE);
+}
+/* a console handle of an attached process (k32_console.c: FreeConsole detaches) */
+static int is_console(HANDLE h) { return k32_console_attached() && is_console_device(h); }
+int k32_console_handle(HANDLE h, int *std_slot)
+{
+    if (!is_console_device(h)) return 0;
+    *std_slot = std_index(h);
+    return 1;
 }
 K32API BOOL WINAPI GetConsoleMode(HANDLE h, LPDWORD mode)
 {
@@ -532,7 +542,9 @@ K32API BOOL WINAPI WriteConsoleA(HANDLE h, const VOID *buf, DWORD n, LPDWORD wri
 {
     (void)reserved;
     if (!is_console(h)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
-    return WriteFile(h, buf, n, written, 0);
+    if (!WriteFile(h, buf, n, written, 0)) return FALSE;  /* WriteFile moves the screen-buffer cursor for standard handles */
+    if (std_index(h) < 1) k32_console_track(buf, n);
+    return TRUE;
 }
 K32API BOOL WINAPI WriteConsoleW(HANDLE h, const VOID *buf, DWORD n, LPDWORD written, LPVOID reserved)
 {
@@ -546,6 +558,7 @@ K32API BOOL WINAPI WriteConsoleW(HANDLE h, const VOID *buf, DWORD n, LPDWORD wri
         int len = wide_to_utf8(w + off, (int)chunk, tmp, sizeof tmp);
         if (len <= 0) break;
         if (!WriteFile(h, tmp, (DWORD)len - 1, &put, 0)) return FALSE;
+        if (std_index(h) < 1) k32_console_track(tmp, (DWORD)len - 1);       /* WriteFile tracked the standard handles */
         off += chunk;
         done += chunk;
     }
