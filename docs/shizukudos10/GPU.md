@@ -43,7 +43,7 @@ Ubuntu 24.04, **QEMU 8.2.2 TCG**(`1:8.2.2+ds-0ubuntu1.18`), libvirglrenderer1 1.
 | 같은 스크립트: `shzvirgl.h` 인코더 상수·패킷 배치를 고정한 virglrenderer 1.0.0 `virgl_protocol.h`/`virgl_hw.h`로 디코드 | HOST_TESTED (ASan/UBSan) | 334 검사 PASS |
 | 같은 스크립트: **같은 스트림을 호스트 libvirglrenderer 1.0.0 + Mesa llvmpipe(EGL surfaceless)가 실행**, 결과 픽셀 판독 | HOST_TESTED | 64x64 중 1,291 픽셀이 무게중심 보간 색(±2/255), 2,799 픽셀이 지운 색, 모서리 6 픽셀 비교 제외. 잘못된 길이의 `DRAW_VBO`는 거부됨 |
 | `run_k64_gui.py --display vga` | GUEST_RUN (TCG) | PASS, 58 검사, 15개 장면 전부 픽셀 일치 |
-| `run_k64_gui.py --display virtio` | GUEST_RUN (TCG) | PASS, 63 검사. **15개 장면 전부 vga와 같은 기대 화면에 픽셀 단위로 일치** |
+| `run_k64_gui.py --display virtio` | GUEST_RUN (TCG) | PASS, 63 검사. **15개 장면 전부 vga와 같은 기대 화면에 픽셀 단위로 일치**. 5회 실행 중 3회 전체 PASS; 나머지 2회도 GPU·GUI 검사는 모두 PASS였고 실패는 T_NET_LOOP.EXE 하나(아래) |
 | virtio: 32x16 무효화 1회의 트래픽 (T_GPU_2D 커널 카운터) | GUEST_RUN | present 1회, 512 픽셀, `TRANSFER_TO_HOST_2D` 1회 2048 바이트, `RESOURCE_FLUSH` 1회 |
 | 같은 구간의 QEMU 자체 기록 (`-trace virtio_gpu_*`, 두 표지에서 VM 정지 중 오프셋 기록) | GUEST_RUN | 바탕 리소스에 transfer 1회, flush 1회 `w 32, h 16, x 344, y 263` — 게스트 계수와 일치 |
 | 실행 전체의 바탕 화면 갱신 | GUEST_RUN | transfer 981회 중 전체 화면(1024x768)은 3회(초기화, 테스트 패턴, 그 뒤 재합성) |
@@ -55,6 +55,11 @@ Ubuntu 24.04, **QEMU 8.2.2 TCG**(`1:8.2.2+ds-0ubuntu1.18`), libvirglrenderer1 1.
 | `run_k64_gui.py --display virtio-gl` | **BLOCKED** | QEMU: `egl: no drm render node available` / `egl: render node init failed`. 러너는 PASS가 아니라 BLOCKED(종료 코드 2)를 보고한다 |
 
 `shz.py test --suite win64`가 위 호스트 테스트와 vga/virtio GUI 실행, virtio-gl(PASS/BLOCKED/FAIL 구분)을 실행한다.
+
+관찰된 무관한 불안정: virtio 실행 5회 중 2회에서 네트워크 루프백 시험 T_NET_LOOP.EXE가 실패했다(한 번은 "a socket with a full send
+buffer is not writable" 검사 — 부분 쓰기 뒤 20 ms 동안 송신 버퍼가 비워질 수 있는 경합, 한 번은 `gethostname` 검사 직후
+ntdll `RtlFreeHeap`의 잘못된 포인터 접근). 이 시험은 GUI·GPU 호출을 하지 않고, 그 시점에는 virtio-gpu 명령이 오가지 않는다.
+vga 2회와 디스플레이 없는 실행 4회에서는 통과했다. 원인은 이 작업에서 조사하지 않았다(별도 과제).
 
 ### 3D 종단 실행에 필요한 호스트 (`BLOCKED` 해제 조건)
 
