@@ -9,7 +9,8 @@
  *        -> HKLM\SYSTEM\CurrentControlSet\Services\<name>, DDInstall AddReg -> the software key
  *        Control\Class\{ClassGUID}\<NNNN>, .HW AddReg -> Enum\<instance>\Device Parameters, and the device's Enum key
  *        (HardwareID, CompatibleIDs, Service, Driver, ClassGUID, DeviceDesc, Mfg).
- *   shzpnp enum [--log <file>]      devices under HKLM\SYSTEM\CurrentControlSet\Enum (or PCI functions from a Kernel64 boot log)
+ *   shzpnp enum [--log <file>]      devices under HKLM\SYSTEM\CurrentControlSet\Enum plus the functions of Kernel64's PCI scan
+ *                                    (NtQuerySystemInformation class 0x101), or the PCI functions of a saved boot log
  *   shzpnp match [<device>...] [--store <dir>] [--all] [--legacy]
  *        rank the models of the media driver store (<dir>\INDEX.TXT, default C:\DRIVERS, written by
  *        shizukudos/ntdrv/store.py) against devices; without devices, against every device of `enum`.
@@ -366,7 +367,8 @@ typedef struct {
     char key[260];              /* Enum-relative instance path, e.g. PCI\VEN_8086&DEV_100E\SHZ0000 */
     shzinf_device_t ids;
     char service[64], driver[64];
-    int registered;
+    char kdriver[24];           /* Kernel64 driver bound to the PCI function (bus scan), if any */
+    int registered, from_scan;
 } device_t;
 
 static int load_enum(device_t *out, int max)
@@ -433,6 +435,51 @@ static int load_enum(device_t *out, int max)
     return n;
 }
 
+/* PCI functions from Kernel64's own bus scan: NtQuerySystemInformation class 0x101 (kernel64/sysx.c) returns
+ * bus/dev/fn, vendor, device, class and the in-kernel driver bound to each function. The record carries no subsystem
+ * or revision, so the IDs are VEN&DEV and the class forms. Instance id: B<bus>D<dev>F<fn>. */
+typedef LONG (NTAPI *nt_qsi_t)(ULONG, PVOID, ULONG, PULONG);
+typedef struct { BYTE bus, dev, fn, cls, sub, pif, irq, pad; WORD vendor, device; DWORD pad2; char driver[24]; } k64_pci_t;
+
+static int load_pci_scan(device_t *out, int max)
+{
+    static k64_pci_t rows[32];
+    ULONG n = 0, i;
+    int k = 0;
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    nt_qsi_t q = ntdll ? (nt_qsi_t)(void *)GetProcAddress(ntdll, "NtQuerySystemInformation") : 0;
+    if (!q || q(0x101, rows, sizeof rows, &n) != 0) return 0;
+    for (i = 0; i < n && i < 32 && k < max; ++i) {
+        device_t *d = &out[k++];
+        char inst[24];
+        memset(d, 0, sizeof *d);
+        shzinf_pci_device(&d->ids, rows[i].vendor, rows[i].device, 0, 0, 0, 0, 1,
+                          (uint32_t)rows[i].cls << 16 | (uint32_t)rows[i].sub << 8 | rows[i].pif);
+        scpy(d->key, sizeof d->key, d->ids.hw[0]);
+        shz_snprintf(inst, sizeof inst, "\\B%02XD%02XF%X", (unsigned)rows[i].bus, (unsigned)rows[i].dev, (unsigned)rows[i].fn);
+        scat(d->key, sizeof d->key, inst);
+        memcpy(d->kdriver, rows[i].driver, sizeof d->kdriver);
+        d->kdriver[sizeof d->kdriver - 1] = 0;
+        d->from_scan = 1;
+    }
+    return k;
+}
+
+/* every device the system knows: the Enum tree, then the bus scan's functions not already registered there */
+static int load_devices(device_t *out, int max, int *from_scan)
+{
+    static device_t scan[32];
+    int n = load_enum(out, max), m = load_pci_scan(scan, 32), i, j;
+    *from_scan = 0;
+    for (i = 0; i < m; ++i) {
+        int dup = 0;
+        for (j = 0; j < n; ++j)
+            if (ieq(out[j].key, scan[i].key)) { dup = 1; scpy(out[j].kdriver, sizeof out[j].kdriver, scan[i].kdriver); }
+        if (!dup && n < max) { out[n++] = scan[i]; ++*from_scan; }
+    }
+    return n;
+}
+
 static int device_from_spec(device_t *d, const char *spec, int index)
 {
     char inst[16];
@@ -449,10 +496,11 @@ static int device_from_spec(device_t *d, const char *spec, int index)
 static void print_device(const device_t *d)
 {
     int i;
-    printf("%s%s\n", d->key, d->registered ? "" : "  (not registered)");
+    printf("%s%s%s\n", d->key, d->registered ? "" : "  (not registered)", d->from_scan ? "  [Kernel64 bus scan]" : "");
     for (i = 0; i < d->ids.nhw; ++i) printf("    HW %s\n", d->ids.hw[i]);
     for (i = 0; i < d->ids.ncp; ++i) printf("    CP %s\n", d->ids.cp[i]);
     if (d->service[0] || d->driver[0]) printf("    service=%s driver=%s\n", d->service[0] ? d->service : "-", d->driver[0] ? d->driver : "-");
+    if (d->kdriver[0]) printf("    bound to the in-kernel driver %s\n", d->kdriver);
 }
 
 /* -------------------------------------------------------------------------------------------- media store index */
@@ -597,9 +645,10 @@ static int cmd_match(int argc, char **argv)
         }
     }
     if (!ndev) {
-        ndev = load_enum(devs, 64);
+        int scanned;
+        ndev = load_devices(devs, 64, &scanned);
         if (!ndev) {
-            printf("no devices: the Enum tree is empty (no bus driver has reported devices; the NT driver host is not present)\n"
+            printf("no devices: the Enum tree is empty and the kernel reports no PCI functions\n"
                    "give devices on the command line, e.g. shzpnp match 8086:100E\n");
             return 1;
         }
@@ -892,7 +941,7 @@ static int cmd_add_driver(int argc, char **argv)
     }
     if (install) {
         int installed = 0;
-        if (!ndev) ndev = load_enum(devs, 64);
+        if (!ndev) { int scanned; ndev = load_devices(devs, 64, &scanned); }
         for (i = 0; i < ndev; ++i) {
             int best = -1, k;
             uint32_t best_rank = 0;
@@ -909,7 +958,7 @@ static int cmd_add_driver(int argc, char **argv)
             printf("%s: best model rank %08x\n", devs[i].key, (unsigned)best_rank);
             if (install_on_device(inf, &models[best], &devs[i], repo, published, &g_target)) ++installed;
         }
-        if (!ndev) printf("no devices to install on (Enum is empty; use --device <id>)\n");
+        if (!ndev) printf("no devices to install on (Enum is empty, no PCI functions reported; use --device <id>)\n");
         printf("installed on %d device(s)\n", installed);
     }
     shzinf_free(inf);
@@ -941,11 +990,15 @@ static int cmd_enum(int argc, char **argv)
         printf("%d PCI functions in the boot log (not registered: no bus driver reported them)\n", n);
         return 0;
     }
-    n = load_enum(devs, 64);
-    for (i = 0; i < n; ++i) print_device(&devs[i]);
-    if (!n) printf("Enum is empty: no bus driver has reported devices (the NT driver host / PnP manager is not present).\n"
-                   "PCI functions Kernel64 saw at boot are in its log: shzpnp enum --log <file>\n");
-    else printf("%d device instance(s)\n", n);
+    {
+        int scanned;
+        n = load_devices(devs, 64, &scanned);
+        for (i = 0; i < n; ++i) print_device(&devs[i]);
+        if (!n) printf("no devices: Enum is empty and the kernel reports no PCI functions (under the Supervisor the "
+                       "configuration ports trap; a saved boot log works: shzpnp enum --log <file>)\n");
+        else printf("%d device(s): %d registered under Enum, %d from the Kernel64 PCI scan (NtQuerySystemInformation 0x101)\n",
+                    n, n - scanned, scanned);
+    }
     return 0;
 }
 

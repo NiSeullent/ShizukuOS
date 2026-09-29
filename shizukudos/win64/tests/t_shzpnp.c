@@ -40,6 +40,9 @@ static const char INDEX[] =
     "MODEL\tSynth\tsynth.inf\tW\tSYN.ndi\tSYN.ndi.NTamd64\t80\tFF\tsynthpnp\t%12%\\synthpnp.sys\t\t"
     "PCI\\VEN_1AF4&DEV_7001&SUBSYS_00011AF4&REV_01\t\tSynthetic PnP Adapter\r\n";
 
+LONG NTAPI NtQuerySystemInformation(ULONG, PVOID, ULONG, PULONG);
+typedef struct { BYTE bus, dev, fn, cls, sub, pif, irq, pad; WORD vendor, device; DWORD pad2; char driver[24]; } k64_pci_t;
+
 static int write_file(const char *path, const void *data, DWORD n)
 {
     WCHAR w[300];
@@ -207,6 +210,36 @@ int main(void)
     CHECK(code == 0, "match ranks devices against a store index");
     code = shzpnp("match 1AF4:7001 --store C:\\SHZTEST\\NOSTORE");
     CHECK(code == 2, "match without an index fails with exit 2");
+    {   /* a device from the Kernel64 PCI scan, no --device: add-driver --install finds it by itself */
+        static k64_pci_t rows[32];
+        ULONG n2 = 0;
+        LONG st = NtQuerySystemInformation(0x101, rows, sizeof rows, &n2);
+        if (st == 0 && n2 > 0) {
+            static char inf2[1024];
+            WCHAR key[160], svc[64];
+            int len = shz_snprintf(inf2, sizeof inf2,
+                "[Version]\r\nSignature=\"$Windows NT$\"\r\nClass=System\r\nClassGUID={4d36e97d-e325-11ce-bfc1-08002be10318}\r\n"
+                "Provider=Synthetic\r\nDriverVer=01/01/2026,1.0\r\n[Manufacturer]\r\nS=M,NTamd64\r\n[M.NTamd64]\r\n"
+                "\"Scanned function\"=SC, PCI\\VEN_%04X&DEV_%04X\r\n[SC.NT]\r\n[SC.NT.Services]\r\nAddService=shzscan,2,SCS\r\n"
+                "[SCS]\r\nServiceType=1\r\nStartType=3\r\nErrorControl=0\r\nServiceBinary=%%12%%\\shzscan.sys\r\n",
+                (unsigned)rows[0].vendor, (unsigned)rows[0].device);
+            CHECK(write_file("C:\\SHZTEST\\scan.inf", inf2, (DWORD)len), "INF for the first PCI function of the bus scan written");
+            code = shzpnp("add-driver C:\\SHZTEST\\scan.inf --install");
+            CHECK(code == 0, "add-driver --install binds a device the kernel's PCI scan reported (no --device)");
+            {
+                char k8[160];
+                shz_snprintf(k8, sizeof k8, "SYSTEM\\CurrentControlSet\\Enum\\PCI\\VEN_%04X&DEV_%04X\\B%02XD%02XF%X",
+                             (unsigned)rows[0].vendor, (unsigned)rows[0].device, (unsigned)rows[0].bus, (unsigned)rows[0].dev, (unsigned)rows[0].fn);
+                MultiByteToWideChar(CP_UTF8, 0, k8, -1, key, 160);
+                MultiByteToWideChar(CP_UTF8, 0, "shzscan", -1, svc, 64);
+                CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, key, L"Service", REG_SZ, svc), "the scanned function's Enum key (B<bus>D<dev>F<fn>) names the service");
+            }
+            code = shzpnp("match --store C:\\SHZTEST\\STORE");
+            CHECK(code == 0, "match without devices ranks the Enum and bus-scan devices");
+        } else {
+            printf("SKIP: the kernel reports no PCI functions (NtQuerySystemInformation 0x101 = %08x, %u)\n", (unsigned)st, (unsigned)n2);
+        }
+    }
     code = shzpnp("load nosuchservice");
     CHECK(code == 2, "load of a service without a key: exit 2");
     code = shzpnp("load synthpnp");

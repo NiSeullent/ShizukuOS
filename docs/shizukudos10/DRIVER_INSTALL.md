@@ -113,7 +113,7 @@ or `$Chicago$`; at least one Models section must apply; the INF and every file i
 StorePath, Provider, Class, ClassGuid, DriverVer, UndecoratedModels). Windows keeps this database in its own
 DRIVERS hive; here it lives in SYSTEM because Kernel64 has one volatile registry.
 
-With `--install` (implied by `--device`), every device — from `--device`, else from the Enum tree — is matched
+With `--install` (implied by `--device`), every device — from `--device`, else every device `enum` lists — is matched
 against the INF's models, and the best-ranked model is installed the way SetupAPI installs a device:
 
 1. CopyFiles of the DDInstall section to their DestinationDirs.
@@ -122,10 +122,11 @@ against the INF's models, and the best-ranked model is installed the way SetupAP
    `Description`, `Group`, `DependOnService`, then the service's AddReg with HKR = the service key.
 3. A software key `HKLM\SYSTEM\CurrentControlSet\Control\Class\{ClassGUID}\<NNNN>`: `DriverDesc`, `ProviderName`,
    `DriverVersion`, `InfPath`, `InfSection`, `MatchingDeviceId`, then the DDInstall AddReg with HKR = this key.
-4. The device key `HKLM\SYSTEM\CurrentControlSet\Enum\<first hardware ID>\SHZ<nnnn>`: `HardwareID`,
+4. The device key `HKLM\SYSTEM\CurrentControlSet\Enum\<first hardware ID>\<instance>`: `HardwareID`,
    `CompatibleIDs` (REG_MULTI_SZ), `DeviceDesc`, `Mfg`, `ClassGUID`, `Class`, `Driver` = `{guid}\NNNN`,
    `ConfigFlags` = 0, `Service` = the AddService entry flagged `SPSVCINST_ASSOCSERVICE`; `.HW` AddReg with HKR =
-   its `Device Parameters` sub-key. The instance id `SHZnnnn` is shzpnp's own: no bus driver assigned one.
+   its `Device Parameters` sub-key. The instance id is `B<bus>D<dev>F<fn>` for a function of the Kernel64 PCI scan
+   and `SHZ<nnnn>` for a `--device` given by hand; both are shzpnp's own (Windows uses the bus driver's instance id).
 
 AddReg honours the documented flags: `FLG_ADDREG_NOCLOBBER`, `DELVAL`, `APPEND` (REG_MULTI_SZ, strings not already
 present), `KEYONLY`, `OVERWRITEONLY`, and the type encoding in the high word (`REG_SZ`, `REG_EXPAND_SZ`,
@@ -138,11 +139,15 @@ RenFiles are not processed, `Include=` of inbox INFs (for example `machine.inf`,
 because ShizukuDOS has no inbox INF set, and nothing is started: `Start=0/1/2` services are recorded, never loaded at
 boot.
 
-**enum** lists `HKLM\SYSTEM\CurrentControlSet\Enum`. Until the NT driver host's PnP manager enumerates buses, only
-devices installed with `--device` are there; `enum --log <file>` lists the PCI functions a saved Kernel64 boot log
-reports.
+**enum** lists the devices the system knows: the `HKLM\SYSTEM\CurrentControlSet\Enum` tree, plus every PCI function
+of Kernel64's own bus scan that is not registered there yet (`NtQuerySystemInformation` class 0x101, kernel64/sysx.c:
+bus/device/function, vendor, device, class and the in-kernel driver bound to it, e.g. `gfx_fb`, `net_rtl8139`). That
+record carries no subsystem ID or revision, so scanned functions get the `VEN&DEV` and class IDs only; the NT driver
+host's PnP manager will replace this source when it enumerates buses. Under the Supervisor the scan is empty (the
+configuration ports trap); `enum --log <file>` lists the PCI functions a saved Kernel64 boot log reports.
 
-**match** ranks the models in `<store>\INDEX.TXT` (default `C:\DRIVERS`, the medium) against devices, Windows rules
+**match** ranks the models in `<store>\INDEX.TXT` (default `C:\DRIVERS`, the medium) against devices (given, else
+all `enum` devices), Windows rules
 first and the undecorated fallback only when nothing else matches (`--legacy` ranks everything together).
 
 **load** calls `NtLoadDriver(\Registry\Machine\System\CurrentControlSet\Services\<service>)` when ntdll exports it
@@ -158,8 +163,9 @@ first and the undecorated fallback only when nothing else matches (`--legacy` ra
 * Guest: `T_SHZPNP.EXE` runs in the Kernel64 standalone test (`shizukudos/tests/run_k64_standalone.py`, QEMU TCG):
   add-driver with `--device` on a synthetic package, then checks the copied file bytes, the published INF, the
   service key values, the device, Device Parameters and software keys, REG_MULTI_SZ/REG_BINARY encodings, the
-  DriverDatabase record, the undecorated-INF refusal and `--legacy`, `enum`, `match` against an index, and that
-  `load` never succeeds on its non-driver payload (exit 3 today).
+  DriverDatabase record, the undecorated-INF refusal and `--legacy`, `enum`, `match` against an index, installing on
+  a function of the Kernel64 PCI scan without `--device` (an INF generated for the first function the scan reports),
+  and that `load` never succeeds on its non-driver payload (exit 3 today).
 
 ## Using it with a vendor package
 

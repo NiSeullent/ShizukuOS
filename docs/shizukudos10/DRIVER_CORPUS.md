@@ -198,8 +198,8 @@ kernel and runtime contracts changes that; the framebuffer path Kernel64 has tod
 * **Install (INF level): close for well-formed packages.** An amd64-decorated Windows 10 INF parses, selects,
   ranks, stages and installs its files and registry with shzpnp today (on the guest: T_SHZPNP.EXE). Gaps: no
   signature/catalog verification, no co-/class installers, no inbox INFs for `Include`/`Needs`, and no PnP
-  enumeration feeding devices to it (devices come from `--device` or a boot log until the driver host's PnP
-  manager populates Enum).
+  manager: devices come from Kernel64's PCI scan (vendor/device/class only, so SUBSYS/REV-specific models
+  cannot win) or from `--device`, until the driver host enumerates buses.
 * **Load: far.** Every Intel family needs a framework provider the host does not have yet: NDIS 6.x (no source here
   provides it; ReactOS's is 5.x), StorPort with extended SRBs (ReactOS's lacks them), KMDF above 1.17 (ReactOS's
   runtime is 1.17; the Microsoft source has no build), SpbCx/GpioClx/UCX/PortCls, and for graphics WDDM 2.x. Even the
