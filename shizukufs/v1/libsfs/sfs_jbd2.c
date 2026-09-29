@@ -569,10 +569,14 @@ int sfs_journal_commit(sfs_fs *fs)
     if (rc) return rc;
     b = fs->txn.bufs;
     while (b) {
+        /* one descriptor group: tags first (checksums over the escaped copies), then descriptor + data blocks in
+         * log order as coalesced requests; an escaped block goes out alone from the scratch copy */
         uint8_t *d = fs->scratch;
-        uint32_t dpos = pos++, off = JH_SIZE, n = 0, last_off = 0, last_flags = 0;
-        uint64_t last_blk = 0;
+        uint32_t dpos = pos, off = JH_SIZE, n = 0, last_off = 0, last_flags = 0, i;
+        uint64_t last_blk = 0, p;
         uint32_t last_csum = 0;
+        sfs_buf *first = b;
+        sfs_wrun run;
         memset(d, 0, fs->bs);
         wrbe32(d, JH_magic, JBD2_MAGIC);
         wrbe32(d, JH_blocktype, JBD2_DESCRIPTOR_BLOCK);
@@ -587,8 +591,6 @@ int sfs_journal_commit(sfs_fs *fs)
                 flags |= JBD2_FLAG_ESCAPE;
             }
             if (j->csum_v2 || j->csum_v3) csum = tag_csum(fs, seq, src);
-            rc = jwrite(fs, pos++, src);
-            if (rc) return rc;
             tag_put(fs, d, off, b->blk, flags, csum);
             last_off = off;
             last_flags = flags;
@@ -599,8 +601,26 @@ int sfs_journal_commit(sfs_fs *fs)
         }
         tag_put(fs, d, last_off, last_blk, last_flags | JBD2_FLAG_LAST_TAG, last_csum);
         block_tail_set(fs, d);
-        rc = jwrite(fs, dpos, d);
+        run.n = 0;
+        rc = jmap(fs, pos++, &p);
+        if (!rc) rc = sfs_wrun_add(fs, &run, p, d);
+        for (i = 0, b = first; !rc && i < n; ++i, b = b->tnext) {
+            rc = jmap(fs, pos++, &p);
+            if (rc) break;
+            if (rdbe32(b->data, 0) == JBD2_MAGIC) {
+                rc = sfs_wrun_flush(fs, &run);
+                if (rc) break;
+                memcpy(fs->scratch2, b->data, fs->bs);
+                wrbe32(fs->scratch2, 0, 0);
+                rc = sfs_dev_write(fs, p, fs->scratch2, 1);
+            } else {
+                rc = sfs_wrun_add(fs, &run, p, b->data);
+            }
+        }
+        if (!rc) rc = sfs_wrun_flush(fs, &run);
         if (rc) return rc;
+        fs->st.journal_blocks_written += n + 1;
+        (void)dpos;
     }
     rc = sfs_dev_flush(fs);
     if (rc) return rc;
@@ -617,16 +637,9 @@ int sfs_journal_commit(sfs_fs *fs)
         if (!rc) rc = sfs_dev_flush(fs);
         if (rc) return rc;
     }
-    /* committed: checkpoint in place */
-    for (b = fs->txn.bufs; b; b = next) {
-        next = b->tnext;
-        b->tnext = 0;
-        b->flags &= ~B_JDIRTY;
-        if (!rc && (b->flags & B_UPTODATE)) rc = sfs_dev_write(fs, b->blk, b->data, 1);
-        fs->st.checkpoint_blocks++;
-    }
-    fs->txn.bufs = 0;
-    fs->txn.nbufs = 0;
+    /* committed: checkpoint in place (sorted list, adjacent blocks coalesced) */
+    rc = sfs_cache_write_meta_direct(fs);
+    (void)next;
     j->head = pos;
     j->next_seq = seq + 1;
     fs->st.commits++;

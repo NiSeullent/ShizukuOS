@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -97,6 +98,42 @@ static int h_write(void *ctx, uint64_t off, const void *buf, uint32_t bytes)
         return 0;
     }
     return full_pwrite(d->fd, buf, bytes, off);
+}
+
+static int h_writev(void *ctx, uint64_t off, const void *const *bufs, uint32_t count, uint32_t bytes)
+{
+    host_dev *d = ctx;
+    struct iovec iov[64];
+    uint32_t i;
+    if (d->volatile_cache || d->cut_after || count > 64) {
+        /* crash simulation keeps per-block granularity */
+        for (i = 0; i < count; ++i)
+            if (h_write(ctx, off + (uint64_t)i * bytes, bufs[i], bytes)) return -1;
+        return 0;
+    }
+    if (off + (uint64_t)count * bytes > d->size) return -1;
+    for (i = 0; i < count; ++i) { iov[i].iov_base = (void *)bufs[i]; iov[i].iov_len = bytes; }
+    d->writes++;
+    {
+        size_t total = (size_t)count * bytes, done = 0;
+        while (done < total) {
+            ssize_t r = pwritev(d->fd, iov, (int)count, (off_t)(off + done));
+            if (r < 0 && errno == EINTR) continue;
+            if (r <= 0) return -1;
+            done += (size_t)r;
+            if (done < total) {
+                /* short write: advance the vector */
+                size_t skip = (size_t)r;
+                uint32_t k = 0;
+                while (k < count && skip >= iov[k].iov_len) { skip -= iov[k].iov_len; k++; }
+                memmove(iov, iov + k, (count - k) * sizeof iov[0]);
+                count -= k;
+                iov[0].iov_base = (uint8_t *)iov[0].iov_base + skip;
+                iov[0].iov_len -= skip;
+            }
+        }
+    }
+    return 0;
 }
 
 static int h_flush(void *ctx)
@@ -190,4 +227,5 @@ void host_ops(host_dev *d, sfs_ops *ops, uint32_t cache_blocks)
     ops->log = h_log;
     ops->size = d->size;
     ops->cache_blocks = cache_blocks;
+    ops->writev = h_writev;
 }

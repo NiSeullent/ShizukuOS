@@ -218,6 +218,12 @@ void sfs_txn_sort(sfs_fs *fs);                                         /* sort t
 int sfs_dev_read(sfs_fs *fs, uint64_t blk, void *buf, uint32_t count);
 int sfs_dev_write(sfs_fs *fs, uint64_t blk, const void *buf, uint32_t count);
 int sfs_dev_flush(sfs_fs *fs);
+int sfs_dev_writev(sfs_fs *fs, uint64_t blk, const void *const *bufs, uint32_t count);
+/* Write coalescing: blocks added in ascending, adjacent order go out as one vectored request. */
+#define WRUN_MAX 64u
+typedef struct sfs_wrun { uint64_t start; uint32_t n; const void *bufs[WRUN_MAX]; } sfs_wrun;
+int sfs_wrun_add(sfs_fs *fs, sfs_wrun *r, uint64_t blk, const void *data);
+int sfs_wrun_flush(sfs_fs *fs, sfs_wrun *r);
 void *sfs_alloc(sfs_fs *fs, size_t bytes);
 void sfs_free(sfs_fs *fs, void *p, size_t bytes);
 

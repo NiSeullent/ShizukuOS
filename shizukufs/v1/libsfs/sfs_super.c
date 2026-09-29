@@ -383,7 +383,13 @@ int sfs_op_begin(sfs_fs *fs)
     return 0;
 }
 
-static uint32_t txn_weight(sfs_fs *fs) { return fs->txn.nbufs + fs->txn.nfrees * 2 + fs->txn.nrevokes / 64u + 8u; }
+/* Journal blocks the running transaction will need: its pinned buffers, plus the bitmap and descriptor block of
+ * every group its pending frees touch (at most one pair per group, however many runs), plus revoke blocks. */
+static uint32_t txn_weight(sfs_fs *fs)
+{
+    uint32_t groups = fs->txn.nfrees < fs->ngroups ? fs->txn.nfrees : fs->ngroups;
+    return fs->txn.nbufs + groups * 2 + fs->txn.nrevokes / 64u + 8u;
+}
 
 int sfs_safe_point(sfs_fs *fs)
 {

@@ -16,7 +16,7 @@ Each interrupted image is then checked two ways:
            and every later-touched file made only of blocks from its own history (no stale/foreign data);
   libsfs   libsfs mounts the image read-write (its own jbd2 replay + orphan cleanup), `crashverify` must pass,
            and `e2fsck -fn` on the result must exit 0 with no problems.
-Usage: run_crash.py [--trials N] [--mode kill|cut|both] [--seed S]
+Usage: run_crash.py [--trials N] [--mode kill|cut|both] [--seed S] [--mkfs "-b 1024 ..."]
 """
 import os
 import random
@@ -94,7 +94,8 @@ def main():
     rng = random.Random(base_seed)
     tmp = tempfile.mkdtemp(prefix="sfscrash-", dir=os.environ.get("SFS_TMP"))
     base = os.path.join(tmp, "base.img")
-    subprocess.run(["mkfs.ext4", "-q", "-F", base, "256M"], check=True)
+    mkfs_opts = sys.argv[sys.argv.index("--mkfs") + 1].split() if "--mkfs" in sys.argv else []
+    subprocess.run(["mkfs.ext4", "-q", "-F"] + mkfs_opts + [base, "256M"], check=True)
     failures = 0
     summary = {"kill": 0, "cut": 0, "replayed_by_e2fsck": 0, "orphans": 0}
     try:

@@ -39,6 +39,45 @@ int sfs_dev_write(sfs_fs *fs, uint64_t blk, const void *buf, uint32_t count)
     return fs->ops.write(fs->ops.ctx, off, buf, bytes) ? SFS_EIO : 0;
 }
 
+int sfs_dev_writev(sfs_fs *fs, uint64_t blk, const void *const *bufs, uint32_t count)
+{
+    const uint64_t off = blk << fs->bs_bits;
+    uint32_t i;
+    if (fs->ro) return SFS_EROFS;
+    if (blk >= fs->nblocks || count > fs->nblocks - blk || off + ((uint64_t)count << fs->bs_bits) > fs->ops.size) return SFS_EIO;
+    if (!fs->ops.writev || fs->write_limit) {
+        for (i = 0; i < count; ++i) {
+            int rc = sfs_dev_write(fs, blk + i, bufs[i], 1);
+            if (rc) return rc;
+        }
+        return 0;
+    }
+    if (fs->write_stopped) return SFS_EIO;
+    fs->st.writes++;
+    fs->st.write_bytes += (uint64_t)count << fs->bs_bits;
+    return fs->ops.writev(fs->ops.ctx, off, bufs, count, fs->bs) ? SFS_EIO : 0;
+}
+
+int sfs_wrun_flush(sfs_fs *fs, sfs_wrun *r)
+{
+    int rc = 0;
+    if (r->n == 1) rc = sfs_dev_write(fs, r->start, r->bufs[0], 1);
+    else if (r->n) rc = sfs_dev_writev(fs, r->start, r->bufs, r->n);
+    r->n = 0;
+    return rc;
+}
+
+int sfs_wrun_add(sfs_fs *fs, sfs_wrun *r, uint64_t blk, const void *data)
+{
+    if (r->n && (r->start + r->n != blk || r->n == WRUN_MAX)) {
+        int rc = sfs_wrun_flush(fs, r);
+        if (rc) return rc;
+    }
+    if (!r->n) r->start = blk;
+    r->bufs[r->n++] = data;
+    return 0;
+}
+
 int sfs_dev_flush(sfs_fs *fs)
 {
     if (fs->write_stopped) return SFS_EIO;
@@ -311,27 +350,57 @@ void sfs_txn_sort(sfs_fs *fs)
     fs->txn.bufs = b;
 }
 
+/* Writes every dirty data buffer: in batches sorted by block number, adjacent blocks coalesced into one request. */
 int sfs_cache_write_data(sfs_fs *fs)
 {
-    sfs_buf *b;
-    for (b = fs->lru_tail; b; b = b->lru_prev) {
-        if ((b->flags & (B_DIRTY | B_UPTODATE)) == (B_DIRTY | B_UPTODATE)) {
-            int rc = write_buf(fs, b);
-            if (rc) return rc;
+    sfs_buf *b = fs->lru_tail, **arr = sfs_alloc(fs, SFS_MAX_ALLOC);
+    const uint32_t cap = SFS_MAX_ALLOC / sizeof(sfs_buf *);
+    if (!arr) {
+        for (; b; b = b->lru_prev) {
+            if ((b->flags & (B_DIRTY | B_UPTODATE)) == (B_DIRTY | B_UPTODATE)) {
+                int rc = write_buf(fs, b);
+                if (rc) return rc;
+            }
         }
+        return 0;
     }
+    while (b) {
+        uint32_t n = 0, i, gap;
+        sfs_wrun run;
+        int rc = 0;
+        for (; b && n < cap; b = b->lru_prev)
+            if ((b->flags & (B_DIRTY | B_UPTODATE)) == (B_DIRTY | B_UPTODATE)) arr[n++] = b;
+        for (gap = n / 2; gap; gap /= 2)                       /* shell sort by block number */
+            for (i = gap; i < n; ++i) {
+                sfs_buf *t = arr[i];
+                uint32_t j = i;
+                while (j >= gap && arr[j - gap]->blk > t->blk) { arr[j] = arr[j - gap]; j -= gap; }
+                arr[j] = t;
+            }
+        run.n = 0;
+        for (i = 0; i < n && !rc; ++i) rc = sfs_wrun_add(fs, &run, arr[i]->blk, arr[i]->data);
+        if (!rc) rc = sfs_wrun_flush(fs, &run);
+        if (rc) { sfs_free(fs, arr, SFS_MAX_ALLOC); return rc; }
+        for (i = 0; i < n; ++i) arr[i]->flags &= ~B_DIRTY;
+    }
+    sfs_free(fs, arr, SFS_MAX_ALLOC);
     return 0;
 }
 
+/* Writes the (sorted) transaction list in place, coalescing adjacent blocks; clears the pins. */
 int sfs_cache_write_meta_direct(sfs_fs *fs)
 {
     sfs_buf *b, *next;
+    sfs_wrun run;
     int rc = 0;
+    run.n = 0;
+    for (b = fs->txn.bufs; b; b = b->tnext)
+        if (!rc && (b->flags & B_UPTODATE)) rc = sfs_wrun_add(fs, &run, b->blk, b->data);
+    if (!rc) rc = sfs_wrun_flush(fs, &run);
     for (b = fs->txn.bufs; b; b = next) {
         next = b->tnext;
         b->tnext = 0;
         b->flags &= ~B_JDIRTY;
-        if (!rc && (b->flags & B_UPTODATE)) rc = sfs_dev_write(fs, b->blk, b->data, 1);
         fs->st.checkpoint_blocks++;
     }
     fs->txn.bufs = 0;

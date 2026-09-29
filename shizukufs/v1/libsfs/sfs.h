@@ -62,6 +62,9 @@ typedef struct sfs_ops {
     void (*log)(void *ctx, const char *msg);                                     /* optional diagnostics */
     uint64_t size;                                                               /* device size in bytes */
     uint32_t cache_blocks;                                                       /* block cache size (0 = default) */
+    /* optional: writes `count` buffers of `buf_bytes` each to consecutive locations starting at `offset` in one
+     * request (0 = ok). Without it every block is a separate write(). */
+    int (*writev)(void *ctx, uint64_t offset, const void *const *bufs, uint32_t count, uint32_t buf_bytes);
 } sfs_ops;
 
 typedef struct sfs_fs sfs_fs;           /* opaque volume handle */
