@@ -17,6 +17,8 @@
 #define PAGE_SIZE 4096ull
 #define K64_VIRT_BASE 0xffffffff80000000ull
 #define DIRECT_MAP 0xffff800000000000ull
+#define KWIN_BASE 0xffffc10000000000ull            /* kernel windows (kwin.c): PML4 slot 386, 512 GiB of virtual space */
+#define KWIN_SIZE 0x0000008000000000ull
 #define USER_TOP 0x00007ffffffef000ull            /* end of the user range (exclusive) */
 #define USER_MIN 0x0000000000010000ull            /* first mappable user address (null guard below) */
 #define VEC_TIMER 0x20
@@ -75,9 +77,11 @@ static inline void cli(void) { __asm__ volatile("cli" ::: "memory"); }
 
 /* ---- mem.c ---- */
 void mem_init(const shz_bootinfo_t *bi);
+uint64_t mem_ram_top(void);                     /* bytes of guest-physical RAM managed */
 uint64_t pmm_alloc(void);                       /* zeroed physical page, 0 on exhaustion */
 void pmm_free(uint64_t pa);
 uint64_t pmm_free_count(void);
+uint64_t pmm_total_count(void);                 /* pages the page allocator manages */
 #define PT_P (1ull << 0)
 #define PT_W (1ull << 1)
 #define PT_U (1ull << 2)
@@ -86,6 +90,7 @@ uint64_t pmm_free_count(void);
 #define PT_NX (1ull << 63)
 uint64_t vm_new_space(void);                    /* new PML4 sharing the kernel half */
 void vm_free_space(uint64_t pml4);              /* frees every user page and table */
+uint64_t vm_count_user_pages(uint64_t pml4);    /* present user-accessible pages (the working set) */
 int vm_map(uint64_t pml4, uint64_t va, uint64_t pa, uint64_t flags);
 int vm_unmap(uint64_t pml4, uint64_t va, uint64_t *pa_out);
 int vm_protect(uint64_t pml4, uint64_t va, uint64_t flags);
@@ -95,6 +100,7 @@ void *kmalloc(size_t n);
 void *kzalloc(size_t n);
 void kfree(void *p);
 size_t kheap_used(void);
+size_t kheap_total(void);                       /* bytes the kernel heap can hand out */
 
 /* ---- sched.c ---- */
 typedef struct thread thread_t;
@@ -125,12 +131,25 @@ struct thread {
     uint64_t tid;                               /* Windows-style thread id (multiple of 4), 0 for kernel threads */
     volatile int alerted, alert_wait;           /* NtAlertThreadByThreadId state */
     void *wait_multi;
+    int creator_hold;                           /* user thread: its creator may still read `object` (see sched.c reaping) */
+    /* CPU accounting (sched.c): timer ticks charged while this thread was current, split by the mode the tick interrupted,
+     * TSC cycles between being switched in and out, and the tick numbers of creation and exit. */
+    uint64_t user_ticks, kernel_ticks, cycles, tsc_in, create_tick, exit_tick;
+    int boost_disabled;                         /* SetThreadPriorityBoost setting (the scheduler never boosts) */
+    uint32_t mem_priority;                      /* SetThreadInformation(ThreadMemoryPriority) setting, 1..5 */
+    uint32_t power_control, power_state;        /* SetThreadInformation(ThreadPowerThrottling) setting (no scheduler effect) */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
 thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg);   /* TS_NEW until thread_resume */
 void thread_resume(thread_t *t);
 void thread_discard(thread_t *t);                                                     /* frees a TS_NEW thread that was never resumed */
+/* Exited user threads are reclaimed automatically (next thread creation); these two cover the creator's side: */
+void thread_creator_release(thread_t *t);       /* the creator no longer reads t (t->object): it may be reclaimed once exited */
+void thread_reap_process(const void *proc);     /* reclaim every exited thread of a finished process now (proc_wait) */
+thread_t *thread_slot(unsigned i);              /* i-th scheduler slot (any state) or 0 past the end: read with interrupts off */
+uint64_t thread_cycles_now(thread_t *t);        /* t->cycles including the running slice of the current thread */
+void sched_tick_from(int user_mode);            /* timer tick; user_mode: the tick interrupted ring 3 */
 thread_t *thread_current(void);
 thread_t *thread_find_tid(void *process, uint64_t tid);
 void thread_yield(void);
@@ -156,6 +175,24 @@ void thread_wake(thread_t *t);
 void ipc64_init(const shz_bootinfo_t *bi);
 int ipc64_run_tests(void);
 extern uint32_t ipc64_results[16];
+
+/* ---- subsys64.c: WIN64 subsystem bridge (ABI 1.1 message family 0x200..) ---- */
+void subsys64_start(const shz_bootinfo_t *bi);   /* Supervisor: serve the Win98 channel until SHUTDOWN; standalone: loopback self-test */
+int subsys64_console_write(process_t *p, int stream, const void *data, uint64_t n);   /* 1 = relayed, 0 = not bridged */
+int subsys64_console_read(process_t *p, void *buf, uint64_t cap, uint64_t *got);      /* 1 = handled (*got 0 = EOF), 0 = not bridged */
+
+/* ---- main.c: boot information (ABI 1.1 tail) ---- */
+/* HOOK for a UEFI GOP display backend (kernel64/gfx_fb.c): the linear framebuffer the UEFI boot manager's direct
+ * Kernel64 boot handed over (shz_bootinfo_t.fb_*). Returns 0 and fills *out, or -1 when there is none (Supervisor,
+ * Multiboot stub, no GOP, or a pixel format other than 32-bit RGBX/BGRX). The range lies outside the direct map:
+ * a backend maps it with mmio_map() (pci.h) before drawing. Nothing calls this yet; the Bochs VBE path is unchanged. */
+typedef struct {
+    uint64_t base, size;                        /* physical */
+    uint32_t width, height, pitch, bpp;         /* pitch in bytes */
+    uint32_t format;                            /* enum shz_fb_format */
+} k64_boot_fb_t;
+int k64_boot_framebuffer(k64_boot_fb_t *out);
+const char *k64_boot_cmdline(void);             /* shz_bootinfo_t.cmdline, "" when absent */
 
 /* ---- tests.c ---- */
 void run_self_tests(const shz_bootinfo_t *bi);

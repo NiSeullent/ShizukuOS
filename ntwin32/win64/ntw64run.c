@@ -1,0 +1,179 @@
+/* SPDX-License-Identifier: GPL-2.0-only
+ * NTW64RUN.EXE: Windows 98 console front end for the ShizukuDOS WIN64 subsystem (NTW32.DLL, ntw64.h).
+ * Original i486 PE32 console program, subsystem 4.10, no CRT.
+ *
+ *   NTW64RUN [/i] [/d:<dir>] <image> [arguments...]    run a Win64 program in the Kernel64 domain
+ *   NTW64RUN /q                                        report the WIN64 subsystem
+ *
+ *   <image>    a path in the Kernel64 file system, e.g. \SHZ\TESTS\T_HELLO.EXE
+ *   /i         forward this program's standard input (until end of file) to the Win64 process; without it the
+ *              process sees end of file at once. Input is forwarded before output is shown.
+ *   /d:<dir>   working directory for the process (Kernel64 path)
+ *
+ * The Win64 command line is the text from <image> to the end of this program's command line. stdout and
+ * stderr of the Win64 process arrive merged on this program's stdout. The exit code is the Win64 process's
+ * exit code; 255 means NTW64RUN itself failed (usage, bridge unavailable, creation failed) and a message on
+ * stderr names the Win32 error. */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include "ntw64.h"
+
+#define RUN_FAILED 255u
+#define CMD_CHARS 2048
+#define PATH_CAP 261
+
+static HANDLE out_h, err_h;
+static WCHAR wpath[PATH_CAP], wcmd[CMD_CHARS + 1], wdir[PATH_CAP];
+static char io[4096];
+
+static DWORD slen(const char *s) { DWORD n = 0; while (s[n]) ++n; return n; }
+static void put(HANDLE h, const char *s, DWORD n) { DWORD w = 0; if (n) WriteFile(h, s, n, &w, NULL); }
+static void puts_to(HANDLE h, const char *s) { put(h, s, slen(s)); }
+static void put_num(HANDLE h, DWORD v, int hex)
+{
+    char digits[12];
+    int n = 0;
+    const DWORD base = hex ? 16u : 10u;
+    if (hex) puts_to(h, "0x");
+    do { digits[n++] = "0123456789abcdef"[v % base]; v /= base; } while (v);
+    while (n) put(h, &digits[--n], 1);
+}
+
+static DWORD failed(const char *what)
+{
+    const DWORD error = GetLastError();
+    puts_to(err_h, "NTW64RUN: ");
+    puts_to(err_h, what);
+    puts_to(err_h, " failed, Win32 error ");
+    put_num(err_h, error, 0);
+    switch (error) {
+    case 2: puts_to(err_h, " (not found: NTWRAP9X.VXD or the Kernel64 image)"); break;
+    case 50: puts_to(err_h, " (no ShizukuDOS Supervisor: not running as a Win98 domain)"); break;
+    case 55: puts_to(err_h, " (the Supervisor announces no Kernel64 channel)"); break;
+    case 1306: puts_to(err_h, " (inter-kernel ABI major version mismatch)"); break;
+    default: break;
+    }
+    puts_to(err_h, "\r\n");
+    return RUN_FAILED;
+}
+
+static DWORD usage(void)
+{
+    puts_to(err_h, "usage: NTW64RUN [/i] [/d:<dir>] <image> [arguments...]\r\n"
+                   "       NTW64RUN /q\r\n"
+                   "  runs a Win64 (PE32+) program in the ShizukuDOS Kernel64 domain\r\n"
+                   "  <image>  Kernel64 path, e.g. \\SHZ\\TESTS\\T_HELLO.EXE\r\n"
+                   "  /i       forward standard input (until end of file)\r\n"
+                   "  /q       report the WIN64 subsystem and exit\r\n");
+    return RUN_FAILED;
+}
+
+static const char *skip_blank(const char *s) { while (*s == ' ' || *s == '\t') ++s; return s; }
+
+/* End of the token at s (quotes group, as in the Windows command-line convention for argv[0]). */
+static const char *token_end(const char *s)
+{
+    int quoted = 0;
+    while (*s && (quoted || (*s != ' ' && *s != '\t'))) {
+        if (*s == '"') quoted = !quoted;
+        ++s;
+    }
+    return s;
+}
+
+/* ANSI -> UTF-16 with the native converter; the quotes of a token are dropped when `unquote`. Returns the
+ * number of UTF-16 units, or 0 when the text is empty, too long for `cap` or not convertible. */
+static int widen(const char *s, const char *end, WCHAR *out, int cap, int unquote)
+{
+    static char tmp[CMD_CHARS + 1];
+    int n = 0, w;
+    for (; s < end; ++s) {
+        if (unquote && *s == '"') continue;
+        if (n >= CMD_CHARS) return 0;
+        tmp[n++] = *s;
+    }
+    if (n == 0) return 0;
+    w = MultiByteToWideChar(CP_ACP, 0, tmp, n, out, cap - 1);
+    if (w <= 0) return 0;
+    out[w] = 0;
+    return w;
+}
+
+static DWORD query(void)
+{
+    ntw64_info_t info;
+    if (!NtwQuerySubsystem64(&info)) return failed("NtwQuerySubsystem64");
+    puts_to(out_h, "WIN64 subsystem: ABI "); put_num(out_h, info.abi_major, 0); puts_to(out_h, ".");
+    put_num(out_h, info.abi_minor, 0); puts_to(out_h, ", subsystem "); put_num(out_h, info.subsystem_version >> 16, 0);
+    puts_to(out_h, "."); put_num(out_h, info.subsystem_version & 0xffffu, 0); puts_to(out_h, ", capabilities ");
+    put_num(out_h, info.capabilities, 1); puts_to(out_h, "\r\nprocesses: ");
+    put_num(out_h, info.active_processes, 0); puts_to(out_h, " of "); put_num(out_h, info.max_processes, 0);
+    puts_to(out_h, " active; console window "); put_num(out_h, info.console_window, 0); puts_to(out_h, " x ");
+    put_num(out_h, info.console_chunk, 0); puts_to(out_h, " bytes\r\nchannel "); put_num(out_h, info.channel_id, 0);
+    puts_to(out_h, " generation "); put_num(out_h, info.generation, 0); puts_to(out_h, " (VxD: ");
+    put_num(out_h, info.vxd_sent, 0); puts_to(out_h, " sent, "); put_num(out_h, info.vxd_received, 0);
+    puts_to(out_h, " received, "); put_num(out_h, info.vxd_proto_errors, 0); puts_to(out_h, " malformed)\r\n");
+    return 0;
+}
+
+static DWORD run(void)
+{
+    const char *s = skip_blank(token_end(skip_blank(GetCommandLineA())));      /* skip argv[0] */
+    const char *dir = NULL, *dir_end = NULL, *image_end;
+    int forward_input = 0;
+    HANDLE process = NULL;
+    DWORD got = 0, code = 0;
+    out_h = GetStdHandle(STD_OUTPUT_HANDLE);
+    err_h = GetStdHandle(STD_ERROR_HANDLE);
+    while (*s == '/' || *s == '-') {
+        const char *end = token_end(s);
+        const char opt = (char)(s[1] | 0x20);
+        if (opt == 'q' && end == s + 2) return query();
+        if (opt == 'i' && end == s + 2) forward_input = 1;
+        else if (opt == 'd' && s[2] == ':' && end > s + 3) { dir = s + 3; dir_end = end; }
+        else return usage();
+        s = skip_blank(end);
+    }
+    if (!*s) return usage();
+    image_end = token_end(s);
+    {   /* trailing blanks are not part of the Win64 command line */
+        const char *e = s + slen(s);
+        while (e > s && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r' || e[-1] == '\n')) --e;
+        if (widen(s, image_end, wpath, sizeof wpath / sizeof wpath[0], 1) <= 0 ||
+            widen(s, e, wcmd, CMD_CHARS + 1, 0) <= 0 ||
+            (dir && widen(dir, dir_end, wdir, sizeof wdir / sizeof wdir[0], 1) <= 0)) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return failed("argument conversion");
+        }
+    }
+    if (!NtwCreateProcess64W(wpath, wcmd, dir ? wdir : NULL, &process))
+        return failed("NtwCreateProcess64W");
+    if (forward_input) {
+        const HANDLE in_h = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD n = 0, written = 0;
+        while (ReadFile(in_h, io, sizeof io, &n, NULL) && n) {
+            if (!NtwWriteConsole64(process, io, n, &written)) {
+                if (GetLastError() == ERROR_BROKEN_PIPE) break;        /* the process ended first */
+                (void)failed("NtwWriteConsole64");
+                break;
+            }
+        }
+    }
+    if (!NtwCloseConsole64(process) && GetLastError() != ERROR_BROKEN_PIPE)
+        (void)failed("NtwCloseConsole64");
+    while (NtwReadConsole64(process, io, sizeof io, &got))
+        put(out_h, io, got);
+    if (GetLastError() != NTW64_ERROR_HANDLE_EOF) {
+        code = failed("NtwReadConsole64");
+        (void)NtwKillProcess64(process, RUN_FAILED);
+    }
+    if (!NtwWaitProcess64(process, INFINITE, &code))
+        code = failed("NtwWaitProcess64");
+    (void)NtwCloseProcess64(process);
+    return code;
+}
+
+void mainCRTStartup(void)
+{
+    ExitProcess(run());
+}

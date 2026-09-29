@@ -11,7 +11,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fatimg  # noqa: E402
+import ints  # noqa: E402
 
 
 def _check(name, ok, detail=""):
@@ -46,6 +48,25 @@ def verify_disk(disk):
     checks.append(_check("T_EXE.OUT 400 lines byte-exact", exe_out == expected,
                          f"{len(exe_out or b'')} bytes"))
     return checks, text
+
+
+def verify_ints(disk, image, run_utc=None):
+    """T_INTS (dual image only): RESULT.TXT line plus every host-side INTS.TXT check (see ints.py).
+
+    `image` is the pristine disk image the run started from; `disk` the disk after the run.
+    Returns (checks, index-of-INTS.TXT or None)."""
+    spec = fatimg.partition_spec(disk)
+    result = fatimg.read_bytes(spec, "RESULT.TXT") or b""
+    lines = [l.strip() for l in result.decode("ascii", "replace").splitlines() if l.strip()]
+    checks = [_check("T_INTS guest verdict in RESULT.TXT", "T_INTS PASS" in lines,
+                     next((l for l in lines if l.startswith("T_INTS")), "missing"))]
+    raw = fatimg.read_bytes(spec, "INTS.TXT")
+    checks.append(_check("INTS.TXT exists", raw is not None, f"{len(raw or b'')} bytes"))
+    if raw is None:
+        return checks, None
+    more, ix = ints.verify(raw.decode("ascii", "replace"), Path(image).read_bytes(), Path(disk).read_bytes(),
+                           run_utc=run_utc)
+    return checks + more, ix
 
 
 def verify_screen(lines):

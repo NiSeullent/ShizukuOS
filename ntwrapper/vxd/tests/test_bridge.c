@@ -21,7 +21,9 @@ static uint32_t ptes(uint32_t page,uint32_t count,uint32_t *out,uint32_t flags)
   if(page>=0xc0000)out[0]^=physical_xor;return 1; }
 static void write_alias(uint32_t address,const void *source,uint32_t bytes)
 { uint32_t base=address&0xffff0000u;CHECK(protected_now && locked==2 && (base==0xc1000000||base==0xc2000000));CHECK((address&0xffff)+bytes<=8192);++writes;memcpy(buffers[base==0xc1000000?0:1]+(address&0xffff),source,bytes); }
-static const struct ntwv_pages ops={check_range,lock_range,unlock_range,ptes,enter,leave,write_alias};
+static void read_alias(void *destination,uint32_t address,uint32_t bytes)
+{ (void)destination;(void)address;(void)bytes;CHECK(0); /* the query path never reads application memory */ }
+static const struct ntwv_pages ops={check_range,lock_range,unlock_range,ptes,enter,leave,write_alias,read_alias};
 static void reset(void) { step=failure=locked=unlocks=writes=protected_now=0;permission=7;physical_xor=0;memset(buffers,0xa5,sizeof(buffers)); }
 int main(void)
 {

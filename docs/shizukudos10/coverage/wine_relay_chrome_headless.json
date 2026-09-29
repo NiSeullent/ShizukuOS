@@ -1,0 +1,3464 @@
+{
+ "what": "Functions from chrome.exe/chrome_elf.dll/chrome.dll import tables that Chromium's own code called during `chrome.exe --headless --no-sandbox --disable-gpu --single-process --dump-dom file:///Z:/.../page.html` under Wine 9.0 (wine64 9.0~repack-4build3) with xvfb-run on the Linux build host. WINEDEBUG=+relay,+pid with RelayFromExclude listing every builtin module the run loads (so only calls made by the native Chromium images are traced). Matched to the import tables by function name. Host-side evidence only; says nothing about Kernel64.",
+ "result": "no DOM printed; killed by the 150 s timeout (exit 124). The run ended with Wine reporting a stack overflow in the browser process' thread 0024 (cause not investigated; relay adds stack use). Without relay the same command stalls after browser start-up (ELECTRON_TARGET.md section 10.2). A lower bound on the M2 call set.",
+ "call_lines": 1621803,
+ "distinct_callee_functions": 377,
+ "callee_modules": {
+  "actxprxy.dll": 1,
+  "advapi32.dll": 32,
+  "bcryptprimitives.dll": 1,
+  "combase.dll": 14,
+  "comctl32.dll": 1,
+  "crypt32.dll": 3,
+  "cryptowinrt.dll": 1,
+  "dwrite.dll": 1,
+  "gdi32.dll": 9,
+  "hnetcfg.dll": 1,
+  "iphlpapi.dll": 2,
+  "kernel32.dll": 165,
+  "kernelbase.dll": 2,
+  "mmdevapi.dll": 1,
+  "msctf.dll": 1,
+  "netapi32.dll": 2,
+  "ntdll.dll": 29,
+  "ole32.dll": 3,
+  "oleaut32.dll": 1,
+  "powrprof.dll": 1,
+  "rpcrt4.dll": 21,
+  "rsaenh.dll": 11,
+  "secur32.dll": 1,
+  "setupapi.dll": 10,
+  "shcore.dll": 3,
+  "shell32.dll": 7,
+  "shlwapi.dll": 1,
+  "ucrtbase.dll": 1,
+  "user32.dll": 32,
+  "userenv.dll": 2,
+  "uxtheme.dll": 2,
+  "version.dll": 3,
+  "wevtsvc.dll": 1,
+  "windows.media.dll": 1,
+  "windows.ui.dll": 1,
+  "winhttp.dll": 1,
+  "wpc.dll": 1,
+  "ws2_32.dll": 4,
+  "wtsapi32.dll": 3
+ },
+ "imported_functions_called": 299,
+ "unresolved_in_shizuku": 134,
+ "by_dll": {
+  "kernel32.dll": {
+   "called": 166,
+   "unresolved": 73
+  },
+  "advapi32.dll": {
+   "called": 32,
+   "unresolved": 20
+  },
+  "user32.dll": {
+   "called": 30,
+   "unresolved": 9
+  },
+  "gdi32.dll": {
+   "called": 9,
+   "unresolved": 0
+  },
+  "ntdll.dll": {
+   "called": 9,
+   "unresolved": 0
+  },
+  "ole32.dll": {
+   "called": 7,
+   "unresolved": 2
+  },
+  "combase.dll": {
+   "called": 6,
+   "unresolved": 2
+  },
+  "setupapi.dll": {
+   "called": 6,
+   "unresolved": 6
+  },
+  "shell32.dll": {
+   "called": 6,
+   "unresolved": 3
+  },
+  "ws2_32.dll": {
+   "called": 4,
+   "unresolved": 1
+  },
+  "crypt32.dll": {
+   "called": 3,
+   "unresolved": 3
+  },
+  "wtsapi32.dll": {
+   "called": 3,
+   "unresolved": 3
+  },
+  "version.dll": {
+   "called": 3,
+   "unresolved": 0
+  },
+  "iphlpapi.dll": {
+   "called": 2,
+   "unresolved": 2
+  },
+  "netapi32.dll": {
+   "called": 2,
+   "unresolved": 2
+  },
+  "userenv.dll": {
+   "called": 2,
+   "unresolved": 2
+  },
+  "api-ms-win-power-base-l1": {
+   "called": 1,
+   "unresolved": 1
+  },
+  "api-ms-win-shcore-scaling-l1": {
+   "called": 1,
+   "unresolved": 1
+  },
+  "comctl32.dll": {
+   "called": 1,
+   "unresolved": 1
+  },
+  "dwrite.dll": {
+   "called": 1,
+   "unresolved": 1
+  },
+  "secur32.dll": {
+   "called": 1,
+   "unresolved": 1
+  },
+  "winhttp.dll": {
+   "called": 1,
+   "unresolved": 1
+  },
+  "bcryptprimitives.dll": {
+   "called": 1,
+   "unresolved": 0
+  },
+  "oleaut32.dll": {
+   "called": 1,
+   "unresolved": 0
+  },
+  "shlwapi.dll": {
+   "called": 1,
+   "unresolved": 0
+  }
+ },
+ "functions": [
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetTokenInformation",
+   "status": "fn-missing",
+   "calls": 10,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "OpenProcessToken",
+   "status": "fn-missing",
+   "calls": 6,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "InitializeAcl",
+   "status": "fn-missing",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "InitializeSecurityDescriptor",
+   "status": "fn-missing",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "SetSecurityDescriptorDacl",
+   "status": "fn-missing",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "BuildExplicitAccessWithNameW",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "BuildSecurityDescriptorW",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "CheckTokenMembership",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetAce",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetSecurityDescriptorControl",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetSecurityDescriptorDacl",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetSecurityDescriptorGroup",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetSecurityDescriptorOwner",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetSecurityDescriptorSacl",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetSecurityInfo",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "IsValidAcl",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "IsValidSecurityDescriptor",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "LookupAccountNameW",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "SetSecurityInfo",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "api-ms-win-power-base-l1",
+   "fn": "CallNtPowerInformation",
+   "status": "apiset-unmapped",
+   "calls": 146,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "api-ms-win-shcore-scaling-l1",
+   "fn": "SetProcessDpiAwareness",
+   "status": "apiset-unmapped",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "combase.dll",
+   "fn": "RoGetActivationFactory",
+   "status": "fn-missing",
+   "calls": 5,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "combase.dll",
+   "fn": "RoActivateInstance",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "comctl32.dll",
+   "fn": "InitCommonControlsEx",
+   "status": "dll-missing",
+   "calls": 2,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptProtectData",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptProtectMemory",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptUnprotectData",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "dwrite.dll",
+   "fn": "DWriteCreateFactory",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "iphlpapi.dll",
+   "fn": "GetAdaptersAddresses",
+   "status": "dll-missing",
+   "calls": 5,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "iphlpapi.dll",
+   "fn": "NotifyAddrChange",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetThreadPriorityBoost",
+   "status": "fn-missing",
+   "calls": 2394,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadContext",
+   "status": "fn-missing",
+   "calls": 1197,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadPriorityBoost",
+   "status": "fn-missing",
+   "calls": 1197,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetQueuedCompletionStatus",
+   "status": "fn-missing",
+   "calls": 167,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LockFileEx",
+   "status": "fn-missing",
+   "calls": 132,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileAttributesExW",
+   "status": "fn-missing",
+   "calls": 108,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindFirstFileExW",
+   "status": "fn-missing",
+   "calls": 83,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnlockFileEx",
+   "status": "fn-missing",
+   "calls": 77,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PostQueuedCompletionStatus",
+   "status": "fn-missing",
+   "calls": 51,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleHandleExW",
+   "status": "fn-missing",
+   "calls": 50,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetModuleInformation",
+   "status": "fn-missing",
+   "calls": 46,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCurrentThreadStackLimits",
+   "status": "fn-missing",
+   "calls": 29,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetThreadInformation",
+   "status": "fn-missing",
+   "calls": 28,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "MapViewOfFile",
+   "status": "fn-missing",
+   "calls": 25,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateFileMappingW",
+   "status": "fn-missing",
+   "calls": 23,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RegisterWaitForSingleObject",
+   "status": "fn-missing",
+   "calls": 22,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LCMapStringEx",
+   "status": "fn-missing",
+   "calls": 20,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SystemTimeToTzSpecificLocalTime",
+   "status": "fn-missing",
+   "calls": 16,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLongPathNameW",
+   "status": "fn-missing",
+   "calls": 10,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateIoCompletionPort",
+   "status": "fn-missing",
+   "calls": 9,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FlushViewOfFile",
+   "status": "fn-missing",
+   "calls": 8,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReplaceFileW",
+   "status": "fn-missing",
+   "calls": 8,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileInformationByHandle",
+   "status": "fn-missing",
+   "calls": 8,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TzSpecificLocalTimeToSystemTime",
+   "status": "fn-missing",
+   "calls": 8,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryThreadCycleTime",
+   "status": "fn-missing",
+   "calls": 6,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VerSetConditionMask",
+   "status": "fn-missing",
+   "calls": 6,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetStringTypeW",
+   "status": "fn-missing",
+   "calls": 5,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessTimes",
+   "status": "fn-missing",
+   "calls": 4,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProductInfo",
+   "status": "fn-missing",
+   "calls": 4,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultLangID",
+   "status": "fn-missing",
+   "calls": 4,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitializeProcThreadAttributeList",
+   "status": "fn-missing",
+   "calls": 4,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AreFileApisANSI",
+   "status": "fn-missing",
+   "calls": 3,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ConnectNamedPipe",
+   "status": "fn-missing",
+   "calls": 3,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetComputerNameExW",
+   "status": "fn-missing",
+   "calls": 3,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleHandleExA",
+   "status": "fn-missing",
+   "calls": 3,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsWow64Process",
+   "status": "fn-missing",
+   "calls": 3,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlCaptureStackBackTrace",
+   "status": "fn-missing",
+   "calls": 3,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateNamedPipeW",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDiskFreeSpaceExW",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileInformationByHandle",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetGeoInfoW",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessId",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadPreferredUILanguages",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserGeoID",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetMappedFileNameW",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "OpenProcess",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleCtrlHandler",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UpdateProcThreadAttribute",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VerifyVersionInfoW",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DeleteProcThreadAttributeList",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DisconnectNamedPipe",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDynamicTimeZoneInformation",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileInformationByHandleEx",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFinalPathNameByHandleW",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetHandleInformation",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLocaleInfoEx",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLogicalProcessorInformationEx",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessMitigationPolicy",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemPowerStatus",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadId",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultLocaleName",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapSetInformation",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsProcessInJob",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetProcessMemoryInfo",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PrefetchVirtualMemory",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryProcessCycleTime",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadDirectoryChangesW",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetHandleInformation",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetNamedPipeHandleState",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetProcessShutdownParameters",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TransactNamedPipe",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnmapViewOfFile",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WerRegisterRuntimeExceptionModule",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome_elf.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "netapi32.dll",
+   "fn": "NetApiBufferFree",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "netapi32.dll",
+   "fn": "NetGetJoinInformation",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "ole32.dll",
+   "fn": "CoCreateInstance",
+   "status": "fn-missing",
+   "calls": 30,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "ole32.dll",
+   "fn": "CoCreateFreeThreadedMarshaler",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "secur32.dll",
+   "fn": "GetUserNameExW",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "setupapi.dll",
+   "fn": "SetupDiEnumDeviceInfo",
+   "status": "dll-missing",
+   "calls": 18,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "setupapi.dll",
+   "fn": "SetupDiDestroyDeviceInfoList",
+   "status": "dll-missing",
+   "calls": 10,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "setupapi.dll",
+   "fn": "SetupDiGetClassDevsW",
+   "status": "dll-missing",
+   "calls": 10,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "setupapi.dll",
+   "fn": "SetupDiOpenDeviceInfoW",
+   "status": "dll-missing",
+   "calls": 8,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "setupapi.dll",
+   "fn": "SetupDiCreateDeviceInfoList",
+   "status": "dll-missing",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "setupapi.dll",
+   "fn": "SetupDiOpenDevRegKey",
+   "status": "dll-missing",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "shell32.dll",
+   "fn": "Shell_NotifyIconW",
+   "status": "fn-missing",
+   "calls": 3,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "shell32.dll",
+   "fn": "SHCreateAssociationRegistration",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "shell32.dll",
+   "fn": "SHGetDesktopFolder",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "MapVirtualKeyW",
+   "status": "fn-missing",
+   "calls": 2,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "CreateIconIndirect",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "EnumDisplayDevicesW",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetCaretBlinkTime",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetLastInputInfo",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetShellWindow",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "RegisterDeviceNotificationW",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "RegisterPointerDeviceNotifications",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "RegisterSuspendResumeNotification",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "userenv.dll",
+   "fn": "RegisterGPNotification",
+   "status": "dll-missing",
+   "calls": 2,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "userenv.dll",
+   "fn": "GetProfileType",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "winhttp.dll",
+   "fn": "WinHttpGetIEProxyConfigForCurrentUser",
+   "status": "dll-missing",
+   "calls": 3,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSALookupServiceBeginW",
+   "status": "fn-missing",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "wtsapi32.dll",
+   "fn": "WTSQuerySessionInformationW",
+   "status": "dll-missing",
+   "calls": 2,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "wtsapi32.dll",
+   "fn": "WTSRegisterSessionNotification",
+   "status": "dll-missing",
+   "calls": 2,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "wtsapi32.dll",
+   "fn": "WTSFreeMemory",
+   "status": "dll-missing",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "RegOpenKeyExW",
+   "status": "provided",
+   "calls": 113,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "RegQueryValueExW",
+   "status": "provided",
+   "calls": 89,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "RegCloseKey",
+   "status": "provided",
+   "calls": 68,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "RegCreateKeyExW",
+   "status": "provided",
+   "calls": 18,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "RegNotifyChangeKeyValue",
+   "status": "provided",
+   "calls": 16,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "RegSetValueExW",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetLengthSid",
+   "status": "provided",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "IsValidSid",
+   "status": "provided",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "RegQueryInfoKeyW",
+   "status": "provided",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "ConvertSidToStringSidW",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "ConvertSidToStringSidA",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "advapi32.dll",
+   "fn": "GetUserNameW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "bcryptprimitives.dll",
+   "fn": "ProcessPrng",
+   "status": "provided",
+   "calls": 237,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "combase.dll",
+   "fn": "RoInitialize",
+   "status": "provided",
+   "calls": 20,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "combase.dll",
+   "fn": "WindowsCreateString",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "combase.dll",
+   "fn": "WindowsDeleteString",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "combase.dll",
+   "fn": "WindowsCreateStringReference",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "CreateFontIndirectW",
+   "status": "provided",
+   "calls": 4931,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "GetDeviceCaps",
+   "status": "provided",
+   "calls": 4931,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "GetObjectW",
+   "status": "provided",
+   "calls": 4931,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "GetTextMetricsW",
+   "status": "provided",
+   "calls": 4931,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "SelectObject",
+   "status": "provided",
+   "calls": 4931,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "DeleteObject",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "CreateBitmap",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "CreateDIBSection",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "gdi32.dll",
+   "fn": "GetStockObject",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlLookupFunctionEntry",
+   "status": "provided",
+   "calls": 288407,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlVirtualUnwind",
+   "status": "provided",
+   "calls": 288406,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryPerformanceCounter",
+   "status": "provided",
+   "calls": 35542,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "MultiByteToWideChar",
+   "status": "provided",
+   "calls": 20056,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLastError",
+   "status": "provided",
+   "calls": 11844,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WideCharToMultiByte",
+   "status": "provided",
+   "calls": 9932,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualAlloc",
+   "status": "provided",
+   "calls": 7327,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitOnceExecuteOnce",
+   "status": "provided",
+   "calls": 5763,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WaitForSingleObject",
+   "status": "provided",
+   "calls": 3480,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SuspendThread",
+   "status": "provided",
+   "calls": 1800,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetEvent",
+   "status": "provided",
+   "calls": 1721,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ResetEvent",
+   "status": "provided",
+   "calls": 1537,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ResumeThread",
+   "status": "provided",
+   "calls": 1197,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualQuery",
+   "status": "provided",
+   "calls": 1055,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WriteFile",
+   "status": "provided",
+   "calls": 590,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitializeCriticalSectionEx",
+   "status": "provided",
+   "calls": 418,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileAttributesW",
+   "status": "provided",
+   "calls": 346,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcAddress",
+   "status": "provided",
+   "calls": 268,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualFree",
+   "status": "provided",
+   "calls": 250,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileSize",
+   "status": "provided",
+   "calls": 234,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindNextFileW",
+   "status": "provided",
+   "calls": 225,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateEventW",
+   "status": "provided",
+   "calls": 145,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateFileW",
+   "status": "provided",
+   "calls": 144,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualProtect",
+   "status": "provided",
+   "calls": 127,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DuplicateHandle",
+   "status": "provided",
+   "calls": 118,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FlushFileBuffers",
+   "status": "provided",
+   "calls": 111,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CloseHandle",
+   "status": "provided",
+   "calls": 96,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadFile",
+   "status": "provided",
+   "calls": 90,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindClose",
+   "status": "provided",
+   "calls": 75,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateDirectoryW",
+   "status": "provided",
+   "calls": 66,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LocalFree",
+   "status": "provided",
+   "calls": 56,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FreeLibrary",
+   "status": "provided",
+   "calls": 53,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateThread",
+   "status": "provided",
+   "calls": 49,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetEnvironmentVariableW",
+   "status": "provided",
+   "calls": 49,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetThreadPriority",
+   "status": "provided",
+   "calls": 48,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsDebuggerPresent",
+   "status": "provided",
+   "calls": 46,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "lstrcmpiA",
+   "status": "provided",
+   "calls": 46,
+   "load_time_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFullPathNameW",
+   "status": "provided",
+   "calls": 39,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LoadLibraryExW",
+   "status": "provided",
+   "calls": 39,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetEndOfFile",
+   "status": "provided",
+   "calls": 31,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleHandleW",
+   "status": "provided",
+   "calls": 29,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFilePointer",
+   "status": "provided",
+   "calls": 28,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNativeSystemInfo",
+   "status": "provided",
+   "calls": 22,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LoadLibraryExA",
+   "status": "provided",
+   "calls": 22,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileType",
+   "status": "provided",
+   "calls": 21,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryPerformanceFrequency",
+   "status": "provided",
+   "calls": 19,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FileTimeToSystemTime",
+   "status": "provided",
+   "calls": 18,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetStdHandle",
+   "status": "provided",
+   "calls": 18,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCommandLineW",
+   "status": "provided",
+   "calls": 17,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleFileNameW",
+   "status": "provided",
+   "calls": 17,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LoadLibraryW",
+   "status": "provided",
+   "calls": 16,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFilePointerEx",
+   "status": "provided",
+   "calls": 12,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadPriority",
+   "status": "provided",
+   "calls": 11,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FlsAlloc",
+   "status": "provided",
+   "calls": 10,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCPInfo",
+   "status": "provided",
+   "calls": 10,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileSizeEx",
+   "status": "provided",
+   "calls": 10,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SystemTimeToFileTime",
+   "status": "provided",
+   "calls": 10,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TlsAlloc",
+   "status": "provided",
+   "calls": 10,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GlobalMemoryStatusEx",
+   "status": "provided",
+   "calls": 9,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "MoveFileW",
+   "status": "provided",
+   "calls": 9,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FreeEnvironmentStringsW",
+   "status": "provided",
+   "calls": 7,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetEnvironmentStringsW",
+   "status": "provided",
+   "calls": 7,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetStartupInfoW",
+   "status": "provided",
+   "calls": 7,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetCurrentDirectoryW",
+   "status": "provided",
+   "calls": 6,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetACP",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCommandLineA",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLocalTime",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessHeap",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemDirectoryW",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsValidCodePage",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetUnhandledExceptionFilter",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleHandleA",
+   "status": "provided",
+   "calls": 4,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetVersionExW",
+   "status": "provided",
+   "calls": 4,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetErrorMode",
+   "status": "provided",
+   "calls": 4,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DeleteFileW",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTickCount",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCurrentDirectoryW",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemInfo",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemTimeAsFileTime",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemTimePreciseAsFileTime",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTempPathW",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateMutexW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateProcessW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateSemaphoreW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetComputerNameW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemTime",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTimeZoneInformation",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "OutputDebugStringW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReleaseMutex",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RemoveDirectoryW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetEnvironmentVariableW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SleepConditionVariableSRW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WaitForMultipleObjects",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "RtlInitUnicodeString",
+   "status": "provided",
+   "calls": 33,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "NtClose",
+   "status": "provided",
+   "calls": 15,
+   "load_time_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "NtOpenKeyEx",
+   "status": "provided",
+   "calls": 15,
+   "load_time_in": [
+    "chrome_elf.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "NtCreateKey",
+   "status": "provided",
+   "calls": 11,
+   "load_time_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "NtQueryValueKey",
+   "status": "provided",
+   "calls": 8,
+   "load_time_in": [
+    "chrome_elf.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "RtlFormatCurrentUserKeyPath",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "RtlFreeUnicodeString",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "NtQueryObject",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "NtSetValueKey",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ole32.dll",
+   "fn": "CoInitializeEx",
+   "status": "provided",
+   "calls": 10,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "ole32.dll",
+   "fn": "CoTaskMemAlloc",
+   "status": "provided",
+   "calls": 5,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "ole32.dll",
+   "fn": "CoTaskMemFree",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "ole32.dll",
+   "fn": "CoRegisterInitializeSpy",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "ole32.dll",
+   "fn": "OleInitialize",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "oleaut32.dll",
+   "fn": "VariantClear",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "shell32.dll",
+   "fn": "SHGetFolderPathW",
+   "status": "provided",
+   "calls": 8,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "shell32.dll",
+   "fn": "CommandLineToArgvW",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "shell32.dll",
+   "fn": "SHGetKnownFolderPath",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "shlwapi.dll",
+   "fn": "PathMatchSpecW",
+   "status": "provided",
+   "calls": 72,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetDC",
+   "status": "provided",
+   "calls": 9863,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "SystemParametersInfoW",
+   "status": "provided",
+   "calls": 4936,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "ReleaseDC",
+   "status": "provided",
+   "calls": 4932,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "DefWindowProcW",
+   "status": "provided",
+   "calls": 37,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetWindowLongPtrW",
+   "status": "provided",
+   "calls": 16,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "MsgWaitForMultipleObjectsEx",
+   "status": "provided",
+   "calls": 14,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetSysColor",
+   "status": "provided",
+   "calls": 12,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "CreateWindowExW",
+   "status": "provided",
+   "calls": 8,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetWindowThreadProcessId",
+   "status": "provided",
+   "calls": 7,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "PeekMessageW",
+   "status": "provided",
+   "calls": 6,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "CharUpperW",
+   "status": "provided",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "RegisterClassExW",
+   "status": "provided",
+   "calls": 4,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetQueueStatus",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "SetWindowLongPtrW",
+   "status": "provided",
+   "calls": 3,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "FindWindowExW",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetMessageW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "GetSystemMetrics",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "MonitorFromPoint",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "RegisterClassW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.exe",
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "RegisterWindowMessageW",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "user32.dll",
+   "fn": "SetWindowPos",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [],
+   "delay_in": [
+    "chrome.dll"
+   ]
+  },
+  {
+   "dll": "version.dll",
+   "fn": "VerQueryValueW",
+   "status": "provided",
+   "calls": 13,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "version.dll",
+   "fn": "GetFileVersionInfoSizeW",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "version.dll",
+   "fn": "GetFileVersionInfoW",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSAGetLastError",
+   "status": "provided",
+   "calls": 2,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSACreateEvent",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSAStartup",
+   "status": "provided",
+   "calls": 1,
+   "load_time_in": [
+    "chrome.dll"
+   ],
+   "delay_in": []
+  }
+ ]
+}
