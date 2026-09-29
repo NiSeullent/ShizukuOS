@@ -32,7 +32,7 @@ static void build_tables(void)
         unsigned short m = 0;
         if (c < 32 || c == 127) m |= C_CONTROL;
         if (c >= 9 && c <= 13) m |= C_SPACE;
-        if (c == 9 || c == ' ') m |= C_BLANK;
+        if (c == ' ') m |= C_BLANK;                      /* the tab is not _BLANK in the table; isblank tests it separately */
         if (c == ' ') m |= C_SPACE;
         if (c >= '0' && c <= '9') m |= C_DIGIT | C_HEX;
         if (c >= 'A' && c <= 'Z') m |= 0x100 | C_UPPER;

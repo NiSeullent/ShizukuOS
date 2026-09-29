@@ -10,6 +10,22 @@ from fractions import Fraction
 getcontext().prec = 90
 
 
+def pi_scaled(digits):
+    """floor(pi * 10^digits) (Machin's formula with 20 guard digits)."""
+    scale = 10 ** (digits + 20)
+
+    def arctan_inv(n):
+        total, term, k, sign = 0, scale // n, 1, 1
+        n2 = n * n
+        while term:
+            total += sign * (term // k)
+            term //= n2
+            k += 2
+            sign = -sign
+        return total
+    return (16 * arctan_inv(5) - 4 * arctan_inv(239)) // 10 ** 20
+
+
 def pi_decimal():
     # Machin: pi = 16 atan(1/5) - 4 atan(1/239), with integers scaled by 10^100
     scale = 10 ** 110
@@ -73,6 +89,45 @@ def atan_dec(x):
     return s * (2 ** k)
 
 
+def bernoulli(nmax):
+    """B_0 .. B_nmax as exact fractions (B_1 = -1/2)."""
+    from math import comb
+    B = [Fraction(1)]
+    for m in range(1, nmax + 1):
+        B.append(-sum(comb(m + 1, k) * B[k] for k in range(m)) / (m + 1))
+    return B
+
+
+def zeta(s_, n=100):
+    """Riemann zeta(s) for integer s >= 2 by Borwein's alternating-series acceleration (error ~ 5.8^-n)."""
+    term = Decimal(1) / n                                  # (n+i-1)! 4^i / ((n-i)! (2i)!) for i = 0
+    acc = term
+    d = [n * acc]
+    for i in range(1, n + 1):
+        term = term * (n + i - 1) * 4 * (n - i + 1) / ((2 * i - 1) * (2 * i))
+        acc += term
+        d.append(n * acc)
+    tot = Decimal(0)
+    for k in range(n):
+        tot += (-1) ** k * (d[k] - d[n]) / (Decimal(k + 1) ** s_)
+    return -tot / (d[n] * (1 - Decimal(2) ** (1 - s_)))
+
+
+def zeta_minus_1(s_):
+    return zeta(s_) - 1                                    # absolute error ~1e-76: relative 1e-58 even at s = 60
+
+
+def euler_gamma():
+    B = bernoulli(44)
+    N = 1000
+    h = sum(Decimal(1) / k for k in range(1, N + 1))
+    g = h - Decimal(N).ln() - Decimal(1) / (2 * N)
+    for k in range(1, 22):
+        b = B[2 * k]
+        g += Decimal(b.numerator) / Decimal(b.denominator) / (2 * k * Decimal(N) ** (2 * k))
+    return g
+
+
 def main():
     out = []
     out.append("/* SPDX-License-Identifier: GPL-2.0-only")
@@ -122,18 +177,37 @@ def main():
         hi, lo = dd(Decimal(1) / n)
         out.append(f"    {{{h(hi)}, {h(lo)}}},")
     out.append("};")
-    # 2/pi as 32-bit words, most significant first (bits after the binary point)
-    two_over_pi = 2 / PI
-    frac = Fraction(two_over_pi)
-    words = []
-    for _ in range(44):
-        frac *= 2 ** 32
-        w = int(frac)
-        words.append(w)
-        frac -= w
+    # 2/pi as 32-bit words, most significant first (bits after the binary point): integer arithmetic with pi to 480
+    # decimal digits (far more than the 1408 bits = 424 digits the table holds)
+    digits = 480
+    pi_int = pi_scaled(digits)
+    bits_int = (2 * 10 ** digits << 1408) // pi_int         # floor(2/pi * 2^1408), 2/pi < 1
+    words = [(bits_int >> (32 * (43 - i))) & 0xffffffff for i in range(44)]
     out.append("static const uint32_t TWO_OVER_PI[44] = {")
     for i in range(0, 44, 6):
         out.append("    " + ", ".join(f"0x{w:08x}u" for w in words[i:i + 6]) + ",")
+    out.append("};")
+    # Riemann zeta(k) and zeta(k) - 1, k = 0..60 (entries 0 and 1 unused)
+    out.append("static const double ZETA[61][2] = {")
+    out.append("    {0x0p+0, 0x0p+0}, {0x0p+0, 0x0p+0},")
+    for k in range(2, 61):
+        hi, lo = dd(zeta(k))
+        out.append(f"    {{{h(hi)}, {h(lo)}}},")
+    out.append("};")
+    out.append("static const double ZETA_M1[61][2] = {")
+    out.append("    {0x0p+0, 0x0p+0}, {0x0p+0, 0x0p+0},")
+    for k in range(2, 61):
+        hi, lo = dd(zeta_minus_1(k))
+        out.append(f"    {{{h(hi)}, {h(lo)}}},")
+    out.append("};")
+    # Stirling series coefficients B_2k / (2k (2k - 1)), k = 1..15
+    B = bernoulli(30)
+    out.append("static const double STIRLING[16][2] = {")
+    out.append("    {0x0p+0, 0x0p+0},")
+    for k in range(1, 16):
+        c = B[2 * k] / (2 * k * (2 * k - 1))
+        hi, lo = dd(Decimal(c.numerator) / Decimal(c.denominator))
+        out.append(f"    {{{h(hi)}, {h(lo)}}},")
     out.append("};")
     # constants
     pio2 = PI / 2
@@ -160,7 +234,8 @@ def main():
         out.append(f"#define {name} {h(v)}")
     for name, v in (("PI", PI), ("PIO2", PI / 2), ("PIO4", PI / 4), ("LN2", LN2), ("LN10", LN10), ("INV_LN2", 1 / LN2),
                     ("INV_LN10", 1 / LN10), ("LOG10_2", LN2 / LN10), ("SQRT_PI", PI.sqrt()), ("TWO_OVER_SQRT_PI", 2 / PI.sqrt()),
-                    ("LN_SQRT_2PI", (2 * PI).sqrt().ln()), ("LN_PI", PI.ln())):
+                    ("LN_SQRT_2PI", (2 * PI).sqrt().ln()), ("LN_PI", PI.ln()),
+                    ("EULER", euler_gamma()), ("ONE_MINUS_EULER", 1 - euler_gamma())):
         hi, lo = dd(v)
         out.append(f"#define C_{name}_HI {h(hi)}")
         out.append(f"#define C_{name}_LO {h(lo)}")

@@ -301,7 +301,6 @@ static char g_tzname_std[64] = "PST", g_tzname_dst[64] = "PDT";
 static char *g_tzname[2] = { g_tzname_std, g_tzname_dst };
 typedef struct { int use_rule, month, week, wday, hour; } dst_rule;   /* week 1..5 (5 = last) */
 static dst_rule g_dst_start, g_dst_end;
-static int g_tz_from_env;
 
 #ifndef SHZ_HOST_TEST
 static void rules_from_os(const os_tzinfo *tz)
@@ -363,9 +362,7 @@ DLLAPI void CRTAPI _tzset(void)
     size_t req = 0;
     crt_errno_t CRTAPI getenv_s(size_t *, char *, size_t, const char *);
     crt_lock(CRT_LOCK_TIME);
-    g_tz_from_env = 0;
-    if (getenv_s(&req, tzv, sizeof tzv, "TZ") == 0 && req > 1 && parse_tz(tzv)) g_tz_from_env = 1;
-    else {
+    if (!(getenv_s(&req, tzv, sizeof tzv, "TZ") == 0 && req > 1 && parse_tz(tzv))) {
         os_tzinfo tz;
         const os_dword id = GetTimeZoneInformation(&tz);
         if (id != OS_TIME_ZONE_ID_INVALID) {
