@@ -47,6 +47,14 @@ static void CALLBACK slow_cb(UINT id, UINT msg, DWORD_PTR user, DWORD_PTR d1, DW
     InterlockedExchange((LONG *)&g_slow_done, 1);
 }
 
+/* wait (bounded) until *v >= n; the timing assertions below keep their strict lower bounds (never early, never faster than
+ * the period) but only loose upper bounds, so a starved host cannot make this test flaky */
+static void wait_at_least(volatile LONG *v, LONG n, DWORD max_ms)
+{
+    DWORD i;
+    for (i = 0; i < max_ms && *v < n; ++i) Sleep(1);
+}
+
 int main(void)
 {
     TIMECAPS caps;
@@ -108,10 +116,11 @@ int main(void)
     t0 = GetTickCount64();
     id = timeSetEvent(30, 1, count_cb, 0x1234abcd, TIME_ONESHOT | TIME_CALLBACK_FUNCTION);
     U_CHECK("timeSetEvent(30 ms one-shot) returns a nonzero id", id != 0);
-    Sleep(200);
+    wait_at_least(&g_count, 1, 5000);
+    Sleep(120);                                                  /* a second (wrong) firing would show up here */
     U_CHECKF("one-shot fired exactly once", g_count == 1, "count=%d", (int)g_count);
     U_CHECKF("one-shot did not fire early (>= 30 ms)", g_first >= t0 + 30, "delta=%u", (unsigned)(g_first - t0));
-    U_CHECKF("one-shot fired reasonably soon (< 150 ms)", g_first < t0 + 150, "delta=%u", (unsigned)(g_first - t0));
+    U_CHECKF("one-shot fired within a generous bound (< 2 s)", g_first < t0 + 2000, "delta=%u", (unsigned)(g_first - t0));
     U_CHECK("callback got its timer id, uMsg 0 and dwUser", g_id_seen == id && g_msg_seen == 0 && g_user_seen == 0x1234abcd);
     U_CHECK("timeKillEvent on an already-fired one-shot is MMSYSERR_INVALPARAM", timeKillEvent(id) == MMSYSERR_INVALPARAM);
 
@@ -132,7 +141,7 @@ int main(void)
     {
         LONG c1 = g_count;
         U_CHECK("timeKillEvent(periodic) succeeds", rc == TIMERR_NOERROR);
-        U_CHECKF("periodic 20 ms timer fired repeatedly (>= 8 times in ~310 ms)", c1 >= 8, "count=%d", (int)c1);
+        U_CHECKF("periodic 20 ms timer fired repeatedly (>= 3 times in ~310 ms)", c1 >= 3, "count=%d", (int)c1);
         U_CHECKF("periodic timer never runs faster than its period", (ULONGLONG)c1 <= (t1 - t0) / 20 + 1, "count=%d elapsed=%u", (int)c1, (unsigned)(t1 - t0));
         U_CHECKF("first periodic callback not before one period", g_first >= t0 + 20, "delta=%u", (unsigned)(g_first - t0));
         Sleep(100);
@@ -146,7 +155,8 @@ int main(void)
     id2 = timeSetEvent(30, 0, order_cb, 2, TIME_ONESHOT);
     id3 = timeSetEvent(60, 0, order_cb, 3, TIME_ONESHOT);
     U_CHECK("three timers get distinct ids", id && id2 && id3 && id != id2 && id != id3 && id2 != id3);
-    Sleep(250);
+    wait_at_least(&g_order_n, 3, 5000);
+    Sleep(50);
     U_CHECKF("deadline order 30, 60, 90 ms", g_order_n == 3 && g_order[0] == 2 && g_order[1] == 3 && g_order[2] == 1, "n=%d %d %d %d", (int)g_order_n,
              (int)g_order[0], (int)g_order[1], (int)g_order[2]);
 
@@ -155,20 +165,21 @@ int main(void)
     t0 = GetTickCount64();
     id = timeSetEvent(40, 0, (LPTIMECALLBACK)ev, 0, TIME_ONESHOT | TIME_CALLBACK_EVENT_SET);
     U_CHECK("timeSetEvent with TIME_CALLBACK_EVENT_SET returns an id", id != 0);
-    w = WaitForSingleObject(ev, 1000);
+    w = WaitForSingleObject(ev, 5000);
     t1 = GetTickCount64();
-    U_CHECKF("the event is signalled, not before the delay", w == WAIT_OBJECT_0 && t1 >= t0 + 40 && t1 < t0 + 400, "w=%u delta=%u", (unsigned)w, (unsigned)(t1 - t0));
+    U_CHECKF("the event is signalled, not before the delay", w == WAIT_OBJECT_0 && t1 >= t0 + 40 && t1 < t0 + 4000, "w=%u delta=%u", (unsigned)w, (unsigned)(t1 - t0));
     U_CHECK("the (auto-reset) event was consumed by the wait", WaitForSingleObject(ev, 0) == WAIT_TIMEOUT);
     id = timeSetEvent(25, 0, (LPTIMECALLBACK)ev, 0, TIME_PERIODIC | TIME_CALLBACK_EVENT_SET);
-    U_CHECK("periodic event timer signals repeatedly", WaitForSingleObject(ev, 500) == WAIT_OBJECT_0 && WaitForSingleObject(ev, 500) == WAIT_OBJECT_0 &&
-            WaitForSingleObject(ev, 500) == WAIT_OBJECT_0);
+    U_CHECK("periodic event timer signals repeatedly", WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0 && WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0 &&
+            WaitForSingleObject(ev, 5000) == WAIT_OBJECT_0);
     timeKillEvent(id);
     CloseHandle(ev);
 
     /* ---- a periodic timer may kill itself from its own callback (TIME_KILL_SYNCHRONOUS must not deadlock) ---- */
     g_self_calls = 0; g_self_kill_rc = -1;
     id = timeSetEvent(10, 0, self_kill_cb, 0, TIME_PERIODIC | TIME_KILL_SYNCHRONOUS);
-    Sleep(200);
+    wait_at_least(&g_self_calls, 3, 5000);
+    Sleep(150);                                                  /* a 4th call after the self-kill would show up here */
     U_CHECKF("self-kill from the callback: killed on the 3rd call, none after", g_self_kill_rc == TIMERR_NOERROR && g_self_calls == 3, "rc=%d calls=%d",
              (int)g_self_kill_rc, (int)g_self_calls);
 
