@@ -12,7 +12,7 @@ Implemented families: seven pointer-sized SRW operations, four InitOnce
 operations, observed-wrap `GetTickCount64`, and scoped `GetProcAddress`
 redirection, plus UTF-8 `MultiByteToWideChar`/`WideCharToMultiByte`, and
 `AddVectoredExceptionHandler` / `RemoveVectoredExceptionHandler`: seventeen
-exports in total. The vectored-handler exports implement first/last order and
+routed exports (plus the eight WIN64 subsystem functions described below). The vectored-handler exports implement first/last order and
 reject a null callback; they are not installed into the CPU exception path.
 Shared readers and an
 exclusive writer use 32-bit atomic acquire/release ordering; contention blocks
@@ -88,6 +88,24 @@ nothing is loaded and no address is hard-coded. The exact semantics,
 grammar, limits and the evidence boundary are in
 [docs/NTW32_ROUTING.md](../docs/NTW32_ROUTING.md). No Windows 98 guest and
 no KernelEx installation exercised this policy; it is host-tested only.
+
+## WIN64 subsystem client (ShizukuDOS)
+
+`NTW32.DLL` also exports eight NTW32-specific functions, listed separately as
+`provider_api` in `routes.json` (they are never routed from KERNEL32 imports):
+`NtwQuerySubsystem64`, `NtwCreateProcess64W`, `NtwWaitProcess64`,
+`NtwReadConsole64`, `NtwWriteConsole64`, `NtwCloseConsole64`,
+`NtwKillProcess64` and `NtwCloseProcess64` (`win64/ntw64.h`). They let a
+Windows 98 program run a Win64 PE32+ program in the ShizukuDOS Kernel64 domain
+through `NTWRAP9X.VXD` and the inter-domain channel; the build also produces the
+console front end `NTW64RUN.EXE`. The client uses `CreateFileA`,
+`DeviceIoControl` and `GetLastError`; `DeviceIoControl` is the only native
+import it adds to the routing runtime's. The design, message table and the exact
+verified/BLOCKED split are in
+[docs/shizukudos10/WIN64_SUBSYSTEM.md](../docs/shizukudos10/WIN64_SUBSYSTEM.md):
+the code runs end to end on the host (`platform/abi32/w64_e2e.py`) but has not
+run inside Windows 98 or under the Supervisor, and the VxD's last guest load
+attempt failed.
 
 ## Build and prepare
 

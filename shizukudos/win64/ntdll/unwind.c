@@ -420,6 +420,38 @@ SHZ_EXPORT VOID NTAPI RtlRaiseStatus(NTSTATUS status)
     RtlRaiseException(&rec);
 }
 
+/* Walks the calling thread's stack with the .pdata unwind tables. The first frame returned (after `skip` frames were dropped)
+ * is the return address into the function that called RtlCaptureStackBackTrace. The walk ends at a null return address, when
+ * the stack pointer leaves the thread's stack, or after `count` frames. `hash` receives the sum of the return addresses. */
+SHZ_EXPORT USHORT NTAPI RtlCaptureStackBackTrace(ULONG skip, ULONG count, PVOID *frames, PULONG hash)
+{
+    CONTEXT ctx;
+    ULONG64 sum = 0;
+    ULONG seen = 0, got = 0, guard;
+    const uint64_t teb = shz_teb();
+    const DWORD64 stack_top = *(const DWORD64 *)(teb + 8), stack_low = *(const DWORD64 *)(teb + 0x10);
+    if (hash) *hash = 0;
+    if (!frames || !count) return 0;
+    RtlCaptureContext(&ctx);                                   /* RIP is inside this function: unwind out of it first */
+    for (guard = 0; guard < 4096 && got < count; ++guard) {
+        DWORD64 image_base = 0, establisher;
+        PVOID hd;
+        PRUNTIME_FUNCTION fe = RtlLookupFunctionEntry(ctx.Rip, &image_base, 0);
+        if (fe) {
+            RtlVirtualUnwind(0, image_base, ctx.Rip, fe, &ctx, &hd, &establisher, 0);
+        } else {                                               /* a leaf function without unwind data */
+            ctx.Rip = *(const DWORD64 *)ctx.Rsp;
+            ctx.Rsp += 8;
+        }
+        if (!ctx.Rip || ctx.Rsp < stack_low || ctx.Rsp > stack_top) break;
+        if (seen++ < skip) continue;
+        frames[got++] = (PVOID)(uintptr_t)ctx.Rip;
+        sum += ctx.Rip;
+    }
+    if (hash) *hash = (ULONG)sum;
+    return (USHORT)got;
+}
+
 SHZ_EXPORT VOID NTAPI RtlRestoreContext(PCONTEXT ctx, PEXCEPTION_RECORD rec)
 {
     (void)rec;

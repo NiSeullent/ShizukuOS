@@ -32,6 +32,11 @@
     {"name": "AddVectoredExceptionHandler", "order": ["native", "own", "kernelex"], "native_win98se": false},
     {"name": "RemoveVectoredExceptionHandler", "order": ["native", "own", "kernelex"], "native_win98se": false}
   ],
+  "provider_api": [
+    "NtwQuerySubsystem64", "NtwCreateProcess64W", "NtwWaitProcess64", "NtwReadConsole64",
+    "NtwWriteConsole64", "NtwCloseConsole64", "NtwKillProcess64", "NtwCloseProcess64"
+  ],
+  "provider_api_note": "NTW32-specific WIN64 subsystem client (win64/ntw64.h); never routed from KERNEL32 imports and absent from the routing table",
   "stubs": [
     {"module": "KERNEL32.DLL", "name": "CompareStringW", "provider": "native", "category": "guest_observed_stub",
      "evidence": "docs/NLS_EX_PORT.md: static CompareStringEx bound to the original Win98 CompareStringW returned 0 with ERROR_CALL_NOT_IMPLEMENTED (120); recorded guest observation from the KernelEx-era work, not re-run here"},
@@ -74,6 +79,7 @@
     "Routing: a KernelEx-supplied pointer is recognised only when it lies inside a KernelEx API library that GetModuleHandleA can see in this process; otherwise it counts as native",
     "Routing: static exports already bound to NTW32.DLL forward to native or KernelEx when the policy selects them; when nothing else exists the own implementation stays bound",
     "Routing: the KernelEx module names and the probing behaviour are host-tested against mocks only; no KernelEx installation was observed here",
-    "Routing: a configured order replaces the orders above for mode auto only and may leave out providers; a left-out provider is never tried for that name"
+    "Routing: a configured order replaces the orders above for mode auto only and may leave out providers; a left-out provider is never tried for that name",
+    "The WIN64 subsystem API needs NTWRAP9X.VXD under the ShizukuDOS Supervisor with a Kernel64 domain; otherwise every call fails with the loader or VxD error"
   ]
 }

@@ -146,7 +146,9 @@ class PrepareTests(unittest.TestCase):
                     'GetLastError','MultiByteToWideChar','WideCharToMultiByte',
                     # routing policy: NTW32.INI beside the DLL, NTW32_ROUTING, diagnostics
                     'GetModuleFileNameA','CreateFileA','ReadFile','CloseHandle',
-                    'GetEnvironmentVariableA','OutputDebugStringA')
+                    'GetEnvironmentVariableA','OutputDebugStringA',
+                    # WIN64 subsystem client (ntwin32/win64/ntw64.c): the NTWRAP9X.VXD transport
+                    'DeviceIoControl')
         self.assertEqual(set(imported), {('KERNEL32.DLL', name) for name in expected})
         # Every import exists in the pinned Windows 98 SE OEM KERNEL32 export manifest.
         manifest = json.loads((ROOT / 'benchmarks/win98se-ko-oem-native-exports-v1.json').read_text())
@@ -156,9 +158,21 @@ class PrepareTests(unittest.TestCase):
         count = provider.u32(exports+24)
         names = provider.u32(exports+32)
         observed = {provider.string(provider.u32(provider.offset(names+i*4,4))) for i in range(count)}
-        self.assertEqual(observed, set(mod.route_names(mod.routes())))
+        plan = mod.routes()
+        self.assertEqual(observed, set(mod.route_names(plan)) | set(plan['provider_api']))
+        self.assertFalse(set(mod.route_names(plan)) & set(plan['provider_api']))
         self.assertNotIn('get_api_table', observed)
         self.assertEqual((provider.u16(provider.opt+48),provider.u16(provider.opt+50)), (4,10))
+
+    def test_win64_front_end_imports(self):
+        tool = mod.PE((ROOT / 'build/platform/NTW64RUN.EXE').read_bytes())
+        imported = {(d['dll'].upper(), e[1]) for d in tool.imports() for e in d['entries']}
+        self.assertEqual({name for dll, name in imported if dll == 'NTW32.DLL'},
+                         set(mod.routes()['provider_api']))
+        self.assertEqual({dll for dll, _ in imported}, {'NTW32.DLL', 'KERNEL32.DLL'})
+        self.assertEqual((tool.u16(tool.opt+48), tool.u16(tool.opt+50)), (4, 10))
+        self.assertEqual(tool.u16(tool.opt+68), 3)          # console subsystem
+        self.assertEqual(tool.u16(tool.pe+4), 0x14c)        # i386 PE32
 
     def test_provider_cannot_redirect_its_own_native_loader_imports(self):
         with self.assertRaisesRegex(mod.PEError, 'self-routing'):

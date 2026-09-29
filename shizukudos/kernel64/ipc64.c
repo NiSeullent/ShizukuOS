@@ -24,7 +24,8 @@ static uint32_t peer;
 uint32_t ipc64_results[16];
 static unsigned failures;
 
-void ipc64_doorbell_irq(void) { sem_post(&doorbell_sem); }
+void __attribute__((weak)) subsys64_doorbell(void) { }       /* subsys64.c: the WIN64 bridge shares the doorbell vector */
+void ipc64_doorbell_irq(void) { sem_post(&doorbell_sem); subsys64_doorbell(); }
 
 void ipc64_init(const shz_bootinfo_t *bi)
 {

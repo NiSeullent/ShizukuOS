@@ -22,6 +22,8 @@ void count_syscall(void) { ++syscalls; }
 uint64_t proc_pml4(process_t *p) { return p->pml4; }
 process_t *current_process(void) { return thread_current()->proc; }
 
+process_t *process_slot(unsigned i) { return i >= 1 && i <= MAX_PROCS ? &procs[i] : 0; }
+
 process_t *process_by_pid(int pid)
 {
     unsigned i;
@@ -159,8 +161,12 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     if (!t->teb) { thread_discard(t); return -1; }
     t->user_gs_base = t->teb;
     tobj = ob_create(OB_THREAD, 0);
+    if (!tobj) { thread_discard(t); return -1; }
     tobj->u.thr.t = t;
+    tobj->u.thr.tid = t->id * 4ull;             /* the id NtQueryInformationThread reports (sysx.c) */
+    tobj->u.thr.pid = (uint64_t)p->pid;
     t->object = tobj;
+    t->creator_hold = out != 0;                 /* the caller reads t->object after the thread may already have run */
     ++p->threads_alive;
     p->next_tid += 4;
     if (!p->main_thread) p->main_thread = t;
@@ -186,6 +192,7 @@ int process_start_thread2(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx
 static void process_reap_signal(process_t *p)
 {
     p->terminated = 1;
+    p->exit_tick = ticks_now();
     p->object->signaled = 1;
     {
         uint64_t f = irq_save();
@@ -252,9 +259,11 @@ int proc_wait(int pid, int64_t *exit_code, int *faulted)
     if (exit_code) *exit_code = p->exit_code;
     if (faulted) *faulted = p->faulted;
     handles_close_all(p);
+    thread_reap_process(p);                             /* its exited threads' slots and kernel stacks */
     write_cr3(kernel_pml4());
     vm_free_space(p->pml4);
     vad_destroy(p);
+    ldr_release_modules(p);                             /* loader records (and lazily mapped image statistics) */
     kfree(p->handles);
     ob_deref(p->object);
     p->used = 0;
@@ -270,6 +279,7 @@ int user_page_fault(struct regs *r, uint64_t addr)
     int st;
     if (!p)
         return 0;
+    ++p->page_faults;                                   /* PROCESS_MEMORY_COUNTERS.PageFaultCount */
     st = user_fault_in(p, addr, (r->error & 2) != 0, (r->error & 16) != 0);
     if (st == 0)
         return 1;                                       /* page populated; restart the instruction */
@@ -301,6 +311,8 @@ int user_fault(struct regs *r)
     }
     if (r->vector == 13 && !(r->error & 0xfff))
         code = (uint32_t)STATUS_PRIVILEGED_INSTRUCTION;        /* GP with no selector: privileged/non-canonical */
+    if (r->vector == 3)
+        r->rip -= 1;            /* #BP is a trap (RIP is past the INT3); Windows reports ExceptionAddress and Context.Rip AT the INT3 */
     if (user_exception_dispatch(r, code, r->vector == 14 ? ((r->error & 2) ? 1 : 0) : 0, r->vector == 14 ? read_cr2() : 0))
         return 1;
     kprintf("K64: process %s (pid %d) killed: vector %d error %llx rip %llx cr2 %llx status %x\n", p->name, p->pid,

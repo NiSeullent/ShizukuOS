@@ -65,7 +65,7 @@ void arch_init(void)
         idt[i].hi = (uint32_t)(h >> 32);
         idt[i].sel = 0x08;
         idt[i].ist = i == 8 ? 1 : 0;
-        idt[i].type = 0x8e;
+        idt[i].type = i == 3 ? 0xee : 0x8e;         /* #BP gate DPL 3: INT3 in ring 3 is a breakpoint (a DPL-0 gate turns it into #GP) */
         idt[i].zero = 0;
     }
     idtr.limit = sizeof idt - 1;
@@ -105,7 +105,7 @@ void isr_dispatch(struct regs *r)
 #ifdef SHZ_STANDALONE
         standalone_eoi();                   /* PIT IRQ0 through the 8259: acknowledge before any context switch */
 #endif
-        sched_tick();
+        sched_tick_from((r->cs & 3) == 3);  /* CPU-time accounting charges the tick to user or kernel mode */
         return;
     case VEC_DOORBELL: {
         extern void ipc64_doorbell_irq(void);
@@ -124,6 +124,11 @@ void isr_dispatch(struct regs *r)
     }
     if (r->vector == 14) {
         const uint64_t addr = read_cr2();
+        if (!(r->cs & 3) && addr >= KWIN_BASE && addr < KWIN_BASE + KWIN_SIZE && !(r->error & 1)) {
+            extern int kwin_fault(uint64_t addr);       /* kernel file view page (kwin.c) */
+            if (kwin_fault(addr))
+                return;
+        }
         if (!(r->cs & 3) && addr >= demand_lo && addr < demand_hi && !(r->error & 1)) {
             const uint64_t pa = pmm_alloc();
             KASSERT(pa);
