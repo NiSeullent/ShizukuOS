@@ -162,8 +162,12 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     if (!t->teb) { thread_discard(t); return -1; }
     t->user_gs_base = t->teb;
     tobj = ob_create(OB_THREAD, 0);
+    if (!tobj) { thread_discard(t); return -1; }
     tobj->u.thr.t = t;
+    tobj->u.thr.tid = t->id * 4ull;             /* the id NtQueryInformationThread reports (sysx.c) */
+    tobj->u.thr.pid = (uint64_t)p->pid;
     t->object = tobj;
+    t->creator_hold = out != 0;                 /* the caller reads t->object after the thread may already have run */
     ++p->threads_alive;
     p->next_tid += 4;
     if (!p->main_thread) p->main_thread = t;
@@ -255,6 +259,7 @@ int proc_wait(int pid, int64_t *exit_code, int *faulted)
     if (exit_code) *exit_code = p->exit_code;
     if (faulted) *faulted = p->faulted;
     handles_close_all(p);
+    thread_reap_process(p);                             /* its exited threads' slots and kernel stacks */
     write_cr3(kernel_pml4());
     vm_free_space(p->pml4);
     vad_destroy(p);

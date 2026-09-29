@@ -1375,7 +1375,8 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     if (st) { st = STATUS_NO_MEMORY; goto failed; }
     kfree(c);
     if (out_proc) *out_proc = p;
-    if (out_thread) *out_thread = t;
+    if (out_thread) *out_thread = t;            /* the caller holds t until thread_creator_release() or proc_wait() */
+    else thread_creator_release(t);
     return STATUS_SUCCESS;
 report_failed:
     report(c, p->name, st);

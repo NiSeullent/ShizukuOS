@@ -256,11 +256,11 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (process_start_thread2(target, target->ntdll_thread_start, start, arg, (uint64_t)stack_arg(p, r, 9), &t))
             return STATUS_NO_MEMORY;
         {
-            extern void thread_user_tls_init(process_t *p, thread_t *t);
-            }
-        ob_ref(t->object);
-        st = give_handle(p, t->object, a1, (uint32_t)a2);
-        return st;
+            kobject_t *to = t->object;
+            ob_ref(to);
+            thread_creator_release(t);                      /* from here on only the object is used */
+            return give_handle(p, to, a1, (uint32_t)a2);
+        }
     }
     case SYS_NtQuerySystemTime: {
         int64_t t = filetime_now();
@@ -283,13 +283,23 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     }
     case SYS_NtQueryInformationThread: {
         thread_t *t = a1 == CURRENT_THREAD_HANDLE ? thread_current() : 0;
-        if (!t) { kobject_t *o = handle_lookup(p, a1, OB_THREAD); t = o ? o->u.thr.t : 0; }
-        if (!t) return STATUS_INVALID_HANDLE;
+        kobject_t *to = 0;
+        if (!t && !(to = handle_lookup(p, a1, OB_THREAD))) return STATUS_INVALID_HANDLE;
         if (a2 == 0) {                                      /* ThreadBasicInformation */
             struct { int64_t exit_status; uint64_t teb; uint64_t pid, tid; uint64_t affinity; int32_t prio, base; } b;
+            uint64_t f;
             if (a4 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
-            b.exit_status = t->state == TS_ZOMBIE ? t->exit_code : 0x103;
-            b.teb = t->teb; b.pid = (uint64_t)p->pid; b.tid = t->id * 4ull; b.affinity = 1; b.prio = 8; b.base = 8;
+            f = irq_save();                                 /* an exited thread may be reclaimed (sched.c) at any preemption */
+            if (to) t = to->u.thr.t;
+            if (t) {
+                b.exit_status = t->state == TS_ZOMBIE ? t->exit_code : 0x103;
+                b.teb = t->teb; b.pid = (uint64_t)p->pid; b.tid = t->id * 4ull;
+            } else {                                        /* exited and reclaimed: the object kept what is still defined */
+                b.exit_status = to->u.thr.exit_code;
+                b.teb = 0; b.pid = to->u.thr.pid; b.tid = to->u.thr.tid;
+            }
+            irq_restore(f);
+            b.affinity = 1; b.prio = 8; b.base = 8;
             if (copy_to_user(p, a3, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
             return STATUS_SUCCESS;
         }
@@ -316,10 +326,15 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         }
         st = ldr_create_process(p, path, cmd, cwd, &np, &nt);
         if (st) return st;
-        ob_ref(np->object);
-        st = give_handle(p, np->object, a1, 0x1fffff);
-        if (st) return st;
-        if (a2) { ob_ref(nt->object); st = give_handle(p, nt->object, a2, 0x1fffff); }
+        {
+            kobject_t *to = nt->object;
+            ob_ref(to);
+            thread_creator_release(nt);                     /* from here on only the thread object is used */
+            ob_ref(np->object);
+            st = give_handle(p, np->object, a1, 0x1fffff);
+            if (!st && a2) { ob_ref(to); st = give_handle(p, to, a2, 0x1fffff); }
+            ob_deref(to);
+        }
         return st;
     }
     case SYS_NtLoadImage: {
