@@ -77,6 +77,7 @@ void ntdrv_set_current_driver(ntdrv_driver_t *d);
 int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *service, ntdrv_driver_t **out);
 int32_t ntdrv_unload(ntdrv_driver_t *d);
 ntdrv_driver_t *ntdrv_find_driver(const char *service);           /* a started driver of that service, or NULL */
+ntdrv_driver_t *ntdrv_driver_by_address(uint64_t va);            /* the loaded image containing va, or NULL */
 struct fsnode;
 int32_t ntdrv_load_node(struct fsnode *n, const char *service, ntdrv_driver_t **out);   /* RAM or disk-backed file */
 uint64_t ntdrv_alloc_image_va(uint64_t bytes);                    /* reserve a slice of the driver VA window */

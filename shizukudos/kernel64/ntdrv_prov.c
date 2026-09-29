@@ -35,6 +35,7 @@ D(ExAllocatePool2) D(ExFreePool) D(ExFreePoolWithTag) D(ExInitializeSListHead)
 D(MmGetPhysicalAddress) D(MmMapIoSpace) D(MmMapIoSpaceEx) D(MmUnmapIoSpace)
 D(MmAllocateContiguousMemory) D(MmAllocateContiguousMemorySpecifyCache) D(MmFreeContiguousMemory)
 D(MmFreeContiguousMemorySpecifyCache) D(MmAllocateNonCachedMemory) D(MmFreeNonCachedMemory) D(MmIsAddressValid)
+D(MmPageEntireDriver) D(MmResetDriverPaging)
 D(IoFreeMdl) D(MmBuildMdlForNonPagedPool) D(MmProbeAndLockPages) D(MmUnlockPages)  /* IoAllocateMdl: ntdrv.h */
 D(MmMapLockedPages) D(MmMapLockedPagesSpecifyCache) D(MmUnmapLockedPages) D(MmGetSystemAddressForMdlSafe)
 D(MmGetMdlByteCount) D(MmGetMdlVirtualAddress) D(MmSizeOfMdl) D(MmInitializeMdl)
@@ -92,6 +93,7 @@ const ntdrv_export_t ntdrv_ntoskrnl_exports[] = {
     E(MmGetPhysicalAddress), E(MmMapIoSpace), E(MmMapIoSpaceEx), E(MmUnmapIoSpace),
     E(MmAllocateContiguousMemory), E(MmAllocateContiguousMemorySpecifyCache), E(MmFreeContiguousMemory),
     E(MmFreeContiguousMemorySpecifyCache), E(MmAllocateNonCachedMemory), E(MmFreeNonCachedMemory), E(MmIsAddressValid),
+    E(MmPageEntireDriver), E(MmResetDriverPaging),
     E(IoAllocateMdl), E(IoFreeMdl), E(MmBuildMdlForNonPagedPool), E(MmProbeAndLockPages), E(MmUnlockPages),
     E(MmMapLockedPages), E(MmMapLockedPagesSpecifyCache), E(MmUnmapLockedPages), E(MmGetSystemAddressForMdlSafe),
     E(MmGetMdlByteCount), E(MmGetMdlVirtualAddress), E(MmSizeOfMdl), E(MmInitializeMdl),
@@ -123,6 +125,8 @@ const ntdrv_export_t ntdrv_hal_exports[] = {
     E(READ_PORT_UCHAR), E(READ_PORT_USHORT), E(READ_PORT_ULONG),
     E(WRITE_PORT_UCHAR), E(WRITE_PORT_USHORT), E(WRITE_PORT_ULONG),
     E(HalGetBusData), E(HalGetBusDataByOffset), E(HalSetBusDataByOffset), E(HalGetInterruptVector),
+    /* on x64 these two live in hal.dll too (drivers import them from there); same implementations as ntoskrnl's */
+    E(KeStallExecutionProcessor), E(KeQueryPerformanceCounter),
     { 0, 0 }
 };
 

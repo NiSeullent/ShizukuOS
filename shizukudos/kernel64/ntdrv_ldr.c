@@ -200,6 +200,14 @@ ntdrv_driver_t *ntdrv_find_driver(const char *service)
     return 0;
 }
 
+ntdrv_driver_t *ntdrv_driver_by_address(uint64_t va)
+{
+    ntdrv_driver_t *d;
+    for (d = driver_list; d; d = d->next)
+        if (va >= d->image_base && va < d->image_base + d->image_size) return d;
+    return 0;
+}
+
 /* Load from a file-system node: initrd/RAM files are used in place; disk-backed files (D:, E: ...) are read into a
  * temporary buffer, which the loader no longer needs once the image is mapped (sections are copied into place). */
 #define NTDRV_MAX_IMAGE (8ull << 20)

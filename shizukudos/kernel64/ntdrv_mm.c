@@ -54,6 +54,17 @@ void NTAPI MmFreeContiguousMemory(void *p) { kfree(p); }
 void NTAPI MmFreeContiguousMemorySpecifyCache(void *p, uint64_t bytes, uint32_t cache) { (void)bytes; (void)cache; kfree(p); }
 void *NTAPI MmAllocateNonCachedMemory(uint64_t bytes) { return kmalloc(bytes ? bytes : 1); }
 void NTAPI MmFreeNonCachedMemory(void *p, uint64_t bytes) { (void)bytes; kfree(p); }
+/* Kernel64 never pages a driver image out: every section stays resident for the life of the image, which is the state
+ * MmResetDriverPaging requests and which MmPageEntireDriver merely permits. What remains of the contract is the return
+ * value -- the handle of the image section containing the address, which is its base -- or NULL for an address that is
+ * in no loaded driver. */
+void *NTAPI MmPageEntireDriver(void *address_within_section)
+{
+    ntdrv_driver_t *d = ntdrv_driver_by_address((uint64_t)address_within_section);
+    return d ? (void *)d->image_base : 0;
+}
+void NTAPI MmResetDriverPaging(void *address_within_section) { (void)address_within_section; }
+
 uint8_t NTAPI MmIsAddressValid(void *va) { return va_to_phys((uint64_t)va) != 0; }
 
 /* ---- MDLs ---- */
