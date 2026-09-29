@@ -572,7 +572,7 @@ int32_t ip_output(uint8_t proto, ip4_t src, ip4_t dst, const uint8_t *payload, u
     if (df || len + IP_HLEN > 65535)
         return NET_ERR(WSAEMSGSIZE);
     {   /* fragmentation: payload pieces are multiples of 8 bytes except the last */
-        static uint8_t frag_buf[ETH_HLEN + NET_MTU + 16];
+        static uint8_t frag_buf[ETH_HLEN + LO_MTU + 16];
         const uint32_t per = ((rt.mtu - IP_HLEN) / 8) * 8;
         const uint16_t id = ++ip_ident;
         uint32_t off = 0;
