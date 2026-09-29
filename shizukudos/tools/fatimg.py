@@ -95,6 +95,13 @@ def copy_in(image, files):
         run(["mcopy", "-m", "-i", image, host, f"::{name}"], env=env)
 
 
+def make_dirs(image, names):
+    """Create directories (parents first), e.g. ["EFI", "EFI/BOOT"]; entries get SOURCE_DATE_EPOCH."""
+    env = _mtools_env()
+    for name in names:
+        run(["mmd", "-i", image, f"::{name}"], env=env)
+
+
 def read_file(image, name):
     r = run(["mtype", "-i", image, f"::{name}"], env=_mtools_env(), capture=True, check=False)
     return r.stdout if r.returncode == 0 else None
@@ -107,6 +114,6 @@ def read_bytes(image, name):
     return r.stdout if r.returncode == 0 else None
 
 
-def listing(image):
-    r = run(["mdir", "-i", image, "::"], env=_mtools_env(), capture=True, check=False)
+def listing(image, directory=""):
+    r = run(["mdir", "-i", image, f"::{directory}"], env=_mtools_env(), capture=True, check=False)
     return r.stdout
