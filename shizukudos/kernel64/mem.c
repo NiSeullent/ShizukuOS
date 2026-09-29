@@ -9,6 +9,9 @@
  * 6 MiB.. page allocator (initrd range and firmware holes from bootinfo excluded).
  */
 #include "k64.h"
+#ifdef SHZ_STANDALONE
+#include "standalone/memholes.h"
+#endif
 
 #define HEAP_PA 0x200000ull
 #define HEAP_BYTES 0x400000ull
@@ -256,20 +259,28 @@ void mem_init(const shz_bootinfo_t *bi)
             --pmm_free_pages;
         }
     }
-    /* Firmware ranges that are not RAM (standalone boot on a firmware memory map with holes, e.g. UEFI +
-     * CSMWrap); the boot stub guarantees they lie above PMM_BASE. A Supervisor domain has none. */
-    if (bi->size >= sizeof *bi) {
-        for (c = 0; c < bi->hole_count && c < SHZ_MAX_HOLES; ++c) {
-            KASSERT(bi->hole[c].gpa >= PMM_BASE);
-            for (off = bi->hole[c].gpa; off < bi->hole[c].gpa + bi->hole[c].size && off < ram_top; off += PAGE_SIZE) {
-                i = (off - PMM_BASE) / PAGE_SIZE;
-                if (!bit_get(i)) {
-                    bit_set(i);
-                    --pmm_free_pages;
+#ifdef SHZ_STANDALONE
+    {   /* Firmware ranges that are not RAM (standalone/memholes.h: e.g. OVMF's ACPI NVS under UEFI + CSMWrap).
+         * The Multiboot stub guarantees they lie above PMM_BASE; still read through the boot mapping here. */
+        const shz_memholes_t *h = (const shz_memholes_t *)(K64_VIRT_BASE + SHZ_MEMHOLES_GPA);
+        if (h->magic == SHZ_MEMHOLES_MAGIC && h->count <= SHZ_MEMHOLES_MAX && h->check == shz_memholes_sum(h)) {
+            const uint64_t before = pmm_free_pages;
+            for (c = 0; c < h->count; ++c) {
+                KASSERT(h->hole[c].gpa >= PMM_BASE);
+                for (off = h->hole[c].gpa; off < h->hole[c].gpa + h->hole[c].size && off < ram_top; off += PAGE_SIZE) {
+                    i = (off - PMM_BASE) / PAGE_SIZE;
+                    if (!bit_get(i)) {
+                        bit_set(i);
+                        --pmm_free_pages;
+                    }
                 }
             }
+            if (h->count)
+                kprintf("K64: %u firmware memory hole(s), %u page(s) kept out of the page allocator\n",
+                        h->count, (uint32_t)(before - pmm_free_pages));
         }
     }
+#endif
     /* Build the final tables while still running on the Supervisor's boot mapping, through
      * which physical memory below 1 GiB is reachable at K64_VIRT_BASE (phys_base_va). */
     kpml4 = pmm_alloc();

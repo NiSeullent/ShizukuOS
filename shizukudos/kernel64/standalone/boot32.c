@@ -5,6 +5,7 @@
  */
 #include <stdint.h>
 #include "../../abi/shz_abi.h"
+#include "memholes.h"
 
 #ifdef STUB_K32                                    /* Kernel32: 32-bit Protected Mode, paging off, EBX = bootinfo */
 #define STUB_DOMAIN SHZ_DOM_KERNEL32
@@ -51,7 +52,7 @@ static void zero(uint32_t dst, uint32_t n)
     __asm__ volatile("rep stosb" : "+D"(dst), "+c"(n) : "a"(0) : "memory");
 }
 
-static uint64_t hole_gpa[SHZ_MAX_HOLES], hole_size[SHZ_MAX_HOLES];
+static uint64_t hole_gpa[SHZ_MEMHOLES_MAX], hole_size[SHZ_MEMHOLES_MAX];
 static uint32_t hole_count;
 
 /* RAM size and the non-RAM holes below it, from the Multiboot memory map (the firmware's E820).
@@ -93,7 +94,7 @@ static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
         if (next > ram) next = ram;
         if (next > cursor) {
             uint64_t a = cursor & ~0xfffull, z = (next + 0xfff) & ~0xfffull;
-            if (hole_count == SHZ_MAX_HOLES) fail("too many holes in the memory map, max", SHZ_MAX_HOLES);
+            if (hole_count == SHZ_MEMHOLES_MAX) fail("too many holes in the memory map, max", SHZ_MEMHOLES_MAX);
 #ifdef STUB_K32
             fail("Kernel32 needs contiguous RAM from 1 MiB; hole at", (uint32_t)a);
 #endif
@@ -101,11 +102,12 @@ static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
             if (a < INITRD_GPA + isize && z > INITRD_GPA) fail("hole where the initrd goes, at", (uint32_t)a);
             hole_gpa[hole_count] = a;
             hole_size[hole_count++] = z - a;
+            say("SHZ-STUB: firmware hole "); hex((uint32_t)a); say(" size "); hex((uint32_t)(z - a)); say(" kept out of the page allocator\n");
         }
         if (i < n && end[i] > cursor) cursor = end[i];
     }
-    for (j = 0; j < 2; ++j) {                      /* page tables 0x1000-0x5000 and bootinfo at 0x7000 */
-        uint64_t need = j ? SHZ_BOOTINFO_GPA : 0x1000;
+    for (j = 0; j < 3; ++j) {                      /* page tables 0x1000-0x5000, holes 0x6000, bootinfo 0x7000 */
+        uint64_t need = j == 2 ? SHZ_BOOTINFO_GPA : j ? SHZ_MEMHOLES_GPA : 0x1000;
         for (i = 0; i < n && !(base[i] <= need && end[i] >= need + 0x1000); ++i)
             ;
         if (i == n) fail("low boot page is not RAM:", (uint32_t)need);
@@ -148,6 +150,17 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     pdpt_hi[2 * 510] = 0x3000 | 3;                 /* 0xFFFFFFFF80000000 -> PD (physical 0) */
     for (i = 0; i < 512 && ((uint64_t)i << 21) < ram; ++i)
         pd[2 * i] = (i << 21) | 0x83;              /* present, writable, 2 MiB */
+    {                                              /* after every read of the Multiboot data, which may sit in low memory */
+        volatile shz_memholes_t *holes = (volatile shz_memholes_t *)SHZ_MEMHOLES_GPA;
+        zero(SHZ_MEMHOLES_GPA, sizeof(shz_memholes_t));
+        holes->magic = SHZ_MEMHOLES_MAGIC;
+        holes->count = hole_count;
+        for (i = 0; i < hole_count; ++i) {
+            holes->hole[i].gpa = hole_gpa[i];
+            holes->hole[i].size = hole_size[i];
+        }
+        holes->check = shz_memholes_sum(holes);
+    }
 #else
     (void)pml4; (void)pdpt_lo; (void)pd; (void)pdpt_hi;
 #endif
@@ -167,18 +180,8 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
         bi->initrd_size = isize;
     }
     bi->tsc_hz = 1000000000u;                      /* nominal; QEMU TCG's TSC runs at 1 GHz. Only logged by Kernel64. */
-    bi->hole_count = hole_count;
-    for (i = 0; i < hole_count; ++i) {
-        bi->hole[i].gpa = hole_gpa[i];
-        bi->hole[i].size = hole_size[i];
-    }
     say("SHZ-STUB: kernel ");  hex(ksize);
     say(" initrd ");           hex(isize);
     say(" ram ");              hex(ram);
     say("\n");
-    for (i = 0; i < hole_count; ++i) {
-        say("SHZ-STUB: firmware hole "); hex((uint32_t)hole_gpa[i]);
-        say(" size ");                   hex((uint32_t)hole_size[i]);
-        say(" kept out of the page allocator\n");
-    }
 }

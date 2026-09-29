@@ -76,7 +76,6 @@ enum shz_domain_state {
 #define SHZ_IPC_GPA_BASE 0xe0000000u            /* channel c at base + c * SHZ_IPC_REGION_SIZE */
 #define SHZ_IPC_REGION_SIZE 0x100000u
 #define SHZ_MAX_CHANNELS 4
-#define SHZ_MAX_HOLES 16
 
 typedef struct {
     uint32_t magic;
@@ -95,17 +94,6 @@ typedef struct {
         uint64_t gpa, size;
         uint32_t peer_domain, channel_id;
     } channel[SHZ_MAX_CHANNELS];
-    /* Firmware ranges inside [0, ram_size) that are NOT RAM (reserved, ACPI, NVS), page aligned
-     * outward. Only the standalone Multiboot stub fills them, from the firmware memory map (for
-     * example CSMWrap's E820 on UEFI keeps OVMF's ACPI NVS at 8-9 MiB); a Supervisor domain has
-     * flat RAM and leaves hole_count 0. Kernel64 keeps these pages out of its page allocator; the
-     * stub refuses a hole below the fixed boot/kernel/heap area. Appended in the same ABI major:
-     * `size` tells a reader whether these fields exist. */
-    uint32_t hole_count;
-    uint32_t reserved1;
-    struct {
-        uint64_t gpa, size;
-    } hole[SHZ_MAX_HOLES];
 } shz_bootinfo_t;
 
 /* ---------------------------------------------------------------- IPC wire format */
@@ -173,7 +161,6 @@ _Static_assert(__builtin_offsetof(shz_msg_hdr_t, request_id) == 0x18, "request_i
 _Static_assert(__builtin_offsetof(shz_msg_hdr_t, buffer_offset) == 0x30, "buffer_offset offset");
 _Static_assert(sizeof(shz_ring_hdr_t) == 192, "ring header layout");
 _Static_assert(sizeof(shz_channel_hdr_t) == 128, "channel header layout");
-_Static_assert(__builtin_offsetof(shz_bootinfo_t, hole_count) == 176, "boot info layout (fields before the holes unchanged)");
-_Static_assert(sizeof(shz_bootinfo_t) == 176 + 8 + 16 * SHZ_MAX_HOLES, "boot info layout");
+_Static_assert(sizeof(shz_bootinfo_t) == 176, "boot info layout");
 _Static_assert(SHZ_MSG_MAX_INLINE == 192, "inline capacity");
 #endif
