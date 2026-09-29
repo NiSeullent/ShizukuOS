@@ -388,7 +388,7 @@ def main():
     dc, _ = device_checks(serial)
     checks += dc
     checks += driver_checks(serial)
-    checks += fatdisk.disk_checks(serial, ev, manifest)          # T_DISK.EXE against the files packed into nvme0n3
+    checks += fatdisk.disk_checks(serial, ev, manifest, img["nvme0n3"])   # T_DISK.EXE against the files packed into nvme0n3
     m = re.search(r"K64 disk: D: = (\S+), FAT32", serial)
     checks.append(base.check("D: is the FAT32 volume on NVMe namespace 3 (FAT32 reader over NVMe through blk.h)",
                              bool(m) and m.group(1) == "nvme0n3", m.group(0) if m else "no mount line"))
