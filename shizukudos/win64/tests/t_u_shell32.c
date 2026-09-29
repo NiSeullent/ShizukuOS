@@ -14,6 +14,12 @@
 HRESULT WINAPI SHGetMalloc(IMalloc **);
 HRESULT WINAPI SetCurrentProcessExplicitAppUserModelID(PCWSTR);
 HRESULT WINAPI GetCurrentProcessExplicitAppUserModelID(PWSTR *);
+HRESULT WINAPI SHGetFolderPathW(HWND, int, HANDLE, DWORD, LPWSTR);
+BOOL WINAPI SHGetSpecialFolderPathW(HWND, LPWSTR, int, BOOL);
+HRESULT WINAPI SHGetKnownFolderPath(const GUID *, DWORD, HANDLE, PWSTR *);
+static const GUID FID_Windows = { 0xf38bf404, 0x1d43, 0x42f2, { 0x93, 0x05, 0x67, 0xde, 0x0b, 0x28, 0xfc, 0x23 } };
+static const GUID FID_System = { 0x1ac14e77, 0x02e7, 0x4e5d, { 0xb7, 0x44, 0x2e, 0xb1, 0xae, 0x51, 0x98, 0xb7 } };
+static const GUID FID_RoamingAppData = { 0x3eb685db, 0x65f9, 0x4cf6, { 0xa0, 0x3a, 0xe3, 0xef, 0x65, 0x72, 0x9f, 0x3d } };
 
 static int argv_is(LPWSTR *argv, int argc, int n, const WCHAR *const *expect)
 {
@@ -111,6 +117,39 @@ int main(void)
                 u_wide_eq((const unsigned short *)id, (const unsigned short *)long128));
         CoTaskMemFree(id);
         U_CHECK("Get(NULL) is E_INVALIDARG", GetCurrentProcessExplicitAppUserModelID(0) == E_INVALIDARG);
+    }
+    /* ---- special folders: only the ones that exist ---- */
+    {
+        WCHAR a[MAX_PATH], b[MAX_PATH];
+        PWSTR k = 0;
+        HRESULT hr;
+        GetWindowsDirectoryW(a, MAX_PATH);
+        memset(b, 0xcc, sizeof b);
+        hr = SHGetFolderPathW(0, 0x24 /* CSIDL_WINDOWS */, 0, 0, b);
+        U_CHECKF("SHGetFolderPathW(CSIDL_WINDOWS) is the kernel32 Windows directory", hr == S_OK && u_wide_eq((const unsigned short *)a, (const unsigned short *)b), "hr=%x", (unsigned)hr);
+        U_CHECK("...and that directory really exists", GetFileAttributesW(b) != INVALID_FILE_ATTRIBUTES && (GetFileAttributesW(b) & FILE_ATTRIBUTE_DIRECTORY));
+        GetSystemDirectoryW(a, MAX_PATH);
+        hr = SHGetFolderPathW(0, 0x25 /* CSIDL_SYSTEM */ | 0x8000 /* CSIDL_FLAG_CREATE */, 0, 0, b);
+        U_CHECK("SHGetFolderPathW(CSIDL_SYSTEM | CSIDL_FLAG_CREATE) is the System directory", hr == S_OK && u_wide_eq((const unsigned short *)a, (const unsigned short *)b));
+        memset(b, 0xcc, sizeof b);
+        hr = SHGetFolderPathW(0, 0x1a /* CSIDL_APPDATA */, 0, 0, b);
+        U_CHECK("CSIDL_APPDATA does not exist here: HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) and an empty path", hr == (HRESULT)0x80070002 && b[0] == 0);
+        U_CHECK("SHGetFolderPathW(NULL buffer) is E_INVALIDARG", SHGetFolderPathW(0, 0x24, 0, 0, 0) == E_INVALIDARG);
+        U_CHECK("SHGetSpecialFolderPathW(CSIDL_WINDOWS) is TRUE", SHGetSpecialFolderPathW(0, b, 0x24, FALSE) && GetWindowsDirectoryW(a, MAX_PATH) && u_wide_eq((const unsigned short *)a, (const unsigned short *)b));
+        U_CHECK("SHGetSpecialFolderPathW(CSIDL_PROFILE) is FALSE", !SHGetSpecialFolderPathW(0, b, 0x28, FALSE));
+        hr = SHGetKnownFolderPath(&FID_Windows, 0, 0, &k);
+        GetWindowsDirectoryW(a, MAX_PATH);
+        U_CHECK("SHGetKnownFolderPath(FOLDERID_Windows) is the Windows directory (CoTaskMem string)", hr == S_OK && k && u_wide_eq((const unsigned short *)a, (const unsigned short *)k));
+        CoTaskMemFree(k);
+        k = 0;
+        hr = SHGetKnownFolderPath(&FID_System, 0, 0, &k);
+        GetSystemDirectoryW(a, MAX_PATH);
+        U_CHECK("SHGetKnownFolderPath(FOLDERID_System) is the System directory", hr == S_OK && k && u_wide_eq((const unsigned short *)a, (const unsigned short *)k));
+        CoTaskMemFree(k);
+        k = (PWSTR)1;
+        hr = SHGetKnownFolderPath(&FID_RoamingAppData, 0, 0, &k);
+        U_CHECK("FOLDERID_RoamingAppData does not exist here: failure HRESULT and a NULL output", FAILED(hr) && k == 0);
+        U_CHECK("SHGetKnownFolderPath(NULL id) / (NULL output) is E_INVALIDARG", SHGetKnownFolderPath(0, 0, 0, &k) == E_INVALIDARG && SHGetKnownFolderPath(&FID_Windows, 0, 0, 0) == E_INVALIDARG);
     }
     return u_finish("t_u_shell32");
 }

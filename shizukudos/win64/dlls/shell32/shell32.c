@@ -4,9 +4,11 @@
  *   SHGetMalloc          the shell's allocator is the COM task allocator (ole32 CoGetMalloc(MEMCTX_TASK))
  *   Set/GetCurrentProcessExplicitAppUserModelID   a per-process string that is stored and read back (there is no taskbar
  *                        that would use it)
- * There are no known-folder functions (SHGetFolderPath*, SHGetKnownFolderPath): this system has no per-user profile
- * directories, and inventing paths would only make programs fail later. No ShellExecute*, file-info, icon, notification
- * area or drag-and-drop functions exist either.
+ *   SHGetFolderPathW, SHGetSpecialFolderPathW, SHGetKnownFolderPath   only the two folders that really exist here: Windows
+ *                        (kernel32 GetWindowsDirectoryW) and System (GetSystemDirectoryW). This system has no per-user
+ *                        profile directories, so every other folder (AppData, Documents, Program Files, ...) is reported as
+ *                        not found (HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) instead of inventing a path. No ShellExecute*,
+ *                        file-info, icon, notification-area or drag-and-drop functions exist either.
  *
  * CommandLineToArgvW rules (MSDN, "Parsing C++ command-line arguments" as applied by shell32): the first argument is the
  * program name, ended by the next quote if it starts with a quote (no escape processing), else by the next blank. Later
@@ -104,6 +106,64 @@ DLLAPI LPWSTR *WINAPI CommandLineToArgvW(LPCWSTR cmd, int *numargs)
     argv[argc] = 0;
     *numargs = argc;
     return argv;
+}
+
+/* ---- special folders: only Windows and System exist ---- */
+#define CSIDL_WINDOWS_ 0x24
+#define CSIDL_SYSTEM_ 0x25
+#define CSIDL_FLAG_DONT_VERIFY_ 0x4000
+#define HR_NOT_FOUND ((HRESULT)0x80070002)                      /* HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) */
+
+static const GUID FOLDERID_Windows_ = { 0xf38bf404, 0x1d43, 0x42f2, { 0x93, 0x05, 0x67, 0xde, 0x0b, 0x28, 0xfc, 0x23 } };
+static const GUID FOLDERID_System_ = { 0x1ac14e77, 0x02e7, 0x4e5d, { 0xb7, 0x44, 0x2e, 0xb1, 0xae, 0x51, 0x98, 0xb7 } };
+
+/* which: 1 = Windows, 2 = System, 0 = anything else */
+static HRESULT folder_path(int which, DWORD flags, WCHAR out[MAX_PATH])
+{
+    UINT n;
+    out[0] = 0;
+    if (which == 1) n = GetWindowsDirectoryW(out, MAX_PATH);
+    else if (which == 2) n = GetSystemDirectoryW(out, MAX_PATH);
+    else return HR_NOT_FOUND;
+    if (!n || n >= MAX_PATH) { out[0] = 0; return HR_NOT_FOUND; }
+    if (!(flags & CSIDL_FLAG_DONT_VERIFY_)) {
+        DWORD a = GetFileAttributesW(out);
+        if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY)) { out[0] = 0; return HR_NOT_FOUND; }
+    }
+    return S_OK;
+}
+
+DLLAPI HRESULT WINAPI SHGetFolderPathW(HWND hwnd, int csidl, HANDLE token, DWORD flags, LPWSTR path)
+{
+    int id = csidl & 0xff;
+    (void)hwnd; (void)token; (void)flags;
+    if (!path) return E_INVALIDARG;
+    return folder_path(id == CSIDL_WINDOWS_ ? 1 : id == CSIDL_SYSTEM_ ? 2 : 0, (DWORD)csidl & CSIDL_FLAG_DONT_VERIFY_, path);
+}
+
+DLLAPI BOOL WINAPI SHGetSpecialFolderPathW(HWND hwnd, LPWSTR path, int csidl, BOOL create)
+{
+    (void)create;                                              /* the two supported folders always exist or are reported missing */
+    return SUCCEEDED(SHGetFolderPathW(hwnd, csidl, 0, 0, path));
+}
+
+DLLAPI HRESULT WINAPI SHGetKnownFolderPath(const GUID *id, DWORD flags, HANDLE token, PWSTR *out)
+{
+    WCHAR tmp[MAX_PATH], *p;
+    HRESULT hr;
+    size_t n = 0;
+    (void)token;
+    if (!out) return E_INVALIDARG;
+    *out = 0;
+    if (!id) return E_INVALIDARG;
+    hr = folder_path(!memcmp(id, &FOLDERID_Windows_, sizeof(GUID)) ? 1 : !memcmp(id, &FOLDERID_System_, sizeof(GUID)) ? 2 : 0, flags, tmp);
+    if (FAILED(hr)) return hr;
+    while (tmp[n]) ++n;
+    p = CoTaskMemAlloc((n + 1) * sizeof(WCHAR));
+    if (!p) return E_OUTOFMEMORY;
+    memcpy(p, tmp, (n + 1) * sizeof(WCHAR));
+    *out = p;                                                  /* released with CoTaskMemFree */
+    return S_OK;
 }
 
 DLLAPI HRESULT WINAPI SHGetMalloc(LPVOID *out) { return CoGetMalloc(1 /* MEMCTX_TASK */, out); }
