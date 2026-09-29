@@ -109,6 +109,7 @@ static int vol_populate(fsvol_t *v, fsnode_t *dir)
 static int try_mount(blk_dev_t *dev)
 {
     int rc;
+    if (dev->sector_size != FAT32_SECTOR) return -1;    /* fat32.c reads 512-byte sectors (4 KiB NVMe formats: no) */
     memset(&dvol.fat, 0, sizeof dvol.fat);
     dvol.fat.read = cb_read; dvol.fat.alloc = cb_alloc; dvol.fat.free = cb_free; dvol.fat.alloc_page = cb_page;
     dvol.fat.ctx = dev; dvol.fat.disk_sectors = dev->sectors;
@@ -128,6 +129,7 @@ static int try_mount(blk_dev_t *dev)
     dvol.root.vol = &dvol.vol;
     dvol.root.first_cluster = dvol.fat.root_cluster;
     if (fs_mount('D', &dvol.root)) return -1;
+    dev->flags |= BLK_F_MOUNTED;                        /* raw user-mode writes to it are refused (sysblk.c) */
     kprintf("K64 disk: D: = %s, FAT32 \"%s\" id %x, %u clusters of %u bytes, %u FAT page(s), %u sector reads\n", dev->name,
             dvol.fat.label, dvol.fat.volume_id, dvol.fat.cluster_count, dvol.fat.bytes_per_cluster, dvol.fat.fat_npages,
             dvol.fat.sector_reads);
@@ -139,14 +141,16 @@ void disk_init(void)
     blk_dev_t *d, *whole = 0;
     uint8_t *sector;
     int mounted = -1;
-    if (ahci_blk_init()) return;                /* NVMe / SDHCI drivers register here too once they exist */
+    const int ahci = ahci_blk_init();
+    const int nvme = nvme_blk_init(), sd = sdhci_blk_init();   /* storage track: nvme.c, sdhci.c */
+    if (ahci && nvme <= 0 && sd <= 0) return;
     for (d = blk_first(); d; d = d->next)
         if (!(d->flags & BLK_F_PARTITION)) { whole = d; break; }
     if (!whole) return;
-    sector = kmalloc(512);
+    sector = kmalloc(whole->sector_size);
     KASSERT(sector);
     if (blk_read(whole, 0, 1, sector) == 0) {
-        const uint32_t crc = k64_crc32(sector, 512);
+        const uint32_t crc = k64_crc32(sector, whole->sector_size);
         kprintf("K64 disk: %s sector 0 crc32 %x, bytes 510..511 %x %x\n", whole->name, crc, sector[510], sector[511]);
         shz_evidence(13, (whole->sectors << 32) | crc);
     }
