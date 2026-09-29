@@ -313,6 +313,7 @@ int sfs_iget_new(sfs_fs *fs, uint32_t ino, uint16_t mode, sfs_inode **out)
     uint32_t off;
     int rc;
     sfs_iforget(fs, ino);
+    if (ilookup(fs, ino)) return SFS_ECORRUPT;          /* a free inode must not be in use in memory */
     rc = sfs_inode_loc(fs, ino, &blk, &off);
     if (rc) return rc;
     rc = sfs_bread(fs, blk, &b);

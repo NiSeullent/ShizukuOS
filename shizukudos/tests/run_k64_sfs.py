@@ -277,7 +277,9 @@ def host_checks(image, files, out):
             still.append(rel)
     c.append(base.check("host: deleted / renamed-away names are gone on disk", not still, ", ".join(still)))
     r = subprocess.run(["debugfs", "-R", "ls -p /OUT/many", str(part)], capture_output=True, text=True).stdout
-    names = [l.split("/")[5] for l in r.splitlines() if l.startswith("/") and l.count("/") >= 6 and l.split("/")[5] not in (".", "..")]
+    # ls -p also prints entries whose inode is 0 (a deleted first entry of a block keeps its name, as on Linux)
+    names = [l.split("/")[5] for l in r.splitlines() if l.startswith("/") and l.count("/") >= 6 and l.split("/")[1] != "0"
+             and l.split("/")[5] not in (".", "..")]
     want = {"file_with_a_long_name_%03u.txt" % i for i in range(300) if i % 3}
     c.append(base.check("host: OUT/many holds exactly the 200 surviving files", set(names) == want, f"{len(names)} entries"))
     r = subprocess.run(["debugfs", "-R", "htree /OUT/many", str(part)], capture_output=True, text=True).stdout

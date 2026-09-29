@@ -551,6 +551,18 @@ static int run_cmd(int argc, char **argv)
         return 0;
     }
     if (!strcmp(c, "sync")) { rc = sfs_sync(g_fs); return rc ? fail("sync", rc) : 0; }
+    if (!strcmp(c, "ondisk")) {
+        /* on-disk state; "ondisk clean" also requires the cleanly-unmounted state. Invariant: a non-empty
+         * journal is only allowed while needs_recovery is set. */
+        int nr, valid;
+        uint32_t js;
+        rc = sfs_ondisk_state(g_fs, &nr, &valid, &js);
+        if (rc) return fail("ondisk", rc);
+        printf("ondisk needs_recovery %d valid_fs %d journal_start %u\n", nr, valid, js);
+        if (js && !nr) { fprintf(stderr, "INVARIANT VIOLATED: journal has data but needs_recovery is clear\n"); return 1; }
+        if (argc > 1 && !strcmp(argv[1], "clean") && (nr || js || !valid)) { fprintf(stderr, "volume not clean\n"); return 1; }
+        return 0;
+    }
     if (!strcmp(c, "batch")) return cmd_batch();
     if (!strcmp(c, "tree")) {
         rc = resolve(argc > 1 ? argv[1] : "/", &ino);
@@ -711,8 +723,9 @@ int main(int argc, char **argv)
     uint64_t cut = 0;
     uint32_t cut_seed = 1;
     int volatile_cache = 0, do_fsync = 0;
-    while ((opt = getopt(argc, argv, "rc:NFqVK:S:T")) != -1) {
+    while ((opt = getopt(argc, argv, "rc:NFqVK:S:TC")) != -1) {
         switch (opt) {
+        case 'C': flags |= SFS_MOUNT_CLEAN_ON_SYNC; break;
         case 'T': g_times = 1; break;
         case 'r': ro = 1; break;
         case 'c': cache = (uint32_t)strtoul(optarg, 0, 0); break;

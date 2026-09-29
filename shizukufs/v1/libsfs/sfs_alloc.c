@@ -443,10 +443,10 @@ int sfs_apply_pending_frees(sfs_fs *fs)
             }
         }
     }
+    if (fs->txn.frees) fs->txn.sb_dirty = 1;
     sfs_runpage_free(fs, &fs->txn.frees);
     fs->txn.nfrees = 0;
     fs->txn.free_blocks_pending = 0;
-    fs->txn.sb_dirty = 1;
     return rc;
 }
 

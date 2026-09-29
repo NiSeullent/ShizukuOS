@@ -632,3 +632,22 @@ int sfs_journal_commit(sfs_fs *fs)
     fs->st.commits++;
     return rc;
 }
+
+int sfs_ondisk_state(sfs_fs *fs, int *needs_recovery, int *valid_fs, uint32_t *journal_start)
+{
+    uint8_t *b = sfs_alloc(fs, fs->bs);
+    int rc;
+    if (!b) return SFS_ENOMEM;
+    rc = fs->ops.read(fs->ops.ctx, SB_OFFSET, b, 1024) ? SFS_EIO : 0;
+    if (!rc) {
+        *needs_recovery = !!(rd32(b, SB_feature_incompat) & INCOMPAT_RECOVER);
+        *valid_fs = !!(rd16(b, SB_state) & SB_STATE_VALID);
+        *journal_start = 0;
+        if (fs->jnl.map && fs->jnl.map->count) {
+            rc = jread(fs, 0, b);
+            if (!rc) *journal_start = rdbe32(b, JS_start);
+        }
+    }
+    sfs_free(fs, b, fs->bs);
+    return rc;
+}

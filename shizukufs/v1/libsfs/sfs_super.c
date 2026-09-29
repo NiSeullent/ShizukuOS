@@ -439,6 +439,11 @@ int sfs_commit(sfs_fs *fs)
     if (!rc) rc = sfs_iflush_all(fs);
     if (!rc && (fs->txn.nbufs || fs->txn.sb_dirty)) rc = sfs_sb_write(fs);
     if (rc) return sfs_fail(fs, rc);
+    if (fs->txn.nbufs && !fs->mounted_dirty) {
+        /* never commit metadata while the disk says "cleanly unmounted" (needs_recovery clear) */
+        rc = set_mounted_state(fs, 1);
+        if (rc) return sfs_fail(fs, rc);
+    }
     if (fs->jnl.present) {
         rc = sfs_journal_commit(fs);
     } else {

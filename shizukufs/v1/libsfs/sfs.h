@@ -46,7 +46,8 @@ enum {
 /* Mount flags. */
 #define SFS_MOUNT_RDONLY 1u            /* never write; the journal is not replayed either (like mount -o ro,noload) */
 #define SFS_MOUNT_NOREPLAY 2u          /* refuse to mount read-write if the journal needs replay (diagnostics) */
-#define SFS_MOUNT_CLEAN_ON_SYNC 4u     /* after every sfs_sync() leave the volume in the "cleanly unmounted" state */
+#define SFS_MOUNT_CLEAN_ON_SYNC 4u     /* after every sfs_sync() leave the volume in the "cleanly unmounted" state
+                                          (and do not mark it in use at mount: the first update does) */
 #define SFS_MOUNT_NAIVE 8u             /* benchmark baseline: no preallocation, no extent cache, tiny block cache */
 
 /* Callback table filled by the host/kernel glue. Byte offsets are always multiples of the volume block size. */
@@ -167,6 +168,10 @@ int sfs_set_times(sfs_fs *fs, uint32_t ino, const int64_t *atime, const int64_t 
 int sfs_set_mode(sfs_fs *fs, uint32_t ino, uint16_t mode);
 /* Resolves a '/'-separated absolute path (host tools; symlinks are not followed). */
 int sfs_path_lookup(sfs_fs *fs, const char *path, uint32_t *ino, uint32_t *parent, const char **leaf, size_t *leaf_len);
+
+/* Diagnostics: what the media says right now (read from the device, not the cache): the superblock's
+ * needs_recovery flag / VALID_FS state and the journal superblock's s_start (0 = empty log). */
+int sfs_ondisk_state(sfs_fs *fs, int *needs_recovery, int *valid_fs, uint32_t *journal_start);
 
 /* Fault injection for the crash test (host only): the writer stops after `n` block writes. */
 void sfs_set_write_limit(sfs_fs *fs, uint64_t n, void (*hit)(void *ctx));
