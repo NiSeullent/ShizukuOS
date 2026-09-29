@@ -32,6 +32,9 @@ def main():
                'ntwin32/exception/veh.c', 'ntwin32/exception/veh.h',
                'ntwin32/exception/k32veh.c', 'ntwin32/exception/k32veh.h',
                'ntwin32/routes.json', 'ntwin32/prepare.py', 'platform/tests/probe.c',
+               'ntwin32/win64/ntw64.c', 'ntwin32/win64/ntw64.h', 'ntwin32/win64/ntw64run.c',
+               'ntwin32/win64/ntw32imp.def', 'ntwrapper/vxd/bridge.h',
+               'shizukudos/abi/shz_abi.h', 'shizukudos/abi/shz_ipc.h',
                'platform/build.py']
     def source_hashes():
         return {name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in sources}
@@ -54,8 +57,13 @@ def main():
         '-I', BUILD, 'ntwin32/runtime.c', 'ntwin32/sync.c', 'ntwin32/resolve.c',
         'ntwin32/routing.c', 'ntwin32/initonce.c', 'ntwin32/unicode/utf.c',
         'ntwin32/exception/veh.c', 'ntwin32/exception/k32veh.c',
+        'ntwin32/win64/ntw64.c',
         'ntwin32/exports.def',
         BUILD/'version.o', '-lkernel32')
+    # WIN64 subsystem console front end: imports the NTW32-specific API by name (not a prepared application).
+    run('i686-w64-mingw32-dlltool', '-k', '-d', 'ntwin32/win64/ntw32imp.def', '-l', BUILD/'libntw32.a')
+    run(cc, *flags, *link, '-Wl,--entry,_mainCRTStartup', '-o', BUILD / 'NTW64RUN.EXE',
+        'ntwin32/win64/ntw64run.c', BUILD/'libntw32.a', '-lkernel32')
     run(cc, *flags, *link, '-Wl,--entry,_mainCRTStartup', '-o', BUILD / 'probe-original.exe',
         'platform/tests/probe.c', '-lkernel32')
     prepared, report = prepare.prepare((BUILD / 'probe-original.exe').read_bytes())
@@ -65,7 +73,7 @@ def main():
                 'guest_verified': False, 'sources_sha256': before,
                 'compiler': subprocess.check_output([cc, '--version'], text=True).splitlines()[0],
                 'artifacts': {}}
-    for name in ('ntwrapper9x.o', 'ntwrapper9x.a', 'NTW32.DLL', 'NTWPROBE.EXE'):
+    for name in ('ntwrapper9x.o', 'ntwrapper9x.a', 'NTW32.DLL', 'NTWPROBE.EXE', 'NTW64RUN.EXE'):
         artifact = BUILD / name
         manifest['artifacts'][name] = {'sha256': hashlib.sha256(artifact.read_bytes()).hexdigest(),
                                        'bytes': artifact.stat().st_size}

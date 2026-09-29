@@ -258,6 +258,7 @@ int proc_wait(int pid, int64_t *exit_code, int *faulted)
     write_cr3(kernel_pml4());
     vm_free_space(p->pml4);
     vad_destroy(p);
+    ldr_release_modules(p);                             /* loader records (and lazily mapped image statistics) */
     kfree(p->handles);
     ob_deref(p->object);
     p->used = 0;

@@ -3,6 +3,7 @@
  * creation. Structures use the Windows x64 layouts the ntdll layer expects.
  */
 #include "fs.h"
+#include "pci.h"
 
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 extern int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -353,17 +354,41 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
             struct { uint32_t reserved, timer_res, page_size, phys_pages, low_page, high_page, alloc_gran; uint64_t min_addr, max_addr, affinity; uint8_t nproc; } b;
             if (a3 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
             memset(&b, 0, sizeof b);
-            b.timer_res = 10000; b.page_size = 4096; b.phys_pages = (uint32_t)pmm_total_count(); b.alloc_gran = 65536;
-            b.low_page = 1; b.high_page = (uint32_t)pmm_total_count();
+            b.timer_res = 10000; b.page_size = 4096; b.phys_pages = (uint32_t)(mem_ram_top() / 4096); b.alloc_gran = 65536;
+            b.low_page = 1; b.high_page = (uint32_t)(mem_ram_top() / 4096);
             b.min_addr = 0x10000; b.max_addr = 0x7ffffffeffffull; b.affinity = 1; b.nproc = 1;
             return copy_to_user(p, a2, &b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
         if (a1 == 0x100) {                                  /* private: {total pages, free pages} for GlobalMemoryStatusEx */
             uint64_t m[2];
             if (a3 < sizeof m) return STATUS_BUFFER_TOO_SMALL;
-            m[0] = pmm_total_count();
+            m[0] = mem_ram_top() / 4096;                    /* RAM the machine has, not only the allocator pool */
             m[1] = pmm_free_count();
             return copy_to_user(p, a2, m, sizeof m) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+        }
+        if (a1 == 0x101) {                                  /* private: PCI functions and the kernel driver bound to each */
+            uint32_t n = 0;
+#ifdef SHZ_STANDALONE                                       /* under the Supervisor the config ports trap: nothing to list */
+            struct { uint8_t bus, dev, fn, class_code, subclass, prog_if, irq, pad; uint16_t vendor, device; uint32_t pad2;
+                     char driver[24]; } e;
+            pci_dev_t all[32];
+            const unsigned cnt = pci_enumerate(all, 32);
+            unsigned i;
+            for (i = 0; i < cnt; ++i) {
+                const char *drv = pci_claimed_by(&all[i]);
+                unsigned k = 0;
+                if ((uint64_t)(n + 1) * sizeof e > a3) return STATUS_BUFFER_TOO_SMALL;
+                memset(&e, 0, sizeof e);
+                e.bus = all[i].bus; e.dev = all[i].dev; e.fn = all[i].fn;
+                e.class_code = all[i].class_code; e.subclass = all[i].subclass; e.prog_if = all[i].prog_if;
+                e.irq = all[i].irq_line; e.vendor = all[i].vendor; e.device = all[i].device;
+                while (drv && drv[k] && k < sizeof e.driver - 1) { e.driver[k] = drv[k]; ++k; }
+                if (copy_to_user(p, a2 + (uint64_t)n * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
+                ++n;
+            }
+#endif
+            if (a4 && copy_to_user(p, a4, &n, 4)) return STATUS_ACCESS_VIOLATION;   /* ReturnLength = entry count */
+            return STATUS_SUCCESS;
         }
         return STATUS_INVALID_INFO_CLASS;
     }

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * File-related system calls over the in-memory file system (NT structures and semantics).
+ * File-related system calls over the Kernel64 file systems (fs.c: RAM C:\, initrd, disk volumes; NT structures and
+ * semantics).
  */
 #include "fs.h"
 
@@ -72,16 +73,21 @@ void file_object_closed(kobject_t *o)
         if (f->node->delete_pending && f->node->open_count == 0)
             fs_remove(f->node);
     }
+    if (f->dir_pattern) kfree(f->dir_pattern);
     kfree(f);
     o->u.file.file = 0;
 }
 
-static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
+/* NtCreateFile(h, access, oa, iosb, alloc_size, attrs, share, disposition, options, ea, ea_len) and
+ * NtOpenFile(h, access, oa, iosb, share, options): the open form has no disposition (FILE_OPEN) and its options are
+ * the 6th argument (reading NtCreateFile's 9th slot there picked up whatever the caller's stack held). */
+static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, int open_only)
 {
     struct objattr oa;
     char path[300];
-    const uint32_t disposition = (uint32_t)stack_arg(p, r, 8), options = (uint32_t)stack_arg(p, r, 9);
-    const uint32_t fattrs = (uint32_t)stack_arg(p, r, 6);
+    const uint32_t disposition = open_only ? FILE_OPEN : (uint32_t)stack_arg(p, r, 8);
+    const uint32_t options = (uint32_t)stack_arg(p, r, open_only ? 6 : 9);
+    const uint32_t fattrs = open_only ? 0 : (uint32_t)stack_arg(p, r, 6);
     int32_t st;
     fsnode_t *n;
     int created = 0;
@@ -129,6 +135,7 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     }
     if ((a2 & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE_ACCESS)) && n->readonly && !created)
         return STATUS_ACCESS_DENIED;
+    if ((options & FILE_DELETE_ON_CLOSE) && n->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;   /* no delete on disk */
     if (n->is_dir && (a2 & (GENERIC_WRITE | FILE_WRITE_DATA))) return STATUS_FILE_IS_A_DIRECTORY;
     f = kzalloc(sizeof *f);
     o = ob_create(OB_FILE, 0);
@@ -161,10 +168,15 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
         if (write) {
             char line[128];
             uint64_t left = len, at = buf;
+            const int bridged = p->console_sink != 0;           /* WIN64 subsystem bridge (subsys64.c) */
             while (left) {
                 chunk = left > sizeof line - 1 ? sizeof line - 1 : left;
                 if (copy_from_user(p, line, at, chunk)) return STATUS_ACCESS_VIOLATION;
                 line[chunk] = 0;
+                if (bridged && subsys64_console_write(p, handle == 12 ? 2 : 1, line, chunk)) {
+                    left -= chunk; at += chunk;
+                    continue;
+                }
                 {
                     /* console output goes to the Supervisor console, tagged with the process */
                     static char pending[256];
@@ -186,7 +198,16 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
             set_iosb(p, iosb, STATUS_SUCCESS, len);
             return STATUS_SUCCESS;
         }
-        set_iosb(p, iosb, STATUS_END_OF_FILE, 0);          /* no console input source yet */
+        if (p->console_sink && len) {                       /* bridged stdin: blocks until data, EOF or termination */
+            uint8_t tmp[256];
+            uint64_t got = 0;
+            if (subsys64_console_read(p, tmp, len > sizeof tmp ? sizeof tmp : len, &got)) {
+                if (got && copy_to_user(p, buf, tmp, got)) return STATUS_ACCESS_VIOLATION;
+                set_iosb(p, iosb, got ? STATUS_SUCCESS : STATUS_END_OF_FILE, got);
+                return got ? STATUS_SUCCESS : STATUS_END_OF_FILE;
+            }
+        }
+        set_iosb(p, iosb, STATUS_END_OF_FILE, 0);          /* no console input source without the bridge */
         return STATUS_END_OF_FILE;
     }
     if (!f->node || f->node->is_dir) return STATUS_INVALID_PARAMETER;
@@ -245,8 +266,7 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         struct basicinfo b;
         if (len < sizeof b) return STATUS_BUFFER_TOO_SMALL;
         memset(&b, 0, sizeof b);
-        if (f->node) { b.create = 132000000000000000ull + f->node->ctime * 10000; b.write = 132000000000000000ull + f->node->mtime * 10000;
-                       b.access = b.write; b.change = b.write; b.attrs = f->node->attrs; }
+        if (f->node) { fs_node_times(f->node, &b.create, &b.write); b.access = b.write; b.change = b.write; b.attrs = f->node->attrs; }
         else b.attrs = FILE_ATTRIBUTE_NORMAL;
         if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
         set_iosb(p, iosb, STATUS_SUCCESS, sizeof b);
@@ -309,6 +329,7 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         fsnode_t *dst, *dir;
         char leaf[96];
         uint32_t chars;
+        if (f->node && f->node->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;            /* no rename on disk volumes */
         if (!f->node || f->node->readonly || len < 20 || copy_from_user(p, hdr, buf, 20)) return STATUS_ACCESS_DENIED;
         chars = *(uint32_t *)(hdr + 16) / 2;
         if (chars >= 260 || len < 20 + chars * 2ull || copy_from_user(p, w, buf + 20, chars * 2ull)) return STATUS_INVALID_PARAMETER;
@@ -338,6 +359,7 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         uint8_t del;
         if (!f->node || copy_from_user(p, &del, buf, 1)) return STATUS_ACCESS_VIOLATION;
         if (f->node->readonly) return STATUS_ACCESS_DENIED;
+        if (del && f->node->backing == FSB_DISK) return STATUS_NOT_SUPPORTED;                /* no delete on disk volumes */
         if (del && f->node->is_dir && f->node->child) return STATUS_DIRECTORY_NOT_EMPTY;
         f->node->delete_pending = del != 0;
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
@@ -347,26 +369,67 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
     }
 }
 
-/* NtQueryDirectoryFile information classes, laid out as the Windows ABI defines them (x64 offsets of FileName):
- *   1 FileDirectoryInformation 64, 2 FileFullDirectoryInformation 68, 3 FileBothDirectoryInformation 94,
- *   12 FileNamesInformation 12, 37 FileIdBothDirectoryInformation 104, 38 FileIdFullDirectoryInformation 80.
- * Common prefix (all but 12): NextEntryOffset 0, FileIndex 4, Creation/LastAccess/LastWrite/Change 8..39, EndOfFile 40,
- * AllocationSize 48, FileAttributes 56, FileNameLength 60; EaSize 64 (2,3,37,38); FileId 96 (37) or 72 (38). */
-static uint32_t dirinfo_name_offset(uint32_t cls)
+/* NtQueryDirectoryFile information classes and where their fields sit (documented Windows x64 layouts; entries are
+ * 8-byte aligned and linked by NextEntryOffset):
+ *   1 FileDirectoryInformation        name length @60, FileName @64
+ *   2 FileFullDirectoryInformation    name length @60, EaSize @64, FileName @68
+ *   3 FileBothDirectoryInformation    ... EaSize @64, ShortNameLength @68 (CCHAR), ShortName[12] @70, FileName @94
+ *  12 FileNamesInformation            name length @8, FileName @12
+ *  37 FileIdBothDirectoryInformation  as 3 up to ShortName, FileId @96, FileName @104
+ *  38 FileIdFullDirectoryInformation  as 2 up to EaSize, FileId @72, FileName @80
+ * Classes 1/2/3/37/38 share: FileIndex @4, CreationTime @8, LastAccessTime @16, LastWriteTime @24, ChangeTime @32,
+ * EndOfFile @40, AllocationSize @48, FileAttributes @56. (kernel32's FindFirstFile on the lead branch, k32_file.c
+ * fill_find, reads FileName at 92 instead of 94: a user-mode bug; the kernel writes the documented layout.) */
+static int dir_class_layout(uint32_t cls, unsigned *name_off, unsigned *len_off)
 {
     switch (cls) {
-    case 1: return 64;
-    case 2: return 68;
-    case 3: return 94;
-    case 12: return 12;
-    case 37: return 104;
-    case 38: return 80;
+    case 1: *name_off = 64; *len_off = 60; return 1;
+    case 2: *name_off = 68; *len_off = 60; return 1;
+    case 3: *name_off = 94; *len_off = 60; return 1;
+    case 12: *name_off = 12; *len_off = 8; return 1;
+    case 37: *name_off = 104; *len_off = 60; return 1;
+    case 38: *name_off = 80; *len_off = 60; return 1;
     default: return 0;
     }
 }
 
-static void put32(uint8_t *e, uint32_t off, uint32_t v) { memcpy(e + off, &v, 4); }
-static void put64(uint8_t *e, uint32_t off, uint64_t v) { memcpy(e + off, &v, 8); }
+static uint16_t up16(uint16_t c) { return c >= 'a' && c <= 'z' ? (uint16_t)(c - 32) : c; }
+
+/* FsRtlIsNameInExpression-style match, case-insensitive (ASCII folding): '*' any run, '?' one character,
+ * DOS_STAR '<' any run up to the last '.', DOS_QM '>' one character or nothing before a '.'/the end,
+ * DOS_DOT '"' a '.' or nothing at the end. */
+static int wild(const uint16_t *p, const uint16_t *n)
+{
+    for (;;) {
+        const uint16_t c = *p;
+        if (!c) return !*n;
+        if (c == '*') {
+            while (*p == '*') ++p;
+            if (!*p) return 1;
+            for (; *n; ++n) if (wild(p, n)) return 1;
+            return wild(p, n);
+        }
+        if (c == '<') {                                  /* DOS_STAR: consumes up to (not past) the name's last '.' */
+            const uint16_t *last_dot = 0, *q, *limit;
+            for (q = n; *q; ++q) if (*q == '.') last_dot = q;
+            limit = last_dot ? last_dot : q;
+            for (q = n; q <= limit; ++q) if (wild(p + 1, q)) return 1;
+            return 0;
+        }
+        if (c == '>') {                                  /* DOS_QM */
+            if (!*n || *n == '.') { ++p; continue; }
+            ++p; ++n; continue;
+        }
+        if (c == '"') {                                  /* DOS_DOT */
+            if (*n == '.') { ++p; ++n; continue; }
+            if (!*n) { ++p; continue; }
+            return 0;
+        }
+        if (!*n) return 0;
+        if (c != '?' && up16(c) != up16(*n)) return 0;
+        ++p; ++n;
+    }
+}
 
 static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb_unused)
 {
@@ -374,47 +437,75 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
     const uint64_t len = (uint64_t)(uint32_t)stack_arg(p, r, 7);
     const uint32_t cls = (uint32_t)stack_arg(p, r, 8);
     const int single = (int)(stack_arg(p, r, 9) & 0xff), restart = (int)(stack_arg(p, r, 11) & 0xff);
-    const uint32_t name_off = dirinfo_name_offset(cls);
+    const uint64_t name_us = (uint64_t)stack_arg(p, r, 10);
     file_t *f = file_of(p, handle, 0);
     fsnode_t *c;
     uint64_t idx = 0, written = 0, prev_at = 0;
+    unsigned name_off, len_off;
+    int first_call;
     (void)iosb_unused;
     if (!f || !f->node) return STATUS_INVALID_HANDLE;
     if (!f->node->is_dir) return STATUS_NOT_A_DIRECTORY;
-    if (!name_off) return STATUS_INVALID_INFO_CLASS;
+    if (!dir_class_layout(cls, &name_off, &len_off)) return STATUS_INVALID_INFO_CLASS;
     if (restart) f->dir_index = 0;
+    first_call = !f->dir_started || restart;
+    if (first_call && (name_us || !f->dir_started)) {    /* the pattern is fixed by the first call (or a restart) */
+        struct ustr u;
+        uint16_t *pat = 0;
+        if (name_us) {
+            if (copy_from_user(p, &u, name_us, sizeof u)) return STATUS_ACCESS_VIOLATION;
+            if (u.length & 1 || u.length > 512) return STATUS_OBJECT_NAME_INVALID;
+            if (u.length) {
+                pat = kzalloc(u.length + 2u);
+                if (!pat) return STATUS_NO_MEMORY;
+                if (copy_from_user(p, pat, u.buffer, u.length)) { kfree(pat); return STATUS_ACCESS_VIOLATION; }
+            }
+        }
+        if (f->dir_pattern) kfree(f->dir_pattern);
+        f->dir_pattern = pat;
+    }
+    f->dir_started = 1;
+    fs_populate(f->node);                                /* disk directory: enumerate on first use */
     for (c = f->node->child; c; c = c->sibling) {
-        uint8_t entry[104 + 96 * 2 + 8];
-        uint16_t wname[96];
+        uint8_t entry[112 + FS_NAME_MAX * 2 + 8];
+        uint16_t wname[FS_NAME_MAX];
         uint32_t nchars = 0, size;
+        int wn;
         if (c->delete_pending) continue;
         if (idx++ < f->dir_index) continue;
-        {
-            const char *s = c->name;
-            while (*s && nchars < 95) wname[nchars++] = (uint8_t)*s++;
-        }
+        wn = utf8_to_utf16(c->name, wname, FS_NAME_MAX);
+        nchars = wn < 0 ? 0 : (uint32_t)wn;
+        if (f->dir_pattern && !wild(f->dir_pattern, wname)) { ++f->dir_index; continue; }
         memset(entry, 0, name_off);
-        put32(entry, 4, (uint32_t)idx);
-        if (cls == 12) {
-            put32(entry, 8, nchars * 2);
-        } else {
-            const uint64_t mt = 132000000000000000ull + c->mtime * 10000;
-            put64(entry, 8, 132000000000000000ull + c->ctime * 10000);
-            put64(entry, 16, mt);
-            put64(entry, 24, mt);
-            put64(entry, 32, mt);
-            put64(entry, 40, c->size);
-            put64(entry, 48, (c->size + 4095) & ~4095ull);
-            put32(entry, 56, c->attrs);
-            put32(entry, 60, nchars * 2);
-            if (cls == 37) put64(entry, 96, idx);
-            if (cls == 38) put64(entry, 72, idx);
+        *(uint32_t *)(entry + 4) = (uint32_t)idx;                              /* FileIndex */
+        *(uint32_t *)(entry + len_off) = nchars * 2;                           /* FileNameLength */
+        if (cls != 12) {
+            uint64_t create_ft, write_ft;
+            fs_node_times(c, &create_ft, &write_ft);
+            *(uint64_t *)(entry + 8) = create_ft;
+            *(uint64_t *)(entry + 16) = write_ft;                              /* LastAccessTime */
+            *(uint64_t *)(entry + 24) = write_ft;
+            *(uint64_t *)(entry + 32) = write_ft;                              /* ChangeTime */
+            *(uint64_t *)(entry + 40) = c->size;
+            *(uint64_t *)(entry + 48) = (c->size + 4095) & ~4095ull;
+            *(uint32_t *)(entry + 56) = c->attrs;
         }
+        if ((cls == 3 || cls == 37) && c->alias[0]) {                          /* ShortName: the 8.3 alias */
+            unsigned k;
+            for (k = 0; c->alias[k] && k < 12; ++k) *(uint16_t *)(entry + 70 + 2 * k) = (uint8_t)c->alias[k];
+            entry[68] = (uint8_t)(k * 2);
+        }
+        if (cls == 37 || cls == 38)                                            /* FileId: stable per node */
+            *(uint64_t *)(entry + (cls == 37 ? 96 : 72)) = c->backing == FSB_DISK ?
+                ((uint64_t)c->dir_cluster << 32 | c->dir_offset) : (uint64_t)(uintptr_t)c;
         memcpy(entry + name_off, wname, nchars * 2);
-        size = name_off + nchars * 2;
+        size = (uint32_t)(name_off + nchars * 2);
         size = (size + 7) & ~7u;
-        if (written + size > len) {
-            if (!written) return STATUS_BUFFER_OVERFLOW;
+        if (written + name_off + nchars * 2 > len) {
+            if (!written) {
+                set_iosb(p, iosb, STATUS_BUFFER_OVERFLOW, 0);
+                return len < name_off ? STATUS_BUFFER_TOO_SMALL : STATUS_BUFFER_OVERFLOW;
+            }
             break;
         }
         if (written) {                                   /* patch the previous NextEntryOffset */
@@ -426,10 +517,12 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
         written += size;
         ++f->dir_index;
         if (single) break;
+        if (written >= len) break;
     }
     if (!written) {
-        set_iosb(p, iosb, STATUS_NO_MORE_FILES, 0);
-        return f->dir_index == 0 && idx == 0 ? STATUS_NO_SUCH_FILE : STATUS_NO_MORE_FILES;
+        const int32_t st = first_call ? STATUS_NO_SUCH_FILE : STATUS_NO_MORE_FILES;
+        set_iosb(p, iosb, st, 0);
+        return st;
     }
     set_iosb(p, iosb, STATUS_SUCCESS, written);
     return STATUS_SUCCESS;
@@ -440,7 +533,8 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
 {
     *handled = 1;
     switch (num) {
-    case SYS_NtCreateFile: case SYS_NtOpenFile: return sys_create_file(p, r, a1, a2, a3, a4);
+    case SYS_NtCreateFile: return sys_create_file(p, r, a1, a2, a3, a4, 0);
+    case SYS_NtOpenFile: return sys_create_file(p, r, a1, a2, a3, a4, 1);
     case SYS_NtReadFile: return sys_rw_file(p, r, a1, 0);
     case SYS_NtWriteFile: return sys_rw_file(p, r, a1, 1);
     case SYS_NtQueryInformationFile: return sys_query_info_file(p, r, a1, a2, a3, a4);
@@ -449,7 +543,13 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
     case SYS_NtClose:
         if (a1 == CURRENT_PROCESS_HANDLE || a1 == CURRENT_THREAD_HANDLE) return STATUS_SUCCESS;
         return handle_close(p, a1);
-    case SYS_NtFlushBuffersFile: return file_of(p, a1, 0) ? STATUS_SUCCESS : STATUS_INVALID_HANDLE;
+    case SYS_NtFlushBuffersFile: {
+        file_t *f = file_of(p, a1, 0);
+        if (!f) return STATUS_INVALID_HANDLE;
+        if (f->node && fs_flush(f->node)) { set_iosb(p, a2, (int32_t)0xC0000185, 0); return (int32_t)0xC0000185; }  /* STATUS_IO_DEVICE_ERROR */
+        set_iosb(p, a2, STATUS_SUCCESS, 0);
+        return STATUS_SUCCESS;
+    }
     default: *handled = 0; return 0;
     }
 }

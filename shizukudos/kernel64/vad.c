@@ -84,7 +84,7 @@ static void vad_coalesce(process_t *p)
     while (i + 1 < p->vads.count) {
         vad_t *a = &p->vads.v[i], *b = &p->vads.v[i + 1];
         if (a->end == b->start && a->state == b->state && a->prot == b->prot && a->kind == b->kind &&
-            a->alloc_base == b->alloc_base && a->alloc_prot == b->alloc_prot)
+            a->alloc_base == b->alloc_base && a->alloc_prot == b->alloc_prot && a->img == b->img)
             { a->end = b->end; vad_remove_at(p, i + 1); }
         else
             ++i;
@@ -155,7 +155,7 @@ int32_t vad_alloc(process_t *p, uint64_t *base, uint64_t *size, uint32_t type, u
                 return STATUS_CONFLICTING_ADDRESSES;
             n.start = start; n.end = end;
             n.state = commit ? VAD_COMMITTED : VAD_RESERVED;
-            n.prot = prot; n.kind = kind; n.alloc_prot = prot; n.alloc_base = start;
+            n.prot = prot; n.kind = kind; n.alloc_prot = prot; n.alloc_base = start; n.img = 0;
             if (vad_insert_at(p, vad_lower(p, start), &n))
                 return STATUS_NO_MEMORY;
         } else {
@@ -193,7 +193,7 @@ int32_t vad_alloc(process_t *p, uint64_t *base, uint64_t *size, uint32_t type, u
             vad_t n;
             n.start = cand; n.end = cand + len;
             n.state = commit ? VAD_COMMITTED : VAD_RESERVED;
-            n.prot = prot; n.kind = kind; n.alloc_prot = prot; n.alloc_base = cand;
+            n.prot = prot; n.kind = kind; n.alloc_prot = prot; n.alloc_base = cand; n.img = 0;
             if (vad_insert_at(p, vad_lower(p, cand), &n))
                 return STATUS_NO_MEMORY;
         }
@@ -220,8 +220,15 @@ int32_t vad_insert_fixed(process_t *p, uint64_t start, uint64_t size, uint32_t s
     if (!range_free(p, start, end))
         return STATUS_CONFLICTING_ADDRESSES;
     n.start = start; n.end = end; n.state = state; n.prot = prot; n.kind = kind;
-    n.alloc_prot = prot; n.alloc_base = alloc_base;
+    n.alloc_prot = prot; n.alloc_base = alloc_base; n.img = 0;
     return vad_insert_at(p, vad_lower(p, start), &n) ? STATUS_NO_MEMORY : STATUS_SUCCESS;
+}
+
+int32_t vad_insert_image(process_t *p, uint64_t start, uint64_t size, uint32_t prot, uint64_t alloc_base, void *img)
+{
+    const int32_t st = vad_insert_fixed(p, start, size, VAD_COMMITTED, prot, VK_IMAGE, alloc_base);
+    if (!st) vad_find(p, start)->img = img;
+    return st;
 }
 
 int vad_range_is_free(process_t *p, uint64_t start, uint64_t size)
@@ -363,6 +370,8 @@ int user_fault_in(process_t *p, uint64_t addr, int write, int exec)
         return STATUS_ACCESS_VIOLATION;
     if (vm_lookup(p->pml4, addr, &flags))
         return 0;                               /* already present (spurious or racing fault) */
+    if (v->img)                                 /* file-backed image page: read (and relocate) it now */
+        return ldr_image_fault(p, v, addr);
     pa = pmm_alloc();
     if (!pa)
         return STATUS_NO_MEMORY;
@@ -389,6 +398,57 @@ static int user_page(process_t *p, uint64_t uva, int write, uint64_t *kva)
     *kva = p2v(pa);
     return 0;
 }
+
+/* The loader's single access path to a process's memory (IAT binding, base-relocation fixups of RAM images, TLS index
+ * and arrays, security cookie, CFG pointers, the mapped header). The page is produced exactly like a fault would
+ * produce it - a file-backed image page is read and relocated by ldr_image_fault(), any other committed page is
+ * demand-zero - and then accessed through the direct map WHATEVER ITS PROTECTION, as the Windows loader does with a
+ * temporary unprotect (an IAT inside read-only .rdata is normal for MSVC-linked images). A NOACCESS page is populated
+ * without user access, so a later VirtualProtect finds its content. Returns the kernel address of the page, or NULL
+ * when `va` is not committed memory of the process. */
+uint8_t *image_kpage(process_t *p, uint64_t va)
+{
+    const uint64_t page = va & PAGE_MASK;
+    uint64_t pa;
+    if (va < USER_MIN || va >= USER_TOP) return 0;
+    pa = vm_lookup(p->pml4, page, 0);
+    if (!pa) {
+        vad_t *v = vad_find(p, page);
+        if (!v || v->state != VAD_COMMITTED) return 0;
+        if (v->img) {
+            if (ldr_image_fault(p, v, page)) return 0;
+        } else {
+            pa = pmm_alloc();                                   /* zeroed */
+            if (!pa) return 0;
+            if (vm_map(p->pml4, page, pa, (v->prot & 0xff) == PAGE_NOACCESS ? 0 : prot_to_ptflags(v->prot))) {
+                pmm_free(pa);
+                return 0;
+            }
+        }
+        pa = vm_lookup(p->pml4, page, 0);
+        if (!pa) return 0;
+    }
+    return (uint8_t *)p2v(pa & PAGE_MASK);
+}
+
+static int image_access(process_t *p, uint64_t va, void *buf, uint64_t n, int write)
+{
+    uint8_t *b = buf;
+    if (va + n < va) return -1;
+    while (n) {
+        uint8_t *pg = image_kpage(p, va);
+        uint64_t chunk = PAGE_SIZE - (va & 0xfff);
+        if (!pg) return -1;
+        if (chunk > n) chunk = n;
+        if (write) memcpy(pg + (va & 0xfff), b, chunk);
+        else memcpy(b, pg + (va & 0xfff), chunk);
+        b += chunk; va += chunk; n -= chunk;
+    }
+    return 0;
+}
+
+int image_poke(process_t *p, uint64_t va, const void *src, uint64_t n) { return image_access(p, va, (void *)src, n, 1); }
+int image_peek(process_t *p, uint64_t va, void *dst, uint64_t n) { return image_access(p, va, dst, n, 0); }
 
 int copy_from_user(process_t *p, void *dst, uint64_t uva, uint64_t n)
 {

@@ -8,10 +8,22 @@
  * API-set contracts resolve through the generated table of kernel64/apiset.c (source: apiset_contracts.txt).
  * Anything the loader cannot verify is rejected with an NTSTATUS; nothing is silently stubbed.
  *
- * Mapping: headers and the file-backed part of every section are copied into fresh pages; the rest of a section
- * (uninitialised data, VirtualSize > SizeOfRawData) is committed demand-zero, so an image with a 1 GiB .bss costs only
- * the pages it touches. Gaps between sections stay reserved (no other allocation can land inside an image).
- * Images with SectionAlignment < 4 KiB (FileAlignment == SectionAlignment) are mapped as one flat copy of the file.
+ * Mapping has two strategies, chosen by where the file lives:
+ *   RAM-backed files (C:\, the initrd): eager. Headers and the file-backed part of every section are copied into
+ *     fresh pages and relocated at load time (pe_apply_relocs); the rest of a section (uninitialised data,
+ *     VirtualSize > SizeOfRawData) is committed demand-zero, so a 1 GiB .bss costs only the pages it touches.
+ *   Disk-backed files (D:\ ...): lazy. The parser reads the file through a kernel file view (kwin.c: only the header
+ *     and directory pages it touches are read), the image's sections become committed VK_IMAGE descriptors tied to an
+ *     image_map_t, and ldr_image_fault() produces each page on its first touch: its bytes are read from the file into a
+ *     private page, the base relocations of that page (and the tail of a fixup straddling in from the page before) are
+ *     applied from a per-page index of the .reloc blocks, then it is mapped with the section's protection. A 334 MB DLL
+ *     costs the pages that are really touched. Pages are private per process (no cross-process sharing).
+ * Either way gaps between sections stay reserved (no other allocation can land inside an image), and images with
+ * SectionAlignment < 4 KiB (FileAlignment == SectionAlignment) are mapped as one flat RWX view of the file.
+ * Every write the loader makes into an image (IAT binding, fixups of RAM images, TLS index, security cookie, CFG
+ * pointers, the header's ImageBase) goes through ONE path, vad.c image_poke()/image_kpage(): the page is produced like
+ * a fault would produce it (lazy pages read and relocated first) and written whatever its protection, like the Windows
+ * loader's temporary unprotect - an IAT inside read-only .rdata is normal for MSVC-linked images.
  *
  * ASLR: an image with IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE and a relocation directory is placed at a random 64 KiB
  * aligned base (RDRAND), per process. Windows-like entropy (Windows Internals 7th ed., part 1, ch. 5 "Address space
@@ -44,13 +56,14 @@
  * Modules mapped by a failed attempt are unmapped again, so a later attempt starts from a clean state.
  */
 #include "fs.h"
+#include "kwin.h"
 #include "apiset.h"
 #include "../win64/pe_parse.h"
 
 #define SYS64_DIR "\\SHZ\\SYS64"
 #define WINDOWS_DIR "\\SHZ"
 #define MAX_DEPTH 24
-#define PATH_CAP 160
+#define PATH_CAP 256
 
 /* LoadLibraryExW flags the loader interprets (winbase.h / libloaderapi.h values) */
 #define LLF_ALTERED_SEARCH_PATH 0x00000008u
@@ -67,13 +80,31 @@
 #define PE_CHAR_RELOCS_STRIPPED 0x0001
 #define PE_CHAR_LARGE_ADDRESS_AWARE 0x0020
 
+typedef struct { uint32_t page, count; uint64_t off; } reloc_block_t;   /* one .reloc block: page RVA, entries, file offset */
+
+/* A lazily mapped (disk-backed) image: its VK_IMAGE descriptors point here and ldr_image_fault() fills their pages. */
+typedef struct image_map {
+    fsnode_t *node;                     /* the file */
+    kview_t *view;                      /* its kernel view (parser, relocation blocks) */
+    const uint8_t *file;                /* view->base */
+    uint64_t fsize;
+    pe_info_t info;
+    uint64_t base, delta;               /* mapped base; base - preferred */
+    reloc_block_t *blocks;              /* sorted by page (relocated images only) */
+    uint32_t nblocks;
+    uint64_t highlow;                   /* 32-bit fixups seen while indexing (the image must then stay below 2 GiB) */
+    uint64_t pages_in, reloc_pages, relocs_applied, bytes_read;
+    char name[48];
+} image_map_t;
+
 typedef struct module {
     struct module *next;
     char name[64];                      /* lowercase base name, e.g. "kernel32.dll" */
     char path[PATH_CAP];
     char dir[PATH_CAP];                 /* directory of `path` (no trailing backslash) */
-    const uint8_t *file;
+    const uint8_t *file;                /* RAM: the file data; disk: the kernel view of the file */
     uint64_t fsize;
+    image_map_t *img;                   /* lazily mapped (disk-backed) image, else NULL */
     pe_info_t info;
     uint64_t base;
     int state;                          /* 0 loading, 1 mapped and linked */
@@ -358,54 +389,9 @@ static fsnode_t *locate_file(ldr_ctx_t *c, const char *name, int system_only, ch
 #undef TRY
 
 /* ---------------------------------------------------------------- image memory (kernel access) */
-/* Kernel view of the page holding user address `va` in process `p`. A committed page that is not present yet
- * (demand-zero) is populated with the protection of its descriptor; protection is not checked: the loader writes
- * IATs, fixups and load-configuration slots that live in read-only sections. */
-static uint8_t *kpage(process_t *p, uint64_t va)
-{
-    const uint64_t page = va & ~0xfffull;
-    uint64_t pa = vm_lookup(p->pml4, page, 0);
-    if (!pa) {
-        vad_t *v = vad_find(p, page);
-        if (!v || v->state != VAD_COMMITTED) return 0;
-        pa = pmm_alloc();
-        if (!pa) return 0;
-        if (vm_map(p->pml4, page, pa, (v->prot & 0xff) == PAGE_NOACCESS ? 0 : prot_to_ptflags(v->prot))) {
-            pmm_free(pa);
-            return 0;
-        }
-    }
-    return (uint8_t *)p2v(pa & ~0xfffull);
-}
-
-static int kread(process_t *p, uint64_t va, void *dst, uint64_t n)
-{
-    uint8_t *d = dst;
-    while (n) {
-        uint8_t *pg = kpage(p, va);
-        uint64_t chunk = PAGE_SIZE - (va & 0xfff);
-        if (!pg) return -1;
-        if (chunk > n) chunk = n;
-        memcpy(d, pg + (va & 0xfff), chunk);
-        d += chunk; va += chunk; n -= chunk;
-    }
-    return 0;
-}
-
-static int kwrite(process_t *p, uint64_t va, const void *src, uint64_t n)
-{
-    const uint8_t *s = src;
-    while (n) {
-        uint8_t *pg = kpage(p, va);
-        uint64_t chunk = PAGE_SIZE - (va & 0xfff);
-        if (!pg) return -1;
-        if (chunk > n) chunk = n;
-        memcpy(pg + (va & 0xfff), s, chunk);
-        s += chunk; va += chunk; n -= chunk;
-    }
-    return 0;
-}
-
+/* All loader reads/writes of process memory go through vad.c image_peek()/image_poke() (see the header comment). */
+static int kread(process_t *p, uint64_t va, void *dst, uint64_t n) { return image_peek(p, va, dst, n); }
+static int kwrite(process_t *p, uint64_t va, const void *src, uint64_t n) { return image_poke(p, va, src, n); }
 static int kwrite64(process_t *p, uint64_t va, uint64_t v) { return kwrite(p, va, &v, 8); }
 static int uwrite(process_t *p, uint64_t va, const void *src, uint64_t n) { return copy_to_user(p, va, src, n); }
 static int uwrite64(process_t *p, uint64_t va, uint64_t v) { return copy_to_user(p, va, &v, 8); }
@@ -455,12 +441,168 @@ static uint64_t aslr_pick(process_t *p, const module_t *m, int low_only)
     return 0;
 }
 
+/* ---------------------------------------------------------------- lazy (file-backed) mapping */
+static int block_cmp_less(const reloc_block_t *a, const reloc_block_t *b) { return a->page < b->page || (a->page == b->page && a->off < b->off); }
+
+/* Index of the .reloc blocks (page RVA -> file offset of its entries), read through the view. Lazily relocated images
+ * support the fixup types AMD64 linkers emit: ABSOLUTE, HIGHLOW and DIR64 (HIGH/LOW/HIGHADJ are relocated only in the
+ * eager path). Also counts the HIGHLOW fixups (an image with 32-bit fixups must stay below 2 GiB). */
+static int32_t build_reloc_index(image_map_t *im)
+{
+    const pe_info_t *o = &im->info;
+    uint32_t rva = o->dir_rva[5], remaining = o->dir_size[5], cap = 0, n = 0, i;
+    reloc_block_t *b = 0;
+    im->highlow = 0;
+    while (remaining >= 8) {
+        uint64_t off, avail;
+        uint32_t page, size;
+        if (pe_rva_to_offset(im->file, im->fsize, o, rva, &off, &avail) || avail < 8) break;
+        page = *(const uint32_t *)(im->file + off);
+        size = *(const uint32_t *)(im->file + off + 4);
+        if (size < 8 || size > remaining || (size & 1) || page >= o->size_of_image || (page & 0xfff) || avail < size) break;
+        if (n == cap) {
+            const uint32_t ncap = cap ? cap * 2 : 64;
+            reloc_block_t *nb = kmalloc((size_t)ncap * sizeof *nb);
+            if (!nb) { kfree(b); return STATUS_NO_MEMORY; }
+            if (b) { memcpy(nb, b, (size_t)n * sizeof *nb); kfree(b); }
+            b = nb; cap = ncap;
+        }
+        b[n].page = page; b[n].count = (size - 8) / 2; b[n].off = off + 8;
+        ++n;
+        rva += size; remaining -= size;
+    }
+    if (remaining) { kfree(b); return STATUS_INVALID_IMAGE_FORMAT; }
+    for (i = 1; i < n; ++i)                                        /* linkers emit ascending pages; keep it robust */
+        if (block_cmp_less(&b[i], &b[i - 1])) {
+            uint32_t j, k;
+            for (j = 1; j < n; ++j)                                 /* insertion sort, only for unsorted input */
+                for (k = j; k > 0 && block_cmp_less(&b[k], &b[k - 1]); --k) { reloc_block_t t = b[k]; b[k] = b[k - 1]; b[k - 1] = t; }
+            break;
+        }
+    for (i = 0; i < n; ++i) {                                       /* entry types must be ABSOLUTE, HIGHLOW or DIR64 */
+        uint32_t e;
+        for (e = 0; e < b[i].count; ++e) {
+            const uint16_t v = *(const uint16_t *)(im->file + b[i].off + 2ull * e);
+            const unsigned type = v >> 12;
+            if (type && type != 3 && type != 10) { kfree(b); return STATUS_INVALID_IMAGE_FORMAT; }
+            if (type && (uint64_t)b[i].page + (v & 0xfff) + (type == 10 ? 8 : 4) > o->size_of_image) { kfree(b); return STATUS_INVALID_IMAGE_FORMAT; }
+            if (type == 3) ++im->highlow;
+        }
+    }
+    im->blocks = b;
+    im->nblocks = n;
+    return im->file && im->view->io_errors ? STATUS_IN_PAGE_ERROR : STATUS_SUCCESS;
+}
+
+/* Original (file) bytes of the image at [rva, rva+n): headers, raw section data, zeros elsewhere. */
+static void image_orig(image_map_t *im, uint64_t rva, uint8_t *out, uint64_t n)
+{
+    while (n) {
+        uint64_t off, avail, take;
+        if (rva < 0x100000000ull && !pe_rva_to_offset(im->file, im->fsize, &im->info, (uint32_t)rva, &off, &avail) && avail) {
+            take = avail < n ? avail : n;
+            memcpy(out, im->file + off, take);
+        } else {
+            take = 1;
+            *out = 0;
+        }
+        out += take; rva += take; n -= take;
+    }
+}
+
+/* Applies the fixups of the .reloc block(s) for page `block_page` that land in the page at page_rva (content in `pg`):
+ * called with the page itself and with the page before it (a fixup starting there may straddle into this page). */
+static void relocate_page(image_map_t *im, uint64_t page_rva, uint8_t *pg, uint32_t block_page)
+{
+    uint32_t lo = 0, hi = im->nblocks;
+    while (lo < hi) {                                               /* first block with page >= block_page */
+        const uint32_t mid = (lo + hi) / 2;
+        if (im->blocks[mid].page < block_page) lo = mid + 1; else hi = mid;
+    }
+    for (; lo < im->nblocks && im->blocks[lo].page == block_page; ++lo) {
+        const reloc_block_t *b = &im->blocks[lo];
+        uint32_t e;
+        for (e = 0; e < b->count; ++e) {
+            const uint16_t v = *(const uint16_t *)(im->file + b->off + 2ull * e);
+            const unsigned type = v >> 12, width = type == 10 ? 8 : 4;
+            const uint64_t at = (uint64_t)b->page + (v & 0xfff);
+            uint8_t val[8];
+            uint64_t x = 0, k;
+            if (!type) continue;
+            if (at + width <= page_rva || at >= page_rva + PAGE_SIZE) continue;      /* not in this page */
+            if (at >= page_rva && at + width <= page_rva + PAGE_SIZE)
+                memcpy(val, pg + (at - page_rva), width);           /* still the original: fixups never overlap */
+            else
+                image_orig(im, at, val, width);                     /* straddles the page edge: file bytes via the view */
+            memcpy(&x, val, width);
+            x = width == 8 ? x + im->delta : (uint64_t)(uint32_t)((uint32_t)x + (uint32_t)im->delta);
+            memcpy(val, &x, width);
+            for (k = 0; k < width; ++k)
+                if (at + k >= page_rva && at + k < page_rva + PAGE_SIZE) pg[at + k - page_rva] = val[k];
+            ++im->relocs_applied;
+        }
+    }
+}
+
+int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr)
+{
+    image_map_t *im = v->img;
+    const uint64_t va = addr & ~(PAGE_SIZE - 1), rva = va - im->base;
+    const pe_info_t *o = &im->info;
+    uint64_t pa, file_off = 0, n = 0, done = 0;
+    uint8_t *pg;
+    unsigned i;
+    if (va < im->base || rva >= o->size_of_image) return STATUS_ACCESS_VIOLATION;
+    if (rva < ((o->size_of_headers + 4095ull) & ~4095ull)) {       /* headers */
+        file_off = rva;
+        n = o->size_of_headers - rva < PAGE_SIZE ? o->size_of_headers - rva : PAGE_SIZE;
+    } else {
+        for (i = 0; i < o->nsections; ++i) {
+            pe_section_t s;
+            uint64_t vlen, raw;
+            pe_get_section(im->file, o, i, &s);
+            vlen = ((uint64_t)(s.vsize ? s.vsize : s.raw_size) + 4095ull) & ~4095ull;
+            if (rva < s.rva || rva >= s.rva + vlen) continue;
+            raw = s.raw_size < (s.vsize ? s.vsize : s.raw_size) ? s.raw_size : (s.vsize ? s.vsize : s.raw_size);
+            if (rva - s.rva < raw) {
+                file_off = s.raw_off + (rva - s.rva);
+                n = raw - (rva - s.rva) < PAGE_SIZE ? raw - (rva - s.rva) : PAGE_SIZE;
+            }
+            break;
+        }
+    }
+    pa = pmm_alloc();                                               /* zeroed: bss tails and gaps read as zero */
+    if (!pa) return STATUS_NO_MEMORY;
+    pg = (uint8_t *)p2v(pa);
+    if (n && (fs_read(im->node, file_off, pg, n, &done) || done != n)) {
+        pmm_free(pa);
+        kprintf("K64 ldr: %s: page rva %llx: read of %llu bytes at file offset %llx failed\n", im->name, rva, n, file_off);
+        return STATUS_IN_PAGE_ERROR;
+    }
+    if (im->delta && im->nblocks) {
+        const uint64_t before = im->relocs_applied;
+        relocate_page(im, rva, pg, (uint32_t)rva);
+        if (rva) relocate_page(im, rva, pg, (uint32_t)(rva - PAGE_SIZE));   /* DIR64/HIGHLOW straddling in */
+        if (im->relocs_applied != before) ++im->reloc_pages;
+        if (im->view->io_errors) { pmm_free(pa); return STATUS_IN_PAGE_ERROR; }
+    }
+    /* The reads may have blocked (volume mutex): another thread of the process may have faulted the page in, or changed
+     * or freed the range (the descriptor array can even have been reallocated), so look the descriptor up again. */
+    if (vm_lookup(p->pml4, va, 0)) { pmm_free(pa); return 0; }
+    v = vad_find(p, va);
+    if (!v || v->img != im || v->state != VAD_COMMITTED) { pmm_free(pa); return STATUS_ACCESS_VIOLATION; }
+    if (vm_map(p->pml4, va, pa, prot_to_ptflags(v->prot))) { pmm_free(pa); return STATUS_NO_MEMORY; }
+    ++im->pages_in;
+    im->bytes_read += n;
+    return 0;
+}
+
 /* ---------------------------------------------------------------- mapping */
 struct page_ctx { process_t *p; uint64_t base; };
 static uint8_t *reloc_page(void *ctx, uint32_t page_rva)
 {
     struct page_ctx *x = ctx;
-    return kpage(x->p, x->base + page_rva);
+    return image_kpage(x->p, x->base + page_rva);
 }
 
 /* Maps pages [va, va + len) as copies of file bytes [src, src + raw) (raw may be shorter than len: the rest is
@@ -481,6 +623,16 @@ static int32_t map_bytes(process_t *p, uint64_t va, uint64_t len, const uint8_t 
     return STATUS_SUCCESS;
 }
 
+/* One committed image descriptor: eager (pages copied now) or lazy (tied to the image map, filled on first touch). */
+static int32_t map_range(process_t *p, module_t *m, uint64_t va, uint64_t len, const uint8_t *src, uint64_t raw,
+                         uint32_t prot)
+{
+    int32_t st;
+    if (m->img) return vad_insert_image(p, va, len, prot, m->base, m->img);
+    st = vad_insert_fixed(p, va, len, VAD_COMMITTED, prot, VK_IMAGE, m->base);
+    return st ? st : map_bytes(p, va, len, src, raw, prot);
+}
+
 static int32_t map_module(ldr_ctx_t *c, module_t *m)
 {
     process_t *p = c->p;
@@ -488,18 +640,29 @@ static int32_t map_module(ldr_ctx_t *c, module_t *m)
     uint64_t base = 0;
     unsigned i;
     int32_t st;
-    const int relocatable = (pi->dll_characteristics & PE_DLLCHAR_DYNAMIC_BASE) && pi->dir_rva[5] && pi->dir_size[5] &&
-                            !(pi->characteristics & PE_CHAR_RELOCS_STRIPPED);
+    /* An image can be moved when it has a relocation directory; it is moved at random (ASLR) when it also asks for
+     * DYNAMIC_BASE. An image without DYNAMIC_BASE loads at its preferred base and is relocated only when that range
+     * is occupied, as on Windows. */
+    const int has_relocs = pi->dir_rva[5] && pi->dir_size[5] && !(pi->characteristics & PE_CHAR_RELOCS_STRIPPED);
+    const int randomize = has_relocs && (pi->dll_characteristics & PE_DLLCHAR_DYNAMIC_BASE);
 
-    if (relocatable) {
-        struct reloc_census rc = { 0, 0 };
-        if (pe_walk_relocs(m->file, m->fsize, pi, census_cb, &rc))
-            return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed base relocation directory");
-        base = aslr_pick(p, m, rc.highlow || !(pi->characteristics & PE_CHAR_LARGE_ADDRESS_AWARE));
+    if (randomize) {
+        uint64_t highlow;
+        if (m->img) {                                               /* lazy: the per-page index also counts HIGHLOW */
+            st = build_reloc_index(m->img);
+            if (st) return fail(c, st, m->name, "", 0, "", "malformed base relocation directory");
+            highlow = m->img->highlow;
+        } else {
+            struct reloc_census rc = { 0, 0 };
+            if (pe_walk_relocs(m->file, m->fsize, pi, census_cb, &rc))
+                return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed base relocation directory");
+            highlow = rc.highlow;
+        }
+        base = aslr_pick(p, m, highlow || !(pi->characteristics & PE_CHAR_LARGE_ADDRESS_AWARE));
     }
     if (!base) {
         if (vad_range_is_free(p, pi->image_base, pi->size_of_image)) base = pi->image_base;
-        else if (!relocatable) return fail(c, STATUS_CONFLICTING_ADDRESSES, m->name, "", 0, "", "fixed-base image and its range is occupied");
+        else if (!has_relocs) return fail(c, STATUS_CONFLICTING_ADDRESSES, m->name, "", 0, "", "fixed-base image and its range is occupied");
         else {
             uint64_t sz = pi->size_of_image, b = 0, fs = 0;
             st = vad_alloc(p, &b, &sz, MEM_RESERVE | MEM_TOP_DOWN, PAGE_READONLY, VK_IMAGE);
@@ -509,30 +672,33 @@ static int32_t map_module(ldr_ctx_t *c, module_t *m)
         }
     }
     m->base = base;
+    if (m->img) {
+        m->img->base = base;
+        m->img->delta = base - pi->image_base;
+        if (m->img->delta && !m->img->blocks && has_relocs) {
+            st = build_reloc_index(m->img);
+            if (st) return fail(c, st, m->name, "", 0, "", "malformed base relocation directory");
+        }
+    }
 
     if (pi->low_alignment) {
         /* one flat view of the file: every section sits at its file offset */
         const uint64_t len = ((uint64_t)pi->size_of_image + 4095) & ~4095ull;
-        st = vad_insert_fixed(p, base, len, VAD_COMMITTED, PAGE_EXECUTE_READWRITE, VK_IMAGE, base);
-        if (!st) st = map_bytes(p, base, len, m->file, m->fsize < pi->size_of_image ? m->fsize : pi->size_of_image,
-                                PAGE_EXECUTE_READWRITE);
+        st = map_range(p, m, base, len, m->file, m->fsize < pi->size_of_image ? m->fsize : pi->size_of_image,
+                       PAGE_EXECUTE_READWRITE);
         if (st) return fail(c, st, m->name, "", 0, "", "cannot map the image");
     } else {
         /* headers, each section, then reserved gaps: descriptors sharing one allocation base */
         uint64_t hdr = ((uint64_t)pi->size_of_headers + 4095) & ~4095ull, cursor, end;
-        st = vad_insert_fixed(p, base, hdr, VAD_COMMITTED, PAGE_READONLY, VK_IMAGE, base);
-        if (!st) st = map_bytes(p, base, hdr, m->file, pi->size_of_headers, PAGE_READONLY);
+        st = map_range(p, m, base, hdr, m->file, pi->size_of_headers, PAGE_READONLY);
         for (i = 0; !st && i < pi->nsections; ++i) {
             pe_section_t s;
             uint64_t vlen, raw;
-            uint32_t prot;
             pe_get_section(m->file, pi, i, &s);
             vlen = (((uint64_t)(s.vsize ? s.vsize : s.raw_size)) + 4095) & ~4095ull;
             if (!vlen) continue;
-            prot = prot_from_section(s.characteristics);
             raw = s.raw_size < (s.vsize ? s.vsize : s.raw_size) ? s.raw_size : (s.vsize ? s.vsize : s.raw_size);
-            st = vad_insert_fixed(p, base + s.rva, vlen, VAD_COMMITTED, prot, VK_IMAGE, base);
-            if (!st) st = map_bytes(p, base + s.rva, vlen, m->file + s.raw_off, raw, prot);
+            st = map_range(p, m, base + s.rva, vlen, m->file + s.raw_off, raw, prot_from_section(s.characteristics));
         }
         if (st) return fail(c, st, m->name, "", 0, "", "cannot map the image (overlapping sections or out of memory)");
         /* every hole of [base, base + SizeOfImage) stays reserved and inaccessible */
@@ -549,13 +715,18 @@ static int32_t map_module(ldr_ctx_t *c, module_t *m)
             }
         }
     }
+    if (m->img)
+        kprintf("K64 ldr: %s mapped lazily from %s at %llx (preferred %llx%s), %u pages in %u sections, %llu of %llu file "
+                "pages read by the parser\n", m->name, m->path, base, pi->image_base, m->img->delta ? ", relocated per page" : "",
+                pi->size_of_image / 4096, pi->nsections, m->img->view->resident, m->img->view->npages);
 
     if (base != pi->image_base) {
         struct page_ctx pc = { p, base };
         uint64_t applied = 0, hb = base;
-        if (!relocatable)
+        if (!has_relocs)
             return fail(c, STATUS_CONFLICTING_ADDRESSES, m->name, "", 0, "", "image cannot be relocated");
-        if (pe_apply_relocs(m->file, m->fsize, pi, base - pi->image_base, reloc_page, &pc, &applied))
+        /* RAM images are relocated now; lazy images page by page in ldr_image_fault() */
+        if (!m->img && pe_apply_relocs(m->file, m->fsize, pi, base - pi->image_base, reloc_page, &pc, &applied))
             return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "base relocation outside the image");
         /* the mapped header reports the actual base, as on Windows (OptionalHeader.ImageBase) */
         if (kwrite(p, base + pi->nt_offset + 24 + 24, &hb, 8))
@@ -770,16 +941,35 @@ static int32_t load_module_file(ldr_ctx_t *c, const char *name, fsnode_t *node, 
     scopy(m->name, sizeof m->name, name);
     scopy(m->path, sizeof m->path, path);
     dir_of(m->path, m->dir, sizeof m->dir);
-    m->file = node->data;
+    if (node->backing == FSB_DISK) {                            /* lazy: parse through the kernel file view */
+        kview_t *v = kview_get(node);
+        if (v) m->img = kzalloc(sizeof *m->img);
+        if (!v || !m->img) { kfree(m); return fail(c, STATUS_NO_MEMORY, name, "", 0, "", "no file view for the image"); }
+        m->img->node = node;
+        m->img->view = v;
+        m->img->file = (const uint8_t *)v->base;
+        m->img->fsize = node->size;
+        scopy(m->img->name, sizeof m->img->name, name);
+        m->file = m->img->file;
+    } else {
+        m->file = node->data;
+    }
     m->fsize = node->size;
     rc = pe_parse(m->file, m->fsize, &m->info);
+    if (!rc && m->img && m->img->view->io_errors) rc = PE_E_TRUNCATED;
     if (rc) {
         char why[48];
-        fmt_dec(why, sizeof why, "not a valid AMD64 PE32+ image (pe error -", (uint64_t)-rc);
-        sappend(why, sizeof why, ")");
+        const int32_t st2 = m->img && m->img->view->io_errors ? STATUS_IN_PAGE_ERROR : STATUS_INVALID_IMAGE_FORMAT;
+        if (st2 == STATUS_IN_PAGE_ERROR) scopy(why, sizeof why, "I/O error while reading the image");
+        else {
+            fmt_dec(why, sizeof why, "not a valid AMD64 PE32+ image (pe error -", (uint64_t)-rc);
+            sappend(why, sizeof why, ")");
+        }
+        kfree(m->img);
         kfree(m);
-        return fail(c, STATUS_INVALID_IMAGE_FORMAT, name, "", 0, "", why);
+        return fail(c, st2, name, "", 0, "", why);
     }
+    if (m->img) m->img->info = m->info;
     m->is_dll = (m->info.characteristics & PE_CHAR_DLL) != 0;
     m->state = 0;
     m->next = p->modules;
@@ -818,9 +1008,29 @@ static void rollback(process_t *p, module_t *mark, unsigned tls_mark)
             uint64_t b = m->base, sz = 0;
             vad_free(p, &b, &sz, MEM_RELEASE);
         }
+        if (m->img) { kfree(m->img->blocks); kfree(m->img); }
         kfree(m);
     }
     p->tls_slots = tls_mark;
+}
+
+/* Process teardown (proc.c): frees the loader's records; lazily mapped images report how much of them was used. */
+void ldr_release_modules(process_t *p)
+{
+    module_t *m = p->modules, *next;
+    for (; m; m = next) {
+        next = m->next;
+        if (m->img) {
+            kprintf("K64 ldr: %s (pid %d): %llu of %u image pages were made resident (%llu bytes read, %llu relocated "
+                    "pages, %llu fixups); file view %llu of %llu pages\n", m->name, p->pid, m->img->pages_in,
+                    m->info.size_of_image / 4096, m->img->bytes_read, m->img->reloc_pages, m->img->relocs_applied,
+                    m->img->view->resident, m->img->view->npages);
+            kfree(m->img->blocks);
+            kfree(m->img);
+        }
+        kfree(m);
+    }
+    p->modules = 0;
 }
 
 /* ---------------------------------------------------------------- Windows-shaped loader database */
@@ -829,6 +1039,7 @@ struct ustr { uint16_t length, maxlen; uint32_t pad; uint64_t buffer; };
 #define LDR_ENTRY_SIZE 0x120
 #define LDR_NEEDS_INIT 0x00000001u
 #define LDR_IMAGE_DLL 0x00000004u
+#define LDR_BASENAME_OFF 520                    /* strings: full path (PATH_CAP UTF-16 units max) then the base name */
 
 static uint64_t alloc_user(process_t *p, uint64_t size)
 {
@@ -855,7 +1066,7 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
     for (i = 0; m->path[i] && nf < PATH_CAP - 1; ++i) wfull[nf++] = (uint8_t)m->path[i];
     for (i = 0; m->name[i] && nb < 63; ++i) wbase[nb++] = (uint8_t)m->name[i];
     uf = (struct ustr){ (uint16_t)(nf * 2), (uint16_t)(nf * 2 + 2), 0, strings_va };
-    ub = (struct ustr){ (uint16_t)(nb * 2), (uint16_t)(nb * 2 + 2), 0, strings_va + 336 };
+    ub = (struct ustr){ (uint16_t)(nb * 2), (uint16_t)(nb * 2 + 2), 0, strings_va + LDR_BASENAME_OFF };
     *(uint64_t *)(entry + 0x30) = m->base;
     *(uint64_t *)(entry + 0x38) = m->info.entry_rva ? m->base + m->info.entry_rva : 0;
     *(uint32_t *)(entry + 0x40) = m->info.size_of_image;
@@ -865,7 +1076,7 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
     *(uint16_t *)(entry + 0x6c) = 1;                         /* load count */
     *(uint16_t *)(entry + 0x6e) = m->has_tls ? (uint16_t)m->tls_index : 0xffff;
     if (uwrite(p, entry_va, entry, sizeof entry) || uwrite(p, strings_va, wfull, nf * 2 + 2) ||
-        uwrite(p, strings_va + 336, wbase, nb * 2 + 2))
+        uwrite(p, strings_va + LDR_BASENAME_OFF, wbase, nb * 2 + 2))
         return -1;
     if (list_append(p, p->ldr_va + 0x10, entry_va) || list_append(p, p->ldr_va + 0x20, entry_va + 0x10))
         return -1;
@@ -874,7 +1085,7 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
     return 0;
 }
 
-#define LDR_SLOT (LDR_ENTRY_SIZE + 512)
+#define LDR_SLOT (LDR_ENTRY_SIZE + 768)          /* entry, full path (<= 512 bytes), base name at +520 */
 
 /* Publishes every module not yet visible to user mode: the executable first (if requested),
  * then the rest in dependency-completion order for the initialization list. */
@@ -1110,6 +1321,8 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     dir_of(image_path, c->app_dir, sizeof c->app_dir);          /* application directory: the executable's */
     scopy(c->cwd, sizeof c->cwd, cwd);
     p->parent_pid = parent ? (uint64_t)parent->pid : 0;
+    p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
+    p->console_sink_gen = parent ? parent->console_sink_gen : 0;
     proc_alloc_peb(p);
     /* std handles occupy 4, 8 and 12 */
     {
@@ -1233,7 +1446,7 @@ uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint
     c->p = p;
     mutex_lock(&p->ldr_lock);
     for (m = p->modules; m; m = m->next)
-        if (m->base == base && !resolve_export(c, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
+        if (m->state == 1 && m->base == base && !resolve_export(c, m, symbol, symbol ? -1 : (int)ordinal, 0, &va))
             break;
     mutex_unlock(&p->ldr_lock);
     kfree(c);

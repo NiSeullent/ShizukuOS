@@ -259,7 +259,8 @@ static void bios_disk(void)
         if (BX == 0x55aa) {
             set_reg16(GPR_RBX, 0xaa55);
             set_reg8h(GPR_RAX, 0x21);
-            set_reg16(GPR_RCX, 0x0001);             /* extended read/write/seek */
+            /* bit 0: "fixed disk access subset" = AH=42h, 43h, 44h, 47h and 48h (EDD 1.1) */
+            set_reg16(GPR_RCX, 0x0001);
             ret_cf(0);
         } else {
             disk_result(0x01, -1);
@@ -280,16 +281,45 @@ static void bios_disk(void)
         disk_result((uint8_t)st, -1);
         break;
     }
-    case 0x48: {
-        uint8_t *out = gpa_ptr(seg_base(VMCS_GUEST_DS_SEL) + SI, 0x1e);
-        if (!out) {
+    case 0x44: case 0x47: {
+        /* Extended verify / extended seek (RBIL INT 13/AH=44h, 47h; same checks as
+         * SeaBIOS src/disk.c:disk_1344/disk_1347 -> extended_access, written anew):
+         * the DAP names an LBA range that must lie on the disk. The RAM-backed image
+         * cannot have unreadable sectors, so a range check is the whole verify.
+         * FreeDOS issues AH=44h after every AH=43h write when VERIFY is ON and the
+         * drive does not report write-with-verify (kernel/dsk.c LBA_WRITE_VERIFY). */
+        const uint8_t *pkt = gpa_ptr(seg_base(VMCS_GUEST_DS_SEL) + SI, 16);
+        uint64_t lba;
+        uint32_t count;
+        if (!pkt || pkt[0] < 0x10) {
             disk_result(0x01, -1);
             break;
         }
-        memset(out + 2, 0, 0x1c);
-        *(uint16_t *)out = 0x1e;
-        *(uint16_t *)(out + 2) = 0x0002;            /* CHS info valid */
-        *(uint32_t *)(out + 4) = cyls;
+        count = func == 0x47 ? 1 : *(const uint16_t *)(pkt + 2);
+        lba = *(const uint64_t *)(pkt + 8);
+        if (lba >= total || count > total - lba) {
+            disk_result(0x04, -1);                  /* sector not found; DAP count left as given */
+            break;
+        }
+        disk_result(0, -1);
+        break;
+    }
+    case 0x48: {
+        /* EDD get drive parameters (RBIL INT 13/AH=48h; SeaBIOS src/block.c:fill_generic_edd
+         * for the size rules): the caller's buffer size word must be >= 1Ah; this drive
+         * has no Device Parameter Table Extension, so exactly the 1Ah-byte EDD 1.x
+         * result is written and reported, whatever larger size the caller offered. */
+        uint8_t *out = gpa_ptr(seg_base(VMCS_GUEST_DS_SEL) + SI, 0x1a);
+        if (!out || *(const uint16_t *)out < 0x1a) {
+            disk_result(0x01, -1);
+            break;
+        }
+        memset(out + 2, 0, 0x18);
+        *(uint16_t *)out = 0x1a;
+        /* Physical geometry (not the 1023-cylinder INT 13h/08h view); bit 1 = CHS valid
+         * unless the disk is beyond what 16383 cylinders can describe. */
+        *(uint16_t *)(out + 2) = total / (HD_HEADS * HD_SPT) > 0x3fff ? 0x0000 : 0x0002;
+        *(uint32_t *)(out + 4) = (uint32_t)(total / (HD_HEADS * HD_SPT) > 0x3fff ? 0x3fff : total / (HD_HEADS * HD_SPT));
         *(uint32_t *)(out + 8) = HD_HEADS;
         *(uint32_t *)(out + 12) = HD_SPT;
         *(uint64_t *)(out + 16) = total;
@@ -413,8 +443,9 @@ static int bios_e820(void)
 }
 
 /* --------------------------------------------------------------- time */
-static uint8_t bcd_ok(uint8_t v) { return v; }
-
+/* INT 1Ah AH=02h-05h (RTC time/date, read and set) never arrive here: the vBIOS ROM
+ * implements them itself through the CMOS ports (guest/vbios.asm rtc_service), which
+ * the device model backs with the platform RTC (devices.c dev_cmos_read). */
 static void bios_time(void)
 {
     uint8_t *bda = gpa_ptr(BDA, 0x100);
@@ -431,20 +462,6 @@ static void bios_time(void)
         *(uint16_t *)(bda + 0x6e) = CX;
         *(uint16_t *)(bda + 0x6c) = DX;
         bda[0x70] = 0;
-        break;
-    case 0x02:
-        set_reg8h(GPR_RCX, bcd_ok(dev_cmos_read(4)));
-        set_reg8l(GPR_RCX, bcd_ok(dev_cmos_read(2)));
-        set_reg8h(GPR_RDX, bcd_ok(dev_cmos_read(0)));
-        set_reg8l(GPR_RDX, 0);
-        ret_cf(0);
-        break;
-    case 0x04:
-        set_reg8h(GPR_RCX, bcd_ok(dev_cmos_read(0x32)));
-        set_reg8l(GPR_RCX, bcd_ok(dev_cmos_read(9)));
-        set_reg8h(GPR_RDX, bcd_ok(dev_cmos_read(8)));
-        set_reg8l(GPR_RDX, bcd_ok(dev_cmos_read(7)));
-        ret_cf(0);
         break;
     case 0xb1:                                      /* PCI BIOS: not present */
         set_reg8h(GPR_RAX, 0x81);

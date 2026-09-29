@@ -163,8 +163,9 @@ def build_modules():
 
 
 # The runners check that T_HELLO.EXE sees its preferred base 0x140000000, so it is linked without DYNAMIC_BASE (a fixed
-# image); every other app is relocatable and receives an ASLR base from the Kernel64 loader.
-FIXED_BASE_APPS = {"t_hello"}
+# image); T_LAZY.EXE is fixed at 0x140000000 too, so D:\LAZY\BIGRELOC.DLL (same preferred base) must be relocated.
+# Every other app is relocatable and receives an ASLR base from the Kernel64 loader.
+FIXED_BASE_APPS = {"t_hello", "t_lazy"}
 
 # Apps that link a module through its DELAY-import library instead of its ordinary import library: the functions are
 # resolved lazily on first call (dlltool --output-delaylib + crt/shzcrt.c __delayLoadHelper2 -> ResolveDelayLoadedAPI).

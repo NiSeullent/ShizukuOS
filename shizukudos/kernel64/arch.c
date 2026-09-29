@@ -124,6 +124,11 @@ void isr_dispatch(struct regs *r)
     }
     if (r->vector == 14) {
         const uint64_t addr = read_cr2();
+        if (!(r->cs & 3) && addr >= KWIN_BASE && addr < KWIN_BASE + KWIN_SIZE && !(r->error & 1)) {
+            extern int kwin_fault(uint64_t addr);       /* kernel file view page (kwin.c) */
+            if (kwin_fault(addr))
+                return;
+        }
         if (!(r->cs & 3) && addr >= demand_lo && addr < demand_hi && !(r->error & 1)) {
             const uint64_t pa = pmm_alloc();
             KASSERT(pa);

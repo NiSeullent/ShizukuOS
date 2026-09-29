@@ -24,7 +24,12 @@ class RoutesSchemaTests(unittest.TestCase):
     def test_exports_match_the_def_file(self):
         text = (ROOT / 'ntwin32/exports.def').read_text()
         exported = re.findall(r'^\s+(\w+)=Ntw\w+@\d+\s*$', text, re.M)
-        self.assertEqual(sorted(exported), sorted(self.names))
+        # The NTW32-specific WIN64 subsystem API (provider_api) is exported under its own Ntw* names and is
+        # never part of the KERNEL32 routing table.
+        api = self.plan['provider_api']
+        self.assertEqual(sorted(name for name in exported if name not in api), sorted(self.names))
+        self.assertEqual(sorted(name for name in exported if name in api), sorted(api))
+        self.assertFalse(set(api) & set(self.names))
         self.assertEqual(len(self.names), 17)
 
     def test_native_presence_matches_the_oem_manifest(self):
