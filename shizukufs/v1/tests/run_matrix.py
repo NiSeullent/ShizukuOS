@@ -20,6 +20,7 @@ Usage: run_matrix.py [--keep] [--only NAME]
 import hashlib
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,13 @@ CONFIGS = [
     ("no-dir_index", ["-O", "^dir_index"], "96M", 0, True),
     ("meta_bg", ["-O", "meta_bg,^resize_inode", "-b", "1024"], "64M", 0, True),
     ("multi-group-4k", ["-g", "8192"], "400M", 0, True),
+]
+
+# Read-only configurations: libsfs reads every file; writes must be refused (EROFS) and the image stay untouched.
+RO_CONFIGS = [
+    ("ext3-blockmap", ["-t", "ext3"], "96M", 5 << 30, True),
+    ("ext2-blockmap", ["-t", "ext2"], "96M", 0, True),
+    ("inline_data", ["-O", "inline_data"], "96M", 0, True),
 ]
 
 
@@ -416,6 +424,46 @@ def one_config(name, opts, size, big_sparse, large_inodes, keep):
             res["dir"] = tmp
 
 
+def one_ro_config(name, opts, size, big_sparse, large_inodes, keep):
+    rng = random.Random(hash(name) & 0xFFFFFFFF)
+    tmp = tempfile.mkdtemp(prefix="sfsmx-%s-" % name, dir=os.environ.get("SFS_TMP"))
+    res = {"name": name, "errors": []}
+    try:
+        src = os.path.join(tmp, "src")
+        build_source(src, rng, big_sparse, 1024)
+        img = os.path.join(tmp, "img")
+        run(["mkfs.ext4", "-q", "-F", "-d", src] + opts + [img, size])
+        if large_inodes:
+            run(["debugfs", "-w", "-R", "sif /docs/future.txt mtime 21000101000000", img])
+        before = hashlib.sha256(open(img, "rb").read()).hexdigest()
+        exp = host_tree(src, large_inodes)
+        got = sfs_tree(img, large_inodes, extra=())
+        res["errors"] += compare(exp, got, "read")
+        res["read_entries"] = len(got)
+        p = subprocess.run([TOOL, "-q", img, "info"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        m = re.search(r"read_only (\d) ro_reason (0x[0-9a-f]+)", p.stdout)
+        res["ro_reason"] = m.group(2) if m else "?"
+        if not m or m.group(1) != "1":
+            res["errors"].append("not mounted read-only: " + p.stdout)
+        p = subprocess.run([TOOL, "-q", img, "mkdir", "/nope"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if p.returncode == 0 or "read-only" not in p.stderr:
+            res["errors"].append("write not refused: rc %d %s" % (p.returncode, p.stderr))
+        after = hashlib.sha256(open(img, "rb").read()).hexdigest()
+        if before != after:
+            res["errors"].append("image changed by a read-only mount")
+        rc, lines, _ = e2fsck_clean(img)
+        res["e2fsck_after_write"] = rc
+        if rc != 0 or lines:
+            res["errors"].append("e2fsck rc=%d %s" % (rc, lines[:10]))
+        return res
+    except Exception as e:  # noqa
+        res["errors"].append("exception: %s" % e)
+        return res
+    finally:
+        if not keep:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     keep = "--keep" in sys.argv
     only = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
@@ -433,6 +481,18 @@ def main():
         status = "PASS" if not r["errors"] else "FAIL"
         print("%-22s %s  read %s entries, %s ops, e2fsck -fn: %s/%s, %ss" % (
             name, status, r.get("read_entries"), r.get("ops"), r.get("e2fsck_after_write"), r.get("e2fsck_after_teardown"), r["seconds"]))
+        for e in r["errors"][:15]:
+            print("    " + e.replace("\n", "\n    "))
+        sys.stdout.flush()
+    for name, opts, size, big, large in RO_CONFIGS:
+        if only and name != only:
+            continue
+        t0 = time.time()
+        r = one_ro_config(name, opts, size, big, large, keep)
+        r["seconds"] = round(time.time() - t0, 1)
+        results.append(r)
+        print("%-22s %s  read %s entries, read-only (reason %s), writes refused, image unchanged, e2fsck -fn: %s, %ss" % (
+            name, "PASS" if not r["errors"] else "FAIL", r.get("read_entries"), r.get("ro_reason"), r.get("e2fsck_after_write"), r["seconds"]))
         for e in r["errors"][:15]:
             print("    " + e.replace("\n", "\n    "))
         sys.stdout.flush()

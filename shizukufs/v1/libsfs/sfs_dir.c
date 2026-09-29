@@ -18,6 +18,7 @@
 #define KIND_ROOT 1
 #define KIND_NODE 2
 
+static int inline_dir_next(sfs_fs *fs, sfs_inode *dir, uint64_t *cookie, sfs_dirent *out);
 static uint32_t name_len_of(sfs_fs *fs, const uint8_t *de) { return fs->filetype ? de[DE_name_len] : rd16(de, DE_name_len); }
 static uint32_t rec_min(uint32_t name_len) { return (DE_HDR + name_len + 3) & ~3u; }
 static uint32_t leaf_limit(sfs_fs *fs) { return fs->csum ? fs->bs - DE_TAIL_SIZE : fs->bs; }
@@ -381,6 +382,20 @@ int sfs_dir_lookup(sfs_fs *fs, sfs_inode *dir, const char *name, size_t len, uin
     int rc;
     if (!sfs_is_dir(dir)) return SFS_ENOTDIR;
     if (len == 0 || len > SFS_NAME_MAX) return len ? SFS_ENAMETOOLONG : SFS_ENOENT;
+    if (dir->flags & IFL_INLINE_DATA) {
+        uint64_t cookie = 0;
+        sfs_dirent *de = sfs_alloc(fs, sizeof *de);
+        if (!de) return SFS_ENOMEM;
+        while ((rc = inline_dir_next(fs, dir, &cookie, de)) == 1) {
+            if (de->name_len == len && !memcmp(de->name, name, len)) {
+                *ino = de->ino;
+                if (type) *type = de->type;
+                break;
+            }
+        }
+        sfs_free(fs, de, sizeof *de);
+        return rc == 1 ? 0 : rc == 0 ? SFS_ENOENT : rc;
+    }
     rc = find_entry(fs, dir, name, (uint32_t)len, &b, &off, &prev);
     if (rc) return rc;
     *ino = rd32(b->data + off, DE_inode);
@@ -788,12 +803,66 @@ int sfs_dir_set_parent(sfs_fs *fs, sfs_inode *dir, uint32_t parent)
     return rc;
 }
 
+/* ---- inline-data directories (read only): i_block holds the parent inode (4 bytes) and entries up to byte 60,
+ * the "system.data" xattr value continues with more entries. Cookie: 0 ".", 1 "..", 2 + byte offset. ---- */
+static int inline_dir_next(sfs_fs *fs, sfs_inode *dir, uint64_t *cookie, sfs_dirent *out)
+{
+    uint8_t *buf;
+    uint64_t total = dir->size, got, pos;
+    int rc;
+    if (*cookie == 0 || *cookie == 1) {
+        out->ino = *cookie == 0 ? dir->ino : rd32(dir->iblock, 0);
+        out->type = SFS_FT_DIR;
+        out->name_len = (uint8_t)(*cookie + 1);
+        out->name[0] = '.';
+        out->name[1] = '.';
+        out->name[out->name_len] = 0;
+        *cookie += 1;
+        return 1;
+    }
+    if (total > SFS_MAX_ALLOC) total = SFS_MAX_ALLOC;
+    if (total < IN_BLOCK_BYTES) total = IN_BLOCK_BYTES;
+    buf = sfs_alloc(fs, SFS_MAX_ALLOC);
+    if (!buf) return SFS_ENOMEM;
+    rc = sfs_inline_read(fs, dir, 0, buf, total, &got);
+    if (rc) { sfs_free(fs, buf, SFS_MAX_ALLOC); return rc; }
+    pos = *cookie - 2 + 4;                              /* entries start after the 4-byte parent */
+    for (;;) {
+        uint32_t region_end = pos < IN_BLOCK_BYTES ? IN_BLOCK_BYTES : (uint32_t)got;
+        const uint8_t *de;
+        uint32_t rl, nl, ino;
+        if (pos >= got || pos + DE_HDR > region_end) {
+            if (pos < IN_BLOCK_BYTES && got > IN_BLOCK_BYTES) { pos = IN_BLOCK_BYTES; continue; }
+            rc = 0;
+            break;
+        }
+        de = buf + pos;
+        rl = rd16(de, DE_rec_len);
+        nl = name_len_of(fs, de);
+        ino = rd32(de, DE_inode);
+        if (rl < DE_HDR || (rl & 3) || pos + rl > region_end || DE_HDR + nl > rl || ino > fs->inodes_count) { rc = SFS_ECORRUPT; break; }
+        pos += rl;
+        if (ino && nl) {
+            out->ino = ino;
+            out->type = fs->filetype ? de[DE_file_type] : SFS_FT_UNKNOWN;
+            out->name_len = (uint8_t)nl;
+            memcpy(out->name, de + DE_name, nl);
+            out->name[nl] = 0;
+            rc = 1;
+            break;
+        }
+    }
+    *cookie = pos - 4 + 2;
+    sfs_free(fs, buf, SFS_MAX_ALLOC);
+    return rc;
+}
+
 /* ---- enumeration (block order; the cookie is the byte position of the next entry) ---- */
 int sfs_dir_next(sfs_fs *fs, sfs_inode *dir, uint64_t *cookie, sfs_dirent *out)
 {
     uint64_t nblk = dir->size >> fs->bs_bits;
     if (!sfs_is_dir(dir)) return SFS_ENOTDIR;
-    if (dir->flags & IFL_INLINE_DATA) return SFS_ENOTSUP;
+    if (dir->flags & IFL_INLINE_DATA) return inline_dir_next(fs, dir, cookie, out);
     for (;;) {
         uint64_t pos = *cookie;
         uint32_t lblk = (uint32_t)(pos >> fs->bs_bits), start = (uint32_t)(pos & (fs->bs - 1)), off = 0, limit;
