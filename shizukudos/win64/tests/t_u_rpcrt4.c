@@ -130,5 +130,50 @@ int main(void)
         RpcStringFreeW(&w);
     }
     U_CHECK("UuidCreate(NULL) is rejected", UuidCreate(0) != RPC_S_OK);
+
+    /* ---- UuidCreateSequential: RFC 4122 version 1 ---- */
+    if (!has_rdrand()) {
+        rs = UuidCreateSequential(&u);
+        U_CHECKF("no RDRAND: UuidCreateSequential refuses (no random node id available)", rs != RPC_S_OK && rs != RPC_S_UUID_LOCAL_ONLY, "rs=%u", (unsigned)rs);
+    } else {
+        enum { N = 400 };
+        static UUID seq[N];
+        FILETIME before, after;
+        unsigned long long uepoch = 6653ull * 86400ull * 10000000ull;            /* 1582-10-15 -> 1601-01-01: 6653 days, in 100 ns */
+        unsigned long long t0 = 0, t1, prev = 0, now_lo, now_hi;
+        int all_ok = 1, incr = 1, ver1 = 1, var = 1, node_same = 1, clk_same = 1, multicast = 1, distinct = 1;
+        GetSystemTimeAsFileTime(&before);
+        for (i = 0; i < N; ++i) {
+            rs = UuidCreateSequential(&seq[i]);
+            if (rs != RPC_S_UUID_LOCAL_ONLY) all_ok = 0;
+        }
+        GetSystemTimeAsFileTime(&after);
+        U_CHECK("UuidCreateSequential returns RPC_S_UUID_LOCAL_ONLY (no network address) 400 times", all_ok);
+        for (i = 0; i < N; ++i) {
+            t1 = (unsigned long long)(seq[i].Data3 & 0x0fff) << 48 | (unsigned long long)seq[i].Data2 << 32 | seq[i].Data1;
+            if (i && t1 <= prev) incr = 0;
+            if (!i) t0 = t1;
+            prev = t1;
+            if ((seq[i].Data3 >> 12) != 1) ver1 = 0;
+            if ((seq[i].Data4[0] >> 6) != 2) var = 0;
+            if (memcmp(seq[i].Data4 + 2, seq[0].Data4 + 2, 6)) node_same = 0;
+            if (seq[i].Data4[0] != seq[0].Data4[0] || seq[i].Data4[1] != seq[0].Data4[1]) clk_same = 0;
+            if (!(seq[i].Data4[2] & 1)) multicast = 0;
+        }
+        for (i = 0; i < N; ++i)
+            for (j = i + 1; j < N; ++j)
+                if (!memcmp(&seq[i], &seq[j], sizeof(UUID))) distinct = 0;
+        U_CHECK("400 sequential UUIDs are pairwise distinct", distinct);
+        U_CHECK("version nibble is 1", ver1);
+        U_CHECK("RFC 4122 variant bits", var);
+        U_CHECK("timestamps strictly increase (the clock is only 1 ms coarse)", incr);
+        U_CHECK("the node id is constant within the process and has the multicast bit set (RFC 4122 4.5: random node)", node_same && multicast);
+        U_CHECK("the clock sequence is constant within the process", clk_same);
+        now_lo = ((unsigned long long)before.dwHighDateTime << 32 | before.dwLowDateTime) + uepoch;
+        now_hi = ((unsigned long long)after.dwHighDateTime << 32 | after.dwLowDateTime) + uepoch;
+        U_CHECKF("the timestamp is the system time in the UUID epoch (1582-10-15), within a few seconds of the clock readings",
+                 t0 + 10ull * 10000000ull >= now_lo && t0 <= now_hi + 10ull * 10000000ull, "t0=%u lo=%u hi=%u (units of 100ns >> 20)", (unsigned)(t0 >> 20), (unsigned)(now_lo >> 20), (unsigned)(now_hi >> 20));
+    }
+    U_CHECK("UuidCreateSequential(NULL) is rejected", UuidCreateSequential(0) != RPC_S_OK && UuidCreateSequential(0) != RPC_S_UUID_LOCAL_ONLY);
     return u_finish("t_u_rpcrt4");
 }

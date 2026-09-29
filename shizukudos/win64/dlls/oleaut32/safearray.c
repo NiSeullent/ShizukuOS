@@ -2,9 +2,12 @@
  * SAFEARRAY: descriptor {cDims, fFeatures, cbElements, cLocks, pvData, rgsabound[cDims]} with the element vartype kept
  * in the hidden DWORD in front of the descriptor (FADF_HAVEVARTYPE), as the documented x64 layout prescribes.
  *
- * Dimension order (documented for SafeArrayGetLBound/GetUBound/GetElement): dimension 1 is the *leftmost* one and is
- * rgsabound[cDims - 1]; rgIndices[0] indexes dimension 1; the leftmost dimension varies fastest in memory, and
- * rgsabound[0] (the rightmost dimension, the only one SafeArrayRedim may change) varies slowest.
+ * Dimension order: dimension 1 (the nDim of SafeArrayGetLBound/GetUBound) is the leftmost one and is rgsabound[cDims - 1];
+ * rgIndices[0] indexes dimension 1 (the convention every C++ consumer of Excel/ADO arrays uses: idx[0] = row, idx[1] = column);
+ * the leftmost dimension varies fastest in memory (column-major, as VB arrays are) and rgsabound[0], the only dimension
+ * SafeArrayRedim may change, varies slowest so that growing it just extends the data. MSDN's prose for SafeArrayGetElement
+ * words the direction of rgIndices ambiguously; this file follows the convention above, which has not been compared with a
+ * real Windows here.
  *
  * Element vartypes handled: I1 UI1 I2 UI2 BOOL I4 UI4 INT UINT ERROR R4 I8 UI8 R8 CY DATE BSTR DISPATCH UNKNOWN VARIANT
  * DECIMAL. Arrays of records (IRecordInfo) or with an IID are not supported.

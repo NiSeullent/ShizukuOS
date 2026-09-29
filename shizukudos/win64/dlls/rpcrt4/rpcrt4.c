@@ -5,8 +5,13 @@
  *
  * UuidCreate returns a version-4 (random) UUID as RFC 4122 section 4.4 defines it: 122 random bits from the CPU's
  * RDRAND instruction (shz_rand.h), version nibble 4, variant bits 10. Without RDRAND it fails instead of inventing
- * predictable "random" data. UuidCreateSequential and UuidHash are not provided: the former needs a network address
- * and clock sequence store, and the latter's exact algorithm is undocumented.
+ * predictable "random" data.
+ *
+ * UuidCreateSequential returns a version-1 (time based) UUID as RFC 4122 section 4.2 defines it: a 60-bit count of 100 ns
+ * intervals since 1582-10-15 (from the system clock, forced strictly increasing within the process), a 14-bit clock
+ * sequence and a 48-bit node. There is no network adapter, so the node is a random 47-bit value with the multicast bit
+ * set (RFC 4122 section 4.5), chosen once per process, and the result is RPC_S_UUID_LOCAL_ONLY - what Windows documents for
+ * a UUID that is not based on a real network address. UuidHash is not provided: its exact algorithm is undocumented.
  */
 #include "nt.h"
 #include "shz_rand.h"
@@ -36,6 +41,43 @@ DLLAPI RPC_STATUS RPC_ENTRY UuidCreate(UUID *u)
     b[8] = (unsigned char)((b[8] & 0x3f) | 0x80);           /* RFC 4122 variant */
     bytes_to_uuid(b, u);
     return RPC_S_OK;
+}
+
+/* ---- UuidCreateSequential (RFC 4122 version 1) ---- */
+#define UUID_EPOCH_TO_FILETIME 5748192000000000ull          /* 1601-01-01 minus 1582-10-15, in 100 ns units */
+static volatile LONG g_seq_lock;
+static ULONGLONG g_seq_last;                                /* last timestamp handed out: strictly increasing */
+static unsigned char g_seq_node[6];
+static unsigned g_seq_clock;                                /* 14-bit clock sequence, fixed for the life of the process */
+static int g_seq_ready;
+
+DLLAPI RPC_STATUS RPC_ENTRY UuidCreateSequential(UUID *u)
+{
+    FILETIME ft;
+    ULONGLONG t;
+    unsigned char b[16];
+    if (!u) return ERROR_INVALID_PARAMETER;
+    while (InterlockedCompareExchange(&g_seq_lock, 1, 0)) SwitchToThread();
+    if (!g_seq_ready) {
+        unsigned char r[8];
+        if (!shz_random_bytes(r, sizeof r)) { InterlockedExchange(&g_seq_lock, 0); return ERROR_NOT_SUPPORTED; }
+        memcpy(g_seq_node, r, 6);
+        g_seq_node[0] |= 1;                                 /* multicast bit: "not a real IEEE 802 address" (RFC 4122 4.5) */
+        g_seq_clock = (unsigned)(r[6] << 8 | r[7]) & 0x3fff;
+        g_seq_ready = 1;
+    }
+    GetSystemTimeAsFileTime(&ft);
+    t = ((ULONGLONG)ft.dwHighDateTime << 32 | ft.dwLowDateTime) + UUID_EPOCH_TO_FILETIME;
+    if (t <= g_seq_last) t = g_seq_last + 1;                /* the clock is coarse (or stepped back): never repeat a timestamp */
+    g_seq_last = t;
+    b[0] = (unsigned char)(t >> 24); b[1] = (unsigned char)(t >> 16); b[2] = (unsigned char)(t >> 8); b[3] = (unsigned char)t;      /* time_low */
+    b[4] = (unsigned char)(t >> 40); b[5] = (unsigned char)(t >> 32);                                                                 /* time_mid */
+    b[6] = (unsigned char)(0x10 | ((t >> 56) & 0x0f)); b[7] = (unsigned char)(t >> 48);                                               /* version 1 + time_hi */
+    b[8] = (unsigned char)(0x80 | (g_seq_clock >> 8)); b[9] = (unsigned char)g_seq_clock;                                             /* variant + clock_seq */
+    memcpy(b + 10, g_seq_node, 6);
+    InterlockedExchange(&g_seq_lock, 0);
+    bytes_to_uuid(b, u);
+    return RPC_S_UUID_LOCAL_ONLY;
 }
 
 DLLAPI RPC_STATUS RPC_ENTRY UuidCreateNil(UUID *u)

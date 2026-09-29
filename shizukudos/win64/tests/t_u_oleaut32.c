@@ -2,8 +2,9 @@
  * oleaut32.dll core: BSTR, VARIANT, SAFEARRAY. Expected values come from the documented automation contracts (MSDN:
  * BSTR layout, SysAlloc*, SafeArray*, VariantClear/Copy/ChangeType, VarI4FromR8 banker's rounding, VARIANT_ALPHABOOL,
  * VARIANT_TRUE = -1, DISP_E_* codes) and from reference-counting behaviour observed with a test COM object.
- * The multi-dimensional element order asserted below is the documented dimension numbering (dimension 1 = the leftmost =
- * rgsabound[cDims-1]) with the conventional column-major SAFEARRAY storage; it has not been compared with a real Windows. */
+ * The multi-dimensional element order asserted below is the convention described in dlls/oleaut32/safearray.c (dimension 1 =
+ * leftmost = rgsabound[cDims-1], idx[0] indexes dimension 1, column-major storage); it has not been compared with a real
+ * Windows. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <oleauto.h>
