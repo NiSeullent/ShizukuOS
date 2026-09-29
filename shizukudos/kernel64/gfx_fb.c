@@ -184,6 +184,7 @@ int gfx_fb_init(void)
     }
     g_fb.ready = 1;
     init_state = 1;
+    pci_claim(&dev, "gfx_fb (Bochs VBE)");
     kprintf("K64 gfx: BGA %x %ux%ux32 LFB %llx (%llu KiB), back buffer %llu KiB\n", g_fb.bga_version, w, h, bar,
             bar_size >> 10, (uint64_t)g_fb.pitch * h >> 10);
     gfx_fb_present(0, 0, (int)w, (int)h);

@@ -26,7 +26,7 @@ def main():
     (BUILD / 'manifest.json').unlink(missing_ok=True)
     sources = ['ntwrapper/core.c', 'ntwrapper/include/ntwrapper.h', 'ntwin32/runtime.c',
                'ntwin32/sync.c', 'ntwin32/sync.h', 'ntwin32/resolve.c',
-               'ntwin32/resolve.h', 'ntwin32/exports.def',
+               'ntwin32/resolve.h', 'ntwin32/routing.c', 'ntwin32/routing.h', 'ntwin32/exports.def',
                'ntwin32/initonce.c', 'ntwin32/initonce.h', 'ntwin32/version.rc',
                'ntwin32/unicode/utf.c', 'ntwin32/unicode/utf.h',
                'ntwin32/exception/veh.c', 'ntwin32/exception/veh.h',
@@ -37,11 +37,9 @@ def main():
         return {name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in sources}
     before = source_hashes()
     cc = os.environ.get('NTW_CC', 'i686-w64-mingw32-gcc')
-    route_names = json.loads((ROOT/'ntwin32/routes.json').read_text())['exports']
-    if any(not name.isascii() or not name.isidentifier() for name in route_names):
-        raise RuntimeError('Invalid route export identifier')
-    (BUILD/'routes.inc').write_text(''.join(
-        f'NTW_ROUTE("{name}", Ntw{name})\n' for name in sorted(route_names)))
+    prepare = load_prepare()
+    plan = prepare.routes()   # validated schema v2: names, provider order and stub list
+    (BUILD/'routes.inc').write_text(prepare.render_routes_inc(plan))
     flags = ['-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', '-march=i486',
              '-fno-builtin', '-ffreestanding', '-fno-stack-protector', '-nostdlib']
     link = ['-Wl,--subsystem,console:4.10', '-Wl,--disable-dynamicbase',
@@ -54,13 +52,13 @@ def main():
         '-Wl,--image-base,0x68000000',
         '-Wl,--subsystem,windows:4.10', '-o', BUILD / 'NTW32.DLL',
         '-I', BUILD, 'ntwin32/runtime.c', 'ntwin32/sync.c', 'ntwin32/resolve.c',
-        'ntwin32/initonce.c', 'ntwin32/unicode/utf.c',
+        'ntwin32/routing.c', 'ntwin32/initonce.c', 'ntwin32/unicode/utf.c',
         'ntwin32/exception/veh.c', 'ntwin32/exception/k32veh.c',
         'ntwin32/exports.def',
         BUILD/'version.o', '-lkernel32')
     run(cc, *flags, *link, '-Wl,--entry,_mainCRTStartup', '-o', BUILD / 'probe-original.exe',
         'platform/tests/probe.c', '-lkernel32')
-    prepared, report = load_prepare().prepare((BUILD / 'probe-original.exe').read_bytes())
+    prepared, report = prepare.prepare((BUILD / 'probe-original.exe').read_bytes())
     (BUILD / 'NTWPROBE.EXE').write_bytes(prepared)
     (BUILD / 'prepare-report.json').write_text(json.dumps(report, indent=2) + '\n')
     manifest = {'product': "Windows 98 Shizuku's Second Edition", 'schema': 'ntw.build.v1',

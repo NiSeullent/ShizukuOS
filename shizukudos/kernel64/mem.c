@@ -56,6 +56,7 @@ void pmm_free(uint64_t pa)
 }
 
 uint64_t pmm_free_count(void) { return pmm_free_pages; }
+uint64_t pmm_total_count(void) { return pmm_pages; }
 
 /* ---------------------------------------------------------------- paging */
 static uint64_t *table_at(uint64_t pa) { return (uint64_t *)p2v(pa); }

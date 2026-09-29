@@ -435,7 +435,7 @@ static BOOL fill_find(find_t *f, LPWIN32_FIND_DATAW out)
             const ULONG next = *(const ULONG *)e;
             const ULONGLONG create = *(const ULONGLONG *)(e + 8), wr = *(const ULONGLONG *)(e + 24), eof = *(const ULONGLONG *)(e + 40);
             const ULONG attrs = *(const ULONG *)(e + 56), nlen = *(const ULONG *)(e + 60);
-            const WCHAR *name = (const WCHAR *)(e + 92);
+            const WCHAR *name = (const WCHAR *)(e + 94);        /* FILE_BOTH_DIR_INFORMATION.FileName */
             WCHAR tmp[260];
             ULONG i, n = nlen / 2;
             if (n > 259) n = 259;
