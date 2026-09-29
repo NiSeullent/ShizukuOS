@@ -101,6 +101,7 @@ struct process {
     /* loader state */
     void *modules;                      /* module_t list, see ldr.c */
     unsigned tls_slots;                 /* TLS indices handed out to loaded modules */
+    kmutex_t ldr_lock;                  /* serialises runtime loads and TLS array (re)building (ldr.c) */
     uint64_t ntdll_process_start, ntdll_thread_start, ntdll_exception_dispatcher;
     uint64_t ldr_va;                    /* PEB_LDR_DATA */
     uint64_t params_va;                 /* RTL_USER_PROCESS_PARAMETERS */
@@ -126,7 +127,11 @@ int32_t vad_insert_fixed(process_t *p, uint64_t start, uint64_t size, uint32_t s
                          uint64_t alloc_base);
 /* A committed VK_IMAGE descriptor whose pages are produced on first touch by ldr_image_fault(img). */
 int32_t vad_insert_image(process_t *p, uint64_t start, uint64_t size, uint32_t prot, uint64_t alloc_base, void *img);
-int image_poke(process_t *p, uint64_t va, const void *src, uint64_t n);   /* loader write ignoring page protection */
+/* The loader's only access path to process memory (vad.c): pages are produced like a fault (lazy image pages read and
+ * relocated, others demand-zero) and accessed whatever their protection. */
+uint8_t *image_kpage(process_t *p, uint64_t va);                              /* kernel address of the page, or NULL */
+int image_poke(process_t *p, uint64_t va, const void *src, uint64_t n);       /* write; 0 = ok */
+int image_peek(process_t *p, uint64_t va, void *dst, uint64_t n);             /* read; 0 = ok */
 int vad_range_is_free(process_t *p, uint64_t start, uint64_t size);
 void vad_init(process_t *p);
 void vad_destroy(process_t *p);

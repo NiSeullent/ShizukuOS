@@ -10,6 +10,9 @@
  *                           host with a GL-capable display) also 3D contexts that execute virgl command streams on the
  *                           host GPU: that is the accelerated path.
  *   SHZ_GPU_BACKEND_BGA     Bochs VBE linear framebuffer (QEMU -vga std): the CPU copies damaged rectangles; no cursor, no 3D.
+ *   SHZ_GPU_BACKEND_GOP     after a UEFI direct boot: the firmware's GOP linear framebuffer in the firmware's mode (any
+ *                           PCI display or a RAM framebuffer; BGRX or RGBX): the CPU copies damaged rectangles; no cursor,
+ *                           no 3D, no mode setting.
  * Everything here is fixed-width so the freestanding kernel and mingw-w64 user code share it. Pointers are user virtual
  * addresses carried in uint64_t. Status values are NTSTATUS: STATUS_NO_SUCH_DEVICE (0xC000000E) without any display,
  * STATUS_NOT_SUPPORTED (0xC00000BB) when the backend lacks the feature (cursor on BGA, 3D without VIRGL).
@@ -21,6 +24,7 @@
 #define SHZ_GPU_BACKEND_NONE 0u
 #define SHZ_GPU_BACKEND_BGA 1u
 #define SHZ_GPU_BACKEND_VIRTIO 2u
+#define SHZ_GPU_BACKEND_GOP 3u              /* the UEFI GOP framebuffer the boot manager handed over (kernel64/gfx_gop.c) */
 
 #define SHZ_GPU_FEAT_2D 0x01u               /* host-side scanout resource updated by transfer + flush of dirty rectangles */
 #define SHZ_GPU_FEAT_CURSOR 0x02u           /* hardware cursor plane (64x64 ARGB) */

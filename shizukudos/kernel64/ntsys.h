@@ -36,7 +36,7 @@
  *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf
  *   installer (SHZSETUP) 0xb0-0xbf   gpu (P-render) 0xd0-0xdf   NT driver host (N1) 0xe0-0xef
  *   storage raw-sector interface (S1) 0xf0-0xff
- *   IPC / process model (kernel64/ipc_*.c, npfs.c): misc 0xa0-0xaf plus 0xc0-0xcf and 0x100-0x10f */
+ *   IPC / process model (kernel64/ipc_*.c, npfs.c): 0xa1-0xaf of misc (0xa0 is the RNG), 0xc0-0xcf and 0x100-0x10f */
 #define SYSCALL_LIST_REGISTRY(X) \
     X(NtCreateKey, 0x50) X(NtOpenKey, 0x51) X(NtOpenKeyEx, 0x52) X(NtQueryValueKey, 0x53) X(NtSetValueKey, 0x54) \
     X(NtDeleteKey, 0x55) X(NtDeleteValueKey, 0x56) X(NtEnumerateKey, 0x57) X(NtEnumerateValueKey, 0x58) \
@@ -47,7 +47,8 @@
     X(NtUserWindowQuery, 0x64) X(NtUserWindowSet, 0x65) X(NtUserShowWindow, 0x66) X(NtUserSetWindowPos, 0x67) \
     X(NtUserPostMessage, 0x68) X(NtUserSendMessage, 0x69) X(NtUserGetMessage, 0x6a) X(NtUserReplyMessage, 0x6b) \
     X(NtUserThreadOp, 0x6c) X(NtUserTimer, 0x6d) X(NtUserInvalidate, 0x6e) X(NtUserPaint, 0x6f) X(NtGdiPresent, 0x70) \
-    X(NtUserFocusOp, 0x71) X(NtUserEnumWindows, 0x72) X(NtUserHitTest, 0x73) X(NtUserAtom, 0x74) X(NtUserProp, 0x75)
+    X(NtUserFocusOp, 0x71) X(NtUserEnumWindows, 0x72) X(NtUserHitTest, 0x73) X(NtUserAtom, 0x74) X(NtUserProp, 0x75) \
+    X(NtUserInput, 0x76) X(NtUserWindowOp, 0x77) X(NtUserClipboard, 0x78)
 
 #define SYSCALL_LIST_NET(X) \
     X(NtShzSocket, 0x80) X(NtShzSockBind, 0x81) X(NtShzSockListen, 0x82) X(NtShzSockAccept, 0x83) \
@@ -58,9 +59,13 @@
 #define SYSCALL_LIST_K32(X) \
     X(NtQueryVolumeInformationFile, 0x90) X(NtLockFile, 0x91) X(NtUnlockFile, 0x92) X(NtShzQueryK32, 0x93) X(NtShzSetK32, 0x94)
 
-/* IPC and the Windows process model (kernel64/ipc_*.c, npfs.c): sections, named pipes, I/O completion, APCs, jobs. */
 #define SYSCALL_LIST_MISC(X) \
-    X(NtCreateSection, 0xa0) X(NtOpenSection, 0xa1) X(NtMapViewOfSection, 0xa2) X(NtUnmapViewOfSection, 0xa3) \
+    X(NtShzRandom, 0xa0)                /* kernel/krandom.c: system RNG (ProcessPrng, BCryptGenRandom, RtlGenRandom) */
+
+/* IPC and the Windows process model (kernel64/ipc_*.c, npfs.c): sections, named pipes, I/O completion, APCs, jobs.
+ * ipc_core.c takes these numbers before the range dispatch (ipc_syscall_override), so they may share the misc range. */
+#define SYSCALL_LIST_IPC_MISC(X) \
+    X(NtOpenSection, 0xa1) X(NtMapViewOfSection, 0xa2) X(NtUnmapViewOfSection, 0xa3) \
     X(NtQuerySection, 0xa4) X(NtFlushVirtualMemory, 0xa5) X(NtCreateNamedPipeFile, 0xa6) X(NtFsControlFile, 0xa7) \
     X(NtCreateIoCompletion, 0xa8) X(NtSetIoCompletion, 0xa9) X(NtRemoveIoCompletion, 0xaa) \
     X(NtRemoveIoCompletionEx, 0xab) X(NtQueueApcThread, 0xac) X(NtTestAlert, 0xad) X(NtCancelIoFileEx, 0xae) \
@@ -73,7 +78,7 @@
     X(NtReadVirtualMemory, 0xc8) X(NtWriteVirtualMemory, 0xc9) X(NtShzQueryKernelStats, 0xca) \
     X(NtQueryIoCompletion, 0xcb) X(NtOpenEvent, 0xcc) X(NtOpenMutant, 0xcd) X(NtOpenSemaphore, 0xce) \
     X(NtOpenTimer, 0xcf) X(NtOpenIoCompletion, 0x100) X(NtDeviceIoControlFile, 0x101) \
-    X(NtNotifyChangeDirectoryFile, 0x102) X(NtQueryTimer, 0x103)
+    X(NtNotifyChangeDirectoryFile, 0x102) X(NtQueryTimer, 0x103) X(NtCreateSection, 0x104)
 
 /* Display/GPU (kernel64/gpu_sys.c; structures in win64/include/shzgpu.h) */
 #define SYSCALL_LIST_GPU(X) \
@@ -87,6 +92,11 @@
     X(NtShzSetupBlkQuery, 0xb0) X(NtShzSetupBlkRead, 0xb1) X(NtShzSetupBlkWrite, 0xb2) X(NtShzSetupBlkFlush, 0xb3) \
     X(NtShzSetupPower, 0xb4)
 
+/* Raw block devices 0xf0-0xff (kernel64/sysblk.c) */
+#define SYSCALL_LIST_BLK(X) \
+    X(NtShzBlkQuery, 0xf0) X(NtShzBlkRead, 0xf1) X(NtShzBlkWrite, 0xf2) X(NtShzBlkFlush, 0xf3) \
+    X(NtShzBlkBatch, 0xf4) X(NtShzBlkControl, 0xf5) X(NtShzBlkDiscard, 0xf6)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
@@ -97,6 +107,8 @@ enum {
     SYSCALL_LIST_MISC(X)
     SYSCALL_LIST_GPU(X)
     SYSCALL_LIST_SETUP(X)
+    SYSCALL_LIST_BLK(X)
+    SYSCALL_LIST_IPC_MISC(X)
     SYSCALL_LIST_IPC(X)
 #undef X
     SYS_MAX = 0x110                 /* every number below goes to sys_extended(); sysext.c rejects unrouted ranges */

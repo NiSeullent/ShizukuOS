@@ -327,7 +327,8 @@ def chromium_probe(args, accel, out):
         i_dll_start = next((i for i, l in enumerate(lines) if "T_CHROME.EXE" in l), 0)
     i_dll_end = next((i for i, l in enumerate(lines) if "CHROME-DLL" in l), len(lines))
     i_exe_end = next((i for i, l in enumerate(lines) if "CHROME-EXE" in l), len(lines))
-    fail_re = re.compile(r"K64 ldr: .*(imports|rejected|failed|cannot|lacks)|K64: process .*killed|unhandled exception")
+    # the loader's one-line diagnostic ("K64 ldr: X not loaded: <image> needs <dll>!<fn>: <reason>") and older forms
+    fail_re = re.compile(r"K64 ldr: .*(not loaded|imports|rejected|failed|cannot|lacks)|K64: process .*killed|unhandled exception")
     dll_lines = [l for l in lines[i_dll_start:i_dll_end] if l.startswith("K64 ldr") or l.startswith("K64:")]
     exe_lines = [l for l in lines[i_dll_end:i_exe_end] if l.startswith("K64 ldr") or l.startswith("K64:")]
     rec["chrome_dll_result"] = lines[i_dll_end] if i_dll_end < len(lines) else None

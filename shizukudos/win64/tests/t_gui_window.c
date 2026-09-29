@@ -6,6 +6,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "shzcrt.h"
+#include "shzgfx.h"
 
 static int bad;
 #define CHECK(cond, name) do { if (cond) printf("PASS: %s\n", name); else { printf("FAIL: %s (line %d)\n", name, __LINE__); ++bad; } } while (0)
@@ -89,7 +90,14 @@ int main(void)
     int r;
     HINSTANCE inst = GetModuleHandleW(0);
     if (GetSystemMetrics(SM_CXSCREEN) == 0) { printf("SKIP: no display device\n"); return 0; }
-    CHECK(GetSystemMetrics(SM_CXSCREEN) == 1024 && GetSystemMetrics(SM_CYSCREEN) == 768, "GetSystemMetrics reports the 1024x768 display");
+    {
+        shz_display_info_t di;
+        memset(&di, 0, sizeof di);
+        di.size = sizeof di;
+        CHECK(NtUserQueryDisplay(&di, SHZ_DISP_QUERY) >= 0 && GetSystemMetrics(SM_CXSCREEN) == (int)di.width &&
+              GetSystemMetrics(SM_CYSCREEN) == (int)di.height && di.width >= 640 && di.height >= 480,
+              "GetSystemMetrics reports the display mode (1024x768 on Bochs VBE and virtio-gpu, the firmware's on UEFI GOP)");
+    }
     memset(&wc, 0, sizeof wc);
     wc.cbSize = sizeof wc;
     wc.style = CS_HREDRAW | CS_VREDRAW;

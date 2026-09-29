@@ -3,9 +3,9 @@
  * functions exist (creation, text conversion, comparison); nothing that would need an endpoint mapper, bindings or
  * marshaling is exported.
  *
- * UuidCreate returns a version-4 (random) UUID as RFC 4122 section 4.4 defines it: 122 random bits from the CPU's
- * RDRAND instruction (shz_rand.h), version nibble 4, variant bits 10. Without RDRAND it fails instead of inventing
- * predictable "random" data.
+ * UuidCreate returns a version-4 (random) UUID as RFC 4122 section 4.4 defines it: 122 random bits from the kernel RNG
+ * (shz_rand.h -> NtShzRandom, a ChaCha20 CSPRNG over an entropy pool; RDRAND is one input when present), version
+ * nibble 4, variant bits 10.
  *
  * UuidCreateSequential returns a version-1 (time based) UUID as RFC 4122 section 4.2 defines it: a 60-bit count of 100 ns
  * intervals since 1582-10-15 (from the system clock, forced strictly increasing within the process), a 14-bit clock

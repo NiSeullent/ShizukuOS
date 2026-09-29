@@ -1,0 +1,506 @@
+diff --git a/dlls/crypt32/chain.c b/dlls/crypt32/chain.c
+index 1b38e78..7110d72 100644
+--- a/dlls/crypt32/chain.c
++++ b/dlls/crypt32/chain.c
+@@ -2964,12 +2964,182 @@ VOID WINAPI CertFreeCertificateChain(PCCERT_CHAIN_CONTEXT pChainContext)
+     }
+ }
+ 
++/* Shizuku: CertFindChainInStore(CERT_CHAIN_FIND_BY_ISSUER), written from the Windows SDK documentation (the
++ * parameter block and flags are not in Wine's wincrypt.h). For each certificate of the store after the previous chain's
++ * end certificate: unless NO_KEY is set, the certificate must have a private key (CERT_KEY_PROV_INFO_PROP_ID with the
++ * requested dwKeySpec, or a cached key context); with COMPARE_KEY the key is acquired and its public key must equal the
++ * certificate's. A chain is built (with the store as additional store, the usage identifier as requested usage and
++ * cache-only URL retrieval when asked); a chain not valid for the usage is skipped. With issuers given, some certificate
++ * of the first simple chain (of any simple chain with COMPLEX_CHAIN) must have one of them as issuer name. The optional
++ * callback has the last word. The previous chain context is always freed. */
++#ifndef CERT_CHAIN_FIND_BY_ISSUER_COMPARE_KEY_FLAG
++#define CERT_CHAIN_FIND_BY_ISSUER_COMPARE_KEY_FLAG    0x0001
++#define CERT_CHAIN_FIND_BY_ISSUER_COMPLEX_CHAIN_FLAG  0x0002
++#define CERT_CHAIN_FIND_BY_ISSUER_CACHE_ONLY_URL_FLAG 0x0004
++#define CERT_CHAIN_FIND_BY_ISSUER_LOCAL_MACHINE_FLAG  0x0008
++#define CERT_CHAIN_FIND_BY_ISSUER_NO_KEY_FLAG         0x4000
++#define CERT_CHAIN_FIND_BY_ISSUER_CACHE_ONLY_FLAG     0x8000
++typedef BOOL (WINAPI *PFN_CERT_CHAIN_FIND_BY_ISSUER_CALLBACK)(PCCERT_CONTEXT cert, void *arg);
++typedef struct _CERT_CHAIN_FIND_BY_ISSUER_PARA
++{
++    DWORD cbSize;
++    LPCSTR pszUsageIdentifier;
++    DWORD dwKeySpec;
++    DWORD dwAcquirePrivateKeyFlags;
++    DWORD cIssuer;
++    CERT_NAME_BLOB *rgIssuer;
++    PFN_CERT_CHAIN_FIND_BY_ISSUER_CALLBACK pfnFindCallback;
++    void *pvFindArg;
++    DWORD *pdwIssuerChainIndex;
++    DWORD *pdwIssuerElementIndex;
++} CERT_CHAIN_FIND_BY_ISSUER_PARA;
++#endif
++
++static BOOL find_chain_cert_has_key(PCCERT_CONTEXT cert, const CERT_CHAIN_FIND_BY_ISSUER_PARA *para, DWORD flags)
++{
++    CRYPT_KEY_PROV_INFO *info;
++    CERT_KEY_CONTEXT key_context;
++    DWORD size = 0;
++    BOOL ret;
++
++    if (CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, NULL, &size))
++    {
++        if (!(info = CryptMemAlloc(size))) return FALSE;
++        ret = CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, info, &size) &&
++              (!para->dwKeySpec || info->dwKeySpec == para->dwKeySpec);
++        CryptMemFree(info);
++    }
++    else
++    {
++        size = sizeof(key_context);
++        ret = CertGetCertificateContextProperty(cert, CERT_KEY_CONTEXT_PROP_ID, &key_context, &size) &&
++              (!para->dwKeySpec || key_context.dwKeySpec == para->dwKeySpec);
++    }
++    if (ret && (flags & CERT_CHAIN_FIND_BY_ISSUER_COMPARE_KEY_FLAG))
++    {
++        HCRYPTPROV_OR_NCRYPT_KEY_HANDLE prov;
++        CERT_PUBLIC_KEY_INFO *pub;
++        DWORD spec;
++        BOOL free_prov;
++
++        ret = CryptAcquireCertificatePrivateKey(cert, para->dwAcquirePrivateKeyFlags & ~CRYPT_ACQUIRE_SILENT_FLAG, NULL,
++                                                &prov, &spec, &free_prov);
++        if (ret)
++        {
++            size = 0;
++            ret = CryptExportPublicKeyInfo(prov, spec, cert->dwCertEncodingType, NULL, &size) &&
++                  (pub = CryptMemAlloc(size));
++            if (ret)
++            {
++                ret = CryptExportPublicKeyInfo(prov, spec, cert->dwCertEncodingType, pub, &size) &&
++                      CertComparePublicKeyInfo(cert->dwCertEncodingType, &cert->pCertInfo->SubjectPublicKeyInfo, pub);
++                CryptMemFree(pub);
++            }
++            if (free_prov) CryptReleaseContext(prov, 0);
++        }
++    }
++    return ret;
++}
++
++static BOOL find_chain_issuer_match(PCCERT_CHAIN_CONTEXT chain, const CERT_CHAIN_FIND_BY_ISSUER_PARA *para, DWORD flags,
++                                    DWORD *chain_index, DWORD *element_index)
++{
++    DWORD i, j, k, chains;
++
++    if (!para->cIssuer)
++    {
++        *chain_index = *element_index = 0;
++        return TRUE;
++    }
++    chains = (flags & CERT_CHAIN_FIND_BY_ISSUER_COMPLEX_CHAIN_FLAG) ? chain->cChain : min(chain->cChain, 1);
++    for (i = 0; i < chains; i++)
++        for (j = 0; j < chain->rgpChain[i]->cElement; j++)
++        {
++            PCCERT_CONTEXT c = chain->rgpChain[i]->rgpElement[j]->pCertContext;
++            for (k = 0; k < para->cIssuer; k++)
++                if (CertCompareCertificateName(c->dwCertEncodingType, &c->pCertInfo->Issuer, &para->rgIssuer[k]))
++                {
++                    *chain_index = i;
++                    *element_index = j;
++                    return TRUE;
++                }
++        }
++    return FALSE;
++}
++
+ PCCERT_CHAIN_CONTEXT WINAPI CertFindChainInStore(HCERTSTORE store,
+  DWORD certEncodingType, DWORD findFlags, DWORD findType,
+  const void *findPara, PCCERT_CHAIN_CONTEXT prevChainContext)
+ {
+-    FIXME("(%p, %08lx, %08lx, %ld, %p, %p): stub\n", store, certEncodingType,
++    const CERT_CHAIN_FIND_BY_ISSUER_PARA *para = findPara;
++    PCCERT_CONTEXT cert = NULL;
++    PCCERT_CHAIN_CONTEXT chain;
++    HCERTCHAINENGINE engine;
++    CERT_CHAIN_PARA chain_para;
++    DWORD chain_flags = 0;
++
++    TRACE("(%p, %08lx, %08lx, %ld, %p, %p)\n", store, certEncodingType,
+      findFlags, findType, findPara, prevChainContext);
++
++    if (findType != CERT_CHAIN_FIND_BY_ISSUER || !para ||
++        para->cbSize < offsetof(CERT_CHAIN_FIND_BY_ISSUER_PARA, pdwIssuerChainIndex) ||
++        (para->cIssuer && !para->rgIssuer))
++    {
++        if (prevChainContext) CertFreeCertificateChain(prevChainContext);
++        SetLastError(E_INVALIDARG);
++        return NULL;
++    }
++    if (prevChainContext)
++    {
++        PCCERT_CONTEXT last = prevChainContext->rgpChain[0]->rgpElement[0]->pCertContext;
++
++        cert = CertFindCertificateInStore(store, last->dwCertEncodingType, 0, CERT_FIND_EXISTING, last, NULL);
++        CertFreeCertificateChain(prevChainContext);
++        if (!cert)
++        {
++            SetLastError(CRYPT_E_NOT_FOUND);
++            return NULL;
++        }
++    }
++    memset(&chain_para, 0, sizeof(chain_para));
++    chain_para.cbSize = sizeof(chain_para);
++    if (para->pszUsageIdentifier)
++    {
++        chain_para.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
++        chain_para.RequestedUsage.Usage.cUsageIdentifier = 1;
++        chain_para.RequestedUsage.Usage.rgpszUsageIdentifier = (LPSTR *)&para->pszUsageIdentifier;
++    }
++    if (findFlags & (CERT_CHAIN_FIND_BY_ISSUER_CACHE_ONLY_URL_FLAG | CERT_CHAIN_FIND_BY_ISSUER_CACHE_ONLY_FLAG))
++        chain_flags |= CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL;
++    engine = (findFlags & CERT_CHAIN_FIND_BY_ISSUER_LOCAL_MACHINE_FLAG) ? HCCE_LOCAL_MACHINE : HCCE_CURRENT_USER;
++
++    while ((cert = CertEnumCertificatesInStore(store, cert)))
++    {
++        DWORD chain_index, element_index;
++
++        if (certEncodingType && GET_CERT_ENCODING_TYPE(certEncodingType) &&
++            !(GET_CERT_ENCODING_TYPE(cert->dwCertEncodingType) & GET_CERT_ENCODING_TYPE(certEncodingType)))
++            continue;
++        if (!(findFlags & CERT_CHAIN_FIND_BY_ISSUER_NO_KEY_FLAG) && !find_chain_cert_has_key(cert, para, findFlags))
++            continue;
++        if (!CertGetCertificateChain(engine, cert, NULL, store, &chain_para, chain_flags, NULL, &chain))
++            continue;
++        if ((para->pszUsageIdentifier && (chain->TrustStatus.dwErrorStatus & CERT_TRUST_IS_NOT_VALID_FOR_USAGE)) ||
++            !find_chain_issuer_match(chain, para, findFlags, &chain_index, &element_index) ||
++            (para->pfnFindCallback && !para->pfnFindCallback(cert, para->pvFindArg)))
++        {
++            CertFreeCertificateChain(chain);
++            continue;
++        }
++        if (para->cbSize >= sizeof(*para))
++        {
++            if (para->pdwIssuerChainIndex) *para->pdwIssuerChainIndex = chain_index;
++            if (para->pdwIssuerElementIndex) *para->pdwIssuerElementIndex = element_index;
++        }
++        CertFreeCertificateContext(cert);
++        return chain;
++    }
++    SetLastError(CRYPT_E_NOT_FOUND);
+     return NULL;
+ }
+ 
+diff --git a/dlls/crypt32/crypt32_private.h b/dlls/crypt32/crypt32_private.h
+index f5918ef..68fd22f 100644
+--- a/dlls/crypt32/crypt32_private.h
++++ b/dlls/crypt32/crypt32_private.h
+@@ -165,6 +165,7 @@ HCRYPTPROV WINAPI I_CryptGetDefaultCryptProv(ALG_ID);
+ extern HINSTANCE hInstance;
+ 
+ void crypt_oid_init(void);
++void CRYPT_EnsureSystemRegistration(void);
+ void crypt_oid_free(void);
+ void crypt_sip_free(void);
+ void root_store_free(void);
+diff --git a/dlls/crypt32/main.c b/dlls/crypt32/main.c
+index b320c89..e2f489e 100644
+--- a/dlls/crypt32/main.c
++++ b/dlls/crypt32/main.c
+@@ -27,6 +27,7 @@
+ #include "wincrypt.h"
+ #include "winreg.h"
+ #include "winuser.h"
++#include "ntsecapi.h"
+ #include "i_cryptasn1tls.h"
+ #include "crypt32_private.h"
+ #include "wine/debug.h"
+@@ -308,16 +309,34 @@ ASN1encoding_t WINAPI I_CryptGetAsn1Encoder(HCRYPTASN1MODULE x)
+     return NULL;
+ }
+ 
+-BOOL WINAPI CryptProtectMemory(void *data, DWORD len, DWORD flags)
++/* Shizuku: CryptProtectMemory / CryptUnprotectMemory encrypt in place through RtlEncryptMemory / RtlDecryptMemory
++ * (cryptbase SystemFunction040/041), as on Windows. The length must be a multiple of CRYPTPROTECTMEMORY_BLOCK_SIZE; the
++ * CRYPTPROTECTMEMORY_* flags have the values of the RTL_ENCRYPT_OPTION_* flags they map to. */
++static BOOL protect_memory(void *data, DWORD len, DWORD flags, BOOL encrypt)
+ {
+-    static int fixme_once;
+-    if (!fixme_once++) FIXME("(%p %lu %08lx): stub\n", data, len, flags);
++    NTSTATUS status;
++
++    TRACE("(%p %lu %08lx)\n", data, len, flags);
++    if (len % CRYPTPROTECTMEMORY_BLOCK_SIZE || flags > CRYPTPROTECTMEMORY_SAME_LOGON)
++    {
++        SetLastError(ERROR_INVALID_PARAMETER);
++        return FALSE;
++    }
++    status = encrypt ? RtlEncryptMemory(data, len, flags) : RtlDecryptMemory(data, len, flags);
++    if (status)
++    {
++        SetLastError(RtlNtStatusToDosError(status));
++        return FALSE;
++    }
+     return TRUE;
+ }
+ 
++BOOL WINAPI CryptProtectMemory(void *data, DWORD len, DWORD flags)
++{
++    return protect_memory(data, len, flags, TRUE);
++}
++
+ BOOL WINAPI CryptUnprotectMemory(void *data, DWORD len, DWORD flags)
+ {
+-    static int fixme_once;
+-    if (!fixme_once++) FIXME("(%p %lu %08lx): stub\n", data, len, flags);
+-    return TRUE;
++    return protect_memory(data, len, flags, FALSE);
+ }
+diff --git a/dlls/crypt32/oid.c b/dlls/crypt32/oid.c
+index 9aa4a3e..aca0187 100644
+--- a/dlls/crypt32/oid.c
++++ b/dlls/crypt32/oid.c
+@@ -179,6 +179,35 @@ static char *CRYPT_GetKeyName(DWORD dwEncodingType, LPCSTR pszFuncName,
+     return szKey;
+ }
+ 
++/* Shizuku (wineport): Windows setup (and wineboot) runs DllRegisterServer of the cryptographic system DLLs, which
++ * registers their OID functions (wintrust: Authenticode encoders/decoders, SIPs, trust providers; cryptnet: revocation
++ * and URL retrieval). The Shizuku registry is volatile and has no setup step, so the first OID or SIP lookup of a
++ * process registers those DLLs that are present, once per boot (the PE file SIP key marks it). */
++void CRYPT_EnsureSystemRegistration(void)
++{
++    static LONG done;
++    static const WCHAR *const dlls[] = { L"wintrust.dll", L"cryptnet.dll" };
++    HRESULT (WINAPI *reg)(void);
++    HMODULE module;
++    HKEY key;
++    unsigned int i;
++
++    if (done || InterlockedCompareExchange(&done, 1, 0)) return;
++    if (!RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\"
++                       L"CryptSIPDllGetSignedDataMsg\\{C689AAB8-8E78-11D0-8C47-00C04FC295EE}", 0, KEY_READ, &key))
++    {
++        RegCloseKey(key);
++        return;
++    }
++    for (i = 0; i < ARRAY_SIZE(dlls); i++)
++    {
++        if (!(module = LoadLibraryW(dlls[i]))) continue;
++        if ((reg = (void *)GetProcAddress(module, "DllRegisterServer")) && FAILED(reg()))
++            ERR("%s: DllRegisterServer failed\n", debugstr_w(dlls[i]));
++        FreeLibrary(module);
++    }
++}
++
+ BOOL WINAPI CryptGetDefaultOIDDllList(HCRYPTOIDFUNCSET hFuncSet,
+  DWORD dwEncodingType, LPWSTR pwszDllList, DWORD *pcchDllList)
+ {
+@@ -190,6 +219,8 @@ BOOL WINAPI CryptGetDefaultOIDDllList(HCRYPTOIDFUNCSET hFuncSet,
+     TRACE("(%p, %ld, %p, %p)\n", hFuncSet, dwEncodingType, pwszDllList,
+      pcchDllList);
+ 
++    CRYPT_EnsureSystemRegistration();
++
+     keyName = CRYPT_GetKeyName(dwEncodingType, set->name, "DEFAULT");
+     rc = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keyName, 0, NULL, 0,
+      KEY_READ, NULL, &key, NULL);
+@@ -382,6 +413,7 @@ BOOL WINAPI CryptGetOIDFunctionAddress(HCRYPTOIDFUNCSET hFuncSet,
+     TRACE("(%p, %ld, %s, %08lx, %p, %p)\n", hFuncSet, dwEncodingType,
+      debugstr_a(pszOID), dwFlags, ppvFuncAddr, phFuncAddr);
+ 
++    CRYPT_EnsureSystemRegistration();
+     *ppvFuncAddr = NULL;
+     if (!(dwFlags & CRYPT_GET_INSTALLED_OID_FUNC_FLAG))
+     {
+diff --git a/dlls/crypt32/protectdata.c b/dlls/crypt32/protectdata.c
+index f7d9f43..2658ff3 100644
+--- a/dlls/crypt32/protectdata.c
++++ b/dlls/crypt32/protectdata.c
+@@ -42,6 +42,7 @@
+ #include "windef.h"
+ #include "winbase.h"
+ #include "wincrypt.h"
++#include "winreg.h"
+ #include "wine/debug.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(crypt);
+@@ -700,6 +701,59 @@ BOOL hash_matches_blob(HCRYPTHASH hHash, const DATA_BLOB *two)
+     return rc;
+ }
+ 
++/* Shizuku: the key derivation below also hashes a random 32-byte machine secret, so a blob can only be decrypted
++ * on the machine that produced it. The secret is created on first use (by whichever process creates the registry key;
++ * others wait for its value) and kept in HKLM\\Software\\Shizuku\\Crypt32\\ProtectData, value MachineKey.
++ * It is NOT bound to a user or logon (Shizuku has one user and no credential store), and since the Shizuku registry is
++ * volatile, data protected before a reboot cannot be unprotected after it. */
++#define MACHINE_SECRET_LEN 32
++static BOOL get_machine_secret(BYTE *secret)
++{
++    static BYTE cached[MACHINE_SECRET_LEN];
++    static LONG have;
++    HKEY key;
++    DWORD disp, type, size, tries;
++    HCRYPTPROV prov;
++    BOOL ok = FALSE;
++
++    if (have)
++    {
++        memcpy(secret, cached, MACHINE_SECRET_LEN);
++        return TRUE;
++    }
++    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Shizuku\\Crypt32\\ProtectData", 0, NULL, 0, KEY_ALL_ACCESS,
++                        NULL, &key, &disp))
++        return FALSE;
++    if (disp == REG_CREATED_NEW_KEY)
++    {
++        if (CryptAcquireContextW(&prov, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
++        {
++            ok = CryptGenRandom(prov, MACHINE_SECRET_LEN, cached) &&
++                 !RegSetValueExW(key, L"MachineKey", 0, REG_BINARY, cached, MACHINE_SECRET_LEN);
++            CryptReleaseContext(prov, 0);
++        }
++    }
++    else
++    {
++        for (tries = 0; tries < 1000 && !ok; tries++)
++        {
++            size = MACHINE_SECRET_LEN;
++            ok = !RegQueryValueExW(key, L"MachineKey", NULL, &type, cached, &size) && type == REG_BINARY &&
++                 size == MACHINE_SECRET_LEN;
++            if (!ok) Sleep(1);
++        }
++    }
++    RegCloseKey(key);
++    if (!ok)
++    {
++        ERR("no machine secret available\n");
++        return FALSE;
++    }
++    have = 1;
++    memcpy(secret, cached, MACHINE_SECRET_LEN);
++    return TRUE;
++}
++
+ /* create an encryption key from a given salt and optional entropy */
+ static
+ BOOL load_encryption_key(HCRYPTPROV hProv, DWORD key_len, const DATA_BLOB *salt,
+@@ -710,6 +764,7 @@ BOOL load_encryption_key(HCRYPTPROV hProv, DWORD key_len, const DATA_BLOB *salt,
+     char * szUsername = NULL;
+     DWORD dwUsernameLen;
+     DWORD dwError;
++    BYTE machine_secret[MACHINE_SECRET_LEN];
+ 
+     /* create hash for salt */
+     if (!salt || !phKey ||
+@@ -737,9 +792,16 @@ BOOL load_encryption_key(HCRYPTPROV hProv, DWORD key_len, const DATA_BLOB *salt,
+      * - randomness (from the salt)
+      * - user-supplied entropy
+      */
++    if (!get_machine_secret(machine_secret))
++    {
++        CryptDestroyHash(hSaltHash);
++        CryptMemFree(szUsername);
++        return FALSE;
++    }
+     if ((szUsername && !CryptHashData(hSaltHash,(LPBYTE)szUsername,dwUsernameLen,0)) ||
+         !CryptHashData(hSaltHash,crypt32_protectdata_secret,
+                                  sizeof(crypt32_protectdata_secret)-1,0) ||
++        !CryptHashData(hSaltHash,machine_secret,MACHINE_SECRET_LEN,0) ||
+         !CryptHashData(hSaltHash,salt->pbData,salt->cbData,0) ||
+         (pOptionalEntropy && !CryptHashData(hSaltHash,
+                                             pOptionalEntropy->pbData,
+@@ -758,6 +820,7 @@ BOOL load_encryption_key(HCRYPTPROV hProv, DWORD key_len, const DATA_BLOB *salt,
+     }
+ 
+     /* clean up */
++    SecureZeroMemory(machine_secret, sizeof(machine_secret));
+     CryptDestroyHash(hSaltHash);
+     CryptMemFree(szUsername);
+ 
+diff --git a/dlls/crypt32/rootstore.c b/dlls/crypt32/rootstore.c
+index 3aca97a..28c8e86 100644
+--- a/dlls/crypt32/rootstore.c
++++ b/dlls/crypt32/rootstore.c
+@@ -792,7 +792,13 @@ void CRYPT_ImportSystemRootCertsToReg(void)
+     }
+     CRYPT_RegReadSerializedFromReg(key, CERT_STORE_CERTIFICATE_CONTEXT_FLAG, cached, CERT_STORE_ADD_ALWAYS);
+     add_ms_root_certs(key, cached);
++#ifndef SHZ_NO_HOST_ROOTS
+     sync_trusted_roots_from_known_locations(key, cached);
++#else
++    /* Shizuku: there is no Unix host whose trusted roots could be imported; the store holds Wine's built-in
++     * Microsoft roots plus whatever was added to the registry store */
++    (void)sync_trusted_roots_from_known_locations;
++#endif
+ 
+ done:
+     RegCloseKey(key);
+diff --git a/dlls/crypt32/sip.c b/dlls/crypt32/sip.c
+index d9da19b..ad56ca5 100644
+--- a/dlls/crypt32/sip.c
++++ b/dlls/crypt32/sip.c
+@@ -605,18 +605,21 @@ static BOOL CRYPT_LoadSIP(const GUID *pgSubject)
+         goto error;
+     FreeLibrary(temp);
+     temp = NULL;
++    /* Shizuku: Create/Verify/Remove are optional. The Wine providers (wintrust) implement them as FIXME stubs, which
++     * the Shizuku build does not export; a SIP that provides Get/Put still loads, and the dispatchers below fail with
++     * ERROR_NOT_SUPPORTED for a missing entry point instead of pretending. */
+     sip.pfCreate = CRYPT_LoadSIPFunc(pgSubject, L"CreateIndirectData\\", &temp);
+-    if (!sip.pfCreate || temp != lib)
++    if (sip.pfCreate && temp != lib)
+         goto error;
+     FreeLibrary(temp);
+     temp = NULL;
+     sip.pfVerify = CRYPT_LoadSIPFunc(pgSubject, L"VerifyIndirectData\\", &temp);
+-    if (!sip.pfVerify || temp != lib)
++    if (sip.pfVerify && temp != lib)
+         goto error;
+     FreeLibrary(temp);
+     temp = NULL;
+     sip.pfRemove = CRYPT_LoadSIPFunc(pgSubject, L"RemoveSignedDataMsg\\", &temp);
+-    if (!sip.pfRemove || temp != lib)
++    if (sip.pfRemove && temp != lib)
+         goto error;
+     FreeLibrary(temp);
+     sip.hSIP = lib;
+@@ -665,6 +668,7 @@ BOOL WINAPI CryptSIPLoad
+         SetLastError(ERROR_INVALID_PARAMETER);
+         return FALSE;
+     }
++    CRYPT_EnsureSystemRegistration();
+     if (!CRYPT_IsSIPCached(pgSubject) && !CRYPT_LoadSIP(pgSubject))
+         return FALSE;
+ 
+@@ -695,7 +699,10 @@ BOOL WINAPI CryptSIPCreateIndirectData(SIP_SUBJECTINFO* pSubjectInfo, DWORD* pcb
+         return FALSE;
+     }
+     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
+-        ret = sip->info.pfCreate(pSubjectInfo, pcbIndirectData, pIndirectData);
++    {
++        if (sip->info.pfCreate) ret = sip->info.pfCreate(pSubjectInfo, pcbIndirectData, pIndirectData);
++        else SetLastError(ERROR_NOT_SUPPORTED);
++    }
+     TRACE("returning %d\n", ret);
+     return ret;
+ }
+@@ -750,7 +757,10 @@ BOOL WINAPI CryptSIPRemoveSignedDataMsg(SIP_SUBJECTINFO* pSubjectInfo,
+     TRACE("(%p %ld)\n", pSubjectInfo, dwIndex);
+ 
+     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
+-        ret = sip->info.pfRemove(pSubjectInfo, dwIndex);
++    {
++        if (sip->info.pfRemove) ret = sip->info.pfRemove(pSubjectInfo, dwIndex);
++        else SetLastError(ERROR_NOT_SUPPORTED);
++    }
+     TRACE("returning %d\n", ret);
+     return ret;
+ }
+@@ -767,7 +777,10 @@ BOOL WINAPI CryptSIPVerifyIndirectData(SIP_SUBJECTINFO* pSubjectInfo,
+     TRACE("(%p %p)\n", pSubjectInfo, pIndirectData);
+ 
+     if ((sip = CRYPT_GetCachedSIP(pSubjectInfo->pgSubjectType)))
+-        ret = sip->info.pfVerify(pSubjectInfo, pIndirectData);
++    {
++        if (sip->info.pfVerify) ret = sip->info.pfVerify(pSubjectInfo, pIndirectData);
++        else SetLastError(ERROR_NOT_SUPPORTED);
++    }
+     TRACE("returning %d\n", ret);
+     return ret;
+ }

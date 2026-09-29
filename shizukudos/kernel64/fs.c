@@ -281,15 +281,53 @@ int fs_truncate(fsnode_t *n, uint64_t size)
     return 0;
 }
 
-void fs_remove(fsnode_t *n)
+static void detach(fsnode_t *n)
 {
     fsnode_t **pp;
-    if (!n->parent || n->backing == FSB_DISK) return;
-    fs_notify(n, 2, NOTIFY_NAME(n));                           /* FILE_ACTION_REMOVED */
     for (pp = &n->parent->child; *pp; pp = &(*pp)->sibling)
         if (*pp == n) { *pp = n->sibling; break; }
+    n->sibling = 0;
+}
+
+void fs_remove(fsnode_t *n)
+{
+    if (!n->parent) return;
+    if (n->backing == FSB_DISK) {
+        /* volumes that can delete (vol->remove) do it on disk first; a refused delete keeps the node visible */
+        if (!n->vol || !n->vol->remove || n->vol->remove(n->vol, n)) { n->delete_pending = 0; return; }
+        detach(n);
+        kfree(n);
+        return;
+    }
+    fs_notify(n, 2, NOTIFY_NAME(n));                           /* FILE_ACTION_REMOVED (RAM volume; ipc_notify.c) */
+    detach(n);
     if (n->data && !n->readonly) { total_bytes -= n->cap; kfree(n->data); }
     kfree(n);
+}
+
+int fs_rename(fsnode_t *n, const char *newpath, int replace)
+{
+    char leaf[FS_NAME_MAX];
+    fsnode_t *dir = resolve(newpath, 1, leaf, sizeof leaf), *dst, *a;
+    int rc;
+    if (n->backing != FSB_DISK || !n->vol || !n->vol->rename || !n->parent) return -1;
+    if (!dir || !dir->is_dir || !leaf[0] || dir->backing != FSB_DISK || dir->vol != n->vol) return -1;
+    for (a = dir; a; a = a->parent) if (a == n) return -1;          /* into its own subtree */
+    dst = child_named(dir, leaf, strlen(leaf));
+    if (dst == n && !strcmp(n->name, leaf)) return 0;
+    if (dst && dst != n && (!replace || dst->open_count)) return -3;
+    rc = n->vol->rename(n->vol, n, dir, leaf, replace);
+    if (rc) return rc;
+    if (dst && dst != n) { detach(dst); kfree(dst); }
+    detach(n);
+    memcpy(n->name, leaf, strlen(leaf) + 1);
+    n->parent = dir;
+    {
+        fsnode_t **pp;
+        for (pp = &dir->child; *pp; pp = &(*pp)->sibling) ;
+        *pp = n;
+    }
+    return 0;
 }
 
 /* ---------------------------------------------------------------- initrd */

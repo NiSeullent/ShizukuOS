@@ -1,0 +1,19 @@
+{
+ "_comment": "String functions are ucrtbase's; __CxxFrameHandler and __CxxFrameHandler2 are the FH3 handler on x64",
+ "libs": ["ucrtbase"],
+ "forwarders": [
+  "__CxxFrameHandler = __CxxFrameHandler3",
+  "__CxxFrameHandler2 = __CxxFrameHandler3",
+  "memchr = ucrtbase.memchr",
+  "memcmp = ucrtbase.memcmp",
+  "memcpy = ucrtbase.memcpy",
+  "memmove = ucrtbase.memmove",
+  "memset = ucrtbase.memset",
+  "strchr = ucrtbase.strchr",
+  "strrchr = ucrtbase.strrchr",
+  "strstr = ucrtbase.strstr",
+  "wcschr = ucrtbase.wcschr",
+  "wcsrchr = ucrtbase.wcsrchr",
+  "wcsstr = ucrtbase.wcsstr"
+ ]
+}

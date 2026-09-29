@@ -70,7 +70,7 @@ LRESULT u32_call(uint64_t proc, HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 static void u32_service(const shz_callback_t *cb)
 {
-    const LRESULT r = u32_call(cb->wndproc, U2H(cb->hwnd), cb->message, cb->wparam, (LPARAM)cb->lparam);
+    const LRESULT r = u32_call_wndproc_hooked(cb->wndproc, U2H(cb->hwnd), cb->message, cb->wparam, (LPARAM)cb->lparam);
     NtUserReplyMessage(cb->id, (uint64_t)r);
 }
 
@@ -89,7 +89,7 @@ LRESULT u32_send(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, DWORD timeout_ms, in
         const int32_t st = NtUserSendMessage(&s);
         if (st < 0) { u32_err(st); if (failed) *failed = 1; return 0; }
         switch (s.result_kind) {
-        case SHZ_SEND_SAME_THREAD: return u32_call(s.wndproc, hwnd, msg, wp, lp);
+        case SHZ_SEND_SAME_THREAD: return u32_call_wndproc_hooked(s.wndproc, hwnd, msg, wp, lp);
         case SHZ_SEND_DONE: return (LRESULT)s.result;
         case SHZ_SEND_CALLBACK:
             u32_service(&s.cb);
@@ -104,11 +104,9 @@ LRESULT u32_send(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, DWORD timeout_ms, in
     }
 }
 
-/* per-thread record of the last retrieved message (GetMessageTime/Pos/ExtraInfo) */
-typedef struct { DWORD time; POINT pt; LPARAM extra; } msginfo_t;
-static msginfo_t *msginfo(void)
+u32_thread_t *u32_ts(void)
 {
-    msginfo_t *m;
+    u32_thread_t *m;
     if (g_tls == TLS_OUT_OF_INDEXES) return 0;
     m = TlsGetValue(g_tls);
     if (!m) {
@@ -119,8 +117,8 @@ static msginfo_t *msginfo(void)
 }
 static void note_message(const shz_msg_t *m)
 {
-    msginfo_t *i = msginfo();
-    if (i) { i->time = m->time; i->pt.x = m->pt.x; i->pt.y = m->pt.y; }
+    u32_thread_t *i = u32_ts();
+    if (i) { i->time = m->time; i->pt.x = m->pt.x; i->pt.y = m->pt.y; i->extra = (LPARAM)(LONG)m->pad1; }
 }
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID res)
@@ -145,8 +143,42 @@ static int retrieve(MSG *msg, HWND hwnd, UINT mn, UINT mx, UINT flags)
         if (st < 0) { u32_err(st); return -1; }
         if (g.result == SHZ_GM_RES_CALLBACK) { u32_service(&g.cb); continue; }
         if (g.result == SHZ_GM_RES_NONE) return 0;
-        if (msg) memcpy(msg, &g.msg, sizeof *msg);
+        if (g.msg.message >= SHZ_WM_WINEVENT && g.msg.message <= SHZ_WM_SENDCB) {   /* user32's own: consume, never return */
+            if (!(flags & PM_REMOVE)) {
+                shz_getmsg_t r;
+                for (;;) {                                        /* take exactly this one out (sent messages are served first) */
+                    memset(&r, 0, sizeof r);
+                    r.hwnd = g.msg.hwnd;
+                    r.min = r.max = g.msg.message;
+                    r.flags = PM_REMOVE;
+                    if (NtUserGetMessage(&r) < 0 || r.result != SHZ_GM_RES_CALLBACK) break;
+                    u32_service(&r.cb);
+                }
+                if (r.result != SHZ_GM_RES_MESSAGE) continue;
+                g.msg = r.msg;
+            }
+            u32_private_message(&g.msg);
+            continue;
+        }
+        if (g.msg.pad0 & SHZ_MSGF_MOUSE) {                         /* screen-coordinate mouse input: hit test and translate */
+            const int rm = (flags & PM_REMOVE) != 0;
+            if (!u32_mouse_translate(&g.msg, rm) || ((mn || mx) && (g.msg.message < mn || g.msg.message > mx))) {
+                if (rm) continue;                                     /* swallowed, or its final form is outside the filter */
+                return 0;
+            }
+        }
         note_message(&g.msg);
+        g.msg.pad0 = 0;
+        g.msg.pad1 = 0;
+        {
+            MSG m;
+            memcpy(&m, &g.msg, sizeof m);
+            if (u32_call_msg_hooks(&m, (flags & PM_REMOVE) != 0)) {     /* WH_KEYBOARD / WH_MOUSE discarded it */
+                if (flags & PM_REMOVE) continue;
+                return 0;
+            }
+            if (msg) *msg = m;
+        }
         return 1;
     }
 }
@@ -178,25 +210,6 @@ DLLAPI BOOL WINAPI WaitMessage(void)
     ShzGdiFlushAll();
     r = retrieve(0, 0, 0, 0, PM_NOREMOVE | SHZ_GM_WAIT);
     return r > 0;
-}
-
-DLLAPI BOOL WINAPI TranslateMessage(const MSG *msg)
-{
-    /* US layout, no dead keys, Shift/Caps state is not known (there is no keyboard driver): only the unshifted character
-     * for messages somebody posted. Returns TRUE if a WM_CHAR was posted, like the real function. */
-    UINT ch = 0;
-    UINT vk;
-    if (!msg || (msg->message != WM_KEYDOWN && msg->message != WM_SYSKEYDOWN)) return FALSE;
-    vk = (UINT)msg->wParam;
-    if (vk >= 'A' && vk <= 'Z') ch = vk + 32;
-    else if (vk >= '0' && vk <= '9') ch = vk;
-    else if (vk == VK_SPACE) ch = ' ';
-    else if (vk == VK_RETURN) ch = '\r';
-    else if (vk == VK_TAB) ch = '\t';
-    else if (vk == VK_BACK) ch = '\b';
-    else if (vk == VK_ESCAPE) ch = 27;
-    if (!ch) return FALSE;
-    return PostMessageW(msg->hwnd, msg->message == WM_KEYDOWN ? WM_CHAR : WM_SYSCHAR, ch, msg->lParam);
 }
 
 DLLAPI LRESULT WINAPI DispatchMessageW(const MSG *msg)
@@ -234,11 +247,11 @@ DLLAPI BOOL WINAPI InSendMessage(void)
     return NtUserThreadOp(&t) >= 0 && t.out0;
 }
 
-DLLAPI LONG WINAPI GetMessageTime(void) { msginfo_t *i = msginfo(); return i ? (LONG)i->time : 0; }
-DLLAPI LPARAM WINAPI GetMessageExtraInfo(void) { msginfo_t *i = msginfo(); return i ? i->extra : 0; }
+DLLAPI LONG WINAPI GetMessageTime(void) { u32_thread_t *i = u32_ts(); return i ? (LONG)i->time : 0; }
+DLLAPI LPARAM WINAPI GetMessageExtraInfo(void) { u32_thread_t *i = u32_ts(); return i ? i->extra : 0; }
 DLLAPI DWORD WINAPI GetMessagePos(void)
 {
-    msginfo_t *i = msginfo();
+    u32_thread_t *i = u32_ts();
     return i ? MAKELONG((WORD)i->pt.x, (WORD)i->pt.y) : 0;
 }
 
@@ -395,12 +408,35 @@ static LRESULT def_nchittest(HWND hwnd, LPARAM lp)
     if (x < wr.left || x >= wr.right || y < wr.top || y >= wr.bottom) return HTNOWHERE;
     nc_insets_of(hwnd, &l, &t, &r, &b);
     if (x >= wr.left + l && x < wr.right - r && y >= wr.top + t && y < wr.bottom - b) return HTCLIENT;
+    {
+        shz_wnd_t s;
+        const uint32_t style = u32_wq(hwnd, SHZ_WQ_STYLE, 0, &s) ? (uint32_t)s.v0 : 0;
+        if ((style & WS_THICKFRAME) && !(style & (WS_MAXIMIZE | WS_MINIMIZE))) {   /* the sizing frame (4 px) with its corners */
+            const int f = 4, cs = f + u32_metric(SM_CXSIZE);
+            const int L = x < wr.left + f, R = x >= wr.right - f, T = y < wr.top + f, B = y >= wr.bottom - f;
+            if (T || B) {
+                if (x < wr.left + cs) return T ? HTTOPLEFT : HTBOTTOMLEFT;
+                if (x >= wr.right - cs) return T ? HTTOPRIGHT : HTBOTTOMRIGHT;
+                return T ? HTTOP : HTBOTTOM;
+            }
+            if (L || R) {
+                if (y < wr.top + cs) return L ? HTTOPLEFT : HTTOPRIGHT;
+                if (y >= wr.bottom - cs) return L ? HTBOTTOMLEFT : HTBOTTOMRIGHT;
+                return L ? HTLEFT : HTRIGHT;
+            }
+        }
+    }
     if (y < wr.top + t && t >= SHZ_CAPTION_H && y >= wr.top + (t - SHZ_CAPTION_H)) return HTCAPTION;
     return HTBORDER;
 }
 
 DLLAPI LRESULT WINAPI DefWindowProcW(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    {
+        int handled;
+        const LRESULT r = u32_def_mouse(hwnd, msg, wp, lp, &handled);
+        if (handled) return r;
+    }
     switch (msg) {
     case WM_NCCREATE: return TRUE;
     case WM_NCACTIVATE: return TRUE;
@@ -423,12 +459,15 @@ DLLAPI LRESULT WINAPI DefWindowProcW(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_NCHITTEST: return def_nchittest(hwnd, lp);
     case WM_SETTEXT: {
         shz_wnd_t s;
+        int ok;
         memset(&s, 0, sizeof s);
         s.hwnd = H2U(hwnd);
         s.what = SHZ_WS_SET_TEXT;
         s.buf = (uint64_t)lp;
         s.buf_len = lp ? (uint32_t)wcslen((LPCWSTR)lp) : 0;
-        return NtUserWindowSet(&s) >= 0;
+        ok = NtUserWindowSet(&s) >= 0;
+        if (ok) u32_winevent(EVENT_OBJECT_NAMECHANGE, hwnd, OBJID_WINDOW, CHILDID_SELF);
+        return ok;
     }
     case WM_GETTEXT: {
         shz_wnd_t q;
@@ -456,6 +495,7 @@ DLLAPI LRESULT WINAPI DefWindowProcW(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case SC_MINIMIZE: ShowWindow(hwnd, SW_MINIMIZE); break;
         case SC_MAXIMIZE: ShowWindow(hwnd, SW_MAXIMIZE); break;
         case SC_RESTORE: ShowWindow(hwnd, SW_RESTORE); break;
+        case SC_MOVE: case SC_SIZE: u32_sys_move_size(hwnd, wp); break;
         default: break;
         }
         return 0;

@@ -1,0 +1,13 @@
+{
+ "_comment": "C++-named exports are aliases of the msvcp_* functions (Microsoft x64 name decoration)",
+ "libs": ["vcruntime140", "ucrtbase"],
+ "forwarders": [
+  "?_Xlength_error@std@@YAXPEBD@Z = msvcp_Xlength_error",
+  "?_Xout_of_range@std@@YAXPEBD@Z = msvcp_Xout_of_range",
+  "?_Xinvalid_argument@std@@YAXPEBD@Z = msvcp_Xinvalid_argument",
+  "?_Xruntime_error@std@@YAXPEBD@Z = msvcp_Xruntime_error",
+  "?_Xoverflow_error@std@@YAXPEBD@Z = msvcp_Xoverflow_error",
+  "?_Xbad_alloc@std@@YAXXZ = msvcp_Xbad_alloc",
+  "?_Xbad_function_call@std@@YAXXZ = msvcp_Xbad_function_call"
+ ]
+}

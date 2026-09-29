@@ -585,6 +585,8 @@ static int32_t route(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     return ipc_section_syscall(p, r, num, a1, a2, a3, a4, handled);
 }
 
+static int32_t ext_common(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
+
 int ipc_syscall_override(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
                          int32_t *st)
 {
@@ -619,6 +621,9 @@ int ipc_syscall_override(process_t *p, struct regs *r, uint32_t num, uint64_t a1
         if (a2 != 4) return 0;
         *st = handle_flags(p, a1, a3, a4, (uint64_t)stack_arg(p, r, 5), 0);
         return 1;
+    case SYS_NtQueueApcThread: case SYS_NtTestAlert:     /* in the misc range, whose dispatcher is krandom.c's */
+        *st = ext_common(p, r, num, a1, a2, a3, a4);
+        return 1;
     default:
         break;
     }
@@ -646,11 +651,6 @@ static int32_t ext_common(process_t *p, struct regs *r, uint32_t num, uint64_t a
     }
     st = route(p, r, num, a1, a2, a3, a4, &handled);
     return handled ? st : STATUS_INVALID_SYSTEM_SERVICE;
-}
-
-int32_t sys_ext_misc(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
-{
-    return ext_common(p, r, num, a1, a2, a3, a4);
 }
 
 int32_t sys_ext_ipc(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)

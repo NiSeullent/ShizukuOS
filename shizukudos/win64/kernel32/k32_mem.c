@@ -231,14 +231,27 @@ K32API HMODULE WINAPI LoadLibraryA(LPCSTR name)
     if (k32_utf8_to_wide(name, -1, w, 260) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
     return LoadLibraryW(w);
 }
+/* Search flags (LOAD_LIBRARY_SEARCH_*, LOAD_WITH_ALTERED_SEARCH_PATH) reach the loader through LdrLoadDll's first
+ * parameter as (flags << 1) | 1 (ntdll/ldr_search.c). IGNORE_CODE_AUTHZ_LEVEL and SAFE_CURRENT_DIRS change nothing
+ * here (no AppLocker; the current directory is already searched after the system directories); SYSTEM32_NO_FORWARDER
+ * means SYSTEM32. Data-file and image-resource mappings, DONT_RESOLVE_DLL_REFERENCES and REQUIRE_SIGNED_TARGET are not
+ * implemented and fail with ERROR_NOT_SUPPORTED. */
 K32API HMODULE WINAPI LoadLibraryExW(LPCWSTR name, HANDLE file, DWORD flags)
 {
-    (void)file;
-    if (flags & ~(DWORD)(LOAD_WITH_ALTERED_SEARCH_PATH | LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)) {
-        shz_set_last_error(ERROR_NOT_SUPPORTED);            /* AS_DATAFILE, IGNORE_CODE_AUTHZ_LEVEL ... are not implemented */
-        return 0;
-    }
-    return LoadLibraryW(name);
+    const DWORD search = LOAD_WITH_ALTERED_SEARCH_PATH | 0x1f00u;
+    const DWORD ignored = 0x10u | 0x2000u;                  /* IGNORE_CODE_AUTHZ_LEVEL, SAFE_CURRENT_DIRS */
+    SHZ_UNICODE_STRING us;
+    PVOID h = 0;
+    NTSTATUS st;
+    if (file || !name) { shz_set_last_error(ERROR_INVALID_PARAMETER); return 0; }
+    if (flags & 0x4000u) flags = (flags & ~0x4000u) | 0x800u;  /* SYSTEM32_NO_FORWARDER */
+    if (flags & ~(search | ignored)) { shz_set_last_error(ERROR_NOT_SUPPORTED); return 0; }
+    if ((flags & LOAD_WITH_ALTERED_SEARCH_PATH) && (flags & 0x1f00u)) { shz_set_last_error(ERROR_INVALID_PARAMETER); return 0; }
+    flags &= search;
+    RtlInitUnicodeString(&us, name);
+    st = LdrLoadDll(flags ? (PWSTR)(ULONG_PTR)(((ULONG_PTR)flags << 1) | 1) : 0, 0, &us, &h);
+    if (st) { k32_nt_error(st); return 0; }
+    return h;
 }
 K32API HMODULE WINAPI LoadLibraryExA(LPCSTR name, HANDLE file, DWORD flags)
 {

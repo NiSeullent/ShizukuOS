@@ -84,8 +84,11 @@ int main(void)
            info.host_height, info.num_scanouts, info.edid_size, info.edid_size ? info.edid_vendor : "-", info.edid_pref_width,
            info.edid_pref_height, info.num_capsets, info.pci_vendor, info.pci_device, (unsigned long long)info.device_features,
            (unsigned long long)info.driver_features);
-    CHECK(info.width == 1024 && info.height == 768 && info.pitch == 4096, "desktop mode 1024x768x32");
-    CHECK(info.backend == SHZ_GPU_BACKEND_BGA || info.backend == SHZ_GPU_BACKEND_VIRTIO, "a known display backend");
+    CHECK(info.width >= 640 && info.height >= 480 && info.pitch == info.width * 4 &&
+          (info.backend == SHZ_GPU_BACKEND_GOP || (info.width == 1024 && info.height == 768)),
+          "desktop mode: 1024x768x32 (the firmware's mode on the UEFI GOP backend)");
+    CHECK(info.backend == SHZ_GPU_BACKEND_BGA || info.backend == SHZ_GPU_BACKEND_VIRTIO || info.backend == SHZ_GPU_BACKEND_GOP,
+          "a known display backend");
     if (info.backend == SHZ_GPU_BACKEND_VIRTIO) {
         CHECK((info.features & (SHZ_GPU_FEAT_2D | SHZ_GPU_FEAT_CURSOR)) == (SHZ_GPU_FEAT_2D | SHZ_GPU_FEAT_CURSOR), "virtio-gpu: 2D and cursor");
         CHECK(info.pci_vendor == 0x1af4 && info.pci_device == 0x1050, "virtio-gpu: modern PCI id 1af4:1050");
@@ -99,8 +102,8 @@ int main(void)
         CHECK(info.stats.transfers_2d >= 1 && info.stats.flushes == info.stats.transfers_2d,
               "virtio-gpu: the desktop reached the host through TRANSFER_TO_HOST_2D + RESOURCE_FLUSH");
     } else {
-        CHECK(ShzGpuGetEdid(edid, sizeof edid, &elen) == NT_NOT_SUPPORTED, "BGA: no EDID (STATUS_NOT_SUPPORTED)");
-        CHECK(info.features == 0, "BGA: no accelerated features");
+        CHECK(ShzGpuGetEdid(edid, sizeof edid, &elen) == NT_NOT_SUPPORTED, "BGA/GOP: no EDID (STATUS_NOT_SUPPORTED)");
+        CHECK(info.features == 0, "BGA/GOP: no accelerated features");
     }
 
     memset(&wc, 0, sizeof wc);
@@ -134,7 +137,7 @@ int main(void)
         if (info.backend == SHZ_GPU_BACKEND_VIRTIO)
             CHECK(dt == dp && df == dp && db == 4 * dpx, "virtio-gpu: one TRANSFER_TO_HOST_2D + RESOURCE_FLUSH per rectangle, 4 bytes per pixel");
         else
-            CHECK(dt == 0 && db == 0 && df == 0, "BGA: no virtio commands");
+            CHECK(dt == 0 && db == 0 && df == 0, "BGA/GOP: no virtio commands");
     }
     printf("GUI-READY: gpu2d-b\n");
     pump_for(hwnd, 1500);
@@ -149,7 +152,7 @@ int main(void)
         CHECK(ShzGpuSetCursor(img, 64, 0, 0, 0) < 0, "a hot spot outside the 64x64 image is refused");
         CHECK(ShzGpuQuery(&s1) >= 0 && s1.stats.cursor_cmds >= 3, "virtio-gpu: cursor queue commands were answered");
     } else {
-        CHECK(c1 == NT_NOT_SUPPORTED && c2 == NT_NOT_SUPPORTED && c3 == NT_NOT_SUPPORTED, "BGA: no cursor plane (STATUS_NOT_SUPPORTED)");
+        CHECK(c1 == NT_NOT_SUPPORTED && c2 == NT_NOT_SUPPORTED && c3 == NT_NOT_SUPPORTED, "BGA/GOP: no cursor plane (STATUS_NOT_SUPPORTED)");
     }
     CHECK(DestroyWindow(hwnd), "DestroyWindow");
     UnregisterClassW(L"ShzGpu2D", inst);

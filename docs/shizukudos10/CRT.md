@@ -1,0 +1,179 @@
+# ShizukuDOS 10 Win64: Microsoft C/C++ runtime DLLs
+
+This page covers `ucrtbase.dll` (the Universal CRT, reached directly or through the `api-ms-win-crt-*-l1-1-0`
+contracts), `vcruntime140.dll`, `vcruntime140_1.dll` and `msvcp140.dll` for the Shizuku Win64 runtime. The modules
+live under `shizukudos/win64/dlls/<name>/` and are built by `shizukudos/win64/build.py`. As for every Shizuku module,
+the exports are exactly the `DLLAPI` definitions plus the `module.json` aliases.
+
+## Approach and licence
+
+Everything here is written for this project and licensed GPL-2.0-only. No third-party code is copied or vendored, and
+nothing is added to `shizukudos/upstream/manifest.json`. Wine's `.spec` files were used only as a list of export names
+to check coverage against. Behaviour follows the C and C++ standards, Microsoft's documentation of the UCRT and of the
+x64 exception ABI, and what MSVC and clang emit (checked on clang's `-target x86_64-pc-windows-msvc` output). CRT
+headers are never included, because mingw's headers declare dllimport versions of the functions these DLLs define.
+`crtos.h` declares the kernel32 imports with plain C types instead.
+
+## Demand (measured first)
+
+The CRT imports were measured with a pefile scan of every PE32+ image in the three reference trees (Chromium 157
+`chrome-win`, Electron, VSCodium), including delay-load imports:
+
+| DLL / contract | functions imported | importers |
+|---|---|---|
+| api-ms-win-crt-runtime / stdio / string / heap / math / convert / locale / utility | 81 distinct | dxil.dll, OpenConsole.exe, conpty.dll, os_proxy_resolver.node |
+| vcruntime140.dll | 8 | os_proxy_resolver.node |
+| vcruntime140_1.dll, msvcp140.dll, ucrtbase.dll by name | 0 | (none) |
+
+Chromium's own binaries link the CRT statically, so they import none of these DLLs.
+
+**Coverage before and after.** Before this work: 0 of 89 CRT imports resolved. After: 89 of 89 resolve. In
+`import_coverage.py`, the api-ms-win-crt contracts went from 0 to 43/43 functions for Electron and from 0 to 81/81 for
+VSCodium. vcruntime140 went from 0 to 8/8 (the `.node` importer is outside import_coverage's scan).
+
+## ucrtbase.dll (847 exports)
+
+- **Startup and runtime:** `_initterm`/`_initterm_e`, onexit tables (encoded pointers), `atexit`/`at_quick_exit`,
+  `exit`/`_exit`/`quick_exit` in C order (TLS callbacks, then atexit, then flush), argv/wargv parsing with Microsoft's
+  quoting rules, narrow and wide environments, `_beginthreadex`, `signal`/`raise` (per-thread SIGFPE/SIGILL/SIGSEGV),
+  `abort` (exit code 3), `terminate`, the invalid-parameter handlers, and `_seh_filter_exe`/`_seh_filter_dll`.
+- **Heap and errno:** the heap is built on the process heap, including the aligned and `_recalloc` families. `errno` and
+  `_doserrno` are per thread, with Microsoft's Win32-to-errno table.
+- **Strings:** the `mem*`/`str*`/`wcs*` functions, including the `_s` variants with `_TRUNCATE`, plus `strtok_s`,
+  `strerror` (Microsoft's texts) and `_sys_errlist`.
+- **Formatted I/O:** printf and scanf through `__stdio_common_v*`, with Microsoft semantics: legacy/standard option
+  bits, `%n`, `%Z`, `nan(ind)`, the three-digit exponent option, and the secure-size rules.
+- **Streams and descriptors:** text mode translates CR LF and treats Ctrl-Z as EOF. Also covered: UTF-16 and UTF-8
+  modes, `_wsopen_dispatch`, `_dup`/`_dup2`, `_chsize`, `_stat64`, `_findfirst64`, `tmpfile`, and the `fseek`/`ftell`
+  text-mode adjustment.
+- **Conversions:** exact `strtod` (big-integer comparison with a Clinger fast path, hex floats, `_atodbl`); `strtol`
+  and family with `long` as 32 bits; `_itoa`, `_ecvt`, `_fcvt` and `_gcvt`.
+- **Math:** the math functions are this project's own, built on double-double arithmetic with table-driven kernels
+  (Cody-Waite and Payne-Hanek reduction with 1408 bits of 2/pi, Stirling and zeta series for lgamma, Lentz continued
+  fractions for erfc). The exact functions (`fma`, `fmod`, `remainder`, `remquo`, `sqrt`, rounding, scaling) are
+  exact. `_controlfp`/`fenv` use Microsoft's encodings, and the long-double aliases (`acoshl` and others) are
+  `module.json` aliases.
+- **Time:** `time`/`mktime`/`localtime` for 32 and 64 bits, and TZ from the environment (with US rules) or from
+  `GetTimeZoneInformation`. `strftime` follows Microsoft's `%c`/`%x`/`%X`, the `#` flag and `%z`.
+- **Locale:** only the "C" locale (see the next section).
+
+### Locale
+
+`setlocale` accepts "C", "POSIX" and "" (all mean C); anything else fails, as for a missing locale. `localeconv`
+returns the C values, and `___lc_codepage_func()` returns 0, as Microsoft's CRT does in the C locale. Narrow/wide
+conversion (`mbtowc`, `mbstowcs`, and the `_l` variants) is the C locale's byte-to-code-unit identity, 0x00..0xFF. The
+UTF-8 `c16`/`c32` functions are real. The narrow ctype table is the C locale's. Wide classification (`iswalpha` and
+the others, `wctype`) uses Unicode 14 category tables generated by `gen_wctype.py`. `towupper`/`towlower` map ASCII
+only.
+
+### Verification (host, before any guest run)
+
+`shizukudos/win64/tests/host_ucrt/host_ucrt.py` compiles the CRT core for Linux (`-DSHZ_HOST_TEST`) and compares it
+with glibc:
+
+- **Math:** 11,376,876 samples across all functions (200,000 per function, including huge and subnormal arguments).
+  Maximum error against the 64-bit-mantissa reference is 0.5010 ulp. Only 3 results differ from the correctly rounded
+  value (two cosines and one exp of a small argument, all flagged as near-ties by the checker). The exact functions match glibc
+  bit for bit.
+- **Formatting and parsing:** 1,261,379 checks of `strtod`, printf, scanf, `strtol`, `qsort`, time and miscellaneous
+  functions, with 0 failures. `strtod` and printf are checked against exact decimal arithmetic.
+
+## vcruntime140.dll (66 exports) and vcruntime140_1.dll (3 exports)
+
+The exception engine (`dlls/vcruntime140/ehengine.h`) is compiled into both DLLs. vcruntime140_1 decodes the FH4
+tables and reaches vcruntime140's per-thread state through its `__current_exception()` export, as the real pair does.
+
+- **C++ exceptions:** `_CxxThrowException`, and `__CxxFrameHandler3` (with `__CxxFrameHandler` and
+  `__CxxFrameHandler2` as aliases). The handlers support catch by reference, by value (copy constructors, including
+  virtual-base ones), by pointer with `this` adjustment, `catch(...)` (which catches SEH exceptions only under `/EHa`,
+  never for `HT_IsStdDotDot`), const/volatile rules, rethrow (`throw;`), `noexcept` (`FI_EHNOEXCEPT` for FH3 and the
+  NoExcept bit for FH4), `_set_se_translator`, `std::uncaught_exceptions`, and `__current_exception(_context)`.
+- **FH4 (`__CxxFrameHandler4`):** decodes the compressed tables (FuncInfo4, unwind map with the three action kinds,
+  try map, handler arrays with continuation addresses, and separated ip-to-state maps).
+- **SEH for C:** `__C_specific_handler` handles filters, `__except` (the code is passed in RAX) and `__finally`;
+  `__C_specific_handler_noexcept` and `_local_unwind` are also provided.
+- **setjmp/longjmp:** `__intrinsic_setjmp` and `__intrinsic_setjmpex`. `longjmp` unwinds through `__finally` blocks and
+  destructors when the buffer was filled by the `ex` variant.
+- **RTTI:** `__RTtypeid`, `__RTDynamicCast` and `__RTCastToVoid`, throwing `std::bad_typeid` and `std::bad_cast` with
+  MSVC's class layout.
+- **Helpers:** `__std_exception_copy`/`destroy`, `__std_type_info_name`/`compare`/`hash`/`destroy_list`, `__unDName`,
+  `_purecall`, `__report_gsfailure`, and the `__vcrt_*` wrappers. The string functions are forwarders to ucrtbase.
+
+### How exceptions are dispatched here
+
+The system dispatcher (ntdll) walks the frames and calls each language handler. When a handler finds a matching catch,
+it does the rest itself:
+
+1. Build the catch object.
+2. Walk from the exception's origin context up to the catching frame, calling every frame's handler with
+   `EXCEPTION_UNWINDING` so that destructors and `__finally` blocks run.
+3. Unwind the catching frame to the try's entry state.
+4. Call the catch funclet from the current, deep stack, through a small thunk that has its own handler.
+5. Resume the catching frame at the continuation the funclet returns.
+
+This mirrors Windows' consolidation callback. It is needed because the Shizuku ntdll's `RtlUnwindEx` supports neither
+`STATUS_UNWIND_CONSOLIDATE` nor collided unwinds, and it cannot be changed from here. The origin context comes from a
+vectored handler that vcruntime140 registers to note every dispatch.
+
+While a catch runs, a heap record describes it. Exceptions raised inside the catch skip the frames the catch already
+unwound (the dead zone between the thunk and the catching frame). In the catching frame itself, the search restarts
+below the try being handled. Records left behind by foreign unwinders are pruned by stack address.
+
+### Verified in the guest
+
+- **T_CRT_EH.EXE (23 checks):** compiled with `clang++ -target x86_64-pc-windows-msvc` and linked by `lld-link` against
+  the Shizuku import libraries (`build.py` builds `tests/t_*.cpp` this way), so it has the shape of an MSVC build: FH3
+  tables and funclets, IAT in `.rdata`, and imports from vcruntime140, ucrtbase and msvcp140. It covers every item in
+  the list above, plus threads throwing concurrently. It also runs two child processes to confirm that `std::terminate`
+  is called for a `noexcept` violation and for a destructor that throws during unwinding.
+- **T_CRT_FH4.EXE (7 checks):** covers FH4 honestly. No available compiler emits FH4 tables (clang produces FH3 only),
+  so a faithful MSVC-built FH4 test is not possible here. Instead, an assembly function carries hand-encoded FH4
+  tables, and a real `_CxxThrowException` from inside it is dispatched by the system to `__CxxFrameHandler4`. The test
+  exercises nested tries, both destructor-action kinds, one- and two-byte compressed integers, an RVA continuation
+  selected by index, a continuation address returned by the funclet, and the NoExcept bit (in a child process). These
+  checks prove the decoder and the unwinding against this project's reading of the FH4 layout, not against an
+  MSVC-compiled binary.
+- **T_CRT_RT.EXE (71 checks) and T_CRT_IO.EXE (44 checks):** cover the runtime, stdio and descriptors through the
+  import table and the api-ms-win-crt contracts.
+
+## msvcp140.dll (39 exports)
+
+No measured image imports msvcp140, so this module is small and covers only the parts the MSVC STL headers call out of
+line:
+
+- The `std::_Xlength_error` family (`_Xout_of_range`, `_Xinvalid_argument`, `_Xruntime_error`, `_Xoverflow_error`,
+  `_Xbad_alloc`, `_Xbad_function_call`). They throw the standard classes with MSVC's layout and RTTI and are exported
+  under their decorated names.
+- `_Mtx_*` over SRW locks, in the layout of `_Mtx_internal_imp_t`, including recursive and timed mutexes.
+- `_Cnd_*` over condition variables.
+- `_Thrd_*`, `_Xtime_get_ticks`, and `_Query_perf_counter`/`_Query_perf_frequency`.
+
+## Loader and contract table
+
+`kernel64/ldr.c` maps `api-ms-win-crt-{runtime,stdio,string,heap,math,convert,locale,utility,time,environment,
+filesystem}-l1` to ucrtbase.dll, under the "everything else" block. Only contracts that ucrtbase really implements are
+mapped. MSVC-linked images keep their IAT in read-only `.rdata`. The loader now binds imports through the image page
+(the kmerge `image_poke` change, identical to the fix made here first); without it, every lld-link or link.exe image
+failed to load with c0000005.
+
+## Gaps
+
+- **ucrtbase:** the conio, multibyte (`_mbs*`), process (`_spawn*`/`_exec*`) and private contracts are not
+  implemented and stay unmapped. There are no locales other than C, and code pages are not converted. `towupper` and
+  `towlower` are ASCII only, and `wcstol` accepts ASCII digits only. There is no complex math and no Bessel functions.
+  `_fstat64` reports the current time for file times, because the system has no per-handle times.
+- **vcruntime140:** these MSVC-internal helpers, which no measured image imports, are absent: `_CreateFrameInfo`,
+  `_FindAndUnlinkFrame`, `__BuildCatchObject(Helper)`, `__TypeMatch`, `__CxxExceptionFilter`, `__FrameUnwindFilter` and
+  `__GetPlatformExceptionInfo`. `__unDName` undecorates type names and qualified names only. `dynamic_cast` requires a
+  public, unambiguous target; with repeated bases it picks the instance at or below the source subobject.
+- **Limits from the unchangeable ntdll:**
+  - When a filter returns `EXCEPTION_CONTINUE_EXECUTION`, ntdll resumes from the frame's context. The handler here
+    resumes the true origin itself when the vectored handler saw it.
+  - A foreign unwinder (another runtime's `RtlUnwindEx`) that crosses an active catch calls the handlers of already
+    unwound frames again.
+  - An exception thrown inside a catch that is handling a hardware fault cannot be dispatched past the fault, because
+    `KiUserExceptionDispatcher` has no unwind information.
+- **FH4:** checked only on hand-encoded tables (see above). The parent-state offset convention, the ip-map boundaries
+  and the base of non-RVA continuation offsets follow this project's reading of the format.
+- **msvcp140:** there are no iostreams, locales, filesystem or `system_error` (`_Throw_Cpp_error`), and no
+  `_Cnd_*_at_thread_exit`.

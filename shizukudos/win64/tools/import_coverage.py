@@ -4,7 +4,8 @@
 
 Static import audit: every PE32+ under the given paths is parsed for its import and delay-import tables; each imported
 (DLL, function) is checked against the export tables of the ntdll.dll / kernel32.dll this repository builds
-(shizukudos/win64/build.py) and of every extra module built from win64/dlls/, using the same api-ms-* schema the Kernel64 loader uses (kernel64/ldr.c apiset_schema).
+(shizukudos/win64/build.py) and of every extra module built from win64/dlls/, using the same API-set contract table and matching rules the Kernel64 loader uses (kernel64/apiset_contracts.txt through
+gen_apiset_table.lookup, which the host tests keep identical to kernel64/apiset.c).
 Imports of DLLs shipped with the application itself are internal and skipped. Everything else is a system DLL
 that must exist for the image to load at all: those without a Shizuku implementation are listed as load blockers.
 
@@ -16,7 +17,7 @@ NAME=PATH. Beyond the per-DLL table the tool reports, per application:
     whatever function the linker numbered at that position: such imports count as unresolved ("ordinal-unpinned");
     with --ordinal-ref (default: the Wine PE build directory, if installed) the ordinal is translated to the name
     it denotes on Windows, from that reference DLL's export table;
-  * api-ms-*/ext-ms-* contract names that kernel64/ldr.c does not map ("apiset-unmapped"): the loader fails such an
+  * api-ms-*/ext-ms-* contract names the contract table does not serve ("apiset-unmapped"): the loader fails such an
     import with STATUS_DLL_NOT_FOUND even when the hosting DLL exists, so they are load blockers in their own right;
   * loader features each image needs, read from the PE headers (delay-load directory, TLS directory and callbacks,
     exception directory, load-config/guard flags, dependent-load flags, high-entropy VA, large SizeOfImage,
@@ -60,6 +61,8 @@ except ImportError:
     raise SystemExit("pip install pefile")
 
 REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gen_apiset_table as apiset  # noqa: E402
 CHAIN_TOOL = Path(__file__).resolve().parent / "startup_chain.py"
 SCHEMA_VERSION = "shz.import-coverage.v2"
 CHAIN_SCHEMA_VERSION = "shz.startup-chain-summary.v1"
@@ -80,8 +83,8 @@ GUARD_FLAGS = {"cf_instrumented": 0x100, "cfw_instrumented": 0x200, "cf_function
                "xfg_enabled": 0x800000}
 MACHINES = {0x8664: "AMD64", 0x14c: "i386", 0xaa64: "ARM64", 0x1c4: "ARMNT", 0xa641: "ARM64EC"}
 # Where a contract family's functions live, by the API-set naming convention and this runtime's convention that
-# api-ms-win-core-* is hosted by kernel32 (kernel64/ldr.c). A suggestion for the schema, not a claim that the host
-# exports the functions: a contract stays unmapped until ldr.c lists it and the host really exports every name.
+# api-ms-win-core-* is hosted by kernel32. A suggestion for kernel64/apiset_contracts.txt, not a claim that the host
+# exports the functions: a contract stays unmapped until the table has a row for it.
 SUGGESTED_HOSTS = (("api-ms-win-crt-", "ucrtbase.dll"), ("api-ms-win-core-winrt-", "combase.dll"), ("api-ms-win-core-com-", "ole32.dll"),
                    ("api-ms-win-core-", "kernel32.dll"), ("api-ms-win-shcore-", "shcore.dll"), ("api-ms-win-power-", "powrprof.dll"),
                    ("api-ms-win-ntuser-", "user32.dll"), ("api-ms-win-shell-", "shell32.dll"), ("api-ms-win-security-", "advapi32.dll"),
@@ -96,10 +99,8 @@ def suggested_host(contract):
 
 
 def schema():
-    text = (REPO / "shizukudos/kernel64/ldr.c").read_text()
-    block = text[text.index("apiset_schema[]"):]
-    block = block[:block.index("{0, 0}")]
-    return {m.group(1): m.group(2) for m in re.finditer(r'\{"([^"]+)", "([^"]+)"\}', block)}
+    """The loader's contract table (rows of kernel64/apiset_contracts.txt)."""
+    return apiset.parse()
 
 
 def exports(dll, with_ordinals=False):
@@ -113,7 +114,7 @@ def exports(dll, with_ordinals=False):
 
 
 def contract_prefix(name):
-    """api-ms-win-core-file-l2-1-0.dll -> api-ms-win-core-file-l2 (the granularity of the ldr.c schema)."""
+    """api-ms-win-core-file-l2-1-0.dll -> api-ms-win-core-file-l2 (the granularity of the contract table)."""
     n = name.lower()
     if n.endswith(".dll"):
         n = n[:-4]
@@ -122,13 +123,12 @@ def contract_prefix(name):
 
 def resolve(name, api_schema):
     """-> (provider dll or None, kind). kind: direct | apiset | apiset-unmapped"""
-    n = name.lower()
-    if n.startswith(("api-", "ext-")):
-        for prefix, host in api_schema.items():
-            if n.startswith(prefix + "-"):
-                return host, "apiset"
-        return None, "apiset-unmapped"
-    return n, "direct"
+    result, row = apiset.lookup(api_schema, name[:-4] if name.lower().endswith(".dll") else name)
+    if result == apiset.NOT_APISET:
+        return name.lower(), "direct"
+    if result == apiset.OK:
+        return row.host, "apiset"
+    return None, "apiset-unmapped"
 
 
 def read_tls_callbacks(pe):
@@ -487,13 +487,13 @@ def print_app(app, summary, ours, top):
           f"{summary['resolved']} resolve against the built Shizuku DLLs ({summary['coverage_pct']:.1f}%)\n")
     print(f"{'system DLL / contract':44} {'imported':>8} {'provided':>9} {'load-time':>10} {'delay':>6} {'ordinal':>8}")
     for dll, r in list(summary["system_dlls"].items())[:top]:
-        mark = "" if r["have_dll"] else ("  <- contract not in ldr.c schema" if r["kind"] == "apiset-unmapped" else "  <- no implementation")
+        mark = "" if r["have_dll"] else ("  <- contract not in the loader contract table" if r["kind"] == "apiset-unmapped" else "  <- no implementation")
         print(f"{dll:44} {r['imported']:8} {r['provided']:9} {len(r['load_time_images']):10} {len(r['delay_only_images']):6} {r['ordinal_imports']:8}{mark}")
     print(f"\nload blockers (DLLs/contracts imported at load time with no Shizuku implementation): {len(summary['load_blockers'])}")
     for dll, users in list(summary["load_blockers"].items())[:top]:
         print(f"  {dll:42} {summary['system_dlls'][dll]['imported']:5} functions, needed at load time by {len(users)} image(s)")
     if summary["apiset_unmapped"]:
-        print(f"\napi-ms-*/ext-ms-* contracts not mapped by kernel64/ldr.c apiset_schema: {len(summary['apiset_unmapped'])}")
+        print(f"\napi-ms-*/ext-ms-* contracts not in the loader contract table (kernel64/apiset_contracts.txt): {len(summary['apiset_unmapped'])}")
         for c, r in list(summary["apiset_unmapped"].items())[:top]:
             print(f"  {c:42} {r['functions']:5} functions, {len(r['images'])} image(s){', load-time' if r['load_time'] else ', delay-load only'}"
                   f"; host by name family: {r['suggested_host'] or '?'}")
@@ -534,6 +534,8 @@ def chain_reason(why):
     """startup_chain.py's failure text -> the import_coverage status vocabulary."""
     if why.startswith("not exported"):
         return "fn-missing"
+    if why.startswith("API-set"):                          # not in the table / version too new / host not built
+        return "apiset-unmapped" if "host" not in why else "dll-missing"
     return {"DLL not found": "dll-missing", "api set contract not mapped": "apiset-unmapped"}.get(why, why)
 
 
@@ -780,7 +782,7 @@ def main():
             fn = a["fn"] + (f" (={a['ordinal_name']})" if a.get("ordinal_name") else "")
             print(f"{a['rank']:4} {a['dll']:40} {fn:44} {a['status']:16} {a['apps_load']:6} {a['images_load']:5} {a['apps_delay']:6} {a['images_delay']:5}")
     meta = {"schema": SCHEMA_VERSION, "build": str(args.build), "shizuku_dlls": {k: len(v["names"]) for k, v in ours.items()},
-            "apiset_schema": api_schema, "ordinal_ref": str(ordinal_ref.dir) if ordinal_ref.dir else None,
+            "apiset_schema": {r.name: r.host for r in api_schema}, "ordinal_ref": str(ordinal_ref.dir) if ordinal_ref.dir else None,
             "excludes": args.exclude}
     chains = [startup_chain_summary(exe, args.build, api_schema, ours, ordinal_ref) for exe in args.startup_chain]
     worklist = chain_worklist(chains)

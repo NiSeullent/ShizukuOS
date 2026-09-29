@@ -30,12 +30,15 @@ void gdi_free_pixels(uint32_t *p, uint64_t n, int big)
 }
 
 /* ---------------------------------------------------------------- handle table */
+static unsigned g_nobjs, g_peak_objs;                          /* live non-stock objects (GetGuiResources) */
+
 HGDIOBJ gdi_obj_new(int type, void *p, int stock)
 {
     unsigned i;
     for (i = 1; i < GDI_MAX_OBJECTS; ++i)
         if (!g_objs[i].type) {
             gobj_t *o = &g_objs[i];
+            if (!stock && ++g_nobjs > g_peak_objs) g_peak_objs = g_nobjs;
             o->gen = (uint8_t)(o->gen + 1);
             o->type = (uint8_t)type;
             o->stock = (uint8_t)stock;
@@ -61,12 +64,24 @@ void *gdi_obj_get(HGDIOBJ h, int type, int *type_out)
     gobj_t *o = obj_slot(h);
     if (!o) return 0;
     if (type_out) *type_out = o->type;
-    if (type && o->type != type && !(type == OBJ_DC && o->type == OBJ_MEMDC) && !(type == OBJ_PEN && o->type == OBJ_EXTPEN))
+    if (type && o->type != type && !(type == OBJ_DC && (o->type == OBJ_MEMDC || o->type == OBJ_ENHMETADC)) &&
+        !(type == OBJ_PEN && o->type == OBJ_EXTPEN))
         return 0;
     return o->p;
 }
 int gdi_obj_type(HGDIOBJ h) { gobj_t *o = obj_slot(h); return o ? o->type : 0; }
-void gdi_obj_free(HGDIOBJ h) { gobj_t *o = obj_slot(h); if (o) { o->type = 0; o->p = 0; o->stock = 0; } }
+void gdi_obj_free(HGDIOBJ h) { gobj_t *o = obj_slot(h); if (o) { if (!o->stock && g_nobjs) --g_nobjs; o->type = 0; o->p = 0; o->stock = 0; } }
+
+/* Private exports for user32 (not Windows APIs). */
+DLLAPI DWORD WINAPI ShzGdiObjectCount(DWORD *peak)
+{
+    DWORD n;
+    GDI_ENTER();
+    n = g_nobjs;
+    if (peak) *peak = g_peak_objs;
+    GDI_LEAVE();
+    return n;
+}
 static int obj_is_stock(HGDIOBJ h) { gobj_t *o = obj_slot(h); return o && o->stock; }
 
 /* A window backing is being freed (the window is gone): DCs that still point at it must not touch it again. */
@@ -390,6 +405,11 @@ void gdi_dc_defaults(dc_t *dc)
     dc->gfxmode = GM_COMPATIBLE;
     dc->dcpen = 0;
     dc->dcbrush = 0xffffff;
+    dc->xf.eM11 = dc->xf.eM22 = 1.0f;
+    dc->xf.eM12 = dc->xf.eM21 = dc->xf.eDx = dc->xf.eDy = 0.0f;
+    dc->xf_dx = dc->xf_dy = 0;
+    dc->arcdir = AD_COUNTERCLOCKWISE;
+    dc->miter = 10.0f;
 }
 
 static bitmap_t *g_default_bitmap;
@@ -426,7 +446,6 @@ DLLAPI BOOL WINAPI DeleteDC(HDC h)
     dc = gdi_dc_get(h);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
     if (dc->hwnd) {                                                 /* window DC: push what was drawn */
-        extern void gdi_window_dc_flush(dc_t *dc);
         gdi_window_dc_flush(dc);
     }
     if (dc->memdc && dc->hbmp) {
@@ -437,9 +456,12 @@ DLLAPI BOOL WINAPI DeleteDC(HDC h)
         dc_t *s = dc->saved;
         dc->saved = s->saved;
         dc_release_rlists(s);
+        gdi_path_free(s->path);
         gdi_free(s);
     }
     dc_release_rlists(dc);
+    gdi_path_free(dc->path);
+    if (dc->emf) gdi_emf_dc_free(dc);                               /* a metafile DC deleted without CloseEnhMetaFile */
     gdi_obj_free((HGDIOBJ)h);
     gdi_free(dc);
     RET(TRUE);
@@ -454,6 +476,7 @@ static int dc_save_copy(dc_t *dc)
     memset(&s->eff, 0, sizeof s->eff);
     memset(&s->userclip, 0, sizeof s->userclip);
     rl_copy(&s->userclip, &dc->userclip);
+    s->path = gdi_path_copy(dc->path);                              /* SaveDC keeps the path too */
     s->saved = dc->saved;
     dc->saved = s;
     return 1;
@@ -473,6 +496,11 @@ static void dc_restore_from(dc_t *dc, dc_t *snap)
     dc->textalign = snap->textalign; dc->gfxmode = snap->gfxmode; dc->pos = snap->pos;
     dc->win_org = snap->win_org; dc->vp_org = snap->vp_org; dc->brush_org = snap->brush_org;
     dc->dcpen = snap->dcpen; dc->dcbrush = snap->dcbrush;
+    dc->xf = snap->xf; dc->xf_dx = snap->xf_dx; dc->xf_dy = snap->xf_dy;
+    dc->arcdir = snap->arcdir; dc->miter = snap->miter;
+    gdi_path_free(dc->path);
+    dc->path = snap->path; dc->path_open = snap->path_open;
+    snap->path = 0;
     rl_free(&dc->userclip);
     dc->userclip = snap->userclip;
     dc->has_userclip = snap->has_userclip;
@@ -508,6 +536,7 @@ DLLAPI BOOL WINAPI RestoreDC(HDC h, int level)
         dc->saved = top->saved;
         if (drop == 1) dc_restore_from(dc, top);
         dc_release_rlists(top);
+        gdi_path_free(top->path);
         gdi_free(top);
     }
     RET(TRUE);
@@ -529,7 +558,7 @@ DLLAPI HGDIOBJ WINAPI SelectObject(HDC hdc, HGDIOBJ obj)
     case OBJ_FONT: prev = dc->font; dc->font = (HFONT)obj; break;
     case OBJ_BITMAP: {
         bitmap_t *b = p, *old;
-        if (!dc->memdc) { SetLastError(ERROR_INVALID_PARAMETER); RET(0); }
+        if (!dc->memdc || dc->emf) { SetLastError(ERROR_INVALID_PARAMETER); RET(0); }   /* not into window or metafile DCs */
         if (b->sel && (HBITMAP)obj != dc->hbmp) { SetLastError(ERROR_INVALID_PARAMETER); RET(0); }   /* already in another DC */
         old = gdi_obj_get((HGDIOBJ)dc->hbmp, OBJ_BITMAP, 0);
         prev = (HGDIOBJ)dc->hbmp;
@@ -698,8 +727,13 @@ DLLAPI int WINAPI SetGraphicsMode(HDC h, int mode)
     GDI_ENTER();
     dc = gdi_dc_get(h);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(0); }
-    if (mode != GM_COMPATIBLE) { SetLastError(ERROR_NOT_SUPPORTED); RET(0); }       /* GM_ADVANCED (world transforms) does not exist */
+    if (mode != GM_COMPATIBLE && mode != GM_ADVANCED) { SetLastError(ERROR_INVALID_PARAMETER); RET(0); }
+    if (mode == GM_COMPATIBLE && (dc->xf_dx || dc->xf_dy || dc->xf.eDx != 0.0f || dc->xf.eDy != 0.0f)) {
+        SetLastError(ERROR_CAN_NOT_COMPLETE);                         /* only with the identity world transform, as on Windows */
+        RET(0);
+    }
     old = dc->gfxmode;
+    dc->gfxmode = mode;
     RET(old);
 }
 
@@ -832,13 +866,32 @@ DLLAPI COLORREF WINAPI GetDCBrushColor(HDC h)
     RET(c);
 }
 
+/* The screen size (the display mode the kernel reports; it depends on the display backend). Without a display device the
+ * nominal 1024x768 of the Bochs VBE mode stands in for it, so that memory-DC programs still get consistent answers. */
+static void screen_size(int *w, int *h)
+{
+    static int sw, sh;
+    if (!sw) {
+        shz_display_info_t info;
+        memset(&info, 0, sizeof info);
+        info.size = sizeof info;
+        if (NtUserQueryDisplay(&info, SHZ_DISP_QUERY) >= 0 && info.width && info.height) { sw = (int)info.width; sh = (int)info.height; }
+        else { sw = 1024; sh = 768; }
+    }
+    *w = sw;
+    *h = sh;
+}
+
 DLLAPI int WINAPI GetDeviceCaps(HDC h, int index)
 {
     dc_t *dc;
-    int w = 1024, hh = 768, v = 0;
+    int w, hh, v = 0, sw, sh;
     GDI_ENTER();
     dc = gdi_dc_get(h);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(0); }
+    screen_size(&sw, &sh);
+    w = sw;
+    hh = sh;
     if (dc->memdc) {
         bitmap_t *b = gdi_obj_get((HGDIOBJ)dc->hbmp, OBJ_BITMAP, 0);
         w = b ? b->w : 1;
@@ -849,8 +902,8 @@ DLLAPI int WINAPI GetDeviceCaps(HDC h, int index)
     switch (index) {
     case DRIVERVERSION: v = 0x0400; break;
     case TECHNOLOGY: v = DT_RASDISPLAY; break;
-    case HORZSIZE: v = 1024 * 254 / 960; break;                    /* 96 dpi */
-    case VERTSIZE: v = 768 * 254 / 960; break;
+    case HORZSIZE: v = sw * 254 / 960; break;                      /* the screen at 96 dpi, in millimetres */
+    case VERTSIZE: v = sh * 254 / 960; break;
     case HORZRES: v = w; break;
     case VERTRES: v = hh; break;
     case BITSPIXEL: v = 32; break;
@@ -864,11 +917,14 @@ DLLAPI int WINAPI GetDeviceCaps(HDC h, int index)
     case ASPECTX: case ASPECTY: v = 36; break;
     case ASPECTXY: v = 51; break;
     case LOGPIXELSX: case LOGPIXELSY: v = 96; break;
+    case VREFRESH: v = 1; break;                                    /* "the hardware's default refresh rate": the Bochs VBE has none to report */
     case SIZEPALETTE: case NUMRESERVED: v = 0; break;
     case COLORRES: v = 24; break;
     case PHYSICALWIDTH: v = w; break;
     case PHYSICALHEIGHT: v = hh; break;
-    case SHADEBLENDCAPS: v = 0; break;
+    case SHADEBLENDCAPS: v = SB_CONST_ALPHA | SB_PIXEL_ALPHA | SB_PREMULT_ALPHA; break;   /* GdiAlphaBlend */
+    case DESKTOPHORZRES: v = sw; break;
+    case DESKTOPVERTRES: v = sh; break;
     default: v = 0;
     }
     RET(v);
@@ -899,4 +955,45 @@ BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
         }
     }
     return TRUE;
+}
+
+/* The pixels a DC draws into (UpdateLayeredWindow's source): the selected bitmap of a memory DC or a window DC's backing.
+ * The pointer stays valid while the bitmap stays selected; callers hold no GDI lock while they read it. */
+DLLAPI BOOL WINAPI ShzGdiDCBitmap(HDC hdc, const uint32_t **bits, int *w, int *h, int *topdown)
+{
+    dc_t *dc;
+    bitmap_t *b;
+    GDI_ENTER();
+    dc = gdi_dc_get(hdc);
+    b = dc ? gdi_dc_target(dc) : 0;
+    if (!b || !b->bits) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (dc->hwnd) gdi_window_dc_flush(dc);
+    *bits = b->bits;
+    *w = b->w;
+    *h = b->h;
+    *topdown = b->topdown;
+    RET(TRUE);
+}
+
+DLLAPI HWND WINAPI ShzGdiDCWindow(HDC hdc)
+{
+    dc_t *dc;
+    HWND h;
+    GDI_ENTER();
+    dc = gdi_dc_get(hdc);
+    h = dc ? dc->hwnd : 0;
+    RET(h);
+}
+
+/* GetWindowDC: logical (0,0) is the window's top-left corner while the DC keeps drawing into the client backing. */
+DLLAPI BOOL WINAPI ShzGdiSetDeviceOrigin(HDC hdc, int x, int y)
+{
+    dc_t *dc;
+    GDI_ENTER();
+    dc = gdi_dc_get(hdc);
+    if (!dc || dc->memdc) RET(FALSE);
+    dc->dev_org.x = x;
+    dc->dev_org.y = y;
+    dc->eff_valid = 0;
+    RET(TRUE);
 }

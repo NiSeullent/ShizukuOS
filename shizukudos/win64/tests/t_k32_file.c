@@ -837,7 +837,9 @@ static void test_second_volume(void)
     }
     SetLastError(0);
     h = FindFirstFileW(L"D:\\*", &fd);
-    CHECKV(h != INVALID_HANDLE_VALUE, "FindFirstFileW(D:\\*) lists the root of D:", "GetLastError=%u", (unsigned)GetLastError());
+    /* an empty root (no volume label entry, no file) yields ERROR_FILE_NOT_FOUND on Windows too */
+    CHECKV(h != INVALID_HANDLE_VALUE || GetLastError() == ERROR_FILE_NOT_FOUND, "FindFirstFileW(D:\\*) lists the root of D: (or reports it empty)",
+           "GetLastError=%u", (unsigned)GetLastError());
     if (h != INVALID_HANDLE_VALUE) FindClose(h);
     {
         WCHAR path[300], want[320];

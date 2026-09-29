@@ -40,6 +40,7 @@ void kmain(uint64_t bootinfo_pa)
     bootinfo.cmdline[SHZ_CMDLINE_MAX - 1] = 0;
     arch_init();
     mem_init(&bootinfo);
+    krandom_init(&bootinfo, sizeof bootinfo);       /* before anything that needs random bytes (ASLR, user RNG) */
     kprintf("%s: Long Mode kernel starting, %u MiB RAM, rip above 4 GiB, tsc %u kHz\n", KVER,
             (uint32_t)(bootinfo.ram_size >> 20), (uint32_t)(bootinfo.tsc_hz / 1000));
     kprintf("%s: boot info ABI %u.%u, %u bytes%s\n", KVER, bootinfo.abi_major, bootinfo.abi_minor, bootinfo.size,
@@ -48,7 +49,7 @@ void kmain(uint64_t bootinfo_pa)
         kprintf("%s: command line \"%s\"\n", KVER, bootinfo.cmdline);
     if (!k64_boot_framebuffer(&fb))
         kprintf("%s: UEFI GOP framebuffer %ux%u, pitch %u, %s, at %llx (%llu KiB): available through "
-                "k64_boot_framebuffer(); no GOP display backend uses it yet\n", KVER, fb.width, fb.height, fb.pitch,
+                "k64_boot_framebuffer(); the GOP display backend (gfx_gop.c) drives it unless a virtio-gpu is present\n", KVER, fb.width, fb.height, fb.pitch,
                 fb.format == SHZ_FB_BGRX8888 ? "BGRX" : "RGBX", fb.base, fb.size >> 10);
 #ifdef SHZ_STANDALONE
     { extern void pci_log_devices(void); pci_log_devices(); }        /* device inventory; port I/O is only safe without the Supervisor */
