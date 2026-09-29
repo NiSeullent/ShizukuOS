@@ -163,6 +163,19 @@ void subsys64_start(const shz_bootinfo_t *bi);   /* Supervisor: serve the Win98 
 int subsys64_console_write(process_t *p, int stream, const void *data, uint64_t n);   /* 1 = relayed, 0 = not bridged */
 int subsys64_console_read(process_t *p, void *buf, uint64_t cap, uint64_t *got);      /* 1 = handled (*got 0 = EOF), 0 = not bridged */
 
+/* ---- main.c: boot information (ABI 1.1 tail) ---- */
+/* HOOK for a UEFI GOP display backend (kernel64/gfx_fb.c): the linear framebuffer the UEFI boot manager's direct
+ * Kernel64 boot handed over (shz_bootinfo_t.fb_*). Returns 0 and fills *out, or -1 when there is none (Supervisor,
+ * Multiboot stub, no GOP, or a pixel format other than 32-bit RGBX/BGRX). The range lies outside the direct map:
+ * a backend maps it with mmio_map() (pci.h) before drawing. Nothing calls this yet; the Bochs VBE path is unchanged. */
+typedef struct {
+    uint64_t base, size;                        /* physical */
+    uint32_t width, height, pitch, bpp;         /* pitch in bytes */
+    uint32_t format;                            /* enum shz_fb_format */
+} k64_boot_fb_t;
+int k64_boot_framebuffer(k64_boot_fb_t *out);
+const char *k64_boot_cmdline(void);             /* shz_bootinfo_t.cmdline, "" when absent */
+
 /* ---- tests.c ---- */
 void run_self_tests(const shz_bootinfo_t *bi);
 unsigned tests_failed(void);
