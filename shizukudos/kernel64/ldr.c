@@ -173,6 +173,16 @@ static fsnode_t *locate_file(const char *name, char *found_path, size_t cap)
 static int uwrite(process_t *p, uint64_t va, const void *src, uint64_t n) { return copy_to_user(p, va, src, n); }
 static int uwrite64(process_t *p, uint64_t va, uint64_t v) { return copy_to_user(p, va, &v, 8); }
 static int uread64(process_t *p, uint64_t va, uint64_t *v) { return copy_from_user(p, v, va, 8); }
+/* Bind an import address table slot. MSVC's link.exe and lld-link put the IAT in read-only .rdata (Windows makes it
+ * writable while binding), so the slot is written through the image page itself, as relocations are; image pages are
+ * the process's private copies. */
+static int iat_write64(process_t *p, uint64_t va, uint64_t v)
+{
+    const uint64_t pa = (va & 0xfff) <= PAGE_SIZE - 8 ? vm_lookup(p->pml4, va, 0) : 0;
+    if (!pa) return uwrite64(p, va, v);
+    memcpy((void *)p2v(pa), &v, 8);
+    return 0;
+}
 
 static uint32_t prot_from_section(uint32_t ch)
 {
@@ -350,7 +360,7 @@ static int import_cb(void *c, const char *dll, const char *name, uint16_t hint, 
         x->st = st;
         return -1;
     }
-    if (uwrite64(x->p, x->m->base + iat_rva, va)) { x->st = STATUS_ACCESS_VIOLATION; return -1; }
+    if (iat_write64(x->p, x->m->base + iat_rva, va)) { x->st = STATUS_ACCESS_VIOLATION; return -1; }
     return 0;
 }
 
