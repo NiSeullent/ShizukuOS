@@ -1,0 +1,6448 @@
+{
+ "schema": "shz.startup-chain-summary.v1",
+ "tool": "shizukudos/win64/tools/startup_chain.py",
+ "build": "/home/user/Win98-Modern/.claude/worktrees/agent-ab8a38a5e87a2b65b/build/shizukudos/win64",
+ "shizuku_dlls": {
+  "advapi32.dll": 47,
+  "bcrypt.dll": 11,
+  "bcryptprimitives.dll": 1,
+  "combase.dll": 17,
+  "gdi32.dll": 107,
+  "kernel32.dll": 221,
+  "modtest.dll": 2,
+  "ntdll.dll": 300,
+  "ole32.dll": 23,
+  "oleaut32.dll": 38,
+  "rpcrt4.dll": 12,
+  "shell32.dll": 7,
+  "shlwapi.dll": 44,
+  "user32.dll": 129,
+  "version.dll": 3,
+  "winmm.dll": 7,
+  "ws2_32.dll": 57
+ },
+ "chains": {
+  "chrome.exe": {
+   "exe": "chrome.exe",
+   "path": "/tmp/claude-0/-home-user-Win98-Modern/31f1e8e6-646b-5a42-ab0f-36694df325e9/scratchpad/chromium-full/chrome-win/chrome.exe",
+   "loads": false,
+   "chain": [
+    "chrome.exe",
+    "chrome_elf.dll",
+    "kernel32.dll",
+    "ntdll.dll",
+    "version.dll"
+   ],
+   "load_time_imports": 533,
+   "failing_imports": 156,
+   "failing_pct": 29.3,
+   "distinct_missing": 100,
+   "missing_by_dll": {
+    "kernel32.dll": {
+     "reason": "fn-missing",
+     "count": 100,
+     "images": [
+      "chrome.exe",
+      "chrome_elf.dll"
+     ],
+     "functions": [
+      "CompareStringW",
+      "ConnectNamedPipe",
+      "CreateFileMappingW",
+      "CreateIoCompletionPort",
+      "CreateJobObjectW",
+      "CreateNamedPipeW",
+      "CreateRemoteThread",
+      "DebugBreak",
+      "DeleteProcThreadAttributeList",
+      "DisconnectNamedPipe",
+      "EnumSystemLocalesEx",
+      "EnumSystemLocalesW",
+      "ExpandEnvironmentStringsW",
+      "FindFirstFileExW",
+      "FlushViewOfFile",
+      "FormatMessageA",
+      "FormatMessageW",
+      "GetComputerNameExW",
+      "GetConsoleScreenBufferInfo",
+      "GetCurrentProcessorNumber",
+      "GetDateFormatW",
+      "GetDriveTypeW",
+      "GetFileInformationByHandle",
+      "GetFileInformationByHandleEx",
+      "GetFileTime",
+      "GetHandleInformation",
+      "GetLocaleInfoW",
+      "GetLogicalProcessorInformation",
+      "GetLongPathNameW",
+      "GetModuleHandleExW",
+      "GetProcessHandleCount",
+      "GetProcessHeaps",
+      "GetProcessId",
+      "GetProcessMitigationPolicy",
+      "GetProcessTimes",
+      "GetProductInfo",
+      "GetQueuedCompletionStatus",
+      "GetStringTypeW",
+      "GetSystemDefaultLCID",
+      "GetThreadContext",
+      "GetThreadId",
+      "GetThreadLocale",
+      "GetTimeFormatW",
+      "GetUserDefaultLCID",
+      "GetUserDefaultLangID",
+      "GetUserDefaultLocaleName",
+      "HeapSetInformation",
+      "InitializeProcThreadAttributeList",
+      "InitializeSListHead",
+      "InterlockedFlushSList",
+      "IsThreadAFiber",
+      "IsValidLocale",
+      "IsWow64Process",
+      "K32EnumProcessModules",
+      "K32GetMappedFileNameW",
+      "K32GetModuleFileNameExA",
+      "K32GetModuleInformation",
+      "K32GetPerformanceInfo",
+      "K32GetProcessMemoryInfo",
+      "K32QueryWorkingSetEx",
+      "LCMapStringW",
+      "LockFileEx",
+      "MapViewOfFile",
+      "OpenProcess",
+      "PeekNamedPipe",
+      "PostQueuedCompletionStatus",
+      "PrefetchVirtualMemory",
+      "QueryInformationJobObject",
+      "QueryThreadCycleTime",
+      "ReadConsoleW",
+      "ReadProcessMemory",
+      "RegisterWaitForSingleObject",
+      "ReplaceFileW",
+      "RtlCaptureStackBackTrace",
+      "SetConsoleCtrlHandler",
+      "SetDefaultDllDirectories",
+      "SetFileAttributesW",
+      "SetFileInformationByHandle",
+      "SetHandleInformation",
+      "SetInformationJobObject",
+      "SetNamedPipeHandleState",
+      "SetProcessMitigationPolicy",
+      "SetProcessShutdownParameters",
+      "SetThreadInformation",
+      "SystemTimeToTzSpecificLocalTime",
+      "TerminateJobObject",
+      "TransactNamedPipe",
+      "UnlockFileEx",
+      "UnmapViewOfFile",
+      "UnregisterWaitEx",
+      "UpdateProcThreadAttribute",
+      "VerSetConditionMask",
+      "VerifyVersionInfoW",
+      "VirtualFreeEx",
+      "VirtualProtectEx",
+      "VirtualQueryEx",
+      "WaitNamedPipeW",
+      "WerRegisterRuntimeExceptionModule",
+      "Wow64GetThreadContext",
+      "WriteProcessMemory"
+     ]
+    }
+   },
+   "ordinal_hazards": [],
+   "images": {
+    "chrome.exe": {
+     "from": "app",
+     "load_time_imports": 254,
+     "delay_imports": 116,
+     "missing": 97,
+     "missing_by_dll": {
+      "kernel32.dll": 97
+     }
+    },
+    "chrome_elf.dll": {
+     "from": "app",
+     "load_time_imports": 192,
+     "delay_imports": 39,
+     "missing": 59,
+     "missing_by_dll": {
+      "kernel32.dll": 59
+     }
+    },
+    "kernel32.dll": {
+     "from": "system",
+     "load_time_imports": 76,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "ntdll.dll": {
+     "from": "system",
+     "load_time_imports": 0,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "version.dll": {
+     "from": "system",
+     "load_time_imports": 11,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    }
+   },
+   "delay_loaded_system_dlls": {
+    "chrome.exe": {
+     "advapi32.dll": {
+      "functions": 47,
+      "provided": 13,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "user32.dll": {
+      "functions": 31,
+      "provided": 23,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "winhttp.dll": {
+      "functions": 12,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dbghelp.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "ole32.dll": {
+      "functions": 5,
+      "provided": 5,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "shell32.dll": {
+      "functions": 3,
+      "provided": 3,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "winmm.dll": {
+      "functions": 3,
+      "provided": 3,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "kernel32.dll": {
+      "functions": 3,
+      "provided": 3,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "shlwapi.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "userenv.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-power-base-l1": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     }
+    },
+    "chrome_elf.dll": {
+     "advapi32.dll": {
+      "functions": 26,
+      "provided": 6,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "dbghelp.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "shell32.dll": {
+      "functions": 2,
+      "provided": 2,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "winmm.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "ole32.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     }
+    }
+   }
+  },
+  "chrome.dll": {
+   "exe": "chrome.dll",
+   "path": "/tmp/claude-0/-home-user-Win98-Modern/31f1e8e6-646b-5a42-ab0f-36694df325e9/scratchpad/chromium-full/chrome-win/chrome.dll",
+   "loads": false,
+   "chain": [
+    "chrome.dll",
+    "winmm.dll",
+    "kernel32.dll",
+    "ws2_32.dll",
+    "version.dll",
+    "ntdll.dll",
+    "chrome_elf.dll"
+   ],
+   "load_time_imports": 855,
+   "failing_imports": 346,
+   "failing_pct": 40.5,
+   "distinct_missing": 289,
+   "missing_by_dll": {
+    "kernel32.dll": {
+     "reason": "fn-missing",
+     "count": 221,
+     "images": [
+      "chrome.dll",
+      "chrome_elf.dll"
+     ],
+     "functions": [
+      "AllocConsole",
+      "AreFileApisANSI",
+      "AssignProcessToJobObject",
+      "AttachConsole",
+      "CancelIo",
+      "CancelIoEx",
+      "CheckRemoteDebuggerPresent",
+      "ClearCommError",
+      "CompareStringW",
+      "ConnectNamedPipe",
+      "CreateFileMappingA",
+      "CreateFileMappingW",
+      "CreateHardLinkW",
+      "CreateIoCompletionPort",
+      "CreateJobObjectW",
+      "CreateNamedPipeW",
+      "CreateRemoteThread",
+      "CreateToolhelp32Snapshot",
+      "CreateWaitableTimerExW",
+      "DebugBreak",
+      "DeleteProcThreadAttributeList",
+      "DeviceIoControl",
+      "DiscardVirtualMemory",
+      "EnumResourceNamesW",
+      "EnumSystemLocalesEx",
+      "EnumSystemLocalesW",
+      "EscapeCommFunction",
+      "ExpandEnvironmentStringsW",
+      "FileTimeToLocalFileTime",
+      "FindFirstFileExA",
+      "FindFirstFileExW",
+      "FindFirstVolumeW",
+      "FindNextVolumeW",
+      "FindResourceW",
+      "FindVolumeClose",
+      "FlushViewOfFile",
+      "FoldStringW",
+      "FormatMessageA",
+      "FormatMessageW",
+      "FreeConsole",
+      "FreeLibraryAndExitThread",
+      "GetActiveProcessorCount",
+      "GetCommModemStatus",
+      "GetCommState",
+      "GetComputerNameExW",
+      "GetConsoleDisplayMode",
+      "GetConsoleScreenBufferInfo",
+      "GetCurrencyFormatEx",
+      "GetCurrentProcessorNumber",
+      "GetCurrentThreadStackLimits",
+      "GetDateFormatEx",
+      "GetDateFormatW",
+      "GetDiskFreeSpaceA",
+      "GetDiskFreeSpaceExW",
+      "GetDiskFreeSpaceW",
+      "GetDriveTypeW",
+      "GetDynamicTimeZoneInformation",
+      "GetFileAttributesExW",
+      "GetFileInformationByHandle",
+      "GetFileInformationByHandleEx",
+      "GetFileTime",
+      "GetFinalPathNameByHandleW",
+      "GetFirmwareType",
+      "GetGeoInfoW",
+      "GetHandleInformation",
+      "GetLocaleInfoEx",
+      "GetLocaleInfoW",
+      "GetLogicalProcessorInformation",
+      "GetLogicalProcessorInformationEx",
+      "GetLongPathNameW",
+      "GetMaximumProcessorCount",
+      "GetMaximumProcessorGroupCount",
+      "GetModuleHandleExA",
+      "GetModuleHandleExW",
+      "GetNamedPipeClientProcessId",
+      "GetNamedPipeServerProcessId",
+      "GetNumberFormatEx",
+      "GetOverlappedResult",
+      "GetPackagePathByFullName",
+      "GetPackagesByPackageFamily",
+      "GetPriorityClass",
+      "GetPrivateProfileStringW",
+      "GetProcessHandleCount",
+      "GetProcessHeaps",
+      "GetProcessId",
+      "GetProcessInformation",
+      "GetProcessMitigationPolicy",
+      "GetProcessTimes",
+      "GetProductInfo",
+      "GetQueuedCompletionStatus",
+      "GetShortPathNameW",
+      "GetStringTypeW",
+      "GetSystemPowerStatus",
+      "GetTempFileNameA",
+      "GetThreadContext",
+      "GetThreadGroupAffinity",
+      "GetThreadId",
+      "GetThreadPreferredUILanguages",
+      "GetThreadPriorityBoost",
+      "GetThreadTimes",
+      "GetTimeFormatEx",
+      "GetTimeFormatW",
+      "GetUserDefaultLCID",
+      "GetUserDefaultLangID",
+      "GetUserDefaultLocaleName",
+      "GetUserDefaultUILanguage",
+      "GetUserGeoID",
+      "GetUserPreferredUILanguages",
+      "GetVolumeInformationW",
+      "GetVolumeNameForVolumeMountPointW",
+      "GetVolumePathNameW",
+      "GetVolumePathNamesForVolumeNameW",
+      "GlobalLock",
+      "GlobalSize",
+      "GlobalUnlock",
+      "HeapCompact",
+      "HeapLock",
+      "HeapSetInformation",
+      "HeapUnlock",
+      "HeapWalk",
+      "InitOnceBeginInitialize",
+      "InitOnceComplete",
+      "InitializeProcThreadAttributeList",
+      "InitializeSListHead",
+      "InterlockedFlushSList",
+      "InterlockedPushEntrySList",
+      "IsProcessInJob",
+      "IsThreadAFiber",
+      "IsValidLocale",
+      "IsWow64Process",
+      "K32EnumProcessModules",
+      "K32GetMappedFileNameW",
+      "K32GetModuleFileNameExA",
+      "K32GetModuleFileNameExW",
+      "K32GetModuleInformation",
+      "K32GetPerformanceInfo",
+      "K32GetProcessMemoryInfo",
+      "K32QueryWorkingSetEx",
+      "LCIDToLocaleName",
+      "LCMapStringEx",
+      "LCMapStringW",
+      "LoadResource",
+      "LocalFileTimeToFileTime",
+      "LocaleNameToLCID",
+      "LockFile",
+      "LockFileEx",
+      "LockResource",
+      "MapViewOfFile",
+      "MapViewOfFileEx",
+      "Module32FirstW",
+      "Module32NextW",
+      "OpenProcess",
+      "OpenThread",
+      "PeekNamedPipe",
+      "PostQueuedCompletionStatus",
+      "PowerClearRequest",
+      "PowerCreateRequest",
+      "PowerSetRequest",
+      "PrefetchVirtualMemory",
+      "Process32FirstW",
+      "Process32NextW",
+      "ProcessIdToSessionId",
+      "PurgeComm",
+      "QueryDosDeviceW",
+      "QueryFullProcessImageNameA",
+      "QueryFullProcessImageNameW",
+      "QueryInformationJobObject",
+      "QueryProcessCycleTime",
+      "QueryThreadCycleTime",
+      "ReadConsoleW",
+      "ReadDirectoryChangesW",
+      "ReadProcessMemory",
+      "RegisterWaitForSingleObject",
+      "ReplaceFileW",
+      "ResolveLocaleName",
+      "RtlAddFunctionTable",
+      "RtlCaptureStackBackTrace",
+      "RtlDeleteFunctionTable",
+      "SetCommState",
+      "SetCommTimeouts",
+      "SetConsoleCtrlHandler",
+      "SetConsoleTextAttribute",
+      "SetDefaultDllDirectories",
+      "SetDllDirectoryW",
+      "SetFileAttributesW",
+      "SetFileCompletionNotificationModes",
+      "SetFileInformationByHandle",
+      "SetFileTime",
+      "SetHandleInformation",
+      "SetInformationJobObject",
+      "SetNamedPipeHandleState",
+      "SetPriorityClass",
+      "SetProcessInformation",
+      "SetProcessMitigationPolicy",
+      "SetProcessShutdownParameters",
+      "SetThreadExecutionState",
+      "SetThreadInformation",
+      "SetThreadPriorityBoost",
+      "SetWaitableTimer",
+      "SizeofResource",
+      "SystemTimeToTzSpecificLocalTime",
+      "TerminateJobObject",
+      "TransactNamedPipe",
+      "TzSpecificLocalTimeToSystemTime",
+      "UnlockFile",
+      "UnlockFileEx",
+      "UnmapViewOfFile",
+      "UnregisterWait",
+      "UnregisterWaitEx",
+      "UpdateProcThreadAttribute",
+      "VerSetConditionMask",
+      "VerifyVersionInfoW",
+      "VirtualFreeEx",
+      "VirtualLock",
+      "VirtualProtectEx",
+      "VirtualUnlock",
+      "WTSGetActiveConsoleSessionId",
+      "WaitNamedPipeW",
+      "WerRegisterRuntimeExceptionModule",
+      "WriteProcessMemory",
+      "lstrcmpW"
+     ]
+    },
+    "winmm.dll": {
+     "reason": "fn-missing",
+     "count": 28,
+     "images": [
+      "chrome.dll"
+     ],
+     "functions": [
+      "midiInAddBuffer",
+      "midiInClose",
+      "midiInGetDevCapsW",
+      "midiInGetNumDevs",
+      "midiInOpen",
+      "midiInPrepareHeader",
+      "midiInReset",
+      "midiInStart",
+      "midiInUnprepareHeader",
+      "midiOutClose",
+      "midiOutGetDevCapsW",
+      "midiOutGetNumDevs",
+      "midiOutLongMsg",
+      "midiOutOpen",
+      "midiOutPrepareHeader",
+      "midiOutReset",
+      "midiOutShortMsg",
+      "midiOutUnprepareHeader",
+      "waveInGetNumDevs",
+      "waveOutClose",
+      "waveOutGetNumDevs",
+      "waveOutOpen",
+      "waveOutPause",
+      "waveOutPrepareHeader",
+      "waveOutReset",
+      "waveOutRestart",
+      "waveOutUnprepareHeader",
+      "waveOutWrite"
+     ]
+    },
+    "crypt32.dll": {
+     "reason": "dll-missing",
+     "count": 26,
+     "images": [
+      "chrome.dll"
+     ],
+     "functions": [
+      "CertAddCertificateContextToStore",
+      "CertAddEncodedCertificateToStore",
+      "CertAddStoreToCollection",
+      "CertCloseStore",
+      "CertCompareCertificateName",
+      "CertControlStore",
+      "CertEnumCertificatesInStore",
+      "CertFindCertificateInStore",
+      "CertFindChainInStore",
+      "CertFreeCertificateContext",
+      "CertGetCertificateContextProperty",
+      "CertGetEnhancedKeyUsage",
+      "CertGetIntendedKeyUsage",
+      "CertGetNameStringW",
+      "CertOpenStore",
+      "CertOpenSystemStoreW",
+      "CertVerifyTimeValidity",
+      "CryptAcquireCertificatePrivateKey",
+      "CryptMsgClose",
+      "CryptMsgGetParam",
+      "CryptProtectData",
+      "CryptProtectMemory",
+      "CryptQueryObject",
+      "CryptUnprotectData",
+      "CryptUnprotectMemory",
+      "CryptVerifyCertificateSignatureEx"
+     ]
+    },
+    "ws2_32.dll": {
+     "reason": "fn-missing",
+     "count": 13,
+     "images": [
+      "chrome.dll"
+     ],
+     "functions": [
+      "FreeAddrInfoExW",
+      "GetAddrInfoExCancel",
+      "GetAddrInfoExW",
+      "WSADuplicateSocketW",
+      "WSAEnumNameSpaceProvidersW",
+      "WSAEnumProtocolsW",
+      "WSAGetOverlappedResult",
+      "WSALookupServiceBeginW",
+      "WSALookupServiceEnd",
+      "WSALookupServiceNextW",
+      "WSASetServiceW",
+      "WSCEnumProtocols",
+      "WSCGetProviderPath"
+     ]
+    },
+    "dwrite.dll": {
+     "reason": "dll-missing",
+     "count": 1,
+     "images": [
+      "chrome.dll"
+     ],
+     "functions": [
+      "DWriteCreateFactory"
+     ]
+    }
+   },
+   "ordinal_hazards": [],
+   "images": {
+    "chrome.dll": {
+     "from": "app",
+     "load_time_imports": 536,
+     "delay_imports": 772,
+     "missing": 287,
+     "missing_by_dll": {
+      "kernel32.dll": 219,
+      "winmm.dll": 28,
+      "crypt32.dll": 26,
+      "ws2_32.dll": 13,
+      "dwrite.dll": 1
+     }
+    },
+    "winmm.dll": {
+     "from": "system",
+     "load_time_imports": 13,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "kernel32.dll": {
+     "from": "system",
+     "load_time_imports": 76,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "ws2_32.dll": {
+     "from": "system",
+     "load_time_imports": 27,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "version.dll": {
+     "from": "system",
+     "load_time_imports": 11,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "ntdll.dll": {
+     "from": "system",
+     "load_time_imports": 0,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "chrome_elf.dll": {
+     "from": "app",
+     "load_time_imports": 192,
+     "delay_imports": 39,
+     "missing": 59,
+     "missing_by_dll": {
+      "kernel32.dll": 59
+     }
+    }
+   },
+   "delay_loaded_system_dlls": {
+    "chrome.dll": {
+     "user32.dll": {
+      "functions": 229,
+      "provided": 103,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "advapi32.dll": {
+      "functions": 96,
+      "provided": 32,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "gdi32.dll": {
+      "functions": 95,
+      "provided": 55,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "ole32.dll": {
+      "functions": 33,
+      "provided": 14,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "shell32.dll": {
+      "functions": 29,
+      "provided": 6,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "oleaut32.dll": {
+      "functions": 21,
+      "provided": 19,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "mfplat.dll": {
+      "functions": 20,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "ncrypt.dll": {
+      "functions": 13,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dbghelp.dll": {
+      "functions": 12,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "secur32.dll": {
+      "functions": 12,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "esent.dll": {
+      "functions": 12,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "hid.dll": {
+      "functions": 11,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "bthprops.cpl": {
+      "functions": 11,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "iphlpapi.dll": {
+      "functions": 10,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "setupapi.dll": {
+      "functions": 10,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wintrust.dll": {
+      "functions": 10,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "winhttp.dll": {
+      "functions": 10,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "uiautomationcore.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "winusb.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "userenv.dll": {
+      "functions": 8,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "shlwapi.dll": {
+      "functions": 8,
+      "provided": 4,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "combase.dll": {
+      "functions": 8,
+      "provided": 6,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "winspool.drv": {
+      "functions": 8,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "netapi32.dll": {
+      "functions": 7,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "pdh.dll": {
+      "functions": 6,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "uxtheme.dll": {
+      "functions": 6,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wevtapi.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "oleacc.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dwmapi.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "kernel32.dll": {
+      "functions": 4,
+      "provided": 3,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "propsys.dll": {
+      "functions": 4,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wtsapi32.dll": {
+      "functions": 4,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "cfgmgr32.dll": {
+      "functions": 4,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "bcrypt.dll": {
+      "functions": 3,
+      "provided": 3,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "ndfapi.dll": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-shcore-scaling-l1": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "api-ms-win-power-setting-l1": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "dxgi.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mf.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "cryptui.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-power-base-l1": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "tbs.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dcomp.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dhcpcsvc.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mmdevapi.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "d3d11.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mfreadwrite.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "comctl32.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "credui.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "urlmon.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "imm32.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-core-realtime-l1": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "d3d12.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "bcryptprimitives.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "comdlg32.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wininet.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     }
+    },
+    "chrome_elf.dll": {
+     "advapi32.dll": {
+      "functions": 26,
+      "provided": 6,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "dbghelp.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "shell32.dll": {
+      "functions": 2,
+      "provided": 2,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "winmm.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "ole32.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     }
+    }
+   }
+  },
+  "electron.exe": {
+   "exe": "electron.exe",
+   "path": "/tmp/claude-0/-home-user-Win98-Modern/31f1e8e6-646b-5a42-ab0f-36694df325e9/scratchpad/electron/tree/electron.exe",
+   "loads": false,
+   "chain": [
+    "electron.exe",
+    "version.dll",
+    "winmm.dll",
+    "ws2_32.dll",
+    "kernel32.dll",
+    "ntdll.dll"
+   ],
+   "load_time_imports": 664,
+   "failing_imports": 297,
+   "failing_pct": 44.7,
+   "distinct_missing": 297,
+   "missing_by_dll": {
+    "kernel32.dll": {
+     "reason": "fn-missing",
+     "count": 227,
+     "images": [
+      "electron.exe"
+     ],
+     "functions": [
+      "AllocConsole",
+      "AreFileApisANSI",
+      "AssignProcessToJobObject",
+      "AttachConsole",
+      "CancelIo",
+      "CancelIoEx",
+      "CancelSynchronousIo",
+      "CheckRemoteDebuggerPresent",
+      "ClearCommError",
+      "CompareStringW",
+      "ConnectNamedPipe",
+      "CreateFileMappingA",
+      "CreateFileMappingW",
+      "CreateHardLinkW",
+      "CreateIoCompletionPort",
+      "CreateJobObjectW",
+      "CreateNamedPipeA",
+      "CreateNamedPipeW",
+      "CreatePipe",
+      "CreateRemoteThread",
+      "CreateSymbolicLinkW",
+      "CreateToolhelp32Snapshot",
+      "CreateWaitableTimerExW",
+      "DebugBreak",
+      "DeleteProcThreadAttributeList",
+      "DeviceIoControl",
+      "DiscardVirtualMemory",
+      "DisconnectNamedPipe",
+      "EnumResourceNamesW",
+      "EnumSystemLocalesEx",
+      "EnumSystemLocalesW",
+      "EscapeCommFunction",
+      "ExpandEnvironmentStringsA",
+      "ExpandEnvironmentStringsW",
+      "FillConsoleOutputAttribute",
+      "FillConsoleOutputCharacterW",
+      "FindFirstFileExA",
+      "FindFirstFileExW",
+      "FindResourceA",
+      "FindResourceW",
+      "FlushViewOfFile",
+      "FormatMessageA",
+      "FormatMessageW",
+      "FreeLibraryAndExitThread",
+      "GetActiveProcessorCount",
+      "GetCommModemStatus",
+      "GetCommState",
+      "GetComputerNameExW",
+      "GetConsoleCursorInfo",
+      "GetConsoleScreenBufferInfo",
+      "GetCurrencyFormatEx",
+      "GetCurrentPackageFullName",
+      "GetCurrentProcessorNumber",
+      "GetDateFormatEx",
+      "GetDateFormatW",
+      "GetDiskFreeSpaceA",
+      "GetDiskFreeSpaceExW",
+      "GetDiskFreeSpaceW",
+      "GetDriveTypeW",
+      "GetDynamicTimeZoneInformation",
+      "GetErrorMode",
+      "GetFileAttributesExW",
+      "GetFileInformationByHandle",
+      "GetFileInformationByHandleEx",
+      "GetFileTime",
+      "GetFinalPathNameByHandleW",
+      "GetGeoInfoW",
+      "GetHandleInformation",
+      "GetLocaleInfoEx",
+      "GetLocaleInfoW",
+      "GetLogicalProcessorInformation",
+      "GetLogicalProcessorInformationEx",
+      "GetLongPathNameW",
+      "GetMaximumProcessorCount",
+      "GetMaximumProcessorGroupCount",
+      "GetModuleHandleExA",
+      "GetModuleHandleExW",
+      "GetNamedPipeClientProcessId",
+      "GetNamedPipeHandleStateW",
+      "GetNamedPipeServerProcessId",
+      "GetNumberFormatEx",
+      "GetNumberOfConsoleInputEvents",
+      "GetOverlappedResult",
+      "GetPackageFamilyName",
+      "GetPackagePathByFullName",
+      "GetPackagesByPackageFamily",
+      "GetPriorityClass",
+      "GetPrivateProfileStringW",
+      "GetProcessHandleCount",
+      "GetProcessHeaps",
+      "GetProcessId",
+      "GetProcessInformation",
+      "GetProcessIoCounters",
+      "GetProcessMitigationPolicy",
+      "GetProcessTimes",
+      "GetProductInfo",
+      "GetQueuedCompletionStatus",
+      "GetQueuedCompletionStatusEx",
+      "GetShortPathNameW",
+      "GetStringTypeW",
+      "GetSystemDefaultLCID",
+      "GetSystemPowerStatus",
+      "GetTempFileNameA",
+      "GetThreadContext",
+      "GetThreadGroupAffinity",
+      "GetThreadId",
+      "GetThreadLocale",
+      "GetThreadPreferredUILanguages",
+      "GetThreadPriorityBoost",
+      "GetThreadTimes",
+      "GetTimeFormatEx",
+      "GetTimeFormatW",
+      "GetUserDefaultLCID",
+      "GetUserDefaultLangID",
+      "GetUserDefaultLocaleName",
+      "GetUserDefaultUILanguage",
+      "GetUserGeoID",
+      "GetVolumeInformationW",
+      "GetVolumePathNameW",
+      "GlobalLock",
+      "GlobalSize",
+      "GlobalUnlock",
+      "HeapCompact",
+      "HeapLock",
+      "HeapSetInformation",
+      "HeapUnlock",
+      "HeapWalk",
+      "InitOnceBeginInitialize",
+      "InitOnceComplete",
+      "InitializeProcThreadAttributeList",
+      "InitializeSListHead",
+      "InterlockedPushEntrySList",
+      "IsThreadAFiber",
+      "IsValidLocale",
+      "IsWow64Process",
+      "K32EnumProcessModules",
+      "K32GetModuleBaseNameW",
+      "K32GetModuleInformation",
+      "K32GetPerformanceInfo",
+      "K32GetProcessMemoryInfo",
+      "K32QueryWorkingSetEx",
+      "LCIDToLocaleName",
+      "LCMapStringW",
+      "LoadResource",
+      "LocaleNameToLCID",
+      "LockFile",
+      "LockFileEx",
+      "LockResource",
+      "MapViewOfFile",
+      "MapViewOfFileEx",
+      "NeedCurrentDirectoryForExePathW",
+      "OpenFileMappingW",
+      "OpenProcess",
+      "OpenThread",
+      "PeekNamedPipe",
+      "PostQueuedCompletionStatus",
+      "PowerClearRequest",
+      "PowerCreateRequest",
+      "PowerSetRequest",
+      "PrefetchVirtualMemory",
+      "Process32FirstW",
+      "Process32NextW",
+      "ProcessIdToSessionId",
+      "PurgeComm",
+      "QueryFullProcessImageNameW",
+      "QueryInformationJobObject",
+      "QueryProcessCycleTime",
+      "QueryThreadCycleTime",
+      "QueueUserWorkItem",
+      "ReOpenFile",
+      "ReadConsoleInputW",
+      "ReadConsoleW",
+      "ReadDirectoryChangesW",
+      "ReadProcessMemory",
+      "RegisterApplicationRestart",
+      "RegisterWaitForSingleObject",
+      "ReplaceFileW",
+      "ResolveLocaleName",
+      "RtlAddFunctionTable",
+      "RtlCaptureStackBackTrace",
+      "RtlDeleteFunctionTable",
+      "SetCommState",
+      "SetCommTimeouts",
+      "SetConsoleCtrlHandler",
+      "SetConsoleCursorInfo",
+      "SetConsoleCursorPosition",
+      "SetConsoleTextAttribute",
+      "SetConsoleTitleW",
+      "SetDefaultDllDirectories",
+      "SetFileAttributesW",
+      "SetFileCompletionNotificationModes",
+      "SetFileInformationByHandle",
+      "SetFileTime",
+      "SetHandleInformation",
+      "SetInformationJobObject",
+      "SetNamedPipeHandleState",
+      "SetPriorityClass",
+      "SetProcessInformation",
+      "SetProcessMitigationPolicy",
+      "SetProcessShutdownParameters",
+      "SetThreadInformation",
+      "SetThreadPriorityBoost",
+      "SetWaitableTimer",
+      "SizeofResource",
+      "SystemTimeToTzSpecificLocalTime",
+      "TerminateJobObject",
+      "TransactNamedPipe",
+      "TzSpecificLocalTimeToSystemTime",
+      "UnlockFile",
+      "UnlockFileEx",
+      "UnmapViewOfFile",
+      "UnregisterWait",
+      "UnregisterWaitEx",
+      "UpdateProcThreadAttribute",
+      "VerSetConditionMask",
+      "VerifyVersionInfoW",
+      "VirtualFreeEx",
+      "VirtualLock",
+      "VirtualProtectEx",
+      "VirtualQueryEx",
+      "VirtualUnlock",
+      "WTSGetActiveConsoleSessionId",
+      "WaitNamedPipeW",
+      "Wow64GetThreadContext",
+      "WriteConsoleInputW",
+      "WriteProcessMemory",
+      "lstrcmpW"
+     ]
+    },
+    "crypt32.dll": {
+     "reason": "dll-missing",
+     "count": 28,
+     "images": [
+      "electron.exe"
+     ],
+     "functions": [
+      "CertAddCertificateContextToStore",
+      "CertAddEncodedCertificateToStore",
+      "CertAddStoreToCollection",
+      "CertCloseStore",
+      "CertCompareCertificateName",
+      "CertControlStore",
+      "CertEnumCertificatesInStore",
+      "CertFindCertificateInStore",
+      "CertFindChainInStore",
+      "CertFreeCertificateChain",
+      "CertFreeCertificateContext",
+      "CertGetCertificateChain",
+      "CertGetCertificateContextProperty",
+      "CertGetEnhancedKeyUsage",
+      "CertGetIntendedKeyUsage",
+      "CertGetNameStringW",
+      "CertOpenStore",
+      "CertOpenSystemStoreW",
+      "CertVerifyTimeValidity",
+      "CryptAcquireCertificatePrivateKey",
+      "CryptMsgClose",
+      "CryptMsgGetParam",
+      "CryptProtectData",
+      "CryptProtectMemory",
+      "CryptQueryObject",
+      "CryptUnprotectData",
+      "CryptUnprotectMemory",
+      "CryptVerifyCertificateSignatureEx"
+     ]
+    },
+    "winmm.dll": {
+     "reason": "fn-missing",
+     "count": 28,
+     "images": [
+      "electron.exe"
+     ],
+     "functions": [
+      "midiInAddBuffer",
+      "midiInClose",
+      "midiInGetDevCapsW",
+      "midiInGetNumDevs",
+      "midiInOpen",
+      "midiInPrepareHeader",
+      "midiInReset",
+      "midiInStart",
+      "midiInUnprepareHeader",
+      "midiOutClose",
+      "midiOutGetDevCapsW",
+      "midiOutGetNumDevs",
+      "midiOutLongMsg",
+      "midiOutOpen",
+      "midiOutPrepareHeader",
+      "midiOutReset",
+      "midiOutShortMsg",
+      "midiOutUnprepareHeader",
+      "waveInGetNumDevs",
+      "waveOutClose",
+      "waveOutGetNumDevs",
+      "waveOutOpen",
+      "waveOutPause",
+      "waveOutPrepareHeader",
+      "waveOutReset",
+      "waveOutRestart",
+      "waveOutUnprepareHeader",
+      "waveOutWrite"
+     ]
+    },
+    "ws2_32.dll": {
+     "reason": "fn-missing",
+     "count": 11,
+     "images": [
+      "electron.exe"
+     ],
+     "functions": [
+      "FreeAddrInfoExW",
+      "GetAddrInfoExCancel",
+      "GetAddrInfoExW",
+      "GetNameInfoW",
+      "WSADuplicateSocketW",
+      "WSAEnumProtocolsW",
+      "WSAGetOverlappedResult",
+      "WSALookupServiceBeginW",
+      "WSALookupServiceEnd",
+      "WSALookupServiceNextW",
+      "WSASetServiceW"
+     ]
+    },
+    "ntdll.dll": {
+     "reason": "fn-missing",
+     "count": 2,
+     "images": [
+      "electron.exe"
+     ],
+     "functions": [
+      "LdrLockLoaderLock",
+      "LdrUnlockLoaderLock"
+     ]
+    },
+    "dwrite.dll": {
+     "reason": "dll-missing",
+     "count": 1,
+     "images": [
+      "electron.exe"
+     ],
+     "functions": [
+      "DWriteCreateFactory"
+     ]
+    }
+   },
+   "ordinal_hazards": [],
+   "images": {
+    "electron.exe": {
+     "from": "app",
+     "load_time_imports": 537,
+     "delay_imports": 747,
+     "missing": 297,
+     "missing_by_dll": {
+      "kernel32.dll": 227,
+      "crypt32.dll": 28,
+      "winmm.dll": 28,
+      "ws2_32.dll": 11,
+      "ntdll.dll": 2,
+      "dwrite.dll": 1
+     }
+    },
+    "version.dll": {
+     "from": "system",
+     "load_time_imports": 11,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "winmm.dll": {
+     "from": "system",
+     "load_time_imports": 13,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "ws2_32.dll": {
+     "from": "system",
+     "load_time_imports": 27,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "kernel32.dll": {
+     "from": "system",
+     "load_time_imports": 76,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "ntdll.dll": {
+     "from": "system",
+     "load_time_imports": 0,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    }
+   },
+   "delay_loaded_system_dlls": {
+    "electron.exe": {
+     "user32.dll": {
+      "functions": 215,
+      "provided": 105,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "gdi32.dll": {
+      "functions": 95,
+      "provided": 55,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "advapi32.dll": {
+      "functions": 83,
+      "provided": 32,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "ole32.dll": {
+      "functions": 32,
+      "provided": 13,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "shell32.dll": {
+      "functions": 24,
+      "provided": 6,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "mfplat.dll": {
+      "functions": 23,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "oleaut32.dll": {
+      "functions": 19,
+      "provided": 17,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "dbghelp.dll": {
+      "functions": 14,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "winhttp.dll": {
+      "functions": 14,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "iphlpapi.dll": {
+      "functions": 13,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "hid.dll": {
+      "functions": 11,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "ncrypt.dll": {
+      "functions": 11,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "bthprops.cpl": {
+      "functions": 11,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "setupapi.dll": {
+      "functions": 10,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "uiautomationcore.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "winusb.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "combase.dll": {
+      "functions": 8,
+      "provided": 6,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "winspool.drv": {
+      "functions": 8,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "shlwapi.dll": {
+      "functions": 7,
+      "provided": 4,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "secur32.dll": {
+      "functions": 7,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wintrust.dll": {
+      "functions": 6,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "uxtheme.dll": {
+      "functions": 6,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "comctl32.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dwmapi.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "pdh.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wevtapi.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "oleacc.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wtsapi32.dll": {
+      "functions": 4,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "kernel32.dll": {
+      "functions": 4,
+      "provided": 3,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "userenv.dll": {
+      "functions": 4,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "propsys.dll": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-shcore-scaling-l1": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "cfgmgr32.dll": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dxgi.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mf.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-power-base-l1": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "dcomp.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dhcpcsvc.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "cryptui.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "rpcrt4.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "d3d11.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mmdevapi.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mfreadwrite.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-core-realtime-l1": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "tbs.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "d3d12.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "bcryptprimitives.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "comdlg32.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "urlmon.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     }
+    }
+   }
+  },
+  "VSCodium.exe": {
+   "exe": "VSCodium.exe",
+   "path": "/tmp/claude-0/-home-user-Win98-Modern/31f1e8e6-646b-5a42-ab0f-36694df325e9/scratchpad/vscodium/tree/VSCodium.exe",
+   "loads": false,
+   "chain": [
+    "VSCodium.exe",
+    "version.dll",
+    "winmm.dll",
+    "ws2_32.dll",
+    "kernel32.dll",
+    "ntdll.dll"
+   ],
+   "load_time_imports": 664,
+   "failing_imports": 297,
+   "failing_pct": 44.7,
+   "distinct_missing": 297,
+   "missing_by_dll": {
+    "kernel32.dll": {
+     "reason": "fn-missing",
+     "count": 227,
+     "images": [
+      "VSCodium.exe"
+     ],
+     "functions": [
+      "AllocConsole",
+      "AreFileApisANSI",
+      "AssignProcessToJobObject",
+      "AttachConsole",
+      "CancelIo",
+      "CancelIoEx",
+      "CancelSynchronousIo",
+      "CheckRemoteDebuggerPresent",
+      "ClearCommError",
+      "CompareStringW",
+      "ConnectNamedPipe",
+      "CreateFileMappingA",
+      "CreateFileMappingW",
+      "CreateHardLinkW",
+      "CreateIoCompletionPort",
+      "CreateJobObjectW",
+      "CreateNamedPipeA",
+      "CreateNamedPipeW",
+      "CreatePipe",
+      "CreateRemoteThread",
+      "CreateSymbolicLinkW",
+      "CreateToolhelp32Snapshot",
+      "CreateWaitableTimerExW",
+      "DebugBreak",
+      "DeleteProcThreadAttributeList",
+      "DeviceIoControl",
+      "DiscardVirtualMemory",
+      "DisconnectNamedPipe",
+      "EnumResourceNamesW",
+      "EnumSystemLocalesEx",
+      "EnumSystemLocalesW",
+      "EscapeCommFunction",
+      "ExpandEnvironmentStringsA",
+      "ExpandEnvironmentStringsW",
+      "FillConsoleOutputAttribute",
+      "FillConsoleOutputCharacterW",
+      "FindFirstFileExA",
+      "FindFirstFileExW",
+      "FindResourceA",
+      "FindResourceW",
+      "FlushViewOfFile",
+      "FormatMessageA",
+      "FormatMessageW",
+      "FreeLibraryAndExitThread",
+      "GetActiveProcessorCount",
+      "GetCommModemStatus",
+      "GetCommState",
+      "GetComputerNameExW",
+      "GetConsoleCursorInfo",
+      "GetConsoleScreenBufferInfo",
+      "GetCurrencyFormatEx",
+      "GetCurrentPackageFullName",
+      "GetCurrentProcessorNumber",
+      "GetDateFormatEx",
+      "GetDateFormatW",
+      "GetDiskFreeSpaceA",
+      "GetDiskFreeSpaceExW",
+      "GetDiskFreeSpaceW",
+      "GetDriveTypeW",
+      "GetDynamicTimeZoneInformation",
+      "GetErrorMode",
+      "GetFileAttributesExW",
+      "GetFileInformationByHandle",
+      "GetFileInformationByHandleEx",
+      "GetFileTime",
+      "GetFinalPathNameByHandleW",
+      "GetGeoInfoW",
+      "GetHandleInformation",
+      "GetLocaleInfoEx",
+      "GetLocaleInfoW",
+      "GetLogicalProcessorInformation",
+      "GetLogicalProcessorInformationEx",
+      "GetLongPathNameW",
+      "GetMaximumProcessorCount",
+      "GetMaximumProcessorGroupCount",
+      "GetModuleHandleExA",
+      "GetModuleHandleExW",
+      "GetNamedPipeClientProcessId",
+      "GetNamedPipeHandleStateW",
+      "GetNamedPipeServerProcessId",
+      "GetNumberFormatEx",
+      "GetNumberOfConsoleInputEvents",
+      "GetOverlappedResult",
+      "GetPackageFamilyName",
+      "GetPackagePathByFullName",
+      "GetPackagesByPackageFamily",
+      "GetPriorityClass",
+      "GetPrivateProfileStringW",
+      "GetProcessHandleCount",
+      "GetProcessHeaps",
+      "GetProcessId",
+      "GetProcessInformation",
+      "GetProcessIoCounters",
+      "GetProcessMitigationPolicy",
+      "GetProcessTimes",
+      "GetProductInfo",
+      "GetQueuedCompletionStatus",
+      "GetQueuedCompletionStatusEx",
+      "GetShortPathNameW",
+      "GetStringTypeW",
+      "GetSystemDefaultLCID",
+      "GetSystemPowerStatus",
+      "GetTempFileNameA",
+      "GetThreadContext",
+      "GetThreadGroupAffinity",
+      "GetThreadId",
+      "GetThreadLocale",
+      "GetThreadPreferredUILanguages",
+      "GetThreadPriorityBoost",
+      "GetThreadTimes",
+      "GetTimeFormatEx",
+      "GetTimeFormatW",
+      "GetUserDefaultLCID",
+      "GetUserDefaultLangID",
+      "GetUserDefaultLocaleName",
+      "GetUserDefaultUILanguage",
+      "GetUserGeoID",
+      "GetVolumeInformationW",
+      "GetVolumePathNameW",
+      "GlobalLock",
+      "GlobalSize",
+      "GlobalUnlock",
+      "HeapCompact",
+      "HeapLock",
+      "HeapSetInformation",
+      "HeapUnlock",
+      "HeapWalk",
+      "InitOnceBeginInitialize",
+      "InitOnceComplete",
+      "InitializeProcThreadAttributeList",
+      "InitializeSListHead",
+      "InterlockedPushEntrySList",
+      "IsValidLocale",
+      "IsWow64Process",
+      "K32EnumProcessModules",
+      "K32GetModuleBaseNameW",
+      "K32GetModuleInformation",
+      "K32GetPerformanceInfo",
+      "K32GetProcessMemoryInfo",
+      "K32QueryWorkingSetEx",
+      "LCIDToLocaleName",
+      "LCMapStringW",
+      "LoadResource",
+      "LocaleNameToLCID",
+      "LockFile",
+      "LockFileEx",
+      "LockResource",
+      "MapViewOfFile",
+      "MapViewOfFileEx",
+      "NeedCurrentDirectoryForExePathW",
+      "OpenFileMappingW",
+      "OpenProcess",
+      "OpenThread",
+      "PeekNamedPipe",
+      "PostQueuedCompletionStatus",
+      "PowerClearRequest",
+      "PowerCreateRequest",
+      "PowerSetRequest",
+      "PrefetchVirtualMemory",
+      "Process32FirstW",
+      "Process32NextW",
+      "ProcessIdToSessionId",
+      "PurgeComm",
+      "QueryFullProcessImageNameW",
+      "QueryInformationJobObject",
+      "QueryProcessCycleTime",
+      "QueryThreadCycleTime",
+      "QueueUserWorkItem",
+      "ReOpenFile",
+      "ReadConsoleInputW",
+      "ReadConsoleW",
+      "ReadDirectoryChangesW",
+      "ReadProcessMemory",
+      "RegisterApplicationRestart",
+      "RegisterWaitForSingleObject",
+      "ReplaceFileW",
+      "ResolveLocaleName",
+      "RtlAddFunctionTable",
+      "RtlCaptureStackBackTrace",
+      "RtlDeleteFunctionTable",
+      "SetCommState",
+      "SetCommTimeouts",
+      "SetConsoleCtrlHandler",
+      "SetConsoleCursorInfo",
+      "SetConsoleCursorPosition",
+      "SetConsoleTextAttribute",
+      "SetConsoleTitleW",
+      "SetDefaultDllDirectories",
+      "SetFileAttributesW",
+      "SetFileCompletionNotificationModes",
+      "SetFileInformationByHandle",
+      "SetFileTime",
+      "SetHandleInformation",
+      "SetInformationJobObject",
+      "SetNamedPipeHandleState",
+      "SetPriorityClass",
+      "SetProcessInformation",
+      "SetProcessMitigationPolicy",
+      "SetProcessShutdownParameters",
+      "SetThreadInformation",
+      "SetThreadPriorityBoost",
+      "SetWaitableTimer",
+      "SizeofResource",
+      "SystemTimeToTzSpecificLocalTime",
+      "TerminateJobObject",
+      "TransactNamedPipe",
+      "TzSpecificLocalTimeToSystemTime",
+      "UnlockFile",
+      "UnlockFileEx",
+      "UnmapViewOfFile",
+      "UnregisterWait",
+      "UnregisterWaitEx",
+      "UpdateProcThreadAttribute",
+      "VerSetConditionMask",
+      "VerifyVersionInfoW",
+      "VirtualFreeEx",
+      "VirtualLock",
+      "VirtualProtectEx",
+      "VirtualQueryEx",
+      "VirtualUnlock",
+      "WTSGetActiveConsoleSessionId",
+      "WaitNamedPipeW",
+      "Wow64GetThreadContext",
+      "WriteConsoleInputW",
+      "WriteProcessMemory",
+      "lstrcmpW",
+      "lstrcmpiW"
+     ]
+    },
+    "crypt32.dll": {
+     "reason": "dll-missing",
+     "count": 28,
+     "images": [
+      "VSCodium.exe"
+     ],
+     "functions": [
+      "CertAddCertificateContextToStore",
+      "CertAddEncodedCertificateToStore",
+      "CertAddStoreToCollection",
+      "CertCloseStore",
+      "CertCompareCertificateName",
+      "CertControlStore",
+      "CertEnumCertificatesInStore",
+      "CertFindCertificateInStore",
+      "CertFindChainInStore",
+      "CertFreeCertificateChain",
+      "CertFreeCertificateContext",
+      "CertGetCertificateChain",
+      "CertGetCertificateContextProperty",
+      "CertGetEnhancedKeyUsage",
+      "CertGetIntendedKeyUsage",
+      "CertGetNameStringW",
+      "CertOpenStore",
+      "CertOpenSystemStoreW",
+      "CertVerifyTimeValidity",
+      "CryptAcquireCertificatePrivateKey",
+      "CryptMsgClose",
+      "CryptMsgGetParam",
+      "CryptProtectData",
+      "CryptProtectMemory",
+      "CryptQueryObject",
+      "CryptUnprotectData",
+      "CryptUnprotectMemory",
+      "CryptVerifyCertificateSignatureEx"
+     ]
+    },
+    "winmm.dll": {
+     "reason": "fn-missing",
+     "count": 28,
+     "images": [
+      "VSCodium.exe"
+     ],
+     "functions": [
+      "midiInAddBuffer",
+      "midiInClose",
+      "midiInGetDevCapsW",
+      "midiInGetNumDevs",
+      "midiInOpen",
+      "midiInPrepareHeader",
+      "midiInReset",
+      "midiInStart",
+      "midiInUnprepareHeader",
+      "midiOutClose",
+      "midiOutGetDevCapsW",
+      "midiOutGetNumDevs",
+      "midiOutLongMsg",
+      "midiOutOpen",
+      "midiOutPrepareHeader",
+      "midiOutReset",
+      "midiOutShortMsg",
+      "midiOutUnprepareHeader",
+      "waveInGetNumDevs",
+      "waveOutClose",
+      "waveOutGetNumDevs",
+      "waveOutOpen",
+      "waveOutPause",
+      "waveOutPrepareHeader",
+      "waveOutReset",
+      "waveOutRestart",
+      "waveOutUnprepareHeader",
+      "waveOutWrite"
+     ]
+    },
+    "ws2_32.dll": {
+     "reason": "fn-missing",
+     "count": 11,
+     "images": [
+      "VSCodium.exe"
+     ],
+     "functions": [
+      "FreeAddrInfoExW",
+      "GetAddrInfoExCancel",
+      "GetAddrInfoExW",
+      "GetNameInfoW",
+      "WSADuplicateSocketW",
+      "WSAEnumProtocolsW",
+      "WSAGetOverlappedResult",
+      "WSALookupServiceBeginW",
+      "WSALookupServiceEnd",
+      "WSALookupServiceNextW",
+      "WSASetServiceW"
+     ]
+    },
+    "ntdll.dll": {
+     "reason": "fn-missing",
+     "count": 2,
+     "images": [
+      "VSCodium.exe"
+     ],
+     "functions": [
+      "LdrLockLoaderLock",
+      "LdrUnlockLoaderLock"
+     ]
+    },
+    "dwrite.dll": {
+     "reason": "dll-missing",
+     "count": 1,
+     "images": [
+      "VSCodium.exe"
+     ],
+     "functions": [
+      "DWriteCreateFactory"
+     ]
+    }
+   },
+   "ordinal_hazards": [],
+   "images": {
+    "VSCodium.exe": {
+     "from": "app",
+     "load_time_imports": 537,
+     "delay_imports": 737,
+     "missing": 297,
+     "missing_by_dll": {
+      "kernel32.dll": 227,
+      "crypt32.dll": 28,
+      "winmm.dll": 28,
+      "ws2_32.dll": 11,
+      "ntdll.dll": 2,
+      "dwrite.dll": 1
+     }
+    },
+    "version.dll": {
+     "from": "system",
+     "load_time_imports": 11,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "winmm.dll": {
+     "from": "system",
+     "load_time_imports": 13,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "ws2_32.dll": {
+     "from": "system",
+     "load_time_imports": 27,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "kernel32.dll": {
+     "from": "system",
+     "load_time_imports": 76,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    },
+    "ntdll.dll": {
+     "from": "system",
+     "load_time_imports": 0,
+     "delay_imports": 0,
+     "missing": 0,
+     "missing_by_dll": {}
+    }
+   },
+   "delay_loaded_system_dlls": {
+    "VSCodium.exe": {
+     "user32.dll": {
+      "functions": 213,
+      "provided": 104,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "gdi32.dll": {
+      "functions": 90,
+      "provided": 55,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "advapi32.dll": {
+      "functions": 84,
+      "provided": 33,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "ole32.dll": {
+      "functions": 33,
+      "provided": 14,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "shell32.dll": {
+      "functions": 23,
+      "provided": 6,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "mfplat.dll": {
+      "functions": 23,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "oleaut32.dll": {
+      "functions": 20,
+      "provided": 16,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "dbghelp.dll": {
+      "functions": 14,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "winhttp.dll": {
+      "functions": 14,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "iphlpapi.dll": {
+      "functions": 13,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "bthprops.cpl": {
+      "functions": 11,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "hid.dll": {
+      "functions": 11,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "ncrypt.dll": {
+      "functions": 10,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "setupapi.dll": {
+      "functions": 10,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "uiautomationcore.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "winusb.dll": {
+      "functions": 9,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "winspool.drv": {
+      "functions": 8,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "combase.dll": {
+      "functions": 8,
+      "provided": 6,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "secur32.dll": {
+      "functions": 7,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "shlwapi.dll": {
+      "functions": 6,
+      "provided": 4,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "uxtheme.dll": {
+      "functions": 6,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wintrust.dll": {
+      "functions": 6,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "comctl32.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dwmapi.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "pdh.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wevtapi.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "oleacc.dll": {
+      "functions": 5,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "wtsapi32.dll": {
+      "functions": 4,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "userenv.dll": {
+      "functions": 4,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "kernel32.dll": {
+      "functions": 4,
+      "provided": 3,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "cfgmgr32.dll": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-shcore-scaling-l1": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "propsys.dll": {
+      "functions": 3,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-power-base-l1": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "dhcpcsvc.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dcomp.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mf.dll": {
+      "functions": 2,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "comdlg32.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "fontsub.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "api-ms-win-core-realtime-l1": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "apiset-unmapped"
+     },
+     "rpcrt4.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     },
+     "urlmon.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "d3d11.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "dxgi.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mmdevapi.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "mfreadwrite.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "d3d12.dll": {
+      "functions": 1,
+      "provided": 0,
+      "have_dll": false,
+      "kind": "dll"
+     },
+     "bcryptprimitives.dll": {
+      "functions": 1,
+      "provided": 1,
+      "have_dll": true,
+      "kind": "dll"
+     }
+    }
+   }
+  }
+ },
+ "worklist_distinct": 327,
+ "worklist": [
+  {
+   "dll": "kernel32.dll",
+   "fn": "CompareStringW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 1
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateFileMappingW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 2
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateNamedPipeW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 3
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateRemoteThread",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 4
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "EnumSystemLocalesW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 5
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ExpandEnvironmentStringsW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 6
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindFirstFileExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 7
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FormatMessageA",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 8
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FormatMessageW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 9
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetComputerNameExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 10
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetConsoleScreenBufferInfo",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 11
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDateFormatW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 12
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDriveTypeW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 13
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileInformationByHandle",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 14
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileTime",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 15
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLocaleInfoW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 16
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLogicalProcessorInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 17
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLongPathNameW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 18
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleHandleExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 19
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessId",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 20
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProductInfo",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 21
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetStringTypeW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 22
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadId",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 23
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTimeFormatW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 24
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultLCID",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 25
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultLangID",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 26
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitializeSListHead",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 27
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsValidLocale",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 28
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsWow64Process",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 29
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32EnumProcessModules",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 30
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetModuleInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 31
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32QueryWorkingSetEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 32
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LCMapStringW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 33
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LockFileEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 34
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "MapViewOfFile",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 35
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "OpenProcess",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 36
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PeekNamedPipe",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 37
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryThreadCycleTime",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 38
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadConsoleW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 39
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadProcessMemory",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 40
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlCaptureStackBackTrace",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 41
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleCtrlHandler",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 42
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetHandleInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 43
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetNamedPipeHandleState",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 44
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetProcessMitigationPolicy",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 45
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetThreadInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 46
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SystemTimeToTzSpecificLocalTime",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 47
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnlockFileEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 48
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnmapViewOfFile",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 49
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VerSetConditionMask",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 50
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VerifyVersionInfoW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 51
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualProtectEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 52
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WaitNamedPipeW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 53
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WriteProcessMemory",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 5,
+   "rank": 54
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ConnectNamedPipe",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 55
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateIoCompletionPort",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 56
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateJobObjectW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 57
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DebugBreak",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 58
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DeleteProcThreadAttributeList",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 59
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "EnumSystemLocalesEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 60
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FlushViewOfFile",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 61
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCurrentProcessorNumber",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 62
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileInformationByHandleEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 63
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetHandleInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 64
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessHandleCount",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 65
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessHeaps",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 66
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessMitigationPolicy",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 67
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessTimes",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 68
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetQueuedCompletionStatus",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 69
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadContext",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 70
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultLocaleName",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 71
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapSetInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 72
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitializeProcThreadAttributeList",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 73
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetPerformanceInfo",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 74
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetProcessMemoryInfo",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 75
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PostQueuedCompletionStatus",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 76
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PrefetchVirtualMemory",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 77
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryInformationJobObject",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 78
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RegisterWaitForSingleObject",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 79
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReplaceFileW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 80
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetDefaultDllDirectories",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 81
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileAttributesW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 82
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileInformationByHandle",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 83
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetInformationJobObject",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 84
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetProcessShutdownParameters",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 85
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TerminateJobObject",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 86
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TransactNamedPipe",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 87
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnregisterWaitEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 88
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UpdateProcThreadAttribute",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 89
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualFreeEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 4,
+   "rank": 90
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertAddCertificateContextToStore",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 91
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertAddEncodedCertificateToStore",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 92
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertAddStoreToCollection",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 93
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertCloseStore",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 94
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertCompareCertificateName",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 95
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertControlStore",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 96
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertEnumCertificatesInStore",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 97
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertFindCertificateInStore",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 98
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertFindChainInStore",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 99
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertFreeCertificateContext",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 100
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetCertificateContextProperty",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 101
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetEnhancedKeyUsage",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 102
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetIntendedKeyUsage",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 103
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetNameStringW",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 104
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertOpenStore",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 105
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertOpenSystemStoreW",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 106
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertVerifyTimeValidity",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 107
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptAcquireCertificatePrivateKey",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 108
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptMsgClose",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 109
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptMsgGetParam",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 110
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptProtectData",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 111
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptProtectMemory",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 112
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptQueryObject",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 113
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptUnprotectData",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 114
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptUnprotectMemory",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 115
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CryptVerifyCertificateSignatureEx",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 116
+  },
+  {
+   "dll": "dwrite.dll",
+   "fn": "DWriteCreateFactory",
+   "reason": "dll-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 117
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AllocConsole",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 118
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AreFileApisANSI",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 119
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AssignProcessToJobObject",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 120
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "AttachConsole",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 121
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CancelIo",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 122
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CancelIoEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 123
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CheckRemoteDebuggerPresent",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 124
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ClearCommError",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 125
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateFileMappingA",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 126
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateHardLinkW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 127
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateToolhelp32Snapshot",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 128
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateWaitableTimerExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 129
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DeviceIoControl",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 130
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DiscardVirtualMemory",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 131
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "DisconnectNamedPipe",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 132
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "EnumResourceNamesW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 133
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "EscapeCommFunction",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 134
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindFirstFileExA",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 135
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindResourceW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 136
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FreeLibraryAndExitThread",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 137
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetActiveProcessorCount",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 138
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCommModemStatus",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 139
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCommState",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 140
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCurrencyFormatEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 141
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDateFormatEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 142
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDiskFreeSpaceA",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 143
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDiskFreeSpaceExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 144
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDiskFreeSpaceW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 145
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetDynamicTimeZoneInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 146
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFileAttributesExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 147
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFinalPathNameByHandleW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 148
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetGeoInfoW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 149
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLocaleInfoEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 150
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetLogicalProcessorInformationEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 151
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetMaximumProcessorCount",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 152
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetMaximumProcessorGroupCount",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 153
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetModuleHandleExA",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 154
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNamedPipeClientProcessId",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 155
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNamedPipeServerProcessId",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 156
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNumberFormatEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 157
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetOverlappedResult",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 158
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPackagePathByFullName",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 159
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPackagesByPackageFamily",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 160
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPriorityClass",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 161
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPrivateProfileStringW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 162
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 163
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetShortPathNameW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 164
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemDefaultLCID",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 165
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetSystemPowerStatus",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 166
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTempFileNameA",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 167
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadGroupAffinity",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 168
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadLocale",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 169
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadPreferredUILanguages",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 170
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadPriorityBoost",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 171
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetThreadTimes",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 172
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetTimeFormatEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 173
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserDefaultUILanguage",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 174
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserGeoID",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 175
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetVolumeInformationW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 176
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetVolumePathNameW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 177
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GlobalLock",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 178
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GlobalSize",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 179
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GlobalUnlock",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 180
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapCompact",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 181
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapLock",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 182
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapUnlock",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 183
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "HeapWalk",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 184
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitOnceBeginInitialize",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 185
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InitOnceComplete",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 186
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InterlockedPushEntrySList",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 187
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsThreadAFiber",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll",
+    "electron.exe"
+   ],
+   "images": 3,
+   "rank": 188
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LCIDToLocaleName",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 189
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LoadResource",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 190
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LocaleNameToLCID",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 191
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LockFile",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 192
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LockResource",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 193
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "MapViewOfFileEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 194
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "OpenThread",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 195
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PowerClearRequest",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 196
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PowerCreateRequest",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 197
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PowerSetRequest",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 198
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "Process32FirstW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 199
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "Process32NextW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 200
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ProcessIdToSessionId",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 201
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "PurgeComm",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 202
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryFullProcessImageNameW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 203
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryProcessCycleTime",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 204
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadDirectoryChangesW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 205
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ResolveLocaleName",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 206
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlAddFunctionTable",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 207
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RtlDeleteFunctionTable",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 208
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetCommState",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 209
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetCommTimeouts",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 210
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleTextAttribute",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 211
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileCompletionNotificationModes",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 212
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetFileTime",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 213
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetPriorityClass",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 214
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetProcessInformation",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 215
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetThreadPriorityBoost",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 216
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetWaitableTimer",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 217
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SizeofResource",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 218
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "TzSpecificLocalTimeToSystemTime",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 219
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnlockFile",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 220
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "UnregisterWait",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 221
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualLock",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 222
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualQueryEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 223
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "VirtualUnlock",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 224
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WTSGetActiveConsoleSessionId",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 225
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "Wow64GetThreadContext",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 226
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "lstrcmpW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 227
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInAddBuffer",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 228
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInClose",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 229
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInGetDevCapsW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 230
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInGetNumDevs",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 231
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInOpen",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 232
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInPrepareHeader",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 233
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInReset",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 234
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInStart",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 235
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiInUnprepareHeader",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 236
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutClose",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 237
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutGetDevCapsW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 238
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutGetNumDevs",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 239
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutLongMsg",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 240
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutOpen",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 241
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutPrepareHeader",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 242
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutReset",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 243
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutShortMsg",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 244
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "midiOutUnprepareHeader",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 245
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveInGetNumDevs",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 246
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutClose",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 247
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutGetNumDevs",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 248
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutOpen",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 249
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutPause",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 250
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutPrepareHeader",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 251
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutReset",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 252
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutRestart",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 253
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutUnprepareHeader",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 254
+  },
+  {
+   "dll": "winmm.dll",
+   "fn": "waveOutWrite",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 255
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "FreeAddrInfoExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 256
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "GetAddrInfoExCancel",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 257
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "GetAddrInfoExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 258
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSADuplicateSocketW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 259
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSAEnumProtocolsW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 260
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSAGetOverlappedResult",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 261
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSALookupServiceBeginW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 262
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSALookupServiceEnd",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 263
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSALookupServiceNextW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 264
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSASetServiceW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll",
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 3,
+   "rank": 265
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetModuleFileNameExA",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "images": 3,
+   "rank": 266
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertFreeCertificateChain",
+   "reason": "dll-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 267
+  },
+  {
+   "dll": "crypt32.dll",
+   "fn": "CertGetCertificateChain",
+   "reason": "dll-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 268
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CancelSynchronousIo",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 269
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateNamedPipeA",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 270
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreatePipe",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 271
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "CreateSymbolicLinkW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 272
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ExpandEnvironmentStringsA",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 273
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FillConsoleOutputAttribute",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 274
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FillConsoleOutputCharacterW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 275
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindResourceA",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 276
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetConsoleCursorInfo",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 277
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCurrentPackageFullName",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 278
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetErrorMode",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 279
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNamedPipeHandleStateW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 280
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetNumberOfConsoleInputEvents",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 281
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetPackageFamilyName",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 282
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetProcessIoCounters",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 283
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetQueuedCompletionStatusEx",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 284
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "InterlockedFlushSList",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "images": 2,
+   "rank": 285
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetMappedFileNameW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "images": 2,
+   "rank": 286
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetModuleBaseNameW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 287
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "NeedCurrentDirectoryForExePathW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 288
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "OpenFileMappingW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 289
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueueUserWorkItem",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 290
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReOpenFile",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 291
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "ReadConsoleInputW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 292
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "RegisterApplicationRestart",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 293
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleCursorInfo",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 294
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleCursorPosition",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 295
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleTitleW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 296
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WriteConsoleInputW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 297
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "LdrLockLoaderLock",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 298
+  },
+  {
+   "dll": "ntdll.dll",
+   "fn": "LdrUnlockLoaderLock",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 299
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "GetNameInfoW",
+   "reason": "fn-missing",
+   "chains": [
+    "electron.exe",
+    "VSCodium.exe"
+   ],
+   "images": 2,
+   "rank": 300
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "WerRegisterRuntimeExceptionModule",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.exe",
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 301
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FileTimeToLocalFileTime",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 302
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindFirstVolumeW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 303
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindNextVolumeW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 304
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FindVolumeClose",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 305
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FoldStringW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 306
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "FreeConsole",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 307
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetConsoleDisplayMode",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 308
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetCurrentThreadStackLimits",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 309
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetFirmwareType",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 310
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetUserPreferredUILanguages",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 311
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetVolumeNameForVolumeMountPointW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 312
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "GetVolumePathNamesForVolumeNameW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 313
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "IsProcessInJob",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 314
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "K32GetModuleFileNameExW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 315
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LCMapStringEx",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 316
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "LocalFileTimeToFileTime",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 317
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "Module32FirstW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 318
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "Module32NextW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 319
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryDosDeviceW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 320
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "QueryFullProcessImageNameA",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 321
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetDllDirectoryW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 322
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "SetThreadExecutionState",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 323
+  },
+  {
+   "dll": "kernel32.dll",
+   "fn": "lstrcmpiW",
+   "reason": "fn-missing",
+   "chains": [
+    "VSCodium.exe"
+   ],
+   "images": 1,
+   "rank": 324
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSAEnumNameSpaceProvidersW",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 325
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSCEnumProtocols",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 326
+  },
+  {
+   "dll": "ws2_32.dll",
+   "fn": "WSCGetProviderPath",
+   "reason": "fn-missing",
+   "chains": [
+    "chrome.dll"
+   ],
+   "images": 1,
+   "rank": 327
+  }
+ ]
+}

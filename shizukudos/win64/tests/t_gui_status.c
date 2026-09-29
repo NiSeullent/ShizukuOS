@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * GUI: runtime status screen. Loads EVERY system DLL present in C:\SHZ\SYS64 with LoadLibraryW, resolves each DLL's first
  * named export with GetProcAddress, and shows the result in one window (DLL, state, export count, load address) together
- * with the version the loader reports (RtlGetVersion), the processor count and the physical memory. Each DLL is also
+ * with the version the loader reports (RtlGetVersion), the processor count, the physical memory, and every PCI function
+ * with the kernel driver bound to it (NtQuerySystemInformation class 0x101, kernel64/sysx.c). Each DLL is also
  * reported on the serial console as `STATUS-DLL: <name> loaded=<0|1> exports=<n> resolved=<0|1>` so the host runner
  * (run_k64_gui.py) can require that every DLL it built was loaded inside the guest; the screendump is the visible record.
  * Reports SKIP and exits 0 when there is no display. */
@@ -10,6 +11,7 @@
 #include "shzcrt.h"
 
 LONG NTAPI RtlGetVersion(OSVERSIONINFOW *);
+LONG NTAPI NtQuerySystemInformation(ULONG, PVOID, ULONG, PULONG);
 
 static int bad;
 #define CHECK(cond, name) do { if (cond) printf("PASS: %s\n", name); else { printf("FAIL: %s (line %d)\n", name, __LINE__); ++bad; } } while (0)
@@ -18,6 +20,21 @@ static int bad;
 static struct dll_row { WCHAR name[40]; int loaded, resolved; DWORD exports; ULONG_PTR base; } g_rows[MAXDLL];
 static int g_n, g_loaded;
 static WCHAR g_head[3][128];
+#define MAXPCI 32
+static struct pci_row { BYTE bus, dev, fn, cls, sub, pif, irq, pad; WORD vendor, device; DWORD pad2; char driver[24]; } g_pci[MAXPCI];
+static ULONG g_npci;
+
+static void query_pci(void)
+{
+    ULONG i;
+    LONG st = NtQuerySystemInformation(0x101, g_pci, sizeof g_pci, &g_npci);
+    CHECK(st == 0, "NtQuerySystemInformation(0x101) lists the PCI functions");
+    if (st) g_npci = 0;
+    for (i = 0; i < g_npci; ++i)
+        printf("STATUS-PCI: %02x:%02x.%x %04x:%04x class %02x%02x%02x irq %u driver=%s\n", g_pci[i].bus, g_pci[i].dev, g_pci[i].fn,
+               g_pci[i].vendor, g_pci[i].device, g_pci[i].cls, g_pci[i].sub, g_pci[i].pif, g_pci[i].irq,
+               g_pci[i].driver[0] ? g_pci[i].driver : "-");
+}
 
 static DWORD export_count(HMODULE m, const char **first)
 {
@@ -125,6 +142,22 @@ static void paint(HDC dc)
         wfmt(w, 64, t);
         TextOutW(dc, x + 328, y, w, lstrlenW(w));
     }
+    {
+        int y = 90 + half * 18 + 18;
+        TextOutW(dc, 8, y, L"PCI function  vendor:device  class   irq  kernel driver", 55);
+        for (i = 0; i < (int)g_npci; ++i) {
+            const struct pci_row *r = &g_pci[i];
+            y += 18;
+            snprintf(t, sizeof t, "%02x:%02x.%x       %04x:%04x      %02x%02x%02x  %-3u  ", r->bus, r->dev, r->fn, r->vendor, r->device,
+                     r->cls, r->sub, r->pif, r->irq);
+            wfmt(w, 64, t);
+            SetTextColor(dc, RGB(0, 0, 0));
+            TextOutW(dc, 8, y, w, lstrlenW(w));
+            SetTextColor(dc, r->driver[0] ? RGB(0, 128, 0) : RGB(128, 128, 128));
+            wfmt(w, 64, r->driver[0] ? r->driver : "(no driver)");
+            TextOutW(dc, 8 + 8 * lstrlenW(L"PCI function  vendor:device  class   irq  "), y, w, lstrlenW(w));
+        }
+    }
 }
 
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -157,6 +190,7 @@ int main(void)
     CHECK(g_n >= 3, "at least ntdll, kernel32 and one more system DLL are present");
     CHECK(all, "every system DLL loads and its first named export resolves");
     header();
+    query_pci();
     memset(&wc, 0, sizeof wc);
     wc.cbSize = sizeof wc;
     wc.lpfnWndProc = wndproc;

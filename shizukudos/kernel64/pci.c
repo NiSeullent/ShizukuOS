@@ -111,6 +111,34 @@ void *mmio_map(uint64_t pa, uint64_t size)
     return (void *)(DIRECT_MAP + first + off);
 }
 
+static struct { uint8_t bus, dev, fn; const char *driver; } g_claims[32];
+static unsigned g_nclaims;
+
+void pci_claim(const pci_dev_t *d, const char *driver)
+{
+    unsigned i;
+    for (i = 0; i < g_nclaims; ++i)
+        if (g_claims[i].bus == d->bus && g_claims[i].dev == d->dev && g_claims[i].fn == d->fn) {
+            g_claims[i].driver = driver;
+            return;
+        }
+    if (g_nclaims < 32) {
+        g_claims[g_nclaims].bus = d->bus;
+        g_claims[g_nclaims].dev = d->dev;
+        g_claims[g_nclaims].fn = d->fn;
+        g_claims[g_nclaims++].driver = driver;
+    }
+}
+
+const char *pci_claimed_by(const pci_dev_t *d)
+{
+    unsigned i;
+    for (i = 0; i < g_nclaims; ++i)
+        if (g_claims[i].bus == d->bus && g_claims[i].dev == d->dev && g_claims[i].fn == d->fn)
+            return g_claims[i].driver;
+    return 0;
+}
+
 void pci_log_devices(void)
 {
     pci_dev_t all[32];
