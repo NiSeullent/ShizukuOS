@@ -25,7 +25,8 @@ typedef struct {
 
 /* ---- kernel objects ---- */
 enum { OB_NONE = 0, OB_EVENT = 1, OB_MUTANT = 2, OB_SEMAPHORE = 3, OB_THREAD = 4, OB_PROCESS = 5, OB_FILE = 6,
-       OB_TIMER = 7, OB_DIRECTORY = 8, OB_KEY = 9 };
+       OB_TIMER = 7, OB_DIRECTORY = 8 };
+enum { OB_KEY = 0x10 };                 /* registry key (registry.c); a separate enum so other subsystems can add their own types */
 struct waitblock;
 struct kobject {
     uint32_t type, refs;

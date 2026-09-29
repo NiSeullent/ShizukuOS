@@ -193,8 +193,8 @@ out:
 }
 
 /* ---------------------------------------------------------------- information records */
-/* Key classes. `full_path`: KeyNameInformation returns the full path of the key (NtQueryKey), sub-key enumeration a
- * bare name. Requires the registry lock. */
+/* Key information classes 0..4 (basic, node, full, name, cached). Class 3 is the full path of the key and only NtQueryKey
+ * offers it. Requires the registry lock. */
 static int32_t fill_key_info(process_t *pr, regkey_t *k, uint32_t cls, uint64_t buf, uint32_t len, uint64_t pres)
 {
     outbuf_t o = { pr, buf, len, 0, 0 };
@@ -459,7 +459,21 @@ static int32_t query_key(process_t *pr, uint64_t h, uint32_t cls, uint64_t buf, 
 }
 
 /* ---------------------------------------------------------------- NtQueryObject */
-static const char *const type_names[] = { 0, "Event", "Mutant", "Semaphore", "Thread", "Process", "File", "Timer", "Directory", "Key" };
+static const char *object_type_name(uint32_t type)
+{
+    switch (type) {
+    case OB_EVENT: return "Event";
+    case OB_MUTANT: return "Mutant";
+    case OB_SEMAPHORE: return "Semaphore";
+    case OB_THREAD: return "Thread";
+    case OB_PROCESS: return "Process";
+    case OB_FILE: return "File";
+    case OB_TIMER: return "Timer";
+    case OB_DIRECTORY: return "Directory";
+    case OB_KEY: return "Key";
+    default: return 0;
+    }
+}
 
 static int32_t query_object(process_t *pr, uint64_t h, uint32_t cls, uint64_t buf, uint32_t len, uint64_t pres)
 {
@@ -476,7 +490,7 @@ static int32_t query_object(process_t *pr, uint64_t h, uint32_t cls, uint64_t bu
         st = handle_ref(pr, h, 0, &o, &access);
         if (st) return st;
     }
-    tn = o->type < sizeof type_names / sizeof type_names[0] ? type_names[o->type] : 0;
+    tn = object_type_name(o->type);
     if (!tn) { ob_deref(o); return STATUS_NOT_SUPPORTED; }
     while (tn[tchars]) { twide[tchars] = (uint8_t)tn[tchars]; ++tchars; }
     switch (cls) {
