@@ -158,9 +158,9 @@ static void reap_user_zombies(const void *only, int drop_holds)
     unsigned i;
     for (i = 0; i < MAX_THREADS; ++i) {
         thread_t *t = &threads[i];
-        if (t->state != TS_ZOMBIE || !t->proc || t == current || (only && t->proc != only)) continue;
-        if (drop_holds) t->creator_hold = 0;
-        if (t->creator_hold) continue;
+        if (t->state == TS_FREE || !t->proc || (only && t->proc != only)) continue;
+        if (drop_holds) t->creator_hold = 0;    /* also a thread still inside thread_exit(): it is reaped at a later pass */
+        if (t->state != TS_ZOMBIE || t == current || t->creator_hold) continue;
         thread_object_detach(t);
         kfree((void *)t->stack_base);
         t->stack_base = 0;
