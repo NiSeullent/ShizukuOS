@@ -48,6 +48,48 @@ int main(void)
     CHECK(st == 0, "loopback ping 127.0.0.1 answered by our own stack");
     st = NtShzNetPing(in.ip_be, (0x4244ull << 16) | 1, 64, 1000, &rtt);
     CHECK(st == 0, "ping to our own address answered over loopback");
+    /* ARP cache expiry / re-resolution: drop every neighbour, the next packet must trigger a new request and still get through */
+    before_req = net_stat(NST_ARP_REQ_TX);
+    CHECK(net_control(3), "ARP cache flushed");
+    st = NtShzNetPing(in.gw_be, (0x4245ull << 16) | 1, 32, 2000, &rtt);
+    CHECK(st == 0 && net_stat(NST_ARP_REQ_TX) == before_req + 1, "after the flush the packet waits for a fresh ARP resolution and is delivered when the reply arrives (%u new request)",
+          (unsigned)(net_stat(NST_ARP_REQ_TX) - before_req));
+    /* ARP for a host that does not exist: 3 requests one second apart, then the queued packet is dropped */
+    {
+        const ULONG ghost = (in.ip_be & in.mask_be) | 0x4d000000u;    /* x.y.z.77 */
+        DWORD t0 = GetTickCount();
+        before_req = net_stat(NST_ARP_REQ_TX);
+        st = NtShzNetPing(ghost, (0x4246ull << 16) | 1, 32, 4500, &rtt);
+        printf("ARP-FAIL ghost=%u.%u.%u.%u requests=%u ms=%u\n", ghost & 255, (ghost >> 8) & 255, (ghost >> 16) & 255, ghost >> 24,
+               (unsigned)(net_stat(NST_ARP_REQ_TX) - before_req), (unsigned)(GetTickCount() - t0));
+        CHECK(st != 0 && net_stat(NST_ARP_REQ_TX) - before_req == 3, "ping to an unresolvable neighbour sends exactly 3 ARP requests and times out (status %08x)", (unsigned)st);
+        {
+            struct sockaddr_in a;
+            WSADATA w;
+            SOCKET s;
+            int r;
+            WSAStartup(MAKEWORD(2, 2), &w);
+            s = socket(AF_INET, SOCK_STREAM, 0);
+            memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons(80); a.sin_addr.s_addr = ghost;
+            t0 = GetTickCount();
+            r = connect(s, (struct sockaddr *)&a, sizeof a);
+            CHECK(r == SOCKET_ERROR && WSAGetLastError() == WSAEHOSTUNREACH && GetTickCount() - t0 < 6000, "TCP connect to the unresolvable neighbour fails with WSAEHOSTUNREACH (10065) after %u ms, got %d",
+                  (unsigned)(GetTickCount() - t0), WSAGetLastError());
+            closesocket(s);
+            WSACleanup();
+        }
+    }
+    /* DHCP renewal (RFC 2131 4.4.5): forced RENEWING -> unicast REQUEST to the server -> ACK -> BOUND again with the same address */
+    {
+        struct shz_net_info after;
+        ULONG tx0 = net_stat(NST_DHCP_TX), rx0 = net_stat(NST_DHCP_RX);
+        DWORD t0 = GetTickCount();
+        CHECK(net_control(1), "DHCP renewal forced");
+        do { Sleep(20); net_query_info(&after); } while (after.dhcp_state != 4 && GetTickCount() - t0 < 3000);
+        printf("DHCP-RENEW state=%u ip=%08x tx=%u rx=%u\n", after.dhcp_state, after.ip_be, (unsigned)(net_stat(NST_DHCP_TX) - tx0), (unsigned)(net_stat(NST_DHCP_RX) - rx0));
+        CHECK(after.dhcp_state == 4 && after.ip_be == in.ip_be && net_stat(NST_DHCP_TX) == tx0 + 1 && net_stat(NST_DHCP_RX) == rx0 + 1,
+              "renewal completed: one unicast REQUEST sent, one ACK received, still BOUND to %s", ip);
+    }
     CHECK(net_stat(NST_ETH_TX) > 0 && net_stat(NST_ETH_RX) > 0 && net_stat(NST_IP_BAD_CSUM) == 0,
           "frames flowed both ways (tx %u, rx %u) and no IP header checksum failed", (unsigned)net_stat(NST_ETH_TX), (unsigned)net_stat(NST_ETH_RX));
     return g_bad ? 1 : 0;

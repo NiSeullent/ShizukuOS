@@ -899,15 +899,21 @@ void net_dhcp_apply(ip4_t ip, ip4_t mask, ip4_t gw, ip4_t dns0, ip4_t dns1, ip4_
     net_wake_all();
 }
 
+void net_arp_flush(void);
 void net_deconfigure(void)
 {
-    unsigned i;
     g_net.ip = 0; g_net.mask = 0; g_net.gw = 0; g_net.dns[0] = g_net.dns[1] = 0; g_net.dhcp_server = 0;
+    net_arp_flush();
+    net_wake_all();
+}
+
+void net_arp_flush(void)
+{
+    unsigned i;
     for (i = 0; i < ARP_N; ++i) {
         arp_free_pending(&arp_tab[i]);
         arp_tab[i].state = A_FREE;
     }
-    net_wake_all();
 }
 
 int net_ensure_init(void)

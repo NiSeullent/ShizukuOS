@@ -11,8 +11,8 @@
  *  - TCP: RFC 793 state machine with RFC 5961 challenge ACKs, RFC 6298 retransmission timer with exponential backoff,
  *    RFC 5681 slow start / congestion avoidance / fast retransmit + NewReno recovery, MSS option, Nagle, zero-window
  *    probes, keep-alive, TIME_WAIT. NOT implemented: window scaling (the receive window is at most 65535), SACK,
- *    timestamps, ECN, urgent data, and out-of-order reassembly (out-of-order segments are dropped and answered with a
- *    duplicate ACK, so the peer's fast retransmit / RTO repairs the hole).
+ *    timestamps, ECN and urgent data. Out-of-order segments are held (bounded by the receive window) and answered with a
+ *    duplicate ACK; when the hole fills, one cumulative ACK covers everything (no SACK blocks are generated).
  *  - IPv4 receive reassembles fragments (RFC 815 hole bitmap, 30 s timeout, at most 4 datagrams in flight); transmit
  *    fragments datagrams larger than the MTU unless DF is set.
  *  - Every stack operation runs under the single net lock (net_lock/net_unlock). The NIC interrupt handler only
@@ -64,7 +64,7 @@ enum {
     NS_ICMP_ECHO_RX, NS_ICMP_ECHO_TX, NS_ICMP_REPLY_RX, NS_ICMP_UNREACH_TX,
     NS_UDP_RX, NS_UDP_TX, NS_UDP_BAD_CSUM,
     NS_TCP_RX, NS_TCP_TX, NS_TCP_BAD_CSUM, NS_TCP_RETRANS, NS_TCP_FAST_RETRANS, NS_TCP_RST_TX, NS_TCP_RST_RX,
-    NS_TCP_OOO_DROP, NS_TCP_DUPACK_TX, NS_TCP_PERSIST, NS_TCP_KEEPALIVE_TX,
+    NS_TCP_OOO, NS_TCP_DUPACK_TX, NS_TCP_PERSIST, NS_TCP_KEEPALIVE_TX,
     NS_DNS_QUERY, NS_DNS_CACHE_HIT, NS_DHCP_TX, NS_DHCP_RX, NS_LO_PKTS,
     NS_COUNT
 };
@@ -136,6 +136,7 @@ extern uint8_t g_l4[];                          /* NET_L4_MAX + 128 bytes: trans
 void net_timers(uint64_t now);                  /* called every ~10 ms by the net thread (lock held) */
 void net_dhcp_apply(ip4_t ip, ip4_t mask, ip4_t gw, ip4_t dns0, ip4_t dns1, ip4_t server, uint32_t lease);
 void net_deconfigure(void);
+void net_arp_flush(void);                       /* forget every neighbour (test hook, control op 3) */
 
 /* ---- UDP (net_udp.c) ---- */
 struct sock;
@@ -205,6 +206,7 @@ int32_t ksock_recvfrom(sock_t *s, uint8_t *buf, uint32_t cap, uint32_t *got, ip4
 /* ---- TCP (net_tcp.c) ---- */
 enum { TCPS_CLOSED = 0, TCPS_LISTEN, TCPS_SYN_SENT, TCPS_SYN_RCVD, TCPS_ESTABLISHED, TCPS_FIN_WAIT_1, TCPS_FIN_WAIT_2, TCPS_CLOSE_WAIT,
        TCPS_CLOSING, TCPS_LAST_ACK, TCPS_TIME_WAIT };
+struct tcp_ooo;
 typedef struct tcb {
     struct tcb *next;                           /* g_tcbs */
     struct tcb *acc_next;                       /* accept queue link */
@@ -226,6 +228,8 @@ typedef struct tcb {
     uint64_t rtx_deadline, persist_deadline, tw_deadline, ack_deadline, ka_deadline, last_rx;
     uint32_t rtx_count, persist_shift, ka_probes, rx_unacked;
     bq_t sndq, rcvq;
+    struct tcp_ooo *ooo;                        /* out-of-order segments beyond a hole, sorted by sequence */
+    uint32_t ooo_bytes;
     int32_t err;                                /* NET_ERR() reported to the application (sticky) */
 } tcb_t;
 extern tcb_t *g_tcbs;

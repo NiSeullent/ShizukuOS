@@ -23,7 +23,7 @@ struct shz_tcp_row { unsigned lip_be, rip_be; unsigned short lport, rport; unsig
 enum { NST_ETH_RX, NST_ETH_TX, NST_ETH_RX_DROP, NST_ARP_REQ_TX, NST_ARP_REP_RX, NST_ARP_REQ_RX, NST_ARP_REP_TX, NST_IP_RX,
        NST_IP_TX, NST_IP_BAD_CSUM, NST_IP_REASM, NST_IP_FRAG_TX, NST_ICMP_ECHO_RX, NST_ICMP_ECHO_TX, NST_ICMP_REPLY_RX,
        NST_ICMP_UNREACH_TX, NST_UDP_RX, NST_UDP_TX, NST_UDP_BAD_CSUM, NST_TCP_RX, NST_TCP_TX, NST_TCP_BAD_CSUM, NST_TCP_RETRANS,
-       NST_TCP_FAST_RETRANS, NST_TCP_RST_TX, NST_TCP_RST_RX, NST_TCP_OOO_DROP, NST_TCP_DUPACK_TX, NST_TCP_PERSIST,
+       NST_TCP_FAST_RETRANS, NST_TCP_RST_TX, NST_TCP_RST_RX, NST_TCP_OOO, NST_TCP_DUPACK_TX, NST_TCP_PERSIST,
        NST_TCP_KEEPALIVE_TX, NST_DNS_QUERY, NST_DNS_CACHE_HIT, NST_DHCP_TX, NST_DHCP_RX, NST_LO_PKTS, NST_COUNT };
 enum { TCPS_CLOSED_T, TCPS_LISTEN_T, TCPS_SYN_SENT_T, TCPS_SYN_RCVD_T, TCPS_ESTABLISHED_T, TCPS_FIN_WAIT_1_T, TCPS_FIN_WAIT_2_T,
        TCPS_CLOSE_WAIT_T, TCPS_CLOSING_T, TCPS_LAST_ACK_T, TCPS_TIME_WAIT_T };
@@ -59,5 +59,44 @@ static ULONG net_state_count(unsigned state)
     ULONG c[11], ret = 0;
     if (NtShzNetQuery(4, c, sizeof c, &ret) || state > 10) return 0;
     return c[state];
+}
+static void *xmalloc(size_t n) { void *p = malloc(n); if (!p) { printf("FAIL: out of memory\n"); ExitProcess(3); } return p; }
+/* deterministic byte stream: the host runner recomputes the same function to verify what the guest sent */
+static unsigned char pat(unsigned long long i) { return (unsigned char)((i * 131u) ^ (i >> 8) ^ (i >> 17)); }
+static void fill_pat(unsigned char *b, size_t n, unsigned long long start) { size_t i; for (i = 0; i < n; ++i) b[i] = pat(start + i); }
+static int send_all(SOCKET s, const void *p, int n)
+{
+    const char *c = p;
+    int sent = 0;
+    while (sent < n) {
+        int r = send(s, c + sent, n - sent, 0);
+        if (r == SOCKET_ERROR) return -1;
+        sent += r;
+    }
+    return sent;
+}
+static int recv_all(SOCKET s, void *p, int n)
+{
+    char *c = p;
+    int got = 0;
+    while (got < n) {
+        int r = recv(s, c + got, n - got, 0);
+        if (r <= 0) return got ? got : r;
+        got += r;
+    }
+    return got;
+}
+
+/* NtShzNetQuery(3) control: 1 = DHCP renew now, 2 = flush DNS cache, 3 = flush ARP cache */
+static int net_control(unsigned op)
+{
+    ULONG v = op, ret = 0;
+    return NtShzNetQuery(3, &v, 4, &ret) == 0;
+}
+/* NtShzNetQuery(5): {free physical pages, kernel heap bytes in use, live TCBs, live sockets} for leak checks */
+static int net_census(unsigned long long m[4])
+{
+    ULONG ret = 0;
+    return NtShzNetQuery(5, m, 32, &ret) == 0 && ret == 32;
 }
 #endif

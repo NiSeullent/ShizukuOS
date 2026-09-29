@@ -8,31 +8,6 @@
 
 #define LO ((u_long)0x0100007f)                         /* 127.0.0.1 in network byte order */
 
-static void *xmalloc(size_t n) { void *p = malloc(n); if (!p) { printf("FAIL: out of memory\n"); ExitProcess(3); } return p; }
-static unsigned char pat(unsigned long long i) { return (unsigned char)((i * 131u) ^ (i >> 8) ^ (i >> 17)); }
-static void fill_pat(unsigned char *b, size_t n, unsigned long long start) { size_t i; for (i = 0; i < n; ++i) b[i] = pat(start + i); }
-static int send_all(SOCKET s, const void *p, int n)
-{
-    const char *c = p;
-    int sent = 0;
-    while (sent < n) {
-        int r = send(s, c + sent, n - sent, 0);
-        if (r == SOCKET_ERROR) return -1;
-        sent += r;
-    }
-    return sent;
-}
-static int recv_all(SOCKET s, void *p, int n)
-{
-    char *c = p;
-    int got = 0;
-    while (got < n) {
-        int r = recv(s, c + got, n - got, 0);
-        if (r <= 0) return got ? got : r;
-        got += r;
-    }
-    return got;
-}
 static SOCKET make_listener(unsigned short *port_out, int backlog)
 {
     struct sockaddr_in a;
@@ -363,7 +338,7 @@ static void test_send_buffer_fill(void)
     int r;
     fd_set wr;
     struct timeval tv;
-    fill_pat(blk, 16384, 0);
+    fill_pat(blk, 16384, 0);                                /* every 16384-byte block repeats: byte i of the stream is pat(i % 16384) */
     c = tcp_connect_lo(port);
     a = accept(l, 0, 0);
     ioctlsocket(c, FIONBIO, &nb);
@@ -371,15 +346,27 @@ static void test_send_buffer_fill(void)
         r = send(c, (const char *)blk, 16384, 0);
         if (r == SOCKET_ERROR) break;
         queued += (unsigned)r;
+        if (r < 16384) { r = SOCKET_ERROR; WSASetLastError(WSAEWOULDBLOCK); break; }   /* partial write: block boundary shifts, stop at a whole block */
         if (queued > (64u << 20)) break;
     }
     CHECK(r == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK && queued > 100000 && queued < (16u << 20),
           "non-blocking send stops with WSAEWOULDBLOCK once buffers are full (%u bytes accepted)", (unsigned)queued);
     FD_ZERO(&wr); FD_SET(c, &wr); tv.tv_sec = 0; tv.tv_usec = 20000;
     CHECK(select(0, 0, &wr, 0, &tv) == 0, "a socket with a full send buffer is not writable");
-    { unsigned long long got = 0; int n;
-      while (got < queued && (n = recv(a, (char *)sink, 65536, 0)) > 0) got += (unsigned)n;
-      CHECK(got == queued, "peer drained all %u queued bytes", (unsigned)got); }
+    {   /* the peer's window is closed: hold it shut long enough for the zero-window probe timer, then drain and verify the stream */
+        ULONG persist0 = net_stat(NST_TCP_PERSIST);
+        unsigned long long got = 0;
+        int n, intact = 1;
+        Sleep(1600);
+        CHECK(net_stat(NST_TCP_PERSIST) > persist0, "the sender probed the zero window while the peer was not reading (%u probe(s))", (unsigned)(net_stat(NST_TCP_PERSIST) - persist0));
+        while (got < queued && (n = recv(a, (char *)sink, 65536, 0)) > 0) {
+            int i;
+            for (i = 0; i < n; ++i)
+                if (sink[i] != pat((got + (unsigned)i) % 16384)) { intact = 0; break; }
+            got += (unsigned)n;
+        }
+        CHECK(got == queued && intact, "peer drained all %u queued bytes, stream intact despite the window probes", (unsigned)got);
+    }
     FD_ZERO(&wr); FD_SET(c, &wr); tv.tv_sec = 2;
     CHECK(select(0, 0, &wr, 0, &tv) == 1, "socket is writable again after the peer read (window reopened)");
     closesocket(c); closesocket(a); closesocket(l);
@@ -613,6 +600,57 @@ static void test_names(void)
     CHECK(gethostname(host, 2) == SOCKET_ERROR && WSAGetLastError() == WSAEFAULT, "gethostname with a short buffer fails with WSAEFAULT");
 }
 
+/* One round of everything that allocates kernel memory: buffers of a bulk transfer, listeners, datagram queues, 30 connections. */
+static void leak_workload(void)
+{
+    struct srv sv;
+    unsigned short port;
+    HANDLE th = start_server(&sv, M_SINK, &port);
+    SOCKET c = tcp_connect_lo(port), u1 = socket(AF_INET, SOCK_DGRAM, 0), u2 = socket(AF_INET, SOCK_DGRAM, 0), l2, cc, aa;
+    unsigned char *data = xmalloc(300000);
+    unsigned resp[2];
+    struct sockaddr_in a;
+    int i, len = sizeof a;
+    fill_pat(data, 300000, 3);
+    send_all(c, data, 300000);
+    shutdown(c, SD_SEND);
+    recv_all(c, resp, 8);
+    closesocket(c);
+    WaitForSingleObject(th, 5000); CloseHandle(th); closesocket(sv.ls);
+    memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_addr.s_addr = LO;
+    bind(u1, (struct sockaddr *)&a, sizeof a); bind(u2, (struct sockaddr *)&a, sizeof a);
+    getsockname(u2, (struct sockaddr *)&a, &len);
+    for (i = 0; i < 20; ++i) sendto(u1, (const char *)data, 1000, 0, (struct sockaddr *)&a, sizeof a);   /* left queued, freed by close */
+    closesocket(u1); closesocket(u2);
+    l2 = make_listener(&port, 32);
+    for (i = 0; i < 30; ++i) {
+        cc = tcp_connect_lo(port);
+        aa = accept(l2, 0, 0);
+        send(cc, (const char *)data, 500, 0);               /* unread data on the server side forces the RST-on-close path */
+        Sleep(1);
+        closesocket(aa);
+        closesocket(cc);
+    }
+    closesocket(l2);
+    free(data);
+}
+
+static void test_no_leaks(void)
+{
+    unsigned long long m1[4], m2[4], m3[4];
+    leak_workload();                                        /* warm-up: user heap growth and one-off kernel allocations */
+    Sleep(50);
+    CHECK(net_census(m1), "resource census");
+    leak_workload();
+    Sleep(50);
+    leak_workload();
+    Sleep(50);
+    CHECK(net_census(m2) && net_census(m3), "resource census after two more rounds");
+    CHECK(m2[0] + 8 >= m1[0] && m3[0] + 8 >= m1[0], "no physical page leak across %u socket rounds: free pages %llu -> %llu", 2u, m1[0], m3[0]);
+    CHECK(m3[3] == m1[3] && m3[3] <= 8, "every socket object was released (%llu live)", m3[3]);
+    printf("INFO: census pages %llu/%llu/%llu heap %llu/%llu/%llu tcbs %llu/%llu/%llu\n", m1[0], m2[0], m3[0], m1[1], m2[1], m3[1], m1[2], m2[2], m3[2]);
+}
+
 static DWORD WINAPI parked_thread(LPVOID arg)
 {
     char b;
@@ -638,6 +676,7 @@ int main(void)
     test_close_while_blocked();
     test_events();
     test_names();
+    test_no_leaks();
     CHECK(WSACleanup() == 0, "WSACleanup balances the one successful WSAStartup");
     CHECK(WSACleanup() == SOCKET_ERROR && WSAGetLastError() == WSANOTINITIALISED, "an extra WSACleanup fails with WSANOTINITIALISED");
     WSAStartup(MAKEWORD(2, 2), &(WSADATA){0});

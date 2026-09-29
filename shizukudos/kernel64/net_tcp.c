@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * TCP (RFC 793, with RFC 1122 / 5681 / 5961 / 6298 / 6528 behaviour). See net.h for the list of what is NOT implemented
- * (window scaling, SACK, timestamps, out-of-order reassembly).
+ * (window scaling, SACK, timestamps).
  *
  * Data model: a connection is a tcb_t on g_tcbs. The application's socket points at it (sock->tcb / tcb->sock). When the
  * application closes the socket the tcb is orphaned (tcb->sock == NULL) and finishes the close handshake on its own, then
@@ -102,6 +102,64 @@ static void acceptq_remove(tcb_t *t)
     t->parent = 0;
 }
 
+/* ---------------------------------------------------------------- out-of-order queue */
+typedef struct tcp_ooo { struct tcp_ooo *next; uint32_t seq; uint16_t len; uint8_t fin; uint8_t data[]; } ooo_t;
+
+static void ooo_free_all(tcb_t *t)
+{
+    while (t->ooo) {
+        ooo_t *n = t->ooo;
+        t->ooo = n->next;
+        kfree(n);
+    }
+    t->ooo_bytes = 0;
+}
+
+/* Keeps a segment that starts beyond rcv_nxt. Bounded: what is held plus what is queued never exceeds the receive buffer. */
+static void ooo_insert(tcb_t *t, uint32_t seq, const uint8_t *data, uint32_t len, int fin)
+{
+    ooo_t **pp = &t->ooo, *n;
+    while (*pp && SEQ_LT((*pp)->seq, seq))
+        pp = &(*pp)->next;
+    if (*pp && (*pp)->seq == seq && (*pp)->len >= len && (!fin || (*pp)->fin))
+        return;                                             /* duplicate of something already held */
+    if (t->ooo_bytes + t->rcvq.len + len > t->rcvq.limit)
+        return;                                             /* would not fit once the hole fills: drop */
+    n = kmalloc(sizeof *n + len);
+    if (!n)
+        return;
+    n->seq = seq; n->len = (uint16_t)len; n->fin = (uint8_t)fin;
+    memcpy(n->data, data, len);
+    n->next = *pp;
+    *pp = n;
+    t->ooo_bytes += len;
+}
+
+/* The hole at rcv_nxt was filled: move every held segment that now starts at or before rcv_nxt into the receive queue.
+ * Returns 1 if that reached a FIN (the caller consumes the FIN's sequence number). */
+static int ooo_deliver(tcb_t *t)
+{
+    int fin = 0;
+    while (t->ooo && SEQ_LEQ(t->ooo->seq, t->rcv_nxt)) {
+        ooo_t *n = t->ooo;
+        const uint32_t end = n->seq + n->len;
+        t->ooo = n->next;
+        t->ooo_bytes -= n->len;
+        if (SEQ_GT(end, t->rcv_nxt)) {
+            const uint32_t skip = t->rcv_nxt - n->seq, take = n->len - skip;
+            const uint32_t w = bq_write(&t->rcvq, n->data + skip, take);
+            t->rcv_nxt += w;
+            if (w < take) { kfree(n); break; }              /* buffer full (cannot happen: bounded on insert); leave the rest to a retransmission */
+        }
+        if (n->fin && t->rcv_nxt == end)
+            fin = 1;
+        kfree(n);
+        if (fin)
+            break;
+    }
+    return fin;
+}
+
 static void tcb_free(tcb_t *t)
 {
     acceptq_remove(t);
@@ -110,6 +168,7 @@ static void tcb_free(tcb_t *t)
         t->sock->tcb = 0;
     bq_free(&t->sndq);
     bq_free(&t->rcvq);
+    ooo_free_all(t);
     kfree(t);
 }
 
@@ -429,6 +488,7 @@ static void tcb_die(tcb_t *t, int32_t err)
     t->rtx_deadline = t->persist_deadline = t->tw_deadline = t->ack_deadline = t->ka_deadline = 0;
     bq_free(&t->sndq);
     bq_free(&t->rcvq);
+    ooo_free_all(t);
     tcb_notify(t);
 }
 
@@ -779,7 +839,9 @@ static void segment_for_tcb(tcb_t *t, uint32_t seq, uint32_t ack, uint8_t flags,
         has_fin = 0;
     }
     if (t->state == TCPS_ESTABLISHED || t->state == TCPS_FIN_WAIT_1 || t->state == TCPS_FIN_WAIT_2) {
-        if (dlen > 0) {
+        const int was_gap = t->ooo != 0;
+        int fin_now = 0;
+        if (dlen > 0 || (has_fin && seq != t->rcv_nxt)) {
             if (!t->sock && t->state != TCPS_ESTABLISHED && t->rcvq.limit == 0) {   /* orphan: nobody can read this (RFC 1122 4.2.2.13) */
                 send_rst_conn(t);
                 tcb_die(t, NET_ERR(WSAECONNRESET));
@@ -798,12 +860,26 @@ static void segment_for_tcb(tcb_t *t, uint32_t seq, uint32_t ack, uint8_t flags,
                     tcb_notify(t);
                 }
             } else {
-                NSTAT(NS_TCP_OOO_DROP);                     /* out of order: drop, duplicate ACK triggers the peer's fast retransmit */
+                NSTAT(NS_TCP_OOO);                     /* beyond a hole: hold it, answer with a duplicate ACK (fast retransmit trigger) */
                 NSTAT(NS_TCP_DUPACK_TX);
+                ooo_insert(t, seq, data, dlen, has_fin);
                 send_ack(t);
                 return;
             }
         }
+        if (t->ooo && SEQ_LEQ(t->ooo->seq, t->rcv_nxt)) {   /* this segment closed (part of) a hole */
+            const uint32_t before = t->rcv_nxt;
+            fin_now = ooo_deliver(t);
+            if (t->rcv_nxt != before) {
+                t->ack_pending = 1; ack_dirty = 1;
+                t->ack_now = 1;                             /* RFC 5681: acknowledge at once a segment that fills a gap */
+                tcb_notify(t);
+            }
+        }
+        if (was_gap && !t->ooo)
+            t->ack_now = 1;
+        if (fin_now)
+            has_fin = 1, dlen = 0, seq = t->rcv_nxt;        /* the FIN is now the next thing in sequence */
         if (has_fin && seq + dlen == t->rcv_nxt) {
             t->rcv_nxt += 1;
             t->rcvd_fin = 1;
@@ -912,6 +988,7 @@ void tcp_timers(uint64_t now)
             *pp = t->next;
             bq_free(&t->sndq);
             bq_free(&t->rcvq);
+            ooo_free_all(t);
             kfree(t);
             continue;
         }

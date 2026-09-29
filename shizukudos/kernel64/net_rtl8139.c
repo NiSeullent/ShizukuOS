@@ -35,7 +35,10 @@ enum { CR_BUFE = 0x01, CR_TE = 0x04, CR_RE = 0x08, CR_RST = 0x10 };
 enum { ISR_ROK = 0x01, ISR_RER = 0x02, ISR_TOK = 0x04, ISR_TER = 0x08, ISR_RXOVW = 0x10, ISR_PUN = 0x20, ISR_FOVW = 0x40,
        ISR_SERR = 0x8000 };
 enum { TSD_OWN = 1 << 13, TSD_TUN = 1 << 14, TSD_TOK = 1 << 15 };
-#define RX_LEN 65536u                               /* RCR.RBLEN = 3: 64 KiB + 16 */
+/* RCR.RBLEN = 2: 32 KiB + 16. With WRAP set a frame that crosses the ring end continues contiguously behind it. RBLEN = 3 (64 KiB)
+ * is avoided on purpose: QEMU's model splits such a frame across the ring end for that size only, real chips do not, so the
+ * two would need different receive code. */
+#define RX_LEN 32768u
 #define RX_ALLOC (RX_LEN + 16 + 1536 + 16)
 #define TX_SLOT 2048u
 
@@ -107,8 +110,8 @@ int nic_probe_init(uint8_t mac[6])
     k_outl((uint16_t)(io + R_RBSTART), (uint32_t)phys((const void *)rx_buf));
     for (i = 0; i < 4; ++i)
         k_outl((uint16_t)(io + R_TSAD0 + 4 * i), (uint32_t)phys(tx_buf[i]));
-    /* RCR: AB | APM (broadcast + our unicast), WRAP, RBLEN=64K, unlimited DMA burst, no early receive threshold. */
-    k_outl((uint16_t)(io + R_RCR), 0x08u | 0x02u | 0x80u | (3u << 11) | (7u << 8) | (7u << 13));
+    /* RCR: AB | APM (broadcast + our unicast), WRAP, RBLEN=32K, unlimited DMA burst, no early receive threshold. */
+    k_outl((uint16_t)(io + R_RCR), 0x08u | 0x02u | 0x80u | (2u << 11) | (7u << 8) | (7u << 13));
     k_outl((uint16_t)(io + R_TCR), 0x03000700u);        /* IFG 96 ns, unlimited DMA burst */
     k_outb((uint16_t)(io + R_CR), CR_RE | CR_TE);
     k_outw((uint16_t)(io + R_CAPR), 0xfff0);            /* read pointer starts at -16 */
@@ -162,7 +165,7 @@ static void rx_reset(void)
     k_outb((uint16_t)(io + R_CR), CR_TE);               /* RE off, then on: the chip restarts at the ring start */
     k_outb((uint16_t)(io + R_CR), CR_RE | CR_TE);
     k_outl((uint16_t)(io + R_RBSTART), (uint32_t)phys((const void *)rx_buf));
-    k_outl((uint16_t)(io + R_RCR), 0x08u | 0x02u | 0x80u | (3u << 11) | (7u << 8) | (7u << 13));
+    k_outl((uint16_t)(io + R_RCR), 0x08u | 0x02u | 0x80u | (2u << 11) | (7u << 8) | (7u << 13));
     rx_off = 0;
     k_outw((uint16_t)(io + R_CAPR), 0xfff0);
 }

@@ -15,6 +15,8 @@ typedef struct {
     ip4_t addr[DNS_MAX_ADDR];
     uint8_t n;
     int32_t neg;                                    /* 0 = positive entry, else the cached error */
+    ip4_t server;                                   /* the entry answers queries to this server:port only */
+    uint16_t port;
     uint64_t expires;
     uint8_t used;
 } dns_ent_t;
@@ -176,23 +178,23 @@ static int32_t parse_response(const uint8_t *p, uint32_t len, uint16_t id, const
     return 0;
 }
 
-static dns_ent_t *cache_find(const char *name)
+static dns_ent_t *cache_find(const char *name, ip4_t server, uint16_t port)
 {
     unsigned i;
     const uint64_t now = net_now();
     for (i = 0; i < DNS_CACHE_N; ++i)
-        if (cache[i].used && now < cache[i].expires && !strcmp(cache[i].name, name))
+        if (cache[i].used && now < cache[i].expires && cache[i].server == server && cache[i].port == port && !strcmp(cache[i].name, name))
             return &cache[i];
     return 0;
 }
 
-static void cache_put(const char *name, const ip4_t *addr, unsigned n, int32_t neg, uint32_t ttl_s)
+static void cache_put(const char *name, ip4_t server, uint16_t port, const ip4_t *addr, unsigned n, int32_t neg, uint32_t ttl_s)
 {
     dns_ent_t *e = 0;
     unsigned i;
     const uint64_t now = net_now();
     for (i = 0; i < DNS_CACHE_N; ++i) {
-        if (cache[i].used && !strcmp(cache[i].name, name)) { e = &cache[i]; break; }
+        if (cache[i].used && cache[i].server == server && cache[i].port == port && !strcmp(cache[i].name, name)) { e = &cache[i]; break; }
         if (!e && (!cache[i].used || now >= cache[i].expires)) e = &cache[i];
     }
     if (!e) e = &cache[net_rand32() % DNS_CACHE_N];
@@ -201,6 +203,8 @@ static void cache_put(const char *name, const ip4_t *addr, unsigned n, int32_t n
     e->n = (uint8_t)n;
     for (i = 0; i < n; ++i) e->addr[i] = addr[i];
     e->neg = neg;
+    e->server = server;
+    e->port = port;
     e->expires = now + (uint64_t)(ttl_s > 3600 ? 3600 : ttl_s) * 1000;
     e->used = 1;
 }
@@ -212,7 +216,7 @@ int32_t dns_resolve(const char *name_in, ip4_t *out, unsigned max, unsigned *cou
     ip4_t addr[DNS_MAX_ADDR], lit;
     unsigned got = 0, attempt;
     uint32_t ttl_s = 60;
-    int final = 0, cacheable;
+    int final = 0;
     int32_t st = NET_ERR(WSATRY_AGAIN);
     static const uint32_t timeouts[3] = {1000, 2000, 4000};
     sock_t *s;
@@ -239,7 +243,12 @@ int32_t dns_resolve(const char *name_in, ip4_t *out, unsigned max, unsigned *cou
         return NET_ERR(WSAENETDOWN);
     net_lock();
     if (!server) {
-        dns_ent_t *e = cache_find(name);
+        server = g_net.dns[0];
+        port = 53;
+    }
+    if (!port) port = 53;
+    {
+        dns_ent_t *e = server ? cache_find(name, server, port) : 0;
         if (e) {
             NSTAT(NS_DNS_CACHE_HIT);
             if (e->neg) { st = e->neg; net_unlock(); return st; }
@@ -248,10 +257,7 @@ int32_t dns_resolve(const char *name_in, ip4_t *out, unsigned max, unsigned *cou
             net_unlock();
             return 0;
         }
-        server = g_net.dns[0];
-        port = 53;
     }
-    if (!port) port = 53;
     if (!server) {
         net_unlock();
         return NET_ERR(WSATRY_AGAIN);               /* no DNS server configured */
@@ -276,8 +282,9 @@ int32_t dns_resolve(const char *name_in, ip4_t *out, unsigned max, unsigned *cou
             const uint64_t now = net_now();
             const int32_t rs = ksock_recvfrom(s, resp, sizeof resp, &rl, &from, &fport,
                                               deadline > now ? (uint32_t)(deadline - now) : 1);
-            if (rs) {                               /* timeout (retry with the next, longer wait) or interruption */
-                st = rs == NET_ERR(WSAETIMEDOUT) ? NET_ERR(WSATRY_AGAIN) : rs;
+            if (rs) {                               /* timeout: retry with the next, longer wait; anything else ends the lookup */
+                const int unreachable = rs == NET_ERR(WSAECONNRESET) || rs == NET_ERR(WSAENETUNREACH) || rs == NET_ERR(WSAEHOSTUNREACH);
+                st = (rs == NET_ERR(WSAETIMEDOUT) || unreachable) ? NET_ERR(WSATRY_AGAIN) : rs;   /* ICMP unreachable: no server there */
                 if (rs != NET_ERR(WSAETIMEDOUT)) final = 1;
                 break;
             }
@@ -290,16 +297,15 @@ int32_t dns_resolve(const char *name_in, ip4_t *out, unsigned max, unsigned *cou
         }
     }
     sock_close_kernel(s);
-    cacheable = server == g_net.dns[0] && port == 53;
     if (got) {
-        if (cacheable) cache_put(name, addr, got, 0, ttl_s);
+        cache_put(name, server, port, addr, got, 0, ttl_s);
         for (i = 0; i < got && i < max; ++i) out[i] = addr[i];
         *count = i;
         net_unlock();
         return 0;
     }
-    if (cacheable && (st == NET_ERR(WSAHOST_NOT_FOUND) || st == NET_ERR(WSANO_DATA)))
-        cache_put(name, 0, 0, st, 30);              /* RFC 2308 negative caching (fixed 30 s: no SOA parsing) */
+    if (st == NET_ERR(WSAHOST_NOT_FOUND) || st == NET_ERR(WSANO_DATA))
+        cache_put(name, server, port, 0, 0, st, 30);  /* RFC 2308 negative caching (fixed 30 s: no SOA parsing) */
     net_unlock();
     return st;
 }

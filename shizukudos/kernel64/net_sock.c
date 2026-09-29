@@ -1073,11 +1073,12 @@ static int32_t op_query(process_t *p, uint64_t cls, uint64_t buf, uint64_t len, 
         kfree(tmp);
         break;
     }
-    case 3: {                                               /* control: {u32 op}; 1 = DHCP renew now, 2 = flush the DNS cache */
+    case 3: {                                               /* control: {u32 op}; 1 = DHCP renew now, 2 = flush the DNS cache, 3 = flush the ARP cache */
         uint32_t op = 0;
         if (len < 4 || copy_from_user(p, &op, buf, 4)) { st = NET_ERR(WSAEFAULT); break; }
         if (op == 1) dhcp_renew_now();
         else if (op == 2) dns_flush_cache();
+        else if (op == 3) net_arp_flush();
         else st = NET_ERR(WSAEINVAL);
         break;
     }
@@ -1088,6 +1089,21 @@ static int32_t op_query(process_t *p, uint64_t cls, uint64_t buf, uint64_t len, 
         if (len < sizeof c) { st = STATUS_BUFFER_TOO_SMALL; break; }
         st = copy_to_user(p, buf, c, sizeof c) ? STATUS_ACCESS_VIOLATION : 0;
         ret = sizeof c;
+        break;
+    }
+    case 5: {                                               /* resource census for leak checks: pages free, heap used, tcbs, sockets */
+        uint64_t m[4];
+        const tcb_t *t;
+        const sock_t *sk;
+        m[0] = pmm_free_count();
+        m[1] = kheap_used();
+        m[2] = 0;
+        m[3] = 0;
+        for (t = g_tcbs; t; t = t->next) ++m[2];
+        for (sk = g_socks; sk; sk = sk->next) ++m[3];
+        if (len < sizeof m) { st = STATUS_BUFFER_TOO_SMALL; break; }
+        st = copy_to_user(p, buf, m, sizeof m) ? STATUS_ACCESS_VIOLATION : 0;
+        ret = sizeof m;
         break;
     }
     default:
