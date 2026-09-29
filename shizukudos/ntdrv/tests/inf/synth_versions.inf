@@ -1,0 +1,70 @@
+; SPDX-License-Identifier: GPL-2.0-only
+; TargetOSVersion selection: several decorations of one manufacturer line, product type and build-number forms,
+; and an x86-only manufacturer. Each models section installs a differently named service so the choice is visible.
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%P%
+DriverVer=01/01/2021,1.0.0.0
+
+[Manufacturer]
+%P%   = Multi, NT.6.1, NTamd64.6.3, NTamd64.10.0, NTamd64.10.0...19041, NTamd64.10.0.3, NTamd64
+%P32% = Only32, NTx86
+%PU%  = Plain
+
+[Multi.NT.6.1]
+%D% = I_61, ROOT\SYNTHVER
+[Multi.NTamd64.6.3]
+%D% = I_63, ROOT\SYNTHVER
+[Multi.NTamd64.10.0]
+%D% = I_100, ROOT\SYNTHVER
+[Multi.NTamd64.10.0...19041]
+%D% = I_19041, ROOT\SYNTHVER
+[Multi.NTamd64.10.0.3]
+%D% = I_server, ROOT\SYNTHVER
+[Multi.NTamd64]
+%D% = I_any, ROOT\SYNTHVER
+[Only32.NTx86]
+%D% = I_x86, ROOT\SYNTHVER
+[Plain]
+%D% = I_plain, ROOT\SYNTHPLAIN
+
+[I_61.NT.Services]
+AddService = svc61,, S
+[I_63.NT.Services]
+AddService = svc63,, S
+[I_100.NT.Services]
+AddService = svc100,, S
+[I_19041.NT.Services]
+AddService = svc19041,, S
+[I_server.NT.Services]
+AddService = svcserver,, S
+[I_any.NT.Services]
+AddService = svcany,, S
+[I_x86.NT.Services]
+AddService = svcx86,, S
+[I_plain.NT.Services]
+AddService = svcplain,, S
+
+[I_61.NT]
+[I_63.NT]
+[I_100.NT]
+[I_19041.NT]
+[I_server.NT]
+[I_any.NT]
+[I_x86.NT]
+[I_plain.NT]
+
+[S]
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\synthver.sys
+
+[Strings]
+P="Synthetic"
+P32="Synthetic 32"
+PU="Synthetic undecorated"
+D="Synthetic version probe"
