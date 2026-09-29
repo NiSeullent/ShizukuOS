@@ -144,6 +144,36 @@ static int write_buf(sfs_fs *fs, sfs_buf *b)
     return 0;
 }
 
+static sfs_buf *lookup(sfs_fs *fs, uint64_t blk);
+
+static int writable_data(const sfs_buf *b)
+{
+    return b && (b->flags & (B_DIRTY | B_UPTODATE | B_JDIRTY | B_LATE)) == (B_DIRTY | B_UPTODATE);
+}
+
+/* Write-behind clustering: a dirty data buffer leaving the cache takes its dirty neighbours along in one request. */
+static int write_cluster(sfs_fs *fs, sfs_buf *b)
+{
+    sfs_buf *run[WRUN_MAX];
+    sfs_wrun w;
+    uint64_t first = b->blk;
+    uint32_t n = 0, i;
+    int rc = 0;
+    if (fs->mflags & SFS_MOUNT_NAIVE) return write_buf(fs, b);
+    while (first > 0 && b->blk - first < WRUN_MAX / 2 && writable_data(lookup(fs, first - 1))) first--;
+    for (i = 0; i < WRUN_MAX; ++i) {
+        sfs_buf *c = first + i == b->blk ? b : lookup(fs, first + i);
+        if (!writable_data(c) || first + i >= fs->nblocks) break;
+        run[n++] = c;
+    }
+    w.n = 0;
+    for (i = 0; i < n && !rc; ++i) rc = sfs_wrun_add(fs, &w, run[i]->blk, run[i]->data);
+    if (!rc) rc = sfs_wrun_flush(fs, &w);
+    if (rc) return rc;
+    for (i = 0; i < n; ++i) run[i]->flags &= ~B_DIRTY;
+    return 0;
+}
+
 /* Evicts one unpinned buffer from the LRU tail; dirty data is written first. 0 = evicted, SFS_EBUSY = nothing evictable. */
 static int evict_one(sfs_fs *fs)
 {
@@ -151,7 +181,7 @@ static int evict_one(sfs_fs *fs)
     for (b = fs->lru_tail; b; b = b->lru_prev) {
         if (b->refs || (b->flags & (B_JDIRTY | B_LATE))) continue;
         if (b->flags & B_DIRTY) {
-            int rc = write_buf(fs, b);
+            int rc = write_cluster(fs, b);
             if (rc) return rc;
         }
         lru_unlink(fs, b);
