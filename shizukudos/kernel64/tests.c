@@ -153,6 +153,7 @@ static int win64_run(int64_t *code, int *faulted)
  * PASS/FAIL lines through the console; a hung program is killed after WIN64_APP_TIMEOUT_MS. */
 #define WIN64_APP_TIMEOUT_MS 60000u
 #define WIN64_MAX_APPS 64
+#define WIN64_TESTS_PREFIX "\\SHZ\\TESTS\\"
 static void win64_run_others(void)
 {
     static char names[WIN64_MAX_APPS][32];
@@ -182,8 +183,8 @@ static void win64_run_others(void)
         int faulted = 1, reaped = -1;
         int32_t st;
         uint64_t waited = 0;
-        memcpy(path, "\\SHZ\\TESTS\\", 12);
-        memcpy(path + 12, names[i], strlen(names[i]) + 1);
+        memcpy(path, WIN64_TESTS_PREFIX, sizeof WIN64_TESTS_PREFIX - 1);
+        memcpy(path + sizeof WIN64_TESTS_PREFIX - 1, names[i], strlen(names[i]) + 1);
         memcpy(cmd, names[i], strlen(names[i]) + 1);
         st = ldr_create_process(0, path, cmd, "C:\\SHZ\\TESTS", &p, &t);
         if (st == 0) {

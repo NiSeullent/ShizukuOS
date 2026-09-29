@@ -58,6 +58,8 @@ EXPORT_PATTERNS = {
     "NTAPI": r"^(?:SHZ_EXPORT\s+)?[A-Za-z_][\w\s\*]*?\b(?:NTAPI|__cdecl)\s+\**(\w+)\s*\(",
     # K32API <type> WINAPI Name(      (the name is the last identifier before the parameter list)
     "K32API": r"^K32API\s[^;{()]*?\b(\w+)\s*\(",
+    # DLLAPI <type> WINAPI Name(      (extra modules under win64/dlls/<name>/)
+    "DLLAPI": r"^DLLAPI\s[^;{()]*?\b(\w+)\s*\(",
 }
 
 
@@ -108,7 +110,50 @@ def build_kernel32(ntdll_names):
     return dll, cmd, names
 
 
-def build_apps():
+DLL_BASE = 0x7ffb20000000
+DLL_STRIDE = 0x01000000
+
+
+def discover_modules():
+    """Extra system DLLs: every win64/dlls/<name>/ containing *.c builds <name>.dll (+ lib<name>.a) and is packed as
+    \\SHZ\\SYS64\\<name>.dll. Exported functions are the DLLAPI-marked definitions. Optional module.json:
+    {"libs": ["advapi32"], "forwarders": ["Name = other.Name"]} lists other modules this one imports from."""
+    root = W64 / "dlls"
+    found = []
+    for d in sorted(root.glob("*")) if root.is_dir() else []:
+        if d.is_dir() and sorted(d.glob("*.c")):
+            cfg = json.loads((d / "module.json").read_text()) if (d / "module.json").exists() else {}
+            found.append((d.name, d, cfg))
+    return found
+
+
+def build_modules():
+    pending = {name: (d, cfg) for name, d, cfg in discover_modules()}
+    built, order = {}, []
+    while pending:
+        ready = [n for n, (d, cfg) in sorted(pending.items()) if all(l in built for l in cfg.get("libs", []) if l in pending or l in built)]
+        if not ready:
+            raise SystemExit(f"circular or missing module dependency among {sorted(pending)}")
+        for name in ready:
+            d, cfg = pending.pop(name)
+            src = sorted(d.glob("*.c"))
+            names = scan_exports(src, "DLLAPI")
+            write_def(OUT / f"{name}.def", f"{name}.dll", names, cfg.get("forwarders", []))
+            has_main = any(re.search(r"\bDllMain\s*\(", s.read_text()) for s in src)
+            base = DLL_BASE + DLL_STRIDE * len(order)
+            dll = OUT / f"{name}.dll"
+            cmd = [CC, *COMMON, "-DBUILDING_" + name.upper(), "-shared", "-nostdlib", f"-Wl,--entry,{'DllMain' if has_main else '0'}",
+                   f"-Wl,--image-base,{base:#x}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
+                   "-I", W64 / "include", "-I", d, *src, OUT / f"{name}.def", "-L", OUT,
+                   *[f"-l{l}" for l in ["kernel32", "ntdll", *cfg.get("libs", [])]], "-lgcc", "-o", dll]
+            run(cmd)
+            run([DLLTOOL, "-d", OUT / f"{name}.def", "-l", OUT / f"lib{name}.a", "--kill-at"])
+            built[name] = {"dll": dll, "cmd": cmd, "exports": names, "base": base}
+            order.append(name)
+    return built
+
+
+def build_apps(module_libs=()):
     apps = {}
     for src in sorted((W64 / "tests").glob("t_*.c")):
         name = src.stem
@@ -117,7 +162,7 @@ def build_apps():
         crt = W64 / "crt"
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
                "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
-               "-L", OUT, "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+               "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
         run(cmd)
         apps[name] = (exe, cmd)
     return apps
@@ -149,8 +194,11 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     ntdll, ntdll_cmd, ntdll_names = build_ntdll()
     k32, k32_cmd, k32_names = build_kernel32(ntdll_names)
-    apps = build_apps()
+    modules = build_modules()
+    apps = build_apps(sorted(modules))
     files = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
+    for name, m in sorted(modules.items()):
+        files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
     for name, (exe, _) in sorted(apps.items()):
         files.append((f"\\SHZ\\TESTS\\{exe.name.upper()}", exe.read_bytes()))
     data_dir = W64 / "tests" / "data"
@@ -165,11 +213,12 @@ def main():
         "toolchain": {"mingw": shzlib.tool_version(CC)},
         "ntdll": {"sha256": sha256_file(ntdll), "exports": len(ntdll_names) + len(syscall_list()) * 2},
         "kernel32": {"sha256": sha256_file(k32), "exports": len(k32_names)},
+        "modules": {n: {"sha256": sha256_file(m["dll"]), "exports": len(m["exports"]), "base": hex(m["base"])} for n, m in modules.items()},
         "apps": {n: sha256_file(e) for n, (e, _) in apps.items()},
         "archive": {"sha256": sha256_file(img), "files": [p for p, _ in files]},
         "commands": {"ntdll": [str(x) for x in ntdll_cmd], "kernel32": [str(x) for x in k32_cmd]},
     })
-    print(json.dumps({"ntdll_exports": len(ntdll_names), "kernel32_exports": len(k32_names), "apps": sorted(apps),
+    print(json.dumps({"ntdll_exports": len(ntdll_names), "kernel32_exports": len(k32_names), "modules": sorted(modules), "apps": sorted(apps),
                       "WIN64.IMG": sha256_file(img)}, indent=2))
 
 

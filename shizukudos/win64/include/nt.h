@@ -22,6 +22,9 @@
 #define NTAPI __stdcall
 #endif
 #define SHZ_EXPORT __declspec(dllexport)
+#ifndef DLLAPI
+#define DLLAPI __declspec(dllexport)      /* exported function of an extra module under win64/dlls/<name>/ */
+#endif
 #define NT_SUCCESS(s) ((LONG)(s) >= 0)
 
 typedef LONG NTSTATUS;

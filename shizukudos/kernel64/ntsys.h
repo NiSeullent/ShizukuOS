@@ -31,11 +31,29 @@
     X(NtOpenProcess, 0x3c) X(NtOpenThread, 0x3d) X(NtSetInformationProcess, 0x3e) X(NtFlushInstructionCache, 0x3f) \
     X(NtWaitForAlertByThreadId, 0x40) X(NtAlertThreadByThreadId, 0x41)
 
+/* Reserved ranges for subsystems that live in their own kernel64 files and their own sys_ext_*() handler (sysext.c).
+ * Each subsystem defines ONLY its own list below (numbers must stay inside its range):
+ *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf */
+#define SYSCALL_LIST_REGISTRY(X)
+
+#define SYSCALL_LIST_GRAPHICS(X)
+
+#define SYSCALL_LIST_NET(X)
+
+#define SYSCALL_LIST_K32(X)
+
+#define SYSCALL_LIST_MISC(X)
+
 enum {
 #define X(name, num) SYS_##name = num,
     SYSCALL_LIST(X)
+    SYSCALL_LIST_REGISTRY(X)
+    SYSCALL_LIST_GRAPHICS(X)
+    SYSCALL_LIST_NET(X)
+    SYSCALL_LIST_K32(X)
+    SYSCALL_LIST_MISC(X)
 #undef X
-    SYS_MAX = 0x50
+    SYS_MAX = 0xb0
 };
 
 /* NTSTATUS values used by the kernel (subset of ntstatus.h; same numeric values). */

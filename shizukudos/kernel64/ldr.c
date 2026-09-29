@@ -55,6 +55,14 @@ static const struct { const char *prefix; const char *dll; } apiset_schema[] = {
     {"api-ms-win-core-interlocked-l1", "kernel32.dll"},
     {"api-ms-win-core-rtlsupport-l1", "ntdll.dll"},
     {"api-ms-win-core-processenvironment-l1", "kernel32.dll"},
+    /* registry / security -> advapi32.dll: entries go directly below this line (only for functions really exported) */
+
+    /* graphics / window -> user32.dll, gdi32.dll: */
+
+    /* network -> ws2_32.dll: */
+
+    /* everything else (ole, shell, crypto, version, ...): */
+
     {0, 0}
 };
 
