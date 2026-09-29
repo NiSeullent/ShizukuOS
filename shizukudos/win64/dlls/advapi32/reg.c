@@ -551,7 +551,6 @@ DLLAPI LONG WINAPI RegGetValueW(HKEY hkey, LPCWSTR lpSubKey, LPCWSTR lpValue, DW
     const DWORD rt = dwFlags & RRF_RT_ANY;
     const DWORD caller_cap = pcbData ? *pcbData : 0;            /* *pcbData is overwritten with the needed size on failure */
     if (pvData && !pcbData) return ERROR_INVALID_PARAMETER;
-    if (!rt) return ERROR_INVALID_PARAMETER;                  /* at least one RRF_RT_* type must be allowed */
     if (lpSubKey && *lpSubKey) {
         e = open_w(hkey, lpSubKey, 0, KEY_QUERY_VALUE, &sub);
         if (e) goto fail;

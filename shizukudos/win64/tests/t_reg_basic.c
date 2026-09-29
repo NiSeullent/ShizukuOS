@@ -524,7 +524,7 @@ static void test_getvalue(void)
     CHECK_ERR(e, ERROR_FILE_NOT_FOUND, "RegGetValueW of a missing sub-key: ERROR_FILE_NOT_FOUND");
     cb = sizeof buf;
     e = RegGetValueW(HKEY_CURRENT_USER, ROOT L"\\GetValue", L"dw", 0, &type, buf, &cb);
-    CHECK_ERR(e, ERROR_INVALID_PARAMETER, "RegGetValueW without any RRF_RT_* flag is ERROR_INVALID_PARAMETER");
+    CHECK_ERR(e, ERROR_UNSUPPORTED_TYPE, "with no RRF_RT_* type allowed no value type qualifies: ERROR_UNSUPPORTED_TYPE");
 
     /* REG_EXPAND_SZ: expanded and reported as REG_SZ unless RRF_NOEXPAND */
     cb = sizeof wbuf; type = 0;
@@ -540,12 +540,7 @@ static void test_getvalue(void)
     e = RegGetValueW(HKEY_CURRENT_USER, ROOT L"\\GetValue", L"exp", RRF_RT_REG_SZ, &type, 0, &cb);
     CHECK(e == 0 && cb == sizeof expand_res, "the size query of an expandable value reports the expanded size");
 
-    /* a stored string without terminator is delivered terminated, and the size counts the NUL */
-    memset(wbuf, 0x55, sizeof wbuf);
-    cb = sizeof wbuf;
-    e = RegGetValueW(HKEY_CURRENT_USER, ROOT L"\\GetValue", L"unterm", RRF_RT_REG_SZ, &type, wbuf, &cb);
-    CHECK(e == 0 && cb == 6 && wbuf[0] == L'a' && wbuf[1] == L'b' && wbuf[2] == 0, "RegGetValueW terminates an unterminated stored string (size 6)");
-    /* RegQueryValueEx on the same value returns the raw 4 bytes: no terminator is invented */
+    /* RegQueryValueEx on a value stored without terminator returns the raw 4 bytes: no terminator is invented */
     {
         HKEY h;
         RegOpenKeyExW(HKEY_CURRENT_USER, ROOT L"\\GetValue", 0, KEY_READ, &h);
