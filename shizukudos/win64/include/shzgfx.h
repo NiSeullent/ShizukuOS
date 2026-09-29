@@ -198,7 +198,11 @@ typedef struct {
 #define SHZ_SEND_FAILED 4               /* target thread died */
 
 /* NtUserThreadOp */
-enum { SHZ_TOP_POSTQUIT = 1, SHZ_TOP_POSTTHREAD, SHZ_TOP_QUEUESTATUS, SHZ_TOP_INSEND, SHZ_TOP_ATTACHINFO };
+/* QUEUESTATUS: a = QS_* mask -> out0 = pending flags & mask, out1 = milliseconds until the next timer is due (0xFFFFFFFF: none).
+ * QUEUEEVENT: out0 = a handle (valid in this process) of a manual-reset event that is signalled exactly while the calling
+ * thread's queue has anything to retrieve (sent/posted messages, WM_QUIT, an update region, ...). Timers do not signal it: they
+ * are time-based, so waiters combine it with the out1 delay above (user32's MsgWaitForMultipleObjectsEx does). */
+enum { SHZ_TOP_POSTQUIT = 1, SHZ_TOP_POSTTHREAD, SHZ_TOP_QUEUESTATUS, SHZ_TOP_INSEND, SHZ_TOP_QUEUEEVENT };
 typedef struct {
     uint32_t op, pad;
     uint64_t a, b, c, d;

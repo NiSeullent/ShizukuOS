@@ -316,7 +316,18 @@ def verify_z4(img, rep):
     compare_screen(img, rep, "z4: A moved to (300,300), the vacated area is desktop again: whole screen matches", s)
 
 
-SCENES = {"fb": verify_fb, "window": verify_window, "z1": verify_z1, "z2": verify_z2, "z3": verify_z3, "z4": verify_z4}
+def verify_orphan1(img, rep):
+    s = Screen()
+    s.window(560, 380, 800, 540, True, "Orphan", (0, 128, 0))
+    compare_screen(img, rep, "orphan1: the window of another process is composited (whole screen matches)", s)
+
+
+def verify_orphan2(img, rep):
+    compare_screen(img, rep, "orphan2: after its process died the kernel removed the window: bare desktop (whole screen matches)", Screen())
+
+
+SCENES = {"fb": verify_fb, "window": verify_window, "z1": verify_z1, "z2": verify_z2, "z3": verify_z3, "z4": verify_z4,
+          "orphan1": verify_orphan1, "orphan2": verify_orphan2}
 
 
 # ---------------------------------------------------------------- harness

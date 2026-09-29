@@ -612,9 +612,18 @@ static LONG_PTR wlong_set(HWND hwnd, int index, LONG_PTR v, uint32_t size)
 DLLAPI LONG_PTR WINAPI SetWindowLongPtrW(HWND hwnd, int index, LONG_PTR v) { return wlong_set(hwnd, index, v, 8); }
 DLLAPI LONG WINAPI SetWindowLongW(HWND hwnd, int index, LONG v) { return (LONG)wlong_set(hwnd, index, (LONG_PTR)v, 4); }
 
+/* Windows of the same process are asked with WM_GETTEXT (so a subclass may answer); a window of another process is read
+ * directly from the window manager, as on Windows (messages cannot cross processes here). */
+static int foreign_window(HWND hwnd)
+{
+    shz_wnd_t q;
+    return u32_wq(hwnd, SHZ_WQ_THREAD, 0, &q) && q.v1 != GetCurrentProcessId();
+}
+
 DLLAPI int WINAPI GetWindowTextLengthW(HWND hwnd)
 {
     U32_NEED_GFX(0);
+    if (foreign_window(hwnd)) { shz_wnd_t q; return u32_wq(hwnd, SHZ_WQ_TEXT, 0, &q) ? (int)q.v0 : 0; }
     return (int)SendMessageW(hwnd, WM_GETTEXTLENGTH, 0, 0);
 }
 
@@ -623,6 +632,7 @@ DLLAPI int WINAPI GetWindowTextW(HWND hwnd, LPWSTR buf, int max)
     U32_NEED_GFX(0);
     if (!buf || max <= 0) return 0;
     buf[0] = 0;
+    if (foreign_window(hwnd)) { const int n = text_of(hwnd, buf, max); return n < 0 ? 0 : n; }
     return (int)SendMessageW(hwnd, WM_GETTEXT, (WPARAM)max, (LPARAM)buf);
 }
 

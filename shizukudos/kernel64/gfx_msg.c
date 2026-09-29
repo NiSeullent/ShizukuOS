@@ -25,6 +25,8 @@
 #define WAIT_POLL_TICKS 50u                     /* re-check process termination at least this often (1 tick = 1 ms) */
 
 gqueue_t g_queues[GFX_MAX_QUEUES];
+static void gq_kick(gqueue_t *q);
+static void q_sync_event(gqueue_t *q);
 static gmsg_t g_msgs[GFX_MAX_MSGS];
 static gmsg_t *msg_free;
 static int msg_pool_ready;
@@ -123,7 +125,7 @@ static int32_t post_to(gqueue_t *q, uint64_t hwnd, uint32_t message, uint64_t wp
     if (q->tail) q->tail->next = m; else q->head = m;
     q->tail = m;
     ++q->nposted;
-    gq_wake(q);
+    gq_kick(q);
     return STATUS_SUCCESS;
 }
 
@@ -235,7 +237,7 @@ static int32_t sys_sendmessage(process_t *cur, uint64_t arg)
         if (w->q->sent_tail) w->q->sent_tail->next = r; else w->q->sent_head = r;
         w->q->sent_tail = r;
         s.id = r->id;
-        gq_wake(w->q);
+        gq_kick(w->q);
     } else {
         r = send_find(s.id);
         if (!r || r->sender_tid != q->thread_id) { st = STATUS_INVALID_PARAMETER; goto out; }
@@ -247,7 +249,7 @@ static int32_t sys_sendmessage(process_t *cur, uint64_t arg)
             send_release(r);
             goto out;
         }
-        if (take_sent(q, &s.cb)) { s.result_kind = SHZ_SEND_CALLBACK; goto out; }       /* keep the wait alive while we serve */
+        if (take_sent(q, &s.cb)) { q_sync_event(q); s.result_kind = SHZ_SEND_CALLBACK; goto out; }   /* keep the wait alive while we serve */
         if (gq_thread_dead(r->target)) {
             if (r->state == GS_QUEUED) send_list_remove(&r->target->sent_head, &r->target->sent_tail, r);
             send_release(r);
@@ -398,10 +400,10 @@ int32_t gq_invalidate(gwin_t *w, const shz_rect_t *rects, uint32_t n, uint32_t f
             if (m) gq_invalidate(c, moved, m, flags);
         }
     }
-    if (flags & SHZ_INV_VALIDATE) { if (!w->nupd) w->erase = 0; }
+    if (flags & SHZ_INV_VALIDATE) { if (!w->nupd) w->erase = 0; if (w->q) q_sync_event(w->q); }
     else {
         if (flags & SHZ_INV_ERASE) w->erase = 1;
-        if (w->nupd && w->q) gq_wake(w->q);
+        if (w->nupd && w->q) gq_kick(w->q);
     }
     return STATUS_SUCCESS;
 }
@@ -440,7 +442,7 @@ static int32_t sys_paint(process_t *cur, uint64_t arg)
     p.erase = w->erase;
     memset(&p.bbox, 0, sizeof p.bbox);
     for (i = 0; i < w->nupd; ++i) { p.rects[i] = w->upd[i]; rc_union(&p.bbox, &w->upd[i]); }
-    if (p.op == SHZ_PAINT_BEGIN) { w->nupd = 0; w->erase = 0; }
+    if (p.op == SHZ_PAINT_BEGIN) { w->nupd = 0; w->erase = 0; if (w->q) q_sync_event(w->q); }
 out:
     mutex_unlock(&gfx_lock);
     if (!st && copy_to_user(cur, arg, &p, sizeof p)) return STATUS_ACCESS_VIOLATION;
@@ -534,6 +536,18 @@ static uint32_t qs_pending(gqueue_t *q)
     return f;
 }
 
+static void q_sync_event(gqueue_t *q)
+{
+    if (!q->event) return;
+    if (qs_pending(q)) ob_signal_event(q->event); else ob_reset_event(q->event);
+}
+
+static void gq_kick(gqueue_t *q)
+{
+    gq_wake(q);
+    q_sync_event(q);
+}
+
 /* Fills g->result: MESSAGE/CALLBACK, or NONE when nothing is available. */
 static void try_get(gqueue_t *q, shz_getmsg_t *g)
 {
@@ -613,6 +627,7 @@ static int32_t sys_getmessage(process_t *cur, uint64_t arg)
         q = gq_current(1);
         if (!q) { st = STATUS_NO_MEMORY; break; }
         try_get(q, &g);
+        q_sync_event(q);
         if (g.result != SHZ_GM_RES_NONE || !(g.flags & SHZ_GM_WAIT)) break;
         if (cur->terminated) { st = STATUS_PROCESS_IS_TERMINATING; break; }
         for (i = 0; i < GFX_MAX_TIMERS; ++i)
@@ -661,7 +676,7 @@ static int32_t sys_threadop(process_t *cur, uint64_t arg)
         if (!q) { st = STATUS_NO_MEMORY; break; }
         q->quit = 1;
         q->quit_code = (int32_t)t.a;
-        gq_wake(q);
+        gq_kick(q);
         break;
     case SHZ_TOP_POSTTHREAD:                                         /* a = tid, b = message, c = wparam, d = lparam */
         q = 0;
@@ -670,10 +685,32 @@ static int32_t sys_threadop(process_t *cur, uint64_t arg)
         if (!q) { st = STATUS_INVALID_CID; break; }
         st = post_to(q, 0, (uint32_t)t.b, t.c, (int64_t)t.d);
         break;
-    case SHZ_TOP_QUEUESTATUS:
+    case SHZ_TOP_QUEUESTATUS: {
+        uint64_t due = 0;
         q = gq_current(1);
         if (!q) { st = STATUS_NO_MEMORY; break; }
         t.out0 = qs_pending(q) & (uint32_t)t.a;
+        for (i = 0; i < GFX_MAX_TIMERS; ++i)
+            if (q->timers[i].used && (!due || q->timers[i].due < due)) due = q->timers[i].due;
+        t.out1 = !due ? 0xffffffffull : due <= ticks_now() ? 0 : due - ticks_now();
+        break;
+    }
+    case SHZ_TOP_QUEUEEVENT:
+        q = gq_current(1);
+        if (!q) { st = STATUS_NO_MEMORY; break; }
+        if (!q->event) {
+            q->event = ob_create(OB_EVENT, 0);
+            if (!q->event) { st = STATUS_NO_MEMORY; break; }
+            q->event->u.event.manual = 1;
+        }
+        if (!q->event_handle || handle_lookup(cur, q->event_handle, OB_EVENT) != q->event) {
+            uint32_t h = 0;
+            st = handle_insert(cur, q->event, 0x1f0003, &h);
+            if (st) break;
+            q->event_handle = h;
+        }
+        q_sync_event(q);
+        t.out0 = q->event_handle;
         break;
     case SHZ_TOP_INSEND:
         q = gq_current(0);
@@ -738,6 +775,7 @@ void gq_purge_window(gwin_t *w)
     if (q->focus == w->handle) q->focus = 0;
     if (q->capture == w->handle) q->capture = 0;
     if (q->active == w->handle) q->active = 0;
+    q_sync_event(q);
 }
 
 void gq_reap_dead(void)
@@ -761,6 +799,7 @@ void gq_reap_dead(void)
             else send_release(x);
         }
         if (g_fg_q == q) g_fg_q = 0;
+        if (q->event) ob_deref(q->event);
         memset(q, 0, sizeof *q);
     }
 }

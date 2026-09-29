@@ -132,6 +132,20 @@ static DWORD WINAPI worker_pump(LPVOID arg)
     return (DWORD)msg.wParam;
 }
 
+/* worker 4: after a delay, posts to the main thread and signals an event (for the MsgWaitForMultipleObjects tests) */
+static HANDLE g_evt;
+static DWORD g_main_tid;
+static DWORD g_delay_ms;
+static int g_do_post, g_do_event;
+static DWORD WINAPI worker_delayed(LPVOID arg)
+{
+    (void)arg;
+    Sleep(g_delay_ms);
+    if (g_do_post) PostThreadMessageW(g_main_tid, WM_APP + 70, 1, 0);
+    if (g_do_event) SetEvent(g_evt);
+    return 0;
+}
+
 /* worker 3: owns a window but does not pump for a while */
 static DWORD WINAPI worker_stuck(LPVOID arg)
 {
@@ -263,6 +277,43 @@ int main(void)
         pump_for(300);
         KillTimer(0, id);
         CHECK(g_proc_hits >= 3, "DispatchMessage calls the TIMERPROC of a thread timer");
+    }
+
+    /* ---- MsgWaitForMultipleObjects: waits for handles and for queue input */
+    g_evt = CreateEventW(0, TRUE, FALSE, 0);
+    g_main_tid = GetCurrentThreadId();
+    {
+        DWORD t1 = GetTickCount(), el;
+        r = (int)MsgWaitForMultipleObjects(1, &g_evt, FALSE, 120, QS_ALLINPUT);
+        el = GetTickCount() - t1;
+        CHECK(r == WAIT_TIMEOUT && el >= 100 && el < 1500, "MsgWaitForMultipleObjects times out when neither the handle nor the queue is signalled");
+        g_do_post = 1; g_do_event = 0; g_delay_ms = 80;
+        th = CreateThread(0, 0, worker_delayed, 0, 0, &tid);
+        t1 = GetTickCount();
+        r = (int)MsgWaitForMultipleObjects(1, &g_evt, FALSE, 3000, QS_POSTMESSAGE);
+        el = GetTickCount() - t1;
+        CHECK(r == WAIT_OBJECT_0 + 1 && el >= 50 && el < 2000 && PeekMessageW(&msg, 0, 0, 0, PM_REMOVE) && msg.message == WM_APP + 70,
+              "a message posted by another thread wakes the wait (index = handle count)");
+        WaitForSingleObject(th, 3000);
+        CloseHandle(th);
+        CHECK(MsgWaitForMultipleObjects(1, &g_evt, FALSE, 30, QS_ALLINPUT) == WAIT_TIMEOUT, "and after removing it the queue no longer wakes the wait");
+        g_do_post = 0; g_do_event = 1; g_delay_ms = 80;
+        th = CreateThread(0, 0, worker_delayed, 0, 0, &tid);
+        r = (int)MsgWaitForMultipleObjects(1, &g_evt, FALSE, 3000, QS_ALLINPUT);
+        CHECK(r == WAIT_OBJECT_0, "a signalled handle wakes the wait with its own index");
+        WaitForSingleObject(th, 3000);
+        CloseHandle(th);
+        ResetEvent(g_evt);
+        SetTimer(w, 5, 70, 0);
+        t1 = GetTickCount();
+        r = (int)MsgWaitForMultipleObjects(1, &g_evt, FALSE, 3000, QS_TIMER);
+        el = GetTickCount() - t1;
+        CHECK(r == WAIT_OBJECT_0 + 1 && el >= 40 && el < 2000, "a timer becoming due wakes a QS_TIMER wait");
+        KillTimer(w, 5);
+        PostMessageW(w, WM_T50, 0, 0);
+        CHECK(MsgWaitForMultipleObjects(0, 0, FALSE, 0, QS_ALLINPUT) == WAIT_OBJECT_0, "already-queued input satisfies the wait immediately");
+        drain();
+        CloseHandle(g_evt);
     }
 
     /* ---- window messages ids, atoms, classes */

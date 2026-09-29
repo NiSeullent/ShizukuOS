@@ -135,6 +135,8 @@ struct gqueue {
     uint64_t next_timer_id;
     uint64_t focus, active, capture;
     volatile int in_wait;                           /* blocked inside a GUI wait: only then may thread_wake() be used */
+    kobject_t *event;                               /* NtUserThreadOp(QUEUEEVENT): signalled while the queue has something to retrieve */
+    uint32_t event_handle;                          /* its handle in the owning process (0 if never handed out) */
 };
 
 /* small rectangle helpers */

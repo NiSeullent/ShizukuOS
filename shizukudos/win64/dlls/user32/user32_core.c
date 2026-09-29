@@ -478,3 +478,54 @@ DLLAPI LRESULT WINAPI DefWindowProcW(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     default: return 0;
     }
 }
+
+/* ---------------------------------------------------------------- waiting for objects and messages */
+/* The queue has an event that is signalled while anything can be retrieved (NtUserThreadOp QUEUEEVENT). Only that "something
+ * is pending" level is known, not which kind arrived since the last call: an unremoved message that does not match `mask`
+ * makes the wait poll every millisecond instead of blocking, and MWMO_INPUTAVAILABLE is therefore always in effect. */
+DLLAPI DWORD WINAPI MsgWaitForMultipleObjectsEx(DWORD n, const HANDLE *handles, DWORD ms, DWORD mask, DWORD flags)
+{
+    HANDLE all[MAXIMUM_WAIT_OBJECTS];
+    shz_threadop_t t;
+    const DWORD start = GetTickCount();
+    HANDLE qe;
+    if (n > MAXIMUM_WAIT_OBJECTS - 1 || (n && !handles)) { SetLastError(ERROR_INVALID_PARAMETER); return WAIT_FAILED; }
+    U32_NEED_GFX(WAIT_FAILED);
+    memset(&t, 0, sizeof t);
+    t.op = SHZ_TOP_QUEUEEVENT;
+    { const int32_t st = NtUserThreadOp(&t); if (st < 0) { u32_err(st); return WAIT_FAILED; } }
+    qe = (HANDLE)(uintptr_t)t.out0;
+    if (n) memcpy(all, handles, n * sizeof(HANDLE));
+    all[n] = qe;
+    for (;;) {
+        DWORD timeout = ms, r;
+        int timer_limited = 0;
+        memset(&t, 0, sizeof t);
+        t.op = SHZ_TOP_QUEUESTATUS;
+        t.a = mask;
+        if (NtUserThreadOp(&t) < 0) return WAIT_FAILED;
+        if (t.out0 && !(flags & MWMO_WAITALL)) return WAIT_OBJECT_0 + n;
+        if (ms != INFINITE) {
+            const DWORD el = GetTickCount() - start;
+            if (el >= ms) return WAIT_TIMEOUT;
+            timeout = ms - el;
+        }
+        if (t.out1 != 0xffffffffull && (timeout == INFINITE || t.out1 + 1 < timeout)) { timeout = (DWORD)t.out1 + 1; timer_limited = 1; }
+        r = WaitForMultipleObjectsEx(n + 1, all, (flags & MWMO_WAITALL) != 0, timeout, (flags & MWMO_ALERTABLE) != 0);
+        if (r == WAIT_OBJECT_0 + n) {
+            memset(&t, 0, sizeof t);
+            t.op = SHZ_TOP_QUEUESTATUS;
+            t.a = mask;
+            if (NtUserThreadOp(&t) >= 0 && t.out0) return r;
+            Sleep(1);                                              /* something is pending, but not what the caller asked for */
+            continue;
+        }
+        if (r == WAIT_TIMEOUT && timer_limited) continue;          /* a timer became due: it shows up in the queue status */
+        return r;
+    }
+}
+
+DLLAPI DWORD WINAPI MsgWaitForMultipleObjects(DWORD n, const HANDLE *handles, BOOL wait_all, DWORD ms, DWORD mask)
+{
+    return MsgWaitForMultipleObjectsEx(n, handles, ms, mask, wait_all ? MWMO_WAITALL : 0);
+}
