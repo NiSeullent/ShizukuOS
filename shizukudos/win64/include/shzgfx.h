@@ -23,7 +23,8 @@ typedef struct {
     uint64_t lfb_pa;                    /* guest-physical address of the linear framebuffer (BAR 0) */
 } shz_display_info_t;
 #define SHZ_DISP_QUERY 0                /* initialise the display on first use, return the info */
-#define SHZ_DISP_TESTPATTERN 1          /* draw the kernel test pattern (see gfx_fb.c) and present it */
+#define SHZ_DISP_TESTPATTERN 1          /* draw the kernel test pattern (see gfx_fb.c) and present it, bypassing the compositor */
+#define SHZ_DISP_RECOMPOSE 2            /* redraw the whole screen from the window tree (undoes the test pattern) */
 #define SHZ_DESKTOP_RGB 0x00008080u
 
 /* ---- geometry / message layouts (identical to the Windows x64 RECT, POINT and MSG) ---- */
@@ -133,7 +134,7 @@ enum {
     SHZ_WQ_EXISTS = 1, SHZ_WQ_RECT, SHZ_WQ_CLIENT, SHZ_WQ_CLIENT_ORG, SHZ_WQ_STYLE, SHZ_WQ_EXSTYLE, SHZ_WQ_ID,
     SHZ_WQ_USERDATA, SHZ_WQ_WNDPROC, SHZ_WQ_HINSTANCE, SHZ_WQ_PARENT, SHZ_WQ_OWNER, SHZ_WQ_THREAD, SHZ_WQ_TEXT,
     SHZ_WQ_CLASSNAME, SHZ_WQ_CLASS_ATOM, SHZ_WQ_VISIBLE, SHZ_WQ_ENABLED, SHZ_WQ_EXTRA, SHZ_WQ_GW, SHZ_WQ_ANCESTOR,
-    SHZ_WQ_ISCHILD, SHZ_WQ_POS, SHZ_WQ_DESKTOP
+    SHZ_WQ_ISCHILD, SHZ_WQ_POS, SHZ_WQ_DESKTOP, SHZ_WQ_RESTORE
 };
 enum {
     SHZ_WS_SET_STYLE = 1, SHZ_WS_SET_EXSTYLE, SHZ_WS_SET_ID, SHZ_WS_SET_USERDATA, SHZ_WS_SET_WNDPROC,
@@ -165,7 +166,7 @@ typedef struct {
 } shz_show_t;
 
 /* ---- messages ---- */
-#define SHZ_GM_WAIT 0x00100000u         /* NtUserGetMessage flag: block until something can be returned */
+#define SHZ_GM_WAIT 0x80000000u         /* NtUserGetMessage flag (above the PM_QS_* bits 16..26): block until something can be returned */
 #define SHZ_GM_RES_NONE 0
 #define SHZ_GM_RES_MESSAGE 1
 #define SHZ_GM_RES_CALLBACK 2

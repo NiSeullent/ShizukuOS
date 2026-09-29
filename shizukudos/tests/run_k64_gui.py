@@ -116,7 +116,118 @@ def verify_fb(img, rep):
               f"{img.px(0, 0)} {img.px(W - 1, 0)} {img.px(0, H - 1)} {img.px(W - 1, H - 1)}")
 
 
-SCENES = {"fb": verify_fb}
+# ---------------------------------------------------------------- the built-in font (the same public-domain data file the
+# guest is built from; used only as the SPECIFICATION of what a glyph looks like, never to read anything back)
+def load_font():
+    text = (HERE.parent / "supervisor" / "src" / "font8x8_basic.h").read_text()
+    rows = re.findall(r"\{\s*((?:0x[0-9A-Fa-f]{2},?\s*){8})\}", text)
+    font = [[int(x, 16) for x in re.findall(r"0x[0-9A-Fa-f]{2}", r)] for r in rows]
+    assert len(font) == 128, len(font)
+    return font
+
+
+FONT = load_font()
+
+
+def glyph_on(ch, x, y):
+    """pixel (x,y) of the 8x16 cell of ASCII `ch`: each 8x8 row doubled, bit 0 = leftmost pixel"""
+    return (FONT[ord(ch) & 0x7f][y >> 1] >> x) & 1
+
+
+def paint_text(canvas, x0, y0, text, color):
+    """canvas: dict (x,y) -> rgb overrides in screen coordinates; draws `text` with foreground pixels only"""
+    for i, ch in enumerate(text):
+        for y in range(16):
+            for x in range(8):
+                if glyph_on(ch, x, y):
+                    canvas[(x0 + 8 * i + x, y0 + y)] = color
+
+
+FACE = (192, 192, 192)
+NAVY = (0, 0, 128)
+GRAY = (128, 128, 128)
+
+
+def check_outside_is_desktop(img, rep, name, windows):
+    """every pixel outside all the given window rectangles [(l,t,r,b)] is the desktop colour"""
+    bad = None
+    dt = bytes(DESKTOP)
+    for y in range(H):
+        spans, x = [], 0
+        for (l, t, r, b) in sorted(w for w in windows if w[1] <= y < w[3]):
+            if l > x:
+                spans.append((x, l))
+            x = max(x, r)
+        if x < W:
+            spans.append((x, W))
+        for (a, b2) in spans:
+            if img.row(y, a, b2) != dt * (b2 - a):
+                bad = f"row {y} x[{a},{b2}) is not desktop coloured"
+                break
+        if bad:
+            break
+    rep.check(f"{name}: everything outside the windows is the desktop colour", bad is None, bad or "")
+
+
+def frame_checks(img, rep, name, l, t, r, b, active, title):
+    """the classic thick-frame overlapped window frame drawn by the kernel compositor (documented in gfx_wm.c draw_nc)"""
+    cap = NAVY if active else GRAY
+    ok = (img.px(l, t) == (192, 192, 192) and img.px(l + 1, t + 1) == (255, 255, 255) and img.px(r - 1, b - 1) == (0, 0, 0) and
+          img.px(r - 2, b - 2) == (128, 128, 128) and img.px(l + 2, t + 2) == FACE and img.px(l + 3, t + 3) == FACE)
+    rep.check(f"{name}: 4-pixel bevelled sizing frame (corner pixels)", ok,
+              f"{img.px(l, t)} {img.px(l + 1, t + 1)} {img.px(r - 1, b - 1)} {img.px(r - 2, b - 2)}")
+    canvas = {}
+    tcol = (255, 255, 255) if active else (192, 192, 192)
+    paint_text(canvas, l + 4 + 4, t + 4 + 1, title, tcol)
+    wrong = None
+    for y in range(t + 4, t + 4 + 18):
+        for x in range(l + 4, r - 4):
+            want = canvas.get((x, y), cap)
+            if img.px(x, y) != want:
+                wrong = f"({x},{y}) is {img.px(x, y)}, want {want}"
+                break
+        if wrong:
+            break
+    rep.check(f"{name}: {'active' if active else 'inactive'} caption bar {cap} with the title text in the 8x16 font", wrong is None, wrong or "")
+    rep.rect(img, f"{name}: 1-pixel face line below the caption", l + 4, t + 4 + 18, r - 4, t + 4 + 19, FACE)
+
+
+def verify_window(img, rep):
+    L, T, R, B = 100, 80, 500, 380
+    cx, cy = L + 4, T + 4 + 19
+    check_outside_is_desktop(img, rep, "window", [(L, T, R, B)])
+    frame_checks(img, rep, "window", L, T, R, B, True, "Shizuku Test")
+    expect = {}
+    for y in range(273):
+        for x in range(392):
+            expect[(x, y)] = (255, 255, 255)
+    for y in range(20, 80):
+        for x in range(20, 120):
+            expect[(x, y)] = (255, 0, 0)
+        for x in range(150, 250):
+            expect[(x, y)] = (0, 0, 255)
+    for x in range(20, 120):
+        expect[(x, 200)] = (0, 160, 0)
+    for y in range(200, 260):
+        for x in range(300, 380):
+            border = x < 302 or x >= 378 or y < 202 or y >= 258
+            expect[(x, y)] = (64, 64, 64) if border else (200, 200, 200)
+    text = {}
+    paint_text(text, 20, 100, "Hello GUI", (0, 0, 0))
+    expect.update(text)
+    wrong = None
+    for y in range(273):
+        for x in range(392):
+            if img.px(cx + x, cy + y) != expect[(x, y)]:
+                wrong = f"client ({x},{y}) is {img.px(cx + x, cy + y)}, want {expect[(x, y)]}"
+                break
+        if wrong:
+            break
+    rep.check("window: the 392x273 client area matches the painted scene pixel for pixel (bg, 2 rects, line, text, pen+brush box)", wrong is None,
+              wrong or "all 106,896 client pixels identical")
+
+
+SCENES = {"fb": verify_fb, "window": verify_window}
 
 
 # ---------------------------------------------------------------- harness

@@ -33,5 +33,6 @@ int main(void)
     printf("GUI-READY: fb\n");
     Sleep(2500);                                    /* the host screendumps during this window */
     printf("PASS: test pattern presented\n");
+    NtUserQueryDisplay(&info, SHZ_DISP_RECOMPOSE);      /* the pattern bypasses the compositor: put the desktop back for the next program */
     return 0;
 }

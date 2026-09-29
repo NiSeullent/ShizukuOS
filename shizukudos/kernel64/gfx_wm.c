@@ -757,6 +757,10 @@ static int32_t sys_wquery(process_t *cur, uint64_t arg)
         break;
     }
     case SHZ_WQ_POS: q.rect.left = w->x; q.rect.top = w->y; q.rect.right = w->x + w->w; q.rect.bottom = w->y + w->h; break;
+    case SHZ_WQ_RESTORE:                                    /* the rectangle a maximised/minimised window returns to (else its own) */
+        if (w->has_restore && (w->style & (SHZ_WS_MAXIMIZE | SHZ_WS_MINIMIZE))) q.rect = w->restore;
+        else { q.rect.left = w->x; q.rect.top = w->y; q.rect.right = w->x + w->w; q.rect.bottom = w->y + w->h; }
+        break;
     case SHZ_WQ_CLIENT: q.rect.left = q.rect.top = 0; q.rect.right = client_w(w); q.rect.bottom = client_h(w); break;
     case SHZ_WQ_CLIENT_ORG: {
         int32_t sx, sy;
@@ -1337,7 +1341,15 @@ int32_t sys_ext_graphics(process_t *cur, struct regs *r, uint32_t num, uint64_t 
     (void)r;
     if (st) return st;
     switch (num) {
-    case SYS_NtUserQueryDisplay: return gfx_syscall_display(cur, a1, a2);
+    case SYS_NtUserQueryDisplay:
+        if (a2 == SHZ_DISP_RECOMPOSE) {
+            const shz_rect_t all = { 0, 0, (int32_t)g_fb.width, (int32_t)g_fb.height };
+            mutex_lock(&gfx_lock);
+            wm_damage(&all);
+            mutex_unlock(&gfx_lock);
+            a2 = SHZ_DISP_QUERY;
+        }
+        return gfx_syscall_display(cur, a1, a2);
     case SYS_NtGdiPresent: return gfx_syscall_present(cur, a1);
     case SYS_NtUserClassOp: return sys_classop(cur, a1);
     case SYS_NtUserCreateWindow: return sys_createwindow(cur, a1);
