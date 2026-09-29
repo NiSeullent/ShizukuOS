@@ -6,7 +6,8 @@
  * Deliberate simplifications (each one is a gap, not a hidden behaviour): pens wider than one pixel have flat ends and no
  * joins; dashed styles apply to one-pixel pens only (as on Windows for cosmetic pens, wider ones are solid); hatch brushes
  * are approximations of the classic patterns; stretching is nearest-neighbour whatever the stretch mode; there are no
- * arcs, paths, rounded rectangles, palettes or world transforms.
+ * arcs, rounded rectangles or palettes. Paths, Bezier curves and the (translation-only) world transform are in gdi_path.c:
+ * while a path is being recorded, MoveToEx/LineTo/Polyline/Polygon/Rectangle/Ellipse add to it and draw nothing.
  */
 #include "gdi_internal.h"
 
@@ -216,28 +217,34 @@ static uint32_t isqrt64(uint64_t v)
 
 static int iceil(double v) { int i = (int)v; return v > (double)i ? i + 1 : i; }
 
-/* Scanline polygon fill of `n` device-coordinate vertices with a callback that paints [x0,x1) on row y. */
-typedef void (*span_fn)(gctx_t *g, int x0, int x1, int y, void *ctx);
-static void poly_fill(gctx_t *g, const POINT *pts, int n, int winding, span_fn fn, void *ctx)
+/* Scanline fill of `nfig` closed polygons (counts[f] device-coordinate vertices each, stored one after the other) under the
+ * ALTERNATE or WINDING rule, with a callback that paints [x0,x1) on row y. A pixel is inside when its centre is. */
+void gdi_poly_fill(gctx_t *g, const POINT *pts, const int *counts, int nfig, int winding, gdi_span_fn fn, void *ctx)
 {
-    int miny, maxy, y, i, k;
+    int miny, maxy, y, i, k, n = 0, f;
     struct cross { double x; int dir; } *xs;
+    struct edge { POINT a, b; } *es;
+    int ne = 0;
+    for (f = 0; f < nfig; ++f) n += counts[f];
     if (n < 3) return;
     xs = gdi_alloc((size_t)n * sizeof *xs);
-    if (!xs) return;
+    es = gdi_alloc((size_t)n * sizeof *es);
+    if (!xs || !es) { gdi_free(xs); gdi_free(es); return; }
     miny = maxy = pts[0].y;
-    for (i = 1; i < n; ++i) {
-        if (pts[i].y < miny) miny = pts[i].y;
-        if (pts[i].y > maxy) maxy = pts[i].y;
-    }
+    for (f = 0, k = 0; f < nfig; k += counts[f++])
+        for (i = 0; i < counts[f]; ++i) {
+            const POINT a = pts[k + i], b = pts[k + (i + 1) % counts[f]];
+            if (a.y < miny) miny = a.y;
+            if (a.y > maxy) maxy = a.y;
+            if (a.y != b.y) { es[ne].a = a; es[ne].b = b; ++ne; }
+        }
     for (y = miny; y < maxy; ++y) {
         int nx = 0;
         const double yc = y + 0.5;
-        for (i = 0; i < n; ++i) {
-            const POINT a = pts[i], b = pts[(i + 1) % n];
+        for (i = 0; i < ne; ++i) {
+            const POINT a = es[i].a, b = es[i].b;
             double x;
             int j;
-            if (a.y == b.y) continue;
             if (!((a.y <= y && b.y > y) || (b.y <= y && a.y > y))) continue;
             x = a.x + (yc - a.y) * (double)(b.x - a.x) / (double)(b.y - a.y);
             j = nx++;
@@ -256,16 +263,24 @@ static void poly_fill(gctx_t *g, const POINT *pts, int n, int winding, span_fn f
         }
     }
     gdi_free(xs);
+    gdi_free(es);
 }
 
-static void span_pen(gctx_t *g, int x0, int x1, int y, void *ctx) { (void)ctx; if (x0 < x1) gctx_span_rop2(g, x0, x1, y, g->ppix, g->dc->rop2); }
-static void span_br(gctx_t *g, int x0, int x1, int y, void *ctx) { (void)ctx; if (x0 < x1) gctx_span_brush(g, x0, x1, y); }
+static void poly_fill(gctx_t *g, const POINT *pts, int n, int winding, gdi_span_fn fn, void *ctx)
+{
+    gdi_poly_fill(g, pts, &n, 1, winding, fn, ctx);
+}
+
+void gdi_span_pen(gctx_t *g, int x0, int x1, int y, void *ctx) { (void)ctx; if (x0 < x1) gctx_span_rop2(g, x0, x1, y, g->ppix, g->dc->rop2); }
+void gdi_span_brush(gctx_t *g, int x0, int x1, int y, void *ctx) { (void)ctx; if (x0 < x1) gctx_span_brush(g, x0, x1, y); }
+#define span_pen gdi_span_pen
+#define span_br gdi_span_brush
 
 static const uint8_t dash_pat[5][6] = { { 0 }, { 18, 6 }, { 3, 3 }, { 9, 3, 3, 3 }, { 9, 3, 3, 3, 3, 3 } };
 static const uint8_t dash_n[5] = { 0, 2, 2, 4, 6 };
 
 /* Draws a line between device points. `last` includes the end pixel (LineTo excludes it). */
-static void line_dev(gctx_t *g, int x0, int y0, int x1, int y1, int last)
+void gdi_line(gctx_t *g, int x0, int y0, int x1, int y1, int last)
 {
     const int rop2 = g->dc->rop2;
     if (g->pnull) return;
@@ -319,6 +334,8 @@ static void line_dev(gctx_t *g, int x0, int y0, int x1, int y1, int last)
     }
 }
 
+#define line_dev gdi_line
+
 DLLAPI BOOL WINAPI MoveToEx(HDC hdc, int x, int y, LPPOINT old)
 {
     dc_t *dc;
@@ -328,6 +345,7 @@ DLLAPI BOOL WINAPI MoveToEx(HDC hdc, int x, int y, LPPOINT old)
     if (old) *old = dc->pos;
     dc->pos.x = x;
     dc->pos.y = y;
+    if (gdi_path_recording(dc)) gdi_path_moveto(dc);
     RET(TRUE);
 }
 
@@ -348,6 +366,11 @@ DLLAPI BOOL WINAPI LineTo(HDC hdc, int x, int y)
     GDI_ENTER();
     dc = gdi_dc_get(hdc);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (gdi_path_recording(dc)) {
+        const BOOL ok = gdi_path_lineto(dc, x, y);
+        if (ok) { dc->pos.x = x; dc->pos.y = y; }
+        RET(ok);
+    }
     if (gctx_begin(&g, dc)) {
         line_dev(&g, dc_lx(dc, dc->pos.x), dc_ly(dc, dc->pos.y), dc_lx(dc, x), dc_ly(dc, y), 0);
         gctx_end(&g);
@@ -366,6 +389,7 @@ DLLAPI BOOL WINAPI Polyline(HDC hdc, const POINT *pts, int n)
     GDI_ENTER();
     dc = gdi_dc_get(hdc);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (gdi_path_recording(dc)) RET(gdi_path_poly(dc, pts, n, 0));
     if (gctx_begin(&g, dc)) {
         for (i = 0; i + 1 < n; ++i)
             line_dev(&g, dc_lx(dc, pts[i].x), dc_ly(dc, pts[i].y), dc_lx(dc, pts[i + 1].x), dc_ly(dc, pts[i + 1].y), i + 2 == n);
@@ -386,6 +410,7 @@ DLLAPI BOOL WINAPI Rectangle(HDC hdc, int l, int t, int r, int b)
     l = dc_lx(dc, l); r = dc_lx(dc, r); t = dc_ly(dc, t); b = dc_ly(dc, b);
     if (l > r) { int s = l; l = r; r = s; }
     if (t > b) { int s = t; t = b; b = s; }
+    if (gdi_path_recording(dc)) RET(gdi_path_rect_dev(dc, l, t, r, b, 0));
     if (!gctx_begin(&g, dc)) RET(TRUE);
     pw = g.pnull ? 0 : g.pwidth;
     { const int half = ((r - l) < (b - t) ? (r - l) : (b - t)) / 2; if (pw > half) pw = half; }
@@ -434,6 +459,7 @@ DLLAPI BOOL WINAPI Ellipse(HDC hdc, int l, int t, int r, int b)
     l = dc_lx(dc, l); r = dc_lx(dc, r); t = dc_ly(dc, t); b = dc_ly(dc, b);
     if (l > r) { int s = l; l = r; r = s; }
     if (t > b) { int s = t; t = b; b = s; }
+    if (gdi_path_recording(dc)) RET(gdi_path_ellipse_dev(dc, l, t, r, b));
     if (!gctx_begin(&g, dc)) RET(TRUE);
     pw = g.pnull ? 0 : g.pwidth;
     for (y = t; y < b; ++y) {
@@ -463,6 +489,7 @@ DLLAPI BOOL WINAPI Polygon(HDC hdc, const POINT *pts, int n)
     GDI_ENTER();
     dc = gdi_dc_get(hdc);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
+    if (gdi_path_recording(dc)) RET(gdi_path_poly(dc, pts, n, 1));
     if (!gctx_begin(&g, dc)) RET(TRUE);
     dv = gdi_alloc((size_t)n * sizeof *dv);
     if (!dv) RET(FALSE);

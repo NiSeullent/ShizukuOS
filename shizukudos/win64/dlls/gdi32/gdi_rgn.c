@@ -376,7 +376,7 @@ int gdi_dc_select_region(dc_t *dc, rgn_t *r)
 {
     rl_free(&dc->userclip);
     rl_copy(&dc->userclip, &r->rl);
-    rl_offset(&dc->userclip, dc_ox(dc), dc_oy(dc));
+    rl_offset(&dc->userclip, dc->dev_org.x, dc->dev_org.y);        /* region coordinates are device units, as on Windows */
     dc->has_userclip = 1;
     dc->eff_valid = 0;
     return rl_type(&dc->userclip);
@@ -486,7 +486,7 @@ DLLAPI int WINAPI GetClipRgn(HDC hdc, HRGN h)
     if (!dc || !r) { SetLastError(ERROR_INVALID_HANDLE); RET(-1); }
     if (!dc->has_userclip) RET(0);
     rl_copy(&r->rl, &dc->userclip);
-    rl_offset(&r->rl, -dc_ox(dc), -dc_oy(dc));
+    rl_offset(&r->rl, -dc->dev_org.x, -dc->dev_org.y);
     RET(1);
 }
 

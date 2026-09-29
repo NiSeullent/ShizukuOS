@@ -64,7 +64,8 @@ void *gdi_obj_get(HGDIOBJ h, int type, int *type_out)
     gobj_t *o = obj_slot(h);
     if (!o) return 0;
     if (type_out) *type_out = o->type;
-    if (type && o->type != type && !(type == OBJ_DC && o->type == OBJ_MEMDC) && !(type == OBJ_PEN && o->type == OBJ_EXTPEN))
+    if (type && o->type != type && !(type == OBJ_DC && (o->type == OBJ_MEMDC || o->type == OBJ_ENHMETADC)) &&
+        !(type == OBJ_PEN && o->type == OBJ_EXTPEN))
         return 0;
     return o->p;
 }
@@ -404,6 +405,11 @@ void gdi_dc_defaults(dc_t *dc)
     dc->gfxmode = GM_COMPATIBLE;
     dc->dcpen = 0;
     dc->dcbrush = 0xffffff;
+    dc->xf.eM11 = dc->xf.eM22 = 1.0f;
+    dc->xf.eM12 = dc->xf.eM21 = dc->xf.eDx = dc->xf.eDy = 0.0f;
+    dc->xf_dx = dc->xf_dy = 0;
+    dc->arcdir = AD_COUNTERCLOCKWISE;
+    dc->miter = 10.0f;
 }
 
 static bitmap_t *g_default_bitmap;
@@ -450,9 +456,12 @@ DLLAPI BOOL WINAPI DeleteDC(HDC h)
         dc_t *s = dc->saved;
         dc->saved = s->saved;
         dc_release_rlists(s);
+        gdi_path_free(s->path);
         gdi_free(s);
     }
     dc_release_rlists(dc);
+    gdi_path_free(dc->path);
+    if (dc->emf) gdi_emf_dc_free(dc);                               /* a metafile DC deleted without CloseEnhMetaFile */
     gdi_obj_free((HGDIOBJ)h);
     gdi_free(dc);
     RET(TRUE);
@@ -467,6 +476,7 @@ static int dc_save_copy(dc_t *dc)
     memset(&s->eff, 0, sizeof s->eff);
     memset(&s->userclip, 0, sizeof s->userclip);
     rl_copy(&s->userclip, &dc->userclip);
+    s->path = gdi_path_copy(dc->path);                              /* SaveDC keeps the path too */
     s->saved = dc->saved;
     dc->saved = s;
     return 1;
@@ -486,6 +496,11 @@ static void dc_restore_from(dc_t *dc, dc_t *snap)
     dc->textalign = snap->textalign; dc->gfxmode = snap->gfxmode; dc->pos = snap->pos;
     dc->win_org = snap->win_org; dc->vp_org = snap->vp_org; dc->brush_org = snap->brush_org;
     dc->dcpen = snap->dcpen; dc->dcbrush = snap->dcbrush;
+    dc->xf = snap->xf; dc->xf_dx = snap->xf_dx; dc->xf_dy = snap->xf_dy;
+    dc->arcdir = snap->arcdir; dc->miter = snap->miter;
+    gdi_path_free(dc->path);
+    dc->path = snap->path; dc->path_open = snap->path_open;
+    snap->path = 0;
     rl_free(&dc->userclip);
     dc->userclip = snap->userclip;
     dc->has_userclip = snap->has_userclip;
@@ -521,6 +536,7 @@ DLLAPI BOOL WINAPI RestoreDC(HDC h, int level)
         dc->saved = top->saved;
         if (drop == 1) dc_restore_from(dc, top);
         dc_release_rlists(top);
+        gdi_path_free(top->path);
         gdi_free(top);
     }
     RET(TRUE);
@@ -542,7 +558,7 @@ DLLAPI HGDIOBJ WINAPI SelectObject(HDC hdc, HGDIOBJ obj)
     case OBJ_FONT: prev = dc->font; dc->font = (HFONT)obj; break;
     case OBJ_BITMAP: {
         bitmap_t *b = p, *old;
-        if (!dc->memdc) { SetLastError(ERROR_INVALID_PARAMETER); RET(0); }
+        if (!dc->memdc || dc->emf) { SetLastError(ERROR_INVALID_PARAMETER); RET(0); }   /* not into window or metafile DCs */
         if (b->sel && (HBITMAP)obj != dc->hbmp) { SetLastError(ERROR_INVALID_PARAMETER); RET(0); }   /* already in another DC */
         old = gdi_obj_get((HGDIOBJ)dc->hbmp, OBJ_BITMAP, 0);
         prev = (HGDIOBJ)dc->hbmp;
@@ -711,8 +727,13 @@ DLLAPI int WINAPI SetGraphicsMode(HDC h, int mode)
     GDI_ENTER();
     dc = gdi_dc_get(h);
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(0); }
-    if (mode != GM_COMPATIBLE) { SetLastError(ERROR_NOT_SUPPORTED); RET(0); }       /* GM_ADVANCED (world transforms) does not exist */
+    if (mode != GM_COMPATIBLE && mode != GM_ADVANCED) { SetLastError(ERROR_INVALID_PARAMETER); RET(0); }
+    if (mode == GM_COMPATIBLE && (dc->xf_dx || dc->xf_dy || dc->xf.eDx != 0.0f || dc->xf.eDy != 0.0f)) {
+        SetLastError(ERROR_CAN_NOT_COMPLETE);                         /* only with the identity world transform, as on Windows */
+        RET(0);
+    }
     old = dc->gfxmode;
+    dc->gfxmode = mode;
     RET(old);
 }
 

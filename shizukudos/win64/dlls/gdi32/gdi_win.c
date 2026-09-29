@@ -89,6 +89,7 @@ void gdi_dc_touch(dc_t *dc, const RECT *dev)
     backing_t *b = dc->bk;
     RECT r = *dev;
     int i, again = 1;
+    if (dc->emf) { gdi_emf_touch(dc, dev); return; }
     if (dc->memdc || !b || rc_is_empty(dev)) return;
     while (again) {                                                   /* absorb every kept rectangle the new one meets */
         again = 0;
@@ -197,6 +198,7 @@ DLLAPI VOID WINAPI ShzGdiWindowGone(HWND hwnd)
 {
     backing_t **pp, *b;
     GDI_ENTER();
+    gdi_window_pixel_format_forget(hwnd);
     for (pp = &g_backings; (b = *pp); pp = &b->next)
         if (b->hwnd == hwnd) {
             *pp = b->next;
