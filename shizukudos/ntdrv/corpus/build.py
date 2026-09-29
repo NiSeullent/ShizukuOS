@@ -49,6 +49,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from shzlib import BUILD, REPO, UPSTREAM_DIR, load_manifest, sha256_file, write_json  # noqa: E402
 
 ROS = UPSTREAM_DIR / "reactos"
@@ -95,6 +96,16 @@ CORPUS_DRIVERS = {
     "hdaudbus":  ("drivers/wdm/audio/hdaudbus", "HD Audio bus driver, KMDF"),
     "wdfldr":    ("sdk/lib/drivers/wdf/wdfldr", "KMDF loader (framework provider)"),
     "wdf01000":  ("sdk/lib/drivers/wdf", "Wdf01000.sys KMDF 1.17 runtime (Microsoft WDF sources, MIT, C++)"),
+}
+
+# virtio-win drivers (BSD-3-Clause): WDK/MSBuild projects. Attempted with the same toolchain against the ReactOS headers
+# standing in for the WDK (corpus/vcxproj.py evaluates the project for "Win10 Release|x64"); the result is recorded.
+VIRTIO = UPSTREAM_DIR / "virtio-win"
+VCX_DRIVERS = {
+    "viostor":   ("viostor/viostor.vcxproj", "virtio-blk StorPort miniport (WDM)"),
+    "netkvm-w10": ("NetKVM/NetKVM-VS2015.vcxproj", "virtio-net NDIS 6.85 miniport, C++ (current NetKVM)"),
+    "vioinput":  ("vioinput/sys/vioinput.vcxproj", "virtio-input HID minidriver, KMDF 1.15"),
+    "viogpudo":  ("viogpu/viogpudo/viogpudo.vcxproj", "virtio-gpu WDDM display-only driver (DOD), C++"),
 }
 
 # Import libraries: generated from the export spec of the module that provides them (dll name, spec path).
@@ -887,7 +898,7 @@ def gen_ksamd64(tc, tools, log):
     t = tgts.get("genincdata")
     if not t:
         return False
-    rec = tc.build_target(t, cm, CORPUS / "_genincdata" / tc.name, tools, need_link=True, entry_zero=True)
+    rec = tc.build_target(t, cm, SDKBIN / "_genincdata" / tc.name, tools, need_link=True, entry_zero=True)
     if rec["status"] != "built":
         log.append("genincdata failed: " + "; ".join(rec["errors"][:2]))
         return False
@@ -978,8 +989,9 @@ class Toolchain:
     # ---- build one CMake target
     def build_target(self, t, cm, outdir, tools, need_link=True, entry_zero=False, jobs=2):
         outdir.mkdir(parents=True, exist_ok=True)
-        rec = {"target": t.name, "dir": str(t.srcdir.relative_to(ROS)), "cc": self.name, "status": "built", "errors": [],
-               "warnings": 0, "sources": 0, "seh": self.seh_mode}
+        rec = {"target": t.name, "dir": upstream_rel(t.srcdir), "cc": self.name, "status": "built", "errors": [],
+               "warnings": 0, "sources": 0, "seh": self.seh_mode, "c_compiler": self.cc[0],
+               "cxx_compiler": " ".join(self.cxx)}
         t0 = time.time()
         srcs = [Path(s) for s in t.sources if Path(s).suffix.lower() in (".c", ".cpp", ".cc", ".s", ".S")]
         srcs = [s for s in srcs if s.suffix != ".s" or True]
@@ -1010,7 +1022,7 @@ class Toolchain:
         def compile_one(src):
             suffix = src.suffix.lower()
             lang = "CXX" if suffix in (".cpp", ".cc") else ("ASM" if suffix == ".s" else "C")
-            obj = outdir / (re.sub(r"[^A-Za-z0-9_.-]", "_", str(src.relative_to(ROS) if ROS in src.parents else src.name)) + ".o")
+            obj = outdir / (re.sub(r"[^A-Za-z0-9_.-]", "_", upstream_rel(src)) + ".o")
             if lang == "ASM":
                 cmd = self.cc + ["-x", "assembler-with-cpp", "-o", obj, "-I", ROS / "sdk/include/asm", "-I", SDKBIN / "sdk/include/asm"] + \
                     self.flags(t, cm, "ASM") + ["-D__ASM__", "-c", src]
@@ -1150,6 +1162,15 @@ def library_index():
     return _LIBINDEX
 
 
+def upstream_rel(p):
+    """Path relative to the ReactOS tree, else to build/upstream, else the file name."""
+    p = Path(p)
+    for base in (ROS, UPSTREAM_DIR):
+        if base in p.parents:
+            return str(p.relative_to(base))
+    return p.name
+
+
 # ============================================================================================================= PE facts
 def describe_pe(path):
     out = run([OBJDUMP, "-p", path], check=False).stdout
@@ -1229,6 +1250,126 @@ def build_corpus_driver(name, tc, tools, log, jobs):
     return rec
 
 
+def ci_resolve(base, rel):
+    """Case-insensitive lookup of rel (with / or \\ separators) below base, as a Windows file system resolves it."""
+    cur = Path(base)
+    for part in re.split(r"[\\/]+", rel):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            cur = cur.parent
+            continue
+        if (cur / part).exists():
+            cur = cur / part
+            continue
+        if not cur.is_dir():
+            return None
+        hit = next((c for c in cur.iterdir() if c.name.lower() == part.lower()), None)
+        if hit is None:
+            return None
+        cur = hit
+    return cur
+
+
+INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.M)
+
+
+def casefix_includes(sources, incdirs, outdir, tree_root):
+    """WDK projects are written for a case-insensitive file system (#include "virtio.h" for VirtIO.h, "..\\Virtio" for
+    VirtIO). For every #include (transitively, within tree_root) that resolves only case-insensitively, a symlink with the
+    spelling the source uses is created under outdir, which goes last on the include path. Returns the fixes made."""
+    outdir.mkdir(parents=True, exist_ok=True)
+    fixes, seen, queue = {}, set(), [Path(x) for x in sources]
+    while queue:
+        f = queue.pop()
+        if f in seen or not f.exists():
+            continue
+        seen.add(f)
+        try:
+            text = f.read_text(errors="replace")
+        except OSError:
+            continue
+        for name in INCLUDE_RE.findall(text):
+            dirs = [f.parent] + [Path(d) for d in incdirs]
+            exact = next((d / name.replace("\\", "/") for d in dirs if (d / name.replace("\\", "/")).is_file()), None)
+            if exact is None:
+                exact = next((r for d in dirs for r in [ci_resolve(d, name)] if r is not None and r.is_file()), None)
+                if exact is not None:
+                    link = outdir / name.replace("\\", "/")
+                    link.parent.mkdir(parents=True, exist_ok=True)
+                    if not link.exists():
+                        link.symlink_to(exact)
+                    fixes[name] = str(exact)
+            if exact is not None and tree_root in exact.resolve().parents:
+                queue.append(exact.resolve())
+    return fixes
+
+
+def build_vcx_driver(name, tc, tools, log, jobs):
+    """Attempt one virtio-win driver: its .vcxproj sources/defines/includes, WDK defaults, ReactOS headers and libraries."""
+    import vcxproj as V
+    rel, what = VCX_DRIVERS[name]
+    rec = {"driver": name, "what": what, "dir": f"virtio-win/{Path(rel).parent}", "cc": tc.name, "tree": "virtio-win"}
+    if not (VIRTIO / rel).exists():
+        rec.update(status="missing", errors=[f"{rel} not in the pinned virtio-win tree (run corpus/fetch.py virtio-win)"])
+        return rec
+    intdir = SDKBIN / "virtio-win" / Path(rel).parent
+    intdir.mkdir(parents=True, exist_ok=True)
+    proj = V.Project(VIRTIO / rel, intdir)
+    cm = CMakeLite(tc.cc_id, tc.version, tc.tool_paths, log)
+    t = Target(name, "MODULE", proj.dir, intdir)
+    t.sources = [str(x) for x in proj.sources]
+    kmdf = proj.driver_type.upper() == "KMDF" or proj.props.get("Feature_UsingWDF", "").lower() == "true"
+    t.module_type = "kmdfdriver" if kmdf else "kernelmodedriver"
+    t.removed_defs = ["-DWINVER=0x502", "-D_WIN32_WINNT=0x502", "-D_WIN32_WINDOWS=0x502"]
+    t.defs["PRIVATE"] = V.WDK_DEFINES + proj.defines()
+    t.incs["PRIVATE"] = [str(ci_resolve("/", d) or d) for d in proj.includes()]      # "..\\Virtio" -> VirtIO
+    missing = []
+    if kmdf:
+        t.defs["PRIVATE"] += [f"-DKMDF_VERSION_MAJOR={proj.props.get('KMDF_VERSION_MAJOR') or 1}",
+                              f"-DKMDF_VERSION_MINOR={proj.props.get('KMDF_VERSION_MINOR') or 15}"]
+        t.incs["PRIVATE"].append(str(ROS / "sdk/include/wdf/kmdf/1.17"))
+        t.importlibs.append("wdfldr")
+        t.links["PRIVATE"].append("wdfdriverentry")
+    for lib in proj.libs():
+        if lib == "virtiolib.lib":
+            vp = V.Project(VIRTIO / "VirtIO/VirtioLib.vcxproj", SDKBIN / "virtio-win/VirtIO")
+            vt = Target("virtiolib", "STATIC", vp.dir, SDKBIN / "virtio-win/VirtIO")
+            vt.sources = [str(x) for x in vp.sources]
+            vt.removed_defs = t.removed_defs
+            vt.defs["PRIVATE"] = V.WDK_DEFINES + vp.defines()
+            vt.incs["PRIVATE"] = vp.includes()
+            cm.targets["virtiolib"] = vt
+            t.links["PRIVATE"].append("virtiolib")
+        elif lib.startswith("wdf") or lib == "wdfdriverentry.lib":
+            continue
+        else:
+            kind, target = V.LIBS.get(lib, (None, None))
+            if kind == "import":
+                t.importlibs.append(target)
+            else:
+                missing.append(lib)
+    ros_incs = [str(SDKBIN / p[1:]) if p.startswith("@") else str(ROS / p) for p in ROOT_INCLUDES] + t.incs["PRIVATE"]
+    fixes = casefix_includes(t.sources + [s for x in cm.targets.values() for s in x.sources], [str(proj.dir)] + ros_incs,
+                             intdir / "_casefix", VIRTIO.resolve())
+    t.incs["PRIVATE"].append(str(intdir / "_casefix"))
+    if "virtiolib" in cm.targets:
+        cm.targets["virtiolib"].incs["PRIVATE"] = [str(ci_resolve("/", d) or d) for d in cm.targets["virtiolib"].incs["PRIVATE"]] + \
+            [str(intdir / "_casefix")]
+    tc.lib_cache = {}
+    r = tc.build_target(t, cm, CORPUS / name / tc.name, tools, jobs=jobs)
+    rec.update(r)
+    rec["case_insensitive_includes"] = fixes
+    rec["module_type"] = t.module_type
+    rec["vcxproj"] = {"DriverType": proj.driver_type, "TargetVersion": proj.props.get("TargetVersion"),
+                      "KMDF": f"{proj.props.get('KMDF_VERSION_MAJOR') or 1}.{proj.props.get('KMDF_VERSION_MINOR')}" if kmdf else None,
+                      "libs": proj.libs(), "wdk_only_libs": missing, "sources": len(t.sources)}
+    rec["cmake"] = {"defines": t.defs["PRIVATE"], "link_libraries": t.links["PRIVATE"], "importlibs": t.importlibs, "infs": [], "exports_api": False}
+    rec["framework"], rec["ndis"] = classify(rec, t) if rec["status"] == "built" else (None, None)
+    rec["static_libraries"] = {k: ("ok" if v[0] else (v[1][:2] or "not a buildable library")) for k, v in tc.lib_cache.items()}
+    return rec
+
+
 def make_package(name, rec):
     """Driver package (the .sys + its own INF, unchanged, as a vendor ships it) for store.py / shzpnp tests."""
     if rec.get("status") != "built" or not rec["cmake"]["infs"]:
@@ -1253,17 +1394,19 @@ def main():
     args = ap.parse_args()
     if args.list:
         for n, (d, what) in CORPUS_DRIVERS.items():
-            print(f"{n:10} {d:38} {what}")
+            print(f"{n:10} reactos    {d:38} {what}")
+        for n, (d, what) in VCX_DRIVERS.items():
+            print(f"{n:10} virtio-win {d:38} {what}")
         return 0
     for tool in (GCC, DLLTOOL, WINDRES, WINDMC, OBJDUMP, AR, "gcc", "g++"):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     if not ROS.is_dir():
         raise SystemExit("ReactOS tree missing: run shizukudos/ntdrv/corpus/fetch.py")
-    names = args.drivers or list(CORPUS_DRIVERS)
+    names = args.drivers or list(CORPUS_DRIVERS) + list(VCX_DRIVERS)
     for n in names:
-        if n not in CORPUS_DRIVERS:
-            raise SystemExit(f"unknown driver {n}; known: {', '.join(CORPUS_DRIVERS)}")
+        if n not in CORPUS_DRIVERS and n not in VCX_DRIVERS:
+            raise SystemExit(f"unknown driver {n}; known: {', '.join(list(CORPUS_DRIVERS) + list(VCX_DRIVERS))}")
     log = []
     tools = prepare_sdk(log)
     plugin = build_seh_plugin(log)
@@ -1286,7 +1429,7 @@ def main():
                 prior.pop("clang", None)                      # default mode: clang only where gcc did not build
                 continue
             try:
-                rec = build_corpus_driver(n, tc, tools, log, args.jobs)
+                rec = build_corpus_driver(n, tc, tools, log, args.jobs) if n in CORPUS_DRIVERS else build_vcx_driver(n, tc, tools, log, args.jobs)
             except Exception as e:                            # noqa: BLE001 - record and continue with the next driver
                 rec = {"driver": n, "cc": cc, "status": "script-error", "errors": [f"{type(e).__name__}: {e}"[:400]]}
             results["drivers"].setdefault(n, {})[cc] = rec

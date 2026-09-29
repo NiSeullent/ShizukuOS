@@ -12,10 +12,17 @@
 #include <stdint.h>
 
 #ifndef SHZINF_MALLOC
+#ifdef _WIN64                          /* Shizuku Win64 program: the freestanding shzcrt heap */
+#include "shzcrt.h"
+#define SHZINF_MALLOC shz_malloc
+#define SHZINF_REALLOC shz_realloc
+#define SHZINF_FREE shz_free
+#else                                  /* host build (test harness) */
 #include <stdlib.h>
 #define SHZINF_MALLOC malloc
 #define SHZINF_REALLOC realloc
 #define SHZINF_FREE free
+#endif
 #endif
 
 typedef struct {
