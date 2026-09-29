@@ -38,6 +38,7 @@ packages (the .sys + the driver's own INF, unchanged) under build/shizukudos/ntd
 """
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
 import re
@@ -637,8 +638,22 @@ class CMakeLite:
             t.spec = getattr(self, "pending_spec", {}).get(tname)     # spec2def() usually precedes add_library()
             self.targets[tname] = t
             state["created"].append(t)
-        elif name == "add_asm_files":
-            local[a[0]] = ";".join(self._path(x, srcdir, local) for x in a[1:])
+        elif name == "add_asm_files":                     # gcc.cmake add_asm_files(): MASM .asm/.inc go through asmpp
+            out = []
+            for x in a[1:]:
+                src = Path(self._path(x, srcdir, local))
+                relx = src.relative_to(srcdir) if Path(srcdir) in src.parents else Path(src.name)
+                if src.suffix == ".asm":
+                    dst = Path(local["CMAKE_CURRENT_BINARY_DIR"]) / f"{relx}.s"
+                elif src.suffix == ".inc":
+                    dst = Path(local["CMAKE_CURRENT_BINARY_DIR"]) / f"{relx}.h"
+                else:
+                    out.append(str(src))
+                    continue
+                self.asm_convert = getattr(self, "asm_convert", {})
+                self.asm_convert[str(dst)] = str(src)
+                out.append(str(dst))
+            local[a[0]] = ";".join(out)
         elif name == "target_compile_definitions":
             self._add_scoped(self._t(a[0]).defs, [(s, v if v.startswith("-D") else "-D" + v) for s, v in self._scoped(a[1:])])
         elif name == "target_compile_options":
@@ -689,11 +704,14 @@ class CMakeLite:
                 cmd = a[a.index("COMMAND") + 1:]
                 if t and cmd and cmd[0] == "native-pefixup":
                     t.post_fixups.append([x for x in cmd[1:] if x not in ("VERBATIM",) and not x.startswith("$<TARGET_FILE")])
+        elif name == "add_idl_headers":
+            self.idl_headers = getattr(self, "idl_headers", [])
+            self.idl_headers.append((Path(srcdir), Path(local["CMAKE_CURRENT_BINARY_DIR"]), a[1:], state))
         elif name in ("add_pch", "add_dependencies", "add_cd_file", "add_registry_inf", "message", "add_subdirectory",
                       "set_source_files_properties", "add_rc_deps", "add_custom_target", "project", "cmake_parse_arguments",
                       "set_property", "get_filename_component", "get_target_property", "file", "string", "math",
                       "add_message_headers", "add_dependency_node", "add_dependency_edge", "add_executable",
-                      "set_cpp", "add_idl_headers", "add_rpc_files", "add_typelib", "generate_idl_iids", "return",
+                      "set_cpp", "add_rpc_files", "add_iid_library", "add_typelib", "generate_idl_iids", "return",
                       "option", "add_link", "add_kd_file", "sign_driver_if_needed", "enable_language"):
             if name == "set_source_files_properties":
                 self.log.append(f"{srcdir}:{lineno}: set_source_files_properties ignored")
@@ -719,7 +737,7 @@ def host_tool(name, src, compiler="gcc", extra=()):
     if exe.exists() and exe.stat().st_mtime >= Path(src).stat().st_mtime:
         return exe
     TOOLS.mkdir(parents=True, exist_ok=True)
-    run([compiler, "-O2", "-w", "-DTARGET_amd64", *extra, "-o", exe, src])      # CMakeLists.txt host section: -DTARGET_${ARCH}
+    run([compiler, "-O2", "-w", "-D__REACTOS__", "-DTARGET_amd64", *extra, "-o", exe, src])   # top-level CMakeLists.txt defines
     return exe
 
 
@@ -756,7 +774,9 @@ def prepare_sdk(log):
              "spec2def": host_tool("spec2def", ROS / "sdk/tools/spec2def/spec2def.c"),
              # sdk/tools/CMakeLists.txt: pefixup gets _TARGET_PE64 for amd64 and the host_includes directory
              "pefixup": host_tool("pefixup", ROS / "sdk/tools/pefixup.c", extra=("-D_TARGET_PE64", "-I", ROS / "sdk/include/host")),
-             "geninc": host_tool("geninc", ROS / "sdk/tools/geninc/geninc.c")}
+             "geninc": host_tool("geninc", ROS / "sdk/tools/geninc/geninc.c"),
+             "asmpp": host_tool("asmpp", ROS / "sdk/tools/asmpp/asmpp.cpp", compiler="g++",
+                                extra=("-std=c++11", "-I", ROS / "sdk/include/host"))}
     for template, out in XDK:
         dest = SDKBIN / "sdk/include" / out
         if not dest.exists():
@@ -783,6 +803,7 @@ def prepare_sdk(log):
         (SDKBIN / "sdk/include/reactos" / tpl[:-6]).write_text(text)
     for name, (dll, spec) in IMPORT_SPECS.items():
         make_import_lib(name, dll, ROS / spec, tools, log)
+    gen_idl_headers(build_widl(log), log)
     return tools
 
 
@@ -797,6 +818,62 @@ def make_import_lib(name, dll, spec, tools, log):
     n = sum(1 for l in deffile.read_text().splitlines() if l.strip() and not l.startswith(("LIBRARY", "EXPORTS", ";")))
     log.append(f"spec2def --implib {Path(spec).relative_to(ROS)} -> lib{name}.a ({n} exports)")
     return lib
+
+
+def build_widl(log):
+    """ReactOS sdk/tools/widl + sdk/tools/wpp host tools (flex/bison generated parsers, as their CMakeLists do)."""
+    exe = TOOLS / "widl"
+    if exe.exists():
+        return exe
+    if not (shutil.which("flex") and shutil.which("bison")):
+        log.append("widl not built: flex/bison missing (IDL-generated psdk headers unavailable)")
+        return None
+    gen = TOOLS / "widl-gen"
+    gen.mkdir(parents=True, exist_ok=True)
+    w, p = ROS / "sdk/tools/widl", ROS / "sdk/tools/wpp"
+    run(["flex", "-o", gen / "parser.yy.c", w / "parser.l"])
+    run(["bison", "-d", "-o", gen / "parser.tab.c", w / "parser.y"])
+    run(["flex", "-o", gen / "ppl.yy.c", p / "ppl.l"])
+    run(["bison", "-d", "-o", gen / "ppy.tab.c", p / "ppy.y"])
+    srcs = [w / f for f in ("attribute.c", "client.c", "expr.c", "hash.c", "header.c", "proxy.c", "register.c", "server.c",
+                            "typegen.c", "typelib.c", "typetree.c", "utils.c", "widl.c", "write_msft.c", "write_sltg.c")]
+    srcs += [gen / "parser.yy.c", gen / "parser.tab.c", ROS / "sdk/tools/port/getopt.c", ROS / "sdk/tools/port/getopt1.c",
+             ROS / "sdk/tools/port/mkstemps.c", p / "wpp.c", gen / "ppl.yy.c", gen / "ppy.tab.c"]
+    r = run(["gcc", "-O2", "-w", "-D__REACTOS__", "-DTARGET_amd64", "-D_CRT_DECLARE_NONSTDC_NAMES=1", "-D_CRT_NONSTDC_NO_DEPRECATE", "-DINT16=SHORT",
+             "-DLANG_SCOTTISH_GAELIC=0x91", '-DINCLUDEDIR="unused"', '-DLIBDIR="unused"', "-I", gen, "-I", w, "-I", p,
+             "-I", ROS / "sdk/include/host", "-o", exe, *srcs], check=False)
+    if r.returncode:
+        log.append("widl not built: " + " | ".join(first_errors(r.stdout, 3)))
+        return None
+    log.append("widl built from sdk/tools/widl + sdk/tools/wpp (flex/bison)")
+    return exe
+
+
+def gen_idl_headers(widl, log):
+    """sdk/include/psdk/CMakeLists.txt add_idl_headers(): widl <includes> <defines> -m64 --win64 -b amd64-x-y -nostdinc
+    -Oicf -h (sdk/cmake/widl-support.cmake)."""
+    if not widl:
+        return 0
+    cm = CMakeLite("GNU", "13", {}, log)
+    cm.run_dir(ROS / "sdk/include/psdk")
+    made = 0
+    for srcdir, bindir, files, state in getattr(cm, "idl_headers", []):
+        bindir.mkdir(parents=True, exist_ok=True)
+        incs = [str(srcdir), str(bindir)] + state["incs"] + \
+            [str(SDKBIN / p[1:]) if p.startswith("@") else str(ROS / p) for p in ROOT_INCLUDES]
+        defs = [d for d in ROOT_DEFINES + state["defs"] if d.startswith("-D")]
+        for f in files:
+            out = bindir / (Path(f).name.rsplit(".", 1)[0] + ".h")
+            if out.exists():
+                continue
+            r = run([widl, *[x for i in incs for x in ("-I", i)], *defs, "-m64", "--win64", "-b", "amd64-x-y", "-nostdinc",
+                     "-Oicf", "-h", "-o", out, Path(f).name], cwd=srcdir, check=False)
+            if r.returncode:
+                log.append(f"widl {Path(f).name}: " + " | ".join(first_errors(r.stdout, 2)))
+            else:
+                made += 1
+    log.append(f"widl: {made} psdk IDL headers generated")
+    return made
 
 
 def gen_ksamd64(tc, tools, log):
@@ -908,6 +985,14 @@ class Toolchain:
         rcs = [Path(s) for s in t.sources if Path(s).suffix.lower() == ".rc"]
         defs = [Path(s) for s in t.sources if Path(s).suffix.lower() == ".def"]
         rec["sources"] = len(srcs)
+        for dst, src in getattr(cm, "asm_convert", {}).items():      # native-asmpp <src> > <dst>
+            if not Path(dst).exists():
+                Path(dst).parent.mkdir(parents=True, exist_ok=True)
+                r = run([tools["asmpp"], src], check=False)
+                if r.returncode:
+                    cm.log.append(f"asmpp {src}: {r.stdout[-200:]}")
+                else:
+                    Path(dst).write_text(r.stdout)
         if any(s.suffix.lower() == ".s" for s in srcs) and not gen_ksamd64(self, tools, cm.log):
             rec.update(status="failed", errors=["assembler sources need sdk/include/asm/ksamd64.inc (geninc failed)"])
             return rec
@@ -931,7 +1016,15 @@ class Toolchain:
             else:
                 cc = self.cxx if lang == "CXX" else self.cc
                 cmd = cc + self.flags(t, cm, lang) + ["-o", obj, "-c", src]
+            # object cache: reuse when the exact command line was used before and the object is newer than the source
+            # (headers under build/upstream never change: the tree is pinned)
+            stamp = obj.with_suffix(".cmd")
+            key = hashlib.sha256("\0".join(str(c) for c in cmd).encode()).hexdigest()
+            if obj.exists() and stamp.exists() and stamp.read_text() == key and obj.stat().st_mtime >= src.stat().st_mtime:
+                return src, obj, subprocess.CompletedProcess(cmd, 0, "", None), cmd
             r = run(cmd, check=False, cwd=t.srcdir)
+            if r.returncode == 0:
+                stamp.write_text(key)
             return src, obj, r, cmd
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
