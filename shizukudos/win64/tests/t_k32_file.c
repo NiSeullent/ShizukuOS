@@ -744,6 +744,43 @@ static void test_volumes(void)
 /* ================================================================ a second volume
  * Runs when D: is a fixed disk (Kernel64 with a FAT32 disk: tests/run_k64_disk.py; many Windows machines). Every property is
  * checked against what the API reports for C: or against another API, so no volume-specific constant is assumed. */
+/* The first regular file under dir ("D:"), searching `depth` directory levels: its full path into out (300 characters). */
+static int find_file_on(const WCHAR *dir, WCHAR *out, int depth)
+{
+    WIN32_FIND_DATAW fd;
+    WCHAR spec[300];
+    HANDLE h;
+    int dl = k32t_wlen(dir), ok = 0;
+    if (dl + 3 >= 300) return 0;
+    memcpy(spec, dir, dl * sizeof(WCHAR));
+    spec[dl] = '\\'; spec[dl + 1] = '*'; spec[dl + 2] = 0;
+    h = FindFirstFileW(spec, &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    do {
+        const int nl = k32t_wlen(fd.cFileName);
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || dl + 1 + nl >= 300) continue;
+        memcpy(out, dir, dl * sizeof(WCHAR));
+        out[dl] = '\\';
+        memcpy(out + dl + 1, fd.cFileName, (nl + 1) * sizeof(WCHAR));
+        ok = 1;
+    } while (!ok && FindNextFileW(h, &fd));
+    FindClose(h);
+    if (ok || depth <= 1) return ok;
+    h = FindFirstFileW(spec, &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    do {
+        const int nl = k32t_wlen(fd.cFileName);
+        WCHAR sub[300];
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.' || dl + 1 + nl >= 290) continue;
+        memcpy(sub, dir, dl * sizeof(WCHAR));
+        sub[dl] = '\\';
+        memcpy(sub + dl + 1, fd.cFileName, (nl + 1) * sizeof(WCHAR));
+        ok = find_file_on(sub, out, depth - 1);
+    } while (!ok && FindNextFileW(h, &fd));
+    FindClose(h);
+    return ok;
+}
+
 static void test_second_volume(void)
 {
     WCHAR cdev[300], ddev[300], cguid[64], dguid[64], names[16], fin[400], label[64], fsn[64], all[600];
@@ -760,6 +797,7 @@ static void test_second_volume(void)
     CHECK(GetVolumeInformationW(L"C:\\", NULL, 0, &cserial, NULL, NULL, NULL, 0), "GetVolumeInformationW(C:\\) serial");
     CHECK(GetVolumeInformationW(L"D:\\", label, 64, &dserial, &maxc, &flags, fsn, 64), "GetVolumeInformationW(D:\\)");
     CHECK(fsn[0] != 0 && maxc >= 12, "D: reports a file system name and a component length");
+    CHECK(dserial != cserial, "D: has a volume serial number of its own");
     CHECK(GetDiskFreeSpaceExW(L"D:\\", &avail, &total, &tfree) && total.QuadPart > 0 && tfree.QuadPart <= total.QuadPart,
           "GetDiskFreeSpaceExW(D:\\): 0 < total, free <= total");
     n = QueryDosDeviceW(L"C:", cdev, 300);
@@ -797,30 +835,31 @@ static void test_second_volume(void)
         CHECK(n == 49 && k32t_weq(fin, dguid), "... and VOLUME_NAME_GUID is D:'s volume name");
         CloseHandle(h);
     }
+    SetLastError(0);
     h = FindFirstFileW(L"D:\\*", &fd);
-    if (h != INVALID_HANDLE_VALUE) {
+    CHECKV(h != INVALID_HANDLE_VALUE, "FindFirstFileW(D:\\*) lists the root of D:", "GetLastError=%u", (unsigned)GetLastError());
+    if (h != INVALID_HANDLE_VALUE) FindClose(h);
+    {
         WCHAR path[300], want[320];
-        int found = 0;
-        do found = !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY); while (!found && FindNextFileW(h, &fd));
-        FindClose(h);
-        if (found && k32t_wlen(fd.cFileName) < 250) {
-            HANDLE f;
-            path[0] = 'D'; path[1] = ':'; path[2] = '\\';
-            memcpy(path + 3, fd.cFileName, (k32t_wlen(fd.cFileName) + 1) * sizeof(WCHAR));
-            f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-            CHECK(f != INVALID_HANDLE_VALUE, "a file in the root of D: opens");
-            if (f != INVALID_HANDLE_VALUE) {
-                CHECK(GetFileInformationByHandle(f, &bi) && bi.dwVolumeSerialNumber == dserial,
-                      "its volume serial number is the one GetVolumeInformation(D:\\) reports");
-                want[0] = '\\'; want[1] = '\\'; want[2] = '?'; want[3] = '\\';
-                memcpy(want + 4, path, (k32t_wlen(path) + 1) * sizeof(WCHAR));
-                n = GetFinalPathNameByHandleW(f, fin, 400, VOLUME_NAME_DOS);
-                CHECK(n > 0 && wieq(fin, want), "GetFinalPathNameByHandle of a D: file is \\\\?\\D:\\<name>");
-                CloseHandle(f);
-            }
+        HANDLE f;
+        if (!find_file_on(L"D:", path, 2)) {
+            printf("NOTE: D: holds no file in its first two levels; the per-file checks do not apply\n");
+            return;
+        }
+        f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+        CHECK(f != INVALID_HANDLE_VALUE, "a file found on D: opens");
+        if (f != INVALID_HANDLE_VALUE) {
+            CHECK(GetFileInformationByHandle(f, &bi) && bi.dwVolumeSerialNumber == dserial,
+                  "its volume serial number is the one GetVolumeInformation(D:\\) reports");
+            want[0] = '\\'; want[1] = '\\'; want[2] = '?'; want[3] = '\\';
+            memcpy(want + 4, path, (k32t_wlen(path) + 1) * sizeof(WCHAR));
+            n = GetFinalPathNameByHandleW(f, fin, 400, VOLUME_NAME_DOS);
+            CHECK(n > 0 && wieq(fin, want), "GetFinalPathNameByHandle of a D: file is \\\\?\\D:\\<path>");
+            n = GetFinalPathNameByHandleW(f, fin, 400, VOLUME_NAME_NT);
+            CHECK(n > 0 && wsub(fin, ddev) && wieq(fin + k32t_wlen(ddev), path + 2), "... and VOLUME_NAME_NT is QueryDosDevice(D:) + \\<path>");
+            CloseHandle(f);
         }
     }
-    (void)cserial;
 }
 
 /* ================================================================ path names */
