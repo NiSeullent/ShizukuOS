@@ -316,6 +316,10 @@ void disk_init(void)
     for (d = blk_first(); d && mounted; d = d->next)   /* superfloppy: the whole device holds the volume */
         if (!(d->flags & BLK_F_PARTITION))
             mounted = try_mount(d);
+    {   /* ShizukuFS (ext4 format) volumes on the other partitions: next free drive letters (sfs_mount.c) */
+        extern int sfs_probe_all(blk_dev_t *skip);
+        sfs_probe_all(mounted ? 0 : dvol.dev);
+    }
     if (mounted) { kprintf("K64 disk: no FAT32 volume found\n"); return; }
     fs_populate(&dvol.root);
     {

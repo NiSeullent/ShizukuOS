@@ -1,5 +1,11 @@
 # ShizukuFS v0 disk format and host tools
 
+> **Deprecated.** ShizukuFS v0 (this Python format) is superseded by **ShizukuFS v1**, which *is* the ext4 on-disk
+> format (bidirectionally compatible with Linux ext2/3/4 and e2fsprogs): the portable C library, its host tests and
+> the Kernel64 mount live in [`v1/`](v1/) and are documented in
+> [`docs/shizukudos10/SHIZUKUFS.md`](../docs/shizukudos10/SHIZUKUFS.md). v0 is kept only so existing v0 images and
+> tests keep working; no new code should target it.
+
 ShizukuFS v0 is a new block filesystem experiment for the Windows 98
 Shizuku's Second Edition project. Its host creator/reader can create a disk
 image, store and extract files, create and remove directories, allocate and
