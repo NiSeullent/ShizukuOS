@@ -24,9 +24,12 @@ can increase contention latency. There is no fairness guarantee, recursive acqui
 cross-process use, condition-variable integration or owner tracking.
 `GetTickCount64` serializes 32-bit samples and counts observed wraps. It cannot
 recover wraps before DLL load or multiple wraps between calls; this limitation
-bars a full native-equivalence claim. The seven native imports are `Sleep`,
+bars a full native-equivalence claim. The fourteen native imports are `Sleep`,
 `GetTickCount`, `GetModuleHandleA`, `GetProcAddress`, `SetLastError`,
-`MultiByteToWideChar` and `WideCharToMultiByte`.
+`GetLastError`, `MultiByteToWideChar`, `WideCharToMultiByte`, and, for the
+routing policy, `GetModuleFileNameA`, `CreateFileA`, `ReadFile`,
+`CloseHandle`, `GetEnvironmentVariableA` and `OutputDebugStringA`; all are
+in the Windows 98 SE OEM `KERNEL32` export manifest.
 There is no CRT dependency.
 
 The original InitOnce implementation provides synchronous and asynchronous
@@ -62,12 +65,29 @@ writing. Maximal-subpart replacement, full-range overlap rejection, alignment,
 failure precedence, and extreme-count error mapping are explicit project
 policies whose exact native Windows equivalence remains unverified.
 
-The redirected `GetProcAddress` intercepts only implemented, case-sensitive
-names requested through the real `KERNEL32.DLL` module handle. Other modules,
-unknown names and ordinal lookups go to the native resolver unchanged. This
-does not manufacture handles or replace the system DLL. An application must
-have its resolver import prepared to use this route; calls originating in
-unprepared dependencies still use the native resolver.
+The redirected `GetProcAddress` applies the routing policy to case-sensitive
+names requested through the real `KERNEL32.DLL` module handle. Other modules
+and ordinal lookups go to the native resolver unchanged. This does not
+manufacture handles or replace the system DLL. An application must have its
+resolver import prepared to use this route; calls originating in unprepared
+dependencies still use the native resolver.
+
+## Routing policy
+
+Every KERNEL32 name, static or dynamic, is routed by a per-process policy
+with the modes `auto` (default), `own`, `kernelex` and `native`, overridable
+per module and per function from `NTW32.INI` beside the DLL or, for tests,
+the `NTW32_ROUTING` variable. `auto` prefers a native export, then the own
+implementation, then a detected KernelEx API library, and demotes providers
+that `routes.json` lists as known stubs; the Auto order is configurable
+per process (`[routing] order=`) and per function (`[order]`); `own` never
+consults KernelEx; `native` is a pure passthrough. Unresolved imports are reported by module
+and function through `OutputDebugStringA`. KernelEx is detected only by
+module presence and its `get_api_table` export through the native loader;
+nothing is loaded and no address is hard-coded. The exact semantics,
+grammar, limits and the evidence boundary are in
+[docs/NTW32_ROUTING.md](../docs/NTW32_ROUTING.md). No Windows 98 guest and
+no KernelEx installation exercised this policy; it is host-tested only.
 
 ## Build and prepare
 
@@ -88,8 +108,10 @@ not contain a new Win98 guest pass for these artifacts yet.
 The preparer writes a new `.ntwimp` section with native/provider descriptor
 runs, retaining original IAT addresses so application instructions remain
 unchanged. It unbinds imports using the original lookup table. The original
-file is never overwritten. `routes.json` is the exact implemented routing
-allowlist; exported names and the routing list are tested for equality.
+file is never overwritten. `routes.json` (schema v2) is the exact implemented
+routing allowlist together with each export's provider order and the known-stub
+list; exported names and the routing list are tested for equality, and the
+same file generates the C table the provider links.
 Unsupported imports remain unresolved by this provider. There is no claim
 that preparation makes an arbitrary modern application run.
 
@@ -113,7 +135,11 @@ The host loader model and binutils parsing do not replace that guest test.
 Tests exercise 80,000 concurrent exclusive updates with interleaved readers,
 invalid object/lifetime states, wrap detection, all 65,536 ordinal lookup
 values, 72 eight-thread InitOnce contention rounds, malformed PE inputs,
-non-destructive writes, retained IAT addresses and the actual linked exports.
+non-destructive writes, retained IAT addresses, the actual linked exports,
+and the routing policy (every mode, override, stub demotion, KernelEx
+attribution, configured order and malformed configuration; 1,422 host
+checks plus the abi32
+scenarios that re-attach the real DLL with mocked `NTW32.INI` contents).
 Address/undefined sanitizers cover the C core. Exact artifacts and hashes are
 in ignored `build/platform/manifest.json`.
 

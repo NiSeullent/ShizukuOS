@@ -498,6 +498,14 @@ def verify_orphan2(img, rep):
     compare_screen(img, rep, "orphan2: after its process died the kernel removed the window: bare desktop (whole screen matches)", Screen())
 
 
+def verify_status(img, rep):
+    """T_GUI_STATUS: the frame of its full-screen window; its content (one row per loaded DLL) is checked through the
+    STATUS-DLL serial lines against the DLLs this build produced, the screendump is kept as the visible record."""
+    L, T, R, B = 8, 8, 1016, 760
+    check_outside_is_desktop(img, rep, "status", [(L, T, R, B)])
+    frame_checks(img, rep, "status", L, T, R, B, True, "Shizuku Win64 runtime status")
+
+
 def input_scene(ptr):
     s = Screen()
     s.window(200, 150, 600, 450, True, "Input Test", (255, 255, 255))
@@ -618,13 +626,22 @@ def drive_input(q, what):
                 time.sleep(0.2)
 
 
-SCENES = {"sys-layer": verify_sys_layer, "input-ptr": verify_input_ptr, "input-noptr": verify_input_noptr, "input-hwptr": verify_input_hwptr,
+SCENES = {"status": verify_status, "sys-layer": verify_sys_layer, "input-ptr": verify_input_ptr, "input-noptr": verify_input_noptr, "input-hwptr": verify_input_hwptr,
           "fb": verify_fb, "window": verify_window, "z1": verify_z1, "z2": verify_z2, "z3": verify_z3, "z4": verify_z4,
           "orphan1": verify_orphan1, "orphan2": verify_orphan2, "gdi": verify_gdi,
           "c1": verify_c1, "c2": verify_c2, "c3": verify_c3, "c4": verify_c4}
 
 
 # ---------------------------------------------------------------- harness
+def save_png(ppm):
+    try:
+        from PIL import Image as PILImage
+    except ImportError:
+        return
+    PILImage.open(ppm).save(ppm.with_suffix(".png"))
+
+
+
 def parse_serial(serial):
     exit_code = None
     m = re.search(r"^SHZ-EXIT:([0-9a-f]+)$", serial, re.M)
@@ -641,6 +658,7 @@ def main():
     ap.add_argument("--memory", default="256")
     ap.add_argument("--out", default=str(BUILD / "kernel64s" / "gui-run"))
     ap.add_argument("--keep-shots", action="store_true", help="keep the screendump of every scene (PPM)")
+    ap.add_argument("--png", action="store_true", help="also write every screendump as PNG next to result.json (needs Pillow)")
     args = ap.parse_args()
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
     for f in (stub, kernel, initrd):
@@ -713,6 +731,8 @@ def main():
                 rep.check(f"{scene}: known scene", False, "no host-side expectation for this scene")
             else:
                 fn(img, rep)
+            if args.png:
+                save_png(shot)
             if not args.keep_shots:
                 shot.unlink(missing_ok=True)
     except (RuntimeError, OSError, ValueError) as e:
@@ -740,6 +760,15 @@ def main():
     # only the GUI programs must not skip: others (network tests without a NIC, ...) legitimately skip in this profile
     skips = [f"{n}: {m}" for n, m in re.findall(r"\[win64 (T_GUI_\S+) pid \d+\] (SKIP: .*)", serial)]
     rep.check("no GUI program skipped (the display is present)", not skips, "; ".join(skips[:5]))
+    loaded = {m.group(1).lower(): m.group(2) == "1" and m.group(3) == "1"
+              for m in re.finditer(r"STATUS-DLL: (\S+) loaded=(\d) exports=\d+ resolved=(\d)", serial)}
+    built = json.loads((WIN64 / "build-result.json").read_text())["archive"]["files"]
+    for dll in sorted(f.rsplit("\\", 1)[-1].lower() for f in built if f.upper().startswith("\\SHZ\\SYS64\\")):
+        rep.check(f"status: {dll} was loaded in the guest and its first export resolved", loaded.get(dll, False),
+                  "reported" if dll in loaded else "not reported by T_GUI_STATUS")
+    pci = re.findall(r"STATUS-PCI: \S+ 1234:1111 class 03\S* irq \d+ driver=(.*)", serial)
+    rep.check("status: the Bochs VBE display (PCI 1234:1111) is listed as bound to the gfx_fb kernel driver",
+              any(d.startswith("gfx_fb") for d in pci), "; ".join(pci) or "not listed")
     for scene in sorted(SCENES):
         rep.check(f"scene {scene} was shown and verified", scene in seen)
     rep.check("the input program asked for keyboard, mouse and wheel input and got it", driven == ["keys", "mouse", "wheel"], f"{driven}")

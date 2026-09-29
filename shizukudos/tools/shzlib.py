@@ -92,6 +92,18 @@ def ensure_upstream(name):
         run(["git", "-C", dest, "fetch", "-q", "--tags", "origin"], timeout=600)
         run(["git", "-C", dest, "checkout", "-q", spec["commit"]])
     if spec.get("submodules"):
+        # The superproject commit already records each submodule commit (gitlink) and URL;
+        # check both against the manifest before fetching so a re-pin cannot drift silently.
+        for sub, info in spec["submodules"].items():
+            link = subprocess.run(["git", "-C", str(dest), "ls-tree", "HEAD", sub], capture_output=True,
+                                  text=True).stdout.split()
+            if len(link) < 3 or link[1] != "commit" or link[2] != info["commit"]:
+                raise RuntimeError(f"{name}/{sub}: manifest pins {info['commit']} but the superproject "
+                                   f"records {link[2] if len(link) > 2 else 'nothing'}")
+            url = subprocess.run(["git", "-C", str(dest), "config", "-f", ".gitmodules", "--get",
+                                  f"submodule.{sub}.url"], capture_output=True, text=True).stdout.strip()
+            if url.removesuffix(".git") != info["repository"].removesuffix(".git"):
+                raise RuntimeError(f"{name}/{sub}: manifest repository {info['repository']} but .gitmodules has {url}")
         run(["git", "-C", dest, "submodule", "update", "--init", "--recursive", "-q"], timeout=600)
         for sub, info in spec["submodules"].items():
             got = subprocess.run(["git", "-C", str(dest / sub), "rev-parse", "HEAD"],
