@@ -143,15 +143,29 @@ class PrepareTests(unittest.TestCase):
         imported = [(d['dll'].upper(), e[1]) for d in provider.imports() for e in d['entries']]
         self.assertEqual(set(imported), {('KERNEL32.DLL', name) for name in
             ('GetTickCount','Sleep','GetModuleHandleA','GetProcAddress','SetLastError',
-             'MultiByteToWideChar','WideCharToMultiByte')})
+             'MultiByteToWideChar','WideCharToMultiByte',
+             # WIN64 subsystem client (ntwin32/win64/ntw64.c): the NTWRAP9X.VXD transport
+             'CreateFileA','DeviceIoControl','GetLastError')})
         export_rva, _ = provider.directory(0)
         exports = provider.offset(export_rva, 40)
         count = provider.u32(exports+24)
         names = provider.u32(exports+32)
         observed = {provider.string(provider.u32(provider.offset(names+i*4,4))) for i in range(count)}
-        self.assertEqual(observed, set(mod.routes()['exports']))
+        plan = mod.routes()
+        self.assertEqual(observed, set(plan['exports']) | set(plan['provider_api']))
+        self.assertFalse(set(plan['exports']) & set(plan['provider_api']))
         self.assertNotIn('get_api_table', observed)
         self.assertEqual((provider.u16(provider.opt+48),provider.u16(provider.opt+50)), (4,10))
+
+    def test_win64_front_end_imports(self):
+        tool = mod.PE((ROOT / 'build/platform/NTW64RUN.EXE').read_bytes())
+        imported = {(d['dll'].upper(), e[1]) for d in tool.imports() for e in d['entries']}
+        self.assertEqual({name for dll, name in imported if dll == 'NTW32.DLL'},
+                         set(mod.routes()['provider_api']))
+        self.assertEqual({dll for dll, _ in imported}, {'NTW32.DLL', 'KERNEL32.DLL'})
+        self.assertEqual((tool.u16(tool.opt+48), tool.u16(tool.opt+50)), (4, 10))
+        self.assertEqual(tool.u16(tool.opt+68), 3)          # console subsystem
+        self.assertEqual(tool.u16(tool.pe+4), 0x14c)        # i386 PE32
 
     def test_provider_cannot_redirect_its_own_native_loader_imports(self):
         with self.assertRaisesRegex(mod.PEError, 'self-routing'):

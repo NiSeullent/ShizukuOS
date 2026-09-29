@@ -10,6 +10,11 @@
     "InitOnceComplete", "InitOnceExecuteOnce",     "MultiByteToWideChar", "WideCharToMultiByte",
     "AddVectoredExceptionHandler", "RemoveVectoredExceptionHandler"
   ],
+  "provider_api": [
+    "NtwQuerySubsystem64", "NtwCreateProcess64W", "NtwWaitProcess64", "NtwReadConsole64",
+    "NtwWriteConsole64", "NtwCloseConsole64", "NtwKillProcess64", "NtwCloseProcess64"
+  ],
+  "provider_api_note": "NTW32-specific WIN64 subsystem client (win64/ntw64.h); never routed from KERNEL32 imports",
   "evidence": "Build/static/host contracts only; no Windows 98 guest result for this provider",
   "limits": [
     "GetTickCount64 cannot recover wraps before DLL load or multiple unobserved wraps",
@@ -19,6 +24,7 @@
     "UTF conversion is independently implemented for CP_UTF8; other code pages delegate to native KERNEL32",
     "UTF maximal-subpart replacement, strict alignment, full-range overlap rejection and error precedence have no native Windows differential proof",
     "AddVectoredExceptionHandler order is host-tested; it is not connected to a CPU trap or the Win98 SEH chain",
-    "RemoveVectoredExceptionHandler returns 0 for an unknown handle and does not pretend success"
+    "RemoveVectoredExceptionHandler returns 0 for an unknown handle and does not pretend success",
+    "The WIN64 subsystem API needs NTWRAP9X.VXD under the ShizukuDOS Supervisor with a Kernel64 domain; otherwise every call fails with the loader or VxD error"
   ]
 }

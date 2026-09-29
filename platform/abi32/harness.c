@@ -135,6 +135,23 @@ static int STDCALL mock_WideCharToMultiByte(uint32_t page, uint32_t flags,
     return native_conversion_result;
 }
 
+/* The WIN64 subsystem client's transport imports. This harness never calls those exports (w64_harness.c
+ * does, against the VxD bridge and the Kernel64 model); reaching one of these mocks here is a failure. */
+static uintptr_t STDCALL mock_CreateFileA(const char *name, uint32_t access, uint32_t share, void *security,
+    uint32_t disposition, uint32_t flags, uintptr_t template_file)
+{
+    (void)name; (void)access; (void)share; (void)security; (void)disposition; (void)flags; (void)template_file;
+    fail("unexpected CreateFileA", __LINE__);
+}
+static uint32_t STDCALL mock_DeviceIoControl(uintptr_t device, uint32_t code, void *input, uint32_t input_bytes,
+    void *output, uint32_t output_bytes, uint32_t *returned, void *overlapped)
+{
+    (void)device; (void)code; (void)input; (void)input_bytes; (void)output; (void)output_bytes;
+    (void)returned; (void)overlapped;
+    fail("unexpected DeviceIoControl", __LINE__);
+}
+static uint32_t STDCALL mock_GetLastError(void) { fail("unexpected GetLastError", __LINE__); }
+
 static void patch_imports(void)
 {
 #include "pe_imports.inc"

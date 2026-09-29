@@ -19,7 +19,9 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 BUILD = HERE / "build"
 IMPORTS = {"Sleep", "GetTickCount", "GetModuleHandleA", "GetProcAddress", "SetLastError",
-           "MultiByteToWideChar", "WideCharToMultiByte"}
+           "MultiByteToWideChar", "WideCharToMultiByte",
+           # WIN64 subsystem client transport (ntwin32/win64/ntw64.c); exercised by w64_e2e.py
+           "CreateFileA", "DeviceIoControl", "GetLastError"}
 EXPORTS = {
     "InitializeSRWLock", "AcquireSRWLockExclusive", "AcquireSRWLockShared",
     "ReleaseSRWLockExclusive", "ReleaseSRWLockShared", "TryAcquireSRWLockExclusive",
@@ -27,6 +29,10 @@ EXPORTS = {
     "InitOnceInitialize", "InitOnceBeginInitialize", "InitOnceComplete", "InitOnceExecuteOnce",
     "MultiByteToWideChar", "WideCharToMultiByte",
     "AddVectoredExceptionHandler", "RemoveVectoredExceptionHandler",
+}
+W64_EXPORTS = {
+    "NtwQuerySubsystem64", "NtwCreateProcess64W", "NtwWaitProcess64", "NtwReadConsole64",
+    "NtwWriteConsole64", "NtwCloseConsole64", "NtwKillProcess64", "NtwCloseProcess64",
 }
 
 
@@ -81,7 +87,7 @@ def inspect(data):
                 raise ValueError(f"Unsupported import: {name!r}")
             imports.append((name, iat))
     if {name for name, _ in imports} != IMPORTS:
-        raise ValueError("DLL import inventory differs from the seven mock contracts")
+        raise ValueError("DLL import inventory differs from the ten mock contracts")
     export_rva, export_size = pe.directory(0)
     at = pe.offset(export_rva, 40)
     function_count, name_count, functions, names, ordinals = struct.unpack_from("<IIIII", data, at + 20)
@@ -98,8 +104,8 @@ def inspect(data):
             raise ValueError("Forwarded exports are unsupported")
         code_rva(rva)
         exports[name] = rva
-    if set(exports) != EXPORTS:
-        raise ValueError(f"Need exact 15-export runtime; got {sorted(exports)}")
+    if set(exports) != EXPORTS | W64_EXPORTS:
+        raise ValueError(f"Need exact 17+8-export runtime; got {sorted(exports)}")
     return pe, image, preferred, entry, imports, exports
 
 
@@ -195,8 +201,11 @@ SECTIONS {{
 def main():
     args = argparse.ArgumentParser(description=__doc__)
     args.add_argument("--dll", type=Path, default=ROOT / "build/platform/NTW32.DLL")
+    args.add_argument("--exe", type=Path, default=ROOT / "build/platform/NTW64RUN.EXE",
+                      help="NTW64RUN.EXE for the WIN64 subsystem end-to-end run (w64_e2e.py)")
     options = args.parse_args()
     options.dll = options.dll.resolve()
+    options.exe = options.exe.resolve()
     BUILD.mkdir(parents=True, exist_ok=True)
     source_paths = [HERE / name for name in ("build.py", "harness.c", "entry.S", "test_packer.py")]
     source_paths.append(ROOT / "ntwin32/prepare.py")
@@ -213,6 +222,11 @@ def main():
         raise RuntimeError("Missing successful packer test evidence")
     variants = [build_variant(pe, image, preferred, entry, imports, exports, target)
                 for target in (0x68000000, 0x69000000)]
+    sys.path.insert(0, str(HERE))
+    import w64_e2e
+    win64 = w64_e2e.run_e2e(options.dll, options.exe)
+    if win64["status"] != "PASS":
+        raise RuntimeError(f"WIN64 subsystem end-to-end run failed: {win64['problems']}")
     if options.dll.read_bytes() != data:
         raise RuntimeError("Input DLL changed during ABI run; rerun against a stable artifact")
     if source_hashes != {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -224,8 +238,12 @@ def main():
               "sources_sha256": source_hashes,
               "packer_tests": {"status": "PASS", "count": int(count_match.group(1)),
                                "stdout": packer_tests.stdout, "stderr": packer_tests.stderr},
-              "imports_mocked": sorted(IMPORTS), "exports_checked": sorted(EXPORTS),
-              "variants": variants}
+              "imports_mocked": sorted(IMPORTS), "exports_checked": sorted(EXPORTS | W64_EXPORTS),
+              "variants": variants,
+              "win64_bridge_e2e": {key: win64[key] for key in
+                                   ("status", "harness_stdout", "exe_sha256", "binary_sha256", "sources_sha256",
+                                    "messages", "expectations", "executed_for_real", "modeled",
+                                    "windows_guest_verified", "supervisor_verified")}}
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 
