@@ -244,7 +244,7 @@
       "used_by": ["shizukudos/win64/webkit"],
       "build": "partial, sparse fetch of the pinned commit; CMake + Ninja, clang --target=x86_64-w64-windows-gnu (shizukudos/win64/webkit/build.py, docs/shizukudos10/WEBKIT.md)",
       "fetched_by": "shizukudos/win64/webkit/build.py",
-      "patches": []
+      "patches": ["shizukudos/win64/webkit/patches/0001-mingw-clang-portability.patch"]
     },
     "icu": {
       "repository": "https://github.com/unicode-org/icu.git",
