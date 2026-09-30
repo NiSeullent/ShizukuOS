@@ -61,6 +61,8 @@ static int32_t map_image(const uint8_t *file, uint64_t size, const pe_info_t *pi
         pe_get_section(file, pi, i, &s);
         vlen = ((s.vsize ? s.vsize : s.raw_size) + 4095ull) & ~4095ull;
         if (!vlen) continue;
+        if ((uint64_t)s.rva + vlen > ((pi->size_of_image + 4095ull) & ~4095ull))
+            return STATUS_INVALID_IMAGE_FORMAT;        /* a section (VirtualSize 0: its raw size) must fit the image slice */
         raw = s.raw_size < (s.vsize ? s.vsize : s.raw_size) ? s.raw_size : (s.vsize ? s.vsize : s.raw_size);
         for (off = 0; off < vlen; off += PAGE_SIZE) {
             pa = pmm_alloc();
@@ -73,6 +75,13 @@ static int32_t map_image(const uint8_t *file, uint64_t size, const pe_info_t *pi
             }
         }
     }
+    /* Every page of the image has to exist: relocation targets, IAT slots and export tables are only checked against
+     * SizeOfImage, and a gap between sections or the tail past the last section must read as zero, not fault. */
+    for (off = 0; off < ((pi->size_of_image + 4095ull) & ~4095ull); off += PAGE_SIZE)
+        if (!vm_lookup(kernel_pml4(), base + off, 0)) {
+            pa = pmm_alloc();
+            if (!pa || vm_map(kernel_pml4(), base + off, pa, PT_W | PT_NX)) return STATUS_NO_MEMORY;
+        }
     return STATUS_SUCCESS;
 }
 
@@ -154,32 +163,63 @@ struct ictx {
     uint64_t base;
     unsigned unresolved;
     const char *service;
-    ntdrv_driver_t *deps[8];            /* modules resolved against so far */
+    ntdrv_driver_t *deps[16];           /* modules resolved against so far */
     unsigned ndeps;
-    char missing[4][32];                /* imported modules that could not be loaded (reported once each) */
+    char missing[8][64];                /* imported modules that could not be loaded (reported once, never retried) */
     unsigned nmissing;
 };
 
 /* The module an import names: a kernel module (NULL, resolved from the provider tables), an already loaded image, or
  * \SHZ\SYS64\DRIVERS\<dll> loaded now on this image's behalf (the way a boot-start dependency is present on
  * Windows before the drivers that import it). */
+/* Images currently being loaded (a stack, innermost last): an import cycle (A imports B imports A) or a runaway chain
+ * is refused instead of recursing until the 32 KiB kernel stack is gone. */
+#define NTDRV_MAX_LOAD_DEPTH 6
+static const char *loading[NTDRV_MAX_LOAD_DEPTH];
+static unsigned nloading;
+
+static void note_missing(struct ictx *x, const char *key)
+{
+    unsigned i;
+    if (x->nmissing >= 8) return;
+    for (i = 0; key[i] && i + 1 < sizeof x->missing[0]; ++i) x->missing[x->nmissing][i] = key[i];
+    x->missing[x->nmissing][i] = 0;
+    ++x->nmissing;
+}
+
 static ntdrv_driver_t *dep_module(struct ictx *x, const char *dll, int *missing)
 {
     ntdrv_driver_t *m;
     unsigned i;
-    char path[96] = "\\SHZ\\SYS64\\DRIVERS\\", svc[64];
+    char path[96] = "\\SHZ\\SYS64\\DRIVERS\\", svc[64], key[64];
     fsnode_t *n;
     int32_t st;
     *missing = 0;
+    for (i = 0; dll[i] && i + 1 < sizeof key; ++i) key[i] = dll[i];          /* the cache compares the same truncation it stores */
+    key[i] = 0;
     for (i = 0; i < x->ndeps; ++i)
         if (ntdrv_find_module(dll) == x->deps[i]) return x->deps[i];
     for (i = 0; i < x->nmissing; ++i)
-        if (ci_eq(x->missing[i], dll)) { *missing = 1; return 0; }
+        if (ci_eq(x->missing[i], key)) { *missing = 1; return 0; }
+    if (x->nmissing >= 8) { *missing = 1; return 0; }                      /* cache full: fail without loading again */
+    module_service(dll, svc, sizeof svc);
+    for (i = 0; i < nloading; ++i)
+        if (ci_eq(loading[i], svc)) {
+            kprintf("K64 ntdrv: %s imports %s, which is being loaded (import cycle): refused\n", x->service, dll);
+            note_missing(x, key);
+            *missing = 1;
+            return 0;
+        }
     m = ntdrv_find_module(dll);
     if (!m) {
         ntdrv_driver_t *saved = ntdrv_current_driver();
+        if (nloading >= NTDRV_MAX_LOAD_DEPTH - 1) {
+            kprintf("K64 ntdrv: %s imports %s: dependency chain deeper than %u: refused\n", x->service, dll, NTDRV_MAX_LOAD_DEPTH - 1);
+            note_missing(x, key);
+            *missing = 1;
+            return 0;
+        }
         { unsigned k = strlen(path); for (i = 0; dll[i] && k + 1 < sizeof path; ++i) path[k++] = dll[i]; path[k] = 0; }
-        module_service(dll, svc, sizeof svc);
         n = fs_lookup(path);
         if (!n || n->is_dir) {
             kprintf("K64 ntdrv: %s imports %s, which is not in \\SHZ\\SYS64\\DRIVERS\n", x->service, dll);
@@ -194,17 +234,15 @@ static ntdrv_driver_t *dep_module(struct ictx *x, const char *dll, int *missing)
                 m->dependency = 1;
             }
         }
-        if (!m) {
-            if (x->nmissing < 4) {
-                for (i = 0; dll[i] && i + 1 < sizeof x->missing[0]; ++i) x->missing[x->nmissing][i] = dll[i];
-                x->missing[x->nmissing][i] = 0;
-                ++x->nmissing;
-            }
-            *missing = 1;
-            return 0;
-        }
+        if (!m) { note_missing(x, key); *missing = 1; return 0; }
     }
-    if (x->ndeps < 8) { x->deps[x->ndeps++] = m; ++m->users; }
+    if (x->ndeps >= 16) {                       /* never bind an export of a module that is not reference-counted */
+        kprintf("K64 ntdrv: %s imports from more than 16 modules: refused\n", x->service);
+        *missing = 1;
+        return 0;
+    }
+    x->deps[x->ndeps++] = m;
+    ++m->users;
     return m;
 }
 
@@ -256,7 +294,7 @@ static void build_regpath(ntdrv_driver_t *d, const char *service)
     d->regpath.MaximumLength = (uint16_t)(n * 2 + 2);
 }
 
-int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *service, ntdrv_driver_t **out)
+static int32_t load_image_impl(const uint8_t *image, uint64_t size, const char *service, ntdrv_driver_t **out)
 {
     pe_info_t pi;
     int rc = pe_parse(image, size, &pi);
@@ -338,7 +376,7 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
     kprintf("K64 ntdrv: %s mapped at %llx (%u bytes), calling DriverEntry\n", service, base, pi.size_of_image);
     st = entry(drv, &d->regpath);
     ntdrv_set_current_driver(0);
-    if (st) {
+    if (st < 0) {                                             /* NT_SUCCESS: informational and success codes both mean loaded */
         kprintf("K64 ntdrv: %s DriverEntry returned %x\n", service, (uint32_t)st);
         /* leave the record so ntdrv_unload can reclaim VA/pages; mark not started */
         d->started = 0;
@@ -351,6 +389,16 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
     d->started = 1;
     if (out) *out = d;
     return STATUS_SUCCESS;
+}
+
+int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *service, ntdrv_driver_t **out)
+{
+    int32_t st;
+    if (nloading >= NTDRV_MAX_LOAD_DEPTH) return STATUS_INVALID_IMAGE_FORMAT;
+    loading[nloading++] = service;
+    st = load_image_impl(image, size, service, out);
+    --nloading;
+    return st;
 }
 
 ntdrv_driver_t *ntdrv_find_driver(const char *service)
@@ -392,6 +440,10 @@ int32_t ntdrv_load_node(fsnode_t *n, const char *service, ntdrv_driver_t **out)
 int32_t ntdrv_unload(ntdrv_driver_t *d)
 {
     if (!d) return STATUS_INVALID_PARAMETER;
+    if (d->started) {                                         /* devices go first (QUERY_REMOVE/REMOVE), then the driver */
+        const int32_t rs = ntdrv_pnp_remove_devices(d);
+        if (rs) return rs;
+    }
     if (d->started && d->drv->DriverUnload) {
         ntdrv_set_current_driver(d);
         d->drv->DriverUnload(d->drv);
@@ -419,6 +471,15 @@ int32_t ntdrv_unload_service(const char *service)
     if (!d->drv->DriverUnload) {
         kprintf("K64 ntdrv: %s has no DriverUnload routine; it stays loaded\n", d->name);
         return STATUS_INVALID_DEVICE_REQUEST;
+    }
+    {   /* a device with a user handle open on it is referenced (ReferenceCount > 1, set by IoCreateDevice to 1): freeing it
+         * would leave the handle pointing at freed memory, so the driver stays loaded until the handles are closed */
+        DEVICE_OBJECT *dv;
+        for (dv = d->drv->DeviceObject; dv; dv = dv->NextDevice)
+            if (dv->ReferenceCount > 1) {
+                kprintf("K64 ntdrv: %s has a device object with %d open handle(s); not unloaded\n", d->name, (int)dv->ReferenceCount - 1);
+                return STATUS_CONNECTION_IN_USE;
+            }
     }
     kprintf("K64 ntdrv: unloading %s\n", d->name);
     return ntdrv_unload(d);

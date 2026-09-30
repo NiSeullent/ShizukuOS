@@ -21,6 +21,7 @@
 | 기존 UEFI x64 부팅, UEFI→32비트 PM 핸드오프 | GUEST_RUN (**TCG**) | PASS |
 | NT 드라이버 호스트: 미수정 x64 `.sys` 3개 로드+DriverEntry, IRP/DPC/타이머/스레드, PCI(edu) BAR/IRQ(공유 INTx 체인)+`pci_claim ntdrv:shzpci`, 사용자 모드 NtLoadDriver→IOCTL (`run_k64_ntdrv.py`) | GUEST_RUN (**TCG**) | PASS 10/10 (provider export 185) |
 | 드라이버 import 커버리지 (`import_coverage.py --ntoskrnl`) | HOST_TESTED | 시험 드라이버 3개 25/25; N2 ReactOS 코퍼스 23개 중 로드 가능 1개(null.sys), ntoskrnl 103/313 |
+| 드라이버 패키지 설치+실행 (N3): `shzpnp add-driver --install` → `shzpnp load` → NtLoadDriver → DriverEntry → Enum 바인딩 PCI 기능 `pci_claim ntdrv:<service>` → AddDevice + IRP_MN_START_DEVICE. 미수정 ECHO.SYS(`T_DRV_LOAD.EXE`, 기본 이미지)와 미수정 ReactOS e1000 NDIS 5 미니포트 + ReactOS ndis.sys(QEMU `-device e1000`, `run_k64_pnp.py`, `T_DRV_PNP.EXE`): MiniportInitialize가 NIC를 초기화하고 START IRP가 STATUS_SUCCESS | GUEST_RUN (**TCG**) | PASS (T_DRV_LOAD 38/38, T_DRV_PNP 24/24; provider export 225). 프로토콜은 바인딩되지 않아 패킷은 오가지 않음 |
 
 `win98-regression`의 BLOCKED는 설치된 Windows 98 체크포인트(`build/win98-lab`, 사용자 제공 자산) 부재,
 SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행하지 않음)이다. Notepad++ 성공/실패를 이 문서는 단정하지 않는다.
@@ -34,6 +35,17 @@ DLL마다 첫 export를 `GetProcAddress`로 해석한다(러너가 패킹된 DLL
 이 화면을 만들며 고친 결함: `NtQueryDirectoryFile`의 FileName 오프셋이 커널 96·kernel32 92로 어긋나 `FindFirstFileW`가
 아무 파일도 찾지 못했다(→ Windows 오프셋, 클래스 1/2/3/12/37/38). `GlobalMemoryStatusEx`가 쓰는 정보 클래스 0x100이 커널에
 없어 물리 메모리가 0이었다. 아직 이 화면에 없는 것: Chromium·Electron, NT 커널 드라이버 호스트, Windows 98 본체.
+
+### 1c. 드라이버 패키지 설치 → 실행 (N3, `docs/shizukudos10/DRIVER_INSTALL.md`, `reports/N3.md`)
+
+`shzpnp load <service>`가 실제로 드라이버를 올린다: 서비스 키(ImagePath/Start/Type)를 읽고 NtLoadDriver로 NT 드라이버 호스트가
+이미지를 매핑·재배치·import 해석(다른 모듈에서 import하면 `\SHZ\SYS64\DRIVERS\<dll>`을 먼저 로드)·DriverEntry 실행, Enum에 이
+서비스로 바인딩된 PCI 기능을 `ntdrv:<service>`로 claim(상태 화면의 PCI 표, `NtQuerySystemInformation` 0x101), AddDevice가 있으면
+PDO를 만들어 AddDevice와 IRP_MN_START_DEVICE(BAR·IRQ 자원)를 보낸다. `shzpnp unload`(DriverUnload, claim 해제)와 `shzpnp status`
+(로드된 이미지·디바이스 객체·PCI 기능)를 추가. 검증: 기본 이미지의 `T_DRV_LOAD.EXE`(ECHO.SYS 패키지 설치→로드→IOCTL→오류 경로→언로드→재로드,
+38/38)와 `run_k64_pnp.py`(ReactOS e1000 + ndis.sys, QEMU e1000: START IRP 성공 = MiniportInitialize가 NIC를 초기화, 24/24), 모두 TCG
+GUEST_RUN. x64 드라이버는 IRQL을 CR8에 직접 쓰므로(DDK 인라인) 호스트의 IRQL도 CR8이 되었고 스케줄러 틱이 CR8≥2에서 선점하지 않는다.
+못 한 것: NDIS 프로토콜(TCP/IP)이 없어 패킷은 오가지 않음, NDIS 6/KMDF/StorPort/WDDM 없음, 코퍼스 e1000 INF는 `--legacy`로만 설치.
 
 ## 2. 이번 세션에서 고친 결함 (원인 → 수정)
 
@@ -351,6 +363,10 @@ lead로 옮겼다(검증 트리 해시 = lead 트리 해시). 모두 QEMU TCG, G
 | 난수 | 커널 엔트로피 풀 + ChaCha20 CSPRNG(`NtShzRandom`), RDRAND 없는 CPU에서도 동작 | 부팅 KAT, qemu64(무 RDRAND)에서 T_WP_CRYPT32 PASS |
 
 Chromium 157 시작 체인(정적 분석, `startup_chain.py`): 적재 시 import 1,346개 중 해결 안 된 것 64개(4.8%, 모두 kernel32).
+K5 브랜치(`wip/k5-chromium-dlls`, 측정: `startup_chain.py --delay`, 스냅샷 1706750): `chrome.exe` 체인은 적재 시 598개 중 미해결 0,
+지연 로드 미해결 0(K3 기준 30). `chrome.dll` 체인은 적재 시 1,471개 중 미해결 0, 지연 로드 772개 중 미해결 157개(K3 기준 275). 게스트
+실행은 지연 로드 체인을 모두 통과해 브라우저 시작 단계(`chrome_browser_main_win`)까지 갔고 `base::expected` CHECK에서 멈춘다(60.4초,
+원인 미확인). 자세한 내용: `reports/K5.md`.
 **Chromium은 아직 게스트에서 실행되지 않았다.** NT 드라이버 호스트(N1), IPC/프로세스 회수(P-ipc), 하이브리드 설치 ISO(C3)는
 lead 병합 작업 중이다.
 

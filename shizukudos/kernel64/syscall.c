@@ -141,6 +141,70 @@ int __attribute__((weak)) ipc_syscall_override(process_t *p, struct regs *r, uin
     return 0;
 }
 
+/* `shz.systrace` on the kernel command line (tests/run_k64_chromium.py passes it): every system call that returns an error status
+ * (severity bits 11) is recorded. The first SYSTRACE_PER_PAIR occurrences of each (call, status) pair are printed as they happen;
+ * all of them enter a ring of the last SYSTRACE_RING failures that k64_systrace_dump() prints (exc.c calls it at the first
+ * breakpoint exception of a process, which is where Chromium's CHECK/NOTREACHED end up), so the failing call that led to a
+ * fatal check is visible even when the same pair was printed earlier. Nothing changes without the flag. */
+#define SYSTRACE_PER_PAIR 3
+#define SYSTRACE_RING 48
+#define SYSTRACE_PAIRS 256
+static struct { uint32_t num, st, pid; uint64_t tid, a1, a2; } systrace_ring[SYSTRACE_RING];
+static unsigned systrace_head, systrace_total;
+static struct { uint32_t num, st, count; } systrace_pairs[SYSTRACE_PAIRS];
+static int systrace_on = -1;
+
+static const char *syscall_name(uint32_t num)
+{
+    static const struct { const char *name; uint32_t num; } tbl[] = {
+#define X(n, v) { #n, v },
+        SYSCALL_LIST(X) SYSCALL_LIST_REGISTRY(X) SYSCALL_LIST_GRAPHICS(X) SYSCALL_LIST_NET(X) SYSCALL_LIST_K32(X) SYSCALL_LIST_MISC(X)
+        SYSCALL_LIST_GPU(X) SYSCALL_LIST_SETUP(X) SYSCALL_LIST_BLK(X) SYSCALL_LIST_NTDRV(X) SYSCALL_LIST_IPC_MISC(X) SYSCALL_LIST_IPC(X)
+#undef X
+    };
+    unsigned i;
+    for (i = 0; i < sizeof tbl / sizeof tbl[0]; ++i) if (tbl[i].num == num) return tbl[i].name;
+    return "?";
+}
+
+static void systrace_record(process_t *p, uint32_t num, int32_t st, uint64_t a1, uint64_t a2)
+{
+    unsigned i, slot = SYSTRACE_PAIRS;
+    uint32_t seen = 0;
+    const uint64_t f = irq_save();
+    for (i = 0; i < SYSTRACE_PAIRS; ++i) {
+        if (systrace_pairs[i].count && systrace_pairs[i].num == num && systrace_pairs[i].st == (uint32_t)st) { slot = i; break; }
+        if (!systrace_pairs[i].count && slot == SYSTRACE_PAIRS) slot = i;
+    }
+    if (slot < SYSTRACE_PAIRS) {
+        if (!systrace_pairs[slot].count) { systrace_pairs[slot].num = num; systrace_pairs[slot].st = (uint32_t)st; }
+        seen = systrace_pairs[slot].count++;
+    }
+    {
+        const unsigned at = systrace_head++ % SYSTRACE_RING;
+        systrace_ring[at].num = num; systrace_ring[at].st = (uint32_t)st; systrace_ring[at].pid = (uint32_t)p->pid;
+        systrace_ring[at].tid = thread_current()->tid; systrace_ring[at].a1 = a1; systrace_ring[at].a2 = a2;
+        ++systrace_total;
+    }
+    irq_restore(f);
+    if (seen < SYSTRACE_PER_PAIR)
+        kprintf("K64 systrace: pid %d tid %llu %s(%x) -> %x a1=%llx a2=%llx\n", p->pid, thread_current()->tid, syscall_name(num), num,
+                (uint32_t)st, a1, a2);
+}
+
+/* The ring, oldest first (called with the process stopped at a breakpoint; exc.c). */
+void k64_systrace_dump(void)
+{
+    unsigned n = systrace_total < SYSTRACE_RING ? systrace_total : SYSTRACE_RING, i;
+    if (systrace_on != 1) return;
+    kprintf("K64 systrace: last %u failing system calls of %u, oldest first\n", n, systrace_total);
+    for (i = 0; i < n; ++i) {
+        const unsigned at = (systrace_head - n + i) % SYSTRACE_RING;
+        kprintf("K64 systrace:   pid %u tid %llu %s(%x) -> %x a1=%llx a2=%llx\n", systrace_ring[at].pid, systrace_ring[at].tid,
+                syscall_name(systrace_ring[at].num), systrace_ring[at].num, systrace_ring[at].st, systrace_ring[at].a1, systrace_ring[at].a2);
+    }
+}
+
 int syscall_dispatch(struct regs *r)
 {
     process_t *p = current_process();
@@ -199,6 +263,8 @@ done:
         return 1;
     }
     r->rax = (uint64_t)(int64_t)st;
+    if (systrace_on < 0) systrace_on = k64_cmdline_has("shz.systrace");
+    if (systrace_on > 0 && ((uint32_t)st >> 30) == 3u) systrace_record(p, num, st, a1, a2);
     check_kill();
     return 0;
 }
