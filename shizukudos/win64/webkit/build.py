@@ -176,7 +176,7 @@ def configure_jsc(tree, icu, config, compat, log):
            "-DUSE_SYSTEM_UNIFDEF=ON", "-DENABLE_API_TESTS=OFF", "-DENABLE_REMOTE_INSPECTOR=OFF", "-DENABLE_TOOLS=OFF",
            f"-DICU_ROOT={icu}", f"-DCMAKE_C_FLAGS={cflags}", f"-DCMAKE_CXX_FLAGS={cflags}",
            f"-DCMAKE_CXX_STANDARD_LIBRARIES={extra} -lucrtbase", f"-DCMAKE_C_STANDARD_LIBRARIES={extra} -lucrtbase",
-           "-DCMAKE_EXE_LINKER_FLAGS=-static", *CONFIGS[config]]
+           *CONFIGS[config]]
     run(cmd, timeout=900)
     log["cmake"] = [str(x) for x in cmd]
     return bdir
