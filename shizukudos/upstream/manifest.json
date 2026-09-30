@@ -201,7 +201,8 @@
         "shizukudos/win64/wineport/patches/wine/0003-advapi32-crypt-register-default-csp-on-first-use.patch",
         "shizukudos/win64/wineport/patches/wine/0004-dwrite-static-freetype-and-font-registration.patch",
         "shizukudos/win64/wineport/patches/wine/0005-winecrt0-debug-options-from-registry.patch",
-        "shizukudos/win64/wineport/patches/wine/0006-wintrust-register-providers-on-first-use.patch"
+        "shizukudos/win64/wineport/patches/wine/0006-wintrust-register-providers-on-first-use.patch",
+        "shizukudos/win64/wineport/patches/wine/0007-dwmapi-no-compositor-explicit-failure.patch"
       ]
     },
     "freetype": {
