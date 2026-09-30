@@ -66,7 +66,8 @@ void bootini_defaults(bootini_policy_t *p)
         p->csm_path[i] = d[i];
     p->csm_path[i] = 0;
     p->auto_kernel64 = 0;
-    p->mode_set = p->csm_path_set = p->auto_kernel64_set = 0;
+    p->menu_timeout = 0;
+    p->mode_set = p->csm_path_set = p->auto_kernel64_set = p->menu_timeout_set = 0;
 }
 
 const char *bootini_mode_name(int mode)
@@ -214,8 +215,18 @@ static int boot_entry(void *ctx, msg_t *m, int line, const char *key, size_t kle
         else
             return fail(m, line, "invalid auto_kernel64 ", val, vlen, " (expected yes or no)");
         p->auto_kernel64_set = 1;
+    } else if (word_is(key, klen, "menu_timeout")) {
+        int seconds = 0;
+        if (p->menu_timeout_set)
+            return fail(m, line, "duplicate key 'menu_timeout'", 0, 0, 0);
+        for (i = 0; i < vlen && i < 3 && val[i] >= '0' && val[i] <= '9'; ++i)
+            seconds = seconds * 10 + (val[i] - '0');
+        if (!vlen || i != vlen || seconds > BOOTINI_MENU_TIMEOUT_MAX)
+            return fail(m, line, "invalid menu_timeout ", val, vlen, " (expected whole seconds 0 to 30)");
+        p->menu_timeout = seconds;
+        p->menu_timeout_set = 1;
     } else {
-        return fail(m, line, "unknown key ", key, klen, " (allowed: mode, csm_path, auto_kernel64)");
+        return fail(m, line, "unknown key ", key, klen, " (allowed: mode, csm_path, auto_kernel64, menu_timeout)");
     }
     return 0;
 }

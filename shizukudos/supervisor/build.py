@@ -149,7 +149,7 @@ def main():
     esp = build_esp(loader, disk)
     sources = sorted([p for p in SRC.rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")] +
                      [SHZ / "abi" / "shz_abi.h", REPO / "shizukudos/uefi/boot.c", REPO / "shizukudos/uefi/boot.h",
-                      REPO / "shizukudos/uefi/efi.h"])
+                      REPO / "shizukudos/uefi/efi.h", SHZ / "kernel64/standalone/memholes.h"])
     receipt = {
         "profile": "uefi-supervisor-vmx",
         "built_utc": shzlib.utc_now(),
