@@ -426,6 +426,8 @@
       "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: public_suffix_list.dat compiled into libpsl",
       "used_by": ["shizukudos/win64/webkit/deps"],
       "build": "shizukudos/win64/webkit/deps/build.py: data only (agent W3)",
+      "patches": []
+    },
     "webkit": {
       "repository": "https://github.com/WebKit/WebKit.git",
       "ref": "main",
