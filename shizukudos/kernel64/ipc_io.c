@@ -154,11 +154,17 @@ void irp_complete(irp_t *irp, int32_t status, uint64_t info)
     irq_restore(f);
 }
 
+/* Ends the issuing system call. An asynchronous request that was pended returns STATUS_PENDING even when it has already
+ * completed - another thread may have completed it between pend_on() and here - because its completion was reported
+ * the pended way (IO_STATUS_BLOCK, event, completion packet, APC), as with an NT driver that marked the IRP pending.
+ * Returning the final status here as well made the caller see a synchronous result *and* receive a packet: e.g. a
+ * ReadFile failing at once with ERROR_BROKEN_PIPE plus a completion packet for it, or a synchronous success on a
+ * FILE_SKIP_COMPLETION_PORT_ON_SUCCESS handle plus a packet - the same completion handled twice. */
 int32_t irp_finish(irp_t *irp)
 {
     uint64_t f = irq_save();
     int32_t st;
-    if (!irp->completed && !irp->sync) {
+    if (!irp->sync && (irp->pended || !irp->completed)) {
         irq_restore(f);
         irp_put(irp);                                   /* the queue keeps it until it completes */
         return STATUS_PENDING;

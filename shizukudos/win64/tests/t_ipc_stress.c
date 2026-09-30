@@ -83,6 +83,93 @@ static int child_worker(unsigned ppid, unsigned round, unsigned idx)
     return 0;
 }
 
+/* ---------------------------------------------------------------- close race
+ * One thread keeps an overlapped read pending on a pipe's server end (ReadFile, CancelIoEx, collect the packet) while a
+ * second, always runnable thread closes the client end at whatever point the scheduler gives it the processor. Each
+ * ReadFile must be reported exactly once: ERROR_IO_PENDING and then one completion packet, or an immediate failure
+ * (ERROR_BROKEN_PIPE once the client is gone) and no packet. A close landing after the kernel queued the read but
+ * before the system call returned used to produce both (the regression behind a stress failure: the parent counted a
+ * child's pipe as finished twice and abandoned another child). */
+static volatile LONG g_race_armed, g_race_closed, g_race_quit;
+static volatile HANDLE g_race_client;
+
+static DWORD WINAPI race_closer(LPVOID p)
+{
+    (void)p;
+    while (!g_race_quit) {
+        if (g_race_armed && InterlockedExchange(&g_race_armed, 0)) {
+            CloseHandle(g_race_client);
+            g_race_closed = 1;
+        }
+        YieldProcessor();
+    }
+    return 0;
+}
+
+static void close_race(unsigned budget_ms)
+{
+    WCHAR name[96];
+    char a[96];
+    HANDLE closer, port;
+    DWORD t0 = GetTickCount();
+    unsigned iters = 0, pending = 0, packets = 0, immediate = 0, extra = 0, missing = 0, broken_by_packet = 0;
+    snprintf(a, sizeof a, "\\\\.\\pipe\\ipcstress_race_%u", (unsigned)GetCurrentProcessId());
+    wcopy(name, a);
+    port = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
+    closer = CreateThread(0, 0, race_closer, 0, 0, 0);
+    if (!port || !closer) { CHECK(0, "close race: port and closer thread"); return; }
+    while (GetTickCount() - t0 < budget_ms) {
+        HANDLE srv = CreateNamedPipeW(name, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, PIPE_TYPE_BYTE | PIPE_WAIT, 1, 4096, 4096, 0, 0);
+        HANDLE cli;
+        OVERLAPPED ov;
+        char buf[16];
+        DWORD n;
+        ULONG_PTR key;
+        LPOVERLAPPED got;
+        unsigned mine_pending = 0, mine_packets = 0;
+        if (srv == INVALID_HANDLE_VALUE || CreateIoCompletionPort(srv, port, 1, 0) != port) { CHECK(0, "close race: pipe"); break; }
+        cli = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
+        if (cli == INVALID_HANDLE_VALUE) { CHECK(0, "close race: client"); CloseHandle(srv); break; }
+        g_race_client = cli;
+        g_race_closed = 0;
+        g_race_armed = 1;
+        for (;;) {                                              /* until the closer has run and a read failed at once */
+            memset(&ov, 0, sizeof ov);
+            if (ReadFile(srv, buf, sizeof buf, 0, &ov)) { ++mine_pending; }     /* completed at once: a packet comes */
+            else if (GetLastError() == ERROR_IO_PENDING) {
+                ++mine_pending;
+                CancelIoEx(srv, &ov);
+            } else {
+                ++immediate;                                    /* failed at once: no packet may follow */
+                break;
+            }
+            {
+                const BOOL okq = GetQueuedCompletionStatus(port, &n, &key, &got, 5000);
+                if (!okq && !got) break;                        /* no packet within 5 s: counted as missing below */
+                ++mine_packets;
+                if (!okq && GetLastError() == ERROR_BROKEN_PIPE) ++broken_by_packet;
+            }
+        }
+        while (!g_race_closed) Sleep(0);
+        while (GetQueuedCompletionStatus(port, &n, &key, &got, mine_packets < mine_pending ? 2000 : 0) || got)
+            ++mine_packets;                                     /* anything left over is a second report (posted by the
+                                                                   close, before g_race_closed was set) */
+        if (mine_packets > mine_pending) extra += mine_packets - mine_pending;
+        if (mine_packets < mine_pending) missing += mine_pending - mine_packets;
+        pending += mine_pending; packets += mine_packets;
+        CloseHandle(srv);
+        ++iters;
+    }
+    g_race_quit = 1;
+    WaitForSingleObject(closer, 5000);
+    CloseHandle(closer);
+    CloseHandle(port);
+    printf("  close race: %u connections, %u reads pended or completed (%u packets, %u of them ERROR_BROKEN_PIPE), %u failed at once\n",
+           iters, pending, packets, broken_by_packet, immediate);
+    CHECK(iters >= 50, "close race: %u connections closed under a pending overlapped read", iters);
+    CHECK(!extra && !missing, "close race: every ReadFile reported once (%u second completions, %u missing)", extra, missing);
+}
+
 /* ---------------------------------------------------------------- parent */
 typedef struct {
     HANDLE pipe, proc;
@@ -111,7 +198,7 @@ static int run_round(unsigned round, unsigned *served)
     WCHAR pname[96], sname[64];
     HANDLE map, port;
     slot_t *slots;
-    unsigned i, active = 0, hangs = 0, bad_msgs = 0, bad_order = 0;
+    unsigned i, active = 0, hangs = 0, bad_msgs = 0, bad_order = 0, late = 0;
     const unsigned ppid = (unsigned)GetCurrentProcessId();
     const int bad0 = g_bad;
     char args[64];
@@ -156,6 +243,7 @@ static int run_round(unsigned round, unsigned *served)
         }
         if (key >= NCHILD) { ++bad_msgs; continue; }
         c = &peers[key];
+        if (c->done) { ++late; continue; }                      /* a request that already ended completed again */
         if (ov == &c->ov_conn) {
             if (!ok) { c->done = 1; --active; continue; }
             if (!start_read(c)) { c->done = 1; --active; }
@@ -191,6 +279,7 @@ static int run_round(unsigned round, unsigned *served)
         }
     }
     CHECK(!hangs, "round %u: every completion arrived within 15 s", round);
+    CHECK(!late, "round %u: no completion packet for a request that had already ended (%u)", round, late);
     CHECK(!bad_msgs && !bad_order, "round %u: requests intact and in order (%u bad, %u out of order)", round, bad_msgs, bad_order);
     for (i = 0; i < NCHILD; ++i) {
         peer_t *c = &peers[i];
@@ -226,6 +315,7 @@ int main(int argc, char **argv)
     printf("T_IPC_STRESS: %d rounds of %d children over pipes + a completion port + a section, one killed per round\n",
            ROUNDS, NCHILD);
     have0 = kstats(&k0);
+    close_race(3000);
     t0 = GetTickCount();
     for (r = 0; r < ROUNDS; ++r) round_bad += run_round(r, &served);
     printf("  %u requests served in %u ms\n", served, (unsigned)(GetTickCount() - t0));
