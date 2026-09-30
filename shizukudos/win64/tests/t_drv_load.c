@@ -131,11 +131,13 @@ int main(void)
     if (n <= 0) return finish_tests("t_drv_load");
     CHECK(write_file(PKG "\\echo.sys", img, (DWORD)n), "package binary written");
 
-    /* the target: the last PCI function of the Kernel64 bus scan that no kernel driver drives and that is not the
-     * display (T_GUI_STATUS checks the display's own binding); a hand-given device when the scan is unavailable */
+    /* the target: a PCI function of the Kernel64 bus scan that no kernel driver drives and that is neither the
+     * display (T_GUI_STATUS checks the display's own binding) nor a storage or network controller (T_DRV_PNP installs
+     * the real e1000 driver on the NIC in run_k64_pnp.py/run_k64_gui.py --pnp); a bridge or the ISA/ACPI function of
+     * the chipset qualifies; a hand-given device when the scan is unavailable */
     if (NtQuerySystemInformation(0x101, rows, sizeof rows, &nrows) == 0)
         for (i = 0; i < (int)nrows && i < 32; ++i)
-            if (!rows[i].driver[0] && rows[i].cls != 3) pick = i;
+            if (!rows[i].driver[0] && rows[i].cls != 3 && rows[i].cls != 2 && rows[i].cls != 1) pick = i;
     if (pick >= 0) {
         bus = rows[pick].bus; dev = rows[pick].dev; fn = rows[pick].fn;
         vendor = rows[pick].vendor; device = rows[pick].device;

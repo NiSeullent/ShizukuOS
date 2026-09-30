@@ -299,7 +299,7 @@ def build_ntdrv_host():
 
 def build_ntdrv_app(module_libs, name="t_ntdrv"):
     """win64/ntdrv/<name>.c: a driver-host test program that is not packed into WIN64.IMG (t_ntdrv -> WIN64_NTDRV.IMG;
-    t_pnp_load -> the initrd tests/run_k64_pnp.py composes with the corpus driver store)."""
+    t_drv_pnp -> the initrd tests/run_k64_pnp.py composes with the corpus driver store)."""
     crt = W64 / "crt"
     src = W64 / "ntdrv" / f"{name}.c"
     exe = OUT / f"{name}.exe"
@@ -377,7 +377,7 @@ def main():
     # tests/run_k64_ntdrv.py mounts the driver-store image.
     ntdir, drivers, nt_exports = build_ntdrv_host()
     ntapp = build_ntdrv_app(sorted(modules))
-    pnpapp = build_ntdrv_app(sorted(modules), "t_pnp_load")
+    pnpapp = build_ntdrv_app(sorted(modules), "t_drv_pnp")
     files.append(("\\SHZ\\TESTS\\ECHO.SYS", drivers["echo"].read_bytes()))
     img = OUT / "WIN64.IMG"
     img.write_bytes(pack_archive(files))
@@ -414,7 +414,7 @@ def main():
                       "WIN64.IMG": sha256_file(img),
                       "ntdrv": {"providers": len(nt_exports["ntoskrnl.exe"]) + len(nt_exports["hal.dll"]),
                                 "drivers": sorted(drivers), "WIN64_NTDRV.IMG": sha256_file(ntimg),
-                                "T_PNP_LOAD.EXE": sha256_file(pnpapp)}}, indent=2))
+                                "T_DRV_PNP.EXE": sha256_file(pnpapp)}}, indent=2))
 
 
 if __name__ == "__main__":

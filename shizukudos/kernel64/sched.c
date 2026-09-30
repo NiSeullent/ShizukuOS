@@ -142,6 +142,13 @@ void sched_tick(void)
             threads[i].wait_result = threads[i].wait_result ? threads[i].wait_result : 0x102;   /* STATUS_TIMEOUT marker */
         }
     sched_check_timeouts(jiffies);
+    {   /* IRQL >= DISPATCH_LEVEL (CR8, written by a hosted NT driver through the DDK's inline KfRaiseIrql, or by the
+         * driver host's own KeRaiseIrql) means "no dispatching": the tick still counts and wakes sleepers, but the
+         * running thread is not preempted until it lowers IRQL (kernel64/ntdrv_ke.c). */
+        uint64_t cr8;
+        __asm__ volatile("mov %%cr8, %0" : "=r"(cr8));
+        if (cr8 >= 2) return;
+    }
     schedule();
 }
 

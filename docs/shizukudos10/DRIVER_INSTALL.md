@@ -12,8 +12,10 @@ from ReactOS sources (see [DRIVER_CORPUS.md](DRIVER_CORPUS.md)) and synthetic IN
 | `inf.py` | `shizukudos/ntdrv/inf.py` | reference implementation of the INF rules (host, Python) |
 | `store.py` | `shizukudos/ntdrv/store.py` | builds the media driver store `\DRIVERS\<package>\` + index (host) |
 | `shzinf.c` | `shizukudos/win64/apps/shzpnp/` | the same INF rules in portable C, used by `shzpnp` |
-| `shzpnp` | `\SHZ\SYS64\SHZPNP.EXE` | Win64 CLI in the running system: add-driver, enum, match, load |
+| `shzpnp` | `\SHZ\SYS64\SHZPNP.EXE` | Win64 CLI in the running system: add-driver, enum, match, load, unload, status |
 | `T_SHZPNP.EXE` | `shizukudos/win64/tests/t_shzpnp.c` | runs `shzpnp` on Kernel64 and checks the files and registry it changed |
+| `T_DRV_LOAD.EXE` | `shizukudos/win64/tests/t_drv_load.c` | packages, installs, loads, reaches, unloads and reloads the ECHO.SYS test driver through `shzpnp` |
+| `T_DRV_PNP.EXE` + `run_k64_pnp.py` | `shizukudos/win64/ntdrv/t_drv_pnp.c`, `shizukudos/tests/run_k64_pnp.py` | the ReactOS e1000 package on QEMU's e1000, end to end |
 
 `shizukudos/ntdrv/tests/test_shzpnp.py` compiles `shzinf.c` for the host and compares it with `inf.py`, line for line,
 on the synthetic INFs and on every INF of the ReactOS and virtio-win trees (136 files; 570 comparisons, all
@@ -99,6 +101,8 @@ shzpnp add-driver <inf> [--install] [--device <id>]... [--legacy]
 shzpnp enum [--log <file>]
 shzpnp match [<device>...] [--store <dir>] [--all] [--legacy]
 shzpnp load <service>
+shzpnp unload <service>
+shzpnp status [<service>]
 ```
 
 Devices are `VVVV:DDDD[:SSSSSSSS[:RR[:CCSSPP]]]` (hex, `-` for unknown), a `PCI\VEN_...` hardware ID, or a Kernel64
@@ -150,22 +154,86 @@ configuration ports trap); `enum --log <file>` lists the PCI functions a saved K
 all `enum` devices), Windows rules
 first and the undecorated fallback only when nothing else matches (`--legacy` ranks everything together).
 
-**load** calls `NtLoadDriver(\Registry\Machine\System\CurrentControlSet\Services\<service>)` when ntdll exports it
-(the NT driver host adds that system call, 0xe0). Without it the command prints `driver host not present` and exits
-3; `STATUS_INVALID_SYSTEM_SERVICE`/`STATUS_NOT_IMPLEMENTED` from the kernel are reported the same way. Exit codes:
-0 success, 1 failure, 2 usage or missing input, 3 driver host not present.
+For `Class=Net` packages, add-driver also produces what the Windows Net class installer (NetCfg) leaves in the
+registry and NDIS reads at `AddDevice`: in the software key `NetCfgInstanceId` (`{GUID}`, derived deterministically from
+the devnode instance path and the service), `Characteristics` and `BusType` from the DDInstall section, `ComponentId`,
+`Linkage\Export` = `\Device\{GUID}` and `Linkage\RootDevice` (REG_MULTI_SZ); in the service key `Linkage\{Bind,Export,Route}`;
+and `Control\Network\{Net class}\{GUID}\Connection`. No protocol is bound (`UpperBind` is not written: there is no
+TCP/IP stack on this side).
+
+**load** reads the service key (`Type`, `Start`, `ImagePath` and the file it resolves to under the service control
+manager's rules: `\SystemRoot\` and `%SystemRoot%` = `C:\SHZ`, absent = `SYS64\DRIVERS\<service>.sys`), refuses a
+non-kernel or disabled service and a missing image file with a message (exit 2), then calls
+`NtLoadDriver(\Registry\Machine\System\CurrentControlSet\Services\<service>)`. The NT driver host (NTDRV.md) maps the
+image, loads the modules it imports from other than `ntoskrnl.exe`/`hal.dll` (`\SHZ\SYS64\DRIVERS\<dll>`, e.g.
+`ndis.sys`) first, runs `DriverEntry`, claims every PCI function whose Enum devnode names the service
+(`ntdrv:<service>` in the kernel's claim registry, `NtQuerySystemInformation` class 0x101, the status screen's PCI
+table) and, when the driver registered `AddDevice`, starts it the way the PnP manager does (`AddDevice` with a PDO for the
+function, then `IRP_MN_START_DEVICE` with the function's BARs and interrupt line as its resources). The status is
+reported in words: loaded; already loaded (`STATUS_IMAGE_ALREADY_LOADED`); not an AMD64 PE32+ kernel image
+(`STATUS_INVALID_IMAGE_FORMAT`); unresolved imports (`STATUS_PROCEDURE_NOT_FOUND`: the kernel log names each missing
+export or module); image not found; or the driver's own `DriverEntry` status. Without the driver host the command prints
+`driver host not present` and exits 3. Exit codes: 0 success, 1 failure, 2 usage or missing input, 3 driver host not
+present. After a load the command prints the driver's status record.
+
+**unload** calls `NtUnloadDriver`: `DriverUnload` runs and the claims are released; a driver without `DriverUnload`
+stays loaded (`STATUS_INVALID_DEVICE_REQUEST`, as on Windows), and so does one another loaded image imports from
+(`STATUS_CONNECTION_IN_USE`).
+
+**status** `[<service>]` lists the images the driver host has loaded (`NtShzDriverQuery`): service, image window, the
+device objects each created (`\Device\...`) and the PCI functions bound to it; exit 1 when the service is not loaded.
 
 ## Verified
 
 * Host: `python3 shizukudos/ntdrv/tests/test_inf.py --corpus` (19 tests; all 130 ReactOS/virtio-win INFs parse),
   `python3 shizukudos/ntdrv/tests/test_store.py` (5 tests + the ReactOS corpus packages),
   `python3 shizukudos/ntdrv/tests/test_shzpnp.py` (C engine = Python reference on 136 INFs).
-* Guest: `T_SHZPNP.EXE` runs in the Kernel64 standalone test (`shizukudos/tests/run_k64_standalone.py`, QEMU TCG):
-  add-driver with `--device` on a synthetic package, then checks the copied file bytes, the published INF, the
-  service key values, the device, Device Parameters and software keys, REG_MULTI_SZ/REG_BINARY encodings, the
-  DriverDatabase record, the undecorated-INF refusal and `--legacy`, `enum`, `match` against an index, installing on
-  a function of the Kernel64 PCI scan without `--device` (an INF generated for the first function the scan reports),
-  and that `load` never succeeds on its non-driver payload (exit 3 today).
+* Guest, default image (`shizukudos/tests/run_k64_standalone.py --accel tcg`, QEMU TCG, `GUEST_RUN`):
+  * `T_SHZPNP.EXE`: add-driver with `--device` on a synthetic package, then checks the copied file bytes, the published
+    INF (found through its `DriverDatabase` record, whatever `oem<N>` number it got), the service key values, the device,
+    Device Parameters and software keys, REG_MULTI_SZ/REG_BINARY encodings, the undecorated-INF refusal and `--legacy`,
+    `enum`, `match` against an index, installing on a function of the Kernel64 PCI scan without `--device`, and that
+    `load` never succeeds on its non-driver payload (the host rejects it: `STATUS_INVALID_IMAGE_FORMAT`, exit 1). 35/35.
+  * `T_DRV_LOAD.EXE` (`shizukudos/win64/tests/t_drv_load.c`): the unmodified `ECHO.SYS` test driver (shipped as test
+    data `\SHZ\TESTS\ECHO.SYS`) packaged with a decorated INF for the last unclaimed non-display function of the PCI
+    scan; `add-driver --install` → `load shzecho` (the function reads `ntdrv:shzecho` in the claim registry;
+    `\\.\ShzEcho` opens and an IOCTL round-trips through the loaded driver) → `status` → a second `load` = already
+    loaded → the error paths without a kernel fault (no service key; missing image; a non-PE image; a copy of ECHO.SYS
+    whose import name `IoCreateDevice` was altered in the file: refused with `STATUS_PROCEDURE_NOT_FOUND`) → `unload`
+    (claim released, device gone) → `load` again, left loaded so the status screen (`k64-status.png`) shows the claim.
+    31/31.
+* Guest, a real package (`shizukudos/tests/run_k64_pnp.py --accel tcg`, QEMU `-device e1000`, `GUEST_RUN`): the
+  unmodified ReactOS e1000 NDIS 5 miniport package built by the corpus tooling (`shizukudos/ntdrv/corpus/build.py
+  --packages` → `build/shizukudos/ntdrv/packages/e1000`: `e1000.sys` + `nete1000.inf`, unchanged) is put on the medium
+  with `store.py add`, together with the corpus `ndis.sys` under `\SHZ\SYS64\DRIVERS` (the framework provider it
+  imports; on Windows an inbox boot-start driver). `T_DRV_PNP.EXE` (`shizukudos/win64/ntdrv/t_drv_pnp.c`) runs
+  `shzpnp match --store C:\DRIVERS`, `add-driver ... --install` (refused: the ReactOS INF is undecorated), `add-driver
+  C:\DRIVERS\e1000\nete1000.inf --legacy --install` (Services\e1000, the Enum devnode `PCI\VEN_8086&DEV_100E\B00D02F0`
+  with `Service=e1000` and `Driver={Net class}\0000`, the Net class installer's keys), `load e1000`, `status e1000`,
+  `status ndis`, `unload ndis` (refused: in use). Kernel log:
+
+  ```
+  K64 ntdrv: NtLoadDriver(e1000) -> C:\SHZ\SYS64\DRIVERS\e1000.sys
+  K64 ntdrv: e1000 imports ndis.sys: loading it first
+  K64 ntdrv: ndis mapped at ffffe00000010000 (106496 bytes), calling DriverEntry
+  K64 ntdrv: e1000 mapped at ffffe00000000000 (40960 bytes), calling DriverEntry
+  K64 ntdrv: e1000 owns PCI 0:2.0 (8086:100e)
+  K64 ntdrv: e1000 AddDevice(PCI 0:2.0) = 0
+  K64 ntdrv: PCI 0:2.0: BUS_INTERFACE_STANDARD handed to the function driver
+  K64 ntdrv: device interface \??\PCI#VEN_8086&DEV_100E#B00D02F0#{CAC88484-7515-4C03-82E6-71A87ABAC361} enabled
+  K64 ntdrv: e1000 IRP_MN_START_DEVICE(PCI 0:2.0) = 0 (started)
+  ```
+
+  `IRP_MN_START_DEVICE` succeeding means NDIS ran the miniport's `MiniportInitialize` on the NIC: e1000 read its PCI
+  configuration through the bus interface, took its port, memory and interrupt resources, mapped BAR0, allocated its
+  descriptor rings as DMA common buffers, reset the chip, read the permanent MAC address from the EEPROM, connected the
+  interrupt and enabled transmit/receive; NDIS then queried its OIDs (MAC options, current address, lookahead) and
+  enabled the `GUID_DEVINTERFACE_NET` interface. The guest program confirms `ntdrv:e1000` on the function
+  (`NtQuerySystemInformation` 0x101), the device object `\Device\{NetCfgInstanceId}` in the host's records, and opens it
+  from user mode (`IRP_MJ_CREATE` through NDIS). 24/24. No protocol is bound on top (there is no NDIS protocol driver or
+  TCP/IP stack on this side), so packets are not exchanged through it.
+* Screenshot: `python3 shizukudos/tests/run_k64_gui.py --accel tcg --png --pnp` (the e1000 package loaded before
+  T_GUI_STATUS runs) → `docs/shizukudos10/screenshots/k64-status-e1000.png`, the PCI table with `ntdrv:e1000`.
 
 ## Using it with a vendor package
 
@@ -175,8 +243,23 @@ On the host, with a package you have the right to use:
 python3 shizukudos/ntdrv/tests/test_inf.py --package /path/to/package      # what the INFs select on NTamd64 10.0.22631
 python3 shizukudos/ntdrv/store.py add /path/to/package --name MyNic        # into build/shizukudos/ntdrv/media/DRIVERS
 python3 shizukudos/ntdrv/store.py match 8086:15B8:06DB1028:10:020000       # which model a device gets
-python3 shizukudos/win64/tools/import_coverage.py /path/to/package --providers [--exports <driver-host export JSON>]
+python3 shizukudos/win64/tools/import_coverage.py /path/to/package --ntoskrnl build/shizukudos/win64/ntdrv
 ```
 
-and in ShizukuDOS: `shzpnp add-driver C:\DRIVERS\MyNic\<file>.inf --device <id>` then `shzpnp load <service>`. What
-`load` can do depends entirely on the NT driver host; see DRIVER_CORPUS.md for what a Windows 10 Intel package needs.
+The last line says which imports the driver host does not provide yet (the corpus e1000 needed 40 more exports than
+the host had; NTDRV.md lists what is there). Modules the package imports besides `ntoskrnl.exe`/`hal.dll` must be
+present as `\SHZ\SYS64\DRIVERS\<name>.sys` (the Windows inbox framework drivers — `ndis.sys`, `storport.sys`,
+`Wdf01000.sys`, ... — are not shipped here; the ReactOS-built ones are in the corpus).
+
+In ShizukuDOS:
+
+```
+shzpnp match --store C:\DRIVERS                       # rank the store against the bus
+shzpnp add-driver C:\DRIVERS\MyNic\<file>.inf --install    # or --device <id>; --legacy for undecorated INFs
+shzpnp load <service>                                 # DriverEntry, PCI claim, AddDevice + IRP_MN_START_DEVICE
+shzpnp status <service>                               # device objects and PCI functions
+```
+
+What runs after that depends on the driver's framework: WDM drivers and NDIS 5 miniports with the corpus `ndis.sys`
+have been taken through `MiniportInitialize`; KMDF, NDIS 6, StorPort with extended SRBs and WDDM are not provided
+(DRIVER_CORPUS.md says what each Windows 10 Intel family needs).

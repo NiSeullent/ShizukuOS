@@ -59,14 +59,17 @@ typedef struct {
         struct { uint32_t Data[3]; } DevicePrivate;
     } u;
 } CM_PARTIAL_RESOURCE_DESCRIPTOR;
-typedef struct { uint16_t Version, Revision; uint32_t Count; CM_PARTIAL_RESOURCE_DESCRIPTOR PartialDescriptors[1]; } CM_PARTIAL_RESOURCE_LIST;
+/* PartialDescriptors is declared [1] in wdm.h; here it is a flexible array so the compiler does not assume a single
+ * element when the host walks the list it built (GCC -O2 otherwise cuts such a loop to one iteration). */
+typedef struct { uint16_t Version, Revision; uint32_t Count; CM_PARTIAL_RESOURCE_DESCRIPTOR PartialDescriptors[]; } CM_PARTIAL_RESOURCE_LIST;
 typedef struct { uint32_t InterfaceType, BusNumber; CM_PARTIAL_RESOURCE_LIST PartialResourceList; } CM_FULL_RESOURCE_DESCRIPTOR;
 typedef struct { uint32_t Count; CM_FULL_RESOURCE_DESCRIPTOR List[1]; } CM_RESOURCE_LIST;
 #pragma pack(pop)
 _Static_assert(sizeof(CM_PARTIAL_RESOURCE_DESCRIPTOR) == 0x14, "cm desc");
 _Static_assert(offsetof(CM_PARTIAL_RESOURCE_DESCRIPTOR, u.Interrupt.Affinity) == 0xc, "cm affinity");
 _Static_assert(offsetof(CM_PARTIAL_RESOURCE_DESCRIPTOR, u.Memory.Length) == 0xc, "cm memlen");
-_Static_assert(sizeof(CM_RESOURCE_LIST) == 0x28 && offsetof(CM_FULL_RESOURCE_DESCRIPTOR, PartialResourceList) == 8 &&
+_Static_assert(sizeof(CM_RESOURCE_LIST) + sizeof(CM_PARTIAL_RESOURCE_DESCRIPTOR) == 0x28 &&      /* wdm.h's sizeof, one descriptor */
+               offsetof(CM_FULL_RESOURCE_DESCRIPTOR, PartialResourceList) == 8 &&
                offsetof(CM_PARTIAL_RESOURCE_LIST, PartialDescriptors) == 8, "cm list");
 #define CmResourceTypePort 1
 #define CmResourceTypeInterrupt 2
@@ -215,9 +218,6 @@ static unsigned pci_resources(const pci_dev_t *d, CM_PARTIAL_RESOURCE_DESCRIPTOR
 {
     unsigned n = 0, b;
     uint8_t line;
-    kprintf("K64 ntdrv: PCI %x:%x.%x config: hdr %x bars %x %x %x %x %x %x irq %x\n", d->bus, d->dev, d->fn,
-            pci_cfg_read32(d, 0x0c), pci_cfg_read32(d, 0x10), pci_cfg_read32(d, 0x14), pci_cfg_read32(d, 0x18),
-            pci_cfg_read32(d, 0x1c), pci_cfg_read32(d, 0x20), pci_cfg_read32(d, 0x24), pci_cfg_read32(d, 0x3c));
     if ((pci_cfg_read32(d, 0x0c) >> 16 & 0x7f) == 0) {                     /* type-0 header: six BARs */
         for (b = 0; b < 6 && n < 8; ++b) {
             const uint32_t raw = pci_cfg_read32(d, 0x10 + 4 * b);
@@ -260,7 +260,7 @@ static CM_RESOURCE_LIST *build_resource_list(const pci_dev_t *d, int translated)
 {
     CM_PARTIAL_RESOURCE_DESCRIPTOR tmp[8];
     unsigned n = pci_resources(d, tmp, translated);
-    CM_RESOURCE_LIST *l = kzalloc(sizeof *l + (n ? n - 1 : 0) * sizeof tmp[0]);
+    CM_RESOURCE_LIST *l = kzalloc(sizeof *l + n * sizeof tmp[0]);
     if (!l) return 0;
     l->Count = 1;
     l->List[0].InterfaceType = PCIBus;
@@ -275,6 +275,7 @@ static CM_RESOURCE_LIST *build_resource_list(const pci_dev_t *d, int translated)
 static void log_resources(const char *svc, const CM_RESOURCE_LIST *l)
 {
     unsigned i;
+    kprintf("K64 ntdrv: %s: %u resource(s) for IRP_MN_START_DEVICE\n", svc, l->List[0].PartialResourceList.Count);
     for (i = 0; i < l->List[0].PartialResourceList.Count; ++i) {
         const CM_PARTIAL_RESOURCE_DESCRIPTOR *r = &l->List[0].PartialResourceList.PartialDescriptors[i];
         if (r->Type == CmResourceTypeInterrupt)

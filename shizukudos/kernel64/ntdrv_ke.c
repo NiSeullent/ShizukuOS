@@ -25,18 +25,23 @@
 #define TimerNotificationObject 8
 #define TimerSynchronizationObject 9
 
-static volatile uint8_t g_irql;                 /* uniprocessor current IRQL */
+/* The current IRQL IS CR8 (the local APIC task-priority register), exactly as on Windows x64: the DDK's amd64
+ * headers inline KeGetCurrentIrql/KfRaiseIrql/KeLowerIrql as CR8 reads and writes, so an unmodified driver
+ * raises and lowers IRQL without calling any export (ndis.sys carries 85 CR8 instructions). The host therefore
+ * keeps no software copy: every provider reads CR8, and the scheduler tick (sched.c) does not preempt while
+ * CR8 >= DISPATCH_LEVEL, which reproduces the guarantee DISPATCH_LEVEL gives a driver on a uniprocessor (no
+ * dispatch-level work interrupts a held spin lock or a running DPC) whether the driver raised through an export
+ * or through CR8 directly. The exports additionally mask interrupts at >= DISPATCH_LEVEL; a driver's own CR8
+ * write leaves them on, as on Windows, where only the tick decision matters. */
+static inline uint8_t cur_irql(void) { uint64_t v; __asm__ volatile("mov %%cr8, %0" : "=r"(v)); return (uint8_t)v; }
+static inline void write_irql(uint8_t v) { uint64_t x = v; __asm__ volatile("mov %0, %%cr8" : : "r"(x) : "memory"); }
+#define g_irql (cur_irql())
 
-uint8_t ntdrv_current_irql(void) { return g_irql; }
+uint8_t ntdrv_current_irql(void) { return cur_irql(); }
 
-/* On this kernel the scheduler only preempts from the timer interrupt (or a voluntary
- * yield/sleep/block). Masking interrupts while IRQL >= DISPATCH_LEVEL therefore reproduces the
- * exact guarantee DISPATCH_LEVEL gives a driver: the scheduler cannot switch away, so a held
- * spin lock and a running DPC are never interrupted by other dispatch-level work. At
- * PASSIVE/APC the scheduler runs normally and waits may block. */
 static void set_irql(uint8_t v)
 {
-    g_irql = v;
+    write_irql(v);
     if (v >= DISPATCH_LEVEL) cli();
     else sti();
 }
@@ -474,7 +479,7 @@ void ntdrv_ke_init(void)                        /* idempotent: the first driver 
     thread_t *w, *tt;
     if (ke_ready) return;
     sem_init(&dpc_sem, 0);
-    g_irql = PASSIVE_LEVEL;
+    write_irql(PASSIVE_LEVEL);
     w = thread_create("ntdrv-dpc", dpc_worker, 0);
     tt = thread_create("ntdrv-timer", timer_thread, 0);
     KASSERT(w && tt);
