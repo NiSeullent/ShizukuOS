@@ -36,9 +36,16 @@ static void trace_first_chance(process_t *p, thread_t *t, const struct regs *r, 
     if (enabled < 0) enabled = k64_cmdline_has("shz.exctrace");
     if (!enabled || lines >= 256) return;
     ++lines;
-    if (code == 0x80000003u) { extern void k64_systrace_dump(void); k64_systrace_dump(); }     /* the failing calls that led to a CHECK */
+    /* The failing calls that led to a CHECK, or to a read through a garbage (non-canonical) pointer such as a freed object. */
+    if (code == 0x80000003u || (code == 0xc0000005u && (info1 >> 47) != 0 && (info1 >> 47) != 0x1ffffu)) {
+        extern void k64_systrace_dump(void);
+        k64_systrace_dump();
+    }
     describe(p, r->rip, d, sizeof d);
     kprintf("K64 exc: pid %d tid %llu first-chance %x at %s (%llx %llx) rsp %llx\n", p->pid, t->tid, code, d, info0, info1, r->rsp);
+    if (code == 0xc0000005u)
+        kprintf("K64 exc:   rax %llx rcx %llx rdx %llx rbx %llx rbp %llx rsi %llx rdi %llx\nK64 exc:   r8 %llx r9 %llx r10 %llx r11 %llx r12 %llx r13 %llx r14 %llx r15 %llx\n",
+                r->rax, r->rcx, r->rdx, r->rbx, r->rbp, r->rsi, r->rdi, r->r8, r->r9, r->r10, r->r11, r->r12, r->r13, r->r14, r->r15);
     for (k = 0; k < 512 && shown < 10; ++k) {
         uint64_t v;
         unsigned j, is_mod = 0;
