@@ -27,24 +27,47 @@
 
 /* The current IRQL IS CR8 (the local APIC task-priority register), exactly as on Windows x64: the DDK's amd64
  * headers inline KeGetCurrentIrql/KfRaiseIrql/KeLowerIrql as CR8 reads and writes, so an unmodified driver
- * raises and lowers IRQL without calling any export (ndis.sys carries 85 CR8 instructions). The host therefore
- * keeps no software copy: every provider reads CR8, and the scheduler tick (sched.c) does not preempt while
- * CR8 >= DISPATCH_LEVEL, which reproduces the guarantee DISPATCH_LEVEL gives a driver on a uniprocessor (no
- * dispatch-level work interrupts a held spin lock or a running DPC) whether the driver raised through an export
- * or through CR8 directly. The exports additionally mask interrupts at >= DISPATCH_LEVEL; a driver's own CR8
- * write leaves them on, as on Windows, where only the tick decision matters. */
+ * raises and lowers IRQL without calling any export (ndis.sys carries 85 CR8 instructions). Every provider reads
+ * CR8, and the scheduler (sched.c) does not preempt while CR8 >= DISPATCH_LEVEL and keeps CR8 per thread, which
+ * reproduces the guarantee DISPATCH_LEVEL gives a driver on a uniprocessor (no dispatch-level work interrupts a held
+ * spin lock or a running DPC) whether the driver raised through an export or through CR8 directly.
+ *
+ * Interrupts: the exports mask them only across the transition that crosses DISPATCH_LEVEL (raise from below: cli;
+ * lower to below: sti). A raise or lower that stays on one side of the line leaves EFLAGS.IF alone, so a driver that
+ * raises inline (IF stays on) and then takes a spin lock through an export, or an export used inside an ISR (which
+ * runs with IF off at CR8 >= DISPATCH_LEVEL, see ntdrv_isr_enter), never turns interrupts back on behind the
+ * caller's back. Not modelled: a driver's own CR8 write cannot drain the DPC queue (Windows runs the DPCs when the
+ * write lowers IRQL); the DPC worker thread does it at the next tick, so a driver that lowers inline and polls for
+ * a DPC's effect with a zero timeout can see it a tick late.
+ *
+ * The Supervisor build (no SHZ_STANDALONE) keeps a software IRQL: whether a guest CR8 write reaches the real APIC
+ * task priority there is not something this host can test. */
+#ifdef SHZ_STANDALONE
 static inline uint8_t cur_irql(void) { uint64_t v; __asm__ volatile("mov %%cr8, %0" : "=r"(v)); return (uint8_t)v; }
 static inline void write_irql(uint8_t v) { uint64_t x = v; __asm__ volatile("mov %0, %%cr8" : : "r"(x) : "memory"); }
+#else
+static volatile uint8_t sw_irql;
+static inline uint8_t cur_irql(void) { return sw_irql; }
+static inline void write_irql(uint8_t v) { sw_irql = v; }
+#endif
 #define g_irql (cur_irql())
 
 uint8_t ntdrv_current_irql(void) { return cur_irql(); }
 
 static void set_irql(uint8_t v)
 {
+    const uint8_t old = cur_irql();
     write_irql(v);
-    if (v >= DISPATCH_LEVEL) cli();
-    else sti();
+    if (old < DISPATCH_LEVEL && v >= DISPATCH_LEVEL) cli();
+    else if (old >= DISPATCH_LEVEL && v < DISPATCH_LEVEL) sti();
 }
+
+/* An interrupt service routine (or a KeSynchronizeExecution routine) runs at its DIRQL: above DISPATCH_LEVEL, with
+ * interrupts off. The returned value goes back to ntdrv_isr_leave; IF is not touched (the caller's gate or irq_save
+ * owns it). DIRQL 13 stands for every device interrupt: this host has no interrupt priorities among devices. */
+#define NTDRV_DIRQL 13
+uint8_t ntdrv_isr_enter(void) { const uint8_t o = cur_irql(); write_irql(NTDRV_DIRQL); return o; }
+void ntdrv_isr_leave(uint8_t old) { write_irql(old); }
 
 /* ---------------------------------------------------------------- IRQL */
 uint8_t NTAPI KeGetCurrentIrql(void) { return g_irql; }
@@ -128,7 +151,8 @@ uint8_t NTAPI KeRemoveQueueDpc(KDPC *dpc)
     return 1;
 }
 
-/* Run one pass of the DPC queue at DISPATCH_LEVEL. */
+/* Run one pass of the DPC queue at DISPATCH_LEVEL. A DPC is taken off the queue and IRQL is raised with interrupts
+ * still off, so a tick cannot preempt the caller while it holds a DPC that KeRemoveQueueDpc no longer finds queued. */
 void ntdrv_dpc_queue_flush(void)
 {
     for (;;) {
@@ -141,11 +165,11 @@ void ntdrv_dpc_queue_flush(void)
         if (!dpc_head) dpc_tail = 0;
         dpc->DpcData = 0;
         sa1 = dpc->SystemArgument1; sa2 = dpc->SystemArgument2;
-        irq_restore(f);
-        saved = g_irql;
-        if (g_irql < DISPATCH_LEVEL) set_irql(DISPATCH_LEVEL);
+        saved = cur_irql();
+        if (saved < DISPATCH_LEVEL) write_irql(DISPATCH_LEVEL);       /* IF stays off until the routine returns, as set_irql would */
+        else irq_restore(f);
         dpc->DeferredRoutine(dpc, dpc->DeferredContext, sa1, sa2);
-        if (saved < DISPATCH_LEVEL) set_irql(saved);
+        if (saved < DISPATCH_LEVEL) { write_irql(saved); irq_restore(f); }
     }
 }
 
@@ -284,7 +308,7 @@ int32_t NTAPI KeWaitForMultipleObjects(uint32_t count, void **objs, uint32_t wai
     int64_t store, *dl;
     uint32_t i;
     (void)reason; (void)mode; (void)alertable; (void)wait_blocks;
-    if (g_irql >= DISPATCH_LEVEL) kpanic("KeWaitForMultipleObjects at IRQL %u", g_irql);
+    if (g_irql >= DISPATCH_LEVEL && !(timeout && *timeout == 0)) kpanic("KeWaitForMultipleObjects at IRQL %u", g_irql);
     deadline_from(timeout, &store);
     dl = timeout ? &store : 0;
     for (;;) {
@@ -418,11 +442,13 @@ uint32_t NTAPI KeGetCurrentProcessorNumberEx(void *g) { (void)g; return 0; }
 uint32_t NTAPI KeQueryActiveProcessorCount(void *g) { (void)g; return 1; }
 uint32_t NTAPI KeQueryMaximumProcessorCount(void) { return 1; }
 void *NTAPI KeGetCurrentThread(void) { return thread_current(); }
+static void run_bugcheck_callbacks(void);
 void NTAPI KeBugCheckEx(uint32_t code, uint64_t p1, uint64_t p2, uint64_t p3, uint64_t p4)
 {
+    run_bugcheck_callbacks();
     kpanic("KeBugCheckEx 0x%x (%llx %llx %llx %llx) from driver", code, p1, p2, p3, p4);
 }
-void NTAPI KeBugCheck(uint32_t code) { kpanic("KeBugCheck 0x%x from driver", code); }
+void NTAPI KeBugCheck(uint32_t code) { run_bugcheck_callbacks(); kpanic("KeBugCheck 0x%x from driver", code); }
 
 /* ---------------------------------------------------------------- interlocked */
 LONG NTAPI InterlockedIncrement(LONG *p) { return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST); }
@@ -538,7 +564,7 @@ void *NTAPI ExpInterlockedPushEntrySList(slist_header_t *h, single_entry_t *e)
     uint64_t f = irq_save();
     single_entry_t *first = (single_entry_t *)(h->region & ~0xfull);
     e->Next = first;
-    h->region = (uint64_t)e & ~0xfull;
+    h->region = (h->region & 0xfull) | ((uint64_t)e & ~0xfull);           /* the low nibble is HeaderType/Init, not the pointer */
     h->alignment = ((h->alignment & ~0xffffull) + 0x10000) | (((h->alignment & 0xffff) + 1) & 0xffff);
     irq_restore(f);
     return first;
@@ -548,7 +574,7 @@ void *NTAPI ExpInterlockedPopEntrySList(slist_header_t *h)
     uint64_t f = irq_save();
     single_entry_t *first = (single_entry_t *)(h->region & ~0xfull);
     if (first) {
-        h->region = (uint64_t)first->Next & ~0xfull;
+        h->region = (h->region & 0xfull) | ((uint64_t)first->Next & ~0xfull);
         h->alignment = ((h->alignment & ~0xffffull) + 0x10000) | (((h->alignment & 0xffff) - 1) & 0xffff);
     }
     irq_restore(f);
@@ -594,4 +620,21 @@ uint8_t NTAPI KeDeregisterBugCheckCallback(kbugcheck_record_t *r)
     r->State = 0;
     irq_restore(f);
     return 1;
+}
+
+/* KBUGCHECK_CALLBACK_ROUTINE(Buffer, Length), ms_abi: each registered record is called once, before the halt, with the
+ * driver's buffer. A callback that faults or blocks cannot be helped here; the list is walked once (State cleared). */
+static void run_bugcheck_callbacks(void)
+{
+    LIST_ENTRY *e = bugcheck_list.Flink;
+    unsigned guard = 0;
+    while (e != &bugcheck_list && guard++ < 256) {
+        kbugcheck_record_t *r = (kbugcheck_record_t *)e;
+        e = e->Flink;
+        if (r->State == 1 && r->CallbackRoutine) {
+            r->State = 2;                                   /* BufferStarted */
+            ((void (NTAPI *)(void *, uint32_t))r->CallbackRoutine)(r->Buffer, r->Length);
+            r->State = 3;                                   /* BufferFinished */
+        }
+    }
 }

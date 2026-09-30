@@ -123,8 +123,9 @@ struct ntdrv_pdo {
     uint16_t desc[128], mfg[128], cls[64], classguid[40];
     uint16_t hwids[512];                /* REG_MULTI_SZ */
     uint32_t hwids_len;                 /* bytes */
-    uint16_t iface[160];                /* the device interface link registered on it (IoRegisterDeviceInterface) */
-    int iface_enabled;
+    uint16_t iface[4][160];             /* the device interface links registered on it (IoRegisterDeviceInterface) */
+    int iface_enabled[4];
+    unsigned niface;
 };
 static ntdrv_pdo_t *pdos;
 static unsigned pdo_count;
@@ -335,6 +336,48 @@ void ntdrv_pnp_start_pending(ntdrv_driver_t *d)
     }
 }
 
+static int32_t send_pnp(DEVICE_OBJECT *top, uint8_t minor)
+{
+    IRP *irp = IoAllocateIrp((uint8_t)top->StackSize, 0);
+    IO_STACK_LOCATION *stk;
+    if (!irp) return STATUS_INSUFFICIENT_RESOURCES;
+    stk = irp->Tail.Overlay.CurrentStackLocation - 1;
+    stk->MajorFunction = IRP_MJ_PNP;
+    stk->MinorFunction = minor;
+    irp->IoStatus.Status = STATUS_NOT_SUPPORTED;
+    return ntdrv_send_irp_sync(top, irp, 0);
+}
+
+/* What the PnP manager does before it lets a function driver go: IRP_MN_QUERY_REMOVE_DEVICE, then (if nobody objects)
+ * IRP_MN_REMOVE_DEVICE down every started stack, which is where a WDM driver detaches and deletes its FDO, disconnects
+ * its interrupt and unmaps its resources. A refused query is cancelled (IRP_MN_CANCEL_REMOVE_DEVICE) and the status is
+ * returned: the driver stays loaded. Exercised by no test here (the test drivers have no AddDevice, and the corpus
+ * NDIS miniport has no DriverUnload, which keeps an unload from getting this far). */
+int32_t ntdrv_pnp_remove_devices(ntdrv_driver_t *d)
+{
+    ntdrv_pdo_t *p;
+    for (p = pdos; p; p = p->next) {
+        DEVICE_OBJECT *top;
+        int32_t st;
+        if (p->fdo_driver != d || !p->started) continue;
+        top = IoGetAttachedDevice(p->pdo);
+        if (top == p->pdo) { p->started = 0; continue; }
+        ntdrv_set_current_driver(d);
+        st = send_pnp(top, IRP_MN_QUERY_REMOVE_DEVICE);
+        if (!NT_SUCCESS(st)) {
+            kprintf("K64 ntdrv: %s refused IRP_MN_QUERY_REMOVE_DEVICE (%x): not unloaded\n", d->name, (uint32_t)st);
+            send_pnp(top, IRP_MN_CANCEL_REMOVE_DEVICE);
+            ntdrv_set_current_driver(0);
+            return st;
+        }
+        st = send_pnp(top, IRP_MN_REMOVE_DEVICE);
+        kprintf("K64 ntdrv: %s IRP_MN_REMOVE_DEVICE(PCI %x:%x.%x) = %x\n", d->name, p->dev.bus, p->dev.dev, p->dev.fn, (uint32_t)st);
+        ntdrv_set_current_driver(0);
+        p->started = 0;
+    }
+    return STATUS_SUCCESS;
+}
+
 void ntdrv_pnp_driver_unloading(ntdrv_driver_t *d)
 {
     ntdrv_pdo_t **pp = &pdos;
@@ -373,14 +416,23 @@ static uint32_t NTAPI if_set_bus_data(void *ctx, uint32_t type, void *buf, uint3
 {
     ntdrv_pdo_t *p = ctx;
     const uint8_t *in = buf;
-    uint32_t i;
+    uint32_t pos, end;
     if (!p || type != 0 || off >= 256) return 0;
     if (off + len > 256) len = 256 - off;
-    for (i = 0; i < len; ++i) {
-        const unsigned reg = (off + i) & ~3u, sh = 8 * ((off + i) & 3);
-        uint32_t dw = pci_cfg_read32(&p->dev, reg);
-        dw = (dw & ~(0xffu << sh)) | ((uint32_t)in[i] << sh);
+    end = off + len;
+    for (pos = off; pos < end; ) {
+        const unsigned reg = pos & ~3u;
+        uint32_t dw = pci_cfg_read32(&p->dev, reg), mask = 0;
+        unsigned b;
+        for (b = pos & 3; b < 4 && reg + b < end; ++b) {              /* merge every byte of this dword, then write it once */
+            dw = (dw & ~(0xffu << (8 * b))) | ((uint32_t)in[reg + b - off] << (8 * b));
+            mask |= 0xffu << (8 * b);
+        }
+        /* dword 0x04 is Command (RW) | Status (RW1C): writing back the Status bits as read would clear the device's sticky
+         * error flags, so they are written as 0 (no effect) unless the caller supplied the Status bytes itself */
+        if (reg == 4 && !(mask & 0xffff0000u)) dw &= 0x0000ffffu;
         pci_cfg_write32(&p->dev, reg, dw);
+        pos = reg + 4;
     }
     return len;
 }
@@ -530,7 +582,8 @@ NTSTATUS NTAPI IoRegisterDeviceInterface(DEVICE_OBJECT *dev, const GUID *guid, U
     uint16_t *buf;
     unsigned n = 0, i;
     if (!p || !guid || !link) return STATUS_INVALID_DEVICE_REQUEST;
-    buf = kzalloc(sizeof p->iface);
+    if (p->niface >= 4) return STATUS_INSUFFICIENT_RESOURCES;
+    buf = kzalloc(sizeof p->iface[0]);
     if (!buf) return STATUS_INSUFFICIENT_RESOURCES;
     buf[n++] = '\\'; buf[n++] = '?'; buf[n++] = '?'; buf[n++] = '\\';
     for (i = 0; p->instance[i] && n < 100; ++i) buf[n++] = (uint16_t)(p->instance[i] == '\\' ? '#' : p->instance[i]);
@@ -538,7 +591,8 @@ NTSTATUS NTAPI IoRegisterDeviceInterface(DEVICE_OBJECT *dev, const GUID *guid, U
     guid_to_wide(guid, buf, &n);
     if (ref && ref->Length && n + ref->Length / 2 + 1 < 158) { buf[n++] = '\\'; memcpy(buf + n, ref->Buffer, ref->Length); n += ref->Length / 2; }
     buf[n] = 0;
-    memcpy(p->iface, buf, (n + 1) * 2);
+    memcpy(p->iface[p->niface], buf, (n + 1) * 2);
+    p->iface_enabled[p->niface++] = 0;
     link->Buffer = buf;
     link->Length = (uint16_t)(n * 2);
     link->MaximumLength = (uint16_t)(n * 2 + 2);
@@ -549,14 +603,16 @@ NTSTATUS NTAPI IoSetDeviceInterfaceState(UNICODE_STRING *link, uint8_t enable)
 {
     ntdrv_pdo_t *p;
     char a[160];
+    unsigned k;
     if (!link || !link->Buffer) return STATUS_INVALID_PARAMETER;
     for (p = pdos; p; p = p->next)
-        if (wlen16(p->iface) * 2 == link->Length && !memcmp(p->iface, link->Buffer, link->Length)) {
-            p->iface_enabled = enable;
-            ntdrv_wide_to_ascii(link->Buffer, link->Length / 2, a, sizeof a);
-            kprintf("K64 ntdrv: device interface %s %s\n", a, enable ? "enabled" : "disabled");
-            return STATUS_SUCCESS;
-        }
+        for (k = 0; k < p->niface; ++k)
+            if (wlen16(p->iface[k]) * 2 == link->Length && !memcmp(p->iface[k], link->Buffer, link->Length)) {
+                p->iface_enabled[k] = enable;
+                ntdrv_wide_to_ascii(link->Buffer, link->Length / 2, a, sizeof a);
+                kprintf("K64 ntdrv: device interface %s %s\n", a, enable ? "enabled" : "disabled");
+                return STATUS_SUCCESS;
+            }
     return STATUS_OBJECT_NAME_NOT_FOUND;
 }
 
@@ -713,16 +769,33 @@ static int32_t NTAPI dma_build_sg(void *ad, DEVICE_OBJECT *dev, MDL *m, void *cu
     fn(dev, dev->CurrentIrp, buf, ctx);
     return STATUS_SUCCESS;
 }
+/* Lists GetScatterGatherList allocated itself: PutScatterGatherList frees exactly those. A list BuildScatterGatherList
+ * built inside the driver's own buffer stays the driver's (it frees that buffer after Put). */
+static void *sg_owned[32];
 static int32_t NTAPI dma_get_sg(void *ad, DEVICE_OBJECT *dev, MDL *m, void *cur, uint32_t len, void *routine, void *ctx, uint8_t write)
 {
     uint32_t need, nmap;
     SCATTER_GATHER_LIST *l;
+    unsigned i;
+    int32_t st;
     dma_calc_sg(ad, m, cur, len, &need, &nmap);
     l = kzalloc(need);
     if (!l) return STATUS_INSUFFICIENT_RESOURCES;
-    return dma_build_sg(ad, dev, m, cur, len, routine, ctx, write, l, need);
+    { uint64_t f = irq_save();
+      for (i = 0; i < 32; ++i) if (!sg_owned[i]) { sg_owned[i] = l; break; }
+      irq_restore(f); }
+    if (i == 32) { kfree(l); return STATUS_INSUFFICIENT_RESOURCES; }
+    st = dma_build_sg(ad, dev, m, cur, len, routine, ctx, write, l, need);
+    if (st) { sg_owned[i] = 0; kfree(l); }
+    return st;
 }
-static void NTAPI dma_put_sg(void *ad, void *l, uint8_t write) { (void)ad; (void)write; kfree(l); }
+static void NTAPI dma_put_sg(void *ad, void *l, uint8_t write)
+{
+    unsigned i;
+    (void)ad; (void)write;
+    for (i = 0; i < 32; ++i)
+        if (sg_owned[i] == l) { sg_owned[i] = 0; kfree(l); return; }
+}
 static int32_t NTAPI dma_build_mdl(void *ad, void *l, MDL *orig, MDL **out) { (void)ad; (void)l; (void)orig; (void)out; return STATUS_NOT_SUPPORTED; }
 
 static DMA_OPERATIONS dma_ops = {

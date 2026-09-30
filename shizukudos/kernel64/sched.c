@@ -106,6 +106,16 @@ static void schedule(void)
     }
     fx_save(prev);
     fx_restore(next);
+#ifdef SHZ_STANDALONE
+    {   /* IRQL lives in CR8 there (a hosted NT driver writes it directly, kernel64/ntdrv_ke.c) and is per thread once a
+         * thread can block at APC_LEVEL: a thread that leaves the CPU keeps its own value, the one that runs next gets its own */
+        uint64_t v;
+        __asm__ volatile("mov %%cr8, %0" : "=r"(v));
+        prev->cr8 = v;
+        v = next->cr8;
+        __asm__ volatile("mov %0, %%cr8" : : "r"(v) : "memory");
+    }
+#endif
     switch_stacks(&prev->rsp, next->rsp);
 }
 
@@ -126,6 +136,12 @@ void sched_tick(void)
     ++jiffies;
     current->run_ticks++;
     if (tick_from_user) current->user_ticks++; else current->kernel_ticks++;
+#ifdef SHZ_STANDALONE
+    if (tick_from_user) {   /* ring 3 always runs at PASSIVE_LEVEL: a raise that leaked out of a driver call must not stop preemption */
+        uint64_t zero = 0;
+        __asm__ volatile("mov %0, %%cr8" : : "r"(zero) : "memory");
+    }
+#endif
     tick_from_user = 0;
     for (i = 0; i < MAX_THREADS; ++i)
         if (threads[i].state == TS_BLOCKED && threads[i].wake_tick && threads[i].wake_tick <= jiffies) {
@@ -142,13 +158,16 @@ void sched_tick(void)
             threads[i].wait_result = threads[i].wait_result ? threads[i].wait_result : 0x102;   /* STATUS_TIMEOUT marker */
         }
     sched_check_timeouts(jiffies);
+#ifdef SHZ_STANDALONE
     {   /* IRQL >= DISPATCH_LEVEL (CR8, written by a hosted NT driver through the DDK's inline KfRaiseIrql, or by the
          * driver host's own KeRaiseIrql) means "no dispatching": the tick still counts and wakes sleepers, but the
-         * running thread is not preempted until it lowers IRQL (kernel64/ntdrv_ke.c). */
+         * running thread is not preempted until it lowers IRQL (kernel64/ntdrv_ke.c). Not compiled for the Supervisor
+         * build, whose scheduler is unchanged and where the guest's CR8 is not the driver host's business. */
         uint64_t cr8;
         __asm__ volatile("mov %%cr8, %0" : "=r"(cr8));
         if (cr8 >= 2) return;
     }
+#endif
     schedule();
 }
 

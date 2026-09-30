@@ -211,8 +211,30 @@ int main(void)
         code = shzpnp("load shzbadimp");
         CHECK(code == 1, "load of an image with an unresolvable import: refused (STATUS_PROCEDURE_NOT_FOUND), exit 1, no fault");
     }
+    {   /* an image that imports from itself: ECHO.SYS with the import DLL name "ntoskrnl.exe" replaced by its own file name
+         * "shzloop1.sys" (same length). The loader must refuse the cycle, not load copies of it until the stack is gone. */
+        int patched = 0;
+        n = read_file(ECHO_SRC, img, sizeof img);
+        for (i = 0; n > 0 && i + 13 <= n; ++i)
+            if (!memcmp(img + i, "ntoskrnl.exe", 13)) { memcpy(img + i, "shzloop1.sys", 13); patched = 1; break; }
+        CHECK(patched, "a copy of ECHO.SYS importing itself (import DLL name = its own file name) prepared");
+        CHECK(write_file("C:\\SHZ\\SYS64\\DRIVERS\\shzloop1.sys", img, (DWORD)n), "written to SYS64\\DRIVERS");
+        CHECK(make_service(L"shzloop1", 0), "service shzloop1 created");
+        code = shzpnp("load shzloop1");
+        CHECK(code == 1, "load of an image that imports itself: refused as an import cycle, exit 1, no recursion or fault");
+    }
     code = shzpnp("unload nosuchservice");
     CHECK(code == 1, "unload of a service that is not loaded: exit 1");
+    {   /* a device with a handle open on it keeps its driver loaded (the handle references the device object) */
+        HANDLE hh = CreateFileW(L"\\\\.\\ShzEcho", GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
+        CHECK(hh != INVALID_HANDLE_VALUE, "the device opens again");
+        code = shzpnp("unload shzecho");
+        CHECK(code == 1, "unload while a handle is open on the device: refused (STATUS_CONNECTION_IN_USE), exit 1");
+        if (hh != INVALID_HANDLE_VALUE) {
+            CHECK(echo_roundtrip(hh), "the driver still answers after the refused unload");
+            CloseHandle(hh);
+        }
+    }
     code = shzpnp("status shzecho");
     CHECK(code == 0, "the kernel and the loaded driver survived the error paths");
 

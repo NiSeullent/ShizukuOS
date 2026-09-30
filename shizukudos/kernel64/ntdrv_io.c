@@ -390,13 +390,23 @@ static unsigned n_owned;
 
 static int same_fn(const pci_dev_t *a, const pci_dev_t *b) { return a->bus == b->bus && a->dev == b->dev && a->fn == b->fn; }
 
-static void own_function(const pci_dev_t *d, ntdrv_driver_t *drv)
+static int own_function(const pci_dev_t *d, ntdrv_driver_t *drv)
 {
     unsigned i;
-    if (!drv) return;
+    const char *cur;
+    if (!drv) return 0;
     for (i = 0; i < n_owned; ++i)
-        if (same_fn(&owned[i].dev, d)) return;
-    if (n_owned < 16) { owned[n_owned].dev = *d; owned[n_owned++].drv = drv; }
+        if (same_fn(&owned[i].dev, d)) return owned[i].drv == drv;
+    cur = pci_claimed_by(d);
+    if (cur) {                                                /* a native driver's claim (or another hosted driver's) is not overwritten */
+        kprintf("K64 ntdrv: %s: PCI %x:%x.%x is already driven by %s; not claimed\n", drv->name, d->bus, d->dev, d->fn, cur);
+        return 0;
+    }
+    if (n_owned >= 16) {
+        kprintf("K64 ntdrv: %s: more than 16 PCI functions claimed by hosted drivers; PCI %x:%x.%x not claimed\n", drv->name, d->bus, d->dev, d->fn);
+        return 0;
+    }
+    owned[n_owned].dev = *d; owned[n_owned++].drv = drv;
     if (!drv->claim[0]) {
         static const char pfx[] = "ntdrv:";
         unsigned k = 0, j;
@@ -406,6 +416,7 @@ static void own_function(const pci_dev_t *d, ntdrv_driver_t *drv)
     }
     pci_claim(d, drv->claim);                                  /* the string lives in the driver record */
     kprintf("K64 ntdrv: %s owns PCI %x:%x.%x (%x:%x)\n", drv->name, d->bus, d->dev, d->fn, d->vendor, d->device);
+    return 1;
 }
 
 void ntdrv_pci_note_mmio(uint64_t pa, uint64_t size)
@@ -527,7 +538,7 @@ void ntdrv_bind_enum(ntdrv_driver_t *d)
                     if (m + 1 < sizeof ipath) ipath[m++] = '\\';
                     for (q = 0; q < inst->name_len && m + 1 < sizeof ipath; ++q) ipath[m++] = (char)(regkey_name(inst)[q] < 0x80 ? regkey_name(inst)[q] : '?');
                     ipath[m] = 0;
-                    own_function(&all[k], d);
+                    if (!own_function(&all[k], d)) continue;                 /* not ours to claim: no PDO either */
                     ntdrv_pnp_add(d, &all[k], inst, ipath);
                     ++bound;
                 }
@@ -556,10 +567,14 @@ typedef struct kinterrupt {
 } kinterrupt_t;
 static kinterrupt_t *interrupts_by_vector[256];
 
+uint8_t ntdrv_isr_enter(void);                  /* ntdrv_ke.c: raise to DIRQL (CR8), interrupts stay as the caller left them */
+void ntdrv_isr_leave(uint8_t old);
 static void call_isr(kinterrupt_t *k)
 {
     uint8_t (NTAPI *svc)(void *, void *) = k->service;
+    const uint8_t old = ntdrv_isr_enter();      /* the ISR runs at DIRQL: exports it calls see IRQL >= DISPATCH_LEVEL */
     svc(k, k->ctx);                             /* KSERVICE_ROUTINE(Interrupt, ServiceContext) */
+    ntdrv_isr_leave(old);
 }
 #ifdef SHZ_STANDALONE
 static void intx_isr(void *ctx) { call_isr(ctx); }   /* one link of pci.c's shared-line chain */
@@ -634,9 +649,11 @@ void NTAPI IoDisconnectInterrupt(void *interrupt)
 uint8_t NTAPI KeSynchronizeExecution(void *interrupt, uint8_t (NTAPI *routine)(void *), void *ctx)
 {
     uint64_t f = irq_save();
-    uint8_t r;
+    uint8_t r, old;
     (void)interrupt;
+    old = ntdrv_isr_enter();                    /* SynchronizeIrql: the routine runs at DIRQL with the ISR excluded */
     r = routine(ctx);
+    ntdrv_isr_leave(old);
     irq_restore(f);
     return r;
 }
@@ -738,13 +755,27 @@ int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, 
     o = ob_create(OB_DEVICE, 0);
     if (!df || !o) { kfree(df); if (o) ob_deref(o); return STATUS_INSUFFICIENT_RESOURCES; }
     df->dev = dev;
+    __atomic_add_fetch(&dev->ReferenceCount, 1, __ATOMIC_SEQ_CST);      /* the handle references the device (NtUnloadDriver checks) */
     df->fo.Type = 5; df->fo.Size = sizeof(FILE_OBJECT); df->fo.DeviceObject = dev;
     o->u.file.file = df;
     st = ntdrv_open_close_device(dev, 0);                      /* IRP_MJ_CREATE */
-    if (st && st != STATUS_PENDING) { ob_deref(o); return st; }
+    if (st && st != STATUS_PENDING) {                          /* no handle was made: undo the device reference, free the record */
+        __atomic_sub_fetch(&dev->ReferenceCount, 1, __ATOMIC_SEQ_CST);
+        o->u.file.file = 0;
+        kfree(df);
+        ob_deref(o);
+        return st;
+    }
     st = handle_insert(p, o, access, &h);
+    if (st) {                                                  /* opened but not inserted: close it again */
+        ntdrv_open_close_device(dev, 1);
+        __atomic_sub_fetch(&dev->ReferenceCount, 1, __ATOMIC_SEQ_CST);
+        o->u.file.file = 0;
+        kfree(df);
+        ob_deref(o);
+        return st;
+    }
     ob_deref(o);
-    if (st) return st;
     if (copy_to_user(p, phandle_out, &(uint64_t){h}, 8)) { handle_close(p, h); return STATUS_ACCESS_VIOLATION; }
     if (iosb_out) { struct { uint64_t s, i; } v = { 0, 1 }; copy_to_user(p, iosb_out, &v, sizeof v); }
     return STATUS_SUCCESS;
@@ -781,7 +812,12 @@ void ntdrv_device_handle_closing(kobject_t *o)
     struct devfile *df;
     if (o->refs != 1) return;
     df = o->u.file.file;
-    if (df) { ntdrv_open_close_device(df->dev, 1); kfree(df); o->u.file.file = 0; }
+    if (df) {
+        ntdrv_open_close_device(df->dev, 1);
+        __atomic_sub_fetch(&df->dev->ReferenceCount, 1, __ATOMIC_SEQ_CST);
+        kfree(df);
+        o->u.file.file = 0;
+    }
 }
 
 /* NtDeviceIoControlFile (0xe1): (h, event, apc, apcctx, iosb, ioctl, in, inlen, out, outlen) */
@@ -864,7 +900,28 @@ static int32_t read_regpath(process_t *p, uint64_t regpath_ustr, uint16_t *w, un
     return service[0] ? STATUS_SUCCESS : STATUS_OBJECT_NAME_INVALID;
 }
 
+/* NtLoadDriver and NtUnloadDriver are serialized against each other: a load blocks (DriverEntry, START_DEVICE) at
+ * PASSIVE_LEVEL and the scheduler is preemptive, so an unload of the same service running meanwhile would free the
+ * records the load is still using. */
+static kmutex_t load_mutex;
+static int load_mutex_ready;
+static void load_lock(void)
+{
+    if (!load_mutex_ready) { mutex_init(&load_mutex); load_mutex_ready = 1; }
+    mutex_lock(&load_mutex);
+}
+static void load_unlock(void) { mutex_unlock(&load_mutex); }
+static int32_t load_driver_locked(process_t *p, uint64_t regpath_ustr);
 static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
+{
+    int32_t st;
+    load_lock();
+    st = load_driver_locked(p, regpath_ustr);
+    load_unlock();
+    return st;
+}
+
+static int32_t load_driver_locked(process_t *p, uint64_t regpath_ustr)
 {
     uint16_t w[200];
     char service[64], raw[300], imagepath[320];
@@ -922,7 +979,10 @@ static int32_t unload_driver_from_service(process_t *p, uint64_t regpath_ustr)
     unsigned chars;
     int32_t st = read_regpath(p, regpath_ustr, w, &chars, service, sizeof service);
     if (st) return st;
-    return ntdrv_unload_service(service);
+    load_lock();
+    st = ntdrv_unload_service(service);
+    load_unlock();
+    return st;
 }
 
 /* NtShzDriverQuery(buffer, length, &count) (0xe3): one shz_driver_info_t per started image. */
