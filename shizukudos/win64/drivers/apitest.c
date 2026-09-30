@@ -47,6 +47,13 @@ NTHALAPI ULONG NTAPI HalGetBusData(BUS_DATA_TYPE, ULONG, ULONG, PVOID, ULONG);
 #define STATUS_INVALID_PARAMETER ((NTSTATUS)0xC000000DL)
 #endif
 
+/* Exports mingw's DDK headers do not prototype (or hide behind the wrong guard): declared as Windows does. */
+NTKERNELAPI PDEVICE_OBJECT NTAPI IoGetLowerDeviceObject(PDEVICE_OBJECT DeviceObject);
+NTSYSAPI USHORT NTAPI RtlCaptureStackBackTrace(ULONG FramesToSkip, ULONG FramesToCapture, PVOID *BackTrace, PULONG BackTraceHash);
+int __cdecl swprintf(wchar_t *buf, const wchar_t *fmt, ...);
+int __cdecl _snwprintf(wchar_t *buf, size_t count, const wchar_t *fmt, ...);
+int __cdecl _snprintf(char *buf, size_t count, const char *fmt, ...);
+
 #define IOCTL_SHZ_APIINFO CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_SHZ_LOWER   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
@@ -352,7 +359,7 @@ static void TestLists(void)
     ExInterlockedInsertTailList(&head, &a, &lock); ExInterlockedInsertHeadList(&head, &b, &lock);
     r = ExInterlockedRemoveHeadList(&head, &lock);
     CHECK(r == &b && ExInterlockedRemoveHeadList(&head, &lock) == &a && ExInterlockedRemoveHeadList(&head, &lock) == NULL, "ExInterlocked{InsertTail,InsertHead,RemoveHead}List order");
-    ExInitializeNPagedLookasideList(&la, NULL, NULL, 0, 48, 'tseT', 0);
+    ExInitializeNPagedLookasideList(&la, NULL, NULL, 0, 48, 0x74736554u, 0);
     m1 = ExAllocateFromNPagedLookasideList(&la);
     ExFreeToNPagedLookasideList(&la, m1);
     m2 = ExAllocateFromNPagedLookasideList(&la);
@@ -478,7 +485,7 @@ static void TestCancelAndStartIo(PDEVICE_OBJECT dev)
 static void TestRemoveLock(void)
 {
     NTSTATUS st;
-    IoInitializeRemoveLock(&g_ext->rlock, 'kolR', 0, 0);
+    IoInitializeRemoveLock(&g_ext->rlock, 0x6b6f6c52u, 0, 0);
     st = IoAcquireRemoveLock(&g_ext->rlock, NULL);
     CHECK(NT_SUCCESS(st), "IoAcquireRemoveLock");
     IoReleaseRemoveLock(&g_ext->rlock, NULL);
@@ -585,7 +592,7 @@ static void TestDma(PDEVICE_OBJECT dev)
     CHECK(cb && la.QuadPart && la.QuadPart == pa.QuadPart && (la.QuadPart & 0xfff) == 0, "AllocateCommonBuffer is page aligned and MmGetPhysicalAddress agrees");
     st = a->DmaOperations->AllocateAdapterChannel(a, dev, 4, DmaChannelReady, &ready);
     CHECK(NT_SUCCESS(st) && ready == 1, "AllocateAdapterChannel calls the AdapterControl routine");
-    buf = ExAllocatePoolWithTag(NonPagedPool, 12000, 'amDT');
+    buf = ExAllocatePoolWithTag(NonPagedPool, 12000, 0x616d4454u);
     mdl = buf ? IoAllocateMdl(buf, 12000, FALSE, FALSE, NULL) : NULL;
     if (mdl) {
         MmBuildMdlForNonPagedPool(mdl);

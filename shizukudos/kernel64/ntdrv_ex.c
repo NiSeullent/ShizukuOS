@@ -174,6 +174,7 @@ typedef struct {
     void (NTAPI *Free)(void *p);
     LIST_ENTRY ListEntry;
     uint32_t LastTotalAllocates, LastAllocateMisses, Future[2];
+    uint8_t CacheLinePad[0x20];         /* DECLSPEC_CACHEALIGN: the record is 0x80 bytes */
 } GENERAL_LOOKASIDE;
 _Static_assert(sizeof(GENERAL_LOOKASIDE) == 0x80 && __builtin_offsetof(GENERAL_LOOKASIDE, Allocate) == 0x30 &&
                __builtin_offsetof(GENERAL_LOOKASIDE, Depth) == 0x10 && __builtin_offsetof(GENERAL_LOOKASIDE, Tag) == 0x28 &&
@@ -260,8 +261,8 @@ typedef struct {
     thread_t *owner;                    /* exclusive owner */
     int32_t excl_count;                 /* recursion depth of the exclusive owner */
     int32_t shared_count;
-    thread_t *shared[8];                /* shared owners (recursion counted in shared_rec) */
-    int32_t shared_rec[8];
+    thread_t *shared[4];                /* shared owners (recursion counted in shared_rec) */
+    int32_t shared_rec[4];
     uint32_t waiters;
 } eresource_t;
 _Static_assert(sizeof(eresource_t) <= 0x68, "eresource fits");
@@ -291,7 +292,7 @@ NTSTATUS NTAPI ExDeleteResourceLite(eresource_t *r)
     irq_restore(f);
     return STATUS_SUCCESS;
 }
-static int shared_index(eresource_t *r, thread_t *t) { int i; for (i = 0; i < 8; ++i) if (r->shared[i] == t) return i; return -1; }
+static int shared_index(eresource_t *r, thread_t *t) { int i; for (i = 0; i < 4; ++i) if (r->shared[i] == t) return i; return -1; }
 static void resource_check_caller(const char *who)
 {
     if (ntdrv_current_irql() > APC_LEVEL) kpanic("%s at IRQL %u", who, ntdrv_current_irql());
@@ -323,8 +324,8 @@ uint8_t NTAPI ExAcquireResourceSharedLite(eresource_t *r, uint8_t wait)
         if (r->owner == me) { r->excl_count++; irq_restore(f); return 1; }      /* exclusive owner: counted as another exclusive level */
         if (i >= 0) { r->shared_rec[i]++; irq_restore(f); return 1; }
         if (!r->owner && !(r->waiters && wait)) {                                  /* a waiting exclusive acquirer has priority */
-            for (i = 0; i < 8; ++i) if (!r->shared[i]) { r->shared[i] = me; r->shared_rec[i] = 1; r->shared_count++; irq_restore(f); return 1; }
-            irq_restore(f); kpanic("ExAcquireResourceSharedLite: more than 8 shared owners");
+            for (i = 0; i < 4; ++i) if (!r->shared[i]) { r->shared[i] = me; r->shared_rec[i] = 1; r->shared_count++; irq_restore(f); return 1; }
+            irq_restore(f); kpanic("ExAcquireResourceSharedLite: more than 4 shared owners");
         }
         if (!wait) { irq_restore(f); return 0; }
         irq_restore(f);
@@ -359,7 +360,7 @@ void NTAPI ExConvertExclusiveToSharedLite(eresource_t *r)
 {
     uint64_t f = irq_save();
     if (r->owner == thread_current() && r->excl_count == 1) {
-        int i; for (i = 0; i < 8; ++i) if (!r->shared[i]) { r->shared[i] = r->owner; r->shared_rec[i] = 1; r->shared_count++; break; }
+        int i; for (i = 0; i < 4; ++i) if (!r->shared[i]) { r->shared[i] = r->owner; r->shared_rec[i] = 1; r->shared_count++; break; }
         r->owner = 0; r->excl_count = 0;
     }
     irq_restore(f);

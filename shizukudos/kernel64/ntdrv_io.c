@@ -605,6 +605,7 @@ uint8_t NTAPI KeSynchronizeExecution(void *interrupt, uint8_t (NTAPI *routine)(v
 typedef struct io_workitem {
     DEVICE_OBJECT *dev;
     void (NTAPI *routine)(DEVICE_OBJECT *, void *);
+    void (NTAPI *routine_ex)(void *, void *, void *);       /* IoQueueWorkItemEx: (IoObject, Context, IoWorkItem) */
     void *ctx;
     int queued;
     struct io_workitem *next;
@@ -619,6 +620,7 @@ static void work_thread(void *arg)
     for (;;) {
         io_workitem_t *w;
         void (NTAPI *routine)(DEVICE_OBJECT *, void *);
+        void (NTAPI *routine_ex)(void *, void *, void *);
         DEVICE_OBJECT *dev;
         void *ctx;
         uint64_t f;
@@ -627,9 +629,10 @@ static void work_thread(void *arg)
         w = wq_head;
         if (w) { wq_head = w->next; if (!wq_head) wq_tail = 0; }
         if (!w) { irq_restore(f); continue; }
-        routine = w->routine; dev = w->dev; ctx = w->ctx;
+        routine = w->routine; routine_ex = w->routine_ex; dev = w->dev; ctx = w->ctx;
         w->queued = 0;                                          /* the routine may requeue or free the item */
         irq_restore(f);
+        if (routine_ex) { routine_ex(dev, ctx, w); continue; }
         routine(dev, ctx);
     }
 }
@@ -640,11 +643,10 @@ void *NTAPI IoAllocateWorkItem(DEVICE_OBJECT *dev)
     return w;
 }
 void NTAPI IoFreeWorkItem(void *item) { kfree(item); }
-void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, void *), uint32_t queue_type, void *ctx)
+static void queue_item(io_workitem_t *w, void (NTAPI *routine)(DEVICE_OBJECT *, void *),
+                       void (NTAPI *routine_ex)(void *, void *, void *), void *ctx)
 {
-    io_workitem_t *w = item;
     uint64_t f;
-    (void)queue_type;                                           /* Critical/Delayed/HyperCritical share one worker */
     if (!wq_started) {
         sem_init(&wq_sem, 0);
         KASSERT(thread_create("ntdrv-work", work_thread, 0));
@@ -652,18 +654,22 @@ void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, vo
     }
     f = irq_save();
     if (w->queued) { irq_restore(f); kpanic("IoQueueWorkItem: work item already queued"); }
-    w->routine = routine; w->ctx = ctx; w->queued = 1; w->next = 0;
+    w->routine = routine; w->routine_ex = routine_ex; w->ctx = ctx; w->queued = 1; w->next = 0;
     if (wq_tail) wq_tail->next = w; else wq_head = w;
     wq_tail = w;
     irq_restore(f);
     sem_post(&wq_sem);
 }
+void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, void *), uint32_t queue_type, void *ctx)
+{
+    (void)queue_type;                                           /* Critical/Delayed/HyperCritical share one worker */
+    queue_item(item, routine, 0, ctx);
+}
 void NTAPI IoQueueWorkItemEx(void *item, void (NTAPI *routine)(void *, void *, void *), uint32_t queue_type, void *ctx)
 {
-    /* IO_WORKITEM_ROUTINE_EX(IoObject, Context, IoWorkItem): delivered through a trampoline carried in the item. */
-    io_workitem_t *w = item;
-    w->ctx = ctx; w->routine = (void (NTAPI *)(DEVICE_OBJECT *, void *))routine;
-    IoQueueWorkItem(item, (void (NTAPI *)(DEVICE_OBJECT *, void *))routine, queue_type, ctx);
+    /* IO_WORKITEM_ROUTINE_EX(IoObject, Context, IoWorkItem): the worker calls the three-argument form. */
+    (void)queue_type;
+    queue_item(item, 0, routine, ctx);
 }
 /* Host-internal: run fn(ctx) once on the system worker thread (ExQueueWorkItem, PnP requests, WMI REGINFO). */
 struct syswork { io_workitem_t item; void (NTAPI *fn)(void *); void *ctx; };

@@ -16,7 +16,7 @@
 #define D(n) extern void n(void);
 /* ntoskrnl.exe: Ke (ntdrv_ke.c) */
 D(KeGetCurrentIrql) D(KeRaiseIrql) D(KeLowerIrql) D(KeRaiseIrqlToDpcLevel) D(KeRaiseIrqlToSynchLevel)
-D(KeInitializeSpinLock) D(KeAcquireSpinLock) D(KeReleaseSpinLock) D(KeAcquireSpinLockAtDpcLevel)
+D(KeInitializeSpinLock) D(KeAcquireSpinLockAtDpcLevel)      /* KeAcquire/ReleaseSpinLock: prototyped in ntdrv.h */
 D(KeReleaseSpinLockFromDpcLevel) D(KeAcquireSpinLockRaiseToDpc)
 D(KeInitializeDpc) D(KeInitializeThreadedDpc) D(KeInsertQueueDpc) D(KeRemoveQueueDpc)
 D(KeClearEvent) D(KeResetEvent) D(KeReadStateEvent)      /* KeInitializeEvent/KeSetEvent: prototyped in ntdrv.h */

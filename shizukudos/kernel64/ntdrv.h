@@ -101,6 +101,8 @@ int32_t ntdrv_open_close_device(DEVICE_OBJECT *dev, int close);
 void ntdrv_ke_init(void);                                         /* DPC worker + timer thread */
 uint8_t ntdrv_current_irql(void);
 void ntdrv_dpc_queue_flush(void);
+void NTAPI KeAcquireSpinLock(KSPIN_LOCK *l, uint8_t *old);
+void NTAPI KeReleaseSpinLock(KSPIN_LOCK *l, uint8_t old);
 void NTAPI KeInitializeEvent(KEVENT *e, uint32_t type, uint8_t state);
 LONG NTAPI KeSetEvent(KEVENT *e, LONG boost, uint8_t wait);
 int32_t NTAPI KeWaitForSingleObject(void *obj, uint32_t reason, uint8_t mode, uint8_t alertable, int64_t *timeout);

@@ -310,7 +310,8 @@ NTSTATUS NTAPI IoRegisterDeviceInterface(DEVICE_OBJECT *pdo, const GUID *guid, U
         for (i = 0; leaf[i] && n + 1 < sizeof f->link; ++i) f->link[n++] = leaf[i];
         if (ref[0]) { f->link[n++] = '\\'; for (i = 0; ref[i] && n + 1 < sizeof f->link; ++i) f->link[n++] = ref[i]; }
         f->link[n] = 0;
-        for (i = 0; devname[i] && i + 1 < sizeof f->devname; ++i) f->devname[i] = devname[i]; f->devname[i] = 0;
+        for (i = 0; devname[i] && i + 1 < sizeof f->devname; ++i) f->devname[i] = devname[i];
+        f->devname[i] = 0;
         f->next = ifaces; ifaces = f;
         /* DeviceClasses\{guid}\##?#<leaf>: DeviceInstance; subkey #<ref>: SymbolicLink */
         devclass_key(key, sizeof key, g, leaf);
@@ -346,7 +347,8 @@ NTSTATUS NTAPI IoSetDeviceInterfaceState(UNICODE_STRING *link, uint8_t enable)
     kfree(l.Buffer); kfree(t.Buffer);
     f->enabled = !!enable;
     ntdrv_guid_to_ascii(&f->guid, g);
-    for (i = 4, n = 0; f->link[i] && f->link[i] != '\\' && n + 1 < sizeof leaf; ++i) leaf[n++] = f->link[i]; leaf[n] = 0;
+    for (i = 4, n = 0; f->link[i] && f->link[i] != '\\' && n + 1 < sizeof leaf; ++i) leaf[n++] = f->link[i];
+    leaf[n] = 0;
     devclass_key(key, sizeof key, g, leaf);
     { unsigned k = (unsigned)strlen(key); const char *ref = f->link[i] == '\\' ? f->link + i + 1 : "";
       key[k++] = '\\'; key[k++] = '#'; for (i = 0; ref[i] && k + 1 < sizeof key; ++i) key[k++] = ref[i]; key[k++] = '\\'; key[k++] = 'C'; key[k++] = 'o'; key[k++] = 'n'; key[k++] = 't'; key[k++] = 'r'; key[k++] = 'o'; key[k++] = 'l'; key[k] = 0; }
@@ -383,7 +385,8 @@ NTSTATUS NTAPI IoOpenDeviceInterfaceRegistryKey(UNICODE_STRING *link, uint32_t a
     for (f = ifaces; f; f = f->next) if (!strcmp(f->link, name)) break;
     if (!f) return STATUS_OBJECT_NAME_NOT_FOUND;
     ntdrv_guid_to_ascii(&f->guid, g);
-    for (i = 4, n = 0; f->link[i] && f->link[i] != '\\' && n + 1 < sizeof leaf; ++i) leaf[n++] = f->link[i]; leaf[n] = 0;
+    for (i = 4, n = 0; f->link[i] && f->link[i] != '\\' && n + 1 < sizeof leaf; ++i) leaf[n++] = f->link[i];
+    leaf[n] = 0;
     devclass_key(key, sizeof key, g, leaf);
     { unsigned k = (unsigned)strlen(key); const char *ref = f->link[i] == '\\' ? f->link + i + 1 : "", *dp = "\\Device Parameters";
       key[k++] = '\\'; key[k++] = '#'; for (i = 0; ref[i] && k + 1 < sizeof key; ++i) key[k++] = ref[i]; for (i = 0; dp[i]; ++i) key[k++] = dp[i]; key[k] = 0; }
@@ -1194,9 +1197,11 @@ NTSTATUS NTAPI IoReportDetectedDevice(DRIVER_OBJECT *drv, uint32_t bus_type, uin
     n = pnp_root_count++;
     num[0] = (char)('0' + (n / 1000) % 10); num[1] = (char)('0' + (n / 100) % 10); num[2] = (char)('0' + (n / 10) % 10); num[3] = (char)('0' + n % 10); num[4] = 0;
     { const char *a = "ROOT\\LEGACY_"; unsigned k = 0; for (i = 0; a[i]; ++i) p->instance[k++] = a[i]; for (i = 0; svc[i] && k + 6 < sizeof p->instance; ++i) p->instance[k++] = svc[i]; p->instance[k++] = '\\'; for (i = 0; num[i]; ++i) p->instance[k++] = num[i]; p->instance[k] = 0; }
-    for (i = 0; svc[i] && i + 1 < sizeof p->service; ++i) p->service[i] = svc[i]; p->service[i] = 0;
+    for (i = 0; svc[i] && i + 1 < sizeof p->service; ++i) p->service[i] = svc[i];
+    p->service[i] = 0;
     { const char *a = "ROOT\\LEGACY_"; unsigned k = 0; for (i = 0; a[i]; ++i) p->hwid[k++] = a[i]; for (i = 0; svc[i] && k + 1 < sizeof p->hwid; ++i) p->hwid[k++] = svc[i]; p->hwid[k] = 0; }
-    for (i = 0; svc[i] && i + 1 < sizeof p->desc; ++i) p->desc[i] = svc[i]; p->desc[i] = 0;
+    for (i = 0; svc[i] && i + 1 < sizeof p->desc; ++i) p->desc[i] = svc[i];
+    p->desc[i] = 0;
     p->legacy_bus_type = bus_type; p->bus_number = bus_number; p->address = slot; p->ui_number = 0xffffffffu;
     if (resources) {
         const uint32_t count = *(const uint32_t *)resources, *full = (const uint32_t *)resources + 1;
@@ -1803,7 +1808,9 @@ void *NTAPI PsGetCurrentProcess(void) { static uint8_t system_process[0x400]; re
 void *NTAPI IoGetCurrentProcess(void) { return PsGetCurrentProcess(); }
 uint8_t NTAPI PsGetVersion(uint32_t *major, uint32_t *minor, uint32_t *build, UNICODE_STRING *csd)
 {
-    if (major) *major = 10; if (minor) *minor = 0; if (build) *build = 22631;
+    if (major) *major = 10;
+    if (minor) *minor = 0;
+    if (build) *build = 22631;
     if (csd) { csd->Length = 0; if (csd->MaximumLength >= 2 && csd->Buffer) csd->Buffer[0] = 0; }
     return 0;                                                    /* not a checked build */
 }

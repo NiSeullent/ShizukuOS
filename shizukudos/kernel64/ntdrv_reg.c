@@ -342,7 +342,7 @@ static NTSTATUS deliver(RTL_QUERY_REGISTRY_TABLE *t, WCHAR *name, uint32_t type,
     return st == STATUS_BUFFER_TOO_SMALL ? STATUS_SUCCESS : st;
 }
 
-/* Reads a value by name into a fresh buffer: *type/*data/*len; STATUS_OBJECT_NAME_NOT_FOUND when absent. Multi-strings get
+/* Reads a value by name into a fresh buffer: type, data and len; STATUS_OBJECT_NAME_NOT_FOUND when absent. Multi-strings get
  * an extra terminating NUL, as ntoskrnl appends before calling the routine. */
 static NTSTATUS read_value(uint64_t key, const WCHAR *name, uint32_t *type, void **data, uint32_t *len)
 {

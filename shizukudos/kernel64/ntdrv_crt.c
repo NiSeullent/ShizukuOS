@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Kernel64 NT driver host: the C runtime ntoskrnl.exe exports to drivers (the narrow and wide
- * printf family, str*/wcs* and their case-insensitive variants) and the Rtl helpers built on
+ * printf family, the str/wcs functions and their case-insensitive variants) and the Rtl helpers built on
  * them -- code-page conversion (RtlMultiByteToUnicodeN & co.: the ANSI code page here is
- * Windows-1252's Latin-1 subset, single-byte), counted-string utilities, integer parsing,
+ * the Latin-1 subset of Windows-1252, single-byte), counted-string utilities, integer parsing,
  * bitmaps, time fields, GUID strings, version verification, image directory / message-table
  * lookup, stack capture, range lists and the Cm/Io resource-descriptor encoders. Every export is
  * NTAPI (Microsoft x64), every vararg entry reads the Microsoft variadic register layout.
@@ -113,7 +113,8 @@ static void ntdrv_vformat_core(out_t *o, const void *fmt, int fwide, __builtin_m
             for (k = 0; k < n; ++k) out_ch(o, w ? u->Buffer[k] : (uint8_t)a->Buffer[k]);
             if (left) pad(o, width - n, ' ');
             break; }
-        case 'p': longs = 2; alt = 0; zero = 1; width = width > 16 ? width : 16; c = 'X'; /* fallthrough: Microsoft prints 16 upper hex digits */
+        case 'p': longs = 2; alt = 0; zero = 1; width = width > 16 ? width : 16; c = 'X'; /* Microsoft prints 16 upper hex digits */
+            __attribute__((fallthrough));
         case 'd': case 'i': case 'u': case 'x': case 'X': case 'o': {
             int is_signed = c == 'd' || c == 'i';
             int64_t v = va_int(ap, longs, is_signed);
@@ -517,20 +518,23 @@ NTSTATUS NTAPI RtlGUIDFromString(const UNICODE_STRING *s, GUID *g)
 {
     const WCHAR *p = s->Buffer; uint64_t v; int i;
     if (s->Length != 38 * 2 || p[0] != '{' || p[37] != '}' || p[9] != '-' || p[14] != '-' || p[19] != '-' || p[24] != '-') return STATUS_INVALID_PARAMETER;
-    if (!parse_hex(p + 1, 8, &v)) return STATUS_INVALID_PARAMETER; g->Data1 = (uint32_t)v;
-    if (!parse_hex(p + 10, 4, &v)) return STATUS_INVALID_PARAMETER; g->Data2 = (uint16_t)v;
-    if (!parse_hex(p + 15, 4, &v)) return STATUS_INVALID_PARAMETER; g->Data3 = (uint16_t)v;
+    if (!parse_hex(p + 1, 8, &v)) return STATUS_INVALID_PARAMETER;
+    g->Data1 = (uint32_t)v;
+    if (!parse_hex(p + 10, 4, &v)) return STATUS_INVALID_PARAMETER;
+    g->Data2 = (uint16_t)v;
+    if (!parse_hex(p + 15, 4, &v)) return STATUS_INVALID_PARAMETER;
+    g->Data3 = (uint16_t)v;
     for (i = 0; i < 2; ++i) { if (!parse_hex(p + 20 + i * 2, 2, &v)) return STATUS_INVALID_PARAMETER; g->Data4[i] = (uint8_t)v; }
     for (i = 0; i < 6; ++i) { if (!parse_hex(p + 25 + i * 2, 2, &v)) return STATUS_INVALID_PARAMETER; g->Data4[2 + i] = (uint8_t)v; }
     return STATUS_SUCCESS;
 }
 int ntdrv_guid_to_ascii(const GUID *g, char *out)                     /* "{...}" upper-case, 38 chars + NUL */
 {
-    WCHAR w[39]; UNICODE_STRING u; int i;
-    u.Buffer = w; u.Length = 0; u.MaximumLength = sizeof w;
+    WCHAR w[39]; int i;
     { WCHAR *p = w; p[0] = '{'; put_hex(p + 1, g->Data1, 8); p[9] = '-'; put_hex(p + 10, g->Data2, 4); p[14] = '-'; put_hex(p + 15, g->Data3, 4); p[19] = '-';
       put_hex(p + 20, g->Data4[0], 2); put_hex(p + 22, g->Data4[1], 2); p[24] = '-';
-      for (i = 0; i < 6; ++i) put_hex(p + 25 + i * 2, g->Data4[2 + i], 2); p[37] = '}'; p[38] = 0; }
+      for (i = 0; i < 6; ++i) put_hex(p + 25 + i * 2, g->Data4[2 + i], 2);
+      p[37] = '}'; p[38] = 0; }
     for (i = 0; i < 39; ++i) out[i] = (char)w[i];
     return 38;
 }

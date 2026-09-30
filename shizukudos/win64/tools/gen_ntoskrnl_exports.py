@@ -54,7 +54,7 @@ def main():
     text = PROV.read_text()
     nt = table_names(text, "ntdrv_ntoskrnl_exports")
     hal = table_names(text, "ntdrv_hal_exports")
-    (args.out / "ntoskrnl-exports.json").write_text(json.dumps({"ntoskrnl.exe": nt, "hal.dll": hal}, indent=1))
+    (args.out / "ntoskrnl-exports.json").write_text(json.dumps({"ntoskrnl.exe": [n for n, _ in nt], "hal.dll": [n for n, _ in hal]}, indent=1))
     write_def(args.out / "ntoskrnl.def", "ntoskrnl.exe", nt)
     write_def(args.out / "hal.def", "hal.dll", hal)
     print(json.dumps({"ntoskrnl.exe": len(nt), "hal.dll": len(hal)}, indent=2))
