@@ -395,3 +395,5 @@ GUEST_RUN. chrome.exe·chrome_elf.dll·chrome.dll(82,091페이지, 지연 매핑
 `GetThreadDescription`(커널 스레드 레코드에 저장, `t_k32_proc` 193/0), `GetEnabledXStateFeatures`와 XState/CONTEXT 도우미
 (`T_K32_XSTATE` 22/0). M2(`--dump-dom`의 DOM 줄)는 아직 도달하지 않았다.
 
+
+K4 (Chromium 실구동, 갱신): `run_k64_chromium.py`의 다중 프로세스 M2(`--headless --no-sandbox --disable-gpu --dump-dom`, `--single-process` 없음)는 스케줄러 스레드 표를 96→1024로 늘린 커널에서 `status PASS`, `expected_line_seen true`, `exit_code 0`, `faulted false`, 198 s(TCG)로 끝난다. 단 K5가 아직 내놓지 않은 31개 DLL은 커밋되지 않은 로컬 대용품으로 채운 실행이며, 정직한 main 트리에서는 oleacc.dll delay-load 치명 오류에서 멈춘다. 지정된 `--single-process` 명령은 DOM 줄(`ShizukuDOS M2 probe 42`)까지 찍고 종료 코드 0xC0000005(Chromium 종료 단계의 use-after-free)라 M2 조건을 충족하지 못한다. 근거와 한계는 reports/K4.md.
