@@ -1,0 +1,37 @@
+diff --git a/libunwind/src/Unwind-seh.cpp b/libunwind/src/Unwind-seh.cpp
+index b2bb119ed..ce053c9d5 100644
+--- a/libunwind/src/Unwind-seh.cpp
++++ b/libunwind/src/Unwind-seh.cpp
+@@ -148,7 +148,15 @@ _GCC_specific_handler(PEXCEPTION_RECORD ms_exc, PVOID frame, PCONTEXT ms_ctx,
+     }
+     // FIXME: Indicate target frame in foreign case!
+     // phase 2: the clean up phase
+-    RtlUnwindEx(frame, (PVOID)disp->ControlPc, ms_exc, exc, ms_ctx, disp->HistoryTable);
++    // ShizukuDOS: the Shizuku ntdll's RtlUnwindEx starts its walk from the ContextRecord it is given (Windows only
++    // uses it as scratch and starts from the caller), and its dispatcher passes the dispatched frame's context as
++    // ms_ctx. Starting from a context captured here gives the Windows walk (every frame from this call up to the
++    // target, so the cleanups in between run) under both behaviours.
++    {
++      CONTEXT start_ctx;
++      RtlCaptureContext(&start_ctx);
++      RtlUnwindEx(frame, (PVOID)disp->ControlPc, ms_exc, exc, &start_ctx, disp->HistoryTable);
++    }
+     _LIBUNWIND_ABORT("RtlUnwindEx() failed");
+   case _URC_INSTALL_CONTEXT: {
+     // If we were called by __libunwind_seh_personality(), indicate that
+@@ -184,6 +192,7 @@ _GCC_specific_handler(PEXCEPTION_RECORD ms_exc, PVOID frame, PCONTEXT ms_ctx,
+     // Don't use the one that was passed in; we don't want to overwrite the
+     // context in the DISPATCHER_CONTEXT.
+     CONTEXT new_ctx;
++    RtlCaptureContext(&new_ctx);  // ShizukuDOS: see the phase 2 call above
+     RtlUnwindEx(frame, (PVOID)target, ms_exc, (PVOID)retval, &new_ctx, disp->HistoryTable);
+     _LIBUNWIND_ABORT("RtlUnwindEx() failed");
+   }
+@@ -404,6 +413,7 @@ _Unwind_Resume(_Unwind_Exception *exception_object) {
+     ms_exc.ExceptionInformation[1] = exception_object->private_[1];
+     ms_exc.ExceptionInformation[2] = exception_object->private_[2];
+     ms_exc.ExceptionInformation[3] = exception_object->private_[3];
++    RtlCaptureContext(&ms_ctx);  // ShizukuDOS: see _GCC_specific_handler's phase 2 call
+     RtlUnwindEx((PVOID)exception_object->private_[1],
+                 (PVOID)exception_object->private_[2], &ms_exc,
+                 exception_object, &ms_ctx, &hist);

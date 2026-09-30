@@ -1,3 +1,18 @@
+diff --git a/Source/JavaScriptCore/runtime/ProfilerSupport.cpp b/Source/JavaScriptCore/runtime/ProfilerSupport.cpp
+index 285ed4c0..86d0c35d 100644
+--- a/Source/JavaScriptCore/runtime/ProfilerSupport.cpp
++++ b/Source/JavaScriptCore/runtime/ProfilerSupport.cpp
+@@ -45,7 +45,10 @@
+ 
+ #if OS(WINDOWS)
+ #include <io.h>
++#endif
+ 
++// mingw-w64 (ShizukuDOS toolchain) declares the POSIX names itself.
++#if OS(WINDOWS) && COMPILER(MSVC)
+ inline static int open(const char* filename, int oflag, int pmode)
+ {
+     return _open(filename, oflag, pmode);
 diff --git a/Source/WTF/wtf/CurrentTime.cpp b/Source/WTF/wtf/CurrentTime.cpp
 index f4b97e56..b1c51391 100644
 --- a/Source/WTF/wtf/CurrentTime.cpp
