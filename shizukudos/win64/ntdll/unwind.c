@@ -104,22 +104,26 @@ SHZ_EXPORT BOOLEAN __cdecl RtlDeleteFunctionTable(PRUNTIME_FUNCTION table)
  * RtlDeleteGrowableFunctionTable(handle) unregisters. The handle is the address of the registry slot: opaque, non-NULL, and
  * checked (a stale or foreign handle is ignored by the two VOID functions, as on Windows). RtlLookupFunctionEntry reports
  * range_base as the image base for a hit. */
+/* NTSTATUS values as plain numbers: this file is also compiled by the host unwinder test (tests/test_unwind.c) with a header
+ * shim that has no ntstatus.h. */
+#define GROW_STATUS_INVALID_PARAMETER 0xC000000Du
+#define GROW_STATUS_NO_MEMORY 0xC0000017u
 SHZ_EXPORT DWORD NTAPI RtlAddGrowableFunctionTable(   /* DWORD: the winnt.h prototype; the value is an NTSTATUS */
                                                       PVOID *handle, PRUNTIME_FUNCTION table, DWORD count, DWORD max,
                                                       ULONG_PTR range_base, ULONG_PTR range_end)
 {
     unsigned i;
-    if (!handle || !table || count > max || !max || range_end <= range_base) return (DWORD)STATUS_INVALID_PARAMETER;
+    if (!handle || !table || count > max || !max || range_end <= range_base) return GROW_STATUS_INVALID_PARAMETER;
     dyn_acquire();
     for (i = 0; i < 128; ++i)
         if (!dyn_tables[i].used) {
             dyn_tables[i] = (dyn_table_t){ table, count, range_base, 0, 0, 0, 0, 1, 1, max, range_end };
             dyn_release();
             *handle = &dyn_tables[i];
-            return (DWORD)STATUS_SUCCESS;
+            return 0;
         }
     dyn_release();
-    return (DWORD)STATUS_NO_MEMORY;
+    return GROW_STATUS_NO_MEMORY;
 }
 
 static dyn_table_t *growable_of(PVOID handle)
