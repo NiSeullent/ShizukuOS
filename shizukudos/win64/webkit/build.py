@@ -158,6 +158,13 @@ def build_compat():
     return obj
 
 
+# mingw-w64's UCRT import library, by path: besides the ucrtbase imports it carries the msvcrt-style entry points
+# (__getmainargs, _onexit, __set_app_type, ...) that crt2.o and libmingw32 were compiled against. `-lucrtbase` would
+# find the Shizuku libucrtbase.a first (plain dlltool imports, without those objects). A literal -lucrtbase still follows:
+# without one, clang's MinGW driver appends -lmsvcrt.
+MINGW_UCRT = "/usr/x86_64-w64-mingw32/lib/libucrtbase.a"
+
+
 def shz_libs(*names):
     """Shizuku import libraries, by path, so they bind ahead of mingw-w64's same-named ones."""
     return [str(W64OUT / f"lib{n}.a") for n in names]
@@ -175,7 +182,7 @@ def configure_jsc(tree, icu, config, compat, log):
            f"-DSHZ_WIN64_LIBDIR={W64OUT}", f"-DSHZ_ICU_PREFIX={icu}", "-DCMAKE_BUILD_TYPE=Release", "-DPORT=JSCOnly", "-DDEVELOPER_MODE=OFF",
            "-DUSE_SYSTEM_UNIFDEF=ON", "-DENABLE_API_TESTS=OFF", "-DENABLE_REMOTE_INSPECTOR=OFF", "-DENABLE_TOOLS=OFF",
            f"-DICU_ROOT={icu}", f"-DCMAKE_C_FLAGS={cflags}", f"-DCMAKE_CXX_FLAGS={cflags}",
-           f"-DCMAKE_CXX_STANDARD_LIBRARIES={extra} -lucrtbase", f"-DCMAKE_C_STANDARD_LIBRARIES={extra} -lucrtbase",
+           f"-DCMAKE_CXX_STANDARD_LIBRARIES={extra} {MINGW_UCRT} -lucrtbase", f"-DCMAKE_C_STANDARD_LIBRARIES={extra} {MINGW_UCRT} -lucrtbase",
            *CONFIGS[config]]
     run(cmd, timeout=900)
     log["cmake"] = [str(x) for x in cmd]
@@ -185,7 +192,7 @@ def configure_jsc(tree, icu, config, compat, log):
 def build_wkbatch(compat):
     exe = OUT / "wkbatch.exe"
     cmd = ["clang", f"--target={TARGET}", "-O2", "-Wall", "-Werror", *UCRT_DEFS, "-fuse-ld=lld", "-static",
-           HERE / "tests" / "wkbatch.c", compat, *shz_libs("ntdll", "bcryptprimitives"), "-lucrtbase", "-o", exe]
+           HERE / "tests" / "wkbatch.c", compat, *shz_libs("ntdll", "bcryptprimitives"), MINGW_UCRT, "-lucrtbase", "-o", exe]
     run(cmd)
     return exe, cmd
 

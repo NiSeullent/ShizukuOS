@@ -21,7 +21,9 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 set(_shz_cflags "-D_UCRT -D__MSVCRT_VERSION__=0xE00 -D_WIN32_WINNT=0x0A00")
 set(CMAKE_C_FLAGS_INIT "${_shz_cflags}")
 set(CMAKE_CXX_FLAGS_INIT "${_shz_cflags}")
-set(_shz_ldflags "-fuse-ld=lld -static -L${SHZ_WIN64_LIBDIR} -Wl,--no-insert-timestamp")
+# --target also here: WebKit probes the linker as `${CMAKE_C_COMPILER} ${CMAKE_EXE_LINKER_FLAGS} -Wl,--help`
+# (OptionsCommon.cmake), which would otherwise ask the host linker and add ELF-only options.
+set(_shz_ldflags "--target=x86_64-w64-windows-gnu -fuse-ld=lld -static -L${SHZ_WIN64_LIBDIR} -Wl,--no-insert-timestamp")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${_shz_ldflags}")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_shz_ldflags}")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "${_shz_ldflags}")
