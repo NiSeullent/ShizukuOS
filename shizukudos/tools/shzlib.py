@@ -117,6 +117,51 @@ def ensure_upstream(name):
     return dest
 
 
+def _fetch_pinned(url, dest, sha256):
+    """Download `url` to `dest` unless a file with the pinned sha256 is already there."""
+    if dest.exists() and sha256_file(dest) == sha256:
+        return dest
+    partial = dest.with_name(dest.name + ".partial")
+    urllib.request.urlretrieve(url, partial)
+    digest = sha256_file(partial)
+    if digest != sha256:
+        partial.unlink()
+        raise RuntimeError(f"{url}: sha256 {digest}, manifest pins {sha256}; refusing a different file")
+    partial.replace(dest)
+    return dest
+
+
+def ensure_deb_upstream(name):
+    """Fetch and unpack a `kind: debian-binary-packages` upstream (never modified).
+
+    Layout under build/upstream/<name>/: downloads/ (the pinned .deb and Debian source files, each
+    checked against its manifest sha256), root/ (every .deb unpacked with dpkg-deb -x). Every file the
+    manifest lists under "files" is checked in root/. Returns {"root", "downloads", "spec"}."""
+    spec = load_manifest()["upstreams"][name]
+    if spec.get("kind") != "debian-binary-packages":
+        raise RuntimeError(f"{name} is not a debian-binary-packages upstream")
+    base = UPSTREAM_DIR / name
+    downloads, root = base / "downloads", base / "root"
+    downloads.mkdir(parents=True, exist_ok=True)
+    for group in ("packages", "source"):
+        for item in spec[group].values():
+            _fetch_pinned(item["url"], downloads / item["file"], item["sha256"])
+    stamp = root / ".unpacked-from"
+    want = "\n".join(sorted(p["sha256"] for p in spec["packages"].values()))
+    if not (stamp.exists() and stamp.read_text() == want):
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True)
+        for item in spec["packages"].values():
+            run(["dpkg-deb", "-x", downloads / item["file"], root])
+        stamp.write_text(want)
+    for relative, digest in spec["files"].items():
+        path = root / relative
+        if not path.is_file() or sha256_file(path) != digest:
+            raise RuntimeError(f"{name}: {relative} missing or not the pinned file (sha256 {digest})")
+    return {"root": root, "downloads": downloads, "spec": spec}
+
+
 def ensure_open_watcom():
     """Return the Open Watcom root, extracting the snapshot if needed.
 

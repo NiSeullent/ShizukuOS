@@ -16,8 +16,9 @@ verify the installed disk ON THE HOST, then boot the installed disk a second tim
      loader then starts Kernel64 (BOOT.INI mode = kernel64) depends on agent C2's boot manager: BLOCKED until it is in
      the tree (detected by the loader's own strings), after that Kernel64 must reach its self-test summary.
    - Legacy BIOS (SeaBIOS): the protective MBR's code (install/gptmbr.asm) must find the legacy-bootable ESP and run its
-     boot sector (seen on COM1 and in VGA text memory). Kernel64 via BIOS needs agent C3's disk-installable SYSLINUX
-     variant on the ESP: BLOCKED until then.
+     boot sector, which is syslinux 6.04 installed into esp.img by install/mkpayload.py (agent C3): SYSLINUX on COM1,
+     then its menu's default entry (mboot.c32 \\SHZDOS\\K64STUB.ELF --- KERNEL64S.BIN --- WIN64.IMG) must bring Kernel64
+     to its self-test summary and SHZ-EXIT:0. An ESP without syslinux (mkpayload --no-bios-boot) stays BLOCKED.
 Every cell is PASS / FAIL / BLOCKED; result.json in build/shizukudos/install/vm-test/.
 """
 import argparse
@@ -161,9 +162,8 @@ def uefi_second_boot(args, target):
     shutil.copyfile(target, disk)
     serial = work / "serial.log"
     cmd = [args.qemu, "-machine", "q35", "-accel", "tcg", "-cpu", "max", "-m", "512",
-           # OVMF with S3 enabled reserves ACPI NVS at 8 MiB, inside the RAM Kernel64 owns from 0; the boot manager then
-           # refuses the direct boot (documented in STATUS 2d, same setting as supervisor/test_bootmgr.py's kernel64 cases)
-           *(["-global", "ICH9-LPC.disable_s3=1"] if direct else []),
+           # OVMF keeps QEMU's default S3 (on): its ACPI NVS at 8 MiB is a firmware hole that the boot manager hands to
+           # Kernel64 (kernel64/standalone/memholes.h), which fences it off in its heap
            "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
            "-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}",
            "-drive", f"file={disk},format=raw,if=virtio", "-vga", "std", "-display", "none", "-nic", "none",
@@ -194,24 +194,31 @@ def bios_second_boot(args, target):
     work.mkdir(parents=True)
     disk = work / "disk.img"
     shutil.copyfile(target, disk)
+    esp_syslinux = b'"bios_boot": "syslinux' in (INSTALL / "payload" / "manifest.json").read_bytes()
     sock_dir = Path(tempfile.mkdtemp(prefix="shzinst-"))    # AF_UNIX paths are limited to 108 bytes
     serial, qmp_path = work / "serial.log", sock_dir / "qmp.sock"
-    cmd = [args.qemu, "-machine", "pc", "-accel", "tcg", "-cpu", "max", "-m", "128", "-nodefaults", "-vga", "std",
+    cmd = [args.qemu, "-machine", "pc", "-accel", "tcg", "-cpu", "max", "-m", "256", "-nodefaults", "-vga", "std",
            "-display", "none", "-drive", f"file={disk},format=raw,if=ide", "-serial", f"file:{serial}",
-           "-qmp", f"unix:{qmp_path},server=on,wait=off", "-no-reboot"]
+           "-qmp", f"unix:{qmp_path},server=on,wait=off", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
+           "-no-reboot"]
     proc = subprocess.Popen([str(c) for c in cmd], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
     screen = []
     try:
         ok = qemu.wait_for(serial, "->VBR", 120) or qemu.wait_for(serial, "FAIL:", 1)
-        time.sleep(4)                                    # let the ESP boot sector print its message
-        try:
-            q = qemu.QMP(qmp_path)
-            screen = qemu.decode_text_page(qemu.read_guest_memory(q, 0xB8000, 4000, work / "vga.bin"))
-            q.close()
-        except Exception as exc:                         # evidence below says what was (not) seen
-            screen = [f"(VGA text memory not read: {exc})"]
+        if esp_syslinux:
+            qemu.wait_for(serial, "SHZ-EXIT:", 900)          # syslinux menu (5 s) -> Kernel64 self-tests
+        else:
+            time.sleep(4)                                    # let the ESP boot sector print its message
+        if proc.poll() is None:
+            try:
+                q = qemu.QMP(qmp_path)
+                screen = qemu.decode_text_page(qemu.read_guest_memory(q, 0xB8000, 4000, work / "vga.bin"))
+                q.close()
+            except Exception as exc:                         # evidence below says what was (not) seen
+                screen = [f"(VGA text memory not read: {exc})"]
     finally:
-        proc.terminate()
+        if proc.poll() is None:
+            proc.terminate()
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
@@ -221,12 +228,21 @@ def bios_second_boot(args, target):
     (work / "screen.txt").write_text("\n".join(screen) + "\n")
     check("second boot BIOS: SeaBIOS ran the protective MBR's code, which found the legacy-bootable ESP (COM1: SHZ-MBR ->VBR)",
           ok and "SHZ-MBR ->VBR" in text, text.strip()[-200:])
-    vbr_msg = any("not a bootable disk" in l for l in screen)
-    check("second boot BIOS: the ESP's own boot sector ran from p1 (its message is in VGA text memory)", vbr_msg,
-          [l for l in screen if l.strip()][:6])
-    cell("second boot BIOS: Kernel64 starts from the installed disk", "BLOCKED",
-         "the ESP boot sector is mkfs.fat's non-system stub; loading KERNEL64S.BIN needs agent C3's disk-installable "
-         "SYSLINUX variant (mboot.c32 + \\SHZDOS\\K64STUB.ELF, KERNEL64S.BIN, WIN64.IMG are already on the ESP)")
+    if not esp_syslinux:
+        vbr_msg = any("not a bootable disk" in l for l in screen)
+        check("second boot BIOS: the ESP's own boot sector ran from p1 (its message is in VGA text memory)", vbr_msg,
+              [l for l in screen if l.strip()][:6])
+        cell("second boot BIOS: Kernel64 starts from the installed disk", "BLOCKED",
+             "the payload was built with --no-bios-boot: the ESP boot sector is mkfs.fat's non-system stub")
+    else:
+        exit_m = re.search(r"SHZ-EXIT:([0-9a-f]+)", text)
+        check("second boot BIOS: the ESP's syslinux boot sector loaded ldlinux.sys from p1 (SYSLINUX 6.04 on COM1)",
+              "SYSLINUX 6.04" in text, [l for l in text.splitlines() if "SYSLINUX" in l or "SHZ-MBR" in l][:4])
+        check("second boot BIOS: the installed syslinux.cfg's default entry started the Kernel64 Multiboot stub",
+              "SHZ-STUB: kernel" in text, [l for l in text.splitlines() if "SHZ-STUB" in l][:4])
+        check("second boot BIOS: Kernel64 starts from the installed disk and finishes its self-tests (SHZ-EXIT:0)",
+              "done, 0 self-test failure(s)" in text and bool(exit_m) and exit_m.group(1) == "0",
+              [l for l in text.splitlines() if "self-test failure" in l or "SHZ-EXIT" in l][:4] or text[-400:])
     disk.unlink()
 
 
