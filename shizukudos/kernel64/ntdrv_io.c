@@ -11,6 +11,7 @@
 #include "fs.h"
 #include "registry.h"
 #include "pci.h"
+#include "ntsys.h"
 
 #define SL_PENDING_RETURNED 0x01
 #define SL_INVOKE_ON_CANCEL 0x20
@@ -23,6 +24,7 @@
 
 static ntdrv_devnode_t *devnodes;
 static ntdrv_symlink_t *symlinks;
+ntdrv_devnode_t *ntdrv_devnodes(void) { return devnodes; }
 
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 
@@ -252,6 +254,12 @@ static int32_t run_sync(DEVICE_OBJECT *dev, IRP *irp, struct sync_irp *s, uint64
     return st;
 }
 
+int32_t ntdrv_send_irp_sync(DEVICE_OBJECT *dev, IRP *irp, uint64_t *info)
+{
+    struct sync_irp s;
+    return run_sync(dev, irp, &s, info);
+}
+
 int32_t ntdrv_device_control(DEVICE_OBJECT *dev, uint32_t ioctl, const void *in, uint32_t inlen,
                              void *out, uint32_t outlen, int internal, uint64_t *info)
 {
@@ -438,8 +446,101 @@ static int function_for_line(unsigned line, pci_dev_t *out)
         }
     return 0;
 }
+
+void ntdrv_release_claims(ntdrv_driver_t *d)
+{
+    unsigned i = 0;
+    while (i < n_owned) {
+        if (owned[i].drv == d) {
+            pci_claim(&owned[i].dev, 0);
+            kprintf("K64 ntdrv: %s released PCI %x:%x.%x\n", d->name, owned[i].dev.bus, owned[i].dev.dev, owned[i].dev.fn);
+            owned[i] = owned[--n_owned];
+        } else ++i;
+    }
+}
+unsigned ntdrv_claimed_functions(ntdrv_driver_t *d, pci_dev_t *out, unsigned max)
+{
+    unsigned i, n = 0;
+    for (i = 0; i < n_owned && n < max; ++i)
+        if (owned[i].drv == d) out[n++] = owned[i].dev;
+    return n;
+}
+
+/* Enum\PCI\<hwid>\B<bus>D<dev>F<fn> (shzpnp's instance id for a function of the Kernel64 bus scan): parse it. */
+static int hexval(uint16_t c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+static int parse_instance(const uint16_t *w, unsigned n, unsigned *bus, unsigned *dev, unsigned *fn)
+{
+    int a, b, c, d2, e;
+    unsigned i, f = 0;
+    if (n < 8 || w[0] != 'B' || w[3] != 'D' || w[6] != 'F') return 0;
+    a = hexval(w[1]); b = hexval(w[2]); c = hexval(w[4]); d2 = hexval(w[5]);
+    if (a < 0 || b < 0 || c < 0 || d2 < 0) return 0;
+    for (i = 7; i < n; ++i) { e = hexval(w[i]); if (e < 0) return 0; f = f * 16 + (unsigned)e; }
+    *bus = (unsigned)(a * 16 + b); *dev = (unsigned)(c * 16 + d2); *fn = f;
+    return 1;
+}
+static int wide_eq_ascii_ci(const uint16_t *w, unsigned n, const char *a)
+{
+    unsigned i;
+    for (i = 0; i < n; ++i) {
+        if (!a[i]) return 0;
+        if (reg_upcase_char(w[i]) != reg_upcase_char((uint16_t)(uint8_t)a[i])) return 0;
+    }
+    return a[n] == 0;
+}
+void ntdrv_bind_enum(ntdrv_driver_t *d)
+{
+    static const uint16_t path[] = { 'M','a','c','h','i','n','e','\\','S','y','s','t','e','m','\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l',
+                                     'S','e','t','\\','E','n','u','m','\\','P','C','I' };
+    static const uint16_t svc[] = { 'S','e','r','v','i','c','e' };
+    regkey_t *pci, *hw, *inst;
+    uint32_t i, j;
+    pci_dev_t all[32];
+    unsigned n = 0, scanned = 0, k, bound = 0;
+    reg_lock();
+    if (reg_resolve(reg_root(), path, sizeof path / 2, 0, 0, 1, 0, 0, &pci, 0)) { reg_unlock(); return; }
+    for (i = 0; (hw = reg_nth_child(pci, i)) != 0; ++i) {
+        for (j = 0; (inst = reg_nth_child(hw, j)) != 0; ++j) {
+            regval_t *v = reg_find_value(inst, svc, 7);
+            unsigned chars, bus, dev, fn;
+            const uint16_t *data;
+            if (!v || (v->type != REG_SZ && v->type != REG_EXPAND_SZ)) continue;
+            data = (const uint16_t *)regval_data(v);
+            chars = v->data_len / 2;
+            while (chars && !data[chars - 1]) --chars;
+            if (!wide_eq_ascii_ci(data, chars, d->name)) continue;
+            if (!parse_instance(regkey_name(inst), inst->name_len, &bus, &dev, &fn)) continue;   /* SHZnnnn: no function */
+            if (!scanned) { n = pci_enumerate(all, 32); scanned = 1; }
+            for (k = 0; k < n; ++k)
+                if (all[k].bus == bus && all[k].dev == dev && all[k].fn == fn) {
+                    char ipath[128];                           /* PCI\<hwid>\B..D..F.., the devnode's instance path */
+                    unsigned m = 0, q;
+                    static const char pfx[] = "PCI\\";
+                    for (q = 0; pfx[q]; ++q) ipath[m++] = pfx[q];
+                    for (q = 0; q < hw->name_len && m + 1 < sizeof ipath; ++q) ipath[m++] = (char)(regkey_name(hw)[q] < 0x80 ? regkey_name(hw)[q] : '?');
+                    if (m + 1 < sizeof ipath) ipath[m++] = '\\';
+                    for (q = 0; q < inst->name_len && m + 1 < sizeof ipath; ++q) ipath[m++] = (char)(regkey_name(inst)[q] < 0x80 ? regkey_name(inst)[q] : '?');
+                    ipath[m] = 0;
+                    own_function(&all[k], d);
+                    ntdrv_pnp_add(d, &all[k], inst, ipath);
+                    ++bound;
+                }
+        }
+    }
+    reg_unlock();
+    if (!bound) kprintf("K64 ntdrv: %s: no Enum\\PCI device names this service (no PCI function claimed)\n", d->name);
+}
 #else
 void ntdrv_pci_note_mmio(uint64_t pa, uint64_t size) { (void)pa; (void)size; }   /* no device is passed through here */
+void ntdrv_release_claims(ntdrv_driver_t *d) { (void)d; }
+unsigned ntdrv_claimed_functions(ntdrv_driver_t *d, pci_dev_t *out, unsigned max) { (void)d; (void)out; (void)max; return 0; }
+void ntdrv_bind_enum(ntdrv_driver_t *d) { (void)d; }
 #endif
 
 /* ---------------------------------------------------------------- interrupts */
@@ -547,6 +648,8 @@ typedef struct io_workitem {
     void *ctx;
     int queued;
     struct io_workitem *next;
+    void (NTAPI *ex_routine)(void *);           /* ExQueueWorkItem: WORK_QUEUE_ITEM.WorkerRoutine(Parameter) */
+    int ex_free;                                /* wrapper allocated by ExQueueWorkItem: freed after the call */
 } io_workitem_t;
 static io_workitem_t *wq_head, *wq_tail;
 static ksem_t wq_sem;
@@ -569,7 +672,8 @@ static void work_thread(void *arg)
         routine = w->routine; dev = w->dev; ctx = w->ctx;
         w->queued = 0;                                          /* the routine may requeue or free the item */
         irq_restore(f);
-        routine(dev, ctx);
+        if (w->ex_routine) { void (NTAPI *r)(void *) = w->ex_routine; if (w->ex_free) kfree(w); r(ctx); }
+        else routine(dev, ctx);
     }
 }
 void *NTAPI IoAllocateWorkItem(DEVICE_OBJECT *dev)
@@ -579,6 +683,18 @@ void *NTAPI IoAllocateWorkItem(DEVICE_OBJECT *dev)
     return w;
 }
 void NTAPI IoFreeWorkItem(void *item) { kfree(item); }
+void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, void *), uint32_t queue_type, void *ctx);
+/* WORK_QUEUE_ITEM { LIST_ENTRY List; WorkerRoutine; Parameter } (0x20): run on the same system worker thread */
+void NTAPI ExQueueWorkItem(void *item, uint32_t queue_type)
+{
+    struct { LIST_ENTRY List; void (NTAPI *WorkerRoutine)(void *); void *Parameter; } *wq = item;
+    io_workitem_t *w = kzalloc(sizeof *w);
+    (void)queue_type;
+    if (!w) kpanic("ExQueueWorkItem: out of memory");
+    w->ex_routine = wq->WorkerRoutine; w->ex_free = 1;
+    IoQueueWorkItem(w, 0, queue_type, wq->Parameter);
+}
+
 void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, void *), uint32_t queue_type, void *ctx)
 {
     io_workitem_t *w = item;
@@ -732,24 +848,34 @@ static void image_path(const char *service, const char *raw, char *out, unsigned
     for (i = 0; i < n; ++i) if (out[i] == '/') out[i] = '\\';
 }
 
-static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
+/* The UNICODE_STRING RegistryPath of NtLoadDriver/NtUnloadDriver: copied in, its last component is the service name. */
+static int32_t read_regpath(process_t *p, uint64_t regpath_ustr, uint16_t *w, unsigned *chars, char *service, unsigned cap)
 {
     struct { uint16_t len, maxlen; uint32_t pad; uint64_t buf; } u;
+    char path[400];
+    unsigned i, seg = 0, j = 0;
+    if (copy_from_user(p, &u, regpath_ustr, sizeof u) || u.len / 2 >= 200) return STATUS_INVALID_PARAMETER;
+    if (copy_from_user(p, w, u.buf, u.len)) return STATUS_ACCESS_VIOLATION;
+    *chars = u.len / 2;
+    ntdrv_wide_to_ascii(w, *chars, path, sizeof path);
+    for (i = 0; path[i]; ++i) if (path[i] == '\\') seg = i + 1;   /* service name = last path component */
+    for (i = seg; path[i] && j < cap - 1; ++i) service[j++] = path[i];
+    service[j] = 0;
+    return service[0] ? STATUS_SUCCESS : STATUS_OBJECT_NAME_INVALID;
+}
+
+static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
+{
     uint16_t w[200];
-    char path[400], service[64], raw[300], imagepath[320];
-    unsigned chars, i, seg = 0;
+    char service[64], raw[300], imagepath[320];
+    unsigned chars, i;
     regkey_t *node, *start;
     regval_t *v;
     fsnode_t *sys;
     int32_t st;
-    ntdrv_driver_t *d;
-    if (copy_from_user(p, &u, regpath_ustr, sizeof u) || u.len / 2 >= 200) return STATUS_INVALID_PARAMETER;
-    if (copy_from_user(p, w, u.buf, u.len)) return STATUS_ACCESS_VIOLATION;
-    chars = u.len / 2;
-    ntdrv_wide_to_ascii(w, chars, path, sizeof path);
-    for (i = 0; path[i]; ++i) if (path[i] == '\\') seg = i + 1;   /* service name = last path component */
-    { unsigned j = 0; for (i = seg; path[i] && j < sizeof service - 1; ++i) service[j++] = path[i]; service[j] = 0; }
-    if (!service[0]) return STATUS_OBJECT_NAME_INVALID;
+    ntdrv_driver_t *d = 0;
+    st = read_regpath(p, regpath_ustr, w, &chars, service, sizeof service);
+    if (st) return st;
     if (ntdrv_find_driver(service)) return STATUS_IMAGE_ALREADY_LOADED;   /* one image per service, as on Windows */
     /* resolve the Services\<name> key ("\Registry\..." object path, as sysreg.c does) and read ImagePath */
     reg_lock();
@@ -781,16 +907,67 @@ static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
     if (!sys || sys->is_dir) { kprintf("K64 ntdrv: %s image %s not found\n", service, imagepath); return STATUS_OBJECT_NAME_NOT_FOUND; }
     kprintf("K64 ntdrv: NtLoadDriver(%s) -> %s\n", service, imagepath);
     st = ntdrv_load_node(sys, service, &d);
+    if (st == 0 && d && d->started) {
+        ntdrv_bind_enum(d);                       /* the devnodes installed for this service are now its functions */
+        ntdrv_pnp_start_pending(d);               /* AddDevice + IRP_MN_START_DEVICE, as the PnP manager would */
+    }
+    return st;
+}
+
+/* NtUnloadDriver(RegistryPath) (0xe2) */
+static int32_t unload_driver_from_service(process_t *p, uint64_t regpath_ustr)
+{
+    uint16_t w[200];
+    char service[64];
+    unsigned chars;
+    int32_t st = read_regpath(p, regpath_ustr, w, &chars, service, sizeof service);
+    if (st) return st;
+    return ntdrv_unload_service(service);
+}
+
+/* NtShzDriverQuery(buffer, length, &count) (0xe3): one shz_driver_info_t per started image. */
+static int32_t query_drivers(process_t *p, uint64_t buf, uint64_t len, uint64_t count_out)
+{
+    ntdrv_driver_t *d;
+    uint32_t n = 0;
+    int32_t st = STATUS_SUCCESS;
+    for (d = ntdrv_drivers(); d; d = d->next) {
+        shz_driver_info_t e;
+        pci_dev_t fns[4];
+        DEVICE_OBJECT *dev;
+        ntdrv_devnode_t *node;
+        unsigned i, k = 0;
+        if (!d->started) continue;
+        if ((uint64_t)(n + 1) * sizeof e > len) { st = STATUS_BUFFER_TOO_SMALL; ++n; continue; }   /* keep counting */
+        memset(&e, 0, sizeof e);
+        for (i = 0; d->name[i] && i < sizeof e.service - 1; ++i) e.service[i] = d->name[i];
+        e.image_base = d->image_base;
+        e.image_size = (uint32_t)d->image_size;
+        e.flags = SHZ_DRV_STARTED | (d->dependency ? SHZ_DRV_DEPENDENCY : 0) | ((d->users & 0xff) << SHZ_DRV_USERS_SHIFT);
+        for (dev = d->drv->DeviceObject; dev; dev = dev->NextDevice) ++e.ndevices;
+        e.npci = ntdrv_claimed_functions(d, fns, 4);
+        for (i = 0; i < e.npci; ++i) { e.pci[i].bus = fns[i].bus; e.pci[i].dev = fns[i].dev; e.pci[i].fn = fns[i].fn; }
+        for (node = devnodes; node && k < 4; node = node->next)
+            if (node->dev->DriverObject == d->drv) {
+                for (i = 0; node->name[i] && i < sizeof e.device[0] - 1; ++i) e.device[k][i] = node->name[i];
+                ++k;
+            }
+        if (copy_to_user(p, buf + (uint64_t)n * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
+        ++n;
+    }
+    if (count_out && copy_to_user(p, count_out, &n, 4)) return STATUS_ACCESS_VIOLATION;
     return st;
 }
 
 /* ---------------------------------------------------------------- ntdrv syscall router */
 int32_t sys_ext_ntdrv(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {
-    (void)a2; (void)a3; (void)a4;
+    (void)a4;
     switch (num) {
     case 0xe0: return load_driver_from_service(cur, a1);                     /* NtLoadDriver(RegistryPath) */
     case 0xe1: return sys_device_io_control(cur, r, a1);                     /* NtDeviceIoControlFile(h, ev, apc, ctx, iosb, ...) */
+    case 0xe2: return unload_driver_from_service(cur, a1);                   /* NtUnloadDriver(RegistryPath) */
+    case 0xe3: return query_drivers(cur, a1, a2, a3);                        /* NtShzDriverQuery(buf, len, &count) */
     default: return STATUS_INVALID_SYSTEM_SERVICE;
     }
 }

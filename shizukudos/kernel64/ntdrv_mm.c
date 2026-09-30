@@ -130,3 +130,18 @@ uint32_t NTAPI MmSizeOfMdl(void *va, uint32_t len)
     return (uint32_t)(sizeof(MDL) + (end - start) / PAGE_SIZE * 8);
 }
 void NTAPI MmInitializeMdl(MDL *m, void *va, uint32_t len) { mdl_init(m, va, len); m->MappedSystemVa = 0; }
+
+/* IoBuildPartialMdl: `target` describes [va, va+len) of the pages `src` maps (len 0 = to the end of src). */
+#define MDL_PARTIAL 0x0010
+void NTAPI IoBuildPartialMdl(MDL *src, MDL *target, void *va, uint32_t len)
+{
+    uint64_t start = (uint64_t)src->StartVa + src->ByteOffset, v = (uint64_t)va;
+    if (!len) len = (uint32_t)(start + src->ByteCount - v);
+    target->Next = 0;
+    target->StartVa = (void *)(v & ~0xfffull);
+    target->ByteOffset = (uint32_t)(v & 0xfff);
+    target->ByteCount = len;
+    target->Process = src->Process;
+    target->MdlFlags = (int16_t)((src->MdlFlags & (MDL_MAPPED_TO_SYSTEM_VA | MDL_PAGES_LOCKED | MDL_SOURCE_IS_NONPAGED_POOL)) | MDL_PARTIAL);
+    target->MappedSystemVa = (src->MdlFlags & MDL_MAPPED_TO_SYSTEM_VA) ? va : 0;
+}
