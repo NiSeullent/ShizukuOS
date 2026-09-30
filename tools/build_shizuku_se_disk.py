@@ -50,7 +50,10 @@ DISK_MIB = 128
 PART_START = 2048
 PART_TYPE = 0x0C          # FAT32 with LBA
 DISK_SIGNATURE = 0x53485A31  # "1ZHS", fixed for reproducibility
-VOLUME_ID = "53485A31"
+# FAT32 volume serial ("SE98"). Not 0x53485A31: that is the volume serial Kernel64 reports for C: (sysk32.c
+# K64_VOLUME_SERIAL); Kernel64 mounts this partition as D:, and Win64 programs expect the two to differ
+# (win64/tests/t_k32_file.c: "D: has a volume serial number of its own").
+VOLUME_ID = "53453938"
 SHZDOS01_PATH = "SHZ/SHZDOS01.IMG"
 SECTOR = 512
 
