@@ -1,1 +1,1 @@
-{"libs": ["advapi32"]}
+{"libs": ["advapi32"], "ordinals": {"QISearch": 219, "IsOS": 437}}

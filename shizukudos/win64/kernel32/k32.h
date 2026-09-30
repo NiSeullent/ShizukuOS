@@ -70,6 +70,11 @@ void k32_power_request_closing(HANDLE h);
 int k32_console_attached(void);
 void k32_console_track(const char *s, DWORD n);         /* the screen-buffer cursor follows console output */
 
+/* Bring-up diagnostics (k32_trace.c): active only when the environment has SHZ_K32TRACE=1 (kernel `shz.k32trace`). */
+int k32_trace_on(void);
+void k32_trace3(const char *a, const char *b, const char *c);
+void k32_trace_hex(const char *a, const char *b, ULONG_PTR v);
+BOOL k32_unsupported(const char *fn, const char *what, DWORD err);   /* sets `err` as last error, reports it, returns FALSE */
 /* UTF-8 <-> UTF-16 helpers (k32_file.c). n < 0 means NUL-terminated (the terminator is converted too). Return 0 when the
  * output buffer is too small. */
 int k32_utf8_to_wide(const char *s, int n, WCHAR *w, int cap);

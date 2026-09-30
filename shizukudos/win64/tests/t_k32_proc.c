@@ -609,8 +609,67 @@ static void test_heaps(void)
     CHECK(HeapSetInformation(0, HeapEnableTerminationOnCorruption, 0, 0), "HeapEnableTerminationOnCorruption");
 }
 
+/* SetThreadDescription / GetThreadDescription (Windows 10 1607+): HRESULT_FROM_NT codes, LocalAlloc'd result, empty string
+ * for a thread without a description, readable through any handle to the thread, NULL clears. */
+HRESULT WINAPI SetThreadDescription(HANDLE, PCWSTR);
+HRESULT WINAPI GetThreadDescription(HANDLE, PWSTR *);
+static DWORD WINAPI desc_worker(LPVOID arg) { return (DWORD)(ULONG_PTR)arg; }
+static void test_description(void)
+{
+    PWSTR s = (PWSTR)1;
+    HRESULT hr;
+    HANDLE th;
+    DWORD tid;
+    static WCHAR big[40000];
+    int i;
+    hr = GetThreadDescription(GetCurrentThread(), &s);
+    CHECKV(hr == S_OK && s && s[0] == 0, "GetThreadDescription of an unnamed thread is S_OK with an empty string", "hr=%lx", (long)hr);
+    if (s) LocalFree(s);
+    hr = SetThreadDescription(GetCurrentThread(), L"shz-main \u00e9");
+    CHECKV(hr == S_OK, "SetThreadDescription on the current thread", "hr=%lx", (long)hr);
+    s = 0;
+    hr = GetThreadDescription(GetCurrentThread(), &s);
+    CHECKV(hr == S_OK && s && k32t_weq(s, L"shz-main \u00e9"), "GetThreadDescription returns the text just set", "hr=%lx", (long)hr);
+    if (s) LocalFree(s);
+    th = CreateThread(0, 0, desc_worker, (LPVOID)7, CREATE_SUSPENDED, &tid);
+    CHECK(th != 0, "worker thread created suspended");
+    hr = SetThreadDescription(th, L"shz-worker");
+    CHECKV(hr == S_OK, "SetThreadDescription through another thread's handle", "hr=%lx", (long)hr);
+    s = 0;
+    hr = GetThreadDescription(th, &s);
+    CHECKV(hr == S_OK && s && k32t_weq(s, L"shz-worker"), "... read back through that handle", "hr=%lx", (long)hr);
+    if (s) LocalFree(s);
+    s = 0;
+    hr = GetThreadDescription(GetCurrentThread(), &s);
+    CHECK(hr == S_OK && s && k32t_weq(s, L"shz-main \u00e9"), "the current thread's own description is unchanged");
+    if (s) LocalFree(s);
+    hr = SetThreadDescription(th, NULL);
+    s = 0;
+    CHECKV(hr == S_OK && GetThreadDescription(th, &s) == S_OK && s && s[0] == 0, "SetThreadDescription(NULL) clears it", "hr=%lx", (long)hr);
+    if (s) LocalFree(s);
+    ResumeThread(th);
+    CHECK(WaitForSingleObject(th, 5000) == WAIT_OBJECT_0, "worker exited");
+    CloseHandle(th);
+    hr = SetThreadDescription((HANDLE)(ULONG_PTR)0x7fff1, L"x");
+    CHECKV(hr == (HRESULT)0xD0000008, "SetThreadDescription on a bad handle is HRESULT_FROM_NT(STATUS_INVALID_HANDLE)", "hr=%lx", (long)hr);
+    s = (PWSTR)1;
+    hr = GetThreadDescription((HANDLE)(ULONG_PTR)0x7fff1, &s);
+    CHECKV(hr == (HRESULT)0xD0000008 && s == 0, "GetThreadDescription on a bad handle: same code, *desc NULL", "hr=%lx", (long)hr);
+    for (i = 0; i < 39999; ++i) big[i] = L'a';
+    big[39999] = 0;
+    hr = SetThreadDescription(GetCurrentThread(), big);
+    CHECKV(hr == (HRESULT)0xD000000D, "a 39999-char description exceeds a UNICODE_STRING: HRESULT_FROM_NT(STATUS_INVALID_PARAMETER)", "hr=%lx", (long)hr);
+    big[32767] = 0;
+    hr = SetThreadDescription(GetCurrentThread(), big);
+    s = 0;
+    CHECKV(hr == S_OK && GetThreadDescription(GetCurrentThread(), &s) == S_OK && s && k32t_wlen(s) == 32767, "a 32767-char description (65534 bytes) is accepted and read back whole", "hr=%lx len=%d", (long)hr, s ? k32t_wlen(s) : -1);
+    if (s) LocalFree(s);
+    SetThreadDescription(GetCurrentThread(), L"t_k32_proc main");
+}
+
 int main(void)
 {
+    test_description();
     test_times();
     test_counts_priority();
     test_mitigation();

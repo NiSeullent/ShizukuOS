@@ -616,3 +616,63 @@ DLLAPI int WINAPI StrToIntW(LPCWSTR s)
     if (*s == '-' || (*s >= '0' && *s <= '9')) StrToIntExW(s, STIF_DEFAULT, &v);
     return v;
 }
+
+/* ---------------------------------------------------------------- IsOS (ordinal 437) */
+/* Answers from the version the system reports (GetVersionExW: NT 10.0, workstation product type) and from facts of this
+ * system: one interactive user and session, no domain, no terminal services, 64-bit processes only (never WOW64), no
+ * tablet, media-center or embedded edition. The OS_* numbers are shlwapi.h's. */
+DLLAPI BOOL WINAPI IsOS(DWORD os)
+{
+    OSVERSIONINFOEXW v;
+    BOOL nt, ws;
+    memset(&v, 0, sizeof v);
+    v.dwOSVersionInfoSize = sizeof v;
+    if (!GetVersionExW((OSVERSIONINFOW *)&v)) return FALSE;
+    nt = v.dwPlatformId == VER_PLATFORM_WIN32_NT;
+    ws = v.wProductType == VER_NT_WORKSTATION;
+    switch (os) {
+    case 0: return v.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS;          /* OS_WINDOWS: the 9x family */
+    case 1: return nt;                                                      /* OS_NT */
+    case 2: return nt || v.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS;     /* OS_WIN95ORGREATER */
+    case 3: return nt && v.dwMajorVersion >= 4;                             /* OS_NT4ORGREATER */
+    case 7: return nt && v.dwMajorVersion >= 5;                             /* OS_WIN2000ORGREATER */
+    case 18: return nt && (v.dwMajorVersion > 5 || (v.dwMajorVersion == 5 && v.dwMinorVersion >= 1));   /* OS_XPORGREATER */
+    case 20: return nt && ws && !(v.wSuiteMask & VER_SUITE_PERSONAL);      /* OS_PROFESSIONAL */
+    case 19: return nt && ws && (v.wSuiteMask & VER_SUITE_PERSONAL);       /* OS_HOME */
+    case 23: case 29: return nt && !ws;                                     /* OS_SERVER, OS_ANYSERVER */
+    case 5: case 6: case 16: case 17:                                      /* OS_WIN98ORGREATER, _GOLD, OS_WIN95_GOLD, OS_MEORGREATER */
+        return v.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS;
+    case 28:                                                               /* OS_DOMAINMEMBER: there is no domain to join */
+    case 30:                                                               /* OS_WOW6432: every process is 64-bit */
+    case 14: case 15: case 24: case 25:                                    /* terminal services: none */
+    case 26: case 27:                                                      /* fast user switching / welcome UI: one user */
+    case 13: case 33: case 35: case 36:                                    /* embedded, tablet, media center, appliance */
+    default:
+        return FALSE;
+    }
+}
+
+/* ---------------------------------------------------------------- QISearch (ordinal 219) */
+/* The table-driven QueryInterface helper: `tab` lists {&IID, offset of that interface in the object} and ends with a NULL
+ * IID; IID_IUnknown is answered with the first entry. */
+typedef struct { const IID *piid; DWORD dwOffset; } shz_qitab;
+static const IID shz_iid_unknown = { 0x00000000, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
+
+DLLAPI HRESULT WINAPI QISearch(void *that, const shz_qitab *tab, REFIID riid, void **out)
+{
+    const shz_qitab *e;
+    if (!out) return E_POINTER;
+    *out = 0;
+    if (!riid) return E_POINTER;
+    for (e = tab; e && e->piid; ++e) {
+        if (!memcmp(e->piid, riid, sizeof(IID)) || (e == tab && !memcmp(riid, &shz_iid_unknown, sizeof(IID)))) {
+            /* a COM interface pointer: its first member is the vtable, whose second slot is AddRef */
+            void *u = (BYTE *)that + e->dwOffset;
+            ULONG (WINAPI *add_ref)(void *) = (*(ULONG (WINAPI ***)(void *))u)[1];
+            add_ref(u);
+            *out = u;
+            return S_OK;
+        }
+    }
+    return E_NOINTERFACE;
+}

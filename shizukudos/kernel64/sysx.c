@@ -390,6 +390,10 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
             b.min_addr = 0x10000; b.max_addr = 0x7ffffffeffffull; b.affinity = 1; b.nproc = 1;
             return copy_to_user(p, a2, &b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
         }
+        if (a1 == 5) {                                      /* SystemProcessInformation (sysk32_proc.c) */
+            extern int32_t k32_system_process_information(process_t *cur, uint64_t buf, uint64_t len, uint64_t retlen);
+            return k32_system_process_information(p, a2, a3, a4);
+        }
         if (a1 == 0x100) {                                  /* private: {total pages, free pages} for GlobalMemoryStatusEx */
             uint64_t m[2];
             if (a3 < sizeof m) return STATUS_BUFFER_TOO_SMALL;

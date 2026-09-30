@@ -834,7 +834,7 @@ static int32_t sys_device_io_control(process_t *p, struct regs *r, uint64_t hand
     void *kin = 0, *kout = 0;
     uint64_t info = 0;
     int32_t st;
-    if (!o) return STATUS_INVALID_HANDLE;
+    if (!o) return handle_lookup(p, handle, 0) ? (int32_t)0xC0000010 : STATUS_INVALID_HANDLE;   /* not a device: STATUS_INVALID_DEVICE_REQUEST */
     df = o->u.file.file;
     if (inlen) { kin = kmalloc(inlen); if (!kin) return STATUS_INSUFFICIENT_RESOURCES;
                  if (copy_from_user(p, kin, inbuf, inlen)) { kfree(kin); return STATUS_ACCESS_VIOLATION; } }

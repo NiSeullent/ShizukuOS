@@ -248,6 +248,11 @@ void process_teardown(process_t *p)
     irq_restore(f);
     ipc_process_teardown(p);
     handles_close_all(p);
+    if (p->token) {                             /* the primary token (sysk32_sec.c) */
+        kobject_t *tok = p->token;
+        p->token = 0;
+        ob_deref(tok);
+    }
     f = irq_save();
     old = p->pml4;
     p->pml4 = kernel_pml4();                    /* the scheduler never switches to the freed tables again */
@@ -292,6 +297,19 @@ void process_thread_gone(process_t *p)
 {
     thread_t *t = thread_current();
     ipc_thread_exit(t);
+    if (t->desc) {                              /* SetThreadDescription text */
+        uint16_t *d = t->desc;
+        const uint64_t f = irq_save();
+        t->desc = 0;
+        t->desc_bytes = 0;
+        irq_restore(f);
+        kfree(d);
+    }
+    if (t->impersonation) {                     /* an impersonation token (sysk32_sec.c) ends with the thread */
+        kobject_t *tok = t->impersonation;
+        t->impersonation = 0;
+        ob_deref(tok);
+    }
     if (--p->threads_alive <= 0) {
         if (!p->terminated) p->exit_code = t->exit_code;   /* the last thread's code is the process's */
         process_reap_signal(p);

@@ -1,18 +1,25 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * advapi32.dll: Event Tracing for Windows, provider side (EventRegister, EventUnregister, EventWrite, EventWriteTransfer,
- * EventSetInformation).
+ * EventSetInformation) and the classic (pre-Vista, "MOF") provider API: RegisterTraceGuidsW/A, UnregisterTraceGuids,
+ * GetTraceLoggerHandle, GetTraceEnableFlags, GetTraceEnableLevel, TraceEvent.
  *
  * This system has no trace sessions: the controller APIs (StartTrace, EnableTraceEx2, ...) do not exist, so no provider can
  * ever be enabled. The functions below keep a real registration table (a provider is registered until it is unregistered,
  * handles are validated, unregistering twice fails) and behave exactly as ETW does for a provider nobody is listening to:
  * events are discarded and the calls succeed. The enable callback is never invoked, because nothing can enable a provider;
  * EventEnabled-style queries would answer "no". Nothing is buffered or logged anywhere.
+ * Classic providers are registered in the same table; their WMIDPREQUEST callback is never called (nothing can enable
+ * them), so no logger (session) handle ever exists: GetTraceLoggerHandle, GetTraceEnableFlags/Level and TraceEvent answer
+ * ERROR_INVALID_HANDLE, which is what they answer on Windows for a handle that does not name a session.
  */
 #define _ADVAPI32_
 #include "nt.h"
 #include <string.h>
 #define EVNTAPI __stdcall
+#define WMIAPI __stdcall
 #include <evntprov.h>
+#include <wmistr.h>
+#include <evntrace.h>
 
 typedef struct provider {
     struct provider *next;
@@ -102,4 +109,63 @@ DLLAPI ULONG EVNTAPI EventSetInformation(REGHANDLE RegHandle, EVENT_INFO_CLASS I
     default:
         return ERROR_INVALID_PARAMETER;
     }
+}
+
+/* ---------------------------------------------------------------- classic trace providers */
+DLLAPI ULONG WMIAPI RegisterTraceGuidsW(WMIDPREQUEST RequestAddress, PVOID RequestContext, LPCGUID ControlGuid, ULONG GuidCount,
+                                        PTRACE_GUID_REGISTRATION TraceGuidReg, LPCWSTR MofImagePath, LPCWSTR MofResourceName,
+                                        PTRACEHANDLE RegistrationHandle)
+{
+    REGHANDLE h = 0;
+    ULONG st, i;
+    (void)RequestContext; (void)MofImagePath; (void)MofResourceName;   /* the MOF resource only serves event decoding */
+    if (!RequestAddress || !ControlGuid || !RegistrationHandle || (GuidCount && !TraceGuidReg)) return ERROR_INVALID_PARAMETER;
+    for (i = 0; i < GuidCount; ++i) if (!TraceGuidReg[i].Guid) return ERROR_INVALID_PARAMETER;
+    st = EventRegister(ControlGuid, 0, 0, &h);
+    if (st) return st;
+    for (i = 0; i < GuidCount; ++i) TraceGuidReg[i].RegHandle = (HANDLE)(ULONG_PTR)h;  /* per-class handles: the registration */
+    *RegistrationHandle = (TRACEHANDLE)h;
+    return ERROR_SUCCESS;
+}
+
+DLLAPI ULONG WMIAPI RegisterTraceGuidsA(WMIDPREQUEST RequestAddress, PVOID RequestContext, LPCGUID ControlGuid, ULONG GuidCount,
+                                        PTRACE_GUID_REGISTRATION TraceGuidReg, LPCSTR MofImagePath, LPCSTR MofResourceName,
+                                        PTRACEHANDLE RegistrationHandle)
+{
+    (void)MofImagePath; (void)MofResourceName;
+    return RegisterTraceGuidsW(RequestAddress, RequestContext, ControlGuid, GuidCount, TraceGuidReg, 0, 0, RegistrationHandle);
+}
+
+DLLAPI ULONG WMIAPI UnregisterTraceGuids(TRACEHANDLE RegistrationHandle)
+{
+    const ULONG st = EventUnregister((REGHANDLE)RegistrationHandle);
+    return st == ERROR_INVALID_HANDLE ? ERROR_INVALID_PARAMETER : st;   /* documented error for an unknown registration */
+}
+
+DLLAPI TRACEHANDLE WMIAPI GetTraceLoggerHandle(PVOID Buffer)
+{
+    (void)Buffer;                             /* only an enable request's WNODE_HEADER carries a logger handle: none exists */
+    shz_set_last_error(ERROR_INVALID_HANDLE);
+    return (TRACEHANDLE)(ULONG_PTR)INVALID_HANDLE_VALUE;
+}
+
+DLLAPI ULONG WMIAPI GetTraceEnableFlags(TRACEHANDLE TraceHandle)
+{
+    (void)TraceHandle;
+    shz_set_last_error(ERROR_INVALID_HANDLE);
+    return 0;
+}
+
+DLLAPI UCHAR WMIAPI GetTraceEnableLevel(TRACEHANDLE TraceHandle)
+{
+    (void)TraceHandle;
+    shz_set_last_error(ERROR_INVALID_HANDLE);
+    return 0;
+}
+
+DLLAPI ULONG WMIAPI TraceEvent(TRACEHANDLE TraceHandle, PEVENT_TRACE_HEADER EventTrace)
+{
+    (void)TraceHandle;
+    if (!EventTrace) return ERROR_INVALID_PARAMETER;
+    return ERROR_INVALID_HANDLE;              /* no session handle can exist (see above) */
 }

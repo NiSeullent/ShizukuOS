@@ -66,8 +66,11 @@ void ob_deref(kobject_t *o)
     }
     irq_restore(f);
     if (last) {
+        extern void token_object_free(kobject_t *o);
         if (o->type == OB_KEY) reg_key_object_free(o);
+        else if (o->type == OB_TOKEN) token_object_free(o);
         else ipc_object_free(o);                    /* IPC hook: sections, pipes, ports, jobs, thread/process slots */
+        kfree(o->sd);                               /* a stored security descriptor (sysk32_sec.c) */
         kfree(o);
     }
 }
@@ -372,3 +375,17 @@ void sched_check_timeouts(uint64_t now)
 
 /* Overridden by the file system layer. */
 void __attribute__((weak)) file_object_closed(kobject_t *o) { (void)o; }
+
+/* Diagnostic for the autorun timeout report (autorun.c): the objects a blocked thread waits for. */
+void ob_print_wait(thread_t *t)
+{
+    waitdesc_t *d = t->wait_multi;
+    unsigned i;
+    if (!d) return;
+    kprintf("K64:     waits for %s of %u object(s):", d->all ? "all" : "any", d->n);
+    for (i = 0; i < d->n && i < 8; ++i) {
+        const kobject_t *o = d->objs[i];
+        kprintf(" [type %x%s%s signaled %d]", o->type, o->name[0] ? " " : "", o->name, o->signaled);
+    }
+    kprintf("\n");
+}

@@ -304,8 +304,10 @@ static void test_apiset(void)
     SetLastError(0);
     m = LoadLibraryW(L"api-ms-win-core-registry-l9-1-0.dll");
     CHECK(m == 0 && GetLastError() == ERROR_MOD_NOT_FOUND, "an unknown contract version is not forwarded blindly: ERROR_MOD_NOT_FOUND");
-    CHECK(GetProcAddress(adv, "OpenProcessToken") == 0 && GetProcAddress(adv, "GetTokenInformation") == 0 && GetProcAddress(adv, "AccessCheck") == 0,
-          "token and access-check functions are not exported: there are no tokens on this system");
+    m = LoadLibraryW(L"api-ms-win-security-base-l1-1-0.dll");
+    CHECK(GetProcAddress(adv, "OpenProcessToken") != 0 && GetProcAddress(adv, "GetTokenInformation") != 0 &&
+          GetProcAddress(m, "AccessCheck") == GetProcAddress(adv, "AccessCheck") && GetProcAddress(adv, "AccessCheck") != 0,
+          "token and access-check functions are exported (t_adv_sec.c checks them) and resolve through security-base");
 }
 
 int main(void)

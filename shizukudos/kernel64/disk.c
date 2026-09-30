@@ -8,8 +8,9 @@
  * Its nodes appear in the common fs.c name space (FSB_DISK backing): directories are enumerated into fsnodes on
  * first use, file reads go through a per-file extent list. Writes (fat32.c) create files and directories with long
  * names, extend/overwrite/truncate files and update the directory entry (size, first cluster, write time from the
- * RTC); every call leaves the on-disk FAT and directories consistent. NtFlushBuffersFile issues FLUSH CACHE EXT.
- * Not supported on D: (documented): delete, rename, writing a file while it backs a mapped image (kwin view).
+ * RTC), delete files and empty directories and rename/move within the volume; every call leaves the on-disk FAT and
+ * directories consistent. NtFlushBuffersFile issues FLUSH CACHE EXT.
+ * Not supported on D: (documented): writing, deleting or renaming a file while it backs a mapped image (kwin view).
  *
  * Evidence (parsed by tests/run_k64_disk.py):
  *   slot 13: (sector count << 32) | CRC-32 of sector 0 of the first whole device, computed from the DMA'd bytes
@@ -96,7 +97,7 @@ static int vol_read(fsvol_t *v, fsnode_t *n, uint64_t off, void *buf, uint64_t l
     return rc ? -1 : 0;
 }
 
-static uint32_t writes_ok, creates_ok;
+static uint32_t writes_ok, creates_ok, removes_ok, renames_ok;
 extern uint32_t ahci_blk_flushes(void);         /* ahci_blk.c diagnostics (kept out of the shared blk.h) */
 
 /* Current time as a FAT date/time (the RTC is UTC; FAT stores local time, UTC is used as the local zone). */
@@ -193,6 +194,49 @@ static fsnode_t *vol_create(fsvol_t *v, fsnode_t *dir, const char *name, int is_
     return c;
 }
 
+static int vol_remove(fsvol_t *v, fsnode_t *n)
+{
+    disk_vol_t *d = v->priv;
+    int rc;
+    if (!n->parent || n->view) return -1;
+    if (n->is_dir && n->child) return -3;               /* known entries: not empty */
+    mutex_lock(&d->lock);
+    rc = fat32_remove(&d->fat, n->parent->first_cluster, n->dir_cluster, n->dir_offset);
+    if (!rc) {
+        if (n->chain) { fat32_chain_free(&d->fat, n->chain); kfree(n->chain); n->chain = 0; }
+        ++removes_ok;
+    }
+    mutex_unlock(&d->lock);
+    if (rc) kprintf("K64 disk: delete %s failed (%d)\n", n->name, rc);
+    return rc == FAT32_E_NOTEMPTY ? -3 : rc ? -1 : 0;
+}
+
+static int vol_rename(fsvol_t *v, fsnode_t *n, fsnode_t *newdir, const char *newname, int replace)
+{
+    disk_vol_t *d = v->priv;
+    uint16_t wname[256];
+    fat32_dirent_t *e;
+    int len, rc;
+    if (!n->parent || n->view) return -1;
+    len = utf8_to_utf16(newname, wname, 256);
+    if (len <= 0) return -1;
+    e = kmalloc(sizeof *e);
+    if (!e) return -1;
+    mutex_lock(&d->lock);
+    rc = fat32_rename(&d->fat, n->parent->first_cluster, n->dir_cluster, n->dir_offset, newdir->first_cluster, wname,
+                      (unsigned)len, replace, e);
+    if (!rc) {
+        n->dir_cluster = e->dir_cluster;
+        n->dir_offset = e->dir_offset;
+        if (e->has_lfn) set_alias(n, e->short_name); else n->alias[0] = 0;
+        ++renames_ok;
+    }
+    mutex_unlock(&d->lock);
+    kfree(e);
+    if (rc) kprintf("K64 disk: rename %s -> %s failed (%d)\n", n->name, newname, rc);
+    return rc == FAT32_E_EXISTS ? -3 : rc == FAT32_E_FULL ? -2 : rc ? -1 : 0;
+}
+
 /* Flushes the device write cache and logs the disk counters (the evidence line tests/run_k64_disk.py reads). */
 static int vol_flush(fsvol_t *v)
 {
@@ -203,8 +247,9 @@ static int vol_flush(fsvol_t *v)
     rc = blk_flush(d->dev);
     for (w = d->dev; w->parent; w = w->parent) ;
     kprintf("K64 disk: flush %s: rc %d; %s: %llu sectors read, %llu written, %u cache flush(es); D: %u write(s), "
-            "%u create(s), %u sector writes, %u free clusters\n", d->dev->name, rc, w->name, w->reads, w->writes,
-            ahci_blk_flushes(), writes_ok, creates_ok, d->fat.sector_writes, d->fat.free_clusters);
+            "%u create(s), %u delete(s), %u rename(s), %u sector writes, %u free clusters\n", d->dev->name, rc, w->name,
+            w->reads, w->writes, ahci_blk_flushes(), writes_ok, creates_ok, removes_ok, renames_ok, d->fat.sector_writes,
+            d->fat.free_clusters);
     mutex_unlock(&d->lock);
     return rc;
 }
@@ -268,6 +313,8 @@ static int try_mount(blk_dev_t *dev)
         dvol.vol.write = vol_write;
         dvol.vol.truncate = vol_truncate;
         dvol.vol.create = vol_create;
+        dvol.vol.remove = vol_remove;
+        dvol.vol.rename = vol_rename;
     }
     dvol.vol.flush = vol_flush;
     dvol.vol.priv = &dvol;
