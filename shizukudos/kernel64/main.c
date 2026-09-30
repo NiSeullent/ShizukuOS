@@ -73,6 +73,7 @@ void kmain(uint64_t bootinfo_pa)
      * unaffected. See docs/shizukudos10/NTDRV.md and kernel64/ntdrv_*.c. */
     { extern void ntdrv_selftest(void); ntdrv_selftest(); }
     setup_autostart(&bootinfo);
+    { extern void k64_autorun(void); k64_autorun(); }   /* shz.autorun=<control file>: one Win64 program (autorun.c) */
     if (bootinfo.channel_count) {
         ipc64_init(&bootinfo);
         if (ipc64_run_tests())

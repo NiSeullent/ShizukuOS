@@ -195,6 +195,10 @@ int syscall_dispatch(struct regs *r)
     }
     r->rax = (uint64_t)(int64_t)st;
     check_kill();
+    {   /* NtSuspendThread takes effect on the way back to user mode (sysk32_obj.c) */
+        extern void thread_park_if_suspended(void);
+        if (thread_current()->suspend_count) { thread_park_if_suspended(); check_kill(); }
+    }
     return 0;
 }
 

@@ -16,6 +16,18 @@ extern void k32_locks_release(const file_t *f);
  * is not a device, so the normal file-system path continues. */
 extern int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, uint64_t phandle, uint64_t iosb);
 extern int ntdrv_file_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t handle, int32_t *st_out);
+/* named pipes (npfs.c) and I/O completion (iocp.c) */
+extern int npfs_path(const char *path, char *leaf, size_t cap);
+extern int32_t npfs_open(process_t *p, const char *leaf, uint32_t access, uint32_t options, uint32_t oa_attrs, uint64_t phandle,
+                         uint64_t iosb);
+extern int npfs_rw(process_t *p, struct regs *r, uint64_t handle, int write, int32_t *st);
+extern int npfs_query_info(process_t *p, file_t *f, uint32_t cls, uint64_t buf, uint64_t len, uint64_t iosb, int32_t *st);
+extern int npfs_set_info(process_t *p, file_t *f, uint32_t cls, uint64_t buf, uint64_t len, uint64_t iosb, int32_t *st);
+extern int npfs_cancel(kobject_t *fo, uint64_t iosb_match, int any, int this_thread);
+extern void npfs_end_closed(kobject_t *fo);
+extern void io_complete(process_t *p, int pid, kobject_t *fo, kobject_t *event, uint64_t apc_ctx, uint64_t iosb, int32_t status,
+                        uint64_t info, int pending);
+extern void io_start(kobject_t *fo, kobject_t *event);
 
 #define IO_OPENED 1
 #define IO_CREATED 2
@@ -103,7 +115,9 @@ kobject_t *console_object(int output)
     if (!o || !f) return 0;
     f->console = output ? 2 : 1;
     f->access = output ? GENERIC_WRITE : GENERIC_READ;
+    f->options = FILE_SYNCHRONOUS_IO_NONALERT;
     o->u.file.file = f;
+    o->signaled = 1;
     return o;
 }
 
@@ -184,6 +198,12 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
         set_iosb(p, a4, STATUS_SUCCESS, IO_OPENED);
         return STATUS_SUCCESS;
     }
+    {   /* named pipes: \??\pipe\NAME, \Device\NamedPipe\NAME (npfs.c) */
+        char leaf[OB_NAME_MAX];
+        const int np = npfs_path(path, leaf, sizeof leaf);
+        if (np < 0) return STATUS_OBJECT_NAME_INVALID;
+        if (np > 0) return npfs_open(p, leaf, (uint32_t)a2, options, oa.attributes, a1, a4);
+    }
     {   /* NT driver host: a "\Device\..." / "\??\..." / "\DosDevices\..." name opens a device (IRP_MJ_CREATE) */
         int32_t dst = ntdrv_open_device_file(p, path, (uint32_t)a2, a1, a4);
         if (dst != (int32_t)0x7fff0002) return dst;
@@ -225,15 +245,54 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     if (options & FILE_DELETE_ON_CLOSE) n->delete_pending = 1;
     o->u.file.file = f;
     o->u.file.access = (uint32_t)a2;
+    f->options = options;
+    o->signaled = 1;                                    /* no I/O in progress */
     st = handle_insert(p, o, (uint32_t)a2, &h);
     ob_deref(o);
     if (st) return st;
+    if (oa.attributes & 2) p->handles[h / 4 - 1].inherit = 1;                          /* OBJ_INHERIT */
     if (copy_to_user(p, a1, &(uint64_t){h}, 8)) return STATUS_ACCESS_VIOLATION;
     set_iosb(p, a4, STATUS_SUCCESS, info);
     return STATUS_SUCCESS;
 }
 
+static int32_t sys_rw_file_sync(process_t *p, struct regs *r, uint64_t handle, int write);
+
+/* NtReadFile / NtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key).
+ * Pipes go to npfs.c (they may pend). Files and consoles complete before the call returns; on a handle opened for
+ * overlapped I/O the completion is reported like an asynchronous one would be: event and file object set, a packet
+ * queued on the associated completion port (unless FILE_SKIP_COMPLETION_PORT_ON_SUCCESS). */
 static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int write)
+{
+    kobject_t *fo = 0, *event = 0;
+    file_t *f;
+    int32_t st;
+    const uint64_t hev = r->rdx, apc = r->r9, iosb = (uint64_t)stack_arg(p, r, 5);
+    if (npfs_rw(p, r, handle, write, &st)) return st;
+    f = file_of(p, handle, &fo);
+    if (!f) return STATUS_INVALID_HANDLE;
+    if (hev && handle_ref(p, hev, OB_EVENT, &event, 0)) return STATUS_INVALID_HANDLE;
+    ob_ref(fo);
+    io_start(fo, event);
+    st = sys_rw_file_sync(p, r, handle, write);
+    if (st >= 0 || st == STATUS_END_OF_FILE) {
+        uint64_t io[2] = { 0, 0 };
+        if (iosb) copy_from_user(p, io, iosb, sizeof io);
+        if (st >= 0 && !(f->options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
+            io_complete(p, p->pid, fo, event, apc, 0, st, io[1], 0);        /* the IO_STATUS_BLOCK is already written */
+        else {
+            if (event) ob_signal_event(event);
+            ob_signal_event(fo);
+        }
+    } else {
+        ob_signal_event(fo);
+    }
+    ob_deref(fo);
+    if (event) ob_deref(event);
+    return st;
+}
+
+static int32_t sys_rw_file_sync(process_t *p, struct regs *r, uint64_t handle, int write)
 {
     const uint64_t iosb = (uint64_t)stack_arg(p, r, 5), buf = (uint64_t)stack_arg(p, r, 6);
     const uint64_t len = (uint64_t)(uint32_t)stack_arg(p, r, 7), off_ptr = (uint64_t)stack_arg(p, r, 8);
@@ -339,8 +398,17 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
 {
     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
     file_t *f = file_of(p, handle, 0);
+    int32_t pst;
     if (!f) return STATUS_INVALID_HANDLE;
+    if (npfs_query_info(p, f, cls, buf, len, iosb, &pst)) return pst;
     switch (cls) {
+    case 16: {                                           /* FileModeInformation: {ULONG Mode} (FILE_SYNCHRONOUS_IO_* ...) */
+        uint32_t mode = f->options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT | 0x2u | 0x8u | 0x1000u);
+        if (len < 4) return STATUS_INFO_LENGTH_MISMATCH;
+        if (copy_to_user(p, buf, &mode, 4)) return STATUS_ACCESS_VIOLATION;
+        set_iosb(p, iosb, STATUS_SUCCESS, 4);
+        return STATUS_SUCCESS;
+    }
     case 4: {                                            /* FileBasicInformation */
         struct basicinfo b;
         if (len < sizeof b) return STATUS_BUFFER_TOO_SMALL;
@@ -433,8 +501,34 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
 {
     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
     file_t *f = file_of(p, handle, 0);
+    int32_t pst;
     if (!f) return STATUS_INVALID_HANDLE;
+    if (npfs_set_info(p, f, cls, buf, len, iosb, &pst)) return pst;
     switch (cls) {
+    case 30: {                                           /* FileCompletionInformation: {HANDLE Port; PVOID Key} */
+        uint64_t v[2];
+        kobject_t *port = 0;
+        int32_t st;
+        if (len < 16) return STATUS_INFO_LENGTH_MISMATCH;
+        if (copy_from_user(p, v, buf, 16)) return STATUS_ACCESS_VIOLATION;
+        if (f->iocp) return STATUS_INVALID_PARAMETER;   /* a file is associated with one port for its lifetime */
+        if (f->options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)) return STATUS_INVALID_PARAMETER;
+        st = handle_ref(p, v[0], OB_IOCP, &port, 0);
+        if (st) return st;
+        f->iocp = port;                                  /* the reference is kept by the association */
+        f->iocp_key = v[1];
+        set_iosb(p, iosb, STATUS_SUCCESS, 0);
+        return STATUS_SUCCESS;
+    }
+    case 41: {                                           /* FileIoCompletionNotificationInformation: {ULONG Flags} */
+        uint32_t fl;
+        if (len < 4) return STATUS_INFO_LENGTH_MISMATCH;
+        if (copy_from_user(p, &fl, buf, 4)) return STATUS_ACCESS_VIOLATION;
+        if (fl & ~3u) return STATUS_INVALID_PARAMETER;
+        f->notify_modes |= fl;                           /* modes can be set, never cleared (as on NT) */
+        set_iosb(p, iosb, STATUS_SUCCESS, 0);
+        return STATUS_SUCCESS;
+    }
     case 14: {                                           /* position */
         int64_t pos;
         if (len < 8 || copy_from_user(p, &pos, buf, 8)) return STATUS_ACCESS_VIOLATION;
@@ -729,6 +823,8 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
     case SYS_NtQueryDirectoryFile: return sys_query_directory(p, r, a1, a2);
     case SYS_NtClose:
         if (a1 == CURRENT_PROCESS_HANDLE || a1 == CURRENT_THREAD_HANDLE) return STATUS_SUCCESS;
+        if (!(a1 & 3) && a1 && a1 <= MAX_HANDLES * 4ull && p->handles[a1 / 4 - 1].obj && (p->handles[a1 / 4 - 1].inherit & 2))
+            return (int32_t)0xC0000235;                  /* STATUS_HANDLE_NOT_CLOSABLE: HANDLE_FLAG_PROTECT_FROM_CLOSE */
         return handle_close(p, a1);
     case SYS_NtFlushBuffersFile: {
         file_t *f = file_of(p, a1, 0);
@@ -737,10 +833,23 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
         set_iosb(p, a2, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     }
-    case SYS_NtCancelIoFile:                             /* (FileHandle, IoStatusBlock): every request completes before the call returns, so none is pending */
-        if (!file_of(p, a1, 0)) return STATUS_INVALID_HANDLE;
+    case SYS_NtCancelIoFile: {                           /* (FileHandle, IoStatusBlock): pending pipe requests are cancelled; file I/O never pends */
+        kobject_t *fo = 0;
+        if (!file_of(p, a1, &fo)) return STATUS_INVALID_HANDLE;
+        npfs_cancel(fo, 0, 1, 1);                         /* CancelIo: the calling thread's requests */
         set_iosb(p, a2, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
+    }
     default: *handled = 0; return 0;
     }
+}
+
+/* objects.c: the last handle of a file object was closed. A pipe end disconnects and cancels its pending requests
+ * (npfs.c); the completion port association is dropped. */
+void file_handles_gone(kobject_t *o)
+{
+    file_t *f = o->u.file.file;
+    if (!f) return;
+    if (f->pipe) npfs_end_closed(o);
+    if (f->iocp) { kobject_t *port = f->iocp; f->iocp = 0; ob_deref(port); }
 }

@@ -617,6 +617,41 @@ static const struct { NTSTATUS status; ULONG error; } status_map_io[] = {
     {(NTSTATUS)0xC00000D4, ERROR_NOT_SAME_DEVICE},       /* STATUS_NOT_SAME_DEVICE */
     {(NTSTATUS)0xC0000106, ERROR_FILENAME_EXCED_RANGE},  /* STATUS_NAME_TOO_LONG */
     {(NTSTATUS)0xC0000121, ERROR_ACCESS_DENIED},         /* STATUS_CANNOT_DELETE */
+    /* named pipes (kernel64/npfs.c) */
+    {(NTSTATUS)0xC000014B, ERROR_BROKEN_PIPE},           /* STATUS_PIPE_BROKEN */
+    {(NTSTATUS)0xC00000B0, ERROR_PIPE_NOT_CONNECTED},    /* STATUS_PIPE_DISCONNECTED */
+    {(NTSTATUS)0xC00000B1, ERROR_NO_DATA},               /* STATUS_PIPE_CLOSING */
+    {(NTSTATUS)0xC00000B2, ERROR_PIPE_CONNECTED},        /* STATUS_PIPE_CONNECTED */
+    {(NTSTATUS)0xC00000B3, ERROR_PIPE_LISTENING},        /* STATUS_PIPE_LISTENING */
+    {(NTSTATUS)0xC00000AE, ERROR_PIPE_BUSY},             /* STATUS_PIPE_BUSY */
+    {(NTSTATUS)0xC00000AC, ERROR_PIPE_BUSY},             /* STATUS_PIPE_NOT_AVAILABLE */
+    {(NTSTATUS)0xC00000AB, ERROR_PIPE_BUSY},             /* STATUS_INSTANCE_NOT_AVAILABLE */
+    {(NTSTATUS)0xC00000AD, ERROR_BAD_PIPE},              /* STATUS_INVALID_PIPE_STATE */
+    {(NTSTATUS)0xC00000B4, ERROR_BAD_PIPE},              /* STATUS_INVALID_READ_MODE */
+    {(NTSTATUS)0xC00000D9, ERROR_NO_DATA},               /* STATUS_PIPE_EMPTY */
+    {(NTSTATUS)0xC00000B5, ERROR_SEM_TIMEOUT},           /* STATUS_IO_TIMEOUT */
+    {(NTSTATUS)0xC00000AF, ERROR_INVALID_FUNCTION},      /* STATUS_ILLEGAL_FUNCTION */
+    /* sections, process memory, jobs, tokens, handles (kernel64/section.c, sysk32_obj.c) */
+    {(NTSTATUS)0xC0000225, ERROR_NOT_FOUND},             /* STATUS_NOT_FOUND */
+    {(NTSTATUS)0x8000000D, ERROR_PARTIAL_COPY},          /* STATUS_PARTIAL_COPY */
+    {(NTSTATUS)0xC000007C, ERROR_NO_TOKEN},              /* STATUS_NO_TOKEN */
+    {(NTSTATUS)0xC000005C, ERROR_BAD_TOKEN_TYPE},        /* STATUS_BAD_TOKEN_TYPE */
+    {(NTSTATUS)0xC0000040, ERROR_NOT_ENOUGH_MEMORY},     /* STATUS_SECTION_TOO_BIG */
+    {(NTSTATUS)0xC000004E, ERROR_ACCESS_DENIED},         /* STATUS_SECTION_PROTECTION */
+    {(NTSTATUS)0xC000011E, ERROR_FILE_INVALID},          /* STATUS_MAPPED_FILE_SIZE_ZERO */
+    {(NTSTATUS)0xC0000220, ERROR_MAPPED_ALIGNMENT},      /* STATUS_MAPPED_ALIGNMENT */
+    {(NTSTATUS)0xC000001F, ERROR_ACCESS_DENIED},         /* STATUS_INVALID_VIEW_SIZE */
+    {(NTSTATUS)0xC0000019, ERROR_INVALID_ADDRESS},       /* STATUS_NOT_MAPPED_VIEW */
+    {(NTSTATUS)0xC000001B, ERROR_INVALID_PARAMETER},     /* STATUS_UNABLE_TO_DELETE_SECTION */
+    {(NTSTATUS)0xC0000045, ERROR_INVALID_PARAMETER},     /* STATUS_INVALID_PAGE_PROTECTION */
+    {(NTSTATUS)0xC0000020, ERROR_BAD_EXE_FORMAT},        /* STATUS_INVALID_FILE_FOR_SECTION */
+    {(NTSTATUS)0xC0000006, ERROR_NOACCESS},              /* STATUS_IN_PAGE_ERROR */
+    {(NTSTATUS)0xC0000044, ERROR_NOT_ENOUGH_QUOTA},      /* STATUS_QUOTA_EXCEEDED */
+    {(NTSTATUS)0xC000004A, ERROR_SIGNAL_REFUSED},        /* STATUS_SUSPEND_COUNT_EXCEEDED */
+    {(NTSTATUS)0xC000010A, ERROR_ACCESS_DENIED},         /* STATUS_PROCESS_IS_TERMINATING */
+    {(NTSTATUS)0xC0000235, ERROR_INVALID_HANDLE},        /* STATUS_HANDLE_NOT_CLOSABLE */
+    {(NTSTATUS)0xC00001A1, ERROR_INVALID_LOCK_RANGE},    /* STATUS_INVALID_LOCK_RANGE */
+    {(NTSTATUS)0xC0000138, ERROR_INVALID_ORDINAL},       /* STATUS_ORDINAL_NOT_FOUND */
 };
 
 ULONG NTAPI RtlNtStatusToDosError(NTSTATUS status)
@@ -687,8 +722,10 @@ void ShzRunInitRoutines(int reason, void *reserved)
 
 void ShzRunThreadAttach(int reason)
 {
+    extern void ShzLoaderLock(void), ShzLoaderUnlock(void);
     SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
     LIST_ENTRY *head = &ldr->InInitializationOrderModuleList, *l;
+    ShzLoaderLock();                                        /* thread notifications run under the loader lock, as on Windows */
     for (l = reason == DLL_THREAD_ATTACH ? head->Flink : head->Blink; l != head;
          l = reason == DLL_THREAD_ATTACH ? l->Flink : l->Blink) {
         SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InInitializationOrderLinks);
@@ -696,6 +733,7 @@ void ShzRunThreadAttach(int reason)
         call_dll_main(e, reason, 0);
     }
     if (reason == DLL_THREAD_ATTACH) run_tls_callbacks(PEB_IMAGE_BASE(shz_peb()), reason, 0);
+    ShzLoaderUnlock();
 }
 
 /* ---------------------------------------------------------------- process and thread start */
@@ -721,9 +759,13 @@ SHZ_EXPORT void NTAPI ShzProcessStart(void *entry, void *unused)
     DWORD (WINAPI *main_entry)(PVOID) = entry;
     DWORD code;
     (void)unused;
+    extern void ShzLoaderLockInit(void), ShzLoaderLock(void), ShzLoaderUnlock(void);
     ShzInitHeap();
     ShzInitSync();
+    ShzLoaderLockInit();
+    ShzLoaderLock();                                        /* static imports' DllMain run under the loader lock, as on Windows */
     ShzRunInitRoutines(DLL_PROCESS_ATTACH, (void *)1);
+    ShzLoaderUnlock();
     code = main_entry((PVOID)shz_peb());
     RtlExitUserProcess((NTSTATUS)code);
 }

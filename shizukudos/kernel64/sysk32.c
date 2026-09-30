@@ -54,6 +54,7 @@ static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t handle, u
     char dlabel[12];
     int dwritable = 0, disk;
     if (!f) return STATUS_INVALID_HANDLE;
+    if (f->pipe && cls != 4) return STATUS_INVALID_DEVICE_REQUEST;           /* a named pipe has no volume (npfs.c) */
     memset(out, 0, sizeof out);
     /* A file on a disk volume (disk.c, FAT32) reports that volume: BPB serial number and label, cluster counts, "FAT32". */
     disk = f->node && disk_volume_info(f->node, &dserial, dlabel, &dtotal, &dfree, &dspc, &dwritable) == 0;
@@ -96,7 +97,7 @@ static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t handle, u
     }
     case 4: {                                                   /* FileFsDeviceInformation */
         if (len < 8) return STATUS_INFO_LENGTH_MISMATCH;
-        *(uint32_t *)out = f->console ? 0x50 : 7;               /* FILE_DEVICE_CONSOLE / FILE_DEVICE_DISK */
+        *(uint32_t *)out = f->console ? 0x50 : f->pipe ? 0x11 : 7;   /* FILE_DEVICE_CONSOLE / _NAMED_PIPE / _DISK */
         *(uint32_t *)(out + 4) = disk && !dwritable ? 0x2 : 0;  /* FILE_READ_ONLY_DEVICE */
         return put_result(p, iosb, buf, len, out, 8, STATUS_SUCCESS);
     }
@@ -182,7 +183,8 @@ static int32_t sys_lock_file(process_t *p, struct regs *r, uint64_t handle)
     if (!f) return STATUS_INVALID_HANDLE;
     if (!f->node || f->node->is_dir) return STATUS_INVALID_PARAMETER;
     if (copy_from_user(p, &off, offp, 8) || copy_from_user(p, &len, lenp, 8)) return STATUS_ACCESS_VIOLATION;
-    if ((int64_t)off < 0 || (int64_t)len < 0) return STATUS_INVALID_PARAMETER;
+    if ((int64_t)off < 0) return STATUS_INVALID_PARAMETER;
+    if (len && off + (len - 1) < off) return (int32_t)0xC00001A1;          /* STATUS_INVALID_LOCK_RANGE; a length up to 2^64-1 from 0 is valid */
     if (len == 0) return STATUS_SUCCESS;                                                         /* nothing to lock */
     fl = irq_save();
     for (i = 0; i < MAX_LOCKS; ++i) {
@@ -230,6 +232,9 @@ int32_t sys_ext_k32(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, u
         extern int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len);
         return k32_set(cur, a1, a2, a3, a4);
     }
-    default: return STATUS_INVALID_SYSTEM_SERVICE;
+    default: {                                  /* 0x95-0x9e: sections, completion ports, pipes, jobs, tokens (sysk32_obj.c) */
+        extern int32_t sys_ext_k32_obj(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
+        return sys_ext_k32_obj(cur, r, num, a1, a2, a3, a4);
+    }
     }
 }

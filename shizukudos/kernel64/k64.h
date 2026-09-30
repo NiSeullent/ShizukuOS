@@ -95,6 +95,7 @@ void krandom_get(void *buf, size_t n);
 #define PT_PWT (1ull << 3)
 #define PT_PCD (1ull << 4)
 #define PT_NX (1ull << 63)
+#define PT_SW_PRIV (1ull << 9)          /* software bit: a private copy-on-write page inside a mapped view (section.c) */
 uint64_t vm_new_space(void);                    /* new PML4 sharing the kernel half */
 void vm_free_space(uint64_t pml4);              /* frees every user page and table */
 uint64_t vm_count_user_pages(uint64_t pml4);    /* present user-accessible pages (the working set) */
@@ -145,6 +146,9 @@ struct thread {
     int boost_disabled;                         /* SetThreadPriorityBoost setting (the scheduler never boosts) */
     uint32_t mem_priority;                      /* SetThreadInformation(ThreadMemoryPriority) setting, 1..5 */
     uint32_t power_control, power_state;        /* SetThreadInformation(ThreadPowerThrottling) setting (no scheduler effect) */
+    uint32_t suspend_count;                     /* NtSuspendThread/NtResumeThread (sysk32_obj.c): parked on its way back to user mode */
+    int parked;                                 /* blocked in thread_park_if_suspended() */
+    void *impersonation;                        /* impersonation token object (kobject_t *, sysk32_obj.c) or NULL */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);

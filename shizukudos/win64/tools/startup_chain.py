@@ -48,16 +48,26 @@ class Image:
         pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY[d] for d in (
             "IMAGE_DIRECTORY_ENTRY_IMPORT", "IMAGE_DIRECTORY_ENTRY_EXPORT", "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT")])
         self.imports = []                                           # (dll, name-or-#ordinal)
+        self.expect = {}                                            # (dll, "#N") -> the name pefile knows for that ordinal
         for e in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
             for i in e.imports:
-                self.imports.append((e.dll.decode(errors="replace"), i.name.decode() if i.name else f"#{i.ordinal}"))
+                dll = e.dll.decode(errors="replace")
+                if i.import_by_ordinal:                             # pefile names ws2_32/oleaut32 ordinals: keep the number
+                    fn = f"#{i.ordinal}"
+                    if i.name:
+                        self.expect[(dll.lower(), fn)] = i.name.decode()
+                else:
+                    fn = i.name.decode()
+                self.imports.append((dll, fn))
         self.delay = sum(len(e.imports) for e in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []))
-        self.exports, self.forwards, self.ordinals = set(), {}, set()
+        self.exports, self.forwards, self.ordinals, self.ordinal_names = set(), {}, set(), {}
         exp = getattr(pe, "DIRECTORY_ENTRY_EXPORT", None)
         if exp:
             for s in exp.symbols:
                 if s.ordinal is not None:
                     self.ordinals.add(s.ordinal)
+                    if s.name:
+                        self.ordinal_names[s.ordinal] = s.name.decode(errors="replace")
                 if s.name:
                     n = s.name.decode(errors="replace")
                     self.exports.add(n)
@@ -105,9 +115,10 @@ def main():
             return system[n], "system"
         return None, "DLL not found"
 
-    def exported(img, fn, depth=0):
-        if fn.startswith("#"):
-            return int(fn[1:]) in img.ordinals
+    def exported(img, fn, depth=0, expect=None):
+        if fn.startswith("#"):                               # by ordinal: the export at that number must be the expected one
+            n = int(fn[1:])
+            return n in img.ordinals and (expect is None or img.ordinal_names.get(n) == expect)
         if fn not in img.exports:
             return False
         fwd = img.forwards.get(fn)
@@ -132,7 +143,7 @@ def main():
             target, where = locate(dll)
             if not target:
                 why = where
-            elif not exported(image(target), fn):
+            elif not exported(image(target), fn, expect=img.expect.get((dll.lower(), fn))):
                 if target not in seen:
                     queue.append(target)
                 why = "not exported by " + target.name + (" (Shizuku)" if where == "system" else "")

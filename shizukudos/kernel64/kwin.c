@@ -96,3 +96,14 @@ int kview_read(kview_t *v, uint64_t off, void *buf, uint64_t len)
 }
 
 uint64_t kwin_total_faults(void) { return total_faults; }
+
+/* Physical address of view page `page` (loaded on first use), for mapping it into a process read-only (section.c);
+ * 0 when the page is outside the file or could not be produced. */
+uint64_t kview_page_pa(kview_t *v, uint64_t page)
+{
+    uint64_t va;
+    if (!v || page >= v->npages) return 0;
+    va = v->base + page * PAGE_SIZE;
+    if (!vm_lookup(kernel_pml4(), va, 0) && load_page(v, va)) return 0;
+    return vm_lookup(kernel_pml4(), va, 0) & ~(PAGE_SIZE - 1);
+}

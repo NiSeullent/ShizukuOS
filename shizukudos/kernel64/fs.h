@@ -68,7 +68,17 @@ typedef struct {
     uint64_t dir_index;                 /* NtQueryDirectoryFile cursor */
     uint16_t *dir_pattern;              /* NtQueryDirectoryFile FileName filter (heap, NUL-terminated), NULL = all */
     int dir_started;                    /* the first query fixed the pattern */
+    /* kernel32 support (npfs.c, iocp.c) */
+    void *pipe;                         /* named pipe instance (npfs.c) when this is a pipe end, else NULL */
+    int pipe_server;                    /* 1: the server end (CreateNamedPipe), 0: the client end (CreateFile) */
+    uint32_t options;                   /* NtCreateFile CreateOptions: FILE_SYNCHRONOUS_IO_(NON)ALERT = synchronous handle */
+    kobject_t *iocp;                    /* completion port (FileCompletionInformation), referenced */
+    uint64_t iocp_key;
+    uint32_t notify_modes;              /* FileIoCompletionNotificationInformation: 1 = skip the port on success, 2 = do not set the event */
 } file_t;
+
+#define FILE_SYNCHRONOUS_IO_ALERT 0x10
+#define FILE_SYNCHRONOUS_IO_NONALERT 0x20
 
 #define FILE_SUPERSEDE 0
 #define FILE_OPEN 1

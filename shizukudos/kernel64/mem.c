@@ -91,7 +91,7 @@ int vm_map(uint64_t pml4, uint64_t va, uint64_t pa, uint64_t flags)
     uint64_t *pte = walk(pml4, va, 1, flags & PT_U);
     if (!pte)
         return -1;
-    *pte = (pa & 0x000ffffffffff000ull) | (flags & (PT_W | PT_U | PT_NX | PT_PWT | PT_PCD)) | PT_P;
+    *pte = (pa & 0x000ffffffffff000ull) | (flags & (PT_W | PT_U | PT_NX | PT_PWT | PT_PCD | PT_SW_PRIV)) | PT_P;
     invlpg(va);
     return 0;
 }
@@ -113,7 +113,7 @@ int vm_protect(uint64_t pml4, uint64_t va, uint64_t flags)
     uint64_t *pte = walk(pml4, va, 0, 0);
     if (!pte || !(*pte & PT_P))
         return -1;
-    *pte = (*pte & 0x000ffffffffff000ull) | (flags & (PT_W | PT_U | PT_NX)) | PT_P;
+    *pte = (*pte & 0x000ffffffffff000ull) | (*pte & PT_SW_PRIV) | (flags & (PT_W | PT_U | PT_NX)) | PT_P;
     invlpg(va);
     return 0;
 }
@@ -124,7 +124,7 @@ uint64_t vm_lookup(uint64_t pml4, uint64_t va, uint64_t *flags_out)
     if (!pte || !(*pte & PT_P))
         return 0;
     if (flags_out)
-        *flags_out = *pte & (PT_W | PT_U | PT_NX);
+        *flags_out = *pte & (PT_W | PT_U | PT_NX | PT_SW_PRIV);
     return (*pte & 0x000ffffffffff000ull) | (va & 0xfff);
 }
 
@@ -169,7 +169,7 @@ static uint64_t count_level(uint64_t table_pa, int level)
     return n;
 }
 
-uint64_t vm_count_user_pages(uint64_t pml4) { return count_level(pml4, 4); }
+uint64_t vm_count_user_pages(uint64_t pml4) { return pml4 ? count_level(pml4, 4) : 0; }   /* 0: released address space (proc.c reaper) */
 
 /* ---------------------------------------------------------------- heap */
 struct hblock { uint64_t size; uint64_t used; struct hblock *next; uint64_t magic; };

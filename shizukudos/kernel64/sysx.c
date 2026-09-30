@@ -23,13 +23,13 @@ static int32_t object_name(process_t *p, uint64_t oa_va, char *out, size_t cap)
 {
     struct objattr oa;
     struct ustr u;
-    uint16_t tmp[64];
+    uint16_t tmp[OB_NAME_MAX];
     out[0] = 0;
     if (!oa_va) return STATUS_SUCCESS;
     if (copy_from_user(p, &oa, oa_va, sizeof oa)) return STATUS_ACCESS_VIOLATION;
     if (!oa.name) return STATUS_SUCCESS;
     if (copy_from_user(p, &u, oa.name, sizeof u)) return STATUS_ACCESS_VIOLATION;
-    if (u.length / 2 >= 64) return STATUS_OBJECT_NAME_INVALID;
+    if (u.length / 2 >= OB_NAME_MAX) return STATUS_OBJECT_NAME_INVALID;
     if (u.length && copy_from_user(p, tmp, u.buffer, u.length)) return STATUS_ACCESS_VIOLATION;
     return utf16_to_utf8(tmp, u.length / 2, out, cap) < 0 ? STATUS_OBJECT_NAME_INVALID : STATUS_SUCCESS;
 }
@@ -71,7 +71,7 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     if (handled) return st;
     switch (num) {
     case SYS_NtCreateEvent: {                              /* (PHANDLE, ACCESS, OA, EVENT_TYPE, BOOLEAN initial) */
-        char name[48];
+        char name[OB_NAME_MAX];
         kobject_t *o;
         st = object_name(p, a3, name, sizeof name);
         if (st) return st;
@@ -105,7 +105,7 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         return copy_to_user(p, a3, v, 8) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
     }
     case SYS_NtCreateMutant: {                              /* (PHANDLE, ACCESS, OA, BOOLEAN initial owner) */
-        char name[48];
+        char name[OB_NAME_MAX];
         kobject_t *o;
         st = object_name(p, a3, name, sizeof name);
         if (st) return st;
@@ -138,7 +138,7 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         return STATUS_SUCCESS;
     }
     case SYS_NtCreateSemaphore: {                           /* (PHANDLE, ACCESS, OA, LONG initial, LONG max) */
-        char name[48];
+        char name[OB_NAME_MAX];
         kobject_t *o;
         const int32_t initial = (int32_t)a4, maxc = (int32_t)stack_arg(p, r, 5);
         if (maxc <= 0 || initial < 0 || initial > maxc) return STATUS_INVALID_PARAMETER;
@@ -180,29 +180,58 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         return STATUS_SUCCESS;
     }
     case SYS_NtCreateTimer: {                               /* (PHANDLE, ACCESS, OA, TIMER_TYPE 0=notification 1=sync) */
-        kobject_t *o = ob_create(OB_TIMER, 0);
+        char name[OB_NAME_MAX];
+        kobject_t *o;
         extern void ob_register_timer(kobject_t *);
+        st = object_name(p, a3, name, sizeof name);
+        if (st) return st;
+        if (a4 > 1) return STATUS_INVALID_PARAMETER;
+        if (name[0] && (o = ob_find_named(OB_TIMER, name))) {
+            if (o->type != OB_TIMER) return STATUS_OBJECT_TYPE_MISMATCH;
+            ob_ref(o);
+            st = give_handle(p, o, a1, (uint32_t)a2);
+            return st ? st : (int32_t)0x40000000;          /* STATUS_OBJECT_NAME_EXISTS */
+        }
+        o = ob_create(OB_TIMER, name);
         if (!o) return STATUS_NO_MEMORY;
         o->u.timer.manual = a4 == 0;
         ob_register_timer(o);
         return give_handle(p, o, a1, (uint32_t)a2);
     }
-    case SYS_NtSetTimer: {                                  /* (handle, PLARGE_INTEGER due, ..., ..., BOOLEAN, LONG period) */
+    case SYS_NtSetTimer: {
+        /* (handle, PLARGE_INTEGER due, ApcRoutine, ApcContext, BOOLEAN resume, LONG period ms, PBOOLEAN previous state).
+         * due < 0: relative (100 ns), due > 0: absolute FILETIME, due == 0: now. Completion routines need APCs, which Kernel64
+         * does not deliver: a non-NULL routine is refused. The resume flag has no meaning without a sleep state. */
         kobject_t *o = handle_lookup(p, a1, OB_TIMER);
         int64_t due;
         const int32_t period = (int32_t)stack_arg(p, r, 6);
+        const uint64_t pprev = (uint64_t)stack_arg(p, r, 7);
+        uint64_t ms, f;
+        uint8_t prev;
         if (!o) return STATUS_INVALID_HANDLE;
+        if (a3) return STATUS_NOT_SUPPORTED;
+        if (period < 0) return STATUS_INVALID_PARAMETER;
         if (copy_from_user(p, &due, a2, 8)) return STATUS_ACCESS_VIOLATION;
+        if (due < 0) ms = ((uint64_t)(-due) + 9999) / 10000;
+        else if (due > 0) { const int64_t now = filetime_now(); ms = due > now ? ((uint64_t)(due - now) + 9999) / 10000 : 0; }
+        else ms = 0;
+        f = irq_save();
+        prev = (uint8_t)o->signaled;
         o->signaled = 0;
         o->u.timer.period_ms = period > 0 ? (uint64_t)period : 0;
-        o->u.timer.due_tick = ticks_now() + (due < 0 ? (uint64_t)(-due) / 10000 : 1) + 1;
+        o->u.timer.due_tick = ticks_now() + (ms ? ms : 1);
         o->u.timer.armed = 1;
+        irq_restore(f);
+        if (pprev) copy_to_user(p, pprev, &prev, 1);
         return STATUS_SUCCESS;
     }
-    case SYS_NtCancelTimer: {
+    case SYS_NtCancelTimer: {                               /* (handle, PBOOLEAN current state) */
         kobject_t *o = handle_lookup(p, a1, OB_TIMER);
+        uint8_t cur;
         if (!o) return STATUS_INVALID_HANDLE;
         o->u.timer.armed = 0;
+        cur = (uint8_t)o->signaled;
+        if (a2) copy_to_user(p, a2, &cur, 1);
         return STATUS_SUCCESS;
     }
     case SYS_NtWaitForSingleObject: {                       /* (handle, BOOLEAN alertable, PLARGE_INTEGER timeout) */
@@ -234,27 +263,32 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         return st;
     }
     case SYS_NtDuplicateObject: {                           /* (srcproc, srchandle, dstproc, PHANDLE dst, access, attrs, options) */
-        kobject_t *o = object_for_handle(p, a2);
-        uint32_t access = (uint32_t)stack_arg(p, r, 5);
-        const uint32_t options = (uint32_t)stack_arg(p, r, 7);
-        if (!o) return STATUS_INVALID_HANDLE;
-        if ((options & 2) && !(a2 & 3))                     /* DUPLICATE_SAME_ACCESS: the source handle's rights (registry keys enforce them) */
-            access = p->handles[a2 / 4 - 1].access;
-        st = give_handle(p, o, a4, access);
-        if (!st && (options & 1) && !(a2 & 3)) handle_close(p, a2);       /* DUPLICATE_CLOSE_SOURCE */
-        return st;
+        extern int32_t sys_duplicate_object(process_t *p, struct regs *r, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
+        return sys_duplicate_object(p, r, a1, a2, a3, a4);  /* sysk32_obj.c: any source and target process */
     }
     case SYS_NtCreateThreadEx: {
         /* (PHANDLE, ACCESS, OA, ProcessHandle, StartRoutine, Argument, Flags, ZeroBits, StackSize, MaxStack, Attr) */
+        /* Flags: THREAD_CREATE_FLAGS_CREATE_SUSPENDED (1) leaves the thread suspended until NtResumeThread. The target may be
+         * another process (CreateRemoteThread): the thread starts at ntdll's thread entry of that process. */
         thread_t *t = 0;
         const uint64_t start = (uint64_t)stack_arg(p, r, 5), arg = (uint64_t)stack_arg(p, r, 6);
         const uint64_t flags = (uint64_t)stack_arg(p, r, 7);
+        extern int process_start_thread3(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, int suspended,
+                                         thread_t **out);
         process_t *target = a4 == CURRENT_PROCESS_HANDLE ? p : 0;
-        (void)flags;
-        if (!target || !start) return STATUS_INVALID_PARAMETER;
-        if (!target->ntdll_thread_start) return STATUS_NOT_SUPPORTED;      /* processes not started by the loader */
-        if (process_start_thread2(target, target->ntdll_thread_start, start, arg, (uint64_t)stack_arg(p, r, 9), &t))
-            return STATUS_NO_MEMORY;
+        kobject_t *pref = 0;
+        int rc;
+        if (!target) {
+            if (handle_ref(p, a4, OB_PROCESS, &pref, 0)) return STATUS_INVALID_HANDLE;
+            target = pref->u.proc.p;
+            if (!target || !target->used || target->object != pref) { ob_deref(pref); return STATUS_INVALID_HANDLE; }
+            if (target->terminated) { ob_deref(pref); return STATUS_PROCESS_IS_TERMINATING; }
+        }
+        if (!start) { if (pref) ob_deref(pref); return STATUS_INVALID_PARAMETER; }
+        if (!target->ntdll_thread_start) { if (pref) ob_deref(pref); return STATUS_NOT_SUPPORTED; }   /* not started by the loader */
+        rc = process_start_thread3(target, target->ntdll_thread_start, start, arg, (uint64_t)stack_arg(p, r, 9), (flags & 1) != 0, &t);
+        if (pref) ob_deref(pref);
+        if (rc) return STATUS_NO_MEMORY;
         {
             kobject_t *to = t->object;
             ob_ref(to);
@@ -293,7 +327,7 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
             if (to) t = to->u.thr.t;
             if (t) {
                 b.exit_status = t->state == TS_ZOMBIE ? t->exit_code : 0x103;
-                b.teb = t->teb; b.pid = (uint64_t)p->pid; b.tid = t->id * 4ull;
+                b.teb = t->teb; b.pid = t->proc ? (uint64_t)t->proc->pid : (uint64_t)p->pid; b.tid = t->tid;
             } else {                                        /* exited and reclaimed: the object kept what is still defined */
                 b.exit_status = to->u.thr.exit_code;
                 b.teb = 0; b.pid = to->u.thr.pid; b.tid = to->u.thr.tid;
@@ -307,25 +341,64 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     }
     case SYS_NtSetInformationProcess: return STATUS_INVALID_INFO_CLASS;   /* nothing settable yet; entry points come from ntdll exports */
     case SYS_NtSetInformationThread: return STATUS_SUCCESS;             /* priorities, names: accepted, no effect */
-    case SYS_NtCreateProcessEx: {                           /* (PHANDLE proc, PHANDLE thread, PUNICODE path, PUNICODE cmd, PUNICODE cwd) */
+    case SYS_NtCreateProcessEx: {
+        /* (PHANDLE proc, PHANDLE thread, PUNICODE path, PUNICODE cmd, PUNICODE cwd, struct shz_process_ex *ext). The extension
+         * block (kernel32 CreateProcessW) carries: flags 1 CREATE_SUSPENDED, 2 inherit handles, 4 break away from the job,
+         * 8 standard handles given; the environment block; PROC_THREAD_ATTRIBUTE_HANDLE_LIST; the three standard handles. */
+        struct { uint32_t size, flags; uint64_t env, env_bytes, handle_list; uint32_t handle_count, pad; uint64_t std[3]; } ext;
+        const uint64_t pcwd = (uint64_t)stack_arg(p, r, 5), pext = (uint64_t)stack_arg(p, r, 6);
+        enum { CMD_MAX = 4096 };
         struct ustr u;
-        uint16_t w[260];
-        char path[300], cmd[300], cwd[128];
+        uint16_t *w = kmalloc(CMD_MAX * 2 + 2);
+        char *path = kmalloc(600), *cmd = kmalloc(CMD_MAX * 3 + 1), cwd[260];
+        uint16_t *env = 0;
+        uint64_t hl[64];
+        ldr_proc_opts_t opts;
         process_t *np = 0;
         thread_t *nt = 0;
         cwd[0] = 0;
-        if (copy_from_user(p, &u, a3, sizeof u) || u.length > sizeof w - 2) return STATUS_ACCESS_VIOLATION;
-        if (copy_from_user(p, w, u.buffer, u.length)) return STATUS_ACCESS_VIOLATION;
-        if (utf16_to_utf8(w, u.length / 2, path, sizeof path) < 0) return STATUS_OBJECT_NAME_INVALID;
+        memset(&opts, 0, sizeof opts);
+        st = STATUS_SUCCESS;
+        if (!w || !path || !cmd) { st = STATUS_NO_MEMORY; goto cp_done; }
+        if (copy_from_user(p, &u, a3, sizeof u) || u.length > 598 || copy_from_user(p, w, u.buffer, u.length)) { st = STATUS_ACCESS_VIOLATION; goto cp_done; }
+        if (utf16_to_utf8(w, u.length / 2, path, 600) < 0) { st = STATUS_OBJECT_NAME_INVALID; goto cp_done; }
+        cmd[0] = 0;
         if (a4) {
-            if (copy_from_user(p, &u, a4, sizeof u) || u.length > sizeof w - 2) return STATUS_ACCESS_VIOLATION;
-            if (u.length && copy_from_user(p, w, u.buffer, u.length)) return STATUS_ACCESS_VIOLATION;
-            if (utf16_to_utf8(w, u.length / 2, cmd, sizeof cmd) < 0) return STATUS_INVALID_PARAMETER;
-        } else {
-            cmd[0] = 0;
+            if (copy_from_user(p, &u, a4, sizeof u) || u.length > CMD_MAX * 2) { st = STATUS_ACCESS_VIOLATION; goto cp_done; }
+            if (u.length && copy_from_user(p, w, u.buffer, u.length)) { st = STATUS_ACCESS_VIOLATION; goto cp_done; }
+            if (utf16_to_utf8(w, u.length / 2, cmd, CMD_MAX * 3 + 1) < 0) { st = STATUS_INVALID_PARAMETER; goto cp_done; }
         }
-        st = ldr_create_process(p, path, cmd, cwd, &np, &nt);
-        if (st) return st;
+        if (pcwd) {
+            if (copy_from_user(p, &u, pcwd, sizeof u) || u.length > 500 || (u.length && copy_from_user(p, w, u.buffer, u.length))) {
+                st = STATUS_ACCESS_VIOLATION;
+                goto cp_done;
+            }
+            if (utf16_to_utf8(w, u.length / 2, cwd, sizeof cwd) < 0) { st = STATUS_OBJECT_PATH_NOT_FOUND; goto cp_done; }
+        }
+        if (pext) {
+            if (copy_from_user(p, &ext, pext, sizeof ext) || ext.size < sizeof ext) { st = STATUS_INVALID_PARAMETER; goto cp_done; }
+            opts.suspended = (ext.flags & 1) != 0;
+            opts.inherit = (ext.flags & 2) != 0;
+            opts.breakaway = (ext.flags & 4) != 0;
+            opts.use_std = (ext.flags & 8) != 0;
+            opts.std[0] = ext.std[0]; opts.std[1] = ext.std[1]; opts.std[2] = ext.std[2];
+            if (ext.env) {
+                if (ext.env_bytes < 4 || ext.env_bytes > 65536 || (ext.env_bytes & 1)) { st = STATUS_INVALID_PARAMETER; goto cp_done; }
+                env = kmalloc(ext.env_bytes);
+                if (!env) { st = STATUS_NO_MEMORY; goto cp_done; }
+                if (copy_from_user(p, env, ext.env, ext.env_bytes)) { st = STATUS_ACCESS_VIOLATION; goto cp_done; }
+                opts.env = env;
+                opts.env_chars = ext.env_bytes / 2;
+            }
+            if (ext.handle_list) {
+                if (ext.handle_count > 64) { st = STATUS_INVALID_PARAMETER; goto cp_done; }
+                if (copy_from_user(p, hl, ext.handle_list, ext.handle_count * 8ull)) { st = STATUS_ACCESS_VIOLATION; goto cp_done; }
+                opts.handle_list = hl;
+                opts.handle_count = ext.handle_count;
+            }
+        }
+        st = ldr_create_process_ex(p, path, cmd, cwd, pext ? &opts : 0, &np, &nt);
+        if (st) goto cp_done;
         {
             kobject_t *to = nt->object;
             ob_ref(to);
@@ -335,6 +408,8 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
             if (!st && a2) { ob_ref(to); st = give_handle(p, to, a2, 0x1fffff); }
             ob_deref(to);
         }
+cp_done:
+        kfree(w); kfree(path); kfree(cmd); kfree(env);
         return st;
     }
     case SYS_NtLoadImage: {
@@ -445,6 +520,11 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         return k32_get_context_thread(p, a1, a2);
     }
     case SYS_NtShzGetTeb: return (int32_t)0;
-    default: return num >= 0x50 ? sysext_dispatch(p, r, num, a1, a2, a3, a4) : STATUS_NOT_IMPLEMENTED;
+    default:
+        if (num >= 0x50) return sysext_dispatch(p, r, num, a1, a2, a3, a4);
+        {   /* NtOpenProcess, NtOpenThread, NtSuspendThread, NtResumeThread (sysk32_obj.c) */
+            extern int32_t sys_k32_base(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
+            return sys_k32_base(p, r, num, a1, a2, a3, a4);
+        }
     }
 }

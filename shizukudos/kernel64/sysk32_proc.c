@@ -32,7 +32,8 @@ enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32
        K32Q_SYSTEM_PERF = 7, K32Q_PROCESS_MEMORY = 8, K32Q_WORKING_SET_EX = 9, K32Q_IMAGE_PATH = 10, K32Q_FIRMWARE = 11,
        K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13 };
 enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
-       K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10 };
+       K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10,
+       K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12 };
 
 /* FILETIME of a scheduler tick: the wall clock at the first query minus the ticks counted by then gives the boot instant once,
  * so a thread's creation or exit time reads the same on every query. */
@@ -450,6 +451,29 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
 int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len)
 {
     switch (cls) {
+    case K32S_SUSPEND_PROCESS: case K32S_RESUME_PROCESS: {
+        /* NtSuspendProcess / NtResumeProcess: every thread's suspend count moves by one (sysk32_obj.c parks a suspended thread
+         * on its way back to user mode); the caller's own thread is suspended last, when it leaves this call. */
+        extern void thread_park_if_suspended(void);
+        process_t *p = proc_of_handle(cur, h);
+        thread_t *t;
+        unsigned i;
+        uint64_t f;
+        (void)buf; (void)len;
+        if (!p) return STATUS_INVALID_HANDLE;
+        if (p->terminated) return STATUS_PROCESS_IS_TERMINATING;
+        f = irq_save();
+        for (i = 0; (t = thread_slot(i)) != 0; ++i) {
+            if (t->proc != p || t->state == TS_FREE || t->state == TS_ZOMBIE) continue;
+            if (cls == K32S_SUSPEND_PROCESS) { if (t->suspend_count < 127) ++t->suspend_count; }
+            else if (t->suspend_count && --t->suspend_count == 0) {
+                if (t->state == TS_NEW) thread_resume(t);
+                else if (t->parked && t->state == TS_BLOCKED) thread_wake(t);
+            }
+        }
+        irq_restore(f);
+        return STATUS_SUCCESS;
+    }
     case K32S_PRIORITY_CLASS: {
         process_t *p = proc_of_handle(cur, h);
         uint32_t v;

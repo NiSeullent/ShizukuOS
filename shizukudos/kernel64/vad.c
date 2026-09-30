@@ -122,6 +122,12 @@ static int prot_valid(uint32_t prot)
 /* sysk32.c: records the working-set / commit peak (the moment before memory goes away); `released` also drops the
  * VirtualLock locks of the range (its pages are freed). */
 extern void k32_before_unmap(process_t *p, uint64_t start, uint64_t end, int released);
+/* section.c: mapped views (VK_SECTION descriptors, img = the view) */
+extern void section_unmap_pages(process_t *p, uint64_t start, uint64_t end);
+extern void section_view_released(void *view);
+extern int section_fault(process_t *p, vad_t *v, uint64_t addr, int write);
+#define STATUS_UNABLE_TO_DELETE_SECTION ((int32_t)0xC000001B)
+#define STATUS_NOT_MAPPED_VIEW ((int32_t)0xC0000019)
 
 /* Free the physical pages and unmap [start, end). */
 static void unmap_pages(process_t *p, uint64_t start, uint64_t end)
@@ -251,6 +257,8 @@ int32_t vad_free(process_t *p, uint64_t *base, uint64_t *size, uint32_t type)
         v = vad_find(p, *base);
         if (!v)
             return STATUS_UNABLE_TO_FREE_VM;
+        if (v->kind == VK_SECTION)
+            return STATUS_UNABLE_TO_DELETE_SECTION;         /* a mapped view goes with NtUnmapViewOfSection */
         if (v->alloc_base != *base)
             return STATUS_FREE_VM_NOT_AT_BASE;
         if (*size != 0)
@@ -271,9 +279,12 @@ int32_t vad_free(process_t *p, uint64_t *base, uint64_t *size, uint32_t type)
         end = up(*base + *size);
         if (!*size || end <= start)
             return STATUS_INVALID_PARAMETER;
-        for (a = start; a < end; a = vad_find(p, a)->end)
+        for (a = start; a < end; a = vad_find(p, a)->end) {
             if (!vad_find(p, a))
                 return STATUS_INVALID_PARAMETER;
+            if (vad_find(p, a)->kind == VK_SECTION)
+                return STATUS_UNABLE_TO_DELETE_SECTION;
+        }
         if (vad_split(p, start) || vad_split(p, end))
             return STATUS_NO_MEMORY;
         for (a = start; a < end; a = vad_find(p, a)->end) {
@@ -316,7 +327,14 @@ int32_t vad_protect(process_t *p, uint64_t *base, uint64_t *size, uint32_t new_p
         uint64_t va;
         w->prot = new_prot;
         for (va = w->start; va < w->end; va += PAGE_SIZE)
-            if (vm_lookup(p->pml4, va, 0)) {
+            if (w->kind == VK_SECTION) {                /* views: section pages re-fault with the new protection */
+                uint64_t fl = 0, pa = vm_lookup(p->pml4, va, &fl);
+                if (!pa) continue;
+                if (!(fl & PT_SW_PRIV)) { vm_unmap(p->pml4, va, 0); continue; }
+                /* a private copy-on-write copy keeps its data; parked without user access for NOACCESS/GUARD */
+                vm_map(p->pml4, va, pa & ~0xfffull, (((new_prot & 0xff) == PAGE_NOACCESS || (new_prot & 0x100)) ? 0 :
+                       prot_to_ptflags(new_prot)) | PT_SW_PRIV);
+            } else if (vm_lookup(p->pml4, va, 0)) {
                 if ((new_prot & 0xff) == PAGE_NOACCESS || (new_prot & 0x100)) {
                     uint64_t pa;
                     if (vm_unmap(p->pml4, va, &pa) == 0) {     /* NOACCESS/GUARD: re-fault on touch */
@@ -351,7 +369,7 @@ int32_t vad_query(process_t *p, uint64_t addr, uint64_t *base, uint64_t *alloc_b
     *base = v->start; *alloc_base = v->alloc_base; *alloc_prot = v->alloc_prot; *size = v->end - v->start;
     *state = v->state == VAD_COMMITTED ? MEM_COMMIT : MEM_RESERVE;
     *prot = v->state == VAD_COMMITTED ? v->prot : 0;
-    *type = v->kind == VK_IMAGE ? MEM_IMAGE : MEM_PRIVATE;
+    *type = v->kind == VK_IMAGE ? MEM_IMAGE : v->kind == VK_SECTION ? MEM_MAPPED : MEM_PRIVATE;
     return STATUS_SUCCESS;
 }
 
@@ -375,6 +393,8 @@ int user_fault_in(process_t *p, uint64_t addr, int write, int exec)
         return STATUS_ACCESS_VIOLATION;
     if (exec && !(base >= PAGE_EXECUTE))
         return STATUS_ACCESS_VIOLATION;
+    if (v->kind == VK_SECTION)                  /* mapped view: shared section page or copy-on-write (section.c) */
+        return section_fault(p, v, addr, write);
     if (vm_lookup(p->pml4, addr, &flags))
         return 0;                               /* already present (spurious or racing fault) */
     if (v->img)                                 /* file-backed image page: read (and relocate) it now */
@@ -422,7 +442,9 @@ uint8_t *image_kpage(process_t *p, uint64_t va)
     if (!pa) {
         vad_t *v = vad_find(p, page);
         if (!v || v->state != VAD_COMMITTED) return 0;
-        if (v->img) {
+        if (v->kind == VK_SECTION) {
+            if (section_fault(p, v, page, 0)) return 0;
+        } else if (v->img) {
             if (ldr_image_fault(p, v, page)) return 0;
         } else {
             pa = pmm_alloc();                                   /* zeroed */
@@ -503,4 +525,44 @@ int user_string_len(process_t *p, uint64_t uva, uint64_t max, uint64_t *len)
         ++n;
     }
     return -1;
+}
+
+/* ---------------------------------------------------------------- mapped views (section.c) */
+/* Records the view on the descriptor section_map() just created at `base`. */
+int32_t vad_attach_view(process_t *p, uint64_t base, void *view)
+{
+    vad_t *v = vad_find(p, base);
+    if (!v || v->kind != VK_SECTION || v->alloc_base != base) return STATUS_INVALID_PARAMETER;
+    v->img = view;
+    return STATUS_SUCCESS;
+}
+
+/* NtUnmapViewOfSection: removes the view containing `addr` (any address inside it). */
+int32_t vad_unmap_view(process_t *p, uint64_t addr)
+{
+    vad_t *v = vad_find(p, addr & PAGE_MASK);
+    uint64_t alloc_base;
+    void *view;
+    unsigned i;
+    if (!v || v->kind != VK_SECTION || !v->img) return STATUS_NOT_MAPPED_VIEW;
+    alloc_base = v->alloc_base;
+    view = v->img;
+    for (i = vad_lower(p, alloc_base); i < p->vads.count && p->vads.v[i].alloc_base == alloc_base && p->vads.v[i].img == view;) {
+        k32_before_unmap(p, p->vads.v[i].start, p->vads.v[i].end, 1);
+        section_unmap_pages(p, p->vads.v[i].start, p->vads.v[i].end);
+        vad_remove_at(p, i);
+    }
+    section_view_released(view);
+    return STATUS_SUCCESS;
+}
+
+/* Process teardown: every view is unmapped before the address space is freed (vm_free_space() frees every present
+ * page, and section pages belong to their section). */
+void vad_unmap_all_views(process_t *p)
+{
+    unsigned i = 0;
+    while (i < p->vads.count) {
+        if (p->vads.v[i].kind == VK_SECTION && p->vads.v[i].img) vad_unmap_view(p, p->vads.v[i].start);
+        else ++i;
+    }
 }

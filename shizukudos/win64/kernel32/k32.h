@@ -52,6 +52,8 @@ NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap);
 DWORD k32_current_directory(WCHAR *buf, DWORD cap);
 /* Opens a DOS path through NtCreateFile (file.c). disposition: FILE_*_D, options: OPT_*. */
 NTSTATUS k32_open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG options, HANDLE *h, ULONG_PTR *info);
+NTSTATUS k32_open_path_ex(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG options, ULONG oa_attrs, int sync, HANDLE *h,
+                          ULONG_PTR *info);
 #define FILE_OPEN_D 1
 #define FILE_CREATE_D 2
 #define FILE_OPEN_IF_D 3
@@ -70,6 +72,11 @@ void k32_power_request_closing(HANDLE h);
 int k32_console_attached(void);
 void k32_console_track(const char *s, DWORD n);         /* the screen-buffer cursor follows console output */
 
+/* Bring-up diagnostics (k32_trace.c): active only when the environment has SHZ_K32TRACE=1 (kernel `shz.k32trace`). */
+int k32_trace_on(void);
+void k32_trace3(const char *a, const char *b, const char *c);
+void k32_trace_hex(const char *a, const char *b, ULONG_PTR v);
+BOOL k32_unsupported(const char *fn, const char *what, DWORD err);   /* sets `err` as last error, reports it, returns FALSE */
 /* UTF-8 <-> UTF-16 helpers (k32_file.c). n < 0 means NUL-terminated (the terminator is converted too). Return 0 when the
  * output buffer is too small. */
 int k32_utf8_to_wide(const char *s, int n, WCHAR *w, int cap);

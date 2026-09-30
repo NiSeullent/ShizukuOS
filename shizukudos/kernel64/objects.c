@@ -18,8 +18,7 @@ typedef struct waitdesc {
 } waitdesc_t;
 
 static kobject_t *named_head;
-static kobject_t *timers_head[16];
-static unsigned timer_count;
+static kobject_t *timers_head;                          /* every timer object (linked through u.timer.next_timer) */
 
 kobject_t *ob_create(uint32_t type, const char *name)
 {
@@ -43,6 +42,14 @@ void ob_ref(kobject_t *o) { const uint64_t f = irq_save(); ++o->refs; irq_restor
 /* Registry key objects: drop the key node's reference (registry.c). May block on the registry lock, so it runs after the
  * interrupt-off section below and ob_deref() must not be called with irqs disabled or with the registry lock held. */
 extern void reg_key_object_free(kobject_t *o);
+/* kernel32 support objects: freed with their last reference (section.c, iocp.c, sysk32_obj.c) */
+extern void section_object_free(kobject_t *o);
+extern void iocp_object_free(kobject_t *o);
+extern void job_object_free(kobject_t *o);
+extern void token_object_free(kobject_t *o);
+/* ... and told when their last handle goes (npfs.c / iocp.c: pending I/O of a file, sysk32_obj.c: kill-on-close jobs) */
+extern void file_handles_gone(kobject_t *o);
+extern void job_handles_gone(kobject_t *o);
 
 void ob_deref(kobject_t *o)
 {
@@ -55,14 +62,19 @@ void ob_deref(kobject_t *o)
         for (pp = &named_head; *pp; pp = &(*pp)->next_named)
             if (*pp == o) { *pp = o->next_named; break; }
         if (o->type == OB_TIMER) {
-            unsigned i;
-            for (i = 0; i < timer_count; ++i)
-                if (timers_head[i] == o) { timers_head[i] = timers_head[--timer_count]; break; }
+            kobject_t **tp;
+            for (tp = &timers_head; *tp; tp = &(*tp)->u.timer.next_timer)
+                if (*tp == o) { *tp = o->u.timer.next_timer; break; }
         }
     }
     irq_restore(f);
     if (last) {
         if (o->type == OB_KEY) reg_key_object_free(o);
+        else if (o->type == OB_SECTION) section_object_free(o);
+        else if (o->type == OB_IOCP) iocp_object_free(o);
+        else if (o->type == OB_JOB) job_object_free(o);
+        else if (o->type == OB_TOKEN) token_object_free(o);
+        if (o->sd) kfree(o->sd);
         kfree(o);
     }
 }
@@ -90,6 +102,7 @@ int32_t handle_insert(process_t *p, kobject_t *o, uint32_t access, uint32_t *h_o
             p->handles[i].access = access;
             p->handles[i].inherit = 0;
             ++o->refs;
+            ++o->handle_count;
             ++p->handle_count;
             *h_out = (i + 1) * 4;
             irq_restore(f);
@@ -133,7 +146,12 @@ int32_t handle_close(process_t *p, uint64_t handle)
     if (!o) { irq_restore(f); return STATUS_INVALID_HANDLE; }
     p->handles[handle / 4 - 1].obj = 0;                 /* the slot is free before anything else can look at it */
     --p->handle_count;
+    if (o->handle_count) --o->handle_count;
     irq_restore(f);
+    if (!o->handle_count) {
+        if (o->type == OB_FILE) file_handles_gone(o);   /* pending I/O is cancelled, a pipe end disconnects (npfs.c) */
+        else if (o->type == OB_JOB) job_handles_gone(o);
+    }
     if (o->type == OB_FILE) {
         extern void file_object_closed(kobject_t *o);
         file_object_closed(o);
@@ -161,6 +179,7 @@ static int obj_signaled(kobject_t *o, thread_t *t)
 {
     switch (o->type) {
     case OB_EVENT: case OB_THREAD: case OB_PROCESS: case OB_TIMER: return o->signaled;
+    case OB_FILE: case OB_IOCP: case OB_JOB: return o->signaled;   /* file: no I/O in progress; port: packets queued */
     case OB_SEMAPHORE: return o->u.sem.count > 0;
     case OB_MUTANT: return o->u.mutant.owner == 0 || o->u.mutant.owner == t;
     default: return 0;
@@ -325,6 +344,7 @@ void thread_object_signal(thread_t *t)
 void thread_object_detach(thread_t *t)
 {
     kobject_t *o = t->object;
+    if (t->impersonation) { kobject_t *tok = t->impersonation; t->impersonation = 0; ob_deref(tok); }   /* sysk32_obj.c */
     if (!o) return;
     o->u.thr.exit_code = t->exit_code;
     o->u.thr.create_tick = t->create_tick;
@@ -339,14 +359,17 @@ void thread_object_detach(thread_t *t)
 
 void ob_register_timer(kobject_t *o)
 {
-    if (timer_count < 16) timers_head[timer_count++] = o;
+    const uint64_t f = irq_save();
+    o->u.timer.next_timer = timers_head;
+    timers_head = o;
+    irq_restore(f);
 }
 
+/* Timer tick (interrupts off): expired timers are signalled, periodic ones re-armed. */
 void sched_check_timeouts(uint64_t now)
 {
-    unsigned i;
-    for (i = 0; i < timer_count; ++i) {
-        kobject_t *o = timers_head[i];
+    kobject_t *o;
+    for (o = timers_head; o; o = o->u.timer.next_timer) {
         if (o->u.timer.armed && o->u.timer.due_tick <= now) {
             o->signaled = 1;
             if (o->u.timer.period_ms)

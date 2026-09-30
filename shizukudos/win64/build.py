@@ -72,9 +72,15 @@ def scan_exports(paths, marker):
     return sorted(set(names))
 
 
-def write_def(path, library, names, forwarders=()):
+def write_def(path, library, names, forwarders=(), ordinals=None):
+    """ordinals: {name: ordinal} to pin (module.json "ordinals"): the Windows ordinals programs import by number (the
+    Winsock 1.1 exports of ws2_32, for instance); every other export gets whatever ordinal the linker assigns."""
+    ordinals = ordinals or {}
+    missing = sorted(set(ordinals) - set(names))
+    if missing:
+        raise SystemExit(f"{library}: pinned ordinals for names that are not exported: {missing}")
     body = [f"LIBRARY {library}", "EXPORTS"]
-    body += [f"  {n}" for n in names]
+    body += [f"  {n} @{ordinals[n]}" if n in ordinals else f"  {n}" for n in names]
     body += [f"  {f}" for f in forwarders]
     path.write_text("\n".join(body) + "\n")
 
@@ -148,7 +154,7 @@ def build_modules():
             d, cfg = pending.pop(name)
             src = sorted(d.glob("*.c"))
             names = scan_exports(src, "DLLAPI")
-            write_def(OUT / f"{name}.def", f"{name}.dll", names, cfg.get("forwarders", []))
+            write_def(OUT / f"{name}.def", f"{name}.dll", names, cfg.get("forwarders", []), cfg.get("ordinals"))
             has_main = any(re.search(r"\bDllMain\s*\(", s.read_text()) for s in src)
             base = DLL_BASE + DLL_STRIDE * len(order)
             dll = OUT / f"{name}.dll"

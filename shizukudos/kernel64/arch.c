@@ -109,6 +109,12 @@ void isr_dispatch(struct regs *r)
         standalone_eoi();                   /* PIT IRQ0 through the 8259: acknowledge before any context switch */
 #endif
         sched_tick_from((r->cs & 3) == 3);  /* CPU-time accounting charges the tick to user or kernel mode */
+        if ((r->cs & 3) == 3) {             /* a thread of a terminated process that never enters the kernel ends here */
+            extern void check_kill(void);
+            extern void thread_park_if_suspended(void);
+            check_kill();
+            if (thread_current()->suspend_count) { thread_park_if_suspended(); check_kill(); }   /* NtSuspendThread */
+        }
         return;
     case VEC_DOORBELL: {
         extern void ipc64_doorbell_irq(void);

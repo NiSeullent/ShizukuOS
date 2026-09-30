@@ -8,7 +8,7 @@
 
 /* ---- virtual address descriptors ---- */
 enum { VAD_FREE = 0, VAD_RESERVED = 1, VAD_COMMITTED = 2 };
-enum { VK_PRIVATE = 0, VK_IMAGE = 1, VK_STACK = 2, VK_TEB = 3 };
+enum { VK_PRIVATE = 0, VK_IMAGE = 1, VK_STACK = 2, VK_TEB = 3, VK_SECTION = 4 };   /* VK_SECTION: a mapped view (section.c), img = view */
 typedef struct {
     uint64_t start, end;                /* [start, end), page aligned */
     uint32_t state;                     /* VAD_RESERVED / VAD_COMMITTED */
@@ -29,13 +29,22 @@ enum { OB_NONE = 0, OB_EVENT = 1, OB_MUTANT = 2, OB_SEMAPHORE = 3, OB_THREAD = 4
        OB_TIMER = 7, OB_DIRECTORY = 8 };
 enum { OB_KEY = 0x10 };                 /* registry key (registry.c); a separate enum so other subsystems can add their own types */
 #define OB_SOCKET 0x40                  /* socket handle (u.net.sock); closed through net_socket_handle_closing() */
+/* kernel32 support objects (kernel64/section.c, iocp.c, npfs.c, sysk32_obj.c) */
+#define OB_SECTION 0x20                 /* section (file mapping): u.section.s = section_t * */
+#define OB_IOCP 0x21                    /* I/O completion port: u.iocp.q; signalled while packets are queued */
+#define OB_JOB 0x22                     /* job object: u.job.j */
+#define OB_TOKEN 0x23                   /* access token: u.token.t */
+#define OB_NAME_MAX 128                 /* named objects: bytes of the UTF-8 name including the terminator */
 struct waitblock;
 struct kobject {
     uint32_t type, refs;
     int signaled;                       /* event/thread/process/timer state, semaphore count > 0 */
     struct waitblock *waiters;
-    char name[48];
+    char name[OB_NAME_MAX];
     struct kobject *next_named;
+    void *sd;                           /* self-relative security descriptor set with NtShzSecurityObject (stored, not enforced) */
+    uint32_t sd_len;
+    uint32_t handle_count;              /* handles referring to the object (handle_insert / handle_close) */
     union {
         struct { int manual; } event;
         struct { thread_t *owner; int recursion; int abandoned; } mutant;
@@ -46,8 +55,12 @@ struct kobject {
         struct { void *sock; } net;         /* OB_SOCKET: sock_t * (net_sock.c) */
         struct { process_t *p; } proc;
         struct { void *file; uint32_t access; } file;
-        struct { uint64_t due_tick, period_ms; int manual; int armed; } timer;
+        struct { uint64_t due_tick, period_ms; int manual; int armed; struct kobject *next_timer; } timer;   /* objects.c timer list */
         struct { void *node; } key;             /* registry key node (registry.c); the node's refs count these objects */
+        struct { void *s; } section;            /* OB_SECTION: section_t * (section.c) */
+        struct { void *q; } iocp;               /* OB_IOCP: iocp_t * (iocp.c) */
+        struct { void *j; } job;                /* OB_JOB: job_t * (sysk32_obj.c) */
+        struct { void *t; } token;              /* OB_TOKEN: token_t * (sysk32_obj.c) */
     } u;
 };
 
@@ -109,6 +122,12 @@ struct process {
      * parent at creation; 0 = the Supervisor/serial console. `console_sink_gen` guards against a recycled slot. */
     void *console_sink;
     uint32_t console_sink_gen;
+    /* kernel32 support (sysk32_obj.c): the job the process belongs to and its primary access token (both referenced) */
+    kobject_t *job;
+    kobject_t *token;
+    /* reaper (proc.c): a process created by another process is never proc_wait()ed by the kernel; once its last thread is
+     * gone the reaper closes its handles and frees its address space, keeping the slot for exit-code queries. */
+    int reap_pending, mem_released;
 };
 
 /* vad.c */
@@ -137,6 +156,20 @@ int copy_to_user(process_t *p, uint64_t uva, const void *src, uint64_t n);
 int user_string_len(process_t *p, uint64_t uva, uint64_t max, uint64_t *len);
 
 /* ldr.c */
+/* Options of a process creation beyond image, command line and directory (NtCreateProcessEx's extension block, sysx.c). */
+typedef struct ldr_proc_opts {
+    int suspended;                      /* the main thread waits for NtResumeThread */
+    const uint16_t *env;                /* UTF-16 environment block (double-NUL terminated), NULL = the default one */
+    uint64_t env_chars;
+    int inherit;                        /* copy the parent's inheritable handles to the same values */
+    const uint64_t *handle_list;        /* only these (PROC_THREAD_ATTRIBUTE_HANDLE_LIST), NULL = every inheritable handle */
+    unsigned handle_count;
+    int use_std;                        /* STARTF_USESTDHANDLES: std[] are the child's standard handles */
+    uint64_t std[3];
+    int breakaway;                      /* CREATE_BREAKAWAY_FROM_JOB */
+} ldr_proc_opts_t;
+int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
+                              const ldr_proc_opts_t *opts, process_t **out_proc, thread_t **out_thread);
 int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr);          /* page-in of a lazily mapped image page; 0 = ok */
 void ldr_release_modules(process_t *p);                             /* frees the loader's per-process records */
 

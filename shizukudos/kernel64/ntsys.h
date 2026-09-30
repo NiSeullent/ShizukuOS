@@ -56,7 +56,42 @@
     X(NtShzSockPoll, 0x8c) X(NtShzNetResolve, 0x8d) X(NtShzNetQuery, 0x8e) X(NtShzNetPing, 0x8f)
 
 #define SYSCALL_LIST_K32(X) \
-    X(NtQueryVolumeInformationFile, 0x90) X(NtLockFile, 0x91) X(NtUnlockFile, 0x92) X(NtShzQueryK32, 0x93) X(NtShzSetK32, 0x94)
+    X(NtQueryVolumeInformationFile, 0x90) X(NtLockFile, 0x91) X(NtUnlockFile, 0x92) X(NtShzQueryK32, 0x93) X(NtShzSetK32, 0x94) \
+    X(NtShzSection, 0x95) X(NtShzIoCompletion, 0x96) X(NtCreateNamedPipeFile, 0x97) X(NtFsControlFile, 0x98) \
+    X(NtReadVirtualMemory, 0x99) X(NtWriteVirtualMemory, 0x9a) X(NtShzJob, 0x9b) X(NtSetInformationObject, 0x9c) \
+    X(NtShzToken, 0x9d) X(NtShzSecurityObject, 0x9e)
+/* 0x95-0x9e (kernel64/section.c, iocp.c, npfs.c, sysk32_obj.c): the NtShz* calls multiplex several NT services by an
+ * operation code in the first argument (ntdll exposes the NT names: NtCreateSection, NtMapViewOfSection, NtCreateIoCompletion,
+ * NtRemoveIoCompletion, NtCreateJobObject, NtOpenProcessToken, NtQuerySecurityObject ...). 0x9f is free. */
+#define SHZ_SEC_CREATE 1        /* (op, PHANDLE, PLARGE_INTEGER max size, ULONG protect, [5] attributes, [6] file, [7] OA, [8] access) */
+#define SHZ_SEC_OPEN 2          /* (op, PHANDLE, ACCESS_MASK, OA) */
+#define SHZ_SEC_MAP 3           /* (op, section, process, PVOID *base, [5] offset, [6] SIZE_T *view size, [7] allocation type, [8] protect) */
+#define SHZ_SEC_UNMAP 4         /* (op, process, base) */
+#define SHZ_SEC_FLUSH 5         /* (op, process, PVOID *base, SIZE_T *size) */
+#define SHZ_SEC_QUERY 6         /* (op, section, SECTION_BASIC_INFORMATION *, length) */
+#define SHZ_IOC_CREATE 1        /* (op, PHANDLE, concurrency, OA) */
+#define SHZ_IOC_SET 2           /* (op, port, key, ApcContext, [5] status, [6] information) */
+#define SHZ_IOC_REMOVE 3        /* (op, port, ULONG64 out[4 * max], max, [5] PULONG removed, [6] PLARGE_INTEGER timeout, [7] alertable) */
+#define SHZ_IOC_CANCEL 4        /* (op, file, IoStatusBlock to cancel (0 = all), [a4] 1 = only the calling thread's) */
+#define SHZ_IOC_QUERY 5         /* (op, port, PULONG depth) */
+#define SHZ_JOB_CREATE 1        /* (op, PHANDLE, ACCESS_MASK, OA) */
+#define SHZ_JOB_OPEN 2          /* (op, PHANDLE, ACCESS_MASK, OA) */
+#define SHZ_JOB_ASSIGN 3        /* (op, job, process) */
+#define SHZ_JOB_TERMINATE 4     /* (op, job, exit status) */
+#define SHZ_JOB_QUERY 5         /* (op, job, class, buffer, [5] length, [6] PULONG returned) */
+#define SHZ_JOB_SET 6           /* (op, job, class, buffer, [5] length) */
+#define SHZ_JOB_IS_IN_JOB 7     /* (op, process, job (0 = any job), PBOOLEAN result) */
+#define SHZ_TOK_OPEN_PROCESS 1  /* (op, process, ACCESS_MASK, PHANDLE) */
+#define SHZ_TOK_OPEN_THREAD 2   /* (op, thread, ACCESS_MASK, PHANDLE): STATUS_NO_TOKEN when the thread does not impersonate */
+#define SHZ_TOK_QUERY 3         /* (op, token, shz_token_info *, length) */
+#define SHZ_TOK_SET 4           /* (op, token, field (SHZ_TOKF_*), value) */
+#define SHZ_TOK_DUPLICATE 5     /* (op, token, type | impersonation level << 8, PHANDLE) */
+#define SHZ_TOK_IMPERSONATE 6   /* (op, thread, token (0 = revert to self)) */
+#define SHZ_TOKF_INTEGRITY 1
+#define SHZ_TOKF_SESSION 2
+#define SHZ_TOKF_PRIVS 3
+#define SHZ_SOB_QUERY 1         /* (op, handle, buffer, length, [5] PULONG needed): the stored self-relative descriptor */
+#define SHZ_SOB_SET 2           /* (op, handle, buffer, length) */
 
 #define SYSCALL_LIST_MISC(X) \
     X(NtShzRandom, 0xa0)                /* kernel/krandom.c: system RNG (ProcessPrng, BCryptGenRandom, RtlGenRandom) */

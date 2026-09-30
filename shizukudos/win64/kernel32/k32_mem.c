@@ -265,6 +265,7 @@ K32API BOOL WINAPI FreeLibrary(HMODULE m)
     if (st) { k32_nt_error(st); return FALSE; }
     return TRUE;
 }
+static SHZ_LDR_ENTRY *entry_for(HMODULE m);
 K32API FARPROC WINAPI GetProcAddress(HMODULE m, LPCSTR name)
 {
     PVOID addr = 0;
@@ -278,7 +279,21 @@ K32API FARPROC WINAPI GetProcAddress(HMODULE m, LPCSTR name)
         as.Length = n; as.MaximumLength = n + 1; as.Buffer = (PCHAR)name;
         st = LdrGetProcedureAddress(m, &as, 0, &addr);
     }
-    if (st) { k32_nt_error(st == STATUS_ENTRYPOINT_NOT_FOUND || st == STATUS_ORDINAL_NOT_FOUND ? STATUS_ENTRYPOINT_NOT_FOUND : st); return 0; }
+    if (st) {
+        const DWORD err = k32_nt_error(st == STATUS_ENTRYPOINT_NOT_FOUND || st == STATUS_ORDINAL_NOT_FOUND ? STATUS_ENTRYPOINT_NOT_FOUND : st);
+        if (k32_trace_on()) {
+            SHZ_LDR_ENTRY *e = entry_for(m);
+            char mod[64];
+            int i = 0;
+            if (e) for (; i < 62 && i < e->BaseDllName.Length / 2; ++i) mod[i] = (char)e->BaseDllName.Buffer[i];
+            mod[i++] = '!';
+            mod[i] = 0;
+            if ((uintptr_t)name < 0x10000) k32_trace_hex("GetProcAddress miss: ", e ? mod : "(unknown module)", (uintptr_t)name);
+            else k32_trace3("GetProcAddress miss: ", e ? mod : "(unknown module)", name);
+            shz_set_last_error(err);
+        }
+        return 0;
+    }
     return (FARPROC)addr;
 }
 
@@ -430,54 +445,24 @@ K32API VOID WINAPI GetStartupInfoA(LPSTARTUPINFOA si)
 }
 
 /* ---------------------------------------------------------------- process creation */
-K32API BOOL WINAPI CreateProcessW(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL inherit,
-                                  DWORD flags, LPVOID env, LPCWSTR dir, LPSTARTUPINFOW si, LPPROCESS_INFORMATION pi)
-{
-    SHZ_UNICODE_STRING image, cmdline;
-    WCHAR path[300], nt[320];
-    HANDLE hp = 0, ht = 0;
-    NTSTATUS st;
-    struct { LONG64 es; ULONG64 peb, aff; LONG64 prio; ULONG64 pid, ppid; } b;
-    struct { LONG64 es; ULONG64 teb, pid, tid, aff; LONG prio, base; } tb;
-    (void)pa; (void)ta; (void)inherit; (void)env; (void)dir; (void)si;
-    if (flags & (CREATE_SUSPENDED | DEBUG_PROCESS | DEBUG_ONLY_THIS_PROCESS)) { shz_set_last_error(ERROR_NOT_SUPPORTED); return FALSE; }
-    if (app) {
-        size_t n = k32_wlen(app);
-        if (n >= 299) { shz_set_last_error(ERROR_FILENAME_EXCED_RANGE); return FALSE; }
-        memcpy(path, app, (n + 1) * sizeof(WCHAR));
-    } else if (cmd) {                                        /* first token of the command line */
-        size_t i = 0, o = 0;
-        if (cmd[0] == '"') { i = 1; while (cmd[i] && cmd[i] != '"' && o < 299) path[o++] = cmd[i++]; }
-        else while (cmd[i] && cmd[i] != ' ' && o < 299) path[o++] = cmd[i++];
-        path[o] = 0;
-        {
-            size_t k = o; int dot = 0;
-            while (k) { --k; if (path[k] == '.') { dot = 1; break; } if (path[k] == '\\') break; }
-            if (!dot && o + 4 < 299) { path[o++] = '.'; path[o++] = 'e'; path[o++] = 'x'; path[o++] = 'e'; path[o] = 0; }
-        }
-    } else { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
-    st = k32_dos_to_nt(path, nt, 320);
-    if (st) { k32_nt_error(st); return FALSE; }
-    image.Buffer = nt + 4;                                   /* the kernel takes DOS-style paths */
-    image.Length = (USHORT)((k32_wlen(nt) - 4) * 2);
-    image.MaximumLength = image.Length + 2;
-    if (cmd) { RtlInitUnicodeString(&cmdline, cmd); }
-    st = NtCreateProcessEx(&hp, &ht, &image, cmd ? &cmdline : 0, 0);
-    if (st) { k32_nt_error(st); return FALSE; }
-    memset(pi, 0, sizeof *pi);
-    pi->hProcess = hp;
-    pi->hThread = ht;
-    if (NtQueryInformationProcess(hp, 0, &b, sizeof b, 0) == 0) pi->dwProcessId = (DWORD)b.pid;
-    if (NtQueryInformationThread(ht, 0, &tb, sizeof tb, 0) == 0) pi->dwThreadId = (DWORD)tb.tid;
-    return TRUE;
-}
+/* CreateProcessW lives in k32_proc2.c. */
 K32API BOOL WINAPI CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL inherit,
                                   DWORD flags, LPVOID env, LPCSTR dir, LPSTARTUPINFOA si, LPPROCESS_INFORMATION pi)
 {
-    WCHAR wapp[300], wcmd[600], wdir[300];
-    (void)si;
+    WCHAR wapp[300], wcmd[2048], wdir[300];
+    STARTUPINFOW wsi;
     if (app && k32_utf8_to_wide(app, -1, wapp, 300) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return FALSE; }
-    if (cmd && k32_utf8_to_wide(cmd, -1, wcmd, 600) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return FALSE; }
+    if (cmd && k32_utf8_to_wide(cmd, -1, wcmd, 2048) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return FALSE; }
     if (dir && k32_utf8_to_wide(dir, -1, wdir, 300) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return FALSE; }
-    return CreateProcessW(app ? wapp : 0, cmd ? wcmd : 0, pa, ta, inherit, flags, env, dir ? wdir : 0, 0, pi);
+    if (flags & EXTENDED_STARTUPINFO_PRESENT) { shz_set_last_error(ERROR_NOT_SUPPORTED); return FALSE; }   /* the W form takes attribute lists */
+    memset(&wsi, 0, sizeof wsi);
+    wsi.cb = sizeof wsi;
+    if (si) {                                                  /* titles and desktop names have no meaning here; flags and handles do */
+        wsi.dwFlags = si->dwFlags;
+        wsi.wShowWindow = si->wShowWindow;
+        wsi.hStdInput = si->hStdInput;
+        wsi.hStdOutput = si->hStdOutput;
+        wsi.hStdError = si->hStdError;
+    }
+    return CreateProcessW(app ? wapp : 0, cmd ? wcmd : 0, pa, ta, inherit, flags, env, dir ? wdir : 0, si ? &wsi : 0, pi);
 }

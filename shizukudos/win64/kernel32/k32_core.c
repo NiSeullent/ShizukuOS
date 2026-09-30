@@ -76,8 +76,8 @@ K32API HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stack, LPTHRE
     NTSTATUS st;
     struct { LONG64 exit_status; ULONG64 teb, pid, tid, aff; LONG prio, base; } b;
     (void)sa;
-    if (flags & CREATE_SUSPENDED) { shz_set_last_error(ERROR_NOT_SUPPORTED); return 0; }     /* not implemented yet */
-    st = NtCreateThreadEx(&h, THREAD_ALL_ACCESS, 0, CURRENT_PROCESS, (PVOID)start, param, 0, 0, stack, 0, 0);
+    if (flags & ~(DWORD)(CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION)) { shz_set_last_error(ERROR_INVALID_PARAMETER); return 0; }
+    st = NtCreateThreadEx(&h, THREAD_ALL_ACCESS, 0, CURRENT_PROCESS, (PVOID)start, param, (flags & CREATE_SUSPENDED) ? 1 : 0, 0, stack, 0, 0);
     if (st) { k32_nt_error(st); return 0; }
     if (tid) {
         if (NtQueryInformationThread(h, 0, &b, sizeof b, 0) == 0) *tid = (DWORD)b.tid; else *tid = 0;
@@ -87,8 +87,7 @@ K32API HANDLE WINAPI CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stack, LPTHRE
 
 K32API BOOL WINAPI SwitchToThread(void) { return NtYieldExecution() != STATUS_NO_YIELD_PERFORMED; }
 K32API BOOL WINAPI TerminateThread(HANDLE h, DWORD code) { (void)h; (void)code; shz_set_last_error(ERROR_NOT_SUPPORTED); return FALSE; }
-K32API DWORD WINAPI SuspendThread(HANDLE h) { (void)h; shz_set_last_error(ERROR_NOT_SUPPORTED); return (DWORD)-1; }
-K32API DWORD WINAPI ResumeThread(HANDLE h) { (void)h; shz_set_last_error(ERROR_NOT_SUPPORTED); return (DWORD)-1; }
+/* SuspendThread / ResumeThread live in k32_proc2.c. */
 K32API int WINAPI GetThreadPriority(HANDLE h) { (void)h; return THREAD_PRIORITY_NORMAL; }
 K32API BOOL WINAPI SetThreadPriority(HANDLE h, int p)
 {
@@ -183,7 +182,7 @@ static NTSTATUS named_attr(LPCWSTR name, SHZ_OBJECT_ATTRIBUTES *oa, SHZ_UNICODE_
     if (name && name[0]) {
         size_t n = 0;
         while (name[n]) ++n;
-        if (n > 40) return STATUS_OBJECT_NAME_INVALID;
+        if (n >= 127) return STATUS_OBJECT_NAME_INVALID;          /* kernel object names: OB_NAME_MAX (kernel64/proc_internal.h) */
         us->Buffer = (PWSTR)name;
         us->Length = (USHORT)(n * 2);
         us->MaximumLength = us->Length;
@@ -208,8 +207,8 @@ K32API HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES sa, BOOL manual, BOOL in
 }
 K32API HANDLE WINAPI CreateEventA(LPSECURITY_ATTRIBUTES sa, BOOL m, BOOL i, LPCSTR name)
 {
-    WCHAR w[64];
-    return CreateEventW(sa, m, i, name ? widen(name, w, 64) : 0);
+    WCHAR w[128];
+    return CreateEventW(sa, m, i, name ? widen(name, w, 128) : 0);
 }
 K32API BOOL WINAPI SetEvent(HANDLE h) { NTSTATUS st = NtSetEvent(h, 0); if (st) { k32_nt_error(st); return FALSE; } return TRUE; }
 K32API BOOL WINAPI ResetEvent(HANDLE h) { NTSTATUS st = NtResetEvent(h, 0); if (st) { k32_nt_error(st); return FALSE; } return TRUE; }
@@ -230,8 +229,8 @@ K32API HANDLE WINAPI CreateMutexW(LPSECURITY_ATTRIBUTES sa, BOOL owner, LPCWSTR 
 }
 K32API HANDLE WINAPI CreateMutexA(LPSECURITY_ATTRIBUTES sa, BOOL o, LPCSTR name)
 {
-    WCHAR w[64];
-    return CreateMutexW(sa, o, name ? widen(name, w, 64) : 0);
+    WCHAR w[128];
+    return CreateMutexW(sa, o, name ? widen(name, w, 128) : 0);
 }
 K32API BOOL WINAPI ReleaseMutex(HANDLE h) { NTSTATUS st = NtReleaseMutant(h, 0); if (st) { k32_nt_error(st); return FALSE; } return TRUE; }
 
@@ -251,8 +250,8 @@ K32API HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES sa, LONG initial, LO
 }
 K32API HANDLE WINAPI CreateSemaphoreA(LPSECURITY_ATTRIBUTES sa, LONG i, LONG m, LPCSTR name)
 {
-    WCHAR w[64];
-    return CreateSemaphoreW(sa, i, m, name ? widen(name, w, 64) : 0);
+    WCHAR w[128];
+    return CreateSemaphoreW(sa, i, m, name ? widen(name, w, 128) : 0);
 }
 K32API BOOL WINAPI ReleaseSemaphore(HANDLE h, LONG n, LPLONG prev)
 {

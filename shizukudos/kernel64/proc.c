@@ -14,6 +14,9 @@ extern void vm_set_demand_range(uint64_t lo, uint64_t hi);
 #define PEB_BYTES 0x1000
 
 static process_t procs[MAX_PROCS + 1];
+static ksem_t reaper_sem;                       /* see the reaper below */
+static int reaper_started;
+static void reaper_main(void *arg);
 static int next_pid = 1;
 static uint64_t syscalls;
 uint64_t user_syscall_count(void) { return syscalls; }
@@ -59,6 +62,10 @@ process_t *process_create_empty(const char *name)
     p->next_tid = 4;                    /* thread ids are multiples of 4, like NT */
     p->create_tick = ticks_now();
     p->used = 1;
+    if (!reaper_started) {
+        sem_init(&reaper_sem, 0);
+        reaper_started = thread_create("reaper", reaper_main, 0) != 0;
+    }
     return p;
 }
 
@@ -137,7 +144,7 @@ static void user_thread_main(void *arg)
 }
 
 static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2,
-                               uint64_t stack_size, thread_t **out)
+                               uint64_t stack_size, int suspended, thread_t **out)
 {
     uint64_t stack_base = 0;
     thread_t *t;
@@ -161,36 +168,93 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     t->user_rsp = rsp;
     t->user_arg = arg;
     t->user_arg2 = arg2;
-    t->tid = p->next_tid;                       /* the TEB reports this same id in ClientId */
+    /* One thread id everywhere (TEB ClientId, NtQueryInformationThread, NtOpenThread, the thread object): unique in the
+     * system like on NT, a multiple of 4. proc_alloc_teb() reads it from p->next_tid. */
+    p->next_tid = t->id * 4ull;
+    t->tid = p->next_tid;
     t->teb = proc_alloc_teb(p, stack_base + stack_size, stack_base);
     if (!t->teb) { thread_discard(t); return -1; }
     t->user_gs_base = t->teb;
     tobj = ob_create(OB_THREAD, 0);
     if (!tobj) { thread_discard(t); return -1; }
     tobj->u.thr.t = t;
-    tobj->u.thr.tid = t->id * 4ull;             /* the id NtQueryInformationThread reports (sysx.c) */
+    tobj->u.thr.tid = t->tid;                   /* the id NtQueryInformationThread reports (sysx.c) */
     tobj->u.thr.pid = (uint64_t)p->pid;
     t->object = tobj;
     t->creator_hold = out != 0;                 /* the caller reads t->object after the thread may already have run */
     ++p->threads_alive;
-    p->next_tid += 4;
     if (!p->main_thread) p->main_thread = t;
     thread_user_tls_init(p, t);
     if (out) *out = t;
-    thread_resume(t);                           /* fully initialised: now it may run */
+    if (suspended) t->suspend_count = 1;        /* stays TS_NEW until NtResumeThread (sysk32_obj.c) */
+    else thread_resume(t);                      /* fully initialised: now it may run */
     return 0;
 }
 
 int process_start_thread(process_t *p, uint64_t rip, uint64_t rsp, uint64_t arg, thread_t **out)
 {
-    return start_thread_common(p, rip, rsp, arg, 0, USER_STACK_BYTES, out);
+    return start_thread_common(p, rip, rsp, arg, 0, USER_STACK_BYTES, 0, out);
+}
+
+int process_start_thread3(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, int suspended, thread_t **out)
+{
+    if (stack_size < 65536) stack_size = 65536;
+    if (stack_size > (64ull << 20)) stack_size = 64ull << 20;
+    return start_thread_common(p, rip, 0, rcx, rdx, (stack_size + 4095) & ~4095ull, suspended, out);
 }
 
 int process_start_thread2(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, thread_t **out)
 {
-    if (stack_size < 65536) stack_size = 65536;
-    if (stack_size > (64ull << 20)) stack_size = 64ull << 20;
-    return start_thread_common(p, rip, 0, rcx, rdx, (stack_size + 4095) & ~4095ull, out);
+    return process_start_thread3(p, rip, rcx, rdx, stack_size, 0, out);
+}
+
+/* ---------------------------------------------------------------- reaper
+ * A process started by another process (CreateProcess) is not waited for by the kernel, but its resources must go when it
+ * ends, as on Windows: handles (a pipe end, a section, a job membership) and memory. The reaper thread releases them once
+ * no thread of the process can run any more; the slot stays (exit code, times) until the kernel reuses it. */
+static int process_threads_gone(process_t *p)
+{
+    unsigned i;
+    thread_t *t;
+    int busy = 0;
+    const uint64_t f = irq_save();
+    for (i = 0; (t = thread_slot(i)) != 0; ++i)
+        if (t->proc == p && t->state != TS_FREE && t->state != TS_ZOMBIE) busy = 1;
+    irq_restore(f);
+    return !busy;
+}
+
+static void release_process(process_t *p)
+{
+    extern void vad_unmap_all_views(process_t *p);
+    extern void job_process_gone(process_t *p);
+    handles_close_all(p);
+    vad_unmap_all_views(p);
+    job_process_gone(p);
+    thread_reap_process(p);
+    vm_free_space(p->pml4);
+    p->pml4 = 0;
+    vad_destroy(p);
+    ldr_release_modules(p);
+    p->mem_released = 1;
+}
+
+static void reaper_main(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        unsigned i;
+        int retry = 0;
+        sem_wait(&reaper_sem);
+        for (i = 1; i <= MAX_PROCS; ++i) {
+            process_t *p = &procs[i];
+            if (!p->used || !p->reap_pending || !p->terminated || p->threads_alive > 0) continue;
+            if (!process_threads_gone(p)) { retry = 1; continue; }        /* the last thread is still on its way out */
+            p->reap_pending = 0;
+            release_process(p);
+        }
+        if (retry) { thread_sleep_ms(2); sem_post(&reaper_sem); }
+    }
 }
 
 /* Called when a process's last thread has exited. */
@@ -205,6 +269,7 @@ static void process_reap_signal(process_t *p)
         irq_restore(f);
     }
     sem_post(&p->exited);
+    if (p->parent_pid && reaper_started) { p->reap_pending = 1; sem_post(&reaper_sem); }
 }
 
 void process_thread_gone(process_t *p)
@@ -218,7 +283,19 @@ void process_terminate(process_t *p, int64_t code, int faulted)
     p->exit_code = code;
     if (faulted) p->faulted = 1;
     p->terminated = 1;
-    /* Other threads are killed at their next kernel entry/exit (see check_kill). */
+    /* Other threads are killed at their next kernel entry/exit (see check_kill) or timer tick in user mode (arch.c). A thread
+     * blocked in an object wait, an alert wait or a sleep is woken now so that it leaves the kernel and dies; kernel-internal
+     * semaphore and mutex waits are left alone (their holders release them). */
+    {
+        const uint64_t f = irq_save();
+        unsigned i;
+        thread_t *t;
+        for (i = 0; (t = thread_slot(i)) != 0; ++i)
+            if (t->proc == p && t->state == TS_BLOCKED && t != thread_current() &&
+                (t->wait_multi || t->alert_wait || (t->wake_tick && !t->wait_sem)))
+                thread_wake(t);
+        irq_restore(f);
+    }
 }
 
 void check_kill(void)
@@ -263,13 +340,24 @@ int proc_wait(int pid, int64_t *exit_code, int *faulted)
     thread_sleep_ms(2);                                 /* let the last thread finish thread_exit */
     if (exit_code) *exit_code = p->exit_code;
     if (faulted) *faulted = p->faulted;
+    while (p->reap_pending) thread_sleep_ms(1);         /* the reaper is releasing it (a process started by a process) */
     handles_close_all(p);
     thread_reap_process(p);                             /* its exited threads' slots and kernel stacks */
     write_cr3(kernel_pml4());
-    vm_free_space(p->pml4);
-    vad_destroy(p);
-    ldr_release_modules(p);                             /* loader records (and lazily mapped image statistics) */
+    if (!p->mem_released) {
+        /* views first: their pages belong to the sections (section.c), vm_free_space() frees what is still mapped */
+        extern void vad_unmap_all_views(process_t *p);
+        vad_unmap_all_views(p);
+        vm_free_space(p->pml4);
+        vad_destroy(p);
+        ldr_release_modules(p);                         /* loader records (and lazily mapped image statistics) */
+    }
     kfree(p->handles);
+    {   /* job membership and the primary token (sysk32_obj.c) */
+        extern void job_process_gone(process_t *p);
+        job_process_gone(p);
+        if (p->token) { ob_deref(p->token); p->token = 0; }
+    }
     ob_deref(p->object);
     p->used = 0;
     return 0;

@@ -83,6 +83,67 @@ int user_exception_dispatch(struct regs *r, uint32_t code, uint64_t info0, uint6
     return 1;
 }
 
+/* "module+rva" of a user address (loader module list), or the bare address. */
+extern int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t *size, const char **name, const char **path);
+static void describe(process_t *p, uint64_t a, char *out, unsigned cap)
+{
+    unsigned i, n = 0;
+    uint64_t base, size;
+    const char *name, *path;
+    static const char hex[] = "0123456789abcdef";
+    char t[20];
+    int k;
+    for (i = 0; ldr_module_at(p, i, &base, &size, &name, &path) == 0; ++i)
+        if (a >= base && a < base + size) {
+            uint64_t rva = a - base;
+            while (*name && n + 1 < cap) out[n++] = *name++;
+            if (n + 1 < cap) out[n++] = '+';
+            k = 0;
+            do { t[k++] = hex[rva & 15]; rva >>= 4; } while (rva);
+            while (k && n + 1 < cap) out[n++] = t[--k];
+            out[n] = 0;
+            return;
+        }
+    k = 0;
+    do { t[k++] = hex[a & 15]; a >>= 4; } while (a);
+    while (k && n + 1 < cap) out[n++] = t[--k];
+    out[n] = 0;
+}
+
+/* The unhandled-exception report: where, what, the registers and the return addresses found on the stack (every stack slot
+ * that points into a loaded module; a heuristic back trace, frames of functions without calls may be missing). */
+static void report_unhandled(process_t *p, const uint8_t *rec, uint64_t ctx_va)
+{
+    uint8_t ctx[CONTEXT_SIZE];
+    char where[96];
+    unsigned i, shown = 0;
+    describe(p, get64(rec, 0x10), where, sizeof where);
+    kprintf("K64: unhandled exception %x at %llx (%s) in %s (pid %d, tid %llu); process terminated\n", *(const uint32_t *)rec,
+            get64(rec, 0x10), where, p->name, p->pid, thread_current()->tid);
+    if (*(const uint32_t *)(rec + 0x18) >= 2)
+        kprintf("K64:   parameters %llx %llx\n", get64(rec, 0x20), get64(rec, 0x28));
+    if (!ctx_va || copy_from_user(p, ctx, ctx_va, sizeof ctx)) return;
+    kprintf("K64:   rax=%llx rbx=%llx rcx=%llx rdx=%llx rsi=%llx rdi=%llx\n", get64(ctx, 0x78), get64(ctx, 0x90), get64(ctx, 0x80),
+            get64(ctx, 0x88), get64(ctx, 0xa8), get64(ctx, 0xb0));
+    kprintf("K64:   r8=%llx r9=%llx r10=%llx r11=%llx r12=%llx r13=%llx r14=%llx r15=%llx\n", get64(ctx, 0xb8), get64(ctx, 0xc0),
+            get64(ctx, 0xc8), get64(ctx, 0xd0), get64(ctx, 0xd8), get64(ctx, 0xe0), get64(ctx, 0xe8), get64(ctx, 0xf0));
+    kprintf("K64:   rsp=%llx rbp=%llx rip=%llx\n", get64(ctx, 0x98), get64(ctx, 0xa0), get64(ctx, 0xf8));
+    for (i = 0; i < 512 && shown < 24; ++i) {
+        uint64_t v;
+        char d[96];
+        if (copy_from_user(p, &v, get64(ctx, 0x98) + i * 8ull, 8)) break;
+        describe(p, v, d, sizeof d);
+        if (d[0] < '0' || d[0] > '9' || strlen(d) > 16) {                /* a module-relative name, not a bare number */
+            int is_mod = 0;
+            unsigned k;
+            for (k = 0; d[k]; ++k) if (d[k] == '+') is_mod = 1;
+            if (!is_mod) continue;
+            kprintf("K64:   stack[%u] %s\n", i, d);
+            ++shown;
+        }
+    }
+}
+
 /* NtContinue(PCONTEXT, BOOLEAN TestAlert) and NtRaiseException(PEXCEPTION_RECORD, PCONTEXT, BOOLEAN FirstChance) */
 int32_t user_exception_continue(process_t *p, struct regs *r, uint64_t context_va, uint64_t record_va, int is_raise)
 {
@@ -94,9 +155,7 @@ int32_t user_exception_continue(process_t *p, struct regs *r, uint64_t context_v
          * (The first-chance variant is not offered: user mode dispatches those itself.) */
         uint8_t rec[RECORD_SIZE];
         if (copy_from_user(p, rec, context_va, sizeof rec)) return STATUS_ACCESS_VIOLATION;
-        kprintf("K64: unhandled exception %x at %llx in %s (pid %d); process terminated\n", *(uint32_t *)rec,
-                get64(rec, 0x10), p->name, p->pid);
-        (void)record_va;
+        report_unhandled(p, rec, record_va);                                  /* (the arguments are record, context) */
         process_terminate(p, (int64_t)(int32_t)*(uint32_t *)rec, 1);
         process_thread_gone(p);
         thread_exit((int32_t)*(uint32_t *)rec);

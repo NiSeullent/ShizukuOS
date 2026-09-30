@@ -28,22 +28,35 @@
 #define LDRS_NO_CWD 0x40000000u         /* kernel64/ldr.c: the current directory is not searched */
 #define DIRS_CAP 512                    /* characters of the directory list handed to the kernel */
 
-/* ---------------------------------------------------------------- loader lock (recursive, per thread id) */
-static volatile LONG g_ldr_owner;
-static LONG g_ldr_depth;
+/* ---------------------------------------------------------------- loader lock
+ * An RTL_CRITICAL_SECTION published in PEB.LoaderLock (x64 PEB + 0x110), as on Windows: programs inspect it directly
+ * (Chromium's chrome_elf compares LoaderLock->OwningThread with its thread id to know whether it runs under the lock). It is
+ * held while DLLs are loaded and their DLL_PROCESS_ATTACH notifications run, at process start and at run time. */
+NTSTATUS NTAPI RtlInitializeCriticalSectionEx(RTL_CRITICAL_SECTION *, ULONG, ULONG);
+NTSTATUS NTAPI RtlEnterCriticalSection(RTL_CRITICAL_SECTION *);
+NTSTATUS NTAPI RtlLeaveCriticalSection(RTL_CRITICAL_SECTION *);
+BOOLEAN NTAPI RtlTryEnterCriticalSection(RTL_CRITICAL_SECTION *);
+static RTL_CRITICAL_SECTION g_loader_cs;
+static volatile LONG g_ldr_ready;
+
+void ShzLoaderLockInit(void)
+{
+    if (g_ldr_ready) return;
+    RtlInitializeCriticalSectionEx(&g_loader_cs, 0, 0);
+    *(RTL_CRITICAL_SECTION **)(shz_peb() + 0x110) = &g_loader_cs;           /* PEB.LoaderLock */
+    g_ldr_ready = 1;
+}
 
 void ShzLoaderLock(void)
 {
-    const LONG me = (LONG)shz_tid();
-    if (g_ldr_owner == me) { ++g_ldr_depth; return; }
-    while (__sync_val_compare_and_swap(&g_ldr_owner, 0, me) != 0) NtYieldExecution();
-    g_ldr_depth = 1;
+    ShzLoaderLockInit();
+    RtlEnterCriticalSection(&g_loader_cs);
 }
 
 void ShzLoaderUnlock(void)
 {
-    if (g_ldr_owner != (LONG)shz_tid()) return;
-    if (--g_ldr_depth == 0) __sync_lock_release(&g_ldr_owner);
+    if (g_loader_cs.OwningThread != (HANDLE)(ULONG_PTR)shz_tid()) return;
+    RtlLeaveCriticalSection(&g_loader_cs);
 }
 
 /* LDR_LOCK_LOADER_LOCK_FLAG_TRY_ONLY (2): disposition 1 = acquired, 2 = busy. The cookie is the owner's thread id. */
@@ -52,16 +65,16 @@ SHZ_EXPORT NTSTATUS NTAPI LdrLockLoaderLock(ULONG flags, PULONG disposition, PUL
     const LONG me = (LONG)shz_tid();
     if (flags & ~3u) return STATUS_INVALID_PARAMETER;
     if ((flags & 2) && !disposition) return STATUS_INVALID_PARAMETER;
+    ShzLoaderLockInit();
     if (flags & 2) {
-        if (g_ldr_owner != me && __sync_val_compare_and_swap(&g_ldr_owner, 0, me) != 0) {
+        if (!RtlTryEnterCriticalSection(&g_loader_cs)) {
             *disposition = 2;
             if (cookie) *cookie = 0;
             return STATUS_SUCCESS;
         }
-        if (g_ldr_owner == me && g_ldr_depth) ++g_ldr_depth; else g_ldr_depth = 1;
         *disposition = 1;
     } else {
-        ShzLoaderLock();
+        RtlEnterCriticalSection(&g_loader_cs);
         if (disposition) *disposition = 1;
     }
     if (cookie) *cookie = (ULONG_PTR)me;
@@ -72,8 +85,8 @@ SHZ_EXPORT NTSTATUS NTAPI LdrUnlockLoaderLock(ULONG flags, ULONG_PTR cookie)
 {
     (void)flags;
     if (!cookie) return STATUS_SUCCESS;
-    if (cookie != (ULONG_PTR)(LONG)shz_tid() || g_ldr_owner != (LONG)cookie) return STATUS_INVALID_PARAMETER;
-    ShzLoaderUnlock();
+    if (cookie != (ULONG_PTR)(LONG)shz_tid() || g_loader_cs.OwningThread != (HANDLE)cookie) return STATUS_INVALID_PARAMETER;
+    RtlLeaveCriticalSection(&g_loader_cs);
     return STATUS_SUCCESS;
 }
 
