@@ -16,7 +16,8 @@
       "execution_mode": "real-mode 16-bit (i8086/i386 instruction set, FAT12/16/32); not a protected-mode kernel",
       "used_by": ["shizukudos/dos16"],
       "build": "Open Watcom + NASM via `make all XCPU=386 XFAT=32` (mkfiles/owlinux.mak)",
-      "patches": ["shizukudos/dos16/patches/0001-shizukudos-branding.patch"]
+      "patches": ["shizukudos/dos16/patches/0001-shizukudos-branding.patch",
+                  "shizukudos/dos16/patches/0002-reproducible-build-date.patch"]
     },
     "freedos-freecom": {
       "repository": "https://github.com/FDOS/freecom.git",

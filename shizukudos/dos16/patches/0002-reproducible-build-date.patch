@@ -1,0 +1,16 @@
+--- a/hdr/version.h
++++ b/hdr/version.h
+@@ -45,7 +45,12 @@
+ #endif
+ 
+ /* actual version string */
+-#define KVS(v,s,o) "FreeDOS kernel " v "(build 20" #s " OEM:" #o ") [compiled " __DATE__ "]\n"
++/* ShizukuDOS: reproducible build; the upstream default embeds the compile date (__DATE__). The fixed date is the
++ * media's SOURCE_DATE_EPOCH (2026-07-29), in __DATE__'s own format so the string keeps its length. */
++#ifndef SHZ_BUILD_DATE
++#define SHZ_BUILD_DATE "Jul 29 2026"
++#endif
++#define KVS(v,s,o) "FreeDOS kernel " v "(build 20" #s " OEM:" #o ") [compiled " SHZ_BUILD_DATE "]\n"
+ #define xKVS(v,s,o) KVS(v,s,o)
+ #define KERNEL_VERSION_STRING xKVS(KERNEL_VERSION, REVISION_SEQ, OEM_ID)
+ 
