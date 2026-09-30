@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "source_observed_date": "2026-10-01",
+  "policy": "Latest selected releases are frozen reference targets, not Windows 98 compatibility claims. A later release requires a new version/hash and fresh evidence. Do not downgrade targets to obtain a pass.",
+  "apps": [
+    {
+      "id": "legcord",
+      "name": "Legcord (Discord)",
+      "version": "1.3.0",
+      "entry_point": "Legcord.exe",
+      "upstream_sources": [
+        "https://github.com/Legcord/Legcord/releases/tag/v1.3.0",
+        "https://raw.githubusercontent.com/Legcord/Legcord/v1.3.0/package.json"
+      ],
+      "runtime_dependencies": {"electron": "43.2.0"},
+      "windows_architectures": ["ia32", "x64", "arm64"],
+      "first_probe": {
+        "architecture": "ia32",
+        "url": "https://github.com/Legcord/Legcord/releases/download/v1.3.0/Legcord-1.3.0-win-ia32.zip",
+        "publisher_sha256": "f348283e64cb1aaaccb7fd3a4d7851c3c95131eef38fa087dc243dbbb604341c",
+        "publisher_digest_source": "https://github.com/Legcord/Legcord/releases/expanded_assets/v1.3.0"
+      },
+      "required_guest_functions": ["startup_and_window_input", "login_with_user_owned_test_account", "send_and_receive_message", "send_and_receive_attachment", "voice_audio_input_and_output", "normal_exit_and_relaunch"],
+      "status": "guest_functionality_pending"
+    },
+    {
+      "id": "signal",
+      "name": "Signal Desktop",
+      "version": "8.28.0",
+      "entry_point": "Signal.exe",
+      "upstream_sources": [
+        "https://github.com/signalapp/Signal-Desktop/releases/tag/v8.28.0",
+        "https://raw.githubusercontent.com/signalapp/Signal-Desktop/v8.28.0/package.json",
+        "https://support.signal.org/hc/en-us/articles/360008216551-Installing-Signal"
+      ],
+      "runtime_dependencies": {"electron": "44.1.0", "libsignal-client": "0.100.0", "ringrtc": "2.71.0", "sqlcipher": "4.1.0"},
+      "windows_architectures": ["x64", "arm64"],
+      "required_execution_path": "win64_runtime_or_current_source_x86_port_including_native_addons",
+      "required_guest_functions": ["startup_and_window_input", "link_user_owned_test_device", "send_and_receive_message", "send_and_receive_attachment", "voice_call", "normal_exit_and_reopen_encrypted_database"],
+      "status": "guest_functionality_pending"
+    },
+    {
+      "id": "libreoffice",
+      "name": "LibreOffice",
+      "version": "26.8.0",
+      "entry_point": "program/soffice.exe",
+      "upstream_sources": [
+        "https://www.libreoffice.org/download/",
+        "https://www.libreoffice.org/get-help/system-requirements/",
+        "https://wiki.documentfoundation.org/Development/BuildingOnWindows"
+      ],
+      "windows_architectures": ["x64", "arm64"],
+      "required_execution_path": "win64_runtime_or_current_source_x86_port",
+      "required_guest_functions": ["writer_create_edit_save_reopen_odt", "calc_formula_save_reopen_ods", "impress_slide_save_reopen_odp", "export_and_read_back_pdf", "font_and_theme_painting", "clipboard_and_print_dialog", "normal_exit_and_relaunch"],
+      "status": "guest_functionality_pending"
+    }
+  ]
+}

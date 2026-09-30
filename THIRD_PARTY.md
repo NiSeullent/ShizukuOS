@@ -57,6 +57,21 @@ Project source code and the KernelEx ABI adaptation are distributed under GPL-2.
 - `integration/core.ini`: copy of KernelEx [`apilibs/core.ini`](https://github.com/metaxor/KernelEx/blob/31cdfc3560fc116637ee8ed7be31b12f3aacf5d1/apilibs/core.ini), its default `contents` extended with the project KERNEL32, Shell, and ADVAPI API libraries, and explicit named-locale, Shell, and ADVAPI routes added in three compatibility profiles. It is a source example, not a replacement for an installed guest's entire configuration.
 
 Wine and ReactOS are not bundled as complete runtimes. Their NT/Unix kernel dependencies are incompatible with direct use in Windows 98. The ISO and installation key supplied for testing remain outside version control.
+
+## Optional modern theme and transport components
+
+- `src/uxtheme_engine*` and the additive `ntth_query_part` are independently
+  authored GPL-2.0-only adapters around the existing project painter. Pinned
+  Wine and ReactOS UXTHEME contract references are recorded in the native
+  source; their implementation bodies were not copied. This opt-in provider
+  does not replace the existing KernelEx KnownDLL automatically.
+- `src/m98_tls13*` and `tools/build_tls13.py` use official Mbed TLS 4.2.0 with
+  bundled TF-PSA-Crypto 1.2.0. Both exact LICENSE files offer Apache-2.0 OR
+  GPL-2.0-or-later; this build selects GPL version 2. The upstream archive hash,
+  source verification, license hashes and build receipts are kept by the build
+  tool. Upstream code remains in ignored `build/tls13/upstream/`; a distributed
+  linked binary must include the selected license notices and corresponding
+  pinned source/build configuration. See `docs/MODERN_THEME_TLS_APPS.md`.
 ## Independent platform path
 
 The new `ntwrapper/`, `ntwin32/`, `ntwddm/`, `drivers/pcie/`,

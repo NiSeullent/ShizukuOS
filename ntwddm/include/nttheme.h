@@ -74,6 +74,17 @@ typedef struct ntth_draw_opts {
     ntwg_rect clip;
 } ntth_draw_opts;
 
+/* An exact declared part/state, with colors in 0x00RRGGBB. Queries do not
+ * invent properties for undefined parts and leave output untouched on error. */
+typedef struct ntth_part_properties {
+    uint32_t bgtype, bordersize, bordercolor, filltype, fillcolor;
+    uint32_t gradient1, gradient2, textcolor;
+} ntth_part_properties;
+
+ntth_status ntth_query_part(ntth_session *session, ntth_theme theme,
+                            int32_t part, int32_t state,
+                            ntth_part_properties *out);
+
 /* Built-in style texts. They are parsed; they are not pre-rendered pixels. */
 extern const char ntth_builtin_classic_text[];
 extern const char ntth_builtin_modern_text[];
