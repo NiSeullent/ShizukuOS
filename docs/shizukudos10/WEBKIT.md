@@ -112,3 +112,38 @@ counts as they are.
 
 See `reports/W1.md` "Needed from K4" for the exact asks (executable memory with W^X toggling, dynamic function tables,
 exception dispatch through JIT frames).
+
+## 6. WebCore and the Shizuku port (agent W3)
+
+Status and evidence per milestone: `reports/W3.md`. Code: `shizukudos/win64/webkit/port/` (port) and
+`shizukudos/win64/webkit/deps/` (toolchain, dependencies).
+
+### 6.1 Dependencies
+
+Built statically with the shared toolchain by `deps/build_deps.py` (zlib, libpng, libjpeg-turbo, libwebp, brotli, woff2,
+SQLite, libxml2, libxslt, FreeType, HarfBuzz, OpenSSL, curl, libpsl; ICU is W1's static build). Each has a guest check
+(`deps/run_deps_guest.py`, one small program per library). Pins and licences are in the manifest.
+
+### 6.2 Why a new single-process port ("Shizuku")
+
+| Candidate | What it needs from Kernel64 | Decision |
+|---|---|---|
+| Upstream `PORT=Win` (WebKit2) | UI, Web and Network processes with IPC over pipes and shared memory, ANGLE on D3D11, Media Foundation | no: three processes each start JSC/WebCore under TCG, and ANGLE/D3D11 are not available |
+| WebKitLegacy on Windows | was removed upstream | not possible at the pin |
+| GTK / WPE | GLib, GObject, Cairo or libwpe/EGL, Unix-style loops | no: large non-Windows dependency stack |
+| **Shizuku** (`PORT=Shizuku`) | Win32 user32/gdi32 only | **yes** |
+
+Shizuku is `PLATFORM(WIN)` plus `USE(SHIZUKU)` (`port/overlay/Source/cmake/OptionsShizuku.cmake`). WTF uses the Win
+port's files (RunLoopWin, a message-only window; verified in the guest by `port/tests/t_wk_msgloop.c`). JavaScriptCore and
+bmalloc use the JSCOnly C-loop configuration from W1. WebCore uses the Win port's file list without the ANGLE,
+Media Foundation, full-screen and resource-usage files. Everything is linked statically into the program, and
+WebKit/WebKitLegacy are off. The port layer (`port/shizuku/`) builds a WebCore `Page` in the same process, as WebCore's own
+`SVGImage` does. It paints through `GraphicsContextSkia` into a 32-bit top-down DIB (Skia CPU raster). Window messages
+drive the input. Fonts are FreeType through Skia's directory font manager, reading `%WEBKIT_TESTFONTS%` or
+`<windir>\fonts` (`port/webcore/FontManagerShizuku.cpp`). Skia's Ganesh/GL code compiles against ANGLE's headers and a
+stub EGL (`port/egl/shzegl.c`) whose `eglInitialize` fails, and accelerated buffers are disabled at start. Networking
+(R3) uses a `ResourceHandle` on curl.
+
+Upstream changes are kept as patches (`port/patches/`, listed in the manifest as `shizuku_port_patches`) and new files
+as an overlay (`port/overlay/`, `shizuku_port_overlay`). `port/build_port.py` restores the patched files, applies
+the patches after W1's patches, and refuses an overlay file that exists upstream.

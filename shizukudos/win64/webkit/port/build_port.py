@@ -42,7 +42,8 @@ DEP_LIBS = ["xslt", "exslt", "xml2", "sqlite3", "curl", "ssl", "crypto", "psl", 
             "icuin", "icuuc", "icudt"]
 SYS_LIBS = ["ws2_32", "crypt32", "bcrypt", "iphlpapi", "secur32", "user32", "gdi32", "shlwapi", "ole32", "oleaut32",
             "uuid", "winmm", "usp10", "advapi32", "shell32", "imm32", "version", "comctl32"]
-PORT_DEFS = ["-DU_STATIC_IMPLEMENTATION", "-DLIBXML_STATIC", "-DLIBXSLT_STATIC", "-DLIBEXSLT_STATIC", "-DCURL_STATICLIB",
+# W1's flags for every WebKit unit (-mcx16 -fms-extensions -DU_STATIC_IMPLEMENTATION) plus the static dependencies'.
+PORT_DEFS = [*w1.WEBKIT_FLAGS, "-DLIBXML_STATIC", "-DLIBXSLT_STATIC", "-DLIBEXSLT_STATIC", "-DCURL_STATICLIB",
              "-DPSL_STATIC"]
 
 
@@ -50,6 +51,9 @@ def prepare_tree():
     tree = w1.ensure_tree("webkit")
     w1_patches = w1.apply_patches(tree)
     mine = sorted(PATCHES.glob("*.patch"))
+    listed = sorted(shzlib.REPO / x for x in w1.spec("webkit").get("shizuku_port_patches", []))
+    if listed != mine:
+        raise SystemExit("manifest.json webkit.shizuku_port_patches does not list exactly port/patches/*.patch")
     targets = sorted({t for p in mine for t in w1.patch_targets(p)})
     tracked = [t for t in targets if w1.git(tree, "ls-files", "--", t)]
     if tracked:
@@ -80,6 +84,7 @@ def configure(tree):
     defs = {
         "CMAKE_TOOLCHAIN_FILE": deps.toolchain_file(), **deps.toolchain_env(),
         "CMAKE_BUILD_TYPE": "Release", "PORT": "Shizuku", "SHIZUKU_PORT_DIR": HERE, "DEVELOPER_MODE": "OFF",
+        "ENABLE_TOOLS": "OFF",
         "CMAKE_PREFIX_PATH": f"{deps.PREFIX};{icu}", "ICU_ROOT": icu, "OPENSSL_ROOT_DIR": deps.PREFIX,
         "OPENSSL_USE_STATIC_LIBS": "ON", "ZLIB_LIBRARY": deps.PREFIX / "lib" / "libz.a",
         "ZLIB_INCLUDE_DIR": deps.PREFIX / "include", "CMAKE_C_FLAGS": flags, "CMAKE_CXX_FLAGS": flags,

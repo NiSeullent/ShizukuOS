@@ -463,7 +463,8 @@
       "build": "partial, sparse fetch of the pinned commit; CMake + Ninja, clang --target=x86_64-w64-windows-gnu (shizukudos/win64/webkit/build.py, docs/shizukudos10/WEBKIT.md)",
       "fetched_by": "shizukudos/win64/webkit/build.py",
       "patches": ["shizukudos/win64/webkit/patches/0001-mingw-clang-portability.patch"],
-      "shizuku_port_patches": ["shizukudos/win64/webkit/port/patches/0001-skia-freetype-directory-fonts.patch"],
+      "shizuku_port_patches": ["shizukudos/win64/webkit/port/patches/0001-skia-freetype-directory-fonts.patch",
+                               "shizukudos/win64/webkit/port/patches/0002-add-the-Shizuku-port.patch"],
       "shizuku_port_overlay": "shizukudos/win64/webkit/port/overlay/ (new files only: the PORT=Shizuku CMake Options/Platform files; copied over the tree by port/build_port.py after W1's patches and the port patches)"
     }
   },
