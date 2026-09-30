@@ -187,9 +187,17 @@ void k64_dump_threads(process_t *p)
         unsigned k, shown = 0;
         if (t->proc != p || t->state == TS_FREE || t->state == TS_ZOMBIE || !t->teb || !t->stack_base) continue;
         r = (const struct regs *)(t->stack_base + KSTACK_BYTES - sizeof(struct regs));
+        char dn[40];
+        unsigned m = 0;
         describe(p, r->rip, d, sizeof d);
-        kprintf("K64:   tid %llu state %u%s%s%s: user rip %llx (%s) rsp %llx; last entry rax=%llx r10=%llx rdx=%llx r8=%llx r9=%llx\n",
-                t->tid, t->state, t->suspended ? " suspended" : "", t->alert_wait ? " alert-wait" : "", t->wait_sem ? " sem-wait" : "",
+        if (t->desc) {                                   /* SetThreadDescription text, ASCII part, for the reader */
+            const uint64_t f = irq_save();
+            for (; t->desc && m < sizeof dn - 1 && m < t->desc_bytes / 2; ++m) dn[m] = t->desc[m] >= 0x20 && t->desc[m] < 0x7f ? (char)t->desc[m] : '?';
+            irq_restore(f);
+        }
+        dn[m] = 0;
+        kprintf("K64:   tid %llu%s%s%s state %u%s%s%s: user rip %llx (%s) rsp %llx; last entry rax=%llx r10=%llx rdx=%llx r8=%llx r9=%llx\n",
+                t->tid, m ? " \"" : "", dn, m ? "\"" : "", t->state, t->suspended ? " suspended" : "", t->alert_wait ? " alert-wait" : "", t->wait_sem ? " sem-wait" : "",
                 r->rip, d, r->rsp, r->rax, r->r10, r->rdx, r->r8, r->r9);
         ob_print_wait(t);
         for (k = 0; k < 1024 && shown < 16; ++k) {
