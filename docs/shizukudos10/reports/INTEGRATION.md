@@ -32,12 +32,27 @@ Agent tips at the start of the pass: n4 `13c3157`, n3 `f78a07e` (0 commits ahead
 | wip/n4-ntdrv-coverage | `13c3157` | **FAILED at merge** (no gate ran) | — | 6 conflicted files, 15 hunks, not a pure conflict; evidence below |
 | wip/n3-driver-load | `f78a07e` | already in the base | — | nothing to merge; its code is covered by the gates of the next row |
 | wip/k5-chromium-dlls | `0a0adb9` | **FAILED at merge** (no gate ran) | — | 2 conflicted files, 3 hunks, two mechanisms for the same feature; evidence below |
-| wip/k4-chromium-run | `d212e35` | merge commit `7af6b57`, gates **RUNNING**, not yet verified | `ee539fc0191629e1d2d430c4c286ba3ce8d927c2` | merges clean (`git merge-tree` rc 0); result goes into this row |
+| wip/k4-chromium-run | `d212e35` | merge commit `7af6b57`; gates 1 to 21 PASSED, gate 22 `k32` FAILED once (pre-existing base hang, see below), gates 22 to 34 re-running: **NOT YET VERIFIED** | `ee539fc0191629e1d2d430c4c286ba3ce8d927c2` | merges clean (`git merge-tree` rc 0); final result goes into this row |
 | wip/r1-release | — | in the base | — | branch not on origin |
 
 Extra runners for this pass: `run_k64_pnp.py` (added by N3, now in the base) inside the gate run; `run_k64_chromium.py` afterwards,
 where a FAIL is expected until the Chromium milestone and only a kernel crash or a regression elsewhere counts against a branch.
 `run_k64_electron.py` is not run (E1 is not on the merge list; it needs inputs this machine does not have).
+
+### Status at 2026-09-30T08:45Z (pass 4 is still running; this text was pushed before the gates finished)
+
+- The lead's base moved to `03a564e` (tree `c310a1fa671ae92c9d92c785ea77dbc6be6dde56`) during the pass: PR #16 (this report) and PR #17 (W1 WebKit: `win64/webkit/*`, `run_k64_webkit.py`, `shz.py`, `upstream/manifest.json`).
+  The gates below run on `f97a2de` + k4, not on `03a564e` + k4; the two differ by those W1 files and this document.
+- n4 is now at `e8de1e9` (5 commits ahead of `03a564e`) and k5 at `39341852` (14 ahead): `git merge-tree` still reports the **same** conflicts
+  (n4: the same six `shizukudos/kernel64/ntdrv_*.c` files; k5: `win64/build.py`, `win64/tests/t_u_version.c`). k4 `d212e35` still merges clean.
+- **`k32` (run_k64_standalone's sibling `run_k32_standalone.py`) failed once at gate 22 with k4 merged, and the same failure exists in the base without k4.**
+  Evidence: (1) gate log `22-k32.log`: `[FAIL] run finished before the timeout  120s, accel=tcg`, `qemu_rc=-9`, `marker=0x0`, serial ends at
+  `K32 test PASS: #PF handler demand-maps 16 kernel pages` (the next stage, the ring-3 test, never reports). (2) The Kernel32 image is byte-identical with and without k4:
+  `KERNEL32S.BIN` sha256 `5da79d3d88412a2dfdb4...` in both trees, built at the same path (images embed absolute source paths, so only same-path builds compare).
+  k4 changes only `win64/kernel32`, `win64/ntdll`, `win64/tests` and docs, not `shizukudos/kernel32`. (3) Repeats: the k4 tree failed 1 of 30 further runs at the same point;
+  the base `f97a2de` alone failed 4 of 240 runs (3 at the same point, 1 with an unexpected ring-3 `#GP`: `K32 EXCEPTION #GP (vec 13) err=0 eip=40000011 cs=1b`, exit code 98,
+  `[FAIL] ring-3 exit code 42, #GP and #PF contained  42 0x0 0x0`). Each run takes 0 to 1 s when it passes. The test was not skipped, changed or quarantined; the failures are
+  reported here as they happened. Cause unknown; it sits in the Kernel32 ring-3 phase (about 2 % of runs) and belongs to whoever owns `shizukudos/kernel32`.
 
 ### Why n4 (`13c3157`) was not merged — evidence
 
