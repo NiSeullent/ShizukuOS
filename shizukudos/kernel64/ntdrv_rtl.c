@@ -184,6 +184,7 @@ static void systhread_trampoline(void *arg)
 {
     struct systhread_start s = *(struct systhread_start *)arg;
     kfree(arg);
+    ntdrv_gs_enter();
     s.routine(s.ctx);
     thread_exit(0);
 }

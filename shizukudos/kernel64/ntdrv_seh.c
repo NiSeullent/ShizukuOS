@@ -550,6 +550,7 @@ static void unwind_worker(void *target_frame, void *target_ip, EXCEPTION_RECORD 
         c = unwound;
     }
     rec->ExceptionFlags &= ~EXCEPTION_TARGET_UNWIND;
+    kprintf("K64 ntdrv-seh: unwound to %llx (frame %llx) rsp=%llx code=%x\n", (uint64_t)target_ip, c.Rsp, (uint64_t)target_frame, (uint32_t)(uint64_t)return_value);
     /* `c` is the target frame's own context (its callees were unwound), so its non-volatile registers and Rsp are what the
      * frame had at the call site; resume at the __except body with the exception code in Rax. */
     c.Rip = (uint64_t)target_ip;
@@ -657,6 +658,12 @@ int ntdrv_kernel_exception(struct regs *r)
     ctx.Rax = r->rax; ctx.Rcx = r->rcx; ctx.Rdx = r->rdx; ctx.Rbx = r->rbx; ctx.Rsp = r->rsp; ctx.Rbp = r->rbp; ctx.Rsi = r->rsi;
     ctx.Rdi = r->rdi; ctx.R8 = r->r8; ctx.R9 = r->r9; ctx.R10 = r->r10; ctx.R11 = r->r11; ctx.R12 = r->r12; ctx.R13 = r->r13;
     ctx.R14 = r->r14; ctx.R15 = r->r15; ctx.Rip = r->rip; ctx.EFlags = (uint32_t)r->rflags;
+    {
+        ntdrv_driver_t *drv = ntdrv_driver_by_address(r->rip);
+        kprintf("K64 ntdrv-seh: CPU exception %d in %s+%llx (status %x, info %llx %llx) rsp=%llx\n", (int)r->vector,
+                drv ? drv->name : "(outside any driver)", drv ? r->rip - drv->image_base : r->rip, (uint32_t)code,
+                rec.ExceptionInformation[0], rec.ExceptionInformation[1], r->rsp);
+    }
     if (!dispatch_frames(&rec, &ctx)) return 0;
     r->rax = ctx.Rax; r->rcx = ctx.Rcx; r->rdx = ctx.Rdx; r->rbx = ctx.Rbx; r->rsp = ctx.Rsp; r->rbp = ctx.Rbp; r->rsi = ctx.Rsi;
     r->rdi = ctx.Rdi; r->r8 = ctx.R8; r->r9 = ctx.R9; r->r10 = ctx.R10; r->r11 = ctx.R11; r->r12 = ctx.R12; r->r13 = ctx.R13;

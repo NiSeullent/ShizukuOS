@@ -46,6 +46,60 @@ static void set_irql(uint8_t v)
     else sti();
 }
 
+
+/* ---------------------------------------------------------------- KPCR emulation (GS base)
+ * Drivers built with the WDK read the current thread, the PRCB and the processor block straight from the GS segment on x64
+ * (KeGetCurrentThread/PsGetCurrentThread are gs:[0x188], KeGetPcr is gs:[0x18], KeGetCurrentPrcb gs:[0x20]). The kernel
+ * itself never uses GS (there is no swapgs discipline: a user thread's GS base is its TEB, kernel threads run with 0), so
+ * every thread that runs driver code gets a small KPCR of its own -- Self at 0x18, CurrentPrcb at 0x20, the embedded PRCB at
+ * 0x180 with CurrentThread at +8 -- and GS points at it for as long as it is inside the host. The scheduler swaps GS at every
+ * context switch once ntdrv_gs_all is set (sched.c), so the value follows the thread. Layout per the Windows x64 KPCR/KPRCB. */
+int ntdrv_gs_all;
+typedef struct kpcr_slot { struct kpcr_slot *next; void *thread; uint8_t blk[0x400] __attribute__((aligned(16))); } kpcr_slot_t;
+static kpcr_slot_t *kpcr_hash[64];
+static kpcr_slot_t isr_kpcr;
+
+static void kpcr_fill(kpcr_slot_t *s, void *thread)
+{
+    uint64_t *q = (uint64_t *)s->blk;
+    s->thread = thread;
+    q[0x18 / 8] = (uint64_t)s->blk;                    /* KPCR.Self */
+    q[0x20 / 8] = (uint64_t)(s->blk + 0x180);          /* KPCR.CurrentPrcb */
+    q[0x188 / 8] = (uint64_t)thread;                   /* KPRCB.CurrentThread */
+    q[0x198 / 8] = (uint64_t)thread;                   /* KPRCB.IdleThread: never idle here, but never NULL */
+}
+static uint64_t kpcr_for_current(void)
+{
+    thread_t *t = thread_current();
+    unsigned h = (unsigned)(((uint64_t)t >> 6) & 63);
+    kpcr_slot_t *s;
+    uint64_t f = irq_save();
+    for (s = kpcr_hash[h]; s; s = s->next) if (s->thread == t) { irq_restore(f); return (uint64_t)s->blk; }
+    irq_restore(f);
+    s = kzalloc(sizeof *s);
+    if (!s) return (uint64_t)isr_kpcr.blk;
+    kpcr_fill(s, t);
+    f = irq_save();
+    s->next = kpcr_hash[h]; kpcr_hash[h] = s;
+    irq_restore(f);
+    return (uint64_t)s->blk;
+}
+uint64_t ntdrv_gs_enter(void)                            /* returns the previous GS base for ntdrv_gs_leave */
+{
+    const uint64_t prev = rdmsr(MSR_GS_BASE);
+    ntdrv_gs_all = 1;
+    wrmsr(MSR_GS_BASE, kpcr_for_current());
+    return prev;
+}
+uint64_t ntdrv_gs_enter_isr(void)                        /* interrupt context: no allocation, one shared block */
+{
+    const uint64_t prev = rdmsr(MSR_GS_BASE);
+    kpcr_fill(&isr_kpcr, thread_current());
+    wrmsr(MSR_GS_BASE, (uint64_t)isr_kpcr.blk);
+    return prev;
+}
+void ntdrv_gs_leave(uint64_t prev) { wrmsr(MSR_GS_BASE, prev); }
+
 /* ---------------------------------------------------------------- IRQL */
 uint8_t NTAPI KeGetCurrentIrql(void) { return g_irql; }
 
@@ -152,6 +206,7 @@ void ntdrv_dpc_queue_flush(void)
 static void dpc_worker(void *arg)
 {
     (void)arg;
+    ntdrv_gs_enter();
     for (;;) {
         sem_wait(&dpc_sem);
         set_irql(DISPATCH_LEVEL);
@@ -355,6 +410,7 @@ uint8_t NTAPI KeReadStateTimer(KTIMER *t) { return t->Header.SignalState != 0; }
 static void timer_thread(void *arg)
 {
     (void)arg;
+    ntdrv_gs_enter();
     for (;;) {
         uint64_t now, f;
         unsigned i;

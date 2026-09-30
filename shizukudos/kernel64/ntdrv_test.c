@@ -30,6 +30,91 @@ static int load_from_store(const char *file, const char *service, ntdrv_driver_t
     return ntdrv_load_node(n, service, out) == 0 ? 0 : -1;
 }
 
+
+/* ---- KMDF: the unmodified WdfLdr + Wdf01000 framework and a KMDF client from the driver corpus. Only the KMDF runner image
+ * (win64/ntdrv/kmdf_image.py) carries WDFLDR.SYS, so every other run skips this. The client's FxDriverEntry calls
+ * WdfVersionBind (an import from wdfldr.sys, which the loader satisfies by loading the export driver); WdfLdr looks the
+ * library up under Services\Wdf01000, ZwLoadDriver()s it, and Wdf01000's DriverEntry registers with WdfLdr.
+ * Results are printed as "K64 ntdrv-test: kmdf <step> ..." lines for the runner. */
+extern NTSTATUS ntdrv_open_key_ascii(const char *path, int create, uint64_t *handle);
+extern NTSTATUS ntdrv_set_value_ascii(uint64_t key, const char *name, uint32_t type, const void *data, uint32_t len);
+extern int32_t ZwClose(uint64_t h) __attribute__((ms_abi));
+extern NTSTATUS NTAPI ntdrv_default_dispatch(DEVICE_OBJECT *dev, IRP *irp);   /* ntdrv_io.c: what the host installs before DriverEntry */
+
+static void seed_sz(const char *keypath, const char *name, uint32_t type, const char *value)
+{
+    uint64_t h = 0;
+    WCHAR w[200];
+    int n;
+    if (ntdrv_open_key_ascii(keypath, 1, &h) != 0) return;
+    n = ntdrv_ascii_to_wide(value, w, 199);
+    ntdrv_set_value_ascii(h, name, type, w, (uint32_t)(n + 1) * 2);
+    ZwClose(h);
+}
+static void seed_dword(const char *keypath, const char *name, uint32_t value)
+{
+    uint64_t h = 0;
+    if (ntdrv_open_key_ascii(keypath, 1, &h) != 0) return;
+    ntdrv_set_value_ascii(h, name, 4, &value, 4);
+    ZwClose(h);
+}
+
+static void kmdf_selftest(int *pass)
+{
+    static const char svc[] = "\\Registry\\Machine\\System\\CurrentControlSet\\Services\\";
+    char key[160];
+    fsnode_t *n;
+    ntdrv_driver_t *client = 0;
+    int32_t st;
+    unsigned i, k;
+    const char *clients[2] = { "CDROM.SYS", "HDAUDBUS.SYS" };
+    if (!fs_lookup("\\SHZ\\DRIVERS\\WDFLDR.SYS")) return;
+    kprintf("K64 ntdrv-test: kmdf: KMDF image present, seeding the framework service\n");
+    for (k = 0; svc[k]; ++k) key[k] = svc[k];
+    memcpy(key + k, "Wdf01000", 9);                             /* the default service WdfLdr falls back to for KMDF 1.x */
+    seed_sz(key, "ImagePath", 2, "\\SystemRoot\\DRIVERS\\WDF01000.SYS");
+    seed_dword(key, "Type", 1);
+    seed_dword(key, "Start", 3);
+    seed_dword("\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Wdf\\Kmdf\\Diagnostics", "DbgPrintOn", 1);
+    seed_dword("\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Wdf\\Kmdf\\Diagnostics", "VerboseLogging", 1);
+    for (i = 0; i < 2; ++i) {
+        char service[32];
+        unsigned j = 0, m;
+        for (m = 0; clients[i][m] && clients[i][m] != '.'; ++m) service[j++] = clients[i][m] >= 'A' && clients[i][m] <= 'Z' ? (char)(clients[i][m] + 32) : clients[i][m];
+        service[j] = 0;
+        for (m = 0; svc[m]; ++m) key[m] = svc[m];
+        memcpy(key + m, service, j + 1);
+        seed_dword(key, "Type", 1);                              /* the client's own service key (its RegistryPath) */
+        seed_dword(key, "Start", 3);
+        {
+            char path[64]; unsigned q = 0, r;
+            const char *pfx = "\\SHZ\\DRIVERS\\";
+            for (r = 0; pfx[r]; ++r) path[q++] = pfx[r];
+            for (r = 0; clients[i][r]; ++r) path[q++] = clients[i][r];
+            path[q] = 0;
+            n = fs_lookup(path);
+        }
+        if (!n) { kprintf("K64 ntdrv-test: kmdf: %s not in the image\n", clients[i]); *pass = 0; continue; }
+        client = 0;
+        st = ntdrv_load_node(n, service, &client);
+        kprintf("K64 ntdrv-test: kmdf: client %s load status=%x started=%d\n", service, (uint32_t)st, client ? client->started : 0);
+        if (st != 0) *pass = 0;
+        else {
+            ntdrv_driver_t *lib = ntdrv_find_driver("Wdf01000"), *ldr = ntdrv_find_driver("wdfldr");
+            DRIVER_OBJECT *d = client->drv;
+            kprintf("K64 ntdrv-test: kmdf: framework loaded=%d loader loaded=%d\n", lib ? lib->started : 0, ldr ? ldr->started : 0);
+            /* WdfDriverCreate's visible effect on the client's DRIVER_OBJECT: the framework installs AddDevice, DriverUnload and its
+             * own IRP dispatch (every major function the host initialised to its default dispatch is replaced). */
+            {
+                unsigned replaced = 0, m;
+                for (m = 0; m <= IRP_MJ_MAXIMUM_FUNCTION; ++m) if (d->MajorFunction[m] != ntdrv_default_dispatch) ++replaced;
+                kprintf("K64 ntdrv-test: kmdf: client %s WdfDriverCreate effect: AddDevice=%s DriverUnload=%s framework dispatch in %u major functions\n",
+                        service, d->DriverExtension && d->DriverExtension->AddDevice ? "set" : "NULL", d->DriverUnload ? "set" : "NULL", replaced);
+            }
+        }
+    }
+}
+
 void ntdrv_selftest(void)
 {
     ntdrv_driver_t *echo = 0, *dpc = 0, *pci = 0;
@@ -38,6 +123,7 @@ void ntdrv_selftest(void)
     uint32_t provider_total = ntdrv_ntoskrnl_export_count + ntdrv_hal_export_count;
 
     if (!fs_lookup("\\SHZ\\DRIVERS")) return;                 /* default runs mount no driver store: complete no-op */
+    ntdrv_gs_enter();                                         /* this thread runs driver code: GS -> its KPCR */
     ntdrv_ke_init();                                          /* DPC + timer service threads (driver runs only) */
 
     kprintf("K64 ntdrv-test: providers = %u ntoskrnl + %u hal\n",
@@ -105,6 +191,7 @@ void ntdrv_selftest(void)
         } else { pass = 0; kprintf("K64 ntdrv-test: apitest driver failed to load\n"); }
     }
 
+    kmdf_selftest(&pass);
     shz_evidence(13, loaded);
     shz_evidence(27, ((uint64_t)pass << 32) | provider_total);
     kprintf("K64 ntdrv-test: %d driver(s) exercised, overall %s\n", loaded, pass ? "PASS" : "FAIL");

@@ -518,7 +518,9 @@ void NTAPI KeReleaseInterruptSpinLock(kinterrupt_t *k, uint8_t old)
 static void call_isr(kinterrupt_t *k)
 {
     uint8_t (NTAPI *svc)(void *, void *) = k->service;
+    const uint64_t gs = ntdrv_gs_enter_isr();   /* the interrupted thread's GS base is a TEB or 0: give the ISR a KPCR */
     svc(k, k->ctx);                             /* KSERVICE_ROUTINE(Interrupt, ServiceContext) */
+    ntdrv_gs_leave(gs);
 }
 #ifdef SHZ_STANDALONE
 static void intx_isr(void *ctx) { call_isr(ctx); }   /* one link of pci.c's shared-line chain */
@@ -617,6 +619,7 @@ static int wq_started;
 static void work_thread(void *arg)
 {
     (void)arg;
+    ntdrv_gs_enter();
     for (;;) {
         io_workitem_t *w;
         void (NTAPI *routine)(DEVICE_OBJECT *, void *);
@@ -693,7 +696,7 @@ void ntdrv_queue_system_work(void (NTAPI *fn)(void *), void *ctx, void *tag)
 /* Weak-hook targets referenced from sysfile.c/objects.c. */
 struct devfile { DEVICE_OBJECT *dev; FILE_OBJECT fo; };
 
-int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, uint64_t phandle_out, uint64_t iosb_out)
+static int32_t open_device_file_inner(process_t *p, const char *path, uint32_t access, uint64_t phandle_out, uint64_t iosb_out)
 {
     DEVICE_OBJECT *dev = 0;
     struct devfile *df;
@@ -726,7 +729,7 @@ int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, 
 }
 
 /* device handle read/write (from sysfile.c hook). Returns 1 if it owned the request. */
-int ntdrv_file_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t handle, int32_t *st_out)
+static int file_dispatch_inner(process_t *p, struct regs *r, uint32_t num, uint64_t handle, int32_t *st_out)
 {
     kobject_t *o = handle_lookup(p, handle, OB_DEVICE);
     struct devfile *df;
@@ -751,7 +754,7 @@ int ntdrv_file_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t han
     return 0;
 }
 
-void ntdrv_device_handle_closing(kobject_t *o)
+static void device_handle_closing_inner(kobject_t *o)
 {
     struct devfile *df;
     if (o->refs != 1) return;
@@ -895,7 +898,7 @@ static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
 }
 
 /* ---------------------------------------------------------------- ntdrv syscall router */
-int32_t sys_ext_ntdrv(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
+static int32_t sys_ext_ntdrv_inner(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {
     (void)a2; (void)a3; (void)a4;
     switch (num) {
@@ -903,4 +906,35 @@ int32_t sys_ext_ntdrv(process_t *cur, struct regs *r, uint32_t num, uint64_t a1,
     case 0xe1: return sys_device_io_control(cur, r, a1);                     /* NtDeviceIoControlFile(h, ev, apc, ctx, iosb, ...) */
     default: return STATUS_INVALID_SYSTEM_SERVICE;
     }
+}
+
+/* ---------------------------------------------------------------- user-thread entry points (GS = a KPCR while inside)
+ * A user thread's GS base is its TEB. Driver code reads the KPCR through GS, so each call from a user thread into the host
+ * switches GS to the thread's KPCR and restores the TEB on the way out (see the KPCR emulation in ntdrv_ke.c). */
+int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, uint64_t phandle_out, uint64_t iosb_out)
+{
+    const uint64_t gs = ntdrv_gs_enter();
+    const int32_t st = open_device_file_inner(p, path, access, phandle_out, iosb_out);
+    ntdrv_gs_leave(gs);
+    return st;
+}
+int ntdrv_file_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t handle, int32_t *st_out)
+{
+    const uint64_t gs = ntdrv_gs_enter();
+    const int owned = file_dispatch_inner(p, r, num, handle, st_out);
+    ntdrv_gs_leave(gs);
+    return owned;
+}
+void ntdrv_device_handle_closing(kobject_t *o)
+{
+    const uint64_t gs = ntdrv_gs_enter();
+    device_handle_closing_inner(o);
+    ntdrv_gs_leave(gs);
+}
+int32_t sys_ext_ntdrv(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
+{
+    const uint64_t gs = ntdrv_gs_enter();
+    const int32_t st = sys_ext_ntdrv_inner(cur, r, num, a1, a2, a3, a4);
+    ntdrv_gs_leave(gs);
+    return st;
 }

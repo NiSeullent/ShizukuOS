@@ -80,6 +80,22 @@ def evaluate(serial, ev):
     return c
 
 
+def evaluate_kmdf(serial):
+    c = []
+    c.append(check("KMDF image mounted (WdfLdr present)", "kmdf: KMDF image present" in serial))
+    for client in ("cdrom", "hdaudbus"):
+        m = re.search(rf"^K64 ntdrv-test: kmdf: client {client} load status=([0-9a-f]+) started=(\d)$", serial, re.M)
+        c.append(check(f"KMDF client {client}.sys: FxDriverEntry -> WdfVersionBind -> WdfDriverCreate, DriverEntry returned success",
+                       bool(m) and int(m.group(1), 16) == 0 and m.group(2) == "1", m.group(0) if m else "no result line"))
+    for client in ("cdrom", "hdaudbus"):
+        m = re.search(rf"^K64 ntdrv-test: kmdf: client {client} WdfDriverCreate effect: AddDevice=(\w+) DriverUnload=(\w+) framework dispatch in (\d+) major functions$", serial, re.M)
+        c.append(check(f"{client}.sys: WdfDriverCreate took effect (framework AddDevice/DriverUnload/dispatch installed on the DRIVER_OBJECT)",
+                       bool(m) and m.group(1) == "set" and m.group(2) == "set" and int(m.group(3)) >= 3, m.group(0) if m else "no effect line"))
+    c.append(check("WdfLdr and Wdf01000 both loaded (the library through ZwLoadDriver from WdfLdr)",
+                   "kmdf: framework loaded=1 loader loaded=1" in serial))
+    return c
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--qemu", default=qemu.DEFAULT_QEMU)
@@ -87,8 +103,11 @@ def main():
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--memory", default="256")
     ap.add_argument("--out", default=str(K64S / "ntdrv-run"))
+    ap.add_argument("--kmdf", action="store_true",
+                    help="mount WIN64_KMDF.IMG (win64/ntdrv/kmdf_image.py: the test drivers + the corpus's WdfLdr/Wdf01000/cdrom/hdaudbus) "
+                         "and require the KMDF client drivers to bind to the framework")
     args = ap.parse_args()
-    stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64_NTDRV.IMG"
+    stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / ("WIN64_KMDF.IMG" if args.kmdf else "WIN64_NTDRV.IMG")
     for f in (stub, kernel, initrd):
         if not f.exists():
             raise SystemExit(f"missing {f}: run shizukudos/kbuild.py and shizukudos/win64/build.py first")
@@ -114,6 +133,8 @@ def main():
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     ev, exit_code = parse(serial)
     checks = evaluate(serial, ev)
+    if args.kmdf:
+        checks += evaluate_kmdf(serial)
     if timed_out:
         checks.insert(0, check("run finished before the timeout", False, f"{args.timeout}s, accel={accel}"))
     status = "PASS" if all(x["status"] == "PASS" for x in checks) else "FAIL"

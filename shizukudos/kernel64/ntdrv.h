@@ -100,6 +100,9 @@ int32_t ntdrv_open_close_device(DEVICE_OBJECT *dev, int close);
 /* ---- Ke/Ex runtime services used across provider files (ntdrv_ke.c/mm.c) ---- */
 void ntdrv_ke_init(void);                                         /* DPC worker + timer thread */
 uint8_t ntdrv_current_irql(void);
+uint64_t ntdrv_gs_enter(void);                                    /* GS base := this thread's KPCR; returns the old base */
+uint64_t ntdrv_gs_enter_isr(void);                                /* same, for interrupt context (no allocation) */
+void ntdrv_gs_leave(uint64_t previous);
 void ntdrv_dpc_queue_flush(void);
 void NTAPI KeAcquireSpinLock(KSPIN_LOCK *l, uint8_t *old);
 void NTAPI KeReleaseSpinLock(KSPIN_LOCK *l, uint8_t old);
