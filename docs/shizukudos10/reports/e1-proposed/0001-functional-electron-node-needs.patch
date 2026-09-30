@@ -1,11 +1,3 @@
-E1 proposal 1/2: what Electron and Node need from Kernel64 and the Win64 runtime
-
-kernel32: CancelSynchronousIo, CreateSymbolicLinkW, ReOpenFile, GetProcessIoCounters, GetErrorMode, NeedCurrentDirectoryForExePathW,
-GetCurrentPackageFullName, GetPackageFamilyName; console cursor/title/fill/input model; WriteConsoleW no longer drops the last byte;
-CreateNamedPipeW accepts the verbatim \\?\pipe\ prefix. ntdll: RtlAddGrowableFunctionTable, RtlGrowFunctionTable,
-RtlDeleteGrowableFunctionTable. ws2_32: GetNameInfoW. advapi32: SystemFunction036. kernel64: the NUL device, FileAllInformation.
-
-
 diff --git a/shizukudos/kernel64/fs.h b/shizukudos/kernel64/fs.h
 index ea3199f..b237562 100644
 --- a/shizukudos/kernel64/fs.h
@@ -180,6 +172,105 @@ index 9581785..a055e18 100644
          *(uint32_t *)(out + 4) = disk && !dwritable ? 0x2 : 0;  /* FILE_READ_ONLY_DEVICE */
          return put_result(p, iosb, buf, len, out, 8, STATUS_SUCCESS);
      }
+diff --git a/shizukudos/tests/e1_minapp/main.js b/shizukudos/tests/e1_minapp/main.js
+index ebc9e71..42ad0fa 100644
+--- a/shizukudos/tests/e1_minapp/main.js
++++ b/shizukudos/tests/e1_minapp/main.js
+@@ -28,6 +28,14 @@ function die(code, line) {
+   process.exit(code);
+ }
+ 
++// A write error on stdout/stderr (EPIPE on a runtime whose stdio handle is not a working pipe) arrives as an 'error' event of the
++// stream, which Node turns into an uncaughtException: it would end the probe before the marker. Every line also goes through
++// process._rawDebug, so the error is reported and the run goes on.
++for (const name of ['stdout', 'stderr']) {
++  try {
++    process[name].on('error', (err) => raw('SHZ-E1 main: ' + name + ' stream error ' + (err && err.code ? err.code : err) + ' (reported, not fatal)'));
++  } catch (e) { raw('SHZ-E1 main: process.' + name + ' unavailable: ' + (e && e.message ? e.message : e)); }
++}
+ process.on('uncaughtException', (err) => die(9, 'SHZ-E1 main: uncaughtException ' + (err && err.stack ? err.stack : err)));
+ process.on('unhandledRejection', (err) => die(10, 'SHZ-E1 main: unhandledRejection ' + (err && err.stack ? err.stack : err)));
+ 
+diff --git a/shizukudos/tests/run_k64_electron.py b/shizukudos/tests/run_k64_electron.py
+index 29f14f8..1ceb229 100755
+--- a/shizukudos/tests/run_k64_electron.py
++++ b/shizukudos/tests/run_k64_electron.py
+@@ -34,8 +34,9 @@ file holds at most 511 characters of command line; --args replaces the default a
+ The run PASSES only when the serial log contains the expected line AND the process exited with code 0 AND no process
+ fault was reported. Anything else is a FAIL, and the result names the furthest point reached, in this order of
+ precedence: loader failure (an import that did not resolve), a fatal exception (process killed by the kernel), a
+-Node/V8 fatal line, a Chromium FATAL/CHECK line, the marker seen without a clean exit, the first explicitly
+-unsupported kernel32 call ("K32 unsupported: ..."), the furthest progress line the app printed, the exit code, or the
++Node/V8 fatal line, a Chromium FATAL/CHECK line, the marker seen without a clean exit, a first-chance breakpoint
++(int3: a failed CHECK or delay-load that a handler turned into a process exit; the result quotes the last LoadLibrary
++refusal and GetProcAddress miss before it), the first explicitly unsupported kernel32 call ("K32 unsupported: ..."), the furthest progress line the app printed, the exit code, or the
+ timeout.
+ 
+ Result: <out>/result.json (printed in short). Exit status 0 = PASS, 1 = FAIL (the expected state today), 2 = the run
+@@ -144,6 +145,18 @@ def put_file(image, data, name, work):
+     run(["mcopy", "-o", "-i", str(image), str(host), "::" + name], env=mtools_env(), capture=True)
+ 
+ 
++def breakpoint_context(b):
++    """What the log says just before the first breakpoint, and how the process ended after it."""
++    out = ""
++    if b["last_loadlibrary_refusal"]:
++        out += "; last LoadLibrary refusal before it: " + b["last_loadlibrary_refusal"].split("K64 ldr: ", 1)[-1]
++    if b["last_getprocaddress_miss"]:
++        out += "; last GetProcAddress miss before it: " + b["last_getprocaddress_miss"].split("trace: ", 1)[-1]
++    if b["self_terminate"]:
++        out += "; then " + b["self_terminate"].split("trace: ", 1)[-1]
++    return out
++
++
+ def classify(serial, expect):
+     """Furthest point reached, from the serial log after the autorun start (precedence in the module docstring).
+     A runtime LoadLibrary that fails ("... LoadLibrary needs ...") is listed separately: programs probe optional DLLs."""
+@@ -161,12 +174,27 @@ def classify(serial, expect):
+                                                 r"executeJavaScript failed|whenReady failed|watchdog|uncaughtException|unhandledRejection|console\.log threw)", l)]
+     fatal = [l for l in lines if re.search(r"FATAL:|Check failed|CHECK failed|NOTREACHED", l)]
+     unsup = [l for l in lines if "K32 unsupported:" in l or "K32 RECON called:" in l]
++    # A first-chance breakpoint (int3) that some handler turned into a process exit is how Chromium ends on a failed CHECK or a
++    # failed delay-load: the kernel prints no "unhandled exception" for it. The loader refusal and the GetProcAddress miss just
++    # before the first one name the usual cause (a delay-loaded DLL or ordinal that does not exist).
++    bp_at = next((i for i, l in enumerate(lines) if re.search(r"K64 exc: pid \d+ tid \d+ first-chance 80000003 ", l)), None)
++    breakpoint_ = None
++    if bp_at is not None:
++        pid = re.search(r"K64 exc: pid (\d+)", lines[bp_at]).group(1)
++        end_at = next((i for i, l in enumerate(lines) if l.startswith("K64 autorun: result")), len(lines))   # later lines belong to the boot's other tests
++        before = lines[:bp_at]
++        breakpoint_ = {"line": lines[bp_at],
++                       "last_loadlibrary_refusal": next((l for l in reversed(before) if ": LoadLibrary needs " in l), None),
++                       "last_getprocaddress_miss": next((l for l in reversed(before) if "GetProcAddress miss:" in l), None),
++                       "self_terminate": next((l for l in lines[bp_at:end_at]
++                                               if f" pid {pid}]" in l and ("TerminateProcess(self)" in l or "ExitProcess code=" in l)), None)}
+     auto = [l for l in lines if l.startswith("K64 autorun: result")]
+     res["loader_failures"] = ldr[:20]
+     res["exceptions"] = killed[:20]
+     res["node_fatal"] = node_fatal[:20]
+     res["chromium_fatal"] = fatal[:20]
+     res["unsupported_calls"] = unsup[:60]
++    res["first_breakpoint"] = breakpoint_
+     res["autorun_result"] = auto[-1] if auto else None
+     progress = None
+     for name, rx in PROGRESS:
+@@ -189,13 +217,15 @@ def classify(serial, expect):
+     if ldr:
+         res["furthest"] = "loader: " + ldr[0]
+     elif killed:
+-        res["furthest"] = "exception: " + killed[0]
++        res["furthest"] = "exception: " + killed[0] + (breakpoint_context(breakpoint_) if breakpoint_ else "")
+     elif node_fatal:
+         res["furthest"] = "node/electron fatal: " + node_fatal[0]
+     elif fatal:
+         res["furthest"] = "chromium fatal: " + fatal[0]
+     elif marker:
+         res["furthest"] = "marker seen" + (f", process {m.group(1)} exit {int(m.group(2), 16):#x}" if m else "")
++    elif breakpoint_:
++        res["furthest"] = "breakpoint (int3): " + breakpoint_["line"].split("K64 exc: ", 1)[-1] + breakpoint_context(breakpoint_)
+     elif unsup:
+         res["furthest"] = "first unsupported kernel32 call: " + unsup[0]
+     elif progress and progress[0] not in ("autorun started", "process created"):
 diff --git a/shizukudos/win64/dlls/advapi32/rand.c b/shizukudos/win64/dlls/advapi32/rand.c
 new file mode 100644
 index 0000000..9d8076d
@@ -401,10 +492,10 @@ index a190b3f..c4d593d 100644
  K32API BOOL WINAPI IsDebuggerPresent(void) { return *(BYTE *)(shz_peb() + 2) != 0; }
 diff --git a/shizukudos/win64/kernel32/k32_e1_gap.c b/shizukudos/win64/kernel32/k32_e1_gap.c
 new file mode 100644
-index 0000000..8daea6b
+index 0000000..26b3f89
 --- /dev/null
 +++ b/shizukudos/win64/kernel32/k32_e1_gap.c
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,97 @@
 +/* SPDX-License-Identifier: GPL-2.0-only
 + * kernel32.dll: the load-time imports of Electron / Node.js (libuv) that Chromium does not use. electron.exe and the VS Code
 + * executables import these by name at load time, so each one has to exist for the image to map at all; what each does here:
@@ -420,6 +511,10 @@ index 0000000..8daea6b
 + *    package identity: APPMODEL_ERROR_NO_PACKAGE, returned as the result as the API defines.
 + *  - NeedCurrentDirectoryForExePathW: TRUE for a name with a path separator or when NoDefaultCurrentDirectoryInExePath is not
 + *    set in the environment (the documented behavior; the registry location the documentation also mentions is not read).
++ *  - HeapQueryInformation: ffmpeg.dll (loaded by every Electron renderer) and other images import it at load time. The only
++ *    class the heaps of this system answer is HeapCompatibilityInformation, always 0 (a standard heap: ntdll's allocator is not
++ *    a low-fragmentation heap, see RtlSetHeapInformation); any other class is ERROR_INVALID_PARAMETER, a handle that is no
++ *    heap is ERROR_INVALID_HANDLE.
 + */
 +#include "k32.h"
 +
@@ -488,6 +583,198 @@ index 0000000..8daea6b
 +        if (*p == '\\') return TRUE;
 +    return GetEnvironmentVariableW(L"NoDefaultCurrentDirectoryInExePath", &v, 1) == 0;
 +}
++
++K32API BOOL WINAPI HeapQueryInformation(HANDLE heap, HEAP_INFORMATION_CLASS cls, PVOID info, SIZE_T len, PSIZE_T needed)
++{
++    if ((int)cls != 0) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    if (!HeapValidate(heap, 0, NULL)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
++    if (needed) *needed = sizeof(ULONG);
++    if (!info || len < sizeof(ULONG)) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return FALSE; }
++    *(ULONG *)info = 0;
++    return TRUE;
++}
+diff --git a/shizukudos/win64/kernel32/k32_fiber.c b/shizukudos/win64/kernel32/k32_fiber.c
+new file mode 100644
+index 0000000..4502a43
+--- /dev/null
++++ b/shizukudos/win64/kernel32/k32_fiber.c
+@@ -0,0 +1,176 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * kernel32.dll: fibers - ConvertThreadToFiber(Ex), ConvertFiberToThread, CreateFiber(Ex), DeleteFiber, SwitchToFiber.
++ *
++ * vk_swiftshader.dll (the software Vulkan driver Chromium's GPU process loads when there is no GPU) imports ConvertFiberToThread
++ * and its scheduler (marl) runs tasks on fibers; without the exports the DLL does not load and the GPU process dies.
++ *
++ * A fiber is a user-mode stack plus the registers that survive a call (rbx, rbp, rdi, rsi, r12-r15, xmm6-xmm15, MXCSR, the x87
++ * control word). SwitchToFiber saves those on the stack of the fiber it leaves, stores that stack pointer in the fiber object,
++ * and resumes the target from its stored stack pointer; the thread environment block is kept in step (stack bounds, FiberData,
++ * the fiber-local storage array) so exception dispatch, GetCurrentThreadStackLimits and FlsGetValue see the running fiber.
++ * The fiber object is laid out as Windows lays it out where programs can see it: its first member is the value GetFiberData
++ * returns, and TEB.NtTib.FiberData (0x20) points to the running fiber. Differences from Windows, each deliberate:
++ *  - a fiber stack is committed in full when it is created (there is no guard page and no growth): CreateFiberEx takes the
++ *    larger of the commit and reserve sizes, 1 MiB when both are 0;
++ *  - DeleteFiber frees the fiber-local storage array without running the FLS callbacks of its values;
++ *  - the FIBER_FLAG_FLOAT_SWITCH flag is accepted and ignored: the floating point state is always switched.
++ * Deleting the running fiber ends the thread (as on Windows); a fiber routine that returns also ends the thread.
++ */
++#include "k32.h"
++
++#define TEB_EXCEPTION_LIST 0x00
++#define TEB_STACK_BASE 0x08
++#define TEB_STACK_LIMIT 0x10
++#define TEB_FIBER_DATA 0x20
++#define TEB_DEALLOCATION_STACK 0x1478
++#define TEB_FLS_DATA 0x17c8
++#define TEB_SAME_TEB_FLAGS 0x17ee
++#define TEB_HAS_FIBER_DATA 4                                   /* SameTebFlags bit 2 */
++#define FIBER_DEFAULT_STACK (1024 * 1024)
++#define FIBER_MIN_STACK (16 * 1024)
++#define SWITCH_FRAME 232                                       /* 8 saved registers, xmm6-xmm15, MXCSR, FPU control word */
++
++typedef struct fiber {
++    PVOID data;                                                /* 0x00: what GetFiberData returns; must stay first */
++    uint64_t exception_list, stack_base, stack_limit, deallocation_stack, fls_data;   /* TEB fields while the fiber is switched out */
++    uint64_t saved_rsp;                                        /* top of the switch frame while it is switched out */
++    PVOID stack;                                               /* the allocation, NULL for a converted thread */
++    LPFIBER_START_ROUTINE start;
++} fiber_t;
++
++#define TEB_U64(off) (*(uint64_t *)(shz_teb() + (off)))
++static fiber_t *current_fiber(void)
++{
++    if (!(*(const USHORT *)(shz_teb() + TEB_SAME_TEB_FLAGS) & TEB_HAS_FIBER_DATA)) return NULL;
++    return (fiber_t *)(ULONG_PTR)TEB_U64(TEB_FIBER_DATA);
++}
++
++void k32_fiber_switch(uint64_t *save_rsp, uint64_t new_rsp);
++__asm__(".text\n.p2align 4\n"
++        "k32_fiber_switch:\n"
++        "  pushq %rbx\n  pushq %rbp\n  pushq %rdi\n  pushq %rsi\n  pushq %r12\n  pushq %r13\n  pushq %r14\n  pushq %r15\n"
++        "  subq $0xa8, %rsp\n"
++        "  movups %xmm6, 0(%rsp)\n  movups %xmm7, 16(%rsp)\n  movups %xmm8, 32(%rsp)\n  movups %xmm9, 48(%rsp)\n  movups %xmm10, 64(%rsp)\n"
++        "  movups %xmm11, 80(%rsp)\n  movups %xmm12, 96(%rsp)\n  movups %xmm13, 112(%rsp)\n  movups %xmm14, 128(%rsp)\n  movups %xmm15, 144(%rsp)\n"
++        "  stmxcsr 160(%rsp)\n  fnstcw 164(%rsp)\n"
++        "  movq %rsp, (%rcx)\n"
++        "  movq %rdx, %rsp\n"
++        "  ldmxcsr 160(%rsp)\n  fldcw 164(%rsp)\n"
++        "  movups 0(%rsp), %xmm6\n  movups 16(%rsp), %xmm7\n  movups 32(%rsp), %xmm8\n  movups 48(%rsp), %xmm9\n  movups 64(%rsp), %xmm10\n"
++        "  movups 80(%rsp), %xmm11\n  movups 96(%rsp), %xmm12\n  movups 112(%rsp), %xmm13\n  movups 128(%rsp), %xmm14\n  movups 144(%rsp), %xmm15\n"
++        "  addq $0xa8, %rsp\n"
++        "  popq %r15\n  popq %r14\n  popq %r13\n  popq %r12\n  popq %rsi\n  popq %rdi\n  popq %rbp\n  popq %rbx\n"
++        "  ret\n");
++
++static void save_teb(fiber_t *f)
++{
++    f->exception_list = TEB_U64(TEB_EXCEPTION_LIST);
++    f->stack_base = TEB_U64(TEB_STACK_BASE);
++    f->stack_limit = TEB_U64(TEB_STACK_LIMIT);
++    f->deallocation_stack = TEB_U64(TEB_DEALLOCATION_STACK);
++    f->fls_data = TEB_U64(TEB_FLS_DATA);
++}
++
++static void load_teb(fiber_t *f)
++{
++    TEB_U64(TEB_EXCEPTION_LIST) = f->exception_list;
++    TEB_U64(TEB_STACK_BASE) = f->stack_base;
++    TEB_U64(TEB_STACK_LIMIT) = f->stack_limit;
++    TEB_U64(TEB_DEALLOCATION_STACK) = f->deallocation_stack;
++    TEB_U64(TEB_FLS_DATA) = f->fls_data;
++    TEB_U64(TEB_FIBER_DATA) = (uint64_t)(ULONG_PTR)f;
++}
++
++__attribute__((noreturn, used)) static void fiber_main(void)
++{
++    fiber_t *f = (fiber_t *)TEB_U64(TEB_FIBER_DATA);
++    f->start(f->data);
++    ExitThread(0);
++    for (;;) { }
++}
++
++K32API LPVOID WINAPI ConvertThreadToFiberEx(LPVOID param, DWORD flags)
++{
++    fiber_t *f;
++    if (flags & ~(DWORD)FIBER_FLAG_FLOAT_SWITCH) { shz_set_last_error(ERROR_INVALID_PARAMETER); return NULL; }
++    if (current_fiber()) { shz_set_last_error(ERROR_ALREADY_FIBER); return NULL; }
++    f = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *f);
++    if (!f) { shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
++    f->data = param;
++    save_teb(f);
++    TEB_U64(TEB_FIBER_DATA) = (uint64_t)(ULONG_PTR)f;
++    *(USHORT *)(shz_teb() + TEB_SAME_TEB_FLAGS) |= TEB_HAS_FIBER_DATA;
++    return f;
++}
++
++K32API LPVOID WINAPI ConvertThreadToFiber(LPVOID param) { return ConvertThreadToFiberEx(param, 0); }
++
++K32API BOOL WINAPI ConvertFiberToThread(void)
++{
++    fiber_t *f = current_fiber();
++    if (!f) { shz_set_last_error(ERROR_ALREADY_THREAD); return FALSE; }
++    if (f->stack) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }      /* only the fiber that came from the thread converts back */
++    *(USHORT *)(shz_teb() + TEB_SAME_TEB_FLAGS) &= (USHORT)~TEB_HAS_FIBER_DATA;
++    TEB_U64(TEB_FIBER_DATA) = 0;
++    HeapFree(GetProcessHeap(), 0, f);
++    return TRUE;
++}
++
++K32API LPVOID WINAPI CreateFiberEx(SIZE_T commit, SIZE_T reserve, DWORD flags, LPFIBER_START_ROUTINE start, LPVOID param)
++{
++    fiber_t *f;
++    SIZE_T size = commit > reserve ? commit : reserve;
++    uint64_t top, slot, frame;
++    uint64_t *w;
++    if ((flags & ~(DWORD)FIBER_FLAG_FLOAT_SWITCH) || !start) { shz_set_last_error(ERROR_INVALID_PARAMETER); return NULL; }
++    if (!size) size = FIBER_DEFAULT_STACK;
++    if (size < FIBER_MIN_STACK) size = FIBER_MIN_STACK;
++    size = (size + 0xfff) & ~(SIZE_T)0xfff;
++    f = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *f);
++    if (!f) { shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
++    f->stack = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++    if (!f->stack) { HeapFree(GetProcessHeap(), 0, f); return NULL; }                  /* VirtualAlloc set the error */
++    f->data = param;
++    f->start = start;
++    f->stack_limit = f->deallocation_stack = (uint64_t)(ULONG_PTR)f->stack;
++    f->stack_base = (uint64_t)(ULONG_PTR)f->stack + size;
++    /* The first SwitchToFiber "returns" into fiber_main: lay out the frame it would have saved, with the return address of
++     * fiber_main (0, end of the call chain) and its 32 bytes of shadow space above. After the final `ret` rsp is 8 (mod 16), as
++     * at the first instruction of any called function. */
++    top = f->stack_base & ~(uint64_t)15;
++    slot = top - 0x30;                                          /* holds the address the switch returns to */
++    frame = slot - SWITCH_FRAME;
++    memset((void *)(ULONG_PTR)frame, 0, SWITCH_FRAME);
++    w = (uint64_t *)(ULONG_PTR)frame;
++    ((uint32_t *)w)[160 / 4] = 0x1f80;                          /* MXCSR: all exceptions masked, round to nearest */
++    ((uint16_t *)w)[164 / 2] = 0x27f;                           /* x87 control word: 53-bit precision, exceptions masked */
++    *(uint64_t *)(ULONG_PTR)slot = (uint64_t)(ULONG_PTR)fiber_main;
++    *(uint64_t *)(ULONG_PTR)(slot + 8) = 0;
++    f->saved_rsp = frame;
++    return f;
++}
++
++K32API LPVOID WINAPI CreateFiber(SIZE_T stack_size, LPFIBER_START_ROUTINE start, LPVOID param)
++{
++    return CreateFiberEx(stack_size, 0, 0, start, param);
++}
++
++K32API VOID WINAPI SwitchToFiber(LPVOID target)
++{
++    fiber_t *from = current_fiber(), *to = target;
++    if (!from || !to) return;
++    if (from == to) return;
++    save_teb(from);
++    load_teb(to);
++    k32_fiber_switch(&from->saved_rsp, to->saved_rsp);
++}
++
++K32API VOID WINAPI DeleteFiber(LPVOID fiber)
++{
++    fiber_t *f = fiber;
++    if (!f) return;
++    if (f == current_fiber()) ExitThread(0);                    /* a fiber that deletes itself ends the thread */
++    if (f->fls_data) HeapFree(GetProcessHeap(), 0, (PVOID)(ULONG_PTR)f->fls_data);
++    if (f->stack) VirtualFree(f->stack, 0, MEM_RELEASE);
++    HeapFree(GetProcessHeap(), 0, f);
++}
 diff --git a/shizukudos/win64/kernel32/k32_file.c b/shizukudos/win64/kernel32/k32_file.c
 index 81d52a9..7735a3a 100644
 --- a/shizukudos/win64/kernel32/k32_file.c
@@ -541,78 +828,180 @@ index ee6f005..d477caf 100644
      n = (ULONG)wl(name);
      if (n - 9 == 0 || n + 1 > 290) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
      if (!max_inst || max_inst > PIPE_UNLIMITED_INSTANCES || !(open_mode & PIPE_ACCESS_DUPLEX) ||
-diff --git a/shizukudos/win64/ntdll/unwind.c b/shizukudos/win64/ntdll/unwind.c
-index 10cba59..e4a6bbd 100644
---- a/shizukudos/win64/ntdll/unwind.c
-+++ b/shizukudos/win64/ntdll/unwind.c
-@@ -40,6 +40,7 @@ typedef struct {
-     PVOID context;
-     DWORD64 identifier;                         /* RtlInstallFunctionTableCallback's TableIdentifier (low 3 bits = 3) */
-     int used;
-+    int growable;                               /* RtlAddGrowableFunctionTable: the handle is this slot's address */
- } dyn_table_t;
- static dyn_table_t dyn_tables[128];
- static volatile LONG dyn_lock;
-@@ -54,7 +55,7 @@ SHZ_EXPORT BOOLEAN NTAPI RtlAddFunctionTable(PRUNTIME_FUNCTION table, DWORD coun
-     dyn_acquire();
-     for (i = 0; i < 128; ++i)
-         if (!dyn_tables[i].used) {
--            dyn_tables[i] = (dyn_table_t){ table, count, base, 0, 0, 0, 0, 1 };
-+            dyn_tables[i] = (dyn_table_t){ table, count, base, 0, 0, 0, 0, 1, 0 };
-             dyn_release();
-             return TRUE;
-         }
-@@ -74,7 +75,7 @@ SHZ_EXPORT BOOLEAN __cdecl RtlInstallFunctionTableCallback(DWORD64 identifier, D
-     dyn_acquire();
-     for (i = 0; i < 128; ++i)
-         if (!dyn_tables[i].used) {
--            dyn_tables[i] = (dyn_table_t){ 0, 0, base, length, callback, context, identifier, 1 };
-+            dyn_tables[i] = (dyn_table_t){ 0, 0, base, length, callback, context, identifier, 1, 0 };
-             dyn_release();
-             return TRUE;
-         }
-@@ -94,6 +95,44 @@ SHZ_EXPORT BOOLEAN __cdecl RtlDeleteFunctionTable(PRUNTIME_FUNCTION table)
-     return found;
+diff --git a/shizukudos/win64/kernel32/k32_procinfo.c b/shizukudos/win64/kernel32/k32_procinfo.c
+index a462382..d20f8a7 100644
+--- a/shizukudos/win64/kernel32/k32_procinfo.c
++++ b/shizukudos/win64/kernel32/k32_procinfo.c
+@@ -745,8 +745,7 @@ K32API BOOL WINAPI Wow64GetThreadContext(HANDLE h, PWOW64_CONTEXT ctx)
+ 
+ K32API BOOL WINAPI IsThreadAFiber(void)
+ {
+-    /* TEB.SameTebFlags (0x17ee) bit 2 is HasFiberData. ConvertThreadToFiber does not exist in this kernel32, so it is never set,
+-     * but the flag is what Windows reports and what is read here. */
++    /* TEB.SameTebFlags (0x17ee) bit 2 is HasFiberData; ConvertThreadToFiber (k32_fiber.c) sets it and ConvertFiberToThread clears it. */
+     return (*(const USHORT *)(shz_teb() + 0x17ee) & 4) != 0;
  }
  
-+/* Growable tables (Windows 8+; V8 registers the unwind info of its code range with them): the caller owns a RUNTIME_FUNCTION
-+ * array sorted by address, registered for [RangeBase, RangeEnd) with `count` valid entries out of `max`, and raises the count
-+ * with RtlGrowFunctionTable as it appends entries. RUNTIME_FUNCTION RVAs are from RangeBase. They live in the same registry
-+ * as RtlAddFunctionTable tables, so RtlLookupFunctionEntry and the unwinder find them with no other change; the handle
-+ * returned through DynamicTable is the address of the registry slot. */
-+SHZ_EXPORT DWORD NTAPI RtlAddGrowableFunctionTable(PVOID *dynamic_table, PRUNTIME_FUNCTION table, DWORD count, DWORD max,
-+                                                      ULONG_PTR range_base, ULONG_PTR range_end)
+diff --git a/shizukudos/win64/tests/t_k32_fiber.c b/shizukudos/win64/tests/t_k32_fiber.c
+new file mode 100644
+index 0000000..0c51727
+--- /dev/null
++++ b/shizukudos/win64/tests/t_k32_fiber.c
+@@ -0,0 +1,157 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * Fibers (kernel32: ConvertThreadToFiber(Ex), ConvertFiberToThread, CreateFiber(Ex), DeleteFiber, SwitchToFiber). The expected
++ * values come from the documented behaviour: the order in which control passes, GetFiberData/GetCurrentFiber, the error codes
++ * (ERROR_ALREADY_FIBER, ERROR_ALREADY_THREAD), a separate stack and fiber-local storage per fiber, that a fiber routine which returns
++ * ends the thread, and that the registers a called function must preserve (rbx, rbp, rdi, rsi, r12-r15, xmm6-xmm15) survive a
++ * switch in both directions - checked with routines written in assembly that load known values, switch, and compare.
++ */
++#include "k32test.h"
++
++static LPVOID g_main, g_a, g_b;
++static int g_log[16], g_nlog;
++static volatile LONG g_after_switch, g_thread_fiber_ran;
++static DWORD g_fls;
++static DWORD64 g_reg_fail_fiber;
++
++/* GetCurrentFiber() / GetFiberData() of the SDK read gs:[0x20] (NtTib.FiberData) and the value it points to; written out here because
++ * GCC rejects the SDK's __readgsqword(0x20) under -Werror=array-bounds. */
++static LPVOID cur_fiber(void) { LPVOID v; __asm__ volatile("movq %%gs:0x20, %0" : "=r"(v)); return v; }
++static LPVOID fiber_data(void) { return *(LPVOID *)cur_fiber(); }
++
++static void note(int v) { if (g_nlog < 16) g_log[g_nlog++] = v; }
++
++/* check_regs(fiber): loads known values into the preserved registers, switches to `fiber`, compares them when control returns;
++ * returns 0 when all are intact, else a bit per register that changed. trash_and_switch(fiber): the same from the other side with
++ * different values (the fiber loads its own values, switches back to `fiber`, and compares them when it is resumed). */
++DWORD64 check_regs(LPVOID fiber);
++DWORD64 trash_and_switch(LPVOID fiber);
++#define REG_BODY(name, K1, K2, K3, K4, K5, K6, K7, X0, X1) \
++    __asm__(".text\n.globl " #name "\n" #name ":\n" \
++        "  pushq %rbx\n  pushq %rbp\n  pushq %rdi\n  pushq %rsi\n  pushq %r12\n  pushq %r13\n  pushq %r14\n  pushq %r15\n" \
++        "  subq $0x48, %rsp\n  movups %xmm6, 0x20(%rsp)\n  movups %xmm15, 0x30(%rsp)\n" \
++        "  movq $" #K1 ", %rbx\n  movq $" #K2 ", %rbp\n  movq $" #K3 ", %rdi\n  movq $" #K4 ", %rsi\n" \
++        "  movq $" #K5 ", %r12\n  movq $" #K6 ", %r13\n  movq $" #K7 ", %r14\n  movq $" #K1 ", %r15\n" \
++        "  movq $" #X0 ", %rax\n  movq %rax, 0(%rsp)\n  movq %rax, 8(%rsp)\n  movups 0(%rsp), %xmm6\n" \
++        "  movq $" #X1 ", %rax\n  movq %rax, 0(%rsp)\n  movq %rax, 8(%rsp)\n  movups 0(%rsp), %xmm15\n" \
++        "  subq $0x20, %rsp\n  call SwitchToFiber\n  addq $0x20, %rsp\n" \
++        "  xorl %eax, %eax\n" \
++        "  movq $" #K1 ", %rcx\n  cmpq %rcx, %rbx\n  je 1f\n  orq $1, %rax\n1:\n" \
++        "  movq $" #K2 ", %rcx\n  cmpq %rcx, %rbp\n  je 2f\n  orq $2, %rax\n2:\n" \
++        "  movq $" #K3 ", %rcx\n  cmpq %rcx, %rdi\n  je 3f\n  orq $4, %rax\n3:\n" \
++        "  movq $" #K4 ", %rcx\n  cmpq %rcx, %rsi\n  je 4f\n  orq $8, %rax\n4:\n" \
++        "  movq $" #K5 ", %rcx\n  cmpq %rcx, %r12\n  je 5f\n  orq $16, %rax\n5:\n" \
++        "  movq $" #K6 ", %rcx\n  cmpq %rcx, %r13\n  je 6f\n  orq $32, %rax\n6:\n" \
++        "  movq $" #K7 ", %rcx\n  cmpq %rcx, %r14\n  je 7f\n  orq $64, %rax\n7:\n" \
++        "  movq $" #K1 ", %rcx\n  cmpq %rcx, %r15\n  je 8f\n  orq $128, %rax\n8:\n" \
++        "  movups %xmm6, 0(%rsp)\n  movq $" #X0 ", %rcx\n  cmpq %rcx, 0(%rsp)\n  jne 9f\n  cmpq %rcx, 8(%rsp)\n  je 10f\n9:\n  orq $256, %rax\n10:\n" \
++        "  movups %xmm15, 0(%rsp)\n  movq $" #X1 ", %rcx\n  cmpq %rcx, 0(%rsp)\n  jne 11f\n  cmpq %rcx, 8(%rsp)\n  je 12f\n11:\n  orq $512, %rax\n12:\n" \
++        "  movups 0x20(%rsp), %xmm6\n  movups 0x30(%rsp), %xmm15\n  addq $0x48, %rsp\n" \
++        "  popq %r15\n  popq %r14\n  popq %r13\n  popq %r12\n  popq %rsi\n  popq %rdi\n  popq %rbp\n  popq %rbx\n  ret\n");
++REG_BODY(check_regs, 0x1111111, 0x2222222, 0x3333333, 0x4444444, 0x5555555, 0x6666666, 0x7777777, 0x1234567, 0x7654321)
++REG_BODY(trash_and_switch, 0x0a0a0a0, 0x0b0b0b0, 0x0c0c0c0, 0x0d0d0d0, 0x0e0e0e0, 0x0f0f0f0, 0x0101010, 0x0abcdef, 0x0fedcba)
++
++static VOID WINAPI fiber_a(LPVOID p)
 +{
-+    unsigned i;
-+    if (!dynamic_table || count > max || range_end <= range_base || (count && !table)) return 0xC000000DUL;        /* STATUS_INVALID_PARAMETER */
-+    dyn_acquire();
-+    for (i = 0; i < 128; ++i)
-+        if (!dyn_tables[i].used) {
-+            dyn_tables[i] = (dyn_table_t){ table, count, range_base, range_end - range_base, 0, 0, 0, 1, 1 };
-+            *dynamic_table = &dyn_tables[i];
-+            dyn_release();
-+            return 0;                /* STATUS_SUCCESS */
-+        }
-+    dyn_release();
-+    return 0xC0000017UL;         /* STATUS_NO_MEMORY */
++    int local = 0x5a5a;
++    note(100 + (int)(ULONG_PTR)p);
++    SwitchToFiber(g_main);                                     /* 1: back to the main fiber */
++    note(200);
++    CHECK(local == 0x5a5a, "a local of the fiber survives a switch (its stack is its own)");
++    CHECK(fiber_data() == p && cur_fiber() == g_a, "the FiberData of the TEB (GetFiberData / GetCurrentFiber) inside the fiber");
++    CHECK(IsThreadAFiber(), "IsThreadAFiber inside a fiber");
++    CHECK(FlsGetValue(g_fls) == NULL, "a new fiber starts with empty fiber-local storage");
++    FlsSetValue(g_fls, (PVOID)0xaaa);
++    SwitchToFiber(g_main);                                     /* 2 */
++    CHECK(FlsGetValue(g_fls) == (PVOID)0xaaa, "the fiber's own FLS value is back after the main fiber ran");
++    g_reg_fail_fiber = trash_and_switch(g_main);               /* 3: registers of the fiber across a switch (run by main in check_regs) */
++    note(300);
++    SwitchToFiber(g_main);                                     /* 4 */
++    note(999);                                                 /* never resumed */
 +}
 +
-+SHZ_EXPORT VOID NTAPI RtlGrowFunctionTable(PVOID dynamic_table, DWORD new_count)
++static VOID WINAPI fiber_b(LPVOID p)
 +{
-+    dyn_table_t *t = dynamic_table;
-+    dyn_acquire();
-+    if (t >= dyn_tables && t < dyn_tables + 128 && t->used && t->growable && new_count > t->count) t->count = new_count;
-+    dyn_release();
++    ULONG_PTR low = 0, high = 0, here = (ULONG_PTR)&low;
++    note(400);
++    GetCurrentThreadStackLimits(&low, &high);
++    CHECKV(here >= low && here < high, "GetCurrentThreadStackLimits inside a fiber bounds a local of that fiber", "%p not in [%p, %p)", (void *)here, (void *)low, (void *)high);
++    SwitchToFiber(g_a);                                        /* a fiber created by another fiber resumes the other fiber */
++    note(999);
 +}
 +
-+SHZ_EXPORT VOID NTAPI RtlDeleteGrowableFunctionTable(PVOID dynamic_table)
++static VOID WINAPI ending_fiber(LPVOID p)
 +{
-+    dyn_table_t *t = dynamic_table;
-+    dyn_acquire();
-+    if (t >= dyn_tables && t < dyn_tables + 128 && t->used && t->growable) t->used = 0;
-+    dyn_release();
++    InterlockedExchange(&g_thread_fiber_ran, 7);
++    (void)p;                                                   /* returns: the thread must end here */
 +}
 +
- static PRUNTIME_FUNCTION search_table(PRUNTIME_FUNCTION t, DWORD n, DWORD64 base, DWORD64 pc)
- {
-     long lo = 0, hi = (long)n - 1;
++static DWORD WINAPI thread_with_fibers(LPVOID p)
++{
++    LPVOID self = ConvertThreadToFiber(NULL), f = CreateFiber(0, ending_fiber, NULL);
++    (void)p;
++    if (self && f) SwitchToFiber(f);
++    InterlockedExchange(&g_after_switch, 1);                   /* must not run */
++    return 5;
++}
++
++int main(void)
++{
++    ULONG_PTR low0 = 0, high0 = 0, low1 = 0, high1 = 0;
++    DWORD64 bits;
++    HANDLE th;
++    DWORD code = 0xdead;
++    int i;
++    CHECK(!IsThreadAFiber(), "a thread is not a fiber at the start");
++    SetLastError(0);
++    CHECK(CreateFiber(0, NULL, NULL) == NULL && GetLastError() == ERROR_INVALID_PARAMETER, "CreateFiber without a routine fails with ERROR_INVALID_PARAMETER");
++    SetLastError(0);
++    CHECK(!ConvertFiberToThread() && GetLastError() == ERROR_ALREADY_THREAD, "ConvertFiberToThread on a plain thread fails with ERROR_ALREADY_THREAD");
++    g_main = ConvertThreadToFiber((LPVOID)0x1234);
++    CHECK(g_main != NULL, "ConvertThreadToFiber");
++    CHECK(IsThreadAFiber() && cur_fiber() == g_main && fiber_data() == (LPVOID)0x1234, "IsThreadAFiber and the TEB's fiber and data after the conversion");
++    SetLastError(0);
++    CHECK(ConvertThreadToFiber(NULL) == NULL && GetLastError() == ERROR_ALREADY_FIBER, "a second ConvertThreadToFiber fails with ERROR_ALREADY_FIBER");
++    GetCurrentThreadStackLimits(&low0, &high0);
++    g_fls = FlsAlloc(NULL);
++    CHECK(g_fls != FLS_OUT_OF_INDEXES, "FlsAlloc");
++    FlsSetValue(g_fls, (PVOID)0x111);
++
++    g_a = CreateFiber(64 * 1024, fiber_a, (LPVOID)7);
++    g_b = CreateFiberEx(32 * 1024, 128 * 1024, 0, fiber_b, NULL);
++    CHECK(g_a != NULL && g_b != NULL && g_a != g_b, "CreateFiber / CreateFiberEx");
++    SwitchToFiber(g_a);                                        /* a runs up to its first switch */
++    note(1);
++    SwitchToFiber(g_a);                                        /* 200 ... second switch */
++    note(2);
++    CHECK(FlsGetValue(g_fls) == (PVOID)0x111, "the main fiber's FLS value is unchanged by what the other fiber stored");
++    CHECK(cur_fiber() == g_main, "the main fiber is current again");
++    GetCurrentThreadStackLimits(&low1, &high1);
++    CHECK(low0 == low1 && high0 == high1, "the thread's stack bounds are restored when the main fiber runs again");
++    bits = check_regs(g_a);                                    /* the fiber's third switch: both sides compare their registers */
++    CHECKV(bits == 0 && g_reg_fail_fiber == 0, "rbx, rbp, rdi, rsi, r12-r15, xmm6 and xmm15 survive a switch in both directions", "main side bits %llx, fiber side bits %llx", (unsigned long long)bits, (unsigned long long)g_reg_fail_fiber);
++    note(3);
++    SwitchToFiber(g_b);                                        /* b checks its stack bounds, switches to a (resumes after the trash_and_switch), a notes 300 and returns to main */
++    note(4);
++    {
++        static const int want[] = {107, 1, 200, 2, 3, 400, 300, 4};
++        int ok = g_nlog == 8;
++        for (i = 0; ok && i < 8; ++i) if (g_log[i] != want[i]) ok = 0;
++        CHECKV(ok, "control passes in the order the switches say", "%d entries: %d %d %d %d %d %d %d %d", g_nlog, g_log[0], g_log[1], g_log[2], g_log[3], g_log[4], g_log[5], g_log[6], g_log[7]);
++    }
++    DeleteFiber(g_a);
++    DeleteFiber(g_b);
++    CHECK(TRUE, "DeleteFiber of fibers that are not running");
++
++    th = CreateThread(NULL, 0, thread_with_fibers, NULL, 0, NULL);
++    CHECK(th != NULL, "CreateThread for the fiber routine that returns");
++    CHECK(th && WaitForSingleObject(th, 20000) == WAIT_OBJECT_0, "the thread ends when its fiber routine returns");
++    CHECK(th && GetExitCodeThread(th, &code) && code == 0, "with exit code 0");
++    CHECK(g_thread_fiber_ran == 7 && g_after_switch == 0, "the code after the switch in the thread never ran");
++    if (th) CloseHandle(th);
++
++    CHECK(ConvertFiberToThread(), "ConvertFiberToThread");
++    CHECK(!IsThreadAFiber(), "IsThreadAFiber is false again");
++    SetLastError(0);
++    CHECK(!ConvertFiberToThread() && GetLastError() == ERROR_ALREADY_THREAD, "ConvertFiberToThread twice fails with ERROR_ALREADY_THREAD");
++    return k32t_finish("t_k32_fiber");
++}

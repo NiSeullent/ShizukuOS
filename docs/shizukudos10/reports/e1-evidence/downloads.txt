@@ -1,0 +1,7 @@
+# E1 download attempts through the session proxy, 2026-09-30, one command per URL: curl -sS -o /dev/null --max-time 25 <url>
+# The proxy refuses the CONNECT tunnel to each of these hosts (the same refusal appeared with curl -D - as "HTTP/1.1 403 Forbidden").
+https://update.code.visualstudio.com/api/update/win32-x64-archive/stable/latest -> curl: (56) CONNECT tunnel failed, response 403
+https://code.visualstudio.com/sha/download?build=stable&os=win32-x64-archive -> curl: (56) CONNECT tunnel failed, response 403
+https://discord.com/api/download?platform=win -> curl: (56) CONNECT tunnel failed, response 403
+https://dl.discordapp.net/distro/app/stable/win/x64/1.0.9001/DiscordSetup.exe -> curl: (56) CONNECT tunnel failed, response 403
+https://stable.dl2.discordapp.net/distro/app/stable/win/x86/RELEASES -> curl: (56) CONNECT tunnel failed, response 403

@@ -1,0 +1,250 @@
+diff --git a/shizukudos/win64/dlls/d3d11/d3d11.c b/shizukudos/win64/dlls/d3d11/d3d11.c
+new file mode 100644
+index 0000000..6947958
+--- /dev/null
++++ b/shizukudos/win64/dlls/d3d11/d3d11.c
+@@ -0,0 +1,25 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * d3d11.dll - "no Direct3D 11 driver": device creation fails with DXGI_ERROR_UNSUPPORTED and leaves the out
++ * parameters NULL (see dxgi.dll). */
++#include "nt.h"
++
++#define DXGI_ERROR_UNSUPPORTED_ ((HRESULT)0x887A0004)
++
++DLLAPI HRESULT WINAPI D3D11CreateDevice(void *adapter, UINT driver_type, HMODULE software, UINT flags, const UINT *levels,
++                                        UINT n_levels, UINT sdk_version, void **device, UINT *level, void **context)
++{
++    (void)adapter; (void)driver_type; (void)software; (void)flags; (void)levels; (void)n_levels; (void)sdk_version;
++    if (device) *device = 0;
++    if (level) *level = 0;
++    if (context) *context = 0;
++    return DXGI_ERROR_UNSUPPORTED_;
++}
++
++DLLAPI HRESULT WINAPI D3D11CreateDeviceAndSwapChain(void *adapter, UINT driver_type, HMODULE software, UINT flags, const UINT *levels,
++                                                    UINT n_levels, UINT sdk_version, const void *swap_desc, void **swap_chain,
++                                                    void **device, UINT *level, void **context)
++{
++    (void)swap_desc;
++    if (swap_chain) *swap_chain = 0;
++    return D3D11CreateDevice(adapter, driver_type, software, flags, levels, n_levels, sdk_version, device, level, context);
++}
+diff --git a/shizukudos/win64/dlls/d3d12/d3d12.c b/shizukudos/win64/dlls/d3d12/d3d12.c
+new file mode 100644
+index 0000000..436cd01
+--- /dev/null
++++ b/shizukudos/win64/dlls/d3d12/d3d12.c
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * d3d12.dll - "no Direct3D 12 driver": D3D12CreateDevice fails with DXGI_ERROR_UNSUPPORTED (see dxgi.dll). The
++ * program in this repository's test set that imports d3d12.dll by ordinal (Chromium/Electron, ordinal 101) only
++ * needs the import to resolve; the function pinned at 101 here is a stub with that same failure, and which Windows
++ * export really sits at 101 has not been verified. */
++#include "nt.h"
++
++#define DXGI_ERROR_UNSUPPORTED_ ((HRESULT)0x887A0004)
++
++DLLAPI HRESULT WINAPI D3D12CreateDevice(void *adapter, UINT min_level, const void *riid, void **device)
++{
++    (void)adapter; (void)min_level; (void)riid;
++    if (device) *device = 0;
++    return DXGI_ERROR_UNSUPPORTED_;
++}
++
++DLLAPI HRESULT WINAPI D3D12GetDebugInterface(const void *riid, void **debug)
++{
++    (void)riid;
++    if (debug) *debug = 0;
++    return DXGI_ERROR_UNSUPPORTED_;
++}
++
++DLLAPI HRESULT WINAPI D3D12UnverifiedOrdinal101(void *a, void *b, void *c, void *d)
++{
++    (void)a; (void)b; (void)c; (void)d;
++    return DXGI_ERROR_UNSUPPORTED_;
++}
+diff --git a/shizukudos/win64/dlls/d3d12/module.json b/shizukudos/win64/dlls/d3d12/module.json
+new file mode 100644
+index 0000000..db13a0c
+--- /dev/null
++++ b/shizukudos/win64/dlls/d3d12/module.json
+@@ -0,0 +1 @@
++{"description": "Direct3D 12 (no driver: device creation fails)", "ordinals": {"D3D12UnverifiedOrdinal101": 101}}
+diff --git a/shizukudos/win64/dlls/dcomp/dcomp.c b/shizukudos/win64/dlls/dcomp/dcomp.c
+new file mode 100644
+index 0000000..c01c597
+--- /dev/null
++++ b/shizukudos/win64/dlls/dcomp/dcomp.c
+@@ -0,0 +1,20 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * dcomp.dll - "no DirectComposition": the device and surface-handle factories fail with E_NOTIMPL, leaving the out
++ * parameters NULL, so a caller that probes for DirectComposition (Chromium's compositor) sees it is unavailable. */
++#include "nt.h"
++
++#define E_NOTIMPL_ ((HRESULT)0x80004001)
++
++DLLAPI HRESULT WINAPI DCompositionCreateDevice(void *dxgi_device, const void *riid, void **device)
++{
++    (void)dxgi_device; (void)riid;
++    if (device) *device = 0;
++    return E_NOTIMPL_;
++}
++
++DLLAPI HRESULT WINAPI DCompositionCreateSurfaceHandle(DWORD access, void *attrs, HANDLE *handle)
++{
++    (void)access; (void)attrs;
++    if (handle) *handle = 0;
++    return E_NOTIMPL_;
++}
+diff --git a/shizukudos/win64/dlls/dxcore/dxcore.c b/shizukudos/win64/dlls/dxcore/dxcore.c
+new file mode 100644
+index 0000000..656c686
+--- /dev/null
++++ b/shizukudos/win64/dlls/dxcore/dxcore.c
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * dxcore.dll - "no DXCore adapter": the adapter-factory entry point fails with E_NOTIMPL and leaves the out parameter NULL. */
++#include "nt.h"
++
++#define E_NOTIMPL_ ((HRESULT)0x80004001)
++
++DLLAPI HRESULT WINAPI DXCoreCreateAdapterFactory(const void *riid, void **factory)
++{
++    (void)riid;
++    if (factory) *factory = 0;
++    return E_NOTIMPL_;
++}
+diff --git a/shizukudos/win64/dlls/dxgi/dxgi.c b/shizukudos/win64/dlls/dxgi/dxgi.c
+new file mode 100644
+index 0000000..8b16c2a
+--- /dev/null
++++ b/shizukudos/win64/dlls/dxgi/dxgi.c
+@@ -0,0 +1,36 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * dxgi.dll - "no DXGI adapter" for a machine without a Direct3D driver: the factory entry points fail with
++ * DXGI_ERROR_UNSUPPORTED (what Windows returns when no adapter driver is installed), so a caller that probes for
++ * hardware (Chromium's GPU process, Dawn, ANGLE) takes its software path instead of dying in the delay-load hook
++ * because the DLL is missing. Nothing here creates an object. */
++#include "nt.h"
++
++#define DXGI_ERROR_UNSUPPORTED_ ((HRESULT)0x887A0004)
++
++DLLAPI HRESULT WINAPI CreateDXGIFactory(const void *riid, void **factory)
++{
++    (void)riid;
++    if (factory) *factory = 0;
++    return DXGI_ERROR_UNSUPPORTED_;
++}
++
++DLLAPI HRESULT WINAPI CreateDXGIFactory1(const void *riid, void **factory)
++{
++    (void)riid;
++    if (factory) *factory = 0;
++    return DXGI_ERROR_UNSUPPORTED_;
++}
++
++DLLAPI HRESULT WINAPI CreateDXGIFactory2(UINT flags, const void *riid, void **factory)
++{
++    (void)flags; (void)riid;
++    if (factory) *factory = 0;
++    return DXGI_ERROR_UNSUPPORTED_;
++}
++
++DLLAPI HRESULT WINAPI DXGIGetDebugInterface1(UINT flags, const void *riid, void **debug)
++{
++    (void)flags; (void)riid;
++    if (debug) *debug = 0;
++    return DXGI_ERROR_UNSUPPORTED_;
++}
+diff --git a/shizukudos/win64/dlls/oleacc/oleacc.c b/shizukudos/win64/dlls/oleacc/oleacc.c
+new file mode 100644
+index 0000000..78d8e44
+--- /dev/null
++++ b/shizukudos/win64/dlls/oleacc/oleacc.c
+@@ -0,0 +1,42 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * oleacc.dll - Microsoft Active Accessibility with no accessibility support: every entry point fails with E_NOTIMPL and
++ * leaves its out parameters NULL/zero. A program that only offers an IAccessible when an accessibility client asks for one
++ * (Chromium answers WM_GETOBJECT through LresultFromObject) sees "no accessible object", which is what happens on a
++ * Windows without a screen reader; the DLL has to exist because Chromium's delay-load hook makes a missing one fatal. */
++#include "nt.h"
++
++#define E_NOTIMPL_ ((HRESULT)0x80004001)
++
++DLLAPI LRESULT WINAPI LresultFromObject(const void *riid, WPARAM wparam, void *unknown)
++{
++    (void)riid; (void)wparam; (void)unknown;
++    return (LRESULT)E_NOTIMPL_;
++}
++
++DLLAPI HRESULT WINAPI AccessibleObjectFromWindow(HWND hwnd, DWORD object_id, const void *riid, void **out)
++{
++    (void)hwnd; (void)object_id; (void)riid;
++    if (out) *out = 0;
++    return E_NOTIMPL_;
++}
++
++DLLAPI HRESULT WINAPI AccessibleChildren(void *container, LONG first, LONG count, void *children, LONG *obtained)
++{
++    (void)container; (void)first; (void)count; (void)children;
++    if (obtained) *obtained = 0;
++    return E_NOTIMPL_;
++}
++
++DLLAPI HRESULT WINAPI CreateStdAccessibleObject(HWND hwnd, LONG object_id, const void *riid, void **out)
++{
++    (void)hwnd; (void)object_id; (void)riid;
++    if (out) *out = 0;
++    return E_NOTIMPL_;
++}
++
++DLLAPI HRESULT WINAPI WindowFromAccessibleObject(void *accessible, HWND *hwnd)
++{
++    (void)accessible;
++    if (hwnd) *hwnd = 0;
++    return E_NOTIMPL_;
++}
+diff --git a/shizukudos/win64/dlls/uxtheme/uxtheme.c b/shizukudos/win64/dlls/uxtheme/uxtheme.c
+new file mode 100644
+index 0000000..0a13f41
+--- /dev/null
++++ b/shizukudos/win64/dlls/uxtheme/uxtheme.c
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * uxtheme.dll - visual styles turned off, the state of a Windows session on the classic theme: OpenThemeData returns NULL
++ * (the caller then draws with plain GDI), IsThemeActive/IsAppThemed are FALSE, and every function that takes a theme handle
++ * fails with E_HANDLE (there is no valid handle). Only the functions Chromium's views layer delay-loads are here. */
++#include "nt.h"
++
++#define E_HANDLE_ ((HRESULT)0x80070006)
++
++DLLAPI HANDLE WINAPI OpenThemeData(HWND hwnd, LPCWSTR classes)
++{
++    (void)hwnd; (void)classes;
++    SetLastError(ERROR_NOT_SUPPORTED);
++    return 0;
++}
++
++DLLAPI HRESULT WINAPI CloseThemeData(HANDLE theme) { (void)theme; return E_HANDLE_; }
++
++DLLAPI HRESULT WINAPI DrawThemeBackground(HANDLE theme, HDC dc, int part, int state, const RECT *rect, const RECT *clip)
++{
++    (void)theme; (void)dc; (void)part; (void)state; (void)rect; (void)clip;
++    return E_HANDLE_;
++}
++
++DLLAPI HRESULT WINAPI GetThemeBackgroundContentRect(HANDLE theme, HDC dc, int part, int state, const RECT *bounds, RECT *content)
++{
++    (void)theme; (void)dc; (void)part; (void)state; (void)bounds; (void)content;
++    return E_HANDLE_;
++}
++
++DLLAPI HRESULT WINAPI GetThemePartSize(HANDLE theme, HDC dc, int part, int state, const RECT *rect, int size_kind, SIZE *size)
++{
++    (void)theme; (void)dc; (void)part; (void)state; (void)rect; (void)size_kind;
++    if (size) { size->cx = 0; size->cy = 0; }
++    return E_HANDLE_;
++}
++
++DLLAPI BOOL WINAPI IsThemeActive(void) { return FALSE; }
++DLLAPI BOOL WINAPI IsAppThemed(void) { return FALSE; }
