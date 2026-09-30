@@ -350,6 +350,17 @@
       "build": "shizukudos/win64/webkit/deps/build.py: CMake (agent W3)",
       "patches": []
     },
+    "icu": {
+      "repository": "https://github.com/unicode-org/icu.git",
+      "ref": "release-77-1",
+      "commit": "457157a92aa053e632cc7fcfd0e12f8a943b2d11",
+      "license": "Unicode-3.0 AND ICU",
+      "license_files": ["icu4c/LICENSE"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: icuuc77/icuin77/icudt77 DLLs (data as a library)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: icu4c/source configure: host build for the data tools, then --host=x86_64-w64-mingw32 --with-cross-build (agent W3)",
+      "patches": []
+    },
     "harfbuzz": {
       "repository": "https://github.com/harfbuzz/harfbuzz.git",
       "ref": "11.5.1",
@@ -423,7 +434,7 @@
       "sparse_paths": ["/*", "!/*/", "/Source/CMakeLists.txt", "/Source/cmake/", "/Source/WTF/", "/Source/JavaScriptCore/",
                        "/Source/bmalloc/", "/Tools/Scripts/*", "!/Tools/Scripts/*/", "/JSTests/stress/"],
       "license": "BSD-2-Clause AND BSD-3-Clause AND LGPL-2.0-or-later AND LGPL-2.1-or-later AND (MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later) AND ISC AND MIT AND Apache-2.0 AND BSL-1.0 AND Unicode-3.0",
-      "license_detail": "Per file, from the pinned tree (shizukudos/win64/webkit/licscan.py; counts in docs/shizukudos10/WEBKIT.md): WTF 698 BSD-2-Clause, 80 BSD-3-Clause, 97 LGPL-2.0-or-later, 1 LGPL-2.1-or-later+BSD-3-Clause (DateMath.cpp), 4 MPL-1.1/GPL-2.0/LGPL-2.1 tri-licence (DateMath.h and relatives), 197 ICU headers (Unicode-3.0), and small third-party files (fast_float Apache-2.0/MIT/BSL-1.0, dragonbox Apache-2.0 WITH LLVM-exception or BSL-1.0, simde MIT, CryptographicallyRandomNumber ISC); JavaScriptCore 3266 BSD-2-Clause, 103 BSD-3-Clause, 188 LGPL-2.0-or-later, 1 LGPL-2.1-or-later+BSD-3-Clause (JSDateMath.cpp), a few MIT/ISC files; bmalloc 622 BSD-2-Clause, 5 BSD-3-Clause, 1 ISC, mimalloc MIT (not built: USE_SYSTEM_MALLOC). The LGPL-2.0-or-later files (KDE heritage: lexer, parser, runtime objects, HashTable) make the built JavaScriptCore library LGPL-2.0-or-later as a whole.",
+      "license_detail": "Per file, from the pinned tree (shizukudos/win64/webkit/licscan.py; counts in docs/shizukudos10/WEBKIT.md): WTF 698 BSD-2-Clause, 80 BSD-3-Clause, 97 LGPL-2.0-or-later, 1 LGPL-2.1-or-later+BSD-3-Clause (DateMath.cpp), 4 MPL-1.1/GPL-2.0/LGPL-2.1 tri-licence (DateMath.h and relatives), 197 ICU headers (Unicode-3.0), and small third-party files (fast_float Apache-2.0/MIT/BSL-1.0, dragonbox Apache-2.0 WITH LLVM-exception or BSL-1.0, simde MIT, CryptographicallyRandomNumber ISC); JavaScriptCore 3266 BSD-2-Clause, 103 BSD-3-Clause, 188 LGPL-2.0-or-later, 1 LGPL-2.1-or-later+BSD-3-Clause (JSDateMath.cpp), a few MIT/ISC files; bmalloc 622 BSD-2-Clause, 5 BSD-3-Clause, 1 ISC, mimalloc MIT (built: bmalloc on Windows requires mimalloc). The LGPL-2.0-or-later files (KDE heritage: lexer, parser, runtime objects, HashTable) make the built JavaScriptCore library LGPL-2.0-or-later as a whole.",
       "license_files": ["Source/JavaScriptCore/COPYING.LIB", "Source/WTF/LICENSE-LLVM.txt", "Source/WTF/LICENSE-dragonbox.txt",
                         "Source/WTF/LICENSE-libc++.txt", "Source/WTF/LICENSE-simde.txt", "Source/WTF/icu/LICENSE",
                         "Source/WTF/wtf/fast_float/LICENSE", "Source/WTF/wtf/simdutf/LICENSE-simdutf.txt",
@@ -433,19 +444,6 @@
       "build": "partial, sparse fetch of the pinned commit; CMake + Ninja, clang --target=x86_64-w64-windows-gnu (shizukudos/win64/webkit/build.py, docs/shizukudos10/WEBKIT.md)",
       "fetched_by": "shizukudos/win64/webkit/build.py",
       "patches": ["shizukudos/win64/webkit/patches/0001-mingw-clang-portability.patch"]
-    },
-    "icu": {
-      "repository": "https://github.com/unicode-org/icu.git",
-      "ref": "release-78.3",
-      "commit": "21d1eb0f306e1141c10931e914dfc038c06121da",
-      "sparse_paths": ["/*", "!/*/", "/icu4c/"],
-      "license": "Unicode-3.0",
-      "license_files": ["icu4c/LICENSE"],
-      "execution_mode": "static libraries (common, i18n, full data) linked into JavaScriptCore.dll for Win64; host build only for the data tools",
-      "used_by": ["shizukudos/win64/webkit"],
-      "fetched_by": "shizukudos/win64/webkit/build.py",
-      "build": "partial, sparse fetch (icu4c only); autoconf, host build then --host=x86_64-w64-mingw32 --with-cross-build with clang, --enable-static --with-data-packaging=static",
-      "patches": []
     }
   },
   "tools": {

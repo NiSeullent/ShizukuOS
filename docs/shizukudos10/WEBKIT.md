@@ -13,7 +13,8 @@ Evidence kinds follow `BASELINE.md`. Everything marked GUEST_RUN ran under QEMU 
 | name | commit | fetch | licence |
 |---|---|---|---|
 | `webkit` | `5c289247285a71147ba4e7fd213394d68dc44da9` (main, 2026-09-30) | shallow, `--filter=blob:none`, sparse: top-level files, `Source/CMakeLists.txt`, `Source/cmake/`, `Source/WTF/`, `Source/JavaScriptCore/`, `Source/bmalloc/`, the files (not subdirectories) of `Tools/Scripts/` (`hmaptool`, `webkit-build-directory`, used by the CMake build), `JSTests/stress/` | see below |
-| `icu` | `21d1eb0f306e1141c10931e914dfc038c06121da` (tag `release-78.3`) | shallow, sparse: `icu4c/` | Unicode-3.0 |
+| `icu` | `457157a92aa053e632cc7fcfd0e12f8a943b2d11` (tag `release-77-1`; the pin W3 made for WebCore's ICU, so JavaScriptCore and WebCore use one ICU) | shallow | Unicode-3.0 AND ICU |
+| `mingw-w64`, `llvm-project-runtimes` | `de62c283…` (v13.0.0), `c13b7485…` (llvmorg-18.1.3) | shallow (entries and `deps/toolchain.py` by W3) | ZPL-2.1 and others / Apache-2.0 WITH LLVM-exception |
 
 Nothing of either tree is committed here. Local changes to WebKit are `.patch` files under
 `shizukudos/win64/webkit/patches/`, listed in the manifest's `webkit.patches` and applied by `build.py` after the files
@@ -38,67 +39,61 @@ as a whole**; shipping it requires offering the corresponding source (the pinned
 
 ## 2. Toolchain (decided by experiment)
 
-**Decision: clang 18 `--target=x86_64-w64-windows-gnu` + mingw-w64 11 headers in UCRT mode + GCC 13's libstdc++ (the
-`win32` thread-model runtime of Ubuntu's `g++-mingw-w64-x86-64-win32`, linked statically) + lld, importing only from the
-Shizuku DLLs (`ucrtbase.dll`, `kernel32.dll`, `ntdll.dll`, ...).** The CMake toolchain file is
-`shizukudos/win64/webkit/toolchain-mingw-clang.cmake`.
+**Decision (revised 2026-09-30 ~09:50 UTC): the shared WebKit toolchain of `shizukudos/win64/webkit/deps/toolchain.py`
+— clang 18 for `x86_64-w64-mingw32`, a mingw-w64 v13 sysroot whose headers and CRT are built for the UCRT
+(`--with-default-msvcrt=ucrt`), compiler-rt builtins, and libc++/libc++abi/libunwind 18 built with that sysroot and
+shipped as `libc++.dll` and `libunwind.dll`.** It was written by agent W3 while this branch did not exist yet; W1 adopts
+it (verbatim, including its two llvm-project patches and the `shzucrt_fix` shim) so that JavaScriptCore and WebCore are
+built by one toolchain with one C++ runtime. This is candidate A of the task ("llvm-mingw style") as stated. The first
+decision (clang + Ubuntu's GCC 13 libstdc++, below) was withdrawn because the full JavaScriptCore link proved it wrong;
+the experiments that led to each decision are kept here.
 
 Requirements checked first: WebKit at the pinned commit requires GCC ≥ 13.1 or clang (it still supports clang 18 for
-the GTK/WPE ports, with a `__cpp_concepts` shim for libstdc++'s `<expected>`: `Source/cmake/WebKitCompilerFlags.cmake`).
-The container has clang 18.1.3, lld 18, mingw-w64 11.0.1 with GCC 13.2, CMake 3.28, Ninja 1.11.
+the GTK/WPE ports: `Source/cmake/WebKitCompilerFlags.cmake`). Container: clang 18.1.3, lld 18, CMake 3.28, Ninja 1.11,
+mingw-w64 11.0.1 with GCC 13.2 (Ubuntu packages; used only in the withdrawn variant).
 
 ### 2.1 Experiments
 
-The same C++ probe (`webkit/tests/probe_cxx.cpp`: `std::vector`/`std::map`/`std::string`, four `std::thread`s under a
+The C++ probe `webkit/tests/probe_cxx.cpp` (`std::vector`/`std::map`/`std::string`, four `std::thread`s under a
 `std::mutex` with an atomic counter, a `thread_local`, a thrown and caught `std::runtime_error`, `snprintf("%.3f")`; exit
 0 only if every value is right) was built each way and run in the guest with
-`python3 shizukudos/tests/run_k64_webkit.py probe --exe <exe> --expect "PROBE v=100"`. All probes are rebuilt by
-`python3 shizukudos/win64/webkit/build.py --probes` (`build/shizukudos/win64/webkit/out-probes/`), and every import of
-each is checked against the exports of the Shizuku DLLs by `webkit/importcheck.py` (API sets resolved with
-`kernel64/apiset_contracts.txt`).
+`python3 shizukudos/tests/run_k64_webkit.py probe --exe <exe> --expect "PROBE v=100"`. `build.py --probes` rebuilds the
+probes with the adopted toolchain (`build/shizukudos/win64/webkit/out-probes/`); every import is checked against the
+exports of the Shizuku DLLs by `webkit/importcheck.py` (API sets resolved with `kernel64/apiset_contracts.txt`).
 
-| # | stack | link | guest result |
-|---|---|---|---|
-| A1 | clang 18 gnu target + libstdc++ 13 (static) + mingw-w64 UCRT import library | imports only `ucrtbase`, `kernel32`, `ntdll`, `bcryptprimitives`; 0 missing after the glue below | **PASS** 6 of 7 runs (`PROBE v=100 m=100 sum=26 caught=1 sqrt=1.414 tl=5`, exit 0, 50 ms). One run (the first, while ICU and the gates were building in parallel) hung: a worker thread stayed runnable at its first store to its `thread_local` block for 300 s. Not reproduced in 6 reruns, 5 of them under the same host load; see `reports/W1.md` "Observed" |
-| A2 | GCC 13 mingw-w64 + libstdc++ (static), default libraries spelled out with `-lucrtbase` instead of GCC's `-lmsvcrt` | 0 missing after the glue | **PASS** |
-| A3 | clang gnu target, C, `__thread` in the main and a `CreateThread` thread (`probe_tls.c`) | 0 missing | **PASS** (native TLS through the PE TLS directory: the Kernel64 loader's per-thread array works) |
-| A4 | clang gnu target, `__try/__except` around a null store (`probe_seh.c`, `-fms-extensions`) | 0 missing | **FAIL, as a toolchain property:** clang 18 accepts `__try` on this target but emits no handler (the `main` unwind info has no handler flag; the disassembly is the plain store), so the access violation is unhandled (`c0000005`, process terminated). JavaScriptCore uses `__try` only in `jsc.cpp`'s crash-report wrapper, which the build disables |
-| B | clang `--target=x86_64-pc-windows-msvc` + microsoft/STL `main` (`f023531`, Apache-2.0 WITH LLVM-exception) against the Shizuku `ucrtbase`/`vcruntime140`/`msvcp140` | **does not compile**: `yvals_core.h:526: fatal error: 'vcruntime.h' file not found`. The STL headers include 60 headers they do not ship: `vcruntime.h`, `vcruntime_new.h`, `vcruntime_exception.h`, `vcruntime_typeinfo.h` (MSVC toolset) and `corecrt*.h`, `crtdbg.h`, `sal.h` and the C headers (Windows SDK UCRT) — all under Microsoft's licences, not open source and not in this container. The mingw-w64 headers are not a substitute (different `crtdefs`/`_CRT` machinery). Separately, the STL's out-of-line part is `msvcp140.dll` (and `msvcp140_1/_2/_atomic_wait`), of which the Shizuku `msvcp140` has 39 exports | not run |
+| # | stack | guest result |
+|---|---|---|
+| A1 (withdrawn) | clang 18 gnu target + Ubuntu's libstdc++ 13 (static) + mingw-w64 11 UCRT import library, CRT objects from Ubuntu's msvcrt build | probe **PASS** 6 of 7 runs; one run hung (a worker thread at its first `thread_local` store; reports/W1.md "Observed"). **But the full JavaScriptCore link failed** on three ABI mismatches of that libstdc++ with clang in UCRT mode: (1) `std::type_info::operator==` defined twice (GCC's mingw target predefines `__GXX_TYPEINFO_EQUALITY_INLINE=0`, clang does not); (2) `std::__once_call`/`__once_callable` undefined — libstdc++ was built with GCC's *emulated* TLS (`__emutls_v.*`), clang references native TLS symbols; (3) `std::codecvt<wchar_t,char,_Mbstatet>` undefined — under the UCRT headers `mbstate_t` is the `_Mbstatet` struct, libstdc++ was built with msvcrt's `int`, so the mangled names differ. (1) can be patched over; (2) and (3) are properties of that prebuilt library |
+| A2 (withdrawn) | GCC 13 mingw-w64 + libstdc++, default libraries spelled out with `-lucrtbase` | probe **PASS**; not pursued (same library, and WebKit's Windows code paths are written for clang) |
+| A3 | clang gnu target, C, `__thread` in the main and a `CreateThread` thread (`probe_tls.c`) | **PASS** (native TLS through the PE TLS directory works in the Kernel64 loader) |
+| A4 | clang gnu target, `__try/__except` around a null store (`probe_seh.c`, `-fms-extensions`) | **FAIL as a toolchain property**: clang 18 accepts `__try` on this target but emits no handler (no handler flag in `main`'s unwind info), so the fault is unhandled (`c0000005`). WebKit's two uses are MSVC-only after patch 0001 |
+| A5 (adopted) | `deps/toolchain.py`: clang 18 + mingw-w64 13 UCRT sysroot + libc++ 18 DLLs | W3's guest run `t_tc_cxx` PASS 16 (exceptions through three frames, a throw inside libc++.dll, `exception_ptr` across threads, 4 threads × 50 throws, condition variables, iostreams, chrono, `std::filesystem`), `t_tc_c` PASS 13 (W3 report §1). The probes of this page rebuilt with it: see reports/W1.md |
+| B | clang `--target=x86_64-pc-windows-msvc` + microsoft/STL `main` (`f023531`, Apache-2.0 WITH LLVM-exception) against the Shizuku `ucrtbase`/`vcruntime140`/`msvcp140` | **does not compile**: `yvals_core.h:526: fatal error: 'vcruntime.h' file not found`. The STL headers include 60 headers they do not ship (`vcruntime*.h` from the MSVC toolset; `corecrt*.h`, `crtdbg.h`, `sal.h` and the C headers from the Windows SDK UCRT), all under Microsoft licences and not available here; the STL's out-of-line part is `msvcp140.dll` (+ `_1/_2/_atomic_wait`), of which the Shizuku `msvcp140` has 39 exports. Not run |
 
-Why A1 over A2: both run. WebKit's Windows port is a clang port (`COMPILER(CLANG)` code paths, `-fms-extensions`
-constructs), clang's gnu target uses native PE TLS (A3) where GCC uses emulated TLS through libgcc, and one compiler
-builds ICU, WTF, JavaScriptCore and the probes. Why not libc++ (llvm-mingw style): libstdc++ 13 is a supported WebKit
-standard library at this commit and already runs in the guest (A1/A2); building libc++/libc++abi/libunwind from a
-pinned llvm-project would add a third upstream for no demonstrated gain. This stays open if libstdc++ blocks something
-(it would be the answer to a libstdc++-only failure, e.g. in `<format>` or `<chrono>` time zones).
-
-Why not B: it needs Microsoft-licensed headers at build time that are not available here, and a much larger
-`msvcp140`. "No Microsoft SDK binaries may be redistributed" holds for A: nothing from Microsoft is used at all.
+Nothing from Microsoft is used in A5 (the task's "no Microsoft SDK binaries may be redistributed" holds).
 
 ### 2.2 The link, in detail
 
-- Headers: mingw-w64 in UCRT mode (`-D_UCRT -D__MSVCRT_VERSION__=0xE00 -D_WIN32_WINNT=0x0A00`). WebKit adds
-  `__USE_MINGW_ANSI_STDIO=1`, so `printf`-family formatting comes from mingw-w64's `libmingwex`, not from ucrtbase.
-- Startup objects and static libraries from mingw-w64 (`crt2.o`, `libmingw32`, `libmingwex`) and GCC 13 (`libstdc++`,
-  `libgcc`, `libgcc_eh`, `libwinpthread` through CMake's `Threads`) are linked statically. They were compiled for msvcrt;
-  mingw-w64's `libucrtbase.a` supplies the msvcrt-style entry points they call (`__getmainargs`, `_onexit`, ...) on top
-  of ucrtbase. This mix is what A1/A2 exercised; it is a known risk area (a libstdc++ built for UCRT would remove it).
-- Import libraries: the Shizuku `libntdll.a` and `libbcryptprimitives.a` are linked by path ahead of mingw-w64's, then
-  `-lucrtbase` (mingw-w64's, UCRT). `build.py` then checks every import of every output against the Shizuku DLLs.
-- Glue (`webkit/compat/shzwk_compat.c`), because the Shizuku ucrtbase lacks two functions mingw-w64 expects there
-  (asked from K5 in `reports/W1.md`): `rand_s` (libstdc++'s `std::random_device`) over `ProcessPrng`, and
-  `__C_specific_handler` for `crt2.o`'s unwind data, bound to the Shizuku ntdll's export by link order.
+- Every image imports the C runtime through the `api-ms-win-crt-*` contracts, which the Kernel64 loader maps to the
+  Shizuku `ucrtbase.dll`; C++ comes from `libc++.dll`/`libunwind.dll`, shipped next to `jsc.exe`.
+- Functions Windows' ucrtbase has and the Shizuku one lacks (`rand_s`, `__C_specific_handler`, `_assert`, `_wassert`,
+  `_*_l` collation/conversion, setjmp/longjmp) come from W3's `deps/shim/shzucrt_fix.c`, merged into the sysroot's
+  `libmingwex.a` (asked from K5 in reports/W1.md and W3.md).
+- WebKit links `-lDbgHelp` and `-lWinmm` in mixed case; `build/shizukudos/win64/webkit/libalias/` maps them to the
+  sysroot's libraries (lld on Linux is case-sensitive). WTF calls DbgHelp only in debug builds.
+- After the link, `build.py` checks every import of every output (`jsc.exe`, `wkbatch.exe`, the two runtime DLLs)
+  against the Shizuku DLLs and fails the build on a miss.
 
 ## 3. JavaScriptCore builds
 
 `python3 shizukudos/win64/webkit/build.py [--config cloop]` (after `python3 shizukudos/win64/build.py`):
-ICU 78.3 host build, then the static Win64 ICU (common, i18n, the full 33 MB data archive), then CMake/Ninja with
-`PORT=JSCOnly`. Output: `build/shizukudos/win64/webkit/out/jsc.exe` (+ `wkbatch.exe`, the stress batch driver) and
+the toolchain (`deps/toolchain.py`, if not built yet), the ICU host build, then the static Win64 ICU (common, i18n,
+the full data archive), then CMake/Ninja with `PORT=JSCOnly`. Output: `build/shizukudos/win64/webkit/out/` with `jsc.exe`, `libc++.dll`, `libunwind.dll` (+ `wkbatch.exe`, the stress batch driver) and
 `build-result.json` (commands, tool versions, patch list, per-image import check, licence table).
 
 | config | CMake options | used for |
 |---|---|---|
-| `cloop` | `ENABLE_JIT=OFF ENABLE_C_LOOP=ON ENABLE_WEBASSEMBLY=OFF ENABLE_SAMPLING_PROFILER=OFF ENABLE_STATIC_JSC=ON` (bmalloc on Windows requires mimalloc: `USE_SYSTEM_MALLOC` is rejected by `BPlatform.h`) | M1 |
+| `cloop` | `ENABLE_JIT=OFF ENABLE_C_LOOP=ON ENABLE_WEBASSEMBLY=OFF ENABLE_SAMPLING_PROFILER=OFF ENABLE_STATIC_JSC=ON` (bmalloc on Windows uses mimalloc; `USE_SYSTEM_MALLOC` is rejected there by `BPlatform.h`) | M1 |
 
 ## 4. Running it in the guest
 
