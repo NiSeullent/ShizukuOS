@@ -182,3 +182,6 @@ uint8_t NTAPI MmIsNonPagedSystemAddressValid(void *va) { return va_to_phys((uint
 /* MmGetPhysicalAddress of the driver VA window and MMIO windows go through vm_lookup above; MmGetVirtualForPhysical is the
  * direct map (every RAM page is mapped there). */
 void *NTAPI MmGetVirtualForPhysical(LARGE_INTEGER pa) { return (void *)p2v((uint64_t)pa.QuadPart); }
+
+/* IoBuildPartialMdl: `target` describes [va, va+len) of the pages `src` maps (len 0 = to the end of src). */
+#define MDL_PARTIAL 0x0010

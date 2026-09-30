@@ -21,6 +21,7 @@
 | 기존 UEFI x64 부팅, UEFI→32비트 PM 핸드오프 | GUEST_RUN (**TCG**) | PASS |
 | NT 드라이버 호스트: 미수정 x64 `.sys` 로드+DriverEntry, IRP/DPC/타이머/스레드, PCI(edu) BAR/IRQ, 사용자 모드 NtLoadDriver→IOCTL, 확장 export 표면(Ex/SList/ERESOURCE/레지스트리/PnP/Po/WMI/DMA/파티션/SEH) `APITEST.SYS` 99개 검사, KMDF(WdfLdr→Wdf01000 바인딩, cdrom/hdaudbus의 FxDriverEntry→WdfVersionBind→WdfDriverCreate 성공), 코퍼스 23개 중 **22개** DriverEntry 성공(uniata만 ATA 컨트롤러 없음 → STATUS_DEVICE_DOES_NOT_EXIST) (`run_k64_ntdrv.py`, `--kmdf`, `--corpus`) | GUEST_RUN (**TCG**) | 기본 13/13, --kmdf 19/19, --corpus 21/21 PASS (provider export 572) |
 | 드라이버 호스트: 코퍼스 **449개 중 449개** 고유 import 해석 (ntoskrnl 313/313, hal 12/12, export 드라이버 ndis 51/51·classpnp 30/30·scsiport 28/28·storport 11/11·wdfldr 4/4 포함); 인텔 Win10 목록: **측정 불가 — BLOCKED** (이 저장소에 목록/패키지 없음; `import_coverage.py <패키지> --ntoskrnl build/shizukudos/win64/ntdrv --export-drivers`로 사용자 쪽에서 산출) | HOST_TESTED (정적) + GUEST_RUN (로드 22/23) | 이전 측정: ntoskrnl 103/313, 로드 가능 1/23 |
+| 드라이버 패키지 설치+실행 (N3): `shzpnp add-driver --install` → `shzpnp load` → NtLoadDriver → DriverEntry → Enum 바인딩 PCI 기능 `pci_claim ntdrv:<service>` → AddDevice + IRP_MN_START_DEVICE. 미수정 ECHO.SYS(`T_DRV_LOAD.EXE`, 기본 이미지)와 미수정 ReactOS e1000 NDIS 5 미니포트 + ReactOS ndis.sys(QEMU `-device e1000`, `run_k64_pnp.py`, `T_DRV_PNP.EXE`): MiniportInitialize가 NIC를 초기화하고 START IRP가 STATUS_SUCCESS | GUEST_RUN (**TCG**) | PASS (T_DRV_LOAD 38/38, T_DRV_PNP 24/24; provider export 225). 프로토콜은 바인딩되지 않아 패킷은 오가지 않음 |
 
 `win98-regression`의 BLOCKED는 설치된 Windows 98 체크포인트(`build/win98-lab`, 사용자 제공 자산) 부재,
 SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행하지 않음)이다. Notepad++ 성공/실패를 이 문서는 단정하지 않는다.
@@ -34,6 +35,17 @@ DLL마다 첫 export를 `GetProcAddress`로 해석한다(러너가 패킹된 DLL
 이 화면을 만들며 고친 결함: `NtQueryDirectoryFile`의 FileName 오프셋이 커널 96·kernel32 92로 어긋나 `FindFirstFileW`가
 아무 파일도 찾지 못했다(→ Windows 오프셋, 클래스 1/2/3/12/37/38). `GlobalMemoryStatusEx`가 쓰는 정보 클래스 0x100이 커널에
 없어 물리 메모리가 0이었다. 아직 이 화면에 없는 것: Chromium·Electron, NT 커널 드라이버 호스트, Windows 98 본체.
+
+### 1c. 드라이버 패키지 설치 → 실행 (N3, `docs/shizukudos10/DRIVER_INSTALL.md`, `reports/N3.md`)
+
+`shzpnp load <service>`가 실제로 드라이버를 올린다: 서비스 키(ImagePath/Start/Type)를 읽고 NtLoadDriver로 NT 드라이버 호스트가
+이미지를 매핑·재배치·import 해석(다른 모듈에서 import하면 `\SHZ\SYS64\DRIVERS\<dll>`을 먼저 로드)·DriverEntry 실행, Enum에 이
+서비스로 바인딩된 PCI 기능을 `ntdrv:<service>`로 claim(상태 화면의 PCI 표, `NtQuerySystemInformation` 0x101), AddDevice가 있으면
+PDO를 만들어 AddDevice와 IRP_MN_START_DEVICE(BAR·IRQ 자원)를 보낸다. `shzpnp unload`(DriverUnload, claim 해제)와 `shzpnp status`
+(로드된 이미지·디바이스 객체·PCI 기능)를 추가. 검증: 기본 이미지의 `T_DRV_LOAD.EXE`(ECHO.SYS 패키지 설치→로드→IOCTL→오류 경로→언로드→재로드,
+38/38)와 `run_k64_pnp.py`(ReactOS e1000 + ndis.sys, QEMU e1000: START IRP 성공 = MiniportInitialize가 NIC를 초기화, 24/24), 모두 TCG
+GUEST_RUN. x64 드라이버는 IRQL을 CR8에 직접 쓰므로(DDK 인라인) 호스트의 IRQL도 CR8이 되었고 스케줄러 틱이 CR8≥2에서 선점하지 않는다.
+못 한 것: NDIS 프로토콜(TCP/IP)이 없어 패킷은 오가지 않음, NDIS 6/KMDF/StorPort/WDDM 없음, 코퍼스 e1000 INF는 `--legacy`로만 설치.
 
 ## 2. 이번 세션에서 고친 결함 (원인 → 수정)
 
@@ -367,3 +379,15 @@ lead 병합 작업 중이다.
 ## 4. 저장소 반영 상태
 
 브랜치 `wip/shizukudos-10-toydzv`는 원격에 올라가 있다. PR #2, #3이 main에 병합됐고(#3은 squash), 이후 작업은 새 PR로 추적한다.
+
+## 5. K4: Chromium 64비트 게스트 실행 (브랜치 `wip/k4-chromium-run`, 보고서 `reports/K4.md`)
+
+Chromium Win_x64 스냅샷 1706750(`chrome.exe` 157.0.8079.0)을 `run_k64_chromium.py`(FAT32 D:, autorun, QEMU TCG)로 실행했다.
+GUEST_RUN. chrome.exe·chrome_elf.dll·chrome.dll(82,091페이지, 지연 매핑)은 모두 로드되고 crashpad 핸들러 자식 프로세스까지 뜬 뒤,
+브라우저 프로세스는 Chromium의 delay-load 실패 훅(`delay_load_failure_support.cc:39`, 모든 delay-load 실패가 FATAL)에서
+`exit=0x80000003, faulted=0`로 끝난다. 커밋된 트리의 도달점(run 1): `DelayLoad-ModuleName = IPHLPAPI.DLL`(DLL 없음, K5 소유).
+커밋하지 않은 로컬 shim으로 그 뒤를 보면 ole32!CoCreateInstance(run 2), wtsapi32.dll(run 3) 순으로 막힌다 — 모두 K5의 DLL이며
+`reports/K4.md` §4 "Needed from K5"에 export·호출자·용도를 적었다. 이 브랜치의 커밋: kernel32 `SetThreadDescription`/
+`GetThreadDescription`(커널 스레드 레코드에 저장, `t_k32_proc` 193/0), `GetEnabledXStateFeatures`와 XState/CONTEXT 도우미
+(`T_K32_XSTATE` 22/0). M2(`--dump-dom`의 DOM 줄)는 아직 도달하지 않았다.
+

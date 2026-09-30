@@ -1,0 +1,37 @@
+diff --git a/libcxx/src/filesystem/posix_compat.h b/libcxx/src/filesystem/posix_compat.h
+index 760cdb65d..ab96be61a 100644
+--- a/libcxx/src/filesystem/posix_compat.h
++++ b/libcxx/src/filesystem/posix_compat.h
+@@ -210,17 +210,30 @@ inline int mkdir(const wchar_t* path, int permissions) {
+   return 0;
+ }
+ 
++// ShizukuDOS: CreateSymbolicLinkW is resolved at run time so that libc++.dll loads on a kernel32 without it
++// (shizukudos/win64/webkit/deps/patches); without the export, creating a symlink fails with ERROR_NOT_SUPPORTED.
++inline BOOLEAN shz_CreateSymbolicLinkW(LPCWSTR link, LPCWSTR target, DWORD flags) {
++  typedef BOOLEAN(WINAPI * fn_t)(LPCWSTR, LPCWSTR, DWORD);
++  static fn_t fn = reinterpret_cast<fn_t>(
++      reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateSymbolicLinkW")));
++  if (!fn) {
++    SetLastError(ERROR_NOT_SUPPORTED);
++    return FALSE;
++  }
++  return fn(link, target, flags);
++}
++
+ inline int symlink_file_dir(const wchar_t* oldname, const wchar_t* newname, bool is_dir) {
+   path dest(oldname);
+   dest.make_preferred();
+   oldname     = dest.c_str();
+   DWORD flags = is_dir ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0;
+-  if (CreateSymbolicLinkW(newname, oldname, flags | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE))
++  if (shz_CreateSymbolicLinkW(newname, oldname, flags | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE))
+     return 0;
+   int e = GetLastError();
+   if (e != ERROR_INVALID_PARAMETER)
+     return set_errno(e);
+-  if (CreateSymbolicLinkW(newname, oldname, flags))
++  if (shz_CreateSymbolicLinkW(newname, oldname, flags))
+     return 0;
+   return set_errno();
+ }

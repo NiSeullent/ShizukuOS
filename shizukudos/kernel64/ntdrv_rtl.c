@@ -249,3 +249,54 @@ uint32_t NTAPI HalSetBusDataByOffset(uint32_t type, uint32_t bus, uint32_t slot,
     }
     return len;
 }
+
+/* ---------------------------------------------------------------- wide C string exports (ntoskrnl exports these) */
+
+/* ---------------------------------------------------------------- more Rtl string routines */
+
+/* ---------------------------------------------------------------- RtlQueryRegistryValues */
+/* RTL_QUERY_REGISTRY_TABLE (0x38). The table is walked until an entry with neither QueryRoutine nor Name. RelativeTo
+ * selects the base key (RTL_REGISTRY_ABSOLUTE/SERVICES/CONTROL/WINDOWS_NT/DEVICEMAP/USER, or a handle with
+ * RTL_REGISTRY_HANDLE). Per entry: SUBKEY descends (a missing subkey fails the call), TOPKEY returns to the base, a named
+ * value is looked up (REQUIRED makes its absence an error, else the Default* fields stand in; a zero DefaultLength on a
+ * string default means "measure it"), DIRECT stores it at EntryContext, otherwise QueryRoutine(Name, Type, Data, Length,
+ * Context, EntryContext) is called; a REG_MULTI_SZ is delivered one REG_SZ at a time unless NOEXPAND; REG_EXPAND_SZ is
+ * expanded ("%SystemRoot%"/"%windir%" = C:\SHZ, other variables stay literal: there is no environment here) and delivered
+ * as REG_SZ unless NOEXPAND; a NULL Name with a QueryRoutine enumerates every value (NOVALUE: one call, REG_NONE); DELETE
+ * removes the value after it was delivered. The registry lock is held only while a key or value is looked up and
+ * copied: the value data goes to the routine from a private copy and the current key is pinned, so a QueryRoutine may call
+ * any registry API (Zw*, IoOpenDeviceRegistryKey, RtlQueryRegistryValues itself), as on Windows. */
+typedef struct {
+    NTSTATUS (NTAPI *QueryRoutine)(const WCHAR *, uint32_t, void *, uint32_t, void *, void *);
+    uint32_t Flags, _p0;
+    const WCHAR *Name;
+    void *EntryContext;
+    uint32_t DefaultType, _p1;
+    void *DefaultData;
+    uint32_t DefaultLength, _p2;
+} rtl_query_table_t;
+_Static_assert(sizeof(rtl_query_table_t) == 0x38, "query table");
+#define RTL_QUERY_REGISTRY_SUBKEY 0x1
+#define RTL_QUERY_REGISTRY_TOPKEY 0x2
+#define RTL_QUERY_REGISTRY_REQUIRED 0x4
+#define RTL_QUERY_REGISTRY_NOVALUE 0x8
+#define RTL_QUERY_REGISTRY_NOEXPAND 0x10
+#define RTL_QUERY_REGISTRY_DIRECT 0x20
+#define RTL_QUERY_REGISTRY_DELETE 0x40
+#define RTL_REGISTRY_HANDLE 0x40000000u
+#define RTL_REGISTRY_OPTIONAL 0x80000000u
+#define REG_NONE_T 0
+#define QR_PATH_MAX 400
+
+
+/* the byte length of a default given as a string type with DefaultLength == 0 */
+
+
+/* %SystemRoot% / %windir% -> C:\SHZ, in place into `out` (capacity `cap` bytes); returns the byte length including the
+ * terminator. A variable that is not known stays as written. */
+
+
+
+/* value `name` of key k copied out under the lock: *type, *len and a kmalloc'd copy (0 when the value is absent) */
+
+

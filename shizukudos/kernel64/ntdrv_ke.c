@@ -25,27 +25,49 @@
 #define TimerNotificationObject 8
 #define TimerSynchronizationObject 9
 
-static volatile uint8_t g_irql;                 /* uniprocessor current IRQL */
+/* The current IRQL IS CR8 (the local APIC task-priority register), exactly as on Windows x64: the DDK's amd64
+ * headers inline KeGetCurrentIrql/KfRaiseIrql/KeLowerIrql as CR8 reads and writes, so an unmodified driver
+ * raises and lowers IRQL without calling any export (ndis.sys carries 85 CR8 instructions). Every provider reads
+ * CR8, and the scheduler (sched.c) does not preempt while CR8 >= DISPATCH_LEVEL and keeps CR8 per thread, which
+ * reproduces the guarantee DISPATCH_LEVEL gives a driver on a uniprocessor (no dispatch-level work interrupts a held
+ * spin lock or a running DPC) whether the driver raised through an export or through CR8 directly.
+ *
+ * Interrupts: the exports mask them only across the transition that crosses DISPATCH_LEVEL (raise from below: cli;
+ * lower to below: sti). A raise or lower that stays on one side of the line leaves EFLAGS.IF alone, so a driver that
+ * raises inline (IF stays on) and then takes a spin lock through an export, or an export used inside an ISR (which
+ * runs with IF off at CR8 >= DISPATCH_LEVEL, see ntdrv_isr_enter), never turns interrupts back on behind the
+ * caller's back. Not modelled: a driver's own CR8 write cannot drain the DPC queue (Windows runs the DPCs when the
+ * write lowers IRQL); the DPC worker thread does it at the next tick, so a driver that lowers inline and polls for
+ * a DPC's effect with a zero timeout can see it a tick late.
+ *
+ * The Supervisor build (no SHZ_STANDALONE) keeps a software IRQL: whether a guest CR8 write reaches the real APIC
+ * task priority there is not something this host can test. */
+#ifdef SHZ_STANDALONE
+static inline uint8_t cur_irql(void) { uint64_t v; __asm__ volatile("mov %%cr8, %0" : "=r"(v)); return (uint8_t)v; }
+static inline void write_irql(uint8_t v) { uint64_t x = v; __asm__ volatile("mov %0, %%cr8" : : "r"(x) : "memory"); }
+#else
+static volatile uint8_t sw_irql;
+static inline uint8_t cur_irql(void) { return sw_irql; }
+static inline void write_irql(uint8_t v) { sw_irql = v; }
+#endif
+#define g_irql (cur_irql())
 
-uint8_t ntdrv_current_irql(void) { return g_irql; }
+uint8_t ntdrv_current_irql(void) { return cur_irql(); }
 
-/* On this kernel the scheduler only preempts from the timer interrupt (or a voluntary
- * yield/sleep/block). Masking interrupts while IRQL >= DISPATCH_LEVEL therefore reproduces the
- * exact guarantee DISPATCH_LEVEL gives a driver: the scheduler cannot switch away, so a held
- * spin lock and a running DPC are never interrupted by other dispatch-level work. At
- * PASSIVE/APC the scheduler runs normally and waits may block. */
-/* Drivers built with the WDK read the IRQL straight from CR8 on x64 (KeGetCurrentIrql, KeRaiseIrql and KeLowerIrql are inline
- * there), so CR8 mirrors g_irql. Interrupt delivery is unaffected: vectors are >= 0x20 (priority class 2 and up) and every
- * IRQL that could mask them (>= DISPATCH_LEVEL) also runs with interrupts disabled. */
-static inline void write_cr8(uint64_t v) { __asm__ volatile("mov %0, %%cr8" : : "r"(v) : "memory"); }
 static void set_irql(uint8_t v)
 {
-    g_irql = v;
-    write_cr8(v);
-    if (v >= DISPATCH_LEVEL) cli();
-    else sti();
+    const uint8_t old = cur_irql();
+    write_irql(v);
+    if (old < DISPATCH_LEVEL && v >= DISPATCH_LEVEL) cli();
+    else if (old >= DISPATCH_LEVEL && v < DISPATCH_LEVEL) sti();
 }
 
+/* An interrupt service routine (or a KeSynchronizeExecution routine) runs at its DIRQL: above DISPATCH_LEVEL, with
+ * interrupts off. The returned value goes back to ntdrv_isr_leave; IF is not touched (the caller's gate or irq_save
+ * owns it). DIRQL 13 stands for every device interrupt: this host has no interrupt priorities among devices. */
+#define NTDRV_DIRQL 13
+uint8_t ntdrv_isr_enter(void) { const uint8_t o = cur_irql(); write_irql(NTDRV_DIRQL); return o; }
+void ntdrv_isr_leave(uint8_t old) { write_irql(old); }
 
 /* ---------------------------------------------------------------- KPCR emulation (GS base)
  * Drivers built with the WDK read the current thread, the PRCB and the processor block straight from the GS segment on x64
@@ -137,7 +159,7 @@ void NTAPI KeAcquireSpinLock(KSPIN_LOCK *l, uint8_t *old) { *old = g_irql; set_i
 void NTAPI KeReleaseSpinLock(KSPIN_LOCK *l, uint8_t old) { spin_release(l); set_irql(old); if (old < DISPATCH_LEVEL) ntdrv_dpc_queue_flush(); }
 uint8_t NTAPI KfAcquireSpinLock(KSPIN_LOCK *l) { uint8_t o = g_irql; set_irql(DISPATCH_LEVEL); spin_acquire(l); return o; }
 void NTAPI KfReleaseSpinLock(KSPIN_LOCK *l, uint8_t old) { spin_release(l); set_irql(old); if (old < DISPATCH_LEVEL) ntdrv_dpc_queue_flush(); }
-void NTAPI KeAcquireSpinLockAtDpcLevel(KSPIN_LOCK *l) { if (g_irql < DISPATCH_LEVEL) kpanic("AcquireSpinLockAtDpcLevel below DISPATCH"); spin_acquire(l); }
+void NTAPI KeAcquireSpinLockAtDpcLevel(KSPIN_LOCK *l) { if (g_irql < DISPATCH_LEVEL) kpanic("AcquireSpinLockAtDpcLevel below DISPATCH (irql %u, caller %p)", g_irql, __builtin_return_address(0)); spin_acquire(l); }
 void NTAPI KeReleaseSpinLockFromDpcLevel(KSPIN_LOCK *l) { spin_release(l); }
 uint8_t NTAPI KeAcquireSpinLockRaiseToDpc(KSPIN_LOCK *l) { uint8_t o = g_irql; set_irql(DISPATCH_LEVEL); spin_acquire(l); return o; }
 
@@ -182,7 +204,8 @@ uint8_t NTAPI KeRemoveQueueDpc(KDPC *dpc)
     return 1;
 }
 
-/* Run one pass of the DPC queue at DISPATCH_LEVEL. */
+/* Run one pass of the DPC queue at DISPATCH_LEVEL. A DPC is taken off the queue and IRQL is raised with interrupts
+ * still off, so a tick cannot preempt the caller while it holds a DPC that KeRemoveQueueDpc no longer finds queued. */
 void ntdrv_dpc_queue_flush(void)
 {
     for (;;) {
@@ -195,11 +218,11 @@ void ntdrv_dpc_queue_flush(void)
         if (!dpc_head) dpc_tail = 0;
         dpc->DpcData = 0;
         sa1 = dpc->SystemArgument1; sa2 = dpc->SystemArgument2;
-        irq_restore(f);
-        saved = g_irql;
-        if (g_irql < DISPATCH_LEVEL) set_irql(DISPATCH_LEVEL);
+        saved = cur_irql();
+        if (saved < DISPATCH_LEVEL) write_irql(DISPATCH_LEVEL);       /* IF stays off until the routine returns, as set_irql would */
+        else irq_restore(f);
         dpc->DeferredRoutine(dpc, dpc->DeferredContext, sa1, sa2);
-        if (saved < DISPATCH_LEVEL) set_irql(saved);
+        if (saved < DISPATCH_LEVEL) { write_irql(saved); irq_restore(f); }
     }
 }
 
@@ -339,7 +362,7 @@ int32_t NTAPI KeWaitForMultipleObjects(uint32_t count, void **objs, uint32_t wai
     int64_t store, *dl;
     uint32_t i;
     (void)reason; (void)mode; (void)alertable; (void)wait_blocks;
-    if (g_irql >= DISPATCH_LEVEL) kpanic("KeWaitForMultipleObjects at IRQL %u", g_irql);
+    if (g_irql >= DISPATCH_LEVEL && !(timeout && *timeout == 0)) kpanic("KeWaitForMultipleObjects at IRQL %u", g_irql);
     deadline_from(timeout, &store);
     dl = timeout ? &store : 0;
     for (;;) {
@@ -475,11 +498,13 @@ uint32_t NTAPI KeGetCurrentProcessorNumberEx(void *g) { (void)g; return 0; }
 uint32_t NTAPI KeQueryActiveProcessorCount(void *g) { (void)g; return 1; }
 uint32_t NTAPI KeQueryMaximumProcessorCount(void) { return 1; }
 void *NTAPI KeGetCurrentThread(void) { return thread_current(); }
+static void run_bugcheck_callbacks(void);
 void NTAPI KeBugCheckEx(uint32_t code, uint64_t p1, uint64_t p2, uint64_t p3, uint64_t p4)
 {
+    run_bugcheck_callbacks();
     kpanic("KeBugCheckEx 0x%x (%llx %llx %llx %llx) from driver", code, p1, p2, p3, p4);
 }
-void NTAPI KeBugCheck(uint32_t code) { kpanic("KeBugCheck 0x%x from driver", code); }
+void NTAPI KeBugCheck(uint32_t code) { run_bugcheck_callbacks(); kpanic("KeBugCheck 0x%x from driver", code); }
 
 /* ---------------------------------------------------------------- interlocked */
 LONG NTAPI InterlockedIncrement(LONG *p) { return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST); }
@@ -535,11 +560,50 @@ void ntdrv_ke_init(void)                        /* idempotent: the first driver 
     thread_t *w, *tt;
     if (ke_ready) return;
     sem_init(&dpc_sem, 0);
-    g_irql = PASSIVE_LEVEL;
-    write_cr8(PASSIVE_LEVEL);
+    write_irql(PASSIVE_LEVEL);
     ntdrv_kuser_init();                             /* the shared-data page drivers read directly at 0xFFFFF78000000000 */
     w = thread_create("ntdrv-dpc", dpc_worker, 0);
     tt = thread_create("ntdrv-timer", timer_thread, 0);
     KASSERT(w && tt);
     ke_ready = 1;
+}
+
+/* ---------------------------------------------------------------- Ex interlocked lists and S-lists */
+/* SLIST_HEADER, x64 layout: Alignment = Depth:16 | Sequence:48, Region = Reserved:4 | NextEntry:60 (address >> 4).
+ * Entries are 16-byte aligned, so the pointer is stored as it is. Drivers read Depth through the inline
+ * ExQueryDepthSList, hence the exact encoding. Push/pop run with interrupts off (uniprocessor). */
+typedef struct { uint64_t alignment, region; } slist_header_t;
+typedef struct single_entry { struct single_entry *Next; } single_entry_t;
+
+/* ---------------------------------------------------------------- processor information */
+int8_t ntdrv_KeNumberProcessors = 1;                    /* the CCHAR data export KeNumberProcessors */
+     /* the cache line */
+/* Per-processor tick counts (idle, kernel+user) and the processor index. The kernel keeps no idle accounting, so idle
+ * is reported as 0 and the timer tick count as busy time: a cumulative count, monotonic, in ticks. */
+extern uint64_t arch_timer_irqs(void);                  /* arch.c */
+   /* no idle accounting: fully busy */
+
+/* ---------------------------------------------------------------- bug-check callbacks */
+/* KBUGCHECK_CALLBACK_RECORD (0x40): Entry(0x00) CallbackRoutine(0x10) Buffer(0x18) Length(0x20) Component(0x28)
+ * Checksum(0x30) State(0x38). Records are kept on a list; KeBugCheckEx runs them before halting. */
+typedef struct { LIST_ENTRY Entry; void *CallbackRoutine, *Buffer; uint32_t Length, _p; const char *Component;
+                 uint64_t Checksum; uint8_t State, _pad[7]; } kbugcheck_record_t;
+_Static_assert(sizeof(kbugcheck_record_t) == 0x40, "bugcheck record");
+static LIST_ENTRY bugcheck_list = { &bugcheck_list, &bugcheck_list };
+
+/* KBUGCHECK_CALLBACK_ROUTINE(Buffer, Length), ms_abi: each registered record is called once, before the halt, with the
+ * driver's buffer. A callback that faults or blocks cannot be helped here; the list is walked once (State cleared). */
+static void run_bugcheck_callbacks(void)
+{
+    LIST_ENTRY *e = bugcheck_list.Flink;
+    unsigned guard = 0;
+    while (e != &bugcheck_list && guard++ < 256) {
+        kbugcheck_record_t *r = (kbugcheck_record_t *)e;
+        e = e->Flink;
+        if (r->State == 1 && r->CallbackRoutine) {
+            r->State = 2;                                   /* BufferStarted */
+            ((void (NTAPI *)(void *, uint32_t))r->CallbackRoutine)(r->Buffer, r->Length);
+            r->State = 3;                                   /* BufferFinished */
+        }
+    }
 }

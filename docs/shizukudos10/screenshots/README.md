@@ -13,5 +13,6 @@ host-computed expectation before the image is kept.
 | `uefi-k64-status.png` | `status` under `supervisor/test_bootmgr.py --case kernel64` | **UEFI boot**: OVMF (q35) → Shizuku boot manager `BOOT.INI mode=kernel64` → Kernel64 direct boot → the status screen (18 DLLs loaded) |
 | `uefi-k64-gpu2d.png` | `gpu2d-b` in the same UEFI boot | T_GPU_2D after a 32x16 partial update |
 | `k64-gdi.png` | `gdi` (T_GUI_GDI) | GDI blits, stretching, text, clipping, polygons, ellipse |
+| `k64-status-e1000.png` | `status`, `run_k64_gui.py --png --pnp` | the same status screen after `T_DRV_PNP.EXE` installed and loaded the unmodified ReactOS e1000 NDIS miniport package through `SHZPNP.EXE` (add-driver → load → NtLoadDriver → DriverEntry → AddDevice → IRP_MN_START_DEVICE): the PCI table lists QEMU's e1000 (8086:100e) as driven by the hosted `.sys`, `ntdrv:e1000`, and the chipset function `T_DRV_LOAD.EXE` bound the ECHO.SYS test driver to as `ntdrv:shzecho` |
 
-Not shown because it does not run yet: Chromium, Electron, Discord, Steam, Windows 98 itself, NT kernel drivers.
+Not shown because it does not run yet: Chromium, Electron, Discord, Steam, Windows 98 itself. (NT kernel drivers: see `k64-status-e1000.png`.)

@@ -247,6 +247,20 @@ static void TestRegistry(PUNICODE_STRING regpath)
     CHECK(str.Buffer && str.Length == 7 * sizeof(WCHAR) && str.Buffer[0] == L'S' && str.Buffer[6] == L'u', "RtlQueryRegistryValues DIRECT REG_SZ allocates a UNICODE_STRING");
     CHECK(multi_calls == 3, "RtlQueryRegistryValues expands REG_MULTI_SZ into three REG_SZ calls");
     if (str.Buffer) ExFreePool(str.Buffer);
+    /* NDIS reads a NIC's Linkage\Export (REG_MULTI_SZ) with DIRECT into a UNICODE_STRING that has no buffer yet */
+    {
+        static WCHAR one[] = L"\\Device\\{SHZ-1}\0";
+        UNICODE_STRING exp;
+        RtlWriteRegistryValue(RTL_REGISTRY_SERVICES, L"shzapi\\Parameters", L"Export", REG_MULTI_SZ, one, sizeof one + sizeof(WCHAR));
+        RtlInitUnicodeString(&exp, NULL);
+        RtlZeroMemory(t, sizeof t);
+        t[0].Flags = RTL_QUERY_REGISTRY_REQUIRED | RTL_QUERY_REGISTRY_DIRECT; t[0].Name = L"Export"; t[0].EntryContext = &exp;
+        st = RtlQueryRegistryValues(RTL_REGISTRY_SERVICES, L"shzapi\\Parameters", t, NULL, NULL);
+        CHECK(NT_SUCCESS(st) && exp.Buffer && exp.Length == 15 * sizeof(WCHAR) && exp.Buffer[0] == L'\\',
+              "RtlQueryRegistryValues DIRECT REG_MULTI_SZ (a one-string multi-string reads as that string)");
+        if (exp.Buffer) ExFreePool(exp.Buffer);
+        RtlDeleteRegistryValue(RTL_REGISTRY_SERVICES, L"shzapi\\Parameters", L"Export");
+    }
     /* default value for an absent name, then REQUIRED without default */
     RtlZeroMemory(t, sizeof t);
     t[0].Flags = RTL_QUERY_REGISTRY_DIRECT; t[0].Name = L"Absent"; t[0].EntryContext = &direct; t[0].DefaultType = REG_DWORD; dword = 77; t[0].DefaultData = &dword; t[0].DefaultLength = 4;

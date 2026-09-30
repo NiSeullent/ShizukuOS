@@ -26,7 +26,10 @@
  * loader's temporary unprotect - an IAT inside read-only .rdata is normal for MSVC-linked images.
  *
  * ASLR: an image with IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE and a relocation directory is placed at a random 64 KiB
- * aligned base (RDRAND), per process. Windows-like entropy (Windows Internals 7th ed., part 1, ch. 5 "Address space
+ * aligned base (RDRAND). An executable is placed per process; a DLL, as on Windows, once per boot: the base drawn for the
+ * first process that loads it (keyed by path, SizeOfImage and CheckSum) is reused in every later process where that
+ * range is free (debuggers and crash reporters such as crashpad read ntdll's and kernel32's data in other processes at
+ * their own addresses). Windows-like entropy (Windows Internals 7th ed., part 1, ch. 5 "Address space
  * layout randomization"): HIGH_ENTROPY_VA DLLs 19 bits in [0x7ff8'0000'0000, 0x7fff'0000'0000), HIGH_ENTROPY_VA
  * executables 17 bits in [0x7ff6'0000'0000, 0x7ff8'0000'0000), other relocatable images 8 bits in
  * [0x7ff5'0000'0000, 0x7ff6'0000'0000); images that are not LARGE_ADDRESS_AWARE or carry 32-bit (HIGHLOW) fixups stay
@@ -417,6 +420,46 @@ static int census_cb(void *ctx, uint32_t rva, unsigned type)
     return 0;
 }
 
+/* Per-boot DLL bases (see the ASLR note at the top): key = FNV-1a of the lowercase path, SizeOfImage, CheckSum. */
+#define BOOT_BASES 256
+static struct { uint64_t key, base; } boot_bases[BOOT_BASES];
+static unsigned boot_base_count;
+
+static uint64_t boot_base_key(const module_t *m)
+{
+    uint64_t h = 0xcbf29ce484222325ull;
+    const char *q;
+    for (q = m->path; *q; ++q) {
+        char ch = *q;
+        if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32);
+        h = (h ^ (uint8_t)ch) * 0x100000001b3ull;
+    }
+    h = (h ^ m->info.size_of_image) * 0x100000001b3ull;
+    return (h ^ m->info.checksum) * 0x100000001b3ull;
+}
+
+static uint64_t boot_base_get(uint64_t key)
+{
+    uint64_t f = irq_save(), base = 0;
+    unsigned i;
+    for (i = 0; i < boot_base_count; ++i) if (boot_bases[i].key == key) { base = boot_bases[i].base; break; }
+    irq_restore(f);
+    return base;
+}
+
+static void boot_base_put(uint64_t key, uint64_t base)
+{
+    uint64_t f = irq_save();
+    unsigned i;
+    for (i = 0; i < boot_base_count; ++i) if (boot_bases[i].key == key) break;
+    if (i == boot_base_count && boot_base_count < BOOT_BASES) {
+        boot_bases[i].key = key;
+        boot_bases[i].base = base;
+        ++boot_base_count;
+    }
+    irq_restore(f);
+}
+
 static uint64_t aslr_pick(process_t *p, const module_t *m, int low_only)
 {
     const pe_info_t *pi = &m->info;
@@ -658,7 +701,15 @@ static int32_t map_module(ldr_ctx_t *c, module_t *m)
                 return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed base relocation directory");
             highlow = rc.highlow;
         }
-        base = aslr_pick(p, m, highlow || !(pi->characteristics & PE_CHAR_LARGE_ADDRESS_AWARE));
+        {
+            const int low_only = highlow || !(pi->characteristics & PE_CHAR_LARGE_ADDRESS_AWARE);
+            const uint64_t key = m->is_dll ? boot_base_key(m) : 0, shared = key ? boot_base_get(key) : 0;
+            if (shared && vad_range_is_free(p, shared, pi->size_of_image)) base = shared;
+            else {
+                base = aslr_pick(p, m, low_only);
+                if (base && key && !shared) boot_base_put(key, base);
+            }
+        }
     }
     if (!base) {
         if (vad_range_is_free(p, pi->image_base, pi->size_of_image)) base = pi->image_base;
@@ -1064,6 +1115,9 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
     unsigned i, nf = 0, nb = 0;
     struct ustr uf, ub;
     memset(entry, 0, sizeof entry);
+    /* FullDllName is fully qualified, as on Windows: a module of the boot volume ("\SHZ\SYS64\kernel32.dll") gets its
+     * drive, C:, so that a program whose current drive is another one (chrome.exe on D:) can open the file by that name. */
+    if (m->path[0] == '\\' && m->path[1] != '\\') { wfull[nf++] = 'C'; wfull[nf++] = ':'; }
     for (i = 0; m->path[i] && nf < PATH_CAP - 1; ++i) wfull[nf++] = (uint8_t)m->path[i];
     for (i = 0; m->name[i] && nb < 63; ++i) wbase[nb++] = (uint8_t)m->name[i];
     uf = (struct ustr){ (uint16_t)(nf * 2), (uint16_t)(nf * 2 + 2), 0, strings_va };
@@ -1183,12 +1237,15 @@ void thread_user_tls_init(process_t *p, thread_t *t)
  * (the old array stays valid for code that already read the pointer; it is released with the process). */
 static void tls_extend_threads(process_t *p, unsigned old_slots)
 {
-    uint64_t tid;
+    unsigned i;
+    thread_t *t;
     if (p->tls_slots == old_slots) return;
-    for (tid = 4; tid < p->next_tid; tid += 4) {
-        thread_t *t = thread_find_tid(p, tid);
+    /* every live thread of the process, found by scheduler slot: thread ids come from the system-wide client-id
+     * allocator (proc.c), so p->next_tid is not an upper bound of this process's ids (it IS the id of its newest thread) */
+    for (i = 0; (t = thread_slot(i)) != 0; ++i) {
         uint64_t old = 0, array;
-        if (!t || !t->teb || kread(p, t->teb + 0x58, &old, 8)) continue;
+        if (t->proc != p || t->state == TS_FREE || t->state == TS_ZOMBIE) continue;
+        if (!t->teb || kread(p, t->teb + 0x58, &old, 8)) continue;
         array = build_tls_array(p, old, old ? old_slots : 0);
         if (array) kwrite64(p, t->teb + 0x58, array);
     }
@@ -1243,6 +1300,7 @@ static int build_params(process_t *p, const char *image, const char *cmdline, co
         for (i = 0; default_env[i]; ++i) {
             at = put_wstr(p, at, default_env[i], &len);
         }
+        if (k64_cmdline_has("shz.k32trace")) at = put_wstr(p, at, "SHZ_K32TRACE=1", &len);   /* kernel32 k32_trace.c */
         { uint16_t z = 0; uwrite(p, at, &z, 2); at += 2; }
     }
     at = (at + 15) & ~15ull;
@@ -1330,6 +1388,20 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
     if (!p) return STATUS_NO_MEMORY;
     mutex_init(&p->ldr_lock);
     p->parent_pid = parent ? (uint64_t)parent->pid : 0;
+    if (parent) {                                                   /* evidence: which program started which */
+        char shortcmd[161];
+        size_t k2 = 0;
+        int more;
+        if (ex && ex->cmdline) {                                    /* CreateProcessW: the UTF-16 command line */
+            for (; k2 < ex->cmdline_chars && k2 < 160; ++k2) shortcmd[k2] = ex->cmdline[k2] < 0x80 ? (char)ex->cmdline[k2] : '?';
+            more = k2 < ex->cmdline_chars;
+        } else {
+            for (; cmdline[k2] && k2 < 160; ++k2) shortcmd[k2] = cmdline[k2];
+            more = cmdline[k2] != 0;
+        }
+        shortcmd[k2] = 0;
+        kprintf("K64 proc: pid %d (%s) creates pid %d: %s%s\n", parent->pid, parent->name, p->pid, shortcmd, more ? " ..." : "");
+    }
     p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
     p->console_sink_gen = parent ? parent->console_sink_gen : 0;
     st = ldr_create_process_body(parent, image_path, cmdline, cwd, ex, p, out_thread);
@@ -1410,6 +1482,7 @@ static int32_t ldr_create_process_body(process_t *parent, const char *image_path
         *(uint32_t *)(peb + 0x124) = 2;                                 /* VER_PLATFORM_WIN32_NT */
         *(uint32_t *)(peb + 0x128) = exe->info.subsystem;               /* ImageSubsystem */
         memcpy((void *)p2v(pa), peb, sizeof peb);
+        *(uint32_t *)(p2v(pa) + 0x2c0) = 1;                             /* SessionId: the interactive session (the token's) */
     }
     p->image_base = exe->base;
     p->entry = exe->base + exe->info.entry_rva;

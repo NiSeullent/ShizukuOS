@@ -81,3 +81,52 @@ DLLAPI HRESULT WINAPI VarBstrCat(BSTR left, BSTR right, BSTR *out)
     *out = r;
     return S_OK;
 }
+
+/* VarBstrCmp (ordinal 314): compares with CompareStringW under `lcid` and the NORM_* flags; a NULL BSTR is the empty
+ * string. Result: VARCMP_LT / VARCMP_EQ / VARCMP_GT. */
+DLLAPI HRESULT WINAPI VarBstrCmp(BSTR left, BSTR right, LCID lcid, ULONG flags)
+{
+    static const OLECHAR empty[1] = { 0 };
+    const UINT ln = SysStringLen(left), rn = SysStringLen(right);
+    int r;
+    if (!ln && !rn) return VARCMP_EQ;
+    r = CompareStringW(lcid, flags, left ? left : empty, (int)ln, right ? right : empty, (int)rn);
+    if (!r) return E_INVALIDARG;                                  /* CompareStringW rejected lcid or flags */
+    return r == CSTR_LESS_THAN ? VARCMP_LT : r == CSTR_EQUAL ? VARCMP_EQ : VARCMP_GT;
+}
+
+/* LoadRegTypeLib (ordinal 162): a type library is found through its registration, HKEY_CLASSES_ROOT\TypeLib\{GUID}\
+ * <major>.<minor> (hexadecimal). This oleaut32 cannot load type libraries (it has no ITypeLib implementation), so a
+ * registered library is reported as TYPE_E_CANTLOADLIBRARY, and one that is not registered - every library on this
+ * system, whose registry holds no TypeLib registrations - as TYPE_E_LIBNOTREGISTERED, as Windows reports it. */
+DLLAPI HRESULT WINAPI LoadRegTypeLib(REFGUID guid, WORD major, WORD minor, LCID lcid, ITypeLib **out)
+{
+    static const char hex[] = "0123456789abcdef";
+    static const unsigned order[16] = { 3, 2, 1, 0, 5, 4, 7, 6, 8, 9, 10, 11, 12, 13, 14, 15 };
+    static const char prefix[] = "TypeLib\\{";
+    WCHAR path[80];
+    unsigned n = 0, i, v, d;
+    HKEY k;
+    const BYTE *g = (const BYTE *)guid;
+    (void)lcid;
+    if (!out) return E_INVALIDARG;
+    *out = 0;
+    if (!guid) return E_INVALIDARG;
+    for (i = 0; prefix[i]; ++i) path[n++] = (WCHAR)prefix[i];
+    for (i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) path[n++] = '-';
+        path[n++] = (WCHAR)(hex[g[order[i]] >> 4] - (hex[g[order[i]] >> 4] >= 'a' ? 32 : 0));
+        path[n++] = (WCHAR)(hex[g[order[i]] & 15] - (hex[g[order[i]] & 15] >= 'a' ? 32 : 0));
+    }
+    path[n++] = '}';
+    path[n++] = '\\';
+    for (v = major, d = 1; v / d >= 16; d *= 16) { }
+    for (; d; d /= 16) path[n++] = (WCHAR)hex[v / d % 16];
+    path[n++] = '.';
+    for (v = minor, d = 1; v / d >= 16; d *= 16) { }
+    for (; d; d /= 16) path[n++] = (WCHAR)hex[v / d % 16];
+    path[n] = 0;
+    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, path, 0, KEY_READ, &k) != ERROR_SUCCESS) return TYPE_E_LIBNOTREGISTERED;
+    RegCloseKey(k);
+    return TYPE_E_CANTLOADLIBRARY;
+}

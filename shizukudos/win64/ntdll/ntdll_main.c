@@ -618,6 +618,41 @@ static const struct { NTSTATUS status; ULONG error; } status_map_io[] = {
     {(NTSTATUS)0xC00000D4, ERROR_NOT_SAME_DEVICE},       /* STATUS_NOT_SAME_DEVICE */
     {(NTSTATUS)0xC0000106, ERROR_FILENAME_EXCED_RANGE},  /* STATUS_NAME_TOO_LONG */
     {(NTSTATUS)0xC0000121, ERROR_ACCESS_DENIED},         /* STATUS_CANNOT_DELETE */
+    /* named pipes */
+    {(NTSTATUS)0xC000014B, ERROR_BROKEN_PIPE},           /* STATUS_PIPE_BROKEN */
+    {(NTSTATUS)0xC00000B0, ERROR_PIPE_NOT_CONNECTED},    /* STATUS_PIPE_DISCONNECTED */
+    {(NTSTATUS)0xC00000B1, ERROR_NO_DATA},               /* STATUS_PIPE_CLOSING */
+    {(NTSTATUS)0xC00000B2, ERROR_PIPE_CONNECTED},        /* STATUS_PIPE_CONNECTED */
+    {(NTSTATUS)0xC00000B3, ERROR_PIPE_LISTENING},        /* STATUS_PIPE_LISTENING */
+    {(NTSTATUS)0xC00000AE, ERROR_PIPE_BUSY},             /* STATUS_PIPE_BUSY */
+    {(NTSTATUS)0xC00000AC, ERROR_PIPE_BUSY},             /* STATUS_PIPE_NOT_AVAILABLE */
+    {(NTSTATUS)0xC00000AB, ERROR_PIPE_BUSY},             /* STATUS_INSTANCE_NOT_AVAILABLE */
+    {(NTSTATUS)0xC00000AD, ERROR_BAD_PIPE},              /* STATUS_INVALID_PIPE_STATE */
+    {(NTSTATUS)0xC00000B4, ERROR_BAD_PIPE},              /* STATUS_INVALID_READ_MODE */
+    {(NTSTATUS)0xC00000D9, ERROR_NO_DATA},               /* STATUS_PIPE_EMPTY */
+    {(NTSTATUS)0xC00000B5, ERROR_SEM_TIMEOUT},           /* STATUS_IO_TIMEOUT */
+    {(NTSTATUS)0xC00000AF, ERROR_INVALID_FUNCTION},      /* STATUS_ILLEGAL_FUNCTION */
+    /* sections, process memory, jobs, tokens, handles */
+    {(NTSTATUS)0xC0000225, ERROR_NOT_FOUND},             /* STATUS_NOT_FOUND */
+    {(NTSTATUS)0x8000000D, ERROR_PARTIAL_COPY},          /* STATUS_PARTIAL_COPY */
+    {(NTSTATUS)0xC000007C, ERROR_NO_TOKEN},              /* STATUS_NO_TOKEN */
+    {(NTSTATUS)0xC000005C, ERROR_BAD_TOKEN_TYPE},        /* STATUS_BAD_TOKEN_TYPE */
+    {(NTSTATUS)0xC0000040, ERROR_NOT_ENOUGH_MEMORY},     /* STATUS_SECTION_TOO_BIG */
+    {(NTSTATUS)0xC000004E, ERROR_ACCESS_DENIED},         /* STATUS_SECTION_PROTECTION */
+    {(NTSTATUS)0xC000011E, ERROR_FILE_INVALID},          /* STATUS_MAPPED_FILE_SIZE_ZERO */
+    {(NTSTATUS)0xC0000220, ERROR_MAPPED_ALIGNMENT},      /* STATUS_MAPPED_ALIGNMENT */
+    {(NTSTATUS)0xC000001F, ERROR_ACCESS_DENIED},         /* STATUS_INVALID_VIEW_SIZE */
+    {(NTSTATUS)0xC0000019, ERROR_INVALID_ADDRESS},       /* STATUS_NOT_MAPPED_VIEW */
+    {(NTSTATUS)0xC000001B, ERROR_INVALID_PARAMETER},     /* STATUS_UNABLE_TO_DELETE_SECTION */
+    {(NTSTATUS)0xC0000045, ERROR_INVALID_PARAMETER},     /* STATUS_INVALID_PAGE_PROTECTION */
+    {(NTSTATUS)0xC0000020, ERROR_BAD_EXE_FORMAT},        /* STATUS_INVALID_FILE_FOR_SECTION */
+    {(NTSTATUS)0xC0000006, ERROR_NOACCESS},              /* STATUS_IN_PAGE_ERROR */
+    {(NTSTATUS)0xC0000044, ERROR_NOT_ENOUGH_QUOTA},      /* STATUS_QUOTA_EXCEEDED */
+    {(NTSTATUS)0xC000004A, ERROR_SIGNAL_REFUSED},        /* STATUS_SUSPEND_COUNT_EXCEEDED */
+    {(NTSTATUS)0xC000010A, ERROR_ACCESS_DENIED},         /* STATUS_PROCESS_IS_TERMINATING */
+    {(NTSTATUS)0xC0000235, ERROR_INVALID_HANDLE},        /* STATUS_HANDLE_NOT_CLOSABLE */
+    {(NTSTATUS)0xC00001A1, ERROR_INVALID_LOCK_RANGE},    /* STATUS_INVALID_LOCK_RANGE */
+    {(NTSTATUS)0xC0000138, ERROR_INVALID_ORDINAL},       /* STATUS_ORDINAL_NOT_FOUND */
 };
 
 ULONG NTAPI RtlNtStatusToDosError(NTSTATUS status)
@@ -693,8 +728,10 @@ void ShzRunInitRoutines(int reason, void *reserved)
 
 void ShzRunThreadAttach(int reason)
 {
+    extern void ShzLoaderLock(void), ShzLoaderUnlock(void);
     SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
     LIST_ENTRY *head = &ldr->InInitializationOrderModuleList, *l;
+    ShzLoaderLock();                                        /* thread notifications run under the loader lock, as on Windows */
     for (l = reason == DLL_THREAD_ATTACH ? head->Flink : head->Blink; l != head;
          l = reason == DLL_THREAD_ATTACH ? l->Flink : l->Blink) {
         SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InInitializationOrderLinks);
@@ -702,6 +739,7 @@ void ShzRunThreadAttach(int reason)
         call_dll_main(e, reason, 0);
     }
     if (reason == DLL_THREAD_ATTACH) run_tls_callbacks(PEB_IMAGE_BASE(shz_peb()), reason, 0);
+    ShzLoaderUnlock();
 }
 
 /* ---------------------------------------------------------------- process and thread start */
@@ -743,9 +781,13 @@ SHZ_EXPORT void NTAPI ShzProcessStart(void *entry, void *unused)
     DWORD (WINAPI *main_entry)(PVOID) = entry;
     DWORD code;
     (void)unused;
+    extern void ShzLoaderLockInit(void), ShzLoaderLock(void), ShzLoaderUnlock(void);
     ShzInitHeap();
     ShzInitSync();
+    ShzLoaderLockInit();
+    ShzLoaderLock();                                        /* static imports' DllMain run under the loader lock, as on Windows */
     ShzRunInitRoutines(DLL_PROCESS_ATTACH, (void *)1);
+    ShzLoaderUnlock();
     code = main_entry((PVOID)shz_peb());
     RtlExitUserProcess((NTSTATUS)code);
 }
@@ -810,17 +852,21 @@ SHZ_EXPORT NTSTATUS NTAPI LdrLoadDll(PWSTR path, PULONG flags, SHZ_UNICODE_STRIN
     /* search order, loader lock: ldr_search.c. `path` carries LoadLibraryExW flags or a search path (see there). */
     extern NTSTATUS ShzLdrLoadImage(PWSTR, SHZ_UNICODE_STRING *, ULONG64 *);
     extern void ShzLoaderLock(void), ShzLoaderUnlock(void);
+    extern void ShzNotifyLoaded(LIST_ENTRY *);
     ULONG64 base = 0;
     NTSTATUS st;
     SHZ_LDR_ENTRY *e;
+    LIST_ENTRY *tail_before;
     (void)flags;
     ShzLoaderLock();
     e = find_entry_by_name(name);
     if (e) { ++e->LoadCount; *handle = e->DllBase; ShzLoaderUnlock(); return STATUS_SUCCESS; }   /* already loaded */
+    tail_before = PEB_LDR(shz_peb())->InLoadOrderModuleList.Blink;
     st = ShzLdrLoadImage(path, name, &base);
     if (!st) {
         *handle = (PVOID)(uintptr_t)base;
         ShzRunInitRoutines(DLL_PROCESS_ATTACH, 0);                                 /* only entries still marked NEEDS_INIT */
+        ShzNotifyLoaded(tail_before);                                              /* LdrRegisterDllNotification callbacks */
     }
     ShzLoaderUnlock();
     if (st) return st;
@@ -840,6 +886,32 @@ SHZ_EXPORT NTSTATUS NTAPI LdrUnloadDll(PVOID handle)
     }
     return STATUS_INVALID_PARAMETER;
 }
+
+/* The unload event trace: the ring of RTL_UNLOAD_EVENT_TRACE records {BaseAddress, SizeOfImage, Sequence, TimeDateStamp,
+ * CheckSum, ImageName[32], Version[2]} (104 bytes on x64, 64 entries) that debuggers and crash reporters (crashpad's
+ * ProcessSnapshotWin) read, in this and in other processes at the same addresses (ntdll has one base in every process).
+ * Kernel64 never unmaps an image (LdrUnloadDll above), so the ring stays empty: every record has BaseAddress 0, which
+ * readers skip. */
+#define UNLOAD_TRACE_ENTRIES 64
+typedef struct {
+    PVOID BaseAddress;
+    SIZE_T SizeOfImage;
+    ULONG Sequence, TimeDateStamp, CheckSum;
+    WCHAR ImageName[32];
+    ULONG Version[2];
+} SHZ_UNLOAD_EVENT_TRACE;
+static SHZ_UNLOAD_EVENT_TRACE g_unload_trace[UNLOAD_TRACE_ENTRIES];
+static ULONG g_unload_trace_size = sizeof(SHZ_UNLOAD_EVENT_TRACE), g_unload_trace_count = UNLOAD_TRACE_ENTRIES;
+static PVOID g_unload_trace_ptr = g_unload_trace;
+
+SHZ_EXPORT VOID NTAPI RtlGetUnloadEventTraceEx(PULONG *element_size, PULONG *element_count, PVOID *event_trace)
+{
+    *element_size = &g_unload_trace_size;
+    *element_count = &g_unload_trace_count;
+    *event_trace = &g_unload_trace_ptr;                    /* the address of the pointer to the ring, as on Windows */
+}
+
+SHZ_EXPORT PVOID NTAPI RtlGetUnloadEventTrace(VOID) { return g_unload_trace; }
 
 /* Flags: LDR_ADDREF_DLL_PIN (1) pins the module for the life of the process, otherwise the reference count grows by one. */
 SHZ_EXPORT NTSTATUS NTAPI LdrAddRefDll(ULONG flags, PVOID handle)
@@ -943,6 +1015,19 @@ SHZ_EXPORT NTSTATUS NTAPI RtlGetVersion(OSVERSIONINFOW *v)
     v->dwPlatformId = PEB_OS_PLATFORM(shz_peb());
     v->szCSDVersion[0] = 0;
     return STATUS_SUCCESS;
+}
+
+/* RtlGetDeviceFamilyInfoEnum (Windows 10 1607+; Chromium's base::win::GetWindowsDeviceFamily resolves it from ntdll with GetProcAddress
+ * and CHECKs that it exists). *version = the UAP version quad (major<<48 | minor<<32 | build<<16 | revision) of the profile the PEB
+ * declares, the same build RtlGetVersion reports; *family = DEVICEFAMILYINFOENUM_DESKTOP (3), what a PC-class system reports;
+ * *form = DEVICEFAMILYDEVICEFORM_UNKNOWN (0): Kernel64 does not know the chassis (Windows reads it from the SMBIOS chassis type). Any
+ * output pointer may be NULL. */
+SHZ_EXPORT VOID NTAPI RtlGetDeviceFamilyInfoEnum(ULONGLONG *version, ULONG *family, ULONG *form)
+{
+    const uint64_t peb = shz_peb();
+    if (version) *version = ((ULONGLONG)PEB_OS_MAJOR(peb) << 48) | ((ULONGLONG)PEB_OS_MINOR(peb) << 32) | ((ULONGLONG)PEB_OS_BUILD(peb) << 16) | 1;
+    if (family) *family = 3;
+    if (form) *form = 0;
 }
 
 /* DLL entry (ntdll has no DllMain on Windows; the loader still expects a valid entry point here). */

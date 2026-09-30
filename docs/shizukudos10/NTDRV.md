@@ -29,8 +29,18 @@ under **QEMU TCG** with QEMU's `edu` PCI device attached, mounts a driver-store 
 | PCI driver finds QEMU `edu` via `HalGetBusData`, `MmMapIoSpace`es BAR0, reads identification reg `0x010000ED` | PASS |
 | `IoConnectInterrupt` over `irq_register`; a raised `edu` interrupt fires the driver's ISR (vector 42) | PASS |
 | Hosted driver recorded as the `edu` function's owner (`pci_claim` → `ntdrv:shzpci`, seen from user mode via `NtQuerySystemInformation(0x101)`) | PASS |
-| Provider export surface | 173 `ntoskrnl.exe` + 12 `hal.dll` = **185** |
+| Provider export surface | 553 `ntoskrnl.exe` + 19 `hal.dll` = **572** (185 at the start of N3's work, 225 after it, then the N4 batch) |
 | User mode reaches a driver: `NtLoadDriver` → `NtCreateFile("\\??\\ShzEcho")` → `NtDeviceIoControlFile`; a second `NtLoadDriver` of the running service → `STATUS_IMAGE_ALREADY_LOADED`; a `%SystemRoot%` REG_EXPAND_SZ `ImagePath` resolves | PASS |
+
+**A real, unmodified corpus package installs and starts** (N3, `tests/run_k64_pnp.py`, QEMU `-device e1000`,
+`GUEST_RUN` TCG): the ReactOS e1000 NDIS 5 miniport package (`corpus/build.py --packages`) put on the medium with
+`store.py`, installed by `SHZPNP.EXE add-driver --legacy --install` (Services key, Enum devnode, the Net class
+installer's keys) and loaded by `SHZPNP.EXE load e1000` → `NtLoadDriver`: the host loads the corpus `ndis.sys` first
+(e1000 imports it), runs both `DriverEntry`s, claims the function (`ntdrv:e1000`), calls the miniport's `AddDevice`
+with a PDO and sends `IRP_MN_START_DEVICE` with the function's BARs and interrupt line; NDIS's `MiniportInitialize`
+programmed the NIC (bus interface config reads, BAR0 mapped, DMA rings, reset, EEPROM MAC, interrupt connected) and the
+start IRP completed with `STATUS_SUCCESS` (§2.9). `T_DRV_PNP.EXE` checks it from user mode: 24/24 PASS. No NDIS protocol
+is bound on top, so no packets flow yet.
 
 The **default** Kernel64 runs (`run_k64_standalone.py`, `run_k64_net.py`, `run_k64_gui.py`) are
 byte-for-byte unaffected: the driver store ships only in `WIN64_NTDRV.IMG`, and `kmain`'s single
@@ -50,8 +60,8 @@ x86_64-w64-mingw32-gcc -shared -nostdlib -Wl,--subsystem,native -Wl,--entry,Driv
 `import_coverage.py --ntoskrnl` measures any `.sys` package against the build-emitted provider
 tables; for the three test drivers it reports **25/25 (100%)** imports resolved (`HOST_TESTED`). Against drivers nobody
 here wrote — N2's 23 unmodified ReactOS/virtio-win `.sys` built by `shizukudos/ntdrv/corpus/build.py` — the baseline was
-`ntoskrnl.exe` 103/313 and `hal.dll` 6/12 and **1 of 23 images loadable**. After the second export batch (§2.9), SEH
-(§2.10), the KPCR/KUSER support (§2.11) and export-driver linking (§2.12) the measured state is (`HOST_TESTED` for the
+`ntoskrnl.exe` 103/313 and `hal.dll` 6/12 and **1 of 23 images loadable**. After the second export batch (§2.10), SEH
+(§2.11), the KPCR/KUSER support (§2.12) and export-driver linking (§2.13) the measured state is (`HOST_TESTED` for the
 static count, `GUEST_RUN` TCG for the loads):
 
 | Measurement | Result |
@@ -168,26 +178,63 @@ one routing line in `sysext.c`, device hooks in `sysfile.c`/`objects.c`, and one
 PDPT `mem_init` materialises like the kernel-window slot, so a driver mapped after a process exists is visible to
 it. Contiguous/non-cached driver memory comes from the kernel heap (physical 3–15 MiB, direct-mapped).
 
+### 2.9 PnP root, device properties, DMA adapter — `ntdrv_pnp.c` (N3)
+Windows starts a function driver through the PnP manager; the host has no bus driver, so `ntdrv_pnp.c` plays that part
+for the functions of the Kernel64 PCI scan that `shzpnp add-driver --install` bound in the registry. After a service's
+`DriverEntry` succeeds, `NtLoadDriver` walks `Enum\PCI\<hwid>\B<bus>D<dev>F<fn>`; every devnode whose `Service` names the
+service is claimed (`pci_claim` → `ntdrv:<service>`) and gets a PDO (`\Device\NTPNP_PCI<n>` on the host's
+`\Driver\PnpManager`). If the driver set `DriverExtension->AddDevice`, the host enables the function (I/O, memory,
+bus master), calls `AddDevice(DriverObject, PDO)` and sends `IRP_MJ_PNP`/`IRP_MN_START_DEVICE` down the new stack with
+raw and translated `CM_RESOURCE_LIST`s built from the BARs (port/memory, sized by the write-ones probe) and the interrupt
+line (`CmResourceTypeInterrupt`, shared, level; the translated vector is the HAL's). The PDO completes the PnP requests a
+function driver sends down: `IRP_MN_START_DEVICE`/stop/remove with success, `IRP_MN_QUERY_INTERFACE` for
+`GUID_BUS_INTERFACE_STANDARD` (config-space `GetBusData`/`SetBusData`, identity `TranslateBusAddress`, `GetDmaAdapter`),
+anything else with the requester's status. `IoGetDeviceProperty` serves the devnode's values (`DriverKeyName` =
+`{ClassGUID}\NNNN`, description, hardware IDs, class, bus number, address, legacy bus type PCI, PDO name);
+`IoOpenDeviceRegistryKey` opens the software key (`PLUGPLAY_REGKEY_DRIVER`) or `Device Parameters`;
+`IoRegisterDeviceInterface` forms the Windows link name and records it (not published: no consumer here);
+`IoGetDmaAdapter` returns a `DMA_ADAPTER` whose common buffers come from the physically contiguous, direct-mapped kernel
+heap (page aligned) and whose scatter/gather lists are built from MDLs page by page. Layouts (`CM_PARTIAL_RESOURCE_DESCRIPTOR`
+0x14 under pack(4), `BUS_INTERFACE_STANDARD` 0x40, `DMA_OPERATIONS` 0x80, `RTL_QUERY_REGISTRY_TABLE` 0x38, ...) were
+measured from Microsoft's wdm.h and are asserted in the source.
+
+**IRQL is CR8.** The DDK's amd64 headers inline `KeGetCurrentIrql`/`KfRaiseIrql`/`KeLowerIrql` as CR8 reads and
+writes, so an unmodified x64 driver raises and lowers IRQL without calling any export (the corpus `ndis.sys` carries 85
+CR8 instructions; the host's software IRQL never saw them and its `KeAcquireSpinLockAtDpcLevel` check panicked under
+`MiniDoRequest`). The host now keeps no software copy: every provider reads CR8, its own raise/lower write CR8, and the
+scheduler tick does not preempt while CR8 >= DISPATCH_LEVEL, so DISPATCH_LEVEL means "no dispatching" whichever way a
+driver got there. A driver's own CR8 write leaves interrupts enabled, as on Windows.
+
+**Export drivers.** An import from a module other than `ntoskrnl.exe`/`hal.dll` loads `\SHZ\SYS64\DRIVERS\<dll>`
+on demand (its `DriverEntry` runs, as a boot-start dependency's would) and resolves the symbol in that image's export
+directory; the dependency counts its users and `NtUnloadDriver` refuses it while any remain. `NtUnloadDriver` (0xe2)
+and the status query `NtShzDriverQuery` (0xe3) are the other two services N3 added (§2.7).
+
 ### 2.8 Registry `Services` keys
 `\Registry\Machine\System\CurrentControlSet\Services\<name>` with `ImagePath` and `Type`, created
 by the user app via advapi32 and read by `NtLoadDriver` — the same key an INF would populate.
 
-### 2.9 Second export batch (N4)
+### 2.10 Second export batch (N4)
 Implemented against the documented semantics, each with a check in `win64/drivers/apitest.c` (its `DriverEntry` fails,
-and the runner fails, on any `FAIL` line):
+and the runner fails, on any `FAIL` line). Where N3's work (§2.9) and this batch overlapped, one implementation was kept per export: the generic
+ones (driver-object extensions, shutdown notifications, `PoCallDriver`, DMA adapters, `HalTranslateBusAddress`, the Ex/Rtl/Zw lists,
+registry query tables) are this batch's in `ntdrv_ex.c`/`ntdrv_crt.c`/`ntdrv_reg.c`/`ntdrv_dev.c`; the four that depend on the kind of PDO
+(`IoGetDeviceProperty`, `IoOpenDeviceRegistryKey`, `IoRegisterDeviceInterface`, `IoSetDeviceInterfaceState`) are exported from `ntdrv_dev.c` and call N3's
+versions in `ntdrv_pnp.c` for the PDOs of PCI functions bound through the registry, and serve legacy root-enumerated devices themselves. IRQL is N3's
+per-thread `CR8` model. Both agents' runners pass on the merged tree (§3).
 
 | File | Contents |
 | --- | --- |
 | `ntdrv_ex.c` | `ExInterlocked*List`, SLIST (x64 `HeaderX64` layout), lookaside lists, `ERESOURCE`, fast/guarded mutexes, in-stack queued spin locks, critical regions, callbacks, rundown protection, bug-check callbacks, `Kd*`, the data exports (`KeNumberProcessors`, `KdDebuggerNotPresent`, `NlsMbCodePageTag`, `HalDispatchTable`, …), object type descriptors |
 | `ntdrv_crt.c` | one printf engine behind `sprintf`/`swprintf`/`_snprintf`/`_vsnwprintf` and `DbgPrint` (Microsoft conversions), `str*`/`wcs*`, code-page and case conversion, counted strings, bitmaps, time fields, GUID strings, `RtlVerifyVersionInfo`, image directory helpers, range lists, resource-descriptor encoders |
 | `ntdrv_reg.c` | key/value information classes, `ZwEnumerate*`/`ZwQueryKey`/`ZwDelete*`, `RtlQueryRegistryValues` (query tables), `RtlWriteRegistryValue` & co., `ZwLoadDriver`/`ZwUnloadDriver`, `ZwQuerySystemInformation`, `ZwPowerInformation` |
-| `ntdrv_pnp.c` | per-device host record, `Po*`, device interfaces and `IoRegisterPlugPlayNotification`, `IoInvalidateDeviceRelations`, WMI registration, cancel/StartIo, remove locks, timers, root-bus PDOs (`IoReportDetectedDevice`, `IoGetDeviceProperty`, `IoOpenDeviceRegistryKey`), resource builders, `HalAssignSlotResources`, DMA adapters (`IoGetDmaAdapter`), partition tables (MBR+GPT), `Mm` pageable/system-routine helpers |
+| `ntdrv_dev.c` | per-device host record, `Po*`, device interfaces and `IoRegisterPlugPlayNotification`, `IoInvalidateDeviceRelations`, WMI registration, cancel/StartIo, remove locks, timers, root-bus PDOs (`IoReportDetectedDevice`, `IoGetDeviceProperty`, `IoOpenDeviceRegistryKey`), resource builders, `HalAssignSlotResources`, DMA adapters (`IoGetDmaAdapter`), partition tables (MBR+GPT), `Mm` pageable/system-routine helpers |
 | `ntdrv_io.c`, `ntdrv_zw.c`, `ntdrv_mm.c` | device handles through `IRP_MJ_CREATE`, `ZwDeviceIoControlFile`, `ObReferenceObjectByHandle` with type checks, page-list MDLs mapped into the driver window, `IoQueueWorkItemEx`, per-interrupt spin locks |
 
 The ABI contract grew with it: `ntddk_abi.h`/`ntddk_abi_check.c` now also pin the full `DEVICE_OBJECT`, `KDEVICE_QUEUE`,
 the PnP/Power stack-location parameters and about forty structure sizes against Microsoft's `wdm.h`.
 
-### 2.10 Structured exception handling — `ntdrv_seh.c`
+### 2.11 Structured exception handling — `ntdrv_seh.c`
 Drivers keep `__try`/`__except`/`__finally` state in `.pdata`/`.xdata` with `__C_specific_handler` as the language handler.
 Provided: `RtlLookupFunctionEntry`, `RtlVirtualUnwind` (unwind codes, chained info, epilog detection), `RtlUnwind(Ex)`,
 `__C_specific_handler` (search and unwind phases over the scope table), `RtlCaptureContext`/`RtlRestoreContext`,
@@ -198,7 +245,7 @@ data, so the frame walk stops at the first frame outside a driver and an excepti
 `KMODE_EXCEPTION_NOT_HANDLED` bug check. `APITEST.SYS` carries hand-assembled functions with real `.pdata` (mingw GCC has no `__try`)
 covering software raise, hardware fault, `__finally` during unwind and a `CONTINUE_SEARCH` filter.
 
-### 2.11 What WDK-built drivers read without calling the kernel
+### 2.12 What WDK-built drivers read without calling the kernel
 - **IRQL**: `KeGetCurrentIrql`/`KeRaiseIrql`/`KeLowerIrql` are inline `CR8` accesses on x64, so the host mirrors its IRQL into `CR8`.
 - **KPCR/KPRCB through GS**: `KeGetCurrentThread`/`PsGetCurrentThread` are `gs:[0x188]`. The kernel never uses GS, so each thread that
   runs driver code gets its own small KPCR (`Self` 0x18, `CurrentPrcb` 0x20, PRCB at 0x180 with `CurrentThread`), the scheduler swaps
@@ -207,7 +254,7 @@ covering software raise, hardware fault, `__finally` during unwind and a `CONTIN
 - **KUSER_SHARED_DATA** at `0xFFFFF78000000000`, read-only, refreshed every millisecond (`ntdrv_kuser.c`): tick count, interrupt and system
   time, Windows version, processor features, processor count.
 
-### 2.12 Export drivers and KMDF
+### 2.13 Export drivers and KMDF
 An import from a module other than `ntoskrnl.exe`/`hal.dll` (`wdfldr.sys`, `ndis.sys`, `classpnp.sys`, `scsiport.sys`, `storport.sys`) is
 resolved against that module's mapped export table, loading `\SHZ\DRIVERS\<MODULE>` on demand; export forwarders
 (`scsiport!ScsiPortStallExecution` → `ntoskrnl!KeStallExecutionProcessor`) resolve through the target; an image without an entry point runs
@@ -278,6 +325,10 @@ implied by a green IOCTL test.
 - **Framework gap:** KMDF, NDIS 6, StorPort, USB, HID, WDDM are the remaining large blocks. A
   chipset/simple function driver could load once KMDF is built; storage/network/USB/HID need
   their class stack; **graphics needs WDDM and is the farthest.**
+- **Done (N3):** one real corpus package taken through install → load → `AddDevice` → `IRP_MN_START_DEVICE` →
+  `MiniportInitialize` on the device (ReactOS e1000 over the ReactOS ndis.sys, on QEMU's e1000), driven by the same
+  `shzpnp` commands a vendor package uses; 40 more exports; the PnP root of §2.9. Still no protocol above NDIS, so no
+  traffic; no NDIS 6, KMDF, StorPort, WDDM.
 - **Not claimed:** that any specific Intel production driver loads today. None was run. The export
   surface a real `igdkmd64`/`e1i68x64`/`iaStorAC` imports is far larger than 183 and includes the
   framework DLLs above; `import_coverage.py --ntoskrnl` on such a package is the honest next

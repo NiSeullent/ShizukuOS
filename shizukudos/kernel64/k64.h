@@ -144,13 +144,17 @@ struct thread {
     volatile int suspend_count;                 /* NtSuspendThread: >0 stops the thread at its next return to user mode */
     volatile int suspended;                     /* parked in that stop (a resume or a kill wakes it) */
     uint64_t user_stack;                        /* allocation base of the user stack the kernel reserved for it (0: none) */
+    void *impersonation;                        /* impersonation token object (kobject_t *, sysk32_sec.c) or NULL */
     int creator_hold;                           /* user thread: its creator may still read `object` (see sched.c reaping) */
     /* CPU accounting (sched.c): timer ticks charged while this thread was current, split by the mode the tick interrupted,
      * TSC cycles between being switched in and out, and the tick numbers of creation and exit. */
     uint64_t user_ticks, kernel_ticks, cycles, tsc_in, create_tick, exit_tick;
+    uint64_t cr8;                               /* SHZ_STANDALONE: the thread's IRQL (CR8) while it is not running (sched.c schedule()) */
     int boost_disabled;                         /* SetThreadPriorityBoost setting (the scheduler never boosts) */
     uint32_t mem_priority;                      /* SetThreadInformation(ThreadMemoryPriority) setting, 1..5 */
     uint32_t power_control, power_state;        /* SetThreadInformation(ThreadPowerThrottling) setting (no scheduler effect) */
+    uint16_t *desc;                             /* SetThreadDescription text (UTF-16, kmalloc'd, desc_bytes long; 0 = none); freed with the thread */
+    uint32_t desc_bytes;
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
@@ -209,6 +213,7 @@ typedef struct {
 } k64_boot_fb_t;
 int k64_boot_framebuffer(k64_boot_fb_t *out);
 const char *k64_boot_cmdline(void);             /* shz_bootinfo_t.cmdline, "" when absent */
+int k64_cmdline_has(const char *word);          /* autorun.c: `word` (or `word=...`) is on the kernel command line */
 
 /* ---- tests.c ---- */
 void run_self_tests(const shz_bootinfo_t *bi);

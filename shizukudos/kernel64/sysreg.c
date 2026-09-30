@@ -471,6 +471,12 @@ static const char *object_type_name(uint32_t type)
     case OB_TIMER: return "Timer";
     case OB_DIRECTORY: return "Directory";
     case OB_KEY: return "Key";
+    case OB_SECTION: return "Section";
+    case OB_NPIPE: return "File";
+    case OB_IOCP: return "IoCompletion";
+    case OB_JOB: return "Job";
+    case OB_TOKEN: return "Token";
+    case OB_SOCKET: return "File";
     default: return 0;
     }
 }

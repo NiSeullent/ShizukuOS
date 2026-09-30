@@ -72,11 +72,25 @@ def scan_exports(paths, marker):
     return sorted(set(names))
 
 
-def write_def(path, library, names, forwarders=()):
+def write_def(path, library, names, forwarders=(), ordinals=None):
+    """ordinals: {name: ordinal} to pin (module.json "ordinals"): the Windows ordinals programs import by number (the
+    Winsock 1.1 exports of ws2_32, for instance); every other export gets whatever ordinal the linker assigns."""
+    ordinals = ordinals or {}
+    missing = sorted(set(ordinals) - set(names))
+    if missing:
+        raise SystemExit(f"{library}: pinned ordinals for names that are not exported: {missing}")
     body = [f"LIBRARY {library}", "EXPORTS"]
-    body += [f"  {n}" for n in names]
+    body += [f"  {n} @{ordinals[n]}" if n in ordinals else f"  {n}" for n in names]
     body += [f"  {f}" for f in forwarders]
     path.write_text("\n".join(body) + "\n")
+
+
+def version_resource(rc):
+    """Compiles a DLL's VERSIONINFO script (windres) and returns the object to link; programs read a system DLL's file
+    version to learn the Windows build (Chromium base::win::OSInfo::Kernel32Version, crashpad's module list)."""
+    res = OUT / (rc.stem + "_res.o")
+    run([WINDRES, "-O", "coff", "-o", res, rc])
+    return res
 
 
 def build_ntdll():
@@ -88,8 +102,8 @@ def build_ntdll():
     dll = OUT / "ntdll.dll"
     cmd = [CC, *COMMON, "-DSHZ_NTDLL_BUILD", "-shared", "-nostdlib", "-Wl,--entry,ShzNtdllEntry",
            f"-Wl,--image-base,{NTDLL_BASE}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
-           "-I", W64 / "include", *src, W64 / "ntdll" / "ntdll_asm.S", OUT / "nt_stubs.S", OUT / "ntdll.def",
-           "-lgcc", "-o", dll]
+           "-I", W64 / "include", *src, W64 / "ntdll" / "ntdll_asm.S", OUT / "nt_stubs.S", version_resource(W64 / "ntdll" / "ntdll.rc"),
+           OUT / "ntdll.def", "-lgcc", "-o", dll]
     run(cmd)
     run([DLLTOOL, "-d", OUT / "ntdll.def", "-l", OUT / "libntdll.a", "--kill-at"])
     return dll, cmd, names
@@ -114,7 +128,7 @@ def build_kernel32(ntdll_names):
     dll = OUT / "kernel32.dll"
     cmd = [CC, *COMMON, "-shared", "-nostdlib", "-Wl,--entry,ShzKernel32Entry", f"-Wl,--image-base,{K32_BASE}",
            "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at", "-I", W64 / "include", *src,
-           OUT / "kernel32.def", "-L", OUT, "-lntdll", "-lgcc", "-o", dll]
+           version_resource(W64 / "kernel32" / "kernel32.rc"), OUT / "kernel32.def", "-L", OUT, "-lntdll", "-lgcc", "-o", dll]
     run(cmd)
     run([DLLTOOL, "-d", OUT / "kernel32.def", "-l", OUT / "libkernel32.a", "--kill-at"])
     return dll, cmd, names
@@ -148,7 +162,7 @@ def build_modules():
             d, cfg = pending.pop(name)
             src = sorted(d.glob("*.c"))
             names = scan_exports(src, "DLLAPI")
-            write_def(OUT / f"{name}.def", f"{name}.dll", names, cfg.get("forwarders", []))
+            write_def(OUT / f"{name}.def", f"{name}.dll", names, cfg.get("forwarders", []), cfg.get("ordinals"))
             has_main = any(re.search(r"\bDllMain\s*\(", s.read_text()) for s in src)
             base = DLL_BASE + DLL_STRIDE * len(order)
             dll = OUT / f"{name}.dll"
@@ -297,10 +311,12 @@ def build_ntdrv_host():
     return ntdir, drivers, exports
 
 
-def build_ntdrv_app(module_libs):
+def build_ntdrv_app(module_libs, name="t_ntdrv"):
+    """win64/ntdrv/<name>.c: a driver-host test program that is not packed into WIN64.IMG (t_ntdrv -> WIN64_NTDRV.IMG;
+    t_drv_pnp -> the initrd tests/run_k64_pnp.py composes with the corpus driver store)."""
     crt = W64 / "crt"
-    src = W64 / "ntdrv" / "t_ntdrv.c"
-    exe = OUT / "t_ntdrv.exe"
+    src = W64 / "ntdrv" / f"{name}.c"
+    exe = OUT / f"{name}.exe"
     run([CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
          "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c",
          "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe])
@@ -368,14 +384,18 @@ def main():
     if data_dir.exists():
         for f in sorted(data_dir.iterdir()):
             files.append((f"\\SHZ\\TESTS\\{f.name.upper()}", f.read_bytes()))
+    # NT driver host: a separate initrd carries the driver store (\SHZ\DRIVERS), so the default WIN64.IMG has none and
+    # Kernel64's ntdrv_selftest() stays a no-op there. The unmodified ECHO.SYS test driver does ride in WIN64.IMG as test
+    # data (\SHZ\TESTS\ECHO.SYS, not a driver store): T_DRV_LOAD.EXE packages it and takes it through
+    # SHZPNP.EXE add-driver / load / status / unload, the path a vendor package uses.
+    # tests/run_k64_ntdrv.py mounts the driver-store image.
+    ntdir, drivers, nt_exports = build_ntdrv_host()
+    ntapp = build_ntdrv_app(sorted(modules))
+    pnpapp = build_ntdrv_app(sorted(modules), "t_drv_pnp")
+    files.append(("\\SHZ\\TESTS\\ECHO.SYS", drivers["echo"].read_bytes()))
     img = OUT / "WIN64.IMG"
     img.write_bytes(pack_archive(files))
 
-    # NT driver host: a separate initrd carries the driver store (\SHZ\DRIVERS), so the default WIN64.IMG has none and
-    # Kernel64's ntdrv_selftest() stays a no-op there (ntdll still exports NtLoadDriver for SHZPNP.EXE's `load`).
-    # tests/run_k64_ntdrv.py mounts this one.
-    ntdir, drivers, nt_exports = build_ntdrv_host()
-    ntapp = build_ntdrv_app(sorted(modules))
     ntfiles = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
         ntfiles.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
@@ -407,7 +427,8 @@ def main():
     print(json.dumps({"ntdll_exports": len(ntdll_names), "kernel32_exports": len(k32_names), "modules": sorted(modules), "apps": sorted(apps),
                       "WIN64.IMG": sha256_file(img),
                       "ntdrv": {"providers": len(nt_exports["ntoskrnl.exe"]) + len(nt_exports["hal.dll"]),
-                                "drivers": sorted(drivers), "WIN64_NTDRV.IMG": sha256_file(ntimg)}}, indent=2))
+                                "drivers": sorted(drivers), "WIN64_NTDRV.IMG": sha256_file(ntimg),
+                                "T_DRV_PNP.EXE": sha256_file(pnpapp)}}, indent=2))
 
 
 if __name__ == "__main__":

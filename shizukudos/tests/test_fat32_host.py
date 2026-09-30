@@ -9,7 +9,9 @@ plus an ASan/UBSan variant when clang is available) and checks every entry the r
 attributes, mtimes (fixed epoch) and CRC-32 of the content read back through fat32_read. Then the same walker runs
 a scripted write sequence (--write) on a copy of each image: long-name and 8.3 creates, a directory, chunked and
 gapped writes, in-place overwrite, append, shrink/grow truncation, directory growth past one cluster, duplicate and
-invalid names. The result is checked three ways: fsck.fat -n must find nothing, mtools must read back the expected
+invalid names, deletion of a file and of a directory (refused while not empty), renames in place, into another
+directory, of a directory with content (its ".." must follow), case-only, with and without replacing an existing file,
+and a refused move of a directory into its own subtree. The result is checked three ways: fsck.fat -n must find nothing, mtools must read back the expected
 bytes of every file and list the generated LONGNA~N aliases, and the walker must enumerate the expected tree.
 Nothing here touches a device or a VM.
 """
@@ -245,6 +247,13 @@ def apply_write_script(expected):
         put(f"Long Directory Name/file number {i:02d} with a long name.txt", f"content {i}\r\n".encode())
     put("longname1.txt", b"")
     put("longname2.txt", b"")
+    # deletion ("Doomed Folder" and its file are gone again) and renaming
+    for old, new in (("big_written.bin", "Renamed Big File.bin"), ("UPPER.TXT", "SUB/MOVED.TXT"), ("HELLO.TXT", "Hello.txt")):
+        exp[new] = exp.pop(old)
+        touched[new] = touched.pop(old)
+    exp["SUB/Moved Dir"] = None
+    put("SUB/Moved Dir/x.txt", b"x\r\n")
+    put("replace me.txt", b"new!")
     return exp, touched
 
 

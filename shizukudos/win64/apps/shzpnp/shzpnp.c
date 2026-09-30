@@ -14,7 +14,12 @@
  *   shzpnp match [<device>...] [--store <dir>] [--all] [--legacy]
  *        rank the models of the media driver store (<dir>\INDEX.TXT, default C:\DRIVERS, written by
  *        shizukudos/ntdrv/store.py) against devices; without devices, against every device of `enum`.
- *   shzpnp load <service>           NtLoadDriver(\Registry\Machine\System\CurrentControlSet\Services\<service>)
+ *   shzpnp load <service>           reads the service key (Type, Start, ImagePath), checks the image file, then
+ *                                    NtLoadDriver(\Registry\Machine\System\CurrentControlSet\Services\<service>):
+ *                                    the NT driver host maps the image, runs DriverEntry and claims the PCI functions
+ *                                    whose Enum key names the service; the status is reported in words
+ *   shzpnp unload <service>         NtUnloadDriver: DriverUnload runs, the claims are released
+ *   shzpnp status [<service>]       the loaded driver images with their device objects and PCI functions
  *
  * Devices: VVVV:DDDD[:SSSSSSSS[:RR[:CCSSPP]]], a PCI\VEN_... hardware ID, or a "K64 pci: ..." boot-log line.
  * INF semantics are those of shzinf.c (cross-checked against shizukudos/ntdrv/inf.py). Paths: %10% = C:\SHZ,
@@ -694,6 +699,82 @@ static int next_free_index(HKEY parent, const char *fmt_prefix, int width)
     return -1;
 }
 
+/* The Net class installer (Windows: NetCfg, invoked by SetupAPI for Class=Net) leaves registry state NDIS reads when
+ * the miniport's AddDevice runs: in the software key NetCfgInstanceId ({GUID} naming the adapter), Characteristics
+ * and BusType from the DDInstall section, ComponentId, and Linkage\Export = \Device\{GUID} (the adapter's device
+ * object name), Linkage\RootDevice = {GUID}; in the service key Linkage\{Bind,Export,Route}; and the connection
+ * record Control\Network\{Net class}\{GUID}\Connection. The GUID is derived from the devnode instance path and the
+ * service (FNV-1a), so the same install always names the same adapter; no protocol is bound (UpperBind is not
+ * written: there is no TCP/IP stack on this side). */
+static const char NET_CLASS[] = "{4D36E972-E325-11CE-BFC1-08002BE10318}";
+
+static void net_instance_guid(const char *instance, const char *service, char *out, size_t cap)
+{
+    uint64_t h1 = 0xcbf29ce484222325ull, h2 = 0x84222325cbf29ce4ull;
+    const char *p;
+    for (p = instance; *p; ++p) { h1 ^= (unsigned char)(*p >= 'a' && *p <= 'z' ? *p - 32 : *p); h1 *= 0x100000001b3ull; }
+    h1 ^= '|'; h1 *= 0x100000001b3ull;
+    for (p = service; *p; ++p) { h1 ^= (unsigned char)(*p >= 'a' && *p <= 'z' ? *p - 32 : *p); h1 *= 0x100000001b3ull; }
+    for (p = service; *p; ++p) { h2 ^= (unsigned char)*p; h2 *= 0x100000001b3ull; }
+    for (p = instance; *p; ++p) { h2 ^= (unsigned char)*p; h2 *= 0x100000001b3ull; }
+    h1 = (h1 & ~0xf000ull) | 0x4000ull;                            /* version 4 nibble */
+    h2 = (h2 & ~0xc000000000000000ull) | 0x8000000000000000ull;    /* RFC 4122 variant */
+    shz_snprintf(out, cap, "{%08X-%04X-%04X-%04X-%04X%08X}", (unsigned)(h1 >> 32), (unsigned)(h1 >> 16) & 0xffff,
+                 (unsigned)h1 & 0xffff, (unsigned)(h2 >> 48) & 0xffff, (unsigned)(h2 >> 32) & 0xffff, (unsigned)h2);
+}
+
+static int parse_int(const char *s)
+{
+    int base = 10, v = 0;
+    if (!s) return -1;
+    while (*s == ' ' || *s == '\t') ++s;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { base = 16; s += 2; }
+    if (!*s) return -1;
+    for (; *s; ++s) {
+        int d = *s >= '0' && *s <= '9' ? *s - '0' : *s >= 'a' && *s <= 'f' ? *s - 'a' + 10 : *s >= 'A' && *s <= 'F' ? *s - 'A' + 10 : -1;
+        if (d < 0 || d >= base) return -1;
+        v = v * base + d;
+    }
+    return v;
+}
+
+static void net_class_install(const shzinf_t *inf, const shzinf_install_t *r, const char *cls_key, const char *instance,
+                              const char *service, const char *hwid)
+{
+    const shzinf_section_t *dd = shzinf_section(inf, r->section);
+    const char *chars = dd ? shzinf_first(dd, "Characteristics") : 0, *bustype = dd ? shzinf_first(dd, "BusType") : 0;
+    char guid[48], devname[64], path[300];
+    HKEY k;
+    int c = parse_int(chars);
+    net_instance_guid(instance, service ? service : "", guid, sizeof guid);
+    scpy(devname, sizeof devname, "\\Device\\");
+    scat(devname, sizeof devname, guid);
+    k = reg_open(HKEY_LOCAL_MACHINE, cls_key);
+    if (k) RegCloseKey(k);
+    k = reg_create(HKEY_LOCAL_MACHINE, cls_key);
+    if (!k) return;
+    set_sz(k, "NetCfgInstanceId", guid, REG_SZ);
+    if (c >= 0) set_dword(k, "Characteristics", (DWORD)c);
+    if (bustype) set_sz(k, "BusType", bustype, REG_SZ);
+    set_sz(k, "ComponentId", hwid, REG_SZ);
+    RegCloseKey(k);
+    scpy(path, sizeof path, cls_key); scat(path, sizeof path, "\\Linkage");
+    k = reg_create(HKEY_LOCAL_MACHINE, path);
+    if (k) { set_multi(k, "Export", devname, 1); set_multi(k, "RootDevice", guid, 1); RegCloseKey(k); }
+    if (service) {
+        char route[64];
+        scpy(path, sizeof path, "SYSTEM\\CurrentControlSet\\Services\\"); scat(path, sizeof path, service); scat(path, sizeof path, "\\Linkage");
+        k = reg_create(HKEY_LOCAL_MACHINE, path);
+        scpy(route, sizeof route, "\""); scat(route, sizeof route, guid); scat(route, sizeof route, "\"");
+        if (k) { set_multi(k, "Bind", devname, 1); set_multi(k, "Export", devname, 1); set_multi(k, "Route", route, 1); RegCloseKey(k); }
+    }
+    scpy(path, sizeof path, "SYSTEM\\CurrentControlSet\\Control\\Network\\"); scat(path, sizeof path, NET_CLASS);
+    scat(path, sizeof path, "\\"); scat(path, sizeof path, guid); scat(path, sizeof path, "\\Connection");
+    k = reg_create(HKEY_LOCAL_MACHINE, path);
+    if (k) { set_sz(k, "Name", "Local Area Connection", REG_SZ); set_sz(k, "PnpInstanceID", instance, REG_SZ); set_dword(k, "ShowIcon", 1); RegCloseKey(k); }
+    printf("  Net class installer: NetCfgInstanceId=%s Characteristics=%s Linkage\\Export=%s\n", guid, chars ? chars : "-", devname);
+}
+
 static int install_on_device(shzinf_t *inf, const shzinf_model_t *m, const device_t *d, const char *pkgdir, const char *published,
                              const shzinf_target_t *t)
 {
@@ -809,6 +890,8 @@ static int install_on_device(shzinf_t *inf, const shzinf_model_t *m, const devic
         RegCloseKey(hdev);
         printf("  device key Enum\\%s: Service=%s Driver=%s\n", d->key, assoc >= 0 ? r->svc[assoc].name : "-", drv);
     }
+    if (hsw && ieq(guid, NET_CLASS))                        /* Class=Net: what the Net class installer adds */
+        net_class_install(inf, r, cls_key, d->key, assoc >= 0 ? r->svc[assoc].name : 0, m->hwid);
     if (r->kmdf) printf("  note: KMDF %s driver: needs Wdf01000.sys/WdfLdr (the KMDF runtime) in the driver host\n", r->kmdf);
     shzinf_install_free(r);
     return ok && !g_errors;
@@ -1004,38 +1087,212 @@ static int cmd_enum(int argc, char **argv)
 
 typedef struct { USHORT Length, MaximumLength; PWSTR Buffer; } shz_ustr_t;
 typedef LONG (NTAPI *nt_load_driver_t)(shz_ustr_t *);
+typedef LONG (NTAPI *nt_drv_query_t)(PVOID, ULONG, PULONG);
+/* NtShzDriverQuery record (kernel64/ntsys.h shz_driver_info_t) */
+typedef struct {
+    char service[64];
+    unsigned long long image_base;
+    DWORD image_size, flags, ndevices, npci;
+    struct { BYTE bus, dev, fn, pad; } pci[4];
+    char device[4][48];
+} shz_drvinfo_t;
+#define DRV_STARTED 0x1u
+#define DRV_DEPENDENCY 0x2u
 
-static int cmd_load(int argc, char **argv)
+#define STATUS_OBJECT_NAME_NOT_FOUND_ ((LONG)0xC0000034)
+#define STATUS_INVALID_IMAGE_FORMAT_ ((LONG)0xC000007B)
+#define STATUS_PROCEDURE_NOT_FOUND_ ((LONG)0xC000007A)
+#define STATUS_IMAGE_ALREADY_LOADED_ ((LONG)0xC000010E)
+#define STATUS_INVALID_DEVICE_REQUEST_ ((LONG)0xC0000010)
+#define STATUS_CONNECTION_IN_USE_ ((LONG)0xC0000108)
+#define STATUS_BUFFER_TOO_SMALL_ ((LONG)0xC0000023)
+#define STATUS_NO_MEMORY_ ((LONG)0xC0000017)
+#define STATUS_INSUFFICIENT_RESOURCES_ ((LONG)0xC000009A)
+
+static void *ntdll_fn(const char *name)
+{
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    return ntdll ? (void *)GetProcAddress(ntdll, name) : 0;
+}
+
+/* NtLoadDriver / NtUnloadDriver take the service key as an object-manager path */
+static LONG call_with_regpath(nt_load_driver_t fn, const char *service)
 {
     char key[300];
     WCHAR *w;
-    HKEY k;
-    HMODULE ntdll;
-    nt_load_driver_t fn;
     shz_ustr_t us;
     LONG st;
-    if (argc < 1) { printf("usage: shzpnp load <service>\n"); return 2; }
-    scpy(key, sizeof key, "SYSTEM\\CurrentControlSet\\Services\\");
-    scat(key, sizeof key, argv[0]);
-    k = reg_open(HKEY_LOCAL_MACHINE, key);
-    if (!k) { printf("error: no service key HKLM\\%s (add-driver --install creates it)\n", key); return 2; }
-    RegCloseKey(k);
-    ntdll = GetModuleHandleA("ntdll.dll");
-    fn = ntdll ? (nt_load_driver_t)(void *)GetProcAddress(ntdll, "NtLoadDriver") : 0;
-    if (!fn) { printf("driver host not present: ntdll.dll exports no NtLoadDriver\n"); return 3; }
     scpy(key, sizeof key, "\\Registry\\Machine\\System\\CurrentControlSet\\Services\\");
-    scat(key, sizeof key, argv[0]);
+    scat(key, sizeof key, service);
     w = wide(key);
     us.Buffer = w;
     us.Length = (USHORT)(lstrlenW(w) * sizeof(WCHAR));
     us.MaximumLength = (USHORT)(us.Length + sizeof(WCHAR));
     st = fn(&us);
     free(w);
+    return st;
+}
+
+static int ci_prefix(const char *s, const char *pfx)        /* case-insensitive "s starts with pfx" */
+{
+    for (; *pfx; ++s, ++pfx) {
+        char a = *s >= 'a' && *s <= 'z' ? (char)(*s - 32) : *s, b = *pfx >= 'a' && *pfx <= 'z' ? (char)(*pfx - 32) : *pfx;
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
+static int query_dword(HKEY k, const char *name, DWORD *out)
+{
+    WCHAR *wn = wide(name);
+    DWORD type = 0, sz = 4;
+    LONG e = RegQueryValueExW(k, wn, 0, &type, (BYTE *)out, &sz);
+    free(wn);
+    return e == 0 && type == REG_DWORD;
+}
+
+/* The service control manager's ImagePath rules, as the kernel applies them (kernel64/ntdrv_io.c image_path): absent ->
+ * \SystemRoot\SYS64\DRIVERS\<service>.sys; %SystemRoot%\x and \SystemRoot\x -> C:\SHZ\x; absolute paths as they are;
+ * a relative path is under SystemRoot. */
+static void service_image_file(const char *service, const char *raw, char *out, size_t cap)
+{
+    if (!raw || !raw[0]) {
+        scpy(out, cap, "C:\\SHZ\\SYS64\\DRIVERS\\"); scat(out, cap, service); scat(out, cap, ".sys");
+    } else if (ci_prefix(raw, "%SystemRoot%\\")) {
+        scpy(out, cap, "C:\\SHZ\\"); scat(out, cap, raw + 13);
+    } else if (ci_prefix(raw, "\\SystemRoot\\")) {
+        scpy(out, cap, "C:\\SHZ\\"); scat(out, cap, raw + 12);
+    } else if (ci_prefix(raw, "\\??\\")) {
+        scpy(out, cap, raw + 4);
+    } else if (raw[0] == '\\' || raw[1] == ':') {
+        scpy(out, cap, raw);
+    } else {
+        scpy(out, cap, "C:\\SHZ\\"); scat(out, cap, raw);
+    }
+}
+
+static int query_loaded(shz_drvinfo_t **out, DWORD *count)
+{
+    nt_drv_query_t q = (nt_drv_query_t)ntdll_fn("NtShzDriverQuery");
+    static shz_drvinfo_t rows[32];
+    ULONG n = 0;
+    LONG st;
+    *out = rows; *count = 0;
+    if (!q) return 3;
+    st = q(rows, sizeof rows, &n);
+    if (st == STATUS_INVALID_SYSTEM_SERVICE_ || st == STATUS_NOT_IMPLEMENTED_) return 3;
+    if (st == STATUS_BUFFER_TOO_SMALL_) n = 32;
+    else if (st) { printf("NtShzDriverQuery = %08x\n", (unsigned)st); return 1; }
+    *count = n;
+    return 0;
+}
+
+static void print_driver(const shz_drvinfo_t *r)
+{
+    DWORD i;
+    printf("%-16s image %llx (%u bytes)%s%s\n", r->service, r->image_base, (unsigned)r->image_size,
+           (r->flags & DRV_DEPENDENCY) ? " export driver" : "", (r->flags >> 8) & 0xff ? " (in use)" : "");
+    printf("  device objects: %u", (unsigned)r->ndevices);
+    for (i = 0; i < r->ndevices && i < 4 && r->device[i][0]; ++i) printf("%s%s", i ? ", " : ": ", r->device[i]);
+    printf("\n  PCI functions:  %u", (unsigned)r->npci);
+    for (i = 0; i < r->npci && i < 4; ++i)
+        printf("%s%02X:%02X.%X", i ? ", " : ": ", (unsigned)r->pci[i].bus, (unsigned)r->pci[i].dev, (unsigned)r->pci[i].fn);
+    printf("\n");
+}
+
+/* shzpnp status [<service>]: the images the NT driver host has loaded, their device objects and PCI functions */
+static int cmd_status(int argc, char **argv)
+{
+    shz_drvinfo_t *rows;
+    DWORD n, i, shown = 0;
+    int rc = query_loaded(&rows, &n);
+    if (rc == 3) { printf("driver host not present: ntdll.dll exports no NtShzDriverQuery\n"); return 3; }
+    if (rc) return 1;
+    for (i = 0; i < n; ++i) {
+        if (argc >= 1 && !ieq(rows[i].service, argv[0])) continue;
+        print_driver(&rows[i]);
+        ++shown;
+    }
+    if (argc >= 1 && !shown) { printf("%s: not loaded\n", argv[0]); return 1; }
+    if (argc < 1) printf("%u driver image(s) loaded by the NT driver host\n", (unsigned)n);
+    return 0;
+}
+
+static int cmd_load(int argc, char **argv)
+{
+    char key[300], file[320];
+    char *raw;
+    HKEY k;
+    nt_load_driver_t fn;
+    LONG st;
+    DWORD type = 0, start = 0;
+    int have_type, have_start;
+    if (argc < 1) { printf("usage: shzpnp load <service>\n"); return 2; }
+    scpy(key, sizeof key, "SYSTEM\\CurrentControlSet\\Services\\");
+    scat(key, sizeof key, argv[0]);
+    k = reg_open(HKEY_LOCAL_MACHINE, key);
+    if (!k) { printf("error: no service key HKLM\\%s (add-driver --install creates it)\n", key); return 2; }
+    have_type = query_dword(k, "Type", &type);
+    have_start = query_dword(k, "Start", &start);
+    raw = query_sz(k, "ImagePath");
+    RegCloseKey(k);
+    service_image_file(argv[0], raw, file, sizeof file);
+    printf("service %s: Type=%u%s Start=%u%s ImagePath=%s\n", argv[0], (unsigned)type,
+           !have_type ? " (absent)" : type == 1 ? " (kernel driver)" : type == 2 ? " (file system driver)" : "",
+           (unsigned)start, !have_start ? " (absent)" : start == 0 ? " (boot)" : start == 1 ? " (system)" : start == 2 ? " (auto)" :
+           start == 3 ? " (demand)" : start == 4 ? " (disabled)" : "", raw ? raw : "(absent)");
+    printf("image file: %s\n", file);
+    free(raw);
+    if (have_type && type != 1 && type != 2) { printf("error: Type %u is not a kernel-mode driver service\n", (unsigned)type); return 2; }
+    if (have_start && start == 4) { printf("error: the service is disabled (Start=4)\n"); return 2; }
+    if (!file_exists(file)) { printf("error: image file not found: %s\n", file); return 2; }
+    fn = (nt_load_driver_t)ntdll_fn("NtLoadDriver");
+    if (!fn) { printf("driver host not present: ntdll.dll exports no NtLoadDriver\n"); return 3; }
+    st = call_with_regpath(fn, argv[0]);
     if (st == STATUS_INVALID_SYSTEM_SERVICE_ || st == STATUS_NOT_IMPLEMENTED_) {
         printf("driver host not present: NtLoadDriver returned %08x\n", (unsigned)st);
         return 3;
     }
-    printf("NtLoadDriver(%s) = %08x%s\n", argv[0], (unsigned)st, st == 0 ? " (loaded)" : "");
+    printf("NtLoadDriver(%s) = %08x", argv[0], (unsigned)st);
+    switch (st) {
+    case 0: printf(" (loaded: DriverEntry returned STATUS_SUCCESS)\n"); break;
+    case STATUS_IMAGE_ALREADY_LOADED_: printf(" already loaded\n"); break;
+    case STATUS_OBJECT_NAME_NOT_FOUND_: printf(" the kernel found no image at the ImagePath\n"); break;
+    case STATUS_INVALID_IMAGE_FORMAT_: printf(" not a loadable AMD64 PE32+ kernel image\n"); break;
+    case STATUS_PROCEDURE_NOT_FOUND_: printf(" unresolved imports: the driver host lacks exports (or a module) this image needs; "
+                                             "the kernel log names each one (K64 ntdrv: unresolved import ...)\n"); break;
+    case STATUS_NO_MEMORY_: case STATUS_INSUFFICIENT_RESOURCES_: printf(" out of memory\n"); break;
+    default: printf(" DriverEntry failed (the driver's own status)\n"); break;
+    }
+    if (st == 0) {
+        shz_drvinfo_t *rows;
+        DWORD n, i;
+        if (query_loaded(&rows, &n) == 0)
+            for (i = 0; i < n; ++i) if (ieq(rows[i].service, argv[0])) print_driver(&rows[i]);
+    }
+    return st == 0 ? 0 : 1;
+}
+
+static int cmd_unload(int argc, char **argv)
+{
+    nt_load_driver_t fn;
+    LONG st;
+    if (argc < 1) { printf("usage: shzpnp unload <service>\n"); return 2; }
+    fn = (nt_load_driver_t)ntdll_fn("NtUnloadDriver");
+    if (!fn) { printf("driver host not present: ntdll.dll exports no NtUnloadDriver\n"); return 3; }
+    st = call_with_regpath(fn, argv[0]);
+    if (st == STATUS_INVALID_SYSTEM_SERVICE_ || st == STATUS_NOT_IMPLEMENTED_) {
+        printf("driver host not present: NtUnloadDriver returned %08x\n", (unsigned)st);
+        return 3;
+    }
+    printf("NtUnloadDriver(%s) = %08x", argv[0], (unsigned)st);
+    switch (st) {
+    case 0: printf(" (unloaded: DriverUnload ran, PCI claims released)\n"); break;
+    case STATUS_OBJECT_NAME_NOT_FOUND_: printf(" not loaded\n"); break;
+    case STATUS_INVALID_DEVICE_REQUEST_: printf(" the driver has no DriverUnload routine; it stays loaded\n"); break;
+    case STATUS_CONNECTION_IN_USE_: printf(" in use (another loaded image imports from it, or a device it created is open); it stays loaded\n"); break;
+    default: printf("\n"); break;
+    }
     return st == 0 ? 0 : 1;
 }
 
@@ -1045,7 +1302,7 @@ int main(int argc, char **argv)
         printf("shzpnp add-driver <inf> [--install] [--device <id>]... [--legacy]\n"
                "shzpnp enum [--log <file>]\n"
                "shzpnp match [<device>...] [--store <dir>] [--all] [--legacy]\n"
-               "shzpnp load <service>\n"
+               "shzpnp load <service> | unload <service> | status [<service>]\n"
                "devices: VVVV:DDDD[:SSSSSSSS[:RR[:CCSSPP]]] | PCI\\VEN_... | \"K64 pci: b:d.f vvvv:dddd class ccsspp\"\n");
         return argc < 2 ? 2 : 0;
     }
@@ -1053,6 +1310,8 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1], "enum")) return cmd_enum(argc - 2, argv + 2);
     if (!strcmp(argv[1], "match")) return cmd_match(argc - 2, argv + 2);
     if (!strcmp(argv[1], "load")) return cmd_load(argc - 2, argv + 2);
+    if (!strcmp(argv[1], "unload")) return cmd_unload(argc - 2, argv + 2);
+    if (!strcmp(argv[1], "status")) return cmd_status(argc - 2, argv + 2);
     printf("unknown command %s (shzpnp help)\n", argv[1]);
     return 2;
 }

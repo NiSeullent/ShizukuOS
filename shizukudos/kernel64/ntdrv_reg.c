@@ -323,13 +323,15 @@ static NTSTATUS deliver(RTL_QUERY_REGISTRY_TABLE *t, WCHAR *name, uint32_t type,
     if (!(t->Flags & RTL_QUERY_REGISTRY_NOEXPAND)) {
         if (type == REG_MULTI_SZ) {
             WCHAR *p = data, *end = (WCHAR *)((uint8_t *)data + len);
-            if (t->Flags & RTL_QUERY_REGISTRY_DIRECT && !(t->Flags & RTL_QUERY_REGISTRY_NOEXPAND)) return STATUS_INVALID_PARAMETER;
             while (p < end && *p) {
                 WCHAR *s = p; uint32_t slen;
                 while (p < end && *p) ++p;
                 if (p < end) ++p;
                 slen = (uint32_t)((uint8_t *)p - (uint8_t *)s);
-                st = t->QueryRoutine(name, REG_SZ, s, slen, ctx, t->EntryContext);
+                /* DIRECT: each string is stored into the entry as a REG_SZ (a UNICODE_STRING with a NULL buffer gets one allocated for
+                 * the first string; a later string that does not fit is skipped), so a one-string multi-string reads as that string. */
+                st = (t->Flags & RTL_QUERY_REGISTRY_DIRECT) ? query_direct(REG_SZ, s, slen, t->EntryContext)
+                                                            : t->QueryRoutine(name, REG_SZ, s, slen, ctx, t->EntryContext);
                 if (st == STATUS_BUFFER_TOO_SMALL) st = STATUS_SUCCESS;
                 if (!NT_SUCCESS(st)) return st;
             }
