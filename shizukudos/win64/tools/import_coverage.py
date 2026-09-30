@@ -731,7 +731,31 @@ def providers_main(args):
                 print("  " + ", ".join(f for _, f in miss[:args.top]))
     if args.json:
         args.json.write_text(json.dumps({"images": table, "providers": rows, "exports": args.exports and str(args.exports)}, indent=1))
+    if args.rank:
+        write_rank(args.rank, per, exports, images)
     return 0
+
+
+def write_rank(path, per, exports, images):
+    """Markdown ranking of every imported function: how many images import it, its provider, whether the host
+    exports it. Sorted by importers (descending), then provider, then name, so the head of the table is the next
+    work for the driver host. Also a totals line per provider (distinct imports, provided, distinct importers)."""
+    rows = []
+    for dll, fns in per.items():
+        have = exports.get(dll) if exports else None
+        for fn, users in fns.items():
+            rows.append((len(users), dll, fn, None if have is None else fn in have))
+    rows.sort(key=lambda r: (-r[0], r[1], r[2]))
+    lines = [f"{len(images)} kernel-mode images; {len(rows)} distinct (provider, function) imports", "",
+             "| provider | imported | provided | images |", "|---|---:|---:|---:|"]
+    for dll, fns in sorted(per.items(), key=lambda kv: -len(kv[1])):
+        have = exports.get(dll) if exports else None
+        prov = "-" if have is None else sum(1 for f in fns if f in have)
+        lines.append(f"| {dll} | {len(fns)} | {prov} | {len({u for us in fns.values() for u in us})} |")
+    lines += ["", "| # | export | provider | importing images | host |", "|---:|---|---|---:|---|"]
+    for i, (n, dll, fn, ok) in enumerate(rows, 1):
+        lines.append(f"| {i} | {fn} | {dll} | {n} | {'-' if ok is None else ('yes' if ok else 'MISSING')} |")
+    Path(path).write_text("\n".join(lines) + "\n")
 
 
 def main():
@@ -745,6 +769,8 @@ def main():
                     help="shorthand for --providers --exports <DIR/ntoskrnl-exports.json>: the NT driver host's export list "
                     "as emitted by win64/build.py (gen_ntoskrnl_exports.py from kernel64/ntdrv_prov.c)")
     ap.add_argument("--json", type=Path, help="combined report (single app: the per-app summary)")
+    ap.add_argument("--rank", type=Path, metavar="MD",
+                    help="with --providers: write a Markdown table ranking every import by how many images use it")
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--next", type=int, default=0, help="print the N highest-ranked unresolved functions across all apps")
     ap.add_argument("--matrix", type=Path, help="write the full app x DLL x function matrix")
