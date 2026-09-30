@@ -777,6 +777,64 @@ static SRWLOCK g_wer_lock = SRWLOCK_INIT;
 
 static int weq(const WCHAR *a, const WCHAR *b) { while (*a && *a == *b) { ++a; ++b; } return *a == *b; }
 
+/* RegisterApplicationRestart / UnregisterApplicationRestart / GetApplicationRestartSettings (Windows Vista+). There is no Windows
+ * Error Reporting service to restart the program after a crash, so the registration is only recorded (and reported back), as the
+ * WER runtime exception modules below are: the HRESULTs, limits and validation follow the documentation. */
+#define RESTART_MAX_CMD_LINE 1024
+#define RESTART_NO_CRASH 1
+#define RESTART_NO_HANG 2
+#define RESTART_NO_PATCH 4
+#define RESTART_NO_REBOOT 8
+static SRWLOCK g_restart_lock = SRWLOCK_INIT;
+static int g_restart_set;
+static DWORD g_restart_flags;
+static WCHAR g_restart_cmd[RESTART_MAX_CMD_LINE + 1];
+
+K32API HRESULT WINAPI RegisterApplicationRestart(PCWSTR cmd, DWORD flags)
+{
+    size_t n = cmd ? k32_wlen(cmd) : 0;
+    if (flags & ~15u) return E_INVALIDARG;
+    if (n > RESTART_MAX_CMD_LINE) return E_INVALIDARG;
+    AcquireSRWLockExclusive(&g_restart_lock);
+    if (n) memcpy(g_restart_cmd, cmd, n * sizeof(WCHAR));
+    g_restart_cmd[n] = 0;
+    g_restart_flags = flags;
+    g_restart_set = 1;
+    ReleaseSRWLockExclusive(&g_restart_lock);
+    return S_OK;
+}
+
+K32API HRESULT WINAPI UnregisterApplicationRestart(void)
+{
+    HRESULT hr = S_OK;
+    AcquireSRWLockExclusive(&g_restart_lock);
+    if (!g_restart_set) hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    g_restart_set = 0;
+    ReleaseSRWLockExclusive(&g_restart_lock);
+    return hr;
+}
+
+K32API HRESULT WINAPI GetApplicationRestartSettings(HANDLE process, PWSTR cmd, PDWORD size, PDWORD flags)
+{
+    HRESULT hr = S_OK;
+    DWORD n;
+    if (!size || (!cmd && *size)) return E_INVALIDARG;
+    if (process != GetCurrentProcess() && GetProcessId(process) != GetCurrentProcessId()) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);   /* another process' registration is not kept */
+    AcquireSRWLockShared(&g_restart_lock);
+    if (!g_restart_set) hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    else {
+        n = (DWORD)k32_wlen(g_restart_cmd) + 1;
+        if (*size < n) { *size = n; hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER); }
+        else {
+            memcpy(cmd, g_restart_cmd, n * sizeof(WCHAR));
+            *size = n;
+            if (flags) *flags = g_restart_flags;
+        }
+    }
+    ReleaseSRWLockShared(&g_restart_lock);
+    return hr;
+}
+
 K32API HRESULT WINAPI WerRegisterRuntimeExceptionModule(PCWSTR dll, PVOID ctx)
 {
     int i, slot = -1;
