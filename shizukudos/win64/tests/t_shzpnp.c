@@ -123,9 +123,33 @@ static int q_sz_eq(HKEY root, const WCHAR *sub, const WCHAR *name, DWORD want_ty
     return n == (wl(want) + 1) * 2 && weq(buf, want);
 }
 
+/* the oem<N>.inf name under SYSTEM\DriverDatabase\DriverInfFiles whose default value starts with `prefix` */
+static int find_oem_inf(const WCHAR *prefix, WCHAR *out, DWORD cap)
+{
+    HKEY db, k;
+    DWORD i, l, vt, vn;
+    WCHAR name[64], v[80];
+    int found = 0;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\DriverDatabase\\DriverInfFiles", 0, KEY_READ, &db)) return 0;
+    for (i = 0; !found; ++i) {
+        l = 64;
+        if (RegEnumKeyExW(db, i, name, &l, 0, 0, 0, 0)) break;
+        if (RegOpenKeyExW(db, name, 0, KEY_READ, &k)) continue;
+        vt = 0; vn = sizeof v;
+        if (!RegQueryValueExW(k, L"", 0, &vt, (BYTE *)v, &vn) && vt == REG_SZ && weq_ci_n(v, prefix, wl(prefix))) {
+            lstrcpynW(out, name, (int)cap);
+            found = 1;
+        }
+        RegCloseKey(k);
+    }
+    RegCloseKey(db);
+    return found;
+}
+
 int main(void)
 {
     char buf[256];
+    WCHAR oem[32];
     int n, code;
     DWORD t, sz;
     BYTE raw[64];
@@ -148,8 +172,14 @@ int main(void)
     CHECK(code == 0, "add-driver --device stages and installs the package");
     n = read_file("C:\\SHZ\\SYS64\\DRIVERS\\synthpnp.sys", buf, sizeof buf);
     CHECK(n == (int)sizeof PAYLOAD - 1 && !memcmp(buf, PAYLOAD, sizeof PAYLOAD - 1), "CopyFiles put the payload byte-identical into %12% = C:\\SHZ\\SYS64\\DRIVERS");
-    n = read_file("C:\\SHZ\\INF\\oem0.inf", buf, sizeof buf);
-    CHECK(n > 0 && !memcmp(buf, INF, (size_t)n), "the INF is published as C:\\SHZ\\INF\\oem0.inf");
+    {   /* published as C:\SHZ\INF\oem<N>.inf; N is the next free number, so find ours through the DriverDatabase record
+         * (another program may have published a package first: T_DRV_LOAD.EXE does) */
+        char path[80] = "C:\\SHZ\\INF\\";
+        CHECK(find_oem_inf(L"synth.inf_amd64_", oem, 32), "DriverDatabase\\DriverInfFiles has an oem<N>.inf record -> synth.inf_amd64_<crc32>");
+        WideCharToMultiByte(CP_UTF8, 0, oem, -1, path + 11, 40, 0, 0);   /* "C:\\SHZ\\INF\\" is 11 characters */
+        n = read_file(path, buf, sizeof buf);
+        CHECK(n > 0 && !memcmp(buf, INF, (size_t)n), "the INF is published byte-identical as C:\\SHZ\\INF\\oem<N>.inf");
+    }
     CHECK(q_dword(HKEY_LOCAL_MACHINE, SVC, L"Type") == 1 && q_dword(HKEY_LOCAL_MACHINE, SVC, L"Start") == 3 &&
           q_dword(HKEY_LOCAL_MACHINE, SVC, L"ErrorControl") == 1, "AddService: Type=1 Start=3 ErrorControl=1");
     CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, SVC, L"ImagePath", REG_EXPAND_SZ, L"\\SystemRoot\\SYS64\\DRIVERS\\synthpnp.sys"),
@@ -189,14 +219,15 @@ int main(void)
           q_sz_eq(HKEY_LOCAL_MACHINE, CLS, L"InfSection", REG_SZ, L"SYN.ndi.NTamd64"), "software key: best model (SUBSYS+REV) and its decorated DDInstall");
     {
         HKEY k;
-        WCHAR v[80];
+        WCHAR key[120] = L"SYSTEM\\DriverDatabase\\DriverInfFiles\\", v[80];
         DWORD vt = 0, vn = sizeof v;
         int ok = 0;
-        if (!RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\DriverDatabase\\DriverInfFiles\\oem0.inf", 0, KEY_READ, &k)) {
+        lstrcatW(key, oem);
+        if (!RegOpenKeyExW(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &k)) {
             ok = !RegQueryValueExW(k, L"", 0, &vt, (BYTE *)v, &vn) && vt == REG_SZ && weq_ci_n(v, L"synth.inf_amd64_", 16) && wl(v) == 24;
             RegCloseKey(k);
         }
-        CHECK(ok, "DriverDatabase records oem0.inf -> synth.inf_amd64_<crc32>");
+        CHECK(ok, "DriverDatabase records oem<N>.inf -> synth.inf_amd64_<crc32> (REG_SZ, 24 characters)");
     }
     code = shzpnp("add-driver " PKG "\\synth.inf");
     CHECK(code == 0, "adding the same package again (staging only) succeeds");

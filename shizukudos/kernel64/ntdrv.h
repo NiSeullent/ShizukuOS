@@ -13,6 +13,8 @@
 #define K64_NTDRV_H
 #include "proc_internal.h"
 #include "ntddk.h"
+#include "pci.h"
+#include "registry.h"
 
 /* NTSTATUS values the driver ABI needs beyond ntsys.h's set (same numeric values as Windows). */
 #define STATUS_INVALID_DEVICE_REQUEST ((int32_t)0xC0000010)
@@ -23,6 +25,9 @@
 #define STATUS_DEVICE_CONFIGURATION_ERROR ((int32_t)0xC0000182)
 #define STATUS_MORE_PROCESSING_REQUIRED ((int32_t)0xC0000016)
 #define STATUS_IMAGE_ALREADY_LOADED ((int32_t)0xC000010E)
+#define STATUS_CONNECTION_IN_USE ((int32_t)0xC0000108)
+#define STATUS_OBJECT_NAME_COLLISION ((int32_t)0xC0000035)
+#define STATUS_NO_MORE_ENTRIES ((int32_t)0x8000001A)
 
 /* Driver image VA window (kernel half, above the direct map, below the image alias). Each
  * loaded .sys gets a naturally sized, page-granular slice; images are mapped, relocated and
@@ -47,6 +52,11 @@ typedef struct ntdrv_driver {
     WCHAR regpath_buf[160];
     int started;                        /* DriverEntry returned STATUS_SUCCESS */
     char claim[72];                     /* "ntdrv:<service>": pci_claim() owner string for functions it drives */
+    uint32_t export_rva, export_size;   /* the image's export directory (an export driver such as ndis.sys) */
+    unsigned users;                     /* loaded images whose imports were resolved against this one */
+    int dependency;                     /* loaded because an image imports it, not by a Services-key request */
+    struct ntdrv_driver *deps[8];       /* modules this image imports from (their `users` count it) */
+    unsigned ndeps;
 } ntdrv_driver_t;
 
 /* device object bookkeeping kept beside the Windows DEVICE_OBJECT the driver sees */
@@ -76,7 +86,17 @@ void ntdrv_set_current_driver(ntdrv_driver_t *d);
  * and the driver record). *out receives the driver record. */
 int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *service, ntdrv_driver_t **out);
 int32_t ntdrv_unload(ntdrv_driver_t *d);
+/* NtUnloadDriver's work: STATUS_OBJECT_NAME_NOT_FOUND (not loaded), STATUS_CONNECTION_IN_USE (another loaded image
+ * imports from it), STATUS_INVALID_DEVICE_REQUEST (the driver has no DriverUnload routine: it stays loaded, as on
+ * Windows), else DriverUnload runs, its PCI claims are released and the record is marked not started. */
+int32_t ntdrv_unload_service(const char *service);
 ntdrv_driver_t *ntdrv_find_driver(const char *service);           /* a started driver of that service, or NULL */
+ntdrv_driver_t *ntdrv_drivers(void);                              /* every record (started or not), newest first */
+/* Export drivers: a loaded image another driver imports from ("ndis.sys" -> the record named "ndis"). The loader
+ * resolves a non-ntoskrnl/hal import by loading \SHZ\SYS64\DRIVERS\<dll> on demand (its DriverEntry runs, as a
+ * boot-start service's would) and looking the symbol up in that image's export directory. */
+ntdrv_driver_t *ntdrv_find_module(const char *dllname);
+void *ntdrv_module_export(ntdrv_driver_t *m, const char *symbol);
 ntdrv_driver_t *ntdrv_driver_by_address(uint64_t va);            /* the loaded image containing va, or NULL */
 struct fsnode;
 int32_t ntdrv_load_node(struct fsnode *n, const char *service, ntdrv_driver_t **out);   /* RAM or disk-backed file */
@@ -84,6 +104,25 @@ uint64_t ntdrv_alloc_image_va(uint64_t bytes);                    /* reserve a s
 
 /* ---- PCI ownership (ntdrv_io.c): MmMapIoSpace inside a function's memory BAR claims it for the current driver ---- */
 void ntdrv_pci_note_mmio(uint64_t pa, uint64_t size);
+/* Claim every PCI function whose Enum key (HKLM\SYSTEM\CurrentControlSet\Enum\PCI\<hwid>\B<bus>D<dev>F<fn>,
+ * written by shzpnp add-driver --install) names this service in `Service`: the devnode -> function-driver binding. */
+void ntdrv_bind_enum(ntdrv_driver_t *d);
+void ntdrv_release_claims(ntdrv_driver_t *d);                     /* drop every pci_claim made for d */
+unsigned ntdrv_claimed_functions(ntdrv_driver_t *d, pci_dev_t *out, unsigned max);
+ntdrv_devnode_t *ntdrv_devnodes(void);                            /* named device objects, newest first */
+
+/* ---- PnP root (ntdrv_pnp.c): one PDO per Enum\PCI devnode bound to a hosted driver ---- */
+typedef struct ntdrv_pdo ntdrv_pdo_t;
+/* Called under the registry lock for each Enum\PCI\<hwid>\B..D..F.. key whose Service names d: records the devnode
+ * (its Driver, DeviceDesc, ClassGUID, HardwareID values) and creates its PDO on the host's PnP root driver. */
+void ntdrv_pnp_add(ntdrv_driver_t *d, const pci_dev_t *dev, regkey_t *inst_key, const char *instance_path);
+/* AddDevice(DriverObject, PDO) + IRP_MN_START_DEVICE (with the function's BARs and interrupt as CM_RESOURCE_LIST)
+ * for every PDO recorded for d and not yet started; a driver without AddDevice keeps its claim and gets no IRP. */
+void ntdrv_pnp_start_pending(ntdrv_driver_t *d);
+void ntdrv_pnp_driver_unloading(ntdrv_driver_t *d);              /* drop the PDOs whose function driver is going away */
+ntdrv_pdo_t *ntdrv_pdo_from_device(DEVICE_OBJECT *dev);
+/* IofCallDriver + wait for completion (a pended IRP included) + IoFreeIrp; returns IoStatus.Status (ntdrv_io.c). */
+int32_t ntdrv_send_irp_sync(DEVICE_OBJECT *dev, IRP *irp, uint64_t *info);
 
 /* ---- IRP engine (ntdrv_io.c) ---- */
 /* Synchronous device control entirely on kernel buffers: builds an IRP, IoCallDriver()s the

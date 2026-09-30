@@ -78,7 +78,7 @@ void NTAPI KeAcquireSpinLock(KSPIN_LOCK *l, uint8_t *old) { *old = g_irql; set_i
 void NTAPI KeReleaseSpinLock(KSPIN_LOCK *l, uint8_t old) { spin_release(l); set_irql(old); if (old < DISPATCH_LEVEL) ntdrv_dpc_queue_flush(); }
 uint8_t NTAPI KfAcquireSpinLock(KSPIN_LOCK *l) { uint8_t o = g_irql; set_irql(DISPATCH_LEVEL); spin_acquire(l); return o; }
 void NTAPI KfReleaseSpinLock(KSPIN_LOCK *l, uint8_t old) { spin_release(l); set_irql(old); if (old < DISPATCH_LEVEL) ntdrv_dpc_queue_flush(); }
-void NTAPI KeAcquireSpinLockAtDpcLevel(KSPIN_LOCK *l) { if (g_irql < DISPATCH_LEVEL) kpanic("AcquireSpinLockAtDpcLevel below DISPATCH"); spin_acquire(l); }
+void NTAPI KeAcquireSpinLockAtDpcLevel(KSPIN_LOCK *l) { if (g_irql < DISPATCH_LEVEL) kpanic("AcquireSpinLockAtDpcLevel below DISPATCH (irql %u, caller %p)", g_irql, __builtin_return_address(0)); spin_acquire(l); }
 void NTAPI KeReleaseSpinLockFromDpcLevel(KSPIN_LOCK *l) { spin_release(l); }
 uint8_t NTAPI KeAcquireSpinLockRaiseToDpc(KSPIN_LOCK *l) { uint8_t o = g_irql; set_irql(DISPATCH_LEVEL); spin_acquire(l); return o; }
 
@@ -479,4 +479,114 @@ void ntdrv_ke_init(void)                        /* idempotent: the first driver 
     tt = thread_create("ntdrv-timer", timer_thread, 0);
     KASSERT(w && tt);
     ke_ready = 1;
+}
+
+/* ---------------------------------------------------------------- Ex interlocked lists and S-lists */
+LIST_ENTRY *NTAPI ExInterlockedInsertHeadList(LIST_ENTRY *head, LIST_ENTRY *e, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    LIST_ENTRY *first = head->Flink;
+    e->Flink = first; e->Blink = head; first->Blink = e; head->Flink = e;
+    KfReleaseSpinLock(lock, old);
+    return first == head ? 0 : first;
+}
+LIST_ENTRY *NTAPI ExInterlockedInsertTailList(LIST_ENTRY *head, LIST_ENTRY *e, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    LIST_ENTRY *last = head->Blink;
+    e->Flink = head; e->Blink = last; last->Flink = e; head->Blink = e;
+    KfReleaseSpinLock(lock, old);
+    return last == head ? 0 : last;
+}
+LIST_ENTRY *NTAPI ExInterlockedRemoveHeadList(LIST_ENTRY *head, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    LIST_ENTRY *e = head->Flink;
+    if (e == head) e = 0;
+    else { head->Flink = e->Flink; e->Flink->Blink = head; }
+    KfReleaseSpinLock(lock, old);
+    return e;
+}
+uint32_t NTAPI ExInterlockedAddUlong(uint32_t *addend, uint32_t inc, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    uint32_t prev = *addend;
+    *addend = prev + inc;
+    KfReleaseSpinLock(lock, old);
+    return prev;
+}
+LARGE_INTEGER NTAPI ExInterlockedAddLargeInteger(LARGE_INTEGER *addend, LARGE_INTEGER inc, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    LARGE_INTEGER prev = *addend;
+    addend->QuadPart += inc.QuadPart;
+    KfReleaseSpinLock(lock, old);
+    return prev;
+}
+/* SLIST_HEADER, x64 layout: Alignment = Depth:16 | Sequence:48, Region = Reserved:4 | NextEntry:60 (address >> 4).
+ * Entries are 16-byte aligned, so the pointer is stored as it is. Drivers read Depth through the inline
+ * ExQueryDepthSList, hence the exact encoding. Push/pop run with interrupts off (uniprocessor). */
+typedef struct { uint64_t alignment, region; } slist_header_t;
+typedef struct single_entry { struct single_entry *Next; } single_entry_t;
+void *NTAPI ExpInterlockedPushEntrySList(slist_header_t *h, single_entry_t *e)
+{
+    uint64_t f = irq_save();
+    single_entry_t *first = (single_entry_t *)(h->region & ~0xfull);
+    e->Next = first;
+    h->region = (uint64_t)e & ~0xfull;
+    h->alignment = ((h->alignment & ~0xffffull) + 0x10000) | (((h->alignment & 0xffff) + 1) & 0xffff);
+    irq_restore(f);
+    return first;
+}
+void *NTAPI ExpInterlockedPopEntrySList(slist_header_t *h)
+{
+    uint64_t f = irq_save();
+    single_entry_t *first = (single_entry_t *)(h->region & ~0xfull);
+    if (first) {
+        h->region = (uint64_t)first->Next & ~0xfull;
+        h->alignment = ((h->alignment & ~0xffffull) + 0x10000) | (((h->alignment & 0xffff) - 1) & 0xffff);
+    }
+    irq_restore(f);
+    return first;
+}
+
+/* ---------------------------------------------------------------- processor information */
+int8_t ntdrv_KeNumberProcessors = 1;                    /* the CCHAR data export KeNumberProcessors */
+uint32_t NTAPI KeGetRecommendedSharedDataAlignment(void) { return 64; }     /* the cache line */
+/* Per-processor tick counts (idle, kernel+user) and the processor index. The kernel keeps no idle accounting, so idle
+ * is reported as 0 and the timer tick count as busy time: a cumulative count, monotonic, in ticks. */
+extern uint64_t arch_timer_irqs(void);                  /* arch.c */
+void NTAPI ExGetCurrentProcessorCounts(uint32_t *idle, uint32_t *kernel_user, uint32_t *index)
+{
+    if (idle) *idle = 0;
+    if (kernel_user) *kernel_user = (uint32_t)arch_timer_irqs();
+    if (index) *index = 0;
+}
+void NTAPI ExGetCurrentProcessorCpuUsage(uint32_t *usage) { if (usage) *usage = 100; }   /* no idle accounting: fully busy */
+
+/* ---------------------------------------------------------------- bug-check callbacks */
+/* KBUGCHECK_CALLBACK_RECORD (0x40): Entry(0x00) CallbackRoutine(0x10) Buffer(0x18) Length(0x20) Component(0x28)
+ * Checksum(0x30) State(0x38). Records are kept on a list; KeBugCheckEx runs them before halting. */
+typedef struct { LIST_ENTRY Entry; void *CallbackRoutine, *Buffer; uint32_t Length, _p; const char *Component;
+                 uint64_t Checksum; uint8_t State, _pad[7]; } kbugcheck_record_t;
+_Static_assert(sizeof(kbugcheck_record_t) == 0x40, "bugcheck record");
+static LIST_ENTRY bugcheck_list = { &bugcheck_list, &bugcheck_list };
+uint8_t NTAPI KeRegisterBugCheckCallback(kbugcheck_record_t *r, void *routine, void *buf, uint32_t len, const char *component)
+{
+    uint64_t f = irq_save();
+    if (r->State == 1) { irq_restore(f); return 0; }             /* BufferInserted already */
+    r->CallbackRoutine = routine; r->Buffer = buf; r->Length = len; r->Component = component; r->State = 1;
+    r->Entry.Flink = &bugcheck_list; r->Entry.Blink = bugcheck_list.Blink;
+    bugcheck_list.Blink->Flink = &r->Entry; bugcheck_list.Blink = &r->Entry;
+    irq_restore(f);
+    return 1;
+}
+uint8_t NTAPI KeDeregisterBugCheckCallback(kbugcheck_record_t *r)
+{
+    uint64_t f = irq_save();
+    if (r->State != 1) { irq_restore(f); return 0; }
+    r->Entry.Blink->Flink = r->Entry.Flink; r->Entry.Flink->Blink = r->Entry.Blink;
+    r->State = 0;
+    irq_restore(f);
+    return 1;
 }

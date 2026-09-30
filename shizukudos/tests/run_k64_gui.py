@@ -771,6 +771,10 @@ def main():
     ap.add_argument("--display", choices=tuple(DISPLAYS), default="vga",
                     help="vga: Bochs VBE (-vga std); virtio: paravirtual virtio-gpu 2D (-device virtio-vga); virtio-gl: "
                          "virtio-gpu with virgl 3D (-device virtio-vga-gl -display egl-headless; needs a DRM render node)")
+    ap.add_argument("--pnp", action="store_true",
+                    help="also attach QEMU's Intel e1000 NIC and carry the ReactOS e1000 driver package, ndis.sys and "
+                         "T_DRV_PNP.EXE in the initrd (as tests/run_k64_pnp.py composes it), so the real driver is installed "
+                         "and loaded through SHZPNP.EXE before T_GUI_STATUS draws the PCI table (needs the built corpus)")
     args = ap.parse_args()
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
     for f in (stub, kernel, initrd):
@@ -779,6 +783,14 @@ def main():
     accel = ("kvm" if Path("/dev/kvm").exists() else "tcg") if args.accel == "auto" else args.accel
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    pnp_devices = []
+    if args.pnp:
+        import run_k64_pnp
+        blocked = run_k64_pnp.corpus_missing()
+        if blocked:
+            raise SystemExit("--pnp: the driver corpus is not built here (" + ", ".join(blocked) + "); run " + run_k64_pnp.NEEDED)
+        initrd, _ = run_k64_pnp.compose_initrd(out, keep_tests=True)
+        pnp_devices = run_k64_pnp.QEMU_E1000
     serial_path = out / "serial.log"
     serial_path.unlink(missing_ok=True)
     sockdir = Path(tempfile.mkdtemp(prefix="shzgui"))     # AF_UNIX paths are limited to ~100 bytes: keep the socket somewhere short
@@ -786,7 +798,7 @@ def main():
     trace_path = out / "qemu-trace.log"
     trace_path.unlink(missing_ok=True)
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults",
-           *DISPLAYS[args.display], "-kernel", str(stub), "-initrd", f"{kernel},{initrd}", "-serial", f"file:{serial_path}",
+           *DISPLAYS[args.display], *pnp_devices, "-kernel", str(stub), "-initrd", f"{kernel},{initrd}", "-serial", f"file:{serial_path}",
            "-qmp", f"unix:{sock},server=on,wait=off", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot"]
     if args.display != "vga":                             # host-side record of every virtio-gpu command QEMU processed
         cmd += ["-trace", "enable=virtio_gpu_*", "-D", str(trace_path)]
@@ -905,6 +917,14 @@ def main():
     pci = re.findall(rf"STATUS-PCI: \S+ {want_dev} class 03\S* irq \d+ driver=(.*)", serial)
     rep.check(f"status: the display (PCI {want_dev}) is listed as bound to the {want_drv} kernel driver",
               any(d.startswith(want_drv) for d in pci), "; ".join(pci) or "not listed")
+    if args.pnp:
+        # the real driver package: T_DRV_PNP.EXE installed and loaded the ReactOS e1000 miniport (through SHZPNP.EXE) before
+        # T_GUI_STATUS ran, so the PCI table on screen lists the e1000 function as driven by the hosted .sys
+        rep.check("pnp: T_DRV_PNP.EXE installed and loaded the e1000 package (t_drv_pnp: PASS)", "t_drv_pnp: PASS" in serial,
+                  "; ".join(re.findall(r"T_DRV_PNP\.EXE pid \d+\] (FAIL: .*)", serial)[:3]))
+        e1000 = re.findall(r"STATUS-PCI: \S+ 8086:100e class 02\S* irq \d+ driver=(.*)", serial)
+        rep.check("status: the e1000 (PCI 8086:100e) is listed as bound to the hosted driver ntdrv:e1000",
+                  any(d.strip() == "ntdrv:e1000" for d in e1000), "; ".join(e1000) or "not listed")
     verify_gpu(rep, args.display, serial, trace, trace_at)
     for scene in sorted(SCENES):
         rep.check(f"scene {scene} was shown and verified", scene in seen)
@@ -912,7 +932,8 @@ def main():
     verify_input_echo(serial, rep)
     status = "PASS" if all(x["status"] == "PASS" for x in rep.items) else "FAIL"
     record = {"profile": f"kernel64-standalone + {DISPLAYS[args.display][-3] if args.display != 'vga' else 'bochs vga'} "
-                         "(no Supervisor, no VMX)", "display": args.display, "accel": accel, "status": status,
+                         "(no Supervisor, no VMX)" + (" + e1000 driver package (--pnp)" if args.pnp else ""),
+              "display": args.display, "accel": accel, "status": status, "pnp": args.pnp,
               "checks": rep.items, "seconds": round(time.time() - started, 1), "command": cmd, "qemu_output": qemu_out[-1500:],
               "serial_tail": serial[-4000:], "trace_summary": trace_summary(trace), "utc": shzlib.utc_now(),
               "git": shzlib.git_state()}

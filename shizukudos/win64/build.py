@@ -303,10 +303,12 @@ def build_ntdrv_host():
     return ntdir, drivers, exports
 
 
-def build_ntdrv_app(module_libs):
+def build_ntdrv_app(module_libs, name="t_ntdrv"):
+    """win64/ntdrv/<name>.c: a driver-host test program that is not packed into WIN64.IMG (t_ntdrv -> WIN64_NTDRV.IMG;
+    t_pnp_load -> the initrd tests/run_k64_pnp.py composes with the corpus driver store)."""
     crt = W64 / "crt"
-    src = W64 / "ntdrv" / "t_ntdrv.c"
-    exe = OUT / "t_ntdrv.exe"
+    src = W64 / "ntdrv" / f"{name}.c"
+    exe = OUT / f"{name}.exe"
     run([CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
          "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c",
          "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe])
@@ -374,14 +376,18 @@ def main():
     if data_dir.exists():
         for f in sorted(data_dir.iterdir()):
             files.append((f"\\SHZ\\TESTS\\{f.name.upper()}", f.read_bytes()))
+    # NT driver host: a separate initrd carries the driver store (\SHZ\DRIVERS), so the default WIN64.IMG has none and
+    # Kernel64's ntdrv_selftest() stays a no-op there. The unmodified ECHO.SYS test driver does ride in WIN64.IMG as test
+    # data (\SHZ\TESTS\ECHO.SYS, not a driver store): T_DRV_LOAD.EXE packages it and takes it through
+    # SHZPNP.EXE add-driver / load / status / unload, the path a vendor package uses.
+    # tests/run_k64_ntdrv.py mounts the driver-store image.
+    ntdir, drivers, nt_exports = build_ntdrv_host()
+    ntapp = build_ntdrv_app(sorted(modules))
+    pnpapp = build_ntdrv_app(sorted(modules), "t_pnp_load")
+    files.append(("\\SHZ\\TESTS\\ECHO.SYS", drivers["echo"].read_bytes()))
     img = OUT / "WIN64.IMG"
     img.write_bytes(pack_archive(files))
 
-    # NT driver host: a separate initrd carries the driver store (\SHZ\DRIVERS), so the default WIN64.IMG has none and
-    # Kernel64's ntdrv_selftest() stays a no-op there (ntdll still exports NtLoadDriver for SHZPNP.EXE's `load`).
-    # tests/run_k64_ntdrv.py mounts this one.
-    ntdir, drivers, nt_exports = build_ntdrv_host()
-    ntapp = build_ntdrv_app(sorted(modules))
     ntfiles = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
         ntfiles.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
@@ -413,7 +419,8 @@ def main():
     print(json.dumps({"ntdll_exports": len(ntdll_names), "kernel32_exports": len(k32_names), "modules": sorted(modules), "apps": sorted(apps),
                       "WIN64.IMG": sha256_file(img),
                       "ntdrv": {"providers": len(nt_exports["ntoskrnl.exe"]) + len(nt_exports["hal.dll"]),
-                                "drivers": sorted(drivers), "WIN64_NTDRV.IMG": sha256_file(ntimg)}}, indent=2))
+                                "drivers": sorted(drivers), "WIN64_NTDRV.IMG": sha256_file(ntimg),
+                                "T_PNP_LOAD.EXE": sha256_file(pnpapp)}}, indent=2))
 
 
 if __name__ == "__main__":
