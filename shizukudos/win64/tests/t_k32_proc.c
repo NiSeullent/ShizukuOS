@@ -613,6 +613,39 @@ static void test_heaps(void)
  * for a thread without a description, readable through any handle to the thread, NULL clears. */
 HRESULT WINAPI SetThreadDescription(HANDLE, PCWSTR);
 HRESULT WINAPI GetThreadDescription(HANDLE, PWSTR *);
+/* RegisterApplicationRestart family: recorded, validated, reported back (no WER service restarts anything). */
+static void test_restart(void)
+{
+    WCHAR buf[64];
+    DWORD n = 64, fl = 77;
+    static WCHAR big[1100];
+    int i;
+    HRESULT hr = GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl);
+    CHECKV(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "GetApplicationRestartSettings before any registration: ERROR_NOT_FOUND", "hr=%lx", (long)hr);
+    hr = UnregisterApplicationRestart();
+    CHECKV(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "UnregisterApplicationRestart without a registration: ERROR_NOT_FOUND", "hr=%lx", (long)hr);
+    CHECK(RegisterApplicationRestart(L"--restart --x", 4 | 8) == S_OK, "RegisterApplicationRestart(cmd, NO_PATCH|NO_REBOOT)");
+    n = 64; fl = 0;
+    hr = GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl);
+    CHECKV(hr == S_OK && fl == 12 && n == 14 && k32t_weq(buf, L"--restart --x"), "GetApplicationRestartSettings returns command line (size includes the NUL) and flags", "hr=%lx n=%lu fl=%lu", (long)hr, (unsigned long)n, (unsigned long)fl);
+    n = 5;
+    hr = GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl);
+    CHECKV(hr == HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) && n == 14, "a short buffer: ERROR_INSUFFICIENT_BUFFER and the needed size", "hr=%lx n=%lu", (long)hr, (unsigned long)n);
+    CHECK(RegisterApplicationRestart(L"x", 16) == E_INVALIDARG, "an unknown flag bit is E_INVALIDARG");
+    for (i = 0; i < 1025; ++i) big[i] = L'a';
+    big[1025] = 0;
+    CHECK(RegisterApplicationRestart(big, 0) == E_INVALIDARG, "a command line over RESTART_MAX_CMD_LINE (1024) is E_INVALIDARG");
+    big[1024] = 0;
+    CHECK(RegisterApplicationRestart(big, 0) == S_OK, "exactly 1024 characters are accepted");
+    CHECK(RegisterApplicationRestart(0, 0) == S_OK, "a NULL command line is an empty one");
+    n = 64;
+    CHECK(GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl) == S_OK && n == 1 && buf[0] == 0 && fl == 0, "... reported back empty");
+    CHECK(UnregisterApplicationRestart() == S_OK, "UnregisterApplicationRestart");
+    n = 64;
+    CHECK(GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl) == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "... after which nothing is registered");
+    CHECK(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "RegisterApplicationRestart") != 0, "the name resolves through GetProcAddress (Chromium looks it up)");
+}
+
 static DWORD WINAPI desc_worker(LPVOID arg) { return (DWORD)(ULONG_PTR)arg; }
 static void test_description(void)
 {
@@ -669,6 +702,7 @@ static void test_description(void)
 
 int main(void)
 {
+    test_restart();
     test_description();
     test_times();
     test_counts_priority();

@@ -120,6 +120,8 @@ void ntdrv_pnp_add(ntdrv_driver_t *d, const pci_dev_t *dev, regkey_t *inst_key, 
  * for every PDO recorded for d and not yet started; a driver without AddDevice keeps its claim and gets no IRP. */
 void ntdrv_pnp_start_pending(ntdrv_driver_t *d);
 void ntdrv_pnp_driver_unloading(ntdrv_driver_t *d);              /* drop the PDOs whose function driver is going away */
+/* IRP_MN_QUERY_REMOVE_DEVICE + IRP_MN_REMOVE_DEVICE down every started stack of d; a refused query returns its status. */
+int32_t ntdrv_pnp_remove_devices(ntdrv_driver_t *d);
 ntdrv_pdo_t *ntdrv_pdo_from_device(DEVICE_OBJECT *dev);
 /* IofCallDriver + wait for completion (a pended IRP included) + IoFreeIrp; returns IoStatus.Status (ntdrv_io.c). */
 int32_t ntdrv_send_irp_sync(DEVICE_OBJECT *dev, IRP *irp, uint64_t *info);

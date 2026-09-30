@@ -136,12 +136,15 @@ void NTAPI MmInitializeMdl(MDL *m, void *va, uint32_t len) { mdl_init(m, va, len
 void NTAPI IoBuildPartialMdl(MDL *src, MDL *target, void *va, uint32_t len)
 {
     uint64_t start = (uint64_t)src->StartVa + src->ByteOffset, v = (uint64_t)va;
+    if (v < start || v > start + src->ByteCount) return;                 /* outside the source: leave the target alone */
     if (!len) len = (uint32_t)(start + src->ByteCount - v);
+    if ((uint64_t)len > start + src->ByteCount - v) len = (uint32_t)(start + src->ByteCount - v);
     target->Next = 0;
     target->StartVa = (void *)(v & ~0xfffull);
     target->ByteOffset = (uint32_t)(v & 0xfff);
     target->ByteCount = len;
     target->Process = src->Process;
-    target->MdlFlags = (int16_t)((src->MdlFlags & (MDL_MAPPED_TO_SYSTEM_VA | MDL_PAGES_LOCKED | MDL_SOURCE_IS_NONPAGED_POOL)) | MDL_PARTIAL);
+    target->MdlFlags = (int16_t)((target->MdlFlags & MDL_ALLOCATED_FIXED_SIZE) |
+                                 (src->MdlFlags & (MDL_MAPPED_TO_SYSTEM_VA | MDL_PAGES_LOCKED | MDL_SOURCE_IS_NONPAGED_POOL)) | MDL_PARTIAL);
     target->MappedSystemVa = (src->MdlFlags & MDL_MAPPED_TO_SYSTEM_VA) ? va : 0;
 }

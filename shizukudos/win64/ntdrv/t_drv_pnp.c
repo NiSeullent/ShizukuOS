@@ -8,7 +8,7 @@
  * (NtShzDriverQuery: e1000.sys and the ndis.sys it imports, the adapter device object \Device\{NetCfgInstanceId}),
  * and an IRP_MJ_CREATE to that device object from user mode. Expected values come from the INF, the Windows registry
  * layout the Net class installer produces, and this program's own reads, never from shzpnp's output.
- * Only run by shizukudos/tests/run_k64_pnp.py (the initrd it composes carries the store and ndis.sys).
+ * Runs before T_GUI_STATUS.EXE (name order), so run_k64_gui.py --pnp shows the claim. Only packed by shizukudos/tests/run_k64_pnp.py (the initrd it composes carries the store and ndis.sys).
  */
 #include "../tests/reg_check.h"
 
@@ -83,7 +83,7 @@ int main(void)
     for (i = 0; i < n && i < 32; ++i)
         if (rows[i].vendor == 0x8086 && rows[i].device == 0x100e) pick = (int)i;
     CHECK(pick >= 0, "an Intel 82540EM (8086:100e, QEMU -device e1000) is on the bus");
-    if (pick < 0) return finish_tests("t_pnp_load");
+    if (pick < 0) return finish_tests("t_drv_pnp");
     bus = rows[pick].bus; dev = rows[pick].dev; fn = rows[pick].fn;
     printf("e1000 at PCI %02X:%02X.%X irq %u, kernel driver '%s'\n", bus, dev, fn, rows[pick].irq, rows[pick].driver);
     CHECK(rows[pick].driver[0] == 0, "no Kernel64 driver claims the e1000 function before the package is loaded");
@@ -169,5 +169,5 @@ int main(void)
     CHECK(code == 1, "unload ndis is refused while e1000 imports from it");
     code = shzpnp("load e1000");
     CHECK(code == 1, "loading e1000 again: already loaded");
-    return finish_tests("t_pnp_load");
+    return finish_tests("t_drv_pnp");
 }
