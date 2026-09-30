@@ -8,7 +8,7 @@
 
 #define NTTH_MAX_CLASSES 8u
 #define NTTH_MAX_RULES 32u
-#define NTTH_MAX_THEMES 8u
+#define NTTH_MAX_THEMES 256u
 #define NTTH_NAME_MAX 15u
 #define NTTH_TEXT_MAX 256u
 
@@ -391,6 +391,32 @@ static void default_rule(ntth_rule *rule)
     rule->filltype = NTTH_FT_SOLID;
     rule->fillcolor = 0x00FFFFFFu;
     rule->gradient2 = 0x00FFFFFFu;
+}
+
+ntth_status ntth_query_part(ntth_session *session, ntth_theme theme,
+                            int32_t part, int32_t state,
+                            ntth_part_properties *out)
+{
+    ntth_slot *slot;
+    ntth_rule rule;
+    ntth_part_properties value;
+    if (out == NULL) return NTTH_E_INVALID;
+    slot = lookup_theme(session, theme);
+    if (slot == NULL || slot->style_generation != session->style_generation)
+        return NTTH_E_HANDLE;
+    if (part <= 0 || state <= 0) return NTTH_E_INVALID;
+    if (!find_rule(session, slot->class_index, (uint32_t)part,
+                   (uint32_t)state, &rule)) return NTTH_E_UNSUPPORTED;
+    value.bgtype = rule.bgtype;
+    value.bordersize = rule.bordersize;
+    value.bordercolor = rule.bordercolor;
+    value.filltype = rule.filltype;
+    value.fillcolor = rule.fillcolor;
+    value.gradient1 = rule.gradient1;
+    value.gradient2 = rule.gradient2;
+    value.textcolor = rule.textcolor;
+    *out = value;
+    return NTTH_OK;
 }
 
 static ntth_status prepare_target(ntth_session *session, ntth_theme theme,
