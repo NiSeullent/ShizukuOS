@@ -8,6 +8,7 @@
 
 typedef LONG NTSTATUS_;
 NTSTATUS_ NTAPI RtlGetVersion(OSVERSIONINFOW *);
+VOID NTAPI RtlGetDeviceFamilyInfoEnum(ULONGLONG *, ULONG *, ULONG *);
 DWORD WINAPI GetFileVersionInfoSizeW(LPCWSTR, LPDWORD);
 BOOL WINAPI GetFileVersionInfoW(LPCWSTR, DWORD, DWORD, LPVOID);
 BOOL WINAPI VerQueryValueW(LPCVOID, LPCWSTR, LPVOID *, PUINT);
@@ -41,6 +42,17 @@ int main(void)
     CHECK(r != 0 && SizeofResource(me, r) > 100, "this program carries an RT_MANIFEST resource (id 1)");
     CHECK(RtlGetVersion(&rtl) == 0 && rtl.dwMajorVersion == 10 && rtl.dwMinorVersion == 0 && rtl.dwBuildNumber == 22631,
           "RtlGetVersion reports the PEB's 10.0.22631");
+    {   /* Chromium resolves this with GetProcAddress(ntdll) and CHECKs the pointer */
+        ULONGLONG ver = 0;
+        ULONG fam = 99, form = 99;
+        FARPROC fn = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetDeviceFamilyInfoEnum");
+        CHECK(fn != 0, "ntdll exports RtlGetDeviceFamilyInfoEnum (GetProcAddress finds it)");
+        if (fn) ((VOID (NTAPI *)(ULONGLONG *, ULONG *, ULONG *))(void *)fn)(&ver, &fam, &form);   /* called through the pointer Chromium would get */
+        CHECKV(ver == ((10ull << 48) | (0ull << 32) | (22631ull << 16) | 1) && fam == 3 && form == 0,
+               "RtlGetDeviceFamilyInfoEnum: UAP version = the PEB's 10.0.22631.1, family DESKTOP (3), form UNKNOWN (0)", "%llx %lu %lu", ver, (unsigned long)fam, (unsigned long)form);
+        RtlGetDeviceFamilyInfoEnum(0, 0, 0);
+        CHECK(1, "NULL output pointers are allowed");
+    }
     CHECK(GetVersionExW((LPOSVERSIONINFOW)&ex), "GetVersionExW (OSVERSIONINFOEXW)");
     CHECKV(ex.dwMajorVersion == rtl.dwMajorVersion && ex.dwMinorVersion == rtl.dwMinorVersion && ex.dwBuildNumber == rtl.dwBuildNumber,
            "with the Windows 10 supportedOS GUID in the manifest GetVersionExW reports the true version", "%lu.%lu.%lu",
