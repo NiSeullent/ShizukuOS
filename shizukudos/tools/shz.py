@@ -195,6 +195,11 @@ def suite_host(results):
             record(results, f"upstream {name} pinned at {spec['commit'][:12]} (driver corpus)", "SKIP",
                    detail="not fetched; shizukudos/ntdrv/corpus/build.py fetches it")
             continue
+        if spec.get("fetched_by") and not (shzlib.UPSTREAM_DIR / name / ".git").exists():
+            # optional components (the WebKit/ICU trees) are fetched only by their own build script
+            record(results, f"upstream {name} pinned at {spec['commit'][:12]}", "SKIP",
+                   detail=f"not fetched; {spec['fetched_by']} fetches it")
+            continue
         if spec.get("kind") == "debian-binary-packages":
             try:
                 shzlib.ensure_deb_upstream(name)
