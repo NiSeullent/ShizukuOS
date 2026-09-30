@@ -157,6 +157,20 @@ int pe_read_string(const uint8_t *f, uint64_t size, const pe_info_t *o, uint32_t
     return PE_E_STRING;
 }
 
+/* The NUL-terminated printable-ASCII string at `rva`, validated in place and returned as a pointer into the file (no
+ * length limit: C++ export and import names are often longer than any fixed buffer), or 0 when it is malformed. */
+const char *pe_string_at(const uint8_t *f, uint64_t size, const pe_info_t *o, uint32_t rva)
+{
+    uint64_t off, avail, n;
+    if (pe_rva_to_offset(f, size, o, rva, &off, &avail)) return 0;
+    for (n = 0; n < avail; ++n) {
+        const unsigned char ch = f[off + n];
+        if (!ch) return (const char *)(f + off);
+        if (ch < 0x20 || ch > 0x7e) return 0;
+    }
+    return 0;
+}
+
 int pe_find_export(const uint8_t *f, uint64_t size, const pe_info_t *o, const char *name, int ordinal, uint32_t *rva,
                    char *forward, unsigned forward_cap)
 {
@@ -179,11 +193,11 @@ int pe_find_export(const uint8_t *f, uint64_t size, const pe_info_t *o, const ch
         for (i = 0; i < nnames; ++i) {
             uint64_t noff, navail, ooff, oavail;
             uint32_t name_rva;
-            char cand[128];
+            const char *cand;
             unsigned k;
             if (pe_rva_to_offset(f, size, o, names_rva + i * 4, &noff, &navail) || navail < 4) return PE_E_EXPORT;
             name_rva = rd32(f + noff);
-            if (pe_read_string(f, size, o, name_rva, cand, sizeof cand)) return PE_E_EXPORT;
+            if (!(cand = pe_string_at(f, size, o, name_rva))) return PE_E_EXPORT;
             for (k = 0; cand[k] && name[k] && cand[k] == name[k]; ++k) { }
             if (cand[k] || name[k]) continue;
             if (pe_rva_to_offset(f, size, o, ords_rva + i * 2, &ooff, &oavail) || oavail < 2) return PE_E_EXPORT;
@@ -233,7 +247,7 @@ int pe_walk_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_impo
         for (idx = 0;; ++idx) {
             uint64_t toff, tavail, thunk;
             int rc;
-            if (idx > 16384) return PE_E_IMPORT;
+            if (idx > 262144) return PE_E_IMPORT;
             if (pe_rva_to_offset(f, size, o, ilt + idx * 8, &toff, &tavail) || tavail < 8) return PE_E_IMPORT;
             thunk = rd64(f + toff);
             if (!thunk) break;
@@ -241,10 +255,10 @@ int pe_walk_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_impo
             if (thunk >> 63) {
                 rc = fn(ctx, dll, 0, (uint16_t)(thunk & 0xffff), 1, iat + idx * 8);
             } else {
-                char sym[160];
+                const char *sym;
                 uint64_t hoff, havail;
                 if ((thunk >> 31) || pe_rva_to_offset(f, size, o, (uint32_t)thunk, &hoff, &havail) || havail < 3) return PE_E_IMPORT;
-                if (pe_read_string(f, size, o, (uint32_t)thunk + 2, sym, sizeof sym)) return PE_E_IMPORT;
+                if (!(sym = pe_string_at(f, size, o, (uint32_t)thunk + 2))) return PE_E_IMPORT;
                 rc = fn(ctx, dll, sym, rd16(f + hoff), 0, iat + idx * 8);
             }
             if (rc) return rc;
@@ -413,7 +427,7 @@ int pe_walk_delay_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, p
             if (thunk >> 63) {
                 rc = fn(ctx, &dd, 0, (uint16_t)(thunk & 0xffff), 1, dd.iat_rva + idx * 8);
             } else {
-                char sym[160];
+                const char *sym;
                 uint64_t hoff, havail;
                 uint32_t hn = (uint32_t)thunk;
                 if (!(dd.attributes & 1)) {
@@ -423,7 +437,7 @@ int pe_walk_delay_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, p
                     return PE_E_DELAY;
                 }
                 if (pe_rva_to_offset(f, size, o, hn, &hoff, &havail) || havail < 3) return PE_E_DELAY;
-                if (pe_read_string(f, size, o, hn + 2, sym, sizeof sym)) return PE_E_DELAY;
+                if (!(sym = pe_string_at(f, size, o, hn + 2))) return PE_E_DELAY;
                 rc = fn(ctx, &dd, sym, rd16(f + hoff), 0, dd.iat_rva + idx * 8);
             }
             if (rc) return rc;

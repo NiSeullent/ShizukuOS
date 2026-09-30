@@ -1,0 +1,10 @@
+{
+ "t_tc_c": {"args": "alpha \"beta gamma\""},
+ "t_tc_cxx": {},
+ "t_dep_zlib": {"libs": ["zlib"]},
+ "t_dep_libpng": {"libs": ["png16", "zlib"]},
+ "t_dep_jpeg": {"libs": ["turbojpeg", "jpeg"]},
+ "t_dep_webp": {"libs": ["webp", "webpdemux", "sharpyuv"]},
+ "t_dep_brotli": {"libs": ["brotlienc", "brotlidec", "brotlicommon"]},
+ "t_dep_woff2": {"libs": ["woff2enc", "woff2dec", "woff2common"]}
+}

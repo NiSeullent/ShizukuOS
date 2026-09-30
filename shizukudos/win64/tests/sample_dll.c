@@ -5,3 +5,5 @@ __declspec(dllexport) int shz_add(int a, int b) { return a + b; }
 __declspec(dllexport) int shz_value = 1234;
 int __stdcall DllMain(void *h, unsigned long reason, void *r) { (void)h; (void)reason; (void)r; return 1; }
 int shz_ord_fn(void) { return 77; }
+/* 300-character export name (C++ mangled names are often longer than any fixed buffer), sorted before shz_add */
+int ShzLongExportName_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx(void) { return 300; }
