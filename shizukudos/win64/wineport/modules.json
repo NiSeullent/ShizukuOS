@@ -77,6 +77,16 @@
     "-DFAR=",
     "-DZ_SOLO"
    ]
+  },
+  "xml2": {
+   "dir": "libs/xml2",
+   "makedep": true,
+   "on_demand": true
+  },
+  "xslt": {
+   "dir": "libs/xslt",
+   "makedep": true,
+   "on_demand": true
   }
  },
  "modules": [
@@ -625,6 +635,445 @@
     "oleaut32"
    ],
    "disabled": "67k lines of controls needing large parts of user32/gdi32 the Shizuku DLLs do not export yet (not attempted in this round)"
+  },
+  {
+   "name": "stdole2",
+   "kind": "typelib",
+   "dir": "dlls/stdole2.tlb",
+   "image_path": "\\SHZ\\SYS64\\stdole2.tlb",
+   "disabled": "not packed until a consumer is enabled (tridentrt's LoadRegTypeLib/LoadTypeLibEx, jscript, mshtml, ieframe, all disabled); still built for widl importlib() by any makedep module and by probe builds"
+  },
+  {
+   "name": "mshtml_tlb",
+   "kind": "typelib",
+   "dir": "dlls/mshtml.tlb",
+   "image_path": "\\SHZ\\SYS64\\mshtml.tlb",
+   "disabled": "not packed (1.1 MB) until mshtml and tridentrt are enabled: dispex.c loads it with LoadRegTypeLib(LIBID_MSHTML, 4, 0); still built by probe builds"
+  },
+  {
+   "name": "tridentrt",
+   "placeholder": true,
+   "dir": "dlls/oleaut32",
+   "disabled": "placeholder: tridentrt.dll is defined by the trident/comrt work (sources, spec, link list); the entry reserves its place before the browser modules that link it first and keeps dlls/oleaut32 (typelib.c, DispCallFunc) in the checkout; never built, not even by a probe, until the placeholder key is removed together with this reason"
+  },
+  {
+   "name": "wininet",
+   "makedep": true,
+   "link": [
+    "tridentrt",
+    "shlwapi",
+    "shell32",
+    "user32",
+    "ws2_32",
+    "secur32",
+    "advapi32"
+   ],
+   "static": [
+    "zlib"
+   ],
+   "delay_imports": [
+    "crypt32"
+   ],
+   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: PathCreateFromUrlW StrStrIA UrlCanonicalizeA UrlCanonicalizeW UrlCombineA UrlCombineW UrlEscapeW (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)",
+   "dynamic_imports": [
+    {
+     "dll": "secur32.dll",
+     "fail": "0x80090302",
+     "functions": [
+      "DecryptMessage",
+      "EncryptMessage",
+      "QueryCredentialsAttributesA"
+     ]
+    },
+    {
+     "dll": "cryptui.dll",
+     "fail": "0",
+     "functions": [
+      "CryptUIDlgViewCertificateW"
+     ]
+    },
+    {
+     "dll": "dhcpcsvc.dll",
+     "fail": "50",
+     "functions": [
+      "DhcpRequestParams"
+     ]
+    },
+    {
+     "dll": "iphlpapi.dll",
+     "fail": "50",
+     "functions": [
+      "GetAdaptersAddresses"
+     ]
+    },
+    {
+     "dll": "mpr.dll",
+     "fail": "50",
+     "functions": [
+      "WNetCachePassword",
+      "WNetGetCachedPassword"
+     ]
+    },
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "DosDateTimeToFileTime",
+      "FileTimeToDosDateTime",
+      "GetComputerNameExA",
+      "IdnToAscii",
+      "IdnToUnicode"
+     ]
+    },
+    {
+     "dll": "shell32.dll",
+     "fail": "120",
+     "functions": [
+      "SHFileOperationW"
+     ]
+    },
+    {
+     "dll": "ws2_32.dll",
+     "fail": "11003",
+     "functions": [
+      "getnameinfo"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "urlmon",
+   "makedep": true,
+   "link": [
+    "tridentrt",
+    "ole32",
+    "oleaut32",
+    "shell32",
+    "rpcrt4",
+    "shlwapi",
+    "user32",
+    "advapi32"
+   ],
+   "static": [
+    "uuid"
+   ],
+   "delay_imports": [
+    "wininet"
+   ],
+   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: CLSIDFromProgID CoCreateInstance CoGetClassObject CreateBindCtx ParseURLW PathCreateFromUrlW ReleaseStgMedium UrlCanonicalizeW UrlCombineW UrlCompareW UrlGetPartW UrlUnescapeW (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)",
+   "exclude_sources": {
+    "usrmarshal.c": "[call_as] marshaling helpers of the widl NDR proxy (urlmon_urlmon_p.c), which is not built: the Shizuku rpcrt4 has no NDR engine (see DLLDATA_SHIM in build.py)"
+   },
+   "dynamic_imports": [
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "IdnToAscii"
+     ]
+    },
+    {
+     "dll": "ntdll.dll",
+     "fail": "0xc000000d",
+     "functions": [
+      "RtlIpv6AddressToStringExW",
+      "RtlIpv6StringToAddressW"
+     ]
+    },
+    {
+     "dll": "shell32.dll",
+     "fail": "0",
+     "functions": [
+      "ShellExecuteExW"
+     ]
+    },
+    {
+     "dll": "ole32.dll",
+     "fail": "0x80004001",
+     "functions": [
+      "CreateGenericComposite",
+      "MkParseDisplayName"
+     ]
+    },
+    {
+     "dll": "advpack.dll",
+     "fail": "0x80004001",
+     "functions": [
+      "ExtractFilesW",
+      "RunSetupCommandW"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "oleacc",
+   "makedep": true,
+   "link": [
+    "tridentrt",
+    "oleaut32",
+    "ole32",
+    "user32",
+    "rpcrt4",
+    "advapi32"
+   ],
+   "static": [
+    "uuid"
+   ],
+   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: CreateStreamOnHGlobal (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)",
+   "dynamic_imports": [
+    {
+     "dll": "ole32.dll",
+     "fail": "0x80004001",
+     "functions": [
+      "CoMarshalInterface",
+      "CoUnmarshalInterface",
+      "CoReleaseMarshalData"
+     ]
+    },
+    {
+     "dll": "user32.dll",
+     "fail": "0",
+     "functions": [
+      "GetGUIThreadInfo",
+      "RealGetWindowClassW"
+     ]
+    },
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "GlobalAddAtomW",
+      "GlobalGetAtomNameW"
+     ]
+    },
+    {
+     "dll": "kernel32.dll",
+     "fail": "0xffff",
+     "functions": [
+      "GlobalDeleteAtom"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "jscript",
+   "makedep": true,
+   "link": [
+    "tridentrt",
+    "oleaut32",
+    "ole32",
+    "user32",
+    "advapi32",
+    "cryptbase"
+   ],
+   "static": [
+    "musl"
+   ],
+   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: CLSIDFromProgID CoGetClassObject VarUdateFromDate (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)"
+  },
+  {
+   "name": "msxml3",
+   "makedep": true,
+   "link": [
+    "tridentrt",
+    "urlmon",
+    "shlwapi",
+    "oleaut32",
+    "ole32",
+    "user32",
+    "advapi32"
+   ],
+   "static": [
+    "xslt",
+    "xml2",
+    "musl",
+    "uuid"
+   ],
+   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: CLSIDFromProgID CoCreateInstance CreateBindCtx CreateStreamOnHGlobal GetHGlobalFromStream PathIsURLW PathSearchAndQualifyW SystemTimeToVariantTime UrlApplySchemeW UrlUnescapeW (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)",
+   "dynamic_imports": [
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "EnumSystemLocalesA"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "mshtml",
+   "makedep": true,
+   "link": [
+    "tridentrt",
+    "urlmon",
+    "shlwapi",
+    "shell32",
+    "ole32",
+    "oleaut32",
+    "user32",
+    "gdi32",
+    "advapi32"
+   ],
+   "static": [
+    "uuid",
+    "musl"
+   ],
+   "delay_imports": [
+    "wininet"
+   ],
+   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: CLSIDFromProgID CoCreateInstance CoGetClassObject CreateBindCtx CreateOleAdviseHolder DispCallFunc GetMIMETypeSubKeyW LoadTypeLibEx ProgIDFromCLSID UrlUnescapeW VarBstrFromI4 VarBstrFromR4 VarBstrFromR8 VarI4FromStr (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)",
+   "dynamic_imports": [
+    {
+     "dll": "shlwapi.dll",
+     "fail": "0x80004001",
+     "functions": [
+      "AssocQueryStringW"
+     ]
+    },
+    {
+     "dll": "shell32.dll",
+     "fail": "0",
+     "functions": [
+      "ShellExecuteW"
+     ]
+    },
+    {
+     "dll": "inetcomm.dll",
+     "fail": "0x80004001",
+     "functions": [
+      "MimeOleObjectFromMoniker"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ieframe",
+   "makedep": true,
+   "link": [
+    "tridentrt",
+    "urlmon",
+    "shell32",
+    "comctl32",
+    "shlwapi",
+    "oleaut32",
+    "ole32",
+    "user32",
+    "gdi32",
+    "advapi32"
+   ],
+   "static": [
+    "uuid"
+   ],
+   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: CoCreateInstance CoRegisterClassObject CoRevokeClassObject CreateOleAdviseHolder CreateStreamOnHGlobal PathCreateFromUrlW PathIsURLW SHSetParentHwnd UrlApplySchemeW (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)",
+   "dynamic_imports": [
+    {
+     "dll": "kernel32.dll",
+     "fail": "-1",
+     "functions": [
+      "CreateActCtxW"
+     ]
+    },
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "ActivateActCtx",
+      "DeactivateActCtx",
+      "ReleaseActCtx",
+      "Wow64DisableWow64FsRedirection",
+      "Wow64RevertWow64FsRedirection"
+     ]
+    },
+    {
+     "dll": "kernel32.dll",
+     "fail": "0xffffffff",
+     "functions": [
+      "MulDiv"
+     ]
+    },
+    {
+     "dll": "comctl32.dll",
+     "fail": "0",
+     "functions": [
+      "CreateStatusWindowW",
+      "ImageList_LoadImageW",
+      "ImageList_Destroy"
+     ]
+    },
+    {
+     "dll": "user32.dll",
+     "fail": "0",
+     "functions": [
+      "DdeGetData"
+     ]
+    },
+    {
+     "dll": "shell32.dll",
+     "fail": "0",
+     "functions": [
+      "ShellAboutW",
+      "ShellExecuteExW"
+     ]
+    },
+    {
+     "dll": "shlwapi.dll",
+     "fail": "120",
+     "functions": [
+      "SHRegOpenUSKeyW",
+      "SHRegEnumUSValueW",
+      "SHRegQueryUSValueW",
+      "SHRegCloseUSKey"
+     ]
+    },
+    {
+     "dll": "ole32.dll",
+     "fail": "0x80004001",
+     "functions": [
+      "StgCreateStorageEx",
+      "OleRegGetUserType"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "shdocvw",
+   "makedep": true,
+   "link": [
+    "tridentrt",
+    "shlwapi",
+    "advapi32",
+    "version",
+    "ole32",
+    "oleaut32"
+   ],
+   "static": [
+    "uuid"
+   ],
+   "delay_imports": [
+    "ieframe"
+   ],
+   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: CoCreateInstance (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)"
+  },
+  {
+   "name": "iexplore",
+   "kind": "exe",
+   "dir": "programs/iexplore",
+   "makedep": true,
+   "link": [
+    "ieframe",
+    "user32",
+    "version"
+   ],
+   "disabled": "imports ieframe.dll (IEWinMain, ordinal 101), which is disabled until tridentrt.dll exists",
+   "dynamic_imports": [
+    {
+     "dll": "advpack.dll",
+     "fail": "0x80004001",
+     "functions": [
+      "RegInstallA"
+     ]
+    }
+   ]
   }
  ],
  "image_files": [
