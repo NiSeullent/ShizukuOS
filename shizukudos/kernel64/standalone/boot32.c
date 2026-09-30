@@ -5,6 +5,7 @@
  */
 #include <stdint.h>
 #include "../../abi/shz_abi.h"
+#include "memholes.h"
 
 #ifdef STUB_K32                                    /* Kernel32: 32-bit Protected Mode, paging off, EBX = bootinfo */
 #define STUB_DOMAIN SHZ_DOM_KERNEL32
@@ -16,11 +17,16 @@
 #define KERNEL_GPA 0x100000u
 #define INITRD_GPA 0x2000000u
 #define MB_MAGIC 0x2BADB002u
+#define MB_INFO_MEM_MAP 0x40u
 
 extern char stub_end[];                            /* boot.ld: end of the stub image including its stack */
 
-struct mbi { uint32_t flags, mem_lower, mem_upper, boot_device, cmdline, mods_count, mods_addr; };
+struct mbi {
+    uint32_t flags, mem_lower, mem_upper, boot_device, cmdline, mods_count, mods_addr, syms[4];
+    uint32_t mmap_length, mmap_addr;
+};
 struct mod { uint32_t start, end, string, reserved; };
+struct mmap_entry { uint32_t size; uint64_t base, length; uint32_t type; } __attribute__((packed));
 
 static inline void outb(uint16_t p, uint8_t v) { __asm__ volatile("outb %0, %1" : : "a"(v), "Nd"(p)); }
 static void say(const char *s) { while (*s) outb(0x3f8, (uint8_t)*s++); }
@@ -44,6 +50,50 @@ static void zero(uint32_t dst, uint32_t n)
     __asm__ volatile("rep stosb" : "+D"(dst), "+c"(n) : "a"(0) : "memory");
 }
 
+static shz_memplan_result_t plan;
+
+/* RAM size and the firmware holes below it (memholes.h: the same plan the UEFI boot manager uses for its direct
+ * Kernel64 boot). Without a Multiboot memory map: the classic mem_upper, contiguous RAM from 1 MiB, no holes. */
+static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
+{
+    static shz_memplan_t runs;
+    uint32_t off, ram, i;
+
+    shz_memplan_init(&runs);
+    if (!(mbi->flags & MB_INFO_MEM_MAP) || !mbi->mmap_length) {
+        /* mem_upper: KiB of contiguous RAM above 1 MiB (below 4 GiB); low memory as on every PC */
+        ram = mbi->mem_upper >= 0x3FFC00u ? 0xFFF00000u : (mbi->mem_upper + 1024u) << 10;
+        shz_memplan_add(&runs, 0, (uint64_t)mbi->mem_lower << 10);
+        shz_memplan_add(&runs, KERNEL_GPA, ram);
+    } else {
+        for (off = 0; off + 24 <= mbi->mmap_length; off += ((const struct mmap_entry *)(mbi->mmap_addr + off))->size + 4) {
+            const struct mmap_entry *e = (const struct mmap_entry *)(mbi->mmap_addr + off);
+            uint64_t b = e->base, x = e->base + e->length;
+            if (e->type != 1 || !e->length || b >= (1ull << 32))
+                continue;
+            if (x > (1ull << 32)) x = 1ull << 32;
+            shz_memplan_add(&runs, b, x);
+        }
+    }
+    if (!shz_memplan_solve(&runs, MAX_RAM, 64u << 20, INITRD_GPA, isize, &plan))
+        fail(plan.why, (uint32_t)plan.at);
+#ifdef STUB_K32
+    if (plan.count) fail("Kernel32 needs contiguous RAM from 1 MiB; firmware hole at", (uint32_t)plan.gpa[0]);
+#endif
+    for (i = 0; i < plan.count; ++i) {
+        say("SHZ-STUB: firmware hole "); hex((uint32_t)plan.gpa[i]); say(" size "); hex((uint32_t)plan.size[i]);
+        say(plan.gpa[i] < SHZ_K64_PMM_GPA ? " fenced off in the kernel heap\n" : " kept out of the page allocator\n");
+    }
+    if (plan.cut) {
+        say("SHZ-STUB: more than 16 firmware holes; RAM ends below the hole at "); hex((uint32_t)plan.cut); say("\n");
+    }
+    if (runs.dropped) {
+        say("SHZ-STUB: memory map has more than 64 separate usable ranges; ignored above the 64th: "); hex(runs.dropped);
+        say("\n");
+    }
+    return (uint32_t)plan.ram;
+}
+
 void stub_prepare(uint32_t magic, const struct mbi *mbi)
 {
     static char cmdline[SHZ_CMDLINE_MAX];          /* stub .bss (above 4 MiB), untouched by the copies below */
@@ -59,10 +109,7 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     mods = (const struct mod *)mbi->mods_addr;
     ksize = mods[0].end - mods[0].start;
     if (mbi->mods_count > 1) isize = mods[1].end - mods[1].start;
-    /* mem_upper: KiB of contiguous RAM above 1 MiB (below 4 GiB; memory above 4 GiB is not used: no E820 walk here) */
-    ram = mbi->mem_upper >= 0x3FFC00u ? 0xFFF00000u : (mbi->mem_upper + 1024u) << 10;
-    ram &= ~0x1fffffu;
-    if (ram > MAX_RAM) ram = MAX_RAM;
+    ram = memory_layout(mbi, isize);
     if (ram < (64u << 20)) fail("need at least 64 MiB, have ", ram);
     for (i = 0; i < mbi->mods_count && i < 2; ++i) {
         if (mods[i].start < (uint32_t)stub_end || mods[i].end > INITRD_GPA)
@@ -90,6 +137,11 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     pdpt_hi[2 * 510] = 0x3000 | 3;                 /* 0xFFFFFFFF80000000 -> PD (physical 0) */
     for (i = 0; i < 512 && ((uint64_t)i << 21) < ram; ++i)
         pd[2 * i] = (i << 21) | 0x83;              /* present, writable, 2 MiB */
+    {                                              /* after every read of the Multiboot data, which may sit in low memory */
+        volatile shz_memholes_t *holes = (volatile shz_memholes_t *)SHZ_MEMHOLES_GPA;
+        zero(SHZ_MEMHOLES_GPA, sizeof(shz_memholes_t));
+        shz_memholes_write(holes, &plan);
+    }
 #else
     (void)pml4; (void)pdpt_lo; (void)pd; (void)pdpt_hi;
 #endif
