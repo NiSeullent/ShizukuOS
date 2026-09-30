@@ -77,6 +77,18 @@ typedef EFI_STATUS (EFIAPI *EFI_LOAD_IMAGE_FN)(uint8_t boot_policy, EFI_HANDLE p
 typedef EFI_STATUS (EFIAPI *EFI_START_IMAGE_FN)(EFI_HANDLE image, size_t *exit_data_size, CHAR16 **exit_data);
 typedef EFI_STATUS (EFIAPI *EFI_UNLOAD_IMAGE_FN)(EFI_HANDLE image);
 
+/* UEFI 2.10 12.3 Simple Text Input (the boot manager menu, BOOT.INI menu_timeout). */
+#define EFI_NOT_READY (EFI_ERROR_BIT | 6)
+typedef struct {
+    uint16_t scan_code;
+    CHAR16 unicode_char;
+} EFI_INPUT_KEY;
+typedef struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL {
+    EFI_STATUS (EFIAPI *reset)(struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL *, uint8_t extended_verification);
+    EFI_STATUS (EFIAPI *read_key_stroke)(struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL *, EFI_INPUT_KEY *);
+    void *wait_for_key;
+} EFI_SIMPLE_TEXT_INPUT_PROTOCOL;
+
 /* UEFI 2.10 7.2 EFI_MEMORY_TYPE and memory attributes (direct Kernel64 boot). */
 enum {
     EFI_RESERVED_MEMORY = 0, EFI_LOADER_CODE_MEM = 1, EFI_LOADER_DATA_MEM = 2, EFI_BS_CODE = 3, EFI_BS_DATA = 4,

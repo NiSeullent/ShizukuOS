@@ -101,6 +101,8 @@ int32_t ntdrv_open_close_device(DEVICE_OBJECT *dev, int close);
 void ntdrv_ke_init(void);                                         /* DPC worker + timer thread */
 uint8_t ntdrv_current_irql(void);
 void ntdrv_dpc_queue_flush(void);
+void NTAPI KeAcquireSpinLock(KSPIN_LOCK *l, uint8_t *old);
+void NTAPI KeReleaseSpinLock(KSPIN_LOCK *l, uint8_t old);
 void NTAPI KeInitializeEvent(KEVENT *e, uint32_t type, uint8_t state);
 LONG NTAPI KeSetEvent(KEVENT *e, LONG boost, uint8_t wait);
 int32_t NTAPI KeWaitForSingleObject(void *obj, uint32_t reason, uint8_t mode, uint8_t alertable, int64_t *timeout);
@@ -116,7 +118,8 @@ int ntdrv_wide_to_ascii(const WCHAR *s, unsigned chars, char *out, unsigned cap)
 /* Kernel-mode handle table (ntdrv_zw.c): a small namespace for the handles a driver holds --
  * registry keys (ZwOpenKey), files (ZwCreateFile) and system threads (PsCreateSystemThread).
  * Separate from the per-process user handle tables. */
-enum { KH_NONE = 0, KH_KEY = 1, KH_FILE = 2, KH_THREAD = 3, KH_EVENT = 4 };
+enum { KH_NONE = 0, KH_KEY = 1, KH_FILE = 2, KH_THREAD = 3, KH_EVENT = 4, KH_DEVICE = 5, KH_DRIVER = 6, KH_PROCESS = 7,
+       KH_SEMAPHORE = 8, KH_DIR = 9, KH_SECTION = 10 };
 uint64_t ntdrv_kh_alloc(int kind, void *ptr);
 void *ntdrv_kh_get(uint64_t handle, int kind);
 int ntdrv_kh_free(uint64_t handle);

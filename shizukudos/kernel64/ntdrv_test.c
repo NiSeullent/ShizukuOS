@@ -2,7 +2,7 @@
  * Kernel64 NT driver host: in-kernel demonstration. Invoked once from kmain when the initrd
  * carries \SHZ\DRIVERS (only the dedicated ntdrv runner mounts such an image, so the default
  * kernel runs are untouched). It loads the unmodified test .sys drivers, drives them through
- * the real IRP path from ring 0 and reports results in evidence slots 13,14,15,25,26,27 for
+ * the real IRP path from ring 0 and reports results in evidence slots 13,14,15,25,26,27 and the serial line "apitest N passed, M failed" for
  * tests/run_k64_ntdrv.py to check. Results are computed from live behaviour, never asserted.
  */
 #include "ntdrv.h"
@@ -88,6 +88,21 @@ void ntdrv_selftest(void)
         }
     } else if (pci) {
         kprintf("K64 ntdrv-test: pciedu present but no edu device (skipped)\n");
+    }
+
+    /* ---- export-surface driver: every check inside its DriverEntry prints "apitest: PASS/FAIL <name>"; a failed
+     * check makes DriverEntry fail, so `loaded` stays at 3 and the runner's "loaded 4 drivers" check fails ---- */
+    {
+        ntdrv_driver_t *api = 0;
+        if (load_from_store("APITEST.SYS", "shzapi", &api) == 0 && api->started) {
+            struct { uint32_t pass, fail; } r = { 0, 0 };
+            uint64_t info = 0;
+            ++loaded;
+            dev = ntdrv_find_device("\\Device\\ShzApi");
+            if (dev) ntdrv_device_control(dev, IOCTL_SHZ_ECHO /* IOCTL_SHZ_APIINFO shares func 0x800 */, 0, 0, &r, sizeof r, 0, &info);
+            kprintf("K64 ntdrv-test: apitest %u passed, %u failed\n", r.pass, r.fail);
+            if (r.fail || !r.pass) pass = 0;
+        } else { pass = 0; kprintf("K64 ntdrv-test: apitest driver failed to load\n"); }
     }
 
     shz_evidence(13, loaded);

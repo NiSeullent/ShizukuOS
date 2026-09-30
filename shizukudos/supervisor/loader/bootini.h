@@ -15,6 +15,10 @@
  *     csm_path = \EFI\SHIZUKU\CSMWRAP.EFI             absolute path on the boot volume
  *     auto_kernel64 = yes | no                        mode=auto without VMX may boot Kernel64
  *                                                     directly before trying CSM (default no)
+ *     menu_timeout = 0 .. 30                          seconds the boot manager menu waits for a key
+ *                                                     (A/Enter = the policy above, K = Kernel64 direct,
+ *                                                     C = CSM, S = Supervisor) before it follows the
+ *                                                     policy; 0 = no menu (default)
  * KERNEL64.INI keys:
  *     cmdline = <printable ASCII, may be empty>       copied into shz_bootinfo_t.cmdline
  */
@@ -25,6 +29,7 @@
 #define BOOTINI_MAX_BYTES 4096
 #define BOOTINI_PATH_MAX 128            /* including the terminating NUL */
 #define BOOTINI_DEFAULT_CSM_PATH "\\EFI\\SHIZUKU\\CSMWRAP.EFI"
+#define BOOTINI_MENU_TIMEOUT_MAX 30
 
 enum bootini_mode { BOOT_MODE_AUTO = 0, BOOT_MODE_SUPERVISOR = 1, BOOT_MODE_CSM = 2, BOOT_MODE_KERNEL64 = 3 };
 
@@ -32,10 +37,11 @@ typedef struct {
     int mode;                           /* enum bootini_mode */
     char csm_path[BOOTINI_PATH_MAX];    /* ASCII, starts with '\' */
     int auto_kernel64;                  /* mode=auto without VMX: try Kernel64 direct boot before CSM */
-    int mode_set, csm_path_set, auto_kernel64_set;  /* which keys the file provided */
+    int menu_timeout;                   /* seconds; 0 = no boot manager menu */
+    int mode_set, csm_path_set, auto_kernel64_set, menu_timeout_set;  /* which keys the file provided */
 } bootini_policy_t;
 
-/* Built-in policy used when BOOT.INI does not exist: mode=auto, default csm_path, auto_kernel64=no. */
+/* Built-in policy used when BOOT.INI does not exist: mode=auto, default csm_path, auto_kernel64=no, no menu. */
 void bootini_defaults(bootini_policy_t *policy);
 
 /* Parses `len` bytes. Returns 0 and fills `policy` (defaults for absent keys), or

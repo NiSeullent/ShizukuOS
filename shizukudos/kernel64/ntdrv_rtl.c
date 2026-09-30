@@ -144,53 +144,19 @@ NTSTATUS NTAPI RtlGetVersion(RTL_OSVERSIONINFOW *v)
 }
 
 /* ---------------------------------------------------------------- DbgPrint */
-static void emit(char *buf, unsigned *n, unsigned cap, char c) { if (*n + 1 < cap) buf[(*n)++] = c; }
-static void emit_str(char *buf, unsigned *n, unsigned cap, const char *s) { while (*s) emit(buf, n, cap, *s++); }
-static void emit_uint(char *buf, unsigned *n, unsigned cap, uint64_t v, unsigned base, int upper, int width, int zero)
+/* The formatter is the CRT's (ntdrv_crt.c: the same engine as sprintf/swprintf), so every Microsoft conversion a
+ * driver's DbgPrint uses (%wZ, %ws, %I64x, %p, widths, precisions) prints the same way it does under a kernel debugger. */
+extern int ntdrv_vformat(void *buf, uint64_t cap, int outwide, const void *fmt, int fmtwide, __builtin_ms_va_list ap);
+static int vdbg_prefix(const char *prefix, const char *fmt, __builtin_ms_va_list ap)
 {
-    char t[24]; int k = 0; const char *d = upper ? "0123456789ABCDEF" : "0123456789abcdef";
-    if (!v) t[k++] = '0';
-    while (v) { t[k++] = d[v % base]; v /= base; }
-    while (k < width) t[k++] = zero ? '0' : ' ';
-    while (k) emit(buf, n, cap, t[--k]);
+    char buf[512];
+    int n = ntdrv_vformat(buf, sizeof buf, 0, fmt, 0, ap);
+    kprintf("[drv] %s%s", prefix ? prefix : "", buf);
+    return n < 0 ? 0 : (n < (int)sizeof buf ? n : (int)sizeof buf - 1);
 }
-static int NTAPI vdbg(const char *fmt, __builtin_ms_va_list ap)
-{
-    char buf[256];
-    unsigned n = 0;
-    const char *f = fmt;
-    while (*f) {
-        if (*f != '%') { emit(buf, &n, sizeof buf, *f++); continue; }
-        ++f;
-        {
-            int zero = 0, width = 0, longs = 0;
-            if (*f == '0') { zero = 1; ++f; }
-            while (*f >= '0' && *f <= '9') { width = width * 10 + (*f - '0'); ++f; }
-            while (*f == 'l') { ++longs; ++f; }
-            if (*f == 'w') ++f;                    /* %ws / %wZ */
-            switch (*f) {
-            case 's': emit_str(buf, &n, sizeof buf, __builtin_va_arg(ap, const char *)); break;
-            case 'd': case 'i': { long v = longs ? __builtin_va_arg(ap, long) : __builtin_va_arg(ap, int);
-                                  if (v < 0) { emit(buf, &n, sizeof buf, '-'); v = -v; }
-                                  emit_uint(buf, &n, sizeof buf, (uint64_t)v, 10, 0, width, zero); break; }
-            case 'u': emit_uint(buf, &n, sizeof buf, longs ? __builtin_va_arg(ap, unsigned long) : __builtin_va_arg(ap, unsigned), 10, 0, width, zero); break;
-            case 'x': emit_uint(buf, &n, sizeof buf, longs ? __builtin_va_arg(ap, unsigned long) : __builtin_va_arg(ap, unsigned), 16, 0, width, zero); break;
-            case 'X': emit_uint(buf, &n, sizeof buf, longs ? __builtin_va_arg(ap, unsigned long) : __builtin_va_arg(ap, unsigned), 16, 1, width, zero); break;
-            case 'p': emit_str(buf, &n, sizeof buf, "0x"); emit_uint(buf, &n, sizeof buf, (uint64_t)__builtin_va_arg(ap, void *), 16, 0, 0, 0); break;
-            case 'c': emit(buf, &n, sizeof buf, (char)__builtin_va_arg(ap, int)); break;
-            case 'Z': { const void *pv = __builtin_va_arg(ap, void *); const ANSI_STRING *a = pv;
-                        unsigned i; for (i = 0; i < a->Length; ++i) emit(buf, &n, sizeof buf, a->Buffer[i]); break; }
-            case '%': emit(buf, &n, sizeof buf, '%'); break;
-            case 0: continue;
-            default: emit(buf, &n, sizeof buf, '%'); emit(buf, &n, sizeof buf, *f); break;
-            }
-            ++f;
-        }
-    }
-    buf[n] = 0;
-    kprintf("[drv] %s", buf);
-    return (int)n;
-}
+static int vdbg(const char *fmt, __builtin_ms_va_list ap) { return vdbg_prefix(0, fmt, ap); }
+uint32_t NTAPI vDbgPrintExWithPrefix(const char *prefix, uint32_t cid, uint32_t level, const char *fmt, __builtin_ms_va_list ap)
+{ (void)cid; (void)level; return (uint32_t)vdbg_prefix(prefix, fmt, ap); }
 uint32_t NTAPI DbgPrint(const char *fmt, ...)
 {
     __builtin_ms_va_list ap; int r;

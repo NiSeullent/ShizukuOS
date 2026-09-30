@@ -108,6 +108,7 @@ void kprintf(const char *fmt, ...)
     kvprintf(fmt, ap);
     __builtin_va_end(ap);
 }
+void __attribute__((weak)) ntdrv_run_bugcheck_callbacks(void) { }
 void kpanic(const char *fmt, ...)
 {
     __builtin_va_list ap;
@@ -117,6 +118,7 @@ void kpanic(const char *fmt, ...)
     kvprintf(fmt, ap);
     __builtin_va_end(ap);
     kprintf("\n");
+    ntdrv_run_bugcheck_callbacks();             /* KeRegisterBugCheckCallback registrations of hosted drivers (weak: no-op without the driver host) */
     shz_evidence(31, 0xdead0064);
     shz_exit(99);
 }

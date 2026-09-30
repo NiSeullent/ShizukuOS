@@ -59,7 +59,10 @@ typedef struct _KDPC {
 } KDPC, *PKDPC;
 
 typedef ULONG_PTR KSPIN_LOCK, *PKSPIN_LOCK;
-typedef struct _KDEVICE_QUEUE_ENTRY { LIST_ENTRY DeviceListEntry; ULONG SortKey; BOOLEAN Inserted; } KDEVICE_QUEUE_ENTRY;
+typedef struct _KDEVICE_QUEUE_ENTRY { LIST_ENTRY DeviceListEntry; ULONG SortKey; BOOLEAN Inserted; uint8_t _pad[3]; } KDEVICE_QUEUE_ENTRY, *PKDEVICE_QUEUE_ENTRY;
+/* KDEVICE_QUEUE (x64 0x28): Type/Size, DeviceListHead(8), Lock(0x18), Busy(0x20). */
+typedef struct _KDEVICE_QUEUE { CSHORT Type, Size; uint32_t _pad; LIST_ENTRY DeviceListHead; KSPIN_LOCK Lock; BOOLEAN Busy; uint8_t _pad2[7]; } KDEVICE_QUEUE, *PKDEVICE_QUEUE;
+typedef struct _GUID { uint32_t Data1; uint16_t Data2, Data3; uint8_t Data4[8]; } GUID, *PGUID;
 
 typedef struct _MDL {
     struct _MDL *Next;
@@ -131,10 +134,21 @@ typedef struct _DEVICE_OBJECT {
     PVOID DeviceExtension;
     DEVICE_TYPE DeviceType;             /* 0x48 */
     CCHAR StackSize;                    /* 0x4c */
-    /* The rest of the Windows DEVICE_OBJECT (Queue, DeviceQueue, Dpc, DeviceLock, ...) is
-     * opaque to the driver host, which keeps its own device state in DeviceExtension and a
-     * side record. Padded to the exact Windows x64 sizeof so a driver never scribbles past. */
-    uint8_t _opaque_tail[0x148 - 0x4d];
+    uint8_t _pad0[3];
+    uint8_t Queue[0x48];                /* 0x50 WAIT_CONTEXT_BLOCK (opaque here) */
+    ULONG AlignmentRequirement;         /* 0x98 */
+    uint32_t _pad1;
+    KDEVICE_QUEUE DeviceQueue;          /* 0xa0 StartIo queue (KeInsertDeviceQueue & co.) */
+    KDPC Dpc;                           /* 0xc8 */
+    ULONG ActiveThreadCount;            /* 0x108 */
+    uint32_t _pad2;
+    PVOID SecurityDescriptor;           /* 0x110 */
+    KEVENT DeviceLock;                  /* 0x118 */
+    USHORT SectorSize;                  /* 0x130 */
+    USHORT Spare1;
+    uint32_t _pad3;
+    PVOID DeviceObjectExtension;        /* 0x138: the host's side record (struct ntdrv_devext) */
+    PVOID Reserved;                     /* 0x140 */
 } DEVICE_OBJECT, *PDEVICE_OBJECT;
 
 /* Device flags (subset). */
@@ -159,6 +173,16 @@ typedef struct _IO_STACK_LOCATION {
         struct { ULONG Length; uint32_t _p0; ULONG Key, Flags; LARGE_INTEGER ByteOffset; } Write;
         struct { ULONG OutputBufferLength; uint32_t _p0; ULONG InputBufferLength; uint32_t _p1; ULONG IoControlCode; uint32_t _p2; PVOID Type3InputBuffer; } DeviceIoControl;
         struct { PVOID Argument1, Argument2, Argument3, Argument4; } Others;
+        struct { ULONG SystemContext; uint32_t _p0; ULONG Type; uint32_t _p1; ULONG State; uint32_t _p2; ULONG ShutdownType; } Power;
+        struct { ULONG Type; } QueryDeviceRelations;
+        struct { PVOID AllocatedResources, AllocatedResourcesTranslated; } StartDevice;
+        struct { ULONG IdType; } QueryId;
+        struct { const GUID *InterfaceType; USHORT Size, Version; uint32_t _p0; PVOID Interface, InterfaceSpecificData; } QueryInterface;
+        struct { PVOID Capabilities; } DeviceCapabilities;
+        struct { PVOID IoResourceRequirementList; } FilterResourceRequirements;
+        struct { ULONG WhichSpace; uint32_t _p0; PVOID Buffer; ULONG Offset; uint32_t _p1; ULONG Length; } ReadWriteConfig;
+        struct { ULONG DeviceTextType; uint32_t _p0; ULONG LocaleId; } QueryDeviceText;
+        struct { BOOLEAN InPath, Reserved[3]; uint32_t _p0; ULONG Type; } UsageNotification;
     } Parameters;
     PDEVICE_OBJECT DeviceObject;
     struct _FILE_OBJECT *FileObject;
@@ -224,6 +248,34 @@ typedef struct _FILE_OBJECT {
 #define METHOD_FROM_CTL_CODE(c) ((ULONG)((c) & 3))
 
 #define IRP_MJ_CREATE 0x00
+#define IRP_MJ_CLEANUP_ 0x12
+#define IRP_MJ_SYSTEM_CONTROL 0x17
+#define IRP_MN_START_DEVICE 0x00
+#define IRP_MN_QUERY_REMOVE_DEVICE 0x01
+#define IRP_MN_REMOVE_DEVICE 0x02
+#define IRP_MN_CANCEL_REMOVE_DEVICE 0x03
+#define IRP_MN_STOP_DEVICE 0x04
+#define IRP_MN_QUERY_STOP_DEVICE 0x05
+#define IRP_MN_CANCEL_STOP_DEVICE 0x06
+#define IRP_MN_QUERY_DEVICE_RELATIONS 0x07
+#define IRP_MN_QUERY_INTERFACE 0x08
+#define IRP_MN_QUERY_CAPABILITIES 0x09
+#define IRP_MN_QUERY_RESOURCES 0x0a
+#define IRP_MN_QUERY_RESOURCE_REQUIREMENTS 0x0b
+#define IRP_MN_QUERY_DEVICE_TEXT 0x0c
+#define IRP_MN_FILTER_RESOURCE_REQUIREMENTS 0x0d
+#define IRP_MN_READ_CONFIG 0x0f
+#define IRP_MN_WRITE_CONFIG 0x10
+#define IRP_MN_EJECT 0x11
+#define IRP_MN_SET_LOCK 0x12
+#define IRP_MN_QUERY_PNP_DEVICE_STATE 0x14
+#define IRP_MN_QUERY_BUS_INFORMATION 0x15
+#define IRP_MN_DEVICE_USAGE_NOTIFICATION 0x16
+#define IRP_MN_SURPRISE_REMOVAL 0x17
+#define IRP_MN_REGINFO 0x08                 /* IRP_MJ_SYSTEM_CONTROL (WMI) */
+#define IRP_MN_QUERY_ID 0x13
+#define IRP_MN_SET_POWER 0x02
+#define IRP_MN_QUERY_POWER 0x03
 #define IRP_MJ_CLOSE 0x02
 #define IRP_MJ_READ 0x03
 #define IRP_MJ_WRITE 0x04
@@ -295,4 +347,23 @@ _Static_assert(offsetof(KDPC, DeferredRoutine) == OFF_KDPC_DEFERREDROUTINE, "kdp
 _Static_assert(offsetof(KDPC, DeferredContext) == OFF_KDPC_DEFERREDCONTEXT, "kdpc ctx");
 _Static_assert(offsetof(KEVENT, Header.SignalState) == OFF_KEVENT_SIGNALSTATE, "kevent signal");
 _Static_assert(sizeof(KTIMER) == 0x40 && sizeof(KEVENT) == 0x18 && sizeof(KSEMAPHORE) == 0x20, "ke sizes");
+_Static_assert(offsetof(DEVICE_OBJECT, Queue) == OFF_DEV_QUEUE, "dev queue");
+_Static_assert(offsetof(DEVICE_OBJECT, AlignmentRequirement) == OFF_DEV_ALIGNMENT, "dev align");
+_Static_assert(offsetof(DEVICE_OBJECT, DeviceQueue) == OFF_DEV_DEVICEQUEUE, "dev devqueue");
+_Static_assert(offsetof(DEVICE_OBJECT, Dpc) == OFF_DEV_DPC, "dev dpc");
+_Static_assert(offsetof(DEVICE_OBJECT, ActiveThreadCount) == OFF_DEV_ACTIVETHREADS, "dev threads");
+_Static_assert(offsetof(DEVICE_OBJECT, SecurityDescriptor) == OFF_DEV_SECURITY, "dev sd");
+_Static_assert(offsetof(DEVICE_OBJECT, DeviceLock) == OFF_DEV_DEVICELOCK, "dev lock");
+_Static_assert(offsetof(DEVICE_OBJECT, SectorSize) == OFF_DEV_SECTORSIZE, "dev sector");
+_Static_assert(offsetof(DEVICE_OBJECT, DeviceObjectExtension) == OFF_DEV_DEVOBJEXT, "dev ext");
+_Static_assert(sizeof(KDEVICE_QUEUE) == SZ_KDEVICE_QUEUE && offsetof(KDEVICE_QUEUE, Lock) == 0x18 && offsetof(KDEVICE_QUEUE, Busy) == 0x20, "kdevq");
+_Static_assert(sizeof(KDEVICE_QUEUE_ENTRY) == SZ_KDEVICE_QUEUE_ENTRY, "kdevqe");
+_Static_assert(offsetof(IRP, Tail.Overlay.DeviceQueueEntry) == OFF_IRP_TAIL_DEVQUEUE, "irp devq");
+_Static_assert(offsetof(IO_STACK_LOCATION, Parameters.Power.Type) == OFF_STK_POWER_TYPE, "stk power type");
+_Static_assert(offsetof(IO_STACK_LOCATION, Parameters.Power.State) == OFF_STK_POWER_STATE, "stk power state");
+_Static_assert(offsetof(IO_STACK_LOCATION, Parameters.Power.ShutdownType) == OFF_STK_POWER_SHUTDOWN, "stk power shutdown");
+_Static_assert(offsetof(IO_STACK_LOCATION, Parameters.StartDevice.AllocatedResourcesTranslated) == OFF_STK_START_TRANSLATED, "stk start");
+_Static_assert(offsetof(IO_STACK_LOCATION, Parameters.QueryInterface.Version) == OFF_STK_QI_VERSION, "stk qi ver");
+_Static_assert(offsetof(IO_STACK_LOCATION, Parameters.QueryInterface.InterfaceSpecificData) == OFF_STK_QI_SPECIFIC, "stk qi data");
+_Static_assert(sizeof(DRIVER_EXTENSION) == SZ_DRIVER_EXTENSION, "drvext");
 #endif

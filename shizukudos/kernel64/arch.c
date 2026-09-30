@@ -160,6 +160,11 @@ void isr_dispatch(struct regs *r)
                 return;
         }
     }
+    {
+        extern int ntdrv_kernel_exception(struct regs *r);   /* ntdrv_seh.c: a fault inside a hosted driver goes to its SEH handlers */
+        if (!(r->cs & 3) && ntdrv_kernel_exception(r))
+            return;
+    }
     if (r->cs & 3) {
         if (user_fault(r))
             return;
