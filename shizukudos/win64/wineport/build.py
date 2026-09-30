@@ -154,6 +154,7 @@ def wine_keep_paths(cfg):
             for f in m.get("extra_sources", []):             # the file and the headers next to it
                 keep += [f"/{f}", f"/{f.rsplit('/', 1)[0]}/*.h"]
             keep += [f"/{p}" for p in m.get("keep", [])]
+            keep += [f"/{f}" for f in m.get("tests", {}).get("shizuku", {}).get("typelibs", {}).values()]
     keep += [f"/{f['path']}" for f in cfg.get("image_files", []) if f.get("upstream", "wine") == "wine"]
     return list(dict.fromkeys(keep))
 
@@ -926,7 +927,7 @@ def build_module(wine, rt, m, base, provided, trees, probe=False, notes=None):
         if m.get("exclude_sources"):
             notes["excluded_sources"] = m["exclude_sources"]
         srcs, widl_res = md.generate_sources(sources, obj_dir, notes)
-        srcs += [wine / s for s in m.get("extra_sources", [])] + [HERE / s for s in m.get("shizuku_sources", [])]
+        srcs += [wine / s for s in m.get("extra_sources", [])] + [HERE / s for s in m.get("shizuku_sources", []) if s.endswith(".c")]
         objs = [obj_dir / (s.stem + "_" + hashlib.sha1(str(s).encode()).hexdigest()[:6] + ".o") for s in srcs]
         unixcall_obj = obj_dir / "shzw_unixcall.o"
         compile_all([*[(s, o, md.cflags(s.name)) for s, o in zip(srcs, objs)],
@@ -940,8 +941,8 @@ def build_module(wine, rt, m, base, provided, trees, probe=False, notes=None):
             sources = [s for s in mk.get("SOURCES", []) if s not in m.get("exclude_sources", {})]
         srcs = [d / s for s in sources if s.endswith(".c") and not is_unix_source(d / s)]
         srcs += [wine / s for s in m.get("extra_sources", [])]
-        srcs += [HERE / s for s in m.get("shizuku_sources", [])]
-        rcs = [d / s for s in sources if s.endswith(".rc")]
+        srcs += [HERE / s for s in m.get("shizuku_sources", []) if s.endswith(".c")]
+        rcs = [d / s for s in sources if s.endswith(".rc")] + [HERE / s for s in m.get("shizuku_sources", []) if s.endswith(".rc")]
         includes = [d, *[wine / i for i in m.get("includes", [])], *[HERE / i for i in m.get("shizuku_includes", [])]]
         defines = [*mk.get("EXTRADEFS", []), *m.get("defines", [])]
         flags = [*WINE_CFLAGS, *defines, *[x for i in includes for x in ("-I", i)], "-I", wine / "include",
@@ -1213,15 +1214,25 @@ def build_tests(wine, rt, m):
     out = {}
     t = m["tests"]
     name = m["name"]
-    d = wine / t.get("dir", f"dlls/{name}/tests")
-    srcs = [s for s in makefile_vars(d / "Makefile.in").get("SOURCES", []) if s.endswith(".c")]
-    out[f"wine_{name}"] = build_test_exe(wine, rt, name, f"T_WINE_{name.upper()}.EXE", d, srcs, t["subtests"], t)
+    if "subtests" in t:                                  # a Shizuku-original module has no Wine tests
+        d = wine / t.get("dir", f"dlls/{name}/tests")
+        srcs = [s for s in makefile_vars(d / "Makefile.in").get("SOURCES", []) if s.endswith(".c")]
+        out[f"wine_{name}"] = build_test_exe(wine, rt, name, f"T_WINE_{name.upper()}.EXE", d, srcs, t["subtests"], t)
     if t.get("shizuku"):
         st = {**t, **t["shizuku"]}
         sd = HERE / "tests" / name
         ssrcs = sorted(p.name for p in sd.glob("*.c"))
         out[f"wp_{name}"] = build_test_exe(wine, rt, name, f"T_WP_{name.upper()}.EXE", sd, ssrcs,
                                            st.get("subtests", [Path(s).stem for s in ssrcs]), st, label=f"wp_{name}")
+        # MSFT type libraries the checks load, built with widl -t from Wine IDL files ({image path: idl})
+        data = []
+        for image_path, idl in st.get("typelibs", {}).items():
+            tlb = WOUT / "obj" / f"t_wp_{name}.exe" / Path(image_path.replace("\\", "/")).name
+            tlb.parent.mkdir(parents=True, exist_ok=True)
+            run([wine / "tools/widl/widl", "-o", tlb, "-m64", "--nostdinc", "-I", (wine / idl).parent, "-I", wine / "include",
+                 "-I", wine / "include/msvcrt", "-D_UCRT", "-D__WINESRC__", "-t", wine / idl])
+            data.append((image_path, str(tlb)))
+        out[f"wp_{name}"]["data"] = data
     return out
 
 
@@ -1330,6 +1341,7 @@ def build(only=None):
         result["probe"] = probe_info
     # the image gets enabled modules only (a probe build of a disabled module is a report, not a product)
     files = [(info["image_path"], info["binary"].read_bytes()) for n, info in sorted(modules.items()) if n in enabled]
+    files += [(p, Path(src).read_bytes()) for t in tests.values() if t["in_plain_image"] for p, src in t.get("data", [])]
     result["image_files"] = {}
     for f in cfg.get("image_files", []):
         src = (trees[f["upstream"]] / f["path"]) if "upstream" in f else (HERE / f["path"])

@@ -652,9 +652,112 @@
   },
   {
    "name": "tridentrt",
-   "placeholder": true,
-   "dir": "dlls/oleaut32",
-   "disabled": "placeholder: tridentrt.dll is defined by the trident/comrt work (sources, spec, link list); the entry reserves its place before the browser modules that link it first and keeps dlls/oleaut32 (typelib.c, DispCallFunc) in the checkout; never built, not even by a probe, until the placeholder key is removed together with this reason"
+   "comment": "Shizuku-original module (trident/comrt, TRIDENT.md): COM activation from the registry, type libraries and IDispatch (Wine oleaut32 typelib.c + DispCallFunc), full variant conversions, HGLOBAL streams, bind contexts, advise holders, shlwapi URL functions and registry seeding for the Wine browser modules, which link it before ole32/oleaut32/shlwapi. Wine files are compiled unmodified except typelib.c (patch 0200); exports: trident/comrt/tridentrt.spec.",
+   "shizuku_spec": "../trident/comrt/tridentrt.spec",
+   "sources": [],
+   "extra_sources": [
+    "dlls/oleaut32/typelib.c",
+    "dlls/oleaut32/thunks.c",
+    "dlls/oleaut32/hash.c",
+    "dlls/oleaut32/dispatch.c",
+    "dlls/oleaut32/variant.c",
+    "dlls/oleaut32/vartype.c",
+    "dlls/ole32/bindctx.c",
+    "dlls/ole32/oleobj.c",
+    "dlls/combase/hglobalstream.c",
+    "dlls/kernelbase/path.c"
+   ],
+   "shizuku_sources": [
+    "../trident/comrt/activation.c",
+    "../trident/comrt/errorinfo.c",
+    "../trident/comrt/rot.c",
+    "../trident/comrt/ole.c",
+    "../trident/comrt/tlbhook.c",
+    "../trident/comrt/shlwapi.c",
+    "../trident/comrt/kernel32.c",
+    "../trident/comrt/register.c",
+    "../trident/comrt/ntdll.c",
+    "../trident/comrt/tridentrt.rc"
+   ],
+   "includes": [
+    "dlls/oleaut32"
+   ],
+   "shizuku_includes": [
+    "../trident/comrt/include"
+   ],
+   "defines": [
+    "-D_OLEAUT32_",
+    "-D_OLE32_",
+    "-DWINSHLWAPI=",
+    "-D_create_locale=trt_create_locale",
+    "-D_free_locale=trt_free_locale"
+   ],
+   "link": [
+    "ole32",
+    "oleaut32",
+    "shlwapi",
+    "user32",
+    "gdi32",
+    "advapi32",
+    "rpcrt4"
+   ],
+   "static": [
+    "uuid",
+    "musl"
+   ],
+   "dynamic_imports": [
+    {
+     "dll": "kernel32.dll",
+     "fail": "0",
+     "functions": [
+      "FindActCtxSectionGuid"
+     ]
+    },
+    {
+     "dll": "kernel32.dll",
+     "fail": "-1",
+     "functions": [
+      "LZOpenFileW",
+      "LZRead",
+      "LZSeek",
+      "LZClose"
+     ]
+    },
+    {
+     "dll": "gdi32.dll",
+     "fail": "0",
+     "functions": [
+      "DeleteMetaFile"
+     ]
+    }
+   ],
+   "tests": {
+    "shizuku": {
+     "subtests": [
+      "activation",
+      "typelib",
+      "variant",
+      "ole",
+      "url",
+      "register"
+     ],
+     "link": [
+      "tridentrt",
+      "ole32",
+      "oleaut32",
+      "shlwapi",
+      "advapi32",
+      "user32"
+     ],
+     "static": [
+      "uuid"
+     ],
+     "in_plain_image": true,
+     "typelibs": {
+      "\\SHZ\\TESTS\\TRT_STD2.TLB": "dlls/stdole2.tlb/stdole2.idl"
+     }
+    }
+   }
   },
   {
    "name": "wininet",
@@ -715,17 +818,6 @@
      ]
     },
     {
-     "dll": "kernel32.dll",
-     "fail": "0",
-     "functions": [
-      "DosDateTimeToFileTime",
-      "FileTimeToDosDateTime",
-      "GetComputerNameExA",
-      "IdnToAscii",
-      "IdnToUnicode"
-     ]
-    },
-    {
      "dll": "shell32.dll",
      "fail": "120",
      "functions": [
@@ -765,13 +857,6 @@
     "usrmarshal.c": "[call_as] marshaling helpers of the widl NDR proxy (urlmon_urlmon_p.c), which is not built: the Shizuku rpcrt4 has no NDR engine (see DLLDATA_SHIM in build.py)"
    },
    "dynamic_imports": [
-    {
-     "dll": "kernel32.dll",
-     "fail": "0",
-     "functions": [
-      "IdnToAscii"
-     ]
-    },
     {
      "dll": "ntdll.dll",
      "fail": "0xc000000d",
@@ -985,13 +1070,6 @@
      ]
     },
     {
-     "dll": "kernel32.dll",
-     "fail": "0xffffffff",
-     "functions": [
-      "MulDiv"
-     ]
-    },
-    {
      "dll": "comctl32.dll",
      "fail": "0",
      "functions": [
@@ -1016,21 +1094,10 @@
      ]
     },
     {
-     "dll": "shlwapi.dll",
-     "fail": "120",
-     "functions": [
-      "SHRegOpenUSKeyW",
-      "SHRegEnumUSValueW",
-      "SHRegQueryUSValueW",
-      "SHRegCloseUSKey"
-     ]
-    },
-    {
      "dll": "ole32.dll",
      "fail": "0x80004001",
      "functions": [
-      "StgCreateStorageEx",
-      "OleRegGetUserType"
+      "StgCreateStorageEx"
      ]
     }
    ]
