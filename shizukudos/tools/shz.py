@@ -461,16 +461,47 @@ def suite_win98_regression(results):
            detail="USER_REPORTED only; no guest run performed by this suite")
 
 
+def medium_stale(medium, builder):
+    """Why `medium` must be rebuilt before it is booted, or "" when it is current: no medium or no receipt, the builder
+    changed after it was built, or a build output its receipt lists (every {"path": "build/...", "sha256": ...} in the
+    receipt) is gone or differs. Booting a medium left over from an earlier tree tests the wrong programs."""
+    receipt = medium.with_suffix(".json")
+    if not (medium.exists() and receipt.exists()):
+        return "absent"
+    if builder.stat().st_mtime > medium.stat().st_mtime:
+        return f"{builder.name} changed"
+    def inputs(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("path"), str) and node["path"].startswith("build/") and "sha256" in node:
+                yield node["path"], node["sha256"]
+            for v in node.values():
+                yield from inputs(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from inputs(v)
+    try:
+        listed = dict(inputs(json.loads(receipt.read_text())))
+    except ValueError:
+        return "unreadable receipt"
+    for rel, digest in sorted(listed.items()):
+        f = REPO / rel
+        if not f.exists() or sha256_file(f) != digest:
+            return f"{rel} changed since it was built"
+    return ""
+
+
 def suite_media(results):
-    """VM install ISO + raw disk: build them if absent, then the boot matrix {SeaBIOS, OVMF} x {ISO as CD,
+    """VM install ISO + raw disk: (re)build them when absent or stale (medium_stale), then the boot matrix {SeaBIOS, OVMF} x {ISO as CD,
     ISO as hard disk, raw disk} x {Kernel64, DOS16, ShizukuDOS 0.1} + OVMF Kernel64 direct (UEFI boot manager
     key K) (tools/test_shizuku_se_boot_matrix.py)."""
     iso = REPO / "build" / "windows98-shizuku-second-edition.iso"
     disk = REPO / "build" / "windows98-shizuku-second-edition-disk.img"
-    if not (iso.exists() and iso.with_suffix(".json").exists()):
-        run_script(results, "build the VM install ISO", [REPO / "tools" / "build_shizuku_se_iso.py"], timeout=3600)
-    if not (disk.exists() and disk.with_suffix(".json").exists()):
-        run_script(results, "build the raw disk image", [REPO / "tools" / "build_shizuku_se_disk.py"], timeout=1800)
+    for medium, builder, label, timeout in ((iso, "build_shizuku_se_iso.py", "build the VM install ISO", 3600),
+                                            (disk, "build_shizuku_se_disk.py", "build the raw disk image", 1800)):
+        why = medium_stale(medium, REPO / "tools" / builder)
+        if why:
+            print(f"{medium.name}: rebuilding ({why})")
+            run_script(results, label, [REPO / "tools" / builder], timeout=timeout)
     run_name = "suite-" + shzlib.utc_now().replace(":", "")
     run([sys.executable, REPO / "tools" / "test_shizuku_se_boot_matrix.py", "--run-name", run_name],
         capture=True, check=False, timeout=8 * 3600)
