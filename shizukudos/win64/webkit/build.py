@@ -120,7 +120,7 @@ def build_icu(icu_tree, log):
     host, cross = OUT / "icu-host", OUT / "icu-win64"
     prefix = cross / "install"
     stamp = prefix / ".shz-stamp"
-    key = json.dumps({"commit": spec("icu")["commit"], "defs": UCRT_DEFS, "v": 2})
+    key = json.dumps({"commit": spec("icu")["commit"], "defs": UCRT_DEFS, "v": 3})
     if stamp.exists() and stamp.read_text() == key:
         return prefix
     common = ["--disable-tests", "--disable-samples", "--disable-extras", "--disable-icuio", "--disable-layoutex"]
@@ -131,7 +131,10 @@ def build_icu(icu_tree, log):
     shutil.rmtree(cross, ignore_errors=True)
     cross.mkdir(parents=True)
     env = dict(os.environ, CC=f"clang --target={TARGET}", CXX=f"clang++ --target={TARGET}", AR="llvm-ar", RANLIB="llvm-ranlib",
-               CPPFLAGS=" ".join(UCRT_DEFS), CFLAGS="-O2", CXXFLAGS="-O2 -std=c++17")
+               CPPFLAGS=" ".join(UCRT_DEFS), CFLAGS="-O2",
+               # GCC's mingw target predefines this as 0 and libstdc++ was built so (type_info::operator== is out of line
+               # in tinfo.o); clang does not, and ICU's C++17 objects then carry their own copy: duplicate symbol at link
+               CXXFLAGS="-O2 -std=c++17 -D__GXX_TYPEINFO_EQUALITY_INLINE=0")
     cfg = [src / "configure", f"--host={TARGET.replace('windows-gnu', 'mingw32')}", f"--with-cross-build={host}",
            "--enable-static", "--disable-shared", "--with-data-packaging=static", "--disable-tools", f"--prefix={prefix}", *common]
     run(cfg, cwd=cross, env=env, timeout=600, capture=True)
@@ -170,6 +173,23 @@ def shz_libs(*names):
     return [str(W64OUT / f"lib{n}.a") for n in names]
 
 
+# WebKit names some Windows libraries in mixed case (-lDbgHelp, -lWinmm); lld on Linux searches case-sensitively.
+# DbgHelp: WTF calls it only in debug builds (wtf/win/DbgHelperWin.cpp), and the Shizuku runtime has no dbghelp.dll,
+# so mingw-w64's import library stands in; the import check proves nothing is imported from it.
+LIB_ALIASES = {"libDbgHelp.a": "/usr/x86_64-w64-mingw32/lib/libdbghelp.a", "libWinmm.a": str(W64OUT / "libwinmm.a")}
+
+
+def lib_aliases():
+    d = OUT / "libalias"
+    d.mkdir(parents=True, exist_ok=True)
+    for name, target in LIB_ALIASES.items():
+        link = d / name
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(target)
+    return d
+
+
 # ---------------------------------------------------------------- WebKit
 def configure_jsc(tree, icu, config, compat, log):
     bdir = OUT / f"jsc-{config}"
@@ -177,7 +197,7 @@ def configure_jsc(tree, icu, config, compat, log):
     cflags = " ".join([*UCRT_DEFS, "-DU_STATIC_IMPLEMENTATION"])
     # Libraries appended to every link: the glue, the Shizuku ntdll (for crt2.o's __C_specific_handler) and
     # bcryptprimitives (ProcessPrng, used by the glue's rand_s), ICU's own Windows dependency (advapi32).
-    extra = " ".join([str(compat), *shz_libs("ntdll", "bcryptprimitives", "advapi32")])
+    extra = " ".join([f"-L{lib_aliases()}", str(compat), *shz_libs("ntdll", "bcryptprimitives", "advapi32")])
     cmd = ["cmake", "-G", "Ninja", "-S", tree, "-B", bdir, f"-DCMAKE_TOOLCHAIN_FILE={HERE / 'toolchain-mingw-clang.cmake'}",
            f"-DSHZ_WIN64_LIBDIR={W64OUT}", f"-DSHZ_ICU_PREFIX={icu}", "-DCMAKE_BUILD_TYPE=Release", "-DPORT=JSCOnly", "-DDEVELOPER_MODE=OFF",
            "-DUSE_SYSTEM_UNIFDEF=ON", "-DENABLE_API_TESTS=OFF", "-DENABLE_REMOTE_INSPECTOR=OFF", "-DENABLE_TOOLS=OFF",
