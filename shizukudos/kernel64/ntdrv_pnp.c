@@ -602,10 +602,17 @@ NTSTATUS NTAPI PoCallDriver(DEVICE_OBJECT *dev, IRP *irp) { return IofCallDriver
 void NTAPI PoStartNextPowerIrp(IRP *irp) { (void)irp; }        /* power IRPs are not serialized here */
 
 /* ---------------------------------------------------------------- DMA adapter */
+/* Physical address of a kernel VA. RAM is mapped with 2 MiB pages at DIRECT_MAP and the kernel image alias likewise
+ * (mem.c map_2m), which the page walker vm_lookup() does not understand, so those two ranges are translated by
+ * arithmetic exactly as ntdrv_mm.c's MmGetPhysicalAddress does; vm_lookup() serves the 4 KiB-mapped ranges (the driver
+ * image window, kernel windows, user pages). 0 = not mapped. */
 static uint64_t va_phys(uint64_t va)
 {
-    uint64_t pa = vm_lookup(kernel_pml4(), va, 0);
-    return pa ? (pa & ~0xfffull) | (va & 0xfff) : 0;
+    uint64_t pa;
+    if (va >= DIRECT_MAP && va < DIRECT_MAP + (256ull << 30)) return v2p_direct(va);
+    if (va >= K64_VIRT_BASE) return kimage_v2p(va);
+    pa = vm_lookup(kernel_pml4(), va, 0);
+    return pa;
 }
 
 /* common buffers: page-aligned, physically contiguous kernel heap memory; the original pointer is kept for the free */
