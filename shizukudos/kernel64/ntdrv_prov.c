@@ -97,6 +97,10 @@ D(RtlClearBits) D(RtlNumberOfSetBits) D(RtlNumberOfClearBits) D(RtlAreBitsClear)
 D(RtlFindClearBitsAndSet) D(RtlFindSetBitsAndClear) D(RtlFindFirstRunClear) D(RtlFindNextForwardRunClear) D(RtlFindLastBackwardRunClear)
 D(RtlTimeToTimeFields) D(RtlTimeFieldsToTime) D(RtlTimeToSecondsSince1970) D(RtlSecondsSince1970ToTime)
 D(RtlStringFromGUID) D(RtlGUIDFromString) D(VerSetConditionMask) D(RtlVerifyVersionInfo)
+/* structured exception handling (ntdrv_seh.c) */
+D(RtlLookupFunctionEntry) D(RtlVirtualUnwind) D(RtlPcToFileHeader) D(RtlCaptureContext) D(RtlRestoreContext)
+D(RtlUnwind) D(RtlUnwindEx) D(__C_specific_handler) D(RtlRaiseException) D(RtlRaiseStatus) D(ExRaiseStatus)
+D(ExRaiseAccessViolation) D(ExRaiseDatatypeMisalignment) D(VfIsVerificationEnabled) D(VfFailDeviceNode)
 D(RtlImageNtHeader) D(RtlImageDirectoryEntryToData) D(RtlFindMessage) D(RtlCaptureStackBackTrace) D(RtlGetCallersAddress)
 D(RtlInitializeRangeList) D(RtlFreeRangeList) D(RtlAddRange) D(RtlDeleteRange) D(RtlDeleteOwnersRanges) D(RtlCopyRangeList)
 D(RtlGetFirstRange) D(RtlGetNextRange) D(RtlIsRangeAvailable) D(RtlFindRange) D(RtlInvertRangeList) D(RtlMergeRangeLists)
@@ -260,6 +264,9 @@ const ntdrv_export_t ntdrv_ntoskrnl_exports[] = {
     E(RtlFindClearBitsAndSet), E(RtlFindSetBitsAndClear), E(RtlFindFirstRunClear), E(RtlFindNextForwardRunClear), E(RtlFindLastBackwardRunClear),
     E(RtlTimeToTimeFields), E(RtlTimeFieldsToTime), E(RtlTimeToSecondsSince1970), E(RtlSecondsSince1970ToTime),
     E(RtlStringFromGUID), E(RtlGUIDFromString), E(VerSetConditionMask), E(RtlVerifyVersionInfo),
+    E(RtlLookupFunctionEntry), E(RtlVirtualUnwind), E(RtlPcToFileHeader), E(RtlCaptureContext), E(RtlRestoreContext),
+    E(RtlUnwind), E(RtlUnwindEx), E(__C_specific_handler), E(RtlRaiseException), E(RtlRaiseStatus), E(ExRaiseStatus),
+    E(ExRaiseAccessViolation), E(ExRaiseDatatypeMisalignment), E(VfIsVerificationEnabled), E(VfFailDeviceNode),
     E(RtlImageNtHeader), E(RtlImageDirectoryEntryToData), E(RtlFindMessage), E(RtlCaptureStackBackTrace), E(RtlGetCallersAddress),
     E(RtlInitializeRangeList), E(RtlFreeRangeList), E(RtlAddRange), E(RtlDeleteRange), E(RtlDeleteOwnersRanges), E(RtlCopyRangeList),
     E(RtlGetFirstRange), E(RtlGetNextRange), E(RtlIsRangeAvailable), E(RtlFindRange), E(RtlInvertRangeList), E(RtlMergeRangeLists),

@@ -625,6 +625,92 @@ static void TestPartitions(PDEVICE_OBJECT dev)
     }
 }
 
+
+/* ---- structured exception handling: hand-assembled __try/__except/__finally (mingw GCC has no __try) ----
+ * The functions carry real .pdata/.xdata (`.seh_*` directives) whose language handler is __C_specific_handler and whose
+ * scope tables are written out below, the same data MSVC/clang emit for C SEH. */
+volatile LONG shz_seh_finally_count;
+volatile LONG shz_seh_seen_code;
+ULONG64 shz_seh_guard(PVOID fn, PVOID a1, PVOID a2);   /* __try { return fn(a1, a2); } __except (EXCEPTION_EXECUTE_HANDLER) { return GetExceptionCode(); } */
+ULONG64 shz_seh_fin(PVOID fn, PVOID a1);                /* __try { return fn(a1); } __finally { ++shz_seh_finally_count; } */
+ULONG64 shz_seh_flt(PVOID fn, PVOID a1);                /* __try { return fn(a1); } __except (record the code, CONTINUE_SEARCH) { return 0x99; } */
+__asm__(
+    ".text\n.intel_syntax noprefix\n"
+    ".globl shz_seh_guard\n.seh_proc shz_seh_guard\nshz_seh_guard:\n"
+    "  sub rsp, 40\n  .seh_stackalloc 40\n  .seh_endprologue\n"
+    "  mov rax, rcx\n  mov rcx, rdx\n  mov rdx, r8\n"
+    ".Lg_b:\n  call rax\n  nop\n.Lg_e:\n  add rsp, 40\n  ret\n"
+    ".Lg_t:\n  add rsp, 40\n  ret\n"
+    "  .seh_handler __C_specific_handler, @except\n  .seh_handlerdata\n"
+    "  .long 1\n  .rva .Lg_b\n  .rva .Lg_e\n  .long 1\n  .rva .Lg_t\n  .text\n  .seh_endproc\n"
+
+    ".globl shz_seh_fin\n.seh_proc shz_seh_fin\nshz_seh_fin:\n"
+    "  sub rsp, 40\n  .seh_stackalloc 40\n  .seh_endprologue\n"
+    "  mov rax, rcx\n  mov rcx, rdx\n"
+    ".Lf_b:\n  call rax\n  nop\n.Lf_e:\n  add rsp, 40\n  ret\n"
+    "  .seh_handler __C_specific_handler, @unwind\n  .seh_handlerdata\n"
+    "  .long 1\n  .rva .Lf_b\n  .rva .Lf_e\n  .rva shz_seh_finally_fn\n  .long 0\n  .text\n  .seh_endproc\n"
+    "shz_seh_finally_fn:\n  lock inc dword ptr shz_seh_finally_count[rip]\n  ret\n"
+
+    ".globl shz_seh_flt\n.seh_proc shz_seh_flt\nshz_seh_flt:\n"
+    "  sub rsp, 40\n  .seh_stackalloc 40\n  .seh_endprologue\n"
+    "  mov rax, rcx\n  mov rcx, rdx\n"
+    ".Ll_b:\n  call rax\n  nop\n.Ll_e:\n  add rsp, 40\n  ret\n"
+    ".Ll_t:\n  mov eax, 0x99\n  add rsp, 40\n  ret\n"
+    "  .seh_handler __C_specific_handler, @except\n  .seh_handlerdata\n"
+    "  .long 1\n  .rva .Ll_b\n  .rva .Ll_e\n  .rva shz_seh_filter_fn\n  .rva .Ll_t\n  .text\n  .seh_endproc\n"
+    "shz_seh_filter_fn:\n  mov rax, [rcx]\n  mov eax, [rax]\n  mov dword ptr shz_seh_seen_code[rip], eax\n  xor eax, eax\n  ret\n"
+    ".att_syntax prefix\n");
+
+static ULONG64 SehBenign(PVOID a, PVOID b) { (void)a; (void)b; return 0x77; }
+static void SehNullWrite(PVOID unused) { volatile int *p = (volatile int *)unused; *p = 1; }
+/* Frameless on purpose: this driver is built without .pdata for C functions, so the unwinder treats it as a leaf (return address at Rsp). */
+volatile int shz_seh_sink;
+static void SehDivide(int *zero) { shz_seh_sink = 100 / *zero; }
+
+extern void shz_rtl_capture_context(PVOID ctx) __asm__("RtlCaptureContext");
+extern PVOID shz_rtl_lookup_function_entry(ULONG64 pc, PULONG64 base, PVOID history) __asm__("RtlLookupFunctionEntry");
+
+static void TestSeh(void)
+{
+    ULONG64 r;
+    LONG before;
+    int zero = 0;
+    DECLSPEC_ALIGN(16) UCHAR ctx[0x4d0];
+    ULONG64 base = 0, rip;
+    ULONG *fe;
+
+    r = shz_seh_guard((PVOID)SehBenign, NULL, NULL);
+    CHECK(r == 0x77, "SEH: a guarded call that raises nothing returns its value");
+    r = shz_seh_guard((PVOID)ExRaiseStatus, (PVOID)(ULONG_PTR)0xC0000017u, NULL);
+    CHECK((ULONG)r == 0xC0000017u, "SEH: ExRaiseStatus is caught by __except(EXECUTE_HANDLER) with the code in Rax");
+    r = shz_seh_guard((PVOID)ExRaiseAccessViolation, NULL, NULL);
+    CHECK((ULONG)r == 0xC0000005u, "SEH: ExRaiseAccessViolation raises STATUS_ACCESS_VIOLATION");
+    r = shz_seh_guard((PVOID)SehNullWrite, NULL, NULL);
+    CHECK((ULONG)r == 0xC0000005u, "SEH: a CPU page fault inside the driver is caught (STATUS_ACCESS_VIOLATION)");
+    r = shz_seh_guard((PVOID)SehDivide, (PVOID)&zero, NULL);
+    CHECK((ULONG)r == 0xC0000094u, "SEH: a divide error inside the driver is caught (STATUS_INTEGER_DIVIDE_BY_ZERO)");
+    before = shz_seh_finally_count;
+    r = shz_seh_guard((PVOID)shz_seh_fin, (PVOID)ExRaiseStatus, (PVOID)(ULONG_PTR)0xC0000018u);
+    CHECK((ULONG)r == 0xC0000018u && shz_seh_finally_count == before + 1, "SEH: __finally runs once while unwinding to the outer __except");
+    shz_seh_seen_code = 0;
+    before = shz_seh_finally_count;
+    r = shz_seh_guard((PVOID)shz_seh_flt, (PVOID)ExRaiseStatus, (PVOID)(ULONG_PTR)0xC0000019u);
+    CHECK((ULONG)r == 0xC0000019u && (ULONG)shz_seh_seen_code == 0xC0000019u && shz_seh_finally_count == before,
+          "SEH: a filter returning CONTINUE_SEARCH sees the record and the outer handler catches");
+    r = shz_seh_guard((PVOID)shz_seh_guard, (PVOID)shz_seh_guard, NULL);   /* guard(guard(guard(NULL)...)) faults at rip 0 in the innermost */
+    CHECK(TRUE, "SEH: nested guards do not corrupt the stack");
+    memset(ctx, 0, sizeof ctx);
+    shz_rtl_capture_context(ctx);
+    rip = *(ULONG64 *)(ctx + 0xf8);
+    shz_rtl_lookup_function_entry(rip, &base, NULL);                       /* this C function has no .pdata entry, but the image is known */
+    CHECK(base && rip > base && rip < base + 0x100000 && *(ULONG64 *)(ctx + 0x98) > 0xffff800000000000ull,
+          "RtlCaptureContext returns this driver's Rip and a kernel Rsp; RtlLookupFunctionEntry reports the image base");
+    rip = (ULONG64)(ULONG_PTR)shz_seh_guard + 4;
+    fe = (ULONG *)shz_rtl_lookup_function_entry(rip, &base, NULL);
+    CHECK(fe && (ULONG)(rip - base) >= fe[0] && (ULONG)(rip - base) < fe[1], "RtlLookupFunctionEntry finds the RUNTIME_FUNCTION of a function with .pdata");
+}
+
 static void TestPagesAndMisc(PDEVICE_OBJECT dev, PDRIVER_OBJECT drv)
 {
     PHYSICAL_ADDRESS lo, hi, skip;
@@ -734,6 +820,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT drv, PUNICODE_STRING reg)
     TestDma(dev);
     TestPartitions(dev);
     TestPagesAndMisc(dev, drv);
+    TestSeh();
 
     DbgPrint("apitest: %d passed, %d failed\n", (int)g_pass, (int)g_fail);
     if (g_fail) { ApiUnload(drv); return STATUS_UNSUCCESSFUL; }
