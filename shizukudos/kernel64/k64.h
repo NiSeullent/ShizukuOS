@@ -149,6 +149,7 @@ struct thread {
     /* CPU accounting (sched.c): timer ticks charged while this thread was current, split by the mode the tick interrupted,
      * TSC cycles between being switched in and out, and the tick numbers of creation and exit. */
     uint64_t user_ticks, kernel_ticks, cycles, tsc_in, create_tick, exit_tick;
+    uint64_t cr8;                               /* SHZ_STANDALONE: the thread's IRQL (CR8) while it is not running (sched.c schedule()) */
     int boost_disabled;                         /* SetThreadPriorityBoost setting (the scheduler never boosts) */
     uint32_t mem_priority;                      /* SetThreadInformation(ThreadMemoryPriority) setting, 1..5 */
     uint32_t power_control, power_state;        /* SetThreadInformation(ThreadPowerThrottling) setting (no scheduler effect) */
