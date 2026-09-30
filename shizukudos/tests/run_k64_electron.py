@@ -154,7 +154,7 @@ def classify(serial, expect):
     killed = [l for l in lines if re.search(r"K64: process .* killed|K64 EXCEPTION|unhandled exception", l)]
     node_fatal = [l for l in lines if re.search(r"FATAL ERROR:|Fatal error in|node::|Uncaught (Type|Reference)?Error|"
                                                 r"A JavaScript error occurred|SHZ-E1 main: (load failed|renderer gone|"
-                                                r"executeJavaScript failed|whenReady failed|watchdog|uncaughtException|unhandledRejection|console\.log threw|SHZ-E1-NODE FAILED)", l)]
+                                                r"executeJavaScript failed|whenReady failed|watchdog|uncaughtException|unhandledRejection|console\.log threw)", l)]
     fatal = [l for l in lines if re.search(r"FATAL:|Check failed|CHECK failed|NOTREACHED", l)]
     unsup = [l for l in lines if "K32 unsupported:" in l or "K32 RECON called:" in l]
     auto = [l for l in lines if l.startswith("K64 autorun: result")]
@@ -170,6 +170,13 @@ def classify(serial, expect):
         if hit:
             progress = (name, hit)
     res["progress"] = list(progress) if progress else None
+    steps = []                                              # Node-mode ladder: "SHZ-E1-NODE step N ok: name" / "step N FAILED: name: error"
+    text = "\n".join(lines)
+    for mm in re.finditer(r"SHZ-E1-NODE step (\d+|\?) (ok|FAILED): ([^\n]*?)(?=SHZ-E1-NODE|\n|$)", text):
+        steps.append({"step": mm.group(1), "result": mm.group(2), "detail": mm.group(3)[:300]})
+    res["node_steps"] = steps
+    done = re.search(r"SHZ-E1-NODE-DONE [^\n]*?(?=SHZ-E1-NODE|\n|$)", text)
+    res["node_done"] = done.group(0) if done else None
     m = re.search(r"K64 autorun: result (\w[\w-]*) exit=([0-9a-f]+) faulted=(\d)", auto[-1]) if auto else None
     res["exit_code"] = int(m.group(2), 16) if m else None
     res["faulted"] = bool(int(m.group(3))) if m else None
@@ -305,6 +312,10 @@ def main():
     print(f"  app: {args.app} ({exe}), status: {record['status']} ({seconds} s, accel={accel})")
     print(f"  furthest point: {res['furthest']}")
     print(f"  autorun: {res['autorun_result']}")
+    if res["node_steps"] or res["node_done"]:
+        print(f"  node ladder: {res['node_done'] or 'did not finish'}")
+        for st in res["node_steps"]:
+            print(f"    step {st['step']} {st['result']}: {st['detail'][:160]}")
     print(f"  expected line: {expect!r} seen: {expect_seen}")
     for k in ("loader_failures", "exceptions", "node_fatal", "chromium_fatal", "unsupported_calls"):
         for l in res[k][:8]:

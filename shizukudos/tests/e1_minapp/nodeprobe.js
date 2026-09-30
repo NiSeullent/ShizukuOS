@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // ShizukuDOS E1 Node-mode probe, run as `electron.exe nodeprobe.js` with ELECTRON_RUN_AS_NODE=1 (Electron's own Node, no
 // Chromium): a ladder over the parts of libuv and Node that Electron and VS Code depend on. One line per step, so a
-// run that stops reports the last step that finished ("SHZ-E1-NODE step N ok: <name>") and the one that did not.
-// Output goes through process._rawDebug (C-level stderr) first, console.log second. Exit code 0 only after the last step.
+// run reports, for every step, "SHZ-E1-NODE step N ok: <name>" or "step N FAILED: <name>: <error>"; it goes on after a failed step.
+// Output goes through process._rawDebug (C-level stderr) first, console.log second. Exit code 0 only when every step passed; the last line is "SHZ-E1-NODE-DONE <n> steps, <k> ok, <m> failed".
 'use strict';
 
 function raw(line) {
@@ -10,14 +10,16 @@ function raw(line) {
 }
 
 let current = 'start';
+let failures = 0;
 function begin(name) { current = name; raw('SHZ-E1-NODE step begin: ' + name); }
 function ok(n) { raw('SHZ-E1-NODE step ' + n + ' ok: ' + current); }
-function fail(err) {
-  raw('SHZ-E1-NODE FAILED in step "' + current + '": ' + (err && err.stack ? err.stack : err));
-  process.exit(2);
+function stepFailed(n, err) {
+  ++failures;
+  raw('SHZ-E1-NODE step ' + n + ' FAILED: ' + current + ': ' + (err && err.stack ? err.stack : err));
 }
-process.on('uncaughtException', fail);
-process.on('unhandledRejection', fail);
+// An error outside any step's promise chain (a callback that throws later) is charged to the step that was running.
+process.on('uncaughtException', (err) => { stepFailed('?', err); });
+process.on('unhandledRejection', (err) => { stepFailed('?', err); });
 
 raw('SHZ-E1-NODE started: node ' + process.versions.node + ', v8 ' + process.versions.v8 + ', uv ' + process.versions.uv +
     ', ' + process.platform + '/' + process.arch + ', argv ' + JSON.stringify(process.argv.slice(1)));
@@ -52,17 +54,18 @@ add('os', () => {
 });
 
 add('timers + immediates + microtasks', () => new Promise((resolve, reject) => {
+  // The order of a timer and an immediate depends on how long the first loop iteration takes (an emulated machine is slow
+  // enough for a 30 ms timer to be due first), so the immediate is compared with a timer that is far enough away.
   const order = [];
-  setTimeout(() => { order.push('timeout'); }, 30);
+  setTimeout(() => { order.push('timeout'); }, 600);
   setImmediate(() => { order.push('immediate'); });
   process.nextTick(() => { order.push('tick'); });
   Promise.resolve().then(() => { order.push('micro'); });
   setTimeout(() => {
-    // tick and micro both run before the immediate, which runs before the 30 ms timer (their relative order depends on the caller)
     const good = order.length === 4 && order.slice().sort().join() === 'immediate,micro,tick,timeout' &&
                  order.indexOf('immediate') === 2 && order[3] === 'timeout';
     if (good) resolve(); else reject(new Error('order ' + order.join() + ', want tick+micro, immediate, timeout'));
-  }, 80);
+  }, 900);
 }));
 
 add('crypto random + hash', () => {
@@ -115,6 +118,38 @@ add('child_process.spawnSync (a process with a pipe)', () => {
   if (r.status !== 0 || r.stdout !== 'child-e1') throw new Error('spawnSync status=' + r.status + ' stdout=' + JSON.stringify(r.stdout) + ' stderr=' + JSON.stringify(r.stderr));
 });
 
+add('dns.lookup("localhost") (uv_getaddrinfo on the thread pool)', () => new Promise((resolve, reject) => {
+  require('dns').lookup('localhost', (err, address) => {
+    if (err) return reject(err);
+    raw('SHZ-E1-NODE dns localhost -> ' + address);
+    resolve();
+  });
+}));
+
+add('http loopback request', () => new Promise((resolve, reject) => {
+  const http = require('http');
+  const server = http.createServer((req, res) => { res.end('http-e1'); });
+  server.on('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    http.get({ host: '127.0.0.1', port: server.address().port, path: '/' }, (res) => {
+      let body = '';
+      res.on('data', (d) => { body += d; });
+      res.on('end', () => { server.close(); if (body === 'http-e1') resolve(); else reject(new Error('http body "' + body + '"')); });
+    }).on('error', reject);
+  });
+}));
+
+add('child_process.spawn (async, stdio pipes)', () => new Promise((resolve, reject) => {
+  const cp = require('child_process');
+  const c = cp.spawn(process.execPath, ['-e', 'process.stdin.on("data",d=>process.stdout.write("echo:"+d)); process.stdin.on("end",()=>process.exit(0))'],
+                     { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'inherit'] });
+  let out = '';
+  c.stdout.on('data', (d) => { out += d; });
+  c.on('error', reject);
+  c.on('exit', (code) => { if (code === 0 && out === 'echo:spawn-e1') resolve(); else reject(new Error('spawn exit=' + code + ' out=' + JSON.stringify(out))); });
+  c.stdin.end('spawn-e1');
+}));
+
 add('worker_threads', () => new Promise((resolve, reject) => {
   const { Worker } = require('worker_threads');
   const w = new Worker('require("worker_threads").parentPort.postMessage(6*7)', { eval: true });
@@ -133,9 +168,15 @@ add('fs.watch on a directory (ReadDirectoryChangesW)', () => new Promise((resolv
 (async () => {
   for (let i = 0; i < steps.length; ++i) {
     begin(steps[i][0]);
-    await steps[i][1]();
-    ok(i + 1);
+    try {
+      // a step that never settles would hang the run: give each one a bound
+      await Promise.race([Promise.resolve().then(steps[i][1]),
+                          new Promise((_, rej) => setTimeout(() => rej(new Error('timed out after 20 s')), 20000))]);
+      ok(i + 1);
+    } catch (err) {
+      stepFailed(i + 1, err);
+    }
   }
-  raw('SHZ-E1-NODE-DONE ' + steps.length + ' steps');
-  process.exit(0);
-})().catch(fail);
+  raw('SHZ-E1-NODE-DONE ' + steps.length + ' steps, ' + (steps.length - failures) + ' ok, ' + failures + ' failed');
+  process.exit(failures ? 1 : 0);
+})();
