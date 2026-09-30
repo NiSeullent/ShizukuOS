@@ -188,6 +188,16 @@ def lib_aliases():
     return d
 
 
+# Flags for every WebKit unit:
+#   -mcx16            16-byte atomics as inline cmpxchg16b (libpas' versioned fields); without it clang emits __atomic_*
+#                     library calls that no library of this sysroot provides. Every x86-64 CPU 64-bit Windows 8.1+
+#                     supports runs cmpxchg16b, and MSVC assumes it.
+#   -fms-extensions   makes _AddressOfReturnAddress a builtin: JavaScriptCore's Windows x86-64 DECLARE_CALL_FRAME
+#                     (interpreter/CallFrame.h) needs it; WebKit's own Windows port always builds in MS mode (clang-cl).
+#   U_STATIC_IMPLEMENTATION  ICU is linked statically.
+WEBKIT_FLAGS = ["-mcx16", "-fms-extensions", "-DU_STATIC_IMPLEMENTATION"]
+
+
 # ---------------------------------------------------------------- WebKit
 def configure_jsc(tree, icu, config, log):
     bdir = OUT / f"jsc-{config}"
@@ -199,7 +209,7 @@ def configure_jsc(tree, icu, config, log):
            f"-DSHZ_WEBKIT_TOOLCHAIN={TC / 'toolchain.cmake'}", f"-DSHZ_ICU_PREFIX={icu}", f"-DSHZ_LIBALIAS={lib_aliases()}",
            "-DCMAKE_BUILD_TYPE=Release", "-DPORT=JSCOnly", "-DDEVELOPER_MODE=OFF", "-DUSE_SYSTEM_UNIFDEF=ON",
            "-DENABLE_API_TESTS=OFF", "-DENABLE_REMOTE_INSPECTOR=OFF", "-DENABLE_TOOLS=OFF", f"-DICU_ROOT={icu}",
-           "-DCMAKE_C_FLAGS=-DU_STATIC_IMPLEMENTATION", "-DCMAKE_CXX_FLAGS=-DU_STATIC_IMPLEMENTATION", *CONFIGS[config]]
+           f"-DCMAKE_C_FLAGS={' '.join(WEBKIT_FLAGS)}", f"-DCMAKE_CXX_FLAGS={' '.join(WEBKIT_FLAGS)}", *CONFIGS[config]]
     env = dict(os.environ, SHZ_WEBKIT_TOOLCHAIN=str(TC / "toolchain.cmake"), SHZ_ICU_PREFIX=str(icu),
                SHZ_LIBALIAS=str(OUT / "libalias"))
     run(cmd, timeout=900, env=env)
