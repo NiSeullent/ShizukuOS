@@ -152,22 +152,25 @@ static int win64_run(int64_t *code, int *faulted)
 /* Every other T_*.EXE in \\SHZ\\TESTS is a self-checking Win64 program: it must exit 0 without a fault. It prints its own
  * PASS/FAIL lines through the console; a hung program is killed after WIN64_APP_TIMEOUT_MS. */
 #define WIN64_APP_TIMEOUT_MS 60000u
-#define WIN64_MAX_APPS 64
+#define WIN64_MAX_APPS 128
 #define WIN64_TESTS_PREFIX "\\SHZ\\TESTS\\"
 static void win64_run_others(void)
 {
     static char names[WIN64_MAX_APPS][32];
-    unsigned n = 0, i, j;
+    unsigned n = 0, found = 0, i, j;
     fsnode_t *dir = fs_lookup("\\SHZ\\TESTS"), *c;
     if (!dir)
         return;
-    for (c = dir->child; c && n < WIN64_MAX_APPS; c = c->sibling) {
+    for (c = dir->child; c; c = c->sibling) {
         const size_t len = strlen(c->name);
-        if (c->is_dir || len < 7 || len >= sizeof names[0] || strncmp(c->name, "T_", 2) || strcmp(c->name + len - 4, ".EXE") ||
+        if (c->is_dir || len < 7 || strncmp(c->name, "T_", 2) || strcmp(c->name + len - 4, ".EXE") ||
             !strcmp(c->name, "T_HELLO.EXE"))
             continue;
-        memcpy(names[n++], c->name, len + 1);
+        ++found;
+        if (n < WIN64_MAX_APPS && len < sizeof names[0])
+            memcpy(names[n++], c->name, len + 1);
     }
+    CHECK("every self-checking T_*.EXE in \\SHZ\\TESTS fits the app list (none skipped)", n == found);
     for (i = 1; i < n; ++i) {                                   /* insertion sort: deterministic order */
         char tmp[32];
         memcpy(tmp, names[i], sizeof tmp);
