@@ -988,9 +988,11 @@ def verify_injection(run, cap, ck, wl):
         not [u for u in un if u["l4"][8 + 20 + 0:8 + 20 + 2] == struct.pack(">H", 5556)]
     ck.add("[lossy] silence on corrupted input: echo with a bad IP header checksum, bad ICMP checksum and TTL 0, a SYN with a bad TCP checksum and a datagram with a bad UDP checksum drew no reply", silent)
     ab = next((d for d, _ in wire_kv(wl, "stats_abs")), {})
+    # every T_NET_LOOP.EXE run draws one port unreachable on the loopback; T_IPC_EXIT.EXE starts it ten more times in this boot
+    loops = max(1, len(set(re.findall(r"\[win64 T_NET_LOOP\.EXE pid (\d+)\]", run["serial"]))))
     ck.add(f"[lossy] guest error counters match what we injected: ip_bad={ab.get('ip_bad')} (1), udp_bad={ab.get('udp_bad')} (1), tcp_bad={ab.get('tcp_bad')} (1); "
-           f"arp_req_rx={ab.get('arp_req_rx')} arp_rep_tx={ab.get('arp_rep_tx')} unreach_tx={ab.get('unreach_tx')} (2: the injected UDP + the loopback test's) rst_tx>={ab.get('rst_tx')} reasm={ab.get('reasm')}",
-           ab.get("ip_bad") == "1" and ab.get("udp_bad") == "1" and ab.get("tcp_bad") == "1" and int(ab.get("arp_rep_tx", 0)) >= 1 and int(ab.get("unreach_tx", 0)) == 2 and
+           f"arp_req_rx={ab.get('arp_req_rx')} arp_rep_tx={ab.get('arp_rep_tx')} unreach_tx={ab.get('unreach_tx')} ({1 + loops}: the injected UDP + one per T_NET_LOOP run, {loops} run(s)) rst_tx>={ab.get('rst_tx')} reasm={ab.get('reasm')}",
+           ab.get("ip_bad") == "1" and ab.get("udp_bad") == "1" and ab.get("tcp_bad") == "1" and int(ab.get("arp_rep_tx", 0)) >= 1 and int(ab.get("unreach_tx", 0)) == 1 + loops and
            int(ab.get("rst_tx", 0)) >= 3 and int(ab.get("reasm", 0)) >= 1)
 
 

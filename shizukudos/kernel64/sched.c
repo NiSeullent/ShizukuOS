@@ -32,6 +32,18 @@ thread_t *thread_find_tid(void *process, uint64_t tid)
     return 0;
 }
 
+/* IPC hook (kernel64/ipc_core.c): visits every allocated thread slot with interrupts off (kill wake-ups, reaping the
+ * kernel stacks of exited user threads). */
+void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx)
+{
+    unsigned i;
+    for (i = 0; i < MAX_THREADS; ++i) {
+        const uint64_t f = irq_save();
+        if (threads[i].state != TS_FREE) fn(&threads[i], ctx);
+        irq_restore(f);
+    }
+}
+
 static thread_t *pick_next(void)
 {
     unsigned i, start = current ? (unsigned)(current - threads) : 0;
@@ -146,9 +158,9 @@ static void reap_user_zombies(const void *only, int drop_holds)
     unsigned i;
     for (i = 0; i < MAX_THREADS; ++i) {
         thread_t *t = &threads[i];
-        if (t->state != TS_ZOMBIE || !t->proc || t == current || (only && t->proc != only)) continue;
-        if (drop_holds) t->creator_hold = 0;
-        if (t->creator_hold) continue;
+        if (t->state == TS_FREE || !t->proc || (only && t->proc != only)) continue;
+        if (drop_holds) t->creator_hold = 0;    /* also a thread still inside thread_exit(): it is reaped at a later pass */
+        if (t->state != TS_ZOMBIE || t == current || t->creator_hold) continue;
         thread_object_detach(t);
         kfree((void *)t->stack_base);
         t->stack_base = 0;
@@ -161,6 +173,13 @@ void thread_reap_process(const void *proc)
 {
     const uint64_t f = irq_save();
     reap_user_zombies(proc, 1);
+    irq_restore(f);
+}
+
+void thread_reap_exited(void)
+{
+    const uint64_t f = irq_save();
+    reap_user_zombies(0, 0);
     irq_restore(f);
 }
 

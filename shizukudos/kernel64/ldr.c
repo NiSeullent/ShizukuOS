@@ -1211,9 +1211,21 @@ static uint64_t put_wstr(process_t *p, uint64_t at, const char *s, uint16_t *len
     return at + n * 2 + 2;
 }
 
-static int build_params(process_t *p, const char *image, const char *cmdline, const char *cwd)
+/* Copies a caller-supplied UTF-16 string (IPC process creation) and NUL-terminates it. */
+static uint64_t put_wraw(process_t *p, uint64_t at, const uint16_t *s, uint32_t chars, uint16_t *len_bytes)
 {
-    uint64_t base = alloc_user(p, 16384), at, env_va;
+    const uint16_t z = 0;
+    uwrite(p, at, s, chars * 2ull);
+    uwrite(p, at + chars * 2ull, &z, 2);
+    *len_bytes = (uint16_t)(chars * 2);
+    return at + chars * 2ull + 2;
+}
+
+static int build_params(process_t *p, const char *image, const char *cmdline, const char *cwd, const ldr_create_ex_t *ex,
+                        const uint32_t std_h[3])
+{
+    const uint64_t extra = ex ? (ex->env_chars + ex->cmdline_chars + ex->cwd_chars) * 2ull : 0;
+    uint64_t base = alloc_user(p, (16384 + extra + 4095) & ~4095ull), at, env_va;
     uint8_t hdr[0x400];
     struct ustr u;
     uint16_t len;
@@ -1224,26 +1236,40 @@ static int build_params(process_t *p, const char *image, const char *cmdline, co
     /* environment block: UTF-16 "K=V\0...\0\0" */
     env_va = (at + 15) & ~15ull;
     at = env_va;
-    for (i = 0; default_env[i]; ++i) {
-        at = put_wstr(p, at, default_env[i], &len);
+    if (ex && ex->env) {
+        uwrite(p, at, ex->env, ex->env_chars * 2ull);
+        at += ex->env_chars * 2ull;
+    } else {
+        for (i = 0; default_env[i]; ++i) {
+            at = put_wstr(p, at, default_env[i], &len);
+        }
+        { uint16_t z = 0; uwrite(p, at, &z, 2); at += 2; }
     }
-    { uint16_t z = 0; uwrite(p, at, &z, 2); at += 2; }
     at = (at + 15) & ~15ull;
     *(uint32_t *)(hdr + 0x00) = 0x400;                      /* MaximumLength */
     *(uint32_t *)(hdr + 0x04) = 0x400;                      /* Length */
     *(uint32_t *)(hdr + 0x08) = 1;                          /* Flags: normalized */
-    *(uint64_t *)(hdr + 0x20) = 4;                          /* StandardInput  (first handle in the table) */
-    *(uint64_t *)(hdr + 0x28) = 8;                          /* StandardOutput */
-    *(uint64_t *)(hdr + 0x30) = 12;                         /* StandardError */
-    at = put_wstr(p, at, cwd[0] ? cwd : "C:\\", &len);      /* CurrentDirectory.DosPath */
+    *(uint64_t *)(hdr + 0x20) = std_h[0];                   /* StandardInput  (the process's console objects) */
+    *(uint64_t *)(hdr + 0x28) = std_h[1];                   /* StandardOutput */
+    *(uint64_t *)(hdr + 0x30) = std_h[2];                   /* StandardError */
+    if (ex && ex->use_std_handles) {
+        *(uint64_t *)(hdr + 0x20) = ex->std_handles[0];
+        *(uint64_t *)(hdr + 0x28) = ex->std_handles[1];
+        *(uint64_t *)(hdr + 0x30) = ex->std_handles[2];
+        *(uint32_t *)(hdr + 0xa4) = 0x100;                  /* WindowFlags: STARTF_USESTDHANDLES */
+    }
+    if (ex && ex->cwd) at = put_wraw(p, at, ex->cwd, ex->cwd_chars, &len);
+    else at = put_wstr(p, at, cwd[0] ? cwd : "C:\\", &len);      /* CurrentDirectory.DosPath */
     u = (struct ustr){ len, (uint16_t)(len + 2), 0, at - len - 2 }; memcpy(hdr + 0x38, &u, 16);
     at = (at + 15) & ~15ull;
     at = put_wstr(p, at, image, &len);                      /* ImagePathName */
     u = (struct ustr){ len, (uint16_t)(len + 2), 0, at - len - 2 }; memcpy(hdr + 0x60, &u, 16);
     at = (at + 15) & ~15ull;
-    at = put_wstr(p, at, cmdline[0] ? cmdline : image, &len);   /* CommandLine */
+    if (ex && ex->cmdline) at = put_wraw(p, at, ex->cmdline, ex->cmdline_chars, &len);
+    else at = put_wstr(p, at, cmdline[0] ? cmdline : image, &len);   /* CommandLine */
     u = (struct ustr){ len, (uint16_t)(len + 2), 0, at - len - 2 }; memcpy(hdr + 0x70, &u, 16);
     *(uint64_t *)(hdr + 0x80) = env_va;                     /* Environment */
+    *(uint64_t *)(hdr + 0x3f0) = at - env_va;               /* EnvironmentSize (bytes, Windows 7+ field) */
     if (uwrite(p, base, hdr, sizeof hdr)) return -1;
     p->params_va = base;
     return 0;
@@ -1281,36 +1307,57 @@ static uint64_t ntdll_export(process_t *p, const char *sym)
     return va;
 }
 
-/* Frees a process whose creation failed before any thread ran (its address space, VADs, handles, modules). */
-static void destroy_unstarted(process_t *p)
-{
-    rollback(p, 0, 0);
-    handles_close_all(p);
-    vm_free_space(p->pml4);
-    vad_destroy(p);
-    kfree(p->handles);
-    ob_deref(p->object);
-    p->used = 0;
-}
+uint64_t ldr_ntdll_export(process_t *p, const char *sym) { return ntdll_export(p, sym); }
+
+static int32_t ldr_create_process_body(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
+                                       const ldr_create_ex_t *ex, process_t *p, thread_t **out_thread);
 
 int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                            process_t **out_proc, thread_t **out_thread)
 {
+    return ldr_create_process_ex(parent, image_path, cmdline, cwd, 0, out_proc, out_thread);
+}
+
+/* A process that failed to load never ran a thread: release it here (teardown + creation reference). */
+int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
+                              const ldr_create_ex_t *ex, process_t **out_proc, thread_t **out_thread)
+{
     fsnode_t *node = fs_lookup(image_path);
     process_t *p;
+    int32_t st;
+    if (!node || node->is_dir) return STATUS_OBJECT_NAME_NOT_FOUND;
+    p = process_create_empty("win64");
+    if (!p) return STATUS_NO_MEMORY;
+    mutex_init(&p->ldr_lock);
+    p->parent_pid = parent ? (uint64_t)parent->pid : 0;
+    p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
+    p->console_sink_gen = parent ? parent->console_sink_gen : 0;
+    st = ldr_create_process_body(parent, image_path, cmdline, cwd, ex, p, out_thread);
+    if (st) {
+        process_terminate(p, st, 0);
+        p->parent_pid = 0;                                          /* the creation reference is dropped right here */
+        process_teardown(p);
+        p->object->signaled = 1;
+        ob_deref(p->object);                                        /* frees the slot (ipc_object_free) */
+        return st;
+    }
+    if (out_proc) *out_proc = p;
+    return STATUS_SUCCESS;
+}
+
+static int32_t ldr_create_process_body(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
+                                       const ldr_create_ex_t *ex, process_t *p, thread_t **out_thread)
+{
+    fsnode_t *node = fs_lookup(image_path);
     module_t *exe = 0;
     int32_t st;
     char nm[64];
     thread_t *t = 0;
-    uint32_t h;
+    uint32_t std_h[3] = { 4, 8, 12 };
     unsigned k;
     ldr_ctx_t *c;
-    if (!node || node->is_dir) return STATUS_OBJECT_NAME_NOT_FOUND;
     c = kzalloc(sizeof *c);
     if (!c) return STATUS_NO_MEMORY;
-    p = process_create_empty("win64");
-    if (!p) { kfree(c); return STATUS_NO_MEMORY; }
-    mutex_init(&p->ldr_lock);
     c->p = p;
     {
         /* short name for logs: last path component */
@@ -1319,19 +1366,21 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
         for (k = 0; s[k] && k < sizeof p->name - 1; ++k) p->name[k] = s[k];
         p->name[k] = 0;
     }
+    (void)parent;                                   /* parent_pid and the console sink: ldr_create_process_ex */
     dir_of(image_path, c->app_dir, sizeof c->app_dir);          /* application directory: the executable's */
     scopy(c->cwd, sizeof c->cwd, cwd);
-    p->parent_pid = parent ? (uint64_t)parent->pid : 0;
-    p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
-    p->console_sink_gen = parent ? parent->console_sink_gen : 0;
     proc_alloc_peb(p);
-    /* std handles occupy 4, 8 and 12 */
+    if (ex && ex->prepare) {                        /* IPC process creation: inherited handles keep their values, jobs */
+        st = ex->prepare(p, ex->prepare_ctx);
+        if (st) goto failed;
+    }
+    /* console standard handles: 4, 8 and 12 unless inherited handles already hold those values */
     {
         kobject_t *in = console_object(0), *outo = console_object(1), *err = console_object(1);
         if (!in || !outo || !err) { st = STATUS_NO_MEMORY; goto failed; }
-        handle_insert(p, in, 0x80000000u, &h); ob_deref(in);
-        handle_insert(p, outo, 0x40000000u, &h); ob_deref(outo);
-        handle_insert(p, err, 0x40000000u, &h); ob_deref(err);
+        handle_insert(p, in, 0x80000000u, &std_h[0]); ob_deref(in);
+        handle_insert(p, outo, 0x40000000u, &std_h[1]); ob_deref(outo);
+        handle_insert(p, err, 0x40000000u, &std_h[2]); ob_deref(err);
     }
     st = load_dll(c, "ntdll.dll", 1, 0, 0);
     if (st) goto report_failed;
@@ -1345,7 +1394,7 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
     }
     st = publish_all(p, exe);
     if (st) goto failed;
-    if (build_params(p, image_path, cmdline, cwd)) { st = STATUS_NO_MEMORY; goto failed; }
+    if (build_params(p, image_path, cmdline, cwd, ex, std_h)) { st = STATUS_NO_MEMORY; goto failed; }
     /* PEB fields */
     {
         uint8_t peb[0x130];
@@ -1372,17 +1421,17 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
         st = STATUS_ENTRYPOINT_NOT_FOUND;
         goto failed;
     }
-    st = process_start_thread2(p, p->ntdll_process_start, p->entry, 0, exe->info.stack_reserve ? exe->info.stack_reserve : 0x100000, &t);
+    st = process_start_thread3(p, p->ntdll_process_start, p->entry, 0, exe->info.stack_reserve ? exe->info.stack_reserve : 0x100000,
+                               ex && ex->suspended, &t);
     if (st) { st = STATUS_NO_MEMORY; goto failed; }
     kfree(c);
-    if (out_proc) *out_proc = p;
     if (out_thread) *out_thread = t;            /* the caller holds t until thread_creator_release() or proc_wait() */
     else thread_creator_release(t);
     return STATUS_SUCCESS;
 report_failed:
     report(c, p->name, st);
 failed:
-    destroy_unstarted(p);
+    rollback(p, 0, 0);                          /* unmaps and forgets the modules; ldr_create_process_ex tears the rest down */
     kfree(c);
     return st;
 }

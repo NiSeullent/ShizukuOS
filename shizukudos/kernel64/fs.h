@@ -97,6 +97,10 @@ int fs_truncate(fsnode_t *n, uint64_t size);
 int fs_flush(fsnode_t *n);                                           /* disk nodes: device write cache to media */
 void fs_remove(fsnode_t *n);                                         /* disk nodes: through vol->remove when present */
 int fs_rename(fsnode_t *n, const char *newpath, int replace);        /* disk nodes with vol->rename; 0 / -1 / -3 exists */
+/* Directory change notification hooks (kernel64/ipc_notify.c). */
+void fs_notify(fsnode_t *n, uint32_t action, uint32_t what);
+void fs_notify_rename(fsnode_t *from, fsnode_t *to);
+extern int fs_notify_suppress;
 fsnode_t *fs_root(void);
 uint64_t fs_total_bytes(void);
 /* Mounted volumes: `root` becomes "<letter>:\". 'C' is the RAM root and cannot be replaced. 0 = ok. */

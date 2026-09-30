@@ -31,6 +31,9 @@ static int32_t object_name(process_t *p, uint64_t oa_va, char *out, size_t cap)
     if (copy_from_user(p, &u, oa.name, sizeof u)) return STATUS_ACCESS_VIOLATION;
     if (u.length / 2 >= 64) return STATUS_OBJECT_NAME_INVALID;
     if (u.length && copy_from_user(p, tmp, u.buffer, u.length)) return STATUS_ACCESS_VIOLATION;
+    if (u.length / 2 > 6 && (tmp[0] | 32) == 'l' && (tmp[1] | 32) == 'o' && (tmp[2] | 32) == 'c' && (tmp[3] | 32) == 'a' &&
+        (tmp[4] | 32) == 'l' && tmp[5] == '\\')          /* "Local\" is this single session's namespace: "x" == "Local\x" */
+        return utf16_to_utf8(tmp + 6, u.length / 2 - 6, out, cap) < 0 ? STATUS_OBJECT_NAME_INVALID : STATUS_SUCCESS;
     return utf16_to_utf8(tmp, u.length / 2, out, cap) < 0 ? STATUS_OBJECT_NAME_INVALID : STATUS_SUCCESS;
 }
 
@@ -58,10 +61,23 @@ static kobject_t *object_for_handle(process_t *p, uint64_t h)
 
 int64_t filetime_now(void)
 {
-    /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform). */
-    hcreg_t secs = 0;
-    shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
-    return (int64_t)(secs + 11644473600ull) * 10000000ll + (int64_t)((shz_time_ns() % 1000000000ull) / 100);
+    /* FILETIME epoch 1601; wall clock comes from the Supervisor (real RTC in the platform), read once: the time then advances
+     * with the monotonic nanosecond clock. Adding that clock's sub-second part to each fresh whole-second RTC reading made
+     * the result jump by up to a second either way (the two clocks' seconds do not start together), so a time taken later
+     * could read earlier. */
+    static int64_t base;                                /* FILETIME at shz_time_ns() == 0 */
+    const uint64_t ns = shz_time_ns();
+    if (!base) {
+        hcreg_t secs = 0;
+        int64_t b;
+        uint64_t f;
+        shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
+        b = (int64_t)(secs + 11644473600ull) * 10000000ll - (int64_t)(ns / 100);
+        f = irq_save();
+        if (!base) base = b;
+        irq_restore(f);
+    }
+    return base + (int64_t)(ns / 100);
 }
 
 int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)

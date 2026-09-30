@@ -349,6 +349,19 @@ static void test_send_buffer_fill(void)
         if (r < 16384) { r = SOCKET_ERROR; WSASetLastError(WSAEWOULDBLOCK); break; }   /* partial write: block boundary shifts, stop at a whole block */
         if (queued > (64u << 20)) break;
     }
+    if (r == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK) {
+        /* The loopback may still be moving queued bytes into the peer's receive buffer (the network thread runs after this
+         * one filled the send buffer), which frees send space again. Top it up until a send after a 20 ms pause takes
+         * nothing: then both buffers are full and stay full. Partial sends continue the pattern at the stream offset. */
+        int settle;
+        for (settle = 0; settle < 100; ++settle) {
+            const unsigned off = (unsigned)(queued % 16384);
+            Sleep(20);
+            r = send(c, (const char *)blk + off, 16384 - (int)off, 0);
+            if (r == SOCKET_ERROR) break;
+            queued += (unsigned)r;
+        }
+    }
     CHECK(r == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK && queued > 100000 && queued < (16u << 20),
           "non-blocking send stops with WSAEWOULDBLOCK once buffers are full (%u bytes accepted)", (unsigned)queued);
     FD_ZERO(&wr); FD_SET(c, &wr); tv.tv_sec = 0; tv.tv_usec = 20000;

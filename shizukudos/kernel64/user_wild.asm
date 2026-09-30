@@ -6,7 +6,7 @@ org 0x400000
 start:
     mov rax, 0xffff800000100000        ; direct-map alias of kernel memory
     mov qword [rax], 1
-    xor r10d, r10d
+    mov r10, -1                         ; NtTerminateProcess(NtCurrentProcess(), 0) if it survived
     xor edx, edx
     mov eax, 1
     syscall

@@ -27,8 +27,12 @@ int main(void)
     CHECK(in.flags & 2, "RTL8139 link is up");
     CHECK((in.flags & 4) && in.ip_be != 0, "interface configured (%s)", ip);
     CHECK((in.flags & 8) && in.dhcp_state == 4, "DHCP lease is BOUND (server %s, %u s)", srv, in.lease_secs);
-    CHECK(in.lease_secs != 0 && in.lease_remaining_secs <= in.lease_secs && in.lease_remaining_secs + 30 >= in.lease_secs,
-          "lease time %u s, %u s remaining", in.lease_secs, in.lease_remaining_secs);
+    {   /* the lease was obtained during this boot: no more of it can have elapsed than the uptime (other test programs may
+         * have run for a minute or more before this one) */
+        const ULONG up = (ULONG)(GetTickCount64() / 1000);
+        CHECK(in.lease_secs != 0 && in.lease_remaining_secs <= in.lease_secs && in.lease_remaining_secs + up + 2 >= in.lease_secs,
+              "lease time %u s, %u s remaining after %u s of uptime", in.lease_secs, in.lease_remaining_secs, (unsigned)up);
+    }
     CHECK(in.mask_be != 0 && in.gw_be != 0 && ((in.ip_be ^ in.gw_be) & in.mask_be) == 0, "gateway %s is on-link for %s/%s", gw, ip, mask);
     CHECK(in.dns0_be != 0, "DHCP supplied a DNS server (%s)", dns);
 
