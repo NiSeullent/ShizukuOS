@@ -90,6 +90,62 @@ SHZ_EXPORT NTSTATUS NTAPI LdrUnlockLoaderLock(ULONG flags, ULONG_PTR cookie)
     return STATUS_SUCCESS;
 }
 
+/* ---------------------------------------------------------------- DLL load notifications
+ * LdrRegisterDllNotification / LdrUnregisterDllNotification (Windows Vista+; Chromium's module database and third-party
+ * DLL tracking register one). A registered callback receives LDR_DLL_NOTIFICATION_REASON_LOADED (1) for every module a
+ * run-time LdrLoadDll maps (the module and the dependencies it pulled in, in load order, after their DllMain(PROCESS_ATTACH)
+ * ran), with the loader lock held, as on Windows. Modules the kernel loader maps before user mode runs (the executable and its
+ * load-time imports) were loaded before anything could register, as on Windows. There is no LDR_DLL_NOTIFICATION_REASON_UNLOADED
+ * (2): Kernel64 never unmaps an image (LdrUnloadDll only drops the reference count), so no module is ever unloaded.
+ * Flags must be 0 (reserved). The cookie is the address of the registration record; unregistering takes the loader lock. */
+typedef struct { ULONG Flags; const SHZ_UNICODE_STRING *FullDllName, *BaseDllName; PVOID DllBase; ULONG SizeOfImage; } SHZ_LDR_DLL_NOTIFICATION;
+typedef VOID (NTAPI *SHZ_LDR_NOTIFY_FN)(ULONG reason, const SHZ_LDR_DLL_NOTIFICATION *data, PVOID context);
+typedef struct notify_reg { struct notify_reg *next; SHZ_LDR_NOTIFY_FN fn; PVOID context; } notify_reg_t;
+static notify_reg_t *g_notify;          /* registration order; protected by the loader lock */
+
+SHZ_EXPORT NTSTATUS NTAPI LdrRegisterDllNotification(ULONG flags, SHZ_LDR_NOTIFY_FN fn, PVOID context, PVOID *cookie)
+{
+    notify_reg_t *r, **tail;
+    if (flags || !fn || !cookie) return STATUS_INVALID_PARAMETER;
+    r = RtlAllocateHeap(ShzProcessHeap(), 0, sizeof *r);
+    if (!r) return STATUS_NO_MEMORY;
+    r->next = 0; r->fn = fn; r->context = context;
+    ShzLoaderLock();
+    for (tail = &g_notify; *tail; tail = &(*tail)->next) {}
+    *tail = r;
+    ShzLoaderUnlock();
+    *cookie = r;
+    return STATUS_SUCCESS;
+}
+
+SHZ_EXPORT NTSTATUS NTAPI LdrUnregisterDllNotification(PVOID cookie)
+{
+    notify_reg_t **pp, *r = cookie;
+    NTSTATUS st = STATUS_INVALID_PARAMETER;
+    if (!r) return STATUS_INVALID_PARAMETER;
+    ShzLoaderLock();
+    for (pp = &g_notify; *pp; pp = &(*pp)->next)
+        if (*pp == r) { *pp = r->next; st = STATUS_SUCCESS; break; }
+    ShzLoaderUnlock();
+    if (!st) RtlFreeHeap(ShzProcessHeap(), 0, r);
+    return st;
+}
+
+/* Called by LdrLoadDll with the loader lock held, after a successful load: every module appended to the load-order list after
+ * `last_before` (the tail before the load; NULL head pointer = the whole list) is reported LOADED to each registration. */
+void ShzNotifyLoaded(LIST_ENTRY *last_before)
+{
+    SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
+    LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
+    for (l = last_before->Flink; l != head; l = l->Flink) {
+        SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
+        SHZ_LDR_DLL_NOTIFICATION d;
+        notify_reg_t *r;
+        d.Flags = 0; d.FullDllName = &e->FullDllName; d.BaseDllName = &e->BaseDllName; d.DllBase = e->DllBase; d.SizeOfImage = e->SizeOfImage;
+        for (r = g_notify; r; r = r->next) r->fn(1, &d, r->context);
+    }
+}
+
 /* ---------------------------------------------------------------- directory state */
 typedef struct dll_dir { struct dll_dir *next; USHORT chars; WCHAR path[1]; } dll_dir_t;
 
