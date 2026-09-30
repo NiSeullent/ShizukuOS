@@ -177,6 +177,33 @@ static void create(fat32_vol_t *v, const char *dir, const char *name, int is_dir
     if (dir) { WCHECK(find(v, dir, &d)); dc = d.first_cluster; }
     WCHECK(fat32_create(v, dc, w, w16name(name, w), is_dir, 0x5c9d, 0x6000, &e));
 }
+/* First cluster of the directory that holds `path` (0 = root). */
+static uint32_t parent_of(fat32_vol_t *v, const char *path)
+{
+    char parent[256];
+    const char *slash = strrchr(path, '/');
+    fat32_dirent_t d;
+    if (!slash) return 0;
+    memcpy(parent, path, (size_t)(slash - path));
+    parent[slash - path] = 0;
+    WCHECK(find(v, parent, &d));
+    return d.first_cluster;
+}
+static int remove_path(fat32_vol_t *v, const char *path)
+{
+    fat32_dirent_t e;
+    WCHECK(find(v, path, &e));
+    return fat32_remove(v, parent_of(v, path), e.dir_cluster, e.dir_offset);
+}
+static int rename_path(fat32_vol_t *v, const char *path, const char *dst_dir, const char *name, int replace)
+{
+    uint16_t w[256];
+    fat32_dirent_t e, d, out;
+    uint32_t dc = 0;
+    WCHECK(find(v, path, &e));
+    if (dst_dir) { WCHECK(find(v, dst_dir, &d)); dc = d.first_cluster; }
+    return fat32_rename(v, parent_of(v, path), e.dir_cluster, e.dir_offset, dc, w, w16name(name, w), replace, &out);
+}
 static int write_script(fat32_vol_t *v)
 {
     uint16_t w[256];
@@ -214,6 +241,34 @@ static int write_script(fat32_vol_t *v)
     WEXPECT(fat32_create(v, 0, w, w16name("UPPER.TXT", w), 0, 0x5c9d, 0x6000, &e), FAT32_E_EXISTS);
     WEXPECT(fat32_create(v, 0, w, w16name("a:b", w), 0, 0x5c9d, 0x6000, &e), FAT32_E_NAME);
     WEXPECT(fat32_create(v, 0, w, w16name("trailing.", w), 0, 0x5c9d, 0x6000, &e), FAT32_E_NAME);
+    /* deletion: a non-empty directory is refused, a long-named file and then the emptied directory go (clusters freed) */
+    {
+        uint8_t *doomed = pat(26, 9000);
+        create(v, 0, "Doomed Folder", 1);
+        create(v, "Doomed Folder", "doomed file with a long name.txt", 0);
+        file_write(v, "Doomed Folder/doomed file with a long name.txt", 0, doomed, 9000, 0);
+        free(doomed);
+    }
+    WEXPECT(remove_path(v, "Doomed Folder"), FAT32_E_NOTEMPTY);
+    WCHECK(remove_path(v, "Doomed Folder/doomed file with a long name.txt"));
+    WCHECK(remove_path(v, "Doomed Folder"));
+    /* renaming: long name in place, 8.3 file into a subdirectory, a directory with content into another parent (its ".."
+     * follows), case-only rename, replace of an existing file (refused without the flag), a directory into its own
+     * subtree (refused) */
+    WCHECK(rename_path(v, "big_written.bin", 0, "Renamed Big File.bin", 0));
+    WCHECK(rename_path(v, "UPPER.TXT", "SUB", "MOVED.TXT", 0));
+    create(v, 0, "Movable Dir", 1);
+    create(v, "Movable Dir", "x.txt", 0);
+    file_write(v, "Movable Dir/x.txt", 0, (const uint8_t *)"x\r\n", 3, 0);
+    WCHECK(rename_path(v, "Movable Dir", "SUB", "Moved Dir", 0));
+    WCHECK(rename_path(v, "HELLO.TXT", 0, "Hello.txt", 0));
+    create(v, 0, "replace me.txt", 0);
+    file_write(v, "replace me.txt", 0, (const uint8_t *)"old", 3, 0);
+    create(v, 0, "source of replace.txt", 0);
+    file_write(v, "source of replace.txt", 0, (const uint8_t *)"new!", 4, 0);
+    WEXPECT(rename_path(v, "source of replace.txt", 0, "replace me.txt", 0), FAT32_E_EXISTS);
+    WCHECK(rename_path(v, "source of replace.txt", 0, "replace me.txt", 1));
+    WEXPECT(rename_path(v, "SUB", "SUB/Moved Dir", "loop", 0), FAT32_E_NAME);
     printf("{\"write\": true, \"sector_writes\": %u, \"free_before\": %u, \"free_after\": %u}\n", v->sector_writes, before,
            v->free_clusters);
     return 0;

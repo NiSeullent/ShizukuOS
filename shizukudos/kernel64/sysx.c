@@ -45,6 +45,20 @@ static int32_t give_handle(process_t *p, kobject_t *o, uint64_t user_ptr, uint32
     return STATUS_SUCCESS;
 }
 
+/* give_handle for a created or opened object whose OBJECT_ATTRIBUTES (at oa_va, may be 0) can ask for OBJ_INHERIT (0x2):
+ * the handle is then marked inheritable (CreateEventW & co. with SECURITY_ATTRIBUTES.bInheritHandle). */
+static int32_t give_handle_oa(process_t *p, kobject_t *o, uint64_t user_ptr, uint32_t access, uint64_t oa_va)
+{
+    struct objattr oa;
+    uint64_t v = 0;
+    int32_t st;
+    if (oa_va && copy_from_user(p, &oa, oa_va, sizeof oa)) { ob_deref(o); return STATUS_ACCESS_VIOLATION; }
+    st = give_handle(p, o, user_ptr, access);
+    if (st || !oa_va || !(oa.attributes & 2)) return st;
+    if (copy_from_user(p, &v, user_ptr, 8) == 0 && v && !(v & 3) && v <= MAX_HANDLES * 4ull) p->handles[v / 4 - 1].inherit |= 1;
+    return STATUS_SUCCESS;
+}
+
 static kobject_t *object_for_handle(process_t *p, uint64_t h)
 {
     if (h == CURRENT_PROCESS_HANDLE) { ob_ref(p->object); return p->object; }
@@ -78,14 +92,14 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (name[0] && (o = ob_find_named(OB_EVENT, name))) {
             if (o->type != OB_EVENT) return STATUS_OBJECT_TYPE_MISMATCH;
             ob_ref(o);
-            st = give_handle(p, o, a1, (uint32_t)a2);
+            st = give_handle_oa(p, o, a1, (uint32_t)a2, a3);
             return st ? st : (int32_t)0x40000000;          /* STATUS_OBJECT_NAME_EXISTS */
         }
         o = ob_create(OB_EVENT, name);
         if (!o) return STATUS_NO_MEMORY;
         o->u.event.manual = a4 == 0;                       /* NotificationEvent = manual reset */
         o->signaled = (int)(stack_arg(p, r, 5) & 0xff) != 0;
-        return give_handle(p, o, a1, (uint32_t)a2);
+        return give_handle_oa(p, o, a1, (uint32_t)a2, a3);
     }
     case SYS_NtSetEvent: case SYS_NtResetEvent: {
         kobject_t *o = handle_lookup(p, a1, OB_EVENT);
@@ -111,14 +125,14 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (st) return st;
         if (name[0] && (o = ob_find_named(OB_MUTANT, name))) {
             ob_ref(o);
-            st = give_handle(p, o, a1, (uint32_t)a2);
+            st = give_handle_oa(p, o, a1, (uint32_t)a2, a3);
             return st ? st : (int32_t)0x40000000;
         }
         o = ob_create(OB_MUTANT, name);
         if (!o) return STATUS_NO_MEMORY;
         o->signaled = 1;
         if (a4 & 0xff) { o->u.mutant.owner = thread_current(); o->u.mutant.recursion = 1; o->signaled = 0; }
-        return give_handle(p, o, a1, (uint32_t)a2);
+        return give_handle_oa(p, o, a1, (uint32_t)a2, a3);
     }
     case SYS_NtReleaseMutant: {
         kobject_t *o = handle_lookup(p, a1, OB_MUTANT);
@@ -146,7 +160,7 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (st) return st;
         if (name[0] && (o = ob_find_named(OB_SEMAPHORE, name))) {
             ob_ref(o);
-            st = give_handle(p, o, a1, (uint32_t)a2);
+            st = give_handle_oa(p, o, a1, (uint32_t)a2, a3);
             return st ? st : (int32_t)0x40000000;
         }
         o = ob_create(OB_SEMAPHORE, name);
@@ -154,7 +168,7 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         o->u.sem.count = initial;
         o->u.sem.max = maxc;
         o->signaled = initial > 0;
-        return give_handle(p, o, a1, (uint32_t)a2);
+        return give_handle_oa(p, o, a1, (uint32_t)a2, a3);
     }
     case SYS_NtReleaseSemaphore: {                          /* (handle, LONG count, PLONG previous) */
         kobject_t *o = handle_lookup(p, a1, OB_SEMAPHORE);
@@ -189,14 +203,14 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (name[0] && (o = ob_find_named(OB_TIMER, name))) {
             if (o->type != OB_TIMER) return STATUS_OBJECT_TYPE_MISMATCH;
             ob_ref(o);
-            st = give_handle(p, o, a1, (uint32_t)a2);
+            st = give_handle_oa(p, o, a1, (uint32_t)a2, a3);
             return st ? st : (int32_t)0x40000000;          /* STATUS_OBJECT_NAME_EXISTS */
         }
         o = ob_create(OB_TIMER, name);
         if (!o) return STATUS_NO_MEMORY;
         o->u.timer.manual = a4 == 0;
         ob_register_timer(o);
-        return give_handle(p, o, a1, (uint32_t)a2);
+        return give_handle_oa(p, o, a1, (uint32_t)a2, a3);
     }
     case SYS_NtSetTimer: {
         /* (handle, PLARGE_INTEGER due, ApcRoutine, ApcContext, BOOLEAN resume, LONG period ms, PBOOLEAN previous state).
@@ -448,6 +462,10 @@ cp_done:
             b.low_page = 1; b.high_page = (uint32_t)(mem_ram_top() / 4096);
             b.min_addr = 0x10000; b.max_addr = 0x7ffffffeffffull; b.affinity = 1; b.nproc = 1;
             return copy_to_user(p, a2, &b, sizeof b) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+        }
+        if (a1 == 5) {                                      /* SystemProcessInformation (sysk32_proc.c) */
+            extern int32_t k32_system_process_information(process_t *cur, uint64_t buf, uint64_t len, uint64_t retlen);
+            return k32_system_process_information(p, a2, a3, a4);
         }
         if (a1 == 0x100) {                                  /* private: {total pages, free pages} for GlobalMemoryStatusEx */
             uint64_t m[2];

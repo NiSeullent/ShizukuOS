@@ -205,6 +205,7 @@ typedef struct {
 } k64_boot_fb_t;
 int k64_boot_framebuffer(k64_boot_fb_t *out);
 const char *k64_boot_cmdline(void);             /* shz_bootinfo_t.cmdline, "" when absent */
+int k64_cmdline_has(const char *word);          /* autorun.c: `word` (or `word=...`) is on the kernel command line */
 
 /* ---- tests.c ---- */
 void run_self_tests(const shz_bootinfo_t *bi);

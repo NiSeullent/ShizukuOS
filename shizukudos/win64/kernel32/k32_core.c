@@ -197,8 +197,8 @@ K32API HANDLE WINAPI CreateEventW(LPSECURITY_ATTRIBUTES sa, BOOL manual, BOOL in
     SHZ_UNICODE_STRING us;
     HANDLE h = 0;
     NTSTATUS st;
-    (void)sa;
     if (named_attr(name, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
+    if (sa && sa->bInheritHandle) oa.Attributes |= 2;                  /* OBJ_INHERIT */
     st = NtCreateEvent(&h, EVENT_ALL_ACCESS, &oa, manual ? 0 : 1, initial != 0);
     if (st == 0x40000000) { shz_set_last_error(ERROR_ALREADY_EXISTS); return h; }
     if (st) { k32_nt_error(st); return 0; }
@@ -219,8 +219,8 @@ K32API HANDLE WINAPI CreateMutexW(LPSECURITY_ATTRIBUTES sa, BOOL owner, LPCWSTR 
     SHZ_UNICODE_STRING us;
     HANDLE h = 0;
     NTSTATUS st;
-    (void)sa;
     if (named_attr(name, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
+    if (sa && sa->bInheritHandle) oa.Attributes |= 2;                  /* OBJ_INHERIT */
     st = NtCreateMutant(&h, MUTANT_ALL_ACCESS, &oa, owner != 0);
     if (st == 0x40000000) { shz_set_last_error(ERROR_ALREADY_EXISTS); return h; }
     if (st) { k32_nt_error(st); return 0; }
@@ -240,8 +240,8 @@ K32API HANDLE WINAPI CreateSemaphoreW(LPSECURITY_ATTRIBUTES sa, LONG initial, LO
     SHZ_UNICODE_STRING us;
     HANDLE h = 0;
     NTSTATUS st;
-    (void)sa;
     if (named_attr(name, &oa, &us)) { shz_set_last_error(ERROR_INVALID_NAME); return 0; }
+    if (sa && sa->bInheritHandle) oa.Attributes |= 2;                  /* OBJ_INHERIT */
     st = NtCreateSemaphore(&h, SEMAPHORE_ALL_ACCESS, &oa, initial, max);
     if (st == 0x40000000) { shz_set_last_error(ERROR_ALREADY_EXISTS); return h; }
     if (st) { k32_nt_error(st); return 0; }

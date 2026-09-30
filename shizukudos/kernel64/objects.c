@@ -383,3 +383,17 @@ void sched_check_timeouts(uint64_t now)
 
 /* Overridden by the file system layer. */
 void __attribute__((weak)) file_object_closed(kobject_t *o) { (void)o; }
+
+/* Diagnostic for the autorun timeout report (autorun.c): the objects a blocked thread waits for. */
+void ob_print_wait(thread_t *t)
+{
+    waitdesc_t *d = t->wait_multi;
+    unsigned i;
+    if (!d) return;
+    kprintf("K64:     waits for %s of %u object(s):", d->all ? "all" : "any", d->n);
+    for (i = 0; i < d->n && i < 8; ++i) {
+        const kobject_t *o = d->objs[i];
+        kprintf(" [type %x%s%s signaled %d]", o->type, o->name[0] ? " " : "", o->name, o->signaled);
+    }
+    kprintf("\n");
+}

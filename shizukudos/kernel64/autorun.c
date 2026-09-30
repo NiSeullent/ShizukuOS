@@ -15,6 +15,8 @@
  */
 #include "fs.h"
 
+extern void k64_dump_threads(process_t *p);
+extern process_t *process_slot(unsigned i);
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
 
@@ -129,7 +131,15 @@ void k64_autorun(void)
         uint64_t grace = 0;
         const int timed_out = !p->terminated;
         if (timed_out) {
-            kprintf("K64 autorun: timeout after %u s, terminating pid %d\n", (unsigned)timeout_s, p->pid);
+            unsigned k;
+            process_t *q;
+            kprintf("K64 autorun: timeout after %u s; thread report of the live processes:\n", (unsigned)timeout_s);
+            for (k = 1; (q = process_slot(k)) != 0; ++k) {
+                if (!q->used || !q->pml4 || q->threads_alive <= 0) continue;
+                kprintf("K64: process pid %d (%s), %d thread(s)%s\n", q->pid, q->name, q->threads_alive, q->terminated ? ", terminating" : "");
+                k64_dump_threads(q);
+            }
+            kprintf("K64 autorun: terminating pid %d\n", p->pid);
             process_terminate(p, 0x102, 1);
         }
         while (p->threads_alive > 0 && grace < 10000) { thread_sleep_ms(10); grace += 10; }

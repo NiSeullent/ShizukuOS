@@ -60,6 +60,8 @@ class Image:
                     fn = i.name.decode()
                 self.imports.append((dll, fn))
         self.delay = sum(len(e.imports) for e in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []))
+        self.delay_imports = [(e.dll.decode(errors="replace"), i.name.decode() if i.name else f"#{i.ordinal}")
+                              for e in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []) for i in e.imports]
         self.exports, self.forwards, self.ordinals, self.ordinal_names = set(), {}, set(), {}
         exp = getattr(pe, "DIRECTORY_ENTRY_EXPORT", None)
         if exp:
@@ -81,6 +83,9 @@ def main():
     ap.add_argument("--build", type=Path, default=REPO / "build/shizukudos/win64")
     ap.add_argument("--json", type=Path)
     ap.add_argument("--top", type=int, default=40)
+    ap.add_argument("--delay", action="store_true",
+                    help="also list the delay-load imports of the loaded images that would fail when first called "
+                         "(the program starts without them; a call raises the MSVC delay-load exception)")
     args = ap.parse_args()
     appdir = args.exe.parent
     rows = apiset.parse()
@@ -176,6 +181,26 @@ def main():
             print(f"   first: {r['first_failure']}")
         for key, fns in sorted(r["by_dll"].items(), key=lambda kv: -len(kv[1])):
             print(f"   {len(fns):4}  {key}: {', '.join(fns[:args.top])}{' ...' if len(fns) > args.top else ''}")
+    if args.delay:
+        dmiss_total = 0
+        for path in order:
+            img = image(path)
+            by = {}
+            for dll, fn in img.delay_imports:
+                target, where = locate(dll)
+                if not target:
+                    by.setdefault((dll, where), []).append(fn)
+                elif not exported(image(target), fn):
+                    by.setdefault((dll, "not exported by " + target.name), []).append(fn)
+            n = sum(len(v) for v in by.values())
+            dmiss_total += n
+            report[path.name]["delay_missing"] = n
+            report[path.name]["delay_by_dll"] = {f"{d} [{w}]": sorted(set(v)) for (d, w), v in sorted(by.items())}
+            if n:
+                print(f"{path.name}: {len(img.delay_imports)} delay-load imports, {n} would fail when called")
+                for (d, w), fns in sorted(by.items(), key=lambda kv: -len(kv[1])):
+                    print(f"   {len(fns):4}  {d} [{w}]: {', '.join(fns[:args.top])}{' ...' if len(fns) > args.top else ''}")
+        print(f"delay-load imports that would fail when called: {dmiss_total}")
     if args.json:
         args.json.write_text(json.dumps({"exe": str(args.exe), "chain": [p.name for p in order],
                                          "first_failure": first_fail, "images": report}, indent=1))

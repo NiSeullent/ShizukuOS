@@ -309,8 +309,37 @@ DLLAPI BOOL WINAPI GetTokenInformation(HANDLE token, TOKEN_INFORMATION_CLASS cls
         break;
     }
     case TokenAppContainerSid: { PSID *v = oreserve(&o, sizeof(PSID), 8); if (v) *v = 0; break; }   /* not an AppContainer */
-    default:
-        return sec_unsupported("GetTokenInformation", "information class", ERROR_INVALID_PARAMETER);
+    case 15:                        /* TokenSandBoxInert: not created with SANDBOX_INERT */
+    case 42:                        /* TokenPrivateNameSpace: no private object namespace */
+    case 46:                        /* TokenIsLessPrivilegedAppContainer */
+    case 47: {                      /* TokenIsSandboxed: no AppContainer, not restricted, medium integrity */
+        DWORD *v = oreserve(&o, 4, 4);
+        if (v) *v = 0;
+        break;
+    }
+    case 41: {                      /* TokenProcessTrustLevel: TOKEN_PROCESS_TRUST_LEVEL {TrustLevelSid}; not a protected process */
+        PSID *v = oreserve(&o, sizeof(PSID), 8);
+        if (v) *v = 0;
+        break;
+    }
+    case 33: case 34: case 39: {    /* user / device claims, security attributes: CLAIM_SECURITY_ATTRIBUTES_INFORMATION, none */
+        struct { WORD version, reserved; DWORD count; PVOID attrs; } *v = oreserve(&o, 16, 8);
+        if (v) { v->version = 1; v->reserved = 0; v->count = 0; v->attrs = 0; }
+        break;
+    }
+    case 37: {                      /* TokenDeviceGroups: no device (compound identity) groups */
+        TOKEN_GROUPS *g = oreserve(&o, (DWORD)(8 + sizeof(SID_AND_ATTRIBUTES)), 8);
+        if (g) g->GroupCount = 0;
+        break;
+    }
+    default: {
+        char what[40] = "information class ";
+        unsigned n = 18, v = (unsigned)cls, d = 1;
+        while (v / d >= 10) d *= 10;
+        for (; d && n + 1 < sizeof what; d /= 10) what[n++] = (char)('0' + v / d % 10);
+        what[n] = 0;
+        return sec_unsupported("GetTokenInformation", what, ERROR_INVALID_PARAMETER);
+    }
     }
     *ret = o.need;
     if (!buf || o.need > len) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return FALSE; }

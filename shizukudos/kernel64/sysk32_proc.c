@@ -156,6 +156,111 @@ static void sample_peaks(process_t *p)
     irq_restore(f);
 }
 
+/* NtQuerySystemInformation(SystemProcessInformation = 5): one SYSTEM_PROCESS_INFORMATION (0x100 bytes on x64) per live
+ * process, followed by one SYSTEM_THREAD_INFORMATION (0x50 bytes) per live thread and the image name (UTF-16, NUL
+ * terminated); NextEntryOffset chains them, 0 in the last. A buffer that is too small gets STATUS_INFO_LENGTH_MISMATCH
+ * and the needed size in ReturnLength. Counters Kernel64 does not keep (I/O transfer counts, pool quotas) are 0. */
+#define SPI_SIZE 0x100u
+#define STI_SIZE 0x50u
+static void put32(uint8_t *b, unsigned off, uint32_t v) { memcpy(b + off, &v, 4); }
+static void put64v(uint8_t *b, unsigned off, uint64_t v) { memcpy(b + off, &v, 8); }
+
+static uint32_t spi_entry_size(process_t *q, unsigned threads)
+{
+    return (uint32_t)((SPI_SIZE + threads * STI_SIZE + (strlen(q->name) + 1) * 2 + 7) & ~7u);
+}
+
+int32_t k32_system_process_information(process_t *cur, uint64_t buf, uint64_t len, uint64_t retlen)
+{
+    enum { MAXP = 64 };
+    process_t *list[MAXP];
+    unsigned counts[MAXP];
+    unsigned i, n = 0, k;
+    uint64_t need = 0, off = 0, largest = 0;
+    process_t *q;
+    uint8_t *e;
+    int32_t st = STATUS_SUCCESS;
+    for (i = 1; (q = process_slot(i)) != 0 && n < MAXP; ++i) {
+        if (!q->used || !q->pml4 || q->threads_alive <= 0) continue;
+        list[n] = q;
+        counts[n] = live_threads(q, 0, 0, 0);
+        need += spi_entry_size(q, counts[n]);
+        if (spi_entry_size(q, counts[n]) > largest) largest = spi_entry_size(q, counts[n]);
+        ++n;
+    }
+    if (retlen) { uint32_t rl = (uint32_t)need; if (copy_to_user(cur, retlen, &rl, 4)) return STATUS_ACCESS_VIOLATION; }
+    if (len < need || !n) return n ? (int32_t)0xC0000004 : STATUS_SUCCESS;          /* STATUS_INFO_LENGTH_MISMATCH */
+    e = kmalloc(largest);
+    if (!e) return STATUS_NO_MEMORY;
+    for (k = 0; k < n && !st; ++k) {
+        uint64_t ut = 0, kt = 0, cyc = 0, f;
+        unsigned t_i, nt = 0;
+        const uint32_t size = spi_entry_size(list[k], counts[k]);
+        thread_t *t;
+        q = list[k];
+        memset(e, 0, size);
+        f = irq_save();                                     /* thread slots change under preemption: one consistent pass */
+        for (t_i = 0; (t = thread_slot(t_i)) != 0 && nt < counts[k]; ++t_i) {
+            uint8_t *ti = e + SPI_SIZE + nt * STI_SIZE;
+            uint32_t state, reason = 0;
+            if (t->proc != q || t->state == TS_FREE || t->state == TS_ZOMBIE) continue;
+            ut += t->user_ticks; kt += t->kernel_ticks; cyc += thread_cycles_now(t);
+            put64v(ti, 0x00, t->kernel_ticks * TICK_100NS);
+            put64v(ti, 0x08, t->user_ticks * TICK_100NS);
+            put64v(ti, 0x10, tick_to_filetime(t->create_tick));
+            put64v(ti, 0x20, t->user_rip);                  /* StartAddress: the thread's initial user RIP */
+            put64v(ti, 0x28, (uint64_t)q->pid);
+            put64v(ti, 0x30, t->tid);
+            put32(ti, 0x38, 8); put32(ti, 0x3c, 8);         /* Priority, BasePriority: normal */
+            /* KTHREAD_STATE: 1 Ready, 2 Running, 5 Waiting, 0 Initialized; KWAIT_REASON 5 Suspended, 6 UserRequest */
+            if (t->state == TS_RUNNING) state = 2;
+            else if (t->state == TS_READY) state = 1;
+            else if (t->state == TS_NEW) state = 0;
+            else { state = 5; reason = t->parked ? 5 : 6; }
+            put32(ti, 0x44, state);
+            put32(ti, 0x48, reason);
+            ++nt;
+        }
+        irq_restore(f);
+        ut += q->dead_user_ticks; kt += q->dead_kernel_ticks; cyc += q->dead_cycles;
+        put32(e, 0x00, k + 1 < n ? size : 0);
+        put32(e, 0x04, nt);
+        put64v(e, 0x18, cyc);
+        put64v(e, 0x20, tick_to_filetime(q->create_tick));
+        put64v(e, 0x28, ut * TICK_100NS);
+        put64v(e, 0x30, kt * TICK_100NS);
+        {
+            const size_t nl = strlen(q->name);
+            uint8_t *name = e + SPI_SIZE + nt * STI_SIZE;
+            size_t c;
+            for (c = 0; c < nl; ++c) { name[c * 2] = (uint8_t)q->name[c]; name[c * 2 + 1] = 0; }
+            *(uint16_t *)(e + 0x38) = (uint16_t)(nl * 2);
+            *(uint16_t *)(e + 0x3a) = (uint16_t)(nl * 2 + 2);
+            put64v(e, 0x40, buf + off + SPI_SIZE + nt * STI_SIZE);
+        }
+        put32(e, 0x48, 8);                                  /* BasePriority */
+        put64v(e, 0x50, (uint64_t)q->pid);
+        put64v(e, 0x58, q->parent_pid);
+        put32(e, 0x60, q->handle_count);
+        put32(e, 0x64, 1);                                  /* SessionId: the interactive session (token.c reports 1) */
+        put64v(e, 0x68, (uint64_t)q->pid);                  /* UniqueProcessKey */
+        {
+            const uint64_t ws = vm_count_user_pages(q->pml4) * PAGE_SIZE;
+            const uint64_t commit = private_commit(q) * PAGE_SIZE;
+            put64v(e, 0x70, commit); put64v(e, 0x78, commit);   /* Peak/VirtualSize: committed private memory */
+            put32(e, 0x80, (uint32_t)q->page_faults);
+            put64v(e, 0x88, q->peak_ws_pages * PAGE_SIZE > ws ? q->peak_ws_pages * PAGE_SIZE : ws);
+            put64v(e, 0x90, ws);
+            put64v(e, 0xb8, commit); put64v(e, 0xc0, q->peak_commit * PAGE_SIZE > commit ? q->peak_commit * PAGE_SIZE : commit);
+            put64v(e, 0xc8, commit);
+        }
+        if (copy_to_user(cur, buf + off, e, size)) st = STATUS_ACCESS_VIOLATION;
+        off += size;
+    }
+    kfree(e);
+    return st;
+}
+
 /* VirtualLock records: one entry per locked page. The table comes from the kernel heap on the first VirtualLock (it is not
  * part of .bss, which must stay small: link.ld), so systems that never lock memory do not pay for it. */
 #define MAX_VLOCKS 2048

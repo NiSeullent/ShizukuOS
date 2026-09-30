@@ -284,15 +284,16 @@ void process_terminate(process_t *p, int64_t code, int faulted)
     if (faulted) p->faulted = 1;
     p->terminated = 1;
     /* Other threads are killed at their next kernel entry/exit (see check_kill) or timer tick in user mode (arch.c). A thread
-     * blocked in an object wait, an alert wait or a sleep is woken now so that it leaves the kernel and dies; kernel-internal
-     * semaphore and mutex waits are left alone (their holders release them). */
+     * blocked in an object wait, an alert wait or a sleep, or parked by NtSuspendThread/NtSuspendProcess (termination
+     * overrides suspension, as on NT), is woken now so that it leaves the kernel and dies; kernel-internal semaphore and
+     * mutex waits are left alone (their holders release them). */
     {
         const uint64_t f = irq_save();
         unsigned i;
         thread_t *t;
         for (i = 0; (t = thread_slot(i)) != 0; ++i)
             if (t->proc == p && t->state == TS_BLOCKED && t != thread_current() &&
-                (t->wait_multi || t->alert_wait || (t->wake_tick && !t->wait_sem)))
+                (t->wait_multi || t->alert_wait || t->parked || (t->wake_tick && !t->wait_sem)))
                 thread_wake(t);
         irq_restore(f);
     }

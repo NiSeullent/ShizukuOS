@@ -22,6 +22,34 @@ static uint64_t get64(const uint8_t *c, unsigned off) { uint64_t v; memcpy(&v, c
 
 static uint64_t canonical_user(uint64_t a) { return a < USER_TOP; }
 
+static void describe(process_t *p, uint64_t a, char *out, unsigned cap);
+
+/* `shz.exctrace` on the kernel command line: one line per hardware exception handed to user mode (first chance), with
+ * the module return addresses of the stack, so a fault that a program's own filter swallows (crash reporters) still
+ * leaves evidence. At most 256 lines per boot. */
+static void trace_first_chance(process_t *p, thread_t *t, const struct regs *r, uint32_t code, uint64_t info0, uint64_t info1)
+{
+    static int enabled = -1;
+    static unsigned lines;
+    char d[96];
+    unsigned k, shown = 0;
+    if (enabled < 0) enabled = k64_cmdline_has("shz.exctrace");
+    if (!enabled || lines >= 256) return;
+    ++lines;
+    describe(p, r->rip, d, sizeof d);
+    kprintf("K64 exc: pid %d tid %llu first-chance %x at %s (%llx %llx) rsp %llx\n", p->pid, t->tid, code, d, info0, info1, r->rsp);
+    for (k = 0; k < 512 && shown < 10; ++k) {
+        uint64_t v;
+        unsigned j, is_mod = 0;
+        if (copy_from_user(p, &v, r->rsp + k * 8ull, 8)) break;
+        describe(p, v, d, sizeof d);
+        for (j = 0; d[j]; ++j) if (d[j] == '+') is_mod = 1;
+        if (!is_mod) continue;
+        kprintf("K64 exc:   stack[%u] %s\n", k, d);
+        ++shown;
+    }
+}
+
 int user_exception_dispatch(struct regs *r, uint32_t code, uint64_t info0, uint64_t info1)
 {
     process_t *p = current_process();
@@ -30,6 +58,7 @@ int user_exception_dispatch(struct regs *r, uint32_t code, uint64_t info0, uint6
     uint64_t sp, ctx_va, rec_va;
     if (!p || !p->ntdll_exception_dispatcher)
         return 0;
+    trace_first_chance(p, t, r, code, info0, info1);
     memset(ctx, 0, sizeof ctx);
     memset(rec, 0, sizeof rec);
     *(uint32_t *)(ctx + 0x30) = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS | CONTEXT_FLOATING_POINT;
@@ -139,6 +168,38 @@ static void report_unhandled(process_t *p, const uint8_t *rec, uint64_t ctx_va)
             for (k = 0; d[k]; ++k) if (d[k] == '+') is_mod = 1;
             if (!is_mod) continue;
             kprintf("K64:   stack[%u] %s\n", i, d);
+            ++shown;
+        }
+    }
+}
+
+/* Diagnostic (autorun.c timeout report): every live thread of p with the user context it entered the kernel with (the
+ * syscall/interrupt frame at the top of its kernel stack), what it waits for, and the module return addresses on its user
+ * stack. Nothing is changed. */
+extern void ob_print_wait(thread_t *t);
+void k64_dump_threads(process_t *p)
+{
+    unsigned i;
+    thread_t *t;
+    for (i = 0; (t = thread_slot(i)) != 0; ++i) {
+        const struct regs *r;
+        char d[96];
+        unsigned k, shown = 0;
+        if (t->proc != p || t->state == TS_FREE || t->state == TS_ZOMBIE || !t->teb || !t->stack_base) continue;
+        r = (const struct regs *)(t->stack_base + KSTACK_BYTES - sizeof(struct regs));
+        describe(p, r->rip, d, sizeof d);
+        kprintf("K64:   tid %llu state %u%s%s%s: user rip %llx (%s) rsp %llx; last entry rax=%llx r10=%llx rdx=%llx r8=%llx r9=%llx\n",
+                t->tid, t->state, t->parked ? " parked" : "", t->alert_wait ? " alert-wait" : "", t->wait_sem ? " sem-wait" : "",
+                r->rip, d, r->rsp, r->rax, r->r10, r->rdx, r->r8, r->r9);
+        ob_print_wait(t);
+        for (k = 0; k < 1024 && shown < 16; ++k) {
+            uint64_t v;
+            unsigned j, is_mod = 0;
+            if (copy_from_user(p, &v, r->rsp + k * 8ull, 8)) break;
+            describe(p, v, d, sizeof d);
+            for (j = 0; d[j]; ++j) if (d[j] == '+') is_mod = 1;
+            if (!is_mod) continue;
+            kprintf("K64:     stack[%u] %s\n", k, d);
             ++shown;
         }
     }

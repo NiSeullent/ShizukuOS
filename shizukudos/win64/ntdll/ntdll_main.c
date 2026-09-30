@@ -861,6 +861,32 @@ SHZ_EXPORT NTSTATUS NTAPI LdrUnloadDll(PVOID handle)
     return STATUS_INVALID_PARAMETER;
 }
 
+/* The unload event trace: the ring of RTL_UNLOAD_EVENT_TRACE records {BaseAddress, SizeOfImage, Sequence, TimeDateStamp,
+ * CheckSum, ImageName[32], Version[2]} (104 bytes on x64, 64 entries) that debuggers and crash reporters (crashpad's
+ * ProcessSnapshotWin) read, in this and in other processes at the same addresses (ntdll has one base in every process).
+ * Kernel64 never unmaps an image (LdrUnloadDll above), so the ring stays empty: every record has BaseAddress 0, which
+ * readers skip. */
+#define UNLOAD_TRACE_ENTRIES 64
+typedef struct {
+    PVOID BaseAddress;
+    SIZE_T SizeOfImage;
+    ULONG Sequence, TimeDateStamp, CheckSum;
+    WCHAR ImageName[32];
+    ULONG Version[2];
+} SHZ_UNLOAD_EVENT_TRACE;
+static SHZ_UNLOAD_EVENT_TRACE g_unload_trace[UNLOAD_TRACE_ENTRIES];
+static ULONG g_unload_trace_size = sizeof(SHZ_UNLOAD_EVENT_TRACE), g_unload_trace_count = UNLOAD_TRACE_ENTRIES;
+static PVOID g_unload_trace_ptr = g_unload_trace;
+
+SHZ_EXPORT VOID NTAPI RtlGetUnloadEventTraceEx(PULONG *element_size, PULONG *element_count, PVOID *event_trace)
+{
+    *element_size = &g_unload_trace_size;
+    *element_count = &g_unload_trace_count;
+    *event_trace = &g_unload_trace_ptr;                    /* the address of the pointer to the ring, as on Windows */
+}
+
+SHZ_EXPORT PVOID NTAPI RtlGetUnloadEventTrace(VOID) { return g_unload_trace; }
+
 /* Flags: LDR_ADDREF_DLL_PIN (1) pins the module for the life of the process, otherwise the reference count grows by one. */
 SHZ_EXPORT NTSTATUS NTAPI LdrAddRefDll(ULONG flags, PVOID handle)
 {

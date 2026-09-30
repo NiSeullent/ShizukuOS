@@ -159,7 +159,6 @@ static void win64_run_others(void)
     static char names[WIN64_MAX_APPS][32];
     unsigned n = 0, i, j;
     fsnode_t *dir = fs_lookup("\\SHZ\\TESTS"), *c;
-    extern int k64_cmdline_has(const char *word);
     if (!dir)
         return;
     if (k64_cmdline_has("shz.noapps")) {                        /* autorun.c: a run dedicated to one program */

@@ -9,6 +9,11 @@ skips the T_*.EXE self-checking programs and starts the program the control file
 (kernel64/autorun.c). The disk is attached with snapshot=on: what Chromium writes (profile, crash database) is thrown
 away when QEMU exits, the image stays reusable.
 
+Display: even with --headless, Chromium registers window classes and creates message-only windows (base::win::
+MessageWindow) and stops ("Your computer has run out of resources") when that fails. Kernel64's window manager
+(kernel64/gfx_wm.c) exists only when the machine has a display device, so by default the VM gets a Bochs VBE adapter
+(`-vga std`, as run_k64_gui.py --display vga) that nobody looks at (`-display none`). --display none runs without it.
+
 Default command (ELECTRON_TARGET.md milestone M2):
     chrome.exe --headless --no-sandbox --disable-gpu --single-process --dump-dom file:///D:/M2/M2.HTML
 The fixture page contains a script, so the expected DOM line `<p id="m">ShizukuDOS M2 probe 42</p>` only exists if V8
@@ -104,6 +109,8 @@ def main():
     ap.add_argument("--qemu", default=qemu.DEFAULT_QEMU)
     ap.add_argument("--accel", choices=("auto", "kvm", "tcg"), default="auto")
     ap.add_argument("--memory", default="3072")
+    ap.add_argument("--display", choices=("vga", "none"), default="vga",
+                    help="vga: a Bochs VBE adapter so the Win32 window manager is active (default); none: no display device")
     ap.add_argument("--timeout", type=int, default=1800, help="host-side QEMU timeout (s)")
     ap.add_argument("--guest-timeout", type=int, default=1200, help="seconds the guest lets chrome.exe run")
     ap.add_argument("--chromium", default=str(DEFAULT_TREE), help="chrome-win tree (read-only)")
@@ -112,7 +119,7 @@ def main():
     ap.add_argument("--expect", default=M2_EXPECT, help="line that must appear in the output for a PASS")
     ap.add_argument("--out", default=str(BUILD / "kernel64s" / "run_chromium"))
     ap.add_argument("--no-trace", action="store_true",
-                    help="do not pass shz.k32trace (kernel32's explicit-failure and GetProcAddress-miss lines)")
+                    help="do not pass shz.k32trace and shz.exctrace (kernel32 explicit-failure and GetProcAddress-miss lines, first-chance hardware exceptions)")
     args = ap.parse_args()
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
     for f in (stub, kernel, initrd):
@@ -142,8 +149,9 @@ def main():
     serial_path = out / "serial.log"
     serial_path.unlink(missing_ok=True)
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
+           *(["-vga", "std"] if args.display == "vga" else []),
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
-           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace"),
+           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace"),
            "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
            "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
            "-device", "ide-hd,drive=d0,bus=ahci0.0"]

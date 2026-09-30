@@ -654,14 +654,17 @@ static int short_equal(const uint8_t *a, const uint8_t *b)
     return 1;
 }
 
-/* 1 when `sn` (or, with name != NULL, the long/short name `name`) is already used in the directory. */
-static int dir_has(fat32_vol_t *v, uint32_t dir_first, const uint8_t *sn, const uint16_t *name, unsigned n, int *err)
+/* 1 when `sn` (or, with name != NULL, the long/short name `name`) is already used in the directory by an entry other
+ * than the one whose short entry is at (skip_cluster, skip_offset) (skip_cluster 0: none). */
+static int dir_has_other(fat32_vol_t *v, uint32_t dir_first, const uint8_t *sn, const uint16_t *name, unsigned n, int *err,
+                         uint32_t skip_cluster, uint32_t skip_offset)
 {
     fat32_dir_t d;
     fat32_dirent_t e;
     int rc;
     fat32_dir_open(v, dir_first, &d);
     while ((rc = fat32_dir_next(v, &d, &e)) == 1) {
+        if (skip_cluster && e.dir_cluster == skip_cluster && e.dir_offset == skip_offset) continue;
         if (sn && short_equal(e.short_name, sn)) return 1;
         if (name && names_equal_ci(e.name, e.name_len, name, n)) return 1;
     }
@@ -669,8 +672,13 @@ static int dir_has(fat32_vol_t *v, uint32_t dir_first, const uint8_t *sn, const 
     return 0;
 }
 
-int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *name, unsigned name_len, int is_dir,
-                 uint16_t date, uint16_t time, fat32_dirent_t *out)
+/* The directory entries of a new name in the directory starting at dir_first_cluster. `tmpl` (32 bytes) is NULL for a new
+ * file or directory (fat32_create), or the short entry of an existing file or directory whose attributes, first
+ * cluster, size and times the new entry takes over (fat32_rename; its old entry, at (skip_cluster, skip_offset), does
+ * not count as a name conflict). */
+static int make_entry(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *name, unsigned name_len, int is_dir,
+                      uint16_t date, uint16_t time, const uint8_t *tmpl, uint32_t skip_cluster, uint32_t skip_offset,
+                      fat32_dirent_t *out)
 {
     uint8_t sn[11], ent[32];
     uint32_t pos_cluster[21], pos_offset[21], cl, off, guard = 0, newdir = 0;
@@ -679,7 +687,7 @@ int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *nam
     int err = 0, rc, rc2;
     if (!v->write) return FAT32_E_RDONLY;
     if (!name_valid(name, name_len)) return FAT32_E_NAME;
-    if (dir_has(v, dir_first_cluster, 0, name, name_len, &err)) return FAT32_E_EXISTS;
+    if (dir_has_other(v, dir_first_cluster, 0, name, name_len, &err, skip_cluster, skip_offset)) return FAT32_E_EXISTS;
     if (err < 0) return err;
     if (!exact_short(name, name_len, sn)) {
         basis_name(name, name_len, sn, &base_len);
@@ -694,11 +702,11 @@ int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *nam
             keep = base_len + t > 8 ? 8 - t : base_len;
             for (i = keep; i < 8; ++i) sn[i] = ' ';
             for (i = 0; i < t; ++i) sn[keep + i] = (uint8_t)tail[i];
-            if (!dir_has(v, dir_first_cluster, sn, 0, 0, &err)) { if (err < 0) return err; break; }
+            if (!dir_has_other(v, dir_first_cluster, sn, 0, 0, &err, skip_cluster, skip_offset)) { if (err < 0) return err; break; }
         }
         if (k == 1000000) return FAT32_E_EXISTS;
         nlfn = (name_len + 12) / 13;
-    } else if (dir_has(v, dir_first_cluster, sn, 0, 0, &err)) {
+    } else if (dir_has_other(v, dir_first_cluster, sn, 0, 0, &err, skip_cluster, skip_offset)) {
         return FAT32_E_EXISTS;
     }
     if (err < 0) return err;
@@ -729,7 +737,7 @@ int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *nam
         }
         off += 32;
     }
-    if (is_dir) {                                             /* the new directory's first cluster: ".", ".." */
+    if (is_dir && !tmpl) {                                    /* the new directory's first cluster: ".", ".." */
         newdir = alloc_cluster(v);
         if (!newdir) { fat32_sync(v); return FAT32_E_FULL; }
         if ((rc = zero_cluster(v, newdir))) { fat32_sync(v); return rc; }
@@ -768,10 +776,15 @@ int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *nam
             if ((rc = write_sector(v, fat32_cluster_lba(v, pos_cluster[k]) + pos_offset[k] / FAT32_SECTOR, v->sector))) { fat32_sync(v); return rc; }
         }
         f32_zero(ent, sizeof ent);
+        if (tmpl) {                                           /* renamed: everything but the name (and its case flags) */
+            f32_copy(ent, tmpl, 32);
+            ent[12] = 0;
+        } else {
+            ent[11] = is_dir ? FAT32_ATTR_DIR : FAT32_ATTR_ARCHIVE;
+            wr16(ent + 14, time); wr16(ent + 16, date); wr16(ent + 18, date); wr16(ent + 22, time); wr16(ent + 24, date);
+            wr16(ent + 20, newdir >> 16); wr16(ent + 26, newdir & 0xffff);
+        }
         f32_copy(ent, sn, 11);
-        ent[11] = is_dir ? FAT32_ATTR_DIR : FAT32_ATTR_ARCHIVE;
-        wr16(ent + 14, time); wr16(ent + 16, date); wr16(ent + 18, date); wr16(ent + 22, time); wr16(ent + 24, date);
-        wr16(ent + 20, newdir >> 16); wr16(ent + 26, newdir & 0xffff);
         if ((rc = bounce(v, fat32_cluster_lba(v, pos_cluster[nlfn]) + pos_offset[nlfn] / FAT32_SECTOR))) { fat32_sync(v); return rc; }
         f32_copy(v->sector + pos_offset[nlfn] % FAT32_SECTOR, ent, 32);
         rc = write_sector(v, fat32_cluster_lba(v, pos_cluster[nlfn]) + pos_offset[nlfn] / FAT32_SECTOR, v->sector);
@@ -783,11 +796,170 @@ int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *nam
     out->name_len = (uint16_t)name_len;
     out->has_lfn = nlfn != 0;
     out->attr = ent[11];
-    out->first_cluster = newdir;
-    out->cdate = out->mdate = out->adate = date;
-    out->ctime = out->mtime = time;
+    out->first_cluster = ((uint32_t)rd16(ent + 20) << 16) | rd16(ent + 26);
+    out->size = (ent[11] & FAT32_ATTR_DIR) ? 0 : rd32(ent + 28);
+    out->ctenth = ent[13]; out->ctime = rd16(ent + 14); out->cdate = rd16(ent + 16); out->adate = rd16(ent + 18);
+    out->mtime = rd16(ent + 22); out->mdate = rd16(ent + 24);
     f32_copy(out->short_name, sn, 11);
     out->dir_cluster = pos_cluster[nlfn];
     out->dir_offset = pos_offset[nlfn];
     return FAT32_OK;
+}
+
+int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *name, unsigned name_len, int is_dir,
+                 uint16_t date, uint16_t time, fat32_dirent_t *out)
+{
+    return make_entry(v, dir_first_cluster, name, name_len, is_dir, date, time, 0, 0, 0, out);
+}
+
+/* ---- deletion and renaming ---- */
+/* The short entry at (dir_cluster, dir_offset) into e[32]; it must be live (not free, deleted, LFN, "." or ".."). */
+static int read_short(fat32_vol_t *v, uint32_t dir_cluster, uint32_t dir_offset, uint8_t e[32])
+{
+    int rc;
+    if (!valid_cluster(v, dir_cluster) || dir_offset >= v->bytes_per_cluster || (dir_offset & 31)) return FAT32_E_RANGE;
+    if ((rc = bounce(v, fat32_cluster_lba(v, dir_cluster) + dir_offset / FAT32_SECTOR))) return rc;
+    f32_copy(e, v->sector + dir_offset % FAT32_SECTOR, 32);
+    if (e[0] == 0 || e[0] == 0xe5 || e[0] == '.' || (e[11] & 0x3f) == FAT32_ATTR_LFN || (e[11] & FAT32_ATTR_LABEL))
+        return FAT32_E_CORRUPT;
+    return FAT32_OK;
+}
+
+/* Marks the short entry at (dir_cluster, dir_offset) and the long-name entries that belong to it (the run of LFN entries
+ * right in front of it whose checksum matches) as deleted (0xE5). The directory is walked from its start because the
+ * entries in front may lie in the previous cluster of the chain. */
+static int erase_entry(fat32_vol_t *v, uint32_t dir_first, uint32_t dir_cluster, uint32_t dir_offset)
+{
+    uint32_t lc[20], lo[20], cl = dir_first ? dir_first : v->root_cluster, off = 0, guard = 0;
+    unsigned nl = 0, i;
+    uint8_t sum = 0;
+    int rc;
+    for (;;) {
+        const uint8_t *e;
+        if (!valid_cluster(v, cl) || ++guard > 65536 * 32) return FAT32_E_CORRUPT;
+        if (off >= v->bytes_per_cluster) {
+            const uint32_t next = fat32_fat_entry(v, cl);
+            if (next >= EOC) return FAT32_E_CORRUPT;              /* the entry is not in this directory */
+            cl = next; off = 0;
+            continue;
+        }
+        if ((rc = bounce(v, fat32_cluster_lba(v, cl) + off / FAT32_SECTOR))) return rc;
+        e = v->sector + off % FAT32_SECTOR;
+        if (e[0] == 0) return FAT32_E_CORRUPT;
+        if (cl == dir_cluster && off == dir_offset) { sum = short_checksum(e); break; }
+        if (e[0] != 0xe5 && (e[11] & 0x3f) == FAT32_ATTR_LFN) {
+            if (e[0] & 0x40) nl = 0;                               /* the first (highest) entry of a long name */
+            if (nl < 20) { lc[nl] = cl; lo[nl] = off; ++nl; }
+        } else {
+            nl = 0;
+        }
+        off += 32;
+    }
+    for (i = 0; i <= nl; ++i) {
+        const uint32_t c = i < nl ? lc[i] : dir_cluster, o = i < nl ? lo[i] : dir_offset;
+        const uint64_t lba = fat32_cluster_lba(v, c) + o / FAT32_SECTOR;
+        uint8_t *e;
+        if ((rc = bounce(v, lba))) return rc;
+        e = v->sector + o % FAT32_SECTOR;
+        if (i < nl && e[13] != sum) continue;                     /* a stale long name of another entry: left alone */
+        e[0] = 0xe5;
+        if ((rc = write_sector(v, lba, v->sector))) return rc;
+    }
+    return FAT32_OK;
+}
+
+/* 1 when the directory starting at `first` holds nothing but ".", ".." and deleted or orphaned long-name entries. */
+static int dir_empty(fat32_vol_t *v, uint32_t first, int *err)
+{
+    fat32_dir_t d;
+    fat32_dirent_t e;
+    int rc;
+    fat32_dir_open(v, first, &d);
+    rc = fat32_dir_next(v, &d, &e);                               /* skips ".", "..", deleted and LFN entries */
+    *err = rc < 0 ? rc : 0;
+    return rc == 0;
+}
+
+static int free_chain(fat32_vol_t *v, uint32_t first)
+{
+    uint32_t cur = first, guard = 0;
+    while (cur >= 2 && cur < EOC) {
+        const uint32_t next = fat32_fat_entry(v, cur);
+        if (!valid_cluster(v, cur) || ++guard > v->cluster_count) return FAT32_E_CORRUPT;
+        fat_set(v, cur, 0);
+        cur = next;
+    }
+    return FAT32_OK;
+}
+
+int fat32_remove(fat32_vol_t *v, uint32_t dir_first_cluster, uint32_t dir_cluster, uint32_t dir_offset)
+{
+    uint8_t e[32];
+    uint32_t first;
+    int rc, rc2, err = 0;
+    if (!v->write) return FAT32_E_RDONLY;
+    if ((rc = read_short(v, dir_cluster, dir_offset, e))) return rc;
+    first = ((uint32_t)rd16(e + 20) << 16) | rd16(e + 26);
+    if (e[11] & FAT32_ATTR_DIR) {
+        if (!first) return FAT32_E_CORRUPT;
+        if (!dir_empty(v, first, &err)) return err ? err : FAT32_E_NOTEMPTY;
+    }
+    rc = erase_entry(v, dir_first_cluster, dir_cluster, dir_offset);      /* the name goes first: no entry to freed clusters */
+    if (!rc && first) rc = free_chain(v, first);
+    rc2 = fat32_sync(v);
+    return rc ? rc : rc2;
+}
+
+int fat32_rename(fat32_vol_t *v, uint32_t src_dir_first, uint32_t dir_cluster, uint32_t dir_offset, uint32_t dst_dir_first,
+                 const uint16_t *name, unsigned name_len, int replace, fat32_dirent_t *out)
+{
+    uint8_t e[32];
+    const uint32_t src_dir = src_dir_first ? src_dir_first : v->root_cluster;
+    const uint32_t dst_dir = dst_dir_first ? dst_dir_first : v->root_cluster;
+    fat32_dir_t d;
+    fat32_dirent_t *old = out;                                    /* scratch until make_entry fills it */
+    uint32_t first;
+    int rc, rc2, is_dir;
+    if (!v->write) return FAT32_E_RDONLY;
+    if (!name_valid(name, name_len)) return FAT32_E_NAME;
+    if ((rc = read_short(v, dir_cluster, dir_offset, e))) return rc;
+    is_dir = (e[11] & FAT32_ATTR_DIR) != 0;
+    first = ((uint32_t)rd16(e + 20) << 16) | rd16(e + 26);
+    if (is_dir && first) {                                        /* not into itself or its own subtree */
+        uint32_t walk = dst_dir, guard = 0;
+        while (walk && walk != v->root_cluster) {
+            uint8_t dd[32];
+            if (walk == first) return FAT32_E_NAME;
+            if (++guard > 4096 || !valid_cluster(v, walk)) return FAT32_E_CORRUPT;
+            if ((rc = bounce(v, fat32_cluster_lba(v, walk)))) return rc;
+            f32_copy(dd, v->sector + 32, 32);                     /* ".." */
+            if (dd[0] != '.' || dd[1] != '.') return FAT32_E_CORRUPT;
+            walk = ((uint32_t)rd16(dd + 20) << 16) | rd16(dd + 26);
+        }
+    }
+    /* an existing entry of that name (other than the source itself): replaced when allowed and it is a file */
+    fat32_dir_open(v, dst_dir_first, &d);
+    while ((rc = fat32_dir_next(v, &d, old)) == 1) {
+        if (old->dir_cluster == dir_cluster && old->dir_offset == dir_offset) continue;
+        if (!names_equal_ci(old->name, old->name_len, name, name_len)) continue;
+        if (!replace || (old->attr & FAT32_ATTR_DIR) || (old->attr & FAT32_ATTR_RO)) return FAT32_E_EXISTS;
+        if ((rc = fat32_remove(v, dst_dir_first, old->dir_cluster, old->dir_offset))) return rc;
+        break;
+    }
+    if (rc < 0) return rc;
+    rc = make_entry(v, dst_dir_first, name, name_len, is_dir, 0, 0, e, dst_dir == src_dir ? dir_cluster : 0,
+                    dst_dir == src_dir ? dir_offset : 0, out);
+    if (rc) return rc;
+    rc = erase_entry(v, src_dir_first, dir_cluster, dir_offset);
+    if (!rc && is_dir && first && dst_dir != src_dir) {            /* the moved directory's ".." names its new parent */
+        const uint64_t lba = fat32_cluster_lba(v, first);
+        const uint32_t parent = dst_dir == v->root_cluster ? 0 : dst_dir;
+        if (!(rc = bounce(v, lba))) {
+            uint8_t *dd = v->sector + 32;
+            if (dd[0] != '.' || dd[1] != '.') rc = FAT32_E_CORRUPT;
+            else { wr16(dd + 20, parent >> 16); wr16(dd + 26, parent & 0xffff); rc = write_sector(v, lba, v->sector); }
+        }
+    }
+    rc2 = fat32_sync(v);
+    return rc ? rc : rc2;
 }

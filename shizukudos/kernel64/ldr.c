@@ -26,7 +26,10 @@
  * loader's temporary unprotect - an IAT inside read-only .rdata is normal for MSVC-linked images.
  *
  * ASLR: an image with IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE and a relocation directory is placed at a random 64 KiB
- * aligned base (RDRAND), per process. Windows-like entropy (Windows Internals 7th ed., part 1, ch. 5 "Address space
+ * aligned base (RDRAND). An executable is placed per process; a DLL, as on Windows, once per boot: the base drawn for the
+ * first process that loads it (keyed by path, SizeOfImage and CheckSum) is reused in every later process where that
+ * range is free (debuggers and crash reporters such as crashpad read ntdll's and kernel32's data in other processes at
+ * their own addresses). Windows-like entropy (Windows Internals 7th ed., part 1, ch. 5 "Address space
  * layout randomization"): HIGH_ENTROPY_VA DLLs 19 bits in [0x7ff8'0000'0000, 0x7fff'0000'0000), HIGH_ENTROPY_VA
  * executables 17 bits in [0x7ff6'0000'0000, 0x7ff8'0000'0000), other relocatable images 8 bits in
  * [0x7ff5'0000'0000, 0x7ff6'0000'0000); images that are not LARGE_ADDRESS_AWARE or carry 32-bit (HIGHLOW) fixups stay
@@ -417,6 +420,46 @@ static int census_cb(void *ctx, uint32_t rva, unsigned type)
     return 0;
 }
 
+/* Per-boot DLL bases (see the ASLR note at the top): key = FNV-1a of the lowercase path, SizeOfImage, CheckSum. */
+#define BOOT_BASES 256
+static struct { uint64_t key, base; } boot_bases[BOOT_BASES];
+static unsigned boot_base_count;
+
+static uint64_t boot_base_key(const module_t *m)
+{
+    uint64_t h = 0xcbf29ce484222325ull;
+    const char *q;
+    for (q = m->path; *q; ++q) {
+        char ch = *q;
+        if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32);
+        h = (h ^ (uint8_t)ch) * 0x100000001b3ull;
+    }
+    h = (h ^ m->info.size_of_image) * 0x100000001b3ull;
+    return (h ^ m->info.checksum) * 0x100000001b3ull;
+}
+
+static uint64_t boot_base_get(uint64_t key)
+{
+    uint64_t f = irq_save(), base = 0;
+    unsigned i;
+    for (i = 0; i < boot_base_count; ++i) if (boot_bases[i].key == key) { base = boot_bases[i].base; break; }
+    irq_restore(f);
+    return base;
+}
+
+static void boot_base_put(uint64_t key, uint64_t base)
+{
+    uint64_t f = irq_save();
+    unsigned i;
+    for (i = 0; i < boot_base_count; ++i) if (boot_bases[i].key == key) break;
+    if (i == boot_base_count && boot_base_count < BOOT_BASES) {
+        boot_bases[i].key = key;
+        boot_bases[i].base = base;
+        ++boot_base_count;
+    }
+    irq_restore(f);
+}
+
 static uint64_t aslr_pick(process_t *p, const module_t *m, int low_only)
 {
     const pe_info_t *pi = &m->info;
@@ -658,7 +701,15 @@ static int32_t map_module(ldr_ctx_t *c, module_t *m)
                 return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "malformed base relocation directory");
             highlow = rc.highlow;
         }
-        base = aslr_pick(p, m, highlow || !(pi->characteristics & PE_CHAR_LARGE_ADDRESS_AWARE));
+        {
+            const int low_only = highlow || !(pi->characteristics & PE_CHAR_LARGE_ADDRESS_AWARE);
+            const uint64_t key = m->is_dll ? boot_base_key(m) : 0, shared = key ? boot_base_get(key) : 0;
+            if (shared && vad_range_is_free(p, shared, pi->size_of_image)) base = shared;
+            else {
+                base = aslr_pick(p, m, low_only);
+                if (base && key && !shared) boot_base_put(key, base);
+            }
+        }
     }
     if (!base) {
         if (vad_range_is_free(p, pi->image_base, pi->size_of_image)) base = pi->image_base;
@@ -1064,6 +1115,9 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
     unsigned i, nf = 0, nb = 0;
     struct ustr uf, ub;
     memset(entry, 0, sizeof entry);
+    /* FullDllName is fully qualified, as on Windows: a module of the boot volume ("\SHZ\SYS64\kernel32.dll") gets its
+     * drive, C:, so that a program whose current drive is another one (chrome.exe on D:) can open the file by that name. */
+    if (m->path[0] == '\\' && m->path[1] != '\\') { wfull[nf++] = 'C'; wfull[nf++] = ':'; }
     for (i = 0; m->path[i] && nf < PATH_CAP - 1; ++i) wfull[nf++] = (uint8_t)m->path[i];
     for (i = 0; m->name[i] && nb < 63; ++i) wbase[nb++] = (uint8_t)m->name[i];
     uf = (struct ustr){ (uint16_t)(nf * 2), (uint16_t)(nf * 2 + 2), 0, strings_va };
@@ -1212,7 +1266,8 @@ static uint64_t put_wstr(process_t *p, uint64_t at, const char *s, uint16_t *len
     return at + n * 2 + 2;
 }
 
-static int build_params(process_t *p, const char *image, const char *cmdline, const char *cwd, const ldr_proc_opts_t *opts)
+static int build_params(process_t *p, const char *image, const char *cmdline, const char *cwd, const ldr_proc_opts_t *opts,
+                        const uint32_t *console)
 {
     const uint64_t env_bytes = opts && opts->env ? opts->env_chars * 2 + 64 : 0;
     uint64_t base = alloc_user(p, 16384 + ((env_bytes + 4095) & ~4095ull)), at, env_va;
@@ -1234,7 +1289,6 @@ static int build_params(process_t *p, const char *image, const char *cmdline, co
             at = put_wstr(p, at, default_env[i], &len);
         }
         {   /* `shz.k32trace` on the kernel command line: kernel32 reports explicit failures and GetProcAddress misses (k32_trace.c) */
-            extern int k64_cmdline_has(const char *word);
             if (k64_cmdline_has("shz.k32trace")) at = put_wstr(p, at, "SHZ_K32TRACE=1", &len);
         }
         { uint16_t z = 0; uwrite(p, at, &z, 2); at += 2; }
@@ -1243,9 +1297,9 @@ static int build_params(process_t *p, const char *image, const char *cmdline, co
     *(uint32_t *)(hdr + 0x00) = 0x400;                      /* MaximumLength */
     *(uint32_t *)(hdr + 0x04) = 0x400;                      /* Length */
     *(uint32_t *)(hdr + 0x08) = 1;                          /* Flags: normalized */
-    *(uint64_t *)(hdr + 0x20) = opts && opts->use_std ? opts->std[0] : 4;   /* StandardInput  (first handle in the table) */
-    *(uint64_t *)(hdr + 0x28) = opts && opts->use_std ? opts->std[1] : 8;   /* StandardOutput */
-    *(uint64_t *)(hdr + 0x30) = opts && opts->use_std ? opts->std[2] : 12;  /* StandardError */
+    *(uint64_t *)(hdr + 0x20) = opts && opts->use_std ? opts->std[0] : console[0];   /* StandardInput */
+    *(uint64_t *)(hdr + 0x28) = opts && opts->use_std ? opts->std[1] : console[1];   /* StandardOutput */
+    *(uint64_t *)(hdr + 0x30) = opts && opts->use_std ? opts->std[2] : console[2];   /* StandardError */
     at = put_wstr(p, at, cwd[0] ? cwd : "C:\\", &len);      /* CurrentDirectory.DosPath */
     u = (struct ustr){ len, (uint16_t)(len + 2), 0, at - len - 2 }; memcpy(hdr + 0x38, &u, 16);
     at = (at + 15) & ~15ull;
@@ -1310,7 +1364,10 @@ static void destroy_unstarted(process_t *p)
  * in the child, as Windows does. A value the child already uses (its console handles 4, 8, 12) is skipped. */
 static void inherit_handles(process_t *parent, process_t *p, const ldr_proc_opts_t *opts)
 {
-    unsigned i;
+    unsigned i, n = 0;
+    char list[160];
+    size_t at = 0;
+    list[0] = 0;
     for (i = 0; i < MAX_HANDLES; ++i) {
         const uint64_t hv = (i + 1) * 4ull;
         kobject_t *o = parent->handles[i].obj;
@@ -1321,7 +1378,6 @@ static void inherit_handles(process_t *parent, process_t *p, const ldr_proc_opts
             for (k = 0; k < opts->handle_count; ++k) if (opts->handle_list[k] == hv) listed = 1;
             if (!listed) continue;
         }
-        if (p->handles[i].obj) continue;
         {
             const uint64_t f = irq_save();
             p->handles[i].obj = o;
@@ -1332,7 +1388,25 @@ static void inherit_handles(process_t *parent, process_t *p, const ldr_proc_opts
             ++p->handle_count;
             irq_restore(f);
         }
+        if (at + 16 < sizeof list) {                        /* evidence: "value(type)" of each inherited handle */
+            static const char hex[] = "0123456789abcdef";
+            char t[12];
+            int k = 0;
+            uint64_t v = hv;
+            list[at++] = ' ';
+            do { t[k++] = hex[v & 15]; v >>= 4; } while (v);
+            while (k) list[at++] = t[--k];
+            list[at++] = '(';
+            v = o->type; k = 0;
+            do { t[k++] = hex[v & 15]; v >>= 4; } while (v);
+            while (k) list[at++] = t[--k];
+            list[at++] = ')';
+            list[at] = 0;
+        }
+        ++n;
     }
+    kprintf("K64 proc: pid %d inherits %u handle(s) from pid %d%s:%s\n", p->pid, n, parent->pid,
+            opts->handle_list ? " (PROC_THREAD_ATTRIBUTE_HANDLE_LIST)" : "", n ? list : " none");
 }
 
 int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
@@ -1350,7 +1424,7 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
     int32_t st;
     char nm[64];
     thread_t *t = 0;
-    uint32_t h;
+    uint32_t console[3] = { 4, 8, 12 };
     unsigned k;
     ldr_ctx_t *c;
     if (!node || node->is_dir) return STATUS_OBJECT_NAME_NOT_FOUND;
@@ -1380,15 +1454,17 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
     p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
     p->console_sink_gen = parent ? parent->console_sink_gen : 0;
     proc_alloc_peb(p);
-    /* std handles occupy 4, 8 and 12 */
+    /* Inherited handles keep the values they have in the parent (programs pass them on command lines: crashpad's
+     * --initial-client-data, for instance), so they go in first; the console handles then take the first free slots,
+     * 4, 8 and 12 unless inherited handles hold those, and their values go into ProcessParameters. */
+    if (parent && opts && opts->inherit) inherit_handles(parent, p, opts);
     {
         kobject_t *in = console_object(0), *outo = console_object(1), *err = console_object(1);
         if (!in || !outo || !err) { st = STATUS_NO_MEMORY; goto failed; }
-        handle_insert(p, in, 0x80000000u, &h); ob_deref(in);
-        handle_insert(p, outo, 0x40000000u, &h); ob_deref(outo);
-        handle_insert(p, err, 0x40000000u, &h); ob_deref(err);
+        handle_insert(p, in, 0x80000000u, &console[0]); ob_deref(in);
+        handle_insert(p, outo, 0x40000000u, &console[1]); ob_deref(outo);
+        handle_insert(p, err, 0x40000000u, &console[2]); ob_deref(err);
     }
-    if (parent && opts && opts->inherit) inherit_handles(parent, p, opts);
     st = load_dll(c, "ntdll.dll", 1, 0, 0);
     if (st) goto report_failed;
     base_name(p->name, nm, sizeof nm);
@@ -1401,7 +1477,7 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
     }
     st = publish_all(p, exe);
     if (st) goto failed;
-    if (build_params(p, image_path, cmdline, cwd, opts)) { st = STATUS_NO_MEMORY; goto failed; }
+    if (build_params(p, image_path, cmdline, cwd, opts, console)) { st = STATUS_NO_MEMORY; goto failed; }
     {   /* a child joins its parent's job (sysk32_obj.c) unless it may and wants to break away */
         extern int32_t job_inherit(process_t *parent, process_t *child, int breakaway);
         st = job_inherit(parent, p, opts && opts->breakaway);
@@ -1422,6 +1498,7 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
         *(uint32_t *)(peb + 0x124) = 2;                                 /* VER_PLATFORM_WIN32_NT */
         *(uint32_t *)(peb + 0x128) = exe->info.subsystem;               /* ImageSubsystem */
         memcpy((void *)p2v(pa), peb, sizeof peb);
+        *(uint32_t *)(p2v(pa) + 0x2c0) = 1;                             /* SessionId: the interactive session (the token's) */
     }
     p->image_base = exe->base;
     p->entry = exe->base + exe->info.entry_rva;
