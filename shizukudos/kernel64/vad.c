@@ -103,6 +103,8 @@ static int range_free(process_t *p, uint64_t start, uint64_t end)
     return !(i < p->vads.count && p->vads.v[i].start < end);
 }
 
+static void vad_apply_prot(process_t *p, vad_t *w, uint32_t new_prot);
+
 uint64_t prot_to_ptflags(uint32_t prot)
 {
     uint64_t f = PT_U;
@@ -177,10 +179,14 @@ static int32_t vad_alloc_locked(process_t *p, uint64_t *base, uint64_t *size, ui
                     return STATUS_INVALID_PARAMETER;
             if (vad_split(p, start) || vad_split(p, end))
                 return STATUS_NO_MEMORY;
+            if (((prot & 0xff) == PAGE_NOACCESS || (prot & 0x100)))
+                k32_before_unmap(p, start, end, 0);     /* parked pages leave the working set (as in VirtualProtect) */
             for (a = start; a < end; a = vad_find(p, a)->end) {
                 vad_t *v = vad_find(p, a);
+                const int was_committed = v->state == VAD_COMMITTED;
                 v->state = VAD_COMMITTED;
-                v->prot = prot;
+                if (was_committed && v->prot != prot) vad_apply_prot(p, v, prot);   /* resident pages follow the new protection */
+                else v->prot = prot;
             }
         }
     } else {
@@ -301,6 +307,34 @@ static int32_t vad_free_locked(process_t *p, uint64_t *base, uint64_t *size, uin
     return STATUS_INVALID_PARAMETER;
 }
 
+/* Gives the committed descriptor `w` the protection `new_prot` and rewrites the page-table entries of its resident pages to
+ * match (a parked NOACCESS/GUARD page keeps its data but loses user access; a section view drops its mappings and view_fault maps
+ * them again with the new protection). Used by VirtualProtect and by VirtualAlloc(MEM_COMMIT) over already committed pages, which
+ * changes the protection the same way: without the page-table rewrite a stale entry (for example read/write after a change to
+ * read/execute, or no-execute after a change to execute) would disagree with the descriptor, and the fault path, which judges the
+ * access by the descriptor, would find the page present and restart the instruction forever. */
+static void vad_apply_prot(process_t *p, vad_t *w, uint32_t new_prot)
+{
+    uint64_t va;
+    w->prot = new_prot;
+    if (w->kind == VK_VIEW) {
+        for (va = w->start; va < w->end; va += PAGE_SIZE)
+            vm_unmap(p->pml4, va, 0);
+        return;
+    }
+    for (va = w->start; va < w->end; va += PAGE_SIZE)
+        if (vm_lookup(p->pml4, va, 0)) {
+            if ((new_prot & 0xff) == PAGE_NOACCESS || (new_prot & 0x100)) {
+                uint64_t pa;
+                if (vm_unmap(p->pml4, va, &pa) == 0)        /* NOACCESS/GUARD: re-fault on touch; keep the data: park it by */
+                    vm_map(p->pml4, va, pa, 0);             /* remapping without user access */
+            } else {
+                const uint64_t pa = vm_lookup(p->pml4, va, 0) & ~0xfffull;
+                vm_map(p->pml4, va, pa, prot_to_ptflags(new_prot));
+            }
+        }
+}
+
 static int32_t vad_protect_locked(process_t *p, uint64_t *base, uint64_t *size, uint32_t new_prot, uint32_t *old_prot)
 {
     uint64_t start = *base & PAGE_MASK, end = up(*base + *size), a;
@@ -322,29 +356,8 @@ static int32_t vad_protect_locked(process_t *p, uint64_t *base, uint64_t *size, 
         return STATUS_NO_MEMORY;
     if ((new_prot & 0xff) == PAGE_NOACCESS || (new_prot & 0x100))
         k32_before_unmap(p, start, end, 0);             /* parked pages leave the working set */
-    for (a = start; a < end; a = vad_find(p, a)->end) {
-        vad_t *w = vad_find(p, a);
-        uint64_t va;
-        w->prot = new_prot;
-        if (w->kind == VK_VIEW) {                       /* the section owns the pages: drop the mappings, view_fault */
-            for (va = w->start; va < w->end; va += PAGE_SIZE)   /* maps them again with the new protection */
-                vm_unmap(p->pml4, va, 0);
-            continue;
-        }
-        for (va = w->start; va < w->end; va += PAGE_SIZE)
-            if (vm_lookup(p->pml4, va, 0)) {
-                if ((new_prot & 0xff) == PAGE_NOACCESS || (new_prot & 0x100)) {
-                    uint64_t pa;
-                    if (vm_unmap(p->pml4, va, &pa) == 0) {     /* NOACCESS/GUARD: re-fault on touch */
-                        /* keep the data: park it by remapping without user access */
-                        vm_map(p->pml4, va, pa, 0);
-                    }
-                } else {
-                    uint64_t pa = vm_lookup(p->pml4, va, 0) & ~0xfffull;
-                    vm_map(p->pml4, va, pa, prot_to_ptflags(new_prot));
-                }
-            }
-    }
+    for (a = start; a < end; a = vad_find(p, a)->end)
+        vad_apply_prot(p, vad_find(p, a), new_prot);
     vad_coalesce(p);
     return STATUS_SUCCESS;
 }
@@ -395,8 +408,16 @@ static int user_fault_in_locked(process_t *p, uint64_t addr, int write, int exec
         return STATUS_ACCESS_VIOLATION;
     if (exec && !(base >= PAGE_EXECUTE))
         return STATUS_ACCESS_VIOLATION;
-    if (vm_lookup(p->pml4, addr, &flags))
-        return 0;                               /* already present (spurious or racing fault) */
+    if ((pa = vm_lookup(p->pml4, addr, &flags))) {
+        /* Already present: a racing fault, or an entry that disagrees with the descriptor. The access was judged legal by the
+         * descriptor above, so when the entry lacks what the descriptor grants (write, execute, user access) bring it in line
+         * instead of restarting the instruction into the same fault forever. */
+        const uint64_t want = prot_to_ptflags(v->prot);
+        if (!v->img && ((write && !(flags & PT_W) && (want & PT_W)) || (exec && (flags & PT_NX) && !(want & PT_NX)) ||
+                        (!(flags & PT_U) && (want & PT_U))))
+            vm_map(p->pml4, addr & PAGE_MASK, pa & ~0xfffull, want);
+        return 0;
+    }
     if (v->img)                                 /* file-backed image page: read (and relocate) it now */
         return ldr_image_fault(p, v, addr);
     pa = pmm_alloc();
