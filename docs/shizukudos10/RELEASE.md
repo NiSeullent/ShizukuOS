@@ -37,8 +37,9 @@ manifest records and the directory name shows as `-dirty`):
    its receipt, was built from `HEAD` and is not a private image, and that the raw disk has the same inputs;
 2. runs `shizukudos/tools/shz.py test --suite media`, the boot matrix (QEMU TCG, SeaBIOS and OVMF; ISO as CD, ISO
    as hard disk, raw disk; Kernel64, DOS16, ShizukuDOS 0.1, Kernel64 direct, install: 23 rows, one QEMU at a time).
-   Unless the verdict is `VERIFIED`, every row `PASS`, on exactly the ISO and disk bytes just built, the release
-   fails and no release directory is written. `--skip-tests` skips this step as an explicit, logged opt-out; the
+   The suite rebuilds a medium only when it is stale, which it is not right after step 1. Unless the verdict is
+   `VERIFIED`, every row `PASS`, on exactly the ISO and disk bytes built in step 1, the release fails and no release
+   directory is written. `--skip-tests` skips this step as an explicit, logged opt-out; the
    manifest then says `"media_suite": "skipped"`;
 3. writes `build/release/windows98-shizuku-second-edition-<commit12>/`:
 

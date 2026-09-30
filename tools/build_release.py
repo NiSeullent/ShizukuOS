@@ -138,7 +138,9 @@ def media_suite(started_utc: str, iso_sha: str, disk_sha: str) -> tuple[dict, di
     matrix_path = Path(evidence.pop()) / "matrix.json"
     matrix = json.loads(matrix_path.read_text())
     if (matrix["media"]["iso"]["sha256"], matrix["media"]["disk"]["sha256"]) != (iso_sha, disk_sha):
-        raise ReleaseError("the boot matrix did not boot the ISO and disk image that were just built")
+        rebuilt = [r["test"] for r in results["results"] if r["test"].startswith("build the ")]
+        raise ReleaseError("the boot matrix did not boot the ISO and disk image that were just built"
+                           + (f" (the media suite rebuilt them as stale: {rebuilt})" if rebuilt else ""))
     failed = [r["test"] for r in results["results"] if r["status"] != "PASS"]
     if results["verdict"] != "VERIFIED" or failed or not results["counts"].get("PASS"):
         raise ReleaseError(f"media suite verdict {results['verdict']} {results['counts']}; not PASS: {failed}; "
