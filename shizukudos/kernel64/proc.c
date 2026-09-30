@@ -60,7 +60,12 @@ process_t *process_create_empty(const char *name)
     p->pml4 = vm_new_space();
     if (!p->pml4)
         return 0;
-    p->handles = kzalloc(sizeof(handle_entry_t) * MAX_HANDLES);
+    p->handle_cap = HANDLE_CAP_FULL;
+    p->handles = kzalloc(sizeof(handle_entry_t) * HANDLE_CAP_FULL);
+    if (!p->handles) {                  /* heap pressure: a small table still works for most programs */
+        p->handle_cap = HANDLE_CAP_MIN;
+        p->handles = kzalloc(sizeof(handle_entry_t) * HANDLE_CAP_MIN);
+    }
     if (!p->handles) { vm_free_space(p->pml4); return 0; }
     vad_init(p);
     p->pid = (int)alloc_client_id();

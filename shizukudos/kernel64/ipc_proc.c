@@ -79,7 +79,7 @@ int32_t process_terminate_handle(process_t *p, uint64_t h, int32_t code)
 /* ---------------------------------------------------------------- handle-table helpers */
 static uint32_t handle_flags_of(process_t *p, uint64_t h)
 {
-    if (!h || (h & 3) || h > MAX_HANDLES * 4ull) return 0;
+    if (!h || (h & 3) || h > (uint64_t)p->handle_cap * 4ull) return 0;
     return p->handles[h / 4 - 1].inherit;
 }
 
@@ -88,7 +88,7 @@ static int32_t handle_insert_at(process_t *p, uint64_t value, kobject_t *o, uint
 {
     uint64_t f;
     handle_entry_t *e;
-    if (!value || (value & 3) || value > MAX_HANDLES * 4ull) return STATUS_INVALID_HANDLE;
+    if (!value || (value & 3) || value > (uint64_t)p->handle_cap * 4ull) return STATUS_INVALID_HANDLE;
     f = irq_save();
     e = &p->handles[value / 4 - 1];
     if (e->obj) { irq_restore(f); return STATUS_OBJECT_NAME_COLLISION; }
@@ -518,7 +518,7 @@ static int32_t cup_prepare(process_t *child, void *vctx)
     int32_t st;
     uint32_t i;
     if (c->flags & CUP_INHERIT) {
-        for (i = 0; i < MAX_HANDLES; ++i) {
+        for (i = 0; i < c->from->handle_cap; ++i) {
             kobject_t *o;
             uint32_t access, flags;
             const uint64_t value = (i + 1) * 4ull;
@@ -902,14 +902,34 @@ static int32_t sys_duplicate(process_t *p, struct regs *r, uint64_t hsp, uint64_
         if (!st && dst->teardown) { st = STATUS_PROCESS_IS_TERMINATING; ob_deref(dpo); dpo = 0; dst = 0; }
     }
     if (!st && dst) {
-        const uint32_t a = (options & DUPLICATE_SAME_ACCESS) ? access : desired;
+        uint32_t a = (options & DUPLICATE_SAME_ACCESS) ? access : desired;
         const int inherit = (options & DUPLICATE_SAME_ATTRIBUTES) ? (flags & HANDLE_FLAG_INHERIT_BIT) != 0
                                                                    : (attrs & OBJ_INHERIT_ATTR) != 0;
+        if (o->type == OB_SECTION && !(options & DUPLICATE_SAME_ACCESS)) {
+            /* Section handles carry the only rights there are (Kernel64 keeps no per-object security descriptors), so a duplicate
+             * narrows them and never adds one: a request for a right the source handle lacks is STATUS_ACCESS_DENIED. On Windows
+             * that is what a section created with Chromium's restrictive descriptor answers, and base::subtle::
+             * PlatformSharedMemoryRegion::Take relies on it (DuplicateHandle(handle, FILE_MAP_WRITE) must fail for a read-only
+             * region, or the region is rejected as "not read-only but should be"). Generic rights map as for sections;
+             * MAXIMUM_ALLOWED means everything the source handle has; the standard rights (READ_CONTROL, ...) that every owner
+             * holds are never refused, only the section-specific ones are compared. */
+            uint32_t want = desired;
+            if (want & MAXIMUM_ALLOWED_ACCESS) want |= access;
+            if (want & GENERIC_READ_ACCESS) want |= 0x20000u | SECTION_QUERY | SECTION_MAP_READ;
+            if (want & GENERIC_WRITE_ACCESS) want |= 0x20000u | SECTION_MAP_WRITE;
+            if (want & GENERIC_EXECUTE_ACCESS) want |= 0x20000u | SECTION_MAP_EXECUTE;
+            if (want & GENERIC_ALL_ACCESS) want |= SECTION_ALL_ACCESS;
+            want &= ~(MAXIMUM_ALLOWED_ACCESS | GENERIC_READ_ACCESS | GENERIC_WRITE_ACCESS | GENERIC_EXECUTE_ACCESS | GENERIC_ALL_ACCESS);
+            if ((want & 0xffffu) & ~access) st = STATUS_ACCESS_DENIED;     /* object-specific rights only: the standard rights (READ_CONTROL, ...) stay grantable */
+            else a = want;
+        }
+        if (!st) {
         ob_ref(o);
         st = ipc_give_handle(dst, o, a, inherit, 0, &h);
         if (!st && pout) {
             const uint64_t v = h;
             if (copy_to_user(p, pout, &v, 8)) { handle_close(dst, h); st = STATUS_ACCESS_VIOLATION; }
+        }
         }
     }
     if ((options & DUPLICATE_CLOSE_SOURCE) && hsrc != CURRENT_PROCESS_HANDLE && hsrc != CURRENT_THREAD_HANDLE && !src->teardown)
@@ -1030,7 +1050,7 @@ static int32_t create_with_inherit(process_t *p, struct regs *r, uint32_t num, u
     int32_t st = sys_extended(p, r, num, a1, a2, a3, a4);
     uint64_t h = 0;
     if ((st != STATUS_SUCCESS && st != STATUS_OBJECT_NAME_EXISTS) || !a3) return st;
-    if (copy_from_user(p, &h, a1, 8) || !h || (h & 3) || h > MAX_HANDLES * 4ull) return st;
+    if (copy_from_user(p, &h, a1, 8) || !h || (h & 3) || h > (uint64_t)p->handle_cap * 4ull) return st;
     if (num == SYS_NtCreateFile || num == SYS_NtOpenFile)
         ipc_file_created(p, h, (uint32_t)stack_arg(p, r, num == SYS_NtOpenFile ? 6 : 9));
     if (copy_from_user(p, &a, a3, sizeof a) || !(a.attributes & OBJ_INHERIT_ATTR)) return st;

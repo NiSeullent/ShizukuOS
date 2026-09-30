@@ -544,7 +544,7 @@ static int32_t handle_flags(process_t *p, uint64_t h, uint64_t buf, uint64_t len
     uint8_t v[2];
     uint64_t f;
     handle_entry_t *e;
-    if (h == CURRENT_PROCESS_HANDLE || h == CURRENT_THREAD_HANDLE || (h & 3) || !h || h > MAX_HANDLES * 4ull)
+    if (h == CURRENT_PROCESS_HANDLE || h == CURRENT_THREAD_HANDLE || (h & 3) || !h || h > (uint64_t)p->handle_cap * 4ull)
         return STATUS_INVALID_HANDLE;
     if (len < 2) return STATUS_INFO_LENGTH_MISMATCH;
     if (set && copy_from_user(p, v, buf, 2)) return STATUS_ACCESS_VIOLATION;
@@ -611,7 +611,7 @@ int ipc_syscall_override(process_t *p, struct regs *r, uint32_t num, uint64_t a1
             apc_deliver(p, r, (int32_t)r->rax);
         return 1;
     case SYS_NtClose:
-        if (!(a1 & 3) && a1 && a1 <= MAX_HANDLES * 4ull && p->handles[a1 / 4 - 1].obj &&
+        if (!(a1 & 3) && a1 && a1 <= (uint64_t)p->handle_cap * 4ull && p->handles[a1 / 4 - 1].obj &&
             (p->handles[a1 / 4 - 1].inherit & HANDLE_FLAG_PROTECT_BIT)) {
             *st = STATUS_HANDLE_NOT_CLOSABLE;
             return 1;

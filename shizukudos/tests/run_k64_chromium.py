@@ -122,6 +122,8 @@ def main():
     ap.add_argument("--args", default=DEFAULT_ARGS, help="chrome.exe arguments")
     ap.add_argument("--expect", default=M2_EXPECT, help="line that must appear in the output for a PASS")
     ap.add_argument("--out", default=str(BUILD / "kernel64s" / "run_chromium"))
+    ap.add_argument("--trace-all-syscalls", action="store_true",
+                    help="also pass shz.systrace.all: the last 70 system calls of the thread that takes the first breakpoint are printed with it")
     ap.add_argument("--no-trace", action="store_true",
                     help="do not pass shz.k32trace, shz.exctrace and shz.systrace (kernel32 explicit-failure and GetProcAddress-miss lines, first-chance hardware exceptions, failing system calls)")
     args = ap.parse_args()
@@ -155,7 +157,7 @@ def main():
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
            *(["-vga", "std"] if args.display == "vga" else []),
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
-           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace shz.systrace"),
+           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace shz.systrace" + (" shz.systrace.all" if args.trace_all_syscalls else "")),
            "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
            "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
            "-device", "ide-hd,drive=d0,bus=ahci0.0"]
