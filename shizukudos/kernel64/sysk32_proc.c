@@ -30,7 +30,7 @@ extern int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t 
 /* query classes (NtShzQueryK32) and set classes (NtShzSetK32); the same numbers are in win64/include/nt.h */
 enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32Q_PROCESS_LIST = 4, K32Q_MODULE_LIST = 5,
        K32Q_SYSTEM_PERF = 7, K32Q_PROCESS_MEMORY = 8, K32Q_WORKING_SET_EX = 9, K32Q_IMAGE_PATH = 10, K32Q_FIRMWARE = 11,
-       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13 };
+       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13, K32Q_CPU_CLOCK = 14, K32Q_SAME_OBJECT = 15 };
 enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
        K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10,
        K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12 };
@@ -540,6 +540,41 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
         for (i = 0; module_copy(p, i, &e) == 0; ++i)
             if (e.base == p->image_base) return put_out(cur, buf, len, retlen, e.path, strlen(e.path) + 1);
         return STATUS_INVALID_HANDLE;                             /* not a Win64 process (no executable image) */
+    }
+    case K32Q_SAME_OBJECT: {                                    /* CompareObjectHandles (NtCompareObjects) */
+        uint64_t h2 = 0;
+        kobject_t *o1 = 0, *o2 = 0;
+        int32_t st;
+        if (len < 8 || copy_from_user(cur, &h2, buf, 8)) return STATUS_ACCESS_VIOLATION;
+        if (h == CURRENT_PROCESS_HANDLE) { o1 = cur->object; ob_ref(o1); }
+        else if (h == CURRENT_THREAD_HANDLE) { o1 = thread_current()->object; ob_ref(o1); }
+        else if ((st = handle_ref(cur, h, 0, &o1, 0))) return st;
+        if (h2 == CURRENT_PROCESS_HANDLE) { o2 = cur->object; ob_ref(o2); }
+        else if (h2 == CURRENT_THREAD_HANDLE) { o2 = thread_current()->object; ob_ref(o2); }
+        else if ((st = handle_ref(cur, h2, 0, &o2, 0))) { ob_deref(o1); return st; }
+        st = o1 == o2 ? STATUS_SUCCESS : (int32_t)0xC00001AC;     /* STATUS_NOT_SAME_OBJECT */
+        ob_deref(o1);
+        ob_deref(o2);
+        return st;
+    }
+    case K32Q_CPU_CLOCK: {
+        /* ULONG64 time-stamp counter rate in Hz, measured once against the scheduler tick over 50 ms (the boot stub's value is
+         * only nominal). The processor's own clock is not known to the kernel; the TSC rate is its best available measure. */
+        static uint64_t hz;
+        if (!hz) {
+            uint64_t t0, t1, k0, k1;
+            uint32_t lo, hi;
+            k0 = ticks_now();
+            while (ticks_now() == k0) thread_yield();           /* start on a tick boundary */
+            k0 = ticks_now();
+            __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); t0 = ((uint64_t)hi << 32) | lo;
+            thread_sleep_ms(50);
+            k1 = ticks_now();
+            __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); t1 = ((uint64_t)hi << 32) | lo;
+            if (k1 > k0) hz = (t1 - t0) * 1000000ull / ((k1 - k0) * TICK_US);
+        }
+        if (!hz) return STATUS_NOT_SUPPORTED;
+        return put_out(cur, buf, len, retlen, &hz, sizeof hz);
     }
     case K32Q_FIRMWARE: {
         /* Kernel64 is started by the Supervisor or by a boot stub; neither reports which firmware interface (BIOS or UEFI) the

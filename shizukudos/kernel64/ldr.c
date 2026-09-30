@@ -1237,12 +1237,15 @@ void thread_user_tls_init(process_t *p, thread_t *t)
  * (the old array stays valid for code that already read the pointer; it is released with the process). */
 static void tls_extend_threads(process_t *p, unsigned old_slots)
 {
-    uint64_t tid;
+    unsigned i;
+    thread_t *t;
     if (p->tls_slots == old_slots) return;
-    for (tid = 4; tid < p->next_tid; tid += 4) {
-        thread_t *t = thread_find_tid(p, tid);
+    /* every live thread of the process, found by scheduler slot: thread ids come from the system-wide client-id
+     * allocator (proc.c), so p->next_tid is not an upper bound of this process's ids (it IS the id of its newest thread) */
+    for (i = 0; (t = thread_slot(i)) != 0; ++i) {
         uint64_t old = 0, array;
-        if (!t || !t->teb || kread(p, t->teb + 0x58, &old, 8)) continue;
+        if (t->proc != p || t->state == TS_FREE || t->state == TS_ZOMBIE) continue;
+        if (!t->teb || kread(p, t->teb + 0x58, &old, 8)) continue;
         array = build_tls_array(p, old, old ? old_slots : 0);
         if (array) kwrite64(p, t->teb + 0x58, array);
     }

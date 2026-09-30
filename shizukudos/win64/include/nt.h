@@ -111,6 +111,8 @@ NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
 #define K32Q_FIRMWARE 11            /* ULONG FIRMWARE_TYPE */
 #define K32Q_THREAD_SETTINGS 12     /* ULONG {priority boost disabled, memory priority, power throttling control, state} */
 #define K32Q_PROCESS_SETTINGS 13    /* ULONG {memory priority, power throttling control, state} */
+#define K32Q_CPU_CLOCK 14           /* ULONG64 time-stamp counter rate in Hz, measured by the kernel against its tick */
+#define K32Q_SAME_OBJECT 15         /* h = first handle, buffer = HANDLE second: STATUS_SUCCESS or STATUS_NOT_SAME_OBJECT */
 #define K32S_PRIORITY_CLASS 1       /* ULONG class value (process handle) */
 #define K32S_THREAD_BOOST 2         /* ULONG disable (thread handle) */
 #define K32S_THREAD_MEM_PRIORITY 3  /* ULONG 1..5 (thread handle) */

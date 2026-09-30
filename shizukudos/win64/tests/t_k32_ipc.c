@@ -328,8 +328,10 @@ static void test_mappings(void)
     if (cow) {
         cow[0] = 0x11111111u;
         CHECK(cow[0] == 0x11111111u && v1[0] == 0x5AFEC0DEu, "a write to the copy-on-write view stays private");
-        v1[2] = 0x22222222u;
-        CHECK(cow[2] == 0x22222222u, "pages of the copy view that were never written still show the section");
+        v1[2048] = 0x22222222u;                               /* page 2: never written through the copy view */
+        CHECK(cow[2048] == 0x22222222u, "pages of the copy view that were never written still show the section");
+        v1[2] = 0x33333333u;                                  /* page 0: the copy view has its own copy of it */
+        CHECK(cow[2] != 0x33333333u, "a written page of the copy view no longer follows the section");
         UnmapViewOfFile(cow);
     }
     /* another process opens the mapping by name and writes into it */
@@ -646,7 +648,8 @@ static void test_timers_and_waits(void)
 
 int main(int argc, char **argv)
 {
-    if (argc >= 2 && !strncmp(argv[1], "child-", 6)) return child_main(argc, argv);
+    if (argc >= 2 && argv[1][0] == 'c' && argv[1][1] == 'h' && argv[1][2] == 'i' && argv[1][3] == 'l' && argv[1][4] == 'd' &&
+        argv[1][5] == '-') return child_main(argc, argv);
     if (!GetModuleFileNameW(0, g_self, 300)) { printf("FAIL: GetModuleFileNameW\n"); return 1; }
     test_anonymous_pipe();
     test_named_byte();

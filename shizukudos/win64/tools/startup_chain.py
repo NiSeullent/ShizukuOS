@@ -60,8 +60,17 @@ class Image:
                     fn = i.name.decode()
                 self.imports.append((dll, fn))
         self.delay = sum(len(e.imports) for e in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []))
-        self.delay_imports = [(e.dll.decode(errors="replace"), i.name.decode() if i.name else f"#{i.ordinal}")
-                              for e in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []) for i in e.imports]
+        self.delay_imports = []
+        for e in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []):
+            dll = e.dll.decode(errors="replace")
+            for i in e.imports:
+                if i.import_by_ordinal:                             # as above: by number, pefile's name is the expectation
+                    fn = f"#{i.ordinal}"
+                    if i.name:
+                        self.expect[(dll.lower(), fn)] = i.name.decode()
+                else:
+                    fn = i.name.decode()
+                self.delay_imports.append((dll, fn))
         self.exports, self.forwards, self.ordinals, self.ordinal_names = set(), {}, set(), {}
         exp = getattr(pe, "DIRECTORY_ENTRY_EXPORT", None)
         if exp:
@@ -120,9 +129,15 @@ def main():
             return system[n], "system"
         return None, "DLL not found"
 
+    pinned = {}                                              # Shizuku DLL -> ordinals its module.json fixes ("ordinals")
+    for mj in (REPO / "shizukudos/win64/dlls").glob("*/module.json"):
+        pinned[mj.parent.name.lower() + ".dll"] = set(json.loads(mj.read_text()).get("ordinals", {}).values())
+
     def exported(img, fn, depth=0, expect=None):
         if fn.startswith("#"):                               # by ordinal: the export at that number must be the expected one
             n = int(fn[1:])
+            if img.path.parent == args.build and n not in pinned.get(img.path.name.lower(), set()):
+                return False                                 # a Shizuku DLL's unpinned ordinals are whatever the linker chose
             return n in img.ordinals and (expect is None or img.ordinal_names.get(n) == expect)
         if fn not in img.exports:
             return False
@@ -190,7 +205,7 @@ def main():
                 target, where = locate(dll)
                 if not target:
                     by.setdefault((dll, where), []).append(fn)
-                elif not exported(image(target), fn):
+                elif not exported(image(target), fn, expect=img.expect.get((dll.lower(), fn))):
                     by.setdefault((dll, "not exported by " + target.name), []).append(fn)
             n = sum(len(v) for v in by.values())
             dmiss_total += n
