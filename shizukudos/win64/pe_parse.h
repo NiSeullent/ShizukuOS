@@ -56,6 +56,7 @@ int pe_get_section(const uint8_t *file, const pe_info_t *info, unsigned index, p
 int pe_rva_to_offset(const uint8_t *file, uint64_t size, const pe_info_t *info, uint32_t rva, uint64_t *off, uint64_t *avail);
 /* Reads a NUL-terminated ASCII string at an RVA (bounded by `cap`). */
 int pe_read_string(const uint8_t *file, uint64_t size, const pe_info_t *info, uint32_t rva, char *out, unsigned cap);
+const char *pe_string_at(const uint8_t *file, uint64_t size, const pe_info_t *info, uint32_t rva);
 
 /* Export lookup by name (ordinal < 0) or ordinal. On success *rva is the function RVA; if it
  * points inside the export directory it is a forwarder and *forward receives "DLL.Name". */
