@@ -1249,29 +1249,29 @@ NTSTATUS NTAPI IoGetDeviceProperty(DEVICE_OBJECT *pdo, uint32_t prop, uint32_t l
     case 0x00: return prop_string(p->desc, len, buf, res, 0);                    /* DevicePropertyDeviceDescription */
     case 0x01: return prop_string(p->hwid, len, buf, res, 1);                    /* HardwareID (REG_MULTI_SZ) */
     case 0x02: return prop_string("", len, buf, res, 1);                         /* CompatibleIDs */
-    case 0x04: return prop_string("LegacyDriver", len, buf, res, 0);             /* ClassName */
-    case 0x05: return prop_string("{8ECC055D-047F-11D1-A537-0000F8753ED1}", len, buf, res, 0);   /* ClassGuid */
+    case 0x05: return prop_string("LegacyDriver", len, buf, res, 0);             /* ClassName */
+    case 0x06: return prop_string("{8ECC055D-047F-11D1-A537-0000F8753ED1}", len, buf, res, 0);   /* ClassGuid */
     case 0x07: { unsigned k = 0, i; const char *a = "{8ECC055D-047F-11D1-A537-0000F8753ED1}\\"; for (i = 0; a[i]; ++i) tmp[k++] = a[i]; for (i = 0; p->instance[i]; ++i) if (p->instance[i] != '\\') tmp[k++] = p->instance[i]; tmp[k] = 0;
                  return prop_string(tmp, len, buf, res, 0); }                     /* DriverKeyName */
     case 0x08: return prop_string("(Standard system devices)", len, buf, res, 0);   /* Manufacturer */
     case 0x09: return prop_string(p->desc, len, buf, res, 0);                    /* FriendlyName */
     case 0x0a: return prop_string("", len, buf, res, 0);                         /* LocationInformation */
-    case 0x0d: { const char *n = ntdrv_device_name(pdo); return prop_string(n ? n : "", len, buf, res, 0); }   /* PhysicalDeviceObjectName */
-    case 0x0e: { *res = 16; if (len < 16) return STATUS_BUFFER_TOO_SMALL; memset(buf, 0, 16); return STATUS_SUCCESS; }   /* BusTypeGuid */
-    case 0x0f: return prop_u32(p->legacy_bus_type, len, buf, res);              /* LegacyBusType */
-    case 0x10: return prop_u32(p->bus_number, len, buf, res);                   /* BusNumber */
-    case 0x11: return prop_string("ROOT", len, buf, res, 0);                     /* EnumeratorName */
-    case 0x12: return prop_u32(p->address, len, buf, res);                      /* Address */
-    case 0x13: return prop_u32(p->ui_number, len, buf, res);                    /* UINumber */
-    case 0x14: return prop_u32(2 /* InstallStateInstalled */, len, buf, res);   /* InstallState */
-    case 0x15: return prop_u32(1 /* RemovalPolicyExpectNoRemoval */, len, buf, res);
-    case 0x17:                                                                   /* AllocatedResources */
+    case 0x0b: { const char *n = ntdrv_device_name(pdo); return prop_string(n ? n : "", len, buf, res, 0); }   /* PhysicalDeviceObjectName */
+    case 0x0c: { *res = 16; if (len < 16) return STATUS_BUFFER_TOO_SMALL; memset(buf, 0, 16); return STATUS_SUCCESS; }   /* BusTypeGuid */
+    case 0x0d: return prop_u32(p->legacy_bus_type, len, buf, res);              /* LegacyBusType */
+    case 0x0e: return prop_u32(p->bus_number, len, buf, res);                   /* BusNumber */
+    case 0x0f: return prop_string("ROOT", len, buf, res, 0);                     /* EnumeratorName */
+    case 0x10: return prop_u32(p->address, len, buf, res);                      /* Address */
+    case 0x11: return prop_u32(p->ui_number, len, buf, res);                    /* UINumber */
+    case 0x12: return prop_u32(2 /* InstallStateInstalled */, len, buf, res);   /* InstallState */
+    case 0x13: return prop_u32(1 /* RemovalPolicyExpectNoRemoval */, len, buf, res);
+    case 0x15:                                                                   /* AllocatedResources */
         *res = p->resources_size;
         if (!p->resources) return STATUS_OBJECT_NAME_NOT_FOUND;
         if (len < p->resources_size) return STATUS_BUFFER_TOO_SMALL;
         memcpy(buf, p->resources, p->resources_size);
         return STATUS_SUCCESS;
-    case 0x18: return prop_string("{00000000-0000-0000-0000-000000000000}", len, buf, res, 0);   /* ContainerID */
+    case 0x16: return prop_string("{00000000-0000-0000-0000-000000000000}", len, buf, res, 0);   /* ContainerID */
     default: *res = 0; return STATUS_INVALID_PARAMETER_2;
     }
 }

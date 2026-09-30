@@ -25,7 +25,7 @@ extern NTSTATUS NTAPI ZwCreateFile(void *handle_out, uint32_t access, struct obj
                                    uint32_t attrs, uint32_t share, uint32_t disp, uint32_t opts, void *ea, uint32_t ealen);
 extern int32_t ntdrv_load_service_path(const uint16_t *w, unsigned chars);      /* ntdrv_io.c: NtLoadDriver's kernel core */
 extern int32_t ntdrv_unload_service_path(const uint16_t *w, unsigned chars);
-extern uint64_t ntdrv_wcslen(const WCHAR *);
+extern uint64_t NTAPI ntdrv_wcslen(const WCHAR *);
 
 /* ================================================================ information records (kernel buffers) */
 typedef struct { uint8_t *buf; uint32_t len, need; } kout_t;

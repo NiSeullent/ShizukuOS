@@ -34,9 +34,14 @@ uint8_t ntdrv_current_irql(void) { return g_irql; }
  * exact guarantee DISPATCH_LEVEL gives a driver: the scheduler cannot switch away, so a held
  * spin lock and a running DPC are never interrupted by other dispatch-level work. At
  * PASSIVE/APC the scheduler runs normally and waits may block. */
+/* Drivers built with the WDK read the IRQL straight from CR8 on x64 (KeGetCurrentIrql, KeRaiseIrql and KeLowerIrql are inline
+ * there), so CR8 mirrors g_irql. Interrupt delivery is unaffected: vectors are >= 0x20 (priority class 2 and up) and every
+ * IRQL that could mask them (>= DISPATCH_LEVEL) also runs with interrupts disabled. */
+static inline void write_cr8(uint64_t v) { __asm__ volatile("mov %0, %%cr8" : : "r"(v) : "memory"); }
 static void set_irql(uint8_t v)
 {
     g_irql = v;
+    write_cr8(v);
     if (v >= DISPATCH_LEVEL) cli();
     else sti();
 }
@@ -474,6 +479,7 @@ void ntdrv_ke_init(void)                        /* idempotent: the first driver 
     if (ke_ready) return;
     sem_init(&dpc_sem, 0);
     g_irql = PASSIVE_LEVEL;
+    write_cr8(PASSIVE_LEVEL);
     w = thread_create("ntdrv-dpc", dpc_worker, 0);
     tt = thread_create("ntdrv-timer", timer_thread, 0);
     KASSERT(w && tt);

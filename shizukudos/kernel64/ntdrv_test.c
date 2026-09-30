@@ -2,7 +2,7 @@
  * Kernel64 NT driver host: in-kernel demonstration. Invoked once from kmain when the initrd
  * carries \SHZ\DRIVERS (only the dedicated ntdrv runner mounts such an image, so the default
  * kernel runs are untouched). It loads the unmodified test .sys drivers, drives them through
- * the real IRP path from ring 0 and reports results in evidence slots 13,14,15,25,26,27 for
+ * the real IRP path from ring 0 and reports results in evidence slots 13,14,15,25,26,27 and the serial line "apitest N passed, M failed" for
  * tests/run_k64_ntdrv.py to check. Results are computed from live behaviour, never asserted.
  */
 #include "ntdrv.h"
@@ -101,7 +101,6 @@ void ntdrv_selftest(void)
             dev = ntdrv_find_device("\\Device\\ShzApi");
             if (dev) ntdrv_device_control(dev, IOCTL_SHZ_ECHO /* IOCTL_SHZ_APIINFO shares func 0x800 */, 0, 0, &r, sizeof r, 0, &info);
             kprintf("K64 ntdrv-test: apitest %u passed, %u failed\n", r.pass, r.fail);
-            shz_evidence(28, ((uint64_t)r.pass << 32) | r.fail);
             if (r.fail || !r.pass) pass = 0;
         } else { pass = 0; kprintf("K64 ntdrv-test: apitest driver failed to load\n"); }
     }

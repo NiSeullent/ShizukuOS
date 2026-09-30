@@ -56,8 +56,9 @@ def evaluate(serial, ev):
     api_pass = len(re.findall(r"^\[drv\] apitest: PASS ", serial, re.M))
     c.append(check("export-surface driver (APITEST.SYS): no FAIL line, >= 60 PASS lines",
                    not api_fail and api_pass >= 60, f"pass={api_pass} fail={len(api_fail)}" + (": " + "; ".join(api_fail[:5]) if api_fail else "")))
-    c.append(check("apitest IOCTL reported the same counts (slot 28) with zero failures",
-                   (e(28) >> 32) >= 60 and (e(28) & 0xffffffff) == 0, f"slot28={e(28):#x}"))
+    m = re.search(r"^K64 ntdrv-test: apitest (\d+) passed, (\d+) failed$", serial, re.M)
+    c.append(check("apitest IOCTL reported the driver's own counts (>= 60 passed, 0 failed)",
+                   bool(m) and int(m.group(1)) >= 60 and int(m.group(2)) == 0, m.group(0) if m else "no count line"))
     c.append(check("driver re-initialization routine ran after DriverEntry",
                    "apitest: PASS IoRegisterDriverReinitialization" in serial))
     c.append(check("echo IOCTL round-tripped through the IRP stack (10 bytes)",
