@@ -28,7 +28,69 @@
     "Persistent actual desktop/application themes",
     "Current Legcord/Signal/Office functionality and cold reopen"
   ],
-  "guest_execution_gate": "Existing20GiB free-space floor not met; no guest launched",
+  "guest_execution_gate": {
+    "minimum_free_bytes": 21474836480,
+    "observed_free_bytes": 12354646016,
+    "guest_started": false,
+    "guard_override": false
+  },
   "application_contract": "benchmarks/modern-app-requirements-7707.json",
-  "peer_theme_tls_commit": "a12a4a9"
+  "peer_theme_tls_commit": "a12a4a9",
+  "combined_branch": {
+    "transport_commit": "2c5e2a6",
+    "peer_original_commit": "a12a4a9",
+    "peer_import_commit": "9560069",
+    "evidence": [
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/theme-engine/result.json",
+        "sha256": "4e2522f763db7d72a6b59356636285926de8e26e670bc25fe983cb3ca0e596a9"
+      },
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/host/build-result.json",
+        "sha256": "11429273e3d8e08c10a2a393938be574285a917e9cff47d016f325f2c644e1ef"
+      },
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/tests/result.json",
+        "sha256": "d940a84ae5102b443491836a9cd40c750b2182cab77a05392b10d8c06ea710e3"
+      },
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/pe32/build-result.json",
+        "sha256": "926d812c7122c110709c8aa0573cf39af1836ded66b84b83cf0418e323ae122c"
+      },
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/pe32/native-import-gate.json",
+        "sha256": "74efbf580d1dfa7dc6342312a721f5bf927046762bce1ee18c4b3305e4d2eb46"
+      }
+    ],
+    "theme_host_checks": 312,
+    "theme_sanitizers_passed": true,
+    "theme_pe_artifacts": 3,
+    "latest_tls_host_cases": 16,
+    "latest_tls_pe_gate": true,
+    "inventory_regression_cases": 19,
+    "source_receipt_match": true,
+    "artifacts": {
+      "M98THEME.DLL": {
+        "path": "/root/Win98-Modern-tls13-7707/build/theme-engine/M98THEME.DLL",
+        "sha256": "c078171c90b52881dcc94f49a5dcd8314fd525d6eec846e8e498d498c3a1d365"
+      },
+      "M98THPRO.EXE": {
+        "path": "/root/Win98-Modern-tls13-7707/build/theme-engine/M98THPRO.EXE",
+        "sha256": "ee852730054371acaa531bfcf2ebdadb376a3afde753d9d705198705ce6e46cd"
+      },
+      "M98THSTA.EXE": {
+        "path": "/root/Win98-Modern-tls13-7707/build/theme-engine/M98THSTA.EXE",
+        "sha256": "f97eb38fb6a23e9432615524fea66ab2afcd1192780e385008d1cba95b45357e"
+      },
+      "M98TLS13.dll": {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/pe32/M98TLS13.dll",
+        "sha256": "8691fa74eeb9dbf02d53f7dc45a5c15c8f9d3c9960f222112621ef6351d621b9"
+      }
+    },
+    "guest_validated": false,
+    "system_theme_installed": false,
+    "os_schannel_integrated": false,
+    "application_functionality_verified": false,
+    "integration_notes": "docs/MODERN_INTEGRATION_7707.md"
+  }
 }
