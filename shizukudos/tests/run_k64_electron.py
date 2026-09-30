@@ -271,7 +271,10 @@ def main():
     qemu_out = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     res = classify(serial, expect)
-    app_lines = [l for l in serial.splitlines() if re.match(r"\[(win64|user) [^\]]+ pid \d+\]", l)]
+    slines = serial.splitlines()
+    start = next((i for i, l in enumerate(slines) if l.startswith("K64 autorun: starting")), len(slines))
+    autorun_lines = slines[start:]                           # the boot self-tests before this are not the app's
+    app_lines = [l for l in autorun_lines if re.match(r"\[(win64|user) [^\]]+ pid \d+\]", l)]
     expect_seen = bool(expect) and expect in serial
     ok = expect_seen and res["exit_code"] == 0 and not res["faulted"] and not res["exceptions"] and not timed_out
     record = {
@@ -281,6 +284,7 @@ def main():
         "tree": str(tree), "tree_files": len(listing), "exe": exe, "command_line": cmdline, "command": cmd,
         **res,
         "app_output_lines": app_lines[:600], "app_output_line_count": len(app_lines),
+        "autorun_log": autorun_lines[:400],
         "serial_tail": serial[-8000:], "qemu_output": qemu_out[-1500:], "utc": shzlib.utc_now(), "git": shzlib.git_state(),
     }
     shzlib.write_json(out / "result.json", record)
@@ -293,6 +297,9 @@ def main():
             print(f"  [{k}] {l}")
     print(f"  app output lines: {len(app_lines)} (first 20 below; all in result.json)")
     for l in app_lines[:20]:
+        print("    " + l[:300])
+    print("  autorun log (first 12 lines):")
+    for l in autorun_lines[:12]:
         print("    " + l[:300])
     print(f"  result: {out / 'result.json'}")
     return 0 if ok else 1

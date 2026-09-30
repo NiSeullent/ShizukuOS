@@ -59,8 +59,11 @@ def pe_machine(path):
         return None
 
 
-def images_of(tree):
-    tops = [p for p in sorted(tree.iterdir()) if p.suffix.lower() in (".exe", ".dll") and pe_machine(p) == 0x8664]
+def images_of(tree, only_exe=None):
+    """AMD64 images at the top of the tree (only_exe: the one executable to keep; other .exe files are helpers such as
+    setup.exe or test binaries, not part of the process under study) and every AMD64 Node addon below it."""
+    tops = [p for p in sorted(tree.iterdir()) if p.suffix.lower() in (".exe", ".dll") and pe_machine(p) == 0x8664
+            and (only_exe is None or p.suffix.lower() == ".dll" or p.name.lower() == only_exe.lower())]
     addons = [p for p in sorted(tree.rglob("*.node")) if pe_machine(p) == 0x8664]
     return tops, addons
 
@@ -96,9 +99,9 @@ def owner(dll, resolved):
     return "K4" if dll in K4_DLLS or dll.startswith("api-ms-win-core-") else "K5"
 
 
-def collect(product, tree, build, host_exe):
+def collect(tree, build, host_exe):
     """{(owner, dll, fn): {"load": set(images), "delay": set(images)}} for one product tree."""
-    tops, addons = images_of(tree)
+    tops, addons = images_of(tree, host_exe)
     host_exports = exports_of(tree / host_exe) if host_exe else set()
     gaps, per_image = {}, {}
     for start in tops + addons:
@@ -106,6 +109,10 @@ def collect(product, tree, build, host_exe):
         rel = str(start.relative_to(tree))
         for name, rep in data["images"].items():
             label = rel if name.lower() == start.name.lower() else name
+            counts = per_image.setdefault(label, {"load": 0, "delay": 0, "first_failure": None})
+            ff = rep.get("first_failure")                    # startup_chain's own import-table order = the loader's
+            if ff and not ff.lower().startswith(("node.exe!", "electron.exe!")) and counts["first_failure"] is None:
+                counts["first_failure"] = ff
             for kind, field in (("load", "by_dll"), ("delay", "delay_by_dll")):
                 for key, fns in rep.get(field, {}).items():
                     dll, why, resolved = parse_key(key)
@@ -115,9 +122,11 @@ def collect(product, tree, build, host_exe):
                                 continue             # bound to the running executable by Electron's delay-load hook
                             why = f"not exported by {host_exe}"
                         g = gaps.setdefault((owner(dll, resolved), dll, fn), {"load": set(), "delay": set(), "why": why})
-                        g[kind].add(label)
-            per_image[label] = {"missing_load": rep.get("missing", 0), "missing_delay": rep.get("delay_missing", 0),
-                                "first_failure": rep.get("first_failure")}
+                        if label not in g[kind]:
+                            g[kind].add(label)
+                            counts[kind] += 1
+                            if kind == "load" and counts["first_failure"] is None:
+                                counts["first_failure"] = f"{dll}!{fn}: {why}"
     return gaps, per_image, [str(p.relative_to(tree)) for p in tops + addons]
 
 
@@ -135,9 +144,9 @@ def main():
     ap.add_argument("--md", type=Path)
     args = ap.parse_args()
     vexe = next((c for c in ("Code.exe", "VSCodium.exe") if (args.vscode / c).exists()), None)
-    prods = {"electron": collect("electron", args.electron, args.build, "electron.exe"),
-             "vscode": collect("vscode", args.vscode, args.build, vexe),
-             "chromium": collect("chromium", args.chromium, args.build, None)}
+    prods = {"electron": collect(args.electron, args.build, "electron.exe"),
+             "vscode": collect(args.vscode, args.build, vexe),
+             "chromium": collect(args.chromium, args.build, "chrome.exe")}
     chromium_fns = {(d, f) for (_, d, f) in prods["chromium"][0]}
     rows = {}
     for p in ("electron", "vscode"):
@@ -178,8 +187,8 @@ def main():
     lines.append("|---|---|---:|---:|---|")
     for p, (_, per, _) in prods.items():
         for img, s in per.items():
-            if s["missing_load"] or s["missing_delay"]:
-                lines.append(f"| {p} | {img} | {s['missing_load']} | {s['missing_delay']} | {s['first_failure'] or '—'} |")
+            if s["load"] or s["delay"]:
+                lines.append(f"| {p} | {img} | {s['load']} | {s['delay']} | {s['first_failure'] or '—'} |")
     md = "\n".join(lines) + "\n"
     if args.md:
         args.md.write_text(md)
