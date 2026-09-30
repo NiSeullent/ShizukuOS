@@ -121,9 +121,11 @@ GPT GUIDs), fixed FAT volume ids, deterministic tarballs. The receipts
 
 ## Results
 
-Recorded in `docs/shizukudos10/STATUS.md` section 2e: the ISO built from commit e43555e
-(sha256 `9c8fffec5c6c93c9c8a9749def1120063e876cb7cd104d6917eabd732e671e04`, 93,323,264 bytes, identical over
-two full rebuilds) and the raw disk (`60334f734333f802f62f7580d79143cc2126a0c136b25cdbe6aadcab0cc6c14c`)
-passed the whole matrix (QEMU 8.2.2 TCG, OVMF with S3 on): SeaBIOS and OVMF, ISO as CD / as disk / raw disk,
-Kernel64, DOS16, ShizukuDOS 0.1, Kernel64 direct (OVMF), and the install row (install to a blank AHCI disk from
-the ISO, host verification, then the installed disk on OVMF and on SeaBIOS) on both firmwares.
+Recorded in `docs/shizukudos10/STATUS.md` section 2e. Latest: the ISO built from commit 8c083c4 (after the lead
+merges up to 939a7cf; sha256 `d0050091dd1edc585710f2f31e206adbfb3616d1735101ae6023b59c9ff0bf1e`, 153,092,096 bytes,
+identical over two full rebuilds) and the raw disk (`e312bff482b6bbfc8f2b18967d7c5ff8c367c377d3d03afd827f8d707e3477aa`)
+passed the whole matrix, 23/23 (`shz.py test --suite media`, QEMU 8.2.2 TCG, OVMF with S3 on): SeaBIOS and OVMF, ISO as
+CD / as disk / raw disk, Kernel64, DOS16, ShizukuDOS 0.1, Kernel64 direct (OVMF), and the install row (install to a
+blank AHCI disk from the ISO, host verification, then the installed disk on OVMF and on SeaBIOS) on both firmwares.
+WIN64.IMG now carries the Wine port; the ISO ships the Wine, FreeType and Noto licences and the Wine and FreeType
+source (`ShizukuDOS10\\SOURCE`).

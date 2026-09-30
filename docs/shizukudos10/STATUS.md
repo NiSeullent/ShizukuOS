@@ -310,6 +310,23 @@ ShizukuFS e2fsck·파일 SHA-256). 이어서 그 디스크만 붙여 **OVMF(S3 �
 - 불안정한 시험(부팅 경로와 무관): `run_k64_standalone.py`(QEMU `-kernel`, 구멍 없음) 3회 중 1회 `T_REG_STRESS.EXE` phase 6
   "handles were used successfully while being closed and replaced under them"가 실패했고 2회는 PASS였다. 그대로 기록한다.
 
+**lead 병합 뒤(1bb8bc3, f65c8d6, 939a7cf; 헤드 8c083c4에서 빌드·시험):**
+- WIN64.IMG가 Wine 포트(Wine DLL, dwrite 안의 FreeType, Noto·Tahoma 글꼴)를 싣게 되어 15.8 MB가 됐다. ISO는 이제
+  wine·freetype·noto-fonts의 라이선스(Wine의 tomcrypt 포함)와 대응 소스도 싣는다. Wine은 빌드가 읽는 파일 + Tahoma의 `.sfd`를
+  고정 커밋의 git 객체에서(`git archive`, 트리가 제자리에서 패치·빌드되므로), FreeType은 전체 트리, Noto(OFL, 수정 없이 배포)는
+  라이선스만 싣는다. `shizukudos-source.tar.gz`에 빠져 있던 `drivers/ahci_native`(독립 Kernel64에 링크)와 `shizukufs`(libsfs)도
+  넣었다. 설치 페이로드는 들어간다(ESP 내용 35 MiB / 128 MiB, INSTALL.IMG 6.8 MB). 단 설치되는 시스템에는 Wine DLL·글꼴이 없다
+  (`mkpayload.py`는 Shizuku 자체 모듈만 싣는다).
+- 재현성 결함 두 가지를 고쳤다. FreeDOS 커널 배너가 `__DATE__`를 넣어서 날짜가 바뀌면 DOS16 이미지와 ISO가 달라졌다(UTC 자정을
+  넘긴 두 빌드에서 발견). `dos16/patches/0002-reproducible-build-date.patch`로 "Jul 29 2026"(매체의 SOURCE_DATE_EPOCH)에 고정했다.
+  raw 디스크 FAT32 볼륨 ID가 Kernel64 C:의 고정 일련번호 0x53485A31과 같아서, lead의 `T_K32_FILE.EXE` "D: has a volume serial
+  number of its own"이 raw 디스크 Kernel64 실행 3건에서 실패했다. 0x53453938로 바꿨다.
+- ISO `d0050091dd1edc585710f2f31e206adbfb3616d1735101ae6023b59c9ff0bf1e`(153,092,096바이트, 커밋 8c083c4, 전체 재빌드 두 번 동일),
+  raw 디스크 `e312bff482b6bbfc8f2b18967d7c5ff8c367c377d3d03afd827f8d707e3477aa`(128 MiB, 두 번 동일).
+- 시험: `test_memplan.py` 30/30. `test_bootmgr.py` 18/18 + 파서 78/78, `run_install.py --build` 40/0/0(둘 다 3e67378; 그 뒤로는 디스크
+  빌더만 바뀜). 매체 스위트 `suite-2026-09-30T011305Z` **23/23 VERIFIED**. 그 전 3e67378 실행은 19/23이었다(볼륨 ID 3건과
+  `T_NET_LOOP.EXE` 페이지 누수 검사 1건, 후자는 알려진 불안정 시험). Kernel64 칸은 Win64 시험 프로그램 61개로 이제 칸마다 110–135초 걸린다.
+
 **없는 것:** UEFI 메뉴에서 Kernel64 직접으로 설치를 고르는 항목(설치는 레거시 메뉴 I, UEFI에서는 CSM을 거친다). 설치 줄은 ISO를
 CD로 붙인 경우만 돈다(`--install-media`로 다른 매체도 가능). NVMe·eMMC 대상에는 설치해 보지 않았다.
 
