@@ -24,12 +24,12 @@ static BOOL CALLBACK on_name(HMODULE m, LPCWSTR type, LPWSTR name, LONG_PTR lp)
 }
 static BOOL CALLBACK on_name_stop(HMODULE m, LPCWSTR type, LPWSTR name, LONG_PTR lp) { (void)m; (void)type; (void)name; ++*(int *)lp; return FALSE; }
 
-static int type_calls, saw_rcdata, saw_shztype;
+static int type_calls, saw_rcdata, saw_shztype, saw_version;
 static BOOL CALLBACK on_type(HMODULE m, LPWSTR type, LONG_PTR lp)
 {
     (void)m; (void)lp;
     ++type_calls;
-    if (((ULONG_PTR)type >> 16) == 0) { if ((ULONG_PTR)type == 10) saw_rcdata = 1; }
+    if (((ULONG_PTR)type >> 16) == 0) { if ((ULONG_PTR)type == 10) saw_rcdata = 1; if ((ULONG_PTR)type == 16) saw_version = 1; }
     else if (k32t_weq(type, L"SHZTYPE")) saw_shztype = 1;
     return TRUE;
 }
@@ -115,8 +115,9 @@ static void test_resources(void)
     CHECK_ERR(ERROR_RESOURCE_TYPE_NOT_FOUND, "absent type: ERROR_RESOURCE_TYPE_NOT_FOUND");
     ansi_calls = ansi_saw_strname = 0;
     CHECK(EnumResourceNamesA(NULL, (LPCSTR)RCDATA, on_name_a, 0) && ansi_calls == 3 && ansi_saw_strname, "EnumResourceNamesA converts the names");
-    type_calls = saw_rcdata = saw_shztype = 0;
-    CHECK(EnumResourceTypesW(NULL, on_type, 0) && type_calls == 2 && saw_rcdata && saw_shztype, "EnumResourceTypesW: RT_RCDATA and SHZTYPE");
+    type_calls = saw_rcdata = saw_shztype = saw_version = 0;
+    CHECK(EnumResourceTypesW(NULL, on_type, 0) && type_calls == 3 && saw_rcdata && saw_shztype && saw_version,
+          "EnumResourceTypesW: RT_RCDATA, SHZTYPE and RT_VERSION (the build gives every image a version resource)");
     lang_calls = saw_en = saw_de = 0;
     CHECK(EnumResourceLanguagesW(NULL, RCDATA, RSRC_INT(100), on_lang, 0) && lang_calls == 2 && saw_en && saw_de, "EnumResourceLanguagesW: en-US and de-DE");
 }

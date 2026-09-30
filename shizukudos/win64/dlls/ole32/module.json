@@ -1,1 +1,1 @@
-{"libs": ["oleaut32", "rpcrt4"]}
+{"libs": ["oleaut32", "rpcrt4", "user32", "gdi32"], "description": "Microsoft OLE for Windows"}

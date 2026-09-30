@@ -11,7 +11,11 @@
  * "\StringFileInfo\<lang><codepage>\<name>" = a string (length in characters, including the NUL as stored by rc).
  * Key comparison is ASCII case-insensitive.
  *
- * Not provided: the *A entry points, GetFileVersionInfo*ExW (MUI localisation), VerLanguageName*, VerFindFile*, VerInstallFile*.
+ * A bare file name ("kernel32.dll") is located through the DLL search order (application directory, system directory,
+ * current directory; ".dll" appended when there is no extension), as Windows does through LoadLibraryEx as a data file.
+ * GetFileVersionInfo{Size}ExW accept the FILE_VER_GET_* flags; without MUI satellite resources they select nothing.
+ *
+ * Not provided: the *A entry points, VerLanguageName*, VerFindFile*, VerInstallFile*.
  */
 #include "nt.h"
 #include <string.h>
@@ -138,6 +142,55 @@ static DWORD locate_version(HANDLE h, ULONGLONG *data_off, DWORD *data_size)
     return 0;
 }
 
+static size_t wlen_(const WCHAR *s) { size_t n = 0; while (s[n]) ++n; return n; }
+
+static int has_separator(const WCHAR *s)
+{
+    for (; *s; ++s) if (*s == '\\' || *s == '/' || *s == ':') return 1;
+    return 0;
+}
+
+/* Opens the image `name` the way Windows' GetFileVersionInfo does: a name with a path component is opened as given; a
+ * bare name goes through the DLL search order (LoadLibraryEx as a data file: the application directory, the system
+ * directory, then the current directory), ".dll" being appended when it has no extension, exactly as LoadLibrary does.
+ * That is how a program asks for the version of "kernel32.dll" without knowing where it lives. */
+static HANDLE open_image(LPCWSTR name)
+{
+    WCHAR path[MAX_PATH + 16], base[MAX_PATH + 16];
+    HANDLE h;
+    size_t n, i, dir, k;
+    int dot = 0;
+    if (has_separator(name)) return CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    n = wlen_(name);
+    if (n == 0 || n >= MAX_PATH) return INVALID_HANDLE_VALUE;
+    for (i = 0; i < n; ++i) if (name[i] == '.') dot = 1;
+    memcpy(base, name, (n + 1) * sizeof(WCHAR));
+    if (!dot && name[n - 1] != '.') { base[n++] = '.'; base[n++] = 'd'; base[n++] = 'l'; base[n++] = 'l'; base[n] = 0; }
+    for (k = 0; k < 3; ++k) {
+        DWORD len = 0;
+        if (k == 0) {                                                       /* application directory */
+            len = GetModuleFileNameW(0, path, MAX_PATH);
+            if (!len || len >= MAX_PATH) continue;
+            for (dir = len; dir > 0 && path[dir - 1] != '\\' && path[dir - 1] != '/'; --dir) ;
+            len = (DWORD)dir;
+        } else if (k == 1) {                                                /* system directory */
+            len = GetSystemDirectoryW(path, MAX_PATH);
+            if (!len || len >= MAX_PATH) continue;
+            path[len++] = '\\';
+        } else {                                                            /* current directory */
+            len = GetCurrentDirectoryW(MAX_PATH, path);
+            if (!len || len >= MAX_PATH) continue;
+            if (path[len - 1] != '\\') path[len++] = '\\';
+        }
+        if (len + n + 1 > sizeof path / sizeof path[0]) continue;
+        memcpy(path + len, base, (n + 1) * sizeof(WCHAR));
+        h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+        if (h != INVALID_HANDLE_VALUE) return h;
+    }
+    SetLastError(ERROR_FILE_NOT_FOUND);
+    return INVALID_HANDLE_VALUE;
+}
+
 /* Reads the version resource of `name` into a heap block; *len receives VS_VERSIONINFO.wLength (the size a caller must
  * provide). Returns 0 or a Win32 error code. */
 static DWORD load_version(LPCWSTR name, void **out, DWORD *len)
@@ -147,7 +200,7 @@ static DWORD load_version(LPCWSTR name, void **out, DWORD *len)
     DWORD size, err, wlen;
     unsigned char *buf;
     if (!name || !*name) return ERROR_INVALID_PARAMETER;
-    h = CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    h = open_image(name);
     if (h == INVALID_HANDLE_VALUE) { err = GetLastError(); return err ? err : ERROR_FILE_NOT_FOUND; }
     err = locate_version(h, &off, &size);
     if (err) { CloseHandle(h); return err; }
@@ -189,6 +242,24 @@ DLLAPI BOOL WINAPI GetFileVersionInfoW(LPCWSTR name, DWORD handle, DWORD len, LP
     return TRUE;
 }
 
+/* The Ex variants take a FILE_VER_GET_* flag word: FILE_VER_GET_LOCALISED/NEUTRAL select the MUI resource language and
+ * FILE_VER_GET_PREFETCHED skips the disk read. This system has no MUI satellite files, so the resource in the image is the
+ * only one and every flag combination yields the same block; the flags are validated (unknown bits are an error, as on
+ * Windows) and otherwise have nothing to select. */
+#define FILE_VER_KNOWN_FLAGS (0x1u | 0x2u | 0x4u)
+
+DLLAPI DWORD WINAPI GetFileVersionInfoSizeExW(DWORD flags, LPCWSTR name, LPDWORD handle)
+{
+    if (flags & ~FILE_VER_KNOWN_FLAGS) { if (handle) *handle = 0; SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    return GetFileVersionInfoSizeW(name, handle);
+}
+
+DLLAPI BOOL WINAPI GetFileVersionInfoExW(DWORD flags, LPCWSTR name, DWORD handle, DWORD len, LPVOID data)
+{
+    if (flags & ~FILE_VER_KNOWN_FLAGS) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    return GetFileVersionInfoW(name, handle, len, data);
+}
+
 /* ---------------------------------------------------------------- VerQueryValue */
 static DWORD align4(DWORD v) { return (v + 3) & ~3u; }
 
@@ -203,8 +274,6 @@ static int key_eq_i(const WCHAR *key, const WCHAR *name, size_t n)
     }
     return key[n] == 0;
 }
-
-static size_t wlen_(const WCHAR *s) { size_t n = 0; while (s[n]) ++n; return n; }
 
 /* Layout helpers for one node at `p` inside a block ending at `end`. */
 static int node_layout(const unsigned char *p, const unsigned char *end, const WCHAR **key, const unsigned char **value,
