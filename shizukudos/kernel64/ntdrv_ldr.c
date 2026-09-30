@@ -10,6 +10,8 @@
 #include "../win64/pe_parse.h"
 
 extern NTSTATUS NTAPI ntdrv_default_dispatch(DEVICE_OBJECT *dev, IRP *irp);   /* ntdrv_io.c */
+extern DRIVER_EXTENSION *ntdrv_alloc_driver_extension(DRIVER_OBJECT *drv, ntdrv_driver_t *d);   /* ntdrv_pnp.c */
+extern void ntdrv_run_reinit(DRIVER_OBJECT *drv);
 
 static ntdrv_driver_t *driver_list;
 static uint64_t va_cursor = NTDRV_VA_BASE;
@@ -172,6 +174,7 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
     drv->DriverName.Length = 0; drv->DriverName.MaximumLength = 0;
     for (i = 0; i <= IRP_MJ_MAXIMUM_FUNCTION; ++i)
         drv->MajorFunction[i] = ntdrv_default_dispatch;
+    if (!ntdrv_alloc_driver_extension(drv, d)) { kfree(d); kfree(drv); return STATUS_NO_MEMORY; }   /* DriverExtension->AddDevice is a PnP driver's first write */
     d->next = driver_list; driver_list = d;
 
     ntdrv_ke_init();                                          /* DPC/timer service threads, on the first load only */
@@ -179,6 +182,7 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
     ntdrv_set_current_driver(d);
     kprintf("K64 ntdrv: %s mapped at %llx (%u bytes), calling DriverEntry\n", service, base, pi.size_of_image);
     st = entry(drv, &d->regpath);
+    if (st == 0) ntdrv_run_reinit(drv);                       /* IoRegisterDriverReinitialization: right after DriverEntry for a dynamic load */
     ntdrv_set_current_driver(0);
     if (st) {
         kprintf("K64 ntdrv: %s DriverEntry returned %x\n", service, (uint32_t)st);
@@ -200,6 +204,11 @@ ntdrv_driver_t *ntdrv_find_driver(const char *service)
     return 0;
 }
 
+void ntdrv_for_each_driver(void (*fn)(ntdrv_driver_t *, void *), void *ctx)
+{
+    ntdrv_driver_t *d;
+    for (d = driver_list; d; d = d->next) fn(d, ctx);
+}
 ntdrv_driver_t *ntdrv_driver_by_address(uint64_t va)
 {
     ntdrv_driver_t *d;

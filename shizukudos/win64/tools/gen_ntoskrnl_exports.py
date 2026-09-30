@@ -26,19 +26,24 @@ def table_names(text, table):
     if not m:
         raise SystemExit(f"table {table} not found in {PROV}")
     body = m.group(1)
-    names = re.findall(r"\bE\((\w+)\)", body)
-    names += re.findall(r'\{\s*"([^"]+)"\s*,', body)
+    # E(Name): function; C("cname", impl): function under its C name; V(Name): data export; { "Name", ... }: literal entry.
+    # The table is read in source order so the emitted list keeps it.
+    names = [(mm.group(2) or mm.group(3) or mm.group(4) or mm.group(5), mm.group(1) == "V")
+             for mm in re.finditer(r'\b(E|C|V)\(\s*(?:(\w+)|"([^"]+)"\s*,\s*\w+)\s*\)|\{\s*"([^"]+)"\s*,|\bV\((\w+)\)', body)
+             if mm.group(2) or mm.group(3) or mm.group(4) or mm.group(5)]
     # de-dup, keep order
     seen, out = set(), []
-    for n in names:
+    for n, is_data in names:
         if n not in seen:
             seen.add(n)
-            out.append(n)
+            out.append((n, is_data))
     return out
 
 
 def write_def(path, library, names):
-    path.write_text("LIBRARY " + library + "\nEXPORTS\n" + "".join(f"  {n}\n" for n in names))
+    """dlltool input: data exports are marked DATA so no call thunk is generated for them (a driver reaches them
+    through __imp_Name, as it does on Windows)."""
+    path.write_text("LIBRARY " + library + "\nEXPORTS\n" + "".join(f"  {n}{' DATA' if d else ''}\n" for n, d in names))
 
 
 def main():

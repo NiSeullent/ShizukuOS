@@ -20,6 +20,14 @@
 #define NT_SUCCESS(s) ((int32_t)(s) >= 0)
 
 #define OB_DEVICE 0x50                          /* kobject type for a user handle onto a device */
+#define DISPATCH_LEVEL_ 2
+
+extern void NTAPI KeInitializeDeviceQueue(KDEVICE_QUEUE *q);           /* ntdrv_pnp.c */
+extern void ntdrv_devext_free(DEVICE_OBJECT *dev);
+extern uint8_t NTAPI KfRaiseIrql(uint8_t);
+extern void NTAPI KfLowerIrql(uint8_t);
+extern void NTAPI KeAcquireSpinLockAtDpcLevel(KSPIN_LOCK *);
+extern void NTAPI KeReleaseSpinLockFromDpcLevel(KSPIN_LOCK *);
 
 static ntdrv_devnode_t *devnodes;
 static ntdrv_symlink_t *symlinks;
@@ -70,6 +78,9 @@ NTSTATUS NTAPI IoCreateDevice(DRIVER_OBJECT *drv, uint32_t ext_size, UNICODE_STR
     dev->StackSize = 1;
     dev->Flags = DO_DEVICE_INITIALIZING;
     dev->DeviceExtension = ext_size ? (uint8_t *)dev + SZ_DEV : 0;
+    dev->AlignmentRequirement = 0;                              /* FILE_BYTE_ALIGNMENT */
+    KeInitializeDeviceQueue(&dev->DeviceQueue);
+    KeInitializeEvent(&dev->DeviceLock, 1 /* SynchronizationEvent */, 1);
     dev->NextDevice = drv->DeviceObject;
     drv->DeviceObject = dev;
     if (name && name->Length) {
@@ -97,7 +108,37 @@ void NTAPI IoDeleteDevice(DEVICE_OBJECT *dev)
         if (*dp) *dp = dev->NextDevice;
     }
     while (*pp) { if ((*pp)->dev == dev) { ntdrv_devnode_t *d = *pp; *pp = d->next; kfree(d); } else pp = &(*pp)->next; }
+    ntdrv_devext_free(dev);
     kfree(dev);
+}
+/* "\Device\X" of a named device object, or NULL for an unnamed one. */
+const char *ntdrv_device_name(DEVICE_OBJECT *dev)
+{
+    ntdrv_devnode_t *n;
+    for (n = devnodes; n; n = n->next) if (n->dev == dev) return n->name;
+    return 0;
+}
+/* The device `dev` is attached on top of (its lower device), found by walking every device chain of every loaded
+ * driver (device objects are reachable from their DRIVER_OBJECT's DeviceObject list). */
+struct lower_ctx { DEVICE_OBJECT *dev, *lower; };
+static void lower_scan_driver(ntdrv_driver_t *d, void *ctx)
+{
+    struct lower_ctx *c = ctx;
+    DEVICE_OBJECT *x;
+    if (c->lower || !d->drv) return;
+    for (x = d->drv->DeviceObject; x; x = x->NextDevice) if (x->AttachedDevice == c->dev) { c->lower = x; return; }
+}
+DEVICE_OBJECT *ntdrv_lower_device(DEVICE_OBJECT *dev)
+{
+    extern void ntdrv_for_each_driver(void (*fn)(ntdrv_driver_t *, void *), void *ctx);
+    struct lower_ctx c = { dev, 0 };
+    ntdrv_devnode_t *n;
+    for (n = devnodes; n; n = n->next) {                        /* host-created PDOs are named and not in a driver record */
+        DEVICE_OBJECT *x;
+        for (x = n->dev; x; x = x->NextDevice) if (x->AttachedDevice == dev) return x;
+    }
+    ntdrv_for_each_driver(lower_scan_driver, &c);
+    return c.lower;
 }
 
 NTSTATUS NTAPI IoCreateSymbolicLink(UNICODE_STRING *link, UNICODE_STRING *target)
@@ -438,8 +479,10 @@ static int function_for_line(unsigned line, pci_dev_t *out)
         }
     return 0;
 }
+void ntdrv_pci_claim_function(const pci_dev_t *d) { own_function(d, ntdrv_current_driver()); }   /* HalAssignSlotResources */
 #else
 void ntdrv_pci_note_mmio(uint64_t pa, uint64_t size) { (void)pa; (void)size; }   /* no device is passed through here */
+void ntdrv_pci_claim_function(const pci_dev_t *d) { (void)d; }
 #endif
 
 /* ---------------------------------------------------------------- interrupts */
@@ -452,8 +495,25 @@ typedef struct kinterrupt {
     pci_dev_t dev;
 #endif
     struct kinterrupt *next;
+    KSPIN_LOCK *lock;                           /* the driver's spin lock (or the object's own) */
+    KSPIN_LOCK own_lock;
+    uint8_t synch_irql;                         /* SynchronizeIrql: the level KeAcquireInterruptSpinLock raises to */
 } kinterrupt_t;
 static kinterrupt_t *interrupts_by_vector[256];
+
+/* KeAcquireInterruptSpinLock: raise to the interrupt's SynchronizeIrql (>= DISPATCH_LEVEL, so the ISR cannot run on
+ * this processor) and take its spin lock; the ISR holds the same lock while it runs (KeSynchronizeExecution). */
+uint8_t NTAPI KeAcquireInterruptSpinLock(kinterrupt_t *k)
+{
+    uint8_t old = KfRaiseIrql(k->synch_irql > DISPATCH_LEVEL_ ? k->synch_irql : DISPATCH_LEVEL_);
+    KeAcquireSpinLockAtDpcLevel(k->lock);
+    return old;
+}
+void NTAPI KeReleaseInterruptSpinLock(kinterrupt_t *k, uint8_t old)
+{
+    KeReleaseSpinLockFromDpcLevel(k->lock);
+    KfLowerIrql(old);
+}
 
 static void call_isr(kinterrupt_t *k)
 {
@@ -490,6 +550,7 @@ NTSTATUS NTAPI IoConnectInterrupt(void **interrupt_out, void *service, void *ctx
     if (!k) return STATUS_INSUFFICIENT_RESOURCES;
     if (vector >= 256) { kfree(k); return STATUS_INVALID_PARAMETER; }
     k->service = service; k->ctx = ctx; k->vector = vector;
+    k->lock = lock ? lock : &k->own_lock; k->synch_irql = synch_irql ? synch_irql : irql;
 #ifdef SHZ_STANDALONE
     {
         const unsigned line = vector - standalone_irq_vector(0);
@@ -596,6 +657,30 @@ void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, vo
     wq_tail = w;
     irq_restore(f);
     sem_post(&wq_sem);
+}
+void NTAPI IoQueueWorkItemEx(void *item, void (NTAPI *routine)(void *, void *, void *), uint32_t queue_type, void *ctx)
+{
+    /* IO_WORKITEM_ROUTINE_EX(IoObject, Context, IoWorkItem): delivered through a trampoline carried in the item. */
+    io_workitem_t *w = item;
+    w->ctx = ctx; w->routine = (void (NTAPI *)(DEVICE_OBJECT *, void *))routine;
+    IoQueueWorkItem(item, (void (NTAPI *)(DEVICE_OBJECT *, void *))routine, queue_type, ctx);
+}
+/* Host-internal: run fn(ctx) once on the system worker thread (ExQueueWorkItem, PnP requests, WMI REGINFO). */
+struct syswork { io_workitem_t item; void (NTAPI *fn)(void *); void *ctx; };
+static void NTAPI syswork_run(DEVICE_OBJECT *dev, void *ctx)
+{
+    struct syswork *s = ctx;
+    (void)dev;
+    s->fn(s->ctx);
+    kfree(s);
+}
+void ntdrv_queue_system_work(void (NTAPI *fn)(void *), void *ctx, void *tag)
+{
+    struct syswork *s = kzalloc(sizeof *s);
+    (void)tag;
+    if (!s) { fn(ctx); return; }                                /* out of memory: run inline rather than drop the request */
+    s->fn = fn; s->ctx = ctx;
+    IoQueueWorkItem(&s->item, syswork_run, 0, s);
 }
 
 /* ================================================================ user-mode reachability */
@@ -732,20 +817,17 @@ static void image_path(const char *service, const char *raw, char *out, unsigned
     for (i = 0; i < n; ++i) if (out[i] == '/') out[i] = '\\';
 }
 
-static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
+/* Kernel core of NtLoadDriver/ZwLoadDriver: `w`/`chars` is the "\Registry\...\Services\<name>" object path. */
+int32_t ntdrv_load_service_path(const uint16_t *w, unsigned chars)
 {
-    struct { uint16_t len, maxlen; uint32_t pad; uint64_t buf; } u;
-    uint16_t w[200];
     char path[400], service[64], raw[300], imagepath[320];
-    unsigned chars, i, seg = 0;
+    unsigned i, seg = 0;
     regkey_t *node, *start;
     regval_t *v;
     fsnode_t *sys;
     int32_t st;
     ntdrv_driver_t *d;
-    if (copy_from_user(p, &u, regpath_ustr, sizeof u) || u.len / 2 >= 200) return STATUS_INVALID_PARAMETER;
-    if (copy_from_user(p, w, u.buf, u.len)) return STATUS_ACCESS_VIOLATION;
-    chars = u.len / 2;
+    if (chars >= 200) return STATUS_INVALID_PARAMETER;
     ntdrv_wide_to_ascii(w, chars, path, sizeof path);
     for (i = 0; path[i]; ++i) if (path[i] == '\\') seg = i + 1;   /* service name = last path component */
     { unsigned j = 0; for (i = seg; path[i] && j < sizeof service - 1; ++i) service[j++] = path[i]; service[j] = 0; }
@@ -782,6 +864,28 @@ static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
     kprintf("K64 ntdrv: NtLoadDriver(%s) -> %s\n", service, imagepath);
     st = ntdrv_load_node(sys, service, &d);
     return st;
+}
+int32_t ntdrv_unload_service_path(const uint16_t *w, unsigned chars)
+{
+    char path[400], service[64];
+    unsigned i, seg = 0;
+    ntdrv_driver_t *d;
+    if (chars >= 200) return STATUS_INVALID_PARAMETER;
+    ntdrv_wide_to_ascii(w, chars, path, sizeof path);
+    for (i = 0; path[i]; ++i) if (path[i] == '\\') seg = i + 1;
+    { unsigned j = 0; for (i = seg; path[i] && j < sizeof service - 1; ++i) service[j++] = path[i]; service[j] = 0; }
+    d = ntdrv_find_driver(service);
+    if (!d) return STATUS_OBJECT_NAME_NOT_FOUND;
+    if (!d->drv->DriverUnload) return STATUS_INVALID_DEVICE_REQUEST;      /* a driver without an Unload routine cannot be unloaded */
+    return ntdrv_unload(d);
+}
+static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
+{
+    struct { uint16_t len, maxlen; uint32_t pad; uint64_t buf; } u;
+    uint16_t w[200];
+    if (copy_from_user(p, &u, regpath_ustr, sizeof u) || u.len / 2 >= 200) return STATUS_INVALID_PARAMETER;
+    if (copy_from_user(p, w, u.buf, u.len)) return STATUS_ACCESS_VIOLATION;
+    return ntdrv_load_service_path(w, u.len / 2);
 }
 
 /* ---------------------------------------------------------------- ntdrv syscall router */

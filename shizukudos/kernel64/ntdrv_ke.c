@@ -465,9 +465,8 @@ void *NTAPI ExAllocatePool2(uint64_t flags, uint64_t n, uint32_t tag)
 void NTAPI ExFreePool(void *p) { kfree(p); }
 void NTAPI ExFreePoolWithTag(void *p, uint32_t tag) { (void)tag; kfree(p); }
 
-/* ExInterlocked list helpers used by many drivers (single-linked). */
+/* SLIST_HEADER initialization (the push/pop/flush/depth family lives in ntdrv_ex.c with the same encoding). */
 void NTAPI ExInitializeSListHead(void *h) { memset(h, 0, 16); }
-void NTAPI KeInitializeDeviceQueue(void *q) { memset(q, 0, 0x28); }
 
 void ntdrv_ke_init(void)                        /* idempotent: the first driver load (kernel or NtLoadDriver) starts it */
 {

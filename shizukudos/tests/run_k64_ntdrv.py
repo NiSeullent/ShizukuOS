@@ -4,9 +4,12 @@
 driver-store initrd (WIN64_NTDRV.IMG) and verify the NT driver host end to end:
 
   stub (Multiboot) -> Kernel64 (SHZ_STANDALONE) -> self-tests -> ntdrv_selftest():
-    - loads the unmodified ECHO.SYS / DPCTIMER.SYS / PCIEDU.SYS, calls each DriverEntry,
+    - loads the unmodified ECHO.SYS / DPCTIMER.SYS / PCIEDU.SYS / APITEST.SYS, calls each DriverEntry,
       drives an IOCTL through the real IRP stack, a pended IRP completed from a timer DPC,
-      and the edu PCI driver (BAR map + register read + IoConnectInterrupt + raised IRQ);
+      the edu PCI driver (BAR map + register read + IoConnectInterrupt + raised IRQ), and the
+      export-surface driver whose DriverEntry checks the second export batch (registry query
+      tables, device interfaces, StartIo/cancel, remove locks, power IRPs, PDO properties, DMA,
+      partition tables, ...) and fails to load if any check fails;
   then the Win64 app harness runs \\SHZ\\TESTS\\T_NTDRV.EXE, which reaches a loaded driver from
   user mode (NtLoadDriver -> NtCreateFile("\\??\\ShzEcho") -> NtDeviceIoControlFile).
 
@@ -48,7 +51,15 @@ def parse(serial):
 def evaluate(serial, ev):
     e = lambda s: ev.get(s, 0)  # noqa: E731
     c = []
-    c.append(check("driver host reported providers and loaded 3 drivers", e(13) == 3, f"loaded={e(13)}"))
+    c.append(check("driver host reported providers and loaded 4 drivers", e(13) == 4, f"loaded={e(13)}"))
+    api_fail = re.findall(r"^\[drv\] apitest: FAIL (.*)$", serial, re.M)
+    api_pass = len(re.findall(r"^\[drv\] apitest: PASS ", serial, re.M))
+    c.append(check("export-surface driver (APITEST.SYS): no FAIL line, >= 60 PASS lines",
+                   not api_fail and api_pass >= 60, f"pass={api_pass} fail={len(api_fail)}" + (": " + "; ".join(api_fail[:5]) if api_fail else "")))
+    c.append(check("apitest IOCTL reported the same counts (slot 28) with zero failures",
+                   (e(28) >> 32) >= 60 and (e(28) & 0xffffffff) == 0, f"slot28={e(28):#x}"))
+    c.append(check("driver re-initialization routine ran after DriverEntry",
+                   "apitest: PASS IoRegisterDriverReinitialization" in serial))
     c.append(check("echo IOCTL round-tripped through the IRP stack (10 bytes)",
                    (e(14) >> 32) == 1 and (e(14) & 0xffffffff) == 10, f"slot14={e(14):#x}"))
     c.append(check("DPC/timer/thread driver + pended IRP completed from a timer DPC",
@@ -60,7 +71,7 @@ def evaluate(serial, ev):
     c.append(check("edu interrupt connected over IoConnectInterrupt and the ISR fired",
                    (e(26) & 0xffffffff) >= 1, f"isr={e(26) & 0xffffffff}"))
     c.append(check("kernel driver-host self-test overall PASS", (e(27) >> 32) == 1, f"slot27={e(27):#x}"))
-    c.append(check("provider export surface >= 180 (ntoskrnl+hal)", (e(27) & 0xffffffff) >= 180,
+    c.append(check("provider export surface >= 500 (ntoskrnl+hal)", (e(27) & 0xffffffff) >= 500,
                    f"providers={e(27) & 0xffffffff}"))
     c.append(check("user-mode app reached a driver (NtLoadDriver + NtDeviceIoControlFile)",
                    "t_ntdrv: PASS" in serial, "t_ntdrv: FAIL" if "t_ntdrv: FAIL" in serial else ""))

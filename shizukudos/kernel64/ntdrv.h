@@ -116,7 +116,8 @@ int ntdrv_wide_to_ascii(const WCHAR *s, unsigned chars, char *out, unsigned cap)
 /* Kernel-mode handle table (ntdrv_zw.c): a small namespace for the handles a driver holds --
  * registry keys (ZwOpenKey), files (ZwCreateFile) and system threads (PsCreateSystemThread).
  * Separate from the per-process user handle tables. */
-enum { KH_NONE = 0, KH_KEY = 1, KH_FILE = 2, KH_THREAD = 3, KH_EVENT = 4 };
+enum { KH_NONE = 0, KH_KEY = 1, KH_FILE = 2, KH_THREAD = 3, KH_EVENT = 4, KH_DEVICE = 5, KH_DRIVER = 6, KH_PROCESS = 7,
+       KH_SEMAPHORE = 8, KH_DIR = 9, KH_SECTION = 10 };
 uint64_t ntdrv_kh_alloc(int kind, void *ptr);
 void *ntdrv_kh_get(uint64_t handle, int kind);
 int ntdrv_kh_free(uint64_t handle);
