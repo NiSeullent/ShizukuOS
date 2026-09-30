@@ -137,6 +137,12 @@ int32_t handle_close(process_t *p, uint64_t handle)
     if (o->type == OB_FILE) {
         extern void file_object_closed(kobject_t *o);
         file_object_closed(o);
+    } else if (o->type == OB_SOCKET) {
+        extern void net_socket_handle_closing(kobject_t *o);   /* net_sock.c: tears the socket down with its last handle */
+        net_socket_handle_closing(o);
+    } else if (o->type == 0x50 /* OB_DEVICE */) {
+        extern void ntdrv_device_handle_closing(kobject_t *o); /* ntdrv_io.c: IRP_MJ_CLOSE on the last handle */
+        ntdrv_device_handle_closing(o);
     }
     ob_deref(o);
     return STATUS_SUCCESS;
@@ -312,6 +318,23 @@ void thread_object_signal(thread_t *t)
         t->object->signaled = 1;
         ob_release_check(t->object);
     }
+}
+
+/* sched.c reclaims an exited user thread (interrupts off): its object keeps the exit status for GetExitCodeThread and
+ * waits (it is already signalled), and loses the reference the thread held on it since creation. */
+void thread_object_detach(thread_t *t)
+{
+    kobject_t *o = t->object;
+    if (!o) return;
+    o->u.thr.exit_code = t->exit_code;
+    o->u.thr.create_tick = t->create_tick;
+    o->u.thr.exit_tick = t->exit_tick;
+    o->u.thr.user_ticks = t->user_ticks;
+    o->u.thr.kernel_ticks = t->kernel_ticks;
+    o->u.thr.cycles = t->cycles;
+    o->u.thr.t = 0;
+    t->object = 0;
+    ob_deref(o);
 }
 
 void ob_register_timer(kobject_t *o)

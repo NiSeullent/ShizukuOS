@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * bcrypt.dll - the CNG primitive layer, restricted to what can be done exactly:
  *   hash algorithms MD5, SHA1, SHA256, SHA384, SHA512, each also as HMAC (BCRYPT_ALG_HANDLE_HMAC_FLAG),
- *   the RNG algorithm / BCryptGenRandom (hardware RDRAND only, see shz_rand.h), and BCryptDeriveKeyPBKDF2.
+ *   the RNG algorithm / BCryptGenRandom (the kernel RNG, see shz_rand.h), and BCryptDeriveKeyPBKDF2.
  * Every other CNG algorithm (AES, RSA, ECDSA, ...) is refused with STATUS_NOT_SUPPORTED by BCryptOpenAlgorithmProvider;
  * the key-object entry points (BCryptGenerateSymmetricKey, BCryptEncrypt, ...) are not exported at all.
  *
@@ -306,7 +306,7 @@ DLLAPI NTSTATUS WINAPI BCryptGenRandom(BCRYPT_ALG_HANDLE ha, PUCHAR buf, ULONG c
     /* BCRYPT_RNG_USE_ENTROPY_IN_BUFFER is ignored since Windows 8; the buffer is overwritten, never read. */
     if (!shz_random_bytes(buf, cb)) {
         memset(buf, 0, cb);                              /* never hand back partially random data */
-        return STATUS_NOT_SUPPORTED;                     /* no RDRAND: there is no other entropy source */
+        return STATUS_INVALID_PARAMETER;                 /* the kernel could not write the buffer */
     }
     return STATUS_SUCCESS;
 }

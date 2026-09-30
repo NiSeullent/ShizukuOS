@@ -13,6 +13,34 @@
 #define NTWV_ERROR_NOACCESS 998u
 #define NTWV_ERROR_NOT_READY 21u
 
+/* WIN64 subsystem bridge (ShizukuDOS ABI 1.1, shizukudos/abi/shz_ipc.h). The VxD is the Win98 domain's
+ * endpoint of the Kernel64 <-> Win98 channel: it maps the channel window the Supervisor exposes at a
+ * guest-physical address, pushes frames NTW32.DLL hands it, pops frames for it, and rings the doorbell
+ * with VMCALL. NTW32.DLL never sees a channel address; the VxD owns src/dst/generation of every frame. */
+#define NTWV_IOCTL_W64_OPEN 0x4e540010u     /* no input; output struct ntwv_w64_open */
+#define NTWV_IOCTL_W64_SEND 0x4e540011u     /* input: 64-byte header + inline payload [+ pool data]; output int32 status */
+#define NTWV_IOCTL_W64_RECV 0x4e540012u     /* no input; output: one 256-byte slot (header + payload) */
+#define NTWV_IOCTL_W64_WAIT 0x4e540013u     /* input uint32 timeout_ms (advisory); output uint32 doorbell mask */
+#define NTWV_W64_MAGIC 0x3436574eu          /* "NW64" */
+#define NTWV_W64_SEND_MAX 4096u             /* header + inline payload + pool data per SEND (two pinned pages) */
+#define NTWV_W64_PENDING_POOL 4u            /* pool blocks outstanding (freed when the matching reply is received) */
+#define NTWV_ERROR_NOT_ENOUGH_MEMORY 8u
+#define NTWV_ERROR_GEN_FAILURE 31u
+#define NTWV_ERROR_DEV_NOT_EXIST 55u
+#define NTWV_ERROR_BUSY 170u
+#define NTWV_ERROR_NO_MORE_ITEMS 259u
+#define NTWV_ERROR_REVISION_MISMATCH 1306u
+
+struct ntwv_w64_open {                      /* 64 bytes */
+    uint32_t magic, size;                   /* NTWV_W64_MAGIC, 64 */
+    uint32_t abi_major, abi_minor;          /* as reported by the Supervisor (SHZ_HC_ABI_VERSION) */
+    uint32_t channel_id, self_domain, peer_domain, generation;
+    uint32_t slot_count, pool_bytes;        /* ring depth and shared pool size of the mapped channel */
+    uint32_t sent, received;                /* frames pushed / popped by this VxD instance */
+    uint32_t proto_errors, notify_errors;   /* malformed slots dropped; NOTIFY hypercalls that failed */
+    uint32_t pending_pool, reserved;        /* pool blocks awaiting their reply */
+};
+
 /* VWIN32-owned structure. Buffer fields remain untrusted 32-bit addresses. */
 struct ntwv_dioc {
     uint32_t internal1, vm, internal2, code, input, input_bytes;
@@ -31,11 +59,22 @@ struct ntwv_pages {
     /* The native implementation copies to a validated pinned kernel alias.
      * Host tests supply a bounded mock alias resolver instead. */
     void (*write)(uint32_t alias, const void *source, uint32_t bytes);
+    /* Copies from a validated pinned alias into kernel memory (WIN64 bridge input). */
+    void (*read)(void *destination, uint32_t alias, uint32_t bytes);
+};
+/* Hypervisor and physical-mapping services: native.c binds VMCALL/CPUID/_MapPhysToLinear, host tests a model. */
+struct ntwv_hv {
+    int (*hypervisor_present)(void);        /* CPUID.1:ECX[31] and the Shizuku Supervisor signature at 0x40000000 */
+    /* VMCALL with the ABI register convention: EAX = op, EBX/ECX = arguments; returns EAX status, EBX/ECX results. */
+    int32_t (*hcall)(uint32_t op, uint32_t a, uint32_t b, uint32_t *ebx_out, uint32_t *ecx_out);
+    void *(*map_phys)(uint32_t phys, uint32_t bytes);   /* system linear alias of a guest-physical window, NULL on failure */
 };
 
 int ntwv_initialize(const struct ntw_lock_ops *ops);
 int ntwv_shutdown(void);
 uint32_t ntwv_dioc(const struct ntwv_dioc *request, const struct ntwv_pages *pages);
+uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *pages, const struct ntwv_hv *hv);
+void ntwv_w64_reset(void);                  /* forget the mapped channel (dynamic exit / host tests) */
 int ntwv_native_init(void);
 int ntwv_native_exit(void);
 uint32_t ntwv_native_dioc(const struct ntwv_dioc *request);

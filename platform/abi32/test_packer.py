@@ -24,7 +24,7 @@ class PackerTests(unittest.TestCase):
         self.assertEqual(base, 0x68000000)
         self.assertLess(entry, len(image))
         self.assertEqual({name for name, _ in imports}, build.IMPORTS)
-        self.assertEqual(set(exports), build.EXPORTS)
+        self.assertEqual(set(exports), build.EXPORTS | build.W64_EXPORTS)
 
     def test_image_size_limit(self):
         data = bytearray(self.data)

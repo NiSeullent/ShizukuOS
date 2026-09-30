@@ -1,0 +1,89 @@
+; SPDX-License-Identifier: GPL-2.0-only
+; Synthetic KMDF driver package: .Wdf extension, KMDF co-installer, FeatureScore, Include/Needs,
+; DriverVer in the DDInstall section, undecorated DDInstall reached through the .NT fallback chain.
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%ManufacturerName%
+DriverVer=01/02/2024,1.0.0.7
+CatalogFile=synthkmdf.cat
+
+[Manufacturer]
+%ManufacturerName%=Standard,NTamd64,NTarm64
+
+[Standard.NTamd64]
+%DeviceDesc%=SynthKmdf_Device, PCI\VEN_1AF4&DEV_1052
+%DeviceDesc2%=SynthKmdf_Device2, ROOT\SYNTHKMDF
+
+[Standard.NTarm64]
+%DeviceDesc%=SynthKmdf_Device, PCI\VEN_1AF4&DEV_1052
+
+[SynthKmdf_Device]
+CopyFiles=Drivers_Dir
+FeatureScore=0x40
+DriverVer=02/03/2024,1.0.0.8
+Include=pci.inf
+Needs=SynthCommon
+
+[SynthCommon]
+AddReg=Common_AddReg
+
+[Common_AddReg]
+HKR,,CommonMarker,0x00010001,0x2A
+
+[Drivers_Dir]
+synthkmdf.sys
+
+[SynthKmdf_Device.Services]
+AddService = synthkmdf,%SPSVCINST_ASSOCSERVICE%, synthkmdf_Service_Inst
+
+[synthkmdf_Service_Inst]
+DisplayName    = %ServiceDesc%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
+ServiceBinary  = %13%\synthkmdf.sys
+Dependencies   = WdfLdr, PciDrv
+
+[SynthKmdf_Device.Wdf]
+KmdfService = synthkmdf, synthkmdf_wdfsect
+
+[synthkmdf_wdfsect]
+KmdfLibraryVersion = 1.15
+
+[SynthKmdf_Device.CoInstallers]
+AddReg=SynthKmdf_Device_CoInstaller_AddReg
+CopyFiles=SynthKmdf_Device_CoInstaller_CopyFiles
+
+[SynthKmdf_Device_CoInstaller_AddReg]
+HKR,,CoInstallers32,0x00010000,"WdfCoInstaller01015.dll,WdfCoInstaller"
+
+[SynthKmdf_Device_CoInstaller_CopyFiles]
+WdfCoInstaller01015.dll
+
+[SynthKmdf_Device2]
+AddReg=Common_AddReg
+
+[SynthKmdf_Device2.Services]
+AddService = synthkmdf2,, synthkmdf_Service_Inst
+
+[DestinationDirs]
+DefaultDestDir = 13
+SynthKmdf_Device_CoInstaller_CopyFiles = 11
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+synthkmdf.sys = 1
+WdfCoInstaller01015.dll = 1
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName = "Synthetic Devices, Inc."
+DiskName = "SynthKmdf Installation Disk"
+DeviceDesc = "SynthKmdf Device"
+DeviceDesc2 = "SynthKmdf Root Device"
+ServiceDesc = "SynthKmdf Service"

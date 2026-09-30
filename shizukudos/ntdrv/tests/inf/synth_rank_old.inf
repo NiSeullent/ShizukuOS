@@ -1,0 +1,39 @@
+; SPDX-License-Identifier: GPL-2.0-only
+; Ranking fixture A: older DriverVer, exact SUBSYS hardware-ID match for one device and a compatible-ID match for another.
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=Net
+ClassGuid={4d36e972-e325-11ce-bfc1-08002be10318}
+Provider=%P%
+DriverVer=01/01/2020,1.0.0.0
+
+[Manufacturer]
+%P%=M,NTamd64
+
+[M.NTamd64]
+%D1%=I1, PCI\VEN_1AF4&DEV_7001&SUBSYS_00011AF4&REV_01
+%D2%=I2, PCI\VEN_1AF4&DEV_7002, PCI\CC_0200
+%D3%=I3, PCI\VEN_1AF4&DEV_7005&CC_020000
+
+[I1.NT]
+[I2.NT]
+[I3.NT]
+[I1.NT.Services]
+AddService=oldA,,S
+[I2.NT.Services]
+AddService=oldB,,S
+[I3.NT.Services]
+AddService=oldC,,S
+
+[S]
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\old.sys
+
+[Strings]
+P="Synthetic"
+D1="Old exact"
+D2="Old generic"
+D3="Old class"

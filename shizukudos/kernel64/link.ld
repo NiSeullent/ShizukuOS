@@ -12,3 +12,6 @@ SECTIONS
     .bss (NOLOAD) : { __bss_start = .; *(.bss .bss.*) *(COMMON) __bss_end = .; }
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 }
+/* The loaders (Supervisor kdom.c, UEFI boot manager, Multiboot stub boot32.c) zero guest-physical [1 MiB, 3 MiB) for the
+ * image and its bss, and mem.c puts the kernel heap at 3 MiB: an image whose bss runs past 3 MiB would overlap the heap. */
+ASSERT(__bss_end - 0xFFFFFFFF80000000 <= 0x300000, "Kernel64 image + bss must end below 3 MiB (heap starts at 3 MiB)")

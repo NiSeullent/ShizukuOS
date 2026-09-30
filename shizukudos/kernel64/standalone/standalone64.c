@@ -32,7 +32,9 @@ long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
             sa_serial_putc(s[i]);
         break;
     }
-    case SHZ_HC_EXIT: sa_exit((unsigned)a);
+    case SHZ_HC_EXIT:
+        if (a <= 1) { extern void vfs_shutdown(void); vfs_shutdown(); }   /* normal exit: commit + flush write-back volumes */
+        sa_exit((unsigned)a);
     case SHZ_HC_TIMER_SET: st = sa_timer_set((unsigned)a, (uint32_t)b); break;
     case SHZ_HC_WAIT: __asm__ volatile("sti; hlt"); break;
     case SHZ_HC_TIME: v = arch_timer_irqs() * TICK_US * 1000ull; break;
@@ -46,6 +48,7 @@ long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
     case SHZ_HC_SET_DOORBELL_VECTOR:
     case SHZ_HC_DOORBELL_ACK:
     case SHZ_HC_DOMAIN_STATE:
+    case SHZ_HC_CHANNEL_INFO:
         st = SHZ_E_UNSUPPORTED;
         break;
     default:

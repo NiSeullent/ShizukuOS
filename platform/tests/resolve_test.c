@@ -18,7 +18,8 @@ static ntw_proc native(void *context, uintptr_t module, const char *name) {
 }
 int main(void) {
     struct mock_loader mock = {0};
-    struct ntw_resolver r = {0x8000, owned, native, &mock};
+    /* No table, policy, owner callback or log: the legacy contract (mode Own). */
+    struct ntw_resolver r = {0x8000, owned, native, &mock, 0, 0, 0, 0, 0};
     uintptr_t ordinal;
     const char *names[] = {"", "gettickcount64", "GetTickCount", "GetTickCount64Extra", "#13"};
     size_t i;

@@ -27,25 +27,71 @@ typedef struct { BYTE ver_flags, prolog, count, frame; BYTE codes[]; } unwind_in
 static DWORD64 *reg_slot(CONTEXT *c, unsigned r) { return &c->Rax + r; }         /* Rax,Rcx,Rdx,Rbx,Rsp,Rbp,Rsi,Rdi,R8..R15 */
 
 /* ---------------------------------------------------------------- function tables */
-typedef struct { PRUNTIME_FUNCTION table; DWORD count; DWORD64 base; int used; } dyn_table_t;
-static dyn_table_t dyn_tables[64];
+/* Dynamically registered unwind info for runtime-generated code (JIT: V8, .NET). A table is either a fixed array of
+ * RUNTIME_FUNCTIONs (RtlAddFunctionTable) or a callback that returns the RUNTIME_FUNCTION for a PC in its range
+ * (RtlInstallFunctionTableCallback). The registry is guarded by a spin lock so a JIT thread may add/remove tables
+ * while another thread unwinds. */
+typedef struct {
+    PRUNTIME_FUNCTION table;                    /* array form: entries; callback form: 0 */
+    DWORD count;
+    DWORD64 base;                               /* the code region's base address (RUNTIME_FUNCTION RVAs are from it) */
+    DWORD64 length;                             /* callback form: size of the region */
+    PGET_RUNTIME_FUNCTION_CALLBACK callback;    /* callback form: resolver */
+    PVOID context;
+    DWORD64 identifier;                         /* RtlInstallFunctionTableCallback's TableIdentifier (low 3 bits = 3) */
+    int used;
+} dyn_table_t;
+static dyn_table_t dyn_tables[128];
+static volatile LONG dyn_lock;
+
+static void dyn_acquire(void) { while (__sync_lock_test_and_set(&dyn_lock, 1)) NtYieldExecution(); }
+static void dyn_release(void) { __sync_lock_release(&dyn_lock); }
 
 SHZ_EXPORT BOOLEAN NTAPI RtlAddFunctionTable(PRUNTIME_FUNCTION table, DWORD count, DWORD64 base)
 {
     unsigned i;
-    for (i = 0; i < 64; ++i)
+    if (!table || !count) return FALSE;
+    dyn_acquire();
+    for (i = 0; i < 128; ++i)
         if (!dyn_tables[i].used) {
-            dyn_tables[i] = (dyn_table_t){ table, count, base, 1 };
+            dyn_tables[i] = (dyn_table_t){ table, count, base, 0, 0, 0, 0, 1 };
+            dyn_release();
             return TRUE;
         }
+    dyn_release();
     return FALSE;
 }
-SHZ_EXPORT BOOLEAN NTAPI RtlDeleteFunctionTable(PRUNTIME_FUNCTION table)
+
+/* TableIdentifier has its low two bits set (Windows convention: 0x3 | BaseAddress); Callback returns the
+ * RUNTIME_FUNCTION for a PC, letting a JIT describe code it has not laid out in a contiguous table. */
+SHZ_EXPORT BOOLEAN __cdecl RtlInstallFunctionTableCallback(DWORD64 identifier, DWORD64 base, DWORD length,
+                                                           PGET_RUNTIME_FUNCTION_CALLBACK callback, PVOID context,
+                                                           PCWSTR out_of_process_dll)
 {
     unsigned i;
-    for (i = 0; i < 64; ++i)
-        if (dyn_tables[i].used && dyn_tables[i].table == table) { dyn_tables[i].used = 0; return TRUE; }
+    (void)out_of_process_dll;                   /* remote unwinding is not supported; in-process callback only */
+    if (!callback || !length || (identifier & 3) != 3) return FALSE;
+    dyn_acquire();
+    for (i = 0; i < 128; ++i)
+        if (!dyn_tables[i].used) {
+            dyn_tables[i] = (dyn_table_t){ 0, 0, base, length, callback, context, identifier, 1 };
+            dyn_release();
+            return TRUE;
+        }
+    dyn_release();
     return FALSE;
+}
+
+SHZ_EXPORT BOOLEAN __cdecl RtlDeleteFunctionTable(PRUNTIME_FUNCTION table)
+{
+    unsigned i;
+    BOOLEAN found = FALSE;
+    dyn_acquire();
+    for (i = 0; i < 128; ++i)
+        if (dyn_tables[i].used && (dyn_tables[i].table == table || dyn_tables[i].identifier == (DWORD64)(uintptr_t)table))
+            { dyn_tables[i].used = 0; found = TRUE; break; }
+    dyn_release();
+    return found;
 }
 
 static PRUNTIME_FUNCTION search_table(PRUNTIME_FUNCTION t, DWORD n, DWORD64 base, DWORD64 pc)
@@ -81,11 +127,24 @@ SHZ_EXPORT PRUNTIME_FUNCTION NTAPI RtlLookupFunctionEntry(DWORD64 pc, PDWORD64 i
     PVOID base = 0;
     unsigned i;
     (void)hist;
-    for (i = 0; i < 64; ++i)
-        if (dyn_tables[i].used) {
+    dyn_acquire();
+    for (i = 0; i < 128; ++i) {
+        if (!dyn_tables[i].used) continue;
+        if (dyn_tables[i].callback) {                       /* callback table: PC in [base, base+length) */
+            if (pc >= dyn_tables[i].base && pc < dyn_tables[i].base + dyn_tables[i].length) {
+                PGET_RUNTIME_FUNCTION_CALLBACK cb = dyn_tables[i].callback;
+                PVOID ctx = dyn_tables[i].context;
+                const DWORD64 b = dyn_tables[i].base;
+                dyn_release();
+                *image_base = b;
+                return cb(pc, ctx);
+            }
+        } else {
             PRUNTIME_FUNCTION f = search_table(dyn_tables[i].table, dyn_tables[i].count, dyn_tables[i].base, pc);
-            if (f) { *image_base = dyn_tables[i].base; return f; }
+            if (f) { const DWORD64 b = dyn_tables[i].base; dyn_release(); *image_base = b; return f; }
         }
+    }
+    dyn_release();
     if (!RtlPcToFileHeader((PVOID)pc, &base)) { *image_base = 0; return 0; }
     {
         const IMAGE_DOS_HEADER *dos = base;
@@ -96,6 +155,47 @@ SHZ_EXPORT PRUNTIME_FUNCTION NTAPI RtlLookupFunctionEntry(DWORD64 pc, PDWORD64 i
         return search_table((PRUNTIME_FUNCTION)((uint8_t *)base + d->VirtualAddress), d->Size / sizeof(RUNTIME_FUNCTION),
                             (DWORD64)(uintptr_t)base, pc);
     }
+}
+
+/* Version 2 UNWIND_INFO records the epilog(s) explicitly with UWOP_EPILOG codes (so the unwinder need not decode
+ * instructions to find an epilog). The first UWOP_EPILOG: OpInfo = flag "at end", CodeOffset = size of the epilog in
+ * bytes; when the flag is set, that single record covers an epilog that ends at the function end. Any further
+ * UWOP_EPILOG records give (CodeOffset = offset of the epilog's last byte from the function end, OpInfo = high nibble
+ * of that offset). Returns 1 when `control_offset` lies inside a described epilog and sets *epilog_at to the RVA of the
+ * epilog's first instruction; 0 otherwise. (Public: the x64 UNWIND_INFO version 2 layout.) */
+static int v2_epilog(const unwind_info_t *info, DWORD64 fn_len, DWORD64 control_offset, DWORD64 *epilog_at)
+{
+    unsigned i;
+    unsigned epilog_size = 0;
+    if (UI_VERSION(info) != 2) return 0;
+    for (i = 0; i < info->count;) {
+        const BYTE code_off = info->codes[i * 2], b1 = info->codes[i * 2 + 1];
+        const unsigned op = b1 & 15, opinfo = b1 >> 4;
+        if (op == UWOP_EPILOG) {
+            if (!epilog_size) {                             /* first record: epilog byte count, "at function end" flag */
+                epilog_size = code_off;
+                if (opinfo & 1) {                           /* an epilog ending exactly at the function end */
+                    const DWORD64 start = fn_len - epilog_size;
+                    if (control_offset >= start && control_offset < fn_len) { *epilog_at = start; return 1; }
+                }
+            } else {                                        /* subsequent record: offset of the epilog end from fn end */
+                const DWORD64 end = fn_len - (code_off | ((DWORD64)opinfo << 8));
+                const DWORD64 start = end - epilog_size;
+                if (control_offset >= start && control_offset < end) { *epilog_at = start; return 1; }
+            }
+            ++i;
+        } else {
+            unsigned slots = 1;
+            switch (op) {
+            case UWOP_ALLOC_LARGE: slots = opinfo ? 3 : 2; break;
+            case UWOP_SAVE_NONVOL: case UWOP_SAVE_XMM128: slots = 2; break;
+            case UWOP_SAVE_NONVOL_FAR: case UWOP_SAVE_XMM128_FAR: slots = 3; break;
+            default: break;
+            }
+            i += slots;
+        }
+    }
+    return 0;
 }
 
 /* ---------------------------------------------------------------- epilogue emulation */
@@ -229,8 +329,15 @@ SHZ_EXPORT PEXCEPTION_ROUTINE NTAPI RtlVirtualUnwind(DWORD handler_type, DWORD64
         }
         *establisher = frame_reg && control_offset >= set_fp_off ? *reg_slot(ctx, frame_reg) - frame_off : ctx->Rsp;
     }
-    if (control_offset >= info->prolog && in_epilogue((const uint8_t *)pc, begin, end, ctx, 1))
-        return 0;
+    /* In an epilog the prolog's saves have already been undone: emulate the remaining epilog instructions instead of
+     * replaying unwind codes. Version 2 marks the epilog authoritatively; earlier versions are detected from the
+     * instruction stream. Either way the register-restoring instructions from PC to the RET are simulated. */
+    {
+        DWORD64 ep = 0;
+        if ((v2_epilog(info, end - begin, control_offset, &ep) || control_offset >= info->prolog) &&
+            in_epilogue((const uint8_t *)pc, begin, end, ctx, 1))
+            return 0;
+    }
     apply_codes(info, ctx, control_offset, 0, *establisher, ptrs);
     /* chained unwind info: the parent's operations always complete */
     while (UI_FLAGS(cur) & UNW_FLAG_CHAININFO) {
@@ -420,6 +527,38 @@ SHZ_EXPORT VOID NTAPI RtlRaiseStatus(NTSTATUS status)
     RtlRaiseException(&rec);
 }
 
+/* Walks the calling thread's stack with the .pdata unwind tables. The first frame returned (after `skip` frames were dropped)
+ * is the return address into the function that called RtlCaptureStackBackTrace. The walk ends at a null return address, when
+ * the stack pointer leaves the thread's stack, or after `count` frames. `hash` receives the sum of the return addresses. */
+SHZ_EXPORT USHORT NTAPI RtlCaptureStackBackTrace(ULONG skip, ULONG count, PVOID *frames, PULONG hash)
+{
+    CONTEXT ctx;
+    ULONG64 sum = 0;
+    ULONG seen = 0, got = 0, guard;
+    const uint64_t teb = shz_teb();
+    const DWORD64 stack_top = *(const DWORD64 *)(teb + 8), stack_low = *(const DWORD64 *)(teb + 0x10);
+    if (hash) *hash = 0;
+    if (!frames || !count) return 0;
+    RtlCaptureContext(&ctx);                                   /* RIP is inside this function: unwind out of it first */
+    for (guard = 0; guard < 4096 && got < count; ++guard) {
+        DWORD64 image_base = 0, establisher;
+        PVOID hd;
+        PRUNTIME_FUNCTION fe = RtlLookupFunctionEntry(ctx.Rip, &image_base, 0);
+        if (fe) {
+            RtlVirtualUnwind(0, image_base, ctx.Rip, fe, &ctx, &hd, &establisher, 0);
+        } else {                                               /* a leaf function without unwind data */
+            ctx.Rip = *(const DWORD64 *)ctx.Rsp;
+            ctx.Rsp += 8;
+        }
+        if (!ctx.Rip || ctx.Rsp < stack_low || ctx.Rsp > stack_top) break;
+        if (seen++ < skip) continue;
+        frames[got++] = (PVOID)(uintptr_t)ctx.Rip;
+        sum += ctx.Rip;
+    }
+    if (hash) *hash = (ULONG)sum;
+    return (USHORT)got;
+}
+
 SHZ_EXPORT VOID NTAPI RtlRestoreContext(PCONTEXT ctx, PEXCEPTION_RECORD rec)
 {
     (void)rec;
@@ -495,3 +634,60 @@ SHZ_EXPORT VOID NTAPI RtlUnwind(PVOID target_frame, PVOID target_ip, PEXCEPTION_
 {
     RtlUnwindEx(target_frame, target_ip, rec, return_value, 0, 0);
 }
+
+/* ---------------------------------------------------------------- __C_specific_handler
+ * The language-specific handler that MSVC- and Clang-compiled C code registers for __try/__except/__finally (the
+ * exception directory's UNWIND_INFO names it, and its HandlerData is a SCOPE_TABLE). It is invoked twice by the
+ * dispatcher: in the search phase (evaluate __except filters) and in the unwind phase (run __finally blocks). This is
+ * the documented algorithm ("x64 exception handling", SCOPE_TABLE_AMD64); no Windows code is copied.
+ *
+ * Scope record (RVAs from DispatcherContext->ImageBase): BeginAddress..EndAddress is the guarded region; JumpTarget==0
+ * marks a __finally (HandlerAddress is the termination handler), JumpTarget!=0 marks an __except (HandlerAddress is the
+ * filter, or the constant 1 meaning EXCEPTION_EXECUTE_HANDLER, and JumpTarget is the __except body). */
+typedef struct { DWORD Count; struct { DWORD Begin, End, Handler, Target; } Rec[1]; } c_scope_table_t;
+typedef LONG (*c_filter_t)(PEXCEPTION_POINTERS, PVOID frame);
+typedef void (*c_finally_t)(BOOLEAN abnormal, PVOID frame);
+
+/* winnt.h declares __C_specific_handler dllimport; we define it here and export it by name from the .def, so the
+ * ignored-dllimport attribute is expected. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+EXCEPTION_DISPOSITION __C_specific_handler(PEXCEPTION_RECORD rec, PVOID frame, PCONTEXT ctx,
+                                                     PDISPATCHER_CONTEXT dc)
+{
+    const c_scope_table_t *st = dc->HandlerData;
+    const DWORD64 base = dc->ImageBase;
+    const DWORD control = (DWORD)(dc->ControlPc - base);
+    DWORD i;
+    if (!st) return ExceptionContinueSearch;
+    if (rec->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND)) {
+        /* unwind phase: run every __finally whose scope contains the control PC, except the target scope itself */
+        for (i = 0; i < st->Count; ++i) {
+            const DWORD tgt = st->Rec[i].Target;
+            if (control < st->Rec[i].Begin || control >= st->Rec[i].End) continue;
+            if (tgt) continue;                                  /* an __except, not a __finally */
+            if ((rec->ExceptionFlags & EXCEPTION_TARGET_UNWIND) && dc->TargetIp == base + st->Rec[i].Handler) continue;
+            ((c_finally_t)(uintptr_t)(base + st->Rec[i].Handler))(TRUE, frame);
+        }
+        return ExceptionContinueSearch;
+    }
+    /* search phase: evaluate __except filters */
+    for (i = 0; i < st->Count; ++i) {
+        EXCEPTION_POINTERS ep;
+        LONG r;
+        if (control < st->Rec[i].Begin || control >= st->Rec[i].End || !st->Rec[i].Target) continue;
+        if (st->Rec[i].Handler == 1) r = EXCEPTION_EXECUTE_HANDLER;      /* __except(EXCEPTION_EXECUTE_HANDLER) */
+        else {
+            ep.ExceptionRecord = rec;
+            ep.ContextRecord = ctx;
+            r = ((c_filter_t)(uintptr_t)(base + st->Rec[i].Handler))(&ep, frame);
+        }
+        if (r == EXCEPTION_CONTINUE_EXECUTION) return ExceptionContinueExecution;
+        if (r == EXCEPTION_CONTINUE_SEARCH) continue;
+        /* EXCEPTION_EXECUTE_HANDLER: unwind to the __except body; RtlUnwindEx does not return */
+        RtlUnwindEx(frame, (PVOID)(uintptr_t)(base + st->Rec[i].Target), rec,
+                    (PVOID)(uintptr_t)(ULONG)rec->ExceptionCode, ctx, dc->HistoryTable);
+    }
+    return ExceptionContinueSearch;
+}
+#pragma GCC diagnostic pop

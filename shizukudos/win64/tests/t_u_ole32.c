@@ -22,13 +22,6 @@ static const GUID G_DNS = { 0x6ba7b810, 0x9dad, 0x11d1, { 0x80, 0xb4, 0x00, 0xc0
 static const GUID IID_MALLOC = { 0x00000002, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
 static const GUID IID_SPY = { 0x00000034, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
 
-static int has_rdrand(void)
-{
-    unsigned a = 1, b = 0, c = 0, d = 0;
-    __asm__ volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
-    return (c >> 30) & 1;
-}
-
 /* ---- reference-counting COM object ---- */
 typedef struct { const IDispatchVtbl *lpVtbl; LONG refs; } fake_t;
 static HRESULT STDMETHODCALLTYPE f_qi(IDispatch *t, REFIID r, void **o) { (void)t; (void)r; *o = 0; return E_NOINTERFACE; }
@@ -154,7 +147,7 @@ int main(void)
         U_CHECK("IIDFromString(NULL) is IID_NULL with S_OK", IIDFromString(0, &g) == S_OK && g.Data1 == 0 && g.Data4[7] == 0);
         U_CHECK("CLSIDFromString(text, NULL) is E_INVALIDARG", CLSIDFromString(L"{6ba7b810-9dad-11d1-80b4-00c04fd430c8}", 0) == E_INVALIDARG);
     }
-    if (has_rdrand()) {
+    {                                   /* the kernel RNG (krandom.c) serves every CPU, with or without RDRAND */
         GUID a, b;
         HRESULT ha = CoCreateGuid(&a), hb = CoCreateGuid(&b);
         U_CHECK("CoCreateGuid succeeds twice", ha == S_OK && hb == S_OK);
@@ -166,9 +159,6 @@ int main(void)
             StringFromGUID2(&a, t, 40);
             U_CHECK("CoCreateGuid -> StringFromGUID2 -> CLSIDFromString round trip", CLSIDFromString(t, &r) == S_OK && !memcmp(&r, &a, sizeof a) && t[15] == '4');
         }
-    } else {
-        GUID a;
-        U_CHECK("no RDRAND: CoCreateGuid fails instead of faking randomness", CoCreateGuid(&a) != S_OK);
     }
     U_CHECK("CoCreateGuid(NULL) is E_INVALIDARG", CoCreateGuid(0) == E_INVALIDARG);
 

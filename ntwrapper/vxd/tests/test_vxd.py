@@ -93,9 +93,11 @@ class VxDTests(unittest.TestCase):
 
     def test_native_vmm_import_constants_and_no_undefined_symbols(self):
         code=self.input['objects'][0]['data']
-        for number in (0x10061,0x10063,0x10064,0x10067):
+        for number in (0x10061,0x10063,0x10064,0x10067,0x1006c):
             self.assertEqual(code.count(b'\xcd\x20'+struct.pack('<I',number)),1)
         self.assertIn(b'\x9c\x60\xfc',code) # preserve flags/GPRs and clear DF
+        self.assertEqual(code.count(b'\x0f\x01\xc1'),1) # exactly one VMCALL: the guarded hypercall thunk
+        self.assertEqual(code.count(b'\x0f\xa2'),1) # exactly one CPUID: the hypervisor signature probe
         symbols=subprocess.check_output(['nm','-u',str(BUILD/'NTWRAP9X.elf')],text=True)
         self.assertEqual(symbols.strip(),'')
 
@@ -130,6 +132,15 @@ class VxDTests(unittest.TestCase):
         subprocess.run(command,check=True)
         result=subprocess.run([str(BUILD/'test_bridge')],check=True,capture_output=True,text=True)
         self.assertIn('every VMM-call failure unwound',result.stdout)
+        print(result.stdout.strip())
+
+    def test_win64_bridge_dioc_against_kernel64_wire_library_under_sanitizers(self):
+        command=['clang','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wpedantic','-Wshadow',
+                 '-fsanitize=address,undefined','-fno-omit-frame-pointer',str(HERE/'bridge.c'),str(HERE.parent/'core.c'),
+                 str(HERE/'tests/test_w64vxd.c'),'-o',str(BUILD/'test_w64vxd')]
+        subprocess.run(command,check=True)
+        result=subprocess.run([str(BUILD/'test_w64vxd')],check=True,capture_output=True,text=True)
+        self.assertIn('PASS: VxD WIN64 bridge',result.stdout)
         print(result.stdout.strip())
 
 if __name__=='__main__':unittest.main()

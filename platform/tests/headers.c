@@ -3,6 +3,7 @@
 #include "../../ntwrapper/include/ntwrapper.h"
 #include "../../ntwin32/sync.h"
 #include "../../ntwin32/resolve.h"
+#include "../../ntwin32/routing.h"
 #include "../../ntwin32/initonce.h"
 #include "../../ntwin32/unicode/utf.h"
 #include "../../ntwddm/include/ntwddm.h"

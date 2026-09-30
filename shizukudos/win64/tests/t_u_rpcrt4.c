@@ -6,13 +6,6 @@
 #include <rpc.h>
 #include "u_check.h"
 
-static int has_rdrand(void)
-{
-    unsigned a = 1, b = 0, c = 0, d = 0;
-    __asm__ volatile("cpuid" : "+a"(a), "=b"(b), "+c"(c), "=d"(d));
-    return (c >> 30) & 1;
-}
-
 static int popcount32(unsigned long v) { int n = 0; while (v) { n += (int)(v & 1); v >>= 1; } return n; }
 static int popcount_uuid(const UUID *u)
 {
@@ -99,10 +92,7 @@ int main(void)
     U_CHECK("UuidEqual true/false", UuidEqual(&dns, &dns, &st) == 1 && UuidEqual(&dns, &url, &st) == 0 && st == RPC_S_OK);
 
     /* ---- UuidCreate ---- */
-    if (!has_rdrand()) {
-        rs = UuidCreate(&u);
-        U_CHECKF("no RDRAND on this CPU: UuidCreate refuses instead of faking randomness", rs != RPC_S_OK, "rs=%u", (unsigned)rs);
-    } else {
+    {                                   /* the kernel RNG (krandom.c) serves every CPU, with or without RDRAND */
         UUID set[64];
         int distinct = 1, bits = 0, ver_ok = 1, var_ok = 1;
         for (i = 0; i < 64; ++i) {
@@ -132,10 +122,7 @@ int main(void)
     U_CHECK("UuidCreate(NULL) is rejected", UuidCreate(0) != RPC_S_OK);
 
     /* ---- UuidCreateSequential: RFC 4122 version 1 ---- */
-    if (!has_rdrand()) {
-        rs = UuidCreateSequential(&u);
-        U_CHECKF("no RDRAND: UuidCreateSequential refuses (no random node id available)", rs != RPC_S_OK && rs != RPC_S_UUID_LOCAL_ONLY, "rs=%u", (unsigned)rs);
-    } else {
+    {                                   /* the kernel RNG (krandom.c) serves every CPU, with or without RDRAND */
         enum { N = 400 };
         static UUID seq[N];
         FILETIME before, after;
