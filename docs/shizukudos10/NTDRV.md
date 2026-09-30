@@ -29,7 +29,7 @@ under **QEMU TCG** with QEMU's `edu` PCI device attached, mounts a driver-store 
 | PCI driver finds QEMU `edu` via `HalGetBusData`, `MmMapIoSpace`es BAR0, reads identification reg `0x010000ED` | PASS |
 | `IoConnectInterrupt` over `irq_register`; a raised `edu` interrupt fires the driver's ISR (vector 42) | PASS |
 | Hosted driver recorded as the `edu` function's owner (`pci_claim` → `ntdrv:shzpci`, seen from user mode via `NtQuerySystemInformation(0x101)`) | PASS |
-| Provider export surface | 553 `ntoskrnl.exe` + 19 `hal.dll` = **572** (185 at the start of N3's work, 225 after it, then the N4 batch) |
+| Provider export surface | 568 `ntoskrnl.exe` + 19 `hal.dll` = **587** (185 at the start of N3's work, 225 after it, then the N4 batch) |
 | User mode reaches a driver: `NtLoadDriver` → `NtCreateFile("\\??\\ShzEcho")` → `NtDeviceIoControlFile`; a second `NtLoadDriver` of the running service → `STATUS_IMAGE_ALREADY_LOADED`; a `%SystemRoot%` REG_EXPAND_SZ `ImagePath` resolves | PASS |
 
 **A real, unmodified corpus package installs and starts** (N3, `tests/run_k64_pnp.py`, QEMU `-device e1000`,
@@ -70,7 +70,7 @@ static count, `GUEST_RUN` TCG for the loads):
 | Corpus drivers whose `DriverEntry` returns `STATUS_SUCCESS` in the guest (`run_k64_ntdrv.py --corpus`) | **22 of 23**; the 23rd, `uniata.sys`, loads and runs and returns `STATUS_DEVICE_DOES_NOT_EXIST` because the VM has no ATA controller |
 | Export-surface driver `APITEST.SYS` (registry query tables, device interfaces, StartIo/cancel, remove locks, power IRPs, PDO properties, DMA adapters, partition tables, SList/lookaside/ERESOURCE, CRT/Rtl, SEH …) | 99 checks, 0 failures |
 | KMDF: `cdrom.sys` and `hdaudbus.sys` `FxDriverEntry` → `WdfVersionBind` → `WdfDriverCreate` (`run_k64_ntdrv.py --kmdf`) | both return `STATUS_SUCCESS`; the framework's `AddDevice`, `DriverUnload` and IRP dispatch are installed on their `DRIVER_OBJECT` |
-| Provider export surface | 553 `ntoskrnl.exe` + 19 `hal.dll` = **572** |
+| Provider export surface | 568 `ntoskrnl.exe` + 19 `hal.dll` = **587** |
 
 Not measured: the **Intel Windows 10 driver list** count. No such package or list exists in this repository or in this
 session, so no number is claimed; run `import_coverage.py <package dir> --ntoskrnl build/shizukudos/win64/ntdrv
