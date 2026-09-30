@@ -201,7 +201,8 @@ device objects each created (`\Device\...`) and the PCI functions bound to it; e
     loaded → the error paths without a kernel fault (no service key; missing image; a non-PE image; a copy of ECHO.SYS
     whose import name `IoCreateDevice` was altered in the file: refused with `STATUS_PROCEDURE_NOT_FOUND`) → `unload`
     (claim released, device gone) → `load` again, left loaded so the status screen (`k64-status.png`) shows the claim.
-    31/31.
+    Also: an image that imports itself is refused as an import cycle, and an unload while a handle is open on the
+    driver's device is refused (`STATUS_CONNECTION_IN_USE`) with the driver still answering. 38/38.
 * Guest, a real package (`shizukudos/tests/run_k64_pnp.py --accel tcg`, QEMU `-device e1000`, `GUEST_RUN`): the
   unmodified ReactOS e1000 NDIS 5 miniport package built by the corpus tooling (`shizukudos/ntdrv/corpus/build.py
   --packages` → `build/shizukudos/ntdrv/packages/e1000`: `e1000.sys` + `nete1000.inf`, unchanged) is put on the medium

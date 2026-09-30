@@ -21,7 +21,7 @@
 | 기존 UEFI x64 부팅, UEFI→32비트 PM 핸드오프 | GUEST_RUN (**TCG**) | PASS |
 | NT 드라이버 호스트: 미수정 x64 `.sys` 3개 로드+DriverEntry, IRP/DPC/타이머/스레드, PCI(edu) BAR/IRQ(공유 INTx 체인)+`pci_claim ntdrv:shzpci`, 사용자 모드 NtLoadDriver→IOCTL (`run_k64_ntdrv.py`) | GUEST_RUN (**TCG**) | PASS 10/10 (provider export 185) |
 | 드라이버 import 커버리지 (`import_coverage.py --ntoskrnl`) | HOST_TESTED | 시험 드라이버 3개 25/25; N2 ReactOS 코퍼스 23개 중 로드 가능 1개(null.sys), ntoskrnl 103/313 |
-| 드라이버 패키지 설치+실행 (N3): `shzpnp add-driver --install` → `shzpnp load` → NtLoadDriver → DriverEntry → Enum 바인딩 PCI 기능 `pci_claim ntdrv:<service>` → AddDevice + IRP_MN_START_DEVICE. 미수정 ECHO.SYS(`T_DRV_LOAD.EXE`, 기본 이미지)와 미수정 ReactOS e1000 NDIS 5 미니포트 + ReactOS ndis.sys(QEMU `-device e1000`, `run_k64_pnp.py`, `T_DRV_PNP.EXE`): MiniportInitialize가 NIC를 초기화하고 START IRP가 STATUS_SUCCESS | GUEST_RUN (**TCG**) | PASS (T_DRV_LOAD 31/31, T_DRV_PNP 24/24; provider export 225). 프로토콜은 바인딩되지 않아 패킷은 오가지 않음 |
+| 드라이버 패키지 설치+실행 (N3): `shzpnp add-driver --install` → `shzpnp load` → NtLoadDriver → DriverEntry → Enum 바인딩 PCI 기능 `pci_claim ntdrv:<service>` → AddDevice + IRP_MN_START_DEVICE. 미수정 ECHO.SYS(`T_DRV_LOAD.EXE`, 기본 이미지)와 미수정 ReactOS e1000 NDIS 5 미니포트 + ReactOS ndis.sys(QEMU `-device e1000`, `run_k64_pnp.py`, `T_DRV_PNP.EXE`): MiniportInitialize가 NIC를 초기화하고 START IRP가 STATUS_SUCCESS | GUEST_RUN (**TCG**) | PASS (T_DRV_LOAD 38/38, T_DRV_PNP 24/24; provider export 225). 프로토콜은 바인딩되지 않아 패킷은 오가지 않음 |
 
 `win98-regression`의 BLOCKED는 설치된 Windows 98 체크포인트(`build/win98-lab`, 사용자 제공 자산) 부재,
 SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행하지 않음)이다. Notepad++ 성공/실패를 이 문서는 단정하지 않는다.
@@ -43,7 +43,7 @@ DLL마다 첫 export를 `GetProcAddress`로 해석한다(러너가 패킹된 DLL
 서비스로 바인딩된 PCI 기능을 `ntdrv:<service>`로 claim(상태 화면의 PCI 표, `NtQuerySystemInformation` 0x101), AddDevice가 있으면
 PDO를 만들어 AddDevice와 IRP_MN_START_DEVICE(BAR·IRQ 자원)를 보낸다. `shzpnp unload`(DriverUnload, claim 해제)와 `shzpnp status`
 (로드된 이미지·디바이스 객체·PCI 기능)를 추가. 검증: 기본 이미지의 `T_DRV_LOAD.EXE`(ECHO.SYS 패키지 설치→로드→IOCTL→오류 경로→언로드→재로드,
-31/31)와 `run_k64_pnp.py`(ReactOS e1000 + ndis.sys, QEMU e1000: START IRP 성공 = MiniportInitialize가 NIC를 초기화, 24/24), 모두 TCG
+38/38)와 `run_k64_pnp.py`(ReactOS e1000 + ndis.sys, QEMU e1000: START IRP 성공 = MiniportInitialize가 NIC를 초기화, 24/24), 모두 TCG
 GUEST_RUN. x64 드라이버는 IRQL을 CR8에 직접 쓰므로(DDK 인라인) 호스트의 IRQL도 CR8이 되었고 스케줄러 틱이 CR8≥2에서 선점하지 않는다.
 못 한 것: NDIS 프로토콜(TCP/IP)이 없어 패킷은 오가지 않음, NDIS 6/KMDF/StorPort/WDDM 없음, 코퍼스 e1000 INF는 `--legacy`로만 설치.
 
