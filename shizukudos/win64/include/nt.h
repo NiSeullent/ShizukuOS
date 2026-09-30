@@ -113,6 +113,7 @@ NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
 #define K32Q_PROCESS_SETTINGS 13    /* ULONG {memory priority, power throttling control, state} */
 #define K32Q_CPU_CLOCK 14           /* ULONG64 time-stamp counter rate in Hz, measured by the kernel against its tick */
 #define K32Q_SAME_OBJECT 15         /* h = first handle, buffer = HANDLE second: STATUS_SUCCESS or STATUS_NOT_SAME_OBJECT */
+#define K32Q_THREAD_NAME 16         /* thread handle: the SetThreadDescription text (UTF-16, no terminator), *ret = its bytes */
 #define K32S_PRIORITY_CLASS 1       /* ULONG class value (process handle) */
 #define K32S_THREAD_BOOST 2         /* ULONG disable (thread handle) */
 #define K32S_THREAD_MEM_PRIORITY 3  /* ULONG 1..5 (thread handle) */
@@ -125,6 +126,7 @@ NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
 #define K32S_PROCESS_POWER 10       /* ULONG {control mask, state mask} (process handle) */
 #define K32S_SUSPEND_PROCESS 11     /* every thread of the process (NtSuspendProcess) */
 #define K32S_RESUME_PROCESS 12      /* NtResumeProcess */
+#define K32S_THREAD_NAME 13         /* thread handle: UTF-16 text without terminator (len 0 clears); > 65534 bytes is INVALID_PARAMETER */
 
 /* advapi32 support calls 0x9d-0x9e (kernel64/sysk32_sec.c; operation codes as in kernel64/ntsys.h) */
 NTSTATUS NTAPI NtShzToken(ULONG_PTR op, ULONG_PTR, ULONG_PTR, ULONG_PTR);

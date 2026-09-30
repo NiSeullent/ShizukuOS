@@ -147,6 +147,46 @@ K32API BOOL WINAPI SetThreadPriorityBoost(HANDLE h, BOOL disable)
     return TRUE;
 }
 
+/* ---------------------------------------------------------------- thread descriptions (Windows 10 1607+) */
+/* Both return HRESULT_FROM_NT(status): 0 on success, 0xD0000008 for a bad handle, 0xD000000D for a text longer than a
+ * UNICODE_STRING can carry (65534 bytes), as on Windows. The text lives in the kernel's thread record (kernel64/sysk32_proc.c),
+ * so any process holding a thread handle reads it, and it ends with the thread. */
+static HRESULT hr_from_nt(NTSTATUS st) { return st ? (HRESULT)(st | 0x10000000) : S_OK; }
+
+K32API HRESULT WINAPI SetThreadDescription(HANDLE h, PCWSTR desc)
+{
+    SIZE_T n = 0;
+    if (desc) while (desc[n]) ++n;
+    if (n * sizeof(WCHAR) > 65534) return hr_from_nt(STATUS_INVALID_PARAMETER);
+    return hr_from_nt(NtShzSetK32(K32S_THREAD_NAME, h, (PVOID)desc, (ULONG)(n * sizeof(WCHAR))));
+}
+
+K32API HRESULT WINAPI GetThreadDescription(HANDLE h, PWSTR *desc)
+{
+    ULONG bytes = 0;
+    WCHAR *s;
+    NTSTATUS st;
+    if (!desc) return hr_from_nt(STATUS_INVALID_PARAMETER);
+    *desc = 0;
+    st = NtShzQueryK32(K32Q_THREAD_NAME, h, 0, 0, &bytes);
+    if (st && st != STATUS_BUFFER_TOO_SMALL) return hr_from_nt(st);
+    s = LocalAlloc(LMEM_FIXED, bytes + sizeof(WCHAR));
+    if (!s) return hr_from_nt(STATUS_NO_MEMORY);
+    if (bytes) {
+        ULONG got = 0;
+        st = NtShzQueryK32(K32Q_THREAD_NAME, h, s, bytes, &got);
+        if (st == STATUS_BUFFER_TOO_SMALL) {                /* grew between the two calls: report what fits */
+            got = bytes;
+            st = 0;
+        }
+        if (st) { LocalFree(s); return hr_from_nt(st); }
+        bytes = got < bytes ? got : bytes;
+    }
+    s[bytes / sizeof(WCHAR)] = 0;
+    *desc = s;
+    return S_OK;
+}
+
 /* ---------------------------------------------------------------- process / thread information classes */
 #define THROTTLE_VALID (PROCESS_POWER_THROTTLING_EXECUTION_SPEED | 0x4)   /* EXECUTION_SPEED, IGNORE_TIMER_RESOLUTION */
 

@@ -297,6 +297,14 @@ void process_thread_gone(process_t *p)
 {
     thread_t *t = thread_current();
     ipc_thread_exit(t);
+    if (t->desc) {                              /* SetThreadDescription text */
+        uint16_t *d = t->desc;
+        const uint64_t f = irq_save();
+        t->desc = 0;
+        t->desc_bytes = 0;
+        irq_restore(f);
+        kfree(d);
+    }
     if (t->impersonation) {                     /* an impersonation token (sysk32_sec.c) ends with the thread */
         kobject_t *tok = t->impersonation;
         t->impersonation = 0;

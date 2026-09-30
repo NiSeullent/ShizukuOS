@@ -30,10 +30,11 @@ extern int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t 
 /* query classes (NtShzQueryK32) and set classes (NtShzSetK32); the same numbers are in win64/include/nt.h */
 enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32Q_PROCESS_LIST = 4, K32Q_MODULE_LIST = 5,
        K32Q_SYSTEM_PERF = 7, K32Q_PROCESS_MEMORY = 8, K32Q_WORKING_SET_EX = 9, K32Q_IMAGE_PATH = 10, K32Q_FIRMWARE = 11,
-       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13, K32Q_CPU_CLOCK = 14, K32Q_SAME_OBJECT = 15 };
+       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13, K32Q_CPU_CLOCK = 14, K32Q_SAME_OBJECT = 15, K32Q_THREAD_NAME = 16 };
 enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
        K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10,
-       K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12 };
+       K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12, K32S_THREAD_NAME = 13 };
+#define THREAD_NAME_MAX_BYTES 65534u            /* SetThreadDescription: a UNICODE_STRING length (USHRT_MAX, as Windows/Wine bound it) */
 
 /* FILETIME of a scheduler tick: the wall clock at the first query minus the ticks counted by then gives the boot instant once,
  * so a thread's creation or exit time reads the same on every query. */
@@ -541,6 +542,27 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
             if (e.base == p->image_base) return put_out(cur, buf, len, retlen, e.path, strlen(e.path) + 1);
         return STATUS_INVALID_HANDLE;                             /* not a Win64 process (no executable image) */
     }
+    case K32Q_THREAD_NAME: {                                    /* GetThreadDescription: the UTF-16 text, ReturnLength = its bytes (0: none) */
+        thread_t *t = 0;
+        kobject_t *o = 0;
+        uint16_t *copy = 0;
+        uint32_t bytes = 0;
+        uint64_t f;
+        int32_t st;
+        if (h == CURRENT_THREAD_HANDLE) t = thread_current();
+        else if (!(o = handle_lookup(cur, h, OB_THREAD))) return STATUS_INVALID_HANDLE;
+        f = irq_save();                                         /* the owner may replace or free the text at any preemption */
+        if (o) t = o->u.thr.t;
+        if (t && t->desc && t->desc_bytes) {
+            copy = kmalloc(t->desc_bytes);
+            if (copy) { memcpy(copy, t->desc, t->desc_bytes); bytes = t->desc_bytes; }
+        }
+        irq_restore(f);
+        if (t && t->desc_bytes && !copy) return STATUS_NO_MEMORY;
+        st = put_out(cur, buf, len, retlen, copy, bytes);
+        kfree(copy);
+        return st;
+    }
     case K32Q_SAME_OBJECT: {                                    /* CompareObjectHandles (NtCompareObjects) */
         uint64_t h2 = 0;
         kobject_t *o1 = 0, *o2 = 0;
@@ -656,6 +678,29 @@ int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t
         }
         irq_restore(f);
         return t ? STATUS_SUCCESS : STATUS_THREAD_IS_TERMINATING;
+    }
+    case K32S_THREAD_NAME: {                                    /* SetThreadDescription: buf/len = the UTF-16 text (len 0 clears) */
+        thread_t *t = 0;
+        kobject_t *o = 0;
+        uint16_t *text = 0, *old;
+        uint64_t f;
+        if (len > THREAD_NAME_MAX_BYTES || (len & 1)) return STATUS_INVALID_PARAMETER;
+        if (h == CURRENT_THREAD_HANDLE) t = thread_current();
+        else if (!(o = handle_lookup(cur, h, OB_THREAD))) return STATUS_INVALID_HANDLE;
+        if (len) {
+            text = kmalloc(len);
+            if (!text) return STATUS_NO_MEMORY;
+            if (copy_from_user(cur, text, buf, len)) { kfree(text); return STATUS_ACCESS_VIOLATION; }
+        }
+        f = irq_save();
+        if (o) t = o->u.thr.t;
+        if (!t || t->state == TS_ZOMBIE) { irq_restore(f); kfree(text); return STATUS_THREAD_IS_TERMINATING; }
+        old = t->desc;
+        t->desc = text;
+        t->desc_bytes = (uint32_t)len;
+        irq_restore(f);
+        kfree(old);
+        return STATUS_SUCCESS;
     }
     case K32S_DISCARD: case K32S_LOCK: case K32S_UNLOCK: case K32S_PREFETCH: {
         process_t *p = proc_of_handle(cur, h);
