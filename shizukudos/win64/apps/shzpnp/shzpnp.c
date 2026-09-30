@@ -1290,7 +1290,7 @@ static int cmd_unload(int argc, char **argv)
     case 0: printf(" (unloaded: DriverUnload ran, PCI claims released)\n"); break;
     case STATUS_OBJECT_NAME_NOT_FOUND_: printf(" not loaded\n"); break;
     case STATUS_INVALID_DEVICE_REQUEST_: printf(" the driver has no DriverUnload routine; it stays loaded\n"); break;
-    case STATUS_CONNECTION_IN_USE_: printf(" another loaded image imports from it; it stays loaded\n"); break;
+    case STATUS_CONNECTION_IN_USE_: printf(" in use (another loaded image imports from it, or a device it created is open); it stays loaded\n"); break;
     default: printf("\n"); break;
     }
     return st == 0 ? 0 : 1;
