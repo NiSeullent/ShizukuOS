@@ -198,6 +198,16 @@ def lib_aliases():
 WEBKIT_FLAGS = ["-mcx16", "-fms-extensions", "-DU_STATIC_IMPLEMENTATION"]
 
 
+def build_shims():
+    """compat/shzwk_missing.c: interim stand-ins for Windows functions the Shizuku runtime does not export yet (listed
+    in W1.md with their owners; delete each when the runtime has it). Linked with the Shizuku ntdll import library
+    ahead of the sysroot's kernel32, so mingw-w64's reference to __C_specific_handler binds to ntdll's export
+    (Windows' kernel32 forwards it there; the Shizuku kernel32 has no such forwarder yet)."""
+    obj = OUT / "shzwk_missing.o"
+    run([CC, "-O2", "-Wall", "-Werror", "-Wno-unused-command-line-argument", "-c", HERE / "compat" / "shzwk_missing.c", "-o", obj])
+    return [str(obj), str(W64OUT / "libntdll.a"), str(W64OUT / "libbcryptprimitives.a")]
+
+
 # ---------------------------------------------------------------- WebKit
 def configure_jsc(tree, icu, config, log):
     bdir = OUT / f"jsc-{config}"
@@ -209,7 +219,8 @@ def configure_jsc(tree, icu, config, log):
            f"-DSHZ_WEBKIT_TOOLCHAIN={TC / 'toolchain.cmake'}", f"-DSHZ_ICU_PREFIX={icu}", f"-DSHZ_LIBALIAS={lib_aliases()}",
            "-DCMAKE_BUILD_TYPE=Release", "-DPORT=JSCOnly", "-DDEVELOPER_MODE=OFF", "-DUSE_SYSTEM_UNIFDEF=ON",
            "-DENABLE_API_TESTS=OFF", "-DENABLE_REMOTE_INSPECTOR=OFF", "-DENABLE_TOOLS=OFF", f"-DICU_ROOT={icu}",
-           f"-DCMAKE_C_FLAGS={' '.join(WEBKIT_FLAGS)}", f"-DCMAKE_CXX_FLAGS={' '.join(WEBKIT_FLAGS)}", *CONFIGS[config]]
+           f"-DCMAKE_C_FLAGS={' '.join(WEBKIT_FLAGS)}", f"-DCMAKE_CXX_FLAGS={' '.join(WEBKIT_FLAGS)}",
+           f"-DCMAKE_CXX_STANDARD_LIBRARIES={' '.join(build_shims())}", *CONFIGS[config]]
     env = dict(os.environ, SHZ_WEBKIT_TOOLCHAIN=str(TC / "toolchain.cmake"), SHZ_ICU_PREFIX=str(icu),
                SHZ_LIBALIAS=str(OUT / "libalias"))
     run(cmd, timeout=900, env=env)
@@ -219,7 +230,7 @@ def configure_jsc(tree, icu, config, log):
 
 def build_wkbatch():
     exe = OUT / "wkbatch.exe"
-    cmd = [CC, "-O2", "-Wall", "-Werror", HERE / "tests" / "wkbatch.c", "-o", exe]
+    cmd = [CC, "-O2", "-Wall", "-Werror", "-Wno-unused-command-line-argument", HERE / "tests" / "wkbatch.c", "-o", exe]
     run(cmd)
     return exe, cmd
 
@@ -277,8 +288,7 @@ def main():
     dest.mkdir(exist_ok=True)
     for old in dest.glob("*"):
         old.unlink()
-    for p in sorted(set(bdir.glob("bin/*.exe")) | set(bdir.glob("bin/*.dll"))):
-        shutil.copyfile(p, dest / p.name)
+    shutil.copyfile(bdir / "bin" / "jsc.exe", dest / "jsc.exe")          # bin/ also has build-time tools (LLInt*Extractor)
     for d in RUNTIME_DLLS:
         shutil.copyfile(TC / TRIPLE / "bin" / d, dest / d)
     batch, batch_cmd = build_wkbatch()
