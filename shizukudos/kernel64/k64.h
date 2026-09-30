@@ -152,6 +152,8 @@ struct thread {
     int boost_disabled;                         /* SetThreadPriorityBoost setting (the scheduler never boosts) */
     uint32_t mem_priority;                      /* SetThreadInformation(ThreadMemoryPriority) setting, 1..5 */
     uint32_t power_control, power_state;        /* SetThreadInformation(ThreadPowerThrottling) setting (no scheduler effect) */
+    uint16_t *desc;                             /* SetThreadDescription text (UTF-16, kmalloc'd, desc_bytes long; 0 = none); freed with the thread */
+    uint32_t desc_bytes;
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
