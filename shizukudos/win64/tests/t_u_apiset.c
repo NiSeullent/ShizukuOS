@@ -70,8 +70,8 @@ int main(void)
     {
         HMODULE v = LoadLibraryW(L"api-ms-win-core-version-l1-1-0.dll");
         size_t_ f = v ? (size_t_)GetProcAddress(v, "GetFileVersionInfoSizeW") : 0;
-        U_CHECK("GetFileVersionInfoSizeW through the version contract (t_u_apiset.exe has no version resource)", f && f(L"C:\\SHZ\\TESTS\\T_U_APISET.EXE", 0) == 0 &&
-                GetLastError() == ERROR_RESOURCE_DATA_NOT_FOUND);
+        U_CHECK("GetFileVersionInfoSizeW through the version contract (every built image carries a version resource)", f && f(L"C:\\SHZ\\TESTS\\T_U_APISET.EXE", 0) > 0 &&
+                f(L"C:\\SHZ\\TESTS\\NO_SUCH.EXE", 0) == 0 && GetLastError() == ERROR_FILE_NOT_FOUND);
     }
 
     SetLastError(0);

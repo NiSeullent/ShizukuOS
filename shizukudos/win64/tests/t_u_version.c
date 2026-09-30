@@ -136,12 +136,87 @@ int main(void)
     U_CHECK("VerQueryValue(NULL block) fails", !VerQueryValueW(0, L"\\", &p, &len));
     U_CHECK("VerQueryValue(NULL sub-block) fails", !VerQueryValueW(buf, 0, &p, &len));
 
-    /* ---- files without usable version data ---- */
+    /* ---- every image the tree builds carries a VS_VERSIONINFO (build.py + tools/verres.py): the system DLLs report
+     * the OS version the loader puts in the PEB (10.0.22631, kernel64/ldr.c), which is what a program derives the Windows
+     * version from when it reads kernel32.dll's file version (Chromium's base::win::OSInfo does exactly that) ---- */
+    {
+        static const struct { const WCHAR *name; const char *label; DWORD type; } imgs[] = {
+            { L"kernel32.dll", "kernel32.dll by bare name (DLL search order: the system directory)", VFT_DLL },
+            { L"C:\\SHZ\\SYS64\\kernel32.dll", "kernel32.dll by full path", VFT_DLL },
+            { L"ntdll.dll", "ntdll.dll", VFT_DLL },
+            { L"version.dll", "version.dll (this DLL)", VFT_DLL },
+            { L"advapi32", "advapi32 without an extension (.dll appended as LoadLibrary does)", VFT_DLL },
+            { L"user32.dll", "user32.dll", VFT_DLL },
+            { L"crypt32.dll", "crypt32.dll (Wine port, Wine's own version.rc)", VFT_DLL },
+            { L"dwrite.dll", "dwrite.dll (Wine port without a Wine version.rc: generated resource)", VFT_DLL },
+            { L"C:\\SHZ\\TESTS\\T_HELLO.EXE", "T_HELLO.EXE (an application without its own .rc)", VFT_APP },
+        };
+        unsigned i;
+        for (i = 0; i < sizeof imgs / sizeof imgs[0]; ++i) {
+            static unsigned char vb[4096];
+            char nm[200];
+            DWORD sz = GetFileVersionInfoSizeW(imgs[i].name, 0);
+            VS_FIXEDFILEINFO *f = 0;
+            UINT l = 0;
+            BOOL got = sz && sz <= sizeof vb && GetFileVersionInfoW(imgs[i].name, 0, sz, vb) && VerQueryValueW(vb, L"\\", (LPVOID *)&f, &l) && l == 52;
+            snprintf(nm, sizeof nm, "version resource of %s", imgs[i].label);
+            U_CHECKF(nm, got, "size=%u err=%u", (unsigned)sz, (unsigned)GetLastError());
+            if (!got) continue;
+            snprintf(nm, sizeof nm, "...FILETYPE %s and a file version", imgs[i].type == VFT_DLL ? "VFT_DLL" : "VFT_APP");
+            U_CHECKF(nm, f->dwFileType == imgs[i].type && (f->dwFileVersionMS | f->dwFileVersionLS), "type=%u ms=%x", (unsigned)f->dwFileType, (unsigned)f->dwFileVersionMS);
+            if (imgs[i].name[0] != 'c' && imgs[i].name[0] != 'C') {     /* crypt32 keeps Wine's version; the others carry the OS version */
+                LPVOID sv = 0;
+                UINT sl = 0;
+                snprintf(nm, sizeof nm, "...file version 10.0.22631.1 (the PEB OS version)");
+                U_CHECKF(nm, f->dwFileVersionMS == 0x000a0000 && f->dwFileVersionLS == (22631u << 16 | 1), "%x.%x", (unsigned)f->dwFileVersionMS, (unsigned)f->dwFileVersionLS);
+                U_CHECK("...StringFileInfo\\040904b0\\FileVersion = \"10.0.22631.1\"",
+                        VerQueryValueW(vb, L"\\StringFileInfo\\040904b0\\FileVersion", &sv, &sl) && sv && u_ascii_eq_w(sv, "10.0.22631.1"));
+            }
+        }
+        U_CHECK("GetFileVersionInfoSizeExW(FILE_VER_GET_NEUTRAL, kernel32.dll) returns the same size",
+                GetFileVersionInfoSizeExW(0x2, L"kernel32.dll", 0) == GetFileVersionInfoSizeW(L"kernel32.dll", 0));
+        U_CHECK("GetFileVersionInfoSizeExW with an unknown flag fails with ERROR_INVALID_PARAMETER",
+                !GetFileVersionInfoSizeExW(0x100, L"kernel32.dll", 0) && GetLastError() == ERROR_INVALID_PARAMETER);
+        U_CHECK("a bare name that no directory has fails with ERROR_FILE_NOT_FOUND",
+                !GetFileVersionInfoSizeW(L"no_such_module_xyz.dll", 0) && GetLastError() == ERROR_FILE_NOT_FOUND);
+    }
+
+    /* ---- files without usable version data: every image the build produces has a version resource now, so the PE
+     * without a resource directory is a fixture this program writes itself (a minimal PE32+ image: DOS header, NT headers
+     * with an empty data directory, one section) ---- */
+    {
+        static unsigned char pe[1024];
+        HANDLE hf;
+        DWORD wr = 0;
+        IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)pe;
+        IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(pe + 0x80);
+        IMAGE_SECTION_HEADER *sh = (IMAGE_SECTION_HEADER *)(nt + 1);
+        memset(pe, 0, sizeof pe);
+        dos->e_magic = IMAGE_DOS_SIGNATURE;
+        dos->e_lfanew = 0x80;
+        nt->Signature = IMAGE_NT_SIGNATURE;
+        nt->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
+        nt->FileHeader.NumberOfSections = 1;
+        nt->FileHeader.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+        nt->FileHeader.Characteristics = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_DLL;
+        nt->OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+        nt->OptionalHeader.SectionAlignment = 0x1000;
+        nt->OptionalHeader.FileAlignment = 0x200;
+        nt->OptionalHeader.SizeOfImage = 0x2000;
+        nt->OptionalHeader.SizeOfHeaders = 0x200;
+        nt->OptionalHeader.NumberOfRvaAndSizes = 16;
+        memcpy(sh->Name, ".text", 5);
+        sh->Misc.VirtualSize = 0x10; sh->VirtualAddress = 0x1000; sh->SizeOfRawData = 0x200; sh->PointerToRawData = 0x200;
+        sh->Characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
+        hf = CreateFileW(L"C:\\SHZ\\TESTS\\NORSRC.DLL", GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+        U_CHECK("the no-resource PE fixture can be written", hf != INVALID_HANDLE_VALUE && WriteFile(hf, pe, 0x400, &wr, 0) && wr == 0x400 && CloseHandle(hf));
+    }
     SetLastError(0);
-    U_CHECK("a PE without a resource directory (kernel32.dll): size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\SYS64\\kernel32.dll", 0) == 0);
+    U_CHECK("a PE without a resource directory (NORSRC.DLL fixture): size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NORSRC.DLL", 0) == 0);
     err = GetLastError();
     U_CHECKF("...with ERROR_RESOURCE_DATA_NOT_FOUND", err == ERROR_RESOURCE_DATA_NOT_FOUND, "err=%u", (unsigned)err);
-    U_CHECK("GetFileVersionInfoW of it fails", !GetFileVersionInfoW(L"C:\\SHZ\\SYS64\\kernel32.dll", 0, sizeof buf, buf));
+    U_CHECK("GetFileVersionInfoW of it fails", !GetFileVersionInfoW(L"C:\\SHZ\\TESTS\\NORSRC.DLL", 0, sizeof buf, buf));
+    DeleteFileW(L"C:\\SHZ\\TESTS\\NORSRC.DLL");
     SetLastError(0);
     U_CHECK("a nonexistent file: size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NO_SUCH_FILE.DLL", 0) == 0);
     err = GetLastError();
