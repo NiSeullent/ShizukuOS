@@ -147,6 +147,46 @@ K32API BOOL WINAPI SetThreadPriorityBoost(HANDLE h, BOOL disable)
     return TRUE;
 }
 
+/* ---------------------------------------------------------------- thread descriptions (Windows 10 1607+) */
+/* Both return HRESULT_FROM_NT(status): 0 on success, 0xD0000008 for a bad handle, 0xD000000D for a text longer than a
+ * UNICODE_STRING can carry (65534 bytes), as on Windows. The text lives in the kernel's thread record (kernel64/sysk32_proc.c),
+ * so any process holding a thread handle reads it, and it ends with the thread. */
+static HRESULT hr_from_nt(NTSTATUS st) { return st ? (HRESULT)(st | 0x10000000) : S_OK; }
+
+K32API HRESULT WINAPI SetThreadDescription(HANDLE h, PCWSTR desc)
+{
+    SIZE_T n = 0;
+    if (desc) while (desc[n]) ++n;
+    if (n * sizeof(WCHAR) > 65534) return hr_from_nt(STATUS_INVALID_PARAMETER);
+    return hr_from_nt(NtShzSetK32(K32S_THREAD_NAME, h, (PVOID)desc, (ULONG)(n * sizeof(WCHAR))));
+}
+
+K32API HRESULT WINAPI GetThreadDescription(HANDLE h, PWSTR *desc)
+{
+    ULONG bytes = 0;
+    WCHAR *s;
+    NTSTATUS st;
+    if (!desc) return hr_from_nt(STATUS_INVALID_PARAMETER);
+    *desc = 0;
+    st = NtShzQueryK32(K32Q_THREAD_NAME, h, 0, 0, &bytes);
+    if (st && st != STATUS_BUFFER_TOO_SMALL) return hr_from_nt(st);
+    s = LocalAlloc(LMEM_FIXED, bytes + sizeof(WCHAR));
+    if (!s) return hr_from_nt(STATUS_NO_MEMORY);
+    if (bytes) {
+        ULONG got = 0;
+        st = NtShzQueryK32(K32Q_THREAD_NAME, h, s, bytes, &got);
+        if (st == STATUS_BUFFER_TOO_SMALL) {                /* grew between the two calls: report what fits */
+            got = bytes;
+            st = 0;
+        }
+        if (st) { LocalFree(s); return hr_from_nt(st); }
+        bytes = got < bytes ? got : bytes;
+    }
+    s[bytes / sizeof(WCHAR)] = 0;
+    *desc = s;
+    return S_OK;
+}
+
 /* ---------------------------------------------------------------- process / thread information classes */
 #define THROTTLE_VALID (PROCESS_POWER_THROTTLING_EXECUTION_SPEED | 0x4)   /* EXECUTION_SPEED, IGNORE_TIMER_RESOLUTION */
 
@@ -736,6 +776,64 @@ static struct { WCHAR path[MAX_PATH]; PVOID ctx; int used; } g_wer[WER_MAX_MODUL
 static SRWLOCK g_wer_lock = SRWLOCK_INIT;
 
 static int weq(const WCHAR *a, const WCHAR *b) { while (*a && *a == *b) { ++a; ++b; } return *a == *b; }
+
+/* RegisterApplicationRestart / UnregisterApplicationRestart / GetApplicationRestartSettings (Windows Vista+). There is no Windows
+ * Error Reporting service to restart the program after a crash, so the registration is only recorded (and reported back), as the
+ * WER runtime exception modules below are: the HRESULTs, limits and validation follow the documentation. */
+#define RESTART_MAX_CMD_LINE 1024
+#define RESTART_NO_CRASH 1
+#define RESTART_NO_HANG 2
+#define RESTART_NO_PATCH 4
+#define RESTART_NO_REBOOT 8
+static SRWLOCK g_restart_lock = SRWLOCK_INIT;
+static int g_restart_set;
+static DWORD g_restart_flags;
+static WCHAR g_restart_cmd[RESTART_MAX_CMD_LINE + 1];
+
+K32API HRESULT WINAPI RegisterApplicationRestart(PCWSTR cmd, DWORD flags)
+{
+    size_t n = cmd ? k32_wlen(cmd) : 0;
+    if (flags & ~15u) return E_INVALIDARG;
+    if (n > RESTART_MAX_CMD_LINE) return E_INVALIDARG;
+    AcquireSRWLockExclusive(&g_restart_lock);
+    if (n) memcpy(g_restart_cmd, cmd, n * sizeof(WCHAR));
+    g_restart_cmd[n] = 0;
+    g_restart_flags = flags;
+    g_restart_set = 1;
+    ReleaseSRWLockExclusive(&g_restart_lock);
+    return S_OK;
+}
+
+K32API HRESULT WINAPI UnregisterApplicationRestart(void)
+{
+    HRESULT hr = S_OK;
+    AcquireSRWLockExclusive(&g_restart_lock);
+    if (!g_restart_set) hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    g_restart_set = 0;
+    ReleaseSRWLockExclusive(&g_restart_lock);
+    return hr;
+}
+
+K32API HRESULT WINAPI GetApplicationRestartSettings(HANDLE process, PWSTR cmd, PDWORD size, PDWORD flags)
+{
+    HRESULT hr = S_OK;
+    DWORD n;
+    if (!size || (!cmd && *size)) return E_INVALIDARG;
+    if (process != GetCurrentProcess() && GetProcessId(process) != GetCurrentProcessId()) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);   /* another process' registration is not kept */
+    AcquireSRWLockShared(&g_restart_lock);
+    if (!g_restart_set) hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    else {
+        n = (DWORD)k32_wlen(g_restart_cmd) + 1;
+        if (*size < n) { *size = n; hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER); }
+        else {
+            memcpy(cmd, g_restart_cmd, n * sizeof(WCHAR));
+            *size = n;
+            if (flags) *flags = g_restart_flags;
+        }
+    }
+    ReleaseSRWLockShared(&g_restart_lock);
+    return hr;
+}
 
 K32API HRESULT WINAPI WerRegisterRuntimeExceptionModule(PCWSTR dll, PVOID ctx)
 {

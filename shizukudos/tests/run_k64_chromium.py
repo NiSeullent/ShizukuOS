@@ -29,6 +29,7 @@ is reached), 2 = the run could not be performed (missing inputs).
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -45,7 +46,10 @@ import run_k64_disk as disk  # noqa: E402
 
 K64S = BUILD / "kernel64s"
 WIN64 = BUILD / "win64"
-DEFAULT_TREE = disk.SCRATCH / "chromium-full" / "chrome-win"
+# Inputs live outside the repository: $SHZ_SCRATCH (or the runner's own scratch default) holds chromium-full/chrome-win
+# (the unpacked Win_x64 snapshot 1706750 chrome-win.zip pinned in ELECTRON_TARGET.md section 1) and the FAT32 image.
+SCRATCH = Path(os.environ.get("SHZ_SCRATCH", str(disk.SCRATCH)))
+DEFAULT_TREE = SCRATCH / "chromium-full" / "chrome-win"
 M2_PAGE = (b"<!doctype html><html><head><title>shz-m2</title></head><body><p id=\"m\">ShizukuDOS M2 probe</p><script>"
            b"document.getElementById('m').textContent += ' ' + (6*7);</script></body></html>")
 M2_EXPECT = '<p id="m">ShizukuDOS M2 probe 42</p>'
@@ -114,7 +118,7 @@ def main():
     ap.add_argument("--timeout", type=int, default=1800, help="host-side QEMU timeout (s)")
     ap.add_argument("--guest-timeout", type=int, default=1200, help="seconds the guest lets chrome.exe run")
     ap.add_argument("--chromium", default=str(DEFAULT_TREE), help="chrome-win tree (read-only)")
-    ap.add_argument("--chromium-image", default=str(disk.SCRATCH / "k64-chromium-fat32.img"))
+    ap.add_argument("--chromium-image", default=str(SCRATCH / "k64-chromium-fat32.img"))
     ap.add_argument("--args", default=DEFAULT_ARGS, help="chrome.exe arguments")
     ap.add_argument("--expect", default=M2_EXPECT, help="line that must appear in the output for a PASS")
     ap.add_argument("--out", default=str(BUILD / "kernel64s" / "run_chromium"))

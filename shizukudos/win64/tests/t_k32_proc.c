@@ -609,8 +609,101 @@ static void test_heaps(void)
     CHECK(HeapSetInformation(0, HeapEnableTerminationOnCorruption, 0, 0), "HeapEnableTerminationOnCorruption");
 }
 
+/* SetThreadDescription / GetThreadDescription (Windows 10 1607+): HRESULT_FROM_NT codes, LocalAlloc'd result, empty string
+ * for a thread without a description, readable through any handle to the thread, NULL clears. */
+HRESULT WINAPI SetThreadDescription(HANDLE, PCWSTR);
+HRESULT WINAPI GetThreadDescription(HANDLE, PWSTR *);
+/* RegisterApplicationRestart family: recorded, validated, reported back (no WER service restarts anything). */
+static void test_restart(void)
+{
+    WCHAR buf[64];
+    DWORD n = 64, fl = 77;
+    static WCHAR big[1100];
+    int i;
+    HRESULT hr = GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl);
+    CHECKV(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "GetApplicationRestartSettings before any registration: ERROR_NOT_FOUND", "hr=%lx", (long)hr);
+    hr = UnregisterApplicationRestart();
+    CHECKV(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "UnregisterApplicationRestart without a registration: ERROR_NOT_FOUND", "hr=%lx", (long)hr);
+    CHECK(RegisterApplicationRestart(L"--restart --x", 4 | 8) == S_OK, "RegisterApplicationRestart(cmd, NO_PATCH|NO_REBOOT)");
+    n = 64; fl = 0;
+    hr = GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl);
+    CHECKV(hr == S_OK && fl == 12 && n == 14 && k32t_weq(buf, L"--restart --x"), "GetApplicationRestartSettings returns command line (size includes the NUL) and flags", "hr=%lx n=%lu fl=%lu", (long)hr, (unsigned long)n, (unsigned long)fl);
+    n = 5;
+    hr = GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl);
+    CHECKV(hr == HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) && n == 14, "a short buffer: ERROR_INSUFFICIENT_BUFFER and the needed size", "hr=%lx n=%lu", (long)hr, (unsigned long)n);
+    CHECK(RegisterApplicationRestart(L"x", 16) == E_INVALIDARG, "an unknown flag bit is E_INVALIDARG");
+    for (i = 0; i < 1025; ++i) big[i] = L'a';
+    big[1025] = 0;
+    CHECK(RegisterApplicationRestart(big, 0) == E_INVALIDARG, "a command line over RESTART_MAX_CMD_LINE (1024) is E_INVALIDARG");
+    big[1024] = 0;
+    CHECK(RegisterApplicationRestart(big, 0) == S_OK, "exactly 1024 characters are accepted");
+    CHECK(RegisterApplicationRestart(0, 0) == S_OK, "a NULL command line is an empty one");
+    n = 64;
+    CHECK(GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl) == S_OK && n == 1 && buf[0] == 0 && fl == 0, "... reported back empty");
+    CHECK(UnregisterApplicationRestart() == S_OK, "UnregisterApplicationRestart");
+    n = 64;
+    CHECK(GetApplicationRestartSettings(GetCurrentProcess(), buf, &n, &fl) == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "... after which nothing is registered");
+    CHECK(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "RegisterApplicationRestart") != 0, "the name resolves through GetProcAddress (Chromium looks it up)");
+}
+
+static DWORD WINAPI desc_worker(LPVOID arg) { return (DWORD)(ULONG_PTR)arg; }
+static void test_description(void)
+{
+    PWSTR s = (PWSTR)1;
+    HRESULT hr;
+    HANDLE th;
+    DWORD tid;
+    static WCHAR big[40000];
+    int i;
+    hr = GetThreadDescription(GetCurrentThread(), &s);
+    CHECKV(hr == S_OK && s && s[0] == 0, "GetThreadDescription of an unnamed thread is S_OK with an empty string", "hr=%lx", (long)hr);
+    if (s) LocalFree(s);
+    hr = SetThreadDescription(GetCurrentThread(), L"shz-main \u00e9");
+    CHECKV(hr == S_OK, "SetThreadDescription on the current thread", "hr=%lx", (long)hr);
+    s = 0;
+    hr = GetThreadDescription(GetCurrentThread(), &s);
+    CHECKV(hr == S_OK && s && k32t_weq(s, L"shz-main \u00e9"), "GetThreadDescription returns the text just set", "hr=%lx", (long)hr);
+    if (s) LocalFree(s);
+    th = CreateThread(0, 0, desc_worker, (LPVOID)7, CREATE_SUSPENDED, &tid);
+    CHECK(th != 0, "worker thread created suspended");
+    hr = SetThreadDescription(th, L"shz-worker");
+    CHECKV(hr == S_OK, "SetThreadDescription through another thread's handle", "hr=%lx", (long)hr);
+    s = 0;
+    hr = GetThreadDescription(th, &s);
+    CHECKV(hr == S_OK && s && k32t_weq(s, L"shz-worker"), "... read back through that handle", "hr=%lx", (long)hr);
+    if (s) LocalFree(s);
+    s = 0;
+    hr = GetThreadDescription(GetCurrentThread(), &s);
+    CHECK(hr == S_OK && s && k32t_weq(s, L"shz-main \u00e9"), "the current thread's own description is unchanged");
+    if (s) LocalFree(s);
+    hr = SetThreadDescription(th, NULL);
+    s = 0;
+    CHECKV(hr == S_OK && GetThreadDescription(th, &s) == S_OK && s && s[0] == 0, "SetThreadDescription(NULL) clears it", "hr=%lx", (long)hr);
+    if (s) LocalFree(s);
+    ResumeThread(th);
+    CHECK(WaitForSingleObject(th, 5000) == WAIT_OBJECT_0, "worker exited");
+    CloseHandle(th);
+    hr = SetThreadDescription((HANDLE)(ULONG_PTR)0x7fff1, L"x");
+    CHECKV(hr == (HRESULT)0xD0000008, "SetThreadDescription on a bad handle is HRESULT_FROM_NT(STATUS_INVALID_HANDLE)", "hr=%lx", (long)hr);
+    s = (PWSTR)1;
+    hr = GetThreadDescription((HANDLE)(ULONG_PTR)0x7fff1, &s);
+    CHECKV(hr == (HRESULT)0xD0000008 && s == 0, "GetThreadDescription on a bad handle: same code, *desc NULL", "hr=%lx", (long)hr);
+    for (i = 0; i < 39999; ++i) big[i] = L'a';
+    big[39999] = 0;
+    hr = SetThreadDescription(GetCurrentThread(), big);
+    CHECKV(hr == (HRESULT)0xD000000D, "a 39999-char description exceeds a UNICODE_STRING: HRESULT_FROM_NT(STATUS_INVALID_PARAMETER)", "hr=%lx", (long)hr);
+    big[32767] = 0;
+    hr = SetThreadDescription(GetCurrentThread(), big);
+    s = 0;
+    CHECKV(hr == S_OK && GetThreadDescription(GetCurrentThread(), &s) == S_OK && s && k32t_wlen(s) == 32767, "a 32767-char description (65534 bytes) is accepted and read back whole", "hr=%lx len=%d", (long)hr, s ? k32t_wlen(s) : -1);
+    if (s) LocalFree(s);
+    SetThreadDescription(GetCurrentThread(), L"t_k32_proc main");
+}
+
 int main(void)
 {
+    test_restart();
+    test_description();
     test_times();
     test_counts_priority();
     test_mitigation();

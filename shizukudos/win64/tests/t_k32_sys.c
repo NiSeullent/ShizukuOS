@@ -90,6 +90,14 @@ static void test_identity(void)
     CHECK(!GetComputerNameExW(ComputerNameMax, name, &n) && GetLastError() == ERROR_INVALID_PARAMETER, "ComputerNameMax is not a format");
     CHECK(GetProductInfo(10, 0, 0, 0, &type) && type == PRODUCT_UNDEFINED, "GetProductInfo: not a Windows edition (PRODUCT_UNDEFINED)");
 
+    {   /* this program has no manifest: GetVersionExW lies like Windows 8.1+ does to a manifest-less program */
+        OSVERSIONINFOEXW ov;
+        memset(&ov, 0, sizeof ov);
+        ov.dwOSVersionInfoSize = sizeof ov;
+        CHECK(GetVersionExW((LPOSVERSIONINFOW)&ov) && ov.dwMajorVersion == 6 && ov.dwMinorVersion == 2 && ov.dwBuildNumber == 9200 &&
+              ov.wProductType == VER_NT_WORKSTATION && ov.dwPlatformId == VER_PLATFORM_WIN32_NT,
+              "GetVersionExW without a compatibility manifest reports 6.2.9200 (workstation), while the PEB says 10.0");
+    }
     CHECK(VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL) == 0x18, "VerSetConditionMask(MAJOR, >=) = 3 << 3");
     CHECK(VerSetConditionMask(0x18, VER_MINORVERSION, VER_GREATER_EQUAL) == 0x1b, "... plus MINOR at bits 0-2");
     CHECK(VerSetConditionMask(0, VER_MAJORVERSION | VER_MINORVERSION, VER_EQUAL) == 0x08, "with two type bits only the higher one is set");

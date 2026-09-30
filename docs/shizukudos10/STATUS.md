@@ -371,3 +371,15 @@ lead 병합 작업 중이다.
 ## 4. 저장소 반영 상태
 
 브랜치 `wip/shizukudos-10-toydzv`는 원격에 올라가 있다. PR #2, #3이 main에 병합됐고(#3은 squash), 이후 작업은 새 PR로 추적한다.
+
+## 5. K4: Chromium 64비트 게스트 실행 (브랜치 `wip/k4-chromium-run`, 보고서 `reports/K4.md`)
+
+Chromium Win_x64 스냅샷 1706750(`chrome.exe` 157.0.8079.0)을 `run_k64_chromium.py`(FAT32 D:, autorun, QEMU TCG)로 실행했다.
+GUEST_RUN. chrome.exe·chrome_elf.dll·chrome.dll(82,091페이지, 지연 매핑)은 모두 로드되고 crashpad 핸들러 자식 프로세스까지 뜬 뒤,
+브라우저 프로세스는 Chromium의 delay-load 실패 훅(`delay_load_failure_support.cc:39`, 모든 delay-load 실패가 FATAL)에서
+`exit=0x80000003, faulted=0`로 끝난다. 커밋된 트리의 도달점(run 1): `DelayLoad-ModuleName = IPHLPAPI.DLL`(DLL 없음, K5 소유).
+커밋하지 않은 로컬 shim으로 그 뒤를 보면 ole32!CoCreateInstance(run 2), wtsapi32.dll(run 3) 순으로 막힌다 — 모두 K5의 DLL이며
+`reports/K4.md` §4 "Needed from K5"에 export·호출자·용도를 적었다. 이 브랜치의 커밋: kernel32 `SetThreadDescription`/
+`GetThreadDescription`(커널 스레드 레코드에 저장, `t_k32_proc` 193/0), `GetEnabledXStateFeatures`와 XState/CONTEXT 도우미
+(`T_K32_XSTATE` 22/0). M2(`--dump-dom`의 DOM 줄)는 아직 도달하지 않았다.
+

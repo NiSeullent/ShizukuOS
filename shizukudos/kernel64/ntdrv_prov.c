@@ -59,13 +59,28 @@ D(IoAllocateWorkItem) D(IoFreeWorkItem) D(IoQueueWorkItem)
 D(ZwOpenKey) D(ZwCreateKey) D(ZwQueryValueKey) D(ZwSetValueKey) D(ZwClose)
 D(ZwCreateFile) D(ZwReadFile) D(ZwWriteFile)
 D(ObReferenceObjectByHandle) D(ObDereferenceObject) D(ObfDereferenceObject) D(ObfReferenceObject)
+/* PnP root, device properties, DMA (ntdrv_pnp.c); export drivers' needs (ndis.sys): Ex lists, Rtl, Zw, wcs */
+D(IoGetDeviceProperty) D(IoOpenDeviceRegistryKey) D(IoRegisterDeviceInterface) D(IoSetDeviceInterfaceState)
+D(IoGetDmaAdapter) D(IoAllocateDriverObjectExtension) D(IoGetDriverObjectExtension)
+D(IoRegisterShutdownNotification) D(IoUnregisterShutdownNotification) D(PoCallDriver) D(PoStartNextPowerIrp)
+D(IoBuildPartialMdl) D(ExQueueWorkItem)
+D(ExInterlockedInsertHeadList) D(ExInterlockedInsertTailList) D(ExInterlockedRemoveHeadList)
+D(ExInterlockedAddUlong) D(ExInterlockedAddLargeInteger) D(ExpInterlockedPushEntrySList) D(ExpInterlockedPopEntrySList)
+D(ExGetCurrentProcessorCounts) D(ExGetCurrentProcessorCpuUsage) D(KeGetRecommendedSharedDataAlignment)
+D(KeRegisterBugCheckCallback) D(KeDeregisterBugCheckCallback)
+D(RtlCompareString) D(RtlInitString) D(RtlQueryRegistryValues) D(RtlUnicodeStringToInteger) D(RtlUpcaseUnicodeString)
+D(ZwEnumerateKey) D(ZwQueryInformationFile)
+extern int8_t ntdrv_KeNumberProcessors;                   /* data export: the driver reads the CCHAR through its IAT */
+extern void *ntdrv_wcscat(void), *ntdrv_wcscpy(void), *ntdrv_wcsncat(void), *ntdrv_wcsncpy(void);
+extern uint64_t ntdrv_wcslen(void);
+extern int ntdrv_wcsncmp(void);
 extern void *ntdrv_memcpy(void *, const void *, uint64_t);
 extern void *ntdrv_memset(void *, int, uint64_t);
 extern void *ntdrv_memmove(void *, const void *, uint64_t);
 /* hal.dll */
 D(READ_PORT_UCHAR) D(READ_PORT_USHORT) D(READ_PORT_ULONG)
 D(WRITE_PORT_UCHAR) D(WRITE_PORT_USHORT) D(WRITE_PORT_ULONG)
-D(HalGetBusData) D(HalGetBusDataByOffset) D(HalSetBusDataByOffset) D(HalGetInterruptVector)
+D(HalGetBusData) D(HalGetBusDataByOffset) D(HalSetBusDataByOffset) D(HalGetInterruptVector) D(HalTranslateBusAddress)
 
 #define E(n) { #n, (void *)n }
 const ntdrv_export_t ntdrv_ntoskrnl_exports[] = {
@@ -118,13 +133,26 @@ const ntdrv_export_t ntdrv_ntoskrnl_exports[] = {
     E(ZwOpenKey), E(ZwCreateKey), E(ZwQueryValueKey), E(ZwSetValueKey), E(ZwClose),
     E(ZwCreateFile), E(ZwReadFile), E(ZwWriteFile),
     E(ObReferenceObjectByHandle), E(ObDereferenceObject), E(ObfDereferenceObject), E(ObfReferenceObject),
+    E(IoGetDeviceProperty), E(IoOpenDeviceRegistryKey), E(IoRegisterDeviceInterface), E(IoSetDeviceInterfaceState),
+    E(IoGetDmaAdapter), E(IoAllocateDriverObjectExtension), E(IoGetDriverObjectExtension),
+    E(IoRegisterShutdownNotification), E(IoUnregisterShutdownNotification), E(PoCallDriver), E(PoStartNextPowerIrp),
+    E(IoBuildPartialMdl), E(ExQueueWorkItem),
+    E(ExInterlockedInsertHeadList), E(ExInterlockedInsertTailList), E(ExInterlockedRemoveHeadList),
+    E(ExInterlockedAddUlong), E(ExInterlockedAddLargeInteger), E(ExpInterlockedPushEntrySList), E(ExpInterlockedPopEntrySList),
+    E(ExGetCurrentProcessorCounts), E(ExGetCurrentProcessorCpuUsage), E(KeGetRecommendedSharedDataAlignment),
+    E(KeRegisterBugCheckCallback), E(KeDeregisterBugCheckCallback),
+    { "KeNumberProcessors", (void *)&ntdrv_KeNumberProcessors },
+    E(RtlCompareString), E(RtlInitString), E(RtlQueryRegistryValues), E(RtlUnicodeStringToInteger), E(RtlUpcaseUnicodeString),
+    E(ZwEnumerateKey), E(ZwQueryInformationFile),
+    { "wcscat", (void *)ntdrv_wcscat }, { "wcscpy", (void *)ntdrv_wcscpy }, { "wcslen", (void *)ntdrv_wcslen },
+    { "wcsncat", (void *)ntdrv_wcsncat }, { "wcsncmp", (void *)ntdrv_wcsncmp }, { "wcsncpy", (void *)ntdrv_wcsncpy },
     { 0, 0 }
 };
 
 const ntdrv_export_t ntdrv_hal_exports[] = {
     E(READ_PORT_UCHAR), E(READ_PORT_USHORT), E(READ_PORT_ULONG),
     E(WRITE_PORT_UCHAR), E(WRITE_PORT_USHORT), E(WRITE_PORT_ULONG),
-    E(HalGetBusData), E(HalGetBusDataByOffset), E(HalSetBusDataByOffset), E(HalGetInterruptVector),
+    E(HalGetBusData), E(HalGetBusDataByOffset), E(HalSetBusDataByOffset), E(HalGetInterruptVector), E(HalTranslateBusAddress),
     /* on x64 these two live in hal.dll too (drivers import them from there); same implementations as ntoskrnl's */
     E(KeStallExecutionProcessor), E(KeQueryPerformanceCounter),
     { 0, 0 }

@@ -169,8 +169,8 @@ int main(void)
                 UINT sl = 0;
                 snprintf(nm, sizeof nm, "...file version 10.0.22631.1 (the PEB OS version)");
                 U_CHECKF(nm, f->dwFileVersionMS == 0x000a0000 && f->dwFileVersionLS == (22631u << 16 | 1), "%x.%x", (unsigned)f->dwFileVersionMS, (unsigned)f->dwFileVersionLS);
-                U_CHECK("...StringFileInfo\\040904b0\\FileVersion = \"10.0.22631.1\"",
-                        VerQueryValueW(vb, L"\\StringFileInfo\\040904b0\\FileVersion", &sv, &sl) && sv && u_ascii_eq_w(sv, "10.0.22631.1"));
+                U_CHECK("...StringFileInfo\\040904b0\\FileVersion begins with \"10.0.22631.1\" (kernel32/ntdll add \" (ShizukuDOS Win64 runtime)\", as Windows appends its build tag)",
+                        VerQueryValueW(vb, L"\\StringFileInfo\\040904b0\\FileVersion", &sv, &sl) && sv && sl >= 12 && !memcmp(sv, L"10.0.22631.1", 24) && (((WCHAR *)sv)[12] == 0 || ((WCHAR *)sv)[12] == ' '));
             }
         }
         U_CHECK("GetFileVersionInfoSizeExW(FILE_VER_GET_NEUTRAL, kernel32.dll) returns the same size",
