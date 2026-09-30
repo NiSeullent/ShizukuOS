@@ -490,9 +490,12 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
             if (!hdr[0] || dst->is_dir || node_ro(dst)) return STATUS_OBJECT_NAME_COLLISION;
             fs_remove(dst);
         }
+        fs_notify_suppress = 1;                              /* reported below as one rename (ipc_notify.c) */
         dir = fs_create(newpath, f->node->is_dir, 0);       /* create the destination entry (empty) ... */
+        fs_notify_suppress = 0;
         if (!dir) return STATUS_OBJECT_PATH_NOT_FOUND;
         if (dir != f->node) {                                /* ... then move the payload into it */
+            fs_notify_rename(f->node, dir);
             dir->data = f->node->data; dir->size = f->node->size; dir->cap = f->node->cap; dir->attrs = f->node->attrs;
             dir->child = f->node->child;
             { fsnode_t *c; for (c = dir->child; c; c = c->sibling) c->parent = dir; }
@@ -502,7 +505,9 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
             dir->ft_create = f->node->ft_create; dir->ft_access = f->node->ft_access; dir->ft_write = f->node->ft_write;
             f->node->data = 0; f->node->size = f->node->cap = 0; f->node->child = 0;
             f->node->delete_pending = 1;
+            fs_notify_suppress = 1;
             fs_remove(f->node);
+            fs_notify_suppress = 0;
             f->node = dir;
         }
         (void)leaf;

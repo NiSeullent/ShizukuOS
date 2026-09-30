@@ -139,7 +139,7 @@ static uint64_t system_commit(void)
     unsigned i;
     process_t *q;
     for (i = 1; (q = process_slot(i)) != 0; ++i)
-        if (q->used && q->vads.v) n += all_commit(q);
+        if (q->used && !q->teardown && q->vads.v) n += all_commit(q);   /* a dead process still referenced by handles owns no memory */
     return n;
 }
 

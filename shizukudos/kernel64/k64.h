@@ -138,6 +138,12 @@ struct thread {
     uint64_t tid;                               /* Windows-style thread id (multiple of 4), 0 for kernel threads */
     volatile int alerted, alert_wait;           /* NtAlertThreadByThreadId state */
     void *wait_multi;
+    void *ipc;                                  /* ipc_thread_t: user APC queue, IPC wait state (kernel64/ipc_core.c) */
+    volatile int kill_pending;                  /* NtTerminateThread by another thread: dies with kill_code at the next exit */
+    int64_t kill_code;
+    volatile int suspend_count;                 /* NtSuspendThread: >0 stops the thread at its next return to user mode */
+    volatile int suspended;                     /* parked in that stop (a resume or a kill wakes it) */
+    uint64_t user_stack;                        /* allocation base of the user stack the kernel reserved for it (0: none) */
     int creator_hold;                           /* user thread: its creator may still read `object` (see sched.c reaping) */
     /* CPU accounting (sched.c): timer ticks charged while this thread was current, split by the mode the tick interrupted,
      * TSC cycles between being switched in and out, and the tick numbers of creation and exit. */
@@ -154,6 +160,7 @@ void thread_discard(thread_t *t);                                               
 /* Exited user threads are reclaimed automatically (next thread creation); these two cover the creator's side: */
 void thread_creator_release(thread_t *t);       /* the creator no longer reads t (t->object): it may be reclaimed once exited */
 void thread_reap_process(const void *proc);     /* reclaim every exited thread of a finished process now (proc_wait) */
+void thread_reap_exited(void);                  /* reclaim the exited user threads nobody holds (process creation) */
 thread_t *thread_slot(unsigned i);              /* i-th scheduler slot (any state) or 0 past the end: read with interrupts off */
 uint64_t thread_cycles_now(thread_t *t);        /* t->cycles including the running slice of the current thread */
 void sched_tick_from(int user_mode);            /* timer tick; user_mode: the tick interrupted ring 3 */
@@ -176,6 +183,7 @@ uint64_t sched_switch_count(void);
 void sched_set_current_kstack(uint64_t top);
 void thread_block_current(void);                /* mark BLOCKED and switch away (caller holds irq off) */
 void thread_wake(thread_t *t);
+void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx);   /* every non-free slot, interrupts off */
 #define KSTACK_BYTES 32768u
 
 /* ---- ipc64.c ---- */

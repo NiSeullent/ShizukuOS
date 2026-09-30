@@ -43,6 +43,10 @@ void ob_ref(kobject_t *o) { const uint64_t f = irq_save(); ++o->refs; irq_restor
 /* Registry key objects: drop the key node's reference (registry.c). May block on the registry lock, so it runs after the
  * interrupt-off section below and ob_deref() must not be called with irqs disabled or with the registry lock held. */
 extern void reg_key_object_free(kobject_t *o);
+/* IPC hooks (kernel64/ipc_core.c; no-ops when it is not linked): the last reference of an object is gone / one handle of
+ * an object was closed (ipc_handle_closed runs for every type, before the handle's reference is dropped). */
+void __attribute__((weak)) ipc_object_free(kobject_t *o) { (void)o; }
+void __attribute__((weak)) ipc_handle_closed(process_t *p, kobject_t *o) { (void)p; (void)o; }
 
 void ob_deref(kobject_t *o)
 {
@@ -63,6 +67,7 @@ void ob_deref(kobject_t *o)
     irq_restore(f);
     if (last) {
         if (o->type == OB_KEY) reg_key_object_free(o);
+        else ipc_object_free(o);                    /* IPC hook: sections, pipes, ports, jobs, thread/process slots */
         kfree(o);
     }
 }
@@ -144,6 +149,7 @@ int32_t handle_close(process_t *p, uint64_t handle)
         extern void ntdrv_device_handle_closing(kobject_t *o); /* ntdrv_io.c: IRP_MJ_CLOSE on the last handle */
         ntdrv_device_handle_closing(o);
     }
+    ipc_handle_closed(p, o);
     ob_deref(o);
     return STATUS_SUCCESS;
 }
@@ -163,7 +169,7 @@ static int obj_signaled(kobject_t *o, thread_t *t)
     case OB_EVENT: case OB_THREAD: case OB_PROCESS: case OB_TIMER: return o->signaled;
     case OB_SEMAPHORE: return o->u.sem.count > 0;
     case OB_MUTANT: return o->u.mutant.owner == 0 || o->u.mutant.owner == t;
-    default: return 0;
+    default: return OB_IS_IPC(o->type) ? o->signaled : 0;     /* pipe ends: set when an I/O on them completes */
     }
 }
 
@@ -325,6 +331,7 @@ void thread_object_signal(thread_t *t)
 void thread_object_detach(thread_t *t)
 {
     kobject_t *o = t->object;
+    process_t *p = t->proc;
     if (!o) return;
     o->u.thr.exit_code = t->exit_code;
     o->u.thr.create_tick = t->create_tick;
@@ -335,6 +342,8 @@ void thread_object_detach(thread_t *t)
     o->u.thr.t = 0;
     t->object = 0;
     ob_deref(o);
+    if (p && p->object) ob_deref(p->object);   /* the process reference the thread took at creation (proc.c): a dead
+                                                   process's slot is recycled once no thread or handle refers to it */
 }
 
 void ob_register_timer(kobject_t *o)
@@ -342,9 +351,12 @@ void ob_register_timer(kobject_t *o)
     if (timer_count < 16) timers_head[timer_count++] = o;
 }
 
+void __attribute__((weak)) ipc_timer_tick(uint64_t now) { (void)now; }   /* waitable timers (ipc_timer.c) */
+
 void sched_check_timeouts(uint64_t now)
 {
     unsigned i;
+    ipc_timer_tick(now);
     for (i = 0; i < timer_count; ++i) {
         kobject_t *o = timers_head[i];
         if (o->u.timer.armed && o->u.timer.due_tick <= now) {

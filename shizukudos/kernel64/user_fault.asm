@@ -9,7 +9,7 @@ start:
     mov eax, 0x30
     syscall
     cli
-    xor r10d, r10d
+    mov r10, -1                         ; NtTerminateProcess(NtCurrentProcess(), 0) if it survived
     xor edx, edx
     mov eax, 1
     syscall

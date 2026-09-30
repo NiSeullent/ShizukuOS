@@ -54,8 +54,7 @@ void net_sleep(uint32_t ms)
 
 int net_current_terminating(void)
 {
-    process_t *p = current_process();
-    return p && p->terminated;
+    return current_thread_must_die();          /* process terminated, or another thread is running ExitProcess */
 }
 
 uint64_t net_now(void) { return ticks_now(); }

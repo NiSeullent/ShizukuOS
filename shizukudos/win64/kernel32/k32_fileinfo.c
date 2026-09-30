@@ -1,11 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * kernel32.dll: file information by handle and by name (attributes, times, size, identity, name), SetFileInformationByHandle,
- * ReplaceFile, byte-range locks, and the overlapped-result / cancel functions.
+ * ReplaceFile and byte-range locks.
  *
  * The information comes from NtQueryInformationFile / NtSetInformationFile (FileBasicInformation 4, FileStandardInformation 5,
  * FileInternalInformation 6, FileNameInformation 9, FileEndOfFileInformation 20, ...) and NtQueryVolumeInformationFile.
- * Every I/O request of this runtime completes before the call returns, so nothing is ever pending: GetOverlappedResult reports the
- * stored result, CancelIo has nothing to cancel.
  */
 #include "k32.h"
 
@@ -399,60 +397,6 @@ K32API BOOL WINAPI UnlockFileEx(HANDLE h, DWORD reserved, DWORD nlo, DWORD nhi, 
     return TRUE;
 }
 
-/* ---------------------------------------------------------------- overlapped results and cancellation */
-K32API BOOL WINAPI GetOverlappedResultEx(HANDLE h, LPOVERLAPPED ov, LPDWORD n, DWORD ms, BOOL alertable)
-{
-    NTSTATUS st;
-    if (!ov) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
-    st = (NTSTATUS)ov->Internal;
-    if (st == STATUS_PENDING) {                                                   /* only possible for requests that complete later */
-        LARGE_INTEGER to;
-        HANDLE w = ov->hEvent ? ov->hEvent : h;
-        NTSTATUS ws;
-        if (!ms) { shz_set_last_error(ERROR_IO_INCOMPLETE); return FALSE; }
-        to.QuadPart = -(LONGLONG)ms * 10000;
-        ws = NtWaitForSingleObject(w, alertable != 0, ms == INFINITE ? 0 : &to);
-        if (ws == STATUS_TIMEOUT) { shz_set_last_error(ERROR_IO_INCOMPLETE); return FALSE; }
-        if (ws != STATUS_SUCCESS) { k32_nt_error(ws); return FALSE; }
-        st = (NTSTATUS)ov->Internal;
-    }
-    if (n) *n = (DWORD)ov->InternalHigh;
-    if (st == STATUS_PENDING) { shz_set_last_error(ERROR_IO_INCOMPLETE); return FALSE; }
-    if (st < 0 && st != STATUS_END_OF_FILE) { k32_nt_error(st); return FALSE; }
-    if (st == STATUS_END_OF_FILE) { shz_set_last_error(ERROR_HANDLE_EOF); return FALSE; }
-    return TRUE;
-}
-K32API BOOL WINAPI GetOverlappedResult(HANDLE h, LPOVERLAPPED ov, LPDWORD n, BOOL wait)
-{
-    return GetOverlappedResultEx(h, ov, n, wait ? INFINITE : 0, FALSE);
-}
-
-K32API BOOL WINAPI CancelIo(HANDLE h)
-{
-    SHZ_IO_STATUS_BLOCK io;
-    NTSTATUS st = NtCancelIoFile(h, &io);
-    if (!NT_SUCCESS(st)) { k32_nt_error(st); return FALSE; }
-    return TRUE;
-}
-
-/* CancelIoEx reports ERROR_NOT_FOUND when no request is pending (all requests complete synchronously, so none ever is). */
-K32API BOOL WINAPI CancelIoEx(HANDLE h, LPOVERLAPPED ov)
-{
-    std_t s;
-    NTSTATUS st = q_std(h, &s);                                                   /* validates the handle */
-    (void)ov;
-    if (!NT_SUCCESS(st)) { k32_nt_error(st); return FALSE; }
-    shz_set_last_error(ERROR_NOT_FOUND);
-    return FALSE;
-}
-
-K32API BOOL WINAPI SetFileCompletionNotificationModes(HANDLE h, UCHAR flags)
-{
-    std_t s;
-    NTSTATUS st = q_std(h, &s);
-    if (!NT_SUCCESS(st)) { k32_nt_error(st); return FALSE; }
-    if (flags & ~(UCHAR)(FILE_SKIP_COMPLETION_PORT_ON_SUCCESS | FILE_SKIP_SET_EVENT_ON_HANDLE)) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
-    return TRUE;                                                                  /* completion is synchronous: there is never a port or event to skip */
-}
+/* GetOverlappedResult(Ex), CancelIo(Ex) and SetFileCompletionNotificationModes: k32_ipc_io.c (asynchronous I/O). */
 
 K32API BOOL WINAPI AreFileApisANSI(void) { return TRUE; }                         /* the *A file functions take the ANSI (UTF-8) code page */
