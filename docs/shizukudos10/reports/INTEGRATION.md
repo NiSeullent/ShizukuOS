@@ -20,7 +20,25 @@ app_probe (both modes), `ntwin32/exception/test.py`, `win64/tests/test_pe_parse.
 `dos16/build.py` (the input that `supervisor/build.py` asks for), `supervisor/build.py` + `supervisor/test_bootmgr.py`,
 and `shz.py test --suite media` when the tree has it.
 
-## Pass 4 — started 2026-09-30T08:15:13Z (IN PROGRESS: nothing below is verified until a row says PASSED)
+## Read first — what the lead needs to know (2026-09-30T10:15Z)
+
+1. **The lead's base is red on two gates, independent of any agent branch.** At base `f97a2de` (and unchanged at `513808d`: `t_disk.c` and the FAT32 code are not in the
+   diff between them) `run_k64_disk.py` and `run_k64_storage.py` fail deterministically: `T_DISK.EXE` line `shizukudos/win64/tests/t_disk.c:263`,
+   `U_CHECK("delete on D: is refused (not supported)", !DeleteFileA(outs[1]))`, prints `FAIL: delete on D: is refused (not supported)` because K3's commit `a27935f`
+   ("FAT32 delete/rename", in the base since PR #9) made `DeleteFileA` on D: work. The delete then removes `D:\OUT\Sub Dir\small.txt` before the read-back, so
+   `FAT32 write: the guest read back what it wrote ... OUT/Sub Dir/small.txt: guest (0, 0) host (46, 326510751)`. Reproduced on base `f97a2de` alone in a clean worktree
+   (`run_k64_disk.py`: 2 of 29 T_DISK checks failed; `run_k64_storage.py`: same) and identical with k4 merged. The test's expectation (or the feature) needs updating by the owner of
+   `t_disk.c` / K3. Until then no merge can turn these two gates green.
+2. **`run_k32_standalone.py` hangs intermittently in the base** (about 2 % of runs: base `f97a2de` alone 4 of 240; 3 hangs after `K32 test PASS: #PF handler demand-maps 16 kernel pages`
+   with `qemu_rc=-9` after the 120 s timeout, 1 unexpected ring-3 `#GP` with exit code 98). Not caused by k4: the Kernel32 image is byte-identical with and without k4 (below).
+3. **`wip/integration` on origin is no longer only I2's merges.** The lead merged PR #30 (`wip/e1-electron`) into it (`d48508a`, 09:35Z). I2 therefore does not reset or force-push it;
+   it pushes fast-forward commits on top. The merge commits I2 builds and gates live in local fresh-from-base worktrees, and the tables give (base commit, branch commit, tree hash),
+   which the lead reproduces with `git merge --no-ff <branch>` on that base. A tree hash is reproducible only on the same base tree.
+4. At the newest base `513808d` (tree `efc0967755f3b5292afa59da444530a4473dd968`) every listed branch merges cleanly on its own by `git merge-tree`:
+   n4 `25588c3`, k5 `bbaf38e`, k4 `bf73d7d`, e1 `31a1cc8`, w2 `96c2738` (w1 `06b48ab` and w3 `7b80cee` are already in it). The n4 and k5 conflicts recorded in pass 4 below are therefore stale for
+   those tips. Pass 5 starts from `513808d` with the extended order n4, n3, k5, k4, e1, w1, w2, w3 and their runners; nothing about those tips is verified yet.
+
+## Pass 4 — 2026-09-30T08:15:13Z to 10:05Z (COMPLETE for k4 at base `f97a2de`; the lead's base has since moved to `513808d`)
 
 Base `f97a2de87432720fd984c8e67bc3effec6cf9612` (tree `366c85bfb9dd06ce554cc4f020ad74a40ad503b3`). This base already contains
 N3 (`f78a07e`, merged by the lead with its own overlap notes), K3/K4-earlier/E1 through `main`, R1 and N4 `f0f7a74`.
@@ -32,14 +50,64 @@ Agent tips at the start of the pass: n4 `13c3157`, n3 `f78a07e` (0 commits ahead
 | wip/n4-ntdrv-coverage | `13c3157` | **FAILED at merge** (no gate ran) | — | 6 conflicted files, 15 hunks, not a pure conflict; evidence below |
 | wip/n3-driver-load | `f78a07e` | already in the base | — | nothing to merge; its code is covered by the gates of the next row |
 | wip/k5-chromium-dlls | `0a0adb9` | **FAILED at merge** (no gate ran) | — | 2 conflicted files, 3 hunks, two mechanisms for the same feature; evidence below |
-| wip/k4-chromium-run | `d212e35` | merge commit `7af6b57`; gates 1 to 21 PASSED, gate 22 `k32` FAILED once (pre-existing base hang, see below), gates 22 to 34 re-running: **NOT YET VERIFIED** | `ee539fc0191629e1d2d430c4c286ba3ce8d927c2` | merges clean (`git merge-tree` rc 0); final result goes into this row |
+| wip/k4-chromium-run | `d212e35` | merge commit `7af6b57` (local, not pushed): **NOT PASSED, but no regression against the base.** 33 of 35 gates pass; the two failing gates, `k64_disk` and `k64_storage`, fail identically on the base `f97a2de` without k4 (Read first, item 1); `k32` failed once and passed on rerun, and the same hang exists in the base (item 2) | `ee539fc0191629e1d2d430c4c286ba3ce8d927c2` | merges clean; `run_k64_chromium.py`: FAIL as expected, kernel did not crash (below) |
 | wip/r1-release | — | in the base | — | branch not on origin |
 
 Extra runners for this pass: `run_k64_pnp.py` (added by N3, now in the base) inside the gate run; `run_k64_chromium.py` afterwards,
 where a FAIL is expected until the Chromium milestone and only a kernel crash or a regression elsewhere counts against a branch.
 `run_k64_electron.py` is not run (E1 is not on the merge list; it needs inputs this machine does not have).
 
-### Status at 2026-09-30T08:45Z (pass 4 is still running; this text was pushed before the gates finished)
+### k4 (`d212e35`) — gate results at base `f97a2de` + k4 (merge `7af6b57`, tree `ee539fc0`)
+
+| gate | result | time | note |
+|---|---|---|---|
+| `platform_build` | PASS | 2s |  |
+| `platform_test` | PASS | 27s |  |
+| `abi32` | PASS | 5s |  |
+| `vxd` | PASS | 4s |  |
+| `ntwddm` | PASS | 0s |  |
+| `freestanding` | PASS | 1s |  |
+| `ntwddm_win98` | PASS | 2s |  |
+| `pcie` | PASS | 1s |  |
+| `uefi` | PASS | 2s |  |
+| `uefi32` | PASS | 2s |  |
+| `ahci` | PASS | 3s |  |
+| `fat` | PASS | 20s |  |
+| `win98lab` | PASS | 6s |  |
+| `native_runner` | PASS | 5s |  |
+| `app_probe` | PASS | 8s |  |
+| `exception` | PASS | 2s |  |
+| `xhci` | PASS | 3s |  |
+| `usb` | PASS | 17s |  |
+| `pe_parse` | PASS | 135s |  |
+| `win64_build` | PASS | 227s |  |
+| `kbuild` | PASS | 47s |  |
+| `k32` | FAIL (first attempt) | 121s | 120 s timeout, hang after the demand-paging test; see below |
+| `k32` | PASS (rerun, same tree) | 0s |  |
+| `k64_standalone_1` | PASS | 98s |  |
+| `k64_standalone_2` | PASS | 94s |  |
+| `k64_gui` | PASS | 141s |  |
+| `k64_net` | PASS | 235s |  |
+| `k64_disk` | FAIL | 98s | `T_DISK.EXE`: `FAIL: delete on D: is refused (not supported)`; same failure on base alone |
+| `k64_sfs` | PASS | 100s |  |
+| `k64_ntdrv` | PASS | 1s |  |
+| `import_coverage` | PASS | 0s |  |
+| `k64_storage` | FAIL | 221s | same `T_DISK.EXE` failure; same on base alone |
+| `dos16_prereq` | PASS | 6s |  |
+| `supervisor` | PASS | 626s |  |
+| `media_suite` | PASS | 2362s |  |
+| `run_k64_pnp` | BLOCKED, then PASS (2 s, 11 checks) | 2s | first attempt: `BLOCKED: driver corpus not built`; after `ntdrv/corpus/fetch.py` + `build.py --packages` (23 of 27 drivers built) it passes |
+
+The `media` suite (`shz.py test --suite media`) passed in 2362 s. Gates 1 to 21 ran in `p4-k4`, `k32` to `k64_disk` in `p4-k4b`, `k64_sfs` onward in `p4-k4c` (the runner was resumed after each
+failure so that one inherited failure does not hide the later gates; nothing was skipped). `import_coverage` and `k64_ntdrv` pass.
+
+**`run_k64_chromium.py` (Chromium snapshot 1706750, `chrome.exe` sha256 `50e3f9ee0aa1c2d55bde01aa822c7a91fa558fa73fdf2648d05bc00b2ba2c93e`, tree of 258 files), `--accel tcg`:**
+`status` FAIL (expected until the milestone), `seconds` 16.4, `exit_code` 0x80000003, `faulted` false, `ended_by` exited, `autorun_result`
+`K64 autorun: result exited exit=80000003 faulted=0 reaped=0 after 13100 ms`, `expected_line_seen` false, `chrome_output_line_count` 69, `loader_failures` [], `exceptions` [], `qemu_timed_out` false,
+`unsupported_calls` []. Furthest point: `FATAL:chrome\common\win\delay_load_failure_support.cc:39] NOTREACHED hit.` (Chromium's fatal delay-load hook; the run's `git.revision` is `7af6b57`,
+`dirty` false). The Kernel64 guest ended with `SHZ-EXIT:0`: no kernel crash, and the other gates show no regression from k4.
+
+### Status at 2026-09-30T08:45Z (earlier status of this pass, kept for the record)
 
 - The lead's base moved to `03a564e` (tree `c310a1fa671ae92c9d92c785ea77dbc6be6dde56`) during the pass: PR #16 (this report) and PR #17 (W1 WebKit: `win64/webkit/*`, `run_k64_webkit.py`, `shz.py`, `upstream/manifest.json`).
   The gates below run on `f97a2de` + k4, not on `03a564e` + k4; the two differ by those W1 files and this document.
