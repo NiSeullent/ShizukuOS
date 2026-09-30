@@ -120,7 +120,7 @@ def build_icu(icu_tree, log):
     host, cross = OUT / "icu-host", OUT / "icu-win64"
     prefix = cross / "install"
     stamp = prefix / ".shz-stamp"
-    key = json.dumps({"commit": spec("icu")["commit"], "defs": UCRT_DEFS, "v": 2})
+    key = json.dumps({"commit": spec("icu")["commit"], "defs": UCRT_DEFS, "v": 3})
     if stamp.exists() and stamp.read_text() == key:
         return prefix
     common = ["--disable-tests", "--disable-samples", "--disable-extras", "--disable-icuio", "--disable-layoutex"]
@@ -131,7 +131,10 @@ def build_icu(icu_tree, log):
     shutil.rmtree(cross, ignore_errors=True)
     cross.mkdir(parents=True)
     env = dict(os.environ, CC=f"clang --target={TARGET}", CXX=f"clang++ --target={TARGET}", AR="llvm-ar", RANLIB="llvm-ranlib",
-               CPPFLAGS=" ".join(UCRT_DEFS), CFLAGS="-O2", CXXFLAGS="-O2 -std=c++17")
+               CPPFLAGS=" ".join(UCRT_DEFS), CFLAGS="-O2",
+               # GCC's mingw target predefines this as 0 and libstdc++ was built so (type_info::operator== is out of line
+               # in tinfo.o); clang does not, and ICU's C++17 objects then carry their own copy: duplicate symbol at link
+               CXXFLAGS="-O2 -std=c++17 -D__GXX_TYPEINFO_EQUALITY_INLINE=0")
     cfg = [src / "configure", f"--host={TARGET.replace('windows-gnu', 'mingw32')}", f"--with-cross-build={host}",
            "--enable-static", "--disable-shared", "--with-data-packaging=static", "--disable-tools", f"--prefix={prefix}", *common]
     run(cfg, cwd=cross, env=env, timeout=600, capture=True)
