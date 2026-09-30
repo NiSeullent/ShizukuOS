@@ -1,0 +1,15 @@
+LIBRARY M98TLS
+EXPORTS
+    ntwst_runtime_init
+    ntwst_runtime_fini
+    ntwst_native_runtime_init
+    ntwst_native_runtime_fini
+    ntwst_create
+    ntwst_destroy
+    ntwst_handshake
+    ntwst_write
+    ntwst_read
+    ntwst_close_notify
+    ntwst_version
+    ntwst_verify_flags
+    ntwst_engine_error
