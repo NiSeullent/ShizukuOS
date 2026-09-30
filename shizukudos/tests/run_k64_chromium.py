@@ -123,7 +123,7 @@ def main():
     ap.add_argument("--expect", default=M2_EXPECT, help="line that must appear in the output for a PASS")
     ap.add_argument("--out", default=str(BUILD / "kernel64s" / "run_chromium"))
     ap.add_argument("--no-trace", action="store_true",
-                    help="do not pass shz.k32trace and shz.exctrace (kernel32 explicit-failure and GetProcAddress-miss lines, first-chance hardware exceptions)")
+                    help="do not pass shz.k32trace, shz.exctrace and shz.systrace (kernel32 explicit-failure and GetProcAddress-miss lines, first-chance hardware exceptions, failing system calls)")
     args = ap.parse_args()
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
     for f in (stub, kernel, initrd):
@@ -155,7 +155,7 @@ def main():
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
            *(["-vga", "std"] if args.display == "vga" else []),
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
-           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace"),
+           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace shz.systrace"),
            "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
            "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
            "-device", "ide-hd,drive=d0,bus=ahci0.0"]
