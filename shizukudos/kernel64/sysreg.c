@@ -502,7 +502,7 @@ static int32_t query_object(process_t *pr, uint64_t h, uint32_t cls, uint64_t bu
     switch (cls) {
     case 0: {                                           /* OBJECT_BASIC_INFORMATION (0x38 bytes) */
         uint32_t handles = 0;
-        for (k = 0; k < MAX_HANDLES; ++k) if (pr->handles[k].obj == o) ++handles;
+        for (k = 0; k < pr->handle_cap; ++k) if (pr->handles[k].obj == o) ++handles;
         st = STATUS_SUCCESS;
         put32(&ob, 0, 0);                               /* Attributes */
         put32(&ob, 4, access);                          /* GrantedAccess of this handle */

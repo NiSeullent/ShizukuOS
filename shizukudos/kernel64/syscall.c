@@ -154,6 +154,15 @@ static unsigned systrace_head, systrace_total;
 static struct { uint32_t num, st, count; } systrace_pairs[SYSTRACE_PAIRS];
 static int systrace_on = -1;
 
+/* `shz.systrace.all` (implies shz.systrace): additionally every system call of every thread, success or not, goes into a ring of
+ * the last SYSALL_RING calls; k64_systrace_dump() prints the last SYSALL_SHOW of the thread that took the breakpoint, so the
+ * operations that preceded a CHECK failure are visible, with their arguments and the tick they happened at. */
+#define SYSALL_RING 4096
+#define SYSALL_SHOW 70
+static struct { uint32_t num, st; uint64_t tid, a1, a2, a3, tick; } sysall[SYSALL_RING];
+static unsigned sysall_head;
+static int sysall_on = -1;
+
 static const char *syscall_name(uint32_t num)
 {
     static const struct { const char *name; uint32_t num; } tbl[] = {
@@ -197,6 +206,23 @@ void k64_systrace_dump(void)
 {
     unsigned n = systrace_total < SYSTRACE_RING ? systrace_total : SYSTRACE_RING, i;
     if (systrace_on != 1) return;
+    if (sysall_on > 0) {
+        const uint64_t me = thread_current()->tid;
+        unsigned shown = 0, back;
+        const unsigned total = sysall_head < SYSALL_RING ? sysall_head : SYSALL_RING;
+        unsigned first = total;                               /* scan backwards for this thread's last SYSALL_SHOW calls */
+        for (back = 0; back < total && shown < SYSALL_SHOW; ++back) {
+            const unsigned at = (sysall_head - 1 - back) % SYSALL_RING;
+            if (sysall[at].tid == me) { ++shown; first = back; }
+        }
+        kprintf("K64 systrace: the last %u system calls of tid %llu (of %u recorded), oldest first\n", shown, me, sysall_head);
+        for (back = first + 1; back-- > 0; ) {
+            const unsigned at = (sysall_head - 1 - back) % SYSALL_RING;
+            if (sysall[at].tid != me) continue;
+            kprintf("K64 systrace:   t=%llu %s(%x) a1=%llx a2=%llx a3=%llx -> %x\n", sysall[at].tick, syscall_name(sysall[at].num), sysall[at].num,
+                    sysall[at].a1, sysall[at].a2, sysall[at].a3, sysall[at].st);
+        }
+    }
     kprintf("K64 systrace: last %u failing system calls of %u, oldest first\n", n, systrace_total);
     for (i = 0; i < n; ++i) {
         const unsigned at = (systrace_head - n + i) % SYSTRACE_RING;
@@ -263,7 +289,17 @@ done:
         return 1;
     }
     r->rax = (uint64_t)(int64_t)st;
-    if (systrace_on < 0) systrace_on = k64_cmdline_has("shz.systrace");
+    if (systrace_on < 0) {
+        sysall_on = k64_cmdline_has("shz.systrace.all");
+        systrace_on = sysall_on || k64_cmdline_has("shz.systrace");
+    }
+    if (sysall_on > 0) {
+        const uint64_t f = irq_save();
+        const unsigned at = sysall_head++ % SYSALL_RING;
+        sysall[at].num = num; sysall[at].st = (uint32_t)st; sysall[at].tid = thread_current()->tid;
+        sysall[at].a1 = a1; sysall[at].a2 = a2; sysall[at].a3 = a3; sysall[at].tick = ticks_now();
+        irq_restore(f);
+    }
     if (systrace_on > 0 && ((uint32_t)st >> 30) == 3u) systrace_record(p, num, st, a1, a2);
     check_kill();
     return 0;

@@ -69,7 +69,13 @@ typedef struct waitblock {
     unsigned index;
 } waitblock_t;
 
-#define MAX_HANDLES 512
+/* Handle table capacity: HANDLE_CAP_FULL entries (64 KiB) per process; a process falls back to HANDLE_CAP_MIN when the kernel heap
+ * cannot give it that much (process_t.handle_cap says which). Chromium's browser process holds several hundred handles (threads,
+ * events, I/O completion ports, sections, files, keys) within seconds of starting and failed NtCreateEvent with STATUS_NO_MEMORY
+ * at 512. */
+#define HANDLE_CAP_MIN 512
+#define HANDLE_CAP_FULL 4096
+#define MAX_HANDLES HANDLE_CAP_FULL
 typedef struct {
     kobject_t *obj;
     uint32_t access;
@@ -81,6 +87,7 @@ struct process {
     uint64_t pml4;
     vad_set_t vads;
     handle_entry_t *handles;
+    uint32_t handle_cap;                /* entries allocated in `handles`: HANDLE_CAP_FULL, or HANDLE_CAP_MIN under heap pressure */
     unsigned handle_count;
     int64_t exit_code;
     int faulted, terminated, threads_alive;
