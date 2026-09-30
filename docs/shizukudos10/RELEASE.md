@@ -2,66 +2,85 @@
 
 The product is one hybrid VM install ISO, `windows98-shizuku-second-edition.iso` (ShizukuDOS 10). It boots as a CD
 and, attached as a hard disk or written raw to a USB stick, as a disk, on legacy BIOS and on UEFI. How the medium is
-built and what each boot path does in detail: [MEDIA.md](MEDIA.md). This page is about the published release: where to
-download it, how to check it, how to boot it, and what can and cannot be shown in a web browser.
+built and what each boot path does in detail: [MEDIA.md](MEDIA.md). This page is about a release: how to build one
+locally, how to check it, how to boot it, and what can and cannot be shown in a web browser.
 
-Releases are built and published by [`.github/workflows/release-iso.yml`](../../.github/workflows/release-iso.yml):
-it builds every component from the release commit on an `ubuntu-24.04` runner, builds the ISO and the raw disk image,
-boots both through the media boot matrix (`shz.py test --suite media`: QEMU TCG, SeaBIOS and OVMF, 23 rows) and
-publishes only if the verdict is `VERIFIED`.
+The ISO is **not published** (no GitHub release, no workflow artifact, no public download URL). A release is built
+locally with `tools/build_release.py` and handed over privately as the files of one release directory.
 
-## Download
+## Build a release
 
-| What | URL |
-| --- | --- |
-| ISO, newest full release | `https://github.com/NiSeullent/Win98-Modern/releases/latest/download/windows98-shizuku-second-edition.iso` |
-| its SHA-256 | `https://github.com/NiSeullent/Win98-Modern/releases/latest/download/windows98-shizuku-second-edition.iso.sha256` |
-| release manifest (JSON) | `https://github.com/NiSeullent/Win98-Modern/releases/latest/download/release-manifest.json` |
-| any asset of a given release | `https://github.com/NiSeullent/Win98-Modern/releases/download/<tag>/<asset>` |
+On Ubuntu 24.04 (the packages the builders and the boot matrix call; the same set the `shizukudos10-tcg` CI job
+installs, plus `xxd`, `patch`, `e2fsprogs`, `file`):
 
-The first release exists once the workflow has run; until then these URLs answer 404. Assets of every release (the
-names never change, so both URL forms stay valid):
+```
+sudo apt-get install --no-install-recommends \
+  gcc gcc-multilib clang libclang-rt-18-dev mingw-w64 nasm make binutils python3 python3-pil \
+  qemu-system-x86 ovmf mtools dosfstools xorriso python3-pefile lld llvm flex bison \
+  xxd patch e2fsprogs file xz-utils git
+python3 tools/build_release.py
+```
 
-| Asset | What |
+Syslinux is not taken from the host: the builders download the pinned Ubuntu 6.04 packages
+(`shizukudos/upstream/manifest.json`, checked by SHA-256) and unpack them with `dpkg-deb`. The first build also
+fetches the pinned FreeDOS kernel and FreeCOM, CSMWrap with SeaBIOS, Wine, FreeType and Noto trees into
+`build/upstream/` and the Open Watcom snapshot into `build/tools/` (network; about 2 GB of disk for everything).
+
+`tools/build_release.py`, from a clean checkout (it refuses uncommitted changes unless `--allow-dirty`, which the
+manifest records and the directory name shows as `-dirty`):
+
+1. builds everything from the checked-out commit in the ISO builder's order, with its fixed
+   `SOURCE_DATE_EPOCH=1785283200`: `shizukudos/csm/build.py`; `shizukudos/tools/shz.py build --profile
+   uefi-multikernel` (DOS16, Kernel32, Kernel64, Win64 runtime, UEFI loader); `shizukudos/install/mkpayload.py --out
+   build/shizukudos/install-media`; `tools/build_shizuku_se_iso.py --reuse-builds` (packages those outputs after
+   checking them against their build receipts); `tools/build_shizuku_se_disk.py`. It then checks that the ISO matches
+   its receipt, was built from `HEAD` and is not a private image, and that the raw disk has the same inputs;
+2. runs `shizukudos/tools/shz.py test --suite media`, the boot matrix (QEMU TCG, SeaBIOS and OVMF; ISO as CD, ISO
+   as hard disk, raw disk; Kernel64, DOS16, ShizukuDOS 0.1, Kernel64 direct, install: 23 rows, one QEMU at a time).
+   Unless the verdict is `VERIFIED`, every row `PASS`, on exactly the ISO and disk bytes just built, the release
+   fails and no release directory is written. `--skip-tests` skips this step as an explicit, logged opt-out; the
+   manifest then says `"media_suite": "skipped"`;
+3. writes `build/release/windows98-shizuku-second-edition-<commit12>/`:
+
+| File | What |
 | --- | --- |
 | `windows98-shizuku-second-edition.iso` | the VM install ISO |
 | `windows98-shizuku-second-edition.iso.sha256` | `sha256sum` line for the ISO |
-| `release-manifest.json` | tag, commit, sizes and SHA-256 of every asset, download URLs, build date, runner QEMU/OVMF versions, matrix verdict |
-| `windows98-shizuku-second-edition.json` | the ISO builder's receipt (`build/windows98-shizuku-second-edition.json`): every input with its SHA-256, the menu, the git revision |
 | `windows98-shizuku-second-edition-disk.img.xz` | the secondary raw disk image (MBR + FAT32, 128 MiB), xz-compressed |
+| `windows98-shizuku-second-edition.json` | the ISO builder's receipt (`build/windows98-shizuku-second-edition.json`): every input with its SHA-256, the menu, the git revision |
 | `windows98-shizuku-second-edition-disk.json` | the raw disk builder's receipt |
-| `media-suite-results.json` | `shz.py test --suite media` results (`build/shizukudos/results/media-*.json`) |
-| `boot-matrix.json` | the boot matrix summary it judged (per row: status, seconds, failed checks; QEMU version, OVMF hash) |
+| `media-suite-results.json` | the `shz.py test --suite media` results (`build/shizukudos/results/media-*.json`) |
+| `boot-matrix.json` | the matrix summary those results judged: per row status, seconds and failed checks, QEMU version, OVMF hash |
+| `release-manifest.json` | see below |
 
-**`releases/latest` only follows full releases.** GitHub resolves `/releases/latest/` to the newest release that is
-neither a draft nor a prerelease. The workflow publishes a prerelease by default (manual runs default to *prerelease*;
-`iso-*` tags and `v*` tags with a hyphen, such as `v10.0.0-alpha1`, are prereleases), and the repository's older
-`v0.1.x-preview` releases are prereleases too. So the `latest` URLs answer 404 until a full release carrying the ISO
-exists (a manual run with *prerelease* unticked, or a `v*` tag without a hyphen such as `v10.0.0`), and they serve the
-ISO only while the Latest release is one made by this workflow. Until then, and whenever a page must pin one build, use
-the per-tag URLs. To find the newest build including prereleases, read the GitHub API:
-`https://api.github.com/repos/NiSeullent/Win98-Modern/releases?per_page=20` and take the first entry whose `assets`
-include `release-manifest.json`.
+`release-manifest.json` (schema 1): `tag` (`--tag`, else the tag on `HEAD`, else `null`), `commit`, `commit_date`,
+`dirty`, `build_date_utc`, `builder` (command line, `SOURCE_DATE_EPOCH`, each step with its duration); `iso`,
+`iso_receipt` and `disk_image` (plus its `uncompressed` image and `receipt`) each with `name`, `bytes`, `sha256`;
+`media_suite`: `"skipped"`, or the verdict, the counts and every case with its status (`cases`), plus the file hashes
+of the results and of `boot-matrix.json`; `host`: OS, kernel, QEMU version and package, OVMF path, package and
+SHA-256 (and the values the matrix recorded).
 
-`release-manifest.json` (schema 1) holds `tag`, `prerelease`, `commit`, `commit_date`, `build_date_utc`,
-`workflow_run`, `docs`, and for `iso`, `iso_receipt`, `disk_image` (plus its `uncompressed` image and `receipt`),
-`media_suite` (plus `boot_matrix`) each `name`, `url`, `bytes`, `sha256`; `runner` records the runner image, the QEMU
-version and package, the OVMF package and the SHA-256 of `OVMF_CODE_4M.fd` the matrix booted.
+Duration on a 4-CPU machine: the builds about 7 minutes, the boot matrix 25–40 minutes depending on the load (a
+Kernel64 row takes 2–4 minutes under TCG).
 
-### Verify the download
+## Verify the ISO
+
+In the release directory (or wherever the files were copied, the ISO and its `.sha256` side by side):
 
 ```
-curl -LO https://github.com/NiSeullent/Win98-Modern/releases/download/<tag>/windows98-shizuku-second-edition.iso
-curl -LO https://github.com/NiSeullent/Win98-Modern/releases/download/<tag>/windows98-shizuku-second-edition.iso.sha256
-sha256sum -c windows98-shizuku-second-edition.iso.sha256        # Linux; macOS: shasum -a 256 -c ...
+sha256sum -c windows98-shizuku-second-edition.iso.sha256        # Linux
+shasum -a 256 -c windows98-shizuku-second-edition.iso.sha256    # macOS
 ```
 
 Windows PowerShell: `(Get-FileHash -Algorithm SHA256 windows98-shizuku-second-edition.iso).Hash` and compare it with
-the first field of the `.sha256` file (case does not matter). The same SHA-256 is in `release-manifest.json`
-(`iso.sha256`), in the receipt (`sha256`) and in the release notes. The receipt's `git.revision` is the commit the
-release was built from; `boot-matrix.json` (`media.iso.sha256`) shows that the matrix booted exactly these bytes.
-The raw disk: `xz -d windows98-shizuku-second-edition-disk.img.xz`, then compare with
-`disk_image.uncompressed.sha256` in the manifest.
+the first field of the `.sha256` file (case does not matter). The same SHA-256 is `iso.sha256` in
+`release-manifest.json` and `sha256` in the receipt; the receipt's `git.revision` is the commit it was built from, and
+`boot-matrix.json` (`media.iso.sha256`) shows that the matrix booted exactly these bytes. The raw disk:
+`xz -d windows98-shizuku-second-edition-disk.img.xz`, then compare with `disk_image.uncompressed.sha256` in the
+manifest.
+
+The ISO records the commit and the branch name it was built from (for example in `ShizukuDOS10\GPL-NOTICE.TXT`),
+so two builds of the same commit are byte-identical only from the same branch name and the same upstream inputs.
 
 ## Boot it
 
@@ -130,7 +149,7 @@ letter, then Enter (on the keyboard or on COM1):
 
 | Key | Entry | What runs | How it ends |
 | --- | --- | --- | --- |
-| **K** (default after 30 s) | Kernel64 + Win64 runtime | the standalone Long Mode kernel (Multiboot stub `BOOT.ELF`, `KERNEL64S.BIN`, `WIN64.IMG`): kernel self-tests, then every `T_*.EXE` Win64 test program | `SHZ-EXIT:0` on COM1 (about 2 minutes under TCG). The text results are on COM1 only; the screen switches to a 1024×768 desktop on which the Win64 GUI test programs open and close their windows, and ends on the empty desktop |
+| **K** (default after 30 s) | Kernel64 + Win64 runtime | the standalone Long Mode kernel (Multiboot stub `BOOT.ELF`, `KERNEL64S.BIN`, `WIN64.IMG`): kernel self-tests, then every `T_*.EXE` Win64 test program | `SHZ-EXIT:0` on COM1 (2–4 minutes under TCG). The text results are on COM1 only; the screen switches to a 1024×768 desktop on which the Win64 GUI test programs open and close their windows, and ends on the empty desktop |
 | **D** | ShizukuDOS 10 DOS16 (FreeDOS profile) | memdisk boots the 32 MiB DOS16 disk from RAM; FreeDOS runs the conformance programs | `SHZ-EXIT:0` on COM1, then the CPU halts. Nothing is written back |
 | **1** | ShizukuDOS 0.1 | memdisk boots the project's own real-mode shell from a floppy image in RAM | the `A:\>` prompt (screen and COM1). `HELP` lists the commands: `DIR`, `TYPE file`, `EXEC file.COM`, `CLS`, `VER`, `MEM`, `STACK`, `CPU`, `PCI`, `BOOT`, `BOOTC`, `REBOOT` |
 | **I** | Install ShizukuDOS 10 (SHZSETUP) | Kernel64 with the installer image: unattended install (GPT, ESP, ShizukuFS) to the first disk without a partition table | `SETUP-RESULT: OK`, `SHZ-EXIT:0`, power off. **Erases that disk** |
@@ -173,7 +192,7 @@ Add a serial port (COM1, 115200 8N1) to a file or pipe to see the results.
   (ShizukuDOS 0.1, via memdisk).
 
 Tested by us with v86 0.5.462 (npm `v86`), run under Node.js 22 with `seabios.bin` and `vgabios.bin` from v86's
-`bios/` directory, `memory_size` 256 MiB, keys sent through the emulated PS/2 keyboard, the ISO built from this tree
+`bios/` directory, `memory_size` 256 MiB, keys sent through the emulated PS/2 keyboard, an ISO built from this tree
 loaded as `cdrom` from memory:
 
 | What | Result in v86 |
@@ -188,11 +207,11 @@ loaded as `cdrom` from memory:
 Not tested: v86 inside a real browser (only under Node.js), loading images over HTTP (`url`, `async: true`), other
 v86 versions and memory sizes.
 
-Advice for the page:
+Advice for a demo page:
 
 1. **Boot the two small images, not the ISO.** A 1.44 MB floppy and a 32 MiB disk instead of the whole ISO, and no
-   Kernel64 default to crash into. Extract them from the release ISO when the page is built and check them against
-   `HASHES.TXT` in the ISO root (columns `sha256  bytes  path`):
+   Kernel64 default to crash into. Extract them from the release ISO and check them against `HASHES.TXT` in the ISO
+   root (columns `sha256  bytes  path`):
    ```
    xorriso -osirrox on -indev windows98-shizuku-second-edition.iso \
      -extract /ShizukuDOS/shizukudos.img shizukudos.img \
@@ -204,11 +223,9 @@ Advice for the page:
 2. **If the page boots the ISO**, choose the entry before the 30 s timeout: watch COM1 (`serial0-output-byte`) for
    `Automatic boot in`, then send `1` or `d` and Enter (`emulator.keyboard_send_text("1")`,
    `emulator.keyboard_send_scancodes([0x1c, 0x9c])`), and tell visitors not to pick K or I.
-3. **Serve the images from the page's own origin** (m98.nyase.kr). v86 downloads disk images with HTTP requests
-   (with `async: true`, as Range requests), which need CORS on another origin. We have not checked whether GitHub's
-   release download URLs (they redirect to a GitHub asset host) allow that, so do not depend on it. For release
-   metadata the GitHub REST API (`api.github.com`) supports CORS; `release-manifest.json` is a release asset like
-   the ISO, so fetch it server-side or at build time.
+3. **Serve the images from the page's own origin.** v86 downloads disk images with HTTP requests (with `async: true`,
+   as Range requests); another origin would need CORS. The ISO has no public download URL; host only what the page
+   shows, and link to nothing else.
 4. Say on the page that the browser demo is the 16-bit part only and that Kernel64 needs an x86-64 VM (below).
 
 ### Kernel64 in real time: a server-side VM
@@ -242,12 +259,13 @@ qemu-system-x86_64 -machine q35 -accel tcg -cpu max -smp 2 -m 512 \
   `isa-debug-exit`, QEMU exits when Kernel64 finishes (`SHZ-EXIT`): end the session then, and also after a fixed time
   limit (the DOS16 and 0.1 entries do not exit QEMU; they halt or wait at `A:\>`).
 - **CPU cost.** TCG needs no KVM and works on any Linux host, but it is slow: with 2 vCPUs QEMU keeps up to two host
-  threads busy, and one Kernel64 run takes about 2 minutes of that on the machine the matrix ran on (113–135 s per
-  Kernel64 row of the matrix including the boot to the menu, QEMU 8.2.2). Budget roughly one to two host cores and 600 MiB of RAM per concurrent session and cap the
-  number of sessions. If the host exposes `/dev/kvm`, `-accel kvm -cpu host` is much faster but is not what the release
-  test runs.
+  threads busy, and one Kernel64 run takes 2–4 minutes of that (113–217 s per Kernel64 row of the matrix including
+  the boot to the menu, QEMU 8.2.2, depending on the host's load). Budget roughly one to two host cores and 600 MiB of
+  RAM per concurrent session and cap the number of sessions. If the host exposes `/dev/kvm`, `-accel kvm -cpu host`
+  is much faster but is not what the release test runs.
 - A cheaper alternative to one VM per visitor is one shared VM that restarts on a loop, with viewers watching a
   read-only noVNC view (`view_only`) and the COM1 log; or a recording of a real run.
+- The server holds the ISO; the page never offers it for download.
 
 ## What the ISO contains
 
@@ -269,8 +287,9 @@ qemu-system-x86_64 -machine q35 -accel tcg -cpu max -smp 2 -m 512 \
 
 ## What it does not contain, and what it does not do
 
-- **No Windows 98 media and nothing from Microsoft**: no `IO.SYS`, no `WIN98` cabinets, no product keys. The builder's
-  `--win98-media` option makes a separate private ISO on the builder's own machine; releases never use it.
+- **No Windows 98 media and nothing from Microsoft**: no `IO.SYS`, no `WIN98` cabinets, no product keys. The ISO
+  builder's `--win98-media` option makes a separate private ISO; `tools/build_release.py` never uses it and refuses a
+  private image.
 - It does **not install or boot Windows 98** and is not a Windows 98 installation. The Install entry installs
   ShizukuDOS 10 (Kernel64 on ShizukuFS), not Windows.
 - **Chromium does not run in the guest yet.** Chromium and Electron applications are a target whose imports are being
@@ -279,24 +298,3 @@ qemu-system-x86_64 -machine q35 -accel tcg -cpu max -smp 2 -m 512 \
   release test**: QEMU TCG has no VMX, so the matrix covers CSMWrap, the legacy menu entries and Kernel64 direct.
 - The installed system (entry I) carries the Shizuku modules only, not the Wine DLLs and fonts of `WIN64.IMG`.
 - VirtualBox, VMware, Hyper-V and real hardware are untested.
-
-## Making a release
-
-- **Manual:** Actions → *Release the VM install ISO* → *Run workflow*, or
-  `gh workflow run release-iso.yml --ref <branch> -f tag=iso-2026.10.01 -f prerelease=false`. An empty tag becomes
-  `iso-<run number>`. A tag that does not exist is created at the dispatched commit; a tag that exists must point at
-  that commit, or the release step stops.
-- **Tag push:** `git tag v10.0.0-alpha1 <commit> && git push origin v10.0.0-alpha1` (prerelease), `v10.0.0` (full
-  release), or `iso-*` (prerelease).
-- The build job (read-only token) builds CSMWrap, then `shz.py build --profile uefi-multikernel` (DOS16, Kernel32,
-  Kernel64, Win64, loader), `install/mkpayload.py`, `tools/build_shizuku_se_iso.py --reuse-builds` and
-  `tools/build_shizuku_se_disk.py` with `SOURCE_DATE_EPOCH=1785283200`, runs `shz.py test --suite media`, requires the
-  verdict `VERIFIED` on exactly these ISO bytes, and keeps the assets as the workflow artifact
-  `iso-release-<tag>` (reachable from the run even if publishing fails) and the matrix evidence as `iso-build-evidence`.
-- The release job (the only one with `contents: write`) checks the hashes again, creates the release or updates its
-  assets (`gh release upload --clobber`). A release this workflow did not create (for example a hand-made
-  `v0.1.x-preview` release) only gets the assets; its title, notes and flags are left alone.
-- Time: on a 4-CPU machine the builds take about 10 minutes and the boot matrix about 25 (one QEMU at a time);
-  GitHub runner times are not measured yet. The job allows 300 minutes, the matrix step 150.
-- A rerun of the same tag replaces the assets. Tags and releases created with the workflow's token do not start
-  another workflow run.
