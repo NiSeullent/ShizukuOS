@@ -15,6 +15,25 @@ static ULONGLONG uptime_ns(void)
     return (ULONGLONG)c.QuadPart;
 }
 K32API ULONGLONG WINAPI GetTickCount64(void) { return uptime_ns() / 1000000ull; }
+
+/* Interrupt time: 100 ns units since boot, from the same clock as QueryPerformanceCounter. The machine never sleeps or
+ * hibernates, so the unbiased time (which excludes sleep) equals it; the non-precise variants return the same value. */
+K32API VOID WINAPI QueryInterruptTimePrecise(PULONGLONG t) { *t = uptime_ns() / 100ull; }
+K32API VOID WINAPI QueryInterruptTime(PULONGLONG t) { *t = uptime_ns() / 100ull; }
+K32API VOID WINAPI QueryUnbiasedInterruptTimePrecise(PULONGLONG t) { *t = uptime_ns() / 100ull; }
+K32API BOOL WINAPI QueryUnbiasedInterruptTime(PULONGLONG t)
+{
+    if (!t) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    *t = uptime_ns() / 100ull;
+    return TRUE;
+}
+
+/* CompareObjectHandles: TRUE when both handles (pseudo handles included) refer to the same kernel object. */
+K32API BOOL WINAPI CompareObjectHandles(HANDLE a, HANDLE b)
+{
+    ULONG got = 0;
+    return NtShzQueryK32(K32Q_SAME_OBJECT, a, &b, sizeof b, &got) == 0;   /* STATUS_NOT_SAME_OBJECT otherwise; no last error */
+}
 K32API DWORD WINAPI GetTickCount(void) { return (DWORD)GetTickCount64(); }
 K32API BOOL WINAPI QueryPerformanceCounter(LARGE_INTEGER *c)
 {

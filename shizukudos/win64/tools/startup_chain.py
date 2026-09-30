@@ -48,16 +48,37 @@ class Image:
         pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY[d] for d in (
             "IMAGE_DIRECTORY_ENTRY_IMPORT", "IMAGE_DIRECTORY_ENTRY_EXPORT", "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT")])
         self.imports = []                                           # (dll, name-or-#ordinal)
+        self.expect = {}                                            # (dll, "#N") -> the name pefile knows for that ordinal
         for e in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
             for i in e.imports:
-                self.imports.append((e.dll.decode(errors="replace"), i.name.decode() if i.name else f"#{i.ordinal}"))
+                dll = e.dll.decode(errors="replace")
+                if i.import_by_ordinal:                             # pefile names ws2_32/oleaut32 ordinals: keep the number
+                    fn = f"#{i.ordinal}"
+                    if i.name:
+                        self.expect[(dll.lower(), fn)] = i.name.decode()
+                else:
+                    fn = i.name.decode()
+                self.imports.append((dll, fn))
         self.delay = sum(len(e.imports) for e in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []))
-        self.exports, self.forwards, self.ordinals = set(), {}, set()
+        self.delay_imports = []
+        for e in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []):
+            dll = e.dll.decode(errors="replace")
+            for i in e.imports:
+                if i.import_by_ordinal:                             # as above: by number, pefile's name is the expectation
+                    fn = f"#{i.ordinal}"
+                    if i.name:
+                        self.expect[(dll.lower(), fn)] = i.name.decode()
+                else:
+                    fn = i.name.decode()
+                self.delay_imports.append((dll, fn))
+        self.exports, self.forwards, self.ordinals, self.ordinal_names = set(), {}, set(), {}
         exp = getattr(pe, "DIRECTORY_ENTRY_EXPORT", None)
         if exp:
             for s in exp.symbols:
                 if s.ordinal is not None:
                     self.ordinals.add(s.ordinal)
+                    if s.name:
+                        self.ordinal_names[s.ordinal] = s.name.decode(errors="replace")
                 if s.name:
                     n = s.name.decode(errors="replace")
                     self.exports.add(n)
@@ -71,6 +92,9 @@ def main():
     ap.add_argument("--build", type=Path, default=REPO / "build/shizukudos/win64")
     ap.add_argument("--json", type=Path)
     ap.add_argument("--top", type=int, default=40)
+    ap.add_argument("--delay", action="store_true",
+                    help="also list the delay-load imports of the loaded images that would fail when first called "
+                         "(the program starts without them; a call raises the MSVC delay-load exception)")
     args = ap.parse_args()
     appdir = args.exe.parent
     rows = apiset.parse()
@@ -105,9 +129,16 @@ def main():
             return system[n], "system"
         return None, "DLL not found"
 
-    def exported(img, fn, depth=0):
-        if fn.startswith("#"):
-            return int(fn[1:]) in img.ordinals
+    pinned = {}                                              # Shizuku DLL -> ordinals its module.json fixes ("ordinals")
+    for mj in (REPO / "shizukudos/win64/dlls").glob("*/module.json"):
+        pinned[mj.parent.name.lower() + ".dll"] = set(json.loads(mj.read_text()).get("ordinals", {}).values())
+
+    def exported(img, fn, depth=0, expect=None):
+        if fn.startswith("#"):                               # by ordinal: the export at that number must be the expected one
+            n = int(fn[1:])
+            if img.path.parent == args.build and n not in pinned.get(img.path.name.lower(), set()):
+                return False                                 # a Shizuku DLL's unpinned ordinals are whatever the linker chose
+            return n in img.ordinals and (expect is None or img.ordinal_names.get(n) == expect)
         if fn not in img.exports:
             return False
         fwd = img.forwards.get(fn)
@@ -132,7 +163,7 @@ def main():
             target, where = locate(dll)
             if not target:
                 why = where
-            elif not exported(image(target), fn):
+            elif not exported(image(target), fn, expect=img.expect.get((dll.lower(), fn))):
                 if target not in seen:
                     queue.append(target)
                 why = "not exported by " + target.name + (" (Shizuku)" if where == "system" else "")
@@ -165,6 +196,26 @@ def main():
             print(f"   first: {r['first_failure']}")
         for key, fns in sorted(r["by_dll"].items(), key=lambda kv: -len(kv[1])):
             print(f"   {len(fns):4}  {key}: {', '.join(fns[:args.top])}{' ...' if len(fns) > args.top else ''}")
+    if args.delay:
+        dmiss_total = 0
+        for path in order:
+            img = image(path)
+            by = {}
+            for dll, fn in img.delay_imports:
+                target, where = locate(dll)
+                if not target:
+                    by.setdefault((dll, where), []).append(fn)
+                elif not exported(image(target), fn, expect=img.expect.get((dll.lower(), fn))):
+                    by.setdefault((dll, "not exported by " + target.name), []).append(fn)
+            n = sum(len(v) for v in by.values())
+            dmiss_total += n
+            report[path.name]["delay_missing"] = n
+            report[path.name]["delay_by_dll"] = {f"{d} [{w}]": sorted(set(v)) for (d, w), v in sorted(by.items())}
+            if n:
+                print(f"{path.name}: {len(img.delay_imports)} delay-load imports, {n} would fail when called")
+                for (d, w), fns in sorted(by.items(), key=lambda kv: -len(kv[1])):
+                    print(f"   {len(fns):4}  {d} [{w}]: {', '.join(fns[:args.top])}{' ...' if len(fns) > args.top else ''}")
+        print(f"delay-load imports that would fail when called: {dmiss_total}")
     if args.json:
         args.json.write_text(json.dumps({"exe": str(args.exe), "chain": [p.name for p in order],
                                          "first_failure": first_fail, "images": report}, indent=1))

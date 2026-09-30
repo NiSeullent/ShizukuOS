@@ -1,0 +1,7 @@
+{
+  "name": "shz-e1-minapp",
+  "version": "1.0.0",
+  "description": "ShizukuDOS E1 minimal Electron probe (run_k64_electron.py)",
+  "main": "main.js",
+  "license": "GPL-2.0-only"
+}

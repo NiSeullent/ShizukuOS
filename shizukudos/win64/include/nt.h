@@ -111,6 +111,9 @@ NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
 #define K32Q_FIRMWARE 11            /* ULONG FIRMWARE_TYPE */
 #define K32Q_THREAD_SETTINGS 12     /* ULONG {priority boost disabled, memory priority, power throttling control, state} */
 #define K32Q_PROCESS_SETTINGS 13    /* ULONG {memory priority, power throttling control, state} */
+#define K32Q_CPU_CLOCK 14           /* ULONG64 time-stamp counter rate in Hz, measured by the kernel against its tick */
+#define K32Q_SAME_OBJECT 15         /* h = first handle, buffer = HANDLE second: STATUS_SUCCESS or STATUS_NOT_SAME_OBJECT */
+#define K32Q_THREAD_NAME 16         /* thread handle: the SetThreadDescription text (UTF-16, no terminator), *ret = its bytes */
 #define K32S_PRIORITY_CLASS 1       /* ULONG class value (process handle) */
 #define K32S_THREAD_BOOST 2         /* ULONG disable (thread handle) */
 #define K32S_THREAD_MEM_PRIORITY 3  /* ULONG 1..5 (thread handle) */
@@ -121,6 +124,39 @@ NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
 #define K32S_THREAD_POWER 8         /* ULONG {control mask, state mask} (thread handle) */
 #define K32S_PROCESS_MEM_PRIORITY 9 /* ULONG 1..5 (process handle) */
 #define K32S_PROCESS_POWER 10       /* ULONG {control mask, state mask} (process handle) */
+#define K32S_SUSPEND_PROCESS 11     /* every thread of the process (NtSuspendProcess) */
+#define K32S_RESUME_PROCESS 12      /* NtResumeProcess */
+#define K32S_THREAD_NAME 13         /* thread handle: UTF-16 text without terminator (len 0 clears); > 65534 bytes is INVALID_PARAMETER */
+
+/* advapi32 support calls 0x9d-0x9e (kernel64/sysk32_sec.c; operation codes as in kernel64/ntsys.h) */
+NTSTATUS NTAPI NtShzToken(ULONG_PTR op, ULONG_PTR, ULONG_PTR, ULONG_PTR);
+NTSTATUS NTAPI NtShzSecurityObject(ULONG_PTR op, ULONG_PTR handle, ULONG_PTR buf, ULONG_PTR len, ULONG_PTR pneeded);
+/* the NT names (ntdll/ntobj.c) */
+NTSTATUS NTAPI NtOpenProcessToken(HANDLE, ACCESS_MASK, PHANDLE);
+NTSTATUS NTAPI NtOpenProcessTokenEx(HANDLE, ACCESS_MASK, ULONG, PHANDLE);
+NTSTATUS NTAPI NtOpenThreadToken(HANDLE, ACCESS_MASK, BOOLEAN, PHANDLE);
+NTSTATUS NTAPI NtOpenThreadTokenEx(HANDLE, ACCESS_MASK, BOOLEAN, ULONG, PHANDLE);
+NTSTATUS NTAPI NtDuplicateToken(HANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *, BOOLEAN, ULONG, PHANDLE);
+NTSTATUS NTAPI NtSuspendProcess(HANDLE);
+NTSTATUS NTAPI NtResumeProcess(HANDLE);
+#define SHZ_TOK_OPEN_PROCESS 1
+#define SHZ_TOK_OPEN_THREAD 2
+#define SHZ_TOK_QUERY 3
+#define SHZ_TOK_SET 4
+#define SHZ_TOK_DUPLICATE 5
+#define SHZ_TOK_IMPERSONATE 6
+#define SHZ_TOKF_INTEGRITY 1
+#define SHZ_TOKF_SESSION 2
+#define SHZ_TOKF_PRIVS 3
+#define SHZ_SOB_QUERY 1
+#define SHZ_SOB_SET 2
+/* Token data the kernel keeps (advapi32 renders the Windows information classes from it). */
+typedef struct shz_token_info {
+    ULONG type, imp_level, integrity_rid, flags;
+    ULONG64 id, modified_id, auth_id;
+    ULONG session, elevation_type;
+    ULONG64 owner_pid;
+} shz_token_info;
 
 #define CURRENT_PROCESS ((HANDLE)(LONG_PTR)-1)
 #define CURRENT_THREAD ((HANDLE)(LONG_PTR)-2)

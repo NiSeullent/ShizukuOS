@@ -57,7 +57,22 @@
     X(NtShzSockPoll, 0x8c) X(NtShzNetResolve, 0x8d) X(NtShzNetQuery, 0x8e) X(NtShzNetPing, 0x8f)
 
 #define SYSCALL_LIST_K32(X) \
-    X(NtQueryVolumeInformationFile, 0x90) X(NtLockFile, 0x91) X(NtUnlockFile, 0x92) X(NtShzQueryK32, 0x93) X(NtShzSetK32, 0x94)
+    X(NtQueryVolumeInformationFile, 0x90) X(NtLockFile, 0x91) X(NtUnlockFile, 0x92) X(NtShzQueryK32, 0x93) X(NtShzSetK32, 0x94) \
+    X(NtShzToken, 0x9d) X(NtShzSecurityObject, 0x9e)
+/* 0x9d-0x9e (kernel64/sysk32_sec.c): access tokens and stored security descriptors for advapi32, multiplexed by an
+ * operation code in the first argument (ntdll exposes NtOpenProcessToken[Ex], NtOpenThreadToken[Ex], NtDuplicateToken).
+ * 0x95-0x9c and 0x9f are free. */
+#define SHZ_TOK_OPEN_PROCESS 1  /* (op, process, ACCESS_MASK, PHANDLE) */
+#define SHZ_TOK_OPEN_THREAD 2   /* (op, thread, ACCESS_MASK, PHANDLE): STATUS_NO_TOKEN when the thread does not impersonate */
+#define SHZ_TOK_QUERY 3         /* (op, token, shz_token_info *, length) */
+#define SHZ_TOK_SET 4           /* (op, token, field (SHZ_TOKF_*), value) */
+#define SHZ_TOK_DUPLICATE 5     /* (op, token, type | impersonation level << 8, PHANDLE) */
+#define SHZ_TOK_IMPERSONATE 6   /* (op, thread, token (0 = revert to self)) */
+#define SHZ_TOKF_INTEGRITY 1
+#define SHZ_TOKF_SESSION 2
+#define SHZ_TOKF_PRIVS 3
+#define SHZ_SOB_QUERY 1         /* (op, handle, buffer, length, [5] PULONG needed): the stored self-relative descriptor */
+#define SHZ_SOB_SET 2           /* (op, handle, buffer, length) */
 
 #define SYSCALL_LIST_MISC(X) \
     X(NtShzRandom, 0xa0)                /* kernel/krandom.c: system RNG (ProcessPrng, BCryptGenRandom, RtlGenRandom) */

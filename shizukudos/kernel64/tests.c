@@ -161,6 +161,10 @@ static void win64_run_others(void)
     fsnode_t *dir = fs_lookup("\\SHZ\\TESTS"), *c;
     if (!dir)
         return;
+    if (k64_cmdline_has("shz.noapps")) {                        /* autorun.c: a run dedicated to one program */
+        kprintf("K64 win64: shz.noapps: the self-checking apps are not run\n");
+        return;
+    }
     for (c = dir->child; c; c = c->sibling) {
         const size_t len = strlen(c->name);
         if (c->is_dir || len < 7 || strncmp(c->name, "T_", 2) || strcmp(c->name + len - 4, ".EXE") ||
