@@ -54,10 +54,24 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default=str(BUILD / "win64" / "WIN64_NTDRV.IMG"))
     ap.add_argument("--corpus", default=str(BUILD / "ntdrv" / "corpus"))
-    ap.add_argument("--out", default=str(BUILD / "win64" / "WIN64_KMDF.IMG"))
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--all", action="store_true",
+                    help="add EVERY built corpus driver (build/.../corpus/*/gcc/*.sys) and write WIN64_CORPUS.IMG instead")
     args = ap.parse_args()
+    if args.out is None:
+        args.out = str(BUILD / "win64" / ("WIN64_CORPUS.IMG" if args.all else "WIN64_KMDF.IMG"))
     files = [f for f in read_archive(args.base) if not any(f[0].upper() == f"\\SHZ\\DRIVERS\\{m.upper()}.SYS" for m in KMDF_MODULES)]
     missing = []
+    if args.all:
+        have = {f[0].upper() for f in files}
+        for sys_file in sorted(Path(args.corpus).glob("*/gcc/*.sys")):
+            store = f"\\SHZ\\DRIVERS\\{sys_file.stem.upper()}.SYS"
+            if store not in have:
+                files.append((store, sys_file.read_bytes()))
+                have.add(store)
+        Path(args.out).write_bytes(pack_archive(files))
+        print(f"wrote {args.out}: {len(files)} files")
+        return 0
     for name in KMDF_MODULES:
         sys_file = Path(args.corpus) / name / "gcc" / f"{name}.sys"
         if not sys_file.exists():

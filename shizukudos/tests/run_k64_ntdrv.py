@@ -96,6 +96,21 @@ def evaluate_kmdf(serial):
     return c
 
 
+CORPUS_LOADED_MIN = 22         # measured: 22 of 23 (uniata returns STATUS_DEVICE_DOES_NOT_EXIST: no ATA controller in the VM)
+
+
+def evaluate_corpus(serial):
+    m = re.search(r"K64 ntdrv-test: corpus: (\d+) of (\d+) drivers loaded", serial, re.M)
+    loaded, total = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    rows = re.findall(r"K64 ntdrv-test: corpus (\S+) status=([0-9a-f]+) started=(\d)", serial, re.M)
+    ok = [n for n, st, s in rows if int(st, 16) == 0 and s == "1"]
+    bad = [f"{n}={st}" for n, st, s in rows if not (int(st, 16) == 0 and s == "1")]
+    return [check("corpus: every driver in the store was attempted and the total line printed", bool(m) and total == len(rows) and total > 0,
+                  f"{loaded} of {total} loaded"),
+            check(f"corpus: at least {CORPUS_LOADED_MIN} drivers load", loaded >= CORPUS_LOADED_MIN,
+                  f"loaded: {', '.join(ok)}; not loaded: {', '.join(bad)}")]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--qemu", default=qemu.DEFAULT_QEMU)
@@ -103,11 +118,13 @@ def main():
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--memory", default="256")
     ap.add_argument("--out", default=str(K64S / "ntdrv-run"))
+    ap.add_argument("--corpus", action="store_true",
+                    help="mount WIN64_CORPUS.IMG (win64/ntdrv/kmdf_image.py --all: every built corpus driver) and report how many load")
     ap.add_argument("--kmdf", action="store_true",
                     help="mount WIN64_KMDF.IMG (win64/ntdrv/kmdf_image.py: the test drivers + the corpus's WdfLdr/Wdf01000/cdrom/hdaudbus) "
                          "and require the KMDF client drivers to bind to the framework")
     args = ap.parse_args()
-    stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / ("WIN64_KMDF.IMG" if args.kmdf else "WIN64_NTDRV.IMG")
+    stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / ("WIN64_CORPUS.IMG" if args.corpus else "WIN64_KMDF.IMG" if args.kmdf else "WIN64_NTDRV.IMG")
     for f in (stub, kernel, initrd):
         if not f.exists():
             raise SystemExit(f"missing {f}: run shizukudos/kbuild.py and shizukudos/win64/build.py first")
@@ -133,8 +150,10 @@ def main():
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     ev, exit_code = parse(serial)
     checks = evaluate(serial, ev)
-    if args.kmdf:
+    if args.kmdf or args.corpus:
         checks += evaluate_kmdf(serial)
+    if args.corpus:
+        checks += evaluate_corpus(serial)
     if timed_out:
         checks.insert(0, check("run finished before the timeout", False, f"{args.timeout}s, accel={accel}"))
     status = "PASS" if all(x["status"] == "PASS" for x in checks) else "FAIL"

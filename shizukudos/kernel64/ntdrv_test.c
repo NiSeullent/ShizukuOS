@@ -115,6 +115,33 @@ static void kmdf_selftest(int *pass)
     }
 }
 
+/* ---- the whole driver corpus: only the corpus image (win64/ntdrv/kmdf_image.py --all) has more than the test drivers in
+ * \SHZ\DRIVERS. Every other image in the store is loaded once, under its file name as service name, and the outcome is
+ * printed per driver plus a total. Export drivers get loaded on demand by the drivers that import them. */
+static void corpus_selftest(void)
+{
+    fsnode_t *dir = fs_lookup("\\SHZ\\DRIVERS"), *n;
+    unsigned total = 0, loaded = 0;
+    if (!dir || !dir->is_dir || !fs_lookup("\\SHZ\\DRIVERS\\CDROM.SYS")) return;      /* not the corpus image */
+    for (n = dir->child; n; n = n->sibling) {
+        char service[48];
+        unsigned i = 0;
+        ntdrv_driver_t *d = 0;
+        int32_t st;
+        if (n->is_dir) continue;
+        while (n->name[i] && n->name[i] != '.' && i < sizeof service - 1) { service[i] = n->name[i] >= 'A' && n->name[i] <= 'Z' ? (char)(n->name[i] + 32) : n->name[i]; ++i; }
+        service[i] = 0;
+        if (!strcmp(service, "echo") || !strcmp(service, "dpctimer") || !strcmp(service, "pciedu") || !strcmp(service, "apitest")) continue;
+        ++total;
+        d = ntdrv_find_driver(service);
+        if (d) { st = 0; }                                       /* loaded already as another driver's export driver */
+        else { d = 0; st = ntdrv_load_node(n, service, &d); }
+        if (st == 0 && d && d->started) ++loaded;
+        kprintf("K64 ntdrv-test: corpus %s status=%x started=%d\n", service, (uint32_t)st, d ? d->started : 0);
+    }
+    kprintf("K64 ntdrv-test: corpus: %u of %u drivers loaded (DriverEntry returned success)\n", loaded, total);
+}
+
 void ntdrv_selftest(void)
 {
     ntdrv_driver_t *echo = 0, *dpc = 0, *pci = 0;
@@ -192,6 +219,7 @@ void ntdrv_selftest(void)
     }
 
     kmdf_selftest(&pass);
+    corpus_selftest();
     shz_evidence(13, loaded);
     shz_evidence(27, ((uint64_t)pass << 32) | provider_total);
     kprintf("K64 ntdrv-test: %d driver(s) exercised, overall %s\n", loaded, pass ? "PASS" : "FAIL");

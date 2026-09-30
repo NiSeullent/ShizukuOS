@@ -13,6 +13,9 @@ extern NTSTATUS NTAPI ntdrv_default_dispatch(DEVICE_OBJECT *dev, IRP *irp);   /*
 extern DRIVER_EXTENSION *ntdrv_alloc_driver_extension(DRIVER_OBJECT *drv, ntdrv_driver_t *d);   /* ntdrv_pnp.c */
 extern void ntdrv_run_reinit(DRIVER_OBJECT *drv);
 
+extern NTSTATUS ntdrv_open_key_ascii(const char *path, int create, uint64_t *handle);   /* ntdrv_reg.c */
+extern int32_t NTAPI ZwClose(uint64_t handle);
+
 static ntdrv_driver_t *driver_list;
 static uint64_t va_cursor = NTDRV_VA_BASE;
 static ntdrv_driver_t *current_driver;
@@ -108,6 +111,26 @@ static int module_name_eq(const char *service, const char *module, unsigned mlen
     return service[mlen] == 0;
 }
 
+static void *resolve_module_export(const char *dll, const char *name);
+
+/* Export forwarder "MODULE.Function" (ReactOS's scsiport forwards ScsiPortStallExecution to NTOSKRNL.KeStallExecutionProcessor). */
+static void *resolve_forwarder(const char *fwd)
+{
+    char module[40], func[80];
+    unsigned m = 0, f = 0;
+    while (fwd[m] && fwd[m] != '.' && m < sizeof module - 5) { module[m] = fwd[m]; ++m; }
+    if (fwd[m] != '.') return 0;
+    ++m;
+    if (fwd[m] == '#') return 0;                                 /* forwarded by ordinal: not supported */
+    while (fwd[m] && f < sizeof func - 1) func[f++] = fwd[m++];
+    func[f] = 0;
+    { unsigned i; for (i = 0; module[i]; ++i) if (module[i] >= 'A' && module[i] <= 'Z') module[i] = (char)(module[i] + 32); }
+    if (!strcmp(module, "ntoskrnl") || !strcmp(module, "ntkrnlmp") || !strcmp(module, "ntkrnlpa")) return ntdrv_resolve_export("ntoskrnl.exe", func);
+    if (!strcmp(module, "hal")) return ntdrv_resolve_export("hal.dll", func);
+    { unsigned k = 0; while (module[k]) ++k; memcpy(module + k, ".sys", 5); }
+    return resolve_module_export(module, func);
+}
+
 static void *find_mapped_export(const ntdrv_driver_t *d, const char *name)
 {
     const uint8_t *base = (const uint8_t *)d->image_base;
@@ -129,7 +152,7 @@ static void *find_mapped_export(const ntdrv_driver_t *d, const char *name)
         if (strcmp((const char *)base + nrva, name)) continue;
         memcpy(&ord, base + ords + 2ull * i, 2);
         memcpy(&frva, base + funcs + 4ull * ord, 4);
-        if (frva >= dir && frva < dir + size) return 0;          /* a forwarder: not supported */
+        if (frva >= dir && frva < dir + size) return resolve_forwarder((const char *)base + frva);   /* a forwarder string */
         return (void *)(base + frva);
     }
     return 0;
@@ -198,6 +221,11 @@ static void build_regpath(ntdrv_driver_t *d, const char *service)
     for (i = 0; pfx[i] && n < sizeof full - 1; ++i) full[n++] = pfx[i];
     for (i = 0; service[i] && n < sizeof full - 1; ++i) full[n++] = service[i];
     full[n] = 0;
+    {   /* A driver's RegistryPath must name an existing key (its DriverEntry typically opens it): make it when the load did not
+         * come through the registry (a store load by file name). */
+        uint64_t h = 0;
+        if (ntdrv_open_key_ascii(full, 1, &h) == 0) ZwClose(h);
+    }
     ntdrv_ascii_to_wide(full, d->regpath_buf, sizeof d->regpath_buf / 2);
     d->regpath.Buffer = d->regpath_buf;
     d->regpath.Length = (uint16_t)(n * 2);

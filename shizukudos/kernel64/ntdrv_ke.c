@@ -415,6 +415,7 @@ static void timer_thread(void *arg)
         uint64_t now, f;
         unsigned i;
         thread_sleep_ms(1);
+        ntdrv_kuser_tick();                                     /* KUSER_SHARED_DATA time fields (ntdrv_kuser.c) */
         now = ticks_now();
         f = irq_save();
         for (i = 0; i < timer_count; ++i) {
@@ -536,6 +537,7 @@ void ntdrv_ke_init(void)                        /* idempotent: the first driver 
     sem_init(&dpc_sem, 0);
     g_irql = PASSIVE_LEVEL;
     write_cr8(PASSIVE_LEVEL);
+    ntdrv_kuser_init();                             /* the shared-data page drivers read directly at 0xFFFFF78000000000 */
     w = thread_create("ntdrv-dpc", dpc_worker, 0);
     tt = thread_create("ntdrv-timer", timer_thread, 0);
     KASSERT(w && tt);
