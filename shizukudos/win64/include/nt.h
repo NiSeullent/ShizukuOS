@@ -81,7 +81,7 @@ NTSTATUS NTAPI NtOpenFile(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *, SHZ_IO_
 NTSTATUS NTAPI NtQueryDirectoryFile(HANDLE, HANDLE, PVOID, PVOID, SHZ_IO_STATUS_BLOCK *, PVOID, ULONG, ULONG, BOOLEAN,
                                     SHZ_UNICODE_STRING *, BOOLEAN);
 NTSTATUS NTAPI NtSetInformationThread(HANDLE, ULONG, PVOID, ULONG);
-NTSTATUS NTAPI NtCreateProcessEx(PHANDLE, PHANDLE, SHZ_UNICODE_STRING *, SHZ_UNICODE_STRING *, SHZ_UNICODE_STRING *, void *ext);
+NTSTATUS NTAPI NtCreateProcessEx(PHANDLE, PHANDLE, SHZ_UNICODE_STRING *, SHZ_UNICODE_STRING *, SHZ_UNICODE_STRING *);
 NTSTATUS NTAPI NtQuerySystemInformation(ULONG, PVOID, ULONG, PULONG);
 NTSTATUS NTAPI NtLoadImage(SHZ_UNICODE_STRING *, PULONG64, ULONG, SHZ_UNICODE_STRING *);   /* name, base, flags, dirs (ldr_search.c) */
 NTSTATUS NTAPI NtShzDebugPrint(const char *, ULONG);
@@ -124,67 +124,17 @@ NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
 #define K32S_SUSPEND_PROCESS 11     /* every thread of the process (NtSuspendProcess) */
 #define K32S_RESUME_PROCESS 12      /* NtResumeProcess */
 
-/* kernel32/advapi32 support calls 0x95-0x9e (kernel64/sysk32_obj.c; operation codes as in kernel64/ntsys.h) */
-NTSTATUS NTAPI NtShzSection(ULONG_PTR op, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR);
-NTSTATUS NTAPI NtShzIoCompletion(ULONG_PTR op, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR);
-NTSTATUS NTAPI NtShzJob(ULONG_PTR op, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR, ULONG_PTR);
+/* advapi32 support calls 0x9d-0x9e (kernel64/sysk32_sec.c; operation codes as in kernel64/ntsys.h) */
 NTSTATUS NTAPI NtShzToken(ULONG_PTR op, ULONG_PTR, ULONG_PTR, ULONG_PTR);
 NTSTATUS NTAPI NtShzSecurityObject(ULONG_PTR op, ULONG_PTR handle, ULONG_PTR buf, ULONG_PTR len, ULONG_PTR pneeded);
-NTSTATUS NTAPI NtCreateNamedPipeFile(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *, SHZ_IO_STATUS_BLOCK *, ULONG share, ULONG disposition,
-                                     ULONG options, ULONG type, ULONG read_mode, ULONG completion_mode, ULONG max_instances,
-                                     ULONG in_quota, ULONG out_quota, PLARGE_INTEGER default_timeout);
-NTSTATUS NTAPI NtFsControlFile(HANDLE, HANDLE event, PVOID apc, PVOID apc_ctx, SHZ_IO_STATUS_BLOCK *, ULONG code, PVOID in,
-                               ULONG in_len, PVOID out, ULONG out_len);
-NTSTATUS NTAPI NtReadVirtualMemory(HANDLE, PVOID addr, PVOID buf, SIZE_T size, PSIZE_T done);
-NTSTATUS NTAPI NtWriteVirtualMemory(HANDLE, PVOID addr, const void *buf, SIZE_T size, PSIZE_T done);
-NTSTATUS NTAPI NtSetInformationObject(HANDLE, ULONG cls, PVOID buf, ULONG len);
-NTSTATUS NTAPI NtQueryObject(HANDLE, ULONG cls, PVOID buf, ULONG len, PULONG ret);
-NTSTATUS NTAPI NtOpenProcess(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *, PVOID client_id);
-NTSTATUS NTAPI NtOpenThread(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *, PVOID client_id);
-NTSTATUS NTAPI NtSuspendThread(HANDLE, PULONG);
-NTSTATUS NTAPI NtResumeThread(HANDLE, PULONG);
-/* the NT names of the multiplexed services (ntdll/ntobj.c) */
-NTSTATUS NTAPI NtCreateSection(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *, PLARGE_INTEGER, ULONG prot, ULONG attrs, HANDLE file);
-NTSTATUS NTAPI NtOpenSection(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *);
-NTSTATUS NTAPI NtMapViewOfSection(HANDLE, HANDLE, PVOID *, ULONG_PTR, SIZE_T, PLARGE_INTEGER, PSIZE_T, ULONG, ULONG, ULONG);
-NTSTATUS NTAPI NtUnmapViewOfSection(HANDLE, PVOID);
-NTSTATUS NTAPI NtFlushVirtualMemory(HANDLE, PVOID *, PSIZE_T, SHZ_IO_STATUS_BLOCK *);
-NTSTATUS NTAPI NtQuerySection(HANDLE, ULONG, PVOID, SIZE_T, PSIZE_T);
-NTSTATUS NTAPI NtCreateIoCompletion(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *, ULONG);
-NTSTATUS NTAPI NtSetIoCompletion(HANDLE, ULONG_PTR, ULONG_PTR, NTSTATUS, ULONG_PTR);
-NTSTATUS NTAPI NtRemoveIoCompletion(HANDLE, PULONG_PTR, PULONG_PTR, SHZ_IO_STATUS_BLOCK *, PLARGE_INTEGER);
-NTSTATUS NTAPI NtRemoveIoCompletionEx(HANDLE, PVOID, ULONG, PULONG, PLARGE_INTEGER, BOOLEAN);
-NTSTATUS NTAPI NtCancelIoFileEx(HANDLE, SHZ_IO_STATUS_BLOCK *, SHZ_IO_STATUS_BLOCK *);
-NTSTATUS NTAPI NtCreateJobObject(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *);
-NTSTATUS NTAPI NtOpenJobObject(PHANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *);
-NTSTATUS NTAPI NtAssignProcessToJobObject(HANDLE, HANDLE);
-NTSTATUS NTAPI NtTerminateJobObject(HANDLE, NTSTATUS);
-NTSTATUS NTAPI NtIsProcessInJob(HANDLE, HANDLE);
-NTSTATUS NTAPI NtQueryInformationJobObject(HANDLE, ULONG, PVOID, ULONG, PULONG);
-NTSTATUS NTAPI NtSetInformationJobObject(HANDLE, ULONG, PVOID, ULONG);
+/* the NT names (ntdll/ntobj.c) */
 NTSTATUS NTAPI NtOpenProcessToken(HANDLE, ACCESS_MASK, PHANDLE);
 NTSTATUS NTAPI NtOpenProcessTokenEx(HANDLE, ACCESS_MASK, ULONG, PHANDLE);
 NTSTATUS NTAPI NtOpenThreadToken(HANDLE, ACCESS_MASK, BOOLEAN, PHANDLE);
 NTSTATUS NTAPI NtOpenThreadTokenEx(HANDLE, ACCESS_MASK, BOOLEAN, ULONG, PHANDLE);
 NTSTATUS NTAPI NtDuplicateToken(HANDLE, ACCESS_MASK, SHZ_OBJECT_ATTRIBUTES *, BOOLEAN, ULONG, PHANDLE);
-#define SHZ_SEC_CREATE 1
-#define SHZ_SEC_OPEN 2
-#define SHZ_SEC_MAP 3
-#define SHZ_SEC_UNMAP 4
-#define SHZ_SEC_FLUSH 5
-#define SHZ_SEC_QUERY 6
-#define SHZ_IOC_CREATE 1
-#define SHZ_IOC_SET 2
-#define SHZ_IOC_REMOVE 3
-#define SHZ_IOC_CANCEL 4
-#define SHZ_IOC_QUERY 5
-#define SHZ_JOB_CREATE 1
-#define SHZ_JOB_OPEN 2
-#define SHZ_JOB_ASSIGN 3
-#define SHZ_JOB_TERMINATE 4
-#define SHZ_JOB_QUERY 5
-#define SHZ_JOB_SET 6
-#define SHZ_JOB_IS_IN_JOB 7
+NTSTATUS NTAPI NtSuspendProcess(HANDLE);
+NTSTATUS NTAPI NtResumeProcess(HANDLE);
 #define SHZ_TOK_OPEN_PROCESS 1
 #define SHZ_TOK_OPEN_THREAD 2
 #define SHZ_TOK_QUERY 3
@@ -203,18 +153,6 @@ typedef struct shz_token_info {
     ULONG session, elevation_type;
     ULONG64 owner_pid;
 } shz_token_info;
-/* NtCreateProcessEx's extension block (6th argument; kernel64/sysx.c) */
-#define SHZ_CPX_SUSPENDED 1
-#define SHZ_CPX_INHERIT 2
-#define SHZ_CPX_BREAKAWAY 4
-#define SHZ_CPX_STD 8
-typedef struct shz_process_ex {
-    ULONG size, flags;
-    ULONG64 env, env_bytes;
-    ULONG64 handle_list;
-    ULONG handle_count, pad;
-    ULONG64 std[3];
-} shz_process_ex;
 
 #define CURRENT_PROCESS ((HANDLE)(LONG_PTR)-1)
 #define CURRENT_THREAD ((HANDLE)(LONG_PTR)-2)

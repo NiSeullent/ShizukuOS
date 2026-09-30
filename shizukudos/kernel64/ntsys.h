@@ -35,7 +35,8 @@
  * Each subsystem defines ONLY its own list below (numbers must stay inside its range):
  *   registry 0x50-0x5f   graphics/window 0x60-0x7f   network 0x80-0x8f   kernel32 support 0x90-0x9f   misc 0xa0-0xaf
  *   installer (SHZSETUP) 0xb0-0xbf   gpu (P-render) 0xd0-0xdf   NT driver host (N1) 0xe0-0xef
- *   storage raw-sector interface (S1) 0xf0-0xff */
+ *   storage raw-sector interface (S1) 0xf0-0xff
+ *   IPC / process model (kernel64/ipc_*.c, npfs.c): 0xa1-0xaf of misc (0xa0 is the RNG), 0xc0-0xcf and 0x100-0x10f */
 #define SYSCALL_LIST_REGISTRY(X) \
     X(NtCreateKey, 0x50) X(NtOpenKey, 0x51) X(NtOpenKeyEx, 0x52) X(NtQueryValueKey, 0x53) X(NtSetValueKey, 0x54) \
     X(NtDeleteKey, 0x55) X(NtDeleteValueKey, 0x56) X(NtEnumerateKey, 0x57) X(NtEnumerateValueKey, 0x58) \
@@ -57,30 +58,10 @@
 
 #define SYSCALL_LIST_K32(X) \
     X(NtQueryVolumeInformationFile, 0x90) X(NtLockFile, 0x91) X(NtUnlockFile, 0x92) X(NtShzQueryK32, 0x93) X(NtShzSetK32, 0x94) \
-    X(NtShzSection, 0x95) X(NtShzIoCompletion, 0x96) X(NtCreateNamedPipeFile, 0x97) X(NtFsControlFile, 0x98) \
-    X(NtReadVirtualMemory, 0x99) X(NtWriteVirtualMemory, 0x9a) X(NtShzJob, 0x9b) X(NtSetInformationObject, 0x9c) \
     X(NtShzToken, 0x9d) X(NtShzSecurityObject, 0x9e)
-/* 0x95-0x9e (kernel64/section.c, iocp.c, npfs.c, sysk32_obj.c): the NtShz* calls multiplex several NT services by an
- * operation code in the first argument (ntdll exposes the NT names: NtCreateSection, NtMapViewOfSection, NtCreateIoCompletion,
- * NtRemoveIoCompletion, NtCreateJobObject, NtOpenProcessToken, NtQuerySecurityObject ...). 0x9f is free. */
-#define SHZ_SEC_CREATE 1        /* (op, PHANDLE, PLARGE_INTEGER max size, ULONG protect, [5] attributes, [6] file, [7] OA, [8] access) */
-#define SHZ_SEC_OPEN 2          /* (op, PHANDLE, ACCESS_MASK, OA) */
-#define SHZ_SEC_MAP 3           /* (op, section, process, PVOID *base, [5] offset, [6] SIZE_T *view size, [7] allocation type, [8] protect) */
-#define SHZ_SEC_UNMAP 4         /* (op, process, base) */
-#define SHZ_SEC_FLUSH 5         /* (op, process, PVOID *base, SIZE_T *size) */
-#define SHZ_SEC_QUERY 6         /* (op, section, SECTION_BASIC_INFORMATION *, length) */
-#define SHZ_IOC_CREATE 1        /* (op, PHANDLE, concurrency, OA) */
-#define SHZ_IOC_SET 2           /* (op, port, key, ApcContext, [5] status, [6] information) */
-#define SHZ_IOC_REMOVE 3        /* (op, port, ULONG64 out[4 * max], max, [5] PULONG removed, [6] PLARGE_INTEGER timeout, [7] alertable) */
-#define SHZ_IOC_CANCEL 4        /* (op, file, IoStatusBlock to cancel (0 = all), [a4] 1 = only the calling thread's) */
-#define SHZ_IOC_QUERY 5         /* (op, port, PULONG depth) */
-#define SHZ_JOB_CREATE 1        /* (op, PHANDLE, ACCESS_MASK, OA) */
-#define SHZ_JOB_OPEN 2          /* (op, PHANDLE, ACCESS_MASK, OA) */
-#define SHZ_JOB_ASSIGN 3        /* (op, job, process) */
-#define SHZ_JOB_TERMINATE 4     /* (op, job, exit status) */
-#define SHZ_JOB_QUERY 5         /* (op, job, class, buffer, [5] length, [6] PULONG returned) */
-#define SHZ_JOB_SET 6           /* (op, job, class, buffer, [5] length) */
-#define SHZ_JOB_IS_IN_JOB 7     /* (op, process, job (0 = any job), PBOOLEAN result) */
+/* 0x9d-0x9e (kernel64/sysk32_sec.c): access tokens and stored security descriptors for advapi32, multiplexed by an
+ * operation code in the first argument (ntdll exposes NtOpenProcessToken[Ex], NtOpenThreadToken[Ex], NtDuplicateToken).
+ * 0x95-0x9c and 0x9f are free. */
 #define SHZ_TOK_OPEN_PROCESS 1  /* (op, process, ACCESS_MASK, PHANDLE) */
 #define SHZ_TOK_OPEN_THREAD 2   /* (op, thread, ACCESS_MASK, PHANDLE): STATUS_NO_TOKEN when the thread does not impersonate */
 #define SHZ_TOK_QUERY 3         /* (op, token, shz_token_info *, length) */
@@ -95,6 +76,24 @@
 
 #define SYSCALL_LIST_MISC(X) \
     X(NtShzRandom, 0xa0)                /* kernel/krandom.c: system RNG (ProcessPrng, BCryptGenRandom, RtlGenRandom) */
+
+/* IPC and the Windows process model (kernel64/ipc_*.c, npfs.c): sections, named pipes, I/O completion, APCs, jobs.
+ * ipc_core.c takes these numbers before the range dispatch (ipc_syscall_override), so they may share the misc range. */
+#define SYSCALL_LIST_IPC_MISC(X) \
+    X(NtOpenSection, 0xa1) X(NtMapViewOfSection, 0xa2) X(NtUnmapViewOfSection, 0xa3) \
+    X(NtQuerySection, 0xa4) X(NtFlushVirtualMemory, 0xa5) X(NtCreateNamedPipeFile, 0xa6) X(NtFsControlFile, 0xa7) \
+    X(NtCreateIoCompletion, 0xa8) X(NtSetIoCompletion, 0xa9) X(NtRemoveIoCompletion, 0xaa) \
+    X(NtRemoveIoCompletionEx, 0xab) X(NtQueueApcThread, 0xac) X(NtTestAlert, 0xad) X(NtCancelIoFileEx, 0xae) \
+    X(NtShzCreateUserProcess, 0xaf)
+
+#define SYSCALL_LIST_IPC(X) \
+    X(NtCreateJobObject, 0xc0) X(NtOpenJobObject, 0xc1) X(NtAssignProcessToJobObject, 0xc2) \
+    X(NtSetInformationJobObject, 0xc3) X(NtQueryInformationJobObject, 0xc4) X(NtTerminateJobObject, 0xc5) \
+    X(NtIsProcessInJob, 0xc6) X(NtSetInformationObject, 0xc7) \
+    X(NtReadVirtualMemory, 0xc8) X(NtWriteVirtualMemory, 0xc9) X(NtShzQueryKernelStats, 0xca) \
+    X(NtQueryIoCompletion, 0xcb) X(NtOpenEvent, 0xcc) X(NtOpenMutant, 0xcd) X(NtOpenSemaphore, 0xce) \
+    X(NtOpenTimer, 0xcf) X(NtOpenIoCompletion, 0x100) /* 0x101: NtDeviceIoControlFile is the NT driver host's 0xe1 */ \
+    X(NtNotifyChangeDirectoryFile, 0x102) X(NtQueryTimer, 0x103) X(NtCreateSection, 0x104)
 
 /* Display/GPU (kernel64/gpu_sys.c; structures in win64/include/shzgpu.h) */
 #define SYSCALL_LIST_GPU(X) \
@@ -131,8 +130,10 @@ enum {
     SYSCALL_LIST_SETUP(X)
     SYSCALL_LIST_BLK(X)
     SYSCALL_LIST_NTDRV(X)
+    SYSCALL_LIST_IPC_MISC(X)
+    SYSCALL_LIST_IPC(X)
 #undef X
-    SYS_MAX = 0x100                 /* every number below goes to sys_extended(); sysext.c rejects unrouted ranges */
+    SYS_MAX = 0x110                 /* every number below goes to sys_extended(); sysext.c rejects unrouted ranges */
 };
 
 /* NTSTATUS values used by the kernel (subset of ntstatus.h; same numeric values). */

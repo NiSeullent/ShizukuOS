@@ -30,7 +30,7 @@ static process_t *proc_from_handle(process_t *cur, uint64_t h)
     if (h == CURRENT_PROCESS_HANDLE) return cur;
     {
         kobject_t *o = handle_lookup(cur, h, OB_PROCESS);
-        return o ? o->u.proc.p : 0;
+        return o && !o->u.proc.p->teardown ? o->u.proc.p : 0;     /* a dead process has no address space left */
     }
 }
 
@@ -132,6 +132,14 @@ static int32_t sys_delay(process_t *cur, uint64_t alertable, uint64_t pinterval)
 
 extern int32_t sys_extended(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3,
                             uint64_t a4);
+/* IPC hook (kernel64/ipc_core.c): may take over a system call of the base list (pipe/overlapped I/O on NtReadFile, alertable
+ * waits, cross-process NtDuplicateObject, ...). Returns nonzero and sets *st when it handled the call. */
+int __attribute__((weak)) ipc_syscall_override(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2,
+                                               uint64_t a3, uint64_t a4, int32_t *st)
+{
+    (void)p; (void)r; (void)num; (void)a1; (void)a2; (void)a3; (void)a4; (void)st;
+    return 0;
+}
 
 int syscall_dispatch(struct regs *r)
 {
@@ -142,24 +150,20 @@ int syscall_dispatch(struct regs *r)
     count_syscall();
     if (!p) { r->rax = (uint64_t)(int64_t)STATUS_INVALID_SYSTEM_SERVICE; return 0; }
     sti();                                              /* SFMASK cleared IF; kernel work is preemptible */
+    if (ipc_syscall_override(p, r, num, a1, a2, a3, a4, &st))
+        goto done;
     switch (num) {
     case SYS_NtShzDebugPrint: st = sys_debug_print(p, a1, a2); break;
     case SYS_NtShzEvidence:
         if (a1 >= 16 && a1 < 24) { shz_evidence(a1, a2); st = STATUS_SUCCESS; } else st = STATUS_INVALID_PARAMETER;
         break;
-    case SYS_NtTerminateProcess: {
-        process_t *t = a1 == 0 ? p : proc_from_handle(p, a1);
-        if (!t) { st = STATUS_INVALID_HANDLE; break; }
-        process_terminate(t, (int64_t)(int32_t)a2, 0);
-        if (t == p) {
-            process_thread_gone(p);
-            thread_exit((int32_t)a2);
-        }
-        st = STATUS_SUCCESS;
+    case SYS_NtTerminateProcess:
+        if (a1 == 0) st = process_terminate_others(p, (int32_t)a2);   /* NULL: every thread but the caller (ExitProcess) */
+        else st = process_terminate_handle(p, a1, (int32_t)a2);  /* ipc_proc.c; does not return when it ends the caller */
         break;
-    }
     case SYS_NtTerminateThread:
         if (a1 == 0 || a1 == CURRENT_THREAD_HANDLE) {
+            thread_current()->exit_code = (int32_t)a2;
             process_thread_gone(p);
             thread_exit((int32_t)a2);
         }
@@ -188,6 +192,7 @@ int syscall_dispatch(struct regs *r)
         if (num < SYS_MAX) st = sys_extended(p, r, num, a1, a2, a3, a4);
         else st = STATUS_INVALID_SYSTEM_SERVICE;
     }
+done:
     cli();
     if (st == (int32_t)0x7fff0001) {                    /* NtContinue already rewrote the whole frame */
         check_kill();
@@ -195,10 +200,6 @@ int syscall_dispatch(struct regs *r)
     }
     r->rax = (uint64_t)(int64_t)st;
     check_kill();
-    {   /* NtSuspendThread takes effect on the way back to user mode (sysk32_obj.c) */
-        extern void thread_park_if_suspended(void);
-        if (thread_current()->suspend_count) { thread_park_if_suspended(); check_kill(); }
-    }
     return 0;
 }
 

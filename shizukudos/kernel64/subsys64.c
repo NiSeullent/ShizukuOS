@@ -723,10 +723,15 @@ static void inject_bad_slot(int how)
     memset(&h, 0, sizeof h);
     h.opcode = SHZ_OP_W64_QUERY; h.src_domain = SHZ_DOM_WIN98; h.dst_domain = SHZ_DOM_KERNEL64; h.generation = 1;
     h.request_id = 0x999;
-    KASSERT(shz_ring_push(cl_tx, &h, 0) == SHZ_OK);
-    if (how == 0) slot[0] ^= 0xff;                          /* magic */
-    else if (how == 1) slot[0x10] ^= 0x01;                  /* opcode bit: checksum mismatch */
-    else *(uint32_t *)(slot + 0x0c) = 3000;                 /* message_size */
+    {   /* push publishes the head: without interrupts off, the (timer-preempted) service thread could pop the still
+           valid slot before it is corrupted and answer it as a QUERY (seen once in 4 standalone runs under TCG) */
+        const uint64_t fl = irq_save();
+        KASSERT(shz_ring_push(cl_tx, &h, 0) == SHZ_OK);
+        if (how == 0) slot[0] ^= 0xff;                      /* magic */
+        else if (how == 1) slot[0x10] ^= 0x01;              /* opcode bit: checksum mismatch */
+        else *(uint32_t *)(slot + 0x0c) = 3000;             /* message_size */
+        irq_restore(fl);
+    }
 }
 
 #define T_HELLO "\\SHZ\\TESTS\\T_HELLO.EXE"

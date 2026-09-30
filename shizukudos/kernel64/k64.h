@@ -95,7 +95,6 @@ void krandom_get(void *buf, size_t n);
 #define PT_PWT (1ull << 3)
 #define PT_PCD (1ull << 4)
 #define PT_NX (1ull << 63)
-#define PT_SW_PRIV (1ull << 9)          /* software bit: a private copy-on-write page inside a mapped view (section.c) */
 uint64_t vm_new_space(void);                    /* new PML4 sharing the kernel half */
 void vm_free_space(uint64_t pml4);              /* frees every user page and table */
 uint64_t vm_count_user_pages(uint64_t pml4);    /* present user-accessible pages (the working set) */
@@ -139,6 +138,13 @@ struct thread {
     uint64_t tid;                               /* Windows-style thread id (multiple of 4), 0 for kernel threads */
     volatile int alerted, alert_wait;           /* NtAlertThreadByThreadId state */
     void *wait_multi;
+    void *ipc;                                  /* ipc_thread_t: user APC queue, IPC wait state (kernel64/ipc_core.c) */
+    volatile int kill_pending;                  /* NtTerminateThread by another thread: dies with kill_code at the next exit */
+    int64_t kill_code;
+    volatile int suspend_count;                 /* NtSuspendThread: >0 stops the thread at its next return to user mode */
+    volatile int suspended;                     /* parked in that stop (a resume or a kill wakes it) */
+    uint64_t user_stack;                        /* allocation base of the user stack the kernel reserved for it (0: none) */
+    void *impersonation;                        /* impersonation token object (kobject_t *, sysk32_sec.c) or NULL */
     int creator_hold;                           /* user thread: its creator may still read `object` (see sched.c reaping) */
     /* CPU accounting (sched.c): timer ticks charged while this thread was current, split by the mode the tick interrupted,
      * TSC cycles between being switched in and out, and the tick numbers of creation and exit. */
@@ -146,9 +152,6 @@ struct thread {
     int boost_disabled;                         /* SetThreadPriorityBoost setting (the scheduler never boosts) */
     uint32_t mem_priority;                      /* SetThreadInformation(ThreadMemoryPriority) setting, 1..5 */
     uint32_t power_control, power_state;        /* SetThreadInformation(ThreadPowerThrottling) setting (no scheduler effect) */
-    uint32_t suspend_count;                     /* NtSuspendThread/NtResumeThread (sysk32_obj.c): parked on its way back to user mode */
-    int parked;                                 /* blocked in thread_park_if_suspended() */
-    void *impersonation;                        /* impersonation token object (kobject_t *, sysk32_obj.c) or NULL */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
@@ -158,6 +161,7 @@ void thread_discard(thread_t *t);                                               
 /* Exited user threads are reclaimed automatically (next thread creation); these two cover the creator's side: */
 void thread_creator_release(thread_t *t);       /* the creator no longer reads t (t->object): it may be reclaimed once exited */
 void thread_reap_process(const void *proc);     /* reclaim every exited thread of a finished process now (proc_wait) */
+void thread_reap_exited(void);                  /* reclaim the exited user threads nobody holds (process creation) */
 thread_t *thread_slot(unsigned i);              /* i-th scheduler slot (any state) or 0 past the end: read with interrupts off */
 uint64_t thread_cycles_now(thread_t *t);        /* t->cycles including the running slice of the current thread */
 void sched_tick_from(int user_mode);            /* timer tick; user_mode: the tick interrupted ring 3 */
@@ -180,6 +184,7 @@ uint64_t sched_switch_count(void);
 void sched_set_current_kstack(uint64_t top);
 void thread_block_current(void);                /* mark BLOCKED and switch away (caller holds irq off) */
 void thread_wake(thread_t *t);
+void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx);   /* every non-free slot, interrupts off */
 #define KSTACK_BYTES 32768u
 
 /* ---- ipc64.c ---- */

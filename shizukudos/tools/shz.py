@@ -181,6 +181,10 @@ def suite_host(results):
            detail=hashes[0][2][:16])
     record(results, "DOS16 dual BIOS/UEFI image is reproducible (hd32 content + T_INTS + CSMWrap ESP files)",
            "PASS" if hashes[0][3] == hashes[1][3] else "FAIL", detail=hashes[0][3][:16])
+    used, pinned = shzlib.open_watcom_snapshot()
+    record(results, f"Open Watcom snapshot is the pinned {pinned[:12]}", "PASS" if used == pinned else "SKIP",
+           detail=used[:12] if used == pinned else f"used {used[:12] if used else 'unknown'}: the rolling Last-CI-build "
+           "archive was replaced upstream; DOS16 reproducibility above is compared within this run")
     manifest = shzlib.load_manifest()
     for name, spec in manifest["upstreams"].items():
         if spec.get("corpus") and not (shzlib.UPSTREAM_DIR / name / ".git").exists():

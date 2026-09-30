@@ -189,7 +189,7 @@ void k64_dump_threads(process_t *p)
         r = (const struct regs *)(t->stack_base + KSTACK_BYTES - sizeof(struct regs));
         describe(p, r->rip, d, sizeof d);
         kprintf("K64:   tid %llu state %u%s%s%s: user rip %llx (%s) rsp %llx; last entry rax=%llx r10=%llx rdx=%llx r8=%llx r9=%llx\n",
-                t->tid, t->state, t->parked ? " parked" : "", t->alert_wait ? " alert-wait" : "", t->wait_sem ? " sem-wait" : "",
+                t->tid, t->state, t->suspended ? " suspended" : "", t->alert_wait ? " alert-wait" : "", t->wait_sem ? " sem-wait" : "",
                 r->rip, d, r->rsp, r->rax, r->r10, r->rdx, r->r8, r->r9);
         ob_print_wait(t);
         for (k = 0; k < 1024 && shown < 16; ++k) {

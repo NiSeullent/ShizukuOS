@@ -8,7 +8,7 @@
 
 /* ---- virtual address descriptors ---- */
 enum { VAD_FREE = 0, VAD_RESERVED = 1, VAD_COMMITTED = 2 };
-enum { VK_PRIVATE = 0, VK_IMAGE = 1, VK_STACK = 2, VK_TEB = 3, VK_SECTION = 4 };   /* VK_SECTION: a mapped view (section.c), img = view */
+enum { VK_PRIVATE = 0, VK_IMAGE = 1, VK_STACK = 2, VK_TEB = 3, VK_VIEW = 4 };  /* VK_VIEW: section view (ipc_section.c) */
 typedef struct {
     uint64_t start, end;                /* [start, end), page aligned */
     uint32_t state;                     /* VAD_RESERVED / VAD_COMMITTED */
@@ -29,22 +29,22 @@ enum { OB_NONE = 0, OB_EVENT = 1, OB_MUTANT = 2, OB_SEMAPHORE = 3, OB_THREAD = 4
        OB_TIMER = 7, OB_DIRECTORY = 8 };
 enum { OB_KEY = 0x10 };                 /* registry key (registry.c); a separate enum so other subsystems can add their own types */
 #define OB_SOCKET 0x40                  /* socket handle (u.net.sock); closed through net_socket_handle_closing() */
-/* kernel32 support objects (kernel64/section.c, iocp.c, npfs.c, sysk32_obj.c) */
-#define OB_SECTION 0x20                 /* section (file mapping): u.section.s = section_t * */
-#define OB_IOCP 0x21                    /* I/O completion port: u.iocp.q; signalled while packets are queued */
-#define OB_JOB 0x22                     /* job object: u.job.j */
-#define OB_TOKEN 0x23                   /* access token: u.token.t */
-#define OB_NAME_MAX 128                 /* named objects: bytes of the UTF-8 name including the terminator */
+/* IPC object types (kernel64/ipc_*.c, npfs.c). OB_NPIPE objects use u.file (file = pipe end, io = I/O context). */
+#define OB_SECTION 0x60
+#define OB_NPIPE 0x61
+#define OB_IOCP 0x62
+#define OB_JOB 0x63
+#define OB_IS_IPC(t) ((t) >= 0x60 && (t) < 0x70)
+#define OB_TOKEN 0x20                   /* access token (u.token.t: shz_token_info, kernel64/sysk32_sec.c) */
 struct waitblock;
 struct kobject {
     uint32_t type, refs;
     int signaled;                       /* event/thread/process/timer state, semaphore count > 0 */
     struct waitblock *waiters;
-    char name[OB_NAME_MAX];
+    char name[48];
     struct kobject *next_named;
-    void *sd;                           /* self-relative security descriptor set with NtShzSecurityObject (stored, not enforced) */
+    void *sd;                           /* self-relative security descriptor stored by NtShzSecurityObject (not enforced) */
     uint32_t sd_len;
-    uint32_t handle_count;              /* handles referring to the object (handle_insert / handle_close) */
     union {
         struct { int manual; } event;
         struct { thread_t *owner; int recursion; int abandoned; } mutant;
@@ -54,13 +54,10 @@ struct kobject {
                  uint64_t create_tick, exit_tick, user_ticks, kernel_ticks, cycles; } thr;
         struct { void *sock; } net;         /* OB_SOCKET: sock_t * (net_sock.c) */
         struct { process_t *p; } proc;
-        struct { void *file; uint32_t access; } file;
-        struct { uint64_t due_tick, period_ms; int manual; int armed; struct kobject *next_timer; } timer;   /* objects.c timer list */
+        struct { void *file; uint32_t access; void *io; } file;   /* io: completion port / notification modes (ipc_io.c) */
+        struct { uint64_t due_tick, period_ms; int manual; int armed; } timer;
         struct { void *node; } key;             /* registry key node (registry.c); the node's refs count these objects */
-        struct { void *s; } section;            /* OB_SECTION: section_t * (section.c) */
-        struct { void *q; } iocp;               /* OB_IOCP: iocp_t * (iocp.c) */
-        struct { void *j; } job;                /* OB_JOB: job_t * (sysk32_obj.c) */
-        struct { void *t; } token;              /* OB_TOKEN: token_t * (sysk32_obj.c) */
+        struct { void *t; } token;              /* OB_TOKEN: shz_token_info (sysk32_sec.c) */
     } u;
 };
 
@@ -112,6 +109,12 @@ struct process {
     uint64_t ntdll_process_start, ntdll_thread_start, ntdll_exception_dispatcher;
     uint64_t ldr_va;                    /* PEB_LDR_DATA */
     uint64_t params_va;                 /* RTL_USER_PROCESS_PARAMETERS */
+    /* IPC / process model (kernel64/ipc_core.c) */
+    int teardown;                       /* 0 running, 1 tearing down, 2 address space and handles released */
+    void *ipc;                          /* ipc_proc_t: mapped views, job membership */
+    kobject_t *token;                   /* primary access token (sysk32_sec.c), created on first use; referenced */
+    thread_t *exit_owner;               /* thread that called NtTerminateProcess(NULL) (ExitProcess): every other thread of
+                                           the process ends, no new thread starts; compared only, never dereferenced */
     /* kernel32 support (sysk32.c): CPU time of the threads that have exited, exit tick, settings and memory statistics */
     uint64_t dead_user_ticks, dead_kernel_ticks, dead_cycles, exit_tick;
     uint32_t priority_class;            /* PROCESS_PRIORITY_CLASS value (GetPriorityClass); 0 = never set: NORMAL */
@@ -122,12 +125,6 @@ struct process {
      * parent at creation; 0 = the Supervisor/serial console. `console_sink_gen` guards against a recycled slot. */
     void *console_sink;
     uint32_t console_sink_gen;
-    /* kernel32 support (sysk32_obj.c): the job the process belongs to and its primary access token (both referenced) */
-    kobject_t *job;
-    kobject_t *token;
-    /* reaper (proc.c): a process created by another process is never proc_wait()ed by the kernel; once its last thread is
-     * gone the reaper closes its handles and frees its address space, keeping the slot for exit-code queries. */
-    int reap_pending, mem_released;
 };
 
 /* vad.c */
@@ -151,25 +148,15 @@ int32_t vad_query(process_t *p, uint64_t addr, uint64_t *base, uint64_t *alloc_b
                   uint64_t *size, uint32_t *state, uint32_t *prot, uint32_t *type);
 uint64_t prot_to_ptflags(uint32_t prot);                  /* PT_* flags (with PT_U) for a PAGE_* value */
 int user_fault_in(process_t *p, uint64_t addr, int write, int exec);   /* demand-zero commit; 0 = ok */
+/* Section views (kernel64/ipc_section.c): their pages belong to a section object, so faults are resolved by view_fault
+ * (interrupts off) and the descriptor is removed only through vad_remove_view, after the view's pages were unmapped. */
+int view_fault(process_t *p, vad_t *v, uint64_t addr, int write, int exec);
+int32_t vad_remove_view(process_t *p, uint64_t base);
 int copy_from_user(process_t *p, void *dst, uint64_t uva, uint64_t n);
 int copy_to_user(process_t *p, uint64_t uva, const void *src, uint64_t n);
 int user_string_len(process_t *p, uint64_t uva, uint64_t max, uint64_t *len);
 
 /* ldr.c */
-/* Options of a process creation beyond image, command line and directory (NtCreateProcessEx's extension block, sysx.c). */
-typedef struct ldr_proc_opts {
-    int suspended;                      /* the main thread waits for NtResumeThread */
-    const uint16_t *env;                /* UTF-16 environment block (double-NUL terminated), NULL = the default one */
-    uint64_t env_chars;
-    int inherit;                        /* copy the parent's inheritable handles to the same values */
-    const uint64_t *handle_list;        /* only these (PROC_THREAD_ATTRIBUTE_HANDLE_LIST), NULL = every inheritable handle */
-    unsigned handle_count;
-    int use_std;                        /* STARTF_USESTDHANDLES: std[] are the child's standard handles */
-    uint64_t std[3];
-    int breakaway;                      /* CREATE_BREAKAWAY_FROM_JOB */
-} ldr_proc_opts_t;
-int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
-                              const ldr_proc_opts_t *opts, process_t **out_proc, thread_t **out_thread);
 int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr);          /* page-in of a lazily mapped image page; 0 = ok */
 void ldr_release_modules(process_t *p);                             /* frees the loader's per-process records */
 
@@ -185,7 +172,31 @@ int process_start_thread2(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx
 void proc_alloc_peb(process_t *p);
 void thread_user_tls_init(process_t *p, thread_t *t);
 void process_thread_gone(process_t *p);
+/* Nonzero when `t` must not return to user mode: its process was terminated, or another of its threads is exiting the
+ * process (ExitProcess ends every other thread before DLL_PROCESS_DETACH). Blocking kernel paths poll this. */
+int thread_must_die(thread_t *t);
+int current_thread_must_die(void);
+int32_t process_terminate_others(process_t *p, int32_t code);  /* NtTerminateProcess(NULL): ipc_proc.c */
+int32_t process_terminate_handle(process_t *p, uint64_t h, int32_t code);   /* NtTerminateProcess(h): ipc_proc.c */
+void process_teardown(process_t *p);    /* releases handles, views and the address space of a dead process (idempotent) */
+int process_start_thread3(process_t *p, uint64_t rip, uint64_t rcx, uint64_t rdx, uint64_t stack_size, int suspended,
+                          thread_t **out);
 uint64_t proc_alloc_teb(process_t *p, uint64_t stack_base, uint64_t stack_limit);
+
+/* ldr.c: process creation with Win32 CreateProcess parameters (used by kernel64/ipc_proc.c). UTF-16 strings are copied
+ * verbatim into RTL_USER_PROCESS_PARAMETERS; a zero pointer selects the loader's default for that field. */
+typedef struct {
+    const uint16_t *cmdline; uint32_t cmdline_chars;
+    const uint16_t *cwd; uint32_t cwd_chars;
+    const uint16_t *env; uint32_t env_chars;        /* whole block including its terminating empty string */
+    uint64_t std_handles[3]; int use_std_handles;   /* STARTF_USESTDHANDLES values for StandardInput/Output/Error */
+    int suspended;                                  /* CREATE_SUSPENDED: the initial thread waits for NtResumeThread */
+    int32_t (*prepare)(process_t *child, void *ctx);  /* runs before the loader's own handles exist (handle inheritance) */
+    void *prepare_ctx;
+} ldr_create_ex_t;
+int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
+                              const ldr_create_ex_t *ex, process_t **out_proc, thread_t **out_thread);
+uint64_t ldr_ntdll_export(process_t *p, const char *sym);
 
 /* objects.c */
 kobject_t *ob_create(uint32_t type, const char *name);

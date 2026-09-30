@@ -472,6 +472,7 @@ static const char *object_type_name(uint32_t type)
     case OB_DIRECTORY: return "Directory";
     case OB_KEY: return "Key";
     case OB_SECTION: return "Section";
+    case OB_NPIPE: return "File";
     case OB_IOCP: return "IoCompletion";
     case OB_JOB: return "Job";
     case OB_TOKEN: return "Token";
@@ -494,17 +495,6 @@ static int32_t query_object(process_t *pr, uint64_t h, uint32_t cls, uint64_t bu
     else {
         st = handle_ref(pr, h, 0, &o, &access);
         if (st) return st;
-    }
-    if (cls == 4) {                                     /* OBJECT_HANDLE_FLAG_INFORMATION {BOOLEAN Inherit, ProtectFromClose} */
-        uint8_t v[2] = { 0, 0 };
-        ob_deref(o);
-        if (h == CURRENT_PROCESS_HANDLE || h == CURRENT_THREAD_HANDLE) return STATUS_INVALID_HANDLE;
-        v[0] = (pr->handles[h / 4 - 1].inherit & 1) != 0;
-        v[1] = (pr->handles[h / 4 - 1].inherit & 2) != 0;
-        if (len < 2) return STATUS_INFO_LENGTH_MISMATCH;
-        if (copy_to_user(pr, buf, v, 2)) return STATUS_ACCESS_VIOLATION;
-        if (pres) { const uint32_t n = 2; copy_to_user(pr, pres, &n, 4); }
-        return STATUS_SUCCESS;
     }
     tn = object_type_name(o->type);
     if (!tn) { ob_deref(o); return STATUS_NOT_SUPPORTED; }

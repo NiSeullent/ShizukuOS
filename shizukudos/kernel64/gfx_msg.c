@@ -314,10 +314,10 @@ static int32_t sys_sendmessage(process_t *cur, uint64_t arg)
             s.result = 0;
             goto out;
         }
-        if ((deadline && ticks_now() >= deadline) || cur->terminated) {
+        if ((deadline && ticks_now() >= deadline) || current_thread_must_die()) {
             if (r->state == GS_QUEUED) { send_list_remove(&r->target->sent_head, &r->target->sent_tail, r); send_release(r); }
             else r->state = GS_ABANDONED;                   /* being serviced: the receiver frees it when it replies */
-            if (cur->terminated) { st = STATUS_PROCESS_IS_TERMINATING; goto out; }
+            if (current_thread_must_die()) { st = STATUS_PROCESS_IS_TERMINATING; goto out; }
             s.result_kind = SHZ_SEND_TIMEOUT;
             s.result = 0;
             goto out;
@@ -729,7 +729,7 @@ static int32_t sys_getmessage(process_t *cur, uint64_t arg)
         try_get(q, &g);
         q_sync_event(q);
         if (g.result != SHZ_GM_RES_NONE || !(g.flags & SHZ_GM_WAIT)) break;
-        if (cur->terminated) { st = STATUS_PROCESS_IS_TERMINATING; break; }
+        if (current_thread_must_die()) { st = STATUS_PROCESS_IS_TERMINATING; break; }
         for (i = 0; i < GFX_MAX_TIMERS; ++i)
             if (q->timers[i].used && (!wake || q->timers[i].due < wake)) wake = q->timers[i].due;
         gq_block(q, wake);                                   /* drops the lock */

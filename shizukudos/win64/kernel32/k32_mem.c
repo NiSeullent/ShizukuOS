@@ -281,7 +281,7 @@ K32API FARPROC WINAPI GetProcAddress(HMODULE m, LPCSTR name)
     }
     if (st) {
         const DWORD err = k32_nt_error(st == STATUS_ENTRYPOINT_NOT_FOUND || st == STATUS_ORDINAL_NOT_FOUND ? STATUS_ENTRYPOINT_NOT_FOUND : st);
-        if (k32_trace_on()) {
+        if (k32_trace_on()) {                               /* k32_trace.c: bring-up evidence of what a program looked for */
             SHZ_LDR_ENTRY *e = entry_for(m);
             char mod[64];
             int i = 0;
@@ -444,25 +444,4 @@ K32API VOID WINAPI GetStartupInfoA(LPSTARTUPINFOA si)
     si->hStdInput = w.hStdInput; si->hStdOutput = w.hStdOutput; si->hStdError = w.hStdError;
 }
 
-/* ---------------------------------------------------------------- process creation */
-/* CreateProcessW lives in k32_proc2.c. */
-K32API BOOL WINAPI CreateProcessA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL inherit,
-                                  DWORD flags, LPVOID env, LPCSTR dir, LPSTARTUPINFOA si, LPPROCESS_INFORMATION pi)
-{
-    WCHAR wapp[300], wcmd[2048], wdir[300];
-    STARTUPINFOW wsi;
-    if (app && k32_utf8_to_wide(app, -1, wapp, 300) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return FALSE; }
-    if (cmd && k32_utf8_to_wide(cmd, -1, wcmd, 2048) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return FALSE; }
-    if (dir && k32_utf8_to_wide(dir, -1, wdir, 300) <= 0) { shz_set_last_error(ERROR_INVALID_NAME); return FALSE; }
-    if (flags & EXTENDED_STARTUPINFO_PRESENT) { shz_set_last_error(ERROR_NOT_SUPPORTED); return FALSE; }   /* the W form takes attribute lists */
-    memset(&wsi, 0, sizeof wsi);
-    wsi.cb = sizeof wsi;
-    if (si) {                                                  /* titles and desktop names have no meaning here; flags and handles do */
-        wsi.dwFlags = si->dwFlags;
-        wsi.wShowWindow = si->wShowWindow;
-        wsi.hStdInput = si->hStdInput;
-        wsi.hStdOutput = si->hStdOutput;
-        wsi.hStdError = si->hStdError;
-    }
-    return CreateProcessW(app ? wapp : 0, cmd ? wcmd : 0, pa, ta, inherit, flags, env, dir ? wdir : 0, si ? &wsi : 0, pi);
-}
+/* CreateProcessW/A: k32_ipc_proc.c */

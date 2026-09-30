@@ -140,7 +140,7 @@ static uint64_t system_commit(void)
     unsigned i;
     process_t *q;
     for (i = 1; (q = process_slot(i)) != 0; ++i)
-        if (q->used && q->vads.v) n += all_commit(q);
+        if (q->used && !q->teardown && q->vads.v) n += all_commit(q);   /* a dead process still referenced by handles owns no memory */
     return n;
 }
 
@@ -181,7 +181,7 @@ int32_t k32_system_process_information(process_t *cur, uint64_t buf, uint64_t le
     uint8_t *e;
     int32_t st = STATUS_SUCCESS;
     for (i = 1; (q = process_slot(i)) != 0 && n < MAXP; ++i) {
-        if (!q->used || !q->pml4 || q->threads_alive <= 0) continue;
+        if (!q->used || q->teardown || q->threads_alive <= 0) continue;
         list[n] = q;
         counts[n] = live_threads(q, 0, 0, 0);
         need += spi_entry_size(q, counts[n]);
@@ -216,7 +216,7 @@ int32_t k32_system_process_information(process_t *cur, uint64_t buf, uint64_t le
             if (t->state == TS_RUNNING) state = 2;
             else if (t->state == TS_READY) state = 1;
             else if (t->state == TS_NEW) state = 0;
-            else { state = 5; reason = t->parked ? 5 : 6; }
+            else { state = 5; reason = t->suspended ? 5 : 6; }
             put32(ti, 0x44, state);
             put32(ti, 0x48, reason);
             ++nt;
@@ -557,23 +557,23 @@ int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t
 {
     switch (cls) {
     case K32S_SUSPEND_PROCESS: case K32S_RESUME_PROCESS: {
-        /* NtSuspendProcess / NtResumeProcess: every thread's suspend count moves by one (sysk32_obj.c parks a suspended thread
-         * on its way back to user mode); the caller's own thread is suspended last, when it leaves this call. */
-        extern void thread_park_if_suspended(void);
+        /* NtSuspendProcess / NtResumeProcess: every thread's suspend count moves by one, as NtSuspendThread/NtResumeThread
+         * (ipc_proc.c) move one thread's: a suspended thread stops at its next return to user mode (check_kill), the
+         * caller's own thread when it leaves this call. */
         process_t *p = proc_of_handle(cur, h);
         thread_t *t;
         unsigned i;
         uint64_t f;
         (void)buf; (void)len;
         if (!p) return STATUS_INVALID_HANDLE;
-        if (p->terminated) return STATUS_PROCESS_IS_TERMINATING;
+        if (p->terminated || p->teardown) return STATUS_PROCESS_IS_TERMINATING;
         f = irq_save();
         for (i = 0; (t = thread_slot(i)) != 0; ++i) {
-            if (t->proc != p || t->state == TS_FREE || t->state == TS_ZOMBIE) continue;
+            if (t->proc != p || t->state == TS_FREE || t->state == TS_ZOMBIE || thread_must_die(t)) continue;
             if (cls == K32S_SUSPEND_PROCESS) { if (t->suspend_count < 127) ++t->suspend_count; }
-            else if (t->suspend_count && --t->suspend_count == 0) {
+            else if (t->suspend_count > 0 && --t->suspend_count == 0) {
                 if (t->state == TS_NEW) thread_resume(t);
-                else if (t->parked && t->state == TS_BLOCKED) thread_wake(t);
+                else if (t->state == TS_BLOCKED && t->suspended) thread_wake(t);
             }
         }
         irq_restore(f);

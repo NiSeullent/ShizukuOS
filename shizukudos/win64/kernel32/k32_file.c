@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * kernel32.dll: files, directories, console handles and paths on top of the NT file API.
  * Paths are converted to NT form (\??\C:\...) in user mode, as on Windows; the kernel file
- * system is case-insensitive (ASCII folding) and UTF-8 internally. Overlapped I/O completes
- * synchronously (the OVERLAPPED offset is honoured, the event is signalled); true asynchronous
- * completion is not implemented and no function claims it.
+ * system is case-insensitive (ASCII folding) and UTF-8 internally. CreateFileW and the I/O calls
+ * with overlapped semantics live in k32_ipc_io.c (kernel IRPs, completion ports, pipes).
  */
 #include "k32.h"
 
@@ -59,7 +58,7 @@ NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap)
     WCHAR tmp[300];
     size_t t = 0;
     cwd_init();
-    if (dos[0] == '\\' && dos[1] == '\\' && (dos[2] == '?' || dos[2] == '.') && dos[3] == '\\') {   /* \\?\ and \\.\ (devices, pipes) verbatim */
+    if (dos[0] == '\\' && dos[1] == '\\' && dos[2] == '?' && dos[3] == '\\') {       /* \\?\ verbatim */
         for (i = 4; dos[i] && t < 298; ++i) tmp[t++] = dos[i];
         tmp[t] = 0;
     } else {
@@ -74,29 +73,6 @@ NTSTATUS k32_dos_to_nt(LPCWSTR dos, WCHAR *nt, size_t cap)
 }
 
 #define open_path k32_open_path
-/* As k32_open_path; `sync` = 0 opens the handle for overlapped I/O (FILE_FLAG_OVERLAPPED), `oa_attrs` adds OBJ_INHERIT. */
-NTSTATUS k32_open_path_ex(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG options, ULONG oa_attrs, int sync, HANDLE *h,
-                          ULONG_PTR *info)
-{
-    WCHAR nt[320];
-    SHZ_UNICODE_STRING us;
-    SHZ_OBJECT_ATTRIBUTES oa;
-    SHZ_IO_STATUS_BLOCK iosb;
-    NTSTATUS st = k32_dos_to_nt(dos, nt, 320);
-    if (st) return st;
-    us.Buffer = nt;
-    us.Length = (USHORT)(k32_wlen(nt) * 2);
-    us.MaximumLength = us.Length + 2;
-    memset(&oa, 0, sizeof oa);
-    oa.Length = sizeof oa;
-    oa.ObjectName = &us;
-    oa.Attributes = oa_attrs;
-    memset(&iosb, 0, sizeof iosb);
-    st = NtCreateFile(h, access | SYNCHRONIZE, &oa, &iosb, 0, FILE_ATTRIBUTE_NORMAL, 3, disposition, options | (sync ? 0x20 : 0), 0, 0);
-    if (info) *info = iosb.Information;
-    return st;
-}
-
 NTSTATUS k32_open_path(LPCWSTR dos, ACCESS_MASK access, ULONG disposition, ULONG options, HANDLE *h, ULONG_PTR *info)
 {
     WCHAR nt[320];
@@ -124,57 +100,7 @@ static WCHAR *widen_str(const char *s, WCHAR *buf, size_t cap);
 #define wide_to_utf8 k32_wide_to_utf8
 
 /* ---------------------------------------------------------------- CreateFile and friends */
-K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp, DWORD flags,
-                                 HANDLE tmpl)
-{
-    HANDLE h = INVALID_HANDLE_VALUE;
-    ULONG d, opts = 0;
-    ULONG_PTR info = 0;
-    NTSTATUS st;
-    static const WCHAR conout[] = { 'C','O','N','O','U','T','$',0 }, conin[] = { 'C','O','N','I','N','$',0 };
-    (void)share; (void)tmpl;
-    if (!name || !name[0]) { shz_set_last_error(ERROR_PATH_NOT_FOUND); return INVALID_HANDLE_VALUE; }
-    switch (disp) {
-    case CREATE_NEW: d = FILE_CREATE_D; break;
-    case CREATE_ALWAYS: d = FILE_OVERWRITE_IF_D; break;
-    case OPEN_EXISTING: d = FILE_OPEN_D; break;
-    case OPEN_ALWAYS: d = FILE_OPEN_IF_D; break;
-    case TRUNCATE_EXISTING: d = FILE_OVERWRITE_D; break;
-    default: shz_set_last_error(ERROR_INVALID_PARAMETER); return INVALID_HANDLE_VALUE;
-    }
-    {
-        const WCHAR *a = name, *b = conout, *c = conin;
-        int is_out = 1, is_in = 1;
-        while (*b) { if ((*a | 32) != (*b | 32)) is_out = 0; ++a; ++b; }
-        a = name;
-        while (*c) { if ((*a | 32) != (*c | 32)) is_in = 0; ++a; ++c; }
-        if (is_out && !name[7]) name = L"\\??\\CONOUT$";
-        else if (is_in && !name[6]) name = L"\\??\\CONIN$";
-    }
-    if (flags & FILE_FLAG_DELETE_ON_CLOSE) opts |= OPT_DELETE_ON_CLOSE;
-    if (!(flags & FILE_FLAG_BACKUP_SEMANTICS)) opts |= OPT_NON_DIRECTORY;
-    if (name[0] == '\\' && name[1] == '?' && name[2] == '?' && name[3] == '\\') {
-        WCHAR nt[64];
-        SHZ_UNICODE_STRING us;
-        SHZ_OBJECT_ATTRIBUTES oa;
-        SHZ_IO_STATUS_BLOCK iosb;
-        size_t n = k32_wlen(name);
-        memcpy(nt, name, (n + 1) * sizeof(WCHAR));
-        us.Buffer = nt; us.Length = (USHORT)(n * 2); us.MaximumLength = us.Length + 2;
-        memset(&oa, 0, sizeof oa); oa.Length = sizeof oa; oa.ObjectName = &us;
-        st = NtCreateFile(&h, access, &oa, &iosb, 0, 0, 3, FILE_OPEN_D, 0, 0, 0);
-    } else {
-        st = k32_open_path_ex(name, access ? access : 0, d, opts, sa && sa->bInheritHandle ? 2 : 0,
-                              !(flags & FILE_FLAG_OVERLAPPED), &h, &info);
-    }
-    if (st) {
-        if (st == STATUS_OBJECT_NAME_COLLISION) shz_set_last_error(ERROR_FILE_EXISTS);        /* CREATE_NEW on an existing file (CreateDirectory keeps 183) */
-        else k32_nt_error(st);
-        return INVALID_HANDLE_VALUE;
-    }
-    shz_set_last_error((info == 1 && (disp == CREATE_ALWAYS || disp == OPEN_ALWAYS)) || info == 3 ? ERROR_ALREADY_EXISTS : 0);
-    return h;
-}
+/* CreateFileW, ReadFile, WriteFile (overlapped I/O), FlushFileBuffers and GetFileType: k32_ipc_io.c */
 K32API HANDLE WINAPI CreateFileA(LPCSTR name, DWORD a, DWORD s, LPSECURITY_ATTRIBUTES sa, DWORD d, DWORD f, HANDLE t)
 {
     WCHAR w[300];
@@ -182,56 +108,6 @@ K32API HANDLE WINAPI CreateFileA(LPCSTR name, DWORD a, DWORD s, LPSECURITY_ATTRI
     return CreateFileW(w, a, s, sa, d, f, t);
 }
 
-/* With an OVERLAPPED the OVERLAPPED is the IO_STATUS_BLOCK and the completion-port context (unless the low bit of hEvent
- * asks for no packet), as on Windows: a request on an overlapped handle may return STATUS_PENDING and complete later
- * (pipes); GetOverlappedResult / the event / the port report it. */
-static NTSTATUS rw_file(HANDLE h, void *buf, DWORD len, DWORD *done, LPOVERLAPPED ov, int write)
-{
-    SHZ_IO_STATUS_BLOCK iosb;
-    LARGE_INTEGER off;
-    NTSTATUS st;
-    memset(&iosb, 0, sizeof iosb);
-    if (ov) {
-        HANDLE ev = (HANDLE)((ULONG_PTR)ov->hEvent & ~(ULONG_PTR)1);
-        PVOID ctx = ((ULONG_PTR)ov->hEvent & 1) ? 0 : ov;
-        off.QuadPart = ((LONGLONG)ov->OffsetHigh << 32) | ov->Offset;
-        ov->Internal = STATUS_PENDING;
-        ov->InternalHigh = 0;
-        st = write ? NtWriteFile(h, ev, 0, ctx, (SHZ_IO_STATUS_BLOCK *)ov, buf, len, &off, 0)
-                   : NtReadFile(h, ev, 0, ctx, (SHZ_IO_STATUS_BLOCK *)ov, buf, len, &off, 0);
-        if (st == STATUS_PENDING) { if (done) *done = 0; return st; }
-        if (st < 0 && st != STATUS_BUFFER_OVERFLOW) { ov->Internal = (ULONG_PTR)(LONG_PTR)st; if (done) *done = 0; return st; }
-        if (done) *done = (DWORD)ov->InternalHigh;
-        return st;
-    } else {
-        st = write ? NtWriteFile(h, 0, 0, 0, &iosb, buf, len, 0, 0) : NtReadFile(h, 0, 0, 0, &iosb, buf, len, 0, 0);
-    }
-    if (done) *done = (DWORD)iosb.Information;
-    return st;
-}
-
-K32API BOOL WINAPI ReadFile(HANDLE h, LPVOID buf, DWORD len, LPDWORD done, LPOVERLAPPED ov)
-{
-    NTSTATUS st = rw_file(h, buf, len, done, ov, 0);
-    if (st == STATUS_PENDING) { shz_set_last_error(ERROR_IO_PENDING); return FALSE; }
-    if (st == STATUS_END_OF_FILE) {                                     /* EOF: success with 0 bytes, but ERROR_HANDLE_EOF for an overlapped request */
-        if (done) *done = 0;
-        if (ov) { shz_set_last_error(ERROR_HANDLE_EOF); return FALSE; }
-        shz_set_last_error(0);
-        return TRUE;
-    }
-    if (st) { k32_nt_error(st); return FALSE; }
-    return TRUE;
-}
-static int std_index(HANDLE h);
-K32API BOOL WINAPI WriteFile(HANDLE h, LPCVOID buf, DWORD len, LPDWORD done, LPOVERLAPPED ov)
-{
-    NTSTATUS st = rw_file(h, (void *)buf, len, done, ov, 1);
-    if (st == STATUS_PENDING) { shz_set_last_error(ERROR_IO_PENDING); return FALSE; }
-    if (st) { k32_nt_error(st); return FALSE; }
-    if (!ov && std_index(h) >= 1 && k32_console_attached()) k32_console_track(buf, done ? *done : len);   /* console screen buffer model */
-    return TRUE;
-}
 
 K32API BOOL WINAPI GetFileSizeEx(HANDLE h, PLARGE_INTEGER size)
 {
@@ -292,23 +168,7 @@ K32API BOOL WINAPI SetEndOfFile(HANDLE h)
     if (st) { k32_nt_error(st); return FALSE; }
     return TRUE;
 }
-K32API BOOL WINAPI FlushFileBuffers(HANDLE h)
-{
-    SHZ_IO_STATUS_BLOCK iosb;
-    LONGLONG dummy;
-    NTSTATUS st = NtQueryInformationFile(h, &iosb, &dummy, 8, 14);      /* validates the handle; the RAM file system has no cache */
-    if (st) { k32_nt_error(st); return FALSE; }
-    return TRUE;
-}
 
-K32API DWORD WINAPI GetFileType(HANDLE h)
-{
-    struct { ULONGLONG c, a, w, ch; ULONG attrs, pad; } b;
-    SHZ_IO_STATUS_BLOCK iosb;
-    if (NtQueryInformationFile(h, &iosb, &b, sizeof b, 4)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FILE_TYPE_UNKNOWN; }
-    shz_set_last_error(0);
-    return (b.attrs & ATTR_DEVICE) ? FILE_TYPE_CHAR : FILE_TYPE_DISK;
-}
 
 /* ---------------------------------------------------------------- attributes, delete, rename, directories */
 K32API DWORD WINAPI GetFileAttributesW(LPCWSTR name)
