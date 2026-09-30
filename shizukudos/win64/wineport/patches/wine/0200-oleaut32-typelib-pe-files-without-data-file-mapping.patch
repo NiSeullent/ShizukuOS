@@ -1,0 +1,35 @@
+diff --git a/dlls/oleaut32/typelib.c b/dlls/oleaut32/typelib.c
+--- a/dlls/oleaut32/typelib.c
++++ b/dlls/oleaut32/typelib.c
+@@ -2912,6 +2912,22 @@
+     TLB_PEFile_Release
+ };
+ 
++/* Shizuku (wineport): the Shizuku LoadLibraryExW has no data-file mapping (LOAD_LIBRARY_AS_DATAFILE and
++ * DONT_RESOLVE_DLL_REFERENCES fail with ERROR_NOT_SUPPORTED). A module that is loaded already - a DLL reading its own
++ * type library - is used through a new reference (GetModuleHandleExW); any other file that starts with a PE (MZ)
++ * header is loaded as a module with LoadLibraryW. A raw MSFT/SLTG file falls through to TLB_Mapping_Open as before. */
++static BOOL TLB_is_pe_file(LPCWSTR path)
++{
++    WORD magic = 0;
++    DWORD read = 0;
++    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
++
++    if (file == INVALID_HANDLE_VALUE) return FALSE;
++    if (!ReadFile(file, &magic, sizeof(magic), &read, NULL)) read = 0;
++    CloseHandle(file);
++    return read == sizeof(magic) && magic == IMAGE_DOS_SIGNATURE;
++}
++
+ static HRESULT TLB_PEFile_Open(LPCWSTR path, INT index, LPVOID *ppBase, DWORD *pdwTLBLength, IUnknown **ppFile)
+ {
+     TLB_PEFile *This;
+@@ -2930,6 +2946,8 @@
+ 
+     This->dll = LoadLibraryExW(path, 0, DONT_RESOLVE_DLL_REFERENCES |
+                     LOAD_LIBRARY_AS_DATAFILE | LOAD_WITH_ALTERED_SEARCH_PATH);
++    if (!This->dll && !GetModuleHandleExW(0, path, &This->dll) && TLB_is_pe_file(path))
++        This->dll = LoadLibraryW(path);
+ 
+     if (This->dll)
+     {
