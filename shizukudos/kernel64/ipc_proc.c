@@ -902,14 +902,34 @@ static int32_t sys_duplicate(process_t *p, struct regs *r, uint64_t hsp, uint64_
         if (!st && dst->teardown) { st = STATUS_PROCESS_IS_TERMINATING; ob_deref(dpo); dpo = 0; dst = 0; }
     }
     if (!st && dst) {
-        const uint32_t a = (options & DUPLICATE_SAME_ACCESS) ? access : desired;
+        uint32_t a = (options & DUPLICATE_SAME_ACCESS) ? access : desired;
         const int inherit = (options & DUPLICATE_SAME_ATTRIBUTES) ? (flags & HANDLE_FLAG_INHERIT_BIT) != 0
                                                                    : (attrs & OBJ_INHERIT_ATTR) != 0;
+        if (o->type == OB_SECTION && !(options & DUPLICATE_SAME_ACCESS)) {
+            /* Section handles carry the only rights there are (Kernel64 keeps no per-object security descriptors), so a duplicate
+             * narrows them and never adds one: a request for a right the source handle lacks is STATUS_ACCESS_DENIED. On Windows
+             * that is what a section created with Chromium's restrictive descriptor answers, and base::subtle::
+             * PlatformSharedMemoryRegion::Take relies on it (DuplicateHandle(handle, FILE_MAP_WRITE) must fail for a read-only
+             * region, or the region is rejected as "not read-only but should be"). Generic rights map as for sections;
+             * MAXIMUM_ALLOWED means everything the source handle has; the standard rights (READ_CONTROL, ...) that every owner
+             * holds are never refused, only the section-specific ones are compared. */
+            uint32_t want = desired;
+            if (want & MAXIMUM_ALLOWED_ACCESS) want |= access;
+            if (want & GENERIC_READ_ACCESS) want |= 0x20000u | SECTION_QUERY | SECTION_MAP_READ;
+            if (want & GENERIC_WRITE_ACCESS) want |= 0x20000u | SECTION_MAP_WRITE;
+            if (want & GENERIC_EXECUTE_ACCESS) want |= 0x20000u | SECTION_MAP_EXECUTE;
+            if (want & GENERIC_ALL_ACCESS) want |= SECTION_ALL_ACCESS;
+            want &= ~(MAXIMUM_ALLOWED_ACCESS | GENERIC_READ_ACCESS | GENERIC_WRITE_ACCESS | GENERIC_EXECUTE_ACCESS | GENERIC_ALL_ACCESS);
+            if ((want & 0xffffu) & ~access) st = STATUS_ACCESS_DENIED;     /* object-specific rights only: the standard rights (READ_CONTROL, ...) stay grantable */
+            else a = want;
+        }
+        if (!st) {
         ob_ref(o);
         st = ipc_give_handle(dst, o, a, inherit, 0, &h);
         if (!st && pout) {
             const uint64_t v = h;
             if (copy_to_user(p, pout, &v, 8)) { handle_close(dst, h); st = STATUS_ACCESS_VIOLATION; }
+        }
         }
     }
     if ((options & DUPLICATE_CLOSE_SOURCE) && hsrc != CURRENT_PROCESS_HANDLE && hsrc != CURRENT_THREAD_HANDLE && !src->teardown)
