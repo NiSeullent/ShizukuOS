@@ -1,0 +1,24 @@
+LIBRARY M98THEME.DLL
+EXPORTS
+ M98SetThemeStyle=m98e_M98SetThemeStyle
+ M98GetThemeStyle=m98e_M98GetThemeStyle
+ OpenThemeData=m98e_OpenThemeData
+ CloseThemeData=m98e_CloseThemeData
+ IsThemeActive=m98e_IsThemeActive
+ IsAppThemed=m98e_IsAppThemed
+ GetWindowTheme=m98e_GetWindowTheme
+ SetWindowTheme=m98e_SetWindowTheme
+ GetThemeAppProperties=m98e_GetThemeAppProperties
+ SetThemeAppProperties=m98e_SetThemeAppProperties
+ IsThemePartDefined=m98e_IsThemePartDefined
+ IsThemeBackgroundPartiallyTransparent=m98e_IsThemeBackgroundPartiallyTransparent
+ DrawThemeBackground=m98e_DrawThemeBackground
+ DrawThemeText=m98e_DrawThemeText
+ DrawThemeTextEx=m98e_DrawThemeTextEx
+ GetThemeColor=m98e_GetThemeColor
+ GetThemeInt=m98e_GetThemeInt
+ GetThemeEnumValue=m98e_GetThemeEnumValue
+ GetThemeMargins=m98e_GetThemeMargins
+ GetThemeBackgroundContentRect=m98e_GetThemeBackgroundContentRect
+ GetThemeFont=m98e_GetThemeFont
+ GetThemeSysFont=m98e_GetThemeSysFont

@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "date": "2026-10-01",
+  "branch": "codex/theme-tls-5abe",
+  "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
+  "evidence": [
+    {
+      "path": "build/theme-engine/result.json",
+      "sha256": "d1c7ad7cf4811355a22f493e7bb977c6fd5379fff84b023c91d27bef3adb95be"
+    },
+    {
+      "path": "build/tls13/host/build-result.json",
+      "sha256": "b9d7869e65ac28c6e8a4065a52a0ce04d51bac9ea8b45dce8ab8695e0fcb476a"
+    },
+    {
+      "path": "build/tls13/tests/result.json",
+      "sha256": "38987c0d7157303f19e213fd5f07ad2f4298f90491c21dcad319dbbc5d69e3f9"
+    },
+    {
+      "path": "build/tls13/pe32/build-result.json",
+      "sha256": "73ac0880829c4d924873aa219fc13dec8de102f8dd759c858f69508f46adaf31"
+    },
+    {
+      "path": "build/tls13/pe32/native-import-gate.json",
+      "sha256": "74efbf580d1dfa7dc6342312a721f5bf927046762bce1ee18c4b3305e4d2eb46"
+    },
+    {
+      "path": "benchmarks/media/legcord-1.3.0/archive-receipt.json",
+      "sha256": "033902afd518abfafdf85f91d1870a1fd6f68e0b6cee61dae6295227b20cac03"
+    },
+    {
+      "path": "benchmarks/media/legcord-1.3.0/inventory.json",
+      "sha256": "2a2a2741ef5c49dffcb7d54a41fc7c0899100ee7ec9e4ab50207f60a57f685d4"
+    }
+  ],
+  "theme": {
+    "host_checks": 312,
+    "sanitizers_passed": true,
+    "native_pe_gates_passed": true,
+    "native_guest_validated": false,
+    "system_theme_installed": false,
+    "artifacts": {
+      "M98THEME.DLL": "236cfbb5fd802edf16ed1a3b3663709f1992b59d6a3b92fabc0e64ff3e8df048",
+      "M98THPRO.EXE": "ee852730054371acaa531bfcf2ebdadb376a3afde753d9d705198705ce6e46cd",
+      "M98THSTA.EXE": "7bdaa673dea7866a3682a39a3a2256d5530c48639dd6ef8a17514aa1d287dab9"
+    }
+  },
+  "tls13": {
+    "backend": "Mbed TLS 4.2.0 + TF-PSA-Crypto 1.2.0",
+    "loopback_cases": 16,
+    "encrypted_http_verified_on_host": true,
+    "native_pe_gate_passed": true,
+    "native_guest_validated": false,
+    "os_schannel_integrated": false,
+    "dll_sha256": "8691fa74eeb9dbf02d53f7dc45a5c15c8f9d3c9960f222112621ef6351d621b9"
+  },
+  "applications": {
+    "inventory_regression_tests": 19,
+    "legcord_publisher_archive_and_all_payloads_verified": true,
+    "legcord_entry_sha256": "c598fd176f9198f2a4f5639249105126016c1458d3e648e9f7883649f19bfb3c",
+    "legcord_binaries_inventoried": 25,
+    "guest_execution_verified": false,
+    "app_functionality_verified": false
+  },
+  "guest_constraint": {
+    "selected_reserve_gib": 20,
+    "free_space_below_selected_reserve": true,
+    "no_peer_disk_or_vm_modified": true
+  },
+  "completion": {
+    "user_objective_complete": false,
+    "pending": [
+      "native_theme_direct_and_static_import_probes",
+      "native_tls_entropy_clock_socket_and_trust_adapter",
+      "system_schannel_winhttp_wininet_integration",
+      "latest_legcord_signal_libreoffice_functionality"
+    ]
+  },
+  "owned_source_sha256": {
+    "THIRD_PARTY.md": "718e866a4bfd7ac111e4bcf220268b3db8664120144546a2c49a7576b27d8df1",
+    "benchmarks/modern-app-targets-v1.json": "b3722f3c127480e8c2ce61006dca052d997b3a635c7722b9b8ecee6621607814",
+    "docs/MODERN_THEME_TLS_APPS.md": "cecfa1f26bcfb72629af68bc6848f1f82f07ed02af88d3e6d9cfcb94c870065a",
+    "docs/modern-apps-coordination-5abe.md": "c8f822a93f42e41351d925136ce3a8ea35a3b5f3b88a64cdd5b9674518c1c1fb",
+    "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
+    "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
+    "src/m98_tls13.c": "644867ad79342c3f5d81c52354d139d9f8794c66cbec519638cb396d8347e8d5",
+    "src/m98_tls13.def": "eae47c8b9e29cb31acb8646fb802ec3ea25bb2aed981e4f8a2d74163824fd76e",
+    "src/m98_tls13.h": "fa420d5dd9183956673814ae8f0393c758fd3b7bb5687dbaa24097bf633e7dbe",
+    "src/m98_tls13_HANDOFF.md": "9aa80cd3a4c7d278c1e6f8db6f736f0917f2b1f93366386b60b6e254389a3747",
+    "src/m98_tls13_config.h": "8f2dd8f8be762f2989f6fb8530febf45df294faaefef6f13db0f5f8829f4fad3",
+    "src/m98_tls13_protocol_config.h": "b5fd6110715cd7ae9d3ec6bbf1fdd77f73014c768fa7f314b8ba3409246eccd1",
+    "src/uxtheme_engine.def": "f33e0a2fe80ce964f2374cb13fea51cce4ece80845ef9e0ff811edb87cfdd350",
+    "src/uxtheme_engine_HANDOFF.md": "3c0af6ae6cf743b57a5349a1e9a63fa69165fbcabb8218b09aabf132f1350f5f",
+    "src/uxtheme_engine_core.c": "93b106d1b068e8b5b370c76e1871060cb24a55f79635d1e6b08cf709980890a2",
+    "src/uxtheme_engine_core.h": "483885768f660ae3cb6a51ed28fd74cddadbc2314dd8901c048d7a55692f7edc",
+    "src/uxtheme_engine_win32.c": "18d2a67ff2a8a9743ec1e01e055bfee3e4ded885e14203f592d91cb2ddd17167",
+    "tests/m98_tls13_host.c": "bed4b9c93dda734113bae88b93abcd9013c0c9da1a25dfe2f949cac27a5522ff",
+    "tests/m98_tls13_integration.py": "bc4a6edbf19f942631fc55692db76dd20304538b44977cbdb72ea914d1933fa8",
+    "tests/m98_tls13_pe98.py": "d96118a18a670c0bc8c6e7c3bd4470a6e0b57a494f8827036948899b1902946f",
+    "tests/test_modern_app_inventory.py": "e6e3ee9f59e30ddf786f1509d3bb389f96495ad24eea123c1c66bf5482b7c717",
+    "tests/uxtheme_engine_guest.c": "556e85255679f3d70ecf8f2ae82047b6bd519fe2cf49fcd15da083719770c672",
+    "tests/uxtheme_engine_host.c": "8b8951ba4e995035ec3c6bbf5e4f1de24b1db6bb998616ec1480c1c30ec97341",
+    "tools/build_theme_engine.py": "d148e89dda4b301c1ab73d55a343f80c30aeda8be5ce4c4b9ac648d9e6747660",
+    "tools/build_tls13.py": "adce018582b146b2ec95939f3180f73e80ed8511a3ef34bff52ac63193624aaa",
+    "tools/modern_app_inventory.py": "cbe2f50d15a8ceb7e22b977c6948a9bfe63fcfbc7e6b3ae764aec052872f560d"
+  }
+}
