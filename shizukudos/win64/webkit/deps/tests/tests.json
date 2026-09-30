@@ -1,10 +1,105 @@
 {
- "t_tc_c": {"args": "alpha \"beta gamma\""},
+ "t_tc_c": {
+  "args": "alpha \"beta gamma\""
+ },
  "t_tc_cxx": {},
- "t_dep_zlib": {"libs": ["zlib"]},
- "t_dep_libpng": {"libs": ["png16", "zlib"]},
- "t_dep_jpeg": {"libs": ["turbojpeg", "jpeg"]},
- "t_dep_webp": {"libs": ["webp", "webpdemux", "sharpyuv"]},
- "t_dep_brotli": {"libs": ["brotlienc", "brotlidec", "brotlicommon"]},
- "t_dep_woff2": {"libs": ["woff2enc", "woff2dec", "woff2common"]}
+ "t_dep_zlib": {
+  "libs": [
+   "zlib"
+  ]
+ },
+ "t_dep_libpng": {
+  "libs": [
+   "png16",
+   "zlib"
+  ]
+ },
+ "t_dep_jpeg": {
+  "libs": [
+   "turbojpeg",
+   "jpeg"
+  ]
+ },
+ "t_dep_webp": {
+  "libs": [
+   "webp",
+   "webpdemux",
+   "sharpyuv"
+  ]
+ },
+ "t_dep_brotli": {
+  "libs": [
+   "brotlienc",
+   "brotlidec",
+   "brotlicommon"
+  ]
+ },
+ "t_dep_woff2": {
+  "libs": [
+   "woff2enc",
+   "woff2dec",
+   "woff2common"
+  ]
+ },
+ "t_dep_sqlite": {
+  "libs": [
+   "sqlite3"
+  ]
+ },
+ "t_dep_libxml2": {
+  "libs": [
+   "xml2"
+  ],
+  "include_dirs": [
+   "libxml2"
+  ]
+ },
+ "t_dep_libxslt": {
+  "libs": [
+   "xslt",
+   "xml2"
+  ],
+  "include_dirs": [
+   "libxml2"
+  ]
+ },
+ "t_dep_icu": {
+  "libs": [
+   "icuin",
+   "icuuc"
+  ]
+ },
+ "t_dep_freetype": {
+  "libs": [
+   "freetype"
+  ],
+  "include_dirs": [
+   "freetype2"
+  ]
+ },
+ "t_dep_harfbuzz": {
+  "libs": [
+   "harfbuzz-icu",
+   "harfbuzz"
+  ],
+  "include_dirs": [
+   "harfbuzz"
+  ]
+ },
+ "t_dep_openssl": {
+  "libs": [
+   "ssl",
+   "crypto"
+  ]
+ },
+ "t_dep_curl": {
+  "libs": [
+   "curl"
+  ]
+ },
+ "t_dep_libpsl": {
+  "libs": [
+   "psl"
+  ]
+ }
 }

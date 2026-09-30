@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SHZ = HERE.parents[2]
+SHZ = HERE.parents[3]
 sys.path.insert(0, str(SHZ / "tools"))
 import qemu  # noqa: E402
 import shzlib  # noqa: E402

@@ -186,9 +186,12 @@ def b_icu(src):
         run([icusrc / "configure", "--disable-tests", "--disable-samples", "--disable-extras"], cwd=host,
             env=hostenv, timeout=1800)
         run(["make", "-j" + JOBS], cwd=host, env=hostenv, timeout=7200)
+    # U_EXPORT: ICU's platform.h picks __attribute__((visibility)) for clang targeting mingw, so the DLLs relied on
+    # lld's auto-export, which left ucol_open, udatpg_*, unum_* ... out of icuin77.dll; export explicitly instead.
     autotools_build("icu", icusrc, [f"--host={TRIPLE}", f"--with-cross-build={host}", f"--prefix={PREFIX}",
                                     "--disable-tests", "--disable-samples", "--disable-extras", "--disable-tools",
-                                    "--enable-shared", "--disable-static", "--with-data-packaging=library"])
+                                    "--enable-shared", "--disable-static", "--with-data-packaging=library"],
+                    extra_env={"CPPFLAGS": "-DU_EXPORT=__declspec(dllexport)"})
 
 
 def b_freetype(src):
@@ -200,8 +203,7 @@ def b_harfbuzz(src):
     meson_build("harfbuzz", src, {"icu": "enabled", "freetype": "enabled", "glib": "disabled", "gobject": "disabled",
                                   "cairo": "disabled", "chafa": "disabled", "tests": "disabled",
                                   "introspection": "disabled", "docs": "disabled", "utilities": "disabled",
-                                  "gdi": "disabled", "directwrite": "disabled", "benchmark": "disabled",
-                                  "subset": "disabled"})
+                                  "gdi": "disabled", "directwrite": "disabled", "benchmark": "disabled"})
 
 
 def b_openssl(src):
@@ -212,8 +214,9 @@ def b_openssl(src):
     e = env()
     e.update({"CC": f"{TRIPLE}-clang", "CXX": f"{TRIPLE}-clang++", "AR": "llvm-ar", "RANLIB": "llvm-ranlib",
               "RC": "x86_64-w64-mingw32-windres", "WINDRES": "x86_64-w64-mingw32-windres"})
+    # no-async: the ASYNC job API runs on fibers, which the Shizuku kernel32 does not provide
     run(["perl", Path(src) / "Configure", "mingw64", "shared", "no-tests", "no-docs", "no-apps", "no-module",
-         "no-legacy", "no-engine", f"--prefix={PREFIX}", "--libdir=lib", f"--openssldir={PREFIX / 'ssl'}"],
+         "no-legacy", "no-engine", "no-async", f"--prefix={PREFIX}", "--libdir=lib", f"--openssldir={PREFIX / 'ssl'}"],
         cwd=b, env=e, timeout=1800)
     run(["make", "-j" + JOBS, "build_sw"], cwd=b, env=e, timeout=14400)
     run(["make", "install_sw"], cwd=b, env=e, timeout=1800)
@@ -231,7 +234,10 @@ def b_curl(src):
 def b_libpsl(src):
     psl = tc.fetch("publicsuffix-list")
     meson_build("libpsl", src, {"runtime": "no", "builtin": "true", "psl_file": psl / "public_suffix_list.dat",
-                                "tests": "false", "docs": "false"})
+                                "tests": "false", "docs": "false",
+                                # libpsl.h picks __attribute__((visibility)) over dllexport whenever the compiler
+                                # supports it, which exports nothing from a PE DLL
+                                "c_args": "-DPSL_API=__declspec(dllexport)"})
 
 
 # name -> (builder, manifest upstream)

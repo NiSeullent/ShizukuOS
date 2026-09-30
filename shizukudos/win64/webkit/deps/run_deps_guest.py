@@ -4,7 +4,7 @@
 
 Builds deps/tests/t_*.c(pp) (deps/build.py --tests), packs them with WKRUN.EXE, every dependency DLL
 (build/shizukudos/webkit/deps/bin) and the toolchain runtime DLLs (libc++.dll, libunwind.dll) into D:\\WK, checks every
-import statically against the Shizuku system DLLs (tests/wkguest.py import_check), boots Kernel64 once and lets
+import statically against the Shizuku system DLLs (port/tests/wkguest.py import_check), boots Kernel64 once and lets
 WKRUN.EXE run each check. A check passes when its process exits 0 and it printed no FAIL line.
 
 Result: build/shizukudos/webkit/run_deps/result.json (+ serial.log). Exit code 0 only if every check passed.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "tests"))
+sys.path.insert(0, str(HERE.parent / "port" / "tests"))
 import build as deps  # noqa: E402
 import toolchain as tc  # noqa: E402
 import wkguest  # noqa: E402
@@ -29,8 +29,8 @@ OUT = BUILD / "webkit" / "run_deps"
 def build_wkrun():
     exe = BUILD / "webkit" / "WKRUN.EXE"
     exe.parent.mkdir(parents=True, exist_ok=True)
-    run([tc.TC / "bin" / f"{tc.TRIPLE}-clang", "-O2", "-Wall", "-Wextra", "-Werror", HERE.parent / "tests" / "wkrun.c",
-         "-o", exe], env=deps.env())
+    run([tc.TC / "bin" / f"{tc.TRIPLE}-clang", "-O2", "-Wall", "-Wextra", "-Werror",
+         HERE.parent / "port" / "tests" / "wkrun.c", "-o", exe], env=deps.env())
     return exe
 
 

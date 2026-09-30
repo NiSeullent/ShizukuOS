@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * WKRUN.EXE: the autorun driver of the W3 WebKit guest runs (shizukudos/win64/webkit/tests/wkguest.py).
+ * WKRUN.EXE: the autorun driver of the W3 WebKit guest runs (shizukudos/win64/webkit/port/tests/wkguest.py).
  *
  * Reads WKRUN.TXT from the current directory. Each non-empty line is `<name>|<timeout seconds>|<command line>`; the
  * program is started with CreateProcessA in the current directory, waited for, and reported as
