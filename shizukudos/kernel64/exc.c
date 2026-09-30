@@ -36,6 +36,7 @@ static void trace_first_chance(process_t *p, thread_t *t, const struct regs *r, 
     if (enabled < 0) enabled = k64_cmdline_has("shz.exctrace");
     if (!enabled || lines >= 256) return;
     ++lines;
+    if (code == 0x80000003u) { extern void k64_systrace_dump(void); k64_systrace_dump(); }     /* the failing calls that led to a CHECK */
     describe(p, r->rip, d, sizeof d);
     kprintf("K64 exc: pid %d tid %llu first-chance %x at %s (%llx %llx) rsp %llx\n", p->pid, t->tid, code, d, info0, info1, r->rsp);
     for (k = 0; k < 512 && shown < 10; ++k) {

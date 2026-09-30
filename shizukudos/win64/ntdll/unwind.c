@@ -40,6 +40,9 @@ typedef struct {
     PVOID context;
     DWORD64 identifier;                         /* RtlInstallFunctionTableCallback's TableIdentifier (low 3 bits = 3) */
     int used;
+    int growable;                               /* RtlAddGrowableFunctionTable: `count` may grow up to `max`, PCs outside [base, range_end) never match */
+    DWORD max;
+    DWORD64 range_end;
 } dyn_table_t;
 static dyn_table_t dyn_tables[128];
 static volatile LONG dyn_lock;
@@ -54,7 +57,7 @@ SHZ_EXPORT BOOLEAN NTAPI RtlAddFunctionTable(PRUNTIME_FUNCTION table, DWORD coun
     dyn_acquire();
     for (i = 0; i < 128; ++i)
         if (!dyn_tables[i].used) {
-            dyn_tables[i] = (dyn_table_t){ table, count, base, 0, 0, 0, 0, 1 };
+            dyn_tables[i] = (dyn_table_t){ table, count, base, 0, 0, 0, 0, 1, 0, 0, 0 };
             dyn_release();
             return TRUE;
         }
@@ -74,7 +77,7 @@ SHZ_EXPORT BOOLEAN __cdecl RtlInstallFunctionTableCallback(DWORD64 identifier, D
     dyn_acquire();
     for (i = 0; i < 128; ++i)
         if (!dyn_tables[i].used) {
-            dyn_tables[i] = (dyn_table_t){ 0, 0, base, length, callback, context, identifier, 1 };
+            dyn_tables[i] = (dyn_table_t){ 0, 0, base, length, callback, context, identifier, 1, 0, 0, 0 };
             dyn_release();
             return TRUE;
         }
@@ -92,6 +95,58 @@ SHZ_EXPORT BOOLEAN __cdecl RtlDeleteFunctionTable(PRUNTIME_FUNCTION table)
             { dyn_tables[i].used = 0; found = TRUE; break; }
     dyn_release();
     return found;
+}
+
+/* Growable function tables (Windows 8+; V8 registers its JIT code range with them and appends unwind entries as it emits code).
+ * RtlAddGrowableFunctionTable(&handle, table, count, max, range_base, range_end) registers `table` (RUNTIME_FUNCTIONs sorted by
+ * BeginAddress, RVAs relative to range_base) for PCs in [range_base, range_end), with `count` valid entries now and room for
+ * `max`; RtlGrowFunctionTable(handle, n) makes the first n entries valid (the owner wrote them into the same array first);
+ * RtlDeleteGrowableFunctionTable(handle) unregisters. The handle is the address of the registry slot: opaque, non-NULL, and
+ * checked (a stale or foreign handle is ignored by the two VOID functions, as on Windows). RtlLookupFunctionEntry reports
+ * range_base as the image base for a hit. */
+/* NTSTATUS values as plain numbers: this file is also compiled by the host unwinder test (tests/test_unwind.c) with a header
+ * shim that has no ntstatus.h. */
+#define GROW_STATUS_INVALID_PARAMETER 0xC000000Du
+#define GROW_STATUS_NO_MEMORY 0xC0000017u
+SHZ_EXPORT DWORD NTAPI RtlAddGrowableFunctionTable(   /* DWORD: the winnt.h prototype; the value is an NTSTATUS */
+                                                      PVOID *handle, PRUNTIME_FUNCTION table, DWORD count, DWORD max,
+                                                      ULONG_PTR range_base, ULONG_PTR range_end)
+{
+    unsigned i;
+    if (!handle || !table || count > max || !max || range_end <= range_base) return GROW_STATUS_INVALID_PARAMETER;
+    dyn_acquire();
+    for (i = 0; i < 128; ++i)
+        if (!dyn_tables[i].used) {
+            dyn_tables[i] = (dyn_table_t){ table, count, range_base, 0, 0, 0, 0, 1, 1, max, range_end };
+            dyn_release();
+            *handle = &dyn_tables[i];
+            return 0;
+        }
+    dyn_release();
+    return GROW_STATUS_NO_MEMORY;
+}
+
+static dyn_table_t *growable_of(PVOID handle)
+{
+    dyn_table_t *t = handle;
+    if (t < &dyn_tables[0] || t >= &dyn_tables[128] || ((uintptr_t)t - (uintptr_t)&dyn_tables[0]) % sizeof *t) return 0;
+    return t->used && t->growable ? t : 0;
+}
+
+SHZ_EXPORT VOID NTAPI RtlGrowFunctionTable(PVOID handle, DWORD new_count)
+{
+    dyn_table_t *t;
+    dyn_acquire();
+    if ((t = growable_of(handle)) && new_count <= t->max) t->count = new_count;
+    dyn_release();
+}
+
+SHZ_EXPORT VOID NTAPI RtlDeleteGrowableFunctionTable(PVOID handle)
+{
+    dyn_table_t *t;
+    dyn_acquire();
+    if ((t = growable_of(handle))) t->used = 0;
+    dyn_release();
 }
 
 static PRUNTIME_FUNCTION search_table(PRUNTIME_FUNCTION t, DWORD n, DWORD64 base, DWORD64 pc)
@@ -140,7 +195,9 @@ SHZ_EXPORT PRUNTIME_FUNCTION NTAPI RtlLookupFunctionEntry(DWORD64 pc, PDWORD64 i
                 return cb(pc, ctx);
             }
         } else {
-            PRUNTIME_FUNCTION f = search_table(dyn_tables[i].table, dyn_tables[i].count, dyn_tables[i].base, pc);
+            PRUNTIME_FUNCTION f;
+            if (dyn_tables[i].growable && (pc < dyn_tables[i].base || pc >= dyn_tables[i].range_end)) continue;
+            f = search_table(dyn_tables[i].table, dyn_tables[i].count, dyn_tables[i].base, pc);
             if (f) { const DWORD64 b = dyn_tables[i].base; dyn_release(); *image_base = b; return f; }
         }
     }
