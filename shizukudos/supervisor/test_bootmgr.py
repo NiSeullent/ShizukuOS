@@ -30,9 +30,13 @@ Cases (QEMU TCG here; no case exercises Intel VMX, which this host cannot provid
                     (no Supervisor, no VMX) and must produce what tests/run_k64_standalone.py checks
                     (its parser/evaluator is reused) plus every T_*.EXE in WIN64.IMG exiting 0
     auto-kernel64   mode=auto + auto_kernel64=yes, no VMX, S3 off: the same Kernel64 run via auto
-    auto-k64-fallback  auto_kernel64=yes, but OVMF's S3 ACPI NVS at 8 MiB splits RAM: Kernel64 is
-                    refused before ExitBootServices and auto falls back to CSM -> FreeDOS verified
-    kernel64-nvs    mode=kernel64 with S3 on: refused (RAM run ends at EfiACPIMemoryNVS), returns
+    auto-k64-fallback  auto_kernel64=yes, but \SHZDOS\KERNEL64S.BIN is the Supervisor-profile image: Kernel64
+                    is refused before ExitBootServices and auto falls back to CSM -> FreeDOS verified
+    kernel64-s3     mode=kernel64 with S3 on (QEMU's default): OVMF's EfiACPIMemoryNVS at 8 MiB becomes a
+                    firmware hole (kernel64/standalone/memholes.h) fenced off in Kernel64's heap; Kernel64
+                    runs and reports the same holes the loader handed over
+    menu-timeout    mode=auto + menu_timeout=1: the boot manager menu is shown, no key arrives, the
+                    policy (auto -> CSM -> FreeDOS verified) is followed
     kernel64-missing   mode=kernel64, KERNEL64S.BIN deleted: Not Found, returns
     kernel64-wrong-image   KERNEL64S.BIN replaced by the Supervisor-profile KERNEL64.BIN: refused, returns
     kernel64-bad-ini   KERNEL64.INI with an unknown key: rejected as a whole, returns
@@ -40,7 +44,10 @@ Cases (QEMU TCG here; no case exercises Intel VMX, which this host cannot provid
 plus a host test of the BOOT.INI / KERNEL64.INI parsers (shizukudos/supervisor/loader/bootini.c) under ASan/UBSan.
 "Returned to firmware" is proven by OVMF's own BdsDxe line "failed to start Boot000N ...: <status>".
 "S3 off" is `-global ICH9-LPC.disable_s3=1`: OVMF then no longer reserves its SEC/PEI scratch RAM at 8 MiB as
-EfiACPIMemoryNVS, so RAM is contiguous from 1 MiB as on typical PC firmware.
+EfiACPIMemoryNVS, so RAM is contiguous from 1 MiB as on typical PC firmware. With S3 on that range is a firmware
+hole that Kernel64 never writes (see kernel64-s3).
+The menu's key selection (K = Kernel64 direct) is exercised by tools/test_shizuku_se_boot_matrix.py, which types on
+COM1; this harness only logs COM1 to a file.
 """
 import argparse
 import json
@@ -85,6 +92,7 @@ INI_BAD_MODE = b"mode = legacy\n"
 INI_NOT_IMAGE = b"mode = auto\ncsm_path = \\EFI\\SHIZUKU\\csmwrap.ini\n"
 INI_KERNEL64 = b"; boot the standalone Long Mode kernel directly\r\nmode = kernel64\r\n"
 INI_AUTO_K64 = b"mode = auto\nauto_kernel64 = yes\n"
+INI_MENU = b"mode = auto\r\nmenu_timeout = 1\r\n"
 K64_CMDLINE = "shz.boot=uefi-direct console=com1 note=a;b#c"
 K64_INI = f"; Kernel64 command line (\\SHZDOS\\KERNEL64.INI)\r\ncmdline = {K64_CMDLINE}\r\n".encode()
 K64_INI_BAD = b"cmdline = x\nappend = y\n"
@@ -124,7 +132,7 @@ def case_table():
         {"name": "malformed-key", "ini": INI_BAD_KEY, "cpu": INTEL_NO_VMX, "smp": 2, "expect": RETURN,
          "status": "Invalid Parameter",
          "serial": ["REFUSED: \\EFI\\SHIZUKU\\BOOT.INI line 2: unknown key 'timeout' "
-                    "(allowed: mode, csm_path, auto_kernel64)",
+                    "(allowed: mode, csm_path, auto_kernel64, menu_timeout)",
                     "rejected as a whole; nothing was started. Returning to firmware."],
          "absent": ["Intel VMX", "CSM legacy boot", "Kernel64 direct boot"]},
         {"name": "malformed-mode", "ini": INI_BAD_MODE, "cpu": INTEL_NO_VMX, "smp": 2, "expect": RETURN,
@@ -149,20 +157,29 @@ def case_table():
                     "Supervisor profile not available: Intel VMX backend unusable: CPUID does not report VMX",
                     "Kernel64 direct boot (mode=auto, auto_kernel64=yes, no usable virtualization backend)"],
          "absent": ["CSM legacy boot", "Kernel64 0.1: command line"]},
-        {"name": "auto-k64-fallback", "ini": INI_AUTO_K64, "cpu": INTEL_NO_VMX, "smp": 2, "expect": DOS_RUN,
+        {"name": "auto-k64-fallback", "ini": INI_AUTO_K64, "delete": ["::/SHZDOS/KERNEL64S.BIN"],
+         "copy": [(K64_SUPERVISOR_IMAGE, "::/SHZDOS/KERNEL64S.BIN")], "cpu": INTEL_NO_VMX, "smp": 2,
+         "expect": DOS_RUN,
          "serial": ["Kernel64 direct boot (mode=auto, auto_kernel64=yes, no usable virtualization backend)",
-                    "usable RAM from 1 MiB runs to 0x0000000000800000, ended by EfiACPIMemoryNVS",
-                    "REFUSED: Kernel64 owns guest-physical [0, ram_size)",
-                    "Kernel64 direct boot did not start (status 0x8000000000000009); falling back to the CSM legacy "
+                    "REFUSED: \\SHZDOS\\KERNEL64S.BIN is not the standalone (-DSHZ_STANDALONE) Kernel64 build",
+                    "Kernel64 direct boot did not start (status 0x8000000000000001); falling back to the CSM legacy "
                     "BIOS profile.",
                     "CSM legacy boot (mode=auto, no usable virtualization backend)", "CSM legacy boot: CSMWrap loaded"],
          "absent": ["ExitBootServices done", "Kernel64 0.1"]},
-        {"name": "kernel64-nvs", "ini": INI_KERNEL64, "cpu": INTEL_NO_VMX, "smp": 2, "expect": RETURN,
-         "status": "Out of Resources",
+        {"name": "kernel64-s3", "ini": INI_KERNEL64, "cpu": INTEL_NO_VMX, "smp": 2, "expect": K64_RUN,
+         "cmdline": "", "holes": True,
          "serial": ["Kernel64 direct boot (mode=kernel64)",
-                    "usable RAM from 1 MiB runs to 0x0000000000800000, ended by EfiACPIMemoryNVS",
-                    "Nothing was started. Returning to firmware."],
-         "absent": ["ExitBootServices done", "Kernel64 0.1", "CSM legacy boot"]},
+                    "firmware hole 0x0000000000800000 size 0x0000000000008000 (occupied by EfiACPIMemoryNVS",
+                    ": fenced off in Kernel64's heap"],
+         "absent": ["Supervisor profile not available", "CSM legacy boot", "REFUSED: "]},
+        {"name": "menu-timeout", "ini": INI_MENU, "cpu": INTEL_NO_VMX, "smp": 2, "expect": DOS_RUN,
+         "serial": ["BOOT.INI mode=auto, csm_path=\\EFI\\SHIZUKU\\CSMWRAP.EFI (default), auto_kernel64=no, "
+                    "menu_timeout=1",
+                    "Shizuku boot manager menu: press a key within 1 seconds",
+                    "  K           Kernel64 direct: the standalone Long Mode kernel, no Supervisor, no VMX",
+                    "Boot manager menu: no key within 1 seconds; BOOT.INI mode=auto.",
+                    "CSM legacy boot (mode=auto, no usable virtualization backend)", "CSM legacy boot: CSMWrap loaded"],
+         "absent": ["Kernel64 direct boot", "Boot manager menu: key"]},
         {"name": "kernel64-missing", "ini": INI_KERNEL64, "delete": ["::/SHZDOS/KERNEL64S.BIN"], "cpu": INTEL_NO_VMX,
          "smp": 2, "s3": False, "expect": RETURN, "status": "Not Found",
          "serial": ["REFUSED: \\SHZDOS\\KERNEL64S.BIN not found on the boot volume",
@@ -339,8 +356,8 @@ int main(int argc, char **argv)
     }
     line = bootini_parse(buf, n, &p, err, sizeof err);
     if (line) printf("ERR %d %s\n", line, err);
-    else printf("OK %s %s %d %d k64=%d %d\n", bootini_mode_name(p.mode), p.csm_path, p.mode_set, p.csm_path_set,
-                p.auto_kernel64, p.auto_kernel64_set);
+    else printf("OK %s %s %d %d k64=%d %d menu=%d %d\n", bootini_mode_name(p.mode), p.csm_path, p.mode_set,
+                p.csm_path_set, p.auto_kernel64, p.auto_kernel64_set, p.menu_timeout, p.menu_timeout_set);
     return 0;
 }
 """
@@ -364,7 +381,22 @@ PARSER_CASES = [
     ("auto_kernel64 empty", b"auto_kernel64 =\n", "ERR 1 invalid auto_kernel64 '' (expected yes or no)"),
     ("auto_kernel64 1", b"auto_kernel64 = 1\n", "ERR 1 invalid auto_kernel64 '1'"),
     ("duplicate auto_kernel64", b"auto_kernel64 = no\nauto_kernel64 = yes\n", "ERR 2 duplicate key 'auto_kernel64'"),
-    ("unknown key", b"mode = csm\ntimeout = 3\n", "ERR 2 unknown key 'timeout' (allowed: mode, csm_path, auto_kernel64)"),
+    ("unknown key", b"mode = csm\ntimeout = 3\n",
+     "ERR 2 unknown key 'timeout' (allowed: mode, csm_path, auto_kernel64, menu_timeout)"),
+    ("defaults: no menu", b"mode = auto\n", "OK auto \\EFI\\SHIZUKU\\CSMWRAP.EFI 1 0 k64=0 0 menu=0 0"),
+    ("menu_timeout", b"mode = auto\r\nMenu_Timeout = 5\r\n", "OK auto \\EFI\\SHIZUKU\\CSMWRAP.EFI 1 0 k64=0 0 menu=5 1"),
+    ("menu_timeout 0 (no menu)", b"menu_timeout=0\n", "OK auto \\EFI\\SHIZUKU\\CSMWRAP.EFI 0 0 k64=0 0 menu=0 1"),
+    ("menu_timeout 30", b"menu_timeout = 30\n", "OK auto \\EFI\\SHIZUKU\\CSMWRAP.EFI 0 0 k64=0 0 menu=30 1"),
+    ("menu_timeout 005", b"menu_timeout = 005\n", "OK auto \\EFI\\SHIZUKU\\CSMWRAP.EFI 0 0 k64=0 0 menu=5 1"),
+    ("menu_timeout 31", b"menu_timeout = 31\n", "ERR 1 invalid menu_timeout '31' (expected whole seconds 0 to 30)"),
+    ("menu_timeout 0005", b"menu_timeout = 0005\n", "ERR 1 invalid menu_timeout '0005'"),
+    ("menu_timeout negative", b"menu_timeout = -1\n", "ERR 1 invalid menu_timeout '-1'"),
+    ("menu_timeout fraction", b"menu_timeout = 1.5\n", "ERR 1 invalid menu_timeout '1.5'"),
+    ("menu_timeout empty", b"menu_timeout =\n", "ERR 1 invalid menu_timeout ''"),
+    ("menu_timeout word", b"menu_timeout = five\n", "ERR 1 invalid menu_timeout 'five'"),
+    ("duplicate menu_timeout", b"menu_timeout = 1\nmenu_timeout = 2\n", "ERR 2 duplicate key 'menu_timeout'"),
+    ("all four keys", b"mode=csm\ncsm_path=\\C.EFI\nauto_kernel64=no\nmenu_timeout=3\n",
+     "OK csm \\C.EFI 1 1 k64=0 1 menu=3 1"),
     ("KERNEL64.INI key in BOOT.INI", b"cmdline = x\n", "ERR 1 unknown key 'cmdline'"),
     ("invalid mode", b"mode = legacy\n", "ERR 1 invalid mode 'legacy' (expected auto, supervisor, csm or kernel64)"),
     ("inline comment", b"mode = csm ; x\n", "ERR 1 invalid mode 'csm ; x'"),
@@ -490,6 +522,18 @@ def k64_checks(name, text, qemu_rc, case, apps):
                                 int(lg.group(4), 16) == int(kg.group(5), 16) and
                                 int(kg.group(3)) >= 4 * int(kg.group(1)),
                                 (kg.group(0) if kg else "kernel line missing") + " / " + (lg.group(0) if lg else "loader line missing")))
+    lh = re.search(r"Kernel64 RAM \[0, 0x[0-9a-f]+\); 0x([0-9a-f]+) firmware hole\(s\) handed over at 0x6000", text)
+    kh = re.search(r"K64: (\d+) firmware memory hole\(s\): (\d+) page\(s\) kept out of the page allocator, "
+                   r"(\d+) KiB of the heap fenced off", text)
+    handed = int(lh.group(1), 16) if lh else -1
+    # Holes near the top of RAM (EfiRuntimeServicesData) exist with S3 off too; with S3 on the 8 MiB ACPI NVS must be
+    # among them, fenced off in the heap (case "holes").
+    checks.append(verify._check(f"[{name}] Kernel64 applied exactly the firmware holes the loader handed over "
+                                "(kernel64/standalone/memholes.h at 0x6000)" +
+                                (", including heap-window holes fenced off" if case.get("holes") else ""),
+                                handed >= 0 and (int(kh.group(1)) if kh else 0) == handed and
+                                (not case.get("holes") or (kh is not None and int(kh.group(3)) > 0)),
+                                f"loader {handed}; kernel {kh.group(0) if kh else 'no hole line'}"))
     checks.append(verify._check(f"[{name}] CSMWrap never ran", "csm_bin_base:" not in text))
     return checks
 
