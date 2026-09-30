@@ -110,8 +110,8 @@ def build_ntdll():
     dll = OUT / "ntdll.dll"
     cmd = [CC, *COMMON, "-DSHZ_NTDLL_BUILD", "-shared", "-nostdlib", "-Wl,--entry,ShzNtdllEntry",
            f"-Wl,--image-base,{NTDLL_BASE}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
-           "-I", W64 / "include", *src, W64 / "ntdll" / "ntdll_asm.S", OUT / "nt_stubs.S", version_resource(W64 / "ntdll" / "ntdll.rc"),
-           OUT / "ntdll.def", "-lgcc", "-o", dll]
+           "-I", W64 / "include", *src, W64 / "ntdll" / "ntdll_asm.S", OUT / "nt_stubs.S", OUT / "ntdll.def",
+           version_obj("ntdll.dll", "NT Layer DLL"), "-lgcc", "-o", dll]
     run(cmd)
     run([DLLTOOL, "-d", OUT / "ntdll.def", "-l", OUT / "libntdll.a", "--kill-at"])
     return dll, cmd, names
@@ -136,7 +136,7 @@ def build_kernel32(ntdll_names):
     dll = OUT / "kernel32.dll"
     cmd = [CC, *COMMON, "-shared", "-nostdlib", "-Wl,--entry,ShzKernel32Entry", f"-Wl,--image-base,{K32_BASE}",
            "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at", "-I", W64 / "include", *src,
-           version_resource(W64 / "kernel32" / "kernel32.rc"), OUT / "kernel32.def", "-L", OUT, "-lntdll", "-lgcc", "-o", dll]
+           OUT / "kernel32.def", version_obj("kernel32.dll", "Windows NT BASE API Client DLL"), "-L", OUT, "-lntdll", "-lgcc", "-o", dll]
     run(cmd)
     run([DLLTOOL, "-d", OUT / "kernel32.def", "-l", OUT / "libkernel32.a", "--kill-at"])
     return dll, cmd, names
