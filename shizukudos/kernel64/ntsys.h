@@ -116,7 +116,24 @@
  * and NtRead/NtWriteFile route to IRPs through the file-object hooks; these two are the device
  * control and driver-load services the host adds. */
 #define SYSCALL_LIST_NTDRV(X) \
-    X(NtLoadDriver, 0xe0) X(NtDeviceIoControlFile, 0xe1)
+    X(NtLoadDriver, 0xe0) X(NtDeviceIoControlFile, 0xe1) X(NtUnloadDriver, 0xe2) X(NtShzDriverQuery, 0xe3)
+
+/* NtShzDriverQuery(buffer, length, &return_length) (0xe3, private): one record per driver image the NT driver host
+ * has loaded and started (service name, image window, device objects, PCI functions it drives). return_length is the
+ * record count; STATUS_BUFFER_TOO_SMALL when the buffer holds fewer. SHZPNP.EXE `status` reads it. */
+typedef struct {
+    char service[64];                   /* Services key name */
+    uint64_t image_base;                /* kernel VA of the mapped image */
+    uint32_t image_size;
+    uint32_t flags;                     /* SHZ_DRV_* */
+    uint32_t ndevices;                  /* DEVICE_OBJECTs on the DRIVER_OBJECT's chain */
+    uint32_t npci;                      /* PCI functions claimed for it (pci_claim "ntdrv:<service>") */
+    struct { uint8_t bus, dev, fn, pad; } pci[4];
+    char device[4][48];                 /* the first named device objects ("\Device\X") */
+} shz_driver_info_t;
+#define SHZ_DRV_STARTED 0x1u            /* DriverEntry returned STATUS_SUCCESS */
+#define SHZ_DRV_DEPENDENCY 0x2u         /* loaded because another image imports it (export driver, e.g. ndis.sys) */
+#define SHZ_DRV_USERS_SHIFT 8           /* (flags >> 8) & 0xff: images importing from it */
 
 enum {
 #define X(name, num) SYS_##name = num,
