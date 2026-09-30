@@ -65,11 +65,15 @@ IMAGES = Path(os.environ.get("SHZ_E1_IMAGES", str(BUILD / "e1-images")))  # FAT3
 FIXED_EPOCH = 1262304000
 MARKER = "SHZ-E1-MARKER electron-min 42"
 COMMON = "--no-sandbox --disable-gpu --enable-logging=stderr --v=0"
+# Without --user-data-dir the Electron browser process stops at a CHECK right after it starts (electron.exe+0x322c975, E1.md
+# wall 15); with one it goes on. The default directory comes from a shell32 known-folder lookup (RoamingAppData) that the
+# runtime's shell32 does not answer: that is the probable cause, not a proved one (setting APPDATA alone does not help).
+USER_DATA = " --user-data-dir=D:\\e1ud"
 APPS = {
-    "minimal": {"dir": "e1min", "exe": "electron.exe", "args": COMMON + " --no-first-run", "expect": MARKER},
+    "minimal": {"dir": "e1min", "exe": "electron.exe", "args": COMMON + USER_DATA + " --no-first-run", "expect": MARKER},
     "node": {"dir": "e1min", "exe": "electron.exe", "image": "minimal", "env": ["ELECTRON_RUN_AS_NODE=1"],
              "args": "D:\\e1min\\resources\\app\\nodeprobe.js", "expect": "SHZ-E1-NODE-DONE"},
-    "default": {"dir": "electron", "exe": "electron.exe", "args": COMMON + " --no-first-run", "expect": None},
+    "default": {"dir": "electron", "exe": "electron.exe", "args": COMMON + USER_DATA + " --no-first-run", "expect": None},
     "vscode": {"dir": "vscode", "exe": None,
                "args": "--disable-gpu --no-sandbox --verbose --enable-logging=stderr --skip-welcome --skip-release-notes "
                        "--disable-extensions --user-data-dir=D:\\vscud --extensions-dir=D:\\vscext",
@@ -231,7 +235,11 @@ def main():
     ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE",
                     help="extra environment variable of the program (repeatable; `env=` lines of the autorun control file, which "
                          "needs a kernel that reads them - kernel64/autorun.c of the E1 proposal; ignored by older kernels)")
-    ap.add_argument("--no-trace", action="store_true", help="do not pass shz.k32trace and shz.exctrace")
+    ap.add_argument("--no-trace", action="store_true",
+                    help="do not pass shz.k32trace, shz.exctrace and shz.systrace (kernel32 explicit-failure and GetProcAddress-miss lines, "
+                         "first-chance hardware exceptions, failing system calls)")
+    ap.add_argument("--trace-all-syscalls", action="store_true",
+                    help="also pass shz.systrace.all: the last 70 system calls of the thread that takes the first breakpoint are printed with it")
     args = ap.parse_args()
     spec = APPS[args.app]
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
@@ -275,7 +283,7 @@ def main():
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
            *(["-vga", "std"] if args.display == "vga" else []),
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
-           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace"),
+           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace shz.systrace" + (" shz.systrace.all" if args.trace_all_syscalls else "")),
            "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
            "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
            "-device", "ide-hd,drive=d0,bus=ahci0.0"]
