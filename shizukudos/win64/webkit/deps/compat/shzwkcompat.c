@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * shzwkcompat.dll: Win32 functions that the WebKit dependencies (and later the port) import but that the Shizuku
- * runtime DLLs do not export yet. The W3 toolchain links its import library (libshzwkcompat.a) before every system
- * import library, so these names bind here instead of failing the whole image at load time (c0000139).
+ * libshzwkcompat.a: Win32 and C runtime functions that the WebKit dependencies (and later the port) import but that
+ * the Shizuku runtime DLLs do not export yet. It is linked statically and FIRST on every link line of the W3 builds
+ * (deps/build.py LINK_HEAD), so these names bind here instead of failing the whole image at load time (c0000139);
+ * lld keeps the first archive that defines a symbol. Each function is its own archive member (deps/build.py splits
+ * this file at the "@@" markers), so an image only carries what it uses.
  *
  * Every function first asks the real system DLL for the same export (GetProcAddress, cached) and forwards to it when
  * it exists, so a later kernel32/advapi32/ws2_32/iphlpapi export takes over without rebuilding anything. Only when the
@@ -16,10 +18,16 @@
 #include <bcrypt.h>
 #include <wincrypt.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <locale.h>
 
-#define EXPORT __declspec(dllexport)
+/* A definition plus the import-slot pointer that dllimport references (__imp_<name>) bind to. */
+#define EXPORT
+#define IMP(name) void *__imp_##name = (void *)(name)
 
-static FARPROC real(const char *dll, const char *name)
+static inline FARPROC real(const char *dll, const char *name)
 {
     HMODULE m = GetModuleHandleA(dll);
     if (!m) m = LoadLibraryA(dll);
@@ -32,7 +40,17 @@ static FARPROC real(const char *dll, const char *name)
     if (!looked_) { fn_ = (type)(void (*)(void))real(dll, #name); looked_ = 1; } \
     if (fn_)
 
-/* ------------------------------------------------------------------ kernel32 */
+struct shz_hash { DWORD magic; BCRYPT_ALG_HANDLE alg; BCRYPT_HASH_HANDLE h; DWORD len; BYTE digest[64]; BOOL done; };
+#define SHZ_PROV ((HCRYPTPROV)0x5348505a)                       /* one pseudo provider: verify contexts only */
+#define SHZ_EVENTLOG ((HANDLE)0x534c4f47)
+
+static inline struct shz_hash *hash_of(HCRYPTHASH x)
+{
+    struct shz_hash *h = (struct shz_hash *)x;
+    return (h && h->magic == 0x48534853) ? h : NULL;
+}
+
+/* @@ MoveFileExA */
 typedef BOOL (WINAPI *MoveFileExA_t)(LPCSTR, LPCSTR, DWORD);
 EXPORT BOOL WINAPI MoveFileExA(LPCSTR from, LPCSTR to, DWORD flags)
 {
@@ -43,6 +61,9 @@ EXPORT BOOL WINAPI MoveFileExA(LPCSTR from, LPCSTR to, DWORD flags)
     return MoveFileExW(wf, to ? wt : NULL, flags);
 }
 
+IMP(MoveFileExA);
+
+/* @@ GetVersion */
 typedef DWORD (WINAPI *GetVersion_t)(void);
 typedef LONG (WINAPI *RtlGetVersion_t)(OSVERSIONINFOW *);
 EXPORT DWORD WINAPI GetVersion(void)
@@ -59,10 +80,9 @@ EXPORT DWORD WINAPI GetVersion(void)
     return (v.dwBuildNumber & 0x7fff) << 16 | (v.dwMinorVersion & 0xff) << 8 | (v.dwMajorVersion & 0xff);
 }
 
-/* ------------------------------------------------------------------ advapi32: legacy CryptoAPI over bcrypt */
-struct shz_hash { DWORD magic; BCRYPT_ALG_HANDLE alg; BCRYPT_HASH_HANDLE h; DWORD len; BYTE digest[64]; BOOL done; };
-#define SHZ_PROV ((HCRYPTPROV)0x5348505a)                       /* one pseudo provider: verify contexts only */
+IMP(GetVersion);
 
+/* @@ CryptAcquireContextA */
 typedef BOOL (WINAPI *CryptAcquireContextA_t)(HCRYPTPROV *, LPCSTR, LPCSTR, DWORD, DWORD);
 EXPORT BOOL WINAPI CryptAcquireContextA(HCRYPTPROV *prov, LPCSTR container, LPCSTR provider, DWORD type, DWORD flags)
 {
@@ -72,14 +92,18 @@ EXPORT BOOL WINAPI CryptAcquireContextA(HCRYPTPROV *prov, LPCSTR container, LPCS
     *prov = SHZ_PROV;
     return TRUE;
 }
+IMP(CryptAcquireContextA);
 
+/* @@ CryptAcquireContextW */
 typedef BOOL (WINAPI *CryptAcquireContextW_t)(HCRYPTPROV *, LPCWSTR, LPCWSTR, DWORD, DWORD);
 EXPORT BOOL WINAPI CryptAcquireContextW(HCRYPTPROV *prov, LPCWSTR container, LPCWSTR provider, DWORD type, DWORD flags)
 {
     REAL("advapi32.dll", CryptAcquireContextW, CryptAcquireContextW_t) return fn_(prov, container, provider, type, flags);
     return CryptAcquireContextA(prov, container ? "" : NULL, NULL, type, flags);
 }
+IMP(CryptAcquireContextW);
 
+/* @@ CryptReleaseContext */
 typedef BOOL (WINAPI *CryptReleaseContext_t)(HCRYPTPROV, DWORD);
 EXPORT BOOL WINAPI CryptReleaseContext(HCRYPTPROV prov, DWORD flags)
 {
@@ -87,7 +111,9 @@ EXPORT BOOL WINAPI CryptReleaseContext(HCRYPTPROV prov, DWORD flags)
     if (prov != SHZ_PROV) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
     return TRUE;
 }
+IMP(CryptReleaseContext);
 
+/* @@ CryptGenRandom */
 typedef BOOL (WINAPI *CryptGenRandom_t)(HCRYPTPROV, DWORD, BYTE *);
 EXPORT BOOL WINAPI CryptGenRandom(HCRYPTPROV prov, DWORD len, BYTE *buf)
 {
@@ -95,7 +121,9 @@ EXPORT BOOL WINAPI CryptGenRandom(HCRYPTPROV prov, DWORD len, BYTE *buf)
     if (prov != SHZ_PROV) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
     return BCryptGenRandom(NULL, buf, len, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
 }
+IMP(CryptGenRandom);
 
+/* @@ CryptCreateHash */
 typedef BOOL (WINAPI *CryptCreateHash_t)(HCRYPTPROV, ALG_ID, HCRYPTKEY, DWORD, HCRYPTHASH *);
 EXPORT BOOL WINAPI CryptCreateHash(HCRYPTPROV prov, ALG_ID alg, HCRYPTKEY key, DWORD flags, HCRYPTHASH *out)
 {
@@ -131,12 +159,9 @@ EXPORT BOOL WINAPI CryptCreateHash(HCRYPTPROV prov, ALG_ID alg, HCRYPTKEY key, D
     return TRUE;
 }
 
-static struct shz_hash *hash_of(HCRYPTHASH x)
-{
-    struct shz_hash *h = (struct shz_hash *)x;
-    return (h && h->magic == 0x48534853) ? h : NULL;
-}
+IMP(CryptCreateHash);
 
+/* @@ CryptHashData */
 typedef BOOL (WINAPI *CryptHashData_t)(HCRYPTHASH, const BYTE *, DWORD, DWORD);
 EXPORT BOOL WINAPI CryptHashData(HCRYPTHASH x, const BYTE *data, DWORD len, DWORD flags)
 {
@@ -147,7 +172,9 @@ EXPORT BOOL WINAPI CryptHashData(HCRYPTHASH x, const BYTE *data, DWORD len, DWOR
     (void)flags;
     return BCryptHashData(h->h, (PUCHAR)data, len, 0) == 0;
 }
+IMP(CryptHashData);
 
+/* @@ CryptGetHashParam */
 typedef BOOL (WINAPI *CryptGetHashParam_t)(HCRYPTHASH, DWORD, BYTE *, DWORD *, DWORD);
 EXPORT BOOL WINAPI CryptGetHashParam(HCRYPTHASH x, DWORD param, BYTE *data, DWORD *len, DWORD flags)
 {
@@ -172,7 +199,9 @@ EXPORT BOOL WINAPI CryptGetHashParam(HCRYPTHASH x, DWORD param, BYTE *data, DWOR
     *len = h->len;
     return TRUE;
 }
+IMP(CryptGetHashParam);
 
+/* @@ CryptDestroyHash */
 typedef BOOL (WINAPI *CryptDestroyHash_t)(HCRYPTHASH);
 EXPORT BOOL WINAPI CryptDestroyHash(HCRYPTHASH x)
 {
@@ -187,30 +216,36 @@ EXPORT BOOL WINAPI CryptDestroyHash(HCRYPTHASH x)
     return TRUE;
 }
 
-/* ------------------------------------------------------------------ advapi32: event log -> debug output */
-#define SHZ_EVENTLOG ((HANDLE)0x534c4f47)
+IMP(CryptDestroyHash);
 
+/* @@ RegisterEventSourceA */
 typedef HANDLE (WINAPI *RegisterEventSourceA_t)(LPCSTR, LPCSTR);
 EXPORT HANDLE WINAPI RegisterEventSourceA(LPCSTR server, LPCSTR source)
 {
     REAL("advapi32.dll", RegisterEventSourceA, RegisterEventSourceA_t) return fn_(server, source);
     return SHZ_EVENTLOG;
 }
+IMP(RegisterEventSourceA);
 
+/* @@ RegisterEventSourceW */
 typedef HANDLE (WINAPI *RegisterEventSourceW_t)(LPCWSTR, LPCWSTR);
 EXPORT HANDLE WINAPI RegisterEventSourceW(LPCWSTR server, LPCWSTR source)
 {
     REAL("advapi32.dll", RegisterEventSourceW, RegisterEventSourceW_t) return fn_(server, source);
     return SHZ_EVENTLOG;
 }
+IMP(RegisterEventSourceW);
 
+/* @@ DeregisterEventSource */
 typedef BOOL (WINAPI *DeregisterEventSource_t)(HANDLE);
 EXPORT BOOL WINAPI DeregisterEventSource(HANDLE h)
 {
     REAL("advapi32.dll", DeregisterEventSource, DeregisterEventSource_t) return fn_(h);
     return h == SHZ_EVENTLOG;
 }
+IMP(DeregisterEventSource);
 
+/* @@ ReportEventA */
 typedef BOOL (WINAPI *ReportEventA_t)(HANDLE, WORD, WORD, DWORD, PSID, WORD, DWORD, LPCSTR *, LPVOID);
 EXPORT BOOL WINAPI ReportEventA(HANDLE h, WORD type, WORD cat, DWORD id, PSID sid, WORD n, DWORD size, LPCSTR *strs,
                                 LPVOID raw)
@@ -219,7 +254,9 @@ EXPORT BOOL WINAPI ReportEventA(HANDLE h, WORD type, WORD cat, DWORD id, PSID si
     for (WORD i = 0; strs && i < n; ++i) { OutputDebugStringA(strs[i]); OutputDebugStringA("\n"); }
     return h == SHZ_EVENTLOG;
 }
+IMP(ReportEventA);
 
+/* @@ ReportEventW */
 typedef BOOL (WINAPI *ReportEventW_t)(HANDLE, WORD, WORD, DWORD, PSID, WORD, DWORD, LPCWSTR *, LPVOID);
 EXPORT BOOL WINAPI ReportEventW(HANDLE h, WORD type, WORD cat, DWORD id, PSID sid, WORD n, DWORD size, LPCWSTR *strs,
                                 LPVOID raw)
@@ -228,8 +265,9 @@ EXPORT BOOL WINAPI ReportEventW(HANDLE h, WORD type, WORD cat, DWORD id, PSID si
     for (WORD i = 0; strs && i < n; ++i) { OutputDebugStringW(strs[i]); OutputDebugStringW(L"\n"); }
     return h == SHZ_EVENTLOG;
 }
+IMP(ReportEventW);
 
-/* ------------------------------------------------------------------ ws2_32 */
+/* @@ gethostbyaddr */
 typedef struct hostent *(WSAAPI *gethostbyaddr_t)(const char *, int, int);
 EXPORT struct hostent *WSAAPI gethostbyaddr(const char *addr, int len, int type)
 {
@@ -237,7 +275,9 @@ EXPORT struct hostent *WSAAPI gethostbyaddr(const char *addr, int len, int type)
     WSASetLastError(WSANO_DATA);                                  /* no reverse lookups: as for an unknown address */
     return NULL;
 }
+IMP(gethostbyaddr);
 
+/* @@ getservbyname */
 typedef struct servent *(WSAAPI *getservbyname_t)(const char *, const char *);
 EXPORT struct servent *WSAAPI getservbyname(const char *name, const char *proto)
 {
@@ -245,7 +285,9 @@ EXPORT struct servent *WSAAPI getservbyname(const char *name, const char *proto)
     WSASetLastError(WSANO_DATA);                                  /* no services database */
     return NULL;
 }
+IMP(getservbyname);
 
+/* @@ getservbyport */
 typedef struct servent *(WSAAPI *getservbyport_t)(int, const char *);
 EXPORT struct servent *WSAAPI getservbyport(int port, const char *proto)
 {
@@ -253,7 +295,9 @@ EXPORT struct servent *WSAAPI getservbyport(int port, const char *proto)
     WSASetLastError(WSANO_DATA);
     return NULL;
 }
+IMP(getservbyport);
 
+/* @@ WSASocketA */
 typedef SOCKET (WSAAPI *WSASocketA_t)(int, int, int, LPWSAPROTOCOL_INFOA, GROUP, DWORD);
 EXPORT SOCKET WSAAPI WSASocketA(int af, int type, int proto, LPWSAPROTOCOL_INFOA info, GROUP g, DWORD flags)
 {
@@ -261,7 +305,9 @@ EXPORT SOCKET WSAAPI WSASocketA(int af, int type, int proto, LPWSAPROTOCOL_INFOA
     if (info) { WSASetLastError(WSAEINVAL); return INVALID_SOCKET; }  /* a protocol-info block needs the real one */
     return WSASocketW(af, type, proto, NULL, g, flags);
 }
+IMP(WSASocketA);
 
+/* @@ WSAStringToAddressW */
 typedef INT (WSAAPI *WSAStringToAddressW_t)(LPWSTR, INT, LPWSAPROTOCOL_INFOW, LPSOCKADDR, LPINT);
 EXPORT INT WSAAPI WSAStringToAddressW(LPWSTR str, INT af, LPWSAPROTOCOL_INFOW info, LPSOCKADDR out, LPINT outlen)
 {
@@ -291,17 +337,77 @@ EXPORT INT WSAAPI WSAStringToAddressW(LPWSTR str, INT af, LPWSAPROTOCOL_INFOW in
     WSASetLastError(WSAEINVAL);
     return SOCKET_ERROR;
 }
+IMP(WSAStringToAddressW);
 
-/* ------------------------------------------------------------------ iphlpapi (not built by the Wine port) */
+/* @@ if_nametoindex */
 typedef ULONG (WINAPI *if_nametoindex_t)(PCSTR);
 EXPORT ULONG WINAPI if_nametoindex(PCSTR name)
 {
     REAL("iphlpapi.dll", if_nametoindex, if_nametoindex_t) return fn_(name);
     return 0;                                                     /* unknown interface name */
 }
+IMP(if_nametoindex);
 
-BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID r)
+/* @@ EnumSystemLocalesA */
+typedef BOOL (WINAPI *EnumSystemLocalesA_t)(LOCALE_ENUMPROCA, DWORD);
+EXPORT BOOL WINAPI EnumSystemLocalesA(LOCALE_ENUMPROCA proc, DWORD flags)
 {
-    (void)h; (void)reason; (void)r;
-    return TRUE;
+    REAL("kernel32.dll", EnumSystemLocalesA, EnumSystemLocalesA_t) return fn_(proc, flags);
+    if (!proc) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    return TRUE;                          /* no installed locales to enumerate (libxslt: no language-specific sort) */
 }
+IMP(EnumSystemLocalesA);
+
+/* ------------------------------------------------------------------ ws2_32 name lookups */
+
+/* @@ getnameinfo */
+typedef INT (WSAAPI *getnameinfo_t)(const SOCKADDR *, socklen_t, PCHAR, DWORD, PCHAR, DWORD, INT);
+INT WSAAPI getnameinfo(const SOCKADDR *sa, socklen_t salen, PCHAR host, DWORD hostlen, PCHAR serv, DWORD servlen,
+                       INT flags)
+{
+    char port[8];
+    const void *addr;
+    unsigned short p;
+    REAL("ws2_32.dll", getnameinfo, getnameinfo_t) return fn_(sa, salen, host, hostlen, serv, servlen, flags);
+    /* no resolver for reverse lookups: every result is numeric, as for an address without a PTR record */
+    if (!sa) return EAI_FAIL;
+    if (sa->sa_family == AF_INET && salen >= (socklen_t)sizeof(struct sockaddr_in)) {
+        addr = &((const struct sockaddr_in *)sa)->sin_addr;
+        p = ((const struct sockaddr_in *)sa)->sin_port;
+    } else if (sa->sa_family == AF_INET6 && salen >= (socklen_t)sizeof(struct sockaddr_in6)) {
+        addr = &((const struct sockaddr_in6 *)sa)->sin6_addr;
+        p = ((const struct sockaddr_in6 *)sa)->sin6_port;
+    } else {
+        return EAI_FAMILY;
+    }
+    if (host && hostlen) {
+        if (flags & NI_NAMEREQD) return EAI_NONAME;
+        if (!inet_ntop(sa->sa_family, (void *)addr, host, hostlen)) return EAI_FAIL;
+    }
+    if (serv && servlen) {
+        unsigned v = ntohs(p), i = sizeof port - 1;
+        port[i] = 0;
+        do { port[--i] = (char)('0' + v % 10); v /= 10; } while (v);
+        memmove(port, port + i, sizeof port - i);
+        if (lstrlenA(port) >= (int)servlen) return EAI_FAIL;
+        lstrcpyA(serv, port);
+    }
+    return 0;
+}
+IMP(getnameinfo);
+
+/* @@ GetNameInfoW */
+typedef INT (WSAAPI *GetNameInfoW_t)(const SOCKADDR *, socklen_t, PWCHAR, DWORD, PWCHAR, DWORD, INT);
+INT WSAAPI GetNameInfoW(const SOCKADDR *sa, socklen_t salen, PWCHAR host, DWORD hostlen, PWCHAR serv, DWORD servlen,
+                        INT flags)
+{
+    char h[NI_MAXHOST], s[NI_MAXSERV];
+    INT r;
+    REAL("ws2_32.dll", GetNameInfoW, GetNameInfoW_t) return fn_(sa, salen, host, hostlen, serv, servlen, flags);
+    r = getnameinfo(sa, salen, host ? h : NULL, host ? sizeof h : 0, serv ? s : NULL, serv ? sizeof s : 0, flags);
+    if (r) return r;
+    if (host && !MultiByteToWideChar(CP_ACP, 0, h, -1, host, hostlen)) return EAI_FAIL;
+    if (serv && !MultiByteToWideChar(CP_ACP, 0, s, -1, serv, servlen)) return EAI_FAIL;
+    return 0;
+}
+IMP(GetNameInfoW);

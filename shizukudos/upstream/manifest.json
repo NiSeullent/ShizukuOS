@@ -432,7 +432,8 @@
       "ref": "main",
       "commit": "5c289247285a71147ba4e7fd213394d68dc44da9",
       "sparse_paths": ["/*", "!/*/", "/Source/CMakeLists.txt", "/Source/cmake/", "/Source/WTF/", "/Source/JavaScriptCore/",
-                       "/Source/bmalloc/", "/Tools/Scripts/*", "!/Tools/Scripts/*/", "/JSTests/stress/"],
+                       "/Source/bmalloc/", "/Tools/Scripts/*", "!/Tools/Scripts/*/", "/JSTests/stress/",
+                       "/Source/WebCore/", "/Source/ThirdParty/skia/", "/Source/ThirdParty/ANGLE/include/"],
       "license": "BSD-2-Clause AND BSD-3-Clause AND LGPL-2.0-or-later AND LGPL-2.1-or-later AND (MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later) AND ISC AND MIT AND Apache-2.0 AND BSL-1.0 AND Unicode-3.0",
       "license_detail": "Per file, from the pinned tree (shizukudos/win64/webkit/licscan.py; counts in docs/shizukudos10/WEBKIT.md): WTF 698 BSD-2-Clause, 80 BSD-3-Clause, 97 LGPL-2.0-or-later, 1 LGPL-2.1-or-later+BSD-3-Clause (DateMath.cpp), 4 MPL-1.1/GPL-2.0/LGPL-2.1 tri-licence (DateMath.h and relatives), 197 ICU headers (Unicode-3.0), and small third-party files (fast_float Apache-2.0/MIT/BSL-1.0, dragonbox Apache-2.0 WITH LLVM-exception or BSL-1.0, simde MIT, CryptographicallyRandomNumber ISC); JavaScriptCore 3266 BSD-2-Clause, 103 BSD-3-Clause, 188 LGPL-2.0-or-later, 1 LGPL-2.1-or-later+BSD-3-Clause (JSDateMath.cpp), a few MIT/ISC files; bmalloc 622 BSD-2-Clause, 5 BSD-3-Clause, 1 ISC, mimalloc MIT (built: bmalloc on Windows requires mimalloc). The LGPL-2.0-or-later files (KDE heritage: lexer, parser, runtime objects, HashTable) make the built JavaScriptCore library LGPL-2.0-or-later as a whole.",
       "license_files": ["Source/JavaScriptCore/COPYING.LIB", "Source/WTF/LICENSE-LLVM.txt", "Source/WTF/LICENSE-dragonbox.txt",
@@ -443,7 +444,9 @@
       "used_by": ["shizukudos/win64/webkit"],
       "build": "partial, sparse fetch of the pinned commit; CMake + Ninja, clang --target=x86_64-w64-windows-gnu (shizukudos/win64/webkit/build.py, docs/shizukudos10/WEBKIT.md)",
       "fetched_by": "shizukudos/win64/webkit/build.py",
-      "patches": ["shizukudos/win64/webkit/patches/0001-mingw-clang-portability.patch"]
+      "patches": ["shizukudos/win64/webkit/patches/0001-mingw-clang-portability.patch"],
+      "shizuku_port_patches": ["shizukudos/win64/webkit/port/patches/0001-skia-freetype-directory-fonts.patch"],
+      "shizuku_port_overlay": "shizukudos/win64/webkit/port/overlay/ (new files only: the PORT=Shizuku CMake Options/Platform files; copied over the tree by port/build_port.py after W1's patches and the port patches)"
     }
   },
   "tools": {

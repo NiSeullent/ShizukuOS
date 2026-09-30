@@ -82,6 +82,33 @@ def patched_source(name, work):
     return dest
 
 
+def build_compat(env):
+    src = (HERE / "compat" / "shzwkcompat.c").read_text()
+    head, *sections = src.split("/* @@ ")
+    d = WORK / "compat"
+    if d.exists():
+        shutil.rmtree(d)
+    d.mkdir(parents=True)
+    objs = []
+    compat_env = dict(env, SHZ_NO_COMPAT="1")
+    for sec in sections:
+        name = sec.split(" ", 1)[0]
+        c, o = d / f"{name}.c", d / f"{name}.o"
+        c.write_text(head + "/* @@ " + sec)
+        run([f"{TRIPLE}-clang", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-inconsistent-dllimport",
+             "-Wno-unused-function", "-c", c, "-o", o], env=compat_env)
+        nm = subprocess.run(["llvm-nm", "--defined-only", "--extern-only", "-j", str(o)], capture_output=True,
+                            text=True, check=True).stdout.split()
+        if sorted(nm) != sorted([name, f"__imp_{name}"]):
+            raise SystemExit(f"compat member {name} defines {nm}")
+        objs.append(o)
+    lib = SYSROOT / "lib" / "libshzwkcompat.a"
+    lib.unlink(missing_ok=True)
+    run(["llvm-ar", "rcs", lib, *objs])
+    (SYSROOT / "bin" / "shzwkcompat.dll").unlink(missing_ok=True)      # the DLL form of earlier revisions
+    return lib
+
+
 def host_clang_resource_dir():
     return Path(subprocess.run(["clang", "-print-resource-dir"], capture_output=True, text=True,
                                check=True).stdout.strip())
@@ -97,8 +124,8 @@ def link_flags():
 
 def write_wrappers():
     """bin/<triple>-clang(++): compile flags always; the link-only flags only when the command links (no -c/-S/-E/-M
-    or -fsyntax-only), and then -lshzwkcompat FIRST, so the compat DLL's exports bind before any system import library
-    (lld keeps the first archive that defines a symbol). SHZ_NO_COMPAT=1 leaves it out (used to build the DLL itself)."""
+    or -fsyntax-only), and then -lshzwkcompat FIRST, so the compat library's definitions bind before any system import
+    library (lld keeps the first archive that defines a symbol). SHZ_NO_COMPAT=1 leaves it out."""
     (TC / "bin").mkdir(parents=True, exist_ok=True)
     for name, drv, extra in (("clang", "clang", []), ("clang++", "clang++", ["-stdlib=libc++"])):
         p = TC / "bin" / f"{TRIPLE}-{name}"
@@ -226,11 +253,10 @@ def build(clean=False):
         "LIBCXXABI_USE_COMPILER_RT": "ON", "LIBCXXABI_USE_LLVM_UNWINDER": "ON", "LIBCXXABI_ENABLE_SHARED": "OFF",
         "LIBCXXABI_LIBDIR_SUFFIX": "", "LIBCXXABI_HAS_WIN32_THREAD_API": "ON",
         "LIBCXX_ENABLE_LOCALIZATION": "ON", "LIBCXX_ENABLE_FILESYSTEM": "ON"}, env)
-    # 6. shzwkcompat.dll (deps/compat): Win32 names the runtime DLLs lack, forwarded when they exist.
-    compat_env = dict(env, SHZ_NO_COMPAT="1")
-    run([f"{TRIPLE}-clang", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-inconsistent-dllimport", "-shared",
-         HERE / "compat" / "shzwkcompat.c", "-o", SYSROOT / "bin" / "shzwkcompat.dll",
-         f"-Wl,--out-implib,{SYSROOT / 'lib' / 'libshzwkcompat.a'}", "-lbcrypt", "-lws2_32"], env=compat_env)
+    # 6. libshzwkcompat.a (deps/compat): Win32 names the runtime DLLs lack, forwarded to the real export when it exists.
+    #    One archive member per "@@" section, each defining exactly its function and its __imp_ pointer; the wrappers
+    #    link it first. Static, so no extra DLL ships with the images.
+    build_compat(env)
     info = {"triple": TRIPLE, "clang": shzlib.tool_version("clang"), "lld": shzlib.tool_version("ld.lld"),
             "upstreams": {n: shzlib.load_manifest()["upstreams"][n]["commit"]
                           for n in ("mingw-w64", "llvm-project-runtimes")},

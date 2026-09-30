@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-2.0-only
+     Milestone R1 test page of the ShizukuDOS "Shizuku" WebKit port (port/tests/run_wk_render.py): block and inline
+     layout, the box model, borders with radii, a linear gradient, flexbox, a float, a table, lists, and text in
+     Noto Sans (the font file the guest's \SHZ\FONTS and the host reference use). The script runs in JavaScriptCore and
+     writes its result into the title and into the page. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>R1 pending</title>
+<style>
+  html, body { margin: 0; background: #ffffff; }
+  body { font-family: "Noto Sans"; font-size: 16px; color: #1a1a1a; }
+  #bar { height: 48px; background: linear-gradient(to right, #1e3c72, #2a5298 60%, #6dd5ed); color: #fff;
+         font-weight: bold; font-size: 22px; line-height: 48px; padding-left: 16px; }
+  .row { display: flex; gap: 12px; padding: 12px 16px; }
+  .box { width: 120px; height: 80px; border: 4px solid #333; border-radius: 12px; }
+  .red { background: #d32f2f; } .green { background: #388e3c; } .blue { background: #1976d2; }
+  .ring { background: #fff; border: 8px double #f57c00; border-radius: 50%; width: 72px; height: 72px; }
+  #text { margin: 0 16px; width: 520px; }
+  #text p { margin: 6px 0; line-height: 1.4; }
+  .float { float: right; width: 150px; height: 90px; margin: 0 0 8px 12px; background: #fbc02d;
+           border: 2px dashed #795548; }
+  table { border-collapse: collapse; margin: 8px 16px; }
+  td, th { border: 1px solid #555; padding: 4px 10px; }
+  th { background: #e0e0e0; }
+  ul { margin: 6px 0 6px 36px; padding: 0; }
+  #js { margin: 8px 16px; padding: 6px 10px; background: #e8f5e9; border-left: 6px solid #2e7d32; }
+</style>
+</head>
+<body>
+<div id="bar">ShizukuDOS WebKit R1</div>
+<div class="row">
+  <div class="box red"></div><div class="box green"></div><div class="box blue"></div><div class="box ring"></div>
+</div>
+<div id="text">
+  <div class="float"></div>
+  <p>This page is rendered by <b>WebCore</b> with <i>Skia</i> into a bitmap, offscreen, inside the Kernel64 guest.</p>
+  <p>The quick brown fox jumps over the lazy dog. 0123456789 &mdash; &ldquo;quotes&rdquo;, ligatures: office, fit.</p>
+</div>
+<table>
+  <tr><th>Engine</th><th>Part</th><th>State</th></tr>
+  <tr><td>WebCore</td><td>layout, paint</td><td>R1</td></tr>
+  <tr><td>JavaScriptCore</td><td>C loop</td><td id="engine">no script</td></tr>
+</table>
+<ul><li>first item</li><li>second item</li></ul>
+<div id="js">script: not run</div>
+<script>
+  var sum = 0; for (var i = 1; i <= 100; ++i) sum += i;
+  var words = "shizuku web kit".split(" ").map(function (w) { return w[0].toUpperCase() + w.slice(1); }).join("");
+  document.getElementById("js").textContent = "script: sum=" + sum + " " + words + " " + [3, 1, 2].sort().join(",");
+  document.getElementById("engine").textContent = "ran";
+  document.title = "R1 " + sum;
+</script>
+</body>
+</html>
