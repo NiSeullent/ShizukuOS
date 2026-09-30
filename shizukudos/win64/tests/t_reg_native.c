@@ -404,16 +404,16 @@ static void test_object_queries(void)
 
 static void test_handle_table(void)
 {
-    HANDLE hs[600];
+    HANDLE hs[4200];
     ULONG n = 0, i, dup = 0;
     NTSTATUS st = 0;
     WCHAR *abs = user_path(L"\\Software\\ShzNative");
-    for (i = 0; i < 600; ++i) {
+    for (i = 0; i < 4200; ++i) {
         st = open_k(&hs[i], 0, abs, KEY_READ);
         if (st) break;
         ++n;
     }
-    CHECK(n >= 400 && n < 600 && st == ST_NO_MEMORY, "the per-process handle table fills up with STATUS_NO_MEMORY (Shizuku limit 512 handles)");
+    CHECK(n >= 3900 && n < 4200 && st == ST_NO_MEMORY, "the per-process handle table fills up with STATUS_NO_MEMORY (Shizuku limit 4096 handles)");
     for (i = 0; i < n; ++i) { ULONG j; for (j = i + 1; j < n; ++j) if (hs[i] == hs[j]) ++dup; }
     CHECK(dup == 0, "all handle values are distinct");
     for (i = 0; i < n; ++i) if (NtClose(hs[i])) ++dup;

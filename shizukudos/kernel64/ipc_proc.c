@@ -79,7 +79,7 @@ int32_t process_terminate_handle(process_t *p, uint64_t h, int32_t code)
 /* ---------------------------------------------------------------- handle-table helpers */
 static uint32_t handle_flags_of(process_t *p, uint64_t h)
 {
-    if (!h || (h & 3) || h > MAX_HANDLES * 4ull) return 0;
+    if (!h || (h & 3) || h > (uint64_t)p->handle_cap * 4ull) return 0;
     return p->handles[h / 4 - 1].inherit;
 }
 
@@ -88,7 +88,7 @@ static int32_t handle_insert_at(process_t *p, uint64_t value, kobject_t *o, uint
 {
     uint64_t f;
     handle_entry_t *e;
-    if (!value || (value & 3) || value > MAX_HANDLES * 4ull) return STATUS_INVALID_HANDLE;
+    if (!value || (value & 3) || value > (uint64_t)p->handle_cap * 4ull) return STATUS_INVALID_HANDLE;
     f = irq_save();
     e = &p->handles[value / 4 - 1];
     if (e->obj) { irq_restore(f); return STATUS_OBJECT_NAME_COLLISION; }
@@ -518,7 +518,7 @@ static int32_t cup_prepare(process_t *child, void *vctx)
     int32_t st;
     uint32_t i;
     if (c->flags & CUP_INHERIT) {
-        for (i = 0; i < MAX_HANDLES; ++i) {
+        for (i = 0; i < c->from->handle_cap; ++i) {
             kobject_t *o;
             uint32_t access, flags;
             const uint64_t value = (i + 1) * 4ull;
@@ -1050,7 +1050,7 @@ static int32_t create_with_inherit(process_t *p, struct regs *r, uint32_t num, u
     int32_t st = sys_extended(p, r, num, a1, a2, a3, a4);
     uint64_t h = 0;
     if ((st != STATUS_SUCCESS && st != STATUS_OBJECT_NAME_EXISTS) || !a3) return st;
-    if (copy_from_user(p, &h, a1, 8) || !h || (h & 3) || h > MAX_HANDLES * 4ull) return st;
+    if (copy_from_user(p, &h, a1, 8) || !h || (h & 3) || h > (uint64_t)p->handle_cap * 4ull) return st;
     if (num == SYS_NtCreateFile || num == SYS_NtOpenFile)
         ipc_file_created(p, h, (uint32_t)stack_arg(p, r, num == SYS_NtOpenFile ? 6 : 9));
     if (copy_from_user(p, &a, a3, sizeof a) || !(a.attributes & OBJ_INHERIT_ATTR)) return st;

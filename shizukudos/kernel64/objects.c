@@ -92,7 +92,7 @@ int32_t handle_insert(process_t *p, kobject_t *o, uint32_t access, uint32_t *h_o
 {
     const uint64_t f = irq_save();
     unsigned i;
-    for (i = 0; i < MAX_HANDLES; ++i)
+    for (i = 0; i < p->handle_cap; ++i)
         if (!p->handles[i].obj) {
             p->handles[i].obj = o;
             p->handles[i].access = access;
@@ -110,7 +110,7 @@ int32_t handle_insert(process_t *p, kobject_t *o, uint32_t access, uint32_t *h_o
 kobject_t *handle_lookup(process_t *p, uint64_t handle, uint32_t type)
 {
     kobject_t *o;
-    if (handle & 3 || !handle || handle > MAX_HANDLES * 4ull) return 0;
+    if (handle & 3 || !handle || handle > (uint64_t)p->handle_cap * 4ull) return 0;
     o = p->handles[handle / 4 - 1].obj;
     if (!o || (type && o->type != type)) return 0;
     return o;
@@ -120,7 +120,7 @@ int32_t handle_ref(process_t *p, uint64_t handle, uint32_t type, kobject_t **out
 {
     const uint64_t f = irq_save();
     kobject_t *o = 0;
-    if (!(handle & 3) && handle && handle <= MAX_HANDLES * 4ull)
+    if (!(handle & 3) && handle && handle <= (uint64_t)p->handle_cap * 4ull)
         o = p->handles[handle / 4 - 1].obj;
     if (!o) { irq_restore(f); return STATUS_INVALID_HANDLE; }
     if (type && o->type != type) { irq_restore(f); return STATUS_OBJECT_TYPE_MISMATCH; }
@@ -136,7 +136,7 @@ int32_t handle_close(process_t *p, uint64_t handle)
     kobject_t *o;
     const uint64_t f = irq_save();
     o = 0;
-    if (!(handle & 3) && handle && handle <= MAX_HANDLES * 4ull)
+    if (!(handle & 3) && handle && handle <= (uint64_t)p->handle_cap * 4ull)
         o = p->handles[handle / 4 - 1].obj;
     if (!o) { irq_restore(f); return STATUS_INVALID_HANDLE; }
     p->handles[handle / 4 - 1].obj = 0;                 /* the slot is free before anything else can look at it */
@@ -160,7 +160,7 @@ int32_t handle_close(process_t *p, uint64_t handle)
 void handles_close_all(process_t *p)
 {
     unsigned i;
-    for (i = 0; i < MAX_HANDLES; ++i)
+    for (i = 0; i < p->handle_cap; ++i)
         if (p->handles[i].obj)
             handle_close(p, (i + 1) * 4ull);
 }
