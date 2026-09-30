@@ -502,6 +502,11 @@ static void test_many_sockets(void)
     CHECK(echoed == N, "every one of the %d connections carried its own byte both ways", echoed);
     for (i = 0; i < N; ++i) { closesocket(c[i]); }
     for (i = 0; i < N; ++i) { char b; recv(a[i], &b, 1, 0); closesocket(a[i]); }
+    {   /* The passive side's FINs reach the active closers through the loopback thread, which may not have run since the
+         * last closesocket(): wait up to 5 s for the census to settle instead of reading it once. */
+        const DWORD t0 = GetTickCount();
+        while (net_state_count(TCPS_TIME_WAIT_T) < tw_before + N / 2 && GetTickCount() - t0 < 5000) Sleep(10);
+    }
     CHECK(net_state_count(TCPS_TIME_WAIT_T) >= tw_before + N / 2, "active closers are in TIME_WAIT (%u now, %u before)", (unsigned)net_state_count(TCPS_TIME_WAIT_T), tw_before);
     closesocket(l);
 }
