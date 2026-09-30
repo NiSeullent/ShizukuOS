@@ -2,10 +2,12 @@
  * Internal header of the Shizuku ole32.dll implementation.
  *
  * What ole32.dll is here: apartment bookkeeping (CoInitializeEx & friends, initialize spies, server-process counting),
- * the task allocator (CoTaskMem*, IMalloc), GUID text conversion, CoCreateGuid, PROPVARIANT clear/copy, and the
- * OleInitialize reference count. There is NO class registry, marshaling, RPC, clipboard, drag and drop, storage or
- * stream implementation: CoCreateInstance, CoGetClassObject, CoRegisterClassObject, CoMarshal*, CreateStreamOnHGlobal,
- * RegisterDragDrop, ProgID lookups ... are not exported at all.
+ * the task allocator (CoTaskMem*, IMalloc), GUID text conversion, CoCreateGuid, PROPVARIANT clear/copy, the
+ * OleInitialize reference count, an in-process class table (classes.c: CoRegisterClassObject / CoGetClassObject /
+ * CoCreateInstance; every CLSID nobody registered is REGDB_E_CLASSNOTREG - there is no class store), IStream/ILockBytes
+ * over global memory and STGMEDIUM release (stream.c), and in-process interface transfer, the free-threaded marshaler,
+ * agile references and the drop-target table (marshal.c). There is NO RPC, no proxy/stub layer, no clipboard, no
+ * compound-file storage and no drag loop (DoDragDrop is not exported).
  */
 #ifndef SHZ_OLE32_INT_H
 #define SHZ_OLE32_INT_H

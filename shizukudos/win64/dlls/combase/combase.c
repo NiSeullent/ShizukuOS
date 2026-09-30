@@ -211,3 +211,51 @@ DLLAPI HRESULT WINAPI RoInitialize(RO_INIT_TYPE type)
 }
 
 DLLAPI void WINAPI RoUninitialize(void) { CoUninitialize(); }
+
+/* ---------------------------------------------------------------- activation (api-ms-win-core-winrt-l1-1-0), error origination
+ * No Windows Runtime class is registered on this system (there is no activation store and no in-box runtime class),
+ * so RoGetActivationFactory / RoActivateInstance answer REGDB_E_CLASSNOTREG for every class id - the documented code
+ * for an unregistered class, which callers (Chromium's connectivity and notification code) treat as "unavailable".
+ * They require RoInitialize on the thread (CO_E_NOTINITIALIZED). RoOriginateError/W: there is no error-info store to
+ * record the origination in, so they report FALSE ("not originated"), never a success they did not deliver. */
+#define REGDB_E_CLASSNOTREG_ ((HRESULT)0x80040154)
+#define CO_E_NOTINITIALIZED_ ((HRESULT)0x800401F0)
+#define E_INVALIDARG_ ((HRESULT)0x80070057)
+#define E_POINTER_ ((HRESULT)0x80004003)
+
+static int ro_active(void)
+{
+    APTTYPE t;
+    APTTYPEQUALIFIER q;
+    return CoGetApartmentType(&t, &q) == S_OK;
+}
+
+DLLAPI HRESULT WINAPI RoGetActivationFactory(HSTRING classid, REFIID iid, void **out)
+{
+    if (!out) return E_POINTER_;
+    *out = 0;
+    if (!classid || !iid) return E_INVALIDARG_;
+    if (!ro_active()) return CO_E_NOTINITIALIZED_;
+    return REGDB_E_CLASSNOTREG_;
+}
+
+DLLAPI HRESULT WINAPI RoActivateInstance(HSTRING classid, IInspectable **out)
+{
+    if (!out) return E_POINTER_;
+    *out = 0;
+    if (!classid) return E_INVALIDARG_;
+    if (!ro_active()) return CO_E_NOTINITIALIZED_;
+    return REGDB_E_CLASSNOTREG_;
+}
+
+DLLAPI BOOL WINAPI RoOriginateError(HRESULT error, HSTRING message)
+{
+    (void)error; (void)message;
+    return FALSE;
+}
+
+DLLAPI BOOL WINAPI RoOriginateErrorW(HRESULT error, UINT length, PCWSTR message)
+{
+    (void)error; (void)length; (void)message;
+    return FALSE;
+}

@@ -65,7 +65,7 @@ int main(void)
         free_t fr = c ? (free_t)GetProcAddress(c, "CoTaskMemFree") : 0;
         void *p = a ? a(32) : 0;
         U_CHECK("CoTaskMemAlloc/Free through the com contract", p && fr && (fr(p), 1));
-        U_CHECK("a com-contract function ole32 does not implement is not found (no fake export)", c && GetProcAddress(c, "CoCreateInstance") == 0);
+        U_CHECK("a com-contract function ole32 does not implement is not found (no fake export)", c && GetProcAddress(c, "CoGetCallContext") == 0);
     }
     {
         HMODULE v = LoadLibraryW(L"api-ms-win-core-version-l1-1-0.dll");

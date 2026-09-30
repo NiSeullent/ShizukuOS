@@ -212,6 +212,13 @@ DLLAPI HRESULT WINAPI OleInitialize(LPVOID reserved)
     return hr;
 }
 
+/* marshal.c: RegisterDragDrop needs OleInitialize on this thread */
+int shz_ole_initialized(void)
+{
+    com_tls *t = tls_get(0);
+    return t && t->ole_inits;
+}
+
 DLLAPI void WINAPI OleUninitialize(void)
 {
     com_tls *t = tls_get(0);
