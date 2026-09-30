@@ -85,6 +85,7 @@ struct npinst {
 struct npipe {
     npipe_t *next;
     uint16_t name[PIPE_NAME_MAX];       /* upper-cased for comparisons */
+    uint16_t display[PIPE_NAME_MAX];    /* as the first CreateNamedPipe spelled it (FileNameInformation) */
     uint32_t name_chars;
     uint32_t type, config, max_instances, instances;
     uint32_t in_quota, out_quota;
@@ -484,7 +485,7 @@ static int32_t sys_create_pipe(process_t *p, struct regs *r, uint64_t ph, uint64
         uint32_t i;
         pp = kzalloc(sizeof *pp);
         if (!pp) { kfree(in); return STATUS_INSUFFICIENT_RESOURCES; }
-        for (i = 0; i < (uint32_t)n; ++i) pp->name[i] = up16(nm[i]);
+        for (i = 0; i < (uint32_t)n; ++i) { pp->name[i] = up16(nm[i]); pp->display[i] = nm[i]; }
         pp->name_chars = (uint32_t)n;
         pp->type = type;
         pp->config = config;
@@ -916,6 +917,23 @@ static int32_t pipe_query_info(process_t *p, npend_t *e, uint32_t cls, uint64_t 
         out[8] = in->state; out[9] = e->server ? 1u : 0u;
         n = 40;
         break;
+    }
+    case 9: {                                            /* FileNameInformation {ULONG length; WCHAR name[]}: "\\<pipe name>" */
+        npipe_t *pp = in ? in->pipe : 0;
+        uint8_t nb[4 + 2 + PIPE_NAME_MAX * 2];
+        uint32_t chars, total, copy;
+        if (!pp) { irq_restore(f); return e->root ? STATUS_INVALID_PARAMETER : STATUS_PIPE_DISCONNECTED; }
+        chars = pp->name_chars + 1;
+        *(uint32_t *)nb = chars * 2;
+        *(uint16_t *)(nb + 4) = '\\';
+        memcpy(nb + 6, pp->display, pp->name_chars * 2ull);
+        irq_restore(f);
+        if (len < 4) return STATUS_INFO_LENGTH_MISMATCH;
+        total = 4 + chars * 2;
+        copy = total <= len ? total : (uint32_t)len;             /* a short buffer gets the length and a truncated name */
+        if (copy_to_user(p, buf, nb, copy)) return STATUS_ACCESS_VIOLATION;
+        if (iosb) { struct ipc_iosb v = { total <= len ? 0 : (int64_t)(int32_t)0x80000005, copy }; copy_to_user(p, iosb, &v, sizeof v); }
+        return total <= len ? STATUS_SUCCESS : (int32_t)0x80000005;   /* STATUS_BUFFER_OVERFLOW */
     }
     case 5: {                                            /* FileStandardInformation: a pipe is a zero-size non-directory */
         irq_restore(f);

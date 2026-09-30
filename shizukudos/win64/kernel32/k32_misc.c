@@ -15,6 +15,25 @@ static ULONGLONG uptime_ns(void)
     return (ULONGLONG)c.QuadPart;
 }
 K32API ULONGLONG WINAPI GetTickCount64(void) { return uptime_ns() / 1000000ull; }
+
+/* Interrupt time: 100 ns units since boot, from the same clock as QueryPerformanceCounter. The machine never sleeps or
+ * hibernates, so the unbiased time (which excludes sleep) equals it; the non-precise variants return the same value. */
+K32API VOID WINAPI QueryInterruptTimePrecise(PULONGLONG t) { *t = uptime_ns() / 100ull; }
+K32API VOID WINAPI QueryInterruptTime(PULONGLONG t) { *t = uptime_ns() / 100ull; }
+K32API VOID WINAPI QueryUnbiasedInterruptTimePrecise(PULONGLONG t) { *t = uptime_ns() / 100ull; }
+K32API BOOL WINAPI QueryUnbiasedInterruptTime(PULONGLONG t)
+{
+    if (!t) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    *t = uptime_ns() / 100ull;
+    return TRUE;
+}
+
+/* CompareObjectHandles: TRUE when both handles (pseudo handles included) refer to the same kernel object. */
+K32API BOOL WINAPI CompareObjectHandles(HANDLE a, HANDLE b)
+{
+    ULONG got = 0;
+    return NtShzQueryK32(K32Q_SAME_OBJECT, a, &b, sizeof b, &got) == 0;   /* STATUS_NOT_SAME_OBJECT otherwise; no last error */
+}
 K32API DWORD WINAPI GetTickCount(void) { return (DWORD)GetTickCount64(); }
 K32API BOOL WINAPI QueryPerformanceCounter(LARGE_INTEGER *c)
 {
@@ -238,12 +257,64 @@ K32API BOOL WINAPI IsProcessorFeaturePresent(DWORD f)
     default: return 0;                                            /* unknown features are reported as absent */
     }
 }
+/* GetVersionExW lies the way Windows 8.1+ lies: the version it reports depends on the supportedOS GUIDs in the
+ * application manifest (RT_MANIFEST resource of the main image). With the Windows 10 GUID the true version (the PEB's,
+ * what RtlGetVersion reports) is returned; with the Windows 8.1 GUID 6.3 (9600); with none 6.2 (9200). Chromium's
+ * manifest carries the Windows 10 GUID and its base::win::OSInfo trusts GetVersionEx. The manifest is scanned once per
+ * process, as raw bytes (UTF-8 or UTF-16, either GUID case). */
+static int manifest_has_guid(const BYTE *m, DWORD n, const char *guid)
+{
+    DWORD i;
+    unsigned k, len = 0;
+    while (guid[len]) ++len;
+    for (i = 0; i + len <= n; ++i) {
+        for (k = 0; k < len; ++k) { char c = (char)m[i + k]; if (c >= 'A' && c <= 'Z') c = (char)(c + 32); if (c != guid[k]) break; }
+        if (k == len) return 1;
+        if (i + 2 * len <= n) {                                        /* UTF-16LE */
+            for (k = 0; k < len; ++k) { char c = (char)m[i + 2 * k]; if (m[i + 2 * k + 1]) break; if (c >= 'A' && c <= 'Z') c = (char)(c + 32); if (c != guid[k]) break; }
+            if (k == len) return 1;
+        }
+    }
+    return 0;
+}
+
+#define K32_INTRESOURCE(i) ((LPCWSTR)(ULONG_PTR)(WORD)(i))
+static void k32_manifest_version(DWORD *major, DWORD *minor, DWORD *build)
+{
+    static DWORD cached[3];
+    if (!cached[0]) {
+        DWORD v[3] = { 6, 2, 9200 };
+        HMODULE exe = GetModuleHandleW(0);
+        HRSRC r = exe ? FindResourceW(exe, K32_INTRESOURCE(1), K32_INTRESOURCE(24)) : 0;     /* RT_MANIFEST, CREATEPROCESS_MANIFEST_RESOURCE_ID */
+        if (!r && exe) r = FindResourceW(exe, K32_INTRESOURCE(2), K32_INTRESOURCE(24));    /* ISOLATIONAWARE_MANIFEST_RESOURCE_ID */
+        if (r) {
+            const BYTE *m = LockResource(LoadResource(exe, r));
+            const DWORD n = SizeofResource(exe, r);
+            if (m && n) {
+                const uint64_t peb = shz_peb();
+                if (manifest_has_guid(m, n, "8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a")) {         /* Windows 10 / 11 */
+                    v[0] = PEB_OS_MAJOR(peb); v[1] = PEB_OS_MINOR(peb); v[2] = PEB_OS_BUILD(peb);
+                } else if (manifest_has_guid(m, n, "1f676c76-80e1-4239-95bb-83d0f6d0da78")) {  /* Windows 8.1 */
+                    v[0] = 6; v[1] = 3; v[2] = 9600;
+                }
+            }
+        }
+        shz_set_last_error(0);
+        cached[1] = v[1]; cached[2] = v[2]; cached[0] = v[0];
+    }
+    *major = cached[0]; *minor = cached[1]; *build = cached[2];
+}
+
 K32API BOOL WINAPI GetVersionExW(LPOSVERSIONINFOW v)
 {
-    /* Without a compatibility manifest Windows 8.1+ reports 6.2 (build 9200); manifests are not parsed yet. */
     if (v->dwOSVersionInfoSize < sizeof(OSVERSIONINFOW)) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return FALSE; }
-    v->dwMajorVersion = 6; v->dwMinorVersion = 2; v->dwBuildNumber = 9200; v->dwPlatformId = VER_PLATFORM_WIN32_NT;
+    k32_manifest_version(&v->dwMajorVersion, &v->dwMinorVersion, &v->dwBuildNumber);
+    v->dwPlatformId = VER_PLATFORM_WIN32_NT;
     v->szCSDVersion[0] = 0;
+    if (v->dwOSVersionInfoSize >= sizeof(OSVERSIONINFOEXW)) {
+        LPOSVERSIONINFOEXW x = (LPOSVERSIONINFOEXW)v;
+        x->wServicePackMajor = 0; x->wServicePackMinor = 0; x->wSuiteMask = 0; x->wProductType = VER_NT_WORKSTATION; x->wReserved = 0;
+    }
     return TRUE;
 }
 K32API BOOL WINAPI GetComputerNameW(LPWSTR buf, LPDWORD n)

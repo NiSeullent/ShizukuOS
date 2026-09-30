@@ -30,9 +30,11 @@ extern int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t 
 /* query classes (NtShzQueryK32) and set classes (NtShzSetK32); the same numbers are in win64/include/nt.h */
 enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32Q_PROCESS_LIST = 4, K32Q_MODULE_LIST = 5,
        K32Q_SYSTEM_PERF = 7, K32Q_PROCESS_MEMORY = 8, K32Q_WORKING_SET_EX = 9, K32Q_IMAGE_PATH = 10, K32Q_FIRMWARE = 11,
-       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13 };
+       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13, K32Q_CPU_CLOCK = 14, K32Q_SAME_OBJECT = 15, K32Q_THREAD_NAME = 16 };
 enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
-       K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10 };
+       K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10,
+       K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12, K32S_THREAD_NAME = 13 };
+#define THREAD_NAME_MAX_BYTES 65534u            /* SetThreadDescription: a UNICODE_STRING length (USHRT_MAX, as Windows/Wine bound it) */
 
 /* FILETIME of a scheduler tick: the wall clock at the first query minus the ticks counted by then gives the boot instant once,
  * so a thread's creation or exit time reads the same on every query. */
@@ -153,6 +155,111 @@ static void sample_peaks(process_t *p)
     if (pc > p->peak_commit) p->peak_commit = pc;
     if (sc > g_peak_system_commit) g_peak_system_commit = sc;
     irq_restore(f);
+}
+
+/* NtQuerySystemInformation(SystemProcessInformation = 5): one SYSTEM_PROCESS_INFORMATION (0x100 bytes on x64) per live
+ * process, followed by one SYSTEM_THREAD_INFORMATION (0x50 bytes) per live thread and the image name (UTF-16, NUL
+ * terminated); NextEntryOffset chains them, 0 in the last. A buffer that is too small gets STATUS_INFO_LENGTH_MISMATCH
+ * and the needed size in ReturnLength. Counters Kernel64 does not keep (I/O transfer counts, pool quotas) are 0. */
+#define SPI_SIZE 0x100u
+#define STI_SIZE 0x50u
+static void put32(uint8_t *b, unsigned off, uint32_t v) { memcpy(b + off, &v, 4); }
+static void put64v(uint8_t *b, unsigned off, uint64_t v) { memcpy(b + off, &v, 8); }
+
+static uint32_t spi_entry_size(process_t *q, unsigned threads)
+{
+    return (uint32_t)((SPI_SIZE + threads * STI_SIZE + (strlen(q->name) + 1) * 2 + 7) & ~7u);
+}
+
+int32_t k32_system_process_information(process_t *cur, uint64_t buf, uint64_t len, uint64_t retlen)
+{
+    enum { MAXP = 64 };
+    process_t *list[MAXP];
+    unsigned counts[MAXP];
+    unsigned i, n = 0, k;
+    uint64_t need = 0, off = 0, largest = 0;
+    process_t *q;
+    uint8_t *e;
+    int32_t st = STATUS_SUCCESS;
+    for (i = 1; (q = process_slot(i)) != 0 && n < MAXP; ++i) {
+        if (!q->used || q->teardown || q->threads_alive <= 0) continue;
+        list[n] = q;
+        counts[n] = live_threads(q, 0, 0, 0);
+        need += spi_entry_size(q, counts[n]);
+        if (spi_entry_size(q, counts[n]) > largest) largest = spi_entry_size(q, counts[n]);
+        ++n;
+    }
+    if (retlen) { uint32_t rl = (uint32_t)need; if (copy_to_user(cur, retlen, &rl, 4)) return STATUS_ACCESS_VIOLATION; }
+    if (len < need || !n) return n ? (int32_t)0xC0000004 : STATUS_SUCCESS;          /* STATUS_INFO_LENGTH_MISMATCH */
+    e = kmalloc(largest);
+    if (!e) return STATUS_NO_MEMORY;
+    for (k = 0; k < n && !st; ++k) {
+        uint64_t ut = 0, kt = 0, cyc = 0, f;
+        unsigned t_i, nt = 0;
+        const uint32_t size = spi_entry_size(list[k], counts[k]);
+        thread_t *t;
+        q = list[k];
+        memset(e, 0, size);
+        f = irq_save();                                     /* thread slots change under preemption: one consistent pass */
+        for (t_i = 0; (t = thread_slot(t_i)) != 0 && nt < counts[k]; ++t_i) {
+            uint8_t *ti = e + SPI_SIZE + nt * STI_SIZE;
+            uint32_t state, reason = 0;
+            if (t->proc != q || t->state == TS_FREE || t->state == TS_ZOMBIE) continue;
+            ut += t->user_ticks; kt += t->kernel_ticks; cyc += thread_cycles_now(t);
+            put64v(ti, 0x00, t->kernel_ticks * TICK_100NS);
+            put64v(ti, 0x08, t->user_ticks * TICK_100NS);
+            put64v(ti, 0x10, tick_to_filetime(t->create_tick));
+            put64v(ti, 0x20, t->user_rip);                  /* StartAddress: the thread's initial user RIP */
+            put64v(ti, 0x28, (uint64_t)q->pid);
+            put64v(ti, 0x30, t->tid);
+            put32(ti, 0x38, 8); put32(ti, 0x3c, 8);         /* Priority, BasePriority: normal */
+            /* KTHREAD_STATE: 1 Ready, 2 Running, 5 Waiting, 0 Initialized; KWAIT_REASON 5 Suspended, 6 UserRequest */
+            if (t->state == TS_RUNNING) state = 2;
+            else if (t->state == TS_READY) state = 1;
+            else if (t->state == TS_NEW) state = 0;
+            else { state = 5; reason = t->suspended ? 5 : 6; }
+            put32(ti, 0x44, state);
+            put32(ti, 0x48, reason);
+            ++nt;
+        }
+        irq_restore(f);
+        ut += q->dead_user_ticks; kt += q->dead_kernel_ticks; cyc += q->dead_cycles;
+        put32(e, 0x00, k + 1 < n ? size : 0);
+        put32(e, 0x04, nt);
+        put64v(e, 0x18, cyc);
+        put64v(e, 0x20, tick_to_filetime(q->create_tick));
+        put64v(e, 0x28, ut * TICK_100NS);
+        put64v(e, 0x30, kt * TICK_100NS);
+        {
+            const size_t nl = strlen(q->name);
+            uint8_t *name = e + SPI_SIZE + nt * STI_SIZE;
+            size_t c;
+            for (c = 0; c < nl; ++c) { name[c * 2] = (uint8_t)q->name[c]; name[c * 2 + 1] = 0; }
+            *(uint16_t *)(e + 0x38) = (uint16_t)(nl * 2);
+            *(uint16_t *)(e + 0x3a) = (uint16_t)(nl * 2 + 2);
+            put64v(e, 0x40, buf + off + SPI_SIZE + nt * STI_SIZE);
+        }
+        put32(e, 0x48, 8);                                  /* BasePriority */
+        put64v(e, 0x50, (uint64_t)q->pid);
+        put64v(e, 0x58, q->parent_pid);
+        put32(e, 0x60, q->handle_count);
+        put32(e, 0x64, 1);                                  /* SessionId: the interactive session (token.c reports 1) */
+        put64v(e, 0x68, (uint64_t)q->pid);                  /* UniqueProcessKey */
+        {
+            const uint64_t ws = vm_count_user_pages(q->pml4) * PAGE_SIZE;
+            const uint64_t commit = private_commit(q) * PAGE_SIZE;
+            put64v(e, 0x70, commit); put64v(e, 0x78, commit);   /* Peak/VirtualSize: committed private memory */
+            put32(e, 0x80, (uint32_t)q->page_faults);
+            put64v(e, 0x88, q->peak_ws_pages * PAGE_SIZE > ws ? q->peak_ws_pages * PAGE_SIZE : ws);
+            put64v(e, 0x90, ws);
+            put64v(e, 0xb8, commit); put64v(e, 0xc0, q->peak_commit * PAGE_SIZE > commit ? q->peak_commit * PAGE_SIZE : commit);
+            put64v(e, 0xc8, commit);
+        }
+        if (copy_to_user(cur, buf + off, e, size)) st = STATUS_ACCESS_VIOLATION;
+        off += size;
+    }
+    kfree(e);
+    return st;
 }
 
 /* VirtualLock records: one entry per locked page. The table comes from the kernel heap on the first VirtualLock (it is not
@@ -435,6 +542,62 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
             if (e.base == p->image_base) return put_out(cur, buf, len, retlen, e.path, strlen(e.path) + 1);
         return STATUS_INVALID_HANDLE;                             /* not a Win64 process (no executable image) */
     }
+    case K32Q_THREAD_NAME: {                                    /* GetThreadDescription: the UTF-16 text, ReturnLength = its bytes (0: none) */
+        thread_t *t = 0;
+        kobject_t *o = 0;
+        uint16_t *copy = 0;
+        uint32_t bytes = 0;
+        uint64_t f;
+        int32_t st;
+        if (h == CURRENT_THREAD_HANDLE) t = thread_current();
+        else if (!(o = handle_lookup(cur, h, OB_THREAD))) return STATUS_INVALID_HANDLE;
+        f = irq_save();                                         /* the owner may replace or free the text at any preemption */
+        if (o) t = o->u.thr.t;
+        if (t && t->desc && t->desc_bytes) {
+            copy = kmalloc(t->desc_bytes);
+            if (copy) { memcpy(copy, t->desc, t->desc_bytes); bytes = t->desc_bytes; }
+        }
+        irq_restore(f);
+        if (t && t->desc_bytes && !copy) return STATUS_NO_MEMORY;
+        st = put_out(cur, buf, len, retlen, copy, bytes);
+        kfree(copy);
+        return st;
+    }
+    case K32Q_SAME_OBJECT: {                                    /* CompareObjectHandles (NtCompareObjects) */
+        uint64_t h2 = 0;
+        kobject_t *o1 = 0, *o2 = 0;
+        int32_t st;
+        if (len < 8 || copy_from_user(cur, &h2, buf, 8)) return STATUS_ACCESS_VIOLATION;
+        if (h == CURRENT_PROCESS_HANDLE) { o1 = cur->object; ob_ref(o1); }
+        else if (h == CURRENT_THREAD_HANDLE) { o1 = thread_current()->object; ob_ref(o1); }
+        else if ((st = handle_ref(cur, h, 0, &o1, 0))) return st;
+        if (h2 == CURRENT_PROCESS_HANDLE) { o2 = cur->object; ob_ref(o2); }
+        else if (h2 == CURRENT_THREAD_HANDLE) { o2 = thread_current()->object; ob_ref(o2); }
+        else if ((st = handle_ref(cur, h2, 0, &o2, 0))) { ob_deref(o1); return st; }
+        st = o1 == o2 ? STATUS_SUCCESS : (int32_t)0xC00001AC;     /* STATUS_NOT_SAME_OBJECT */
+        ob_deref(o1);
+        ob_deref(o2);
+        return st;
+    }
+    case K32Q_CPU_CLOCK: {
+        /* ULONG64 time-stamp counter rate in Hz, measured once against the scheduler tick over 50 ms (the boot stub's value is
+         * only nominal). The processor's own clock is not known to the kernel; the TSC rate is its best available measure. */
+        static uint64_t hz;
+        if (!hz) {
+            uint64_t t0, t1, k0, k1;
+            uint32_t lo, hi;
+            k0 = ticks_now();
+            while (ticks_now() == k0) thread_yield();           /* start on a tick boundary */
+            k0 = ticks_now();
+            __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); t0 = ((uint64_t)hi << 32) | lo;
+            thread_sleep_ms(50);
+            k1 = ticks_now();
+            __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); t1 = ((uint64_t)hi << 32) | lo;
+            if (k1 > k0) hz = (t1 - t0) * 1000000ull / ((k1 - k0) * TICK_US);
+        }
+        if (!hz) return STATUS_NOT_SUPPORTED;
+        return put_out(cur, buf, len, retlen, &hz, sizeof hz);
+    }
     case K32Q_FIRMWARE: {
         /* Kernel64 is started by the Supervisor or by a boot stub; neither reports which firmware interface (BIOS or UEFI) the
          * machine has, so the honest answer is FirmwareTypeUnknown (0). */
@@ -450,6 +613,29 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
 int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len)
 {
     switch (cls) {
+    case K32S_SUSPEND_PROCESS: case K32S_RESUME_PROCESS: {
+        /* NtSuspendProcess / NtResumeProcess: every thread's suspend count moves by one, as NtSuspendThread/NtResumeThread
+         * (ipc_proc.c) move one thread's: a suspended thread stops at its next return to user mode (check_kill), the
+         * caller's own thread when it leaves this call. */
+        process_t *p = proc_of_handle(cur, h);
+        thread_t *t;
+        unsigned i;
+        uint64_t f;
+        (void)buf; (void)len;
+        if (!p) return STATUS_INVALID_HANDLE;
+        if (p->terminated || p->teardown) return STATUS_PROCESS_IS_TERMINATING;
+        f = irq_save();
+        for (i = 0; (t = thread_slot(i)) != 0; ++i) {
+            if (t->proc != p || t->state == TS_FREE || t->state == TS_ZOMBIE || thread_must_die(t)) continue;
+            if (cls == K32S_SUSPEND_PROCESS) { if (t->suspend_count < 127) ++t->suspend_count; }
+            else if (t->suspend_count > 0 && --t->suspend_count == 0) {
+                if (t->state == TS_NEW) thread_resume(t);
+                else if (t->state == TS_BLOCKED && t->suspended) thread_wake(t);
+            }
+        }
+        irq_restore(f);
+        return STATUS_SUCCESS;
+    }
     case K32S_PRIORITY_CLASS: {
         process_t *p = proc_of_handle(cur, h);
         uint32_t v;
@@ -492,6 +678,29 @@ int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t
         }
         irq_restore(f);
         return t ? STATUS_SUCCESS : STATUS_THREAD_IS_TERMINATING;
+    }
+    case K32S_THREAD_NAME: {                                    /* SetThreadDescription: buf/len = the UTF-16 text (len 0 clears) */
+        thread_t *t = 0;
+        kobject_t *o = 0;
+        uint16_t *text = 0, *old;
+        uint64_t f;
+        if (len > THREAD_NAME_MAX_BYTES || (len & 1)) return STATUS_INVALID_PARAMETER;
+        if (h == CURRENT_THREAD_HANDLE) t = thread_current();
+        else if (!(o = handle_lookup(cur, h, OB_THREAD))) return STATUS_INVALID_HANDLE;
+        if (len) {
+            text = kmalloc(len);
+            if (!text) return STATUS_NO_MEMORY;
+            if (copy_from_user(cur, text, buf, len)) { kfree(text); return STATUS_ACCESS_VIOLATION; }
+        }
+        f = irq_save();
+        if (o) t = o->u.thr.t;
+        if (!t || t->state == TS_ZOMBIE) { irq_restore(f); kfree(text); return STATUS_THREAD_IS_TERMINATING; }
+        old = t->desc;
+        t->desc = text;
+        t->desc_bytes = (uint32_t)len;
+        irq_restore(f);
+        kfree(old);
+        return STATUS_SUCCESS;
     }
     case K32S_DISCARD: case K32S_LOCK: case K32S_UNLOCK: case K32S_PREFETCH: {
         process_t *p = proc_of_handle(cur, h);

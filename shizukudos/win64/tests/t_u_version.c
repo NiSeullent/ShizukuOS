@@ -138,10 +138,11 @@ int main(void)
 
     /* ---- files without usable version data ---- */
     SetLastError(0);
-    U_CHECK("a PE without a resource directory (kernel32.dll): size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\SYS64\\kernel32.dll", 0) == 0);
+    /* (kernel32.dll and ntdll.dll carry a VERSIONINFO since the K4 branch; T_HELLO.EXE is built without any resource) */
+    U_CHECK("a PE without a resource directory (T_HELLO.EXE): size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\T_HELLO.EXE", 0) == 0);
     err = GetLastError();
     U_CHECKF("...with ERROR_RESOURCE_DATA_NOT_FOUND", err == ERROR_RESOURCE_DATA_NOT_FOUND, "err=%u", (unsigned)err);
-    U_CHECK("GetFileVersionInfoW of it fails", !GetFileVersionInfoW(L"C:\\SHZ\\SYS64\\kernel32.dll", 0, sizeof buf, buf));
+    U_CHECK("GetFileVersionInfoW of it fails", !GetFileVersionInfoW(L"C:\\SHZ\\TESTS\\T_HELLO.EXE", 0, sizeof buf, buf));
     SetLastError(0);
     U_CHECK("a nonexistent file: size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NO_SUCH_FILE.DLL", 0) == 0);
     err = GetLastError();

@@ -228,3 +228,74 @@ NTSTATUS NTAPI ObReferenceObjectByHandle(uint64_t h, uint32_t access, void *type
 void NTAPI ObDereferenceObject(void *o) { (void)o; }
 void NTAPI ObfDereferenceObject(void *o) { (void)o; }
 LONG NTAPI ObfReferenceObject(void *o) { (void)o; return 1; }
+
+/* ---------------------------------------------------------------- ZwEnumerateKey / ZwQueryInformationFile */
+/* KEY_BASIC_INFORMATION (0x10 + name): LastWriteTime, TitleIndex, NameLength, Name[].
+ * KEY_NODE_INFORMATION (0x18 + name): LastWriteTime, TitleIndex, ClassOffset, ClassLength, NameLength, Name[].
+ * KEY_FULL_INFORMATION (0x2c + class): LastWriteTime, TitleIndex, ClassOffset, ClassLength, SubKeys, MaxNameLen,
+ * MaxClassLen, Values, MaxValueNameLen, MaxValueDataLen, Class[]. */
+NTSTATUS NTAPI ZwEnumerateKey(uint64_t handle, uint32_t index, uint32_t cls, void *buf, uint32_t len, uint32_t *reslen)
+{
+    regkey_t *node = ntdrv_kh_get(handle, KH_KEY), *child;
+    uint8_t tmp[0x30];
+    uint32_t fixed, need, i;
+    const void *var;
+    uint32_t varlen;
+    NTSTATUS st = STATUS_SUCCESS;
+    if (!node) return STATUS_INVALID_HANDLE;
+    reg_lock();
+    child = reg_nth_child(node, index);
+    if (!child) { reg_unlock(); return STATUS_NO_MORE_ENTRIES; }
+    memset(tmp, 0, sizeof tmp);
+    memcpy(tmp, &child->last_write, 8);
+    var = regkey_name(child); varlen = child->name_len * 2;
+    switch (cls) {
+    case 0: fixed = 0x10; memcpy(tmp + 0xc, &varlen, 4); break;
+    case 1: fixed = 0x18; { uint32_t cl = child->class_len * 2, co = cl ? 0x18 + varlen : 0xffffffffu; memcpy(tmp + 0xc, &co, 4); memcpy(tmp + 0x10, &cl, 4); memcpy(tmp + 0x14, &varlen, 4); } break;
+    case 2: {
+        uint32_t cl = child->class_len * 2, co = cl ? 0x2c : 0xffffffffu, maxname = 0, maxclass = 0, maxvname = 0, maxvdata = 0;
+        regkey_t *c; regval_t *v;
+        for (i = 0; (c = reg_nth_child(child, i)) != 0; ++i) { if (c->name_len * 2 > maxname) maxname = c->name_len * 2; if (c->class_len * 2 > maxclass) maxclass = c->class_len * 2; }
+        for (i = 0; (v = reg_nth_value(child, i)) != 0; ++i) { if (v->name_len * 2 > maxvname) maxvname = v->name_len * 2; if (v->data_len > maxvdata) maxvdata = v->data_len; }
+        fixed = 0x2c;
+        memcpy(tmp + 0xc, &co, 4); memcpy(tmp + 0x10, &cl, 4); memcpy(tmp + 0x14, &child->nsubkeys, 4); memcpy(tmp + 0x18, &maxname, 4);
+        memcpy(tmp + 0x1c, &maxclass, 4); memcpy(tmp + 0x20, &child->nvalues, 4); memcpy(tmp + 0x24, &maxvname, 4); memcpy(tmp + 0x28, &maxvdata, 4);
+        var = regkey_class(child); varlen = cl;
+        break;
+    }
+    default: reg_unlock(); return STATUS_INVALID_INFO_CLASS;
+    }
+    need = fixed + varlen;
+    if (reslen) *reslen = need;
+    if (len < fixed) { reg_unlock(); return STATUS_BUFFER_TOO_SMALL; }
+    memcpy(buf, tmp, fixed);
+    if (len < need) { memcpy((uint8_t *)buf + fixed, var, len - fixed); st = STATUS_BUFFER_OVERFLOW; }
+    else memcpy((uint8_t *)buf + fixed, var, varlen);
+    reg_unlock();
+    return st;
+}
+
+/* FILE_STANDARD_INFORMATION (class 5, 0x18): AllocationSize, EndOfFile, NumberOfLinks, DeletePending, Directory.
+ * FILE_BASIC_INFORMATION (class 4, 0x28): four FILETIMEs and FileAttributes. */
+NTSTATUS NTAPI ZwQueryInformationFile(uint64_t handle, IO_STATUS_BLOCK *iosb, void *buf, uint32_t len, uint32_t cls)
+{
+    struct kfile *f = ntdrv_kh_get(handle, KH_FILE);
+    NTSTATUS st = STATUS_SUCCESS;
+    uint32_t n = 0;
+    if (!f) return STATUS_INVALID_HANDLE;
+    if (cls == 5) {
+        struct { uint64_t alloc, eof; uint32_t links; uint8_t del, dir, pad[2]; } s;
+        memset(&s, 0, sizeof s);
+        s.alloc = s.eof = f->node->size; s.links = 1; s.del = f->node->delete_pending != 0; s.dir = f->node->is_dir != 0;
+        n = sizeof s;
+        if (len < n) st = STATUS_BUFFER_TOO_SMALL; else memcpy(buf, &s, n);
+    } else if (cls == 4) {
+        struct { int64_t t[4]; uint32_t attrs, pad; } b;
+        memset(&b, 0, sizeof b);
+        b.attrs = f->node->attrs ? f->node->attrs : (f->node->is_dir ? 0x10 : 0x80);
+        n = sizeof b;
+        if (len < n) st = STATUS_BUFFER_TOO_SMALL; else memcpy(buf, &b, n);
+    } else st = STATUS_INVALID_INFO_CLASS;
+    if (iosb) { iosb->Status = st; iosb->Information = st ? 0 : n; }
+    return st;
+}

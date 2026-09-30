@@ -35,6 +35,7 @@ enum { OB_KEY = 0x10 };                 /* registry key (registry.c); a separate
 #define OB_IOCP 0x62
 #define OB_JOB 0x63
 #define OB_IS_IPC(t) ((t) >= 0x60 && (t) < 0x70)
+#define OB_TOKEN 0x20                   /* access token (u.token.t: shz_token_info, kernel64/sysk32_sec.c) */
 struct waitblock;
 struct kobject {
     uint32_t type, refs;
@@ -42,6 +43,8 @@ struct kobject {
     struct waitblock *waiters;
     char name[48];
     struct kobject *next_named;
+    void *sd;                           /* self-relative security descriptor stored by NtShzSecurityObject (not enforced) */
+    uint32_t sd_len;
     union {
         struct { int manual; } event;
         struct { thread_t *owner; int recursion; int abandoned; } mutant;
@@ -54,6 +57,7 @@ struct kobject {
         struct { void *file; uint32_t access; void *io; } file;   /* io: completion port / notification modes (ipc_io.c) */
         struct { uint64_t due_tick, period_ms; int manual; int armed; } timer;
         struct { void *node; } key;             /* registry key node (registry.c); the node's refs count these objects */
+        struct { void *t; } token;              /* OB_TOKEN: shz_token_info (sysk32_sec.c) */
     } u;
 };
 
@@ -108,6 +112,7 @@ struct process {
     /* IPC / process model (kernel64/ipc_core.c) */
     int teardown;                       /* 0 running, 1 tearing down, 2 address space and handles released */
     void *ipc;                          /* ipc_proc_t: mapped views, job membership */
+    kobject_t *token;                   /* primary access token (sysk32_sec.c), created on first use; referenced */
     thread_t *exit_owner;               /* thread that called NtTerminateProcess(NULL) (ExitProcess): every other thread of
                                            the process ends, no new thread starts; compared only, never dereferenced */
     /* kernel32 support (sysk32.c): CPU time of the threads that have exited, exit tick, settings and memory statistics */

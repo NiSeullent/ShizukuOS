@@ -265,6 +265,7 @@ K32API BOOL WINAPI FreeLibrary(HMODULE m)
     if (st) { k32_nt_error(st); return FALSE; }
     return TRUE;
 }
+static SHZ_LDR_ENTRY *entry_for(HMODULE m);
 K32API FARPROC WINAPI GetProcAddress(HMODULE m, LPCSTR name)
 {
     PVOID addr = 0;
@@ -278,7 +279,21 @@ K32API FARPROC WINAPI GetProcAddress(HMODULE m, LPCSTR name)
         as.Length = n; as.MaximumLength = n + 1; as.Buffer = (PCHAR)name;
         st = LdrGetProcedureAddress(m, &as, 0, &addr);
     }
-    if (st) { k32_nt_error(st == STATUS_ENTRYPOINT_NOT_FOUND || st == STATUS_ORDINAL_NOT_FOUND ? STATUS_ENTRYPOINT_NOT_FOUND : st); return 0; }
+    if (st) {
+        const DWORD err = k32_nt_error(st == STATUS_ENTRYPOINT_NOT_FOUND || st == STATUS_ORDINAL_NOT_FOUND ? STATUS_ENTRYPOINT_NOT_FOUND : st);
+        if (k32_trace_on()) {                               /* k32_trace.c: bring-up evidence of what a program looked for */
+            SHZ_LDR_ENTRY *e = entry_for(m);
+            char mod[64];
+            int i = 0;
+            if (e) for (; i < 62 && i < e->BaseDllName.Length / 2; ++i) mod[i] = (char)e->BaseDllName.Buffer[i];
+            mod[i++] = '!';
+            mod[i] = 0;
+            if ((uintptr_t)name < 0x10000) k32_trace_hex("GetProcAddress miss: ", e ? mod : "(unknown module)", (uintptr_t)name);
+            else k32_trace3("GetProcAddress miss: ", e ? mod : "(unknown module)", name);
+            shz_set_last_error(err);
+        }
+        return 0;
+    }
     return (FARPROC)addr;
 }
 
