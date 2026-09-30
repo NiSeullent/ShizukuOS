@@ -32,6 +32,7 @@
 #include "bootini.h"
 #include "../../uefi/boot.h"
 #include "../../abi/shz_abi.h"
+#include "../../kernel64/standalone/memholes.h"
 #include "../include/shz_info.h"
 #include "../src/caps.h"
 #include "images.h"
@@ -323,7 +324,12 @@ static EFI_STATUS load_boot_policy(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, boot
     say(", csm_path=");
     say(policy->csm_path);
     say(policy->csm_path_set ? "" : " (default)");
-    say(policy->auto_kernel64 ? ", auto_kernel64=yes\n" : ", auto_kernel64=no\n");
+    say(policy->auto_kernel64 ? ", auto_kernel64=yes" : ", auto_kernel64=no");
+    if (policy->menu_timeout_set) {
+        say(", menu_timeout=");
+        say_dec((uint64_t)policy->menu_timeout);
+    }
+    say("\n");
     return EFI_SUCCESS;
 }
 
@@ -566,6 +572,7 @@ typedef struct {
     uint64_t ksize, isize, initrd_pages, ram_size;
     int low_alloc, kernel_alloc, initrd_alloc;
     char cmdline[SHZ_CMDLINE_MAX];
+    shz_memplan_result_t plan;          /* RAM and firmware holes (kernel64/standalone/memholes.h) */
 } k64_state_t;
 static k64_state_t g_k64;
 
@@ -589,51 +596,29 @@ static int k64_usable(const EFI_MEMORY_DESCRIPTOR *d)
 #define K64_DESC(map, i, stride) ((const EFI_MEMORY_DESCRIPTOR *)((const uint8_t *)(map) + (i) * (stride)))
 #define K64_END(d) ((d)->physical_start + ((d)->pages << 12))
 
-/* End of the run of usable memory that starts at `from`, and the descriptor that ends it
- * (0 when a hole in the map ends it). The map is not assumed sorted or free of overlaps:
- * an unusable descriptor overlapping the run cuts it. */
-static uint64_t k64_run(const void *map, size_t count, size_t stride, uint64_t from, const EFI_MEMORY_DESCRIPTOR **stop)
+/* Kernel64's RAM and firmware holes from a UEFI memory map: the same plan as the Multiboot stub
+ * (kernel64/standalone/memholes.h). Usable after ExitBootServices are loader and boot-services code and data and
+ * conventional memory with write-back caching (k64_usable); any other descriptor overlapping them cuts them. The
+ * map is not assumed sorted. OVMF with S3 on (QEMU's default) keeps EfiACPIMemoryNVS at 8-9 MiB: that becomes a
+ * hole fenced off in Kernel64's heap window instead of ending its RAM at 8 MiB. */
+static int k64_plan(const void *map, size_t map_size, size_t stride, uint64_t cap, uint64_t isize,
+                    shz_memplan_result_t *plan)
 {
-    uint64_t cur = from;
-    size_t i, pass;
-    int grew = 1;
-    for (pass = 0; grew && pass <= count; ++pass) {
-        grew = 0;
-        for (i = 0; i < count; ++i) {
-            const EFI_MEMORY_DESCRIPTOR *d = K64_DESC(map, i, stride);
-            if (k64_usable(d) && d->physical_start <= cur && K64_END(d) > cur) {
-                cur = K64_END(d);
-                grew = 1;
-            }
-        }
-    }
-    *stop = 0;
+    static shz_memplan_t runs;
+    const size_t count = map_size / stride;
+    size_t i;
+    shz_memplan_init(&runs);
     for (i = 0; i < count; ++i) {
         const EFI_MEMORY_DESCRIPTOR *d = K64_DESC(map, i, stride);
-        if (!k64_usable(d) && K64_END(d) > from && d->physical_start < cur) {
-            cur = d->physical_start > from ? d->physical_start : from;
-            *stop = d;
-        }
+        if (k64_usable(d) && d->physical_start < (1ull << 32))
+            shz_memplan_add(&runs, d->physical_start, K64_END(d) < (1ull << 32) ? K64_END(d) : 1ull << 32);
     }
-    if (!*stop)
-        for (i = 0; i < count; ++i)
-            if (K64_DESC(map, i, stride)->physical_start == cur)
-                *stop = K64_DESC(map, i, stride);
-    return cur;
-}
-
-/* ram_size for Kernel64 from a memory map: 2 MiB aligned, capped at the kernel's limit,
- * 0 when [0x1000, 0x8000) (boot structures) is not usable. */
-static uint64_t k64_ram_from_map(const void *map, size_t map_size, size_t stride, uint64_t *run_top,
-                                 const EFI_MEMORY_DESCRIPTOR **stop)
-{
-    const size_t count = map_size / stride;
-    const EFI_MEMORY_DESCRIPTOR *low_stop;
-    uint64_t top = k64_run(map, count, stride, K64_KERNEL_PA, stop), ram = top & ~0x1fffffull;
-    *run_top = top;
-    if (k64_run(map, count, stride, K64_LOW_PA, &low_stop) < K64_LOW_PA + ((uint64_t)K64_LOW_PAGES << 12))
-        return 0;
-    return ram > K64_RAM_MAX ? K64_RAM_MAX : ram;
+    for (i = 0; i < count; ++i) {
+        const EFI_MEMORY_DESCRIPTOR *d = K64_DESC(map, i, stride);
+        if (!k64_usable(d))
+            shz_memplan_remove(&runs, d->physical_start, K64_END(d));
+    }
+    return shz_memplan_solve(&runs, cap, K64_RAM_MIN, K64_INITRD_PA, isize, plan);
 }
 
 static EFI_STATUS get_memory_map_copy(EFI_BOOT_SERVICES *bs, void **map, size_t *size, size_t *stride)
@@ -759,11 +744,10 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     EFI_ALLOCATE_PAGES_FN allocate_pages = (EFI_ALLOCATE_PAGES_FN)bs->allocate_pages;
     EFI_STALL_FN stall = (EFI_STALL_FN)bs->stall;
     EFI_FILE_PROTOCOL *root = 0, *kfile = 0, *ifile = 0, *cfile = 0;
-    const EFI_MEMORY_DESCRIPTOR *stop = 0;
     shz_bootinfo_t *bi = (shz_bootinfo_t *)(uintptr_t)SHZ_BOOTINFO_GPA;
     uint64_t *pml4 = (uint64_t *)(uintptr_t)0x1000, *pdpt_lo = (uint64_t *)(uintptr_t)0x2000,
              *pd = (uint64_t *)(uintptr_t)0x3000, *pdpt_hi = (uint64_t *)(uintptr_t)0x4000;
-    uint64_t csize = 0, addr, run_top = 0, t0, t1;
+    uint64_t csize = 0, addr, t0, t1;
     void *map = 0;
     size_t map_size = 0, stride = 0, i;
     EFI_GOP *gop = 0;
@@ -850,41 +834,17 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         root->close(root);
         return k64_refuse("GetMemoryMap() failed", status);
     }
-    g_k64.ram_size = k64_ram_from_map(map, map_size, stride, &run_top, &stop);
-    say("Kernel64 direct boot: usable RAM from 1 MiB runs to ");
-    say_hex(run_top);
-    if (stop) {
-        say(", ended by ");
-        say_desc(stop);
-    } else {
-        say(", ended by a hole in the memory map");
-    }
-    say("; Kernel64 RAM would be [0, ");
-    say_dec(g_k64.ram_size >> 20);
-    say(" MiB) (2 MiB aligned, at most 256 MiB).\n");
-    if (!g_k64.ram_size || g_k64.ram_size < K64_RAM_MIN ||
-        K64_INITRD_PA + g_k64.isize > g_k64.ram_size) {
-        const size_t count = map_size / stride;
-        uint64_t best_start = 0, best_end = 0;
-        const EFI_MEMORY_DESCRIPTOR *ignored;
-        for (i = 0; i < count; ++i) {
-            const EFI_MEMORY_DESCRIPTOR *d = K64_DESC(map, i, stride);
-            if (k64_usable(d)) {
-                const uint64_t end = k64_run(map, count, stride, d->physical_start, &ignored);
-                if (end - d->physical_start > best_end - best_start) {
-                    best_start = d->physical_start;
-                    best_end = end;
-                }
-            }
-        }
-        say("REFUSED: Kernel64 owns guest-physical [0, ram_size) and is linked for 1 MiB, so it needs memory usable "
-            "after ExitBootServices from 1 MiB up to at least ");
-        say_dec((K64_INITRD_PA + g_k64.isize > K64_RAM_MIN ? K64_INITRD_PA + g_k64.isize : K64_RAM_MIN) >> 20);
-        say(" MiB (and [0x1000, 0x8000) for its boot structures). The largest usable range on this machine is [");
-        say_hex(best_start);
-        say(", ");
-        say_hex(best_end);
-        say(").\nNothing was started. Returning to firmware.\n");
+    if (!k64_plan(map, map_size, stride, K64_RAM_MAX, g_k64.isize, &g_k64.plan)) {
+        say("REFUSED: Kernel64 direct boot: ");
+        say(g_k64.plan.why);
+        say(" ");
+        say_hex(g_k64.plan.at);
+        if (!g_k64.plan.at_is_size)
+            say_owner(map, map_size, stride, g_k64.plan.at, g_k64.plan.at + 0x1000);
+        say(".\nKernel64 needs RAM usable after ExitBootServices at [0x1000, 0x8000) (boot structures), [1 MiB, 3 MiB) "
+            "(kernel image) and under its initial RAM image at 32 MiB, at least 8 MiB of its heap window [3 MiB, "
+            "15 MiB), and 64 MiB in all; other firmware holes are kept out of its allocators.\n"
+            "Nothing was started. Returning to firmware.\n");
         bs->free_pool(map);
         if (ifile)
             ifile->close(ifile);
@@ -892,6 +852,26 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         root->close(root);
         return EFI_OUT_OF_RESOURCES;
     }
+    g_k64.ram_size = g_k64.plan.ram;
+    say("Kernel64 direct boot: RAM [0, ");
+    say_dec(g_k64.ram_size >> 20);
+    say(" MiB) (2 MiB aligned, at most 256 MiB), ");
+    say_dec(g_k64.plan.count);
+    say(" firmware hole(s) below it");
+    for (i = 0; i < g_k64.plan.count; ++i) {
+        say("\n  firmware hole ");
+        say_hex(g_k64.plan.gpa[i]);
+        say(" size ");
+        say_hex(g_k64.plan.size[i]);
+        say_owner(map, map_size, stride, g_k64.plan.gpa[i], g_k64.plan.gpa[i] + g_k64.plan.size[i]);
+        say(g_k64.plan.gpa[i] < SHZ_K64_PMM_GPA ? ": fenced off in Kernel64's heap" :
+                                                   ": kept out of Kernel64's page allocator");
+    }
+    if (g_k64.plan.cut) {
+        say("\n  more than 16 holes: RAM ends below the hole at ");
+        say_hex(g_k64.plan.cut);
+    }
+    say(".\n");
 
     /* Fixed-address ranges: the firmware guarantees nothing live is there. */
     addr = K64_LOW_PA;
@@ -1059,8 +1039,7 @@ static __attribute__((noreturn)) void k64_halt(const char *why)
 static EFI_STATUS k64_launch(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
 {
     shz_bootinfo_t *bi = (shz_bootinfo_t *)(uintptr_t)SHZ_BOOTINFO_GPA;
-    const EFI_MEMORY_DESCRIPTOR *stop = 0;
-    uint64_t run_top = 0, ram;
+    uint64_t ram;
     EFI_STATUS status;
 
     say("Kernel64 direct boot: ExitBootServices, then Long Mode entry at 0xffffffff80100000 with RDI=0x7000.\n");
@@ -1074,18 +1053,22 @@ static EFI_STATUS k64_launch(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     __asm__ volatile("cli" ::: "memory");
     if (!g_handoff.boot_services_exited)
         k64_halt("ExitBootServices failed after it was attempted (Kernel64 not started)");
-    /* The final map is authoritative; it can only differ in boot-services memory, but check anyway. */
-    ram = k64_ram_from_map(g_handoff.memory_map, g_handoff.map_size, g_handoff.descriptor_size, &run_top, &stop);
-    if (ram > g_k64.ram_size)
-        ram = g_k64.ram_size;
-    if (ram < K64_RAM_MIN || K64_INITRD_PA + g_k64.isize > ram)
-        k64_halt("the final memory map no longer gives Kernel64 enough contiguous RAM from 1 MiB");
+    /* The final map is authoritative; it can only differ in boot-services memory, but plan again (never above the
+     * RAM planned before) and hand Kernel64 the holes of this final plan. */
+    if (!k64_plan(g_handoff.memory_map, g_handoff.map_size, g_handoff.descriptor_size, g_k64.ram_size, g_k64.isize,
+                  &g_k64.plan))
+        k64_halt(g_k64.plan.why);
+    ram = g_k64.plan.ram;
     bi->ram_size = ram;
+    zero((void *)(uintptr_t)SHZ_MEMHOLES_GPA, sizeof(shz_memholes_t));
+    shz_memholes_write((volatile shz_memholes_t *)(uintptr_t)SHZ_MEMHOLES_GPA, &g_k64.plan);
     com1_say("Shizuku boot manager: ExitBootServices done (");
     com1_hex(g_handoff.exit_calls);
     com1_say(" call(s)); Kernel64 RAM [0, ");
     com1_hex(ram);
-    com1_say("); entering Kernel64 at 0xffffffff80100000\r\n");
+    com1_say("); ");
+    com1_hex(g_k64.plan.count);
+    com1_say(" firmware hole(s) handed over at 0x6000; entering Kernel64 at 0xffffffff80100000\r\n");
     ((void (EFIAPI *)(uint64_t, uint64_t, uint64_t, uint64_t))(uintptr_t)K64_TRAMP_PA)(
         0x1000, K64_GDTR_PA, SHZ_BOOTINFO_GPA, K64_ENTRY);
     k64_halt("Kernel64 returned");
@@ -1121,6 +1104,68 @@ static int k64_image_present(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     return status != EFI_NOT_FOUND;         /* present but unreadable: let k64_boot report it */
 }
 
+/* BOOT.INI menu_timeout: a one-key menu on the firmware console (OVMF mirrors the console to COM1 and reads COM1
+ * as a keyboard). The choice applies to this boot only; no key within the timeout follows the policy file. */
+static void boot_menu(bootini_policy_t *policy)
+{
+    EFI_SIMPLE_TEXT_INPUT_PROTOCOL *in = (EFI_SIMPLE_TEXT_INPUT_PROTOCOL *)g_st->console_in;
+    EFI_STALL_FN stall = (EFI_STALL_FN)g_st->boot_services->stall;
+    EFI_INPUT_KEY key;
+    uint32_t tick, ticks = (uint32_t)policy->menu_timeout * 100u;
+    int mode = -1;
+    CHAR16 c = 0;
+
+    if (!in || !in->read_key_stroke) {
+        say("Boot manager menu: the firmware has no console input; following BOOT.INI.\n");
+        return;
+    }
+    if (in->reset)
+        in->reset(in, 0);                           /* forget keys typed before the menu was shown */
+    say("\nShizuku boot manager menu: press a key within ");
+    say_dec((uint64_t)policy->menu_timeout);
+    say(" seconds\n  A or Enter  BOOT.INI policy, mode=");
+    say(bootini_mode_name(policy->mode));
+    if (policy->mode == BOOT_MODE_AUTO)
+        say(policy->auto_kernel64 ? ": Supervisor with Intel VMX, otherwise Kernel64 direct, otherwise CSM"
+                                  : ": Supervisor with Intel VMX, otherwise CSM");
+    say("  (default)\n"
+        "  K           Kernel64 direct: the standalone Long Mode kernel, no Supervisor, no VMX\n"
+        "  C           CSM legacy BIOS: CSMWrap, then this medium's legacy boot menu\n"
+        "  S           Supervisor (needs Intel VMX)\n");
+    for (tick = 0; tick < ticks && mode < 0; ++tick) {
+        if (in->read_key_stroke(in, &key) != EFI_SUCCESS) {
+            stall(10000);
+            continue;
+        }
+        c = key.unicode_char >= 'A' && key.unicode_char <= 'Z' ? (CHAR16)(key.unicode_char + 32) : key.unicode_char;
+        if (c == 'a' || c == '\r' || c == '\n')
+            mode = policy->mode;
+        else if (c == 'k')
+            mode = BOOT_MODE_KERNEL64;
+        else if (c == 'c')
+            mode = BOOT_MODE_CSM;
+        else if (c == 's')
+            mode = BOOT_MODE_SUPERVISOR;
+    }
+    if (mode < 0) {
+        say("Boot manager menu: no key within ");
+        say_dec((uint64_t)policy->menu_timeout);
+        say(" seconds; BOOT.INI mode=");
+        say(bootini_mode_name(policy->mode));
+        say(".\n");
+        return;
+    }
+    say("Boot manager menu: key '");
+    {
+        char text[2] = {c == '\r' || c == '\n' ? 'A' : (char)(c - 32), 0};
+        say(text);
+    }
+    say("': mode=");
+    say(bootini_mode_name(mode));
+    say(" for this boot.\n");
+    policy->mode = mode;
+}
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 {
     EFI_BOOT_SERVICES *bs;
@@ -1149,6 +1194,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     status = load_boot_policy(image, bs, &g_policy);
     if (EFI_ERROR(status))
         return status;
+    if (g_policy.menu_timeout)
+        boot_menu(&g_policy);
     if (g_policy.mode == BOOT_MODE_CSM)
         return csm_boot(image, bs, &g_policy, "mode=csm");
 

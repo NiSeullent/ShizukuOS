@@ -20,6 +20,10 @@ isolinux/mboot.c32, agent C3).
 ESP layout: \\EFI\\BOOT\\BOOTX64.EFI (Shizuku UEFI loader), \\EFI\\SHIZUKU\\BOOT.INI (mode = kernel64),
 \\EFI\\SHIZUKU\\CSMWRAP.EFI (when built), \\SHZDOS\\KERNEL64S.BIN, WIN64.IMG, DISK.IMG (DOS16), KERNEL32.BIN, KERNEL64.BIN,
 K64STUB.ELF (Multiboot stub for a BIOS boot loader). Nothing from Microsoft is ever included.
+Legacy BIOS boot of the installed disk (agent C3): the pinned syslinux 6.04 (upstream/manifest.json "syslinux") is
+installed into esp.img on the host: its FAT32 boot sector (which GPTMBR.BIN chains to) loads \\syslinux\\ldlinux.sys,
+and \\syslinux\\syslinux.cfg boots Kernel64 by default (mboot.c32 \\SHZDOS\\K64STUB.ELF --- KERNEL64S.BIN --- WIN64.IMG)
+or DOS16 (memdisk \\SHZDOS\\DISK.IMG). --no-bios-boot leaves the ESP boot sector as mkfs.fat's non-system stub.
 
 Inputs are the outputs of kbuild.py, win64/build.py, dos16/build.py, supervisor/build.py and (optional) csm/build.py;
 `--build` runs the missing ones first.
@@ -148,6 +152,75 @@ def build_esp(members, size_mib):
     return data
 
 
+SYSLINUX_MODULES = ("libcom32.c32", "libutil.c32", "menu.c32", "mboot.c32")
+SYSLINUX_CFG = (
+    "# ShizukuDOS 10 installed system: legacy BIOS boot menu (written by install/mkpayload.py).\r\n"
+    "# GPT protective MBR (GPTMBR.BIN) -> this ESP's syslinux boot sector -> ldlinux.sys -> this file.\r\n"
+    "SERIAL 0 115200\r\n"
+    "UI menu.c32\r\n"
+    "PROMPT 0\r\n"
+    "TIMEOUT 50\r\n"
+    "MENU TITLE ShizukuDOS 10 (installed)\r\n"
+    "DEFAULT kernel64\r\n"
+    "LABEL kernel64\r\n"
+    "  MENU LABEL ^Kernel64 + Win64 runtime\r\n"
+    "  KERNEL mboot.c32\r\n"
+    "  APPEND /SHZDOS/K64STUB.ELF --- /SHZDOS/KERNEL64S.BIN --- /SHZDOS/WIN64.IMG\r\n"
+    "LABEL dos16\r\n"
+    "  MENU LABEL ^DOS16 - FreeDOS profile (disk image in RAM)\r\n"
+    "  KERNEL memdisk\r\n"
+    "  INITRD /SHZDOS/DISK.IMG\r\n"
+    "  APPEND harddisk\r\n"
+).encode("ascii")
+
+
+def syslinux_members():
+    """Files of the pinned syslinux that go into \\syslinux on the ESP (ldlinux.sys/.c32 come from the installer)."""
+    up = shzlib.ensure_deb_upstream("syslinux")
+    root = up["root"]
+    members = [(f"syslinux/{name}", (root / "usr/lib/syslinux/modules/bios" / name).read_bytes())
+               for name in SYSLINUX_MODULES]
+    members.append(("syslinux/memdisk", (root / "usr/lib/syslinux/memdisk").read_bytes()))
+    members.append(("syslinux/syslinux.cfg", SYSLINUX_CFG))
+    return members, root / "usr/bin/syslinux"
+
+
+def install_syslinux(esp_data, installer):
+    """Runs the pinned mtools-based syslinux installer on the ESP placed at LBA ESP_FIRST_LBA of a scratch disk, i.e.
+    exactly where SHZSETUP writes it (the geometry tools/build_shizuku_se_disk.py boots), and returns the partition's
+    bytes: FAT32 boot sector with the syslinux loader, \\syslinux\\ldlinux.sys and ldlinux.c32 added."""
+    offset = ESP_FIRST_LBA * 512
+    scratch = OUT / "syslinux-scratch.img"
+    tmp = OUT / "syslinux-tmp"
+    tmp.mkdir(exist_ok=True)
+    with open(scratch, "wb") as fh:
+        fh.truncate(offset + len(esp_data))
+        fh.seek(offset)
+        fh.write(esp_data)
+    env = mtools_env()
+    env["TMPDIR"] = str(tmp)
+    run([str(installer), "--install", "--directory", "/syslinux", "--offset", str(offset), str(scratch)], env=env)
+    with open(scratch, "rb") as fh:
+        head = fh.read(offset)
+        data = fh.read()
+    scratch.unlink()
+    shutil.rmtree(tmp, ignore_errors=True)
+    if head != bytes(offset):
+        raise SystemExit("the syslinux installer wrote outside the ESP")
+    if data[3:11] != b"SYSLINUX" or struct.unpack_from("<I", data, 0x1C)[0] != ESP_FIRST_LBA or data[510:512] != b"\x55\xaa":
+        raise SystemExit("esp.img: the syslinux boot sector was not installed as expected")
+    return data
+
+
+def read_esp_file(img, path):
+    out = OUT / "esp-readback.bin"
+    out.unlink(missing_ok=True)
+    run(["mcopy", "-n", "-i", str(img), f"::/{path}", str(out)], env=mtools_env())
+    data = out.read_bytes()
+    out.unlink()
+    return data
+
+
 def sparse_image(data):
     """SHZSIMG1: header, chunk table {u64 first_block, u32 blocks, u32 0}, chunk data. Zero blocks are omitted."""
     assert len(data) % SIMG_BLOCK == 0
@@ -217,11 +290,17 @@ def system_tree(runtime, pkgs):
 
 
 def main():
+    global OUT, PAYLOAD                 # --out rebinds the module-level output paths used by the helpers
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", action="store_true", help="run the input builds that have no output yet")
     ap.add_argument("--esp-mib", type=int, default=128)
     ap.add_argument("--answer", default=str(HERE / "shzsetup.ini"), help="answer file to pack (default: install/shzsetup.ini)")
+    ap.add_argument("--no-bios-boot", action="store_true",
+                    help="do not install syslinux into the ESP (the installed disk then boots on UEFI only)")
+    ap.add_argument("--out", type=Path, default=OUT,
+                    help=f"output directory (default {OUT}); the install media use their own, with the shipped answer file")
     args = ap.parse_args()
+    OUT, PAYLOAD = args.out.resolve(), args.out.resolve() / "payload"
     for tool in ("mkfs.fat", "mmd", "mcopy", "fsck.fat", "nasm"):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
@@ -249,7 +328,19 @@ def main():
                     ("SHZDOS/KERNEL32.BIN", INPUTS["kernel32"].read_bytes()),
                     ("SHZDOS/KERNEL64.BIN", INPUTS["kernel64"].read_bytes()),
                     ("SHZDOS/K64STUB.ELF", INPUTS["stub"].read_bytes())]
+    bios_boot = not args.no_bios_boot
+    if bios_boot:
+        sysl_members, installer = syslinux_members()
+        esp_members += sysl_members
     esp = build_esp(esp_members, args.esp_mib)
+    if bios_boot:
+        esp = install_syslinux(esp, installer)
+        (OUT / "esp.img").write_bytes(esp)
+        check = subprocess.run(["fsck.fat", "-n", str(OUT / "esp.img")], capture_output=True, text=True)
+        if check.returncode != 0:
+            raise SystemExit("fsck.fat rejects esp.img after the syslinux install:\n" + check.stdout + check.stderr)
+        for name in ("ldlinux.sys", "ldlinux.c32"):         # written by the installer: listed with their final bytes
+            esp_members.append((f"syslinux/{name}", read_esp_file(OUT / "esp.img", f"syslinux/{name}")))
     sim, nchunks = sparse_image(esp)
     assert expand_sparse(sim) == esp, "sparse image does not round-trip"
     (PAYLOAD / "ESP.SIM").write_bytes(sim)
@@ -274,7 +365,7 @@ def main():
         "mbr": {"file": "GPTMBR.BIN", "bytes": 440, "sha256": sha256_file(mbr)},
         "esp": {"image": "ESP.SIM", "bytes": len(esp), "sha256": sha256(esp), "sparse_chunks": nchunks,
                 "first_lba": ESP_FIRST_LBA, "fat": "FAT32", "label": ESP_LABEL, "volume_id": ESP_VOLID,
-                "csmwrap": csm_present,
+                "csmwrap": csm_present, "bios_boot": "syslinux 6.04 (pinned)" if bios_boot else None,
                 "files": [{"path": "/" + p, "bytes": len(d), "sha256": sha256(d)} for p, d in esp_members]},
         "system": {"archive": "SYSTEM.ARC", "archive_sha256": sha256(arc), "label": SYS_LABEL,
                    "filesystem": "ShizukuFS v1 (ext4 on-disk format)",
@@ -302,7 +393,7 @@ def main():
         "outputs": {p.name: {"bytes": p.stat().st_size, "sha256": sha256_file(p)}
                     for p in [OUT / "esp.img", OUT / "INSTALL.IMG", OUT / "shzsetup.ini", *sorted(PAYLOAD.iterdir())]},
         "esp_files": len(esp_members), "system_files": len(files), "system_dirs": len(dirs),
-        "driver_packages": [n for n, _, _ in pkgs], "csmwrap_included": csm_present,
+        "driver_packages": [n for n, _, _ in pkgs], "csmwrap_included": csm_present, "bios_boot": bios_boot,
     }
     shzlib.write_json(OUT / "mkpayload-result.json", receipt)
     print(json.dumps({k: v["sha256"] for k, v in receipt["outputs"].items()}, indent=1))
