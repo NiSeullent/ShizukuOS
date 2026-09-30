@@ -1,0 +1,57 @@
+Excerpts from guest serial logs (QEMU TCG, 2026-09-30), copied verbatim from the runs that found each wall. The per-run JSON files in
+this directory keep the first 250 log lines of the final runs only; these lines come from earlier runs whose logs were overwritten.
+
+wall 3  (no NUL device), run with 0001 minus the NUL hunk, default arguments:
+  [user electron.exe pid 60] [60:0930/073926.188:FATAL:electron\shell\common\node_bindings.cc:710] Unable to open nul device needed for initialization,aborting startup. As a workaround, try starting with --no-stdio-init
+
+wall 4  (FileAllInformation), same run series, after NUL:
+  K64 sys: pid 60 NtQueryInformationFile (0x21) -> c0000003 (a1=170 a2=7ffffffdd750)
+  K64 fs: pid 60 NtCreateFile \??\D:\e1min\resources\app\package.json.js -> c0000034
+  K64 fs: pid 60 NtCreateFile \??\D:\e1min\resources\app\package.json.json -> c0000034
+  K64 fs: pid 60 NtCreateFile \??\D:\e1min\resources\app\package.json.node -> c0000034
+
+wall 2  (growable function tables), run with the 19 loader imports supplied:
+  [user electron.exe pid 60] K32 trace: GetProcAddress miss: ntdll.dll!RtlAddGrowableFunctionTable
+  [user electron.exe pid 60] K32 trace: GetProcAddress miss: ntdll.dll!RtlDeleteGrowableFunctionTable
+  K64 exc: pid 60 tid 64 first-chance c0000005 at 0 (8 0) rsp 7ffffffde758
+  K64 exc:   stack[0] electron.exe+b1d72d
+
+wall 5  (RtlGenRandom), node mode:
+  [user electron.exe pid 60] K32 trace: GetProcAddress miss: advapi32.dll!SystemFunction036
+  [user electron.exe pid 60] K32 trace: ExitProcess code=0x3 caller=0x7ff63329624c image=0x7ff6301f0000 rva=0x30a624c
+  (electron.exe+0x30a624c is the C runtime's exit helper called by abort(): mov ecx,3 / call _exit)
+
+wall 7  (home directory), node mode, step "os":
+  K64 exc: pid 60 tid 64 first-chance 80000003 at electron.exe+6a1328a (0 0) rsp 7ffffffde100
+  K64 exc:   stack[92] userenv.dll+0
+
+wall 8  (iphlpapi), node mode, step "net loopback echo", before K5's iphlpapi:
+  K64 ldr: iphlpapi.dll not loaded: LoadLibrary needs iphlpapi.dll: DLL not found [c0000135]
+  K64 exc: pid 60 tid 64 first-chance 80000003 at electron.exe+6a1328a (0 0) rsp 7ffffffdcb80
+
+wall 9  (pipe prefix), node mode, step "child_process.spawnSync":
+  [user electron.exe pid 60] K32 trace: CreateNamedPipeW failed: \\?\pipe\uv\18446744073709551615-60 error=0x7b extra=0x400c0003
+  SHZ-E1-NODE step 9 FAILED: child_process.spawnSync (a process with a pipe): Error: spawnSync D:\e1min\electron.exe ENOENT
+
+wall 10 (stdio pipe access), after the prefix fix:
+  K64 sys: pid 60 NtCreateNamedPipeFile (0xa6) -> c0000022 (a1=7ffffffdc868 a2=801c0080)
+  [user electron.exe pid 60] K32 trace: CreateNamedPipeW failed: \\?\pipe\uv\18446744073709551615-60 error=0x5 extra=0x400c0001
+  K64 proc: pid 60 (electron.exe) creates pid 104: D:\e1min\electron.exe -e "process.stdout.write(\"child-e1\")"
+
+wall 11 (socket and IOCP), node mode, step "net loopback echo":
+  K64 sys: pid 60 NtSetInformationFile (0x22) class 30 -> c0000024 (a1=9c)
+  SHZ-E1-NODE step 7 FAILED: net loopback echo: Error: listen EBADF: bad file descriptor 127.0.0.1
+
+wall 13 (cpus, hostname):
+  K64 sys: pid 60 NtQuerySystemInformation (0x27) -> c0000003 (a1=8 a2=3c000053b80)
+  [user electron.exe pid 60] K32 trace: GetProcAddress miss: ws2_32.dll!GetHostNameW
+  SHZ-E1-NODE os: win32 x64 cpus=0 totalmem=3219128320 homedir=D:\e1home tmpdir=C:\TEMP
+
+wall 14 (TaskDialogIndirect):
+  [user electron.exe pid 60] K32 trace: GetProcAddress miss: comctl32.dll!0x159
+  K64 exc: pid 60 tid 64 first-chance 80000003 at electron.exe+6a1328a (0 0) rsp 7ffffffddca0
+  (comctl32 ordinal 345 = TaskDialogIndirect, from the Wine export table used by ELECTRON_TARGET.md section 11)
+
+wall 18 (AHCI), VSCodium, once in five runs:
+  K64 ahci: read lba 556758 failed (-4) is=0 tfd=50 serr=0
+  K64 ldr: vscodium.exe: page rva b58a000: read of 4096 bytes at file offset b588c00 failed

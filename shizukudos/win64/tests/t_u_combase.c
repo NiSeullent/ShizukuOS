@@ -10,6 +10,9 @@
 #include <objbase.h>
 #include "u_check.h"
 
+BOOL WINAPI RoOriginateError(HRESULT error, HSTRING message);                 /* roerrorapi.h (not in mingw 13) */
+BOOL WINAPI RoOriginateErrorW(HRESULT error, UINT length, PCWSTR message);
+
 #define ST_BOUNDS ((HRESULT)0x8000000B)
 #define ST_CHANGED_MODE ((HRESULT)0x80010106)
 
@@ -190,6 +193,26 @@ int main(void)
         U_CHECK("RoInitialize(RO_INIT_SINGLETHREADED) is S_OK and makes the main STA", RoInitialize(RO_INIT_SINGLETHREADED) == S_OK && CoGetApartmentType(&t, &q) == S_OK && t == APTTYPE_MAINSTA);
         RoUninitialize();
         U_CHECK("...and RoUninitialize leaves it", CoGetApartmentType(&t, &q) == (HRESULT)0x800401F0);
+    }
+    /* ---- WinRT activation (api-ms-win-core-winrt-l1-1-0), error origination ---- */
+    {
+        HSTRING cls = 0;
+        void *f = (void *)1;
+        IInspectable *insp = (IInspectable *)1;
+        static const GUID IID_ACT = { 0x00000035, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };   /* IActivationFactory */
+        WindowsCreateString(L"Windows.Networking.Connectivity.NetworkInformation", 50, &cls);
+        U_CHECK("RoGetActivationFactory before RoInitialize is CO_E_NOTINITIALIZED", RoGetActivationFactory(cls, &IID_ACT, &f) == (HRESULT)0x800401F0 && f == 0);
+        RoInitialize(RO_INIT_MULTITHREADED);
+        U_CHECK("RoGetActivationFactory(NetworkInformation) is REGDB_E_CLASSNOTREG (no WinRT class is registered)", RoGetActivationFactory(cls, &IID_ACT, &f) == (HRESULT)0x80040154 && f == 0);
+        U_CHECK("RoActivateInstance the same, out cleared", RoActivateInstance(cls, &insp) == (HRESULT)0x80040154 && insp == 0);
+        U_CHECK("RoGetActivationFactory(NULL class) is E_INVALIDARG, NULL out is E_POINTER", RoGetActivationFactory(0, &IID_ACT, &f) == E_INVALIDARG && RoGetActivationFactory(cls, &IID_ACT, 0) == E_POINTER);
+        U_CHECK("RoOriginateError / RoOriginateErrorW report FALSE (no error-info store records them)", !RoOriginateError(E_FAIL, cls) && !RoOriginateErrorW(E_FAIL, 3, L"abc"));
+        RoUninitialize();
+        WindowsDeleteString(cls);
+        {
+            HMODULE c = LoadLibraryW(L"api-ms-win-core-winrt-l1-1-0.dll");
+            U_CHECK("api-ms-win-core-winrt-l1-1-0 exports RoGetActivationFactory and RoActivateInstance through combase", c && GetProcAddress(c, "RoGetActivationFactory") && GetProcAddress(c, "RoGetActivationFactory") == GetProcAddress(GetModuleHandleW(L"combase.dll"), "RoGetActivationFactory") && GetProcAddress(c, "RoActivateInstance") == GetProcAddress(GetModuleHandleW(L"combase.dll"), "RoActivateInstance"));
+        }
     }
     return u_finish("t_u_combase");
 }

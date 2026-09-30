@@ -313,4 +313,11 @@ DLLAPI VOID WINAPI MapGenericMask(PDWORD AccessMask, PGENERIC_MAPPING GenericMap
     *AccessMask = m & ~(DWORD)(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
-DLLAPI ULONG WINAPI LsaNtStatusToWinError(NTSTATUS Status) { return RtlNtStatusToDosError(Status); }
+/* RPC runtime statuses (facility 2, 0xC002xxxx) map onto the RPC_S_* Win32 codes by their low word (RPC_S_INVALID_STRING_BINDING
+ * 1700 = RPC_NT_INVALID_STRING_BINDING 0xC0020001, ... RPC_S_SERVER_UNAVAILABLE 1722 = 0xC0020017), as RtlNtStatusToDosError
+ * does on Windows; ntdll's table here does not cover that facility, so the rule lives with LsaNtStatusToWinError. */
+DLLAPI ULONG WINAPI LsaNtStatusToWinError(NTSTATUS Status)
+{
+    if (((ULONG)Status & 0xFFFF0000u) == 0xC0020000u && (Status & 0xFFFF) >= 1 && (Status & 0xFFFF) <= 0x7F) return 1699 + (Status & 0xFFFF);
+    return RtlNtStatusToDosError(Status);
+}

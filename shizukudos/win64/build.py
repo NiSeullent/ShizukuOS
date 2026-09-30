@@ -20,6 +20,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import shzlib  # noqa: E402
 from shzlib import BUILD, REPO, SHZ, run, sha256_file  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
+import verres  # noqa: E402  (VS_VERSIONINFO resource of every built image)
 
 W64 = SHZ / "win64"
 OUT = BUILD / "win64"
@@ -33,6 +35,12 @@ COMMON = ["-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin"
           "-Wno-unused-function", "-Wno-unused-parameter", "-Wno-cast-function-type"]
 NTDLL_BASE = "0x7ffb00000000"
 K32_BASE = "0x7ffb10000000"
+RES = OUT / "res"                       # generated version resources (tools/verres.py)
+
+
+def version_obj(filename, description, filetype=verres.VFT_DLL, fmt="coff", extra_rc=None):
+    """The compiled VS_VERSIONINFO of one image (every DLL and EXE gets one; see tools/verres.py)."""
+    return verres.compile_version(RES, filename, description, filetype, fmt=fmt, extra_rc=extra_rc)
 
 
 def syscall_list():
@@ -102,8 +110,8 @@ def build_ntdll():
     dll = OUT / "ntdll.dll"
     cmd = [CC, *COMMON, "-DSHZ_NTDLL_BUILD", "-shared", "-nostdlib", "-Wl,--entry,ShzNtdllEntry",
            f"-Wl,--image-base,{NTDLL_BASE}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
-           "-I", W64 / "include", *src, W64 / "ntdll" / "ntdll_asm.S", OUT / "nt_stubs.S", version_resource(W64 / "ntdll" / "ntdll.rc"),
-           OUT / "ntdll.def", "-lgcc", "-o", dll]
+           "-I", W64 / "include", *src, W64 / "ntdll" / "ntdll_asm.S", OUT / "nt_stubs.S", OUT / "ntdll.def",
+           version_obj("ntdll.dll", "NT Layer DLL"), "-lgcc", "-o", dll]
     run(cmd)
     run([DLLTOOL, "-d", OUT / "ntdll.def", "-l", OUT / "libntdll.a", "--kill-at"])
     return dll, cmd, names
@@ -128,7 +136,7 @@ def build_kernel32(ntdll_names):
     dll = OUT / "kernel32.dll"
     cmd = [CC, *COMMON, "-shared", "-nostdlib", "-Wl,--entry,ShzKernel32Entry", f"-Wl,--image-base,{K32_BASE}",
            "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at", "-I", W64 / "include", *src,
-           version_resource(W64 / "kernel32" / "kernel32.rc"), OUT / "kernel32.def", "-L", OUT, "-lntdll", "-lgcc", "-o", dll]
+           OUT / "kernel32.def", version_obj("kernel32.dll", "Windows NT BASE API Client DLL"), "-L", OUT, "-lntdll", "-lgcc", "-o", dll]
     run(cmd)
     run([DLLTOOL, "-d", OUT / "kernel32.def", "-l", OUT / "libkernel32.a", "--kill-at"])
     return dll, cmd, names
@@ -141,7 +149,8 @@ DLL_STRIDE = 0x01000000
 def discover_modules():
     """Extra system DLLs: every win64/dlls/<name>/ containing *.c builds <name>.dll (+ lib<name>.a) and is packed as
     \\SHZ\\SYS64\\<name>.dll. Exported functions are the DLLAPI-marked definitions. Optional module.json:
-    {"libs": ["advapi32"], "forwarders": ["Name = other.Name"]} lists other modules this one imports from."""
+    {"libs": ["advapi32"], "forwarders": ["Name = other.Name"], "description": "..."} lists other modules this one imports
+    from; "description" is the FileDescription of its version resource (default: "<name>.dll")."""
     root = W64 / "dlls"
     found = []
     for d in sorted(root.glob("*")) if root.is_dir() else []:
@@ -168,7 +177,8 @@ def build_modules():
             dll = OUT / f"{name}.dll"
             cmd = [CC, *COMMON, "-DBUILDING_" + name.upper(), "-shared", "-nostdlib", f"-Wl,--entry,{'DllMain' if has_main else '0'}",
                    f"-Wl,--image-base,{base:#x}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
-                   "-I", W64 / "include", "-I", d, *src, OUT / f"{name}.def", "-L", OUT,
+                   "-I", W64 / "include", "-I", d, *src, OUT / f"{name}.def",
+                   version_obj(f"{name}.dll", cfg.get("description", f"{name}.dll")), "-L", OUT,
                    *[f"-l{l}" for l in ["kernel32", "ntdll", *cfg.get("libs", [])]], "-lgcc", "-o", dll]
             run(cmd)
             run([DLLTOOL, "-d", OUT / f"{name}.def", "-l", OUT / f"lib{name}.a", "--kill-at"])
@@ -193,12 +203,8 @@ def build_apps(module_libs=()):
     for src in sorted((W64 / "tests").glob("t_*.c")):
         name = src.stem
         exe = OUT / f"{name}.exe"
-        extra = []
         rc = src.with_suffix(".rc")                       # optional resource script (e.g. a VERSIONINFO fixture)
-        if rc.exists():
-            res = OUT / f"{name}_res.o"
-            run([WINDRES, "-O", "coff", "-o", res, rc])
-            extra.append(res)
+        extra = [version_obj(f"{name}.exe", f"Shizuku Win64 self-check {name}", verres.VFT_APP, extra_rc=rc if rc.exists() else None)]
         crt = W64 / "crt"
         delayed = DELAY_MODULES.get(name, ())
         libs = [(f"{l}_delay" if l in delayed else l) for l in module_libs]
@@ -219,6 +225,7 @@ def build_setup(module_libs=()):
     crt = W64 / "crt"
     cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
            "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", W64 / "setup", *src, crt / "shzcrt.c",
+           version_obj("SHZSETUP.EXE", "ShizukuDOS 10 Setup", verres.VFT_APP),
            "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
     run(cmd)
     return exe, cmd
@@ -237,6 +244,7 @@ def build_sys_apps(module_libs=()):
         crt = W64 / "crt"
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
                "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", d, *src, crt / "shzcrt.c",
+               version_obj(f"{d.name}.exe", f"ShizukuDOS 10 {d.name}", verres.VFT_APP),
                "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
         run(cmd)
         apps[d.name] = (exe, cmd)
@@ -267,7 +275,8 @@ def build_cxx_apps(module_libs=()):
         obj, exe = OUT / f"{name}.obj", OUT / f"{name}.exe"
         run([CLANGXX, *CXX_FLAGS, "-c", src, "-o", obj])
         cmd = [LLD_LINK, "/nologo", "/entry:ShzCxxStart", "/subsystem:console", "/nodefaultlib", "/base:0x140000000",
-               f"/out:{exe}", obj, *[OUT / f"lib{lib}.a" for lib in libs]]
+               f"/out:{exe}", obj, version_obj(f"{name}.exe", f"Shizuku Win64 self-check {name}", verres.VFT_APP, fmt="res"),
+               *[OUT / f"lib{lib}.a" for lib in libs]]
         run(cmd)
         apps[name] = (exe, cmd)
     return apps
@@ -319,6 +328,7 @@ def build_ntdrv_app(module_libs, name="t_ntdrv"):
     exe = OUT / f"{name}.exe"
     run([CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
          "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c",
+         version_obj("t_ntdrv.exe", "Shizuku Win64 self-check t_ntdrv", verres.VFT_APP),
          "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe])
     return exe
 
