@@ -478,13 +478,25 @@ static void test_options_and_binding(void)
     closesocket(s2); closesocket(s3); closesocket(l);
 }
 
+/* TIME_WAIT entries whose remote port is `port` (host order): the active closers of that listener's connections. */
+static unsigned tw_clients_of(unsigned short port)
+{
+    enum { MAXR = 8192 };
+    struct shz_tcp_row *rows = xmalloc(MAXR * sizeof *rows);
+    ULONG ret = 0, i, n = 0;
+    if (NtShzNetQuery(2, rows, MAXR * sizeof *rows, &ret) == 0)
+        for (i = 0; i < ret / sizeof *rows; ++i)
+            if (rows[i].state == TCPS_TIME_WAIT_T && rows[i].rport == port) ++n;
+    free(rows);
+    return n;
+}
+
 static void test_many_sockets(void)
 {
     enum { N = 100 };
     unsigned short port;
     SOCKET l = make_listener(&port, 128), c[N], a[N];
     int i, ok = 0, echoed = 0;
-    unsigned tw_before = net_state_count(TCPS_TIME_WAIT_T);
     for (i = 0; i < N; ++i) { c[i] = INVALID_SOCKET; a[i] = INVALID_SOCKET; }
     for (i = 0; i < N; ++i) {
         c[i] = tcp_connect_lo(port);
@@ -503,11 +515,13 @@ static void test_many_sockets(void)
     for (i = 0; i < N; ++i) { closesocket(c[i]); }
     for (i = 0; i < N; ++i) { char b; recv(a[i], &b, 1, 0); closesocket(a[i]); }
     {   /* The passive side's FINs reach the active closers through the loopback thread, which may not have run since the
-         * last closesocket(): wait up to 5 s for the census to settle instead of reading it once. */
+         * last closesocket(), and TIME_WAIT entries of the earlier tests expire (2 MSL) all the while, so the census
+         * total can even fall: count only this listener's clients, and wait up to 5 s for them. */
         const DWORD t0 = GetTickCount();
-        while (net_state_count(TCPS_TIME_WAIT_T) < tw_before + N / 2 && GetTickCount() - t0 < 5000) Sleep(10);
+        while (tw_clients_of(port) < N / 2 && GetTickCount() - t0 < 5000) Sleep(10);
     }
-    CHECK(net_state_count(TCPS_TIME_WAIT_T) >= tw_before + N / 2, "active closers are in TIME_WAIT (%u now, %u before)", (unsigned)net_state_count(TCPS_TIME_WAIT_T), tw_before);
+    CHECK(tw_clients_of(port) >= N / 2, "active closers are in TIME_WAIT (%u of %d clients of port %u; %u TIME_WAIT in all)",
+          tw_clients_of(port), N, port, (unsigned)net_state_count(TCPS_TIME_WAIT_T));
     closesocket(l);
 }
 
