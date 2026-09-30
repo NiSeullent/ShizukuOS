@@ -2,21 +2,25 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Build WebKit's JavaScriptCore shell (jsc.exe) for the ShizukuDOS Kernel64 Win64 runtime (docs/shizukudos10/WEBKIT.md).
 
+Toolchain: the WebKit toolchain of webkit/deps/toolchain.py (clang 18 for x86_64-w64-mingw32, a mingw-w64 v13 sysroot
+built for the UCRT, libc++/libc++abi/libunwind 18 as DLLs), shared with WebCore (agent W3). build.py runs it when its
+output is missing.
+
 Inputs
   build/upstream/webkit, build/upstream/icu   pinned upstream trees (shizukudos/upstream/manifest.json), fetched shallow
-                                              and sparse if absent; never edited except by the patches below
+                                              (and sparse where the manifest says so) if absent; never edited except by
+                                              the patches below
   webkit/patches/*.patch                      local changes to the WebKit tree, applied in name order after the touched
                                               files are restored to the pinned commit (so a rebuild starts clean)
-  webkit/toolchain-mingw-clang.cmake          clang --target=x86_64-w64-windows-gnu (WEBKIT.md "Toolchain")
-  webkit/compat/*.c                           link glue between mingw-w64 and the Shizuku runtime
-  build/shizukudos/win64                      the Shizuku runtime (win64/build.py): its import libraries are searched
-                                              first and every import of the result is checked against its DLLs' exports
+  build/shizukudos/win64                      the Shizuku runtime (win64/build.py): every import of the result is
+                                              checked against its DLLs' exports (webkit/importcheck.py)
 
 Outputs (build/shizukudos/win64/webkit/)
-  icu-host/, icu-win64/install/  ICU 78.3: host tools, then static Win64 libraries with the full data
+  icu-host/, icu-win64/install/  ICU (manifest pin): host tools, then static Win64 libraries with the full data
   jsc-<config>/                  the CMake/Ninja tree (PORT=JSCOnly)
-  out/jsc.exe, out/wkbatch.exe   what tests/run_k64_webkit.py copies to the guest's D:\\WK
-  build-result.json              commands, versions, patch list, import check
+  out/                           jsc.exe, wkbatch.exe and the runtime DLLs they need (libc++.dll, libunwind.dll):
+                                 what tests/run_k64_webkit.py copies to the guest's D:\\WK
+  build-result.json              commands, versions, patch list, import check, licence table
 
 Configurations (--config)
   cloop   M1: ENABLE_JIT=OFF, ENABLE_C_LOOP=ON, no WebAssembly, static JavaScriptCore (default)
@@ -42,8 +46,11 @@ W64OUT = BUILD / "win64"
 OUT = W64OUT / "webkit"
 UPSTREAM = REPO / "build" / "upstream"
 MANIFEST = REPO / "shizukudos" / "upstream" / "manifest.json"
-TARGET = "x86_64-w64-windows-gnu"
-UCRT_DEFS = ["-D_UCRT", "-D__MSVCRT_VERSION__=0xE00", "-D_WIN32_WINNT=0x0A00"]
+TC = BUILD / "webkit" / "toolchain"                    # deps/toolchain.py output
+TRIPLE = "x86_64-w64-mingw32"
+CC = TC / "bin" / f"{TRIPLE}-clang"
+CXX = TC / "bin" / f"{TRIPLE}-clang++"
+RUNTIME_DLLS = ["libc++.dll", "libunwind.dll"]         # in the sysroot's bin/
 JOBS = max(1, int(os.environ.get("SHZ_WEBKIT_JOBS", str(os.cpu_count() or 2))))
 
 CONFIGS = {
@@ -65,19 +72,24 @@ def git(tree, *args, check=True):
 
 
 def ensure_tree(name):
-    """Shallow, sparse fetch of the pinned commit into build/upstream/<name>; re-applies the manifest's sparse paths
-    when they changed and verifies HEAD (as wineport/build.py does for its trees)."""
+    """Shallow fetch of the pinned commit into build/upstream/<name> (sparse when the manifest lists sparse_paths, which
+    are re-applied when they changed); a tree at another commit is fetched again. Verifies HEAD."""
     s = spec(name)
     dest = UPSTREAM / name
+    sparse = s.get("sparse_paths")
+    if (dest / ".git").exists() and git(dest, "rev-parse", "HEAD", check=False) != s["commit"]:
+        shutil.rmtree(dest)
     if not (dest / ".git").exists():
         dest.mkdir(parents=True, exist_ok=True)
         git(dest, "init", "-q")
         git(dest, "remote", "add", "origin", s["repository"])
-        run(["git", "-C", dest, "fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", s["commit"]], timeout=3600)
-        git(dest, "sparse-checkout", "set", "--no-cone", *s["sparse_paths"])
+        run(["git", "-C", dest, "fetch", "-q", "--depth", "1", *(["--filter=blob:none"] if sparse else []), "origin",
+             s["commit"]], timeout=3600)
+        if sparse:
+            git(dest, "sparse-checkout", "set", "--no-cone", *sparse)
         git(dest, "checkout", "-q", "FETCH_HEAD")
-    elif git(dest, "sparse-checkout", "list", check=False).splitlines() != s["sparse_paths"]:
-        git(dest, "sparse-checkout", "set", "--no-cone", *s["sparse_paths"])
+    elif sparse and git(dest, "sparse-checkout", "list", check=False).splitlines() != sparse:
+        git(dest, "sparse-checkout", "set", "--no-cone", *sparse)
     head = git(dest, "rev-parse", "HEAD")
     if head != s["commit"]:
         raise SystemExit(f"{name}: pinned {s['commit']} but {dest} is at {head}")
@@ -113,30 +125,36 @@ def apply_patches(tree):
     return [str(p.relative_to(REPO)) for p in patches]
 
 
-# ---------------------------------------------------------------- ICU
+# ---------------------------------------------------------------- toolchain and ICU
+def ensure_toolchain():
+    if not (CXX.exists() and (TC / "toolchain.cmake").exists() and all((TC / TRIPLE / "bin" / d).exists() for d in RUNTIME_DLLS)):
+        run([sys.executable, HERE / "deps" / "toolchain.py"], timeout=3 * 3600)
+    return json.loads((TC / "toolchain.json").read_text()) if (TC / "toolchain.json").exists() else {}
+
+
 def build_icu(icu_tree, log):
     """Host build (data tools), then the static Win64 libraries with the full data archive. Cached by a stamp."""
     src = icu_tree / "icu4c" / "source"
     host, cross = OUT / "icu-host", OUT / "icu-win64"
     prefix = cross / "install"
     stamp = prefix / ".shz-stamp"
-    key = json.dumps({"commit": spec("icu")["commit"], "defs": UCRT_DEFS, "v": 3})
+    key = json.dumps({"commit": spec("icu")["commit"], "toolchain": sha256_file(CXX), "v": 4})
     if stamp.exists() and stamp.read_text() == key:
         return prefix
     common = ["--disable-tests", "--disable-samples", "--disable-extras", "--disable-icuio", "--disable-layoutex"]
-    if not (host / "bin" / "icupkg").exists():
-        host.mkdir(parents=True, exist_ok=True)
+    hstamp = host / ".shz-commit"
+    if not (host / "bin" / "icupkg").exists() or not hstamp.exists() or hstamp.read_text() != spec("icu")["commit"]:
+        shutil.rmtree(host, ignore_errors=True)
+        host.mkdir(parents=True)
         run([src / "configure", *common], cwd=host, timeout=600, capture=True)
         run(["make", f"-j{JOBS}"], cwd=host, timeout=3600, capture=True)
+        hstamp.write_text(spec("icu")["commit"])
     shutil.rmtree(cross, ignore_errors=True)
     cross.mkdir(parents=True)
-    env = dict(os.environ, CC=f"clang --target={TARGET}", CXX=f"clang++ --target={TARGET}", AR="llvm-ar", RANLIB="llvm-ranlib",
-               CPPFLAGS=" ".join(UCRT_DEFS), CFLAGS="-O2",
-               # GCC's mingw target predefines this as 0 and libstdc++ was built so (type_info::operator== is out of line
-               # in tinfo.o); clang does not, and ICU's C++17 objects then carry their own copy: duplicate symbol at link
-               CXXFLAGS="-O2 -std=c++17 -D__GXX_TYPEINFO_EQUALITY_INLINE=0")
-    cfg = [src / "configure", f"--host={TARGET.replace('windows-gnu', 'mingw32')}", f"--with-cross-build={host}",
-           "--enable-static", "--disable-shared", "--with-data-packaging=static", "--disable-tools", f"--prefix={prefix}", *common]
+    env = dict(os.environ, CC=str(CC), CXX=str(CXX), AR="llvm-ar", RANLIB="llvm-ranlib", CFLAGS="-O2",
+               CXXFLAGS="-O2 -std=c++17")
+    cfg = [src / "configure", f"--host={TRIPLE}", f"--with-cross-build={host}", "--enable-static", "--disable-shared",
+           "--with-data-packaging=static", "--disable-tools", f"--prefix={prefix}", *common]
     run(cfg, cwd=cross, env=env, timeout=600, capture=True)
     run(["make", f"-j{JOBS}"], cwd=cross, env=env, timeout=7200, capture=True)
     # `make install` copies the headers and libsicuuc/libsicuin; its data step installs the stub and then fails on
@@ -153,30 +171,10 @@ def build_icu(icu_tree, log):
     return prefix
 
 
-# ---------------------------------------------------------------- the Shizuku link glue
-def build_compat():
-    obj = OUT / "shzwk_compat.o"
-    run(["clang", f"--target={TARGET}", "-O2", "-Wall", "-Werror", *UCRT_DEFS, "-c", HERE / "compat" / "shzwk_compat.c",
-         "-o", obj])
-    return obj
-
-
-# mingw-w64's UCRT import library, by path: besides the ucrtbase imports it carries the msvcrt-style entry points
-# (__getmainargs, _onexit, __set_app_type, ...) that crt2.o and libmingw32 were compiled against. `-lucrtbase` would
-# find the Shizuku libucrtbase.a first (plain dlltool imports, without those objects). A literal -lucrtbase still follows:
-# without one, clang's MinGW driver appends -lmsvcrt.
-MINGW_UCRT = "/usr/x86_64-w64-mingw32/lib/libucrtbase.a"
-
-
-def shz_libs(*names):
-    """Shizuku import libraries, by path, so they bind ahead of mingw-w64's same-named ones."""
-    return [str(W64OUT / f"lib{n}.a") for n in names]
-
-
 # WebKit names some Windows libraries in mixed case (-lDbgHelp, -lWinmm); lld on Linux searches case-sensitively.
-# DbgHelp: WTF calls it only in debug builds (wtf/win/DbgHelperWin.cpp), and the Shizuku runtime has no dbghelp.dll,
-# so mingw-w64's import library stands in; the import check proves nothing is imported from it.
-LIB_ALIASES = {"libDbgHelp.a": "/usr/x86_64-w64-mingw32/lib/libdbghelp.a", "libWinmm.a": str(W64OUT / "libwinmm.a")}
+# DbgHelp: WTF calls it only in debug builds (wtf/win/DbgHelperWin.cpp) and the Shizuku runtime has no dbghelp.dll;
+# the import check proves nothing is imported from it.
+LIB_ALIASES = {"libDbgHelp.a": "libdbghelp.a", "libWinmm.a": "libwinmm.a"}
 
 
 def lib_aliases():
@@ -186,61 +184,52 @@ def lib_aliases():
         link = d / name
         if link.is_symlink() or link.exists():
             link.unlink()
-        link.symlink_to(target)
+        link.symlink_to(TC / TRIPLE / "lib" / target)
     return d
 
 
 # ---------------------------------------------------------------- WebKit
-def configure_jsc(tree, icu, config, compat, log):
+def configure_jsc(tree, icu, config, log):
     bdir = OUT / f"jsc-{config}"
+    cache = bdir / "CMakeCache.txt"
+    if cache.exists() and str(CXX) not in cache.read_text(errors="replace"):
+        shutil.rmtree(bdir)                                       # a tree configured with another compiler
     bdir.mkdir(parents=True, exist_ok=True)
-    cflags = " ".join([*UCRT_DEFS, "-DU_STATIC_IMPLEMENTATION"])
-    # Libraries appended to every link: the glue, the Shizuku ntdll (for crt2.o's __C_specific_handler) and
-    # bcryptprimitives (ProcessPrng, used by the glue's rand_s), ICU's own Windows dependency (advapi32).
-    extra = " ".join([f"-L{lib_aliases()}", str(compat), *shz_libs("ntdll", "bcryptprimitives", "advapi32")])
     cmd = ["cmake", "-G", "Ninja", "-S", tree, "-B", bdir, f"-DCMAKE_TOOLCHAIN_FILE={HERE / 'toolchain-mingw-clang.cmake'}",
-           f"-DSHZ_WIN64_LIBDIR={W64OUT}", f"-DSHZ_ICU_PREFIX={icu}", "-DCMAKE_BUILD_TYPE=Release", "-DPORT=JSCOnly", "-DDEVELOPER_MODE=OFF",
-           "-DUSE_SYSTEM_UNIFDEF=ON", "-DENABLE_API_TESTS=OFF", "-DENABLE_REMOTE_INSPECTOR=OFF", "-DENABLE_TOOLS=OFF",
-           f"-DICU_ROOT={icu}", f"-DCMAKE_C_FLAGS={cflags}", f"-DCMAKE_CXX_FLAGS={cflags}",
-           f"-DCMAKE_CXX_STANDARD_LIBRARIES={extra} {MINGW_UCRT} -lucrtbase", f"-DCMAKE_C_STANDARD_LIBRARIES={extra} {MINGW_UCRT} -lucrtbase",
-           *CONFIGS[config]]
+           f"-DSHZ_WEBKIT_TOOLCHAIN={TC / 'toolchain.cmake'}", f"-DSHZ_ICU_PREFIX={icu}", f"-DSHZ_LIBALIAS={lib_aliases()}",
+           "-DCMAKE_BUILD_TYPE=Release", "-DPORT=JSCOnly", "-DDEVELOPER_MODE=OFF", "-DUSE_SYSTEM_UNIFDEF=ON",
+           "-DENABLE_API_TESTS=OFF", "-DENABLE_REMOTE_INSPECTOR=OFF", "-DENABLE_TOOLS=OFF", f"-DICU_ROOT={icu}",
+           "-DCMAKE_C_FLAGS=-DU_STATIC_IMPLEMENTATION", "-DCMAKE_CXX_FLAGS=-DU_STATIC_IMPLEMENTATION", *CONFIGS[config]]
     run(cmd, timeout=900)
     log["cmake"] = [str(x) for x in cmd]
     return bdir
 
 
-def build_wkbatch(compat):
+def build_wkbatch():
     exe = OUT / "wkbatch.exe"
-    cmd = ["clang", f"--target={TARGET}", "-O2", "-Wall", "-Werror", *UCRT_DEFS, "-fuse-ld=lld", "-static",
-           HERE / "tests" / "wkbatch.c", compat, *shz_libs("ntdll", "bcryptprimitives"), MINGW_UCRT, "-lucrtbase", "-o", exe]
+    cmd = [CC, "-O2", "-Wall", "-Werror", HERE / "tests" / "wkbatch.c", "-o", exe]
     run(cmd)
     return exe, cmd
 
 
-def build_probes(compat):
-    """The toolchain experiments of WEBKIT.md, rebuilt from tests/probe_*: out-probes/<name>.exe. Each is linked the way
-    jsc.exe is (Shizuku ntdll/bcryptprimitives import libraries first, the glue, mingw-w64's UCRT import library)."""
+def build_probes():
+    """The toolchain experiments of WEBKIT.md, rebuilt from tests/probe_* with the WebKit toolchain: out-probes/."""
     pdir = OUT / "out-probes"
     pdir.mkdir(parents=True, exist_ok=True)
     tests = HERE / "tests"
-    link = [compat, *shz_libs("ntdll", "bcryptprimitives")]
     cmds = {
-        "probe_clang": ["clang++", f"--target={TARGET}", *UCRT_DEFS, "-O2", "-std=c++20", "-fuse-ld=lld", "-static",
-                        tests / "probe_cxx.cpp", *link, "-lucrtbase"],
-        # GCC 13 itself: its driver would add -lmsvcrt, so the default libraries are spelled out with the UCRT instead
-        "probe_gcc": ["x86_64-w64-mingw32-g++-win32", *UCRT_DEFS, "-O2", "-std=c++20", "-static", tests / "probe_cxx.cpp",
-                      *link, "-nodefaultlibs", "-Wl,--start-group", "-lstdc++", "-lmingw32", "-lgcc", "-lgcc_eh", "-lmingwex",
-                      "-lucrtbase", "-lkernel32", "-Wl,--end-group"],
-        "probe_tls": ["clang", f"--target={TARGET}", *UCRT_DEFS, "-O1", "-fuse-ld=lld", tests / "probe_tls.c", *link, "-lucrtbase"],
-        "probe_seh": ["clang", f"--target={TARGET}", *UCRT_DEFS, "-O1", "-fms-extensions", "-fuse-ld=lld", tests / "probe_seh.c",
-                      *link, "-lucrtbase"],
+        "probe_libcxx": [CXX, "-O2", "-std=c++20", tests / "probe_cxx.cpp"],
+        "probe_tls": [CC, "-O1", tests / "probe_tls.c"],
+        "probe_seh": [CC, "-O1", "-fms-extensions", tests / "probe_seh.c"],
     }
     out = {}
     for name, cmd in cmds.items():
         exe = pdir / f"{name}.exe"
         run([*cmd, "-o", exe])
         out[name] = {"exe": str(exe), "sha256": sha256_file(exe), "command": [str(x) for x in cmd]}
-    report, _ = importcheck.check([v["exe"] for v in out.values()])
+    for d in RUNTIME_DLLS:
+        shutil.copyfile(TC / TRIPLE / "bin" / d, pdir / d)
+    report, _ = importcheck.check([v["exe"] for v in out.values()] + [str(pdir / d) for d in RUNTIME_DLLS])
     for name in out:
         out[name]["missing_imports"] = report[f"{name}.exe"]["missing"]
     shzlib.write_json(pdir / "probes.json", out)
@@ -254,40 +243,39 @@ def main():
     ap.add_argument("--target", default="jsc", help="ninja target (default jsc)")
     ap.add_argument("--probes", action="store_true", help="only build the toolchain probes (out-probes/)")
     args = ap.parse_args()
-    for tool in ("clang", "clang++", "ld.lld", "llvm-ar", "cmake", "ninja", "ruby", "perl", "gperf", "unifdef",
-                 "x86_64-w64-mingw32-g++-win32"):
+    for tool in ("clang", "clang++", "ld.lld", "llvm-ar", "cmake", "ninja", "ruby", "perl", "gperf", "unifdef"):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
-    for f in ("libkernel32.a", "libucrtbase.a", "libntdll.a", "ucrtbase.dll"):
+    for f in ("kernel32.dll", "ucrtbase.dll", "ntdll.dll"):
         if not (W64OUT / f).exists():
             raise SystemExit(f"missing {W64OUT / f}: run shizukudos/win64/build.py first")
     OUT.mkdir(parents=True, exist_ok=True)
+    tc = ensure_toolchain()
     if args.probes:
-        build_probes(build_compat())
+        build_probes()
         return
     log = {"built_utc": shzlib.utc_now(), "git": shzlib.git_state(), "config": args.config}
     t0 = time.time()
     wk, icu_tree = ensure_tree("webkit"), ensure_tree("icu")
     log["patches"] = apply_patches(wk)
     icu = build_icu(icu_tree, log)
-    compat = build_compat()
-    bdir = configure_jsc(wk, icu, args.config, compat, log)
-    run(["ninja", "-C", bdir, f"-j{JOBS}", args.target], timeout=4 * 3600)
+    bdir = configure_jsc(wk, icu, args.config, log)
+    run(["ninja", "-C", bdir, f"-j{JOBS}", args.target], timeout=6 * 3600)
     dest = OUT / "out"
     dest.mkdir(exist_ok=True)
     for old in dest.glob("*"):
         old.unlink()
-    produced = sorted(set(bdir.glob("bin/*.exe")) | set(bdir.glob("bin/*.dll")))
-    for p in produced:
+    for p in sorted(set(bdir.glob("bin/*.exe")) | set(bdir.glob("bin/*.dll"))):
         shutil.copyfile(p, dest / p.name)
-    batch, batch_cmd = build_wkbatch(compat)
+    for d in RUNTIME_DLLS:
+        shutil.copyfile(TC / TRIPLE / "bin" / d, dest / d)
+    batch, batch_cmd = build_wkbatch()
     shutil.copyfile(batch, dest / batch.name)
     images = sorted(dest.glob("*.exe")) + sorted(dest.glob("*.dll"))
     report, bad = importcheck.check([str(p) for p in images])
     log.update({
         "seconds": round(time.time() - t0, 1),
-        "toolchain": {"clang": shzlib.tool_version("clang"), "libstdc++ (mingw-w64 GCC)": shzlib.tool_version("x86_64-w64-mingw32-g++-win32"),
-                      "cmake": shzlib.tool_version("cmake"), "ninja": shzlib.tool_version("ninja")},
+        "toolchain": {"deps/toolchain.py": tc, "cmake": shzlib.tool_version("cmake"), "ninja": shzlib.tool_version("ninja")},
         "upstreams": {n: spec(n)["commit"] for n in ("webkit", "icu")},
         "outputs": {p.name: {"sha256": sha256_file(p), "bytes": p.stat().st_size} for p in images},
         "wkbatch": [str(x) for x in batch_cmd],
