@@ -517,6 +517,17 @@ DWORD NTAPI RtlSetHeapInformation(PVOID hp, HEAP_INFORMATION_CLASS cls, PVOID in
         return STATUS_INVALID_PARAMETER;
     }
 }
+/* Only class 0 (HeapCompatibilityInformation) can be queried; it answers 0, this allocator is never a low-fragmentation heap.
+ * *ret receives the size the class needs even when the buffer is too small. */
+DWORD NTAPI RtlQueryHeapInformation(PVOID hp, HEAP_INFORMATION_CLASS cls, PVOID info, SIZE_T len, PSIZE_T ret)   /* returns an NTSTATUS */
+{
+    if ((int)cls != 0) return STATUS_INVALID_PARAMETER;
+    if (!valid_heap(hp)) return STATUS_INVALID_HANDLE;
+    if (ret) *ret = sizeof(ULONG);
+    if (!info || len < sizeof(ULONG)) return STATUS_BUFFER_TOO_SMALL;
+    *(ULONG *)info = 0;
+    return 0;
+}
 BOOLEAN NTAPI RtlValidateHeap(PVOID hp, ULONG flags, PVOID p)
 {
     heap_t *h = valid_heap(hp);
