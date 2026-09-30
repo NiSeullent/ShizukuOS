@@ -87,7 +87,127 @@ static int reloc_cb(void *c, uint32_t rva, unsigned type)
     return 0;
 }
 
-struct ictx { uint64_t base; unsigned unresolved; };
+/* ---- export drivers (an image another image imports from) ---- */
+static int ci_eq(const char *a, const char *b)
+{
+    for (; *a && *b; ++a, ++b) {
+        char ca = *a >= 'A' && *a <= 'Z' ? (char)(*a + 32) : *a, cb = *b >= 'A' && *b <= 'Z' ? (char)(*b + 32) : *b;
+        if (ca != cb) return 0;
+    }
+    return *a == *b;
+}
+static int is_kernel_module(const char *dll)
+{
+    return ci_eq(dll, "ntoskrnl.exe") || ci_eq(dll, "ntkrnlpa.exe") || ci_eq(dll, "ntkrnlmp.exe") || ci_eq(dll, "hal.dll");
+}
+/* "ndis.sys" -> "ndis": the service/record name of an imported module is its file name without the extension */
+static void module_service(const char *dll, char *out, unsigned cap)
+{
+    unsigned i;
+    for (i = 0; dll[i] && dll[i] != '.' && i + 1 < cap; ++i) out[i] = dll[i];
+    out[i] = 0;
+}
+
+ntdrv_driver_t *ntdrv_find_module(const char *dllname)
+{
+    char svc[64];
+    ntdrv_driver_t *d;
+    module_service(dllname, svc, sizeof svc);
+    for (d = driver_list; d; d = d->next)
+        if (d->started && ci_eq(d->name, svc)) return d;
+    return 0;
+}
+
+/* Symbol lookup in a mapped image's export directory (IMAGE_EXPORT_DIRECTORY at export_rva: 40 bytes, then the
+ * address/name/ordinal tables). Every RVA is bounds-checked against the image; forwarders are not supported. */
+void *ntdrv_module_export(ntdrv_driver_t *m, const char *symbol)
+{
+    const uint8_t *base = (const uint8_t *)m->image_base;
+    const uint32_t size = (uint32_t)m->image_size;
+    const uint32_t *ed;
+    uint32_t nfuncs, nnames, funcs, names, ords, i;
+    if (!m->export_rva || m->export_rva + 40 > size) return 0;
+    ed = (const uint32_t *)(base + m->export_rva);
+    nfuncs = ed[5]; nnames = ed[6]; funcs = ed[7]; names = ed[8]; ords = ed[9];
+    if ((uint64_t)names + 4ull * nnames > size || (uint64_t)ords + 2ull * nnames > size || (uint64_t)funcs + 4ull * nfuncs > size)
+        return 0;
+    for (i = 0; i < nnames; ++i) {
+        const uint32_t nrva = ((const uint32_t *)(base + names))[i];
+        const uint16_t ord = ((const uint16_t *)(base + ords))[i];
+        uint32_t frva, k;
+        if (nrva >= size) continue;
+        for (k = 0; nrva + k < size && symbol[k] && base[nrva + k] == (uint8_t)symbol[k]; ++k) {}
+        if (symbol[k] || nrva + k >= size || base[nrva + k]) continue;
+        if (ord >= nfuncs) return 0;
+        frva = ((const uint32_t *)(base + funcs))[ord];
+        if (!frva || frva >= size) return 0;
+        if (frva >= m->export_rva && frva < m->export_rva + m->export_size) {
+            kprintf("K64 ntdrv: %s!%s is a forwarder (unsupported)\n", m->name, symbol);
+            return 0;
+        }
+        return (void *)(base + frva);
+    }
+    return 0;
+}
+
+struct ictx {
+    uint64_t base;
+    unsigned unresolved;
+    const char *service;
+    ntdrv_driver_t *deps[8];            /* modules resolved against so far */
+    unsigned ndeps;
+    char missing[4][32];                /* imported modules that could not be loaded (reported once each) */
+    unsigned nmissing;
+};
+
+/* The module an import names: a kernel module (NULL, resolved from the provider tables), an already loaded image, or
+ * \SHZ\SYS64\DRIVERS\<dll> loaded now on this image's behalf (the way a boot-start dependency is present on
+ * Windows before the drivers that import it). */
+static ntdrv_driver_t *dep_module(struct ictx *x, const char *dll, int *missing)
+{
+    ntdrv_driver_t *m;
+    unsigned i;
+    char path[96] = "\\SHZ\\SYS64\\DRIVERS\\", svc[64];
+    fsnode_t *n;
+    int32_t st;
+    *missing = 0;
+    for (i = 0; i < x->ndeps; ++i)
+        if (ntdrv_find_module(dll) == x->deps[i]) return x->deps[i];
+    for (i = 0; i < x->nmissing; ++i)
+        if (ci_eq(x->missing[i], dll)) { *missing = 1; return 0; }
+    m = ntdrv_find_module(dll);
+    if (!m) {
+        ntdrv_driver_t *saved = ntdrv_current_driver();
+        { unsigned k = strlen(path); for (i = 0; dll[i] && k + 1 < sizeof path; ++i) path[k++] = dll[i]; path[k] = 0; }
+        module_service(dll, svc, sizeof svc);
+        n = fs_lookup(path);
+        if (!n || n->is_dir) {
+            kprintf("K64 ntdrv: %s imports %s, which is not in \\SHZ\\SYS64\\DRIVERS\n", x->service, dll);
+        } else {
+            kprintf("K64 ntdrv: %s imports %s: loading it first\n", x->service, dll);
+            st = ntdrv_load_node(n, svc, &m);
+            ntdrv_set_current_driver(saved);
+            if (st || !m || !m->started) {
+                kprintf("K64 ntdrv: %s: dependency %s failed to load (%x)\n", x->service, dll, (uint32_t)st);
+                m = 0;
+            } else {
+                m->dependency = 1;
+            }
+        }
+        if (!m) {
+            if (x->nmissing < 4) {
+                for (i = 0; dll[i] && i + 1 < sizeof x->missing[0]; ++i) x->missing[x->nmissing][i] = dll[i];
+                x->missing[x->nmissing][i] = 0;
+                ++x->nmissing;
+            }
+            *missing = 1;
+            return 0;
+        }
+    }
+    if (x->ndeps < 8) { x->deps[x->ndeps++] = m; ++m->users; }
+    return m;
+}
+
 static int import_cb(void *c, const char *dll, const char *name, uint16_t hint, int by_ord, uint32_t iat_rva)
 {
     struct ictx *x = c;
@@ -96,15 +216,29 @@ static int import_cb(void *c, const char *dll, const char *name, uint16_t hint, 
     if (by_ord || !name) {
         kprintf("K64 ntdrv: unresolved import %s!#%u (ordinal imports unsupported)\n", dll, hint);
         ++x->unresolved;
-    } else {
+    } else if (is_kernel_module(dll)) {
         fn = ntdrv_resolve_export(dll, name);
         if (!fn) {
             kprintf("K64 ntdrv: unresolved import %s!%s\n", dll, name);
             ++x->unresolved;
         }
+    } else {
+        int missing;
+        ntdrv_driver_t *m = dep_module(x, dll, &missing);
+        if (m) {
+            fn = ntdrv_module_export(m, name);
+            if (!fn) kprintf("K64 ntdrv: unresolved import %s!%s (not exported by the loaded %s)\n", dll, name, m->name);
+        }
+        if (!fn) ++x->unresolved;                 /* a missing module was reported once, by dep_module */
     }
     { uint64_t v = (uint64_t)fn; memcpy((void *)(x->base + iat_rva), &v, 8); }   /* 0 IAT slot faults cleanly if called */
     return 0;                                                                     /* keep going: report every miss */
+}
+
+static void drop_deps(ntdrv_driver_t **deps, unsigned n)
+{
+    unsigned i;
+    for (i = 0; i < n; ++i) if (deps[i]->users) --deps[i]->users;
 }
 
 /* ---- DRIVER_OBJECT ---- */
@@ -151,25 +285,49 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
          * means none are needed. */
         kprintf("K64 ntdrv: %s is position-independent (no base relocations); mapped at %llx\n", service, base);
     }
-    ic.base = base; ic.unresolved = 0;
-    if (pe_walk_imports(image, size, &pi, import_cb, &ic)) return STATUS_INVALID_IMAGE_FORMAT;
+    memset(&ic, 0, sizeof ic);
+    ic.base = base; ic.service = service;
+    if (pe_walk_imports(image, size, &pi, import_cb, &ic)) { drop_deps(ic.deps, ic.ndeps); return STATUS_INVALID_IMAGE_FORMAT; }
     if (ic.unresolved) {
         kprintf("K64 ntdrv: %s has %u unresolved import(s); not loaded\n", service, ic.unresolved);
+        drop_deps(ic.deps, ic.ndeps);
         return STATUS_PROCEDURE_NOT_FOUND;
     }
     d = kzalloc(sizeof *d);
     drv = kzalloc(SZ_DRV);
-    if (!d || !drv) { kfree(d); kfree(drv); return STATUS_NO_MEMORY; }
+    if (!d || !drv) { kfree(d); kfree(drv); drop_deps(ic.deps, ic.ndeps); return STATUS_NO_MEMORY; }
     for (i = 0; service[i] && i < sizeof d->name - 1; ++i) d->name[i] = service[i];
     d->image_base = base; d->image_size = pi.size_of_image; d->drv = drv;
+    d->export_rva = pi.dir_rva[0]; d->export_size = pi.dir_size[0];
+    for (i = 0; i < ic.ndeps; ++i) d->deps[i] = ic.deps[i];
+    d->ndeps = ic.ndeps;
     build_regpath(d, service);
     drv->Type = 4; drv->Size = SZ_DRV;
     drv->DriverStart = (void *)base;
     drv->DriverSize = pi.size_of_image;
     drv->DriverInit = (PDRIVER_INITIALIZE)(base + pi.entry_rva);
     drv->DriverSection = d;
-    drv->DriverName.Buffer = d->regpath_buf;           /* not the real \Driver\name, but a valid UNICODE_STRING */
-    drv->DriverName.Length = 0; drv->DriverName.MaximumLength = 0;
+    {   /* \Driver\<service>, the DRIVER_EXTENSION (AddDevice lives there; ServiceKeyName = the service) and
+         * HardwareDatabase, as every DRIVER_OBJECT on Windows carries them */
+        static const char pfx[] = "\\Driver\\";
+        static uint16_t hwdb[] = { '\\','R','E','G','I','S','T','R','Y','\\','M','A','C','H','I','N','E','\\','H','A','R','D','W','A','R','E','\\',
+                                   'D','E','S','C','R','I','P','T','I','O','N','\\','S','Y','S','T','E','M' };
+        static UNICODE_STRING hwdb_us = { sizeof hwdb, sizeof hwdb, 0, hwdb };
+        const unsigned svclen = (unsigned)strlen(service);
+        uint16_t *wn = kzalloc((sizeof pfx + svclen) * 2), *ws = kzalloc((svclen + 1) * 2);
+        DRIVER_EXTENSION *ext = kzalloc(0x40);                /* the public 0x28 bytes plus Windows' private tail */
+        unsigned n = 0;
+        if (!wn || !ws || !ext) { kfree(wn); kfree(ws); kfree(ext); kfree(d); kfree(drv); drop_deps(ic.deps, ic.ndeps); return STATUS_NO_MEMORY; }
+        for (i = 0; pfx[i]; ++i) wn[n++] = (uint16_t)pfx[i];
+        for (i = 0; service[i]; ++i) { wn[n++] = (uint16_t)service[i]; ws[i] = (uint16_t)service[i]; }
+        drv->DriverName.Buffer = wn;
+        drv->DriverName.Length = (uint16_t)(n * 2); drv->DriverName.MaximumLength = (uint16_t)(n * 2 + 2);
+        ext->DriverObject = drv;
+        ext->ServiceKeyName.Buffer = ws;
+        ext->ServiceKeyName.Length = (uint16_t)(svclen * 2); ext->ServiceKeyName.MaximumLength = (uint16_t)(svclen * 2 + 2);
+        drv->DriverExtension = ext;
+        drv->HardwareDatabase = &hwdb_us;
+    }
     for (i = 0; i <= IRP_MJ_MAXIMUM_FUNCTION; ++i)
         drv->MajorFunction[i] = ntdrv_default_dispatch;
     d->next = driver_list; driver_list = d;
@@ -184,6 +342,9 @@ int32_t ntdrv_load_image(const uint8_t *image, uint64_t size, const char *servic
         kprintf("K64 ntdrv: %s DriverEntry returned %x\n", service, (uint32_t)st);
         /* leave the record so ntdrv_unload can reclaim VA/pages; mark not started */
         d->started = 0;
+        ntdrv_release_claims(d);                              /* a BAR it mapped before failing is nobody's now */
+        drop_deps(d->deps, d->ndeps);
+        d->ndeps = 0;
         if (out) *out = d;
         return st;
     }
@@ -196,9 +357,10 @@ ntdrv_driver_t *ntdrv_find_driver(const char *service)
 {
     ntdrv_driver_t *d;
     for (d = driver_list; d; d = d->next)
-        if (d->started && !strcmp(d->name, service)) return d;
+        if (d->started && ci_eq(d->name, service)) return d;   /* service names are case-insensitive, like keys */
     return 0;
 }
+ntdrv_driver_t *ntdrv_drivers(void) { return driver_list; }
 
 ntdrv_driver_t *ntdrv_driver_by_address(uint64_t va)
 {
@@ -236,8 +398,28 @@ int32_t ntdrv_unload(ntdrv_driver_t *d)
         ntdrv_set_current_driver(0);
     }
     /* image pages and the DRIVER_OBJECT are intentionally retained: the VA window is a
-     * monotonically growing bring-up arena and no driver is reloaded in the same boot. The
-     * device namespace entries the driver created were freed by IoDeleteDevice in unload. */
+     * monotonically growing bring-up arena (a reload maps a fresh copy). The device namespace
+     * entries the driver created were freed by IoDeleteDevice in unload. */
     d->started = 0;
+    ntdrv_pnp_driver_unloading(d);
+    ntdrv_release_claims(d);
+    drop_deps(d->deps, d->ndeps);
+    d->ndeps = 0;
     return STATUS_SUCCESS;
+}
+
+int32_t ntdrv_unload_service(const char *service)
+{
+    ntdrv_driver_t *d = ntdrv_find_driver(service);
+    if (!d) return STATUS_OBJECT_NAME_NOT_FOUND;
+    if (d->users) {
+        kprintf("K64 ntdrv: %s is imported by %u loaded image(s); not unloaded\n", d->name, d->users);
+        return STATUS_CONNECTION_IN_USE;
+    }
+    if (!d->drv->DriverUnload) {
+        kprintf("K64 ntdrv: %s has no DriverUnload routine; it stays loaded\n", d->name);
+        return STATUS_INVALID_DEVICE_REQUEST;
+    }
+    kprintf("K64 ntdrv: unloading %s\n", d->name);
+    return ntdrv_unload(d);
 }
