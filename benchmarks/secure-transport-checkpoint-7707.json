@@ -1,0 +1,34 @@
+{
+  "schema": "win98modern.secure-transport-checkpoint.v1",
+  "date_utc": "2026-09-30",
+  "branch": "codex/tls13-7707",
+  "base": "abc160b",
+  "verification": {
+    "status": "PASS",
+    "scope": "Frozen build/static/handoff evidence only",
+    "host_protocol_checks": 11,
+    "native_pe_artifacts": 3,
+    "dll_exports": 13,
+    "dll_relocations": true,
+    "guest_83_inputs": 8,
+    "host_receipt_sha256": "6851a064ed6a168a72840023bc38d458cbef48464fafa5613c05a52ec6be710a",
+    "native_receipt_sha256": "e80ac28e5ea1ac5c719c4f2223a0f1017d3f27ae03d5972d625d560b6f688494",
+    "manifest_sha256": "9b88a8ef866dab8c80349afe754d3d3ff838b5438debbb7184ecc9b72858c13f",
+    "verifier_sha256": "ba871e68466c60322ac6bfff40062ff087c2173b08ee2551d99feca8039e9c5e",
+    "native_guest_verified": false,
+    "system_schannel_verified": false,
+    "application_functionality_verified": false
+  },
+  "host_build_receipt": "/root/Win98-Modern-tls13-7707/build/secure-transport/host-v3/build-result.json",
+  "native_build_receipt": "/root/Win98-Modern-tls13-7707/build/secure-transport/native-v3/build-result.json",
+  "guest_manifest": "/root/Win98-Modern-boot/build/secure-transport-7707/tls13-v3-dos/guest-files.json",
+  "remaining": [
+    "Actual Windows98 LoadLibrary/relocation/CRT and clock/RNG/TLS guest execution",
+    "Socket/DNS, CA store and Schannel/WinHTTP/WinINet provider integration",
+    "Persistent actual desktop/application themes",
+    "Current Legcord/Signal/Office functionality and cold reopen"
+  ],
+  "guest_execution_gate": "Existing20GiB free-space floor not met; no guest launched",
+  "application_contract": "benchmarks/modern-app-requirements-7707.json",
+  "peer_theme_tls_commit": "a12a4a9"
+}
