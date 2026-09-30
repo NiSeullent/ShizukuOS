@@ -34,8 +34,9 @@ file holds at most 511 characters of command line; --args replaces the default a
 The run PASSES only when the serial log contains the expected line AND the process exited with code 0 AND no process
 fault was reported. Anything else is a FAIL, and the result names the furthest point reached, in this order of
 precedence: loader failure (an import that did not resolve), a fatal exception (process killed by the kernel), a
-Node/V8 fatal line, a Chromium FATAL/CHECK line, the marker seen without a clean exit, the first explicitly
-unsupported kernel32 call ("K32 unsupported: ..."), the furthest progress line the app printed, the exit code, or the
+Node/V8 fatal line, a Chromium FATAL/CHECK line, the marker seen without a clean exit, a first-chance breakpoint
+(int3: a failed CHECK or delay-load that a handler turned into a process exit; the result quotes the last LoadLibrary
+refusal and GetProcAddress miss before it), the first explicitly unsupported kernel32 call ("K32 unsupported: ..."), the furthest progress line the app printed, the exit code, or the
 timeout.
 
 Result: <out>/result.json (printed in short). Exit status 0 = PASS, 1 = FAIL (the expected state today), 2 = the run
@@ -144,6 +145,18 @@ def put_file(image, data, name, work):
     run(["mcopy", "-o", "-i", str(image), str(host), "::" + name], env=mtools_env(), capture=True)
 
 
+def breakpoint_context(b):
+    """What the log says just before the first breakpoint, and how the process ended after it."""
+    out = ""
+    if b["last_loadlibrary_refusal"]:
+        out += "; last LoadLibrary refusal before it: " + b["last_loadlibrary_refusal"].split("K64 ldr: ", 1)[-1]
+    if b["last_getprocaddress_miss"]:
+        out += "; last GetProcAddress miss before it: " + b["last_getprocaddress_miss"].split("trace: ", 1)[-1]
+    if b["self_terminate"]:
+        out += "; then " + b["self_terminate"].split("trace: ", 1)[-1]
+    return out
+
+
 def classify(serial, expect):
     """Furthest point reached, from the serial log after the autorun start (precedence in the module docstring).
     A runtime LoadLibrary that fails ("... LoadLibrary needs ...") is listed separately: programs probe optional DLLs."""
@@ -161,12 +174,27 @@ def classify(serial, expect):
                                                 r"executeJavaScript failed|whenReady failed|watchdog|uncaughtException|unhandledRejection|console\.log threw)", l)]
     fatal = [l for l in lines if re.search(r"FATAL:|Check failed|CHECK failed|NOTREACHED", l)]
     unsup = [l for l in lines if "K32 unsupported:" in l or "K32 RECON called:" in l]
+    # A first-chance breakpoint (int3) that some handler turned into a process exit is how Chromium ends on a failed CHECK or a
+    # failed delay-load: the kernel prints no "unhandled exception" for it. The loader refusal and the GetProcAddress miss just
+    # before the first one name the usual cause (a delay-loaded DLL or ordinal that does not exist).
+    bp_at = next((i for i, l in enumerate(lines) if re.search(r"K64 exc: pid \d+ tid \d+ first-chance 80000003 ", l)), None)
+    breakpoint_ = None
+    if bp_at is not None:
+        pid = re.search(r"K64 exc: pid (\d+)", lines[bp_at]).group(1)
+        end_at = next((i for i, l in enumerate(lines) if l.startswith("K64 autorun: result")), len(lines))   # later lines belong to the boot's other tests
+        before = lines[:bp_at]
+        breakpoint_ = {"line": lines[bp_at],
+                       "last_loadlibrary_refusal": next((l for l in reversed(before) if ": LoadLibrary needs " in l), None),
+                       "last_getprocaddress_miss": next((l for l in reversed(before) if "GetProcAddress miss:" in l), None),
+                       "self_terminate": next((l for l in lines[bp_at:end_at]
+                                               if f" pid {pid}]" in l and ("TerminateProcess(self)" in l or "ExitProcess code=" in l)), None)}
     auto = [l for l in lines if l.startswith("K64 autorun: result")]
     res["loader_failures"] = ldr[:20]
     res["exceptions"] = killed[:20]
     res["node_fatal"] = node_fatal[:20]
     res["chromium_fatal"] = fatal[:20]
     res["unsupported_calls"] = unsup[:60]
+    res["first_breakpoint"] = breakpoint_
     res["autorun_result"] = auto[-1] if auto else None
     progress = None
     for name, rx in PROGRESS:
@@ -189,13 +217,15 @@ def classify(serial, expect):
     if ldr:
         res["furthest"] = "loader: " + ldr[0]
     elif killed:
-        res["furthest"] = "exception: " + killed[0]
+        res["furthest"] = "exception: " + killed[0] + (breakpoint_context(breakpoint_) if breakpoint_ else "")
     elif node_fatal:
         res["furthest"] = "node/electron fatal: " + node_fatal[0]
     elif fatal:
         res["furthest"] = "chromium fatal: " + fatal[0]
     elif marker:
         res["furthest"] = "marker seen" + (f", process {m.group(1)} exit {int(m.group(2), 16):#x}" if m else "")
+    elif breakpoint_:
+        res["furthest"] = "breakpoint (int3): " + breakpoint_["line"].split("K64 exc: ", 1)[-1] + breakpoint_context(breakpoint_)
     elif unsup:
         res["furthest"] = "first unsupported kernel32 call: " + unsup[0]
     elif progress and progress[0] not in ("autorun started", "process created"):
