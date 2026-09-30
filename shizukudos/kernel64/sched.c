@@ -8,9 +8,11 @@
 extern void switch_stacks(uint64_t *save_rsp, uint64_t new_rsp);
 extern void thread_start(void);
 
-#define MAX_THREADS 96
+#define MAX_THREADS 1024        /* a multi-process Chromium run holds a few hundred; the table is sized once, from the page allocator */
 
-static thread_t threads[MAX_THREADS];
+static void kstack_free(uint64_t base);
+static thread_t *threads;       /* MAX_THREADS slots (sched_init); slots >= thread_hi have never been used */
+static unsigned thread_hi;      /* high-water mark of the slot search: every loop over the table stops here, not at MAX_THREADS */
 static thread_t *current;
 static thread_t *idle_thread;
 static uint32_t next_id = 1;
@@ -26,7 +28,7 @@ thread_t *thread_current(void) { return current; }
 thread_t *thread_find_tid(void *process, uint64_t tid)
 {
     unsigned i;
-    for (i = 0; i < MAX_THREADS; ++i)
+    for (i = 0; i < thread_hi; ++i)
         if (threads[i].state != TS_FREE && threads[i].state != TS_ZOMBIE && threads[i].proc == process && threads[i].tid == tid)
             return &threads[i];
     return 0;
@@ -37,7 +39,7 @@ thread_t *thread_find_tid(void *process, uint64_t tid)
 void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx)
 {
     unsigned i;
-    for (i = 0; i < MAX_THREADS; ++i) {
+    for (i = 0; i < thread_hi; ++i) {
         const uint64_t f = irq_save();
         if (threads[i].state != TS_FREE) fn(&threads[i], ctx);
         irq_restore(f);
@@ -47,8 +49,8 @@ void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx)
 static thread_t *pick_next(void)
 {
     unsigned i, start = current ? (unsigned)(current - threads) : 0;
-    for (i = 1; i <= MAX_THREADS; ++i) {
-        thread_t *t = &threads[(start + i) % MAX_THREADS];
+    for (i = 1; i <= thread_hi; ++i) {
+        thread_t *t = &threads[(start + i) % thread_hi];
         if (t->state == TS_READY && t != idle_thread)
             return t;
     }
@@ -59,7 +61,7 @@ static thread_t *pick_next(void)
 
 static inline uint64_t rdtsc(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
 
-thread_t *thread_slot(unsigned i) { return i < MAX_THREADS ? &threads[i] : 0; }
+thread_t *thread_slot(unsigned i) { return i < thread_hi ? &threads[i] : 0; }
 
 uint64_t thread_cycles_now(thread_t *t)
 {
@@ -143,7 +145,7 @@ void sched_tick(void)
     }
 #endif
     tick_from_user = 0;
-    for (i = 0; i < MAX_THREADS; ++i)
+    for (i = 0; i < thread_hi; ++i)
         if (threads[i].state == TS_BLOCKED && threads[i].wake_tick && threads[i].wake_tick <= jiffies) {
             threads[i].wake_tick = 0;
             threads[i].state = TS_READY;
@@ -182,13 +184,13 @@ void __attribute__((weak)) thread_object_detach(thread_t *t) { (void)t; }       
 static void reap_user_zombies(const void *only, int drop_holds)
 {
     unsigned i;
-    for (i = 0; i < MAX_THREADS; ++i) {
+    for (i = 0; i < thread_hi; ++i) {
         thread_t *t = &threads[i];
         if (t->state == TS_FREE || !t->proc || (only && t->proc != only)) continue;
         if (drop_holds) t->creator_hold = 0;    /* also a thread still inside thread_exit(): it is reaped at a later pass */
         if (t->state != TS_ZOMBIE || t == current || t->creator_hold) continue;
         thread_object_detach(t);
-        kfree((void *)t->stack_base);
+        kstack_free(t->stack_base);
         t->stack_base = 0;
         t->object = 0;
         t->state = TS_FREE;
@@ -216,24 +218,38 @@ void thread_creator_release(thread_t *t)
     irq_restore(f);
 }
 
+/* Kernel stacks are runs of physical pages, not heap blocks: the 12 MiB kernel heap holds ~300 of them at 32 KiB, a multi-process
+ * Chromium run needs that many threads alone. */
+static uint64_t kstack_alloc(void)
+{
+    const uint64_t pa = pmm_alloc_contig(KSTACK_BYTES / PAGE_SIZE);
+    return pa ? p2v(pa) : 0;
+}
+
+static void kstack_free(uint64_t base)
+{
+    if (base) pmm_free_contig(base - phys_base_va, KSTACK_BYTES / PAGE_SIZE);
+}
+
 static thread_t *thread_create_state(const char *name, void (*fn)(void *), void *arg, uint32_t state)
 {
     uint64_t f = irq_save(), *sp;
     thread_t *t = 0;
     unsigned i, k;
     reap_user_zombies(0, 0);
-    for (i = 0; i < MAX_THREADS; ++i)
-        if (threads[i].state == TS_FREE) { t = &threads[i]; break; }
+    for (i = 0; i < thread_hi && threads[i].state != TS_FREE; ++i) { }
+    if (i < MAX_THREADS) t = &threads[i];
     if (!t) {
         unsigned z = 0;
-        for (i = 0; i < MAX_THREADS; ++i) z += threads[i].state == TS_ZOMBIE;
+        for (i = 0; i < thread_hi; ++i) z += threads[i].state == TS_ZOMBIE;
         irq_restore(f);
         kprintf("K64: thread table full (%u slots, %u exited but not reclaimable)\n", MAX_THREADS, z);
         return 0;
     }
     memset(t, 0, sizeof *t);
-    t->stack_base = (uint64_t)kmalloc(KSTACK_BYTES);
+    t->stack_base = kstack_alloc();
     if (!t->stack_base) { irq_restore(f); kprintf("K64: no kernel stack for a new thread\n"); return 0; }
+    if ((unsigned)(t - threads) >= thread_hi) thread_hi = (unsigned)(t - threads) + 1;
     t->id = next_id++;
     t->create_tick = jiffies;
     t->mem_priority = 5;                            /* MEMORY_PRIORITY_NORMAL */
@@ -274,7 +290,7 @@ void thread_discard(thread_t *t)
 {
     const uint64_t f = irq_save();
     if (t->state == TS_NEW) {
-        kfree((void *)t->stack_base);
+        kstack_free(t->stack_base);
         t->state = TS_FREE;
     }
     irq_restore(f);
@@ -315,7 +331,7 @@ int64_t thread_join(thread_t *t)
         uint64_t f = irq_save();
         if (t->state == TS_ZOMBIE) {
             const int64_t code = t->exit_code;
-            kfree((void *)t->stack_base);
+            kstack_free(t->stack_base);
             t->state = TS_FREE;
             irq_restore(f);
             return code;
@@ -442,7 +458,10 @@ static void idle_loop(void *arg)
 
 void sched_init(void)
 {
-    memset(threads, 0, sizeof threads);
+    const uint64_t table = pmm_alloc_contig((unsigned)((sizeof(thread_t) * MAX_THREADS + PAGE_SIZE - 1) / PAGE_SIZE));
+    KASSERT(table);
+    threads = (thread_t *)p2v(table);                                       /* zeroed: every slot is TS_FREE */
+    thread_hi = 1;
     current = &threads[0];
     current->id = next_id++;
     current->state = TS_RUNNING;

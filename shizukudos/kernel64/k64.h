@@ -83,6 +83,8 @@ void mem_init(const shz_bootinfo_t *bi);
 uint64_t mem_ram_top(void);                     /* bytes of guest-physical RAM managed */
 uint64_t pmm_alloc(void);                       /* zeroed physical page, 0 on exhaustion */
 void pmm_free(uint64_t pa);
+uint64_t pmm_alloc_contig(unsigned n);          /* n contiguous zeroed physical pages (top of the map), 0 on exhaustion */
+void pmm_free_contig(uint64_t pa, unsigned n);
 uint64_t pmm_free_count(void);
 uint64_t pmm_total_count(void);                 /* pages the page allocator manages */
 /* krandom.c: entropy pool + ChaCha20 CSPRNG (seeded at boot, fed by every interrupt) */

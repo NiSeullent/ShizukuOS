@@ -70,6 +70,53 @@ void pmm_free(uint64_t pa)
     irq_restore(f);
 }
 
+/* A run of n physically contiguous zeroed pages (kernel stacks, the scheduler's thread table), searched top-down so the runs stay
+ * clear of the single pages pmm_alloc() hands out from the bottom of the map. contig_hint is the exclusive upper bound of the next
+ * search: it follows the last run handed out and is lifted again by pmm_free_contig(), so thread churn recycles the same slots. */
+static uint64_t contig_hint;
+
+uint64_t pmm_alloc_contig(unsigned n)
+{
+    uint64_t f, i, run, start, base = 0;
+    unsigned pass;
+    if (!n) return 0;
+    f = irq_save();
+    for (pass = 0; pass < 2 && !base; ++pass) {
+        start = (!pass && contig_hint && contig_hint <= pmm_pages) ? contig_hint : pmm_pages;
+        run = 0;
+        for (i = start; i > 0;) {
+            --i;
+            if ((i & 7) == 7 && page_map[i >> 3] == 0xff) { i -= 7; run = 0; continue; }     /* a fully used byte of the map */
+            if (bit_get(i)) { run = 0; continue; }
+            if (++run == n) { base = i + 1; break; }                                        /* base is stored +1: 0 means none */
+        }
+    }
+    if (!base) { irq_restore(f); return 0; }
+    --base;
+    for (i = 0; i < n; ++i) bit_set(base + i);
+    pmm_free_pages -= n;
+    contig_hint = base;
+    irq_restore(f);
+    memset((void *)p2v(PMM_BASE + base * PAGE_SIZE), 0, (size_t)n * PAGE_SIZE);
+    return PMM_BASE + base * PAGE_SIZE;
+}
+
+void pmm_free_contig(uint64_t pa, unsigned n)
+{
+    uint64_t f, i;
+    KASSERT(pa >= PMM_BASE && !(pa & 0xfff));
+    f = irq_save();
+    i = (pa - PMM_BASE) / PAGE_SIZE;
+    KASSERT(i + n <= pmm_pages);
+    for (; n; --n, ++i) {
+        KASSERT(bit_get(i));
+        bit_clr(i);
+        ++pmm_free_pages;
+    }
+    if (i > contig_hint) contig_hint = i;
+    irq_restore(f);
+}
+
 uint64_t pmm_free_count(void) { return pmm_free_pages; }
 uint64_t pmm_total_count(void) { return pmm_pages; }
 
