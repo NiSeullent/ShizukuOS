@@ -13,8 +13,9 @@ set after every merge, failed merges reset off the pass. The newest pass is firs
 
 **Gate list, in order:** `platform/build.py`, `platform/test.py`, `platform/abi32/build.py`, vxd build+test, ntwddm make
 test/freestanding/sanitize, `platform/freestanding/test.py`, ntwddm/win98 test+build, pcie make + i486 object check,
-uefi/uefi32/ahci/fat/xhci/usb/usb_config build+test, win98lab storage/packed/trial tests, native runner + logs,
-app_probe (both modes), `ntwin32/exception/test.py`, `win64/tests/test_pe_parse.py` + `abi/test_abi.py`,
+uefi/uefi32/ahci/fat build+test, win98lab storage/packed/trial tests, native runner + logs,
+app_probe (both modes), `ntwin32/exception/test.py`, xhci and usb (including usb_config) build+test,
+`win64/tests/test_pe_parse.py` + `abi/test_abi.py`,
 `win64/build.py`, `kbuild.py`, `run_k32_standalone.py`, `run_k64_standalone.py` ×2, `run_k64_gui.py`, `run_k64_net.py`,
 `run_k64_disk.py`, `run_k64_sfs.py`, `run_k64_ntdrv.py`, `win64/tools/import_coverage.py`, `run_k64_storage.py`,
 `dos16/build.py` (the input that `supervisor/build.py` asks for), `supervisor/build.py` + `supervisor/test_bootmgr.py`,
@@ -28,9 +29,13 @@ and `shz.py test --suite media` when the tree has it.
    ("FAT32 delete/rename", in the base since PR #9) made `DeleteFileA` on D: work. The delete then removes `D:\OUT\Sub Dir\small.txt` before the read-back, so
    `FAT32 write: the guest read back what it wrote ... OUT/Sub Dir/small.txt: guest (0, 0) host (46, 326510751)`. Reproduced on base `f97a2de` alone in a clean worktree
    (`run_k64_disk.py`: 2 of 29 T_DISK checks failed; `run_k64_storage.py`: same) and identical with k4 merged. The test's expectation (or the feature) needs updating by the owner of
-   `t_disk.c` / K3. Until then no merge can turn these two gates green.
+   `t_disk.c` / K3. **`run_k64_disk.py` has a second, separate cause that fixing `t_disk.c` does not remove:** `[FAIL] AHCI write path: WRITE DMA EXT sectors and FLUSH CACHE EXT
+   commands completed (kernel counters)  no flush line`. The runner (`shizukudos/tests/run_k64_disk.py`, lines 226 to 231 at `f97a2de`) matches `... D: (\d+) write\(s\), (\d+) create\(s\), (\d+) sector writes`,
+   but K3's `a27935f` changed the kernel line (`shizukudos/kernel64/disk.c:250`) to `... 4 create(s), 0 delete(s), 0 rename(s), 731 sector writes`, so the regex never matches (0 matches on the
+   recorded `serial.log`; the counters themselves would pass its thresholds). `run_k64_storage.py` does not have this check. Both files are unchanged between `f97a2de` and `513808d`. Until the test,
+   the runner regex and (if delete is now supported) the expected `small.txt` in `run_k64_disk.py` are updated by their owners, no merge can turn these two gates green.
 2. **`run_k32_standalone.py` hangs intermittently in the base** (about 2 % of runs: base `f97a2de` alone 4 of 240; 3 hangs after `K32 test PASS: #PF handler demand-maps 16 kernel pages`
-   with `qemu_rc=-9` after the 120 s timeout, 1 unexpected ring-3 `#GP` with exit code 98). Not caused by k4: the Kernel32 image is byte-identical with and without k4 (below).
+   with `qemu_rc=-9` after the 120 s timeout, 1 ring-3 `#GP` that was not contained, exit code 98). Not caused by k4: the Kernel32 image is byte-identical with and without k4 (below).
 3. **`wip/integration` on origin is no longer only I2's merges.** The lead merged PR #30 (`wip/e1-electron`) into it (`d48508a`, 09:35Z). I2 therefore does not reset or force-push it;
    it pushes fast-forward commits on top. The merge commits I2 builds and gates live in local fresh-from-base worktrees, and the tables give (base commit, branch commit, tree hash),
    which the lead reproduces with `git merge --no-ff <branch>` on that base. A tree hash is reproducible only on the same base tree.
@@ -88,7 +93,7 @@ where a FAIL is expected until the Chromium milestone and only a kernel crash or
 | `k64_standalone_2` | PASS | 94s |  |
 | `k64_gui` | PASS | 141s |  |
 | `k64_net` | PASS | 235s |  |
-| `k64_disk` | FAIL | 98s | `T_DISK.EXE`: `FAIL: delete on D: is refused (not supported)`; same failure on base alone |
+| `k64_disk` | FAIL | 98s | two causes, both present on base alone: `T_DISK.EXE` `FAIL: delete on D: is refused (not supported)`, and `[FAIL] AHCI write path ... no flush line` (runner regex vs K3's changed kernel line, see Read first item 1) |
 | `k64_sfs` | PASS | 100s |  |
 | `k64_ntdrv` | PASS | 1s |  |
 | `import_coverage` | PASS | 0s |  |
@@ -98,8 +103,9 @@ where a FAIL is expected until the Chromium milestone and only a kernel crash or
 | `media_suite` | PASS | 2362s |  |
 | `run_k64_pnp` | BLOCKED, then PASS (2 s, 11 checks) | 2s | first attempt: `BLOCKED: driver corpus not built`; after `ntdrv/corpus/fetch.py` + `build.py --packages` (23 of 27 drivers built) it passes |
 
-The `media` suite (`shz.py test --suite media`) passed in 2362 s. Gates 1 to 21 ran in `p4-k4`, `k32` to `k64_disk` in `p4-k4b`, `k64_sfs` onward in `p4-k4c` (the runner was resumed after each
-failure so that one inherited failure does not hide the later gates; nothing was skipped). `import_coverage` and `k64_ntdrv` pass.
+The `media` suite (`shz.py test --suite media`) passed in 2362 s. Gates 1 to 21 ran in `p4-k4`, `k32` to `k64_disk` in `p4-k4b`, `k64_sfs` onward in `p4-k4c` (the runner was restarted twice: after the `k32`
+hang (`p4-k4b`, from `k32` on) and after the `k64_disk` failure (`p4-k4c`, from `k64_sfs` on, in a continue-on-fail mode so the later `k64_storage` failure did not stop it either); the
+`run_k64_pnp` BLOCKED result was re-run by hand after building the driver corpus; nothing was skipped). `import_coverage` and `k64_ntdrv` pass.
 
 **`run_k64_chromium.py` (Chromium snapshot 1706750, `chrome.exe` sha256 `50e3f9ee0aa1c2d55bde01aa822c7a91fa558fa73fdf2648d05bc00b2ba2c93e`, tree of 258 files), `--accel tcg`:**
 `status` FAIL (expected until the milestone), `seconds` 16.4, `exit_code` 0x80000003, `faulted` false, `ended_by` exited, `autorun_result`
@@ -118,7 +124,7 @@ failure so that one inherited failure does not hide the later gates; nothing was
   `K32 test PASS: #PF handler demand-maps 16 kernel pages` (the next stage, the ring-3 test, never reports). (2) The Kernel32 image is byte-identical with and without k4:
   `KERNEL32S.BIN` sha256 `5da79d3d88412a2dfdb4...` in both trees, built at the same path (images embed absolute source paths, so only same-path builds compare).
   k4 changes only `win64/kernel32`, `win64/ntdll`, `win64/tests` and docs, not `shizukudos/kernel32`. (3) Repeats: the k4 tree failed 1 of 30 further runs at the same point;
-  the base `f97a2de` alone failed 4 of 240 runs (3 at the same point, 1 with an unexpected ring-3 `#GP`: `K32 EXCEPTION #GP (vec 13) err=0 eip=40000011 cs=1b`, exit code 98,
+  the base `f97a2de` alone failed 4 of 240 runs (3 at the same point, 1 where the test's own deliberate ring-3 `#GP` (the `cli` at byte 17 of `shizukudos/kernel32/user_fault.asm`, eip 0x40000011) was not contained: the kernel printed `K32 EXCEPTION #GP (vec 13) err=0 eip=40000011 cs=1b` instead of killing the process, exit code 98,
   `[FAIL] ring-3 exit code 42, #GP and #PF contained  42 0x0 0x0`). Each run takes 0 to 1 s when it passes. The test was not skipped, changed or quarantined; the failures are
   reported here as they happened. Cause unknown; it sits in the Kernel32 ring-3 phase (about 2 % of runs) and belongs to whoever owns `shizukudos/kernel32`.
 
@@ -168,7 +174,7 @@ Base `30c597719071cdd801cc33b84a092d340db46a94` (tree `94c55c94ce0a778a77169d019
 | wip/n4-ntdrv-coverage | `f0f7a7429c3a645d99bb167bb2d41886e068a18d` | **PASSED** (all gates) | `ddc04f0a3408a52814ccfec0417fe8b9b53210a6` | `eefd74f` |
 | wip/n3-driver-load | — | not on origin | — | — |
 | wip/k5-chromium-dlls | — | not on origin | — | — |
-| wip/k4-chromium-run | (`f291938` when n4 finished) | not run in this pass; moved to pass 2 on the new base | — | — |
+| wip/k4-chromium-run | (`f291938` when n4 finished) | not run in this pass; not run in pass 2 or 3 either (both were n4-only and were aborted when the base moved); first merged and gated in pass 4 at base `f97a2de` (merge `7af6b57`, tip `d212e35`) | — | — |
 | wip/r1-release | — | not on origin | — | — |
 
 `shz.py test --suite media`: not runnable at `30c5977`. The runner has no such suite (`argument --suite: invalid choice: 'media'`).
