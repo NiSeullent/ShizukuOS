@@ -19,8 +19,8 @@
 | `shz.py test --suite host` | — | VERIFIED (5 PASS) |
 | `shz.py test --suite win98-regression` | HOST_TESTED / GUEST_RUN(TCG) | 19 PASS / 0 FAIL / 1 SKIP / 1 BLOCKED |
 | 기존 UEFI x64 부팅, UEFI→32비트 PM 핸드오프 | GUEST_RUN (**TCG**) | PASS |
-| NT 드라이버 호스트: 미수정 x64 `.sys` 3개 로드+DriverEntry, IRP/DPC/타이머/스레드, PCI(edu) BAR/IRQ(공유 INTx 체인)+`pci_claim ntdrv:shzpci`, 사용자 모드 NtLoadDriver→IOCTL (`run_k64_ntdrv.py`) | GUEST_RUN (**TCG**) | PASS 10/10 (provider export 185) |
-| 드라이버 import 커버리지 (`import_coverage.py --ntoskrnl`) | HOST_TESTED | 시험 드라이버 3개 25/25; N2 ReactOS 코퍼스 23개 중 로드 가능 1개(null.sys), ntoskrnl 103/313 |
+| NT 드라이버 호스트: 미수정 x64 `.sys` 로드+DriverEntry, IRP/DPC/타이머/스레드, PCI(edu) BAR/IRQ, 사용자 모드 NtLoadDriver→IOCTL, 확장 export 표면(Ex/SList/ERESOURCE/레지스트리/PnP/Po/WMI/DMA/파티션/SEH) `APITEST.SYS` 99개 검사, KMDF(WdfLdr→Wdf01000 바인딩, cdrom/hdaudbus의 FxDriverEntry→WdfVersionBind→WdfDriverCreate 성공), 코퍼스 23개 중 **22개** DriverEntry 성공(uniata만 ATA 컨트롤러 없음 → STATUS_DEVICE_DOES_NOT_EXIST) (`run_k64_ntdrv.py`, `--kmdf`, `--corpus`) | GUEST_RUN (**TCG**) | 기본 13/13, --kmdf 19/19, --corpus 21/21 PASS (provider export 572) |
+| 드라이버 호스트: 코퍼스 **449개 중 449개** 고유 import 해석 (ntoskrnl 313/313, hal 12/12, export 드라이버 ndis 51/51·classpnp 30/30·scsiport 28/28·storport 11/11·wdfldr 4/4 포함); 인텔 Win10 목록: **측정 불가 — BLOCKED** (이 저장소에 목록/패키지 없음; `import_coverage.py <패키지> --ntoskrnl build/shizukudos/win64/ntdrv --export-drivers`로 사용자 쪽에서 산출) | HOST_TESTED (정적) + GUEST_RUN (로드 22/23) | 이전 측정: ntoskrnl 103/313, 로드 가능 1/23 |
 
 `win98-regression`의 BLOCKED는 설치된 Windows 98 체크포인트(`build/win98-lab`, 사용자 제공 자산) 부재,
 SKIP은 Notepad++ (USER_REPORTED만 존재, 이 스위트는 게스트를 실행하지 않음)이다. Notepad++ 성공/실패를 이 문서는 단정하지 않는다.
