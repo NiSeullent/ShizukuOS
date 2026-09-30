@@ -22,7 +22,7 @@ static uint8_t *slurp(const char *path, size_t *n)
     return b;
 }
 
-struct impctx { unsigned count, ordinals; char last_dll[64], last_sym[64]; };
+struct impctx { unsigned count, ordinals, longest; char last_dll[64], last_sym[64]; };
 static int imp_cb(void *c, const char *dll, const char *name, uint16_t hint, int by_ord, uint32_t iat_rva)
 {
     struct impctx *x = c;
@@ -31,6 +31,7 @@ static int imp_cb(void *c, const char *dll, const char *name, uint16_t hint, int
     if (by_ord) ++x->ordinals;
     strncpy(x->last_dll, dll, 63);
     if (name) strncpy(x->last_sym, name, 63);
+    if (name && strlen(name) > x->longest) x->longest = (unsigned)strlen(name);
     return 0;
 }
 struct relctx { unsigned n, dir64; };
@@ -54,7 +55,17 @@ static void test_valid(const uint8_t *dll, size_t dn, const uint8_t *exe, size_t
     CHECK(pe_find_export(dll, dn, &d, "nosuch", -1, &rva, fwd, sizeof fwd) == PE_E_NOT_FOUND);
     CHECK(pe_find_export(dll, dn, &d, 0, 7, &rva, fwd, sizeof fwd) == PE_OK && rva);            /* by ordinal */
     CHECK(pe_find_export(dll, dn, &d, 0, 500, &rva, fwd, sizeof fwd) == PE_E_NOT_FOUND);
-    CHECK(pe_walk_imports(exe, en, &e, imp_cb, &ic) == PE_OK && ic.count >= 2);
+    CHECK(pe_walk_imports(exe, en, &e, imp_cb, &ic) == PE_OK && ic.count >= 3);
+    CHECK(ic.longest == 300);                                                                     /* no length cap */
+    {   /* a 300-character export name: found by name, and it does not stop the scan for the names after it */
+        char lname[301];
+        memcpy(lname, "ShzLongExportName_", 18);
+        memset(lname + 18, 'x', 282);
+        lname[300] = 0;
+        CHECK(pe_find_export(dll, dn, &d, lname, -1, &rva, fwd, sizeof fwd) == PE_OK && rva && !fwd[0]);
+        lname[299] = 0;
+        CHECK(pe_find_export(dll, dn, &d, lname, -1, &rva, fwd, sizeof fwd) == PE_E_NOT_FOUND);  /* prefix only */
+    }
     CHECK(pe_walk_relocs(dll, dn, &d, rel_cb, &rc) == PE_OK);
 }
 
