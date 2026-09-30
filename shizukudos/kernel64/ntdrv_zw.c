@@ -251,7 +251,10 @@ NTSTATUS NTAPI ZwEnumerateKey(uint64_t handle, uint32_t index, uint32_t cls, voi
     var = regkey_name(child); varlen = child->name_len * 2;
     switch (cls) {
     case 0: fixed = 0x10; memcpy(tmp + 0xc, &varlen, 4); break;
-    case 1: fixed = 0x18; { uint32_t cl = child->class_len * 2, co = cl ? 0x18 + varlen : 0xffffffffu; memcpy(tmp + 0xc, &co, 4); memcpy(tmp + 0x10, &cl, 4); memcpy(tmp + 0x14, &varlen, 4); } break;
+    case 1: fixed = 0x18; {   /* the key's class string is not returned: ClassOffset -1 and ClassLength 0 say so */
+        uint32_t cl = 0, co = 0xffffffffu;
+        memcpy(tmp + 0xc, &co, 4); memcpy(tmp + 0x10, &cl, 4); memcpy(tmp + 0x14, &varlen, 4);
+    } break;
     case 2: {
         uint32_t cl = child->class_len * 2, co = cl ? 0x2c : 0xffffffffu, maxname = 0, maxclass = 0, maxvname = 0, maxvdata = 0;
         regkey_t *c; regval_t *v;
@@ -288,13 +291,13 @@ NTSTATUS NTAPI ZwQueryInformationFile(uint64_t handle, IO_STATUS_BLOCK *iosb, vo
         memset(&s, 0, sizeof s);
         s.alloc = s.eof = f->node->size; s.links = 1; s.del = f->node->delete_pending != 0; s.dir = f->node->is_dir != 0;
         n = sizeof s;
-        if (len < n) st = STATUS_BUFFER_TOO_SMALL; else memcpy(buf, &s, n);
+        if (len < n) st = STATUS_INFO_LENGTH_MISMATCH; else memcpy(buf, &s, n);
     } else if (cls == 4) {
         struct { int64_t t[4]; uint32_t attrs, pad; } b;
         memset(&b, 0, sizeof b);
         b.attrs = f->node->attrs ? f->node->attrs : (f->node->is_dir ? 0x10 : 0x80);
         n = sizeof b;
-        if (len < n) st = STATUS_BUFFER_TOO_SMALL; else memcpy(buf, &b, n);
+        if (len < n) st = STATUS_INFO_LENGTH_MISMATCH; else memcpy(buf, &b, n);
     } else st = STATUS_INVALID_INFO_CLASS;
     if (iosb) { iosb->Status = st; iosb->Information = st ? 0 : n; }
     return st;

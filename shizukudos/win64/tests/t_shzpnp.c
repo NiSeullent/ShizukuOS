@@ -155,7 +155,8 @@ int main(void)
     BYTE raw[64];
     static const WCHAR SVC[] = L"SYSTEM\\CurrentControlSet\\Services\\synthpnp";
     static const WCHAR DEV[] = L"SYSTEM\\CurrentControlSet\\Enum\\PCI\\VEN_1AF4&DEV_7001&SUBSYS_00011AF4&REV_01\\SHZ0000";
-    static const WCHAR CLS[] = L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0000";
+    static WCHAR CLS[200] = L"SYSTEM\\CurrentControlSet\\Control\\Class\\";
+    WCHAR drvval[80];
 
     mkdir_a("C:\\SHZTEST");
     mkdir_a(PKG);
@@ -191,7 +192,15 @@ int main(void)
     CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Services\\synthpnp\\Parameters", L"Name", REG_SZ, L"a, \"quoted\" value"),
           "quoted string with comma and doubled quotes");
     CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, DEV, L"Service", REG_SZ, L"synthpnp"), "device key Service = the SPSVCINST_ASSOCSERVICE service");
-    CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, DEV, L"Driver", REG_SZ, L"{4d36e972-e325-11ce-bfc1-08002be10318}\\0000"), "device key Driver = {ClassGUID}\\0000");
+    {   /* Driver = {ClassGUID}\NNNN: NNNN is the next free software-key index, so it is 0000 only when this package is the
+         * first of its class (T_DRV_PNP.EXE installs a Net-class package first in run_k64_gui.py --pnp) */
+        DWORD dt = 0, dn = sizeof drvval - 2;
+        int ok = q_raw(HKEY_LOCAL_MACHINE, DEV, L"Driver", &dt, (BYTE *)drvval, &dn) && dt == REG_SZ;
+        if (ok) drvval[dn / 2] = 0;
+        CHECK(ok && weq_ci_n(drvval, L"{4d36e972-e325-11ce-bfc1-08002be10318}\\", 39) && wl(drvval) == 43,
+              "device key Driver = {ClassGUID}\\NNNN (the Net class, a 4-digit software key)");
+        if (ok) lstrcatW(CLS, drvval);
+    }
     {   /* the six PCI hardware IDs in the documented order, as REG_MULTI_SZ ("a\0b\0...\0\0") */
         static WCHAR hw[800];
         DWORD hl = sizeof hw;
@@ -207,11 +216,15 @@ int main(void)
     }
     CHECK(q_dword(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Enum\\PCI\\VEN_1AF4&DEV_7001&SUBSYS_00011AF4&REV_01\\SHZ0000\\Device Parameters",
                   L"MSISupported") == 1, ".HW AddReg lands in Device Parameters");
-    CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0000\\Ndi",
-                  L"Service", REG_SZ, L"synthpnp"), "DDInstall AddReg (HKR = software key): Ndi\\Service");
-    t = 0; sz = sizeof raw;
-    CHECK(q_raw(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e972-e325-11ce-bfc1-08002be10318}\\0000\\Ndi\\Interfaces",
-                L"UpperRange", &t, raw, &sz) && t == REG_MULTI_SZ && sz == (6 + 6 + 1) * 2, "FLG_ADDREG_TYPE_MULTI_SZ: ndis5, ndis6");
+    {
+        WCHAR sub[240];
+        lstrcpyW(sub, CLS); lstrcatW(sub, L"\\Ndi");
+        CHECK(q_sz_eq(HKEY_LOCAL_MACHINE, sub, L"Service", REG_SZ, L"synthpnp"), "DDInstall AddReg (HKR = software key): Ndi\\Service");
+        lstrcatW(sub, L"\\Interfaces");
+        t = 0; sz = sizeof raw;
+        CHECK(q_raw(HKEY_LOCAL_MACHINE, sub, L"UpperRange", &t, raw, &sz) && t == REG_MULTI_SZ && sz == (6 + 6 + 1) * 2,
+              "FLG_ADDREG_TYPE_MULTI_SZ: ndis5, ndis6");
+    }
     t = 0; sz = sizeof raw;
     CHECK(q_raw(HKEY_LOCAL_MACHINE, CLS, L"Blob", &t, raw, &sz) && t == REG_BINARY && sz == 3 && raw[0] == 1 && raw[1] == 2 && raw[2] == 0xff,
           "FLG_ADDREG_BINVALUETYPE: REG_BINARY 01 02 ff");

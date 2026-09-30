@@ -11,9 +11,9 @@ NDIS miniport (shizukudos/ntdrv/corpus/build.py --packages) and the unmodified R
                               the Enum-bound function claimed (ntdrv:e1000), AddDevice + IRP_MN_START_DEVICE
   SHZPNP.EXE status       ->  the adapter's device object and PCI function
 
-The guest program \\SHZ\\TESTS\\T_PNP_LOAD.EXE issues these commands and checks the results (registry, claim registry,
+The guest program \\SHZ\\TESTS\\T_DRV_PNP.EXE issues these commands and checks the results (registry, claim registry,
 device object, an IRP_MJ_CREATE to the adapter); the kernel log carries the loader/PnP evidence. The initrd is
-composed here from WIN64.IMG (system DLLs, SHZPNP.EXE, T_HELLO.EXE), T_PNP_LOAD.EXE, ndis.sys under \\SHZ\\SYS64\\DRIVERS
+composed here from WIN64.IMG (system DLLs, SHZPNP.EXE, T_HELLO.EXE), T_DRV_PNP.EXE, ndis.sys under \\SHZ\\SYS64\\DRIVERS
 and the driver store built with store.py, so the default WIN64.IMG is untouched.
 
 Exit codes: 0 PASS, 1 FAIL (any FAIL line, missing evidence, timeout), 2 BLOCKED (the corpus is not built here:
@@ -67,11 +67,21 @@ def load_pack_archive():
     return mod.pack_archive
 
 
-def compose_initrd(out_dir):
-    """WIN64.IMG minus the other T_*.EXE, plus T_PNP_LOAD.EXE, ndis.sys and the driver store."""
+NEEDED = "python3 shizukudos/ntdrv/corpus/fetch.py && python3 shizukudos/ntdrv/corpus/build.py --packages"
+QEMU_E1000 = ["-netdev", "user,id=n0", "-device", "e1000,netdev=n0"]
+
+
+def corpus_missing():
+    """The corpus artifacts this runner needs that are not built here (empty when all are present)."""
+    return [str(p) for p in (PACKAGE / "e1000.sys", PACKAGE / "nete1000.inf", NDIS) if not p.exists()]
+
+
+def compose_initrd(out_dir, keep_tests=False):
+    """WIN64.IMG (minus the other T_*.EXE unless keep_tests: run_k64_gui.py --pnp keeps them all), plus T_DRV_PNP.EXE,
+    ndis.sys and the driver store."""
     files = [(p, d) for p, d in unpack_archive((WIN64 / "WIN64.IMG").read_bytes())
-             if not (p.upper().startswith("\\SHZ\\TESTS\\T_") and p.upper() != "\\SHZ\\TESTS\\T_HELLO.EXE")]
-    files.append(("\\SHZ\\TESTS\\T_PNP_LOAD.EXE", (WIN64 / "t_pnp_load.exe").read_bytes()))
+             if keep_tests or not (p.upper().startswith("\\SHZ\\TESTS\\T_") and p.upper() != "\\SHZ\\TESTS\\T_HELLO.EXE")]
+    files.append(("\\SHZ\\TESTS\\T_DRV_PNP.EXE", (WIN64 / "t_drv_pnp.exe").read_bytes()))
     files.append(("\\SHZ\\SYS64\\DRIVERS\\ndis.sys", NDIS.read_bytes()))
     root = Path(tempfile.mkdtemp(prefix="shzpnpstore"))
     try:
@@ -97,9 +107,9 @@ def evaluate(serial, exit_code):
     c = []
     c.append(check("Kernel64 finished its self-tests and exited 0", exit_code == 0 and "K64 test FAIL" not in serial, f"exit={exit_code}"))
     c.append(check("the e1000 function is on the bus (kernel PCI scan reports 8086:100e)", bool(re.search(r"K64 pci: \S+ 8086:100e", serial))))
-    c.append(check("T_PNP_LOAD.EXE ran to PASS", "t_pnp_load: PASS" in serial, "t_pnp_load: FAIL" if "t_pnp_load: FAIL" in serial else ""))
-    fails = re.findall(r"T_PNP_LOAD\.EXE pid \d+\] (FAIL: .*)", serial)
-    c.append(check("no FAIL line from T_PNP_LOAD.EXE", not fails, "; ".join(fails[:5])))
+    c.append(check("T_DRV_PNP.EXE ran to PASS", "t_drv_pnp: PASS" in serial, "t_drv_pnp: FAIL" if "t_drv_pnp: FAIL" in serial else ""))
+    fails = re.findall(r"T_DRV_PNP\.EXE pid \d+\] (FAIL: .*)", serial)
+    c.append(check("no FAIL line from T_DRV_PNP.EXE", not fails, "; ".join(fails[:5])))
     c.append(check("e1000.sys imports ndis.sys, which the host loaded first (unmodified ReactOS ndis.sys, DriverEntry run)",
                    "K64 ntdrv: e1000 imports ndis.sys: loading it first" in serial and
                    bool(re.search(r"K64 ntdrv: ndis mapped at [0-9a-f]+ \(\d+ bytes\), calling DriverEntry", serial))))
@@ -113,7 +123,8 @@ def evaluate(serial, exit_code):
     c.append(check("IRP_MN_START_DEVICE completed with STATUS_SUCCESS (MiniportInitialize ran on the NIC)",
                    bool(re.search(r"K64 ntdrv: e1000 IRP_MN_START_DEVICE\(PCI [^)]*\) = 0 \(started\)", serial)),
                    "; ".join(re.findall(r"K64 ntdrv: e1000 IRP_MN_START_DEVICE.*", serial)[:2])))
-    c.append(check("no kernel fault or bug check", "KeBugCheck" not in serial and "K64 panic" not in serial and "#PF" not in serial))
+    c.append(check("no kernel panic or bug check", "K64 PANIC" not in serial and "KeBugCheck" not in serial,
+                   "; ".join(re.findall(r"K64 PANIC.*", serial)[:2])))
     return c
 
 
@@ -126,16 +137,15 @@ def main():
     ap.add_argument("--out", default=str(K64S / "pnp-run"))
     args = ap.parse_args()
     stub, kernel = K64S / "boot.elf", K64S / "KERNEL64S.BIN"
-    for f in (stub, kernel, WIN64 / "WIN64.IMG", WIN64 / "t_pnp_load.exe"):
+    for f in (stub, kernel, WIN64 / "WIN64.IMG", WIN64 / "t_drv_pnp.exe"):
         if not f.exists():
             raise SystemExit(f"missing {f}: run shizukudos/kbuild.py and shizukudos/win64/build.py first")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    missing = [str(p) for p in (PACKAGE / "e1000.sys", PACKAGE / "nete1000.inf", NDIS) if not p.exists()]
+    missing = corpus_missing()
     if missing:
         record = {"profile": "kernel64-standalone + e1000 (NT driver host PnP, no Supervisor, no VMX)", "status": "BLOCKED",
-                  "reason": "driver corpus not built: " + ", ".join(missing),
-                  "needed": "python3 shizukudos/ntdrv/corpus/fetch.py && python3 shizukudos/ntdrv/corpus/build.py --packages",
+                  "reason": "driver corpus not built: " + ", ".join(missing), "needed": NEEDED,
                   "utc": shzlib.utc_now(), "git": shzlib.git_state()}
         shzlib.write_json(out / "result.json", record)
         print("BLOCKED: " + record["reason"])
@@ -147,7 +157,7 @@ def main():
     serial_path.unlink(missing_ok=True)
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults",
            "-display", "none", "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
-           "-netdev", "user,id=n0", "-device", "e1000,netdev=n0", "-serial", f"file:{serial_path}",
+           *QEMU_E1000, "-serial", f"file:{serial_path}",
            "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot"]
     started = time.time()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

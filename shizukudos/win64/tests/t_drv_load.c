@@ -131,11 +131,13 @@ int main(void)
     if (n <= 0) return finish_tests("t_drv_load");
     CHECK(write_file(PKG "\\echo.sys", img, (DWORD)n), "package binary written");
 
-    /* the target: the last PCI function of the Kernel64 bus scan that no kernel driver drives and that is not the
-     * display (T_GUI_STATUS checks the display's own binding); a hand-given device when the scan is unavailable */
+    /* the target: a PCI function of the Kernel64 bus scan that no kernel driver drives and that is neither the
+     * display (T_GUI_STATUS checks the display's own binding) nor a storage or network controller (T_DRV_PNP installs
+     * the real e1000 driver on the NIC in run_k64_pnp.py/run_k64_gui.py --pnp); a bridge or the ISA/ACPI function of
+     * the chipset qualifies; a hand-given device when the scan is unavailable */
     if (NtQuerySystemInformation(0x101, rows, sizeof rows, &nrows) == 0)
         for (i = 0; i < (int)nrows && i < 32; ++i)
-            if (!rows[i].driver[0] && rows[i].cls != 3) pick = i;
+            if (!rows[i].driver[0] && rows[i].cls != 3 && rows[i].cls != 2 && rows[i].cls != 1) pick = i;
     if (pick >= 0) {
         bus = rows[pick].bus; dev = rows[pick].dev; fn = rows[pick].fn;
         vendor = rows[pick].vendor; device = rows[pick].device;
@@ -209,8 +211,30 @@ int main(void)
         code = shzpnp("load shzbadimp");
         CHECK(code == 1, "load of an image with an unresolvable import: refused (STATUS_PROCEDURE_NOT_FOUND), exit 1, no fault");
     }
+    {   /* an image that imports from itself: ECHO.SYS with the import DLL name "ntoskrnl.exe" replaced by its own file name
+         * "shzloop1.sys" (same length). The loader must refuse the cycle, not load copies of it until the stack is gone. */
+        int patched = 0;
+        n = read_file(ECHO_SRC, img, sizeof img);
+        for (i = 0; n > 0 && i + 13 <= n; ++i)
+            if (!memcmp(img + i, "ntoskrnl.exe", 13)) { memcpy(img + i, "shzloop1.sys", 13); patched = 1; break; }
+        CHECK(patched, "a copy of ECHO.SYS importing itself (import DLL name = its own file name) prepared");
+        CHECK(write_file("C:\\SHZ\\SYS64\\DRIVERS\\shzloop1.sys", img, (DWORD)n), "written to SYS64\\DRIVERS");
+        CHECK(make_service(L"shzloop1", 0), "service shzloop1 created");
+        code = shzpnp("load shzloop1");
+        CHECK(code == 1, "load of an image that imports itself: refused as an import cycle, exit 1, no recursion or fault");
+    }
     code = shzpnp("unload nosuchservice");
     CHECK(code == 1, "unload of a service that is not loaded: exit 1");
+    {   /* a device with a handle open on it keeps its driver loaded (the handle references the device object) */
+        HANDLE hh = CreateFileW(L"\\\\.\\ShzEcho", GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
+        CHECK(hh != INVALID_HANDLE_VALUE, "the device opens again");
+        code = shzpnp("unload shzecho");
+        CHECK(code == 1, "unload while a handle is open on the device: refused (STATUS_CONNECTION_IN_USE), exit 1");
+        if (hh != INVALID_HANDLE_VALUE) {
+            CHECK(echo_roundtrip(hh), "the driver still answers after the refused unload");
+            CloseHandle(hh);
+        }
+    }
     code = shzpnp("status shzecho");
     CHECK(code == 0, "the kernel and the loaded driver survived the error paths");
 
