@@ -20,6 +20,61 @@ app_probe (both modes), `ntwin32/exception/test.py`, `win64/tests/test_pe_parse.
 `dos16/build.py` (the input that `supervisor/build.py` asks for), `supervisor/build.py` + `supervisor/test_bootmgr.py`,
 and `shz.py test --suite media` when the tree has it.
 
+## Pass 4 — started 2026-09-30T08:15:13Z (IN PROGRESS: nothing below is verified until a row says PASSED)
+
+Base `f97a2de87432720fd984c8e67bc3effec6cf9612` (tree `366c85bfb9dd06ce554cc4f020ad74a40ad503b3`). This base already contains
+N3 (`f78a07e`, merged by the lead with its own overlap notes), K3/K4-earlier/E1 through `main`, R1 and N4 `f0f7a74`.
+Agent tips at the start of the pass: n4 `13c3157`, n3 `f78a07e` (0 commits ahead of the base), k5 `0a0adb9`, k4 `d212e35`;
+`wip/r1-release` is not on origin (R1 is in the base). `wip/e1-electron` is not on the I2 merge list; it is in the base via `main`.
+
+| branch | commit | result | tree after merge | notes |
+|---|---|---|---|---|
+| wip/n4-ntdrv-coverage | `13c3157` | **FAILED at merge** (no gate ran) | — | 6 conflicted files, 15 hunks, not a pure conflict; evidence below |
+| wip/n3-driver-load | `f78a07e` | already in the base | — | nothing to merge; its code is covered by the gates of the next row |
+| wip/k5-chromium-dlls | `0a0adb9` | **FAILED at merge** (no gate ran) | — | 2 conflicted files, 3 hunks, two mechanisms for the same feature; evidence below |
+| wip/k4-chromium-run | `d212e35` | merge commit `7af6b57`, gates **RUNNING**, not yet verified | `ee539fc0191629e1d2d430c4c286ba3ce8d927c2` | merges clean (`git merge-tree` rc 0); result goes into this row |
+| wip/r1-release | — | in the base | — | branch not on origin |
+
+Extra runners for this pass: `run_k64_pnp.py` (added by N3, now in the base) inside the gate run; `run_k64_chromium.py` afterwards,
+where a FAIL is expected until the Chromium milestone and only a kernel crash or a regression elsewhere counts against a branch.
+`run_k64_electron.py` is not run (E1 is not on the merge list; it needs inputs this machine does not have).
+
+### Why n4 (`13c3157`) was not merged — evidence
+
+`git merge origin/wip/n4-ntdrv-coverage` onto the base: `CONFLICT` in `shizukudos/kernel64/ntdrv_io.c` (6 hunks), `ntdrv_ke.c` (2),
+`ntdrv_mm.c` (1), `ntdrv_pnp.c` (2, **add/add**: the base's file has 824 lines from N3, N4's has 1816 lines from its second export
+batch), `ntdrv_prov.c` (3), `ntdrv_zw.c` (1). Not a pure text conflict: the two branches implement the same NT-kernel services
+differently. Examples from the hunks: IRQL (`ntdrv_ke.c` `set_irql`: N4 keeps a global `g_irql` mirrored into CR8, N3 keeps a per-thread
+IRQL behind `cur_irql()`/`write_irql()`); object references (`ntdrv_zw.c`: N4 counts references on device objects, N3's
+`ObfReferenceObject` is a no-op that returns 1); `MmInitializeMdl` and `IoBuildPartialMdl` in `ntdrv_mm.c`. `docs/shizukudos10/reports/N3.md`
+section "Overlap with N4's second export batch" already lists 40 exports defined on both sides and the merge order it suggests.
+Choosing a side per hunk is a design decision in the agents' code, so I2 did not resolve it. N4 needs to be rebased onto the base by
+its owner (or the lead reconciles it as N3 describes).
+Earlier evidence that N4 itself is sound on an older base: in pass 3 (below) `13c3157` merged cleanly onto `662e756` and passed 25 of 34 gates.
+
+### Why k5 (`0a0adb9`) was not merged — evidence
+
+`git merge origin/wip/k5-chromium-dlls` onto the base: `CONFLICT` in `shizukudos/win64/build.py` (2 hunks) and
+`shizukudos/win64/tests/t_u_version.c` (1 hunk). The base (K4, commit `96ddb06`) gives kernel32 and ntdll a VERSIONINFO through
+`version_resource(W64 / "ntdll" / "ntdll.rc")` (and the same for kernel32); K5 (`8974020`, "VS_VERSIONINFO in every built DLL and EXE") does the
+same through `version_obj("ntdll.dll", ...)`. In `t_u_version.c` the base checks a no-resource PE against `T_HELLO.EXE`, K5 checks a
+generated `NORSRC.DLL` fixture and deletes it. Keeping both mechanisms or dropping one changes what the two branches' tests assert, so
+I2 did not resolve it. K5 needs to be brought onto the base by its owner.
+
+## Pass 3 — 2026-09-30T07:57:54Z to 08:15Z (ABORTED: the lead moved the base again, nothing here is a PASS for a branch)
+
+Base `662e756387421b706f7522ac935a96f3c6ab9a08` (tree `12ee02209430af9c9266d7fa1f2b1845b5a4802e`).
+n4 `13c3157` merged clean as `736f196` (tree `6edb87c0e33d9ea8baadb9d4075eec09ef09d12e`); the 34-gate run was stopped by hand during
+`run_k64_net` after gates 1 to 25 had passed (`platform_build` through `k64_gui`). It was stopped because `f97a2de` had merged N3, so
+this tree was no longer one the lead could use. Not a failure and not a PASS. At that base n3 (`86cfa8b`) conflicted with n4 in the same
+six files, and k4 conflicted with n4 (via the N3 code that k4 carries from `main`).
+
+## Pass 2 — 2026-09-30T07:00:11Z to 07:56Z (ABORTED: base moved)
+
+Base `640a6a4` (tree `4aafc0f8478cbb5674093130a038b13cec8cc085`, identical to `769be99`). n4 `f0f7a74` merged as `6948751`
+(tree `4ddb8dab179ce00f7c695589312afcad4a5aa7a1`): gates 1 to 33 passed (through `supervisor`, 610 s); the `media` suite had built the ISO and
+the raw disk (both `[PASS]`) and was stopped inside its boot matrix at 07:56Z. Not a PASS. n4 `f0f7a74` is in the lead's base since `4e5456d`.
+
 ## Pass 1 — started 2026-09-30T04:58:45Z, finished 06:58Z (superseded: the lead moved to `640a6a4` during the pass)
 
 Base `30c597719071cdd801cc33b84a092d340db46a94` (tree `94c55c94ce0a778a77169d0192315003ab994249`).
