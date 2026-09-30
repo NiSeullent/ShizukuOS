@@ -852,17 +852,21 @@ SHZ_EXPORT NTSTATUS NTAPI LdrLoadDll(PWSTR path, PULONG flags, SHZ_UNICODE_STRIN
     /* search order, loader lock: ldr_search.c. `path` carries LoadLibraryExW flags or a search path (see there). */
     extern NTSTATUS ShzLdrLoadImage(PWSTR, SHZ_UNICODE_STRING *, ULONG64 *);
     extern void ShzLoaderLock(void), ShzLoaderUnlock(void);
+    extern void ShzNotifyLoaded(LIST_ENTRY *);
     ULONG64 base = 0;
     NTSTATUS st;
     SHZ_LDR_ENTRY *e;
+    LIST_ENTRY *tail_before;
     (void)flags;
     ShzLoaderLock();
     e = find_entry_by_name(name);
     if (e) { ++e->LoadCount; *handle = e->DllBase; ShzLoaderUnlock(); return STATUS_SUCCESS; }   /* already loaded */
+    tail_before = PEB_LDR(shz_peb())->InLoadOrderModuleList.Blink;
     st = ShzLdrLoadImage(path, name, &base);
     if (!st) {
         *handle = (PVOID)(uintptr_t)base;
         ShzRunInitRoutines(DLL_PROCESS_ATTACH, 0);                                 /* only entries still marked NEEDS_INIT */
+        ShzNotifyLoaded(tail_before);                                              /* LdrRegisterDllNotification callbacks */
     }
     ShzLoaderUnlock();
     if (st) return st;
@@ -1011,6 +1015,19 @@ SHZ_EXPORT NTSTATUS NTAPI RtlGetVersion(OSVERSIONINFOW *v)
     v->dwPlatformId = PEB_OS_PLATFORM(shz_peb());
     v->szCSDVersion[0] = 0;
     return STATUS_SUCCESS;
+}
+
+/* RtlGetDeviceFamilyInfoEnum (Windows 10 1607+; Chromium's base::win::GetWindowsDeviceFamily resolves it from ntdll with GetProcAddress
+ * and CHECKs that it exists). *version = the UAP version quad (major<<48 | minor<<32 | build<<16 | revision) of the profile the PEB
+ * declares, the same build RtlGetVersion reports; *family = DEVICEFAMILYINFOENUM_DESKTOP (3), what a PC-class system reports;
+ * *form = DEVICEFAMILYDEVICEFORM_UNKNOWN (0): Kernel64 does not know the chassis (Windows reads it from the SMBIOS chassis type). Any
+ * output pointer may be NULL. */
+SHZ_EXPORT VOID NTAPI RtlGetDeviceFamilyInfoEnum(ULONGLONG *version, ULONG *family, ULONG *form)
+{
+    const uint64_t peb = shz_peb();
+    if (version) *version = ((ULONGLONG)PEB_OS_MAJOR(peb) << 48) | ((ULONGLONG)PEB_OS_MINOR(peb) << 32) | ((ULONGLONG)PEB_OS_BUILD(peb) << 16) | 1;
+    if (family) *family = 3;
+    if (form) *form = 0;
 }
 
 /* DLL entry (ntdll has no DllMain on Windows; the loader still expects a valid entry point here). */
