@@ -200,7 +200,9 @@ def configure_jsc(tree, icu, config, log):
            "-DCMAKE_BUILD_TYPE=Release", "-DPORT=JSCOnly", "-DDEVELOPER_MODE=OFF", "-DUSE_SYSTEM_UNIFDEF=ON",
            "-DENABLE_API_TESTS=OFF", "-DENABLE_REMOTE_INSPECTOR=OFF", "-DENABLE_TOOLS=OFF", f"-DICU_ROOT={icu}",
            "-DCMAKE_C_FLAGS=-DU_STATIC_IMPLEMENTATION", "-DCMAKE_CXX_FLAGS=-DU_STATIC_IMPLEMENTATION", *CONFIGS[config]]
-    run(cmd, timeout=900)
+    env = dict(os.environ, SHZ_WEBKIT_TOOLCHAIN=str(TC / "toolchain.cmake"), SHZ_ICU_PREFIX=str(icu),
+               SHZ_LIBALIAS=str(OUT / "libalias"))
+    run(cmd, timeout=900, env=env)
     log["cmake"] = [str(x) for x in cmd]
     return bdir
 

@@ -6,6 +6,14 @@
 #   SHZ_WEBKIT_TOOLCHAIN  build/shizukudos/webkit/toolchain/toolchain.cmake
 #   SHZ_ICU_PREFIX        the static Win64 ICU
 #   SHZ_LIBALIAS          mixed-case library names WebKit links (-lDbgHelp, -lWinmm) mapped to the sysroot's
+# try_compile projects (compiler checks) do not see -D cache variables: pass them on, with the environment as the
+# fallback build.py also sets.
+foreach(_v SHZ_WEBKIT_TOOLCHAIN SHZ_ICU_PREFIX SHZ_LIBALIAS)
+    if (NOT DEFINED ${_v})
+        set(${_v} "$ENV{${_v}}")
+    endif ()
+endforeach ()
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES SHZ_WEBKIT_TOOLCHAIN SHZ_ICU_PREFIX SHZ_LIBALIAS)
 include(${SHZ_WEBKIT_TOOLCHAIN})
 list(APPEND CMAKE_FIND_ROOT_PATH ${SHZ_ICU_PREFIX})
 set(_shz_ldflags "-L${SHZ_LIBALIAS} -Wl,--no-insert-timestamp")
