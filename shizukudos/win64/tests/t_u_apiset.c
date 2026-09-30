@@ -65,13 +65,13 @@ int main(void)
         free_t fr = c ? (free_t)GetProcAddress(c, "CoTaskMemFree") : 0;
         void *p = a ? a(32) : 0;
         U_CHECK("CoTaskMemAlloc/Free through the com contract", p && fr && (fr(p), 1));
-        U_CHECK("a com-contract function ole32 does not implement is not found (no fake export)", c && GetProcAddress(c, "CoCreateInstance") == 0);
+        U_CHECK("a com-contract function ole32 does not implement is not found (no fake export)", c && GetProcAddress(c, "CoGetCallContext") == 0);
     }
     {
         HMODULE v = LoadLibraryW(L"api-ms-win-core-version-l1-1-0.dll");
         size_t_ f = v ? (size_t_)GetProcAddress(v, "GetFileVersionInfoSizeW") : 0;
-        U_CHECK("GetFileVersionInfoSizeW through the version contract (t_u_apiset.exe has no version resource)", f && f(L"C:\\SHZ\\TESTS\\T_U_APISET.EXE", 0) == 0 &&
-                GetLastError() == ERROR_RESOURCE_DATA_NOT_FOUND);
+        U_CHECK("GetFileVersionInfoSizeW through the version contract (every built image carries a version resource)", f && f(L"C:\\SHZ\\TESTS\\T_U_APISET.EXE", 0) > 0 &&
+                f(L"C:\\SHZ\\TESTS\\NO_SUCH.EXE", 0) == 0 && GetLastError() == ERROR_FILE_NOT_FOUND);
     }
 
     SetLastError(0);

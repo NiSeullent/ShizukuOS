@@ -363,6 +363,10 @@ lead로 옮겼다(검증 트리 해시 = lead 트리 해시). 모두 QEMU TCG, G
 | 난수 | 커널 엔트로피 풀 + ChaCha20 CSPRNG(`NtShzRandom`), RDRAND 없는 CPU에서도 동작 | 부팅 KAT, qemu64(무 RDRAND)에서 T_WP_CRYPT32 PASS |
 
 Chromium 157 시작 체인(정적 분석, `startup_chain.py`): 적재 시 import 1,346개 중 해결 안 된 것 64개(4.8%, 모두 kernel32).
+K5 브랜치(`wip/k5-chromium-dlls`, 측정: `startup_chain.py --delay`, 스냅샷 1706750): `chrome.exe` 체인은 적재 시 598개 중 미해결 0,
+지연 로드 미해결 0(K3 기준 30). `chrome.dll` 체인은 적재 시 1,471개 중 미해결 0, 지연 로드 772개 중 미해결 157개(K3 기준 275). 게스트
+실행은 지연 로드 체인을 모두 통과해 브라우저 시작 단계(`chrome_browser_main_win`)까지 갔고 `base::expected` CHECK에서 멈춘다(60.4초,
+원인 미확인). 자세한 내용: `reports/K5.md`.
 **Chromium은 아직 게스트에서 실행되지 않았다.** NT 드라이버 호스트(N1), IPC/프로세스 회수(P-ipc), 하이브리드 설치 ISO(C3)는
 lead 병합 작업 중이다.
 

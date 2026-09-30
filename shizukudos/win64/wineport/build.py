@@ -35,6 +35,8 @@ sys.path.insert(0, str(HERE))
 import shzlib  # noqa: E402
 from shzlib import BUILD, REPO, SHZ, run  # noqa: E402
 import winespec  # noqa: E402
+sys.path.insert(0, str(HERE.parent / "tools"))
+import verres  # noqa: E402  (VS_VERSIONINFO for modules whose Wine sources carry none)
 
 W64 = SHZ / "win64"
 OUT = BUILD / "win64"
@@ -434,6 +436,10 @@ def build_module(wine, rt, m, base, provided, trees):
     objs += [*uobjs, unixcall_obj]
     for rc in rcs:
         objs.append(compile_rc(wine, rc, obj_dir / (rc.stem + "_rc.o"), includes, defines))
+    if not any("VERSIONINFO" in rc.read_text() or "version.rc" in rc.read_text() for rc in rcs):
+        # Wine gives a DLL its version through wine/version.rc when its .rc includes it; the others get the tree's
+        # generated VS_VERSIONINFO so every built image has one (tools/verres.py).
+        objs.append(verres.compile_version(obj_dir, f"{name}.dll", f"Wine {name}.dll (ShizukuDOS port)", verres.VFT_DLL))
     if m.get("dynamic_imports"):
         s = dynamic_thunks(name, m["dynamic_imports"], obj_dir / "dynimports.S")
         o = obj_dir / "dynimports.o"
@@ -628,8 +634,11 @@ def build_test_exe(wine, rt, name, exe_name, d, sources, subtests, t, extra_incl
         drv.write_text(text)
     objs = [obj_dir / (s.stem + ".o") for s in srcs] + [obj_dir / "driver.o"]
     compile_all([*zip(srcs, objs[:-1], [flags] * len(srcs)), (drv, objs[-1], flags)])
-    for rc in [d / s for s in mk.get("SOURCES", []) if s.endswith(".rc")]:
+    test_rcs = [d / s for s in mk.get("SOURCES", []) if s.endswith(".rc")]
+    for rc in test_rcs:
         objs.append(compile_rc(wine, rc, obj_dir / (rc.stem + "_rc.o"), [d], []))
+    if not any("VERSIONINFO" in rc.read_text() or "version.rc" in rc.read_text() for rc in test_rcs):
+        objs.append(verres.compile_version(obj_dir, exe_name, f"Wine conformance tests of {name} (ShizukuDOS port)", verres.VFT_APP))
     if t.get("dynamic_imports"):
         dyn = dynamic_thunks(name, t["dynamic_imports"], obj_dir / "dynimports.S")
         run([CC, "-c", "-o", obj_dir / "dynimports.o", dyn])

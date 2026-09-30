@@ -1,1 +1,28 @@
-{"libs": ["ole32"]}
+{
+ "description": "Windows Shell Common Dll",
+ "libs": [
+  "ole32",
+  "user32",
+  "advapi32"
+ ],
+ "_comment": "Windows' fixed ordinals for the functions programs import by number (Wine's shell32.spec at the pinned commit)",
+ "ordinals": {
+  "SHChangeNotifyRegister": 2,
+  "SHChangeNotifyDeregister": 4,
+  "ILFindLastID": 16,
+  "ILRemoveLastID": 17,
+  "ILClone": 18,
+  "ILCloneFirst": 19,
+  "ILIsEqual": 21,
+  "ILIsParent": 23,
+  "ILCombine": 25,
+  "ILGetSize": 152,
+  "ILGetNext": 153,
+  "ILAppendID": 154,
+  "ILFree": 155,
+  "SHSimpleIDListFromPath": 162,
+  "ILCreateFromPathA": 189,
+  "ILCreateFromPathW": 190,
+  "IsUserAnAdmin": 680
+ }
+}

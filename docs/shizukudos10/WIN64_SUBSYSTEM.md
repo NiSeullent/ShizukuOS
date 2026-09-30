@@ -156,3 +156,27 @@ python3 platform/build.py && python3 platform/test.py    # row 5 (builds NTW32.D
 python3 platform/abi32/build.py                          # row 4 (+ the original ABI harness)
 python3 shizukudos/dos16/build.py && python3 shizukudos/supervisor/build.py   # row 6
 ```
+
+## 8. User-mode system DLL surface for Chromium 64-bit (agent K5, branch `wip/k5-chromium-dlls`)
+
+The Win64 runtime's system DLLs live under `shizukudos/win64/dlls/<name>/` (own GPL-2.0-only code, one directory per
+DLL, exports = the `DLLAPI` definitions, `module.json` for imports/forwarders/pinned ordinals/FileDescription) and
+`shizukudos/win64/wineport/` (Wine ports, pinned commit). What K5 added for the Chromium start-up path, each with its
+`tests/t_u_<dll>.c` self-check run by the standalone and GUI gates (details, evidence and the remaining gaps in
+`reports/K5.md`):
+
+| DLL | what | why Chromium needs it |
+| --- | --- | --- |
+| every DLL/EXE | a VS_VERSIONINFO resource (`tools/verres.py`, 10.0.22631.1 = the PEB OS version) | crashpad records module versions; `base::win::OSInfo` reads kernel32.dll's file version |
+| version.dll | DLL search order for bare names, `GetFileVersionInfo{Size}ExW` | `GetFileVersionInfoSizeW(L"kernel32.dll")` |
+| iphlpapi.dll (new) | adapters/interfaces/addresses/routes/statistics over the Kernel64 stack, change notifications (polled) | first delay-load Chromium reaches (`net::NetworkChangeNotifierWin`); a failed delay-load is fatal |
+| dbghelp.dll (new) | Sym* over export tables, StackWalk64, SymSrvGetFileIndexInfo, in-process MiniDumpWriteDump | `base::debug::StackTrace`, crash reporting |
+| advapi32.dll | SCM/event log/LSA/logon entry points (absent-server codes), Crypt* forwarders to cryptsp, LUIDs, file security | chrome.dll delay-loads |
+| shcore.dll (new) | api-ms-win-shcore-* host: per-monitor DPI API, CommandLineToArgvW forwarder | `SetProcessDpiAwareness`, the shcore contracts |
+| ole32.dll | in-process class table (CoCreateInstance, REGDB_E_CLASSNOTREG otherwise), IStream/ILockBytes on HGLOBAL, in-process marshalling, FTM, agile references, drop targets | `CoCreateInstance(CLSID_NetworkListManager)` and the other 18 delay-loads |
+| combase.dll | RoGetActivationFactory/RoActivateInstance (REGDB_E_CLASSNOTREG), RoOriginateError | the api-ms-win-core-winrt contract |
+| wtsapi32.dll (new) | the single console session; notification registration | `base::win::SessionChangeObserver` |
+
+Rules kept: nothing is silently stubbed - a function either does the documented work over what the kernel provides or
+fails with the code Windows gives when the underlying server/feature is absent, and its test asserts that code.
+

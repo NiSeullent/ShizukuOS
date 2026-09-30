@@ -1,0 +1,49 @@
+diff --git a/dlls/dwmapi/dwmapi_main.c b/dlls/dwmapi/dwmapi_main.c
+--- a/dlls/dwmapi/dwmapi_main.c
++++ b/dlls/dwmapi/dwmapi_main.c
+@@ -68,9 +68,10 @@
+  */
+ HRESULT WINAPI DwmExtendFrameIntoClientArea(HWND hwnd, const MARGINS* margins)
+ {
+-    FIXME("(%p, %p) stub\n", hwnd, margins);
+-
+-    return S_OK;
++    /* Shizuku (wineport): no compositor: DWM_E_COMPOSITIONDISABLED (see DwmSetWindowAttribute) */
++    if (!IsWindow(hwnd)) return E_HANDLE;
++    if (!margins) return E_INVALIDARG;
++    return DWM_E_COMPOSITIONDISABLED;
+ }
+ 
+ /**********************************************************************
+@@ -100,11 +101,12 @@
+  */
+ HRESULT WINAPI DwmSetWindowAttribute(HWND hwnd, DWORD attributenum, LPCVOID attribute, DWORD size)
+ {
+-    static BOOL once;
+-
+-    if (!once++) FIXME("(%p, %lx, %p, %lx) stub\n", hwnd, attributenum, attribute, size);
+-
+-    return S_OK;
++    /* Shizuku (wineport): there is no compositor to apply a window attribute (dark mode, corner preference, caption
++     * colour, ...) to: the documented answer of a system without desktop composition is DWM_E_COMPOSITIONDISABLED,
++     * not a success that changed nothing. */
++    if (!IsWindow(hwnd)) return E_HANDLE;
++    if (!attribute && size) return E_INVALIDARG;
++    return DWM_E_COMPOSITIONDISABLED;
+ }
+ 
+ /**********************************************************************
+@@ -172,10 +174,9 @@
+  */
+ BOOL WINAPI DwmDefWindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam, LRESULT *plResult)
+ {
+-    static int i;
+-
+-    if (!i++) FIXME("stub\n");
+-
++    /* Shizuku (wineport): DWM draws the non-client frame for composited windows; with no compositor it handles no
++     * message: FALSE with *plResult cleared, which is exactly "not processed by DWM" */
++    if (plResult) *plResult = 0;
+     return FALSE;
+ }
+ 
