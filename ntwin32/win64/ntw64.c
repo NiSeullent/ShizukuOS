@@ -27,13 +27,14 @@ typedef char info_matches_header[(sizeof(ntw64_info_t) == NTW64_INFO_SIZE) ? 1 :
 #define NTW64_MAX_RECORDS 8u
 #define NTW64_FIFO 16384u
 #define NTW64_HANDLE_TAG 0x57340000u
+#define NTW64_HANDLE_GEN_MAX 0x1fffu
 #define NTW64_CALL_TIMEOUT_MS 5000u
 #define NTW64_TRANSPORT (-1000)             /* last_status: the VxD refused the request, see GetLastError() */
 
 struct record {
     int used;
     int closed;                         /* handle closed while the process ran: output discarded, released on EXITED */
-    uint32_t gen;                       /* 13-bit handle generation: a closed handle never names a later process */
+    uint32_t gen;                       /* per-record 13-bit generation; retain on close and retire at the maximum */
     uint32_t pid, state;
     uint8_t fifo[NTW64_FIFO];
     uint32_t head, tail;                /* head - tail = bytes queued for the application */
@@ -44,7 +45,6 @@ struct record {
 };
 
 static struct record records[NTW64_MAX_RECORDS];
-static uint32_t next_gen = 1;
 static HANDLE device = INVALID_HANDLE_VALUE;
 static int opened;
 static struct ntwv_w64_open vxd_info;
@@ -162,7 +162,7 @@ static struct record *record_of(HANDLE handle)
     if ((v & 0xffff0000u) != NTW64_HANDLE_TAG || (v & 7u) >= NTW64_MAX_RECORDS)
         return NULL;
     r = &records[v & 7u];
-    return r->used && !r->closed && r->gen == ((v >> 3) & 0x1fffu) ? r : NULL;
+    return r->used && !r->closed && r->gen == ((v >> 3) & NTW64_HANDLE_GEN_MAX) ? r : NULL;
 }
 
 static HANDLE handle_of(const struct record *r)
@@ -366,7 +366,7 @@ BOOL WINAPI NtwCreateProcess64W(LPCWSTR path, LPCWSTR cmdline, LPCWSTR cwd, HAND
     shz_w64_event_t ev;
     struct record *r = NULL;
     unsigned i;
-    uint32_t bytes;
+    uint32_t bytes, generation;
     int needs_pool = 0;
     if (!handle) return fail(ERROR_INVALID_PARAMETER);
     *handle = NULL;
@@ -379,7 +379,9 @@ BOOL WINAPI NtwCreateProcess64W(LPCWSTR path, LPCWSTR cmdline, LPCWSTR cwd, HAND
     if (!ensure_open()) return FALSE;
     release_closed();
     for (i = 0; i < NTW64_MAX_RECORDS; ++i)
-        if (!records[i].used) { r = &records[i]; break; }
+        if (!records[i].used && records[i].gen < NTW64_HANDLE_GEN_MAX) { r = &records[i]; break; }
+    /* Retired records cannot name another process. Refuse exhaustion before
+     * sending CREATE, so no remote process is launched without a local handle. */
     if (!r) return fail(ERROR_TOO_MANY_OPEN_FILES);
     ntw_copy(payload, &ch, sizeof ch);
     if (needs_pool) {
@@ -393,10 +395,10 @@ BOOL WINAPI NtwCreateProcess64W(LPCWSTR path, LPCWSTR cmdline, LPCWSTR cwd, HAND
     ntw_copy(&ev, reply_payload, sizeof ev);
     if (ev.state != SHZ_W64_PS_STARTED || ev.pid == 0)
         return fail(win32_of_ntstatus(ev.status));
+    generation = r->gen + 1;              /* failed CREATE/RELEASE never resets this history */
     ntw_zero(r, 0, sizeof *r);
     r->used = 1;
-    r->gen = next_gen;
-    next_gen = next_gen >= 0x1fffu ? 1 : next_gen + 1;
+    r->gen = generation;
     r->pid = ev.pid;
     r->state = ev.state;
     *handle = handle_of(r);
