@@ -204,8 +204,8 @@ class CheckedFiles:
         self.records[str(path)] = {"path": str(path), "sha256": got, "bytes": before[2], "identity": before}
         return b"".join(chunks) if contents else got
 
-    def json(self, path, expected=UNPINNED):
-        return json_object(self.read(path, expected))
+    def json(self, path, expected=UNPINNED, maximum=1024 ** 2):
+        return json_object(self.read(path, expected, maximum=maximum))
 
     def finish(self):
         for row in self.records.values():
@@ -304,7 +304,7 @@ def validate_run(reader, run, manifest_path, manifest_sha, runner_sha, boot_root
     run = Path(run).resolve(strict=True)
     require(run.parent == (boot_root / "build/shizukudos/csm").resolve(strict=True) and "7707" in run.name,
             "Run must be a separate owned canonical 7707 CSM trial")
-    result = reader.json(run / "result.json")
+    result = reader.json(run / "result.json", maximum=4 * 1024 ** 2)
     require(result.get("profile") == "actual-win98-uefi-csmwrap" and result.get("status") == "NEEDS-VISUAL-REVIEW" and
             integer(result.get("qemu_exit_code"), "QEMU exit") == 0 and result.get("guest_status", {}).get("running") is True and
             not result.get("error") and not result.get("runtime_failure"), "Canonical run is incomplete or unhealthy")
@@ -383,7 +383,7 @@ def validate_run(reader, run, manifest_path, manifest_sha, runner_sha, boot_root
     require(source_run.parent == run.parent and source_run != run and
             reuse.get("method") == "verified private sparse post-run disk copy; cold hardware, new VARS, no CPU/RAM state",
             "Run is not a separate cold sparse clone of a retained source")
-    prior = reader.json(source_run / "result.json", reuse.get("source_receipt_sha256"))
+    prior = reader.json(source_run / "result.json", reuse.get("source_receipt_sha256"), maximum=4 * 1024 ** 2)
     require(prior.get("owned_disk_sha256_after_run") == reuse.get("source_disk_sha256") and
             prior.get("originals_unchanged") is True and integer(prior.get("qemu_exit_code"), "source QEMU exit") == 0,
             "Retained cold source receipt differs from selected source")

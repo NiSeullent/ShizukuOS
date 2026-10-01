@@ -37,15 +37,21 @@ MAX_IMAGE = 16 * 1024**2
 OBSERVE_SECONDS = 105
 BOOT_STATUS = 'BOOT_CONTROLS_ACKNOWLEDGED; NEXT_SCREEN_REVIEW_REQUIRED'
 DESKTOP_STATUS = 'CONTROLS_ACKNOWLEDGED; STOPPED_TLS_EVIDENCE_NOT_REVIEWED'
+RUN_DIALOG_STATUS = 'RUN_DIALOG_CONTROLS_ACKNOWLEDGED; SCREEN_REVIEW_REQUIRED'
+LEGACY_BOOT_CONTROLLER_SHA = '4e446c6645ded9d28fea91fb317c7dcb2ad8a015244196d275d0bf818e5e50a7'
 
 
-def bounded_bytes(path: Path, limit: int) -> bytes:
+class EvidenceWriteInProgress(ValueError):
+    """A bounded regular producer file changed while it was being read."""
+
+
+def bounded_bytes(path: Path, limit: int, *, allow_empty: bool = False) -> bytes:
     """Reject symlinks, foreign/multiply-linked files and unbounded reads."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         info = os.fstat(fd)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
-                or info.st_nlink != 1 or not 0 < info.st_size <= limit):
+                or info.st_nlink != 1 or not (0 if allow_empty else 1) <= info.st_size <= limit):
             raise ValueError('Expected a bounded privately owned regular file: ' + str(path))
         data = bytearray()
         while len(data) <= limit:
@@ -57,7 +63,7 @@ def bounded_bytes(path: Path, limit: int) -> bytes:
         if (len(data) != info.st_size or len(data) > limit
                 or (info.st_ino, info.st_dev, info.st_mtime_ns, info.st_size)
                 != (after.st_ino, after.st_dev, after.st_mtime_ns, after.st_size)):
-            raise ValueError('Bounded evidence changed during read')
+            raise EvidenceWriteInProgress('Bounded evidence changed during read')
         return bytes(data)
     finally:
         os.close(fd)
@@ -206,7 +212,18 @@ def acknowledged_request(run: Path, request: dict) -> dict | None:
         raise ValueError('Another controller changed the exact pending request')
     if not receipt.exists():
         return None
-    got = read_json(receipt)
+    # Canonical write_json truncates then writes this sole-producer ACK.
+    # Empty/partial/changing JSON is pending, bounded by drive's deadline;
+    # ownership/type/size violations and complete conflicting ACKs still fail.
+    try:
+        raw = bounded_bytes(receipt, MAX_JSON, allow_empty=True)
+        if not raw:
+            return None
+        got = json.loads(raw)
+    except (EvidenceWriteInProgress, json.JSONDecodeError):
+        return None
+    if not isinstance(got, dict):
+        raise ValueError('Expected an ACK JSON object')
     value = got.get('sequence')
     if type(value) is not int or value < 1 or value > request['sequence']:
         raise ValueError('Foreign or invalid GUI receipt sequence')
@@ -250,22 +267,75 @@ def existing_queue(run: Path, record: dict) -> tuple[int, dict | None]:
     control, receipt = run / 'gui-control.json', run / 'gui-control-receipt.json'
     boot_record = run / 'tls-control-boot-warning.json'
     if not control.exists() and not receipt.exists() and not boot_record.exists():
+        if record['reviewed_stage'] != 'boot-warning':
+            raise ValueError('Complete the boot-warning stage before opening or launching from Run')
         return 0, None
-    if (record['reviewed_stage'] != 'desktop' or not control.exists()
+    if record['reviewed_stage'] == 'launch-observer':
+        dialog = read_json(run / 'tls-control-run-dialog.json')
+        for key in ('manifest', 'manifest_sha256', 'nonce', 'guest_plan_sha256',
+                    'control_source_sha256', 'qemu_pid', 'qemu_start_ticks'):
+            if dialog.get(key) != record.get(key):
+                raise ValueError('Run dialog belongs to another fixture/process/controller')
+        close_welcome = dialog.get('close_welcome', False)
+        if type(close_welcome) is not bool:
+            raise ValueError('Invalid reviewed welcome-window choice')
+        expected = [
+            dict(sequence=3, name='tls7707-close-reviewed-welcome',
+                 keys=[['alt', 'f4'], ['esc']] if close_welcome else [['esc']]),
+            dict(sequence=4, name='tls7707-open-reviewed-run-dialog', keys=[['meta_l', 'r']]),
+            dict(sequence=5, name='tls7707-run-dialog-review-capture', framebuffer_capture=True),
+        ]
+        actions = dialog.get('actions', [])
+        if (dialog.get('reviewed_stage') != 'run-dialog'
+                or dialog.get('status') != RUN_DIALOG_STATUS
+                or [a.get('request') for a in actions] != expected):
+            raise ValueError('Run dialog controls incomplete or different')
+        got = acknowledged_request(run, expected[-1])
+        if got is None or got != actions[-1].get('ack'):
+            raise ValueError('Run dialog capture ACK is pending or changed')
+        if (record.get('reviewed_image') != got.get('screenshot')
+                or record.get('reviewed_image_sha256') != got.get('review_driver_screenshot_sha256')):
+            raise ValueError('Launch requires personally reviewing the exact completed Run dialog capture')
+        record['reviewed_dialog_record_sha256'] = digest(bounded_bytes(run / 'tls-control-run-dialog.json', MAX_JSON))
+        return 5, expected[-1]
+    if (record['reviewed_stage'] != 'run-dialog' or not control.exists()
             or not receipt.exists() or not boot_record.exists()):
         raise ValueError('Pending, foreign or repeated GUI stage already exists')
     prior = read_json(boot_record)
     for key in ('manifest', 'manifest_sha256', 'nonce', 'guest_plan_sha256',
-                'control_source_sha256', 'qemu_pid', 'qemu_start_ticks'):
+                'qemu_pid', 'qemu_start_ticks'):
         if prior.get(key) != record.get(key):
             raise ValueError('Prior boot controls belong to a different fixture/process')
     actions = prior.get('actions', [])
-    if prior.get('status') != BOOT_STATUS or len(actions) != 2:
-        raise ValueError('Prior boot controls were incomplete')
     expected = [
         dict(sequence=1, name='tls7707-reviewed-boot-warning-enter', keys=[['ret']]),
         dict(sequence=2, name='tls7707-boot-warning-result-capture', framebuffer_capture=True),
     ]
+    recoverable = (
+        prior.get('status') == 'CONTROL_INTERRUPTED'
+        and prior.get('reviewed_stage') == 'boot-warning'
+        and prior.get('control_source_sha256') == LEGACY_BOOT_CONTROLLER_SHA
+        and prior.get('error') == 'Expected a bounded privately owned regular file: ' + str(receipt)
+        and prior.get('pending_request') == expected[1]
+        and len(actions) == 1 and actions[0].get('request') == expected[0])
+    if recoverable:
+        frozen = run / 'tls-control-source.py'
+        if digest(bounded_bytes(frozen, 1024**2)) != LEGACY_BOOT_CONTROLLER_SHA:
+            raise ValueError('Interrupted boot controller snapshot differs')
+        got = acknowledged_request(run, expected[1])
+        if got is None:
+            raise ValueError('Interrupted boot capture ACK is still pending')
+        # Do not rewrite the interrupted receipt or replay Enter. Preserve
+        # its exact hash and append only the now validated canonical ACK.
+        record['boot_ack_recovery'] = dict(
+            prior_record=str(boot_record), prior_sha256=digest(bounded_bytes(boot_record, MAX_JSON)),
+            frozen_controller=str(frozen), frozen_controller_sha256=LEGACY_BOOT_CONTROLLER_SHA,
+            recovered_request=expected[1], recovered_ack=got,
+            keys_replayed=False, tls_pass=False, process_exit_verified=False)
+        return 2, expected[1]
+    if (prior.get('control_source_sha256') != record.get('control_source_sha256')
+            or prior.get('status') != BOOT_STATUS or len(actions) != 2):
+        raise ValueError('Prior boot controls were incomplete or source differs')
     if [a.get('request') for a in actions] != expected:
         raise ValueError('Prior boot control requests differ')
     last = actions[-1]
@@ -334,9 +404,15 @@ def drive(args, run: Path, record: dict, out: Path, token: str,
             pause(45)
             send('tls7707-boot-warning-result-capture', framebuffer_capture=True)
             record['status'] = BOOT_STATUS
-        else:
-            send('tls7707-open-run-for-observer', keys=[['esc'], ['meta_l', 'r']])
+        elif args.stage == 'run-dialog':
+            send('tls7707-close-reviewed-welcome',
+                 keys=[['alt', 'f4'], ['esc']] if getattr(args, 'close_welcome', False) else [['esc']])
             pause(2)
+            send('tls7707-open-reviewed-run-dialog', keys=[['meta_l', 'r']])
+            pause(8)
+            send('tls7707-run-dialog-review-capture', framebuffer_capture=True)
+            record['status'] = RUN_DIALOG_STATUS
+        elif args.stage == 'launch-observer':
             send('tls7707-launch-pinned-observer', keys=[['ctrl', 'a']], text=COMMAND, enter=True)
             record['observer_wait_seconds'] = OBSERVE_SECONDS
             atomic_json(out, record)
@@ -349,6 +425,8 @@ def drive(args, run: Path, record: dict, out: Path, token: str,
             send('tls7707-capture-and-finish-owned-trial', framebuffer_capture=True, finish=True)
             record['runner_finish_requested'] = True
             record['status'] = DESKTOP_STATUS
+        else:
+            raise ValueError('Unsupported GUI stage; separately reviewed Run dialog is required')
         return 0
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         record['status'], record['error'] = 'CONTROL_INTERRUPTED', str(error)
@@ -364,9 +442,13 @@ def main() -> int:
     parser.add_argument('--manifest-sha256', required=True)
     parser.add_argument('--qemu-pid', type=int, required=True)
     parser.add_argument('--reviewed-image', type=Path, required=True)
-    parser.add_argument('--stage', choices=['boot-warning', 'desktop'], required=True,
+    parser.add_argument('--stage', choices=['boot-warning', 'run-dialog', 'launch-observer'], required=True,
                         help='Guest stage personally reviewed in the supplied image')
+    parser.add_argument('--close-welcome', action='store_true',
+                        help='Only for run-dialog after personally reviewing a visible welcome window')
     args = parser.parse_args()
+    if args.close_welcome and args.stage != 'run-dialog':
+        parser.error('--close-welcome requires the separately reviewed run-dialog stage')
     run = args.run.absolute()
     validate_run(run)
     image = args.reviewed_image.absolute()
@@ -378,6 +460,7 @@ def main() -> int:
                   reviewed_stage=args.stage, reviewed_image=str(image), reviewed_image_sha256=image_sha,
                   manifest=str(MANIFEST), manifest_sha256=MANIFEST_SHA, nonce=NONCE,
                   command=COMMAND, guest_plan_sha256=plan_sha,
+                  close_welcome=args.close_welcome,
                   control_source_sha256=digest(Path(__file__).read_bytes()),
                   qemu_pid=args.qemu_pid, qemu_start_ticks=token, actions=[],
                   tls_pass=False, application_pass=False, process_exit_verified=False,
