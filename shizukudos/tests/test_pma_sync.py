@@ -68,7 +68,8 @@ def main():
     # Every extraction and receipt digest must describe these same exact bytes.
     # Capture compiled inputs before extraction can race a disk edit.
     inputs = [source, Path(__file__).resolve(), ROOT / "shizukudos/kernel64/tests/test_ntdrv_spin_host.c",
-              ROOT / "shizukudos/kernel64/ntddk.h", ROOT / "shizukudos/kcommon/pma_sync.h"]
+              ROOT / "shizukudos/kernel64/ntddk.h", ROOT / "shizukudos/kernel64/ntddk_abi.h",
+              ROOT / "shizukudos/kcommon/pma_sync.h"]
     if not args.driver_only:
         inputs += [ROOT / "shizukudos/tests/test_pma_sync.c"]
     snapshots = {path: path.read_bytes() for path in inputs}

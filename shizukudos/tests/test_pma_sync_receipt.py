@@ -19,11 +19,13 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = ("shizukudos/kernel64/ntdrv_ke.c", "shizukudos/kernel64/ntddk.h",
+         "shizukudos/kernel64/ntddk_abi.h",
          "shizukudos/kernel64/tests/test_ntdrv_spin_host.c", "shizukudos/kcommon/pma_sync.h",
          "shizukudos/tests/test_pma_sync.py")
 
 
-def test_case(out, name, edit_during_extraction):
+def test_case(out, name, edit_during_extraction,
+              mutated_header="shizukudos/kcommon/pma_sync.h"):
     case = out / name
     tree = case / "tree"
     for relative in FILES:
@@ -36,7 +38,7 @@ def test_case(out, name, edit_during_extraction):
     spec.loader.exec_module(runner)
     source = tree / "shizukudos/kernel64/ntdrv_ke.c"
     original_sha = hashlib.sha256(source.read_bytes()).hexdigest()
-    header = tree / "shizukudos/kcommon/pma_sync.h"
+    header = tree / mutated_header
     compiler_calls = []
     original_body = runner.body
     edited = False
@@ -71,7 +73,7 @@ def test_case(out, name, edit_during_extraction):
         checks["digest_matches_extracted_bytes"] = result["source_sha256"] == original_sha
         checks["no_compiler_started_after_mismatch"] = not compiler_calls
     else:
-        checks["shared_header_pinned_in_driver_mode"] = "shizukudos/kcommon/pma_sync.h" in result["sources_sha256"]
+        checks["mutated_header_pinned_in_driver_mode"] = mutated_header in result["sources_sha256"]
     print(name, checks)
     return {"case": name, "checks": checks, "pass": all(checks.values())}
 
@@ -85,6 +87,8 @@ def main():
         parser.error("choose a fresh directory to preserve prior evidence")
     out.mkdir(parents=True)
     results = [test_case(out, "driver-header-edit", False),
+               test_case(out, "driver-abi-header-edit", False,
+                         "shizukudos/kernel64/ntddk_abi.h"),
                test_case(out, "extraction-source-edit", True)]
     passed = all(row["pass"] for row in results)
     (out / "result.json").write_text(json.dumps({"status": "PASS" if passed else "FAIL", "results": results,
