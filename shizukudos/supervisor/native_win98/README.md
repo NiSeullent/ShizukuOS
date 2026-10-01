@@ -32,7 +32,7 @@ python3 shizukudos/supervisor/native_win98/build.py \
   --validate-only
 ```
 
-확인한 해시 64자리를 각 placeholder에 넣습니다. 새 설정 파일 경로도 이미 존재하면 덮어쓰지 않습니다. 생성하려면 `--validate-only`를 `--out /absolute/new-private-output`으로 바꿉니다. 소스 저장소 안의 개인 출력은 Git ignored `build/` 아래만 허용합니다. 저장소 밖의 새 출력 폴더도 허용합니다. 최소 17 GiB 여유 공간을 유지하면서 추가 7 GiB 작업 예산을 요구합니다. 심볼릭 링크, 장치/가상 파일 시스템, FIFO, 다른 writer가 열어 둔 입력은 거부합니다. Linux read lease가 제공되지 않는 파일 시스템에서는 생성을 거부하며 검사 강도를 낮추지 않습니다.
+확인한 해시 64자리를 각 placeholder에 넣습니다. 새 설정 파일 경로도 이미 존재하면 덮어쓰지 않습니다. 생성하려면 `--validate-only`를 `--out /absolute/new-private-output`으로 바꿉니다. 소스 저장소 안의 개인 출력은 Git ignored `build/` 아래만 허용합니다. 저장소 밖의 새 출력 폴더도 허용합니다. 17 GiB 여유 공간을 유지하면서 전체 2,304 MiB ESP, 원본의 실제 할당 블록과 128 MiB 메타데이터를 합산한 작업 예산을 요구합니다. 복제와 FAT 기록 중에도 남은 예산을 확인합니다. 심볼릭 링크, 장치/가상 파일 시스템, FIFO, 다른 writer가 열어 둔 입력은 거부합니다. Linux read lease가 제공되지 않는 파일 시스템에서는 생성을 거부하며 검사 강도를 낮추지 않습니다.
 
 선택 입력은 `--kernel32 ... --kernel32-sha256 ...`, `--kernel64 ... --kernel64-sha256 ...`, `--win64-img ... --win64-img-sha256 ...`입니다. K64에는 Supervisor용 **KERNEL64.BIN**을 사용합니다. 독립 부팅용 KERNEL64S.BIN은 이 입력이 아닙니다. WIN64.IMG는 K64 입력이 있어야 하며 현재 64 MiB K64 RAM/32 MiB archive 위치에 맞도록 최대 32 MiB로 제한합니다. 이 입력은 호출자가 별도로 빌드한 파일이며 builder가 K64 전체나 Win64 앱을 새로 컴파일했다고 주장하지 않습니다. Kernel32/64가 없으면 해당 도메인과 IPC 채널도 생성되지 않습니다.
 

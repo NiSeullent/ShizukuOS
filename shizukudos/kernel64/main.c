@@ -2,6 +2,7 @@
  * Kernel64 entry (C): CPU tables, memory, scheduler, timer and the selected boot profile.
  */
 #include "proc_internal.h"
+#include "../dead_screen/native.h"
 #include "fs.h"
 #include "boot_channel_peer.h"
 
@@ -44,6 +45,7 @@ void kmain(uint64_t bootinfo_pa)
         shz_exit(97); /* Malformed peer handoff is a real failure. */
     arch_init();
     mem_init(&bootinfo);
+    ds_native_init();
     krandom_init(&bootinfo, sizeof bootinfo);       /* before anything that needs random bytes (ASLR, user RNG) */
     kprintf("%s: Long Mode kernel starting, %u MiB RAM, rip above 4 GiB, tsc %u kHz\n", KVER,
             (uint32_t)(bootinfo.ram_size >> 20), (uint32_t)(bootinfo.tsc_hz / 1000));
@@ -70,7 +72,11 @@ void kmain(uint64_t bootinfo_pa)
     { extern void disk_init(void); disk_init(); }   /* standalone profile: AHCI disk -> FAT32 volume as D:\ (disk.c) */
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
+#ifdef SHZ_STANDALONE
+    ds_native_timer_ready();
+#endif
     sti();
+    ds_native_control();
     if (k64_cmdline_has("shz.setup=interactive")) {
         extern unsigned k64_desktop(void);
         /* User installation starts without the diagnostic app suite. Cancelling

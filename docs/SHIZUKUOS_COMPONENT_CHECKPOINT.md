@@ -135,6 +135,18 @@ This run uses a preserved earlier runtime input set and original DOS. Its old
 Kernel64 conformance/IPC failures are retained; it is not a current runtime
 pass or ShizukuDOS replacement acceptance.
 
+A further cold native control observed the same source-bound inputs for
+900.602 seconds. Its original DOS remained at ScanDisk 99%, with CR0 `0x30`,
+708,062 native exits and 11,816 IRQ observations in the final sample. It did
+not reach VMM or the Windows GUI. The result SHA-256 is
+`9fc094b37c6ec3cda49c81de89b18e44a435ef785f2ed9ddcfded0fac817e2d9`.
+All original/plan/source/ESP byte checks matched and sampled ESP writes were
+zero. The owned process exited and was reaped. This older diagnostic
+controller did not record a strict quit-ack/forced-cleanup gate; it is not
+presented as strict lifecycle acceptance. Independent review found those
+controller gaps, which require a separate repaired controller and negative
+controls. Original evidence and the preserved runtime inputs remain intact.
+
 ## DOS-to-Windows contract increment
 
 The DOSMGR patch reports only implemented capabilities and distinguishes the
@@ -223,6 +235,18 @@ matching. Its wrapper result SHA-256 is
 `036ef50a3252a7de83f0cbdcfe776453b4d94e77825e697f99997cb8a12cdfbe`.
 This build alone does not establish a guest pass.
 
+The complete enabled runtime was then rebuilt successfully in 783.136 seconds.
+All 829 source pins, membership, the additional syscall guard, prior snapshots
+and official producer pins stayed exact. Independent actual archive/PE audit
+passed 28 checks: 57 system DLLs, 153 T executables, five public catalog/license
+members and four trust fixtures in both runtime archives, fresh CRT once,
+single enabled MPR/OLEACC providers and plain-image-only QA fixtures.
+WIN64.IMG is 23,178,795 bytes with SHA-256
+`1b1f66c09a79b1dc20477af51672e9807ef3e669c1e0d8589d600496bd731b6a`;
+the driver image is 10,239,908 bytes with SHA-256
+`4a1563326ec3f611cd01c2dc4e6d3791bff16978eacba9d6a9d040b474e9c65c`.
+This package audit does not establish actual guest or modern-app acceptance.
+
 A desktop installer archive contained T_HELLO twice. The producer correction
 passed five actual packaging regressions, including FAT readback and the
 unchanged QA system-file layout. A separate installer VM runner tests cancel
@@ -247,6 +271,57 @@ Shizuku component installer, not Windows 98 setup or latest application use.
 All four VM processes were reaped; original sources and input disks stayed
 unchanged, with the 17 GiB free-space reserve maintained.
 The pre-correction development ISO is not a validated downloadable release.
+
+## Actual standalone Dead Screen candidate controls
+
+Three owned cold UEFI VMs observed the held standalone Kernel64 candidate's
+own panic, actual UD2 exception and forced text fallback. The reviewed result
+SHA-256 is `b965633b4ce1110bab00ba4fee246303e8c863072193b9606a9029764ba05416`.
+Both graphical controls retained their first fault bytes through actual PS/2
+Korean/English switching, Tetris movement/rotation/drop/gravity/restart, Suika
+aim/drop/gravity/real-key merge/restart, trace display and menu return. The
+exception record contains the actual vector 6/error 0/CS 8 and saved registers.
+The text control showed the complete exact "You session got wasted" English
+trace and actual ASCII pixels, then refused game resumption after key input.
+All three owned QEMU processes were stopped through acknowledged normal QMP
+quit; no forced cleanup was needed. The 956 held input handles were released
+only after each child exited. Intentional fatal loops are not OS exit success.
+
+The original V4 assertion/forced-stop failure and V5 source-closure refusal
+are preserved. Two historical documentation/builder blobs were recovered
+exactly from Git into independent owned clones for the new V6 plan; existing
+source files and old receipts were not rewritten. All compiled inputs,
+candidate and prepared boot image pins stayed unchanged. These are real
+standalone candidate controls, not current-main kernel, Windows 98/VMM error
+interception, recoverable Windows dialogs or modern-app acceptance. Default
+integration and fresh current-kernel VM regression remain separate gates.
+
+The current-main integration then added only seven kernel seams and four
+production Dead Screen units to native/standalone Kernel64. It preserves
+demand/user paging recovery, hosted-driver callbacks, the installer, console,
+section security, capacity and peer branches. Its build helper now accepts a
+coherent default integration without adding duplicate hooks; partial hooks
+are refused. Independent and owner actual-body host suites each passed six
+tests with GCC and Clang sanitizers. Fresh owner production builds passed
+all kernels in 232.270 seconds and Supervisor in 10.844 seconds, with unchanged
+source/input pins. Their wrapper receipt SHA-256 values are
+`121288d706ba3f3656213ab474d89077f2a2b8aaff4a9d9ad25d67b1bb071480` and
+`5730590d1cd408a4874ca212067d9656ae6fbad36d740b1652ac61107cf3444f`.
+KERNEL64S.BIN is 791,898 bytes with SHA-256
+`1b8be56407839423d3e1da2cc8fadfceade5054aca9bc7ffb6c7f46d73fdf3a6`,
+and the actual ELF BSS end is `ffffffff802a33a8`, below the unchanged 3-MiB
+physical limit. These new builds require their own current VM controls;
+historical V6 success is not substituted.
+
+The native diagnostic collector was independently reviewed and hardened.
+The owner passed 31 focused controls with ResourceWarning treated as errors:
+all original/plan/source pins and leases, bounded output and resource limits,
+real Unix QMP peer identity/request IDs/deadlines, quit/terminate/kill/reap, and
+atomic receipt failure vetoes. A paused 32-MiB QEMU transport test verified
+actual pipe backends, owned QMP acknowledgements and normal exit without
+executing a guest or attaching a disk. Collection verification is explicitly
+separate from Windows/domain success. This does not change the preserved
+900-second ScanDisk failure or establish MS-DOS replacement.
 
 ## Release boundary
 

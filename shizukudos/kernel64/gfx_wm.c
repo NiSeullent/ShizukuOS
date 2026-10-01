@@ -61,6 +61,7 @@
  *  follows shz_nc_insets()).
  */
 #include "gfx.h"
+#include "../dead_screen/native.h"
 #include "gfx_present_layout.h"
 #include "gfx_written_coverage.h"
 
@@ -1850,6 +1851,8 @@ static int32_t wm_init(void)
     mutex_unlock(&wm_init_lock);
     return st;
 }
+
+int ds_native_control_prepare_gui(void) { return wm_init(); }
 
 int32_t sys_ext_graphics(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {

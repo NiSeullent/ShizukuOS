@@ -33,6 +33,12 @@ K64_FLAGS = ["-m64", "-march=x86-64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "
 STUB_DIR = SHZ / "kernel64" / "standalone"
 
 
+def dead_screen_sources():
+    # Host/ABI test units share this directory and must not enter either kernel.
+    return [SHZ / "dead_screen" / name for name in
+            ("dead_screen.c", "render.c", "native.c", "control.c")]
+
+
 def build_standalone_stub(k32=False):
     """Multiboot ELF32 boot stub (see kernel64/standalone/boot32.c) for running a guest kernel without the Supervisor."""
     out = BUILD / ("kernel32s" if k32 else "kernel64s")
@@ -53,11 +59,12 @@ def sources(directory, suffix):
 
 
 def source_hashes():
-    directories = [SHZ / name for name in ("kernel32", "kernel64", "kcommon", "abi", "win64/include")]
+    directories = [SHZ / name for name in ("kernel32", "kernel64", "kcommon", "abi", "win64/include", "dead_screen")]
     directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native"]
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
-    paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c"])
+    paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
+                  SHZ / "supervisor/src/font8x8_basic.h"])
     return {str(p.relative_to(REPO)): sha256_file(p) for p in sorted(paths)}
 
 
@@ -114,13 +121,13 @@ def main():
     # ShizukuFS v1 (ext4 format, jbd2): the portable libsfs sources are linked freestanding (kernel64/sfs_mount.c).
     libsfs = sorted((REPO / "shizukufs" / "v1" / "libsfs").glob("*.c"))
     k64 = build_kernel("kernel64", "kernel64", K64_FLAGS, "elf64", "elf_x86_64", "KERNEL64.BIN",
-                       extra_c=[SHZ / "win64" / "pe_parse.c", *libsfs])
+                       extra_c=[SHZ / "win64" / "pe_parse.c", *libsfs, *dead_screen_sources()])
     # Same sources with SHZ_STANDALONE: hypercalls served in-kernel over COM1/PIT/RTC so it boots under QEMU TCG.
     # The standalone profile is the only one with a disk: the original AHCI core (drivers/ahci_native) is linked
     # behind kernel64/ahci_blk.c; under the Supervisor no device is passed through and the block registry stays empty.
     k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"], "elf64", "elf_x86_64",
                         "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c",
-                                                  REPO / "drivers" / "ahci_native" / "ahci.c", *libsfs])
+                                                  REPO / "drivers" / "ahci_native" / "ahci.c", *libsfs, *dead_screen_sources()])
     stub = build_standalone_stub()
     k32s = build_kernel("kernel32s", "kernel32", K32_FLAGS + ["-DSHZ_STANDALONE"], "elf32", "elf_i386", "KERNEL32S.BIN",
                         extra_c=[SHZ / "kernel32" / "standalone" / "standalone32.c"])

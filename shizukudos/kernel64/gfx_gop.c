@@ -17,6 +17,7 @@
  *    programmed, only the memory the firmware already set up is written.
  */
 #include "gfx.h"
+#include "../dead_screen/native.h"
 #include "pci.h"
 #include "gfx_pixfmt.h"
 
@@ -98,6 +99,7 @@ static int gop_probe(gfx_fb_t *fb)
     } else {
         kprintf("K64 gfx: UEFI GOP framebuffer lies in no PCI display BAR (a firmware RAM framebuffer)\n");
     }
+    ds_native_bind(gop.fb, b.width, b.height, b.pitch, (size_t)b.pitch * b.height, gop.rgbx);
     return 0;
 }
 

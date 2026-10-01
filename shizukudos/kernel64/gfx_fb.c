@@ -20,6 +20,7 @@
  *    each row doubled to form an 8x16 cell. Nothing else exists: no other sizes, no bold/italic, no non-ASCII.
  */
 #include "gfx.h"
+#include "../dead_screen/native.h"
 #include "pci.h"
 #include "../supervisor/src/font8x8_basic.h"
 
@@ -165,6 +166,7 @@ static int bga_probe(gfx_fb_t *fb)
     }
     kprintf("K64 gfx: BGA %x %ux%ux32 LFB %llx (%llu KiB)\n", fb->bga_version, w, h, bar, bar_size >> 10);
     pci_claim(&dev, "gfx_fb (Bochs VBE)");
+    ds_native_bind(fb->lfb, fb->width, fb->height, fb->pitch, (size_t)fb->pitch * h, 0);
     return 0;
 }
 

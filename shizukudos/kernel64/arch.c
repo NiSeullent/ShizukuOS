@@ -3,6 +3,7 @@
  * interrupt dispatch and exception reporting.
  */
 #include "k64.h"
+#include "../dead_screen/native.h"
 
 extern void load_gdt(void *gdtr, uint16_t tss_sel);
 extern void load_idt(void *idtr);
@@ -175,6 +176,7 @@ void isr_dispatch(struct regs *r)
     kprintf("  rax=%llx rbx=%llx rcx=%llx rdx=%llx rsi=%llx rdi=%llx rbp=%llx\n", r->rax, r->rbx, r->rcx, r->rdx,
             r->rsi, r->rdi, r->rbp);
     shz_evidence(31, 0xdead0000ull | r->vector);
+    if (!(r->cs & 3)) ds_native_exception(r);
     shz_exit(98);
 }
 

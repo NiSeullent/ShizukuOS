@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "k64.h"
+#include "../dead_screen/native.h"
 
 void *memcpy(void *d, const void *s, size_t n)
 {
@@ -55,6 +56,7 @@ static void flush_line(void)
 }
 static void putc_line(char c)
 {
+    ds_native_capture_char(c);
     line[line_len++] = c;
     if (c == '\n' || line_len >= sizeof line)
         flush_line();
@@ -113,6 +115,7 @@ void kpanic(const char *fmt, ...)
 {
     __builtin_va_list ap;
     cli();
+    ds_native_capture_begin();
     kprintf("K64 PANIC: ");
     __builtin_va_start(ap, fmt);
     kvprintf(fmt, ap);
@@ -120,5 +123,8 @@ void kpanic(const char *fmt, ...)
     kprintf("\n");
     ntdrv_run_bugcheck_callbacks();             /* KeRegisterBugCheckCallback registrations of hosted drivers (weak: no-op without the driver host) */
     shz_evidence(31, 0xdead0064);
-    shz_exit(99);
+    uint64_t sp, bp;
+    __asm__ volatile("mov %%rsp, %0" : "=r"(sp));
+    __asm__ volatile("mov %%rbp, %0" : "=r"(bp));
+    ds_native_panic((uint64_t)__builtin_return_address(0), sp, bp);
 }

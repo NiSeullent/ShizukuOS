@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Closed private Dead Screen host + Kernel64 build. Never edits default sources or runs a VM."""
+"""Closed Dead Screen host + Kernel64 build. Never edits default sources or runs a VM."""
 import argparse
 import ast
 import datetime
@@ -45,8 +45,41 @@ def replace_once(s,a,b):
         raise RuntimeError('private integration seam differs: '+a[:100])
     return s.replace(a,b,1)
 
+def integration_state(base):
+    """Admit either seven bare seams or a coherent already integrated kernel.
+
+    Partial/duplicate hooks cannot be silently completed or compiled as a
+    baseline lacking their implementations. This also makes changed idempotent.
+    """
+    seams={
+        'lib.c':('static void putc_line(char c)\n{\n    ds_native_capture_char(c);',
+                 '    cli();\n    ds_native_capture_begin();\n    kprintf("K64 PANIC: ");',
+                 'ds_native_panic((uint64_t)__builtin_return_address(0), sp, bp);'),
+        'arch.c':('    if (!(r->cs & 3)) ds_native_exception(r);\n    shz_exit(98);',),
+        'main.c':('    mem_init(&bootinfo);\n    ds_native_init();',
+                  '    KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);\n#ifdef SHZ_STANDALONE\n    ds_native_timer_ready();\n#endif',
+                  '    sti();\n    ds_native_control();\n    if (k64_cmdline_has('),
+        'gfx_fb.c':('    pci_claim(&dev, "gfx_fb (Bochs VBE)");\n    ds_native_bind(fb->lfb, fb->width, fb->height, fb->pitch, (size_t)fb->pitch * h, 0);',),
+        'gfx_gop.c':('    ds_native_bind(gop.fb, b.width, b.height, b.pitch, (size_t)b.pitch * b.height, gop.rgbx);\n    return 0;\n}\n\nstatic void gop_present',),
+        'gfx_input.c':('    if (dat_read(0) == 0xFA) g_info |= SHZ_INFO_KEYBOARD;\n    ds_native_keyboard_ready((g_info & SHZ_INFO_KEYBOARD) != 0);',),
+        'gfx_wm.c':('int ds_native_control_prepare_gui(void) { return wm_init(); }',),
+    }
+    if set(base)!=set(seams):
+        raise RuntimeError('incoherent integration source set')
+    counts=[base[n].count(s) for n,items in seams.items()
+            for s in ('#include "../dead_screen/native.h"',*items)]
+    if not any(counts):
+        if any('ds_native_' in s for s in base.values()):
+            raise RuntimeError('partial integration has unknown native hooks')
+        return False
+    raw_counts=[base[n].count(name+'(') for n,items in seams.items()
+                for name in sorted(set(re.findall(r'\b(ds_native_\w+)\(', '\n'.join(items))))]
+    if all(c==1 for c in counts) and all(c==1 for c in raw_counts):return True
+    raise RuntimeError('partial or incoherent Dead Screen integration')
+
 def changed(base):
     """Exact actual seams; default files are read once and never written."""
+    if integration_state(base):return dict(base)
     out={}
     for name in ('lib.c','arch.c','main.c','gfx_fb.c','gfx_gop.c','gfx_input.c','gfx_wm.c'):
         s=base[name]
@@ -61,7 +94,11 @@ def changed(base):
         elif name=='main.c':
             s=replace_once(s,'    mem_init(&bootinfo);','    mem_init(&bootinfo);\n    ds_native_init();')
             s=replace_once(s,'    KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);','    KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);\n#ifdef SHZ_STANDALONE\n    ds_native_timer_ready();\n#endif')
-            s=replace_once(s,'    sti();\n    if (k64_cmdline_has("shz.desktop"))','    sti();\n    ds_native_control();\n    if (k64_cmdline_has("shz.desktop"))')
+            # The current production installer precedes the desktop branch;
+            # older bare source snapshots have only the desktop branch here.
+            profile='shz.setup=interactive' if 'k64_cmdline_has("shz.setup=interactive")' in s else 'shz.desktop'
+            anchor='    sti();\n    if (k64_cmdline_has("'+profile+'"))'
+            s=replace_once(s,anchor,'    sti();\n    ds_native_control();\n    if (k64_cmdline_has("'+profile+'"))')
         elif name=='gfx_fb.c':
             s=replace_once(s,'    pci_claim(&dev, "gfx_fb (Bochs VBE)");','    pci_claim(&dev, "gfx_fb (Bochs VBE)");\n    ds_native_bind(fb->lfb, fb->width, fb->height, fb->pitch, (size_t)fb->pitch * h, 0);')
         elif name=='gfx_gop.c':
@@ -125,7 +162,10 @@ def main():
             dst=out/'frozen'/rel;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(p,dst)
         frozen=out/'frozen'
         base={n:(frozen/'shizukudos/kernel64'/n).read_text() for n in ('lib.c','arch.c','main.c','gfx_fb.c','gfx_gop.c','gfx_input.c','gfx_wm.c')}
+        already_integrated=integration_state(base)
         edited=changed(base)
+        result['integration_profile']='already-default-integrated' if already_integrated else 'isolated-adapter-patch'
+        result['integration_patch_applied']=not already_integrated
         patch=''
         for n in edited:
             patch+=''.join(difflib.unified_diff(base[n].splitlines(True),edited[n].splitlines(True),
@@ -191,7 +231,7 @@ def main():
             binary=dest/'KERNEL64S.BIN';run(['objcopy','-O','binary',elf,binary],name+'-binary')
             dis=run(['objdump','-d','-M','intel',elf],name+'-disassembly');(dest/'disassembly.txt').write_text(dis)
             return {'elf':record(elf),'bin':record(binary),'bss_end':hex(end),'objects':[record(o) for o in objects]}
-        baseline=kernel(frozen,'baseline')
+        baseline=kernel(frozen,'baseline',already_integrated)
         candidate_root=out/'patched';shutil.copytree(frozen,candidate_root)
         for n,s in edited.items():(candidate_root/'shizukudos/kernel64'/n).write_text(s)
         candidate=kernel(candidate_root,'candidate',True)

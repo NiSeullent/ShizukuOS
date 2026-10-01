@@ -28,6 +28,7 @@
  *  hardware (SendInput can inject WM_MOUSEHWHEEL), extra mouse buttons on PS/2 hardware, touch and pen, low-level hooks.
  */
 #include "gfx.h"
+#include "../dead_screen/native.h"
 #include "pci.h"
 #include "../win64/include/shzpointer.h"
 #include "../win64/include/shzkbd.h"
@@ -239,6 +240,7 @@ void gin_init(void)
     ctl_cmd(0xA8);
     dat_write(0xF4);                                        /* keyboard: enable scanning */
     if (dat_read(0) == 0xFA) g_info |= SHZ_INFO_KEYBOARD;
+    ds_native_keyboard_ready((g_info & SHZ_INFO_KEYBOARD) != 0);
     if (aux_send(0xF6) == 0xFA) {                           /* mouse: defaults */
         g_info |= SHZ_INFO_MOUSE;
         aux_send(0xF3); aux_send(200);                      /* the IntelliMouse knock: sample rates 200, 100, 80 */
