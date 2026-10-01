@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "kind": "ShizukuOS Win98-only profile probe source preparation",
+  "result": "HOST_HELPERS_SANITIZERS_PE_OEM_FULL_BYTE_CPU_PASS_NATIVE_PENDING",
+  "build_receipt": {
+    "path": "build/shizukuos-profile-native-v2/result.json",
+    "sha256": "4debdf933674ff2c333d6bf496f37b1597bec3cd90f6a7c455c1e1e8cd75f1d1"
+  },
+  "independent_review": {
+    "path": "build/publication-20261001/native-v2-review.json",
+    "sha256": "5ac5ae84e605cc1b3d157aeb6b4201146d1d386abfcb29315c2cb5f361bcfb2d",
+    "actual_files_rehashed": 385
+  },
+  "source_sha256": {
+    "tests/shizukuos_theme_profile_guest.c": "2edcb1ce11be07700eccfa718c8c4f65912c0bc42e6ce86b3ce5feda9694ec73",
+    "tests/shizukuos_theme_profile_helpers_host.c": "3689fa3ce5dbcf564d593a8e816f0c46302f2d9cfa9ac7adf0b80d36ac79bcf1",
+    "tools/build_shizukuos_theme_profile_probe.py": "96764f3cbd6ecbc5398fc906ae53b85dfa8999cdb6b98be2a46a31084e329c3c",
+    "docs/SHIZUKUOS_THEME_NATIVE_ACCEPTANCE.md": "0ed742e9a784a62e39b6eb01a68cbe922aa15eb15d69f02aae0fa397ff9064a8"
+  },
+  "provider": {
+    "receipt_sha256": "c9d8fdc57d4b5986297f44edbcbdc88b107088768ea39accac7c800d80b0af28",
+    "DLL_sha256": "721e3700b978f12cf7d535cb9ff8ed02bc0262a464a88011aa86804d845308b4",
+    "historical_v4_unchanged": true
+  },
+  "helper_checks": {
+    "normal": 11021,
+    "asan_ubsan_leak": 11021,
+    "scope": "Pure production CLI, Win98 identity predicate and bounded adjacent paths only; no registry or GDI simulation."
+  },
+  "command_evidence": {
+    "actual_completed_commands": 10,
+    "all_returncodes_zero": true,
+    "raw_stdout_stderr_logs_sha256_bound": true,
+    "actual_translation_units": 2,
+    "actual_native_dependency_members_before_and_after": 99,
+    "actual_SDK_header_files_before_and_after": 96,
+    "project_translation_units_and_memory_header": 3
+  },
+  "probe": {
+    "file": "SHZTPRO.EXE",
+    "sha256": "60de1d3252d61fc8350b094f3c808bd2546b98fdc36a2b2b90a52e9896e75b49",
+    "bytes": 21856,
+    "nonce": "shizukuos-profile-5abe-v1",
+    "PE_OEM_imports": "PASS",
+    "full_executable_i486_byte_coverage": true,
+    "executable_bytes": 5176,
+    "instructions": 1590,
+    "syntax": "C:\\GOPLAB\\SHZTPRO.EXE <one exact mode>",
+    "modes": [
+      "default-shizukuos",
+      "save-classic",
+      "check-classic",
+      "save-shizukuos",
+      "check-shizukuos"
+    ]
+  },
+  "historical_attempts": {
+    "helper_RED": {
+      "receipt": "build/shizukuos-profile-native-v1/red-result.json",
+      "sha256": "597a6f0d4226aa09a5c1faaf9f43761d7dded8f25ddb88bc9d680f4c4a1bd59b",
+      "actual_compile_exit": 0,
+      "actual_runtime_exit": 1
+    },
+    "SDK_order_compile_failure": {
+      "receipt": "build/shizukuos-profile-native-v1/failed-result.json",
+      "sha256": "5103fe56c8e5a39fb8cde27a5be14838837979560e28a6b550713455a2dbfa6d"
+    },
+    "original_v1_files_preserved": 103,
+    "reused_failed_steps": false
+  },
+  "native_windows98_execution": false,
+  "native_profile_registry_GDI_save_restart": false,
+  "native_gui_input_save_restart": false,
+  "cold_boot_persistence": false,
+  "os_wide_theme": false,
+  "all_latest_app_compatibility": false,
+  "shizukudos_msdos_replacement": false,
+  "final_installer_iso_100": false,
+  "distribution": {
+    "official_site": "https://m98.nyase.kr",
+    "public_ISO_site_only": true,
+    "GitHub": "Public patch/development source only; no ISO/runtime distributions/private files"
+  },
+  "remaining_owner": "BOOT owns source integration, actual shared native guest, GUI input, final installer, ShizukuDOS replacement and ISO. AMD64 needs separate acceptance; do not spoof its NT report to pass this Win98-only probe."
+}
