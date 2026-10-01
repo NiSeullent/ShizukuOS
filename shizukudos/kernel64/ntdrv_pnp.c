@@ -662,3 +662,38 @@ int32_t shz_query_pnp_catalog(process_t *process,uint64_t output,uint64_t length
     }
 done:irq_restore(flags);return status;
 }
+
+/* Atomic UP snapshot of actually registered PDOs and interfaces. Neither PCI
+ * functions without a registered devnode nor imaginary USB devices are added.
+ * IRQ serialization prevents driver unload from freeing a visited PDO. The
+ * published niface follows all link/GUID writes; no internal pointer escapes.
+ */
+static void catalog_row(ntdrv_pdo_t *node, shz_pnp_row_t *row, unsigned interface)
+{
+    unsigned i;
+    memset(row,0,sizeof *row);
+    row->kind=interface<node->niface?SHZ_PNP_INTERFACE:SHZ_PNP_NODE;
+    row->node_id=node->index+1;row->started=node->started!=0;
+    for(i=0;node->instance[i]&&i+1<128;++i)row->instance[i]=(uint8_t)node->instance[i];
+    memcpy(row->class_guid,node->classguid,sizeof row->class_guid);
+    memcpy(row->driver_key,node->driverkey,sizeof row->driver_key);
+    memcpy(row->description,node->desc,sizeof row->description);
+    memcpy(row->manufacturer,node->mfg,sizeof row->manufacturer);
+    if(node->fdo_driver)for(i=0;node->fdo_driver->name[i]&&i+1<sizeof row->service;++i)row->service[i]=node->fdo_driver->name[i];
+    if(interface<node->niface){row->enabled=node->iface_enabled[interface]!=0;memcpy(row->interface_guid,node->iface_guid[interface],16);memcpy(row->link,node->iface[interface],sizeof row->link);}
+}
+int32_t shz_query_pnp_catalog(process_t *process,uint64_t output,uint64_t length,uint64_t return_length)
+{
+    ntdrv_pdo_t *node;uint64_t flags=irq_save();uint32_t count=0,required,index=0;int32_t status=STATUS_SUCCESS;
+    shz_pnp_catalog_t header={SHZ_PNP_CATALOG_VERSION,sizeof(shz_pnp_row_t),0,0};shz_pnp_row_t row;
+    for(node=pdos;node;node=node->next){if(node->niface>4 || count>1024-1-node->niface){status=STATUS_INSUFFICIENT_RESOURCES;goto done;}count+=1+node->niface;}
+    required=sizeof header+count*sizeof row;header.count=count;
+    if(return_length&&copy_to_user(process,return_length,&required,sizeof required)){status=STATUS_ACCESS_VIOLATION;goto done;}
+    if(length<required){status=STATUS_INFO_LENGTH_MISMATCH;goto done;}
+    if(copy_to_user(process,output,&header,sizeof header)){status=STATUS_ACCESS_VIOLATION;goto done;}
+    for(node=pdos;node;node=node->next){unsigned k;
+        catalog_row(node,&row,4);if(copy_to_user(process,output+sizeof header+(uint64_t)index++*sizeof row,&row,sizeof row)){status=STATUS_ACCESS_VIOLATION;goto done;}
+        for(k=0;k<node->niface;++k){catalog_row(node,&row,k);if(copy_to_user(process,output+sizeof header+(uint64_t)index++*sizeof row,&row,sizeof row)){status=STATUS_ACCESS_VIOLATION;goto done;}}
+    }
+done:irq_restore(flags);return status;
+}
