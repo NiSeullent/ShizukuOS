@@ -72,6 +72,36 @@ Wine and ReactOS are not bundled as complete runtimes. Their NT/Unix kernel depe
   tool. Upstream code remains in ignored `build/tls13/upstream/`; a distributed
   linked binary must include the selected license notices and corresponding
   pinned source/build configuration. See `docs/MODERN_THEME_TLS_APPS.md`.
+
+## Optional Trident script extension
+
+The original `src/m98_trident_script*` embedding and
+`src/m98_trident_automation*` adapter use GPL-2.0-only project code. The real
+interpreter is [QuickJS 2026-06-04](https://bellard.org/quickjs/), pinned to the
+official archive SHA256
+`b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a`.
+Its MIT license credits Fabrice Bellard and Charlie Gordon; upstream copyright
+and license notices remain in the ignored, verified source and build output.
+Distributing a linked binary requires including those notices. Platform changes
+and original embedding sources remain separate from the pinned upstream input.
+This extension does not replace Microsoft's MSHTML implementation or copy it.
+`tests/trident_es2026_selected.js` is original semantic-test code based on the
+linked public ECMAScript2026 specification; it is not a copied Test262 suite
+and does not certify full ECMAScript or browser conformance.
+
+The portability build also selects the mathematical source subset from official
+[musl revision c4e1bb3994c14ed5112c894d15a451bf00f0d501](https://git.musl-libc.org/cgit/musl/commit/?id=c4e1bb3994c14ed5112c894d15a451bf00f0d501),
+archive SHA256
+`b124fa46818a524d373a176b3262a9c26f421d5972073110f3fe51690a9ac4f1`.
+Original source copies and COPYRIGHT remain beside the prepared local source;
+the umbrella MIT grant and applicable Sun, FreeBSD and Arm per-file notices all
+remain required. Local helper names and platform declarations are adapted in
+prepared copies, with exact hashes and build recipes recorded separately.
+No complete musl runtime or prebuilt musl binary is linked. The original project
+formatting adapter is GPL-2.0-only; native basic math uses explicitly audited
+installed-system CRT exports. Host math and original Windows CRT results require
+separate execution evidence.
+
 ## Independent platform path
 
 The new `ntwrapper/`, `ntwin32/`, `ntwddm/`, `drivers/pcie/`,

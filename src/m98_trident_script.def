@@ -1,0 +1,11 @@
+LIBRARY M98QJS.DLL
+EXPORTS
+ m98_script_open
+ m98_script_bind_root
+ m98_script_eval
+ m98_script_invoke
+ m98_script_invoke_this
+ m98_script_jobs
+ m98_script_release_result
+ m98_script_info
+ m98_script_close
