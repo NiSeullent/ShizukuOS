@@ -62,6 +62,9 @@ def main():
         for item in checks:
             print(f"[{item['status']}] {item['check']}")
         return int(any(item["status"] != "PASS" for item in checks))
+    out = Path(args.out)
+    if out.exists():
+        ap.error("choose a fresh output directory to preserve earlier guest receipts")
     stub = BUILD / "kernel64s" / "boot.elf"
     kernel = BUILD / "kernel64s" / "KERNEL64S.BIN"
     initrd = BUILD / "win64" / "WIN64.IMG"
@@ -86,10 +89,8 @@ def main():
         raise SystemExit("guest kernel does not match its build receipt")
     if receipt["kernels"]["kernel64-standalone"]["stub_sha256"] != digest(stub):
         raise SystemExit("guest boot stub does not match its build receipt")
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True)
     serial_path = out / "serial.log"
-    serial_path.unlink(missing_ok=True)
     accel = ("kvm" if Path("/dev/kvm").exists() else "tcg") if args.accel == "auto" else args.accel
     command = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory,
                "-nodefaults", "-vga", "std", "-display", "none", "-nic", "none", "-kernel", str(stub),
@@ -100,7 +101,8 @@ def main():
     serial = serial_path.read_text(errors="replace") if serial_path.is_file() else ""
     evidence, exit_code = baseline.parse(serial)
     checks = baseline.evaluate(serial, evidence, exit_code, rc, memory=args.memory) + pma_checks(serial)
-    checks.append(baseline.check("bounded isolated guest finished", not timed_out, f"timeout={args.timeout}s"))
+    checks.append(baseline.check("bounded isolated guest finished", not timed_out and rc == 1,
+                                f"qemu_rc={rc}, expected=1, timed_out={timed_out}, timeout={args.timeout}s"))
     checks.append(baseline.check("sources and guest inputs unchanged during execution",
                   all(inputs[str(p.relative_to(ROOT))] == digest(p) for p in (*sources, stub, kernel, initrd)) and
                   kbuild.source_hashes() == current_sources))
