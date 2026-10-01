@@ -7,6 +7,7 @@
  * ("x64 exception handling", UNWIND_INFO / UNWIND_CODE). It is not derived from Windows binaries.
  */
 #include "nt.h"
+#include "unwind_internal.h"
 
 #define UWOP_PUSH_NONVOL 0
 #define UWOP_ALLOC_LARGE 1
@@ -102,7 +103,7 @@ SHZ_EXPORT BOOLEAN __cdecl RtlDeleteFunctionTable(PRUNTIME_FUNCTION table)
  * BeginAddress, RVAs relative to range_base) for PCs in [range_base, range_end), with `count` valid entries now and room for
  * `max`; RtlGrowFunctionTable(handle, n) makes the first n entries valid (the owner wrote them into the same array first);
  * RtlDeleteGrowableFunctionTable(handle) unregisters. The handle is the address of the registry slot: opaque, non-NULL, and
- * checked (a stale or foreign handle is ignored by the two VOID functions, as on Windows). RtlLookupFunctionEntry reports
+ * checked for slot alignment and active ownership. Deleted handles must not be reused after a slot is recycled. RtlLookupFunctionEntry reports
  * range_base as the image base for a hit. */
 /* NTSTATUS values as plain numbers: this file is also compiled by the host unwinder test (tests/test_unwind.c) with a header
  * shim that has no ntstatus.h. */
@@ -129,7 +130,8 @@ SHZ_EXPORT DWORD NTAPI RtlAddGrowableFunctionTable(   /* DWORD: the winnt.h prot
 static dyn_table_t *growable_of(PVOID handle)
 {
     dyn_table_t *t = handle;
-    if (t < &dyn_tables[0] || t >= &dyn_tables[128] || ((uintptr_t)t - (uintptr_t)&dyn_tables[0]) % sizeof *t) return 0;
+    const uintptr_t h = (uintptr_t)handle, first = (uintptr_t)&dyn_tables[0];
+    if (h < first || h - first >= sizeof dyn_tables || (h - first) % sizeof *t) return 0;
     return t->used && t->growable ? t : 0;
 }
 
@@ -137,7 +139,7 @@ SHZ_EXPORT VOID NTAPI RtlGrowFunctionTable(PVOID handle, DWORD new_count)
 {
     dyn_table_t *t;
     dyn_acquire();
-    if ((t = growable_of(handle)) && new_count <= t->max) t->count = new_count;
+    if ((t = growable_of(handle)) && new_count > t->count && new_count <= t->max) t->count = new_count;
     dyn_release();
 }
 
@@ -232,12 +234,13 @@ static int v2_epilog(const unwind_info_t *info, DWORD64 fn_len, DWORD64 control_
             if (!epilog_size) {                             /* first record: epilog byte count, "at function end" flag */
                 epilog_size = code_off;
                 if (opinfo & 1) {                           /* an epilog ending exactly at the function end */
-                    const DWORD64 start = fn_len - epilog_size;
+                    const DWORD64 start = epilog_size <= fn_len ? fn_len - epilog_size : fn_len;
                     if (control_offset >= start && control_offset < fn_len) { *epilog_at = start; return 1; }
                 }
             } else {                                        /* subsequent record: offset of the epilog end from fn end */
-                const DWORD64 end = fn_len - (code_off | ((DWORD64)opinfo << 8));
-                const DWORD64 start = end - epilog_size;
+                const DWORD64 distance = code_off | ((DWORD64)opinfo << 8);
+                const DWORD64 end = distance <= fn_len ? fn_len - distance : 0;
+                const DWORD64 start = epilog_size <= end ? end - epilog_size : end;
                 if (control_offset >= start && control_offset < end) { *epilog_at = start; return 1; }
             }
             ++i;
@@ -255,161 +258,261 @@ static int v2_epilog(const unwind_info_t *info, DWORD64 fn_len, DWORD64 control_
     return 0;
 }
 
-/* ---------------------------------------------------------------- epilogue emulation */
-static int in_epilogue(const uint8_t *pc, DWORD64 fn_begin, DWORD64 fn_end, CONTEXT *ctx, int apply)
+/* ---------------------------------------------------------------- bounded reads and metadata validation */
+/* A malformed record must not recursively fault the exception dispatcher. Snapshot each record through the existing
+ * checked self-process read syscall; a short/failed copy ends this walk. The caller still owns ctx/output pointers.
+ * This is a local fail-closed policy for invalid data, not a Windows compatibility promise for invalid input. */
+static int unwind_read(DWORD64 addr, void *out, size_t n)
 {
-    /* Recognised epilogue: [add rsp,imm | lea rsp,[fp+imm]] , pop* , (ret | rep ret | jmp out-of-function). */
-    const uint8_t *p = pc;
-    DWORD64 rsp = ctx->Rsp;
+    size_t got = 0;
+    if (!addr || !n || addr > UINT64_MAX - n) return 0;
+    return NtReadVirtualMemory(CURRENT_PROCESS, (PVOID)(uintptr_t)addr, out, n, &got) == 0 && got == n;
+}
+
+static int unwind_add(DWORD64 a, DWORD64 b, DWORD64 *out)
+{
+    if (a > UINT64_MAX - b) return 0;
+    *out = a + b;
+    return 1;
+}
+
+static int unwind_stack_read(DWORD64 addr, void *out, size_t n)
+{
+    DWORD64 low, high;
+    shz_unwind_stack_limits(&low, &high);
+    return low < high && addr >= low && addr < high && !(addr & 7) && n <= high - addr &&
+           unwind_read(addr, out, n);
+}
+
+static WORD unwind_word(const BYTE *p) { WORD v; memcpy(&v, p, sizeof v); return v; }
+static DWORD unwind_dword(const BYTE *p) { DWORD v; memcpy(&v, p, sizeof v); return v; }
+
+static unsigned unwind_slots(unsigned op, unsigned opinfo)
+{
+    switch (op) {
+    case UWOP_ALLOC_LARGE: return opinfo <= 1 ? (opinfo ? 3 : 2) : 0;
+    case UWOP_SAVE_NONVOL: case UWOP_SAVE_XMM128: return 2;
+    case UWOP_SAVE_NONVOL_FAR: case UWOP_SAVE_XMM128_FAR: return 3;
+    case UWOP_SET_FPREG: return opinfo == 0 ? 1 : 0;
+    case UWOP_PUSH_MACHFRAME: return opinfo <= 1 ? 1 : 0;
+    case UWOP_PUSH_NONVOL: case UWOP_ALLOC_SMALL: case UWOP_EPILOG: return 1;
+    default: return 0;
+    }
+}
+
+/* Largest record: 4-byte header + 256 padded slots + 12-byte chained RUNTIME_FUNCTION. */
+typedef union { DWORD align; BYTE bytes[4 + 512 + sizeof(RUNTIME_FUNCTION)]; } unwind_record_t;
+static int unwind_record(DWORD64 addr, unwind_record_t *record)
+{
+    unwind_info_t *info = (unwind_info_t *)record->bytes;
+    unsigned i, flags, tail, bytes;
+    BYTE header[4];
+    if ((addr & 3) || !unwind_read(addr, record->bytes, 4)) return 0;
+    memcpy(header, record->bytes, 4);
+    flags = UI_FLAGS(info);
+    if ((UI_VERSION(info) != 1 && UI_VERSION(info) != 2) || (flags & ~7u) ||
+        ((flags & UNW_FLAG_CHAININFO) && (flags & (UNW_FLAG_EHANDLER | UNW_FLAG_UHANDLER)))) return 0;
+    tail = (flags & UNW_FLAG_CHAININFO) ? sizeof(RUNTIME_FUNCTION) : flags ? sizeof(DWORD) : 0;
+    bytes = 4 + ((info->count + 1u) & ~1u) * 2 + tail;
+    if (!unwind_read(addr, record->bytes, bytes) || memcmp(header, record->bytes, 4)) return 0;
+    for (i = 0; i < info->count;) {
+        unsigned op = info->codes[i * 2 + 1] & 15, opinfo = info->codes[i * 2 + 1] >> 4;
+        unsigned slots = unwind_slots(op, opinfo);
+        if (!slots || slots > info->count - i || (op == UWOP_EPILOG && UI_VERSION(info) != 2) ||
+            (op == UWOP_SET_FPREG && !(info->frame & 15))) return 0;
+        i += slots;
+    }
+    return 1;
+}
+
+/* ---------------------------------------------------------------- epilogue emulation */
+static int epilogue_read(DWORD64 pc, DWORD64 end, BYTE *bytes, size_t n)
+{
+    return pc < end && n <= end - pc && unwind_read(pc, bytes, n);
+}
+static int in_epilogue(DWORD64 pc, DWORD64 fn_begin, DWORD64 fn_end, CONTEXT *ctx)
+{
+    /* Read only complete instructions inside the function. All speculative state stays in tmp. */
+    BYTE b[7];
+    DWORD64 p = pc, rsp = ctx->Rsp, value;
     CONTEXT tmp = *ctx;
-    if ((p[0] == 0x48 && p[1] == 0x83 && p[2] == 0xc4)) { rsp += (int8_t)p[3]; p += 4; }                        /* add rsp, imm8 */
-    else if (p[0] == 0x48 && p[1] == 0x81 && p[2] == 0xc4) { int32_t v; memcpy(&v, p + 3, 4); rsp += v; p += 7; }  /* add rsp, imm32 */
-    else if ((p[0] & 0xfb) == 0x48 && p[1] == 0x8d && (p[2] & 0xc7) == 0x45 && ((p[2] >> 3) & 7) == 4 && !(p[0] & 4)) {
-        /* lea rsp, [rbp/rbp-like + disp8]: 48 8d 65 xx (rbp) or 49 8d 65 xx (r13) */
-        const unsigned reg = (p[2] & 7) | ((p[0] & 1) ? 8 : 0);
-        rsp = *reg_slot(&tmp, reg) + (int8_t)p[3];
-        p += 4;
-    } else if ((p[0] & 0xfa) == 0x48 && p[1] == 0x8d && (p[2] & 0xc7) == 0x85 && ((p[2] >> 3) & 7) == 4) {
-        const unsigned reg = (p[2] & 7) | ((p[0] & 1) ? 8 : 0);
-        int32_t v; memcpy(&v, p + 3, 4);
-        rsp = *reg_slot(&tmp, reg) + v;
-        p += 7;
-    }
-    for (;;) {                                                            /* pops */
-        unsigned reg;
-        if (p[0] >= 0x58 && p[0] <= 0x5f) { reg = p[0] - 0x58; p += 1; }
-        else if (p[0] == 0x41 && p[1] >= 0x58 && p[1] <= 0x5f) { reg = 8 + p[1] - 0x58; p += 2; }
-        else break;
-        *reg_slot(&tmp, reg) = *(DWORD64 *)rsp;
-        rsp += 8;
-    }
-    if (p[0] == 0xc3 || (p[0] == 0xf3 && p[1] == 0xc3) || (p[0] == 0xc2)) {
-        if (apply) {
-            *ctx = tmp;
-            ctx->Rip = *(DWORD64 *)rsp;
-            ctx->Rsp = rsp + 8;
-        }
-        return 1;
-    }
-    /* tail-call jump out of the function: rex.w jmp r/m64, jmp rel32/rel8, jmp [mem] */
-    if ((p[0] == 0x48 && p[1] == 0xff && (p[2] & 0x38) == 0x20) || p[0] == 0xe9 || p[0] == 0xeb ||
-        (p[0] == 0xff && p[1] == 0x25)) {
-        int outside = 1;
-        if (p[0] == 0xe9) { int32_t rel; memcpy(&rel, p + 1, 4); outside = ((DWORD64)(p + 5 + rel) < fn_begin || (DWORD64)(p + 5 + rel) >= fn_end); }
-        else if (p[0] == 0xeb) { outside = ((DWORD64)(p + 2 + (int8_t)p[1]) < fn_begin || (DWORD64)(p + 2 + (int8_t)p[1]) >= fn_end); }
-        if (outside) {
-            if (apply) {
-                *ctx = tmp;
-                ctx->Rip = *(DWORD64 *)rsp;
-                ctx->Rsp = rsp + 8;
-            }
-            return 1;
+    unsigned pops = 0;
+    if (!epilogue_read(p, fn_end, b, 1)) return -1;
+    if (b[0] == 0x48 || b[0] == 0x49) {
+        if (!epilogue_read(p, fn_end, b, 3)) return 0;
+        if (b[0] == 0x48 && b[1] == 0x83 && b[2] == 0xc4) {
+            if (!epilogue_read(p, fn_end, b, 4)) return 0;
+            if ((int8_t)b[3] < 0 || !unwind_add(rsp, b[3], &rsp)) return -1;
+            p += 4;
+        } else if (b[0] == 0x48 && b[1] == 0x81 && b[2] == 0xc4) {
+            int32_t v;
+            if (!epilogue_read(p, fn_end, b, 7)) return 0;
+            memcpy(&v, b + 3, 4);
+            if (v < 0 || !unwind_add(rsp, (DWORD)v, &rsp)) return -1;
+            p += 7;
+        } else if (b[1] == 0x8d && ((b[2] >> 3) & 7) == 4 &&
+                   ((b[2] & 0xc7) == 0x45 || (b[2] & 0xc7) == 0x85)) {
+            const unsigned reg = (b[2] & 7) | ((b[0] & 1) ? 8 : 0);
+            const unsigned n = (b[2] & 0xc0) == 0x40 ? 4 : 7;
+            int32_t v;
+            if (!epilogue_read(p, fn_end, b, n)) return 0;
+            if (n == 4) v = (int8_t)b[3]; else memcpy(&v, b + 3, 4);
+            value = *reg_slot(&tmp, reg);
+            if (v < 0) { if (value < (DWORD64)-(int64_t)v) return -1; rsp = value - (DWORD64)-(int64_t)v; }
+            else if (!unwind_add(value, (DWORD)v, &rsp)) return -1;
+            p += n;
         }
     }
+    for (;;) {
+        unsigned reg, n;
+        if (!epilogue_read(p, fn_end, b, 1)) return 0;
+        if (b[0] >= 0x58 && b[0] <= 0x5f) { reg = b[0] - 0x58; n = 1; }
+        else if (b[0] == 0x41) {
+            if (!epilogue_read(p, fn_end, b, 2)) return 0;
+            if (b[1] < 0x58 || b[1] > 0x5f) break;
+            reg = 8 + b[1] - 0x58; n = 2;
+        } else break;
+        if (++pops > 16 || reg == 4 || !unwind_stack_read(rsp, &value, 8) || !unwind_add(rsp, 8, &rsp)) return -1;
+        *reg_slot(&tmp, reg) = value;
+        p += n;
+    }
+    if (b[0] == 0xc3 || (b[0] == 0xf3 && epilogue_read(p, fn_end, b, 2) && b[1] == 0xc3)) goto finish;
+    if (b[0] == 0xe9 || b[0] == 0xeb) {
+        int32_t rel;
+        const unsigned n = b[0] == 0xe9 ? 5 : 2;
+        if (!epilogue_read(p, fn_end, b, n)) return 0;
+        if (n == 5) memcpy(&rel, b + 1, 4); else rel = (int8_t)b[1];
+        value = p + n;
+        if (rel < 0) { if (value < (DWORD64)-(int64_t)rel) return 0; value -= (DWORD64)-(int64_t)rel; }
+        else if (!unwind_add(value, (DWORD)rel, &value)) return 0;
+        if (value >= fn_begin && value < fn_end) return 0;
+        goto finish;
+    }
+    if (b[0] == 0xff && epilogue_read(p, fn_end, b, 6) && b[1] == 0x25) goto finish;
+    if (b[0] == 0x48 && epilogue_read(p, fn_end, b, 3) && b[1] == 0xff && (b[2] & 0xf8) == 0xe0) goto finish;
     return 0;
+finish:
+    if (!unwind_stack_read(rsp, &value, 8) || !unwind_add(rsp, 8, &rsp)) return -1;
+    tmp.Rip = value; tmp.Rsp = rsp;
+    *ctx = tmp;
+    return 1;
 }
 
 /* ---------------------------------------------------------------- RtlVirtualUnwind */
-static void apply_codes(const unwind_info_t *info, CONTEXT *c, DWORD64 control_offset, int all, DWORD64 frame_base,
-                        PKNONVOLATILE_CONTEXT_POINTERS ptrs)
+static int apply_codes(const unwind_info_t *info, CONTEXT *c, DWORD64 control_offset, int all, int *machframe)
 {
     unsigned i = 0;
-    const unsigned frame_off = (info->frame >> 4) * 16u;
-    const unsigned frame_reg = info->frame & 15;
-    (void)ptrs;
+    const unsigned frame_off = (info->frame >> 4) * 16u, frame_reg = info->frame & 15;
     while (i < info->count) {
         const BYTE off = info->codes[i * 2], b1 = info->codes[i * 2 + 1];
-        const unsigned op = b1 & 15, opinfo = b1 >> 4;
-        unsigned slots = 1;
-        int active = all || control_offset >= off;
-        switch (op) {
-        case UWOP_ALLOC_LARGE: slots = opinfo ? 3 : 2; break;
-        case UWOP_SAVE_NONVOL: case UWOP_SAVE_XMM128: slots = 2; break;
-        case UWOP_SAVE_NONVOL_FAR: case UWOP_SAVE_XMM128_FAR: slots = 3; break;
-        default: slots = 1;
-        }
-        if (active) {
+        const unsigned op = b1 & 15, opinfo = b1 >> 4, slots = unwind_slots(op, opinfo);
+        DWORD64 addr, value;
+        if (all || control_offset >= off) {
             switch (op) {
-            case UWOP_PUSH_NONVOL: *reg_slot(c, opinfo) = *(DWORD64 *)c->Rsp; c->Rsp += 8; break;
-            case UWOP_ALLOC_LARGE: {
-                DWORD64 sz = opinfo ? *(const DWORD *)&info->codes[(i + 1) * 2]
-                                    : (DWORD64)*(const WORD *)&info->codes[(i + 1) * 2] * 8;
-                c->Rsp += sz;
+            case UWOP_PUSH_NONVOL:
+                if (!unwind_stack_read(c->Rsp, &value, 8) || !unwind_add(c->Rsp, 8, &c->Rsp)) return 0;
+                *reg_slot(c, opinfo) = value; break;
+            case UWOP_ALLOC_LARGE:
+                value = opinfo ? unwind_dword(&info->codes[(i + 1) * 2]) : (DWORD64)unwind_word(&info->codes[(i + 1) * 2]) * 8;
+                if (!unwind_add(c->Rsp, value, &c->Rsp)) return 0;
                 break;
-            }
-            case UWOP_ALLOC_SMALL: c->Rsp += (DWORD64)opinfo * 8 + 8; break;
-            case UWOP_SET_FPREG: c->Rsp = *reg_slot(c, frame_reg) - frame_off; (void)frame_base; break;
-            case UWOP_SAVE_NONVOL: *reg_slot(c, opinfo) = *(DWORD64 *)(c->Rsp + (DWORD64)*(const WORD *)&info->codes[(i + 1) * 2] * 8); break;
-            case UWOP_SAVE_NONVOL_FAR: *reg_slot(c, opinfo) = *(DWORD64 *)(c->Rsp + *(const DWORD *)&info->codes[(i + 1) * 2]); break;
-            case UWOP_SAVE_XMM128: c->FltSave.XmmRegisters[opinfo] = *(M128A *)(c->Rsp + (DWORD64)*(const WORD *)&info->codes[(i + 1) * 2] * 16); break;
-            case UWOP_SAVE_XMM128_FAR: c->FltSave.XmmRegisters[opinfo] = *(M128A *)(c->Rsp + *(const DWORD *)&info->codes[(i + 1) * 2]); break;
+            case UWOP_ALLOC_SMALL:
+                if (!unwind_add(c->Rsp, (DWORD64)opinfo * 8 + 8, &c->Rsp)) return 0;
+                break;
+            case UWOP_SET_FPREG:
+                if (*reg_slot(c, frame_reg) < frame_off) return 0;
+                c->Rsp = *reg_slot(c, frame_reg) - frame_off; break;
+            case UWOP_SAVE_NONVOL: case UWOP_SAVE_NONVOL_FAR:
+                value = op == UWOP_SAVE_NONVOL ? (DWORD64)unwind_word(&info->codes[(i + 1) * 2]) * 8 : unwind_dword(&info->codes[(i + 1) * 2]);
+                if (!unwind_add(c->Rsp, value, &addr) || !unwind_stack_read(addr, &value, 8)) return 0;
+                *reg_slot(c, opinfo) = value; break;
+            case UWOP_SAVE_XMM128: case UWOP_SAVE_XMM128_FAR:
+                value = op == UWOP_SAVE_XMM128 ? (DWORD64)unwind_word(&info->codes[(i + 1) * 2]) * 16 : unwind_dword(&info->codes[(i + 1) * 2]);
+                if (!unwind_add(c->Rsp, value, &addr) || !unwind_stack_read(addr, &c->FltSave.XmmRegisters[opinfo], sizeof(M128A))) return 0;
+                break;
             case UWOP_PUSH_MACHFRAME: {
-                DWORD64 sp = c->Rsp;
-                if (opinfo) sp += 8;                                            /* skip the hardware error code */
-                c->Rip = *(DWORD64 *)sp;
-                c->EFlags = (DWORD)*(DWORD64 *)(sp + 16);
-                c->Rsp = *(DWORD64 *)(sp + 24);
+                DWORD64 frame[5];
+                if (!unwind_add(c->Rsp, opinfo ? 8 : 0, &addr) || !unwind_stack_read(addr, frame, sizeof frame)) return 0;
+                c->Rip = frame[0]; c->EFlags = (DWORD)frame[2]; c->Rsp = frame[3]; *machframe = 1;
                 break;
             }
-            default: break;                                                     /* EPILOG / SPARE */
+            default: break; /* validated version 2 EPILOG descriptor */
             }
         }
         i += slots;
     }
+    return 1;
 }
 
 SHZ_EXPORT PEXCEPTION_ROUTINE NTAPI RtlVirtualUnwind(DWORD handler_type, DWORD64 image_base, DWORD64 pc,
                                                       PRUNTIME_FUNCTION fe, PCONTEXT ctx, PVOID *handler_data,
                                                       PDWORD64 establisher, PKNONVOLATILE_CONTEXT_POINTERS ptrs)
 {
-    const DWORD64 begin = image_base + fe->BeginAddress, end = image_base + fe->EndAddress;
-    const DWORD64 control_offset = pc - begin;
-    const unwind_info_t *info = (const unwind_info_t *)(image_base + fe->UnwindData);
+    RUNTIME_FUNCTION entry;
+    unwind_record_t record;
+    const unwind_info_t *info = (const unwind_info_t *)record.bytes;
+    CONTEXT c = *ctx;
+    DWORD64 begin, end, addr, est = c.Rsp, control_offset, value;
+    unsigned i, set_fp_off = 0xffff, depth = 0;
+    int machframe = 0, ep;
     PEXCEPTION_ROUTINE handler = 0;
-    unsigned set_fp_off = 0xffff, i;
-    const unwind_info_t *cur = info;
+    PVOID hdata = 0;
+    (void)ptrs;
     if (handler_data) *handler_data = 0;
-    /* establisher frame: frame register based when established, else the incoming RSP */
+    *establisher = 0;
+    if (!unwind_read((DWORD64)(uintptr_t)fe, &entry, sizeof entry) || entry.BeginAddress >= entry.EndAddress ||
+        !unwind_add(image_base, entry.BeginAddress, &begin) || !unwind_add(image_base, entry.EndAddress, &end) ||
+        pc < begin || pc >= end || !unwind_add(image_base, entry.UnwindData, &addr) || !unwind_record(addr, &record)) goto bad;
+    control_offset = pc - begin;
+    for (i = 0; i < info->count;) {
+        const BYTE b1 = info->codes[i * 2 + 1];
+        if ((b1 & 15) == UWOP_SET_FPREG) set_fp_off = info->codes[i * 2];
+        i += unwind_slots(b1 & 15, b1 >> 4);
+    }
+    if ((info->frame & 15) && control_offset >= set_fp_off) {
+        value = *reg_slot(&c, info->frame & 15);
+        if (value < (DWORD64)(info->frame >> 4) * 16) goto bad;
+        est = value - (DWORD64)(info->frame >> 4) * 16;
+    }
     {
-        const unsigned frame_reg = info->frame & 15, frame_off = (info->frame >> 4) * 16u;
-        for (i = 0; i < info->count;) {
-            const BYTE b1 = info->codes[i * 2 + 1];
-            unsigned slots = 1;
-            switch (b1 & 15) {
-            case UWOP_ALLOC_LARGE: slots = (b1 >> 4) ? 3 : 2; break;
-            case UWOP_SAVE_NONVOL: case UWOP_SAVE_XMM128: slots = 2; break;
-            case UWOP_SAVE_NONVOL_FAR: case UWOP_SAVE_XMM128_FAR: slots = 3; break;
-            default: break;
-            }
-            if ((b1 & 15) == UWOP_SET_FPREG) set_fp_off = info->codes[i * 2];
-            i += slots;
+        DWORD64 epilog_at;
+        if (v2_epilog(info, end - begin, control_offset, &epilog_at) || control_offset >= info->prolog) {
+            ep = in_epilogue(pc, begin, end, &c);
+            if (ep < 0) goto bad;
+            if (ep) goto done;
         }
-        *establisher = frame_reg && control_offset >= set_fp_off ? *reg_slot(ctx, frame_reg) - frame_off : ctx->Rsp;
     }
-    /* In an epilog the prolog's saves have already been undone: emulate the remaining epilog instructions instead of
-     * replaying unwind codes. Version 2 marks the epilog authoritatively; earlier versions are detected from the
-     * instruction stream. Either way the register-restoring instructions from PC to the RET are simulated. */
-    {
-        DWORD64 ep = 0;
-        if ((v2_epilog(info, end - begin, control_offset, &ep) || control_offset >= info->prolog) &&
-            in_epilogue((const uint8_t *)pc, begin, end, ctx, 1))
-            return 0;
+    if (!apply_codes(info, &c, control_offset, 0, &machframe)) goto bad;
+    while (UI_FLAGS(info) & UNW_FLAG_CHAININFO) {
+        const BYTE *chain = &info->codes[((info->count + 1u) & ~1u) * 2];
+        DWORD64 next;
+        memcpy(&entry, chain, sizeof entry);
+        /* Cap even valid-address cycles before they can exhaust the exception stack or hang forever. */
+        if (++depth > SHZ_UNWIND_CHAIN_LIMIT || entry.BeginAddress >= entry.EndAddress ||
+            !unwind_add(image_base, entry.UnwindData, &next) || next == addr || !unwind_record(next, &record)) goto bad;
+        addr = next;
+        if (!apply_codes(info, &c, 0, 1, &machframe)) goto bad;
     }
-    apply_codes(info, ctx, control_offset, 0, *establisher, ptrs);
-    /* chained unwind info: the parent's operations always complete */
-    while (UI_FLAGS(cur) & UNW_FLAG_CHAININFO) {
-        const RUNTIME_FUNCTION *chain = (const RUNTIME_FUNCTION *)&cur->codes[((cur->count + 1) & ~1u) * 2];
-        cur = (const unwind_info_t *)(image_base + chain->UnwindData);
-        apply_codes(cur, ctx, 0, 1, *establisher, ptrs);
+    if (!machframe) {
+        if (!unwind_stack_read(c.Rsp, &value, 8) || !unwind_add(c.Rsp, 8, &c.Rsp)) goto bad;
+        c.Rip = value;
     }
-    ctx->Rip = *(DWORD64 *)ctx->Rsp;
-    ctx->Rsp += 8;
-    if ((UI_FLAGS(info) & handler_type) && !(UI_FLAGS(info) & UNW_FLAG_CHAININFO) && control_offset >= info->prolog) {
-        const DWORD *h = (const DWORD *)&info->codes[((info->count + 1) & ~1u) * 2];
-        handler = (PEXCEPTION_ROUTINE)(uintptr_t)(image_base + h[0]);
-        if (handler_data) *handler_data = (PVOID)(h + 1);
+    if ((UI_FLAGS(info) & handler_type) && control_offset >= info->prolog) {
+        const unsigned at = 4 + ((info->count + 1u) & ~1u) * 2;
+        if (!unwind_add(image_base, unwind_dword(record.bytes + at), &value)) goto bad;
+        handler = (PEXCEPTION_ROUTINE)(uintptr_t)value;
+        if (!unwind_add(addr, at + 4, &value)) goto bad;
+        hdata = (PVOID)(uintptr_t)value;
     }
+done:
+    *ctx = c;
+    *establisher = est;
+    if (handler_data) *handler_data = hdata;
     return handler;
+bad:
+    /* Existing walkers stop at RIP == 0. Do not publish speculative register/SP restores or call a handler. */
+    ctx->Rip = 0;
+    return 0;
 }
 
 /* ---------------------------------------------------------------- vectored handlers */
@@ -474,10 +577,9 @@ static int run_vectored(veh_t *head, PEXCEPTION_RECORD rec, PCONTEXT ctx)
 /* ---------------------------------------------------------------- frame walking */
 static int stack_ok(DWORD64 sp)
 {
-    uint64_t base, limit;
-    __asm__ volatile("movq %%gs:8, %0" : "=r"(base));
-    __asm__ volatile("movq %%gs:16, %0" : "=r"(limit));
-    return sp >= limit && sp < base && !(sp & 7);
+    DWORD64 base, limit;
+    shz_unwind_stack_limits(&limit, &base);
+    return limit < base && sp >= limit && sp < base && !(sp & 7) && base - sp >= 8;
 }
 
 static BOOLEAN dispatch_frames(PEXCEPTION_RECORD rec, PCONTEXT orig)
@@ -552,6 +654,12 @@ SHZ_EXPORT VOID NTAPI KiUserExceptionDispatcher(PEXCEPTION_RECORD rec, PCONTEXT 
     for (;;) NtTerminateProcess(CURRENT_PROCESS, rec->ExceptionCode);
 }
 
+/* mingw marks RtlCaptureContext returns_twice; this runtime's implementation returns once. Keep the warning
+ * suppression local to functions that capture contexts, including RtlCaptureStackBackTrace. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclobbered"
+#endif
 /* Software exceptions: RaiseException / RtlRaiseException. */
 SHZ_EXPORT VOID NTAPI RtlRaiseException(PEXCEPTION_RECORD rec)
 {
@@ -623,8 +731,6 @@ SHZ_EXPORT VOID NTAPI RtlRestoreContext(PCONTEXT ctx, PEXCEPTION_RECORD rec)
     for (;;) __asm__ volatile("ud2");
 }
 
-/* mingw declares RtlCaptureContext returns_twice; ours is an ordinary call, so -Wclobbered is a false positive. */
-#pragma GCC diagnostic ignored "-Wclobbered"
 /* ---------------------------------------------------------------- RtlUnwindEx */
 SHZ_EXPORT VOID NTAPI RtlUnwindEx(PVOID target_frame, PVOID target_ip, PEXCEPTION_RECORD rec, PVOID return_value,
                                   PCONTEXT original, PUNWIND_HISTORY_TABLE hist)
@@ -691,6 +797,10 @@ SHZ_EXPORT VOID NTAPI RtlUnwind(PVOID target_frame, PVOID target_ip, PEXCEPTION_
 {
     RtlUnwindEx(target_frame, target_ip, rec, return_value, 0, 0);
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 /* ---------------------------------------------------------------- __C_specific_handler
  * The language-specific handler that MSVC- and Clang-compiled C code registers for __try/__except/__finally (the

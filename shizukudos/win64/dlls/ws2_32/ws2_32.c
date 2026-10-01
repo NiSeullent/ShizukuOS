@@ -7,11 +7,19 @@
  *
  * Deliberate limits (all documented, none silent):
  *  - IPv4 only. socket(AF_INET6) fails with WSAEAFNOSUPPORT; inet_pton/inet_ntop still convert IPv6 text (pure formatting).
- *  - No overlapped I/O: WSASend/WSARecv/WSASendTo/WSARecvFrom/WSAIoctl are synchronous and fail with WSAEOPNOTSUPP when
+ *  - WSASend/WSARecv/WSASendTo/WSARecvFrom/WSAIoctl are synchronous and fail with WSAEOPNOTSUPP when
  *    an OVERLAPPED or completion routine is supplied. WSAEventSelect/WSAEnumNetworkEvents are implemented (kernel side).
- *  - SOCK_RAW is not supported. No AcceptEx/ConnectEx (WSAIoctl(SIO_GET_EXTENSION_FUNCTION_POINTER) fails with WSAEINVAL).
- *  - gethostbyname, inet_ntoa use process-wide static buffers (Windows uses per-thread ones).
+ *  - ConnectEx/DisconnectEx use real IPv4 TCP and native IRPs with events/IOCP. No AcceptEx, raw sockets or extension APCs.
+ *  - inet_ntoa uses a process-wide static buffer (Windows uses per-thread storage).
+ *  - gethostbyaddr reads genuine IPv4 records from system drivers\\etc\\hosts only; no PTR, NetBIOS or IPv6 reverse provider.
+ *    Missing hosts database is WSANO_RECOVERY; an absent address is WSAHOST_NOT_FOUND. No numeric-name fallback.
+ *  - getprotobyname/getprotobynumber read the actual system drivers\\etc\\protocols database.
+ *    Protocol, host and service structures belong to the calling thread; host-name/address calls share one hostent.
  *  - getaddrinfo: numeric hosts, "localhost", and A-record DNS lookups; service names come from a small built-in table.
+ *  - getservbyname reads the actual system drivers\\etc\\services database. No database means WSANO_RECOVERY;
+ *    an unknown name means WSAHOST_NOT_FOUND, a known name without the requested protocol means WSANO_DATA.
+ *    Returned storage belongs to the calling thread.
+ *  - GetNameInfoW: numeric IPv4/IPv6 (including scope IDs), table service names and decimal fallback; no reverse DNS.
  *  - Winsock error codes are the standard values; the kernel reports them as NTSTATUS 0xE0A0xxxx (net.h NET_ERR).
  *  - Catalog: one transport provider built into this DLL ("Shizuku Tcpip", entries TCP/IPv4 and UDP/IPv4) and one namespace
  *    provider (NS_DNS, the kernel resolver). WSAEnumProtocols / WSCEnumProtocols / WSCGetProviderPath / WSAEnumNameSpaceProviders
@@ -27,6 +35,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <string.h>
+#include <stddef.h>
+#include "ws2_extensions.h"
+#include "ws2_trace.h"
 
 #ifndef DLLAPI
 #define DLLAPI __declspec(dllexport)
@@ -71,6 +82,7 @@ size_t strlen(const char *s) { size_t n = 0; while (s[n]) ++n; return n; }
 #define STATUS_BUFFER_TOO_SMALL_ ((NTSTATUS)0xC0000023)
 
 static volatile LONG g_started;
+int shz_ws2_extensions_started(void) { return g_started != 0; }
 
 /* NTSTATUS -> Winsock error. Network statuses carry the code in the low 16 bits (customer range 0xE0A0xxxx). */
 static int map_status(NTSTATUS st)
@@ -81,13 +93,19 @@ static int map_status(NTSTATUS st)
     case STATUS_INVALID_HANDLE_: return WSAENOTSOCK;
     case STATUS_ACCESS_VIOLATION_: return WSAEFAULT;
     case STATUS_NO_MEMORY_: return WSAENOBUFS;
+    case (NTSTATUS)0xC000009A: return WSAENOBUFS;
+    case (NTSTATUS)0xC0000120: return WSA_OPERATION_ABORTED;
     case STATUS_BUFFER_TOO_SMALL_: return WSAEFAULT;
     case STATUS_INVALID_PARAMETER_: return WSAEINVAL;
     default: return WSAEINVAL;
     }
 }
-static int fail(NTSTATUS st) { SetLastError((DWORD)map_status(st)); return SOCKET_ERROR; }
-static int fail_code(int code) { SetLastError((DWORD)code); return SOCKET_ERROR; }
+static int fail_at(NTSTATUS st, const char *function)
+{ DWORD error = (DWORD)map_status(st); SetLastError(error); ws2_trace_failure(function, error); return SOCKET_ERROR; }
+static int fail_code_at(int code, const char *function)
+{ SetLastError((DWORD)code); ws2_trace_failure(function, (unsigned)code); return SOCKET_ERROR; }
+#define fail(st) fail_at((st), __func__)
+#define fail_code(code) fail_code_at((code), __func__)
 #define NEED_INIT(ret) do { if (!g_started) { SetLastError(WSANOTINITIALISED); return (ret); } } while (0)
 
 /* ---------------------------------------------------------------- startup / errors */
@@ -358,8 +376,8 @@ DLLAPI SOCKET WSAAPI WSASocketW(int af, int type, int protocol, LPWSAPROTOCOL_IN
 {
     HANDLE h = 0;
     NTSTATUS st;
-    (void)g; (void)dwFlags;                                 /* WSA_FLAG_OVERLAPPED is accepted; overlapped *I/O* is refused later */
     NEED_INIT(INVALID_SOCKET);
+    if (g || (dwFlags & ~0x81u)) { SetLastError(WSAEOPNOTSUPP); return INVALID_SOCKET; }
     if (lpProtocolInfo) {
         if (lpProtocolInfo->dwProviderReserved) {           /* from WSADuplicateSocketW: the duplicated handle of that socket */
             ULONG v = 0, n = 4;
@@ -376,10 +394,13 @@ DLLAPI SOCKET WSAAPI WSASocketW(int af, int type, int protocol, LPWSAPROTOCOL_IN
     if (af != AF_INET) { SetLastError(WSAEAFNOSUPPORT); return INVALID_SOCKET; }
     st = NtShzSocket((ULONG_PTR)af, (ULONG_PTR)(ULONG)type, (ULONG_PTR)(ULONG)protocol, &h);
     if (st) { SetLastError((DWORD)map_status(st)); return INVALID_SOCKET; }
+    { ULONG attributes = dwFlags;                         /* default inheritable; NO_HANDLE_INHERIT explicitly clears it */
+      st = NtShzSockIoctl((ULONG_PTR)h, SHZ_SOCK_SET_OVERLAPPED, &attributes, 4, NULL, 0, NULL);
+      if (st) { NtClose(h); SetLastError((DWORD)map_status(st)); return INVALID_SOCKET; } }
     return (SOCKET)h;
 }
 
-DLLAPI SOCKET WSAAPI socket(int af, int type, int protocol) { return WSASocketW(af, type, protocol, 0, 0, 0); }
+DLLAPI SOCKET WSAAPI socket(int af, int type, int protocol) { return WSASocketW(af, type, protocol, 0, 0, WSA_FLAG_OVERLAPPED); }
 
 DLLAPI int WSAAPI closesocket(SOCKET s)
 {
@@ -542,6 +563,10 @@ DLLAPI int WSAAPI setsockopt(SOCKET s, int level, int optname, const char *optva
     ULONG widened = 0;
     NTSTATUS st;
     NEED_INIT(SOCKET_ERROR);
+    if (level == SOL_SOCKET && optname == 0x7010 && optlen == 0) {
+        st = NtShzSockSetOpt(s, SOL_SOCKET, 0x7010, NULL, 0);
+        return st ? fail(st) : 0;
+    }
     if (!optval || optlen < 1) return fail_code(WSAEFAULT);
     if (optlen < 4) {                                       /* char / short BOOLEAN-style options */
         memcpy(&widened, optval, (size_t)optlen);
@@ -590,8 +615,12 @@ DLLAPI int WSAAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in, DWORD inlen, LPVOID 
     ULONG r = 0;
     NTSTATUS st;
     NEED_INIT(SOCKET_ERROR);
+    ws2_trace_request("WSAIoctl", code, ov != NULL, cr != NULL);
+    if (code == 0xc8000006 && in && inlen >= 16) ws2_trace_guid(in);
     if (ov || cr) return fail_code(WSAEOPNOTSUPP);          /* synchronous only */
     switch (code) {
+    case 0xc8000006:                                      /* SIO_GET_EXTENSION_FUNCTION_POINTER */
+        return shz_ws2_extension_pointer(s, in, inlen, out, outlen, ret);
     case 0x8004667e:                                        /* FIONBIO */
         if (!in || inlen < 4) return fail_code(WSAEFAULT);
         st = NtShzSockIoctl(s, code, in, 4, 0, 0, &r);
@@ -733,16 +762,44 @@ DLLAPI int WSAAPI WSAEnumNetworkEvents(SOCKET s, WSAEVENT hEventObject, LPWSANET
 }
 
 /* ---------------------------------------------------------------- names */
+/* A/W read the same computer-name state and retain the existing fallback token.
+ * GetHostNameW's capacity is in WCHARs, including the NUL (Microsoft Learn).
+ * Contract references: Wine df15af3652511150490934682202d45af892f887,
+ * dlls/ws2_32/protocol.c; ReactOS 9dc3ca87209fd8ebabd96c8ea95d439c13e7fdf8,
+ * dll/win32/ws2_32/src/getxbyxx.c. Original Shizuku implementation, no upstream code copied. */
+static DWORD local_hostname(WCHAR name[MAX_COMPUTERNAME_LENGTH + 1])
+{
+    static const WCHAR fallback[] = L"SHIZUKU";
+    DWORD n = MAX_COMPUTERNAME_LENGTH + 1;
+    if (!GetComputerNameW(name, &n)) {
+        memcpy(name, fallback, sizeof fallback);
+        n = sizeof fallback / sizeof fallback[0] - 1;
+    }
+    return n;
+}
+
 DLLAPI int WSAAPI gethostname(char *name, int namelen)
 {
     WCHAR w[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD n = MAX_COMPUTERNAME_LENGTH + 1, i;
+    DWORD n, i;
     NEED_INIT(SOCKET_ERROR);
-    if (!name || namelen < 0) return fail_code(WSAEFAULT);
-    if (!GetComputerNameW(w, &n)) { w[0] = 'S'; w[1] = 'H'; w[2] = 'I'; w[3] = 'Z'; w[4] = 'U'; w[5] = 'K'; w[6] = 'U'; n = 7; }
-    if ((int)n + 1 > namelen) return fail_code(WSAEFAULT);
+    if (!name || namelen <= 0) return fail_code(WSAEFAULT);
+    n = local_hostname(w);
+    if ((DWORD)namelen <= n) return fail_code(WSAEFAULT);
     for (i = 0; i < n; ++i) name[i] = (char)(w[i] > 0x7f ? '?' : w[i]);
     name[n] = 0;
+    return 0;
+}
+
+DLLAPI int WSAAPI GetHostNameW(PWSTR name, int namelen)
+{
+    WCHAR w[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD n;
+    NEED_INIT(SOCKET_ERROR);
+    if (!name || namelen <= 0) return fail_code(WSAEFAULT);
+    n = local_hostname(w);
+    if ((DWORD)namelen <= n) return fail_code(WSAEFAULT);
+    memcpy(name, w, (n + 1) * sizeof *name);
     return 0;
 }
 
@@ -759,6 +816,471 @@ static int ieq(const char *a, const char *b)
         if ((*a | 32) != (*b | 32)) return 0;
     return !*a && !*b;
 }
+
+/* ---- service database: original implementation of the documented Winsock contract.
+ * Primary references: Microsoft getservbyname/SERVENT; Wine db11d0fe6a169c457e23d007e20404643d067aa8
+ * dlls/ws2_32/{ws2_32.spec,protocol.c}. No Wine body copied. The existing numeric/name helper below is not a
+ * protocol/alias database: this API reads the real OS services file instead of inventing records from that table. */
+struct svc_span { const char *p; size_t n; };
+struct svc_row { struct svc_span name, proto; const char *aliases, *end; size_t alias_count; unsigned port; };
+struct svc_thread {
+    struct svc_thread *next;
+    DWORD tid;
+    struct servent entry;
+    void *payload;
+    struct protoent protocol;
+    void *protocol_payload;
+    struct hostent host;
+    void *host_payload;
+};
+static SRWLOCK g_svc_lock = SRWLOCK_INIT;
+static DWORD g_svc_tls = TLS_OUT_OF_INDEXES;
+static struct svc_thread *g_svc_threads;
+
+static int svc_space(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\v' || c == '\f'; }
+static int svc_token(const char **cursor, const char *end, struct svc_span *token)
+{
+    const char *p = *cursor, *start;
+    while (p < end && svc_space(*p)) ++p;
+    start = p;
+    while (p < end && !svc_space(*p)) ++p;
+    token->p = start; token->n = (size_t)(p - start); *cursor = p;
+    return p != start;
+}
+static int svc_ascii(const struct svc_span *token)
+{
+    size_t i;
+    for (i = 0; i < token->n; ++i)
+        if ((unsigned char)token->p[i] < 0x21 || (unsigned char)token->p[i] > 0x7e) return 0;
+    return token->n != 0;
+}
+static unsigned char svc_lower(unsigned char c) { return c >= 'A' && c <= 'Z' ? (unsigned char)(c + 32) : c; }
+static int svc_equal(const struct svc_span *token, const char *name)
+{
+    size_t i;
+    for (i = 0; i < token->n; ++i)
+        if (!name[i] || svc_lower((unsigned char)token->p[i]) != svc_lower((unsigned char)name[i])) return 0;
+    return !name[token->n];
+}
+static int svc_parse_line(const char *line, const char *end, const char *name, const char *proto, struct svc_row *row, int *known_name)
+{
+    const char *p = line, *comment;
+    struct svc_span port, alias;
+    unsigned value = 0;
+    size_t i;
+    int matched;
+    for (comment = line; comment < end; ++comment) if (*comment == '#') { end = comment; break; }
+    if (!svc_token(&p, end, &row->name) || !svc_ascii(&row->name) || !svc_token(&p, end, &port)) return 0;
+    for (i = 0; i < port.n && port.p[i] >= '0' && port.p[i] <= '9'; ++i) {
+        const unsigned digit = (unsigned)(port.p[i] - '0');
+        if (value > (65535u - digit) / 10u) return 0;
+        value = value * 10u + digit;
+    }
+    if (!i || i >= port.n || port.p[i] != '/' || i + 1 == port.n) return 0;
+    row->proto.p = port.p + i + 1; row->proto.n = port.n - i - 1;
+    if (!svc_ascii(&row->proto)) return 0;
+    for (i = 0; i < row->proto.n; ++i) if (row->proto.p[i] == '/') return 0;
+    row->port = value; row->aliases = p; row->end = end; row->alias_count = 0;
+    matched = name ? svc_equal(&row->name, name) : 0;
+    while (svc_token(&p, end, &alias)) {
+        if (!svc_ascii(&alias)) return 0;
+        ++row->alias_count;
+        if (name && svc_equal(&alias, name)) matched = 1;
+    }
+    if (matched) *known_name = 1;
+    return (!name || matched) && (!proto || svc_equal(&row->proto, proto));
+}
+static char *svc_read_catalog(const WCHAR *suffix, size_t suffix_chars, DWORD *length, int *error)
+{
+    WCHAR path[MAX_PATH];
+    LARGE_INTEGER size;
+    HANDLE file;
+    UINT n;
+    DWORD done = 0;
+    char *data;
+    *error = WSANO_RECOVERY;
+    n = GetSystemDirectoryW(path, MAX_PATH);
+    if (!n || n >= MAX_PATH || n + suffix_chars > MAX_PATH) return 0;
+    memcpy(path + n, suffix, suffix_chars * sizeof *suffix);
+    file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    if (file == INVALID_HANDLE_VALUE) return 0;
+    if (!GetFileSizeEx(file, &size) || size.QuadPart < 0) { CloseHandle(file); return 0; }
+    if ((ULONGLONG)size.QuadPart > 16u * 1024u * 1024u) { CloseHandle(file); *error = WSAENOBUFS; return 0; }
+    *length = (DWORD)size.QuadPart;
+    data = HeapAlloc(GetProcessHeap(), 0, (size_t)*length + 1);
+    if (!data) { CloseHandle(file); *error = WSAENOBUFS; return 0; }
+    while (done < *length) {
+        DWORD got = 0, request = *length - done;
+        if (request > 1024u * 1024u) request = 1024u * 1024u;
+        if (!ReadFile(file, data + done, request, &got, 0) || !got || got > request) {
+            CloseHandle(file); HeapFree(GetProcessHeap(), 0, data); return 0;
+        }
+        done += got;
+    }
+    CloseHandle(file); data[*length] = 0;
+    return data;
+}
+static char *svc_read_database(DWORD *length, int *error)
+{
+    static const WCHAR suffix[] = L"\\drivers\\etc\\services";
+    return svc_read_catalog(suffix, sizeof suffix / sizeof *suffix, length, error);
+}
+static struct svc_thread *svc_storage(int *error)
+{
+    struct svc_thread *state, *candidate;
+    const DWORD tid = GetCurrentThreadId();
+    AcquireSRWLockExclusive(&g_svc_lock);
+    if (g_svc_tls == TLS_OUT_OF_INDEXES) g_svc_tls = TlsAlloc();
+    if (g_svc_tls == TLS_OUT_OF_INDEXES) { ReleaseSRWLockExclusive(&g_svc_lock); *error = WSAENOBUFS; return 0; }
+    candidate = TlsGetValue(g_svc_tls);
+    /* Some runtime TLS-slot reuse paths retain old values in other threads. Never dereference a TLS value until
+     * membership and the actual calling thread identity are checked against this loaded DLL's owned records. */
+    for (state = g_svc_threads; state; state = state->next)
+        if (state == candidate && state->tid == tid) break;
+    if (!state) {
+        state = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *state);
+        if (!state || !TlsSetValue(g_svc_tls, state)) {
+            if (state) HeapFree(GetProcessHeap(), 0, state);
+            ReleaseSRWLockExclusive(&g_svc_lock); *error = WSAENOBUFS; return 0;
+        }
+        state->tid = tid; state->next = g_svc_threads; g_svc_threads = state;
+    }
+    ReleaseSRWLockExclusive(&g_svc_lock);
+    return state;
+}
+static char *svc_copy(char **where, const struct svc_span *token)
+{
+    char *result = *where;
+    memcpy(result, token->p, token->n); result[token->n] = 0; *where += token->n + 1;
+    return result;
+}
+static struct servent *svc_result(const struct svc_row *row, int *error)
+{
+    struct svc_thread *state;
+    struct servent entry;
+    struct svc_span alias;
+    const char *cursor = row->aliases;
+    const size_t text = (size_t)(row->end - row->name.p) + 2;
+    size_t i = 0, bytes;
+    char **aliases, *strings;
+    void *payload, *previous;
+    if (row->alias_count == (size_t)-1 || row->alias_count + 1 > ((size_t)-1 - text) / sizeof(char *)) {
+        *error = WSAENOBUFS; return 0;
+    }
+    bytes = (row->alias_count + 1) * sizeof(char *) + text;
+    payload = HeapAlloc(GetProcessHeap(), 0, bytes);
+    if (!payload) { *error = WSAENOBUFS; return 0; }
+    state = svc_storage(error);
+    if (!state) { HeapFree(GetProcessHeap(), 0, payload); return 0; }
+    aliases = payload; strings = (char *)(aliases + row->alias_count + 1);
+    entry.s_name = svc_copy(&strings, &row->name);
+    entry.s_proto = svc_copy(&strings, &row->proto);
+    entry.s_port = (short)htons((u_short)row->port); entry.s_aliases = aliases;
+    while (svc_token(&cursor, row->end, &alias)) aliases[i++] = svc_copy(&strings, &alias);
+    aliases[i] = 0;
+    previous = state->payload; state->payload = payload; state->entry = entry;
+    if (previous) HeapFree(GetProcessHeap(), 0, previous);
+    return &state->entry;
+}
+DLLAPI struct servent *WSAAPI getservbyname(const char *name, const char *proto)
+{
+    const DWORD saved_error = GetLastError();
+    DWORD length, offset = 0;
+    int error = WSAHOST_NOT_FOUND, known_name = 0;
+    char *data;
+    struct servent *result = 0;
+    NEED_INIT(0);
+    if (!name) { SetLastError(WSAEFAULT); return 0; }
+    data = svc_read_database(&length, &error);
+    if (!data) { SetLastError((DWORD)error); return 0; }
+    error = WSAHOST_NOT_FOUND;
+    while (offset < length) {
+        DWORD end = offset;
+        struct svc_row row;
+        while (end < length && data[end] != '\n') ++end;
+        if (svc_parse_line(data + offset, data + end, name, proto, &row, &known_name)) { result = svc_result(&row, &error); break; }
+        offset = end < length ? end + 1 : length;
+    }
+    HeapFree(GetProcessHeap(), 0, data);
+    if (!result && error == WSAHOST_NOT_FOUND && known_name) error = WSANO_DATA;
+    SetLastError(result ? saved_error : (DWORD)error);
+    return result;
+}
+/* ---- legacy database lookups: genuine system catalog records, no fallback ---- */
+DLLAPI struct servent *WSAAPI getservbyport(int port, const char *proto)
+{
+    const DWORD saved = GetLastError();
+    const unsigned wanted = htons((u_short)port);
+    DWORD length, offset = 0;
+    int error = WSAHOST_NOT_FOUND, known = 0;
+    char *data;
+    struct servent *result = 0;
+    NEED_INIT(0);
+    data = svc_read_database(&length, &error);
+    if (!data) { SetLastError((DWORD)error); return 0; }
+    error = WSAHOST_NOT_FOUND;
+    while (offset < length) {
+        DWORD end = offset;
+        struct svc_row row;
+        while (end < length && data[end] != '\n') ++end;
+        if (svc_parse_line(data + offset, data + end, 0, 0, &row, &known) && row.port == wanted) {
+            known = 1;
+            if (!proto || svc_equal(&row.proto, proto)) { result = svc_result(&row, &error); break; }
+        }
+        offset = end < length ? end + 1 : length;
+    }
+    HeapFree(GetProcessHeap(), 0, data);
+    if (!result && error == WSAHOST_NOT_FOUND && known) error = WSANO_DATA;
+    SetLastError(result ? saved : (DWORD)error);
+    return result;
+}
+
+struct legacy_row {
+    struct svc_span name;
+    const char *aliases, *end;
+    size_t alias_count;
+    unsigned number;
+};
+static int legacy_row_start(const char *line, const char **end, const char **cursor)
+{
+    const char *p;
+    for (p = line; p < *end; ++p) if (*p == '#') { *end = p; break; }
+    *cursor = line;
+    return line != *end;
+}
+static int legacy_aliases(const char *cursor, const char *end, struct legacy_row *row)
+{
+    struct svc_span alias;
+    row->aliases = cursor; row->end = end; row->alias_count = 0;
+    while (svc_token(&cursor, end, &alias)) {
+        if (!svc_ascii(&alias)) return 0;
+        ++row->alias_count;
+    }
+    return 1;
+}
+static int legacy_number(const struct svc_span *token, unsigned maximum, unsigned *number)
+{
+    size_t i;
+    unsigned n = 0;
+    if (!token->n) return 0;
+    for (i = 0; i < token->n; ++i) {
+        const unsigned digit = (unsigned char)token->p[i] - (unsigned)'0';
+        if (digit > 9 || n > (maximum - digit) / 10u) return 0;
+        n = n * 10u + digit;
+    }
+    *number = n;
+    return 1;
+}
+static int legacy_proto_row(const char *line, const char *end, struct legacy_row *row)
+{
+    const char *cursor;
+    struct svc_span number;
+    if (!legacy_row_start(line, &end, &cursor) || !svc_token(&cursor, end, &row->name)
+        || !svc_ascii(&row->name) || !svc_token(&cursor, end, &number)
+        || !legacy_number(&number, 65535u, &row->number)) return 0;
+    return legacy_aliases(cursor, end, row);
+}
+static int legacy_name_matches(const struct legacy_row *row, const char *name)
+{
+    const char *cursor = row->aliases;
+    struct svc_span alias;
+    if (svc_equal(&row->name, name)) return 1;
+    while (svc_token(&cursor, row->end, &alias)) if (svc_equal(&alias, name)) return 1;
+    return 0;
+}
+static struct protoent *legacy_proto_result(const struct legacy_row *row, int *error)
+{
+    struct svc_thread *state;
+    struct protoent result;
+    const size_t text = (size_t)(row->end - row->name.p) + 1;
+    size_t bytes, i = 0;
+    const char *cursor = row->aliases;
+    struct svc_span alias;
+    char **aliases, *strings;
+    void *payload, *previous;
+    if (row->alias_count == (size_t)-1 || row->alias_count + 1 > ((size_t)-1 - text) / sizeof(char *)) {
+        *error = WSAENOBUFS; return 0;
+    }
+    bytes = (row->alias_count + 1) * sizeof(char *) + text;
+    payload = HeapAlloc(GetProcessHeap(), 0, bytes);
+    if (!payload) { *error = WSAENOBUFS; return 0; }
+    state = svc_storage(error);
+    if (!state) { HeapFree(GetProcessHeap(), 0, payload); return 0; }
+    aliases = payload; strings = (char *)(aliases + row->alias_count + 1);
+    result.p_name = svc_copy(&strings, &row->name);
+    result.p_proto = (short)row->number; result.p_aliases = aliases;
+    while (svc_token(&cursor, row->end, &alias)) aliases[i++] = svc_copy(&strings, &alias);
+    aliases[i] = 0;
+    previous = state->protocol_payload; state->protocol_payload = payload; state->protocol = result;
+    if (previous) HeapFree(GetProcessHeap(), 0, previous);
+    return &state->protocol;
+}
+static struct protoent *legacy_proto_lookup(const char *name, int number)
+{
+    static const WCHAR suffix[] = L"\\drivers\\etc\\protocols";
+    const DWORD saved = GetLastError();
+    DWORD length, offset = 0;
+    int error = WSAHOST_NOT_FOUND;
+    char *data;
+    struct protoent *result = 0;
+    data = svc_read_catalog(suffix, sizeof suffix / sizeof *suffix, &length, &error);
+    if (!data) { SetLastError((DWORD)error); return 0; }
+    error = WSAHOST_NOT_FOUND;
+    while (offset < length) {
+        DWORD end = offset;
+        struct legacy_row row;
+        while (end < length && data[end] != '\n') ++end;
+        if (legacy_proto_row(data + offset, data + end, &row)
+            && (name ? legacy_name_matches(&row, name) : number >= 0 && (unsigned)number == row.number)) {
+            result = legacy_proto_result(&row, &error); break;
+        }
+        offset = end < length ? end + 1 : length;
+    }
+    HeapFree(GetProcessHeap(), 0, data);
+    SetLastError(result ? saved : (DWORD)error);
+    return result;
+}
+DLLAPI struct protoent *WSAAPI getprotobyname(const char *name)
+{
+    NEED_INIT(0);
+    if (!name) { SetLastError(WSAEFAULT); return 0; }
+    return legacy_proto_lookup(name, 0);
+}
+DLLAPI struct protoent *WSAAPI getprotobynumber(int number)
+{
+    NEED_INIT(0);
+    return legacy_proto_lookup(0, number);
+}
+
+static struct hostent *legacy_host_result(const struct svc_span *name, const char *alias_start,
+                                         const char *alias_end, size_t alias_count, const ULONG *addresses,
+                                         unsigned count, int *error)
+{
+    struct svc_thread *state;
+    struct hostent result;
+    struct svc_span alias;
+    const char *cursor = alias_start;
+    size_t i, text = name->n + 1, pointers, bytes;
+    char **aliases, **list, *strings, *raw_addresses;
+    void *payload, *previous;
+    if (!count || count > 8 || alias_count > 16u * 1024u * 1024u) { *error = WSANO_RECOVERY; return 0; }
+    for (i = 0; i < alias_count; ++i) {
+        if (!svc_token(&cursor, alias_end, &alias) || text > (size_t)-1 - alias.n - 1) { *error = WSAENOBUFS; return 0; }
+        text += alias.n + 1;
+    }
+    pointers = alias_count + count + 2;
+    if (text > (size_t)-1 - count * 4u || pointers > ((size_t)-1 - text - count * 4u) / sizeof(char *)) {
+        *error = WSAENOBUFS; return 0;
+    }
+    bytes = pointers * sizeof(char *) + count * 4u + text;
+    payload = HeapAlloc(GetProcessHeap(), 0, bytes);
+    if (!payload) { *error = WSAENOBUFS; return 0; }
+    state = svc_storage(error);
+    if (!state) { HeapFree(GetProcessHeap(), 0, payload); return 0; }
+    aliases = payload; list = aliases + alias_count + 1; raw_addresses = (char *)(list + count + 1);
+    strings = raw_addresses + count * 4u;
+    result.h_name = svc_copy(&strings, name); result.h_aliases = aliases;
+    cursor = alias_start;
+    for (i = 0; i < alias_count; ++i) { svc_token(&cursor, alias_end, &alias); aliases[i] = svc_copy(&strings, &alias); }
+    aliases[alias_count] = 0;
+    memcpy(raw_addresses, addresses, count * 4u);
+    for (i = 0; i < count; ++i) list[i] = raw_addresses + i * 4u;
+    list[count] = 0;
+    result.h_addrtype = AF_INET; result.h_length = 4; result.h_addr_list = list;
+    previous = state->host_payload; state->host_payload = payload; state->host = result;
+    if (previous) HeapFree(GetProcessHeap(), 0, previous);
+    return &state->host;
+}
+static int legacy_ipv4(const struct svc_span *token, ULONG *address)
+{
+    size_t start = 0, end;
+    unsigned part, value;
+    unsigned char octets[4];
+    for (part = 0; part < 4; ++part) {
+        struct svc_span number;
+        end = start;
+        while (end < token->n && token->p[end] != '.') ++end;
+        number.p = token->p + start; number.n = end - start;
+        if (!legacy_number(&number, 255, &value) || (part < 3 ? end == token->n : end != token->n)) return 0;
+        octets[part] = (unsigned char)value; start = end + 1;
+    }
+    memcpy(address, octets, 4);
+    return 1;
+}
+DLLAPI struct hostent *WSAAPI gethostbyaddr(const char *address, int length, int type)
+{
+    static const WCHAR suffix[] = L"\\drivers\\etc\\hosts";
+    const DWORD saved = GetLastError();
+    DWORD bytes, offset = 0;
+    ULONG wanted;
+    int error = WSAHOST_NOT_FOUND;
+    char *data;
+    struct hostent *result = 0;
+    NEED_INIT(0);
+    if (!address || length < 4) { SetLastError(WSAEFAULT); return 0; }
+    if (type != AF_INET) { SetLastError(WSAEAFNOSUPPORT); return 0; }
+    memcpy(&wanted, address, 4);
+    data = svc_read_catalog(suffix, sizeof suffix / sizeof *suffix, &bytes, &error);
+    if (!data) { SetLastError((DWORD)error); return 0; }
+    error = WSAHOST_NOT_FOUND;
+    while (offset < bytes) {
+        DWORD end = offset;
+        const char *cursor, *line_end;
+        struct svc_span ip;
+        struct legacy_row row;
+        ULONG candidate;
+        while (end < bytes && data[end] != '\n') ++end;
+        line_end = data + end;
+        if (legacy_row_start(data + offset, &line_end, &cursor) && svc_token(&cursor, line_end, &ip)
+            && legacy_ipv4(&ip, &candidate) && candidate == wanted && svc_token(&cursor, line_end, &row.name)
+            && svc_ascii(&row.name) && legacy_aliases(cursor, line_end, &row)) {
+            result = legacy_host_result(&row.name, row.aliases, row.end, row.alias_count, &candidate, 1, &error); break;
+        }
+        offset = end < bytes ? end + 1 : bytes;
+    }
+    HeapFree(GetProcessHeap(), 0, data);
+    SetLastError(result ? saved : (DWORD)error);
+    return result;
+}
+/* ---- end legacy database lookups ---- */
+BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved)
+{
+    struct svc_thread *state = 0;
+    DWORD slot;
+    const DWORD saved_error = GetLastError();
+    (void)module;
+    /* At process termination, killed threads can own locks; the OS reclaims their heap/TLS without a wait here. */
+    if (reason == DLL_PROCESS_DETACH && reserved) return TRUE;
+    if (reason == DLL_THREAD_DETACH) {
+        struct svc_thread **link;
+        const DWORD tid = GetCurrentThreadId();
+        AcquireSRWLockExclusive(&g_svc_lock);
+        if (g_svc_tls != TLS_OUT_OF_INDEXES) {
+            struct svc_thread *candidate = TlsGetValue(g_svc_tls);
+            for (link = &g_svc_threads; *link; link = &(*link)->next)
+                if (*link == candidate && (*link)->tid == tid) { state = *link; *link = state->next; break; }
+            TlsSetValue(g_svc_tls, 0);
+        }
+        ReleaseSRWLockExclusive(&g_svc_lock);
+        if (state) { if (state->payload) HeapFree(GetProcessHeap(), 0, state->payload); if (state->protocol_payload) HeapFree(GetProcessHeap(), 0, state->protocol_payload); if (state->host_payload) HeapFree(GetProcessHeap(), 0, state->host_payload); HeapFree(GetProcessHeap(), 0, state); }
+    } else if (reason == DLL_PROCESS_DETACH) {
+        AcquireSRWLockExclusive(&g_svc_lock);
+        state = g_svc_threads; g_svc_threads = 0; slot = g_svc_tls; g_svc_tls = TLS_OUT_OF_INDEXES;
+        ReleaseSRWLockExclusive(&g_svc_lock);
+        if (slot != TLS_OUT_OF_INDEXES) TlsFree(slot);
+        while (state) {
+            struct svc_thread *next = state->next;
+            if (state->payload) HeapFree(GetProcessHeap(), 0, state->payload);
+            if (state->protocol_payload) HeapFree(GetProcessHeap(), 0, state->protocol_payload);
+            if (state->host_payload) HeapFree(GetProcessHeap(), 0, state->host_payload);
+            HeapFree(GetProcessHeap(), 0, state); state = next;
+        }
+    }
+    SetLastError(saved_error);
+    return TRUE;
+}
+/* ---- end service database ---- */
 
 /* -> 0 and *port (host order), or a Winsock error code */
 static int service_port(const char *service, int numeric_only, unsigned *port)
@@ -895,6 +1417,77 @@ static int narrow(PCWSTR w, char *out, size_t cap)
     return 1;
 }
 
+/* Original implementation of the Microsoft Learn GetNameInfoW contract, strengthened from E1 proposal 0001.
+ * References reviewed: Wine df15af3652511150490934682202d45af892f887 dlls/ws2_32/protocol.c;
+ * ReactOS 9dc3ca87209fd8ebabd96c8ea95d439c13e7fdf8 dll/win32/ws2_32/src/addrinfo.c. No code copied.
+ * Numeric IPv4/IPv6 conversion needs no IPv6 transport. There is no PTR resolver: a requested name fails with
+ * NI_NAMEREQD, otherwise the numeric address is returned. NI_NUMERICHOST bypasses name lookup, even with NI_NAMEREQD.
+ * Service lookup uses the existing small table, plus the transport-specific names for ports 512..514; unknown ports
+ * fall back to decimal as on Vista+. Both capacities are WCHAR counts including the NUL. Preflight both outputs. */
+static INT nameinfo_error(INT code) { SetLastError((DWORD)code); return code; }
+
+static unsigned nameinfo_decimal(ULONG value, char *out)
+{
+    char reverse[10];
+    unsigned n = 0, i;
+    do { reverse[n++] = (char)('0' + value % 10); value /= 10; } while (value);
+    for (i = 0; i < n; ++i) out[i] = reverse[n - i - 1];
+    out[n] = 0;
+    return n;
+}
+
+DLLAPI INT WSAAPI GetNameInfoW(const SOCKADDR *sa, socklen_t salen, PWCHAR host, DWORD hostlen,
+                              PWCHAR serv, DWORD servlen, INT flags)
+{
+    char address[64], port_text[6];
+    const void *addr;
+    const char *service = port_text;
+    ULONG scope = 0;
+    unsigned port, hn = 0, sn = 0, i;
+    NEED_INIT(WSANOTINITIALISED);
+    if (!sa || salen < (socklen_t)sizeof sa->sa_family) return nameinfo_error(WSAEFAULT);
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in *in4 = (const struct sockaddr_in *)sa;
+        if (salen < (socklen_t)sizeof *in4) return nameinfo_error(WSAEFAULT);
+        addr = &in4->sin_addr;
+        port = ntohs(in4->sin_port);
+    } else if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)sa;
+        if (salen < (socklen_t)sizeof *in6) return nameinfo_error(WSAEFAULT);
+        addr = &in6->sin6_addr;
+        port = ntohs(in6->sin6_port);
+        scope = in6->sin6_scope_id;
+    } else {
+        return nameinfo_error(WSAEAFNOSUPPORT);
+    }
+    if (flags & ~(NI_NOFQDN | NI_NUMERICHOST | NI_NAMEREQD | NI_NUMERICSERV | NI_DGRAM))
+        return nameinfo_error(WSAEINVAL);
+    if ((host && !hostlen) || (serv && !servlen)) return nameinfo_error(WSAEINVAL);
+    if (!host && !serv) return nameinfo_error(WSAHOST_NOT_FOUND);
+    if (host) {
+        if ((flags & NI_NAMEREQD) && !(flags & NI_NUMERICHOST)) return nameinfo_error(WSAHOST_NOT_FOUND);
+        if (!inet_ntop(sa->sa_family, addr, address, sizeof address)) return nameinfo_error(WSAGetLastError());
+        hn = (unsigned)strlen(address);
+        if (scope) { address[hn++] = '%'; hn += nameinfo_decimal(scope, address + hn); }
+        if (hn + 1 > hostlen) return nameinfo_error(WSAEFAULT);
+    }
+    if (serv) {
+        nameinfo_decimal(port, port_text);
+        if (!(flags & NI_NUMERICSERV)) {
+            if (port == 512) service = flags & NI_DGRAM ? "biff" : "exec";
+            else if (port == 513) service = flags & NI_DGRAM ? "who" : "login";
+            else if (port == 514) service = flags & NI_DGRAM ? "syslog" : "shell";
+            else for (i = 0; services[i].name; ++i)
+                if (services[i].port == port) { service = services[i].name; break; }
+        }
+        sn = (unsigned)strlen(service);
+        if (sn + 1 > servlen) return nameinfo_error(WSAEFAULT);
+    }
+    if (host) { for (i = 0; i <= hn; ++i) host[i] = (WCHAR)(unsigned char)address[i]; }
+    if (serv) { for (i = 0; i <= sn; ++i) serv[i] = (WCHAR)(unsigned char)service[i]; }
+    return 0;
+}
+
 DLLAPI int WSAAPI GetAddrInfoW(PCWSTR pNodeName, PCWSTR pServiceName, const ADDRINFOW *pHints, PADDRINFOW *ppResult)
 {
     char node[260], service[64];
@@ -946,15 +1539,12 @@ DLLAPI void WSAAPI FreeAddrInfoW(PADDRINFOW pAddrInfo)
 
 DLLAPI struct hostent *WSAAPI gethostbyname(const char *name)
 {
-    static struct hostent he;
-    static char h_name[256];
-    static char *aliases[1];
-    static struct in_addr addrs[8];
-    static char *addr_list[9];
+    struct svc_span host_name;
+    struct hostent *result;
+    const DWORD saved = GetLastError();
     ULONG a[8];
-    unsigned n = 0, i;
+    unsigned n = 0;
     int rc;
-    size_t len;
     char local[MAX_COMPUTERNAME_LENGTH + 2];
     if (!g_started) { SetLastError(WSANOTINITIALISED); return 0; }
     if (!name || !*name) {                                  /* NULL / "": the local host, answered with our own address */
@@ -969,19 +1559,10 @@ DLLAPI struct hostent *WSAAPI gethostbyname(const char *name)
         rc = resolve_node(name, 0, a, &n);
     }
     if (rc) { SetLastError((DWORD)rc); return 0; }
-    len = strlen(name);
-    if (len >= sizeof h_name) len = sizeof h_name - 1;
-    memcpy(h_name, name, len);
-    h_name[len] = 0;
-    for (i = 0; i < n; ++i) { addrs[i].s_addr = a[i]; addr_list[i] = (char *)&addrs[i]; }
-    addr_list[n] = 0;
-    aliases[0] = 0;
-    he.h_name = h_name;
-    he.h_aliases = aliases;
-    he.h_addrtype = AF_INET;
-    he.h_length = 4;
-    he.h_addr_list = addr_list;
-    return &he;
+    host_name.p = name; host_name.n = strlen(name);
+    result = legacy_host_result(&host_name, 0, 0, 0, a, n, &rc);
+    SetLastError(result ? saved : (DWORD)rc);
+    return result;
 }
 
 /* ---------------------------------------------------------------- catalog: transport and namespace providers */
@@ -1037,6 +1618,35 @@ DLLAPI int WSAAPI WSAEnumProtocolsW(LPINT lpiProtocols, LPWSAPROTOCOL_INFOW lpPr
     n = enum_protocols(lpiProtocols, lpProtocolBuffer, lpdwBufferLength, &err);
     return n < 0 ? fail_code(err) : n;
 }
+
+/* ---- ANSI provider enumeration: same real transport metadata as W ---- */
+_Static_assert(sizeof(WSAPROTOCOL_INFOA) == 372 && sizeof(WSAPROTOCOL_INFOW) == 628
+               && offsetof(WSAPROTOCOL_INFOA, szProtocol) == 116
+               && offsetof(WSAPROTOCOL_INFOW, szProtocol) == 116, "Windows protocol-info A/W ABI");
+DLLAPI int WSAAPI WSAEnumProtocolsA(LPINT protocols, LPWSAPROTOCOL_INFOA buffer, LPDWORD length)
+{
+    WSAPROTOCOL_INFOW wide[2];
+    DWORD wide_bytes = sizeof wide, need;
+    int error = 0, count, i;
+    NEED_INIT(SOCKET_ERROR);
+    if (!length) return fail_code(WSAEFAULT);
+    count = enum_protocols(protocols, wide, &wide_bytes, &error);
+    if (count < 0) return fail_code(error);
+    need = (DWORD)count * sizeof *buffer;
+    if (count && (!buffer || *length < need)) { *length = need; return fail_code(WSAENOBUFS); }
+    for (i = 0; i < count; ++i) {
+        unsigned j;
+        memset(&buffer[i], 0, sizeof buffer[i]);
+        memcpy(&buffer[i], &wide[i], offsetof(WSAPROTOCOL_INFOA, szProtocol));
+        /* The built-in provider labels above are ASCII, so their A conversion
+         * is exact and independent of the current ANSI code page. */
+        for (j = 0; j < WSAPROTOCOL_LEN && wide[i].szProtocol[j]; ++j)
+            buffer[i].szProtocol[j] = (char)wide[i].szProtocol[j];
+    }
+    *length = need;
+    return count;
+}
+/* ---- end ANSI provider enumeration ---- */
 
 DLLAPI int WSAAPI WSCEnumProtocols(LPINT lpiProtocols, LPWSAPROTOCOL_INFOW lpProtocolBuffer, LPDWORD lpdwBufferLength, LPINT lpErrno)
 {
@@ -1106,7 +1716,8 @@ DLLAPI BOOL WSAAPI WSAGetOverlappedResult(SOCKET s, LPWSAOVERLAPPED ov, LPDWORD 
     if (st) { SetLastError((DWORD)map_status(st)); return FALSE; }
     while ((NTSTATUS)ov->Internal == (NTSTATUS)0x103) {     /* STATUS_PENDING */
         if (!wait) { SetLastError(WSA_IO_INCOMPLETE); return FALSE; }
-        if (!ov->hEvent || WaitForSingleObject(ov->hEvent, INFINITE) == WAIT_FAILED) { SetLastError(WSA_INVALID_HANDLE); return FALSE; }
+        { HANDLE event = (HANDLE)((ULONG_PTR)ov->hEvent & ~(ULONG_PTR)1);
+          if (WaitForSingleObject(event ? event : (HANDLE)s, INFINITE) == WAIT_FAILED) { SetLastError(WSA_INVALID_HANDLE); return FALSE; } }
     }
     *transferred = (DWORD)ov->InternalHigh;
     *flags = 0;

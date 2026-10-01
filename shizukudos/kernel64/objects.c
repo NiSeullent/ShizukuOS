@@ -18,6 +18,10 @@ typedef struct waitdesc {
 } waitdesc_t;
 
 static kobject_t *named_head;
+/* Only owned mutants are linked here. Their ownership reference keeps even
+ * an unnamed mutant whose last handle was closed alive until release/exit.
+ * This is global: handles in another process name the same kernel object. */
+static kobject_t *owned_mutants;
 static kobject_t *timers_head[16];
 static unsigned timer_count;
 
@@ -56,6 +60,7 @@ void ob_deref(kobject_t *o)
     last = --o->refs == 0;
     if (last) {
         kobject_t **pp;
+        KASSERT(o->type != OB_MUTANT || (!o->u.mutant.owner && !o->u.mutant.next_owned));
         for (pp = &named_head; *pp; pp = &(*pp)->next_named)
             if (*pp == o) { *pp = o->next_named; break; }
         if (o->type == OB_TIMER) {
@@ -166,10 +171,61 @@ void handles_close_all(process_t *p)
 }
 
 /* ---------------------------------------------------------------- acquire / signal */
+/* These helpers run with interrupts off. A recursive acquisition neither
+ * relinks the object nor takes another ownership reference. */
+static void mutant_take(kobject_t *o, thread_t *t)
+{
+    KASSERT(t && (!o->u.mutant.owner || o->u.mutant.owner == t));
+    if (!o->u.mutant.owner) {
+        ++o->refs;
+        o->u.mutant.owner = t;
+        o->u.mutant.next_owned = owned_mutants;
+        owned_mutants = o;
+    }
+    ++o->u.mutant.recursion;
+    o->signaled = 0;
+}
+
+static void mutant_unlink_owned(kobject_t *o)
+{
+    kobject_t **pp;
+    for (pp = &owned_mutants; *pp && *pp != o; pp = &(*pp)->u.mutant.next_owned) { }
+    KASSERT(*pp == o);
+    *pp = o->u.mutant.next_owned;
+    o->u.mutant.next_owned = 0;
+}
+
+void ob_mutant_initial_owner(kobject_t *o, thread_t *t)
+{
+    const uint64_t f = irq_save();
+    KASSERT(o->type == OB_MUTANT && !o->u.mutant.owner);
+    mutant_take(o, t);
+    irq_restore(f);
+}
+
+int32_t ob_mutant_release(kobject_t *o, thread_t *t, int32_t *previous)
+{
+    const uint64_t f = irq_save();
+    int final;
+    if (o->u.mutant.owner != t) { irq_restore(f); return STATUS_MUTANT_NOT_OWNED; }
+    KASSERT(o->u.mutant.recursion > 0);
+    if (previous) *previous = 1 - o->u.mutant.recursion;
+    final = --o->u.mutant.recursion == 0;
+    if (final) {
+        mutant_unlink_owned(o);
+        o->u.mutant.owner = 0;
+        o->signaled = 1;
+        ob_release_check(o);               /* new owner takes its own reference */
+    }
+    irq_restore(f);
+    if (final) ob_deref(o);                 /* old owner's reference, not the caller's */
+    return STATUS_SUCCESS;
+}
+
 static int obj_signaled(kobject_t *o, thread_t *t)
 {
     switch (o->type) {
-    case OB_EVENT: case OB_THREAD: case OB_PROCESS: case OB_TIMER: return o->signaled;
+    case OB_EVENT: case OB_THREAD: case OB_PROCESS: case OB_TIMER: case OB_SOCKET: return o->signaled;
     case OB_SEMAPHORE: return o->u.sem.count > 0;
     case OB_MUTANT: return o->u.mutant.owner == 0 || o->u.mutant.owner == t;
     default: return OB_IS_IPC(o->type) ? o->signaled : 0;     /* pipe ends: set when an I/O on them completes */
@@ -185,9 +241,7 @@ static int obj_acquire(kobject_t *o, thread_t *t)
     case OB_TIMER: if (!o->u.timer.manual) o->signaled = 0; break;
     case OB_SEMAPHORE: --o->u.sem.count; o->signaled = o->u.sem.count > 0; break;
     case OB_MUTANT:
-        o->u.mutant.owner = t;
-        ++o->u.mutant.recursion;
-        o->signaled = 0;
+        mutant_take(o, t);
         if (o->u.mutant.abandoned) { abandoned = 1; o->u.mutant.abandoned = 0; }
         break;
     default: break;
@@ -323,10 +377,28 @@ int32_t ob_wait(process_t *p, kobject_t **objs, unsigned n, int wait_all, int64_
 /* ---------------------------------------------------------------- thread / timer hooks */
 void thread_object_signal(thread_t *t)
 {
+    const uint64_t f = irq_save();
+    kobject_t *o;
+    /* Scan afresh after each handoff: WaitAll can acquire several mutants
+     * and relink them. No pointer into the old owner's list survives it. */
+    for (;;) {
+        for (o = owned_mutants; o && o->u.mutant.owner != t; o = o->u.mutant.next_owned) { }
+        if (!o) break;
+        mutant_unlink_owned(o);
+        o->u.mutant.owner = 0;
+        o->u.mutant.recursion = 0;
+        o->u.mutant.abandoned = 1;
+        o->signaled = 1;
+        ob_release_check(o);
+        /* OB_MUTANT destruction has no blocking object hook. Retain the old
+         * ownership reference through waiter acquisition, then drop it. */
+        ob_deref(o);
+    }
     if (t->object) {
         t->object->signaled = 1;
         ob_release_check(t->object);
     }
+    irq_restore(f);
 }
 
 /* sched.c reclaims an exited user thread (interrupts off): its object keeps the exit status for GetExitCodeThread and

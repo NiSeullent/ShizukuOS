@@ -171,6 +171,26 @@ const char *pe_string_at(const uint8_t *f, uint64_t size, const pe_info_t *o, ui
     return 0;
 }
 
+/* Export names are variable-length ASCII, including long decorated C++ names.
+ * Compare in the backed file extent without copying into a fixed-size buffer.
+ * Keep validating the entire candidate after a mismatch: a missing terminator
+ * or invalid byte still makes the export directory malformed. */
+static int pe_match_export_name(const uint8_t *f, uint64_t size, const pe_info_t *o, uint32_t rva,
+                                const char *name, int *matches)
+{
+    uint64_t off, avail, n;
+    int same = 1;
+    if (pe_rva_to_offset(f, size, o, rva, &off, &avail)) return PE_E_STRING;
+    for (n = 0; n < avail; ++n) {
+        const unsigned char ch = f[off + n];
+        if (!ch) { *matches = same && !name[n]; return PE_OK; }
+        if (ch < 0x20 || ch > 0x7e) return PE_E_STRING;
+        /* Once the requested string ends or differs, do not index it again. */
+        if (same && ch != (unsigned char)name[n]) same = 0;
+    }
+    return PE_E_STRING;
+}
+
 int pe_find_export(const uint8_t *f, uint64_t size, const pe_info_t *o, const char *name, int ordinal, uint32_t *rva,
                    char *forward, unsigned forward_cap)
 {
@@ -193,13 +213,11 @@ int pe_find_export(const uint8_t *f, uint64_t size, const pe_info_t *o, const ch
         for (i = 0; i < nnames; ++i) {
             uint64_t noff, navail, ooff, oavail;
             uint32_t name_rva;
-            const char *cand;
-            unsigned k;
+            int matches;
             if (pe_rva_to_offset(f, size, o, names_rva + i * 4, &noff, &navail) || navail < 4) return PE_E_EXPORT;
             name_rva = rd32(f + noff);
-            if (!(cand = pe_string_at(f, size, o, name_rva))) return PE_E_EXPORT;
-            for (k = 0; cand[k] && name[k] && cand[k] == name[k]; ++k) { }
-            if (cand[k] || name[k]) continue;
+            if (pe_match_export_name(f, size, o, name_rva, name, &matches)) return PE_E_EXPORT;
+            if (!matches) continue;
             if (pe_rva_to_offset(f, size, o, ords_rva + i * 2, &ooff, &oavail) || oavail < 2) return PE_E_EXPORT;
             i = rd16(f + ooff);
             if (i >= nfunc) return PE_E_EXPORT;
@@ -224,6 +242,21 @@ found:
         if (forward) forward[0] = 0;
         return PE_OK;
     }
+}
+
+/* A symbol is a view into the caller-owned raw image. Validate the entire
+ * string against its contiguous file-backed extent before invoking a callback;
+ * long C++ names need neither a truncated copy nor a growing kernel stack. */
+static int pe_symbol_view(const uint8_t *f, uint64_t size, const pe_info_t *o, uint32_t rva, const char **name)
+{
+    uint64_t off, avail, n;
+    if (pe_rva_to_offset(f, size, o, rva, &off, &avail)) return PE_E_STRING;
+    for (n = 0; n < avail; ++n) {
+        unsigned char ch = f[off + n];
+        if (!ch) { *name = (const char *)(f + off); return PE_OK; }
+        if (ch < 0x20 || ch > 0x7e) return PE_E_STRING;
+    }
+    return PE_E_STRING;
 }
 
 int pe_walk_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_import_fn fn, void *ctx)
@@ -258,7 +291,7 @@ int pe_walk_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, pe_impo
                 const char *sym;
                 uint64_t hoff, havail;
                 if ((thunk >> 31) || pe_rva_to_offset(f, size, o, (uint32_t)thunk, &hoff, &havail) || havail < 3) return PE_E_IMPORT;
-                if (!(sym = pe_string_at(f, size, o, (uint32_t)thunk + 2))) return PE_E_IMPORT;
+                if (pe_symbol_view(f, size, o, (uint32_t)thunk + 2, &sym)) return PE_E_IMPORT;
                 rc = fn(ctx, dll, sym, rd16(f + hoff), 0, iat + idx * 8);
             }
             if (rc) return rc;
@@ -437,7 +470,7 @@ int pe_walk_delay_imports(const uint8_t *f, uint64_t size, const pe_info_t *o, p
                     return PE_E_DELAY;
                 }
                 if (pe_rva_to_offset(f, size, o, hn, &hoff, &havail) || havail < 3) return PE_E_DELAY;
-                if (!(sym = pe_string_at(f, size, o, hn + 2))) return PE_E_DELAY;
+                if (pe_symbol_view(f, size, o, hn + 2, &sym)) return PE_E_DELAY;
                 rc = fn(ctx, &dd, sym, rd16(f + hoff), 0, dd.iat_rva + idx * 8);
             }
             if (rc) return rc;

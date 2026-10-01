@@ -8,7 +8,7 @@
  *
  * Model: the whole FAT is copied into memory at mount (4 KiB pages), files are read through a per-file extent
  * list (runs of consecutive clusters) built once from the in-memory FAT, so a page of a 250 MB file costs
- * exactly its 8 sector reads. Supported: MBR partition of type 0x0B/0x0C or a superfloppy (no MBR), 512-byte
+ * exactly its 8 sectors, optionally grouped into up to four sectors per read. Supported: MBR partition of type 0x0B/0x0C or a superfloppy (no MBR), 512-byte
  * sectors, 1..128 sectors per cluster, one or two FATs (the first is used), LFN with checksum validation.
  * Writing (when the caller supplies `write`): data writes with read-modify-write of partial sectors, file growth by
  * cluster allocation (gaps read as zero), truncation, creation of files and directories with VFAT long names and
@@ -27,6 +27,7 @@
 #include <stdint.h>
 
 #define FAT32_SECTOR 512u
+#define FAT32_READ_MAX_SECTORS 4u
 #define FAT32_ATTR_RO 0x01
 #define FAT32_ATTR_HIDDEN 0x02
 #define FAT32_ATTR_SYSTEM 0x04
@@ -39,6 +40,10 @@ enum { FAT32_OK = 0, FAT32_E_IO = -1, FAT32_E_FORMAT = -2, FAT32_E_NOMEM = -3, F
        FAT32_E_RDONLY = -6, FAT32_E_FULL = -7, FAT32_E_NAME = -8, FAT32_E_EXISTS = -9, FAT32_E_NOTEMPTY = -10 };
 
 typedef int (*fat32_read_fn)(void *ctx, uint64_t lba, void *buf512);         /* one sector, 0 = ok */
+/* Optional consecutive-sector read. Never asked for more than four sectors or
+ * for sectors outside the caller's actual file request. A failed call's buffer
+ * is discarded: the caller receives only previously completed batches. */
+typedef int (*fat32_read_many_fn)(void *ctx, uint64_t lba, unsigned count, void *buf);
 typedef int (*fat32_write_fn)(void *ctx, uint64_t lba, const void *buf512);  /* one sector, 0 = ok; NULL: read-only */
 typedef void *(*fat32_alloc_fn)(void *ctx, uint64_t bytes);                  /* zeroed small allocation, NULL = none */
 typedef void (*fat32_free_fn)(void *ctx, void *p, uint64_t bytes);
@@ -47,6 +52,7 @@ typedef void *(*fat32_page_fn)(void *ctx);                                   /* 
 typedef struct {
     /* filled in by the caller before fat32_mount() */
     fat32_read_fn read;
+    fat32_read_many_fn read_many;               /* optional: NULL preserves one-sector callbacks */
     fat32_alloc_fn alloc;
     fat32_free_fn free;
     fat32_page_fn alloc_page;
@@ -69,6 +75,7 @@ typedef struct {
     uint8_t *fat_dirty;                         /* one bit per FAT sector held in memory (writable volumes) */
     uint64_t sector_lba;                        /* LBA held in `sector`, ~0 when nothing */
     uint8_t sector[FAT32_SECTOR];               /* bounce buffer: the caller serialises calls on one volume */
+    uint8_t read_batch[FAT32_SECTOR * FAT32_READ_MAX_SECTORS]; /* bounded staging; no failed-batch output leak */
 } fat32_vol_t;
 
 typedef struct { uint32_t cluster, offset; int ended; } fat32_dir_t;   /* enumeration cursor (offset within the cluster) */

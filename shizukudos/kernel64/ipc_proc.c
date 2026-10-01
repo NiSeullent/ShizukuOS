@@ -97,8 +97,8 @@ static int32_t handle_insert_at(process_t *p, uint64_t value, kobject_t *o, uint
     e->inherit = flags;
     ++o->refs;
     ++p->handle_count;
+    ipc_handle_opened(o);                               /* inherited table entry and ioctx count have one publication */
     irq_restore(f);
-    ipc_handle_opened(o);
     return STATUS_SUCCESS;
 }
 
@@ -879,6 +879,27 @@ static int32_t sys_terminate_thread(process_t *p, uint64_t h, int32_t code)
 /* ---------------------------------------------------------------- handle duplication */
 /* NtDuplicateObject(SourceProcess, SourceHandle, TargetProcess, PHANDLE TargetHandle, DesiredAccess, HandleAttributes,
  * Options), within or across processes. */
+/* Bounded opt-in observations; object rights and duplication behavior stay unchanged. */
+static void duplicate_failure_trace(process_t *p, process_t *src, process_t *dst, kobject_t *o,
+                                    uint64_t hsrc, uint32_t access, uint32_t desired,
+                                    uint32_t attrs, uint32_t options, int32_t status)
+{
+    static int enabled = -1;
+    static unsigned count;
+    unsigned emit = 0;
+    uint64_t saved;
+    if (!status || ((uint32_t)status >> 30) != 3u) return;
+    if (enabled < 0) enabled = k64_cmdline_has("shz.ipcdiag");
+    if (!enabled) return;
+    saved = irq_save();
+    if (count < 32u) { ++count; emit = 1; }
+    irq_restore(saved);
+    if (emit)
+        kprintf("K64 duplicate failure: pid=%d src=%d dst=%d handle=%llx type=%u granted=%x desired=%x attrs=%x options=%x status=%x\n",
+                p->pid, src ? src->pid : 0, dst ? dst->pid : 0, hsrc, o ? (unsigned)o->type : 0u,
+                access, desired, attrs, options, (uint32_t)status);
+}
+
 static int32_t sys_duplicate(process_t *p, struct regs *r, uint64_t hsp, uint64_t hsrc, uint64_t htp, uint64_t pout)
 {
     const uint32_t desired = (uint32_t)stack_arg(p, r, 5), attrs = (uint32_t)stack_arg(p, r, 6);
@@ -905,35 +926,20 @@ static int32_t sys_duplicate(process_t *p, struct regs *r, uint64_t hsp, uint64_
         uint32_t a = (options & DUPLICATE_SAME_ACCESS) ? access : desired;
         const int inherit = (options & DUPLICATE_SAME_ATTRIBUTES) ? (flags & HANDLE_FLAG_INHERIT_BIT) != 0
                                                                    : (attrs & OBJ_INHERIT_ATTR) != 0;
-        if (o->type == OB_SECTION && !(options & DUPLICATE_SAME_ACCESS)) {
-            /* Section handles carry the only rights there are (Kernel64 keeps no per-object security descriptors), so a duplicate
-             * narrows them and never adds one: a request for a right the source handle lacks is STATUS_ACCESS_DENIED. On Windows
-             * that is what a section created with Chromium's restrictive descriptor answers, and base::subtle::
-             * PlatformSharedMemoryRegion::Take relies on it (DuplicateHandle(handle, FILE_MAP_WRITE) must fail for a read-only
-             * region, or the region is rejected as "not read-only but should be"). Generic rights map as for sections;
-             * MAXIMUM_ALLOWED means everything the source handle has; the standard rights (READ_CONTROL, ...) that every owner
-             * holds are never refused, only the section-specific ones are compared. */
-            uint32_t want = desired;
-            if (want & MAXIMUM_ALLOWED_ACCESS) want |= access;
-            if (want & GENERIC_READ_ACCESS) want |= 0x20000u | SECTION_QUERY | SECTION_MAP_READ;
-            if (want & GENERIC_WRITE_ACCESS) want |= 0x20000u | SECTION_MAP_WRITE;
-            if (want & GENERIC_EXECUTE_ACCESS) want |= 0x20000u | SECTION_MAP_EXECUTE;
-            if (want & GENERIC_ALL_ACCESS) want |= SECTION_ALL_ACCESS;
-            want &= ~(MAXIMUM_ALLOWED_ACCESS | GENERIC_READ_ACCESS | GENERIC_WRITE_ACCESS | GENERIC_EXECUTE_ACCESS | GENERIC_ALL_ACCESS);
-            if ((want & 0xffffu) & ~access) st = STATUS_ACCESS_DENIED;     /* object-specific rights only: the standard rights (READ_CONTROL, ...) stay grantable */
-            else a = want;
-        }
+        if (o->type == OB_SECTION && !(options & DUPLICATE_SAME_ACCESS))
+            st = ipc_section_duplicate_access(o, access, &a);
         if (!st) {
-        ob_ref(o);
-        st = ipc_give_handle(dst, o, a, inherit, 0, &h);
+            ob_ref(o);
+            st = ipc_give_handle(dst, o, a, inherit, 0, &h);
+        }
         if (!st && pout) {
             const uint64_t v = h;
             if (copy_to_user(p, pout, &v, 8)) { handle_close(dst, h); st = STATUS_ACCESS_VIOLATION; }
         }
-        }
     }
     if ((options & DUPLICATE_CLOSE_SOURCE) && hsrc != CURRENT_PROCESS_HANDLE && hsrc != CURRENT_THREAD_HANDLE && !src->teardown)
         handle_close(src, hsrc & ~3ull);                 /* closed whether or not the duplication worked, as on NT */
+    duplicate_failure_trace(p, src, dst, o, hsrc, access, desired, attrs, options, st);
     ob_deref(o);
     if (dpo) ob_deref(dpo);
     ob_deref(spo);

@@ -106,12 +106,32 @@ def build_ntdll():
     stub_exports = gen_stubs()
     names = scan_exports(src, "NTAPI")
     names = [n for n in names if n not in ("ShzInitSync",)]
-    write_def(OUT / "ntdll.def", "ntdll.dll", names + ["RtlCaptureContext", "__C_specific_handler"] + stub_exports)
+    entries = names + ["RtlCaptureContext", "__C_specific_handler"] + stub_exports
+    ordinal_file = W64 / "ntdll" / "ordinals.json"
+    if ordinal_file.exists():
+        policy = json.loads(ordinal_file.read_text())
+        pins = policy.get("ordinals", {})
+        actual_names = {entry.split("=", 1)[0].strip() for entry in entries}
+        if (policy.get("library") != "ntdll.dll" or not isinstance(pins, dict) or set(pins) != actual_names
+                or any(type(value) is not int or not 1 <= value <= 65535 for value in pins.values())
+                or len(set(pins.values())) != len(pins)):
+            raise SystemExit("ntdll.dll: exact named-export ordinal coverage and unique valid ordinals required")
+        definitions = sorted({entry for entry in entries if "=" not in entry})
+        aliases = sorted({entry for entry in entries if "=" in entry})
+        for alias in aliases:
+            name, target = (part.strip() for part in alias.split("=", 1))
+            if target not in definitions:
+                raise SystemExit(f"ntdll.dll: alias {name} has no actual local target {target}")
+        alias_entries = [f"{entry} @{pins[entry.split('=', 1)[0].strip()]}" for entry in aliases]
+        write_def(OUT / "ntdll.def", "ntdll.dll", definitions, alias_entries,
+                  {name: pins[name] for name in definitions})
+    else:
+        write_def(OUT / "ntdll.def", "ntdll.dll", entries)
     dll = OUT / "ntdll.dll"
     cmd = [CC, *COMMON, "-DSHZ_NTDLL_BUILD", "-shared", "-nostdlib", "-Wl,--entry,ShzNtdllEntry",
            f"-Wl,--image-base,{NTDLL_BASE}", "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
-           "-I", W64 / "include", *src, W64 / "ntdll" / "ntdll_asm.S", OUT / "nt_stubs.S", version_resource(W64 / "ntdll" / "ntdll.rc"),
-           OUT / "ntdll.def", "-lgcc", "-o", dll]
+           "-I", W64 / "include", *src, W64 / "ntdll" / "ntdll_asm.S", OUT / "nt_stubs.S", OUT / "ntdll.def",
+           version_obj("ntdll.dll", "NT Layer DLL"), "-lgcc", "-o", dll]
     run(cmd)
     run([DLLTOOL, "-d", OUT / "ntdll.def", "-l", OUT / "libntdll.a", "--kill-at"])
     return dll, cmd, names
@@ -136,7 +156,7 @@ def build_kernel32(ntdll_names):
     dll = OUT / "kernel32.dll"
     cmd = [CC, *COMMON, "-shared", "-nostdlib", "-Wl,--entry,ShzKernel32Entry", f"-Wl,--image-base,{K32_BASE}",
            "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at", "-I", W64 / "include", *src,
-           version_resource(W64 / "kernel32" / "kernel32.rc"), OUT / "kernel32.def", "-L", OUT, "-lntdll", "-lgcc", "-o", dll]
+           OUT / "kernel32.def", version_obj("kernel32.dll", "Windows NT BASE API Client DLL"), "-L", OUT, "-lntdll", "-lgcc", "-o", dll]
     run(cmd)
     run([DLLTOOL, "-d", OUT / "kernel32.def", "-l", OUT / "libkernel32.a", "--kill-at"])
     return dll, cmd, names

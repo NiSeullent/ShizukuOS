@@ -626,8 +626,8 @@ static void test_heaps(void)
 
 /* SetThreadDescription / GetThreadDescription (Windows 10 1607+): HRESULT_FROM_NT codes, LocalAlloc'd result, empty string
  * for a thread without a description, readable through any handle to the thread, NULL clears. */
-HRESULT WINAPI SetThreadDescription(HANDLE, PCWSTR);
-HRESULT WINAPI GetThreadDescription(HANDLE, PWSTR *);
+WINBASEAPI HRESULT WINAPI SetThreadDescription(HANDLE, PCWSTR);
+WINBASEAPI HRESULT WINAPI GetThreadDescription(HANDLE, PWSTR *);
 /* RegisterApplicationRestart family: recorded, validated, reported back (no WER service restarts anything). */
 static void test_restart(void)
 {

@@ -1,3 +1,10 @@
+E1 proposal 2/2: bring-up diagnostics
+
+shz.exctrace: first occurrence of every failing system call (by name and status) and every NtCreateFile/NtOpenFile with its
+path and status; shz.k32trace: ExitProcess/TerminateProcess(self) caller and return addresses, failed CreateFileW,
+CreateNamedPipeW and CreateProcessW with their paths and errors; autorun control file: env=NAME=VALUE lines.
+
+
 diff --git a/shizukudos/kernel64/autorun.c b/shizukudos/kernel64/autorun.c
 index a5e493d..f6445ee 100644
 --- a/shizukudos/kernel64/autorun.c
@@ -71,6 +78,68 @@ index d803134..e8dbcdc 100644
          { uint16_t z = 0; uwrite(p, at, &z, 2); at += 2; }
      }
      at = (at + 15) & ~15ull;
+diff --git a/shizukudos/kernel64/syscall.c b/shizukudos/kernel64/syscall.c
+index 171b464..c048dea 100644
+--- a/shizukudos/kernel64/syscall.c
++++ b/shizukudos/kernel64/syscall.c
+@@ -141,6 +141,49 @@ int __attribute__((weak)) ipc_syscall_override(process_t *p, struct regs *r, uin
+     return 0;
+ }
+ 
++/* `shz.exctrace`: the first occurrence of every (system call, error status) pair, by name, at most 300 per boot. A program that
++ * gives up after an unsupported call or information class leaves the call's name and status behind. Statuses that are
++ * ordinary control flow (pending, timeout, end of file, no more entries, buffer overflow, name not found) are skipped. */
++static const char *sys_name(uint32_t num)
++{
++    switch (num) {
++#define X(name, n) case n: return #name;
++    SYSCALL_LIST(X)
++    SYSCALL_LIST_REGISTRY(X)
++    SYSCALL_LIST_GRAPHICS(X)
++    SYSCALL_LIST_NET(X)
++    SYSCALL_LIST_K32(X)
++    SYSCALL_LIST_MISC(X)
++    SYSCALL_LIST_GPU(X)
++    SYSCALL_LIST_SETUP(X)
++    SYSCALL_LIST_BLK(X)
++    SYSCALL_LIST_NTDRV(X)
++    SYSCALL_LIST_IPC_MISC(X)
++    SYSCALL_LIST_IPC(X)
++#undef X
++    default: return "?";
++    }
++}
++
++static void trace_syscall_failure(process_t *p, struct regs *r, uint32_t num, int32_t st, uint64_t a1, uint64_t a2)
++{
++    static int enabled = -1;
++    static struct { uint32_t num; int32_t st; } seen[300];
++    static unsigned nseen;
++    unsigned i;
++    if ((st & 0xc0000000) != 0xc0000000) return;
++    if (st == (int32_t)0xc0000034 || st == (int32_t)0xc000000f || st == (int32_t)0xc0000011 || st == (int32_t)0xc000011a) return;
++    if (enabled < 0) enabled = k64_cmdline_has("shz.exctrace");
++    if (!enabled || nseen >= 300) return;
++    for (i = 0; i < nseen; ++i)
++        if (seen[i].num == num && seen[i].st == st) return;
++    seen[nseen].num = num; seen[nseen].st = st; ++nseen;
++    if (num == SYS_NtQueryInformationFile || num == SYS_NtSetInformationFile || num == SYS_NtQueryVolumeInformationFile)
++        kprintf("K64 sys: pid %d %s (0x%x) class %llu -> %x (a1=%llx)\n", p->pid, sys_name(num), num, (uint64_t)stack_arg(p, r, 5), (uint32_t)st, a1);
++    else
++        kprintf("K64 sys: pid %d %s (0x%x) -> %x (a1=%llx a2=%llx)\n", p->pid, sys_name(num), num, (uint32_t)st, a1, a2);
++}
++
+ int syscall_dispatch(struct regs *r)
+ {
+     process_t *p = current_process();
+@@ -193,6 +236,7 @@ int syscall_dispatch(struct regs *r)
+         else st = STATUS_INVALID_SYSTEM_SERVICE;
+     }
+ done:
++    trace_syscall_failure(p, r, num, st, a1, a2);
+     cli();
+     if (st == (int32_t)0x7fff0001) {                    /* NtContinue already rewrote the whole frame */
+         check_kill();
 diff --git a/shizukudos/kernel64/sysfile.c b/shizukudos/kernel64/sysfile.c
 index 63b9974..37dd8a8 100644
 --- a/shizukudos/kernel64/sysfile.c
@@ -218,10 +287,10 @@ index 32cb618..d40f794 100644
      WCHAR image[300], cwd[300], *cmdline = 0, *envw = 0;
      SHZ_CREATE_PROCESS c;
 diff --git a/shizukudos/win64/kernel32/k32_trace.c b/shizukudos/win64/kernel32/k32_trace.c
-index fbe85bc..52adfba 100644
+index fbe85bc..fa1c61a 100644
 --- a/shizukudos/win64/kernel32/k32_trace.c
 +++ b/shizukudos/win64/kernel32/k32_trace.c
-@@ -81,3 +81,71 @@ void k32_trace_hex(const char *a, const char *b, ULONG_PTR v)
+@@ -81,3 +81,69 @@ void k32_trace_hex(const char *a, const char *b, ULONG_PTR v)
      line[n++] = '\n';
      NtShzDebugPrint(line, n);
  }
@@ -278,8 +347,7 @@ index fbe85bc..52adfba 100644
 +    static volatile LONG lines;
 +    char line[300];
 +    unsigned n = 0, i;
-+    const DWORD saved = GetLastError();                   /* k32_trace_on() reads the environment, which sets ERROR_ENVVAR_NOT_FOUND */
-+    if (!k32_trace_on() || lines >= 200) { SetLastError(saved); return; }
++    if (!k32_trace_on() || lines >= 200) return;
 +    InterlockedIncrement(&lines);
 +    n = put(line, n, sizeof line, "K32 trace: ");
 +    n = put(line, n, sizeof line, fn);
@@ -291,5 +359,4 @@ index fbe85bc..52adfba 100644
 +    n = put_hex(line, n, sizeof line, extra);
 +    line[n++] = '\n';
 +    NtShzDebugPrint(line, n);
-+    SetLastError(saved);
 +}

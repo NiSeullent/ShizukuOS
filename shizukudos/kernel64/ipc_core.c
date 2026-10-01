@@ -14,6 +14,7 @@
  * returns, as on Windows.
  */
 #include "ipc.h"
+#include "office_sync_rights.h"
 
 extern uint64_t ticks_now(void);
 
@@ -75,7 +76,7 @@ int32_t ipc_name_from_oa(process_t *p, uint64_t oa_va, char *out, size_t cap, ui
 void ipc_handle_opened(kobject_t *o)
 {
     switch (o->type) {
-    case OB_FILE: {
+    case OB_FILE: case OB_SOCKET: {
         ioctx_t *io = o->u.file.io;
         const uint64_t f = irq_save();
         if (io) ++io->handles;
@@ -97,15 +98,15 @@ int32_t ipc_give_handle(process_t *p, kobject_t *o, uint32_t access, int inherit
 {
     uint32_t h;
     uint64_t v;
+    const uint64_t f = irq_save();
     int32_t st = handle_insert(p, o, access, &h);
-    if (st) { ob_deref(o); return st; }
-    ipc_handle_opened(o);
-    ob_deref(o);                                        /* the handle table now holds the object */
-    if (inherit) {
-        const uint64_t f = irq_save();
-        p->handles[h / 4 - 1].inherit |= HANDLE_FLAG_INHERIT_BIT;
-        irq_restore(f);
+    if (!st) {
+        ipc_handle_opened(o);                           /* publish handle and actual count atomically */
+        if (inherit) p->handles[h / 4 - 1].inherit |= HANDLE_FLAG_INHERIT_BIT;
     }
+    irq_restore(f);
+    if (st) { ob_deref(o); return st; }
+    ob_deref(o);                                        /* the handle table now holds the object */
     v = h;
     if (user_ptr && copy_to_user(p, user_ptr, &v, 8)) { handle_close(p, h); return STATUS_ACCESS_VIOLATION; }
     if (h_out) *h_out = h;
@@ -166,12 +167,17 @@ void ipc_handle_closed(process_t *p, kobject_t *o)
     uint64_t f;
     int last;
     (void)p;
-    if (o->type == OB_FILE) {                           /* counted since ipc_file_created(); others are not tracked */
+    if (o->type == OB_FILE || o->type == OB_SOCKET) {     /* real handle count; pending IRP refs are separate */
         ioctx_t *io = o->u.file.io;
         f = irq_save();
         last = io && io->handles && --io->handles == 0;
         irq_restore(f);
-        if (last) notify_handle_closed(o);
+        if (last) {
+            if (o->type == OB_SOCKET) {
+                extern void net_socket_last_handle_closed(kobject_t *o);
+                net_socket_last_handle_closed(o);
+            } else notify_handle_closed(o);
+        }
         return;
     }
     if (o->type != OB_NPIPE && o->type != OB_IOCP && o->type != OB_JOB) return;
@@ -194,7 +200,7 @@ void ipc_object_free(kobject_t *o)
     case OB_IOCP: iocp_free(o); break;
     case OB_JOB: job_free(o); break;
     case OB_TIMER: timer_free(o); break;
-    case OB_FILE: ioctx_free(o); break;
+    case OB_FILE: case OB_SOCKET: ioctx_free(o); break;
     case OB_PROCESS: {                                  /* nothing references the process any more: recycle its slot */
         process_t *pp = o->u.proc.p;
         if (!pp || pp->teardown != 2) {
@@ -461,10 +467,12 @@ static int32_t sys_wait_single_alertable(process_t *p, struct regs *r, uint64_t 
 {
     kobject_t *o;
     int64_t to;
+    uint32_t access=0;
     int32_t st = read_timeout(p, pto, &to);
     if (st) return st;
-    st = ipc_ref_handle(p, h, 0, &o, 0);
+    st = ipc_ref_handle(p, h, 0, &o, &access);
     if (st) return st == STATUS_OBJECT_TYPE_MISMATCH ? STATUS_INVALID_HANDLE : st;
+    if ((o->type==OB_EVENT || o->type==OB_SEMAPHORE) && !shz_sync_rights_present(access,SHZ_SYNCHRONIZE)) { ob_deref(o); return STATUS_ACCESS_DENIED; }
     st = wait_alertable(p, r, &o, 1, 0, to);
     ob_deref(o);
     return st;
@@ -483,8 +491,10 @@ static int32_t sys_wait_multiple_alertable(process_t *p, struct regs *r, uint64_
     st = read_timeout(p, pto, &to);
     if (st) return st;
     for (i = 0; i < n; ++i) {
-        st = ipc_ref_handle(p, hs[i], 0, &objs[i], 0);
+        uint32_t access=0;
+        st = ipc_ref_handle(p, hs[i], 0, &objs[i], &access);
         if (st) { while (i--) ob_deref(objs[i]); return STATUS_INVALID_HANDLE; }
+        if ((objs[i]->type==OB_EVENT || objs[i]->type==OB_SEMAPHORE) && !shz_sync_rights_present(access,SHZ_SYNCHRONIZE)) { ob_deref(objs[i]); while(i--)ob_deref(objs[i]); return STATUS_ACCESS_DENIED; }
     }
     st = wait_alertable(p, r, objs, (unsigned)n, type == 0, to);
     for (i = 0; i < n; ++i) ob_deref(objs[i]);

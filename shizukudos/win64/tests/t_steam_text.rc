@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#include <windows.h>
+701 DIALOGEX 0, 0, 120, 40
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION
+CAPTION "Steam ordinal fixture"
+BEGIN
+END
+STEAM_NAMED_DIALOG DIALOGEX 0, 0, 120, 40
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION
+CAPTION "Steam named fixture"
+BEGIN
+END

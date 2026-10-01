@@ -19,11 +19,20 @@ static thread_t *idle_thread;
 static uint32_t next_id = 1;
 static volatile uint64_t jiffies;
 static uint64_t switches;
+static uint64_t cpu_idle_ticks, cpu_kernel_ticks, cpu_user_ticks;
 uint64_t g_kstack_top;
 uint64_t g_user_rsp_scratch;
 
 uint64_t ticks_now(void) { return jiffies; }
 uint64_t sched_switch_count(void) { return switches; }
+void sched_processor_times(uint64_t *idle, uint64_t *kernel, uint64_t *user)
+{
+    const uint64_t flags = irq_save();
+    *idle = cpu_idle_ticks * (TICK_US * 10ull);
+    *kernel = (cpu_idle_ticks + cpu_kernel_ticks) * (TICK_US * 10ull);
+    *user = cpu_user_ticks * (TICK_US * 10ull);
+    irq_restore(flags);
+}
 thread_t *thread_current(void) { return current; }
 
 thread_t *thread_find_tid(void *process, uint64_t tid)
@@ -137,6 +146,9 @@ void sched_tick(void)
 {
     unsigned i;
     ++jiffies;
+    if (current == idle_thread) ++cpu_idle_ticks;
+    else if (tick_from_user) ++cpu_user_ticks;
+    else ++cpu_kernel_ticks;
     current->run_ticks++;
     if (tick_from_user) current->user_ticks++; else current->kernel_ticks++;
 #ifdef SHZ_STANDALONE

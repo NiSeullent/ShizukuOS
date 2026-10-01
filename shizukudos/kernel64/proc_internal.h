@@ -47,7 +47,9 @@ struct kobject {
     uint32_t sd_len;
     union {
         struct { int manual; } event;
-        struct { thread_t *owner; int recursion; int abandoned; } mutant;
+        /* Owned mutants hold one object reference, independent of handles and
+         * recursion. objects.c removes them before an owner's slot can die. */
+        struct { thread_t *owner; int recursion; int abandoned; struct kobject *next_owned; } mutant;
         struct { int count, max; } sem;
         /* t is 0 once the exited thread was reclaimed (sched.c); the other fields then answer queries */
         struct { thread_t *t; int64_t exit_code; uint64_t tid; uint64_t pid;
@@ -113,6 +115,8 @@ struct process {
     void *modules;                      /* module_t list, see ldr.c */
     unsigned tls_slots;                 /* TLS indices handed out to loaded modules */
     kmutex_t ldr_lock;                  /* serialises runtime loads and TLS array (re)building (ldr.c) */
+    void *ldr_retirement;               /* prepared dynamic unload, never a lock held across user callbacks */
+    uint64_t ldr_retire_sequence;       /* private transaction token, never reused within this process */
     uint64_t ntdll_process_start, ntdll_thread_start, ntdll_exception_dispatcher;
     uint64_t ldr_va;                    /* PEB_LDR_DATA */
     uint64_t params_va;                 /* RTL_USER_PROCESS_PARAMETERS */
@@ -221,6 +225,10 @@ int32_t ob_wait(process_t *p, kobject_t **objs, unsigned n, int wait_all, int64_
 void ob_signal_event(kobject_t *o);
 void ob_reset_event(kobject_t *o);
 void ob_release_check(kobject_t *o);
+void ob_mutant_initial_owner(kobject_t *o, thread_t *t);
+/* Caller holds a reference; successful final release drops the ownership
+ * reference after satisfying waiters. `previous` receives the NT count. */
+int32_t ob_mutant_release(kobject_t *o, thread_t *t, int32_t *previous);
 
 #define CURRENT_PROCESS_HANDLE ((uint64_t)-1)
 #define CURRENT_THREAD_HANDLE ((uint64_t)-2)

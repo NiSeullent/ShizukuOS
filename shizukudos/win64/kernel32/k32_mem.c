@@ -406,7 +406,17 @@ K32API BOOL WINAPI SetEnvironmentVariableW(LPCWSTR name, LPCWSTR value)
     size_t total = 0, nl = k32_wlen(name), vl = value ? k32_wlen(value) : 0, o = 0;
     WCHAR *n;
     const WCHAR *p;
-    if (!nl || wcschr_eq(name, '=')) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    /* The CRT's _wchdir stores each drive's current directory under =X:.
+     * Microsoft CreateProcessA documents these inherited environment entries;
+     * Wine11 ntdll/env.c also permits a leading '=' while rejecting later '='.
+     * Support this drive form only: arbitrary other hidden names remain outside
+     * this implementation, and an interior '=' is still invalid. */
+    if (!nl || (wcschr_eq(name, '=') &&
+        !(nl == 3 && name[0] == '=' && name[2] == ':' &&
+          ((name[1] >= 'A' && name[1] <= 'Z') || (name[1] >= 'a' && name[1] <= 'z'))))) {
+        shz_set_last_error(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
     for (p = e; *p; p += k32_wlen(p) + 1) total += k32_wlen(p) + 1;
     n = RtlAllocateHeap(ShzProcessHeap(), 0, (total + nl + vl + 4) * sizeof(WCHAR));
     if (!n) { shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY); return FALSE; }

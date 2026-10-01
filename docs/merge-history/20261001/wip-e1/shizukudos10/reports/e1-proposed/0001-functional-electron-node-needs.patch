@@ -1,0 +1,1007 @@
+diff --git a/shizukudos/kernel64/fs.h b/shizukudos/kernel64/fs.h
+index ea3199f..b237562 100644
+--- a/shizukudos/kernel64/fs.h
++++ b/shizukudos/kernel64/fs.h
+@@ -63,7 +63,7 @@ typedef struct {
+     fsnode_t *node;
+     uint64_t pos;
+     uint32_t access;                    /* GENERIC/FILE_* rights granted */
+-    int console;                        /* 0 none, 1 input, 2 output */
++    int console;                        /* 0 none, 1 console input, 2 console output, 3 the NUL device (writes are discarded, reads are at end of file) */
+     int append;
+     uint64_t dir_index;                 /* NtQueryDirectoryFile cursor */
+     uint16_t *dir_pattern;              /* NtQueryDirectoryFile FileName filter (heap, NUL-terminated), NULL = all */
+diff --git a/shizukudos/kernel64/sysfile.c b/shizukudos/kernel64/sysfile.c
+index d0674e7..63b9974 100644
+--- a/shizukudos/kernel64/sysfile.c
++++ b/shizukudos/kernel64/sysfile.c
+@@ -107,6 +107,31 @@ kobject_t *console_object(int output)
+     return o;
+ }
+ 
++/* The NUL device (\\??\\NUL): a file object that takes every write and reports end of file on every read. */
++static kobject_t *null_object(uint32_t access)
++{
++    kobject_t *o = ob_create(OB_FILE, 0);
++    file_t *f = kzalloc(sizeof *f);
++    if (!o || !f) return 0;
++    f->console = 3;
++    f->access = access;
++    o->u.file.file = f;
++    o->u.file.access = access;
++    return o;
++}
++
++static int path_is_nul(const char *path)
++{
++    static const char want[] = "\\??\\nul";
++    unsigned i;
++    for (i = 0; want[i]; ++i) {
++        char c = path[i];
++        if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
++        if (c != want[i]) return 0;
++    }
++    return path[i] == 0;
++}
++
+ static file_t *file_of(process_t *p, uint64_t h, kobject_t **obj)
+ {
+     kobject_t *o = handle_lookup(p, h, OB_FILE);
+@@ -173,6 +198,16 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
+     /* A drive letter without a mounted volume names no device (Windows: the \??\Z: link is missing, so the path is not found). */
+     if (path[0] == '\\' && path[1] == '?' && path[2] == '?' && path[3] == '\\' && path[4] && path[5] == ':' && !fs_root_of(path[4]))
+         return STATUS_OBJECT_PATH_NOT_FOUND;
++    if (path_is_nul(path)) {
++        o = null_object((uint32_t)a2);
++        if (!o) return STATUS_NO_MEMORY;
++        st = handle_insert(p, o, (uint32_t)a2, &h);
++        ob_deref(o);
++        if (st) return st;
++        if (copy_to_user(p, a1, &(uint64_t){h}, 8)) return STATUS_ACCESS_VIOLATION;
++        set_iosb(p, a4, STATUS_SUCCESS, IO_OPENED);
++        return STATUS_SUCCESS;
++    }
+     /* console pseudo-devices */
+     if (!strcmp(path, "\\??\\CONOUT$") || !strcmp(path, "\\??\\CONIN$")) {
+         o = console_object(path[6] == 'O');
+@@ -242,6 +277,10 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
+     uint8_t *tmp;
+     uint64_t chunk;
+     if (!f) return STATUS_INVALID_HANDLE;
++    if (f->console == 3) {                                  /* NUL */
++        set_iosb(p, iosb, write ? STATUS_SUCCESS : STATUS_END_OF_FILE, write ? len : 0);
++        return write ? STATUS_SUCCESS : STATUS_END_OF_FILE;
++    }
+     if (f->console) {
+         if (write) {
+             char line[128];
+@@ -335,6 +374,28 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
+ struct basicinfo { uint64_t create, access, write, change; uint32_t attrs, pad; };
+ struct stdinfo { int64_t alloc, eof; uint32_t links; uint8_t delete_pending, directory; uint16_t pad; };
+ 
++/* The volume-relative name of the file behind `f` as UTF-16 (FileNameInformation and FileAllInformation); STATUS_SUCCESS or
++ * STATUS_OBJECT_NAME_INVALID when it does not fit. */
++static int32_t file_name_utf16(const file_t *f, uint16_t *w, uint32_t cap, uint32_t *nchars_out)
++{
++    const fsnode_t *chain[24];
++    uint32_t depth = 0, nchars = 0;
++    const fsnode_t *n;
++    for (n = f->node; n && n->parent && depth < 24; n = n->parent) chain[depth++] = n;
++    if (!depth) { w[nchars++] = '\\'; }
++    while (depth) {
++        const fsnode_t *c = chain[--depth];
++        int wn;
++        if (nchars + 1 >= cap) return STATUS_OBJECT_NAME_INVALID;
++        w[nchars++] = '\\';
++        wn = utf8_to_utf16(c->name, w + nchars, cap - nchars);
++        if (wn < 0) return STATUS_OBJECT_NAME_INVALID;
++        nchars += (uint32_t)wn;
++    }
++    *nchars_out = nchars;
++    return STATUS_SUCCESS;
++}
++
+ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb, uint64_t buf, uint64_t len)
+ {
+     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
+@@ -347,7 +408,7 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
+         memset(&b, 0, sizeof b);
+         if (f->node) { b.create = node_time(f->node, 0); b.write = node_time(f->node, 2); b.access = node_time(f->node, 1);
+                        b.change = b.write; b.attrs = f->node->attrs; }
+-        else b.attrs = f->console ? 0x40 : FILE_ATTRIBUTE_NORMAL;      /* console pseudo-device: FILE_ATTRIBUTE_DEVICE marks it for GetFileType */
++        else b.attrs = f->console == 1 || f->console == 2 ? 0x40 : FILE_ATTRIBUTE_NORMAL;      /* console pseudo-device: FILE_ATTRIBUTE_DEVICE marks it for GetFileType */
+         if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
+         set_iosb(p, iosb, STATUS_SUCCESS, sizeof b);
+         return STATUS_SUCCESS;
+@@ -362,6 +423,45 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
+         set_iosb(p, iosb, STATUS_SUCCESS, sizeof s);
+         return STATUS_SUCCESS;
+     }
++    case 18: {                                           /* FileAllInformation (what libuv's stat asks for): 104 bytes without the name */
++        uint8_t all[104];
++        uint16_t w[512];
++        struct basicinfo b;
++        struct stdinfo sd;
++        int64_t idx = f->node ? (int64_t)node_file_id(f->node) : 0;
++        uint32_t nchars = 0, total, room, copy, access = f->access, mode = 0x20, zero = 0;
++        int64_t pos = (int64_t)f->pos;
++        int32_t st = STATUS_SUCCESS;
++        if (len < sizeof all) return STATUS_INFO_LENGTH_MISMATCH;
++        memset(&b, 0, sizeof b);
++        memset(&sd, 0, sizeof sd);
++        if (f->node) {
++            b.create = node_time(f->node, 0); b.write = node_time(f->node, 2); b.access = node_time(f->node, 1);
++            b.change = b.write; b.attrs = f->node->attrs;
++            sd.eof = (int64_t)f->node->size; sd.alloc = (int64_t)((f->node->size + 4095) & ~4095ull);
++            sd.directory = f->node->is_dir; sd.delete_pending = f->node->delete_pending; sd.links = 1;
++            st = file_name_utf16(f, w, 512, &nchars);
++            if (st) return st;
++        } else {
++            b.attrs = f->console == 1 || f->console == 2 ? 0x40 : FILE_ATTRIBUTE_NORMAL;
++        }
++        memset(all, 0, sizeof all);
++        memcpy(all + 0, &b, 40);                          /* FILE_BASIC_INFORMATION */
++        memcpy(all + 40, &sd, 24);                        /* FILE_STANDARD_INFORMATION */
++        memcpy(all + 64, &idx, 8);                        /* FILE_INTERNAL_INFORMATION */
++        memcpy(all + 72, &zero, 4);                       /* FILE_EA_INFORMATION: no extended attributes */
++        memcpy(all + 76, &access, 4);                     /* FILE_ACCESS_INFORMATION */
++        memcpy(all + 80, &pos, 8);                        /* FILE_POSITION_INFORMATION */
++        memcpy(all + 88, &mode, 4);                       /* FILE_MODE_INFORMATION: FILE_SYNCHRONOUS_IO_NONALERT */
++        memcpy(all + 92, &zero, 4);                       /* FILE_ALIGNMENT_INFORMATION: byte aligned */
++        total = nchars * 2;
++        memcpy(all + 96, &total, 4);                      /* FILE_NAME_INFORMATION.FileNameLength; the name follows at 100 */
++        room = (uint32_t)len - 100;
++        copy = total < room ? total : room & ~1u;
++        if (copy_to_user(p, buf, all, 100) || (copy && copy_to_user(p, buf + 100, w, copy))) return STATUS_ACCESS_VIOLATION;
++        set_iosb(p, iosb, copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS, 100 + copy);
++        return copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
++    }
+     case 6: {                                            /* FileInternalInformation: {LARGE_INTEGER IndexNumber} */
+         int64_t idx = f->node ? (int64_t)node_file_id(f->node) : 0;
+         if (len < 8) return STATUS_BUFFER_TOO_SMALL;
+diff --git a/shizukudos/kernel64/sysk32.c b/shizukudos/kernel64/sysk32.c
+index 9581785..a055e18 100644
+--- a/shizukudos/kernel64/sysk32.c
++++ b/shizukudos/kernel64/sysk32.c
+@@ -96,7 +96,7 @@ static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t handle, u
+     }
+     case 4: {                                                   /* FileFsDeviceInformation */
+         if (len < 8) return STATUS_INFO_LENGTH_MISMATCH;
+-        *(uint32_t *)out = f->console ? 0x50 : 7;               /* FILE_DEVICE_CONSOLE / FILE_DEVICE_DISK */
++        *(uint32_t *)out = f->console == 3 ? 0x15 : f->console ? 0x50 : 7;   /* FILE_DEVICE_NULL / FILE_DEVICE_CONSOLE / FILE_DEVICE_DISK */
+         *(uint32_t *)(out + 4) = disk && !dwritable ? 0x2 : 0;  /* FILE_READ_ONLY_DEVICE */
+         return put_result(p, iosb, buf, len, out, 8, STATUS_SUCCESS);
+     }
+diff --git a/shizukudos/tests/e1_minapp/main.js b/shizukudos/tests/e1_minapp/main.js
+index ebc9e71..42ad0fa 100644
+--- a/shizukudos/tests/e1_minapp/main.js
++++ b/shizukudos/tests/e1_minapp/main.js
+@@ -28,6 +28,14 @@ function die(code, line) {
+   process.exit(code);
+ }
+ 
++// A write error on stdout/stderr (EPIPE on a runtime whose stdio handle is not a working pipe) arrives as an 'error' event of the
++// stream, which Node turns into an uncaughtException: it would end the probe before the marker. Every line also goes through
++// process._rawDebug, so the error is reported and the run goes on.
++for (const name of ['stdout', 'stderr']) {
++  try {
++    process[name].on('error', (err) => raw('SHZ-E1 main: ' + name + ' stream error ' + (err && err.code ? err.code : err) + ' (reported, not fatal)'));
++  } catch (e) { raw('SHZ-E1 main: process.' + name + ' unavailable: ' + (e && e.message ? e.message : e)); }
++}
+ process.on('uncaughtException', (err) => die(9, 'SHZ-E1 main: uncaughtException ' + (err && err.stack ? err.stack : err)));
+ process.on('unhandledRejection', (err) => die(10, 'SHZ-E1 main: unhandledRejection ' + (err && err.stack ? err.stack : err)));
+ 
+diff --git a/shizukudos/tests/run_k64_electron.py b/shizukudos/tests/run_k64_electron.py
+index 29f14f8..1ceb229 100755
+--- a/shizukudos/tests/run_k64_electron.py
++++ b/shizukudos/tests/run_k64_electron.py
+@@ -34,8 +34,9 @@ file holds at most 511 characters of command line; --args replaces the default a
+ The run PASSES only when the serial log contains the expected line AND the process exited with code 0 AND no process
+ fault was reported. Anything else is a FAIL, and the result names the furthest point reached, in this order of
+ precedence: loader failure (an import that did not resolve), a fatal exception (process killed by the kernel), a
+-Node/V8 fatal line, a Chromium FATAL/CHECK line, the marker seen without a clean exit, the first explicitly
+-unsupported kernel32 call ("K32 unsupported: ..."), the furthest progress line the app printed, the exit code, or the
++Node/V8 fatal line, a Chromium FATAL/CHECK line, the marker seen without a clean exit, a first-chance breakpoint
++(int3: a failed CHECK or delay-load that a handler turned into a process exit; the result quotes the last LoadLibrary
++refusal and GetProcAddress miss before it), the first explicitly unsupported kernel32 call ("K32 unsupported: ..."), the furthest progress line the app printed, the exit code, or the
+ timeout.
+ 
+ Result: <out>/result.json (printed in short). Exit status 0 = PASS, 1 = FAIL (the expected state today), 2 = the run
+@@ -144,6 +145,18 @@ def put_file(image, data, name, work):
+     run(["mcopy", "-o", "-i", str(image), str(host), "::" + name], env=mtools_env(), capture=True)
+ 
+ 
++def breakpoint_context(b):
++    """What the log says just before the first breakpoint, and how the process ended after it."""
++    out = ""
++    if b["last_loadlibrary_refusal"]:
++        out += "; last LoadLibrary refusal before it: " + b["last_loadlibrary_refusal"].split("K64 ldr: ", 1)[-1]
++    if b["last_getprocaddress_miss"]:
++        out += "; last GetProcAddress miss before it: " + b["last_getprocaddress_miss"].split("trace: ", 1)[-1]
++    if b["self_terminate"]:
++        out += "; then " + b["self_terminate"].split("trace: ", 1)[-1]
++    return out
++
++
+ def classify(serial, expect):
+     """Furthest point reached, from the serial log after the autorun start (precedence in the module docstring).
+     A runtime LoadLibrary that fails ("... LoadLibrary needs ...") is listed separately: programs probe optional DLLs."""
+@@ -161,12 +174,27 @@ def classify(serial, expect):
+                                                 r"executeJavaScript failed|whenReady failed|watchdog|uncaughtException|unhandledRejection|console\.log threw)", l)]
+     fatal = [l for l in lines if re.search(r"FATAL:|Check failed|CHECK failed|NOTREACHED", l)]
+     unsup = [l for l in lines if "K32 unsupported:" in l or "K32 RECON called:" in l]
++    # A first-chance breakpoint (int3) that some handler turned into a process exit is how Chromium ends on a failed CHECK or a
++    # failed delay-load: the kernel prints no "unhandled exception" for it. The loader refusal and the GetProcAddress miss just
++    # before the first one name the usual cause (a delay-loaded DLL or ordinal that does not exist).
++    bp_at = next((i for i, l in enumerate(lines) if re.search(r"K64 exc: pid \d+ tid \d+ first-chance 80000003 ", l)), None)
++    breakpoint_ = None
++    if bp_at is not None:
++        pid = re.search(r"K64 exc: pid (\d+)", lines[bp_at]).group(1)
++        end_at = next((i for i, l in enumerate(lines) if l.startswith("K64 autorun: result")), len(lines))   # later lines belong to the boot's other tests
++        before = lines[:bp_at]
++        breakpoint_ = {"line": lines[bp_at],
++                       "last_loadlibrary_refusal": next((l for l in reversed(before) if ": LoadLibrary needs " in l), None),
++                       "last_getprocaddress_miss": next((l for l in reversed(before) if "GetProcAddress miss:" in l), None),
++                       "self_terminate": next((l for l in lines[bp_at:end_at]
++                                               if f" pid {pid}]" in l and ("TerminateProcess(self)" in l or "ExitProcess code=" in l)), None)}
+     auto = [l for l in lines if l.startswith("K64 autorun: result")]
+     res["loader_failures"] = ldr[:20]
+     res["exceptions"] = killed[:20]
+     res["node_fatal"] = node_fatal[:20]
+     res["chromium_fatal"] = fatal[:20]
+     res["unsupported_calls"] = unsup[:60]
++    res["first_breakpoint"] = breakpoint_
+     res["autorun_result"] = auto[-1] if auto else None
+     progress = None
+     for name, rx in PROGRESS:
+@@ -189,13 +217,15 @@ def classify(serial, expect):
+     if ldr:
+         res["furthest"] = "loader: " + ldr[0]
+     elif killed:
+-        res["furthest"] = "exception: " + killed[0]
++        res["furthest"] = "exception: " + killed[0] + (breakpoint_context(breakpoint_) if breakpoint_ else "")
+     elif node_fatal:
+         res["furthest"] = "node/electron fatal: " + node_fatal[0]
+     elif fatal:
+         res["furthest"] = "chromium fatal: " + fatal[0]
+     elif marker:
+         res["furthest"] = "marker seen" + (f", process {m.group(1)} exit {int(m.group(2), 16):#x}" if m else "")
++    elif breakpoint_:
++        res["furthest"] = "breakpoint (int3): " + breakpoint_["line"].split("K64 exc: ", 1)[-1] + breakpoint_context(breakpoint_)
+     elif unsup:
+         res["furthest"] = "first unsupported kernel32 call: " + unsup[0]
+     elif progress and progress[0] not in ("autorun started", "process created"):
+diff --git a/shizukudos/win64/dlls/advapi32/rand.c b/shizukudos/win64/dlls/advapi32/rand.c
+new file mode 100644
+index 0000000..9d8076d
+--- /dev/null
++++ b/shizukudos/win64/dlls/advapi32/rand.c
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * advapi32.dll: SystemFunction036 (RtlGenRandom), what the C runtime's rand_s, V8's random number generator seeding and
++ * Chromium's base::RandBytes look up by name in advapi32. Same source as BCryptGenRandom: the kernel generator
++ * (shz_rand.h, NtShzRandom). Windows returns TRUE when the buffer was filled; a NULL buffer or one the kernel cannot write fails.
++ */
++#define _ADVAPI32_
++#include "nt.h"
++#include "shz_rand.h"
++
++DLLAPI BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length)
++{
++    if (!length) return TRUE;
++    if (!buffer) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    return shz_random_bytes(buffer, length) ? TRUE : FALSE;
++}
+diff --git a/shizukudos/win64/dlls/ws2_32/ws2_32.c b/shizukudos/win64/dlls/ws2_32/ws2_32.c
+index 27a6275..17969fd 100644
+--- a/shizukudos/win64/dlls/ws2_32/ws2_32.c
++++ b/shizukudos/win64/dlls/ws2_32/ws2_32.c
+@@ -895,6 +895,54 @@ static int narrow(PCWSTR w, char *out, size_t cap)
+     return 1;
+ }
+ 
++/* GetNameInfoW: IPv4 only. There is no reverse DNS in the kernel resolver (NtShzNetResolve answers A-record lookups), so the host
++ * comes back in numeric form, which is also what Windows does for an address with no name; NI_NAMEREQD therefore fails with
++ * WSAHOST_NOT_FOUND. The service is the decimal port, or the name from the built-in table unless NI_NUMERICSERV is set. */
++DLLAPI INT WSAAPI GetNameInfoW(const SOCKADDR *sa, socklen_t salen, PWCHAR host, DWORD hostlen, PWCHAR serv, DWORD servlen, INT flags)
++{
++    const struct sockaddr_in *in4 = (const struct sockaddr_in *)sa;
++    char text[16], port[8];
++    unsigned i, n, p;
++    NEED_INIT(WSANOTINITIALISED);
++    if (!sa || (salen < (socklen_t)sizeof *in4)) { SetLastError(WSAEFAULT); return WSAEFAULT; }
++    if (sa->sa_family != AF_INET) { SetLastError(WSAEAFNOSUPPORT); return WSAEAFNOSUPPORT; }
++    if ((!host || !hostlen) && (!serv || !servlen)) { SetLastError(WSAEINVAL); return WSAEINVAL; }
++    if (flags & ~(NI_NOFQDN | NI_NUMERICHOST | NI_NAMEREQD | NI_NUMERICSERV | NI_DGRAM)) { SetLastError(WSAEINVAL); return WSAEINVAL; }
++    if (host && hostlen) {
++        const unsigned char *a = (const unsigned char *)&in4->sin_addr;
++        if (flags & NI_NAMEREQD) { SetLastError(WSAHOST_NOT_FOUND); return WSAHOST_NOT_FOUND; }
++        for (i = 0, n = 0; i < 4; ++i) {
++            unsigned v = a[i], d = v >= 100 ? 3 : v >= 10 ? 2 : 1, k;
++            for (k = d; k > 0; --k) { text[n + k - 1] = (char)('0' + v % 10); v /= 10; }
++            n += d;
++            if (i < 3) text[n++] = '.';
++        }
++        if (n + 1 > hostlen) { SetLastError(WSAEFAULT); return WSAEFAULT; }
++        for (i = 0; i < n; ++i) host[i] = (WCHAR)text[i];
++        host[n] = 0;
++    }
++    if (serv && servlen) {
++        const char *name = 0;
++        p = ntohs(in4->sin_port);
++        if (!(flags & NI_NUMERICSERV))
++            for (i = 0; services[i].name; ++i)
++                if (services[i].port == p) { name = services[i].name; break; }
++        if (name) {
++            n = (unsigned)strlen(name);
++            if (n + 1 > servlen) { SetLastError(WSAEFAULT); return WSAEFAULT; }
++            for (i = 0; i < n; ++i) serv[i] = (WCHAR)name[i];
++        } else {
++            unsigned v = p, d = v >= 10000 ? 5 : v >= 1000 ? 4 : v >= 100 ? 3 : v >= 10 ? 2 : 1, k;
++            for (k = d; k > 0; --k) { port[k - 1] = (char)('0' + v % 10); v /= 10; }
++            n = d;
++            if (n + 1 > servlen) { SetLastError(WSAEFAULT); return WSAEFAULT; }
++            for (i = 0; i < n; ++i) serv[i] = (WCHAR)port[i];
++        }
++        serv[n] = 0;
++    }
++    return 0;
++}
++
+ DLLAPI int WSAAPI GetAddrInfoW(PCWSTR pNodeName, PCWSTR pServiceName, const ADDRINFOW *pHints, PADDRINFOW *ppResult)
+ {
+     char node[260], service[64];
+diff --git a/shizukudos/win64/kernel32/k32_console.c b/shizukudos/win64/kernel32/k32_console.c
+index aab76ee..5ae5a9c 100644
+--- a/shizukudos/win64/kernel32/k32_console.c
++++ b/shizukudos/win64/kernel32/k32_console.c
+@@ -192,3 +192,119 @@ K32API BOOL WINAPI SetConsoleCtrlHandler(PHANDLER_ROUTINE fn, BOOL add)
+     if (!ok) shz_set_last_error(ERROR_INVALID_PARAMETER);
+     return ok;
+ }
++
++/* ---------------------------------------------------------------- cursor, title, cell fills and the input queue
++ * Same model as above: the serial console has neither a cell store, a cursor shape, a title bar nor an input queue, so these
++ * keep the model a Windows program expects and change nothing on the line.
++ *  - SetConsoleCursorPosition moves the modelled cursor (the next WriteConsole continues from it); the position must lie
++ *    inside the 80x25 buffer. Get/SetConsoleCursorInfo keep the cursor size and visibility.
++ *  - FillConsoleOutputCharacterW / FillConsoleOutputAttribute report the cells of the buffer they could reach (clipped at the
++ *    end of the buffer, as Windows does); no cell contents exist to change.
++ *  - SetConsoleTitleW keeps the title (there is no title bar to show it).
++ *  - The console has no input source (reads report end of file): it holds no input events, ReadConsoleInputW reports
++ *    ERROR_HANDLE_EOF instead of blocking forever, and WriteConsoleInputW, which needs an input queue to write into, fails
++ *    with ERROR_NOT_SUPPORTED.
++ */
++static DWORD g_cursor_size = 25;
++static BOOL g_cursor_visible = TRUE;
++static WCHAR g_title[256];
++
++static BOOL in_handle(HANDLE h)
++{
++    DWORD mode;
++    if (g_detached || !GetConsoleMode(h, &mode)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
++    return TRUE;
++}
++
++K32API BOOL WINAPI SetConsoleCursorPosition(HANDLE h, COORD pos)
++{
++    if (!out_handle(h)) return FALSE;
++    if (pos.X < 0 || pos.X >= CON_COLS || pos.Y < 0 || pos.Y >= CON_ROWS) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    AcquireSRWLockExclusive(&g_con_lock);
++    g_x = pos.X; g_y = pos.Y;
++    ReleaseSRWLockExclusive(&g_con_lock);
++    return TRUE;
++}
++
++K32API BOOL WINAPI GetConsoleCursorInfo(HANDLE h, PCONSOLE_CURSOR_INFO info)
++{
++    if (!out_handle(h)) return FALSE;
++    if (!info) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    AcquireSRWLockShared(&g_con_lock);
++    info->dwSize = g_cursor_size; info->bVisible = g_cursor_visible;
++    ReleaseSRWLockShared(&g_con_lock);
++    return TRUE;
++}
++
++K32API BOOL WINAPI SetConsoleCursorInfo(HANDLE h, const CONSOLE_CURSOR_INFO *info)
++{
++    if (!out_handle(h)) return FALSE;
++    if (!info || info->dwSize < 1 || info->dwSize > 100) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    AcquireSRWLockExclusive(&g_con_lock);
++    g_cursor_size = info->dwSize; g_cursor_visible = info->bVisible;
++    ReleaseSRWLockExclusive(&g_con_lock);
++    return TRUE;
++}
++
++static BOOL fill_reach(HANDLE h, DWORD len, COORD at, LPDWORD written)
++{
++    DWORD room;
++    if (!out_handle(h)) return FALSE;
++    if (!written) { shz_set_last_error(ERROR_INVALID_ACCESS); return FALSE; }
++    if (at.X < 0 || at.X >= CON_COLS || at.Y < 0 || at.Y >= CON_ROWS) { *written = 0; return TRUE; }   /* outside: no cell is reached */
++    room = (DWORD)(CON_ROWS - at.Y) * CON_COLS - (DWORD)at.X;
++    *written = len < room ? len : room;
++    return TRUE;
++}
++
++K32API BOOL WINAPI FillConsoleOutputCharacterW(HANDLE h, WCHAR ch, DWORD len, COORD at, LPDWORD written)
++{
++    (void)ch;
++    return fill_reach(h, len, at, written);
++}
++
++K32API BOOL WINAPI FillConsoleOutputAttribute(HANDLE h, WORD attr, DWORD len, COORD at, LPDWORD written)
++{
++    (void)attr;
++    return fill_reach(h, len, at, written);
++}
++
++K32API BOOL WINAPI SetConsoleTitleW(LPCWSTR title)
++{
++    size_t n = 0;
++    if (g_detached) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
++    if (!title) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    while (title[n]) ++n;
++    if (n > 255) n = 255;
++    AcquireSRWLockExclusive(&g_con_lock);
++    memcpy(g_title, title, n * sizeof(WCHAR));
++    g_title[n] = 0;
++    ReleaseSRWLockExclusive(&g_con_lock);
++    return TRUE;
++}
++
++K32API BOOL WINAPI GetNumberOfConsoleInputEvents(HANDLE h, LPDWORD n)
++{
++    if (!in_handle(h)) return FALSE;
++    if (!n) { shz_set_last_error(ERROR_INVALID_ACCESS); return FALSE; }
++    *n = 0;
++    return TRUE;
++}
++
++K32API BOOL WINAPI ReadConsoleInputW(HANDLE h, PINPUT_RECORD buf, DWORD len, LPDWORD got)
++{
++    if (!in_handle(h)) return FALSE;
++    if (!buf || !got || !len) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    *got = 0;
++    shz_set_last_error(ERROR_HANDLE_EOF);                 /* no input source: Windows would block, this console never delivers */
++    return FALSE;
++}
++
++K32API BOOL WINAPI WriteConsoleInputW(HANDLE h, const INPUT_RECORD *buf, DWORD len, LPDWORD written)
++{
++    (void)buf; (void)len;
++    if (!in_handle(h)) return FALSE;
++    if (written) *written = 0;
++    shz_set_last_error(ERROR_NOT_SUPPORTED);              /* there is no input queue to write into */
++    return FALSE;
++}
+diff --git a/shizukudos/win64/kernel32/k32_core.c b/shizukudos/win64/kernel32/k32_core.c
+index a190b3f..c4d593d 100644
+--- a/shizukudos/win64/kernel32/k32_core.c
++++ b/shizukudos/win64/kernel32/k32_core.c
+@@ -21,7 +21,9 @@ DWORD k32_nt_error(NTSTATUS st)
+     return e;
+ }
+ 
+-K32API UINT WINAPI SetErrorMode(UINT m) { static UINT mode; UINT old = mode; mode = m; return old; }
++static volatile LONG g_error_mode;
++K32API UINT WINAPI SetErrorMode(UINT m) { return (UINT)InterlockedExchange(&g_error_mode, (LONG)m); }
++K32API UINT WINAPI GetErrorMode(void) { return (UINT)g_error_mode; }
+ K32API PVOID WINAPI EncodePointer(PVOID p) { return p; }         /* no pointer obfuscation cookie is used */
+ K32API PVOID WINAPI DecodePointer(PVOID p) { return p; }
+ K32API BOOL WINAPI IsDebuggerPresent(void) { return *(BYTE *)(shz_peb() + 2) != 0; }
+diff --git a/shizukudos/win64/kernel32/k32_e1_gap.c b/shizukudos/win64/kernel32/k32_e1_gap.c
+new file mode 100644
+index 0000000..26b3f89
+--- /dev/null
++++ b/shizukudos/win64/kernel32/k32_e1_gap.c
+@@ -0,0 +1,97 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * kernel32.dll: the load-time imports of Electron / Node.js (libuv) that Chromium does not use. electron.exe and the VS Code
++ * executables import these by name at load time, so each one has to exist for the image to map at all; what each does here:
++ *
++ *  - CancelSynchronousIo: Kernel64 has no way to cancel a synchronous request of another thread, so it reports what Windows
++ *    reports when there is nothing to cancel, ERROR_NOT_FOUND (a thread blocked in a synchronous read stays blocked).
++ *  - CreateSymbolicLinkW: no file system of this system stores symbolic links (FAT32 D:, ShizukuFS E:): ERROR_NOT_SUPPORTED.
++ *  - ReOpenFile: a second handle to the file behind `orig` with the requested access, sharing and flags, opened by the path
++ *    GetFinalPathNameByHandleW reports for it.
++ *  - GetProcessIoCounters: the kernel does not count read/write operations or bytes per process, and zeros would be made-up
++ *    data: ERROR_NOT_SUPPORTED.
++ *  - GetCurrentPackageFullName, GetPackageFamilyName: there are no packaged (AppX) applications, so every process has no
++ *    package identity: APPMODEL_ERROR_NO_PACKAGE, returned as the result as the API defines.
++ *  - NeedCurrentDirectoryForExePathW: TRUE for a name with a path separator or when NoDefaultCurrentDirectoryInExePath is not
++ *    set in the environment (the documented behavior; the registry location the documentation also mentions is not read).
++ *  - HeapQueryInformation: ffmpeg.dll (loaded by every Electron renderer) and other images import it at load time. The only
++ *    class the heaps of this system answer is HeapCompatibilityInformation, always 0 (a standard heap: ntdll's allocator is not
++ *    a low-fragmentation heap, see RtlSetHeapInformation); any other class is ERROR_INVALID_PARAMETER, a handle that is no
++ *    heap is ERROR_INVALID_HANDLE.
++ */
++#include "k32.h"
++
++#ifndef APPMODEL_ERROR_NO_PACKAGE
++#define APPMODEL_ERROR_NO_PACKAGE 15700L
++#endif
++
++K32API BOOL WINAPI CancelSynchronousIo(HANDLE thread)
++{
++    DWORD exit;
++    if (!thread || thread == INVALID_HANDLE_VALUE || (thread != GetCurrentThread() && !GetExitCodeThread(thread, &exit))) {
++        shz_set_last_error(ERROR_INVALID_HANDLE);
++        return FALSE;
++    }
++    shz_set_last_error(ERROR_NOT_FOUND);
++    return FALSE;
++}
++
++K32API BOOLEAN WINAPI CreateSymbolicLinkW(LPCWSTR link, LPCWSTR target, DWORD flags)
++{
++    if (!link || !target || (flags & ~(DWORD)(SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE))) {
++        shz_set_last_error(ERROR_INVALID_PARAMETER);
++        return FALSE;
++    }
++    shz_set_last_error(ERROR_NOT_SUPPORTED);
++    return FALSE;
++}
++
++K32API HANDLE WINAPI ReOpenFile(HANDLE orig, DWORD access, DWORD share, DWORD flags)
++{
++    WCHAR path[MAX_PATH + 8];
++    DWORD n = GetFinalPathNameByHandleW(orig, path, MAX_PATH + 8, 0);
++    if (!n) return INVALID_HANDLE_VALUE;                  /* LastError set by GetFinalPathNameByHandleW */
++    if (n >= MAX_PATH + 8) { shz_set_last_error(ERROR_FILENAME_EXCED_RANGE); return INVALID_HANDLE_VALUE; }
++    return CreateFileW(path, access, share, 0, OPEN_EXISTING, flags, 0);
++}
++
++K32API BOOL WINAPI GetProcessIoCounters(HANDLE process, PIO_COUNTERS counters)
++{
++    (void)process;
++    if (!counters) { shz_set_last_error(ERROR_NOACCESS); return FALSE; }
++    shz_set_last_error(ERROR_NOT_SUPPORTED);
++    return FALSE;
++}
++
++K32API LONG WINAPI GetCurrentPackageFullName(UINT32 *len, PWSTR name)
++{
++    (void)name;
++    if (!len) return ERROR_INVALID_PARAMETER;
++    return APPMODEL_ERROR_NO_PACKAGE;
++}
++
++K32API LONG WINAPI GetPackageFamilyName(HANDLE process, UINT32 *len, PWSTR name)
++{
++    (void)name;
++    if (!process || !len) return ERROR_INVALID_PARAMETER;
++    return APPMODEL_ERROR_NO_PACKAGE;
++}
++
++K32API BOOL WINAPI NeedCurrentDirectoryForExePathW(LPCWSTR exe)
++{
++    WCHAR v;
++    const WCHAR *p;
++    if (!exe) { shz_set_last_error(ERROR_INVALID_PARAMETER); return TRUE; }
++    for (p = exe; *p; ++p)
++        if (*p == '\\') return TRUE;
++    return GetEnvironmentVariableW(L"NoDefaultCurrentDirectoryInExePath", &v, 1) == 0;
++}
++
++K32API BOOL WINAPI HeapQueryInformation(HANDLE heap, HEAP_INFORMATION_CLASS cls, PVOID info, SIZE_T len, PSIZE_T needed)
++{
++    if ((int)cls != 0) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    if (!HeapValidate(heap, 0, NULL)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
++    if (needed) *needed = sizeof(ULONG);
++    if (!info || len < sizeof(ULONG)) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return FALSE; }
++    *(ULONG *)info = 0;
++    return TRUE;
++}
+diff --git a/shizukudos/win64/kernel32/k32_fiber.c b/shizukudos/win64/kernel32/k32_fiber.c
+new file mode 100644
+index 0000000..4502a43
+--- /dev/null
++++ b/shizukudos/win64/kernel32/k32_fiber.c
+@@ -0,0 +1,176 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * kernel32.dll: fibers - ConvertThreadToFiber(Ex), ConvertFiberToThread, CreateFiber(Ex), DeleteFiber, SwitchToFiber.
++ *
++ * vk_swiftshader.dll (the software Vulkan driver Chromium's GPU process loads when there is no GPU) imports ConvertFiberToThread
++ * and its scheduler (marl) runs tasks on fibers; without the exports the DLL does not load and the GPU process dies.
++ *
++ * A fiber is a user-mode stack plus the registers that survive a call (rbx, rbp, rdi, rsi, r12-r15, xmm6-xmm15, MXCSR, the x87
++ * control word). SwitchToFiber saves those on the stack of the fiber it leaves, stores that stack pointer in the fiber object,
++ * and resumes the target from its stored stack pointer; the thread environment block is kept in step (stack bounds, FiberData,
++ * the fiber-local storage array) so exception dispatch, GetCurrentThreadStackLimits and FlsGetValue see the running fiber.
++ * The fiber object is laid out as Windows lays it out where programs can see it: its first member is the value GetFiberData
++ * returns, and TEB.NtTib.FiberData (0x20) points to the running fiber. Differences from Windows, each deliberate:
++ *  - a fiber stack is committed in full when it is created (there is no guard page and no growth): CreateFiberEx takes the
++ *    larger of the commit and reserve sizes, 1 MiB when both are 0;
++ *  - DeleteFiber frees the fiber-local storage array without running the FLS callbacks of its values;
++ *  - the FIBER_FLAG_FLOAT_SWITCH flag is accepted and ignored: the floating point state is always switched.
++ * Deleting the running fiber ends the thread (as on Windows); a fiber routine that returns also ends the thread.
++ */
++#include "k32.h"
++
++#define TEB_EXCEPTION_LIST 0x00
++#define TEB_STACK_BASE 0x08
++#define TEB_STACK_LIMIT 0x10
++#define TEB_FIBER_DATA 0x20
++#define TEB_DEALLOCATION_STACK 0x1478
++#define TEB_FLS_DATA 0x17c8
++#define TEB_SAME_TEB_FLAGS 0x17ee
++#define TEB_HAS_FIBER_DATA 4                                   /* SameTebFlags bit 2 */
++#define FIBER_DEFAULT_STACK (1024 * 1024)
++#define FIBER_MIN_STACK (16 * 1024)
++#define SWITCH_FRAME 232                                       /* 8 saved registers, xmm6-xmm15, MXCSR, FPU control word */
++
++typedef struct fiber {
++    PVOID data;                                                /* 0x00: what GetFiberData returns; must stay first */
++    uint64_t exception_list, stack_base, stack_limit, deallocation_stack, fls_data;   /* TEB fields while the fiber is switched out */
++    uint64_t saved_rsp;                                        /* top of the switch frame while it is switched out */
++    PVOID stack;                                               /* the allocation, NULL for a converted thread */
++    LPFIBER_START_ROUTINE start;
++} fiber_t;
++
++#define TEB_U64(off) (*(uint64_t *)(shz_teb() + (off)))
++static fiber_t *current_fiber(void)
++{
++    if (!(*(const USHORT *)(shz_teb() + TEB_SAME_TEB_FLAGS) & TEB_HAS_FIBER_DATA)) return NULL;
++    return (fiber_t *)(ULONG_PTR)TEB_U64(TEB_FIBER_DATA);
++}
++
++void k32_fiber_switch(uint64_t *save_rsp, uint64_t new_rsp);
++__asm__(".text\n.p2align 4\n"
++        "k32_fiber_switch:\n"
++        "  pushq %rbx\n  pushq %rbp\n  pushq %rdi\n  pushq %rsi\n  pushq %r12\n  pushq %r13\n  pushq %r14\n  pushq %r15\n"
++        "  subq $0xa8, %rsp\n"
++        "  movups %xmm6, 0(%rsp)\n  movups %xmm7, 16(%rsp)\n  movups %xmm8, 32(%rsp)\n  movups %xmm9, 48(%rsp)\n  movups %xmm10, 64(%rsp)\n"
++        "  movups %xmm11, 80(%rsp)\n  movups %xmm12, 96(%rsp)\n  movups %xmm13, 112(%rsp)\n  movups %xmm14, 128(%rsp)\n  movups %xmm15, 144(%rsp)\n"
++        "  stmxcsr 160(%rsp)\n  fnstcw 164(%rsp)\n"
++        "  movq %rsp, (%rcx)\n"
++        "  movq %rdx, %rsp\n"
++        "  ldmxcsr 160(%rsp)\n  fldcw 164(%rsp)\n"
++        "  movups 0(%rsp), %xmm6\n  movups 16(%rsp), %xmm7\n  movups 32(%rsp), %xmm8\n  movups 48(%rsp), %xmm9\n  movups 64(%rsp), %xmm10\n"
++        "  movups 80(%rsp), %xmm11\n  movups 96(%rsp), %xmm12\n  movups 112(%rsp), %xmm13\n  movups 128(%rsp), %xmm14\n  movups 144(%rsp), %xmm15\n"
++        "  addq $0xa8, %rsp\n"
++        "  popq %r15\n  popq %r14\n  popq %r13\n  popq %r12\n  popq %rsi\n  popq %rdi\n  popq %rbp\n  popq %rbx\n"
++        "  ret\n");
++
++static void save_teb(fiber_t *f)
++{
++    f->exception_list = TEB_U64(TEB_EXCEPTION_LIST);
++    f->stack_base = TEB_U64(TEB_STACK_BASE);
++    f->stack_limit = TEB_U64(TEB_STACK_LIMIT);
++    f->deallocation_stack = TEB_U64(TEB_DEALLOCATION_STACK);
++    f->fls_data = TEB_U64(TEB_FLS_DATA);
++}
++
++static void load_teb(fiber_t *f)
++{
++    TEB_U64(TEB_EXCEPTION_LIST) = f->exception_list;
++    TEB_U64(TEB_STACK_BASE) = f->stack_base;
++    TEB_U64(TEB_STACK_LIMIT) = f->stack_limit;
++    TEB_U64(TEB_DEALLOCATION_STACK) = f->deallocation_stack;
++    TEB_U64(TEB_FLS_DATA) = f->fls_data;
++    TEB_U64(TEB_FIBER_DATA) = (uint64_t)(ULONG_PTR)f;
++}
++
++__attribute__((noreturn, used)) static void fiber_main(void)
++{
++    fiber_t *f = (fiber_t *)TEB_U64(TEB_FIBER_DATA);
++    f->start(f->data);
++    ExitThread(0);
++    for (;;) { }
++}
++
++K32API LPVOID WINAPI ConvertThreadToFiberEx(LPVOID param, DWORD flags)
++{
++    fiber_t *f;
++    if (flags & ~(DWORD)FIBER_FLAG_FLOAT_SWITCH) { shz_set_last_error(ERROR_INVALID_PARAMETER); return NULL; }
++    if (current_fiber()) { shz_set_last_error(ERROR_ALREADY_FIBER); return NULL; }
++    f = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *f);
++    if (!f) { shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
++    f->data = param;
++    save_teb(f);
++    TEB_U64(TEB_FIBER_DATA) = (uint64_t)(ULONG_PTR)f;
++    *(USHORT *)(shz_teb() + TEB_SAME_TEB_FLAGS) |= TEB_HAS_FIBER_DATA;
++    return f;
++}
++
++K32API LPVOID WINAPI ConvertThreadToFiber(LPVOID param) { return ConvertThreadToFiberEx(param, 0); }
++
++K32API BOOL WINAPI ConvertFiberToThread(void)
++{
++    fiber_t *f = current_fiber();
++    if (!f) { shz_set_last_error(ERROR_ALREADY_THREAD); return FALSE; }
++    if (f->stack) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }      /* only the fiber that came from the thread converts back */
++    *(USHORT *)(shz_teb() + TEB_SAME_TEB_FLAGS) &= (USHORT)~TEB_HAS_FIBER_DATA;
++    TEB_U64(TEB_FIBER_DATA) = 0;
++    HeapFree(GetProcessHeap(), 0, f);
++    return TRUE;
++}
++
++K32API LPVOID WINAPI CreateFiberEx(SIZE_T commit, SIZE_T reserve, DWORD flags, LPFIBER_START_ROUTINE start, LPVOID param)
++{
++    fiber_t *f;
++    SIZE_T size = commit > reserve ? commit : reserve;
++    uint64_t top, slot, frame;
++    uint64_t *w;
++    if ((flags & ~(DWORD)FIBER_FLAG_FLOAT_SWITCH) || !start) { shz_set_last_error(ERROR_INVALID_PARAMETER); return NULL; }
++    if (!size) size = FIBER_DEFAULT_STACK;
++    if (size < FIBER_MIN_STACK) size = FIBER_MIN_STACK;
++    size = (size + 0xfff) & ~(SIZE_T)0xfff;
++    f = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *f);
++    if (!f) { shz_set_last_error(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
++    f->stack = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++    if (!f->stack) { HeapFree(GetProcessHeap(), 0, f); return NULL; }                  /* VirtualAlloc set the error */
++    f->data = param;
++    f->start = start;
++    f->stack_limit = f->deallocation_stack = (uint64_t)(ULONG_PTR)f->stack;
++    f->stack_base = (uint64_t)(ULONG_PTR)f->stack + size;
++    /* The first SwitchToFiber "returns" into fiber_main: lay out the frame it would have saved, with the return address of
++     * fiber_main (0, end of the call chain) and its 32 bytes of shadow space above. After the final `ret` rsp is 8 (mod 16), as
++     * at the first instruction of any called function. */
++    top = f->stack_base & ~(uint64_t)15;
++    slot = top - 0x30;                                          /* holds the address the switch returns to */
++    frame = slot - SWITCH_FRAME;
++    memset((void *)(ULONG_PTR)frame, 0, SWITCH_FRAME);
++    w = (uint64_t *)(ULONG_PTR)frame;
++    ((uint32_t *)w)[160 / 4] = 0x1f80;                          /* MXCSR: all exceptions masked, round to nearest */
++    ((uint16_t *)w)[164 / 2] = 0x27f;                           /* x87 control word: 53-bit precision, exceptions masked */
++    *(uint64_t *)(ULONG_PTR)slot = (uint64_t)(ULONG_PTR)fiber_main;
++    *(uint64_t *)(ULONG_PTR)(slot + 8) = 0;
++    f->saved_rsp = frame;
++    return f;
++}
++
++K32API LPVOID WINAPI CreateFiber(SIZE_T stack_size, LPFIBER_START_ROUTINE start, LPVOID param)
++{
++    return CreateFiberEx(stack_size, 0, 0, start, param);
++}
++
++K32API VOID WINAPI SwitchToFiber(LPVOID target)
++{
++    fiber_t *from = current_fiber(), *to = target;
++    if (!from || !to) return;
++    if (from == to) return;
++    save_teb(from);
++    load_teb(to);
++    k32_fiber_switch(&from->saved_rsp, to->saved_rsp);
++}
++
++K32API VOID WINAPI DeleteFiber(LPVOID fiber)
++{
++    fiber_t *f = fiber;
++    if (!f) return;
++    if (f == current_fiber()) ExitThread(0);                    /* a fiber that deletes itself ends the thread */
++    if (f->fls_data) HeapFree(GetProcessHeap(), 0, (PVOID)(ULONG_PTR)f->fls_data);
++    if (f->stack) VirtualFree(f->stack, 0, MEM_RELEASE);
++    HeapFree(GetProcessHeap(), 0, f);
++}
+diff --git a/shizukudos/win64/kernel32/k32_file.c b/shizukudos/win64/kernel32/k32_file.c
+index 81d52a9..7735a3a 100644
+--- a/shizukudos/win64/kernel32/k32_file.c
++++ b/shizukudos/win64/kernel32/k32_file.c
+@@ -452,8 +452,11 @@ K32API BOOL WINAPI WriteConsoleW(HANDLE h, const VOID *buf, DWORD n, LPDWORD wri
+         DWORD chunk = n - off > 250 ? 250 : n - off, put;
+         int len = wide_to_utf8(w + off, (int)chunk, tmp, sizeof tmp);
+         if (len <= 0) break;
+-        if (!WriteFile(h, tmp, (DWORD)len - 1, &put, 0)) return FALSE;
+-        if (std_index(h) < 1) k32_console_track(tmp, (DWORD)len - 1);       /* WriteFile tracked the standard handles */
++        /* wide_to_utf8 with an explicit length returns the bytes it wrote, without a terminator (only a length of -1 counts the
++         * NUL): every byte goes out. Dropping the last one lost the newline of every CRT / Node console write, so the line-buffered
++         * console kept text until the next newline. */
++        if (!WriteFile(h, tmp, (DWORD)len, &put, 0)) return FALSE;
++        if (std_index(h) < 1) k32_console_track(tmp, (DWORD)len);       /* WriteFile tracked the standard handles */
+         off += chunk;
+         done += chunk;
+     }
+diff --git a/shizukudos/win64/kernel32/k32_ipc_io.c b/shizukudos/win64/kernel32/k32_ipc_io.c
+index ee6f005..d477caf 100644
+--- a/shizukudos/win64/kernel32/k32_ipc_io.c
++++ b/shizukudos/win64/kernel32/k32_ipc_io.c
+@@ -80,6 +80,7 @@ K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECU
+     }
+     if (is_console_name(name, "CONOUT$")) name = L"\\??\\CONOUT$";
+     else if (is_console_name(name, "CONIN$")) name = L"\\??\\CONIN$";
++    else if (is_console_name(name, "NUL") || is_console_name(name, "NUL:") || is_console_name(name, "\\\\.\\NUL")) name = L"\\??\\NUL";
+     st = to_nt(name, nt, 320);
+     if (st) { k32_nt_error(st); return INVALID_HANDLE_VALUE; }
+     if (flags & FILE_FLAG_DELETE_ON_CLOSE) opts |= NT_OPT_DELETE_ON_CLOSE;
+@@ -263,7 +264,7 @@ K32API DWORD WINAPI GetFileType(HANDLE h)
+     shz_set_last_error(0);
+     switch (dev[0]) {
+     case 0x11: case 0x12: return FILE_TYPE_PIPE;               /* named pipes, sockets (AFD) */
+-    case 0x50: return FILE_TYPE_CHAR;                          /* console */
++    case 0x50: case 0x15: return FILE_TYPE_CHAR;               /* console, NUL */
+     default: return FILE_TYPE_DISK;
+     }
+ }
+@@ -400,7 +401,12 @@ K32API HANDLE WINAPI CreateNamedPipeW(LPCWSTR name, DWORD open_mode, DWORD pipe_
+     ACCESS_MASK access = SYNCHRONIZE | FILE_READ_ATTRIBUTES;
+     ULONG share = 0, n, i;
+     NTSTATUS st;
+-    for (i = 0; pfx[i]; ++i) if (!name || (name[i] | (i >= 3 ? 32 : 0)) != (pfx[i] | (i >= 3 ? 32 : 0))) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
++    /* "\\.\pipe\" or the verbatim form "\\?\pipe\" (libuv names its stdio pipes \\?\pipe\uv\<id>; Windows accepts both) */
++    for (i = 0; pfx[i]; ++i)
++        if (!name || !(name[i] == pfx[i] || (i == 2 && name[i] == '?') || (i >= 3 && (name[i] | 32) == (pfx[i] | 32)))) {
++            shz_set_last_error(ERROR_INVALID_NAME);
++            return INVALID_HANDLE_VALUE;
++        }
+     n = (ULONG)wl(name);
+     if (n - 9 == 0 || n + 1 > 290) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
+     if (!max_inst || max_inst > PIPE_UNLIMITED_INSTANCES || !(open_mode & PIPE_ACCESS_DUPLEX) ||
+diff --git a/shizukudos/win64/kernel32/k32_procinfo.c b/shizukudos/win64/kernel32/k32_procinfo.c
+index a462382..d20f8a7 100644
+--- a/shizukudos/win64/kernel32/k32_procinfo.c
++++ b/shizukudos/win64/kernel32/k32_procinfo.c
+@@ -745,8 +745,7 @@ K32API BOOL WINAPI Wow64GetThreadContext(HANDLE h, PWOW64_CONTEXT ctx)
+ 
+ K32API BOOL WINAPI IsThreadAFiber(void)
+ {
+-    /* TEB.SameTebFlags (0x17ee) bit 2 is HasFiberData. ConvertThreadToFiber does not exist in this kernel32, so it is never set,
+-     * but the flag is what Windows reports and what is read here. */
++    /* TEB.SameTebFlags (0x17ee) bit 2 is HasFiberData; ConvertThreadToFiber (k32_fiber.c) sets it and ConvertFiberToThread clears it. */
+     return (*(const USHORT *)(shz_teb() + 0x17ee) & 4) != 0;
+ }
+ 
+diff --git a/shizukudos/win64/tests/t_k32_fiber.c b/shizukudos/win64/tests/t_k32_fiber.c
+new file mode 100644
+index 0000000..0c51727
+--- /dev/null
++++ b/shizukudos/win64/tests/t_k32_fiber.c
+@@ -0,0 +1,157 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * Fibers (kernel32: ConvertThreadToFiber(Ex), ConvertFiberToThread, CreateFiber(Ex), DeleteFiber, SwitchToFiber). The expected
++ * values come from the documented behaviour: the order in which control passes, GetFiberData/GetCurrentFiber, the error codes
++ * (ERROR_ALREADY_FIBER, ERROR_ALREADY_THREAD), a separate stack and fiber-local storage per fiber, that a fiber routine which returns
++ * ends the thread, and that the registers a called function must preserve (rbx, rbp, rdi, rsi, r12-r15, xmm6-xmm15) survive a
++ * switch in both directions - checked with routines written in assembly that load known values, switch, and compare.
++ */
++#include "k32test.h"
++
++static LPVOID g_main, g_a, g_b;
++static int g_log[16], g_nlog;
++static volatile LONG g_after_switch, g_thread_fiber_ran;
++static DWORD g_fls;
++static DWORD64 g_reg_fail_fiber;
++
++/* GetCurrentFiber() / GetFiberData() of the SDK read gs:[0x20] (NtTib.FiberData) and the value it points to; written out here because
++ * GCC rejects the SDK's __readgsqword(0x20) under -Werror=array-bounds. */
++static LPVOID cur_fiber(void) { LPVOID v; __asm__ volatile("movq %%gs:0x20, %0" : "=r"(v)); return v; }
++static LPVOID fiber_data(void) { return *(LPVOID *)cur_fiber(); }
++
++static void note(int v) { if (g_nlog < 16) g_log[g_nlog++] = v; }
++
++/* check_regs(fiber): loads known values into the preserved registers, switches to `fiber`, compares them when control returns;
++ * returns 0 when all are intact, else a bit per register that changed. trash_and_switch(fiber): the same from the other side with
++ * different values (the fiber loads its own values, switches back to `fiber`, and compares them when it is resumed). */
++DWORD64 check_regs(LPVOID fiber);
++DWORD64 trash_and_switch(LPVOID fiber);
++#define REG_BODY(name, K1, K2, K3, K4, K5, K6, K7, X0, X1) \
++    __asm__(".text\n.globl " #name "\n" #name ":\n" \
++        "  pushq %rbx\n  pushq %rbp\n  pushq %rdi\n  pushq %rsi\n  pushq %r12\n  pushq %r13\n  pushq %r14\n  pushq %r15\n" \
++        "  subq $0x48, %rsp\n  movups %xmm6, 0x20(%rsp)\n  movups %xmm15, 0x30(%rsp)\n" \
++        "  movq $" #K1 ", %rbx\n  movq $" #K2 ", %rbp\n  movq $" #K3 ", %rdi\n  movq $" #K4 ", %rsi\n" \
++        "  movq $" #K5 ", %r12\n  movq $" #K6 ", %r13\n  movq $" #K7 ", %r14\n  movq $" #K1 ", %r15\n" \
++        "  movq $" #X0 ", %rax\n  movq %rax, 0(%rsp)\n  movq %rax, 8(%rsp)\n  movups 0(%rsp), %xmm6\n" \
++        "  movq $" #X1 ", %rax\n  movq %rax, 0(%rsp)\n  movq %rax, 8(%rsp)\n  movups 0(%rsp), %xmm15\n" \
++        "  subq $0x20, %rsp\n  call SwitchToFiber\n  addq $0x20, %rsp\n" \
++        "  xorl %eax, %eax\n" \
++        "  movq $" #K1 ", %rcx\n  cmpq %rcx, %rbx\n  je 1f\n  orq $1, %rax\n1:\n" \
++        "  movq $" #K2 ", %rcx\n  cmpq %rcx, %rbp\n  je 2f\n  orq $2, %rax\n2:\n" \
++        "  movq $" #K3 ", %rcx\n  cmpq %rcx, %rdi\n  je 3f\n  orq $4, %rax\n3:\n" \
++        "  movq $" #K4 ", %rcx\n  cmpq %rcx, %rsi\n  je 4f\n  orq $8, %rax\n4:\n" \
++        "  movq $" #K5 ", %rcx\n  cmpq %rcx, %r12\n  je 5f\n  orq $16, %rax\n5:\n" \
++        "  movq $" #K6 ", %rcx\n  cmpq %rcx, %r13\n  je 6f\n  orq $32, %rax\n6:\n" \
++        "  movq $" #K7 ", %rcx\n  cmpq %rcx, %r14\n  je 7f\n  orq $64, %rax\n7:\n" \
++        "  movq $" #K1 ", %rcx\n  cmpq %rcx, %r15\n  je 8f\n  orq $128, %rax\n8:\n" \
++        "  movups %xmm6, 0(%rsp)\n  movq $" #X0 ", %rcx\n  cmpq %rcx, 0(%rsp)\n  jne 9f\n  cmpq %rcx, 8(%rsp)\n  je 10f\n9:\n  orq $256, %rax\n10:\n" \
++        "  movups %xmm15, 0(%rsp)\n  movq $" #X1 ", %rcx\n  cmpq %rcx, 0(%rsp)\n  jne 11f\n  cmpq %rcx, 8(%rsp)\n  je 12f\n11:\n  orq $512, %rax\n12:\n" \
++        "  movups 0x20(%rsp), %xmm6\n  movups 0x30(%rsp), %xmm15\n  addq $0x48, %rsp\n" \
++        "  popq %r15\n  popq %r14\n  popq %r13\n  popq %r12\n  popq %rsi\n  popq %rdi\n  popq %rbp\n  popq %rbx\n  ret\n");
++REG_BODY(check_regs, 0x1111111, 0x2222222, 0x3333333, 0x4444444, 0x5555555, 0x6666666, 0x7777777, 0x1234567, 0x7654321)
++REG_BODY(trash_and_switch, 0x0a0a0a0, 0x0b0b0b0, 0x0c0c0c0, 0x0d0d0d0, 0x0e0e0e0, 0x0f0f0f0, 0x0101010, 0x0abcdef, 0x0fedcba)
++
++static VOID WINAPI fiber_a(LPVOID p)
++{
++    int local = 0x5a5a;
++    note(100 + (int)(ULONG_PTR)p);
++    SwitchToFiber(g_main);                                     /* 1: back to the main fiber */
++    note(200);
++    CHECK(local == 0x5a5a, "a local of the fiber survives a switch (its stack is its own)");
++    CHECK(fiber_data() == p && cur_fiber() == g_a, "the FiberData of the TEB (GetFiberData / GetCurrentFiber) inside the fiber");
++    CHECK(IsThreadAFiber(), "IsThreadAFiber inside a fiber");
++    CHECK(FlsGetValue(g_fls) == NULL, "a new fiber starts with empty fiber-local storage");
++    FlsSetValue(g_fls, (PVOID)0xaaa);
++    SwitchToFiber(g_main);                                     /* 2 */
++    CHECK(FlsGetValue(g_fls) == (PVOID)0xaaa, "the fiber's own FLS value is back after the main fiber ran");
++    g_reg_fail_fiber = trash_and_switch(g_main);               /* 3: registers of the fiber across a switch (run by main in check_regs) */
++    note(300);
++    SwitchToFiber(g_main);                                     /* 4 */
++    note(999);                                                 /* never resumed */
++}
++
++static VOID WINAPI fiber_b(LPVOID p)
++{
++    ULONG_PTR low = 0, high = 0, here = (ULONG_PTR)&low;
++    note(400);
++    GetCurrentThreadStackLimits(&low, &high);
++    CHECKV(here >= low && here < high, "GetCurrentThreadStackLimits inside a fiber bounds a local of that fiber", "%p not in [%p, %p)", (void *)here, (void *)low, (void *)high);
++    SwitchToFiber(g_a);                                        /* a fiber created by another fiber resumes the other fiber */
++    note(999);
++}
++
++static VOID WINAPI ending_fiber(LPVOID p)
++{
++    InterlockedExchange(&g_thread_fiber_ran, 7);
++    (void)p;                                                   /* returns: the thread must end here */
++}
++
++static DWORD WINAPI thread_with_fibers(LPVOID p)
++{
++    LPVOID self = ConvertThreadToFiber(NULL), f = CreateFiber(0, ending_fiber, NULL);
++    (void)p;
++    if (self && f) SwitchToFiber(f);
++    InterlockedExchange(&g_after_switch, 1);                   /* must not run */
++    return 5;
++}
++
++int main(void)
++{
++    ULONG_PTR low0 = 0, high0 = 0, low1 = 0, high1 = 0;
++    DWORD64 bits;
++    HANDLE th;
++    DWORD code = 0xdead;
++    int i;
++    CHECK(!IsThreadAFiber(), "a thread is not a fiber at the start");
++    SetLastError(0);
++    CHECK(CreateFiber(0, NULL, NULL) == NULL && GetLastError() == ERROR_INVALID_PARAMETER, "CreateFiber without a routine fails with ERROR_INVALID_PARAMETER");
++    SetLastError(0);
++    CHECK(!ConvertFiberToThread() && GetLastError() == ERROR_ALREADY_THREAD, "ConvertFiberToThread on a plain thread fails with ERROR_ALREADY_THREAD");
++    g_main = ConvertThreadToFiber((LPVOID)0x1234);
++    CHECK(g_main != NULL, "ConvertThreadToFiber");
++    CHECK(IsThreadAFiber() && cur_fiber() == g_main && fiber_data() == (LPVOID)0x1234, "IsThreadAFiber and the TEB's fiber and data after the conversion");
++    SetLastError(0);
++    CHECK(ConvertThreadToFiber(NULL) == NULL && GetLastError() == ERROR_ALREADY_FIBER, "a second ConvertThreadToFiber fails with ERROR_ALREADY_FIBER");
++    GetCurrentThreadStackLimits(&low0, &high0);
++    g_fls = FlsAlloc(NULL);
++    CHECK(g_fls != FLS_OUT_OF_INDEXES, "FlsAlloc");
++    FlsSetValue(g_fls, (PVOID)0x111);
++
++    g_a = CreateFiber(64 * 1024, fiber_a, (LPVOID)7);
++    g_b = CreateFiberEx(32 * 1024, 128 * 1024, 0, fiber_b, NULL);
++    CHECK(g_a != NULL && g_b != NULL && g_a != g_b, "CreateFiber / CreateFiberEx");
++    SwitchToFiber(g_a);                                        /* a runs up to its first switch */
++    note(1);
++    SwitchToFiber(g_a);                                        /* 200 ... second switch */
++    note(2);
++    CHECK(FlsGetValue(g_fls) == (PVOID)0x111, "the main fiber's FLS value is unchanged by what the other fiber stored");
++    CHECK(cur_fiber() == g_main, "the main fiber is current again");
++    GetCurrentThreadStackLimits(&low1, &high1);
++    CHECK(low0 == low1 && high0 == high1, "the thread's stack bounds are restored when the main fiber runs again");
++    bits = check_regs(g_a);                                    /* the fiber's third switch: both sides compare their registers */
++    CHECKV(bits == 0 && g_reg_fail_fiber == 0, "rbx, rbp, rdi, rsi, r12-r15, xmm6 and xmm15 survive a switch in both directions", "main side bits %llx, fiber side bits %llx", (unsigned long long)bits, (unsigned long long)g_reg_fail_fiber);
++    note(3);
++    SwitchToFiber(g_b);                                        /* b checks its stack bounds, switches to a (resumes after the trash_and_switch), a notes 300 and returns to main */
++    note(4);
++    {
++        static const int want[] = {107, 1, 200, 2, 3, 400, 300, 4};
++        int ok = g_nlog == 8;
++        for (i = 0; ok && i < 8; ++i) if (g_log[i] != want[i]) ok = 0;
++        CHECKV(ok, "control passes in the order the switches say", "%d entries: %d %d %d %d %d %d %d %d", g_nlog, g_log[0], g_log[1], g_log[2], g_log[3], g_log[4], g_log[5], g_log[6], g_log[7]);
++    }
++    DeleteFiber(g_a);
++    DeleteFiber(g_b);
++    CHECK(TRUE, "DeleteFiber of fibers that are not running");
++
++    th = CreateThread(NULL, 0, thread_with_fibers, NULL, 0, NULL);
++    CHECK(th != NULL, "CreateThread for the fiber routine that returns");
++    CHECK(th && WaitForSingleObject(th, 20000) == WAIT_OBJECT_0, "the thread ends when its fiber routine returns");
++    CHECK(th && GetExitCodeThread(th, &code) && code == 0, "with exit code 0");
++    CHECK(g_thread_fiber_ran == 7 && g_after_switch == 0, "the code after the switch in the thread never ran");
++    if (th) CloseHandle(th);
++
++    CHECK(ConvertFiberToThread(), "ConvertFiberToThread");
++    CHECK(!IsThreadAFiber(), "IsThreadAFiber is false again");
++    SetLastError(0);
++    CHECK(!ConvertFiberToThread() && GetLastError() == ERROR_ALREADY_THREAD, "ConvertFiberToThread twice fails with ERROR_ALREADY_THREAD");
++    return k32t_finish("t_k32_fiber");
++}

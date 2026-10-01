@@ -74,6 +74,9 @@ void kmain(uint64_t bootinfo_pa)
     { extern void ntdrv_selftest(void); ntdrv_selftest(); }
     setup_autostart(&bootinfo);
     { extern void k64_autorun(void); k64_autorun(); }   /* shz.autorun=<control file>: one Win64 program (autorun.c) */
+#ifdef SHZ_STANDALONE
+    { extern void k64_autorun_observe(void); k64_autorun_observe(); } /* explicit bounded post-autorun observation */
+#endif
     if (bootinfo.channel_count) {
         ipc64_init(&bootinfo);
         if (ipc64_run_tests())

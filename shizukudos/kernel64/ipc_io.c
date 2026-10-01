@@ -18,6 +18,7 @@
 
 #define NT_ERROR(s) ((uint32_t)(s) >= 0xC0000000u)
 #define PORT_USER_PACKET_LIMIT 16384u
+#define IRPF_SKIP_COMPLETION_PORT_ON_SUCCESS 2u
 
 static irp_t *all_irps;                 /* every pending IRP */
 
@@ -41,20 +42,27 @@ void ioctx_free(kobject_t *o)
 int32_t irp_prepare(process_t *p, kobject_t *fobj, uint64_t event_h, uint64_t apc_routine, uint64_t apc_context,
                     uint64_t iosb, uint32_t major, irp_t **out)
 {
-    ioctx_t *io = fobj->u.file.io;
+    ioctx_t *io;
     kobject_t *ev = 0;
     irp_t *irp;
     int32_t st;
+    uint64_t f;
     if (event_h) {
         st = ipc_ref_handle(p, event_h, OB_EVENT, &ev, 0);
         if (st) return st;
     }
-    if (io && io->port && apc_routine) {                /* a file bound to a port cannot also take completion routines */
-        if (ev) ob_deref(ev);
-        return STATUS_INVALID_PARAMETER;
-    }
     irp = kzalloc(sizeof *irp);
     if (!irp) { if (ev) ob_deref(ev); return STATUS_INSUFFICIENT_RESOURCES; }
+    /* A replacement port can drop its last ref at any preemption. Capture the
+     * key, modes and referenced port in one atomic snapshot, before it can move. */
+    f = irq_save();
+    io = fobj->u.file.io;
+    if (io && io->port && apc_routine) {
+        irq_restore(f);
+        if (ev) ob_deref(ev);
+        kfree(irp);
+        return STATUS_INVALID_PARAMETER;
+    }
     irp->proc = p;
     ob_ref(p->object);
     irp->thread = thread_current();
@@ -72,11 +80,13 @@ int32_t irp_prepare(process_t *p, kobject_t *fobj, uint64_t event_h, uint64_t ap
         irp->key = io->key;
     }
     if (io && (io->notify & 2)) irp->flags |= IRPF_NO_EVENT_ON_HANDLE;
+    if (io && (io->notify & 1)) irp->flags |= IRPF_SKIP_COMPLETION_PORT_ON_SUCCESS;
     if (ev) ob_reset_event(ev);
     if (!(irp->flags & IRPF_NO_EVENT_ON_HANDLE)) fobj->signaled = 0;
     irp->refs = 1;                                      /* the issuer's, dropped by irp_finish() */
     ++ipc_stat_irps;
     *out = irp;
+    irq_restore(f);
     return STATUS_SUCCESS;
 }
 
@@ -141,8 +151,7 @@ void irp_complete(irp_t *irp, int32_t status, uint64_t info)
         if (irp->apc_routine && irp->thread && live)
             apc_queue(irp->thread, irp->apc_routine, irp->apc_context, irp->iosb, 0);
         if (irp->port && live) {
-            ioctx_t *io = irp->fobj->u.file.io;
-            const int skip = immediate && status == STATUS_SUCCESS && io && (io->notify & 1);
+            const int skip = immediate && status == STATUS_SUCCESS && (irp->flags & IRPF_SKIP_COMPLETION_PORT_ON_SUCCESS);
             if (!skip) iocp_post(irp->port, irp->key, irp->apc_context, status, info);
         }
     }
@@ -239,7 +248,7 @@ restart:
         if (irp->thread != t || irp->completed) continue;
         io = irp->fobj->u.file.io;
         irp->thread = 0;                                /* no APC can reach an exited thread */
-        if (io && io->port) continue;
+        if (io && io->port && irp->fobj->type != OB_SOCKET) continue;
         if (irp->cancel) irp->cancel(irp);
         irp_complete(irp, STATUS_CANCELLED, irp->major == IRP_WRITE ? irp->done : 0);
         goto restart;
@@ -506,7 +515,9 @@ int32_t ipc_set_completion_info(process_t *p, kobject_t *fobj, uint32_t cls, uin
         if (flags & ~7u) return STATUS_INVALID_PARAMETER;
         io = ipc_ioctx(fobj, 1);
         if (!io) return STATUS_INSUFFICIENT_RESOURCES;
-        io->notify |= flags;                            /* modes can be set, never cleared */
+        { const uint64_t f = irq_save();
+          io->notify |= flags;                          /* modes can be set, never cleared */
+          irq_restore(f); }
         return STATUS_SUCCESS;
     }
     if (len < 16) return STATUS_INFO_LENGTH_MISMATCH;
@@ -517,11 +528,15 @@ int32_t ipc_set_completion_info(process_t *p, kobject_t *fobj, uint32_t cls, uin
     }
     io = ipc_ioctx(fobj, 1);
     if (!io) { if (port) ob_deref(port); return STATUS_INSUFFICIENT_RESOURCES; }
-    if (io->sync) { if (port) ob_deref(port); return STATUS_INVALID_PARAMETER; }   /* synchronous handles cannot be bound */
-    if (cls == 30 && io->port) { ob_deref(port); return STATUS_INVALID_PARAMETER; }  /* already bound */
     {
-        kobject_t *old = io->port;
         const uint64_t f = irq_save();
+        kobject_t *old;
+        if (io->sync || (cls == 30 && io->port)) {
+            irq_restore(f);
+            if (port) ob_deref(port);
+            return STATUS_INVALID_PARAMETER;           /* synchronous/already attached: one atomic decision */
+        }
+        old = io->port;
         io->port = port;
         io->key = v[1];
         irq_restore(f);
@@ -687,7 +702,7 @@ int32_t ipc_io_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
         if (cls != 30 && cls != 41 && cls != 61) break;
         st = ipc_ref_handle(p, a1, 0, &o, 0);
         if (st) return st;
-        if (o->type != OB_FILE && o->type != OB_NPIPE) st = STATUS_OBJECT_TYPE_MISMATCH;
+        if (o->type != OB_FILE && o->type != OB_NPIPE && o->type != OB_SOCKET) st = STATUS_OBJECT_TYPE_MISMATCH;
         else st = ipc_set_completion_info(p, o, cls, a3, a4);
         ob_deref(o);
         if (!st && a2) { struct ipc_iosb v = { 0, 0 }; copy_to_user(p, a2, &v, sizeof v); }
@@ -700,7 +715,7 @@ int32_t ipc_io_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
         if (cls != 41) break;
         st = ipc_ref_handle(p, a1, 0, &o, 0);
         if (st) return st;
-        st = (o->type != OB_FILE && o->type != OB_NPIPE) ? STATUS_OBJECT_TYPE_MISMATCH : ipc_query_completion_info(p, o, a3, a4);
+        st = (o->type != OB_FILE && o->type != OB_NPIPE && o->type != OB_SOCKET) ? STATUS_OBJECT_TYPE_MISMATCH : ipc_query_completion_info(p, o, a3, a4);
         ob_deref(o);
         if (!st && a2) { struct ipc_iosb v = { 0, 4 }; copy_to_user(p, a2, &v, sizeof v); }
         return st;
@@ -713,7 +728,7 @@ int32_t ipc_io_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
         const uint64_t iosb_out = num == SYS_NtCancelIoFile ? a2 : a3;
         int32_t st = ipc_ref_handle(p, a1, 0, &o, 0);
         if (st) return st;
-        if (o->type != OB_FILE && o->type != OB_NPIPE) { ob_deref(o); return STATUS_OBJECT_TYPE_MISMATCH; }
+        if (o->type != OB_FILE && o->type != OB_NPIPE && o->type != OB_SOCKET) { ob_deref(o); return STATUS_OBJECT_TYPE_MISMATCH; }
         irp_cancel_matching(p, num == SYS_NtCancelIoFile ? thread_current() : 0, o, num == SYS_NtCancelIoFile ? 0 : a2, &found);
         ob_deref(o);
         if (num == SYS_NtCancelIoFileEx && !found) return STATUS_NOT_FOUND;

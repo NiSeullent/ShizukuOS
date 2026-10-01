@@ -1,7 +1,8 @@
 {
  "_comment": "Windows oleaut32 ordinals of the exported functions (programs import oleaut32 by ordinal)",
  "libs": [
-  "advapi32"
+  "advapi32",
+  "ucrtbase"
  ],
  "ordinals": {
   "SysAllocString": 2,
@@ -43,6 +44,33 @@
   "VarBstrCat": 313,
   "VarBstrCmp": 314,
   "SafeArrayCreateVector": 411,
-  "SafeArrayCopyData": 412
+  "SafeArrayCopyData": 412,
+  "VarDecAdd": 177,
+  "VarDecDiv": 178,
+  "VarDecMul": 179,
+  "VarDecSub": 181,
+  "VarDecNeg": 189,
+  "VarDecFromUI1": 190,
+  "VarDecFromI2": 191,
+  "VarDecFromI4": 192,
+  "VarDecFromR4": 193,
+  "VarDecFromR8": 194,
+  "VarDecFromStr": 197,
+  "VarDecCmp": 204,
+  "VarI2FromDec": 208,
+  "VarI4FromDec": 212,
+  "VarR4FromDec": 216,
+  "VarR8FromDec": 220,
+  "VarBstrFromDec": 232,
+  "VarUI1FromDec": 240,
+  "VarDecFromUI2": 242,
+  "VarDecFromUI4": 243,
+  "VarUI2FromDec": 269,
+  "VarUI4FromStr": 277,
+  "VarUI4FromDec": 282,
+  "VarI8FromDec": 345,
+  "VarDecFromI8": 374,
+  "VarDecFromUI8": 375,
+  "VarUI8FromDec": 441
  }
 }

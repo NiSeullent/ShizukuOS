@@ -42,7 +42,8 @@ static uint32_t ka_cnt(const tcb_t *t) { return t->sock && t->sock->ka_cnt ? t->
 /* SO_KEEPALIVE / TCP_KEEPIDLE changed on a live connection. */
 void tcp_keepalive_changed(tcb_t *t)
 {
-    if (t->sock && t->sock->keepalive && (t->state == TCPS_ESTABLISHED || t->state == TCPS_CLOSE_WAIT))
+    if (t->sock && t->sock->keepalive && !t->sock->extension_context_pending &&
+        (t->state == TCPS_ESTABLISHED || t->state == TCPS_CLOSE_WAIT))
         t->ka_deadline = net_now() + ka_idle_ms(t);
     else
         t->ka_deadline = 0;
@@ -313,7 +314,7 @@ static void tcp_output_ex(tcb_t *t, int force_probe)
             force_probe = 0;
             NSTAT(NS_TCP_PERSIST);
         }
-        nodelay = t->sock ? t->sock->nodelay : 1;
+        nodelay = t->sock ? (t->sock->nodelay && !t->sock->extension_context_pending) : 1;
         if (!forced && len > 0 && len < t->mss && flight > 0 && !nodelay && !(t->fin_queued && len == unsent))
             len = 0;                                        /* Nagle: hold a small segment while data is unacknowledged */
         if (!forced && len > 0 && len < t->mss && len < unsent && flight > 0)
@@ -981,6 +982,7 @@ void tcp_flush_acks(void)
 
 void tcp_timers(uint64_t now)
 {
+    sock_extensions_poll();
     tcb_t **pp = &g_tcbs;
     while (*pp) {
         tcb_t *t = *pp;

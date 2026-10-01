@@ -1,0 +1,4 @@
+{
+  "name": "mpr",
+  "link": ["user32", "advapi32"]
+}

@@ -933,26 +933,29 @@ static int module_fixed_version(const sym_process *p, const sym_module *m, VS_FI
     return 0;
 }
 
-DLLAPI BOOL WINAPI MiniDumpWriteDump(HANDLE h, DWORD pid, HANDLE file, MINIDUMP_TYPE type, PMINIDUMP_EXCEPTION_INFORMATION const exc,
+DLLAPI BOOL WINAPI MiniDumpWriteDump(HANDLE h, volatile DWORD pid, HANDLE file, MINIDUMP_TYPE type, PMINIDUMP_EXCEPTION_INFORMATION const exc,
                                      PMINIDUMP_USER_STREAM_INFORMATION const user, PMINIDUMP_CALLBACK_INFORMATION const cb)
 {
     sym_process tmp;
     dumpbuf d;
     MINIDUMP_HEADER hdr;
     MINIDUMP_DIRECTORY dirs[8];
-    unsigned ndir = 0, i;
+    /* RtlCaptureContext is declared returns_twice by mingw. Keep the stream
+     * counter observable across that capture; do not rewrite the input PID. */
+    volatile unsigned ndir = 0;
+    unsigned i;
     CONTEXT ctx;
     DWORD tid = GetCurrentThreadId();
     DWORD64 stack_lo, stack_hi;
     RVA ctx_rva, stack_rva;
     int exc_ctx_ok = 0;
+    const DWORD dump_pid = pid ? pid : GetProcessId(h);
     (void)type;
     if (!file || file == INVALID_HANDLE_VALUE) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
     if (cb) { SetLastError(ERROR_NOT_SUPPORTED); return FALSE; }
-    if (!pid) pid = GetProcessId(h);
-    if (pid != GetCurrentProcessId() || (h && GetProcessId(h) != pid)) { SetLastError(ERROR_NOT_SUPPORTED); return FALSE; }
+    if (dump_pid != GetCurrentProcessId() || (h && GetProcessId(h) != dump_pid)) { SetLastError(ERROR_NOT_SUPPORTED); return FALSE; }
     memset(&tmp, 0, sizeof tmp);
-    tmp.h = GetCurrentProcess(); tmp.pid = pid; tmp.is_self = 1;
+    tmp.h = GetCurrentProcess(); tmp.pid = dump_pid; tmp.is_self = 1;
     AcquireSRWLockExclusive(&g_lock);
     refresh_modules(&tmp);
     ReleaseSRWLockExclusive(&g_lock);
@@ -1131,7 +1134,7 @@ DLLAPI BOOL WINAPI MiniDumpWriteDump(HANDLE h, DWORD pid, HANDLE file, MINIDUMP_
         memset(&mi, 0, sizeof mi);
         mi.SizeOfInfo = sizeof mi;
         mi.Flags1 = MINIDUMP_MISC1_PROCESS_ID;
-        mi.ProcessId = pid;
+        mi.ProcessId = dump_pid;
         if (GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)) {
             ULONG64 ct = ((ULONG64)c.dwHighDateTime << 32 | c.dwLowDateTime);
             mi.Flags1 |= MINIDUMP_MISC1_PROCESS_TIMES;

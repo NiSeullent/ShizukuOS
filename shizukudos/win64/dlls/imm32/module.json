@@ -1,0 +1,4 @@
+{
+  "libs": ["advapi32"],
+  "description": "IMM32 input-layout registry metadata (composition engine unavailable)"
+}

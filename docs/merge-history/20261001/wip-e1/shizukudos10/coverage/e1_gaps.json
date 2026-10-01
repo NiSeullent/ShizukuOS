@@ -1,0 +1,3799 @@
+{
+ "images": {
+  "electron": [
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "electron.exe",
+   "ffmpeg.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ],
+  "vscode": [
+   "VSCodium.exe",
+   "d3dcompiler_47.dll",
+   "dxcompiler.dll",
+   "dxil.dll",
+   "ffmpeg.dll",
+   "libEGL.dll",
+   "libGLESv2.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll",
+   "resources/app/extensions/microsoft-authentication/dist/msal-node-runtime.node",
+   "resources/app/node_modules.asar.unpacked/@parcel/watcher/build/Release/watcher.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/deviceid/build/Release/windows.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/native-watchdog/build/Release/watchdog.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/os-proxy-resolver-win32-x64-msvc/os_proxy_resolver.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/spdlog/build/Release/spdlog.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/sqlite3/build/Release/vscode-sqlite3.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/windows-ca-certs/build/Release/crypt32.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/windows-mutex/build/Release/CreateMutex.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/windows-process-tree/build/Release/windows_process_tree.node",
+   "resources/app/node_modules.asar.unpacked/@vscode/windows-registry/build/Release/winregistry.node",
+   "resources/app/node_modules.asar.unpacked/@vscodium/native-keymap/build/Release/keymapping.node",
+   "resources/app/node_modules.asar.unpacked/@vscodium/policy-watcher/build/Release/vscodium-policy-watcher.node",
+   "resources/app/node_modules.asar.unpacked/kerberos/build/Release/kerberos.node",
+   "resources/app/node_modules.asar.unpacked/native-is-elevated/build/Release/iselevated.node",
+   "resources/app/node_modules.asar.unpacked/node-pty/build/Release/conpty.node",
+   "resources/app/node_modules.asar.unpacked/node-pty/build/Release/conpty_console_list.node",
+   "resources/app/node_modules.asar.unpacked/windows-foreground-love/build/Release/foreground_love.node"
+  ],
+  "chromium": [
+   "D3DCompiler_47.dll",
+   "chrome.dll",
+   "chrome.exe",
+   "chrome_elf.dll",
+   "chrome_wer.dll",
+   "dxcompiler.dll",
+   "eventlog_provider.dll",
+   "libEGL.dll",
+   "libGLESv2.dll",
+   "vk_swiftshader.dll",
+   "vulkan-1.dll"
+  ]
+ },
+ "gaps": [
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-console-l3-2-0.dll",
+   "fn": "GetConsoleWindow",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-largeinteger-l1-1-0.dll",
+   "fn": "MulDiv",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-processthreads-l1-1-0.dll",
+   "fn": "OpenProcessToken",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-string-l2-1-0.dll",
+   "fn": "CharLowerW",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-string-l2-1-0.dll",
+   "fn": "CharNextW",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-threadpool-l1-2-0.dll",
+   "fn": "CloseThreadpoolWait",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-threadpool-l1-2-0.dll",
+   "fn": "CreateThreadpoolWait",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-threadpool-l1-2-0.dll",
+   "fn": "SetThreadpoolWait",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "api-ms-win-core-threadpool-l1-2-0.dll",
+   "fn": "TrySubmitThreadpoolCallback",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "CancelSynchronousIo",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "ConvertFiberToThread",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vk_swiftshader.dll",
+    "vscode:vk_swiftshader.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "ConvertThreadToFiberEx",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vk_swiftshader.dll",
+    "vscode:vk_swiftshader.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "CreateFiberEx",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vk_swiftshader.dll",
+    "vscode:vk_swiftshader.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "CreateSymbolicLinkW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "DeleteFiber",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vk_swiftshader.dll",
+    "vscode:vk_swiftshader.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "FillConsoleOutputAttribute",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "FillConsoleOutputCharacterW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetConsoleCursorInfo",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetConsoleProcessList",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/node_modules.asar.unpacked/node-pty/build/Release/conpty_console_list.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetConsoleWindow",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/extensions/microsoft-authentication/dist/msal-node-runtime.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetCurrentPackageFullName",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetErrorMode",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetNumberOfConsoleInputEvents",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetPackageFamilyName",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetProcessIoCounters",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "GetSystemTimes",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/node_modules.asar.unpacked/@vscode/windows-process-tree/build/Release/windows_process_tree.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "HeapQueryInformation",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:dxcompiler.dll",
+    "electron:ffmpeg.dll",
+    "electron:vk_swiftshader.dll",
+    "electron:vulkan-1.dll",
+    "vscode:dxcompiler.dll",
+    "vscode:ffmpeg.dll",
+    "vscode:libEGL.dll",
+    "vscode:libGLESv2.dll",
+    "vscode:vk_swiftshader.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "NeedCurrentDirectoryForExePathW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "Process32First",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/node_modules.asar.unpacked/@vscode/windows-process-tree/build/Release/windows_process_tree.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "Process32Next",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/node_modules.asar.unpacked/@vscode/windows-process-tree/build/Release/windows_process_tree.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "ReOpenFile",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "ReadConsoleInputW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleCursorInfo",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleCursorPosition",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "SetConsoleTitleW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "SetThreadStackGuarantee",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/node_modules.asar.unpacked/@vscode/os-proxy-resolver-win32-x64-msvc/os_proxy_resolver.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "SwitchToFiber",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vk_swiftshader.dll",
+    "vscode:vk_swiftshader.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K4",
+   "dll": "kernel32.dll",
+   "fn": "WriteConsoleInputW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by kernel32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "advapi32.dll",
+   "fn": "SystemFunction036",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by advapi32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "api-ms-win-core-registry-l1-1-0.dll",
+   "fn": "RegOpenCurrentUser",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by advapi32.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "bcrypt.dll",
+   "fn": "BCryptDecrypt",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by bcrypt.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "bcrypt.dll",
+   "fn": "BCryptDestroyKey",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by bcrypt.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "bcrypt.dll",
+   "fn": "BCryptGenerateSymmetricKey",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by bcrypt.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "bcrypt.dll",
+   "fn": "BCryptSetProperty",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by bcrypt.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothEnableDiscovery",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothEnableIncomingConnections",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothFindDeviceClose",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothFindFirstDevice",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothFindFirstRadio",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothFindNextDevice",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothFindRadioClose",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothGetRadioInfo",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothIsConnectable",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothSdpGetAttributeValue",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "bthprops.cpl",
+   "fn": "BluetoothSdpGetContainerElementData",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Child",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_DevNode_PropertyW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_DevNode_Registry_PropertyW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_DevNode_Status",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Device_IDW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Device_ID_ListW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Device_ID_List_SizeW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Parent",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Get_Sibling",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Locate_DevNodeW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cfgmgr32.dll",
+   "fn": "CM_Open_DevNode_Key",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:vulkan-1.dll",
+    "vscode:vulkan-1.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "comctl32.dll",
+   "fn": "#345",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by comctl32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "comctl32.dll",
+   "fn": "#410",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by comctl32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "comctl32.dll",
+   "fn": "#412",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by comctl32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "comctl32.dll",
+   "fn": "#413",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by comctl32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "comdlg32.dll",
+   "fn": "PrintDlgExW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "cryptui.dll",
+   "fn": "CryptUIDlgViewCertificateW",
+   "products": [
+    "electron"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "d3d11.dll",
+   "fn": "D3D11CreateDevice",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "d3d12.dll",
+   "fn": "#101",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "d3d9.dll",
+   "fn": "D3DPERF_BeginEvent",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "vscode:libGLESv2.dll"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "d3d9.dll",
+   "fn": "D3DPERF_EndEvent",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "vscode:libGLESv2.dll"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "d3d9.dll",
+   "fn": "D3DPERF_GetStatus",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "vscode:libGLESv2.dll"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "d3d9.dll",
+   "fn": "D3DPERF_SetMarker",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "vscode:libGLESv2.dll"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "d3d9.dll",
+   "fn": "Direct3DCreate9",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "vscode:libGLESv2.dll"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "dcomp.dll",
+   "fn": "DCompositionCreateDevice",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "dcomp.dll",
+   "fn": "DCompositionCreateSurfaceHandle",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "dhcpcsvc.dll",
+   "fn": "DhcpCApiInitialize",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "dhcpcsvc.dll",
+   "fn": "DhcpRequestParams",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "dxgi.dll",
+   "fn": "CreateDXGIFactory",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:libGLESv2.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "dxgi.dll",
+   "fn": "CreateDXGIFactory1",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:libGLESv2.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "fontsub.dll",
+   "fn": "CreateFontPackage",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidD_FreePreparsedData",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidD_GetAttributes",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidD_GetPreparsedData",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidD_GetProductString",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidD_GetSerialNumberString",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidP_GetButtonCaps",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidP_GetCaps",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidP_GetScaledUsageValue",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidP_GetUsageValue",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidP_GetUsagesEx",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "hid.dll",
+   "fn": "HidP_GetValueCaps",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mf.dll",
+   "fn": "MFCreateDeviceSource",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mf.dll",
+   "fn": "MFEnumDeviceSources",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateAlignedMemoryBuffer",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateAsyncResult",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateAttributes",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateDXGIDeviceManager",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateDXGISurfaceBuffer",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateEventQueue",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateMediaBufferWrapper",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateMediaEvent",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateMediaType",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateMemoryBuffer",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreatePresentationDescriptor",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateSample",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateStreamDescriptor",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFCreateWaveFormatExFromMFMediaType",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFFrameRateToAverageTimePerFrame",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFGetSystemTime",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFInitMediaTypeFromWaveFormatEx",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFLockDXGIDeviceManager",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFSerializeAttributesToStream",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFShutdown",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFStartup",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFTEnumEx",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfplat.dll",
+   "fn": "MFUnlockDXGIDeviceManager",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mfreadwrite.dll",
+   "fn": "MFCreateSourceReaderFromMediaSource",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "mmdevapi.dll",
+   "fn": "#17",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptCreatePersistedKey",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptDecrypt",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptDeleteKey",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptExportKey",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptFinalizeKey",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptFreeObject",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptGetProperty",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptImportKey",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptIsAlgSupported",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptOpenKey",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptOpenStorageProvider",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptSetProperty",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ncrypt.dll",
+   "fn": "NCryptSignHash",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "ole32.dll",
+   "fn": "DoDragDrop",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by ole32.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleacc.dll",
+   "fn": "AccessibleChildren",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleacc.dll",
+   "fn": "AccessibleObjectFromWindow",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleacc.dll",
+   "fn": "CreateStdAccessibleObject",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleacc.dll",
+   "fn": "LresultFromObject",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleacc.dll",
+   "fn": "WindowFromAccessibleObject",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleaut32.dll",
+   "fn": "#146",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by oleaut32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleaut32.dll",
+   "fn": "#161",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by oleaut32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleaut32.dll",
+   "fn": "#200",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by oleaut32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleaut32.dll",
+   "fn": "#201",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by oleaut32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleaut32.dll",
+   "fn": "#277",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by oleaut32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "oleaut32.dll",
+   "fn": "#420",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "not exported by oleaut32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "pdh.dll",
+   "fn": "PdhAddEnglishCounterW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "pdh.dll",
+   "fn": "PdhCloseQuery",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "pdh.dll",
+   "fn": "PdhCollectQueryData",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "pdh.dll",
+   "fn": "PdhGetFormattedCounterValue",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "pdh.dll",
+   "fn": "PdhOpenQueryW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "propsys.dll",
+   "fn": "VariantCompare",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by propsys.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "secur32.dll",
+   "fn": "DecryptMessage",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/node_modules.asar.unpacked/kerberos/build/Release/kerberos.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by secur32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "secur32.dll",
+   "fn": "EncryptMessage",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/node_modules.asar.unpacked/kerberos/build/Release/kerberos.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by secur32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "secur32.dll",
+   "fn": "QueryContextAttributesA",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:resources/app/node_modules.asar.unpacked/kerberos/build/Release/kerberos.node"
+   ],
+   "delay_images": [],
+   "reason": "not exported by secur32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiCreateDeviceInfoList",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiDestroyDeviceInfoList",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiEnumDeviceInfo",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiEnumDeviceInterfaces",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiGetClassDevsW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiGetDeviceInterfaceDetailW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiGetDevicePropertyW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiOpenDevRegKey",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiOpenDeviceInfoW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "setupapi.dll",
+   "fn": "SetupDiOpenDeviceInterfaceW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "shell32.dll",
+   "fn": "SHAddToRecentDocs",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by shell32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "shell32.dll",
+   "fn": "Shell_NotifyIconGetRect",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by shell32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "shlwapi.dll",
+   "fn": "#12",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by shlwapi.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "shlwapi.dll",
+   "fn": "AssocQueryStringW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by shlwapi.dll",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "sspicli.dll",
+   "fn": "GetUserNameExW",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "tbs.dll",
+   "fn": "Tbsip_Submit_Command",
+   "products": [
+    "electron"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaDisconnectAllProviders",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaDisconnectProvider",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaGetReservedMixedAttributeValue",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaGetReservedNotSupportedValue",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaHostProviderFromHwnd",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaRaiseAutomationEvent",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaRaiseAutomationPropertyChangedEvent",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaRaiseStructureChangedEvent",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uiautomationcore.dll",
+   "fn": "UiaReturnRawElementProvider",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "urlmon.dll",
+   "fn": "CoInternetCreateSecurityManager",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "userenv.dll",
+   "fn": "GetUserProfileDirectoryW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "not exported by userenv.dll",
+   "electron_specific": true,
+   "node_hint": true
+  },
+  {
+   "owner": "K5",
+   "dll": "uxtheme.dll",
+   "fn": "#47",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uxtheme.dll",
+   "fn": "CloseThemeData",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uxtheme.dll",
+   "fn": "DrawThemeBackground",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uxtheme.dll",
+   "fn": "GetThemeBackgroundContentRect",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uxtheme.dll",
+   "fn": "GetThemePartSize",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "uxtheme.dll",
+   "fn": "OpenThemeData",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wevtapi.dll",
+   "fn": "EvtClose",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wevtapi.dll",
+   "fn": "EvtCreateRenderContext",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wevtapi.dll",
+   "fn": "EvtNext",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wevtapi.dll",
+   "fn": "EvtQuery",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wevtapi.dll",
+   "fn": "EvtRender",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "HttpOpenRequestA",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "HttpQueryInfoA",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "HttpQueryInfoW",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "HttpSendRequestA",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "InternetCloseHandle",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "InternetConnectA",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "InternetOpenA",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "InternetReadFile",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "InternetSetOptionW",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "wininet.dll",
+   "fn": "InternetSetStatusCallbackW",
+   "products": [
+    "vscode"
+   ],
+   "load_time_images": [
+    "vscode:msalruntime.dll"
+   ],
+   "delay_images": [],
+   "reason": "DLL not found",
+   "electron_specific": true,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winspool.drv",
+   "fn": "#203",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winspool.drv",
+   "fn": "ClosePrinter",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winspool.drv",
+   "fn": "DeviceCapabilitiesW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winspool.drv",
+   "fn": "DocumentPropertiesW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winspool.drv",
+   "fn": "EnumPrintersW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winspool.drv",
+   "fn": "GetPrinterDriverW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winspool.drv",
+   "fn": "GetPrinterW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winspool.drv",
+   "fn": "OpenPrinterW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_ControlTransfer",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_Free",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_GetAssociatedInterface",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_GetOverlappedResult",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_Initialize",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_ReadPipe",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_ResetPipe",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_SetCurrentAlternateSetting",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "winusb.dll",
+   "fn": "WinUsb_WritePipe",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [],
+   "delay_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "reason": "DLL not found",
+   "electron_specific": false,
+   "node_hint": false
+  },
+  {
+   "owner": "K5",
+   "dll": "ws2_32.dll",
+   "fn": "GetNameInfoW",
+   "products": [
+    "electron",
+    "vscode"
+   ],
+   "load_time_images": [
+    "electron:electron.exe",
+    "vscode:VSCodium.exe"
+   ],
+   "delay_images": [],
+   "reason": "not exported by ws2_32.dll",
+   "electron_specific": true,
+   "node_hint": false
+  }
+ ],
+ "chromium_gap_count": 170
+}

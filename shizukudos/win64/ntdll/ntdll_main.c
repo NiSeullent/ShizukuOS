@@ -690,7 +690,12 @@ VOID NTAPI RtlSetLastWin32Error(ULONG e) { shz_set_last_error(e); }
 static int call_dll_main(SHZ_LDR_ENTRY *e, int reason, void *reserved)
 {
     BOOL (WINAPI *entry)(HINSTANCE, DWORD, LPVOID) = e->EntryPoint;
-    return entry ? entry((HINSTANCE)e->DllBase, (DWORD)reason, reserved) : 1;
+    ULONG active = e->Flags & SHZ_LDR_CALLBACK_ACTIVE;
+    int result;
+    e->Flags |= SHZ_LDR_CALLBACK_ACTIVE;
+    result = entry ? entry((HINSTANCE)e->DllBase, (DWORD)reason, reserved) : 1;
+    e->Flags = (e->Flags & ~SHZ_LDR_CALLBACK_ACTIVE) | active;
+    return result;
 }
 
 static void run_tls_callbacks(void *base, int reason, void *reserved)
@@ -710,7 +715,7 @@ static void run_tls_callbacks(void *base, int reason, void *reserved)
 }
 
 /* Runs DLL_PROCESS_ATTACH (TLS callbacks first, then DllMain) for every module the loader marked. */
-void ShzRunInitRoutines(int reason, void *reserved)
+static void run_init_routines(int reason, void *reserved, int executable_tls)
 {
     SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
     LIST_ENTRY *head = &ldr->InInitializationOrderModuleList, *l;
@@ -719,23 +724,29 @@ void ShzRunInitRoutines(int reason, void *reserved)
         if (reason == DLL_PROCESS_ATTACH) {
             if (!(e->Flags & SHZ_LDR_NEEDS_INIT)) continue;
             e->Flags &= ~SHZ_LDR_NEEDS_INIT;
+            e->Flags |= SHZ_LDR_CALLBACK_ACTIVE;
             run_tls_callbacks(e->DllBase, reason, reserved);
+            e->Flags &= ~SHZ_LDR_CALLBACK_ACTIVE;
             if (!call_dll_main(e, reason, reserved)) {
                 ShzDebugLine("ntdll: DllMain(DLL_PROCESS_ATTACH) failed\n");
                 NtTerminateProcess(CURRENT_PROCESS, (NTSTATUS)0xC0000142);       /* STATUS_DLL_INIT_FAILED */
             }
         }
     }
-    if (reason == DLL_PROCESS_ATTACH) {                       /* executable TLS callbacks run after the DLLs */
+    if (reason == DLL_PROCESS_ATTACH && executable_tls) {    /* executable TLS callbacks run once at startup */
         run_tls_callbacks(PEB_IMAGE_BASE(shz_peb()), reason, reserved);
     } else if (reason == DLL_PROCESS_DETACH) {                /* reverse order */
         for (l = head->Blink; l != head; l = l->Blink) {
             SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InInitializationOrderLinks);
+            if (e->Flags & SHZ_LDR_DETACH_CALLED) continue;
+            e->Flags |= SHZ_LDR_DETACH_CALLED;
             run_tls_callbacks(e->DllBase, reason, reserved);
             call_dll_main(e, reason, reserved);
         }
     }
 }
+
+void ShzRunInitRoutines(int reason, void *reserved) { run_init_routines(reason, reserved, 1); }
 
 void ShzRunThreadAttach(int reason)
 {
@@ -746,6 +757,7 @@ void ShzRunThreadAttach(int reason)
     for (l = reason == DLL_THREAD_ATTACH ? head->Flink : head->Blink; l != head;
          l = reason == DLL_THREAD_ATTACH ? l->Flink : l->Blink) {
         SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InInitializationOrderLinks);
+        if (e->Flags & SHZ_LDR_RETIRING) continue;
         run_tls_callbacks(e->DllBase, reason, 0);
         call_dll_main(e, reason, 0);
     }
@@ -863,21 +875,22 @@ SHZ_EXPORT NTSTATUS NTAPI LdrLoadDll(PWSTR path, PULONG flags, SHZ_UNICODE_STRIN
     /* search order, loader lock: ldr_search.c. `path` carries LoadLibraryExW flags or a search path (see there). */
     extern NTSTATUS ShzLdrLoadImage(PWSTR, SHZ_UNICODE_STRING *, ULONG64 *);
     extern void ShzLoaderLock(void), ShzLoaderUnlock(void);
-    extern void ShzNotifyLoaded(LIST_ENTRY *);
+    extern void ShzNotifyLoaded(LIST_ENTRY *, LIST_ENTRY *);
     ULONG64 base = 0;
     NTSTATUS st;
-    SHZ_LDR_ENTRY *e;
     LIST_ENTRY *tail_before;
     (void)flags;
     ShzLoaderLock();
-    e = find_entry_by_name(name);
-    if (e) { ++e->LoadCount; *handle = e->DllBase; ShzLoaderUnlock(); return STATUS_SUCCESS; }   /* already loaded */
     tail_before = PEB_LDR(shz_peb())->InLoadOrderModuleList.Blink;
     st = ShzLdrLoadImage(path, name, &base);
     if (!st) {
+        /* Capture the actual newly published range before DllMain can retire
+         * the unrelated old tail or recursively append its own notified batch. */
+        LIST_ENTRY *first_loaded = tail_before->Flink;
+        LIST_ENTRY *last_loaded = PEB_LDR(shz_peb())->InLoadOrderModuleList.Blink;
         *handle = (PVOID)(uintptr_t)base;
-        ShzRunInitRoutines(DLL_PROCESS_ATTACH, 0);                                 /* only entries still marked NEEDS_INIT */
-        ShzNotifyLoaded(tail_before);                                              /* LdrRegisterDllNotification callbacks */
+        run_init_routines(DLL_PROCESS_ATTACH, 0, 0);                              /* pending DLLs; no repeated executable TLS */
+        ShzNotifyLoaded(first_loaded, last_loaded);                              /* exactly this mapped batch */
     }
     ShzLoaderUnlock();
     if (st) return st;
@@ -886,23 +899,11 @@ SHZ_EXPORT NTSTATUS NTAPI LdrLoadDll(PWSTR path, PULONG flags, SHZ_UNICODE_STRIN
 
 #define LDR_PINNED 0xFFFFu                                  /* LoadCount of a pinned module: never released */
 
-SHZ_EXPORT NTSTATUS NTAPI LdrUnloadDll(PVOID handle)
-{
-    /* FreeLibrary drops the reference count; the image stays mapped (documented limitation). A pinned module keeps its count. */
-    SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
-    LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
-    for (l = head->Flink; l != head; l = l->Flink) {
-        SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
-        if (e->DllBase == handle) { if (e->LoadCount && e->LoadCount != LDR_PINNED) --e->LoadCount; return STATUS_SUCCESS; }
-    }
-    return STATUS_INVALID_PARAMETER;
-}
 
 /* The unload event trace: the ring of RTL_UNLOAD_EVENT_TRACE records {BaseAddress, SizeOfImage, Sequence, TimeDateStamp,
  * CheckSum, ImageName[32], Version[2]} (104 bytes on x64, 64 entries) that debuggers and crash reporters (crashpad's
  * ProcessSnapshotWin) read, in this and in other processes at the same addresses (ntdll has one base in every process).
- * Kernel64 never unmaps an image (LdrUnloadDll above), so the ring stays empty: every record has BaseAddress 0, which
- * readers skip. */
+ * Records are captured while mapped and published only after the kernel commits a real image retirement. */
 #define UNLOAD_TRACE_ENTRIES 64
 typedef struct {
     PVOID BaseAddress;
@@ -924,23 +925,76 @@ SHZ_EXPORT VOID NTAPI RtlGetUnloadEventTraceEx(PULONG *element_size, PULONG *ele
 
 SHZ_EXPORT PVOID NTAPI RtlGetUnloadEventTrace(VOID) { return g_unload_trace; }
 
-/* Flags: LDR_ADDREF_DLL_PIN (1) pins the module for the life of the process, otherwise the reference count grows by one. */
-SHZ_EXPORT NTSTATUS NTAPI LdrAddRefDll(ULONG flags, PVOID handle)
+static ULONG g_unload_trace_sequence;
+
+static void capture_unload_trace(SHZ_LDR_ENTRY *e, SHZ_UNLOAD_EVENT_TRACE *record)
 {
-    SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
-    LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
-    if (flags & ~1u) return STATUS_INVALID_PARAMETER;
-    for (l = head->Flink; l != head; l = l->Flink) {
-        SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
-        if (e->DllBase != handle) continue;
-        if (flags & 1u) e->LoadCount = LDR_PINNED;
-        else if (e->LoadCount < LDR_PINNED - 1) __sync_add_and_fetch(&e->LoadCount, 1);
-        return STATUS_SUCCESS;
-    }
-    return STATUS_DLL_NOT_FOUND;
+    const IMAGE_DOS_HEADER *dos = e->DllBase;
+    const IMAGE_NT_HEADERS64 *nt = (const IMAGE_NT_HEADERS64 *)((const BYTE *)e->DllBase + dos->e_lfanew);
+    unsigned i;
+    memset(record, 0, sizeof *record);
+    record->BaseAddress = e->DllBase; record->SizeOfImage = e->SizeOfImage;
+    record->TimeDateStamp = nt->FileHeader.TimeDateStamp; record->CheckSum = nt->OptionalHeader.CheckSum;
+    for (i = 0; i < 31 && i < e->BaseDllName.Length / 2; ++i) record->ImageName[i] = e->BaseDllName.Buffer[i];
 }
 
-static int str_eq(const char *a, const char *b) { while (*a && *a == *b) { ++a; ++b; } return *a == *b; }
+SHZ_EXPORT NTSTATUS NTAPI LdrUnloadDll(PVOID handle)
+{
+    extern void ShzLoaderLock(void), ShzLoaderUnlock(void), ShzNotifyUnloaded(SHZ_LDR_ENTRY *);
+    shz_ldr_retire_buffer *buffer;
+    SHZ_UNLOAD_EVENT_TRACE *records;
+    NTSTATUS st;
+    ULONG i;
+    /* The fixed protocol bound is explicit; no callbacks run after a failed
+     * prepare. Callback records and shared PEB entry storage outlive unmapping. */
+    buffer = RtlAllocateHeap(ShzProcessHeap(), 0, sizeof *buffer + SHZ_LDR_RETIRE_MAX * sizeof *buffer->Entries);
+    records = RtlAllocateHeap(ShzProcessHeap(), 0, SHZ_LDR_RETIRE_MAX * sizeof *records);
+    if (!buffer || !records) {
+        if (buffer) RtlFreeHeap(ShzProcessHeap(), 0, buffer);
+        if (records) RtlFreeHeap(ShzProcessHeap(), 0, records);
+        return STATUS_NO_MEMORY;
+    }
+    ShzLoaderLock();
+    st = NtShzLoaderControl(SHZ_LDR_PREPARE, handle, buffer, SHZ_LDR_RETIRE_MAX);
+    if (!st) {
+        for (i = 0; i < buffer->Count; ++i)
+            ((SHZ_LDR_ENTRY *)(ULONG_PTR)buffer->Entries[i])->Flags |= SHZ_LDR_RETIRING;
+        for (i = 0; i < buffer->Count; ++i) {
+            SHZ_LDR_ENTRY *e = (SHZ_LDR_ENTRY *)(ULONG_PTR)buffer->Entries[i];
+            capture_unload_trace(e, &records[i]);
+            /* Static TLS retirement was rejected by the actual kernel. All
+             * selected images stay mapped through every detach callback. */
+            if (!(e->Flags & (SHZ_LDR_NEEDS_INIT | SHZ_LDR_DETACH_CALLED))) {
+                e->Flags |= SHZ_LDR_DETACH_CALLED;
+                call_dll_main(e, DLL_PROCESS_DETACH, 0);
+            }
+            ShzNotifyUnloaded(e);
+        }
+        if (buffer->Count) st = NtShzLoaderCommit(buffer->Token);
+        if (!st) for (i = 0; i < buffer->Count; ++i) {
+            ULONG sequence = ++g_unload_trace_sequence;
+            records[i].Sequence = sequence;
+            g_unload_trace[(sequence - 1) % UNLOAD_TRACE_ENTRIES] = records[i];
+        }
+    }
+    ShzLoaderUnlock();
+    RtlFreeHeap(ShzProcessHeap(), 0, records);
+    RtlFreeHeap(ShzProcessHeap(), 0, buffer);
+    return st;
+}
+
+/* Flags: LDR_ADDREF_DLL_PIN (1) pins for the process lifetime. Kernel graph
+ * references are authoritative; the published LoadCount mirrors their value. */
+SHZ_EXPORT NTSTATUS NTAPI LdrAddRefDll(ULONG flags, PVOID handle)
+{
+    extern void ShzLoaderLock(void), ShzLoaderUnlock(void);
+    NTSTATUS st;
+    if (flags & ~1u) return STATUS_INVALID_PARAMETER;
+    ShzLoaderLock();
+    st = NtShzLoaderControl(flags & 1u ? SHZ_LDR_PIN : SHZ_LDR_ADDREF, handle, 0, 0);
+    ShzLoaderUnlock();
+    return st;
+}
 
 SHZ_EXPORT NTSTATUS NTAPI LdrGetProcedureAddress(PVOID module, const void *name_or_null, ULONG ordinal, PVOID *address)
 {
@@ -963,13 +1017,17 @@ SHZ_EXPORT NTSTATUS NTAPI LdrGetProcedureAddress(PVOID module, const void *name_
     if (name_or_null) {
         const SHZ_UNICODE_STRING *dummy = 0; (void)dummy;
         const struct { USHORT Length, MaximumLength; PCHAR Buffer; } *as = name_or_null;         /* ANSI_STRING */
-        char tmp[128];
         USHORT i;
         DWORD k;
-        for (i = 0; i < as->Length && i < 127; ++i) tmp[i] = as->Buffer[i];
-        tmp[i] = 0;
-        for (k = 0; k < ex->NumberOfNames; ++k)
-            if (str_eq((const char *)(base + names[k]), tmp)) { idx = ords[k]; goto found; }
+        if (as->Length && !as->Buffer) return STATUS_INVALID_PARAMETER;
+        /* ANSI_STRING is counted and need not have a terminator. Compare its
+         * whole length; a matching prefix is not the requested export. */
+        for (k = 0; k < ex->NumberOfNames; ++k) {
+            const char *candidate = (const char *)(base + names[k]);
+            for (i = 0; i < as->Length; ++i)
+                if (!candidate[i] || candidate[i] != as->Buffer[i]) break;
+            if (i == as->Length && !candidate[i]) { idx = ords[k]; goto found; }
+        }
         return STATUS_ENTRYPOINT_NOT_FOUND;
     } else {
         if (ordinal < ex->Base || ordinal - ex->Base >= ex->NumberOfFunctions) return STATUS_ORDINAL_NOT_FOUND;

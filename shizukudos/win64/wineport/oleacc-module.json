@@ -1,0 +1,7 @@
+{
+  "name": "oleacc",
+  "link": ["oleaut32", "ole32", "user32", "rpcrt4", "advapi32"],
+  "static": ["uuid"],
+  "sources": ["client.c", "main.c", "propservice.c", "window.c", "oleacc.rc", "oleacc_classes_p.c", "dlldata.c"],
+  "defines": ["-DENTRY_PREFIX=OLEACC_", "-DPROXY_DELEGATION", "-DWINE_REGISTER_DLL"]
+}

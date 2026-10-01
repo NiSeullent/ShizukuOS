@@ -55,36 +55,3 @@ wall 14 (TaskDialogIndirect):
 wall 18 (AHCI), VSCodium, once in five runs:
   K64 ahci: read lba 556758 failed (-4) is=0 tfd=50 serr=0
   K64 ldr: vscodium.exe: page rva b58a000: read of 4096 bytes at file offset b588c00 failed
-
---- added with the second version of the report (tree of 2026-09-30 ~10:00-12:15 UTC; logs of the final runs are in the JSON files) ---
-
-wall 17 (VSCodium, oleaut32 ordinal 161), final run:
-  [user VSCodium.exe pid 60] K32 trace: GetProcAddress miss: oleaut32.dll!0xa1
-  K64 exc: pid 60 tid 64 first-chance 80000003 at vscodium.exe+55f884a (0 0) rsp 7ffffffdf2a0
-  (e1_gaps.json: oleaut32 "#161", delay_images ["vscode:VSCodium.exe"], load_time_images ["vscode:msalruntime.dll"])
-
-wall 19 (dxgi absent), in-process GPU run, before 0003:
-  K64 ldr: dxcore.dll not loaded: LoadLibrary needs dxcore.dll: file not found [c0000135]
-  K64 ldr: dxgi.dll not loaded: LoadLibrary needs dxgi.dll: DLL not found [c0000135]
-  K64 exc: pid 60 tid 156 first-chance 80000003 at electron.exe+6a1328a (0 0) rsp 7ffffe07f220
-
-wall 20 (oleacc), with 0003 minus oleacc/uxtheme:
-  K64 ldr: oleacc.dll not loaded: LoadLibrary needs oleacc.dll: DLL not found [c0000135]
-  K64 exc: pid 60 tid 64 first-chance 80000003 at electron.exe+6a1328a (0 0) rsp 7ffffffdc140
-  [user electron.exe pid 60] K32 trace: TerminateProcess(self) code=0xffff7003 caller=0x7ff6c779eec9 image=0x7ff6c0310000 rva=0x748eec9
-
-wall 22 (ffmpeg, then vk_swiftshader):
-  K64 ldr: ffmpeg.dll not loaded: ffmpeg.dll needs KERNEL32.dll!HeapQueryInformation: not exported by the DLL [c0000135 -> c0000139]
-  K64 ldr: vk_swiftshader.dll not loaded: vk_swiftshader.dll needs KERNEL32.dll!ConvertFiberToThread: not exported by the DLL [c0000139]
-
-wall 21 (GPU process), final run:
-  [win64 electron.exe pid 464] [464:0930/...:ERROR:components\viz\service\display_embedder\output_device_backing.cc:140] CreateDXGIFactory1 failed: ... (0x887A0004)
-  K64 exc: pid 464 tid 520 first-chance 80000003 at electron.exe+3796a67 (0 0) rsp 7ffffee4e710
-
-wall 12 (stdout), final run:
-  [win64 electron.exe pid 60] SHZ-E1 main: stdout stream error EPIPE (reported, not fatal)
-  [win64 electron.exe pid 60] SHZ-E1-MARKER electron-min 42
-
-wall 23 (directory race):
-  K64 disk: create Code Cache in e1ud failed (-9)
-  [user electron.exe pid 60] [60:0930/100950.825:ERROR:net\disk_cache\simple\simple_backend_impl.cc:81] Failed to create directory: D:\e1ud\Code Cache\wasm

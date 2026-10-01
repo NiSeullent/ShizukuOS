@@ -11,6 +11,8 @@
  */
 #include "k32_ipc.h"
 
+int k32_console_handle(HANDLE h, int *kind);
+
 #define NT_FILE_OPEN 1u
 #define NT_FILE_CREATE 2u
 #define NT_FILE_OPEN_IF 3u
@@ -80,6 +82,7 @@ K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECU
     }
     if (is_console_name(name, "CONOUT$")) name = L"\\??\\CONOUT$";
     else if (is_console_name(name, "CONIN$")) name = L"\\??\\CONIN$";
+    else if (is_console_name(name, "NUL") || is_console_name(name, "NUL:") || is_console_name(name, "\\\\.\\NUL")) name = L"\\??\\NUL";
     st = to_nt(name, nt, 320);
     if (st) { k32_nt_error(st); return INVALID_HANDLE_VALUE; }
     if (flags & FILE_FLAG_DELETE_ON_CLOSE) opts |= NT_OPT_DELETE_ON_CLOSE;
@@ -171,7 +174,10 @@ K32API BOOL WINAPI WriteFile(HANDLE h, LPCVOID buf, DWORD len, LPDWORD done, LPO
     if (done && !ov) *done = 0;
     ok = rw(h, (void *)buf, len, ov ? done : &n, ov, 1);
     if (!ov && done) *done = n;
-    if (ok && !ov && is_std_output(h) && k32_console_attached()) k32_console_track(buf, n);   /* console screen buffer model */
+    if (ok && !ov && k32_console_attached() && GetFileType(h) == FILE_TYPE_CHAR) {
+        int slot;
+        if (k32_console_handle(h, &slot) && slot == 1) k32_console_track(buf, n);
+    }   /* console screen buffer model */
     return ok;
 }
 
@@ -263,7 +269,7 @@ K32API DWORD WINAPI GetFileType(HANDLE h)
     shz_set_last_error(0);
     switch (dev[0]) {
     case 0x11: case 0x12: return FILE_TYPE_PIPE;               /* named pipes, sockets (AFD) */
-    case 0x50: return FILE_TYPE_CHAR;                          /* console */
+    case 0x50: case 0x15: return FILE_TYPE_CHAR;               /* console, NUL */
     default: return FILE_TYPE_DISK;
     }
 }
@@ -400,9 +406,14 @@ K32API HANDLE WINAPI CreateNamedPipeW(LPCWSTR name, DWORD open_mode, DWORD pipe_
     ACCESS_MASK access = SYNCHRONIZE | FILE_READ_ATTRIBUTES;
     ULONG share = 0, n, i;
     NTSTATUS st;
-    for (i = 0; pfx[i]; ++i) if (!name || (name[i] | (i >= 3 ? 32 : 0)) != (pfx[i] | (i >= 3 ? 32 : 0))) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
+    /* "\\.\pipe\" or the verbatim form "\\?\pipe\" (libuv names its stdio pipes \\?\pipe\uv\<id>; Windows accepts both) */
+    for (i = 0; pfx[i]; ++i)
+        if (!name || !(name[i] == pfx[i] || (i == 2 && name[i] == '?') || (i >= 3 && (name[i] | 32) == (pfx[i] | 32)))) {
+            shz_set_last_error(ERROR_INVALID_NAME);
+            return INVALID_HANDLE_VALUE;
+        }
     n = (ULONG)wl(name);
-    if (n - 9 == 0 || n + 1 > 290) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
+    if (n <= 8 || n + 1 > 290) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
     if (!max_inst || max_inst > PIPE_UNLIMITED_INSTANCES || !(open_mode & PIPE_ACCESS_DUPLEX) ||
         (pipe_mode & ~(DWORD)(PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS)) ||
         ((pipe_mode & PIPE_READMODE_MESSAGE) && !(pipe_mode & PIPE_TYPE_MESSAGE))) {
