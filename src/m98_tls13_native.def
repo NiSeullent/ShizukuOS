@@ -1,0 +1,8 @@
+LIBRARY M98NET.DLL
+EXPORTS
+ m98_net_open
+ m98_net_write
+ m98_net_read
+ m98_net_shutdown
+ m98_net_close
+ m98_net_info
