@@ -286,3 +286,59 @@ with observed peak585,884. The result preserves all native Windows loading,
 provider execution, engine-link, credentials, TLS/network, OS registration,
 Kernel64, application and ISO claims as false. The existing disabled
 `native_loader --providers` policy remains unchanged.
+
+## Next scoped step: retain actual build artifacts for the native owner
+
+The successful fourth run has zero retained Actions artifacts. Its historical
+binary hashes cannot substitute for accessible, source-bound bytes. A fresh
+hosted build will repeat the unchanged 14-source proof and, on an explicitly
+selected workflow-dispatch retention option, seal an exact handoff allowlist.
+This step supports later Windows98 loading; it does not change the native
+loader policy, provider engine, DOS/VMM owner or official ISO/site publisher.
+
+The root owns workflow and plan changes. The modern-app agent owns only the
+new `seal_native_handoff_6970.py`; coordination and disk agents independently
+review envelope/resource boundaries. The closed build receipt is immutable.
+The sealer must verify its successful verdict, exact reported revision and
+scope flags, current source pins, both actual PE hashes and all selected link
+scripts before producing a bounded manifest and exact upload paths. No whole
+directory glob, Windows media, prerequisites, app binary or private VM path
+belongs in this handoff. Source/licence files are explicit committed paths.
+
+Reuse the repository's existing pinned
+[upload-artifact action](https://raw.githubusercontent.com/actions/upload-artifact/ea165f8d65b6e75b540449e92b4886f43607fa02/README.md),
+with a unique run/attempt name, overwrite disabled, missing files as errors,
+hidden files excluded and short retention. Artifact ID/digest and API
+source/size/expiry must be recorded. The recipient must admit its own fresh
+binary working space and verify both archive and inner byte hashes. The NAS
+6970 evidence lane excludes these compiler binaries regardless of their size.
+
+The sealer's bounded manifest is counted after the original closed build
+receipt; it must not relabel that receipt's original output accounting. The
+upload action has a separate runtime/resource scope. Its observed pre/post
+free-space and growth checks do not establish a filesystem quota, continuous
+minimum-free guarantee, transient peak measurement or full action attestation.
+No local compiler, helper execution, VM or artifact download is required to
+prepare and review these source changes. Actual artifact retention remains
+unverified until a fresh selected hosted run and independent API/log review.
+
+The reviewed sealer source is 36,712 B SHA256
+728535d641874a9b30182cf77b68bd39a207615ae8b12282f9f9b98e4a192c07.
+Both hosted calls execute that exact checked source buffer and retain its FD
+through the call. The sealer compares each held source with its committed
+HEAD blob through a separate bounded read-only Git stream (2 MiB per blob,
+16 MiB aggregate, 30 seconds per query); this is not the closed build's
+256 KiB capture budget. Git leaders retain WNOWAIT ownership until pipe EOF
+and owned-group cleanup/reaping on success or failure.
+
+Creation permits only the runner's external canonical command-output file,
+excludes all held input inodes before append, and never rewrites an original
+source or closed result. Seven hosted rejection controls include a source-path
+command-output case; symlink/hardlink controls are metadata models only.
+Upload requires actual successful creation and explicit dispatch selection.
+Read-only post-upload verification requires the original creation manifest
+SHA256 and repeats the same 24-path source option. Separate upload boundary
+observations admit 20 GiB plus 64 MiB and bound observed net growth to 64 MiB;
+they do not measure transient upload storage or hold the sealer's input FDs
+across the upload action. API archive and inner-file verification remains
+required before another chat adopts the artifact.

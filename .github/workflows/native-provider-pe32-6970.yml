@@ -15,11 +15,18 @@ name: Native provider PE32 and SDK ABI build
       - ntwin32/legacy_provider_bridge/probe.c
       - ntwin32/legacy_provider_bridge/build.py
       - ntwin32/legacy_provider_bridge/pe_link_script_6970.py
+      - ntwin32/legacy_provider_bridge/seal_native_handoff_6970.py
       - tools/build_npp_prerequisites.py
       - benchmarks/win98se-ko-oem-native-exports-v1.json
       - ntwin32/secure_transport/i486_gate.py
       - ntwin32/secure_transport/i486_gate_test.py
   workflow_dispatch:
+    inputs:
+      retain_native_handoff:
+        description: Retain verified project PE32 files and their exact source/proof handoff
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -298,7 +305,8 @@ jobs:
                           'os_tls_provider_verified', 'os_registration_verified',
                           'kernel64_backend_verified', 'application_compatibility_verified'):
                   assert result[key] is False
-          # Diagnostics were produced inside the counted build root; never upload binaries/media.
+          # Print counted diagnostics here. The separate opt-in handoff below
+          # retains only explicit source-built project files, never Windows media.
           captured = 0
           for capture in sorted([*proof.glob('*.stdout'), *proof.glob('*.stderr')]):
               assert not capture.is_symlink()
@@ -312,4 +320,136 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
               stream.write(f"Native provider build verdict: {result['result']}\n\n")
               stream.write('Actual PE32/SDK ABI/linked instruction build proof only; Windows loading, credentials, TLS1.3, Kernel64 forwarding, applications and final ISO remain unverified.\n')
+          PYTHON
+
+      - name: Seal the explicit source and PE32 handoff
+        id: native_handoff_seal
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.retain_native_handoff }}
+        timeout-minutes: 3
+        run: |
+          python3 -B - "$PMA_PROVIDER_PE32_PROOF" "$GITHUB_SHA" <<'PYTHON'
+          import hashlib, os, stat, sys
+          from pathlib import Path
+          path = Path.cwd() / 'ntwin32/legacy_provider_bridge/seal_native_handoff_6970.py'
+          expected = '728535d641874a9b30182cf77b68bd39a207615ae8b12282f9f9b98e4a192c07'
+          identity = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_uid,
+                                   item.st_gid, item.st_nlink, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+          with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
+              initial = os.fstat(source.fileno())
+              assert stat.S_ISREG(initial.st_mode) and initial.st_nlink == 1 and initial.st_size <= 65536
+              raw = source.read(65537)
+              assert hashlib.sha256(raw).hexdigest() == expected
+              sys.argv = [str(path), '--proof-root', sys.argv[1], '--expected-head', sys.argv[2],
+                          '--retain', '--include-sources']
+              try:
+                  exec(compile(raw, str(path), 'exec'), {'__name__': '__main__', '__file__': str(path)})
+              finally:
+                  source.seek(0)
+                  final = os.fstat(source.fileno())
+                  assert identity(initial) == identity(final) == identity(path.stat(follow_symlinks=False))
+                  assert hashlib.sha256(source.read(65537)).hexdigest() == expected
+          PYTHON
+          python3 -B - <<'PYTHON'
+          import json, os, shutil
+          from pathlib import Path
+          root = Path.cwd()
+          reserve, budget = 20 * 1024**3, 64 * 1024**2
+          free = shutil.disk_usage(root).free
+          assert free >= reserve + budget
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+              stream.write(f'upload_free_before={free}\n')
+          print(json.dumps({'schema': 'native-handoff-upload-observation-v1', 'phase': 'before-upload',
+                            'available_bytes': free, 'reserve_bytes': reserve,
+                            'observed_growth_limit_bytes': budget, 'filesystem_quota_verified': False,
+                            'all_transient_peaks_observed': False}, sort_keys=True))
+          PYTHON
+
+      - name: Retain only the sealed explicit handoff files
+        id: native_handoff_upload
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.retain_native_handoff && steps.native_handoff_seal.outputs.handoff_result == 'PASS_HANDOFF_ENVELOPE_ONLY' }}
+        timeout-minutes: 3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-provider-pe32-6970-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.native_handoff_seal.outputs.handoff_paths }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Revalidate the retained handoff and record observed upload scope
+        if: ${{ always() && steps.native_handoff_seal.outcome == 'success' && steps.native_handoff_upload.outcome == 'success' }}
+        timeout-minutes: 3
+        env:
+          PMA_HANDOFF_MANIFEST_SHA256: ${{ steps.native_handoff_seal.outputs.handoff_manifest_sha256 }}
+          PMA_HANDOFF_UPLOAD_FREE_BEFORE: ${{ steps.native_handoff_seal.outputs.upload_free_before }}
+          PMA_HANDOFF_ARTIFACT_ID: ${{ steps.native_handoff_upload.outputs.artifact-id }}
+          PMA_HANDOFF_ARTIFACT_URL: ${{ steps.native_handoff_upload.outputs.artifact-url }}
+          PMA_HANDOFF_ARTIFACT_SHA256: ${{ steps.native_handoff_upload.outputs.artifact-digest }}
+        run: |
+          python3 -B - "$PMA_PROVIDER_PE32_PROOF" "$GITHUB_SHA" "$PMA_HANDOFF_MANIFEST_SHA256" <<'PYTHON'
+          import hashlib, os, stat, sys
+          from pathlib import Path
+          path = Path.cwd() / 'ntwin32/legacy_provider_bridge/seal_native_handoff_6970.py'
+          expected = '728535d641874a9b30182cf77b68bd39a207615ae8b12282f9f9b98e4a192c07'
+          identity = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_uid,
+                                   item.st_gid, item.st_nlink, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+          with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as source:
+              initial = os.fstat(source.fileno())
+              assert stat.S_ISREG(initial.st_mode) and initial.st_nlink == 1 and initial.st_size <= 65536
+              raw = source.read(65537)
+              assert hashlib.sha256(raw).hexdigest() == expected
+              sys.argv = [str(path), '--proof-root', sys.argv[1], '--expected-head', sys.argv[2],
+                          '--verify-existing', '--expected-manifest-sha256', sys.argv[3], '--include-sources']
+              try:
+                  exec(compile(raw, str(path), 'exec'), {'__name__': '__main__', '__file__': str(path)})
+              finally:
+                  source.seek(0)
+                  final = os.fstat(source.fileno())
+                  assert identity(initial) == identity(final) == identity(path.stat(follow_symlinks=False))
+                  assert hashlib.sha256(source.read(65537)).hexdigest() == expected
+          PYTHON
+          python3 -B - <<'PYTHON'
+          import hashlib, json, os, re, shutil, stat
+          from pathlib import Path
+          root = Path.cwd()
+          before = int(os.environ['PMA_HANDOFF_UPLOAD_FREE_BEFORE'])
+          free = shutil.disk_usage(root).free
+          reserve, budget = 20 * 1024**3, 64 * 1024**2
+          assert free >= reserve and max(0, before-free) <= budget
+          artifact_id = os.environ['PMA_HANDOFF_ARTIFACT_ID']
+          digest = os.environ['PMA_HANDOFF_ARTIFACT_SHA256']
+          assert re.fullmatch(r'[1-9][0-9]*', artifact_id)
+          assert re.fullmatch(r'[0-9a-f]{64}', digest)
+          expected_url = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}/artifacts/{artifact_id}"
+          assert os.environ['PMA_HANDOFF_ARTIFACT_URL'] == expected_url
+          manifest = Path(os.environ['PMA_PROVIDER_PE32_PROOF']) / 'native-handoff-6970.json'
+          identity = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_uid,
+                                   item.st_gid, item.st_nlink, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+          with os.fdopen(os.open(manifest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
+              info = os.fstat(stream.fileno())
+              assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= 16384
+              assert identity(info) == identity(manifest.stat(follow_symlinks=False))
+              raw = stream.read(16385)
+              assert len(raw) <= 16384
+              assert identity(info) == identity(os.fstat(stream.fileno())) == identity(manifest.stat(follow_symlinks=False))
+          assert hashlib.sha256(raw).hexdigest() == os.environ['PMA_HANDOFF_MANIFEST_SHA256']
+          print('Handoff manifest SHA256:', hashlib.sha256(raw).hexdigest())
+          print(raw.decode('utf-8'), end='')
+          observation = {'schema': 'native-handoff-upload-observation-v1', 'phase': 'after-upload',
+                         'head': os.environ['GITHUB_SHA'], 'artifact_id': artifact_id,
+                         'artifact_url': expected_url, 'artifact_sha256': digest,
+                         'available_before_bytes': before, 'available_after_bytes': free,
+                         'observed_net_growth_bytes': max(0, before-free),
+                         'reserve_bytes': reserve, 'observed_growth_limit_bytes': budget,
+                         'closed_build_receipt_rewritten': False,
+                         'filesystem_quota_verified': False, 'continuous_minimum_free_verified': False,
+                         'all_transient_peaks_observed': False, 'upload_action_lifetime_verified': False,
+                         'consumer_archive_verification_required': True,
+                         'native_execution_verified': False, 'windows98_integration_verified': False}
+          print(json.dumps(observation, sort_keys=True))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f'Explicit source/PE32 handoff artifact: {expected_url}\n\n')
+              stream.write('Post-upload envelope verified; recipient archive/inner-byte verification and actual Windows98 loading remain required. Upload storage checks are boundary observations only.\n')
           PYTHON

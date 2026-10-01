@@ -54,3 +54,12 @@ the SDK fixture, both links and 22 COFF controls. Its overall instruction
 gate remains FAIL because linker-generated CTOR/DTOR data occupies `.text`.
 The successor moves only those blocks through the actual selected linker
 script; no scanner waiver, PE rewrite or native/TLS acceptance is assigned.
+
+The next handoff step preserves that completed build's original scope. Root
+owns workflow/plan edits; modern-app owns only new
+`ntwin32/legacy_provider_bridge/seal_native_handoff_6970.py`; coordination and
+disk agents independently review exact envelope/resource boundaries. Existing
+14 build sources, guard, native/table/probe and SDK fixture stay frozen. A
+selected fresh hosted run may retain only source-bound project artifacts and
+explicit source/licence files. The private NAS evidence lane receives no
+compiler binary, and no peer loader/DOS/VMM/main/site/ISO file is assigned here.
