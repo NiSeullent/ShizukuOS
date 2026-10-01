@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Public edge acceptance from a GitHub hosted runner; no deployment or secrets.
+name: Public distribution acceptance
+
+'on':
+  workflow_dispatch:
+    inputs:
+      iso_path:
+        description: 'Optional public .iso path on https://m98.nyase.kr (supply all three ISO fields together)'
+        required: false
+        type: string
+      iso_sha256:
+        description: 'Exact lowercase SHA-256 from the publisher ISO receipt'
+        required: false
+        type: string
+      iso_bytes:
+        description: 'Exact decimal byte count from the publisher ISO receipt'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  outside-host:
+    name: Public DNS, HTTPS, Chrome homepage and optional complete ISO
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      CHECK_OUTPUT: ${{ runner.temp }}/public-distribution
+      PUBLIC_ISO_PATH: ${{ inputs.iso_path }}
+      PUBLIC_ISO_SHA256: ${{ inputs.iso_sha256 }}
+      PUBLIC_ISO_BYTES: ${{ inputs.iso_bytes }}
+    steps:
+      - name: Check out main without retaining credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Test the offline verifier contracts
+        run: |
+          python3 -B -m unittest discover -s tests -p test_verify_public_distribution.py \
+            2>&1 | tee "$RUNNER_TEMP/public-distribution-tests.log"
+
+      - name: Check public routes with the installed Chrome and optional ISO
+        # The Ubuntu hosted image must already include Google Chrome.
+        # No browser/npm download, certificate bypass, origin override or secret.
+        run: |
+          chrome_path="$(command -v google-chrome)"
+          verification_args=(--out "$CHECK_OUTPUT" --chrome "$chrome_path" --vantage github-hosted)
+          if [[ -n "$PUBLIC_ISO_PATH$PUBLIC_ISO_SHA256$PUBLIC_ISO_BYTES" ]]; then
+            if [[ -z "$PUBLIC_ISO_PATH" || -z "$PUBLIC_ISO_SHA256" || -z "$PUBLIC_ISO_BYTES" ]]; then
+              echo 'Supply ISO path, SHA-256 and bytes together.' >&2
+              exit 2
+            fi
+            verification_args+=(--iso-path "$PUBLIC_ISO_PATH" --iso-sha256 "$PUBLIC_ISO_SHA256" --iso-bytes "$PUBLIC_ISO_BYTES")
+          fi
+          python3 -B tools/verify_public_distribution.py "${verification_args[@]}" \
+            2>&1 | tee "$RUNNER_TEMP/public-distribution-console.log"
+
+      - name: Retain actual hosted evidence even when acceptance fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: public-distribution-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/public-distribution/
+            ${{ runner.temp }}/public-distribution-tests.log
+            ${{ runner.temp }}/public-distribution-console.log
+          if-no-files-found: error
+          retention-days: 30
