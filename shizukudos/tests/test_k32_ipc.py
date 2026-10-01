@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 
@@ -34,11 +35,13 @@ def main():
     out.mkdir(parents=True)
     source = ROOT / "shizukudos/kernel32/ipc.c"
     fixture = ROOT / "shizukudos/kernel32/tests/test_ipc_host.c"
-    # This fixture includes the complete original translation unit, not copied
-    # endpoint bodies. Preserve that input and its complete current project closure.
-    paths = [source, fixture, Path(__file__).resolve(), ROOT / "shizukudos/kernel32/k32.h",
-             ROOT / "shizukudos/kcommon/khc.h", ROOT / "shizukudos/abi/shz_abi.h", ROOT / "shizukudos/abi/shz_ipc.h"]
+    # Snapshot project headers before asking the compiler for its exact closure.
+    # A nested include changed during discovery must not acquire a later hash.
+    paths = [source, fixture, Path(__file__).resolve()]
     snapshots = {p: p.read_bytes() for p in paths}
+    initial_headers = {p.resolve(): p.read_bytes() for p in ROOT.rglob("*.h")
+                       if ".git" not in p.parts and "build" not in p.parts and
+                       p.resolve().is_relative_to(ROOT)}
     before = {str(p.relative_to(ROOT)): digest(b) for p, b in snapshots.items()}
     compilers = {cc: Path(shutil.which(cc)).resolve() for cc in ("gcc", "clang")}
     compiler_bytes = {cc: p.read_bytes() for cc, p in compilers.items()}
@@ -47,11 +50,17 @@ def main():
                              for cc, b in compiler_bytes.items()},
                "guest_executed": False, "production_translation_unit": str(source.relative_to(ROOT))}
     binaries = {}
+    helper_snapshots = {}
+    receipt["project_dependencies"] = {}
+    receipt["unbound_project_dependencies"] = []
+    receipt["dependency_scope"] = "Compiler -MM project closure for host GCC, host Clang sanitizers and freestanding i486; system headers excluded."
+    receipt["compiler_helpers_sha256"] = {}
 
     def stable():
         return all(p.exists() and p.read_bytes() == b for p, b in snapshots.items()) and all(
             compilers[cc].read_bytes() == b for cc, b in compiler_bytes.items()) and all(
-            p.exists() and p.read_bytes() == b for p, b in binaries.items())
+            p.exists() and p.read_bytes() == b for p, b in binaries.items()) and all(
+            p.exists() and p.read_bytes() == b for p, b in helper_snapshots.items())
 
     def run(command, name):
         if not stable():
@@ -72,6 +81,48 @@ def main():
         return result.returncode == 0
 
     passed = True
+    for cc, names in (("gcc", ("cc1", "collect2", "as", "ld")), ("clang", ("ld",))):
+        for name in names:
+            command = [compilers[cc], "-print-prog-name=" + name]
+            if not run(command, "helper-" + cc + "-" + name):
+                passed = False
+                continue
+            printed = receipt["runs"][-1]["output"].strip()
+            helper = Path(shutil.which(printed) or printed).resolve()
+            if not helper.is_file():
+                passed = False
+                continue
+            helper_snapshots[helper] = helper.read_bytes()
+            receipt["compiler_helpers_sha256"][str(helper)] = digest(helper_snapshots[helper])
+    variants = (("host_gcc", "gcc", ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror"], fixture),
+                ("host_clang_asan_ubsan", "clang", ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
+                                                  "-fsanitize=address,undefined", "-fno-omit-frame-pointer"], fixture),
+                ("i486", "gcc", K32_FLAGS, source))
+    for label, cc, flags, translation_unit in variants:
+        command = [compilers[cc], *flags, "-MM", "-MT", "k32-inputs", translation_unit]
+        if not run(command, "dependencies-" + label):
+            passed = False
+            continue
+        dependencies = set()
+        for line in receipt["runs"][-1]["output"].replace("\\\n", " ").splitlines():
+            _, separator, names = line.partition(":")
+            if not separator:
+                passed = False
+                continue
+            for name in shlex.split(names):
+                path = (ROOT / name).resolve()
+                if not path.is_relative_to(ROOT):
+                    continue
+                original = snapshots.get(path, initial_headers.get(path))
+                if original is None:
+                    receipt["unbound_project_dependencies"].append(str(path.relative_to(ROOT)))
+                    passed = False
+                    continue
+                snapshots[path] = original
+                before[str(path.relative_to(ROOT))] = digest(original)
+                dependencies.add(str(path.relative_to(ROOT)))
+        receipt["project_dependencies"][label] = sorted(dependencies)
+        passed = stable() and passed
     for cc, extra in (("gcc", []), ("clang", ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"])):
         exe = out / ("ipc-" + cc)
         command = [compilers[cc], "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", *extra, fixture, "-o", exe]
@@ -88,6 +139,8 @@ def main():
         binaries[obj] = obj.read_bytes()
         receipt["binaries_sha256"][obj.name] = digest(binaries[obj])
     receipt["source_compiler_binary_before_after_match"] = stable()
+    receipt["changed_project_inputs"] = [str(p.relative_to(ROOT)) for p, b in snapshots.items()
+                                          if not p.exists() or p.read_bytes() != b]
     passed = receipt["source_compiler_binary_before_after_match"] and passed
     receipt["status"] = "PASS_HOST_KERNEL32_IPC_RECEIVE_CONTRACT" if passed else "FAIL"
     (out / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
