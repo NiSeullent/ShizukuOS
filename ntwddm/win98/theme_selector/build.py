@@ -40,8 +40,9 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def native_gate(path):
+def native_gate(path, role="selector"):
     """Require genuine OEM imports, a legacy GUI entry and usable relocations."""
+    require(role in {"selector", "observer"}, "unknown native component role")
     inventory = json.loads((ROOT / SOURCES[-1]).read_text())["dlls"]
     with pefile.PE(str(path)) as pe:
         header = pe.OPTIONAL_HEADER
@@ -75,12 +76,31 @@ def native_gate(path):
             require(set(names) <= set(inventory[module]),
                     f"not present in OEM {module}: {set(names) - set(inventory[module])}")
             imports[module] = names
-        require(imports and "SetSysColors" in imports.get("USER32.DLL", []),
-                "actual system palette setter missing")
-        require("RegSetValueExA" in imports.get("ADVAPI32.DLL", [])
-                and "RegQueryValueExA" in imports.get("ADVAPI32.DLL", []),
-                "native persistent profile access missing")
-        return {"status": "PASS", "imports": imports, "native_execution_verified": False}
+        require(imports, "native imports missing")
+        if role == "selector":
+            require("SetSysColors" in imports.get("USER32.DLL", []),
+                    "actual system palette setter missing")
+            require("RegSetValueExA" in imports.get("ADVAPI32.DLL", [])
+                    and "RegQueryValueExA" in imports.get("ADVAPI32.DLL", []),
+                    "native persistent profile access missing")
+        else:
+            all_names = {name for names in imports.values() for name in names}
+            require(not all_names & {"SetSysColors", "RegSetValueExA", "RegSetValueExW",
+                    "RegSetValueA", "RegSetValueW", "RegCreateKeyA", "RegCreateKeyW",
+                    "RegCreateKeyExA", "RegCreateKeyExW", "RegDeleteValueA", "RegDeleteValueW",
+                    "RegDeleteKeyA", "RegDeleteKeyW", "GetProcAddress", "LoadLibraryA",
+                    "LoadLibraryW", "TerminateProcess"}, "observer imports a forbidden mutation/resolver")
+            require(set(imports.get("ADVAPI32.DLL", [])) <=
+                    {"RegOpenKeyExA", "RegQueryValueExA", "RegCloseKey"},
+                    "observer registry imports must be read-only")
+            require({"GetSysColor"} <= set(imports.get("USER32.DLL", []))
+                    and "GetPixel" in imports.get("GDI32.DLL", [])
+                    and "RegQueryValueExA" in imports.get("ADVAPI32.DLL", [])
+                    and {"CreateProcessA", "WaitForSingleObject", "GetExitCodeProcess"}
+                    <= set(imports.get("KERNEL32.DLL", [])),
+                    "independent observer palette/pixel/profile/child APIs missing")
+        return {"status": "PASS", "role": role, "imports": imports,
+                "native_execution_verified": False}
 
 
 def guard(directory=None, admission=False):

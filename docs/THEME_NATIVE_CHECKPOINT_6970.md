@@ -482,3 +482,51 @@ The dedicated optimizer independently confirmed 378,695,680 additional bytes
 of sharing across three immutable derived binary pairs, with zero deletions and
 unchanged whole-file hashes/inodes/lengths/mtimes. Earlier reclaim is excluded;
 subsequent shared-host free-space changes belong to other workstreams.
+
+## Independent global palette observer and two cold epochs
+
+The shared native build gate now distinguishes the palette selector from its
+independent observer. Four additional import/relocation regressions bring its
+actual passing count to eight. A fresh product build passed the same 139 host
+and 139 ASan/UBSan checks and produced the identical selector binary above.
+Its receipt is
+`build/win98-global-theme-selector/20261001T163426Z-f30fc76d/result.json`, SHA256
+`7d2edfec0e8d97d6e65c52f84b5201aea3d9b59dc2f7fbaee10dde538e59a642`.
+
+`ntwddm/win98/theme_global_probe/observer.c` independently reads all 25 native
+system colors, the complete profile and exact startup bytes. It creates an
+unrelated native witness window and owns only the selector child it launches.
+It requires real system-color broadcasts, repaint, native background pixels,
+normal child exit zero, and a final full readback after that exit. Temporary
+disabled buttons, unequal reads and pending repaint share a latched deadline;
+an expired stage cannot accept subsequently settled values. The observer's
+imports cannot mutate system colors or registry values, resolve dynamic code,
+or terminate a process.
+
+The actual observer compiler and OEM PE gate passed. Receipt:
+`build/win98-global-theme-observer/20261001T164450Z-89a8a48a/result.json`, SHA256
+`96c0b05de65224b6a0cfe82c5d350b2232a3023c4f1034295ac560a1799e7019`.
+`SHZOBS.EXE` is 37,208 bytes, SHA256
+`2d48d00faaddbe70e6c6f51c520e9ce49752071ac20a3f16b3fcde955e75ee35`.
+It has 46 native OEM imports and genuine i486 PE32 4.10/HIGHLOW relocations.
+There is no guest result for this binary yet.
+
+The new `tools/global_theme_trial.py` source uses one pinned private reflink
+for two distinct, fully stopped cold hardware epochs and keeps the original
+pre-injection COW baseline. Phase 1 is Classic baseline, ShizukuOS, Classic,
+ShizukuOS and normal close. Phase 2 must observe saved ShizukuOS restoration
+before launching a new selector child, then witness Classic return and normal
+close. Its exact four output roots include all logs and receipts; only the
+pinned private disk is excluded from the 16 MiB aggregate output budget. The
+20 GiB reserve and cumulative 256 MiB exclusive COW budget remain mandatory.
+This source is undergoing review; no cold epoch has executed. Observer self
+logs do not prove observer or automatic restoration process exit, and visible
+output and full-frame evidence remain separate incomplete gates.
+
+A separate completed range-sharing audit recovered exactly 99,532,800 bytes
+across three closed historical derived VM disks through 552 successful kernel
+comparisons. Full source and destination hashes and identities remain intact,
+with zero deletions. The unique frozen checkpoint is
+`/root/Win98-Modern-boot/build/disk-optimizer-6970-closed-ranges-20261001T1632/checkpoint.json`.
+This excludes the earlier 378,695,680-byte result and unrelated free-space
+changes. Native admission still requires a fresh full-budget space check.
