@@ -63,7 +63,7 @@ def source_hashes():
     directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native"]
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
-    paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
+    paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c", SHZ / "win64/pe_parse.h",
                   SHZ / "supervisor/src/font8x8_basic.h"])
     return {str(p.relative_to(REPO)): sha256_file(p) for p in sorted(paths)}
 
