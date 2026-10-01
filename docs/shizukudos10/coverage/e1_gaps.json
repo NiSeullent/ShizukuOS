@@ -1425,57 +1425,6 @@
   },
   {
    "owner": "K5",
-   "dll": "dwmapi.dll",
-   "fn": "DwmDefWindowProc",
-   "products": [
-    "electron",
-    "vscode"
-   ],
-   "load_time_images": [],
-   "delay_images": [
-    "electron:electron.exe",
-    "vscode:VSCodium.exe"
-   ],
-   "reason": "not exported by dwmapi.dll",
-   "electron_specific": false,
-   "node_hint": false
-  },
-  {
-   "owner": "K5",
-   "dll": "dwmapi.dll",
-   "fn": "DwmExtendFrameIntoClientArea",
-   "products": [
-    "electron",
-    "vscode"
-   ],
-   "load_time_images": [],
-   "delay_images": [
-    "electron:electron.exe",
-    "vscode:VSCodium.exe"
-   ],
-   "reason": "not exported by dwmapi.dll",
-   "electron_specific": false,
-   "node_hint": false
-  },
-  {
-   "owner": "K5",
-   "dll": "dwmapi.dll",
-   "fn": "DwmSetWindowAttribute",
-   "products": [
-    "electron",
-    "vscode"
-   ],
-   "load_time_images": [],
-   "delay_images": [
-    "electron:electron.exe",
-    "vscode:VSCodium.exe"
-   ],
-   "reason": "not exported by dwmapi.dll",
-   "electron_specific": false,
-   "node_hint": false
-  },
-  {
-   "owner": "K5",
    "dll": "dxgi.dll",
    "fn": "CreateDXGIFactory",
    "products": [
@@ -3846,5 +3795,5 @@
    "node_hint": false
   }
  ],
- "chromium_gap_count": 173
+ "chromium_gap_count": 170
 }

@@ -28,6 +28,14 @@ function die(code, line) {
   process.exit(code);
 }
 
+// A write error on stdout/stderr (EPIPE on a runtime whose stdio handle is not a working pipe) arrives as an 'error' event of the
+// stream, which Node turns into an uncaughtException: it would end the probe before the marker. Every line also goes through
+// process._rawDebug, so the error is reported and the run goes on.
+for (const name of ['stdout', 'stderr']) {
+  try {
+    process[name].on('error', (err) => raw('SHZ-E1 main: ' + name + ' stream error ' + (err && err.code ? err.code : err) + ' (reported, not fatal)'));
+  } catch (e) { raw('SHZ-E1 main: process.' + name + ' unavailable: ' + (e && e.message ? e.message : e)); }
+}
 process.on('uncaughtException', (err) => die(9, 'SHZ-E1 main: uncaughtException ' + (err && err.stack ? err.stack : err)));
 process.on('unhandledRejection', (err) => die(10, 'SHZ-E1 main: unhandledRejection ' + (err && err.stack ? err.stack : err)));
 
