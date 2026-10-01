@@ -82,12 +82,13 @@
 - [x] Repair the combined VxD copied-header conflict; independent 13-test approval.
 - [x] Bind actual shared font dependencies to Supervisor compile receipts; independent mutation-control approval.
 - [x] Converge canonical2bde source/helper closure in3efbc6f, preserve focused evidence;16 controls and real KVM11checks pass.
-- [x] Repair eager/lazy empty-relocation DLL collision in d08e1cb; independently approved production-path host251checks/compiler. Full current-source guest remains pending.
+- [x] Repair eager/lazy empty-relocation DLL collision in d08e1cb; independently approved production-path host251checks/compiler and actual archived WinMM execution.
 - [x] Import reviewed b9f170c scheduler, d461529 PMA service, 402f2cb GOP AUTO, 6dfc4b5 K32 deadlines, 97bafff bounded K32 IPC and merged compiler-derived VxD receipt closure.
 - [x] Run fresh `python3 -B shizukudos/kbuild.py` atd08e1cb (212stableinputs) and preserve the still-current105input source-bound Supervisor compile. These are compile/component evidence.
-- [ ] Admit a complete current-source native kernel guest after canonical useful-progress repair; latest fullguest retains two scheduler failures despite151normalapps.
+- [x] Import the independently reviewed four-file canonical644c94f finite aging grant; fresh212-input build, focused11-check/35-assertion guest and full standalone38/38 guest pass at the frozen fcb36a0 epoch.
+- [ ] Close the independent canonical arrival-boundary failure: its fresh same-source guest waits5 ticks for a remaining4-tick grant. Retain both receipts; canonical163f owns diagnosis and correction.
 - [x] Run host ABI/VxD/display/kernel/firmware and production PMA service/ring gates; retain source hashes and actual scope.
-- [ ] Publish tested commit SHAs and blockers for peer integration.
+- [x] Publish tested commit SHAs, exact receipts and blockers in shared peer coordination mailboxes; continue exchange for subsequent units.
 
 ## Complete requested sequence
 
@@ -117,8 +118,9 @@ Full requirements remain active; a completed slice is not the final architecture
 - [ ] Assemble the final1.0.0 ISO using the project installer and frozen admitted production sources; validate artifact contents, exact checksums and actual intended boot/install paths. Private Microsoft media remains private.
 - [x] Refactor the official distribution website source into coherent bilingual download, installation, compatibility, development and real-execution pages, preserving all92 existing public paths and75 immutable artifacts. Source7050f3e; publication remains the separate gate below.
 - [x] Stage and inspect the frozen100-asset website in real Chrome; validate exact HTTP/download hashes, desktop/mobile layout, keyboard navigation, both48-frame viewers, browser game controls and no-JavaScript original PNG/JSON access.54 regression tests and independent source review pass; see status/site-ux-c957.md.
-- [ ] Deploy through the existing m98 nginx static release with scoped ownership/lock/current-release guards, preserving rollback and the separate legacy console. Verify the actual public domain and complete ISO download; GitHub remains source/patch only.
+- [x] Deploy the reviewed100-file static website through existing m98 nginx with both publication locks, exact source/current guards and preserved rollback/console. Actual normal headed Chrome verifies public HTTPS,100 body hashes and all five existing ZIP downloads; see status/site-ux-c957.md.
+- [ ] Publish and verify the complete final ISO download after production build, actual boot/install and native acceptance. Official ISO distribution remains m98.nyase.kr; GitHub remains source/patch only.
 
-The goal is still active. Final artifacts and web deployment remain required;
-passing native component tests does not complete or redefine it. Current
+The goal is still active. Final artifacts and native acceptance remain required;
+passing component tests and static website delivery do not complete it. Current
 implementation/evidence and open native failures are in INTEGRATION_STATUS.md.

@@ -26,13 +26,45 @@ specific implementation slices only.
 | Closed NTW64 handles | 8c51a72; root GCC/Clang ASan each 2162440 lifetime checks over 65528 create/release cycles, plus failure/deferred-close groups | Slots retire at generation exhaustion; transport mocked; no unlimited reuse claim |
 | Kernel32 publication | 8671fba; root 17 production checks in GCC/Clang ASan; fresh isolated KVM guest passes all nine original checks | Fresh updated v2 guest passes12 total checks/44preemptions/31ms wait/50ms sleep; standalone backend, not Windows 98/Supervisor/SMP |
 | Kernel32 guest provenance | 665792e imported; current receipts bind source/evaluator/build before/after hashes and immutable artifacts; root control regressions executed | Fresh v2 guest PASS, artifacts/receipt/36-source closure stable; 12 runner controls PASS; prior guest receipt remains historical |
-| Kernel64 PMA policy | b9f170c imported; narrow sampler86f52c1 preserves scheduler/timing gates; fresh root KVM11checks and canonical helper/fresh-output16controls pass | All three whole-guest failures remain; canonical peer refresh useful-work failure is distinct and still unresolved; no VMM/SMP acceptance |
-| PMA event/completion service | d461529 imported/independently production-reviewed; host GCC/Clang ASan3429 each; ABI GCC37764/ASan+TSan37716 each and2000 threaded exchanges pass | Original full guest FAIL sampler; next FAIL WinMM collision; latest FAIL two scheduler useful-progress checks with all151apps normal;16 PMA/48 legacy service checks pass in all; no native VMM delivery proof |
-| PE DLL collision successor | d08e1cb allows non-stripped empty-directory DLL fallback mapping; GCC/Clang ASan and independent reviewer each20cases251checks pass | Actual archived WinMM/T_GUI_STATUS now passes with all151apps in source-bound fullguest; two scheduler failures still reject whole38-check guest; no nativeWindows98 evidence |
-| Website preservation/refactor | Live immutable92-asset inventory audited; source57eebbe nine-asset preservation consumes exact live bytes and43 tests pass | 83b43cb independently approved and committed; full bilingual UX now implementing; browser preview, final ISO, actual deployment/public download pending; NAS/capacity and publication floors retained |
+| Kernel64 PMA policy | Reviewed644c94f four-file finite aging source imported as fcb36a0; fresh212-input four-profile build, focused11-check/35-assertion and full38/38 ROOT guests pass | Canonical same-source actual guest independently fails arrival wait5/remaining4; correction remains owner163f's lane. All earlier failed receipts preserved; no VMM/SMP acceptance |
+| PMA event/completion service | d461529 production-reviewed; host GCC/Clang ASan3429 each; ABI GCC37764/ASan+TSan37716 each and2000 threaded exchanges pass; ROOT full successor passes16PMA plus32legacy Win64 checks,48total | Actual standalone fixture/rings only; historical sampler/loader/scheduler failures retained; no native VMM delivery proof |
+| PE DLL collision successor | d08e1cb allows non-stripped empty-directory DLL fallback mapping; GCC/Clang ASan and independent reviewer each20cases251checks pass | Actual archived WinMM/T_GUI_STATUS passes with all151apps in source-bound full38/38 guest; no nativeWindows98 or ten-required-modern-app acceptance |
+| Website preservation/refactor/publication | Source7050f3e;54 tests and independent review;100 assets, both48-frame viewers, desktop/mobile/keyboard/games/noJS and5 actual ZIP downloads pass. New nginx current213716 and100 normal-headed public HTTPS body hashes verified | Final ISO and native proof not published; prior public headless403 retained; generic direct/headless access not inferred; NAS/large-artifact publication floors retained |
+| Partial NT priority projection | Unwired common helper supports35 non-realtime class/level combinations and Win32±15 ↔ NT±16 sentinels; GCC/Clang ASan each3456 checks and i486/x64 freestanding consumers pass with independent review | Runtime handle/rights/object-lifetime/API/init wiring remains pending; helper adds inventory input213 and does not change scheduling behavior |
 | DOS boundary audit | Pinned actual FreeDOS entry, EXEC, exit and reentry paths inspected; see status/dos-boundary-audit-c957.md | Executor/VMM callback prerequisites assigned to163f Windows/NT lead; an INT21 lock alone misses real transfers; actual DOS gate/boot pending |
 
-## Build and execution records
+## Latest frozen component and website evidence
+
+Full details are in `status/scheduler-integration-c957.md` and
+`status/site-ux-c957.md`. The frozen fcb36a0 four-profile build passed at
+21:25:29Z with212 sources and both build helpers stable. Full actual KVM guest
+`build/pma-c957-pma-bridge-aged-final/result.json` passed38/38 at21:30:00Z,
+216.49seconds/QEMU1/no timeout. It binds212 sources,8 direct inputs and5
+runner/helper identities. All151 historical fixture EXEs exit0/faulted0,
+35 scheduler assertions pass, and48 loopback checks comprise32 legacy Win64
+and16 PMA checks. Older descriptions of48 additional legacy checks were an
+overcount; raw receipts/logs remain unchanged.
+
+Canonical's separate actual guest with the same212 source/five helper
+identities fails the arrival boundary5/remaining4. Its modeled READY/BLOCKED
+coordinator control supports possible aged-thread fixture interference but
+does not close the natural guest failure. Both real guest receipts are
+retained. Owner163f handles the reviewed correction and fresh acceptance.
+
+The new unused NT projection header extends complete kbuild inventory to213;
+the212-input whole-kernel receipts remain historical at their frozen epoch.
+This helper has host/freestanding verification only and no existing consumer.
+
+Official static nginx current is `/srv/m98/releases/20261001T213716` with100
+files/5,181,666 bytes; previous152940 is preserved. Both publication locks,
+source/current guards and100 actual origin-body hashes pass. Normal headed
+Chrome153 subsequently verifies public HTTPS Korean/English pages, all100
+body hashes and five actual browser downloads with matching ZIP bytes/hashes.
+TLS validation stays enabled; no custom UA/proxy/host mapping was supplied.
+No ISO, native proof, private media, console or nginx configuration changes.
+Final ISO download and actual Windows98 acceptance remain pending.
+
+## Historical build and execution records
 
 Baseline four kernel profiles and baseline Supervisor compilation passed; their
 original outputs are preserved. The merged four-profile build at `743edf6`
@@ -77,14 +109,14 @@ fresh output and exact isa-debug-exit rc1 without timeout. Actual-runner RED
 reproduced old-output reuse and four abnormal-exit false positives;5 GREEN
 methods independently pass. Mock controls execute no guest. The fresh real
 combined bridge guest ended FAIL in `build/pma-c957-pma-bridge-final`:204.8s,
-38 checks, QEMU rc3. All16 PMA assertions,48 legacy service assertions and151
+38 checks, QEMU rc3. All16 PMA assertions,32 legacy service assertions and151
 ordinary app exits pass; the one sampler failure remains a failed whole guest.
 Its sources/artifacts/runner helper stability checks pass. Original logs and
 receipt are preserved. The independently reviewed sampler guard86f52c1 subsequently passed a full212-input four-profile build and fresh focused KVM11checks. That build is preserved at `build/pma-c957-kernels-86f52c1`; its K64 SHA is b9ef854980ff69f255e6d5f8ee569915c415812e858a6a3b2a003ca860debeb1 and K64S SHA25d060c6144d5caf72797156528daeffd700d0b1df350602af6e337e393a72b9.
 
-Its full bridge successor `build/pma-c957-pma-bridge-sampler-final` still failed:217.67s, QEMU rc3,38checks with three failures resulting from T_GUI_STATUS.EXE failing to load archived WinMM. All scheduler assertions,16 PMA/48 legacy service assertions and150 other apps pass in that historical failed guest. The archive DLL has stripping clear and relocation directory0/0 but preferred-base collision was treated as fixed-base. Narrow source successor d08e1cb has genuine RED/GREEN and independent host approval. Fresh four-profile compilation passed at2026-10-01T20:43:56Z with212exactcurrentinputs. K64 SHA71fb04d908344cda48b95c4d6d64373ea1e29cba7b3c482c35e56e2f4d065995; K64S SHAacc02413b8fb7b009780c99cda95d3c32160281c322f37fc7eea1aafd2482663; K32/K32S unchanged. Fresh focusedKVM11checks and16controls pass.
+Its full bridge successor `build/pma-c957-pma-bridge-sampler-final` still failed:217.67s, QEMU rc3,38checks with three failures resulting from T_GUI_STATUS.EXE failing to load archived WinMM. All scheduler assertions,16 PMA/32 legacy service assertions and150 other apps pass in that historical failed guest. The archive DLL has stripping clear and relocation directory0/0 but preferred-base collision was treated as fixed-base. Narrow source successor d08e1cb has genuine RED/GREEN and independent host approval. Fresh four-profile compilation passed at2026-10-01T20:43:56Z with212exactcurrentinputs. K64 SHA71fb04d908344cda48b95c4d6d64373ea1e29cba7b3c482c35e56e2f4d065995; K64S SHAacc02413b8fb7b009780c99cda95d3c32160281c322f37fc7eea1aafd2482663; K32/K32S unchanged. Fresh focusedKVM11checks and16controls pass.
 
-The actual full loader-successor guest `build/pma-c957-pma-bridge-ldr-final` is terminal FAIL:301.7s, QEMUrc3/no timeout. All151ordinaryapps exit0/faulted0 includingT_GUI_STATUS/archivedWinMM;16 PMA/48 legacy service assertions and sampler64/32,32/ready32 pass. Two actual PMA failures remain: zero useful work in the second low-priority phase and refreshupdates625199/first164/loops0. Source/artifact/helper gates pass; this reproduces the canonical useful-progress problem in ROOT. No threshold or gate was weakened and no blind rerun performed. Neither earlier whole-guest failure is relabeled.
+The actual full loader-successor guest `build/pma-c957-pma-bridge-ldr-final` is terminal FAIL:301.7s, QEMUrc3/no timeout. All151ordinaryapps exit0/faulted0 includingT_GUI_STATUS/archivedWinMM;16 PMA/32 legacy service assertions and sampler64/32,32/ready32 pass. Two actual PMA failures remain: zero useful work in the second low-priority phase and refreshupdates625199/first164/loops0. Source/artifact/helper gates pass; this reproduces the canonical useful-progress problem in ROOT. No threshold or gate was weakened and no blind rerun performed. Neither earlier whole-guest failure is relabeled.
 
 Canonical2bde Python source/helper provenance is consumed in3efbc6f, plus independently reviewed focused fresh-output preservation.16 controls and real fresh KVM11checks pass at `build/pma-c957-k64-helpers-{green,kvm}`; GCC/ClangASan K32host17checks each and two actual copied-header CLI controls pass. These bind their original sampler-only compiled epoch. The canonical peer refresh failure remains a distinct unresolved gate.
 
@@ -105,8 +137,16 @@ Actual Windows 98 boot on replacement DOS, positive VMM→PMA work/wait/result,
 VMM responsiveness, native SMP, per-process VGA/SVGA virtualization, complete
 DOS state serialization and modern driver/application acceptance remain open.
 Original-DOS controls, absent-peer VxD rejection, inventories and host or
-standalone component tests do not satisfy these gates. The full goal explicitly includes final1.0.0 ISO, a complete m98.nyase.kr website refactor and verified nginx/public delivery after actual native acceptance. Website source refactor7050f3e and frozen local browser verification are complete:100assets,54 regressions, both48-frame viewers and actual downloads pass; see status/site-ux-c957.md. No live release, ISO, shared main/origin, client-global configuration or private-media publication has been performed by this lane.
+standalone component tests do not satisfy these gates. The full goal includes
+final1.0.0 ISO, complete m98.nyase.kr refactor and verified nginx/public
+delivery. Website source7050f3e, frozen local browser verification and actual
+bounded static nginx/public delivery are complete; see status/site-ux-c957.md.
+No final ISO or private media was published. Shared source main/origin and
+client-global configuration remain unchanged by this lane.
 
-Actual public browser baseline at20:51UTC reached a valid-HTTPS Cloudflare security challenge (HTTP403), preserved in `output/playwright/public-baseline-challenge.png`. No TLS-ignore or challenge bypass was used. This proves neither public-page delivery nor final artifact download. Local reviewed-stage preview and later normal external delivery checks remain required.
+The earlier actual public headless browser baseline at20:51UTC reached a
+valid-HTTPS Cloudflare403 challenge, preserved unchanged. The later normal
+headed public delivery success is a separate receipt; final artifact download
+and general direct/headless access are not inferred from it.
 
 Fresh current-loader capability CLI report: `build/pma-c957-cap-receipt-ldr-final/capabilities.json`; all58currentprojecthashes rechecked,120/56/17 inventory, native/behavior flagsfalse. The prior report remains historical at its captured pre-loader source epoch.
