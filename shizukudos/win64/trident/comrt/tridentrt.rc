@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later
+ * tridentrt.dll resources: the strings Wine's dlls/oleaut32/vartype.c loads from its own module (hProxyDll, set to
+ * tridentrt.dll in ole.c) for BOOL <-> BSTR conversions. Copied from Wine's dlls/oleaut32/oleaut32.rc (LGPL-2.1+),
+ * identifiers from dlls/oleaut32/resource.h.
+ */
+#include "resource.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT
+
+STRINGTABLE
+{
+  IDS_TRUE  "True"
+  IDS_FALSE "False"
+  IDS_YES   "Yes"
+  IDS_NO    "No"
+  IDS_ON    "On"
+  IDS_OFF   "Off"
+}
