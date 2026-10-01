@@ -119,6 +119,15 @@ typedef struct { volatile int locked; thread_t *owner; thread_t *waiters; } kmut
 typedef struct { volatile int count; thread_t *waiters; } ksem_t;
 /* TS_NEW: allocated but still being initialised; never scheduled until thread_resume() (see start_thread_common). */
 enum { TS_FREE = 0, TS_READY = 1, TS_RUNNING = 2, TS_BLOCKED = 3, TS_ZOMBIE = 4, TS_NEW = 5 };
+#define SCHED_PRIORITY_LEVELS 32u
+#define SCHED_DEFAULT_PRIORITY 16u
+#define SCHED_MAX_QUANTUM_TICKS 16u
+#define SCHED_STARVATION_TICKS 32u
+typedef struct { uint32_t priority, quantum_ticks; uint64_t cpu_mask; } sched_policy_t;
+typedef struct {
+    uint64_t ticks, context_switches, preemptions, wakeups, timeouts;
+    uint32_t ready_threads, live_threads, zombie_threads, cpu_count;
+} sched_stats_t;
 struct thread {
     uint64_t rsp;                               /* saved kernel stack pointer */
     uint32_t id, state;
@@ -157,6 +166,12 @@ struct thread {
     uint32_t power_control, power_state;        /* SetThreadInformation(ThreadPowerThrottling) setting (no scheduler effect) */
     uint16_t *desc;                             /* SetThreadDescription text (UTF-16, kmalloc'd, desc_bytes long; 0 = none); freed with the thread */
     uint32_t desc_bytes;
+    /* Native UP scheduling policy, distinct from Windows VMM scheduling. The
+     * existing `next` remains exclusively a kernel semaphore/mutex wait link. */
+    thread_t *ready_prev, *ready_next;
+    uint64_t ready_since, ready_order, cpu_mask;
+    uint32_t sched_priority, quantum_ticks, quantum_left, ready_queued;
+    uint64_t max_ready_wait_ticks;              /* diagnostic: longest READY-to-dispatch residence */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
@@ -190,6 +205,15 @@ void sched_set_current_kstack(uint64_t top);
 void thread_block_current(void);                /* mark BLOCKED and switch away (caller holds irq off) */
 void thread_wake(thread_t *t);
 void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx);   /* every non-free slot, interrupts off */
+/* Higher numerical priority selects first. An aged FIFO head receives service
+ * after 32 ticks; with N competing ready threads and stable policies its next
+ * dispatch is bounded by 32 + (N + 1) * 16 eligible ticks. IRQ/IRQL deferral is
+ * outside that bound. CPU mask 1 is the only supported affinity (no APs yet).
+ * Policy updates are atomic and return -1 for invalid/dead/foreign TCBs. */
+int thread_set_sched_policy(thread_t *t, unsigned priority, unsigned quantum_ticks, uint64_t cpu_mask);
+int thread_get_sched_policy(thread_t *t, sched_policy_t *out);
+void sched_get_stats(sched_stats_t *out);         /* bounded IRQ-protected diagnostic snapshot */
+int sched_validate(void);                       /* bounded queue/state integrity diagnostic */
 #define KSTACK_BYTES 32768u
 
 /* ---- ipc64.c ---- */
