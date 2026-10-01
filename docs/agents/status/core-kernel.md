@@ -498,3 +498,91 @@ IF-enabled adversarial mixed-delivery FAIL receipts remain separate and intact.
 The final candidate is ready for independent source review and root's fresh
 four-profile build/full combined KVM checkpoint; those broader steps are not
 claimed complete by this focused component result. No shared index/commit action.
+
+## Reopened combined successor: grant-arrival coordinator contention
+
+Root's fresh canonical combined KVM run failed at the unchanged isolated grant
+arrival assertion: arrival READY residence 5 with remaining credit 4. All 151 app
+runs, W64 loopback 48 and PMA bridge 16 passed; the original natural refresh also
+passed (first 33, useful 1015770). Overall acceptance remains FAIL. Original
+`build/pma-integrated-native-successor-20261001/{serial.log,result.json}` and the
+root source/binary archive 94b4bb097de24b84a3db87a03b9eeb6d39a75a69d707ba88ad0bfc7c7669832b
+remain historical failure evidence. Earlier 37fd component passes do not replace it.
+
+The fixture's coordinator used `thread_join`, which keeps it READY. At low grant
+expiry it can be another aged head and receive its own four tick allocation
+before the newly READY high-priority arrival. The previously documented bound is
+additional deferral by one current grant, not a global arrival bound across
+other aged contenders. The supposedly isolated fixture did not enforce that
+precondition.
+
+Meaningful source and native controls preceded correction:
+
+- `build/pma-arrival-diagnosis/actual_sched_probe.c` includes the actual production
+  scheduler. 32 scheduler ticks obtain a real low grant 4; after four eligible
+  charges a READY coordinator receives its own aged grant. One modeled eligible
+  coordinator tick followed by its join-like yield dispatches arrival at wait 5.
+  RED exits1. Blocking that coordinator in the same production C dispatches the
+  arrival at wait 4, GREEN exits0. Privileged/context operations are host models;
+  source/compiler/executable pre/post pins are in the adjacent result.json.
+- Fresh native diagnostic build 68.16 s, kernel 3cc63de2ce2996a5a12062550d847fa58c048e255be4dd9f5f3795c5dee1a183,
+  receipt b9e66fb4f26e2e4c38114aa0fec1036c81ef6adfef0352e5f8429f547ea76d90.
+  Its explicitly injected real ISR/context control exits QEMU 3 / guest FAIL 1 in 1.63 s.
+  At tick 1079 coordinator id 1 has READY wait 38, grant 4, low charges 4. Exactly one
+  eligible coordinator delivery precedes arrival id 429 at tick 1080, wait 5, low
+  charges 4, body delay 0. 32 IRQL2 deliveries and 4 low eligible deliveries are
+  separately labeled software controls, IF 0, hardware_claim0. Only the unchanged
+  <=remaining arrival assertion fails. Result and full serial are preserved in
+  `build/pma-arrival-native-red/run-native-red`; result SHA d00cb2506118ee0f2916c729ae68e21f9e07923de1bf4f9df5421a02f98c82dd.
+- The native injected control proves a reachable production ISR/context sequence
+  matching the failed observation. The original natural run did not record
+  first selection, so this does not claim attribution of its exact PIT sequence.
+  All 212 diagnostic source bytes plus drivers are archived in
+  `build/pma-arrival-diagnosis/native-red-source.zip`, SHA 6246cb5fb9e2a8607a305c34a7c750ef58c34e343c066c80ee05b0a8583927f8.
+
+The corrected fixture blocks its coordinator on a completion semaphore during
+measurement, with a finite 512 tick timeout. A passive bounded selection hook
+captures the arrival's first dispatch, low charged ticks and actual coordinator
+BLOCKED/wait-sem identity; C-body timing is recorded separately. The original
+arrival <=remaining test remains, with an added verified-isolation precondition.
+A 16 record passive dispatch diagnostic is flushed only after observation stops.
+The forced control branches are removed from the candidate and remain only in
+the archived native RED source/binary. No production scheduler/header/arch change,
+allocation increase, setter renewal or original 40/80/>1000 gate change.
+
+Frozen test source 6761e4cd35de1672406e01dc356303fa84773baf71096fe3fd3a15391f9fed3b;
+complete 212 source canonical-map SHA b4d66f59927b422fc5afdef4cd8fae4aeb575c6bec4e2e054b1dd9073674d0bf.
+Fresh single-profile compile 81.53 s passes with identical pre/post source maps.
+Receipt `build/pma-arrival-final/kernels-build-result.json` SHA
+cadc5a4a35cb4157d5616a018d6705d14d7470aae8c28ccbc4e203674c9f025c.
+BIN 6518d6787834687829f2fe162c2d4083a89c8ae99f63be4c3210b5bea8c95bde,
+ELF 54a97685cada7978f814c9956b5aa3671f7de238c03ac7854df0636d6c5f1331.
+Exact sources/driver/evaluator archive `build/pma-arrival-final/sources-tested.zip`
+SHA d76758e60eb5604f0377413f88091846a765ec9f75b4431262f3f2cfb3ab51de.
+
+Both natural focused runs PASS 17/17, including all previous 16 gates and an
+independent parsed first-selection/isolation gate:
+
+```
+python3 build/pma-arrival-final/run_natural.py --accel kvm --out build/pma-arrival-final/run-natural-kvm
+python3 build/pma-arrival-final/run_natural.py --accel tcg --out build/pma-arrival-final/run-natural-tcg
+```
+
+KVM 2.45 s: original refresh first 32/useful 2444330; arrival firstwait 4/remaining 4,
+low charges 4, coordinator BLOCKED 1, completion 1, body delay 0. Result SHA
+e0206cc00673120c746c595846e9deba506380c658938722ae4e55a270c6b1ae.
+TCG 3.02 s: original refresh first 32/useful 70358; same arrival4/4/4, BLOCKED 1,
+completion 1 and body delay 0. Result SHA
+f14831ce19e251c751f6f18064dcd0aa5832a3c03f2c07810696d8f424588832.
+Both bind full 212 sources, BIN/ELF/loader, runtime fixture, receipt, evaluator and
+loaded helpers before/after. Final handoff is `build/pma-arrival-final/handoff.json`.
+No live build/guest handles or canonical index changes. Ready for independent
+review and root's new full-profile/combined native checkpoint; the failed combined
+successor is not promoted by these focused results.
+
+Kernel32 SMP work was paused at root's request before production edits. Its new
+linked worktree`/root/Win98-Modern-k32-smp-163f-20261002`, branch
+`codex/k32-smp-163f-20261002`, remains clean at 3cbc1f8. Registration/online identity,
+GDT/TSS, virtual AP/IPI and context handoff contracts still require the coordinated
+next stage. USB P2 remains unapplied pending authoritative NAS recovery and valid
+race RED. Actual Windows98 VMM integration/full boot/SMP/final media remain open.
