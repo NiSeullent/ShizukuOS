@@ -208,7 +208,7 @@ def copy_disk(source, target, mode, copy_budget, capture_budget):
     if target.exists(): raise FileExistsError(target)
     need(mode != 'full' or copy_budget >= size, 'explicit full-copy logical-byte budget too small')
     capacity(target.parent, size if mode == 'full' else 16 << 20, capture_budget)
-    owned = False
+    owned, copy_stats = False, {}
     try:
         fd = os.open(target, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         owned = True
@@ -217,15 +217,25 @@ def copy_disk(source, target, mode, copy_budget, capture_budget):
             if mode == 'reflink':
                 fcntl.ioctl(fd, 0x40049409, source['fd'])  # FICLONE; never fallback.
             else:
-                at = 0
+                at, zero_bytes, data_bytes = 0, 0, 0
                 while at < size:
                     block = os.pread(source['fd'], min(1 << 20, size-at), at)
                     need(block, 'source ended during full copy'); check()
                     capacity(target.parent, size-at, capture_budget)
-                    written = 0
-                    while written < len(block):
-                        n = os.write(fd, block[written:]); need(n > 0, 'zero destination write'); written += n
-                    at += len(block)
+                    if block.count(0) == len(block):
+                        # Read bytes, never filesystem hole/extent metadata, decide
+                        # whether a whole chunk can remain unwritten in this new inode.
+                        need(os.lseek(fd,len(block),os.SEEK_CUR) == at+len(block), 'destination zero-chunk seek differs')
+                        zero_bytes += len(block)
+                    else:
+                        written = 0
+                        while written < len(block):
+                            n = os.write(fd, block[written:]); need(n > 0, 'zero destination write'); written += n
+                        data_bytes += written
+                    at += len(block); check()
+                # A seek alone does not establish an all-zero or trailing-zero extent.
+                os.ftruncate(fd,size)
+                copy_stats = {'source_bytes_read':at, 'zero_bytes_omitted':zero_bytes, 'data_bytes_written':data_bytes}
             os.fsync(fd); check()
             need(os.fstat(fd).st_size == size and identity(os.fstat(fd))[:2] != source['identity'][:2], 'independent complete destination required')
             need(hash_fd(fd, size, check) == source['pin']['sha256'], 'destination readback SHA mismatch')
@@ -234,7 +244,7 @@ def copy_disk(source, target, mode, copy_budget, capture_budget):
         capacity(target.parent, 0, capture_budget); check()
         return {'method': 'explicit-full-copy' if mode == 'full' else 'mandatory-FICLONE', 'bytes': size,
                 'sha256': source['pin']['sha256'], 'allocated_bytes': allocated,
-                'destination_readback_verified': True, 'source_lease_preserved': True}
+                'destination_readback_verified': True, 'source_lease_preserved': True, **copy_stats}
     except BaseException:
         if owned: target.unlink()
         raise

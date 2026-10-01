@@ -66,8 +66,17 @@ cannot be resumed under the same output path.
 
 Choose exactly one copy policy. `reflink` requires successful Linux FICLONE and
 never falls back. `full` requires an explicit budget at least the complete disk
-logical byte length and copies every byte into a new independent inode.
-Destination extent/hash are read back in both modes. Disk sizes above 64 MiB
+logical byte length and reads every source byte into a new independent inode.
+Only an actually read chunk containing entirely zero bytes omits data writes:
+an explicit seek must reach the expected offset. All other chunks use complete
+writes, including short-write retries. The final logical extent is established
+with `ftruncate` before `fsync` and the independent full destination hash.
+The full-copy receipt records `source_bytes_read`, `zero_bytes_omitted` and
+`data_bytes_written`; the last two sum to the complete logical size. No
+filesystem hole metadata is consulted, and no sparse-allocation guarantee is
+made. The complete logical budget and remaining-byte capacity checks still
+apply even to an all-zero source. Destination extent/hash are read back in both
+modes. Disk sizes above 64 MiB
 are confined to the reserved NAS lane
 `/mnt/shizukuos-native-workspace-fada-20261001/fada/replacement`; small synthetic
 host controls use private temporary directories. Root allocates and coordinates
@@ -110,4 +119,9 @@ python3 -B -W error -m unittest shizukudos/win98_boot/tests/test_prepare_replace
 They construct actual tiny FAT12 and 40 MiB FAT32 synthetic images, execute
 mcopy/NASM and real Linux lease controls, verify private backups/independent
 copies/member hashes, and refuse malformed geometry/source/output/budget inputs.
+Full-copy controls include leading/interior/trailing/all-zero regions, nonzero
+chunk-edge bytes, short reads/writes, failed or incorrect seeks, failed or
+ignored truncation, premature source EOF, capacity loss and actual lease breaks
+at zero-skip/truncation boundaries. A failed truncation in an actual tiny FAT
+preparation leaves no accepted receipt or copied disk.
 These are filesystem/source-preparation checks; no BIOS, DOS, Windows or VM runs.

@@ -155,6 +155,147 @@ class ReplacementCopy(unittest.TestCase):
                 with self.assertRaises(ValueError): prep.safe_path(path)
 
 
+class ReplacementSparseCopy(unittest.TestCase):
+    """Real tiny files/syscalls; injected capacity never admits a production job."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='shz-sparse-copy-', dir='/var/tmp')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.source, self.target = self.root/'source.raw', self.root/'new.raw'
+
+    def pin(self, data):
+        self.source.write_bytes(data)
+        return {'path':str(self.source), 'bytes':len(data), 'sha256':hashlib.sha256(data).hexdigest()}
+
+    def test_leading_interior_trailing_zero_chunks_omit_writes_but_read_every_byte(self):
+        chunk = 1 << 20
+        data = bytes(chunk) + b'A' + bytes(chunk-2) + b'B' + bytes(chunk) + b'C' + bytes(chunk-2) + b'D' + bytes(chunk+17)
+        pin = self.pin(data)
+        real_read, real_write = os.pread, os.write
+        reads, written = [], []
+        with prep.leased_inputs([pin]) as sources, patch.object(prep,'available_bytes',return_value=1 << 40):
+            source = sources[str(self.source)]
+            def observed_read(fd, count, at):
+                block = real_read(fd, count, at)
+                if fd == source['fd']: reads.append((at,len(block)))
+                return block
+            def observed_write(fd, block):
+                n = real_write(fd, block); written.append(n); return n
+            with patch.object(prep.os,'pread',observed_read), patch.object(prep.os,'write',observed_write):
+                result = prep.copy_disk(source,self.target,'full',len(data),1 << 20)
+        self.assertEqual(self.target.read_bytes(),data)
+        self.assertEqual(reads,[(0,chunk),(chunk,chunk),(2*chunk,chunk),(3*chunk,chunk),(4*chunk,chunk),(5*chunk,17)])
+        self.assertEqual(sum(written),2*chunk)
+        self.assertEqual(result['data_bytes_written'],2*chunk)
+        self.assertEqual(result['zero_bytes_omitted'],3*chunk+17)
+        self.assertEqual(result['source_bytes_read'],5*chunk+17)
+        self.assertNotEqual(self.target.stat().st_ino,self.source.stat().st_ino)
+
+    def test_all_zero_input_has_exact_extent_hash_and_no_data_writes(self):
+        data = bytes((2 << 20)+19); pin = self.pin(data)
+        real_write, real_truncate, real_sync = os.write, os.ftruncate, os.fsync
+        writes, events = [], []
+        def observed_write(fd, block):
+            n = real_write(fd,block); writes.append(n); return n
+        def observed_truncate(fd, size):
+            real_truncate(fd,size); events.append(('truncate',os.fstat(fd).st_size))
+        def observed_sync(fd):
+            events.append(('sync',os.fstat(fd).st_size)); return real_sync(fd)
+        with prep.leased_inputs([pin]) as sources, patch.object(prep,'available_bytes',return_value=1 << 40), \
+             patch.object(prep.os,'write',observed_write), patch.object(prep.os,'ftruncate',observed_truncate), \
+             patch.object(prep.os,'fsync',observed_sync):
+            result = prep.copy_disk(sources[str(self.source)],self.target,'full',len(data),1 << 20)
+        self.assertEqual(self.target.stat().st_size,len(data))
+        self.assertEqual(hashlib.sha256(self.target.read_bytes()).hexdigest(),pin['sha256'])
+        self.assertEqual(sum(writes),0)
+        self.assertEqual(events,[('truncate',len(data)),('sync',len(data))])
+        self.assertEqual(result['data_bytes_written'],0)
+        self.assertEqual(result['zero_bytes_omitted'],len(data))
+
+    def test_nonzero_bytes_across_short_read_boundaries_survive_short_writes(self):
+        # Nonzero offsets 63,64,191 put bytes on either side of 64-byte reads.
+        data = bytes(63)+b'A'+b'B'+bytes(126)+b'C'+bytes(321); pin = self.pin(data)
+        real_read, real_write = os.pread, os.write
+        with prep.leased_inputs([pin]) as sources, patch.object(prep,'available_bytes',return_value=1 << 40):
+            source = sources[str(self.source)]
+            def short_read(fd, count, at):
+                return real_read(fd,min(count,64) if fd == source['fd'] else count,at)
+            def short_write(fd, block): return real_write(fd,block[:7])
+            with patch.object(prep.os,'pread',short_read), patch.object(prep.os,'write',short_write):
+                result = prep.copy_disk(source,self.target,'full',len(data),1 << 20)
+        self.assertEqual(self.target.read_bytes(),data)
+        self.assertEqual(result.get('source_bytes_read'),513)
+        self.assertEqual(result.get('data_bytes_written'),192)
+        self.assertEqual(result.get('zero_bytes_omitted'),321)
+
+    def test_failed_or_wrong_seek_and_failed_or_ignored_truncate_leave_no_copy(self):
+        pin = self.pin(bytes((1 << 20)+7)); real_seek = os.lseek
+        def wrong_seek(fd, offset, whence): return real_seek(fd,offset,whence)-1
+        controls = (('lseek',OSError('seek unavailable')),('lseek',wrong_seek),
+                    ('ftruncate',OSError('truncate unavailable')),('ftruncate',lambda *_: None))
+        for number, (call, behavior) in enumerate(controls):
+            target = self.root/('failed-'+str(number)+'.raw')
+            with self.subTest(call=call,behavior=str(behavior)):
+                with prep.leased_inputs([pin]) as sources, patch.object(prep,'available_bytes',return_value=1 << 40), \
+                     patch.object(prep.os,call,side_effect=behavior):
+                    with self.assertRaises((OSError,ValueError)):
+                        prep.copy_disk(sources[str(self.source)],target,'full',pin['bytes'],1 << 20)
+                self.assertFalse(target.exists())
+
+    def test_premature_source_end_and_zero_destination_write_leave_no_copy(self):
+        pin = self.pin(b'A'+bytes((1 << 20)+7)); real_read, real_write = os.pread, os.write
+        for failure in ('read','write'):
+            with self.subTest(failure=failure), prep.leased_inputs([pin]) as sources, \
+                 patch.object(prep,'available_bytes',return_value=1 << 40):
+                source = sources[str(self.source)]
+                def ended_read(fd, count, at):
+                    return b'' if fd == source['fd'] and at else real_read(fd,count,at)
+                with patch.object(prep.os,'pread',ended_read if failure == 'read' else real_read), \
+                     patch.object(prep.os,'write',side_effect=(lambda *_: 0) if failure == 'write' else real_write):
+                    with self.assertRaises(ValueError):
+                        prep.copy_disk(source,self.target,'full',pin['bytes'],1 << 20)
+            self.assertFalse(self.target.exists())
+
+    def test_actual_lease_break_at_zero_skip_or_truncate_never_accepts_copy(self):
+        pin = self.pin(bytes((1 << 20)+7))
+        for call in ('lseek','ftruncate'):
+            target = self.root/(call+'.raw')
+            real = getattr(os,call)
+            def concurrent_writer(*args):
+                result = real(*args)
+                with self.assertRaises(BlockingIOError): os.open(self.source,os.O_WRONLY|os.O_NONBLOCK)
+                return result
+            with self.subTest(call=call):
+                with self.assertRaises(RuntimeError):
+                    with prep.leased_inputs([pin]) as sources, patch.object(prep,'available_bytes',return_value=1 << 40), \
+                         patch.object(prep.os,call,concurrent_writer):
+                        prep.copy_disk(sources[str(self.source)],target,'full',pin['bytes'],1 << 20)
+                self.assertFalse(target.exists())
+
+    def test_all_zero_source_still_requires_complete_logical_budget(self):
+        pin = self.pin(bytes((2 << 20)+19))
+        with prep.leased_inputs([pin]) as sources, patch.object(prep,'available_bytes',return_value=1 << 40):
+            with self.assertRaises(ValueError):
+                prep.copy_disk(sources[str(self.source)],self.target,'full',pin['bytes']-1,1 << 20)
+        self.assertFalse(self.target.exists())
+
+    def test_capacity_loss_after_zero_chunk_read_rejects_and_removes_copy(self):
+        pin = self.pin(bytes((1 << 20)+7)); free = iter((1 << 40,prep.FLOOR))
+        with prep.leased_inputs([pin]) as sources, patch.object(prep,'available_bytes',side_effect=lambda _: next(free)):
+            with self.assertRaises(RuntimeError):
+                prep.copy_disk(sources[str(self.source)],self.target,'full',pin['bytes'],1 << 20)
+        self.assertFalse(self.target.exists())
+
+    def test_failed_truncate_in_real_tiny_fat_preparation_never_publishes_receipt(self):
+        fixture = ReplacementPrepare('test_validate_only_has_no_owned_disk_or_acceptance_claim')
+        fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        out = fixture.root/'failed-owned'
+        with patch.object(prep.os,'ftruncate',side_effect=OSError('truncate unavailable')):
+            with self.assertRaises(OSError): fixture.prepare(out)
+        self.assertFalse((out/'preparation.json').exists())
+        self.assertFalse((out/'replacement.img').exists())
+
+
 class ReplacementInventory(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(prep)
