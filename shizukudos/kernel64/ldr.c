@@ -757,6 +757,12 @@ static int32_t map_module(ldr_ctx_t *c, module_t *m)
      * DYNAMIC_BASE. An image without DYNAMIC_BASE loads at its preferred base and is relocated only when that range
      * is occupied, as on Windows. */
     const int has_relocs = pi->dir_rva[5] && pi->dir_size[5] && !(pi->characteristics & PE_CHAR_RELOCS_STRIPPED);
+    /* A non-stripped DLL with an empty directory needs no fixups when its
+     * preferred range is occupied. This does not opt it into ASLR, admit a
+     * half-present directory, or make an empty-directory executable movable. */
+    const int no_reloc_needed = m->is_dll && !pi->dir_rva[5] && !pi->dir_size[5] &&
+                                !(pi->characteristics & PE_CHAR_RELOCS_STRIPPED);
+    const int can_move = has_relocs || no_reloc_needed;
     const int randomize = has_relocs && (pi->dll_characteristics & PE_DLLCHAR_DYNAMIC_BASE);
 
     if (randomize) {
@@ -783,7 +789,7 @@ static int32_t map_module(ldr_ctx_t *c, module_t *m)
     }
     if (!base) {
         if (vad_range_is_free(p, pi->image_base, pi->size_of_image)) base = pi->image_base;
-        else if (!has_relocs) return fail(c, STATUS_CONFLICTING_ADDRESSES, m->name, "", 0, "", "fixed-base image and its range is occupied");
+        else if (!can_move) return fail(c, STATUS_CONFLICTING_ADDRESSES, m->name, "", 0, "", "fixed-base image and its range is occupied");
         else {
             uint64_t sz = pi->size_of_image, b = 0, fs = 0;
             st = vad_alloc(p, &b, &sz, MEM_RESERVE | MEM_TOP_DOWN, PAGE_READONLY, VK_IMAGE);
@@ -844,10 +850,10 @@ static int32_t map_module(ldr_ctx_t *c, module_t *m)
     if (base != pi->image_base) {
         struct page_ctx pc = { p, base };
         uint64_t applied = 0, hb = base;
-        if (!has_relocs)
+        if (!can_move)
             return fail(c, STATUS_CONFLICTING_ADDRESSES, m->name, "", 0, "", "image cannot be relocated");
         /* RAM images are relocated now; lazy images page by page in ldr_image_fault() */
-        if (!m->img && pe_apply_relocs(m->file, m->fsize, pi, base - pi->image_base, reloc_page, &pc, &applied))
+        if (!m->img && has_relocs && pe_apply_relocs(m->file, m->fsize, pi, base - pi->image_base, reloc_page, &pc, &applied))
             return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, "", "base relocation outside the image");
         /* the mapped header reports the actual base, as on Windows (OptionalHeader.ImageBase) */
         if (kwrite(p, base + pi->nt_offset + 24 + 24, &hb, 8))
