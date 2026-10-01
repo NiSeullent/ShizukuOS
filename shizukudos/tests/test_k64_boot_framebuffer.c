@@ -79,10 +79,32 @@ int main(void)
     bootinfo = valid_bootinfo();
     bootinfo.fb_base = UINT64_C(0x100000004);
     CHECK(k64_boot_framebuffer(&out) == 0 && out.base == bootinfo.fb_base);
-    /* The final pixel below the page-aligned aperture end is safe. */
-    b.fb_size = 4;
-    bootinfo = b;
-    CHECK(k64_boot_framebuffer(&out) == 0 && out.base == b.fb_base);
+    /* Physical 64 GiB aliases the existing graphics page arena, rather than
+     * free MMIO space. Later direct-map aliases include raw block windows,
+     * KWIN, driver images and KUSER_SHARED_DATA. Never overwrite their PTEs. */
+    {
+        const uint64_t reserved[] = {
+            UINT64_C(64) << 30, (UINT64_C(65) << 30) - 4,
+            UINT64_C(256) << 30, KWIN_BASE - DIRECT_MAP,
+            NTDRV_VA_BASE - DIRECT_MAP, UINT64_C(0xfffff78000000000) - DIRECT_MAP
+        };
+        unsigned i;
+        for (i = 0; i < sizeof reserved / sizeof reserved[0]; ++i) {
+            b = valid_bootinfo();
+            b.fb_base = reserved[i]; b.fb_width = b.fb_height = 1;
+            b.fb_pitch = 4; b.fb_size = 4;
+            rejects_without_output_change(b);
+        }
+        b.fb_base = (UINT64_C(64) << 30) - 4; b.fb_size = 8;
+        rejects_without_output_change(b); /* mapped last page would cross the boundary */
+        /* The final pixel and final page below the first reserved alias remain
+         * valid; their exclusive rounded end is exactly the 64-GiB boundary. */
+        b.fb_size = 4; bootinfo = b;
+        CHECK(k64_boot_framebuffer(&out) == 0 && out.base == b.fb_base);
+        b.fb_base = (UINT64_C(64) << 30) - PAGE_SIZE; b.fb_size = PAGE_SIZE;
+        bootinfo = b;
+        CHECK(k64_boot_framebuffer(&out) == 0 && out.base == b.fb_base);
+    }
     b = valid_bootinfo(); b.fb_base = 0;
     rejects_without_output_change(b);
     b = valid_bootinfo(); b.fb_width = 0;
