@@ -18,9 +18,25 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parent / "tools"))
 sys.path.insert(0, str(HERE))
-import kbuild  # noqa: E402 -- current source inventory; no build executes
+HELPER_PATHS = (HERE / "run_k64_standalone.py", HERE.parent / "tools/qemu.py",
+                HERE.parent / "tools/shzlib.py", HERE.parent / "kbuild.py")
+
+
+def helper_hashes():
+    values = {}
+    for path in HELPER_PATHS:
+        try:
+            value = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            value = None
+        values[str(path.resolve())] = value
+    return values
+
+
+HELPER_IMPORT_HASHES = helper_hashes()
 import qemu  # noqa: E402
 import shzlib  # noqa: E402
+import kbuild  # noqa: E402
 from run_k64_standalone import check, parse  # noqa: E402
 
 
@@ -98,6 +114,8 @@ def main():
     ap.add_argument("--timeout", type=int, default=120)
     ap.add_argument("--out", type=Path, default=shzlib.BUILD / "pma-validation/k64-focused")
     args = ap.parse_args()
+    if args.out.exists():
+        ap.error("choose a fresh output directory; existing evidence must be preserved")
     stub, kernel = args.build_dir / "boot.elf", args.build_dir / "KERNEL64S.BIN"
     for path in (stub, kernel):
         if not path.is_file():
@@ -115,10 +133,8 @@ def main():
     sources = receipt.get("sources_sha256", {})
     if not sources:
         ap.error("build receipt has no source input hashes")
-    current_closure = kbuild.source_hashes()
-    missing = sorted(current_closure.keys() - sources.keys())
-    if missing:
-        ap.error("build receipt missing current kernel source inputs: " + ", ".join(missing))
+    if sources != kbuild.source_hashes():
+        ap.error("build receipt must contain the exact complete current kbuild source closure")
     for name, expected in sources.items():
         path = (shzlib.REPO / name).resolve()
         if not path.is_relative_to(shzlib.REPO.resolve()) or not path.is_file() or shzlib.sha256_file(path) != expected:
@@ -126,9 +142,11 @@ def main():
     source_paths = [HERE.parent / "kernel64" / name for name in ("sched.c", "k64.h", "pma_tests.c", "tests.c")]
     sources_at_launch = {str(p.relative_to(shzlib.REPO)): shzlib.sha256_file(p) for p in source_paths}
     runner_before = shzlib.sha256_file(Path(__file__))
-    args.out.mkdir(parents=True, exist_ok=True)
+    helpers_before = helper_hashes()
+    if helpers_before != HELPER_IMPORT_HASHES:
+        ap.error("Python evaluator/helper inputs changed after import")
+    args.out.mkdir(parents=True)
     serial_path = args.out.resolve() / "serial.log"
-    serial_path.unlink(missing_ok=True)
     command = [args.qemu, "-machine", "pc", "-accel", args.accel, "-cpu", "max", "-m", args.memory,
                "-nodefaults", "-display", "none", "-kernel", str(stub.resolve()), "-initrd", str(kernel.resolve()),
                "-append", "shz.pma=test", "-serial", f"file:{serial_path}",
@@ -146,14 +164,14 @@ def main():
     checks, evidence = evaluate(serial, proc.returncode)
     inputs_after = {str(p.resolve()): shzlib.sha256_file(p) if p.is_file() else None for p in (stub, kernel)}
     receipt_after = shzlib.sha256_file(receipt_path) if receipt_path.is_file() else None
-    sources_after = {name: shzlib.sha256_file(shzlib.REPO / name) if (shzlib.REPO / name).is_file() else None
-                     for name in sources}
-    current_closure_after = kbuild.source_hashes()
-    sources_stable = sources == sources_after and current_closure == current_closure_after
+    sources_after = kbuild.source_hashes()
+    sources_stable = sources == sources_after
     runner_after = shzlib.sha256_file(Path(__file__))
-    inputs_stable = inputs_before == inputs_after and receipt_before == receipt_after and sources_stable and runner_before == runner_after
+    helpers_after = helper_hashes()
+    helpers_stable = helpers_before == helpers_after
+    inputs_stable = inputs_before == inputs_after and receipt_before == receipt_after and sources_stable and runner_before == runner_after and helpers_stable
     checks.append(check("guest artifacts and their source-bound receipt stayed unchanged", inputs_stable,
-                        f"artifacts={inputs_before == inputs_after} receipt={receipt_before == receipt_after} sources={sources_stable} runner={runner_before == runner_after}"))
+                        f"artifacts={inputs_before == inputs_after} receipt={receipt_before == receipt_after} sources={sources_stable} runner={runner_before == runner_after} helpers={helpers_stable}"))
     if timed_out:
         checks.insert(0, check("bounded guest run completed", False, f"timeout={args.timeout}s"))
     status = "PASS" if all(c["status"] == "PASS" for c in checks) else "FAIL"
@@ -164,10 +182,11 @@ def main():
               "inputs_sha256": inputs_before, "inputs_sha256_after": inputs_after, "inputs_stable": inputs_stable,
               "build_receipt_sha256": receipt_before, "build_receipt_sha256_after": receipt_after,
               "runner_sha256": runner_before, "runner_sha256_after": runner_after,
+              "runtime_helpers_sha256_at_import": HELPER_IMPORT_HASHES, "runtime_helpers_sha256": helpers_before,
+              "runtime_helpers_sha256_after": helpers_after, "runtime_helpers_stable": helpers_stable,
               "serial_sha256": shzlib.sha256_file(serial_path) if serial_path.is_file() else None,
-              "build_sources_sha256": sources, "build_sources_stable": sources_stable,
-              "current_kernel_sources_sha256": current_closure,
-              "current_kernel_sources_sha256_after": current_closure_after,
+              "build_sources_sha256": sources, "build_sources_sha256_after": sources_after,
+              "build_sources_stable": sources_stable,
               "source_sha256_at_run": sources_at_launch, "source_sha256_at_launch": sources_at_launch,
               "source_sha256_after": {str(p.relative_to(shzlib.REPO)): sources_after.get(str(p.relative_to(shzlib.REPO))) for p in source_paths},
               "utc": shzlib.utc_now(), "git": shzlib.git_state()}
