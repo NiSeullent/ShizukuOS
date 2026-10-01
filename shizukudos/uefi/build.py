@@ -51,6 +51,8 @@ def main():
     compiler = shutil.which(args.cc)
     if not compiler:
         raise SystemExit(f"Existing compiler required: {args.cc}; nothing installed")
+    if BUILD.is_symlink() and not BUILD.exists():
+        BUILD.unlink()
     BUILD.mkdir(exist_ok=True)
     output = BUILD / ("BOOTX64-PCI-TEST.EFI" if args.test_pci else "BOOTX64.EFI")
     temporary = output.with_suffix(".EFI.tmp")
@@ -65,6 +67,17 @@ def main():
     def source_hashes():
         return {str(path.relative_to(ROOT.parent.parent)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in sources}
+    csm = ROOT.parent / "csmwrap"
+    switch_obj = BUILD / "csmwrap-switch.obj"
+    subprocess.run(["nasm", "-f", "win64", "-o", str(switch_obj), str(csm / "loader" / "switch.asm")],
+                   check=True, timeout=30)
+    csm_sources = [
+        csm / "core" / "mode.c", csm / "core" / "checksum.c", csm / "core" / "kernel64.c",
+        csm / "core" / "registry.c", csm / "handoff" / "fill.c", csm / "diagnostics" / "log.c",
+        csm / "bios" / "dispatch.c", csm / "loader" / "uefi_collect.c",
+        csm / "loader" / "entry16_bytes.c",
+    ]
+    sources += csm_sources
     before = source_hashes()
     command = [compiler, "-std=c11", "-Os", "-Wall", "-Wextra", "-Werror",
                "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-mno-red-zone",
@@ -76,6 +89,7 @@ def main():
                str(ROOT / "main.c"), str(ROOT / "boot.c"), str(ROOT / "display.c"),
                str(ROOT / "kernel_probe.c"), str(ROOT.parent.parent / "ntwrapper" / "core.c"),
                str(ROOT.parent.parent / "ntwddm" / "src" / "ntwddm.c"),
+               *[str(path) for path in csm_sources], str(switch_obj),
                "-o", str(temporary)]
     if args.test_pci:
         command += ["-DSD_UEFI_TEST_PCI", "-I", str(ROOT.parent.parent / "drivers" / "pcie" / "include"),

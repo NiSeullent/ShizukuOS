@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "boot.h"
 #include "display.h"
+#include "../csmwrap/include/csmwrap_abi.h"
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 /* A real absolute address ensures the image carries a relocatable PE section. */
@@ -87,7 +88,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
                 h->acpi_rsdp = st->tables[i].table;
         }
     print(st, "GOP framebuffer ready; acquiring memory map.\r\n");
-    print(st, "Next: ExitBootServices and independent framebuffer output.\r\n");
+    print(st, "Next: CSMWrap handoff, then ExitBootServices.\r\n");
+    if (csmwrap_uefi_before_exit(image, st, gop) != 0) {
+        print(st, "CSMWrap rejected the handoff; Windows 98 was not started.\r\n");
+        if (h->memory_map)
+            bs->free_pool(h->memory_map);
+        bs->free_pool(h);
+        return EFI_UNSUPPORTED;
+    }
     status = sd_exit_boot_services(bs, image, h);
     if (EFI_ERROR(status) && !h->exit_attempted) {
         print(st, "Memory-map preparation failed; still in firmware.\r\n");
@@ -99,6 +107,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     __asm__ volatile("cli" ::: "memory");
     sd_framebuffer_result(h, h->boot_services_exited != 0);
     if (h->boot_services_exited) {
+        /* No UEFI boot service after this call. It returns only when KERNEL64 is absent. */
+        csmwrap_uefi_after_exit();
         sd_ntwddm_demo(&h->framebuffer, graphics_arena, sizeof(graphics_arena));
         sd_framebuffer_kernel_result(h, sd_kernel_probe());
 #ifdef SD_UEFI_TEST_PCI
