@@ -27,6 +27,8 @@ def main():
         "pic": (HERE / "pic_host.c", SUPERVISOR / "src/devices.c"),
         "constructor": (HERE / "constructor_host.c", NATIVE / "ata_pio.c"),
         "channels": (HERE / "channels_host.c",),
+        "doorbell": (HERE / "doorbell_host.c",),
+        "video": (HERE / "video_host.c", SUPERVISOR.parent / "csmwrap/video/cp437.c"),
     }
     results = []
     for compiler in ("gcc", "clang"):
@@ -38,6 +40,7 @@ def main():
             command = [compiler, "-std=c11", "-D_GNU_SOURCE", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
                        *sanitizer, "-fno-omit-frame-pointer", "-fno-pie", "-no-pie",
                        "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections",
+                       "-I", str(SUPERVISOR.parent / "csmwrap"),
                        *map(str, sources), "-o", str(binary)]
             built = subprocess.run(command, capture_output=True, text=True, timeout=60)
             (output / f"{compiler}-{name}-compile.log").write_text(built.stdout + built.stderr)

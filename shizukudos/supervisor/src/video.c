@@ -2,7 +2,7 @@
 #include "video.h"
 #include "cpu.h"
 #include "devices.h"
-#include "font8x8_basic.h"
+#include "../../csmwrap/video/cp437.h"
 #include "guest.h"
 
 #define TEXT_BASE 0xb8000ull
@@ -13,14 +13,33 @@
 static uint8_t cur_row, cur_col;
 static uint16_t cursor_shape = 0x0607;
 static uint32_t last_hash;
+static int last_render_valid;
+static struct {
+    uint64_t base, size, guest_ram;
+    uint32_t width, height, pitch, format;
+} last_target;
 static const uint32_t palette[16] = {
     0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 0xaa0000, 0xaa00aa, 0xaa5500, 0xaaaaaa,
     0x555555, 0x5555ff, 0x55ff55, 0x55ffff, 0xff5555, 0xff55ff, 0xffff55, 0xffffff,
 };
 
+static uint16_t *text_page(void)
+{
+    return (uint16_t *)gpa_ptr(TEXT_BASE, COLS * ROWS * 2);
+}
+
 static uint16_t *cell(unsigned row, unsigned col)
 {
-    return (uint16_t *)gpa_ptr(TEXT_BASE + (row * COLS + col) * 2, 2);
+    uint16_t *page = text_page();
+    return page && row < ROWS && col < COLS ? page + row * COLS + col : 0;
+}
+
+/* Several BIOS data words start at odd addresses (notably 0463h/0485h).
+ * Store their little-endian bytes without an unaligned C uint16_t access. */
+static void bda_word(uint8_t *bda, unsigned offset, uint16_t value)
+{
+    bda[offset] = (uint8_t)value;
+    bda[offset + 1] = (uint8_t)(value >> 8);
 }
 
 static void store_cursor(void)
@@ -37,7 +56,9 @@ static void store_cursor(void)
 void video_clear(uint8_t attr)
 {
     unsigned i;
-    uint16_t *p = cell(0, 0);
+    uint16_t *p = text_page();
+    if (!p)
+        return;
     for (i = 0; i < COLS * ROWS; ++i)
         p[i] = (uint16_t)(0x20 | (attr << 8));
     cur_row = cur_col = 0;
@@ -47,15 +68,17 @@ void video_clear(uint8_t attr)
 void video_init(void)
 {
     uint8_t *bda = gpa_ptr(BDA, 0x100);
+    cursor_shape = 0x0607;
+    last_render_valid = 0;
     video_clear(0x07);
     if (bda) {
         bda[0x49] = 3;                              /* video mode */
-        *(uint16_t *)(bda + 0x4a) = COLS;
-        *(uint16_t *)(bda + 0x4c) = 0x1000;         /* page size */
-        *(uint16_t *)(bda + 0x4e) = 0;
-        *(uint16_t *)(bda + 0x63) = 0x3d4;          /* CRTC base */
+        bda_word(bda, 0x4a, COLS);
+        bda_word(bda, 0x4c, 0x1000);               /* page size */
+        bda_word(bda, 0x4e, 0);
+        bda_word(bda, 0x63, 0x3d4);                /* CRTC base */
         bda[0x84] = ROWS - 1;
-        *(uint16_t *)(bda + 0x85) = 16;
+        bda_word(bda, 0x85, 16);
         bda[0x65] = 0x29;
         bda[0x66] = 0x30;
     }
@@ -87,7 +110,7 @@ static void scroll_down(unsigned top, unsigned left, unsigned bottom, unsigned r
             *cell((unsigned)r, c) = ((unsigned)r >= top + lines) ? *cell((unsigned)r - lines, c) : (uint16_t)(0x20 | (attr << 8));
 }
 
-static void teletype(uint8_t ch, uint8_t attr_default)
+static void teletype(uint8_t ch, uint8_t attr, int write_attr)
 {
     switch (ch) {
     case 7: return;                                 /* bell: no speaker model */
@@ -96,8 +119,7 @@ static void teletype(uint8_t ch, uint8_t attr_default)
     case 13: cur_col = 0; break;
     default: {
         uint16_t *p = cell(cur_row, cur_col);
-        *p = (uint16_t)((*p & 0xff00) | ch);
-        (void)attr_default;
+        *p = (uint16_t)((write_attr ? (uint16_t)attr << 8 : *p & 0xff00) | ch);
         if (++cur_col >= COLS) {
             cur_col = 0;
             ++cur_row;
@@ -105,7 +127,10 @@ static void teletype(uint8_t ch, uint8_t attr_default)
     }
     }
     if (cur_row >= ROWS) {
-        scroll_up(0, 0, ROWS - 1, COLS - 1, 1, (uint8_t)(*cell(ROWS - 1, 0) >> 8));
+        /* AH=13h follows BIOS string/teletype scrolling, blanking the exposed
+         * row with attribute 07h. AH=0Eh retains this path's existing fill. */
+        const uint8_t fill = write_attr ? 0x07 : (uint8_t)(*cell(ROWS - 1, 0) >> 8);
+        scroll_up(0, 0, ROWS - 1, COLS - 1, 1, fill);
         cur_row = ROWS - 1;
     }
     store_cursor();
@@ -113,7 +138,11 @@ static void teletype(uint8_t ch, uint8_t attr_default)
 
 void video_int10(void)
 {
-    const uint8_t func = AH;
+    uint8_t func;
+    /* No service may dereference a partial or missing 4,000-byte text page. */
+    if (!G.vc || !text_page())
+        return;
+    func = AH;
     switch (func) {
     case 0x00:
         if ((AL & 0x7f) == 3 || (AL & 0x7f) == 2) {
@@ -146,7 +175,7 @@ void video_int10(void)
         }
         break;
     }
-    case 0x0e: teletype(AL, 0x07); break;
+    case 0x0e: teletype(AL, 0x07, 0); break;
     case 0x0f:
         set_reg8l(GPR_RAX, 3);
         set_reg8h(GPR_RAX, COLS);
@@ -163,17 +192,30 @@ void video_int10(void)
     case 0x13: {
         const uint8_t mode = AL;
         unsigned n = CX, r = DH, c = DL, i;
-        const uint8_t *s = gpa_ptr(((vmread(VMCS_GUEST_ES_SEL) & 0xffffull) << 4) + BP, n * ((mode & 2) ? 2 : 1));
+        const unsigned stride = (mode & 2) ? 2 : 1;
+        const unsigned bytes = n * stride, offset = BP;
+        uint64_t base;
+        unsigned first, rest;
         const uint8_t save_r = cur_row, save_c = cur_col;
-        if (!s)
+        if (!n || r >= ROWS || c >= COLS)
+            break;
+        base = (vmread(VMCS_GUEST_ES_SEL) & 0xffffull) << 4;
+        /* The real-mode ES:BP offset wraps at 64 KiB. Validate every source
+         * span before changing the page/cursor; malformed reads are a no-op. */
+        first = bytes < 0x10000u - offset ? bytes : 0x10000u - offset;
+        rest = bytes - first;
+        if (!gpa_ptr(base + offset, first) ||
+            (rest && !gpa_ptr(base, rest < 0x10000u ? rest : 0x10000u)))
             break;
         cur_row = (uint8_t)r;
         cur_col = (uint8_t)c;
         for (i = 0; i < n; ++i) {
-            const uint8_t ch = (mode & 2) ? s[i * 2] : s[i];
-            const uint8_t at = (mode & 2) ? s[i * 2 + 1] : BL;
-            *cell(cur_row, cur_col) = (uint16_t)((at << 8) | ch);
-            if (++cur_col >= COLS) { cur_col = 0; if (cur_row + 1 < ROWS) ++cur_row; }
+            const unsigned source = (offset + i * stride) & 0xffff;
+            const uint8_t ch = *gpa_ptr(base + source, 1);
+            const uint8_t at = (mode & 2) ? *gpa_ptr(base + ((source + 1) & 0xffff), 1) : BL;
+            /* Reuse the bounded text path: controls, wrapping and scrolling
+             * apply even when AL bit 0 requests restoration of the cursor. */
+            teletype(ch, at, 1);
         }
         if (!(mode & 1)) {
             cur_row = save_r;
@@ -198,12 +240,12 @@ static void put_glyph(volatile uint32_t *fb, unsigned pitch, unsigned x, unsigne
 {
     unsigned row, col;
     for (row = 0; row < 16; ++row) {
-        const uint8_t bits = (uint8_t)font8x8_basic[ch & 0x7f][row >> 1];
+        const uint8_t bits = csm_cp437_row(ch, row);
         for (col = 0; col < 8; ++col) {
             uint32_t rgb = (bits >> col) & 1 ? fg : bg;
             if (swap)
                 rgb = ((rgb & 255) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 255);
-            fb[(y + row) * pitch + x + col] = rgb;
+            fb[(size_t)(y + row) * pitch + x + col] = rgb;
         }
     }
 }
@@ -211,19 +253,35 @@ static void put_glyph(volatile uint32_t *fb, unsigned pitch, unsigned x, unsigne
 void video_render(void)
 {
     shz_info_t *info = G.info;
-    const uint16_t *page = (const uint16_t *)gpa_ptr(TEXT_BASE, COLS * ROWS * 2);
-    volatile uint32_t *fb = (volatile uint32_t *)(uintptr_t)info->fb_base;
+    const uint16_t *page = text_page();
+    volatile uint32_t *fb;
+    uint64_t pixels;
     unsigned r, c, x0, y0;
     uint32_t hash = 2166136261u;
-    if (!info->fb_base || !page || info->fb_width < COLS * 8 || info->fb_height < ROWS * 16)
+    if (!info || !info->fb_base || (info->fb_base & 3) || !page ||
+        info->fb_width < COLS * 8 || info->fb_height < ROWS * 16 ||
+        info->fb_pitch_pixels < info->fb_width || info->fb_format > 1) {
+        last_render_valid = 0;
         return;
+    }
+    pixels = (uint64_t)info->fb_pitch_pixels * info->fb_height;
+    if (pixels > UINT64_MAX / 4 || pixels * 4 > info->fb_size ||
+        info->fb_base > UINT64_MAX - info->fb_size) {
+        last_render_valid = 0;
+        return;
+    }
+    fb = (volatile uint32_t *)(uintptr_t)info->fb_base;
     for (r = 0; r < ROWS * COLS; ++r)
         hash = (hash ^ page[r]) * 16777619u;
     hash = (hash ^ cur_row) * 16777619u;
     hash = (hash ^ cur_col) * 16777619u;
-    if (hash == last_hash)
+    hash = (hash ^ cursor_shape) * 16777619u;
+    if (last_render_valid && hash == last_hash &&
+        last_target.base == info->fb_base && last_target.size == info->fb_size &&
+        last_target.guest_ram == G.ram_base && last_target.width == info->fb_width &&
+        last_target.height == info->fb_height && last_target.pitch == info->fb_pitch_pixels &&
+        last_target.format == info->fb_format)
         return;
-    last_hash = hash;
     x0 = (info->fb_width - COLS * 8) / 2;
     y0 = (info->fb_height - ROWS * 16) / 2;
     for (r = 0; r < ROWS; ++r)
@@ -232,13 +290,26 @@ void video_render(void)
             put_glyph(fb, info->fb_pitch_pixels, x0 + c * 8, y0 + r * 16, (uint8_t)v,
                       palette[(v >> 8) & 15], palette[(v >> 12) & 7], info->fb_format == 0);
         }
-    /* cursor: underline in the current cell */
-    if (cur_row < ROWS && cur_col < COLS)
-        for (c = 0; c < 8; ++c) {
-            uint32_t rgb = palette[7];
-            if (info->fb_format == 0)
-                rgb = ((rgb & 255) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 255);
-            fb[(y0 + cur_row * 16 + 14) * info->fb_pitch_pixels + x0 + cur_col * 8 + c] = rgb;
-            fb[(y0 + cur_row * 16 + 15) * info->fb_pitch_pixels + x0 + cur_col * 8 + c] = rgb;
-        }
+    /* CH bit 5 disables the VGA cursor. Remaining start/end scanlines are
+     * clipped to this 16-line font; reversed/outside shapes stay hidden. */
+    const unsigned start = (cursor_shape >> 8) & 31;
+    unsigned end = cursor_shape & 31;
+    if (end > 15) end = 15;
+    if (!(cursor_shape & 0x2000) && start <= end && cur_row < ROWS && cur_col < COLS)
+        for (r = start; r <= end; ++r)
+            for (c = 0; c < 8; ++c) {
+                uint32_t rgb = palette[7];
+                if (info->fb_format == 0)
+                    rgb = ((rgb & 255) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 255);
+                fb[(size_t)(y0 + cur_row * 16 + r) * info->fb_pitch_pixels + x0 + cur_col * 8 + c] = rgb;
+            }
+    last_hash = hash;
+    last_target.base = info->fb_base;
+    last_target.size = info->fb_size;
+    last_target.guest_ram = G.ram_base;
+    last_target.width = info->fb_width;
+    last_target.height = info->fb_height;
+    last_target.pitch = info->fb_pitch_pixels;
+    last_target.format = info->fb_format;
+    last_render_valid = 1;
 }
