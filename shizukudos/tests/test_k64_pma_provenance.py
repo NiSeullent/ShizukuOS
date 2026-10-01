@@ -33,7 +33,9 @@ def main():
     original_popen = subprocess.Popen
     original_read_text, original_read_bytes = Path.read_text, Path.read_bytes
     results = []
-    for name in ("unchanged", "missing-receipt", "mismatched-artifact", "stale-source", "replaced-artifact", "removed-artifact", "replaced-receipt", "receipt-read-replacement", "zero-first-low-phase-progress", "zero-second-low-phase-progress"):
+    for name in ("unchanged", "missing-receipt", "mismatched-artifact", "stale-source", "omitted-scheduler",
+                 "omitted-all-core", "omitted-main", "replaced-artifact", "removed-artifact", "replaced-receipt",
+                 "receipt-read-replacement", "zero-first-low-phase-progress", "zero-second-low-phase-progress"):
         folder = args.out.resolve() / name
         kernel_dir = folder / "kernel64s"
         kernel_dir.mkdir(parents=True, exist_ok=True)
@@ -43,6 +45,11 @@ def main():
         receipt = json.loads(json.dumps(base_receipt))
         if name == "stale-source":
             receipt["sources_sha256"]["shizukudos/kernel64/sched.c"] = "0" * 64
+        omitted = {"omitted-scheduler": ("sched.c",),
+                   "omitted-all-core": ("sched.c", "k64.h", "pma_tests.c", "tests.c"),
+                   "omitted-main": ("main.c",)}
+        for source in omitted.get(name, ()):
+            del receipt["sources_sha256"]["shizukudos/kernel64/" + source]
         receipt_path.write_text(json.dumps(receipt) + "\n")
         if name == "missing-receipt":
             receipt_path.unlink()
@@ -110,7 +117,8 @@ def main():
         (folder / "gate.log").write_text(log.getvalue())
         if name == "unchanged":
             passed = status == 0 and len(launches) == 1
-        elif name in ("missing-receipt", "mismatched-artifact", "stale-source"):
+        elif name in ("missing-receipt", "mismatched-artifact", "stale-source", "omitted-scheduler",
+                      "omitted-all-core", "omitted-main"):
             passed = status == 2 and not launches
         elif name in ("zero-first-low-phase-progress", "zero-second-low-phase-progress"):
             result = json.loads((folder / "run/result.json").read_text())
