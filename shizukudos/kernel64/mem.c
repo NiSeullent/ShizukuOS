@@ -14,6 +14,7 @@
  */
 #include "k64.h"
 #include "cpu_memory_owner.h"
+#include "mem_lock.h"
 #ifdef SHZ_STANDALONE
 #include "standalone/memholes.h"
 #endif
@@ -31,6 +32,10 @@ static unsigned hole_count;
 #endif
 
 static uint8_t page_map[MAX_PAGES / 8];
+/* Unavailable bits include firmware/initrd reservations. Only allocation APIs
+ * set these live provenance bits; a reserved frame can never be freed. */
+static uint8_t page_allocated[MAX_PAGES / 8];
+static shz_mem_lock_t pmm_lock,heap_lock;
 static uint64_t pmm_pages, pmm_free_pages, pmm_hint;
 static uint64_t kpml4;
 static uint64_t ram_top;
@@ -41,52 +46,62 @@ uint64_t kernel_pml4(void) { return kpml4; }
 static int bit_get(uint64_t i) { return page_map[i >> 3] & (1u << (i & 7)); }
 static void bit_set(uint64_t i) { page_map[i >> 3] |= (uint8_t)(1u << (i & 7)); }
 static void bit_clr(uint64_t i) { page_map[i >> 3] &= (uint8_t)~(1u << (i & 7)); }
+static int allocation_get(uint64_t i) { return page_allocated[i>>3]&(1u<<(i&7)); }
+static void allocation_set(uint64_t i) { page_allocated[i>>3]|=(uint8_t)(1u<<(i&7)); }
+static void allocation_clear(uint64_t i) { page_allocated[i>>3]&=(uint8_t)~(1u<<(i&7)); }
 
 int shz_cpu_pmm_page_owned(uint64_t pa,const shz_bootinfo_t *bi)
 {
-    uint64_t i;
+    uint64_t i;int owned=0;shz_mem_guard_t guard;
     if(!bi || pa<PMM_BASE || (pa&(PAGE_SIZE-1)) || ram_top<PAGE_SIZE || pa>ram_top-PAGE_SIZE)
         return 0;
     i=(pa-PMM_BASE)/PAGE_SIZE;
-    if(i>=pmm_pages || !bit_get(i)) return 0;
+    guard=shz_mem_lock_enter(&pmm_lock);if(!guard.valid) return 0;
+    if(i>=pmm_pages || !bit_get(i) || !allocation_get(i)) goto done;
     /* page_map marks both allocations and initial reservations as unavailable.
      * Only allocations can authorize a table: exclude every reserved overlap. */
     if(bi->initrd_size && (bi->initrd_size>UINT64_MAX-bi->initrd_gpa ||
-       (pa<bi->initrd_gpa+bi->initrd_size && bi->initrd_gpa<pa+PAGE_SIZE))) return 0;
+       (pa<bi->initrd_gpa+bi->initrd_size && bi->initrd_gpa<pa+PAGE_SIZE))) goto done;
 #ifdef SHZ_STANDALONE
     for(unsigned h=0;h<hole_count;h++)
-        if(pa<hole_end[h] && hole_gpa[h]<pa+PAGE_SIZE) return 0;
+        if(pa<hole_end[h] && hole_gpa[h]<pa+PAGE_SIZE) goto done;
 #endif
-    return 1;
+    owned=1;
+done:
+    shz_mem_lock_leave(&pmm_lock,guard);return owned;
 }
 
 uint64_t pmm_alloc(void)
 {
-    uint64_t f = irq_save(), n, i;
+    uint64_t n, i;const shz_mem_guard_t guard=shz_mem_lock_enter(&pmm_lock);
+    if(!guard.valid) return 0;
     for (n = 0; n < pmm_pages; ++n) {
         i = (pmm_hint + n) % pmm_pages;
         if (!bit_get(i)) {
             bit_set(i);
+            allocation_set(i);
             pmm_hint = i + 1;
             --pmm_free_pages;
-            irq_restore(f);
+            shz_mem_lock_leave(&pmm_lock,guard);
             memset((void *)p2v(PMM_BASE + i * PAGE_SIZE), 0, PAGE_SIZE);
             return PMM_BASE + i * PAGE_SIZE;
         }
     }
-    irq_restore(f);
+    shz_mem_lock_leave(&pmm_lock,guard);
     return 0;
 }
 
 void pmm_free(uint64_t pa)
 {
-    uint64_t f = irq_save(), i;
+    const shz_mem_guard_t guard=shz_mem_lock_enter(&pmm_lock);uint64_t i;
+    KASSERT(guard.valid);
     KASSERT(pa >= PMM_BASE && !(pa & 0xfff));
     i = (pa - PMM_BASE) / PAGE_SIZE;
-    KASSERT(i < pmm_pages && bit_get(i));       /* double free or foreign page */
+    KASSERT(i < pmm_pages && bit_get(i) && allocation_get(i)); /* live allocation only */
     bit_clr(i);
+    allocation_clear(i);
     ++pmm_free_pages;
-    irq_restore(f);
+    shz_mem_lock_leave(&pmm_lock,guard);
 }
 
 /* A run of n physically contiguous zeroed pages (kernel stacks, the scheduler's thread table), searched top-down so the runs stay
@@ -96,10 +111,11 @@ static uint64_t contig_hint;
 
 uint64_t pmm_alloc_contig(unsigned n)
 {
-    uint64_t f, i, run, start, base = 0;
+    uint64_t i, run, start, base = 0;shz_mem_guard_t guard;
     unsigned pass;
     if (!n) return 0;
-    f = irq_save();
+    guard=shz_mem_lock_enter(&pmm_lock);if(!guard.valid) return 0;
+    if(n>pmm_pages) { shz_mem_lock_leave(&pmm_lock,guard);return 0; }
     for (pass = 0; pass < 2 && !base; ++pass) {
         start = (!pass && contig_hint && contig_hint <= pmm_pages) ? contig_hint : pmm_pages;
         run = 0;
@@ -110,33 +126,38 @@ uint64_t pmm_alloc_contig(unsigned n)
             if (++run == n) { base = i + 1; break; }                                        /* base is stored +1: 0 means none */
         }
     }
-    if (!base) { irq_restore(f); return 0; }
+    if (!base) { shz_mem_lock_leave(&pmm_lock,guard); return 0; }
     --base;
-    for (i = 0; i < n; ++i) bit_set(base + i);
+    for (i = 0; i < n; ++i) { bit_set(base + i);allocation_set(base+i); }
     pmm_free_pages -= n;
     contig_hint = base;
-    irq_restore(f);
+    shz_mem_lock_leave(&pmm_lock,guard);
     memset((void *)p2v(PMM_BASE + base * PAGE_SIZE), 0, (size_t)n * PAGE_SIZE);
     return PMM_BASE + base * PAGE_SIZE;
 }
 
 void pmm_free_contig(uint64_t pa, unsigned n)
 {
-    uint64_t f, i;
+    uint64_t i,j;const shz_mem_guard_t guard=shz_mem_lock_enter(&pmm_lock);
+    KASSERT(guard.valid);
     KASSERT(pa >= PMM_BASE && !(pa & 0xfff));
-    f = irq_save();
     i = (pa - PMM_BASE) / PAGE_SIZE;
-    KASSERT(i + n <= pmm_pages);
+    KASSERT(i<=pmm_pages && n<=pmm_pages-i);
+    /* Validate the entire subrun before changing any state. Valid partial
+     * allocation frees and the previous valid zero-count operation remain. */
+    for(j=0;j<n;j++) KASSERT(bit_get(i+j) && allocation_get(i+j));
     for (; n; --n, ++i) {
-        KASSERT(bit_get(i));
         bit_clr(i);
+        allocation_clear(i);
         ++pmm_free_pages;
     }
     if (i > contig_hint) contig_hint = i;
-    irq_restore(f);
+    shz_mem_lock_leave(&pmm_lock,guard);
 }
 
-uint64_t pmm_free_count(void) { return pmm_free_pages; }
+uint64_t pmm_free_count(void)
+{ const shz_mem_guard_t g=shz_mem_lock_enter(&pmm_lock);if(!g.valid) return 0;
+  const uint64_t n=pmm_free_pages;shz_mem_lock_leave(&pmm_lock,g);return n; }
 uint64_t pmm_total_count(void) { return pmm_pages; }
 
 /* ---------------------------------------------------------------- paging */
@@ -252,6 +273,7 @@ uint64_t vm_count_user_pages(uint64_t pml4) { return count_level(pml4, 4); }
 /* ---------------------------------------------------------------- heap */
 struct hblock { uint64_t size; uint64_t used; struct hblock *next; uint64_t magic; };
 #define HMAGIC 0x4b48454150363421ull
+#define HFENCE 2ull /* permanent reservation, distinct from a live zero-size allocation */
 static struct hblock *heap_head;
 static size_t heap_used_bytes, heap_total_bytes;
 
@@ -286,7 +308,7 @@ static void heap_init(void)
             if (stop < window_end) {
                 sentinel = (struct hblock *)p2v(stop - hdr);
                 sentinel->size = 0;
-                sentinel->used = 1;
+                sentinel->used = HFENCE;
                 sentinel->next = 0;
                 sentinel->magic = HMAGIC;
                 b->size -= hdr;
@@ -306,13 +328,14 @@ static void heap_init(void)
 
 void *kmalloc(size_t n)
 {
-    uint64_t f = irq_save();
+    if(n>SIZE_MAX-15) return 0;
+    const shz_mem_guard_t guard=shz_mem_lock_enter(&heap_lock);if(!guard.valid) return 0;
     struct hblock *b;
     n = (n + 15) & ~(size_t)15;
     for (b = heap_head; b; b = b->next) {
         KASSERT(b->magic == HMAGIC);
         if (!b->used && b->size >= n) {
-            if (b->size >= n + sizeof *b + 32) {
+            if (b->size - n >= sizeof *b + 32) {
                 struct hblock *rest = (struct hblock *)((uint8_t *)(b + 1) + n);
                 rest->size = b->size - n - sizeof *b;
                 rest->used = 0;
@@ -323,11 +346,11 @@ void *kmalloc(size_t n)
             }
             b->used = 1;
             heap_used_bytes += b->size;
-            irq_restore(f);
+            shz_mem_lock_leave(&heap_lock,guard);
             return b + 1;
         }
     }
-    irq_restore(f);
+    shz_mem_lock_leave(&heap_lock,guard);
     return 0;
 }
 
@@ -340,22 +363,30 @@ void *kzalloc(size_t n)
 
 void kfree(void *p)
 {
-    uint64_t f = irq_save();
+    if(!p) return;
+    const shz_mem_guard_t guard=shz_mem_lock_enter(&heap_lock);KASSERT(guard.valid);
     struct hblock *b, *n;
-    if (!p) { irq_restore(f); return; }
-    b = (struct hblock *)p - 1;
-    KASSERT(b->magic == HMAGIC && b->used);
+    const uint64_t address=(uint64_t)p;
+    KASSERT(!(address&15) && address>=p2v(HEAP_PA)+sizeof *b && address<p2v(PMM_BASE));
+    /* Establish real free-list membership before reading a caller-derived
+     * header; a forged interior header or misaligned pointer is not a block. */
+    for(b=heap_head;b && b+1!=p;b=b->next) KASSERT(b->magic==HMAGIC);
+    KASSERT(b);
+    KASSERT(b->magic == HMAGIC && b->used == 1); /* live allocation, never a reserved fence */
     b->used = 0;
     heap_used_bytes -= b->size;
     for (n = heap_head; n; n = n->next)
-        while (!n->used && n->next && !n->next->used) {
+        while (!n->used && n->next && !n->next->used &&
+               (uint64_t)(n+1)+n->size == (uint64_t)n->next) {
             n->size += sizeof *n + n->next->size;
             n->next = n->next->next;
         }
-    irq_restore(f);
+    shz_mem_lock_leave(&heap_lock,guard);
 }
 
-size_t kheap_used(void) { return heap_used_bytes; }
+size_t kheap_used(void)
+{ const shz_mem_guard_t g=shz_mem_lock_enter(&heap_lock);if(!g.valid) return 0;
+  const size_t n=heap_used_bytes;shz_mem_lock_leave(&heap_lock,g);return n; }
 size_t kheap_total(void) { return heap_total_bytes; }   /* HEAP_BYTES minus block headers and fenced firmware holes */
 
 /* ---------------------------------------------------------------- init */
@@ -386,6 +417,7 @@ void mem_init(const shz_bootinfo_t *bi)
     pmm_pages = (ram_top - PMM_BASE) / PAGE_SIZE;
     pmm_free_pages = pmm_pages;
     memset(page_map, 0, sizeof page_map);
+    memset(page_allocated,0,sizeof page_allocated);
     if (bi->initrd_size) {                      /* keep the initial RAM image out of the allocator */
         first_initrd_page = (bi->initrd_gpa - PMM_BASE) / PAGE_SIZE;
         last_initrd_page = (bi->initrd_gpa + bi->initrd_size - 1 - PMM_BASE) / PAGE_SIZE;
