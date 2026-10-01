@@ -11,10 +11,20 @@
 
 static int k32t_checks, k32t_failed;
 
-#define CHECK(cond, what) do { ++k32t_checks; if (cond) printf("PASS: %s\n", what); \
-    else { ++k32t_failed; printf("FAIL: %s (line %d)\n", what, __LINE__); } } while (0)
-#define CHECKV(cond, what, ...) do { ++k32t_checks; if (cond) printf("PASS: %s\n", what); \
-    else { ++k32t_failed; printf("FAIL: %s (line %d: ", what, __LINE__); printf(__VA_ARGS__); printf(")\n"); } } while (0)
+/* Console output calls Win32 I/O too. Preserve the error produced by the
+ * tested expression, including before formatted failure diagnostics, so a
+ * following CHECK_ERR observes the API rather than printf's WriteFile. */
+#define CHECK(cond, what) do { BOOL k32t_ok; DWORD k32t_error; ++k32t_checks; \
+    k32t_ok = !!(cond); k32t_error = GetLastError(); \
+    if (k32t_ok) printf("PASS: %s\n", what); \
+    else { ++k32t_failed; printf("FAIL: %s (line %d)\n", what, __LINE__); } \
+    SetLastError(k32t_error); } while (0)
+#define CHECKV(cond, what, ...) do { BOOL k32t_ok; DWORD k32t_error; ++k32t_checks; \
+    k32t_ok = !!(cond); k32t_error = GetLastError(); \
+    if (k32t_ok) printf("PASS: %s\n", what); \
+    else { ++k32t_failed; printf("FAIL: %s (line %d: ", what, __LINE__); \
+        SetLastError(k32t_error); printf(__VA_ARGS__); printf(")\n"); } \
+    SetLastError(k32t_error); } while (0)
 /* CHECK_W / CHECKV_W: expectations that follow Windows documentation or Windows' own message texts but where Wine (the reference
  * implementation of tests/host/run_wine_tests.py, built with -DK32T_WINE) is known to behave differently: reported as skipped there. */
 #ifdef K32T_WINE

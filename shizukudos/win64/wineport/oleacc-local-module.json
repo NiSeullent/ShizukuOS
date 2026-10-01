@@ -1,0 +1,15 @@
+{
+  "name": "oleacc",
+  "link": ["oleaut32", "ole32", "user32", "rpcrt4", "advapi32"],
+  "static": ["uuid"],
+  "sources": ["client.c", "main.c", "propservice.c", "window.c", "oleacc.rc"],
+  "dynamic_imports": [
+    {"dll": "user32.dll", "fail": "0", "functions": ["GetGUIThreadInfo", "RealGetWindowClassW"]},
+    {"dll": "kernel32.dll", "fail": "0", "functions": ["GlobalAddAtomW", "GlobalGetAtomNameW"]},
+    {"dll": "kernel32.dll", "fail": "1", "functions": ["GlobalDeleteAtom"]}
+  ],
+  "unported": {
+    "DllRegisterServer": "RPC proxy registration is excluded from the local standard-object subset",
+    "DllUnregisterServer": "RPC proxy registration is excluded from the local standard-object subset"
+  }
+}

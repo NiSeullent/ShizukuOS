@@ -15,7 +15,7 @@ MessageWindow) and stops ("Your computer has run out of resources") when that fa
 (`-vga std`, as run_k64_gui.py --display vga) that nobody looks at (`-display none`). --display none runs without it.
 
 Default command (ELECTRON_TARGET.md milestone M2):
-    chrome.exe --headless --no-sandbox --disable-gpu --single-process --dump-dom file:///D:/M2/M2.HTML
+    chrome.exe --headless --no-sandbox --disable-gpu --dump-dom file:///D:/M2/M2.HTML
 The fixture page contains a script, so the expected DOM line `<p id="m">ShizukuDOS M2 probe 42</p>` only exists if V8
 ran it. The run PASSES only when the serial log contains that line AND chrome.exe exited with code 0 AND no process
 fault was reported. Anything else is a FAIL, and the result names the furthest point reached, in this order of
@@ -53,7 +53,7 @@ DEFAULT_TREE = SCRATCH / "chromium-full" / "chrome-win"
 M2_PAGE = (b"<!doctype html><html><head><title>shz-m2</title></head><body><p id=\"m\">ShizukuDOS M2 probe</p><script>"
            b"document.getElementById('m').textContent += ' ' + (6*7);</script></body></html>")
 M2_EXPECT = '<p id="m">ShizukuDOS M2 probe 42</p>'
-DEFAULT_ARGS = ("--headless --no-sandbox --disable-gpu --single-process --no-first-run --enable-logging=stderr --v=0 "
+DEFAULT_ARGS = ("--headless --no-sandbox --disable-gpu --no-first-run --enable-logging=stderr --v=0 "
                 "--user-data-dir=D:\\prof --dump-dom file:///D:/M2/M2.HTML")
 
 
@@ -124,7 +124,10 @@ def main():
     ap.add_argument("--out", default=str(BUILD / "kernel64s" / "run_chromium"))
     ap.add_argument("--no-trace", action="store_true",
                     help="do not pass shz.k32trace, shz.exctrace and shz.systrace (kernel32 explicit-failure and GetProcAddress-miss lines, first-chance hardware exceptions, failing system calls)")
+    ap.add_argument("--ipc-diagnostic", action="store_true", help="bounded handle-duplication observations without changing access checks")
     args = ap.parse_args()
+    if "--no-sandbox" not in args.args.split():
+        ap.error("Windows98 Modern Chromium requires --no-sandbox")
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
     for f in (stub, kernel, initrd):
         if not f.exists():
@@ -155,7 +158,7 @@ def main():
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
            *(["-vga", "std"] if args.display == "vga" else []),
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
-           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace shz.systrace"),
+           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace shz.systrace") + (" shz.ipcdiag" if args.ipc_diagnostic else ""),
            "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
            "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
            "-device", "ide-hd,drive=d0,bus=ahci0.0"]

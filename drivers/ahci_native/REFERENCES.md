@@ -31,10 +31,19 @@ commands; the Kernel64 fixture verifies the written bytes in the host image file
 
 The exact supported policy is narrower than those specifications: active ATA
 SATA links, complete IDENTIFY, LBA48, 512-byte logical sectors, coherent DMA,
-one slot, one PRDT, one read or written sector per command, serialized polling and exclusive HBA ownership.
+one slot, one PRDT, up to four read or written sectors per command, serialized polling and exclusive HBA ownership.
 Larger sectors, NCQ, ATAPI, port multipliers, power sequencing and automatic reset
 recovery are not silently approximated. Specification access and interface
 research do not constitute hardware conformance or vendor certification.
+
+The bounded four-sector extension was checked against the same Intel AHCI 1.3.1
+and SATA 1.0 primary documents on 2026-10-01: the H2D FIS sector-count registers
+encode the actual requested count, and the one PRDT's DBC is requested bytes
+minus one. IDENTIFY and FLUSH keep their original one-sector/no-data layouts.
+The DMA arena, command-slot ownership and coherent allocation contracts remain
+unchanged. No read-ahead, guessed completion amount or deferred write cache was
+added. Host deadline tests use the production TSC conversion at 2.4 and 3.6 GHz;
+actual guest timing and hardware behavior need separate evidence.
 
 Host compiler/version and exact source/object/log hashes are recorded by
 `test.py` in `build/host-tests.json`. A live guest receipt must separately identify

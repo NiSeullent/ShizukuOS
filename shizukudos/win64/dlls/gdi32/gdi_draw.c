@@ -10,6 +10,7 @@
  * while a path is being recorded, MoveToEx/LineTo/Polyline/Polygon/Rectangle/Ellipse add to it and draw nothing.
  */
 #include "gdi_internal.h"
+#include "gdi_render_trace.h"
 
 static void fill32(uint32_t *p, uint32_t v, size_t n) { __asm__ volatile("rep stosl" : "+D"(p), "+c"(n) : "a"(v) : "memory"); }
 
@@ -697,6 +698,7 @@ static BOOL do_blit(dc_t *dst, int dx, int dy, int dw, int dh, dc_t *src, int sx
     b.dx = dx; b.dy = dy; b.dw = dw; b.dh = dh;
     if (dw > 0 && dh > 0 && (!b.src || (b.sw > 0 && b.sh > 0))) rop_rect(&g, &b);
     gctx_end(&g);
+    gdi_render_trace_blit(dst,b.src,&g,dx,dy,dw,dh,b.sx,b.sy,b.sw,b.sh,rop);
     if (tmp) { gdi_free_pixels(tmp->bits, (uint64_t)tmp->w * (uint64_t)tmp->h, tmp->big); gdi_free(tmp); }
     return TRUE;
 }

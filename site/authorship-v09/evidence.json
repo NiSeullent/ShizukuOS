@@ -1,0 +1,129 @@
+{
+  "schema": "win98modern.authorship-evidence.v1",
+  "as_of_utc": "2026-10-01",
+  "proposed_version": "0.9",
+  "release_state": "preparation",
+  "published_by_this_tool": false,
+  "repository": "https://github.com/NiSeullent/Win98-Modern",
+  "full_project_goal_complete": false,
+  "screenshots": [
+    {
+      "src": "./images/npp-cold-open.png",
+      "kind": "original-guest-capture",
+      "sha256": "cb630d9533decbe718cdaddd79f93ec8b9d7da3ebd3eaaadcfdc62d5695a9990",
+      "width": 1280,
+      "height": 800,
+      "app": "npp",
+      "capture_receipt_sha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+      "review_sha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/npp-keyboard-saved.png",
+      "kind": "original-guest-capture",
+      "sha256": "10699734c6334687e95b8b6150f98bef3a27d9acda7f06ac4c2f78f702787417",
+      "width": 1280,
+      "height": 800,
+      "app": "npp",
+      "capture_receipt_sha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+      "review_sha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/gop-start.png",
+      "kind": "original-guest-capture",
+      "sha256": "574a70e9ee600e7f458eb6c93e54ae8ac88584addd0887e8af78328c510e2062",
+      "width": 1280,
+      "height": 800,
+      "app": "gop",
+      "capture_receipt_sha256": "fe3ff557d190676e8e82433cd47825786245d4bcda5e21cab3fdec65cf657296",
+      "review_sha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/gop-gdi.png",
+      "kind": "original-guest-capture",
+      "sha256": "41bf02431b194a3889eac4f80da8ceb22ec390875fcdd084a9c6bf9593288eb4",
+      "width": 1280,
+      "height": 800,
+      "app": "gop",
+      "capture_receipt_sha256": "a3b1e42ec719cb4de75e2986e653e5fe9c547752429f13c48ac80e51bced629b",
+      "review_sha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/legcord-welcome.png",
+      "kind": "original-guest-capture",
+      "sha256": "28fc8a9c451a610160ca833be12056e9497fb5bf85753a6169d3d3bbadf62238",
+      "width": 1024,
+      "height": 768,
+      "app": "legcord",
+      "capture_receipt_sha256": "fd6a3236dcc813637a04f3f385065ca9e42db5b7d072c9b08786f5bfeb9af485",
+      "review_sha256": "fd6a3236dcc813637a04f3f385065ca9e42db5b7d072c9b08786f5bfeb9af485",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    }
+  ],
+  "results": [
+    {
+      "id": "npp",
+      "platform": "installed Microsoft Windows 98 SE",
+      "version": "8.9.8.1",
+      "verified": [
+        "old44B_document_cold_reopen",
+        "distinct39B_keyboard_save",
+        "actual_application_exit0"
+      ],
+      "requires_native_field_interpreter": true,
+      "unassisted_exit_verified": false,
+      "new39B_document_cold_reopen_verified": false,
+      "gpu3d_verified": false,
+      "receipt_sha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+      "review_sha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175"
+    },
+    {
+      "id": "gop",
+      "platform": "installed Microsoft Windows 98 SE through UEFI/CSMWrap",
+      "verified": [
+        "original_monitor_start_menu",
+        "native_GDI_pattern_monitor_readback"
+      ],
+      "fixed_mode": "1280x800",
+      "gpu3d_verified": false,
+      "additive_correction_audit_sha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969"
+    },
+    {
+      "id": "chromium",
+      "platform": "ShizukuDOS Kernel64 standalone",
+      "version": "157.0.8081.0",
+      "verified": [
+        "headless_multiprocess_DOM42",
+        "actual_normal_exit0"
+      ],
+      "command": "--headless --no-sandbox --disable-gpu --no-first-run --enable-logging=stderr --v=0 --user-data-dir=D:\\prof --dump-dom file:///D:/M2/M2.HTML",
+      "screenshot": null,
+      "screenshot_status": "not_captured_in_this_headless_trial",
+      "native_windows98_verified": false,
+      "graphical_browser_verified": false,
+      "network_navigation_verified": false,
+      "receipt_sha256": "7aa0079ee82c01e06fd4117111d05776177eb7c93f16cad1126f809282df0f63"
+    },
+    {
+      "id": "legcord",
+      "platform": "ShizukuDOS Kernel64 standalone",
+      "version": "1.3.0",
+      "verified": [
+        "original_welcome_setup_rendered"
+      ],
+      "discord_functionality_verified": false,
+      "native_windows98_verified": false,
+      "clean_exit_verified": false,
+      "observation_ended_by": "timeout",
+      "receipt_sha256": "fd6a3236dcc813637a04f3f385065ca9e42db5b7d072c9b08786f5bfeb9af485"
+    }
+  ]
+}

@@ -14,6 +14,12 @@ Applications (--app):
            packaged-app layout: electron.exe starts it directly, without default_app.asar). main.js opens a hidden
            BrowserWindow on a local page whose script sets the title to "electron-min 42"; main reads it back and prints
            "SHZ-E1-MARKER electron-min 42" (console.log and stderr), then app.exit(0). Expected line = that marker.
+  node     the same tree and image as `minimal`, but electron.exe runs as plain Node (ELECTRON_RUN_AS_NODE=1, no Chromium) on
+           resources\\app\\nodeprobe.js: a ladder over fs, timers, os, crypto, zlib, loopback TCP, a named pipe, a child
+           process, worker threads and fs.watch, one "SHZ-E1-NODE step N ok" line each. Expected line: "SHZ-E1-NODE-DONE".
+           The steps reached tell which libuv / Node feature breaks first, without a window. Needs a kernel that reads the
+           `env=` lines of the autorun control file (see --env); on a kernel that ignores them the run is an ordinary Electron
+           start with a script argument and says so in its result.
   default  the pristine Electron release tree as D:\\electron, electron.exe with no application argument (Electron's
            default_app.asar). It opens a window and never quits, so it has no marker: the run can only report the
            furthest point reached (status FAIL by construction, see below).
@@ -61,6 +67,8 @@ MARKER = "SHZ-E1-MARKER electron-min 42"
 COMMON = "--no-sandbox --disable-gpu --enable-logging=stderr --v=0"
 APPS = {
     "minimal": {"dir": "e1min", "exe": "electron.exe", "args": COMMON + " --no-first-run", "expect": MARKER},
+    "node": {"dir": "e1min", "exe": "electron.exe", "image": "minimal", "env": ["ELECTRON_RUN_AS_NODE=1"],
+             "args": "D:\\e1min\\resources\\app\\nodeprobe.js", "expect": "SHZ-E1-NODE-DONE"},
     "default": {"dir": "electron", "exe": "electron.exe", "args": COMMON + " --no-first-run", "expect": None},
     "vscode": {"dir": "vscode", "exe": None,
                "args": "--disable-gpu --no-sandbox --verbose --enable-logging=stderr --skip-welcome --skip-release-notes "
@@ -75,7 +83,9 @@ PROGRESS = [
     ("electron main: started", r"SHZ-E1 main: started"),
     ("electron main: app ready", r"SHZ-E1 main: app ready|\[main [0-9T:.\-Z ]+\]"),
     ("renderer: page script ran", r"SHZ-E1 page script ran|SHZ-E1 renderer console"),
-    ("marker", re.escape(MARKER)),
+    ("node: started", r"SHZ-E1-NODE started"),
+    ("node: step reached", r"SHZ-E1-NODE step \d+ ok"),
+    ("marker", r"SHZ-E1-MARKER|SHZ-E1-NODE-DONE"),
 ]
 
 
@@ -144,7 +154,7 @@ def classify(serial, expect):
     killed = [l for l in lines if re.search(r"K64: process .* killed|K64 EXCEPTION|unhandled exception", l)]
     node_fatal = [l for l in lines if re.search(r"FATAL ERROR:|Fatal error in|node::|Uncaught (Type|Reference)?Error|"
                                                 r"A JavaScript error occurred|SHZ-E1 main: (load failed|renderer gone|"
-                                                r"executeJavaScript failed|whenReady failed|watchdog)", l)]
+                                                r"executeJavaScript failed|whenReady failed|watchdog|uncaughtException|unhandledRejection|console\.log threw)", l)]
     fatal = [l for l in lines if re.search(r"FATAL:|Check failed|CHECK failed|NOTREACHED", l)]
     unsup = [l for l in lines if "K32 unsupported:" in l or "K32 RECON called:" in l]
     auto = [l for l in lines if l.startswith("K64 autorun: result")]
@@ -160,6 +170,13 @@ def classify(serial, expect):
         if hit:
             progress = (name, hit)
     res["progress"] = list(progress) if progress else None
+    steps = []                                              # Node-mode ladder: "SHZ-E1-NODE step N ok: name" / "step N FAILED: name: error"
+    text = "\n".join(lines)
+    for mm in re.finditer(r"SHZ-E1-NODE step (\d+|\?) (ok|FAILED): ([^\n]*?)(?=SHZ-E1-NODE|\n|$)", text):
+        steps.append({"step": mm.group(1), "result": mm.group(2), "detail": mm.group(3)[:300]})
+    res["node_steps"] = steps
+    done = re.search(r"SHZ-E1-NODE-DONE [^\n]*?(?=SHZ-E1-NODE|\n|$)", text)
+    res["node_done"] = done.group(0) if done else None
     m = re.search(r"K64 autorun: result (\w[\w-]*) exit=([0-9a-f]+) faulted=(\d)", auto[-1]) if auto else None
     res["exit_code"] = int(m.group(2), 16) if m else None
     res["faulted"] = bool(int(m.group(3))) if m else None
@@ -211,6 +228,9 @@ def main():
     ap.add_argument("--timeout", type=int, default=2400, help="host-side QEMU timeout (s)")
     ap.add_argument("--guest-timeout", type=int, default=1500, help="seconds the guest lets the program run")
     ap.add_argument("--out", help="result directory (default build/kernel64s/run_electron_<app>)")
+    ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE",
+                    help="extra environment variable of the program (repeatable; `env=` lines of the autorun control file, which "
+                         "needs a kernel that reads them - kernel64/autorun.c of the E1 proposal; ignored by older kernels)")
     ap.add_argument("--no-trace", action="store_true", help="do not pass shz.k32trace and shz.exctrace")
     args = ap.parse_args()
     spec = APPS[args.app]
@@ -241,12 +261,13 @@ def main():
     accel = ("kvm" if Path("/dev/kvm").exists() else "tcg") if args.accel == "auto" else args.accel
     out = Path(args.out or (K64S / f"run_electron_{args.app}"))
     out.mkdir(parents=True, exist_ok=True)
-    image = Path(args.image or (IMAGES / f"{args.app}.img"))
+    image = Path(args.image or (IMAGES / f"{spec.get('image', args.app)}.img"))
     t0 = time.time()
-    overlay = {str(MINAPP): f"{vdir}/resources/app"} if args.app == "minimal" else None
+    overlay = {str(MINAPP): f"{vdir}/resources/app"} if args.app in ("minimal", "node") else None
     listing = build_image(image, tree, vdir, overlay)
     control = (f"image=D:\\{vdir}\\{exe}\r\ncmdline={cmdline}\r\ncwd=D:\\{vdir}\r\n"
-               f"timeout={args.guest_timeout}\r\n").encode()
+               + "".join(f"env={e}\r\n" for e in [*spec.get("env", []), *args.env])
+               + f"timeout={args.guest_timeout}\r\n").encode()
     put_file(image, control, "K64RUN.TXT", out)
     image_s = round(time.time() - t0, 1)
     serial_path = out / "serial.log"
@@ -281,7 +302,7 @@ def main():
         "profile": f"kernel64-standalone + {args.app} Electron app on AHCI FAT32 (D:), autorun", "app": args.app,
         "accel": accel, "status": "PASS" if ok else "FAIL", "expected_line": expect, "expected_line_seen": expect_seen,
         "qemu_timed_out": timed_out, "seconds": seconds, "image_prepare_s": image_s, "image": str(image),
-        "tree": str(tree), "tree_files": len(listing), "exe": exe, "command_line": cmdline, "command": cmd,
+        "tree": str(tree), "tree_files": len(listing), "exe": exe, "command_line": cmdline, "env": [*spec.get("env", []), *args.env], "command": cmd,
         **res,
         "app_output_lines": app_lines[:600], "app_output_line_count": len(app_lines),
         "autorun_log": autorun_lines[:400],
@@ -291,6 +312,10 @@ def main():
     print(f"  app: {args.app} ({exe}), status: {record['status']} ({seconds} s, accel={accel})")
     print(f"  furthest point: {res['furthest']}")
     print(f"  autorun: {res['autorun_result']}")
+    if res["node_steps"] or res["node_done"]:
+        print(f"  node ladder: {res['node_done'] or 'did not finish'}")
+        for st in res["node_steps"]:
+            print(f"    step {st['step']} {st['result']}: {st['detail'][:160]}")
     print(f"  expected line: {expect!r} seen: {expect_seen}")
     for k in ("loader_failures", "exceptions", "node_fatal", "chromium_fatal", "unsupported_calls"):
         for l in res[k][:8]:

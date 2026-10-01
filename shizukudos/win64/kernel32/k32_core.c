@@ -21,7 +21,9 @@ DWORD k32_nt_error(NTSTATUS st)
     return e;
 }
 
-K32API UINT WINAPI SetErrorMode(UINT m) { static UINT mode; UINT old = mode; mode = m; return old; }
+static volatile LONG g_error_mode;
+K32API UINT WINAPI SetErrorMode(UINT m) { return (UINT)InterlockedExchange(&g_error_mode, (LONG)m); }
+K32API UINT WINAPI GetErrorMode(void) { return (UINT)g_error_mode; }
 K32API PVOID WINAPI EncodePointer(PVOID p) { return p; }         /* no pointer obfuscation cookie is used */
 K32API PVOID WINAPI DecodePointer(PVOID p) { return p; }
 K32API BOOL WINAPI IsDebuggerPresent(void) { return *(BYTE *)(shz_peb() + 2) != 0; }
@@ -508,6 +510,29 @@ K32API BOOL WINAPI FlsFree(DWORD i)
     fls_callbacks[i] = 0;
     ulk(&tls_bitmap_lock);
     return TRUE;
+}
+
+/* A suspended fiber's TEB_FLS_DATA array is detached from the running fiber.
+ * Registry storage is process-static; snapshot the live callback under its lock,
+ * clear the value before callback reentry, and never hold the lock across user
+ * code. Reentry can free/allocate FLS slots or delete a different suspended fiber.
+ * This helper does not upgrade FlsFree's existing calling-thread-only rundown or
+ * add generation tracking for slots freed/reused while a fiber is suspended. */
+void k32_fls_destroy_data(PVOID *values)
+{
+    DWORD i;
+    if (!values) return;
+    for (i = 0; i < FLS_MAX; ++i) {
+        PVOID value;
+        PFLS_CALLBACK_FUNCTION callback;
+        lk(&tls_bitmap_lock);
+        value = values[i];
+        values[i] = 0;
+        callback = (fls_bitmap[i >> 6] & (1ull << (i & 63))) ? fls_callbacks[i] : 0;
+        ulk(&tls_bitmap_lock);
+        if (value && callback) callback(value);
+    }
+    RtlFreeHeap(ShzProcessHeap(), 0, values);
 }
 
 /* ---------------------------------------------------------------- exceptions */

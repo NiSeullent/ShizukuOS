@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * userenv.dll - environment blocks, profile type, group policy notification and critical sections, AppContainer SIDs.
  *
- * This system has one user (advapi32 token.c: SHZ_USER_NAME_W) and no user profile directories (shell32.c reports every
+ * This system has one user (advapi32 token.c: SHZ_USER_NAME_W) and no managed user profile directories (shell32.c reports every
  * profile folder as not found), no group policy engine and no AppContainers. What that means for each function:
  *   CreateEnvironmentBlock   bInherit TRUE: a copy of the calling process's environment; FALSE: the system variables of
  *                            the calling process's environment (the ones the Kernel64 loader gives every process:
@@ -10,6 +10,8 @@
  *                            APPDATA, ...) are invented: no profile exists. The block is sorted, as Windows builds it.
  *   DestroyEnvironmentBlock  frees such a block.
  *   GetProfileType           no profile is loaded for the user: FALSE with ERROR_FILE_NOT_FOUND.
+ *   GetUserProfileDirectoryA/W   the process USERPROFILE, if explicitly supplied; otherwise ERROR_FILE_NOT_FOUND.
+ *                            No directory is created and no managed profile is implied. A valid TOKEN_QUERY token is required.
  *   RegisterGPNotification / UnregisterGPNotification   a real registration table; the events are never signaled
  *                            because no policy is ever applied.
  *   EnterCriticalPolicySection / LeaveCriticalPolicySection   named mutexes (one for machine, one for user policy): a
@@ -20,6 +22,7 @@
  */
 #define _USERENV_
 #include "nt.h"
+#include "ntreg.h"
 #include <string.h>
 #include <userenv.h>
 
@@ -122,6 +125,144 @@ DLLAPI BOOL WINAPI DestroyEnvironmentBlock(LPVOID block)
 }
 
 /* ---------------------------------------------------------------- profile */
+/* ---- managed profile contract: real handles, absent hive backend ---- */
+/* Kernel64 has a volatile registry but no hive file load/unload provider.
+ * Validate an owned snapshot of the caller's actual token before reporting
+ * that limitation. Never return HKCU as a fabricated loaded profile. */
+static BOOL managed_profile_token(HANDLE token, DWORD required)
+{
+    HANDLE owned = NULL;
+    ULONG basic[14] = {0}, returned = 0;
+    union { SHZ_UNICODE_STRING name; BYTE bytes[256]; } type = {0};
+    NTSTATUS status;
+    DWORD error = ERROR_SUCCESS;
+    ULONG_PTR begin, end, text;
+    static const WCHAR token_type[] = L"Token";
+    if (!DuplicateHandle(GetCurrentProcess(), token, GetCurrentProcess(), &owned,
+                         0, FALSE, DUPLICATE_SAME_ACCESS)) return FALSE;
+    status = NtQueryObject(owned, SHZ_ObjectBasicInformation, basic, sizeof basic, &returned);
+    if (status < 0) error = RtlNtStatusToDosError(status);
+    else if (returned != sizeof basic) error = ERROR_INVALID_DATA;
+    if (!error) {
+        status = NtQueryObject(owned, SHZ_ObjectTypeInformation, &type, sizeof type, &returned);
+        if (status < 0) error = RtlNtStatusToDosError(status);
+        else {
+            begin = (ULONG_PTR)&type;
+            end = begin + returned;
+            text = (ULONG_PTR)type.name.Buffer;
+            if (returned > sizeof type || returned < sizeof type.name ||
+                text < begin + sizeof type.name || text > end - (sizeof token_type - sizeof(WCHAR)))
+                error = ERROR_INVALID_DATA;
+            else if (type.name.Length != sizeof token_type - sizeof(WCHAR) ||
+                     memcmp(type.name.Buffer, token_type, sizeof token_type - sizeof(WCHAR)))
+                error = ERROR_INVALID_HANDLE;
+            else if ((basic[1] & required) != required) error = ERROR_ACCESS_DENIED;
+        }
+    }
+    /* Only this private duplicate is closed. Caller token/profile handles
+     * remain owned by their caller, even on every validation failure. */
+    if (!CloseHandle(owned) && !error) error = GetLastError();
+    if (error) { SetLastError(error); return FALSE; }
+    return TRUE;
+}
+
+DLLAPI BOOL WINAPI LoadUserProfileW(HANDLE token, LPPROFILEINFOW profile)
+{
+    if (!profile || profile->dwSize != sizeof *profile) {
+        SetLastError(ERROR_INVALID_PARAMETER); return FALSE;
+    }
+    profile->hProfile = NULL;
+    if (!profile->lpUserName) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    if (!managed_profile_token(token, TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_DUPLICATE)) return FALSE;
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+DLLAPI BOOL WINAPI LoadUserProfileA(HANDLE token, LPPROFILEINFOA profile)
+{
+    if (!profile || profile->dwSize != sizeof *profile) {
+        SetLastError(ERROR_INVALID_PARAMETER); return FALSE;
+    }
+    profile->hProfile = NULL;
+    if (!profile->lpUserName) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    if (!managed_profile_token(token, TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_DUPLICATE)) return FALSE;
+    /* No string reaches a backend: neither encoding can load a hive here. */
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+DLLAPI BOOL WINAPI UnloadUserProfile(HANDLE token, HANDLE profile)
+{
+    if (!profile) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+    if (!managed_profile_token(token, TOKEN_IMPERSONATE | TOKEN_DUPLICATE)) return FALSE;
+    /* This provider has never issued a loaded-profile handle. An unrelated
+     * key, event, token or predefined HKCU cannot be a matching profile. */
+    SetLastError(ERROR_INVALID_HANDLE);
+    return FALSE;
+}
+/* ---- end managed profile contract ---- */
+
+/* Original single-user implementation, following Microsoft Learn's size-in-TCHARs contract (including NUL).
+ * References reviewed: Wine df15af3652511150490934682202d45af892f887 dlls/userenv/userenv_main.c;
+ * ReactOS 9dc3ca87209fd8ebabd96c8ea95d439c13e7fdf8 dll/win32/userenv/profile.c. No upstream code copied.
+ * There is no profile registry here. Only an explicitly configured USERPROFILE is returned. A snapshot avoids
+ * a size-query/read race with SetEnvironmentVariableW; A is converted with CP_ACP, never by truncating WCHARs. */
+static WCHAR *profile_environment(HANDLE token, const WCHAR **path)
+{
+    TOKEN_TYPE type;
+    DWORD ret;
+    WCHAR *env, *p;
+    if (!GetTokenInformation(token, TokenType, &type, sizeof type, &ret)) return 0;
+    env = GetEnvironmentStringsW();
+    if (!env) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return 0; }
+    for (p = env; *p; p += wlen(p) + 1) {
+        if (!wci_cmp(p, wlen(p), L"USERPROFILE=", 12) && p[12]) {
+            *path = p + 12;
+            return env;
+        }
+    }
+    FreeEnvironmentStringsW(env);
+    SetLastError(ERROR_FILE_NOT_FOUND);
+    return 0;
+}
+
+DLLAPI BOOL WINAPI GetUserProfileDirectoryW(HANDLE token, LPWSTR out, LPDWORD size)
+{
+    const WCHAR *path;
+    WCHAR *env;
+    DWORD need;
+    BOOL fits;
+    if (!size) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    env = profile_environment(token, &path);
+    if (!env) return FALSE;
+    need = (DWORD)wlen(path) + 1;
+    fits = out && *size >= need;
+    if (fits) memcpy(out, path, need * sizeof *out);
+    *size = need;
+    FreeEnvironmentStringsW(env);
+    if (!fits) SetLastError(ERROR_INSUFFICIENT_BUFFER);
+    return fits;
+}
+
+DLLAPI BOOL WINAPI GetUserProfileDirectoryA(HANDLE token, LPSTR out, LPDWORD size)
+{
+    const WCHAR *path;
+    WCHAR *env;
+    int need;
+    DWORD error = ERROR_SUCCESS;
+    if (!size) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    env = profile_environment(token, &path);
+    if (!env) return FALSE;
+    need = WideCharToMultiByte(CP_ACP, 0, path, -1, 0, 0, 0, 0);
+    if (!need) error = GetLastError();
+    else if (!out || *size < (DWORD)need) error = ERROR_INSUFFICIENT_BUFFER;
+    else if (!WideCharToMultiByte(CP_ACP, 0, path, -1, out, need, 0, 0)) error = GetLastError();
+    if (need) *size = (DWORD)need;
+    FreeEnvironmentStringsW(env);
+    if (error) { SetLastError(error); return FALSE; }
+    return TRUE;
+}
+
 DLLAPI BOOL WINAPI GetProfileType(DWORD *flags)
 {
     if (!flags) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }

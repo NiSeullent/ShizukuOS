@@ -169,8 +169,8 @@ def dos_filetime(date, time):
     return (calendar.timegm((y, m, d, hh, mm, ss)) + 11644473600) * 10_000_000
 
 
-def check_image(exe, image, expected, label, write=False, mtimes=None):
-    r = subprocess.run([str(exe), str(image), *(["--write"] if write else [])], capture_output=True, text=True)
+def check_image(exe, image, expected, label, write=False, mtimes=None, batch=False):
+    r = subprocess.run([str(exe), str(image), *(["--write"] if write else []), *(["--batch"] if batch else [])], capture_output=True, text=True)
     lines = [json.loads(l) for l in r.stdout.splitlines() if l.strip()]
     assert r.returncode == 0, f"{label}: walker failed rc={r.returncode}\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}"
     seen = {}
@@ -215,6 +215,7 @@ def check_image(exe, image, expected, label, write=False, mtimes=None):
     assert done and done[0]["allocs"] == done[0]["frees"], f"{label}: allocation leak {done}"
     assert not problems, f"{label}:\n  " + "\n  ".join(problems)
     out = {"entries": len(seen), "sector_reads": done[0]["sector_reads"], "frag_runs": frag["runs"] if frag else None}
+    out.update(read_calls=done[0]["read_calls"], batch_calls=done[0]["batch_calls"])
     w = [l for l in lines if l.get("write")]
     if write:
         assert w, f"{label}: no write summary"
@@ -257,10 +258,10 @@ def apply_write_script(expected):
     return exp, touched
 
 
-def check_written(exe, image, expected, label):
+def check_written(exe, image, expected, label, batch=False):
     """Runs the write script on `image`, then fsck.fat -n, mtools read-back and the walker."""
     exp, mtimes = apply_write_script(expected)
-    result = check_image(exe, image, exp, label + "/write", write=True, mtimes=mtimes)
+    result = check_image(exe, image, exp, label + "/write", write=True, mtimes=mtimes, batch=batch)
     fsck = subprocess.run(["fsck.fat", "-n", "-v", str(image)], capture_output=True, text=True)
     bad_words = [l for l in fsck.stdout.splitlines() if not l.startswith("Checking") and
                  any(k in l.lower() for k in ("wrong", "lost", "invalid", "differ", "bad ", "orphan", "reclaim", "unused",
@@ -297,14 +298,19 @@ def main():
         build_image(image, size_mib, spc, mbr)
         expected = fill(image, src)
         for exe in exes:
-            results[f"{name}/{exe.name}"] = check_image(exe, image, expected, f"{name}/{exe.name}")
-            print(f"PASS {name} {exe.name}: {results[f'{name}/{exe.name}']}")
-        for exe in exes:
-            copy = OUT / f"{name}-{exe.name}-written.img"
-            shutil.copyfile(image, copy)
-            results[f"{name}/{exe.name}/write"] = check_written(exe, copy, expected, f"{name}/{exe.name}")
-            print(f"PASS {name} {exe.name} write: {results[f'{name}/{exe.name}/write']}")
-            copy.unlink()
+            for batch in (False, True):
+                label = f"{name}/{exe.name}/{'batch' if batch else 'single'}"
+                results[label] = check_image(exe, image, expected, label, batch=batch)
+                print(f"PASS {label}: {results[label]}")
+                copy = OUT / f"{name}-{exe.name}-{'batch' if batch else 'single'}-written.img"
+                shutil.copyfile(image, copy)
+                results[label + '/write'] = check_written(exe, copy, expected, label, batch=batch)
+                print(f"PASS {label} write: {results[label + '/write']}")
+                copy.unlink()
+            single = results[f"{name}/{exe.name}/single"]
+            batch = results[f"{name}/{exe.name}/batch"]
+            assert batch['sector_reads'] == single['sector_reads'], (single, batch)
+            assert batch['read_calls'] < single['read_calls'] and batch['batch_calls'] > 0, (single, batch)
     (OUT / "result.json").write_text(json.dumps({"status": "PASS", "results": results}, indent=2) + "\n")
     print("PASS")
 

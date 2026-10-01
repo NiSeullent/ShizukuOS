@@ -10,11 +10,44 @@
  * The OS primitives unwind.c calls are stubbed here; NtContinue / NtRaiseException / NtTerminateProcess record the
  * outcome and longjmp back, so a completed unwind is observable without a real thread context switch.
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "nt.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <setjmp.h>
 #include <sys/mman.h>
+#include <sys/uio.h>
+#include <unistd.h>
+#if defined(__SANITIZE_ADDRESS__)
+#define SHZ_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SHZ_ASAN 1
+#endif
+#endif
+#ifdef SHZ_ASAN
+#include <sanitizer/asan_interface.h>
+#endif
+
+/* Emulate the kernel's checked self-process copy, including short reads and inaccessible pages.
+ * ASan checks source poison explicitly: a kernel copy would otherwise bypass its instrumentation. */
+static unsigned host_read_failures;
+NTSTATUS NTAPI NtReadVirtualMemory(PVOID process, PVOID from, PVOID to, size_t n, size_t *got)
+{
+    struct iovec local = { to, n }, remote = { from, n };
+    ssize_t copied;
+    (void)process;
+    *got = 0;
+#ifdef SHZ_ASAN
+    if (__asan_region_is_poisoned(from, n)) { ++host_read_failures; return (NTSTATUS)0x8000000d; }
+#endif
+    copied = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+    if (copied > 0) *got = (size_t)copied;
+    if (copied < 0 || (size_t)copied != n) { ++host_read_failures; return (NTSTATUS)0x8000000d; }
+    return 0;
+}
 
 /* ---- exports of the code under test (unwind.c) ---- */
 PRUNTIME_FUNCTION NTAPI RtlLookupFunctionEntry(DWORD64, PDWORD64, PUNWIND_HISTORY_TABLE);
@@ -61,6 +94,11 @@ static int checks, failures;
 #define STACK_BYTES (1u << 24)
 static uint8_t *image;                          /* the "module": unwind info + executable trampolines (RWX mmap) */
 static uint8_t *stackbuf;                        /* emulated stack (16 MiB) */
+void shz_unwind_stack_limits(DWORD64 *low, DWORD64 *high)
+{
+    *low = (DWORD64)(uintptr_t)stackbuf;
+    *high = *low + STACK_BYTES;
+}
 
 /* Build an UNWIND_INFO at image offset `at`: version `ver`, prolog size, `n` codes (each {offset, (opinfo<<4)|op}),
  * optional handler flag. Returns the byte length. */

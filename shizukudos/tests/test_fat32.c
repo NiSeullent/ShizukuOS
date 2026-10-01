@@ -15,11 +15,21 @@ static FILE *img;
 static uint64_t nsectors, allocs, frees;
 
 static uint64_t writes;
+static uint64_t reads, batch_reads;
 static int rd(void *ctx, uint64_t lba, void *buf)
 {
     (void)ctx;
+    ++reads;
     if (fseeko(img, (off_t)(lba * 512), SEEK_SET)) return -1;
     return fread(buf, 1, 512, img) == 512 ? 0 : -1;
+}
+static int rd_many(void *ctx, uint64_t lba, unsigned count, void *buf)
+{
+    (void)ctx;
+    if (!count || count > FAT32_READ_MAX_SECTORS || lba >= nsectors || count > nsectors - lba) return -1;
+    ++reads; ++batch_reads;
+    if (fseeko(img, (off_t)(lba * 512), SEEK_SET)) return -1;
+    return fread(buf, 512, count, img) == count ? 0 : -1;
 }
 static int wr(void *ctx, uint64_t lba, const void *buf)
 {
@@ -277,13 +287,19 @@ static int write_script(fat32_vol_t *v)
 int main(int argc, char **argv)
 {
     static fat32_vol_t v;
-    int rc, write_mode = argc == 3 && !strcmp(argv[2], "--write");
-    if (argc != 2 && !write_mode) { fprintf(stderr, "usage: test_fat32 image [--write]\n"); return 2; }
+    int rc, i, write_mode = 0, batch_mode = 0;
+    if (argc < 2 || argc > 4) { fprintf(stderr, "usage: test_fat32 image [--write] [--batch]\n"); return 2; }
+    for (i = 2; i < argc; ++i) {
+        if (!strcmp(argv[i], "--write")) write_mode = 1;
+        else if (!strcmp(argv[i], "--batch")) batch_mode = 1;
+        else { fprintf(stderr, "unknown option: %s\n", argv[i]); return 2; }
+    }
     img = fopen(argv[1], write_mode ? "r+b" : "rb");
     if (!img) { perror(argv[1]); return 2; }
     fseeko(img, 0, SEEK_END);
     nsectors = (uint64_t)ftello(img) / 512;
     v.read = rd; v.alloc = al; v.free = fr; v.alloc_page = pg; v.ctx = 0; v.disk_sectors = nsectors;
+    if (batch_mode) v.read_many = rd_many;
     if (write_mode) v.write = wr;
     rc = fat32_mount(&v);
     if (rc) { printf("{\"error\": \"mount %d\"}\n", rc); return 1; }
@@ -295,8 +311,9 @@ int main(int argc, char **argv)
            (unsigned long long)v.part_lba, v.spc, v.cluster_count, v.root_cluster, v.label, v.fat_npages);
     if (walk(&v, 0, "", 0) < 0) return 1;
     fat32_unmount(&v);
-    printf("{\"done\": true, \"sector_reads\": %u, \"sector_writes\": %llu, \"allocs\": %llu, \"frees\": %llu}\n", v.sector_reads,
-           (unsigned long long)writes, (unsigned long long)allocs, (unsigned long long)frees);
+    printf("{\"done\": true, \"sector_reads\": %u, \"sector_writes\": %llu, \"allocs\": %llu, \"frees\": %llu, \"read_calls\": %llu, \"batch_calls\": %llu}\n", v.sector_reads,
+           (unsigned long long)writes, (unsigned long long)allocs, (unsigned long long)frees,
+           (unsigned long long)reads, (unsigned long long)batch_reads);
     fclose(img);
     return 0;
 }

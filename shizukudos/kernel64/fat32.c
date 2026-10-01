@@ -337,8 +337,26 @@ int fat32_read(fat32_vol_t *v, const fat32_chain_t *c, uint32_t size, uint64_t o
         if (!cluster) return FAT32_E_CORRUPT;                              /* chain shorter than the size */
         lba = fat32_cluster_lba(v, cluster) + sec;
         if (in_sec == 0 && len >= FAT32_SECTOR) {
-            if ((rc = read_sector(v, lba, dst))) return rc;
-            n = FAT32_SECTOR;
+            unsigned count = 1;
+            if (v->read_many && len >= FAT32_SECTOR * 2u) {
+                unsigned wanted = (unsigned)(len / FAT32_SECTOR > FAT32_READ_MAX_SECTORS ?
+                                             FAT32_READ_MAX_SECTORS : len / FAT32_SECTOR);
+                /* Verify each requested sector is physically consecutive, even
+                 * across cluster boundaries. Never bridge a fragmented run. */
+                for (count = 1; count < wanted; ++count) {
+                    const uint64_t next = off + (uint64_t)count * FAT32_SECTOR;
+                    const uint32_t next_cluster = chain_cluster(c, (uint32_t)(next / v->bytes_per_cluster));
+                    if (!next_cluster || fat32_cluster_lba(v, next_cluster) +
+                        (next % v->bytes_per_cluster) / FAT32_SECTOR != lba + count) break;
+                }
+            }
+            n = (uint64_t)count * FAT32_SECTOR;
+            if (count > 1) {
+                if (lba >= v->disk_sectors || count > v->disk_sectors - lba) return FAT32_E_RANGE;
+                v->sector_reads += count;
+                if (v->read_many(v->ctx, lba, count, v->read_batch)) return FAT32_E_IO;
+                f32_copy(dst, v->read_batch, n);
+            } else if ((rc = read_sector(v, lba, dst))) return rc;
         } else {
             if ((rc = bounce(v, lba))) return rc;
             n = FAT32_SECTOR - in_sec;

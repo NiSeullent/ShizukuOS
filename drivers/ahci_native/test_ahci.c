@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only -- original asynchronous HBA model (read, write, flush). */
 #include "ahci.h"
+#include "ahci_clock.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,15 +14,16 @@ struct model {
     uint8_t identify[512];
     uint8_t *allocation;
     uint64_t bus,clock,lba;
+    uint64_t clock_ticks_per_ms;
     unsigned calls,fault,reads,writes,allocations,releases,commands,syncs;
     unsigned pending,never_complete,late_error,short_transfer,unplug,stop_stuck;
     unsigned freeze_time,reverse_time,allocation_bad,bohc_stuck;
-    unsigned cpu_sync,device_sync,opcode;
+    unsigned cpu_sync,device_sync,opcode,count,completion_delay,sact_on_completion;
     uint32_t selected_base;
     uint32_t cold_signature,delivered_signature;
     /* media written through WRITE DMA EXT (reads of these LBAs return the stored bytes) */
     uint64_t written_lba[8]; uint8_t written[8][512]; unsigned nwritten,writes_done,flushes;
-    uint8_t pending_data[512];
+    uint8_t pending_data[AHCI_SECTOR_BYTES * AHCI_MAX_SECTORS];
 };
 static uint32_t u32(const uint8_t *p)
 { return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
@@ -37,27 +39,32 @@ static int stored(const struct model *m,uint64_t lba)
 { unsigned i; for(i=0;i<m->nwritten;++i) if(m->written_lba[i]==lba) return (int)i; return -1; }
 static void finish_command(struct model *m)
 {
-    unsigned i; uint32_t base=m->selected_base; int k;
+    unsigned i,sector; uint32_t base=m->selected_base; int k;
     CHECK(m->allocation && m->pending);
     if(m->opcode==0xec) memcpy(m->allocation+2048,m->identify,512);
     else if(m->opcode==0x35) {
         /* The device consumes the DMA data when the command completes successfully. */
         if(!m->late_error && !m->short_transfer && !m->unplug) {
-            k=stored(m,m->lba);
-            if(k<0) { CHECK(m->nwritten<8); k=(int)m->nwritten++; m->written_lba[k]=m->lba; }
-            memcpy(m->written[k],m->pending_data,512); ++m->writes_done;
+            for(sector=0;sector<m->count;++sector) {
+                k=stored(m,m->lba+sector);
+                if(k<0) { CHECK(m->nwritten<8); k=(int)m->nwritten++; m->written_lba[k]=m->lba+sector; }
+                memcpy(m->written[k],m->pending_data+sector*512u,512); ++m->writes_done;
+            }
         }
     } else if(m->opcode==0xea) {
         if(!m->late_error && !m->unplug) ++m->flushes;
-    } else if((k=stored(m,m->lba))>=0) memcpy(m->allocation+2048,m->written[k],512);
-    else for(i=0;i<512;++i)m->allocation[2048+i]=pattern(m->lba,i);
-    w32(m->allocation+4,m->opcode==0xea?(m->short_transfer?512u:0u):m->short_transfer?256:512);
+    } else for(sector=0;sector<m->count;++sector) {
+        if((k=stored(m,m->lba+sector))>=0) memcpy(m->allocation+2048+sector*512u,m->written[k],512);
+        else for(i=0;i<512;++i)m->allocation[2048+sector*512u+i]=pattern(m->lba+sector,i);
+    }
+    w32(m->allocation+4,m->opcode==0xea?(m->short_transfer?512u:0u):m->short_transfer?256u:m->count*512u);
     m->regs[(base+CI)/4]=0;
     m->regs[(base+TFD)/4]=0x50;
     if(m->late_error==1) { m->regs[(base+PIS)/4]|=1u<<30; m->regs[(base+TFD)/4]=0x51; }
     if(m->late_error==2)m->regs[(base+TFD)/4]=0x70; /* DF without TFES */
     if(m->late_error==3)m->regs[(base+TFD)/4]=0x51; /* ERR even if IRQ bit absent */
     if(m->unplug)m->regs[(base+SSTS)/4]=0;
+    if(m->sact_on_completion)m->regs[(base+SACT)/4]=1;
     m->pending=0;
 }
 static int read32(void *opaque,uint32_t offset,uint32_t *value)
@@ -66,7 +73,9 @@ static int read32(void *opaque,uint32_t offset,uint32_t *value)
     CHECK(!(offset&3u) && offset<sizeof(m->regs));++m->reads;
     /* Completion happens between the driver's first status read and CI read,
      * deliberately requiring a final status recheck after observing CI clear. */
-    if(offset==m->selected_base+CI && m->pending && !m->never_complete)finish_command(m);
+    if(offset==m->selected_base+CI && m->pending && !m->never_complete) {
+        if(m->completion_delay)--m->completion_delay;else finish_command(m);
+    }
     if(offset==m->selected_base+SIG && m->cold_signature &&
         (m->regs[(m->selected_base+CMD)/4]&0x4000u)) {
         CHECK(m->allocation && !(m->regs[(m->selected_base+CMD)/4]&1u));
@@ -96,18 +105,21 @@ static void issue_command(struct model *m,uint32_t value)
     if(table[2]!=0xea) {
         data_bus=(uint64_t)u32(table+128)|((uint64_t)u32(table+132)<<32);
         CHECK(data_bus==m->bus+2048);
-        CHECK(u32(table+136)==0 && u32(table+140)==511);
+        const unsigned count=table[2]==0xec?1u:(unsigned)table[12];
+        CHECK(count>=1 && count<=AHCI_MAX_SECTORS);
+        CHECK(u32(table+136)==0 && u32(table+140)==count*512u-1u);
     } else {
         for(i=128;i<144;++i) CHECK(table[i]==0);
     }
     CHECK(m->device_sync>=3);
     m->opcode=table[2]; m->lba=0;
+    m->count=m->opcode==0xea?0u:m->opcode==0xec?1u:(unsigned)table[12];
     for(i=0;i<3;++i) m->lba|=(uint64_t)table[4+i]<<(i*8);
     for(i=0;i<3;++i) m->lba|=(uint64_t)table[8+i]<<((i+3)*8);
-    if(m->opcode==0x25 || m->opcode==0x35) CHECK(table[7]==0x40 && table[12]==1 && table[13]==0);
+    if(m->opcode==0x25 || m->opcode==0x35) CHECK(table[7]==0x40 && table[12]>=1 && table[12]<=AHCI_MAX_SECTORS && table[13]==0);
     else if(m->opcode==0xea) CHECK(m->lba==0 && table[7]==0x40 && table[12]==0 && table[13]==0);
     else CHECK(m->lba==0 && table[7]==0 && table[12]==0);
-    if(m->opcode==0x35) memcpy(m->pending_data,header+2048,512);   /* what the HBA fetches over DMA */
+    if(m->opcode==0x35) memcpy(m->pending_data,header+2048,m->count*512u); /* what the HBA fetches over DMA */
     m->pending=1;++m->commands;m->cpu_sync=m->device_sync=0;
 }
 static int write32(void *opaque,uint32_t offset,uint32_t value)
@@ -169,10 +181,10 @@ static uint64_t now(void *opaque)
 {
     struct model *m=opaque;
     if(m->reverse_time && m->clock) return --m->clock;
-    return m->clock;
+    return m->clock_ticks_per_ms ? ahci_ticks_to_us(m->clock,m->clock_ticks_per_ms) : m->clock;
 }
 static void relax(void *opaque)
-{ struct model *m=opaque;if(!m->freeze_time)m->clock+=1000; }
+{ struct model *m=opaque;if(!m->freeze_time)m->clock+=m->clock_ticks_per_ms?m->clock_ticks_per_ms:1000u; }
 static struct ahci_ops callbacks(struct model *m)
 {
     const struct ahci_ops ops={m,read32,write32,allocate,release,sync_dma,now,relax};return ops;
@@ -251,6 +263,11 @@ static void command_errors(void)
         result=ahci_read_sector(&a,0,output,512);
         CHECK(result==((mode<2 || mode>=6)?AHCI_DEVICE_ERROR:mode==2?AHCI_NO_DEVICE:mode==5?AHCI_CLOCK:AHCI_TIMEOUT));
         CHECK(a.state==AHCI_CLOSED);
+        if (mode>=3 && mode<6) {
+            CHECK(a.last_wait_reason==(mode==5 ? 3u : mode==4 ? 2u : 1u));
+            if (mode==4) CHECK(a.last_wait_elapsed_us==0 && a.last_wait_polls==AHCI_POLL_LIMIT);
+            if (mode==3) CHECK(a.last_wait_elapsed_us>=a.timeout_us && a.last_wait_polls<AHCI_POLL_LIMIT);
+        }
         for(i=0;i<512;++i)CHECK(output[i]==0xa5);
         no_leaks(&m);
     }
@@ -476,6 +493,112 @@ static void write_command_errors(void)
         no_leaks(&m);
     }
 }
+
+static void batch_commands_and_clock(void)
+{
+    struct model m;struct ahci_device a={0};struct ahci_ops ops;struct ahci_config cfg=config_rw();
+    uint8_t in[2048],out[2049];unsigned count,i,sector,calls,before,delay=100;
+    const uint64_t lba=UINT64_C(0x123400000770);
+    reset(&m);w16(m.identify+166,0x6400);ops=callbacks(&m);
+    CHECK(ahci_open(&a,&ops,&cfg)==0);
+    for(count=1;count<=AHCI_MAX_SECTORS;++count) {
+        memset(out,0xa5,sizeof(out));before=m.commands;
+        CHECK(ahci_read_sectors(&a,lba,count,out,sizeof(out))==0 && m.commands==before+1);
+        for(sector=0;sector<count;++sector)for(i=0;i<512;++i)
+            CHECK(out[sector*512u+i]==pattern(lba+sector,i));
+        for(i=count*512u;i<sizeof(out);++i)CHECK(out[i]==0xa5);
+        /* Exact data bytes, reserved FIS bytes and DMA allocation canaries. */
+        for(i=4096;i<8192;++i)CHECK(m.allocation[i]==0xa5);
+    }
+    calls=m.calls;
+    CHECK(ahci_read_sectors(&a,lba,0,out,sizeof(out))==AHCI_INVALID);
+    CHECK(ahci_read_sectors(&a,lba,5,out,sizeof(out))==AHCI_INVALID);
+    CHECK(ahci_read_sectors(&a,lba,UINT32_MAX,out,sizeof(out))==AHCI_INVALID);
+    CHECK(ahci_read_sectors(&a,lba,4,out,2047)==AHCI_INVALID);
+    CHECK(ahci_read_sectors(&a,a.identity.sectors-3,4,out,sizeof(out))==AHCI_INVALID);
+    CHECK(ahci_read_sectors(&a,UINT64_C(0xfffffffffffe),4,out,sizeof(out))==AHCI_INVALID);
+    CHECK(ahci_read_sectors(&a,lba,4,(uint8_t *)a.dma.cpu-1,2048)==AHCI_INVALID);
+    CHECK(ahci_read_sectors(&a,lba,4,&a,2048)==AHCI_INVALID && m.calls==calls);
+    for(i=0;i<sizeof(in);++i)in[i]=(uint8_t)(i*17u+11u);
+    before=m.commands;
+    CHECK(ahci_write_sectors(&a,lba,4,in,sizeof(in))==0 && m.commands==before+1);
+    CHECK(m.writes_done==4 && m.nwritten==4);
+    CHECK(ahci_read_sectors(&a,lba,4,out,sizeof(out))==0 && !memcmp(in,out,sizeof(in)));
+    CHECK(ahci_read_sectors(&a,a.identity.sectors-4,4,out,sizeof(out))==0);
+    calls=m.calls;
+    CHECK(ahci_write_sectors(&a,lba,0,in,sizeof(in))==AHCI_INVALID);
+    CHECK(ahci_write_sectors(&a,lba,5,in,sizeof(in))==AHCI_INVALID);
+    CHECK(ahci_write_sectors(&a,lba,4,in,2047)==AHCI_INVALID);
+    CHECK(ahci_write_sectors(&a,lba,4,in,2049)==AHCI_INVALID);
+    CHECK(ahci_write_sectors(&a,a.identity.sectors-3,4,in,sizeof(in))==AHCI_INVALID);
+    CHECK(ahci_write_sectors(&a,lba,4,a.dma.cpu,sizeof(in))==AHCI_INVALID && m.calls==calls);
+    before=m.reads;m.completion_delay=delay;
+    CHECK(ahci_read_sectors(&a,lba,4,out,sizeof(out))==0);
+    CHECK(m.reads-before==delay*3u+13u); /* pending loops issue exactly three MMIO reads */
+    CHECK(ahci_close(&a)==0);no_leaks(&m);
+    for(count=0;count<4;++count) {
+        const uint64_t per_ms=count==0?100000u:count==1?2400000u:count==2?3600000u:20000000u;
+        CHECK(ahci_ticks_to_us(per_ms,per_ms)==1000);
+        CHECK(ahci_ticks_to_us(per_ms*5000u,per_ms)==5000000);
+        CHECK(ahci_ticks_to_us(per_ms*5000u-1u,per_ms)==4999999);
+        CHECK(ahci_ticks_to_us(UINT64_MAX,per_ms)>ahci_ticks_to_us(UINT64_MAX-per_ms,per_ms));
+        CHECK(ahci_ticks_to_us(0,per_ms)==0);
+    }
+    CHECK(ahci_ticks_to_us(5,0)==UINT64_MAX);
+    CHECK(ahci_ticks_to_us(5,99999)==UINT64_MAX);
+    CHECK(ahci_ticks_to_us(5,20000001)==UINT64_MAX);
+    for(count=0;count<2;++count) {
+        reset(&m);memset(&a,0,sizeof(a));ops=callbacks(&m);CHECK(ahci_open(&a,&ops,&cfg)==0);
+        m.clock_ticks_per_ms=count?3600000u:2400000u;m.never_complete=1;
+        CHECK(ahci_read_sectors(&a,9,4,out,sizeof(out))==AHCI_TIMEOUT);
+        CHECK(a.last_wait_reason==1 && a.last_wait_elapsed_us==cfg.command_timeout_us);
+        CHECK(m.clock==m.clock_ticks_per_ms*1000u && a.last_wait_polls==1000);
+        no_leaks(&m);
+    }
+}
+
+static void batch_errors_and_callback_failures(void)
+{
+    struct model m;struct ahci_device a;struct ahci_ops ops;struct ahci_config cfg=config_rw();
+    uint8_t in[2048],out[2048];unsigned mode,i,op,total,which;int result;
+    memset(in,0x69,sizeof(in));
+    for(op=0;op<2;++op)for(mode=0;mode<9;++mode) {
+        reset(&m);memset(&a,0,sizeof(a));ops=callbacks(&m);CHECK(ahci_open(&a,&ops,&cfg)==0);
+        memset(out,0xa5,sizeof(out));
+        if(mode==0)m.late_error=1;
+        if(mode==1)m.short_transfer=1;
+        if(mode==2)m.unplug=1;
+        if(mode>=3 && mode<6)m.never_complete=1;
+        if(mode==4)m.freeze_time=1;
+        if(mode==5){m.reverse_time=1;m.clock=100;}
+        if(mode==6)m.late_error=2;
+        if(mode==7)m.late_error=3;
+        if(mode==8)m.sact_on_completion=1;
+        result=op?ahci_write_sectors(&a,7,4,in,sizeof(in)):ahci_read_sectors(&a,7,4,out,sizeof(out));
+        CHECK(result==((mode<2 || (mode>=6 && mode<8))?AHCI_DEVICE_ERROR:
+                       mode==2?AHCI_NO_DEVICE:mode==5?AHCI_CLOCK:mode==8?AHCI_BUSY:AHCI_TIMEOUT));
+        CHECK(a.state==AHCI_CLOSED);
+        if(!op)for(i=0;i<sizeof(out);++i)CHECK(out[i]==0xa5);
+        no_leaks(&m);
+    }
+    for(op=0;op<2;++op) {
+        reset(&m);memset(&a,0,sizeof(a));ops=callbacks(&m);CHECK(ahci_open(&a,&ops,&cfg)==0);
+        CHECK((op?ahci_write_sectors(&a,7,4,in,sizeof(in)):ahci_read_sectors(&a,7,4,out,sizeof(out)))==0);
+        CHECK(ahci_close(&a)==0);total=m.calls;no_leaks(&m);
+        for(which=1;which<=total;++which) {
+            reset(&m);memset(&a,0,sizeof(a));m.fault=which;ops=callbacks(&m);memset(out,0xa5,sizeof(out));
+            result=ahci_open(&a,&ops,&cfg);
+            if(!result)result=op?ahci_write_sectors(&a,7,4,in,sizeof(in)):ahci_read_sectors(&a,7,4,out,sizeof(out));
+            /* Preserve whether data completion occurred before a later close failure. */
+            if(result && !op)for(i=0;i<sizeof(out);++i)CHECK(out[i]==0xa5);
+            if(!result)result=ahci_close(&a);
+            CHECK(result!=AHCI_OK);
+            if(a.state==AHCI_RETAINED){CHECK(m.allocation);CHECK(ahci_close(&a)==0);}
+            no_leaks(&m);
+        }
+        printf("Batch %s: fault injected after each of %u callbacks\n",op?"write":"read",total);
+    }
+}
 int main(void)
 {
     success_and_bounds();callback_failures();command_errors();capability_and_dma_errors();identify_errors();
@@ -483,6 +606,7 @@ int main(void)
     sparse_ports_and_initial_state();
     cold_signature_and_fbs();
     qemu_identify_contract();
+    batch_commands_and_clock();batch_errors_and_callback_failures();
     printf("PASS: AHCI native core %u assertions; no model DMA freed while active\n",assertions);
     return 0;
 }
