@@ -19,6 +19,7 @@
 #define OP_CRC32 0x102
 #define OP_TIME 0x103
 #define OP_SESSION_END 0x1f0
+#define RX_PASS_BUDGET 32u
 
 static void *chan_base;
 static size_t chan_size;
@@ -133,13 +134,24 @@ void ipc_server_thread(void *arg)
         shz_msg_hdr_t m;
         uint8_t payload[SHZ_MSG_MAX_INLINE];
         int reason, rc;
+        unsigned budget;
         sem_wait_timeout(&doorbell_sem, 20);          /* also polls: a doorbell may race the wait */
         shz_doorbell_ack();
-        while ((rc = shz_ring_pop(rx, &m, payload, sizeof payload, &reason)) != SHZ_E_NOENT) {
+        /* Bound work even when a peer replenishes the ring continuously. */
+        for (budget = 0; budget < RX_PASS_BUDGET; ++budget) {
+            rc = shz_ring_pop(rx, &m, payload, sizeof payload, &reason);
+            if (rc == SHZ_E_NOENT)
+                break;
             if (rc == SHZ_OK)
                 handle(&m, payload);
-            else
+            else {
                 ++proto_errors;
+                /* Malformed frames are consumed; invalid metadata and a
+                 * corrupt producer index are not. Retry them after a wait. */
+                if (rc != SHZ_E_PROTO || reason == SHZ_PR_HEAD_CORRUPT)
+                    break;
+            }
         }
+        thread_yield();                             /* pending doorbells can make the next wait immediate */
     }
 }
