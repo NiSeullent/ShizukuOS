@@ -1,0 +1,178 @@
+{
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "VM_executed": false,
+  "Windows98_boot_verified": false,
+  "changed_allowlist": {
+    "shizukudos/kernel32/ipc.c": {
+      "after_sha256": "66dd30417622e2d4a223899db4e147715543dc47d9ad1fc8a64668d12aadbfa3",
+      "before_sha256": "da1334447456982068591fb7319dd8b0beae88d59cf1b11cb230c702dd187e64"
+    },
+    "shizukudos/kernel32/main.c": {
+      "after_sha256": "e75b4903007c2d591bdd5f6af39cf2eafff5e3ff9e5a4b4de4ce1cbba880b93b",
+      "before_sha256": "9c3a15f5f1ad0a9fe1021cdf66df05511c09a061e848aef17458ccf620db50f5"
+    },
+    "shizukudos/kernel32/service_policy.h": {
+      "after_sha256": "33f5346ce3c8a1b4b009fb3efcbbe942acbaab8cb1703e738022b0b146992eae",
+      "before_sha256": null
+    },
+    "shizukudos/supervisor/src/kdom.c": {
+      "after_sha256": "301e6bddab2d3c7f4e8464d60c011b1058b19fee8751f0d944c6135c8502e74d",
+      "before_sha256": "cc6e561694aced029469678d8a7079fd8c3263508872c489a2eed48901d5f5e5"
+    }
+  },
+  "full_native_link_performed": false,
+  "native_apps_verified": false,
+  "original_sources_sha256": {
+    "shizukudos/abi/shz_abi.h": "7d53ebf6c5be271cf8dae5ff18fe1b05d8ba87492fc71f0a447f544c76750682",
+    "shizukudos/abi/shz_ipc.h": "892e00099aad4d1c05cac2555ce6db7f95710ab41e544380afadf17c6ce6202c",
+    "shizukudos/abi/shz_pixel_sample.h": "35a0cda6665de837267b4c3b6b47cc45b0e8cc89e0aa7c276728ccc6da0f6cf6",
+    "shizukudos/abi/shz_pnp_catalog.h": "eb28131979b3264cf1ac195973703872755ce71bdc26ee33fca9ca3d06817964",
+    "shizukudos/abi/test_abi.c": "f0f8e79f7fb40586b7fc862c1edcf1c46b9ef64f46b7f75a1e52bbd0888b7770",
+    "shizukudos/abi/test_abi.py": "706cfc1a7c45d1f82abfbdae6215954e897a2ffe3f4a33bb3075423ef29ed3cb",
+    "shizukudos/kbuild.py": "1b0ffd44dd73b2b0a6c656b91f054e002cd999006e121ed16bbd666530f25b22",
+    "shizukudos/kcommon/khc.h": "6e4779375a0c3cd80a35a9178bc0a92dcfbf62937ee767e6eaa80d0af50e7bf4",
+    "shizukudos/kcommon/standalone_dev.h": "d9a234bd537411f29c19a178181e2439ab8655d70eabc56f2f362ea15e5e5e4d",
+    "shizukudos/kernel32/arch.c": "94c1cc6b3a62a474f7a349bfae45535ac7336720103a5b351a459e7577ba95ea",
+    "shizukudos/kernel32/ipc.c": "da1334447456982068591fb7319dd8b0beae88d59cf1b11cb230c702dd187e64",
+    "shizukudos/kernel32/k32.h": "97b924cc350c50c72321ea8dcb1b9f7b51a9f9e90daee8f84be189b183eba51c",
+    "shizukudos/kernel32/lib.c": "9db50deba52ee9928ab7df5b70f9e2d0be595771590ab078b86ad352c5a3e487",
+    "shizukudos/kernel32/main.c": "9c3a15f5f1ad0a9fe1021cdf66df05511c09a061e848aef17458ccf620db50f5",
+    "shizukudos/kernel32/mem.c": "4e299d1364d35484ab6d61b8de06a3321bc5f965456281b76b5f1d7b6c03649e",
+    "shizukudos/kernel32/sched.c": "4819e88176c90dff11666e7aa59a904fb47178f0748ae78e9414b5f9d45749dc",
+    "shizukudos/kernel32/standalone/standalone32.c": "b13ddbfaab7a1b87d13dd440fcacb18cb2011179f91e001b273842cddfb2003b",
+    "shizukudos/kernel32/tests.c": "681ae51e13697c48347253dbebf8e50a0fe4e96606ffacdd1b4619506ddc6e0a",
+    "shizukudos/kernel32/user.c": "03690b723ac6bce68ab075ab93687c369a5a0e26f857607f5b3d61dd56eaa1aa",
+    "shizukudos/kernel64/boot_channel_peer.h": "a72e27e51de1e33eef755f6e3164e1a21e68714e52e1b00e6ed2f1dcf3fe6933",
+    "shizukudos/kernel64/ipc64.c": "3ce5744d0da181003054c35b1e41039cb201a9c6e5f96d7cc1601630549eb610",
+    "shizukudos/kernel64/main.c": "ebe389e0d6beb9bb13e188809d448a25b2c7090a901c6ca248089018d4bdf14e",
+    "shizukudos/kernel64/subsys64.c": "ce44ec45ffea336e2594d972b72d3090515d3701552fc10bfe96f1be5683e6d2",
+    "shizukudos/supervisor/build.py": "a2f16bb4a530e59c9172ba636e573fa30c02404bfef7281c8f165ee0a5b35a62",
+    "shizukudos/supervisor/include/shz_info.h": "03ede36a69488ca96ecdc25d5f379e851c960e9580eab59b06f352e90df3bda7",
+    "shizukudos/supervisor/src/bios.c": "fd29cd30b5b2d17c24ab980643ffe9127be5b3c406dabfa88e81ef8ea8ce69be",
+    "shizukudos/supervisor/src/bios.h": "6726cd5992c373122117d1daa7af36167e2de61f36bf3d8bc7a8d87ee0217f28",
+    "shizukudos/supervisor/src/caps.c": "00b25c3479df2c9fa290166edf9fe24bb1d9b9492a42f9dff042b1924ae1b042",
+    "shizukudos/supervisor/src/caps.h": "36ae0e4fbae1b9e636bd4996cd02953e00fb1359b196ee8b1099b3bcd56da06d",
+    "shizukudos/supervisor/src/console.c": "0886aecbff21cefa7dc7ad72548457b67ae20d2bd2fb88c374ccf7b6668b5ff5",
+    "shizukudos/supervisor/src/console.h": "e643203d85811fa80a4474af531d2492130a2f108d91855a7b7617d75e45c714",
+    "shizukudos/supervisor/src/cpu.h": "bc02d3a20d9674699686ca14c0455724507043187f8aec06db26a6ee39043b0e",
+    "shizukudos/supervisor/src/devices.c": "08c9d1ed097edcae1384a9e732fd4dab760de8ff73a541f75da8f1da80beb16e",
+    "shizukudos/supervisor/src/devices.h": "1466044ef299a1fc4664975a875643b6b289a5d743ea5c644ba3e59ee8bd1fd9",
+    "shizukudos/supervisor/src/domain.c": "e8ec9d6d80a2b320dc2e28b77222dbd9aeb77d881381613eb843f2bf6db6f64e",
+    "shizukudos/supervisor/src/domain.h": "84da0a953e7e2e0be2c47eb306cd48f8ad0c5715ecdcc1bd50348fb31f915e06",
+    "shizukudos/supervisor/src/dos.c": "b0053e8f48eb427a81d03ddc1d4deada085d1bf5e18d2f48d71610c6731e285f",
+    "shizukudos/supervisor/src/ept.c": "86cadb3db346f7b117ff1c6daa5fc8a9c5db102fc4d0ef4587cea504f3971a50",
+    "shizukudos/supervisor/src/ept.h": "1806a451932fac996ebdb9d94ec1456e6b4a1bf564b1decdc6e39e950f85865b",
+    "shizukudos/supervisor/src/font8x8_basic.h": "446e3540430193b60ac7a7abdb86b553fe5594211dc41796f1e1d8aabf78cca3",
+    "shizukudos/supervisor/src/guest.h": "12aa5ad5410238516eb5348c1f097079b27bfad767e7ef4ddfb532191d9724f0",
+    "shizukudos/supervisor/src/kdom.c": "cc6e561694aced029469678d8a7079fd8c3263508872c489a2eed48901d5f5e5",
+    "shizukudos/supervisor/src/lib.c": "4de3fc56b40a3478c58c035a6fdb42cb52d67d0c1f375fe21cb72e55b238ba99",
+    "shizukudos/supervisor/src/main.c": "cc22ef586c6295f85063d4d57dd0bdbe5ed662a3fcfd44e893b998066fc9b88c",
+    "shizukudos/supervisor/src/platform.c": "379c9b503caed2a51816bf929b2ce4f28fe7e958197483001439d4a429edf2e1",
+    "shizukudos/supervisor/src/platform.h": "3d724809939612f19a442bc99c3bcc3c0d6a697cb0ca9efab5598427951b6a9e",
+    "shizukudos/supervisor/src/pool.c": "1e698e03cc8088fe9be5424135cb74585007229560e8aeff9897030c4ce9ad3e",
+    "shizukudos/supervisor/src/pool.h": "88861fceb0549daeabfde05ab1d6f5ce1bac42b7490202ffd26ecad49d69ed26",
+    "shizukudos/supervisor/src/video.c": "c4c25e1e050a25c6c5f4eb316917fe7dab3fbf01314151826ba59c203002b03a",
+    "shizukudos/supervisor/src/video.h": "b8a2670037f322a5c21d0183c04ddf3c8701c29df1b568962bca163b0bf2b0ae",
+    "shizukudos/supervisor/src/vmx.c": "69dd393464ca2550b1acc829c99b71ccbbe711b29a4857505dbc373e24a2db6c",
+    "shizukudos/supervisor/src/vmx.h": "a3caffad54d6b5aca92dd7c7004e3565d0ca6ab01b548155340dc07426476259"
+  },
+  "payloads": {
+    "README.md": {
+      "bytes": 7480,
+      "sha256": "26ae2d0ade5a1866bb7f49edd48eaa0d29b862d697d029bb8b8975f2aa6d38ee"
+    },
+    "baseline.log": {
+      "bytes": 22318,
+      "sha256": "995b594882833deee630b6534f82eeae05cd83d9418de7e1742a7b1e90c50067"
+    },
+    "empty-policy-red.log": {
+      "bytes": 1062,
+      "sha256": "342204ebfd8dd9ce4dd3c3ed145ae46e6fd96744b461711c589afbe8db837a88"
+    },
+    "evidence.json": {
+      "bytes": 24833,
+      "sha256": "26c77c0ab6a1fae4f2c468a2fd200ea68b4a32f3fb3918d6c7df276bb91011b3"
+    },
+    "host_fixture.c": {
+      "bytes": 10919,
+      "sha256": "d059e9b244fd761e069685da5994c64b36127d7327d39be66b50a2c115eac1c5"
+    },
+    "proposal.patch": {
+      "bytes": 6860,
+      "sha256": "4d3fa27d77b7701a7512957f0656f39d02f8e41d68a497ccd24cf475e4dba0ba"
+    },
+    "reproduce.py": {
+      "bytes": 8749,
+      "sha256": "534624f46ca22ee29b277541e1c4bb48a897c931752983b7db17112c3252eca8"
+    },
+    "test_lifetime.py": {
+      "bytes": 4572,
+      "sha256": "848429f9f8ed3766f833a0f64016f83e7799a31d97676502b5a7af209d2b77fd"
+    },
+    "test_reproducer.py": {
+      "bytes": 1451,
+      "sha256": "bc3738ea5333952c34b85717875195c7065617cafb4a98fde0079d00c13fe223"
+    },
+    "tests.log": {
+      "bytes": 3921,
+      "sha256": "bfb4e555c57ce0db5671992ad904142dac815506470c3485a2e8839af4544c74"
+    }
+  },
+  "schema": 1,
+  "source_commit": "8508c5e360fe8c24c659b719f1ed21831cbdbd4c",
+  "sources_sha256": {
+    "shizukudos/abi/shz_abi.h": "7d53ebf6c5be271cf8dae5ff18fe1b05d8ba87492fc71f0a447f544c76750682",
+    "shizukudos/abi/shz_ipc.h": "892e00099aad4d1c05cac2555ce6db7f95710ab41e544380afadf17c6ce6202c",
+    "shizukudos/abi/shz_pixel_sample.h": "35a0cda6665de837267b4c3b6b47cc45b0e8cc89e0aa7c276728ccc6da0f6cf6",
+    "shizukudos/abi/shz_pnp_catalog.h": "eb28131979b3264cf1ac195973703872755ce71bdc26ee33fca9ca3d06817964",
+    "shizukudos/abi/test_abi.c": "f0f8e79f7fb40586b7fc862c1edcf1c46b9ef64f46b7f75a1e52bbd0888b7770",
+    "shizukudos/abi/test_abi.py": "706cfc1a7c45d1f82abfbdae6215954e897a2ffe3f4a33bb3075423ef29ed3cb",
+    "shizukudos/kbuild.py": "1b0ffd44dd73b2b0a6c656b91f054e002cd999006e121ed16bbd666530f25b22",
+    "shizukudos/kcommon/khc.h": "6e4779375a0c3cd80a35a9178bc0a92dcfbf62937ee767e6eaa80d0af50e7bf4",
+    "shizukudos/kcommon/standalone_dev.h": "d9a234bd537411f29c19a178181e2439ab8655d70eabc56f2f362ea15e5e5e4d",
+    "shizukudos/kernel32/arch.c": "94c1cc6b3a62a474f7a349bfae45535ac7336720103a5b351a459e7577ba95ea",
+    "shizukudos/kernel32/ipc.c": "66dd30417622e2d4a223899db4e147715543dc47d9ad1fc8a64668d12aadbfa3",
+    "shizukudos/kernel32/k32.h": "97b924cc350c50c72321ea8dcb1b9f7b51a9f9e90daee8f84be189b183eba51c",
+    "shizukudos/kernel32/lib.c": "9db50deba52ee9928ab7df5b70f9e2d0be595771590ab078b86ad352c5a3e487",
+    "shizukudos/kernel32/main.c": "e75b4903007c2d591bdd5f6af39cf2eafff5e3ff9e5a4b4de4ce1cbba880b93b",
+    "shizukudos/kernel32/mem.c": "4e299d1364d35484ab6d61b8de06a3321bc5f965456281b76b5f1d7b6c03649e",
+    "shizukudos/kernel32/sched.c": "4819e88176c90dff11666e7aa59a904fb47178f0748ae78e9414b5f9d45749dc",
+    "shizukudos/kernel32/service_policy.h": "33f5346ce3c8a1b4b009fb3efcbbe942acbaab8cb1703e738022b0b146992eae",
+    "shizukudos/kernel32/standalone/standalone32.c": "b13ddbfaab7a1b87d13dd440fcacb18cb2011179f91e001b273842cddfb2003b",
+    "shizukudos/kernel32/tests.c": "681ae51e13697c48347253dbebf8e50a0fe4e96606ffacdd1b4619506ddc6e0a",
+    "shizukudos/kernel32/user.c": "03690b723ac6bce68ab075ab93687c369a5a0e26f857607f5b3d61dd56eaa1aa",
+    "shizukudos/kernel64/boot_channel_peer.h": "a72e27e51de1e33eef755f6e3164e1a21e68714e52e1b00e6ed2f1dcf3fe6933",
+    "shizukudos/kernel64/ipc64.c": "3ce5744d0da181003054c35b1e41039cb201a9c6e5f96d7cc1601630549eb610",
+    "shizukudos/kernel64/main.c": "ebe389e0d6beb9bb13e188809d448a25b2c7090a901c6ca248089018d4bdf14e",
+    "shizukudos/kernel64/subsys64.c": "ce44ec45ffea336e2594d972b72d3090515d3701552fc10bfe96f1be5683e6d2",
+    "shizukudos/supervisor/build.py": "a2f16bb4a530e59c9172ba636e573fa30c02404bfef7281c8f165ee0a5b35a62",
+    "shizukudos/supervisor/include/shz_info.h": "03ede36a69488ca96ecdc25d5f379e851c960e9580eab59b06f352e90df3bda7",
+    "shizukudos/supervisor/src/bios.c": "fd29cd30b5b2d17c24ab980643ffe9127be5b3c406dabfa88e81ef8ea8ce69be",
+    "shizukudos/supervisor/src/bios.h": "6726cd5992c373122117d1daa7af36167e2de61f36bf3d8bc7a8d87ee0217f28",
+    "shizukudos/supervisor/src/caps.c": "00b25c3479df2c9fa290166edf9fe24bb1d9b9492a42f9dff042b1924ae1b042",
+    "shizukudos/supervisor/src/caps.h": "36ae0e4fbae1b9e636bd4996cd02953e00fb1359b196ee8b1099b3bcd56da06d",
+    "shizukudos/supervisor/src/console.c": "0886aecbff21cefa7dc7ad72548457b67ae20d2bd2fb88c374ccf7b6668b5ff5",
+    "shizukudos/supervisor/src/console.h": "e643203d85811fa80a4474af531d2492130a2f108d91855a7b7617d75e45c714",
+    "shizukudos/supervisor/src/cpu.h": "bc02d3a20d9674699686ca14c0455724507043187f8aec06db26a6ee39043b0e",
+    "shizukudos/supervisor/src/devices.c": "08c9d1ed097edcae1384a9e732fd4dab760de8ff73a541f75da8f1da80beb16e",
+    "shizukudos/supervisor/src/devices.h": "1466044ef299a1fc4664975a875643b6b289a5d743ea5c644ba3e59ee8bd1fd9",
+    "shizukudos/supervisor/src/domain.c": "e8ec9d6d80a2b320dc2e28b77222dbd9aeb77d881381613eb843f2bf6db6f64e",
+    "shizukudos/supervisor/src/domain.h": "84da0a953e7e2e0be2c47eb306cd48f8ad0c5715ecdcc1bd50348fb31f915e06",
+    "shizukudos/supervisor/src/dos.c": "b0053e8f48eb427a81d03ddc1d4deada085d1bf5e18d2f48d71610c6731e285f",
+    "shizukudos/supervisor/src/ept.c": "86cadb3db346f7b117ff1c6daa5fc8a9c5db102fc4d0ef4587cea504f3971a50",
+    "shizukudos/supervisor/src/ept.h": "1806a451932fac996ebdb9d94ec1456e6b4a1bf564b1decdc6e39e950f85865b",
+    "shizukudos/supervisor/src/font8x8_basic.h": "446e3540430193b60ac7a7abdb86b553fe5594211dc41796f1e1d8aabf78cca3",
+    "shizukudos/supervisor/src/guest.h": "12aa5ad5410238516eb5348c1f097079b27bfad767e7ef4ddfb532191d9724f0",
+    "shizukudos/supervisor/src/kdom.c": "301e6bddab2d3c7f4e8464d60c011b1058b19fee8751f0d944c6135c8502e74d",
+    "shizukudos/supervisor/src/lib.c": "4de3fc56b40a3478c58c035a6fdb42cb52d67d0c1f375fe21cb72e55b238ba99",
+    "shizukudos/supervisor/src/main.c": "cc22ef586c6295f85063d4d57dd0bdbe5ed662a3fcfd44e893b998066fc9b88c",
+    "shizukudos/supervisor/src/platform.c": "379c9b503caed2a51816bf929b2ce4f28fe7e958197483001439d4a429edf2e1",
+    "shizukudos/supervisor/src/platform.h": "3d724809939612f19a442bc99c3bcc3c0d6a697cb0ca9efab5598427951b6a9e",
+    "shizukudos/supervisor/src/pool.c": "1e698e03cc8088fe9be5424135cb74585007229560e8aeff9897030c4ce9ad3e",
+    "shizukudos/supervisor/src/pool.h": "88861fceb0549daeabfde05ab1d6f5ce1bac42b7490202ffd26ecad49d69ed26",
+    "shizukudos/supervisor/src/video.c": "c4c25e1e050a25c6c5f4eb316917fe7dab3fbf01314151826ba59c203002b03a",
+    "shizukudos/supervisor/src/video.h": "b8a2670037f322a5c21d0183c04ddf3c8701c29df1b568962bca163b0bf2b0ae",
+    "shizukudos/supervisor/src/vmx.c": "69dd393464ca2550b1acc829c99b71ccbbe711b29a4857505dbc373e24a2db6c",
+    "shizukudos/supervisor/src/vmx.h": "a3caffad54d6b5aca92dd7c7004e3565d0ca6ab01b548155340dc07426476259"
+  }
+}
