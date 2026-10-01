@@ -385,6 +385,7 @@ def main():
     for name, m in sorted(modules.items()):
         files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
     files += wine_files
+    files += __import__("runpy").run_path(str(W64 / "trident" / "build.py"))["build"](OUT)  # W2 hook: ShizukuTrident (trident/)
     for name, (exe, _) in sorted(apps.items()):
         files.append((f"\\SHZ\\TESTS\\{exe.name.upper()}", exe.read_bytes()))
     files.append(("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe.read_bytes()))

@@ -23,7 +23,7 @@ import shzlib  # noqa: E402
 COMPONENTS = [
     # (builder, {output key: archive path})
     (HERE / "engine" / "build_engine.py", {"dll": "\\SHZ\\SYS64\\shzlite.dll"}),
-    (HERE / "xul" / "build_xul.py", {"dll": "\\SHZ\\SYS64\\gecko\\xul.dll", "version": "\\SHZ\\SYS64\\gecko\\VERSION"}),
+    # xul/build_xul.py -> \\SHZ\\SYS64\\gecko\\xul.dll + VERSION joins this list once the adaptor is complete (W2.md)
 ]
 
 

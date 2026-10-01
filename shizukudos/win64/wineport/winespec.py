@@ -234,27 +234,40 @@ def classify_entries(entries, sources):
     return entries
 
 
+def def_name(e):
+    """The name an entry has in the .def file. A nameless spec entry (`108 stdcall @() Impl`) exists only as an ordinal;
+    ld needs a name to attach it to, so it gets winebuild's placeholder `_noname<ordinal>` (winebuild emits
+    `-export:_noname108=Impl,@108,NONAME` for such entries in a PE build)."""
+    return f"_noname{e.ordinal}" if e.name == "@" else e.name
+
+
 def def_lines(library, entries, forward_ok):
-    """The EXPORTS block for mingw ld/dlltool. forward_ok(target) says whether a forward target is itself provided."""
+    """The EXPORTS block for mingw ld/dlltool. forward_ok(target) says whether a forward target is itself provided.
+    `-noname` entries and nameless (`@`) entries are exported by ordinal only (NONAME): the export table has no name
+    for them and the import library generated from this file imports them by ordinal, as winebuild's does."""
     out = [f"LIBRARY {library}", "EXPORTS"]
     kept = []
     for e in entries:
         if e.kind in ("stub", "import", "unported", "missing"):
             continue
+        if e.name == "@" and e.ordinal is None:              # winebuild rejects this too
+            e.kind, e.reason = "missing", "nameless entry without an ordinal"
+            continue
+        name = def_name(e)
         if e.kind == "forward":
             if not forward_ok(e.target):
                 e.kind, e.reason = "forward-missing", f"target {e.target} not provided"
                 continue
-            line = f"  {e.name} = {e.target}"
+            line = f"  {name} = {e.target}"
         elif e.kind == "extern":
-            line = f"  {e.name} DATA" if not e.target else f"  {e.name} = {e.target} DATA"
-        elif e.target and e.target != e.name:
-            line = f"  {e.name} = {e.target}"
+            line = f"  {name} DATA" if not e.target else f"  {name} = {e.target} DATA"
+        elif e.target and e.target != name:
+            line = f"  {name} = {e.target}"
         else:
-            line = f"  {e.name}"
+            line = f"  {name}"
         if e.ordinal is not None:
             line += f" @{e.ordinal}"
-            if e.noname:
+            if e.noname or e.name == "@":
                 line += " NONAME"
         out.append(line)
         kept.append(e)
