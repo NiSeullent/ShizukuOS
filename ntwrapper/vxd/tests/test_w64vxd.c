@@ -145,9 +145,12 @@ static void regression(const char *name)
     regression_begin();
     if (!strcmp(name, "layout")) {
         const shz_channel_hdr_t saved = *chdr();
+        const shz_ring_hdr_t saved_tx = *k64_tx(), saved_rx = *k64_rx();
         unsigned i;
-        for (i = 0; i < 8; ++i) {
+        for (i = 0; i < 10; ++i) {
             *chdr() = saved;
+            *k64_tx() = saved_tx;
+            *k64_rx() = saved_rx;
             switch (i) {
             case 0: chdr()->channel_id = 1; break;
             case 1: chdr()->generation = 0; break;
@@ -156,7 +159,9 @@ static void regression(const char *name)
             case 4: chdr()->slot_count = 64; break; /* disagrees with actual rings */
             case 5: chdr()->pool_size = SHZ_IPC_REGION_SIZE; break;
             case 6: chdr()->ring_ab_offset = 64; break; /* overlaps header/owner table */
-            default: chdr()->pool_size -= 1; break;
+            case 7: chdr()->pool_size -= 1; break;
+            case 8: k64_tx()->magic = 0; break; /* actual mapped ring, not the header snapshot */
+            default: k64_rx()->slot_size = SHZ_MSG_SLOT_SIZE / 2; break;
             }
             reset();
             CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == NTWV_ERROR_GEN_FAILURE);
@@ -164,6 +169,10 @@ static void regression(const char *name)
             ntwv_w64_reset();
         }
         *chdr() = saved;
+        *k64_tx() = saved_tx;
+        *k64_rx() = saved_rx;
+        reset();
+        CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == 0);
     } else {
         regression_open();
         if (!strcmp(name, "reentrant")) {
