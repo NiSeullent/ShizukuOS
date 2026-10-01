@@ -9,6 +9,7 @@
 #define _WIN32_WINNT 0x0400
 #include <windows.h>
 #include "composition.h"
+#include "foreground.h"
 
 #define CLIENT_WIDTH 456
 #define CLIENT_HEIGHT 264
@@ -170,6 +171,20 @@ static int close_handles(int cleanup)
     return success;
 }
 
+static void request_owned_foreground(const char *trigger)
+{
+    foreground_report report = acquire_own_foreground(main_window);
+    log_text("FOREGROUND_TRIGGER="); log_text(trigger); log_text("\r\n");
+    log_text(selected_style == 1u ? "FOREGROUND_STYLE=CLASSIC\r\n" : "FOREGROUND_STYLE=MODERN\r\n");
+    log_number("FOREGROUND_SWITCH=", switches);
+    log_number("FOREGROUND_OWNED=", (DWORD)report.owned);
+    log_number("FOREGROUND_VISIBLE=", (DWORD)report.visible);
+    log_number("FOREGROUND_REQUESTED=", (DWORD)report.requested);
+    log_number("FOREGROUND_API_RETURN=", (DWORD)report.api_return);
+    log_number("FOREGROUND_MATCH=", (DWORD)report.matches);
+    log_text("FOREGROUND_VERDICT=DIAGNOSTIC-ONLY\r\n");
+}
+
 static int select_style(DWORD requested)
 {
     HRESULT result;
@@ -187,6 +202,7 @@ static int select_style(DWORD requested)
     ++switches; paint_event_sent = 0;
     log_text(requested == 1u ? "SELECTED_STYLE=CLASSIC\r\n" : "SELECTED_STYLE=MODERN\r\n");
     log_number("SELECT_SWITCH=", switches);
+    request_owned_foreground("STYLE-SWITCH");
     SendMessageA(main_window, WM_THEMECHANGED, 0, 0);
     if (!InvalidateRect(main_window, NULL, FALSE)) {
         record_native_failure("InvalidateRect(style)"); return 0;
@@ -296,6 +312,7 @@ void mainCRTStartup(void)
                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (logfile == INVALID_HANDLE_VALUE) ExitProcess(2);
     log_text("COMPOSITION_LOG_VERSION=1\r\n");
+    log_text("FOREGROUND_LOG_VERSION=1\r\n");
     log_text("NTTHGUI_LOG_VERSION=1\r\nBEGIN_NONCE="); log_text(run_nonce);
     log_text("\r\nSCOPE=app-local native DIB composition; separate visible capture required\r\n");
     version.dwOSVersionInfoSize = sizeof(version);
@@ -341,6 +358,7 @@ void mainCRTStartup(void)
     if (!main_window) { record_native_failure("CreateWindowExA"); goto cleanup; }
     if (!select_style(1)) goto cleanup;
     ShowWindow(main_window, SW_SHOWNORMAL);
+    request_owned_foreground("INITIAL-SHOWN");
     if (!UpdateWindow(main_window)) { record_native_failure("UpdateWindow"); goto cleanup; }
     start = GetTickCount();
     /* Bounded wall clock and message batches; a hung native call still needs

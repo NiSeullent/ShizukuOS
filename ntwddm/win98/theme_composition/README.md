@@ -26,3 +26,19 @@ artifact/source receipt. The existing guarded startup helper can then prepare a
 fresh nonce and private COW trial. Parser results alone do not prove native
 process exit or complete visible scanout. Keep original native strict lifecycle
 verification and independent stopped-guest readbacks, then review actual PNGs.
+
+V13 passed actual offscreen pixel and normal child lifecycle checks but failed
+the existing strict verifier because its immutable build receipt used uppercase
+`NOT-TESTED` instead of the required `not_tested`. Its original receipt and FAIL
+remain sealed. Later builds validate the exact static receipt contract and all
+frozen artifact hashes before preparation; this gate supplies no native exit.
+
+The subsequent candidate makes one foreground request on initial show and each
+style change, only after checking the probe handle belongs to its own process
+and is visible. It records both the request return and the independently read
+foreground handle. A refusal remains diagnostic, with no retry loop or changes
+to other windows. Foreground state still cannot prove a complete visible scene.
+Microsoft documents request restrictions and a possibly null foreground handle:
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getforegroundwindow
+Win98 import support is checked against the unchanged local OEM export inventory.
