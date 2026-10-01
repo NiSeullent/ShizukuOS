@@ -1,0 +1,16 @@
+{
+  "schema": "shizuku-win98-registry-persistence-public-manifest/v1",
+  "public_payload_scope": "source/text metadata report only; no original Windows media, registry payloads, private paths or screenshots",
+  "actual_windows98_boot_verified": false,
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "payloads": {
+    "README.md": {
+      "bytes": 4928,
+      "sha256": "2ef7fb5185995f5c5f1ff01beaac7048946774a5616e2da0a8fdbaf3bb132144"
+    },
+    "summary.json": {
+      "bytes": 10992,
+      "sha256": "bc0bc792246e91ad07ea3a1d66a5f4b1f27932bea42c42b17c25d2d64a7d2bd4"
+    }
+  }
+}

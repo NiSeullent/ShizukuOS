@@ -1,0 +1,121 @@
+{
+  "schema": "shizukudos-cb43-source-only-checkpoint-v1",
+  "owned_source_files": 5,
+  "host_checks_passed": 38,
+  "linked_byte_checks_passed": 14,
+  "negative_layouts_rejected": 4,
+  "actual_DOS_guest_checks_passed": 17,
+  "failed_checks": 0,
+  "both_complete_source_profiles_compiled": true,
+  "combined_DOSMGR_profile_compiled": false,
+  "Windows98_boot_verified": false,
+  "MSDOS_replaced_under_Windows98": false,
+  "native_modern_apps_verified": false,
+  "files": [
+    {
+      "path": "shizukudos/dos16/patches/0003-cb43-win98-dos-internals.patch",
+      "bytes": 8188,
+      "sha256": "a68f2a6bec6b378f69727bd32b386c097ed926323a98c5e34fb109ccdda10ce0"
+    },
+    {
+      "path": "shizukudos/dos16/tests/test_cb43_dos_internals.py",
+      "bytes": 12618,
+      "sha256": "266dd11d080ce638bb35b2568b18b1574ecaaf34917378b8aee04c666963c89b"
+    },
+    {
+      "path": "shizukudos/dos16/tests/cb43_dos_internals.c",
+      "bytes": 4369,
+      "sha256": "9bae00d4354c19e45efae1b18de2b7f7056ee118e864050d88c097c086c18214"
+    },
+    {
+      "path": "shizukudos/dos16/tests/verify_cb43_dos_layout.py",
+      "bytes": 3931,
+      "sha256": "879b7c2ff229dfec9505a8d0917c057a6893781c2c0469338ae2b36a3504d267"
+    },
+    {
+      "path": "shizukudos/dos16/tests/build_cb43_dos_diagnostic.py",
+      "bytes": 5764,
+      "sha256": "2b333d72c225b557e7b521b7b2350301affef18cb978ea5477fa6807fb119745"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/README.md",
+      "bytes": 8493,
+      "sha256": "ddaa6f0b2f7ad5df8b660c5b8c901a996751609f873890069fac8e2897cf5063"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/diagnostic-image-manifest.json",
+      "bytes": 5078,
+      "sha256": "509692958f4c11f08989c1b40c456b953b0a4cb38cbc10add04b73b270d5c9f4"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/diagnostic-image-static.json",
+      "bytes": 463,
+      "sha256": "c54afe50781a2d99f6cdf335e0872886034eb1340ab51cbe105e364304064b6b"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/dosmgr-patch-compatibility.json",
+      "bytes": 1773,
+      "sha256": "103f2bf09643b983a5c9c9bf1cb9360f60af9a5b44c98fd99ed73dd3bd179130"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/freecom-source-preimages.json",
+      "bytes": 122647,
+      "sha256": "78cccc2915ca604230a3b5e266d788e21373b4422955f9938a4125dab3c69932"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/host-result.json",
+      "bytes": 3402,
+      "sha256": "26be8fd1456e30b495f88ceda1f83156514b3f59bf54a8f8ada8eeb1751dcdd3"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/host-results.txt",
+      "bytes": 1729,
+      "sha256": "633ec5e3421d912c0751e1ca43d89b1a7464ef0404924b594e51d05570e1ee5f"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/layout-negative-result.json",
+      "bytes": 948,
+      "sha256": "87594a7f1347eaacf9c16efe4ee8f89743cae2ca347580507f9fde9c5f7394cf"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/linked-layout.json",
+      "bytes": 1359,
+      "sha256": "0842a4e8d375fcd10094ef569a31bd0ef7f8825a20082027f0e03e852636ce0d"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/native-dos-v1-corrected-failure.json",
+      "bytes": 919,
+      "sha256": "a6efad71bf39ae80c9ff02633e77249302a7292508c6d9eab023ff98809e2723"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/native-dos-v2-result.json",
+      "bytes": 1096,
+      "sha256": "01b1e4f8699327e502a3f868d18e785a70e662652e95720d6239788f78bc38c8"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/native-dos-v2-results.txt",
+      "bytes": 710,
+      "sha256": "f8419d5b465e7ba84dafa4265d446104aa4503916045e8b66e1dec440c525716"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/native-dos-v2-review.json",
+      "bytes": 1280,
+      "sha256": "a3d64ce5a13f02148fef564f9b3afd1e3a2fa542be7353ce054d1e3559dfc9ef"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/primary-authorities.json",
+      "bytes": 1845,
+      "sha256": "0d537b115dc21965abfb9d7bde14164980661cce715ce3fc2db3fe24a7587148"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/source-preimages.json",
+      "bytes": 48485,
+      "sha256": "ea1948aebccb768843903165e596272f0d4459246ea8e000df31eb671a53cc19"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-internals-cb43-20261001/toolchain-receipt.json",
+      "bytes": 1147,
+      "sha256": "1f237012209794abb3c0c319161876b58c3a4e44af0f590df141d7f7e006ad25"
+    }
+  ]
+}

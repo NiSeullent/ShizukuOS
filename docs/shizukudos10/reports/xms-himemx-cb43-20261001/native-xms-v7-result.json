@@ -1,0 +1,76 @@
+{
+  "schema": "shizukudos-cb43-actual-dos-xms-v7-limited-receipt-v1",
+  "status": "PASS_REAL_DOS_XMS_16_REPORT_ONLY_WINDOWS_UNVERIFIED",
+  "root_run_epoch": "win98-dos-replacement-root-20261001-v7",
+  "report": {
+    "file": "native-xms-v7-results.txt",
+    "bytes": 1272,
+    "sha256": "bdf634071d5206e608456e850f69f94a8500d1989a8602ec08e6fdc5f90b7516",
+    "PASS_lines": 16,
+    "checks": 16,
+    "failures": 0,
+    "reported_IO_ERROR": 0,
+    "exact_guest_bytes_exported": true
+  },
+  "input_manager": {
+    "guest_file": "HIMEMX.EXE",
+    "bytes": 6100,
+    "sha256": "5e0ed027a150ac1c198e994ca248245c07c1f44796bc0791448afbcf29789211"
+  },
+  "input_probe": {
+    "guest_file": "CBXMS.COM",
+    "bytes": 2365,
+    "sha256": "8c900ac24fccbe10a2c5ea5211ad85d9ae45eaefb08c51b136d9b6ac5a5f227c"
+  },
+  "probe_source_sha256": "284177e9c2eb20212b901f9c8e18fabba6e14ef6bb78924f8a97e06e7a0a8cbd",
+  "source_build_raw_receipt_sha256": "7baf9712ee27d9f6af12519019c0c2e58a3683bd325611d7208a0dcd5f3e2e42",
+  "probe_compile_raw_receipt_sha256": "590da112991e4381adc43942d58e9fe401c7cba9eab016176c9ab6260aa1434f",
+  "input_probe_image_readback_sha256": "8c900ac24fccbe10a2c5ea5211ad85d9ae45eaefb08c51b136d9b6ac5a5f227c",
+  "kernel_source_profile": "CB43 WIN31SUPPORT C+NASM; primary DOSMGR patch excluded",
+  "input_kernel": {
+    "guest_file": "KERNEL.SYS",
+    "sha256": "62194db22e7d157865f9767c78ca3ecf7d7977d720a99a1afe8c8c02b1aebb3f",
+    "bytes": 72767
+  },
+  "combined_DOSMGR_kernel_result_transferred": false,
+  "host_run": {
+    "elapsed_seconds": 120.2,
+    "QEMU_process_exit": 0,
+    "owned_process_stopped": true,
+    "guest_clean_shutdown_verified": false,
+    "CPU": "qemu64",
+    "acceleration": "TCG",
+    "RAM_MiB": 128,
+    "CPUs": 1,
+    "NIC": "none",
+    "timeout_seconds": 120,
+    "guest_acceptance": false
+  },
+  "raw_root_preparation_sha256": "2a25088d0746b7947535892d5f1c5e036c10b44f9172afd926f7a847d1c4a392",
+  "raw_root_run_result_sha256": "0e37e36bebc0b79c282c4d8c046c89129ec762e7be9a8252af035d84e8628a30",
+  "raw_root_command_sha256": "99de70424fd45f6e21f9f8b360da0a8a471019ea1311790b12327ef20275d7f1",
+  "VM_executed_by_root": true,
+  "VM_executed_by_source_agent": false,
+  "native_XMS_services_verified": true,
+  "probe_DOS_exit_code_independently_captured": false,
+  "Windows98_boot_verified": false,
+  "MSDOS_replacement_under_Windows98": false,
+  "modern_apps_verified": false,
+  "private_Microsoft_inputs_in_guest": true,
+  "Microsoft_inputs_exported": false,
+  "BOOTLOG_used_as_evidence": false,
+  "public_binary_included": false,
+  "measured_services": [
+    "actualinstalledFARcall/version andA20queries",
+    "own64KiB actualallocation/size/lockcount/locklinearaddress>=1MiB/unlock",
+    "actual256byteconventional-to-XMS-to-conventionalpattern comparison",
+    "ownblockrelease and actualAX0/BLA2 rejection of freedhandle"
+  ],
+  "limits": [
+    "Exactguestreport checks only; wholeWin98guest acceptance remainsfalse",
+    "HostQEMUexit0 is not guestclean shutdown or an independently capturedDOSprobe ERRORLEVEL",
+    "Actualv7 usesCB43-only62194kernel, notnewcombinedc1kernel",
+    "Privatevolume containedlicensedWindows/Microsoftinputs; nofiles/media/screens/keys exported",
+    "InheritedBOOTLOG stale andexcluded; noboot/VMM/desktop/appsuccess inferred"
+  ]
+}

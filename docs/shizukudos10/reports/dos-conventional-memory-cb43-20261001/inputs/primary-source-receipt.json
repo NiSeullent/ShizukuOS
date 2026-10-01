@@ -1,0 +1,63 @@
+[
+  {
+    "author": "Ralf Brown",
+    "url": "https://www.cs.cmu.edu/~ralf/interrupt-list/inter61a.zip",
+    "archive_bytes": 360590,
+    "archive_sha256": "8077536135c0290ff18a4a44cf63c56339f6127f053ee673f9895837248cc947",
+    "extracted_preimages": [
+      {
+        "file": "INTERRUP.A",
+        "bytes": 364393,
+        "sha256": "32593e4ae9cc200a3a9d190e81b17dd381e3a4976a0719b67baf4565b9db4682"
+      },
+      {
+        "file": "INTERRUP.B",
+        "bytes": 360893,
+        "sha256": "ad57c1cf5d8209c8dae8d09e28b07974fbcebbb566ad2a376106cf09900d4e98"
+      },
+      {
+        "file": "INTERRUP.C",
+        "bytes": 360394,
+        "sha256": "6713937ecfedec0daa75cb132cbec171c919e8d081116cc13adbb5338edd92a5"
+      },
+      {
+        "file": "INTERRUP.D",
+        "bytes": 283609,
+        "sha256": "b75fd287b2dd9b1c7573f52d1cdd7c82c94b74d528d65c863ddee9f7868317ca"
+      }
+    ]
+  },
+  {
+    "author": "Ralf Brown",
+    "url": "https://www.cs.cmu.edu/~ralf/interrupt-list/inter61b.zip",
+    "archive_bytes": 364118,
+    "archive_sha256": "713e9e218eda694ed2bac8d5f02378f935f3e3132b79c92c44c14101e76b88a7",
+    "extracted_preimages": [
+      {
+        "file": "INTERRUP.E",
+        "bytes": 340545,
+        "sha256": "5db513c99f15337d5c3788ea16ae7098fb6c952d7d6c59dd69ced7f063c0f447"
+      },
+      {
+        "file": "INTERRUP.F",
+        "bytes": 278190,
+        "sha256": "58be5f66a47ba9c1c7b25ca2a6a702c5efc5599f11101bf8ac2efd42b701e4d8"
+      },
+      {
+        "file": "INTERRUP.G",
+        "bytes": 365004,
+        "sha256": "c5b2d94333c06a19b44f80580266ae16dc1fb23206bf8bef3770101a980dd7de"
+      },
+      {
+        "file": "INTERRUP.H",
+        "bytes": 283667,
+        "sha256": "56690cf99ebc9e24b0b163c51772e447de6429e48bc2c0e5400c80c82b2165ea"
+      },
+      {
+        "file": "INTERRUP.I",
+        "bytes": 148464,
+        "sha256": "fe713c4cccb52011a1f14996746c26150a45b9f510b682562f29c0b60c3a043e"
+      }
+    ]
+  }
+]

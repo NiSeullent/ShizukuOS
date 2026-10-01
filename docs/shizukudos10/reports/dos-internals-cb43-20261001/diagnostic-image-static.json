@@ -1,0 +1,13 @@
+{
+  "schema": "shizukudos-cb43-diagnostic-image-static-v1",
+  "image_sha256": "48632369aebe7bc2a609c2589e662d3c9c5bace4763645f9a7834ffc83ede129",
+  "image_bytes": 33546240,
+  "MBR_signature": "55AA",
+  "active_partition": true,
+  "partition_start_sector": 63,
+  "partition_sectors": 65457,
+  "FAT_check_exit": 0,
+  "FAT_result": "fsck.fat 4.2 (2021-01-31)\ndiagnostic-fat16.img: 7 files, 347/64916 clusters",
+  "VM_started": false,
+  "native_result": "NOT RUN"
+}

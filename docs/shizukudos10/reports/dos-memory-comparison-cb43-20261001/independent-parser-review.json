@@ -1,0 +1,32 @@
+{
+  "schema": "cb43-cbmem-independent-parser-readonly-review-v1",
+  "status": "PASS_SCOPED_SOURCE_REPORT_INTERPRETATION",
+  "parser": {
+    "file": "parse_cbmem_report.py",
+    "bytes": 9534,
+    "sha256": "865fa35166554307e44adb7c473beeab9b3720321ac82e59887b2d991d0a5113"
+  },
+  "tests": {
+    "file": "test_parse_cbmem_report.py",
+    "bytes": 7799,
+    "sha256": "83da964041fca72488c36ff07e1ee7a02931673c23d47442853825764686617d"
+  },
+  "synthetic_tests_log": {
+    "file": "synthetic-tests.log",
+    "bytes": 2381,
+    "sha256": "f9e0b5fb8bdb33c2d3392af294690a9d44e9ecf73036a51f4c5b5755704d8047"
+  },
+  "source_review_only": true,
+  "reviewer_executed_tests_imports_producers_DOS_VM": false,
+  "review_scope": [
+    "All 16 synthetic test methods; strict 810-byte CRLF report, 34 ordered unique hexadecimal fields, header and footer",
+    "Strict separate ERRORLEVEL marker including the observed single trailing ASCII space",
+    "All 28 scoped ownership, layout, carry, allocator, size, identity and HMA gates",
+    "Undefined raw registers and FFFF values preserved; no 580 KiB acceptance gate",
+    "Actual LOW/HIGH arithmetic 572240/626224 and HMA 0/1000 agree with report fields",
+    "Declared source identities and offline freshness/Windows flags are explicitly limited"
+  ],
+  "future_hardening": "CLI uses bounded ordinary Path.open, not a regular/no-follow reader. Actual owner-supplied frozen inputs were independently checked to be regular files; the parser does not assert external freshness.",
+  "Windows98_verified": false,
+  "MSDOS_replacement_under_Windows98": false
+}

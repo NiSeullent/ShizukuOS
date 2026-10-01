@@ -1,0 +1,54 @@
+{
+  "schema": "shizukudos-cb43-combined-diagnostic-build-provenance-v1",
+  "first_attempt": {
+    "phase": "compile-before-disk-construction",
+    "exit_code": 1,
+    "VM_executed": false,
+    "image_created": false,
+    "native_DOS_interrupts_executed": false,
+    "actual_cause": "Open Watcom standard headers not found because INCLUDE was unset",
+    "raw_compile_log_sha256": "7292ec8538145434cd1d3a95c4fb4d4e8950aa52162882a98f6833843bff3fe4",
+    "preserved_private_output": "${STAGE}/diagnostic-image/",
+    "compiler_errors": [
+      "${REPO}/shizukudos/dos16/tests/cb43_dos_internals.c(7): Error! E1055: Unable to open 'dos.h'",
+      "${REPO}/shizukudos/dos16/tests/cb43_dos_internals.c(8): Error! E1055: Unable to open 'stdio.h'",
+      "${REPO}/shizukudos/dos16/tests/cb43_dos_internals.c(9): Error! E1055: Unable to open 'string.h'",
+      "${REPO}/shizukudos/dos16/tests/cb43_dos_internals.c(10): Error! E1055: Unable to open 'io.h'"
+    ]
+  },
+  "second_attempt": {
+    "command": [
+      "python3",
+      "-B",
+      "${REPO}/shizukudos/dos16/tests/build_cb43_dos_diagnostic.py",
+      "--kernel-tree",
+      "${STAGE}/kernel-win31",
+      "--freecom",
+      "${FROZEN_FREECOM_SOURCE}/command.com",
+      "--output",
+      "${STAGE}/diagnostic-image-v2"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 1.359,
+    "environment": {
+      "WATCOM": "${WATCOM}",
+      "PATH": "${WATCOM}/binl64:${PATH}",
+      "INCLUDE": "${WATCOM}/h",
+      "SOURCE_DATE_EPOCH": "1785283200"
+    },
+    "first_attempt_preserved": "diagnostic-image/compile.log",
+    "first_attempt_failure": "OpenWatcom standard include files were not found: INCLUDE unset",
+    "VM_executed": false
+  },
+  "raw_second_attempt_record_sha256": "74fa56d8a212878fe5af6537a4de5486b5016ebd6a5031629312b3c3e4dc14cf",
+  "unchanged_builder_sha256": "2b333d72c225b557e7b521b7b2350301affef18cb978ea5477fa6807fb119745",
+  "kernel_input_sha256": "c1c86626585c8332a8788a01ded40c8795fd449d1832c9428436038530bbe906",
+  "frozen_freecom_input_sha256": "27c91c0c27d7aac140fd3dbeb4c20592ae6fae0555d4e310cf749e2102bd3e50",
+  "boot_template_sha256": "545a556405919560022ecbc55b48cff5e8047c655b30f81ac59762da9bb4fa39",
+  "image_sha256": "50d44ccf164e26fbcc06c4e3869031f6ca8353116e71f9218a5528596a39ab0a",
+  "guest_execution": "NOT RUN",
+  "Windows98_boot_verified": false,
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "native_modern_apps_verified": false,
+  "sanitization": "Only actual workspace prefixes normalized; old failed attempt retained unchanged; successful attempt used a separate output epoch"
+}
