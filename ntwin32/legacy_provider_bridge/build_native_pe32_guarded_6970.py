@@ -84,6 +84,19 @@ I486_CONTROL_METHODS = (
     "test_exact_byte_address_coverage_and_symbol",
     "test_gap_tampered_bytes_and_missing_section",
 )
+COFF_FORMAT_REFERENCE = {
+    "project": "GNU binutils / BFD",
+    "release": "GNU binutils 2.42",
+    "tag": "binutils-2_42",
+    "commit": "c7f28aad0c99d1d2fec4e52ebfa3735d90ceb8e9",
+    "file": "bfd/coffcode.h",
+    "blob": "4170b630b4db39501e3509846c226d6745125f76",
+    "url": "https://gnu.googlesource.com/binutils-gdb/+/c7f28aad0c99d1d2fec4e52ebfa3735d90ceb8e9/bfd/coffcode.h",
+    "license_at_reference_revision": "GPL-3.0-or-later",
+    "copied_upstream_source": False,
+    "concept_only": "COFF section allocation size and file-content pointer are distinct; an uninitialized section may have nonzero size and zero raw-data pointer",
+    "section_flag_reference": "https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#section-flags",
+}
 
 # Only four original in-memory unittest methods; the fifth filesystem/scan
 # test is excluded because its scanner bypasses this launch's guarded run.
@@ -248,29 +261,147 @@ def coff_symbols(raw, pointer, count, sections, wanted):
     return result
 
 
-def coff_object_metadata(raw):
-    """Inspect emitted i386 COFF metadata; this is not native execution."""
+def coff_object_metadata(raw, observation=None):
+    """Inspect bounded i386 COFF metadata, allowing flag-defined BSS storage.
+
+    Independently implemented format predicates; no BFD source was copied.
+    COFF_FORMAT_REFERENCE identifies the upstream concept/license/revision.
+    SizeOfRawData is the object section allocation size; non-file-backed BSS
+    is selected by flag 0x80, never by trusting a section name alone.
+    """
+    if observation is None:
+        observation = {}
+    observation.update(raw_file_bytes=len(raw), section_rows=[], section_table_complete=False)
     if len(raw) < 20:
         raise RuntimeError("compiled COFF object truncated")
     machine, count, timestamp, symbols, symbol_count, optional, flags = struct.unpack_from("<HHIIIHH", raw)
+    observation["header"] = {"machine": machine, "section_count": count,
+                              "symbol_table_offset": symbols, "symbol_count": symbol_count,
+                              "optional_header_bytes": optional, "characteristics": flags}
+    # Retain bounded actual fields BEFORE predicates can reject the object.
+    # A malformed/truncated table leaves only the observed header, not invented rows.
+    header_end = 20 + count * 40
+    sections = []
+    if 0 < count <= 96 and header_end <= len(raw):
+        for index in range(count):
+            section = struct.unpack_from("<8sIIIIIIHHI", raw, 20 + index * 40)
+            sections.append(section)
+            observation["section_rows"].append({
+                "index": index, "name_raw_hex": section[0].hex(),
+                "name_field": section[0].rstrip(b"\0").decode("ascii", errors="backslashreplace"),
+                "size": section[3], "raw_data_offset": section[4],
+                "relocation_offset": section[5], "relocation_count": section[7],
+                "characteristics": section[9]})
+        observation["section_table_complete"] = True
     if machine != 0x14C or not 0 < count <= 96 or optional != 0 or flags & 0x2002:
         raise RuntimeError("compiled object must be i386 COFF, not executable/DLL")
-    if 20 + count * 40 > len(raw) or not symbols or symbols + symbol_count * 18 + 4 > len(raw):
+    if header_end > len(raw) or not symbols or symbols + symbol_count * 18 + 4 > len(raw):
         raise RuntimeError("compiled COFF headers/symbol table out of bounds")
     string_size = struct.unpack_from("<I", raw, symbols + symbol_count * 18)[0]
     if string_size < 4 or symbols + symbol_count * 18 + string_size > len(raw):
         raise RuntimeError("compiled COFF string table out of bounds")
-    for index in range(count):
-        section = struct.unpack_from("<8sIIIIIIHHI", raw, 20 + index * 40)
+    allocation = 0
+    uninitialized = 0
+    file_backed = 0
+    for section in sections:
         size, at, relocation_at, relocations = section[3], section[4], section[5], section[7]
-        if size and (at < 20 + count * 40 or at + size > len(raw)):
+        characteristics = section[9]
+        allocation += size
+        if allocation > LIMIT:
+            raise RuntimeError("compiled COFF summed section allocation exceeded 8 MiB")
+        if characteristics & 0x80:
+            if at != 0 or characteristics & (0x20 | 0x40 | 0x20000000):
+                raise RuntimeError("compiled COFF uninitialized section has raw bytes or conflicting flags")
+            uninitialized += size
+        elif size and (at < header_end or at + size > len(raw)):
             raise RuntimeError("compiled COFF section bytes outside object")
-        if relocations and (not relocation_at or relocation_at + relocations * 10 > len(raw)):
+        else:
+            file_backed += size
+        # Extended relocation-count encoding is not interpreted by this scope.
+        if characteristics & 0x01000000:
+            raise RuntimeError("compiled COFF extended relocation count unsupported")
+        if relocations and (relocation_at < header_end or relocation_at + relocations * 10 > len(raw)):
             raise RuntimeError("compiled COFF relocation record bounds invalid")
     return {"format": "i386 COFF", "machine": machine, "section_count": count,
             "optional_header_bytes": optional, "symbol_count": symbol_count,
-            "metadata_bounds_verified": True, "relocation_semantics_verified": False,
+            "summed_section_allocation_bytes": allocation,
+            "uninitialized_allocation_bytes": uninitialized, "file_backed_section_bytes": file_backed,
+            "metadata_bounds_verified": True, "relocation_record_bounds_verified": True,
+            "relocation_semantics_verified": False,
             "native_execution_verified": False}
+
+
+def coff_object_controls(guard, reports):
+    """Fixed synthetic format controls, executed only in the admitted runner.
+
+    No compiler-produced object is reconstructed or claimed from these bytes.
+    Memory-only 136-byte fixtures test the selected allocation/flag/raw/reloc
+    predicates; they are not complete COFF/linker/relocation-semantic proof.
+    """
+    fixture = bytearray(136)
+    struct.pack_into("<HHIIIHH", fixture, 0, 0x14C, 2, 0, 114, 1, 0, 0)
+    struct.pack_into("<8sIIIIIIHHI", fixture, 20, b".text", 0, 0, 4, 100, 104, 0, 1, 0, 0x60000020)
+    struct.pack_into("<8sIIIIIIHHI", fixture, 60, b".bss", 0, 0, 64, 0, 0, 0, 0, 0, 0xC0000080)
+    fixture[100:104] = b"\xc3\0\0\0"
+    struct.pack_into("<IIH", fixture, 104, 0, 0, 6)
+    struct.pack_into("<8sIhHBB", fixture, 114, b"_stub", 0, 1, 0x20, 2, 0)
+    struct.pack_into("<I", fixture, 132, 4)
+    raw_error = "compiled COFF section bytes outside object"
+    bss_error = "compiled COFF uninitialized section has raw bytes or conflicting flags"
+    relocation_error = "compiled COFF relocation record bounds invalid"
+    format_error = "compiled object must be i386 COFF, not executable/DLL"
+    cases = (
+        ("initialized-and-empty-bss", ((76, "<I", 0),), None),
+        ("nonzero-uninitialized-allocation", (), None),
+        ("flagged-uninitialized-renamed", ((60, "<8s", b".reserve"),), None),
+        ("summed-allocation-at-8MiB", ((76, "<I", LIMIT - 4),), None),
+        ("initialized-data-section", ((56, "<I", 0xC0000040),), None),
+        ("initialized-null-raw-pointer", ((40, "<I", 0),), raw_error),
+        ("initialized-header-overlap", ((40, "<I", 99),), raw_error),
+        ("initialized-outside-file", ((40, "<I", 137),), raw_error),
+        ("initialized-truncated-bytes", ((36, "<I", 137),), raw_error),
+        ("bss-name-without-uninitialized-flag", ((96, "<I", 0xC0000000),), raw_error),
+        ("uninitialized-has-code-flag", ((96, "<I", 0xC00000A0),), bss_error),
+        ("uninitialized-has-initialized-flag", ((96, "<I", 0xC00000C0),), bss_error),
+        ("uninitialized-executable", ((96, "<I", 0xE0000080),), bss_error),
+        ("uninitialized-has-file-pointer", ((80, "<I", 100),), bss_error),
+        ("summed-allocation-exceeds-8MiB", ((76, "<I", LIMIT),),
+         "compiled COFF summed section allocation exceeded 8 MiB"),
+        ("relocation-null-pointer", ((44, "<I", 0),), relocation_error),
+        ("relocation-header-overlap", ((44, "<I", 99),), relocation_error),
+        ("relocation-truncated", ((44, "<I", 127),), relocation_error),
+        ("relocation-overflow-flag", ((56, "<I", 0x61000020),),
+         "compiled COFF extended relocation count unsupported"),
+        ("executable-file-characteristic", ((18, "<H", 2),), format_error),
+        ("DLL-file-characteristic", ((18, "<H", 0x2000),), format_error),
+        ("wrong-machine", ((0, "<H", 0x8664),), format_error),
+    )
+    for label, edits, expected_error in cases:
+        guard.check()
+        raw = bytearray(fixture)
+        for at, format, value in edits:
+            struct.pack_into(format, raw, at, value)
+        observed = {}
+        try:
+            metadata = coff_object_metadata(bytes(raw), observed)
+        except RuntimeError as error:
+            if expected_error is None or str(error) != expected_error:
+                raise RuntimeError("COFF synthetic control failed/unintended rejection: " + label) from error
+            outcome = "PASS_REJECTION"
+        else:
+            if expected_error is not None:
+                raise RuntimeError("malformed synthetic COFF control accepted: " + label)
+            outcome = "PASS_ACCEPTANCE"
+            if not metadata["metadata_bounds_verified"]:
+                raise RuntimeError("COFF synthetic positive omitted its metadata validation")
+        if not observed.get("section_table_complete") or len(observed["section_rows"]) != 2:
+            raise RuntimeError("bounded synthetic COFF diagnostic rows missing")
+        reports.append({"case": label, "result": outcome, "expected_rejection": expected_error,
+                        "synthetic_bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()})
+        guard.check()
+    return {"completed": len(reports), "positive_controls": 5, "negative_controls": 17,
+            "compiler_produced_objects_reconstructed": False,
+            "full_COFF_or_relocation_semantics_verified": False}
 
 
 def structural_pe_gate(raw, document, pe_module, *, dll):
@@ -623,7 +754,9 @@ def main():
         "original_i486_python_controls_verified": False,
         "original_i486_synthetic_PE_scan_control_verified": False,
         "structural_negative_controls_verified": False,
+        "coff_object_structural_controls_verified": False,
         "independent_export_clause_coverage": False,
+        "coff_format_reference": COFF_FORMAT_REFERENCE,
         "recipe": {"reference": "ntwin32/legacy_provider_bridge/build.py",
                    "reference_sha256": FROZEN_INPUTS["ntwin32/legacy_provider_bridge/build.py"][1],
                    "original_one_shot_compile_link_used": False,
@@ -756,6 +889,9 @@ def main():
         return result
 
     try:
+        receipt["coff_object_control_cases"] = []
+        receipt["coff_object_control_summary"] = coff_object_controls(
+            guard, receipt["coff_object_control_cases"])
         tools = {}
         for label, name in (("compiler", "i686-w64-mingw32-gcc-win32"),
                             ("objdump", "i686-w64-mingw32-objdump")):
@@ -842,6 +978,7 @@ def main():
                    ("probe", HERE / "probe.c", PROBE_CFLAGS),
                    ("sdk-abi", fixture, DLL_CFLAGS))
         objects = {}
+        receipt["compiled_objects"] = objects
         for label, source, flags in recipes:
             common = [cc, *flags]
             depfile = output / (label + ".includes")
@@ -881,9 +1018,17 @@ def main():
                 "included_paths": list(unit_before), "included_path_count": len(included)}
             object_pin = base.hash_regular(obj, maximum=LIMIT, guard=guard)
             object_raw = read_pinned(obj, object_pin, base, maximum=LIMIT, guard=guard)
-            objects[label] = {"path": str(obj), **object_pin,
-                              "metadata": coff_object_metadata(object_raw)}
-        receipt["compiled_objects"] = objects
+            # Install the actual immutable artifact pin and bounded diagnostic
+            # sink before validation. A FAIL receipt retains this object/rows.
+            record = {"path": str(obj), **object_pin,
+                      "coff_observation": {"validation_result": "NOT_COMPLETED"}}
+            objects[label] = record
+            try:
+                record["metadata"] = coff_object_metadata(object_raw, record["coff_observation"])
+            except RuntimeError as error:
+                record["coff_observation"].update(validation_result="FAIL", error=str(error)[:2048])
+                raise
+            record["coff_observation"]["validation_result"] = "PASS"
         dll = output / "NTWPROV.DLL"
         probe = output / "NTWPRB.EXE"
         for flags, paths, artifact, label in (
@@ -986,6 +1131,7 @@ def main():
                        oem_import_gate_verified=True, i486_full_executable_sections_decode_verified=True,
                        original_i486_python_controls_verified=True,
                        structural_negative_controls_verified=True,
+                       coff_object_structural_controls_verified=True,
                        result="PASS_BUILD_AND_SDK_ABI_ONLY")
     except BaseException as error:
         receipt.update(result="FAIL", error=str(error)[:2048])

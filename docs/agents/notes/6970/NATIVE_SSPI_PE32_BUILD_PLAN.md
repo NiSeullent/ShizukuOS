@@ -89,3 +89,58 @@ The narrow workflow successor prepares and validates writable namespace
 parents as the ordinary runner before sudo creates its private preparation
 child. Source pins, compiler flags, fixtures, resource limits and old evidence
 remain unchanged. A fresh actual hosted result is required.
+
+## Actual second attempt: COFF object metadata rejection
+
+Commit 1599ddc82b84c979b4cc5671a4178f672f5b4a76 ran in
+[run 36933745116](https://github.com/NiSeullent/Win98-Modern/actions/runs/36933745116),
+job 110609008553. Writable output creation succeeded. Preparation passed
+three commands, followed by ten successful guarded commands through
+probe-compile. The four original i486 Python control methods passed.
+The build then returned FAIL: `compiled COFF section bytes outside object`.
+The SDK fixture, linking and linked-image decoding were not reached.
+
+Actual build receipt 63,495 B SHA256:
+48babe3f2f7bf3926063fd473510577cafcddf39d00b3922a89af4fcce250697.
+Actual job log 174,666 B SHA256:
+93c962d6648495e1039e11ef274f847342dbef79ceefd198131e6f5868fa4074.
+Preparation receipt 2,525 B SHA256:
+ee429eaa57b64f2ea0668da59732e12a6038bb161a8d923d49a81e8aae928cb0.
+Minimum observed build free space was 91,853,332,480 B; resource failure
+was null and final self-inclusive output accounting was 97,309 B.
+
+The failed checker required every nonzero object section size to have
+file-backed bytes. The actual object headers were not printed in this
+attempt, so its exact section fields are not reconstructed. A narrow
+successor will distinguish uninitialized, nonexecuting BSS allocation
+from file-backed data, preserve initialized-data and relocation bounds,
+and retain bounded actual header rows before rejecting an object.
+Meaningful synthetic object controls must pass in a fresh guarded hosted
+run. This failure is preserved separately from any later result; it is
+neither feature RED nor native acceptance.
+
+The object-only successor is 67,964 B SHA256:
+dbbdb60436fe9030aa8e8e05f5f2c1a0b8f1e1e1ef30e19e5a92f22119d9b247.
+It accepts uninitialized allocation only with flag 0x80, zero raw pointer,
+and no code, initialized-data or executable flags. Each object's sum of
+declared section allocations is bounded by the existing 8 MiB limit; this
+is not a memory quota or a sum across all objects. Initialized
+spans and relocation records remain file bounded; relocation-header overlap
+and uninterpreted extended relocation counts are rejected. Actual object
+pins and at most 96 section rows are attached to the incremental receipt
+before validation, including a failed validation.
+
+Twenty-two prepared memory-only format controls cover five accepted and
+seventeen rejected cases; these are not execution results yet. They are
+invoked only inside the admitted hosted runner. The linked PE scanner,
+original i486 methods, SDK fixture, twelve frozen inputs, compiler flags
+and resource limits remain unchanged. Root compared exact ASTs and source
+pins without invoking a local compiler or the build runner.
+
+Format provenance: [GNU binutils 2.42 COFF writer](https://gnu.googlesource.com/binutils-gdb/+/c7f28aad0c99d1d2fec4e52ebfa3735d90ceb8e9/bfd/coffcode.h),
+release commit c7f28aad0c99d1d2fec4e52ebfa3735d90ceb8e9, file
+bfd/coffcode.h, blob4170b630b4db39501e3509846c226d6745125f76,
+GPL-3.0-or-later, and [Microsoft section flags](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#section-flags).
+Only the distinction between allocation and stored section bytes was studied;
+no upstream implementation was copied. This does not attest the entire
+installed compiler/backend or establish Windows loader acceptance.

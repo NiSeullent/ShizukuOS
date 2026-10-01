@@ -98,3 +98,25 @@ Gate SHA256:
 The gate remains BLOCKED. No local compiler, VM, physical evidence copy,
 deletion or new cleanup credit follows from this check. Older gates and
 proofs retain their original scope and bytes.
+
+The 21:44 persistence gate is now historical: two additional bounded native
+bridge build attempts have been retained in RAM. The first failed before
+compiler invocation on output-directory ownership. Its narrow workflow repair
+allowed the second attempt to reach three successful object compilations,
+then the COFF object metadata checker rejected the probe. Neither attempt
+establishes SDK ABI, linked PE32 or native Windows acceptance.
+[Actual failures and the scoped successor plan](NATIVE_SSPI_PE32_BUILD_PLAN.md)
+preserve the separate receipts and raw logs. An independent reviewer confirmed
+the second attempt's ten exit-zero, reaped commands and byte-exact receipt;
+the parser correction is still awaiting fresh hosted execution. A new complete
+RAM persistence gate is required before any physical evidence copy.
+
+Actual app observation at 22:20 UTC found canonical architecture thread163f
+active, with committed head4bd5de1646525764b50d995b329abd8578ede66e.
+That chat continues DOS replacement boot/USB/VMM and current Kernel32 SMP
+work. This lane does not overwrite its scheduler or newer IPC runner.
+The sole main/site/ISO publisher remained interrupted/notLoaded at a648e9b.
+Existing bilateral deadline/publication imports are acknowledged; a new
+SSPI/WinHTTP reciprocal adoption acknowledgement has not been observed.
+Shared handoff updates are the actual coordination channel, without a claimed
+direct thread message or wake. The complete user objective remains open.
