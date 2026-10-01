@@ -100,13 +100,16 @@ def audit_pe(path):
     passed = (pe.FILE_HEADER.Machine == 0x14c and pe.OPTIONAL_HEADER.Magic == 0x10b
               and version <= [4, 10] and not absent and not unexpected and bool(imports))
     return {"machine": pe.FILE_HEADER.Machine, "format_magic": pe.OPTIONAL_HEADER.Magic,
+            "subsystem": pe.OPTIONAL_HEADER.Subsystem,
             "subsystem_version": version, "imports": imports,
             "absent_from_oem_exports": absent, "unexpected_directories": unexpected,
             "baseline_sha256": sha(baseline_path), "static_gate_passed": passed,
             "native_guest_verified": False}
 
 
-def build(archive, output, target, jobs, run_probe):
+def build(archive, output, target, jobs, run_probe, native_subsystem="windows"):
+    if native_subsystem not in ("console", "windows"):
+        raise ValueError("Require an explicit supported native subsystem")
     archive, output = archive.resolve(), output.absolute()
     if output.exists() or output.is_symlink():
         raise ValueError("Preserve earlier builds; output must be a new directory")
@@ -157,9 +160,9 @@ set(CMAKE_C_COMPILER i686-w64-mingw32-gcc)
 set(CMAKE_RC_COMPILER i686-w64-mingw32-windres)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 set(CMAKE_C_FLAGS_INIT "-Os -march=i486 -ffunction-sections -fdata-sections -DWINVER=0x0410 -D_WIN32_WINDOWS=0x0410 -D_WIN32_WINNT=0x0400")
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--gc-sections,--no-insert-timestamp,--subsystem,console:4.10,--major-os-version,4,--minor-os-version,10")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--gc-sections,--no-insert-timestamp,--subsystem,NATIVE_SUBSYSTEM:4.10,--major-os-version,4,--minor-os-version,10")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--gc-sections,--no-insert-timestamp,--subsystem,windows:4.10,--major-os-version,4,--minor-os-version,10")
-''')
+'''.replace("NATIVE_SUBSYSTEM", native_subsystem))
     else:
         toolchain.write_text('set(CMAKE_C_FLAGS_INIT "-O2 -ffunction-sections -fdata-sections")\n')
     commands = []
@@ -172,6 +175,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--g
             raise RuntimeError("Build failed; inspect " + str(output / "build.log"))
 
     receipt = {"schema": "win98modern.secure-transport-build.v1", "target": target,
+               "native_subsystem": native_subsystem if target == "win98-x86" else None,
                "upstream": {"version": VERSION, "archive_sha256": ARCHIVE_SHA256,
                  "url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2",
                  "license": "Apache-2.0 OR GPL-2.0-or-later"},
@@ -195,6 +199,10 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--g
             dll = binary_dir / "M98TLS.dll"
             receipt["native_library"] = {"path": str(dll.resolve()), "sha256": sha(dll),
               "bytes": dll.stat().st_size, "pe_audit": audit_pe(dll)}
+            expected_subsystem = 2 if native_subsystem == "windows" else 3
+            if any(item["subsystem"] != expected_subsystem for item in
+                   (receipt["pe_audit"], receipt["clock_probe"]["pe_audit"])):
+                raise RuntimeError("Native executable subsystem differs from the selected build")
             if not all(item["static_gate_passed"] for item in (receipt["pe_audit"],
                   receipt["clock_probe"]["pe_audit"], receipt["native_library"]["pe_audit"])):
                 raise RuntimeError("Native import/directory gate failed; inspect build-result.json")
@@ -231,12 +239,14 @@ def main():
     parser.add_argument("--target", choices=("host", "win98-x86"), required=True)
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--run-probe", action="store_true")
+    parser.add_argument("--native-subsystem", choices=("console", "windows"), default="windows",
+                        help="Native file-logging probes default to GUI entry to avoid the Win98 DOS console display host")
     args = parser.parse_args()
     if not 1 <= args.jobs <= 4:
         parser.error("jobs must be between one and four")
     if args.run_probe and args.target != "host":
         parser.error("--run-probe is host-only")
-    print(json.dumps(build(args.archive, args.output, args.target, args.jobs, args.run_probe)))
+    print(json.dumps(build(args.archive, args.output, args.target, args.jobs, args.run_probe, args.native_subsystem)))
 
 
 if __name__ == "__main__":
