@@ -79,7 +79,7 @@ struct thread {
     uint32_t esp;                       /* saved kernel stack pointer */
     uint32_t id;
     uint32_t state;                     /* 0 free, 1 ready, 2 running, 3 blocked, 4 zombie */
-    uint32_t wake_tick;
+    uint64_t wake_tick;                 /* 0 = no finite deadline */
     thread_t *next;                     /* run/wait queue link */
     uint32_t stack_base;
     uint32_t proc;                      /* owning process id, 0 = kernel */

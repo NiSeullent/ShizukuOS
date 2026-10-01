@@ -4,6 +4,9 @@
  * vector 0x20; kernel data is protected by disabling interrupts.
  */
 #include "k32.h"
+#include "../abi/shz_sched_deadline.h"
+
+_Static_assert(TICK_US > 0, "finite deadlines require a positive tick interval");
 
 extern void switch_stacks(uint32_t *save_esp, uint32_t new_esp);
 extern void vm_set_demand_range(uint32_t lo, uint32_t hi);
@@ -158,8 +161,7 @@ int thread_join(thread_t *t)
 void thread_sleep_ms(uint32_t ms)
 {
     uint32_t f = irq_save();
-    current->wake_tick = jiffies + (ms * 1000u + TICK_US - 1) / TICK_US;
-    if (current->wake_tick <= jiffies) current->wake_tick = jiffies + 1;
+    current->wake_tick = shz_sched_finite_deadline_ms(jiffies, ms, TICK_US);
     current->state = TS_BLOCKED;
     schedule();
     irq_restore(f);
@@ -181,7 +183,7 @@ static int sem_wait_common(ksem_t *s, uint32_t ms)
     if (!s->waiters) s->waiters = current;
     else { thread_t *w = s->waiters; while (w->next) w = w->next; w->next = current; }
     current->wait_sem = s;
-    current->wake_tick = ms ? jiffies + (ms * 1000u + TICK_US - 1) / TICK_US : 0;
+    current->wake_tick = ms ? shz_sched_finite_deadline_ms(jiffies, ms, TICK_US) : 0;
     current->exit_code = 0;
     current->state = TS_BLOCKED;
     schedule();
