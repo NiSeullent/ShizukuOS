@@ -6,7 +6,24 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+
+/* Swap a sender's slot immediately after the receiver's first real copy. This
+ * uses the production header's environment copy boundary, not a second ring
+ * implementation or a timing-dependent concurrent C data race. */
+static uint8_t *snapshot_swap_slot;
+static const uint8_t *snapshot_swap_replacement;
+static void *snapshot_copy(void *dst, const void *src, size_t bytes)
+{
+    void *result = memcpy(dst, src, bytes);
+    if (snapshot_swap_slot && src == snapshot_swap_slot) {
+        memcpy(snapshot_swap_slot, snapshot_swap_replacement, 256);
+        snapshot_swap_slot = 0;
+    }
+    return result;
+}
+#define SHZ_IPC_MEMCPY(d, s, n) snapshot_copy((d), (s), (n))
 #include "shz_ipc.h"
 
 static unsigned long checks;
@@ -121,6 +138,50 @@ static void test_malformed(void)
         CHECK(shz_ring_push(r, &h, pl) == SHZ_OK);
         CHECK(shz_ring_pop(r, &out, small, sizeof small, &reason) == SHZ_E_PROTO && reason == SHZ_PR_PAYLOAD_RANGE);
     }
+}
+
+static void test_ring_snapshot(void)
+{
+    union frame { shz_msg_hdr_t header; uint8_t bytes[SHZ_MSG_SLOT_SIZE]; } first, second, returned;
+    const uint8_t first_payload[8] = {'s', 'a', 'f', 'e', 'd', 'a', 't', 'a'};
+    const uint8_t second_payload[8] = {'e', 'v', 'i', 'l', 0xcf, 0x60, 0xc8, 0xdc};
+    shz_ring_hdr_t *r = (shz_ring_hdr_t *)ring_mem;
+    shz_msg_hdr_t h, out;
+    uint8_t got[8];
+    uint32_t returned_crc;
+    int reason = -1;
+
+    CHECK(shz_ring_init(ring_mem, sizeof ring_mem, 8) == SHZ_OK);
+    make(&h, 0x1111, UINT64_C(0x1111222233334444), first_payload, sizeof first_payload);
+    h.generation = 7;
+    CHECK(shz_ring_push(r, &h, first_payload) == SHZ_OK);
+    memcpy(first.bytes, shz_ring_slot(r, 0), sizeof first);
+    memcpy(second.bytes, first.bytes, sizeof second);
+    second.header.opcode = 0x2222;
+    second.header.request_id = UINT64_C(0xaaaabbbbccccdddd);
+    memcpy(second.bytes + sizeof h, second_payload, sizeof second_payload);
+    /* Independently derived with Python struct + zlib CRC-32: the two valid
+     * 72-byte frames collide, but first header + second payload has 0x9fb5bbc9.
+     * Old ring_pop returned that mixed frame as SHZ_OK with checksum 0x1d562b37. */
+    CHECK(first.header.checksum == UINT32_C(0x1d562b37));
+    CHECK(shz_msg_checksum(&first.header) == UINT32_C(0x1d562b37));
+    CHECK(shz_msg_checksum(&second.header) == UINT32_C(0x1d562b37));
+    snapshot_swap_replacement = second.bytes;
+    snapshot_swap_slot = shz_ring_slot(r, 0);
+    CHECK(shz_ring_pop(r, &out, got, sizeof got, &reason) == SHZ_OK);
+    snapshot_swap_slot = 0;
+    CHECK(reason == SHZ_PR_NONE && r->tail == 1 && r->head == 1);
+    CHECK(!memcmp(shz_ring_slot(r, 0), second.bytes, sizeof second)); /* swap really happened */
+    memcpy(returned.bytes, &out, sizeof out);
+    memcpy(returned.bytes + sizeof out, got, sizeof got);
+    returned_crc = shz_msg_checksum(&returned.header);
+    if (returned_crc != out.checksum)
+        fprintf(stderr, "snapshot collision: accepted checksum 0x%08x, returned bytes checksum 0x%08x\n",
+                out.checksum, returned_crc);
+    CHECK(returned_crc == out.checksum);
+    CHECK(out.opcode == 0x1111 && out.request_id == UINT64_C(0x1111222233334444));
+    CHECK(!memcmp(got, first_payload, sizeof got));
+    CHECK(shz_ring_pop(r, &out, got, sizeof got, &reason) == SHZ_E_NOENT);
 }
 
 static void test_fuzz(void)
@@ -782,6 +843,11 @@ int main(int argc, char **argv)
 {
     if (argc == 4 && !strcmp(argv[1], "--verify"))
         return verify_frames(argv[2], argv[3]);
+    if (argc == 2 && !strcmp(argv[1], "--ring-snapshot")) {
+        test_ring_snapshot();
+        printf("ABI ring snapshot: %lu checks passed\n", checks);
+        return 0;
+    }
     if (argc == 2 && !strcmp(argv[1], "--channel-safety")) {
         test_channel_init_rejection();
         test_channel_layout_rejection();
@@ -801,6 +867,7 @@ int main(int argc, char **argv)
     }
     test_ring_basic();
     test_malformed();
+    test_ring_snapshot();
     test_fuzz();
     test_requests();
     test_channel_and_pool();

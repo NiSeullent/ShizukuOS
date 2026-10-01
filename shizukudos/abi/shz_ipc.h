@@ -140,8 +140,8 @@ enum shz_proto_reason {
 SHZ_IPC_INLINE int shz_ring_pop(shz_ring_hdr_t *r, shz_msg_hdr_t *out, void *payload_out, size_t payload_cap,
                                 int *reason)
 {
+    union { shz_msg_hdr_t header; uint8_t bytes[SHZ_MSG_SLOT_SIZE]; } snapshot;
     uint32_t head, tail;
-    const shz_msg_hdr_t *m;
     int why = SHZ_PR_NONE;
     if (reason)
         *reason = SHZ_PR_NONE;
@@ -156,8 +156,11 @@ SHZ_IPC_INLINE int shz_ring_pop(shz_ring_hdr_t *r, shz_msg_hdr_t *out, void *pay
             *reason = SHZ_PR_HEAD_CORRUPT;
         return SHZ_E_PROTO;
     }
-    m = (const shz_msg_hdr_t *)shz_ring_slot(r, tail);
-    SHZ_IPC_MEMCPY(out, m, sizeof *out);        /* work on a private copy: the peer may keep writing */
+    /* One naturally aligned private slot supplies the header, CRC and payload.
+     * This copy is not atomic against a peer violating the SPSC publication
+     * contract, but later peer writes cannot mix separately checked frames. */
+    SHZ_IPC_MEMCPY(snapshot.bytes, shz_ring_slot(r, tail), sizeof snapshot);
+    SHZ_IPC_MEMCPY(out, &snapshot.header, sizeof *out);
     if (out->magic != SHZ_MSG_MAGIC)
         why = SHZ_PR_MAGIC;
     else if (out->abi_major != SHZ_ABI_MAJOR)
@@ -172,16 +175,14 @@ SHZ_IPC_INLINE int shz_ring_pop(shz_ring_hdr_t *r, shz_msg_hdr_t *out, void *pay
              !shz_range_ok(out->payload_offset, out->payload_length, out->message_size))
         why = SHZ_PR_PAYLOAD_RANGE;
     else {
-        uint8_t copy[SHZ_MSG_SLOT_SIZE];
-        SHZ_IPC_MEMCPY(copy, m, out->message_size);
-        ((shz_msg_hdr_t *)copy)->checksum = 0;
-        if (shz_crc32(copy, out->message_size) != out->checksum)
+        snapshot.header.checksum = 0;
+        if (shz_crc32(snapshot.bytes, out->message_size) != out->checksum)
             why = SHZ_PR_CHECKSUM;
         else if (out->payload_length) {
             if (!payload_out || payload_cap < out->payload_length) {
                 why = SHZ_PR_PAYLOAD_RANGE;
             } else {
-                SHZ_IPC_MEMCPY(payload_out, copy + out->payload_offset, out->payload_length);
+                SHZ_IPC_MEMCPY(payload_out, snapshot.bytes + out->payload_offset, out->payload_length);
             }
         }
     }
