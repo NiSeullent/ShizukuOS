@@ -405,41 +405,71 @@ K32API BOOL WINAPI SetStdHandle(DWORD which, HANDLE h)
     default: shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE;
     }
 }
-static int is_console_device(HANDLE h)
+NTSTATUS NTAPI NtQueryObject(HANDLE, ULONG, PVOID, ULONG, PULONG);
+
+/* Device identity comes from the native volume query, not the standard-handle slot or
+ * FILE_ATTRIBUTE_DEVICE (which other devices may also carry). FileAllInformation reports
+ * the console object's direction even after duplication or SetStdHandle redirection. */
+int k32_console_handle(HANDLE h, int *kind)
 {
-    struct { ULONGLONG c, a, w, ch; ULONG attrs, pad; } b;
     SHZ_IO_STATUS_BLOCK iosb;
-    return NtQueryInformationFile(h, &iosb, &b, sizeof b, 4) == 0 && (b.attrs & ATTR_DEVICE);
-}
-/* a console handle of an attached process (k32_console.c: FreeConsole detaches) */
-static int is_console(HANDLE h) { return k32_console_attached() && is_console_device(h); }
-int k32_console_handle(HANDLE h, int *std_slot)
-{
-    if (!is_console_device(h)) return 0;
-    *std_slot = std_index(h);
+    ULONG dev[2];
+    BYTE all[104];
+    DWORD direction;
+    if (NtQueryVolumeInformationFile(h, &iosb, dev, sizeof dev, 4) || dev[0] != 0x50) return 0;
+    if (NtQueryInformationFile(h, &iosb, all, sizeof all, 18)) return 0;
+    memcpy(&direction, all + 76, sizeof direction);
+    *kind = direction & (GENERIC_WRITE | FILE_WRITE_DATA) ? 1 : 0;
     return 1;
 }
+
+/* kind: -1 either, 0 input buffer, 1 output buffer. Check per-handle granted access:
+ * a duplicated handle with reduced rights must not gain access through this model. */
+BOOL k32_console_check(HANDLE h, int kind, DWORD access)
+{
+    ULONG basic[14];
+    int actual;
+    NTSTATUS st;
+    if (!k32_console_attached() || !k32_console_handle(h, &actual) || (kind >= 0 && kind != actual)) {
+        shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE;
+    }
+    st = NtQueryObject(h, 0, basic, sizeof basic, 0);
+    if (st) { k32_nt_error(st); return FALSE; }
+    if (access && !(basic[1] & (access | GENERIC_ALL | (access == GENERIC_READ ? FILE_READ_DATA : FILE_WRITE_DATA)))) {
+        shz_set_last_error(ERROR_ACCESS_DENIED); return FALSE;
+    }
+    return TRUE;
+}
+
+DWORD k32_console_output_mode(void) { return (DWORD)console_mode[1]; }
+
 K32API BOOL WINAPI GetConsoleMode(HANDLE h, LPDWORD mode)
 {
-    int i = std_index(h);
-    if (!is_console(h)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
-    *mode = (DWORD)console_mode[i < 0 ? 1 : i];
+    int kind;
+    if (!k32_console_check(h, -1, GENERIC_READ)) return FALSE;
+    if (!mode) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    k32_console_handle(h, &kind);
+    *mode = (DWORD)console_mode[kind];
     return TRUE;
 }
 K32API BOOL WINAPI SetConsoleMode(HANDLE h, DWORD mode)
 {
-    int i = std_index(h);
-    if (!is_console(h)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
-    console_mode[i < 0 ? 1 : i] = mode;
+    int kind;
+    if (!k32_console_check(h, -1, GENERIC_WRITE)) return FALSE;
+    k32_console_handle(h, &kind);
+    console_mode[kind] = mode;
     return TRUE;
 }
 K32API BOOL WINAPI WriteConsoleA(HANDLE h, const VOID *buf, DWORD n, LPDWORD written, LPVOID reserved)
 {
+    DWORD put = 0;
     (void)reserved;
-    if (!is_console(h)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
-    if (!WriteFile(h, buf, n, written, 0)) return FALSE;  /* WriteFile moves the screen-buffer cursor for standard handles */
-    if (std_index(h) < 1) k32_console_track(buf, n);
-    return TRUE;
+    if (written) *written = 0;
+    if (!k32_console_check(h, 1, GENERIC_WRITE)) return FALSE;
+    if (!buf && n) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    if (!WriteFile(h, buf, n, &put, 0)) return FALSE;
+    if (written) *written = put;
+    return TRUE;                                         /* WriteFile tracks every console output handle once */
 }
 K32API BOOL WINAPI WriteConsoleW(HANDLE h, const VOID *buf, DWORD n, LPDWORD written, LPVOID reserved)
 {
@@ -447,23 +477,31 @@ K32API BOOL WINAPI WriteConsoleW(HANDLE h, const VOID *buf, DWORD n, LPDWORD wri
     const WCHAR *w = buf;
     DWORD done = 0, off = 0;
     (void)reserved;
-    if (!is_console(h)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
+    if (written) *written = 0;
+    if (!k32_console_check(h, 1, GENERIC_WRITE)) return FALSE;
+    if (!buf && n) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
     while (off < n) {
-        DWORD chunk = n - off > 250 ? 250 : n - off, put;
-        int len = wide_to_utf8(w + off, (int)chunk, tmp, sizeof tmp);
-        if (len <= 0) break;
-        if (!WriteFile(h, tmp, (DWORD)len - 1, &put, 0)) return FALSE;
-        if (std_index(h) < 1) k32_console_track(tmp, (DWORD)len - 1);       /* WriteFile tracked the standard handles */
+        DWORD chunk = n - off > 250 ? 250 : n - off, put = 0;
+        int len;
+        /* Never split a UTF-16 surrogate pair between conversions. Explicit-length conversion
+         * includes no terminator: send every byte, including a final LF or an embedded NUL. */
+        if (off + chunk < n && w[off + chunk - 1] >= 0xd800 && w[off + chunk - 1] <= 0xdbff &&
+            w[off + chunk] >= 0xdc00 && w[off + chunk] <= 0xdfff) --chunk;
+        len = wide_to_utf8(w + off, (int)chunk, tmp, sizeof tmp);
+        if (len <= 0) { shz_set_last_error(ERROR_NO_UNICODE_TRANSLATION); return FALSE; }
+        if (!WriteFile(h, tmp, (DWORD)len, &put, 0)) { if (written) *written = done; return FALSE; }
+        if (put != (DWORD)len) { if (written) *written = done; shz_set_last_error(ERROR_WRITE_FAULT); return FALSE; }
         off += chunk;
         done += chunk;
+        if (written) *written = done;
     }
-    if (written) *written = done;
     return TRUE;
 }
 K32API BOOL WINAPI ReadConsoleA(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPVOID ctl)
 {
-    (void)ctl;
-    if (!is_console(h)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
+    if (got) *got = 0;
+    if (!k32_console_check(h, 0, GENERIC_READ)) return FALSE;
+    if ((!buf && n) || ctl) { shz_set_last_error(ctl ? ERROR_NOT_SUPPORTED : ERROR_INVALID_PARAMETER); return FALSE; }
     return ReadFile(h, buf, n, got, 0);
 }
 K32API UINT WINAPI GetConsoleCP(void) { return 65001; }

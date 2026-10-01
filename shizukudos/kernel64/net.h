@@ -166,6 +166,7 @@ typedef struct dgram {
 } dgram_t;
 
 struct tcb;
+struct sock_extension;
 typedef struct sock {
     struct sock *next;                          /* g_socks list */
     int type;                                   /* SK_STREAM / SK_DGRAM */
@@ -190,6 +191,8 @@ typedef struct sock {
     kobject_t *evt;                             /* WSAEventSelect event object (referenced) */
     uint32_t evt_mask, evt_pending;
     int32_t evt_err[6];
+    struct sock_extension *extension;          /* one owned ConnectEx IRP; cancel abort deferred under net lock */
+    uint8_t extension_busy, extension_context_pending, extension_no_reuse;
 } sock_t;
 extern sock_t *g_socks;
 
@@ -197,6 +200,7 @@ sock_t *sock_new(int type, int kernel_owned);
 void sock_close_kernel(sock_t *s);              /* lock held */
 void sock_release(sock_t *s);                   /* drops one ref; frees when dead and unreferenced (lock held) */
 void sock_notify(sock_t *s);                    /* state changed: wake sleepers, signal WSAEventSelect event */
+void sock_extensions_poll(void);                /* net lock held; progress and reap canceled requests */
 int sock_port_in_use(int type, ip4_t lip, uint16_t lport, const sock_t *except, int reuse);
 uint16_t sock_alloc_port(int type);
 uint32_t sock_poll_mask(sock_t *s);             /* Winsock POLL* mask */
@@ -253,6 +257,7 @@ unsigned tcp_dump(uint8_t *out, unsigned max_entries);
 /* ---- syscall front end ---- */
 int32_t sys_ext_net(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
 void net_socket_handle_closing(kobject_t *o);  /* objects.c handle_close hook for OB_SOCKET */
+void net_socket_last_handle_closed(kobject_t *o); /* IPC atomic last-handle hook; handles vs IRP references */
 
 /* ---- ABI structures shared with ws2_32.dll (layout = Windows x64) ---- */
 struct shz_sockaddr_in { uint16_t family; uint16_t port_be; uint32_t addr_be; uint8_t zero[8]; };

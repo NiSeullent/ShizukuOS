@@ -79,4 +79,7 @@ BOOL k32_unsupported(const char *fn, const char *what, DWORD err);   /* sets `er
  * output buffer is too small. */
 int k32_utf8_to_wide(const char *s, int n, WCHAR *w, int cap);
 int k32_wide_to_utf8(const WCHAR *w, int n, char *s, int cap);
+/* DeleteFiber releases a detached FLS array; callbacks run without the bitmap lock.
+ * The caller owns the array until this helper returns and must prevent recursive deletion. */
+void k32_fls_destroy_data(PVOID *values);
 #endif

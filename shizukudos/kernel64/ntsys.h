@@ -29,7 +29,8 @@
     X(NtGetContextThread, 0x34) X(NtSetContextThread, 0x35) X(NtSuspendThread, 0x36) X(NtResumeThread, 0x37) \
     X(NtCancelIoFile, 0x38) X(NtCreateTimer, 0x39) X(NtSetTimer, 0x3a) X(NtCancelTimer, 0x3b) \
     X(NtOpenProcess, 0x3c) X(NtOpenThread, 0x3d) X(NtSetInformationProcess, 0x3e) X(NtFlushInstructionCache, 0x3f) \
-    X(NtWaitForAlertByThreadId, 0x40) X(NtAlertThreadByThreadId, 0x41)
+    X(NtWaitForAlertByThreadId, 0x40) X(NtAlertThreadByThreadId, 0x41) \
+    X(NtShzLoaderControl, 0x42) X(NtShzLoaderCommit, 0x43)
 
 /* Reserved ranges for subsystems that live in their own kernel64 files and their own sys_ext_*() handler (sysext.c).
  * Each subsystem defines ONLY its own list below (numbers must stay inside its range):

@@ -62,7 +62,9 @@ int pe_read_string(const uint8_t *file, uint64_t size, const pe_info_t *info, ui
 int pe_find_export(const uint8_t *file, uint64_t size, const pe_info_t *info, const char *name, int ordinal,
                    uint32_t *rva, char *forward, unsigned forward_cap);
 
-/* Iteration helpers for imports and relocations (callback style keeps this allocation-free). */
+/* Iteration helpers for imports and relocations (callback style keeps this allocation-free).
+ * Named symbols are validated NUL-terminated views into the caller-owned raw file, valid for
+ * that file's lifetime. No fixed-size symbol copy truncates decorated C++ names. */
 typedef int (*pe_import_fn)(void *ctx, const char *dll, const char *name, uint16_t ordinal_or_hint, int by_ordinal,
                             uint32_t iat_rva);
 int pe_walk_imports(const uint8_t *file, uint64_t size, const pe_info_t *info, pe_import_fn fn, void *ctx);

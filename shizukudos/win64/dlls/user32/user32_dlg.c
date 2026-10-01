@@ -777,6 +777,15 @@ DLLAPI BOOL WINAPI EndDialog(HWND dlg, INT_PTR result)
     return TRUE;
 }
 
+/* Dialog callbacks can destroy their HWND synchronously, which also frees
+ * ShzDlgInfo in WM_NCDESTROY. Never retain that heap pointer across a call
+ * that can deliver application messages. Destruction without EndDialog is a
+ * failed modal operation and returns -1 after restoring the owner's state. */
+static dlginfo_t *live_dialog_info(HWND dlg)
+{
+    return IsWindow(dlg) ? dlg_info(dlg, 0) : 0;
+}
+
 DLLAPI INT_PTR WINAPI DialogBoxIndirectParamW(HINSTANCE inst, LPCDLGTEMPLATEW tpl, HWND owner, DLGPROC proc, LPARAM init)
 {
     HWND dlg;
@@ -788,21 +797,33 @@ DLLAPI INT_PTR WINAPI DialogBoxIndirectParamW(HINSTANCE inst, LPCDLGTEMPLATEW tp
     dlg = CreateDialogIndirectParamW(inst, tpl, owner, proc, init);
     if (!dlg) return -1;
     d = dlg_info(dlg, 1);
+    if (!d) {
+        DestroyWindow(dlg);
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return -1;
+    }
     d->modal = 1;
     if (!d->ended) {
-        if (owner && IsWindowEnabled(owner)) { EnableWindow(owner, FALSE); owner_enabled = 1; }
-        ShowWindow(dlg, SW_SHOWNORMAL);
-        UpdateWindow(dlg);
-        while (!d->ended) {
+        if (owner && IsWindowEnabled(owner)) { owner_enabled = 1; EnableWindow(owner, FALSE); }
+        if ((d = live_dialog_info(dlg)) && !d->ended) ShowWindow(dlg, SW_SHOWNORMAL);
+        if ((d = live_dialog_info(dlg)) && !d->ended) UpdateWindow(dlg);
+        while ((d = live_dialog_info(dlg)) && !d->ended) {
             const BOOL got = GetMessageW(&msg, 0, 0, 0);
             if (got <= 0) { if (got == 0) PostQuitMessage((int)msg.wParam); break; }
-            if (!IsDialogMessageW(dlg, &msg)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
-            if (!IsWindow(dlg)) break;
+            d = live_dialog_info(dlg);                 /* GetMessage can dispatch sent messages */
+            if (!d || d->ended) break;
+            if (!IsDialogMessageW(dlg, &msg)) {
+                d = live_dialog_info(dlg);             /* dialog routing also calls application code */
+                if (!d || d->ended) break;
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
         }
         if (owner_enabled) EnableWindow(owner, TRUE);
         if (owner && IsWindow(owner)) SetForegroundWindow(owner);
     }
-    result = IsWindow(dlg) && d->ended ? d->result : -1;
+    d = live_dialog_info(dlg);
+    result = d && d->ended ? d->result : -1;
     if (IsWindow(dlg)) DestroyWindow(dlg);
     return result;
 }

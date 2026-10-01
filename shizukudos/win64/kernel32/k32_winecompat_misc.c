@@ -91,11 +91,69 @@ K32API PVOID WINAPI DelayLoadFailureHook(LPCSTR dll, LPCSTR proc)
 
 typedef PVOID (WINAPI *delay_sys_hook)(LPCSTR, LPCSTR);
 
+/* Modern linker delay thunks can live in read-only image pages. Serialize
+ * these short patch transactions so two resolvers cannot restore each other's
+ * temporary protection. Never hold this lock across a loader call or hook. */
+static RTL_SRWLOCK delay_patch_lock;
+
+static BOOL delay_read_module(HMODULE *slot, HMODULE *module)
+{
+    BOOL ok;
+    if (((ULONG_PTR)slot & (sizeof(PVOID) - 1)) != 0) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    RtlAcquireSRWLockExclusive(&delay_patch_lock);
+    ok = range_ok(slot, sizeof *slot, FALSE);
+    if (ok) *module = *slot;
+    else SetLastError(ERROR_NOACCESS);
+    RtlReleaseSRWLockExclusive(&delay_patch_lock);
+    return ok;
+}
+
+static BOOL delay_patch_pointer(PVOID *target, PVOID value, BOOL compare_null, PVOID *previous, BOOL *committed)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    DWORD protection, writable, old = 0, ignored;
+    BOOL changed = FALSE, ok = FALSE;
+    if (committed) *committed = FALSE;
+    if (((ULONG_PTR)target & (sizeof(PVOID) - 1)) != 0) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    RtlAcquireSRWLockExclusive(&delay_patch_lock);
+    if (!VirtualQuery(target, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT ||
+        !range_ok(target, sizeof *target, FALSE)) {
+        SetLastError(ERROR_NOACCESS);
+        goto done;
+    }
+    protection = mbi.Protect & 0xff;
+    if (protection == PAGE_READONLY || protection == PAGE_EXECUTE_READ) {
+        writable = (protection == PAGE_EXECUTE_READ ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE) |
+                   (mbi.Protect & (PAGE_NOCACHE | PAGE_WRITECOMBINE));
+        if (!VirtualProtect(target, sizeof *target, writable, &old)) goto done;
+        changed = TRUE;
+    } else if (!range_ok(target, sizeof *target, TRUE)) {
+        SetLastError(ERROR_NOACCESS);
+        goto done;
+    }
+    if (compare_null) *previous = InterlockedCompareExchangePointer(target, value, NULL);
+    else InterlockedExchangePointer(target, value);
+    if (committed) *committed = TRUE;
+    ok = TRUE;
+    if (changed && !VirtualProtect(target, sizeof *target, old, &ignored)) ok = FALSE;
+done:
+    RtlReleaseSRWLockExclusive(&delay_patch_lock);
+    return ok;
+}
+
 K32API PVOID WINAPI ResolveDelayLoadedAPI(PVOID base, const SHZ_DELAYLOAD_DESCRIPTOR *desc, PVOID dll_hook, delay_sys_hook sys_hook,
                                           PIMAGE_THUNK_DATA thunk, ULONG flags)
 {
     BYTE *b = base;
-    BOOL rva = desc->Attributes & 1;
+    BOOL rva;
+    if (!base || !desc || !thunk || flags) { SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
+    rva = desc->Attributes & 1;
 #define PTR(v) ((void *)(rva ? b + (v) : (BYTE *)(ULONG_PTR)(v)))
     const char *dll = PTR(desc->DllNameRVA);
     HMODULE *slot = PTR(desc->ModuleHandleRVA), mod;
@@ -104,19 +162,29 @@ K32API PVOID WINAPI ResolveDelayLoadedAPI(PVOID base, const SHZ_DELAYLOAD_DESCRI
     LPCSTR proc;
     PVOID fn = NULL;
 #undef PTR
-    (void)dll_hook; (void)flags;
+    (void)dll_hook;
     if (IMAGE_SNAP_BY_ORDINAL(names[index].u1.Ordinal)) proc = (LPCSTR)(ULONG_PTR)IMAGE_ORDINAL(names[index].u1.Ordinal);
     else proc = (const char *)((IMAGE_IMPORT_BY_NAME *)(rva ? b + names[index].u1.AddressOfData
                                                            : (BYTE *)(ULONG_PTR)names[index].u1.AddressOfData))->Name;
-    if (!(mod = *slot)) {
+    if (!delay_read_module(slot, &mod)) return NULL;
+    if (!mod) {
         if ((mod = LoadLibraryA(dll))) {
-            HMODULE prev = InterlockedCompareExchangePointer((PVOID *)slot, mod, NULL);
+            HMODULE prev = NULL;
+            BOOL committed;
+            if (!delay_patch_pointer((PVOID *)slot, mod, TRUE, (PVOID *)&prev, &committed)) {
+                DWORD error = GetLastError();
+                /* A successful publication owns this module reference even
+                 * when restoration fails. Do not leave a dangling slot. */
+                if (!committed || prev) FreeLibrary(mod);
+                SetLastError(error);
+                return NULL;
+            }
             if (prev) { FreeLibrary(mod); mod = prev; }
         }
     }
     if (mod) fn = (PVOID)GetProcAddress(mod, proc);
     if (!fn) fn = sys_hook ? sys_hook(dll, proc) : DelayLoadFailureHook(dll, proc);
-    if (fn) thunk->u1.Function = (ULONG_PTR)fn;
+    if (fn && !delay_patch_pointer((PVOID *)&thunk->u1.Function, fn, FALSE, NULL, NULL)) return NULL;
     return fn;
 }
 

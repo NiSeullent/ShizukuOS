@@ -21,4 +21,6 @@
 #include <propidl.h>
 
 extern const GUID shz_iid_unknown, shz_iid_malloc, shz_iid_initializespy;
+/* Caller owns this AddRef snapshot across reentrant modal-loop callbacks. */
+IMessageFilter *shz_message_filter_snapshot(void);
 #endif

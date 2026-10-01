@@ -46,11 +46,12 @@ static int depth_walk(HANDLE proc, int expect_self_frames)
 {
     CONTEXT ctx;
     STACKFRAME64 f;
-    int frames = 0, self = 0, saw_main = 0;
     DWORD64 exe = (DWORD64)(ULONG_PTR)GetModuleHandleW(0);
     (void)expect_self_frames;
     memset(&ctx, 0, sizeof ctx);
     RtlCaptureContext(&ctx);
+    /* Initialize walk state after the SDK returns-twice capture point. */
+    int frames = 0, self = 0, saw_main = 0;
     g_pc_inner = ctx.Rip;
     memset(&f, 0, sizeof f);
     f.AddrPC.Offset = ctx.Rip; f.AddrPC.Mode = AddrModeFlat;

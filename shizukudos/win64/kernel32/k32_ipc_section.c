@@ -28,6 +28,7 @@ K32API HANDLE WINAPI CreateFileMappingW(HANDLE file, LPSECURITY_ATTRIBUTES sa, D
     const DWORD attrs = protect & 0xffffff00u, prot = protect & 0xff;
     DWORD e = k32_ipc_oa(name, sa && sa->bInheritHandle, TRUE, &oa, &us);
     if (e) { shz_set_last_error(e); return 0; }
+    oa.SecurityDescriptor = sa ? sa->lpSecurityDescriptor : 0;
     size.QuadPart = ((LONGLONG)max_hi << 32) | max_lo;
     if (file == INVALID_HANDLE_VALUE) {
         file = 0;                                               /* backed by the paging file */

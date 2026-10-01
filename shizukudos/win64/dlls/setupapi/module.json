@@ -1,0 +1,4 @@
+{
+  "description": "SetupAPI over the actual registered Kernel64 PnP devnode/interface catalog",
+  "libs": ["advapi32"]
+}

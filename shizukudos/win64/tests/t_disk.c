@@ -52,7 +52,9 @@ static int list_dir(const wchar_t *ntpath, dent_t *out, int cap)
             const unsigned char *e = buf + off;
             const ULONG next = *(const ULONG *)e, nlen = *(const ULONG *)(e + 60);
             const WCHAR *w = (const WCHAR *)(e + 94);
-            if (n < cap) {
+            /* Content receipts compare packed children. The hierarchy entries
+             * are verified separately by t_legcord_directory.c. */
+            if (n < cap && !(nlen == 2 && w[0] == L'.') && !(nlen == 4 && w[0] == L'.' && w[1] == L'.')) {
                 for (i = 0; i < nlen / 2 && i < 259; ++i) out[n].name[i] = w[i] < 0x80 ? (char)w[i] : '?';
                 out[n].name[i] = 0;
                 out[n].size = *(const unsigned long long *)(e + 40);
@@ -108,8 +110,10 @@ static int query_pattern(const wchar_t *ntpath, const wchar_t *pattern, const ch
                 for (i = 0; i < slen / 2 && i < 12; ++i) alias[i] = (char)((const WCHAR *)(e + 70))[i];
                 alias[i] = 0;
             }
-            printf("DISK-QUERY %u %s %s|%s\n", cls, pattern_a, name, alias);
-            ++n;
+            if (strcmp(name, ".") && strcmp(name, "..")) {
+                printf("DISK-QUERY %u %s %s|%s\n", cls, pattern_a, name, alias);
+                ++n;
+            }
             if (!next) break;
             off += next;
         }
@@ -260,7 +264,24 @@ static void write_tests(void)
         U_CHECKF("NtFlushBuffersFile after the last write", st == 0, "status %x", (unsigned)st);
         CloseHandle(h);
     }
-    U_CHECK("delete on D: is refused (not supported)", !DeleteFileA(outs[1]));
+    /* Verify the actual FAT deletion path using a separate temporary file.
+     * Keep the four write/readback receipts available to independent mtools. */
+    {
+        static const char remove_path[] = "D:\\OUT\\delete.tmp";
+        static const char payload[] = "owned temporary FAT deletion contract";
+        h = CreateFileA(remove_path, GENERIC_WRITE, 0, 0, CREATE_NEW, 0, 0);
+        U_CHECK("create separate FAT deletion fixture", h != INVALID_HANDLE_VALUE);
+        if (h != INVALID_HANDLE_VALUE) {
+            U_CHECK("write separate FAT deletion fixture", WriteFile(h, payload, sizeof payload - 1, &got, 0)
+                    && got == sizeof payload - 1);
+            U_CHECK("close separate FAT deletion fixture", CloseHandle(h));
+            U_CHECK("delete actual FAT file", DeleteFileA(remove_path));
+            U_CHECK("deleted FAT file is absent", GetFileAttributesA(remove_path) == INVALID_FILE_ATTRIBUTES
+                    && GetLastError() == ERROR_FILE_NOT_FOUND);
+            U_CHECK("second FAT deletion reports file not found", !DeleteFileA(remove_path)
+                    && GetLastError() == ERROR_FILE_NOT_FOUND);
+        }
+    }
     for (i = 0; i < sizeof outs / sizeof outs[0]; ++i) {
         int ok = readback(outs[i], &size, &crc);
         U_CHECK("read back a written file", ok);
