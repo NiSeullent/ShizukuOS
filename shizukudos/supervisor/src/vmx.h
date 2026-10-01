@@ -149,7 +149,7 @@ typedef struct vcpu {
     uint64_t vmcs_pa;
     uint64_t ept_pointer;
     uint64_t pending_irq_window;    /* interrupt-window exiting currently requested */
-    uint32_t owner_cpu, cpu_binding_valid; /* immutable until domain destruction */
+    uint32_t owner_cpu, cpu_binding_valid; /* 0 virgin, 2 retained construction, 1 ready; owner immutable */
     uint8_t exit_stack[VCPU_EXIT_STACK_BYTES] __attribute__((aligned(16)));
 } vcpu_t;
 

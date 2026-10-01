@@ -15,6 +15,20 @@ typedef struct {
     uint32_t sealed, count, apic[VMX_CPU_MAX], state[VMX_CPU_MAX];
     uint64_t gdt[VMX_CPU_MAX], idt[VMX_CPU_MAX], tss[VMX_CPU_MAX];
 } vmx_cpu_topology_t;
+static inline int vmx_cpu_tss_decode(uint64_t low,uint64_t high,uint64_t *base)
+{
+    if(!base || ((low>>40)&0xffu)!=0x8b || ((low>>52)&0xfu) || high>>32 ||
+       ((low&0xffffu)|((low>>32)&0xf0000u))!=103) return -1;
+    *base=((low>>16)&0xffffffu)|((low>>32)&0xff000000u)|(high<<32);
+    return 0;
+}
+/* 0 virgin, 2 retained construction owner, 1 fully initialized. A failed
+ * hardware construction never returns to virgin or becomes loadable. */
+static inline int vmx_cpu_claim_binding(uint32_t *binding)
+{
+    uint32_t expected=0;
+    return binding && __atomic_compare_exchange_n(binding,&expected,2,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)?0:-1;
+}
 static inline int vmx_cpu_topology_init(vmx_cpu_topology_t *t, const uint32_t *ids,
                                        unsigned count, uint32_t actual_bsp)
 {

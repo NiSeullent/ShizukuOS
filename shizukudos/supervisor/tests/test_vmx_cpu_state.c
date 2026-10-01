@@ -7,6 +7,21 @@ static unsigned checks;
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr,"FAIL %s:%u %s\n",__FILE__,__LINE__,#x);exit(1); } } while(0)
 int main(void)
 {
+    const uint64_t descriptor=103u|(UINT64_C(0x3000)<<16)|(UINT64_C(0x8b)<<40);
+    uint64_t decoded=0;
+    CHECK(vmx_cpu_tss_decode(descriptor,0,&decoded)==0 && decoded==0x3000);
+    CHECK(vmx_cpu_tss_decode(descriptor|(UINT64_C(1)<<55),0,&decoded)<0);
+    CHECK(vmx_cpu_tss_decode(descriptor|(UINT64_C(1)<<54),0,&decoded)<0);
+    CHECK(vmx_cpu_tss_decode(descriptor|(UINT64_C(1)<<53),0,&decoded)<0);
+    CHECK(vmx_cpu_tss_decode(descriptor|(UINT64_C(1)<<52),0,&decoded)<0);
+    CHECK(vmx_cpu_tss_decode(descriptor,UINT64_C(1)<<32,&decoded)<0);
+    CHECK(vmx_cpu_tss_decode(descriptor^1,0,&decoded)<0);
+    CHECK(vmx_cpu_tss_decode(descriptor,0,NULL)<0);
+    uint32_t binding=0;
+    CHECK(vmx_cpu_claim_binding(NULL)<0);
+    CHECK(vmx_cpu_claim_binding(&binding)==0 && binding==2);
+    CHECK(vmx_cpu_claim_binding(&binding)<0 && binding==2);
+    binding=1;CHECK(vmx_cpu_claim_binding(&binding)<0 && binding==1);
     vmx_cpu_topology_t t={0}, bad={0};
     const uint32_t ids[]={11,97,300,0xfffffffeu}, dup[]={11,97,11};
     CHECK(vmx_cpu_find(&t,11)==VMX_CPU_INVALID);

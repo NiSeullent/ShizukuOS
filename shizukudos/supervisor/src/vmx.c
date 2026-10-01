@@ -71,10 +71,8 @@ static int publish_host_tables(unsigned cpu)
         return -1;
     low = *(const uint64_t *)(uintptr_t)(gdtr.base + HOST_TR);
     high = *(const uint64_t *)(uintptr_t)(gdtr.base + HOST_TR + 8);
-    if (((low >> 40) & 0xffu) != 0x8b || high >> 32 ||
-        ((low & 0xffffu) | ((low >> 32) & 0xf0000u)) != 103)
+    if (vmx_cpu_tss_decode(low, high, &base))
         return -1;
-    base = ((low >> 16) & 0xffffffu) | ((low >> 32) & 0xff000000u) | (high << 32);
     return vmx_cpu_publish_tables(&cpu_topology, cpu, gdtr.base, idtr.base, base);
 }
 
@@ -208,7 +206,7 @@ void vmx_hw_shutdown(void)
 int vmx_vcpu_load(vcpu_t *vc)
 {
     const unsigned cpu = current_cpu();
-    if (!vc || vc->cpu_binding_valid != 1 || !vc->vmcs_pa || (vc->vmcs_pa & 4095) ||
+    if (!vc || __atomic_load_n(&vc->cpu_binding_valid, __ATOMIC_ACQUIRE) != 1 || !vc->vmcs_pa || (vc->vmcs_pa & 4095) ||
         vmx_cpu_bind_allowed(&cpu_topology, cpu, vc->owner_cpu, vc->domain_id))
         return -1;
     return vmptrld(vc->vmcs_pa);
@@ -250,11 +248,13 @@ int vmx_vcpu_init(vcpu_t *vc, shz_info_t *info, const shz_caps_t *caps, const vm
     uint64_t cr0_host, cr4_host, guest_cr0, guest_cr4, guest_efer;
     int i;
     (void)caps;
+    if (!vc || !info || !cfg || !cfg->vmcs || ((uintptr_t)cfg->vmcs & 4095))
+        return -1;
     const int real = cfg->mode == VMODE_REAL;
     const int lm = cfg->mode == VMODE_LONG64;
     unsigned cpu;
     struct vmx_cpu_bank *bank = ready_bank(&cpu);
-    if (!bank || vc->cpu_binding_valid ||
+    if (!bank || __atomic_load_n(&vc->cpu_binding_valid, __ATOMIC_ACQUIRE) ||
         vmx_cpu_bind_allowed(&cpu_topology, cpu, cpu, cfg->vpid)) {
         log_capture(info->last_error, sizeof info->last_error, "VMCS CPU ownership refused");
         return -1;
@@ -278,6 +278,12 @@ int vmx_vcpu_init(vcpu_t *vc, shz_info_t *info, const shz_caps_t *caps, const vm
         info->vmx_entry = entryc;
     }
 
+    if (vmx_cpu_claim_binding(&vc->cpu_binding_valid)) {
+        log_capture(info->last_error, sizeof info->last_error, "VMCS construction owner already retained");
+        return -1;
+    }
+    vc->owner_cpu = cpu;
+    vc->domain_id = cfg->vpid;
     memset(cfg->vmcs, 0, 4096);
     *(uint32_t *)cfg->vmcs = (uint32_t)(bank->basic & 0x7fffffff);
     vc->vmcs_pa = (uint64_t)(uintptr_t)cfg->vmcs;
@@ -413,9 +419,7 @@ out:
                     vmread(VMCS_INSTR_ERROR));
         return -1;
     }
-    vc->owner_cpu = cpu;
-    vc->domain_id = cfg->vpid;
-    vc->cpu_binding_valid = 1;
+    __atomic_store_n(&vc->cpu_binding_valid, 1, __ATOMIC_RELEASE);
     return 0;
 }
 
