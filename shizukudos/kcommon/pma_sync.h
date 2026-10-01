@@ -3,7 +3,10 @@
  *
  * Ticket admission is FIFO; unsigned 32-bit counters wrap naturally. Fewer than
  * 2^32 outstanding tickets are required, and an issued ticket cannot be canceled.
- * The returned ticket is the release token: invalid or repeated release fails.
+ * The returned ticket is a single-use release token for that acquisition only.
+ * Discard it on release. Numbers recur after a full counter wrap: a retired
+ * token cannot establish ownership or be diagnosed reliably after that reuse.
+ * Empty/wrong/repeated release within the current acquisition epoch fails.
  * A trylock never joins or bypasses the ticket queue and leaves *ticket unchanged
  * on failure. Initialization requires exclusive access to an unused lock.
  *
@@ -22,7 +25,7 @@
 #define SHZ_PMA_SYNC_H
 #include <stdint.h>
 
-typedef struct { uint32_t next, owner; } pma_ticketlock_t;
+typedef struct { uint32_t next, owner, reservation; } pma_ticketlock_t;
 
 /* These targets must emit CPU atomics, never an out-of-line libatomic call. */
 _Static_assert(__atomic_always_lock_free(sizeof(uint32_t), 0), "PMA needs lock-free 32-bit atomics");
@@ -38,11 +41,30 @@ static inline void pma_ticket_init(pma_ticketlock_t *lock)
 {
     __atomic_store_n(&lock->next, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&lock->owner, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&lock->reservation, 0, __ATOMIC_RELAXED);
+}
+
+/* Serialize only ticket issuance, never the protected critical section.
+ * In particular, next cannot wrap while trylock pauses on an owner snapshot.
+ * Without this gate, separate 32-bit owner/next reads permit a rollover ABA. */
+static inline int pma_ticket_reserve_try(pma_ticketlock_t *lock)
+{
+    uint32_t expected = 0;
+    return __atomic_compare_exchange_n(&lock->reservation, &expected, 1, 0,
+                                       __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+}
+
+static inline void pma_ticket_reserve_release(pma_ticketlock_t *lock)
+{
+    __atomic_store_n(&lock->reservation, 0, __ATOMIC_RELEASE);
 }
 
 static inline uint32_t pma_ticket_lock(pma_ticketlock_t *lock)
 {
+    while (!pma_ticket_reserve_try(lock))
+        pma_spin_pause();
     const uint32_t ticket = __atomic_fetch_add(&lock->next, 1, __ATOMIC_RELAXED);
+    pma_ticket_reserve_release(lock);
     while (__atomic_load_n(&lock->owner, __ATOMIC_ACQUIRE) != ticket)
         pma_spin_pause();
     return ticket;
@@ -50,12 +72,16 @@ static inline uint32_t pma_ticket_lock(pma_ticketlock_t *lock)
 
 static inline int pma_ticket_trylock(pma_ticketlock_t *lock, uint32_t *ticket)
 {
-    uint32_t owner = __atomic_load_n(&lock->owner, __ATOMIC_ACQUIRE);
-    uint32_t expected = owner;
-    if (!__atomic_compare_exchange_n(&lock->next, &expected, owner + 1u, 0,
-                                     __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+    if (!pma_ticket_reserve_try(lock))
         return 0;
+    uint32_t owner = __atomic_load_n(&lock->owner, __ATOMIC_ACQUIRE);
+    if (__atomic_load_n(&lock->next, __ATOMIC_RELAXED) != owner) {
+        pma_ticket_reserve_release(lock);
+        return 0;
+    }
+    __atomic_store_n(&lock->next, owner + 1u, __ATOMIC_RELAXED);
     *ticket = owner;
+    pma_ticket_reserve_release(lock);
     return 1;
 }
 

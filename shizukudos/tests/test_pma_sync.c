@@ -10,7 +10,27 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
+/* Bounded atomic-operation interleaving model: compact billions of otherwise
+ * legitimate completed admissions between an owner snapshot and reservation.
+ * The production helper still executes its own loads and CAS. A held
+ * reservation gate prevents that modeled allocation progress. */
+static uint32_t *paused_owner, *paused_next, *paused_gate;
+static int paused_snapshot;
+static uint32_t observed_load(const uint32_t *address, int order)
+{
+    uint32_t result = __atomic_load_n(address, order);
+    if (paused_snapshot && address == paused_owner) {
+        paused_snapshot = 0;
+        if (!paused_gate || !__atomic_load_n(paused_gate, __ATOMIC_RELAXED)) {
+            __atomic_store_n(paused_owner, UINT32_MAX - 1, __ATOMIC_RELAXED);
+            __atomic_store_n(paused_next, 0, __ATOMIC_RELAXED);
+        }
+    }
+    return result;
+}
+#define __atomic_load_n(address, order) observed_load(address, order)
 #include "../kcommon/pma_sync.h"
+#undef __atomic_load_n
 
 #define WORKERS 8
 #ifdef PMA_SYNC_TSAN_SMALL
@@ -131,9 +151,46 @@ static void test_word(void)
     assert(!pma_word_try_lock(&binary) && !pma_word_unlock(&binary) && binary == 2);
 }
 
+static void test_paused_trylock(void)
+{
+    pma_ticketlock_t lock;
+    uint32_t ticket = 99;
+    pma_ticket_init(&lock);
+    paused_owner = &lock.owner;
+    paused_next = &lock.next;
+    paused_gate = sizeof lock > 2 * sizeof(uint32_t) ? (uint32_t *)&lock + 2 : NULL;
+    paused_snapshot = 1;
+    int acquired = pma_ticket_trylock(&lock, &ticket);
+    assert(!paused_snapshot);
+    /* A successful trylock must own the current service ticket even when the
+     * caller paused between its snapshot and reservation. */
+    assert(!acquired || __atomic_load_n(&lock.owner, __ATOMIC_ACQUIRE) == ticket);
+    if (acquired) assert(pma_ticket_unlock(&lock, ticket));
+}
+
+static void test_token_reuse(void)
+{
+    pma_ticketlock_t lock;
+    pma_ticket_init(&lock);
+    uint32_t retired = pma_ticket_lock(&lock);
+    assert(retired == 0 && pma_ticket_unlock(&lock, retired));
+    assert(!pma_ticket_unlock(&lock, retired));
+    /* Compress completed history while quiescent. Token numbers necessarily
+     * recur after a full wrap; retired tokens must not be used as identities. */
+    lock.next = lock.owner = UINT32_MAX;
+    uint32_t last = pma_ticket_lock(&lock);
+    assert(last == UINT32_MAX && pma_ticket_unlock(&lock, last));
+    uint32_t active = pma_ticket_lock(&lock);
+    assert(active == retired);
+    assert(pma_ticket_unlock(&lock, active));
+    assert(!pma_ticket_unlock(&lock, active));
+}
+
 int main(void)
 {
     test_word();
+    test_paused_trylock();
+    test_token_reuse();
     test_fifo(0);
     test_fifo(UINT32_MAX - 2);
     test_stress(0);
