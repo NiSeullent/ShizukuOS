@@ -147,11 +147,31 @@ K32API BOOL WINAPI HeapSetInformation(HANDLE h, HEAP_INFORMATION_CLASS cls, PVOI
     return TRUE;
 }
 
-/* Documented: HeapCompatibilityInformation reports 0 here (a standard heap); a short buffer sets ERROR_INSUFFICIENT_BUFFER and the
- * needed size (dxcompiler.dll imports this name; the classes that can only be set fail with ERROR_INVALID_PARAMETER). */
+/* Query the real ntdll allocator only after checking its registered heap identities.
+ * A destroyed heap descriptor may already be unmapped. The current registry holds
+ * at most 64 heaps; do not dereference an unregistered caller-supplied handle.
+ * HeapCompatibilityInformation is queryable; termination/optimization are set-only.
+ * This SDK lacks the name HeapOptimizeResources, whose documented enum value is 3. */
 K32API BOOL WINAPI HeapQueryInformation(HANDLE h, HEAP_INFORMATION_CLASS cls, PVOID info, SIZE_T len, PSIZE_T ret)
 {
-    NTSTATUS st = (NTSTATUS)RtlQueryHeapInformation(h, cls, info, len, ret);
+    HANDLE registered[64];
+    DWORD count, i;
+    NTSTATUS st;
+    if (cls != HeapCompatibilityInformation) {
+        if (cls == HeapEnableTerminationOnCorruption || (int)cls == 3) {
+            shz_set_last_error(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+        return k32_unsupported("HeapQueryInformation", "information class not supported by this allocator", ERROR_NOT_SUPPORTED);
+    }
+    count = GetProcessHeaps(64, registered);
+    if (count > 64) return k32_unsupported("HeapQueryInformation", "heap registry exceeds query capacity", ERROR_NOT_SUPPORTED);
+    for (i = 0; i < count && registered[i] != h; ++i) { }
+    if (i == count) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
+    if (ret) *ret = sizeof(ULONG);
+    if (len < sizeof(ULONG)) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return FALSE; }
+    if (!info) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    st = (NTSTATUS)RtlQueryHeapInformation(h, cls, info, len, ret);
     if (st) { k32_nt_error(st); return FALSE; }
     return TRUE;
 }

@@ -1,10 +1,20 @@
-# Windows 98 Shizuku's Second Edition
+# ShizukuOS
+
+ShizukuOS의 최종 배포 목표는 **1.0.0**이며 자체 설치 시스템을 사용합니다. 현재는 개발 중입니다. **ISO 배포는 [m98.nyase.kr](https://m98.nyase.kr)에서만 제공**하며 GitHub에는 공개 가능한 개발 소스와 패치만 올립니다. 비공개 파일·Microsoft 설치 파일·개인 VM은 포함하지 않습니다.
+
+[공식 홈페이지·다운로드](https://m98.nyase.kr) · [English](https://m98.nyase.kr/en/) · [실제 화면 미리보기](https://m98.nyase.kr/preview.html)
+
+ShizukuDOS는 MS-DOS를 대체하는 Windows98용 기반이며 Kernel32·Kernel64도 모두 그 구성요소입니다. 단독 실행은 구성요소를 검증하는 시험 프로필입니다. 최종 목표는 ShizukuDOS 위에서 실제 Windows98을 부팅하고 드라이버와 최신 앱을 구동하는 것입니다.
+
+여러 작업 분기의 UEFI 부팅·Shizuku GOP 기본 그래픽 드라이버·한글 데스크톱·데드 스크린·현대 앱 공통 런타임을 `main`에 통합합니다. [다른 환경에서 빌드](docs/CONTINUE_ON_ANOTHER_MACHINE.md)와 [앱 실행 현황·후속 작업](docs/CONTINUE_MODERN_APPS.md)에 현재 구현과 실제 시험 범위가 있습니다. 공개 개발 ISO와 사용자 Windows98 ISO를 설치 USB에 함께 준비하는 경로를 제공합니다. Windows98 원본 미디어와 최신 앱의 원본은 본인의 입력을 사용합니다.
+
+Chromium·Legcord/Discord·최신 오픈소스 Office·Steam은 필수 구현 목표입니다. 실제 Windows98 GOP의 제한된 GUI·Notepad++ 작업과 독립 Kernel64의 API 시험은 기록되어 있으나, 전체 최신 앱·GPU 가속·Windows98 자동 설치는 아직 완료되지 않았습니다. 소스·빌드·부팅 성공과 개별 앱의 실제 기능 성공을 각각 검증합니다.
 
 Windows 98를 현대 하드웨어와 애플리케이션에 맞게 확장하는 **개발 중인 운영체제 프로젝트**입니다. 새 개발 경로는 **NTWrapper9x**(커널 기반), **NTWin32Wrapper9x**(앱 호환성), **NTWDDMWrapper9x**(그래픽), **PCI-E 확장**, **ShizukuDOS UEFI**로 구성합니다. Windows 8.1/10/11 수준의 기능은 목표이며 아직 달성하지 않았습니다.
 
-새 경로의 빌드·시험·현재 한계는 [독립 플랫폼 개발 안내](platform/README.md), [저장장치·UTF 검증 기록](docs/STORAGE_UTF_CHECKPOINT.md), [USB 구성 조회 실행 기록](docs/USB_CONFIGURATION_CHECKPOINT.md)에 있습니다. 이 빌드는 KernelEx·Wine·ReactOS 구현이나 기존 `m98wrap.dll`을 사용하지 않습니다. `NTW32.DLL`의 기존 Windows 98 네이티브 함수 호출은 유지합니다.
+새 경로의 빌드·시험·현재 한계는 [독립 플랫폼 개발 안내](platform/README.md), [저장장치·UTF 검증 기록](docs/STORAGE_UTF_CHECKPOINT.md), [USB 구성 조회 실행 기록](docs/USB_CONFIGURATION_CHECKPOINT.md)에 있습니다. 아래 독립 NTW32 경로는 KernelEx·Wine·ReactOS 구현이나 기존 `m98wrap.dll`을 사용하지 않습니다. 후속 Win64 포트는 고정 Wine·FreeType 등 공개 소스를 라이선스와 함께 사용합니다. `NTW32.DLL`의 기존 Windows 98 네이티브 함수 호출은 유지합니다.
 
-2026-09-27부터 후속 커널·앱 기능은 ReactOS 소스를 적극 참조해 단계적으로 이식합니다. 기존 독자 구현의 출처를 보존하고, 새 이식에는 원본 리비전·파일별 라이선스·수정 내역을 기록합니다. 앱 검증은 최신 Chromium을 우선하며, 현재 고정한 공식 x86 스냅샷은 **156.0.8076.0 / 1705698**입니다. 과거 Chromium 150의 KernelEx 시험은 이 경로의 실행 성공으로 계산하지 않습니다.
+2026-09-27부터 후속 커널·앱 기능은 ReactOS 소스를 적극 참조해 단계적으로 이식합니다. 기존 독자 구현의 출처를 보존하고, 새 이식에는 원본 리비전·파일별 라이선스·수정 내역을 기록합니다. 앱 검증은 최신 Chromium을 우선하며, 당시 고정한 공식 x86 스냅샷은 **156.0.8076.0 / 1705698**이며, 최신 AMD64 시험의 실제 패키지 핀은 [앱 인계 문서](docs/CONTINUE_MODERN_APPS.md)에 있습니다. 과거 Chromium 150의 KernelEx 시험은 이 경로의 실행 성공으로 계산하지 않습니다.
 
 ```sh
 python3 platform/build.py

@@ -16,22 +16,3 @@ K32API BOOL WINAPI SetProcessAffinityMask(HANDLE process, DWORD_PTR mask)
      * NtShzQueryK32 contract; SET_INFORMATION enforcement needs kernel work. */
     return TRUE;
 }
-
-K32API BOOL WINAPI HeapQueryInformation(HANDLE heap, HEAP_INFORMATION_CLASS information_class,
-                                       PVOID output, SIZE_T capacity, PSIZE_T returned)
-{
-    HANDLE registered[64];                   /* actual ntdll MAX_HEAPS is 64 */
-    DWORD count, i;
-    if (information_class != HeapCompatibilityInformation) {
-        return k32_unsupported("HeapQueryInformation", "information class not supported by this allocator", ERROR_NOT_SUPPORTED);
-    }
-    count = GetProcessHeaps(64, registered);
-    if (count > 64) return k32_unsupported("HeapQueryInformation", "heap registry exceeds query capacity", ERROR_NOT_SUPPORTED);
-    for (i = 0; i < count && registered[i] != heap; ++i) { }
-    if (i == count) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
-    if (returned) *returned = sizeof(ULONG);
-    if (capacity < sizeof(ULONG)) { shz_set_last_error(ERROR_INSUFFICIENT_BUFFER); return FALSE; }
-    if (!output) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
-    *(ULONG *)output = 0;                     /* real standard mode, no look-aside list or LFH */
-    return TRUE;
-}

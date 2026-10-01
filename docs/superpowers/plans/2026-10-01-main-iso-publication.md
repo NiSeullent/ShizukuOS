@@ -31,7 +31,7 @@
 - [x] Inspect all worktrees/branches and exclude generated/private input files.
 - [x] Commit project source snapshots and source-only experimental archive; prepare fresh-machine handoff.
 - [x] Remove mandatory historical receipts from default DeadScreen source build; retain explicit history verification.
-- [ ] Merge all relevant branch histories and preserve conflicting historical evidence separately.
+- [x] Merge all relevant branch histories and preserve conflicting historical evidence separately.
 - [ ] Rebuild merged runtime/boot components and run appropriate source/build checks.
 - [ ] Build Microsoft-free public ISO, inspect contents, run private BIOS/UEFI boot checks.
 - [ ] Add ISO/checksum/download metadata to Korean and English pages and publish immutable nginx release.

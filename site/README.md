@@ -126,3 +126,55 @@ HTML remains byte-for-byte with reviewed source. PublicDNS HTTPS/normal TLS chec
 with a standard Chrome request User-Agent returned exact200 bodies for eleven
 routes, including oldVNC redirects and component download. Independent outside-host
 verification and the final development ISO remain separate gates.
+
+## Public development ISO publication
+
+The static publisher keeps the existing ZIP pages and their exact asset bytes
+when run without ISO options. To publish a reviewed public development ISO, use
+`python3 site/deploy/publish_static.py --iso build/<public-image>.iso --iso-source-commit <40-character-lowercase-commit>`.
+The adjacent builder receipt `<public-image>.json` must identify the same path,
+size, SHA256 and source commit, with `private: false`. An ISO containing supplied
+Microsoft media is refused. ISO files must be regular files of at most256MiB
+with an ISO9660 primary descriptor; source links and special files are refused.
+
+The publisher retains the input handle, hashes and copies it in1MiB chunks,
+checks the immutable copy, and derives a versioned download name from the source
+commit and artifact hash. It adds the ISO, its `.sha256` and shared
+`downloads/release.json` to the existing reviewed asset set. Both home pages show
+four links to that ISO, its exact size, source commit and verification scope;
+the existing compatibility ZIPs remain available as component downloads. These
+ISO home pages are rendered only in the new static release. Source ZIP pages,
+recorded screenshots and their evidence manifests are not overwritten.
+
+The release manifest identifies a **public development boot image**, excludes
+Microsoft Windows98 media, and does not claim a completed Windows98 installer or
+full latest-app support. Boot execution for this new download is initially
+unverified; separate earlier component trials are not promoted to ISO acceptance.
+The source commit identifies the packaging checkout, and `source_tree_dirty`
+preserves the builder's actual checkout state.
+
+After copying every asset, the publisher swaps only `/srv/m98/current` and checks
+all exact loopback HTTPS bodies. The ISO has a separate bounded180-second full
+fetch, streamed SHA256/size verification, HEAD Content-Length/type checks and an
+actual2048-byte Range response. The final PASS receipt is written to a unique,
+exclusively created temporary file in the same directory. Complete write, close
+and byte verification precede its atomic replacement into the canonical receipt
+name; a failure removes the temporary file without exposing a partial PASS.
+A failed check or final receipt write restores
+the old symlink while this transaction still owns `current`.
+A scoped `/srv/m98/publish.lock` serializes
+cooperating publishers; an occupied lock refuses another publication immediately.
+Older publishers may not use this lock, so rollback also checks that `current`
+still points to this transaction's release and preserves a later foreign release.
+The ownership check is not an atomic compare-and-swap against non-cooperating
+writers. This does not alter Nginx, DNS, services, VMs or original media. The8MiB limit for small
+static assets and the Dead Screen WASM loader remains separate from the256MiB ISO
+bound, and the128-asset allowlist limit remains in force. Origin checks do not
+establish unchallenged access through the public Cloudflare edge.
+
+Run host publication controls with
+`python3 -m unittest discover -s site/deploy/tests -p 'test_*.py'`.
+They use disposable modeled ISO fixtures and never publish or boot a VM. A
+successful fixture check is not an acceptance result for the actual final ISO.
+
+Optionally add `--iso-boot-evidence <run_k64_desktop.py-result.json>` after the actual shipped ISO passes its two cold boots. The publisher binds the exact ISO and builder receipt, production boot configuration, persisted-file checks and unchanged inputs. Only proof SHA, counts and UEFI/QEMU scope are public; the original private commands, paths and serial logs stay local. This acceptance is for the Shizuku development desktop and does not establish Microsoft Windows98 installation or full latest-app functionality.
