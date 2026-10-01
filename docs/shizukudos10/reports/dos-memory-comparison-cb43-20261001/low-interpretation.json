@@ -1,0 +1,192 @@
+{
+  "schema": "cb43-independent-conventional-memory-report-interpretation-v1",
+  "status": "PASS_SCOPED_REPORTED_CONTRACT",
+  "acceptance_passed": true,
+  "report_bytes": 810,
+  "report_sha256": "f7e6e0212c90b66ce1471b6e0d7cb4c7fb3a0321ebd106e93160ae90fdb930f2",
+  "marker_bytes": 21,
+  "marker_sha256": "456e7641cd18025324e4d151fcd540b810932f44c369cc04261bef90bb406aeb",
+  "separately_reported_DOS_ERRORLEVEL": 0,
+  "declared_input_identity": {
+    "kernel_sha256": "62194db22e7d157865f9767c78ca3ecf7d7977d720a99a1afe8c8c02b1aebb3f",
+    "probe_sha256": "0a93f6402ada0478ae6d95f1e02169e8f7fdd5b30c1353c0ec9d54bf00048c18",
+    "known_kernel_profile": "CB43_WIN31_ONLY"
+  },
+  "raw_fields": {
+    "PHASE": 7,
+    "INT12_TOTAL_KB": 639,
+    "COM_CS": 4775,
+    "CURRENT_PSP": 4775,
+    "AX3306_AX": 13062,
+    "AX3306_BX": 2567,
+    "AX3306_DX": 0,
+    "AX3306_FLAGS": 582,
+    "AX3306_DH_BIT4_RAW": 0,
+    "AX5800_STRATEGY": 0,
+    "AX5800_FLAGS": 582,
+    "AX5802_RAW_AX": 22528,
+    "AX5802_FLAGS": 582,
+    "MCB_TYPE_BEFORE": 77,
+    "MCB_OWNER_BEFORE": 4775,
+    "MCB_PARAS_BEFORE": 36088,
+    "PSP_END_BEFORE": 40863,
+    "SELF_KEEP_PARAS": 322,
+    "AH4A_AX": 4775,
+    "AH4A_BX": 322,
+    "AH4A_FLAGS": 518,
+    "MCB_TYPE_AFTER": 77,
+    "MCB_OWNER_AFTER": 4775,
+    "MCB_PARAS_AFTER": 322,
+    "PSP_END_AFTER": 40863,
+    "AH48_AX": 8,
+    "AH48_LARGEST_PARAS": 35765,
+    "AH48_FLAGS": 519,
+    "LARGEST_KB_FLOOR": 558,
+    "UNEXPECTED_OWN_SEG": 65535,
+    "CLEANUP_AH49_AX": 65535,
+    "CLEANUP_AH49_FLAGS": 65535,
+    "CHECKS": 11,
+    "FAILURES": 0
+  },
+  "checks": [
+    {
+      "name": "separate_DOS_ERRORLEVEL_zero",
+      "passed": true
+    },
+    {
+      "name": "known_source_built_probe_identity",
+      "passed": true
+    },
+    {
+      "name": "known_source_built_kernel_identity",
+      "passed": true
+    },
+    {
+      "name": "full_success_phase",
+      "passed": true
+    },
+    {
+      "name": "eleven_actual_probe_contract_checks_reported",
+      "passed": true
+    },
+    {
+      "name": "zero_reported_contract_failures",
+      "passed": true
+    },
+    {
+      "name": "current_PSP_matches_nonzero_COM_CS",
+      "passed": true
+    },
+    {
+      "name": "before_own_MCB_type_M_or_Z",
+      "passed": true
+    },
+    {
+      "name": "after_own_MCB_type_M_or_Z",
+      "passed": true
+    },
+    {
+      "name": "before_own_MCB_owner",
+      "passed": true
+    },
+    {
+      "name": "after_own_MCB_owner",
+      "passed": true
+    },
+    {
+      "name": "retained_size_exact_322_paragraphs",
+      "passed": true
+    },
+    {
+      "name": "original_own_block_not_grown",
+      "passed": true
+    },
+    {
+      "name": "AH4A_actual_carry_clear",
+      "passed": true
+    },
+    {
+      "name": "AH48_actual_carry_set",
+      "passed": true
+    },
+    {
+      "name": "AH48_actual_insufficient_memory_error_8",
+      "passed": true
+    },
+    {
+      "name": "no_unexpected_owned_allocation_cleanup_path",
+      "passed": true
+    },
+    {
+      "name": "allocator_strategy_query_carry_clear",
+      "passed": true
+    },
+    {
+      "name": "allocator_standard_conventional_strategy",
+      "passed": true
+    },
+    {
+      "name": "UMB_link_query_carry_clear",
+      "passed": true
+    },
+    {
+      "name": "actual_UMB_link_AL_zero",
+      "passed": true
+    },
+    {
+      "name": "BIOS_total_base_memory_KB_nonzero_at_most_640",
+      "passed": true
+    },
+    {
+      "name": "original_own_MCB_span_inside_base_memory",
+      "passed": true
+    },
+    {
+      "name": "retained_own_MCB_span_inside_base_memory",
+      "passed": true
+    },
+    {
+      "name": "largest_available_plus_retained_own_block_fits_base_memory",
+      "passed": true
+    },
+    {
+      "name": "reported_largest_KB_equals_actual_paragraphs_floor",
+      "passed": true
+    },
+    {
+      "name": "true_DOS5plus_version_fields_valid",
+      "passed": true
+    },
+    {
+      "name": "HMA_raw_bit_matches_returned_DX",
+      "passed": true
+    }
+  ],
+  "failed_checks": [],
+  "reported_memory": {
+    "BIOS_total_KB": 639,
+    "largest_paragraphs": 35765,
+    "largest_bytes": 572240,
+    "largest_kib_floor": 558,
+    "retained_probe_bytes_including_PSP": 5152,
+    "minimum_580_KiB_gate_applied": false
+  },
+  "reported_HMA": {
+    "interpretable": true,
+    "raw_DX_bit_0x1000": 0,
+    "DOS_in_HMA": false
+  },
+  "native_execution_verified": false,
+  "external_guest_run_identity_or_marker_freshness_verified": false,
+  "Windows98_verified": false,
+  "MSDOS_replacement_under_Windows98": false,
+  "modern_apps_verified": false,
+  "limits": [
+    "Offline report contract validation only; supplied source identities are declarations, not image inspection",
+    "Separate marker must be independently bound to this actual probe invocation by the run owner",
+    "All raw registers preserved; FFFF is never silently changed to zero",
+    "PSP allocation-end values are observations, not resize-success conditions",
+    "Memory measurement includes retained probe and its environment/parent shell",
+    "No free-memory threshold, Windows startup or MS-DOS replacement acceptance follows from this report"
+  ]
+}

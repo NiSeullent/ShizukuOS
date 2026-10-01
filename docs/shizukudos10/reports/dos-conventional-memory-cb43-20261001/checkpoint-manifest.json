@@ -1,0 +1,66 @@
+{
+  "schema": "cb43-conventional-memory-source-only-checkpoint-v1",
+  "public_file_count_including_manifest": 11,
+  "source_candidate_status": "PASS_COMPILE_STATIC_LAYOUT_AND_INDEPENDENT_REVIEW_ONLY",
+  "native_binary_static_checks": 20,
+  "unsafe_binary_mutations_rejected": 3,
+  "expected_native_success_checks_not_executed": 11,
+  "DOS_executed": false,
+  "actual_conventional_memory_measured": false,
+  "Windows98_verified": false,
+  "MSDOS_replacement_under_Windows98": false,
+  "modern_apps_verified": false,
+  "public_binary_included": false,
+  "files": [
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/README.md",
+      "bytes": 4554,
+      "sha256": "25d9b2d6f557f75d63985f7efd0b9d3af6447eba4719048e4cab63a834b18e74"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/authority-identity-closure.json",
+      "bytes": 2358,
+      "sha256": "57d2e0656acf73e85ce3f53a42a74815be91581d18c8441913876dede1b823a4"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/build-receipt.json",
+      "bytes": 1831,
+      "sha256": "b88558a4888e3f747ce7d7e7f81099fffbbb44aa4c1007991c3ce518a0c4159b"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/cbmem.asm",
+      "bytes": 10062,
+      "sha256": "e5a627d4ad0a682ada6aed4308eea58671fa7fe9ea1d6a5d0e1f98269119f33b"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/independent-source-review.json",
+      "bytes": 1885,
+      "sha256": "21c937d8c9ba942b6183f621b17b6557b899283080f0ec80f394d1ac0f84b9e8"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/inputs/primary-source-receipt.json",
+      "bytes": 1938,
+      "sha256": "ee14fbff9f3989aa17b914c9f4e047023f79f11e584e7039c4a8ea0cbb76631c"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/layout-result.json",
+      "bytes": 1430,
+      "sha256": "ee40912bb88b9c8e5f8fcb30e870ff9117bfb59f5fb2163c48727f6e2fdbd19a"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/prebuild-receipt.json",
+      "bytes": 495,
+      "sha256": "c577f1bc745346c1b795576a919429c055136996ead61bd889b629a45f220b9e"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/primary-authorities.json",
+      "bytes": 2446,
+      "sha256": "3f3073fed02a02ba666b9c24d13440df70b3700eadd5fa48d793c42ad64595ea"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-conventional-memory-cb43-20261001/verify_cbmem_layout.py",
+      "bytes": 3924,
+      "sha256": "28a79643e0a325a1894ad25cd5f3a8e252685b7f2d10314c860b1f1242e1a9d5"
+    }
+  ]
+}
