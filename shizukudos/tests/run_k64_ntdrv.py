@@ -4,9 +4,12 @@
 driver-store initrd (WIN64_NTDRV.IMG) and verify the NT driver host end to end:
 
   stub (Multiboot) -> Kernel64 (SHZ_STANDALONE) -> self-tests -> ntdrv_selftest():
-    - loads the unmodified ECHO.SYS / DPCTIMER.SYS / PCIEDU.SYS, calls each DriverEntry,
+    - loads the unmodified ECHO.SYS / DPCTIMER.SYS / PCIEDU.SYS / APITEST.SYS, calls each DriverEntry,
       drives an IOCTL through the real IRP stack, a pended IRP completed from a timer DPC,
-      and the edu PCI driver (BAR map + register read + IoConnectInterrupt + raised IRQ);
+      the edu PCI driver (BAR map + register read + IoConnectInterrupt + raised IRQ), and the
+      export-surface driver whose DriverEntry checks the second export batch (registry query
+      tables, device interfaces, StartIo/cancel, remove locks, power IRPs, PDO properties, DMA,
+      partition tables, ...) and fails to load if any check fails;
   then the Win64 app harness runs \\SHZ\\TESTS\\T_NTDRV.EXE, which reaches a loaded driver from
   user mode (NtLoadDriver -> NtCreateFile("\\??\\ShzEcho") -> NtDeviceIoControlFile).
 
@@ -48,7 +51,16 @@ def parse(serial):
 def evaluate(serial, ev):
     e = lambda s: ev.get(s, 0)  # noqa: E731
     c = []
-    c.append(check("driver host reported providers and loaded 3 drivers", e(13) == 3, f"loaded={e(13)}"))
+    c.append(check("driver host reported providers and loaded 4 drivers", e(13) == 4, f"loaded={e(13)}"))
+    api_fail = re.findall(r"^\[drv\] apitest: FAIL (.*)$", serial, re.M)
+    api_pass = len(re.findall(r"^\[drv\] apitest: PASS ", serial, re.M))
+    c.append(check("export-surface driver (APITEST.SYS): no FAIL line, >= 60 PASS lines",
+                   not api_fail and api_pass >= 60, f"pass={api_pass} fail={len(api_fail)}" + (": " + "; ".join(api_fail[:5]) if api_fail else "")))
+    m = re.search(r"^K64 ntdrv-test: apitest (\d+) passed, (\d+) failed$", serial, re.M)
+    c.append(check("apitest IOCTL reported the driver's own counts (>= 60 passed, 0 failed)",
+                   bool(m) and int(m.group(1)) >= 60 and int(m.group(2)) == 0, m.group(0) if m else "no count line"))
+    c.append(check("driver re-initialization routine ran after DriverEntry",
+                   "apitest: PASS IoRegisterDriverReinitialization" in serial))
     c.append(check("echo IOCTL round-tripped through the IRP stack (10 bytes)",
                    (e(14) >> 32) == 1 and (e(14) & 0xffffffff) == 10, f"slot14={e(14):#x}"))
     c.append(check("DPC/timer/thread driver + pended IRP completed from a timer DPC",
@@ -60,12 +72,43 @@ def evaluate(serial, ev):
     c.append(check("edu interrupt connected over IoConnectInterrupt and the ISR fired",
                    (e(26) & 0xffffffff) >= 1, f"isr={e(26) & 0xffffffff}"))
     c.append(check("kernel driver-host self-test overall PASS", (e(27) >> 32) == 1, f"slot27={e(27):#x}"))
-    c.append(check("provider export surface >= 180 (ntoskrnl+hal)", (e(27) & 0xffffffff) >= 180,
+    c.append(check("provider export surface >= 500 (ntoskrnl+hal)", (e(27) & 0xffffffff) >= 500,
                    f"providers={e(27) & 0xffffffff}"))
     c.append(check("user-mode app reached a driver (NtLoadDriver + NtDeviceIoControlFile)",
                    "t_ntdrv: PASS" in serial, "t_ntdrv: FAIL" if "t_ntdrv: FAIL" in serial else ""))
     c.append(check("DriverEntry ran for the echo driver", "ShzEcho: DriverEntry" in serial))
     return c
+
+
+def evaluate_kmdf(serial):
+    c = []
+    c.append(check("KMDF image mounted (WdfLdr present)", "kmdf: KMDF image present" in serial))
+    for client in ("cdrom", "hdaudbus"):
+        m = re.search(rf"^K64 ntdrv-test: kmdf: client {client} load status=([0-9a-f]+) started=(\d)$", serial, re.M)
+        c.append(check(f"KMDF client {client}.sys: FxDriverEntry -> WdfVersionBind -> WdfDriverCreate, DriverEntry returned success",
+                       bool(m) and int(m.group(1), 16) == 0 and m.group(2) == "1", m.group(0) if m else "no result line"))
+    for client in ("cdrom", "hdaudbus"):
+        m = re.search(rf"^K64 ntdrv-test: kmdf: client {client} WdfDriverCreate effect: AddDevice=(\w+) DriverUnload=(\w+) framework dispatch in (\d+) major functions$", serial, re.M)
+        c.append(check(f"{client}.sys: WdfDriverCreate took effect (framework AddDevice/DriverUnload/dispatch installed on the DRIVER_OBJECT)",
+                       bool(m) and m.group(1) == "set" and m.group(2) == "set" and int(m.group(3)) >= 3, m.group(0) if m else "no effect line"))
+    c.append(check("WdfLdr and Wdf01000 both loaded (the library through ZwLoadDriver from WdfLdr)",
+                   "kmdf: framework loaded=1 loader loaded=1" in serial))
+    return c
+
+
+CORPUS_LOADED_MIN = 22         # measured: 22 of 23 (uniata returns STATUS_DEVICE_DOES_NOT_EXIST: no ATA controller in the VM)
+
+
+def evaluate_corpus(serial):
+    m = re.search(r"K64 ntdrv-test: corpus: (\d+) of (\d+) drivers loaded", serial, re.M)
+    loaded, total = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    rows = re.findall(r"K64 ntdrv-test: corpus (\S+) status=([0-9a-f]+) started=(\d)", serial, re.M)
+    ok = [n for n, st, s in rows if int(st, 16) == 0 and s == "1"]
+    bad = [f"{n}={st}" for n, st, s in rows if not (int(st, 16) == 0 and s == "1")]
+    return [check("corpus: every driver in the store was attempted and the total line printed", bool(m) and total == len(rows) and total > 0,
+                  f"{loaded} of {total} loaded"),
+            check(f"corpus: at least {CORPUS_LOADED_MIN} drivers load", loaded >= CORPUS_LOADED_MIN,
+                  f"loaded: {', '.join(ok)}; not loaded: {', '.join(bad)}")]
 
 
 def main():
@@ -75,8 +118,13 @@ def main():
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--memory", default="256")
     ap.add_argument("--out", default=str(K64S / "ntdrv-run"))
+    ap.add_argument("--corpus", action="store_true",
+                    help="mount WIN64_CORPUS.IMG (win64/ntdrv/kmdf_image.py --all: every built corpus driver) and report how many load")
+    ap.add_argument("--kmdf", action="store_true",
+                    help="mount WIN64_KMDF.IMG (win64/ntdrv/kmdf_image.py: the test drivers + the corpus's WdfLdr/Wdf01000/cdrom/hdaudbus) "
+                         "and require the KMDF client drivers to bind to the framework")
     args = ap.parse_args()
-    stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64_NTDRV.IMG"
+    stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / ("WIN64_CORPUS.IMG" if args.corpus else "WIN64_KMDF.IMG" if args.kmdf else "WIN64_NTDRV.IMG")
     for f in (stub, kernel, initrd):
         if not f.exists():
             raise SystemExit(f"missing {f}: run shizukudos/kbuild.py and shizukudos/win64/build.py first")
@@ -102,6 +150,10 @@ def main():
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     ev, exit_code = parse(serial)
     checks = evaluate(serial, ev)
+    if args.kmdf or args.corpus:
+        checks += evaluate_kmdf(serial)
+    if args.corpus:
+        checks += evaluate_corpus(serial)
     if timed_out:
         checks.insert(0, check("run finished before the timeout", False, f"{args.timeout}s, accel={accel}"))
     status = "PASS" if all(x["status"] == "PASS" for x in checks) else "FAIL"

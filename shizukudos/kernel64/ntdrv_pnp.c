@@ -43,7 +43,6 @@ uint32_t NTAPI HalGetInterruptVector(uint32_t bus_type, uint32_t bus, uint32_t l
 #define IRP_MN_QUERY_PNP_DEVICE_STATE 0x14
 #define IRP_MN_SURPRISE_REMOVAL 0x17
 
-typedef struct { uint32_t Data1; uint16_t Data2, Data3; uint8_t Data4[8]; } GUID;
 static const GUID GUID_BUS_INTERFACE_STANDARD = { 0x496b8280, 0x6f25, 0x11d0, { 0xbe, 0xaf, 0x08, 0x00, 0x2b, 0xe2, 0x09, 0x2f } };
 
 /* ---- CM_RESOURCE_LIST: declared under pack(4) in wdm.h, so a descriptor is 0x14 bytes with the union at +4 ---- */
@@ -498,7 +497,7 @@ static int32_t put_property(const void *data, uint32_t bytes, uint32_t buflen, v
     return STATUS_SUCCESS;
 }
 
-NTSTATUS NTAPI IoGetDeviceProperty(DEVICE_OBJECT *dev, uint32_t prop, uint32_t buflen, void *buf, uint32_t *reslen)
+NTSTATUS NTAPI n3_IoGetDeviceProperty(DEVICE_OBJECT *dev, uint32_t prop, uint32_t buflen, void *buf, uint32_t *reslen)
 {
     ntdrv_pdo_t *p = ntdrv_pdo_from_device(dev);
     uint32_t v;
@@ -526,7 +525,7 @@ NTSTATUS NTAPI IoGetDeviceProperty(DEVICE_OBJECT *dev, uint32_t prop, uint32_t b
     }
 }
 
-NTSTATUS NTAPI IoOpenDeviceRegistryKey(DEVICE_OBJECT *dev, uint32_t type, uint32_t access, uint64_t *handle)
+NTSTATUS NTAPI n3_IoOpenDeviceRegistryKey(DEVICE_OBJECT *dev, uint32_t type, uint32_t access, uint64_t *handle)
 {
     static const char ctl[] = "Machine\\System\\CurrentControlSet\\Control\\Class\\", en[] = "Machine\\System\\CurrentControlSet\\Enum\\",
                       params[] = "\\Device Parameters";
@@ -576,7 +575,7 @@ static void guid_to_wide(const GUID *g, uint16_t *out, unsigned *n)
 
 /* The symbolic link name Windows forms: \??\<instance path with '\' -> '#'>#{InterfaceClassGuid}[\<RefString>]. It is
  * recorded on the PDO and handed back; the name is not published in the object namespace (no consumer here). */
-NTSTATUS NTAPI IoRegisterDeviceInterface(DEVICE_OBJECT *dev, const GUID *guid, UNICODE_STRING *ref, UNICODE_STRING *link)
+NTSTATUS NTAPI n3_IoRegisterDeviceInterface(DEVICE_OBJECT *dev, const GUID *guid, UNICODE_STRING *ref, UNICODE_STRING *link)
 {
     ntdrv_pdo_t *p = ntdrv_pdo_from_device(dev);
     uint16_t *buf;
@@ -599,7 +598,7 @@ NTSTATUS NTAPI IoRegisterDeviceInterface(DEVICE_OBJECT *dev, const GUID *guid, U
     return STATUS_SUCCESS;
 }
 
-NTSTATUS NTAPI IoSetDeviceInterfaceState(UNICODE_STRING *link, uint8_t enable)
+NTSTATUS NTAPI n3_IoSetDeviceInterfaceState(UNICODE_STRING *link, uint8_t enable)
 {
     ntdrv_pdo_t *p;
     char a[160];
@@ -616,209 +615,12 @@ NTSTATUS NTAPI IoSetDeviceInterfaceState(UNICODE_STRING *link, uint8_t enable)
     return STATUS_OBJECT_NAME_NOT_FOUND;
 }
 
-/* ---------------------------------------------------------------- driver object extensions */
-typedef struct drvext { struct drvext *next; DRIVER_OBJECT *drv; void *id; void *mem; } drvext_t;
-static drvext_t *drvexts;
+/* ---------------------------------------------------------------- generic exports live in ntdrv_dev.c
+ * IoAllocate/GetDriverObjectExtension, shutdown notifications, PoCallDriver/PoStartNextPowerIrp, IoGetDmaAdapter and
+ * HalTranslateBusAddress are implemented once in ntdrv_dev.c (which also serves legacy root-enumerated devices). The four
+ * exports that depend on which kind of PDO they are given (properties, device registry key, device interfaces) are exported
+ * from there too and call the n3_* versions in this file for the PDOs of PCI functions bound through the registry. */
+extern void *NTAPI IoGetDmaAdapter(DEVICE_OBJECT *pdo, const uint8_t *desc, uint32_t *nmap);
 
-NTSTATUS NTAPI IoAllocateDriverObjectExtension(DRIVER_OBJECT *drv, void *id, uint32_t size, void **out)
-{
-    drvext_t *e;
-    for (e = drvexts; e; e = e->next)
-        if (e->drv == drv && e->id == id) return STATUS_OBJECT_NAME_COLLISION;
-    e = kzalloc(sizeof *e);
-    if (!e) return STATUS_INSUFFICIENT_RESOURCES;
-    e->mem = kzalloc(size ? size : 1);
-    if (!e->mem) { kfree(e); return STATUS_INSUFFICIENT_RESOURCES; }
-    e->drv = drv; e->id = id;
-    e->next = drvexts; drvexts = e;
-    *out = e->mem;
-    return STATUS_SUCCESS;
-}
-void *NTAPI IoGetDriverObjectExtension(DRIVER_OBJECT *drv, void *id)
-{
-    drvext_t *e;
-    for (e = drvexts; e; e = e->next) if (e->drv == drv && e->id == id) return e->mem;
-    return 0;
-}
+static void *NTAPI if_get_dma_adapter(void *ctx, void *desc, uint32_t *nmap) { return IoGetDmaAdapter(((ntdrv_pdo_t *)ctx)->pdo, desc, nmap); }   /* ntdrv_dev.c */
 
-/* ---------------------------------------------------------------- shutdown notifications, power */
-static DEVICE_OBJECT *shutdown_devs[32];
-NTSTATUS NTAPI IoRegisterShutdownNotification(DEVICE_OBJECT *dev)
-{
-    unsigned i;
-    for (i = 0; i < 32; ++i) if (!shutdown_devs[i]) { shutdown_devs[i] = dev; return STATUS_SUCCESS; }
-    return STATUS_INSUFFICIENT_RESOURCES;
-}
-void NTAPI IoUnregisterShutdownNotification(DEVICE_OBJECT *dev)
-{
-    unsigned i;
-    for (i = 0; i < 32; ++i) if (shutdown_devs[i] == dev) shutdown_devs[i] = 0;
-}
-NTSTATUS NTAPI PoCallDriver(DEVICE_OBJECT *dev, IRP *irp) { return IofCallDriver(dev, irp); }
-void NTAPI PoStartNextPowerIrp(IRP *irp) { (void)irp; }        /* power IRPs are not serialized here */
-
-/* ---------------------------------------------------------------- DMA adapter */
-/* Physical address of a kernel VA. RAM is mapped with 2 MiB pages at DIRECT_MAP and the kernel image alias likewise
- * (mem.c map_2m), which the page walker vm_lookup() does not understand, so those two ranges are translated by
- * arithmetic exactly as ntdrv_mm.c's MmGetPhysicalAddress does; vm_lookup() serves the 4 KiB-mapped ranges (the driver
- * image window, kernel windows, user pages). 0 = not mapped. */
-static uint64_t va_phys(uint64_t va)
-{
-    uint64_t pa;
-    if (va >= DIRECT_MAP && va < DIRECT_MAP + (256ull << 30)) return v2p_direct(va);
-    if (va >= K64_VIRT_BASE) return kimage_v2p(va);
-    pa = vm_lookup(kernel_pml4(), va, 0);
-    return pa;
-}
-
-/* common buffers: page-aligned, physically contiguous kernel heap memory; the original pointer is kept for the free */
-static struct { void *raw, *aligned; } common[64];
-static void *NTAPI dma_alloc_common(void *ad, uint32_t len, int64_t *pa, uint8_t cached)
-{
-    void *raw, *al;
-    unsigned i;
-    (void)ad; (void)cached;
-    raw = kzalloc((uint64_t)len + 4096);
-    if (!raw) return 0;
-    al = (void *)(((uint64_t)raw + 4095) & ~4095ull);
-    for (i = 0; i < 64; ++i) if (!common[i].raw) { common[i].raw = raw; common[i].aligned = al; break; }
-    if (i == 64) { kfree(raw); return 0; }
-    if (pa) *pa = (int64_t)va_phys((uint64_t)al);
-    return al;
-}
-static void NTAPI dma_free_common(void *ad, uint32_t len, int64_t pa, void *va, uint8_t cached)
-{
-    unsigned i;
-    (void)ad; (void)len; (void)pa; (void)cached;
-    for (i = 0; i < 64; ++i) if (common[i].aligned == va) { kfree(common[i].raw); common[i].raw = common[i].aligned = 0; return; }
-}
-static void NTAPI dma_put(void *ad) { kfree(ad); }
-static uint32_t NTAPI dma_alignment(void *ad) { (void)ad; return 1; }
-static uint32_t NTAPI dma_read_counter(void *ad) { (void)ad; return 0; }
-static int32_t NTAPI dma_alloc_channel(void *ad, DEVICE_OBJECT *dev, uint32_t nmap, void *routine, void *ctx)
-{
-    uint32_t (NTAPI *fn)(DEVICE_OBJECT *, IRP *, void *, void *) = routine;   /* PDRIVER_CONTROL */
-    (void)ad; (void)nmap;
-    fn(dev, dev->CurrentIrp, (void *)1, ctx);                              /* map registers are not real on this platform */
-    return STATUS_SUCCESS;
-}
-static uint8_t NTAPI dma_flush(void *ad, MDL *m, void *base, void *cur, uint32_t len, uint8_t write)
-{ (void)ad; (void)m; (void)base; (void)cur; (void)len; (void)write; return 1; }
-static void NTAPI dma_free_channel(void *ad) { (void)ad; }
-static void NTAPI dma_free_mapregs(void *ad, void *base, uint32_t n) { (void)ad; (void)base; (void)n; }
-
-/* the physically contiguous run starting at `va`, at most `len` bytes */
-static uint64_t contiguous_run(uint64_t va, uint32_t len, uint64_t *pa_out)
-{
-    uint64_t pa = va_phys(va), run, next;
-    if (!pa) return 0;
-    run = 4096 - (va & 0xfff);
-    while (run < len) {
-        next = va_phys(va + run);
-        if (next != pa + run) break;
-        run += 4096;
-    }
-    if (run > len) run = len;
-    *pa_out = pa;
-    return run;
-}
-static int64_t NTAPI dma_map_transfer(void *ad, MDL *m, void *base, void *cur, uint32_t *len, uint8_t write)
-{
-    uint64_t pa = 0, run = contiguous_run((uint64_t)cur, *len, &pa);
-    (void)ad; (void)m; (void)base; (void)write;
-    *len = (uint32_t)run;
-    return (int64_t)pa;
-}
-static unsigned sg_count(uint64_t va, uint32_t len)
-{
-    unsigned n = 0;
-    while (len) { uint64_t pa, run = contiguous_run(va, len, &pa); if (!run) break; va += run; len -= (uint32_t)run; ++n; }
-    return n;
-}
-static void sg_fill(SCATTER_GATHER_LIST *l, uint64_t va, uint32_t len)
-{
-    l->NumberOfElements = 0;
-    l->Reserved = 0;
-    while (len) {
-        uint64_t pa, run = contiguous_run(va, len, &pa);
-        if (!run) break;
-        l->Elements[l->NumberOfElements].Address = (int64_t)pa;
-        l->Elements[l->NumberOfElements].Length = (uint32_t)run;
-        l->Elements[l->NumberOfElements].Reserved = 0;
-        ++l->NumberOfElements;
-        va += run; len -= (uint32_t)run;
-    }
-}
-static int32_t NTAPI dma_calc_sg(void *ad, MDL *m, void *cur, uint32_t len, uint32_t *size, uint32_t *nmap)
-{
-    unsigned n = sg_count((uint64_t)cur, len);
-    (void)ad; (void)m;
-    *size = (uint32_t)(offsetof(SCATTER_GATHER_LIST, Elements) + n * sizeof(SCATTER_GATHER_ELEMENT));
-    if (nmap) *nmap = (uint32_t)(((uint64_t)cur & 0xfff) + len + 4095) / 4096;
-    return STATUS_SUCCESS;
-}
-static int32_t NTAPI dma_build_sg(void *ad, DEVICE_OBJECT *dev, MDL *m, void *cur, uint32_t len, void *routine, void *ctx,
-                                 uint8_t write, void *buf, uint32_t buflen)
-{
-    void (NTAPI *fn)(DEVICE_OBJECT *, IRP *, SCATTER_GATHER_LIST *, void *) = routine;   /* PDRIVER_LIST_CONTROL */
-    uint32_t need, nmap;
-    (void)m; (void)write;
-    dma_calc_sg(ad, m, cur, len, &need, &nmap);
-    if (buflen < need) return STATUS_BUFFER_TOO_SMALL;
-    sg_fill(buf, (uint64_t)cur, len);
-    fn(dev, dev->CurrentIrp, buf, ctx);
-    return STATUS_SUCCESS;
-}
-/* Lists GetScatterGatherList allocated itself: PutScatterGatherList frees exactly those. A list BuildScatterGatherList
- * built inside the driver's own buffer stays the driver's (it frees that buffer after Put). */
-static void *sg_owned[32];
-static int32_t NTAPI dma_get_sg(void *ad, DEVICE_OBJECT *dev, MDL *m, void *cur, uint32_t len, void *routine, void *ctx, uint8_t write)
-{
-    uint32_t need, nmap;
-    SCATTER_GATHER_LIST *l;
-    unsigned i;
-    int32_t st;
-    dma_calc_sg(ad, m, cur, len, &need, &nmap);
-    l = kzalloc(need);
-    if (!l) return STATUS_INSUFFICIENT_RESOURCES;
-    { uint64_t f = irq_save();
-      for (i = 0; i < 32; ++i) if (!sg_owned[i]) { sg_owned[i] = l; break; }
-      irq_restore(f); }
-    if (i == 32) { kfree(l); return STATUS_INSUFFICIENT_RESOURCES; }
-    st = dma_build_sg(ad, dev, m, cur, len, routine, ctx, write, l, need);
-    if (st) { sg_owned[i] = 0; kfree(l); }
-    return st;
-}
-static void NTAPI dma_put_sg(void *ad, void *l, uint8_t write)
-{
-    unsigned i;
-    (void)ad; (void)write;
-    for (i = 0; i < 32; ++i)
-        if (sg_owned[i] == l) { sg_owned[i] = 0; kfree(l); return; }
-}
-static int32_t NTAPI dma_build_mdl(void *ad, void *l, MDL *orig, MDL **out) { (void)ad; (void)l; (void)orig; (void)out; return STATUS_NOT_SUPPORTED; }
-
-static DMA_OPERATIONS dma_ops = {
-    sizeof(DMA_OPERATIONS), 0,
-    (void *)dma_put, (void *)dma_alloc_common, (void *)dma_free_common, (void *)dma_alloc_channel, (void *)dma_flush,
-    (void *)dma_free_channel, (void *)dma_free_mapregs, (void *)dma_map_transfer, (void *)dma_alignment, (void *)dma_read_counter,
-    (void *)dma_get_sg, (void *)dma_put_sg, (void *)dma_calc_sg, (void *)dma_build_sg, (void *)dma_build_mdl
-};
-
-void *NTAPI IoGetDmaAdapter(DEVICE_OBJECT *pdo, void *desc, uint32_t *nmap)
-{
-    DMA_ADAPTER *a = kzalloc(sizeof *a);
-    (void)pdo; (void)desc;
-    if (!a) return 0;
-    a->Version = 1; a->Size = sizeof *a; a->DmaOperations = &dma_ops;
-    if (nmap) *nmap = 64;                                        /* map registers are not real on this platform */
-    return a;
-}
-static void *NTAPI if_get_dma_adapter(void *ctx, void *desc, uint32_t *nmap) { return IoGetDmaAdapter(((ntdrv_pdo_t *)ctx)->pdo, desc, nmap); }
-
-uint8_t NTAPI HalTranslateBusAddress(uint32_t type, uint32_t bus, int64_t addr, uint32_t *space, int64_t *out)
-{
-    (void)type; (void)bus; (void)space;                          /* PCI addresses are system addresses on this platform */
-    *out = addr;
-    return 1;
-}

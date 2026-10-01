@@ -9,6 +9,10 @@
 #include "registry.h"
 #include "fs.h"
 
+extern const char *ntdrv_device_name(DEVICE_OBJECT *dev);
+struct kfile;
+static void kfile_close(struct kfile *f);
+
 /* ---------------------------------------------------------------- kernel handle table */
 #define KH_MAX 256
 static struct { int kind; void *ptr; } kh_tab[KH_MAX];
@@ -46,7 +50,7 @@ int ntdrv_kh_free(uint64_t handle)
       kh_tab[i].kind = KH_NONE; kh_tab[i].ptr = 0;
       mutex_unlock(&kh_lock);
       if (kind == KH_KEY) reg_key_release((regkey_t *)ptr);
-      else if (kind == KH_FILE) kfree(ptr); }
+      else if (kind == KH_FILE) kfile_close(ptr); }
     return 0;
 }
 
@@ -122,28 +126,7 @@ NTSTATUS NTAPI ZwCreateKey(void *handle_out, uint32_t access, struct objattr *oa
     return STATUS_SUCCESS;
 }
 
-struct kv_partial { uint32_t TitleIndex, Type, DataLength; uint8_t Data[]; };
-NTSTATUS NTAPI ZwQueryValueKey(uint64_t handle, UNICODE_STRING *name, uint32_t cls, void *buf, uint32_t len, uint32_t *reslen)
-{
-    regkey_t *node = ntdrv_kh_get(handle, KH_KEY);
-    regval_t *v;
-    NTSTATUS st = STATUS_SUCCESS;
-    if (!node) return STATUS_INVALID_HANDLE;
-    reg_lock();
-    v = reg_find_value(node, name->Buffer, name->Length / 2);
-    if (!v) { reg_unlock(); return STATUS_OBJECT_NAME_NOT_FOUND; }
-    if (cls == 2) {                            /* KeyValuePartialInformation */
-        uint32_t need = 12 + v->data_len;
-        if (reslen) *reslen = need;
-        if (len < 12) { reg_unlock(); return STATUS_BUFFER_TOO_SMALL; }
-        { struct kv_partial *p = buf; uint32_t copy = len - 12 < v->data_len ? len - 12 : v->data_len;
-          p->TitleIndex = 0; p->Type = v->type; p->DataLength = v->data_len;
-          memcpy(p->Data, regval_data(v), copy);
-          if (copy < v->data_len) st = STATUS_BUFFER_OVERFLOW; }
-    } else { reg_unlock(); return STATUS_INVALID_INFO_CLASS; }
-    reg_unlock();
-    return st;
-}
+/* ZwQueryValueKey (every information class), ZwEnumerate*Key, ZwQueryKey, ZwDelete*: ntdrv_reg.c. */
 NTSTATUS NTAPI ZwSetValueKey(uint64_t handle, UNICODE_STRING *name, uint32_t ti, uint32_t type, void *data, uint32_t len)
 {
     regkey_t *node = ntdrv_kh_get(handle, KH_KEY);
@@ -157,11 +140,44 @@ NTSTATUS NTAPI ZwSetValueKey(uint64_t handle, UNICODE_STRING *name, uint32_t ti,
 }
 
 /* ---------------------------------------------------------------- Zw files */
-struct kfile { fsnode_t *node; uint64_t pos; int write; };
+/* A kernel file handle is either a file-system node or an open device (a FILE_OBJECT on a DEVICE_OBJECT, opened with
+ * IRP_MJ_CREATE and closed with IRP_MJ_CLEANUP/IRP_MJ_CLOSE, reads/writes/IOCTLs travelling as IRPs). */
+struct kfile { fsnode_t *node; uint64_t pos; int write; DEVICE_OBJECT *dev; FILE_OBJECT fo; };
+static void kfile_close(struct kfile *f)
+{
+    if (f->dev) ntdrv_open_close_device(f->dev, 1);
+    kfree(f);
+}
 NTSTATUS NTAPI ZwClose(uint64_t handle)
 {
-    if (kh_index(handle) < 0) return STATUS_SUCCESS;            /* tolerate pseudo handles */
+    int i = kh_index(handle);
+    if (i < 0) return STATUS_SUCCESS;                           /* tolerate pseudo handles */
+    if (i < KH_MAX && kh_tab[i].kind == KH_FILE) {
+        struct kfile *f = kh_tab[i].ptr;
+        kh_ensure(); mutex_lock(&kh_lock); kh_tab[i].kind = KH_NONE; kh_tab[i].ptr = 0; mutex_unlock(&kh_lock);
+        kfile_close(f);
+        return STATUS_SUCCESS;
+    }
     return ntdrv_kh_free(handle) == 0 ? STATUS_SUCCESS : STATUS_INVALID_HANDLE;
+}
+/* Open a device object for a kernel caller: IRP_MJ_CREATE through its stack; *fo_out is the FILE_OBJECT (kept in the
+ * kfile record, valid until the handle closes). Used by ZwCreateFile on "\Device\..." / "\??\..." names and by
+ * IoGetDeviceObjectPointer. */
+int32_t ntdrv_device_open_file(DEVICE_OBJECT *dev, uint32_t access, FILE_OBJECT **fo_out)
+{
+    struct kfile *f = kzalloc(sizeof *f);
+    DEVICE_OBJECT *top;
+    int32_t st;
+    if (!f) return STATUS_INSUFFICIENT_RESOURCES;
+    top = dev; while (top->AttachedDevice) top = top->AttachedDevice;
+    f->dev = top; f->write = (access & (0x40000000u | 2u)) != 0;
+    f->fo.Type = 5; f->fo.Size = sizeof(FILE_OBJECT); f->fo.DeviceObject = top;
+    f->fo.ReadAccess = (access & (0x80000000u | 1u)) != 0; f->fo.WriteAccess = f->write;
+    st = ntdrv_open_close_device(top, 0);
+    if (st && st != STATUS_PENDING) { kfree(f); return st; }
+    if (fo_out) *fo_out = &f->fo;
+    { uint64_t h = ntdrv_kh_alloc(KH_FILE, f); if (!h) { ntdrv_open_close_device(top, 1); kfree(f); return STATUS_INSUFFICIENT_RESOURCES; } }
+    return STATUS_SUCCESS;
 }
 NTSTATUS NTAPI ZwCreateFile(void *handle_out, uint32_t access, struct objattr *oa, IO_STATUS_BLOCK *iosb,
                             LARGE_INTEGER *alloc, uint32_t attrs, uint32_t share, uint32_t disp, uint32_t opts,
@@ -171,9 +187,21 @@ NTSTATUS NTAPI ZwCreateFile(void *handle_out, uint32_t access, struct objattr *o
     fsnode_t *n;
     struct kfile *f;
     int created = 0;
+    DEVICE_OBJECT *dev = 0;
     (void)alloc; (void)attrs; (void)share; (void)opts; (void)ea; (void)ealen;
     if (!oa->ObjectName) return STATUS_INVALID_PARAMETER;
     ntdrv_wide_to_ascii(oa->ObjectName->Buffer, oa->ObjectName->Length / 2, path, sizeof path);
+    if (!strncmp(path, "\\Device\\", 8)) dev = ntdrv_find_device(path);
+    else if (!strncmp(path, "\\??\\", 4) || !strncmp(path, "\\DosDevices\\", 12) || !strncmp(path, "\\Global??\\", 10)) dev = ntdrv_resolve_symlink(path);
+    if (dev) {
+        FILE_OBJECT *fo;
+        int32_t st = ntdrv_device_open_file(dev, access, &fo);
+        if (st) { if (iosb) { iosb->Status = st; iosb->Information = 0; } return st; }
+        f = (struct kfile *)((uint8_t *)fo - __builtin_offsetof(struct kfile, fo));
+        { unsigned i; for (i = 0; i < KH_MAX; ++i) if (kh_tab[i].kind == KH_FILE && kh_tab[i].ptr == f) { *(uint64_t *)handle_out = ((uint64_t)(i + 1) << 2) | 0x80000000ull; break; } }
+        if (iosb) { iosb->Status = STATUS_SUCCESS; iosb->Information = 1; }
+        return STATUS_SUCCESS;
+    }
     n = fs_lookup(path);
     if (!n && (disp == 2 || disp == 3 || disp == 5)) n = fs_create(path, 0, &created);   /* CREATE/OPEN_IF/OVERWRITE_IF */
     if (!n) { if (iosb) { iosb->Status = STATUS_OBJECT_NAME_NOT_FOUND; iosb->Information = 0; } return STATUS_OBJECT_NAME_NOT_FOUND; }
@@ -193,6 +221,12 @@ NTSTATUS NTAPI ZwReadFile(uint64_t handle, void *event, void *apc, void *apcctx,
     (void)event; (void)apc; (void)apcctx; (void)key;
     if (!f) return STATUS_INVALID_HANDLE;
     at = off ? (uint64_t)off->QuadPart : f->pos;
+    if (f->dev) {
+        int32_t st = ntdrv_read_write(f->dev, 0, buf, len, at, &got);
+        f->pos = at + got;
+        if (iosb) { iosb->Status = st; iosb->Information = got; }
+        return st;
+    }
     fs_read(f->node, at, buf, len, &got);
     f->pos = at + got;
     if (iosb) { iosb->Status = got ? STATUS_SUCCESS : STATUS_END_OF_FILE; iosb->Information = got; }
@@ -207,6 +241,13 @@ NTSTATUS NTAPI ZwWriteFile(uint64_t handle, void *event, void *apc, void *apcctx
     (void)event; (void)apc; (void)apcctx; (void)key;
     if (!f) return STATUS_INVALID_HANDLE;
     at = off ? (uint64_t)off->QuadPart : f->pos;
+    if (f->dev) {
+        uint64_t info = 0;
+        int32_t st = ntdrv_read_write(f->dev, 1, buf, len, at, &info);
+        f->pos = at + info;
+        if (iosb) { iosb->Status = st; iosb->Information = info; }
+        return st;
+    }
     rc = fs_write(f->node, at, buf, len);
     if (rc) { if (iosb) { iosb->Status = STATUS_DISK_FULL; iosb->Information = 0; } return STATUS_DISK_FULL; }
     f->pos = at + len;
@@ -214,91 +255,79 @@ NTSTATUS NTAPI ZwWriteFile(uint64_t handle, void *event, void *apc, void *apcctx
     return STATUS_SUCCESS;
 }
 
-/* ---------------------------------------------------------------- minimal Ob */
+NTSTATUS NTAPI ZwDeviceIoControlFile(uint64_t handle, void *event, void *apc, void *apcctx, IO_STATUS_BLOCK *iosb,
+                                     uint32_t ioctl, void *in, uint32_t inlen, void *out, uint32_t outlen)
+{
+    struct kfile *f = ntdrv_kh_get(handle, KH_FILE);
+    uint64_t info = 0;
+    int32_t st;
+    (void)event; (void)apc; (void)apcctx;
+    if (!f) return STATUS_INVALID_HANDLE;
+    if (!f->dev) return STATUS_INVALID_DEVICE_REQUEST;
+    st = ntdrv_device_control(f->dev, ioctl, in, inlen, out, outlen, 0, &info);
+    if (iosb) { iosb->Status = st; iosb->Information = info; }
+    return st;
+}
+
+/* ---------------------------------------------------------------- Ob */
+/* Handle -> object: the kernel handle table maps a handle to its kind; when the caller names an object type
+ * (*IoFileObjectType, *PsThreadType, ...) the kinds must agree (STATUS_OBJECT_TYPE_MISMATCH otherwise). A file handle
+ * yields its FILE_OBJECT; a device handle its DEVICE_OBJECT; thread/event/semaphore handles their objects. */
+extern int ntdrv_object_type_kind(const void *type);
+#define STATUS_OBJECT_TYPE_MISMATCH_ ((int32_t)0xC0000024)
 NTSTATUS NTAPI ObReferenceObjectByHandle(uint64_t h, uint32_t access, void *type, uint8_t mode, void **obj, void *info)
 {
+    int i = kh_index(h), kind, want = ntdrv_object_type_kind(type);
     void *p;
-    (void)access; (void)type; (void)mode; (void)info;
-    p = ntdrv_kh_get(h, KH_THREAD);
-    if (!p) p = ntdrv_kh_get(h, KH_EVENT);
-    if (!p) return STATUS_INVALID_HANDLE;
+    (void)access; (void)mode; (void)info;
+    if (i < 0 || i >= KH_MAX || !kh_tab[i].kind) return STATUS_INVALID_HANDLE;
+    kind = kh_tab[i].kind; p = kh_tab[i].ptr;
+    if (want && want != kind) return STATUS_OBJECT_TYPE_MISMATCH_;
+    if (kind == KH_FILE) p = &((struct kfile *)p)->fo;
     if (obj) *obj = p;
     return STATUS_SUCCESS;
 }
-void NTAPI ObDereferenceObject(void *o) { (void)o; }
-void NTAPI ObfDereferenceObject(void *o) { (void)o; }
-LONG NTAPI ObfReferenceObject(void *o) { (void)o; return 1; }
-
-/* ---------------------------------------------------------------- ZwEnumerateKey / ZwQueryInformationFile */
-/* KEY_BASIC_INFORMATION (0x10 + name): LastWriteTime, TitleIndex, NameLength, Name[].
- * KEY_NODE_INFORMATION (0x18 + name): LastWriteTime, TitleIndex, ClassOffset, ClassLength, NameLength, Name[].
- * KEY_FULL_INFORMATION (0x2c + class): LastWriteTime, TitleIndex, ClassOffset, ClassLength, SubKeys, MaxNameLen,
- * MaxClassLen, Values, MaxValueNameLen, MaxValueDataLen, Class[]. */
-NTSTATUS NTAPI ZwEnumerateKey(uint64_t handle, uint32_t index, uint32_t cls, void *buf, uint32_t len, uint32_t *reslen)
+/* Object references: device objects carry ReferenceCount; the kernel's own records (threads, events, keys) are not
+ * freed by a dereference, so a reference is bookkeeping for them. */
+LONG NTAPI ObfReferenceObject(void *o)
 {
-    regkey_t *node = ntdrv_kh_get(handle, KH_KEY), *child;
-    uint8_t tmp[0x30];
-    uint32_t fixed, need, i;
-    const void *var;
-    uint32_t varlen;
-    NTSTATUS st = STATUS_SUCCESS;
-    if (!node) return STATUS_INVALID_HANDLE;
-    reg_lock();
-    child = reg_nth_child(node, index);
-    if (!child) { reg_unlock(); return STATUS_NO_MORE_ENTRIES; }
-    memset(tmp, 0, sizeof tmp);
-    memcpy(tmp, &child->last_write, 8);
-    var = regkey_name(child); varlen = child->name_len * 2;
-    switch (cls) {
-    case 0: fixed = 0x10; memcpy(tmp + 0xc, &varlen, 4); break;
-    case 1: fixed = 0x18; {   /* the key's class string is not returned: ClassOffset -1 and ClassLength 0 say so */
-        uint32_t cl = 0, co = 0xffffffffu;
-        memcpy(tmp + 0xc, &co, 4); memcpy(tmp + 0x10, &cl, 4); memcpy(tmp + 0x14, &varlen, 4);
-    } break;
-    case 2: {
-        uint32_t cl = child->class_len * 2, co = cl ? 0x2c : 0xffffffffu, maxname = 0, maxclass = 0, maxvname = 0, maxvdata = 0;
-        regkey_t *c; regval_t *v;
-        for (i = 0; (c = reg_nth_child(child, i)) != 0; ++i) { if (c->name_len * 2 > maxname) maxname = c->name_len * 2; if (c->class_len * 2 > maxclass) maxclass = c->class_len * 2; }
-        for (i = 0; (v = reg_nth_value(child, i)) != 0; ++i) { if (v->name_len * 2 > maxvname) maxvname = v->name_len * 2; if (v->data_len > maxvdata) maxvdata = v->data_len; }
-        fixed = 0x2c;
-        memcpy(tmp + 0xc, &co, 4); memcpy(tmp + 0x10, &cl, 4); memcpy(tmp + 0x14, &child->nsubkeys, 4); memcpy(tmp + 0x18, &maxname, 4);
-        memcpy(tmp + 0x1c, &maxclass, 4); memcpy(tmp + 0x20, &child->nvalues, 4); memcpy(tmp + 0x24, &maxvname, 4); memcpy(tmp + 0x28, &maxvdata, 4);
-        var = regkey_class(child); varlen = cl;
-        break;
-    }
-    default: reg_unlock(); return STATUS_INVALID_INFO_CLASS;
-    }
-    need = fixed + varlen;
-    if (reslen) *reslen = need;
-    if (len < fixed) { reg_unlock(); return STATUS_BUFFER_TOO_SMALL; }
-    memcpy(buf, tmp, fixed);
-    if (len < need) { memcpy((uint8_t *)buf + fixed, var, len - fixed); st = STATUS_BUFFER_OVERFLOW; }
-    else memcpy((uint8_t *)buf + fixed, var, varlen);
-    reg_unlock();
-    return st;
+    int16_t t = *(int16_t *)o;
+    if (t == 3) return ++((DEVICE_OBJECT *)o)->ReferenceCount;
+    return 1;
 }
-
-/* FILE_STANDARD_INFORMATION (class 5, 0x18): AllocationSize, EndOfFile, NumberOfLinks, DeletePending, Directory.
- * FILE_BASIC_INFORMATION (class 4, 0x28): four FILETIMEs and FileAttributes. */
-NTSTATUS NTAPI ZwQueryInformationFile(uint64_t handle, IO_STATUS_BLOCK *iosb, void *buf, uint32_t len, uint32_t cls)
+LONG NTAPI ObfDereferenceObject(void *o)
 {
-    struct kfile *f = ntdrv_kh_get(handle, KH_FILE);
-    NTSTATUS st = STATUS_SUCCESS;
-    uint32_t n = 0;
-    if (!f) return STATUS_INVALID_HANDLE;
-    if (cls == 5) {
-        struct { uint64_t alloc, eof; uint32_t links; uint8_t del, dir, pad[2]; } s;
-        memset(&s, 0, sizeof s);
-        s.alloc = s.eof = f->node->size; s.links = 1; s.del = f->node->delete_pending != 0; s.dir = f->node->is_dir != 0;
-        n = sizeof s;
-        if (len < n) st = STATUS_INFO_LENGTH_MISMATCH; else memcpy(buf, &s, n);
-    } else if (cls == 4) {
-        struct { int64_t t[4]; uint32_t attrs, pad; } b;
-        memset(&b, 0, sizeof b);
-        b.attrs = f->node->attrs ? f->node->attrs : (f->node->is_dir ? 0x10 : 0x80);
-        n = sizeof b;
-        if (len < n) st = STATUS_INFO_LENGTH_MISMATCH; else memcpy(buf, &b, n);
-    } else st = STATUS_INVALID_INFO_CLASS;
-    if (iosb) { iosb->Status = st; iosb->Information = st ? 0 : n; }
-    return st;
+    int16_t t = *(int16_t *)o;
+    if (t == 3 && ((DEVICE_OBJECT *)o)->ReferenceCount > 0) return --((DEVICE_OBJECT *)o)->ReferenceCount;
+    return 0;
+}
+void NTAPI ObDereferenceObject(void *o) { ObfDereferenceObject(o); }
+void NTAPI ObReferenceObject(void *o) { ObfReferenceObject(o); }
+NTSTATUS NTAPI ObOpenObjectByPointer(void *obj, uint32_t attrs, void *pas, uint32_t access, void *type, uint8_t mode, uint64_t *handle)
+{
+    int16_t t = *(int16_t *)obj;
+    int kind = ntdrv_object_type_kind(type);
+    (void)attrs; (void)pas; (void)access; (void)mode;
+    if (t == 5) kind = KH_FILE;
+    if (!kind) return STATUS_INVALID_PARAMETER;
+    if (kind == KH_FILE) {                                      /* a FILE_OBJECT of ours sits inside its kfile record */
+        struct kfile *f = (struct kfile *)((uint8_t *)obj - __builtin_offsetof(struct kfile, fo));
+        unsigned i; for (i = 0; i < KH_MAX; ++i) if (kh_tab[i].kind == KH_FILE && kh_tab[i].ptr == f) { *handle = ((uint64_t)(i + 1) << 2) | 0x80000000ull; return STATUS_SUCCESS; }
+        return STATUS_INVALID_PARAMETER;
+    }
+    *handle = ntdrv_kh_alloc(kind, obj);
+    return *handle ? STATUS_SUCCESS : STATUS_INSUFFICIENT_RESOURCES;
+}
+NTSTATUS NTAPI ObQueryNameString(void *obj, void *info, uint32_t len, uint32_t *reslen)
+{
+    /* OBJECT_NAME_INFORMATION: UNICODE_STRING then the characters; devices report "\Device\X", others an empty name. */
+    int16_t t = *(int16_t *)obj;
+    const char *name = t == 3 ? ntdrv_device_name(obj) : 0;
+    uint32_t n = name ? (uint32_t)strlen(name) : 0, need = 16 + (n + 1) * 2;
+    UNICODE_STRING *u = info;
+    if (reslen) *reslen = need;
+    if (len < need) return STATUS_INFO_LENGTH_MISMATCH;
+    u->Buffer = (WCHAR *)(u + 1); u->Length = (uint16_t)(n * 2); u->MaximumLength = (uint16_t)((n + 1) * 2);
+    if (name) ntdrv_ascii_to_wide(name, u->Buffer, n + 1); else u->Buffer[0] = 0;
+    return STATUS_SUCCESS;
 }

@@ -4,6 +4,7 @@
  * Each thread owns an FXSAVE area so user-mode SSE state survives preemption.
  */
 #include "k64.h"
+extern int ntdrv_gs_all;                     /* ntdrv_ke.c: set once the driver host runs code that reads the KPCR through GS */
 
 extern void switch_stacks(uint64_t *save_rsp, uint64_t new_rsp);
 extern void thread_start(void);
@@ -96,7 +97,7 @@ static void schedule(void)
         if (read_cr3() != want)
             write_cr3(want);
     }
-    if (prev->teb || next->teb) {
+    if (prev->teb || next->teb || ntdrv_gs_all) {      /* ntdrv_gs_all: hosted drivers read a per-thread KPCR through GS (ntdrv_ke.c) */
         prev->user_gs_base = rdmsr(MSR_GS_BASE);
         wrmsr(MSR_GS_BASE, next->user_gs_base);
     }

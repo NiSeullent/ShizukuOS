@@ -69,6 +69,59 @@ static void set_irql(uint8_t v)
 uint8_t ntdrv_isr_enter(void) { const uint8_t o = cur_irql(); write_irql(NTDRV_DIRQL); return o; }
 void ntdrv_isr_leave(uint8_t old) { write_irql(old); }
 
+/* ---------------------------------------------------------------- KPCR emulation (GS base)
+ * Drivers built with the WDK read the current thread, the PRCB and the processor block straight from the GS segment on x64
+ * (KeGetCurrentThread/PsGetCurrentThread are gs:[0x188], KeGetPcr is gs:[0x18], KeGetCurrentPrcb gs:[0x20]). The kernel
+ * itself never uses GS (there is no swapgs discipline: a user thread's GS base is its TEB, kernel threads run with 0), so
+ * every thread that runs driver code gets a small KPCR of its own -- Self at 0x18, CurrentPrcb at 0x20, the embedded PRCB at
+ * 0x180 with CurrentThread at +8 -- and GS points at it for as long as it is inside the host. The scheduler swaps GS at every
+ * context switch once ntdrv_gs_all is set (sched.c), so the value follows the thread. Layout per the Windows x64 KPCR/KPRCB. */
+int ntdrv_gs_all;
+typedef struct kpcr_slot { struct kpcr_slot *next; void *thread; uint8_t blk[0x400] __attribute__((aligned(16))); } kpcr_slot_t;
+static kpcr_slot_t *kpcr_hash[64];
+static kpcr_slot_t isr_kpcr;
+
+static void kpcr_fill(kpcr_slot_t *s, void *thread)
+{
+    uint64_t *q = (uint64_t *)s->blk;
+    s->thread = thread;
+    q[0x18 / 8] = (uint64_t)s->blk;                    /* KPCR.Self */
+    q[0x20 / 8] = (uint64_t)(s->blk + 0x180);          /* KPCR.CurrentPrcb */
+    q[0x188 / 8] = (uint64_t)thread;                   /* KPRCB.CurrentThread */
+    q[0x198 / 8] = (uint64_t)thread;                   /* KPRCB.IdleThread: never idle here, but never NULL */
+}
+static uint64_t kpcr_for_current(void)
+{
+    thread_t *t = thread_current();
+    unsigned h = (unsigned)(((uint64_t)t >> 6) & 63);
+    kpcr_slot_t *s;
+    uint64_t f = irq_save();
+    for (s = kpcr_hash[h]; s; s = s->next) if (s->thread == t) { irq_restore(f); return (uint64_t)s->blk; }
+    irq_restore(f);
+    s = kzalloc(sizeof *s);
+    if (!s) return (uint64_t)isr_kpcr.blk;
+    kpcr_fill(s, t);
+    f = irq_save();
+    s->next = kpcr_hash[h]; kpcr_hash[h] = s;
+    irq_restore(f);
+    return (uint64_t)s->blk;
+}
+uint64_t ntdrv_gs_enter(void)                            /* returns the previous GS base for ntdrv_gs_leave */
+{
+    const uint64_t prev = rdmsr(MSR_GS_BASE);
+    ntdrv_gs_all = 1;
+    wrmsr(MSR_GS_BASE, kpcr_for_current());
+    return prev;
+}
+uint64_t ntdrv_gs_enter_isr(void)                        /* interrupt context: no allocation, one shared block */
+{
+    const uint64_t prev = rdmsr(MSR_GS_BASE);
+    kpcr_fill(&isr_kpcr, thread_current());
+    wrmsr(MSR_GS_BASE, (uint64_t)isr_kpcr.blk);
+    return prev;
+}
+void ntdrv_gs_leave(uint64_t prev) { wrmsr(MSR_GS_BASE, prev); }
+
 /* ---------------------------------------------------------------- IRQL */
 uint8_t NTAPI KeGetCurrentIrql(void) { return g_irql; }
 
@@ -176,6 +229,7 @@ void ntdrv_dpc_queue_flush(void)
 static void dpc_worker(void *arg)
 {
     (void)arg;
+    ntdrv_gs_enter();
     for (;;) {
         sem_wait(&dpc_sem);
         set_irql(DISPATCH_LEVEL);
@@ -379,10 +433,12 @@ uint8_t NTAPI KeReadStateTimer(KTIMER *t) { return t->Header.SignalState != 0; }
 static void timer_thread(void *arg)
 {
     (void)arg;
+    ntdrv_gs_enter();
     for (;;) {
         uint64_t now, f;
         unsigned i;
         thread_sleep_ms(1);
+        ntdrv_kuser_tick();                                     /* KUSER_SHARED_DATA time fields (ntdrv_kuser.c) */
         now = ticks_now();
         f = irq_save();
         for (i = 0; i < timer_count; ++i) {
@@ -496,9 +552,8 @@ void *NTAPI ExAllocatePool2(uint64_t flags, uint64_t n, uint32_t tag)
 void NTAPI ExFreePool(void *p) { kfree(p); }
 void NTAPI ExFreePoolWithTag(void *p, uint32_t tag) { (void)tag; kfree(p); }
 
-/* ExInterlocked list helpers used by many drivers (single-linked). */
+/* SLIST_HEADER initialization (the push/pop/flush/depth family lives in ntdrv_ex.c with the same encoding). */
 void NTAPI ExInitializeSListHead(void *h) { memset(h, 0, 16); }
-void NTAPI KeInitializeDeviceQueue(void *q) { memset(q, 0, 0x28); }
 
 void ntdrv_ke_init(void)                        /* idempotent: the first driver load (kernel or NtLoadDriver) starts it */
 {
@@ -506,6 +561,7 @@ void ntdrv_ke_init(void)                        /* idempotent: the first driver 
     if (ke_ready) return;
     sem_init(&dpc_sem, 0);
     write_irql(PASSIVE_LEVEL);
+    ntdrv_kuser_init();                             /* the shared-data page drivers read directly at 0xFFFFF78000000000 */
     w = thread_create("ntdrv-dpc", dpc_worker, 0);
     tt = thread_create("ntdrv-timer", timer_thread, 0);
     KASSERT(w && tt);
@@ -513,87 +569,19 @@ void ntdrv_ke_init(void)                        /* idempotent: the first driver 
 }
 
 /* ---------------------------------------------------------------- Ex interlocked lists and S-lists */
-LIST_ENTRY *NTAPI ExInterlockedInsertHeadList(LIST_ENTRY *head, LIST_ENTRY *e, KSPIN_LOCK *lock)
-{
-    uint8_t old = KfAcquireSpinLock(lock);
-    LIST_ENTRY *first = head->Flink;
-    e->Flink = first; e->Blink = head; first->Blink = e; head->Flink = e;
-    KfReleaseSpinLock(lock, old);
-    return first == head ? 0 : first;
-}
-LIST_ENTRY *NTAPI ExInterlockedInsertTailList(LIST_ENTRY *head, LIST_ENTRY *e, KSPIN_LOCK *lock)
-{
-    uint8_t old = KfAcquireSpinLock(lock);
-    LIST_ENTRY *last = head->Blink;
-    e->Flink = head; e->Blink = last; last->Flink = e; head->Blink = e;
-    KfReleaseSpinLock(lock, old);
-    return last == head ? 0 : last;
-}
-LIST_ENTRY *NTAPI ExInterlockedRemoveHeadList(LIST_ENTRY *head, KSPIN_LOCK *lock)
-{
-    uint8_t old = KfAcquireSpinLock(lock);
-    LIST_ENTRY *e = head->Flink;
-    if (e == head) e = 0;
-    else { head->Flink = e->Flink; e->Flink->Blink = head; }
-    KfReleaseSpinLock(lock, old);
-    return e;
-}
-uint32_t NTAPI ExInterlockedAddUlong(uint32_t *addend, uint32_t inc, KSPIN_LOCK *lock)
-{
-    uint8_t old = KfAcquireSpinLock(lock);
-    uint32_t prev = *addend;
-    *addend = prev + inc;
-    KfReleaseSpinLock(lock, old);
-    return prev;
-}
-LARGE_INTEGER NTAPI ExInterlockedAddLargeInteger(LARGE_INTEGER *addend, LARGE_INTEGER inc, KSPIN_LOCK *lock)
-{
-    uint8_t old = KfAcquireSpinLock(lock);
-    LARGE_INTEGER prev = *addend;
-    addend->QuadPart += inc.QuadPart;
-    KfReleaseSpinLock(lock, old);
-    return prev;
-}
 /* SLIST_HEADER, x64 layout: Alignment = Depth:16 | Sequence:48, Region = Reserved:4 | NextEntry:60 (address >> 4).
  * Entries are 16-byte aligned, so the pointer is stored as it is. Drivers read Depth through the inline
  * ExQueryDepthSList, hence the exact encoding. Push/pop run with interrupts off (uniprocessor). */
 typedef struct { uint64_t alignment, region; } slist_header_t;
 typedef struct single_entry { struct single_entry *Next; } single_entry_t;
-void *NTAPI ExpInterlockedPushEntrySList(slist_header_t *h, single_entry_t *e)
-{
-    uint64_t f = irq_save();
-    single_entry_t *first = (single_entry_t *)(h->region & ~0xfull);
-    e->Next = first;
-    h->region = (h->region & 0xfull) | ((uint64_t)e & ~0xfull);           /* the low nibble is HeaderType/Init, not the pointer */
-    h->alignment = ((h->alignment & ~0xffffull) + 0x10000) | (((h->alignment & 0xffff) + 1) & 0xffff);
-    irq_restore(f);
-    return first;
-}
-void *NTAPI ExpInterlockedPopEntrySList(slist_header_t *h)
-{
-    uint64_t f = irq_save();
-    single_entry_t *first = (single_entry_t *)(h->region & ~0xfull);
-    if (first) {
-        h->region = (h->region & 0xfull) | ((uint64_t)first->Next & ~0xfull);
-        h->alignment = ((h->alignment & ~0xffffull) + 0x10000) | (((h->alignment & 0xffff) - 1) & 0xffff);
-    }
-    irq_restore(f);
-    return first;
-}
 
 /* ---------------------------------------------------------------- processor information */
 int8_t ntdrv_KeNumberProcessors = 1;                    /* the CCHAR data export KeNumberProcessors */
-uint32_t NTAPI KeGetRecommendedSharedDataAlignment(void) { return 64; }     /* the cache line */
+     /* the cache line */
 /* Per-processor tick counts (idle, kernel+user) and the processor index. The kernel keeps no idle accounting, so idle
  * is reported as 0 and the timer tick count as busy time: a cumulative count, monotonic, in ticks. */
 extern uint64_t arch_timer_irqs(void);                  /* arch.c */
-void NTAPI ExGetCurrentProcessorCounts(uint32_t *idle, uint32_t *kernel_user, uint32_t *index)
-{
-    if (idle) *idle = 0;
-    if (kernel_user) *kernel_user = (uint32_t)arch_timer_irqs();
-    if (index) *index = 0;
-}
-void NTAPI ExGetCurrentProcessorCpuUsage(uint32_t *usage) { if (usage) *usage = 100; }   /* no idle accounting: fully busy */
+   /* no idle accounting: fully busy */
 
 /* ---------------------------------------------------------------- bug-check callbacks */
 /* KBUGCHECK_CALLBACK_RECORD (0x40): Entry(0x00) CallbackRoutine(0x10) Buffer(0x18) Length(0x20) Component(0x28)
@@ -602,25 +590,6 @@ typedef struct { LIST_ENTRY Entry; void *CallbackRoutine, *Buffer; uint32_t Leng
                  uint64_t Checksum; uint8_t State, _pad[7]; } kbugcheck_record_t;
 _Static_assert(sizeof(kbugcheck_record_t) == 0x40, "bugcheck record");
 static LIST_ENTRY bugcheck_list = { &bugcheck_list, &bugcheck_list };
-uint8_t NTAPI KeRegisterBugCheckCallback(kbugcheck_record_t *r, void *routine, void *buf, uint32_t len, const char *component)
-{
-    uint64_t f = irq_save();
-    if (r->State == 1) { irq_restore(f); return 0; }             /* BufferInserted already */
-    r->CallbackRoutine = routine; r->Buffer = buf; r->Length = len; r->Component = component; r->State = 1;
-    r->Entry.Flink = &bugcheck_list; r->Entry.Blink = bugcheck_list.Blink;
-    bugcheck_list.Blink->Flink = &r->Entry; bugcheck_list.Blink = &r->Entry;
-    irq_restore(f);
-    return 1;
-}
-uint8_t NTAPI KeDeregisterBugCheckCallback(kbugcheck_record_t *r)
-{
-    uint64_t f = irq_save();
-    if (r->State != 1) { irq_restore(f); return 0; }
-    r->Entry.Blink->Flink = r->Entry.Flink; r->Entry.Flink->Blink = r->Entry.Blink;
-    r->State = 0;
-    irq_restore(f);
-    return 1;
-}
 
 /* KBUGCHECK_CALLBACK_ROUTINE(Buffer, Length), ms_abi: each registered record is called once, before the halt, with the
  * driver's buffer. A callback that faults or blocks cannot be helped here; the list is walked once (State cleared). */

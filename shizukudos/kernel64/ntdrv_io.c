@@ -21,6 +21,14 @@
 #define NT_SUCCESS(s) ((int32_t)(s) >= 0)
 
 #define OB_DEVICE 0x50                          /* kobject type for a user handle onto a device */
+#define DISPATCH_LEVEL_ 2
+
+extern void NTAPI KeInitializeDeviceQueue(KDEVICE_QUEUE *q);           /* ntdrv_pnp.c */
+extern void ntdrv_devext_free(DEVICE_OBJECT *dev);
+extern uint8_t NTAPI KfRaiseIrql(uint8_t);
+extern void NTAPI KfLowerIrql(uint8_t);
+extern void NTAPI KeAcquireSpinLockAtDpcLevel(KSPIN_LOCK *);
+extern void NTAPI KeReleaseSpinLockFromDpcLevel(KSPIN_LOCK *);
 
 static ntdrv_devnode_t *devnodes;
 static ntdrv_symlink_t *symlinks;
@@ -72,6 +80,9 @@ NTSTATUS NTAPI IoCreateDevice(DRIVER_OBJECT *drv, uint32_t ext_size, UNICODE_STR
     dev->StackSize = 1;
     dev->Flags = DO_DEVICE_INITIALIZING;
     dev->DeviceExtension = ext_size ? (uint8_t *)dev + SZ_DEV : 0;
+    dev->AlignmentRequirement = 0;                              /* FILE_BYTE_ALIGNMENT */
+    KeInitializeDeviceQueue(&dev->DeviceQueue);
+    KeInitializeEvent(&dev->DeviceLock, 1 /* SynchronizationEvent */, 1);
     dev->NextDevice = drv->DeviceObject;
     drv->DeviceObject = dev;
     if (name && name->Length) {
@@ -99,7 +110,37 @@ void NTAPI IoDeleteDevice(DEVICE_OBJECT *dev)
         if (*dp) *dp = dev->NextDevice;
     }
     while (*pp) { if ((*pp)->dev == dev) { ntdrv_devnode_t *d = *pp; *pp = d->next; kfree(d); } else pp = &(*pp)->next; }
+    ntdrv_devext_free(dev);
     kfree(dev);
+}
+/* "\Device\X" of a named device object, or NULL for an unnamed one. */
+const char *ntdrv_device_name(DEVICE_OBJECT *dev)
+{
+    ntdrv_devnode_t *n;
+    for (n = devnodes; n; n = n->next) if (n->dev == dev) return n->name;
+    return 0;
+}
+/* The device `dev` is attached on top of (its lower device), found by walking every device chain of every loaded
+ * driver (device objects are reachable from their DRIVER_OBJECT's DeviceObject list). */
+struct lower_ctx { DEVICE_OBJECT *dev, *lower; };
+static void lower_scan_driver(ntdrv_driver_t *d, void *ctx)
+{
+    struct lower_ctx *c = ctx;
+    DEVICE_OBJECT *x;
+    if (c->lower || !d->drv) return;
+    for (x = d->drv->DeviceObject; x; x = x->NextDevice) if (x->AttachedDevice == c->dev) { c->lower = x; return; }
+}
+DEVICE_OBJECT *ntdrv_lower_device(DEVICE_OBJECT *dev)
+{
+    extern void ntdrv_for_each_driver(void (*fn)(ntdrv_driver_t *, void *), void *ctx);
+    struct lower_ctx c = { dev, 0 };
+    ntdrv_devnode_t *n;
+    for (n = devnodes; n; n = n->next) {                        /* host-created PDOs are named and not in a driver record */
+        DEVICE_OBJECT *x;
+        for (x = n->dev; x; x = x->NextDevice) if (x->AttachedDevice == dev) return x;
+    }
+    ntdrv_for_each_driver(lower_scan_driver, &c);
+    return c.lower;
 }
 
 NTSTATUS NTAPI IoCreateSymbolicLink(UNICODE_STRING *link, UNICODE_STRING *target)
@@ -457,6 +498,7 @@ static int function_for_line(unsigned line, pci_dev_t *out)
         }
     return 0;
 }
+void ntdrv_pci_claim_function(const pci_dev_t *d) { own_function(d, ntdrv_current_driver()); }   /* HalAssignSlotResources */
 
 void ntdrv_release_claims(ntdrv_driver_t *d)
 {
@@ -549,6 +591,7 @@ void ntdrv_bind_enum(ntdrv_driver_t *d)
 }
 #else
 void ntdrv_pci_note_mmio(uint64_t pa, uint64_t size) { (void)pa; (void)size; }   /* no device is passed through here */
+void ntdrv_pci_claim_function(const pci_dev_t *d) { (void)d; }
 void ntdrv_release_claims(ntdrv_driver_t *d) { (void)d; }
 unsigned ntdrv_claimed_functions(ntdrv_driver_t *d, pci_dev_t *out, unsigned max) { (void)d; (void)out; (void)max; return 0; }
 void ntdrv_bind_enum(ntdrv_driver_t *d) { (void)d; }
@@ -564,8 +607,25 @@ typedef struct kinterrupt {
     pci_dev_t dev;
 #endif
     struct kinterrupt *next;
+    KSPIN_LOCK *lock;                           /* the driver's spin lock (or the object's own) */
+    KSPIN_LOCK own_lock;
+    uint8_t synch_irql;                         /* SynchronizeIrql: the level KeAcquireInterruptSpinLock raises to */
 } kinterrupt_t;
 static kinterrupt_t *interrupts_by_vector[256];
+
+/* KeAcquireInterruptSpinLock: raise to the interrupt's SynchronizeIrql (>= DISPATCH_LEVEL, so the ISR cannot run on
+ * this processor) and take its spin lock; the ISR holds the same lock while it runs (KeSynchronizeExecution). */
+uint8_t NTAPI KeAcquireInterruptSpinLock(kinterrupt_t *k)
+{
+    uint8_t old = KfRaiseIrql(k->synch_irql > DISPATCH_LEVEL_ ? k->synch_irql : DISPATCH_LEVEL_);
+    KeAcquireSpinLockAtDpcLevel(k->lock);
+    return old;
+}
+void NTAPI KeReleaseInterruptSpinLock(kinterrupt_t *k, uint8_t old)
+{
+    KeReleaseSpinLockFromDpcLevel(k->lock);
+    KfLowerIrql(old);
+}
 
 uint8_t ntdrv_isr_enter(void);                  /* ntdrv_ke.c: raise to DIRQL (CR8), interrupts stay as the caller left them */
 void ntdrv_isr_leave(uint8_t old);
@@ -573,7 +633,9 @@ static void call_isr(kinterrupt_t *k)
 {
     uint8_t (NTAPI *svc)(void *, void *) = k->service;
     const uint8_t old = ntdrv_isr_enter();      /* the ISR runs at DIRQL: exports it calls see IRQL >= DISPATCH_LEVEL */
+    const uint64_t gs = ntdrv_gs_enter_isr();   /* the interrupted thread's GS base is a TEB or 0: give the ISR a KPCR */
     svc(k, k->ctx);                             /* KSERVICE_ROUTINE(Interrupt, ServiceContext) */
+    ntdrv_gs_leave(gs);
     ntdrv_isr_leave(old);
 }
 #ifdef SHZ_STANDALONE
@@ -606,6 +668,7 @@ NTSTATUS NTAPI IoConnectInterrupt(void **interrupt_out, void *service, void *ctx
     if (!k) return STATUS_INSUFFICIENT_RESOURCES;
     if (vector >= 256) { kfree(k); return STATUS_INVALID_PARAMETER; }
     k->service = service; k->ctx = ctx; k->vector = vector;
+    k->lock = lock ? lock : &k->own_lock; k->synch_irql = synch_irql ? synch_irql : irql;
 #ifdef SHZ_STANDALONE
     {
         const unsigned line = vector - standalone_irq_vector(0);
@@ -662,6 +725,7 @@ uint8_t NTAPI KeSynchronizeExecution(void *interrupt, uint8_t (NTAPI *routine)(v
 typedef struct io_workitem {
     DEVICE_OBJECT *dev;
     void (NTAPI *routine)(DEVICE_OBJECT *, void *);
+    void (NTAPI *routine_ex)(void *, void *, void *);       /* IoQueueWorkItemEx: (IoObject, Context, IoWorkItem) */
     void *ctx;
     int queued;
     struct io_workitem *next;
@@ -675,9 +739,11 @@ static int wq_started;
 static void work_thread(void *arg)
 {
     (void)arg;
+    ntdrv_gs_enter();
     for (;;) {
         io_workitem_t *w;
         void (NTAPI *routine)(DEVICE_OBJECT *, void *);
+        void (NTAPI *routine_ex)(void *, void *, void *);
         DEVICE_OBJECT *dev;
         void *ctx;
         uint64_t f;
@@ -686,9 +752,10 @@ static void work_thread(void *arg)
         w = wq_head;
         if (w) { wq_head = w->next; if (!wq_head) wq_tail = 0; }
         if (!w) { irq_restore(f); continue; }
-        routine = w->routine; dev = w->dev; ctx = w->ctx;
+        routine = w->routine; routine_ex = w->routine_ex; dev = w->dev; ctx = w->ctx;
         w->queued = 0;                                          /* the routine may requeue or free the item */
         irq_restore(f);
+        if (routine_ex) { routine_ex(dev, ctx, w); continue; }
         if (w->ex_routine) { void (NTAPI *r)(void *) = w->ex_routine; if (w->ex_free) kfree(w); r(ctx); }
         else routine(dev, ctx);
     }
@@ -700,23 +767,10 @@ void *NTAPI IoAllocateWorkItem(DEVICE_OBJECT *dev)
     return w;
 }
 void NTAPI IoFreeWorkItem(void *item) { kfree(item); }
-void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, void *), uint32_t queue_type, void *ctx);
-/* WORK_QUEUE_ITEM { LIST_ENTRY List; WorkerRoutine; Parameter } (0x20): run on the same system worker thread */
-void NTAPI ExQueueWorkItem(void *item, uint32_t queue_type)
+static void queue_item(io_workitem_t *w, void (NTAPI *routine)(DEVICE_OBJECT *, void *),
+                       void (NTAPI *routine_ex)(void *, void *, void *), void *ctx)
 {
-    struct { LIST_ENTRY List; void (NTAPI *WorkerRoutine)(void *); void *Parameter; } *wq = item;
-    io_workitem_t *w = kzalloc(sizeof *w);
-    (void)queue_type;
-    if (!w) kpanic("ExQueueWorkItem: out of memory");
-    w->ex_routine = wq->WorkerRoutine; w->ex_free = 1;
-    IoQueueWorkItem(w, 0, queue_type, wq->Parameter);
-}
-
-void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, void *), uint32_t queue_type, void *ctx)
-{
-    io_workitem_t *w = item;
     uint64_t f;
-    (void)queue_type;                                           /* Critical/Delayed/HyperCritical share one worker */
     if (!wq_started) {
         sem_init(&wq_sem, 0);
         KASSERT(thread_create("ntdrv-work", work_thread, 0));
@@ -724,18 +778,46 @@ void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, vo
     }
     f = irq_save();
     if (w->queued) { irq_restore(f); kpanic("IoQueueWorkItem: work item already queued"); }
-    w->routine = routine; w->ctx = ctx; w->queued = 1; w->next = 0;
+    w->routine = routine; w->routine_ex = routine_ex; w->ctx = ctx; w->queued = 1; w->next = 0;
     if (wq_tail) wq_tail->next = w; else wq_head = w;
     wq_tail = w;
     irq_restore(f);
     sem_post(&wq_sem);
+}
+void NTAPI IoQueueWorkItem(void *item, void (NTAPI *routine)(DEVICE_OBJECT *, void *), uint32_t queue_type, void *ctx)
+{
+    (void)queue_type;                                           /* Critical/Delayed/HyperCritical share one worker */
+    queue_item(item, routine, 0, ctx);
+}
+void NTAPI IoQueueWorkItemEx(void *item, void (NTAPI *routine)(void *, void *, void *), uint32_t queue_type, void *ctx)
+{
+    /* IO_WORKITEM_ROUTINE_EX(IoObject, Context, IoWorkItem): the worker calls the three-argument form. */
+    (void)queue_type;
+    queue_item(item, 0, routine, ctx);
+}
+/* Host-internal: run fn(ctx) once on the system worker thread (ExQueueWorkItem, PnP requests, WMI REGINFO). */
+struct syswork { io_workitem_t item; void (NTAPI *fn)(void *); void *ctx; };
+static void NTAPI syswork_run(DEVICE_OBJECT *dev, void *ctx)
+{
+    struct syswork *s = ctx;
+    (void)dev;
+    s->fn(s->ctx);
+    kfree(s);
+}
+void ntdrv_queue_system_work(void (NTAPI *fn)(void *), void *ctx, void *tag)
+{
+    struct syswork *s = kzalloc(sizeof *s);
+    (void)tag;
+    if (!s) { fn(ctx); return; }                                /* out of memory: run inline rather than drop the request */
+    s->fn = fn; s->ctx = ctx;
+    IoQueueWorkItem(&s->item, syswork_run, 0, s);
 }
 
 /* ================================================================ user-mode reachability */
 /* Weak-hook targets referenced from sysfile.c/objects.c. */
 struct devfile { DEVICE_OBJECT *dev; FILE_OBJECT fo; };
 
-int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, uint64_t phandle_out, uint64_t iosb_out)
+static int32_t open_device_file_inner(process_t *p, const char *path, uint32_t access, uint64_t phandle_out, uint64_t iosb_out)
 {
     DEVICE_OBJECT *dev = 0;
     struct devfile *df;
@@ -782,7 +864,7 @@ int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, 
 }
 
 /* device handle read/write (from sysfile.c hook). Returns 1 if it owned the request. */
-int ntdrv_file_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t handle, int32_t *st_out)
+static int file_dispatch_inner(process_t *p, struct regs *r, uint32_t num, uint64_t handle, int32_t *st_out)
 {
     kobject_t *o = handle_lookup(p, handle, OB_DEVICE);
     struct devfile *df;
@@ -807,7 +889,7 @@ int ntdrv_file_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t han
     return 0;
 }
 
-void ntdrv_device_handle_closing(kobject_t *o)
+static void device_handle_closing_inner(kobject_t *o)
 {
     struct devfile *df;
     if (o->refs != 1) return;
@@ -921,18 +1003,27 @@ static int32_t load_driver_from_service(process_t *p, uint64_t regpath_ustr)
     return st;
 }
 
+static int32_t load_driver_core(const uint16_t *w, unsigned chars, const char *service);
 static int32_t load_driver_locked(process_t *p, uint64_t regpath_ustr)
 {
     uint16_t w[200];
-    char service[64], raw[300], imagepath[320];
-    unsigned chars, i;
+    char service[64];
+    unsigned chars;
+    const int32_t st = read_regpath(p, regpath_ustr, w, &chars, service, sizeof service);
+    if (st) return st;
+    return load_driver_core(w, chars, service);
+}
+
+/* The load itself, given the "\Registry\...\Services\<name>" object path and the service name (last component). */
+static int32_t load_driver_core(const uint16_t *w, unsigned chars, const char *service)
+{
+    char raw[300], imagepath[320];
+    unsigned i;
     regkey_t *node, *start;
     regval_t *v;
     fsnode_t *sys;
     int32_t st;
     ntdrv_driver_t *d = 0;
-    st = read_regpath(p, regpath_ustr, w, &chars, service, sizeof service);
-    if (st) return st;
     if (ntdrv_find_driver(service)) return STATUS_IMAGE_ALREADY_LOADED;   /* one image per service, as on Windows */
     /* resolve the Services\<name> key ("\Registry\..." object path, as sysreg.c does) and read ImagePath */
     reg_lock();
@@ -1018,9 +1109,50 @@ static int32_t query_drivers(process_t *p, uint64_t buf, uint64_t len, uint64_t 
     if (count_out && copy_to_user(p, count_out, &n, 4)) return STATUS_ACCESS_VIOLATION;
     return st;
 }
+/* Kernel-mode callers (ZwLoadDriver/ZwUnloadDriver from a hosted driver, e.g. WdfLdr loading the framework library from a
+ * client's DriverEntry): the same core as NtLoadDriver. A load already running on this thread holds the load mutex, so
+ * the call must not take it again. */
+static void service_from_path(const uint16_t *w, unsigned chars, char *service, unsigned cap)
+{
+    char path[400];
+    unsigned i, seg = 0, j = 0;
+    ntdrv_wide_to_ascii(w, chars, path, sizeof path);
+    for (i = 0; path[i]; ++i) if (path[i] == '\\') seg = i + 1;
+    for (i = seg; path[i] && j < cap - 1; ++i) service[j++] = path[i];
+    service[j] = 0;
+}
+static int load_lock_held_by_me(void) { return load_mutex_ready && load_mutex.locked && load_mutex.owner == thread_current(); }
+int32_t ntdrv_load_service_path(const uint16_t *w, unsigned chars)
+{
+    char service[64];
+    int32_t st;
+    int mine;
+    if (chars >= 200) return STATUS_INVALID_PARAMETER;
+    service_from_path(w, chars, service, sizeof service);
+    if (!service[0]) return STATUS_OBJECT_NAME_INVALID;
+    mine = load_lock_held_by_me();
+    if (!mine) load_lock();
+    st = load_driver_core(w, chars, service);
+    if (!mine) load_unlock();
+    return st;
+}
+int32_t ntdrv_unload_service_path(const uint16_t *w, unsigned chars)
+{
+    char service[64];
+    int32_t st;
+    int mine;
+    if (chars >= 200) return STATUS_INVALID_PARAMETER;
+    service_from_path(w, chars, service, sizeof service);
+    if (!service[0]) return STATUS_OBJECT_NAME_INVALID;
+    mine = load_lock_held_by_me();
+    if (!mine) load_lock();
+    st = ntdrv_unload_service(service);
+    if (!mine) load_unlock();
+    return st;
+}
 
 /* ---------------------------------------------------------------- ntdrv syscall router */
-int32_t sys_ext_ntdrv(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
+static int32_t sys_ext_ntdrv_inner(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {
     (void)a4;
     switch (num) {
@@ -1030,4 +1162,35 @@ int32_t sys_ext_ntdrv(process_t *cur, struct regs *r, uint32_t num, uint64_t a1,
     case 0xe3: return query_drivers(cur, a1, a2, a3);                        /* NtShzDriverQuery(buf, len, &count) */
     default: return STATUS_INVALID_SYSTEM_SERVICE;
     }
+}
+
+/* ---------------------------------------------------------------- user-thread entry points (GS = a KPCR while inside)
+ * A user thread's GS base is its TEB. Driver code reads the KPCR through GS, so each call from a user thread into the host
+ * switches GS to the thread's KPCR and restores the TEB on the way out (see the KPCR emulation in ntdrv_ke.c). */
+int32_t ntdrv_open_device_file(process_t *p, const char *path, uint32_t access, uint64_t phandle_out, uint64_t iosb_out)
+{
+    const uint64_t gs = ntdrv_gs_enter();
+    const int32_t st = open_device_file_inner(p, path, access, phandle_out, iosb_out);
+    ntdrv_gs_leave(gs);
+    return st;
+}
+int ntdrv_file_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t handle, int32_t *st_out)
+{
+    const uint64_t gs = ntdrv_gs_enter();
+    const int owned = file_dispatch_inner(p, r, num, handle, st_out);
+    ntdrv_gs_leave(gs);
+    return owned;
+}
+void ntdrv_device_handle_closing(kobject_t *o)
+{
+    const uint64_t gs = ntdrv_gs_enter();
+    device_handle_closing_inner(o);
+    ntdrv_gs_leave(gs);
+}
+int32_t sys_ext_ntdrv(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
+{
+    const uint64_t gs = ntdrv_gs_enter();
+    const int32_t st = sys_ext_ntdrv_inner(cur, r, num, a1, a2, a3, a4);
+    ntdrv_gs_leave(gs);
+    return st;
 }

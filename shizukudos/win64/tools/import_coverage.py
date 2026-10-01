@@ -672,8 +672,16 @@ def load_exports(path):
     return out
 
 
+def image_export_names(path):
+    pe = pefile.PE(str(path), fast_load=True)
+    pe.parse_data_directories([pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"]])
+    exp = getattr(pe, "DIRECTORY_ENTRY_EXPORT", None)
+    return {e.name.decode("ascii", "replace") for e in exp.symbols if e.name} if exp else set()
+
+
 def providers_main(args):
     exports = load_exports(args.exports) if args.exports else None
+    image_exports = {}
     roots = [Path(a.split("=", 1)[1] if "=" in a and not Path(a).exists() else a) for a in args.apps]
     per = collections.defaultdict(lambda: collections.defaultdict(set))                    # provider dll -> fn -> images
     images = {}
@@ -688,6 +696,8 @@ def providers_main(args):
                 continue
             if pefile.PE(str(p), fast_load=True).OPTIONAL_HEADER.Subsystem != 1:           # IMAGE_SUBSYSTEM_NATIVE only
                 continue
+            if getattr(args, "export_drivers", False):
+                image_exports[p.name.lower()] = image_export_names(p)
             rel = str(p.relative_to(root)) if root.is_dir() else p.name
             if len(roots) > 1:
                 rel = f"{root.name}/{rel}"
@@ -696,6 +706,11 @@ def providers_main(args):
                 per[dll.lower()][fn].add(rel)
                 images[rel][dll.lower()].append(fn)
     local = {Path(r).name.lower() for r in images}
+    if getattr(args, "export_drivers", False):
+        exports = dict(exports or {})
+        for dll in per:
+            if dll in image_exports and dll not in exports:
+                exports[dll] = image_exports[dll]
     print(f"{len(images)} kernel-mode images (subsystem native) under {', '.join(map(str, roots))}")
     print(f"export list: {args.exports if exports else 'none (raw import lists; pass --exports <driver-host export JSON>)'}\n")
     print(f"{'provider':30} {'module':16} {'imported':>8} {'provided':>9} {'images':>7}")
@@ -708,6 +723,10 @@ def providers_main(args):
         rows[dll] = {"provider": name, "imported": sorted(fns), "provided": sorted(f for f in fns if have and f in have) if have is not None else None,
                      "images": sorted(users)}
         print(f"{name:30} {dll:16} {len(fns):8} {('-' if ok is None else ok):>9} {len(users):7}")
+    if exports is not None:
+        total = sum(len(f) for f in per.values())
+        have_n = sum(1 for d, f in per.items() for fn in f if exports.get(d) and fn in exports[d])
+        print(f"\nheadline: {have_n} of {total} distinct (provider, function) imports resolved for {len(images)} images")
     print("\nper image (imports per provider" + (", provided/imported" if exports else "") + "):")
     table = {}
     for rel, by in sorted(images.items()):
@@ -769,6 +788,9 @@ def main():
                     help="shorthand for --providers --exports <DIR/ntoskrnl-exports.json>: the NT driver host's export list "
                     "as emitted by win64/build.py (gen_ntoskrnl_exports.py from kernel64/ntdrv_prov.c)")
     ap.add_argument("--json", type=Path, help="combined report (single app: the per-app summary)")
+    ap.add_argument("--export-drivers", action="store_true",
+                    help="--providers: a module that is itself one of the analysed images (wdfldr.sys, ndis.sys, classpnp.sys, ...) "
+                         "provides its own export table, as the driver host loads export drivers from the store on demand")
     ap.add_argument("--rank", type=Path, metavar="MD",
                     help="with --providers: write a Markdown table ranking every import by how many images use it")
     ap.add_argument("--top", type=int, default=25)

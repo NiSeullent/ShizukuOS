@@ -153,7 +153,10 @@ def root_options(cc_id):
     opts = [(None, "-pipe"), (None, "-fms-extensions"), (None, "-fno-strict-aliasing"), (None, "-fno-common"),
             (None, "-mlong-double-64"), ("C", "-nostdinc"), ("ASM", "-nostdinc")]
     if cc_id == "GNU":
-        opts += [(None, "-fno-aggressive-loop-optimizations")] + [(None, f) for f in GCC_NO_BUILTIN]
+        # -fno-tree-loop-distribute-patterns: the CRT's own memset/memcpy loops must not be "recognised" and turned back into
+        # calls to memset/memcpy (which makes ReactOS's C memset call itself: unbounded recursion on the first use).
+        opts += [(None, "-fno-aggressive-loop-optimizations"), (None, "-fno-tree-loop-distribute-patterns")]
+        opts += [(None, f) for f in GCC_NO_BUILTIN]
     else:
         opts += [(None, "-fno-associative-math"), (None, "-fno-builtin-stpcpy")]
     opts += [(None, "-march=athlon64"), (None, "-mtune=generic"), (None, "-Wall"), (None, "-Wpointer-arith")]
