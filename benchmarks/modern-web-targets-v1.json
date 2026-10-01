@@ -1,0 +1,157 @@
+{
+  "schema": 1,
+  "as_of": "2026-10-01",
+  "recorded_utc": "2026-10-01T07:27:18.775117+00:00",
+  "target_os": "installed Windows98SE4.10.2222 x86; exact future variants require separate evidence",
+  "visible_host": "Trident/MSHTML modernization; full WebKit port optional",
+  "user_requirement": "latest JavaScript + CSS + modern WASM + WebGPU + WebGL all mandatory; themes, TLS1.3, current Legcord/Signal/Office remain mandatory",
+  "targets": [
+    {
+      "id": "javascript",
+      "required": true,
+      "target": "ECMAScript2026 language and browser/Intl integration",
+      "sources": [
+        {
+          "url": "https://tc39.es/ecma262/2026/multipage/",
+          "edition": "2026",
+          "body_accessed": true
+        }
+      ],
+      "suite": "https://github.com/tc39/test262",
+      "acceptance": [
+        "Real modern syntax and standard library semantics",
+        "Promise jobs, modules, errors and execution limits",
+        "Actual DOM/event/origin integration and internationalization"
+      ],
+      "current": "real interpreter port in progress; selected34 language and24 numeric host checks are not full conformance"
+    },
+    {
+      "id": "css",
+      "required": true,
+      "target": "CSS Snapshot2026 modules plus current modern-site feature corpus",
+      "sources": [
+        {
+          "url": "https://www.w3.org/TR/2026/NOTE-css-2026-20260622/",
+          "maturity": "W3C Group Note; module maturities differ",
+          "body_accessed": true
+        }
+      ],
+      "suite": "https://github.com/web-platform-tests/wpt",
+      "acceptance": [
+        "Real syntax, selectors, cascade, custom properties and computed styles",
+        "Flex/Grid, text/fonts, responsive/container layout, transforms and animation",
+        "Authoritative document reflow, hit testing and actual reviewed pixels"
+      ],
+      "current": "not implemented by the script/Automation slice"
+    },
+    {
+      "id": "wasm",
+      "required": true,
+      "target": "WebAssembly3.0 core plus actual JavaScript/Web APIs and modern browser extension corpus",
+      "sources": [
+        {
+          "url": "https://webassembly.github.io/spec/core/",
+          "observed_release": "3.0 (2026-09-30)",
+          "maturity": "latest core draft",
+          "body_accessed": true
+        },
+        {
+          "url": "https://webassembly.github.io/spec/js-api/",
+          "body_accessed": true
+        },
+        {
+          "url": "https://webassembly.github.io/spec/web-api/",
+          "body_accessed": true
+        }
+      ],
+      "suite": "https://github.com/WebAssembly/spec",
+      "acceptance": [
+        "Real validation, compilation/interpretation, imports, exports, memories, tables and traps",
+        "Bulk memory, SIMD/relaxed SIMD, GC/typed references, tail calls, exceptions, multiple memories and memory64 semantics",
+        "Real JavaScript Module/Instance/Memory/Table bindings and origin-bound streaming",
+        "Workers/shared-memory/Atomics and current extension semantics separately pinned and tested"
+      ],
+      "current": "no verified native browser WASM runtime/bindings; existing C_LOOP profile disables WASM"
+    },
+    {
+      "id": "webgpu",
+      "required": true,
+      "target": "Current WebGPU API and WGSL, actual render and compute backend",
+      "sources": [
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-webgpu-20260915/",
+          "maturity": "Candidate Recommendation Draft",
+          "publication_verified_via": "https://www.w3.org/TR/webgpu/all/",
+          "body_accessed": false,
+          "body_access_limit": "web reader rejected document over4MiB"
+        },
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-WGSL-20260921/",
+          "maturity": "Candidate Recommendation Draft",
+          "body_accessed": true
+        }
+      ],
+      "suite": "https://github.com/gpuweb/cts",
+      "acceptance": [
+        "Actual adapter/device/queue/resource lifetimes, validated shaders and honest features/limits",
+        "WGSL render+compute results, buffer readback, synchronization and error/device-loss semantics",
+        "Real canvas composition in the visible Trident-hosted document; hardware/software backend identified"
+      ],
+      "current": "no verified browser WebGPU backend/binding; framebuffer/2D/GPU naming is insufficient"
+    },
+    {
+      "id": "webgl",
+      "required": true,
+      "target": "WebGL1 and WebGL2 current specification and real supported extensions",
+      "sources": [
+        {
+          "url": "https://registry.khronos.org/webgl/specs/latest/2.0/",
+          "observed_edition": "Editors Draft2026-06-30",
+          "maturity": "working draft; official2.0.0 remains separately identified",
+          "body_accessed": true
+        },
+        {
+          "url": "https://registry.khronos.org/webgl/",
+          "body_accessed": true
+        }
+      ],
+      "suite": "https://github.com/KhronosGroup/WebGL",
+      "acceptance": [
+        "Actual webgl/webgl2 canvas contexts, GLSL ES shader validation and execution",
+        "Textures, framebuffers, depth/blend, rendering/readPixels and context loss",
+        "Extension enumeration follows implemented backend semantics and measured limits"
+      ],
+      "current": "no verified current WebGL native browser integration"
+    },
+    {
+      "id": "html_dom",
+      "required": true,
+      "target": "Modern HTML parsing, DOM/events and browser behavior in actual visible host",
+      "sources": [
+        {
+          "url": "https://html.spec.whatwg.org/",
+          "body_accessed": false,
+          "reason": "existing audited integration target; exact snapshot must be pinned before conformance run"
+        }
+      ],
+      "suite": "https://github.com/web-platform-tests/wpt",
+      "acceptance": [
+        "Actual document/script/layout/canvas ownership, inputs and navigation",
+        "Authoritative URLs/history, redirects/POST, fetch/subresources, origin checks and TLS verification",
+        "Korean input/font shaping, accessibility, teardown and document isolation"
+      ],
+      "current": "genuine MSHTML bridge built; native execution and modern parser/layout still pending"
+    }
+  ],
+  "acceptance_policy": {
+    "suite_commits": "not fetched/pinned yet; select exact approved corpus before full claim",
+    "smoke_checks_are_not_full_conformance": true,
+    "no_namespace_or_capability_success_stubs": true,
+    "native_artifact_source_log_input_pixel_hash_bindings_required": true,
+    "software_fallback_requires_real_semantics_and_measured_output": true,
+    "hardware_and_optional_extension_limits_reported_honestly": true
+  },
+  "all_current_web_standards_verified": false,
+  "applications_verified": false,
+  "user_objective_complete": false
+}
