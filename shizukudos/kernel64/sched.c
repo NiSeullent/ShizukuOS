@@ -31,6 +31,15 @@ static uint64_t cpu_idle_ticks, cpu_kernel_ticks, cpu_user_ticks;
 uint64_t g_kstack_top;
 uint64_t g_user_rsp_scratch;
 
+/* Explicit PMA diagnostic mode only. Callbacks run with interrupts disabled;
+ * they must not print, allocate, block, or change scheduling policy. */
+volatile int pma_sched_trace_enabled;
+volatile int pma_sched_observe_enabled;          /* bounded self-test selection counters; no IRQ trace */
+void __attribute__((weak)) pma_sched_trace_dispatch(thread_t *t, uint64_t waited)
+{ (void)t; (void)waited; }
+void __attribute__((weak)) pma_sched_trace_tick(thread_t *t, uint64_t now)
+{ (void)t; (void)now; }
+
 uint64_t ticks_now(void) { return jiffies; }
 uint64_t sched_switch_count(void) { return switches; }
 void sched_processor_times(uint64_t *idle, uint64_t *kernel, uint64_t *user)
@@ -138,6 +147,8 @@ int sched_validate(void)
         if (t->state > TS_NEW || !!t->ready_queued != queued || !!seen[i] != queued ||
             (!queued && (t->ready_prev || t->ready_next)) ||
             (t->state == TS_RUNNING && t != current) ||
+            t->aging_service_left > SCHED_AGED_SERVICE_TICKS ||
+            (t->state != TS_RUNNING && t->aging_service_left) ||
             (t->state != TS_FREE && (t->sched_priority >= SCHED_PRIORITY_LEVELS || !t->quantum_ticks ||
              t->quantum_ticks > SCHED_MAX_QUANTUM_TICKS || t->cpu_mask != 1))) ok = 0;
     }
@@ -178,6 +189,7 @@ static void ready_enqueue(thread_t *t)
 {
     const unsigned p = t->sched_priority;
     KASSERT(t->state == TS_READY && !t->ready_queued && p < SCHED_PRIORITY_LEVELS);
+    t->aging_service_left = 0;                  /* a queued thread owns no running service grant */
     if (t == idle_thread) return;
     t->ready_prev = ready[p].tail;
     t->ready_next = 0;
@@ -227,10 +239,11 @@ static thread_t *pick_aged(void)
     return oldest;
 }
 
-static thread_t *pick_next(void)
+static thread_t *pick_next(int *aged)
 {
     thread_t *oldest = pick_aged();
     int p;
+    *aged = oldest != 0;
     if (oldest) return oldest;
     for (p = (int)SCHED_PRIORITY_LEVELS - 1; p >= 0; --p)
         if (ready_mask & (1u << p)) return ready[p].head;
@@ -257,18 +270,23 @@ static inline void fx_restore(thread_t *t) { __asm__ volatile("fxrstor (%0)" :: 
 static void schedule(int from_tick)
 {
     thread_t *prev = current, *next;
+    int aged;
+    /* A yield, wait, exit or preemption relinquishes any unused grant. */
+    prev->aging_service_left = 0;
     if (prev->state == TS_RUNNING) {
         prev->state = TS_READY;
         ready_enqueue(prev);
     }
-    next = pick_next();
+    next = pick_next(&aged);
+    next->aging_service_left = aged ? SCHED_AGED_SERVICE_TICKS : 0;
+    next->quantum_left = next->quantum_ticks;
     if (next != idle_thread) {
         const uint64_t waited = jiffies - next->ready_since;
         if (waited > next->max_ready_wait_ticks) next->max_ready_wait_ticks = waited;
+        if (pma_sched_trace_enabled || pma_sched_observe_enabled) pma_sched_trace_dispatch(next, waited);
         ready_remove(next);
     }
     next->state = TS_RUNNING;
-    next->quantum_left = next->quantum_ticks;
     if (next == prev) {
         return;
     }
@@ -321,6 +339,7 @@ void sched_tick_from(int user_mode)
 void sched_tick(void)
 {
     unsigned i;
+    if (pma_sched_trace_enabled) pma_sched_trace_tick(current, jiffies);
     ++jiffies;
     if (current == idle_thread) ++cpu_idle_ticks;
     else if (tick_from_user) ++cpu_user_ticks;
@@ -361,10 +380,16 @@ void sched_tick(void)
         if (cr8 >= 2) return;
     }
 #endif
-    if (current != idle_thread && current->quantum_left > 1) {
-        --current->quantum_left;
-        /* Higher priority arrivals and aged FIFO heads need not wait for the
-         * old quantum. Aging must also override the highest running priority. */
+    if (current != idle_thread) {
+        if (current->quantum_left) --current->quantum_left;
+        /* An aged selection is a finite service grant, not merely a dequeue.
+         * Pending entry-boundary timer delivery must not immediately revoke
+         * it for higher-ready or another aged head. Policy setters touch only
+         * the base quantum and cannot refill this independent budget. */
+        if (current->aging_service_left && --current->aging_service_left) return;
+    }
+    if (current != idle_thread && current->quantum_left) {
+        /* After the finite grant, ordinary priority and aging rules apply. */
         const int higher_ready = current->sched_priority < SCHED_PRIORITY_LEVELS - 1 &&
             (ready_mask & (~0u << (current->sched_priority + 1)));
         if (!higher_ready && !pick_aged()) return;

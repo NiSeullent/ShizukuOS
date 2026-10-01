@@ -123,6 +123,8 @@ enum { TS_FREE = 0, TS_READY = 1, TS_RUNNING = 2, TS_BLOCKED = 3, TS_ZOMBIE = 4,
 #define SCHED_DEFAULT_PRIORITY 16u
 #define SCHED_MAX_QUANTUM_TICKS 16u
 #define SCHED_STARVATION_TICKS 32u
+/* Aged FIFO service is independent of the configured base quantum. */
+#define SCHED_AGED_SERVICE_TICKS 4u
 typedef struct { uint32_t priority, quantum_ticks; uint64_t cpu_mask; } sched_policy_t;
 typedef struct {
     uint64_t ticks, context_switches, preemptions, wakeups, timeouts;
@@ -172,6 +174,7 @@ struct thread {
     uint64_t ready_since, ready_order, cpu_mask;
     uint32_t sched_priority, quantum_ticks, quantum_left, ready_queued;
     uint64_t max_ready_wait_ticks;              /* diagnostic: longest READY-to-dispatch residence */
+    uint32_t aging_service_left;                /* unrenewable aged-dispatch timer budget; RUNNING only */
 };
 void sched_init(void);
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
