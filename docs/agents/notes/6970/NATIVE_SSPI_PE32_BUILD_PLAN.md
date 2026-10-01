@@ -68,3 +68,24 @@ false. Native_loader's disabled provider execution policy stays in place.
 Root owns this plan, the exact helper restore and workflow. The disk agent
 owns the new guarded build runner; the modern-app agent owns the SDK ABI C
 fixture; the coordination agent independently reviews the reused gates.
+
+## Actual first attempt: hosted directory ownership failure
+
+Commit 9a4b6d6212e375d86c792a216d9b76cebc35c7e1 ran in
+[run 36933131506](https://github.com/NiSeullent/Win98-Modern/actions/runs/36933131506),
+job 110607041508. Hosted prerequisite installation and version recording
+passed all three commands. Preparation receipt 2,520 B SHA256:
+1a9e862aed80191714e4f936c37c6de4923288f25d4914817461a679957298c9.
+Minimum observed free space was 91,844,296,704 B. The actual job log is
+53,630 B, SHA256:
+47cc80c0f84acb36ba6c739e46125a03468a42f6b4c983f3d14b697ec6654708.
+
+The build stopped while creating its new counted output directory:
+the sudo preparation had created the previously absent shared build parent
+with root ownership. The ordinary runner could not create the proof namespace.
+No counted build receipt, compiler, SDK ABI or linked-artifact result was
+produced. This is a real infrastructure failure, not feature RED or acceptance.
+The narrow workflow successor prepares and validates writable namespace
+parents as the ordinary runner before sudo creates its private preparation
+child. Source pins, compiler flags, fixtures, resource limits and old evidence
+remain unchanged. A fresh actual hosted result is required.
