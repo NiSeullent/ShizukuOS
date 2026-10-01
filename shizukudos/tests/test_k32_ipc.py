@@ -74,7 +74,7 @@ def main():
     passed = True
     for cc, extra in (("gcc", []), ("clang", ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"])):
         exe = out / ("ipc-" + cc)
-        command = [cc, "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", *extra, fixture, "-o", exe]
+        command = [compilers[cc], "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", *extra, fixture, "-o", exe]
         built = run(command, "build-" + cc)
         passed = built and passed
         if built:
@@ -83,7 +83,7 @@ def main():
             for case in CASES:
                 passed = run([exe, case], cc + "-" + case) and passed
     obj = out / "ipc-i486.o"
-    passed = run(["gcc", *K32_FLAGS, "-c", source, "-o", obj], "build-i486") and passed
+    passed = run([compilers["gcc"], *K32_FLAGS, "-c", source, "-o", obj], "build-i486") and passed
     if obj.exists():
         binaries[obj] = obj.read_bytes()
         receipt["binaries_sha256"][obj.name] = digest(binaries[obj])
