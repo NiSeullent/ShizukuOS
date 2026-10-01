@@ -745,8 +745,8 @@ K32API BOOL WINAPI Wow64GetThreadContext(HANDLE h, PWOW64_CONTEXT ctx)
 
 K32API BOOL WINAPI IsThreadAFiber(void)
 {
-    /* TEB.SameTebFlags (0x17ee) bit 2 is HasFiberData. ConvertThreadToFiber does not exist in this kernel32, so it is never set,
-     * but the flag is what Windows reports and what is read here. */
+    /* TEB.SameTebFlags (0x17ee) bit 2 is HasFiberData. The cooperative fiber
+     * family sets/clears this bit during forward/reverse conversion. */
     return (*(const USHORT *)(shz_teb() + 0x17ee) & 4) != 0;
 }
 

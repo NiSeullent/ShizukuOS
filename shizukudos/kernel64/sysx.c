@@ -4,6 +4,7 @@
  */
 #include "fs.h"
 #include "pci.h"
+#include "office_sync_rights.h"
 
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 extern int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -15,6 +16,8 @@ extern int32_t ldr_create_process(process_t *parent, const char *image_path, con
 extern int32_t sysext_dispatch(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
 extern int32_t ldr_load_module_runtime(process_t *p, const char *name, uint32_t flags, const char *dirs, uint64_t *base_out);
 extern uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint64_t ordinal);
+extern int32_t ldr_lifetime_control(process_t *, uint64_t, uint64_t, uint64_t, uint64_t);
+extern int32_t ldr_lifetime_commit(process_t *, uint64_t);
 
 struct objattr { uint32_t length, pad; uint64_t root, name; uint32_t attributes, pad2; uint64_t sd, sqos; };
 struct ustr { uint16_t length, maxlen; uint32_t pad; uint64_t buffer; };
@@ -48,15 +51,40 @@ static int32_t give_handle(process_t *p, kobject_t *o, uint64_t user_ptr, uint32
     return STATUS_SUCCESS;
 }
 
-static kobject_t *object_for_handle(process_t *p, uint64_t h)
+static kobject_t *object_for_handle_access(process_t *p,uint64_t h,uint32_t *access)
 {
-    if (h == CURRENT_PROCESS_HANDLE) { ob_ref(p->object); return p->object; }
-    if (h == CURRENT_THREAD_HANDLE) { ob_ref(thread_current()->object); return thread_current()->object; }
-    {
-        kobject_t *o = handle_lookup(p, h, 0);
-        if (o) ob_ref(o);
-        return o;
+    kobject_t *o;
+    if(h==CURRENT_PROCESS_HANDLE){if(access)*access=0x1fffffu;ob_ref(p->object);return p->object;}
+    if(h==CURRENT_THREAD_HANDLE){if(access)*access=0x1fffffu;ob_ref(thread_current()->object);return thread_current()->object;}
+    return handle_ref(p,h,0,&o,access)?0:o;
+}
+static kobject_t *object_for_handle(process_t *p,uint64_t h)
+{return object_for_handle_access(p,h,0);}
+static kobject_t *object_for_wait(process_t *p,uint64_t h,int32_t *status)
+{
+    uint32_t access=0;kobject_t *o=object_for_handle_access(p,h,&access);
+    if(!o){*status=STATUS_INVALID_HANDLE;return 0;}
+    if((o->type==OB_EVENT || o->type==OB_SEMAPHORE) && !shz_sync_rights_present(access,SHZ_SYNCHRONIZE)){
+        ob_deref(o);*status=STATUS_ACCESS_DENIED;return 0;
     }
+    *status=STATUS_SUCCESS;return o;
+}
+static int32_t sync_attributes(process_t *p,uint64_t pointer,uint32_t *attributes)
+{
+    struct objattr oa;*attributes=0;
+    if(!pointer)return STATUS_SUCCESS;
+    if(copy_from_user(p,&oa,pointer,sizeof oa))return STATUS_ACCESS_VIOLATION;
+    if(oa.length!=sizeof oa)return STATUS_INVALID_PARAMETER;
+    if(oa.sd)return STATUS_NOT_SUPPORTED; /* never ignore a caller's DACL */
+    *attributes=oa.attributes;return STATUS_SUCCESS;
+}
+static int32_t give_sync_handle(process_t *p,kobject_t *o,uint64_t output,uint32_t access,uint32_t attributes)
+{
+    uint32_t h;int32_t status=handle_insert(p,o,access,&h);uint64_t value;
+    ob_deref(o);if(status)return status;
+    if(attributes & 2u){uint64_t f=irq_save();p->handles[h/4-1].inherit|=1u;irq_restore(f);}
+    value=h;if(copy_to_user(p,output,&value,8)){handle_close(p,h);return STATUS_ACCESS_VIOLATION;}
+    return STATUS_SUCCESS;
 }
 
 int64_t filetime_now(void)
@@ -86,102 +114,117 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     int32_t st = sysfile_dispatch(p, r, num, a1, a2, a3, a4, &handled);
     if (handled) return st;
     switch (num) {
-    case SYS_NtCreateEvent: {                              /* (PHANDLE, ACCESS, OA, EVENT_TYPE, BOOLEAN initial) */
-        char name[48];
-        kobject_t *o;
-        st = object_name(p, a3, name, sizeof name);
-        if (st) return st;
-        if (name[0] && (o = ob_find_named(OB_EVENT, name))) {
-            if (o->type != OB_EVENT) return STATUS_OBJECT_TYPE_MISMATCH;
-            ob_ref(o);
-            st = give_handle(p, o, a1, (uint32_t)a2);
-            return st ? st : (int32_t)0x40000000;          /* STATUS_OBJECT_NAME_EXISTS */
+    case SYS_NtCreateEvent: {
+        char name[48];kobject_t *o;uint32_t access,attributes;
+        if(a4>1)return STATUS_INVALID_PARAMETER;
+        if(!shz_sync_map_access((uint32_t)a2,&access))return STATUS_ACCESS_DENIED;
+        st=sync_attributes(p,a3,&attributes);if(st)return st;
+        st=object_name(p,a3,name,sizeof name);if(st)return st;
+        {
+            uint64_t f=irq_save();o=name[0]?ob_find_named(OB_EVENT,name):0;
+            if(o){
+                if(o->type!=OB_EVENT){irq_restore(f);return STATUS_OBJECT_TYPE_MISMATCH;}
+                if(o->sd){irq_restore(f);return STATUS_NOT_SUPPORTED;}
+                ob_ref(o);irq_restore(f);
+                st=give_sync_handle(p,o,a1,access,attributes);return st?st:(int32_t)0x40000000;
+            }
+            /* Kernel heap allocation is IRQ-safe; lookup, publication and
+             * initial state remain atomic against competing named creators. */
+            o=ob_create(OB_EVENT,name);
+            if(o){o->u.event.manual=a4==0;o->signaled=(int)(stack_arg(p,r,5)&0xff)!=0;}
+            irq_restore(f);if(!o)return STATUS_NO_MEMORY;
         }
-        o = ob_create(OB_EVENT, name);
-        if (!o) return STATUS_NO_MEMORY;
-        o->u.event.manual = a4 == 0;                       /* NotificationEvent = manual reset */
-        o->signaled = (int)(stack_arg(p, r, 5) & 0xff) != 0;
-        return give_handle(p, o, a1, (uint32_t)a2);
+        return give_sync_handle(p,o,a1,access,attributes);
     }
     case SYS_NtSetEvent: case SYS_NtResetEvent: {
-        kobject_t *o = handle_lookup(p, a1, OB_EVENT);
-        int32_t prev;
-        if (!o) return STATUS_INVALID_HANDLE;
-        prev = o->signaled;
-        if (num == SYS_NtSetEvent) ob_signal_event(o); else ob_reset_event(o);
-        if (a2 && copy_to_user(p, a2, &prev, 4)) return STATUS_ACCESS_VIOLATION;
-        return STATUS_SUCCESS;
+        kobject_t *o;uint32_t access;int32_t prev;
+        st=handle_ref(p,a1,OB_EVENT,&o,&access);if(st)return st;
+        if(!shz_sync_rights_present(access,SHZ_SYNC_MODIFY)){ob_deref(o);return STATUS_ACCESS_DENIED;}
+        { uint64_t f=irq_save();prev=o->signaled;if(num==SYS_NtSetEvent)ob_signal_event(o);else ob_reset_event(o);irq_restore(f); }
+        ob_deref(o);return a2&&copy_to_user(p,a2,&prev,4)?STATUS_ACCESS_VIOLATION:STATUS_SUCCESS;
     }
     case SYS_NtQueryEvent: {
-        kobject_t *o = handle_lookup(p, a1, OB_EVENT);
-        uint32_t v[2];
-        if (!o) return STATUS_INVALID_HANDLE;
-        v[0] = o->u.event.manual ? 0 : 1; v[1] = (uint32_t)o->signaled;
-        if (a4 < 8 && a3) return STATUS_BUFFER_TOO_SMALL;
-        return copy_to_user(p, a3, v, 8) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+        kobject_t *o;uint32_t access,v[2];
+        st=handle_ref(p,a1,OB_EVENT,&o,&access);if(st)return st;
+        if(!shz_sync_rights_present(access,SHZ_SYNC_QUERY)){ob_deref(o);return STATUS_ACCESS_DENIED;}
+        v[0]=o->u.event.manual?0:1;v[1]=(uint32_t)o->signaled;ob_deref(o);
+        if(a4<8&&a3)return STATUS_BUFFER_TOO_SMALL;
+        return copy_to_user(p,a3,v,8)?STATUS_ACCESS_VIOLATION:STATUS_SUCCESS;
     }
     case SYS_NtCreateMutant: {                              /* (PHANDLE, ACCESS, OA, BOOLEAN initial owner) */
         char name[48];
         kobject_t *o;
+        uint64_t f;
+        const int initial = (a4 & 0xff) != 0;
         st = object_name(p, a3, name, sizeof name);
         if (st) return st;
+        f = irq_save();
         if (name[0] && (o = ob_find_named(OB_MUTANT, name))) {
+            if (o->type != OB_MUTANT) { irq_restore(f); return STATUS_OBJECT_TYPE_MISMATCH; }
             ob_ref(o);
+            irq_restore(f);
             st = give_handle(p, o, a1, (uint32_t)a2);
             return st ? st : (int32_t)0x40000000;
         }
         o = ob_create(OB_MUTANT, name);
-        if (!o) return STATUS_NO_MEMORY;
+        if (!o) { irq_restore(f); return STATUS_NO_MEMORY; }
         o->signaled = 1;
-        if (a4 & 0xff) { o->u.mutant.owner = thread_current(); o->u.mutant.recursion = 1; o->signaled = 0; }
-        return give_handle(p, o, a1, (uint32_t)a2);
+        if (initial) ob_mutant_initial_owner(o, thread_current());
+        ob_ref(o);                           /* retain through failed handle publication */
+        irq_restore(f);
+        st = give_handle(p, o, a1, (uint32_t)a2);
+        if (st && initial) (void)ob_mutant_release(o, thread_current(), 0);
+        ob_deref(o);
+        return st;
     }
     case SYS_NtReleaseMutant: {
-        kobject_t *o = handle_lookup(p, a1, OB_MUTANT);
-        uint64_t f;
+        kobject_t *o;
         int32_t prev;
-        if (!o) return STATUS_INVALID_HANDLE;
-        f = irq_save();
-        if (o->u.mutant.owner != thread_current()) { irq_restore(f); return STATUS_MUTANT_NOT_OWNED; }
-        prev = o->u.mutant.recursion;
-        if (--o->u.mutant.recursion == 0) {
-            o->u.mutant.owner = 0;
-            o->signaled = 1;
-            ob_release_check(o);
-        }
-        irq_restore(f);
+        st = handle_ref(p, a1, OB_MUTANT, &o, 0);
+        if (st) return st;
+        st = ob_mutant_release(o, thread_current(), &prev);
+        ob_deref(o);
+        if (st) return st;
         if (a2 && copy_to_user(p, a2, &prev, 4)) return STATUS_ACCESS_VIOLATION;
         return STATUS_SUCCESS;
     }
-    case SYS_NtCreateSemaphore: {                           /* (PHANDLE, ACCESS, OA, LONG initial, LONG max) */
-        char name[48];
-        kobject_t *o;
-        const int32_t initial = (int32_t)a4, maxc = (int32_t)stack_arg(p, r, 5);
-        if (maxc <= 0 || initial < 0 || initial > maxc) return STATUS_INVALID_PARAMETER;
-        st = object_name(p, a3, name, sizeof name);
-        if (st) return st;
-        if (name[0] && (o = ob_find_named(OB_SEMAPHORE, name))) {
-            ob_ref(o);
-            st = give_handle(p, o, a1, (uint32_t)a2);
-            return st ? st : (int32_t)0x40000000;
+    case SYS_NtCreateSemaphore: {
+        char name[48];kobject_t *o;uint32_t access,attributes;
+        const int32_t initial=(int32_t)a4,maxc=(int32_t)stack_arg(p,r,5);
+        if(maxc<=0 || initial<0 || initial>maxc)return STATUS_INVALID_PARAMETER;
+        if(!shz_sync_map_access((uint32_t)a2,&access))return STATUS_ACCESS_DENIED;
+        st=sync_attributes(p,a3,&attributes);if(st)return st;
+        st=object_name(p,a3,name,sizeof name);if(st)return st;
+        {
+            uint64_t f=irq_save();o=name[0]?ob_find_named(OB_SEMAPHORE,name):0;
+            if(o){
+                if(o->type!=OB_SEMAPHORE){irq_restore(f);return STATUS_OBJECT_TYPE_MISMATCH;}
+                if(o->sd){irq_restore(f);return STATUS_NOT_SUPPORTED;}
+                ob_ref(o);irq_restore(f);
+                st=give_sync_handle(p,o,a1,access,attributes);return st?st:(int32_t)0x40000000;
+            }
+            /* Kernel heap allocation is IRQ-safe; lookup, publication and
+             * initial state remain atomic against competing named creators. */
+            o=ob_create(OB_SEMAPHORE,name);
+            if(o){o->u.sem.count=initial;o->u.sem.max=maxc;o->signaled=initial>0;}
+            irq_restore(f);if(!o)return STATUS_NO_MEMORY;
         }
-        o = ob_create(OB_SEMAPHORE, name);
-        if (!o) return STATUS_NO_MEMORY;
-        o->u.sem.count = initial;
-        o->u.sem.max = maxc;
-        o->signaled = initial > 0;
-        return give_handle(p, o, a1, (uint32_t)a2);
+        return give_sync_handle(p,o,a1,access,attributes);
     }
     case SYS_NtReleaseSemaphore: {                          /* (handle, LONG count, PLONG previous) */
-        kobject_t *o = handle_lookup(p, a1, OB_SEMAPHORE);
+        kobject_t *o;
+        uint32_t access;
         int32_t prev;
         uint64_t f;
-        if (!o) return STATUS_INVALID_HANDLE;
-        if ((int32_t)a2 <= 0) return STATUS_INVALID_PARAMETER;
+        st = handle_ref(p, a1, OB_SEMAPHORE, &o, &access);
+        if (st) return st;
+        if (!shz_sync_rights_present(access, SHZ_SYNC_MODIFY)) { ob_deref(o); return STATUS_ACCESS_DENIED; }
+        if ((int32_t)a2 <= 0) { ob_deref(o); return STATUS_INVALID_PARAMETER; }
         f = irq_save();
         prev = o->u.sem.count;
-        if (o->u.sem.count + (int32_t)a2 > o->u.sem.max || o->u.sem.count + (int32_t)a2 < o->u.sem.count) {
+        if ((int32_t)a2 > o->u.sem.max - o->u.sem.count) {
             irq_restore(f);
+            ob_deref(o);
             return STATUS_SEMAPHORE_LIMIT_EXCEEDED;
         }
         o->u.sem.count += (int32_t)a2;
@@ -192,6 +235,7 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
                 ob_release_check(o);
         }
         irq_restore(f);
+        ob_deref(o);
         if (a3 && copy_to_user(p, a3, &prev, 4)) return STATUS_ACCESS_VIOLATION;
         return STATUS_SUCCESS;
     }
@@ -222,9 +266,9 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         return STATUS_SUCCESS;
     }
     case SYS_NtWaitForSingleObject: {                       /* (handle, BOOLEAN alertable, PLARGE_INTEGER timeout) */
-        kobject_t *o = object_for_handle(p, a1);
+        kobject_t *o = object_for_wait(p, a1, &st);
         int64_t to = INT64_MAX;
-        if (!o) return STATUS_INVALID_HANDLE;
+        if (!o) return st;
         if (a3 && copy_from_user(p, &to, a3, 8)) { ob_deref(o); return STATUS_ACCESS_VIOLATION; }
         if (a3 && to > 0) to = -to;                          /* absolute times are not supported: treat as relative */
         st = ob_wait(p, &o, 1, 0, to, (int)(a2 & 0xff));
@@ -242,8 +286,8 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (pto && copy_from_user(p, &to, pto, 8)) return STATUS_ACCESS_VIOLATION;
         if (pto && to > 0) to = -to;
         for (i = 0; i < n; ++i) {
-            objs[i] = object_for_handle(p, hs[i]);
-            if (!objs[i]) { while (i--) ob_deref(objs[i]); return STATUS_INVALID_HANDLE; }
+            objs[i] = object_for_wait(p, hs[i], &st);
+            if (!objs[i]) { while (i--) ob_deref(objs[i]); return st; }
         }
         st = ob_wait(p, objs, n, a3 == 0, to, (int)(a4 & 0xff));
         for (i = 0; i < n; ++i) ob_deref(objs[i]);
@@ -380,7 +424,12 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         if (st) return st;
         return copy_to_user(p, a2, &base, 8) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
     }
+    case SYS_NtShzLoaderControl: return ldr_lifetime_control(p, a1, a2, a3, a4);
+    case SYS_NtShzLoaderCommit: return ldr_lifetime_commit(p, a1);
     case SYS_NtQuerySystemInformation: {                    /* class 0 basic: processors=1, page size; 0x100 Shizuku memory */
+        extern int32_t shz_query_processor_times(process_t *,uint64_t,uint64_t,uint64_t);
+        if (a1 == 0x102) return shz_query_processor_times(p,a2,a3,a4);
+        if (a1 == 0x103) { extern int32_t shz_query_pnp_catalog(process_t *,uint64_t,uint64_t,uint64_t); return shz_query_pnp_catalog(p,a2,a3,a4); }
         if (a1 == 0) {
             struct { uint32_t reserved, timer_res, page_size, phys_pages, low_page, high_page, alloc_gran; uint64_t min_addr, max_addr, affinity; uint8_t nproc; } b;
             if (a3 < sizeof b) return STATUS_BUFFER_TOO_SMALL;

@@ -3,7 +3,7 @@
  *
  *  - Every drawing target is a bitmap in the application's own address space: memory-DC bitmaps, DIB sections (the
  *    application must be able to write their pixels through the pointer CreateDIBSection returns, which only user-space
- *    memory can offer without a shared-section facility), and one "backing" bitmap per window that a window DC draws into.
+ *    memory provides, including section-backed shared pixels), and one "backing" bitmap per window that a window DC draws into.
  *  - A window DC pushes the rectangle it changed to the kernel window manager (NtGdiPresent), which copies it into the
  *    window's kernel surface and recomposes. Flush points: ReleaseDC/EndPaint (user32 calls ShzGdiWindowDCRelease),
  *    GdiFlush and the message-loop idle points in user32 (ShzGdiFlushAll).
@@ -36,6 +36,10 @@ typedef struct bitmap {
     int big;                                                /* bits came from VirtualAlloc */
     int sel;                                                /* number of DCs it is selected into */
     BITMAPINFOHEADER bih;                                   /* what CreateDIBSection was given (for GetObject) */
+    void *section_view;                                     /* owned mapping base, distinct from interior bits */
+    HANDLE section;                                        /* caller-owned section handle for DIBSECTION metadata */
+    DWORD section_offset;
+    DWORD masks[3];
 } bitmap_t;
 
 typedef struct { LOGPEN lp; int ext; DWORD ext_style; } pen_t;
@@ -45,6 +49,7 @@ typedef struct { rlist_t rl; } rgn_t;
 
 typedef struct dc {
     int memdc;                                              /* memory DC (else a window/screen DC) */
+    int info_only;                                          /* CreateIC: capabilities/deletion, never a drawing target */
     HBITMAP hbmp;                                           /* selected bitmap (memory DC) */
     HWND hwnd;                                              /* window DC: the window; 0 for memory DCs */
     int wcx, wcy;                                           /* window DC: client size when it was created */

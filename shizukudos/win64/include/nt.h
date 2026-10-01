@@ -84,6 +84,9 @@ NTSTATUS NTAPI NtSetInformationThread(HANDLE, ULONG, PVOID, ULONG);
 NTSTATUS NTAPI NtCreateProcessEx(PHANDLE, PHANDLE, SHZ_UNICODE_STRING *, SHZ_UNICODE_STRING *, SHZ_UNICODE_STRING *);
 NTSTATUS NTAPI NtQuerySystemInformation(ULONG, PVOID, ULONG, PULONG);
 NTSTATUS NTAPI NtLoadImage(SHZ_UNICODE_STRING *, PULONG64, ULONG, SHZ_UNICODE_STRING *);   /* name, base, flags, dirs (ldr_search.c) */
+#include "shz_loader_protocol.h"
+NTSTATUS NTAPI NtShzLoaderControl(ULONG, PVOID, shz_ldr_retire_buffer *, ULONG);
+NTSTATUS NTAPI NtShzLoaderCommit(ULONG64);
 NTSTATUS NTAPI NtShzDebugPrint(const char *, ULONG);
 NTSTATUS NTAPI NtShzEvidence(ULONG, ULONG64);
 NTSTATUS NTAPI NtCreateTimer(PHANDLE, ACCESS_MASK, PVOID, ULONG);
@@ -164,6 +167,9 @@ typedef struct shz_token_info {
 /* Loader database layout published by Kernel64 (see kernel64/ldr.c). */
 #define SHZ_LDR_NEEDS_INIT 0x1u
 #define SHZ_LDR_IMAGE_DLL 0x4u
+#define SHZ_LDR_CALLBACK_ACTIVE 0x80000000u /* private: a loader callback must return before retirement */
+#define SHZ_LDR_DETACH_CALLED 0x40000000u   /* private: interrupted retirement must never detach twice */
+#define SHZ_LDR_RETIRING 0x20000000u
 typedef struct _SHZ_LDR_ENTRY {
     LIST_ENTRY InLoadOrderLinks, InMemoryOrderLinks, InInitializationOrderLinks;
     PVOID DllBase;

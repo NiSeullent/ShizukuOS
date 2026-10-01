@@ -2,6 +2,8 @@
  * gdi32: handle table, stock objects, pens, brushes, fonts, bitmaps, DIB sections, device contexts and DC state.
  * See gdi_internal.h for the architecture (user-mode GDI drawing into bitmaps; windows present to the kernel). */
 #include "gdi_internal.h"
+#include "gdi_render_trace.h"
+#include "gdi_dib_layout.h"
 
 CRITICAL_SECTION g_gdi_lock;
 HGDIOBJ g_stock[32];
@@ -316,10 +318,15 @@ static bitmap_t *bitmap_create(int w, int h, int topdown)
     if (!b->bits) { gdi_free(b); SetLastError(ERROR_NOT_ENOUGH_MEMORY); return 0; }
     return b;
 }
-static void bitmap_destroy(bitmap_t *b)
+static BOOL bitmap_destroy(bitmap_t *b)
 {
-    gdi_free_pixels(b->bits, (uint64_t)b->w * (uint64_t)b->h, b->big);
+    if (b->section_view) {
+        /* The section handle belongs to the caller. The bitmap owns only this
+         * view, which may start before the pixel pointer at an interior offset. */
+        if (!UnmapViewOfFile(b->section_view)) return FALSE;
+    } else gdi_free_pixels(b->bits, (uint64_t)b->w * (uint64_t)b->h, b->big);
     gdi_free(b);
+    return TRUE;
 }
 
 DLLAPI HBITMAP WINAPI CreateBitmap(int w, int h, UINT planes, UINT bpp, const VOID *bits)
@@ -355,10 +362,12 @@ DLLAPI HBITMAP WINAPI CreateDIBSection(HDC hdc, const BITMAPINFO *bmi, UINT usag
 {
     bitmap_t *b;
     HGDIOBJ hb;
-    int w, h, topdown;
+    shz_dib_layout_t layout;
+    DWORD masks[3] = {0, 0, 0};
     (void)hdc;
-    if (!bmi || bmi->bmiHeader.biSize < sizeof(BITMAPINFOHEADER) || section || offset || usage != DIB_RGB_COLORS) {
-        SetLastError(section || offset ? ERROR_NOT_SUPPORTED : ERROR_INVALID_PARAMETER);
+    if (ppv) *ppv = NULL;
+    if (!ppv || !bmi || bmi->bmiHeader.biSize < sizeof(BITMAPINFOHEADER) || usage != DIB_RGB_COLORS) {
+        SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }
     if (bmi->bmiHeader.biBitCount != 32 || bmi->bmiHeader.biPlanes != 1 ||
@@ -367,27 +376,49 @@ DLLAPI HBITMAP WINAPI CreateDIBSection(HDC hdc, const BITMAPINFO *bmi, UINT usag
         return 0;
     }
     if (bmi->bmiHeader.biCompression == BI_BITFIELDS) {
-        const DWORD *m = (const DWORD *)((const uint8_t *)bmi + bmi->bmiHeader.biSize);
+        /* V4/V5 masks occupy the same offset as the three masks following a
+         * BITMAPINFOHEADER; they are part of the extended header itself. */
+        const DWORD *m = (const DWORD *)((const uint8_t *)bmi + sizeof(BITMAPINFOHEADER));
         if (m[0] != 0x00ff0000 || m[1] != 0x0000ff00 || m[2] != 0x000000ff) { SetLastError(ERROR_NOT_SUPPORTED); return 0; }
+        memcpy(masks, m, sizeof masks);
     }
-    w = bmi->bmiHeader.biWidth;
-    h = bmi->bmiHeader.biHeight;
-    topdown = h < 0;
-    if (h < 0) h = -h;
+    if (!shz_dib_layout(bmi->bmiHeader.biWidth, bmi->bmiHeader.biHeight, section != NULL, offset, &layout)) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
     GDI_ENTER();
-    b = bitmap_create(w, h, topdown);
+    if (section) {
+        b = gdi_alloc(sizeof *b);
+        if (!b) RET(0);
+        /* Original mapping/lifetime adaptation after reviewing Wine11
+         * win32u/dib.c and ReactOS9dc3ca win32ss/gdi/ntgdi/dibobj.c.
+         * The real section provider enforces size, handle and write access. */
+        b->section_view = MapViewOfFile(section, FILE_MAP_WRITE, 0, layout.map_offset, (SIZE_T)layout.view_bytes);
+        if (!b->section_view) { gdi_free(b); RET(0); }
+        b->w = layout.width; b->h = layout.height; b->topdown = layout.topdown;
+        b->bits = (uint32_t *)((uint8_t *)b->section_view + layout.delta);
+        b->section = section;
+        b->section_offset = offset;
+    } else b = bitmap_create(layout.width, layout.height, layout.topdown);
     if (!b) RET(0);
     b->is_dib = 1;
     b->bih = bmi->bmiHeader;
-    b->bih.biSizeImage = (DWORD)((uint64_t)w * (uint64_t)h * 4);
+    b->bih.biSizeImage = (DWORD)layout.pixel_bytes;
+    memcpy(b->masks, masks, sizeof masks);
     hb = gdi_obj_new(OBJ_BITMAP, b, 0);
     if (!hb) { bitmap_destroy(b); RET(0); }
     if (ppv) *ppv = b->bits;
+    gdi_render_trace_dib(b,(HBITMAP)hb);
     RET((HBITMAP)hb);
 }
 
 /* ---------------------------------------------------------------- device contexts */
-dc_t *gdi_dc_get(HDC h) { return gdi_obj_get((HGDIOBJ)h, OBJ_DC, 0); }
+dc_t *gdi_dc_get(HDC h)
+{
+    dc_t *dc = gdi_obj_get((HGDIOBJ)h, OBJ_DC, 0);
+    if (dc && dc->info_only) { SetLastError(ERROR_INVALID_HANDLE); return 0; }
+    return dc;
+}
 
 void gdi_dc_defaults(dc_t *dc)
 {
@@ -443,7 +474,7 @@ DLLAPI BOOL WINAPI DeleteDC(HDC h)
 {
     dc_t *dc;
     GDI_ENTER();
-    dc = gdi_dc_get(h);
+    dc = gdi_obj_get((HGDIOBJ)h, OBJ_DC, 0);   /* information contexts allow this query/lifecycle operation */
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(FALSE); }
     if (dc->hwnd) {                                                 /* window DC: push what was drawn */
         gdi_window_dc_flush(dc);
@@ -608,7 +639,7 @@ DLLAPI BOOL WINAPI DeleteObject(HGDIOBJ h)
     case OBJ_BITMAP: {
         bitmap_t *b = p;
         if (b->sel) RET(FALSE);                                       /* still selected into a DC */
-        bitmap_destroy(b);
+        if (!bitmap_destroy(b)) RET(FALSE);
         break;
     }
     case OBJ_REGION: { rgn_t *r = p; rl_free(&r->rl); gdi_free(r); break; }
@@ -647,6 +678,9 @@ DLLAPI int WINAPI GetObjectW(HANDLE h, int cb, LPVOID buf)
         ds.dsBm.bmBitsPixel = 32; ds.dsBm.bmBits = b->is_dib ? b->bits : 0;
         if (b->is_dib && cb >= (int)sizeof ds) {
             ds.dsBmih = b->bih;
+            memcpy(ds.dsBitfields, b->masks, sizeof b->masks);
+            ds.dshSection = b->section;
+            ds.dsOffset = b->section_offset;
             n = sizeof ds;
             if (buf) memcpy(buf, &ds, sizeof ds);
         } else {
@@ -887,7 +921,7 @@ DLLAPI int WINAPI GetDeviceCaps(HDC h, int index)
     dc_t *dc;
     int w, hh, v = 0, sw, sh;
     GDI_ENTER();
-    dc = gdi_dc_get(h);
+    dc = gdi_obj_get((HGDIOBJ)h, OBJ_DC, 0);   /* information contexts allow this query/lifecycle operation */
     if (!dc) { SetLastError(ERROR_INVALID_HANDLE); RET(0); }
     screen_size(&sw, &sh);
     w = sw;

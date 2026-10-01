@@ -46,6 +46,8 @@ uint32_t k64_crc32(const void *data, uint64_t n)
 
 /* ---------------------------------------------------------------- fat32 callbacks */
 static int cb_read(void *ctx, uint64_t lba, void *buf) { return blk_read((blk_dev_t *)ctx, lba, 1, buf); }
+static int cb_read_many(void *ctx, uint64_t lba, unsigned count, void *buf)
+{ return blk_read((blk_dev_t *)ctx, lba, count, buf); }
 static int cb_write(void *ctx, uint64_t lba, const void *buf) { return blk_write((blk_dev_t *)ctx, lba, 1, buf); }
 static void *cb_alloc(void *ctx, uint64_t bytes) { (void)ctx; return kzalloc((size_t)bytes); }
 static void cb_free(void *ctx, void *p, uint64_t bytes) { (void)ctx; (void)bytes; kfree(p); }
@@ -300,6 +302,7 @@ static int try_mount(blk_dev_t *dev)
     if (dev->sector_size != FAT32_SECTOR) return -1;    /* fat32.c reads 512-byte sectors (4 KiB NVMe formats: no) */
     memset(&dvol.fat, 0, sizeof dvol.fat);
     dvol.fat.read = cb_read; dvol.fat.alloc = cb_alloc; dvol.fat.free = cb_free; dvol.fat.alloc_page = cb_page;
+    dvol.fat.read_many = dev->max_sectors > 1 ? cb_read_many : 0;
     dvol.fat.write = dev->write && !(dev->flags & BLK_F_READONLY) ? cb_write : 0;
     dvol.fat.ctx = dev; dvol.fat.disk_sectors = dev->sectors;
     rc = fat32_mount(&dvol.fat);

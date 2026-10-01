@@ -2,8 +2,8 @@
 
 This original freestanding C implementation takes exclusive ownership of one AHCI
 controller, initializes an active SATA disk port, obtains IDENTIFY data, and reads
-one 512-byte sector using READ DMA EXT. When the caller opts in at open
-(`ahci_config.allow_write = 1`) it also writes one 512-byte sector using WRITE DMA
+one to four consecutive 512-byte sectors using READ DMA EXT. When the caller opts in at open
+(`ahci_config.allow_write = 1`) it also writes one to four sectors using WRITE DMA
 EXT and flushes the device write cache using FLUSH CACHE EXT. It is a concrete
 storage path for **Windows 98 Shizuku's Second Edition**, ready for a separate
 native guest binding. Kernel64 (ShizukuDOS 10, standalone profile) links it as its
@@ -58,7 +58,7 @@ space, DMA coherent, and stable until release.
 | 0 | 1,024 | 32-entry command list; only slot 0 is submitted |
 | 1,024 | 256 | Received FIS area |
 | 1,280 | 256 | Command table, including one PRDT entry |
-| 2,048 | 512 | IDENTIFY/read bounce buffer |
+| 2,048 | 2,048 | IDENTIFY (512 bytes), or bounded 1..4-sector read/write bounce buffer |
 
 The core checks 32-bit DMA limits when CAP.S64A is clear, upper-address encoding
 when it is set, range overflow and allocation alignment. No scatter/gather,
@@ -96,17 +96,18 @@ and, only after an `allow_write = 1` open, `0x35` WRITE DMA EXT and `0xea` FLUSH
 CACHE EXT. There is no generic command pass-through and no trim, security,
 firmware-update or feature-changing command. Every command uses a five-DWORD
 Register H2D FIS. Reads and IDENTIFY use device-to-host direction and one PRDT for
-exactly 512 bytes; a write sets the command header's W bit (host-to-device) and
-one PRDT for exactly 512 bytes copied from the caller before submission; a flush is
+exactly the requested bytes (IDENTIFY remains 512); a write sets the command header's W bit (host-to-device) and
+one PRDT for the requested bytes copied from the caller before submission; a flush is
 a non-data command with no PRDT whose PRDBC must stay 0. Reads and writes use one
-sector and validate LBA against both the reported capacity and the 48-bit command
+to four sectors and validate the entire extent against both the reported capacity and the 48-bit command
 limit. A write buffer must not overlap the DMA block or the device context.
 `ahci_flush` requires IDENTIFY word 83 bit 13 (FLUSH CACHE EXT supported) and
 otherwise returns `AHCI_UNSUPPORTED` without device access, as do writes and
 flushes on a read-only open. IDENTIFY word 85 bit 5 (volatile write cache enabled,
 when word 87 marks words 85..87 valid) is reported as `AHCI_FEATURE_WRITE_CACHE`.
 A write success means the device completed the command; the data is durable only
-after a successful flush. A failed write leaves that sector undefined.
+after a successful flush. A failed write leaves every sector in that command undefined.
+The original one-sector functions retain their buffer-size and error contracts.
 
 IDENTIFY parsing requires complete ATA data, DMA/LBA support,
 valid LBA48 support and a nonzero bounded capacity. Advertised logical sectors
@@ -118,15 +119,25 @@ AHCI class, active SATA link and ATA signature separately. A QEMU 10.1 disk
 reported word 76 `0x0100` with no speed bits, valid DMA/LBA48 and 512-byte sectors;
 those observed fields have a regression fixture without relaxing mandatory data.
 
-Polling checks new host/interface/task-file interrupt errors, link removal, and CI/SACT.
+Pending-command polling checks new host/interface/task-file interrupt errors, link removal, and CI.
 It resamples status **after** command completion to catch a late error racing the
 earlier status reads. Both DF and ERR are rejected in that final task-file status;
 stale initial status while a command is pending is not mistaken for completion.
-After DMA synchronization, PRDBC must be exactly 512 before
-the bounce data reaches the caller. Failure leaves the caller's sector unchanged.
+SACT is checked before submission and again after CI clears; this exclusive
+non-NCQ core never submits commands that use SACT. This reduces pending polling
+from five to three trapped MMIO reads while keeping the final task-file checks.
+After DMA synchronization, PRDBC must equal the entire requested byte count before
+the bounce data reaches the caller. Failure leaves the caller's whole read buffer unchanged.
 Backwards clock readings are errors; a separate one-million-poll bound prevents
 a frozen clock from causing an infinite loop. This bound is a fail-safe, not a
 replacement for the callback's real time contract.
+Kernel64 now supplies the existing PIT-channel-2 TSC measurement, frozen before
+opening the controller, rather than dividing every machine's TSC by 1,000.
+Its read/write/flush error logs retain the first deadline's measured elapsed
+microseconds, poll count and clock/poll/deadline reason across safe shutdown.
+FAT32 optionally batches only requested whole sectors whose extent map confirms
+physical adjacency. It stages failed batches privately and reports only prior
+completed batches; it does not infer a partial transfer from a failed command.
 
 On any command failure, the device closes and stops the engine before releasing
 memory. A write callback may fail after its MMIO write took effect; the core

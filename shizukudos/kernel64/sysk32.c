@@ -96,7 +96,7 @@ static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t handle, u
     }
     case 4: {                                                   /* FileFsDeviceInformation */
         if (len < 8) return STATUS_INFO_LENGTH_MISMATCH;
-        *(uint32_t *)out = f->console ? 0x50 : 7;               /* FILE_DEVICE_CONSOLE / FILE_DEVICE_DISK */
+        *(uint32_t *)out = f->console == 3 ? 0x15 : f->console ? 0x50 : 7;   /* FILE_DEVICE_NULL / FILE_DEVICE_CONSOLE / FILE_DEVICE_DISK */
         *(uint32_t *)(out + 4) = disk && !dwritable ? 0x2 : 0;  /* FILE_READ_ONLY_DEVICE */
         return put_result(p, iosb, buf, len, out, 8, STATUS_SUCCESS);
     }

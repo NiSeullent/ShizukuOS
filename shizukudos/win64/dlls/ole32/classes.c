@@ -297,3 +297,15 @@ DLLAPI HRESULT WINAPI CoRegisterMessageFilter(LPMESSAGEFILTER filter, LPMESSAGEF
     (void)iid_messagefilter;
     return S_OK;
 }
+
+/* No allocation or filter registration side effect. The registered per-thread
+ * reference remains valid while AddRef runs; the caller's extra reference
+ * then protects MessagePending against reentrant replacement/unregistration. */
+IMessageFilter *shz_message_filter_snapshot(void)
+{
+    IMessageFilter *filter;
+    if (g_filter_tls == TLS_OUT_OF_INDEXES) return NULL;
+    filter = TlsGetValue(g_filter_tls);
+    if (filter) IMessageFilter_AddRef(filter);
+    return filter;
+}

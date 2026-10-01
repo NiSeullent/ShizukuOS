@@ -97,8 +97,8 @@ static int32_t handle_insert_at(process_t *p, uint64_t value, kobject_t *o, uint
     e->inherit = flags;
     ++o->refs;
     ++p->handle_count;
+    ipc_handle_opened(o);                               /* inherited table entry and ioctx count have one publication */
     irq_restore(f);
-    ipc_handle_opened(o);
     return STATUS_SUCCESS;
 }
 
@@ -902,11 +902,15 @@ static int32_t sys_duplicate(process_t *p, struct regs *r, uint64_t hsp, uint64_
         if (!st && dst->teardown) { st = STATUS_PROCESS_IS_TERMINATING; ob_deref(dpo); dpo = 0; dst = 0; }
     }
     if (!st && dst) {
-        const uint32_t a = (options & DUPLICATE_SAME_ACCESS) ? access : desired;
+        uint32_t a = (options & DUPLICATE_SAME_ACCESS) ? access : desired;
         const int inherit = (options & DUPLICATE_SAME_ATTRIBUTES) ? (flags & HANDLE_FLAG_INHERIT_BIT) != 0
                                                                    : (attrs & OBJ_INHERIT_ATTR) != 0;
-        ob_ref(o);
-        st = ipc_give_handle(dst, o, a, inherit, 0, &h);
+        if (o->type == OB_SECTION && !(options & DUPLICATE_SAME_ACCESS))
+            st = ipc_section_duplicate_access(o, access, &a);
+        if (!st) {
+            ob_ref(o);
+            st = ipc_give_handle(dst, o, a, inherit, 0, &h);
+        }
         if (!st && pout) {
             const uint64_t v = h;
             if (copy_to_user(p, pout, &v, 8)) { handle_close(dst, h); st = STATUS_ACCESS_VIOLATION; }

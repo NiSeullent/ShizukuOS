@@ -1,1 +1,4 @@
-{"libs": ["user32"]}
+{
+  "libs": ["user32"],
+  "ordinals": {"TaskDialog": 344, "TaskDialogIndirect": 345}
+}

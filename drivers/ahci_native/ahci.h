@@ -6,6 +6,7 @@
 
 #define AHCI_DMA_BYTES 4096u
 #define AHCI_SECTOR_BYTES 512u
+#define AHCI_MAX_SECTORS 4u /* remaining 2 KiB of the existing 4 KiB DMA arena */
 #define AHCI_AUTO_PORT 32u
 #define AHCI_POLL_LIMIT 1000000u
 enum ahci_result {
@@ -63,6 +64,10 @@ struct ahci_device {
     uint32_t timeout_us, dma_owned, dma_published, ownership_acquired, writable;
     uint32_t last_is, last_tfd, last_serr;
     int last_error;
+    /* First deadline failure retained across safe port shutdown. Diagnostics
+     * only: 1 elapsed deadline, 2 frozen-clock poll guard, 3 reversed clock. */
+    uint64_t last_wait_elapsed_us;
+    uint32_t last_wait_polls, last_wait_reason;
 };
 
 /* Takes over the HBA after firmware is finished with it. Stops all implemented
@@ -70,10 +75,18 @@ struct ahci_device {
 int ahci_open(struct ahci_device *, const struct ahci_ops *, const struct ahci_config *);
 /* Only one 512-byte sector is supported. Output changes only after completion. */
 int ahci_read_sector(struct ahci_device *, uint64_t lba, void *output, size_t bytes);
+/* One command, 1..4 consecutive sectors within the identified capacity. Output
+ * is changed only after successful completion and exact PRDBC validation. */
+int ahci_read_sectors(struct ahci_device *, uint64_t lba, unsigned count,
+                      void *output, size_t bytes);
 /* Exactly one 512-byte sector (bytes must be 512). Needs allow_write=1 at open, else AHCI_UNSUPPORTED with no
  * device access. Success means the device reported completion; data may sit in a volatile write cache until
  * ahci_flush(). A failed write leaves the sector's content undefined (as on any interrupted ATA write). */
 int ahci_write_sector(struct ahci_device *, uint64_t lba, const void *input, size_t bytes);
+/* One WRITE DMA EXT, 1..4 consecutive sectors; bytes must equal count * 512.
+ * Interrupted writes can leave any sector in this command partially written. */
+int ahci_write_sectors(struct ahci_device *, uint64_t lba, unsigned count,
+                       const void *input, size_t bytes);
 /* FLUSH CACHE EXT: returns after the device reports its write cache written to media. AHCI_UNSUPPORTED without
  * allow_write or when IDENTIFY does not advertise the command (no device access in either case). */
 int ahci_flush(struct ahci_device *);

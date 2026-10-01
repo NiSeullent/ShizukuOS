@@ -63,7 +63,8 @@ typedef struct {
     fsnode_t *node;
     uint64_t pos;
     uint32_t access;                    /* GENERIC/FILE_* rights granted */
-    int console;                        /* 0 none, 1 input, 2 output */
+    int console;                        /* 0 none, 1 console input, 2 console output, 3 the NUL device (writes are discarded, reads are at end of file) */
+    uint32_t options;                  /* NtCreateFile/CreateOptions; queried as FileModeInformation */
     int append;
     uint64_t dir_index;                 /* NtQueryDirectoryFile cursor */
     uint16_t *dir_pattern;              /* NtQueryDirectoryFile FileName filter (heap, NUL-terminated), NULL = all */

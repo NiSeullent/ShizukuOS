@@ -3,8 +3,9 @@
  *
  * A socket is a kernel object of type OB_SOCKET in the process handle table (handle value == Winsock SOCKET). The object
  * points at a sock_t owned by this file; the sock_t lives until the last handle is closed AND no system call is inside it
- * (sock_t.refs). Closing the last handle (NtClose, CloseHandle, or process teardown) runs net_socket_handle_closing() from
- * objects.c: TCP connections are orphaned and finish their close handshake in the background (RST instead if SO_LINGER
+ * (sock_t.refs). Closing the last tracked handle (NtClose, CloseHandle, or process teardown) runs
+ * net_socket_last_handle_closed() after IPC's atomic handle-count decrement: TCP connections are orphaned and finish
+ * their close handshake in the background (RST instead if SO_LINGER
  * {1,0} was set or unread data remains), blocked callers are woken and fail.
  *
  * Blocking: a blocking call sleeps in net_sleep() slices of at most 20 ms and re-evaluates its condition, so process
@@ -22,10 +23,13 @@
  *   0x8e NetQuery(class, buf, len, PULONG returned)          0x8f NetPing(dst_be, id<<16|seq, payload_len, timeout_ms, [PULONG rtt_ms])
  */
 #include "net.h"
+#include "ipc.h"
 
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 
 sock_t *g_socks;
+static void sock_extension_progress(sock_t *s);
+static void sock_extension_closed(sock_t *s);
 
 #define SOL_SOCKET 0xffff
 #define IPPROTO_TCP_L 6
@@ -194,11 +198,13 @@ void sock_notify(sock_t *s)
     net_wake_all();
     if (s->evt)
         sock_evt_update(s);
+    sock_extension_progress(s);
 }
 
 /* ---------------------------------------------------------------- closing */
 static void sock_close_locked(sock_t *s)
 {
+    sock_extension_closed(s);
     s->dead = 1;
     sock_unlink(s);
     if (s->type == SK_STREAM)
@@ -217,7 +223,9 @@ void sock_close_kernel(sock_t *s) { sock_close_locked(s); }
 void net_socket_handle_closing(kobject_t *o)
 {
     sock_t *s;
-    if (o->refs != 1)
+    ioctx_t *io = o->u.file.io;
+    /* Tracked sockets close in the atomic last-handle IPC hook below. */
+    if (io || o->refs != 1)
         return;                                             /* another handle (duplicate) keeps the socket alive */
     s = o->u.net.sock;
     if (!s)
@@ -228,13 +236,27 @@ void net_socket_handle_closing(kobject_t *o)
     net_unlock();
 }
 
+/* ipc_core.c calls this after the atomic handle count reaches zero. */
+void net_socket_last_handle_closed(kobject_t *o)
+{
+    sock_t *s;
+    net_lock();
+    if (o->u.file.io && ((ioctx_t *)o->u.file.io)->handles == 0 && (s = o->u.net.sock)) {
+        o->u.net.sock = 0;
+        sock_close_locked(s);
+    }
+    net_unlock();
+}
+
 static sock_t *get_sock(process_t *p, uint64_t h)           /* lock held; takes a reference */
 {
-    kobject_t *o = handle_lookup(p, h, OB_SOCKET);
-    sock_t *s = o ? (sock_t *)o->u.net.sock : 0;
-    if (!s || s->dead)
-        return 0;
-    ++s->refs;
+    kobject_t *o;
+    sock_t *s;
+    if (handle_ref(p, h, OB_SOCKET, &o, 0)) return 0;
+    s = o->u.net.sock;
+    if (!s || s->dead) s = 0;
+    else ++s->refs;
+    ob_deref(o);
     return s;
 }
 
@@ -324,13 +346,20 @@ static int32_t put_u32(process_t *p, uint64_t uva, uint32_t v)
     return uva && copy_to_user(p, uva, &v, 4) ? STATUS_ACCESS_VIOLATION : 0;
 }
 
+#include "net_sock_extensions.h"
+
 /* ---------------------------------------------------------------- operations */
 static int32_t new_handle(process_t *p, sock_t *s, uint32_t *h_out)
 {
     kobject_t *o = ob_create(OB_SOCKET, 0);
+    ioctx_t *io;
     int32_t st;
     if (!o)
         return STATUS_NO_MEMORY;
+    io = ipc_ioctx(o, 1);
+    if (!io) { ob_deref(o); return STATUS_NO_MEMORY; }
+    io->sync = 0;
+    io->handles = 1;                     /* duplicate/inherited handles use ipc_handle_opened */
     o->u.net.sock = s;
     st = handle_insert(p, o, 0x1fffff, h_out);
     ob_deref(o);                                            /* the handle now owns the object */
@@ -495,6 +524,7 @@ static int32_t op_connect(process_t *p, uint64_t h, uint64_t sa_uva, uint64_t sa
         return st;
     }
     if (s->listening) { sock_release(s); net_unlock(); return NET_ERR(WSAEINVAL); }
+    if (s->extension || s->extension_no_reuse) { sock_release(s); net_unlock(); return NET_ERR(WSAEINVAL); }
     if (!ip || !port || (ip_is_broadcast(ip) && ip != 0)) { sock_release(s); net_unlock(); return NET_ERR(WSAEADDRNOTAVAIL); }
     t = s->tcb;
     if (t) {
@@ -584,6 +614,7 @@ static int32_t op_send(process_t *p, struct regs *r, uint64_t h, uint64_t buf, u
     net_lock();
     s = get_sock(p, h);
     if (!s) { net_unlock(); return STATUS_INVALID_HANDLE; }
+    if (s->extension) { sock_release(s); net_unlock(); return NET_ERR(WSAEINPROGRESS); }
     if (s->type == SK_DGRAM) {
         st = send_udp(p, s, buf, (uint32_t)len, to, tolen, &total);
         sock_release(s);
@@ -638,6 +669,7 @@ static int32_t op_recv(process_t *p, struct regs *r, uint64_t h, uint64_t buf, u
     net_lock();
     s = get_sock(p, h);
     if (!s) { net_unlock(); return STATUS_INVALID_HANDLE; }
+    if (s->extension) { sock_release(s); net_unlock(); return NET_ERR(WSAEINPROGRESS); }
     deadline = s->rcvtimeo ? net_now() + s->rcvtimeo : 0;
     if (s->type == SK_DGRAM) {
         if (!s->bound) { sock_release(s); net_unlock(); return NET_ERR(WSAEINVAL); }
@@ -747,6 +779,7 @@ static int32_t op_name(process_t *p, uint64_t h, uint64_t which, uint64_t sa_uva
     net_lock();
     s = get_sock(p, h);
     if (!s) { net_unlock(); return STATUS_INVALID_HANDLE; }
+    if (s->extension_context_pending) { sock_release(s); net_unlock(); return NET_ERR(WSAEINVAL); }
     if (which == 0) {
         if (s->tcb) { ip = s->tcb->lip; port = s->tcb->lport; }
         else if (s->bound) { ip = s->lip; port = s->lport; }
@@ -771,6 +804,21 @@ static int32_t op_setopt(process_t *p, struct regs *r, uint64_t h, uint64_t leve
     uint32_t v = 0, v2 = 0;
     sock_t *s;
     int32_t st = 0;
+    if (level == SOL_SOCKET && opt == 0x7010u) {            /* SO_UPDATE_CONNECT_CONTEXT */
+        if (len != 0) return NET_ERR(WSAEINVAL);
+        net_lock();
+        s = get_sock(p, h);
+        if (!s) { net_unlock(); return STATUS_INVALID_HANDLE; }
+        if (!s->tcb || !s->connected || s->extension) st = NET_ERR(WSAENOTCONN);
+        else {
+            s->extension_context_pending = 0;
+            tcp_keepalive_changed(s->tcb);
+            tcp_output(s->tcb);
+        }
+        sock_release(s);
+        net_unlock();
+        return st;
+    }
     if (len < 4 || len > 8 || copy_from_user(p, &v, val, 4) || (len >= 8 && copy_from_user(p, &v2, val + 4, 4)))
         return len < 4 ? NET_ERR(WSAEFAULT) : STATUS_ACCESS_VIOLATION;
     net_lock();
@@ -876,16 +924,49 @@ static int32_t op_getopt(process_t *p, struct regs *r, uint64_t h, uint64_t leve
 
 struct shz_netevents { uint32_t events; int32_t err[10]; };
 
+/* Private creation attributes: WSA_FLAG_OVERLAPPED and NO_HANDLE_INHERIT.
+ * Never change an already shared/bound socket's I/O or inheritance mode. */
+static int32_t sock_initial_flags(process_t *p, uint64_t h, sock_t *s, uint32_t flags)
+{
+    kobject_t *object;
+    ioctx_t *io;
+    uint64_t irq;
+    int32_t st;
+    if (flags & ~0x81u) return NET_ERR(WSAEINVAL);
+    st = handle_ref(p, h, OB_SOCKET, &object, 0);
+    if (st) return st;
+    irq = irq_save();
+    io = object->u.file.io;
+    if (object->u.net.sock != s || !io || io->handles != 1 || io->port ||
+        s->bound || s->listening || s->tcb || s->extension ||
+        !h || (h & 3) || h / 4 > MAX_HANDLES || p->handles[h / 4 - 1].obj != object)
+        st = NET_ERR(WSAEINVAL);
+    else {
+        io->sync = !(flags & 1u);
+        p->handles[h / 4 - 1].inherit = (flags & 0x80u) ? 0 : HANDLE_FLAG_INHERIT_BIT;
+    }
+    irq_restore(irq);
+    ob_deref(object);
+    return st;
+}
+
 static int32_t op_ioctl(process_t *p, struct regs *r, uint64_t h, uint64_t cmd, uint64_t in, uint64_t inlen)
 {
     const uint64_t out = (uint64_t)stack_arg(p, r, 5), outlen = (uint64_t)stack_arg(p, r, 6), pret = (uint64_t)stack_arg(p, r, 7);
     sock_t *s;
     uint32_t v = 0, ret = 0;
     int32_t st = 0;
+    if (cmd == SHZ_SOCK_CONNECT_EX || cmd == SHZ_SOCK_DISCONNECT_EX)
+        return sock_extension_ioctl(p, h, (uint32_t)cmd, in, inlen);
     net_lock();
     s = get_sock(p, h);
     if (!s) { net_unlock(); return STATUS_INVALID_HANDLE; }
     switch ((uint32_t)cmd) {
+    case 0x53480012u: {                                    /* private initial socket attributes */
+        if (inlen != 4 || copy_from_user(p, &v, in, 4)) { st = NET_ERR(WSAEINVAL); break; }
+        st = sock_initial_flags(p, h, s, v);
+        break;
+    }
     case IOC_FIONBIO:
         if (inlen < 4 || copy_from_user(p, &v, in, 4)) { st = NET_ERR(WSAEFAULT); break; }
         s->nonblock = v != 0;

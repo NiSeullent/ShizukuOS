@@ -1,0 +1,14 @@
+{
+  "description": "Process Status API backed by real kernel32 accounting/module queries",
+  "forwarders": [
+    "GetProcessMemoryInfo = kernel32.K32GetProcessMemoryInfo",
+    "GetModuleFileNameExW = kernel32.K32GetModuleFileNameExW",
+    "GetModuleInformation = kernel32.K32GetModuleInformation",
+    "GetModuleFileNameExA = kernel32.K32GetModuleFileNameExA",
+    "GetModuleBaseNameA = kernel32.K32GetModuleBaseNameA",
+    "GetModuleBaseNameW = kernel32.K32GetModuleBaseNameW",
+    "EnumProcesses = kernel32.K32EnumProcesses",
+    "EnumProcessModules = kernel32.K32EnumProcessModules",
+    "EnumProcessModulesEx = kernel32.K32EnumProcessModulesEx"
+  ]
+}

@@ -3,6 +3,7 @@
  * pushes the changed rectangle to the kernel window manager with NtGdiPresent (see gdi_internal.h). The ShzGdi* exports
  * are the private interface user32 uses to create/release window DCs; they are not Windows APIs. */
 #include "gdi_internal.h"
+#include "gdi_render_trace.h"
 
 static backing_t *g_backings;
 
@@ -138,7 +139,11 @@ void gdi_window_flush(backing_t *b)
         p.stride = (uint32_t)b->bmp.w * 4;
         p.surf_w = b->bmp.w;
         p.surf_h = b->bmp.h;
-        if (NtGdiPresent(&p) < 0) break;   /* the window vanished or was resized meanwhile: nothing left to update */
+        {
+            int32_t status = NtGdiPresent(&p);
+            gdi_render_trace_present(b,&r,status);
+            if (status < 0) break;   /* the window vanished or was resized meanwhile: nothing left to update */
+        }
     }
 }
 
