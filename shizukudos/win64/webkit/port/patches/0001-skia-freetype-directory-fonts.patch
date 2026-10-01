@@ -1,0 +1,58 @@
+diff --git a/Source/ThirdParty/skia/CMakeLists.txt b/Source/ThirdParty/skia/CMakeLists.txt
+index 679b31f33..a5b119236 100644
+--- a/Source/ThirdParty/skia/CMakeLists.txt
++++ b/Source/ThirdParty/skia/CMakeLists.txt
+@@ -812,7 +812,19 @@ add_library(Skia STATIC
+     modules/skcms/src/skcms_TransformSkx.cc
+ )
+ 
+-if (WIN32)
++if (USE_SHIZUKU)
++    # ShizukuDOS: FreeType glyphs and the directory font manager (the system font directory), no DirectWrite
++    target_sources(Skia PRIVATE
++        src/ports/SkFontHost_FreeType.cpp
++        src/ports/SkFontHost_FreeType_common.cpp
++        src/ports/SkFontMgr_custom.cpp
++        src/ports/SkFontMgr_custom_directory.cpp
++        src/ports/SkLog_win.cpp
++        src/ports/SkOSFile_win.cpp
++        src/ports/SkTypeface_proxy.cpp
++    )
++    target_link_libraries(Skia PRIVATE Freetype::Freetype)
++elseif (WIN32)
+     target_sources(Skia PRIVATE
+         src/ports/SkFontHost_win.cpp
+         src/ports/SkFontMgr_win_dw.cpp
+@@ -1084,7 +1096,7 @@ target_compile_definitions(Skia PUBLIC
+     SK_ASSUME_WEBGL=0
+ )
+ 
+-if (WIN32)
++if (WIN32 AND NOT USE_SHIZUKU)
+     target_compile_definitions(Skia PRIVATE SK_TYPEFACE_FACTORY_DIRECTWRITE)
+ else ()
+     target_compile_definitions(Skia PRIVATE SK_TYPEFACE_FACTORY_FREETYPE)
+diff --git a/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp b/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
+index 74cfeb60a..27fbfd725 100644
+--- a/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
++++ b/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
+@@ -52,6 +52,10 @@ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
+ #endif
+ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
+ 
++#if USE(SHIZUKU)
++#include "FontManagerShizuku.h"
++#endif
++
+ namespace WebCore {
+ 
+ void FontCache::platformInit()
+@@ -63,6 +67,8 @@ SkFontMgr& FontCache::fontManager() const
+     if (!m_fontManager) {
+ #if OS(ANDROID)
+         m_fontManager = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
++#elif USE(SHIZUKU)
++        m_fontManager = shizukuCreateFontManager();
+ #elif OS(WINDOWS)
+         auto result = createDWriteFactory();
+         m_fontManager = SkFontMgr_New_DirectWrite(result.factory.get(), result.fontCollection.get());

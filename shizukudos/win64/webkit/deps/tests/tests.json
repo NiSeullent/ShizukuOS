@@ -1,10 +1,23 @@
 {
  "t_tc_c": {"args": "alpha \"beta gamma\""},
  "t_tc_cxx": {},
- "t_dep_zlib": {"libs": ["zlib"]},
- "t_dep_libpng": {"libs": ["png16", "zlib"]},
+ "t_dep_zlib": {"libs": ["z"]},
+ "t_dep_libpng": {"libs": ["png16", "z"]},
  "t_dep_jpeg": {"libs": ["turbojpeg", "jpeg"]},
- "t_dep_webp": {"libs": ["webp", "webpdemux", "sharpyuv"]},
+ "t_dep_webp": {"libs": ["webpdemux", "webp", "sharpyuv"]},
  "t_dep_brotli": {"libs": ["brotlienc", "brotlidec", "brotlicommon"]},
- "t_dep_woff2": {"libs": ["woff2enc", "woff2dec", "woff2common"]}
+ "t_dep_woff2": {"libs": ["woff2enc", "woff2dec", "woff2common", "brotlienc", "brotlidec", "brotlicommon"]},
+ "t_dep_sqlite": {"libs": ["sqlite3"]},
+ "t_dep_libxml2": {"libs": ["xml2", "ws2_32", "bcrypt"], "include_dirs": ["libxml2"], "defines": ["-DLIBXML_STATIC"]},
+ "t_dep_libxslt": {"libs": ["xslt", "xml2", "ws2_32", "bcrypt"], "include_dirs": ["libxml2"],
+                   "defines": ["-DLIBXML_STATIC", "-DLIBXSLT_STATIC"]},
+ "t_dep_icu": {"libs": ["icuin", "icuuc", "icudt"], "defines": ["-DU_STATIC_IMPLEMENTATION"]},
+ "t_dep_freetype": {"libs": ["freetype", "png16", "z", "brotlidec", "brotlicommon"], "include_dirs": ["freetype2"]},
+ "t_dep_harfbuzz": {"libs": ["harfbuzz-icu", "harfbuzz", "freetype", "png16", "z", "brotlidec", "brotlicommon",
+                             "icuin", "icuuc", "icudt"],
+                    "include_dirs": ["harfbuzz"], "defines": ["-DU_STATIC_IMPLEMENTATION"]},
+ "t_dep_openssl": {"libs": ["ssl", "crypto", "ws2_32", "crypt32", "bcrypt"]},
+ "t_dep_curl": {"libs": ["curl", "ssl", "crypto", "brotlidec", "brotlicommon", "z", "ws2_32", "crypt32", "bcrypt",
+                         "iphlpapi", "secur32"], "defines": ["-DCURL_STATICLIB"]},
+ "t_dep_libpsl": {"libs": ["psl", "ws2_32"], "defines": ["-DPSL_STATIC"]}
 }
