@@ -2,8 +2,11 @@
 
 The requested target remains functioning themes, current Legcord/Discord,
 Signal and open-source Office, broader modern application support, and OS TLS
-1.3. The new components are working foundations. Installed Windows 98 tests,
-system API integration and functional application runs remain acceptance gates.
+1.3. The new components are working foundations. Actual installed Windows 98 component API and comparison-screen evidence is now retained.
+System API integration and functional application runs remain acceptance gates.
+The browser direction is now Trident modernization toward HTML5, WebAssembly
+and current JavaScript standards. A full WebKit port is optional. See
+`TRIDENT_MODERNIZATION_HANDOFF.md` for the inspected integration seams and limits.
 
 ## Theme implementation
 
@@ -28,6 +31,18 @@ import probes for the guest owner. The existing unthemed UXTHEME/KernelEx
 routes are preserved until a new provider is installed and verified. Ordinary
 system controls, all modern UXTHEME classes, arbitrary `.msstyles` files,
 and automatic shell/non-client interception have not been implemented here.
+
+## Native theme execution
+
+The frozen v1 direct and static-import probes both passed on an actual installed
+Korean Windows 98 SE4.10/build2222 guest, with the supervisor observing full
+child exit0 and successful output flush/close. The production DLL is unchanged.
+A fresh v3 trial captured visible Classic/Modern fills, borders and labels for
+both separately titled modes, plus ACP949 and the direct child exit0. Its manual
+finish occurred just before the final static child completed; the current static
+probe completion remains unverified. Original v1, interrupted v2 and partial v3
+receipts remain distinct. The ignored `build/theme-engine/native-v3-visual-review.json`
+binds the two reviewed frames to their hashes and records this limitation.
 
 ## Transport TLS 1.3 implementation
 
@@ -60,6 +75,54 @@ to mean PE thread-local storage; it is unrelated to encrypted network transport.
 
 Primary dependency sources: [Mbed TLS 4.2.0 release](https://github.com/Mbed-TLS/mbedtls/releases/tag/mbedtls-4.2.0),
 [exact license](https://raw.githubusercontent.com/Mbed-TLS/mbedtls/mbedtls-4.2.0/LICENSE).
+
+## Native TLS and OS adapter work
+
+A frozen no-CRT GUI probe and child supervisor load the latest client DLL and
+an independent Mbed TLS3.6.7 server DLL in a fresh Windows98 guest. Each DLL
+owns separate PSA state. The fixture uses actual CryptoAPI randomness and UTC,
+real TLS1.3 records, bounded memory queues, authenticated bidirectional data,
+and explicit certificate/entropy/ciphertext rejection. Executables reserve2MiB
+and commit64KiB of stack. Host controller and supervisor fault tests are models;
+42 evidence-parser regressions refuse missing checks, stale logs and failed
+actual child exits. Actual v4 failed its combined handshake predicate and the
+supervisor observed child exit1. Original evidence remains preserved. The
+fixture incorrectly required zero server certificate flags despite no requested
+client certificate; v7 corrects that assertion and logs each endpoint, while
+retaining required client certificate/hostname verification and TLS1.3. A real
+host latest/LTS exchange observes server flags128 and completes encrypted HTTP
+and shutdown. v7 is frozen for a fresh native trial. Its first preparation stopped
+before QEMU because concurrent disk growth removed the required copy budget;
+zero captures and no probe execution were recorded. A retry still requires stable
+space and the shared guest queue. Neither v4 nor the host result is a native
+sockets pass. See
+`tests/m98_tls13_guest_interop_HANDOFF.md` for exact frozen inputs and readback.
+
+A separate additive `M98NET.DLL` adapter connects the latest backend to Win98
+nonblocking TCP, CryptoAPI and UTC, with explicit endpoint, DNS identity, CA and
+finite deadlines. Its independently reviewed v3 passes40571 controller and799 native-platform
+mock assertions, each normally and under sanitizers, eight real host TCP/TLS
+cases, and two Win98 PE/OEM/stack gates. The actual-platform source is exercised
+against OS doubles; those results do not establish installed Win98 behavior.
+Native networking execution and global provider installation remain unverified.
+Schannel/WinHTTP/WinINet consumer integration remains required for OS support.
+See `src/m98_tls13_native_HANDOFF.md` for bounds and exact API ownership.
+The reviewed source is committed as c39f6c9; native observers and strict evidence
+verifiers are committed as b872beb. Neither commit installs a global provider.
+
+## DNS configuration port
+
+Commit66912e3 adds opt-in M98DNS.DLL and an original portable DnsQueryConfig
+core, capturing the actual installed IP Helper settings. Supported hostname,
+domain/FQDN, ACP/UTF16/UTF8 and IPv4-server results follow byte-sizing and
+LocalAlloc/LocalFree ownership. Bounded parsing rejects malformed lists and
+never invents a DNS server. Independent review corrected reserved-provider-field,
+already-qualified-host, native identity, encoding evidence and stack issues.
+The v2 build passes11609 normal and sanitizer checks and two native PE gates.
+Native configuration execution, full DNS resolution and application operation
+remain unverified. Peer runtime owners can feed their actual DHCP snapshot into
+the portable core; their standard-module binding and other DNS exports need
+separate integration. See `src/m98_dns_config_HANDOFF.md`.
 
 ## Current applications and exact evidence
 
@@ -116,6 +179,11 @@ python3 tools/modern_app_inventory.py --app legcord \
   --output benchmarks/media/legcord-1.3.0/inventory.json
 ```
 
+The application inventory command requires its reproducible extracted package;
+that copy was removed after all182 payload hashes and the pinned publisher ZIP
+were verified to reclaim401MiB. The retained ZIP is sufficient to restore it
+when another inventory is needed; no application/source artifact was lost.
+
 The TLS build downloads only its pinned source when absent. Integration tests
 create private test certificates/keys and temporary loopback-only servers;
 none are production trust material. No command installs a DLL, changes global
@@ -123,13 +191,15 @@ client settings, takes over an active VM, or promotes a guest capability.
 
 ## Remaining acceptance and coordination
 
-The guest owner must run both theme probes with frozen DLL/probe hashes on an
-independent installed Windows 98 clone. Check visible Classic/Modern switching,
-real redraws, clipping/DC preservation, ACP Korean text where representable,
-handle reopen and normal unload. A PE pass cannot supply this evidence.
+The frozen original direct/static probes have actual native exit0 evidence.
+The longer current probes have reviewed comparison frames, but still require
+a complete final static child log. Peer6970 owns interactive presentation
+integration and its complete redraw/style-switch/exit acceptance. Ordinary
+control/shell integration and modern-app theme functionality remain separate.
 
-The TLS DLL requires guest socket, entropy, time and trust adapters, followed by
-real TLS 1.3 encrypted request/response and the same negative cases. Kernel64's
+The TLS native fixture is checking actual DLL, entropy and time prerequisites
+with explicit fixture trust. The separate TCP adapter must then pass isolated
+real network encrypted request/response and equivalent negative cases. Kernel64's
 RNG readiness must be proven before it is used for TLS. System-wide support
 also requires the Schannel/WinHTTP/WinINet adapters.
 
@@ -140,14 +210,18 @@ Calc and Impress files and export/read back PDF. None has a new functional
 Windows 98 pass in this checkpoint.
 
 Peer ownership and handoff are in `docs/modern-apps-coordination-5abe.md`.
-The established guest harness maintains a selected 20-GiB disk reserve. Current
-shared-host free space is below that threshold; this checkpoint does not lower
-the reserve, delete peer evidence, or start a competing guest. Native execution
-remains pending with the guest owners.
+The established guest harness maintains a selected20GiB disk reserve and a
+measured sparse-copy/dirty budget. A separate disk agent shares only identical
+allocations of closed verified experiment copies, retaining full logical hashes,
+metadata and evidence. The verified official Legcord archive is retained after
+removing its reproducible extracted copy. Free space fluctuates with peer work;
+each new trial must pass the unchanged guard and shared native queue check.
+The native presentation lane is coordinated with peer6970; peer7707 retains
+the independent LTS fixture and cb43/c009 retain application-runtime integration.
 
 The completed host checkpoint passes 312 new theme checks normally and under
 ASan/UBSan, the existing ntwddm regression/freestanding checks, 16 real TLS
 loopback cases, and 19 application-inventory regression tests. Theme and TLS
 artifacts also pass their native PE/import gates. The exact artifacts and
-receipts are bound by `docs/MODERN_THEME_TLS_CHECKPOINT.json`; no guest or
-application capability is promoted by those host results.
+receipts are bound by `docs/MODERN_THEME_TLS_CHECKPOINT.json`; native component evidence is recorded separately, and application functionality
+is not promoted by host/PE checks.
