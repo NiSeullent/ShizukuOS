@@ -57,12 +57,44 @@ guest RAM and no network. Its child was PID 60. The exact serial evidence shows:
 | Private CJK face | All nine glyph IDs, advances and bearings match independent font tables |
 | Korean glyph-run analysis | PASS; alpha texture has 2,244 nonzero bytes out of 5,040, guards unchanged |
 | Latin text layout and raster | PASS; callback order matches, 463 DIB ink pixels |
-| Korean text layout | FAIL; covered positions 255/255, two callback cmap/order errors |
+| Korean text layout | FAIL; covered positions 255/255, two aggregate callback cmap/order errors |
 | Korean text raster | FAIL; zero Korean DIB ink pixels |
 | Glyph face identity | No missing glyphs or wrong faces reported across two runs and ten glyphs |
 | Visible GDI readback | PASS; all 49,152 pixels match the owned DWrite DIB |
 | Separate QEMU framebuffer | Capture PASS; same 49,152 pixels, RGB hash `32a97c0e` |
 | Final verdict, cleanup and normal child exit | Unverified; child timed out after 45 seconds |
+
+The matching bound probe source rejects the Korean callback before calling
+`IDWriteBitmapRenderTarget::DrawGlyphRun` when its shape-error count is nonzero.
+The target is cleared white before each row and then copied/read back. The zero
+Korean ink remains an observed FAIL; it does not prove that the provider's
+bitmap raster call executed and failed. The v2 log does not identify which two
+UTF-16 positions or comparison conditions failed. Its layout `Draw` HRESULT
+was `S_OK`, which is distinct from the rejected renderer callback.
+
+## Current source diagnostics, not yet executed
+
+The current probe records `DW64 MISMATCH` for each failing position, with row
+(0 Latin, 1 Korean), absolute/local UTF-16 position, callback text position,
+expected/actual character, expected cmap/actual shaped glyph, expected/actual
+cluster and the prior seen mask. Condition mask bits are 1 duplicate position,
+2 cluster, 4 character and 8 glyph; several conditions can share one position.
+The original one-error-per-position count and strict failure conditions remain.
+
+Rejected runs still return early and now emit `DW64 DRAW SKIPPED` with a reason.
+Valid runs emit `DW64 DRAW CALL` immediately before the actual bitmap call and
+`DW64 DRAW RETURN` with its HRESULT. These diagnostic prefixes do not change the
+existing assertion, `DW64 SHAPE`, raster, nonce, final-verdict or child-exit
+records. No separate diagnostic draw is performed on rejected runs. The font,
+expected oracle, locale/provider code and acceptance parser are unchanged.
+
+These diagnostics have been compiled as described below, but not guest-tested. The
+historical v2 source hashes and raw evidence above retain their original meaning;
+new diagnostics require a fresh source-bound preparation and trial. A possible
+locale-specific OpenType space substitution has not been established as the
+cause of the two errors because the existing trace lacks per-position values.
+
+## Recorded child termination
 
 The furthest child marker is `DW64 GUI READY`. The next source operation is
 `Sleep(4000)`. At timeout the thread report places the child in `ntdll.dll+9096`
@@ -176,3 +208,15 @@ Direct2D integration, native Windows 98 execution and modern application
 functionality remain unverified. The next functional work must resolve the
 Korean layout/raster failures and independently complete cleanup and normal
 exit before this private subset can pass.
+
+The diagnostic source was subsequently compiled into a fresh 81,521-byte AMD64
+executable, SHA-256
+`47e1a1f4c89a4e39c135711d3480c66912687b638c931d0771eedf6023db646f`.
+The executable retains the same 33 imports as the recorded v4b probe, an
+executable entry and actual DIR64 relocations. Its nonce is fresh; the font
+oracle is byte-identical apart from that nonce. The compile/PE receipt SHA-256
+is `1b2145433197c21925dbd13394a01aecfa735af4804f9ba3004e11e73a8b5796`.
+This is a compile check, not a new guest trial or proof of reviewed DWrite
+source-to-DLL identity. A functional retry still requires fresh preparation
+with the actual runtime, font and compiler inputs. The previous v2 result
+remains FAIL.
