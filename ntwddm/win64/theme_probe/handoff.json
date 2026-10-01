@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "stage": "standalone-kernel64-private-theme-acceptance",
+  "nonce": "897b1d08584c4593bd2b42044b5f4fe8",
+  "preparation": {
+    "path": "/root/Win98-Modern-theme-6970/build/tp64-prep-v4/prepared.json",
+    "sha256": "3922113ec98e1fa1fc11f3aad0c64ea0022667e6180d8bb74895f0c177fa714e"
+  },
+  "acceptance": {
+    "path": "/root/Win98-Modern-theme-6970/build/tp64-run-v2/theme-acceptance.json",
+    "sha256": "9273d24598542688ab58e5c2f169226df4c507f9ec9f2937dbd1f7db10735dba"
+  },
+  "serial": {
+    "path": "/root/Win98-Modern-theme-6970/build/tp64-run-v2/serial.log",
+    "sha256": "6e7b55083571d74fe7dace2ab83325603b2a46d2a5d3711808c3dd5d6a12c67e"
+  },
+  "screenshot": {
+    "path": "/root/Win98-Modern-theme-6970/build/tp64-run-v2/theme-screen.png",
+    "sha256": "9ff17d072ce67c3673a381e6603c04e26bba6098d8ed0c5c552c39d2c60b2ca4"
+  },
+  "provider_sha256": "f8e69da3c430f9b237fc490ea5f72cae8d3bcffab5b1efc77208ead22ce95442",
+  "probe_sha256": "f36447e86b539d02ea0704bfedeb58952d30fde37917e953a0eb971f22153e05",
+  "assertions_passed": 94,
+  "assertions_failed": 0,
+  "actual_framebuffer_pixels_verified": 16800,
+  "normal_exit_code": 0,
+  "proc_wait_return_code": 0,
+  "kernel_child_reaped": true,
+  "host_evidence_gate_tests_passed": 24,
+  "original_and_sealed_inputs_preserved": true,
+  "minimum_free_bytes": 58240233472,
+  "peak_private_write_and_capture_bytes": 2578355,
+  "reserve_bytes": 21474836480,
+  "private_write_budget_bytes": 268435456,
+  "host_output_budget_bytes": 16777216,
+  "theme_windows_abi_memory_painting_verified": true,
+  "actual_qemu_framebuffer_theme_pixels_verified": true,
+  "windows98_execution_verified": false,
+  "os_wide_theme_verified": false,
+  "app_functionality_verified": false,
+  "text_font_drawing_verified": false,
+  "peer_sources_modified": false,
+  "installation": "not_performed",
+  "network_attached": false,
+  "retained_earlier_failure": "/root/Win98-Modern-theme-6970/build/tp64-run-v1/theme-acceptance.json",
+  "license": "GPL-2.0-only; original probe and private trial runner; shared provider source remains unchanged"
+}

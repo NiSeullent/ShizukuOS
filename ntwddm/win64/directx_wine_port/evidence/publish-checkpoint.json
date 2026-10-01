@@ -1,0 +1,89 @@
+{
+  "amd64_shader_library_built": false,
+  "compiled_graphics_units": 107,
+  "directx_runtime_verified": false,
+  "full_directx_support_verified": false,
+  "generated_headers_checked": 341,
+  "graphics_objects_checked": 107,
+  "historical_receipts": [
+    {
+      "error": "genuine container unit did not compile: libs/vkd3d/libs/vkd3d-common/debug.c",
+      "file": "build/wine-graphics-object-v2/result.json",
+      "sha256": "e93d6496a79ace2209aeac727ba267dcb9dab964c091898dc93b52d489e5556a",
+      "status": "INCOMPLETE"
+    },
+    {
+      "error": "genuine shader compiler link failed",
+      "file": "build/genuine-shader-compiler-v3/result.json",
+      "sha256": "a12d1d5d4a02ea7d58e5ca5971490def8eb726333155e60440ceb0f00a3458ac",
+      "status": "INCOMPLETE"
+    },
+    {
+      "error": "20 GiB reserve",
+      "file": "build/genuine-shader-compiler-v4/result.json",
+      "sha256": "09ddc931c44ca3f29f5fc7281b4cb1a830b2e2bfbbab45750cecee439384de44",
+      "status": "INCOMPLETE"
+    },
+    {
+      "error": "genuine compiler/test failure: sanitize-test",
+      "file": "build/genuine-shader-compiler-resume-v1/result.json",
+      "sha256": "7753c9b95b5738382ab6d5703ff40c6cbe200c3d087425a633c1f330454def06",
+      "status": "INCOMPLETE"
+    }
+  ],
+  "host_runs": [
+    {
+      "binary": "build/genuine-shader-compiler-v4/normal-shader-test",
+      "binary_sha256": "50d6b0ff649171527391f29d5089d9dfe4019b0384f738f1b91cd50b664e5830",
+      "duration_seconds": 0.012,
+      "exit_code": 0,
+      "log_sha256": "2d86b6c3ce328abf17cf69f3d54115c3b70440c658154bbc9bf7b5ee3635653b",
+      "output": "GENUINE_SHADER checks=108 hlsl_dxbc_bytes=468 spirv_words=165 pinned_assembly_bytes=321 negative_decoder=1 cleanup=1 PASS"
+    },
+    {
+      "binary": "build/genuine-shader-compiler-v4/normal-container-test",
+      "binary_sha256": "e46f03967e58d192383f6e56dc6b59a8c94c17effa588f4e201f3c856ebb88bf",
+      "duration_seconds": 0.004,
+      "exit_code": 0,
+      "log_sha256": "517fb0c175e3a53f511729d2b03a922d524a504249b1591ba6165de3fa290391",
+      "output": "GENUINE_DXBC checks=975 fixture_bytes=452 sections=3 input_semantics=POSITION,NORMAL normal_cleanup=1 PASS"
+    }
+  ],
+  "original_files_checked": 1398,
+  "preparation_receipt": {
+    "file": "build/publish-lifetime-preparation-v1/prepared.json",
+    "sha256": "643aa7479f9e94caddd86284e4626880c12d583b657d9d6dfa72e879c77d5289",
+    "status": "SOURCE_PREPARATION_PASS_RUNTIME_UNVERIFIED"
+  },
+  "prepared_headers_checked": 1,
+  "python_sources_parsed": [
+    "build.py",
+    "compiler_build.py",
+    "contracts.py",
+    "archive_failed.py",
+    "compiler_resume.py",
+    "prepare_lifetime.py",
+    "prepare_lifetime_cli.py"
+  ],
+  "recorded_date_utc": "2026-10-01",
+  "repair_execution_verified": false,
+  "repair_patch_sha256": "e8b45f17167696adc7731cd880d6fe6b08c29663c3de70b7d9062d80752f3a57",
+  "resource_after": {
+    "free_bytes": 22726721536,
+    "owned_bytes": 224313344
+  },
+  "resource_before": {
+    "free_bytes": 22725742592,
+    "owned_bytes": 224292864
+  },
+  "shader_leak_failure": {
+    "allocations": 5,
+    "bytes": 725,
+    "exit_code": 1,
+    "log": "build/genuine-shader-compiler-resume-v1/sanitize-test.log",
+    "log_sha256": "06137144f5a38f265249becb775a0ca857320623d8189a68c5178a5366c25ff4",
+    "suppressed": false
+  },
+  "source_audit_sha256": "51bae21b7670fc8857c35bf70ce8907b3d27715d1dc970f6ef5c9bf1816563ac",
+  "status": "PINNED_SOURCE_OBJECT_AND_NORMAL_HOST_REVIEW_PASS_REPAIR_RUNTIME_UNVERIFIED"
+}

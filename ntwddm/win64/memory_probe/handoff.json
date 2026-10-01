@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "status": "PASS_FOR_DEFINED_BASIC_MEMORY_SUBSET",
+  "nonce": "e78c2eabe19a492aa9dde7f5685e7f46",
+  "diagnostic": {
+    "path": "/root/Win98-Modern-theme-6970/build/mp64-run-v1/memory-diagnostic.json",
+    "sha256": "38f93c81702b4c482c43fa0f0df9f1395c7731dc121d1c5cb03dbeda528f3627"
+  },
+  "prepared": {
+    "path": "/root/Win98-Modern-theme-6970/build/mp64-prep-v2/prepared.json",
+    "sha256": "d27b37dae29e64f83346bbfa4f7b4a8ab8409f3a4554ca8a0fb5aca2f2363274"
+  },
+  "serial": {
+    "path": "/root/Win98-Modern-theme-6970/build/mp64-run-v1/serial.log",
+    "sha256": "a79f84b270f7f6ce3c8611d63f8e6663119be5f187d3da7f7af922ba52178ce0"
+  },
+  "candidate_sha256": "d370ada2423503929a761f271fcf0728d9dadaecd52f906ee52b8167c347efff",
+  "archive_sha256": "fa2973620864ad64dfb8c00856f821beab33a3f7abe65024d6439cb7840441d1",
+  "guest_assertions": 69,
+  "host_evidence_gate_tests": 29,
+  "normal_guest_exit": 0,
+  "raw_proc_wait_return": 0,
+  "hardware_virtualization_fd_verified": true,
+  "original_and_sealed_inputs_preserved": true,
+  "basic_memory_subset_verified": true,
+  "kernelbase_basename_and_absolute_load_verified": true,
+  "signal_functionality_verified": false,
+  "office_functionality_verified": false,
+  "windows98_execution_verified": false,
+  "os_wide_support_verified": false,
+  "unsupported_modern_memory_features_verified": false,
+  "license": "GPL-2.0-only; original probe and dedicated private runner",
+  "runtime_comparison": {
+    "path": "/root/Win98-Modern-theme-6970/build/memory-runtime-comparison-6970-v1/comparison.json",
+    "sha256": "269eaf43c55cfa59f645c1340320b29cf771f5b2299f17cf7a6e07769efd5397"
+  },
+  "shared_runtime_identical_to_failed_signal_run": true,
+  "signal_loader_context_dependence_unresolved": true
+}

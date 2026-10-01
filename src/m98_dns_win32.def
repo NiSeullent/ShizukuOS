@@ -1,0 +1,3 @@
+LIBRARY M98DNS.DLL
+EXPORTS
+ DnsQueryConfig=m98dns_DnsQueryConfig

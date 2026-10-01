@@ -1,0 +1,913 @@
+{
+  "schema": "w98mod.modern-app-requirements.v1",
+  "document_type": "requirements_contract_not_test_result",
+  "status": "REQUIREMENTS_RECORDED_FUNCTIONAL_COMPLETION_UNVERIFIED",
+  "source_snapshot": {
+    "verified_on_client_date": "2026-10-01",
+    "timezone": "Asia/Seoul",
+    "recorded_at": "2026-10-01T06:12:06+09:00",
+    "policy": "Latest means latest stable shown by these primary sources on this date; recheck before a release, retain prior pins and never silently downgrade."
+  },
+  "coordination": {
+    "chat_id": "01a0f3d1-7707-7d10-962d-26c937d2743b",
+    "branch": "codex/tls13-7707",
+    "worktree": "/root/Win98-Modern-tls13-7707",
+    "shared_ledger": "/root/Win98-Modern-boot/docs/modern-apps-coordination-7707.md",
+    "owned_scope": "New secure-transport files, TLS 1.3 backend/native fixture and this requirements contract.",
+    "peer_owned_scope": [
+      "theme and native-control implementation",
+      "Chromium/Electron/application implementation",
+      "Office suites",
+      "kernel/display/wineport/runtime source",
+      "existing running VMs and disk images"
+    ],
+    "integration_required": "Share secure-transport artifacts and receipts with the established guest and app owners; do not overwrite peer-owned files."
+  },
+  "broad_goals": {
+    "retained": true,
+    "goals": [
+      "Working themes in the actual desktop and native controls with persistence.",
+      "Current Legcord/Discord, Signal and current open-source Office suites with real guest functionality.",
+      "Broad operation of modern applications and the Office family, including retained prior app targets.",
+      "OS-accessible TLS 1.3 secure transport.",
+      "Port existing source and selectively integrate pinned current libraries, preserving licenses and patches.",
+      "Preserve the project's full Windows API compatibility aspiration separately from application results."
+    ],
+    "scope_policy": "These finite mandatory checks are minimum acceptance gates, not proof of every modern application or all suite features; expand a versioned app/feature matrix without dropping existing requirements.",
+    "compatibility_percentage_claimed": null,
+    "complete_claimed": false
+  },
+  "evidence_policy": {
+    "allowed_receipt_states": [
+      "NOT_RUN",
+      "BLOCKED",
+      "FAIL",
+      "GUEST_PASS"
+    ],
+    "host_tests_are_guest_pass": false,
+    "export_or_import_match_is_functional_pass": false,
+    "observer_exit_zero_is_functional_pass": false,
+    "window_visible_is_functional_pass": false,
+    "forced_termination_is_clean_exit": false,
+    "linux_host_or_standalone_kernel64_is_win98_integration": false,
+    "older_version_satisfies_latest_target": false,
+    "source_port_equals_official_binary": false,
+    "direct_tls_library_equals_system_api": false,
+    "system_tls_equals_all_app_network_paths": false,
+    "required_receipt_fields": [
+      "contract_version",
+      "check_id",
+      "result",
+      "tested_at",
+      "guest_os_and_execution_domain",
+      "cold_boot_identity",
+      "cpu_architecture",
+      "app_version",
+      "official_archive_digest",
+      "executed_file_digest",
+      "core_provider_library_and_port_revision_digests",
+      "launch_command_and_flags",
+      "endpoint_or_fixture_identity",
+      "expected_result",
+      "observed_result",
+      "evidence_paths_and_digests"
+    ],
+    "pass_policy": "Require all applicable app and global gates to have reproducible GUEST_PASS receipts in the claimed execution domain; BLOCKED, NOT_RUN and FAIL remain incomplete. Do not hide security/feature changes behind launch flags.",
+    "network_tests": "Use controlled TLS endpoints and approved test accounts/counterparts; do not embed credentials or perform unapproved real-account messaging."
+  },
+  "sources": [
+    {
+      "id": "legcord_release",
+      "url": "https://github.com/Legcord/Legcord/releases/tag/v1.3.0",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "legcord_release_metadata",
+      "url": "https://api.github.com/repos/Legcord/Legcord/releases/latest",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "legcord_package",
+      "url": "https://raw.githubusercontent.com/Legcord/Legcord/v1.3.0/package.json",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "electron_43_platforms",
+      "url": "https://raw.githubusercontent.com/electron/electron/v43.2.0/README.md",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "signal_release",
+      "url": "https://github.com/signalapp/Signal-Desktop/releases/tag/v8.28.0",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "signal_release_metadata",
+      "url": "https://api.github.com/repos/signalapp/Signal-Desktop/releases/latest",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "signal_package",
+      "url": "https://raw.githubusercontent.com/signalapp/Signal-Desktop/v8.28.0/package.json",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "signal_windows_update_metadata",
+      "url": "https://updates.signal.org/desktop/latest.yml",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "signal_install_requirements",
+      "url": "https://support.signal.org/hc/en-us/articles/360008216551-Installing-Signal",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "electron_44_platforms",
+      "url": "https://raw.githubusercontent.com/electron/electron/v44.1.0/README.md",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "libreoffice_download",
+      "url": "https://www.libreoffice.org/download/",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "libreoffice_requirements",
+      "url": "https://www.libreoffice.org/system-requirements/",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "libreoffice_artifact_metadata",
+      "url": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/win/x86_64/LibreOffice_26.8.0_Win_x86-64.msi.mirrorlist",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "onlyoffice_release",
+      "url": "https://github.com/ONLYOFFICE/DesktopEditors/releases/tag/v9.4.0",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "onlyoffice_release_metadata",
+      "url": "https://api.github.com/repos/ONLYOFFICE/DesktopEditors/releases/latest",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    },
+    {
+      "id": "onlyoffice_requirements",
+      "url": "https://helpcenter.onlyoffice.com/desktop/installation/desktop-sys-reqs-windows.aspx",
+      "verified_on_client_date": "2026-10-01",
+      "timezone": "Asia/Seoul",
+      "kind": "primary_upstream"
+    }
+  ],
+  "new_required_apps": [
+    {
+      "id": "legcord",
+      "name": "Legcord",
+      "version": "1.3.0",
+      "version_role": "latest_stable_at_source_snapshot",
+      "publisher_windows_architectures": [
+        "ia32",
+        "x64",
+        "arm64"
+      ],
+      "publisher_minimum_windows": "Windows 10 (Electron 43.2.0 platform policy)",
+      "artifact": {
+        "url": "https://github.com/Legcord/Legcord/releases/download/v1.3.0/Legcord-1.3.0-win-ia32.zip",
+        "size_bytes": 153902184,
+        "digest": {
+          "algorithm": "sha256",
+          "encoding": "hex",
+          "value": "f348283e64cb1aaaccb7fd3a4d7851c3c95131eef38fa087dc243dbbb604341c",
+          "origin": "publisher_metadata"
+        },
+        "sources": [
+          "legcord_release_metadata"
+        ],
+        "downloaded_by_this_task": false,
+        "binary_pe_inspected_by_this_task": false
+      },
+      "runtime": {
+        "electron": "43.2.0",
+        "source_build_node": ">=26",
+        "source_build_package_manager": "pnpm@11.10.0"
+      },
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "legcord.login",
+        "legcord.messages",
+        "legcord.attachments",
+        "legcord.voice",
+        "legcord.relaunch",
+        "tls13.app_path"
+      ],
+      "known_gaps": [
+        "An official ia32 package exists, but NT loader/API, Electron multiprocess semantics, graphics, real Discord connectivity and guest functionality remain unverified for this artifact.",
+        "Published architecture labels have not been confirmed by this task's PE inspection."
+      ],
+      "sources": [
+        "legcord_release",
+        "legcord_package",
+        "electron_43_platforms"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts": [],
+      "release_published_at_utc": "2026-07-26T18:56:07Z"
+    },
+    {
+      "id": "signal",
+      "name": "Signal Desktop",
+      "version": "8.28.0",
+      "version_role": "latest_stable_at_source_snapshot",
+      "publisher_windows_architectures": [
+        "x64",
+        "arm64"
+      ],
+      "publisher_minimum_windows": "10.0.10240 (Windows 10); Windows 10/11 support page",
+      "artifact": {
+        "url": "https://updates.signal.org/desktop/signal-desktop-win-x64-8.28.0.exe",
+        "size_bytes": 141981864,
+        "digest": {
+          "algorithm": "sha512",
+          "encoding": "base64",
+          "value": "jCEuerFSe9HiVtES7y40Wk+VmrzI7VOCpuB61WRLeZRv3JJdn7KN15ZRnWMItFGE+35QyAOoIPPE4LlLBHvmgw==",
+          "origin": "publisher_metadata"
+        },
+        "sources": [
+          "signal_windows_update_metadata"
+        ],
+        "downloaded_by_this_task": false,
+        "binary_pe_inspected_by_this_task": false
+      },
+      "runtime": {
+        "electron": "44.1.0",
+        "source_build_node": "24.19.0",
+        "source_build_package_manager": "pnpm@11.24.0",
+        "native_modules": {
+          "@signalapp/libsignal-client": "0.100.0",
+          "@signalapp/ringrtc": "2.71.0",
+          "@signalapp/sqlcipher": "4.1.0"
+        }
+      },
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "signal.link",
+        "signal.messages",
+        "signal.attachments",
+        "signal.call",
+        "signal.relaunch",
+        "tls13.app_path"
+      ],
+      "known_gaps": [
+        "Official Windows builds and Electron 44.1.0 are x64/ARM64, so the Win98 x86 wrapper path cannot directly load the official target.",
+        "Latest-source x86 rebuilding, if pursued, is a separate port artifact with its own patches, hashes and native-module builds; no prior app version can satisfy this pin.",
+        "Linking, encrypted message storage, native module execution and calls remain unverified."
+      ],
+      "sources": [
+        "signal_release",
+        "signal_package",
+        "signal_windows_update_metadata",
+        "signal_install_requirements",
+        "electron_44_platforms"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts": [],
+      "release_published_at_utc": "2026-09-23T21:28:17Z",
+      "windows_update_metadata_release_date_utc": "2026-09-23T21:40:14.407Z"
+    },
+    {
+      "id": "libreoffice",
+      "name": "LibreOffice",
+      "version": "26.8.0",
+      "version_role": "latest_stable_at_source_snapshot",
+      "publisher_windows_architectures": [
+        "x86-64",
+        "arm64"
+      ],
+      "publisher_minimum_windows": "Windows 10/11 (current publisher requirements)",
+      "artifact": {
+        "url": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/win/x86_64/LibreOffice_26.8.0_Win_x86-64.msi",
+        "size_bytes": 374906880,
+        "digest": {
+          "algorithm": "sha256",
+          "encoding": "hex",
+          "value": "4aa6c6e1895f4055104effcb556bd3362d20c6ad707c149543304f395ef9db95",
+          "origin": "publisher_metadata"
+        },
+        "sources": [
+          "libreoffice_artifact_metadata"
+        ],
+        "downloaded_by_this_task": false,
+        "binary_pe_inspected_by_this_task": false
+      },
+      "runtime": {
+        "source_port_policy": "Use the same 26.8.0 source revision and record all architecture/backport changes; exact dependencies must be pinned by the suite owner."
+      },
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "office.document",
+        "office.spreadsheet",
+        "office.presentation",
+        "office.pdf",
+        "office.dialogs"
+      ],
+      "known_gaps": [
+        "The current official Windows download offers x86-64/ARM64; x86 Win98 API shims alone cannot execute this official x64 installer/app payload.",
+        "Installer acceptance, source-port completeness, real document rendering, formulas, save/cold reopen and native dialogs remain unverified."
+      ],
+      "sources": [
+        "libreoffice_download",
+        "libreoffice_requirements",
+        "libreoffice_artifact_metadata"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts": [],
+      "artifact_last_modified_at_utc": "2026-08-24T10:54:49Z"
+    },
+    {
+      "id": "onlyoffice",
+      "name": "ONLYOFFICE Desktop Editors",
+      "version": "9.4.0",
+      "version_role": "latest_stable_at_source_snapshot",
+      "publisher_windows_architectures": [
+        "x86",
+        "x64",
+        "arm64"
+      ],
+      "publisher_minimum_windows": "Windows XP for 32-bit; Windows Vista for 64-bit (publisher requirements page)",
+      "artifact": {
+        "url": "https://github.com/ONLYOFFICE/DesktopEditors/releases/download/v9.4.0/DesktopEditors_x86.zip",
+        "size_bytes": 582858718,
+        "digest": {
+          "algorithm": "sha256",
+          "encoding": "hex",
+          "value": "5eba4b785c5366023de6deaba478da1d18624211561f0a8306da4ca9bd053e1a",
+          "origin": "publisher_metadata"
+        },
+        "sources": [
+          "onlyoffice_release_metadata"
+        ],
+        "downloaded_by_this_task": false,
+        "binary_pe_inspected_by_this_task": false
+      },
+      "runtime": {
+        "runtime_inventory": "The exact bundled browser/CRT/native dependencies must be inventoried from this artifact by the suite owner; no version is guessed."
+      },
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "office.document",
+        "office.spreadsheet",
+        "office.presentation",
+        "office.pdf",
+        "office.dialogs"
+      ],
+      "known_gaps": [
+        "An official x86 portable artifact exists, but XP support does not establish Win98 support.",
+        "Bundled runtime loading, real native controls, format conversion, save/cold reopen and clean exit remain unverified."
+      ],
+      "sources": [
+        "onlyoffice_release",
+        "onlyoffice_requirements"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts": [],
+      "release_published_at_utc": "2026-05-19T09:55:56Z"
+    }
+  ],
+  "retained_targets": [
+    {
+      "id": "chromium_x86",
+      "version": "156.0.8076.0 / r1705698",
+      "architecture": "x86",
+      "version_role": "existing_pinned_target",
+      "artifact_url": "https://storage.googleapis.com/chromium-browser-snapshots/Win/1705698/chrome-win.zip",
+      "sha256": "2ff3b6bafda988752817b4eda7ee74e0842535bc513eb985a8194dfa08bad6c0",
+      "digest_origin": "retained_repository_receipt_not_recomputed_by_this_task",
+      "repository_evidence": "docs/TARGET_APPS.md",
+      "upstream_latest_rechecked_by_this_task": false,
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "browser.function",
+        "tls13.app_path"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts_added_by_this_task": []
+    },
+    {
+      "id": "chromium_x64",
+      "version": "157.0.8079.0 / r1706750",
+      "architecture": "x64",
+      "version_role": "existing_pinned_target",
+      "artifact_url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1706750/chrome-win.zip",
+      "sha256": "804da77eb033ac837a559f259c7e831d9440c28697f6647e860b123a410949a7",
+      "digest_origin": "retained_repository_receipt_not_recomputed_by_this_task",
+      "repository_evidence": "docs/shizukudos10/reports/K4.md",
+      "upstream_latest_rechecked_by_this_task": false,
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "browser.function",
+        "tls13.app_path"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts_added_by_this_task": []
+    },
+    {
+      "id": "supermium",
+      "version": "144.0.7559.256 R5",
+      "architecture": "x86",
+      "version_role": "existing_pinned_target",
+      "artifact_url": "https://github.com/win32ss/supermium/releases/tag/v144-r5",
+      "sha256": "17acfcdf89ea651905053b50b0fce5a28db19cb2c69ed5579c7b177806ed6d31",
+      "digest_origin": "retained_repository_receipt_not_recomputed_by_this_task",
+      "repository_evidence": "docs/TARGET_APPS.md",
+      "upstream_latest_rechecked_by_this_task": false,
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "browser.function",
+        "tls13.app_path"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts_added_by_this_task": []
+    },
+    {
+      "id": "vlc",
+      "version": "3.0.24",
+      "architecture": "x86",
+      "version_role": "existing_pinned_target",
+      "artifact_url": "https://get.videolan.org/vlc/3.0.24/win32/vlc-3.0.24-win32.zip",
+      "sha256": "8511356afd680817f3aea624c63032d0936f3d77b2175fb36c8fc16adf9744e8",
+      "digest_origin": "retained_repository_receipt_not_recomputed_by_this_task",
+      "repository_evidence": "docs/TARGET_APPS.md",
+      "upstream_latest_rechecked_by_this_task": false,
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "vlc.playback"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts_added_by_this_task": []
+    },
+    {
+      "id": "notepadpp",
+      "version": "8.9.8",
+      "architecture": "x86",
+      "version_role": "existing_pinned_target",
+      "artifact_url": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/tag/v8.9.8",
+      "sha256": "880c5c5323305154aaed3fa5238d6186cda3bcfa3a82645243c1e7999e35602a",
+      "digest_origin": "retained_repository_receipt_not_recomputed_by_this_task",
+      "repository_evidence": "docs/TARGET_APPS.md",
+      "upstream_latest_rechecked_by_this_task": false,
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "notepad.edit"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts_added_by_this_task": []
+    },
+    {
+      "id": "vscode_official",
+      "version": "1.138.0",
+      "architecture": "x64",
+      "version_role": "existing_pinned_target",
+      "artifact_url": "https://update.code.visualstudio.com/1.138.0/win32-x64-archive/stable",
+      "sha256": "c0a9f12a0d8962fa4cda1959eecd5fdd3f82de9715ad4dadd5601856bb60fd21",
+      "digest_origin": "retained_repository_receipt_not_recomputed_by_this_task",
+      "repository_evidence": "docs/TARGET_APPS.md",
+      "upstream_latest_rechecked_by_this_task": false,
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "editor.function"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts_added_by_this_task": []
+    },
+    {
+      "id": "vscodium",
+      "version": "1.135.06055",
+      "architecture": "x64",
+      "version_role": "existing_pinned_target",
+      "artifact_url": "https://github.com/VSCodium/vscodium/releases/tag/1.135.06055",
+      "sha256": "0bec978f201238624bc9ad43966f5e201ed8afacc37d77035a822252d9c9c200",
+      "digest_origin": "retained_repository_receipt_not_recomputed_by_this_task",
+      "repository_evidence": "docs/shizukudos10/reports/E1.md",
+      "upstream_latest_rechecked_by_this_task": false,
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "editor.function"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts_added_by_this_task": []
+    },
+    {
+      "id": "electron_fixture",
+      "version": "44.5.0",
+      "architecture": "x64",
+      "version_role": "existing_runtime_fixture_not_legcord_or_signal_pass",
+      "artifact_url": "https://github.com/electron/electron/releases/download/v44.5.0/electron-v44.5.0-win32-x64.zip",
+      "sha256": "b3405d8847bc5054cd16272f538d22ba5b73032945e85cef26241f7135035278",
+      "digest_origin": "retained_repository_receipt_not_recomputed_by_this_task",
+      "repository_evidence": "docs/shizukudos10/reports/E1.md",
+      "upstream_latest_rechecked_by_this_task": false,
+      "required_checks": [
+        "guest.identity",
+        "app.launch",
+        "app.input",
+        "app.shutdown",
+        "app.cold_reopen",
+        "theme.apps",
+        "browser.function"
+      ],
+      "functional_pass_claimed": false,
+      "guest_receipts_added_by_this_task": []
+    }
+  ],
+  "retained_historical_inputs": [
+    {
+      "id": "chromium_x86_previous",
+      "version": "150.0.7871.0 / r1639845",
+      "architecture": "x86",
+      "sha256": "9c3601da8237f3cb22022cd222f06b92f06d88d0674c4f242d1590bec89af97a",
+      "repository_evidence": "docs/TARGET_APPS.md",
+      "role": "historical_probe_not_latest_target"
+    },
+    {
+      "id": "electron_previous",
+      "version": "44.4.5",
+      "architecture": "x64",
+      "sha256": "11c395820a5aaa8ebcc0686b476d0ac98a730274ebfbdc8cf5538a7c2815cb5d",
+      "repository_evidence": "docs/shizukudos10/ELECTRON_TARGET.md",
+      "role": "older_static_audit_fixture_not_latest_app_proof"
+    }
+  ],
+  "unresolved_corpus_entries": [
+    {
+      "id": "discord_official",
+      "repository_evidence": "docs/shizukudos10/reports/E1.md",
+      "version": null,
+      "artifact_digest": null,
+      "status": "NEEDS_VERSION_AND_ARTIFACT_PIN",
+      "note": "Legcord/Discord functionality is required; a Legcord result does not establish the separate official Discord binary."
+    },
+    {
+      "id": "steam",
+      "repository_evidence": "docs/shizukudos10/screenshots/README.md",
+      "version": null,
+      "artifact_digest": null,
+      "status": "RETAINED_BUT_NEEDS_VERSION_AND_FEATURE_CONTRACT"
+    },
+    {
+      "id": "vscode_upstream_seen",
+      "version": "1.139.1",
+      "artifact_digest": null,
+      "repository_evidence": "docs/shizukudos10/reports/E1.md",
+      "status": "PEER_REPORTED_TAG_NOT_REVERIFIED_BY_THIS_TASK",
+      "note": "Keep the existing official 1.138.0 corpus pin until a newer official artifact is acquired and the acceptance matrix explicitly updated."
+    },
+    {
+      "id": "office_family_general",
+      "version": null,
+      "status": "ASPIRATION_RETAINED_NEEDS_EXPANDING_APP_AND_FEATURE_MATRIX"
+    },
+    {
+      "id": "modern_apps_general",
+      "version": null,
+      "status": "ASPIRATION_RETAINED_NEEDS_EXPANDING_APP_AND_FEATURE_MATRIX"
+    }
+  ],
+  "existing_implementation_snapshot": {
+    "nature": "Repository-document snapshot, not rerun by this task.",
+    "evidence": [
+      "docs/TARGET_APPS.md",
+      "docs/shizukudos10/STATUS.md",
+      "docs/shizukudos10/reports/K4.md",
+      "docs/shizukudos10/reports/K5.md",
+      "docs/shizukudos10/reports/E1.md",
+      "ntwin32/README.md",
+      "ntwddm/include/nttheme.h"
+    ],
+    "findings": [
+      "Kernel64 direct UEFI/TCG and Win64 fixture guest evidence exist; the older Supervisor-only VMX blocker must not erase them.",
+      "Chromium 157 x64 startup and crashpad child execution are recorded, with later startup checks still failing before browser-function milestones; this is not a rendered browser pass.",
+      "Electron/VSCodium peer guest trials stop at load-time imports in the recorded E1 tree; exact missing imports are revision-specific and must be remeasured after merges.",
+      "NTWin32Wrapper9x PE32 preparation rejects PE32+; it cannot by itself execute official Signal/LibreOffice x64 payloads.",
+      "The NTWDDM theme painter and builtin theme files are source assets, not evidence of actual desktop/native-control persistence.",
+      "No new-app functional receipts, system-wide TLS 1.3 receipts or theme-integration pass are supplied by this contract.",
+      "Historical Notepad++ editing/save evidence and its Save As/shutdown failures remain separate; no full pass is promoted here."
+    ],
+    "results_added_by_this_task": []
+  },
+  "global_required_checks": [
+    "theme.apply",
+    "theme.controls",
+    "theme.persist",
+    "theme.apps",
+    "tls13.valid",
+    "tls13.untrusted",
+    "tls13.hostname",
+    "tls13.expired",
+    "tls13.not_yet_valid",
+    "tls13.tamper",
+    "tls13.no_downgrade",
+    "tls13.system_api",
+    "tls13.app_path"
+  ],
+  "checks": [
+    {
+      "id": "guest.identity",
+      "requirement": "Capture the Windows 98 host identity, any companion Kernel64 domain identity, cold-boot receipt, CPU architecture, actual process execution domain and desktop presentation path; a Linux host or standalone Kernel64 run does not prove Windows 98 integration.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "app.launch",
+      "requirement": "Run the pinned app entry point with its complete packaged data/native-module tree; capture loader errors, main and helper process identities, responsive actual app UI and the tested launch flags.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "app.input",
+      "requirement": "Enter and read back Korean text and Unicode emoji through real keyboard/IME, copy/paste and pointer interaction; verify focus and window resize without crashes.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "app.shutdown",
+      "requirement": "Close through the application's normal UI, observe all owned helper processes exit, reject forced termination, crash dialogs and unhandled exceptions as a clean shutdown.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "app.cold_reopen",
+      "requirement": "Shut down the guest normally, cold boot it, reopen the exact app artifact and verify the stored settings and app-specific saved data.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "theme.apply",
+      "requirement": "Select at least two supported themes from the actual guest settings UI; verify the desktop, title bars and controls change and still respond.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "theme.controls",
+      "requirement": "Exercise real native buttons, edits, menus, checkbox/radio controls, scrollbars and file dialogs in normal, hover, pressed, focused and disabled states where applicable; inspect pixels and behavior.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "theme.persist",
+      "requirement": "Save a selected theme, relaunch applications and cold boot the guest; verify the active persisted theme and repaint of new native controls.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "theme.apps",
+      "requirement": "Verify native chrome and each app's supported theme setting using actual Legcord, Signal and Office windows; record custom-rendered content separately from native control coverage.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "legcord.login",
+      "requirement": "Authenticate to Discord in the actual Legcord app with approved test credentials and verify the chosen conversation is usable; a login page alone is insufficient.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "legcord.messages",
+      "requirement": "Send and receive unique test messages containing Korean and emoji with an approved test counterpart, and verify the counterpart receipt and reopened conversation.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "legcord.attachments",
+      "requirement": "Transfer a known fixture file both ways and compare its SHA-256 after download on the receiving side.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "legcord.voice",
+      "requirement": "Establish and close a voice session with the approved test counterpart; verify microphone/speaker audio and preserve failures as unresolved features.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "legcord.relaunch",
+      "requirement": "Normally close and relaunch, then cold reopen; verify authenticated state, settings, theme and conversation without a crash or forced reset.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "signal.link",
+      "requirement": "Display a live QR code and complete desktop linking with an approved Signal mobile test device; merely rendering a QR image is insufficient.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "signal.messages",
+      "requirement": "Send and receive unique encrypted test messages containing Korean and emoji with an approved test counterpart; verify both endpoints and cold-reopened history.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "signal.attachments",
+      "requirement": "Transfer a known file both ways and compare hashes; confirm the real libsignal and encrypted local database modules load and operate.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "signal.call",
+      "requirement": "Establish and close a voice/video call using the app's supported UI and real RingRTC path; record unsupported devices/features rather than substituting a mock.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "signal.relaunch",
+      "requirement": "Cold reopen the same installation and verify linked-device state, message history, theme and successful further messaging with intact encrypted storage.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "office.document",
+      "requirement": "In each required suite, create/open a document with Korean, styled text and a table; edit and save DOCX and ODT, normally close, cold reopen both and inspect the edited content/layout.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "office.spreadsheet",
+      "requirement": "In each required suite, edit a sheet with a formula and chart, trigger recalculation, save XLSX and ODS, cold reopen and verify formula values, chart and Korean cells.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "office.presentation",
+      "requirement": "In each required suite, edit a slide deck with Korean and images, run its slideshow, save PPTX and ODP, cold reopen and verify content and slide display.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "office.pdf",
+      "requirement": "Export the edited office fixtures to PDF, reopen the output independently and verify Korean text, pagination and chart/slide content.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "office.dialogs",
+      "requirement": "Use actual New/Open/Save As dialogs and new destination paths; verify output files on guest storage. Existing-file save alone is insufficient.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.valid",
+      "requirement": "From the guest transport client, connect to a controlled independent TLS server offering TLS 1.3 only; verify chain, hostname and validity, negotiate TLSv1.3, exchange and compare application payloads, and close normally.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.untrusted",
+      "requirement": "Reject an otherwise valid peer chained to an untrusted root before releasing application payload to the caller.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.hostname",
+      "requirement": "Reject a peer whose SAN does not match the requested hostname; do not bypass hostname verification or count encryption-only success.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.expired",
+      "requirement": "Reject an expired peer certificate against the documented guest clock and validity policy.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.not_yet_valid",
+      "requirement": "Reject a peer certificate with a future notBefore value against the same controlled clock.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.tamper",
+      "requirement": "Reject a corrupted chain signature or tampered encrypted record without delivering unverified application data.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.no_downgrade",
+      "requirement": "With the client constrained to TLS 1.3, reject a server offering only TLS 1.2 and record the negotiated version on successful trials.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.system_api",
+      "requirement": "Run a separately built client through the actual supported OS public transport API/provider, with the same positive and negative certificate checks; a direct library fixture alone does not satisfy this gate.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "tls13.app_path",
+      "requirement": "Identify and test the transport implementation actually used by each network app; an OS provider success does not establish Electron/BoringSSL or Signal native-module compatibility.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "browser.function",
+      "requirement": "Render a known local page, execute JavaScript, use real input, fetch a controlled HTTPS fixture through the app and close cleanly; loader progress and --dump-dom alone are separate milestones.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "vlc.playback",
+      "requirement": "Discover actual packaged plugins, play a known audio/video fixture with visible video and audible audio, seek and close cleanly.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "notepad.edit",
+      "requirement": "Create a new Korean/Unicode file, use Save As, reopen and edit it, save and close normally; preserve the historical shutdown/Save As gaps until retested.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "editor.function",
+      "requirement": "In official VS Code and separately VSCodium, edit/save/cold reopen a fixture, run the integrated terminal and a supported extension; VSCodium is not an official VS Code pass.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "trident.html_dom_css",
+      "requirement": "In actual Windows 98 Trident browser validate HTML parsing, DOM mutations, CSS layout, events and Korean input against identified upstream fixtures and interactive pages.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "trident.javascript",
+      "requirement": "Execute actual modern JavaScript and asynchronous browser APIs in the integrated Trident browser; record precise upstream revision and passed/failing conformance cases.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "trident.wasm",
+      "requirement": "In actual integrated Trident browser validate, instantiate and execute real WebAssembly modules and JS/host imports; reject malformed modules and report the actual supported feature subset.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "trident.https",
+      "requirement": "Fetch a controlled HTTPS fixture through the Trident browser network path with real TLS1.3 and negative certificate tests; direct backend/library execution does not count as browser HTTPS.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    }
+  ],
+  "browser_engine_direction": {
+    "user_clarified": "2026-10-01",
+    "engine": "Trident",
+    "full_webkit_port_required": false,
+    "target": "Actual modern HTML5/DOM/CSS, WebAssembly and modern JavaScript functionality; user requests 2026 web standards",
+    "strategy": "Extend existing Trident-based browser, combine source ports with modern libraries; preserve separate Chromium/Electron app goals",
+    "status": "REQUIREMENT-NOT-A-CONFORMANCE-RESULT",
+    "shared_handoff": "/root/Win98-Modern/.codex-collaboration/7707-trident-direction-20261001.json"
+  }
+}

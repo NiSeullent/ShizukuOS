@@ -1,0 +1,11 @@
+LIBRARY M98TLS13
+EXPORTS
+    m98_tls_create
+    m98_tls_handshake
+    m98_tls_write
+    m98_tls_read
+    m98_tls_shutdown
+    m98_tls_backend_error
+    m98_tls_verify_flags
+    m98_tls_is_established
+    m98_tls_free

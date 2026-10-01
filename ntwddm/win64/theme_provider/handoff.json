@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "status": "STATIC_CANDIDATE_READY_FOR_GUEST_TEST",
+  "build_tool": "ntwddm/win64/theme_provider/build.py",
+  "candidate_receipt": "/root/Win98-Modern-theme-6970/ntwddm/win64/theme_provider/build/20261001T075428Z-c6a4cba4/result.json",
+  "candidate_receipt_sha256": "d600690879ef79edd2f871faf6676989dbe4745eb09afd48407ef7db1cbb63b3",
+  "candidate_dll": "/root/Win98-Modern-theme-6970/ntwddm/win64/theme_provider/build/20261001T075428Z-c6a4cba4/UXTHEME.DLL",
+  "candidate_dll_sha256": "f8e69da3c430f9b237fc490ea5f72cae8d3bcffab5b1efc77208ead22ce95442",
+  "candidate_dll_bytes": 40341,
+  "default_style": "modern; explicitly selected at build; application-local lazy initialization outside DllMain",
+  "exports": {
+    "shared_engine_exports": 22,
+    "additional_named_exports": ["GetThemePartSize", "DrawThemeBackgroundEx"],
+    "ordinal_47": "DrawThemeBackgroundEx"
+  },
+  "host_checks": {
+    "shared_engine_normal_and_sanitized": 312,
+    "extensions_normal_and_sanitized": 507,
+    "private_unicode_transport_normal_and_sanitized": 878,
+    "all_default_styles_normal_and_sanitized": 192,
+    "actual_windows_abi_execution_verified": false,
+    "extension_draw_test_uses_gdi_mock": true
+  },
+  "consumer": {
+    "runtime_dir": "/root/Win98-Modern-apps-cb43/build/shizukudos/win64",
+    "dll_count": 51,
+    "missing_imports": {
+      "USER32.DLL": [],
+      "GDI32.DLL": [],
+      "KERNEL32.DLL": []
+    },
+    "remaining_work": [
+      "Test loader, window properties, GDI drawing, font conversion, clipping, style switching and cleanup in the actual Kernel64 guest.",
+      "Verify unsupported text options and icon-title SPI endpoint failures remain explicit; no success stub is supplied.",
+      "Retain native Win98 GUI bridge and full Signal functionality as separate required acceptance work."
+    ]
+  },
+  "verified": {
+    "native_win98_execution": false,
+    "kernel64_execution": false,
+    "signal_functionality": false,
+    "os_wide_themes": false
+  },
+  "installation": "not_performed",
+  "peer_sources_modified": false
+}

@@ -57,6 +57,31 @@ Project source code and the KernelEx ABI adaptation are distributed under GPL-2.
 - `integration/core.ini`: copy of KernelEx [`apilibs/core.ini`](https://github.com/metaxor/KernelEx/blob/31cdfc3560fc116637ee8ed7be31b12f3aacf5d1/apilibs/core.ini), its default `contents` extended with the project KERNEL32, Shell, and ADVAPI API libraries, and explicit named-locale, Shell, and ADVAPI routes added in three compatibility profiles. It is a source example, not a replacement for an installed guest's entire configuration.
 
 Wine and ReactOS are not bundled as complete runtimes. Their NT/Unix kernel dependencies are incompatible with direct use in Windows 98. The ISO and installation key supplied for testing remain outside version control.
+
+## Optional modern theme and transport components
+
+- `src/uxtheme_engine*` and the additive `ntth_query_part` are independently
+  authored GPL-2.0-only adapters around the existing project painter. Pinned
+  Wine and ReactOS UXTHEME contract references are recorded in the native
+  source; their implementation bodies were not copied. This opt-in provider
+  does not replace the existing KernelEx KnownDLL automatically.
+- `src/m98_tls13*` and `tools/build_tls13.py` use official Mbed TLS 4.2.0 with
+  bundled TF-PSA-Crypto 1.2.0. Both exact LICENSE files offer Apache-2.0 OR
+  GPL-2.0-or-later; this build selects GPL version 2. The upstream archive hash,
+  source verification, license hashes and build receipts are kept by the build
+  tool. Upstream code remains in ignored `build/tls13/upstream/`; a distributed
+  linked binary must include the selected license notices and corresponding
+  pinned source/build configuration. See `docs/MODERN_THEME_TLS_APPS.md`.
+- `ntwin32/secure_transport/` separately links verified official Mbed TLS
+  3.6.7 for its LTS transport and explicit SSPI adapter. The upstream license
+  is Apache-2.0 OR GPL-2.0-or-later; this combination selects GPL version 2.
+  Its archive identity, original adapter code, compiler-helper notices and
+  redistribution requirements are recorded in
+  `ntwin32/secure_transport/PROVENANCE.md`. Upstream sources and private test
+  certificates remain in ignored build storage. This optional TLS backend is
+  an external dependency of that component, separate from the independently
+  authored platform sources below.
+
 ## Independent platform path
 
 The new `ntwrapper/`, `ntwin32/`, `ntwddm/`, `drivers/pcie/`,
@@ -107,3 +132,19 @@ The exact301-record output and extraction receipt are documented in
 locale parser, Win98 registry/version/NLS adapters are independently written
 GPL2.0-only project code. The source and data attribution remain in the table
 header; supported lookup fields do not imply full modern geography/NLS support.
+
+## Private modern graphics and Korean font corpus
+
+- `ntwddm/graphics_backend/` links the selected real Mesa 26.2.3 TGSI and
+  scalar support sources from a SHA-pinned official archive. Its fresh build
+  copies the complete reviewed selected originals, prepared source and
+  applicable Mesa MIT, SoftFloat BSD and BSL notices into ignored build storage.
+  Original resource/FP/consumer code uses GPL-2.0-only. This is a private rendering
+  prerequisite; it does not include a complete GL/Vulkan driver or establish
+  DirectX device support. See `docs/DIRECTX_GRAPHICS_CONTINUATION_6970.md`.
+- `tools/dwrite_font_corpus.py` obtains unmodified official Noto Sans CJK KR
+  font bytes from an immutable notofonts/noto-cjk publisher commit, with exact
+  publisher Git blob and local SHA-256 identities. It retains the SIL Open Font
+  License 1.1 and publisher README in private ignored build storage. No font is
+  installed or registered by the corpus tool. See
+  `docs/DIRECTWRITE_FONT_CORPUS_6970.md`.

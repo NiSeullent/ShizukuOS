@@ -1,0 +1,6 @@
+{
+  "license": "GPL-2.0-only",
+  "original_probe": "/root/Win98-Modern-theme-6970/ntwddm/win64/memory_probe/probe.c",
+  "original_probe_sha256": "7a280be2cdda46f7cd4fc2c405776d70d9e3bcbd8a4705204ed4aa49167c6e68",
+  "derivation": "Preserves original real memory trials; new entry rejects the exact absent fibers contract and tries ExW/ExA SYSTEM32 plus plain/absolute Kernelbase before all file inspection."
+}

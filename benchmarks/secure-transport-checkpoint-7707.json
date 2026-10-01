@@ -1,0 +1,215 @@
+{
+  "schema": "win98modern.secure-transport-checkpoint.v1",
+  "date_utc": "2026-09-30",
+  "branch": "codex/tls13-7707",
+  "base": "abc160b",
+  "verification": {
+    "status": "PASS",
+    "scope": "Frozen build/static/handoff evidence only",
+    "host_protocol_checks": 11,
+    "native_pe_artifacts": 3,
+    "dll_exports": 13,
+    "dll_relocations": true,
+    "guest_83_inputs": 8,
+    "host_receipt_sha256": "6851a064ed6a168a72840023bc38d458cbef48464fafa5613c05a52ec6be710a",
+    "native_receipt_sha256": "e80ac28e5ea1ac5c719c4f2223a0f1017d3f27ae03d5972d625d560b6f688494",
+    "manifest_sha256": "9b88a8ef866dab8c80349afe754d3d3ff838b5438debbb7184ecc9b72858c13f",
+    "verifier_sha256": "ba871e68466c60322ac6bfff40062ff087c2173b08ee2551d99feca8039e9c5e",
+    "native_guest_verified": false,
+    "system_schannel_verified": false,
+    "application_functionality_verified": false
+  },
+  "host_build_receipt": "/root/Win98-Modern-tls13-7707/build/secure-transport/host-v3/build-result.json",
+  "native_build_receipt": "/root/Win98-Modern-tls13-7707/build/secure-transport/native-v3/build-result.json",
+  "guest_manifest": "/root/Win98-Modern-boot/build/secure-transport-7707/tls13-v3-dos/guest-files.json",
+  "remaining": [
+    "Actual Windows98 LoadLibrary/relocation/CRT and clock/RNG/TLS guest execution",
+    "Socket/DNS, CA store and Schannel/WinHTTP/WinINet provider integration",
+    "Persistent actual desktop/application themes",
+    "Current Legcord/Signal/Office functionality and cold reopen"
+  ],
+  "guest_execution_gate": {
+    "minimum_free_bytes": 21474836480,
+    "observed_free_bytes": 12354646016,
+    "guest_started": false,
+    "guard_override": false
+  },
+  "application_contract": "benchmarks/modern-app-requirements-7707.json",
+  "peer_theme_tls_commit": "a12a4a9",
+  "combined_branch": {
+    "transport_commit": "2c5e2a6",
+    "peer_original_commit": "a12a4a9",
+    "peer_import_commit": "9560069",
+    "evidence": [
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/theme-engine/result.json",
+        "sha256": "4e2522f763db7d72a6b59356636285926de8e26e670bc25fe983cb3ca0e596a9"
+      },
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/host/build-result.json",
+        "sha256": "11429273e3d8e08c10a2a393938be574285a917e9cff47d016f325f2c644e1ef"
+      },
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/tests/result.json",
+        "sha256": "d940a84ae5102b443491836a9cd40c750b2182cab77a05392b10d8c06ea710e3"
+      },
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/pe32/build-result.json",
+        "sha256": "926d812c7122c110709c8aa0573cf39af1836ded66b84b83cf0418e323ae122c"
+      },
+      {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/pe32/native-import-gate.json",
+        "sha256": "74efbf580d1dfa7dc6342312a721f5bf927046762bce1ee18c4b3305e4d2eb46"
+      }
+    ],
+    "theme_host_checks": 312,
+    "theme_sanitizers_passed": true,
+    "theme_pe_artifacts": 3,
+    "latest_tls_host_cases": 16,
+    "latest_tls_pe_gate": true,
+    "inventory_regression_cases": 19,
+    "source_receipt_match": true,
+    "artifacts": {
+      "M98THEME.DLL": {
+        "path": "/root/Win98-Modern-tls13-7707/build/theme-engine/M98THEME.DLL",
+        "sha256": "c078171c90b52881dcc94f49a5dcd8314fd525d6eec846e8e498d498c3a1d365"
+      },
+      "M98THPRO.EXE": {
+        "path": "/root/Win98-Modern-tls13-7707/build/theme-engine/M98THPRO.EXE",
+        "sha256": "ee852730054371acaa531bfcf2ebdadb376a3afde753d9d705198705ce6e46cd"
+      },
+      "M98THSTA.EXE": {
+        "path": "/root/Win98-Modern-tls13-7707/build/theme-engine/M98THSTA.EXE",
+        "sha256": "f97eb38fb6a23e9432615524fea66ab2afcd1192780e385008d1cba95b45357e"
+      },
+      "M98TLS13.dll": {
+        "path": "/root/Win98-Modern-tls13-7707/build/tls13/pe32/M98TLS13.dll",
+        "sha256": "8691fa74eeb9dbf02d53f7dc45a5c15c8f9d3c9960f222112621ef6351d621b9"
+      }
+    },
+    "guest_validated": false,
+    "system_theme_installed": false,
+    "os_schannel_integrated": false,
+    "application_functionality_verified": false,
+    "integration_notes": "docs/MODERN_INTEGRATION_7707.md"
+  },
+  "continuation_20261001": {
+    "recorded_utc": "2026-10-01T07:37:28.557670+00:00",
+    "scope": "Actual host protocol tests, native static/ABI evidence, failed and queued guest trials; no system-provider acceptance",
+    "receipts": {
+      "host_v5": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/host-v5-crt/build-result.json",
+        "sha256": "4189f342c30c82820a2636be4afe4c0f2cabdae25695b2088eee19e775b34161"
+      },
+      "native_v5": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/native-v5-crt/build-result.json",
+        "sha256": "e412a3d82cbb25e915016e5f89552104c52babbaeb7e7e1ac0f1733ee20cab43"
+      },
+      "crt_abi_host": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/native-crt-host-v1/retry2/result.json",
+        "sha256": "306a383844b94140b60caef7c2016e1533c4bc5d59b067b0d2e9a56250f86336"
+      },
+      "stream_host": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/sspi-stream-host-v1/receipt.json",
+        "sha256": "fd5b420a454a36cbd3b75c86db77614525afab957b1634cf8a2e46b4df5b30e7"
+      },
+      "sspi_abi_host": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/sspi-native-v1/abi-host-root-readonly/receipt.json",
+        "sha256": "9520c30c6199208be391450992fa3455a92f4649df80866e2b1928e9d473cfd7"
+      },
+      "sspi_abi_sanitize": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/sspi-native-v1/abi-sanitize-root-readonly/receipt.json",
+        "sha256": "98286f755b9148ff224ced9c06473ec5d61cba452b45cf68a5da1b2cf5735002"
+      },
+      "sspi_native_static": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/sspi-native-v1/native-root-readonly/receipt.json",
+        "sha256": "65a79989844be91d39f536d494ef9614a6741b20dd60fa8d850ec53d1a1fc4bd"
+      },
+      "disk_cleanup": {
+        "path": "/root/Win98-Modern-tls13-7707/build/disk-cleanup-v5-7707-20261001/result.json",
+        "sha256": "38565ca72a19c529b3b1c3a92f4b8203e0321d380c278da9875dd644f661f3a4"
+      },
+      "disk_cross_audit": {
+        "path": "/root/Win98-Modern-tls13-7707/build/disk-cleanup-v5-7707-20261001/final-audit.json",
+        "sha256": "efd3d6b1526dd2da4bc023e783d808367b085f11b4bb8c1421ab749c38a63001"
+      },
+      "guest_manifest": {
+        "path": "/root/Win98-Modern-boot/build/secure-transport-7707/tls-observed-v5-crt/guest-files.json",
+        "sha256": "1097b2e9b239fc83f5a85c7731360cf0d544156638ca97b87c706238c82c2213"
+      },
+      "site_r2": {
+        "path": "/root/Win98-Modern-release-7707-v2/published-20261001T064000621364.json",
+        "sha256": "f6d3f2830613a564e3f2b9a9604f5e8ce2906dd6bf4c9ba4751071ae70fe0613"
+      },
+      "sspi_handoff": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/sspi-native-v1/HANDOFF-RECEIPT-root-readonly.json",
+        "sha256": "5e8c5bd0facdb38185fe1c4cba7b818dbd6c4da942025f5a3d3834d08559a236"
+      },
+      "disk_additional_audit": {
+        "path": "/root/Win98-Modern-tls13-7707/build/disk-cleanup-v5-7707-20261001/additional-owned-cache-audit.json",
+        "sha256": "254fa3ef0a6293ccac19602bb4005fe3b9657c62f374413721bb020f914a8e95"
+      },
+      "native_v5_preparation": {
+        "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-tls-observed-v5-7707-20261001T0718/result.json",
+        "sha256": "11fccb5be4ac5ca4e5a9b3d090a6b0b2cadb962866b12e2b3f76789180a722bc"
+      }
+    },
+    "host_protocol_checks": 11,
+    "crt_host_fault_cases": 12,
+    "sspi_stream_protocol_groups": 14,
+    "sspi_abi_model_groups": 14,
+    "sspi_abi_model_concurrent_callers": 8,
+    "sspi_abi_model_sequences_per_caller": 200,
+    "sspi_native_static_exports": 15,
+    "sspi_native_static_imports": 47,
+    "sspi_native_static_highlow_relocations": 6577,
+    "native_v4_status": "FAIL: genuine Win98 SE child exit2 and no TLS13.LOG",
+    "native_v5_status": "NOT-STARTED: final preparation reserve/dirty guard failed after concurrent peer writes; zero captures/no QEMU; temporary RAW removed by canonical cleanup; original and prepared source unchanged",
+    "native_guest_tls_verified": false,
+    "sspi_native_dll_loaded": false,
+    "sspi_native_ROOT_execution_verified": false,
+    "sspi_socket_verified": false,
+    "system_schannel_verified": false,
+    "application_functionality_verified": false,
+    "browser_engine_direction": {
+      "engine": "Trident",
+      "full_webkit_port_required": false,
+      "conformance_status": "PENDING; exact tested modern HTML/DOM/CSS, JS and WASM subset required"
+    },
+    "site": {
+      "url": "https://m98.nyase.kr/",
+      "version": "M98EVAL-20261001-R2",
+      "independent_site_notice": true,
+      "no_activation_notice": true,
+      "origin_exact_body_checks": 61,
+      "external_edge_verified": false
+    },
+    "disk": {
+      "own_removed_cache_allocated_bytes": 106160128,
+      "protected_files_unchanged": 358,
+      "filesystem_net_reclaimed_bytes_claimed": false,
+      "minimum_launch_free_bytes": 21991407616,
+      "reserve_override": false
+    },
+    "superseded_sspi_opener_receipts": {
+      "sspi_abi_host": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/sspi-native-v1/abi-host-complete/receipt.json",
+        "sha256": "789ebdf8fa6ea445f3af3e7e48d228ffcbf758752bedad49ae0f9664588d157c"
+      },
+      "sspi_abi_sanitize": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/sspi-native-v1/abi-sanitize-complete/receipt.json",
+        "sha256": "0e90be7a7c724ee4ce9e16c950d4c254b774b26187bc5f137bb6a2615c8fc576"
+      },
+      "sspi_native_static": {
+        "path": "/root/Win98-Modern-tls13-7707/build/secure-transport/sspi-native-v1/native-complete/receipt.json",
+        "sha256": "7b0f8c5e8567c2e0ff2497d1a7347cfdd740cbe002bb424dfe974fe840ab3b64"
+      }
+    },
+    "sspi_native_root_open": "CertOpenStore SYSTEM_A CURRENT_USER OPEN_EXISTING READONLY; absent store cannot be created",
+    "sspi_provenance_scope": "Explicit source/object/static-library/config/artifact hashes; implicit compiler libraries and complete SDK headers are not independently hashed",
+    "native_v5_run": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-tls-observed-v5-7707-20261001T0718",
+    "controller_admission_host_tests": 20,
+    "stopped_verifier_host_tests": 20,
+    "browser_https_handoff": "ntwin32/secure_transport/SSPI_BROWSER_INTEGRATION_7707.md"
+  }
+}
