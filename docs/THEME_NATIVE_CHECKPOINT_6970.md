@@ -562,3 +562,30 @@ to this laboratory and are not private media supplied through public source.
 No prepare or native epoch has executed at this checkpoint. No source-only
 test proves ShizukuDOS boot, actual persistence, visible desktop output or
 the final ISO.
+
+The first actual preparation stopped before any guest-file injection or VM
+launch. The host's four mtools aliases resolve to one executable, whose
+dispatcher requires the original invocation name; invoking the resolved binary
+directly returned exit 1. The exact failed clone remains byte-identical to the
+protected base. Its guarded, self-inclusive failure receipt is
+`build/global-theme-6970-bootstrap-4d67d317adf6/preparation-failure.json`, SHA256
+`3928f574e24cb2405cfcd61fe3bdfa4a66f5d53802f71660b46368d4703d0b54`;
+the four roots total 263,504 bytes, excluding that one pinned private COW.
+
+The fix pins the resolved executable and supplies only a whitelisted mtools
+role as `argv[0]` through `Popen(executable=...)`, without a shell. All four
+actual role/version calls returned zero; read-only directory, attributes and
+WIN.INI calls on the stopped failed clone also succeeded. The three added
+regressions bring the actual passing adapter count to **26**. Independent
+read-only review found no remaining material issue in this fix. Retry requires
+entirely new roots, nonce and source-bound plan; the failed trial is preserved.
+
+The dedicated optimizer subsequently confirmed 736,251,904 more bytes of
+kernel/FIEMAP sharing across seven closed derived targets, with unchanged
+whole-file contents and identities and no deletion or logical content write.
+This excludes both earlier optimizer results above. While other writers held
+the filesystem below reserve, exact plans and receipts were capped in private
+RAM directories; immutable disk copies were made only after the unchanged
+20 GiB floor plus pending receipt bytes and headroom was restored. Native and
+build admission gates were never lowered. Durable batch checkpoints are under
+`/root/Win98-Modern-boot/build/disk-optimizer-6970-ram-ranges-20261001T1657-batch{2,3,4}/`.

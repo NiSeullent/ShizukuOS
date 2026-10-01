@@ -44,6 +44,7 @@ SELECTOR_COMMAND = '"C:\\VXDLAB\\SHZTHEME.EXE"'
 ROLES = ("stage", "consumer", "run", "bootstrap")
 INPUTS = ("SHZTHEME.EXE", "SHZOBS.EXE", "SHZCASE.TXT")
 LOGS = ("SHZGLOB1.LOG", "SHZGLOB2.LOG")
+MTOOLS_ROLES = frozenset({"mcopy", "mdir", "mtype", "mattrib"})
 SNAPSHOT_FIELDS = ("PROFILE_TYPE", "PROFILE_BYTES", "PROFILE_RAW", "RUN_TYPE", "RUN_BYTES", "RUN_RAW")
 # Independently specified legacy COLORREF contract; no product/provider imports.
 SHIZOS = (0xcfcfcf, 0x452e13, 0xd77800, 0x888078, 0xf0f0f0,
@@ -373,15 +374,27 @@ def protected_sources_quiet(nr, plan):
         nr.ensure_unopened(by_role(plan, role)["path"])
 
 
-def command(argv, *, limit=65536, timeout=120):
+def command(argv, *, limit=65536, timeout=120, mtool_executable=None):
     """Bound stdout/stderr in memory while owning only this child handle."""
+    argv = [str(value) for value in argv]
+    need(argv, "Owned command argv is empty")
+    options = {}
+    if mtool_executable is not None:
+        # mtools dispatches using argv[0]. Its aliases resolve to one pinned
+        # executable, so resolving a role must not erase the invocation name.
+        need(argv[0] in MTOOLS_ROLES, "Only whitelisted mtools argv[0] dispatch is permitted")
+        executable = safe_path(mtool_executable)
+        metadata(executable)
+        options["executable"] = str(executable)
+    context = {"role": argv[0][:256], "argv": [value[:256] for value in argv[:16]],
+               "argv_argument_count": len(argv), "executable": options.get("executable", argv[0])[:1024]}
     def limits():
         # mcopy edits a 2GiB existing raw file at arbitrary FAT offsets. An
         # 16MiB RLIMIT_FSIZE would also reject those legitimate private writes.
         # HostOutputGuard separately measures the exact four output roots.
         resource.setrlimit(resource.RLIMIT_FSIZE, (2 * 1024**3, 2 * 1024**3))
-    child = subprocess.Popen([str(x) for x in argv], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=limits)
+    child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, preexec_fn=limits, **options)
     pieces = {"out": bytearray(), "err": bytearray()}
     deadline = time.monotonic() + timeout
     try:
@@ -389,15 +402,17 @@ def command(argv, *, limit=65536, timeout=120):
             events.register(child.stdout, selectors.EVENT_READ, "out")
             events.register(child.stderr, selectors.EVENT_READ, "err")
             while events.get_map():
-                need(time.monotonic() < deadline, "Owned command timeout")
+                need(time.monotonic() < deadline, "Owned command timeout: " + json.dumps(context))
                 for key, _ in events.select(0.1):
                     block = os.read(key.fileobj.fileno(), 65536)
                     if not block:
                         events.unregister(key.fileobj); continue
                     pieces[key.data].extend(block)
-                    need(len(pieces[key.data]) <= limit, "Owned command diagnostic/readback bound exceeded")
+                    need(len(pieces[key.data]) <= limit, "Owned command diagnostic/readback bound exceeded: " + json.dumps(context))
         code = child.wait(timeout=max(0.1, deadline - time.monotonic()))
-        need(code == 0, "Owned command failed: " + bytes(pieces["err"]).decode(errors="replace")[:512])
+        need(code == 0, "Owned command failed: " + json.dumps({**context, "exit_code": code,
+             "stdout": bytes(pieces["out"]).decode(errors="replace")[:512],
+             "stderr": bytes(pieces["err"]).decode(errors="replace")[:512]}))
         return bytes(pieces["out"])
     finally:
         if child.poll() is None:
@@ -411,6 +426,11 @@ def guarded_command(guard, argv, **kwargs):
         return command(argv, **kwargs)
     finally:
         guard.check("after-bounded-command", require_cow=True)
+
+
+def guarded_mtool(plan, guard, role, arguments, **kwargs):
+    need(role in MTOOLS_ROLES, "Only whitelisted mtools role dispatch is permitted")
+    return guarded_command(guard, [role, *arguments], mtool_executable=by_role(plan, role)["path"], **kwargs)
 
 
 def build_input(path, expected_sha, expected_name):
@@ -492,13 +512,13 @@ def guest_spec(plan):
 
 
 def mtype(plan, guard, guest, limit):
-    return guarded_command(guard, [by_role(plan, "mtype")["path"], "-i", guest_spec(plan), guest], limit=limit)
+    return guarded_mtool(plan, guard, "mtype", ["-i", guest_spec(plan), guest], limit=limit)
 
 
 def absent(plan, guard, guest):
     # Directory listing successful without the requested name is proof of
     # absence; a failed tool call is not interpreted as a missing guest file.
-    listing = guarded_command(guard, [by_role(plan, "mdir")["path"], "-b", "-i", guest_spec(plan), "::/VXDLAB"])
+    listing = guarded_mtool(plan, guard, "mdir", ["-b", "-i", guest_spec(plan), "::/VXDLAB"])
     names = {row.decode("ascii").rsplit("/", 1)[-1].upper() for row in listing.splitlines()}
     need(guest.upper() not in names, "New guest input/output is stale: " + guest)
 
@@ -553,7 +573,7 @@ def stopped_guest_readback(plan, guard, epoch):
         actual = mtype(plan, guard, item["guest_path"], item["read_limit_bytes"])
         need(actual == expected and hashlib.sha256(actual).hexdigest() == item["sha256"],
              "Stopped guest byte/hash readback differs: " + name)
-    attributes = guarded_command(guard, [by_role(plan, "mattrib")["path"], "-i", guest_spec(plan), "::/WINDOWS/WIN.INI"])
+    attributes = guarded_mtool(plan, guard, "mattrib", ["-i", guest_spec(plan), "::/WINDOWS/WIN.INI"])
     need(attributes.hex() == evidence["files"]["WIN.INI"]["attributes_hex"], "Stopped WIN.INI FAT attributes differ")
     return evidence
 
@@ -650,15 +670,15 @@ def prepare(args):
     boot_sectors(disk, plan["partition"])
     original = mtype(plan, guard, "::/WINDOWS/WIN.INI", 65536)
     patched, edit = patch_empty_run(original)
-    attributes = guarded_command(guard, [by_role(plan, "mattrib")["path"], "-i", spec, "::/WINDOWS/WIN.INI"])
+    attributes = guarded_mtool(plan, guard, "mattrib", ["-i", spec, "::/WINDOWS/WIN.INI"])
     need(re.fullmatch(rb"\s*A\s+::/WINDOWS/WIN.INI\r?\n", attributes), "Unsupported WIN.INI attributes")
     new_file(bootstrap / "WININI-BEFORE", original); new_file(bootstrap / "WININI-AFTER", patched)
     for name in INPUTS:
-        guarded_command(guard, [by_role(plan, "mcopy")["path"], "-i", spec, stage / name, "::/VXDLAB/" + name])
+        guarded_mtool(plan, guard, "mcopy", ["-i", spec, stage / name, "::/VXDLAB/" + name])
         need(mtype(plan, guard, "::/VXDLAB/" + name, 1024**2) == bounded(stage / name, 1024**2), "Guest input readback differs")
-    guarded_command(guard, [by_role(plan, "mcopy")["path"], "-o", "-i", spec, bootstrap / "WININI-AFTER", "::/WINDOWS/WIN.INI"])
+    guarded_mtool(plan, guard, "mcopy", ["-o", "-i", spec, bootstrap / "WININI-AFTER", "::/WINDOWS/WIN.INI"])
     need(mtype(plan, guard, "::/WINDOWS/WIN.INI", 65536) == patched and
-         guarded_command(guard, [by_role(plan, "mattrib")["path"], "-i", spec, "::/WINDOWS/WIN.INI"]) == attributes, "WIN.INI readback/attributes differ")
+         guarded_mtool(plan, guard, "mattrib", ["-i", spec, "::/WINDOWS/WIN.INI"]) == attributes, "WIN.INI readback/attributes differ")
     boot_sectors(disk, plan["partition"])
     plan["preparation"] = {"status": "PREPARED_NATIVE_UNVERIFIED", "copy_mode": "cp --reflink=always --sparse=auto",
         "no_cpu_or_ram_state": True, "winini_before_sha256": hashlib.sha256(original).hexdigest(),
@@ -973,15 +993,15 @@ def execute(path, selected_sha, lock_wait=0):
                     need(report["epochs"][0]["qemu_child_reaped"] is True, "Previous QEMU still active")
                     allocation(plan, cow, guard)
                     need(mtype(plan, guard, "::/VXDLAB/SHZCASE.TXT", 60) == case_bytes(plan["nonce"], 1), "Phase file is stale")
-                    attrs = guarded_command(guard, [by_role(plan, "mattrib")["path"], "-i", guest_spec(plan), "::/VXDLAB/SHZCASE.TXT"])
+                    attrs = guarded_mtool(plan, guard, "mattrib", ["-i", guest_spec(plan), "::/VXDLAB/SHZCASE.TXT"])
                     before_ini = mtype(plan, guard, "::/WINDOWS/WIN.INI", 65536)
                     need(hashlib.sha256(before_ini).hexdigest() == plan["preparation"]["winini_after_sha256"], "WIN.INI changed between epochs")
                     absent(plan, guard, LOGS[1])
-                    guarded_command(guard, [by_role(plan, "mcopy")["path"], "-o", "-i", guest_spec(plan),
-                                            Path(plan["roots"]["bootstrap"]) / "SHZCASE2.TXT", "::/VXDLAB/SHZCASE.TXT"])
+                    guarded_mtool(plan, guard, "mcopy", ["-o", "-i", guest_spec(plan),
+                                           Path(plan["roots"]["bootstrap"]) / "SHZCASE2.TXT", "::/VXDLAB/SHZCASE.TXT"])
                     need(mtype(plan, guard, "::/VXDLAB/SHZCASE.TXT", 60) == case_bytes(plan["nonce"], 2) and
                          mtype(plan, guard, "::/WINDOWS/WIN.INI", 65536) == before_ini and
-                         guarded_command(guard, [by_role(plan, "mattrib")["path"], "-i", guest_spec(plan), "::/VXDLAB/SHZCASE.TXT"]) == attrs, "Only stopped case phase may change")
+                         guarded_mtool(plan, guard, "mattrib", ["-i", guest_spec(plan), "::/VXDLAB/SHZCASE.TXT"]) == attrs, "Only stopped case phase may change")
                     boot_sectors(assert_private(plan), plan["partition"])
                     allocation(plan, cow, guard)
                     check_bindings(plan)

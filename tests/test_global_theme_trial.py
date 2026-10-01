@@ -246,7 +246,7 @@ class StoppedGuestInputIdentity(unittest.TestCase):
     def collect(self, phase):
         with mock.patch.object(trial, "mtype", side_effect=lambda plan, guard, path, limit: self.guest[path]), \
              mock.patch.object(trial, "guest_spec", return_value="fixture-not-opened"), \
-             mock.patch.object(trial, "guarded_command", return_value=bytes.fromhex(self.plan["preparation"]["winini_attributes_hex"])):
+             mock.patch.object(trial, "guarded_mtool", return_value=bytes.fromhex(self.plan["preparation"]["winini_attributes_hex"])):
             # This fixture exercises stopped byte comparison, not guest execution.
             return trial.stopped_guest_readback(self.plan, object(), phase)
 
@@ -343,6 +343,60 @@ class CompiledReceiptBoundary(unittest.TestCase):
             selected_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
             with self.assertRaisesRegex(trial.TrialError, "Executed compiler"):
                 trial.build_input(receipt, selected_sha, "SHZOBS.EXE")
+
+
+class PinnedMtoolsDispatch(unittest.TestCase):
+    def child_and_selector(self, exit_code=0):
+        child = mock.Mock()
+        child.wait.return_value = exit_code
+        child.poll.return_value = exit_code
+        selector = mock.MagicMock()
+        selector.__enter__.return_value.get_map.return_value = {}
+        return child, selector
+
+    def test_resolved_alias_keeps_each_whitelisted_role_as_actual_argv_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); executable = root / "mtools"; executable.write_bytes(b"fixture never executed\n")
+            bindings = []
+            for role in ("mtype", "mcopy", "mdir", "mattrib"):
+                alias = root / role; alias.symlink_to(executable)
+                bindings.append(trial.binding(role, alias.resolve(strict=True)))
+            plan = {"bindings": bindings}
+            for role in ("mtype", "mcopy", "mdir", "mattrib"):
+                with self.subTest(role=role):
+                    child, selector = self.child_and_selector()
+                    guard = mock.Mock()
+                    with mock.patch.object(trial.subprocess, "Popen", return_value=child) as spawn, \
+                         mock.patch.object(trial.selectors, "DefaultSelector", return_value=selector):
+                        self.assertEqual(trial.guarded_mtool(plan, guard, role, ["-V"]), b"")
+                    argv = spawn.call_args.args[0]
+                    self.assertEqual(argv, [role, "-V"])
+                    self.assertEqual(spawn.call_args.kwargs["executable"], str(executable))
+                    self.assertNotIn("shell", spawn.call_args.kwargs)
+                    self.assertEqual(guard.check.call_count, 2)
+
+    def test_arbitrary_or_path_based_dispatch_is_rejected_before_process_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "mtools"; executable.write_bytes(b"not executed\n")
+            for role in ("mtools", "sh", "/usr/bin/mtype", "mtype;sh"):
+                with self.subTest(role=role), mock.patch.object(trial.subprocess, "Popen") as spawn:
+                    with self.assertRaises(trial.TrialError):
+                        trial.command([role, "-V"], mtool_executable=executable)
+                    spawn.assert_not_called()
+
+    def test_failed_dispatch_reports_actual_role_argv_and_exit_boundedly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "mtools"; executable.write_bytes(b"not executed\n")
+            child, selector = self.child_and_selector(exit_code=1)
+            with mock.patch.object(trial.subprocess, "Popen", return_value=child), \
+                 mock.patch.object(trial.selectors, "DefaultSelector", return_value=selector):
+                with self.assertRaises(trial.TrialError) as raised:
+                    trial.command(["mtype", "-i", "fixture", "::/VXDLAB/SHZCASE.TXT"], mtool_executable=executable)
+            message = str(raised.exception)
+            self.assertIn('"role": "mtype"', message)
+            self.assertIn('"exit_code": 1', message)
+            self.assertIn("::/VXDLAB/SHZCASE.TXT", message)
+            self.assertLess(len(message), 8192)
 
 
 class OwnedPlanScope(unittest.TestCase):
