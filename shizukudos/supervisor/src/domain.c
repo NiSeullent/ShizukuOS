@@ -297,7 +297,9 @@ int hcall_vmcall(domain_t *d)
         break;
     }
     case SHZ_HC_WAIT:
-        if (!(d->doorbell_pending && !d->doorbell_signaled))
+        /* Injection only records interrupt delivery. Pending work is consumed
+         * by DOORBELL_ACK, so WAIT must not park an unacknowledged notification. */
+        if (!d->doorbell_pending)
             d->state = SHZ_DS_WAITING;
         break;
     case SHZ_HC_TIME:
