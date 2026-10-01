@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "kind": "fixed-64KiB-browser-memory-backend-profile",
+  "upstream_revision": "f5f57c09aee623436f5fb87a90798fdd2cdf39fd",
+  "frozen_runtime_receipt_sha256": "26b28af54df7566a9653633078c1948ff5211714f95a836f4a3b2bb0ea773d91",
+  "frozen_builder_sha256": "9e10828c4f1c88fa162bde9a76c014c709a604876dc710fba424fe6c3443e506",
+  "original_loader_sha256": "8d4433bd2adb100cfbec86e64876e9b5bb53e60e5d5ab21933c18ecda50b4452",
+  "frozen_prepared_loader_sha256": "c0ccc4663ad92f35a3aff0d587cb983c942d722f7670f06537b1c64904e6446c",
+  "patch": "patches/wamr-f5f57c09-browser-memory-v1.patch",
+  "patch_sha256": "c634d7e2167cc6db95842721a01e069da4338c57ad6cb7d570117f2d3b979999",
+  "patched_original_loader_sha256": "3cc77aa5cc3836ed4f3ed0a1f684e54c012e7cc83f1db7ed698fbda551d2df05",
+  "config_delta": {
+    "M98_WASM_BROWSER_MEMORY": 1,
+    "WASM_ENABLE_SHRUNK_MEMORY": 0
+  },
+  "page_bytes": 65536,
+  "native_execution": false,
+  "browser_js_api": false,
+  "full_modern_wasm": false,
+  "additional_prepared_patches": [
+    {
+      "source": "core/iwasm/common/wasm_memory.c",
+      "basis": "frozen-v24-prepared",
+      "original_sha256": "679d510f445d4e01fcf38e1f9a60ac3bb8eff5a39f86b5d0f6f3aaa439fa80ec",
+      "prior_prepared_sha256": "aefb3adbbe937dd04067232f35a30ab57fb13277d688e7f3fe65abedb2dcb53f",
+      "patched_prepared_sha256": "b44d8701512eee979ccd4e07ef26ae0b5fb8c23cd5f6a360b7c00a0ac1e04ed0"
+    },
+    {
+      "source": "core/iwasm/interpreter/wasm_runtime.c",
+      "basis": "frozen-v24-prepared",
+      "original_sha256": "343b23ede2a3b73b942b5d220db7e4b06ea138568bf2d13742e630f5f1324891",
+      "prior_prepared_sha256": "f635968af96aac6c5f07bf62183acaa756bfb9e4d3f1cf6fe8c685363d4b0a96",
+      "patched_prepared_sha256": "c2805bb0d779d803270b7229bad133846efad90b21ed88c4c6ce565cd60dd3dd"
+    }
+  ]
+}
