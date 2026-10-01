@@ -45,6 +45,12 @@ jobs:
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
             gcc-multilib clang lld mingw-w64 nasm make binutils python3 python3-pil fonts-dejavu-core qemu-utils
 
+      - name: Test Chromium and Electron result evidence on the host
+        # Fixture and subprocess tests only; no guest or application run is claimed.
+        run: |
+          python3 -m unittest discover -s shizukudos/tests -p 'test_k64_*runner.py' -v
+          python3 shizukudos/tests/test_qemu_bounded.py -v
+
       - name: Build NTWrapper9x and NTWin32Wrapper9x
         run: python3 platform/build.py
 
