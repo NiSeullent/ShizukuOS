@@ -1,0 +1,422 @@
+{
+  "schema": 1,
+  "publisher_repository": "https://github.com/notofonts/noto-cjk",
+  "publisher_commit": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+  "license": "OFL-1.1",
+  "font_profile": {
+    "family": "Noto Sans CJK KR",
+    "version": "Version 2.004;hotconv 1.0.118;makeotfexe 2.5.65603",
+    "units_per_em": 1000,
+    "glyph_count": 65535,
+    "hangul_syllables": 11172,
+    "design_metrics": [
+      {
+        "character": "A",
+        "codepoint": 65,
+        "glyph_id": 34,
+        "advance_width": 608,
+        "left_side_bearing": 4
+      },
+      {
+        "character": "B",
+        "codepoint": 66,
+        "glyph_id": 35,
+        "advance_width": 657,
+        "left_side_bearing": 101
+      },
+      {
+        "character": "가",
+        "codepoint": 44032,
+        "glyph_id": 47611,
+        "advance_width": 920,
+        "left_side_bearing": 55
+      },
+      {
+        "character": "한",
+        "codepoint": 54620,
+        "glyph_id": 58199,
+        "advance_width": 920,
+        "left_side_bearing": 52
+      },
+      {
+        "character": "글",
+        "codepoint": 44544,
+        "glyph_id": 48123,
+        "advance_width": 920,
+        "left_side_bearing": 50
+      },
+      {
+        "character": "현",
+        "codepoint": 54788,
+        "glyph_id": 58367,
+        "advance_width": 920,
+        "left_side_bearing": 51
+      },
+      {
+        "character": "대",
+        "codepoint": 45824,
+        "glyph_id": 49403,
+        "advance_width": 920,
+        "left_side_bearing": 82
+      },
+      {
+        "character": "모",
+        "codepoint": 47784,
+        "glyph_id": 51363,
+        "advance_width": 920,
+        "left_side_bearing": 50
+      },
+      {
+        "character": "던",
+        "codepoint": 45912,
+        "glyph_id": 49491,
+        "advance_width": 920,
+        "left_side_bearing": 102
+      }
+    ]
+  },
+  "assets": [
+    {
+      "publisher_path": "Sans/OTF/Korean/NotoSansCJKkr-Regular.otf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf",
+      "git_blob_sha1": "dc4a7c65e6f450bf17c10a2405250b620eb78703",
+      "bytes": 16433112,
+      "sha256": "6bcb2a0703aa137e874fc2dffa85f6c21ba9a67fa329e81b8c801663af7e992a"
+    },
+    {
+      "publisher_path": "Sans/LICENSE",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/LICENSE",
+      "git_blob_sha1": "d952d62c065f3f35fb83a173496e90b21525aef3",
+      "bytes": 4301,
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    },
+    {
+      "publisher_path": "Sans/README.md",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/README.md",
+      "git_blob_sha1": "449c31d5774c4387663614096f9fd399a0ffc808",
+      "bytes": 10976,
+      "sha256": "2357303b980f90a33c3dd68b6fa5e3b1df08a0bc34feef3bb084f700e96f6c65"
+    }
+  ],
+  "baseline_archive_sha256": "cac9b31ad2a9835847d8ac12372307553ff801df3e8dcf3aad5d6c6349947e2a",
+  "baseline_fonts": [
+    {
+      "path": "\\SHZ\\FONTS\\NotoSans.ttf",
+      "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+      "bytes": 2049096,
+      "profile": {
+        "family": "Noto Sans",
+        "version": "Version 2.015",
+        "units_per_em": 1000,
+        "glyph_count": 4515,
+        "hangul_syllables": 0,
+        "design_metrics": [
+          {
+            "character": "A",
+            "codepoint": 65,
+            "glyph_id": 36,
+            "advance_width": 639,
+            "left_side_bearing": 0
+          },
+          {
+            "character": "B",
+            "codepoint": 66,
+            "glyph_id": 37,
+            "advance_width": 650,
+            "left_side_bearing": 97
+          },
+          {
+            "character": "가",
+            "codepoint": 44032,
+            "glyph_id": 0
+          },
+          {
+            "character": "한",
+            "codepoint": 54620,
+            "glyph_id": 0
+          },
+          {
+            "character": "글",
+            "codepoint": 44544,
+            "glyph_id": 0
+          },
+          {
+            "character": "현",
+            "codepoint": 54788,
+            "glyph_id": 0
+          },
+          {
+            "character": "대",
+            "codepoint": 45824,
+            "glyph_id": 0
+          },
+          {
+            "character": "모",
+            "codepoint": 47784,
+            "glyph_id": 0
+          },
+          {
+            "character": "던",
+            "codepoint": 45912,
+            "glyph_id": 0
+          }
+        ]
+      }
+    },
+    {
+      "path": "\\SHZ\\FONTS\\NotoSansMono.ttf",
+      "sha256": "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
+      "bytes": 1708408,
+      "profile": {
+        "family": "Noto Sans Mono",
+        "version": "Version 2.014",
+        "units_per_em": 1000,
+        "glyph_count": 3920,
+        "hangul_syllables": 0,
+        "design_metrics": [
+          {
+            "character": "A",
+            "codepoint": 65,
+            "glyph_id": 36,
+            "advance_width": 600,
+            "left_side_bearing": 20
+          },
+          {
+            "character": "B",
+            "codepoint": 66,
+            "glyph_id": 37,
+            "advance_width": 600,
+            "left_side_bearing": 95
+          },
+          {
+            "character": "가",
+            "codepoint": 44032,
+            "glyph_id": 0
+          },
+          {
+            "character": "한",
+            "codepoint": 54620,
+            "glyph_id": 0
+          },
+          {
+            "character": "글",
+            "codepoint": 44544,
+            "glyph_id": 0
+          },
+          {
+            "character": "현",
+            "codepoint": 54788,
+            "glyph_id": 0
+          },
+          {
+            "character": "대",
+            "codepoint": 45824,
+            "glyph_id": 0
+          },
+          {
+            "character": "모",
+            "codepoint": 47784,
+            "glyph_id": 0
+          },
+          {
+            "character": "던",
+            "codepoint": 45912,
+            "glyph_id": 0
+          }
+        ]
+      }
+    },
+    {
+      "path": "\\SHZ\\FONTS\\NotoSerif.ttf",
+      "sha256": "4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713",
+      "bytes": 1887192,
+      "profile": {
+        "family": "Noto Serif",
+        "version": "Version 2.015",
+        "units_per_em": 1000,
+        "glyph_count": 3830,
+        "hangul_syllables": 0,
+        "design_metrics": [
+          {
+            "character": "A",
+            "codepoint": 65,
+            "glyph_id": 36,
+            "advance_width": 705,
+            "left_side_bearing": 0
+          },
+          {
+            "character": "B",
+            "codepoint": 66,
+            "glyph_id": 37,
+            "advance_width": 654,
+            "left_side_bearing": 38
+          },
+          {
+            "character": "가",
+            "codepoint": 44032,
+            "glyph_id": 0
+          },
+          {
+            "character": "한",
+            "codepoint": 54620,
+            "glyph_id": 0
+          },
+          {
+            "character": "글",
+            "codepoint": 44544,
+            "glyph_id": 0
+          },
+          {
+            "character": "현",
+            "codepoint": 54788,
+            "glyph_id": 0
+          },
+          {
+            "character": "대",
+            "codepoint": 45824,
+            "glyph_id": 0
+          },
+          {
+            "character": "모",
+            "codepoint": 47784,
+            "glyph_id": 0
+          },
+          {
+            "character": "던",
+            "codepoint": 45912,
+            "glyph_id": 0
+          }
+        ]
+      }
+    },
+    {
+      "path": "\\SHZ\\FONTS\\tahoma.ttf",
+      "sha256": "90f1abad4da0ce03da5d2277ee75a9600ce812d37c90eab76e0838ffa7937e55",
+      "bytes": 143884,
+      "profile": {
+        "family": "Tahoma",
+        "version": "Version 0.001",
+        "units_per_em": 2048,
+        "glyph_count": 988,
+        "hangul_syllables": 0,
+        "design_metrics": [
+          {
+            "character": "A",
+            "codepoint": 65,
+            "glyph_id": 36,
+            "advance_width": 1229,
+            "left_side_bearing": -10
+          },
+          {
+            "character": "B",
+            "codepoint": 66,
+            "glyph_id": 37,
+            "advance_width": 1206,
+            "left_side_bearing": 152
+          },
+          {
+            "character": "가",
+            "codepoint": 44032,
+            "glyph_id": 0
+          },
+          {
+            "character": "한",
+            "codepoint": 54620,
+            "glyph_id": 0
+          },
+          {
+            "character": "글",
+            "codepoint": 44544,
+            "glyph_id": 0
+          },
+          {
+            "character": "현",
+            "codepoint": 54788,
+            "glyph_id": 0
+          },
+          {
+            "character": "대",
+            "codepoint": 45824,
+            "glyph_id": 0
+          },
+          {
+            "character": "모",
+            "codepoint": 47784,
+            "glyph_id": 0
+          },
+          {
+            "character": "던",
+            "codepoint": 45912,
+            "glyph_id": 0
+          }
+        ]
+      }
+    },
+    {
+      "path": "\\SHZ\\FONTS\\tahomabd.ttf",
+      "sha256": "508a2acc88cd6abdd399ae79c9965db43fba75a46bb115117b55d2be2272d889",
+      "bytes": 137836,
+      "profile": {
+        "family": "Tahoma",
+        "version": "Version 0.001",
+        "units_per_em": 2048,
+        "glyph_count": 979,
+        "hangul_syllables": 0,
+        "design_metrics": [
+          {
+            "character": "A",
+            "codepoint": 65,
+            "glyph_id": 36,
+            "advance_width": 1402,
+            "left_side_bearing": 9
+          },
+          {
+            "character": "B",
+            "codepoint": 66,
+            "glyph_id": 37,
+            "advance_width": 1405,
+            "left_side_bearing": 136
+          },
+          {
+            "character": "가",
+            "codepoint": 44032,
+            "glyph_id": 0
+          },
+          {
+            "character": "한",
+            "codepoint": 54620,
+            "glyph_id": 0
+          },
+          {
+            "character": "글",
+            "codepoint": 44544,
+            "glyph_id": 0
+          },
+          {
+            "character": "현",
+            "codepoint": 54788,
+            "glyph_id": 0
+          },
+          {
+            "character": "대",
+            "codepoint": 45824,
+            "glyph_id": 0
+          },
+          {
+            "character": "모",
+            "codepoint": 47784,
+            "glyph_id": 0
+          },
+          {
+            "character": "던",
+            "codepoint": 45912,
+            "glyph_id": 0
+          }
+        ]
+      }
+    }
+  ],
+  "fonts_installed": false,
+  "korean_directwrite_rendering_verified": false,
+  "receipt_sha256": "32da592b4f3eed7916ad1c91e72b058c902f01e796c176e50514f16eb8e3032b"
+}
