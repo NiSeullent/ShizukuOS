@@ -1,0 +1,36 @@
+{
+  "schema": "cb43-combined-dos-memory-source-only-followup-checkpoint-v1",
+  "public_files_including_manifest": 5,
+  "actual_root_run_epoch": "combined-v2 only",
+  "actual_DOS_memory_checks": 11,
+  "actual_DOS_memory_failures": 0,
+  "actual_probe_separate_ERRORLEVEL": 0,
+  "actual_additional_DOS_internals_pass": 17,
+  "actual_additional_XMS_pass": 16,
+  "shared_high_report_bytes": 810,
+  "shared_marker_bytes": 21,
+  "Windows98_MSDOS_replacement_apps_verified": false,
+  "public_binary_included": false,
+  "files": [
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-combined-cb43-20261001/README.md",
+      "bytes": 4907,
+      "sha256": "28ae80774d2a7a822e2b01b99eade863d7a7d5e6da3ec1b26378a84453b6cfe5"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-combined-cb43-20261001/combined-high-interpretation.json",
+      "bytes": 5134,
+      "sha256": "d3fbac32efa72ed38354aefa6137fc0b9906f68f0e8488ce2ff8f140f7026007"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-combined-cb43-20261001/controller-change-summary.json",
+      "bytes": 1868,
+      "sha256": "52be1a34d20e67a2582b5a267808490d943dc852377f6ff3f603ceb35a48bc3d"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-combined-cb43-20261001/native-combined-memory-receipt.json",
+      "bytes": 6127,
+      "sha256": "7b0760a8537d9160404e375aece0cfa86254abb641dc5adf07b272296c6e56ce"
+    }
+  ]
+}

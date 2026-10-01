@@ -1,0 +1,39 @@
+{
+  "schema": "cb43-combined-controller-clarification-public-summary-v1",
+  "root_raw_clarification": {
+    "bytes": 1812,
+    "sha256": "a9e443710c6348a5351175e16276e7dd9a528c527139ec865824b1f0d9559d89"
+  },
+  "preserved_preparation_metadata": {
+    "bytes": 3131,
+    "sha256": "881de571ba97da008af0c438e78687362ce391f2065f3e0828b88e30731634a6"
+  },
+  "actual_command": {
+    "bytes": 1127,
+    "sha256": "cd92a9e23c565293406579a832e3b811a2819c28e01eb497881606f6cbedd787"
+  },
+  "actual_preflight": {
+    "bytes": 170,
+    "sha256": "e68c1d76656398812ba65b926c5d5cd221e7de5786ee96aae7b7e1910e2acc4e"
+  },
+  "actual_run_result": {
+    "bytes": 681,
+    "sha256": "1ff61da548a8ab8f5cd70744033089e2ef2f84ed330fa4619924880b8bcdb7dc"
+  },
+  "retained_preparation_capture_target_seconds": 30,
+  "actual_executed_capture_target_seconds": 120,
+  "actual_elapsed_seconds": 120.08,
+  "root_controller_account": "Before launch root changed only its new controller to the reviewed preflight harness and target120/twelve captures. The preparation/image was not changed by this controller edit. Original preparation target30 remains historical.",
+  "command_preparation_input_sha256_namespace": "Prepared private image SHA, not preparation JSON SHA. Equality with preparation replacement_candidate_sha256 and actual preflight image_sha256 physically checked; private image hash not exported.",
+  "controller_source_identity_after_completed_run": {
+    "bytes": 4518,
+    "sha256": "5b033b5ec4a99039bdad36e8de60335fcea727991a957696df6f9c8d6f2dcf7f"
+  },
+  "controller_source_prelaunch_self_pin_available": false,
+  "owned_process_stopped_and_reaped": true,
+  "exact_cleanup_path_not_logged": true,
+  "QMP_quit_ack_or_no_forced_cleanup_attested": false,
+  "guest_clean_shutdown_verified": false,
+  "prior_receipts_rewritten": false,
+  "Windows98_replacement_apps_verified": false
+}
