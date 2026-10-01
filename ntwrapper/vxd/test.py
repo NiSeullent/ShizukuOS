@@ -7,8 +7,11 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -16,6 +19,82 @@ BUILD = HERE / 'build'
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+def project_source(name):
+    path = (ROOT / name).resolve()
+    if not path.is_relative_to(ROOT) or not path.is_file():
+        raise SystemExit('Invalid or missing project build input: ' + str(name))
+    return path
+
+def dependency_closure(manifest):
+    """Ask the actual C/assembly preprocessors for current project dependencies.
+    -MM excludes system/toolchain headers; those are outside this receipt's scope.
+    No object, executable, or generated dependency file is written here.
+    """
+    bridge, core = HERE / 'bridge.c', HERE.parent / 'core.c'
+    clang = os.environ.get('CLANG', 'clang')
+    mingw = os.environ.get('MINGW_CC', 'i686-w64-mingw32-gcc')
+    host = ['-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
+            '-Wpedantic', '-Wshadow', '-fno-omit-frame-pointer']
+    cases = (
+        ('native_i486', clang, manifest['compiler_flags'], [bridge, HERE / 'native.c', core]),
+        ('probe_mingw', mingw, ['-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', '-march=i486',
+                              '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-nostdlib'],
+         [HERE / 'query_probe.c']),
+        ('host_bridge_asan_ubsan', 'clang', [*host, '-Wconversion', '-fsanitize=address,undefined'],
+         [bridge, core, HERE / 'tests/test_bridge.c']),
+        ('host_w64_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined'],
+         [bridge, core, HERE / 'tests/test_w64vxd.c']),
+        ('host_admission_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined', '-pthread'],
+         [bridge, core, HERE / 'tests/test_w64_admission.c']),
+        ('host_admission_tsan', 'clang', [*host, '-fsanitize=thread', '-pthread'],
+         [bridge, core, HERE / 'tests/test_w64_admission.c']),
+    )
+    commands, closure = [], {}
+
+    def scan(label, command):
+        commands.append(command)
+        result = subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+        paths = set()
+        for line in result.stdout.replace('\\\n', ' ').splitlines():
+            if not line.strip():
+                continue
+            _, separator, dependencies = line.partition(':')
+            if not separator:
+                raise SystemExit('Malformed compiler dependency output for ' + label)
+            for name in shlex.split(dependencies):
+                path = (ROOT / name).resolve()
+                if path.is_relative_to(ROOT):
+                    paths.add(project_source(path))
+        closure.setdefault(label, set()).update(paths)
+
+    for label, compiler, flags, sources in cases:
+        scan(label, [compiler, *flags, '-MM', '-MT', 'ntwv-inputs', *map(str, sources)])
+    for source in (HERE / 'control.asm', HERE / 'tests/control_harness.asm'):
+        scan('assembly_i386', ['nasm', '-M', '-MT', 'ntwv-inputs', '-f', 'elf32', str(source)])
+    return closure, commands
+
+def changed_inputs(paths, before):
+    changed = []
+    for path in sorted(paths):
+        try:
+            same = path.is_file() and digest(path) == before[str(path.relative_to(ROOT))]
+        except OSError:
+            same = False
+        if not same:
+            changed.append(str(path.relative_to(ROOT)))
+    return changed
+
+def preserve_previous_receipt():
+    previous = [BUILD / name for name in ('host-tests.json', 'host-tests.log') if (BUILD / name).is_file()]
+    if not previous:
+        return None
+    history = BUILD / 'host-test-history'
+    history.mkdir(exist_ok=True)
+    saved = Path(tempfile.mkdtemp(prefix='previous-', dir=history))
+    for path in previous:
+        shutil.copy2(path, saved / path.name)
+    return str(saved.relative_to(ROOT))
 
 def main():
     global BUILD
@@ -25,25 +104,39 @@ def main():
     BUILD=args.out.resolve()
     if BUILD!=(HERE/'build').resolve() and (BUILD==(ROOT/'build').resolve() or not BUILD.is_relative_to((ROOT/'build').resolve())):
         parser.error('--out must be the normal build directory or a component directory under project build/')
-    paths = [p for p in HERE.rglob('*') if p.is_file() and
-             'build' not in p.relative_to(HERE).parts and
-             '__pycache__' not in p.relative_to(HERE).parts]
-    paths += [HERE.parent/'core.c', HERE.parent/'include/ntwrapper.h',
-              BUILD/'NTWRAP9X.VXD', BUILD/'NTWRAP9X.elf', BUILD/'NTWQUERY.EXE', BUILD/'manifest.json']
-    before = {str(p.relative_to(ROOT)): digest(p) for p in sorted(paths)}
     manifest = json.loads((BUILD/'manifest.json').read_text())
+    paths = {p for p in HERE.rglob('*') if p.is_file() and
+             'build' not in p.relative_to(HERE).parts and
+             '__pycache__' not in p.relative_to(HERE).parts}
+    paths.update(project_source(name) for name in manifest['sources'])
+    # Pin the externally located ABI even before preprocessing, so a persistent
+    # change during dependency discovery cannot acquire a later initial hash.
+    paths.update((HERE.parent/'core.c', HERE.parent/'include/ntwrapper.h',
+                  ROOT/'shizukudos/abi/shz_abi.h', ROOT/'shizukudos/abi/shz_ipc.h',
+                  BUILD/'NTWRAP9X.VXD', BUILD/'NTWRAP9X.elf', BUILD/'NTWQUERY.EXE', BUILD/'manifest.json'))
+    before = {str(p.relative_to(ROOT)): digest(p) for p in sorted(paths)}
     for name, expected in manifest['sources'].items():
-        if digest(ROOT/name) != expected:
+        if before[str(project_source(name).relative_to(ROOT))] != expected:
             raise SystemExit('Build inputs changed; rebuild before testing: '+name)
     if digest(BUILD/'NTWRAP9X.VXD') != manifest['sha256'] or digest(BUILD/'NTWQUERY.EXE') != manifest['probe']['sha256']:
         raise SystemExit('Build artifact hash does not match manifest')
+    dependencies, dependency_commands = dependency_closure(manifest)
+    for dependency_paths in dependencies.values():
+        for path in dependency_paths - paths:
+            before[str(path.relative_to(ROOT))] = digest(path)
+        paths.update(dependency_paths)
+    changed = changed_inputs(paths, before)
+    if changed:
+        raise SystemExit('Build inputs changed during dependency discovery: ' + ', '.join(changed))
+    previous_receipt = preserve_previous_receipt()
     result = subprocess.run([sys.executable, '-B', '-m', 'unittest', 'discover',
                              '-s', str(HERE/'tests'), '-v'], cwd=ROOT,
                             env=dict(os.environ,NTWV_HOST_TEST_OUT=str(BUILD)),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     print(result.stdout, end='')
     (BUILD/'host-tests.log').write_text(result.stdout)
-    unchanged = all(p.is_file() and digest(p) == before[str(p.relative_to(ROOT))] for p in paths)
+    changed = changed_inputs(paths, before)
+    unchanged = not changed
     passed = result.returncode == 0 and unchanged
     report = {
         'schema': 1,
@@ -52,6 +145,12 @@ def main():
         'artifact_sha256': manifest['sha256'],
         'probe_sha256': manifest['probe']['sha256'],
         'hashes': before,
+        'changed_inputs': changed,
+        'project_dependencies': {name: sorted(str(p.relative_to(ROOT)) for p in paths)
+                                 for name, paths in dependencies.items()},
+        'project_dependency_commands': dependency_commands,
+        'project_dependency_scope': 'Project files; compiler dependency mode excludes system/toolchain headers.',
+        'previous_receipt_directory': previous_receipt,
         'log_sha256': digest(BUILD/'host-tests.log'),
         'statuses': {name: ('passed' if passed else 'failed-or-unverified') for name in
                      ('host_bridge_asan_ubsan', 'i386_control_harness', 'static_le_relocations',
@@ -65,6 +164,8 @@ def main():
         'scope': 'Host ABI/model evidence only; not Windows VMM or loader execution.'
     }
     (BUILD/'host-tests.json').write_text(json.dumps(report, indent=2)+'\n')
+    if changed:
+        print('Input drift during tests: ' + ', '.join(changed))
     return 0 if passed else 1
 
 if __name__ == '__main__':
