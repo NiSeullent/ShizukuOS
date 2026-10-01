@@ -142,12 +142,17 @@ def main():
     parser.add_argument("--memory", default="512M")
     args = parser.parse_args()
 
-    esp = OUT / "esp.img"
+    # This harness intentionally expects conformance programs and SHZ-EXIT.
+    # The normal product ESP keeps an interactive DOS prompt instead.
+    esp = OUT / "esp-conformance.img"
     loader = OUT / "BOOTX64.EFI"
     receipt = OUT / "build-result.json"
     if not (esp.exists() and receipt.exists()):
         raise SystemExit("Run shizukudos/supervisor/build.py first")
     built = json.loads(receipt.read_text())
+    qa = built.get("artifacts", {}).get("esp-conformance.img", {})
+    if qa.get("sha256") != sha256_file(esp) or qa.get("bytes") != esp.stat().st_size:
+        raise SystemExit("Conformance ESP differs from its build receipt; rebuild supervisor")
     for name, digest in built["sources_sha256"].items():
         if sha256_file(REPO / name) != digest:
             raise SystemExit(f"Stale build, source changed: {name}")

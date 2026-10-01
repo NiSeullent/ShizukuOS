@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Build the Shizuku Supervisor: vBIOS ROM, fixed-address x64 payload, UEFI loader
-and the ESP image that carries the DOS16 RAM-backed disk.
+and the ESP image that carries the normal DOS10 RAM-backed disk.
+esp-conformance.img separately carries the unchanged developer test disk.
 
 Toolchains stay separate on purpose:
   * vBIOS       : NASM, 16-bit flat binary (guest code, real mode)
@@ -118,8 +119,8 @@ def guest_kernel_files():
     return found
 
 
-def build_esp(loader, disk_image):
-    esp = OUT / "esp.img"
+def build_esp(loader, disk_image, name="esp.img"):
+    esp = OUT / name
     esp.unlink(missing_ok=True)
     with open(esp, "wb") as fh:
         fh.truncate(ESP_MIB * 1024 * 1024)
@@ -139,14 +140,16 @@ def main():
                  "mmd"):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool} (nothing is installed automatically)")
-    disk = BUILD / "dos16" / "shizukudos-dos16-hd32.img"
-    if not disk.exists():
-        raise SystemExit("Run shizukudos/dos16/build.py first (the DOS16 disk image is an input)")
+    disk = BUILD / "dos16" / "shizukudos-dos10.img"
+    conformance_disk = BUILD / "dos16" / "shizukudos-dos16-hd32.img"
+    if not disk.exists() or not conformance_disk.exists():
+        raise SystemExit("Run shizukudos/dos16/build.py first (normal DOS10 and conformance images are inputs)")
     OUT.mkdir(parents=True, exist_ok=True)
     vbios = build_vbios()
     payload, payload_cmds = build_payload()
     loader, loader_cmd = build_loader(payload)
     esp = build_esp(loader, disk)
+    conformance_esp = build_esp(loader, conformance_disk, "esp-conformance.img")
     sources = sorted([p for p in SRC.rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")] +
                      [SHZ / "abi" / "shz_abi.h", REPO / "shizukudos/uefi/boot.c", REPO / "shizukudos/uefi/boot.h",
                       REPO / "shizukudos/uefi/efi.h", SHZ / "kernel64/standalone/memholes.h"])
@@ -157,6 +160,8 @@ def main():
         "toolchain": {"gcc": shzlib.tool_version("gcc"), "nasm": shzlib.tool_version("nasm", ("-v",)),
                       "mingw": shzlib.tool_version("x86_64-w64-mingw32-gcc"), "ld": shzlib.tool_version("ld")},
         "payload_base": hex(PAYLOAD_BASE),
+        "dos_boot_profile": "dos10-user-compatibility-bootstrap",
+        "conformance_esp": "esp-conformance.img (explicit developer QA input, not the product boot image)",
         "commands": {"payload": [[str(x) for x in c] for c in payload_cmds], "loader": [str(x) for x in loader_cmd]},
         "artifacts": {
             "BOOTX64.EFI": {"sha256": sha256_file(loader), "bytes": loader.stat().st_size},
@@ -165,6 +170,8 @@ def main():
             "vbios.bin": {"sha256": sha256_file(OUT / "vbios.bin"), "bytes": len(vbios)},
             "esp.img": {"sha256": sha256_file(esp), "bytes": esp.stat().st_size},
             "disk.img (input)": {"sha256": sha256_file(disk), "bytes": disk.stat().st_size},
+            "esp-conformance.img": {"sha256": sha256_file(conformance_esp), "bytes": conformance_esp.stat().st_size},
+            "conformance-disk.img (input)": {"sha256": sha256_file(conformance_disk), "bytes": conformance_disk.stat().st_size},
             **{f"{p.name} (input)": {"sha256": sha256_file(p), "bytes": p.stat().st_size}
                for p in guest_kernel_files()},
         },

@@ -13,11 +13,16 @@
 #include <bcrypt.h>
 #include "plat.h"                       /* before shzcrt.h, whose malloc/free macros would rename plat_t members */
 #include "blkio.h"
+#include "interactive_ui.h"
 #include "shzcrt.h"
 
 static BCRYPT_ALG_HANDLE sha_alg;
+static char interactive_answer[1024];
+static const char ui_answer_path[] = "SHZSETUP:INTERACTIVE";
+static int interactive;
 
-static void out(void *c, const char *t) { (void)c; shz_puts(t); }
+static void out(void *c, const char *t)
+{ (void)c; shz_puts(t); if (interactive) setup_ui_progress(t); }
 static void *al(void *c, size_t n) { (void)c; return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, n ? n : 1); }
 static void fr(void *c, void *p) { (void)c; if (p) HeapFree(GetProcessHeap(), 0, p); }
 
@@ -28,6 +33,9 @@ static int f_open(void *c, const char *path, void **h, uint64_t *size)
     LARGE_INTEGER sz;
     HANDLE f;
     (void)c;
+    if (interactive && !strcmp(path, ui_answer_path)) {
+        *h = interactive_answer; *size = strlen(interactive_answer); return 0;
+    }
     for (i = 0; path[i] && i < sizeof p - 1; ++i) p[i] = path[i] == '/' ? '\\' : path[i];
     p[i] = 0;
     f = CreateFileA(p, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
@@ -44,6 +52,11 @@ static int f_read(void *c, void *h, uint64_t off, void *buf, uint32_t len)
     DWORD got;
     uint8_t *p = buf;
     (void)c;
+    if (h == interactive_answer) {
+        const size_t size = strlen(interactive_answer);
+        if (off > size || len > size - off) return -1;
+        memcpy(buf, interactive_answer + (size_t)off, len); return 0;
+    }
     pos.QuadPart = (LONGLONG)off;
     if (!SetFilePointerEx(h, pos, 0, FILE_BEGIN)) return -1;
     while (len) {
@@ -54,7 +67,7 @@ static int f_read(void *c, void *h, uint64_t off, void *buf, uint32_t len)
     return 0;
 }
 
-static void f_close(void *c, void *h) { (void)c; CloseHandle(h); }
+static void f_close(void *c, void *h) { (void)c; if (h != interactive_answer) CloseHandle(h); }
 
 static void *sha_begin(void *c)
 {
@@ -89,26 +102,41 @@ int main(int argc, char **argv)
                 blkio_count, blkio_info, blkio_read, blkio_write, blkio_flush, BLKIO_MAX_SECTORS};
     const char *answer = "C:\\SHZ\\SETUP\\SHZSETUP.INI", *payload = "C:\\SHZ\\SETUP\\PAYLOAD";
     setup_result_t r;
-    int i;
+    int i, unattended = 0;
+    interactive = 1;
     for (i = 1; i < argc; ++i) {
-        if (!strcmp(argv[i], "/unattend") && i + 1 < argc) answer = argv[++i];
+        if (!strcmp(argv[i], "/unattend") && i + 1 < argc) { answer = argv[++i]; unattended = 1; }
+        else if (!strcmp(argv[i], "/interactive")) { /* default */ }
         else if (!strcmp(argv[i], "/payload") && i + 1 < argc) payload = argv[++i];
         else {
-            printf("usage: SHZSETUP.EXE [/unattend answer.ini] [/payload dir]\n");
+            printf("usage: SHZSETUP.EXE [/interactive | /unattend answer.ini] [/payload dir]\n");
             printf("SETUP-RESULT: FAIL bad command line\n");
             return 1;
         }
     }
+    interactive = !unattended;
     if (BCryptOpenAlgorithmProvider(&sha_alg, BCRYPT_SHA256_ALGORITHM, 0, 0)) {
         printf("SETUP-RESULT: FAIL bcrypt.dll has no SHA-256 provider\n");
         return 1;
     }
     if (blkio_init()) {
+        BCryptCloseAlgorithmProvider(sha_alg, 0);
         printf("SETUP-RESULT: FAIL block devices could not be enumerated\n");
         return 1;
     }
+    if (interactive) {
+        int chosen = setup_ui_choose(&P, interactive_answer, sizeof interactive_answer);
+        if (chosen) {
+            BCryptCloseAlgorithmProvider(sha_alg, 0);
+            printf(chosen > 0 ? "SETUP-RESULT: CANCELLED (no disk writes)\n" :
+                               "SETUP-RESULT: FAIL interactive display unavailable (no disk writes)\n");
+            return chosen > 0 ? 0 : 1;
+        }
+        answer = ui_answer_path;
+    }
     setup_run(&P, answer, payload, &r);
     BCryptCloseAlgorithmProvider(sha_alg, 0);
+    if (interactive) setup_ui_finish(&r);
     blkio_power(r.power);
     return r.ok ? 0 : 1;
 }

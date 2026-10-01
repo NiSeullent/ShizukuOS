@@ -1,10 +1,10 @@
-# ShizukuDOS desktop
+# ShizukuOS development desktop — ShizukuDOS 10 component
 
 `SHZDESK.EXE` is a persistent Win64 system application, built by `win64/build.py`
 from `apps/shzdesk/*.c` with the existing `ShzStart`/`shzcrt` entry machinery. It
-uses the project's `kernel32.dll`, `user32.dll` and `gdi32.dll`. It is a ShizukuDOS
-shell, not Microsoft's Windows 98 Explorer, and does not establish that Windows
-98 or an external application boots successfully.
+uses the project's `kernel32.dll`, `user32.dll` and `gdi32.dll`. It is a ShizukuDOS 10 component shell used to develop the Windows 98 foundation.
+Its standalone profile does not yet establish Microsoft Windows 98 Explorer or
+external application startup. Native Windows 98 integration remains required.
 
 The desktop and its taskbar offer Files, Text Editor and a launcher. The tools
 are real top-level windows with custom-painted controls; common controls are
@@ -30,6 +30,7 @@ window or owning thread dies.
 | Launch bundled app | F4 | Hello icon or Start item |
 | Launch executable from Files | select `.exe`, Enter | second click |
 | Hide current tool | Escape | X button inside its toolbar |
+| Choose Classic / ShizukuOS theme | F6, then C / S | Theme button, then Classic / ShizukuOS |
 | End session | F10 | Start / End session |
 
 The default document is `D:\DESKTOP.TXT`. Change its path to
@@ -76,8 +77,8 @@ escapes backslash, LF, CR and Tab as `\\`, `\n`, `\r`, `\t`; other printable
 ASCII, including spaces, is literal. Only the first 128 content bytes are logged;
 longer documents produce a separate CONTENT-TRUNCATED marker. Errors emit
 `SHZ-DESKTOP ERROR operation=<description> error=<Win32 code>`; refused actions
-emit REFUSED markers. READY requires a real display, registered class, three
-created windows, successful shared shell registration, a polling timer and
+emit REFUSED markers. READY requires a real display, registered class, desktop/tool/theme
+windows, successful shared shell registration, a polling timer and
 completed initial desktop paint.
 
 A persistence test can use F3, type `uefi desktop persistence`, Enter, Ctrl+S,
@@ -86,3 +87,22 @@ content is the 25 bytes `uefi desktop persistence\n`. Boot again with the same
 disk, then F3 / Ctrl+O to confirm the saved content; the host must also compare
 the file on disk independently. A screenshot or marker alone is not disk
 persistence evidence.
+
+## ShizukuOS themes — development candidate
+
+`F6` or the desktop Theme button opens the Classic/ShizukuOS chooser. `C` and
+`S`, or the two actual shell buttons, select the palette for the desktop, Files
+and Editor client surfaces. Classic remains the initial default and preserves
+its existing colors. Each selection attempts to persist an exact versioned
+18-byte record in `D:\SHZTHEME.CFG`, after exclusive temporary creation, complete
+write/flush/close, strict readback and rename. Failed saving applies the palette
+only to this session and reports the failure; it retains the previous setting.
+Missing/invalid settings use Classic. No writes target the shipped ISO.
+
+Run `python3 shizukudos/win64/tests/test_shzdesk_theme_host.py` to check the real
+palette/record/persistence routines with GCC and ASan/UBSan and compile the
+AMD64 shell. These host controls do not certify a visible guest interaction or
+cold-boot persistence. Native Windows98 UXTHEME/Explorer integration, non-client
+captions, other applications and system-wide theme acceptance remain separate
+required work for ShizukuOS 1.0.0, currently a development candidate. See
+`docs/SHIZUKUOS_TARGET.md` for the Windows98 component and release scope.

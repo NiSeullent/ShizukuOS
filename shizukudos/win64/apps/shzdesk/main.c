@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Persistent ShizukuDOS desktop. All tools perform their work through the Win64
+ * Persistent ShizukuOS development desktop (ShizukuDOS 10 component). All tools perform their work through the Win64
  * runtime; none of the action markers substitutes for an API result.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "shzcrt.h"
+#include "theme.h"
 /* The shell-only API is exported by user32, but absent from MinGW's public header. */
 __declspec(dllimport) BOOL WINAPI SetShellWindow(HWND hwnd);
 
@@ -15,9 +16,11 @@ __declspec(dllimport) BOOL WINAPI SetShellWindow(HWND hwnd);
 #define BAR_HEIGHT 38
 
 static HINSTANCE g_instance;
-static HWND g_desktop, g_files, g_editor;
+static HWND g_desktop, g_files, g_editor, g_theme_dialog;
 static int g_width, g_height, g_start, g_exit_confirm, g_desktop_painted;
-static WCHAR g_status[160] = L"Ready. F2 Files   F3 Editor   F4 Run hello   F10 End session";
+static unsigned g_theme = SHZ_THEME_CLASSIC;
+static int g_theme_open;
+static WCHAR g_status[160] = L"Ready. F2 Files   F3 Editor   F4 Hello   F6 Theme   F10 End session";
 static WCHAR g_directory[PATH_CAP] = L"C:\\";
 static WCHAR g_document[PATH_CAP] = L"D:\\DESKTOP.TXT";
 static WCHAR g_path_input[PATH_CAP];
@@ -91,14 +94,41 @@ static void label(HDC dc, int x, int y, const WCHAR *text, COLORREF color)
     TextOutW(dc, x, y, text, lstrlenW(text));
 }
 
+static const struct shz_theme_colors *theme(void)
+{
+    return shz_theme_palette(g_theme);
+}
+
+static void choose_theme(unsigned selected)
+{
+    DWORD error = 0;
+    int saved;
+    if (!shz_theme_palette(selected)) return;
+    g_theme = selected; g_theme_open = 0;
+    ShowWindow(g_theme_dialog, SW_HIDE);
+    SetForegroundWindow(g_desktop); SetFocus(g_desktop);
+    saved = shz_theme_save(selected, &error);
+    if (saved) status(selected == SHZ_THEME_CLASSIC ?
+        L"Classic theme selected and saved for the next session." :
+        L"ShizukuOS theme selected and saved for the next session.");
+    else {
+        char line[160];
+        snprintf(line, sizeof line, "Theme applied to this session. Saving failed (error %lu); previous saved setting retained.", (unsigned long)error);
+        ascii(g_status, 160, line);
+        redraw(g_desktop); redraw(g_files); redraw(g_editor);
+    }
+    printf("SHZ-DESKTOP THEME style=%s saved=%d error=%lu scope=shell-client-surfaces\n",
+           selected == SHZ_THEME_CLASSIC ? "classic" : "shizuku", saved, (unsigned long)error);
+}
+
 static void button(HDC dc, int x, int y, int width, const WCHAR *text, int pressed)
 {
-    fill(dc, x, y, x + width, y + 28, RGB(192, 192, 192));
-    fill(dc, x, y, x + width, y + 1, pressed ? RGB(64, 64, 64) : RGB(255, 255, 255));
-    fill(dc, x, y, x + 1, y + 28, pressed ? RGB(64, 64, 64) : RGB(255, 255, 255));
-    fill(dc, x, y + 27, x + width, y + 28, pressed ? RGB(255, 255, 255) : RGB(64, 64, 64));
-    fill(dc, x + width - 1, y, x + width, y + 28, pressed ? RGB(255, 255, 255) : RGB(64, 64, 64));
-    label(dc, x + 8, y + 6, text, RGB(0, 0, 0));
+    fill(dc, x, y, x + width, y + 28, (pressed ? theme()->pressed : theme()->panel));
+    fill(dc, x, y, x + width, y + 1, pressed ? theme()->edge_dark : theme()->edge_light);
+    fill(dc, x, y, x + 1, y + 28, pressed ? theme()->edge_dark : theme()->edge_light);
+    fill(dc, x, y + 27, x + width, y + 28, pressed ? theme()->edge_light : theme()->edge_dark);
+    fill(dc, x + width - 1, y, x + width, y + 28, pressed ? theme()->edge_light : theme()->edge_dark);
+    label(dc, x + 8, y + 6, text, theme()->text);
 }
 
 static int join_path(WCHAR *out, const WCHAR *directory, const WCHAR *name)
@@ -378,21 +408,22 @@ static void erase_character(int backward)
 static void paint_desktop(HDC dc)
 {
     const int bar = g_height - BAR_HEIGHT;
-    fill(dc, 0, 0, g_width, bar, RGB(0, 128, 128));
-    label(dc, 20, 18, L"ShizukuDOS", RGB(255, 255, 255));
+    fill(dc, 0, 0, g_width, bar, theme()->desktop);
+    label(dc, 20, 18, L"ShizukuOS - Development candidate", theme()->desktop_text);
     button(dc, 20, 52, 144, L"Files   [F2]", 0);
     button(dc, 20, 98, 144, L"Editor  [F3]", 0);
     button(dc, 20, 144, 144, L"Hello   [F4]", 0);
-    label(dc, 20, bar - 32, g_status, RGB(255, 255, 255));
-    fill(dc, 0, bar, g_width, g_height, RGB(192, 192, 192));
-    fill(dc, 0, bar, g_width, bar + 1, RGB(255, 255, 255));
+    button(dc, 20, 190, 144, L"Theme   [F6]", g_theme_open);
+    label(dc, 20, bar - 32, g_status, theme()->desktop_text);
+    fill(dc, 0, bar, g_width, g_height, theme()->panel);
+    fill(dc, 0, bar, g_width, bar + 1, theme()->edge_light);
     button(dc, 4, bar + 5, 78, L"Start", g_start > 0);
     button(dc, 90, bar + 5, 132, L"Files [F2]", IsWindowVisible(g_files));
     button(dc, 230, bar + 5, 140, L"Editor [F3]", IsWindowVisible(g_editor));
-    label(dc, 390, bar + 12, L"F10: End session", RGB(0, 0, 0));
+    label(dc, 390, bar + 12, L"F10: End session", theme()->text);
     if (g_start > 0) {
         const int top = bar - 136;
-        fill(dc, 4, top, 238, bar, RGB(192, 192, 192));
+        fill(dc, 4, top, 238, bar, theme()->panel);
         button(dc, 8, top + 4, 226, L"Files         F2", 0);
         button(dc, 8, top + 36, 226, L"Text editor   F3", 0);
         button(dc, 8, top + 68, 226, L"Run hello     F4", 0);
@@ -400,26 +431,39 @@ static void paint_desktop(HDC dc)
     }
 }
 
+static void paint_theme(HDC dc)
+{
+    RECT client;
+    GetClientRect(g_theme_dialog, &client);
+    fill(dc, 0, 0, client.right, client.bottom, theme()->panel);
+    label(dc, 16, 14, L"Choose your desktop theme", theme()->text);
+    button(dc, 16, 50, 176, L"Classic [C]", g_theme == SHZ_THEME_CLASSIC);
+    button(dc, 204, 50, 208, L"ShizukuOS [S]", g_theme == SHZ_THEME_SHIZUKU);
+    label(dc, 16, 98, L"Your desktop, files and text editor.", theme()->text);
+    label(dc, 16, 126, L"Your choice is saved for the next session.", theme()->text);
+    label(dc, 16, 154, L"F6 closes. ShizukuOS development candidate.", theme()->text);
+}
+
 static void paint_files(HDC dc, int width, int height)
 {
     unsigned i, visible = height > 160 ? (unsigned)(height - 160) / 20 : 1;
     WCHAR text[160];
     char value[80];
-    fill(dc, 0, 0, width, height, RGB(255, 255, 255));
-    fill(dc, 0, 0, width, 84, RGB(192, 192, 192));
+    fill(dc, 0, 0, width, height, theme()->surface);
+    fill(dc, 0, 0, width, 84, theme()->panel);
     button(dc, 8, 6, 52, L"C:", g_directory[0] == 'C');
     button(dc, 68, 6, 52, L"D:", g_directory[0] == 'D');
     button(dc, 128, 6, 52, L"E:", g_directory[0] == 'E');
     button(dc, 188, 6, 60, L"Up", 0);
     button(dc, 256, 6, 110, L"Refresh F5", 0);
     button(dc, width - 40, 6, 32, L"X", 0);
-    label(dc, 8, 44, g_directory, RGB(0, 0, 0));
-    label(dc, 8, 66, L"Name                                   Bytes", RGB(0, 0, 0));
+    label(dc, 8, 44, g_directory, theme()->text);
+    label(dc, 8, 66, L"Name                                   Bytes", theme()->text);
     for (i = 0; i < visible && g_top + i < g_row_count; ++i) {
         const struct file_row *r = &g_rows[g_top + i];
         int y = 90 + (int)i * 20, selected = g_selected == (int)(g_top + i);
-        COLORREF color = selected ? RGB(255, 255, 255) : RGB(0, 0, 0);
-        if (selected) fill(dc, 4, y - 2, width - 4, y + 18, RGB(0, 0, 128));
+        COLORREF color = selected ? theme()->selected_text : theme()->text;
+        if (selected) fill(dc, 4, y - 2, width - 4, y + 18, theme()->selected);
         label(dc, 8, y, (r->attrs & FILE_ATTRIBUTE_DIRECTORY) ? L"[DIR]" : L"     ", color);
         {
             RECT clip = { 60, y, width - 150, y + 18 };
@@ -429,8 +473,8 @@ static void paint_files(HDC dc, int width, int height)
         snprintf(value, sizeof value, "%llu", r->bytes); ascii(text, 160, value);
         label(dc, width - 136, y, text, color);
     }
-    fill(dc, 0, height - 56, width, height, RGB(192, 192, 192));
-    label(dc, 8, height - 50, L"Enter: open/launch  Arrows: select  Backspace: up  Esc: close", RGB(0, 0, 0));
+    fill(dc, 0, height - 56, width, height, theme()->panel);
+    label(dc, 8, height - 50, L"Enter: open/launch  Arrows: select  Backspace: up  Esc: close", theme()->text);
     { RECT clip = { 8, height - 26, width - 8, height - 6 };
       DrawTextW(dc, g_status, -1, &clip, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX); }
 }
@@ -450,22 +494,22 @@ static void paint_editor(HDC dc, int width, int height)
     }
     if ((int)caret_line < g_editor_scroll) g_editor_scroll = (int)caret_line;
     if (caret_line >= (unsigned)g_editor_scroll + visible) g_editor_scroll = (int)(caret_line - visible + 1);
-    fill(dc, 0, 0, width, height, RGB(255, 255, 255));
-    fill(dc, 0, 0, width, 80, RGB(192, 192, 192));
+    fill(dc, 0, 0, width, height, theme()->surface);
+    fill(dc, 0, 0, width, 80, theme()->panel);
     button(dc, 8, 6, 100, L"Save ^S", 0);
     button(dc, 116, 6, 100, L"Open ^O", 0);
     button(dc, 224, 6, 100, L"Path ^L", g_path_edit);
     button(dc, 332, 6, 72, L"New ^N", 0);
     button(dc, width - 40, 6, 32, L"X", 0);
-    label(dc, 8, 44, g_path_edit ? g_path_input : g_document, RGB(0, 0, 0));
+    label(dc, 8, 44, g_path_edit ? g_path_input : g_document, theme()->text);
     snprintf(info, sizeof info, "%lu bytes   %s   ASCII / LF", (unsigned long)g_text_bytes, g_dirty ? "unsaved" : "saved");
-    ascii(text, 160, info); label(dc, 8, 64, text, RGB(0, 0, 0));
+    ascii(text, 160, info); label(dc, 8, 64, text, theme()->text);
     for (i = 0; i <= g_text_bytes; ++i) {
         char c = i < g_text_bytes ? g_text[i] : '\n';
         if (c == '\r') continue;
         if (c == '\n' || column >= columns || n >= 254) {
             if (line >= (unsigned)g_editor_scroll && line < (unsigned)g_editor_scroll + visible) {
-                row[n] = 0; label(dc, 12, 90 + ((int)line - g_editor_scroll) * 18, row, RGB(0, 0, 0));
+                row[n] = 0; label(dc, 12, 90 + ((int)line - g_editor_scroll) * 18, row, theme()->text);
             }
             ++line; n = 0; column = 0;
             if (c == '\n') continue;
@@ -473,9 +517,9 @@ static void paint_editor(HDC dc, int width, int height)
         row[n++] = c == '\t' ? ' ' : (WCHAR)(unsigned char)c; ++column;
     }
     if (!g_path_edit) fill(dc, 12 + (int)caret_column * 8, 90 + ((int)caret_line - g_editor_scroll) * 18 + 15,
-                          20 + (int)caret_column * 8, 107 + ((int)caret_line - g_editor_scroll) * 18, RGB(0, 0, 0));
-    fill(dc, 0, height - 48, width, height, RGB(192, 192, 192));
-    label(dc, 8, height - 44, L"Type text. Ctrl+S save  Ctrl+O open  Ctrl+L path  Esc close", RGB(0, 0, 0));
+                          20 + (int)caret_column * 8, 107 + ((int)caret_line - g_editor_scroll) * 18, theme()->text);
+    fill(dc, 0, height - 48, width, height, theme()->panel);
+    label(dc, 8, height - 44, L"Type text. Ctrl+S save  Ctrl+O open  Ctrl+L path  Esc close", theme()->text);
     { RECT clip = { 8, height - 24, width - 8, height - 4 };
       DrawTextW(dc, g_status, -1, &clip, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX); }
 }
@@ -502,8 +546,20 @@ static int key(HWND hwnd, WPARAM vk)
     if (vk == VK_F2) { show_files(); return 1; }
     if (vk == VK_F3) { show_editor(); return 1; }
     if (vk == VK_F4) { launch_application(L"C:\\SHZ\\TESTS\\T_HELLO.EXE"); return 1; }
+    if (vk == VK_F6) {
+        g_theme_open = !g_theme_open; g_start = 0;
+        ShowWindow(g_theme_dialog, g_theme_open ? SW_SHOW : SW_HIDE);
+        SetForegroundWindow(g_theme_open ? g_theme_dialog : g_desktop);
+        SetFocus(g_theme_open ? g_theme_dialog : g_desktop);
+        redraw(g_theme_dialog); redraw(g_desktop); return 1;
+    }
+    if (hwnd == g_theme_dialog && g_theme_open && (vk == 'C' || vk == 'S')) {
+        choose_theme(vk == 'C' ? SHZ_THEME_CLASSIC : SHZ_THEME_SHIZUKU); return 1;
+    }
     if (vk == VK_F10) { end_session(); return 1; }
     if (vk == VK_ESCAPE) {
+        if (g_theme_open) { g_theme_open = 0; ShowWindow(g_theme_dialog, SW_HIDE);
+            SetForegroundWindow(g_desktop); SetFocus(g_desktop); redraw(g_desktop); return 1; }
         if (hwnd == g_editor && g_path_edit) { g_path_edit = 0; status(L"Path edit cancelled."); return 1; }
         if (hwnd != g_desktop) { ShowWindow(hwnd, SW_HIDE); SetForegroundWindow(g_desktop); SetFocus(g_desktop); }
         g_start = 0; redraw(g_desktop); return 1;
@@ -553,6 +609,9 @@ static void click(HWND hwnd, int x, int y)
     GetClientRect(hwnd, &r);
     if (hwnd == g_desktop) {
         int bar = g_height - BAR_HEIGHT;
+        if (x >= 20 && x < 164 && y >= 190 && y < 218) {
+            key(hwnd, VK_F6); return;
+        }
         if (g_start > 0 && x >= 8 && x < 234 && y >= bar - 132 && y < bar) {
             int item = (y - (bar - 132)) / 32;
             g_start = 0;
@@ -564,6 +623,11 @@ static void click(HWND hwnd, int x, int y)
         else if (x >= 20 && x < 164 && y >= 144 && y < 172) launch_application(L"C:\\SHZ\\TESTS\\T_HELLO.EXE");
         else g_start = 0;
         redraw(g_desktop); return;
+    }
+    if (hwnd == g_theme_dialog) {
+        if (y >= 50 && y < 78 && x >= 16 && x < 192) choose_theme(SHZ_THEME_CLASSIC);
+        else if (y >= 50 && y < 78 && x >= 204 && x < 412) choose_theme(SHZ_THEME_SHIZUKU);
+        return;
     }
     if (y >= 6 && y < 34 && x >= r.right - 40) { key(hwnd, VK_ESCAPE); return; }
     if (hwnd == g_files) {
@@ -602,12 +666,13 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPAR
         }
         else if (hwnd == g_files) paint_files(dc, r.right, r.bottom);
         else if (hwnd == g_editor) paint_editor(dc, r.right, r.bottom);
+        else if (hwnd == g_theme_dialog) paint_theme(dc);
         if (EndPaint(hwnd, &ps) && dc && hwnd == g_desktop) g_desktop_painted = 1;
         return 0;
     }
     case WM_KEYDOWN: case WM_SYSKEYDOWN:
         if ((lparam & ((LPARAM)1 << 30)) &&
-            (wparam == VK_F2 || wparam == VK_F3 || wparam == VK_F4 || wparam == VK_F10)) return 0;
+            (wparam == VK_F2 || wparam == VK_F3 || wparam == VK_F4 || wparam == VK_F6 || wparam == VK_F10)) return 0;
         if (key(hwnd, wparam)) return 0;
         break;
     case WM_CHAR:
@@ -657,6 +722,12 @@ int main(void)
     MSG message;
     int result, code = 0;
     unsigned i;
+    DWORD theme_error = 0;
+    int theme_loaded = shz_theme_load(&g_theme, &theme_error);
+    if (theme_loaded < 0) status(L"Saved theme could not be read. Classic theme is active; F6 opens theme selection.");
+    printf("SHZ-DESKTOP THEME style=%s source=%s error=%lu scope=shell-client-surfaces\n",
+           g_theme == SHZ_THEME_CLASSIC ? "classic" : "shizuku", theme_loaded == 1 ? "disk" : "default",
+           (unsigned long)theme_error);
     g_instance = GetModuleHandleW(0);
     g_width = GetSystemMetrics(SM_CXSCREEN); g_height = GetSystemMetrics(SM_CYSCREEN);
     if (g_width < 640 || g_height < 480) {
@@ -667,13 +738,15 @@ int main(void)
     wc.cbSize = sizeof wc; wc.style = CS_HREDRAW | CS_VREDRAW; wc.lpfnWndProc = window_proc;
     wc.hInstance = g_instance; wc.lpszClassName = L"ShzDesktopWindow"; wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     if (!RegisterClassExW(&wc)) { failure("Register desktop class", GetLastError()); return 1; }
-    g_desktop = CreateWindowExW(0, wc.lpszClassName, L"ShizukuDOS Desktop", WS_POPUP | WS_VISIBLE,
+    g_desktop = CreateWindowExW(0, wc.lpszClassName, L"ShizukuOS Development Desktop", WS_POPUP | WS_VISIBLE,
                                0, 0, g_width, g_height, 0, 0, g_instance, 0);
     g_files = CreateWindowExW(0, wc.lpszClassName, L"Files", WS_OVERLAPPEDWINDOW,
                             48, 40, g_width - 96, g_height - 108, 0, 0, g_instance, 0);
     g_editor = CreateWindowExW(0, wc.lpszClassName, L"Text Editor", WS_OVERLAPPEDWINDOW,
                              72, 54, g_width - 144, g_height - 136, 0, 0, g_instance, 0);
-    if (!g_desktop || !g_files || !g_editor) { failure("Create desktop windows", GetLastError()); code = 1; }
+    g_theme_dialog = CreateWindowExW(0, wc.lpszClassName, L"ShizukuOS Themes", WS_OVERLAPPEDWINDOW,
+                                   188, 52, 428, 228, 0, 0, g_instance, 0);
+    if (!g_desktop || !g_files || !g_editor || !g_theme_dialog) { failure("Create desktop windows", GetLastError()); code = 1; }
     else if (!SetShellWindow(g_desktop) || GetShellWindow() != g_desktop) {
         failure("Register shell window", GetLastError()); code = 1;
     }
@@ -693,6 +766,7 @@ int main(void)
     }
     for (i = 0; i < CHILD_CAP; ++i) if (g_children[i].process) CloseHandle(g_children[i].process);
     if (g_desktop) KillTimer(g_desktop, 1);
+    if (g_theme_dialog) DestroyWindow(g_theme_dialog);
     if (g_editor) DestroyWindow(g_editor);
     if (g_files) DestroyWindow(g_files);
     if (g_desktop) DestroyWindow(g_desktop);

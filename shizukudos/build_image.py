@@ -1,9 +1,11 @@
-"""Build a bootable 1.44 MiB FAT12 ShizukuDOS test image from original sources."""
+"""Current default: build DOS10. Explicit --historical-fixture retains the retired FAT12 test builder."""
 
 from __future__ import annotations
 
 import argparse
 import struct
+import subprocess
+import sys
 from pathlib import Path
 
 BYTES_PER_SECTOR = 512
@@ -82,7 +84,20 @@ def make_image(boot: bytes, stage2: bytes, files: dict[str, bytes]) -> bytes:
 
 
 def main() -> None:
+    if "--historical-fixture" not in sys.argv[1:]:
+        if sys.argv[1:] in (["--help"], ["-h"]):
+            print(__doc__)
+            print("Run without arguments for DOS10. Current CLI: python3 shizukudos/tools/shz.py build.")
+            print("Retired fixture: --historical-fixture boot stage2 output --demo COM --ret-demo COM --std-demo COM.")
+            return
+        if len(sys.argv) != 1:
+            raise SystemExit("ShizukuDOS 0.1 is retired. Run this entry without arguments for DOS10, "
+                             "or use --historical-fixture only for the old developer test inputs.")
+        subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "dos16/build.py")], check=True)
+        return
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--historical-fixture", action="store_true", required=True,
+                        help="explicit retired DOS 0.1 developer fixture; never the current product image")
     parser.add_argument("boot", type=Path)
     parser.add_argument("stage2", type=Path)
     parser.add_argument("output", type=Path)

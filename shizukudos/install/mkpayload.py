@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build the ShizukuDOS installation payload (host side of SHZSETUP.EXE).
+"""Build the ShizukuOS installation payload (host side of SHZSETUP.EXE).
 
 Outputs (build/shizukudos/install/):
   esp.img                 the EFI System Partition, FAT32, built on the host and written by SHZSETUP sector by sector
@@ -14,8 +14,8 @@ Outputs (build/shizukudos/install/):
                           \\SHZ\\SETUP\\SHZSETUP.EXE, \\SHZ\\SETUP\\SHZSETUP.INI and \\SHZ\\SETUP\\PAYLOAD\\*
   mkpayload-result.json   receipt (inputs, outputs, hashes)
 Boot the installer: Multiboot stub build/shizukudos/kernel64s/boot.elf with modules KERNEL64S.BIN and INSTALL.IMG and
-the kernel command line `shz.setup=auto` (tests/run_install.py does this under QEMU; the install ISO does it with
-isolinux/mboot.c32, agent C3).
+the kernel command line `shz.setup=interactive` (the public medium opens the self-developed installer).
+The explicit unattended QA profile uses `shz.setup=auto` and mkpayload.py --no-desktop.
 
 ESP layout: \\EFI\\BOOT\\BOOTX64.EFI (Shizuku UEFI loader), \\EFI\\SHIZUKU\\BOOT.INI (mode = kernel64),
 \\EFI\\SHIZUKU\\CSMWRAP.EFI (when built), \\SHZDOS\\KERNEL64S.BIN, WIN64.IMG, DISK.IMG (DOS16), KERNEL32.BIN, KERNEL64.BIN,
@@ -48,7 +48,7 @@ OUT = BUILD / "install"
 PAYLOAD = OUT / "payload"
 FIXED_EPOCH = 1785283200            # same fixed stamp as tools/fatimg.py and csm/build.py
 SCHEMA = "shizukudos-install-manifest/1"
-PRODUCT = "ShizukuDOS 10.0-dev"
+PRODUCT = "ShizukuOS 1.0.0 development candidate"
 ESP_LABEL, ESP_VOLID = "SHZESP", "53485A45"
 ESP_FIRST_LBA = 2048                # p1 starts at 1 MiB; esp.img's BPB hidden-sectors field says so
 SYS_LABEL = "SHZSYS"
@@ -62,7 +62,7 @@ INPUTS = {
     "stub": BUILD / "kernel64s" / "boot.elf",
     "kernel64": BUILD / "kernel64" / "KERNEL64.BIN",
     "kernel32": BUILD / "kernel32" / "KERNEL32.BIN",
-    "dos16": BUILD / "dos16" / "shizukudos-dos16-hd32.img",
+    "dos16": BUILD / "dos16" / "shizukudos-dos10.img",
     "win64": BUILD / "win64",
 }
 BUILDERS = [("kernel64s", ["kbuild.py"]), ("win64", ["win64/build.py"]), ("dos16", ["dos16/build.py"]),
@@ -164,14 +164,14 @@ SYSLINUX_CFG = (
     "UI menu.c32\r\n"
     "PROMPT 0\r\n"
     "TIMEOUT 50\r\n"
-    "MENU TITLE ShizukuDOS 10 (installed)\r\n"
+    "MENU TITLE ShizukuOS development (installed)\r\n"
     "DEFAULT kernel64\r\n"
     "LABEL kernel64\r\n"
-    "  MENU LABEL ^Kernel64 + Win64 runtime\r\n"
+    "  MENU LABEL ^ShizukuDOS Kernel64 component diagnostics\r\n"
     "  KERNEL mboot.c32\r\n"
     "  APPEND /SHZDOS/K64STUB.ELF --- /SHZDOS/KERNEL64S.BIN --- /SHZDOS/WIN64.IMG\r\n"
     "LABEL dos16\r\n"
-    "  MENU LABEL ^DOS16 - FreeDOS profile (disk image in RAM)\r\n"
+    "  MENU LABEL ^DOS10 compatibility shell (disk image in RAM)\r\n"
     "  KERNEL memdisk\r\n"
     "  INITRD /SHZDOS/DISK.IMG\r\n"
     "  APPEND harddisk\r\n"
@@ -187,6 +187,8 @@ def syslinux_members(desktop=False):
     members.append(("syslinux/memdisk", (root / "usr/lib/syslinux/memdisk").read_bytes()))
     cfg = SYSLINUX_CFG
     if desktop:
+        cfg = cfg.replace(b"MENU LABEL ^ShizukuDOS Kernel64 component diagnostics",
+                          b"MENU LABEL ^Start ShizukuOS development desktop")
         cfg = cfg.replace(b"APPEND /SHZDOS/K64STUB.ELF ---", b"APPEND /SHZDOS/K64STUB.ELF shz.desktop ---")
     members.append(("syslinux/syslinux.cfg", cfg))
     return members, root / "usr/bin/syslinux"
@@ -312,7 +314,7 @@ def main():
     ap.add_argument("--answer", default=str(HERE / "shzsetup.ini"), help="answer file to pack (default: install/shzsetup.ini)")
     ap.add_argument("--no-bios-boot", action="store_true",
                     help="do not install syslinux into the ESP (the installed disk then boots on UEFI only)")
-    ap.add_argument("--desktop", action="store_true",
+    ap.add_argument("--desktop", action=argparse.BooleanOptionalAction, default=True,
                     help="install the built persistent desktop and start it on BIOS and UEFI boots")
     ap.add_argument("--out", type=Path, default=OUT,
                     help=f"output directory (default {OUT}); the install media use their own, with the shipped answer file")
@@ -333,9 +335,9 @@ def main():
     # ---- ESP
     esp_members = [("EFI/BOOT/BOOTX64.EFI", INPUTS["loader"].read_bytes()),
                    ("EFI/SHIZUKU/BOOT.INI",
-                    b"; ShizukuDOS boot manager policy (written by the installer payload, install/mkpayload.py)\r\n"
+                    b"; ShizukuOS boot manager policy (written by the installer payload, install/mkpayload.py)\r\n"
                     b"; kernel64: start Kernel64 directly (no Supervisor, no VMX needed); see supervisor/loader/bootini.h\r\n"
-                    b"mode = kernel64\r\n")]
+                    b"mode = kernel64\r\nmenu_timeout = 0\r\n")]
     csm_present = INPUTS["csmwrap"].exists()
     if csm_present:
         esp_members.append(("EFI/SHIZUKU/CSMWRAP.EFI", INPUTS["csmwrap"].read_bytes()))
@@ -379,6 +381,8 @@ def main():
     manifest = {
         "schema": SCHEMA,
         "product": PRODUCT,
+        "release_target": "1.0.0", "release_channel": "development",
+        "architecture": "ShizukuDOS replaces MS-DOS for actual Windows 98; Kernel32 and Kernel64 are its components",
         "source_date_epoch": FIXED_EPOCH,
         "boot_profile": "desktop" if args.desktop else "self-test",
         "sector_size": 512,

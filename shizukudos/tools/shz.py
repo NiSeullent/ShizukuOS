@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""ShizukuDOS 10.0 build / test / package driver.
+"""ShizukuOS 1.0.0 / ShizukuDOS 10 build, test and source driver.
 
     shz.py doctor [--guest]
-    shz.py build --profile {bios-legacy,uefi-multikernel,bios-multikernel,dual-bios-uefi-csm}
+    shz.py build [--profile dos10]    normal BIOS + UEFI-CSM compatibility shell
     shz.py test  --suite {host,boot,interkernel,win64,win98-regression,media}
     shz.py package --channel dev
 
@@ -28,6 +28,12 @@ import shzlib  # noqa: E402
 from shzlib import BUILD, REPO, SHZ, run, sha256_file  # noqa: E402
 
 PROFILES = {
+    "dos10": {
+        "summary": "ShizukuDOS 10 normal automatic startup and recovery shell, BIOS + UEFI-CSM",
+        "steps": ["dos16/build.py"],
+        "status": "current pinned FreeDOS/FreeCOM compatibility bootstrap; Windows 98 replacement boot, "
+                  "GUI and kernel bridge remain in development",
+    },
     "bios-legacy": {
         "summary": "Legacy BIOS/CSM -> real Real Mode -> FreeDOS DOS16",
         "steps": ["dos16/build.py"],
@@ -179,11 +185,14 @@ def suite_host(results):
         run([sys.executable, SHZ / "dos16" / "build.py"], capture=True, timeout=600)
         hashes.append((sha256_file(BUILD / "dos16" / "command.com"), sha256_file(BUILD / "dos16" / "kernel.sys"),
                        sha256_file(BUILD / "dos16" / "shizukudos-dos16-hd32.img"),
-                       sha256_file(BUILD / "dos16" / "shizukudos-dos16-dual.img")))
+                       sha256_file(BUILD / "dos16" / "shizukudos-dos16-dual.img"),
+                       sha256_file(BUILD / "dos16" / "shizukudos-dos10.img")))
     record(results, "DOS16 build is reproducible (kernel, shell, image)", "PASS" if hashes[0][:3] == hashes[1][:3] else "FAIL",
            detail=hashes[0][2][:16])
     record(results, "DOS16 dual BIOS/UEFI image is reproducible (hd32 content + T_INTS + CSMWrap ESP files)",
            "PASS" if hashes[0][3] == hashes[1][3] else "FAIL", detail=hashes[0][3][:16])
+    record(results, "DOS10 normal automatic-start/recovery image is reproducible",
+           "PASS" if hashes[0][4] == hashes[1][4] else "FAIL", detail=hashes[0][4][:16])
     used, pinned = shzlib.open_watcom_snapshot()
     record(results, f"Open Watcom snapshot is the pinned {pinned[:12]}", "PASS" if used == pinned else "SKIP",
            detail=used[:12] if used == pinned else f"used {used[:12] if used else 'unknown'}: the rolling Last-CI-build "
@@ -557,7 +566,8 @@ def cmd_package(args):
     files = []
     for sub in ("dos16", "csm", "supervisor"):
         base = BUILD / sub
-        for item in ("build-result.json", "BOOTX64.EFI", "esp.img", "kernel.sys", "command.com",
+        for item in ("build-result.json", "BOOTX64.EFI", "esp.img", "esp-conformance.img", "kernel.sys", "command.com",
+                     "shizukudos-dos10.img",
                      "shizukudos-dos16-hd32.img", "shizukudos-dos16-dual.img", "csmwrap.ini", "CSMWRAP.EFI",
                      "Csm16.bin", "vgabios.bin", "vbios.bin", "payload.bin"):
             if (base / item).exists():
@@ -598,7 +608,7 @@ def main():
     p = sub.add_parser("doctor")
     p.add_argument("--guest", action="store_true", help="boot the Supervisor and report capabilities seen from inside")
     p = sub.add_parser("build")
-    p.add_argument("--profile", choices=sorted(PROFILES), required=True)
+    p.add_argument("--profile", choices=sorted(PROFILES), default="dos10")
     p = sub.add_parser("test")
     p.add_argument("--suite", choices=sorted(SUITES), required=True)
     p = sub.add_parser("package")

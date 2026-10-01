@@ -10,6 +10,10 @@ lld-link (which takes .res files, not COFF .rsrc objects).
 The file version is the OS version the Kernel64 loader writes into every PEB (kernel64/ldr.c: OSMajorVersion 10,
 OSMinorVersion 0, OSBuildNumber 22631), with 1 as the private part, so the version a program derives from kernel32.dll
 agrees with what RtlGetVersion/GetVersionEx report.
+
+ProductVersion identifies the ShizukuOS 1.0.0 target independently of that
+compatibility FileVersion. FILEFLAGS marks these development builds prerelease;
+it does not certify the final release or actual Windows 98 app acceptance.
 """
 import shutil
 import subprocess
@@ -17,14 +21,15 @@ from pathlib import Path
 
 WINDRES = "x86_64-w64-mingw32-windres"
 OS_VERSION = (10, 0, 22631, 1)
+PRODUCT_VERSION = (1, 0, 0, 0)
 COMPANY = "The Shizuku Authors"
-PRODUCT = "ShizukuDOS 10 Win64 runtime"
+PRODUCT = "ShizukuOS development Win64 runtime"
 VFT_APP, VFT_DLL = 1, 2
 
 
 def rc_text(filename, description, filetype, version=OS_VERSION, product_version=None, internal_name=None):
     """The .rc source of one VERSIONINFO (language 0x0409, code page 1200)."""
-    product_version = product_version or version
+    product_version = product_version or PRODUCT_VERSION
     internal_name = internal_name or filename.rsplit(".", 1)[0]
     v = ",".join(str(x) for x in version)
     pv = ",".join(str(x) for x in product_version)
@@ -35,7 +40,7 @@ def rc_text(filename, description, filetype, version=OS_VERSION, product_version
  FILEVERSION {v}
  PRODUCTVERSION {pv}
  FILEFLAGSMASK 0x3fL
- FILEFLAGS 0x0L
+ FILEFLAGS 0x2L
  FILEOS 0x40004L
  FILETYPE {filetype:#x}L
  FILESUBTYPE 0x0L

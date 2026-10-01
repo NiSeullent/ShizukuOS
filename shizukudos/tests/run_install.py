@@ -58,7 +58,7 @@ def check(name, ok, detail=""):
 
 
 def build():
-    for script, extra in (("kbuild.py", []), ("win64/build.py", []), ("install/mkpayload.py", ["--answer", str(ANSWER)])):
+    for script, extra in (("kbuild.py", []), ("win64/build.py", []), ("install/mkpayload.py", ["--no-desktop", "--answer", str(ANSWER)])):
         print(f"== {script}", flush=True)
         subprocess.run([sys.executable, str(SHZ / script), *extra], check=True, timeout=3600, stdout=subprocess.DEVNULL)
 

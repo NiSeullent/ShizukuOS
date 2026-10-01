@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build the DOS16 runtime from pinned FreeDOS sources and assemble a boot image.
+r"""Build the DOS16 runtime from pinned FreeDOS sources and assemble a boot image.
 
-This is the *external-code* build profile: the kernel and shell are FreeDOS
-(GPL-2.0-or-later) built from source with Open Watcom, plus patches recorded in
-shizukudos/dos16/patches. The independently written pre-existing ShizukuDOS 0.1
-shell (shizukudos/boot.asm) is a different, unrelated profile.
+The current DOS-compatibility bootstrap uses FreeDOS/FreeCOM (GPL-2.0-or-later)
+built from pinned source with Open Watcom and recorded local patches. ShizukuDOS
+is the MS-DOS replacement for Windows 98; the current external-code bootstrap
+does not yet complete that Windows 98 boot/GUI/kernel connection.
 
 Outputs (all under build/shizukudos/dos16/): kernel.sys, command.com, test
-programs, shizukudos-dos16-hd32.img, shizukudos-dos16-dual.img and build-result.json.
+programs, shizukudos-dos16-hd32.img, shizukudos-dos16-dual.img,
+shizukudos-dos10.img and build-result.json.
+
+shizukudos-dos10.img is the normal BIOS/UEFI-CSM compatibility-shell profile:
+AUTOEXEC calls SHZSTART.BAT and returns to a permanent COMMAND.COM prompt.
+Startup failure or SHZSAFE.TAG selects a recovery prompt. It never runs the
+conformance programs or SHZEXIT automatically. The older two images remain
+unchanged conformance profiles for the existing developer harnesses.
 
 shizukudos-dos16-dual.img is the same MBR + FAT16 + FreeDOS disk with T_INTS (BIOS
 interrupt coverage) added to AUTOEXEC.BAT and \EFI\BOOT\BOOTX64.EFI = CSMWrap
@@ -33,6 +40,8 @@ TESTS = SHZ / "dos16" / "tests"
 CSM = BUILD / "csm"
 PATCHES = sorted((SHZ / "dos16" / "patches").glob("0*.patch"))
 FREECOM_PATCHES = sorted((SHZ / "dos16" / "patches").glob("freecom-*.patch"))
+USER = Path(__file__).resolve().parent / "user"
+USER_FILES = ("CONFIG.SYS", "AUTOEXEC.BAT", "SHZSTART.BAT", "RECOVER.BAT", "README.TXT")
 
 CONFIG_SYS = (
     "DOS=LOW\r\nFILES=30\r\nBUFFERS=20\r\nLASTDRIVE=Z\r\n"
@@ -187,6 +196,69 @@ def assemble_dual(kernel, freecom, tests, csm_efi):
     return image
 
 
+def user_text(path):
+    """ASCII DOS text with one CRLF per line, without modifying source files."""
+    return Path(path).read_text(encoding="ascii").replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii")
+
+
+def assemble_user(kernel, freecom, csm_efi):
+    """Normal DOS10 shell, on one MBR/FAT16 image bootable by BIOS or UEFI-CSM.
+
+    This is a compatibility bootstrap for the Windows 98 architecture, not a
+    Windows 98 installation or proof of complete MS-DOS compatibility.
+    """
+    work = OUT / "user-boot"
+    work.mkdir(parents=True, exist_ok=True)
+    mbr, ready = work / "mbr.bin", work / "SHZREADY.COM"
+    commands = [
+        ["nasm", "-f", "bin", "-w+all", "-o", mbr, SHZ / "dos16" / "mbr.asm"],
+        ["nasm", "-f", "bin", "-w+all", "-o", ready, USER / "ready.asm"],
+    ]
+    for command in commands:
+        run(command)
+    members = {"SHZREADY.COM": ready}
+    for name, source in (("KERNEL.SYS", kernel["kernel"]), ("COMMAND.COM", freecom["command"])):
+        target = work / name
+        shutil.copyfile(source, target)
+        members[name] = target
+    for name in USER_FILES:
+        target = work / name
+        target.write_bytes(user_text(USER / name))
+        members[name] = target
+    config = members["CONFIG.SYS"].read_bytes()
+    if b" /P\r\n" not in config or not members["AUTOEXEC.BAT"].stat().st_size:
+        raise RuntimeError("Normal DOS profile requires a permanent shell and a real AUTOEXEC.BAT")
+    boot = work / "BOOTX64.EFI"
+    shutil.copyfile(csm_efi, boot)
+    ini = work / "csmwrap.ini"
+    ini.write_bytes(CSMWRAP_INI.encode("ascii"))
+    members.update({"EFI/BOOT/BOOTX64.EFI": boot, "EFI/BOOT/csmwrap.ini": ini})
+    image = OUT / "shizukudos-dos10.img"
+    spec = fatimg.make_hdd(image, mbr)
+    fatimg.install_freedos_boot(spec, kernel["boot_fat16"])
+    # KERNEL.SYS stays first, as required by the boot-image construction contract.
+    ordered = ["KERNEL.SYS", "COMMAND.COM", *[n for n in members if n not in ("KERNEL.SYS", "COMMAND.COM")]]
+    fatimg.copy_in(spec, [(members[name], name) for name in ordered if "/" not in name])
+    fatimg.make_dirs(spec, ["EFI", "EFI/BOOT"])
+    fatimg.copy_in(spec, [(members[name], name) for name in ordered if "/" in name])
+    for name, source in members.items():
+        if fatimg.read_bytes(spec, name) != source.read_bytes():
+            raise RuntimeError(f"Normal DOS image readback differs: {name}")
+    inputs = [Path(__file__).resolve(), USER / "ready.asm", *(USER / n for n in USER_FILES)]
+    pins = {str(p.relative_to(REPO)): sha256_file(p) for p in inputs}
+    return image, {
+        "profile": "dos10-user-compatibility-bootstrap", "product": "ShizukuOS 1.0.0",
+        "kernel_origin": "pinned FreeDOS ke2046 + recorded local patches",
+        "shell_origin": "pinned FreeCOM 04fc21a", "auto_start": "C:\\SHZSTART.BAT",
+        "recovery": "startup absent/nonzero, SHZSAFE.TAG, RECOVER.BAT, retained F5/F8",
+        "permanent_shell": True, "conformance_auto_run": False,
+        "Windows98_native_boot_connection_complete": False,
+        "sources_sha256": pins,
+        "members": {n: {"bytes": p.stat().st_size, "sha256": sha256_file(p)} for n, p in members.items()},
+        "commands": [" ".join(str(x) for x in cmd) for cmd in commands],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.parse_args()
@@ -201,6 +273,7 @@ def main():
     image = assemble_image(kernel, freecom, tests)
     csm_efi, csm_receipt = ensure_csmwrap()
     dual = assemble_dual(kernel, freecom, tests, csm_efi)
+    user_image, user_receipt = assemble_user(kernel, freecom, csm_efi)
     manifest = shzlib.load_manifest()
     for name in ("kernel.sys",):
         shutil.copy2(kernel["kernel"], OUT / name)
@@ -212,6 +285,7 @@ def main():
         "upstream": {k: {"commit": v["commit"], "ref": v["ref"], "license": v["license"]}
                      for k, v in manifest["upstreams"].items()},
         "patches": kernel["patches"] + freecom["patches"],
+        "user_boot": user_receipt,
         "toolchain": {
             "open-watcom": {"snapshot_sha256": snapshot,
                             "manifest_snapshot_sha256": snapshot_pin,
@@ -219,7 +293,7 @@ def main():
             "nasm": shzlib.tool_version("nasm", ("-v",)),
             "mtools": shzlib.tool_version("mformat", ("--version",)),
         },
-        "commands": ["nasm -f bin dos16/mbr.asm"] + kernel["commands"] + freecom["commands"] + test_commands,
+        "commands": ["nasm -f bin dos16/mbr.asm"] + kernel["commands"] + freecom["commands"] + test_commands + user_receipt["commands"],
         "artifacts": {
             "kernel.sys": {"sha256": sha256_file(kernel["kernel"]),
                            "bytes": kernel["kernel"].stat().st_size,
@@ -231,6 +305,8 @@ def main():
             "dual.img": {"sha256": sha256_file(dual), "bytes": dual.stat().st_size,
                          "origin": "hd32 content + T_INTS + EFI/BOOT/BOOTX64.EFI (CSMWrap, external LGPL-2.1 "
                                    "with SeaBIOS CSM16 LGPL-3.0) + EFI/BOOT/csmwrap.ini"},
+            "dos10.img": {"sha256": sha256_file(user_image), "bytes": user_image.stat().st_size,
+                          "origin": "normal automatic startup + permanent compatibility/recovery shell + UEFI CSMWrap"},
             "BOOTX64.EFI": {"sha256": sha256_file(csm_efi), "bytes": csm_efi.stat().st_size,
                             "origin": "shizukudos/csm/build.py (CSMWrap "
                                       f"{csm_receipt['upstream']['csmwrap']['commit'][:12]})"},
@@ -241,11 +317,13 @@ def main():
         "image_listing": fatimg.listing(fatimg.partition_spec(image)),
         "dual_image_listing": fatimg.listing(fatimg.partition_spec(dual)) +
                               fatimg.listing(fatimg.partition_spec(dual), "EFI/BOOT"),
+        "user_image_listing": fatimg.listing(fatimg.partition_spec(user_image)) +
+                              fatimg.listing(fatimg.partition_spec(user_image), "EFI/BOOT"),
     }
     if shzlib.open_watcom_snapshot() != (snapshot, snapshot_pin):
         raise RuntimeError("Open Watcom snapshot changed during build")
     shzlib.write_json(OUT / "build-result.json", receipt)
-    print(json.dumps({k: receipt["artifacts"][k] for k in ("kernel.sys", "command.com", "hd32.img", "dual.img")},
+    print(json.dumps({k: receipt["artifacts"][k] for k in ("kernel.sys", "command.com", "hd32.img", "dual.img", "dos10.img")},
                      indent=2))
 
 

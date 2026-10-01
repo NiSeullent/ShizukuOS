@@ -239,13 +239,14 @@ def build_apps(module_libs=()):
 
 def build_setup(module_libs=()):
     """SHZSETUP.EXE, the installer (win64/setup/*.c; its portable core is shared with the host tests in
-    shizukudos/install/tests). Packed as \\SHZ\\SETUP\\SHZSETUP.EXE; Kernel64 runs it when booted with shz.setup=auto."""
+    shizukudos/install/tests). Packed as \\SHZ\\SETUP\\SHZSETUP.EXE; Kernel64 runs it with shz.setup=interactive
+    for the public installer or shz.setup=auto for explicit unattended QA."""
     src = sorted((W64 / "setup").glob("*.c"))
     exe = OUT / "SHZSETUP.EXE"
     crt = W64 / "crt"
     cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
            "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", W64 / "setup", *src, crt / "shzcrt.c",
-           version_obj("SHZSETUP.EXE", "ShizukuDOS 10 Setup", verres.VFT_APP),
+           version_obj("SHZSETUP.EXE", "ShizukuOS development Setup", verres.VFT_APP),
            "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
     run(cmd)
     return exe, cmd
@@ -264,7 +265,7 @@ def build_sys_apps(module_libs=()):
         crt = W64 / "crt"
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
                "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", d, *src, crt / "shzcrt.c",
-               version_obj(f"{d.name}.exe", f"ShizukuDOS 10 {d.name}", verres.VFT_APP),
+               version_obj(f"{d.name}.exe", f"ShizukuOS development {d.name}", verres.VFT_APP),
                "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
         run(cmd)
         apps[d.name] = (exe, cmd)
