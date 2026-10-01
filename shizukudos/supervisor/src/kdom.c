@@ -11,6 +11,7 @@
 #include "domain.h"
 #include "pool.h"
 #include "../../abi/shz_ipc.h"
+#include "../../kernel32/service_policy.h"
 
 #define BOOT_GDT_GPA 0x6000u
 #define BOOT_PML4_GPA 0x1000u
@@ -111,6 +112,13 @@ int kernel_domain_create(shz_info_t *info, const shz_caps_t *caps, dom_kind_t ki
         bi->initrd_size = initrd->size;
     }
     bi->tsc_hz = info->tsc_hz;
+    /* Native Win98 is the explicit owner of this K32 service lifetime. The
+     * existing ABI1.1 command line carries policy; default DOS/QA stays empty.
+     */
+    if (!lm && info->loader_flags == SHZ_LOADER_NATIVE_WIN98) {
+        memcpy(bi->cmdline, K32_WIN98_SERVICE_CMDLINE, sizeof K32_WIN98_SERVICE_CMDLINE);
+        bi->cmdline_size = sizeof K32_WIN98_SERVICE_CMDLINE - 1;
+    }
 
     if (ept_init(&d->ept) || ept_map(&d->ept, 0, base, size, EPT_RWX | EPT_WB, 0)) {
         log_capture(info->last_error, sizeof info->last_error, "%s: EPT construction failed", d->name);

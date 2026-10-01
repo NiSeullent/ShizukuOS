@@ -1,0 +1,33 @@
+{
+  "schema": "shizukudos-cb43-toolchain-sourcebuild-v1",
+  "used_tools": [
+    {
+      "file": "binl64/wcc",
+      "bytes": 2082696,
+      "sha256": "22dcffbf9591daef50fe69c6dcb327b10d20b4884bd3e84614b043f7c3f81bd2"
+    },
+    {
+      "file": "binl64/wcl",
+      "bytes": 868632,
+      "sha256": "b3fe9f3d819e893bd3fab88c90db3ed036e618919638af7395182016421d6e09"
+    },
+    {
+      "file": "binl64/wlink",
+      "bytes": 1519499,
+      "sha256": "603bf3bbd8a2de51653e7d81d79bcd94b1b7172f02f0a8805eb89c81ab5862e5"
+    },
+    {
+      "file": "binl64/wmake",
+      "bytes": 1213297,
+      "sha256": "774bf4cb0a2bc8a47de4781acc3df98856c1c4827cd576e86472a313fcfa5e30"
+    }
+  ],
+  "local_cached_archive_sha256": "4fdc24c04a02e31ffedae1690fc2c6d53fcb01464f92692adf6b17a7e890af3f",
+  "local_cached_archive_bytes": 151216612,
+  "extracted_tree_snapshot_stamp": null,
+  "limits": [
+    "Tool executable hashes identify the binaries actually used",
+    "The used extracted tree has no archive hash stamp; correspondence to cached archive is not assumed",
+    "Open Watcom Last-CI-build URL is rolling; acquire and record actual toolchain separately"
+  ]
+}

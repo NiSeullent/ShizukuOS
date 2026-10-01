@@ -1,0 +1,23 @@
+{
+  "schema": "shizukuos.actual-combined-DOS-source-only-checkpoint.v1",
+  "files": [
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-guest-cb43-20261001/README.md",
+      "bytes": 1700,
+      "sha256": "661f81391f0824d183940977eb63b0597d479525b09e56de0d3ca8f59a27f51c"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-guest-cb43-20261001/actual-native-result.json",
+      "bytes": 1176,
+      "sha256": "5e211f108ce32e5e771f4b57750ca0baaf782285d55138d6b7d2cacf3c3ab7ae"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-guest-cb43-20261001/actual-native-results.txt",
+      "bytes": 710,
+      "sha256": "f8419d5b465e7ba84dafa4265d446104aa4503916045e8b66e1dec440c525716"
+    }
+  ],
+  "Windows98_boot_verified": false,
+  "MSDOS_replaced_under_Windows98": false,
+  "native_apps_verified": false
+}

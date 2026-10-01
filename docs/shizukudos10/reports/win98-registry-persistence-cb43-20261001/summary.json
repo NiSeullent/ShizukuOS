@@ -1,0 +1,292 @@
+{
+  "schema": "shizuku-win98-registry-persistence-metadata/v1",
+  "public_payload_scope": "fixed-system-file lengths, SHA256, FAT attributes and chain counts only; no registry contents, users, keys, installed media or private screenshots",
+  "metadata_receipt_sha256": "471853c3a234cf2838fc0fb4849391fd18e03dd071abc90cfd3f5653b1438e13",
+  "actual_inspector_source_sha256": "5c77799ea6c2feed3371b802be135eb8aefabac6c26305aeacd5faa14aff7562",
+  "synthetic_reader_tests": {
+    "methods": 5,
+    "failures": 0,
+    "log_sha256": "a86c9af0ee1ac40e4e3977fc4f650292e0bb3d1969d9f1aa33718b93aa51a891",
+    "source_sha256": "45712e8955ac773ae1f5d13c636993c6e304336a71080a6855b9babec8169b2f"
+  },
+  "partition_offset_bytes": 32256,
+  "image_epoch_sha256": {
+    "original": {
+      "sha256": "518d18d5e286cb0eb63065d8d896d0d3ee743289f220fb62083f6176b5925db7",
+      "bytes": 2147483648,
+      "whole_image_before_equals_after": true,
+      "independent_standard_full_sha256_matches": true
+    },
+    "v6": {
+      "sha256": "ea85779525893673d40cb1ebb9953a441b3654a9ee46fb803abd01ad98a778b1",
+      "bytes": 2147483648,
+      "whole_image_before_equals_after": true,
+      "independent_standard_full_sha256_matches": true
+    },
+    "v7": {
+      "sha256": "f7d6d163b445aad545d6a0f8660837e0233aa52a475e239b602ac82e350c48b4",
+      "bytes": 2147483648,
+      "whole_image_before_equals_after": true,
+      "independent_standard_full_sha256_matches": true
+    },
+    "v9": {
+      "sha256": "925f5bb24fb879bc82fe685f95cf89df933979f3ca3836150241061da6aac9f1",
+      "bytes": 2147483648,
+      "whole_image_before_equals_after": true,
+      "independent_standard_full_sha256_matches": true
+    }
+  },
+  "files": {
+    "SYSTEM.DAT": {
+      "candidate_bytes": 2273312,
+      "candidate_sha256": "07dd33e284da58438d2efc6e864d7f6520b15da567d85e6e3530d043570e8abd",
+      "candidate_fat_attributes": 3,
+      "all3_candidates_same_bytes_hash_attributes": true,
+      "original_bytes": 2277408,
+      "original_sha256": "461a2af04a2c5f2cc3e2f98080074b6b6dbf8499dba7ad1ba659222bfc4bd212",
+      "delta_bytes": -4096,
+      "first_clusters_by_epoch": {
+        "original": 43479,
+        "v6": 60643,
+        "v7": 60058,
+        "v9": 43483
+      },
+      "all_selected_chains_sane": true
+    },
+    "USER.DAT": {
+      "candidate_bytes": 102432,
+      "candidate_sha256": "b323ef2cd952521f5d6ed3ce8fdbd31f5033f358d7bbcdf583cd69b000db421c",
+      "candidate_fat_attributes": 3,
+      "all3_candidates_same_bytes_hash_attributes": true,
+      "original_bytes": 106528,
+      "original_sha256": "faad2bce4ef05cffc3f9fb3525e7f6ae3fa99cbdb26726637a7c581d47382d65",
+      "delta_bytes": -4096,
+      "first_clusters_by_epoch": {
+        "original": 40650,
+        "v6": 60617,
+        "v7": 60032,
+        "v9": 40658
+      },
+      "all_selected_chains_sane": true
+    },
+    "SYSTEM.INI": {
+      "candidate_bytes": 1701,
+      "candidate_sha256": "6a2ef5802a16a716adee21b2dfb2cd28f6d27af26b9bd6122475d8abfb257f90",
+      "candidate_fat_attributes": 32,
+      "all3_candidates_same_bytes_hash_attributes": true,
+      "original_bytes": 1701,
+      "original_sha256": "ddc29820ad60073b980446e69e4f5c45b457b75c14b1c156bad7021bf015f7bf",
+      "delta_bytes": 0,
+      "first_clusters_by_epoch": {
+        "original": 2138,
+        "v6": 61201,
+        "v7": 60616,
+        "v9": 61202
+      },
+      "all_selected_chains_sane": true
+    },
+    "WIN.INI": {
+      "candidate_bytes": 7011,
+      "candidate_sha256": "fa45041ccc42257781a0503b425cac60cce06be897aab7a1039edef05acaf12c",
+      "candidate_fat_attributes": 32,
+      "all3_candidates_same_bytes_hash_attributes": true,
+      "original_bytes": 7011,
+      "original_sha256": "fa45041ccc42257781a0503b425cac60cce06be897aab7a1039edef05acaf12c",
+      "delta_bytes": 0,
+      "first_clusters_by_epoch": {
+        "original": 64692,
+        "v6": 61199,
+        "v7": 60614,
+        "v9": 61200
+      },
+      "all_selected_chains_sane": true
+    }
+  },
+  "backup_metadata": {
+    "original": {
+      "RB000.CAB": {
+        "bytes": 576115,
+        "sha256": "f8670c1a6708fb73ac015f2b12426f7df7e1b43642db7d7054356f22a6ae25e4",
+        "fat_attributes": 32,
+        "cluster_count": 141,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      },
+      "RB001.CAB": {
+        "bytes": 575973,
+        "sha256": "928d425ab6b1095ecbc523b73ecec03a239d262f4a983e552fe6cc93a3874f95",
+        "fat_attributes": 32,
+        "cluster_count": 141,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      }
+    },
+    "v6": {
+      "RBBAD.CAB": {
+        "bytes": 2393471,
+        "sha256": "03c580becb79e7ee4e843dc9742893a62e8a3794d52fe4c126e06a08115d041b",
+        "fat_attributes": 32,
+        "cluster_count": 585,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      },
+      "RB000.CAB": {
+        "bytes": 576115,
+        "sha256": "f8670c1a6708fb73ac015f2b12426f7df7e1b43642db7d7054356f22a6ae25e4",
+        "fat_attributes": 32,
+        "cluster_count": 141,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      },
+      "RB001.CAB": {
+        "bytes": 575973,
+        "sha256": "928d425ab6b1095ecbc523b73ecec03a239d262f4a983e552fe6cc93a3874f95",
+        "fat_attributes": 32,
+        "cluster_count": 141,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      }
+    },
+    "v7": {
+      "RBBAD.CAB": {
+        "bytes": 2385271,
+        "sha256": "7608546704ae9e49fac9c3c6c03d9a1757dfda6cdcddb30dfa789f567900ba99",
+        "fat_attributes": 32,
+        "cluster_count": 583,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      },
+      "RB000.CAB": {
+        "bytes": 576115,
+        "sha256": "f8670c1a6708fb73ac015f2b12426f7df7e1b43642db7d7054356f22a6ae25e4",
+        "fat_attributes": 32,
+        "cluster_count": 141,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      },
+      "RB001.CAB": {
+        "bytes": 575973,
+        "sha256": "928d425ab6b1095ecbc523b73ecec03a239d262f4a983e552fe6cc93a3874f95",
+        "fat_attributes": 32,
+        "cluster_count": 141,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      }
+    },
+    "v9": {
+      "RBBAD.CAB": {
+        "bytes": 2385271,
+        "sha256": "d341fb512da39505378fd233b7a018f8465bc6d55d212424d659f8f0506bcc1f",
+        "fat_attributes": 32,
+        "cluster_count": 583,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      },
+      "RB000.CAB": {
+        "bytes": 576115,
+        "sha256": "f8670c1a6708fb73ac015f2b12426f7df7e1b43642db7d7054356f22a6ae25e4",
+        "fat_attributes": 32,
+        "cluster_count": 141,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      },
+      "RB001.CAB": {
+        "bytes": 575973,
+        "sha256": "928d425ab6b1095ecbc523b73ecec03a239d262f4a983e552fe6cc93a3874f95",
+        "fat_attributes": 32,
+        "cluster_count": 141,
+        "chain_sane": true,
+        "fat_copies_agree_for_chain": true
+      }
+    }
+  },
+  "fat_clean_shutdown_bits": {
+    "original": [
+      false,
+      false
+    ],
+    "v6": [
+      true,
+      true
+    ],
+    "v7": [
+      true,
+      true
+    ],
+    "v9": [
+      true,
+      true
+    ]
+  },
+  "fat_no_io_error_bits": {
+    "original": [
+      true,
+      true
+    ],
+    "v6": [
+      true,
+      true
+    ],
+    "v7": [
+      true,
+      true
+    ],
+    "v9": [
+      true,
+      true
+    ]
+  },
+  "findings": [
+    "Restored file bytes persist across three completed replacement-DOS epochs; their physical cluster locations change.",
+    "Restored SYSTEM.DAT and USER.DAT are each 4096 bytes smaller than original, retain readonly+hidden attributes and have exact-size valid chains agreeing across both FAT copies.",
+    "Unmodified numbered backup CAB hashes persist; a separate RBBAD.CAB appears after restore.",
+    "Observed persistence weakens a lost-flush/rename hypothesis; internal registry semantic validity and restore-trigger flags were not examined."
+  ],
+  "claim_limits": [
+    "Metadata only; registry contents never extracted or printed.",
+    "Per-file FAT chain range/cycle/length and mirrored entries checked; not a full filesystem checker or registry-format parser.",
+    "v10 live image not accessed.",
+    "Existing original dirty FAT clean-bit changed to clean in all completed candidates.",
+    "5 synthetic reader tests passed; no VM execution by this inspector.",
+    "Registry Checker display is not Windows98 protected-mode/desktop or successful MS-DOS replacement evidence.",
+    "DOS=HIGH alone in later root-controlled run reportedly repeats the prompt; actual HMA/conventional-memory measurement is pending and that live/later image was not inspected here."
+  ],
+  "full_registry_semantic_validation": false,
+  "Windows98_boot_verified": false,
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "native_apps_verified": false,
+  "independent_private_metadata_review": {
+    "scope": "read-only inspector source, fixture source, exact metadata/comparison hashes and permissions; no image payload opened by reviewer",
+    "status": "PASS",
+    "reviewer": "publish_site"
+  },
+  "reader_exact_io_followup": {
+    "source_sha256": "3bc872e86d591e0d1000dd1f8cce7135613786b76c755035c8ffc60361c2fa28",
+    "test_source_sha256": "48115a89c9196e1337646fea81b14065062f5e694e88325ecd5c8206314525b3",
+    "red_failures": 3,
+    "green_methods": 3,
+    "green_failures": 0,
+    "green_log_sha256": "89cb7f388c364126ac24227ae2739158af9f38a516c97d5a7da51c2b25352732",
+    "private_image_metadata_rerun": false,
+    "scope": "new source-only followup refuses short whole-image reads, completes partial metadata writes and refuses zero-progress writes; original metadata producer provenance is unchanged"
+  },
+  "standard_full_image_hash_crosscheck": {
+    "receipt_sha256": "f530ac2adb2c1b7979c1142765f09a5fa645a53b9a936b390f74c53b542e00d0",
+    "tool": "sha256sum",
+    "tool_sha256": "0d2ba4093456171d594bb7b1ffd64f10816cc3b4f063079afea524963d4556d8",
+    "all_four_closed_epochs_match": true,
+    "tool_before_equals_after": true,
+    "source_and_path_identities_unchanged": true,
+    "active_image_or_vm_accessed": false,
+    "prior_exclusive_source_lease": "refused before source byte read; preserved blocked checkpoint; owner released legitimate closed COW-input lease before fresh retry",
+    "blocked_checkpoint_sha256": "d5118f5ad181000d0ec1fcb4f8050fa9717787ea306725a95a909b6ca5774631"
+  },
+  "microsoft_authority_receipt": {
+    "sha256": "0f4bf7ffb1daf4ebbe835c0e1b9aadd9d2ecffcac65049f81abcd3c464ce8e3f",
+    "checked_utc_date": "2026-10-01",
+    "KB183887": "original Microsoft-authored search-index article body; direct archive unavailable",
+    "KB184023": "original Microsoft-authored search-index article body; live URL redirects to generic Windows help",
+    "generic_landing_page_used_as_evidence": false,
+    "full_article_text_republished": false
+  }
+}

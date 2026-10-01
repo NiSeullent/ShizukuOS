@@ -49,6 +49,21 @@ AUTHORSHIP_IMAGES = {
 }
 COMPONENT_INSTALLER_MANIFEST_SHA = 'ad97f8e8bee8d72dc57176028ebb83ab31618f11bebab5d0cdeb3f87127ff059'
 
+# Historical 0.9 source handoff; final ISO/source/Git bundle admission remains
+# separate. Re-review both bytes and producer scope before changing these pins.
+CONTINUATION_PINS = {
+    'continuation/index.html': (6440, '19747185348f7e7675e01bd73cd5752b7aacc54099ba1a29f188d5a7b19e6e3c'),
+    'continuation/guide.html': (31403, '8bb10240a11d925ca191f1b3e26c1ee906670860051e89ff86f00c474bbbb160'),
+    'continuation/styles.css': (1380, '535bf65880d2ca123df6a6137c5c21e88c51b8d80def4a9c83d26b5f89ff1797'),
+    'continuation/downloads.json': (3154, '20488553f97a4e3d7f0f4618c07f55dcd815e62268d4832a3d0edf9ee370c838'),
+    'continuation/modern-apps-guide.md': (19961, '69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f'),
+    'continuation/environment-guide.md': (6814, '22371d3abfaf731d9cd39b60ccb5b8e8e83012317ae042eb71edf0fc47cdf060'),
+    'continuation/official-distribution.md': (2339, '16d663f0743af8eaafd9ac6ea84b2884939ffbae5cf9695abc5e771d15b165d4'),
+    'downloads/win98-modern-usb-helper.zip': (17916, 'f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54'),
+    'downloads/win98-modern-usb-helper.zip.sha256': (94, '86b77cc378c2ed69b9255fdfecd3175f482f39423c4a26df2f8835edacaa780b'),
+}
+CONTINUATION_HELPER_SOURCE_COMMIT = '899c51ec6f4c731fe3181570feec0fa52bfbd591'
+
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
@@ -572,6 +587,69 @@ def render_component_installer_homepage(data, manifest, language):
     return text.replace(marker, section + marker, 1).encode('utf-8')
 
 
+def add_continuation_assets(assets):
+    """Keep the reviewed local handoff and helper without admitting new media."""
+    staged = {}
+    for name, (size, expected) in CONTINUATION_PINS.items():
+        raw = read_small(SITE / name)
+        if len(raw) != size or sha(raw) != expected:
+            raise ValueError('Reviewed continuation bytes changed: ' + name)
+        staged[name] = raw
+    manifest = json.loads(staged['continuation/downloads.json'])
+    if (manifest.get('schema') != 'win98modern.official-downloads.v1'
+            or manifest.get('version') != '0.9.0-dev'
+            or manifest.get('publication_state') != 'helper_source_available_other_artifacts_pending'
+            or manifest.get('official_origin') != 'https://m98.nyase.kr'
+            or manifest.get('source_commit') is not None
+            or manifest.get('full_modern_apps_verified') is not False
+            or manifest.get('native_windows98_modern_apps_verified') is not False):
+        raise ValueError('Historical incomplete helper-source checkpoint required')
+    items = manifest.get('items')
+    roles = {'development_iso', 'source_archive', 'main_git_bundle', 'usb_helpers'}
+    if (not isinstance(items, list) or len(items) != 4
+            or not all(isinstance(row, dict) for row in items)
+            or {row.get('role') for row in items} != roles):
+        raise ValueError('Exactly four unambiguous continuation roles required')
+    for row in items:
+        if row['role'] != 'usb_helpers':
+            if row.get('state') != 'pending' or any(row.get(key) is not None for key in ('url', 'sha256', 'bytes', 'source_commit')):
+                raise ValueError('Final artifacts need their separate producer review')
+            continue
+        helper = 'downloads/win98-modern-usb-helper.zip'
+        size, expected = CONTINUATION_PINS[helper]
+        if (row.get('state') != 'ready' or row.get('url') != '/' + helper
+                or row.get('sha256') != expected or row.get('bytes') != size
+                or row.get('source_commit') != CONTINUATION_HELPER_SOURCE_COMMIT):
+            raise ValueError('Reviewed helper source identity differs')
+        checksum = expected + '  ' + Path(helper).name + '\n'
+        if staged[helper + '.sha256'] != checksum.encode('ascii'):
+            raise ValueError('Reviewed helper checksum differs')
+    private = manifest.get('private_media_policy', {})
+    if any(private.get(key) is not False for key in ('windows_media_published', 'product_keys_published', 'vendor_app_installers_published', 'vm_disks_published')):
+        raise ValueError('Private media must remain private')
+    usb = manifest.get('usb_scope', {})
+    if (any(usb.get(key) is not False for key in ('uefi_file_copy_preparation_verified', 'bios_hybrid_image_boot_verified', 'windows98_setup_boot_verified', 'full_public_usb_payload_available'))
+            or usb.get('helper_source_package_verified') is not True
+            or usb.get('helper_host_fixture_checks') != 9):
+        raise ValueError('Only the reviewed helper source preparation is verified')
+    architecture = manifest.get('architecture_goal', {})
+    if (architecture.get('project') != 'ShizukuDOS for Windows98'
+            or architecture.get('replaces') != 'MS-DOS'
+            or architecture.get('separate_standalone_os_goal') is not False
+            or architecture.get('installed_windows98_complete') is not False):
+        raise ValueError('Windows98 MS-DOS replacement is an incomplete goal')
+    guide = manifest.get('guide_provenance', {})
+    for field, name in (('modern_original_sha256', 'modern-apps-guide.md'),
+                        ('modern_web_sha256', 'modern-apps-guide.md'),
+                        ('environment_source_sha256', 'environment-guide.md'),
+                        ('policy_source_sha256', 'official-distribution.md')):
+        if guide.get(field) != CONTINUATION_PINS['continuation/' + name][1]:
+            raise ValueError('Reviewed source guide provenance differs')
+    if guide.get('modern_web_changes') != []:
+        raise ValueError('Reviewed source guide must remain unchanged')
+    assets.update(staged)
+
+
 def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None,
                    component_installer_proof=None):
     if (iso_path is None) != (iso_source_commit is None):
@@ -584,6 +662,7 @@ def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None
     assets = {name: read_small(SITE / name) for name in STATIC}
     validate_translation(manifest, json.loads(assets['en/evidence/preview.json']))
     authorship_images = add_authorship_assets(assets)
+    add_continuation_assets(assets)
     # Each redistributed component download remains bound to its reviewed bytes.
     expected_downloads = {
         'downloads/SHZGOP.zip': '5fdc6ca5942012b6d29a291ca85e6ad4e5ca28421477394bfd2909c64f9c5dbb',

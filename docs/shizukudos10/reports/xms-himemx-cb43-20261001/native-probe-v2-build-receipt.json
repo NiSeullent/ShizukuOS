@@ -1,0 +1,73 @@
+{
+  "schema": "shizukudos-cb43-real-xms-native-probe-build-v2",
+  "source": {
+    "file": "probe-v2/cbxms.asm",
+    "sha256": "284177e9c2eb20212b901f9c8e18fabba6e14ef6bb78924f8a97e06e7a0a8cbd",
+    "bytes": 9997,
+    "license": "GPL-2.0-only; original ShizukuOS diagnostic"
+  },
+  "binary": {
+    "file": "artifacts-v2/CBXMS.COM",
+    "sha256": "8c900ac24fccbe10a2c5ea5211ad85d9ae45eaefb08c51b136d9b6ac5a5f227c",
+    "bytes": 2365
+  },
+  "nasm": {
+    "executable": "/usr/bin/nasm",
+    "sha256": "59694445d621c9e92607ac65257af511d5e9f184e7e88cfe6af1cc9c16f711d7"
+  },
+  "compile_command": [
+    "nasm",
+    "-f",
+    "bin",
+    "-w+all",
+    "-Werror",
+    "-l",
+    "${STAGE}/artifacts-v2/CBXMS.lst",
+    "-o",
+    "${STAGE}/artifacts-v2/CBXMS.COM",
+    "${STAGE}/probe-v2/cbxms.asm"
+  ],
+  "compile_exit_code": 0,
+  "warnings": 0,
+  "intended_successful_checks": 16,
+  "native_probe_executed": false,
+  "native_XMS_services_verified": false,
+  "Windows98_boot_verified": false,
+  "actual_contract_authority": "Pinned official HimemX production source and original RBIL INTERRUP.L AX4300/4310/XMS call tables",
+  "services_to_measure": [
+    "actual INT2F4300/4310 presence/FAR entry, XMS>=3.00 version",
+    "A20 boolean queries only; no explicit A20 enable/disable calls",
+    "query actual largest/free extended memory",
+    "allocate own64KiB, query size/lock count, lock actual>=1MiB address, unlock",
+    "actual256byte conventional-to-XMS-to-conventional pattern roundtrip",
+    "free ownhandle and actualAX0/BLA2 rejection afterfree"
+  ],
+  "report": "CBXMS.TXT; every checked call reports actual AX/BX/DX/ES, final decimalCHECKS/FAILURES/IO_ERROR",
+  "exit_codes": {
+    "0": "all executed checks and DOS report writes/close succeeded",
+    "1": "a checked service or DOS report write/close failed",
+    "2": "DOS report creation failed"
+  },
+  "limits": [
+    "Compile-only source; no actual runtime result here",
+    "XMS API success alone is not Windows98 startup or MS-DOS replacement proof",
+    "Root reviews source then executes only on its owned private DOS/Windows volume; no VM/image/mcopy launched by this stage"
+  ],
+  "supersedes_v1_source_sha256": "1c7387b45ad6000ab96ccd0c3ae03897d76653a756713152f8e12fff06d510f1",
+  "v1_preserved_unchanged": true,
+  "v1_defect": "A20AX0boolean was not distinguished from BL80/81error; v1 was never executed here",
+  "v2_changes": [
+    "A20query BL0 input and output success required for bothqueries",
+    "AH8 queryfree BL0 input perRBIL02758 and outputsuccess required"
+  ],
+  "authority_preimage": {
+    "original_RBIL_INTERRUPT_L_sha256": "f1351f2eac53e5f392bc352b983522ceb565a50913433fe46928e7dfdace0452",
+    "tables": [
+      "02757",
+      "02758"
+    ]
+  },
+  "raw_private_record_sha256": "590da112991e4381adc43942d58e9fe401c7cba9eab016176c9ab6260aa1434f",
+  "receipt_scope": "Own source-stage build/static/compile-only work; separate root-owned v7 native result is native-xms-v7-result.json",
+  "sanitization": "Only actual source-stage workspace prefix replaced with ${STAGE}; no results invented or rerun"
+}
