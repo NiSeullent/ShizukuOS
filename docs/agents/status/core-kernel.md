@@ -313,3 +313,188 @@ queued timer delivery after interrupt restoration before useful thread-body
 execution; IRQ-boundary trace/probe is pending root's production freeze release.
 The failing log remains intact. No thresholds are relaxed and no production
 edits/builds are permitted while root's ramfb guest is still executing.
+
+## Controlled interrupt-boundary diagnosis (2026-10-01, open)
+
+The original combined KVM failure remains preserved at
+`build/pma-integrated-native-service`: refresh first C-body observation 98,
+zero useful loops inside the unchanged 80-tick window. Root preserved all normal
+build inputs/artifacts under `build/pma-pre-diagnostic-epoch`. RAMfb TCG completed,
+then root authorized exactly sched.c/arch.c/pma_tests.c for passive diagnostics;
+all unrelated C imports remain held.
+
+Stage 1 adds a 64-entry memory ring, enabled only by explicit `shz.pma=trace`.
+The hooks observe the refresh worker's own lifetime: selection immediately
+before dequeue, timer frame RIP/RFLAGS before EOI, accounting before tick charge,
+first C entry and body end. They do not print, allocate, block, or enable IRQs.
+Tracing stops before serial flush. The sampler separately keeps one caller IRQ
+guard across its two intended yields/captures, so another interrupt cannot insert
+an unintended third observed interval; other contexts restore their own IF.
+No scheduler policy, header, assembly or acceptance threshold changes occurred.
+
+Fresh single-profile source compile via the existing kbuild API (all normal
+extra C units, no reused objects):
+`python3 build/pma-irq-trace/build_profile.py`, exit 0, 49.03 s, complete 211-source
+map unchanged before/after. BIN SHA256
+`4cff34511f0497c6b64cfa543fd4f0f3dccc9e168c01fc1d37b527f41402b3b7`;
+ELF `2fa17dd1918321db3e22e98b819a5f9fd052261a3b608931cbe7f2c3b20d27d0`.
+Natural KVM trace (`run-natural-kvm`) passed all 12 retained native/identity/trace
+checks in 1.22 s. Refresh own wait 32, run ticks 2, three dispatches, C entry 32,
+885334 useful loops, zero injected interrupts/overflow. Dispatches 32/65/98;
+first IRQ RIP belongs to refresh_low_worker's real loop, second to ticks_now.
+This successful observation does not reproduce or close the historical failure.
+
+Stage 2 explicitly models adversarial timer delivery: a test-only naked entry
+wrapper executes exactly two `INT 0x20` instructions before entering the C body.
+It records wrapper entry and each resumed continuation separately; the trace
+explicitly states `hardware_burst_claim=0`. This is not evidence that natural
+PIT hardware generated two queued interrupts in the failing KVM run.
+Fresh single-profile compile (`build/pma-irq-injected/build_profile.py`) exited 0
+in 64.31 s with all 211 inputs stable. BIN
+`7c508a58e5f8a3cc4dec41a38c09f4a607fd80f76db4a932ccc5c1aafea93653`;
+ELF `87bddb7046157ecb331fdb6514c8719d59ee88987bc78e0b121dbe9434e68944`.
+The exact tested 211-source closure is archived in `sources-tested.zip`.
+
+Actual KVM modeled RED (`run-modeled-red-kvm`) exited 1 as expected: dispatch and
+wrapper entry at 32; first software timer frame RIP `ffffffff8016c811`, saved IF1,
+then charge/requeue; dispatch and first continuation at 65; second frame RIP
+`ffffffff8016c825`, IF1, charge/requeue; third dispatch, second continuation and
+C entry at 98; useful loops 0. Own completed ready residence is 32, run ticks 2,
+three dispatches, two completed injected continuations, 12 events, no overflow.
+This demonstrates that the existing aging policy can repeatedly charge and
+requeue a thread before its body, exactly producing the observed 98/zero-work
+shape under the declared delivery control. Production grace policy is proposed
+for root review; no policy fix has been implemented or accepted yet. Original
+40-tick arrival, 80-tick window and >1000 useful-loop gates stay intact.
+
+## Normative finite aging service and corrected credit controls
+
+Root and the independent whole reviewer accepted a fixed scheduling policy:
+true `pick_aged()` selections receive a separate, unrenewable per-TCB budget of
+four dispatchable timer ticks. The first three eligible ticks cannot revoke the
+grant for base expiry, a higher READY priority or another aged FIFO head. On the
+fourth eligible tick ordinary scheduling rules resume; a remaining larger base
+quantum can continue when no competitor requires preemption. Ordinary dispatch
+keeps its configured quantum/default one. Setters can clamp the base remainder
+but never refill aging credit. Every scheduling transition relinquishes unused
+credit, and all READY transitions clear it. The validator rejects credit on a
+non-RUNNING TCB or credit above four. IRQL>=2 retains existing accounting but
+spends neither base quantum nor the dispatchable credit.
+
+Four is the declared minimum aging allocation and a priority-latency tradeoff,
+not an inferred count of pending PIT interrupts. One current grant adds at most
+three eligible timer deferrals; other older aged heads can then consume their
+own grants, so this is not a population-independent response bound. This policy
+cannot promise a useful body instruction before an arbitrary burst of delivered
+interrupts. The allocation must not be raised merely to fit a later failure.
+The per-TCB field remains an UP backend policy; future SMP work must provide
+per-CPU queue/current ownership. No Windows VMM scheduling completion is claimed.
+
+Native test-first RED (`build/pma-grant-controls-red/run-native-kvm`) used the
+original no-grant scheduler and failed the five new assertions: zero observed
+credit, no independent credit/setter/IRQL/lifecycle proof, and three aged workers'
+body entries at 65/66/67. The exact 211-source build closure is archived. The
+new FIFO fixture's useful work was then changed from a one-tick observer window
+to 2048 actual barrier-protected CPU loop iterations; the RED had already executed
+more than 299000 loops per worker, so its failures were absence of credit and late
+entry, not lack of useful work.
+
+The first four-tick candidate (`build/pma-aged-service-green`) was freshly built
+with 211 unchanged inputs, BIN `4b0dfe9422ec996522904891e89abf44e6ac79695c1a54f2b1fc373453f8440b`.
+Natural KVM and TCG passed all original/native assertions. The original isolated
+refresh remained first<=40, window80 and useful>1000. Its fixed-two-INT IF-enabled
+adversarial KVM probe nevertheless failed and is preserved, including the exact
+source/driver archive and full trace:
+
+- Result SHA256 `dd4e937fc6f6f5552fa0c33ddca1f9846dd71dad70e4c1f267a9ae2cc51d4c0b`.
+- Serial SHA256 `2176d022d004768a3952bfc38b37a489c102f86c658c267c65d84325501e3bf7`.
+- Four total pre-body IRQs exhausted the declared four-tick grant: two declared
+  software interrupts and two uncontrolled natural deliveries. C entry 69,
+  useful loops355394; it still failed the untouched first<=40 assertion.
+- The new three-aged fixture's body entries34/38/42 also exceeded its initially
+  chosen global40 body limit. That limit was unjustified under three-worker
+  contention and did not measure first selection. Original isolated limits are
+  retained. TCG's adversarial probe passed separately; it does not erase KVM RED.
+
+The native scheduler reviewer then accepted a correction limited to test
+measurement/accounting, plus a dedicated gated selection observer. The observer
+records only bounded first matching-TCB selection counters; IRQ/RIP ring tracing
+remains off unless explicit `shz.pma=trace` enables it. Current production policy
+is unchanged at four.
+
+The corrected credit fixture snapshots actual remaining credit1..4 under its
+caller IF0 guard and delivers remaining-1 software timer interrupts at dispatchable
+IRQL. After EACH, it checks exact tick/run increments, same TCB, decrement by one,
+and setter nonrenewal. The final software interrupt must exhaust the remaining
+credit. A competitor first acquires its own IF0 guard, then publishes the target,
+and sleeps with that guard across context switches so other contexts receive PIT
+ticks. Its actual C context observes target READY/zero before the terminal
+interrupt continuation returns. Labels state savedIF0 and software-only; no
+hardware-burst equivalence is asserted. A separate one-tick probe publishes an
+equal-priority peer and observes selection after exactly one eligible interrupt.
+
+For the stable three-worker cohort, first selection order is0/1/2, grant at each
+first selection is4, and first READY residence is bounded by32+4*i. Body entry
+order/time is diagnostic; 2048 eventual CPU iterations establish eventual useful
+work, not useful work before grant reclamation. The original isolated refresh
+and IF-enabled adversarial probe remain unchanged.
+
+Final corrected sources are frozen for a fresh single-profile compile:
+sched `3c3081a437779649dfeef720e22972daf8b038dd7fa5f98d1014edf206de8556`,
+header `7ce8d1eff6784f21f9e7d7d7d38e23a29cb2254fbef0fc6967860aae0569df0f`,
+tests `2cef7cc5827fee78d3149a6b2ca7843c12af751a3749695f3d579dfd25872eef`,
+arch `4a8c8b29484c07b14f517dc6bf018e433251d68ab01947fb9e70f53d4465176d`.
+Root's K32 IPC import adds its dedicated host C test to the complete kbuild map:
+current closure212, canonical map SHA256
+`8a5c6b511a9a104e52e7abc1ea943c74a657d9aa20c09f4b277a06f54f6b853c`.
+Fresh compile/run evidence is pending in `build/pma-credit-final`; no completion
+claim or broader Windows98/SMP/full-boot admission follows this component work.
+
+## Final corrected focused checkpoint: frozen, ready for independent review
+
+Fresh single-profile compile (all normal standalone extra C units, no reused
+objects) exited0 in134.37s. Its212-source map exactly equals the announced frozen
+map before and after compilation. Build receipt:
+`build/pma-credit-final/kernels-build-result.json`, SHA256
+`d0daf35465f8372bbddf2695a67a38eb5abc9b0a6fe55fbb82adcd2dab48e8a1`.
+BIN `37fd31608ddc509dba1ddf086adc011f2eb0b4c57c9b30b6fad322190b0e8446`;
+ELF `d522338e92c99bbbe5cb4fe6b24ddcdeb29cb906424031be9b4eac1c774b9d91`;
+loader `b9746b523b7b6f125acf256fb8ad7ef3d98f83dd5bf0a03f15d19ab654a3ff97`.
+Exact source/driver snapshot: `build/pma-credit-final/sources-tested.zip`.
+
+Actual executed commands:
+
+```
+python3 build/pma-credit-final/build_profile.py
+python3 build/pma-credit-final/run_natural.py --accel kvm --out build/pma-credit-final/run-natural-kvm
+python3 build/pma-credit-final/run_natural.py --accel tcg --out build/pma-credit-final/run-natural-tcg
+```
+
+Both native runs pass16/16 focused checks, including explicit parsed credit,
+ordinary-q1, lifecycle and first-selection controls in addition to the original
+native gates. Both retain full artifact/ELF/fixture/driver/evaluator/helper,
+receipt and complete212-source before/after identity checks. Same source/binary
+under KVM1.85s and TCG2.89s, computed guest failures0.
+
+- KVM original refresh: first32, useful2143538, updates2577728; source-bound result
+  `dc303b741a36ef8d7306a6d84a326e5fc207bc9f77975f5319dd0d9b8ed47d60`,
+  serial `4c62ef33f8373adea5d568c14507a951c12614d39cd81d8672c441ada6251dda`.
+- TCG original refresh: first32, useful99690, updates220025; result
+  `c23558b5adec1ce77695ec6e7ee4b07263a640406f531abe0aa5b600a8ac73d3`,
+  serial `2547013c80b4f5e9185965eda15c82f14a65b6ad613e1c9e8444942c9edc5b77`.
+- Both controlled remaining-credit fixtures: initial4, issued4, exact per-step
+  accounting/setter/terminal checks1, actual peer observation before continuation1;
+  savedIF0/software-only labels retained. These four delivered software ticks
+  include the terminal expiry; this is not a two-interrupt hardware-burst proof.
+- Both lifecycle controls: observed4, setters/IRQL2/yield-clear/wait-clear1,
+  new higher-ready own READY residence4 with remaining grant4, terminal1.
+- Both three-aged first selections: order0/1/2, READY residence32/33/34,
+  grant4/4/4; each worker eventually performs2048 real CPU loop iterations.
+  Body timestamps are diagnostic and do not gate an invented global bound.
+
+All four owned source hashes remain the frozen values above. No production
+allocation increase or original40/80/>1000 change. Earlier natural98/zero and
+IF-enabled adversarial mixed-delivery FAIL receipts remain separate and intact.
+The final candidate is ready for independent source review and root's fresh
+four-profile build/full combined KVM checkpoint; those broader steps are not
+claimed complete by this focused component result. No shared index/commit action.
