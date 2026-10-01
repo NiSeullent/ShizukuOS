@@ -46,10 +46,11 @@ class AdmissionTests(unittest.TestCase):
         self.image.write_bytes(PNG)
         self.ack = dict(sequence=1, name=self.request['name'], keys=[['ret']],
                         status=C.ACK_STATUS, screenshot=str(self.image))
-        self.record = dict(reviewed_stage='desktop', manifest=str(C.MANIFEST),
+        self.record = dict(reviewed_stage='run-dialog', manifest=str(C.MANIFEST),
                            manifest_sha256=C.MANIFEST_SHA, nonce=C.NONCE,
                            guest_plan_sha256='pinned-plan', control_source_sha256='pinned-source',
-                           qemu_pid=123, qemu_start_ticks='456')
+                           qemu_pid=123, qemu_start_ticks='456',
+                           reviewed_image=str(self.image), reviewed_image_sha256=C.digest(PNG))
 
     def queue(self, request=None, ack=None):
         write(self.run / 'gui-control.json', request or self.request)
@@ -98,7 +99,45 @@ class AdmissionTests(unittest.TestCase):
             C.validate_run(self.run)
 
     def test_fresh_queue_accepted(self):
-        self.assertEqual(C.existing_queue(self.run, self.record), (0, None))
+        self.assertEqual(C.existing_queue(self.run, dict(self.record, reviewed_stage='boot-warning')), (0, None))
+
+    def test_fresh_dialog_cannot_lose_the_required_boot_sequence(self):
+        with self.assertRaises(ValueError):
+            C.existing_queue(self.run, self.record)
+
+    def test_launch_without_reviewed_dialog_rejected(self):
+        with self.assertRaises(ValueError):
+            C.existing_queue(self.run, dict(self.record, reviewed_stage='launch-observer'))
+
+    def test_launch_accepts_only_exact_completed_dialog(self):
+        reqs = [dict(sequence=3, name='tls7707-close-reviewed-welcome', keys=[['esc']]),
+                dict(sequence=4, name='tls7707-open-reviewed-run-dialog', keys=[['meta_l', 'r']]),
+                dict(sequence=5, name='tls7707-run-dialog-review-capture', framebuffer_capture=True)]
+        ack = dict(sequence=5, name=reqs[-1]['name'], keys=[], status=C.ACK_STATUS,
+                   screenshot=str(self.image))
+        self.image.with_name(self.image.stem + '-physical-framebuffer.bin').write_bytes(b'framebuffer')
+        self.queue(reqs[-1], ack)
+        got = C.acknowledged_request(self.run, reqs[-1])
+        prior = dict(self.record, reviewed_stage='run-dialog', status=C.RUN_DIALOG_STATUS,
+                     close_welcome=False,
+                     actions=[dict(request=q, ack=got if i == 2 else {}) for i, q in enumerate(reqs)])
+        path = self.run / 'tls-control-run-dialog.json'
+        write(path, prior)
+        record = dict(self.record, reviewed_stage='launch-observer')
+        self.assertEqual(C.existing_queue(self.run, record), (5, reqs[-1]))
+        for key, value in [('reviewed_image', str(self.run / 'screen-old.png')),
+                           ('reviewed_image_sha256', '0' * 64)]:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                C.existing_queue(self.run, dict(record, **{key: value}))
+        for key, value in [('qemu_start_ticks', 'foreign'), ('control_source_sha256', 'foreign'),
+                           ('close_welcome', True), ('status', 'RUNNING'), ('actions', prior['actions'][:2])]:
+            write(path, dict(prior, **{key: value}))
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                C.existing_queue(self.run, dict(self.record, reviewed_stage='launch-observer'))
+        write(path, prior)
+        self.image.with_name(self.image.stem + '-physical-framebuffer.bin').write_bytes(b'changed physical capture')
+        with self.assertRaises(ValueError):
+            C.existing_queue(self.run, record)
 
     def test_pending_queue_rejected(self):
         write(self.run / 'gui-control.json', self.request)
@@ -118,6 +157,61 @@ class AdmissionTests(unittest.TestCase):
     def test_unacknowledged_request_returns_pending(self):
         write(self.run / 'gui-control.json', self.request)
         self.assertIsNone(C.acknowledged_request(self.run, self.request))
+
+    def test_empty_partial_or_changing_producer_ack_is_pending(self):
+        self.queue()
+        for raw in [b'', b'{', b'{"sequence":']:
+            (self.run / 'gui-control-receipt.json').write_bytes(raw)
+            self.assertIsNone(C.acknowledged_request(self.run, self.request))
+        self.queue()
+        with patch.object(C, 'bounded_bytes', side_effect=[json.dumps(self.request).encode(),
+                          C.EvidenceWriteInProgress('changed')]):
+            self.assertIsNone(C.acknowledged_request(self.run, self.request))
+        self.queue()
+        self.assertIsNotNone(C.acknowledged_request(self.run, self.request))
+
+    def test_completed_non_object_ack_and_hardlinked_empty_ack_rejected(self):
+        self.queue()
+        (self.run / 'gui-control-receipt.json').write_text('[]')
+        with self.assertRaises(ValueError):
+            C.acknowledged_request(self.run, self.request)
+        (self.run / 'gui-control-receipt.json').write_bytes(b'')
+        os.link(self.run / 'gui-control-receipt.json', self.run / 'linked-ack')
+        with self.assertRaises(ValueError):
+            C.acknowledged_request(self.run, self.request)
+
+    def test_only_exact_interrupted_legacy_capture_recovers_without_enter_replay(self):
+        request = dict(sequence=2, name='tls7707-boot-warning-result-capture', framebuffer_capture=True)
+        ack = dict(sequence=2, name=request['name'], keys=[], status=C.ACK_STATUS,
+                   screenshot=str(self.image))
+        self.image.with_name(self.image.stem + '-physical-framebuffer.bin').write_bytes(b'framebuffer')
+        self.queue(request, ack)
+        frozen = b'known immutable legacy controller'
+        (self.run / 'tls-control-source.py').write_bytes(frozen)
+        legacy_sha = C.digest(frozen)
+        prior = dict(self.record, control_source_sha256=legacy_sha,
+                     status='CONTROL_INTERRUPTED', reviewed_stage='boot-warning',
+                     error='Expected a bounded privately owned regular file: ' + str(self.run / 'gui-control-receipt.json'),
+                     pending_request=request, actions=[dict(request=self.request, ack=self.ack)])
+        path = self.run / 'tls-control-boot-warning.json'
+        write(path, prior)
+        before = path.read_bytes()
+        with patch.object(C, 'LEGACY_BOOT_CONTROLLER_SHA', legacy_sha):
+            record = dict(self.record)
+            self.assertEqual(C.existing_queue(self.run, record), (2, request))
+            self.assertFalse(record['boot_ack_recovery']['keys_replayed'])
+            self.assertFalse(record['boot_ack_recovery']['tls_pass'])
+            self.assertEqual(path.read_bytes(), before)
+            for key, value in [('qemu_start_ticks', 'foreign'), ('error', 'other failure'),
+                               ('pending_request', self.request), ('control_source_sha256', 'foreign'),
+                               ('status', C.BOOT_STATUS), ('reviewed_stage', 'desktop')]:
+                write(path, dict(prior, **{key: value}))
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    C.existing_queue(self.run, dict(self.record))
+            write(path, prior)
+            (self.run / 'tls-control-source.py').write_bytes(b'different source')
+            with self.assertRaises(ValueError):
+                C.existing_queue(self.run, dict(self.record))
 
     def test_ack_name_keys_typed_status_or_sequence_tamper_rejected(self):
         for key, value in [('name', 'foreign-request'), ('keys', [['alt', 'f4']]),
@@ -209,16 +303,19 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             C.bounded_bytes(self.image, C.MAX_IMAGE)
 
-    def simulate_stage(self, stage):
+    def simulate_stage(self, stage, close_welcome=False, sequence=0, previous=None, ack_mode='complete'):
         clock = [0.0]
         submitted = []
-        args = SimpleNamespace(stage=stage, qemu_pid=123)
+        deferred = []
+        args = SimpleNamespace(stage=stage, qemu_pid=123, close_welcome=close_welcome)
         record = dict(self.record, reviewed_stage=stage, status='RUNNING', actions=[],
                       tls_pass=False, application_pass=False, process_exit_verified=False)
         original_atomic = C.atomic_json
 
         def fake_sleep(seconds):
             clock[0] += seconds
+            if ack_mode == 'partial-then-complete' and clock[0] >= 1 and deferred:
+                write(self.run / 'gui-control-receipt.json', deferred.pop())
 
         def emulate_runner_ack(path, obj):
             original_atomic(path, obj)
@@ -233,15 +330,45 @@ class AdmissionTests(unittest.TestCase):
                        status=C.ACK_STATUS, screenshot=str(image))
             if obj.get('text'):
                 ack['typed'] = obj['text']
-            write(self.run / 'gui-control-receipt.json', ack)
+            if ack_mode == 'empty':
+                (self.run / 'gui-control-receipt.json').write_bytes(b'')
+            elif ack_mode == 'partial-then-complete' and obj['sequence'] == 1:
+                (self.run / 'gui-control-receipt.json').write_bytes(b'{')
+                deferred.append(ack)
+            elif ack_mode == 'pid-change':
+                (self.run / 'gui-control-receipt.json').write_bytes(b'{')
+            else:
+                write(self.run / 'gui-control-receipt.json', ack)
 
         out = self.run / ('tls-control-' + stage + '.json')
-        with patch.object(C, 'process_token', return_value='456'), \
+        with patch.object(C, 'process_token', side_effect=lambda *_: 'foreign' if ack_mode == 'pid-change' and clock[0] >= 1 else '456'), \
                 patch.object(C.time, 'monotonic', side_effect=lambda: clock[0]), \
                 patch.object(C.time, 'sleep', side_effect=fake_sleep), \
                 patch.object(C, 'atomic_json', side_effect=emulate_runner_ack):
-            rc = C.drive(args, self.run, record, out, '456', 0, None)
+            rc = C.drive(args, self.run, record, out, '456', sequence, previous)
         return rc, submitted, C.read_json(out)
+
+    def test_permanently_empty_ack_times_out_without_replaying_keys(self):
+        rc, actions, record = self.simulate_stage('boot-warning', ack_mode='empty')
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(record['status'], 'CONTROL_INTERRUPTED')
+        self.assertEqual(record['error'], 'Canonical runner did not acknowledge this exact request')
+        self.assertEqual(record['actions'], [])
+
+    def test_partial_ack_completed_by_producer_advances_once(self):
+        rc, actions, record = self.simulate_stage('boot-warning', ack_mode='partial-then-complete')
+        self.assertEqual(rc, 0)
+        self.assertEqual([a['sequence'] for _, a in actions], [1, 2])
+        self.assertEqual(record['status'], C.BOOT_STATUS)
+        self.assertEqual(len(record['actions']), 2)
+
+    def test_pid_start_identity_change_while_ack_pending_aborts(self):
+        rc, actions, record = self.simulate_stage('boot-warning', ack_mode='pid-change')
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(actions), 1)
+        self.assertIn('PID was reused', record['error'])
+        self.assertFalse(record['tls_pass'])
 
     def test_boot_warning_stops_after_enter_and_capture(self):
         rc, actions, record = self.simulate_stage('boot-warning')
@@ -254,16 +381,46 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(record['status'], C.BOOT_STATUS)
         self.assertFalse(record['tls_pass'])
 
-    def test_desktop_uses_fixed_command_waits105s_then_finishes(self):
+    def test_legacy_desktop_cannot_skip_separate_run_dialog_review(self):
         rc, actions, record = self.simulate_stage('desktop')
+        self.assertEqual(rc, 1)
+        self.assertEqual(actions, [])
+        self.assertEqual(record['status'], 'CONTROL_INTERRUPTED')
+        self.assertFalse(record['tls_pass'])
+        self.assertFalse(record['process_exit_verified'])
+
+    def test_run_dialog_is_capture_only_and_does_not_launch_or_finish(self):
+        rc, actions, record = self.simulate_stage('run-dialog')
         self.assertEqual(rc, 0)
-        self.assertEqual(len(actions), 3)
-        self.assertEqual(actions[1][1]['text'], C.COMMAND)
-        self.assertTrue(actions[1][1]['enter'])
-        self.assertGreaterEqual(actions[2][0] - actions[1][0], 105)
-        self.assertTrue(actions[2][1]['finish'])
+        self.assertEqual([a['keys'] for _, a in actions[:2]],
+                         [[['esc']], [['meta_l', 'r']]])
+        self.assertGreaterEqual(actions[2][0] - actions[1][0], 8)
         self.assertTrue(actions[2][1]['framebuffer_capture'])
-        self.assertEqual(record['status'], C.DESKTOP_STATUS)
+        self.assertTrue(all('text' not in a and not a.get('finish') for _, a in actions))
+        self.assertEqual(record['status'], C.RUN_DIALOG_STATUS)
+        self.assertFalse(record['tls_pass'])
+
+    def test_reviewed_welcome_close_is_explicit(self):
+        rc, actions, record = self.simulate_stage('run-dialog', close_welcome=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(actions[0][1]['keys'], [['alt', 'f4'], ['esc']])
+        self.assertTrue(all('text' not in a for _, a in actions))
+
+    def test_launch_after_dialog_does_not_reopen_it_and_waits_before_finish(self):
+        previous = dict(sequence=5, name='tls7707-run-dialog-review-capture', framebuffer_capture=True)
+        ack = dict(sequence=5, name=previous['name'], keys=[], status=C.ACK_STATUS,
+                   screenshot=str(self.image))
+        self.image.with_name(self.image.stem + '-physical-framebuffer.bin').write_bytes(b'framebuffer')
+        self.queue(previous, ack)
+        rc, actions, record = self.simulate_stage('launch-observer', sequence=5, previous=previous)
+        self.assertEqual(rc, 0)
+        self.assertEqual([a['sequence'] for _, a in actions], [6, 7])
+        self.assertEqual(actions[0][1]['keys'], [['ctrl', 'a']])
+        self.assertEqual(actions[0][1]['text'], C.COMMAND)
+        self.assertTrue(actions[0][1]['enter'])
+        self.assertGreaterEqual(actions[1][0] - actions[0][0], 105)
+        self.assertTrue(actions[1][1]['framebuffer_capture'])
+        self.assertTrue(actions[1][1]['finish'])
         self.assertFalse(record['tls_pass'])
         self.assertFalse(record['process_exit_verified'])
 

@@ -281,6 +281,55 @@ class CheckedFilesAcceptanceTests(unittest.TestCase):
         with self.assertRaises(VERIFIER.VerificationError):
             reader.finish()
 
+    def test_json_exact_default_and_explicit_receipt_limits(self):
+        for maximum in (1024 ** 2, 4 * 1024 ** 2):
+            with self.subTest(maximum=maximum):
+                self.path.write_bytes(b"{}" + b" " * (maximum - 2))
+                reader = VERIFIER.CheckedFiles()
+                options = {} if maximum == 1024 ** 2 else {"maximum": maximum}
+                self.assertEqual(reader.json(self.path, **options), {})
+                self.assertEqual(reader.finish()[0]["bytes"], maximum)
+
+    def test_json_limit_plus_one_rejected_with_no_record(self):
+        for maximum in (1024 ** 2, 4 * 1024 ** 2):
+            with self.subTest(maximum=maximum):
+                self.path.write_bytes(b"{}" + b" " * (maximum - 1))
+                reader = VERIFIER.CheckedFiles()
+                options = {} if maximum == 1024 ** 2 else {"maximum": maximum}
+                with self.assertRaisesRegex(VERIFIER.VerificationError, "Evidence size outside bounds"):
+                    reader.json(self.path, **options)
+                self.assertEqual(reader.records, {})
+
+    def test_json_receipt_allowance_does_not_raise_default_limit(self):
+        self.path.write_bytes(b"{}" + b" " * (1024 ** 2 - 1))
+        with self.assertRaisesRegex(VERIFIER.VerificationError, "Evidence size outside bounds"):
+            VERIFIER.CheckedFiles().json(self.path)
+        self.assertEqual(VERIFIER.CheckedFiles().json(self.path, maximum=4 * 1024 ** 2), {})
+
+    def test_json_explicit_null_sha_with_receipt_allowance_stays_pinned(self):
+        self.path.write_bytes(b"{}" + b" " * (1024 ** 2 - 1))
+        reader = VERIFIER.CheckedFiles()
+        with self.assertRaisesRegex(VERIFIER.VerificationError, "Malformed pinned SHA"):
+            reader.json(self.path, None, maximum=4 * 1024 ** 2)
+        self.assertEqual(reader.records, {})
+
+    def test_large_json_mutation_rejected_at_finish(self):
+        raw = b"{}" + b" " * (1024 ** 2 - 1)
+        self.path.write_bytes(raw)
+        reader = VERIFIER.CheckedFiles()
+        self.assertEqual(reader.json(self.path, hashlib.sha256(raw).hexdigest(), maximum=4 * 1024 ** 2), {})
+        self.path.write_bytes(raw + b" ")
+        with self.assertRaisesRegex(VERIFIER.VerificationError, "Evidence mutated during verification"):
+            reader.finish()
+
+    def test_large_json_mutation_rejected_against_retained_sha(self):
+        raw = b"{}" + b" " * (1024 ** 2 - 1)
+        self.path.write_bytes(raw + b" ")
+        reader = VERIFIER.CheckedFiles()
+        with self.assertRaisesRegex(VERIFIER.VerificationError, "Evidence SHA differs"):
+            reader.json(self.path, hashlib.sha256(raw).hexdigest(), maximum=4 * 1024 ** 2)
+        self.assertEqual(reader.records, {})
+
 
 if __name__ == "__main__":
     unittest.main()
