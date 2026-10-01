@@ -2,7 +2,7 @@
 
 > For agentic workers: use `superpowers:subagent-driven-development` for owned implementation and independent review. Track verified steps here and in status files.
 
-**Goal:** Integrate tested native backend improvements beneath actual Windows 98, cooperating with peer chats implementing PMA, GOP and VMM transport.
+**Goal:** Complete the requested Windows98/PMA/GOP/VMM/NT architecture, then produce the final ISO and fully refactor and deploy m98.nyase.kr. Native backend changes are intermediate work toward that end state; cooperate with the existing peer owners.
 
 **Architecture:** Reuse existing UP preemptive schedulers, VMX/EPT Supervisor, shared ABI 1.1, VxD/Win64 transport, NT driver contracts and GOP backend. Windows VMM owns Windows scheduling; PMA owns native workers. Every change remains reversible and has a truthful component acceptance scope.
 
@@ -34,11 +34,12 @@
 
 **Interfaces:** Shared FIFO ticket lock and pointer-sized binary atomic helpers, fixed declarations recorded by the lead before consumers use them. Existing NT exported signatures and lock storage remain unchanged.
 
-- [ ] Add failing tests for FIFO contention, release/acquire publication, non-barging trylock, wraparound and actual NT spin/IRQL behavior.
-- [ ] Run `python3 -B shizukudos/tests/test_pma_sync.py` and preserve expected failures.
-- [ ] Implement shared atomics/ticket lock and consume atomic binary lock operations in existing NT exports.
-- [ ] Run normal and `--sanitize` tests, including freestanding i486 compile/link dependency checks.
-- [ ] Commit only owned files; independently review ABI, IRQ and concurrency behavior.
+- [x] Add failing tests for FIFO contention, release/acquire publication, non-barging trylock, wraparound and actual NT spin/IRQL behavior.
+- [x] Run `python3 -B shizukudos/tests/test_pma_sync.py --out build/pma-core-red` and preserve expected failures.
+- [x] Implement shared atomics/ticket lock and consume atomic binary lock operations in existing NT exports.
+- [x] Run `python3 -B shizukudos/tests/test_pma_sync.py --tsan --out build/pma-c957-integrated-core`, including freestanding i486 compile/link dependency checks; all 11 commands pass.
+- [x] Commit owned files and independently review ABI, IRQ and concurrency behavior; final source is 8a74d9a.
+- [x] Repair independent ABA and source-binding findings, including three copied-source mutation cases.
 
 ## Task 2: Existing framebuffer handoff and rectangle safety
 
@@ -46,11 +47,13 @@
 
 **Interfaces:** `k64_boot_framebuffer(k64_boot_fb_t *)` and `gfx_fb_present(int,int,int,int)` retain signatures. Tests call actual production functions; no independent desktop, graphics stack or firmware ownership is added.
 
-- [ ] Add failing malformed/truncated/padded-pitch framebuffer and extreme rectangle tests with an independent range oracle.
-- [ ] Run `python3 -B shizukudos/tests/test_display_contract.py` and preserve expected failures.
-- [ ] Repair bounded validation and clipping in existing paths.
-- [ ] Run normal and `--sanitize` display tests; verify output preservation and unchanged normal clipping/statistics.
-- [ ] Commit owned files and review against peer GOP mode-selection metadata.
+- [x] Add failing malformed/truncated/padded-pitch framebuffer and extreme rectangle tests with an independent range oracle.
+- [x] Run `python3 -B shizukudos/tests/test_display_contract.py` and preserve expected failures.
+- [x] Repair bounded validation and clipping in existing paths.
+- [x] Run normal and `--sanitize` display tests; verify output preservation and unchanged normal clipping/statistics.
+- [x] Commit owned files and review against peer GOP mode-selection metadata.
+- [x] Reproduce the reserved-alias finding and conservatively bound GOP below the unchanged 64-GiB arena with a shared constant; GCC/Clang ASan each pass 63 + 156579 assertions.
+- [x] Independently approve the reserved-alias followup; current-source kernel build running.
 
 ## Task 3: Source-backed common wrapper capability inventory
 
@@ -58,11 +61,13 @@
 
 **Interfaces:** Strict versioned JSON schema, read-only validation by default, optional explicit `--out` report with fresh source hashes. Existing exports, wire layouts and capability bits remain authoritative.
 
-- [ ] Add failing schema/duplicate/source/export/capability-promotion mutation tests.
-- [ ] Implement manifest, all requested architectural families, and deterministic validation with useful failure messages.
-- [ ] Run `python3 -B -m unittest discover -s ntwrapper/capabilities -p test_validate.py -v`.
-- [ ] Run `python3 -B ntwrapper/capabilities/validate.py --out build/pma-c957-compat/capabilities.json`.
-- [ ] Commit and independently verify statuses against current source/native-negative evidence.
+- [x] Add failing schema/duplicate/source/export/capability-promotion mutation tests.
+- [x] Implement manifest, all requested architectural families, and deterministic validation with useful failure messages.
+- [x] Run `python3 -B -m unittest discover -s ntwrapper/capabilities -p test_validate.py -v`.
+- [x] Run `python3 -B ntwrapper/capabilities/validate.py --out build/pma-c957-compat/capabilities.json`.
+- [x] Commit and independently verify statuses against current source/native-negative evidence.
+- [x] Correct the reviewed KeSetTimer and ExQueueWorkItem contracts; all 67 contract guards pass independently and the combined-source report validates 120 families/56 frontend/17 backend APIs.
+- [x] Repair capability manifest capture/publication provenance (4e6beea);78 total tests and11 independent CLI race controls pass without native promotion.
 
 ## Task 4: Integrate passing local and peer changes
 
@@ -72,30 +77,48 @@
 - [x] Audit original and current trees; supersede stale `e455f01` conclusions.
 - [x] Create isolated integration/core/display/compat worktrees at `a648e9b`.
 - [x] Discover/read other active chats and publish cross-chat ownership messages.
-- [ ] Obtain scoped commits and review each actual diff against its tests.
-- [ ] Integrate passing commits with dependency order, retain peer ownership/status.
-- [ ] Run fresh `python3 -B shizukudos/kbuild.py` and source-bound Supervisor compilation.
-- [ ] Run appropriate host ABI/VxD/display/kernel/firmware regression gates; retain source hashes and actual scope.
+- [x] Obtain scoped commits and review each actual diff against its tests.
+- [x] Integrate passing core/display/inventory, IPC/doorbell/GOP, VxD/text/handle and K32 publication commits in dependency order.
+- [x] Repair the combined VxD copied-header conflict; independent 13-test approval.
+- [x] Bind actual shared font dependencies to Supervisor compile receipts; independent mutation-control approval.
+- [x] Converge canonical2bde source/helper closure in3efbc6f, preserve focused evidence;16 controls and real KVM11checks pass.
+- [x] Repair eager/lazy empty-relocation DLL collision in d08e1cb; independently approved production-path host251checks/compiler. Full current-source guest remains pending.
+- [x] Import reviewed b9f170c scheduler, d461529 PMA service, 402f2cb GOP AUTO, 6dfc4b5 K32 deadlines, 97bafff bounded K32 IPC and merged compiler-derived VxD receipt closure.
+- [x] Run fresh `python3 -B shizukudos/kbuild.py` atd08e1cb (212stableinputs) and preserve the still-current105input source-bound Supervisor compile. These are compile/component evidence.
+- [ ] Admit a complete current-source native kernel guest after canonical useful-progress repair; latest fullguest retains two scheduler failures despite151normalapps.
+- [x] Run host ABI/VxD/display/kernel/firmware and production PMA service/ring gates; retain source hashes and actual scope.
 - [ ] Publish tested commit SHAs and blockers for peer integration.
 
 ## Complete requested sequence
 
 | Phase | Goal | Ownership/status |
 | --- | --- | --- |
-| 0 | Repository audit and evidence inventory | Current baseline inspected; detailed owned audits underway |
-| 1 | PMA native scheduler core | Peer 163f priority/quantum/ready-queue implementation |
-| 2 | Synchronization primitives | Existing object waits reused; c957 fair atomics and NT spin migration |
+| 0 | Repository audit and evidence inventory | Baseline and actual owned production paths audited; detailed component receipts retained |
+| 1 | PMA native scheduler core | Reviewed b9f170c native-UP priorities, quantum, aging, queues and bounded stress imported; current execution recorded in status |
+| 2 | Synchronization primitives | NT atomic spin and shared FIFO locks implemented and independently approved; full primitives remain per-contract work |
 | 3 | SMP/AP startup/per-CPU queues/IPIs/UP fallback | Pending integrated native acceptance; preserve current UP |
-| 4 | UEFI GOP/EDID/retained framebuffer | Peer 163f mode selector; c957 handoff safety |
+| 4 | UEFI GOP/EDID/retained framebuffer | Host checks and actual OVMF retained-framebuffer execution pass; reserved-address correction independently approved; 402f2cb AUTO stops after fatal mode-selection/restore failure; actual extracted entry passes 15 scenarios/180 checks per compiler |
 | 5 | High-resolution console | Existing backend backbuffer; complete shell acceptance pending |
 | 6 | On-demand per-process VGA/SVGA | Existing emulation preserved; full virtualization pending |
-| 7 | Serialized DOS gate/InDOS/PSP/MCB/SFT/CDS | Pending actual DOS execution-boundary integration |
-| 8 | VMM↔PMA bridge | Existing VxD reused; peer 163f admission/epoch safety |
-| 9 | Common NT ABI/handles/capabilities | Existing fabric reused; c957 source-bound manifest |
+| 7 | Serialized DOS gate/InDOS/PSP/MCB/SFT/CDS | Actual pinned FreeDOS entry/EXEC/exit/reentry audited; executor/VMM callback prerequisite work assigned to 163f Windows/NT lead; real transport/boot acceptance pending |
+| 8 | VMM↔PMA bridge | Existing VxD reused and copied-header conflict repaired/retested; fada d461 production events/deferred waits/epoch fences imported and independently reviewed; root host tests pass; real Windows VMM delivery pending |
+| 9 | Common NT ABI/handles/capabilities | Source-bound 120-family/56-frontend/17-backend API inventory, timer/work correction and78 contract/receipt guards pass; native-positive flags remain false |
 | 10 | Evidence-driven NT/user32/gdi/runtime contracts | Existing concrete APIs catalogued; remaining contracts pending |
 | 11 | Graphics/storage/network/USB/audio translation | Existing implementations retained; per-driver/API acceptance required |
 | 12 | Actual Windows98+Kernel64 integrated execution | Pending real Windows peer/work/result/GUI positive acceptance |
-| 13 | Stress and regression | Local synchronization/display/metadata tests in progress; full matrix pending |
+| 13 | Stress and regression | Local sanitizer/concurrency/mutation tests and isolated K32/OVMF guests pass at recorded epochs; fresh merged component executions recorded in status; full product/SMP/real-VMM matrix pending |
 | 14 | Documentation/release gates | This ledger maintained; release not complete until real-path gates pass |
 
 Full requirements remain active; a completed slice is not the final architecture completion.
+
+## Final goal deliverables — active, not achieved
+
+- [ ] Actual Windows 98 on ShizukuDOS meets the required native VMM, DOS, driver, GUI and modern-application gates; component/old-DOS controls cannot substitute.
+- [ ] Assemble the final1.0.0 ISO using the project installer and frozen admitted production sources; validate artifact contents, exact checksums and actual intended boot/install paths. Private Microsoft media remains private.
+- [ ] Fully refactor the official distribution website into coherent download, installation, compatibility and real-execution pages while preserving every existing92 published asset and its genuine evidence.
+- [ ] Stage and inspect the website in a real browser; validate links/download hashes, responsive layout and accessibility.
+- [ ] Deploy through the existing m98 nginx static release with scoped ownership/lock/current-release guards, preserving rollback and the separate legacy console. Verify the actual public domain and complete ISO download; GitHub remains source/patch only.
+
+The goal is still active. Final artifacts and web deployment remain required;
+passing native component tests does not complete or redefine it. Current
+implementation/evidence and open native failures are in INTEGRATION_STATUS.md.
