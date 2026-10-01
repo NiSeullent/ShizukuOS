@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "preserved_inputs_sha256": {
+    "ntwddm/win64/memory_probe/probe.c": "7a280be2cdda46f7cd4fc2c405776d70d9e3bcbd8a4705204ed4aa49167c6e68",
+    "tools/win64_memory_probe_trial.py": "3a7fb70bf183f626f3798c3b12e5f3c78870756b66e400a882c57bfb429b6693",
+    "tests/test_win64_memory_probe_trial.py": "487058d43339857e3f2a2faab542eff7413baac6e19f8b41c7b65155386c4a3a",
+    "ntwddm/win64/memory_probe/README.md": "835f84da7ff02cd2d9a7947a23eb53a99a9e7c46e67f788c2b1ac7e786c620ce",
+    "ntwddm/win64/memory_probe/handoff.json": "90b880dc3eec9b65493588ac1d8947874fe1ff14155f4bdb5a6c98190b3d3cd0",
+    "tools/runtime_extension_overlay.py": "a258b865cdae4daaba458268a42189801a76e2c2972511c7346b144064b519e9",
+    "build/required-memory-runtime-6970-v1/extension-overlay.json": "7af0d26107ddd0e07fe3c0c123adc7081bdf95865b58d4a028892f7a5fefb1c3",
+    "build/mp64-prep-v2/prepared.json": "d27b37dae29e64f83346bbfa4f7b4a8ab8409f3a4554ca8a0fb5aca2f2363274",
+    "build/mp64-run-v1/memory-diagnostic.json": "38f93c81702b4c482c43fa0f0df9f1395c7731dc121d1c5cb03dbeda528f3627",
+    "build/modern-required-apps-6970/signal-memory-themed-run-v1/extension-runtime-result.json": "32f5d6f508b38c4c91a7158df8b9627063063b7e228e6868cbb2a3a5085cc927",
+    "build/modern-required-apps-6970/signal-memory-themed-run-v1/serial.log": "c5cae148c12a7a5744e4a7165668a91153fccf33c894abcd3dd18327acd7a69c",
+    "build/modern-required-apps-6970/signal-memory-themed-1024-run-v1/extension-runtime-result.json": "32f5d6f508b38c4c91a7158df8b9627063063b7e228e6868cbb2a3a5085cc927",
+    "build/modern-required-apps-6970/signal-memory-themed-1024-run-v1/serial.log": "82d291360d60c4d01ee8daec40aa4d33dc30ed5f3a3fb39f0a97073cc83d90ba",
+    "build/signal-memory-ram-comparison-6970-v1/comparison.json": "85cdffa97b2c877b1fd69fefb003c90a21cd606be9687f7ae725b5888e2b1718",
+    "build/required-memory-runtime-6970-v1/KERNELBASE.DLL": "d370ada2423503929a761f271fcf0728d9dadaecd52f906ee52b8167c347efff"
+  }
+}
