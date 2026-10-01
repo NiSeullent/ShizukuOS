@@ -530,3 +530,35 @@ with zero deletions. The unique frozen checkpoint is
 `/root/Win98-Modern-boot/build/disk-optimizer-6970-closed-ranges-20261001T1632/checkpoint.json`.
 This excludes the earlier 378,695,680-byte result and unrelated free-space
 changes. Native admission still requires a fresh full-budget space check.
+
+The independent adapter review identified and closed gaps in actual compiler
+receipt formats, guest binary readback, pointer admission and complete image
+validation. Root executed all **23 offline adapter regressions successfully**
+with bytecode disabled and temporary fixtures on `/dev/shm`, avoiding new
+physical-disk outputs while unrelated writers held the filesystem below its
+reserve. Root separately passed `build_input` on both actual immutable compiler
+receipts above, binding ten selector and eight observer command/source records.
+The tests reject old startup plans, changed COW identity or baseline, stale and
+partial native logs, wrong final post-exit state, missing compiler execution,
+altered guest binaries/case/INI, unsupported absolute input and truncated or
+corrupt native rasters. The observer's singular compiler version is validated
+under its explicit role; it never substitutes for executed compiler evidence.
+
+After each fully stopped epoch, the adapter independently reads both guest
+executables and compares every byte to the staged and compiled artifacts. It
+also verifies the exact case nonce/phase and unchanged byte-preserved WIN.INI
+and FAT attributes. The separate verifier checks both epoch records and repeats
+the final stopped-disk readback. Only keyboard input or a reported current
+absolute pointer is admitted. Native PPM captures require complete raster bytes;
+every QMP screenshot error aborts. Supported PNG readbacks additionally need
+complete chunks, CRCs, exact bounded decompression and valid raster filter bytes.
+
+Use `python3 -B tools/global_theme_trial.py prepare --help` for the explicit
+selected-build, QEMU, firmware and GOP inputs. `prepare` never boots; `execute`
+requires its exact new plan path/hash and the shared guest lease for both cold
+epochs. `queue` admits bounded, nonce-bound GUI input, and `verify` independently
+reads the stopped evidence. The retained absolute base/peer paths are specific
+to this laboratory and are not private media supplied through public source.
+No prepare or native epoch has executed at this checkpoint. No source-only
+test proves ShizukuDOS boot, actual persistence, visible desktop output or
+the final ISO.

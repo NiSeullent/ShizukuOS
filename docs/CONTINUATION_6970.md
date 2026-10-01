@@ -165,3 +165,29 @@ relax its checks. No ISO was requested by this run. New USB/ISO installation,
 complete download verification and Windows 98 replacement acceptance remain
 pending. The public ShizukuOS name follows the integrated product design;
 ShizukuDOS still replaces MS-DOS in the required Windows 98 system.
+
+## Native system theme continuation
+
+The public development branch includes a genuine Windows 98 system palette
+selector in `ntwddm/win98/theme_selector/` and a separate native read-only
+observer in `ntwddm/win98/theme_global_probe/`. Classic and ShizukuOS selection
+uses actual system colors, validated whole-profile persistence, an exact
+startup restore command and rollback; it preserves native fonts and Korean
+character sets. Both actual i486 PE32 4.10 builds passed their pinned OEM import
+and relocation gates. The production transaction tests passed 139 assertions
+normally and under ASan/UBSan; eight build-gate regressions passed.
+
+The new `tools/global_theme_trial.py` source and its 23 actual passing offline
+tests provide a separate, source-bound single-COW two-cold-boot control. It
+verifies unrelated native repaint/pixels and rechecks binary, case and startup
+bytes after each stopped guest. It rejects old app-local startup plans. Its
+fixed private base paths describe this laboratory; they are not included in a
+GitHub source checkout. Rebuild and prepare fresh private inputs on another host.
+
+Neither native cold epoch has run for this selector yet. Actual system-wide
+visibility, reboot persistence, native failure rollback and the integrated
+ShizukuDOS Windows 98 system remain unverified. Detailed immutable build hashes,
+test scope and resource requirements are in `THEME_NATIVE_CHECKPOINT_6970.md`.
+Source commits `645901a5f41ed67382cf98f55351cbfe563078b6` and
+`a5eed8fee4cfc271850e0a8112787674dde2ad14` are pushed for additive integration
+by the sole main/site/ISO publisher; this statement does not claim main merge.
