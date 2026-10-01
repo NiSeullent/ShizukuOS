@@ -29,6 +29,7 @@ ESP_MIB = 96
 
 PAYLOAD_C = ["main.c", "platform.c", "console.c", "caps.c", "vmx.c", "ept.c", "devices.c", "video.c", "bios.c",
              "domain.c", "dos.c", "kdom.c", "pool.c", "lib.c",
+             "../../csmwrap/video/cp437.c",
              "../native_win98/ata_pio.c", "../native_win98/string_pio.c", "../native_win98/win98.c"]
 PAYLOAD_ASM = ["entry.asm", "vmx_asm.asm"]
 CFLAGS = ["-m64", "-march=x86-64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin",
@@ -62,7 +63,8 @@ def build_payload():
         obj = OUT / "obj" / (Path(name).stem + ".o")
         if obj in objs:
             raise RuntimeError(f"duplicate payload object name: {name}")
-        cmd = ["gcc", *CFLAGS, "-I", OUT, "-I", SRC / "src", "-I", SHZ / "abi", "-c", SRC / "src" / name, "-o", obj]
+        cmd = ["gcc", *CFLAGS, "-I", OUT, "-I", SRC / "src", "-I", SHZ / "abi",
+               "-I", SHZ / "csmwrap", "-c", SRC / "src" / name, "-o", obj]
         run(cmd)
         commands.append(cmd)
         objs.append(obj)
@@ -154,8 +156,12 @@ def main():
     esp = build_esp(loader, disk)
     conformance_esp = build_esp(loader, conformance_disk, "esp-conformance.img")
     sources = sorted([p for p in SRC.rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")] +
-                     [SHZ / "abi" / "shz_abi.h", REPO / "shizukudos/uefi/boot.c", REPO / "shizukudos/uefi/boot.h",
+                     [SHZ / "abi" / "shz_abi.h", SHZ / "abi" / "shz_ipc.h",
+                      REPO / "shizukudos/uefi/boot.c", REPO / "shizukudos/uefi/boot.h",
                       REPO / "shizukudos/uefi/efi.h", SHZ / "kernel64/standalone/memholes.h"])
+    # The Supervisor shares the existing CP437 glyphs rather than maintaining a
+    # second font implementation. Include their complete closure in the receipt.
+    sources += [SHZ / "csmwrap/video" / name for name in ("cp437.c", "cp437.h", "font8x8_basic.h")]
     receipt = {
         "profile": "uefi-supervisor-vmx",
         "built_utc": shzlib.utc_now(),
