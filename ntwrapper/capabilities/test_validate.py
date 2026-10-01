@@ -49,6 +49,7 @@ class InventoryTests(unittest.TestCase):
             paths.update(ref["path"] for ref in entry["backend_refs"])
         for api in self.manifest["backend_apis"]:
             paths.update((api["source"], api["declaration_source"], api["resolver_source"]))
+            paths.update(ref["path"] for ref in api.get("source_dependencies", []))
         for path in paths:
             destination = directory / path
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -299,6 +300,69 @@ class InventoryTests(unittest.TestCase):
             routes["exports"].append(copy.deepcopy(routes["exports"][0]))
             source.write_text(json.dumps(routes))
             self.reject("duplicate routing", root=fixture)
+
+    def mutate_backend_source(self, path, old, new, message):
+        with tempfile.TemporaryDirectory(prefix="pma-c957-cap-test-") as temp:
+            fixture = Path(temp)
+            self.clone_sources(fixture)
+            source = fixture / path
+            before = source.read_text()
+            self.assertIn(old, before)
+            source.write_text(before.replace(old, new, 1))
+            self.reject(message, root=fixture)
+
+    def test_timer_signal_return_source_drift_is_rejected(self):
+        self.mutate_backend_source("shizukudos/kernel64/ntdrv_ke.c",
+                                   "uint8_t was = t->Header.SignalState != 0;",
+                                   "uint8_t was = t->Header.Inserted != 0;", "timer signal return")
+
+    def test_timer_absolute_due_source_drift_is_rejected(self):
+        self.mutate_backend_source("shizukudos/kernel64/ntdrv_ke.c", "/ 10000 : 1;",
+                                   "/ 10000 : 500;", "timer due-time")
+
+    def test_timer_bounded_admission_source_drift_is_rejected(self):
+        self.mutate_backend_source("shizukudos/kernel64/ntdrv_ke.c", "if (timer_count < 32)",
+                                   "if (timer_count < 64)", "timer list capacity")
+
+    def test_work_allocation_failure_source_drift_is_rejected(self):
+        self.mutate_backend_source("shizukudos/kernel64/ntdrv_io.c", "if (!s) { fn(ctx); return; }",
+                                   "if (!s) { return; }", "work allocation-failure fallback")
+
+    def test_work_normal_queue_dispatch_drift_is_rejected(self):
+        self.mutate_backend_source("shizukudos/kernel64/ntdrv_io.c", "queue_item(item, routine, 0, ctx);",
+                                   "routine(0, ctx);", "work dispatch")
+
+    def test_work_callback_parameter_drift_is_rejected(self):
+        self.mutate_backend_source("shizukudos/kernel64/ntdrv_io.c", "s->fn(s->ctx);",
+                                   "s->fn(0);", "work callback")
+
+    def test_work_irql_contract_cannot_hide_inline_fallback(self):
+        api = next(a for a in self.manifest["backend_apis"] if a["name"] == "ExQueueWorkItem")
+        api["irql"] = "UP CR8/dispatcher model; every callback guaranteed PASSIVE_LEVEL"
+        self.reject("backend IRQL contract")
+
+    def test_work_provider_source_dependency_is_required(self):
+        api = next(a for a in self.manifest["backend_apis"] if a["name"] == "ExQueueWorkItem")
+        api["source_dependencies"] = []
+        self.reject("backend dependency")
+
+    def test_timer_manifest_cannot_claim_prior_insertion_return(self):
+        api = next(a for a in self.manifest["backend_apis"] if a["name"] == "KeSetTimer")
+        api.setdefault("source_semantics", {})["return_value"] = "previous_Header.Inserted"
+        self.reject("backend source semantics")
+
+    def test_work_manifest_cannot_claim_only_worker_execution(self):
+        api = next(a for a in self.manifest["backend_apis"] if a["name"] == "ExQueueWorkItem")
+        api.setdefault("source_semantics", {})["allocation_failure_execution"] = "always_PASSIVE_worker"
+        self.reject("backend source semantics")
+
+    def test_partial_timer_and_work_contracts_are_explicit(self):
+        report = self.check()
+        timer = next(a for a in report["backend_apis"] if a["name"] == "KeSetTimer")
+        work = next(a for a in report["backend_apis"] if a["name"] == "ExQueueWorkItem")
+        self.assertEqual(timer.get("source_semantics", {}).get("return_value"), "previous_Header.SignalState_nonzero")
+        self.assertEqual(work.get("source_semantics", {}).get("allocation_failure_execution"), "synchronous_callback_at_caller_irql")
+        self.assertIn("shizukudos/kernel64/ntdrv_io.c", [r["path"] for r in work.get("source_dependencies", [])])
 
     def test_impossible_capability_shift_is_rejected(self):
         with tempfile.TemporaryDirectory(prefix="pma-c957-cap-test-") as temp:
