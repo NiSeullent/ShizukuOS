@@ -1,0 +1,107 @@
+{
+  "schema": "shizukudos-cb43-xms-source-only-checkpoint-v1",
+  "public_files_including_manifest": 18,
+  "pinned_HimemX_source_files": 5,
+  "pinned_JWasm_source_preimages": 268,
+  "source_builds_passed": [
+    "JWasm",
+    "HIMEMX",
+    "HIMEMX2"
+  ],
+  "static_binary_checks_passed": 64,
+  "actual_DOS_XMS_checks_passed": 16,
+  "actual_DOS_XMS_check_failures": 0,
+  "actual_DOS_report_IO_ERROR": 0,
+  "actual_native_manager_variant": "HIMEMX default strategy only; alternateHIMEMX2 notrun",
+  "Windows98_boot_verified": false,
+  "MSDOS_replaced_under_Windows98": false,
+  "native_modern_apps_verified": false,
+  "public_binary_included": false,
+  "files": [
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/HIMEMX-build.log",
+      "bytes": 62,
+      "sha256": "3763d95b5c8d1e117f8306f80ca02569216ea59ccb666dbf4606b4eab8066d9d"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/HIMEMX2-build.log",
+      "bytes": 62,
+      "sha256": "5dd2f44bc18d76473059aa15a2693f38182f817cbfa7b994d865a269e8f77450"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/README.md",
+      "bytes": 8557,
+      "sha256": "018b01de1f944daeaaa502af94ecbadb292042a4cb52085c9148470d58227a55"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/binary-static-result.json",
+      "bytes": 10656,
+      "sha256": "9cb98f8509061289a59becbca0d60fa850cbcb9e9ad36cf797c04f8a08755686"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/cbxms.asm",
+      "bytes": 9997,
+      "sha256": "284177e9c2eb20212b901f9c8e18fabba6e14ef6bb78924f8a97e06e7a0a8cbd"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/independent-probe-review.json",
+      "bytes": 1648,
+      "sha256": "e47b96144f39a1181dc3d510326381d44166956e9dcce0b1e6c8a43c48f1fe41"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/jwasm-build.log",
+      "bytes": 6818,
+      "sha256": "a8d49b5ed02bdab4264eed944a757f14f6a7bb29fbd778a4bd1de89ac0632d7c"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/native-probe-v2-build-receipt.json",
+      "bytes": 3081,
+      "sha256": "48363968c88169913d3bb2a9949c98221f8825ffc6b6688a7393216e0e0af6bf"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/native-xms-v7-result.json",
+      "bytes": 3299,
+      "sha256": "7334a918de6a7fe4af6307184fa60dba38ff704a37b91fb08e8d93ea69a069f8"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/native-xms-v7-results.txt",
+      "bytes": 1272,
+      "sha256": "bdf634071d5206e608456e850f69f94a8500d1989a8602ec08e6fdc5f90b7516"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/source-build-receipt.json",
+      "bytes": 51930,
+      "sha256": "943d91911fe325ee3f8513da2d3a3e7744735c2b58dff36b5082bd720398a01a"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/upstream/HimemX/HimemX.asm",
+      "bytes": 84567,
+      "sha256": "ddce17d5fe652a3b1e2b2bf1f97f4a3c8c990b16257bbae2bd3ea6ff9ae10d41"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/upstream/HimemX/History.txt",
+      "bytes": 5265,
+      "sha256": "8edd94dc83c53bedb32cb2fe956c81bb0ace0401acbfc268edd144f88d6729bb"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/upstream/HimemX/Make.bat",
+      "bytes": 399,
+      "sha256": "32598f7794301d7c092cd9a1f14df8fe7b257e9966cc00f1b8c6de2600a79be7"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/upstream/HimemX/Makefile",
+      "bytes": 529,
+      "sha256": "f0e882d5ac918d85d490b1b573d336c6f3abdca5dd2fa6ef300e837b0f271138"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/upstream/HimemX/Readme.txt",
+      "bytes": 1954,
+      "sha256": "be54cf4a34e96935e2abe2c1cd86ea902c7680be96b5b2d155ed55419edc5dbd"
+    },
+    {
+      "path": "docs/shizukudos10/reports/xms-himemx-cb43-20261001/upstream/JWasm-License.html",
+      "bytes": 21404,
+      "sha256": "a56629ae87823fff585de36daccc762e9d8ca8bcecde2f0910e313ae2ef65131"
+    }
+  ]
+}
