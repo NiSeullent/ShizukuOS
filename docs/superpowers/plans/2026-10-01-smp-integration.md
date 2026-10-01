@@ -31,7 +31,7 @@
 
 **Files and owners (updated after peer review):** Fada owns the single `smp_acpi.[ch]`, `smp_boot.[ch]`, `smp_boot_guard.h` and `smp_ap_trampoline.asm` implementation. This integration lane owns normal `main.c`/`pci.c` hooks, `standalone/boot32.c`, retained `native_firmware.h` and `qemu_firmware.h`, and new `cpu_firmware.[ch]`/`cpu_bringup.[ch]`/private architecture consumer. Import only exact reviewed frozen peer sources; do not duplicate the parser, hardware startup or final-table walker. Core scheduler/arch/header/start remain frozen under their owner.
 
-**Interfaces:** `int cpu_topology_init(uint64_t rsdp_pa)` validates topology; `unsigned cpu_index(void)` returns the running logical index; `uint64_t cpu_online_mask(void)` publishes only acknowledged fully initialized contexts; `int cpu_start_aps(void)` performs bounded startup. Initially APs run an explicit architecture bringup loop, not the existing UP scheduler. `cpu_discovered_count()` is separate from scheduler-ready CPU count.
+**Implemented native interfaces:** `shz_smp_acpi_probe()` validates bounded32-slot topology; `shz_smp_this_cpu()` maps the actual physical xAPIC ID to the dense BSP-index0 map and rejects an unknown CPU with32. `shz_smp_boot_start_with_reader()` performs bounded physical startup, and its installed `shz_smp_boot_set_resource_check()` callback verifies owned resources before INIT. `shz_smp_online_count()` counts acknowledged architecture entries; scheduler-ready CPU masks remain independently1. APs initially run an explicit private architecture/work/IPI consumer. The later per-CPU scheduler owns its online/affinity mask and activation contract; this native dependency does not fabricate a64-CPU-capable mask or support x2APIC.
 
 - [x] Run the existing native four-CPU acceptance test and preserve expected `observed1/requested4` RED evidence.
 - [x] Preserve own32-check parser RED/GREEN, then retire it in favor of Fada's reviewed parser. Peer452-check successor rejects physical xAPIC255; enabled x2APIC remains explicitly unsupported until the later backend extension.
@@ -39,11 +39,14 @@
 - [x] Implement bounded QEMU fw_cfg original E820 acquisition and read-only reserved-RAM ACPI admission from actual original RAM plus retained BIOS cover. The managed254MiB limit does not reject legitimate tables below the original256MiB machine limit; MMIO/ROM/nonRAM conflicts remain denied.
 - [x] Verify normal production `main.c`/Multiboot stub firmware consumption with real2CPU/4CPU/SMP-off boots. Preserve the first old-Core whole-gate failure; import the independently reviewed644c94f Core fix as a separate own commit and retain the next observed PASS distinctly.
 - [x] Correct the producer's helper load-before-capture defect through private actual-helper behavioral RED/GREEN. Capture the complete closure before helper execution, execute exactly the captured bytes, reject changed compiled sources/artifacts during reuse, and record a separate actual2CPU/4CPU/off receipt with full219-file archived inputs. This proves firmware/runner scope only, not AP execution.
-- [ ] Implement a bounded physical reader, RSDP/RSDT/XSDT/MADT parsing and a dense logical-index map with BSP index0. Keep a64-bit supported CPU mask and explicitly report any unsupported topology instead of fabricating CPU counts.
-- [ ] Reserve a legal trampoline page distinct from bootinfo0x7000. Enter APs through real/protected/long-mode bootstrap with unique stacks and temporary identity mapping; switch to final shared CR3 before C entry.
-- [ ] Adopt peer's actual initialCR3 capture and exact old1000/2000/4000 shape guard, full RAM-owned nonleaf validation and private4KiB-only identity bootstrap. Archive the independently tested5000 alternative and use one common guard. Root also reviewed5000 as legal only for true Multiboot (its stub GDT/code/stack is above4MiB); UEFI's5000 trampoline remains protected.
-- [ ] Add independent AP entry records for CR0/CR3/CR4/EFER, stack canary, APIC identity and bounded IPI acknowledgements; exercise withheld acknowledgement, duplicate entry and late-entry controls.
-- [ ] Verify fresh source-bound native2/4CPU bringup under KVM and a bounded TCG control; verify unchanged UP boot with1CPU/`smp=off`/invalid topology.
+- [x] Adopt the single bounded physical reader/parser and dense BSP-index0 map. Actual unknown physical identities and unsupported x2APIC/topologies are rejected. Future scheduler-ready mask support remains under its CPU owner.
+- [x] Use proven retired native0x1000 distinct from bootinfo0x7000. Enter APs through real/protected/long-mode bootstrap with unique stacks and temporary4096-byte identity mapping; switch to the final shared CR3 before consumer entry.
+- [x] Adopt actual initialCR3 capture and exact old1000/2000/4000 shape guard, complete type1 RAM plus real PMM-allocation ownership for every full nonleaf/PT page, and one private bootstrap root. Archive/remove the independently tested5000 alternative and retain one common walker. UEFI's separate trampoline contract remains protected.
+- [x] Install private AP GDT/IDT/TSS/boot/IRQ/DF resources and verify actual SGDT/SIDT/STR, shared finalCR3, physical-to-logical identity, disabled AP SYSCALL and boot-stack canaries. Perform real independent work with bidirectional BSP/AP progress and physical F0/F1 acknowledgements.
+- [x] Exercise actual suppressed-IPI, delivered-but-withheld acknowledgement and returned-entry failure controls. Returned AP publishes FAILED, retains its actual PMM stack and rejects restart. Completion-vector delivery is not a TLB shootdown.
+- [ ] Add remaining raw CR0/CR4/EFER entry records plus native duplicate/late-entry fault controls. Resource lifetime already retains all AP-visible pages after INIT; do not claim unexecuted fault controls passed.
+- [x] Verify source-bound actual normal KVM2/4, bounded TCG2, native1 and `smp=off` with the same227-file compiled source closure. Preserve evaluator-helper replacement RED/GREEN and capture executed producer/helper bytes.
+- [ ] Resolve the distinct absent-ACPI whole-kernel PMA failure before claiming every fallback gate passed. Its AP consumer rejects activation and leaves the UP path, but existing useful-work phase2 observes242 loops versus unchanged1000; no retry or threshold relaxation. Core owns diagnosis.
 - [ ] Review and commit the bringup change with its limited scope. Do not change scheduler stats to count parked APs.
 
 ## Task2: CPU architectural state and shared-memory ownership
@@ -112,6 +115,9 @@ migration, contention and remote-wake observability travels with Tasks2–5.
 Section36 `smp=on/off` is covered by Tasks1/5. Full VMM connection, complete
 Windows boot and final ISO are Task5/parent acceptance and remain explicit.
 
-Next reviewable implementation is Task1 production topology/AP bringup with
-parked APs and independent interrupt acknowledgements. It is a dependency for
-Tasks2–5, not a replacement end state or final SMP acceptance.
+Next review covers the exact normal production AP integration source and its
+positive/expected-negative/native fallback receipts, including the preserved
+absent-ACPI whole-gate failure. Core's isolated per-CPU queue/context foundation
+is the next dependency; public AP scheduler activation remains rejected until
+shared architecture, memory, interrupt and syscall ownership is proven. Native
+AP work/IPI evidence is a dependency for Tasks2–5, not final SMP acceptance.

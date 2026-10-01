@@ -45,6 +45,12 @@ extern const uint8_t shz_smp_trampoline_start[],shz_smp_trampoline_end[];
 static uint64_t final_cr3;
 static shz_smp_ap_entry_fn ap_entry;
 static int started;
+/* The normal production consumer supplies an owning reader for every table,
+ * stack and private architecture resource. The isolated baseline component
+ * retains its existing documented optional-hook scope. Called before INIT. */
+static shz_smp_resource_check_fn resource_check;
+int shz_smp_boot_set_resource_check(shz_smp_resource_check_fn check)
+{ if(started || !check) return SHZ_SMP_ACPI_INVALID;resource_check=check;return 0; }
 enum { APIC_ICR_LO=0x300,APIC_ICR_HI=0x310,APIC_ESR=0x280 };
 struct trampoline_params { uint32_t cr3,cpu,apic_id,claim; uint64_t stack,entry; };
 _Static_assert(sizeof(struct trampoline_params)==32,"AP trampoline parameter size");
@@ -151,7 +157,7 @@ int shz_smp_boot_start_with_reader(uint64_t rsdp_pa,shz_smp_ap_entry_fn entry,sh
         found.apic_id[0]=found.apic_id[j]; found.acpi_uid[0]=found.acpi_uid[j];
         found.apic_id[j]=id; found.acpi_uid[j]=uid; found.bsp_index=0;
     }
-    lapic=mmio_map(found.lapic_pa,PAGE_SIZE);
+    lapic=pci_bsp_lapic_acquire(found.lapic_pa,found.apic_id[0]);
     if(!lapic || (lapic[0x20/4]>>24)!=found.apic_id[0]) return SHZ_SMP_ACPI_INVALID;
     if((size_t)(shz_smp_trampoline_end-shz_smp_trampoline_start)>PAGE_SIZE) return SHZ_SMP_ACPI_LIMIT;
     final_cr3=kernel_pml4(); boot_cr3=bootstrap_space();
@@ -174,6 +180,13 @@ int shz_smp_boot_start_with_reader(uint64_t rsdp_pa,shz_smp_ap_entry_fn entry,sh
         shz_smp_cpus[i].syscall_kstack=shz_smp_cpus[i].boot_stack_top;
     }
     topology=found; ap_entry=entry;
+    if(resource_check && resource_check(found.count,boot_cr3)) {
+        for(i=0;i<found.count;i++)
+            pmm_free_contig(shz_smp_cpus[i].boot_stack_top-phys_base_va-KSTACK_BYTES,
+                            (KSTACK_BYTES*2+8192)/PAGE_SIZE);
+        free_bootstrap_space(boot_cr3);memset(shz_smp_cpus,0,sizeof shz_smp_cpus);
+        memset(&topology,0,sizeof topology);ap_entry=0;return SHZ_SMP_ACPI_INVALID;
+    }
     shz_smp_cpus[0].state=SHZ_SMP_CPU_ONLINE;
     memcpy((void *)p2v(SHZ_SMP_TRAMPOLINE_PA),shz_smp_trampoline_start,
            (size_t)(shz_smp_trampoline_end-shz_smp_trampoline_start));
@@ -214,6 +227,8 @@ int shz_smp_send_ipi(unsigned cpu,unsigned vector)
     return rc;
 }
 #else
+int shz_smp_boot_set_resource_check(shz_smp_resource_check_fn check)
+{ (void)check;return SHZ_SMP_ACPI_UNSUPPORTED; }
 int shz_smp_boot_start(uint64_t rsdp_pa,shz_smp_ap_entry_fn entry,uint64_t initial_cr3)
 { (void)rsdp_pa;(void)entry;(void)initial_cr3; return SHZ_SMP_ACPI_UNSUPPORTED; }
 int shz_smp_boot_start_with_reader(uint64_t rsdp_pa,shz_smp_ap_entry_fn entry,shz_smp_phys_read_fn read,void *ctx,uint64_t initial_cr3)

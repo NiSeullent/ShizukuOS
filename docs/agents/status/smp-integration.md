@@ -197,9 +197,9 @@ Only the producer changed from the prior compiled closure; no unnecessary
 kernel rebuild was performed. Its complete source/input/log/control ZIP SHA256:
 `8f789cac8321462108e31f992ab500b8f122e97fc76f56031552bce0b0d0ade5`.
 
-This milestone proves bounded retained firmware consumption and source-bound
-normal boot. It does not start APs. Fada's backend remains unimported until its
-final PT-node ownership defect is fixed, reviewed and frozen. Its private
+That milestone proved bounded retained firmware consumption and source-bound
+normal boot. It did not start APs. Fada's backend remained unimported until its
+final PT-node ownership defect was addressed in a reviewed successor. Its private
 architecture consumer and real AP/IPI integration remain the next Task1 work.
 Per-CPU scheduler, allocators/waits/TLB, Kernel32/NT workers, Supervisor VMX,
 actual Windows98 VMM service execution and final ISO remain required Tasks2–5.
@@ -234,3 +234,86 @@ Root-approved fixture b5c49d8 was separately imported as own1bb94f1 before any
 new normal-native build. Exact pma_tests.c SHA256 is
 `6761e4cd35de1672406e01dc356303fa84773baf71096fe3fd3a15391f9fed3b`;
 the four-tick policy and Core scheduler/header/architecture are unchanged.
+
+## Normal production AP architecture, work and physical IPI milestone
+
+The single reviewed parser/bootstrap/walker now feeds the normal `main.c`
+consumer. The BSP captures actual initial CR3 before `mem_init`; admission
+requires true Multiboot metadata, initial1000, a distinct final PMM root,
+private high-kernel SGDT/SIDT and complete retained type1 RAM cover. An owning
+reader validates the actual allocation bit for every complete PML4/PDPT/PD/PT
+page, separately from the read-only ACPI firmware reader. Leaf data mappings
+are outside this table-ownership proof. The superseded5000 guard and its20-check
+control are archived, and their production/test files are removed.
+
+An installed internal resource validator executes after all private bootstrap
+and per-CPU stack allocations, but before trampoline writes or INIT. It checks
+the same common walker, exact private four-page bootstrap shape with only4096
+bytes of temporary low identity mapping, every allocated stack/context span
+and pairwise nonoverlap. The existing PCI owner supplies the BSP LAPIC mapping.
+Before INIT failure may release backend resources; after INIT all AP-visible
+pages remain pinned, including failed or late processors' resources. Private
+architecture pages are conservatively retained if later preflight fails.
+
+APs install separate GDT/IDT/TSS, boot/IRQ/DF stacks and private interrupt
+handlers. Actual SGDT/SIDT/STR, physical APIC-to-logical identity and final CR3
+are checked. AP SYSCALL is disabled because the existing BSP entry scratch is
+still global. AP interrupts do not call the UP scheduler/device handlers. BSP
+and APs perform independently checked hash work with a bidirectional progress
+barrier, then exchange serialized physical F0/F1 acknowledgements. F1 is an
+interrupt-delivery/completion probe; no translation shootdown is implemented.
+
+Fresh producer `build/smp-normal-ap-source-firmware-5/result.json` has227 exact
+source files, current fixture6761e4cd, normal production stub and machine inputs;
+its actual firmware2/4/off gates passed. It records source/tool/input stability
+and the exact captured helper bytes executed. Its receipt SHA256 is
+`36f7af6dac8c0d6a095b7fb6f46993e9e4a758e10352e42ea6965a7ddd85ad89`.
+The prior firmware-4 directory preserves the strict compile failure caused by
+the missing timer observer declaration; it launched no VM.
+
+Actual normal-main KVM2 and KVM4 receipts at `build/smp-normal-ap-native{2,4}-1`
+passed: APs use distinct real stacks/GDT/IDT/TSS and shared finalCR3=f00000;
+each AP performs two million correct hash iterations and sees real BSP work.
+BSP wake/verify acknowledgements are1 for two CPUs and3 for four; each AP has
+one actual wake and verify acknowledgement on its private IRQ stack. The exact
+resource proof runs before INIT. Bounded TCG2 and native1 controls also passed
+with the same compiled source/input bytes. Native1 issues no AP IPIs. The
+`smp=off` control passed and emits no firmware/resource/AP records.
+
+The no-IPI control observes no actual wake and fails boundedly before work.
+The withheld-verify control records actual delivery1/ack0 and component bad1.
+The returned-AP control records FAILED3, architecture-online1, actual retained
+PMM stack, restart rejection-2 and error-7. These are expected-negative control
+PASS receipts, each with `ap_component_pass=false`; none is AP-positive evidence.
+
+**The absent-ACPI whole gate remains FAIL**, preserved without retry at
+`build/smp-normal-ap-noacpi-1/result.json`, SHA256
+`4df80f4fa56c4cb3acec5d8a53e1bf3e03dc8c4ae6f9fafb2f58ed34c87c4495`.
+The AP consumer reports ACPI unavailable and allocates/releases no AP resource,
+but the existing PMA useful-work phase records168827/242 loops and fails its
+unchanged1000-loop requirement. All other checks, including the reviewed
+isolated grant4/remaining4/terminal1, pass. Final failures1/SHZ-EXIT1 remains a
+real integrated failure assigned to Core for diagnosis. The positive and
+negative control observations above do not relabel it.
+
+The AP evaluator's original helper import race is separately reproduced using
+actual copied helper bytes and a prepared successor receipt stopped at the VM
+boundary. The captured producer/helper loader now denies both persistent
+after-load replacements; the unchanged control reaches the boundary. No prior
+receipt is proved raced. Latest three controls pass in
+`build/smp-ap-runner-provenance-final-accel-4`; evaluator SHA256 is
+`86522be17a60cc54dee3da2e1257639c06a1efbb1c5312ec482e154d9961774a`.
+Existing primary KVM receipts retain their previous evaluator7e4613a9 bytes.
+Actual production descriptor-builder controls on current source pass528 checks
+under GCC and Clang ASan/UBSan in `build/smp-ap-arch-tables-current-green-4`.
+
+The frozen227-source plus normal machine-input archive is
+`build/smp-normal-ap-current-source-227/compiled-source-227.zip`, SHA256
+`ffd6e4f75d9baa86b71d0725328305ea60058e146c8b64ec0d53fda846bbdf40`.
+Historical219/221 archives, original full-SMP and missing-AP REDs, and all failed
+compile/runtime outcomes remain distinct. This is intermediate native AP
+architecture/useful-work/IPI integration. Scheduler count remains1; real
+per-CPU contexts/queues, concurrent syscalls/waits/allocator/TLB reclamation,
+Kernel32 and wrapper workers, retained UEFI/Supervisor resources and actual
+Windows98 VMM/fullboot/final ISO remain required. No canonical checkout edits
+or shared-index commits were made.

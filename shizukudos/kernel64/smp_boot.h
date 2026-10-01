@@ -24,6 +24,10 @@ typedef struct __attribute__((aligned(64))) shz_smp_cpu {
 } shz_smp_cpu_t;
 extern shz_smp_cpu_t shz_smp_cpus[SHZ_SMP_MAX_CPUS];
 typedef void (*shz_smp_ap_entry_fn)(unsigned cpu);
+typedef int (*shz_smp_resource_check_fn)(unsigned count,uint64_t bootstrap_cr3);
+/* Optional component seam; the normal production consumer installs its owning
+ * validator before startup. It runs after all allocations and before INIT. */
+int shz_smp_boot_set_resource_check(shz_smp_resource_check_fn check);
 
 /* This starts real native APs, but does not grant them access to the UP scheduler.
  * The supplied entry must initialize CPU-private arch/scheduler state before

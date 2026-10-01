@@ -11,8 +11,7 @@ REPO = Path(__file__).resolve().parents[2]
 PATHS = ["shizukudos/kernel64/standalone/native_firmware.h", "shizukudos/kernel64/standalone/boot32.c",
          "shizukudos/kernel64/standalone/memholes.h", "shizukudos/tests/test_k64_native_firmware.c",
          "shizukudos/tests/test_k64_native_firmware.py", "shizukudos/kernel64/standalone/qemu_firmware.h",
-         "shizukudos/tests/test_k64_qemu_firmware.c", "shizukudos/kernel64/cpu_boot_contract.h",
-         "shizukudos/tests/test_k64_ap_boot_contract.c", "shizukudos/kernel64/cpu_firmware.c",
+         "shizukudos/tests/test_k64_qemu_firmware.c", "shizukudos/kernel64/cpu_firmware.c",
          "shizukudos/kernel64/cpu_firmware.h"]
 
 
@@ -34,7 +33,7 @@ def main():
     runs = []
     for mode, compiler, flags in (("gcc", "gcc", ["-O2"]), ("asan-ubsan", "clang", ["-O1", "-g",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-fno-omit-frame-pointer"])):
-        for source in (PATHS[3], PATHS[6], PATHS[8]):
+        for source in (PATHS[3], PATHS[6]):
             name = Path(source).stem + "-" + mode
             binary = out / name
             command = [compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", *flags,
