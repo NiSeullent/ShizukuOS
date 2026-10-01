@@ -22,6 +22,31 @@ DEFAULT_OVMF_VARS = _first_existing(["/usr/share/edk2/ovmf/OVMF_VARS.fd", "/usr/
                                      "/usr/share/OVMF/OVMF_VARS.fd"], "/usr/share/edk2/ovmf/OVMF_VARS.fd")
 
 
+def run_bounded(command, timeout):
+    """Run QEMU with a deadline while draining its merged output pipe.
+
+    communicate() consumes output while the process is running, so a verbose
+    emulator cannot block on a full pipe before the timeout is checked. After
+    a timeout, kill and reap the process and retain its partial output.
+    Returns (returncode, output_text, timed_out). Launch errors propagate to
+    the caller, which can record an unavailable test as BLOCKED.
+    """
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    timed_out = False
+    try:
+        try:
+            output, _ = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.kill()
+            output, _ = proc.communicate()
+    except BaseException:
+        proc.kill()
+        proc.communicate()
+        raise
+    return proc.returncode, output.decode(errors="replace"), timed_out
+
+
 class QMP:
     def __init__(self, path, timeout=10):
         deadline = time.time() + timeout

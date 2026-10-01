@@ -17,15 +17,16 @@ MessageWindow) and stops ("Your computer has run out of resources") when that fa
 Default command (ELECTRON_TARGET.md milestone M2):
     chrome.exe --headless --no-sandbox --disable-gpu --single-process --dump-dom file:///D:/M2/M2.HTML
 The fixture page contains a script, so the expected DOM line `<p id="m">ShizukuDOS M2 probe 42</p>` only exists if V8
-ran it. The run PASSES only when the serial log contains that line AND chrome.exe exited with code 0 AND no process
-fault was reported. Anything else is a FAIL, and the result names the furthest point reached, in this order of
-precedence: loader failure (an import that did not resolve), a fatal exception (process killed by the kernel), a
+ran it. The run PASSES only when that nonempty line appears after autorun starts, chrome.exe ended by exiting with
+code 0, faulted is explicitly false, no exception/fatal/loader failure or timeout occurred, and QEMU exited 0 or 1
+(the normal isa-debug-exit convention). Anything else is a FAIL, and the result names the furthest point reached,
+in this order of precedence: loader failure (an import that did not resolve), a fatal exception (process killed by the kernel), a
 Chromium FATAL/CHECK line, the first kernel32 function that failed explicitly because a feature is not implemented
 ("K32 unsupported: ..."), the exit code, or the timeout. Chromium's own log lines (--enable-logging=stderr) are copied
 into the result as evidence.
 
 The result is written to <out>/result.json and printed. Exit status 0 = PASS, 1 = FAIL (the expected state until M2
-is reached), 2 = the run could not be performed (missing inputs).
+is reached), 2 = BLOCKED (missing inputs/tools/QEMU or a host preparation/launch error). All outcomes persist result.json.
 """
 import argparse
 import json
@@ -68,13 +69,18 @@ def put_file(image, data, name, work):
     run(["mcopy", "-o", "-i", str(image), str(host), "::" + name], env=disk.mtools_env(), capture=True)
 
 
+def autorun_lines(serial):
+    """Evidence belonging to the autorun, excluding earlier kernel self-test output."""
+    lines = serial.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.startswith("K64 autorun: starting")), None)
+    return lines[start + 1:] if start is not None else []
+
+
 def classify(serial):
     """Furthest point reached, from the serial log after the autorun start (see the module docstring for the precedence).
     A runtime LoadLibrary that fails ("K64 ldr: X not loaded: LoadLibrary needs ...") is reported separately: programs
     probe for optional DLLs and continue without them, so it is not a failure by itself."""
-    all_lines = serial.splitlines()
-    start = next((i for i, l in enumerate(all_lines) if l.startswith("K64 autorun: starting")), len(all_lines))
-    lines = all_lines[start:]
+    lines = autorun_lines(serial)
     res = {}
     ldr_all = [l for l in lines if re.search(r"K64 ldr: .*(not loaded|imports|rejected|failed|cannot|lacks)", l)]
     runtime_misses = [l for l in ldr_all if ": LoadLibrary needs " in l]
@@ -89,10 +95,16 @@ def classify(serial):
     res["chromium_fatal"] = fatal[:20]
     res["unsupported_calls"] = unsup[:60]
     res["autorun_result"] = auto[-1] if auto else None
-    m = re.search(r"K64 autorun: result (\w[\w-]*) exit=([0-9a-f]+) faulted=(\d)", auto[-1]) if auto else None
+    # Accept the actual autorun format (including its optional reap/timing suffix), not a valid-looking prefix
+    # of a malformed line. In particular, faulted must be exactly 0 or 1, never an unknown or truncated value.
+    m = re.fullmatch(r"K64 autorun: result ([\w-]+) exit=([0-9a-fA-F]+) faulted=([01])"
+                     r"(?: reaped=-?\d+(?: \(\d+ thread\(s\) still alive\))? after \d+ ms)?",
+                     auto[-1]) if auto else None
     res["exit_code"] = int(m.group(2), 16) if m else None
     res["faulted"] = bool(int(m.group(3))) if m else None
     res["ended_by"] = m.group(1) if m else None
+    res["guest_timed_out"] = res["ended_by"] == "timeout" or any(
+        line.startswith("K64 autorun: timeout") for line in lines)
     if ldr:
         res["furthest"] = "loader: " + ldr[0]
     elif killed:
@@ -108,6 +120,30 @@ def classify(serial):
     return res
 
 
+def evaluate(serial, expected, qemu_returncode, timed_out):
+    """Combine guest evidence with the host outcome; unknown completion fields cannot pass."""
+    res = classify(serial)
+    expect_seen = bool(expected and expected.strip() and expected in "\n".join(autorun_lines(serial)))
+    conditions = [
+        (bool(expected and expected.strip()), "expected marker is empty"),
+        (expect_seen, "expected marker not seen after autorun start"),
+        (res["ended_by"] == "exited", "autorun did not end by exiting"),
+        (res["exit_code"] == 0, "autorun exit code is not zero"),
+        (res["faulted"] is False, "autorun faulted is not explicitly false"),
+        (not res["exceptions"], "guest exception reported"),
+        (not res["chromium_fatal"], "Chromium fatal line reported"),
+        (not res["loader_failures"], "loader failure reported"),
+        (not res["guest_timed_out"], "guest autorun timed out"),
+        (not timed_out, "host QEMU timeout"),
+        # isa-debug-exit encodes a guest write of zero as host status 1; ordinary clean shutdown is status 0.
+        (qemu_returncode in (0, 1), "QEMU exit status is not 0 or 1"),
+    ]
+    failures = [reason for ok, reason in conditions if not ok]
+    return {**res, "status": "FAIL" if failures else "PASS", "expected_line": expected,
+            "expected_line_seen": expect_seen, "qemu_returncode": qemu_returncode, "qemu_timed_out": timed_out,
+            "failure_reasons": failures}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--qemu", default=qemu.DEFAULT_QEMU)
@@ -115,7 +151,7 @@ def main():
     ap.add_argument("--memory", default="3072")
     ap.add_argument("--display", choices=("vga", "none"), default="vga",
                     help="vga: a Bochs VBE adapter so the Win32 window manager is active (default); none: no display device")
-    ap.add_argument("--timeout", type=int, default=1800, help="host-side QEMU timeout (s)")
+    ap.add_argument("--timeout", default=1800, help="host-side QEMU timeout (positive integer seconds)")
     ap.add_argument("--guest-timeout", type=int, default=1200, help="seconds the guest lets chrome.exe run")
     ap.add_argument("--chromium", default=str(DEFAULT_TREE), help="chrome-win tree (read-only)")
     ap.add_argument("--chromium-image", default=str(SCRATCH / "k64-chromium-fat32.img"))
@@ -125,33 +161,14 @@ def main():
     ap.add_argument("--no-trace", action="store_true",
                     help="do not pass shz.k32trace and shz.exctrace (kernel32 explicit-failure and GetProcAddress-miss lines, first-chance hardware exceptions)")
     args = ap.parse_args()
+    # Resolve --out before preflight so even an unavailable run leaves a discoverable result.
+    out = Path(args.out).resolve()
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
-    for f in (stub, kernel, initrd):
-        if not f.exists():
-            print(f"missing {f}: run shizukudos/kbuild.py and shizukudos/win64/build.py first")
-            return 2
     tree = Path(args.chromium)
-    if not (tree / "chrome.exe").exists():
-        print(f"no Chromium tree at {tree} (chrome.exe missing)")
-        return 2
-    for tool in ("mkfs.vfat", "mcopy", "mmd"):
-        if not shutil.which(tool):
-            print(f"required tool missing: {tool}")
-            return 2
-    accel = ("kvm" if Path("/dev/kvm").exists() else "tcg") if args.accel == "auto" else args.accel
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
     image = Path(args.chromium_image)
-    image.parent.mkdir(parents=True, exist_ok=True)
-    t0 = time.time()
-    listing = disk.build_chromium_image(tree, image)
-    control = (f"image=D:\\chrome-win\\chrome.exe\r\ncmdline=chrome.exe {args.args}\r\ncwd=D:\\chrome-win\r\n"
-               f"timeout={args.guest_timeout}\r\n").encode()
-    put_file(image, control, "K64RUN.TXT", out)
-    put_file(image, M2_PAGE, "M2/M2.HTML", out)
-    image_s = round(time.time() - t0, 1)
+    command_line = f"chrome.exe {args.args}"
+    accel = ("kvm" if Path("/dev/kvm").exists() else "tcg") if args.accel == "auto" else args.accel
     serial_path = out / "serial.log"
-    serial_path.unlink(missing_ok=True)
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
            *(["-vga", "std"] if args.display == "vga" else []),
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
@@ -159,44 +176,97 @@ def main():
            "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
            "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
            "-device", "ide-hd,drive=d0,bus=ahci0.0"]
-    started = time.time()
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    try:
-        proc.wait(timeout=args.timeout)
-        timed_out = False
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        timed_out = True
-    seconds = round(time.time() - started, 1)
-    qemu_out = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
-    serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
-    res = classify(serial)
-    chrome_lines = [l for l in serial.splitlines() if re.match(r"\[(win64|user) chrome\.exe pid \d+\]", l)]
-    expect_seen = args.expect in serial
-    ok = expect_seen and res["exit_code"] == 0 and not res["faulted"] and not res["exceptions"] and not timed_out
+    # Keep the existing schema present on BLOCKED as well as completed runs. Unknown results stay None.
     record = {
         "profile": "kernel64-standalone + Chromium chrome-win on AHCI FAT32 (D:), autorun", "accel": accel,
-        "status": "PASS" if ok else "FAIL", "expected_line": args.expect, "expected_line_seen": expect_seen,
-        "qemu_timed_out": timed_out, "seconds": seconds, "image_prepare_s": image_s,
-        "image": str(image), "tree_files": len(listing), "command": cmd, "chrome_args": args.args,
-        **res,
-        "chrome_output_lines": chrome_lines[:400], "chrome_output_line_count": len(chrome_lines),
-        "serial_tail": serial[-6000:], "qemu_output": qemu_out[-1500:], "utc": shzlib.utc_now(), "git": shzlib.git_state(),
+        **evaluate("", args.expect, None, False),
+        "status": "BLOCKED", "seconds": 0.0, "image_prepare_s": 0.0,
+        "image": str(image), "tree_files": 0, "command": cmd, "chrome_args": args.args,
+        "chrome_output_lines": [], "chrome_output_line_count": 0,
+        "serial_tail": "", "qemu_output": "", "utc": shzlib.utc_now(), "git": {},
+        "missing_prerequisites": [], "blocked_reason": None,
     }
-    shzlib.write_json(out / "result.json", record)
-    print(f"  status: {record['status']} ({seconds} s, accel={accel})")
-    print(f"  furthest point: {res['furthest']}")
-    print(f"  autorun: {res['autorun_result']}")
-    print(f"  expected line seen: {expect_seen}")
+    stage = "preflight"
+    started = None
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        missing = [f"missing input: {f}" for f in (stub, kernel, initrd) if not f.is_file()]
+        if not (tree / "chrome.exe").is_file():
+            missing.append(f"missing Chromium input: {tree / 'chrome.exe'}")
+        missing.extend(f"required tool missing: {tool}" for tool in ("mkfs.vfat", "mcopy", "mmd")
+                       if not shutil.which(tool))
+        if not shutil.which(args.qemu):
+            missing.append(f"QEMU executable missing or not executable: {args.qemu}")
+        if not args.expect or not args.expect.strip():
+            missing.append("expected marker is empty (--expect)")
+        timeout_value = args.timeout
+        try:
+            args.timeout = int(timeout_value)
+            if args.timeout <= 0:
+                raise ValueError("not positive")
+        except (TypeError, ValueError):
+            missing.append(f"invalid host timeout (--timeout): {timeout_value!r}; require positive integer seconds")
+        # kernel64/autorun.c stores cmdline in char[512] and silently truncates beyond 511 bytes.
+        command_bytes = len(command_line.encode())
+        if command_bytes > 511:
+            missing.append(f"Chromium command line is {command_bytes} encoded bytes; autorun limit is 511")
+        record["missing_prerequisites"] = missing
+        record["git"] = shzlib.git_state()
+        if missing:
+            record["blocked_reason"] = "; ".join(missing)
+            record["furthest"] = "preflight blocked: " + record["blocked_reason"]
+        else:
+            stage = "image preparation"
+            t0 = time.time()
+            image.parent.mkdir(parents=True, exist_ok=True)
+            listing = disk.build_chromium_image(tree, image)
+            record["tree_files"] = len(listing)
+            control = (f"image=D:\\chrome-win\\chrome.exe\r\ncmdline={command_line}\r\ncwd=D:\\chrome-win\r\n"
+                       f"timeout={args.guest_timeout}\r\n").encode()
+            put_file(image, control, "K64RUN.TXT", out)
+            put_file(image, M2_PAGE, "M2/M2.HTML", out)
+            record["image_prepare_s"] = round(time.time() - t0, 1)
+            stage = "QEMU launch/collection"
+            serial_path.unlink(missing_ok=True)
+            started = time.time()
+            rc, qemu_out, timed_out = qemu.run_bounded(cmd, args.timeout)
+            record.update(qemu_returncode=rc, qemu_timed_out=timed_out, qemu_output=qemu_out[-1500:],
+                          seconds=round(time.time() - started, 1))
+            stage = "serial log collection"
+            serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
+            record["serial_tail"] = serial[-6000:]
+            record.update(evaluate(serial, args.expect, rc, timed_out))
+            chrome_lines = [l for l in autorun_lines(serial) if re.match(r"\[(win64|user) chrome\.exe pid \d+\]", l)]
+            record.update(chrome_output_lines=chrome_lines[:400], chrome_output_line_count=len(chrome_lines))
+    except (OSError, RuntimeError, subprocess.SubprocessError, OverflowError) as exc:
+        record["status"] = "BLOCKED"
+        record["blocked_reason"] = f"{stage}: {type(exc).__name__}: {exc}"
+        record["furthest"] = record["blocked_reason"]
+        if started is not None:
+            record["seconds"] = round(time.time() - started, 1)
+    # A writable --out is needed to persist any evidence; report that failure explicitly if it is unavailable.
+    try:
+        shzlib.write_json(out / "result.json", record)
+    except OSError as exc:
+        print(f"  status: BLOCKED (cannot write {out / 'result.json'}: {exc})")
+        return 2
+    print(f"  status: {record['status']} ({record['seconds']} s, accel={accel})")
+    print(f"  furthest point: {record['furthest']}")
+    print(f"  autorun: {record['autorun_result']}")
+    print(f"  expected line seen: {record['expected_line_seen']}")
+    print(f"  QEMU exit status: {record['qemu_returncode']}")
+    if record["blocked_reason"]:
+        print(f"  blocked: {record['blocked_reason']}")
+    for reason in record["failure_reasons"] if record["status"] == "FAIL" else []:
+        print(f"  [failure] {reason}")
     for k in ("loader_failures", "exceptions", "chromium_fatal", "unsupported_calls"):
-        for l in res[k][:8]:
+        for l in record[k][:8]:
             print(f"  [{k}] {l}")
-    print(f"  chrome.exe output lines: {len(chrome_lines)} (first 20 below; all in result.json)")
-    for l in chrome_lines[:20]:
+    print(f"  chrome.exe output lines: {record['chrome_output_line_count']} (first 20 below; all in result.json)")
+    for l in record["chrome_output_lines"][:20]:
         print("    " + l[:300])
     print(f"  result: {out / 'result.json'}")
-    return 0 if ok else 1
+    return {"PASS": 0, "FAIL": 1, "BLOCKED": 2}[record["status"]]
 
 
 if __name__ == "__main__":
