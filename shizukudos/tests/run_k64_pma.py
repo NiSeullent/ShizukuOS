@@ -15,8 +15,10 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE.parent / "tools"))
 sys.path.insert(0, str(HERE))
+import kbuild  # noqa: E402 -- current source inventory; no build executes
 import qemu  # noqa: E402
 import shzlib  # noqa: E402
 from run_k64_standalone import check, parse  # noqa: E402
@@ -113,6 +115,10 @@ def main():
     sources = receipt.get("sources_sha256", {})
     if not sources:
         ap.error("build receipt has no source input hashes")
+    current_closure = kbuild.source_hashes()
+    missing = sorted(current_closure.keys() - sources.keys())
+    if missing:
+        ap.error("build receipt missing current kernel source inputs: " + ", ".join(missing))
     for name, expected in sources.items():
         path = (shzlib.REPO / name).resolve()
         if not path.is_relative_to(shzlib.REPO.resolve()) or not path.is_file() or shzlib.sha256_file(path) != expected:
@@ -142,7 +148,8 @@ def main():
     receipt_after = shzlib.sha256_file(receipt_path) if receipt_path.is_file() else None
     sources_after = {name: shzlib.sha256_file(shzlib.REPO / name) if (shzlib.REPO / name).is_file() else None
                      for name in sources}
-    sources_stable = sources == sources_after
+    current_closure_after = kbuild.source_hashes()
+    sources_stable = sources == sources_after and current_closure == current_closure_after
     runner_after = shzlib.sha256_file(Path(__file__))
     inputs_stable = inputs_before == inputs_after and receipt_before == receipt_after and sources_stable and runner_before == runner_after
     checks.append(check("guest artifacts and their source-bound receipt stayed unchanged", inputs_stable,
@@ -159,6 +166,8 @@ def main():
               "runner_sha256": runner_before, "runner_sha256_after": runner_after,
               "serial_sha256": shzlib.sha256_file(serial_path) if serial_path.is_file() else None,
               "build_sources_sha256": sources, "build_sources_stable": sources_stable,
+              "current_kernel_sources_sha256": current_closure,
+              "current_kernel_sources_sha256_after": current_closure_after,
               "source_sha256_at_run": sources_at_launch, "source_sha256_at_launch": sources_at_launch,
               "source_sha256_after": {str(p.relative_to(shzlib.REPO)): sources_after.get(str(p.relative_to(shzlib.REPO))) for p in source_paths},
               "utc": shzlib.utc_now(), "git": shzlib.git_state()}
