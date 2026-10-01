@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Public-source HOST arithmetic/queue evidence. Results are logs; no binary/media publication.
+name: Kernel32 finite deadline host proof
+
+'on':
+  push:
+    branches: [codex/theme-integration-6970]
+    paths:
+      - .github/workflows/k32-deadlines-6970.yml
+      - shizukudos/tests/test_sched_deadlines_k32.c
+      - shizukudos/tests/test_sched_deadlines_k32.py
+      - shizukudos/kernel32/sched.c
+      - shizukudos/kernel32/k32.h
+      - shizukudos/kernel32/start.asm
+      - shizukudos/kcommon/khc.h
+      - shizukudos/abi/shz_abi.h
+      - shizukudos/abi/shz_sched_deadline.h
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k32-deadlines-6970-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deadlines:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Bind source revision, phase and fresh proof path
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import os, re, subprocess
+          root = Path.cwd().resolve()
+          expected = os.environ['GITHUB_SHA']
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert re.fullmatch(r'[0-9a-f]{40}', expected) and actual == expected
+          run_id = os.environ['GITHUB_RUN_ID']
+          attempt = os.environ['GITHUB_RUN_ATTEMPT']
+          assert run_id.isdigit() and attempt.isdigit()
+          phase = 'green' if (root / 'shizukudos/abi/shz_sched_deadline.h').is_file() else 'red'
+          proof = root / 'build/k32-deadline-6970' / f'actions-{run_id}-{attempt}-{phase}'
+          assert not proof.exists()
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write(f'PMA_DEADLINE_PHASE={phase}\nPMA_DEADLINE_PROOF={proof}\n')
+          print(f'Exact checkout {actual}; phase {phase}; proof {proof}')
+          PYTHON
+
+      - name: Execute actual production C with guarded resource admission
+        run: |
+          python3 -B shizukudos/tests/test_sched_deadlines_k32.py             --phase "$PMA_DEADLINE_PHASE" --output-root "$PMA_DEADLINE_PROOF"
+
+      - name: Record the actual bounded receipt and assertions
+        if: always()
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import hashlib, json, os, stat
+          root = Path.cwd().resolve()
+          proof_value = os.environ.get('PMA_DEADLINE_PROOF')
+          if not proof_value:
+              print('Proof setup did not finish; no result adopted.')
+              raise SystemExit(0)
+          proof = Path(proof_value)
+          assert proof.parent == root / 'build/k32-deadline-6970'
+          receipt = proof / 'result.json'
+          if not receipt.exists():
+              print('No receipt: admission/earlier execution did not establish a result.')
+              raise SystemExit(0)
+          assert not receipt.is_symlink()
+          info = receipt.stat()
+          assert stat.S_ISREG(info.st_mode) and info.st_size <= 65536
+          data = receipt.read_bytes()
+          result = json.loads(data)
+          print('Receipt SHA256:', hashlib.sha256(data).hexdigest())
+          print(data.decode(), end='')
+          incomplete_failure = (
+              set(result) == {'result', 'receipt_accounting_verified', 'error'}
+              and result['result'] == 'FAIL'
+              and result['receipt_accounting_verified'] is False
+              and isinstance(result['error'], str)
+          )
+          if incomplete_failure:
+              print('Incomplete failure receipt; no successful result adopted.')
+          else:
+              assert result['native_execution_verified'] is False
+              assert result['windows98_integration_verified'] is False
+          for name in ('host-run.stdout', 'host-run.stderr', 'sanitizer-run.stdout', 'sanitizer-run.stderr'):
+              path = proof / name
+              if path.exists():
+                  assert not path.is_symlink() and path.stat().st_size <= 262144
+                  print(f'Actual {name}:')
+                  print(path.read_text(), end='')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f"Kernel32 production C verdict: {result['result']}\n\n")
+              stream.write('HOST hardware-boundary fixture; actual Windows98/VMM, assembly switching and full counter rollover remain unverified.\n')
+          PYTHON
