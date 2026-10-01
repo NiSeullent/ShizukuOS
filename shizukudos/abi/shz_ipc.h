@@ -62,15 +62,18 @@ SHZ_IPC_INLINE int shz_range_ok(uint64_t offset, uint64_t length, uint64_t limit
 /* ------------------------------------------------------------------ rings */
 SHZ_IPC_INLINE size_t shz_ring_bytes(uint32_t slot_count)
 {
-    return sizeof(shz_ring_hdr_t) + (size_t)slot_count * SHZ_MSG_SLOT_SIZE;
+    const uint64_t bytes = sizeof(shz_ring_hdr_t) + (uint64_t)slot_count * SHZ_MSG_SLOT_SIZE;
+    return bytes <= SIZE_MAX ? (size_t)bytes : 0; /* zero denotes an unrepresentable 32-bit size */
 }
 
 SHZ_IPC_INLINE int shz_ring_init(void *base, size_t bytes, uint32_t slot_count)
 {
     shz_ring_hdr_t *r = (shz_ring_hdr_t *)base;
-    if (!base || slot_count < 2 || (slot_count & (slot_count - 1)) || bytes < shz_ring_bytes(slot_count))
+    const size_t needed = shz_ring_bytes(slot_count);
+    if (!base || (uintptr_t)base % __alignof__(shz_msg_hdr_t) ||
+        slot_count < 2 || (slot_count & (slot_count - 1)) || !needed || bytes < needed)
         return SHZ_E_INVALID;
-    SHZ_IPC_MEMSET(base, 0, shz_ring_bytes(slot_count));
+    SHZ_IPC_MEMSET(base, 0, needed);
     r->slot_count = slot_count;
     r->slot_size = SHZ_MSG_SLOT_SIZE;
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -85,8 +88,9 @@ SHZ_IPC_INLINE uint8_t *shz_ring_slot(shz_ring_hdr_t *r, uint32_t index)
 
 SHZ_IPC_INLINE int shz_ring_valid(const shz_ring_hdr_t *r)
 {
-    return r && r->magic == SHZ_RING_MAGIC && r->slot_size == SHZ_MSG_SLOT_SIZE && r->slot_count >= 2 &&
-           !(r->slot_count & (r->slot_count - 1));
+    return r && !((uintptr_t)r % __alignof__(shz_msg_hdr_t)) &&
+           r->magic == SHZ_RING_MAGIC && r->slot_size == SHZ_MSG_SLOT_SIZE && r->slot_count >= 2 &&
+           !(r->slot_count & (r->slot_count - 1)) && shz_ring_bytes(r->slot_count);
 }
 
 SHZ_IPC_INLINE uint32_t shz_ring_count(const shz_ring_hdr_t *r)
@@ -195,25 +199,50 @@ SHZ_IPC_INLINE int shz_ring_pop(shz_ring_hdr_t *r, shz_msg_hdr_t *out, void *pay
 
 SHZ_IPC_INLINE uint32_t shz_pool_blocks(const shz_channel_hdr_t *c) { return (uint32_t)(c->pool_size / SHZ_POOL_BLOCK); }
 
+SHZ_IPC_INLINE int shz_channel_has_domain(const shz_channel_hdr_t *c, uint32_t domain)
+{
+    return c && domain > SHZ_DOM_NONE && domain < SHZ_DOM_MAX &&
+           (domain == c->domain_a || domain == c->domain_b);
+}
+
 /* Layout: [channel hdr 128][owner table][ring a->b][ring b->a][pool, 4 KiB blocks]. The owner
- * table has one byte per pool block: 0 = free, else the owning domain id. */
+ * table has one byte per pool block: 0 = free, else one of the two domain ids.
+ * Initialization requires exclusive ownership of accessible, naturally aligned
+ * storage. Header geometry is immutable until both peers stop and reinitialize. */
 SHZ_IPC_INLINE int shz_channel_init(void *base, size_t bytes, uint32_t channel_id, uint32_t dom_a, uint32_t dom_b,
                                     uint32_t slot_count, uint32_t generation)
 {
     shz_channel_hdr_t *c = (shz_channel_hdr_t *)base;
     const size_t ring = shz_ring_bytes(slot_count);
-    size_t pool_off, table_bytes, blocks;
-    if (!base || bytes < 65536 || (slot_count & (slot_count - 1)) || slot_count < 2)
+    size_t pool_off, table_bytes, blocks, padding;
+    if (!base || (uintptr_t)base % __alignof__(shz_channel_hdr_t) || bytes < 65536 ||
+        channel_id >= SHZ_MAX_CHANNELS || dom_a == SHZ_DOM_NONE || dom_a >= SHZ_DOM_MAX ||
+        dom_b == SHZ_DOM_NONE || dom_b >= SHZ_DOM_MAX || dom_a == dom_b ||
+        (slot_count & (slot_count - 1)) || slot_count < 2)
         return SHZ_E_INVALID;
+    /* Check representability and both rings before subtracting their bytes.
+     * No failed geometry check may clear even the channel header. */
+    if (!ring || ring > (bytes - sizeof *c) / 2 ||
+        bytes - 1 > UINTPTR_MAX - (uintptr_t)base)
+        return SHZ_E_RANGE;
     /* first pass: assume pool starts after both rings and a table sized for the remainder */
     blocks = (bytes - sizeof *c - 2 * ring) / (SHZ_POOL_BLOCK + 1);
-    table_bytes = (blocks + 63) & ~(size_t)63;
-    pool_off = (sizeof *c + table_bytes + 2 * ring + SHZ_POOL_BLOCK - 1) & ~(size_t)(SHZ_POOL_BLOCK - 1);
-    if (pool_off >= bytes)
+    if (!blocks || blocks > UINT32_MAX || blocks > SIZE_MAX - 63)
         return SHZ_E_RANGE;
+    table_bytes = (blocks + 63) & ~(size_t)63;
+    pool_off = sizeof *c + 2 * ring;
+    if (table_bytes > bytes - pool_off)
+        return SHZ_E_RANGE;
+    pool_off += table_bytes;
+    padding = (SHZ_POOL_BLOCK - pool_off % SHZ_POOL_BLOCK) % SHZ_POOL_BLOCK;
+    if (padding > bytes - pool_off)
+        return SHZ_E_RANGE;
+    pool_off += padding;
     blocks = (bytes - pool_off) / SHZ_POOL_BLOCK;
     if (blocks > table_bytes)
         blocks = table_bytes;
+    if (!blocks || blocks > UINT32_MAX)
+        return SHZ_E_RANGE;
     SHZ_IPC_MEMSET(base, 0, pool_off);
     c->abi_major = SHZ_ABI_MAJOR;
     c->abi_minor = SHZ_ABI_MINOR;
@@ -236,18 +265,47 @@ SHZ_IPC_INLINE int shz_channel_init(void *base, size_t bytes, uint32_t channel_i
 
 SHZ_IPC_INLINE int shz_channel_valid(const shz_channel_hdr_t *c, size_t bytes)
 {
-    return c && c->magic == SHZ_CHANNEL_MAGIC && c->abi_major == SHZ_ABI_MAJOR &&
-           shz_range_ok(c->ring_ab_offset, shz_ring_bytes(c->slot_count), bytes) &&
-           shz_range_ok(c->ring_ba_offset, shz_ring_bytes(c->slot_count), bytes) &&
-           shz_range_ok(c->pool_offset, c->pool_size, bytes);
+    size_t ring;
+    uint64_t owners;
+    const shz_ring_hdr_t *ab, *ba;
+    if (!c || bytes < sizeof *c || (uintptr_t)c % __alignof__(shz_channel_hdr_t) ||
+        bytes - 1 > UINTPTR_MAX - (uintptr_t)c ||
+        c->magic != SHZ_CHANNEL_MAGIC || c->abi_major != SHZ_ABI_MAJOR ||
+        c->channel_id >= SHZ_MAX_CHANNELS ||
+        !shz_channel_has_domain(c, c->domain_a) || !shz_channel_has_domain(c, c->domain_b) ||
+        c->domain_a == c->domain_b || c->slot_count < 2 || (c->slot_count & (c->slot_count - 1)))
+        return 0;
+    ring = shz_ring_bytes(c->slot_count);
+    if (!ring || !c->pool_size || c->pool_size % SHZ_POOL_BLOCK ||
+        c->pool_offset % SHZ_POOL_BLOCK ||
+        c->ring_ab_offset % __alignof__(shz_msg_hdr_t) ||
+        c->ring_ba_offset % __alignof__(shz_msg_hdr_t) ||
+        !shz_range_ok(c->ring_ab_offset, ring, bytes) ||
+        !shz_range_ok(c->ring_ba_offset, ring, bytes) ||
+        !shz_range_ok(c->pool_offset, c->pool_size, bytes))
+        return 0;
+    owners = c->pool_size / SHZ_POOL_BLOCK;
+    /* Bounds above make the additions safe. Enforce the documented ordered
+     * layout so pool ownership bytes cannot alias either ring or the header. */
+    if (owners > UINT32_MAX || c->ring_ab_offset < sizeof *c + owners ||
+        c->ring_ba_offset < c->ring_ab_offset + ring || c->pool_offset < c->ring_ba_offset + ring)
+        return 0;
+    ab = (const shz_ring_hdr_t *)((const uint8_t *)c + c->ring_ab_offset);
+    ba = (const shz_ring_hdr_t *)((const uint8_t *)c + c->ring_ba_offset);
+    return shz_ring_valid(ab) && shz_ring_valid(ba) &&
+           ab->slot_count == c->slot_count && ba->slot_count == c->slot_count;
 }
 
 SHZ_IPC_INLINE shz_ring_hdr_t *shz_channel_ring_tx(void *base, const shz_channel_hdr_t *c, uint32_t self)
 {
+    if (!base || !shz_channel_has_domain(c, self))
+        return NULL;
     return (shz_ring_hdr_t *)((uint8_t *)base + (self == c->domain_a ? c->ring_ab_offset : c->ring_ba_offset));
 }
 SHZ_IPC_INLINE shz_ring_hdr_t *shz_channel_ring_rx(void *base, const shz_channel_hdr_t *c, uint32_t self)
 {
+    if (!base || !shz_channel_has_domain(c, self))
+        return NULL;
     return (shz_ring_hdr_t *)((uint8_t *)base + (self == c->domain_a ? c->ring_ba_offset : c->ring_ab_offset));
 }
 
@@ -260,10 +318,10 @@ SHZ_IPC_INLINE volatile uint8_t *shz_pool_owner_table(void *base) { return (vola
 SHZ_IPC_INLINE uint64_t shz_pool_alloc(void *base, const shz_channel_hdr_t *c, uint32_t owner, uint32_t len)
 {
     volatile uint8_t *table = shz_pool_owner_table(base);
-    const uint32_t need = (len + SHZ_POOL_BLOCK - 1) / SHZ_POOL_BLOCK;
+    const uint32_t need = (uint32_t)(((uint64_t)len + SHZ_POOL_BLOCK - 1) / SHZ_POOL_BLOCK);
     const uint32_t total = shz_pool_blocks(c);
     uint32_t i, run = 0;
-    if (!len || !need || need > total || owner == 0 || owner > 255)
+    if (!len || !need || need > total || !shz_channel_has_domain(c, owner))
         return 0;
     for (i = 0; i < total; ++i) {
         uint8_t expect = 0;
@@ -296,9 +354,11 @@ SHZ_IPC_INLINE int shz_pool_release(void *base, const shz_channel_hdr_t *c, uint
                                     uint32_t len, uint32_t new_owner)
 {
     volatile uint8_t *table = shz_pool_owner_table(base);
-    const uint32_t need = (len + SHZ_POOL_BLOCK - 1) / SHZ_POOL_BLOCK;
+    const uint32_t need = (uint32_t)(((uint64_t)len + SHZ_POOL_BLOCK - 1) / SHZ_POOL_BLOCK);
     uint64_t first;
     uint32_t i;
+    if (!shz_channel_has_domain(c, owner) || (new_owner && !shz_channel_has_domain(c, new_owner)))
+        return SHZ_E_DENIED;
     if (!len || offset < c->pool_offset || ((offset - c->pool_offset) % SHZ_POOL_BLOCK))
         return SHZ_E_RANGE;
     first = (offset - c->pool_offset) / SHZ_POOL_BLOCK;
@@ -322,12 +382,15 @@ SHZ_IPC_INLINE int shz_pool_check(void *base, const shz_channel_hdr_t *c, const 
     uint32_t i, need;
     if (!m->buffer_length)
         return SHZ_OK;
+    if (!shz_channel_has_domain(c, expected_owner))
+        return SHZ_E_DENIED;
     if (m->buffer_offset < c->pool_offset)
         return SHZ_E_RANGE;
     if (!shz_range_ok(m->buffer_offset - c->pool_offset, m->buffer_length, c->pool_size))
         return SHZ_E_RANGE;
     first = (m->buffer_offset - c->pool_offset) / SHZ_POOL_BLOCK;
-    need = (uint32_t)((m->buffer_offset - c->pool_offset) % SHZ_POOL_BLOCK + m->buffer_length + SHZ_POOL_BLOCK - 1) / SHZ_POOL_BLOCK;
+    need = (uint32_t)(((m->buffer_offset - c->pool_offset) % SHZ_POOL_BLOCK +
+                       (uint64_t)m->buffer_length + SHZ_POOL_BLOCK - 1) / SHZ_POOL_BLOCK);
     for (i = 0; i < need; ++i)
         if (table[first + i] != expected_owner)
             return SHZ_E_DENIED;
