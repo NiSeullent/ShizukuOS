@@ -116,3 +116,69 @@ peer Kernel32 deadline changes; real DOS-to-VMM/service-domain connections;
 actual Windows 98 cold boot and native application requests; integrated SMP.
 General concurrent process-slot reservation and other allocator error paths
 are outside this bounded startup-publication fix.
+
+## Source-bound runner follow-up
+
+The reviewer identified that the earlier runner, when invoked without
+`--build`, could launch artifacts without validating their build receipt. That
+gap is now closed in `run_k32_publication_guest.py`; no kernel files were changed
+in this follow-up. Historical receipts and earlier run folders above remain
+unchanged. Earlier receipts lack the new required schema and are intentionally
+rejected by the current runner; the fresh evidence below is the verified
+source-bound execution.
+
+Every launch now requires a version 2 build receipt. Its exact source closure
+must match current files, including the real Kernel32 C/header/assembly/linker
+inputs, shared headers, standalone boot stub and its previously omitted
+`memholes.h`, build tool, host tools, runner, Kernel32 evaluator and imported
+shared parser. Before/after build snapshots must match. Kernel, stub and linked
+ELF hashes must match the receipt before launch. Runner/evaluator hashes are
+captured before their modules load and checked against the current files.
+
+Each result records the source closure, runner/evaluator hashes, build receipt
+hash, and artifact/source/receipt hashes before and after execution. Any drift
+rejects the computed PASS. Fresh builds and runs refuse to overwrite existing
+artifacts, receipts or evidence. New build receipts use exclusive creation.
+
+The new `shizukudos/tests/test_k32_publication_provenance.py` executes the actual
+runner CLI with a controlled executable. These are admission/attribution tests,
+not guest execution evidence. All ten initial cases failed against the old
+runner, without test errors, in the preserved RED folder. The final twelve
+cases pass: missing receipt, changed kernel/stub, stale core hash, omitted boot
+header/evaluator, inconsistent build snapshots, artifact/receipt changes during
+a computed PASS, existing build/run evidence protection, and valid receipt
+binding. Required dependency names in these fixtures are independent literals.
+
+Executed commands:
+
+```sh
+python3 -B shizukudos/tests/test_k32_publication_provenance.py --out build/pma-k32-provenance/negative-red-assertions
+python3 -B shizukudos/tests/test_k32_publication_provenance.py --out build/pma-k32-provenance/negative-green-reviewed
+python3 -B shizukudos/tests/run_k32_publication_guest.py --build --kernel-dir build/pma-k32-provenance/source-bound/kernel32s --accel kvm --out build/pma-k32-provenance/source-bound/kvm
+python3 -B shizukudos/tests/run_k32_publication_guest.py --kernel-dir build/pma-k32-provenance/source-bound/kernel32s --accel tcg --out build/pma-k32-provenance/source-bound/tcg
+git diff --check
+```
+
+RED: ten expected failures, exit 1. GREEN: twelve runner control cases pass,
+exit 0. Each case preserves its fixture receipt/artifacts, actual command,
+console log and attempted-launch marker; the suite preserves `result.json`.
+Fresh isolated Kernel32-only build: PASS with 32 unchanged source input hashes.
+Real KVM and TCG: all nine component checks and all three provenance checks
+PASS, guest exit 0, unchanged sources/artifacts/receipt. Both real runs contain
+the same receipt binding. Read-only follow-up review found no additional
+concrete provenance blocker. Whitespace check passed.
+
+| Follow-up input/artifact | SHA-256 |
+| --- | --- |
+| Final guest runner | `89c086e14254b338cb4bf3d778315fc47b8af6158d956841f58b23bf244aa13c` |
+| Final provenance test | `4c7b27fe0c9b47c838422c42003f639acc242be62ba7b54bdf11f89d46b8358a` |
+| Source-bound build receipt | `69971f6bed64ff3f6dc89f3f85f8dc7979ad27230b743f99ad8219772c3bd177` |
+| Kernel32 evaluator | `7efaf583f7ab59105dc34a1e0b966d143a22ca930859f8e4caf8179ca9c1861a` |
+| Imported shared parser/evaluator module | `5aa026474df47605ca027c094ebd94b6b7a88e8379a8dbbb14d3f6bb0aed73ab` |
+| Fresh Kernel32 image | `381b831a49835fca9efc596c6b50192730fd8ed01b15abdaca7a9406f8e5e274` |
+| Fresh boot stub | `a45e18fb70d2b27e75bade14db1c84773b2c525fa1420fff5fb3877bd793e925` |
+
+All source-bound inputs and build/run receipts are under
+`build/pma-k32-provenance/source-bound`; the earlier evidence is not upgraded or
+overwritten. These checks still cover a standalone UP component, with actual
+Windows 98 integration and integrated SMP unresolved.
