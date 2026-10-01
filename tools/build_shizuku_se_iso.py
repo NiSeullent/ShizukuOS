@@ -95,6 +95,10 @@ class Win98MediaError(RuntimeError):
     """The supplied --win98-media is unusable. Reported as a clear error, not a traceback."""
 
 
+class Win98MissingFilesError(Win98MediaError):
+    """Only the required DOS files are missing; other media layout checks passed."""
+
+
 def load_image_builder():
     path = ROOT / "shizukudos" / "build_image.py"
     spec = importlib.util.spec_from_file_location("shizuku_image", path)
@@ -732,6 +736,7 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[s
                      "shizukufs"):
         source_entries += tar_entries(ROOT / relative, f"{top}/{relative}")
     for relative in ("LICENSE", "tools/build_shizuku_se_iso.py", "tools/build_shizuku_se_disk.py",
+                     "tools/win98_boot_media.py", "tests/test_win98_boot_media.py",
                      "tools/shizuku_se_media.py", "tools/shizuku_se_drivers.py",
                      "tools/test_shizuku_se_boot_matrix.py"):
         if (ROOT / relative).is_file():
@@ -824,7 +829,7 @@ def walk_media(tree: Path) -> list[tuple[str, Path]]:
     return files
 
 
-def find_win98_layout(tree: Path) -> dict:
+def find_win98_layout(tree: Path, boot_files: dict | None = None) -> dict:
     files = walk_media(tree)
     loose = {}
     for relative, _path in files:
@@ -852,7 +857,12 @@ def find_win98_layout(tree: Path) -> dict:
                 found[name] = "inside a WIN98 cabinet"
                 missing.remove(name)
     if missing:
-        raise Win98MediaError("not found as files or inside the WIN98 cabinets: " + ", ".join(missing))
+        for name in list(missing):
+            if boot_files and name in boot_files:
+                found[name] = "inside a validated OEM El Torito boot floppy (reference only)"
+                missing.remove(name)
+    if missing:
+        raise Win98MissingFilesError("not found as files or inside the WIN98 cabinets: " + ", ".join(missing))
     return {"required": {name: found[name] for name in REQUIRED_MS_FILES}, "cabinets": len(cabs),
             "files": len(files), "bytes": sum(path.stat().st_size for _, path in files)}
 
@@ -887,14 +897,25 @@ def inspect_win98_media(media: Path, work: Path) -> dict:
             raise Win98MediaError(f"{media} is not readable as an ISO 9660 image or a directory (xorriso failed)")
         info.update(kind="ISO image", extracted=True)
     try:
-        layout = find_win98_layout(tree)
+        try:
+            layout = find_win98_layout(tree)
+        except Win98MissingFilesError:
+            if not info["extracted"]:
+                raise
+            import win98_boot_media
+            try:
+                boot_media = win98_boot_media.inspect_boot_media(media)
+            except win98_boot_media.BootMediaError as error:
+                raise Win98MediaError(f"invalid OEM boot-media reference: {error}") from error
+            layout = find_win98_layout(tree, boot_files=boot_media["files"])
+            info["boot_media"] = boot_media
     except Win98MediaError as exc:
         if info["extracted"]:
             rmtree_force(tree)
         raise Win98MediaError(
             f"{media} is not usable Windows 98 media: {exc}. Supply your own Windows 98 ISO or the "
             "extracted media root that contains the WIN98 folder (IO.SYS, MSDOS.SYS and COMMAND.COM "
-            "as files or inside the WIN98 cabinets). Nothing was built.") from exc
+            "as files, inside the WIN98 cabinets, or in a validated ISO OEM boot floppy). Nothing was built.") from exc
     info.update(tree=tree, files=layout["files"], total_bytes=layout["bytes"], required=layout["required"],
                 cabinets=layout["cabinets"])
     if media.is_file():
