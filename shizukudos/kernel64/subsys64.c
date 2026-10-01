@@ -23,11 +23,13 @@
 #include "proc_internal.h"
 #include "fs.h"
 #include "../abi/shz_ipc.h"
+#include "../pma_bridge/service.h"
 
 #define W64_MAX_PROCS 4
 #define W64_OUT_FIFO 2048u
 #define W64_IN_FIFO 1024u
 #define W64_WRITE_WAIT_MS 10000u
+#define W64_SHUTDOWN_WAIT_MS 5000u
 
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
@@ -62,8 +64,68 @@ static uint32_t peer;
 static int notify_supported = 1;
 static ksem_t doorbell_sem;
 static volatile int shutdown_requested;
+static uint64_t shutdown_deadline;
 static uint32_t served, proto_errors, refused, stale_msgs, out_frames, in_frames;
 static uint64_t start_tick;
+/* One service thread owns the PMA bridge state. Windows identities describe
+ * the caller; they never become native scheduler threads. Accepted WAITs keep
+ * a completion reservation until their reply reaches the existing channel. */
+static shz_pma_service_t pma_service;
+static shz_msg_hdr_t pma_inbound, pma_rejection;
+static uint8_t pma_inbound_payload[SHZ_MSG_MAX_INLINE];
+static int pma_inbound_pending, pma_rejection_pending;
+static int channel_rx_faulted;
+static uint64_t pma_full_ring_retries;
+
+static uint64_t pma_now_ns(void)
+{
+    const uint64_t tick = ticks_now();
+    const uint64_t unit = (uint64_t)TICK_US * 1000;
+    return tick > (UINT64_MAX - 1) / unit ? UINT64_MAX - 1 : tick * unit;
+}
+
+static int pma_pump(void)
+{
+    const shz_pma_frame_t *frame;
+    int progressed = 0;
+    if (pma_service.generation != chan->generation) return 0;
+    shz_pma_service_tick(&pma_service, pma_now_ns());
+    while ((frame = shz_pma_service_peek(&pma_service)) != 0) {
+        shz_msg_hdr_t header = frame->header;
+        if (shz_ring_push(tx, &header, frame->payload) != SHZ_OK) {
+            ++pma_full_ring_retries;
+            break;
+        }
+        shz_pma_service_ack(&pma_service, header.request_id);
+        progressed = 1;
+    }
+    if (pma_rejection_pending && shz_ring_push(tx, &pma_rejection, 0) == SHZ_OK) {
+        pma_rejection_pending = 0;
+        progressed = 1;
+    }
+    if (progressed && notify_supported && shz_notify(peer, 1) == SHZ_E_UNSUPPORTED)
+        notify_supported = 0;
+    return progressed;
+}
+
+static void pma_retry_inbound(void)
+{
+    int rc;
+    if (!pma_inbound_pending || pma_rejection_pending) return;
+    rc = shz_pma_service_dispatch(&pma_service, &pma_inbound, pma_inbound_payload, pma_now_ns());
+    if (rc == SHZ_E_QUEUE_FULL) return; /* retry unchanged after outgoing replies drain */
+    pma_inbound_pending = 0;
+    if (rc == SHZ_OK) return;
+    memset(&pma_rejection, 0, sizeof pma_rejection);
+    pma_rejection.flags = SHZ_MSGF_REPLY;
+    pma_rejection.opcode = pma_inbound.opcode;
+    pma_rejection.request_id = pma_inbound.request_id;
+    pma_rejection.src_domain = SHZ_DOM_KERNEL64;
+    pma_rejection.dst_domain = pma_inbound.src_domain;
+    pma_rejection.generation = pma_service.generation;
+    pma_rejection.status = rc;
+    pma_rejection_pending = 1;
+}
 
 void subsys64_doorbell(void) { sem_post(&doorbell_sem); }
 
@@ -170,8 +232,15 @@ static int push(shz_msg_hdr_t *h, const void *payload)
 {
     int rc;
     unsigned spins = 0;
-    while ((rc = shz_ring_push(tx, h, payload)) == SHZ_E_QUEUE_FULL && spins++ < 2000)
+    for (;;) {
+        /* A blocked W64 reply shares this worker with PMA. Expire accepted
+         * waits and give their retained completions the first available slot. */
+        pma_pump();
+        rc = shz_ring_push(tx, h, payload);
+        if (rc != SHZ_E_QUEUE_FULL || spins++ >= 2000 ||
+            (shutdown_requested && ticks_now() >= shutdown_deadline)) break;
         thread_sleep_ms(1);                                 /* back-pressure: the client drains its ring */
+    }
     if (rc == SHZ_OK && notify_supported && shz_notify(peer, 1) == SHZ_E_UNSUPPORTED)
         notify_supported = 0;                               /* standalone: no Supervisor, the client polls */
     return rc;
@@ -351,6 +420,7 @@ static void handle_release(const shz_msg_hdr_t *m, const uint8_t *payload)
 
 static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
 {
+    if (m->src_domain != peer) { ++refused; return; }
     if (m->generation != chan->generation || m->dst_domain != SHZ_DOM_KERNEL64) {
         ++stale_msgs;
         if (!(m->flags & SHZ_MSGF_ONEWAY))
@@ -365,7 +435,12 @@ static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
     case SHZ_OP_W64_CONSOLE_INPUT: handle_console_input(m, payload); break;
     case SHZ_OP_W64_KILL_PROCESS: handle_kill(m, payload); break;
     case SHZ_OP_W64_RELEASE: handle_release(m, payload); break;
-    case SHZ_OP_W64_SHUTDOWN: shutdown_requested = 1; reply(m, SHZ_OK, 0, 0); break;
+    case SHZ_OP_W64_SHUTDOWN:
+        shutdown_requested = 1;
+        shutdown_deadline = ticks_now() + W64_SHUTDOWN_WAIT_MS;
+        KASSERT(shz_pma_service_shutdown(&pma_service) == SHZ_OK);
+        reply(m, SHZ_OK, 0, 0);
+        break;
     default:
         if (!(m->flags & SHZ_MSGF_ONEWAY))
             reply(m, SHZ_E_UNSUPPORTED, 0, 0);
@@ -437,13 +512,40 @@ static void service_loop(void)
     while (!shutdown_requested) {
         shz_msg_hdr_t m;
         uint8_t payload[SHZ_MSG_MAX_INLINE];
-        int reason, rc, busy = 0;
-        unsigned i;
-        while ((rc = shz_ring_pop(rx, &m, payload, sizeof payload, &reason)) != SHZ_E_NOENT) {
-            busy = 1;
-            if (rc == SHZ_OK) handle(&m, payload);
-            else ++proto_errors;                            /* malformed slot consumed and dropped, never answered */
+        int reason, rc, busy;
+        unsigned i, receive_budget = 64;
+        if (pma_service.generation < chan->generation) {
+            /* A Supervisor-owned channel epoch fences every old identity,
+             * request and reply. Never re-stamp an old completion as new. */
+            pma_inbound_pending = pma_rejection_pending = 0;
+            channel_rx_faulted = 0;
+            KASSERT(shz_pma_service_restart(&pma_service, chan->generation) == SHZ_OK);
         }
+        busy = pma_pump();
+        pma_retry_inbound();
+        while (receive_budget-- && !shutdown_requested && !channel_rx_faulted && !pma_inbound_pending && !pma_rejection_pending &&
+               (rc = shz_ring_pop(rx, &m, payload, sizeof payload, &reason)) != SHZ_E_NOENT) {
+            busy = 1;
+            if (rc == SHZ_OK && m.src_domain != peer) ++refused;
+            else if (rc == SHZ_OK && shz_pma_is_opcode(m.opcode)) {
+                pma_inbound = m;
+                memset(pma_inbound_payload, 0, sizeof pma_inbound_payload);
+                memcpy(pma_inbound_payload, payload, m.payload_length);
+                pma_inbound_pending = 1;
+                pma_retry_inbound();
+            } else if (rc == SHZ_OK) handle(&m, payload);
+            else {
+                ++proto_errors;                            /* malformed slot consumed and dropped, never answered */
+                if (reason == SHZ_PR_HEAD_CORRUPT || rc == SHZ_E_INVALID) {
+                    /* The slot was not consumed. Quarantine this receive ring
+                     * until a newer Supervisor epoch; keep accepted deadlines
+                     * and outgoing completion processing live. */
+                    channel_rx_faulted = 1;
+                    break;
+                }
+            }
+        }
+        busy |= pma_pump();
         for (i = 0; i < W64_MAX_PROCS; ++i)
             if (slots[i].used) busy |= pump_slot(&slots[i]);
         if (!busy) {
@@ -458,12 +560,17 @@ static void service_loop(void)
                 process_terminate(slots[i].proc, 0x102, 0);
                 slots[i].state = SHZ_W64_PS_KILLED;
             }
-        while (active_count() && rounds++ < 5000) {
+        while (active_count() && rounds++ < W64_SHUTDOWN_WAIT_MS && ticks_now() < shutdown_deadline) {
+            pma_pump();
             for (i = 0; i < W64_MAX_PROCS; ++i)
                 if (slots[i].used) pump_slot(&slots[i]);
             thread_sleep_ms(1);
         }
     }
+    while ((shz_pma_service_peek(&pma_service) || pma_rejection_pending) && ticks_now() < shutdown_deadline)
+        if (!pma_pump()) thread_sleep_ms(1);
+    if (shz_pma_service_peek(&pma_service) || pma_rejection_pending)
+        kprintf("K64 subsys64: shutdown completion drain reached %u ms limit; native domain exits next\n", W64_SHUTDOWN_WAIT_MS);
     kprintf("K64 subsys64: service stopped: %u request(s), %u output frame(s), %u input frame(s), %u protocol error(s), "
             "%u refused, %u stale\n", served, out_frames, in_frames, proto_errors, refused, stale_msgs);
 }
@@ -480,7 +587,11 @@ static void bind_channel(void *base, size_t bytes, uint32_t peer_domain)
     KASSERT(shz_ring_valid(rx) && shz_ring_valid(tx));
     sem_init(&doorbell_sem, 0);
     shutdown_requested = 0;
+    shutdown_deadline = 0;
     start_tick = ticks_now();
+    pma_inbound_pending = pma_rejection_pending = 0;
+    channel_rx_faulted = 0;
+    KASSERT(shz_pma_service_init(&pma_service, SHZ_DOM_KERNEL64, peer, chan->generation) == SHZ_OK);
 #ifdef SHZ_STANDALONE
     notify_supported = 0;                                   /* no Supervisor: no doorbells, the peer polls */
 #endif
@@ -769,6 +880,387 @@ static void inject_bad_slot(int how)
 #define T_HELLO "\\SHZ\\TESTS\\T_HELLO.EXE"
 #define T_CON "\\SHZ\\TESTS\\T_W64CON.EXE"
 
+/* PMA fixtures use the actual channel and a separately scheduled service, so
+ * SIGNAL may complete WAIT before its own reply. Keep unrelated replies rather
+ * than discarding asynchronous completions as a synchronous client would. */
+static struct { int used; uint64_t order; shz_msg_hdr_t h; uint8_t pl[SHZ_MSG_MAX_INLINE]; } pma_replies[64];
+static unsigned pma_passed, pma_failed;
+static uint64_t pma_received_order, pma_taken_order;
+#define PMA_CHECK(name, cond) do { if (cond) { ++pma_passed; ++passed; kprintf("K64 PMA bridge PASS: %s\n", name); } \
+    else { ++pma_failed; ++failed; kprintf("K64 PMA bridge FAIL: %s\n", name); } } while (0)
+
+static shz_pma_request_t pma_request(uint32_t pid, uint32_t tid)
+{
+    shz_pma_request_t r;
+    memset(&r, 0, sizeof r);
+    r.magic = SHZ_PMA_MAGIC;
+    r.abi_major = SHZ_PMA_ABI_MAJOR;
+    r.abi_minor = SHZ_PMA_ABI_MINOR;
+    r.size = sizeof r;
+    r.domain = SHZ_DOM_WIN98;
+    r.pid = pid; r.tid = tid;
+    r.owner_generation = r.thread_generation = 1;
+    return r;
+}
+
+static uint64_t pma_send(uint32_t op, const shz_pma_request_t *r, uint64_t id, uint32_t generation)
+{
+    shz_msg_hdr_t h;
+    unsigned waited = 0;
+    int rc;
+    memset(&h, 0, sizeof h);
+    h.opcode = op;
+    h.request_id = id ? id : cl_next_id++;
+    h.src_domain = SHZ_DOM_WIN98;
+    h.dst_domain = SHZ_DOM_KERNEL64;
+    h.generation = generation;
+    h.payload_length = sizeof *r;
+    while ((rc = shz_ring_push(cl_tx, &h, r)) == SHZ_E_QUEUE_FULL) {
+        if (++waited > 500) return 0;
+        thread_sleep_ms(1);
+    }
+    return rc == SHZ_OK ? h.request_id : 0;
+}
+
+static int pma_take(uint64_t id, shz_msg_hdr_t *h, uint8_t *pl, unsigned timeout_ms)
+{
+    uint64_t start = ticks_now();
+    unsigned i;
+    if (!id) return 0;
+    for (i = 0; i < 64; ++i)
+        if (pma_replies[i].used && pma_replies[i].h.request_id == id) {
+            *h = pma_replies[i].h;
+            memcpy(pl, pma_replies[i].pl, SHZ_MSG_MAX_INLINE);
+            pma_taken_order = pma_replies[i].order;
+            pma_replies[i].used = 0;
+            return 1;
+        }
+    for (;;) {
+        shz_msg_hdr_t next;
+        uint8_t data[SHZ_MSG_MAX_INLINE];
+        int reason, rc;
+        while ((rc = shz_ring_pop(cl_rx, &next, data, sizeof data, &reason)) != SHZ_E_NOENT) {
+            if (rc != SHZ_OK) continue;
+            if (!(next.flags & SHZ_MSGF_REPLY)) continue;
+            ++pma_received_order;
+            if (next.request_id == id) {
+                *h = next; memcpy(pl, data, sizeof data);
+                pma_taken_order = pma_received_order;
+                return 1;
+            }
+            for (i = 0; i < 64; ++i) if (!pma_replies[i].used) break;
+            KASSERT(i < 64);
+            pma_replies[i].used = 1;
+            pma_replies[i].order = pma_received_order;
+            pma_replies[i].h = next;
+            memcpy(pma_replies[i].pl, data, sizeof data);
+        }
+        if (ticks_now() - start >= timeout_ms) return 0;
+        thread_sleep_ms(1);
+    }
+}
+
+static int pma_result(uint64_t id, int32_t status, shz_pma_completion_t *out)
+{
+    shz_msg_hdr_t h;
+    uint8_t pl[SHZ_MSG_MAX_INLINE];
+    if (!pma_take(id, &h, pl, 2000) || h.status != status || h.flags != SHZ_MSGF_REPLY ||
+        h.src_domain != SHZ_DOM_KERNEL64 || h.dst_domain != SHZ_DOM_WIN98 || h.generation != 1) return 0;
+    if (h.payload_length == sizeof(shz_pma_completion_t)) {
+        shz_pma_completion_t c;
+        memcpy(&c, pl, sizeof c);
+        if (c.magic != SHZ_PMA_MAGIC || c.size != sizeof c || c.sequence != id || c.status != status) return 0;
+        if (out) *out = c;
+    } else if (out) return 0;
+    return 1;
+}
+
+static int pma_call(uint32_t op, shz_pma_request_t *r, int32_t status, shz_pma_completion_t *out)
+{
+    return pma_result(pma_send(op, r, 0, 1), status, out);
+}
+
+static uint64_t pma_wait(uint32_t object, uint32_t tid, uint64_t deadline)
+{
+    shz_pma_request_t r = pma_request(600, tid);
+    r.object = object; r.deadline_ns = deadline;
+    return pma_send(SHZ_OP_PMA_EVENT_WAIT, &r, 0, 1);
+}
+
+static void pma_selftest(void)
+{
+    shz_pma_request_t r = pma_request(600, 1);
+    shz_pma_completion_t c;
+    shz_msg_hdr_t h;
+    uint8_t pl[SHZ_MSG_MAX_INLINE];
+    uint32_t automatic = 0, manual = 0;
+    uint64_t a, b, op, before;
+    int ok;
+    shz_pma_info_t info;
+
+    a = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 1);
+    memset(&info, 0, sizeof info);
+    ok = pma_take(a, &h, pl, 2000) && h.status == SHZ_OK && h.payload_length == sizeof info;
+    if (ok) memcpy(&info, pl, sizeof info);
+    r.required_features = UINT64_C(1) << 63;
+    ok &= pma_call(SHZ_OP_PMA_QUERY, &r, SHZ_E_UNSUPPORTED, 0);
+    r.required_features = 0; r.abi_major = 2;
+    ok &= pma_call(SHZ_OP_PMA_QUERY, &r, SHZ_E_UNSUPPORTED, 0);
+    r.abi_major = SHZ_PMA_ABI_MAJOR; r.abi_minor = 2;
+    b = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 1);
+    ok &= pma_take(b, &h, pl, 2000) && h.status == SHZ_OK;
+    r.abi_minor = SHZ_PMA_ABI_MINOR;
+    PMA_CHECK("query negotiation", ok && info.magic == SHZ_PMA_MAGIC && info.abi_major == 1 &&
+              info.features == 31 && info.max_waits > 0 && info.max_completions > info.max_waits &&
+              info.now_ns > 0 && info.now_ns <= pma_now_ns() && info.generation == 1 && info.self_domain == SHZ_DOM_KERNEL64 &&
+              info.peer_domain == SHZ_DOM_WIN98);
+
+    memset(&c, 0, sizeof c);
+    ok = pma_call(SHZ_OP_PMA_EVENT_CREATE, &r, SHZ_OK, &c);
+    automatic = c.object;
+    a = pma_wait(automatic, 2, UINT64_MAX);
+    thread_sleep_ms(10);
+    ok &= !pma_take(a, &h, pl, 0); /* an unsignaled WAIT has no immediate success reply */
+    r.object = automatic;
+    ok &= pma_call(SHZ_OP_PMA_EVENT_SIGNAL, &r, SHZ_OK, 0) && pma_result(a, SHZ_OK, 0);
+    b = pma_wait(automatic, 2, 0);
+    ok &= pma_result(b, SHZ_E_TIMEOUT, 0);
+    PMA_CHECK("auto-reset deferred wait", ok && automatic != 0);
+
+    r.object = 0; r.flags = SHZ_PMA_EVENT_MANUAL_RESET;
+    memset(&c, 0, sizeof c);
+    ok = pma_call(SHZ_OP_PMA_EVENT_CREATE, &r, SHZ_OK, &c);
+    manual = c.object; r.flags = 0; r.object = manual;
+    a = pma_wait(manual, 2, UINT64_MAX); b = pma_wait(manual, 3, UINT64_MAX);
+    thread_sleep_ms(5);
+    ok &= !pma_take(a, &h, pl, 0) && !pma_take(b, &h, pl, 0);
+    ok &= pma_call(SHZ_OP_PMA_EVENT_SIGNAL, &r, SHZ_OK, 0);
+    ok &= pma_result(a, SHZ_OK, 0) && pma_result(b, SHZ_OK, 0);
+    ok &= pma_result(pma_wait(manual, 2, 0), SHZ_OK, 0);
+    ok &= pma_call(SHZ_OP_PMA_EVENT_RESET, &r, SHZ_OK, 0);
+    ok &= pma_result(pma_wait(manual, 2, 0), SHZ_E_TIMEOUT, 0);
+    PMA_CHECK("manual-reset broadcast", ok && manual != 0);
+
+    r = pma_request(600, 1);
+    b = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 1);
+    ok = pma_take(b, &h, pl, 2000) && h.status == SHZ_OK && h.payload_length == sizeof info;
+    memcpy(&info, pl, sizeof info);
+    before = ticks_now();
+    b = info.now_ns + UINT64_C(15000000);
+    a = pma_wait(automatic, 2, b);
+    ok &= pma_result(a, SHZ_E_TIMEOUT, 0);
+    PMA_CHECK("timeout", ok && pma_now_ns() >= b && ticks_now() - before < 2000);
+
+    a = pma_wait(automatic, 2, UINT64_MAX);
+    r = pma_request(600, 2); r.target_sequence = a;
+    ok = pma_call(SHZ_OP_PMA_CANCEL, &r, SHZ_OK, 0) && pma_result(a, SHZ_E_CANCELLED, 0);
+    PMA_CHECK("cancellation", ok);
+
+    r = pma_request(600, 1); r.object = automatic;
+    a = pma_send(SHZ_OP_PMA_EVENT_SIGNAL, &r, 0, 9);
+    PMA_CHECK("stale generation", pma_result(a, SHZ_E_STALE, 0) &&
+              pma_result(pma_wait(automatic, 2, 0), SHZ_E_TIMEOUT, 0));
+
+    op = pma_send(SHZ_OP_PMA_EVENT_SIGNAL, &r, 0, 1);
+    ok = pma_result(op, SHZ_OK, 0) && pma_result(pma_wait(automatic, 2, 0), SHZ_OK, 0);
+    ok &= pma_send(SHZ_OP_PMA_EVENT_SIGNAL, &r, op, 1) == op && pma_result(op, SHZ_E_STALE, 0);
+    ok &= pma_result(pma_wait(automatic, 2, 0), SHZ_E_TIMEOUT, 0);
+    PMA_CHECK("duplicate request", ok);
+
+    a = pma_wait(automatic, 4, UINT64_MAX);
+    r = pma_request(600, 4);
+    ok = pma_call(SHZ_OP_PMA_THREAD_EXIT, &r, SHZ_OK, 0) && pma_result(a, SHZ_E_CANCELLED, 0);
+    r.object = automatic;
+    ok &= pma_call(SHZ_OP_PMA_EVENT_WAIT, &r, SHZ_E_STALE, 0);
+    r.thread_generation = 2; r.deadline_ns = 0;
+    ok &= pma_call(SHZ_OP_PMA_EVENT_WAIT, &r, SHZ_E_TIMEOUT, 0);
+    PMA_CHECK("thread cleanup", ok);
+
+    /* Fill the real reply ring without consuming replies. A timeout completion
+     * must remain queued, then appear once after the peer drains the ring. */
+    {
+        uint64_t ids[32], retries = pma_full_ring_retries;
+        unsigned i;
+        a = pma_wait(automatic, 2, pma_now_ns() + UINT64_C(30000000));
+        r = pma_request(600, 1);
+        for (i = 0; i < 32; ++i) ids[i] = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 1);
+        thread_sleep_ms(60);
+        ok = cl_rx->head - cl_rx->tail == 32 && pma_full_ring_retries > retries;
+        for (i = 0; i < 32; ++i)
+            ok &= pma_take(ids[i], &h, pl, 2000) && h.status == SHZ_OK && h.payload_length == sizeof info;
+        ok &= pma_result(a, SHZ_E_TIMEOUT, 0) && !pma_take(a, &h, pl, 5);
+        PMA_CHECK("full-ring completion retention", ok);
+    }
+
+    /* A W64 reply under back-pressure must not monopolize the worker and
+     * postpone an already accepted PMA deadline. Decode wire arrival order. */
+    {
+        uint64_t ids[32], legacy, timeout_order;
+        unsigned i;
+        shz_msg_hdr_t request;
+        r = pma_request(600, 1);
+        b = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 1);
+        ok = pma_take(b, &h, pl, 2000) && h.status == SHZ_OK && h.payload_length == sizeof info;
+        memcpy(&info, pl, sizeof info);
+        a = pma_wait(automatic, 2, info.now_ns + UINT64_C(30000000));
+        for (i = 0; i < 32; ++i) ids[i] = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 1);
+        thread_sleep_ms(5);
+        ok &= cl_rx->head - cl_rx->tail == 32;
+        memset(&request, 0, sizeof request);
+        request.opcode = SHZ_OP_W64_QUERY; request.request_id = legacy = cl_next_id++;
+        request.src_domain = SHZ_DOM_WIN98; request.dst_domain = SHZ_DOM_KERNEL64; request.generation = 1;
+        ok &= shz_ring_push(cl_tx, &request, 0) == SHZ_OK;
+        thread_sleep_ms(60);
+        for (i = 0; i < 32; ++i) ok &= pma_take(ids[i], &h, pl, 2000) && h.status == SHZ_OK;
+        ok &= pma_result(a, SHZ_E_TIMEOUT, 0);
+        timeout_order = pma_taken_order;
+        ok &= pma_take(legacy, &h, pl, 2000) && h.status == SHZ_OK && h.opcode == SHZ_OP_W64_QUERY;
+        PMA_CHECK("mixed W64 backpressure deadline", ok && timeout_order < pma_taken_order);
+    }
+
+    a = pma_wait(automatic, 2, UINT64_MAX);
+    r = pma_request(600, 1);
+    ok = pma_call(SHZ_OP_PMA_PROCESS_EXIT, &r, SHZ_OK, 0) && pma_result(a, SHZ_E_CANCELLED, 0);
+    ok &= pma_call(SHZ_OP_PMA_EVENT_CREATE, &r, SHZ_E_STALE, 0);
+    r.owner_generation = 2;
+    memset(&c, 0, sizeof c);
+    ok &= pma_call(SHZ_OP_PMA_EVENT_CREATE, &r, SHZ_OK, &c) && c.object != automatic;
+    r.object = automatic;
+    ok &= pma_call(SHZ_OP_PMA_EVENT_SIGNAL, &r, SHZ_E_NOENT, 0);
+    r.object = c.object;
+    ok &= pma_call(SHZ_OP_PMA_EVENT_CLOSE, &r, SHZ_OK, 0);
+    PMA_CHECK("process cleanup", ok);
+
+    {
+        uint32_t object;
+        r = pma_request(601, 1);
+        memset(&c, 0, sizeof c);
+        ok = pma_call(SHZ_OP_PMA_EVENT_CREATE, &r, SHZ_OK, &c);
+        object = c.object;
+        r.object = object; r.deadline_ns = UINT64_MAX;
+        a = pma_send(SHZ_OP_PMA_EVENT_WAIT, &r, 0, 1);
+        r.object = 0; r.deadline_ns = 0;
+        ok &= pma_call(SHZ_OP_PMA_THREAD_EXIT, &r, SHZ_OK, 0) && pma_result(a, SHZ_E_CANCELLED, 0);
+        /* VMM process teardown may run after its last caller thread is dead. */
+        ok &= pma_call(SHZ_OP_PMA_PROCESS_EXIT, &r, SHZ_OK, 0);
+        r.tid = 2;
+        ok &= pma_call(SHZ_OP_PMA_EVENT_CREATE, &r, SHZ_E_STALE, 0);
+        r.owner_generation = 2;
+        memset(&c, 0, sizeof c);
+        ok &= pma_call(SHZ_OP_PMA_EVENT_CREATE, &r, SHZ_OK, &c) && c.object != object;
+        r.object = object;
+        ok &= pma_call(SHZ_OP_PMA_EVENT_SIGNAL, &r, SHZ_E_NOENT, 0);
+        r.object = c.object;
+        ok &= pma_call(SHZ_OP_PMA_EVENT_CLOSE, &r, SHZ_OK, 0);
+        PMA_CHECK("process cleanup after thread exit", ok);
+    }
+
+    /* A corrupt producer index is quarantined once. The native worker must
+     * still expire and transmit accepted waits, rather than spin on the slot. */
+    r = pma_request(600, 1); r.owner_generation = 2;
+    memset(&c, 0, sizeof c);
+    ok = pma_call(SHZ_OP_PMA_EVENT_CREATE, &r, SHZ_OK, &c);
+    r.object = c.object; r.deadline_ns = pma_now_ns() + UINT64_C(30000000);
+    a = pma_send(SHZ_OP_PMA_EVENT_WAIT, &r, 0, 1);
+    thread_sleep_ms(5);
+    {
+        uint32_t head = cl_tx->head, errors = proto_errors;
+        const uint64_t f = irq_save();
+        cl_tx->head = cl_tx->tail + cl_tx->slot_count + 1;
+        irq_restore(f);
+        thread_sleep_ms(40);
+        ok &= pma_result(a, SHZ_E_TIMEOUT, 0) && proto_errors == errors + 1;
+        { const uint64_t restore = irq_save(); cl_tx->head = head; irq_restore(restore); }
+    }
+    PMA_CHECK("corrupt-ring quarantine", ok);
+
+    /* Supervisor epochs may change while a WAIT is outstanding. Only fresh
+     * requests belong to the restarted peer; the obsolete WAIT is discarded. */
+    { const uint64_t f = irq_save(); chan->generation = 2; irq_restore(f); }
+    r = pma_request(600, 1);
+    b = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 2);
+    ok = pma_take(b, &h, pl, 2000) && h.status == SHZ_OK && h.generation == 2;
+    /* Ring metadata validation failures are also nonconsuming. Quarantine
+     * those once, keep native deadlines live, and recover in a fresh epoch. */
+    r.object = 0;
+    memset(&c, 0, sizeof c);
+    b = pma_send(SHZ_OP_PMA_EVENT_CREATE, &r, 0, 2);
+    ok &= pma_take(b, &h, pl, 2000) && h.status == SHZ_OK && h.payload_length == sizeof c;
+    memcpy(&c, pl, sizeof c);
+    r.object = c.object; r.deadline_ns = pma_now_ns() + UINT64_C(30000000);
+    a = pma_send(SHZ_OP_PMA_EVENT_WAIT, &r, 0, 2);
+    thread_sleep_ms(5);
+    {
+        uint32_t errors = proto_errors, magic = cl_tx->magic;
+        const uint64_t f = irq_save(); cl_tx->magic = 0; irq_restore(f);
+        thread_sleep_ms(40);
+        ok &= pma_take(a, &h, pl, 2000) && h.status == SHZ_E_TIMEOUT && h.generation == 2 && proto_errors == errors + 1;
+        { const uint64_t restore = irq_save(); cl_tx->magic = magic; irq_restore(restore); }
+    }
+    PMA_CHECK("invalid-ring metadata quarantine", ok);
+
+    /* Reuse the next epoch for the outstanding-wait restart itself. */
+    { const uint64_t f = irq_save(); chan->generation = 3; irq_restore(f); }
+    r = pma_request(600, 1);
+    b = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 3);
+    ok = pma_take(b, &h, pl, 2000) && h.status == SHZ_OK && h.generation == 3;
+    b = pma_send(SHZ_OP_PMA_EVENT_CREATE, &r, 0, 3);
+    ok &= pma_take(b, &h, pl, 2000) && h.status == SHZ_OK && h.payload_length == sizeof c;
+    memcpy(&c, pl, sizeof c);
+    r.object = c.object; r.deadline_ns = UINT64_MAX;
+    a = pma_send(SHZ_OP_PMA_EVENT_WAIT, &r, 0, 3);
+    thread_sleep_ms(5);
+    ok &= !pma_take(a, &h, pl, 0);
+    { const uint64_t f = irq_save(); chan->generation = 4; irq_restore(f); }
+    r = pma_request(600, 1);
+    b = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 4);
+    ok &= pma_take(b, &h, pl, 2000) && h.status == SHZ_OK && h.generation == 4 && h.payload_length == sizeof info;
+    memcpy(&info, pl, sizeof info);
+    ok &= info.generation == 4 && !pma_take(a, &h, pl, 5);
+    b = pma_send(SHZ_OP_PMA_QUERY, &r, 0, 1);
+    ok &= pma_take(b, &h, pl, 2000) && h.status == SHZ_E_STALE && h.generation == 4;
+    PMA_CHECK("domain restart", ok);
+}
+
+static int pma_shutdown_selftest(thread_t *svc)
+{
+    shz_pma_request_t r = pma_request(600, 1);
+    shz_pma_completion_t c;
+    shz_msg_hdr_t h, shutdown;
+    uint8_t pl[SHZ_MSG_MAX_INLINE];
+    uint64_t ids[32], waiting, trailing, stop;
+    unsigned i;
+    int ok;
+    const uint32_t epoch = chan->generation;
+    uint64_t id = pma_send(SHZ_OP_PMA_EVENT_CREATE, &r, 0, epoch);
+    ok = pma_take(id, &h, pl, 2000) && h.status == SHZ_OK && h.payload_length == sizeof c;
+    memcpy(&c, pl, sizeof c);
+    r.object = c.object; r.deadline_ns = UINT64_MAX;
+    waiting = pma_send(SHZ_OP_PMA_EVENT_WAIT, &r, 0, epoch);
+    r.object = 0; r.deadline_ns = 0;
+    for (i = 0; i < 32; ++i) ids[i] = pma_send(SHZ_OP_PMA_QUERY, &r, 0, epoch);
+    thread_sleep_ms(5);
+    ok &= cl_rx->head - cl_rx->tail == 32;
+    memset(&shutdown, 0, sizeof shutdown);
+    shutdown.opcode = SHZ_OP_W64_SHUTDOWN; shutdown.request_id = stop = cl_next_id++;
+    shutdown.src_domain = SHZ_DOM_WIN98; shutdown.dst_domain = SHZ_DOM_KERNEL64; shutdown.generation = epoch;
+    r.object = c.object; r.deadline_ns = UINT64_MAX;
+    {
+        const uint64_t f = irq_save();
+        ok &= shz_ring_push(cl_tx, &shutdown, 0) == SHZ_OK;
+        trailing = pma_send(SHZ_OP_PMA_EVENT_WAIT, &r, 0, epoch);
+        irq_restore(f);
+    }
+    thread_sleep_ms(10);
+    for (i = 0; i < 32; ++i) ok &= pma_take(ids[i], &h, pl, 2000) && h.status == SHZ_OK;
+    ok &= pma_take(waiting, &h, pl, 2000) && h.status == SHZ_E_CANCELLED && h.generation == epoch;
+    ok &= pma_take(stop, &h, pl, 2000) && h.status == SHZ_OK && h.opcode == SHZ_OP_W64_SHUTDOWN;
+    thread_join(svc);
+    ok &= !pma_take(trailing, &h, pl, 5) && shz_ring_count(cl_tx) == 1 && !shz_pma_service_peek(&pma_service);
+    PMA_CHECK("shutdown cancels waits and stops admission", ok && shutdown_requested);
+    return ok ? SHZ_OK : SHZ_E_PROTO;
+}
+
 static void selftest(void)
 {
     thread_t *svc;
@@ -955,12 +1447,29 @@ static void selftest(void)
         CHECK("a CONSOLE_ACK for an unknown process is ignored", rc == SHZ_OK);
     }
 
-    /* 9. shutdown */
-    rc = cl_call(SHZ_OP_W64_SHUTDOWN, 0, 0, 0, 0, 1, &rh, rpl, 2000);
-    thread_join(svc);
+    {
+        shz_msg_hdr_t hostile;
+        memset(&hostile, 0, sizeof hostile);
+        hostile.opcode = SHZ_OP_W64_SHUTDOWN;
+        hostile.request_id = cl_next_id++;
+        hostile.src_domain = SHZ_DOM_KERNEL32;
+        hostile.dst_domain = SHZ_DOM_KERNEL64;
+        hostile.generation = chan->generation;
+        KASSERT(shz_ring_push(cl_tx, &hostile, 0) == SHZ_OK);
+        rc = cl_call(SHZ_OP_W64_QUERY, 0, 0, 0, 0, chan->generation, &rh, rpl, 2000);
+        CHECK("hostile source cannot SHUTDOWN the service; the real peer still receives QUERY", rc == SHZ_OK && !shutdown_requested);
+    }
+
+    /* 9. PMA requests share the same live channel and service thread. */
+    pma_selftest();
+
+    /* 10. shutdown */
+    rc = pma_shutdown_selftest(svc);
     CHECK("SHUTDOWN stops the service thread", rc == SHZ_OK && shutdown_requested);
     kprintf("K64 subsys64: physical pages: %llu free before, %llu after (heap warm-up may keep some)\n", free_before, pmm_free_count());
     kprintf("K64 subsys64: loopback self-test %u passed, %u failed\n", passed, failed);
+    kprintf("K64 PMA bridge: %u passed, %u failed\n", pma_passed, pma_failed);
+    KASSERT(passed <= 255 && failed <= 255);
     shz_evidence(31, 0x57340000ull | ((uint64_t)passed << 8) | failed);
 }
 
