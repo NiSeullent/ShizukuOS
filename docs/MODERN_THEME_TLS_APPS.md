@@ -237,8 +237,10 @@ Selected official numeric suitesv5 pass5,896 commands in each execution mode;
 eight text-only malformed-source cases remain explicitly excluded. The real
 DLL's155,996 executable bytes contain54,602 checked i486/x87 instructions.
 Current macro maps retain114 actual interpreter-TU switches per configuration.
-Browser JS bindings, SIMD/EH and remaining modern Wasm proposals and native
-Win98 arithmetic still require implementation/validation. See
+Browser JS bindings, SIMD/EH and remaining modern Wasm proposals still require
+implementation/validation. A fresh actual Win98 numericv24 trial passes265
+ordered checks with original system MSVCRT, full x87 preservation and actual
+owned-child DWORD0; selected official native suites and memoryv8 remain pending. See
 `TRIDENT_WASM_RUNTIME.md` and `TRIDENT_WASM_SPEC_SELECTED.md`.
 
 Mesa foundationv2 constructs genuine TGSI fragment programs from bounded typed
@@ -439,14 +441,21 @@ acceptance methods; explicitly synthetic controls are not native evidence.
 Fresh canonical numeric stage v2 manifest is
 `d0948ad22afc556cf57398c6361326729e2c7afe50b6ce360513d9392f973b8b`,
 provenance `9e87ddbe5ddb43ecba1edc7d5ac49b5a6bc88a9b56f6adb27c847a9a06738587`.
-Native numeric acceptance remains pending; full browser Wasm remains false.
+Native numericv24 acceptance now passes; full browser Wasm remains false.
 Earlier admission preserved a queue refusal behind peer VLC PID3026413. After
 that guest naturally ended, fresh admission observed a vacant Win98 slot and
 positively identified the separate Kernel64 Chromium runner by exact PID,
-start identity, image and ELF boot source. Root now owns QEMU PID3404150 and a
-fresh private numericv24 image under the cooperative lock. This actual launch
-does not establish guest probe success or the new memoryv8 profile's execution;
-no peer process or guest is controlled.
+start identity, image and ELF boot source. The fresh private numericv24 trial
+normally stopped QEMU PID3404150 and released its cooperative lock. Strict
+acceptance375493e73d749079e931caae98e8e0c589649cf68e19602fd94927e9fa1a0812
+checks all265 ordered predicates, original system MSVCRT, full x87 preservation,
+actual owned-child PID4294877739/DWORD0, flushed output and closed handles.
+Root independently rehashed2827 current/frozen/native paths twice; originals
+and prepared sources remain unchanged. Actual supervisor exit remains
+unverified. This pass does not establish memoryv8, browser WebAssembly or full
+standards. A subsequent runtime-only JavaScript admission queued before run
+creation behind peer theme Win98 PID3455405 and the occupied cooperative lock.
+No peer process or guest is controlled.
 
 The isolated TLS i486 v1 receipt
 `1123b84ae84c35981cbf5e6e3ea9c4d4b6848cac00d2ee0b22e61be7237167b3`

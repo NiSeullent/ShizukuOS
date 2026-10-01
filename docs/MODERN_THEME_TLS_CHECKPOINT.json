@@ -1,5 +1,5 @@
 {
-  "schema": 7,
+  "schema": 8,
   "date": "2026-10-01",
   "branch": "codex/theme-tls-5abe",
   "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
@@ -37,6 +37,10 @@
       "sha256": "af59c776542dab98aec930dd973610cda0ad5f52bef00e37e258bb1231214fef"
     },
     {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-wasm-numeric-5abe-native-v1/result.json",
+      "sha256": "05a1ade263a68fad49dae82f6c2d66117e094a91268c10de7ba15d80e0dd408c"
+    },
+    {
       "path": "/root/Win98-Modern-boot/build/trident-automation-native-5abe-20261001-v1/guest-files.json",
       "sha256": "13eddef2f02f8bfc3a1ba331aaf8fa027e334cff8e7a2a225ddeeab517e46a9a"
     },
@@ -71,6 +75,10 @@
     {
       "path": "build/checkpoint-schema7/schema6-original.json",
       "sha256": "7332c20b3a0663073dfaeeb30a95c4d9e82bb3fade38e15698a1ed16a1daac44"
+    },
+    {
+      "path": "build/checkpoint-schema8/schema7-original.json",
+      "sha256": "d32dc2abe139ef929a8319c8ec48d8998b69c5edfa1afe69026ac96fcfc08661"
     },
     {
       "path": "build/css-core-v4/result.json",
@@ -293,6 +301,10 @@
       "sha256": "7b1e29758d8df087054e3ddf502b7282b2e01ed214eee946f8bddc70a8d54206"
     },
     {
+      "path": "build/trident-script-native-preflight-v1/preflight.json",
+      "sha256": "c32f24a897262888186d29d694eb911fa3e9fddfecb744439476d2e973f7811b"
+    },
+    {
       "path": "build/trident-script-observer-v10/result.json",
       "sha256": "94c5004e13571ffd6de7e814dbbf8080fda853ac0dfd203f50b4d4e1ebb71959"
     },
@@ -349,6 +361,14 @@
       "sha256": "c6abd7193f921e36fedbed90d316238c0fc7559542f100f5776162d7cf7b26dd"
     },
     {
+      "path": "build/wasm-native-acceptance-v1/result.json",
+      "sha256": "375493e73d749079e931caae98e8e0c589649cf68e19602fd94927e9fa1a0812"
+    },
+    {
+      "path": "build/wasm-native-acceptance-v1/root-byte-readback.json",
+      "sha256": "bab04e8f77b05ad212fbe248433149b437bb10e835959f399146aadee9b8647c"
+    },
+    {
       "path": "build/wasm-native-final-controls-readback-v1/result.json",
       "sha256": "1c1eef7ef19019a508f38a73e772958c5fcf56379f6b26044b8e1364186b966b"
     },
@@ -363,6 +383,14 @@
     {
       "path": "build/wasm-native-preflight-v1/preflight.json",
       "sha256": "11668b9798bd68b033ae1ff3cb65d28a6582c5e696baba654f9055654f92dd13"
+    },
+    {
+      "path": "build/wasm-native-preflight-v2/completion.json",
+      "sha256": "ad189a38a5f0c6ce330dc99762b63969a0d2094fb786af52dfe4472b46ab831f"
+    },
+    {
+      "path": "build/wasm-native-preflight-v2/preflight.json",
+      "sha256": "87ef3a8f8e19ee0e8c5c786eb5c971f26498c14571b5139f65e0ba20689d28e6"
     },
     {
       "path": "build/wasm-native-probe-v6/result.json",
@@ -493,24 +521,24 @@
   "guest_constraint": {
     "selected_reserve_gib": 20,
     "prepared_copy_floor_bytes": 21991407616,
-    "free_bytes_at_checkpoint": 24297902080,
+    "free_bytes_at_checkpoint": 32179855360,
     "free_space_below_selected_reserve": false,
     "no_original_or_active_vm_logical_bytes_modified": true,
     "approved_closed_clone_allocation_sharing_only": true,
-    "native_queue_owned": true,
-    "latest_attempt_safely_blocked_before_qemu": false,
-    "root_queue_owned": true,
+    "native_queue_owned": false,
+    "latest_attempt_safely_blocked_before_qemu": true,
+    "root_queue_owned": false,
     "guard_recheck_required_before_every_trial": true,
-    "space_observation_utc": "2026-10-01T11:40:32.686026+00:00",
+    "space_observation_utc": "2026-10-01T11:47:58.449950+00:00",
     "prepared_copy_floor_with_staging_bytes": 22058516480,
-    "queue_observation": "Root fresh numericv24 Win98 trial actually running under owned lock and pinned image/PID/start identity; acceptance pending",
-    "mem_available_bytes_at_observation": 8969691136,
+    "queue_observation": "Own numericv24 native component accepted/stopped; subsequent standaloneQuickJS admission queued before run creation behind actual peer theme Win98PID3455405 and occupied lock at11:46:46UTC",
+    "mem_available_bytes_at_observation": 9725063168,
     "cooperative_lock_vacant_at_observation": false,
     "actual_qa_vacant_at_observation": false,
     "actual_win98_native_slot_vacant_at_observation": false,
     "scheduling_scope_addendum": "docs/NATIVE_QA_SCHEDULING_SCOPE.md",
     "positively_identified_separate_xp_kernel64_runners_consume_win98_slot": false,
-    "root_vm_running": true
+    "root_vm_running": false
   },
   "completion": {
     "user_objective_complete": false,
@@ -551,7 +579,7 @@
     "benchmarks/wpt-css-selected-v1/source-pin.json": "eb370b76c4acd0e1e902bc22f395ca7d529cf16774724e541cd676e7afcc4241",
     "docs/I486_NATIVE_INPUT_AUDIT.md": "3060a8ad33090feb195e8df254e03b1095fde058db81b23df5bbac2b5a885951",
     "docs/MESA_SOFTPIPE_PORT_FEASIBILITY.md": "756d0bade66c01c2cf916d12c88fc1ac7a668327f5accde116c3c9955c059644",
-    "docs/MODERN_THEME_TLS_APPS.md": "97461a8856a086ad34e00327c47db9abf9176067d0d79412ffc7c0e880dc2492",
+    "docs/MODERN_THEME_TLS_APPS.md": "2da131e7ad271b8c744b3cd146af7c7dd00cb60bff3ea013270242fd946f984a",
     "docs/NATIVE_QA_SCHEDULING_SCOPE.md": "8f4567ff592a0ba9c192499c5b00753fdcc4cc6cd149a87b4e4520a0bd51d89e",
     "docs/THEME_NATIVE_EVIDENCE.md": "8ea864696546587527c32c92acea505888ba83717398970bb7104ad40ab47f43",
     "docs/TRIDENT_AUTOMATION_NATIVE_EVIDENCE.md": "ca6008f43eb5517caa34ca372f3bec6a6826cff8d4503d20f8a6785ad28caa5f",
@@ -571,7 +599,7 @@
     "docs/TRIDENT_WASM_QJS_BRIDGE.md": "eba468069792bfe92c9d90abefb1da24815592fb71ca3c9daff40b62b28549c2",
     "docs/TRIDENT_WASM_RUNTIME.md": "1c35259a162411ff3797f505a8acdfeb36e3b3c6793cef5bddaa2a971d8b377d",
     "docs/TRIDENT_WASM_SPEC_SELECTED.md": "78b0a07c0f51caa59a86620b57ea65f0d0d890b0b0df42980aa12e7a7e2b5524",
-    "docs/modern-apps-coordination-5abe.md": "1dcd4be42029b5cf1e4105565e9c2263273039f2e093c452a5fc68e2b7f2eea1",
+    "docs/modern-apps-coordination-5abe.md": "f4926002b7de7ab06ff352169b6f1fe71d87cde41755f7886bb5f3605c7fb2a8",
     "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
     "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
     "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
@@ -752,7 +780,7 @@
     "tests/m98_wasm_memory_spec_host.c": "e339a578adfc08ef442c7c5ba879623c522f9dca6400b229a6ab1e9e1b4d621a",
     "tools/build_wasm_memory_profile.py": "44049c5ed1aeedd3b79c57e9c2be68fefb9bb25022aaf09554fc0fabdf93c07e"
   },
-  "updated_utc": "2026-10-01T11:40:32.686026+00:00",
+  "updated_utc": "2026-10-01T11:47:58.449950+00:00",
   "source_commits": {
     "foundation": "a12a4a95e9f3fbddcea82d69f124876d22fb660f",
     "dns_config": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -832,7 +860,7 @@
       "dll_sha256": "a0311d69d40e22c65e4182b44d4ff53988c6247f669a47901dd3f3e9d6ca29a6",
       "complete_i486_executable_bytes": 155996,
       "complete_i486_instructions": 54602,
-      "native_execution": false,
+      "native_execution": true,
       "browser_js_api": false,
       "full_modern_wasm": false,
       "mandatory_remaining": [
@@ -840,8 +868,15 @@
         "exception handling",
         "remaining current proposals",
         "real JavaScript/DOM/origin-bound embedding",
-        "actual Win98 arithmetic"
-      ]
+        "full selected native spec commands"
+      ],
+      "native_scope": "original_v24_numeric_C_ABI_only",
+      "native_ordered_checks": 265,
+      "native_child_pid": 4294877739,
+      "native_child_full_dword_exit": 0,
+      "native_actual_supervisor_exit_verified": false,
+      "native_memory_v8": false,
+      "native_selected_official_suite": false
     },
     "complete_javascript_verified": false,
     "complete_css_verified": false,
@@ -871,7 +906,10 @@
       "post_i486_instruction_families": "absent",
       "shared_memory_atomics": false,
       "native_execution": false,
-      "full_language_conformance": false
+      "full_language_conformance": false,
+      "latest_native_admission": "QUEUED_BEFORE_RUN_CREATION",
+      "admission_receipt_sha256": "c32f24a897262888186d29d694eb911fa3e9fddfecb744439476d2e973f7811b",
+      "other_actual_win98_pid_at_observation": 3455405
     },
     "automation_v4": {
       "production_adapter_os_double_assertions": 3799,
@@ -996,15 +1034,29 @@
       "normal_and_optimized_log_methods": 6,
       "normal_and_optimized_acceptance_methods": 7,
       "independent_review_sha256": "7ff29a24487985a1a5dd1c7fb8d827790ace9fc3ab301043b3a806c5e32fdd59",
-      "native_execution": false,
+      "native_execution": true,
       "actual_supervisor_exit_verified": false,
       "full_modern_wasm": false,
       "standard_browser_webassembly": false,
-      "admission": "ACTUAL_OWNED_QEMU_RUNNING_ACCEPTANCE_PENDING",
+      "admission": "ACTUAL_OWNED_NATIVE_COMPONENT_ACCEPTED_VM_STOPPED_LOCK_RELEASED",
       "owned_qemu_pid": 3404150,
       "owned_qemu_start_ticks": 2123948,
       "owned_run": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-wasm-numeric-5abe-native-v1",
-      "stage_runtime_profile": "original_v24_not_corrective_memory_v8"
+      "stage_runtime_profile": "original_v24_not_corrective_memory_v8",
+      "native_ordered_checks": 265,
+      "native_shared_real_engine_checks": 244,
+      "actual_child_pid": 4294877739,
+      "actual_child_full_dword_exit": 0,
+      "stdout_flushed": true,
+      "handles_closed": true,
+      "original_system_crt": true,
+      "complete_x87_boundary": true,
+      "acceptance_sha256": "375493e73d749079e931caae98e8e0c589649cf68e19602fd94927e9fa1a0812",
+      "root_final_twice_readback_sha256": "bab04e8f77b05ad212fbe248433149b437bb10e835959f399146aadee9b8647c",
+      "root_final_twice_checked_paths": 2827,
+      "harness_result_sha256": "05a1ade263a68fad49dae82f6c2d66117e094a91268c10de7ba15d80e0dd408c",
+      "own_vm_running": false,
+      "own_lock_held": false
     },
     "wasm_memory_correction": {
       "status": "v8_frozen_source_root_and_independent_complete_byte_reviews_passed",
