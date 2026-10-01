@@ -1,0 +1,618 @@
+E1 proposal 1/2: what Electron and Node need from Kernel64 and the Win64 runtime
+
+kernel32: CancelSynchronousIo, CreateSymbolicLinkW, ReOpenFile, GetProcessIoCounters, GetErrorMode, NeedCurrentDirectoryForExePathW,
+GetCurrentPackageFullName, GetPackageFamilyName; console cursor/title/fill/input model; WriteConsoleW no longer drops the last byte;
+CreateNamedPipeW accepts the verbatim \\?\pipe\ prefix. ntdll: RtlAddGrowableFunctionTable, RtlGrowFunctionTable,
+RtlDeleteGrowableFunctionTable. ws2_32: GetNameInfoW. advapi32: SystemFunction036. kernel64: the NUL device, FileAllInformation.
+
+
+diff --git a/shizukudos/kernel64/fs.h b/shizukudos/kernel64/fs.h
+index ea3199f..b237562 100644
+--- a/shizukudos/kernel64/fs.h
++++ b/shizukudos/kernel64/fs.h
+@@ -63,7 +63,7 @@ typedef struct {
+     fsnode_t *node;
+     uint64_t pos;
+     uint32_t access;                    /* GENERIC/FILE_* rights granted */
+-    int console;                        /* 0 none, 1 input, 2 output */
++    int console;                        /* 0 none, 1 console input, 2 console output, 3 the NUL device (writes are discarded, reads are at end of file) */
+     int append;
+     uint64_t dir_index;                 /* NtQueryDirectoryFile cursor */
+     uint16_t *dir_pattern;              /* NtQueryDirectoryFile FileName filter (heap, NUL-terminated), NULL = all */
+diff --git a/shizukudos/kernel64/sysfile.c b/shizukudos/kernel64/sysfile.c
+index d0674e7..63b9974 100644
+--- a/shizukudos/kernel64/sysfile.c
++++ b/shizukudos/kernel64/sysfile.c
+@@ -107,6 +107,31 @@ kobject_t *console_object(int output)
+     return o;
+ }
+ 
++/* The NUL device (\\??\\NUL): a file object that takes every write and reports end of file on every read. */
++static kobject_t *null_object(uint32_t access)
++{
++    kobject_t *o = ob_create(OB_FILE, 0);
++    file_t *f = kzalloc(sizeof *f);
++    if (!o || !f) return 0;
++    f->console = 3;
++    f->access = access;
++    o->u.file.file = f;
++    o->u.file.access = access;
++    return o;
++}
++
++static int path_is_nul(const char *path)
++{
++    static const char want[] = "\\??\\nul";
++    unsigned i;
++    for (i = 0; want[i]; ++i) {
++        char c = path[i];
++        if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
++        if (c != want[i]) return 0;
++    }
++    return path[i] == 0;
++}
++
+ static file_t *file_of(process_t *p, uint64_t h, kobject_t **obj)
+ {
+     kobject_t *o = handle_lookup(p, h, OB_FILE);
+@@ -173,6 +198,16 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
+     /* A drive letter without a mounted volume names no device (Windows: the \??\Z: link is missing, so the path is not found). */
+     if (path[0] == '\\' && path[1] == '?' && path[2] == '?' && path[3] == '\\' && path[4] && path[5] == ':' && !fs_root_of(path[4]))
+         return STATUS_OBJECT_PATH_NOT_FOUND;
++    if (path_is_nul(path)) {
++        o = null_object((uint32_t)a2);
++        if (!o) return STATUS_NO_MEMORY;
++        st = handle_insert(p, o, (uint32_t)a2, &h);
++        ob_deref(o);
++        if (st) return st;
++        if (copy_to_user(p, a1, &(uint64_t){h}, 8)) return STATUS_ACCESS_VIOLATION;
++        set_iosb(p, a4, STATUS_SUCCESS, IO_OPENED);
++        return STATUS_SUCCESS;
++    }
+     /* console pseudo-devices */
+     if (!strcmp(path, "\\??\\CONOUT$") || !strcmp(path, "\\??\\CONIN$")) {
+         o = console_object(path[6] == 'O');
+@@ -242,6 +277,10 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
+     uint8_t *tmp;
+     uint64_t chunk;
+     if (!f) return STATUS_INVALID_HANDLE;
++    if (f->console == 3) {                                  /* NUL */
++        set_iosb(p, iosb, write ? STATUS_SUCCESS : STATUS_END_OF_FILE, write ? len : 0);
++        return write ? STATUS_SUCCESS : STATUS_END_OF_FILE;
++    }
+     if (f->console) {
+         if (write) {
+             char line[128];
+@@ -335,6 +374,28 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
+ struct basicinfo { uint64_t create, access, write, change; uint32_t attrs, pad; };
+ struct stdinfo { int64_t alloc, eof; uint32_t links; uint8_t delete_pending, directory; uint16_t pad; };
+ 
++/* The volume-relative name of the file behind `f` as UTF-16 (FileNameInformation and FileAllInformation); STATUS_SUCCESS or
++ * STATUS_OBJECT_NAME_INVALID when it does not fit. */
++static int32_t file_name_utf16(const file_t *f, uint16_t *w, uint32_t cap, uint32_t *nchars_out)
++{
++    const fsnode_t *chain[24];
++    uint32_t depth = 0, nchars = 0;
++    const fsnode_t *n;
++    for (n = f->node; n && n->parent && depth < 24; n = n->parent) chain[depth++] = n;
++    if (!depth) { w[nchars++] = '\\'; }
++    while (depth) {
++        const fsnode_t *c = chain[--depth];
++        int wn;
++        if (nchars + 1 >= cap) return STATUS_OBJECT_NAME_INVALID;
++        w[nchars++] = '\\';
++        wn = utf8_to_utf16(c->name, w + nchars, cap - nchars);
++        if (wn < 0) return STATUS_OBJECT_NAME_INVALID;
++        nchars += (uint32_t)wn;
++    }
++    *nchars_out = nchars;
++    return STATUS_SUCCESS;
++}
++
+ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb, uint64_t buf, uint64_t len)
+ {
+     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
+@@ -347,7 +408,7 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
+         memset(&b, 0, sizeof b);
+         if (f->node) { b.create = node_time(f->node, 0); b.write = node_time(f->node, 2); b.access = node_time(f->node, 1);
+                        b.change = b.write; b.attrs = f->node->attrs; }
+-        else b.attrs = f->console ? 0x40 : FILE_ATTRIBUTE_NORMAL;      /* console pseudo-device: FILE_ATTRIBUTE_DEVICE marks it for GetFileType */
++        else b.attrs = f->console == 1 || f->console == 2 ? 0x40 : FILE_ATTRIBUTE_NORMAL;      /* console pseudo-device: FILE_ATTRIBUTE_DEVICE marks it for GetFileType */
+         if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
+         set_iosb(p, iosb, STATUS_SUCCESS, sizeof b);
+         return STATUS_SUCCESS;
+@@ -362,6 +423,45 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
+         set_iosb(p, iosb, STATUS_SUCCESS, sizeof s);
+         return STATUS_SUCCESS;
+     }
++    case 18: {                                           /* FileAllInformation (what libuv's stat asks for): 104 bytes without the name */
++        uint8_t all[104];
++        uint16_t w[512];
++        struct basicinfo b;
++        struct stdinfo sd;
++        int64_t idx = f->node ? (int64_t)node_file_id(f->node) : 0;
++        uint32_t nchars = 0, total, room, copy, access = f->access, mode = 0x20, zero = 0;
++        int64_t pos = (int64_t)f->pos;
++        int32_t st = STATUS_SUCCESS;
++        if (len < sizeof all) return STATUS_INFO_LENGTH_MISMATCH;
++        memset(&b, 0, sizeof b);
++        memset(&sd, 0, sizeof sd);
++        if (f->node) {
++            b.create = node_time(f->node, 0); b.write = node_time(f->node, 2); b.access = node_time(f->node, 1);
++            b.change = b.write; b.attrs = f->node->attrs;
++            sd.eof = (int64_t)f->node->size; sd.alloc = (int64_t)((f->node->size + 4095) & ~4095ull);
++            sd.directory = f->node->is_dir; sd.delete_pending = f->node->delete_pending; sd.links = 1;
++            st = file_name_utf16(f, w, 512, &nchars);
++            if (st) return st;
++        } else {
++            b.attrs = f->console == 1 || f->console == 2 ? 0x40 : FILE_ATTRIBUTE_NORMAL;
++        }
++        memset(all, 0, sizeof all);
++        memcpy(all + 0, &b, 40);                          /* FILE_BASIC_INFORMATION */
++        memcpy(all + 40, &sd, 24);                        /* FILE_STANDARD_INFORMATION */
++        memcpy(all + 64, &idx, 8);                        /* FILE_INTERNAL_INFORMATION */
++        memcpy(all + 72, &zero, 4);                       /* FILE_EA_INFORMATION: no extended attributes */
++        memcpy(all + 76, &access, 4);                     /* FILE_ACCESS_INFORMATION */
++        memcpy(all + 80, &pos, 8);                        /* FILE_POSITION_INFORMATION */
++        memcpy(all + 88, &mode, 4);                       /* FILE_MODE_INFORMATION: FILE_SYNCHRONOUS_IO_NONALERT */
++        memcpy(all + 92, &zero, 4);                       /* FILE_ALIGNMENT_INFORMATION: byte aligned */
++        total = nchars * 2;
++        memcpy(all + 96, &total, 4);                      /* FILE_NAME_INFORMATION.FileNameLength; the name follows at 100 */
++        room = (uint32_t)len - 100;
++        copy = total < room ? total : room & ~1u;
++        if (copy_to_user(p, buf, all, 100) || (copy && copy_to_user(p, buf + 100, w, copy))) return STATUS_ACCESS_VIOLATION;
++        set_iosb(p, iosb, copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS, 100 + copy);
++        return copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
++    }
+     case 6: {                                            /* FileInternalInformation: {LARGE_INTEGER IndexNumber} */
+         int64_t idx = f->node ? (int64_t)node_file_id(f->node) : 0;
+         if (len < 8) return STATUS_BUFFER_TOO_SMALL;
+diff --git a/shizukudos/kernel64/sysk32.c b/shizukudos/kernel64/sysk32.c
+index 9581785..a055e18 100644
+--- a/shizukudos/kernel64/sysk32.c
++++ b/shizukudos/kernel64/sysk32.c
+@@ -96,7 +96,7 @@ static int32_t sys_query_volume(process_t *p, struct regs *r, uint64_t handle, u
+     }
+     case 4: {                                                   /* FileFsDeviceInformation */
+         if (len < 8) return STATUS_INFO_LENGTH_MISMATCH;
+-        *(uint32_t *)out = f->console ? 0x50 : 7;               /* FILE_DEVICE_CONSOLE / FILE_DEVICE_DISK */
++        *(uint32_t *)out = f->console == 3 ? 0x15 : f->console ? 0x50 : 7;   /* FILE_DEVICE_NULL / FILE_DEVICE_CONSOLE / FILE_DEVICE_DISK */
+         *(uint32_t *)(out + 4) = disk && !dwritable ? 0x2 : 0;  /* FILE_READ_ONLY_DEVICE */
+         return put_result(p, iosb, buf, len, out, 8, STATUS_SUCCESS);
+     }
+diff --git a/shizukudos/win64/dlls/advapi32/rand.c b/shizukudos/win64/dlls/advapi32/rand.c
+new file mode 100644
+index 0000000..9d8076d
+--- /dev/null
++++ b/shizukudos/win64/dlls/advapi32/rand.c
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * advapi32.dll: SystemFunction036 (RtlGenRandom), what the C runtime's rand_s, V8's random number generator seeding and
++ * Chromium's base::RandBytes look up by name in advapi32. Same source as BCryptGenRandom: the kernel generator
++ * (shz_rand.h, NtShzRandom). Windows returns TRUE when the buffer was filled; a NULL buffer or one the kernel cannot write fails.
++ */
++#define _ADVAPI32_
++#include "nt.h"
++#include "shz_rand.h"
++
++DLLAPI BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length)
++{
++    if (!length) return TRUE;
++    if (!buffer) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    return shz_random_bytes(buffer, length) ? TRUE : FALSE;
++}
+diff --git a/shizukudos/win64/dlls/ws2_32/ws2_32.c b/shizukudos/win64/dlls/ws2_32/ws2_32.c
+index 27a6275..17969fd 100644
+--- a/shizukudos/win64/dlls/ws2_32/ws2_32.c
++++ b/shizukudos/win64/dlls/ws2_32/ws2_32.c
+@@ -895,6 +895,54 @@ static int narrow(PCWSTR w, char *out, size_t cap)
+     return 1;
+ }
+ 
++/* GetNameInfoW: IPv4 only. There is no reverse DNS in the kernel resolver (NtShzNetResolve answers A-record lookups), so the host
++ * comes back in numeric form, which is also what Windows does for an address with no name; NI_NAMEREQD therefore fails with
++ * WSAHOST_NOT_FOUND. The service is the decimal port, or the name from the built-in table unless NI_NUMERICSERV is set. */
++DLLAPI INT WSAAPI GetNameInfoW(const SOCKADDR *sa, socklen_t salen, PWCHAR host, DWORD hostlen, PWCHAR serv, DWORD servlen, INT flags)
++{
++    const struct sockaddr_in *in4 = (const struct sockaddr_in *)sa;
++    char text[16], port[8];
++    unsigned i, n, p;
++    NEED_INIT(WSANOTINITIALISED);
++    if (!sa || (salen < (socklen_t)sizeof *in4)) { SetLastError(WSAEFAULT); return WSAEFAULT; }
++    if (sa->sa_family != AF_INET) { SetLastError(WSAEAFNOSUPPORT); return WSAEAFNOSUPPORT; }
++    if ((!host || !hostlen) && (!serv || !servlen)) { SetLastError(WSAEINVAL); return WSAEINVAL; }
++    if (flags & ~(NI_NOFQDN | NI_NUMERICHOST | NI_NAMEREQD | NI_NUMERICSERV | NI_DGRAM)) { SetLastError(WSAEINVAL); return WSAEINVAL; }
++    if (host && hostlen) {
++        const unsigned char *a = (const unsigned char *)&in4->sin_addr;
++        if (flags & NI_NAMEREQD) { SetLastError(WSAHOST_NOT_FOUND); return WSAHOST_NOT_FOUND; }
++        for (i = 0, n = 0; i < 4; ++i) {
++            unsigned v = a[i], d = v >= 100 ? 3 : v >= 10 ? 2 : 1, k;
++            for (k = d; k > 0; --k) { text[n + k - 1] = (char)('0' + v % 10); v /= 10; }
++            n += d;
++            if (i < 3) text[n++] = '.';
++        }
++        if (n + 1 > hostlen) { SetLastError(WSAEFAULT); return WSAEFAULT; }
++        for (i = 0; i < n; ++i) host[i] = (WCHAR)text[i];
++        host[n] = 0;
++    }
++    if (serv && servlen) {
++        const char *name = 0;
++        p = ntohs(in4->sin_port);
++        if (!(flags & NI_NUMERICSERV))
++            for (i = 0; services[i].name; ++i)
++                if (services[i].port == p) { name = services[i].name; break; }
++        if (name) {
++            n = (unsigned)strlen(name);
++            if (n + 1 > servlen) { SetLastError(WSAEFAULT); return WSAEFAULT; }
++            for (i = 0; i < n; ++i) serv[i] = (WCHAR)name[i];
++        } else {
++            unsigned v = p, d = v >= 10000 ? 5 : v >= 1000 ? 4 : v >= 100 ? 3 : v >= 10 ? 2 : 1, k;
++            for (k = d; k > 0; --k) { port[k - 1] = (char)('0' + v % 10); v /= 10; }
++            n = d;
++            if (n + 1 > servlen) { SetLastError(WSAEFAULT); return WSAEFAULT; }
++            for (i = 0; i < n; ++i) serv[i] = (WCHAR)port[i];
++        }
++        serv[n] = 0;
++    }
++    return 0;
++}
++
+ DLLAPI int WSAAPI GetAddrInfoW(PCWSTR pNodeName, PCWSTR pServiceName, const ADDRINFOW *pHints, PADDRINFOW *ppResult)
+ {
+     char node[260], service[64];
+diff --git a/shizukudos/win64/kernel32/k32_console.c b/shizukudos/win64/kernel32/k32_console.c
+index aab76ee..5ae5a9c 100644
+--- a/shizukudos/win64/kernel32/k32_console.c
++++ b/shizukudos/win64/kernel32/k32_console.c
+@@ -192,3 +192,119 @@ K32API BOOL WINAPI SetConsoleCtrlHandler(PHANDLER_ROUTINE fn, BOOL add)
+     if (!ok) shz_set_last_error(ERROR_INVALID_PARAMETER);
+     return ok;
+ }
++
++/* ---------------------------------------------------------------- cursor, title, cell fills and the input queue
++ * Same model as above: the serial console has neither a cell store, a cursor shape, a title bar nor an input queue, so these
++ * keep the model a Windows program expects and change nothing on the line.
++ *  - SetConsoleCursorPosition moves the modelled cursor (the next WriteConsole continues from it); the position must lie
++ *    inside the 80x25 buffer. Get/SetConsoleCursorInfo keep the cursor size and visibility.
++ *  - FillConsoleOutputCharacterW / FillConsoleOutputAttribute report the cells of the buffer they could reach (clipped at the
++ *    end of the buffer, as Windows does); no cell contents exist to change.
++ *  - SetConsoleTitleW keeps the title (there is no title bar to show it).
++ *  - The console has no input source (reads report end of file): it holds no input events, ReadConsoleInputW reports
++ *    ERROR_HANDLE_EOF instead of blocking forever, and WriteConsoleInputW, which needs an input queue to write into, fails
++ *    with ERROR_NOT_SUPPORTED.
++ */
++static DWORD g_cursor_size = 25;
++static BOOL g_cursor_visible = TRUE;
++static WCHAR g_title[256];
++
++static BOOL in_handle(HANDLE h)
++{
++    DWORD mode;
++    if (g_detached || !GetConsoleMode(h, &mode)) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
++    return TRUE;
++}
++
++K32API BOOL WINAPI SetConsoleCursorPosition(HANDLE h, COORD pos)
++{
++    if (!out_handle(h)) return FALSE;
++    if (pos.X < 0 || pos.X >= CON_COLS || pos.Y < 0 || pos.Y >= CON_ROWS) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    AcquireSRWLockExclusive(&g_con_lock);
++    g_x = pos.X; g_y = pos.Y;
++    ReleaseSRWLockExclusive(&g_con_lock);
++    return TRUE;
++}
++
++K32API BOOL WINAPI GetConsoleCursorInfo(HANDLE h, PCONSOLE_CURSOR_INFO info)
++{
++    if (!out_handle(h)) return FALSE;
++    if (!info) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    AcquireSRWLockShared(&g_con_lock);
++    info->dwSize = g_cursor_size; info->bVisible = g_cursor_visible;
++    ReleaseSRWLockShared(&g_con_lock);
++    return TRUE;
++}
++
++K32API BOOL WINAPI SetConsoleCursorInfo(HANDLE h, const CONSOLE_CURSOR_INFO *info)
++{
++    if (!out_handle(h)) return FALSE;
++    if (!info || info->dwSize < 1 || info->dwSize > 100) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    AcquireSRWLockExclusive(&g_con_lock);
++    g_cursor_size = info->dwSize; g_cursor_visible = info->bVisible;
++    ReleaseSRWLockExclusive(&g_con_lock);
++    return TRUE;
++}
++
++static BOOL fill_reach(HANDLE h, DWORD len, COORD at, LPDWORD written)
++{
++    DWORD room;
++    if (!out_handle(h)) return FALSE;
++    if (!written) { shz_set_last_error(ERROR_INVALID_ACCESS); return FALSE; }
++    if (at.X < 0 || at.X >= CON_COLS || at.Y < 0 || at.Y >= CON_ROWS) { *written = 0; return TRUE; }   /* outside: no cell is reached */
++    room = (DWORD)(CON_ROWS - at.Y) * CON_COLS - (DWORD)at.X;
++    *written = len < room ? len : room;
++    return TRUE;
++}
++
++K32API BOOL WINAPI FillConsoleOutputCharacterW(HANDLE h, WCHAR ch, DWORD len, COORD at, LPDWORD written)
++{
++    (void)ch;
++    return fill_reach(h, len, at, written);
++}
++
++K32API BOOL WINAPI FillConsoleOutputAttribute(HANDLE h, WORD attr, DWORD len, COORD at, LPDWORD written)
++{
++    (void)attr;
++    return fill_reach(h, len, at, written);
++}
++
++K32API BOOL WINAPI SetConsoleTitleW(LPCWSTR title)
++{
++    size_t n = 0;
++    if (g_detached) { shz_set_last_error(ERROR_INVALID_HANDLE); return FALSE; }
++    if (!title) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    while (title[n]) ++n;
++    if (n > 255) n = 255;
++    AcquireSRWLockExclusive(&g_con_lock);
++    memcpy(g_title, title, n * sizeof(WCHAR));
++    g_title[n] = 0;
++    ReleaseSRWLockExclusive(&g_con_lock);
++    return TRUE;
++}
++
++K32API BOOL WINAPI GetNumberOfConsoleInputEvents(HANDLE h, LPDWORD n)
++{
++    if (!in_handle(h)) return FALSE;
++    if (!n) { shz_set_last_error(ERROR_INVALID_ACCESS); return FALSE; }
++    *n = 0;
++    return TRUE;
++}
++
++K32API BOOL WINAPI ReadConsoleInputW(HANDLE h, PINPUT_RECORD buf, DWORD len, LPDWORD got)
++{
++    if (!in_handle(h)) return FALSE;
++    if (!buf || !got || !len) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
++    *got = 0;
++    shz_set_last_error(ERROR_HANDLE_EOF);                 /* no input source: Windows would block, this console never delivers */
++    return FALSE;
++}
++
++K32API BOOL WINAPI WriteConsoleInputW(HANDLE h, const INPUT_RECORD *buf, DWORD len, LPDWORD written)
++{
++    (void)buf; (void)len;
++    if (!in_handle(h)) return FALSE;
++    if (written) *written = 0;
++    shz_set_last_error(ERROR_NOT_SUPPORTED);              /* there is no input queue to write into */
++    return FALSE;
++}
+diff --git a/shizukudos/win64/kernel32/k32_core.c b/shizukudos/win64/kernel32/k32_core.c
+index a190b3f..c4d593d 100644
+--- a/shizukudos/win64/kernel32/k32_core.c
++++ b/shizukudos/win64/kernel32/k32_core.c
+@@ -21,7 +21,9 @@ DWORD k32_nt_error(NTSTATUS st)
+     return e;
+ }
+ 
+-K32API UINT WINAPI SetErrorMode(UINT m) { static UINT mode; UINT old = mode; mode = m; return old; }
++static volatile LONG g_error_mode;
++K32API UINT WINAPI SetErrorMode(UINT m) { return (UINT)InterlockedExchange(&g_error_mode, (LONG)m); }
++K32API UINT WINAPI GetErrorMode(void) { return (UINT)g_error_mode; }
+ K32API PVOID WINAPI EncodePointer(PVOID p) { return p; }         /* no pointer obfuscation cookie is used */
+ K32API PVOID WINAPI DecodePointer(PVOID p) { return p; }
+ K32API BOOL WINAPI IsDebuggerPresent(void) { return *(BYTE *)(shz_peb() + 2) != 0; }
+diff --git a/shizukudos/win64/kernel32/k32_e1_gap.c b/shizukudos/win64/kernel32/k32_e1_gap.c
+new file mode 100644
+index 0000000..8daea6b
+--- /dev/null
++++ b/shizukudos/win64/kernel32/k32_e1_gap.c
+@@ -0,0 +1,83 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * kernel32.dll: the load-time imports of Electron / Node.js (libuv) that Chromium does not use. electron.exe and the VS Code
++ * executables import these by name at load time, so each one has to exist for the image to map at all; what each does here:
++ *
++ *  - CancelSynchronousIo: Kernel64 has no way to cancel a synchronous request of another thread, so it reports what Windows
++ *    reports when there is nothing to cancel, ERROR_NOT_FOUND (a thread blocked in a synchronous read stays blocked).
++ *  - CreateSymbolicLinkW: no file system of this system stores symbolic links (FAT32 D:, ShizukuFS E:): ERROR_NOT_SUPPORTED.
++ *  - ReOpenFile: a second handle to the file behind `orig` with the requested access, sharing and flags, opened by the path
++ *    GetFinalPathNameByHandleW reports for it.
++ *  - GetProcessIoCounters: the kernel does not count read/write operations or bytes per process, and zeros would be made-up
++ *    data: ERROR_NOT_SUPPORTED.
++ *  - GetCurrentPackageFullName, GetPackageFamilyName: there are no packaged (AppX) applications, so every process has no
++ *    package identity: APPMODEL_ERROR_NO_PACKAGE, returned as the result as the API defines.
++ *  - NeedCurrentDirectoryForExePathW: TRUE for a name with a path separator or when NoDefaultCurrentDirectoryInExePath is not
++ *    set in the environment (the documented behavior; the registry location the documentation also mentions is not read).
++ */
++#include "k32.h"
++
++#ifndef APPMODEL_ERROR_NO_PACKAGE
++#define APPMODEL_ERROR_NO_PACKAGE 15700L
++#endif
++
++K32API BOOL WINAPI CancelSynchronousIo(HANDLE thread)
++{
++    DWORD exit;
++    if (!thread || thread == INVALID_HANDLE_VALUE || (thread != GetCurrentThread() && !GetExitCodeThread(thread, &exit))) {
++        shz_set_last_error(ERROR_INVALID_HANDLE);
++        return FALSE;
++    }
++    shz_set_last_error(ERROR_NOT_FOUND);
++    return FALSE;
++}
++
++K32API BOOLEAN WINAPI CreateSymbolicLinkW(LPCWSTR link, LPCWSTR target, DWORD flags)
++{
++    if (!link || !target || (flags & ~(DWORD)(SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE))) {
++        shz_set_last_error(ERROR_INVALID_PARAMETER);
++        return FALSE;
++    }
++    shz_set_last_error(ERROR_NOT_SUPPORTED);
++    return FALSE;
++}
++
++K32API HANDLE WINAPI ReOpenFile(HANDLE orig, DWORD access, DWORD share, DWORD flags)
++{
++    WCHAR path[MAX_PATH + 8];
++    DWORD n = GetFinalPathNameByHandleW(orig, path, MAX_PATH + 8, 0);
++    if (!n) return INVALID_HANDLE_VALUE;                  /* LastError set by GetFinalPathNameByHandleW */
++    if (n >= MAX_PATH + 8) { shz_set_last_error(ERROR_FILENAME_EXCED_RANGE); return INVALID_HANDLE_VALUE; }
++    return CreateFileW(path, access, share, 0, OPEN_EXISTING, flags, 0);
++}
++
++K32API BOOL WINAPI GetProcessIoCounters(HANDLE process, PIO_COUNTERS counters)
++{
++    (void)process;
++    if (!counters) { shz_set_last_error(ERROR_NOACCESS); return FALSE; }
++    shz_set_last_error(ERROR_NOT_SUPPORTED);
++    return FALSE;
++}
++
++K32API LONG WINAPI GetCurrentPackageFullName(UINT32 *len, PWSTR name)
++{
++    (void)name;
++    if (!len) return ERROR_INVALID_PARAMETER;
++    return APPMODEL_ERROR_NO_PACKAGE;
++}
++
++K32API LONG WINAPI GetPackageFamilyName(HANDLE process, UINT32 *len, PWSTR name)
++{
++    (void)name;
++    if (!process || !len) return ERROR_INVALID_PARAMETER;
++    return APPMODEL_ERROR_NO_PACKAGE;
++}
++
++K32API BOOL WINAPI NeedCurrentDirectoryForExePathW(LPCWSTR exe)
++{
++    WCHAR v;
++    const WCHAR *p;
++    if (!exe) { shz_set_last_error(ERROR_INVALID_PARAMETER); return TRUE; }
++    for (p = exe; *p; ++p)
++        if (*p == '\\') return TRUE;
++    return GetEnvironmentVariableW(L"NoDefaultCurrentDirectoryInExePath", &v, 1) == 0;
++}
+diff --git a/shizukudos/win64/kernel32/k32_file.c b/shizukudos/win64/kernel32/k32_file.c
+index 81d52a9..7735a3a 100644
+--- a/shizukudos/win64/kernel32/k32_file.c
++++ b/shizukudos/win64/kernel32/k32_file.c
+@@ -452,8 +452,11 @@ K32API BOOL WINAPI WriteConsoleW(HANDLE h, const VOID *buf, DWORD n, LPDWORD wri
+         DWORD chunk = n - off > 250 ? 250 : n - off, put;
+         int len = wide_to_utf8(w + off, (int)chunk, tmp, sizeof tmp);
+         if (len <= 0) break;
+-        if (!WriteFile(h, tmp, (DWORD)len - 1, &put, 0)) return FALSE;
+-        if (std_index(h) < 1) k32_console_track(tmp, (DWORD)len - 1);       /* WriteFile tracked the standard handles */
++        /* wide_to_utf8 with an explicit length returns the bytes it wrote, without a terminator (only a length of -1 counts the
++         * NUL): every byte goes out. Dropping the last one lost the newline of every CRT / Node console write, so the line-buffered
++         * console kept text until the next newline. */
++        if (!WriteFile(h, tmp, (DWORD)len, &put, 0)) return FALSE;
++        if (std_index(h) < 1) k32_console_track(tmp, (DWORD)len);       /* WriteFile tracked the standard handles */
+         off += chunk;
+         done += chunk;
+     }
+diff --git a/shizukudos/win64/kernel32/k32_ipc_io.c b/shizukudos/win64/kernel32/k32_ipc_io.c
+index ee6f005..d477caf 100644
+--- a/shizukudos/win64/kernel32/k32_ipc_io.c
++++ b/shizukudos/win64/kernel32/k32_ipc_io.c
+@@ -80,6 +80,7 @@ K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECU
+     }
+     if (is_console_name(name, "CONOUT$")) name = L"\\??\\CONOUT$";
+     else if (is_console_name(name, "CONIN$")) name = L"\\??\\CONIN$";
++    else if (is_console_name(name, "NUL") || is_console_name(name, "NUL:") || is_console_name(name, "\\\\.\\NUL")) name = L"\\??\\NUL";
+     st = to_nt(name, nt, 320);
+     if (st) { k32_nt_error(st); return INVALID_HANDLE_VALUE; }
+     if (flags & FILE_FLAG_DELETE_ON_CLOSE) opts |= NT_OPT_DELETE_ON_CLOSE;
+@@ -263,7 +264,7 @@ K32API DWORD WINAPI GetFileType(HANDLE h)
+     shz_set_last_error(0);
+     switch (dev[0]) {
+     case 0x11: case 0x12: return FILE_TYPE_PIPE;               /* named pipes, sockets (AFD) */
+-    case 0x50: return FILE_TYPE_CHAR;                          /* console */
++    case 0x50: case 0x15: return FILE_TYPE_CHAR;               /* console, NUL */
+     default: return FILE_TYPE_DISK;
+     }
+ }
+@@ -400,7 +401,12 @@ K32API HANDLE WINAPI CreateNamedPipeW(LPCWSTR name, DWORD open_mode, DWORD pipe_
+     ACCESS_MASK access = SYNCHRONIZE | FILE_READ_ATTRIBUTES;
+     ULONG share = 0, n, i;
+     NTSTATUS st;
+-    for (i = 0; pfx[i]; ++i) if (!name || (name[i] | (i >= 3 ? 32 : 0)) != (pfx[i] | (i >= 3 ? 32 : 0))) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
++    /* "\\.\pipe\" or the verbatim form "\\?\pipe\" (libuv names its stdio pipes \\?\pipe\uv\<id>; Windows accepts both) */
++    for (i = 0; pfx[i]; ++i)
++        if (!name || !(name[i] == pfx[i] || (i == 2 && name[i] == '?') || (i >= 3 && (name[i] | 32) == (pfx[i] | 32)))) {
++            shz_set_last_error(ERROR_INVALID_NAME);
++            return INVALID_HANDLE_VALUE;
++        }
+     n = (ULONG)wl(name);
+     if (n - 9 == 0 || n + 1 > 290) { shz_set_last_error(ERROR_INVALID_NAME); return INVALID_HANDLE_VALUE; }
+     if (!max_inst || max_inst > PIPE_UNLIMITED_INSTANCES || !(open_mode & PIPE_ACCESS_DUPLEX) ||
+diff --git a/shizukudos/win64/ntdll/unwind.c b/shizukudos/win64/ntdll/unwind.c
+index 10cba59..e4a6bbd 100644
+--- a/shizukudos/win64/ntdll/unwind.c
++++ b/shizukudos/win64/ntdll/unwind.c
+@@ -40,6 +40,7 @@ typedef struct {
+     PVOID context;
+     DWORD64 identifier;                         /* RtlInstallFunctionTableCallback's TableIdentifier (low 3 bits = 3) */
+     int used;
++    int growable;                               /* RtlAddGrowableFunctionTable: the handle is this slot's address */
+ } dyn_table_t;
+ static dyn_table_t dyn_tables[128];
+ static volatile LONG dyn_lock;
+@@ -54,7 +55,7 @@ SHZ_EXPORT BOOLEAN NTAPI RtlAddFunctionTable(PRUNTIME_FUNCTION table, DWORD coun
+     dyn_acquire();
+     for (i = 0; i < 128; ++i)
+         if (!dyn_tables[i].used) {
+-            dyn_tables[i] = (dyn_table_t){ table, count, base, 0, 0, 0, 0, 1 };
++            dyn_tables[i] = (dyn_table_t){ table, count, base, 0, 0, 0, 0, 1, 0 };
+             dyn_release();
+             return TRUE;
+         }
+@@ -74,7 +75,7 @@ SHZ_EXPORT BOOLEAN __cdecl RtlInstallFunctionTableCallback(DWORD64 identifier, D
+     dyn_acquire();
+     for (i = 0; i < 128; ++i)
+         if (!dyn_tables[i].used) {
+-            dyn_tables[i] = (dyn_table_t){ 0, 0, base, length, callback, context, identifier, 1 };
++            dyn_tables[i] = (dyn_table_t){ 0, 0, base, length, callback, context, identifier, 1, 0 };
+             dyn_release();
+             return TRUE;
+         }
+@@ -94,6 +95,44 @@ SHZ_EXPORT BOOLEAN __cdecl RtlDeleteFunctionTable(PRUNTIME_FUNCTION table)
+     return found;
+ }
+ 
++/* Growable tables (Windows 8+; V8 registers the unwind info of its code range with them): the caller owns a RUNTIME_FUNCTION
++ * array sorted by address, registered for [RangeBase, RangeEnd) with `count` valid entries out of `max`, and raises the count
++ * with RtlGrowFunctionTable as it appends entries. RUNTIME_FUNCTION RVAs are from RangeBase. They live in the same registry
++ * as RtlAddFunctionTable tables, so RtlLookupFunctionEntry and the unwinder find them with no other change; the handle
++ * returned through DynamicTable is the address of the registry slot. */
++SHZ_EXPORT DWORD NTAPI RtlAddGrowableFunctionTable(PVOID *dynamic_table, PRUNTIME_FUNCTION table, DWORD count, DWORD max,
++                                                      ULONG_PTR range_base, ULONG_PTR range_end)
++{
++    unsigned i;
++    if (!dynamic_table || count > max || range_end <= range_base || (count && !table)) return 0xC000000DUL;        /* STATUS_INVALID_PARAMETER */
++    dyn_acquire();
++    for (i = 0; i < 128; ++i)
++        if (!dyn_tables[i].used) {
++            dyn_tables[i] = (dyn_table_t){ table, count, range_base, range_end - range_base, 0, 0, 0, 1, 1 };
++            *dynamic_table = &dyn_tables[i];
++            dyn_release();
++            return 0;                /* STATUS_SUCCESS */
++        }
++    dyn_release();
++    return 0xC0000017UL;         /* STATUS_NO_MEMORY */
++}
++
++SHZ_EXPORT VOID NTAPI RtlGrowFunctionTable(PVOID dynamic_table, DWORD new_count)
++{
++    dyn_table_t *t = dynamic_table;
++    dyn_acquire();
++    if (t >= dyn_tables && t < dyn_tables + 128 && t->used && t->growable && new_count > t->count) t->count = new_count;
++    dyn_release();
++}
++
++SHZ_EXPORT VOID NTAPI RtlDeleteGrowableFunctionTable(PVOID dynamic_table)
++{
++    dyn_table_t *t = dynamic_table;
++    dyn_acquire();
++    if (t >= dyn_tables && t < dyn_tables + 128 && t->used && t->growable) t->used = 0;
++    dyn_release();
++}
++
+ static PRUNTIME_FUNCTION search_table(PRUNTIME_FUNCTION t, DWORD n, DWORD64 base, DWORD64 pc)
+ {
+     long lo = 0, hi = (long)n - 1;
