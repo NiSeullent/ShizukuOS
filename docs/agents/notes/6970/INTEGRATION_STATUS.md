@@ -24,4 +24,17 @@ minimum observed free21,514,727,424B, resource failure absent, native execution 
 
 Main source changes, standalone component execution, an original-Microsoft-DOS Windows control and complete product acceptance are different evidence boundaries. Final integrated acceptance is pending. No ISO or modern-app completion is inferred here.
 
-Kernel32 deadline fixture and guarded runner are prepared and independently source-reviewed. The actual admission attempt exited3/BLOCKED_NOT_RUN before any compiler/output root, so unchanged-production RED and production repair/GREEN remain pending. Canonical master163f acknowledged this lane separately from its user.c process-owner publication repair.
+Kernel32 deadline source is repaired in6dfc4b574a023c4e4277bbc357b876cfbd82f70d.
+Actual hosted unchanged-production RED reproduced22 failures across76 checks.
+The identical frozen production-C fixture then passed76 HOST and76 ASan/UBSan
+checks; all6 actual GREEN commands exited0, eight-file closure matched and no
+resource failure occurred. This does not establish native i486 linking, context
+switch assembly or Windows/VMM execution. [Evidence](K32_DEADLINE_PLAN.md#actual-hosted-red-and-green).
+Canonical master163f acknowledged this lane separately from its user.c
+process-owner publication repair. Combined source/build acceptance is pending.
+
+[DOS executor boundary audit](DOS_GATE_BOUNDARY_AUDIT.md) confirms audited main
+lacks an actual backend-worker→DOS executor. Canonical master163f acknowledged
+the audit and assigned its Windows/NT lead that boundary; replacement boot
+stays with master. Implementation/acceptance remains unverified; independent
+common locks do not establish DOS replacement.

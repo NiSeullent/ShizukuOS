@@ -36,3 +36,39 @@ Independent source review covered hardware-only substitutions, accumulated asser
 An actual RED CLI admission attempt returned BLOCKED_NOT_RUN/exit3 at20,095,266,816B free versus21,483,225,088B required, without creating the requested proof root or starting a compiler. All four frozen source hashes remained unchanged. Python syntax parsing passed without bytecode output. There is no actual C compile, RED, GREEN, descendant teardown negative-control or native acceptance yet. The prepared tests are committed for continuation in another environment; no production deadline repair is included.
 
 Use a fresh absolute direct child of this checkout's build/k32-deadline-6970 for every actual proof. The runner derives paths from the checkout and rejects reused/symlinked/outside roots. Keep resource admission and compiler/sanitizer requirements when continuing.
+
+## Actual hosted RED and GREEN
+
+The local blocked attempt above is preserved. A separate GitHub-hosted Ubuntu
+checkout ran the real production C under the same20 GiB reserve and8 MiB
+aggregate output cap; there was no local below-floor compiler exception.
+Public source workflow d47b21521d20941c27f594ef59724e8a46c52d30 pins checkout,
+verifies GITHUB_SHA, derives a fresh run/attempt path and uploads no artifacts.
+
+| Phase | Exact source | Actual result | Receipt SHA256 |
+| --- | --- | --- | --- |
+| [RED run36915348082](https://github.com/NiSeullent/Win98-Modern/actions/runs/36915348082) | d47b21521d20941c27f594ef59724e8a46c52d30 | GCC compile0, fixture1;22 expected failures of76 checks | 3cf2fcd2ccaa6f42be2ba1cec65a85951fecc3a8dbe455b5f63701fffca2193e |
+| [GREEN run36916096646](https://github.com/NiSeullent/Win98-Modern/actions/runs/36916096646) | 6dfc4b574a023c4e4277bbc357b876cfbd82f70d | HOST76 and ASan/UBSan76 checks, zero failures; all6commands0 | 31bcdf1a527efaee6ec17274b8d7b1391709b5b710b09bf31f6be39d4bcac135 |
+
+Both multiplication overflow and finite-zero collision failed on actual
+unchanged production. Root reconstructed each receipt from actual job logs,
+matched its logged SHA and checked closure against current source. Independent
+review also rehashed the bounded RED log and cleared the small production
+change before GREEN. GCC13.3 and Clang18.1 compiler identities, argv, exits,
+executable hashes and source before/after identities are in the actual receipts.
+
+GREEN eight-file closure includes the unchanged fixture/runner plus the helper;
+final aggregate1,625,251B, minimum observed free92,384,980,992B, resource failure
+absent and receipt accounting verified. The original HOST fixture and runner
+hashes remain unchanged. Sanitizer stderr is empty.
+
+Only wake_tick width and finite sleep/semaphore expressions changed, with a
+positive-tick static assertion and bounded unsigned quotient/remainder helper.
+Kernel64 scheduler and peer user.c publication source were untouched. Source
+review confirms assembly retains ESP32 at offset0 and unsigned64 division
+helpers exist, but actual i486 lowering/linking is a separate pending proof.
+
+Actual Windows98, VMM, context-switch assembly, thread_create, unlocked/torn
+clock reads, full64-bit counter rollover and deliberate descendant-abort
+negative control remain unverified by these receipts. Combined main imports
+must retain peer publication/storage changes and run their own closure tests.
