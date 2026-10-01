@@ -10,7 +10,7 @@
 
 #define CLIENT_WIDTH 456
 #define CLIENT_HEIGHT 264
-#define RUN_MILLISECONDS 10000u
+#define RUN_MILLISECONDS 30000u
 #ifndef WM_THEMECHANGED
 #define WM_THEMECHANGED 0x031Au
 #endif
@@ -227,7 +227,7 @@ static int paint_scene(HDC dc)
         !paint_part(dc, button_theme, 1, selected_style == 2u ? 3 : 1,
                     &modern_control, L"Modern (M)", centered)) return 0;
     result = draw_text(button_theme, dc, 1, 1,
-        L"Click a style, or press C / M. Esc closes.\nAutomatic switches at 3 and 6 seconds; closes at 10 seconds.",
+        L"Click a style, or press C / M. Esc closes.\nAutomatic switches at 10 and 20 seconds; closes at 30 seconds.",
         -1, DT_CENTER | DT_WORDBREAK, 0, &footer);
     if (result != S_OK) { record_failure("DrawThemeText(instructions)", result); return 0; }
     if (!GdiFlush()) { record_native_failure("GdiFlush(paint)"); return 0; }
@@ -357,10 +357,10 @@ void mainCRTStartup(void)
         MSG message;
         DWORD now = GetTickCount(), elapsed = now - start;
         unsigned batch = 0;
-        if (!auto_modern && elapsed >= 3000u) {
+        if (!auto_modern && elapsed >= 10000u) {
             auto_modern = 1; if (!select_style(2)) break;
         }
-        if (!auto_classic && elapsed >= 6000u) {
+        if (!auto_classic && elapsed >= 20000u) {
             auto_classic = 1; if (!select_style(1)) break;
         }
         while (batch++ < 32u && PeekMessageA(&message, NULL, 0, 0, PM_REMOVE)) {

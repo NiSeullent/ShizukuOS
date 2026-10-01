@@ -20,7 +20,14 @@ from typing import Any
 
 
 MAX_METADATA_BYTES = 1024 * 1024
-ARTIFACTS = ("M98THEME.DLL", "NTTHGUI.EXE")
+ARTIFACTS = ("M98THEME.DLL", "NTTHGUI.EXE", "NTTHRUN.EXE")
+OBSERVER_FIELDS = frozenset({
+    "NTTHOBS_LOG_VERSION", "BEGIN_NONCE", "RUN_NONCE", "OS_PLATFORM", "OS_MAJOR", "OS_MINOR",
+    "OS_BUILD_LOW", "WIN98_IDENTIFIED", "CHILD_PATH", "CHILD_CREATED", "CHILD_CREATE_ERROR",
+    "CHILD_PID", "CHILD_WAIT", "CHILD_WAIT_ERROR", "CHILD_EXIT_QUERY", "CHILD_EXIT_QUERY_ERROR",
+    "CHILD_EXIT_CODE", "CHILD_REAPED", "THREAD_CLOSED", "PROCESS_CLOSED", "TERMINATION_ATTEMPTED",
+    "CLEANUP", "RESULT",
+})
 FINAL_FIELDS = frozenset({
     "RUN_NONCE", "WIN98_IDENTIFIED", "OS_PLATFORM", "OS_MAJOR", "OS_MINOR",
     "CLASSIC_PAINTS", "MODERN_PAINTS", "SWITCHES", "DLL_LOCAL",
@@ -154,9 +161,55 @@ def _source_freshness(receipt: dict[str, Any]) -> dict[str, Any]:
     return {"checked": True, "matches": not mismatches, "mismatches": mismatches}
 
 
+def parse_observer_log(data: bytes, expected_nonce: str, provider_path: str) -> dict[str, Any]:
+    """Require a normal owned-process wait and its actual full DWORD exit."""
+    try:
+        text = data.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise VerificationError("observer log is not ASCII") from error
+    _require(not any(ord(char) < 32 and char not in "\r\n\t" for char in text),
+             "observer log contains control characters")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    _require(bool(lines) and lines[-1] == "RESULT=PASS", "observer log has no final PASS")
+    fields: dict[str, str] = {}
+    for line in lines:
+        _require("=" in line, "malformed observer log line")
+        key, value = (part.strip() for part in line.split("=", 1))
+        _require(not re.search(r"(?:^|_)(?:FAIL|FAILED|FAILURE|FAIL_STAGE)(?:_|$)", key, re.IGNORECASE),
+                 "observer log contains a failure stage")
+        if key.upper() in OBSERVER_FIELDS:
+            _require(key == key.upper() and key not in fields, f"duplicate or noncanonical observer field: {key}")
+            fields[key] = value
+        elif re.search(r"(?:^|_)(?:ERROR|LOGERROR)(?:_|$)", key, re.IGNORECASE):
+            _require(value == "0", "observer log contains an error")
+    _require(OBSERVER_FIELDS <= fields.keys(), "missing observer log fields: " +
+             ", ".join(sorted(OBSERVER_FIELDS - fields.keys())))
+    for key in ("BEGIN_NONCE", "RUN_NONCE"):
+        _require(fields[key] == expected_nonce, f"observer {key} nonce mismatch")
+    success_values = {
+        "NTTHOBS_LOG_VERSION": "1", "OS_PLATFORM": "1", "OS_MAJOR": "4", "OS_MINOR": "10",
+        "OS_BUILD_LOW": "2222", "WIN98_IDENTIFIED": "1", "CHILD_CREATED": "1",
+        "CHILD_CREATE_ERROR": "0", "CHILD_WAIT": "0", "CHILD_WAIT_ERROR": "0",
+        "CHILD_EXIT_QUERY": "1", "CHILD_EXIT_QUERY_ERROR": "0", "CHILD_EXIT_CODE": "0",
+        "CHILD_REAPED": "1", "THREAD_CLOSED": "1", "PROCESS_CLOSED": "1",
+        "TERMINATION_ATTEMPTED": "0", "CLEANUP": "PASS", "RESULT": "PASS",
+    }
+    for key, expected in success_values.items():
+        _require(fields[key] == expected, f"invalid observer field: {key}")
+    pid = fields["CHILD_PID"]
+    _require(re.fullmatch(r"[0-9]{1,10}", pid) is not None and 0 < int(pid) <= 0xffffffff,
+             "invalid observer child PID")
+    child_path = ntpath.join(ntpath.dirname(_win_path(provider_path)), "NTTHGUI.EXE")
+    _require(_win_path(fields["CHILD_PATH"]) == _win_path(child_path), "observer launched another child path")
+    return {"child_path": fields["CHILD_PATH"], "child_pid": int(pid), "child_exit_code": 0,
+            "os_build_low": 2222, "normal_wait_verified": True,
+            "actual_supervisor_exit_verified": False, "supervisor_log_close_verified": False}
+
+
 def verify_native_evidence(*, build_receipt: Path, build_receipt_sha256: str,
                            log: Path, nonce: str, exit_code: int, provider_path: str,
-                           guest_dll: Path, guest_probe: Path) -> dict[str, Any]:
+                           guest_dll: Path, guest_probe: Path, observer_log: Path,
+                           guest_observer: Path) -> dict[str, Any]:
     """Read only; require independent readbacks and an actual outer exit result."""
     _require(type(exit_code) is int and exit_code == 0, "external native probe exit code must be exactly zero")
     _require(re.fullmatch(r"[0-9a-f]{64}", build_receipt_sha256) is not None,
@@ -176,7 +229,7 @@ def verify_native_evidence(*, build_receipt: Path, build_receipt_sha256: str,
     artifacts = receipt.get("artifacts")
     _require(isinstance(artifacts, dict), "build receipt has no artifact mapping")
     verified_artifacts: dict[str, Any] = {}
-    for name, readback in zip(ARTIFACTS, (guest_dll, guest_probe)):
+    for name, readback in zip(ARTIFACTS, (guest_dll, guest_probe, guest_observer)):
         entry = artifacts.get(name)
         _require(isinstance(entry, dict), f"missing frozen build artifact: {name}")
         pe_gate = entry.get("pe98_gate")
@@ -197,6 +250,8 @@ def verify_native_evidence(*, build_receipt: Path, build_receipt_sha256: str,
                                     "built_path": str(built.resolve()), "readback_path": str(readback.resolve())}
     log_data = _read_metadata(log)
     parsed = parse_log(log_data, nonce, provider_path)
+    observer_data = _read_metadata(observer_log)
+    observed = parse_observer_log(observer_data, nonce, provider_path)
     return {
         "schema": 1, "status": "PASS", "run_nonce": nonce,
         "gdi_contracts_verified": True, "native_visibility_verified": False,
@@ -204,6 +259,9 @@ def verify_native_evidence(*, build_receipt: Path, build_receipt_sha256: str,
         "system_theme_installed": False, "persistence_verified": False,
         "application_functionality_verified": False,
         "external_exit_code": exit_code, "os": parsed["os"],
+        "observer_child_exit_verified": True, "observer": observed,
+        "observer_log": {"path": str(observer_log.resolve()),
+                         "sha256": hashlib.sha256(observer_data).hexdigest(), "bytes": len(observer_data)},
         "provider_path": parsed["provider_path"], "counts": parsed["counts"],
         "build_receipt": {"path": str(build_receipt.resolve()), "sha256": build_receipt_sha256},
         "artifacts": verified_artifacts,
@@ -227,6 +285,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Independent M98THEME.DLL readback after guest stop")
     parser.add_argument("--guest-probe", type=Path, required=True,
                         help="Independent NTTHGUI.EXE readback after guest stop")
+    parser.add_argument("--observer-log", type=Path, required=True,
+                        help="Independent THOBS.LOG with the observer's actual child exit")
+    parser.add_argument("--guest-observer", type=Path, required=True,
+                        help="Independent NTTHRUN.EXE readback after guest stop")
     args = parser.parse_args(argv)
     try:
         result = verify_native_evidence(**vars(args))

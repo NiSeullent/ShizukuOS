@@ -27,7 +27,8 @@ class NativeEvidenceTests(unittest.TestCase):
         readback_dir.mkdir()
         self.artifacts = {}
         for name, payload in (("M98THEME.DLL", b"test-only provider build bytes"),
-                              ("NTTHGUI.EXE", b"test-only native probe build bytes")):
+                              ("NTTHGUI.EXE", b"test-only native probe build bytes"),
+                              ("NTTHRUN.EXE", b"test-only observer build bytes")):
             built, readback = build_dir / name, readback_dir / name
             built.write_bytes(payload)
             readback.write_bytes(payload)
@@ -49,9 +50,23 @@ class NativeEvidenceTests(unittest.TestCase):
             f"PROVIDER_PATH={self.provider}", "CLEANUP=PASS", "RESULT=PASS", "",
         ])
         self.log.write_text(self.valid_log, encoding="ascii", newline="")
+        self.observer_log = readback_dir / "THOBS.LOG"
+        observer = {
+            "NTTHOBS_LOG_VERSION": "1", "BEGIN_NONCE": self.nonce,
+            "OS_PLATFORM": "1", "OS_MAJOR": "4", "OS_MINOR": "10", "OS_BUILD_LOW": "2222",
+            "WIN98_IDENTIFIED": "1", "CHILD_PATH": r"C:\VXDLAB\NTTHGUI.EXE",
+            "CHILD_CREATED": "1", "CHILD_CREATE_ERROR": "0", "CHILD_PID": "1234",
+            "CHILD_WAIT": "0", "CHILD_WAIT_ERROR": "0", "CHILD_EXIT_QUERY": "1",
+            "CHILD_EXIT_QUERY_ERROR": "0", "CHILD_EXIT_CODE": "0", "CHILD_REAPED": "1",
+            "THREAD_CLOSED": "1", "PROCESS_CLOSED": "1", "TERMINATION_ATTEMPTED": "0",
+            "RUN_NONCE": self.nonce, "CLEANUP": "PASS", "RESULT": "PASS",
+        }
+        self.valid_observer = "\r\n".join(f"{key}={value}" for key, value in observer.items()) + "\r\n"
+        self.observer_log.write_text(self.valid_observer, encoding="ascii", newline="")
         self.args = {"build_receipt": self.receipt, "build_receipt_sha256": self.receipt_hash,
                      "log": self.log, "nonce": self.nonce, "exit_code": 0, "provider_path": self.provider,
-                     "guest_dll": readback_dir / "M98THEME.DLL", "guest_probe": readback_dir / "NTTHGUI.EXE"}
+                     "guest_dll": readback_dir / "M98THEME.DLL", "guest_probe": readback_dir / "NTTHGUI.EXE",
+                     "guest_observer": readback_dir / "NTTHRUN.EXE", "observer_log": self.observer_log}
 
     def freeze_receipt(self):
         self.receipt.write_text(json.dumps(self.receipt_value), encoding="utf-8")
@@ -71,6 +86,8 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertFalse(result["os_wide_automatic_theme_verified"])
         self.assertFalse(result["persistence_verified"])
         self.assertEqual(result["source_freshness"]["matches"], True)
+        self.assertTrue(result["observer_child_exit_verified"])
+        self.assertFalse(result["observer"]["actual_supervisor_exit_verified"])
 
     def test_successful_old_run_cannot_be_replayed_under_a_new_nonce(self):
         self.args["nonce"] = "f" * 32
@@ -114,7 +131,7 @@ class NativeEvidenceTests(unittest.TestCase):
                     VERIFY.verify_native_evidence(**self.args)
 
     def test_each_changed_guest_binary_rejects_otherwise_valid_evidence(self):
-        for key in ("guest_dll", "guest_probe"):
+        for key in ("guest_dll", "guest_probe", "guest_observer"):
             with self.subTest(key=key):
                 path = self.args[key]
                 original = path.read_bytes()
@@ -187,6 +204,22 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertTrue(result["gdi_contracts_verified"])
         self.assertFalse(result["source_freshness"]["matches"])
         self.assertEqual(result["source_freshness"]["mismatches"][0]["path"], "source.c")
+
+    def test_observer_stale_incomplete_and_abnormal_exit_records_are_rejected(self):
+        replacements = (
+            ("BEGIN_NONCE=" + self.nonce, "BEGIN_NONCE=" + "f" * 32),
+            ("OS_BUILD_LOW=2222", "OS_BUILD_LOW=1998"), ("CHILD_WAIT=0", "CHILD_WAIT=258"),
+            ("CHILD_EXIT_QUERY=1", "CHILD_EXIT_QUERY=0"), ("CHILD_EXIT_CODE=0", "CHILD_EXIT_CODE=256"),
+            ("PROCESS_CLOSED=1", "PROCESS_CLOSED=0"), ("TERMINATION_ATTEMPTED=0", "TERMINATION_ATTEMPTED=1"),
+            (r"C:\VXDLAB\NTTHGUI.EXE", r"C:\WINDOWS\OTHER.EXE"),
+            ("CHILD_EXIT_CODE=0", "CHILD_EXIT_CODE=0\r\nCHILD_EXIT_CODE=0"),
+            ("CHILD_REAPED=1\r\n", ""), ("RESULT=PASS", "RESULT=PASS\r\nFAIL_STAGE=log-close\r\nRESULT=PASS"),
+        )
+        for old, new in replacements:
+            with self.subTest(old=old, new=new):
+                self.observer_log.write_text(self.valid_observer.replace(old, new), encoding="ascii", newline="")
+                with self.assertRaises(VERIFY.VerificationError):
+                    VERIFY.verify_native_evidence(**self.args)
 
 
 if __name__ == "__main__":

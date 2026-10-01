@@ -24,6 +24,8 @@ SOURCES = [
     "benchmarks/win98se-ko-oem-native-exports-v1.json",
     "ntwddm/win98/theme_probe/probe.c", "ntwddm/win98/theme_probe/build.py",
     "ntwddm/win98/theme_probe/verify.py", "ntwddm/win98/theme_probe/test_verify.py",
+    "ntwddm/win98/theme_probe/observer.c", "ntwddm/win98/theme_probe/observer_mock.h",
+    "ntwddm/win98/theme_probe/observer_mock_test.c",
 ]
 
 
@@ -107,6 +109,15 @@ def main():
             match = re.fullmatch(r"PASS: (\d+) theme lifecycle, pixel, state, query and allocation checks", output)
             require(match is not None and int(match[1]) > 0, f"unrecognized {kind} result: {output}")
             host_results[kind] = {"checks": int(match[1]), "output": output}
+            observer_host = run_dir / ("observer-" + kind)
+            run(["clang"] + common + flags + ["ntwddm/win98/theme_probe/observer_mock_test.c",
+                                               "-o", str(observer_host)])
+            observer_output = run([str(observer_host)], env)
+            observer_match = re.fullmatch(r"PASS: (\d+) observer ownership, lifecycle, exit and log assertions",
+                                         observer_output)
+            require(observer_match is not None and int(observer_match[1]) > 0,
+                    f"unrecognized observer {kind} result: {observer_output}")
+            host_results["observer_" + kind] = {"checks": int(observer_match[1]), "output": observer_output}
         native = ["i686-w64-mingw32-gcc", "-std=c11", "-Os", "-Wall", "-Wextra", "-Werror",
                   "-march=i486", "-mno-sse", "-mno-sse2", "-mno-mmx", "-msoft-float",
                   "-fno-builtin", "-fno-stack-protector", "-mno-stack-arg-probe", "-nostdlib",
@@ -119,9 +130,12 @@ def main():
              "src/uxtheme_engine.def", "-lkernel32", "-luser32", "-lgdi32", "-o", str(dll)])
         run(native + ["-Wl,--entry,_mainCRTStartup", "ntwddm/win98/theme_probe/probe.c",
                       "platform/freestanding/memory.c", "-lkernel32", "-luser32", "-lgdi32", "-o", str(probe)])
+        observer = run_dir / "NTTHRUN.EXE"
+        run(native + ["-Wl,--entry,_mainCRTStartup", "ntwddm/win98/theme_probe/observer.c",
+                      "platform/freestanding/memory.c", "-lkernel32", "-o", str(observer)])
         artifacts = {path.name: {"path": str(path), "sha256": digest(path), "bytes": path.stat().st_size,
                                  "pe98_gate": gate(path, is_dll)}
-                     for path, is_dll in ((dll, True), (probe, False))}
+                     for path, is_dll in ((dll, True), (probe, False), (observer, False))}
         require(all(digest(ROOT / name) == value for name, value in hashes.items()), "source changed during build")
         result.update(status="PASS", artifacts=artifacts, compiler_versions=versions, host_results=host_results)
     except Exception as error:
@@ -132,6 +146,7 @@ def main():
     receipt.write_text(json.dumps(result, indent=2) + "\n")
     latest.write_bytes(receipt.read_bytes())
     print(f"PASS: {host_results['host']['checks']} host checks and sanitizers; native PE32 gates")
+    print(f"PASS: {host_results['observer_host']['checks']} observer lifecycle assertions and sanitizers")
     print(f"Windows 98 execution and visual review remain required. Receipt: {receipt}")
     print(f"Receipt SHA256: {digest(receipt)}")
 
