@@ -202,6 +202,30 @@ class ReplacementInventory(unittest.TestCase):
                 handle.seek(at); handle.write(struct.pack('<H', pair))
         with self.assertRaises(ValueError): self.inventory(self.disk)
 
+    def invalid_eoc_entry(self, directory):
+        with self.disk.open('r+b') as handle:
+            mbr = handle.read(512); handle.seek(16384); vbr = handle.read(512)
+            geometry = prep.inspect_geometry(mbr, vbr, self.disk.stat().st_size)
+            root_at = (geometry['start_lba']+geometry['reserved']+
+                       geometry['fats']*geometry['fat_sectors'])*512
+            row = bytearray(32); row[:11] = b'BADENTRY   '
+            row[11] = 16 if directory else 32
+            struct.pack_into('<H', row, 26, 0xff8)
+            handle.seek(root_at); handle.write(row)
+        with self.assertRaises(ValueError): self.inventory(self.disk)
+        if not directory:
+            # A legitimate empty file has no cluster chain; keep that case.
+            struct.pack_into('<H', row, 26, 0)
+            with self.disk.open('r+b') as handle:
+                handle.seek(root_at); handle.write(row)
+            self.assertEqual(self.inventory(self.disk)['BADENTRY']['bytes'], 0)
+
+    def test_eoc_start_is_not_an_empty_directory(self):
+        self.invalid_eoc_entry(True)
+
+    def test_eoc_start_is_not_a_valid_zero_length_file(self):
+        self.invalid_eoc_entry(False)
+
 
 class ReplacementPrepare(ReplacementInventory):
     def setUp(self):
@@ -244,6 +268,22 @@ class ReplacementPrepare(ReplacementInventory):
         self.assertEqual(after['WIN.COM']['sha256'],hashlib.sha256(self.original.read_bytes()).hexdigest())
         self.assertEqual(after['KERNEL.SYS']['sha256'],self.pin(self.kernel)['sha256'])
         with self.assertRaises(FileExistsError): self.prepare(out)
+
+    def test_actual_payload_tool_append_refuses_final_extent_and_prepared_receipt(self):
+        out = self.root/'appended-output'; calls = []
+        original = prep.run_tool
+        def tool(name, args, commands, cwd=None):
+            original(name, args, commands, cwd=cwd)
+            if name == 'mcopy':
+                target = Path(str(args[args.index('-i')+1]).split('@@',1)[0])
+                with target.open('ab') as handle: handle.write(b'!')
+                calls.append(target)
+        with patch.object(prep, 'run_tool', tool):
+            with self.assertRaisesRegex(ValueError, 'disk extent differs'):
+                self.prepare(out)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual((out/'replacement.img').stat().st_size, self.disk.stat().st_size+2)
+        self.assertFalse((out/'preparation.json').exists())
 
     def test_source_build_artifact_and_source_drift_refused_before_output(self):
         out = self.root / 'owned'
