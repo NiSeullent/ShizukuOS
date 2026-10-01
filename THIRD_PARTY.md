@@ -102,3 +102,19 @@ follows the public Vista `D3DKMT` device/context/present contracts without
 copying `d3dkmthk.h`. Per-file differences are in
 [`ntwddm/PROVENANCE.md`](ntwddm/PROVENANCE.md). This does not change the
 historical KernelEx UXTHEME bridge above.
+
+## Private modern graphics and Korean font corpus
+
+- `ntwddm/graphics_backend/` links the selected real Mesa 26.2.3 TGSI and
+  scalar support sources from a SHA-pinned official archive. Its fresh build
+  copies the complete reviewed selected originals, prepared source and
+  applicable Mesa MIT, SoftFloat BSD and BSL notices into ignored build storage.
+  Original resource/FP/consumer code uses GPL-2.0-only. This is a private rendering
+  prerequisite; it does not include a complete GL/Vulkan driver or establish
+  DirectX device support. See `docs/DIRECTX_GRAPHICS_CONTINUATION_6970.md`.
+- `tools/dwrite_font_corpus.py` obtains unmodified official Noto Sans CJK KR
+  font bytes from an immutable notofonts/noto-cjk publisher commit, with exact
+  publisher Git blob and local SHA-256 identities. It retains the SIL Open Font
+  License 1.1 and publisher README in private ignored build storage. No font is
+  installed or registered by the corpus tool. See
+  `docs/DIRECTWRITE_FONT_CORPUS_6970.md`.

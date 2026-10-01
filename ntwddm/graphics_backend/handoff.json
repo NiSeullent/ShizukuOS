@@ -1,0 +1,145 @@
+{
+  "acceptance": {
+    "actual_qemu_framebuffer_mesa_pixels_verified": true,
+    "app_functionality_verified": false,
+    "direct2d_support_verified": false,
+    "direct3d_device_creation_verified": false,
+    "directwrite_full_support_verified": false,
+    "dxgi_presentation_verified": false,
+    "full_directx_support_verified": false,
+    "hardware_virtualization_fd_verified": true,
+    "private_guest_mesa_resource_rendering_verified": true,
+    "qemu_isa_debug_exit_guest_zero_encoding_verified": true,
+    "windows98_execution_verified": false
+  },
+  "checks": {
+    "actual_guest_assertions": 66,
+    "actual_qemu_framebuffer_pixels": 16384,
+    "host_asan_ubsan_assertions": 1714,
+    "host_normal_assertions": 1714,
+    "independent_rgba_bytes": 4096,
+    "trial_gate_tests": 23,
+    "triangle_samples": 496
+  },
+  "continuation_document": "docs/DIRECTX_GRAPHICS_CONTINUATION_6970.md",
+  "dll": {
+    "PE32+": true,
+    "exports": [
+      "ntg_abi",
+      "ntg_bind",
+      "ntg_clear_color",
+      "ntg_clear_depth",
+      "ntg_copy",
+      "ntg_create",
+      "ntg_destroy",
+      "ntg_draw",
+      "ntg_map",
+      "ntg_release",
+      "ntg_retain",
+      "ntg_shader_create",
+      "ntg_texture_create",
+      "ntg_unmap"
+    ],
+    "imports": {},
+    "machine": "AMD64",
+    "sha256": "09bf19fa09c994d6aca6110c024faa93a0f5d2b2835928b69db96cd2b76e6829",
+    "size": 119331
+  },
+  "evidence": {
+    "build_receipt": {
+      "bytes": 124119,
+      "path": "ntwddm/graphics_backend/build/mesa-resources-amd64-v3/result.json",
+      "sha256": "f2503ebaef06403ef27a0fb44b7953a8bfa7e8bfc09ce3cfd965addec1253fe6"
+    },
+    "framebuffer_png": {
+      "bytes": 4995,
+      "path": "build/graphics-mesa-run-v1/theme-screen.png",
+      "sha256": "f0e7d8d74289f6d9d3d307b6253b5a952b4e901c65b0f9a0abd5738c0d219cb2"
+    },
+    "framebuffer_ppm": {
+      "bytes": 2359312,
+      "path": "build/graphics-mesa-run-v1/theme-screen.ppm",
+      "sha256": "b8864ec354034225998072dc9d4581dcaa0052fbfef839bd7d32bf7dfa535353"
+    },
+    "guest_receipt": {
+      "bytes": 4161,
+      "path": "build/graphics-mesa-run-v1/graphics-acceptance.json",
+      "sha256": "f3c69d1ca3360ec8c983ad54aa164624c8be781cb8a14d4500834e75730b09c9"
+    },
+    "guest_serial": {
+      "bytes": 13187,
+      "path": "build/graphics-mesa-run-v1/serial.log",
+      "sha256": "cf0d1425c650319c3d7abe2c5cb3a387c1f0d58276c39c1d1293ca9d609e4721"
+    },
+    "preparation_receipt": {
+      "bytes": 28659,
+      "path": "build/graphics-mesa-prep-v2/prepared.json",
+      "sha256": "dd811fe7d511240f6a92d1b22c43dc5b80d957db9d4f5927c9f960d86d938cf6"
+    }
+  },
+  "full_requirement_manifest": "benchmarks/modern-graphics-requirements-6970.json",
+  "generated_artifacts_tracked": false,
+  "global_install": false,
+  "guards": {
+    "minimum_free_bytes": 25298604032,
+    "peak_written_bytes": 2578260,
+    "reserve_bytes": 21474836480,
+    "stderr_budget_bytes": 16777216,
+    "termination_reason": null,
+    "write_budget_bytes": 268435456
+  },
+  "guest_os": "ShizukuDOS Kernel64 standalone",
+  "hardware_virtualization_fd_verified": true,
+  "lifecycle": {
+    "child_pid": 60,
+    "host_qemu_return_code": 1,
+    "normal_child_exit": 0,
+    "qemu_isa_debug_exit_guest_zero_encoding_verified": true,
+    "raw_proc_wait_return_code": 0,
+    "vm_stopped": true
+  },
+  "network_attached": false,
+  "next_real_port_boundaries": [
+    "software winsys and actual HWND/surface/present lifecycle",
+    "real DXGI factory/adapter/device and D3D11 COM identity/resources/context",
+    "resource/view/sampler/vertex/index/raster/depth/blend semantics",
+    "real app DXBC validation/translation and executable shader stages",
+    "native Win98 display/execution ABI and separate actual app trials"
+  ],
+  "original_and_sealed_inputs_preserved": true,
+  "ownership": [
+    "ntwddm/graphics_backend",
+    "docs/DIRECTX_GRAPHICS_CONTINUATION_6970.md"
+  ],
+  "peer_foundations": {
+    "archive_sha256": "1628058a8d2c0615975de5a15ab7bbb9638c50000b5bed9456ff423ea034a81f",
+    "mesa_version": "26.2.3",
+    "raster_receipt": "/root/Win98-Modern-theme-tls-5abe/build/softpipe-raster-v3/result.json",
+    "raster_sha256": "26d7055953bb6e0915df675ea0c0797c07e0c5704b00ef16f077e1867da3164f",
+    "shader_receipt": "/root/Win98-Modern-theme-tls-5abe/build/softpipe-shader-v2/result.json",
+    "shader_sha256": "b2c21ccdbf876d310affac58202d4b3139c30f1d71db7b696d12980dfb81cac2"
+  },
+  "peer_sources_modified": false,
+  "probe_nonce": "678d07d78db948b98e9110f98d690383",
+  "schema": 1,
+  "scope": "Actual private resource allocation/state/lifetime and Mesa TGSI triangle rendering, distinct from DirectX COM/API, native Windows 98 and app acceptance.",
+  "source_sha256": {
+    "LICENSE": "fac9da110d1433f4df0cb9f5dda9449e9aff6ee236ed240fa29e3e92926c363a",
+    "ntwddm/graphics_backend/backend.c": "9f7eac2880f05b6e536b425a27167de6acc20c78ac98292db971dfd74b207063",
+    "ntwddm/graphics_backend/backend.h": "253696498f4027e652d705022488b4bcd7e6cdd472984db8de128b669712e4f4",
+    "ntwddm/graphics_backend/build.py": "715e16c929ad8335914cebb602908c671300d7f7f8361270f858f24c2f2dc373",
+    "ntwddm/graphics_backend/fp64.h": "10647eb8ba7e0ad70763b75c65457d65f1fa9ed63d055e2b5b97f6d69c5421d5",
+    "ntwddm/graphics_backend/host.c": "0328925808f90c7c39121562512bca8cd614346015ec0bd30b6c7cef8fdb6109",
+    "ntwddm/graphics_backend/probe.c": "da444604ad3de164fc23a150b459f6afd38e8e636f0051d544e0ff626a357d49",
+    "ntwddm/graphics_backend/trial.py": "b6c8d2ec346d91277ec03c572f2057e625d59bc87aeec46d3df7aafaf74a27a3",
+    "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
+    "platform/freestanding/memory.h": "fca39e400632604dafd3895fed60674a1171f66245094f898e9f425c41c64c92",
+    "tools/modern_app_inventory.py": "cbe2f50d15a8ceb7e22b977c6948a9bfe63fcfbc7e6b3ae764aec052872f560d",
+    "tools/required_app_runtime_handoff.py": "28bd8f6bf7bf069e5724fa1cdcf479a9e14cb37d92c264611cbaa6e4f3d2ad78",
+    "tools/required_theme_runtime.py": "022352442e53a273005ad4531d04c412f96e118c0b0d0df122d867c8443ca101",
+    "tools/signal_desktop_corpus.py": "9c071b59c2a2228c822bb51a1ff8e13933bfaf854156be70397764d26bd327e6",
+    "tools/win64_theme_probe_trial.py": "4eb503d522eed3a60694aed6ef10488222d4ccd3e19852b9a4047dfd8aef03d0"
+  },
+  "stage": "private-amd64-mesa-resource-rendering-prerequisite",
+  "status": "PASS"
+}
