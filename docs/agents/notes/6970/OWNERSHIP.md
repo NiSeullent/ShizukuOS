@@ -39,3 +39,18 @@ Do not edit another agent's source, index, live VM or historical evidence. After
 Canonical master documents belong to session163f. That session owns Kernel64 scheduling, UEFI/GOP selection and existing VxD transport. Fada owns the new event/completion payload and its dispatch hunks. Fd5c owns shared channel/layout/doorbell/video validation and independently confirmed the separate Kernel32 process-owner publication race; session163f retains its user.c-only repair. C957 owns common atomics, NT spin-lock operations, framebuffer validation/clipping and the capability manifest; DOS_GATE and arbitrary GOP BitMask support remain unimplemented/unclaimed.
 
 Canonical session163f acknowledged our Kernel32 deadline helper/arithmetic and storage lane in its ownership document on2026-10-01. Our deadline expressions/wake-width change is separate from its user.c process-owner publication repair. Production deadline edits await actual unchanged-production RED and resource admission. Never overwrite a peer scheduler file during integration.
+# Native bridge linker-data correction checkpoint
+
+The 6970 root owns the native build plan, workflow and actual-evidence
+handoff. The modern-app agent owns the new `pe_link_script_6970.py` and
+the ordinary bridge `build.py` integration. The disk agent owns
+`build_native_pe32_guarded_6970.py`. The coordination agent independently
+reviews the shared helper, effective scripts and final PE placement.
+These assignments preserve production native/table/SDK and other-chat
+DOS/VMM/current Kernel32 SMP/main/site/ISO ownership.
+
+Actual third attempt at dc4a0c9 completed four object compiles, including
+the SDK fixture, both links and 22 COFF controls. Its overall instruction
+gate remains FAIL because linker-generated CTOR/DTOR data occupies `.text`.
+The successor moves only those blocks through the actual selected linker
+script; no scanner waiver, PE rewrite or native/TLS acceptance is assigned.

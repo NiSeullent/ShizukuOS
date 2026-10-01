@@ -14,6 +14,7 @@ name: Native provider PE32 and SDK ABI build
       - ntwin32/legacy_provider_bridge/NTWPROV.def
       - ntwin32/legacy_provider_bridge/probe.c
       - ntwin32/legacy_provider_bridge/build.py
+      - ntwin32/legacy_provider_bridge/pe_link_script_6970.py
       - tools/build_npp_prerequisites.py
       - benchmarks/win98se-ko-oem-native-exports-v1.json
       - ntwin32/secure_transport/i486_gate.py

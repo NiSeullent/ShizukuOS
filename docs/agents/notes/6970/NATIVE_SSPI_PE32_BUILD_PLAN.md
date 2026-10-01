@@ -144,3 +144,81 @@ GPL-3.0-or-later, and [Microsoft section flags](https://learn.microsoft.com/en-u
 Only the distinction between allocation and stored section bytes was studied;
 no upstream implementation was copied. This does not attest the entire
 installed compiler/backend or establish Windows loader acceptance.
+
+## Actual third attempt: SDK and links completed, strict ISA gate failed
+
+Commit dc4a0c989bfc89cab6d16d7adb431ddef727ab8a ran in
+[run 36935339096](https://github.com/NiSeullent/Win98-Modern/actions/runs/36935339096),
+job110614155068. Fifteen actual commands exited zero, were reaped, and had
+no stderr. The 22 COFF controls passed; the new actual probe object recorded
+12 B of uninitialized `.bss`, raw pointer zero, flags0xc0300080. This does
+not reconstruct the prior attempt's missing object headers.
+
+All four objects compiled, including the real SDK fixture with 36 static
+assertions. Both DLL and probe linked against the frozen selected kernel32
+import library. Actual -M/-MD manifests matched for all four translation
+units, with discovery counts93/13/88/98 and a 100-path initial union.
+Final source/header/tool/library snapshots were not reached, so this is
+partial command evidence, not a completed build acceptance.
+
+The DLL instruction gate returned FAIL. It covered all3,744 bytes of `.text`
+with zero coverage errors, but rejected eight decodes in the linker-generated
+`__CTOR_LIST__` and `__DTOR_LIST__`. Actual objdump bytes show two final
+8-byte lists, each `ffffffff00000000`, in that executable section. No newer
+instruction is inferred from these data bytes, and no scanner exception is
+introduced to accept them. Actual receipt108,368 B SHA256:
+40bdf49d1921fd84407cfae202e1d3cae40073c05fd804acf1b56844be394357.
+Actual raw log378,557 B SHA256:
+7110204bbc8f5e0e9e77d52dfe802c9775531058e24348745559579b32245181.
+Minimum observed free91,853,144,064 B; resource failure null; final
+self-accounted275,068 B. Independent review reconstructed the receipt,
+all30 command captures and the complete DLL disassembly correspondence.
+
+The successor will reuse the actual selected GNU linker's default script
+separately for DLL and probe, moving only its two constructor/destructor
+blocks to the aligned beginning of nonexecuting `.rdata`. Every other
+default-script byte and notice must be preserved. A unique signature mismatch
+fails closed. The moved blocks must precede the runtime pseudo-relocation
+tail, whose following aliases depend on the location counter.
+
+The ordinary recipe and guarded proof must share one independently authored
+transform helper. Actual linker/default/generated inputs will be bounded,
+hashed and checked before/after explicit-script linking. Linked-image checks
+must confirm both double/triple-underscore aliases, their distinct aligned
+8-byte empty lists, and readonly nonexecuting placement. Nonempty constructor
+inputs are unsupported by these C/no-CRT entry points and must be rejected.
+The existing full executable-byte i486, OEM import and Windows4.10 header
+checks remain unchanged. This is a real recipe correction, not PE rewriting
+or an instruction-data exception. Fresh actual execution remains required.
+
+Independent source review withheld the provisional helperd965d534 and
+guardf81c7482 before any fourth run. Checking only the first8 bytes of the
+destructor table does not prove its complete length: a zero-leading extra
+destructor contribution could pass that prefix check. The correction adds
+retained internal end symbols after each original terminating LONG(0), then
+checks both actual retained-symbol spans are exactly8 bytes. These marker
+assignments add no table or code bytes and do not become public DLL exports.
+The transformed-script scope is therefore the aligned placement plus two
+internal marker assignments, with every original command and notice retained.
+A selective extra-destructor-span control must also reject this case. The
+provisional source is not treated as tested, accepted or deployed.
+
+The final source candidate was independently reviewed twice before the
+fourth hosted attempt. Helper 26,070 B SHA256:
+9a98336d9c5a0bc417ed816454d3188e79dc4cf326a52bfabad73df8c903b55b.
+Ordinary recipe 10,046 B SHA256:
+b6372e074fec112558250a5675e090c217740c1c3ca7ca8c098d7f6b51a10c63.
+Guarded runner 76,927 B SHA256:
+b7d627c71076b6cbdb1e65d896ab798e4fe3688067ef7b0a1774243d2c3010d9.
+It requires six unique retained symbols, both exact 8-byte spans and a
+16-byte combined end. Public exports at either marker name or marker RVA
+are rejected, including renamed and ordinal-only exports.
+
+Fifteen text controls and five selective actual-image layout controls are
+prepared. The extra-destructor-span control changes only the retained end
+value from 16 to 20 while preserving the first 16 sentinel bytes. Those
+controls have not yet run in the fourth hosted attempt. Root checked ASTs,
+exact source hashes and unchanged prior guard functions without executing
+the helper, compiler or build runner locally. The recipe modification is
+explicitly reported; no Windows, TLS, application or ISO acceptance follows
+from this source review.

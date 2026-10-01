@@ -44,7 +44,9 @@ SDK_FIXTURE_SHA256 = "714e1a3f42eb0241fa0a2f4df94ed0eb847743edd7ba58d8eef29d1e43
 SDK_FIXTURE_SIZE = 5015
 FROZEN_INPUTS = {
     "ntwin32/legacy_provider_bridge/build.py":
-        (4572, "4007b6daeca61ee580c9dbaa0cff45277a98b2d601f4030657a1310c2fb0ba1d"),
+        (10046, "b6372e074fec112558250a5675e090c217740c1c3ca7ca8c098d7f6b51a10c63"),
+    "ntwin32/legacy_provider_bridge/pe_link_script_6970.py":
+        (26070, "9a98336d9c5a0bc417ed816454d3188e79dc4cf326a52bfabad73df8c903b55b"),
     "ntwin32/legacy_provider_bridge/native.c":
         (10295, "97a33c5292773ef949df251c7615eff259305b604f8d8d8d7f20b8039f98c301"),
     "ntwin32/legacy_provider_bridge/table.c":
@@ -222,6 +224,20 @@ def source_snapshot(paths, base, guard=None, *, maximum_total=SOURCE_TOTAL_LIMIT
 
 def compact_manifest(manifest):
     return {key: manifest[key] for key in ("manifest", "sha256", "identity")}
+
+
+def require_script_controls(report, expected_count):
+    """Classify a pinned helper's completed, named, bounded pure controls."""
+    if not isinstance(report, dict) or not isinstance(expected_count, int) or not 0 < expected_count <= 64:
+        raise RuntimeError("bounded linker-script control report/count required")
+    cases = report.get("cases", [])
+    if (report.get("status") != "PASS" or report.get("completed") != expected_count
+            or len(cases) != expected_count
+            or any(case.get("result") != "PASS" or not isinstance(case.get("case"), str)
+                   or not case["case"] or case.get("expected") not in ("accept", "reject") for case in cases)
+            or len({case["case"] for case in cases}) != expected_count
+            or report.get("native_execution_verified") is not False):
+        raise RuntimeError("linker-script text/layout controls incomplete or failed")
 
 
 def coff_symbols(raw, pointer, count, sections, wanted):
@@ -755,13 +771,21 @@ def main():
         "original_i486_synthetic_PE_scan_control_verified": False,
         "structural_negative_controls_verified": False,
         "coff_object_structural_controls_verified": False,
+        "generated_link_script_controls_verified": False,
+        "actual_generated_link_script_inputs_hashed_before_after": False,
+        "actual_empty_lifecycle_lists_in_readonly_rdata_verified": False,
+        "actual_lifecycle_layout_negative_controls_verified": False,
         "independent_export_clause_coverage": False,
         "coff_format_reference": COFF_FORMAT_REFERENCE,
         "recipe": {"reference": "ntwin32/legacy_provider_bridge/build.py",
                    "reference_sha256": FROZEN_INPUTS["ntwin32/legacy_provider_bridge/build.py"][1],
                    "original_one_shot_compile_link_used": False,
                    "object_split_for_individual_actual_MD_manifests": True,
-                   "original_C_linker_flags_def_and_kernel32_preserved": True,
+                   "original_C_flags_entry_version_security_flags_def_and_kernel32_preserved": True,
+                   "recipe_changed_generated_script": True,
+                   "original_linker_recipe_unmodified": False,
+                   "generated_script_passed_explicitly_per_profile": True,
+                   "generated_script_argument_flags": ["-Xlinker", "-T", "-Xlinker"],
                    "added_linker_trace_flag_without_link_semantics_change": "-Wl,-t",
                    "SDK_fixture_compile_only_no_link_or_execution": True},
         "guard_model": {"recursive_regular_file_logical_bytes": True,
@@ -784,6 +808,7 @@ def main():
                               "direct_kernel32_linker_input_required": True,
                               "direct_kernel32_linker_input_hashed_before_after": False,
                               "actual_linker_trace_matches_direct_kernel32_input": False,
+                              "direct_compiler_selected_linker_hashed_before_after": False,
                               "compiler_backend_linker_dynamic_runtime_kernel_closure_verified": False,
                               "python_runtime_or_self_loaded_code_attestation_verified": False,
                               "imported_pefile_runtime_attestation_verified": False},
@@ -912,6 +937,26 @@ def main():
                                            "version_queried": False,
                                            "full_Python_runtime_attestation_verified": False}
         cc = tools["compiler"]["path"]
+        linker_query = run([cc, "-print-prog-name=ld"], "selected-linker-query")
+        linker_text = linker_query.stdout.decode("ascii", errors="strict")
+        if (linker_query.returncode or linker_query.stderr or not linker_text.endswith("\n")
+                or linker_text.count("\n") != 1 or "\r" in linker_text or not linker_text[:-1]):
+            raise RuntimeError("actual compiler-selected linker query failed")
+        queried_linker = Path(linker_text[:-1])
+        if queried_linker.is_absolute():
+            linker_path = queried_linker.resolve(strict=True)
+        elif queried_linker.name == linker_text[:-1]:
+            selected = shutil.which(linker_text[:-1], path=env["PATH"])
+            if not selected:
+                raise RuntimeError("actual selected linker name was not resolvable in bounded PATH")
+            linker_path = Path(selected).resolve(strict=True)
+        else:
+            raise RuntimeError("actual selected linker path must be absolute or one executable name")
+        linker_pin = base.hash_regular(linker_path, maximum=TOOL_INPUT_LIMIT, guard=guard)
+        tools["linker"] = {"path": str(linker_path), **linker_pin,
+                           "actual_compiler_query": linker_text[:-1],
+                           "query_stdout_sha256": hashlib.sha256(linker_query.stdout).hexdigest(),
+                           "full_implicit_compiler_backend_attestation_verified": False}
         query = run([cc, "-print-file-name=libkernel32.a"], "kernel32-input-query")
         text = query.stdout.decode("ascii", errors="strict")
         if query.returncode or query.stderr or not text.endswith("\n") or text.count("\n") != 1 or "\r" in text:
@@ -932,6 +977,14 @@ def main():
         i486 = import_verified(ROOT / "ntwin32/secure_transport/i486_gate.py",
                               expected["ntwin32/secure_transport/i486_gate.py"][1],
                               "native_pe32_frozen_i486_gate", guard=guard)
+        script_helper = import_verified(HERE / "pe_link_script_6970.py",
+                                        expected["ntwin32/legacy_provider_bridge/pe_link_script_6970.py"][1],
+                                        "native_pe32_frozen_link_script_helper", guard=guard)
+        guard.check()
+        script_controls = script_helper.run_synthetic_controls()
+        guard.check()
+        receipt["generated_link_script_controls"] = script_controls
+        require_script_controls(script_controls, 15)
         parser_path = Path(i486.pefile.__file__).absolute()
         base.safe_components(parser_path)
         if parser_path != parser_path.resolve(strict=True) or parser_path.suffix != ".py":
@@ -972,6 +1025,36 @@ def main():
                                               "gate_loader_boundary_substituted": True,
                                               "path_loader_or_stale_pyc_fallback_used": False,
                                               "native_execution_verified": False}
+        scripts = {}
+        receipt["link_scripts"] = scripts
+        for profile, mode in (("dll", ["--dll"]), ("probe", [])):
+            if base.hash_regular(linker_path, maximum=TOOL_INPUT_LIMIT, guard=guard) != linker_pin:
+                raise RuntimeError("actual selected linker changed before default script discovery")
+            label = profile + "-ld-default-script"
+            verbose = run([str(linker_path), "--verbose", "-m", "i386pe", *mode], label)
+            if verbose.returncode or verbose.stderr or not verbose.stdout:
+                raise RuntimeError("actual selected linker default-script query failed/diagnosed/empty")
+            raw_path = output / (label + ".stdout")
+            raw_pin = base.hash_regular(raw_path, maximum=CAPTURE_LIMIT, guard=guard)
+            if read_pinned(raw_path, raw_pin, base, maximum=CAPTURE_LIMIT, guard=guard) != verbose.stdout:
+                raise RuntimeError("retained actual linker verbose stdout differs from captured bytes")
+            guard.check()
+            default = script_helper.extract_default_script(verbose.stdout)
+            generated, transformation = script_helper.relocate_lifecycle_lists(default)
+            guard.check()
+            default_path = output / (profile + "-default.ld")
+            generated_path = output / (profile + "-readonly-lifecycle.ld")
+            guard.write(default_path, default)
+            guard.write(generated_path, generated)
+            default_pin = base.hash_regular(default_path, maximum=SOURCE_INPUT_LIMIT, guard=guard)
+            generated_pin = base.hash_regular(generated_path, maximum=SOURCE_INPUT_LIMIT, guard=guard)
+            if (read_pinned(default_path, default_pin, base, maximum=SOURCE_INPUT_LIMIT, guard=guard) != default
+                    or read_pinned(generated_path, generated_pin, base, maximum=SOURCE_INPUT_LIMIT, guard=guard) != generated):
+                raise RuntimeError("owned linker scripts differ from extracted/transformed bytes")
+            scripts[profile] = {"raw_verbose": {"path": str(raw_path), **raw_pin},
+                                "default": {"path": str(default_path), **default_pin},
+                                "generated": {"path": str(generated_path), **generated_pin},
+                                "transformation": transformation}
         include_union = set()
         recipes = (("dll-native", HERE / "native.c", DLL_CFLAGS),
                    ("dll-table", HERE / "table.c", DLL_CFLAGS),
@@ -1037,13 +1120,22 @@ def main():
                 (PROBE_LDFLAGS, [objects["probe"]["path"]], probe, "probe-link")):
             if base.hash_regular(library, maximum=TOOL_INPUT_LIMIT, guard=guard) != library_before:
                 raise RuntimeError("direct kernel32 linker input changed before actual link")
-            linked = run([cc, *flags, "-Wl,-t", "-o", str(artifact), *paths, "-lkernel32"], label)
+            profile = "dll" if label == "dll-link" else "probe"
+            script_input = scripts[profile]["generated"]
+            if base.hash_regular(Path(script_input["path"]), maximum=SOURCE_INPUT_LIMIT, guard=guard) != {
+                    "sha256": script_input["sha256"], "identity": script_input["identity"]}:
+                raise RuntimeError("explicit generated linker-script input changed before link")
+            if base.hash_regular(linker_path, maximum=TOOL_INPUT_LIMIT, guard=guard) != linker_pin:
+                raise RuntimeError("selected direct linker changed before actual link")
+            linked = run([cc, *flags, "-Xlinker", "-T", "-Xlinker", script_input["path"], "-Wl,-t",
+                          "-o", str(artifact), *paths, "-lkernel32"], label)
             trace = linked.stdout.decode("ascii", errors="strict")
             if (linked.returncode or linked.stderr or not trace.endswith("\n")
                     or "\r" in trace or not trace[:-1]):
                 raise RuntimeError("actual link trace failed/diagnosed/empty")
             traced = []
-            permitted = {Path(path).resolve(strict=True) for path in paths} | {library}
+            permitted = {Path(path).resolve(strict=True) for path in paths} | {
+                library, Path(script_input["path"]).resolve(strict=True)}
             for line in trace.split("\n")[:-1]:
                 candidate = Path(line)
                 if not candidate.is_absolute():
@@ -1057,13 +1149,30 @@ def main():
             receipt.setdefault("linker_trace", {})[label] = {
                 "resolved_inputs": traced,
                 "stdout_sha256": hashlib.sha256(linked.stdout).hexdigest(),
-                "direct_kernel32_input_matches_query": True}
+                "direct_kernel32_input_matches_query": True,
+                "explicit_profile_script": script_input["path"]}
         artifacts = {}
         for artifact, label in ((dll, "dll"), (probe, "probe")):
             guard.check()
             pin = base.hash_regular(artifact, maximum=LIMIT, guard=guard)
             raw = read_pinned(artifact, pin, base, maximum=LIMIT, guard=guard)
             structure = structural_pe_gate(raw, document, i486.pefile, dll=label == "dll")
+            guard.check()
+            lifecycle_layout = script_helper.validate_empty_lifecycle_layout(raw, i486.pefile)
+            guard.check()
+            if lifecycle_layout.get("status") != "PASS":
+                raise RuntimeError("actual empty lifecycle-table read-only layout proof failed")
+            if label == "dll":
+                guard.check()
+                layout_controls = script_helper.run_layout_controls(raw, i486.pefile)
+                guard.check()
+                receipt["actual_lifecycle_layout_controls"] = layout_controls
+                require_script_controls(layout_controls, 5)
+                if {case["case"] for case in layout_controls["cases"]} != {
+                        "layout-sentinel-tamper", "layout-rdata-executable",
+                        "layout-one-alias-mismatch", "layout-nonempty-adjacency",
+                        "layout-destructor-end-gap"}:
+                    raise RuntimeError("actual lifecycle layout control identities changed")
             if label == "dll":
                 policy = prerequisite.gate(artifact, native_exports)
                 if set(policy["exports"]) != {"NtwOpenProviderDirectoryA", "NtwFindProviderExportA",
@@ -1088,6 +1197,7 @@ def main():
                 raise RuntimeError("linked artifact changed during OEM/i486 proof")
             artifacts[artifact.name] = {"path": str(artifact), **pin, "oem_policy": policy,
                                         "structural_policy": structure,
+                                        "lifecycle_layout": lifecycle_layout,
                                         "i486_decode": decode,
                                         "objdump_stdout_sha256": hashlib.sha256(decoded.stdout).hexdigest(),
                                         "native_load_verified": False}
@@ -1103,8 +1213,10 @@ def main():
         receipt["source_inputs_after"] = after
         if after != before:
             raise RuntimeError("frozen build/helper/SDK/OEM sources changed during proof")
-        for info in tools.values():
-            if base.hash_regular(Path(info["path"]), maximum=TOOL_INPUT_LIMIT, guard=guard) != {
+        for label, info in tools.items():
+            tool_after = base.hash_regular(Path(info["path"]), maximum=TOOL_INPUT_LIMIT, guard=guard)
+            receipt.setdefault("tool_inputs_after", {})[label] = {"path": info["path"], **tool_after}
+            if tool_after != {
                     "sha256": info["sha256"], "identity": info["identity"]}:
                 raise RuntimeError("actual direct compiler/objdump changed during proof")
         library_after = base.hash_regular(library, maximum=TOOL_INPUT_LIMIT, guard=guard)
@@ -1123,15 +1235,27 @@ def main():
             if base.hash_regular(Path(info["path"]), maximum=LIMIT, guard=guard) != {
                     "sha256": info["sha256"], "identity": info["identity"]}:
                 raise RuntimeError("owned mutated PE negative copy changed before final proof")
+        for profile, inputs in scripts.items():
+            for kind in ("raw_verbose", "default", "generated"):
+                pin = inputs[kind]
+                maximum = CAPTURE_LIMIT if kind == "raw_verbose" else SOURCE_INPUT_LIMIT
+                if base.hash_regular(Path(pin["path"]), maximum=maximum, guard=guard) != {
+                        "sha256": pin["sha256"], "identity": pin["identity"]}:
+                    raise RuntimeError("actual retained default/generated linker-script input changed during proof")
         guard.check(RECEIPT_LIMIT)
         receipt["provenance_limits"]["actual_M_and_MD_include_closures_hashed"] = True
         receipt["provenance_limits"]["direct_kernel32_linker_input_hashed_before_after"] = True
         receipt["provenance_limits"]["actual_linker_trace_matches_direct_kernel32_input"] = True
+        receipt["provenance_limits"]["direct_compiler_selected_linker_hashed_before_after"] = True
         receipt.update(sdk_abi_compile_verified=True, pe32_artifacts_build_verified=True,
                        oem_import_gate_verified=True, i486_full_executable_sections_decode_verified=True,
                        original_i486_python_controls_verified=True,
                        structural_negative_controls_verified=True,
                        coff_object_structural_controls_verified=True,
+                       generated_link_script_controls_verified=True,
+                       actual_generated_link_script_inputs_hashed_before_after=True,
+                       actual_empty_lifecycle_lists_in_readonly_rdata_verified=True,
+                       actual_lifecycle_layout_negative_controls_verified=True,
                        result="PASS_BUILD_AND_SDK_ABI_ONLY")
     except BaseException as error:
         receipt.update(result="FAIL", error=str(error)[:2048])
