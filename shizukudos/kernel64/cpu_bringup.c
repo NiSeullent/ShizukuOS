@@ -6,6 +6,7 @@
 #include "cpu_firmware.h"
 #include "cpu_memory_owner.h"
 #include "cpu_arch_bringup.h"
+#include "cpu_memory_stress.h"
 #include "pci.h"
 extern uint64_t arch_timer_irqs(void);
 static shz_cpu_firmware_t firmware;
@@ -139,6 +140,8 @@ static uint32_t work_hash(unsigned cpu,unsigned loops)
                 else jobs[j].bsp_seen=1;
             }
         }
+        if(i==(cpu?750000u:1250000u) && k64_cmdline_has("shz.memory=test"))
+            if(shz_cpu_memory_stress(cpu)) shz_cpu_arch_fault(cpu);
     }
     return value;
 }
@@ -245,6 +248,7 @@ void shz_cpu_bringup_verify(void)
            wait_for(&jobs[0].wake,i) || wait_for(&jobs[0].verify,i)) bad=1;
     }
     if(canary!=0x534d50415053544bull) bad=1;
+    if(k64_cmdline_has("shz.memory=test")) shz_cpu_memory_stress_report();
 report:
     for(unsigned i=0;i<count;i++) {
         bad+=__atomic_load_n(&jobs[i].bad,__ATOMIC_ACQUIRE);
