@@ -260,6 +260,154 @@ static void test_channel_and_pool(void)
     }
 }
 
+/* Invalid constructors must reject before touching any part of the caller's
+ * storage. The 128-slot case needs 66,048 bytes before even an owner table or
+ * pool: accepting it in a 64 KiB window would underflow the remaining size. */
+static void test_channel_init_rejection(void)
+{
+    static uint8_t saved[sizeof chan_mem];
+    static const struct {
+        size_t bytes;
+        uint32_t channel, a, b, slots;
+        int result;
+    } bad[] = {
+        {65536, 2, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 128, SHZ_E_RANGE},
+        {65536, 2, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 0x80000000u, SHZ_E_RANGE},
+        {65535, 2, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 32, SHZ_E_INVALID},
+        {65536, 2, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 3, SHZ_E_INVALID},
+        {65536, 2, SHZ_DOM_NONE, SHZ_DOM_WIN98, 32, SHZ_E_INVALID},
+        {65536, 2, SHZ_DOM_KERNEL64, SHZ_DOM_MAX, 32, SHZ_E_INVALID},
+        {65536, 2, SHZ_DOM_WIN98, SHZ_DOM_WIN98, 32, SHZ_E_INVALID},
+        {65536, SHZ_MAX_CHANNELS, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 32, SHZ_E_INVALID}
+    };
+    unsigned i;
+    memset(chan_mem, 0xa5, sizeof chan_mem);
+    memcpy(saved, chan_mem, sizeof saved);
+    for (i = 0; i < sizeof bad / sizeof bad[0]; ++i) {
+        const int rc = shz_channel_init(chan_mem, bad[i].bytes, bad[i].channel,
+                                         bad[i].a, bad[i].b, bad[i].slots, 0);
+        if (rc != bad[i].result)
+            fprintf(stderr, "channel init rejection %u: slots=%u domains=%u/%u got=%d want=%d\n",
+                    i, bad[i].slots, bad[i].a, bad[i].b, rc, bad[i].result);
+        CHECK(rc == bad[i].result);
+        CHECK(memcmp(saved, chan_mem, sizeof saved) == 0);
+    }
+    CHECK(shz_channel_init(NULL, 65536, 2, 4, 5, 32, 1) == SHZ_E_INVALID);
+    CHECK(shz_channel_init(chan_mem + 1, 65536, 2, 4, 5, 32, 1) == SHZ_E_INVALID);
+    CHECK(memcmp(saved, chan_mem, sizeof saved) == 0);
+    /* On a 32-bit receiver this slot count used to wrap the byte size to 192. */
+    if (sizeof(size_t) == 4) {
+        CHECK(shz_ring_bytes(0x01000000u) == 0);
+        CHECK(shz_ring_init(chan_mem, 65536, 0x01000000u) == SHZ_E_INVALID);
+        CHECK(shz_channel_init(chan_mem, 65536, 2, 4, 5, 0x01000000u, 1) == SHZ_E_RANGE);
+        CHECK(memcmp(saved, chan_mem, sizeof saved) == 0);
+    }
+}
+
+static void test_channel_layout_rejection(void)
+{
+    shz_channel_hdr_t *c = (shz_channel_hdr_t *)chan_mem, saved;
+    shz_ring_hdr_t *ab, *ba;
+    uint32_t old;
+    uint8_t *short_window;
+    CHECK(shz_channel_init(chan_mem, sizeof chan_mem, 2, 4, 5, 32, 1) == SHZ_OK);
+    saved = *c;
+#define BAD_CHANNEL(field, value) do { *c = saved; c->field = (value); CHECK(!shz_channel_valid(c, sizeof chan_mem)); } while (0)
+    BAD_CHANNEL(ring_ab_offset, 0);               /* channel header overlap */
+    BAD_CHANNEL(ring_ab_offset, 128);             /* owner table overlap */
+    BAD_CHANNEL(ring_ba_offset, saved.ring_ab_offset);
+    BAD_CHANNEL(ring_ba_offset, saved.ring_ba_offset - 8);
+    BAD_CHANNEL(ring_ab_offset, saved.ring_ab_offset + 1);
+    BAD_CHANNEL(pool_offset, saved.pool_offset - 4096); /* second ring overlap */
+    BAD_CHANNEL(pool_offset, saved.pool_offset + 1);
+    BAD_CHANNEL(pool_size, saved.pool_size - 1);
+    BAD_CHANNEL(pool_size, 0);
+    BAD_CHANNEL(pool_size, UINT64_MAX);
+    BAD_CHANNEL(ring_ba_offset, UINT64_MAX);
+    BAD_CHANNEL(slot_count, 0);
+    BAD_CHANNEL(slot_count, 1);
+    BAD_CHANNEL(slot_count, 3);
+    BAD_CHANNEL(slot_count, 0x80000000u);
+    BAD_CHANNEL(domain_a, SHZ_DOM_NONE);
+    BAD_CHANNEL(domain_b, SHZ_DOM_MAX);
+    BAD_CHANNEL(domain_b, saved.domain_a);
+    BAD_CHANNEL(channel_id, SHZ_MAX_CHANNELS);
+#undef BAD_CHANNEL
+    *c = saved;
+    CHECK(!shz_channel_valid(c, sizeof *c - 1));
+    CHECK(!shz_channel_valid(c, saved.pool_offset + saved.pool_size - 1));
+    CHECK(shz_channel_ring_tx(chan_mem, c, SHZ_DOM_DOS16) == NULL);
+    CHECK(shz_channel_ring_rx(chan_mem, c, SHZ_DOM_NONE) == NULL);
+    ab = shz_channel_ring_tx(chan_mem, c, 4);
+    ba = shz_channel_ring_tx(chan_mem, c, 5);
+    old = ab->magic; ab->magic = 0;
+    CHECK(!shz_channel_valid(c, sizeof chan_mem)); ab->magic = old;
+    old = ba->slot_size; ba->slot_size = 128;
+    CHECK(!shz_channel_valid(c, sizeof chan_mem)); ba->slot_size = old;
+    old = ab->slot_count; ab->slot_count = 16;
+    CHECK(!shz_channel_valid(c, sizeof chan_mem)); ab->slot_count = old;
+    old = ba->slot_count; ba->slot_count = 64;
+    CHECK(!shz_channel_valid(c, sizeof chan_mem)); ba->slot_count = old;
+    CHECK(shz_channel_valid(c, sizeof chan_mem));
+    /* The ABI does not reserve generation zero or reject a future minor. */
+    c->generation = 0; c->abi_minor = UINT16_MAX;
+    CHECK(shz_channel_valid(c, sizeof chan_mem));
+    c->generation = UINT32_MAX;
+    CHECK(shz_channel_valid(c, sizeof chan_mem));
+    short_window = malloc(1);
+    CHECK(short_window != NULL);
+    short_window[0] = 0;
+    CHECK(!shz_channel_valid((const shz_channel_hdr_t *)short_window, 1));
+    free(short_window);
+    CHECK(!shz_channel_valid(NULL, sizeof chan_mem));
+    /* Exercise accepted boundary geometry, not just malformed metadata. */
+    CHECK(shz_channel_init(chan_mem, 65536, 2, 4, 5, 64, 0) == SHZ_OK);
+    CHECK(shz_channel_valid(c, 65536));
+    CHECK(shz_pool_alloc(chan_mem, c, 4, 1) != 0);
+}
+
+static void test_pool_length_and_domain_rejection(void)
+{
+    shz_channel_hdr_t *c = (shz_channel_hdr_t *)chan_mem;
+    shz_msg_hdr_t m;
+    uint8_t saved[256];
+    uint64_t offset;
+    volatile uint8_t *owners;
+    CHECK(shz_channel_init(chan_mem, sizeof chan_mem, 2, 4, 5, 32, 1) == SHZ_OK);
+    owners = shz_pool_owner_table(chan_mem);
+    CHECK(shz_pool_blocks(c) <= sizeof saved);
+    memcpy(saved, (const void *)owners, shz_pool_blocks(c));
+    CHECK(shz_pool_alloc(chan_mem, c, 4, UINT32_MAX) == 0);
+    CHECK(shz_pool_alloc(chan_mem, c, 4, UINT32_MAX - 4095) == 0);
+    CHECK(shz_pool_alloc(chan_mem, c, 0, 1) == 0);
+    CHECK(shz_pool_alloc(chan_mem, c, 3, 1) == 0);  /* a third domain is not an owner */
+    CHECK(shz_pool_alloc(chan_mem, c, 260, 1) == 0); /* truncates to domain 4 in an owner byte */
+    CHECK(memcmp(saved, (const void *)owners, shz_pool_blocks(c)) == 0);
+    offset = shz_pool_alloc(chan_mem, c, 4, 4096);
+    CHECK(offset != 0 && owners[0] == 4);
+    memcpy(saved, (const void *)owners, shz_pool_blocks(c));
+    CHECK(shz_pool_release(chan_mem, c, 4, offset, UINT32_MAX, 0) == SHZ_E_RANGE);
+    CHECK(shz_pool_release(chan_mem, c, 4, offset, 4096, 3) == SHZ_E_DENIED);
+    CHECK(shz_pool_release(chan_mem, c, 4, offset, 4096, 256) == SHZ_E_DENIED);
+    CHECK(shz_pool_release(chan_mem, c, 260, offset, 4096, 0) == SHZ_E_DENIED);
+    CHECK(memcmp(saved, (const void *)owners, shz_pool_blocks(c)) == 0);
+    CHECK(shz_pool_release(chan_mem, c, 4, offset, 4096, 5) == SHZ_OK);
+    memset(&m, 0, sizeof m);
+    m.buffer_offset = offset; m.buffer_length = 4096;
+    CHECK(shz_pool_check(chan_mem, c, &m, 5) == SHZ_OK);
+    CHECK(shz_pool_check(chan_mem, c, &m, 261) == SHZ_E_DENIED);
+    CHECK(shz_pool_release(chan_mem, c, 5, offset, 4096, 0) == SHZ_OK);
+    CHECK(shz_pool_release(chan_mem, c, 0, offset, 4096, 5) == SHZ_E_DENIED);
+    CHECK(shz_pool_check(chan_mem, c, &m, 0) == SHZ_E_DENIED); /* free bytes are not owned */
+    CHECK(owners[0] == 0);
+    offset = shz_pool_alloc(chan_mem, c, 5, c->pool_size);
+    CHECK(offset == c->pool_offset);
+    m.buffer_offset = offset + 4095; m.buffer_length = 2;
+    CHECK(shz_pool_check(chan_mem, c, &m, 5) == SHZ_OK); /* crosses two owned blocks */
+    CHECK(shz_pool_release(chan_mem, c, 5, offset, 4096, 0) == SHZ_OK);
+    CHECK(shz_pool_check(chan_mem, c, &m, 5) == SHZ_E_DENIED);
+}
+
 #define STRESS_N 1000000u
 static shz_ring_hdr_t *g_ring;
 static void *producer(void *arg)
@@ -634,11 +782,31 @@ int main(int argc, char **argv)
 {
     if (argc == 4 && !strcmp(argv[1], "--verify"))
         return verify_frames(argv[2], argv[3]);
+    if (argc == 2 && !strcmp(argv[1], "--channel-safety")) {
+        test_channel_init_rejection();
+        test_channel_layout_rejection();
+        test_pool_length_and_domain_rejection();
+        printf("ABI channel safety: %lu checks passed\n", checks);
+        return 0;
+    }
+    if (argc == 2 && !strcmp(argv[1], "--channel-layout")) {
+        test_channel_layout_rejection();
+        printf("ABI channel layout: %lu checks passed\n", checks);
+        return 0;
+    }
+    if (argc == 2 && !strcmp(argv[1], "--pool-safety")) {
+        test_pool_length_and_domain_rejection();
+        printf("ABI pool safety: %lu checks passed\n", checks);
+        return 0;
+    }
     test_ring_basic();
     test_malformed();
     test_fuzz();
     test_requests();
     test_channel_and_pool();
+    test_channel_init_rejection();
+    test_channel_layout_rejection();
+    test_pool_length_and_domain_rejection();
     test_w64_family();
     test_w64_fuzz();
     test_stress();
