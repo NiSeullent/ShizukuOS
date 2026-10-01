@@ -243,12 +243,19 @@ out:
 
 void gfx_fb_present(int x, int y, int w, int h)
 {
-    if (!g_fb.ready) return;
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > (int)g_fb.width) w = (int)g_fb.width - x;
-    if (y + h > (int)g_fb.height) h = (int)g_fb.height - y;
-    if (w <= 0 || h <= 0) return;
+    int64_t left = x, top = y, right = left + w, bottom = top + h;
+    if (!g_fb.ready || w <= 0 || h <= 0 || g_fb.width > INT32_MAX || g_fb.height > INT32_MAX) return;
+    /* Form and intersect endpoints in 64 bits before narrowing. Signed int
+     * wrapping here could send an offscreen rectangle to a framebuffer backend. */
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > g_fb.width) right = g_fb.width;
+    if (bottom > g_fb.height) bottom = g_fb.height;
+    if (left >= right || top >= bottom) return;
+    x = (int)left;
+    y = (int)top;
+    w = (int)(right - left);
+    h = (int)(bottom - top);
     ++g_fb.stat_presents;
     g_fb.stat_present_pixels += (uint64_t)w * (uint64_t)h;
     g_fb.backend->present(x, y, w, h);
