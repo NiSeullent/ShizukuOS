@@ -10,6 +10,7 @@ extern uint64_t demand_faults;
 extern uint64_t arch_timer_irqs(void);
 extern uint32_t arch_exception_count(unsigned v);
 extern int initrd_files;                                  /* main.c: files mounted from WIN64.IMG, -1 = none */
+extern unsigned run_pma_self_tests(void);
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
 
@@ -74,9 +75,9 @@ static volatile int many_started, many_done;
 static void many_worker(void *arg)
 {
     (void)arg;
-    ++many_started;
+    __atomic_add_fetch(&many_started, 1, __ATOMIC_RELAXED);
     sem_wait(&many_gate);
-    ++many_done;
+    __atomic_add_fetch(&many_done, 1, __ATOMIC_RELAXED);
 }
 static void test_many_threads(void)
 {
@@ -334,6 +335,7 @@ void run_self_tests(const shz_bootinfo_t *bi)
     test_preempt();
     test_mutex();
     test_many_threads();
+    failures += run_pma_self_tests();
     test_heap_and_demand();
     test_user();
     test_win64();
