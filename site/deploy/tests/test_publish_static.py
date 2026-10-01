@@ -310,7 +310,7 @@ class IsoPublication(unittest.TestCase):
         self.assertTrue(hasattr(publisher, 'prepare_assets'), 'testable static preparation is absent')
         prepared = publisher.prepare_assets()
         self.assertIsNone(prepared['iso'])
-        self.assertEqual(len(prepared['assets']), 83)
+        self.assertEqual(len(prepared['assets']), 92)
         for name, data in prepared['assets'].items():
             self.assertEqual(data, (publisher.SITE / name).read_bytes(), name)
         self.assertNotIn('downloads/release.json', prepared['assets'])
@@ -320,7 +320,7 @@ class IsoPublication(unittest.TestCase):
         before = {name: (publisher.SITE / name).read_bytes() for name in ['index.html', 'en/index.html']}
         prepared = publisher.prepare_assets(self.iso, COMMIT)
         self.addCleanup(prepared['iso'].close)
-        self.assertEqual(len(prepared['assets']) + 1, 86)
+        self.assertEqual(len(prepared['assets']) + 1, 95)
         checksum = prepared['assets'][prepared['iso'].name + '.sha256'].decode('ascii')
         self.assertEqual(checksum, self.digest + '  ' + Path(prepared['iso'].name).name + '\n')
         metadata = json.loads(prepared['assets']['downloads/release.json'])
@@ -509,7 +509,7 @@ class IsoPublication(unittest.TestCase):
         receipt_path, = (self.root / 'build/m98-self-host').glob('release-*.json')
         receipt = json.loads(receipt_path.read_text())
         self.assertNotEqual((base / 'current').resolve(), previous)
-        self.assertEqual(receipt['origin_check_count'], 86)
+        self.assertEqual(receipt['origin_check_count'], 95)
         self.assertTrue(receipt['iso_head_and_range_verified'])
         self.assertEqual(receipt['iso_release'], prepared['iso'].metadata)
         self.assertFalse(receipt['public_edge_verified'])

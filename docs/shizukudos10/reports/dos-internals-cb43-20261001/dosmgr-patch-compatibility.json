@@ -1,0 +1,44 @@
+{
+  "schema": "shizukudos-cb43-dosmgr-patch-compatibility-v1",
+  "cb43_patch_sha256": "a68f2a6bec6b378f69727bd32b386c097ed926323a98c5e34fb109ccdda10ce0",
+  "primary_dosmgr_patch_sha256": "9ea1d25225664d41d0ba5be40e34455804932272b2f2f6808767e1bf14fc078d",
+  "both_orders_apply_exactly": true,
+  "identical_combined_handler_sha256": "e44dc4ccb2dd964d00ef067a2d24a881cdf8d7c5f1a2dc1722cd6b6f291f16ab",
+  "orders": [
+    {
+      "order": "cb43-then-dosmgr",
+      "patch": "0003-cb43-win98-dos-internals.patch",
+      "exit": 0,
+      "fuzz": 0,
+      "output": "patching file hdr/win.h\npatching file kernel/kernel.asm\npatching file kernel/inthndlr.c"
+    },
+    {
+      "order": "cb43-then-dosmgr",
+      "patch": "0003-dosmgr-honest-contract.patch",
+      "exit": 0,
+      "fuzz": 0,
+      "output": "patching file kernel/inthndlr.c\nHunk #1 succeeded at 2109 (offset 16 lines).\nHunk #2 succeeded at 2129 (offset 16 lines).\nHunk #3 succeeded at 2148 (offset 16 lines)."
+    },
+    {
+      "order": "dosmgr-then-cb43",
+      "patch": "0003-dosmgr-honest-contract.patch",
+      "exit": 0,
+      "fuzz": 0,
+      "output": "patching file kernel/inthndlr.c"
+    },
+    {
+      "order": "dosmgr-then-cb43",
+      "patch": "0003-cb43-win98-dos-internals.patch",
+      "exit": 0,
+      "fuzz": 0,
+      "output": "patching file hdr/win.h\npatching file kernel/kernel.asm\npatching file kernel/inthndlr.c\nHunk #5 succeeded at 2736 (offset 6 lines).\nHunk #6 succeeded at 3375 (offset 6 lines)."
+    }
+  ],
+  "combined_profile_compiled": false,
+  "combined_profile_booted": false,
+  "limits": [
+    "Only isolated preimage copies changed",
+    "Main DOSMGR patch remains owned by primary BOOT",
+    "CB43 source build and diagnostic disk exclude the separate DOSMGR patch"
+  ]
+}

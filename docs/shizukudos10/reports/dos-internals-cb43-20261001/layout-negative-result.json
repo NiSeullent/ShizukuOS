@@ -1,0 +1,35 @@
+{
+  "schema": "shizukudos-cb43-layout-negative-v1",
+  "rejected": 4,
+  "accepted_invalid": 0,
+  "cases": [
+    {
+      "case": "reversed-instance-pointer",
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "exit_code": 1,
+      "diagnostic": "ValueError: IIS_Ptr bytes encode offset-low then segment-high"
+    },
+    {
+      "case": "relocation-targets-offset",
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "exit_code": 1,
+      "diagnostic": "ValueError: MZ relocation targets IIS_Ptr segment word"
+    },
+    {
+      "case": "non-null-optional-pointer",
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "exit_code": 1,
+      "diagnostic": "ValueError: 4.0 optional instance pointer is an actual linked zero DWORD"
+    },
+    {
+      "case": "shifted-fixed-SFT",
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "exit_code": 1,
+      "diagnostic": "ValueError: first SFT fixed address DS:00CC preserved"
+    }
+  ]
+}

@@ -1,0 +1,205 @@
+{
+  "schema": "shizukuos.official-continuation-proposal.freeze.v1",
+  "status": "FROZEN_SOURCE_PROPOSAL_NOT_APPLIED_OR_PUBLISHED",
+  "primary_snapshot_head": "8508c5e360fe8c24c659b719f1ed21831cbdbd4c",
+  "requested_base_commit": "6a18ee1f4af4261963fd87e7a759e070630ffc5b",
+  "exact_preimage_publisher_sha256": "5dfd2ffc0bea1006f755c5965c7e6129e3958173239966af310cd96fef18f51f",
+  "source_freeze_sha256": "62ab1723b1d29af09a17406671061f087f9b8f828560dab51a04dfc62012c218",
+  "files": [
+    {
+      "path": "site/authorship/handoff.html",
+      "before_sha256": "e311c2e11865c77a8868c826d5e7175137e9f8f2d2ddbf5ceca33cfc0d321e28",
+      "before_bytes": 4486,
+      "sha256": "388fc951fc6e26617055e245d196ac1b6bcc13b19bf6bae2034d426c44b03c25",
+      "bytes": 5311
+    },
+    {
+      "path": "site/continuation/downloads.json",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "20488553f97a4e3d7f0f4618c07f55dcd815e62268d4832a3d0edf9ee370c838",
+      "bytes": 3154
+    },
+    {
+      "path": "site/continuation/environment-guide.md",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "22371d3abfaf731d9cd39b60ccb5b8e8e83012317ae042eb71edf0fc47cdf060",
+      "bytes": 6814
+    },
+    {
+      "path": "site/continuation/guide.html",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "8bb10240a11d925ca191f1b3e26c1ee906670860051e89ff86f00c474bbbb160",
+      "bytes": 31403
+    },
+    {
+      "path": "site/continuation/index.html",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "19747185348f7e7675e01bd73cd5752b7aacc54099ba1a29f188d5a7b19e6e3c",
+      "bytes": 6440
+    },
+    {
+      "path": "site/continuation/modern-apps-guide.md",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f",
+      "bytes": 19961
+    },
+    {
+      "path": "site/continuation/official-distribution.md",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "16d663f0743af8eaafd9ac6ea84b2884939ffbae5cf9695abc5e771d15b165d4",
+      "bytes": 2339
+    },
+    {
+      "path": "site/continuation/styles.css",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "535bf65880d2ca123df6a6137c5c21e88c51b8d80def4a9c83d26b5f89ff1797",
+      "bytes": 1380
+    },
+    {
+      "path": "site/deploy/publish_static.py",
+      "before_sha256": "5dfd2ffc0bea1006f755c5965c7e6129e3958173239966af310cd96fef18f51f",
+      "before_bytes": 41392,
+      "sha256": "1039e0f9d475425c7401cab34edcb7d9cb5220758abb11cef958c9d6915a1d0e",
+      "bytes": 46863
+    },
+    {
+      "path": "site/deploy/tests/test_continuation_assets.py",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "207ab663b9253db46383e1f8acba73d21b89f3643377e855932005f720017ec6",
+      "bytes": 7734
+    },
+    {
+      "path": "site/deploy/tests/test_publish_static.py",
+      "before_sha256": "92393189e5a18078bbe0dce74327eb46d7055f33b2ea2765969c6098f1cc0d44",
+      "before_bytes": 33475,
+      "sha256": "410265bae3bee85baaa14ce38c3484f755640adf671a327ffb99ae2935d4b5b2",
+      "bytes": 33475
+    },
+    {
+      "path": "site/downloads/win98-modern-usb-helper.zip",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54",
+      "bytes": 17916
+    },
+    {
+      "path": "site/downloads/win98-modern-usb-helper.zip.sha256",
+      "before_sha256": null,
+      "before_bytes": null,
+      "sha256": "86b77cc378c2ed69b9255fdfecd3175f482f39423c4a26df2f8835edacaa780b",
+      "bytes": 94
+    },
+    {
+      "path": "site/en/index.html",
+      "before_sha256": "8c3adb4dc59cebe2388ca8deba103a223eafc2d9aa20f8bf2c31fc71f99f23eb",
+      "before_bytes": 11693,
+      "sha256": "f5fdcad11cc3be284907be0132ed1db1b5cb6ac1edc213054ea9d8ec42367bf3",
+      "bytes": 11746
+    },
+    {
+      "path": "site/index.html",
+      "before_sha256": "e6394476e5d445585528c821fe0671bff1a56efa33f21626d2d0b48115c6653c",
+      "before_bytes": 11575,
+      "sha256": "6931c22f07e51b730200864fc19d2fd9632c51f3305a7efe97153044687388be",
+      "bytes": 11623
+    }
+  ],
+  "file_count": 15,
+  "public_static_count": 92,
+  "unchanged_live_public_files": 89,
+  "changed_public_allowlist": [
+    "authorship/handoff.html",
+    "en/index.html",
+    "index.html"
+  ],
+  "existing_publisher_functions_changed": [
+    "prepare_assets"
+  ],
+  "existing_publisher_functions_preserved": [
+    "IsoDownload",
+    "_publish",
+    "add_authorship_assets",
+    "current_is",
+    "file_snapshot",
+    "load_iso_boot_evidence",
+    "main",
+    "open_iso",
+    "open_regular",
+    "publication_lock",
+    "publish",
+    "read_small",
+    "render_iso_homepage",
+    "response_headers",
+    "sha",
+    "stream_digest",
+    "validate_iso_headers",
+    "validate_translation",
+    "verify_download",
+    "write_receipt"
+  ],
+  "red": {
+    "exit_code": 1,
+    "methods": 8,
+    "failures_including_subtests": 52,
+    "sha256": "eaf6c2344e946475a46b8986747301031b38ce5cb8e15b1bffd267616c658a1a"
+  },
+  "green": {
+    "exit_code": 0,
+    "methods": 34,
+    "sha256": "592f12c8489b5c7d6cfb3fd94dba7b319f6bf9a17376df7f64a7ffe45ab2aaea"
+  },
+  "patch": {
+    "path": "primary-continuation.patch",
+    "bytes": 124628,
+    "sha256": "d995dbef36a82fa28f1d8e4f12aa0e91f362b32df79a79b8d5e8a206c9b660e3"
+  },
+  "tests_transport": "isolated fixture only; no external HTTP",
+  "primary_source_modified": false,
+  "main_index_modified": false,
+  "live_site_modified": false,
+  "publication_executed": false,
+  "nginx_modified": false,
+  "remote_git_actions": false,
+  "iso_or_vm_executed": false,
+  "historical_checkpoint_version": "0.9.0-dev",
+  "current_product_target": "ShizukuOS 1.0.0 development",
+  "final_iso_source_and_git_bundle_cards": "pending; activation requires a separate reviewed artifact epoch",
+  "helper_scope": "17,916-byte source/docs/tests/license ZIP; no OS media or full USB payload",
+  "native_windows98_and_latest_apps_complete": false,
+  "patch_application": {
+    "status": "PASS_ISOLATED_BINARY_PATCH_APPLY",
+    "check_exit_code": 0,
+    "apply_exit_code": 0,
+    "result_files_verified": 15,
+    "result_hash_mismatches": [],
+    "repository_discovery_disabled": true
+  },
+  "preimages_file_sha256": "ff1d4a8a526bf2c3b43a87186fed65bec6350868b29a7e6cbe8401987b509707",
+  "test_receipt_file_sha256": "e82723ddf6fe025acd36f193ff0e3ba0a9cac836f2078624320cb1ef399880b0",
+  "public_package_scope": "Additive source patch, source identities and actual normalized test text only.",
+  "new_public_files": [
+    "README.md",
+    "primary-continuation.patch",
+    "preimages.json",
+    "source-freeze.json",
+    "test-receipt.json"
+  ],
+  "e6_identical_assets_already_present_patch_application": {
+    "status": "PASS_ISOLATED_BINARY_PATCH_APPLY_WITH_EXACT_NINE_EXCLUSIONS",
+    "check_exit_code": 0,
+    "apply_exit_code": 0,
+    "existing_identical_assets_verified": 9,
+    "result_files_verified": 15,
+    "result_hash_mismatches": [],
+    "repository_discovery_disabled": true,
+    "primary_checkout_or_index_modified": false
+  }
+}

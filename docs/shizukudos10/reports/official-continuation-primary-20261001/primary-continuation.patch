@@ -1,0 +1,1194 @@
+diff --git a/site/authorship/handoff.html b/site/authorship/handoff.html
+index a40a2fd..d9cb849 100644
+--- a/site/authorship/handoff.html
++++ b/site/authorship/handoff.html
+@@ -1,7 +1,7 @@
+ <!doctype html>
+ <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="ShizukuOS 개발 체크포인트와 다른 환경에서 이어서 작업하는 방법."><title>작업 이어가기 · Authorship</title><link rel="stylesheet" href="./styles.css"><link rel="icon" type="image/svg+xml" href="../favicon.svg"><link rel="canonical" href="https://m98.nyase.kr/authorship/handoff.html"></head>
+-<body><a class="skip" href="#main">본문으로 건너뛰기</a><div class="shell"><header><a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">S</span><span>ShizukuOS<small>Development candidate</small></span></a><nav aria-label="주 메뉴"><a href="../index.html">다운로드</a><a href="./">Authorship</a><a href="./handoff.html" aria-current="page">작업 이어가기</a></nav></header>
+-<main id="main"><section class="intro"><p class="eyebrow">CONTINUATION / 다른 환경에서 이어가기</p><div class="intro-line"><h1>소스와 기록을 받아,<br>여기서 이어가세요.</h1><span class="version">개발 체크포인트</span></div><p class="lead">현재 소스와 구현 상태는 GitHub의 main 브랜치로 통합합니다. 실제 실행에서 확인한 결과와 아직 해결할 부분을 함께 기록해 다음 환경에서도 같은 지점에서 시작할 수 있게 합니다.</p><p class="date">2026년 10월 1일 기준 · ShizukuOS 1.0.0의 실제 Windows 98 기반 연결과 최신 앱 전체 기능은 개발 중입니다.</p><div class="credit-links"><a href="https://github.com/NiSeullent/Win98-Modern/tree/main">main 브랜치 소스 받기 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/CONTINUE_MODERN_APPS.md">환경 준비·인계 문서 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/MODERN_APPS_CAMPAIGN.md">현대 앱 실행 시험과 공통 호환 기능 기록 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/skills/win98-modern-lab/SKILL.md">개발·검증 절차 ↗</a></div></section>
++<body><a class="skip" href="#main">본문으로 건너뛰기</a><div class="shell"><header><a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">S</span><span>ShizukuOS<small>Development candidate</small></span></a><nav aria-label="주 메뉴"><a href="../index.html">다운로드</a><a href="./">Authorship</a><a href="../continuation/">소스·USB 도구</a><a href="./handoff.html" aria-current="page">작업 이어가기</a></nav></header>
++<main id="main"><section class="intro"><p class="eyebrow">CONTINUATION / 다른 환경에서 이어가기</p><div class="intro-line"><h1>소스와 기록을 받아,<br>여기서 이어가세요.</h1><span class="version">개발 체크포인트</span></div><p class="lead">현재 소스와 구현 상태는 GitHub의 main 브랜치로 통합합니다. 실제 실행에서 확인한 결과와 아직 해결할 부분을 함께 기록해 다음 환경에서도 같은 지점에서 시작할 수 있게 합니다.</p><p class="date">2026년 10월 1일 기준 · ShizukuOS 1.0.0의 실제 Windows 98 기반 연결과 최신 앱 전체 기능은 개발 중입니다.</p><p>공식 사이트의 로컬 안내에는 기존 0.9 개발 소스 체크포인트와 USB 도구 소스가 보존되어 있습니다. 이 기록은 ShizukuOS 1.0.0 완성판이나 전체 USB 설치 묶음이 아닙니다. ShizukuDOS가 Windows 98의 MS-DOS 기반을 대체하는 것이 목표이며, 실제 Windows 98 시작·설치와 최신 앱 전체 기능은 아직 검증 중입니다.</p><p>다운로드한 Markdown 문서의 상대 경로는 소스 저장소를 기준으로 합니다. 현재 ShizukuOS 개발 ISO의 배포 상태와 기본 다운로드는 <a href="../index.html">홈페이지</a>에서 확인하세요.</p><div class="credit-links"><a href="../continuation/">공식 사이트 소스·USB 도구</a><a href="../continuation/guide.html">로컬 환경 준비·인계 안내</a><a href="https://github.com/NiSeullent/Win98-Modern/tree/main">main 브랜치 소스 받기 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/CONTINUE_MODERN_APPS.md">환경 준비·인계 문서 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/MODERN_APPS_CAMPAIGN.md">현대 앱 실행 시험과 공통 호환 기능 기록 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/skills/win98-modern-lab/SKILL.md">개발·검증 절차 ↗</a></div></section>
+ <section class="progress"><h2>현재 확인된 동작</h2><p>실제 Windows 98에서 Notepad++ 편집·저장·다시 열기와 UEFI GOP 화면 출력을 확인했습니다. VLC는 메뉴와 움직이는 영상을 표시했으며 종료 오류가 남아 있습니다. 독립 64비트 실행기에서는 Chromium의 DOM 계산 결과와 Legcord 설정 화면을 확인했습니다. Chromium 그래픽 시험은 도구 모음까지 표시한 뒤 페이지 로딩과 종료 오류가 남았습니다.</p></section>
+ <section class="credits"><div><p class="eyebrow">NEXT / 남은 구현</p><h2>공통 호환 기능부터 연결합니다.</h2><p>Chrome·Chromium·Firefox·Discord·Steam·최신 Office를 위한 공통 커널, 파일·문자열·프로세스 기능과 화면·입력을 확장하고 있습니다. 실제 UEFI/VMX/EPT 기반 64비트 실행기 기초 시험 37개는 통과했지만, 설치된 Windows 98과 현대 앱을 연결하는 전체 경로는 아직 검증되지 않았습니다.</p><p>공통 런타임 V44의 일반 빌드와 실제 독립 게스트 API 시험 252개를 통과했습니다. 모듈 열거·검색 경로·토큰·UCRT·파일 복사·RTL 기능을 확인한 결과이며, 현대 앱의 기능 시험과 설치된 Windows 98 연결은 별도로 남아 있습니다. 앞선 V43 빌드 실패 기록도 보존했습니다.</p></div><div><p class="eyebrow">SETUP / 준비 범위</p><h2>본인 환경에서 준비할 것</h2><p>인계 문서의 도구 버전과 빌드 경로를 확인하고, 앱 원본은 각 공식 배포처에서 다시 받아 해시를 비교하세요. 실제 게스트 시험에는 적법하게 보유한 Windows 98 설치본과 가상화 환경이 필요합니다.</p><p>이 웹 페이지와 소스 저장소는 Windows 설치 미디어, 제품 키, 앱 원본 설치 패키지, 가상머신 디스크를 배포하지 않습니다. 화면은 실제 기록이며 웹에서 Windows 98이 실행되는 실시간 콘솔이 아닙니다.</p><p lang="en">The source checkpoint and handoff document are linked above. Modern app support and native Windows 98 integration remain incomplete; standalone runtime evidence is labelled separately.</p></div></section></main>
+ <footer><p>ShizukuOS · 1.0.0 개발 후보</p><a href="./">실제 화면과 검증 범위 →</a></footer></div></body></html>
+diff --git a/site/continuation/downloads.json b/site/continuation/downloads.json
+new file mode 100644
+index 0000000..6489235
+--- /dev/null
++++ b/site/continuation/downloads.json
+@@ -0,0 +1,83 @@
++{
++  "schema": "win98modern.official-downloads.v1",
++  "version": "0.9.0-dev",
++  "publication_state": "helper_source_available_other_artifacts_pending",
++  "official_origin": "https://m98.nyase.kr",
++  "source_commit": null,
++  "full_modern_apps_verified": false,
++  "native_windows98_modern_apps_verified": false,
++  "items": [
++    {
++      "role": "development_iso",
++      "name_ko": "프로젝트 개발 ISO",
++      "name_en": "Project development ISO",
++      "state": "pending",
++      "url": null,
++      "sha256": null,
++      "bytes": null,
++      "source_commit": null
++    },
++    {
++      "role": "source_archive",
++      "name_ko": "전체 소스 압축 파일",
++      "name_en": "Full source archive",
++      "state": "pending",
++      "url": null,
++      "sha256": null,
++      "bytes": null,
++      "source_commit": null
++    },
++    {
++      "role": "main_git_bundle",
++      "name_ko": "main Git bundle",
++      "name_en": "main Git bundle",
++      "state": "pending",
++      "url": null,
++      "sha256": null,
++      "bytes": null,
++      "source_commit": null
++    },
++    {
++      "role": "usb_helpers",
++      "name_ko": "Windows 98용 ShizukuDOS USB 조합 도구",
++      "name_en": "ShizukuDOS for Windows98 USB helper source ZIP",
++      "state": "ready",
++      "url": "/downloads/win98-modern-usb-helper.zip",
++      "sha256": "f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54",
++      "bytes": 17916,
++      "source_commit": "899c51ec6f4c731fe3181570feec0fa52bfbd591",
++      "scope": "Helper source/docs/license only; no ISO or Windows media. Host preparation fixtures 9 PASS; actual USB boot/Windows Setup not verified."
++    }
++  ],
++  "private_media_policy": {
++    "windows_media_published": false,
++    "product_keys_published": false,
++    "vendor_app_installers_published": false,
++    "vm_disks_published": false,
++    "own_windows98_iso_processing": "User-provided media remains local/private; never uploaded to official downloads."
++  },
++  "usb_scope": {
++    "uefi_file_copy_preparation_verified": false,
++    "bios_hybrid_image_boot_verified": false,
++    "windows98_setup_boot_verified": false,
++    "private_combined_iso_scope": "Packaging own licensed media alone does not prove Windows98 Setup boot or modern application support.",
++    "helper_source_package_verified": true,
++    "helper_host_fixture_checks": 9,
++    "full_public_usb_payload_available": false
++  },
++  "guide_provenance": {
++    "modern_original_sha256": "69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f",
++    "modern_web_sha256": "69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f",
++    "modern_web_changes": [],
++    "environment_source_sha256": "22371d3abfaf731d9cd39b60ccb5b8e8e83012317ae042eb71edf0fc47cdf060",
++    "policy_source_sha256": "16d663f0743af8eaafd9ac6ea84b2884939ffbae5cf9695abc5e771d15b165d4"
++  },
++  "architecture_goal": {
++    "project": "ShizukuDOS for Windows98",
++    "replaces": "MS-DOS",
++    "kernel32_kernel64_scope": "Windows98 integration components of ShizukuDOS",
++    "separate_standalone_os_goal": false,
++    "standalone_trials": "Experimental foundation/API validation only",
++    "installed_windows98_complete": false
++  }
++}
+diff --git a/site/continuation/environment-guide.md b/site/continuation/environment-guide.md
+new file mode 100644
+index 0000000..379bb8a
+--- /dev/null
++++ b/site/continuation/environment-guide.md
+@@ -0,0 +1,101 @@
++# 다른 환경에서 이어서 작업하기
++
++공식 배포처는 **[m98.nyase.kr](https://m98.nyase.kr)**입니다. 공홈의 소스
++압축 파일 또는 `main` Git bundle로 작업을 옮길 수 있습니다. GitHub 접속은
++필수가 아닙니다. 다운로드의 실제 파일명과 SHA256 목록은 공홈의 해당 배포
++매니페스트를 사용하세요. 이 문서는 아직 제공되지 않은 파일의 다운로드를
++완료했다고 주장하지 않습니다.
++
++공홈에서 받은 파일을 빈 작업 디렉터리에 놓고 먼저 해시를 확인하세요.
++아래 파일명은 예시이며, 배포 매니페스트에 적힌 실제 이름으로 바꿔야 합니다.
++
++```sh
++sha256sum --check SHA256SUMS
++git clone --branch main ./Win98-Modern-main.bundle Win98-Modern
++cd Win98-Modern
++git rev-parse HEAD
++python3 -B tools/check_continuation_environment.py
++```
++
++마지막 커밋은 배포 매니페스트의 커밋과 비교하세요. Git bundle 대신 소스
++압축 파일을 풀어 편집해도 됩니다. 소스 압축 파일에는 Git 이력이 없을 수
++있습니다. 원본 매니페스트와 해시를 함께 보관하세요.
++
++## 준비해야 할 환경과 파일
++
++기존 호스트 빌드는 Linux/POSIX와 Python 3을 사용했습니다. 새 환경의
++검토·편집에는 Git과 Python 3.10 이상을 준비하고, 빌드 재현에는 기존에
++기록된 Python 3.12 및 도구 버전을 먼저 확인하세요. Windows 호스트에서는
++Linux VM 또는 WSL에서 호스트 작업을 할 수 있지만, 이 안내가 그 환경의
++빌드 성공을 인증하지는 않습니다.
++
++- 호스트 빌드: GCC/G++, Clang/Clang++, Make, CMake, Ninja, Bison, Flex,
++  Patch, Tar와 Binutils. 전체 ASan/UBSan 런타임도 필요합니다. 기존 GLSL
++  시도는 GCC ASan 라이브러리 누락으로 링크가 실패했습니다.
++- PE 빌드: `i686-w64-mingw32-gcc`, G++와 Objdump. Win98 대상에서 배포판의
++  미리 빌드된 C++ 런타임을 그대로 사용할 수 있다고 가정하면 안 됩니다.
++- Python 빌드 의존성: `pefile`, PyYAML. GLSL 생성에는 분리된 Mako 1.4.3과
++  MarkupSafe 2.1.3 증거 묶음이 필요합니다. 설치는 별도 환경에서 직접
++  준비하며, 점검 도구는 설치하거나 모듈 코드를 실행하지 않습니다.
++- 공개 원본: Mesa 26.2.3, QuickJS 2026-06-04, 고정 musl/WAMR 리비전,
++  Mbed TLS 4.2.0 및 3.6.7, WABT 1.0.42. 공식 원본과 라이선스·고지문을
++  보존하고 각 빌더의 고정 SHA256에 맞춰야 합니다. Mesa는
++  [공식 아카이브](https://archive.mesa3d.org/), QuickJS는
++  [공식 사이트](https://bellard.org/quickjs/)에서 확인할 수 있습니다.
++
++**소스만 받아서는 기존 빌드가 바로 재현되지 않습니다.** `build/`, VM 디스크,
++설치 매체와 로그는 Git에서 제외됩니다. 공홈의 별도 증거 묶음 또는 매니페스트
++범위를 확인해 원본 아카이브, 도구 묶음, 준비된 소스, 객체 캐시, 영수증과
++로그를 옮겨야 합니다. 캐시 파일의 존재가 해시·출처 검증을 대신하지 않습니다.
++외부 컴파일러 전체 구성요소의 증거까지 완성된 것으로 간주하면 안 됩니다.
++
++일부 도구는 `/root/Win98-Modern-boot` 및
++`/root/Win98-Modern-tls13-7707`의 절대 경로와 이전 영수증을 사용합니다.
++새 환경에서 누락된 경로를 임의로 대체하거나 이전 영수증을 수정하지 마세요.
++매니페스트에 따른 원본 보존과 별도 새 경로 설정·증거 생성이 필요합니다.
++점검에 다른 캐시 위치를 알려줄 수는 있으나 빌더 경로를 바꾸지는 않습니다.
++
++```sh
++python3 -B tools/check_continuation_environment.py --json
++python3 -B tools/check_continuation_environment.py --verify-archives \
++  --boot-root /ABSOLUTE/Win98-Modern-boot \
++  --tls-root /ABSOLUTE/Win98-Modern-tls13-7707
++```
++
++Windows 설치 매체와 제품 키는 사용자가 정당한 라이선스로 로컬에서 준비해야
++합니다. 소스 배포에 포함된다고 가정하지 마세요. 실제 Win98 시험에는 원본
++OEM 파일, 준비된 게스트 디스크, QEMU와 해당 실험의 증거·실행 절차가 별도로
++필요합니다. 점검 도구는 VM·서비스를 시작하지 않습니다.
++
++## 이어받는 시점의 검증 상태
++
++역사적 제한 프로파일에서 Script 307개 검사, 숫자 Wasm 265개 검사 및
++한정된 MSHTML CSS 소비·화면 시험이 승인되었습니다. 새 환경이나 모든 웹
++표준의 인증이 아닙니다. 수정된 TLS i486 호스트·PE 증거는 있으며, 수정 DLL의
++실제 Win98 게스트 TLS 시험은 아직 대기 중입니다.
++
++GLSL 9개 파일과 SIMD 6개 파일은 **DRAFT_UNVERIFIED**, 현재 세대의 빌드가
++실행되지 않았습니다. 이전 GLSL 세대의 정상 전처리 비교 608개는 통과했지만
++전체 sanitizer 링크 및 타입 컴파일 시도는 실패했고 그대로 보존되어 있습니다.
++현재 타입 수정과 자원 보호 제어 시험도 실행되지 않았습니다. SIMD의 공개
++Wasm 호출 ABI는 숫자 스칼라만 지원하며 벡터 경계는 미해결입니다. 벡터
++export는 실행 전 거부하고, 벡터 import·벡터 GC 필드는 지원하지 않습니다.
++새 엔진에서 기존 1237 숫자, 386 메모리, 4641 선택 공식 메모리, 622 QuickJS
++메모리 검사를 정상 및 전체 ASan/UBSan으로 다시 실행해야 합니다.
++
++HTML DOM, 전체 최신 JavaScript/CSS/Wasm, WebGL/WebGPU, 현대 앱 호환성 및
++OS 전체는 인증되지 않았습니다. Legcord/Discord, 최신 오픈소스 Office,
++Signal 지원은 계속 필요한 작업입니다. 상세 경계는 각 `docs/TRIDENT_*` 및
++`docs/TLS13_I486_*` 문서, 실패 영수증과 고정 소스 프로파일을 함께 보세요.
++
++큰 호스트 빌드 전에는 실제 여유 **22,595,387,392 바이트**와 Linux
++`MemAvailable` **6 GiB** 이상을 확인하고 한 번에 하나의 큰 작업을 예약하세요.
++512 MiB 실험 예산은 예상 성공 용량이 아닙니다. 실행 중 공유 디스크 바닥은
++**22,058,516,480 바이트**이며, native 준비에서도 이 바닥을 유지해야 합니다.
++각 빌더의 실제 제한·자기 프로세스 종료·실패 보존 절차를 적용해야 합니다.
++점검 출력은 순간 측정으로, 빌드·native 실행 허가나 API 성공 증거가 아닙니다.
++
++점검기는 표준 라이브러리만 쓰고 파일·PATH·설치 메타데이터·자원만 읽습니다.
++다운로드, 설치, 빌드, 프로그램 실행, VM 시작, 전역 설정 변경은 없습니다.
++기본 아카이브 검사는 존재만 확인하며 `--verify-archives`에서 지정된 파일의
++SHA256을 읽습니다. 누락·불일치·자원 부족이 있으면 종료 코드 2를 반환합니다.
+diff --git a/site/continuation/guide.html b/site/continuation/guide.html
+new file mode 100644
+index 0000000..4a73c90
+--- /dev/null
++++ b/site/continuation/guide.html
+@@ -0,0 +1,99 @@
++<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="공식 사이트에서 Windows 98 Shizuku Modern Edition의 소스와 개발 ISO, USB 준비 도구를 받고 작업을 이어가는 방법."><title>작업 환경·빌드 안내 · Windows 98 Shizuku Modern Edition</title><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="./styles.css"><link rel="icon" href="../favicon.svg" type="image/svg+xml"></head><body><a class="skip" href="#main">본문으로 건너뛰기</a><header class="top"><a class="brand" href="../index.html">Windows 98 <strong>Shizuku Modern Edition</strong></a><nav aria-label="주 메뉴"><a href="../index.html">홈페이지</a><a href="./">소스·USB 준비</a><a href="../authorship/">Authorship</a><a href="./guide.html">작업 안내서</a></nav></header><main id="main"><section class="guide-intro"><p class="eyebrow">OFFICIAL CONTINUATION / 환경·빌드 안내</p><h1>다른 환경에서 작업 이어가기</h1><p class="lead">공식 배포 기록의 실제 파일명과 해시를 먼저 확인하세요. 아직 새 파일이 준비 중이면 배포 페이지에 다운로드가 표시되지 않습니다.</p><p><a href="./">배포 상태 보기</a> · <a href="./modern-apps-guide.md" download>현대 앱·커널 안내서 받기</a> · <a href="./environment-guide.md" download>웹 엔진 환경 안내서 받기</a> · <a href="./official-distribution.md" download>공식 배포 기준</a></p><p class="small">이 웹 안내서는 최신 공식 사이트 배포 기준을 적용했습니다. 앱 원본과 외부 오픈소스의 정식 출처는 각각의 배포처를 사용합니다. 소스 내 상대 경로 문서는 전체 소스 압축 파일에서 찾아보세요.</p></section><article class="guide-copy" id="modern-apps"><h2>다른 환경에서 Windows 98 Modern 작업 이어가기</h2>
++<p>이 문서는 2026-10-01 소스 인계 지점입니다. 목표는 <strong>Windows 98의 MS-DOS 기반을 ShizukuDOS로 대체</strong>하는 것입니다. Kernel32·Kernel64·호환 라이브러리·드라이버는 모두 Windows 98용 ShizukuDOS의 구성요소이며, 별도 커널 실행 시험은 이 통합 제품을 구현하기 위한 단계입니다. <code>main</code>에 통합하는 코드는 개발 중인 호환 커널과 공통 API 구현입니다. <strong>Chrome·Chromium·Firefox·Discord/Legcord·Steam·최신 Office가 설치된 Windows 98에서 모두 동작한다는 완료 선언은 아닙니다.</strong> 공개 자료에도 아래 검증 범위를 함께 표시합니다. 실제 기록의 SHA와 공개 입력 핀은 checkpoint-20261001 <small class="source-reference">(전체 소스: shizukudos10/reports/checkpoint-20261001/)</small>에 있습니다.</p>
++<h3>확인된 범위와 다음 작업</h3>
++<div class="guide-table"><table><thead><tr><th>영역</th><th>실제 확인 결과</th><th>남은 작업</th></tr></thead><tbody><tr><td>V44 공통 런타임</td><td>NTDLL·KERNEL32·UCRT 및 7개 시험 EXE 일반 빌드 완료. 변경된 PE의 import 443개 확인</td><td>이 빌드 성공 자체는 앱 실행 증거가 아님</td></tr><tr><td>V44 게스트 API 시험</td><td>모듈 열거 45, 검색 경로 50, 토큰 19, UCRT 44, CreateFile2/CopyFile2 37, RTL 57: <strong>252개 PASS</strong></td><td>모두 독립 Kernel64 게스트 시험. 설치된 Win98 시험은 별도</td></tr><tr><td>네이티브 Supervisor 기반</td><td>VMX/EPT, native K64, 실제 콘솔 PE 종료 코드 7 두 번 등 <strong>37개 PASS</strong></td><td>해당 실행의 도메인은 DOS16/K64. Win98 VMM 연결·현대 앱 실행은 미검증</td></tr><tr><td>Chromium</td><td>headless 다중 프로세스에서 실제 JavaScript DOM <code>42</code>와 정상 종료 확인</td><td>GUI V2는 157.0.8079.0/1706750: 화면 표시 후 공유 메모리 오류와 <code>c0000005</code> 종료. 페이지·웹 기능 미완료</td></tr><tr><td>Firefox 157.0</td><td>정식 Mozilla 설치 파일 체크섬 및 원본 73개 파일 확인</td><td>V42 실제 실행은 <code>mozglue!OpenProcessToken</code> import 실패. V44 토큰/RTL/file2 기반으로 다시 시험</td></tr><tr><td>LibreOffice 26.8.0</td><td>정식 MSI 및 실제 26.8.0.3 앱 파일 확인</td><td>V42 실제 실행은 <code>sal3!SetSearchPathMode</code> 실패. V44 이후 버전 출력, 문서 열기·편집·저장·PDF 변환 재시험</td></tr><tr><td>Legcord 1.3.0</td><td>실제 Welcome 및 설정 화면 표시</td><td>설정 완료 후 실제 재실행, Discord 로그인·채팅·음성 미검증</td></tr><tr><td>Steam</td><td>원본 클라이언트 시작 및 누락 API 위치 확인</td><td>V44의 Module32Next 시험은 통과. 실제 CEF·로그인·라이브러리·게임 실행 미검증</td></tr><tr><td>Google Chrome</td><td>정식 enterprise x64 MSI에서 브라우저 154.0.8037.93의 원본 267개 파일을 추출하고 전체 SHA·PE 버전 확인</td><td>게스트 실행과 브라우저 기능은 아직 미검증. 정식 metadata의 단계적 배포 버전과 구분</td></tr><tr><td>설치된 Win98 네이티브 통합</td><td>opt-in Win98 생성자·ATA/PIC/문자열 PIO 구현 후보와 일반 native 링크 보존</td><td>실제 Win98 부팅·그래픽·입력·VMM 채널·앱 실행을 계속 구현/검증</td></tr></tbody></table></div>
++<p>Chromium GUI V2의 원본 기록은 잘못된 1708403 라벨을 포함합니다. 실제 패키지는 <strong>1706750 / 157.0.8079.0</strong>입니다. 원본 실패 기록은 보존하고 공개 요약에서 바로잡았습니다. 1708403 PDB를 1706750 DLL에 적용하면 안 됩니다. 기존 headless 기록은 이미지 경로로 1708403을 식별하지만 EXE/tree SHA를 기록하지 않았으므로, 최신 패키지 전체 provenance 확인 시험이 추가로 필요합니다.</p>
++<p>V43의 MinGW stdio 링크 실패도 삭제하지 않았습니다. V44의 부모/자식 시험 소스는 기존 SHZ CRT를 사용해 실제 일반 링크를 통과했습니다. post-autorun 관찰의 세 가지 실제 대조 실행 및 Legcord 재실행 성공은 이 문서의 252개 API PASS에 포함되지 않습니다.</p>
++<h3>새 작업 환경</h3>
++<p>Linux x86-64에서 시작합니다. <a href="https://m98.nyase.kr/">공식 홈페이지</a>의 해당 배포에서 소스 아카이브 또는 Git bundle과 체크섬을 받습니다. 실제 게시된 파일의 SHA-256과 source commit을 먼저 대조합니다. 소스 아카이브는 새 작업 폴더에 풀고, Git bundle을 받았다면 로컬 파일에서 복원합니다. 다음 예의 파일명은 자신이 받은 실제 bundle 이름으로 바꿉니다. 공식 페이지에 게시되지 않은 파일이 존재한다고 가정하지 않습니다.</p>
++<pre><code data-language="sh">git clone /path/to/official-source.bundle Win98-Modern
++cd Win98-Modern
++git checkout main
++python3 -m venv .venv
++. .venv/bin/activate
++python3 -m pip install -r tests/requirements.txt
++python3 -m pip install Pillow</code></pre>
++<p>필요한 실제 도구는 Python 3.10+, Git, GNU make, GCC/binutils(<code>gcc -m32</code> 컴파일 가능한 multilib 포함), NASM, <strong>x86-64 및 i686 mingw-w64</strong>의 GCC/G++·dlltool·windres, Windows 드라이버 빌드에 쓰는 해당 DDK 헤더, mtools, dosfstools, QEMU x86-64입니다. Wine 소스의 host 도구 생성에는 bison·flex·pkg-config와 개발 헤더가 필요할 수 있습니다. 전체 ISO에는 xorriso, CSMWrap 빌드 도구, DOS16용 Open Watcom이 추가됩니다. 패키지 이름은 Linux 배포판별로 다르며 이 문서는 전역 도구나 클라이언트 설정을 자동 변경하지 않습니다.</p>
++<p>API 게스트 시험에는 접근 가능한 <code>/dev/kvm</code>이 필요합니다. native Supervisor의 VMX 시험에는 Intel VT-x/EPT와 <strong>중첩 VMX가 실제 노출되는</strong> 호스트 및 OVMF가 필요합니다. QEMU의 KVM 사용과 게스트 Supervisor의 VMX 동작은 각각 검증합니다. AMD에서 동일 native VMX 결과를 가정하지 않습니다. QEMU/OVMF 경로는 <code>shizukudos/tools/qemu.py</code>가 Fedora/RHEL 및 Debian/Ubuntu 위치에서 찾습니다. TCG 결과는 KVM 또는 native Supervisor 가속 증거로 계산하지 않습니다.</p>
++<p>빌드/VM 출력은 <code>build/</code> 아래에서만 생성합니다. native Win98 실험은 여유 디스크 17 GiB를 남기며 복제·ESP·읽기 검증 예산을 추가로 확보합니다. 약 3–4 GiB 게스트 RAM 외에도 호스트에 최소 4 GiB를 남깁니다. 설치된 원본 VM은 종료 상태로 보관하고 각 시험은 독립 복사본을 사용합니다.</p>
++<h3>캐시 없는 일반 빌드와 API 시험</h3>
++<p>과거 개발 머신의 절대 경로, WIN64.IMG, Wine 캐시, 디스크 이미지는 clone에 없습니다. <strong>처음에는 전체 일반 빌드를 실행</strong>해 새 환경의 런타임과 import 라이브러리를 만듭니다. 기본 빌드는 upstream manifest <small class="source-reference">(전체 소스: ../shizukudos/upstream/manifest.json)</small>의 고정 Wine 소스 등을 <code>build/upstream/</code>에 가져와 필요한 host 도구/헤더와 PE DLL을 생성합니다. 해당 revision과 패치의 라이선스/출처를 유지합니다.</p>
++<pre><code data-language="sh">mkdir -p build
++python3 -B shizukudos/win64/build.py &gt; build/fresh-win64-build.log 2&gt;&amp;1
++python3 -B tools/build_isolated_kernel.py --out build/modern-apps/fresh-kernel</code></pre>
++<p>첫 명령은 전체 runtime DLL·시험·<code>build/shizukudos/win64/WIN64.IMG</code> 및 <code>build-result.json</code>을 생성합니다. <code>--no-wineport</code> 빌드는 Wine 기반 DLL/폰트가 빠지므로 전체 앱용 런타임 대신 사용하지 않습니다. 이 새 환경의 전체 빌드는 아직 다시 실행하지 않았으므로 실패하면 로그와 실제 누락 의존성을 보존하고 해결합니다. 기존 개발 호스트의 V44 SHA를 새 빌드 결과에 붙이지 않습니다.</p>
++<p>252개 계약 시험은 다음 여섯 이름으로 재현합니다. 각 실행은 입력 archive의 복사본과 새 기록 폴더를 사용합니다.</p>
++<pre><code data-language="sh">for test in T_MODULE_ANSI T_SEARCH_PATH_MODE T_BASE_TOKEN T_UCRT_LEGACY T_FILE2 T_RTL_BOOTSTRAP; do
++  python3 -B shizukudos/tests/run_k64_contract.py \
++    --runtime build/shizukudos/win64 \
++    --kernel build/modern-apps/fresh-kernel/kernel64s \
++    --test &quot;$test.EXE&quot; --accel kvm \
++    --out &quot;build/modern-apps/fresh-contract-$test&quot; \
++    --timeout 180 --guest-timeout 120 || break
++done</code></pre>
++<p>확인은 <code>result.json</code>의 PASS, 실제 정상 앱 종료, <code>faulted=0</code>, PASS 행, 실패 없음, 입력 불변 및 현재 KVM 증거로 합니다. <code>isa-debug-exit</code> 때문에 QEMU 프로세스 코드 1이 정상 게스트 값 0을 나타낼 수 있습니다. 프로그램 자신의 실패 코드를 QEMU 종료 코드로 덮지 않습니다. <code>summary_check_count=0</code>인 기존 기록에서도 개별 <code>checks</code> 행을 확인합니다.</p>
++<p>후속 부분 빌드는 <strong>새로 생성한</strong> archive를 base로 사용합니다. 아래 도구는 일반 import 라이브러리가 <code>build/shizukudos/win64/</code>에 존재해야 합니다. 컴파일하는 동안 관련 소스·헤더·라이브러리를 수정하지 않습니다.</p>
++<pre><code data-language="sh">python3 -B tools/build_frozen_native_subset.py \
++  --base build/shizukudos/win64/WIN64.IMG \
++  --out build/modern-apps/fresh-common-subset \
++  --ntdll --kernel32 --module ucrtbase \
++  --test t_module_ansi --test t_search_path_mode --test t_base_token \
++  --test t_autorun_observe --test t_ucrt_legacy --test t_file2 \
++  --test t_rtl_bootstrap --compile-timeout 900</code></pre>
++<p>출력 <code>receipt.json</code>은 소비한 소스·실제 명령·원본/새 archive SHA·변경 PE·import 확인을 기록합니다. 오래된 NTDLL 494개 ordinal과 Nt/Zw 로컬 별칭, UCRT 861개 ordinal 보존도 실제 PE로 확인합니다. host 계약 검사는 각 시험 README와 다음 도구를 사용합니다.</p>
++<pre><code data-language="sh">python3 -B shizukudos/win64/tests/test_ucrt_legacy_host.py --output-dir build/modern-apps/fresh-ucrt-host
++python3 -B shizukudos/win64/tests/test_rtl_bootstrap_host.py --output-dir build/modern-apps/fresh-rtl-host
++python3 -B shizukudos/win64/tests/test_module_ansi_host.py \
++  --win64-root shizukudos/win64 --output-dir build/modern-apps/fresh-module-host</code></pre>
++<h3>정식 앱을 직접 확보하고 다시 시험</h3>
++<p>정식 URL, 크기, SHA-256, revision은 publisher-input-pins.json <small class="source-reference">(전체 소스: shizukudos10/reports/checkpoint-20261001/publisher-input-pins.json)</small>에 있습니다. 이동하는 “latest” URL 대신 해당 시험의 버전을 고정합니다. 새 버전을 쓰면 공식 체크섬/REVISIONS, 전체 파일 목록, 실제 PE 버전과 EXE SHA를 새로 기록합니다. 다운로드·원본 앱·Microsoft VC DLL은 개인 입력 폴더에 두고 커밋하거나 ISO에 넣지 않습니다.</p>
++<ul><li>Chromium: 정식 <code>chrome-win.zip</code>과 같은 revision의 <code>REVISIONS</code>를 받아 안전하게 전체 추출합니다. 1708403은 157.0.8081.0이며 1706750은 157.0.8079.0입니다. ZIP SHA, 258개 전체 파일과 실제 PE identity를 혼합하지 않습니다.</li><li>Firefox: 정식 157.0 한국어 x64 installer와 Mozilla <code>SHA512SUMS</code>를 검증합니다. 7-Zip 등으로 <strong>설치 실행 없이</strong> <code>core/</code>를 추출합니다. 실험에는 원본 73개 파일을 모두 사용합니다.</li><li>Legcord: 정식 v1.3.0 win-x64 ZIP을 전체 추출합니다. Electron 43.2/Chrome 150이 포함된 앱 자체 패키지입니다. Welcome만으로 Discord 기능을 인증하지 않습니다.</li><li>LibreOffice: 정식 26.8.0 x64 MSI를 <code>msiextract</code> 등으로 개인 폴더에 추출합니다. 필요한 app-local VC 14.44.35211 DLL은 자신의 정식 MSI/redistributable에서 확보하고 각 DLL SHA를 기록합니다. 실제 버전·ODT/PDF 왕복 시험을 순서대로 합니다.</li><li>Steam: Valve의 정식 client 설치/패키지를 개인 환경에서 확보합니다. 기존 5624개 파일 클라이언트 시험은 설치 bootstrap을 건너뛴 별도 진단이며 신규 설치 성공이 아닙니다.</li><li>Google Chrome: 공식 enterprise MSI URL은 이동합니다. 기록된 SHA와 일치하지 않으면 다른 패키지로 취급하고 실제 브라우저 PE 버전부터 확인합니다. MSI 다운로드 성공은 Chrome 실행 성공이 아닙니다.</li></ul>
++<p><strong>Chromium/Chrome/Electron/Legcord 실행 인자에는 <code>--no-sandbox</code>가 필수</strong>입니다. Steam에는 <code>--no-sandbox -no-cef-sandbox</code>를 유지합니다. Firefox에서 같은 인자가 실제 sandbox를 끈다고 가정하지 않습니다. 해당 Mozilla 소스의 <code>MOZ_DISABLE_CONTENT_SANDBOX</code> 등 실제 적용 경로를 확인하고 게스트 환경 설정으로 전달해야 합니다. SSL 검증 생략, 거짓 OS/API 성공 응답이나 단일 프로세스 강제로 다중 프로세스 성공을 대체하지 않습니다.</p>
++<p>일반 앱 도구는 <code>shizukudos/tests/run_k64_chromium.py</code>, <code>run_k64_electron.py</code>, <code>run_k64_productivity.py</code>입니다. 기본 입력 위치는 <strong>이번 환경에서 생성한</strong> <code>build/shizukudos/{kernel64s,win64}</code>입니다. 필요하면 일반 <code>python3 shizukudos/kbuild.py</code>로 기본 Kernel64S 출력을 생성하거나 도구의 source-defined 입력 경로를 확인한 독립 runner를 사용합니다. 소스 내 과거 scratch 기본값 대신 <code>--tree/--chromium</code>, <code>--image</code>, <code>--out</code>을 명시합니다.</p>
++<p>GUI 도구 <code>tools/capture_chromium_interactive_v3.py</code>와 <code>tools/capture_modern_app_interactive_v5.py</code>는 기존 검토 시점의 runner SHA를 고정한 역사적 도구입니다. 이번 병합에서 runner가 변경되면 import 단계에서 정상적으로 중단하므로 새 clone에서 바로 실행할 수 있다고 가정하지 않습니다. 현재 runner의 인자·입력·판정 및 host 계약을 검토한 <strong>새 capture epoch</strong>를 만들어야 하며, 이전 SHA를 무조건 갱신하거나 gate를 지우지 않습니다. Chromium 새 도구는 <code>--publisher-manifest --publisher-revisions</code>와 전체 258개 파일 identity를 확인하고, 완전한 파일 핀이 없는 manifest에는 원본 <code>--publisher-archive</code> 검증도 요구합니다. 실제 화면을 확인한 뒤 입력과 화면 generation/sequence를 기록합니다. post-autorun 추가 관찰은 K14 기능의 실제 대조 시험을 마친 뒤 사용합니다.</p>
++<p>공식 public CA를 실제 crypto 경로로 적재하는 시험 helper가 별도로 필요합니다. <code>tools/seal_carried_public_trust.py</code>는 <strong>과거 receipt와 원본 CA payload가 있는 환경의 인계 도구</strong>이며 새 clone에서 자동 CA 생성/설치를 수행하지 않습니다. 같은 이름의 파일이나 임의 인증서를 넣어 기존 해시 검증을 우회하지 않습니다.</p>
++<h3>네이티브 Win98 후보 소스 이어가기</h3>
++<p>candidate source/manifest <small class="source-reference">(전체 소스: shizukudos10/reports/checkpoint-20261001/native-win98-candidate/manifest.json)</small>는 검토된 Supervisor 후보 18개, generic K64 peer-dispatch 소스 2개와 해당 diff를 보존합니다. 실험중인 구현을 잃지 않도록 <strong>별도 후보 위치</strong>에 넣었으며 기본 Supervisor·shared ABI를 바꾸지 않습니다.</p>
++<p>ATA/PIC/REP PIO와 생성자 host 시험 및 일반 native 링크는 확인됐지만 실제 설치된 Win98 부팅은 아직 아닙니다. 후보는 128 MiB 실제 guest RAM, 자신의 설치된 2 GiB disk, 실제 256 KiB SeaBIOS ROM, opt-in 16-byte <code>WIN98CFG.BIN</code>/<code>mode=supervisor</code>를 사용합니다. 실제 graphics/input/VMM 연결은 후속 작업입니다. generic dispatcher는 실제 K32 peer 존재 여부를 검사해 Win98 채널을 K32 selftest peer로 오인하지 않도록 하는 후보이며 아직 VM 실행 검증이 없습니다.</p>
++<p>후보의 <code>build_candidate.py</code>는 과거 고정 build receipt를 소비하는 참고 스크립트입니다. 공개본에서는 개발 머신의 cold-disk 절대 경로를 명시적 placeholder로 바꿨고 변경 전/후 SHA를 manifest에 구분했습니다. <strong>그대로 실행할 fresh-clone producer가 아닙니다.</strong> 격리 worktree에서 현재 소스와 ABI를 비교해 후보를 적용하고, 자신의 정당한 Win98 disk/SeaBIOS/OVMF를 인자로 받는 producer를 만든 뒤 모든 일반 빌드와 source/artifact receipt를 재생성합니다. 과거 영수증에 새 입력을 끼워 넣거나 hash gate를 제거하지 않습니다.</p>
++<p><code>tools/build_native_supervisor_foundation.py</code>는 일반 native 기반 producer지만 <code>tools/run_native_supervisor_foundation.py</code>와 <code>tools/run_autorun_observe_contrast.py</code>도 역사적 K13/K14/fixture 핀을 소비합니다. 새 환경에서는 그 입력을 명시한 새 source epoch/검증 도구가 필요합니다. 이 문서는 무조건 성공하는 자동 재개 스크립트를 약속하지 않습니다.</p>
++<h3>ISO 생성과 공개/개인 미디어 구분</h3>
++<p>프로젝트 미디어는 라이선스와 해당 소스를 포함하는 Linux 일반 builder로 생성합니다. 다음은 기존 캐시 대신 필요한 source build를 수행하는 경로입니다.</p>
++<pre><code data-language="sh">SOURCE_DATE_EPOCH=1785283200 python3 -B tools/build_shizuku_se_iso.py \
++  --desktop --output build/final-iso/windows98-shizuku-development.iso</code></pre>
++<p>이 빌드는 xorriso·mtools·dosfstools, 실제 GCC/MinGW/NASM 및 DOS16용 Open Watcom, manifest에 고정된 FreeDOS/FreeCOM·CSMWrap/SeaBIOS·syslinux를 요구합니다. 필요 도구가 없으면 설치 완료로 가장하지 않고 멈춥니다. <code>--reuse-builds</code>는 이미 일반 빌드와 현재 receipt를 확인한 환경에서만 사용합니다. ISO builder는 부팅 성공을 인증하지 않으며 실제 BIOS/UEFI boot matrix가 별도입니다. 최종 배포 환경의 manifest·SHA 및 부팅 기록을 확인합니다.</p>
++<p>자신의 라이선스가 있는 Windows 98 설치 미디어를 포함한 <strong>개인 ISO</strong>는 별도 생성합니다.</p>
++<pre><code data-language="sh">python3 -B tools/build_shizuku_se_iso.py \
++  --desktop --win98-media /path/to/your/licensed-win98.iso \
++  --output build/windows98-shizuku-second-edition-private.iso</code></pre>
++<p>공개 GitHub/공식 페이지/공개 ISO에는 Microsoft 설치 파일·제품 키·VC redistributable·앱 archive·설치 VM disk를 넣지 않습니다. 공개 ISO는 프로젝트 boot/runtime/overlay와 재현 소스입니다. 개인 ISO 또는 VM을 만들 때는 원본 부팅 가능한 disk를 보관하고 독립 복사본만 수정합니다.</p>
++<p>설치 USB에는 공개 미디어의 전체 구성과 EFI 파일을 최상위에 복사하고 본인의 Windows 98 ISO를 <code>OWNMEDIA/WIN98.ISO</code>에 넣습니다. 실제 파일 준비·원본 보존·읽기 대조 도구와 개인 통합 ISO 명령은 INSTALL_USB.md <small class="source-reference">(전체 소스: INSTALL_USB.md)</small>에 있습니다. 파일이 담겼다는 결과를 Windows Setup이나 MS-DOS 대체 부팅 성공으로 계산하지 않습니다. 최종 Windows 98 설치와 부팅 경로에서 ShizukuDOS가 실제 DOS 커널과 서비스를 제공해야 합니다.</p>
++<h3>병합 후 작업 순서</h3>
++<p>현재 <code>main</code>을 clone한 상태에서 이 문서의 일반 빌드와 6개 API 계약을 먼저 재현합니다. 그 다음 V44 기반 Firefox/Office/Steam을 다시 시작해 실제 다음 실패를 기록하고 공통 기능으로 수정합니다. Chromium은 정확한 publisher identity로 GUI와 headless를 각각 실행하고 공유 메모리 동작을 조사합니다. Legcord는 실제 setup finish/relaunch와 Discord 기능, native Win98는 부팅 → VMM 채널 → framebuffer/input → 앱 실행 순서로 닫습니다.</p>
++<p>과거 여러 작업 환경은 apps·boot/site·theme/TLS·validation·ISO 역할로 나뉘었습니다. 병합 시 최신 boot/site 소스를 오래된 apps 사본으로 덮지 않습니다. 새 에이전트도 파일·VM 소유권을 분리하고 소비 source epoch를 동결합니다. 공개 자료의 PASS는 표시된 시험 범위에만 적용하며 전체 앱 목표는 계속 유지합니다.</p>
++<h3>공개 배포를 서버 밖에서 확인</h3>
++<p>최종 ISO를 공식 페이지에 배포한 뒤 <code>tools/verify_m98_public.py</code>에 배포 manifest의 실제 파일명·SHA256·바이트 수를 전달합니다. 이 도구는 공개 DNS와 정상 HTTPS 검증으로 한국어/영어 홈페이지, 예전 VNC 주소의 홈페이지 이동, Authorship/인계 페이지 및 <strong>전체 ISO 다운로드 해시</strong>를 확인합니다. 다른 머신에서 공식 소스에 담긴 이 도구를 직접 실행할 수 있으며 GitHub 실행 환경에 의존하지 않습니다. origin 주소를 강제로 넣거나 Cloudflare 확인 화면을 성공으로 계산하지 않습니다. 일반 HTTP 응답 검증이며 실제 브라우저 렌더링·OS 부팅 검증과 구분합니다. 실패 기록도 그대로 남깁니다.</p></article><details class="download-details"><summary>별도 웹 엔진·TLS 작업 환경 자료</summary><article class="guide-copy"><h2>다른 환경에서 이어서 작업하기</h2>
++<p>공식 배포처는 <strong><a href="https://m98.nyase.kr">m98.nyase.kr</a></strong>입니다. 공홈의 소스 압축 파일 또는 <code>main</code> Git bundle로 작업을 옮길 수 있습니다. GitHub 접속은 필수가 아닙니다. 다운로드의 실제 파일명과 SHA256 목록은 공홈의 해당 배포 매니페스트를 사용하세요. 이 문서는 아직 제공되지 않은 파일의 다운로드를 완료했다고 주장하지 않습니다.</p>
++<p>공홈에서 받은 파일을 빈 작업 디렉터리에 놓고 먼저 해시를 확인하세요. 아래 파일명은 예시이며, 배포 매니페스트에 적힌 실제 이름으로 바꿔야 합니다.</p>
++<pre><code data-language="sh">sha256sum --check SHA256SUMS
++git clone --branch main ./Win98-Modern-main.bundle Win98-Modern
++cd Win98-Modern
++git rev-parse HEAD
++python3 -B tools/check_continuation_environment.py</code></pre>
++<p>마지막 커밋은 배포 매니페스트의 커밋과 비교하세요. Git bundle 대신 소스 압축 파일을 풀어 편집해도 됩니다. 소스 압축 파일에는 Git 이력이 없을 수 있습니다. 원본 매니페스트와 해시를 함께 보관하세요.</p>
++<h3>준비해야 할 환경과 파일</h3>
++<p>기존 호스트 빌드는 Linux/POSIX와 Python 3을 사용했습니다. 새 환경의 검토·편집에는 Git과 Python 3.10 이상을 준비하고, 빌드 재현에는 기존에 기록된 Python 3.12 및 도구 버전을 먼저 확인하세요. Windows 호스트에서는 Linux VM 또는 WSL에서 호스트 작업을 할 수 있지만, 이 안내가 그 환경의 빌드 성공을 인증하지는 않습니다.</p>
++<ul><li>호스트 빌드: GCC/G++, Clang/Clang++, Make, CMake, Ninja, Bison, Flex, Patch, Tar와 Binutils. 전체 ASan/UBSan 런타임도 필요합니다. 기존 GLSL 시도는 GCC ASan 라이브러리 누락으로 링크가 실패했습니다.</li><li>PE 빌드: <code>i686-w64-mingw32-gcc</code>, G++와 Objdump. Win98 대상에서 배포판의 미리 빌드된 C++ 런타임을 그대로 사용할 수 있다고 가정하면 안 됩니다.</li><li>Python 빌드 의존성: <code>pefile</code>, PyYAML. GLSL 생성에는 분리된 Mako 1.4.3과 MarkupSafe 2.1.3 증거 묶음이 필요합니다. 설치는 별도 환경에서 직접 준비하며, 점검 도구는 설치하거나 모듈 코드를 실행하지 않습니다.</li><li>공개 원본: Mesa 26.2.3, QuickJS 2026-06-04, 고정 musl/WAMR 리비전, Mbed TLS 4.2.0 및 3.6.7, WABT 1.0.42. 공식 원본과 라이선스·고지문을 보존하고 각 빌더의 고정 SHA256에 맞춰야 합니다. Mesa는 <a href="https://archive.mesa3d.org/">공식 아카이브</a>, QuickJS는 <a href="https://bellard.org/quickjs/">공식 사이트</a>에서 확인할 수 있습니다.</li></ul>
++<p><strong>소스만 받아서는 기존 빌드가 바로 재현되지 않습니다.</strong> <code>build/</code>, VM 디스크, 설치 매체와 로그는 Git에서 제외됩니다. 공홈의 별도 증거 묶음 또는 매니페스트 범위를 확인해 원본 아카이브, 도구 묶음, 준비된 소스, 객체 캐시, 영수증과 로그를 옮겨야 합니다. 캐시 파일의 존재가 해시·출처 검증을 대신하지 않습니다. 외부 컴파일러 전체 구성요소의 증거까지 완성된 것으로 간주하면 안 됩니다.</p>
++<p>일부 도구는 <code>/root/Win98-Modern-boot</code> 및 <code>/root/Win98-Modern-tls13-7707</code>의 절대 경로와 이전 영수증을 사용합니다. 새 환경에서 누락된 경로를 임의로 대체하거나 이전 영수증을 수정하지 마세요. 매니페스트에 따른 원본 보존과 별도 새 경로 설정·증거 생성이 필요합니다. 점검에 다른 캐시 위치를 알려줄 수는 있으나 빌더 경로를 바꾸지는 않습니다.</p>
++<pre><code data-language="sh">python3 -B tools/check_continuation_environment.py --json
++python3 -B tools/check_continuation_environment.py --verify-archives \
++  --boot-root /ABSOLUTE/Win98-Modern-boot \
++  --tls-root /ABSOLUTE/Win98-Modern-tls13-7707</code></pre>
++<p>Windows 설치 매체와 제품 키는 사용자가 정당한 라이선스로 로컬에서 준비해야 합니다. 소스 배포에 포함된다고 가정하지 마세요. 실제 Win98 시험에는 원본 OEM 파일, 준비된 게스트 디스크, QEMU와 해당 실험의 증거·실행 절차가 별도로 필요합니다. 점검 도구는 VM·서비스를 시작하지 않습니다.</p>
++<h3>이어받는 시점의 검증 상태</h3>
++<p>역사적 제한 프로파일에서 Script 307개 검사, 숫자 Wasm 265개 검사 및 한정된 MSHTML CSS 소비·화면 시험이 승인되었습니다. 새 환경이나 모든 웹 표준의 인증이 아닙니다. 수정된 TLS i486 호스트·PE 증거는 있으며, 수정 DLL의 실제 Win98 게스트 TLS 시험은 아직 대기 중입니다.</p>
++<p>GLSL 9개 파일과 SIMD 6개 파일은 <strong>DRAFT_UNVERIFIED</strong>, 현재 세대의 빌드가 실행되지 않았습니다. 이전 GLSL 세대의 정상 전처리 비교 608개는 통과했지만 전체 sanitizer 링크 및 타입 컴파일 시도는 실패했고 그대로 보존되어 있습니다. 현재 타입 수정과 자원 보호 제어 시험도 실행되지 않았습니다. SIMD의 공개 Wasm 호출 ABI는 숫자 스칼라만 지원하며 벡터 경계는 미해결입니다. 벡터 export는 실행 전 거부하고, 벡터 import·벡터 GC 필드는 지원하지 않습니다. 새 엔진에서 기존 1237 숫자, 386 메모리, 4641 선택 공식 메모리, 622 QuickJS 메모리 검사를 정상 및 전체 ASan/UBSan으로 다시 실행해야 합니다.</p>
++<p>HTML DOM, 전체 최신 JavaScript/CSS/Wasm, WebGL/WebGPU, 현대 앱 호환성 및 OS 전체는 인증되지 않았습니다. Legcord/Discord, 최신 오픈소스 Office, Signal 지원은 계속 필요한 작업입니다. 상세 경계는 각 <code>docs/TRIDENT_*</code> 및 <code>docs/TLS13_I486_*</code> 문서, 실패 영수증과 고정 소스 프로파일을 함께 보세요.</p>
++<p>큰 호스트 빌드 전에는 실제 여유 <strong>22,595,387,392 바이트</strong>와 Linux <code>MemAvailable</code> <strong>6 GiB</strong> 이상을 확인하고 한 번에 하나의 큰 작업을 예약하세요. 512 MiB 실험 예산은 예상 성공 용량이 아닙니다. 실행 중 공유 디스크 바닥은 <strong>22,058,516,480 바이트</strong>이며, native 준비에서도 이 바닥을 유지해야 합니다. 각 빌더의 실제 제한·자기 프로세스 종료·실패 보존 절차를 적용해야 합니다. 점검 출력은 순간 측정으로, 빌드·native 실행 허가나 API 성공 증거가 아닙니다.</p>
++<p>점검기는 표준 라이브러리만 쓰고 파일·PATH·설치 메타데이터·자원만 읽습니다. 다운로드, 설치, 빌드, 프로그램 실행, VM 시작, 전역 설정 변경은 없습니다. 기본 아카이브 검사는 존재만 확인하며 <code>--verify-archives</code>에서 지정된 파일의 SHA256을 읽습니다. 누락·불일치·자원 부족이 있으면 종료 코드 2를 반환합니다.</p></article></details></main><footer><span>Windows 98 Shizuku Modern Edition · 공식 배포 체크포인트</span><div><a href="./downloads.json">배포 상태·체크섬 기록</a><a href="../authorship/handoff.html">현재 작업 상태</a></div></footer></body></html>
+\ No newline at end of file
+diff --git a/site/continuation/index.html b/site/continuation/index.html
+new file mode 100644
+index 0000000..20165b9
+--- /dev/null
++++ b/site/continuation/index.html
+@@ -0,0 +1,8 @@
++<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="공식 사이트에서 Windows 98 Shizuku Modern Edition의 소스와 개발 ISO, USB 준비 도구를 받고 작업을 이어가는 방법."><title>공식 소스·USB 준비 · Windows 98 Shizuku Modern Edition</title><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="./styles.css"><link rel="icon" href="../favicon.svg" type="image/svg+xml"></head><body><a class="skip" href="#main">본문으로 건너뛰기</a><header class="top"><a class="brand" href="../index.html">Windows 98 <strong>Shizuku Modern Edition</strong></a><nav aria-label="주 메뉴"><a href="../index.html">홈페이지</a><a href="./">소스·USB 준비</a><a href="../authorship/">Authorship</a><a href="./guide.html">작업 안내서</a></nav></header><main id="main"><section class="download-hero continuation-hero"><div><p class="eyebrow">OFFICIAL DOWNLOADS / 작업 이어가기</p><h1>공식 사이트에서 받고,<br>내 환경에서 이어가세요.</h1><p class="lead">개발 ISO와 전체 소스, main Git 자료와 USB 준비 도구를 한곳에서 제공합니다. USB 조합 도구의 소스를 먼저 제공합니다. 개발 ISO와 전체 소스·main Git 자료는 최종 검증 뒤 연결합니다.</p><p class="small" lang="en">Official source, Git bundle, development ISO and USB tools are prepared here. The USB helper source is available; the ISO, source archive and Git bundle are pending. Local source handoff will also be available.</p><a class="button primary" href="./guide.html">작업 안내서 보기</a> <a class="button secondary" href="../authorship/handoff.html">현재 검증 결과</a></div></section>
++<section class="download-details"><h2>Windows 98을 위한 ShizukuDOS</h2><p>ShizukuDOS는 Windows 98의 MS-DOS 기반을 대체합니다. Kernel32·Kernel64와 호환 라이브러리·드라이버도 Windows 98에 통합하기 위한 구성요소입니다. 독립 실행 시험은 개발 단계이며 전체 Windows 98 연결과 최신 앱 기능은 계속 검증하고 있습니다.</p></section><section aria-labelledby="download-title"><div class="section-title"><h2 id="download-title">새 배포 파일</h2><p>실제 파일·체크섬 확인 후 연결합니다.</p></div><div class="app-grid">
++<article class="app-item download-card" data-role="development_iso" data-state="pending"><h3>프로젝트 개발 ISO <small lang="en">Development ISO</small></h3><p>Windows 98의 MS-DOS 기반을 대체할 ShizukuDOS와 Kernel32·Kernel64, 호환 구성요소를 담는 개발 미디어입니다. Windows 98 설치본은 별도로 준비합니다.</p><span class="download-pending" aria-disabled="true">빌드·부팅 검증 중</span></article>
++<article class="app-item download-card" data-role="source_archive" data-state="pending"><h3>전체 소스 압축 파일 <small lang="en">Full source archive</small></h3><p>통합한 main의 현재 소스와 문서를 받아 다른 환경에서 검토·수정합니다. 배포 시점의 커밋과 해시를 함께 제공합니다.</p><span class="download-pending" aria-disabled="true">통합 자료 준비 중</span></article>
++<article class="app-item download-card" data-role="main_git_bundle" data-state="pending"><h3>main Git bundle</h3><p>공식 사이트에서 받은 Git 자료로 작업 저장소를 만들 수 있습니다. 외부 저장소 서비스 접속 없이 소스 이력을 이어갑니다.</p><span class="download-pending" aria-disabled="true">배포 자료 준비 중</span></article>
++<article class="app-item download-card" data-role="usb_helpers" data-state="ready"><h3>Windows 98용 ShizukuDOS USB 조합 도구 <small lang="en">USB helper source ZIP</small></h3><p>Python 도구·한국어 안내·시험 소스·라이선스만 담은 17,916바이트 묶음입니다. 최종 프로젝트 ISO와 Windows 98 설치 파일은 포함하지 않습니다.</p><a class="button primary" href="../downloads/win98-modern-usb-helper.zip" download>도구 소스 ZIP 받기</a><p class="download-meta small"><a href="../downloads/win98-modern-usb-helper.zip.sha256">SHA-256 확인</a> · 소스 899c51ec6f4c</p><p class="small">준비 폴더 시험 9개 통과. 실제 USB 부팅·Windows 98 설치는 아직 검증 중입니다.</p></article></div></section>
++<section class="download-details" aria-labelledby="usb-scope"><h2 id="usb-scope">Windows 98 미디어는 내 환경에서</h2><p>공개 프로젝트 ISO와 본인의 정당한 Windows 98 ISO는 별개입니다. 개인 결합 ISO나 USB 준비 폴더에 원본 파일을 담는 작업은 로컬에서 합니다. 이 사이트로 Windows ISO나 제품 키를 업로드하지 않습니다.</p><p>최종 공개 묶음을 FAT32 USB 루트에 복사하고 본인의 ISO를 <code>OWNMEDIA/WIN98.ISO</code>에 추가하는 흐름입니다. 현재 다운로드는 도구 소스이며 전체 USB 파일 묶음은 최종 ISO를 기다리고 있습니다.</p><p>개인 결합 ISO에 설치 파일을 담았다는 사실은 Windows 98 설치 프로그램의 부팅·설치 성공을 뜻하지 않습니다. USB 준비 도구의 UEFI 파일 복사와 BIOS 이미지 기록 범위도 실제 검증 결과에 맞춰 표시합니다.</p></section>
++<section class="install-section"><h2>다운로드 뒤 이렇게 이어갑니다</h2><ol class="steps"><li><h3>파일과 기록을 함께 받기</h3><p>게시된 파일명과 바이트 수, SHA-256과 소스 커밋을 배포 기록에서 확인합니다. 준비 중인 파일은 다운로드되지 않습니다.</p></li><li><h3>내 작업 폴더에 소스 펼치기</h3><p>전체 소스를 풀거나, 받은 Git bundle로 로컬 저장소를 만듭니다. 작업 안내서의 실제 도구·환경 요구 사항을 확인합니다.</p></li><li><h3>동작 시험부터 다시 확인하기</h3><p>빌드와 공통 기능 시험을 마친 뒤 실제 앱과 Windows 98 연결을 이어갑니다. 이전 결과를 새 환경의 성공으로 대신하지 않습니다.</p></li></ol><a href="./guide.html">구체적인 환경·빌드 안내</a></section></main><footer><span>Windows 98 Shizuku Modern Edition · 공식 배포 체크포인트</span><div><a href="./downloads.json">배포 상태·체크섬 기록</a><a href="../authorship/handoff.html">현재 작업 상태</a></div></footer></body></html>
+\ No newline at end of file
+diff --git a/site/continuation/modern-apps-guide.md b/site/continuation/modern-apps-guide.md
+new file mode 100644
+index 0000000..9405d53
+--- /dev/null
++++ b/site/continuation/modern-apps-guide.md
+@@ -0,0 +1,152 @@
++# 다른 환경에서 Windows 98 Modern 작업 이어가기
++
++이 문서는 2026-10-01 소스 인계 지점입니다. 목표는 **Windows 98의 MS-DOS 기반을 ShizukuDOS로 대체**하는 것입니다. Kernel32·Kernel64·호환 라이브러리·드라이버는 모두 Windows 98용 ShizukuDOS의 구성요소이며, 별도 커널 실행 시험은 이 통합 제품을 구현하기 위한 단계입니다. `main`에 통합하는 코드는 개발 중인 호환 커널과 공통 API 구현입니다. **Chrome·Chromium·Firefox·Discord/Legcord·Steam·최신 Office가 설치된 Windows 98에서 모두 동작한다는 완료 선언은 아닙니다.** 공개 자료에도 아래 검증 범위를 함께 표시합니다. 실제 기록의 SHA와 공개 입력 핀은 [checkpoint-20261001](shizukudos10/reports/checkpoint-20261001/)에 있습니다.
++
++## 확인된 범위와 다음 작업
++
++| 영역 | 실제 확인 결과 | 남은 작업 |
++|---|---|---|
++| V44 공통 런타임 | NTDLL·KERNEL32·UCRT 및 7개 시험 EXE 일반 빌드 완료. 변경된 PE의 import 443개 확인 | 이 빌드 성공 자체는 앱 실행 증거가 아님 |
++| V44 게스트 API 시험 | 모듈 열거 45, 검색 경로 50, 토큰 19, UCRT 44, CreateFile2/CopyFile2 37, RTL 57: **252개 PASS** | 모두 독립 Kernel64 게스트 시험. 설치된 Win98 시험은 별도 |
++| 네이티브 Supervisor 기반 | VMX/EPT, native K64, 실제 콘솔 PE 종료 코드 7 두 번 등 **37개 PASS** | 해당 실행의 도메인은 DOS16/K64. Win98 VMM 연결·현대 앱 실행은 미검증 |
++| Chromium | headless 다중 프로세스에서 실제 JavaScript DOM `42`와 정상 종료 확인 | GUI V2는 157.0.8079.0/1706750: 화면 표시 후 공유 메모리 오류와 `c0000005` 종료. 페이지·웹 기능 미완료 |
++| Firefox 157.0 | 정식 Mozilla 설치 파일 체크섬 및 원본 73개 파일 확인 | V42 실제 실행은 `mozglue!OpenProcessToken` import 실패. V44 토큰/RTL/file2 기반으로 다시 시험 |
++| LibreOffice 26.8.0 | 정식 MSI 및 실제 26.8.0.3 앱 파일 확인 | V42 실제 실행은 `sal3!SetSearchPathMode` 실패. V44 이후 버전 출력, 문서 열기·편집·저장·PDF 변환 재시험 |
++| Legcord 1.3.0 | 실제 Welcome 및 설정 화면 표시 | 설정 완료 후 실제 재실행, Discord 로그인·채팅·음성 미검증 |
++| Steam | 원본 클라이언트 시작 및 누락 API 위치 확인 | V44의 Module32Next 시험은 통과. 실제 CEF·로그인·라이브러리·게임 실행 미검증 |
++| Google Chrome | 정식 enterprise x64 MSI에서 브라우저 154.0.8037.93의 원본 267개 파일을 추출하고 전체 SHA·PE 버전 확인 | 게스트 실행과 브라우저 기능은 아직 미검증. 정식 metadata의 단계적 배포 버전과 구분 |
++| 설치된 Win98 네이티브 통합 | opt-in Win98 생성자·ATA/PIC/문자열 PIO 구현 후보와 일반 native 링크 보존 | 실제 Win98 부팅·그래픽·입력·VMM 채널·앱 실행을 계속 구현/검증 |
++
++Chromium GUI V2의 원본 기록은 잘못된 1708403 라벨을 포함합니다. 실제 패키지는 **1706750 / 157.0.8079.0**입니다. 원본 실패 기록은 보존하고 공개 요약에서 바로잡았습니다. 1708403 PDB를 1706750 DLL에 적용하면 안 됩니다. 기존 headless 기록은 이미지 경로로 1708403을 식별하지만 EXE/tree SHA를 기록하지 않았으므로, 최신 패키지 전체 provenance 확인 시험이 추가로 필요합니다.
++
++V43의 MinGW stdio 링크 실패도 삭제하지 않았습니다. V44의 부모/자식 시험 소스는 기존 SHZ CRT를 사용해 실제 일반 링크를 통과했습니다. post-autorun 관찰의 세 가지 실제 대조 실행 및 Legcord 재실행 성공은 이 문서의 252개 API PASS에 포함되지 않습니다.
++
++## 새 작업 환경
++
++Linux x86-64에서 시작합니다. [공식 홈페이지](https://m98.nyase.kr/)의 해당 배포에서 소스 아카이브 또는 Git bundle과 체크섬을 받습니다. 실제 게시된 파일의 SHA-256과 source commit을 먼저 대조합니다. 소스 아카이브는 새 작업 폴더에 풀고, Git bundle을 받았다면 로컬 파일에서 복원합니다. 다음 예의 파일명은 자신이 받은 실제 bundle 이름으로 바꿉니다. 공식 페이지에 게시되지 않은 파일이 존재한다고 가정하지 않습니다.
++
++```sh
++git clone /path/to/official-source.bundle Win98-Modern
++cd Win98-Modern
++git checkout main
++python3 -m venv .venv
++. .venv/bin/activate
++python3 -m pip install -r tests/requirements.txt
++python3 -m pip install Pillow
++```
++
++필요한 실제 도구는 Python 3.10+, Git, GNU make, GCC/binutils(`gcc -m32` 컴파일 가능한 multilib 포함), NASM, **x86-64 및 i686 mingw-w64**의 GCC/G++·dlltool·windres, Windows 드라이버 빌드에 쓰는 해당 DDK 헤더, mtools, dosfstools, QEMU x86-64입니다. Wine 소스의 host 도구 생성에는 bison·flex·pkg-config와 개발 헤더가 필요할 수 있습니다. 전체 ISO에는 xorriso, CSMWrap 빌드 도구, DOS16용 Open Watcom이 추가됩니다. 패키지 이름은 Linux 배포판별로 다르며 이 문서는 전역 도구나 클라이언트 설정을 자동 변경하지 않습니다.
++
++API 게스트 시험에는 접근 가능한 `/dev/kvm`이 필요합니다. native Supervisor의 VMX 시험에는 Intel VT-x/EPT와 **중첩 VMX가 실제 노출되는** 호스트 및 OVMF가 필요합니다. QEMU의 KVM 사용과 게스트 Supervisor의 VMX 동작은 각각 검증합니다. AMD에서 동일 native VMX 결과를 가정하지 않습니다. QEMU/OVMF 경로는 `shizukudos/tools/qemu.py`가 Fedora/RHEL 및 Debian/Ubuntu 위치에서 찾습니다. TCG 결과는 KVM 또는 native Supervisor 가속 증거로 계산하지 않습니다.
++
++빌드/VM 출력은 `build/` 아래에서만 생성합니다. native Win98 실험은 여유 디스크 17 GiB를 남기며 복제·ESP·읽기 검증 예산을 추가로 확보합니다. 약 3–4 GiB 게스트 RAM 외에도 호스트에 최소 4 GiB를 남깁니다. 설치된 원본 VM은 종료 상태로 보관하고 각 시험은 독립 복사본을 사용합니다.
++
++## 캐시 없는 일반 빌드와 API 시험
++
++과거 개발 머신의 절대 경로, WIN64.IMG, Wine 캐시, 디스크 이미지는 clone에 없습니다. **처음에는 전체 일반 빌드를 실행**해 새 환경의 런타임과 import 라이브러리를 만듭니다. 기본 빌드는 [upstream manifest](../shizukudos/upstream/manifest.json)의 고정 Wine 소스 등을 `build/upstream/`에 가져와 필요한 host 도구/헤더와 PE DLL을 생성합니다. 해당 revision과 패치의 라이선스/출처를 유지합니다.
++
++```sh
++mkdir -p build
++python3 -B shizukudos/win64/build.py > build/fresh-win64-build.log 2>&1
++python3 -B tools/build_isolated_kernel.py --out build/modern-apps/fresh-kernel
++```
++
++첫 명령은 전체 runtime DLL·시험·`build/shizukudos/win64/WIN64.IMG` 및 `build-result.json`을 생성합니다. `--no-wineport` 빌드는 Wine 기반 DLL/폰트가 빠지므로 전체 앱용 런타임 대신 사용하지 않습니다. 이 새 환경의 전체 빌드는 아직 다시 실행하지 않았으므로 실패하면 로그와 실제 누락 의존성을 보존하고 해결합니다. 기존 개발 호스트의 V44 SHA를 새 빌드 결과에 붙이지 않습니다.
++
++252개 계약 시험은 다음 여섯 이름으로 재현합니다. 각 실행은 입력 archive의 복사본과 새 기록 폴더를 사용합니다.
++
++```sh
++for test in T_MODULE_ANSI T_SEARCH_PATH_MODE T_BASE_TOKEN T_UCRT_LEGACY T_FILE2 T_RTL_BOOTSTRAP; do
++  python3 -B shizukudos/tests/run_k64_contract.py \
++    --runtime build/shizukudos/win64 \
++    --kernel build/modern-apps/fresh-kernel/kernel64s \
++    --test "$test.EXE" --accel kvm \
++    --out "build/modern-apps/fresh-contract-$test" \
++    --timeout 180 --guest-timeout 120 || break
++done
++```
++
++확인은 `result.json`의 PASS, 실제 정상 앱 종료, `faulted=0`, PASS 행, 실패 없음, 입력 불변 및 현재 KVM 증거로 합니다. `isa-debug-exit` 때문에 QEMU 프로세스 코드 1이 정상 게스트 값 0을 나타낼 수 있습니다. 프로그램 자신의 실패 코드를 QEMU 종료 코드로 덮지 않습니다. `summary_check_count=0`인 기존 기록에서도 개별 `checks` 행을 확인합니다.
++
++후속 부분 빌드는 **새로 생성한** archive를 base로 사용합니다. 아래 도구는 일반 import 라이브러리가 `build/shizukudos/win64/`에 존재해야 합니다. 컴파일하는 동안 관련 소스·헤더·라이브러리를 수정하지 않습니다.
++
++```sh
++python3 -B tools/build_frozen_native_subset.py \
++  --base build/shizukudos/win64/WIN64.IMG \
++  --out build/modern-apps/fresh-common-subset \
++  --ntdll --kernel32 --module ucrtbase \
++  --test t_module_ansi --test t_search_path_mode --test t_base_token \
++  --test t_autorun_observe --test t_ucrt_legacy --test t_file2 \
++  --test t_rtl_bootstrap --compile-timeout 900
++```
++
++출력 `receipt.json`은 소비한 소스·실제 명령·원본/새 archive SHA·변경 PE·import 확인을 기록합니다. 오래된 NTDLL 494개 ordinal과 Nt/Zw 로컬 별칭, UCRT 861개 ordinal 보존도 실제 PE로 확인합니다. host 계약 검사는 각 시험 README와 다음 도구를 사용합니다.
++
++```sh
++python3 -B shizukudos/win64/tests/test_ucrt_legacy_host.py --output-dir build/modern-apps/fresh-ucrt-host
++python3 -B shizukudos/win64/tests/test_rtl_bootstrap_host.py --output-dir build/modern-apps/fresh-rtl-host
++python3 -B shizukudos/win64/tests/test_module_ansi_host.py \
++  --win64-root shizukudos/win64 --output-dir build/modern-apps/fresh-module-host
++```
++
++## 정식 앱을 직접 확보하고 다시 시험
++
++정식 URL, 크기, SHA-256, revision은 [publisher-input-pins.json](shizukudos10/reports/checkpoint-20261001/publisher-input-pins.json)에 있습니다. 이동하는 “latest” URL 대신 해당 시험의 버전을 고정합니다. 새 버전을 쓰면 공식 체크섬/REVISIONS, 전체 파일 목록, 실제 PE 버전과 EXE SHA를 새로 기록합니다. 다운로드·원본 앱·Microsoft VC DLL은 개인 입력 폴더에 두고 커밋하거나 ISO에 넣지 않습니다.
++
++- Chromium: 정식 `chrome-win.zip`과 같은 revision의 `REVISIONS`를 받아 안전하게 전체 추출합니다. 1708403은 157.0.8081.0이며 1706750은 157.0.8079.0입니다. ZIP SHA, 258개 전체 파일과 실제 PE identity를 혼합하지 않습니다.
++- Firefox: 정식 157.0 한국어 x64 installer와 Mozilla `SHA512SUMS`를 검증합니다. 7-Zip 등으로 **설치 실행 없이** `core/`를 추출합니다. 실험에는 원본 73개 파일을 모두 사용합니다.
++- Legcord: 정식 v1.3.0 win-x64 ZIP을 전체 추출합니다. Electron 43.2/Chrome 150이 포함된 앱 자체 패키지입니다. Welcome만으로 Discord 기능을 인증하지 않습니다.
++- LibreOffice: 정식 26.8.0 x64 MSI를 `msiextract` 등으로 개인 폴더에 추출합니다. 필요한 app-local VC 14.44.35211 DLL은 자신의 정식 MSI/redistributable에서 확보하고 각 DLL SHA를 기록합니다. 실제 버전·ODT/PDF 왕복 시험을 순서대로 합니다.
++- Steam: Valve의 정식 client 설치/패키지를 개인 환경에서 확보합니다. 기존 5624개 파일 클라이언트 시험은 설치 bootstrap을 건너뛴 별도 진단이며 신규 설치 성공이 아닙니다.
++- Google Chrome: 공식 enterprise MSI URL은 이동합니다. 기록된 SHA와 일치하지 않으면 다른 패키지로 취급하고 실제 브라우저 PE 버전부터 확인합니다. MSI 다운로드 성공은 Chrome 실행 성공이 아닙니다.
++
++**Chromium/Chrome/Electron/Legcord 실행 인자에는 `--no-sandbox`가 필수**입니다. Steam에는 `--no-sandbox -no-cef-sandbox`를 유지합니다. Firefox에서 같은 인자가 실제 sandbox를 끈다고 가정하지 않습니다. 해당 Mozilla 소스의 `MOZ_DISABLE_CONTENT_SANDBOX` 등 실제 적용 경로를 확인하고 게스트 환경 설정으로 전달해야 합니다. SSL 검증 생략, 거짓 OS/API 성공 응답이나 단일 프로세스 강제로 다중 프로세스 성공을 대체하지 않습니다.
++
++일반 앱 도구는 `shizukudos/tests/run_k64_chromium.py`, `run_k64_electron.py`, `run_k64_productivity.py`입니다. 기본 입력 위치는 **이번 환경에서 생성한** `build/shizukudos/{kernel64s,win64}`입니다. 필요하면 일반 `python3 shizukudos/kbuild.py`로 기본 Kernel64S 출력을 생성하거나 도구의 source-defined 입력 경로를 확인한 독립 runner를 사용합니다. 소스 내 과거 scratch 기본값 대신 `--tree/--chromium`, `--image`, `--out`을 명시합니다.
++
++GUI 도구 `tools/capture_chromium_interactive_v3.py`와 `tools/capture_modern_app_interactive_v5.py`는 기존 검토 시점의 runner SHA를 고정한 역사적 도구입니다. 이번 병합에서 runner가 변경되면 import 단계에서 정상적으로 중단하므로 새 clone에서 바로 실행할 수 있다고 가정하지 않습니다. 현재 runner의 인자·입력·판정 및 host 계약을 검토한 **새 capture epoch**를 만들어야 하며, 이전 SHA를 무조건 갱신하거나 gate를 지우지 않습니다. Chromium 새 도구는 `--publisher-manifest --publisher-revisions`와 전체 258개 파일 identity를 확인하고, 완전한 파일 핀이 없는 manifest에는 원본 `--publisher-archive` 검증도 요구합니다. 실제 화면을 확인한 뒤 입력과 화면 generation/sequence를 기록합니다. post-autorun 추가 관찰은 K14 기능의 실제 대조 시험을 마친 뒤 사용합니다.
++
++공식 public CA를 실제 crypto 경로로 적재하는 시험 helper가 별도로 필요합니다. `tools/seal_carried_public_trust.py`는 **과거 receipt와 원본 CA payload가 있는 환경의 인계 도구**이며 새 clone에서 자동 CA 생성/설치를 수행하지 않습니다. 같은 이름의 파일이나 임의 인증서를 넣어 기존 해시 검증을 우회하지 않습니다.
++
++## 네이티브 Win98 후보 소스 이어가기
++
++[candidate source/manifest](shizukudos10/reports/checkpoint-20261001/native-win98-candidate/manifest.json)는 검토된 Supervisor 후보 18개, generic K64 peer-dispatch 소스 2개와 해당 diff를 보존합니다. 실험중인 구현을 잃지 않도록 **별도 후보 위치**에 넣었으며 기본 Supervisor·shared ABI를 바꾸지 않습니다.
++
++ATA/PIC/REP PIO와 생성자 host 시험 및 일반 native 링크는 확인됐지만 실제 설치된 Win98 부팅은 아직 아닙니다. 후보는 128 MiB 실제 guest RAM, 자신의 설치된 2 GiB disk, 실제 256 KiB SeaBIOS ROM, opt-in 16-byte `WIN98CFG.BIN`/`mode=supervisor`를 사용합니다. 실제 graphics/input/VMM 연결은 후속 작업입니다. generic dispatcher는 실제 K32 peer 존재 여부를 검사해 Win98 채널을 K32 selftest peer로 오인하지 않도록 하는 후보이며 아직 VM 실행 검증이 없습니다.
++
++후보의 `build_candidate.py`는 과거 고정 build receipt를 소비하는 참고 스크립트입니다. 공개본에서는 개발 머신의 cold-disk 절대 경로를 명시적 placeholder로 바꿨고 변경 전/후 SHA를 manifest에 구분했습니다. **그대로 실행할 fresh-clone producer가 아닙니다.** 격리 worktree에서 현재 소스와 ABI를 비교해 후보를 적용하고, 자신의 정당한 Win98 disk/SeaBIOS/OVMF를 인자로 받는 producer를 만든 뒤 모든 일반 빌드와 source/artifact receipt를 재생성합니다. 과거 영수증에 새 입력을 끼워 넣거나 hash gate를 제거하지 않습니다.
++
++`tools/build_native_supervisor_foundation.py`는 일반 native 기반 producer지만 `tools/run_native_supervisor_foundation.py`와 `tools/run_autorun_observe_contrast.py`도 역사적 K13/K14/fixture 핀을 소비합니다. 새 환경에서는 그 입력을 명시한 새 source epoch/검증 도구가 필요합니다. 이 문서는 무조건 성공하는 자동 재개 스크립트를 약속하지 않습니다.
++
++## ISO 생성과 공개/개인 미디어 구분
++
++프로젝트 미디어는 라이선스와 해당 소스를 포함하는 Linux 일반 builder로 생성합니다. 다음은 기존 캐시 대신 필요한 source build를 수행하는 경로입니다.
++
++```sh
++SOURCE_DATE_EPOCH=1785283200 python3 -B tools/build_shizuku_se_iso.py \
++  --desktop --output build/final-iso/windows98-shizuku-development.iso
++```
++
++이 빌드는 xorriso·mtools·dosfstools, 실제 GCC/MinGW/NASM 및 DOS16용 Open Watcom, manifest에 고정된 FreeDOS/FreeCOM·CSMWrap/SeaBIOS·syslinux를 요구합니다. 필요 도구가 없으면 설치 완료로 가장하지 않고 멈춥니다. `--reuse-builds`는 이미 일반 빌드와 현재 receipt를 확인한 환경에서만 사용합니다. ISO builder는 부팅 성공을 인증하지 않으며 실제 BIOS/UEFI boot matrix가 별도입니다. 최종 배포 환경의 manifest·SHA 및 부팅 기록을 확인합니다.
++
++자신의 라이선스가 있는 Windows 98 설치 미디어를 포함한 **개인 ISO**는 별도 생성합니다.
++
++```sh
++python3 -B tools/build_shizuku_se_iso.py \
++  --desktop --win98-media /path/to/your/licensed-win98.iso \
++  --output build/windows98-shizuku-second-edition-private.iso
++```
++
++공개 GitHub/공식 페이지/공개 ISO에는 Microsoft 설치 파일·제품 키·VC redistributable·앱 archive·설치 VM disk를 넣지 않습니다. 공개 ISO는 프로젝트 boot/runtime/overlay와 재현 소스입니다. 개인 ISO 또는 VM을 만들 때는 원본 부팅 가능한 disk를 보관하고 독립 복사본만 수정합니다.
++
++설치 USB에는 공개 미디어의 전체 구성과 EFI 파일을 최상위에 복사하고 본인의 Windows 98 ISO를 `OWNMEDIA/WIN98.ISO`에 넣습니다. 실제 파일 준비·원본 보존·읽기 대조 도구와 개인 통합 ISO 명령은 [INSTALL_USB.md](INSTALL_USB.md)에 있습니다. 파일이 담겼다는 결과를 Windows Setup이나 MS-DOS 대체 부팅 성공으로 계산하지 않습니다. 최종 Windows 98 설치와 부팅 경로에서 ShizukuDOS가 실제 DOS 커널과 서비스를 제공해야 합니다.
++
++## 병합 후 작업 순서
++
++현재 `main`을 clone한 상태에서 이 문서의 일반 빌드와 6개 API 계약을 먼저 재현합니다. 그 다음 V44 기반 Firefox/Office/Steam을 다시 시작해 실제 다음 실패를 기록하고 공통 기능으로 수정합니다. Chromium은 정확한 publisher identity로 GUI와 headless를 각각 실행하고 공유 메모리 동작을 조사합니다. Legcord는 실제 setup finish/relaunch와 Discord 기능, native Win98는 부팅 → VMM 채널 → framebuffer/input → 앱 실행 순서로 닫습니다.
++
++과거 여러 작업 환경은 apps·boot/site·theme/TLS·validation·ISO 역할로 나뉘었습니다. 병합 시 최신 boot/site 소스를 오래된 apps 사본으로 덮지 않습니다. 새 에이전트도 파일·VM 소유권을 분리하고 소비 source epoch를 동결합니다. 공개 자료의 PASS는 표시된 시험 범위에만 적용하며 전체 앱 목표는 계속 유지합니다.
++
++## 공개 배포를 서버 밖에서 확인
++
++최종 ISO를 공식 페이지에 배포한 뒤 `tools/verify_m98_public.py`에 배포 manifest의 실제 파일명·SHA256·바이트 수를 전달합니다. 이 도구는 공개 DNS와 정상 HTTPS 검증으로 한국어/영어 홈페이지, 예전 VNC 주소의 홈페이지 이동, Authorship/인계 페이지 및 **전체 ISO 다운로드 해시**를 확인합니다. 다른 머신에서 공식 소스에 담긴 이 도구를 직접 실행할 수 있으며 GitHub 실행 환경에 의존하지 않습니다. origin 주소를 강제로 넣거나 Cloudflare 확인 화면을 성공으로 계산하지 않습니다. 일반 HTTP 응답 검증이며 실제 브라우저 렌더링·OS 부팅 검증과 구분합니다. 실패 기록도 그대로 남깁니다.
+diff --git a/site/continuation/official-distribution.md b/site/continuation/official-distribution.md
+new file mode 100644
+index 0000000..f155563
+--- /dev/null
++++ b/site/continuation/official-distribution.md
+@@ -0,0 +1,13 @@
++# 공식 배포 기준 — 2026-10-01
++
++공식 홈페이지·다운로드·미리보기는 [m98.nyase.kr](https://m98.nyase.kr), 영문판은 [m98.nyase.kr/en/](https://m98.nyase.kr/en/)에서 제공합니다. nginx의 기본 페이지는 공홈이며 이전 VNC 주소도 공홈으로 이동합니다. 개발 VM 콘솔은 별도 명시적 경로에 있습니다.
++
++최신 사용자 지시는 모든 소스 커밋, GitHub `main` 병합과 웹 게시입니다. [GitHub main](https://github.com/NiSeullent/Win98-Modern/tree/main)에서 새 환경으로 clone할 수 있습니다. 이전 GitHub 게시 제한 문구의 원문은 `merge-history/20261001/distribution-policy/`에 보존하며 현재 배포 지시로 적용하지 않습니다.
++
++ShizukuDOS는 MS-DOS를 대체하며 Kernel32·Kernel64 등은 Windows98을 위한 구성요소입니다. 단독 실행 프로필의 검증과 실제 Windows98 전체 경로의 완료를 구별합니다. 임시 Microsoft DOS 매체 의존은 최종 설계가 아닙니다.
++
++공개 개발 ISO는 통합 소스에서 새로 빌드하고, ISO의 실제 크기·SHA256·소스 commit과 실제 부팅 시험 범위를 함께 게시합니다. 한국어·영문 페이지의 기본 버튼은 실제 게시한 ISO를 가리키며 구성요소 ZIP도 유지합니다. 전체 다운로드와 Range 응답, 공개 DNS·유효 TLS·실제 브라우저 및 서버 밖의 실행 환경을 각각 확인합니다. 인증 확인 화면과 localhost 응답은 외부 공홈 성공으로 세지 않습니다.
++
++설치 USB는 Shizuku 부팅 파일·구성요소와 본인의 `WIN98.ISO`를 함께 준비하는 방식입니다. 공개 묶음과 사용자 미디어를 더한 개인 묶음을 구별하고 실제 설치·부팅 검증 범위를 표시합니다. Microsoft 설치 파일·제품 키·비공개 VM·TLS 키는 공개 소스나 공개 다운로드에 포함하지 않습니다.
++
++[새 환경 빌드 안내](CONTINUE_ON_ANOTHER_MACHINE.md), [현대 앱과 native 후보 이어가기](CONTINUE_MODERN_APPS.md), [기존 인계 자료](CONTINUE_IN_ANOTHER_ENVIRONMENT.md)를 함께 확인하세요. 소스 통합이나 개발 ISO 부팅은 전체 최신 앱·GPU 가속·완성된 Windows98 자동 설치의 완료 선언이 아닙니다. 실제 기록과 미완료 항목은 각 원본 증거를 보존합니다.
+diff --git a/site/continuation/styles.css b/site/continuation/styles.css
+new file mode 100644
+index 0000000..c532438
+--- /dev/null
++++ b/site/continuation/styles.css
+@@ -0,0 +1 @@
++.continuation-hero{grid-template-columns:1fr;max-width:960px;padding:24px 0 42px}.continuation-hero .lead{max-width:820px}.download-card h3 small{display:block;font-size:.875rem;font-weight:400;color:#516b72}.download-pending{display:inline-block;margin-top:18px;padding:8px 12px;border:1px solid #d0dfe1;border-radius:4px;background:#eef2f2;color:#617279;font-size:.875rem}.guide-intro{max-width:960px;padding:18px 0 24px}.guide-copy{max-width:960px;min-width:0;overflow-wrap:anywhere}.guide-copy h2{margin-top:36px;font-size:1.8rem}.guide-copy h3{margin-top:30px;font-size:1.45rem}.guide-copy p,.guide-copy li{font-size:1rem}.guide-copy pre{max-width:100%;overflow:auto;padding:18px;background:#102e37;color:#e8f1ed;border-radius:4px;font-size:.875rem;line-height:1.7}.guide-copy code:not(pre code){overflow-wrap:anywhere;padding:1px 3px;background:#e6efed}.guide-table{max-width:100%;overflow:auto}.guide-copy table{border-collapse:collapse;min-width:680px;width:100%;margin:24px 0}.guide-copy td,.guide-copy th{padding:12px;border:1px solid #c5d6d5;text-align:left;vertical-align:top}.guide-copy th{background:#e6efed}.source-reference{font-size:.875rem;color:#62757b}.download-card .download-meta{overflow-wrap:anywhere}@media(max-width:760px){.continuation-hero .button{width:100%;margin-top:10px}.guide-intro h1{font-size:2rem}.guide-copy pre{padding:12px;font-size:.8rem}}
+\ No newline at end of file
+diff --git a/site/deploy/publish_static.py b/site/deploy/publish_static.py
+index 2a57c3f..0c2fa7a 100644
+--- a/site/deploy/publish_static.py
++++ b/site/deploy/publish_static.py
+@@ -46,6 +46,21 @@ AUTHORSHIP_IMAGES = {
+     'chromium-loading.png': 'ca6b5ce2e239170b91fc4372b98979efa6f3c7cf73f16efcd501c2be4282453e',
+ }
+ 
++# Historical 0.9 source handoff; final ISO/source/Git bundle admission remains
++# separate. Re-review both bytes and producer scope before changing these pins.
++CONTINUATION_PINS = {
++    'continuation/index.html': (6440, '19747185348f7e7675e01bd73cd5752b7aacc54099ba1a29f188d5a7b19e6e3c'),
++    'continuation/guide.html': (31403, '8bb10240a11d925ca191f1b3e26c1ee906670860051e89ff86f00c474bbbb160'),
++    'continuation/styles.css': (1380, '535bf65880d2ca123df6a6137c5c21e88c51b8d80def4a9c83d26b5f89ff1797'),
++    'continuation/downloads.json': (3154, '20488553f97a4e3d7f0f4618c07f55dcd815e62268d4832a3d0edf9ee370c838'),
++    'continuation/modern-apps-guide.md': (19961, '69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f'),
++    'continuation/environment-guide.md': (6814, '22371d3abfaf731d9cd39b60ccb5b8e8e83012317ae042eb71edf0fc47cdf060'),
++    'continuation/official-distribution.md': (2339, '16d663f0743af8eaafd9ac6ea84b2884939ffbae5cf9695abc5e771d15b165d4'),
++    'downloads/win98-modern-usb-helper.zip': (17916, 'f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54'),
++    'downloads/win98-modern-usb-helper.zip.sha256': (94, '86b77cc378c2ed69b9255fdfecd3175f482f39423c4a26df2f8835edacaa780b'),
++}
++CONTINUATION_HELPER_SOURCE_COMMIT = '899c51ec6f4c731fe3181570feec0fa52bfbd591'
++
+ 
+ def sha(data):
+     return hashlib.sha256(data).hexdigest()
+@@ -488,6 +503,69 @@ def add_authorship_assets(assets):
+     return len(records)
+ 
+ 
++def add_continuation_assets(assets):
++    """Keep the reviewed local handoff and helper without admitting new media."""
++    staged = {}
++    for name, (size, expected) in CONTINUATION_PINS.items():
++        raw = read_small(SITE / name)
++        if len(raw) != size or sha(raw) != expected:
++            raise ValueError('Reviewed continuation bytes changed: ' + name)
++        staged[name] = raw
++    manifest = json.loads(staged['continuation/downloads.json'])
++    if (manifest.get('schema') != 'win98modern.official-downloads.v1'
++            or manifest.get('version') != '0.9.0-dev'
++            or manifest.get('publication_state') != 'helper_source_available_other_artifacts_pending'
++            or manifest.get('official_origin') != 'https://m98.nyase.kr'
++            or manifest.get('source_commit') is not None
++            or manifest.get('full_modern_apps_verified') is not False
++            or manifest.get('native_windows98_modern_apps_verified') is not False):
++        raise ValueError('Historical incomplete helper-source checkpoint required')
++    items = manifest.get('items')
++    roles = {'development_iso', 'source_archive', 'main_git_bundle', 'usb_helpers'}
++    if (not isinstance(items, list) or len(items) != 4
++            or not all(isinstance(row, dict) for row in items)
++            or {row.get('role') for row in items} != roles):
++        raise ValueError('Exactly four unambiguous continuation roles required')
++    for row in items:
++        if row['role'] != 'usb_helpers':
++            if row.get('state') != 'pending' or any(row.get(key) is not None for key in ('url', 'sha256', 'bytes', 'source_commit')):
++                raise ValueError('Final artifacts need their separate producer review')
++            continue
++        helper = 'downloads/win98-modern-usb-helper.zip'
++        size, expected = CONTINUATION_PINS[helper]
++        if (row.get('state') != 'ready' or row.get('url') != '/' + helper
++                or row.get('sha256') != expected or row.get('bytes') != size
++                or row.get('source_commit') != CONTINUATION_HELPER_SOURCE_COMMIT):
++            raise ValueError('Reviewed helper source identity differs')
++        checksum = expected + '  ' + Path(helper).name + '\n'
++        if staged[helper + '.sha256'] != checksum.encode('ascii'):
++            raise ValueError('Reviewed helper checksum differs')
++    private = manifest.get('private_media_policy', {})
++    if any(private.get(key) is not False for key in ('windows_media_published', 'product_keys_published', 'vendor_app_installers_published', 'vm_disks_published')):
++        raise ValueError('Private media must remain private')
++    usb = manifest.get('usb_scope', {})
++    if (any(usb.get(key) is not False for key in ('uefi_file_copy_preparation_verified', 'bios_hybrid_image_boot_verified', 'windows98_setup_boot_verified', 'full_public_usb_payload_available'))
++            or usb.get('helper_source_package_verified') is not True
++            or usb.get('helper_host_fixture_checks') != 9):
++        raise ValueError('Only the reviewed helper source preparation is verified')
++    architecture = manifest.get('architecture_goal', {})
++    if (architecture.get('project') != 'ShizukuDOS for Windows98'
++            or architecture.get('replaces') != 'MS-DOS'
++            or architecture.get('separate_standalone_os_goal') is not False
++            or architecture.get('installed_windows98_complete') is not False):
++        raise ValueError('Windows98 MS-DOS replacement is an incomplete goal')
++    guide = manifest.get('guide_provenance', {})
++    for field, name in (('modern_original_sha256', 'modern-apps-guide.md'),
++                        ('modern_web_sha256', 'modern-apps-guide.md'),
++                        ('environment_source_sha256', 'environment-guide.md'),
++                        ('policy_source_sha256', 'official-distribution.md')):
++        if guide.get(field) != CONTINUATION_PINS['continuation/' + name][1]:
++            raise ValueError('Reviewed source guide provenance differs')
++    if guide.get('modern_web_changes') != []:
++        raise ValueError('Reviewed source guide must remain unchanged')
++    assets.update(staged)
++
++
+ def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None):
+     if (iso_path is None) != (iso_source_commit is None):
+         raise ValueError('Both --iso and --iso-source-commit are required')
+@@ -499,6 +577,7 @@ def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None
+     assets = {name: read_small(SITE / name) for name in STATIC}
+     validate_translation(manifest, json.loads(assets['en/evidence/preview.json']))
+     authorship_images = add_authorship_assets(assets)
++    add_continuation_assets(assets)
+     # Each redistributed component download remains bound to its reviewed bytes.
+     expected_downloads = {
+         'downloads/SHZGOP.zip': '5fdc6ca5942012b6d29a291ca85e6ad4e5ca28421477394bfd2909c64f9c5dbb',
+diff --git a/site/deploy/tests/test_continuation_assets.py b/site/deploy/tests/test_continuation_assets.py
+new file mode 100644
+index 0000000..cccecb0
+--- /dev/null
++++ b/site/deploy/tests/test_continuation_assets.py
+@@ -0,0 +1,153 @@
++"""Continuation preservation controls; prepare only, never publish or boot."""
++import hashlib
++import importlib.util
++import json
++from pathlib import Path
++import shutil
++import tempfile
++import unittest
++from unittest.mock import patch
++
++PUBLISHER = Path(__file__).resolve().parents[1] / 'publish_static.py'
++spec = importlib.util.spec_from_file_location('m98_continuation_publisher', PUBLISHER)
++publisher = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(publisher)
++ADDED = {
++    'continuation/index.html', 'continuation/guide.html',
++    'continuation/styles.css', 'continuation/downloads.json',
++    'continuation/modern-apps-guide.md', 'continuation/environment-guide.md',
++    'continuation/official-distribution.md',
++    'downloads/win98-modern-usb-helper.zip',
++    'downloads/win98-modern-usb-helper.zip.sha256',
++}
++
++
++class ContinuationAssets(unittest.TestCase):
++    def setUp(self):
++        temporary = tempfile.TemporaryDirectory(prefix='m98-continuation-controls-')
++        self.addCleanup(temporary.cleanup)
++        self.site = Path(temporary.name) / 'site'
++        shutil.copytree(publisher.SITE, self.site, ignore=shutil.ignore_patterns('__pycache__'))
++        patcher = patch.object(publisher, 'SITE', self.site)
++        patcher.start()
++        self.addCleanup(patcher.stop)
++
++    def prepared(self):
++        with patch.object(publisher, 'publish', side_effect=AssertionError('publication forbidden')):
++            return publisher.prepare_assets()
++
++    def test_full_static_inventory_preserves_all_existing_assets_and_exact_nine_additions(self):
++        prepared = self.prepared()
++        assets = prepared['assets']
++        self.assertEqual(len(assets), 92)
++        self.assertTrue(ADDED.issubset(assets))
++        existing = set(publisher.STATIC) | set(publisher.AUTHORSHIP_STATIC)
++        existing.update('authorship/images/' + name for name in publisher.AUTHORSHIP_IMAGES)
++        preview = json.loads((self.site / 'evidence/preview.json').read_bytes())
++        existing.update('evidence/' + Path(frame['src']).as_posix() for collection in preview['collections'] for frame in collection['frames'])
++        self.assertEqual(len(existing), 83)
++        self.assertEqual(set(assets), existing | ADDED)
++        for name, raw in assets.items():
++            self.assertEqual(raw, (self.site / name).read_bytes(), name)
++        self.assertIsNone(prepared['iso'])
++        manifest = json.loads(assets['continuation/downloads.json'])
++        self.assertEqual(manifest['version'], '0.9.0-dev')
++        self.assertFalse(manifest['full_modern_apps_verified'])
++        self.assertFalse(manifest['native_windows98_modern_apps_verified'])
++        self.assertEqual([item['role'] for item in manifest['items'] if item['state'] == 'ready'], ['usb_helpers'])
++
++    def test_any_missing_continuation_or_helper_asset_stops_preparation(self):
++        for name in sorted(ADDED):
++            with self.subTest(path=name):
++                path = self.site / name
++                raw = path.read_bytes()
++                path.unlink()
++                try:
++                    with self.assertRaises((ValueError, FileNotFoundError)):
++                        self.prepared()
++                finally:
++                    path.write_bytes(raw)
++
++    def test_any_changed_continuation_or_helper_bytes_stop_preparation(self):
++        for name in sorted(ADDED):
++            with self.subTest(path=name):
++                path = self.site / name
++                raw = path.read_bytes()
++                path.write_bytes(raw[:-1] + bytes([raw[-1] ^ 1]))
++                try:
++                    with self.assertRaises(ValueError):
++                        self.prepared()
++                finally:
++                    path.write_bytes(raw)
++
++    def with_modified_manifest(self, change):
++        self.assertTrue(hasattr(publisher, 'CONTINUATION_PINS'), 'Reviewed continuation identity pins are absent')
++        name = 'continuation/downloads.json'
++        path = self.site / name
++        original = path.read_bytes()
++        manifest = json.loads(original)
++        change(manifest)
++        raw = (json.dumps(manifest, indent=2) + '\n').encode()
++        pins = dict(publisher.CONTINUATION_PINS)
++        pins[name] = (len(raw), hashlib.sha256(raw).hexdigest())
++        path.write_bytes(raw)
++        try:
++            # Re-reviewing only JSON bytes cannot admit a new artifact or claim.
++            with patch.object(publisher, 'CONTINUATION_PINS', pins), self.assertRaises(ValueError):
++                self.prepared()
++        finally:
++            path.write_bytes(original)
++
++    def test_reviewed_helper_sha_size_and_source_commit_cannot_be_relabelled(self):
++        for field, value in [('sha256', '0' * 64), ('bytes', 17917),
++                             ('source_commit', '0' * 40), ('url', '/downloads/other.zip')]:
++            with self.subTest(field=field):
++                self.with_modified_manifest(lambda m: m['items'][3].update({field: value}))
++
++    def test_unreviewed_iso_source_archive_and_git_bundle_stay_pending(self):
++        for index in range(3):
++            for field, value in [('state', 'ready'), ('url', '/downloads/not-reviewed.iso'),
++                                 ('sha256', '0' * 64), ('bytes', 1), ('source_commit', '0' * 40)]:
++                with self.subTest(role=index, field=field):
++                    self.with_modified_manifest(lambda m: m['items'][index].update({field: value}))
++
++    def test_duplicate_roles_cannot_hide_a_missing_artifact_gate(self):
++        self.with_modified_manifest(lambda m: m['items'][1].update(role='development_iso'))
++
++    def test_false_native_private_media_setup_and_architecture_claims_are_refused(self):
++        changes = [
++            lambda m: m.update(full_modern_apps_verified=True),
++            lambda m: m.update(native_windows98_modern_apps_verified=True),
++            lambda m: m['private_media_policy'].update(windows_media_published=True),
++            lambda m: m['private_media_policy'].update(product_keys_published=True),
++            lambda m: m['private_media_policy'].update(vm_disks_published=True),
++            lambda m: m['private_media_policy'].update(vendor_app_installers_published=True),
++            lambda m: m['usb_scope'].update(windows98_setup_boot_verified=True),
++            lambda m: m['usb_scope'].update(full_public_usb_payload_available=True),
++            lambda m: m['architecture_goal'].update(installed_windows98_complete=True),
++            lambda m: m['architecture_goal'].update(replaces='none'),
++        ]
++        for index, change in enumerate(changes):
++            with self.subTest(index=index):
++                self.with_modified_manifest(change)
++
++    def test_local_navigation_keeps_current_product_and_source_only_distribution_policy(self):
++        for name, href, label in [('index.html', './continuation/', '소스·USB 도구'),
++                                  ('en/index.html', '../continuation/', 'Source &amp; USB tools')]:
++            with self.subTest(path=name):
++                text = (self.site / name).read_text()
++                self.assertIn('href="' + href + '">' + label + '</a>', text)
++                self.assertIn('ShizukuOS', text)
++                self.assertIn('1.0.0', text)
++                self.assertNotIn('1.0.0 complete', text)
++                self.assertIn('https://github.com/NiSeullent/Win98-Modern', text)
++        handoff = (self.site / 'authorship/handoff.html').read_text()
++        self.assertIn('href="../continuation/"', handoff)
++        self.assertIn('href="../continuation/guide.html"', handoff)
++        self.assertIn('0.9', handoff)
++        self.assertIn('1.0.0', handoff)
++        self.assertIn('https://github.com/NiSeullent/Win98-Modern/tree/main', handoff)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/site/deploy/tests/test_publish_static.py b/site/deploy/tests/test_publish_static.py
+index 875eac2..492108e 100644
+--- a/site/deploy/tests/test_publish_static.py
++++ b/site/deploy/tests/test_publish_static.py
+@@ -310,7 +310,7 @@ class IsoPublication(unittest.TestCase):
+         self.assertTrue(hasattr(publisher, 'prepare_assets'), 'testable static preparation is absent')
+         prepared = publisher.prepare_assets()
+         self.assertIsNone(prepared['iso'])
+-        self.assertEqual(len(prepared['assets']), 83)
++        self.assertEqual(len(prepared['assets']), 92)
+         for name, data in prepared['assets'].items():
+             self.assertEqual(data, (publisher.SITE / name).read_bytes(), name)
+         self.assertNotIn('downloads/release.json', prepared['assets'])
+@@ -320,7 +320,7 @@ class IsoPublication(unittest.TestCase):
+         before = {name: (publisher.SITE / name).read_bytes() for name in ['index.html', 'en/index.html']}
+         prepared = publisher.prepare_assets(self.iso, COMMIT)
+         self.addCleanup(prepared['iso'].close)
+-        self.assertEqual(len(prepared['assets']) + 1, 86)
++        self.assertEqual(len(prepared['assets']) + 1, 95)
+         checksum = prepared['assets'][prepared['iso'].name + '.sha256'].decode('ascii')
+         self.assertEqual(checksum, self.digest + '  ' + Path(prepared['iso'].name).name + '\n')
+         metadata = json.loads(prepared['assets']['downloads/release.json'])
+@@ -509,7 +509,7 @@ class IsoPublication(unittest.TestCase):
+         receipt_path, = (self.root / 'build/m98-self-host').glob('release-*.json')
+         receipt = json.loads(receipt_path.read_text())
+         self.assertNotEqual((base / 'current').resolve(), previous)
+-        self.assertEqual(receipt['origin_check_count'], 86)
++        self.assertEqual(receipt['origin_check_count'], 95)
+         self.assertTrue(receipt['iso_head_and_range_verified'])
+         self.assertEqual(receipt['iso_release'], prepared['iso'].metadata)
+         self.assertFalse(receipt['public_edge_verified'])
+diff --git a/site/downloads/win98-modern-usb-helper.zip b/site/downloads/win98-modern-usb-helper.zip
+new file mode 100644
+index 0000000000000000000000000000000000000000..5d1ed0b0729e0f21d095923187b6313aa649d0be
+GIT binary patch
+literal 17916
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/site/downloads/win98-modern-usb-helper.zip.sha256 b/site/downloads/win98-modern-usb-helper.zip.sha256
+new file mode 100644
+index 0000000..8549dca
+--- /dev/null
++++ b/site/downloads/win98-modern-usb-helper.zip.sha256
+@@ -0,0 +1 @@
++f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54  win98-modern-usb-helper.zip
+diff --git a/site/en/index.html b/site/en/index.html
+index 2da919b..036075e 100644
+--- a/site/en/index.html
++++ b/site/en/index.html
+@@ -7,7 +7,7 @@
+ <link rel="canonical" href="https://m98.nyase.kr/en/index.html"><link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/index.html"><link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/index.html"></head>
+ <body class="download-page">
+ <a class="skip" href="#main">Skip to content</a>
+-<header class="top"><a class="brand" href="./index.html"><strong>ShizukuOS</strong><span>1.0.0 development candidate</span></a><nav aria-label="Main navigation"><a href="./preview.html">Real screenshots</a><a href="../authorship/">Authorship</a><a href="./dead-screen.html">Play the demo</a><a href="../index.html" lang="ko" hreflang="ko" aria-label="Korean version">한국어</a><a class="nav-download" href="../downloads/shizuku-modern-preview-2026.10.01.zip" download>Download</a></nav></header>
++<header class="top"><a class="brand" href="./index.html"><strong>ShizukuOS</strong><span>1.0.0 development candidate</span></a><nav aria-label="Main navigation"><a href="./preview.html">Real screenshots</a><a href="../authorship/">Authorship</a><a href="../continuation/">Source &amp; USB tools</a><a href="./dead-screen.html">Play the demo</a><a href="../index.html" lang="ko" hreflang="ko" aria-label="Korean version">한국어</a><a class="nav-download" href="../downloads/shizuku-modern-preview-2026.10.01.zip" download>Download</a></nav></header>
+ <main id="main">
+ <section class="download-hero" aria-labelledby="hero-title">
+ <div class="hero-copy"><p class="eyebrow">SHIZUKUOS · 1.0.0 DEVELOPMENT CANDIDATE</p><h1 id="hero-title">Windows 98.<br><span>Today’s apps.</span></h1><p class="lead">Real Windows 98. A UEFI boot.<br>Notepad++ edited, saved and reopened.</p>
+diff --git a/site/index.html b/site/index.html
+index aac9cae..ddb0ae4 100644
+--- a/site/index.html
++++ b/site/index.html
+@@ -7,7 +7,7 @@
+ <link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/index.html"><link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/index.html"></head>
+ <body class="download-page">
+ <a class="skip" href="#main">본문으로 건너뛰기</a>
+-<header class="top"><a class="brand" href="./index.html"><strong>ShizukuOS</strong><span>1.0.0 개발판</span></a><nav aria-label="주 메뉴"><a href="./preview.html">실제 실행 화면</a><a href="./authorship/">Authorship</a><a href="./dead-screen.html">게임 체험</a><a href="./en/index.html" lang="en" hreflang="en" aria-label="English version">English</a><a class="nav-download" href="./downloads/shizuku-modern-preview-2026.10.01.zip" download>다운로드</a></nav></header>
++<header class="top"><a class="brand" href="./index.html"><strong>ShizukuOS</strong><span>1.0.0 개발판</span></a><nav aria-label="주 메뉴"><a href="./preview.html">실제 실행 화면</a><a href="./authorship/">Authorship</a><a href="./continuation/">소스·USB 도구</a><a href="./dead-screen.html">게임 체험</a><a href="./en/index.html" lang="en" hreflang="en" aria-label="English version">English</a><a class="nav-download" href="./downloads/shizuku-modern-preview-2026.10.01.zip" download>다운로드</a></nav></header>
+ <main id="main">
+ <section class="download-hero" aria-labelledby="hero-title">
+ <div class="hero-copy"><p class="eyebrow">SHIZUKUOS · 1.0.0 DEVELOPMENT CANDIDATE</p><h1 id="hero-title">Windows 98에서<br><span>최신 Notepad++.</span></h1><p class="lead">UEFI로 부팅한 Windows 98에서<br>편집하고, 저장하고, 다시 열었습니다.</p>

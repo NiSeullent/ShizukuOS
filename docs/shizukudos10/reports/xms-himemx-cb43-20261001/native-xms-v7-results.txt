@@ -1,0 +1,18 @@
+CBXMS actual DOS-only XMS services; Windows startup NOT TESTED
+PASS INT2F4300 actual installed XMS manager AX=4380 BX=0000 DX=051F ES=11F4
+PASS INT2F4310 actual nonnull FAR entry AX=4310 BX=0682 DX=051F ES=02A1
+PASS XMS interface version >=3.00 AX=0300 BX=0328 DX=0001 ES=02A1
+PASS A20 query returns actual boolean AX=0001 BX=0300 DX=0001 ES=02A1
+PASS free/largest extended block at least64KiB AX=FFFF BX=0300 DX=FFFF ES=02A1
+PASS allocate actual64KiB owned XMS block AX=0001 BX=0300 DX=06CE ES=02A1
+PASS actual owned handle size64KiB locks0 AX=0001 BX=002D DX=0040 ES=02A1
+PASS lock actual block linear address >=1MiB AX=0001 BX=8800 DX=0012 ES=02A1
+PASS actual owned handle size64KiB locks1 AX=0001 BX=012D DX=0040 ES=02A1
+PASS unlock own block AX=0001 BX=0100 DX=06CE ES=02A1
+PASS move256 pattern bytes conventional toXMS AX=0001 BX=0100 DX=06CE ES=11F4
+PASS move256 pattern bytes XMS toconventional AX=0001 BX=0100 DX=06CE ES=11F4
+PASS actual256byte roundtrip equals every pattern byte AX=0001 BX=0100 DX=06CE ES=11F4
+PASS free own XMS block AX=0001 BX=0100 DX=06CE ES=11F4
+PASS freed handle rejected AX0/BLA2 AX=0000 BX=01A2 DX=06CE ES=11F4
+PASS final A20 query returns actual boolean AX=0001 BX=0100 DX=06CE ES=11F4
+CHECKS 16 FAILURES 0 IO_ERROR 0

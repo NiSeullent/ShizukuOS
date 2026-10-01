@@ -1,0 +1,21 @@
+{
+  "status": "PASS_ACTUAL_TRACKED_SOURCE_ARCHIVE_HOST_READBACK",
+  "archive_bytes": 13831682,
+  "archive_sha256": "51663e0fc16f2f19c8bc147f5d275413aa054718a625e276c7bc7cc376cee0c4",
+  "project_source_files": 3379,
+  "mandatory_gpl_source_members": 14,
+  "all_actual_file_hashes_matched": true,
+  "ignored_private_build_caches_included": false,
+  "actual_iso_built": false,
+  "final_source_commit_claim": false,
+  "scope": "Host archive membership/readback of current primary source, which still has uncommitted fixes. Final ISO is separate.",
+  "producer_source_change": {
+    "status": "SOURCE_ONLY_REVIEWED_COMPLETE_GPL_SOURCE_FIX",
+    "base_primary_source_commit": "466c44105d407ce4677908d5bcdb6481cf85fc9c",
+    "primary_producer_unchanged": true,
+    "before_sha256": "a55577e3956e6284455467eacba5dd062e21ced83639dedf9dac2160b4f31436",
+    "after_sha256": "8d41fff97501d6afed11600b555d06722720a5ca692edc966ccedbbee044c4c4",
+    "patch_sha256": "ad2171907bf6130aa4600299b4e6714b4108f30985d66270d12c4917152b144b",
+    "actual_iso_built": false
+  }
+}

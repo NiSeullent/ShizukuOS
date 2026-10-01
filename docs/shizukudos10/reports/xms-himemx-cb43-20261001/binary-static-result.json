@@ -1,0 +1,320 @@
+{
+  "schema": "shizukudos-cb43-himemx-actual-binary-static-v1",
+  "results": [
+    {
+      "file": "artifacts/HIMEMX.EXE",
+      "sha256": "5e0ed027a150ac1c198e994ca248245c07c1f44796bc0791448afbcf29789211",
+      "bytes": 6100,
+      "passed": 32,
+      "failed": 0,
+      "checks": [
+        "actual MZ signature",
+        "MZ page count matches complete executable bytes",
+        "actual MZ header/load image boundaries",
+        "actual tiny-model driver has zero relocation records",
+        "actual DOS executable entry lies inside loaded image",
+        "actual stack fits minimum allocated DOS image",
+        "actual DOS device chain next pointer terminates",
+        "actual character-device attributes and XMS driver name",
+        "actual strategy/interrupt vectors point inside driver image",
+        "actual strategy/interrupt target bytes are executable code",
+        "actual dispatch table pointer matches linked xms_get_version",
+        "actual dispatch table pointer matches linked xms_request_hma",
+        "actual dispatch table pointer matches linked xms_release_hma",
+        "actual dispatch table pointer matches linked xms_global_enable_a20",
+        "actual dispatch table pointer matches linked xms_global_disable_a20",
+        "actual dispatch table pointer matches linked xms_local_enable_a20",
+        "actual dispatch table pointer matches linked xms_local_disable_a20",
+        "actual dispatch table pointer matches linked xms_query_a20",
+        "actual dispatch table pointer matches linked xms_query_free_mem",
+        "actual dispatch table pointer matches linked xms_alloc_emb",
+        "actual dispatch table pointer matches linked xms_free_emb",
+        "actual dispatch table pointer matches linked xms_move_emb",
+        "actual dispatch table pointer matches linked xms_lock_emb",
+        "actual dispatch table pointer matches linked xms_unlock_emb",
+        "actual dispatch table pointer matches linked xms_get_handle_info",
+        "actual dispatch table pointer matches linked xms_realloc_emb",
+        "actual dispatch table pointer matches linked xms_ext_query_free_mem",
+        "actual dispatch table pointer matches linked xms_ext_alloc_emb",
+        "actual dispatch table pointer matches linked xms_ext_get_handle_info",
+        "actual dispatch table pointer matches linked xms_ext_realloc_emb",
+        "all twenty XMS2/3 service pointers are distinct actual implementations",
+        "actual INT2F4310 XMS dispatcher target exists"
+      ],
+      "MZ_header_words": [
+        23117,
+        468,
+        12,
+        0,
+        2,
+        65,
+        65535,
+        380,
+        1024,
+        0,
+        3872,
+        0,
+        30,
+        0
+      ],
+      "load_image_bytes": 6068,
+      "driver_header": {
+        "next": 4294967295,
+        "attributes": 32768,
+        "strategy_offset": 2192,
+        "interrupt_offset": 3811,
+        "name": "XMSXXXX0"
+      },
+      "XMS_dispatch_table": {
+        "offset": 1626,
+        "pointers": [
+          {
+            "function": "xms_get_version",
+            "offset": 247
+          },
+          {
+            "function": "xms_request_hma",
+            "offset": 257
+          },
+          {
+            "function": "xms_release_hma",
+            "offset": 282
+          },
+          {
+            "function": "xms_global_enable_a20",
+            "offset": 299
+          },
+          {
+            "function": "xms_global_disable_a20",
+            "offset": 313
+          },
+          {
+            "function": "xms_local_enable_a20",
+            "offset": 338
+          },
+          {
+            "function": "xms_local_disable_a20",
+            "offset": 351
+          },
+          {
+            "function": "xms_query_a20",
+            "offset": 366
+          },
+          {
+            "function": "xms_query_free_mem",
+            "offset": 503
+          },
+          {
+            "function": "xms_alloc_emb",
+            "offset": 543
+          },
+          {
+            "function": "xms_free_emb",
+            "offset": 661
+          },
+          {
+            "function": "xms_move_emb",
+            "offset": 876
+          },
+          {
+            "function": "xms_lock_emb",
+            "offset": 1244
+          },
+          {
+            "function": "xms_unlock_emb",
+            "offset": 1272
+          },
+          {
+            "function": "xms_get_handle_info",
+            "offset": 1327
+          },
+          {
+            "function": "xms_realloc_emb",
+            "offset": 1612
+          },
+          {
+            "function": "xms_ext_query_free_mem",
+            "offset": 444
+          },
+          {
+            "function": "xms_ext_alloc_emb",
+            "offset": 551
+          },
+          {
+            "function": "xms_ext_get_handle_info",
+            "offset": 1290
+          },
+          {
+            "function": "xms_ext_realloc_emb",
+            "offset": 1368
+          }
+        ]
+      },
+      "XMS_dispatcher_offset": 1666
+    },
+    {
+      "file": "artifacts/HIMEMX2.EXE",
+      "sha256": "bc5c29a755a6093b32f59e5117b1ab65f32c67efad2c017f822e67f723b04ff5",
+      "bytes": 6100,
+      "passed": 32,
+      "failed": 0,
+      "checks": [
+        "actual MZ signature",
+        "MZ page count matches complete executable bytes",
+        "actual MZ header/load image boundaries",
+        "actual tiny-model driver has zero relocation records",
+        "actual DOS executable entry lies inside loaded image",
+        "actual stack fits minimum allocated DOS image",
+        "actual DOS device chain next pointer terminates",
+        "actual character-device attributes and XMS driver name",
+        "actual strategy/interrupt vectors point inside driver image",
+        "actual strategy/interrupt target bytes are executable code",
+        "actual dispatch table pointer matches linked xms_get_version",
+        "actual dispatch table pointer matches linked xms_request_hma",
+        "actual dispatch table pointer matches linked xms_release_hma",
+        "actual dispatch table pointer matches linked xms_global_enable_a20",
+        "actual dispatch table pointer matches linked xms_global_disable_a20",
+        "actual dispatch table pointer matches linked xms_local_enable_a20",
+        "actual dispatch table pointer matches linked xms_local_disable_a20",
+        "actual dispatch table pointer matches linked xms_query_a20",
+        "actual dispatch table pointer matches linked xms_query_free_mem",
+        "actual dispatch table pointer matches linked xms_alloc_emb",
+        "actual dispatch table pointer matches linked xms_free_emb",
+        "actual dispatch table pointer matches linked xms_move_emb",
+        "actual dispatch table pointer matches linked xms_lock_emb",
+        "actual dispatch table pointer matches linked xms_unlock_emb",
+        "actual dispatch table pointer matches linked xms_get_handle_info",
+        "actual dispatch table pointer matches linked xms_realloc_emb",
+        "actual dispatch table pointer matches linked xms_ext_query_free_mem",
+        "actual dispatch table pointer matches linked xms_ext_alloc_emb",
+        "actual dispatch table pointer matches linked xms_ext_get_handle_info",
+        "actual dispatch table pointer matches linked xms_ext_realloc_emb",
+        "all twenty XMS2/3 service pointers are distinct actual implementations",
+        "actual INT2F4310 XMS dispatcher target exists"
+      ],
+      "MZ_header_words": [
+        23117,
+        468,
+        12,
+        0,
+        2,
+        65,
+        65535,
+        380,
+        1024,
+        0,
+        3872,
+        0,
+        30,
+        0
+      ],
+      "load_image_bytes": 6068,
+      "driver_header": {
+        "next": 4294967295,
+        "attributes": 32768,
+        "strategy_offset": 2192,
+        "interrupt_offset": 3811,
+        "name": "XMSXXXX0"
+      },
+      "XMS_dispatch_table": {
+        "offset": 1628,
+        "pointers": [
+          {
+            "function": "xms_get_version",
+            "offset": 247
+          },
+          {
+            "function": "xms_request_hma",
+            "offset": 257
+          },
+          {
+            "function": "xms_release_hma",
+            "offset": 282
+          },
+          {
+            "function": "xms_global_enable_a20",
+            "offset": 299
+          },
+          {
+            "function": "xms_global_disable_a20",
+            "offset": 313
+          },
+          {
+            "function": "xms_local_enable_a20",
+            "offset": 338
+          },
+          {
+            "function": "xms_local_disable_a20",
+            "offset": 351
+          },
+          {
+            "function": "xms_query_a20",
+            "offset": 366
+          },
+          {
+            "function": "xms_query_free_mem",
+            "offset": 503
+          },
+          {
+            "function": "xms_alloc_emb",
+            "offset": 543
+          },
+          {
+            "function": "xms_free_emb",
+            "offset": 663
+          },
+          {
+            "function": "xms_move_emb",
+            "offset": 878
+          },
+          {
+            "function": "xms_lock_emb",
+            "offset": 1246
+          },
+          {
+            "function": "xms_unlock_emb",
+            "offset": 1274
+          },
+          {
+            "function": "xms_get_handle_info",
+            "offset": 1329
+          },
+          {
+            "function": "xms_realloc_emb",
+            "offset": 1614
+          },
+          {
+            "function": "xms_ext_query_free_mem",
+            "offset": 444
+          },
+          {
+            "function": "xms_ext_alloc_emb",
+            "offset": 551
+          },
+          {
+            "function": "xms_ext_get_handle_info",
+            "offset": 1292
+          },
+          {
+            "function": "xms_ext_realloc_emb",
+            "offset": 1370
+          }
+        ]
+      },
+      "XMS_dispatcher_offset": 1668
+    }
+  ],
+  "passed": 64,
+  "failed": 0,
+  "VM_executed": false,
+  "native_XMS_services_executed": false,
+  "Windows98_compatibility_verified": false,
+  "limits": [
+    "Actual source-built DOS/MZ header and function vectors only; code was not executed",
+    "No XMS presence/allocation/move/A20 service outcome is inferred from static checks",
+    "Windows98 boot remains a separate actual native gate"
+  ],
+  "raw_private_record_sha256": "6683a5200775b0491a29d15395caa5f3d08cfc13dc5823bcce44f257744a1ac5",
+  "receipt_scope": "Own source-stage build/static/compile-only work; separate root-owned v7 native result is native-xms-v7-result.json",
+  "sanitization": "Only actual source-stage workspace prefix replaced with ${STAGE}; no results invented or rerun"
+}

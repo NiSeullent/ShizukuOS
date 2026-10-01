@@ -1,0 +1,27 @@
+{
+  "schema": "shizukudos-cb43-xms-probe-independent-review-v1",
+  "status": "PASS_READONLY_SOURCE_REVIEW",
+  "reviewer": "independent publish_site agent",
+  "source_sha256": "284177e9c2eb20212b901f9c8e18fabba6e14ef6bb78924f8a97e06e7a0a8cbd",
+  "binary_sha256": "8c900ac24fccbe10a2c5ea5211ad85d9ae45eaefb08c51b136d9b6ac5a5f227c",
+  "private_compile_receipt_sha256": "590da112991e4381adc43942d58e9fe401c7cba9eab016176c9ab6260aa1434f",
+  "VM_executed_by_reviewer": false,
+  "tests_executed_by_reviewer": false,
+  "compiler_executed_by_reviewer": false,
+  "intended_successful_checks": 16,
+  "closed_v1_finding": "A20AX0 could have BL80/81error; v2explicitinput/outputBL0 gates bothA20queries andAH8freequery",
+  "v1_source_preserved_sha256": "1c7387b45ad6000ab96ccd0c3ae03897d76653a756713152f8e12fff06d510f1",
+  "reviewed_contracts": [
+    "actual16:16 FAR entry matches HimemX RETF dispatcher",
+    "DS/ES/SI/DI preserved and16byte conventionalCS:offset move record matches actual manager contract",
+    "actual256byte initialized pattern roundtrip verifies every byte; PUSHF/POPF retains comparisonZF",
+    "actualAX/BX/DX captured beforeDOS logging; callerES recorded aftersegment preservation",
+    "ownership andlock state retained before later assertions; onlyown64KiB block cleanup attempted",
+    "report create/write/short-write/close outcomes fail ERRORLEVEL appropriately; MOV4C00 preserves OR-derivedZF"
+  ],
+  "limits": [
+    "Read-only source review, not runtime evidence",
+    "Cleanup failure paths attempt/log release; successful cleanup is not guaranteed",
+    "No Windows98/MSDOSreplacement/native-app verification inferred"
+  ]
+}
