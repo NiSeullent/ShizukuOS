@@ -29,7 +29,7 @@ ESP_MIB = 96
 PAYLOAD_C = ["main.c", "platform.c", "console.c", "caps.c", "vmx.c", "ept.c", "devices.c", "video.c", "bios.c",
              "domain.c", "dos.c", "kdom.c", "pool.c", "lib.c"]
 PAYLOAD_ASM = ["entry.asm", "vmx_asm.asm"]
-CFLAGS = ["-m64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin",
+CFLAGS = ["-m64", "-march=x86-64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin",
           "-fno-stack-protector", "-fno-pie", "-fno-pic", "-mno-red-zone", "-mgeneral-regs-only",
           "-mcmodel=small", "-fno-asynchronous-unwind-tables", "-fno-ident", "-fno-common", "-mno-mmx",
           "-mno-sse", "-fno-tree-loop-distribute-patterns", "-fwrapv", "-fno-strict-aliasing"]
@@ -89,7 +89,7 @@ def build_payload():
 def build_loader(payload):
     (OUT / "images.h").write_text(c_array("payload_image", payload, "static const unsigned char"))
     out = OUT / "BOOTX64.EFI"
-    cmd = ["x86_64-w64-mingw32-gcc", "-std=gnu11", "-Os", "-Wall", "-Wextra", "-Werror", "-ffreestanding",
+    cmd = ["x86_64-w64-mingw32-gcc", "-march=x86-64", "-std=gnu11", "-Os", "-Wall", "-Wextra", "-Werror", "-ffreestanding",
            "-fno-builtin", "-fno-stack-protector", "-mno-red-zone", "-mno-stack-arg-probe", "-fno-ident",
            "-fno-asynchronous-unwind-tables", "-fno-tree-loop-distribute-patterns", "-nostdlib",
            "-Wl,--subsystem,10", "-Wl,--entry,efi_main", "-Wl,--image-base,0x10000000",

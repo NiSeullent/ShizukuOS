@@ -154,15 +154,18 @@ def assemble_image(kernel, freecom, tests, name="shizukudos-dos16-hd32.img", aut
 
 
 def ensure_csmwrap():
-    """CSMWRAP.EFI from shizukudos/csm/build.py, rebuilt when absent or built from another pin."""
+    """CSMWRAP.EFI rebuilt when absent, changed, or built with different pinned patches."""
     spec = shzlib.load_manifest()["upstreams"]["csmwrap"]
     receipt = CSM / "build-result.json"
     efi = CSM / "CSMWRAP.EFI"
     current = False
+    wanted_patches = [{"patch": name, "sha256": sha256_file(REPO / name)}
+                      for name in spec.get("patches", [])]
     if efi.exists() and receipt.exists():
         got = json.loads(receipt.read_text())
         up = got.get("upstream", {}).get("csmwrap", {})
         current = (up.get("commit") == spec["commit"] and up.get("build_version") == spec["build_version"]
+                   and got.get("patches", []) == wanted_patches
                    and got.get("artifacts", {}).get("CSMWRAP.EFI", {}).get("sha256") == sha256_file(efi))
     if not current:
         run([sys.executable, SHZ / "csm" / "build.py"], timeout=1800)
@@ -189,6 +192,9 @@ def main():
     parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     env = shzlib.ow_env()
+    snapshot, snapshot_pin = shzlib.open_watcom_snapshot()
+    if not snapshot:
+        raise RuntimeError("Open Watcom build has no recorded snapshot")
     kernel = build_kernel(env)
     freecom = build_freecom(env)
     tests, test_commands = build_tests(env)
@@ -207,7 +213,9 @@ def main():
                      for k, v in manifest["upstreams"].items()},
         "patches": kernel["patches"] + freecom["patches"],
         "toolchain": {
-            "open-watcom": {"snapshot_sha256": manifest["tools"]["open-watcom-v2"]["sha256"]},
+            "open-watcom": {"snapshot_sha256": snapshot,
+                            "manifest_snapshot_sha256": snapshot_pin,
+                            "matches_manifest": snapshot == snapshot_pin},
             "nasm": shzlib.tool_version("nasm", ("-v",)),
             "mtools": shzlib.tool_version("mformat", ("--version",)),
         },
@@ -234,6 +242,8 @@ def main():
         "dual_image_listing": fatimg.listing(fatimg.partition_spec(dual)) +
                               fatimg.listing(fatimg.partition_spec(dual), "EFI/BOOT"),
     }
+    if shzlib.open_watcom_snapshot() != (snapshot, snapshot_pin):
+        raise RuntimeError("Open Watcom snapshot changed during build")
     shzlib.write_json(OUT / "build-result.json", receipt)
     print(json.dumps({k: receipt["artifacts"][k] for k in ("kernel.sys", "command.com", "hd32.img", "dual.img")},
                      indent=2))

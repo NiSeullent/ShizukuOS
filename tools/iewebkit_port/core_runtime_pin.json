@@ -1,0 +1,72 @@
+{
+  "schema": "iewebkit-exact-gcc-win9x-tls-runtime-port-v2",
+  "gcc_source_commit": "b9def1721b12cae307c1a1ebc49030fce6531dfa",
+  "installed_package": "mingw32-gcc-c++15.1.1-1.el10",
+  "archive_sha512": "86b06902e10aa6eba4ccbe54e97fee17838e21484e4f6d4aef2e93d0687b04e82f00655828ac0233f4026cd0d2df08bbdfe7dc2eeafc8908cab183584d2fb8ee",
+  "source": "runtime/gcc-15.1.1-atexit_thread.cc",
+  "before_sha256": "362bb21299a6bfc08bef9ca5b0cee913f81d2f3e6b4ec7beba5fd76c3e8d1408",
+  "after_sha256": "4701d330c0944fad5db7c2b743658286b4d25b17fe4df004454a018b35c74644",
+  "patch": "patches/core-gcc-15.1.1-win9x-thread-atexit.patch",
+  "patch_sha256": "eac8bfc9a1450f527f525ca7d27c43f6a92f7d96c6f0e3a658f96da3c3e9e9f9",
+  "license": "GPL3-or-later withGCCRuntimeLibraryException3.1",
+  "license_files": [
+    {
+      "path": "runtime/COPYING.RUNTIME",
+      "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+    },
+    {
+      "path": "runtime/COPYING3",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    }
+  ],
+  "installed_runtime": {
+    "path": "/usr/i686-w64-mingw32/sys-root/mingw/lib/libstdc++.a",
+    "sha256": "a6f0578483aea48533344f3a1c0d0dcb422a85f354012984e18e3d8f1018d37e",
+    "original_member_sha256": "c265fb814dfa842f3092514453a1d409ff0d770dd74f7ec7bf48e74bad5a1672"
+  },
+  "config_headers": [
+    {
+      "path": "/usr/i686-w64-mingw32/sys-root/mingw/include/c++/i686-w64-mingw32/bits/c++config.h",
+      "sha256": "99025037dff2948a0ac2e4b655e03932f34526b17b81270745e7d9eb63a891c5"
+    },
+    {
+      "path": "/usr/i686-w64-mingw32/sys-root/mingw/include/c++/i686-w64-mingw32/bits/os_defines.h",
+      "sha256": "47f01be16ee307a669340ebb3812722e2e1aaac4c22c72d47a5b45e020dac7d0"
+    },
+    {
+      "path": "/usr/i686-w64-mingw32/sys-root/mingw/include/c++/i686-w64-mingw32/bits/gthr-default.h",
+      "sha256": "5b4242f4c32526185948c0615bfc5a4dcadce139523d0e595553af043e9c7723"
+    },
+    {
+      "path": "/usr/i686-w64-mingw32/sys-root/mingw/include/c++/i686-w64-mingw32/bits/gthr.h",
+      "sha256": "192db09cf592d5e689632864cbc424b80d8541ddc5e11d21ad0e70c6e786b662"
+    },
+    {
+      "path": "/usr/i686-w64-mingw32/sys-root/mingw/include/pthread.h",
+      "sha256": "3a1e36ffeccc0a4f660ff2cfaa30840f6eeef4bcd3d94587d7a48275c9896f1b"
+    }
+  ],
+  "lifecycle": "Pin actualdestructor-address DLL viaVirtualQuery/GetModuleFileNameA/LoadLibraryA; releasebalanced aftergenuinecallback; processimageoutlivesTLS",
+  "limitation": "Legacy pinsequenceisnotatomic. Hostmustforbidunloadwhileexecuting/registeringcode. ActualguestDLLlifetimebehaviorpending.",
+  "new_platform_pin_failure": "abort: generatedGCCWTF TLSinitializer ignorescxa_thread_atexit returnvalue; retainupstreamallocationfailure behavior",
+  "companion": {
+    "source": "runtime/gcc-15.1.1-emutls.c",
+    "before_sha256": "bb5fe862dfcad4785acef15f4d64a17cbf728df84883545401cd521bccfc9bf6",
+    "after_sha256": "aa3b2abc210281b11d04d083758a5c9f16af77ab81d41630a93b16b577429ad5",
+    "patch": "patches/core-gcc-15.1.1-win9x-emutls.patch",
+    "patch_sha256": "c8dadad6b6240f6a55e3b5fddc67edecbceaf28172e46eda5df288db69f38a2e",
+    "installed_runtime": {
+      "path": "/usr/lib/gcc/i686-w64-mingw32/15.1.1/libgcc_eh.a",
+      "sha256": "d30e3675088e201e210a90340b09c2d9addf982b31bd619ec987f4bc40ceb452",
+      "original_member": "emutls.o",
+      "original_member_sha256": "1c4b2bbee90a52c24d8047bf5addb4748b82ce56814c0cd218c2bce03af631b4"
+    },
+    "extraction_receipt": {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/gcc-emutls-source/source-receipt.json",
+      "sha256": "021e5ae00794792461ba6c45650fe4cbc88e3b9a0133763ae59ef0d4766618df"
+    },
+    "include_policy": "Explicit standalone branch uses real installed target libc and POSIX gthread headers; original generated compiler-build include path retained."
+  },
+  "TLS_cleanup_order": "Genuine emutls_destroy reinstalls its original per-thread array, drains real cxa destructor chains including newly registered chains, refetches any grown array, clears the key, then frees all current cells. C++ key readiness uses checked creation/publication and checked deletion.",
+  "new_platform_key_failure": "Abort on real gthread key create/set/delete failures; preserve upstream nothrow allocation return policy. No API substitutions."
+}

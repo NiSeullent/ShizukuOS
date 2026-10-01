@@ -1,0 +1,4 @@
+LIBRARY MXFIX
+EXPORTS
+ MxBind=MxBind@4
+ MxWord=MxWord@4

@@ -393,6 +393,11 @@ def main():
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     OUT.mkdir(parents=True, exist_ok=True)
+    source_paths = sorted({p for directory in (W64, SHZ / "install", SHZ / "abi")
+                           for p in directory.rglob("*")
+                           if p.is_file() and p.suffix in (".c", ".cpp", ".cc", ".cxx", ".h", ".S", ".asm", ".rc", ".json", ".py")}
+                          | {NTSYS, SHZ / "tools/shzlib.py"})
+    source_hashes = {str(p.relative_to(REPO)): sha256_file(p) for p in source_paths}
     ntdll, ntdll_cmd, ntdll_names = build_ntdll()
     k32, k32_cmd, k32_names = build_kernel32(ntdll_names)
     modules = build_modules()
@@ -437,8 +442,13 @@ def main():
     ntimg = OUT / "WIN64_NTDRV.IMG"
     ntimg.write_bytes(pack_archive(ntfiles))
 
+    changed = [name for name, digest in source_hashes.items()
+               if not (REPO / name).is_file() or sha256_file(REPO / name) != digest]
+    if changed:
+        raise RuntimeError("runtime sources changed during build: " + ", ".join(changed))
     shzlib.write_json(OUT / "build-result.json", {
         "built_utc": shzlib.utc_now(), "git": shzlib.git_state(),
+        "sources_sha256": source_hashes,
         "toolchain": {"mingw": shzlib.tool_version(CC)},
         "ntdll": {"sha256": sha256_file(ntdll), "exports": len(ntdll_names) + len(syscall_list()) * 2},
         "kernel32": {"sha256": sha256_file(k32), "exports": len(k32_names)},

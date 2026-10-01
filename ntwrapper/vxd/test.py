@@ -3,8 +3,10 @@
 SPDX-License-Identifier: GPL-2.0-only
 """
 from pathlib import Path
+import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 
@@ -16,6 +18,13 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def main():
+    global BUILD
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out',type=Path,default=BUILD)
+    args=parser.parse_args()
+    BUILD=args.out.resolve()
+    if BUILD!=(HERE/'build').resolve() and (BUILD==(ROOT/'build').resolve() or not BUILD.is_relative_to((ROOT/'build').resolve())):
+        parser.error('--out must be the normal build directory or a component directory under project build/')
     paths = [p for p in HERE.rglob('*') if p.is_file() and
              'build' not in p.relative_to(HERE).parts and
              '__pycache__' not in p.relative_to(HERE).parts]
@@ -30,6 +39,7 @@ def main():
         raise SystemExit('Build artifact hash does not match manifest')
     result = subprocess.run([sys.executable, '-B', '-m', 'unittest', 'discover',
                              '-s', str(HERE/'tests'), '-v'], cwd=ROOT,
+                            env=dict(os.environ,NTWV_HOST_TEST_OUT=str(BUILD)),
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     print(result.stdout, end='')
     (BUILD/'host-tests.log').write_text(result.stdout)
@@ -45,7 +55,8 @@ def main():
         'log_sha256': digest(BUILD/'host-tests.log'),
         'statuses': {name: ('passed' if passed else 'failed-or-unverified') for name in
                      ('host_bridge_asan_ubsan', 'i386_control_harness', 'static_le_relocations',
-                      'native_contract_constants', 'win32_probe_pe_contract', 'win64_bridge_dioc_asan_ubsan')},
+                      'native_contract_constants', 'win32_probe_pe_contract', 'win64_bridge_dioc_asan_ubsan',
+                      'strict_object_flag_policy')},
         'win64_bridge_supervisor_run': False,
         'guest_loaded': False,
         'native_vmm_calls_verified': False,

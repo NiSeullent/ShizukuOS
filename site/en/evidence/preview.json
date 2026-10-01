@@ -1,0 +1,1035 @@
+{
+  "schema": 1,
+  "generatedUtc": "2026-10-01T10:50:22.413030+00:00",
+  "live": {
+    "available": false,
+    "reason": "An authenticated owner endpoint is not connected."
+  },
+  "collections": [
+    {
+      "id": "native-gop-monitor",
+      "title": "Windows 98 UEFI GOP · real display",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "1280 × 800 · Shizuku basic graphics driver · KVM",
+      "result": "Start menu, drawing and copying verified on the guest monitor",
+      "observations": [
+        "Real Windows 98 GOP output was verified across two cold boots.",
+        "15,360 pixels in the guest graphics test window were independently compared with the original monitor capture.",
+        "The actual graphics test process exited normally."
+      ],
+      "scope": "Verified in a test VM with a fixed GOP mode. A later audit of original monitor captures corrects the earlier display-output assessment. GPU 3D acceleration, broader hardware support and other modern apps remain in development.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW",
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "correctionAuditSha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969",
+      "frames": [
+        {
+          "src": "../../evidence/images/win98-gop-monitor-start.png",
+          "kind": "guest-capture",
+          "sha256": "574a70e9ee600e7f458eb6c93e54ae8ac88584addd0887e8af78328c510e2062",
+          "width": 1280,
+          "height": 800,
+          "caption": "The Start menu is open in real Windows 98 booted through UEFI GOP.",
+          "alt": "The Start menu is open in real Windows 98 booted through UEFI GOP.",
+          "chapter": "Start menu",
+          "runLabel": "Windows 98 · GOP cold boot 1",
+          "receiptSha256": "fe3ff557d190676e8e82433cd47825786245d4bcda5e21cab3fdec65cf657296",
+          "captureSeconds": 271.7,
+          "captureSource": "qmp-monitor",
+          "monitorScanout": "verified",
+          "correctionAuditSha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969"
+        },
+        {
+          "src": "../../evidence/images/win98-gop-monitor-gdi.png",
+          "kind": "guest-capture",
+          "sha256": "41bf02431b194a3889eac4f80da8ceb22ec390875fcdd084a9c6bf9593288eb4",
+          "width": 1280,
+          "height": 800,
+          "caption": "Drawing, copying and screen reads were verified in real Windows 98 using the installed Shizuku basic graphics driver.",
+          "alt": "Drawing, copying and screen reads were verified in real Windows 98 using the installed Shizuku basic graphics driver.",
+          "chapter": "Graphics test window",
+          "runLabel": "Windows 98 · GOP cold boot 2",
+          "receiptSha256": "a3b1e42ec719cb4de75e2986e653e5fe9c547752429f13c48ac80e51bced629b",
+          "captureSeconds": 414.1,
+          "captureSource": "qmp-monitor",
+          "monitorScanout": "verified",
+          "correctionAuditSha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969"
+        }
+      ]
+    },
+    {
+      "id": "latest-npp-gop",
+      "title": "Notepad++ 8.9.8.1 · Windows 98 GOP",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "1280 × 800 · Shizuku basic graphics driver · compatibility launcher · KVM",
+      "result": "Save, cold-boot reopen, keyboard editing and scoped clean exit verified",
+      "observations": [
+        "The original Notepad++ 8.9.8.1 ran on the real Windows 98 GOP display.",
+        "The new file's actual 44 bytes and the original app and driver files were independently checked on disk.",
+        "The next boot reopened that file; different text was typed, saved as a new 39-byte file, and the app exited normally."
+      ],
+      "scope": "This accepted trial requires the dedicated compatibility launcher and scoped native field interpretation. Unassisted clean exit is not verified; the earlier failure is preserved. During the repeat trial, the save target was corrected and previous documents were restored and compared. A keypress is required at the DOS video prompt. GPU 3D acceleration and other modern apps remain in development.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "applicationTrialStatus": "SCOPED-NATIVE-GOP-NPP-PASS",
+      "requiresNativeFieldInterpreter": true,
+      "cleanExitVerified": true,
+      "unassistedCleanExitVerified": false,
+      "newFileColdReopenVerified": true,
+      "repeatTrialPreviousFilesFinalBytesRestored": true,
+      "firstChanceExceptionsPassedToOS": 4,
+      "workerShutdownExitFFFFFFFFCount": 3,
+      "reviewSha256": [
+        "4969701e15e2170caa6927bdb9cd2c40a34367d3666d7487caa00f8170e1bfa5",
+        "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/latest-npp-gop-open.png",
+          "kind": "guest-capture",
+          "sha256": "18074fe87cb95424f2ddb7ae7c83cd8c23674c8e847ea30f5d9affb05715a362",
+          "width": 1280,
+          "height": 800,
+          "caption": "The original Notepad++ 8.9.8.1 opened a previously saved file on the real Windows 98 GOP display.",
+          "alt": "The original Notepad++ 8.9.8.1 opened a previously saved file on the real Windows 98 GOP display.",
+          "chapter": "Open after GOP boot",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98 GOP",
+          "receiptSha256": "dc600f031150f6440a4c1ce3b657a7d71c0e7b6f57f2549b7f733d3cd453708f",
+          "captureSeconds": 440,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "4969701e15e2170caa6927bdb9cd2c40a34367d3666d7487caa00f8170e1bfa5",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-save-dialog.png",
+          "kind": "guest-capture",
+          "sha256": "9a293ff00f1ef9b1cdfcf263089f6748fb3f339819f404aead136893c1c20191",
+          "width": 1280,
+          "height": 800,
+          "caption": "The real Windows 98 Save As dialog opened for a new document on the GOP display.",
+          "alt": "The real Windows 98 Save As dialog opened for a new document on the GOP display.",
+          "chapter": "New file Save As",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98 GOP",
+          "receiptSha256": "dc600f031150f6440a4c1ce3b657a7d71c0e7b6f57f2549b7f733d3cd453708f",
+          "captureSeconds": 490.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "4969701e15e2170caa6927bdb9cd2c40a34367d3666d7487caa00f8170e1bfa5",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-saved.png",
+          "kind": "guest-capture",
+          "sha256": "ce2b2c6922ac509fcd686cfad502110f7bbe4ce515f00082e481e5cb91a01052",
+          "width": 1280,
+          "height": 800,
+          "caption": "The new NPPGOP.TXT was saved. Its 44 bytes read from disk match the entered text.",
+          "alt": "The new NPPGOP.TXT was saved. Its 44 bytes read from disk match the entered text.",
+          "chapter": "New file verified",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98 GOP",
+          "receiptSha256": "dc600f031150f6440a4c1ce3b657a7d71c0e7b6f57f2549b7f733d3cd453708f",
+          "captureSeconds": 530.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "4969701e15e2170caa6927bdb9cd2c40a34367d3666d7487caa00f8170e1bfa5",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-document-closed.png",
+          "kind": "guest-capture",
+          "sha256": "10a977aea7eb87cad4274674ffc03f20234b421f08b6db170d23404df093f7fe",
+          "width": 1280,
+          "height": 800,
+          "caption": "The new document was closed and the original document was checked for preservation.",
+          "alt": "The new document was closed and the original document was checked for preservation.",
+          "chapter": "Close document",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98 GOP",
+          "receiptSha256": "dc600f031150f6440a4c1ce3b657a7d71c0e7b6f57f2549b7f733d3cd453708f",
+          "captureSeconds": 560.2,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "4969701e15e2170caa6927bdb9cd2c40a34367d3666d7487caa00f8170e1bfa5",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-reopen.png",
+          "kind": "guest-capture",
+          "sha256": "dd329f9bdb07fa6c524154406e01b5ebf73d6328cd15cedebb21723cf5657998",
+          "width": 1280,
+          "height": 800,
+          "caption": "The new NPPGOP.TXT was reopened in the same app session, confirming its path and contents.",
+          "alt": "The new NPPGOP.TXT was reopened in the same app session, confirming its path and contents.",
+          "chapter": "Reopen in the same session",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98 GOP",
+          "receiptSha256": "dc600f031150f6440a4c1ce3b657a7d71c0e7b6f57f2549b7f733d3cd453708f",
+          "captureSeconds": 580.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "4969701e15e2170caa6927bdb9cd2c40a34367d3666d7487caa00f8170e1bfa5",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-exit.png",
+          "kind": "guest-capture",
+          "sha256": "6f79bab4b61d9b842a9379b7e3dfeb01f3b3faeff697f0562cb3f8aca73151e3",
+          "width": 1280,
+          "height": 800,
+          "caption": "Alt+F4 closed the app. The actual app, compatibility launcher and waiting process all returned exit code 0.",
+          "alt": "Alt+F4 closed the app. The actual app, compatibility launcher and waiting process all returned exit code 0.",
+          "chapter": "Scoped clean exit",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98 GOP",
+          "receiptSha256": "dc600f031150f6440a4c1ce3b657a7d71c0e7b6f57f2549b7f733d3cd453708f",
+          "captureSeconds": 600.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "4969701e15e2170caa6927bdb9cd2c40a34367d3666d7487caa00f8170e1bfa5",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-cold-open.png",
+          "kind": "guest-capture",
+          "sha256": "cb630d9533decbe718cdaddd79f93ec8b9d7da3ebd3eaaadcfdc62d5695a9990",
+          "width": 1280,
+          "height": 800,
+          "caption": "The next cold boot reopened NPPGOP.TXT. Its original 44 bytes and path matched.",
+          "alt": "The next cold boot reopened NPPGOP.TXT. Its original 44 bytes and path matched.",
+          "chapter": "Reopen on the next GOP boot",
+          "runLabel": "Notepad++ 8.9.8.1 · next Windows 98 GOP boot",
+          "receiptSha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+          "captureSeconds": 130,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-keyboard.png",
+          "kind": "guest-capture",
+          "sha256": "e0238816dc25e62c35bb8e0826a172e08c8cdd472388e9670f3d4484ea4e34a5",
+          "width": 1280,
+          "height": 800,
+          "caption": "Different text was entered using the actual keyboard. The new editor contents are 39 bytes.",
+          "alt": "Different text was entered using the actual keyboard. The new editor contents are 39 bytes.",
+          "chapter": "Type different text",
+          "runLabel": "Notepad++ 8.9.8.1 · next Windows 98 GOP boot",
+          "receiptSha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+          "captureSeconds": 160.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-keyboard-saved.png",
+          "kind": "guest-capture",
+          "sha256": "10699734c6334687e95b8b6150f98bef3a27d9acda7f06ac4c2f78f702787417",
+          "width": 1280,
+          "height": 800,
+          "caption": "The typed text was saved as a new NPEDGOP.TXT. Its actual 39 bytes on disk were also checked.",
+          "alt": "The typed text was saved as a new NPEDGOP.TXT. Its actual 39 bytes on disk were also checked.",
+          "chapter": "Save different text",
+          "runLabel": "Notepad++ 8.9.8.1 · next Windows 98 GOP boot",
+          "receiptSha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+          "captureSeconds": 300.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-original-restored.png",
+          "kind": "guest-capture",
+          "sha256": "5e25ef0de6e0edd7d445e8b0386ae7916556602523614249d21ad95446f43486",
+          "width": 1280,
+          "height": 800,
+          "caption": "The save target was corrected during the trial. The original contents of two previous files and the new file were compared on the final disk.",
+          "alt": "The save target was corrected during the trial. The original contents of two previous files and the new file were compared on the final disk.",
+          "chapter": "Restore and verify previous files",
+          "runLabel": "Notepad++ 8.9.8.1 · next Windows 98 GOP boot",
+          "receiptSha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+          "captureSeconds": 380.2,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+          "monitorScanout": "verified"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-gop-cold-exit.png",
+          "kind": "guest-capture",
+          "sha256": "7ecccbd46c9b1eb14c1b0efc2ea11c7408ab3071995a47fcbe53c81b0a3f5806",
+          "width": 1280,
+          "height": 800,
+          "caption": "Alt+F4 closed the app normally on the next GOP boot too. The actual app, compatibility launcher and waiting process all returned 0.",
+          "alt": "Alt+F4 closed the app normally on the next GOP boot too. The actual app, compatibility launcher and waiting process all returned 0.",
+          "chapter": "Scoped clean exit on the next boot",
+          "runLabel": "Notepad++ 8.9.8.1 · next Windows 98 GOP boot",
+          "receiptSha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+          "captureSeconds": 410,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+          "monitorScanout": "verified"
+        }
+      ]
+    },
+    {
+      "id": "vlc-video-gop",
+      "title": "VLC 3.0.24 · real video output",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "1280 × 800 · Shizuku basic graphics driver · KVM",
+      "result": "Changing video verified · full player interface failed",
+      "observations": [
+        "Official VLC 3.0.24 displayed a test video on the real Windows 98 GOP screen.",
+        "Comparing only the video region verified yellow bar widths of 46, 73 and 99 pixels.",
+        "The Qt interface component failed to load. Clean exit and audible output were not verified."
+      ],
+      "scope": "Partial verification of actual video output, not acceptance of a complete usable player. The run log was seen on screen, but its on-disk file is 0 bytes. Stopping the VM does not prove a clean app or Windows exit.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "applicationTrialStatus": "PARTIAL_REAL_VIDEO_RENDERING_QT_GUI_FAIL",
+      "guiAcceptance": false,
+      "videoRegionMotionVerified": true,
+      "cleanExitVerified": false,
+      "audibleAudioVerified": false,
+      "reviewSha256": [
+        "3fb19e2bbe77de4ac1bb9f1695d6e90d55987f02733c83657187b4cec670bd08",
+        "a4abb473e2424f2ff334a108bb967cfbc3751fe951c831e4502966e59fe3607c",
+        "82bedbd977cf57bdc23e312a910ac5d0cda1e61d24821518fa0068e91c368aa8",
+        "c4fd102f2bdbb08af26a93e58e3ab9f533394959687c1f4aac327327c272371f"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/vlc-video-1.png",
+          "kind": "guest-capture",
+          "sha256": "26fe66468694b55122feb8e0e940d2cf220222464917ebccddf9a80d9623ff74",
+          "width": 1280,
+          "height": 800,
+          "caption": "The yellow bar inside the actual VLC video region grows over time. The full interface and clean exit remain unverified.",
+          "alt": "The yellow bar inside the actual VLC video region grows over time. The full interface and clean exit remain unverified.",
+          "chapter": "Video frame 1",
+          "runLabel": "VLC 3.0.24 · Windows 98 GOP video output",
+          "receiptSha256": "3fb19e2bbe77de4ac1bb9f1695d6e90d55987f02733c83657187b4cec670bd08",
+          "captureSeconds": 140.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "c4fd102f2bdbb08af26a93e58e3ab9f533394959687c1f4aac327327c272371f"
+        },
+        {
+          "src": "../../evidence/images/vlc-video-2.png",
+          "kind": "guest-capture",
+          "sha256": "7ec2d9bf6e413562d8332ebcb9534acccaf8af025dfe5b73d473d5e2b3c05449",
+          "width": 1280,
+          "height": 800,
+          "caption": "The yellow bar inside the actual VLC video region grows over time. The full interface and clean exit remain unverified.",
+          "alt": "The yellow bar inside the actual VLC video region grows over time. The full interface and clean exit remain unverified.",
+          "chapter": "Video frame 2",
+          "runLabel": "VLC 3.0.24 · Windows 98 GOP video output",
+          "receiptSha256": "3fb19e2bbe77de4ac1bb9f1695d6e90d55987f02733c83657187b4cec670bd08",
+          "captureSeconds": 145.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "c4fd102f2bdbb08af26a93e58e3ab9f533394959687c1f4aac327327c272371f"
+        },
+        {
+          "src": "../../evidence/images/vlc-video-3.png",
+          "kind": "guest-capture",
+          "sha256": "108b60ba12c27737ad27a800ef10151fd991e6d2c4e75a9184b7ba96cefb5e36",
+          "width": 1280,
+          "height": 800,
+          "caption": "The yellow bar inside the actual VLC video region grows over time. The full interface and clean exit remain unverified.",
+          "alt": "The yellow bar inside the actual VLC video region grows over time. The full interface and clean exit remain unverified.",
+          "chapter": "Video frame 3",
+          "runLabel": "VLC 3.0.24 · Windows 98 GOP video output",
+          "receiptSha256": "3fb19e2bbe77de4ac1bb9f1695d6e90d55987f02733c83657187b4cec670bd08",
+          "captureSeconds": 150,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "c4fd102f2bdbb08af26a93e58e3ab9f533394959687c1f4aac327327c272371f"
+        },
+        {
+          "src": "../../evidence/images/vlc-video-qt-error.png",
+          "kind": "guest-capture",
+          "sha256": "799f9750b0dd6947749f5f9b814c170688a80e10da026adf5a66e9d2c773221c",
+          "width": 1280,
+          "height": 800,
+          "caption": "The run log opened in real Notepad shows the Qt interface component's load failure. Its on-disk log file is 0 bytes.",
+          "alt": "The run log opened in real Notepad shows the Qt interface component's load failure. Its on-disk log file is 0 bytes.",
+          "chapter": "Remaining interface error",
+          "runLabel": "VLC 3.0.24 · Windows 98 GOP video output",
+          "receiptSha256": "3fb19e2bbe77de4ac1bb9f1695d6e90d55987f02733c83657187b4cec670bd08",
+          "captureSeconds": 365.2,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "c4fd102f2bdbb08af26a93e58e3ab9f533394959687c1f4aac327327c272371f"
+        }
+      ]
+    },
+    {
+      "id": "vlc-first-startup",
+      "title": "VLC 3.0.24 · first startup failure",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "1280 × 800 · Shizuku basic graphics driver · KVM",
+      "result": "Initial video and audio startup failures preserved",
+      "observations": [
+        "The original VLC executable and compatibility components were installed and launched after a fresh Windows 98 GOP boot.",
+        "After dismissing the video trial's error dialog, the actual process returned 0. That is not successful playback.",
+        "After adding the official file logger plugin, partial video output was verified in a separate record."
+      ],
+      "scope": "The first startup errors and original captures are preserved. A working player window, video playback and audible output were not verified in this run. The audio process's exit was also not confirmed. Issues beyond the missing plugin may remain.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "applicationTrialStatus": "FAIL",
+      "guiAcceptance": false,
+      "videoPlaybackVerified": false,
+      "audibleAudioVerified": false,
+      "videoChildActualExitCode": 0,
+      "audioChildExitObserved": false,
+      "reviewSha256": [
+        "f3e7dc672c5e0ed60d27682b41d73ce026ae176e08e182007643c4d2728da678",
+        "2c10babca9a67868f12669ded7f4ced56f399e0081f0f2d55c5540fb764f8da7",
+        "c9c9e9faae54f2efa64af7700087695f75b06c150b24c4c128101a3a0dbeb635",
+        "a88fe6258ea3dfa80c13741eff7176a3503282ae0248cdf55c076175dc354bce"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/vlc-first-video-error.png",
+          "kind": "guest-capture",
+          "sha256": "f5aa4e986dd640c3b2421fee73c7e85efda3e58b35a94c33c809d3ebbe07476a",
+          "width": 1280,
+          "height": 800,
+          "caption": "The original VLC 3.0.24 launched on Windows 98 GOP but failed to start because of an option or plugin error.",
+          "alt": "The original VLC 3.0.24 launched on Windows 98 GOP but failed to start because of an option or plugin error.",
+          "chapter": "Video startup error",
+          "runLabel": "VLC 3.0.24 · first Windows 98 GOP launch",
+          "receiptSha256": "49592049aee85b8a080e4fed11869a2cbaecfff0e05eb23d064d5dfbc7b9b41b",
+          "captureSeconds": 195.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "c9c9e9faae54f2efa64af7700087695f75b06c150b24c4c128101a3a0dbeb635"
+        },
+        {
+          "src": "../../evidence/images/vlc-first-video-exit.png",
+          "kind": "guest-capture",
+          "sha256": "55ef3fe7ec2e35c895b351644d5053e54622044d4a8fb4393050197adbf9b4c2",
+          "width": 1280,
+          "height": 800,
+          "caption": "The actual VLC child process returned 0 after its error dialog was dismissed. This is not successful video playback.",
+          "alt": "The actual VLC child process returned 0 after its error dialog was dismissed. This is not successful video playback.",
+          "chapter": "Exit code after the error",
+          "runLabel": "VLC 3.0.24 · first Windows 98 GOP launch",
+          "receiptSha256": "49592049aee85b8a080e4fed11869a2cbaecfff0e05eb23d064d5dfbc7b9b41b",
+          "captureSeconds": 660.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "c9c9e9faae54f2efa64af7700087695f75b06c150b24c4c128101a3a0dbeb635"
+        },
+        {
+          "src": "../../evidence/images/vlc-first-audio-error.png",
+          "kind": "guest-capture",
+          "sha256": "aa930e1bd80b5b176b94b076665df6667158933ea77a2e95fde8a19665224eee",
+          "width": 1280,
+          "height": 800,
+          "caption": "The audio trial also showed a startup error. Its exit code and audible output were not verified.",
+          "alt": "The audio trial also showed a startup error. Its exit code and audible output were not verified.",
+          "chapter": "Audio startup error",
+          "runLabel": "VLC 3.0.24 · first Windows 98 GOP launch",
+          "receiptSha256": "49592049aee85b8a080e4fed11869a2cbaecfff0e05eb23d064d5dfbc7b9b41b",
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "c9c9e9faae54f2efa64af7700087695f75b06c150b24c4c128101a3a0dbeb635"
+        }
+      ]
+    },
+    {
+      "id": "native-gop-file",
+      "title": "Windows 98 GOP · save and reopen",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "1280 × 800 · Shizuku basic graphics driver · KVM",
+      "result": "Previous file reopened and new contents saved",
+      "observations": [
+        "Windows 98 Notepad reopened the previous file after a fresh cold boot.",
+        "New text entered on the GOP display matched the actual 43 bytes stored on disk.",
+        "14 API provider controls and a normal process exit were verified in the same Windows 98 installation."
+      ],
+      "scope": "The editor in this record is Windows 98's built-in Notepad. Notepad++ results appear in the separate GOP app collection. A keypress was required at the existing Korean DOS video component's startup prompt.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "reviewSha256": [
+        "9b2da011af1368cf5d0ff555eeee63235194d1f3fabc4145e2a677d1772a59bd"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/win98-gop-file-desktop.png",
+          "kind": "guest-capture",
+          "sha256": "936f74134307cb40b9db09bc1dc327ee235c79c4101c4c03b4b6919a63fd21fa",
+          "width": 1280,
+          "height": 800,
+          "caption": "The actual Windows 98 desktop appeared after a fresh UEFI GOP boot.",
+          "alt": "The actual Windows 98 desktop appeared after a fresh UEFI GOP boot.",
+          "chapter": "Fresh GOP boot",
+          "runLabel": "Windows 98 · GOP file persistence trial",
+          "receiptSha256": "447f265637cee62d858092cf7acfdb08c0c55fb846369517763185ed3e9f8026",
+          "captureSeconds": 175.1,
+          "captureSource": "qmp-monitor",
+          "monitorScanout": "verified",
+          "verificationReceiptSha256": "9b2da011af1368cf5d0ff555eeee63235194d1f3fabc4145e2a677d1772a59bd"
+        },
+        {
+          "src": "../../evidence/images/win98-gop-file-reopen.png",
+          "kind": "guest-capture",
+          "sha256": "17d14e7facb7381b9f1ec1beff057a85d937f6bee08920e5b854e4cba5028ead",
+          "width": 1280,
+          "height": 800,
+          "caption": "Windows 98 Notepad reopened a file saved in the previous run after a fresh GOP boot.",
+          "alt": "Windows 98 Notepad reopened a file saved in the previous run after a fresh GOP boot.",
+          "chapter": "Reopen the previous file",
+          "runLabel": "Windows 98 · GOP file persistence trial",
+          "receiptSha256": "447f265637cee62d858092cf7acfdb08c0c55fb846369517763185ed3e9f8026",
+          "captureSeconds": 490,
+          "captureSource": "qmp-monitor",
+          "monitorScanout": "verified",
+          "verificationReceiptSha256": "9b2da011af1368cf5d0ff555eeee63235194d1f3fabc4145e2a677d1772a59bd"
+        },
+        {
+          "src": "../../evidence/images/win98-gop-file-save.png",
+          "kind": "guest-capture",
+          "sha256": "eef52643c972727c1a490f4add57f02f74925622de63a8b85f83d0397912fd6e",
+          "width": 1280,
+          "height": 800,
+          "caption": "New text was entered and saved on the GOP display. Its stored 43 bytes were independently read and checked.",
+          "alt": "New text was entered and saved on the GOP display. Its stored 43 bytes were independently read and checked.",
+          "chapter": "Type and save new text",
+          "runLabel": "Windows 98 · GOP file persistence trial",
+          "receiptSha256": "447f265637cee62d858092cf7acfdb08c0c55fb846369517763185ed3e9f8026",
+          "captureSeconds": 615,
+          "captureSource": "qmp-monitor",
+          "monitorScanout": "verified",
+          "verificationReceiptSha256": "9b2da011af1368cf5d0ff555eeee63235194d1f3fabc4145e2a677d1772a59bd"
+        }
+      ]
+    },
+    {
+      "id": "latest-npp",
+      "title": "Notepad++ 8.9.8.1 · earlier VGA trial",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "640 × 480 · basic VGA · KernelEx and app compatibility components · KVM",
+      "result": "Edit, save and cold-boot reopen verified · clean exit failed",
+      "observations": [
+        "The publisher's original executable was used unchanged.",
+        "The new file's actual 44 bytes were independently checked on disk after saving through the Save As dialog.",
+        "The original app reopened the saved file on a separate cold boot. The exit error is preserved."
+      ],
+      "scope": "The earlier full app trial remains a failure. The newer GOP trial's clean exit through the dedicated compatibility launcher appears in a separate collection.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "applicationTrialStatus": "FAIL",
+      "coldReopenVerified": true,
+      "reviewSha256": [
+        "f0ea413eaf74b72f1fd0d62c0283e357dc68dd90b66dfe7e52804a9c2b2f7003",
+        "1b387e4ac6091d28a7fa79c87d038b42cc5669156dd7d05ad41a0ad431b88e53"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/latest-npp-edit.png",
+          "kind": "guest-capture",
+          "sha256": "efad5f629ee3ed7ee9fedb7e9645ff740caa10d963fba5a80bd00d2a99eb370a",
+          "width": 640,
+          "height": 480,
+          "caption": "Text was entered in Notepad++ 8.9.8.1 on real Windows 98.",
+          "alt": "Text was entered in Notepad++ 8.9.8.1 on real Windows 98.",
+          "chapter": "Actual editing",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98",
+          "receiptSha256": "8fe159a7bb4876d495b06f051fbc0463c996f11d6d5efc5581dbc8f0c561c6bb",
+          "captureSeconds": 640.2,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "f0ea413eaf74b72f1fd0d62c0283e357dc68dd90b66dfe7e52804a9c2b2f7003"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-save-dialog.png",
+          "kind": "guest-capture",
+          "sha256": "28ad76f9751fe4644bc5a80d698ed473197c49513d05a392aad9d92364232909",
+          "width": 640,
+          "height": 480,
+          "caption": "A new file was saved through the real Windows 98 Save As dialog supplied by the compatibility component.",
+          "alt": "A new file was saved through the real Windows 98 Save As dialog supplied by the compatibility component.",
+          "chapter": "New file Save As",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98",
+          "receiptSha256": "8fe159a7bb4876d495b06f051fbc0463c996f11d6d5efc5581dbc8f0c561c6bb",
+          "captureSeconds": 670.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "f0ea413eaf74b72f1fd0d62c0283e357dc68dd90b66dfe7e52804a9c2b2f7003"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-saved.png",
+          "kind": "guest-capture",
+          "sha256": "50e17a08ad3350d38d86cd83936ad2a757a11558d7415fa51055862c7dd616e0",
+          "width": 640,
+          "height": 480,
+          "caption": "The new NPPQA.TXT was saved. Its 44 bytes read from the actual disk match the entered text.",
+          "alt": "The new NPPQA.TXT was saved. Its 44 bytes read from the actual disk match the entered text.",
+          "chapter": "New file verified",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98",
+          "receiptSha256": "8fe159a7bb4876d495b06f051fbc0463c996f11d6d5efc5581dbc8f0c561c6bb",
+          "captureSeconds": 720.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "f0ea413eaf74b72f1fd0d62c0283e357dc68dd90b66dfe7e52804a9c2b2f7003"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-reopen.png",
+          "kind": "guest-capture",
+          "sha256": "14594bd49067ed34cf114ec90f32e54075a05b74641c03d21d30ccd635d938de",
+          "width": 640,
+          "height": 480,
+          "caption": "The document was closed and the saved file reopened in the same Notepad++ session.",
+          "alt": "The document was closed and the saved file reopened in the same Notepad++ session.",
+          "chapter": "Reopen in the same session",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98",
+          "receiptSha256": "8fe159a7bb4876d495b06f051fbc0463c996f11d6d5efc5581dbc8f0c561c6bb",
+          "captureSeconds": 853.1,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "f0ea413eaf74b72f1fd0d62c0283e357dc68dd90b66dfe7e52804a9c2b2f7003"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-cold-reopen.png",
+          "kind": "guest-capture",
+          "sha256": "32f3a96847d7204736462d49e37515ed9b5f6296f6006e33b00fa5e5b03c6ce2",
+          "width": 640,
+          "height": 480,
+          "caption": "The original Notepad++ reopened NPPQA.TXT after a fresh boot. Its actual 44 disk bytes were checked again.",
+          "alt": "The original Notepad++ reopened NPPQA.TXT after a fresh boot. Its actual 44 disk bytes were checked again.",
+          "chapter": "Open after a fresh boot",
+          "runLabel": "Notepad++ 8.9.8.1 · separate cold boot",
+          "receiptSha256": "117ea2b45269a26e01fda5410921c5fdcb389a5ed8b432eaf47ab4e1bc8c92b4",
+          "captureSeconds": 200,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "1b387e4ac6091d28a7fa79c87d038b42cc5669156dd7d05ad41a0ad431b88e53"
+        },
+        {
+          "src": "../../evidence/images/latest-npp-exit-fault.png",
+          "kind": "guest-capture",
+          "sha256": "b08cbd70f4082f0916fdd3fa9a05cf295515fb6f11feed7237b8e9d642859921",
+          "width": 640,
+          "height": 480,
+          "caption": "The app showed an error while exiting after saving and reopening. The full app trial remains a failure.",
+          "alt": "The app showed an error while exiting after saving and reopening. The full app trial remains a failure.",
+          "chapter": "Clean exit failure",
+          "runLabel": "Notepad++ 8.9.8.1 · real Windows 98",
+          "receiptSha256": "8fe159a7bb4876d495b06f051fbc0463c996f11d6d5efc5581dbc8f0c561c6bb",
+          "captureSeconds": 890.2,
+          "captureSource": "qmp-monitor",
+          "verificationReceiptSha256": "f0ea413eaf74b72f1fd0d62c0283e357dc68dd90b66dfe7e52804a9c2b2f7003"
+        }
+      ]
+    },
+    {
+      "id": "native-gop-surface",
+      "title": "Windows 98 native GOP · framebuffer pixels",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "1280 × 800 · 32-bit GOP framebuffer · KVM",
+      "result": "Actual desktop, input and GDI test framebuffer verified",
+      "observations": [
+        "The installed Shizuku basic graphics driver initialized in real Windows 98.",
+        "Actual desktop, Run dialog and Start menu pixels were read directly from the verified framebuffer.",
+        "The guest drawing, copying and reading controls and a normal process exit were verified."
+      ],
+      "scope": "The original framebuffer pixels were decoded into PNG without changing their dimensions or contents. Original monitor captures later in the same run also verified display output; the additional audit corrects the earlier assessment. Modern app execution is a separate workstream.",
+      "correctionAuditSha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "reviewSha256": [
+        "864adb8dc50e76ceefce3007cad2e9b0478e114cf1bf93cba485ebe71f63847a"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/win98-native-gop-desktop.png",
+          "kind": "guest-capture",
+          "sha256": "3435f97b2298ca8bf0a05b22a4e340f56738d4d64dc324ea80116be198a1bc40",
+          "width": 1280,
+          "height": 800,
+          "caption": "The real Windows 98 desktop, read directly from GOP framebuffer memory.",
+          "alt": "The real Windows 98 desktop, read directly from GOP framebuffer memory.",
+          "chapter": "Windows 98 desktop",
+          "runLabel": "Windows 98 · native GOP framebuffer",
+          "receiptSha256": "fe3ff557d190676e8e82433cd47825786245d4bcda5e21cab3fdec65cf657296",
+          "captureSeconds": 57,
+          "captureSource": "physical-gop-framebuffer",
+          "rawSha256": "56f421197c64872e335dac6c0da552de0dc548c8a60b3e6a8b25e42737a3957b",
+          "decoderSha256": "bef00758bdaba26ce3ec5225ac4a8da9aa44eca2ed75bbf9ae628f909c183d58",
+          "monitorScanout": "verified-by-additive-audit",
+          "correctionAuditSha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969"
+        },
+        {
+          "src": "../../evidence/images/win98-native-gop-run.png",
+          "kind": "guest-capture",
+          "sha256": "28b62c5881f2fb76f9342d257452b42e7884e54d062489bbe1e93ee91bc177c6",
+          "width": 1280,
+          "height": 800,
+          "caption": "The Windows 98 Run dialog opened through actual keyboard input.",
+          "alt": "The Windows 98 Run dialog opened through actual keyboard input.",
+          "chapter": "Open the Run dialog",
+          "runLabel": "Windows 98 · native GOP framebuffer",
+          "receiptSha256": "fe3ff557d190676e8e82433cd47825786245d4bcda5e21cab3fdec65cf657296",
+          "captureSeconds": 149.6,
+          "captureSource": "physical-gop-framebuffer",
+          "rawSha256": "7634567fe99fe6de1b7f0a99e79d70aa79a1fc04eb75885967a13dd7e94bb66a",
+          "decoderSha256": "bef00758bdaba26ce3ec5225ac4a8da9aa44eca2ed75bbf9ae628f909c183d58",
+          "monitorScanout": "verified-by-additive-audit",
+          "correctionAuditSha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969"
+        },
+        {
+          "src": "../../evidence/images/win98-native-gop-start.png",
+          "kind": "guest-capture",
+          "sha256": "c4eba9b2514e1241d0325a5825a1ad8366714b76a90b19d251c1665f127f3d0c",
+          "width": 1280,
+          "height": 800,
+          "caption": "The Windows 98 Start menu opened through actual keyboard input.",
+          "alt": "The Windows 98 Start menu opened through actual keyboard input.",
+          "chapter": "Open the Start menu",
+          "runLabel": "Windows 98 · native GOP framebuffer",
+          "receiptSha256": "fe3ff557d190676e8e82433cd47825786245d4bcda5e21cab3fdec65cf657296",
+          "captureSeconds": 271.7,
+          "captureSource": "physical-gop-framebuffer",
+          "rawSha256": "dd638bb509171ae53fcfe8698092de69698742264939a2e9102723a69edaee88",
+          "decoderSha256": "bef00758bdaba26ce3ec5225ac4a8da9aa44eca2ed75bbf9ae628f909c183d58",
+          "monitorScanout": "verified-by-additive-audit",
+          "correctionAuditSha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969"
+        }
+      ]
+    },
+    {
+      "id": "native-win98",
+      "title": "Real Windows 98 · earlier VGA trial",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "640 × 480 · KVM · UEFI/CSM",
+      "result": "Notepad save and cold-boot reopen verified",
+      "observations": [
+        "The actual Windows 98 desktop and Notepad ran.",
+        "A file saved in the guest was independently read on the host to verify its contents and hash.",
+        "The same file reopened after a fresh cold boot."
+      ],
+      "scope": "This earlier run used basic VGA. Its native VxD loading failure remains preserved. Current GOP driver results appear in the separate GOP collections.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW",
+        "FAIL"
+      ],
+      "reviewSha256": [
+        "7e9383fc5f023f960f276e68c385c7550e4c877cd16f79c434032987280446eb",
+        "d4138ea36f67ad7071d4cc89148fceb0811d4af0eb29deaab17034c652c3586b"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/win98-saved.png",
+          "kind": "guest-capture",
+          "sha256": "a1ff257d80f11d33380cdd2d473c3bd470f7d23b3c030e4d18a7881d70190ec7",
+          "width": 640,
+          "height": 480,
+          "caption": "Text entered in real Windows 98 Notepad was saved as UEFIQA.TXT.",
+          "alt": "Text entered in real Windows 98 Notepad was saved as UEFIQA.TXT.",
+          "chapter": "Notepad save",
+          "runLabel": "Windows 98 · first boot",
+          "receiptSha256": "bef6c72dac399ddab964f8eb6b86ec48ccc26f94668870bcd86ffc7656b433a3",
+          "captureSeconds": 311.2
+        },
+        {
+          "src": "../../evidence/images/win98-cold-reopen.png",
+          "kind": "guest-capture",
+          "sha256": "0907474491860b253e2ed4750cb169de40006deec79f92c8daaf47be331e9be1",
+          "width": 640,
+          "height": 480,
+          "caption": "UEFIQA.TXT reopened after a fresh cold boot and its contents matched.",
+          "alt": "UEFIQA.TXT reopened after a fresh cold boot and its contents matched.",
+          "chapter": "Reopen after restart",
+          "runLabel": "Windows 98 · fresh cold boot",
+          "receiptSha256": "b6ca2f23a6b1afac62ff26187937d3b23650dffef3eaddf8e1a8193a8eca06aa",
+          "captureSeconds": 160.1
+        }
+      ]
+    },
+    {
+      "id": "independent-gop",
+      "title": "Shizuku standalone GOP desktop",
+      "platform": "ShizukuDOS Kernel64 · independent Win64 runtime",
+      "display": "1280 × 800 · UEFI GOP · KVM",
+      "result": "Two cold-boot trials passed using the built ISO",
+      "observations": [
+        "A file was written and reopened using actual keyboard input.",
+        "The saved 25 bytes on the FAT32 disk were independently checked on the host in both boots.",
+        "Child app execution and normal exit, disk flush and shutdown were verified."
+      ],
+      "scope": "This is a separate Shizuku kernel and its own shell. It is not a Microsoft Windows 98 screen or acceptance evidence for a Windows 98 display driver.",
+      "rawRunStatuses": [
+        "PASS"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/gop-desktop.png",
+          "kind": "guest-capture",
+          "sha256": "7c75f6de6e620370c903e913fdb35497576ba26a8df0c356271684ca26bd9549",
+          "width": 1280,
+          "height": 800,
+          "caption": "The Shizuku standalone desktop booted from the built ISO.",
+          "alt": "The Shizuku standalone desktop booted from the built ISO.",
+          "chapter": "First ISO boot",
+          "runLabel": "Shizuku GOP · ISO boot 1",
+          "receiptSha256": "727f525de9f4409909822a2236fcbce10121910f811f918045ba79a60aa6446c"
+        },
+        {
+          "src": "../../evidence/images/gop-editor-saved.png",
+          "kind": "guest-capture",
+          "sha256": "9188b25878cd17e5114e497dec70f9ec7ea4c3122affc4bcbd15c1eff0ef7d25",
+          "width": 1280,
+          "height": 800,
+          "caption": "The editor saved D:\\DESKTOP.TXT to the actual FAT32 disk.",
+          "alt": "The editor saved D:\\DESKTOP.TXT to the actual FAT32 disk.",
+          "chapter": "Save file",
+          "runLabel": "Shizuku GOP · ISO boot 1",
+          "receiptSha256": "727f525de9f4409909822a2236fcbce10121910f811f918045ba79a60aa6446c"
+        },
+        {
+          "src": "../../evidence/images/gop-cold-reopen.png",
+          "kind": "guest-capture",
+          "sha256": "9188b25878cd17e5114e497dec70f9ec7ea4c3122affc4bcbd15c1eff0ef7d25",
+          "width": 1280,
+          "height": 800,
+          "caption": "The saved 25 bytes reopened after the second cold boot using the same disk.",
+          "alt": "The saved 25 bytes reopened after the second cold boot using the same disk.",
+          "chapter": "Second cold boot",
+          "runLabel": "Shizuku GOP · ISO boot 2",
+          "receiptSha256": "727f525de9f4409909822a2236fcbce10121910f811f918045ba79a60aa6446c"
+        }
+      ]
+    },
+    {
+      "id": "native-driver-install",
+      "title": "Windows 98 driver installation",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "640 × 480 · KVM · installation confirmation",
+      "result": "Shizuku basic graphics driver installation verified",
+      "observations": [
+        "The actual Windows 98 Change Display wizard was completed.",
+        "Adapter properties showed the Shizuku name and DRV/VXD files.",
+        "The actual bytes of both installed files matched the trial inputs."
+      ],
+      "scope": "This installation confirmation used basic VGA before restarting. The driver's later actual output appears in the GOP collections. Modern app support remains in development.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "reviewSha256": [
+        "a631ae988b2f5f08df7b3bf5799a51debff67cb56c07cb685a859d14da718c4c"
+      ],
+      "frames": [
+        {
+          "src": "../../evidence/images/win98-driver-installed.png",
+          "kind": "guest-capture",
+          "sha256": "69bb18d97a0b5f3ee66dd435035059d5482d5f2d410efb1a79b05bdec97494ee",
+          "width": 640,
+          "height": 480,
+          "caption": "Adapter properties showed the SHZGOP name and driver files after completing the Windows 98 installation wizard.",
+          "alt": "Adapter properties showed the SHZGOP name and driver files after completing the Windows 98 installation wizard.",
+          "chapter": "Driver installation confirmed",
+          "runLabel": "Windows 98 · driver installation",
+          "receiptSha256": "e1cff27d0ab07c77b32e345aa85b1bd6738ca4f54ad63f905d7eab0956625c6a",
+          "captureSeconds": 718.3
+        }
+      ]
+    },
+    {
+      "id": "native-app-foundations",
+      "title": "Compatibility controls · real Windows 98",
+      "platform": "Microsoft Windows 98 4.10.2222 Korean",
+      "display": "1280 × 800 · Shizuku basic graphics driver · KVM",
+      "result": "Worker isolation, function binding and waits verified",
+      "observations": [
+        "Worker data isolation and exit notifications were verified inside real Windows 98.",
+        "28 actual system-function binding controls and 28 address-based wait/wake controls passed.",
+        "All three control child processes exited normally, and the existing driver and editor files were preserved."
+      ],
+      "scope": "These are controls for features needed by apps. They do not prove Chromium GUI acceptance or browsing. Chromium, Legcord, LibreOffice and Steam running inside Windows 98 remain in development.",
+      "rawRunStatuses": [
+        "NEEDS-VISUAL-REVIEW"
+      ],
+      "applicationExecuted": false,
+      "ChromiumGUIAcceptance": false,
+      "outerObserverOwnOSExitVerified": false,
+      "physicalWorkerCessationEstablished": false,
+      "nativeControlsAccepted": true,
+      "actualChildNormalExits": 3,
+      "frames": [
+        {
+          "src": "../../evidence/images/native-app-desktop.png",
+          "kind": "guest-capture",
+          "sha256": "a8f43af278c4be0f07034413ba0c1ab723d75cdf6ecaa1bbff719aa04282a2c2",
+          "width": 1280,
+          "height": 800,
+          "caption": "The actual Windows 98 desktop booted with the Shizuku basic graphics driver.",
+          "alt": "The actual Windows 98 desktop booted with the Shizuku basic graphics driver.",
+          "chapter": "Real Windows 98 boot",
+          "runLabel": "Compatibility controls · real Windows 98 GOP",
+          "captureSeconds": 90.2,
+          "captureSource": "qmp-monitor",
+          "receiptSha256": "599df88d89c576734f52561bb86452c0a395ade04810dea345a7f39bfebf3884",
+          "verificationReceiptSha256": "4effe5acd8f01dba4d9da00fea216527974b0bb98d5d031b16ff59deb7f0c6f0"
+        },
+        {
+          "src": "../../evidence/images/native-app-thread.png",
+          "kind": "guest-capture",
+          "sha256": "5f9dfc4b5dec6b56aee61cf6657d2bfbef55c679eb7f8304143c50f7ce2534ec",
+          "width": 1280,
+          "height": 800,
+          "caption": "Actual worker data isolation and post-exit notifications were verified.",
+          "alt": "Actual worker data isolation and post-exit notifications were verified.",
+          "chapter": "Worker isolation and exit",
+          "runLabel": "Compatibility controls · real Windows 98 GOP",
+          "captureSeconds": 500.1,
+          "captureSource": "qmp-monitor",
+          "receiptSha256": "599df88d89c576734f52561bb86452c0a395ade04810dea345a7f39bfebf3884",
+          "verificationReceiptSha256": "4effe5acd8f01dba4d9da00fea216527974b0bb98d5d031b16ff59deb7f0c6f0"
+        },
+        {
+          "src": "../../evidence/images/native-app-functions.png",
+          "kind": "guest-capture",
+          "sha256": "497943d5815826ec748db3617e7b12af471ee5352525b90054cb26497cfcd8a6",
+          "width": 1280,
+          "height": 800,
+          "caption": "Actual Windows 98 functions were bound and called, then released after the worker ended.",
+          "alt": "Actual Windows 98 functions were bound and called, then released after the worker ended.",
+          "chapter": "Function binding",
+          "runLabel": "Compatibility controls · real Windows 98 GOP",
+          "captureSeconds": 600,
+          "captureSource": "qmp-monitor",
+          "receiptSha256": "599df88d89c576734f52561bb86452c0a395ade04810dea345a7f39bfebf3884",
+          "verificationReceiptSha256": "4effe5acd8f01dba4d9da00fea216527974b0bb98d5d031b16ff59deb7f0c6f0"
+        },
+        {
+          "src": "../../evidence/images/native-app-wait.png",
+          "kind": "guest-capture",
+          "sha256": "2053280d722e6c8d25f71d9f9216196ed9ed3c7aa2b60df3817d510824fca654",
+          "width": 1280,
+          "height": 800,
+          "caption": "Actual worker wait/wake ordering and normal process exit were verified.",
+          "alt": "Actual worker wait/wake ordering and normal process exit were verified.",
+          "chapter": "Wait and wake",
+          "runLabel": "Compatibility controls · real Windows 98 GOP",
+          "captureSeconds": 730,
+          "captureSource": "qmp-monitor",
+          "receiptSha256": "599df88d89c576734f52561bb86452c0a395ade04810dea345a7f39bfebf3884",
+          "verificationReceiptSha256": "4effe5acd8f01dba4d9da00fea216527974b0bb98d5d031b16ff59deb7f0c6f0"
+        }
+      ]
+    },
+    {
+      "id": "legcord-runtime-setup",
+      "title": "Legcord setup · standalone 64-bit runtime",
+      "platform": "ShizukuDOS Kernel64 · standalone runtime trial",
+      "display": "1024 × 768 · software rendering",
+      "result": "Actual setup screen displayed · full app acceptance pending",
+      "observations": [
+        "The official Legcord 1.3.0 distribution displayed its actual setup screen.",
+        "Electron's HTML screen appeared. Discord connection and complete interaction were not verified."
+      ],
+      "scope": "This did not run inside Windows 98. Windows 98 execution, display and input integration, and Discord functionality remain in development. The overall trial is incomplete and normal exit was not verified.",
+      "applicationExecuted": true,
+      "applicationFunctionalityVerified": false,
+      "windows98ExecutionVerified": false,
+      "normalExitVerified": false,
+      "observationQemuReturnCode": 1,
+      "frames": [
+        {
+          "src": "../../evidence/images/legcord-runtime-setup.png",
+          "kind": "guest-capture",
+          "sha256": "28fc8a9c451a610160ca833be12056e9497fb5bf85753a6169d3d3bbadf62238",
+          "width": 1024,
+          "height": 768,
+          "caption": "The actual Legcord 1.3.0 setup screen, recorded in the standalone 64-bit runtime. Windows 98 integration remains in development.",
+          "alt": "The actual Legcord 1.3.0 setup screen, recorded in the standalone 64-bit runtime. Windows 98 integration remains in development.",
+          "chapter": "Legcord setup screen",
+          "runLabel": "Standalone Kernel64 · before Windows 98 integration",
+          "captureSeconds": 545.04,
+          "captureSource": "qmp-monitor",
+          "receiptSha256": "fd6a3236dcc813637a04f3f385065ca9e42db5b7d072c9b08786f5bfeb9af485"
+        }
+      ]
+    },
+    {
+      "id": "vlc-qt-video-gop",
+      "title": "VLC player and video · real Windows 98 GOP",
+      "platform": "Real Microsoft Windows 98 SE · UEFI boot",
+      "display": "1280 × 800 · Shizuku basic GOP graphics driver",
+      "result": "Real Qt GUI and changing video verified · clean exit failed",
+      "observations": [
+        "VLC 3.0.24's actual menus, playback controls and changing test video were verified.",
+        "Clean exit failed with an RPCRT4 error. Audible output has not been verified."
+      ],
+      "scope": "Captured in real Windows 98 after a Qt diagnostic run. That diagnostic's effect is still being checked in a separate boot. The video is a 160 × 120 test AVI. This does not establish full app, audio or 3D acceleration acceptance. Exit code 0 after dismissing the error dialog is not a successful clean exit.",
+      "applicationExecuted": true,
+      "windows98ExecutionVerified": true,
+      "applicationFunctionalityVerified": false,
+      "normalExitVerified": false,
+      "audioVerified": false,
+      "realQtPlayerVerified": true,
+      "changingVideoVerified": true,
+      "frames": [
+        {
+          "src": "../../evidence/images/vlc-qt-video-1.png",
+          "kind": "guest-capture",
+          "sha256": "3c9e7c35179ff1d9a634758a75f48f30399438382c9f5587bb2945dc4e08bbbb",
+          "width": 1280,
+          "height": 800,
+          "caption": "The actual VLC menus, playback controls and test video at 00:11.",
+          "alt": "The actual VLC menus, playback controls and test video at 00:11.",
+          "chapter": "Actual VLC video",
+          "captureSeconds": 1420.2,
+          "captureSource": "qmp-monitor",
+          "runLabel": "Real Windows 98 · UEFI GOP",
+          "receiptSha256": "3db47a5fdb630149149445a3e4efb788dee708562060cf42d62f02ce529ce323"
+        },
+        {
+          "src": "../../evidence/images/vlc-qt-video-2.png",
+          "kind": "guest-capture",
+          "sha256": "b10107b439ffcd27108799c6b13b7b3265ad62791a0c28dfdf99cf7ba6a34d5f",
+          "width": 1280,
+          "height": 800,
+          "caption": "The video contents and playback position changed in the same actual player.",
+          "alt": "The video contents and playback position changed in the same actual player.",
+          "chapter": "Actual VLC video",
+          "captureSeconds": 1430.2,
+          "captureSource": "qmp-monitor",
+          "runLabel": "Real Windows 98 · UEFI GOP",
+          "receiptSha256": "3db47a5fdb630149149445a3e4efb788dee708562060cf42d62f02ce529ce323"
+        },
+        {
+          "src": "../../evidence/images/vlc-qt-video-3.png",
+          "kind": "guest-capture",
+          "sha256": "a0506b0525b0063f2ff5af0785e505e0664f00062d0093d85bca5e3febde8b6e",
+          "width": 1280,
+          "height": 800,
+          "caption": "The actual video at 00:17. 4,200 pixels changed inside the video region.",
+          "alt": "The actual video at 00:17. 4,200 pixels changed inside the video region.",
+          "chapter": "Actual VLC video",
+          "captureSeconds": 1440.1,
+          "captureSource": "qmp-monitor",
+          "runLabel": "Real Windows 98 · UEFI GOP",
+          "receiptSha256": "3db47a5fdb630149149445a3e4efb788dee708562060cf42d62f02ce529ce323"
+        },
+        {
+          "src": "../../evidence/images/vlc-qt-exit-error.png",
+          "kind": "guest-capture",
+          "sha256": "929c50921399c9d5f2c87c5c9154af9e423609de65fd3ab64fe6e6792847f2c9",
+          "width": 1280,
+          "height": 800,
+          "caption": "An actual RPCRT4 error dialog appeared during exit. Clean-exit acceptance failed.",
+          "alt": "An actual RPCRT4 error dialog appeared during exit. Clean-exit acceptance failed.",
+          "chapter": "Remaining exit error",
+          "captureSeconds": 1620.1,
+          "captureSource": "qmp-monitor",
+          "runLabel": "Real Windows 98 · UEFI GOP",
+          "receiptSha256": "3db47a5fdb630149149445a3e4efb788dee708562060cf42d62f02ce529ce323"
+        },
+        {
+          "src": "../../evidence/images/vlc-qt-exit-details.png",
+          "kind": "guest-capture",
+          "sha256": "fbd3cad701d356b12008083febc4766d87994303c982d2b2d6d376f4feac3d47",
+          "width": 1280,
+          "height": 800,
+          "caption": "The actual exit error code and stack. Exit code 0 after dismissing the error dialog does not establish a clean exit.",
+          "alt": "The actual exit error code and stack. Exit code 0 after dismissing the error dialog does not establish a clean exit.",
+          "chapter": "Remaining exit error",
+          "captureSeconds": 1710.1,
+          "captureSource": "qmp-monitor",
+          "runLabel": "Real Windows 98 · UEFI GOP",
+          "receiptSha256": "3db47a5fdb630149149445a3e4efb788dee708562060cf42d62f02ce529ce323"
+        }
+      ]
+    }
+  ]
+}

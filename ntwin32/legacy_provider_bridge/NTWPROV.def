@@ -1,0 +1,5 @@
+LIBRARY NTWPROV.DLL
+EXPORTS
+    NtwOpenProviderDirectoryA=NtwOpenProviderDirectoryA@4
+    NtwFindProviderExportA=NtwFindProviderExportA@12
+    NtwCloseProviderDirectory=NtwCloseProviderDirectory@4

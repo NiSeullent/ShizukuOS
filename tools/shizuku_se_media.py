@@ -163,11 +163,12 @@ def shzdos_inputs() -> dict[str, Input]:
     return {name: Input(f"\\SHZDOS\\{name}", require(path, how), how) for name, path in SHZDOS_FILES.items()}
 
 
-def build_install_payload(directory: Path | None = None) -> None:
+def build_install_payload(directory: Path | None = None, desktop: bool = False) -> None:
     """install/mkpayload.py (agent I1) with the shipped answer file (install/shzsetup.ini) into its own directory, so
     tests/run_install.py's test payload (build/shizukudos/install) and the media's never overwrite each other."""
     directory = Path(directory) if directory else DEFAULT_SETUP_DIR
-    subprocess.run([sys.executable, str(ROOT / "shizukudos" / "install" / "mkpayload.py"), "--out", str(directory)],
+    subprocess.run([sys.executable, str(ROOT / "shizukudos" / "install" / "mkpayload.py"), "--out", str(directory),
+                    *(["--desktop"] if desktop else [])],
                    check=True, timeout=1800, stdout=subprocess.DEVNULL, env=dict(os.environ,
                                                                                   SOURCE_DATE_EPOCH=str(FIXED_EPOCH)))
 
@@ -201,7 +202,9 @@ def setup_payload(directory: Path | None, prefix: str = SETUP_ISO_DIR) -> tuple[
                    "manager, BOOT.INI mode = kernel64) and on legacy BIOS (syslinux on the ESP).\r\n"
                    "MANIFEST.JSON lists every file the installer writes, with SHA-256.\r\n"
                    f"INSTALL.IMG sha256 {sha256(image.read_bytes())}\r\n").encode("ascii")}
-    info.update(present=True, bios_boot=receipt.get("bios_boot"), install_img_sha256=sha256(image.read_bytes()),
+    manifest = json.loads(payload[f"{prefix}/MANIFEST.JSON"])
+    info.update(present=True, bios_boot=receipt.get("bios_boot"),
+                boot_profile=manifest.get("boot_profile", "self-test"), install_img_sha256=sha256(image.read_bytes()),
                 files={name: sha256(data) for name, data in payload.items()})
     return payload, info
 

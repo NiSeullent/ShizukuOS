@@ -1,0 +1,16 @@
+--- a/sal/osl/w32/time.cxx
++++ b/sal/osl/w32/time.cxx
+@@ -34,8 +34,13 @@
+ 
+     assert(pTimeVal != nullptr);
+ 
++#if defined(LIBO_WIN98) && LIBO_WIN98
++    // Keep UTC FILETIME semantics with the native Win98 clock's resolution.
++    GetSystemTimeAsFileTime(reinterpret_cast<LPFILETIME>(&CurTime));
++#else
+     // use ~1 microsecond resolution
+     GetSystemTimePreciseAsFileTime(reinterpret_cast<LPFILETIME>(&CurTime));
++#endif
+ 
+     static const unsigned __int64 OffTime = [] {
+         SYSTEMTIME SystemTime;

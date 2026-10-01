@@ -1,0 +1,7 @@
+LIBRARY M98ADDR
+EXPORTS
+ WaitOnAddress=m98_wait@16
+ WakeByAddressSingle=m98_single@4
+ WakeByAddressAll=m98_all@4
+ M98AddressCleanup=m98_cleanup@4
+ M98AddressPending=m98_pending@0

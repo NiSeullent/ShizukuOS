@@ -1,0 +1,32 @@
+--- a/Source/WTF/wtf/FastMalloc.cpp
++++ b/Source/WTF/wtf/FastMalloc.cpp
+@@ -34,7 +34,11 @@
+ 
+ #if OS(WINDOWS)
+ #include <windows.h>
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++#include <wtf/win/core_MemoryWin9x.h>
++#else
+ #include <psapi.h>
++#endif
+ #else
+ #if HAVE(RESOURCE_H)
+ #include <sys/resource.h>
+@@ -606,9 +610,17 @@
+     statistics.reservedVMBytes = 0;
+ 
+ #if OS(WINDOWS)
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    // Win9x has no PSAPI resident/peak working-set query. Report the shared
++    // committed-private virtual-byte proxy; zero means unavailable here.
++    size_t committedPrivateBytes = 0;
++    iewkWin9xCommittedPrivateBytes(&committedPrivateBytes);
++    statistics.committedVMBytes = committedPrivateBytes;
++#else
+     PROCESS_MEMORY_COUNTERS resourceUsage;
+     GetProcessMemoryInfo(GetCurrentProcess(), &resourceUsage, sizeof(resourceUsage));
+     statistics.committedVMBytes = resourceUsage.PeakWorkingSetSize;
++#endif
+ #elif OS(HAIKU)
+     ssize_t cookie = nullptr;
+     statistics.committedVMBytes = 0;

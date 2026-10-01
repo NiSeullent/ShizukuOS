@@ -698,8 +698,11 @@ SHZ_EXPORT VOID NTAPI RtlRaiseStatus(NTSTATUS status)
 SHZ_EXPORT USHORT NTAPI RtlCaptureStackBackTrace(ULONG skip, ULONG count, PVOID *frames, PULONG hash)
 {
     CONTEXT ctx;
-    ULONG64 sum = 0;
-    ULONG seen = 0, got = 0, guard;
+    /* The SDK declares RtlCaptureContext returns_twice. Keep the walk's
+     * accumulated state in memory across that compiler-visible boundary. */
+    volatile ULONG64 sum = 0;
+    volatile ULONG seen = 0;
+    ULONG got = 0, guard;
     const uint64_t teb = shz_teb();
     const DWORD64 stack_top = *(const DWORD64 *)(teb + 8), stack_low = *(const DWORD64 *)(teb + 0x10);
     if (hash) *hash = 0;

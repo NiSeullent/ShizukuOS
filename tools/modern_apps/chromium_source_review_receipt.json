@@ -1,0 +1,133 @@
+{
+  "schema": "win98modern.browser-source-review.v1",
+  "as_of": "2026-09-30",
+  "source_inputs": [
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/chromium_port_profile.json",
+      "size_bytes": 5015,
+      "sha256": "75b9970cdf4a5587de749f7b4b683b0d092c40bdfc69c8cee390af6c27654a03"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/chromium_port_profile.py",
+      "size_bytes": 5877,
+      "sha256": "760307053714026043be0a2ec02c755cbec7eed29bb8d5f141d656c595b4c244"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/chromium_port_profile_test.py",
+      "size_bytes": 3556,
+      "sha256": "3d0be2fa5a749d67658d7f32253505763f66e7a1328361e99ac5de6fd700084a"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/chromium_win9x_wait.c",
+      "size_bytes": 4689,
+      "sha256": "794149709a4485f3025bdbcc1a084eb1b262f6d9f0d5aaf180aa4c27901fa1df"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/chromium_win9x_wait.h",
+      "size_bytes": 1297,
+      "sha256": "0c8c1c6ef4c2d8aeeddda9e58f0ee4bc5a9bdc31555846bbf5e79292de76fb3d"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/chromium_win9x_wait_probe.c",
+      "size_bytes": 7112,
+      "sha256": "8b250bbcea115b0f63269961be538c1845a2c27466422df5062d535d57c2444a"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/chromium_win9x_wait_redirect.h",
+      "size_bytes": 527,
+      "sha256": "ab8f4bb8f95ce678b92cb6376c7feb82d5353328056a14d99fe0f0ade9c4ce9c"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_port_profile.json",
+      "size_bytes": 3442,
+      "sha256": "ea4a1544a0bf2c9eab5c26f274544057c84b233a37108acf739302534547a3a9"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_entry.cjs",
+      "size_bytes": 6701,
+      "sha256": "921ab2a9872d5cf627ab4845089cf49c5411d9abcd805f037f97cab72f9937d8"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_entry_test.cjs",
+      "size_bytes": 3057,
+      "sha256": "f007a21fa265130efd43e3561dc98b3b2cd948f85bd0e75955ff64c0bbfe49f4"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_source_lease.c",
+      "size_bytes": 3019,
+      "sha256": "e0d78158cb915e8786c70c8d43f330d9e052da7835ae57c47c315b8c0005de04"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_source_lease.h",
+      "size_bytes": 736,
+      "sha256": "cf9fca509a80c2f38aaef5d013308edefbd624e65bca1404406556b43ed3fdb1"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/docs/MODERN_BROWSER_PORT_83BD.md",
+      "size_bytes": 12420,
+      "sha256": "2ef55eebb93942db16acba93cb263eb0ff6a178c9c02ff0577b2e6e48c472353"
+    }
+  ],
+  "checks": [
+    {
+      "command": [
+        "python3",
+        "-B",
+        "tools/modern_apps/chromium_port_profile_test.py"
+      ],
+      "status": "PASS",
+      "test_count": 8
+    },
+    {
+      "command": [
+        "node",
+        "tools/modern_apps/legcord_win9x_entry_test.cjs"
+      ],
+      "status": "PASS",
+      "scope": "runtime/entry/lease rejection and cancelled-shutdown/exit lifetime host controls only"
+    }
+  ],
+  "active_chromium": {
+    "version": "157.0.8080.0",
+    "snapshot": 1707946,
+    "source_commit": "73c8f84d67bfbad65ad4817d9839ffecb78b06ee",
+    "existing_preflight_and_input_hashes_reverified": true,
+    "stable_155_is_secondary_reference": true
+  },
+  "static_prerequisite_build": {
+    "receipt_path": "/root/Win98-Modern-boot/build/modern-browser-83bd/chromium-wait-prerequisite-static-20260930/build-receipt.json",
+    "receipt_sha256": "057979dc1e799b98d5617832ff038c94c8cfb510403905482a6273be2e135e6b",
+    "status": "STATIC_BUILD_AND_IMPORT_AUDIT_PASS",
+    "binary_sha256": "f3da42267d6c50857f93e0ce667da40ad9a50e08a7bdddf8800046754d63c40e",
+    "binary_bytes": 104527,
+    "output_tree_bytes": 113836,
+    "all_66_load_delay_import_rows_match_native_baseline": true
+  },
+  "stopped_native_k": {
+    "review_path": "/root/Win98-Modern-boot/build/shizukudos/iosys-uefi-port/runs/win98-iosys-gop-wtf-v5-83bd-20260930k/native-runtime-classification-review.json",
+    "review_sha256": "1f297d153b129e1770b8e2bbcbfc812d96dd402951afae83eafc8290a8ff1172",
+    "classification": "RUNTIME_ABORTED_AT_HOST_RESERVE_FLOOR",
+    "wtf_v5": "NOT_TESTED"
+  },
+  "source_write_bytes_before_receipt": 57448,
+  "permission_bounds": {
+    "new_source_doc_review_limit_bytes": 262144,
+    "new_static_output_tree_limit_bytes": 8388608,
+    "native_vm_heavy_build_floor_bytes": 21474836480
+  },
+  "remaining_limits": [
+    "No probe, Chromium, Electron, Legcord or Discord was executed.",
+    "Static native export names do not establish installed-module presence or API behavior.",
+    "All address waits/wakes must use one process-wide provider; cross-DLL integration remains unverified.",
+    "Forcible thread termination and unloading with active waiters are unsupported; cooperative lifetime is required.",
+    "Legcord source lease C helper is uncompiled; future real Node/Electron binding and native filesystem/lifetime verification are pending.",
+    "Caller complete-tree inventory/provenance and source/lockfile/native dependency freeze remain unverified; exact entry digest alone does not prove Legcord source commit.",
+    "Source leases survive cancellable will-quit and failed imports; abnormal process termination relies on OS handle cleanup."
+  ],
+  "guest_executed": false,
+  "native_prerequisite_pass": false,
+  "runtime_compatibility": "unverified",
+  "browser_pass": false,
+  "discord_pass": false,
+  "download_performed": false
+}

@@ -1,0 +1,46 @@
+{
+  "schema": "win98modern.libreoffice-sal-clock-pin.v1",
+  "observed_at_utc": "2026-09-30",
+  "application": "LibreOffice",
+  "latest_download_version_observed": "26.8.0",
+  "upstream_tag": "libreoffice-26.8.0.3",
+  "upstream_tag_object": "cf55f45554a356e77e7977c6a28679069017157f",
+  "upstream_commit": "bce0998afefdbc355585ca324285661a2170ba77",
+  "tag_signature_verification": "not independently verified; GitHub reports unknown_key",
+  "source_path": "sal/osl/w32/time.cxx",
+  "source_url": "https://raw.githubusercontent.com/LibreOffice/core/bce0998afefdbc355585ca324285661a2170ba77/sal/osl/w32/time.cxx",
+  "original": {
+    "file": "office_steam_upstream_time.cxx",
+    "bytes": 5739,
+    "sha256": "ac98127a763ab1214b606ea29e0ec842e3529c2e39392c1d7025533a4bbcf851",
+    "git_blob_sha1": "373ae7aa51cd11443719b18701dcf51331840300"
+  },
+  "modified": {
+    "bytes": 5936,
+    "sha256": "7c0e2c3b28bacbb3a21a1e0447a8ee1571676725d3e4063132c7909f61d8375e"
+  },
+  "patch": {
+    "file": "office_steam_sal_clock.patch",
+    "sha256": "47305da03b5c88cd222d7270897a786d4dbbd35204b25e3255fcb32ce100134d",
+    "license": "upstream MPL-2.0 and retained Apache-2.0 notice"
+  },
+  "activation": {
+    "translation_unit": "sal/osl/w32/time.cxx",
+    "define": "LIBO_WIN98=1",
+    "ordinary_windows_branch": "original direct GetSystemTimePreciseAsFileTime call remains"
+  },
+  "semantics": {
+    "clock": "real UTC wall clock, not monotonic",
+    "resolution": "native operating-system resolution; no microsecond-resolution claim for Win98",
+    "native_api": "GetSystemTimeAsFileTime",
+    "epoch_and_conversion": "unchanged genuine upstream SAL code"
+  },
+  "native_executed": false,
+  "full_application_compatibility": "unverified",
+  "primary_sources": [
+    "https://www.libreoffice.org/download/",
+    "https://www.libreoffice.org/system-requirements/",
+    "https://api.github.com/repos/LibreOffice/core/git/tags/cf55f45554a356e77e7977c6a28679069017157f",
+    "https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemtimeasfiletime"
+  ]
+}

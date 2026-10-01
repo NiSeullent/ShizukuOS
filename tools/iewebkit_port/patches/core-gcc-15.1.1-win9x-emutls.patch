@@ -1,0 +1,100 @@
+--- a/gcc-15.1.1-emutls.c
++++ b/gcc-15.1.1-emutls.c
+@@ -23,15 +23,32 @@
+ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+ <http://www.gnu.org/licenses/>.  */
+ 
++#if defined(IEWEBKIT_STANDALONE_EMUTLS) && IEWEBKIT_STANDALONE_EMUTLS
++/* A private runtime build uses the installed target's genuine headers rather
++   than fabricating GCC's internal generated compiler configuration files.
++   The runtime body needs libc and the exact POSIX gthread implementation. */
++#include <stdlib.h>
++#include <string.h>
++#include <bits/gthr.h>
++#else
+ #include "tconfig.h"
+ #include "tsystem.h"
+ #include "coretypes.h"
+ #include "tm.h"
+ #include "libgcc_tm.h"
+ #include "gthr.h"
++#endif
++
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++extern void __cxa_thread_atexit_emutls_drain (void);
++#endif
+ 
+ typedef unsigned int word __attribute__((mode(word)));
+ typedef unsigned int pointer __attribute__((mode(pointer)));
++#if defined(IEWEBKIT_STANDALONE_EMUTLS) && IEWEBKIT_STANDALONE_EMUTLS
++_Static_assert (sizeof (word) == 4 && sizeof (pointer) == 4
++                && sizeof (void *) == 4, "Use the pinned i686 emutls ABI");
++#endif
+ 
+ struct __emutls_object
+ {
+@@ -44,6 +61,11 @@
+   void *templ;
+ };
+ 
++#if defined(IEWEBKIT_STANDALONE_EMUTLS) && IEWEBKIT_STANDALONE_EMUTLS
++_Static_assert (sizeof (struct __emutls_object) == 16,
++                "The compiler-emitted i686 control-object layout must match");
++#endif
++
+ struct __emutls_array
+ {
+   pointer size;
+@@ -83,6 +105,17 @@
+ emutls_destroy (void *ptr)
+ {
+   struct __emutls_array *arr = ptr;
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  /* pthread has cleared this key before calling us. C++ TLS destructors
++     must see their original cells, and may grow/reallocate this very array.
++     Run their genuine destructor chain before releasing any TLS storage. */
++  if (!arr || __gthread_setspecific (emutls_key, arr) != 0)
++    abort ();
++  __cxa_thread_atexit_emutls_drain ();
++  arr = __gthread_getspecific (emutls_key);
++  if (!arr || __gthread_setspecific (emutls_key, NULL) != 0)
++    abort ();
++#endif
+   pointer size = arr->size;
+   pointer i;
+ 
+@@ -92,7 +125,7 @@
+ 	free (arr->data[i][-1]);
+     }
+ 
+-  free (ptr);
++  free (arr);
+ }
+ 
+ static void
+@@ -181,7 +214,12 @@
+       if (arr == NULL)
+ 	abort ();
+       arr->size = size;
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++      if (__gthread_setspecific (emutls_key, (void *) arr) != 0)
++        abort ();
++#else
+       __gthread_setspecific (emutls_key, (void *) arr);
++#endif
+     }
+   else if (__builtin_expect (offset > arr->size, 0))
+     {
+@@ -195,7 +233,12 @@
+       arr->size = size;
+       memset (arr->data + orig_size, 0,
+ 	      (size - orig_size) * sizeof (void *));
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++      if (__gthread_setspecific (emutls_key, (void *) arr) != 0)
++        abort ();
++#else
+       __gthread_setspecific (emutls_key, (void *) arr);
++#endif
+     }
+ 
+   void *ret = arr->data[offset - 1];

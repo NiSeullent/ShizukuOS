@@ -114,7 +114,8 @@ static BOOL delay_read_module(HMODULE *slot, HMODULE *module)
 static BOOL delay_patch_pointer(PVOID *target, PVOID value, BOOL compare_null, PVOID *previous, BOOL *committed)
 {
     MEMORY_BASIC_INFORMATION mbi;
-    DWORD protection, writable, old = 0, ignored;
+    DWORD saved_error = GetLastError(), error = 0, protection, writable, old = 0, ignored;
+    PVOID prior;
     BOOL changed = FALSE, ok = FALSE;
     if (committed) *committed = FALSE;
     if (((ULONG_PTR)target & (sizeof(PVOID) - 1)) != 0) {
@@ -124,26 +125,38 @@ static BOOL delay_patch_pointer(PVOID *target, PVOID value, BOOL compare_null, P
     RtlAcquireSRWLockExclusive(&delay_patch_lock);
     if (!VirtualQuery(target, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT ||
         !range_ok(target, sizeof *target, FALSE)) {
-        SetLastError(ERROR_NOACCESS);
+        error = ERROR_NOACCESS;
         goto done;
     }
     protection = mbi.Protect & 0xff;
     if (protection == PAGE_READONLY || protection == PAGE_EXECUTE_READ) {
         writable = (protection == PAGE_EXECUTE_READ ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE) |
                    (mbi.Protect & (PAGE_NOCACHE | PAGE_WRITECOMBINE));
-        if (!VirtualProtect(target, sizeof *target, writable, &old)) goto done;
+        if (!VirtualProtect(target, sizeof *target, writable, &old)) { error = GetLastError(); goto done; }
         changed = TRUE;
     } else if (!range_ok(target, sizeof *target, TRUE)) {
-        SetLastError(ERROR_NOACCESS);
+        error = ERROR_NOACCESS;
         goto done;
     }
-    if (compare_null) *previous = InterlockedCompareExchangePointer(target, value, NULL);
-    else InterlockedExchangePointer(target, value);
+    prior = compare_null ? InterlockedCompareExchangePointer(target, value, NULL) : InterlockedExchangePointer(target, value);
+    if (previous) *previous = prior;
     if (committed) *committed = TRUE;
+    if (changed && !VirtualProtect(target, sizeof *target, old, &ignored)) {
+        error = GetLastError();
+        /* Undo only this transaction's publication while the page is writable.
+         * A module reference can be released only when its slot no longer owns
+         * it; retain the committed signal if a competing writer prevents undo. */
+        if (!compare_null || !prior) {
+            PVOID undone = InterlockedCompareExchangePointer(target, prior, value);
+            if (undone == value && committed) *committed = FALSE;
+        }
+        VirtualProtect(target, sizeof *target, old, &ignored);
+        goto done;
+    }
     ok = TRUE;
-    if (changed && !VirtualProtect(target, sizeof *target, old, &ignored)) ok = FALSE;
 done:
     RtlReleaseSRWLockExclusive(&delay_patch_lock);
+    SetLastError(ok ? saved_error : error);
     return ok;
 }
 
@@ -161,6 +174,7 @@ K32API PVOID WINAPI ResolveDelayLoadedAPI(PVOID base, const SHZ_DELAYLOAD_DESCRI
     ULONG_PTR index = thunk - iat;
     LPCSTR proc;
     PVOID fn = NULL;
+    DWORD failure_error = 0;
 #undef PTR
     (void)dll_hook;
     if (IMAGE_SNAP_BY_ORDINAL(names[index].u1.Ordinal)) proc = (LPCSTR)(ULONG_PTR)IMAGE_ORDINAL(names[index].u1.Ordinal);
@@ -180,10 +194,14 @@ K32API PVOID WINAPI ResolveDelayLoadedAPI(PVOID base, const SHZ_DELAYLOAD_DESCRI
                 return NULL;
             }
             if (prev) { FreeLibrary(mod); mod = prev; }
-        }
+        } else failure_error = GetLastError();
     }
-    if (mod) fn = (PVOID)GetProcAddress(mod, proc);
+    if (mod) {
+        fn = (PVOID)GetProcAddress(mod, proc);
+        if (!fn) failure_error = GetLastError();
+    }
     if (!fn) fn = sys_hook ? sys_hook(dll, proc) : DelayLoadFailureHook(dll, proc);
+    if (failure_error) SetLastError(failure_error);
     if (fn && !delay_patch_pointer((PVOID *)&thunk->u1.Function, fn, FALSE, NULL, NULL)) return NULL;
     return fn;
 }

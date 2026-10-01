@@ -1,0 +1,37 @@
+{
+  "schema": "iewebkit-genuine-filesystem-win9x-source-v1",
+  "upstream_commit": "5220e80b97a253c60ed899361654142ab5021998",
+  "patch": "patches/core-filesystem-win9x.patch",
+  "patch_sha256": "d90127c5450ae514e6479dc781658465a5877eaebaf0171e0335d262ca83067c",
+  "files": [
+    {
+      "path": "Source/WTF/wtf/win/FileSystemWin.cpp",
+      "before_sha256": "d2cdd3e171dacf26627ed68c2b251427a9cc3e1e8989304c79633dac8461175a",
+      "after_sha256": "d442dd4bf158d5016da0ab2c2e9a286e76334a86c8a68265cdf37c52b4ea3912"
+    },
+    {
+      "path": "Source/JavaScriptCore/jsc.cpp",
+      "before_sha256": "fe0193b138d96d1115ce456679941a131bb1ac2373e1b9f02aa1ea449b453cdf",
+      "after_sha256": "c5b186771ae74efde000e563111ebd5b5ab5cd078d14841c7cbf568eb38943a2"
+    }
+  ],
+  "new_files": [
+    {
+      "path": "Source/WTF/wtf/win/FileSystemWin9x.h",
+      "source": "src/core_FileSystemWin9x.h",
+      "sha256": "687e72e8164dbe9f0d8f39e61d1caa4a3cf6407e4cb2aaa343afd62753a4825c"
+    }
+  ],
+  "scope": [
+    "Real WTF file open, metadata, temporary path/file and volume block size",
+    "Real JSC shell script, module and descriptor file paths"
+  ],
+  "limitations": [
+    "MAX_PATH and losslessly representable active-code-page filenames only; no best-fit or default substitutions",
+    "Unicode file contents are unaffected by the filename encoding constraint",
+    "This does not port all PathWalker, FileSystemWin, storage-directory or WebCore file operations",
+    "Specific native file API behavior and full engine use remain unverified"
+  ],
+  "live_source_applied": false,
+  "native_execution_verified": false
+}

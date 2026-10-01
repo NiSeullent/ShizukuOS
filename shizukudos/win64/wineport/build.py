@@ -964,7 +964,7 @@ def build_module(wine, rt, m, base, provided, trees, probe=False, notes=None):
         for rc in rcs:
             objs.append(compile_rc(wine, rc, obj_dir / (rc.stem + "_rc.o"), includes, defines))
 
-    if not any("VERSIONINFO" in rc.read_text() or "version.rc" in rc.read_text() for rc in rcs) if not m.get("makedep") else False:
+    if not m.get("makedep") and not any("VERSIONINFO" in rc.read_text() or "version.rc" in rc.read_text() for rc in rcs):
         suffix = ".exe" if kind == "exe" else ".dll"
         objs.append(verres.compile_version(obj_dir, f"{name}{suffix}", f"Wine {name}{suffix} (ShizukuDOS port)",
                                            verres.VFT_APP if kind == "exe" else verres.VFT_DLL))

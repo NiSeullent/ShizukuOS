@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Zetscape native acceptance fixture. SPDX-License-Identifier: MIT -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self'; base-uri 'none'; object-src 'none'">
+<title>Zetscape modern web fixture v1</title>
+<style>
+body { margin: 16px; color: #172333; background: #f5f7fa; font: 16px sans-serif; }
+section { margin: 12px 0; padding: 10px; background: white; }
+button, input { font: inherit; padding: 8px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px monospace; }
+#grid { display: grid; width: 260px; grid-template-columns: 80px 1fr; gap: 10px; }
+#grid > div { height: 20px; min-width: 0; background: #4c91e8; }
+#flex { display: flex; width: 240px; gap: 10px; }
+#flex > div { min-width: 0; height: 20px; background: #58ab77; }
+#flex > div:nth-child(1) { flex: 0 0 50px; }
+#flex > div:nth-child(2) { flex: 1 1 0; }
+#flex > div:nth-child(3) { flex: 0 0 40px; }
+canvas { width: 64px; height: 64px; border: 1px solid #172333; }
+</style>
+<body>
+<h1>Zetscape modern web fixture v1</h1>
+<p>Actual page assertions only. Full web coverage, native OS and GPU evidence remain separate.</p>
+<section>
+<p id="status">Waiting for actual JavaScript execution and a fresh nonce.</p>
+<p>Click the button three times, then type <strong>Zetscape98</strong> and press Enter.</p>
+<button id="input-button" type="button">Native input: 0 / 3</button>
+<label>Native keyboard <input id="input-text" autocomplete="off" spellcheck="false"></label>
+</section>
+<section>
+<p id="unicode-sample">한글 Ω 🧪 é é</p>
+<div id="event-parent"><span id="event-target">DOM target</span></div>
+<div id="mutation-target"></div>
+<div id="grid"><div></div><div></div></div>
+<div id="flex"><div></div><div></div><div></div></div>
+</section>
+<section>
+<canvas id="canvas" width="64" height="64"></canvas>
+<canvas id="webgl" width="16" height="16"></canvas>
+<svg id="svg" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<rect id="svg-rect" x="8" y="12" width="24" height="20" fill="#00ff00"/>
+</svg>
+</section>
+<pre id="results">No results yet.</pre>
+<script id="module-fixture" type="module" src="async.mjs"></script>
+<script src="harness.js"></script>
+<script src="layout.js"></script>
+<script src="canvas.js"></script>
+</body>
+</html>

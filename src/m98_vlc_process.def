@@ -1,0 +1,7 @@
+LIBRARY M98CTX
+EXPORTS
+    get_api_table
+    GetProcessId=m98_vlc_GetProcessId@4
+    OpenThread=m98_vlc_OpenThread@12
+    CheckRemoteDebuggerPresent=m98_vlc_CheckRemoteDebuggerPresent@8
+    RtlCaptureContext=m98_vlc_RtlCaptureContext@4

@@ -1,0 +1,145 @@
+{
+  "schema": "legcord-win9x-node-api-source-pin-v1",
+  "source": [
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_napi.c",
+        "bytes": 15422,
+        "sha256": "e09cdc5977b03ac72f50773570341741b9873ccdd227b03b8bebe3c33fccad9f"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-freeze-v1/legcord_win9x_napi.c",
+        "bytes": 15422,
+        "sha256": "e09cdc5977b03ac72f50773570341741b9873ccdd227b03b8bebe3c33fccad9f"
+      }
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_napi_README.md",
+        "bytes": 5673,
+        "sha256": "506855ff830634fe93160c5bd824a523b229ace97d48aed7e8d95ef3d1a4a1d4"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-freeze-v1/legcord_win9x_napi_README.md",
+        "bytes": 5673,
+        "sha256": "506855ff830634fe93160c5bd824a523b229ace97d48aed7e8d95ef3d1a4a1d4"
+      }
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_napi_bootstrap.cjs",
+        "bytes": 10705,
+        "sha256": "a862773863b04e280c4e227f259ddf6a1382f70b835ce8041c370502254d80b8"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-freeze-v1/legcord_win9x_napi_bootstrap.cjs",
+        "bytes": 10705,
+        "sha256": "a862773863b04e280c4e227f259ddf6a1382f70b835ce8041c370502254d80b8"
+      }
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_napi_build.py",
+        "bytes": 10730,
+        "sha256": "985e388cd64ac02153428a85ceeab200b08928db9f2ae52ee1bdb3d3f72f1dfb"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-freeze-v1/legcord_win9x_napi_build.py",
+        "bytes": 10730,
+        "sha256": "985e388cd64ac02153428a85ceeab200b08928db9f2ae52ee1bdb3d3f72f1dfb"
+      }
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_napi_check.py",
+        "bytes": 10334,
+        "sha256": "adf5ae3f89d3d55d6f05ba6cc289730d86e63e43be65a872527ad60dfa2b9c52"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-freeze-v1/legcord_win9x_napi_check.py",
+        "bytes": 10334,
+        "sha256": "adf5ae3f89d3d55d6f05ba6cc289730d86e63e43be65a872527ad60dfa2b9c52"
+      }
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_napi_headers.py",
+        "bytes": 5310,
+        "sha256": "1de0035be459b91dcd904bd0358033ddccccbcb815ef64c16d820300bfab4c35"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-freeze-v1/legcord_win9x_napi_headers.py",
+        "bytes": 5310,
+        "sha256": "1de0035be459b91dcd904bd0358033ddccccbcb815ef64c16d820300bfab4c35"
+      }
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_napi_native_probe.c",
+        "bytes": 7885,
+        "sha256": "c1b6a6837e9bb9df6949ec10445b63fb599850b3465d293208460d18bf4d1638"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-freeze-v1/legcord_win9x_napi_native_probe.c",
+        "bytes": 7885,
+        "sha256": "c1b6a6837e9bb9df6949ec10445b63fb599850b3465d293208460d18bf4d1638"
+      }
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_napi_probe.cjs",
+        "bytes": 6536,
+        "sha256": "0c3f726f2342275fcb1e8d673941bc61e902c1ce3a65f006ac41c23d1d13a586"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-freeze-v1/legcord_win9x_napi_probe.cjs",
+        "bytes": 6536,
+        "sha256": "0c3f726f2342275fcb1e8d673941bc61e902c1ce3a65f006ac41c23d1d13a586"
+      }
+    }
+  ],
+  "original_immutable_inputs": [
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_entry.cjs",
+      "bytes": 6701,
+      "sha256": "921ab2a9872d5cf627ab4845089cf49c5411d9abcd805f037f97cab72f9937d8"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_source_lease.c",
+      "bytes": 3019,
+      "sha256": "e0d78158cb915e8786c70c8d43f330d9e052da7835ae57c47c315b8c0005de04"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/modern_apps/legcord_win9x_source_lease.h",
+      "bytes": 736,
+      "sha256": "cf9fca509a80c2f38aaef5d013308edefbd624e65bca1404406556b43ed3fdb1"
+    }
+  ],
+  "header_extraction": {
+    "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/headers-v1/extraction.json",
+    "bytes": 4339,
+    "sha256": "a9468985a32863d8394422fa0d92514100706d12843d41327c31676f2c801c71"
+  },
+  "source_checkpoint": {
+    "path": "/root/Win98-Modern-boot/build/legcord-napi-83bd/source-checkpoint-v3.json",
+    "bytes": 14544,
+    "sha256": "377e4fd486447d8d8bcc7d7620e8a10f302395f853500204498dfff691689a77"
+  },
+  "exact_runtime": {
+    "os": "Win98SE 4.10.2222",
+    "architecture": "ia32",
+    "electron": "43.2.0",
+    "node": "24.18.0",
+    "chromium": "150.0.7871.129",
+    "node_api": 8,
+    "registration_symbol": 1
+  },
+  "source_checks_passed": true,
+  "native_binary_built": false,
+  "native_component_pass": false,
+  "whole_application_pass": false,
+  "link_hold_reason": "Shared free space is below unchanged20GiB floor",
+  "initial_staging_trust_required": true,
+  "directory_membership_frozen": false,
+  "source_commit_proven": false
+}

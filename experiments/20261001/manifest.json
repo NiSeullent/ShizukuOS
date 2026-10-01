@@ -1,0 +1,236 @@
+{
+  "utc": "2026-10-01T13:33:45.643342+00:00",
+  "scope": "SOURCE_ONLY_EXPERIMENTAL_CHECKPOINT",
+  "native_win98_verified": false,
+  "dead_screen_v5_native_verified": false,
+  "files": [
+    {
+      "archive": "native-win98/shizukudos/supervisor/include/shz_info.h",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/include/shz_info.h",
+      "bytes": 5279,
+      "sha256": "03ede36a69488ca96ecdc25d5f379e851c960e9580eab59b06f352e90df3bda7"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/loader/bootini.h",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/loader/bootini.h",
+      "bytes": 3260,
+      "sha256": "5d9f969fc05c91528b235ca3bba66974a14d20e519f1ae52c1071bb816c49b0a"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/loader/loader.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/loader/loader.c",
+      "bytes": 59376,
+      "sha256": "3cb33444388a0d9fb823583002ba3a867db81e75e3c8147336a53179fb4aaef1"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/README.md",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/README.md",
+      "bytes": 2487,
+      "sha256": "be02510af8e516a4e5e887b15f7e24fbe6157aa5f3e398940846981410797ea1"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/ata_pio.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/ata_pio.c",
+      "bytes": 8057,
+      "sha256": "f8ee1059fe317bc25aa375d9d59353d96567a0cabc0fa70dd2a2f4b30c02e89b"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/ata_pio.h",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/ata_pio.h",
+      "bytes": 919,
+      "sha256": "766c900b0185ab25f2542ed64cac13793e3c78b984d3db7cc53281b14ce7cfc0"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/build_candidate.py",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/build_candidate.py",
+      "bytes": 10148,
+      "sha256": "717e51cd5992376eaf199839b5bd6d2013212835e5c422f26540cfa37a95bb10"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/config.h",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/config.h",
+      "bytes": 565,
+      "sha256": "daf85da70c2bb640feb2aabdaf297b7b4d8a72fd4e136595de2c6ca26ab395cf"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/string_pio.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/string_pio.c",
+      "bytes": 5296,
+      "sha256": "7c685be965749ecd264bcf59ee674b43654e1824077f50e11f3d9718c2e69e70"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/string_pio.h",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/string_pio.h",
+      "bytes": 1211,
+      "sha256": "c0a733924150b5d9dbd7b4521910085a393e7f7f15f5ccf7597280db734129f8"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/win98.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/win98.c",
+      "bytes": 8310,
+      "sha256": "d56a0e9fea25356072aab936d521fc609447197dbf4bd936589792fa6253afc2"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/win98.h",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/win98.h",
+      "bytes": 303,
+      "sha256": "98153d23fe23e85c920a3871f333eb60a36e03743965fbb7cd77739c93753bda"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/src/devices.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/src/devices.c",
+      "bytes": 15907,
+      "sha256": "08c9d1ed097edcae1384a9e732fd4dab760de8ff73a541f75da8f1da80beb16e"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/src/devices.h",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/src/devices.h",
+      "bytes": 1653,
+      "sha256": "1466044ef299a1fc4664975a875643b6b289a5d743ea5c644ba3e59ee8bd1fd9"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/src/domain.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/src/domain.c",
+      "bytes": 23059,
+      "sha256": "e8ec9d6d80a2b320dc2e28b77222dbd9aeb77d881381613eb843f2bf6db6f64e"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/src/domain.h",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/src/domain.h",
+      "bytes": 3023,
+      "sha256": "84da0a953e7e2e0be2c47eb306cd48f8ad0c5715ecdcc1bd50348fb31f915e06"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/src/kdom.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/src/kdom.c",
+      "bytes": 9568,
+      "sha256": "cc6e561694aced029469678d8a7079fd8c3263508872c489a2eed48901d5f5e5"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/src/main.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/src/main.c",
+      "bytes": 4545,
+      "sha256": "cc22ef586c6295f85063d4d57dd0bdbe5ed662a3fcfd44e893b998066fc9b88c"
+    },
+    {
+      "archive": "native-win98/shizukudos/supervisor/native_win98/run_candidate.py",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/candidate/shizukudos/supervisor/native_win98/run_candidate.py",
+      "bytes": 16449,
+      "sha256": "6220473ab1ef3e38353da64178948250cd0b8c9ba61d5cc314dd987864c50d66"
+    },
+    {
+      "archive": "native-win98/controls/foundation_host.py",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/foundation_host.py",
+      "bytes": 3680,
+      "sha256": "fff94d141e3e4864c21f1de4a01de06c037d5bb2c306027d30062f2c44a6f961"
+    },
+    {
+      "archive": "native-win98/controls/ata_host.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/ata_host.c",
+      "bytes": 4640,
+      "sha256": "998073c68ea439f9b79c14e607259c4699f38d67831db6ea74ebf81aca7d3b3a"
+    },
+    {
+      "archive": "native-win98/controls/string_host.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/string_host.c",
+      "bytes": 6786,
+      "sha256": "0d0b51d9d7887158d0d5457e8d6bfe2e0c53245cf68e03db95c95179e3deda72"
+    },
+    {
+      "archive": "native-win98/controls/pic_host.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/pic_host.c",
+      "bytes": 2223,
+      "sha256": "1bed9596f208ddcf5bda3eb7590b21603466b5d02718b2a446716ff66ba95243"
+    },
+    {
+      "archive": "native-win98/controls/constructor_host.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/constructor_host.c",
+      "bytes": 4260,
+      "sha256": "3d268cd3490c45e9fe0e26b85f92a99f073a38d355e39198225e2f24a4eecef9"
+    },
+    {
+      "archive": "native-win98/controls/constructor-body.c",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/constructor-body.c",
+      "bytes": 3807,
+      "sha256": "877da86e210d236b17928c3a7e006df8a38fd69f1df011fe95e959114b53be69"
+    },
+    {
+      "archive": "native-win98/controls/compile_candidate.py",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/compile_candidate.py",
+      "bytes": 1434,
+      "sha256": "b6b2f5e657b5e828f22e53b4316ce4d5b3185c74ba5c38c8e87066f360175590"
+    },
+    {
+      "archive": "native-win98/controls/producer_host.py",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/producer_host.py",
+      "bytes": 3892,
+      "sha256": "600e148520672e52bddf049e2f2c231c1661b2f8d1a1e6ab1daaa4303fffdd5c"
+    },
+    {
+      "archive": "native-win98/controls/win98_observer_host.py",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/win98_observer_host.py",
+      "bytes": 10599,
+      "sha256": "3266cbcfc6c360cfd36ac71b578fe04cef0f8be3e3bd58556bb566962daa5147"
+    },
+    {
+      "archive": "native-win98/controls/win98-existing-plus-new-v1.diff",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/win98-existing-plus-new-v1.diff",
+      "bytes": 53274,
+      "sha256": "d3f44110fb913c7ea25b1ea063c258b2cf305a565acb50be7e6399a09bab9d01"
+    },
+    {
+      "archive": "native-win98/controls/win98-candidate-source-receipt-v1.json",
+      "source": "/root/Win98-Modern-apps-cb43/build/modern-apps/native-foundation-source-v1/win98-candidate-source-receipt-v1.json",
+      "bytes": 5894,
+      "sha256": "6031b293d3a310b96c49698c3e4b7ec8ec7a7ecd13632f1cb8da097fe7f5aefb"
+    },
+    {
+      "archive": "dead-screen-native-controls/runner.py",
+      "source": "/root/Win98-Modern-boot/build/dead-screen-native-control-plan-20261001-v5/runner.py",
+      "bytes": 32393,
+      "sha256": "3a9afabe426c9e4863aae5cbfb1371f2fd1f33c73f8af426d42465d717393bbf"
+    },
+    {
+      "archive": "dead-screen-native-controls/prepare.py",
+      "source": "/root/Win98-Modern-boot/build/dead-screen-native-control-plan-20261001-v5/prepare.py",
+      "bytes": 17832,
+      "sha256": "78cfbb0d2f9f406f672d355204c645d13568f478c7d72a9b6bca829018fa1da0"
+    },
+    {
+      "archive": "dead-screen-native-controls/selftest.py",
+      "source": "/root/Win98-Modern-boot/build/dead-screen-native-control-plan-20261001-v5/selftest.py",
+      "bytes": 18643,
+      "sha256": "f8245bba2baa169b3e81f07800097d6d191d096b1c42007f8ad0da41a331b302"
+    },
+    {
+      "archive": "dead-screen-native-controls/reference.c",
+      "source": "/root/Win98-Modern-boot/build/dead-screen-native-control-plan-20261001-v5/reference.c",
+      "bytes": 1644,
+      "sha256": "1aff6bf6323876f756b563f4790887dd97133b5abd6dcd9b1b3cfb2163445676"
+    },
+    {
+      "archive": "dead-screen-native-controls/abi.c",
+      "source": "/root/Win98-Modern-boot/build/dead-screen-native-control-plan-20261001-v5/abi.c",
+      "bytes": 1971,
+      "sha256": "082734011f27c8940d2bc775e8f07b1c739d6b710ce09d87bf4817d9b3e9f280"
+    },
+    {
+      "archive": "dead-screen-native-controls/README.md",
+      "source": "/root/Win98-Modern-boot/build/dead-screen-native-control-plan-20261001-v5/README.md",
+      "bytes": 9024,
+      "sha256": "bac79388ebba8f200895d756c616934844a07543cd2250e546b9cd30b4eaf8bb"
+    },
+    {
+      "archive": "dead-screen-native-controls/integration.patch",
+      "source": "/root/Win98-Modern-boot/build/dead-screen-candidate-20261001T1120-v5/integration.patch",
+      "bytes": 5174,
+      "sha256": "cc27d9be2fcf55cc63493a3a85687bb608ac4fe1f8c1e5585e227c2cba2115f7"
+    },
+    {
+      "archive": "native-boot-lane/qemu_guard.py",
+      "source": "/root/Win98-Modern-boot/build/native-boot-concurrency-guard-20261001T0650-v2/qemu_guard.py",
+      "bytes": 4926,
+      "sha256": "6c027eaa91fe4f65a4a395c2b604fe10f4af5703b6eb1bc38391658a2d545d52"
+    }
+  ]
+}

@@ -112,12 +112,16 @@ def ensure_inputs(build):
         raise SystemExit("missing inputs: " + ", ".join(f"{k} ({INPUTS[k]})" for k in missing) + "; run with --build")
 
 
-def runtime_files():
+def runtime_files(desktop=False):
     """The Win64 runtime of this build: every system DLL plus T_HELLO.EXE (Kernel64's boot self-test runs it)."""
     w = INPUTS["win64"]
     receipt = json.loads((w / "build-result.json").read_text())
     dlls = ["ntdll", "kernel32", *sorted(receipt.get("modules", {}))]
-    files = [(f"\\SHZ\\SYS64\\{n}.dll", (w / f"{n}.dll").read_bytes()) for n in dlls]
+    if desktop:
+        from desktop_profile import desktop_runtime
+        files = desktop_runtime((w / "WIN64.IMG").read_bytes(), receipt["archive"]["sha256"])
+    else:
+        files = [(f"\\SHZ\\SYS64\\{n}.dll", (w / f"{n}.dll").read_bytes()) for n in dlls]
     return files, (w / "t_hello.exe").read_bytes(), (w / "SHZSETUP.EXE").read_bytes()
 
 
@@ -174,14 +178,17 @@ SYSLINUX_CFG = (
 ).encode("ascii")
 
 
-def syslinux_members():
+def syslinux_members(desktop=False):
     """Files of the pinned syslinux that go into \\syslinux on the ESP (ldlinux.sys/.c32 come from the installer)."""
     up = shzlib.ensure_deb_upstream("syslinux")
     root = up["root"]
     members = [(f"syslinux/{name}", (root / "usr/lib/syslinux/modules/bios" / name).read_bytes())
                for name in SYSLINUX_MODULES]
     members.append(("syslinux/memdisk", (root / "usr/lib/syslinux/memdisk").read_bytes()))
-    members.append(("syslinux/syslinux.cfg", SYSLINUX_CFG))
+    cfg = SYSLINUX_CFG
+    if desktop:
+        cfg = cfg.replace(b"APPEND /SHZDOS/K64STUB.ELF ---", b"APPEND /SHZDOS/K64STUB.ELF shz.desktop ---")
+    members.append(("syslinux/syslinux.cfg", cfg))
     return members, root / "usr/bin/syslinux"
 
 
@@ -275,6 +282,14 @@ def system_tree(runtime, pkgs):
     dirs = [("/SHZ", "base"), ("/SHZ/SYS64", "base"), ("/SHZ/DRIVERS", "base"), ("/SHZ/SETUP", "base"),
             ("/SHZ/SETUP/log", "base"), ("/Users", "base"), ("/Users/Public", "base")]
     files = [(p.replace("\\", "/"), "base", data) for p, data in runtime]
+    existing_dirs = {p for p, _ in dirs}
+    for path, _, _ in files:
+        parts = path.split("/")
+        for end in range(2, len(parts)):
+            directory = "/".join(parts[:end])
+            if directory not in existing_dirs:
+                dirs.append((directory, "base"))
+                existing_dirs.add(directory)
     readme = ("ShizukuDOS system volume (ShizukuFS v1, ext4 on-disk format), created by SHZSETUP.\r\n"
               "\\SHZ\\SYS64        Win64 runtime (ntdll, kernel32, system DLLs)\r\n"
               "\\SHZ\\DRIVERS      driver package descriptors\r\n"
@@ -297,6 +312,8 @@ def main():
     ap.add_argument("--answer", default=str(HERE / "shzsetup.ini"), help="answer file to pack (default: install/shzsetup.ini)")
     ap.add_argument("--no-bios-boot", action="store_true",
                     help="do not install syslinux into the ESP (the installed disk then boots on UEFI only)")
+    ap.add_argument("--desktop", action="store_true",
+                    help="install the built persistent desktop and start it on BIOS and UEFI boots")
     ap.add_argument("--out", type=Path, default=OUT,
                     help=f"output directory (default {OUT}); the install media use their own, with the shipped answer file")
     args = ap.parse_args()
@@ -310,7 +327,7 @@ def main():
     PAYLOAD.mkdir(parents=True)
     w64 = load_win64_build()
 
-    runtime, t_hello, setup_exe = runtime_files()
+    runtime, t_hello, setup_exe = runtime_files(args.desktop)
     runtime_img = w64.pack_archive([*runtime, ("\\SHZ\\TESTS\\T_HELLO.EXE", t_hello)])
 
     # ---- ESP
@@ -328,9 +345,11 @@ def main():
                     ("SHZDOS/KERNEL32.BIN", INPUTS["kernel32"].read_bytes()),
                     ("SHZDOS/KERNEL64.BIN", INPUTS["kernel64"].read_bytes()),
                     ("SHZDOS/K64STUB.ELF", INPUTS["stub"].read_bytes())]
+    if args.desktop:
+        esp_members.append(("SHZDOS/KERNEL64.INI", b"cmdline = shz.desktop\r\n"))
     bios_boot = not args.no_bios_boot
     if bios_boot:
-        sysl_members, installer = syslinux_members()
+        sysl_members, installer = syslinux_members(args.desktop)
         esp_members += sysl_members
     esp = build_esp(esp_members, args.esp_mib)
     if bios_boot:
@@ -361,6 +380,7 @@ def main():
         "schema": SCHEMA,
         "product": PRODUCT,
         "source_date_epoch": FIXED_EPOCH,
+        "boot_profile": "desktop" if args.desktop else "self-test",
         "sector_size": 512,
         "mbr": {"file": "GPTMBR.BIN", "bytes": 440, "sha256": sha256_file(mbr)},
         "esp": {"image": "ESP.SIM", "bytes": len(esp), "sha256": sha256(esp), "sparse_chunks": nchunks,

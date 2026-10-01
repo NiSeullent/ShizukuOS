@@ -1,0 +1,9 @@
+LIBRARY M98VLC
+EXPORTS
+    get_api_table
+    GetNativeSystemInfo=m98_vlc_GetNativeSystemInfo@4
+    SetFilePointerEx=m98_vlc_SetFilePointerEx@20
+    HeapSetInformation=m98_vlc_HeapSetInformation@16
+    RemoveFontResourceExW=m98_vlc_RemoveFontResourceExW@12
+    RemoveFontMemResourceEx=m98_vlc_RemoveFontMemResourceEx@4
+    RealGetWindowClassW=m98_vlc_RealGetWindowClassW@12

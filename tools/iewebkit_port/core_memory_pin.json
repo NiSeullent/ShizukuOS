@@ -1,0 +1,45 @@
+{
+  "schema": "iewebkit-win9x-core-memory-v1",
+  "upstream_commit": "5220e80b97a253c60ed899361654142ab5021998",
+  "archive_sha256": "846fd19ccedbae1dbfe904f26dbf2d68a800a33a50caf2ad5222c8dcb3f25682",
+  "applies_after": "Independent IEWebKit reviewed Win9x patches; these three upstream files are otherwise unchanged",
+  "patch": "patches/core-win9x-memory.patch",
+  "patch_sha256": "3ee5f1e73b5f0faaba01d8aa8b08448c960bcf8bc7cc5fbae37d9a22c787dc4a",
+  "files": [
+    {
+      "path": "Source/WTF/wtf/AvailableMemory.cpp",
+      "before_sha256": "2dfbca21541955d97330670159b6342e6ae5b8a374a89d217d98e6469a18a4dd",
+      "after_sha256": "13656bce4d7dc043d314f4d36870edc2bb71ff8d5e800977753daddbc878430b"
+    },
+    {
+      "path": "Source/WTF/wtf/win/MemoryPressureHandlerWin.cpp",
+      "before_sha256": "c098b95ee3c80fac365cda8809007aa1c910fa8dfa57f2a5030661196d5e6d86",
+      "after_sha256": "2ce1bb8b466c726abed34ea14ea1f5fbb5e07f89a24f0caaf761802546f668a1"
+    },
+    {
+      "path": "Source/WTF/wtf/win/MemoryFootprintWin.cpp",
+      "before_sha256": "d441abe1a7600228cf848553a8c927522a7d1a2a96738997f1d7562f7907c83a",
+      "after_sha256": "ca7911638957787987e96ac85e0a2de7881972e3ab9eddab14f209ede304ce01"
+    }
+  ],
+  "new_files": [
+    {
+      "path": "Source/WTF/wtf/win/core_MemoryWin9x.h",
+      "source": "src/core_MemoryWin9x.h",
+      "sha256": "cd04e99740faaa06e73b2e207d4a186e152318c7c35d36cf04e3f91a76b54440"
+    }
+  ],
+  "native_probe": "core_memory_native.c",
+  "native_probe_sha256": "f9ecd87b5124568df81e2eefb3614fab36e6fe079efcf29c81f43238b1bc3aaa",
+  "policy": {
+    "poll_seconds": 60,
+    "warning_free_fraction": "1/8 of physical or process virtual capacity",
+    "critical_free_fraction": "1/16 of physical or process virtual capacity",
+    "process_critical_committed_private_bytes": 966367641,
+    "accounting": "MEM_COMMIT + MEM_PRIVATE virtual bytes; not resident working set",
+    "process_accounting_exclusive_address_limit": "0x80000000 (or OS maximum+1 if lower)"
+  },
+  "modern_branch_preserved": true,
+  "full_engine": false,
+  "guest_execution": "NOT-VERIFIED"
+}

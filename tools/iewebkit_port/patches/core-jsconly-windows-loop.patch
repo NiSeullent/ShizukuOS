@@ -1,0 +1,52 @@
+--- a/Source/cmake/OptionsJSCOnly.cmake
++++ b/Source/cmake/OptionsJSCOnly.cmake
+@@ -32,6 +32,9 @@
+     Generic
+ )
+ 
++if (WIN32)
++    list(APPEND ALL_EVENT_LOOP_TYPES Windows)
++endif ()
+ set(DEFAULT_EVENT_LOOP_TYPE "Generic")
+ 
+ set(EVENT_LOOP_TYPE ${DEFAULT_EVENT_LOOP_TYPE} CACHE STRING "Implementation of event loop to be used in JavaScriptCore (one of ${ALL_EVENT_LOOP_TYPES})")
+@@ -65,11 +68,13 @@
+ if (WIN32)
+     option(IEWEBKIT_WIN9X "Build the experimental IEWebkit Win9x OS abstraction" OFF)
+     if (IEWEBKIT_WIN9X)
++        SET_AND_EXPOSE_TO_BUILD(IEWEBKIT_WIN9X 1)
+         # Keep declarations coherent while the missing Win9x PAL is ported.
+         # This flag alone does not make modern Windows implementations compatible.
+         add_definitions(-D_WINDOWS -DWINVER=0x0410 -D_WIN32_WINDOWS=0x0410
+             -DNTDDI_VERSION=0x04000000 -D_WIN32_WINNT=0x0400)
+     else ()
++        SET_AND_EXPOSE_TO_BUILD(IEWEBKIT_WIN9X 0)
+         add_definitions(-D_WINDOWS -DNTDDI_VERSION=0x0A000006 -D_WIN32_WINNT=0x0A00)
+     endif ()
+ 
+@@ -117,6 +122,12 @@
+     SET_AND_EXPOSE_TO_BUILD(USE_GLIB 1)
+     SET_AND_EXPOSE_TO_BUILD(USE_GLIB_EVENT_LOOP 1)
+     SET_AND_EXPOSE_TO_BUILD(WTF_DEFAULT_EVENT_LOOP 0)
++elseif (LOWERCASE_EVENT_LOOP_TYPE STREQUAL "windows")
++    if (NOT WIN32)
++        message(FATAL_ERROR "The Windows event loop requires a Windows target")
++    endif ()
++    SET_AND_EXPOSE_TO_BUILD(USE_WINDOWS_EVENT_LOOP 1)
++    SET_AND_EXPOSE_TO_BUILD(WTF_DEFAULT_EVENT_LOOP 0)
+ else ()
+     SET_AND_EXPOSE_TO_BUILD(USE_GENERIC_EVENT_LOOP 1)
+     SET_AND_EXPOSE_TO_BUILD(WTF_DEFAULT_EVENT_LOOP 0)
+--- a/Source/WTF/wtf/PlatformJSCOnly.cmake
++++ b/Source/WTF/wtf/PlatformJSCOnly.cmake
+@@ -164,6 +164,10 @@
+     list(APPEND WTF_LIBRARIES
+         GLib::GioUnix
+     )
++elseif (LOWERCASE_EVENT_LOOP_TYPE STREQUAL "windows")
++    list(APPEND WTF_SOURCES
++        win/RunLoopWin.cpp
++    )
+ else ()
+     list(APPEND WTF_SOURCES
+         generic/RunLoopGeneric.cpp

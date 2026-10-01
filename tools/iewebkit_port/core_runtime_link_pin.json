@@ -1,0 +1,14 @@
+{
+  "schema": "iewebkit-win9x-runtime-link-hook-v1",
+  "source": "core_runtime_link.cmake",
+  "sha256": "9e91a5ac2017799568707335d9e35adefb5c5c93b9a1ecdd4da22e3f5107b361",
+  "license": "MIT",
+  "cmake_minimum": "3.20",
+  "activation": "CMAKE_PROJECT_INCLUDE=<exact source path>; IEWEBKIT_WIN9X=ON; IEWEBKIT_WIN9X_RUNTIME_OBJECT=<existing absolute genuine object>",
+  "effect": "Defer until top-level target creation. For IEWEBKIT_WIN9X and PORT=JSCOnly require actual mimalloc-obj and add its PRIVATE IEWEBKIT_WIN9X=1 C definition. Append the existing genuine runtime object only to jsc LINK_DEPENDS. Keep the object in existing LINK_FLAGS without duplicating or propagating it to libraries.",
+  "real_engine_configuration_changed": false,
+  "real_jsc_incremental_link_verified": false,
+  "guest_execution": "NOT-VERIFIED",
+  "full_engine": false,
+  "reason": "Measured Win98 mimalloc standalone C object used NT TEB TLS layout; config.h macro did not reach that C target."
+}

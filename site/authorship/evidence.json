@@ -1,0 +1,199 @@
+{
+  "schema": "win98modern.authorship-evidence.v2",
+  "as_of_utc": "2026-10-01",
+  "proposed_version": "0.9",
+  "release_state": "development_checkpoint",
+  "published_by_this_tool": false,
+  "repository": "https://github.com/NiSeullent/Win98-Modern",
+  "full_project_goal_complete": false,
+  "screenshots": [
+    {
+      "src": "./images/npp-cold-open.png",
+      "kind": "original-guest-capture",
+      "sha256": "cb630d9533decbe718cdaddd79f93ec8b9d7da3ebd3eaaadcfdc62d5695a9990",
+      "width": 1280,
+      "height": 800,
+      "app": "npp",
+      "capture_receipt_sha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+      "review_sha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/npp-keyboard-saved.png",
+      "kind": "original-guest-capture",
+      "sha256": "10699734c6334687e95b8b6150f98bef3a27d9acda7f06ac4c2f78f702787417",
+      "width": 1280,
+      "height": 800,
+      "app": "npp",
+      "capture_receipt_sha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+      "review_sha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/gop-start.png",
+      "kind": "original-guest-capture",
+      "sha256": "574a70e9ee600e7f458eb6c93e54ae8ac88584addd0887e8af78328c510e2062",
+      "width": 1280,
+      "height": 800,
+      "app": "gop",
+      "capture_receipt_sha256": "fe3ff557d190676e8e82433cd47825786245d4bcda5e21cab3fdec65cf657296",
+      "review_sha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/gop-gdi.png",
+      "kind": "original-guest-capture",
+      "sha256": "41bf02431b194a3889eac4f80da8ceb22ec390875fcdd084a9c6bf9593288eb4",
+      "width": 1280,
+      "height": 800,
+      "app": "gop",
+      "capture_receipt_sha256": "a3b1e42ec719cb4de75e2986e653e5fe9c547752429f13c48ac80e51bced629b",
+      "review_sha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/legcord-welcome.png",
+      "kind": "original-guest-capture",
+      "sha256": "28fc8a9c451a610160ca833be12056e9497fb5bf85753a6169d3d3bbadf62238",
+      "width": 1024,
+      "height": 768,
+      "app": "legcord",
+      "capture_receipt_sha256": "fd6a3236dcc813637a04f3f385065ca9e42db5b7d072c9b08786f5bfeb9af485",
+      "review_sha256": "fd6a3236dcc813637a04f3f385065ca9e42db5b7d072c9b08786f5bfeb9af485",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only"
+    },
+    {
+      "src": "./images/chromium-loading.png",
+      "kind": "original-guest-capture",
+      "sha256": "ca6b5ce2e239170b91fc4372b98979efa6f3c7cf73f16efcd501c2be4282453e",
+      "width": 1024,
+      "height": 768,
+      "app": "chromium-gui",
+      "capture_receipt_sha256": "7df897aa1f8e2504cfe40fcd99ea8b47683c847cc4b0366860fe8a59e0d7a97b",
+      "pixel_transform": false,
+      "thumbnail_method": "CSS containment only",
+      "verified_scope": "Standalone browser chrome rendered; local page remained Loading and application later exited with access violation",
+      "actual_version": "157.0.8079.0",
+      "actual_revision": "1706750",
+      "raw_label_correction_sha256": "d5f5bb3869b3698c89419acc24c6272d186ea55ba819596f6c7fb94489bb776a"
+    }
+  ],
+  "results": [
+    {
+      "id": "npp",
+      "platform": "installed Microsoft Windows 98 SE",
+      "version": "8.9.8.1",
+      "verified": [
+        "old44B_document_cold_reopen",
+        "distinct39B_keyboard_save",
+        "actual_application_exit0"
+      ],
+      "requires_native_field_interpreter": true,
+      "unassisted_exit_verified": false,
+      "new39B_document_cold_reopen_verified": false,
+      "gpu3d_verified": false,
+      "receipt_sha256": "13f76fc4f6870a61d5067b76b7c47a49b7d40ddcd9310f271d5d8cbd1fab8ada",
+      "review_sha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175"
+    },
+    {
+      "id": "gop",
+      "platform": "installed Microsoft Windows 98 SE through UEFI/CSMWrap",
+      "verified": [
+        "original_monitor_start_menu",
+        "native_GDI_pattern_monitor_readback"
+      ],
+      "fixed_mode": "1280x800",
+      "gpu3d_verified": false,
+      "additive_correction_audit_sha256": "a01cef2ab1b74594fcac22a68d97450ff513560b446f2621c817dba1ff6b9969"
+    },
+    {
+      "id": "chromium-headless",
+      "platform": "ShizukuDOS Kernel64 standalone",
+      "version": "157.0.8081.0",
+      "verified": [
+        "headless_multiprocess_DOM42",
+        "actual_normal_exit0"
+      ],
+      "command": "--headless --no-sandbox --disable-gpu --no-first-run --enable-logging=stderr --v=0 --user-data-dir=D:\\prof --dump-dom file:///D:/M2/M2.HTML",
+      "screenshot": null,
+      "screenshot_status": "not_captured_in_this_headless_trial",
+      "native_windows98_verified": false,
+      "graphical_browser_verified": false,
+      "network_navigation_verified": false,
+      "receipt_sha256": "7aa0079ee82c01e06fd4117111d05776177eb7c93f16cad1126f809282df0f63",
+      "version_identification": "legacy_image_path_and_prepared_package_provenance_only",
+      "executable_tree_sha_pinned_in_legacy_result": false,
+      "disk_image_byte_audit_performed_for_this_page": false,
+      "provenance_limit": "The legacy result JSON does not pin executable or complete package tree hashes; the recorded revision1708403 image path and prepared package provenance support version157.0.8081.0 identification."
+    },
+    {
+      "id": "legcord",
+      "platform": "ShizukuDOS Kernel64 standalone",
+      "version": "1.3.0",
+      "verified": [
+        "original_welcome_setup_rendered"
+      ],
+      "discord_functionality_verified": false,
+      "native_windows98_verified": false,
+      "clean_exit_verified": false,
+      "observation_ended_by": "timeout",
+      "receipt_sha256": "fd6a3236dcc813637a04f3f385065ca9e42db5b7d072c9b08786f5bfeb9af485"
+    },
+    {
+      "id": "chromium-gui",
+      "platform": "ShizukuDOS Kernel64 standalone",
+      "version": "157.0.8079.0",
+      "revision": "1706750",
+      "actual_publisher": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1706750/",
+      "original_raw_publisher_label": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1708403/",
+      "raw_record_rewritten": false,
+      "semantic_correction_sha256": "d5f5bb3869b3698c89419acc24c6272d186ea55ba819596f6c7fb94489bb776a",
+      "receipt_sha256": "7df897aa1f8e2504cfe40fcd99ea8b47683c847cc4b0366860fe8a59e0d7a97b",
+      "actual_tree_sha256": "6af7aa2155a2163122c8af25eb246e128a0068a1292bde9f83dbb5103b9ad75e",
+      "actual_chrome_exe_sha256": "50e3f9ee0aa1c2d55bde01aa822c7a91fa558fa73fdf2648d05bc00b2ba2c93e",
+      "actual_chrome_dll_sha256": "5a36d13089083cc3e84831bcac6f22d373217c00350d63d8492bc499371aae4c",
+      "verified": [
+        "browser_toolbar_rendered",
+        "actual_GDI_blit_present"
+      ],
+      "local_page_loaded": false,
+      "network_navigation_verified": false,
+      "app_functionality_verified": false,
+      "native_windows98_verified": false,
+      "actual_exit": "0xc0000005",
+      "first_chance_exception": "chrome.dll+a0cbbc4",
+      "observed_capture_count": 82,
+      "original_inputs_unchanged": true,
+      "command": "chrome.exe --no-sandbox --disable-gpu --disable-direct-composition --no-first-run --enable-logging=stderr --v=0 --user-data-dir=D:\\chprofile file:///D:/M2/M2.HTML"
+    }
+  ],
+  "publication_target": "https://m98.nyase.kr/authorship/",
+  "source_branch": "main",
+  "handoff_document": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/CONTINUE_MODERN_APPS.md",
+  "required_targets": [
+    "Google Chrome",
+    "Chromium",
+    "Firefox",
+    "Legcord / Discord",
+    "Steam",
+    "LibreOffice",
+    "Notepad++",
+    "VLC",
+    "Supermium",
+    "Visual Studio Code"
+  ],
+  "current_checkpoint": {
+    "native_compatibility_kernel": "UEFI/VMX/EPT standalone Kernel64 foundation passed37 checks. Installed Windows98 constructor/bridge and modern app functionality remain pending.",
+    "office": "Latest LibreOffice26.8.0.3 startup stopped at missing SetSearchPathMode; new shared implementation is staged for guest validation.",
+    "firefox": "Official Firefox157.0 package verified; startup stopped at missing OpenProcessToken; new shared implementation is staged for guest validation.",
+    "google_chrome": "Official enterprise MSI downloaded and SHA-256 retained; embedded browser payload/version and startup are not yet verified.",
+    "steam": "Original client startup stopped at missing Module32Next; corrected common module enumeration awaits actual guest verification.",
+    "ordinary_v43": "Full ordinary build failed at parent-child fixture console linkage. The failure is preserved; no runtime archive or actual VM pass is claimed.",
+    "release_0_9_complete": false
+  }
+}

@@ -1,0 +1,7 @@
+LIBRARY PXUNLD
+EXPORTS
+ M98ExitInitialize=M98ExitInitialize@0
+ M98ExitRegister=M98ExitRegister@16
+ M98ExitUnregister=M98ExitUnregister@4
+ M98ExitCount=M98ExitCount@0
+ PXTestObserve=PXTestObserve@4

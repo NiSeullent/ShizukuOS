@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Shizuku 데드 스크린 디자인과 테트리스·수박게임을 직접 체험해 보세요.">
+  <title>데드 스크린 체험 · Windows 98 Shizuku Modern Edition</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css?v=20261001-download1">
+  <link rel="stylesheet" href="./dead-screen.css?v=20261001-1">
+  <script src="./dead-screen.js?v=20261001-1" defer></script>
+<link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/dead-screen.html"><link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/dead-screen.html"></head>
+<body>
+  <a class="skip" href="#main">본문으로 건너뛰기</a>
+  <header class="top"><a class="brand" href="./index.html">Windows 98 <strong>Shizuku Modern Edition</strong></a><nav aria-label="주 메뉴"><a href="./preview.html">실제 실행 화면</a><a href="./authorship/">Authorship</a><a href="./en/dead-screen.html" lang="en" hreflang="en" aria-label="English version">English</a><a class="nav-download" href="./downloads/shizuku-modern-preview-2026.10.01.zip" download>다운로드</a></nav></header>
+  <main id="main" class="dead-preview">
+    <div class="dead-heading"><div><p class="eyebrow">직접 해 보세요</p><h1>데드 스크린.</h1></div><p>디자인·게임 미리보기입니다.<br>실제 운영체제의 오류 화면은 아닙니다.</p></div>
+    <section class="game-panel" aria-labelledby="game-question">
+      <h2 id="game-question">테트리스 게임을 할래? 수박 게임을 할래?</h2>
+      <div class="game-choice"><button type="button" data-key="1" disabled>테트리스</button><button type="button" data-key="2" disabled>수박게임</button></div>
+      <div class="game-screen"><canvas id="dead-canvas" width="640" height="480" tabindex="0" aria-label="데드 스크린 게임 화면. 아래 버튼 또는 방향키로 조작할 수 있습니다."></canvas><p id="load-status" role="status">게임을 준비하고 있습니다.</p><pre id="load-trace" hidden></pre></div>
+      <div class="game-meta"><span id="game-status" role="status">게임을 골라 주세요.</span><span id="game-score">점수 0</span></div>
+      <div class="game-controls" aria-label="게임 조작">
+        <button type="button" data-key="3" disabled aria-label="왼쪽으로 이동">←</button><button type="button" data-key="5" disabled aria-label="블록 회전">회전</button><button type="button" data-key="4" disabled aria-label="오른쪽으로 이동">→</button><button type="button" data-key="7" disabled>떨어뜨리기</button>
+      </div>
+      <div class="game-options"><button type="button" data-key="9" disabled>다시 하기</button><button type="button" data-key="8" disabled>게임 선택</button><button type="button" data-key="10" disabled>한국어 / English</button><button type="button" data-key="11" disabled>오류 정보 / 아이템</button><button id="text-toggle" type="button" disabled>텍스트 화면 보기</button></div>
+      <p class="game-help">방향키 또는 A/D로 이동 · ↑/W로 회전 · Space로 떨어뜨리기 · R로 다시 하기 · Esc로 게임 선택</p>
+    </section>
+    <div class="dead-about"><section aria-labelledby="items"><h2 id="items">블루스크린으로 수박게임.</h2><p>새드 맥에서 Windows 2000, XP, 8.1, 10, 11까지. 같은 아이템을 합쳐 더 큰 아이템을 만드세요.</p><p class="small">게임 속 그림입니다. 해당 운영체제에서 발생한 실제 오류를 보여 주는 것은 아닙니다.</p></section><section aria-labelledby="error-behavior"><h2 id="error-behavior">오류 뒤에도, 잠깐의 게임.</h2><p>가벼운 오류는 오류 창으로, 심각한 Shizuku Kernel 오류는 데드 스크린으로. 화면을 준비할 수 없으면 <span lang="en">You session got wasted</span>와 영문 오류 정보를 표시합니다.</p><p class="small">커널 연결과 실제 오류 화면은 구현·검증 중입니다. 게임을 해도 멈춘 운영체제가 복구되지는 않습니다.</p></section></div>
+    <details class="demo-source"><summary>미리보기 소스 받기</summary><p>게임의 소스와 빌드 안내를 함께 제공합니다.</p><a href="./downloads/dead-screen-preview-source.zip" download>소스 다운로드</a></details>
+    <div class="dead-return"><a class="button primary" href="./index.html">배포 페이지로</a><a href="./preview.html">실제 부팅·앱 실행 화면 보기</a></div>
+  </main>
+  <footer class="site-footer"><span>Windows 98 Shizuku Modern Edition · 개발 미리보기</span><a href="./index.html">배포 페이지</a></footer>
+</body>
+</html>

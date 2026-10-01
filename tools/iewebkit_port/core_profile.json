@@ -1,0 +1,20 @@
+{
+  "upstream_commit": "5220e80b97a253c60ed899361654142ab5021998",
+  "patch": "patches/core-jsconly-windows-loop.patch",
+  "patch_sha256": "52157df9b47591625ce826c0d9a3934536bd9a59c1033f9537c9daaf75f9f3c7",
+  "applies_after": "Independent IEWebKit reviewed Win9x patches",
+  "files": [
+    {
+      "path": "Source/cmake/OptionsJSCOnly.cmake",
+      "before_sha256": "fa6afbbfcd697cde09dedb25671833be158077b32dbcf0a2321b109d620eec12",
+      "after_sha256": "fb07111adb1978a859bfa22fb3cc148898b0ff6b8444a026b62357ef5b5ce4d4"
+    },
+    {
+      "path": "Source/WTF/wtf/PlatformJSCOnly.cmake",
+      "before_sha256": "dde6c8dcc941610a6ed6b6ff36ead9508ed523e2e146a9832c6a9cfe435cb4ff",
+      "after_sha256": "5adcda90172cbcb45c169723b58939fe03078f0019f31ecfed8845926898accb"
+    }
+  ],
+  "purpose": "Compile the actual Windows RunLoop into JSCOnly WTF and expose the opt-in Win9x C++ macro; Generic remains the upstream default",
+  "full_renderer": false
+}

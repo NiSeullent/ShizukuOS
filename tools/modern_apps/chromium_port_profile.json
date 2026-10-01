@@ -1,0 +1,74 @@
+{
+  "schema": "win98modern.browser-source-port-profile.v1",
+  "app": "chromium",
+  "as_of": "2026-09-30",
+  "version": "157.0.8080.0",
+  "source_commit": "73c8f84d67bfbad65ad4817d9839ffecb78b06ee",
+  "source_url": "https://chromium.googlesource.com/chromium/src/+/73c8f84d67bfbad65ad4817d9839ffecb78b06ee",
+  "selection": "active project publisher snapshot; reuse docs/TARGET_APPS.md inputs read-only",
+  "publisher_input": {
+    "snapshot": 1707946,
+    "url": "https://storage.googleapis.com/chromium-browser-snapshots/Win/1707946/chrome-win.zip",
+    "size_bytes": 323332967,
+    "sha256": "af0a1a5eb80a21ff2364b4974ca254d3a3af0bf087db9f5af4232672cb3a53df",
+    "download_performed_by_this_lane": false
+  },
+  "existing_preflights": [
+    {
+      "path": "build/latest-app-preflight-20260930/chromium-157.0.8080.0-1707946/chrome.exe.preflight.json",
+      "sha256": "c9af79670f0bedb198f3c32662802cd0829308eced199f4cb62a3516d7f445ce",
+      "input_sha256": "7335c4494009b24842f5a2f501afb136c6b30bb473a9731a48147ce69865d823"
+    },
+    {
+      "path": "build/latest-app-preflight-20260930/chromium-157.0.8080.0-1707946/chrome_elf.dll.preflight.json",
+      "sha256": "1bbfca0bfcf878876a5bd98376ff0c1824eab92a0e2ff128363a7aac2ab2d98e",
+      "input_sha256": "54ffa9edd24ed9251fefca50abd27d4542fe81b63757d0ed0df2304a36ad1473"
+    }
+  ],
+  "alternate_upstream_reference": {
+    "selection": "Windows stable reference only; does not replace the active 157 target",
+    "version": "155.0.8059.26",
+    "source_commit": "16c3e55476d3564bea713314b2fff638749ce3e6",
+    "metadata_url": "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Windows&num=1"
+  },
+  "guest_target": {"os": "win98se", "os_version": "4.10.2222", "arch": "x86"},
+  "upstream_windows_minimum": "Windows 10",
+  "build_host": {
+    "arch": "x86_64",
+    "ram_minimum_bytes": 8000000000,
+    "free_disk_minimum_bytes": 100000000000,
+    "filesystem": "NTFS for the upstream Windows build",
+    "visual_studio": ">=18.0.0 (Visual Studio 2026)",
+    "sdk": "10.0.28000.2270",
+    "build_tools": ["depot_tools", "GN", "Siso/autoninja", "clang-cl"],
+    "documentation": "https://raw.githubusercontent.com/chromium/chromium/73c8f84d67bfbad65ad4817d9839ffecb78b06ee/docs/windows_build_instructions.md"
+  },
+  "gn_candidate_arguments": {
+    "target_cpu": "x86",
+    "is_component_build": false,
+    "is_debug": false,
+    "symbol_level": 0,
+    "blink_symbol_level": 0,
+    "v8_symbol_level": 0
+  },
+  "gn_arguments_are_win98_port": false,
+  "prerequisites": [
+    {"id": "pe32-loader-crt", "state": "native-browser-unverified", "reuse": ["tools/app_preflight.py", "ntwin32/native_loader", "src/m98wrap.c"], "required": "Bind the x86 PE/imports, TLS, SEH, C++/CRT initialization and delay/API-set loads to actual Win98 execution."},
+    {"id": "address-waits", "state": "new-source-native-unverified", "source": "tools/modern_apps/chromium_win9x_wait.c", "required": "Event-backed WaitOnAddress/WakeByAddressSingle/All; native queue, timeout, lost-wake and address-isolation probe."},
+    {"id": "srw-cv-fls-threadpool", "state": "reuse-source-native-browser-unverified", "reuse": ["src/m98wrap.c", "src/m98_fls.c", "src/m98_threadpool.c"], "required": "Validate existing synchronization and thread lifetime implementations against Chromium workloads."},
+    {"id": "process-mojo-ipc", "state": "missing-native-acceptance", "required": "Real Win98 process launch, handle/section passing, async IPC/completion and Mojo transport. No fake NT token/job/pipe success."},
+    {"id": "software-compositor-fonts", "state": "missing-native-acceptance", "required": "Actual Skia/Blink raster output to a Win98 window, shaping/font rasterization and DWrite/DirectComposition-free source paths; GPU switches alone are insufficient."},
+    {"id": "network-crypto", "state": "missing-native-browser-acceptance", "required": "Real Winsock DNS/socket cancellation and current crypto/certificate validation for HTTPS/WebSocket. Reuse genuine ANSI CryptoAPI fixes where appropriate."},
+    {"id": "v8-memory-abi", "state": "missing-native-acceptance", "required": "Actual x86 V8 execution, reservation/commit/protection, exception handling and mapped shared buffers within the guest address-space/RAM limits."}
+  ],
+  "acceptance": [
+    "Exact frozen x86 Chromium binary/source/DEPS/compiler inputs and unchanged Win98 IO.SYS evidence.",
+    "Fresh native OS/version/nonce log and complete required load-time/delay imports without success stubs.",
+    "Real browser window renders a local HTML/CSS/canvas/JavaScript fixture; typed input and DOM result read back from the owned guest.",
+    "Real navigation and separately authorized HTTPS/certificate/WebSocket fixtures; networkless bootstrap does not establish network acceptance.",
+    "Renderer process/IPC lifecycle, thread/TLS teardown, bounded resource accounting and external zero process exit."
+  ],
+  "guest_executed": false,
+  "runtime_compatibility": "unverified",
+  "browser_pass": false
+}
