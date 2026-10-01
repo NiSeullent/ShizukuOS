@@ -11,6 +11,9 @@ Kernel64, the firmware, wrappers and graphics components all serve that
 Windows 98 system. An isolated boot or runtime test records an experimental
 boundary; it does not establish completion of the DOS replacement or Windows
 98 integration. Preserve that distinction without changing the product goal.
+The [architecture contract](SHIZUKUOS_ARCHITECTURE_CONTRACT.md) records the
+required positive ShizukuDOS → WIN.COM → VMM boot and native VxD → Supervisor →
+Kernel32/Kernel64 application/reply chain for the final installation.
 
 Use the repository-wide [official delivery guide](OFFICIAL_DISTRIBUTION.md)
 and [new machine guide](CONTINUE_ON_ANOTHER_MACHINE.md) after integrated

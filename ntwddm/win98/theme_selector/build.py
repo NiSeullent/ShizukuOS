@@ -42,7 +42,7 @@ def digest(path):
 
 def native_gate(path, role="selector"):
     """Require genuine OEM imports, a legacy GUI entry and usable relocations."""
-    require(role in {"selector", "observer"}, "unknown native component role")
+    require(role in {"selector", "observer", "bootstrap"}, "unknown native component role")
     inventory = json.loads((ROOT / SOURCES[-1]).read_text())["dlls"]
     with pefile.PE(str(path)) as pe:
         header = pe.OPTIONAL_HEADER
@@ -68,6 +68,7 @@ def native_gate(path, role="selector"):
         imports = {}
         for entry in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
             module = entry.dll.decode("ascii").upper()
+            require(module not in imports, f"duplicate native import descriptor for {module}")
             require(module in {"KERNEL32.DLL", "USER32.DLL", "GDI32.DLL", "ADVAPI32.DLL"},
                     f"unexpected dependency {module}")
             require(all(item.name is not None for item in entry.imports),
@@ -83,7 +84,7 @@ def native_gate(path, role="selector"):
             require("RegSetValueExA" in imports.get("ADVAPI32.DLL", [])
                     and "RegQueryValueExA" in imports.get("ADVAPI32.DLL", []),
                     "native persistent profile access missing")
-        else:
+        elif role == "observer":
             all_names = {name for names in imports.values() for name in names}
             require(not all_names & {"SetSysColors", "RegSetValueExA", "RegSetValueExW",
                     "RegSetValueA", "RegSetValueW", "RegCreateKeyA", "RegCreateKeyW",
@@ -96,9 +97,20 @@ def native_gate(path, role="selector"):
             require({"GetSysColor"} <= set(imports.get("USER32.DLL", []))
                     and "GetPixel" in imports.get("GDI32.DLL", [])
                     and "RegQueryValueExA" in imports.get("ADVAPI32.DLL", [])
-                    and {"CreateProcessA", "WaitForSingleObject", "GetExitCodeProcess"}
+                    and {"CreateProcessA", "WaitForSingleObject", "GetExitCodeProcess", "GetCurrentProcessId"}
                     <= set(imports.get("KERNEL32.DLL", [])),
                     "independent observer palette/pixel/profile/child APIs missing")
+        else:
+            require(set(imports) == {"KERNEL32.DLL"},
+                    "bootstrap dependencies must be the OEM kernel only")
+            required = {"CloseHandle", "CreateFileA", "CreateProcessA", "ExitProcess",
+                        "FlushFileBuffers", "GetCommandLineA", "GetCurrentProcessId",
+                        "GetExitCodeProcess", "GetModuleFileNameA", "GetVersionExA",
+                        "ReadFile", "WaitForSingleObject", "WriteFile"}
+            actual = set(imports["KERNEL32.DLL"])
+            require(required <= actual, "bootstrap identity/lifecycle/case/log APIs missing")
+            require(actual <= required | {"GetLastError"},
+                    "bootstrap imports a forbidden mutation/resolver/termination API")
         return {"status": "PASS", "role": role, "imports": imports,
                 "native_execution_verified": False}
 

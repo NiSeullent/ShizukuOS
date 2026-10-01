@@ -857,6 +857,7 @@ static DWORD run_observer(void)
     if (log_handle == INVALID_HANDLE_VALUE) return 4u;
     emit_line("HEADER", phase == 1u ? "SHZGLOB1_V1" : "SHZGLOB2_V1");
     emit_line("NONCE", nonce); emit_number("PHASE", phase);
+    emit_number("OBSERVER_PID", GetCurrentProcessId());
     emit_line("OBSERVER_ROLE", "INDEPENDENT_NATIVE_READ_ONLY_THEME_OBSERVER");
     emit_line("PROCESS_SELF_LOG_IS_NOT", "EXTERNAL_EXIT_OR_BOOT_OR_SOURCE_PROOF");
     clear_bytes(&version, sizeof(version)); version.dwOSVersionInfoSize = sizeof(version);

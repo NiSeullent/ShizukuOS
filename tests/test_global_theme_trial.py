@@ -51,7 +51,7 @@ def stage(name, colors, notifications, paints):
 
 
 def log(phase):
-    lines = ["HEADER=SHZGLOB%d_V1" % phase, "NONCE=" + NONCE, "PHASE=" + str(phase),
+    lines = ["HEADER=SHZGLOB%d_V1" % phase, "NONCE=" + NONCE, "PHASE=" + str(phase), "OBSERVER_PID=234",
              "OBSERVER_ROLE=INDEPENDENT_NATIVE_READ_ONLY_THEME_OBSERVER",
              "PROCESS_SELF_LOG_IS_NOT=EXTERNAL_EXIT_OR_BOOT_OR_SOURCE_PROOF",
              "OS_PLATFORM=1", "OS_MAJOR=4", "OS_MINOR=10",
@@ -85,11 +85,27 @@ def log(phase):
     return ("\r\n".join(lines) + "\r\n").encode("ascii")
 
 
+def bootstrap_log(phase):
+    # Independent accepted wire grammar; this is not a native execution claim.
+    lines = ["HEADER=SHZGB%d_V1" % phase, "NONCE=" + NONCE, "PHASE=" + str(phase),
+             "BOOTSTRAP_PID=345", "BOOTSTRAP_PATH=C:\\VXDLAB\\SHZGBOOT.EXE",
+             "BOOTSTRAP_COMMAND_MODE=FIXED_PATH_NO_ARGUMENTS", "OS_PLATFORM=1", "OS_MAJOR=4", "OS_MINOR=10",
+             "OS_BUILD_RAW=67766446", "OS_BUILD_LOW_WORD=2222",
+             'OBSERVER_COMMAND="C:\\VXDLAB\\SHZOBS.EXE"', "OBSERVER_WORKING_DIRECTORY=C:\\VXDLAB",
+             "OBSERVER_INHERIT_HANDLES=0", "OBSERVER_PID=234", "OBSERVER_THREAD_HANDLE_CLOSED=1",
+             "OBSERVER_WAIT_RESULT=0", "OBSERVER_EXIT_QUERY_SUCCEEDED=1", "OBSERVER_EXIT_CODE=0",
+             "OBSERVER_PROCESS_HANDLE_CLOSED=1", "LOG_FLUSH_OBSERVED=1",
+             "LOG_FINAL_FLUSH=REQUESTED_NOT_EXTERNALLY_OBSERVED", "LOG_FINAL_CLOSE=REQUESTED_NOT_EXTERNALLY_OBSERVED",
+             "BOOTSTRAP_EXTERNAL_EXIT=NOT_OBSERVED", "BOOTSTRAP_REQUESTED_EXIT=0",
+             "RESULT=NOT_A_FINAL_BOOTSTRAP_EXIT_VERDICT"]
+    return ("\r\n".join(lines) + "\r\n").encode("ascii")
+
+
 class BytePreservingStartup(unittest.TestCase):
     def test_only_one_empty_windows_run_changes_and_ansi_bytes_survive(self):
         data = b";\xb0\xa1\xb3\xaa\r\n[Windows]\r\n run = \t\r\nload=\r\n[fonts]\r\nx=\xc7\xd1\r\n"
         changed, detail = trial.patch_empty_run(data)
-        self.assertEqual(changed, b";\xb0\xa1\xb3\xaa\r\n[Windows]\r\n run =C:\\VXDLAB\\SHZOBS.EXE \t\r\nload=\r\n[fonts]\r\nx=\xc7\xd1\r\n")
+        self.assertEqual(changed, b";\xb0\xa1\xb3\xaa\r\n[Windows]\r\n run =C:\\VXDLAB\\SHZGBOOT.EXE \t\r\nload=\r\n[fonts]\r\nx=\xc7\xd1\r\n")
         self.assertTrue(detail["other_bytes_preserved"])
 
     def test_stale_duplicate_and_ambiguous_inputs_are_refused(self):
@@ -117,6 +133,9 @@ class NativeObserverEvidence(unittest.TestCase):
         self.assertEqual(second["baseline"], BASELINE)
         self.assertEqual(second["restore_process_exit"], "NOT_OBSERVED_NO_PROCESS_HANDLE")
         self.assertEqual(second["observer_exit"], "NOT_OBSERVED_SELF_LOG_ONLY")
+        self.assertEqual(second["observer_pid"], 234)
+        self.assertEqual(second["final_profile"], profile(0).hex())
+        self.assertEqual(second["cold_boot_saved_profile"], profile(1).hex())
 
     def test_missing_duplicate_wrong_nonce_and_failure_records_never_pass(self):
         valid = log(1)
@@ -149,6 +168,56 @@ class NativeObserverEvidence(unittest.TestCase):
         with self.assertRaises(trial.TrialError): trial.parse_observer_log(data, NONCE, 1)
         data = log(1).replace(b"FINAL_READBACK=AFTER_NORMAL_CHILD_EXIT\r\n", b"")
         with self.assertRaises(trial.TrialError): trial.parse_observer_log(data, NONCE, 1)
+
+
+class ParentBootstrapEvidence(unittest.TestCase):
+    def test_parent_both_epochs_prove_observer_zero_exit_but_not_self_exit(self):
+        first = trial.parse_observer_log(log(1), NONCE, 1)
+        second = trial.parse_observer_log(log(2), NONCE, 2, first)
+        for phase, observer in ((1, first), (2, second)):
+            parsed = trial.parse_bootstrap_log(bootstrap_log(phase), NONCE, phase, observer)
+            self.assertEqual(parsed["observer_pid"], observer["observer_pid"])
+            self.assertEqual(parsed["observer_exit"], "OBSERVED_NORMAL_ZERO")
+            self.assertEqual(parsed["bootstrap_exit"], "NOT_OBSERVED")
+            self.assertEqual(parsed["final_io"], "REQUESTED_NOT_EXTERNALLY_OBSERVED")
+
+    def test_missing_truncated_duplicate_wrong_phase_or_nonce_are_rejected(self):
+        observer = trial.parse_observer_log(log(1), NONCE, 1)
+        valid = bootstrap_log(1)
+        damaged = (b"", valid[:-2], valid[:-12], valid.replace(b"OBSERVER_EXIT_QUERY_SUCCEEDED=1\r\n", b""),
+                   valid.replace(b"PHASE=1\r\n", b"PHASE=1\r\nPHASE=1\r\n"),
+                   valid.replace(b"PHASE=1\r\n", b"PHASE=2\r\n"), valid.replace(NONCE.encode(), b"f" * 32),
+                   valid + b"FAIL_STAGE=final_close\r\n", valid.replace(b"\r\n", b"\n"))
+        for data in damaged:
+            with self.subTest(length=len(data)), self.assertRaises(trial.TrialError):
+                trial.parse_bootstrap_log(data, NONCE, 1, observer)
+
+    def test_high_dword_exit_timeout_wrong_command_and_pid_cannot_pass(self):
+        observer = trial.parse_observer_log(log(1), NONCE, 1)
+        valid = bootstrap_log(1)
+        damaged = (valid.replace(b"OBSERVER_EXIT_CODE=0\r\n", b"OBSERVER_EXIT_CODE=256\r\n"),
+                   valid.replace(b"OBSERVER_EXIT_CODE=0\r\n", b"OBSERVER_EXIT_CODE=4294967295\r\n"),
+                   valid.replace(b"OBSERVER_WAIT_RESULT=0\r\n", b"OBSERVER_WAIT_RESULT=258\r\n"),
+                   valid.replace(b"SHZOBS.EXE\"", b"SHZTHEME.EXE\""),
+                   valid.replace(b"OBSERVER_PID=234\r\n", b"OBSERVER_PID=123\r\n"),
+                   valid.replace(b"OBSERVER_PID=234\r\n", b"OBSERVER_PID=0\r\n"))
+        for data in damaged:
+            with self.subTest(data=data[-80:]), self.assertRaises(trial.TrialError):
+                trial.parse_bootstrap_log(data, NONCE, 1, observer)
+
+    def test_handle_and_final_io_failures_or_self_final_claims_are_rejected(self):
+        observer = trial.parse_observer_log(log(1), NONCE, 1)
+        valid = bootstrap_log(1)
+        damaged = (valid.replace(b"OBSERVER_THREAD_HANDLE_CLOSED=1", b"OBSERVER_THREAD_HANDLE_CLOSED=0"),
+                   valid.replace(b"OBSERVER_PROCESS_HANDLE_CLOSED=1", b"OBSERVER_PROCESS_HANDLE_CLOSED=0"),
+                   valid.replace(b"LOG_FLUSH_OBSERVED=1", b"LOG_FLUSH_OBSERVED=0"),
+                   valid.replace(b"LOG_FINAL_CLOSE=REQUESTED_NOT_EXTERNALLY_OBSERVED", b"LOG_FINAL_CLOSE=PASS"),
+                   valid.replace(b"BOOTSTRAP_EXTERNAL_EXIT=NOT_OBSERVED", b"BOOTSTRAP_EXTERNAL_EXIT=PASS"),
+                   valid + b"FAIL_ERROR=5\r\nBOOTSTRAP_REQUESTED_EXIT=5\r\n",
+                   valid + b"OBSERVER_TERMINATED=1\r\n")
+        for data in damaged:
+            with self.subTest(data=data[-80:]), self.assertRaises(trial.TrialError):
+                trial.parse_bootstrap_log(data, NONCE, 1, observer)
 
 
 class CumulativePrivateBudget(unittest.TestCase):
@@ -217,14 +286,15 @@ class StoppedGuestInputIdentity(unittest.TestCase):
         bootstrap = self.root / "bootstrap"; bootstrap.mkdir()
         sources = self.root / "sources"; sources.mkdir()
         inputs = {"SHZTHEME.EXE": b"independent selector fixture", "SHZOBS.EXE": b"independent observer fixture",
+                  "SHZGBOOT.EXE": b"independent parent fixture",
                   "SHZCASE.TXT": b"SHZGCASE1\r\nnonce=0123456789abcdef0123456789abcdef\r\nphase=1\r\n"}
         for name, data in inputs.items(): (stage / name).write_bytes(data)
         second = inputs["SHZCASE.TXT"].replace(b"phase=1", b"phase=2")
         (bootstrap / "SHZCASE2.TXT").write_bytes(second)
-        ini = b";\xb0\xa1\r\n[windows]\r\nrun=C:\\VXDLAB\\SHZOBS.EXE\r\nload=\r\n"
+        ini = b";\xb0\xa1\r\n[windows]\r\nrun=C:\\VXDLAB\\SHZGBOOT.EXE\r\nload=\r\n"
         (bootstrap / "WININI-AFTER").write_bytes(ini)
         bindings = []
-        for role, name in (("selector", "SHZTHEME.EXE"), ("observer", "SHZOBS.EXE")):
+        for role, name in (("selector", "SHZTHEME.EXE"), ("observer", "SHZOBS.EXE"), ("bootstrap", "SHZGBOOT.EXE")):
             artifact = sources / name; artifact.write_bytes(inputs[name])
             receipt = sources / (role + "-receipt.json"); receipt.write_bytes(b'{"fixture":"not a native build"}\n')
             source = sources / (role + ".c"); source.write_bytes(("/* " + role + " */\n").encode())
@@ -262,7 +332,7 @@ class StoppedGuestInputIdentity(unittest.TestCase):
         self.assertEqual(second["files"]["WIN.INI"], first["files"]["WIN.INI"])
 
     def test_changed_binary_case_or_winini_is_not_accepted_after_guest_exit(self):
-        for path in ("::/VXDLAB/SHZTHEME.EXE", "::/VXDLAB/SHZOBS.EXE", "::/VXDLAB/SHZCASE.TXT", "::/WINDOWS/WIN.INI"):
+        for path in ("::/VXDLAB/SHZTHEME.EXE", "::/VXDLAB/SHZOBS.EXE", "::/VXDLAB/SHZGBOOT.EXE", "::/VXDLAB/SHZCASE.TXT", "::/WINDOWS/WIN.INI"):
             original = self.guest[path]
             try:
                 self.guest[path] = original + b"tampered"
@@ -274,34 +344,99 @@ class StoppedGuestInputIdentity(unittest.TestCase):
         (Path(self.plan["roots"]["stage"]) / "SHZOBS.EXE").write_bytes(b"changed staged program")
         with self.assertRaises(trial.TrialError): self.collect(1)
 
+    def test_third_bootstrap_artifact_and_build_source_binding_are_mandatory(self):
+        for missing_role in ("bootstrap", "bootstrap_receipt", "pe_source:SHZGBOOT.EXE:bootstrap.c"):
+            original = self.plan["bindings"]
+            try:
+                self.plan["bindings"] = [row for row in original if row["role"] != missing_role]
+                with self.subTest(missing_role=missing_role), self.assertRaises(trial.TrialError): self.collect(1)
+            finally: self.plan["bindings"] = original
+
 
 class CompiledReceiptBoundary(unittest.TestCase):
-    def observer_envelope(self, root):
+    def native_envelope(self, root, name):
         # Receipt-shape fixture only: no compiler or native executable is run.
-        source = root / "observer.c"; source.write_bytes(b"/* independent fixture input */\n")
-        artifact = root / "SHZOBS.EXE"; artifact.write_bytes(b"receipt-envelope-fixture")
+        inputs = {"SHZTHEME.EXE": ("ntwddm/win98/theme_selector/selector_core.c", "ntwddm/win98/theme_selector/selector_win98.c"),
+                  "SHZOBS.EXE": ("ntwddm/win98/theme_global_probe/observer.c",),
+                  "SHZGBOOT.EXE": ("ntwddm/win98/theme_global_startup/launcher.c",)}[name] + ("platform/freestanding/memory.c",)
+        hashes = {}
+        for relative in inputs:
+            source = root / relative; source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(("/* independent fixture " + relative + " */\n").encode())
+            hashes[relative] = hashlib.sha256(source.read_bytes()).hexdigest()
+        artifact = root / name; artifact.write_bytes(b"receipt-envelope-fixture")
         receipt = root / "result.json"
         payload = {"schema": 1, "status": "PASS", "source_root": str(root),
-                   "source_hashes": {"observer.c": hashlib.sha256(source.read_bytes()).hexdigest()},
+                   "source_hashes": hashes,
                    "compiler_version": "i686-w64-mingw32-gcc (GCC) fixture-version",
                    "executable": {"path": str(artifact), "bytes": artifact.stat().st_size,
                                   "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
-                                  "native_gate": {"status": "PASS", "role": "observer",
+                                  "native_gate": {"status": "PASS", "role": {"SHZTHEME.EXE": "selector", "SHZOBS.EXE": "observer", "SHZGBOOT.EXE": "bootstrap"}[name],
                                                   "native_execution_verified": False}}}
+        libraries = ["-lkernel32"] if name == "SHZGBOOT.EXE" else ["-lkernel32", "-luser32", "-lgdi32", "-ladvapi32"]
+        if name == "SHZTHEME.EXE":
+            payload["compiler_versions"] = {"clang": "clang fixture-version", "i686-w64-mingw32-gcc": payload.pop("compiler_version")}
+            payload["host_tests"] = [{"kind": kind, "result": "PASS: 139 selector checks"} for kind in ("host", "sanitizer")]
         commands = [{"argv": ["i686-w64-mingw32-gcc", "-std=c11", "-Os", "-Wall", "-Wextra", "-Werror",
             "-march=i486", "-mno-sse", "-mno-sse2", "-mno-mmx", "-msoft-float",
             "-fno-builtin", "-fno-stack-protector", "-mno-stack-arg-probe", "-nostdlib",
             "-Wl,--entry,_mainCRTStartup", "-Wl,--subsystem,windows:4.10",
             "-Wl,--major-os-version,4", "-Wl,--minor-os-version,10",
             "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--disable-tsaware",
-            "-Wl,--no-insert-timestamp", str(source), "-lkernel32", "-luser32", "-lgdi32",
-            "-ladvapi32", "-o", str(artifact)], "exit_code": 0, "stdout": "", "stderr": ""}]
+            "-Wl,--no-insert-timestamp", *[str(root / relative) for relative in inputs], *libraries,
+            "-o", str(artifact)], "exit_code": 0, "stdout": "", "stderr": ""}]
         return receipt, payload, commands
+
+    def observer_envelope(self, root):
+        return self.native_envelope(root, "SHZOBS.EXE")
 
     def write_envelope(self, receipt, payload, commands):
         receipt.write_text(json.dumps(payload))
         (receipt.parent / "commands.json").write_text(json.dumps(commands))
         return hashlib.sha256(receipt.read_bytes()).hexdigest()
+
+    def bootstrap_envelope(self, root):
+        receipt, payload, commands = self.native_envelope(root, "SHZGBOOT.EXE")
+        for relative in ("ntwddm/win98/theme_global_startup/launcher_host_test.c", "ntwddm/win98/theme_global_startup/launcher_mock.h"):
+            source = root / relative; source.write_bytes(("/* fixture " + relative + " */\n").encode())
+            payload["source_hashes"][relative] = hashlib.sha256(source.read_bytes()).hexdigest()
+        text = "PASS: 32 global bootstrap checks"
+        payload["host_compiler_version"] = "clang fixture-version"
+        payload["host_tests"] = [{"kind": kind, "result": text, "completed_checks": 32} for kind in ("host", "sanitizer")]
+        for kind in ("host", "sanitizer"):
+            flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if kind == "sanitizer" else []
+            binary = root / kind
+            commands.append({"argv": ["clang", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", *flags,
+                str(root / "ntwddm/win98/theme_global_startup/launcher_host_test.c"), "-o", str(binary)], "exit_code": 0, "stdout": "", "stderr": ""})
+            commands.append({"argv": [str(binary)], "exit_code": 0, "stdout": text + "\n", "stderr": ""})
+        return receipt, payload, commands
+
+    def test_bootstrap_requires_matching_actual_host_sanitizer_and_native_commands(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipt, payload, commands = self.bootstrap_envelope(root)
+            selected = self.write_envelope(receipt, payload, commands)
+            artifact, _ = trial.build_input(receipt, selected, "SHZGBOOT.EXE")
+            self.assertEqual(artifact, root / "SHZGBOOT.EXE")
+
+    def test_bootstrap_declared_checks_missing_runs_or_wrong_native_artifact_reject(self):
+        for defect in ("too_few", "different_counts", "duplicate_kind", "missing_runtime", "runtime_failed",
+                       "wrong_stdout", "no_sanitizer", "wrong_role", "wrong_artifact", "no_commands"):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); receipt, payload, commands = self.bootstrap_envelope(root)
+                if defect == "too_few":
+                    for row in payload["host_tests"]: row["result"] = "PASS: 29 global bootstrap checks"
+                elif defect == "different_counts": payload["host_tests"][1]["result"] = "PASS: 33 global bootstrap checks"
+                elif defect == "duplicate_kind": payload["host_tests"][1]["kind"] = "host"
+                elif defect == "missing_runtime": commands.pop()
+                elif defect == "runtime_failed": commands[-1]["exit_code"] = 1
+                elif defect == "wrong_stdout": commands[-1]["stdout"] = "PASS: 999 global bootstrap checks\n"
+                elif defect == "no_sanitizer": commands[-2]["argv"].remove("-fsanitize=address,undefined")
+                elif defect == "wrong_role": payload["executable"]["native_gate"]["role"] = "observer"
+                elif defect == "wrong_artifact": payload["executable"]["sha256"] = "0" * 64
+                else: commands = []
+                selected = self.write_envelope(receipt, payload, commands)
+                with self.assertRaises(trial.TrialError): trial.build_input(receipt, selected, "SHZGBOOT.EXE")
 
     def test_actual_observer_singular_compiler_envelope_is_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -311,7 +446,60 @@ class CompiledReceiptBoundary(unittest.TestCase):
             executable, records = trial.build_input(receipt, selected, "SHZOBS.EXE")
             self.assertEqual(executable, root / "SHZOBS.EXE")
             self.assertEqual({row["role"] for row in records},
-                             {"pe_commands:SHZOBS.EXE", "pe_source:SHZOBS.EXE:observer.c"})
+                             {"pe_commands:SHZOBS.EXE", "pe_source:SHZOBS.EXE:ntwddm/win98/theme_global_probe/observer.c",
+                              "pe_source:SHZOBS.EXE:platform/freestanding/memory.c"})
+
+    def test_all_three_genuine_compiler_recipe_envelopes_remain_accepted(self):
+        for name in ("SHZTHEME.EXE", "SHZOBS.EXE", "SHZGBOOT.EXE"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                receipt, payload, commands = self.bootstrap_envelope(root) if name == "SHZGBOOT.EXE" else self.native_envelope(root, name)
+                selected = self.write_envelope(receipt, payload, commands)
+                self.assertEqual(trial.build_input(receipt, selected, name)[0], root / name)
+
+    def test_swapped_unhashed_extra_response_or_plugin_native_inputs_reject(self):
+        defects = ("swapped", "extra_unhashed", "extra_hashed", "response", "include", "imacros", "plugin",
+                   "object", "library_path", "noncanonical", "missing_hash")
+        for defect in defects:
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); receipt, payload, commands = self.observer_envelope(root)
+                source = str(root / "ntwddm/win98/theme_global_probe/observer.c")
+                extra = root / "unrelated.c"; extra.write_bytes(b"/* unapproved source */\n")
+                argv = commands[0]["argv"]
+                if defect == "swapped":
+                    payload["source_hashes"]["unrelated.c"] = hashlib.sha256(extra.read_bytes()).hexdigest()
+                    argv[argv.index(source)] = str(extra)
+                elif defect.startswith("extra_"):
+                    argv.insert(argv.index("-o"), str(extra))
+                    if defect == "extra_hashed": payload["source_hashes"]["unrelated.c"] = hashlib.sha256(extra.read_bytes()).hexdigest()
+                elif defect == "response": argv.insert(1, "@" + str(root / "inputs.rsp"))
+                elif defect in ("include", "imacros"): argv[1:1] = ["-" + defect, str(root / "unhashed.h")]
+                elif defect == "plugin": argv.insert(1, "-fplugin=" + str(root / "unhashed.so"))
+                elif defect == "object": argv.insert(1, str(root / "unhashed.o"))
+                elif defect == "library_path": argv.insert(1, str(root / "unhashed.a"))
+                elif defect == "noncanonical": argv[argv.index(source)] = str(root) + "/ntwddm/win98/theme_global_probe/../theme_global_probe/observer.c"
+                else: payload["source_hashes"].pop("ntwddm/win98/theme_global_probe/observer.c")
+                selected = self.write_envelope(receipt, payload, commands)
+                with self.assertRaises(trial.TrialError): trial.build_input(receipt, selected, "SHZOBS.EXE")
+
+    def test_host_source_mock_header_and_implicit_inputs_are_source_bound(self):
+        for defect in ("swapped", "extra", "response", "include", "plugin", "missing_mock", "missing_host_hash"):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); receipt, payload, commands = self.bootstrap_envelope(root)
+                argv = commands[-2]["argv"]
+                source = str(root / "ntwddm/win98/theme_global_startup/launcher_host_test.c")
+                extra = root / "foreign_test.c"; extra.write_bytes(b"/* not the shared host test */\n")
+                if defect == "swapped":
+                    payload["source_hashes"]["foreign_test.c"] = hashlib.sha256(extra.read_bytes()).hexdigest()
+                    argv[argv.index(source)] = str(extra)
+                elif defect == "extra": argv.insert(1, str(extra))
+                elif defect == "response": argv.insert(1, "@" + str(root / "host-inputs.rsp"))
+                elif defect == "include": argv[1:1] = ["-include", str(root / "unhashed.h")]
+                elif defect == "plugin": argv.insert(1, "-fplugin=" + str(root / "unhashed.so"))
+                elif defect == "missing_mock": payload["source_hashes"].pop("ntwddm/win98/theme_global_startup/launcher_mock.h")
+                else: payload["source_hashes"].pop("ntwddm/win98/theme_global_startup/launcher_host_test.c")
+                selected = self.write_envelope(receipt, payload, commands)
+                with self.assertRaises(trial.TrialError): trial.build_input(receipt, selected, "SHZGBOOT.EXE")
 
     def test_observer_version_does_not_replace_actual_command_and_role_gates(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -408,19 +596,20 @@ class OwnedPlanScope(unittest.TestCase):
     def plan(self):
         roots = [self.root / "build" / ("global-theme-6970-" + role + "-abc")
                  for role in ("stage", "consumer", "run", "bootstrap")]
-        return {"schema": 1, "kind": "native-win98-global-selector-two-cold-boots-v1",
+        return {"schema": 2, "kind": "native-win98-global-selector-two-cold-boots-v2",
                 "owner_root": str(self.root), "nonce": NONCE,
                 "roots": {role: str(path) for role, path in zip(("stage", "consumer", "run", "bootstrap"), roots)},
                 "host_output_budget": {"schema": 1, "roots": [str(p) for p in roots],
                     "excluded_private_cow": str(roots[2] / "windows-uefi.raw"),
                     "limit_bytes": 16777216, "reserve_bytes": 21474836480},
                 "cow_quota_bytes": 268435456, "runtime_bound_seconds": 900,
-                "startup_executable": "C:\\VXDLAB\\SHZOBS.EXE", "two_cold_epochs": 2,
+                "startup_executable": "C:\\VXDLAB\\SHZGBOOT.EXE", "two_cold_epochs": 2,
                 "machine_profile": "q35-kvm-qemu64-2cpu-128m-gop-offline",
                 "scope": "OEM_WIN98_CONTROL_NOT_SHIZUKUDOS_REPLACEMENT"}
 
     def test_old_plan_kind_and_unsafe_path_fail_before_mutations(self):
         for field, value in (("kind", "native-theme-empty-winini-run-on-owned-cow-v1"),
+                             ("kind", "native-win98-global-selector-two-cold-boots-v1"), ("schema", 1),
                              ("startup_executable", "C:\\VXDLAB\\SHZOBS.EXE /restore"),
                              ("two_cold_epochs", 1), ("cow_quota_bytes", 536870912)):
             plan = self.plan(); plan[field] = value
@@ -440,6 +629,21 @@ class OwnedPlanScope(unittest.TestCase):
         with self.assertRaises(trial.TrialError): trial.require_fresh_roots(plan, self.root)
         alias = self.root / "alias";alias.symlink_to(self.root, target_is_directory=True)
         with self.assertRaises(trial.TrialError): trial.safe_path(alias)
+
+    def test_frozen_kvm_and_guard_cannot_rebind_different_source_hashes(self):
+        roles = {"canonical": "1", "adapter": "2", "cow": "3", "qemu_helper": "4", "shzlib": "5",
+                 "own:tools/theme_native_runner.py": "6", "own:tools/global_theme_kvm_gate.py": "7"}
+        bindings = [{"role": name, "sha256": digit * 64} for name, digit in roles.items()]
+        frozen = {name + ".py": roles[name] * 64 for name in ("canonical", "adapter", "cow", "qemu_helper", "shzlib")}
+        frozen.update({"guard.py": "6" * 64, "kvm_gate.py": "7" * 64})
+        plan = {"bindings": bindings, "frozen_helpers": frozen}
+        trial.validate_frozen_helpers(plan)
+        for name in ("kvm_gate.py", "guard.py", "adapter.py"):
+            original = frozen[name]
+            try:
+                frozen[name] = "f" * 64
+                with self.subTest(name=name), self.assertRaises(trial.TrialError): trial.validate_frozen_helpers(plan)
+            finally: frozen[name] = original
 
 
 if __name__ == "__main__":

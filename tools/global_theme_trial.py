@@ -31,19 +31,37 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 PEER = Path("/root/Win98-Modern-boot")
-KIND = "native-win98-global-selector-two-cold-boots-v1"
+KIND = "native-win98-global-selector-two-cold-boots-v2"
 BASE = PEER / "build/shizukudos/csm/run-win98-gop-theme-5abe-native-v1/windows-uefi.raw"
 BASE_SHA = "828080b6bc04dfdeafaa8cded0e3e5c7c6698bb38b6c21d094b5cf38ed1e5b05"
 BASE_RECEIPT_SHA = "28328280a25dad4996616bf105a63e00ed1f6e16c70f4a64142a62a2d095761b"
 RESERVE = 20 * 1024**3
 QUOTA = 256 * 1024**2
 HOST_LIMIT = 16 * 1024**2
-STARTUP = r"C:\VXDLAB\SHZOBS.EXE"
+STARTUP = r"C:\VXDLAB\SHZGBOOT.EXE"
+OBSERVER_COMMAND = '"C:\\VXDLAB\\SHZOBS.EXE"'
 RUN_COMMAND = b'"C:\\VXDLAB\\SHZTHEME.EXE" /restore\0'
 SELECTOR_COMMAND = '"C:\\VXDLAB\\SHZTHEME.EXE"'
 ROLES = ("stage", "consumer", "run", "bootstrap")
-INPUTS = ("SHZTHEME.EXE", "SHZOBS.EXE", "SHZCASE.TXT")
+COMPONENTS = (("selector", "SHZTHEME.EXE"), ("observer", "SHZOBS.EXE"), ("bootstrap", "SHZGBOOT.EXE"))
+NATIVE_INPUTS = {
+    "SHZTHEME.EXE": ("ntwddm/win98/theme_selector/selector_core.c", "ntwddm/win98/theme_selector/selector_win98.c",
+                     "platform/freestanding/memory.c"),
+    "SHZOBS.EXE": ("ntwddm/win98/theme_global_probe/observer.c", "platform/freestanding/memory.c"),
+    "SHZGBOOT.EXE": ("ntwddm/win98/theme_global_startup/launcher.c", "platform/freestanding/memory.c"),
+}
+NATIVE_FLAGS = ("-std=c11", "-Os", "-Wall", "-Wextra", "-Werror", "-march=i486", "-mno-sse", "-mno-sse2",
+    "-mno-mmx", "-msoft-float", "-fno-builtin", "-fno-stack-protector", "-mno-stack-arg-probe", "-nostdlib",
+    "-Wl,--entry,_mainCRTStartup", "-Wl,--subsystem,windows:4.10", "-Wl,--major-os-version,4", "-Wl,--minor-os-version,10",
+    "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--disable-tsaware", "-Wl,--no-insert-timestamp")
+BOOT_HOST_INPUT = "ntwddm/win98/theme_global_startup/launcher_host_test.c"
+BOOT_HOST_CLOSURE = (BOOT_HOST_INPUT, "ntwddm/win98/theme_global_startup/launcher.c",
+                     "ntwddm/win98/theme_global_startup/launcher_mock.h")
+HOST_FLAGS = ("-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror")
+SAN_FLAGS = ("-fsanitize=address,undefined", "-fno-omit-frame-pointer")
+INPUTS = ("SHZTHEME.EXE", "SHZOBS.EXE", "SHZGBOOT.EXE", "SHZCASE.TXT")
 LOGS = ("SHZGLOB1.LOG", "SHZGLOB2.LOG")
+BOOT_LOGS = ("SHZGB1.LOG", "SHZGB2.LOG")
 MTOOLS_ROLES = frozenset({"mcopy", "mdir", "mtype", "mattrib"})
 SNAPSHOT_FIELDS = ("PROFILE_TYPE", "PROFILE_BYTES", "PROFILE_RAW", "RUN_TYPE", "RUN_BYTES", "RUN_RAW")
 # Independently specified legacy COLORREF contract; no product/provider imports.
@@ -52,7 +70,8 @@ SHIZOS = (0xcfcfcf, 0x452e13, 0xd77800, 0x888078, 0xf0f0f0,
           0xa0a0a0, 0xd77800, 0xffffff, 0xf0f0f0, 0xa0a0a0,
           0x808080, 0, 0xf0f0f0, 0xffffff, 0x606060, 0xe0e0e0, 0, 0xe1ffff)
 OWN_SOURCES = ("tools/global_theme_trial.py", "tests/test_global_theme_trial.py",
-               "tools/theme_native_runner.py", "tools/theme_startup_trial.py")
+               "tools/theme_native_runner.py", "tools/theme_startup_trial.py",
+               "tools/global_theme_kvm_gate.py", "tests/test_global_theme_kvm_gate.py")
 PEER_SOURCES = {"canonical": "shizukudos/csm/test_win98_uefi.py",
                 "adapter": "shizukudos/iosys_uefi/boot.py",
                 "cow": "shizukudos/iosys_uefi/cow_accounting.py",
@@ -188,7 +207,7 @@ def cumulative_growth(baseline, current):
 
 
 def validate_plan_shape(plan, owner_root=ROOT):
-    need(plan.get("schema") == 1 and plan.get("kind") == KIND, "Old or unsupported plan kind")
+    need(plan.get("schema") == 2 and plan.get("kind") == KIND, "Old or unsupported plan kind")
     owner = safe_path(plan.get("owner_root", ""))
     need(owner == safe_path(owner_root), "Plan belongs to another source checkout")
     need(plan.get("cow_quota_bytes") == QUOTA and plan.get("runtime_bound_seconds") == 900
@@ -259,6 +278,7 @@ def parse_observer_log(data, nonce, phase, first=None):
         return value
 
     take("HEADER", "SHZGLOB%d_V1" % phase); take("NONCE", nonce); number("PHASE", phase)
+    observer_pid = number("OBSERVER_PID"); need(observer_pid > 0, "Actual native observer PID missing")
     take("OBSERVER_ROLE", "INDEPENDENT_NATIVE_READ_ONLY_THEME_OBSERVER")
     take("PROCESS_SELF_LOG_IS_NOT", "EXTERNAL_EXIT_OR_BOOT_OR_SOURCE_PROOF")
     number("OS_PLATFORM", 1); number("OS_MAJOR", 4); number("OS_MINOR", 10)
@@ -327,9 +347,66 @@ def parse_observer_log(data, nonce, phase, first=None):
     number("EVIDENCE_COMPLETE_REQUIRES_EXTERNAL_EXIT", 1); number("OBSERVER_REQUESTED_EXIT", 0)
     need(index == len(rows), "Extra observer records")
     return {"phase": phase, "nonce": nonce, "baseline": baseline, "stages": stages,
-            "observations": observations, "final_profile": saved.hex(), "child_pid": pid,
+            "observations": observations, "final_profile": final_profile.hex(), "child_pid": pid,
+            "cold_boot_saved_profile": saved.hex() if phase == 2 else None,
+            "observer_pid": observer_pid, "os_build_raw": raw_build,
             "child_exit_code": 0, "observer_exit": "NOT_OBSERVED_SELF_LOG_ONLY",
             "restore_process_exit": "NOT_OBSERVED_NO_PROCESS_HANDLE" if phase == 2 else "NOT_APPLICABLE"}
+
+
+def parse_bootstrap_log(data, nonce, phase, observer):
+    """Parent handle evidence proves observer exit; final parent IO/exit stays unknown."""
+    case_bytes(nonce, phase)
+    need(isinstance(observer, dict) and observer.get("nonce") == nonce and observer.get("phase") == phase,
+         "Bootstrap lacks matching independently decoded observer evidence")
+    need(isinstance(data, bytes) and 0 < len(data) <= 4096 and data.endswith(b"\r\n"), "Incomplete/bounded bootstrap log")
+    need(not re.search(rb"[^\x20-\x7e\r\n]", data) and not re.search(rb"(?<!\r)\n|\r(?!\n)", data),
+         "Bootstrap ASCII/CRLF malformed")
+    rows = []
+    for line in data[:-2].decode("ascii").split("\r\n"):
+        key, sep, value = line.partition("=")
+        need(sep and re.fullmatch("[A-Z0-9_]+", key) and key not in ("FAIL_STAGE", "FAIL_ERROR"),
+             "Bootstrap failure/invalid record")
+        rows.append((key, value))
+    index = 0
+
+    def take(key, wanted=None):
+        nonlocal index
+        need(index < len(rows) and rows[index][0] == key, "Missing, duplicate or out-of-order bootstrap " + key)
+        value = rows[index][1]; index += 1
+        need(wanted is None or value == wanted, "Incorrect bootstrap " + key)
+        return value
+
+    def number(key, wanted=None):
+        text = take(key)
+        need(re.fullmatch("0|[1-9][0-9]{0,9}", text) is not None, "Invalid bootstrap DWORD")
+        value = int(text)
+        need(value <= 0xffffffff and (wanted is None or value == wanted), "Incorrect bootstrap DWORD " + key)
+        return value
+
+    take("HEADER", "SHZGB%d_V1" % phase); take("NONCE", nonce); number("PHASE", phase)
+    parent_pid = number("BOOTSTRAP_PID"); need(parent_pid > 0, "Actual bootstrap PID missing")
+    take("BOOTSTRAP_PATH", STARTUP); take("BOOTSTRAP_COMMAND_MODE", "FIXED_PATH_NO_ARGUMENTS")
+    number("OS_PLATFORM", 1); number("OS_MAJOR", 4); number("OS_MINOR", 10)
+    raw_build = number("OS_BUILD_RAW"); number("OS_BUILD_LOW_WORD", 2222)
+    need(raw_build & 65535 == 2222 and raw_build == observer.get("os_build_raw"), "Bootstrap/observer native OS build differs")
+    take("OBSERVER_COMMAND", OBSERVER_COMMAND); take("OBSERVER_WORKING_DIRECTORY", r"C:\VXDLAB")
+    number("OBSERVER_INHERIT_HANDLES", 0)
+    observer_pid = number("OBSERVER_PID")
+    need(observer_pid > 0 and observer_pid == observer.get("observer_pid")
+         and len({parent_pid, observer_pid, observer.get("child_pid")}) == 3, "Parent/observer/GUI process identity differs")
+    number("OBSERVER_THREAD_HANDLE_CLOSED", 1); number("OBSERVER_WAIT_RESULT", 0)
+    number("OBSERVER_EXIT_QUERY_SUCCEEDED", 1); number("OBSERVER_EXIT_CODE", 0)
+    number("OBSERVER_PROCESS_HANDLE_CLOSED", 1); number("LOG_FLUSH_OBSERVED", 1)
+    for key in ("LOG_FINAL_FLUSH", "LOG_FINAL_CLOSE"):
+        take(key, "REQUESTED_NOT_EXTERNALLY_OBSERVED")
+    take("BOOTSTRAP_EXTERNAL_EXIT", "NOT_OBSERVED"); number("BOOTSTRAP_REQUESTED_EXIT", 0)
+    take("RESULT", "NOT_A_FINAL_BOOTSTRAP_EXIT_VERDICT")
+    need(index == len(rows), "Extra bootstrap records or termination claims")
+    return {"phase": phase, "nonce": nonce, "bootstrap_pid": parent_pid, "observer_pid": observer_pid,
+            "os_build_raw": raw_build, "observer_wait_result": 0, "observer_exit_code": 0,
+            "thread_handle_closed": True, "process_handle_closed": True, "observer_exit": "OBSERVED_NORMAL_ZERO",
+            "bootstrap_exit": "NOT_OBSERVED", "final_io": "REQUESTED_NOT_EXTERNALLY_OBSERVED"}
 
 
 def load_module(name, path):
@@ -367,6 +444,13 @@ def by_role(plan, role):
     matches = [x for x in plan["bindings"] if x["role"] == role]
     need(len(matches) == 1, "Required binding absent: " + role)
     return matches[0]
+
+
+def validate_frozen_helpers(plan):
+    expected = {role + ".py": by_role(plan, role)["sha256"] for role in PEER_SOURCES}
+    expected.update({"guard.py": by_role(plan, "own:tools/theme_native_runner.py")["sha256"],
+                     "kvm_gate.py": by_role(plan, "own:tools/global_theme_kvm_gate.py")["sha256"]})
+    need(plan.get("frozen_helpers") == expected, "Frozen runtime helper bytes differ from pinned source closure")
 
 
 def protected_sources_quiet(nr, plan):
@@ -434,7 +518,7 @@ def guarded_mtool(plan, guard, role, arguments, **kwargs):
 
 
 def build_input(path, expected_sha, expected_name):
-    need(expected_name in {"SHZTHEME.EXE", "SHZOBS.EXE"}, "Unknown native PE input role")
+    need(expected_name in {name for _, name in COMPONENTS}, "Unknown native PE input role")
     need(re.fullmatch("[0-9a-f]{64}", expected_sha or "") and sha(path) == expected_sha, "Selected PE build receipt SHA differs")
     data = read_json(path)
     need(isinstance(data, dict) and data.get("status") == "PASS" and
@@ -447,8 +531,8 @@ def build_input(path, expected_sha, expected_name):
         expected_role = "selector"
     else:
         version = data.get("compiler_version")
-        need(isinstance(version, str) and version.strip(), "Observer compiler_version record absent")
-        expected_role = "observer"
+        need(isinstance(version, str) and version.strip(), "Observer/bootstrap compiler_version record absent")
+        expected_role = "observer" if expected_name == "SHZOBS.EXE" else "bootstrap"
     artifact = data.get("executable", {})
     source = safe_path(artifact.get("path", ""))
     gate = artifact.get("native_gate", {})
@@ -461,6 +545,8 @@ def build_input(path, expected_sha, expected_name):
         need({row.get("kind") for row in data.get("host_tests", [])} >= {"host", "sanitizer"} and
              all(str(row.get("result", "")).startswith("PASS:") for row in data["host_tests"]), "Product host/SAN completed assertions absent")
     commands_path = safe_path(path).parent / "commands.json"
+    if expected_name == "SHZGBOOT.EXE":
+        need(commands_path.exists(), "Bootstrap complete commands.json absent")
     commands = read_json(commands_path) if commands_path.exists() else data.get("commands")
     need(isinstance(commands, list), "Executed compiler command records absent; hash-only metadata rejected")
     compiled = [row for row in commands if isinstance(row, dict) and isinstance(row.get("argv"), list)
@@ -473,6 +559,9 @@ def build_input(path, expected_sha, expected_name):
           "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--disable-tsaware", "-Wl,--no-insert-timestamp"} <= set(flags),
          "Actual native compiler legacy flags absent")
     source_root = safe_path(data["source_root"])
+    require_native_recipe(flags, source_root, data["source_hashes"], expected_name, source)
+    if expected_name == "SHZGBOOT.EXE":
+        require_bootstrap_host_evidence(data, commands, safe_path(path).parent)
     records = []
     if commands_path.exists():
         records.append(binding("pe_commands:" + expected_name, commands_path))
@@ -483,6 +572,59 @@ def build_input(path, expected_sha, expected_name):
         need(item["sha256"] == digest, "PE source receipt is stale")
         records.append(item)
     return source, records
+
+
+def hashed_recipe_sources(source_root, source_hashes, names):
+    paths = []
+    for name in names:
+        need(name in source_hashes and isinstance(source_hashes[name], str)
+             and re.fullmatch("[0-9a-f]{64}", source_hashes[name]), "Required compiler source member absent from hash closure: " + name)
+        paths.append(str(safe_path(source_root / name)))
+    return paths
+
+
+def require_native_recipe(argv, source_root, source_hashes, name, output):
+    inputs = hashed_recipe_sources(source_root, source_hashes, NATIVE_INPUTS[name])
+    libraries = ["-lkernel32"] if name == "SHZGBOOT.EXE" else ["-lkernel32", "-luser32", "-lgdi32", "-ladvapi32"]
+    # Exact reviewed recipes exclude response files, injected includes/macros,
+    # plugins, extra objects/sources and arbitrary library search/input paths.
+    need(argv[1:] == [*NATIVE_FLAGS, *inputs, *libraries, "-o", str(output)],
+         "Unsupported or unbound native compiler recipe/source operands")
+
+
+def require_bootstrap_host_evidence(data, commands, directory):
+    need(isinstance(data.get("host_compiler_version"), str) and data["host_compiler_version"].strip(),
+         "Bootstrap actual host compiler version absent")
+    tests = data.get("host_tests")
+    need(isinstance(tests, list) and len(tests) == 2 and all(isinstance(row, dict) for row in tests)
+         and {row.get("kind") for row in tests} == {"host", "sanitizer"}, "Bootstrap unique HOST/SAN checks absent")
+    need(all(isinstance(row, dict) and isinstance(row.get("argv"), list) and row["argv"]
+             and row.get("exit_code") == 0 for row in commands), "Bootstrap command execution incomplete/failed")
+    source_root = safe_path(data["source_root"])
+    inputs = hashed_recipe_sources(source_root, data["source_hashes"], BOOT_HOST_CLOSURE)
+    counts = []
+    for item in tests:
+        result = item.get("result", "")
+        match = re.fullmatch(r"PASS: ([1-9][0-9]*) global bootstrap checks", result) if isinstance(result, str) else None
+        need(match is not None, "Bootstrap actual completed assertion text absent")
+        count = int(match[1]); counts.append(count)
+        need(count >= 30 and type(item.get("completed_checks")) is int and item["completed_checks"] == count,
+             "Bootstrap completed assertion count differs/below required minimum")
+        binary = str(directory / item["kind"])
+        runs = [row for row in commands if row["argv"] == [binary]]
+        need(len(runs) == 1 and runs[0].get("stdout", "").strip() == result,
+             "Bootstrap actual HOST/SAN zero-exit run output absent")
+        compiled = [row for row in commands if Path(row["argv"][0]).name == "clang"
+                    and row["argv"][-2:] == ["-o", binary]]
+        need(len(compiled) == 1 and {"-std=c11", "-Wall", "-Wextra", "-Werror"} <= set(compiled[0]["argv"]),
+             "Bootstrap actual host compiler zero-exit command absent")
+        flags = SAN_FLAGS if item["kind"] == "sanitizer" else ()
+        need(compiled[0]["argv"][1:] == [*HOST_FLAGS, *flags, inputs[0], "-o", binary],
+             "Unsupported or unbound bootstrap host compiler recipe/source operands")
+        if item["kind"] == "sanitizer":
+            need({"-fsanitize=address,undefined", "-fno-omit-frame-pointer"} <= set(compiled[0]["argv"]),
+                 "Bootstrap actual sanitizer compiler flags absent")
+    need(counts[0] == counts[1], "Bootstrap HOST/SAN completed different assertions")
 
 
 def boot_sectors(disk, partition):
@@ -528,7 +670,7 @@ def guest_readback_inputs(plan, epoch):
     need(epoch in (1, 2), "Stopped readback epoch invalid")
     stage, bootstrap = (Path(plan["roots"][name]) for name in ("stage", "bootstrap"))
     files, payloads = {}, {}
-    for role, name in (("selector", "SHZTHEME.EXE"), ("observer", "SHZOBS.EXE")):
+    for role, name in COMPONENTS:
         payload = bounded(stage / name, 1024**2)
         artifact = by_role(plan, role)
         digest = hashlib.sha256(payload).hexdigest()
@@ -604,9 +746,10 @@ def prepare(args):
          and base["partition"]["firmware_gop_opt_in"] is True, "Installed OEM/GOP base provenance mismatch")
     selector, product_sources = build_input(args.selector_receipt, args.selector_receipt_sha, "SHZTHEME.EXE")
     observer, observer_sources = build_input(args.observer_receipt, args.observer_receipt_sha, "SHZOBS.EXE")
+    parent, bootstrap_sources = build_input(args.bootstrap_build, args.bootstrap_build_sha, "SHZGBOOT.EXE")
     token = uuid.uuid4().hex[:12]
     roots = {role: str(ROOT / "build" / ("global-theme-6970-" + role + "-" + token)) for role in ROLES}
-    plan = {"schema": 1, "kind": KIND, "owner_root": str(ROOT), "peer_root": str(PEER),
+    plan = {"schema": 2, "kind": KIND, "owner_root": str(ROOT), "peer_root": str(PEER),
             "nonce": uuid.uuid4().hex, "roots": roots, "cow_quota_bytes": QUOTA,
             "runtime_bound_seconds": 900, "two_cold_epochs": 2, "startup_executable": STARTUP,
             "machine_profile": "q35-kvm-qemu64-2cpu-128m-gop-offline",
@@ -619,7 +762,8 @@ def prepare(args):
     need(base.get("immutable_sources") == {base["archive"]: sha(base["archive"]), base["checkpoint_record"]: sha(base["checkpoint_record"])}, "Archive/checkpoint changed")
     artifacts += [binding("archive", base["archive"]), binding("checkpoint", base["checkpoint_record"]),
                   binding("selector_receipt", args.selector_receipt), binding("observer_receipt", args.observer_receipt),
-                  binding("selector", selector), binding("observer", observer)] + product_sources + observer_sources
+                  binding("bootstrap_receipt", args.bootstrap_build), binding("selector", selector),
+                  binding("observer", observer), binding("bootstrap", parent)] + product_sources + observer_sources + bootstrap_sources
     for name in OWN_SOURCES:
         artifacts.append(binding("own:" + name, ROOT / name))
     for role, name in PEER_SOURCES.items():
@@ -647,9 +791,11 @@ def prepare(args):
     for role in PEER_SOURCES:
         new_file(frozen / (role + ".py"), bounded(by_role(plan, role)["path"], 2 * 1024**2))
     new_file(frozen / "guard.py", bounded(ROOT / "tools/theme_native_runner.py", 2 * 1024**2))
+    new_file(frozen / "kvm_gate.py", bounded(ROOT / "tools/global_theme_kvm_gate.py", 65536))
     plan["frozen_helpers"] = {p.name: sha(p) for p in frozen.iterdir()}
+    validate_frozen_helpers(plan)
     new_file(bootstrap / "SHZCASE2.TXT", case_bytes(plan["nonce"], 2))
-    for path, name in ((selector, "SHZTHEME.EXE"), (observer, "SHZOBS.EXE")):
+    for path, name in ((selector, "SHZTHEME.EXE"), (observer, "SHZOBS.EXE"), (parent, "SHZGBOOT.EXE")):
         new_file(stage / name, bounded(path, 1024**2))
     new_file(stage / "SHZCASE.TXT", case_bytes(plan["nonce"], 1))
     guard.check("before-private-reflink")
@@ -665,7 +811,7 @@ def prepare(args):
     plan["cow_baseline_before_injection"] = baseline.to_dict()
     guard.check("pre-injection-original-baseline", require_cow=True)
     spec = guest_spec(plan)
-    for name in INPUTS + LOGS:
+    for name in INPUTS + LOGS + BOOT_LOGS:
         absent(plan, guard, name)
     boot_sectors(disk, plan["partition"])
     original = mtype(plan, guard, "::/WINDOWS/WIN.INI", 65536)
@@ -701,6 +847,14 @@ def load_plan(path, selected_sha, *, full_bindings=True):
     need(re.fullmatch("[0-9a-f]{64}", selected_sha or "") and sha(path) == selected_sha, "Selected plan SHA differs")
     plan = read_json(path, 256 * 1024)
     validate_plan_shape(plan)
+    need(set(plan.get("stage_hashes", {})) == set(INPUTS) and "kvm_gate.py" in plan.get("frozen_helpers", {}),
+         "v2 third guest executable or frozen KVM gate absent")
+    for role, name in COMPONENTS:
+        artifact = by_role(plan, role)
+        by_role(plan, role + "_receipt")
+        need(Path(artifact["path"]).name == name and artifact["sha256"] == plan["stage_hashes"][name]
+             and any(row["role"].startswith("pe_source:" + name + ":") for row in plan["bindings"]),
+             "v2 mandatory PE/build source closure absent")
     need(plan.get("peer_root") == str(PEER) and plan.get("snapshot") == "windows98-clean-installed"
          and by_role(plan, "base_disk")["path"] == str(BASE)
          and by_role(plan, "base_disk")["sha256"] == BASE_SHA
@@ -710,6 +864,7 @@ def load_plan(path, selected_sha, *, full_bindings=True):
         need(by_role(plan, "own:" + name)["path"] == str(ROOT / name), "Current runtime source binding absent")
     for role, name in PEER_SOURCES.items():
         need(by_role(plan, role)["path"] == str(PEER / name), "Reviewed peer helper binding differs")
+    validate_frozen_helpers(plan)
     need(safe_path(path).parent == Path(plan["roots"]["stage"]) and Path(path).name == "global-theme-plan.json", "Plan outside exact owned stage")
     for role in ROLES:
         root = safe_path(plan["roots"][role]); info = root.stat()
@@ -839,7 +994,7 @@ def queue_input(path, selected_sha, epoch, sequence, action):
     guard.check("after-queued-manual-input", require_cow=True)
 
 
-def epoch_run(plan, plan_path, selected_sha, epoch, nr, guard, cow, sample, qemu):
+def epoch_run(plan, plan_path, selected_sha, epoch, nr, guard, cow, sample, qemu, kvm_gate):
     root = Path(plan["roots"]["run"]) / ("e" + str(epoch))
     need(not root.exists(), "Cold epoch output is stale")
     nr.ensure_unopened(assert_private(plan)); protected_sources_quiet(nr, plan)
@@ -851,11 +1006,12 @@ def epoch_run(plan, plan_path, selected_sha, epoch, nr, guard, cow, sample, qemu
     root.mkdir(mode=0o700)
     new_file(root / "OVMF_VARS.fd", bounded(by_role(plan, "ovmf_vars")["path"], 8 * 1024**2))
     argv = qemu_arguments(plan, epoch)
-    report = {"schema": 1, "status": "FAIL", "epoch": epoch, "nonce": plan["nonce"],
+    report = {"schema": 2, "status": "FAIL", "epoch": epoch, "nonce": plan["nonce"],
         "plan_sha256": selected_sha, "cold_hardware": True, "cpu_ram_snapshot_loaded": False,
         "private_cow_identity": plan["private_cow_identity"], "original_baseline": plan["cow_baseline_before_injection"],
         "fresh_vars_sha256": sha(root / "OVMF_VARS.fd"), "argv": argv, "inputs": [], "captures": [],
-        "qemu_child_reaped": False, "observer_external_exit": "NOT_OBSERVED", "raw_full_framebuffer": "NOT_COLLECTED"}
+        "qemu_child_reaped": False, "observer_external_exit": "NOT_OBSERVED",
+        "bootstrap_external_exit": "NOT_OBSERVED", "raw_full_framebuffer": "NOT_COLLECTED"}
     baseline = cow.AllocationObservation(**plan["cow_baseline_before_injection"])
     child, monitor = None, None
     try:
@@ -871,6 +1027,7 @@ def epoch_run(plan, plan_path, selected_sha, epoch, nr, guard, cow, sample, qemu
         need(sha(plan_path) == selected_sha, "Selected plan changed before VM")
         guard.check("after-QEMU-launch", require_cow=True)
         monitor = qemu.QMP(root / "q.sock")
+        report["kvm"] = kvm_gate.validate_kvm_reply(monitor.call("query-kvm"), child.pid)
         active = {"status": "ACTIVE", "epoch": epoch, "nonce": plan["nonce"], "plan_sha256": selected_sha,
                   "owned_qemu_pid": child.pid}
         guard.write_owned_json(root / "active.json", active)
@@ -940,11 +1097,20 @@ def epoch_run(plan, plan_path, selected_sha, epoch, nr, guard, cow, sample, qemu
             first_bytes = bounded(Path(plan["roots"]["run"]) / "e1" / LOGS[0], 32768)
             need(mtype(plan, guard, "::/VXDLAB/" + LOGS[0], 32768) == first_bytes, "Phase1 guest log changed across boot2")
             first = parse_observer_log(first_bytes, plan["nonce"], 1)
+            first_parent_bytes = bounded(Path(plan["roots"]["run"]) / "e1" / BOOT_LOGS[0], 4096)
+            need(mtype(plan, guard, "::/VXDLAB/" + BOOT_LOGS[0], 4096) == first_parent_bytes,
+                 "Phase1 guest bootstrap log changed across boot2")
+            parse_bootstrap_log(first_parent_bytes, plan["nonce"], 1, first)
         report["observer"] = parse_observer_log(data, plan["nonce"], epoch, first)
         new_file(root / LOGS[epoch - 1], data)
         report["observer_log_sha256"] = sha(root / LOGS[epoch - 1])
+        parent_data = mtype(plan, guard, "::/VXDLAB/" + BOOT_LOGS[epoch - 1], 4096)
+        report["bootstrap"] = parse_bootstrap_log(parent_data, plan["nonce"], epoch, report["observer"])
+        new_file(root / BOOT_LOGS[epoch - 1], parent_data)
+        report["bootstrap_log_sha256"] = sha(root / BOOT_LOGS[epoch - 1])
+        report["observer_external_exit"] = "OBSERVED_NORMAL_ZERO"
         report["private_disk_sha256_after_stop"] = sha(assert_private(plan))
-        report["status"] = "NATIVE_EVIDENCE_COLLECTED_EXTERNAL_EXIT_VISUAL_PENDING"
+        report["status"] = "NATIVE_EVIDENCE_COLLECTED_BOOTSTRAP_EXIT_VISUAL_PENDING"
     except BaseException as error:
         report["error"] = str(error)
         raise
@@ -974,12 +1140,14 @@ def execute(path, selected_sha, lock_wait=0):
     frozen = Path(plan["roots"]["consumer"])
     cow = load_module("global_epoch_cow_" + uuid.uuid4().hex, frozen / "cow.py")
     qemu = load_module("global_epoch_qemu_" + uuid.uuid4().hex, frozen / "qemu_helper.py")
+    kvm_gate = load_module("global_epoch_kvm_" + uuid.uuid4().hex, frozen / "kvm_gate.py")
     functions = nr.reviewed_functions(bounded(frozen / "adapter.py", 2 * 1024**2))
     lock = safe_path(PEER / "build/modern-app-native-guest.lock")
     need(stat.S_ISREG(lock.stat().st_mode), "Existing shared native lock required")
-    report = {"schema": 1, "kind": KIND, "status": "FAIL", "plan": str(path), "plan_sha256": selected_sha,
+    report = {"schema": 2, "kind": KIND, "status": "FAIL", "plan": str(path), "plan_sha256": selected_sha,
               "nonce": plan["nonce"], "epochs": [], "scope": plan["scope"], "shizukudos_replacement_verified": False,
               "all_requested_modern_features_verified": False, "observer_process_exit": "NOT_OBSERVED",
+              "bootstrap_process_exit": "NOT_OBSERVED", "bootstrap_final_io": "REQUESTED_NOT_EXTERNALLY_OBSERVED",
               "automatic_restore_process_exit": "NOT_OBSERVED_NO_PROCESS_HANDLE", "full_framebuffer_gate": "NOT_COLLECTED",
               "visual_review": "REQUIRED"}
     with lock.open("rb") as lease:
@@ -997,6 +1165,7 @@ def execute(path, selected_sha, lock_wait=0):
                     before_ini = mtype(plan, guard, "::/WINDOWS/WIN.INI", 65536)
                     need(hashlib.sha256(before_ini).hexdigest() == plan["preparation"]["winini_after_sha256"], "WIN.INI changed between epochs")
                     absent(plan, guard, LOGS[1])
+                    absent(plan, guard, BOOT_LOGS[1])
                     guarded_mtool(plan, guard, "mcopy", ["-o", "-i", guest_spec(plan),
                                            Path(plan["roots"]["bootstrap"]) / "SHZCASE2.TXT", "::/VXDLAB/SHZCASE.TXT"])
                     need(mtype(plan, guard, "::/VXDLAB/SHZCASE.TXT", 60) == case_bytes(plan["nonce"], 2) and
@@ -1006,9 +1175,10 @@ def execute(path, selected_sha, lock_wait=0):
                     allocation(plan, cow, guard)
                     check_bindings(plan)
                 report["epochs"].append(epoch_run(plan, path, selected_sha, epoch, nr, guard, cow,
-                                                  functions["quiescent_cow_observation"], qemu))
+                                                  functions["quiescent_cow_observation"], qemu, kvm_gate))
             report["source_bindings_unchanged"] = True
             check_bindings(plan); protected_sources_quiet(nr, plan)
+            report["observer_process_exit"] = "OBSERVED_NORMAL_ZERO"
             report["status"] = "NEEDS_VISUAL_REVIEW"
         except BaseException as error:
             report["error"] = str(error)
@@ -1028,14 +1198,19 @@ def verify(path, selected_sha):
     disk = assert_private(plan); nr.ensure_unopened(disk); protected_sources_quiet(nr, plan)
     report = read_json(run / "trial-result.json")
     need(report.get("status") == "NEEDS_VISUAL_REVIEW" and report.get("kind") == KIND and
+         report.get("schema") == 2 and report.get("observer_process_exit") == "OBSERVED_NORMAL_ZERO"
+         and report.get("bootstrap_process_exit") == "NOT_OBSERVED"
+         and report.get("bootstrap_final_io") == "REQUESTED_NOT_EXTERNALLY_OBSERVED" and
          report.get("plan_sha256") == selected_sha and report.get("nonce") == plan["nonce"] and
          report.get("source_bindings_unchanged") is True and len(report.get("epochs", [])) == 2,
          "Missing, failed or partial trial evidence")
     need(report.get("host_output_budget", {}).get("status") == "PASS", "Final host-output guard failed")
+    kvm_gate = load_module("global_verify_kvm_" + uuid.uuid4().hex, Path(plan["roots"]["consumer"]) / "kvm_gate.py")
     first, pids = None, []
     for epoch in (1, 2):
         item = read_json(run / ("e" + str(epoch)) / "epoch-result.json")
-        need(item == report["epochs"][epoch - 1] and item.get("status") == "NATIVE_EVIDENCE_COLLECTED_EXTERNAL_EXIT_VISUAL_PENDING"
+        need(item == report["epochs"][epoch - 1] and item.get("schema") == 2
+             and item.get("status") == "NATIVE_EVIDENCE_COLLECTED_BOOTSTRAP_EXIT_VISUAL_PENDING"
              and item.get("epoch") == epoch and item.get("nonce") == plan["nonce"]
              and item.get("plan_sha256") == selected_sha and item.get("cold_hardware") is True
              and item.get("cpu_ram_snapshot_loaded") is False and item.get("qemu_child_reaped") is True
@@ -1046,6 +1221,8 @@ def verify(path, selected_sha):
              and item.get("argv") == qemu_arguments(plan, epoch)
              and item.get("host_output_budget", {}).get("status") == "PASS", "Cold epoch/source/resource evidence differs")
         pids.append(item["owned_qemu_pid"])
+        need(kvm_gate.validate_kvm_reply(item.get("kvm", {}).get("query_kvm_reply"), item["owned_qemu_pid"]) == item.get("kvm"),
+             "Actual owned QEMU KVM evidence differs")
         cumulative_growth(plan["cow_baseline_before_injection"], item["stopped_cow"]["observation"])
         need(item["stopped_cow"]["status"] == "PASS" and item.get("cow_peak_growth_bytes", QUOTA + 1) <= QUOTA,
              "Cumulative resource evidence failed")
@@ -1057,6 +1234,11 @@ def verify(path, selected_sha):
         need(observed == {**item["observer"], "baseline": tuple(item["observer"]["baseline"])}, "Observer decoder disagrees")
         if epoch == 1:
             first = observed
+        parent_log = run / ("e" + str(epoch)) / BOOT_LOGS[epoch - 1]
+        need(sha(parent_log) == item.get("bootstrap_log_sha256"), "Collected bootstrap log changed")
+        need(parse_bootstrap_log(bounded(parent_log, 4096), plan["nonce"], epoch, observed) == item.get("bootstrap")
+             and item.get("observer_external_exit") == "OBSERVED_NORMAL_ZERO"
+             and item.get("bootstrap_external_exit") == "NOT_OBSERVED", "Parent-owned observer exit evidence differs")
         for capture in item["captures"]:
             image = safe_path(capture["path"])
             need(image.parent == run / ("e" + str(epoch)) and sha(image) == capture["sha256"], "Native capture changed/foreign")
@@ -1086,7 +1268,9 @@ def verify(path, selected_sha):
             "owned_selector_gui_child_exit": "PASS", "same_cow_two_cold_hardware_epochs": "PASS",
             "stopped_guest_executable_case_ini_source_readback": "PASS",
             "cold_boot_saved_palette_restore": "PASS", "source_and_resource_guards": "PASS",
-            "observer_process_exit": "NOT_OBSERVED", "automatic_restore_process_exit": "NOT_OBSERVED_NO_PROCESS_HANDLE",
+            "actual_owned_kvm_enabled": "PASS", "observer_process_exit": "OBSERVED_NORMAL_ZERO",
+            "bootstrap_process_exit": "NOT_OBSERVED", "bootstrap_final_io": "REQUESTED_NOT_EXTERNALLY_OBSERVED",
+            "automatic_restore_process_exit": "NOT_OBSERVED_NO_PROCESS_HANDLE",
             "full_framebuffer_gate": "NOT_COLLECTED", "visual_review": "REQUIRED",
             "shizukudos_windows98_replacement": "NOT_VERIFIED", "all_modern_features": "NOT_VERIFIED"},
         "final_cow": final, "host_output_budget": guard.to_dict()}
@@ -1097,6 +1281,7 @@ def main():
     sub = parser.add_subparsers(dest="action", required=True)
     prep = sub.add_parser("prepare", allow_abbrev=False)
     for name in ("selector-receipt", "selector-receipt-sha", "observer-receipt", "observer-receipt-sha",
+                 "bootstrap-build", "bootstrap-build-sha",
                  "qemu", "firmware-code", "firmware-vars", "vga-rom", "csm-dir"):
         prep.add_argument("--" + name, required=True)
     for name in ("execute", "verify", "queue"):

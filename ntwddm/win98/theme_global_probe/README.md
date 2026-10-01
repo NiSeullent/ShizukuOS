@@ -15,7 +15,7 @@ retains each unique build receipt, freezes source hashes, and uses the shared
 PE gate's observer role to reject registry/color setters and dynamic resolvers.
 
 The actual 2026-10-01 build passed with `-Werror`, i486 PE32 GUI/OS 4.10,
-usable HIGHLOW relocations and 46 OEM native imports. Its immutable receipt is
+usable HIGHLOW relocations and 47 OEM native imports. Its immutable receipt is
 `build/win98-global-theme-observer/20261001T164450Z-89a8a48a/result.json`, SHA256
 `96c0b05de65224b6a0cfe82c5d350b2232a3023c4f1034295ac560a1799e7019`.
 `SHZOBS.EXE` is 37,208 bytes, SHA256
@@ -23,6 +23,29 @@ usable HIGHLOW relocations and 46 OEM native imports. Its immutable receipt is
 The build does not establish native execution, actual observer exit, visible
 output or either cold boot. The separate `tools/global_theme_trial.py` adapter
 must retain those incomplete gates until independent runtime evidence exists.
+
+The subsequent source-bound PID build passed on 2026-10-01 with 48 OEM imports
+and the shared gate's 12 resource/import regression tests. The immutable receipt
+is `build/win98-global-theme-observer/20261001T172441Z-8d392a9f/result.json`,
+SHA256 `2a9033a089f2121975b6a80d5b40b02c48d8239dacb6bc0d789fc3293fad71b1`.
+Its executable is 37,934 bytes, SHA256
+`b8f79529dceb0fb8ae31d0d51bf96ce9fbc1b269a42374ea8aa02b1fd088f2a4`.
+Both phase logs now record `OBSERVER_PID` immediately after `PHASE`. The native
+startup parent in `../theme_global_startup/` owns this process and reports its
+actual wait and full exit code. The v2 adapter correlates both PID records;
+the observer's own completion line alone still cannot establish its exit.
+The parent's own external exit and the automatic Run process's external exit
+remain separately unobserved. New sources require new build receipts and a
+fresh plan; retain both historical binaries and the failed v1 trial.
+
+After the shared PE gate was tightened to reject duplicate import descriptors,
+the current source-bound observer build passed all 13 gate/resource regressions
+with the identical 37,934-byte PID executable. Receipt:
+`build/win98-global-theme-observer/20261001T173344Z-0b39a3e9/result.json`, SHA256
+`3dac28fe33b7ac52820b3376151ed843271befa6fe3143350498a122da7aa69f`.
+The import totals here are recomputed from the actual receipt lists:
+ADVAPI32 3, GDI32 1, KERNEL32 17, USER32 27. Earlier prose totals of 46/47 were
+off by one; the immutable receipts and executable hashes are unchanged.
 
 ## Fixed input and freshness
 

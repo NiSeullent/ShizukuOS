@@ -85,7 +85,7 @@ class ObserverImportGateTests(unittest.TestCase):
             Subsystem=2, AddressOfEntryPoint=0x1000, DllCharacteristics=0,
             DATA_DIRECTORY=directories)
         pe.DIRECTORY_ENTRY_BASERELOC = [SimpleNamespace(entries=[SimpleNamespace(type=relocation_type)])]
-        names = {"KERNEL32.DLL": ["CreateProcessA", "WaitForSingleObject", "GetExitCodeProcess"],
+        names = {"KERNEL32.DLL": ["CreateProcessA", "WaitForSingleObject", "GetExitCodeProcess", "GetCurrentProcessId"],
                  "USER32.DLL": ["GetSysColor"], "GDI32.DLL": ["GetPixel"],
                  "ADVAPI32.DLL": ["RegQueryValueExA"]}
         if extra:
@@ -118,12 +118,70 @@ class ObserverImportGateTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "registry imports must be read-only"):
                 build.native_gate("fixture", "observer")
 
+    def test_observer_identity_must_bind_to_the_parent_owned_process(self):
+        with patch.object(build.pefile, "PE", return_value=self.fake_pe(
+                missing=("KERNEL32.DLL", "GetCurrentProcessId"))):
+            with self.assertRaisesRegex(RuntimeError, "child APIs missing"):
+                build.native_gate("fixture", "observer")
+
     def test_zero_sized_or_non_highlow_relocations_cannot_pass(self):
         for pe, reason in ((self.fake_pe(relocation_size=0), "relocations required"),
                            (self.fake_pe(relocation_type=0), "HIGHLOW")):
             with patch.object(build.pefile, "PE", return_value=pe):
                 with self.assertRaisesRegex(RuntimeError, reason):
                     build.native_gate("fixture", "observer")
+
+
+class BootstrapImportGateTests(unittest.TestCase):
+    """A parent must observe a real process with only the fixed OEM kernel APIs."""
+    def fake_pe(self, missing=None, extra=None):
+        pe = ObserverImportGateTests().fake_pe()
+        names = ["CloseHandle", "CreateFileA", "CreateProcessA", "ExitProcess",
+                 "FlushFileBuffers", "GetCommandLineA", "GetCurrentProcessId",
+                 "GetExitCodeProcess", "GetModuleFileNameA", "GetVersionExA",
+                 "ReadFile", "WaitForSingleObject", "WriteFile"]
+        if missing:
+            names.remove(missing)
+        modules = {"KERNEL32.DLL": names}
+        if extra:
+            modules.setdefault(extra[0], []).append(extra[1])
+        pe.DIRECTORY_ENTRY_IMPORT = [SimpleNamespace(dll=dll.encode("ascii"),
+            imports=[SimpleNamespace(name=name.encode("ascii")) for name in members])
+            for dll, members in modules.items()]
+        return pe
+
+    def test_oem_parent_observes_owned_child_and_final_file_io(self):
+        with patch.object(build.pefile, "PE", return_value=self.fake_pe()):
+            result = build.native_gate("fixture", "bootstrap")
+        self.assertEqual(result["role"], "bootstrap")
+        self.assertFalse(result["native_execution_verified"])
+
+    def test_parent_cannot_lose_wait_exit_or_case_log_apis(self):
+        for name in ("CreateProcessA", "WaitForSingleObject", "GetExitCodeProcess",
+                     "GetCurrentProcessId", "ReadFile", "WriteFile", "FlushFileBuffers",
+                     "CloseHandle", "GetCommandLineA"):
+            with self.subTest(name=name), patch.object(build.pefile, "PE", return_value=self.fake_pe(missing=name)):
+                with self.assertRaisesRegex(RuntimeError, "bootstrap.*missing"):
+                    build.native_gate("fixture", "bootstrap")
+
+    def test_duplicate_descriptors_cannot_hide_a_setter_or_termination(self):
+        fixtures = (("bootstrap", self.fake_pe(), "kernel32.dll", "TerminateProcess"),
+                    ("observer", ObserverImportGateTests().fake_pe(), "advapi32.dll", "RegSetValueExA"))
+        for role, pe, module, name in fixtures:
+            hidden = SimpleNamespace(dll=module.encode("ascii"),
+                imports=[SimpleNamespace(name=name.encode("ascii"))])
+            pe.DIRECTORY_ENTRY_IMPORT.insert(0, hidden)
+            with self.subTest(role=role), patch.object(build.pefile, "PE", return_value=pe):
+                with self.assertRaisesRegex(RuntimeError, "duplicate.*descriptor"):
+                    build.native_gate("fixture", role)
+
+    def test_parent_cannot_load_resolve_kill_or_mutate_theme(self):
+        for extra in (("KERNEL32.DLL", "GetProcAddress"), ("KERNEL32.DLL", "LoadLibraryA"),
+                      ("KERNEL32.DLL", "TerminateProcess"), ("USER32.DLL", "SetSysColors"),
+                      ("ADVAPI32.DLL", "RegSetValueExA"), ("GDI32.DLL", "SetPixel")):
+            with self.subTest(extra=extra), patch.object(build.pefile, "PE", return_value=self.fake_pe(extra=extra)):
+                with self.assertRaisesRegex(RuntimeError, "bootstrap"):
+                    build.native_gate("fixture", "bootstrap")
 
 
 if __name__ == "__main__":

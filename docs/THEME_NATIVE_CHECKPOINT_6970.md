@@ -508,7 +508,7 @@ The actual observer compiler and OEM PE gate passed. Receipt:
 `96c0b05de65224b6a0cfe82c5d350b2232a3023c4f1034295ac560a1799e7019`.
 `SHZOBS.EXE` is 37,208 bytes, SHA256
 `2d48d00faaddbe70e6c6f51c520e9ce49752071ac20a3f16b3fcde955e75ee35`.
-It has 46 native OEM imports and genuine i486 PE32 4.10/HIGHLOW relocations.
+It has 47 native OEM imports and genuine i486 PE32 4.10/HIGHLOW relocations.
 There is no guest result for this binary yet.
 
 The new `tools/global_theme_trial.py` source uses one pinned private reflink
@@ -589,3 +589,94 @@ RAM directories; immutable disk copies were made only after the unchanged
 20 GiB floor plus pending receipt bytes and headroom was restored. Native and
 build admission gates were never lowered. Durable batch checkpoints are under
 `/root/Win98-Modern-boot/build/disk-optimizer-6970-ram-ranges-20261001T1657-batch{2,3,4}/`.
+
+## Corrected preparation and parent-owned observer follow-up
+
+The corrected v1 preparation actually passed on a fresh four-root trial.
+The selected plan was
+`build/global-theme-6970-stage-cc79ca47794a/global-theme-plan.json`, SHA256
+`ed1a9bef1bc69fe276b87b090870c693090a6945ae4310510106a65f03220cdd`,
+nonce `d3260ebb3e3449d48c425c5f37e50cd9`. The 2 GiB private disk remained inode
+82113189 on device 2307 and had 139,264 exclusive bytes after injection. The
+unchanged original baseline, staged native binaries, exact case, byte-preserved
+WIN.INI and FAT attributes were actually checked.
+
+Execution subsequently failed **before either epoch or QEMU was started**
+because other host allocations crossed the unchanged 20 GiB reserve. The
+failure receipt is
+`build/global-theme-6970-run-cc79ca47794a/trial-result.json`, SHA256
+`443a515718d163d641efe02921a3b7d7797183f0b9b7d6b9ce6f39ebc52def29`.
+It retains `status=FAIL`, `epochs=[]` and 305,283 aggregate host-output bytes.
+Keep this receipt, the private disk and `execute.claim`; this failed plan is
+not reusable. A new source revision requires fresh roots and a new nonce.
+
+The follow-up adds a fixed, argument-free `SHZGBOOT.EXE` native parent. Its
+owned handle observes the independent observer's real wait and full DWORD
+exit code. Each observer log now records its native PID; the separate parent
+log must match that PID, nonce, phase and OS identity, with actual wait/query
+and successful handle closure. Parent final log IO and its own external exit
+remain explicitly unobserved. The separate automatic Run process also has no
+owned handle. These incomplete gates are retained rather than inferred from
+a completion message.
+
+The v2 adapter requires schema 2, kind
+`native-win98-global-selector-two-cold-boots-v2`, all three actual native build
+receipts and both independently decoded parent/observer log pairs. It retains
+the original single-COW baseline across two reaped QEMU epochs. Its primary
+live QMP connection queries KVM before input; the reply must report actual
+enabled acceleration and is frozen into the epoch evidence. Four offline KVM
+gate tests and 34 adapter regressions passed in root's combined 38-test run.
+Those tests, compiler results and historical preparation are separate from
+new native execution, which has not happened.
+
+Fresh source-bound product build:
+`build/win98-global-theme-selector/20261001T172426Z-1ce398d8/result.json`, SHA256
+`bcf2a0f6f21642d323892999835483aba0c06d1c063e509a56c3b1decff2ee05`.
+The selector binary is unchanged; 139 host checks, 139 ASan/UBSan checks and
+12 native import/resource regressions passed. Fresh PID observer build:
+`build/win98-global-theme-observer/20261001T172441Z-8d392a9f/result.json`, SHA256
+`2a9033a089f2121975b6a80d5b40b02c48d8239dacb6bc0d789fc3293fad71b1`.
+Its 37,934-byte executable SHA256 is
+`b8f79529dceb0fb8ae31d0d51bf96ce9fbc1b269a42374ea8aa02b1fd088f2a4`,
+with 48 OEM imports. Root's v2 `build_input` actually accepted ten selector
+and eight observer command/source records. The native parent build and new
+trial still require their own fresh results.
+
+The replacement architecture remains the
+[ShizukuDOS → genuine Windows 98 contract](SHIZUKUOS_ARCHITECTURE_CONTRACT.md).
+These theme controls do not establish replacement boot, modern application
+functionality or a final ISO.
+
+Independent review subsequently found that duplicate import descriptors for
+one DLL could hide an earlier forbidden import from the role check. Root
+reproduced both bootstrap termination and observer registry-setter hiding in
+a failing regression, then made the shared gate reject duplicate normalized
+DLL descriptors. No actual built PE had duplicate descriptors. All **13**
+import/resource regressions passed, and all three native components were
+rebuilt against that final shared gate:
+
+| Component | Actual current receipt | Receipt SHA256 | Artifact |
+| --- | --- | --- | --- |
+| Selector | `build/win98-global-theme-selector/20261001T173205Z-782106c7/result.json` | `ec5f5b1ad05754fb0b2072a071f7f5e06b3a28707de192356091fdb4acfbb7fb` | same 27,477-byte `fa0f0149…` executable, HOST/SAN 139 each |
+| Observer | `build/win98-global-theme-observer/20261001T173344Z-0b39a3e9/result.json` | `3dac28fe33b7ac52820b3376151ed843271befa6fe3143350498a122da7aa69f` | same 37,934-byte `b8f79529…` executable, 48 OEM imports |
+| Parent | `build/win98-global-theme-bootstrap/20261001T173408Z-7183decb/result.json` | `a2e5083e48feff2e6af4a70f40976f8c00fbff228bdc04c19f21600cbd9e556f` | 13,897 bytes, SHA256 `c42b8039c7e73f4337dbe7f64fba1f1ae465c44dbd53be1cc70b6f37c1558f1c`, 14 OEM KERNEL32 imports |
+
+The parent host and ASan/UBSan runs each completed **5,374** assertions. These
+exercise real launcher code under the host API shim, including strict case,
+path/arguments and OS gates, process creation, wait failure/timeout, full
+nonzero DWORD exit codes, handle cleanup and final log IO failures. They are
+host evidence, not native Win98 lifecycle results. Each final build stays
+within its admitted 8 MiB output and retains the unchanged 20 GiB reserve.
+Observer import totals are corrected from the actual receipt lists (47 before
+the PID addition, 48 afterward); earlier prose totals were off by one and no
+immutable result or artifact hash was altered.
+
+The final adapter also checks the complete actual compiler recipe. Native
+source operands must be the expected canonical files under the selected
+source root and members of its hash closure. Host/SAN inputs include the real
+launcher, host test and mock header. Extra or swapped sources, object/library
+paths, response files, forced headers and compiler plugins are rejected. Root
+then accepted all three genuine current receipts above, with ten selector,
+eight observer and ten parent command/source bindings. The final combined
+source suite passed **41 tests** (37 adapter and four KVM gate tests). No new
+guest execution is implied by these source and compiler checks.
