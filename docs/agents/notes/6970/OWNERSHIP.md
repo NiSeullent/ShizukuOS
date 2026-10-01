@@ -7,7 +7,7 @@ Observed orchestration date: 2026-10-01. 6970 isolated worktree: /root/Win98-Mod
 | Active role | Agent | Assigned scope | Writable source |
 | --- | --- | --- | --- |
 | Master/integration | root | User architecture, firmware/display/runtime-wrapper source audit, final review and own source commits | docs/agents/notes/6970 and status/6970-master.md; Kernel32 deadline tests only while production ownership is coordinated |
-| Core Kernel Lead | main_publish_inventory | Completed source audit; actual Kernel32 deadline fixture/runner preparation | tests/test_sched_deadlines_k32.c and .py only; no production edits before actual RED |
+| Core Kernel Lead | main_publish_inventory | Completed source audit; actual Kernel32 deadline fixture/runner preparation | tests/test_sched_deadlines_k32.c and .py; accepted subsequent deadline-only sched.c/k32.h/helper hunks after actual RED |
 | Windows 98/Validation Lead | coordination_audit | Completed storage/Windows bridge audit; independent Kernel32 plan/fixture review | Read-only after frozen repair handoff |
 | Disk resource lead | disk_optimizer_phase2 | Exact approved inactive-copy allocation sharing and read-only candidate proposals | Approved allocation metadata only; no source, logical media, historical receipt or peer VM writes |
 | Main/site/ISO publisher | existing integration session | Three-way source integration, merged-source validation and official distribution | Its own main/index/site/artifact activation; other agents do not write those paths |
@@ -36,6 +36,6 @@ Do not edit another agent's source, index, live VM or historical evidence. After
 
 ## Current peer ownership correction
 
-Canonical master documents belong to session163f. That session owns Kernel64 scheduling, UEFI/GOP selection and existing VxD transport. Fada owns the new event/completion payload and its dispatch hunks. Fd5c owns shared channel/layout/doorbell/video validation and is investigating the separate Kernel32 process-owner publication race. C957 owns common atomics, NT spin-lock operations, framebuffer validation/clipping and the capability manifest; DOS_GATE and arbitrary GOP BitMask support remain unimplemented/unclaimed.
+Canonical master documents belong to session163f. That session owns Kernel64 scheduling, UEFI/GOP selection and existing VxD transport. Fada owns the new event/completion payload and its dispatch hunks. Fd5c owns shared channel/layout/doorbell/video validation and independently confirmed the separate Kernel32 process-owner publication race; session163f retains its user.c-only repair. C957 owns common atomics, NT spin-lock operations, framebuffer validation/clipping and the capability manifest; DOS_GATE and arbitrary GOP BitMask support remain unimplemented/unclaimed.
 
-Our proposed Kernel32 deadline expressions/wake-width change is separate from process-owner publication. Until peers acknowledge exact hunk ownership, tests may be authored but production scheduler/header edits remain pending. Never overwrite a peer scheduler file during integration.
+Canonical session163f acknowledged our Kernel32 deadline helper/arithmetic and storage lane in its ownership document on2026-10-01. Our deadline expressions/wake-width change is separate from its user.c process-owner publication repair. Production deadline edits await actual unchanged-production RED and resource admission. Never overwrite a peer scheduler file during integration.

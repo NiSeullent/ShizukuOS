@@ -23,3 +23,5 @@ minimum observed free21,514,727,424B, resource failure absent, native execution 
 [Full repair checkpoint](../../../FAT32_RENAME_CHECKPOINT_6970.md) preserves the actual failed and passing attempts.
 
 Main source changes, standalone component execution, an original-Microsoft-DOS Windows control and complete product acceptance are different evidence boundaries. Final integrated acceptance is pending. No ISO or modern-app completion is inferred here.
+
+Kernel32 deadline fixture and guarded runner are prepared and independently source-reviewed. The actual admission attempt exited3/BLOCKED_NOT_RUN before any compiler/output root, so unchanged-production RED and production repair/GREEN remain pending. Canonical master163f acknowledged this lane separately from its user.c process-owner publication repair.
