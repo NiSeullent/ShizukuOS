@@ -75,6 +75,9 @@ int main(void)
     put(PD,0x83); CHECK(probe()==0); put(PD,PT|3); /*2MiB leaf likewise. */
     available=0x4000+510*8; CHECK(probe()==SHZ_SMP_BOOT_GUARD_UNREADABLE); available=sizeof mem;
     available=PDPT; CHECK(probe()==SHZ_SMP_BOOT_GUARD_UNREADABLE); available=sizeof mem;
+    /* Actual level2 entry points at unavailable PT; numeric PMM range alone must not authorize retirement. */
+    available=PT; CHECK(probe()==SHZ_SMP_BOOT_GUARD_UNREADABLE); available=sizeof mem;
+    available=PT+4095; CHECK(probe()==SHZ_SMP_BOOT_GUARD_UNREADABLE); available=sizeof mem;
     /* Repeated valid-looking non-leaf aliases are bounded, even though no
      * retired table/cycle is involved. */
     for(i=0;i<512;i++) { put(ROOT+i*8,PDPT|3); put(PDPT+i*8,PD|3); }

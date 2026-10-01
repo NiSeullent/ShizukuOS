@@ -45,9 +45,10 @@ static inline int shz_smp_guard_walk(shz_smp_phys_read_fn read,void *ctx,
     for(j=0;j<4-level;j++) if(path[j]==pa) return SHZ_SMP_BOOT_GUARD_DEPENDENCY;
     if(!*budget) return SHZ_SMP_BOOT_GUARD_LIMIT;
     --*budget; path[4-level]=pa;
-    if(level==1) return 0; /* Leaf frame aliases retain no paging tables. */
     for(at=0;at<512;at+=8) {
         if(read(ctx,pa+at*8,b,sizeof b)) return SHZ_SMP_BOOT_GUARD_UNREADABLE;
+        /* PT pages are table nodes too: validate every byte through the ownership reader. */
+        if(level==1) continue;
         for(i=0;i<8;i++) {
             const uint64_t entry=shz_smp_guard_u64(b+i*8);
             int rc;

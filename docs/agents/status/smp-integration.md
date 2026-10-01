@@ -203,3 +203,34 @@ final PT-node ownership defect is fixed, reviewed and frozen. Its private
 architecture consumer and real AP/IPI integration remain the next Task1 work.
 Per-CPU scheduler, allocators/waits/TLB, Kernel32/NT workers, Supervisor VMX,
 actual Windows98 VMM service execution and final ISO remain required Tasks2–5.
+
+## Frozen backend import and owning-reader successor
+
+Imported only Fada's frozen55b684c/981debb commits as own cedf79c/6d6b382.
+The original221-source component/input/serial archive SHA256 is
+`8badf002d499a3b38fd82d341980e9e30de42baa37d7164c016ef6a7dd8b1d0e`;
+its original ca6d8c359241c59dbce9e5a402cd061063df68b2e8a24642a52fa87ece056473
+receipt remains unchanged and does not establish whole-kernel SMP.
+
+The same common walker now validates every64-byte block of the complete final
+PT page before skipping leaf-frame recursion. Actual imported-code unavailable
+PT RED is in `build/smp-common-pt-reader-red-1`; successor1,567-check GCC/Clang
+ASan/UBSan and32/64freestanding GREEN is in `build/smp-common-pt-reader-green-2`.
+No competing parser/walker/bootstrap was introduced. Leaf mapped data frames
+remain outside this table-resource ownership check.
+
+The new read-only `mem.c` observer consults the real PMM allocation bit and
+excludes actual bootinfo initrd reservations, overflow and every retained
+memholes overlap. PMM numeric range or an unavailable reservation bit alone
+cannot authorize a table. Its actual-C runtime missing-feature RED and20-check
+GCC/Clang ASan/UBSan GREEN are preserved in `build/smp-pmm-owner-{red-1,green-3}`.
+The earlier green-2 name contains a retained Clang compile failure, not a PASS.
+The observer is restricted to BSP IRQ-off admission before AP release; it does
+not supply cross-CPU allocator synchronization. Production preflight must also
+prove the whole page has native type1 RAM cover and use this observer at every
+nonleaf level, including the PML4 and PT. APs may not allocate or mutate tables.
+
+Root-approved fixture b5c49d8 was separately imported as own1bb94f1 before any
+new normal-native build. Exact pma_tests.c SHA256 is
+`6761e4cd35de1672406e01dc356303fa84773baf71096fe3fd3a15391f9fed3b`;
+the four-tick policy and Core scheduler/header/architecture are unchanged.
