@@ -122,7 +122,11 @@ def runtime_files(desktop=False):
         files = desktop_runtime((w / "WIN64.IMG").read_bytes(), receipt["archive"]["sha256"])
     else:
         files = [(f"\\SHZ\\SYS64\\{n}.dll", (w / f"{n}.dll").read_bytes()) for n in dlls]
-    return files, (w / "t_hello.exe").read_bytes(), (w / "SHZSETUP.EXE").read_bytes()
+    t_hello = (w / "t_hello.exe").read_bytes()
+    names = [p.upper() for p, _ in files]
+    if len(names) != len(set(names)) or any(p.upper() == "\\SHZ\\TESTS\\T_HELLO.EXE" and d != t_hello for p, d in files):
+        raise ValueError("ambiguous runtime paths or T_HELLO differs from the built executable")
+    return files, t_hello, (w / "SHZSETUP.EXE").read_bytes()
 
 
 def build_esp(members, size_mib):
@@ -330,7 +334,8 @@ def main():
     w64 = load_win64_build()
 
     runtime, t_hello, setup_exe = runtime_files(args.desktop)
-    runtime_img = w64.pack_archive([*runtime, ("\\SHZ\\TESTS\\T_HELLO.EXE", t_hello)])
+    boot_runtime = runtime if any(p.upper() == "\\SHZ\\TESTS\\T_HELLO.EXE" for p, _ in runtime) else [*runtime, ("\\SHZ\\TESTS\\T_HELLO.EXE", t_hello)]
+    runtime_img = w64.pack_archive(boot_runtime)
 
     # ---- ESP
     esp_members = [("EFI/BOOT/BOOTX64.EFI", INPUTS["loader"].read_bytes()),
@@ -404,7 +409,7 @@ def main():
     (OUT / "shzsetup.ini").write_bytes(answer)
 
     # ---- installer boot archive
-    install = [*runtime, ("\\SHZ\\TESTS\\T_HELLO.EXE", t_hello), ("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe),
+    install = [*boot_runtime, ("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe),
                ("\\SHZ\\SETUP\\SHZSETUP.INI", answer)]
     for name in ("manifest.json", "ESP.SIM", "SYSTEM.ARC", "GPTMBR.BIN"):
         install.append((f"\\SHZ\\SETUP\\PAYLOAD\\{name}", (PAYLOAD / name).read_bytes()))

@@ -22,7 +22,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / 'site'
 BASE = Path('/srv/m98')
 SMALL_LIMIT = 8 * 1024 * 1024
-ISO_LIMIT = 256 * 1024 * 1024
+# The measured 2026-10-01 candidate is 284,164,096 bytes (271 MiB).
+# Only streamed ISO inputs use this bound; ZIPs and static assets stay at 8 MiB.
+ISO_LIMIT = 512 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
 STATIC = ('index.html', 'preview.html', 'styles.css', 'preview.css', 'preview.js',
           'dead-screen.html', 'dead-screen.css', 'dead-screen.js',
@@ -45,6 +47,7 @@ AUTHORSHIP_IMAGES = {
     'legcord-welcome.png': '28fc8a9c451a610160ca833be12056e9497fb5bf85753a6169d3d3bbadf62238',
     'chromium-loading.png': 'ca6b5ce2e239170b91fc4372b98979efa6f3c7cf73f16efcd501c2be4282453e',
 }
+COMPONENT_INSTALLER_MANIFEST_SHA = 'ad97f8e8bee8d72dc57176028ebb83ab31618f11bebab5d0cdeb3f87127ff059'
 
 
 def sha(data):
@@ -488,7 +491,89 @@ def add_authorship_assets(assets):
     return len(records)
 
 
-def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None):
+def add_component_installer_proof(assets, directory):
+    """Publish only four pinned, unchanged captures of the component installer.
+
+    This dated proof is independent of shipped-ISO acceptance. Its public
+    manifest deliberately contains no owned inputs or private lab paths.
+    """
+    directory = Path(directory)
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError('Regular component proof directory required')
+    data = read_small(directory / 'manifest.json')
+    if sha(data) != COMPONENT_INSTALLER_MANIFEST_SHA:
+        raise ValueError('Reviewed component installer provenance or scope differs')
+    manifest = json.loads(data)
+    frames = manifest['frames']
+    allowed = {'manifest.json', *(frame['file'] for frame in frames)}
+    if {path.name for path in directory.iterdir()} != allowed:
+        raise ValueError('Component proof directory must contain only the four reviewed PNGs and manifest')
+    prefix = 'evidence/component-installer/'
+    for frame in frames:
+        image = read_small(directory / frame['file'])
+        if (len(image) != frame['bytes'] or sha(image) != frame['sha256']
+                or image[:16] != b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR'
+                or int.from_bytes(image[16:20], 'big') != frame['width']
+                or int.from_bytes(image[20:24], 'big') != frame['height']):
+            raise ValueError('Reviewed original component installer PNG changed')
+        assets[prefix + frame['file']] = image
+    assets[prefix + 'manifest.json'] = data
+    return manifest
+
+
+def render_component_installer_homepage(data, manifest, language):
+    text = data.decode('utf-8')
+    if language == 'ko':
+        prefix = './'
+        title = '설치하고, 다시 켜 봤습니다.'
+        scope = 'Shizuku 구성요소 설치 검증'
+        intro = '2026-10-01 · 실제 시험 VM 4회: 취소, 선택한 디스크 설치, UEFI와 BIOS 콜드 부팅.'
+        pending = 'Windows 98의 MS-DOS 대체와 최신 앱 전체 지원은 개발 중입니다.'
+        details = '이 화면은 Shizuku 구성요소 시험 기록입니다. 내려받는 ISO의 부팅 검증은 배포 정보에서 별도로 확인하세요.'
+        link = '화면 원본과 검증 범위'
+        captions = (
+            ('직접 고른 디스크만.', '디스크를 선택해 내용을 확인하고, 취소 경로에서는 실제 쓰기가 없음을 검사했습니다.'),
+            ('설치 후 파일까지 확인.', '선택한 디스크에 기록한 뒤 파티션, 시스템 파일과 설치 결과를 별도로 검사했습니다.'),
+            ('UEFI로 다시 켜기.', '설치한 디스크로 새 VM을 켜서 데스크톱과 편집기를 열고 정상 종료했습니다.'),
+            ('BIOS에서도 다시 켜기.', '같은 설치본을 BIOS로 콜드 부팅해 데스크톱과 편집기를 확인했습니다.'),
+        )
+    elif language == 'en':
+        prefix = '../'
+        title = 'Installed, then cold-booted.'
+        scope = 'Shizuku component installer verification'
+        intro = '2026-10-01 · Four real test VMs: cancel, selected-disk install, UEFI and BIOS cold boots.'
+        pending = 'Replacing MS-DOS for Windows 98 and complete latest-app support remain in development.'
+        details = 'These are Shizuku component test records. Check release information separately for boot verification of the ISO you download.'
+        link = 'Original captures and verification scope'
+        captions = (
+            ('Only the selected disk.', 'The disk review and cancel path were tested, including proof that cancellation performed no writes.'),
+            ('Installed files checked, too.', 'The selected disk was written, then its partitions, system files and installation result were checked independently.'),
+            ('A fresh UEFI boot.', 'A new VM booted the installed disk, opened the desktop and editor, and shut down normally.'),
+            ('A fresh BIOS boot, too.', 'The same installation cold-booted through BIOS and displayed its desktop and editor.'),
+        )
+    else:
+        raise ValueError('Unsupported component proof language')
+    cards = []
+    for frame, (heading, caption) in zip(manifest['frames'], captions):
+        image = prefix + 'evidence/component-installer/' + frame['file']
+        cards.append('<a class="showcase-card" href="' + image + '"><img src="' + image
+                     + '" width="' + str(frame['width']) + '" height="' + str(frame['height'])
+                     + '" loading="lazy" alt="' + scope + ': ' + heading
+                     + '"><div class="showcase-copy"><span class="badge">' + scope
+                     + '</span><h3>' + heading + '</h3><p>' + caption + '</p></div></a>')
+    section = ('<section class="showcase" aria-labelledby="component-installer-title"><div class="section-title"><div><p class="eyebrow">'
+               + scope + '</p><h2 id="component-installer-title">' + title
+               + '</h2></div></div><p>' + intro + '</p><div class="showcase-grid">'
+               + ''.join(cards) + '</div><p class="small">' + pending + ' ' + details
+               + ' <a href="' + prefix + 'evidence/component-installer/manifest.json">' + link + '</a></p></section>\n')
+    marker = '<section class="final-download"'
+    if text.count(marker) != 1:
+        raise ValueError('Reviewed component proof insertion point changed')
+    return text.replace(marker, section + marker, 1).encode('utf-8')
+
+
+def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None,
+                   component_installer_proof=None):
     if (iso_path is None) != (iso_source_commit is None):
         raise ValueError('Both --iso and --iso-source-commit are required')
     if iso_boot_evidence is not None and iso_path is None:
@@ -529,6 +614,7 @@ def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None
             assets[name] = data
             images.add(name)
     iso = None
+    component_proof = None
     try:
         if iso_path is not None:
             iso = open_iso(iso_path, iso_source_commit, iso_boot_evidence)
@@ -536,9 +622,14 @@ def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None
             assets[iso.name + '.sha256'] = (iso.metadata['artifact']['sha256'] + '  ' + Path(iso.name).name + '\n').encode('ascii')
             assets['index.html'] = render_iso_homepage(assets['index.html'], iso.metadata, 'ko')
             assets['en/index.html'] = render_iso_homepage(assets['en/index.html'], iso.metadata, 'en')
+        if component_installer_proof is not None:
+            component_proof = add_component_installer_proof(assets, component_installer_proof)
+            assets['index.html'] = render_component_installer_homepage(assets['index.html'], component_proof, 'ko')
+            assets['en/index.html'] = render_component_installer_homepage(assets['en/index.html'], component_proof, 'en')
         if not images or len(assets) + (iso is not None) > 128:
             raise ValueError('Unexpected static publication size')
-        return {'assets': assets, 'images': images, 'authorship_images': authorship_images, 'iso': iso}
+        return {'assets': assets, 'images': images, 'authorship_images': authorship_images,
+                'iso': iso, 'component_installer_proof': component_proof}
     except Exception:
         if iso is not None:
             iso.close()
@@ -682,6 +773,8 @@ def _publish(prepared):
         if iso is not None:
             receipt['iso_release'] = iso.metadata
             receipt['iso_head_and_range_verified'] = True
+        if prepared.get('component_installer_proof') is not None:
+            receipt['component_installer_proof'] = prepared['component_installer_proof']
         path = output / ('release-' + stamp + '.json')
         payload = (json.dumps(receipt, indent=2) + '\n').encode()
         write_receipt(path, payload)
@@ -702,12 +795,15 @@ def main():
     parser.add_argument('--iso', type=Path, help='reviewed public development ISO with adjacent builder JSON receipt')
     parser.add_argument('--iso-source-commit', help='exact source revision from the public ISO builder receipt')
     parser.add_argument('--iso-boot-evidence', type=Path, help='optional PASS shipped-ISO result from run_k64_desktop.py')
+    parser.add_argument('--component-installer-proof', type=Path,
+                        help='optional directory containing four reviewed component-installer PNGs and the pinned public manifest')
     args = parser.parse_args()
     if (args.iso is None) != (args.iso_source_commit is None):
         parser.error('Both --iso and --iso-source-commit are required')
     if args.iso_boot_evidence is not None and args.iso is None:
         parser.error('--iso-boot-evidence requires --iso and --iso-source-commit')
-    prepared = prepare_assets(args.iso, args.iso_source_commit, args.iso_boot_evidence)
+    prepared = prepare_assets(args.iso, args.iso_source_commit, args.iso_boot_evidence,
+                              args.component_installer_proof)
     try:
         publish(prepared)
     finally:

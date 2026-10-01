@@ -18,6 +18,7 @@ extern int32_t ldr_load_module_runtime(process_t *p, const char *name, uint32_t 
 extern uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint64_t ordinal);
 extern int32_t ldr_lifetime_control(process_t *, uint64_t, uint64_t, uint64_t, uint64_t);
 extern int32_t ldr_lifetime_commit(process_t *, uint64_t);
+extern int32_t ipc_section_duplicate_access(kobject_t *, uint32_t, uint32_t *);
 
 struct objattr { uint32_t length, pad; uint64_t root, name; uint32_t attributes, pad2; uint64_t sd, sqos; };
 struct ustr { uint16_t length, maxlen; uint32_t pad; uint64_t buffer; };
@@ -58,8 +59,6 @@ static kobject_t *object_for_handle_access(process_t *p,uint64_t h,uint32_t *acc
     if(h==CURRENT_THREAD_HANDLE){if(access)*access=0x1fffffu;ob_ref(thread_current()->object);return thread_current()->object;}
     return handle_ref(p,h,0,&o,access)?0:o;
 }
-static kobject_t *object_for_handle(process_t *p,uint64_t h)
-{return object_for_handle_access(p,h,0);}
 static kobject_t *object_for_wait(process_t *p,uint64_t h,int32_t *status)
 {
     uint32_t access=0;kobject_t *o=object_for_handle_access(p,h,&access);
@@ -294,14 +293,21 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         return st;
     }
     case SYS_NtDuplicateObject: {                           /* (srcproc, srchandle, dstproc, PHANDLE dst, access, attrs, options) */
-        kobject_t *o = object_for_handle(p, a2);
+        uint32_t granted = 0;
+        kobject_t *o = object_for_handle_access(p, a2, &granted);
         uint32_t access = (uint32_t)stack_arg(p, r, 5);
         const uint32_t options = (uint32_t)stack_arg(p, r, 7);
         if (!o) return STATUS_INVALID_HANDLE;
-        if ((options & 2) && !(a2 & 3))                     /* DUPLICATE_SAME_ACCESS: the source handle's rights (registry keys enforce them) */
-            access = p->handles[a2 / 4 - 1].access;
-        st = give_handle(p, o, a4, access);
-        if (!st && (options & 1) && !(a2 & 3)) handle_close(p, a2);       /* DUPLICATE_CLOSE_SOURCE */
+        if (options & 2) access = granted;                 /* DUPLICATE_SAME_ACCESS */
+        st = STATUS_SUCCESS;
+        if (o->type == OB_SECTION && !(options & 2)) {
+            /* Apply the same current-descriptor policy as the IPC route. */
+            if (access & 0x02000000u) access = granted | (access & ~0x02000000u);
+            st = ipc_section_duplicate_access(o, granted, &access);
+        }
+        if (!st) st = give_handle(p, o, a4, access);
+        else ob_deref(o);
+        if ((options & 1) && !(a2 & 3)) handle_close(p, a2); /* DUPLICATE_CLOSE_SOURCE: also on failure */
         return st;
     }
     case SYS_NtCreateThreadEx: {

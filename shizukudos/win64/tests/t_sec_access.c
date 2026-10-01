@@ -3,8 +3,11 @@
  * (base::subtle::PlatformSharedMemoryRegion) convert a region to read-only by duplicating its handle with FILE_MAP_READ |
  * SECTION_QUERY, and Take() then checks the mode: a read-only handle must REFUSE DuplicateHandle(FILE_MAP_WRITE), a writable
  * one must allow it; a region that answers wrongly is rejected ("File mapping handle has wrong access rights"), which made the
- * in-process renderer's mojo deserialization fail. The expectations are the documented access rules: a duplicate can only narrow
- * a section handle's rights, MAXIMUM_ALLOWED means all the source handle has, and MapViewOfFile needs the matching map right.
+ * in-process renderer's mojo deserialization fail. As in Chromium's actual creation path, this fixture installs an EMPTY DACL:
+ * new section-specific rights are then denied, while existing rights remain usable. A NULL/default DACL permits expansion,
+ * tested separately with current-descriptor updates in unchanged T_CHROME_SECTION. This fixture retains READ_CONTROL so
+ * GENERIC_READ maps to rights already held, without assuming an unimplemented owner/token standard-rights evaluator.
+ * MAXIMUM_ALLOWED preserves the source grant; MapViewOfFile still needs the matching map right.
  */
 #include "k32test.h"
 
@@ -32,14 +35,21 @@ static int handle_is_read_only(HANDLE h)
 
 int main(void)
 {
-    HANDLE full = CreateFileMappingW(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE, 0, 0x2000, 0);
+    ACL acl;
+    SECURITY_DESCRIPTOR sd;
+    SECURITY_ATTRIBUTES sa = { sizeof sa, &sd, FALSE };
+    HANDLE full;
     HANDLE ro = 0, x = 0, y = 0;
     unsigned char *w, *r;
+    CHECK(InitializeAcl(&acl, sizeof acl, ACL_REVISION), "initialize the actual empty section ACL");
+    CHECK(InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION), "initialize the actual section descriptor");
+    CHECK(SetSecurityDescriptorDacl(&sd, TRUE, &acl, FALSE), "install the actual empty DACL used by Chromium");
+    full = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE, 0, 0x2000, 0);
     CHECKV(full != 0, "CreateFileMappingW (pagefile-backed, 8 KiB)", "err %lu", (unsigned long)GetLastError());
     if (!full) return k32t_finish("t_sec_access");
 
     CHECK(!handle_is_read_only(full), "the creator's handle allows FILE_MAP_WRITE duplicates (a writable region)");
-    CHECK(dup(full, FILE_MAP_READ | SECTION_QUERY, 0, &ro) && ro != 0 && ro != full, "DuplicateHandle(FILE_MAP_READ | SECTION_QUERY) narrows it to a read-only handle");
+    CHECK(dup(full, FILE_MAP_READ | SECTION_QUERY | READ_CONTROL, 0, &ro) && ro != 0 && ro != full, "DuplicateHandle(FILE_MAP_READ | SECTION_QUERY | READ_CONTROL) narrows it to a read-only handle");
     CHECK(handle_is_read_only(ro), "the read-only handle refuses a FILE_MAP_WRITE duplicate (what Take() probes)");
     CHECK(!dup(ro, FILE_MAP_WRITE, 0, &x) && dup_err == ERROR_ACCESS_DENIED, "... with ERROR_ACCESS_DENIED");
     CHECK(!dup(ro, FILE_MAP_READ | FILE_MAP_WRITE, 0, &x) && dup_err == ERROR_ACCESS_DENIED, "asking for write among other rights is refused too");

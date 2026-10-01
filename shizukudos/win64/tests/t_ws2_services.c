@@ -12,6 +12,7 @@ _Static_assert(sizeof(struct servent)==32, "Windows AMD64 SERVENT size");
 _Static_assert(offsetof(struct servent,s_name)==0 && offsetof(struct servent,s_aliases)==8
                && offsetof(struct servent,s_proto)==16 && offsetof(struct servent,s_port)==24, "Windows AMD64 SERVENT fields");
 typedef struct servent *(WSAAPI *service_fn)(const char *,const char *);
+typedef struct servent *(WSAAPI *service_port_fn)(int,const char *);
 static HANDLE acquired,release_worker;
 static struct servent *worker_entry;
 static DWORD WINAPI service_worker(void *unused)
@@ -32,7 +33,7 @@ static int alias_present(const struct servent *s,const char *name)
 int main(void)
 {
     WSADATA data;HMODULE ws=GetModuleHandleW(L"ws2_32.dll");HANDLE thread;
-    struct servent *s,*same;service_fn named,numbered;DWORD exit_code=1;
+    struct servent *s,*same;service_fn named,numbered;service_port_fn port_named,port_numbered;DWORD exit_code=1;
     CHECK(getservbyname("http","tcp")==NULL && WSAGetLastError()==WSANOTINITIALISED,
           "actual getservbyname requires real successful WSAStartup");
     CHECK(WSAStartup(MAKEWORD(2,2),&data)==0,"real Winsock startup succeeds");
@@ -40,8 +41,13 @@ int main(void)
     numbered=ws ? (service_fn)GetProcAddress(ws,(LPCSTR)(uintptr_t)55u) : NULL;
     CHECK(named!=NULL && named==numbered,"actual named and ordinal55 exports select the same service function");
     CHECK(ws && (FARPROC)numbered!=GetProcAddress(ws,"WSAResetEvent"),"actual ordinal55 never selects WSAResetEvent");
-    CHECK(ws && GetProcAddress(ws,(LPCSTR)(uintptr_t)56u)==NULL,
-          "absent legacy getservbyport ordinal56 remains an empty export rather than selecting another API");
+    port_named=ws ? (service_port_fn)GetProcAddress(ws,"getservbyport") : NULL;
+    port_numbered=ws ? (service_port_fn)GetProcAddress(ws,(LPCSTR)(uintptr_t)56u) : NULL;
+    CHECK(port_named && port_named==port_numbered,
+          "actual named and ordinal56 exports select the same port lookup function");
+    same=port_numbered ? port_numbered(htons(80),"tcp") : NULL;
+    CHECK(same && !strcmp(same->s_name,"http") && (u_short)same->s_port==htons(80),
+          "actual ordinal56 call returns the genuine HTTP service record");
     s=getservbyname("http","tcp");
     CHECK(s && !strcmp(s->s_name,"http") && !strcmp(s->s_proto,"tcp") && (u_short)s->s_port==htons(80),
           "actual OS catalog supplies canonical HTTP TCP and network-order port80");

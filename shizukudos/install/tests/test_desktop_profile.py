@@ -45,6 +45,15 @@ class ProductionInstallTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SHZDESK.EXE"):
             self.select([p for p in self.files if not p[0].endswith("SHZDESK.EXE")])
 
+    def test_install_preserves_certificate_bytes_and_excludes_provider_fixtures(self):
+        roots = ("\\SHZ\\CERTS\\ROOTS.BIN", b"root packaging fixture")
+        chain = ("\\SHZ\\CERTS\\SERVER0.CER", b"chain packaging fixture")
+        fixture = ("\\SHZ\\TESTS\\mprfix.dll", b"QA provider fixture")
+        selected = dict(self.select(self.files + [roots, chain, fixture]))
+        self.assertEqual(selected[roots[0]], roots[1])
+        self.assertEqual(selected[chain[0]], chain[1])
+        self.assertNotIn(fixture[0], selected)
+
     def test_missing_bundled_app_rejects_a_broken_installed_launcher(self):
         with self.assertRaisesRegex(ValueError, "T_HELLO.EXE"):
             self.select(self.files[:-1])

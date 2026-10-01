@@ -189,8 +189,8 @@ static int win64_run(int64_t *code, int *faulted)
     return proc_wait(p->pid, code, faulted);
 }
 
-/* Every other T_*.EXE in \\SHZ\\TESTS is a self-checking Win64 program: it must exit 0 without a fault. It prints its own
- * PASS/FAIL lines through the console; a hung program is killed at its bounded workload deadline. */
+/* Ordinary T_*.EXE programs must exit 0 without a fault. T_HELLO and the deliberately nonzero observation diagnostic
+ * have separate contracts. Programs print their own PASS/FAIL lines; a hung program has a bounded deadline. */
 #define WIN64_APP_TIMEOUT_MS 60000u
 
 /* t_ipc_exit.c has finite waits for readiness/termination (10s + 5s),
@@ -206,8 +206,36 @@ static unsigned win64_app_timeout_ms(const char *name)
         ? WIN64_APP_TIMEOUT_MS + WIN64_IPC_EXIT_CHILD_WAITS_MS
         : WIN64_APP_TIMEOUT_MS;
 }
-#define WIN64_MAX_APPS 128
+#define WIN64_MAX_APPS 256
 #define WIN64_TESTS_PREFIX "\\SHZ\\TESTS\\"
+#define WIN64_OBSERVATION_EXE "T_AUTORUN_OBSERVE.EXE"
+
+static void win64_observation_diagnostic(void)
+{
+    process_t *p = 0;
+    thread_t *t = 0;
+    int pid = 0, faulted = 1, reaped = -1;
+    int64_t code = -1;
+    int32_t st = ldr_create_process(0, WIN64_TESTS_PREFIX WIN64_OBSERVATION_EXE,
+                                  WIN64_OBSERVATION_EXE, "C:\\SHZ\\TESTS", &p, &t);
+    if (!st) {
+        const uint64_t started = ticks_now();
+        pid = p->pid;
+        while (!(p->terminated && p->threads_alive == 0) && ticks_now() - started < WIN64_APP_TIMEOUT_MS)
+            thread_sleep_ms(1);
+        if (!p->terminated) process_terminate(p, 0x102, 1);
+        reaped = proc_wait(pid, &code, &faulted);
+    }
+    kprintf("K64 win64 diagnostic: " WIN64_OBSERVATION_EXE " pid=%d exit=%d faulted=%d reaped=%d\n",
+            pid, (int)code, faulted, reaped);
+    CHECK("Win64 observation diagnostic parent deliberately exits 7 without a fault",
+          !st && !reaped && code == 7 && !faulted);
+    /* The real child waits for its parent's process handle, then sleeps 10 seconds before printing its proof.
+     * Keep the diagnostic observable even when an archive contains very few ordinary apps. The host requires
+     * both real console identities, the native wait result and the ordered delayed child marker. */
+    if (!st && !reaped && code == 7 && !faulted) thread_sleep_ms(11000);
+}
+
 static void win64_run_others(void)
 {
     static char names[WIN64_MAX_APPS][32];
@@ -219,10 +247,12 @@ static void win64_run_others(void)
         kprintf("K64 win64: shz.noapps: the self-checking apps are not run\n");
         return;
     }
+    if (fs_lookup(WIN64_TESTS_PREFIX WIN64_OBSERVATION_EXE))
+        win64_observation_diagnostic();
     for (c = dir->child; c; c = c->sibling) {
         const size_t len = strlen(c->name);
         if (c->is_dir || len < 7 || strncmp(c->name, "T_", 2) || strcmp(c->name + len - 4, ".EXE") ||
-            !strcmp(c->name, "T_HELLO.EXE"))
+            !strcmp(c->name, "T_HELLO.EXE") || !strcmp(c->name, WIN64_OBSERVATION_EXE))
             continue;
         ++found;
         if (n < WIN64_MAX_APPS && len < sizeof names[0])
@@ -235,7 +265,7 @@ static void win64_run_others(void)
         for (j = i; j > 0 && strcmp(names[j - 1], tmp) > 0; --j) memcpy(names[j], names[j - 1], sizeof tmp);
         memcpy(names[j], tmp, sizeof tmp);
     }
-    kprintf("K64 win64: %u self-checking app(s) besides T_HELLO.EXE\n", n);
+    kprintf("K64 win64: %u ordinary self-checking app(s), separate T_HELLO/observation contracts\n", n);
     for (i = 0; i < n; ++i) {
         char path[64], cmd[40], label[80];
         process_t *p = 0;

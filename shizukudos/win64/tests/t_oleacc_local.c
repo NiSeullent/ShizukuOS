@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Genuine window/client IAccessible objects from the isolated Wine11 subset.
- * The unavailable RPC proxy/atom provider is not an accessibility success.
+ * Actual in-process transfers coexist with standard objects; RPC is separate.
  */
 #define COBJMACROS
 #define WIN32_LEAN_AND_MEAN
@@ -13,6 +13,7 @@ typedef HRESULT (WINAPI *from_window_fn)(HWND, DWORD, REFIID, void **);
 typedef HRESULT (WINAPI *children_fn)(IAccessible *, LONG, LONG, VARIANT *, LONG *);
 typedef HRESULT (WINAPI *window_fn)(IAccessible *, HWND *);
 typedef LRESULT (WINAPI *result_fn)(REFIID, WPARAM, LPUNKNOWN);
+typedef HRESULT (WINAPI *object_fn)(LRESULT, REFIID, WPARAM, void **);
 
 int main(void)
 {
@@ -22,6 +23,7 @@ int main(void)
     children_fn children;
     window_fn from_object;
     result_fn marshal;
+    object_fn unmarshal;
     IAccessible *client = 0, *window = 0;
     HWND parent = 0, child = 0, obtained = 0;
     WNDCLASSW cls;
@@ -37,8 +39,9 @@ int main(void)
     children = (children_fn)GetProcAddress(dll, "AccessibleChildren");
     from_object = (window_fn)GetProcAddress(dll, "WindowFromAccessibleObject");
     marshal = (result_fn)GetProcAddress(dll, "LresultFromObject");
-    CHECK(create && from_window && children && from_object && marshal, "all five actual Chromium delay imports resolve");
-    if (!create || !from_window || !children || !from_object || !marshal) goto done;
+    unmarshal = (object_fn)GetProcAddress(dll, "ObjectFromLresult");
+    CHECK(create && from_window && children && from_object && marshal && unmarshal, "all five Chromium delay imports and actual transfer receiver resolve");
+    if (!create || !from_window || !children || !from_object || !marshal || !unmarshal) goto done;
     CHECK(!GetProcAddress(dll, "CreateStdAccessibleProxyW") && !GetProcAddress(dll, "DllRegisterServer"),
           "unported RPC proxy and registration exports remain absent");
     memset(&cls, 0, sizeof cls);
@@ -83,11 +86,21 @@ int main(void)
     CHECK(create(parent, OBJID_CLIENT, &iid_accessible, 0) == E_INVALIDARG,
           "null standard-object output fails without a fault");
     CHECK((HRESULT)marshal(&iid_accessible, 0, 0) == E_INVALIDARG, "null marshaling object fails");
-    /* The current atom provider is absent. A real marshaling call must report
-     * a failure HRESULT instead of creating a fabricated success token. */
-    if (!GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GlobalAddAtomW"))
-        CHECK(FAILED((HRESULT)marshal(&iid_accessible, 0, (IUnknown *)client)),
-              "absent atom/marshal provider returns failure for a real COM object");
+    {
+        LRESULT token = marshal(&iid_accessible, 0, (IUnknown *)client);
+        IAccessible *received = NULL;
+        CHECK(token > 0 && SUCCEEDED((HRESULT)token), "a real local standard object yields a usable positive transfer token");
+        CHECK(unmarshal(token, &iid_accessible, 0, (void **)&received) == S_OK && received != NULL,
+              "the actual receiver transfers a real standard object reference");
+        if (received) {
+            obtained = NULL;
+            CHECK(from_object(received, &obtained) == S_OK && obtained == parent,
+                  "transferred standard object retains its actual HWND");
+            IAccessible_Release(received); received = NULL;
+        }
+        CHECK(unmarshal(token, &iid_accessible, 0, (void **)&received) == E_INVALIDARG && !received,
+              "a consumed transfer token cannot be reused");
+    }
  done:
     if (window) IAccessible_Release(window);
     if (client) IAccessible_Release(client);

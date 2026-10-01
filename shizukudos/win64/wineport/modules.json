@@ -892,9 +892,7 @@
   },
   {
    "name": "oleacc",
-   "makedep": true,
    "link": [
-    "tridentrt",
     "oleaut32",
     "ole32",
     "user32",
@@ -904,17 +902,15 @@
    "static": [
     "uuid"
    ],
-   "disabled": "tridentrt.dll is not built yet; it must provide what the Shizuku DLLs lack: CreateStreamOnHGlobal (unresolved in a SHZ_WINEPORT_PROBE=1 link without it; everything else links)",
+   "sources": [
+    "client.c",
+    "main.c",
+    "propservice.c",
+    "window.c",
+    "oleacc.rc",
+    "oleacc_classes.idl"
+   ],
    "dynamic_imports": [
-    {
-     "dll": "ole32.dll",
-     "fail": "0x80004001",
-     "functions": [
-      "CoMarshalInterface",
-      "CoUnmarshalInterface",
-      "CoReleaseMarshalData"
-     ]
-    },
     {
      "dll": "user32.dll",
      "fail": "0",
@@ -933,12 +929,17 @@
     },
     {
      "dll": "kernel32.dll",
-     "fail": "0xffff",
+     "fail": "1",
      "functions": [
       "GlobalDeleteAtom"
      ]
     }
-   ]
+   ],
+   "unported": {
+    "DllRegisterServer": "RPC proxy registration is excluded from the local standard-object subset",
+    "DllUnregisterServer": "RPC proxy registration is excluded from the local standard-object subset"
+   },
+   "makedep": true
   },
   {
    "name": "jscript",
@@ -1140,6 +1141,13 @@
       "RegInstallA"
      ]
     }
+   ]
+  },
+  {
+   "name": "mpr",
+   "link": [
+    "user32",
+    "advapi32"
    ]
   }
  ],

@@ -29,6 +29,40 @@ def check(name, ok, detail=""):
     return {"check": name, "status": "PASS" if ok else "FAIL", "detail": detail}
 
 
+OBSERVATION_EXE = "T_AUTORUN_OBSERVE.EXE"
+
+
+def observation_diagnostic(serial):
+    """Require the real intentionally nonzero parent and its distinct delayed child.
+
+    A parent's exit 7 is never treated as an ordinary app's exit-0 success. The
+    console's originating PID, native wait record and lifecycle order must agree.
+    """
+    parent = list(re.finditer(
+        r"^\[win64 T_AUTORUN_OBSERVE\.EXE pid (\d+)\] K64 observation fixture: actual parent pid (\d+) "
+        r"exits 7 after real child pid (\d+) acquired its process handle$", serial, re.M))
+    native = list(re.finditer(
+        r"^K64 win64 diagnostic: T_AUTORUN_OBSERVE\.EXE pid=(\d+) exit=(-?\d+) faulted=(\d+) reaped=(-?\d+)$",
+        serial, re.M))
+    child = list(re.finditer(
+        r"^\[win64 T_AUTORUN_OBSERVE\.EXE pid (\d+)\] K64 observation fixture: real child pid (\d+) "
+        r"survived actual parent pid (\d+) exit 7 after delayed scheduling$", serial, re.M))
+    ordinary = re.search(r"^K64 win64 app: T_AUTORUN_OBSERVE\.EXE\b", serial, re.M)
+    ok = len(parent) == len(native) == len(child) == 1 and not ordinary
+    detail = f"parent/native/child records={len(parent)}/{len(native)}/{len(child)}; ordinary={bool(ordinary)}"
+    if ok:
+        p, n, c = parent[0], native[0], child[0]
+        pp, declared_parent, cp = map(int, p.groups())
+        np, code, fault, reaped = map(int, n.groups())
+        emitted_child, declared_child, child_parent = map(int, c.groups())
+        ok = (pp == declared_parent == np == child_parent and cp == emitted_child == declared_child
+              and 0 < pp <= 0xffffffff and 0 < cp <= 0xffffffff and pp != cp
+              and (code, fault, reaped) == (7, 0, 0) and p.start() < n.start() < c.start())
+        detail += f"; actual parent={pp} child={cp} exit/fault/reaped={code}/{fault}/{reaped}"
+    return check("Win64 observation diagnostic: intentional parent exit 7, native wait and actual delayed child agree",
+                 ok, detail)
+
+
 def parse(serial):
     ev, exit_code = {}, None
     for m in re.finditer(r"^SHZ-EV ([0-9a-f]+) ([0-9a-f]+)$", serial, re.M):
@@ -85,6 +119,8 @@ def evaluate(serial, ev, exit_code, qemu_rc, memory=None):
                    e(19) == 0x140000000 and e(20) == 1 and e(21) == 2, f"{e(19):#x} {e(20)} {e(21)}"))
     c.append(check("Win64: second process returned every physical page", res != 0 and e(22) == 0, f"delta={e(22)}"))
     c.append(check("Win64 console output reached the serial console", "hello from Win64 PE32+" in serial))
+    if OBSERVATION_EXE in serial:
+        c.append(observation_diagnostic(serial))
     # WIN64 subsystem bridge (kernel64/subsys64.c) loopback: slot 31 = 'W4' << 16 | passed << 8 | failed
     w64 = e(31)
     c.append(check("WIN64 subsystem bridge loopback: every self-test check passed (no peer domain in this profile)",

@@ -851,7 +851,14 @@ def media_context(iso: Path, disk: Path, media=None) -> dict:
         info = ctx[key]["receipt"].get("setup", {})
         ctx.setdefault("setup", {})[medium] = {"directory": ROOT / info["directory"]} if info.get("present") else None
     # The DOS16 image the menu boots, as built (the same bytes are on the ISO and, as \SHZDOS\DISK.IMG, on the disk).
-    dos16 = next(i for i in ctx[first]["receipt"]["inputs"] if i["name"] == "DISK.IMG")
+    dos_inputs = [i for i in ctx[first]["receipt"]["inputs"]
+                  if i["name"].replace("\\", "/").upper().lstrip("/")
+                  in ("DISK.IMG", "SHZDOS/DISK.IMG")]
+    if not dos_inputs:
+        raise SystemExit("the selected medium receipt has no DOS16 image input")
+    if len(dos_inputs) != 1:
+        raise SystemExit("the selected medium receipt has ambiguous DOS16 image inputs")
+    dos16 = dos_inputs[0]
     ctx["dos16_image"] = (ROOT / dos16["path"]).read_bytes()
     if shzlib.sha256_bytes(ctx["dos16_image"]) != dos16["sha256"]:
         raise SystemExit("the DOS16 image in build/ changed since the ISO was built; rebuild the media")

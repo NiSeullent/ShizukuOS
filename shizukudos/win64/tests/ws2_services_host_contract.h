@@ -15,6 +15,9 @@ typedef int BOOL;
 typedef struct { int64_t QuadPart; } LARGE_INTEGER;
 typedef pthread_mutex_t SRWLOCK;
 struct servent { char *s_name; char **s_aliases; char *s_proto; short s_port; };
+typedef uint32_t ULONG;
+struct protoent { char *p_name; char **p_aliases; short p_proto; };
+struct hostent { char *h_name; char **h_aliases; short h_addrtype, h_length; char **h_addr_list; };
 #define SRWLOCK_INIT PTHREAD_MUTEX_INITIALIZER
 #define WINAPI
 #define WSAAPI
@@ -40,6 +43,8 @@ struct servent { char *s_name; char **s_aliases; char *s_proto; short s_port; };
 #define WSAHOST_NOT_FOUND 11001
 #define WSANO_RECOVERY 11003
 #define WSANO_DATA 11004
+#define AF_INET 2
+#define WSAEAFNOSUPPORT 10047
 _Static_assert(sizeof(struct servent) == 32, "Windows AMD64 SERVENT size");
 _Static_assert(offsetof(struct servent,s_name)==0 && offsetof(struct servent,s_aliases)==8
                && offsetof(struct servent,s_proto)==16 && offsetof(struct servent,s_port)==24, "Windows AMD64 SERVENT fields");

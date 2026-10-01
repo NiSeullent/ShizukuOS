@@ -35,7 +35,8 @@ def main():
     legacy = {'accept':1,'bind':2,'closesocket':3,'connect':4,'getpeername':5,'getsockname':6,'getsockopt':7,
               'htonl':8,'htons':9,'ioctlsocket':10,'inet_addr':11,'inet_ntoa':12,'listen':13,'ntohl':14,'ntohs':15,
               'recv':16,'recvfrom':17,'select':18,'send':19,'sendto':20,'setsockopt':21,'shutdown':22,'socket':23,
-              'gethostbyname':52,'getservbyname':55,'gethostname':57,'WSAGetLastError':111,'WSASetLastError':112,
+              'gethostbyaddr':51,'gethostbyname':52,'getprotobyname':53,'getprotobynumber':54,
+              'getservbyname':55,'getservbyport':56,'gethostname':57,'WSAGetLastError':111,'WSASetLastError':112,
               'WSAStartup':115,'WSACleanup':116,'__WSAFDIsSet':151}
     for name,ordinal in config['ordinals'].items():
         assert ordinal==legacy[name] if name in legacy else ordinal>=501
@@ -48,8 +49,12 @@ def main():
             records.append((fields[0],int(port),proto,fields[2:]))
     http = next(r for r in records if r[:3]==('http',80,'tcp'))
     assert http[3], 'Real OS HTTP alias fixture required'
-    high = next(r for r in records if 32767<r[1]<=65535 and r[2] in ('tcp','udp')
-                and socket.getservbyname(r[0],r[2])==r[1])
+    def agrees_with_host(row):
+        try:
+            return socket.getservbyname(row[0],row[2])==row[1]
+        except OSError:
+            return False  # Catalogs differ; require a positive OS-confirmed record below.
+    high = next(r for r in records if 32767<r[1]<=65535 and r[2] in ('tcp','udp') and agrees_with_host(r))
     assert socket.getservbyname(http[3][0],'tcp')==80
     first = next(r for r in records if r[0]=='http')
     expected = ''.join('#define '+name+' '+value+'\n' for name,value in [

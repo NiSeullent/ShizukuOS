@@ -34,8 +34,13 @@ Pinned Wine db11d0fe6a169c457e23d007e20404643d067aa8 ws2_32.spec supplies the
 canonical ordinal declarations. No Wine implementation body is copied.
 
 Host tests use explicit Windows file/heap/TLS adapters and temporary copies of
-the actual host services, protocols and hosts files. Catalog provenance is
-recorded; the host files are not modified. Host adapters are separate from
+the explicitly selected services, protocols and hosts files. The production
+build packages unmodified public Debian netbase services/protocols and the
+Alpine package's default localhost hosts file, with pinned recipe provenance,
+upstream digests, copyright and full GPL-2 text. Its offline packaging helper
+copies no private host configuration and puts the same catalog bytes in both
+runtime images and the production desktop/install system path.
+Host adapters are separate from
 native provider evidence. The compiled native fixture checks actual named/
 ordinal bindings, real catalogue records, common forward/reverse storage,
 real A/W metadata, a real socket opened from ANSI metadata and live native

@@ -141,7 +141,9 @@ static int32_t shz_sec_section_check(const uint8_t *sd, uint32_t len,
     n = shz_sec_u16(sd + off + 2);
     if (n > len - off || !shz_sec_acl_valid(sd + off, n)) return SHZ_SEC_BAD_ACL;
     if (shz_sec_u16(sd + off + 4)) return SHZ_SEC_UNSUPPORTED;
-    if (extra & 0x1fu) return SHZ_SEC_DENIED;
+    /* SECTION_MAP_EXECUTE_EXPLICIT (0x20) is also an object-specific right,
+     * alongside QUERY/MAP_WRITE/MAP_READ/MAP_EXECUTE/EXTEND_SIZE. */
+    if (extra & 0x3fu) return SHZ_SEC_DENIED;
     /* Owner/privilege-based standard rights need the token-aware evaluator. */
     return SHZ_SEC_UNSUPPORTED;
 }

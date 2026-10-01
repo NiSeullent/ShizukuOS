@@ -926,8 +926,12 @@ static int32_t sys_duplicate(process_t *p, struct regs *r, uint64_t hsp, uint64_
         uint32_t a = (options & DUPLICATE_SAME_ACCESS) ? access : desired;
         const int inherit = (options & DUPLICATE_SAME_ATTRIBUTES) ? (flags & HANDLE_FLAG_INHERIT_BIT) != 0
                                                                    : (attrs & OBJ_INHERIT_ATTR) != 0;
-        if (o->type == OB_SECTION && !(options & DUPLICATE_SAME_ACCESS))
+        if (o->type == OB_SECTION && !(options & DUPLICATE_SAME_ACCESS)) {
+            /* Existing rights can be duplicated without reopening the object;
+             * any expansion must pass its current security descriptor. */
+            if (a & MAXIMUM_ALLOWED_ACCESS) a = access | (a & ~MAXIMUM_ALLOWED_ACCESS);
             st = ipc_section_duplicate_access(o, access, &a);
+        }
         if (!st) {
             ob_ref(o);
             st = ipc_give_handle(dst, o, a, inherit, 0, &h);

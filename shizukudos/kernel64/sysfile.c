@@ -214,7 +214,7 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     }
     /* console pseudo-devices */
     if (!strcmp(path, "\\??\\CONOUT$") || !strcmp(path, "\\??\\CONIN$")) {
-        o = console_object(path[6] == 'O');
+        o = console_object(!strcmp(path, "\\??\\CONOUT$"));
         if (!o) return STATUS_NO_MEMORY;
         st = handle_insert(p, o, (uint32_t)a2, &h);
         if (st) file_object_closed(o);
@@ -404,6 +404,15 @@ static int32_t file_name_utf16(const file_t *f, uint16_t *w, uint32_t cap, uint3
     uint32_t depth = 0, nchars = 0;
     const fsnode_t *n;
     if (!cap) return STATUS_OBJECT_NAME_INVALID;
+    if (f->console == 1 || f->console == 2) {
+        const char *device = f->console == 1 ? "\\CONIN$" : "\\CONOUT$";
+        while (*device) {
+            if (nchars == cap) return STATUS_OBJECT_NAME_INVALID;
+            w[nchars++] = (uint8_t)*device++;
+        }
+        *nchars_out = nchars;
+        return STATUS_SUCCESS;
+    }
     for (n = f->node; n && n->parent; n = n->parent) {
         if (depth == sizeof chain / sizeof chain[0]) return STATUS_OBJECT_NAME_INVALID;
         chain[depth++] = n;
@@ -470,6 +479,10 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
             if (st) return st;
         } else {
             b.attrs = f->console == 1 || f->console == 2 ? 0x40 : FILE_ATTRIBUTE_NORMAL;
+            if (f->console == 1 || f->console == 2) {
+                st = file_name_utf16(f, w, 512, &nchars);
+                if (st) return st;
+            }
         }
         memset(all, 0, sizeof all);
         memcpy(all + 0, &b, 40);                          /* FILE_BASIC_INFORMATION */
@@ -499,7 +512,7 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         uint16_t w[512];
         uint32_t nchars = 0, total, room, copy;
         int32_t st;
-        if (!f->node) return STATUS_INVALID_PARAMETER;
+        if (!f->node && f->console != 1 && f->console != 2) return STATUS_INVALID_PARAMETER;
         if (len < 4) return STATUS_BUFFER_TOO_SMALL;
         st = file_name_utf16(f, w, 512, &nchars);
         if (st) return st;

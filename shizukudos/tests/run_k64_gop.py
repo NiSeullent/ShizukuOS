@@ -17,7 +17,8 @@ Per display it checks, from what QEMU shows (QMP screendump) and what the guest 
     its frame and caption are drawn; every DLL this build produced was loaded in the guest; the PCI binding as above;
   - T_GUI_INPUT: PS/2 keyboard, mouse and wheel input driven through QMP arrives as the expected messages (the same
     expectations as run_k64_gui.py);
-  - every T_*.EXE in WIN64.IMG exits 0 without a fault, no FAIL line, Kernel64 exits 0.
+  - ordinary T_*.EXE programs exit 0 without a fault; the separate observation diagnostic must prove its intentional
+    parent exit 7 and actual delayed child. No FAIL line is permitted, and Kernel64 must exit 0.
 Before booting anything, a host test compiles kernel64/gfx_pixfmt.h (the row conversion the GOP backend uses) with the
 host C compiler and checks the byte order of both GOP layouts (BGRX copied, RGBX with red and blue swapped): QEMU's GOP
 is always BGRX, so the RGBX path is only exercised there. This says nothing about real hardware beyond what OVMF does.
@@ -273,9 +274,12 @@ def run_display(name, args, disk, work, apps, built_dlls):
               ", ".join(missing[:8]))
     ran = re.findall(r"^K64 win64 app: (\S+) exit=(-?\d+) faulted=(\d+)", serial, re.M)
     bad = [f"{n} exit={e} faulted={f}" for n, e, f in ran if e != "0" or f != "0"]
-    expected = [a for a in apps if a != "T_HELLO.EXE"]
-    rep.check(f"{name}: every T_*.EXE in WIN64.IMG ran and exited 0 without a fault",
+    expected = [a for a in apps if a not in ("T_HELLO.EXE", run_k64_standalone.OBSERVATION_EXE)]
+    rep.check(f"{name}: every ordinary T_*.EXE in WIN64.IMG ran and exited 0 without a fault",
               sorted(n for n, _, _ in ran) == expected and not bad, f"{len(ran)}/{len(expected)} ran; {bad[:3]}")
+    if run_k64_standalone.OBSERVATION_EXE in apps:
+        diagnostic = run_k64_standalone.observation_diagnostic(serial)
+        rep.check(f"{name}: {diagnostic['check']}", diagnostic["status"] == "PASS", diagnostic["detail"])
     fails = re.findall(r"\] (FAIL: .*)", serial)
     rep.check(f"{name}: no program printed FAIL:", not fails, "; ".join(fails[:5]))
     skips = re.findall(r"\[win64 (T_GUI_\S+) pid \d+\] (SKIP: .*)", serial)

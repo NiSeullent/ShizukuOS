@@ -7,18 +7,21 @@ disk's existing DOS: ShizukuDOS DOS-to-VMM replacement remains incomplete.
 """
 import argparse
 import contextlib
+import errno
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import selectors
 import shutil
 import signal
 import stat
 import struct
 import subprocess
 import sys
+import time
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -135,23 +138,84 @@ def space(path, remaining=0):
         raise RuntimeError("17 GiB retained free space plus the remaining preparation budget is required")
 
 
-def copy_fd(fd, checkpoint, destination, expected, size, maximum=DISK_BYTES):
-    destination = safe_path(destination)
-    digest, written = hashlib.sha256(), 0
+def copy_fd(fd, checkpoint, destination, expected, size, maximum=DISK_BYTES, *, prefer_reflink=False):
+    """Copy the same read-leased descriptor into a fresh independent file.
+
+    Explicit COW preference falls back only on unsupported clone operations.
+    Sparse fallback skips zero 4 KiB runs while hashing every logical byte.
+    A failed copy remains private and unaccepted; original inputs are unchanged.
+    """
+    destination, expected = safe_path(destination), pin_format(expected)
+    method, fallback_errno = "streaming-sparse-zero-runs", None
+    source_identity = stable(os.fstat(fd))
+    if source_identity[2] != size or not 0 < size <= maximum:
+        raise ValueError("leased copy extent mismatch")
     with destination.open("xb") as stream:
-        while block := os.read(fd, 1 << 20):
-            checkpoint()  # Check after read and before any owned data write.
-            space(destination, len(block))
-            if stream.write(block) != len(block):
-                raise OSError("partial owned input write")
-            digest.update(block)
-            written += len(block)
+        checkpoint()
+        cloned = False
+        if prefer_reflink:
+            space(destination, 1 << 20)
+            try:
+                fcntl.ioctl(stream.fileno(), 0x40049409, fd)  # Linux FICLONE.
+                checkpoint()
+                method, cloned = "leased-FICLONE-COW", True
+            except OSError as error:
+                if error.errno not in (errno.EXDEV, errno.EOPNOTSUPP, errno.ENOTTY, errno.ENOSYS, errno.EINVAL):
+                    raise
+                fallback_errno = error.errno
+                checkpoint()
+                # Failed unsupported clone never justifies a dense fallback.
+                # Reserve the measured extent before sparse copying starts.
+                space(destination, min(size, os.fstat(fd).st_blocks * 512))
+                stream.truncate(0)
+        if not cloned:
+            os.lseek(fd, 0, os.SEEK_SET)
+            digest, written = hashlib.sha256(), 0
+            zero = bytes(1 << 20)
+            while block := os.read(fd, 1 << 20):
+                checkpoint()  # After read and before any owned data write.
+                if written + len(block) > size:
+                    raise ValueError("leased copy exceeds its bounded extent")
+                digest.update(block)
+                if block != zero[:len(block)]:
+                    for at in range(0, len(block), 4096):
+                        run = block[at:at + 4096]
+                        if run != zero[:len(run)]:
+                            space(destination, len(run))
+                            stream.seek(written + at)
+                            if stream.write(run) != len(run):
+                                raise OSError("partial owned sparse write")
+                written += len(block)
+            if written != size or digest.hexdigest() != expected:
+                raise ValueError("owned copy SHA/extent mismatch")
+            stream.truncate(size)
         stream.flush()
         os.fsync(stream.fileno())
+        checkpoint()
+        owned = os.fstat(stream.fileno())
+        if (owned.st_dev, owned.st_ino) == source_identity[:2] or stable(os.fstat(fd)) != source_identity:
+            raise RuntimeError("copy inode independence or leased source identity failed")
+        allocation = owned.st_blocks * 512
     checkpoint()
-    if written != size or digest.hexdigest() != pin_format(expected):
-        raise ValueError("owned copy SHA/extent mismatch")
     pinned_hash(destination, expected, size, maximum=maximum)
+    space(destination)
+    return {"method": method, "bytes": size, "sha256": expected,
+            "allocated_bytes": allocation, "allocation_includes_shared_extents": cloned,
+            "reflink_fallback_errno": fallback_errno, "source_lease_preserved": True,
+            "independent_inode": True, "target_readback_verified": True}
+
+
+def preparation_budget(inputs):
+    """Conservative ESP extent + measured input allocation + build metadata.
+
+    Reflinks may cost fewer physical blocks; this deliberately counts their
+    source allocation anyway. Full ESP capacity remains budgeted because FAT
+    copies write complete logical members, including zero-filled disk sectors.
+    Per-operation retained-space checks remain active throughout preparation.
+    """
+    measured = sum(min(item["bytes"], item["path"].stat().st_blocks * 512)
+                   for item in inputs.values())
+    return (ESP_MIB << 20) + measured + (128 << 20)
 
 
 def config_bytes():
@@ -195,6 +259,45 @@ def command(argv, receipt, cwd=None, timeout=120):
     subprocess.run(argv, cwd=cwd, check=True, timeout=timeout, stdout=subprocess.DEVNULL)
 
 
+def verify_esp_member(esp, name, expected, size, receipt, timeout=120):
+    """Read actual FAT member bytes through mtype into a bounded streaming hash.
+
+    No full-size readback file is materialized. Nonzero exit, timeout, excess
+    bytes or a digest/extent difference fails the private build.
+    """
+    argv = ["mtype", "-i", str(esp), "::/" + name]
+    receipt["commands"].append(argv)
+    digest, count = hashlib.sha256(), 0
+    child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + timeout
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(child.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("ESP member streaming readback timed out")
+                if not selector.select(remaining):
+                    raise TimeoutError("ESP member streaming readback timed out")
+                block = os.read(child.stdout.fileno(), 1 << 20)
+                if not block:
+                    break
+                count += len(block)
+                if count > size:
+                    raise ValueError("ESP byte readback mismatch: " + name)
+                digest.update(block)
+        if child.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+            raise RuntimeError("ESP member readback command failed: " + name)
+        if count != size or digest.hexdigest() != pin_format(expected):
+            raise ValueError("ESP byte readback mismatch: " + name)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
+        child.stdout.close()
+    return {"bytes": count, "sha256": digest.hexdigest(), "method": "mtype-streaming-SHA256"}
+
+
 def assemble(out, copies, loader, receipt):
     space(out, ESP_MIB << 20)
     esp = out / "esp-win98.img"
@@ -206,17 +309,15 @@ def assemble(out, copies, loader, receipt):
     policy.write_bytes(b"mode=supervisor\r\nmenu_timeout=0\r\n")
     members = {"EFI/BOOT/BOOTX64.EFI": loader, "EFI/SHIZUKU/BOOT.INI": policy,
                **{"SHZDOS/" + name: source for name, source in copies.items()}}
+    identities = {}
     for name, source in members.items():
-        space(out, source.stat().st_size)
+        size, pin = source.stat().st_size, file_sha(source)
+        space(out, size)
         command(["mcopy", "-i", esp, source, "::/" + name], receipt)
-        readback = out / "readback-owned.tmp"
-        space(out, source.stat().st_size)
-        command(["mcopy", "-i", esp, "::/" + name, readback], receipt)
-        if readback.stat().st_size != source.stat().st_size or file_sha(readback) != file_sha(source):
-            raise ValueError("ESP byte readback mismatch: " + name)
-        readback.unlink()  # Only this owned temporary is removed after a full successful check.
+        verify_esp_member(esp, name, pin, size, receipt)
+        identities[name] = {"bytes": size, "sha256": pin}
         space(out)
-    return esp, {name: {"bytes": source.stat().st_size, "sha256": file_sha(source)} for name, source in members.items()}
+    return esp, identities
 
 
 def main(argv=None):
@@ -267,9 +368,11 @@ def main(argv=None):
     if not args.out:
         parser.error("a new --out private directory is required for building")
     out = fresh_output(args.out)
-    space(out, 7 << 30)
+    budget = preparation_budget(inputs)
+    space(out, budget)
     out.mkdir()
     receipt = {"status": "FAIL_BUILD_PRESERVED", "private": True, "commands": [],
+               "preparation_budget_bytes": budget, "retained_free_space_bytes": RESERVE, "copies": {},
                "input_pins": {n: {**item, "path": str(item["path"])} for n, item in inputs.items()},
                "Windows98_installation_identity_verified": False, "VM_executed": False,
                "Windows98_boot_verified": False, "MS_DOS_replaced": False, "native_Win64_app_verified": False}
@@ -280,7 +383,7 @@ def main(argv=None):
             with read_leased(item["path"], item["sha256"], item["bytes"]) as (fd, checkpoint):
                 validate_contents(name, fd)
                 checkpoint()
-                copy_fd(fd, checkpoint, destination, item["sha256"], item["bytes"])
+                receipt["copies"][name] = copy_fd(fd, checkpoint, destination, item["sha256"], item["bytes"], prefer_reflink=True)
             copies[name] = destination
         files = source_files()
         pins = {str(p.relative_to(ROOT)): file_sha(p) for p in files}

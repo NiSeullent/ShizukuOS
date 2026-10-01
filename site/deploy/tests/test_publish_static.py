@@ -25,6 +25,93 @@ spec.loader.exec_module(publisher)
 COMMIT = '1234567890abcdef1234567890abcdef12345678'
 
 
+PROOF = Path(__file__).resolve().parents[2] / 'evidence/component-installer'
+
+
+class ComponentInstallerProof(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='m98-component-proof-controls-')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.proof = self.root / 'proof'
+        shutil.copytree(PROOF, self.proof)
+        self.manifest = json.loads((self.proof / 'manifest.json').read_bytes())
+
+    def prepare(self, **kwargs):
+        return publisher.prepare_assets(component_installer_proof=self.proof, **kwargs)
+
+    def write_manifest(self):
+        (self.proof / 'manifest.json').write_text(json.dumps(self.manifest))
+
+    def test_optional_original_component_frames_are_localized_and_scope_stays_incomplete(self):
+        prepared = self.prepare()
+        self.assertIsNone(prepared['iso'])
+        self.assertEqual(len(prepared['assets']), 88)
+        self.assertEqual(prepared['component_installer_proof'], self.manifest)
+        for flag in ('microsoft_media_included', 'windows98_boot_verified', 'ms_dos_replaced', 'latest_apps_complete', 'pixel_transform'):
+            self.assertIs(self.manifest[flag], False)
+        for frame in self.manifest['frames']:
+            name = 'evidence/component-installer/' + frame['file']
+            self.assertEqual(hashlib.sha256(prepared['assets'][name]).hexdigest(), frame['sha256'])
+        for name, scope, pending, prefix in (
+                ('index.html', 'Shizuku 구성요소 설치 검증', 'Windows 98의 MS-DOS 대체와 최신 앱 전체 지원은 개발 중입니다.', './'),
+                ('en/index.html', 'Shizuku component installer verification', 'Replacing MS-DOS for Windows 98 and complete latest-app support remain in development.', '../')):
+            page = prepared['assets'][name].decode()
+            self.assertIn(scope, page)
+            self.assertIn(pending, page)
+            self.assertIn('2026-10-01', page)
+            self.assertIn(prefix + 'evidence/component-installer/manifest.json', page)
+            for frame in self.manifest['frames']:
+                self.assertIn(prefix + 'evidence/component-installer/' + frame['file'], page)
+        self.assertNotIn(b'/root/', prepared['assets']['evidence/component-installer/manifest.json'])
+
+    def test_unpinned_bytes_and_dimensions_are_rejected(self):
+        path = self.proof / self.manifest['frames'][0]['file']
+        original = path.read_bytes()
+        path.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))
+        with self.assertRaises(ValueError): self.prepare()
+        path.write_bytes(original)
+        self.manifest['frames'][0]['width'] = 1024; self.write_manifest()
+        with self.assertRaises(ValueError): self.prepare()
+
+    def test_changed_provenance_scope_and_private_fields_are_rejected(self):
+        original = json.loads(json.dumps(self.manifest))
+        for field, value in [('windows98_boot_verified', True), ('ms_dos_replaced', True),
+                             ('latest_apps_complete', True), ('microsoft_media_included', True),
+                             ('pixel_transform', True), ('public', False),
+                             ('actual_vm_count', 3), ('result_sha256', '0' * 64),
+                             ('input_capture_sha256', '0' * 64), ('scope', 'Windows 98 installed'),
+                             ('date', '2026-10-02'), ('status', 'PASS_WINDOWS98_COMPLETE'),
+                             ('private_input_path', '/private/owned-media.iso')]:
+            with self.subTest(field=field):
+                self.manifest = json.loads(json.dumps(original)); self.manifest[field] = value
+                self.write_manifest()
+                with self.assertRaises(ValueError): self.prepare()
+
+    def test_missing_extra_or_symlink_inputs_are_rejected(self):
+        frame = self.proof / self.manifest['frames'][0]['file']
+        original = frame.read_bytes(); frame.unlink()
+        with self.assertRaises(ValueError): self.prepare()
+        frame.write_bytes(original)
+        extra = self.proof / 'private.iso'; extra.write_bytes(b'not accepted')
+        with self.assertRaises(ValueError): self.prepare()
+        extra.unlink(); frame.unlink(); frame.symlink_to(PROOF / frame.name)
+        with self.assertRaises(ValueError): self.prepare()
+        linked = self.root / 'linked-proof'; linked.symlink_to(PROOF, target_is_directory=True)
+        with self.assertRaises(ValueError): publisher.prepare_assets(component_installer_proof=linked)
+        frame.unlink(); frame.write_bytes(original)
+        manifest = self.proof / 'manifest.json'; manifest.unlink(); manifest.symlink_to(PROOF / 'manifest.json')
+        with self.assertRaises(ValueError): self.prepare()
+
+    def test_default_pages_do_not_gain_or_claim_component_proof(self):
+        prepared = publisher.prepare_assets()
+        self.assertIsNone(prepared.get('component_installer_proof'))
+        self.assertEqual(len(prepared['assets']), 83)
+        self.assertNotIn('evidence/component-installer/manifest.json', prepared['assets'])
+        for name in ('index.html', 'en/index.html'):
+            self.assertEqual(prepared['assets'][name], (publisher.SITE / name).read_bytes())
+
+
 class Anchors(HTMLParser):
     def __init__(self):
         super().__init__(); self.downloads = []
@@ -280,13 +367,42 @@ class IsoPublication(unittest.TestCase):
 
     def test_zero_oversized_or_non_iso_inputs_are_rejected(self):
         self.assertTrue(hasattr(publisher, 'open_iso'), 'reviewed ISO input support is absent')
-        for size in [0, 256 * 1024 * 1024 + 1]:
+        for size in [0, 512 * 1024 * 1024 + 1]:
             with self.subTest(size=size):
                 with self.iso.open('wb') as stream: stream.truncate(size)
                 with self.assertRaises(ValueError): publisher.open_iso(self.iso, COMMIT)
         self.iso.write_bytes(b'x' * self.size)
         self.receipt_data['sha256'] = hashlib.sha256(self.iso.read_bytes()).hexdigest(); self.write_receipt()
         with self.assertRaises(ValueError): publisher.open_iso(self.iso, COMMIT)
+
+    def test_281_mib_sparse_iso_streams_without_claiming_a_boot(self):
+        # Sparse host contract input; this is not a release or a boot record.
+        with self.iso.open('wb') as stream:
+            stream.truncate(281 * 1024 * 1024)
+            stream.seek(32768); stream.write(b'\x01CD001\x01')
+        digest = hashlib.sha256()
+        with self.iso.open('rb') as stream:
+            while chunk := stream.read(1024 * 1024): digest.update(chunk)
+        self.receipt_data.update(bytes=self.iso.stat().st_size, sha256=digest.hexdigest())
+        self.write_receipt()
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('whole ISO reads forbidden')):
+            candidate = self.open_iso()
+        self.assertEqual(publisher.ISO_LIMIT, 512 * 1024 * 1024)
+        self.assertEqual(candidate.metadata['artifact']['bytes'], 281 * 1024 * 1024)
+        self.assertEqual(candidate.metadata['validation']['boot_status'], 'not-verified-for-this-download')
+        self.assertFalse(candidate.metadata['validation']['windows98_installer_complete'])
+        self.assertFalse(candidate.metadata['validation']['latest_apps_complete'])
+        with self.assertRaises(ValueError): publisher.read_small(self.iso)
+
+    def test_iso_512_mib_exact_bound_and_larger_rejected_before_read(self):
+        large = self.root / 'bounded.iso'
+        with large.open('wb') as stream: stream.truncate(512 * 1024 * 1024)
+        with publisher.open_regular(large, publisher.ISO_LIMIT) as stream:
+            self.assertEqual(os.fstat(stream.fileno()).st_size, 512 * 1024 * 1024)
+        with large.open('wb') as stream: stream.truncate(512 * 1024 * 1024 + 1)
+        with patch.object(publisher, 'stream_digest', side_effect=AssertionError('oversized ISO must not be read')):
+            with self.assertRaises(ValueError): publisher.open_iso(large, COMMIT)
+        self.assertEqual(publisher.SMALL_LIMIT, 8 * 1024 * 1024)
 
     def test_changed_open_source_cannot_be_copied_as_reviewed(self):
         candidate = self.open_iso()
@@ -326,6 +442,25 @@ class IsoPublication(unittest.TestCase):
         metadata = json.loads(prepared['assets']['downloads/release.json'])
         self.assertEqual(metadata, prepared['iso'].metadata)
         for name, data in before.items(): self.assertEqual(data, (publisher.SITE / name).read_bytes())
+
+    def test_component_proof_cannot_replace_exact_shipped_iso_boot_evidence(self):
+        prepared = publisher.prepare_assets(self.iso, COMMIT, component_installer_proof=PROOF)
+        self.addCleanup(prepared['iso'].close)
+        self.assertEqual(len(prepared['assets']) + 1, 91)
+        metadata = json.loads(prepared['assets']['downloads/release.json'])
+        self.assertEqual(metadata['validation']['boot_status'], 'not-verified-for-this-download')
+        self.assertFalse(metadata['validation']['windows98_installer_complete'])
+        self.assertFalse(metadata['validation']['latest_apps_complete'])
+        self.assertNotIn('iso_boot_evidence', metadata)
+        self.assertEqual(prepared['component_installer_proof']['actual_vm_count'], 4)
+        for name, warning in [('index.html', '별도로 확인하세요.'),
+                              ('en/index.html', 'Check release information separately')]:
+            self.assertIn(warning, prepared['assets'][name].decode())
+        path = self.root / 'rejected-shipped-iso.json'
+        evidence = self.desktop_evidence(); evidence['status'] = 'FAIL'
+        path.write_text(json.dumps(evidence))
+        with self.assertRaises(ValueError):
+            publisher.prepare_assets(self.iso, COMMIT, path, component_installer_proof=PROOF)
 
     def test_origin_headers_reject_full_body_for_range_and_wrong_lengths(self):
         candidate = self.open_iso()
@@ -369,6 +504,26 @@ class IsoPublication(unittest.TestCase):
         destination = Path(command[command.index('--output') + 1])
         destination.write_bytes((base / 'current' / 'site' / name).read_bytes())
         return subprocess.CompletedProcess(command, 0, '', '')
+
+    def test_component_proof_origin_hashes_and_publication_receipt_remain_separate(self):
+        prepared = publisher.prepare_assets(component_installer_proof=PROOF)
+        base, previous = self.publication_environment()
+        with patch.object(publisher, 'BASE', base), patch.object(publisher, 'ROOT', self.root), \
+             patch.object(publisher.subprocess, 'run', side_effect=lambda cmd, **kwargs: self.exact_local_curl(base, cmd, **kwargs)), \
+             redirect_stdout(io.StringIO()):
+            publisher.publish(prepared)
+        records = list((self.root / 'build/m98-self-host').glob('release-*.json'))
+        self.assertEqual(len(records), 1)
+        receipt = json.loads(records[0].read_bytes())
+        self.assertEqual(receipt['component_installer_proof'], json.loads((PROOF / 'manifest.json').read_bytes()))
+        self.assertEqual(receipt['origin_check_count'], 88)
+        self.assertFalse(receipt['public_edge_verified'])
+        self.assertNotIn('iso_release', receipt)
+        checks = {row['path']: row for row in receipt['origin_checks']}
+        for frame in receipt['component_installer_proof']['frames']:
+            name = '/evidence/component-installer/' + frame['file']
+            self.assertEqual(checks[name]['sha256'], frame['sha256'])
+            self.assertEqual(checks[name]['bytes'], frame['bytes'])
 
     def test_receipt_persistence_failure_restores_previous_publication(self):
         prepared = publisher.prepare_assets()

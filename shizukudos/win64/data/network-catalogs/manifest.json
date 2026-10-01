@@ -1,0 +1,50 @@
+{
+  "schema": "shizuku-public-network-catalogs/1",
+  "public_sources_only": true,
+  "host_configuration_read": false,
+  "host_configuration_modified": false,
+  "alpine_aports_commit": "24f4ccc89d6da5b337c32460c5aec8b44146cadf",
+  "debian_netbase_version": "6.4",
+  "captured_utc": "2026-10-01T17:11:04.717322+00:00",
+  "files": {
+    "services.txt": {
+      "source_url": "https://salsa.debian.org/md/netbase/-/raw/v6.4/etc/services",
+      "upstream_version": "6.4",
+      "sha512": "47b0f3ee73af2d259bd206a026204be0ea25531a895a0b035a904b38fe5407bc3dd2beab7f8fcb3d760587e6159702ebdb9cbc4f508942befdf7f10c10c87888",
+      "bytes": 12813,
+      "sha256": "f6183055fd949f9c53d49ee620f85d0150123ea691d25ed1bba0c641b4ee2f48"
+    },
+    "protocols.txt": {
+      "source_url": "https://salsa.debian.org/md/netbase/-/raw/v6.4/etc/protocols",
+      "upstream_version": "6.4",
+      "sha512": "3a00083bcdf5a9e884c9d07877d52311e3d99e79cbee656e236ba06e08ba0dddb7ba76494fdc9dd1a826c48e197a790a69e6bb458e9df64832d6b5e904e9fd15",
+      "bytes": 3144,
+      "sha256": "4959498abbadaa1e50894a266f8d0d94500101cfe5b5f09dcad82e9d5bdfab46"
+    },
+    "hosts.txt": {
+      "source_url": "https://raw.githubusercontent.com/alpinelinux/aports/24f4ccc89d6da5b337c32460c5aec8b44146cadf/main/alpine-baselayout/APKBUILD",
+      "derivation": "Exact tab-stripped body of Alpine package() hosts heredoc; no script executed",
+      "bytes": 79,
+      "sha256": "e3998dbe02b51dada33de87ae43d18a93ab6915b9e34f5a751bf2b9b25a55492"
+    },
+    "netbase-copyright.txt": {
+      "source_url": "https://salsa.debian.org/md/netbase/-/raw/v6.4/debian/copyright",
+      "license": "GPL-2.0-only",
+      "bytes": 1234,
+      "sha256": "795b66147ea5ad692991caa7008ece551fb0fa88b9c53656223bd1518dc58ab2"
+    },
+    "GPL-2.txt": {
+      "source_url": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt",
+      "license": "GPL-2.0-only",
+      "bytes": 17984,
+      "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+    },
+    "alpine-APKBUILD.txt": {
+      "source_url": "https://raw.githubusercontent.com/alpinelinux/aports/24f4ccc89d6da5b337c32460c5aec8b44146cadf/main/alpine-baselayout/APKBUILD",
+      "git_commit": "24f4ccc89d6da5b337c32460c5aec8b44146cadf",
+      "license": "GPL-2.0-only",
+      "bytes": 8642,
+      "sha256": "f8b181ad7557e80ced0d45c060b54109a9416bd7d1c0a0a1de6b015d8b8ffaf9"
+    }
+  }
+}

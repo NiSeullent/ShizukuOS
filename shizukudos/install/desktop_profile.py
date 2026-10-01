@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Select the built production runtime, including the shell and font data.
+"""Select the built production runtime, including the shell, fonts and public trust inputs.
 
 The installer consumes the actual archive, rather than reconstructing a subset
 from DLL names and silently dropping Wine libraries or system programs.
@@ -33,7 +33,7 @@ def desktop_runtime(archive, expected_sha256):
         seen.add(key)
         # The shell's bundled launcher must work after installation as well as
         # from the full initrd. Retain this one demo executable, not the QA suite.
-        if key.startswith(("\\SHZ\\SYS64\\", "\\SHZ\\FONTS\\")) or key == "\\SHZ\\TESTS\\T_HELLO.EXE":
+        if key.startswith(("\\SHZ\\SYS64\\", "\\SHZ\\FONTS\\", "\\SHZ\\CERTS\\")) or key == "\\SHZ\\TESTS\\T_HELLO.EXE":
             files.append((path, archive[offset:offset + size]))
     required = {"\\SHZ\\SYS64\\NTDLL.DLL", "\\SHZ\\SYS64\\KERNEL32.DLL",
                 "\\SHZ\\SYS64\\USER32.DLL", "\\SHZ\\SYS64\\GDI32.DLL", "\\SHZ\\SYS64\\SHZDESK.EXE",

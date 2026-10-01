@@ -408,18 +408,28 @@ K32API BOOL WINAPI SetStdHandle(DWORD which, HANDLE h)
 NTSTATUS NTAPI NtQueryObject(HANDLE, ULONG, PVOID, ULONG, PULONG);
 
 /* Device identity comes from the native volume query, not the standard-handle slot or
- * FILE_ATTRIBUTE_DEVICE (which other devices may also carry). FileAllInformation reports
- * the console object's direction even after duplication or SetStdHandle redirection. */
+ * FILE_ATTRIBUTE_DEVICE (which other devices may also carry). FileNameInformation
+ * identifies the actual console endpoint after duplication or redirection. Granted
+ * access remains a separate property; a writable input is still an input object. */
 int k32_console_handle(HANDLE h, int *kind)
 {
-    SHZ_IO_STATUS_BLOCK iosb;
-    ULONG dev[2];
-    BYTE all[104];
-    DWORD direction;
-    if (NtQueryVolumeInformationFile(h, &iosb, dev, sizeof dev, 4) || dev[0] != 0x50) return 0;
-    if (NtQueryInformationFile(h, &iosb, all, sizeof all, 18)) return 0;
-    memcpy(&direction, all + 76, sizeof direction);
-    *kind = direction & (GENERIC_WRITE | FILE_WRITE_DATA) ? 1 : 0;
+    SHZ_IO_STATUS_BLOCK iosb = {0};
+    ULONG dev[2] = {0};
+    BYTE name[4 + 8 * sizeof(WCHAR)] = {0};
+    ULONG bytes;
+    static const WCHAR input[] = {'\\', 'C', 'O', 'N', 'I', 'N', '$'};
+    static const WCHAR output[] = {'\\', 'C', 'O', 'N', 'O', 'U', 'T', '$'};
+    if (!kind) return 0;
+    if (NtQueryVolumeInformationFile(h, &iosb, dev, sizeof dev, 4) ||
+        iosb.Information != sizeof dev || dev[0] != 0x50) return 0;
+    iosb.Information = 0;
+    if (NtQueryInformationFile(h, &iosb, name, sizeof name, 9)) return 0;
+    if (iosb.Information < sizeof bytes || iosb.Information > sizeof name) return 0;
+    memcpy(&bytes, name, sizeof bytes);
+    if (bytes > iosb.Information - sizeof bytes) return 0;
+    if (bytes == sizeof input && !memcmp(name + 4, input, sizeof input)) *kind = 0;
+    else if (bytes == sizeof output && !memcmp(name + 4, output, sizeof output)) *kind = 1;
+    else return 0;
     return 1;
 }
 

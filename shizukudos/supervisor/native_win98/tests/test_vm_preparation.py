@@ -5,6 +5,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import shutil
 from pathlib import Path
 import tempfile
 import unittest
@@ -51,10 +52,20 @@ class VmPreparationTests(unittest.TestCase):
     def test_actual_distinct_copies_and_exact_no_launch_plan(self):
         output = self.root / "fresh"
         before = {name: PREPARE.BUILDER.file_sha(path) for name, path in self.files.items()}
-        with mock.patch.object(PREPARE.BUILDER, "ESP_MIB", 4), contextlib.redirect_stdout(io.StringIO()):
+        # The old 3 GiB gate rejects this model; actual independent COW or
+        # sparse fixture copies fit while retaining the full 17 GiB reserve.
+        usage = shutil._ntuple_diskusage(30 << 30, 12 << 30, (17 << 30) + (128 << 20))
+        with mock.patch.object(PREPARE.BUILDER, "ESP_MIB", 4), \
+             mock.patch.object(PREPARE.BUILDER.shutil, "disk_usage", return_value=usage), \
+             contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(PREPARE.main(self.arguments(output)), 0)
         result = json.loads((output / "vm-plan.json").read_text())
         self.assertEqual(result["status"], "PASS_FRESH_PRIVATE_VM_INPUTS_PREPARED_NOT_RUN")
+        self.assertEqual(result["retained_free_space_bytes"], 17 << 30)
+        self.assertLess(result["preparation_budget_bytes"], 128 << 20)
+        for entry in result["copies"].values():
+            self.assertIn(entry["method"], ("leased-FICLONE-COW", "streaming-sparse-zero-runs"))
+            self.assertTrue(entry["target_readback_verified"])
         self.assertTrue(result["private"])
         self.assertFalse(result["VM_executed"])
         self.assertFalse(result["Windows98_boot_verified"])

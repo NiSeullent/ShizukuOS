@@ -3,8 +3,8 @@
  *
  *  - access tokens (NtShzToken): one primary token per process (medium integrity, session 1, a fresh LUID) and duplicates
  *    of it; advapi32 renders the Windows information classes from shz_token_info. Thread impersonation records which
- *    token a thread impersonates (OpenThreadToken reports it); Kernel64 performs no access checks, so impersonation
- *    changes nothing else;
+ *    token a thread impersonates (OpenThreadToken reports it). Token queries require the handle's TOKEN_QUERY right;
+ *    descriptor-based access checks are not implemented, so impersonation changes nothing else;
  *  - security descriptors (NtShzSecurityObject): stored per object as the self-relative blob advapi32 composes (not
  *    enforced: Kernel64 has no access checks), returned by the query.
  */
@@ -117,9 +117,11 @@ static int32_t sys_token(process_t *p, struct regs *r, uint64_t op, uint64_t a2,
     }
     case SHZ_TOK_QUERY: {
         kobject_t *tok;
-        int32_t st = handle_ref(p, a2, OB_TOKEN, &tok, 0);
+        uint32_t access;
+        int32_t st = handle_ref(p, a2, OB_TOKEN, &tok, &access);
         if (st) return st;
-        if (a4 < sizeof(shz_token_info)) st = STATUS_INFO_LENGTH_MISMATCH;
+        if (!(access & 0x0008u)) st = STATUS_ACCESS_DENIED;                /* TOKEN_QUERY, from this actual handle */
+        else if (a4 < sizeof(shz_token_info)) st = STATUS_INFO_LENGTH_MISMATCH;
         else if (copy_to_user(p, a3, tok->u.token.t, sizeof(shz_token_info))) st = STATUS_ACCESS_VIOLATION;
         ob_deref(tok);
         return st;

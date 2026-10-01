@@ -1,0 +1,45 @@
+{
+  "schema": "shizuku.component-installer-proof.v1",
+  "date": "2026-10-01",
+  "status": "PASS_ACTUAL_PRODUCTION_INSTALLER_VM_COMPONENT_GATE",
+  "scope": "Shizuku component installer",
+  "result_sha256": "d90bcadbf82a580e11ff925be5249b16d53d7f4d01dada385d335aa65ed8fa15",
+  "input_capture_sha256": "e8d25f808e07f2ef7a4594f8241c84ce73c3e9ceb3ece382760b40de013f6087",
+  "actual_vm_count": 4,
+  "public": true,
+  "microsoft_media_included": false,
+  "windows98_boot_verified": false,
+  "ms_dos_replaced": false,
+  "latest_apps_complete": false,
+  "pixel_transform": false,
+  "frames": [
+    {
+      "file": "install-review.png",
+      "sha256": "a512b2fbdf59d4e508f5657e8472250a878728ed8bc41da1d0bc9e6c9a3966cd",
+      "bytes": 9837,
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "file": "installed-result.png",
+      "sha256": "513d71fe8f13d7379be23d1af878841cd0b78124c94c03bbb075bdd7b862e3bf",
+      "bytes": 8194,
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "file": "installed-uefi-editor.png",
+      "sha256": "9f95b91791374c086489c1e78c9b3b31e16c2cf29113c118ddfa8861328a1b37",
+      "bytes": 10512,
+      "width": 1280,
+      "height": 800
+    },
+    {
+      "file": "installed-bios-editor.png",
+      "sha256": "b9ac9550bc702b7180f687116628a430bb5fda0186640f977a27d52ffc21a736",
+      "bytes": 9711,
+      "width": 1024,
+      "height": 768
+    }
+  ]
+}

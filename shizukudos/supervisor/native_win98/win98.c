@@ -15,7 +15,18 @@
 static domain_t *w98;
 static w98_ata_t ata;
 static const shz_blob_t *rom;
+static uint8_t *absent_lapic;
+#define W98_ABSENT_LAPIC_GPA 0xfee00000u
 static uint64_t last_render;
+/* Passive fixed ring: no control, register, memory or delivery writes. */
+typedef struct {
+    uint64_t sequence,rip,cs_base,cr0,cr3,rsp,qual,rax,rdx;
+    uint32_t reason,intr,vectoring;
+    uint16_t cs;
+} w98_trace_t;
+static w98_trace_t trace_ring[32];
+static uint64_t trace_count;
+static int trace_emitted;
 static const shz_blob_t *find_rom(const shz_info_t *info)
 {
     static const char name[]="SEABIOS.BIN";
@@ -44,15 +55,29 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
         log_capture(info->last_error,sizeof info->last_error,"invalid explicit Win98 RAM/disk/SeaBIOS geometry");return -1;
     }
     memset(d,0,sizeof *d);memset(&cfg,0,sizeof cfg);
+    trace_count=0;trace_emitted=0;
     d->id=SHZ_DOM_WIN98;d->name="WIN98";d->kind=DK_WIN98;d->generation=1;
     d->ram_base=info->guest_ram_base;d->ram_size=info->guest_ram_size;
     d->fx[0]=0x7f;d->fx[1]=3;d->fx[24]=0x80;d->fx[25]=0x1f;
     ram=(uint8_t *)(uintptr_t)d->ram_base;memset(ram,0,d->ram_size);
-    /* Standard ISA alias is the final128KiB; full ROM is also mapped at the top
-     * of the real32-bit physical bus for SeaBIOS's genuine protected-mode code. */
-    memcpy(ram+0xe0000,(const void *)(uintptr_t)(rom->base+rom->size-0x20000),0x20000);
+    /* Our explicit no-PCI profile uses an always writable RAM shadow. Populate
+     * the whole pinned 256 KiB image, not only the final ISA 128 KiB: genuine
+     * SeaBIOS protected-mode callees also live below E0000. Its normal PCI/PAM
+     * copy path cannot supply those bytes when no host bridge is emulated.
+     * The high ROM alias stays read-only; this does not advertise PCI/PAM. */
+    memcpy(ram+0x100000-rom->size,(const void *)(uintptr_t)rom->base,rom->size);
+    /* SeaBIOS rel-1.17.0 src/fw/mptable.c reads LAPIC version unconditionally.
+     * This explicit single-CPU profile has no LAPIC: only its exact 4 KiB bus
+     * window floats high. It cannot consume writes, execute code or deliver IRQs;
+     * CPUID APIC and APICBASE remain absent. All other unknown GPAs still fault. */
+    absent_lapic=pool_alloc_pages(1);
+    if(!absent_lapic) {
+        log_capture(info->last_error,sizeof info->last_error,"Win98 absent-device page allocation failed");return -1;
+    }
+    memset(absent_lapic,0xff,4096);
     if(ept_init(&d->ept) || ept_map(&d->ept,0,d->ram_base,d->ram_size,EPT_RWX|EPT_WB,1) ||
-       ept_map(&d->ept,0x100000000ull-rom->size,rom->base,rom->size,EPT_R|EPT_X|EPT_WB,1)) {
+       ept_map(&d->ept,0x100000000ull-rom->size,rom->base,rom->size,EPT_R|EPT_X|EPT_WB,1) ||
+       ept_map(&d->ept,W98_ABSENT_LAPIC_GPA,(uintptr_t)absent_lapic,4096,EPT_R|EPT_UC,1)) {
         log_capture(info->last_error,sizeof info->last_error,"Win98 EPT RAM/real-ROM construction failed");return -1;
     }
     d->io_bitmap_a=pool_alloc_pages(1);d->io_bitmap_b=pool_alloc_pages(1);d->msr_bitmap=pool_alloc_pages(1);cfg.vmcs=pool_alloc_pages(1);
@@ -75,7 +100,13 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
 static uint8_t *physical(void *opaque,uint32_t gpa,unsigned bytes,int write)
 {
     domain_t *d=opaque;
+    if(!bytes) return 0;
     if(!dev_a20_get()) gpa&=~0x100000u;
+    if(gpa>=W98_ABSENT_LAPIC_GPA && gpa-W98_ABSENT_LAPIC_GPA<4096) {
+        const unsigned offset=gpa-W98_ABSENT_LAPIC_GPA;
+        if(write || !absent_lapic || bytes>4096-offset) return 0;
+        return absent_lapic+offset;
+    }
     if(gpa>=0x100000000ull-rom->size) {
         const uint64_t offset=gpa-(0x100000000ull-rom->size);
         if(write || bytes>rom->size-offset) return 0;
@@ -83,9 +114,79 @@ static uint8_t *physical(void *opaque,uint32_t gpa,unsigned bytes,int write)
     }
     return dom_gpa_ptr(d,gpa,bytes);
 }
+static const uint8_t *trace_read(domain_t *d,uint64_t gpa,unsigned bytes)
+{
+    /* Check the complete 32-bit bus span before narrowing; never turn an
+     * arbitrary GPA into a host pointer. physical() applies actual A20 state. */
+    if(d!=w98 || !rom || !bytes || bytes>64 || gpa>0xffffffffull ||
+       bytes>0x100000000ull-gpa || !d->ram_base ||
+       d->ram_base>~0ull-d->ram_size || !rom->base ||
+       rom->base>~0ull-rom->size) return 0;
+    return physical(d,(uint32_t)gpa,bytes,0);
+}
+static void trace_memory(domain_t *d,const char *name,uint64_t linear,unsigned bytes)
+{
+    const uint8_t *p;
+    /* Without paging, linear address equals GPA. Do not invent a translation
+     * after the guest turns paging on: that observation is explicitly absent. */
+    if(vmread(VMCS_GUEST_CR0)&0x80000000ull) {
+        kprintf("W98TRACE %s linear=%llx paging-unsupported\n",name,linear);return;
+    }
+    p=trace_read(d,linear,bytes);
+    if(!p) {kprintf("W98TRACE %s gpa=%llx unmapped bytes=%u\n",name,linear,bytes);return;}
+    kprintf("W98TRACE %s gpa=%llx bytes=%u",name,linear,bytes);
+    for(unsigned i=0;i<bytes;++i) kprintf(" %02x",(unsigned)p[i]);
+    kprintf("\n");
+}
+void win98_observe_exit(domain_t *d,uint32_t reason)
+{
+    w98_trace_t *t;uint64_t start,base,limit,rip,rsp;
+    if(d!=w98 || d->kind!=DK_WIN98 || trace_emitted) return;
+    t=&trace_ring[trace_count%32];memset(t,0,sizeof *t);
+    t->sequence=++trace_count;t->reason=reason;
+    t->rip=vmread(VMCS_GUEST_RIP);t->cs=(uint16_t)vmread(VMCS_GUEST_CS_SEL);
+    t->cs_base=vmread(VMCS_GUEST_CS_BASE);t->cr0=vmread(VMCS_GUEST_CR0);
+    t->cr3=vmread(VMCS_GUEST_CR3);t->rsp=vmread(VMCS_GUEST_RSP);
+    t->qual=vmread(VMCS_EXIT_QUAL);t->intr=(uint32_t)vmread(VMCS_EXIT_INTR_INFO);
+    t->vectoring=(uint32_t)vmread(VMCS_IDT_VECTORING_INFO);
+    t->rax=d->vc.gpr[GPR_RAX];t->rdx=d->vc.gpr[GPR_RDX];
+    if(reason!=EXIT_TRIPLE_FAULT && reason!=EXIT_EPT_VIOLATION &&
+       reason!=EXIT_EPT_MISCONFIG && reason!=EXIT_INVALID_GUEST_STATE &&
+       reason!=EXIT_EXCEPTION_NMI) return;
+    trace_emitted=1;
+    kprintf("W98TRACE paused-VMCS reason=%u count=%llu guest-physical-bus=32 A20=%d\n",reason,trace_count,dev_a20_get());
+    start=trace_count>32?trace_count-32:0;
+    for(uint64_t n=start;n<trace_count;++n) {
+        t=&trace_ring[n%32];
+        kprintf("W98TRACE seq=%llu reason=%u rip=%llx cs=%x base=%llx cr0=%llx cr3=%llx rsp=%llx qual=%llx intr=%x vectoring=%x ax=%llx dx=%llx\n",
+            t->sequence,t->reason,t->rip,(unsigned)t->cs,t->cs_base,t->cr0,t->cr3,t->rsp,t->qual,t->intr,t->vectoring,t->rax,t->rdx);
+    }
+    kprintf("W98TRACE cr4=%llx efer=%llx flags=%llx exit-intr-error=%llx vectoring-error=%llx gpa=%llx linear=%llx\n",
+        vmread(VMCS_GUEST_CR4),vmread(VMCS_GUEST_EFER),vmread(VMCS_GUEST_RFLAGS),
+        vmread(VMCS_EXIT_INTR_ERRCODE),vmread(VMCS_IDT_VECTORING_ERR),vmread(VMCS_GUEST_PHYS_ADDR),vmread(VMCS_GUEST_LINEAR_ADDR));
+    for(unsigned i=0;i<6;++i)
+        kprintf("W98TRACE seg=%u sel=%llx base=%llx limit=%llx ar=%llx\n",i,
+            vmread(VMCS_GUEST_ES_SEL+2*i),vmread(VMCS_GUEST_ES_BASE+2*i),
+            vmread(VMCS_GUEST_ES_LIMIT+2*i),vmread(VMCS_GUEST_ES_AR+2*i));
+    for(unsigned i=0;i<GPR_COUNT;++i) kprintf("W98TRACE gpr=%u value=%llx\n",i,d->vc.gpr[i]);
+    base=vmread(VMCS_GUEST_CS_BASE);rip=vmread(VMCS_GUEST_RIP);
+    if(base<=~0ull-rip) trace_memory(d,"code",base+rip,64);
+    else kprintf("W98TRACE code linear-overflow\n");
+    base=vmread(VMCS_GUEST_SS_BASE);rsp=vmread(VMCS_GUEST_RSP);
+    if(base<=~0ull-rsp) trace_memory(d,"stack",base+rsp,64);
+    else kprintf("W98TRACE stack linear-overflow\n");
+    base=vmread(VMCS_GUEST_GDTR_BASE);limit=vmread(VMCS_GUEST_GDTR_LIMIT);
+    trace_memory(d,"gdt",base,(unsigned)(limit<63?limit+1:64));
+    base=vmread(VMCS_GUEST_IDTR_BASE);limit=vmread(VMCS_GUEST_IDTR_LIMIT);
+    trace_memory(d,"idt",base,(unsigned)(limit<63?limit+1:64));
+    trace_memory(d,"shadow-start",0xe0000,64);
+    trace_memory(d,"ROM-source",0xfffe0000,64);
+}
 static int input(void *unused,uint16_t port,unsigned bytes,uint32_t *value)
 {
     (void)unused;
+    /* Configured SeaBIOS debugcon has an 8-bit E9 presence signature. */
+    if(port==0x402 && bytes==1) {*value=0xe9;return 1;}
     if(w98_ata_in(&ata,port,bytes,value) || dev_pio_in(port,(int)bytes,value)) return 1;
     ++G.info->io_unhandled;*value=0xffffffffu;return 1; /* absent hardware floats high */
 }

@@ -46,7 +46,7 @@ static const unsigned char *memory_version_block(DWORD *size)
 int main(void)
 {
     static unsigned char buf[4096];
-    DWORD handle = 0xdeadbeef, size, err;
+    DWORD handle = 0xdeadbeef, size, err, error_size;
     VS_FIXEDFILEINFO *ffi = 0;
     LPVOID p = 0;
     UINT len = 0;
@@ -212,18 +212,23 @@ int main(void)
         U_CHECK("the no-resource PE fixture can be written", hf != INVALID_HANDLE_VALUE && WriteFile(hf, pe, 0x400, &wr, 0) && wr == 0x400 && CloseHandle(hf));
     }
     SetLastError(0);
-    U_CHECK("a PE without a resource directory (NORSRC.DLL fixture): size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NORSRC.DLL", 0) == 0);
+    /* Capture the API result and error before U_CHECK prints through WriteFile,
+     * which may change the calling thread's last-error value. */
+    error_size = GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NORSRC.DLL", 0);
     err = GetLastError();
+    U_CHECK("a PE without a resource directory (NORSRC.DLL fixture): size 0", error_size == 0);
     U_CHECKF("...with ERROR_RESOURCE_DATA_NOT_FOUND", err == ERROR_RESOURCE_DATA_NOT_FOUND, "err=%u", (unsigned)err);
     U_CHECK("GetFileVersionInfoW of it fails", !GetFileVersionInfoW(L"C:\\SHZ\\TESTS\\NORSRC.DLL", 0, sizeof buf, buf));
     DeleteFileW(L"C:\\SHZ\\TESTS\\NORSRC.DLL");
     SetLastError(0);
-    U_CHECK("a nonexistent file: size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NO_SUCH_FILE.DLL", 0) == 0);
+    error_size = GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NO_SUCH_FILE.DLL", 0);
     err = GetLastError();
+    U_CHECK("a nonexistent file: size 0", error_size == 0);
     U_CHECKF("...with ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND", err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND, "err=%u", (unsigned)err);
     SetLastError(0);
-    U_CHECK("a text file that is not a PE image: size 0", GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NOTPE.TXT", 0) == 0);
+    error_size = GetFileVersionInfoSizeW(L"C:\\SHZ\\TESTS\\NOTPE.TXT", 0);
     err = GetLastError();
+    U_CHECK("a text file that is not a PE image: size 0", error_size == 0);
     U_CHECKF("...with ERROR_BAD_EXE_FORMAT", err == ERROR_BAD_EXE_FORMAT, "err=%u", (unsigned)err);
     U_CHECK("NULL file name: size 0", GetFileVersionInfoSizeW(0, 0) == 0);
     U_CHECK("empty file name: size 0", GetFileVersionInfoSizeW(L"", 0) == 0);

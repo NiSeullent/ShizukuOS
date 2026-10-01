@@ -55,8 +55,12 @@ def main():
             records.append((fields[0],int(port),proto,fields[2:]))
     http = next(r for r in records if r[:3]==('http',80,'tcp'))
     assert http[3], 'Real OS HTTP alias fixture required'
-    high = next(r for r in records if 32767<r[1]<=65535 and r[2] in ('tcp','udp')
-                and socket.getservbyname(r[0],r[2])==r[1])
+    def agrees_with_host(row):
+        try:
+            return socket.getservbyname(row[0],row[2])==row[1]
+        except OSError:
+            return False  # Catalogs differ; require a positive OS-confirmed record below.
+    high = next(r for r in records if 32767<r[1]<=65535 and r[2] in ('tcp','udp') and agrees_with_host(r))
     assert socket.getservbyname(http[3][0],'tcp')==80
     first = next(r for r in records if r[0]=='http')
     expected = ''.join('#define '+name+' '+value+'\n' for name,value in [

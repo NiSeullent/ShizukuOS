@@ -22,6 +22,8 @@ import shzlib  # noqa: E402
 from shzlib import BUILD, REPO, SHZ, run, sha256_file  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
 import verres  # noqa: E402  (VS_VERSIONINFO resource of every built image)
+import public_trust_fixtures  # noqa: E402  (pinned public CA/chain inputs; never modifies host trust)
+import public_network_catalogs  # noqa: E402  (public services/protocols/hosts, no host settings copied)
 
 W64 = SHZ / "win64"
 OUT = BUILD / "win64"
@@ -218,7 +220,21 @@ FIXED_BASE_APPS = {"t_hello", "t_lazy"}
 DELAY_MODULES = {"t_delay": ("winmm", "version")}
 
 
-def build_apps(module_libs=()):
+def build_crt():
+    """Compile a fresh CRT once for this invocation's identically configured C programs.
+
+    Do not reuse a previous object: source/flags are covered by the full build's
+    source snapshot, and the final object hash and command are recorded below.
+    Standalone build_setup callers can still compile the source in their link.
+    """
+    obj = OUT / "shzcrt.o"
+    cmd = [CC, *COMMON, "-I", W64 / "include", "-I", W64 / "crt",
+           "-c", W64 / "crt" / "shzcrt.c", "-o", obj]
+    run(cmd)
+    return obj, cmd
+
+
+def build_apps(module_libs=(), crt_obj=None):
     apps = {}
     for src in sorted((W64 / "tests").glob("t_*.c")):
         name = src.stem
@@ -230,14 +246,14 @@ def build_apps(module_libs=()):
         libs = [(f"{l}_delay" if l in delayed else l) for l in module_libs]
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
                "-Wl,--image-base,0x140000000", *(["-Wl,--disable-dynamicbase"] if name in FIXED_BASE_APPS else []),
-               "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c", *extra,
-               "-L", OUT, *[f"-l{l}" for l in libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+               "-I", W64 / "include", "-I", crt, src, crt_obj if crt_obj is not None else crt / "shzcrt.c", *extra,
+               "-L", OUT, "-lkernel32", "-lntdll", *[f"-l{l}" for l in libs], "-lgcc", "-o", exe]
         run(cmd)
         apps[name] = (exe, cmd)
     return apps
 
 
-def build_setup(module_libs=()):
+def build_setup(module_libs=(), crt_obj=None):
     """SHZSETUP.EXE, the installer (win64/setup/*.c; its portable core is shared with the host tests in
     shizukudos/install/tests). Packed as \\SHZ\\SETUP\\SHZSETUP.EXE; Kernel64 runs it with shz.setup=interactive
     for the public installer or shz.setup=auto for explicit unattended QA."""
@@ -245,14 +261,15 @@ def build_setup(module_libs=()):
     exe = OUT / "SHZSETUP.EXE"
     crt = W64 / "crt"
     cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
-           "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", W64 / "setup", *src, crt / "shzcrt.c",
+           "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", W64 / "setup", *src,
+           crt_obj if crt_obj is not None else crt / "shzcrt.c",
            version_obj("SHZSETUP.EXE", "ShizukuOS development Setup", verres.VFT_APP),
-           "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+           "-L", OUT, "-lkernel32", "-lntdll", *[f"-l{l}" for l in module_libs], "-lgcc", "-o", exe]
     run(cmd)
     return exe, cmd
 
 
-def build_sys_apps(module_libs=()):
+def build_sys_apps(module_libs=(), crt_obj=None):
     """System programs: every win64/apps/<name>/ containing *.c builds <name>.exe, packed as \\SHZ\\SYS64\\<NAME>.EXE
     (not a T_*.EXE self-check: the kernel's test run does not start it)."""
     apps = {}
@@ -264,9 +281,10 @@ def build_sys_apps(module_libs=()):
         exe = OUT / f"{d.name}.exe"
         crt = W64 / "crt"
         cmd = [CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
-               "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", d, *src, crt / "shzcrt.c",
+               "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, "-I", d, *src,
+               crt_obj if crt_obj is not None else crt / "shzcrt.c",
                version_obj(f"{d.name}.exe", f"ShizukuOS development {d.name}", verres.VFT_APP),
-               "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe]
+               "-L", OUT, "-lkernel32", "-lntdll", *[f"-l{l}" for l in module_libs], "-lgcc", "-o", exe]
         run(cmd)
         apps[d.name] = (exe, cmd)
     return apps
@@ -341,21 +359,54 @@ def build_ntdrv_host():
     return ntdir, drivers, exports
 
 
-def build_ntdrv_app(module_libs, name="t_ntdrv"):
+def build_ntdrv_app(module_libs, name="t_ntdrv", crt_obj=None):
     """win64/ntdrv/<name>.c: a driver-host test program that is not packed into WIN64.IMG (t_ntdrv -> WIN64_NTDRV.IMG;
     t_drv_pnp -> the initrd tests/run_k64_pnp.py composes with the corpus driver store)."""
     crt = W64 / "crt"
     src = W64 / "ntdrv" / f"{name}.c"
     exe = OUT / f"{name}.exe"
     run([CC, *COMMON, "-nostdlib", "-Wl,--entry,ShzStart", "-Wl,--subsystem,console", "-Wl,--kill-at",
-         "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src, crt / "shzcrt.c",
+         "-Wl,--image-base,0x140000000", "-I", W64 / "include", "-I", crt, src,
+         crt_obj if crt_obj is not None else crt / "shzcrt.c",
          version_obj(f"{name}.exe", f"Shizuku Win64 self-check {name}", verres.VFT_APP),
-         "-L", OUT, *[f"-l{l}" for l in module_libs], "-lkernel32", "-lntdll", "-lgcc", "-o", exe])
+         "-L", OUT, "-lkernel32", "-lntdll", *[f"-l{l}" for l in module_libs], "-lgcc", "-o", exe])
     return exe
+
+
+def build_test_dlls():
+    """Real QA-only dynamic DLLs, packed beside the tests and omitted by the production runtime filter.
+
+    The loader importer links to its actual dependency. mprfix is an explicitly
+    empty provider fixture; it is never registered as a product network provider.
+    """
+    fixtures = [
+        ("loader_fixture_b", "loader_fixture_b.c", ()),
+        ("loader_fixture_a", "loader_fixture_a.c", ("loader_fixture_b",)),
+        ("loader_fixture_notify_leaf", "loader_fixture_notify_leaf.c", ()),
+        ("loader_fixture_notify_reentry", "loader_fixture_notify_reentry.c", ()),
+        ("mprfix", "fixtures/mpr_empty_provider.c", ()),
+    ]
+    built = {}
+    for index, (name, relative, dependencies) in enumerate(fixtures):
+        dll = OUT / f"{name}.dll"
+        cmd = [CC, *COMMON, "-shared", "-nostdlib",
+               f"-Wl,--entry,{'0' if name == 'mprfix' else 'DllMain'}",
+               f"-Wl,--image-base,{0x7ffa80000000 + index * DLL_STRIDE:#x}",
+               "-Wl,--dynamicbase", "-Wl,--subsystem,console", "-Wl,--kill-at",
+               f"-Wl,--out-implib,{OUT / f'lib{name}.a'}",
+               "-I", W64 / "include", W64 / "tests" / relative,
+               version_obj(f"{name}.dll", f"Shizuku test-only fixture {name}"),
+               "-L", OUT, "-lkernel32", "-lntdll", *[f"-l{dep}" for dep in dependencies], "-lgcc", "-o", dll]
+        run(cmd)
+        built[name] = (dll, cmd)
+    return built
 
 
 def pack_archive(files):
     """SHZARC01: header, entries {char path[120]; u64 offset; u64 size}, then file data (16-byte aligned)."""
+    paths = [path.replace("/", "\\").upper() for path, _ in files]
+    if len(paths) != len(set(paths)):
+        raise ValueError("duplicate archive path")
     entries = []
     blob = bytearray()
     header_size = 16 + 136 * len(files)
@@ -383,38 +434,57 @@ def build_wineport():
     for name, t in sorted(res["tests"].items()):
         if t["in_plain_image"]:
             files.append((f"\\SHZ\\TESTS\\{t['exe'].name.upper()}", t["exe"].read_bytes()))
-    return files, {n: {"exports": m["exports"], "counts": m["counts"]} for n, m in res["modules"].items()}
+    return files, {n: {"sha256": sha256_file(m["binary"]), "exports": m["exports"], "counts": m["counts"]}
+                   for n, m in res["modules"].items()}
+
+
+def runtime_source_paths():
+    """Local build inputs, including patches, specs, resources and shipped fixtures."""
+    suffixes = {".c", ".cpp", ".cc", ".cxx", ".h", ".s", ".asm", ".rc", ".json", ".py", ".patch",
+                ".def", ".spec", ".pem", ".der", ".bin", ".txt", ".htm", ".html", ".js", ".cmake", ".ini", ".idl", ".rgs"}
+    return sorted({p for directory in (W64, SHZ / "install", SHZ / "abi")
+                   for p in directory.rglob("*") if p.is_file() and p.suffix.lower() in suffixes}
+                  | {NTSYS, SHZ / "tools/shzlib.py", SHZ / "upstream/manifest.json"})
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--no-wineport", action="store_true", help="do not build/pack the DLLs ported from Wine")
     args = ap.parse_args()
-    for tool in (CC, DLLTOOL, WINDRES):
+    for tool in (CC, DLLTOOL, WINDRES, "openssl"):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     OUT.mkdir(parents=True, exist_ok=True)
-    source_paths = sorted({p for directory in (W64, SHZ / "install", SHZ / "abi")
-                           for p in directory.rglob("*")
-                           if p.is_file() and p.suffix in (".c", ".cpp", ".cc", ".cxx", ".h", ".S", ".asm", ".rc", ".json", ".py")}
-                          | {NTSYS, SHZ / "tools/shzlib.py"})
+    source_paths = runtime_source_paths()
     source_hashes = {str(p.relative_to(REPO)): sha256_file(p) for p in source_paths}
+    trust_files, trust_info = public_trust_fixtures.load_fixtures()
+    catalog_files, catalog_info = public_network_catalogs.load_catalogs()
     ntdll, ntdll_cmd, ntdll_names = build_ntdll()
     k32, k32_cmd, k32_names = build_kernel32(ntdll_names)
     modules = build_modules()
+    native_module_sha256 = {name: sha256_file(module["dll"]) for name, module in modules.items()}
     wine_files, wine_info = build_wineport() if not args.no_wineport else ([], {})
+    wine_paths = {path.replace("/", "\\").upper() for path, _ in wine_files}
+    overrides = {name for name in modules if f"\\SHZ\\SYS64\\{name}.dll".upper() in wine_paths}
     runtime_libs = sorted(set(modules) | set(wine_info))
-    apps = build_apps(runtime_libs)
-    setup_exe, _ = build_setup(runtime_libs)
-    sys_apps = build_sys_apps(runtime_libs)
+    crt_obj, crt_cmd = build_crt()
+    apps = build_apps(runtime_libs, crt_obj)
+    setup_exe, _ = build_setup(runtime_libs, crt_obj)
+    sys_apps = build_sys_apps(runtime_libs, crt_obj)
     apps.update(build_cxx_apps(runtime_libs))
+    test_dlls = build_test_dlls()
     files = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
-        files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
+        if name not in overrides:
+            files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
     files += wine_files
+    files += trust_files
+    files += catalog_files
     files += __import__("runpy").run_path(str(W64 / "trident" / "build.py"))["build"](OUT)  # W2 hook: ShizukuTrident (trident/)
     for name, (exe, _) in sorted(apps.items()):
         files.append((f"\\SHZ\\TESTS\\{exe.name.upper()}", exe.read_bytes()))
+    for name, (dll, _) in sorted(test_dlls.items()):
+        files.append((f"\\SHZ\\TESTS\\{dll.name}", dll.read_bytes()))
     files.append(("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe.read_bytes()))
     for name, (exe, _) in sorted(sys_apps.items()):
         files.append((f"\\SHZ\\SYS64\\{exe.name.upper()}", exe.read_bytes()))
@@ -428,15 +498,18 @@ def main():
     # SHZPNP.EXE add-driver / load / status / unload, the path a vendor package uses.
     # tests/run_k64_ntdrv.py mounts the driver-store image.
     ntdir, drivers, nt_exports = build_ntdrv_host()
-    ntapp = build_ntdrv_app(runtime_libs)
-    pnpapp = build_ntdrv_app(runtime_libs, "t_drv_pnp")
+    ntapp = build_ntdrv_app(runtime_libs, crt_obj=crt_obj)
+    pnpapp = build_ntdrv_app(runtime_libs, "t_drv_pnp", crt_obj=crt_obj)
     files.append(("\\SHZ\\TESTS\\ECHO.SYS", drivers["echo"].read_bytes()))
     img = OUT / "WIN64.IMG"
     img.write_bytes(pack_archive(files))
 
-    ntfiles = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
-    for name, m in sorted(modules.items()):
-        ntfiles.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
+    # Both archives select the same real system DLLs, including an enabled
+    # Wine replacement and its dependencies; QA-only fixtures stay in WIN64.IMG.
+    ntfiles = [(path, data) for path, data in files
+               if (path.upper().startswith("\\SHZ\\SYS64\\") and path.upper().endswith(".DLL"))
+               or path.upper().startswith("\\SHZ\\CERTS\\")
+               or path in {name for name, _ in catalog_files}]
     for name, sysf in sorted(drivers.items()):
         ntfiles.append((f"\\SHZ\\DRIVERS\\{name.upper()}.SYS", sysf.read_bytes()))
     ntfiles.append(("\\SHZ\\TESTS\\T_NTDRV.EXE", ntapp.read_bytes()))
@@ -446,17 +519,28 @@ def main():
 
     changed = [name for name, digest in source_hashes.items()
                if not (REPO / name).is_file() or sha256_file(REPO / name) != digest]
+    if runtime_source_paths() != source_paths:
+        raise RuntimeError("runtime source membership changed during build")
     if changed:
         raise RuntimeError("runtime sources changed during build: " + ", ".join(changed))
     shzlib.write_json(OUT / "build-result.json", {
         "built_utc": shzlib.utc_now(), "git": shzlib.git_state(),
         "sources_sha256": source_hashes,
         "toolchain": {"mingw": shzlib.tool_version(CC)},
+        "crt": {"sha256": sha256_file(crt_obj), "command": [str(x) for x in crt_cmd], "fresh_compiles": 1},
         "ntdll": {"sha256": sha256_file(ntdll), "exports": len(ntdll_names) + len(syscall_list()) * 2},
         "kernel32": {"sha256": sha256_file(k32), "exports": len(k32_names)},
-        "modules": {n: {"sha256": sha256_file(m["dll"]), "exports": len(m["exports"]), "base": hex(m["base"])} for n, m in modules.items()},
+        "modules": {n: {"sha256": native_module_sha256[n], "exports": len(m["exports"]), "base": hex(m["base"])}
+                    for n, m in modules.items() if n not in overrides},
+        "native_modules_superseded": {n: {"sha256": native_module_sha256[n], "exports": len(modules[n]["exports"]),
+                                         "replacement": "wineport", "packaged": False}
+                                      for n in sorted(overrides)},
         "apps": {n: sha256_file(e) for n, (e, _) in apps.items()},
+        "test_dlls": {n: {"sha256": sha256_file(d), "qa_only": True, "command": [str(x) for x in cmd]}
+                      for n, (d, cmd) in test_dlls.items()},
         "wineport": wine_info,
+        "public_trust_fixtures": trust_info,
+        "public_network_catalogs": catalog_info,
         "setup": {"SHZSETUP.EXE": sha256_file(setup_exe)},
         "sys_apps": {n: sha256_file(e) for n, (e, _) in sys_apps.items()},
         "archive": {"sha256": sha256_file(img), "files": [p for p, _ in files]},

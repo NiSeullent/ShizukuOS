@@ -74,6 +74,41 @@ class MatrixInputs(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'changed since'):
             matrix.media_context(self.iso, self.disk, ['iso-cd'])
 
+    def test_absolute_dos_receipt_names_load_the_recorded_image(self):
+        receipt = self.iso.with_suffix('.json')
+        data = json.loads(receipt.read_text())
+        for name in (r'\SHZDOS\DISK.IMG', '/SHZDOS/DISK.IMG'):
+            with self.subTest(name=name):
+                data['inputs'][0]['name'] = name
+                receipt.write_text(json.dumps(data))
+                ctx = matrix.media_context(self.iso, self.disk, ['iso-cd'])
+                self.assertEqual(ctx['dos16_image'], b'owned synthetic DOS10 fixture')
+
+    def test_missing_dos_receipt_input_is_explicitly_refused(self):
+        receipt = self.iso.with_suffix('.json')
+        data = json.loads(receipt.read_text())
+        data['inputs'][0]['name'] = r'\OTHER\DISK.IMG'
+        receipt.write_text(json.dumps(data))
+        with self.assertRaisesRegex(SystemExit, 'no DOS16.*input'):
+            matrix.media_context(self.iso, self.disk, ['iso-cd'])
+
+    def test_ambiguous_dos_receipt_inputs_are_refused(self):
+        receipt = self.iso.with_suffix('.json')
+        data = json.loads(receipt.read_text())
+        data['inputs'].append(dict(data['inputs'][0], name=r'\SHZDOS\DISK.IMG'))
+        receipt.write_text(json.dumps(data))
+        with self.assertRaisesRegex(SystemExit, 'ambiguous DOS16.*inputs'):
+            matrix.media_context(self.iso, self.disk, ['iso-cd'])
+
+    def test_qualified_dos_receipt_still_refuses_changed_image(self):
+        receipt = self.iso.with_suffix('.json')
+        data = json.loads(receipt.read_text())
+        data['inputs'][0]['name'] = r'\SHZDOS\DISK.IMG'
+        receipt.write_text(json.dumps(data))
+        self.dos.write_bytes(b'changed after media assembly')
+        with self.assertRaisesRegex(SystemExit, 'changed since'):
+            matrix.media_context(self.iso, self.disk, ['iso-cd'])
+
     def test_empty_or_unknown_selection_is_refused(self):
         for selected in ([], ['physical-usb']):
             with self.assertRaises(ValueError):

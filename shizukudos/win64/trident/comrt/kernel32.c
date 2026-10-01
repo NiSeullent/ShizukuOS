@@ -16,6 +16,7 @@
 #include <wctype.h>
 #include "comrt.h"
 #include "winnls.h"
+#include "../../kernel32/k32_muldiv.h"
 
 #ifndef IDN_EMAIL_ADDRESS                                   /* Windows 8 SDK values, not in Wine's winnls.h */
 #define IDN_EMAIL_ADDRESS 0x04
@@ -26,14 +27,7 @@
 
 INT WINAPI MulDiv(INT a, INT b, INT c)
 {
-    LONGLONG r;
-    if (!c) return -1;
-    if (c < 0) { a = -a; c = -c; }
-    /* round half away from zero, the documented result */
-    if ((a < 0) == (b < 0)) r = ((LONGLONG)a * b + c / 2) / c;
-    else r = ((LONGLONG)a * b - c / 2) / c;
-    if (r > 2147483647 || r < -2147483647) return -1;
-    return (INT)r;
+    return shz_muldiv(a, b, c);
 }
 
 /* ---------------------------------------------------------------- MS-DOS date/time */

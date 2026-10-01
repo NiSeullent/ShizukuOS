@@ -120,7 +120,9 @@ static void handle_cpuid(domain_t *d)
             r.ecx |= 1u << 31;          /* hypervisor present */
             r.edx &= ~(1u << 28);       /* no hyper-threading */
             r.ebx = (r.ebx & 0x0000ffffu) | (1u << 16);   /* one logical processor, APIC ID 0 */
-            if (d->kind == DK_WIN98) r.edx &= ~(1u << 17);
+            /* Native firmware must not probe unimplemented MTRR MSRs (FE,
+             * fixed/variable ranges). Neither MTRRs nor PSE36 are modeled. */
+            if (d->kind == DK_WIN98) r.edx &= ~((1u << 17) | (1u << 12));
             r.edx &= ~(1u << 9);        /* no local APIC is modelled */
         } else if (leaf == 4) {
             r.eax &= ~0xfc000000u;      /* single core */
@@ -555,6 +557,8 @@ static int run_slice(domain_t *d)
         dom_fail(d, "VM entry failure exit reason=%x qual=%llx", reason & 0xffff, vmread(VMCS_EXIT_QUAL));
         return -1;
     }
+    if (d->kind == DK_WIN98)
+        win98_observe_exit(d, reason & 0xffff);
     handle_exit(d, reason & 0xffff);
     if (d->kind == DK_DOS16) {
         dos_housekeeping();

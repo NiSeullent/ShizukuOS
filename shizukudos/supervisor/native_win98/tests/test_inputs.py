@@ -224,14 +224,17 @@ class InputTests(unittest.TestCase):
 
         def corrupt_after_readback(argv, receipt, *args, **kwargs):
             original(argv, receipt, *args, **kwargs)
-            if Path(argv[-1]).name == "readback-owned.tmp":
-                Path(argv[-1]).write_bytes(b"corrupted actual readback")
+            if str(argv[0]) == "mcopy" and str(argv[-1]) == "::/EFI/BOOT/BOOTX64.EFI":
+                corrupt = out / "owned-corruption-fixture"
+                corrupt.write_bytes(b"corrupted actual FAT member")
+                original(["mcopy", "-o", "-i", argv[2], corrupt, argv[-1]], receipt)
 
         with mock.patch.object(BUILDER, "ESP_MIB", 64), mock.patch.object(BUILDER, "command", corrupt_after_readback):
             with self.assertRaisesRegex(ValueError, "ESP byte readback mismatch"):
                 BUILDER.assemble(out, {}, loader, {"commands": []})
         self.assertTrue((out / "esp-win98.img").is_file())
-        self.assertEqual((out / "readback-owned.tmp").read_bytes(), b"corrupted actual readback")
+        self.assertFalse((out / "readback-owned.tmp").exists())
+        self.assertEqual((out / "owned-corruption-fixture").read_bytes(), b"corrupted actual FAT member")
         self.assertEqual(loader.read_bytes(), b"synthetic EFI fixture; not executable\r\n")
 
 

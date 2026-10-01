@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * oleacc.dll: the WM_GETOBJECT reply channel (LresultFromObject/ObjectFromLresult) over an in-process token table,
  * AccessibleObjectFromWindow against a window procedure that really answers WM_GETOBJECT, AccessibleChildren over a
- * hand-written IAccessible, WindowFromAccessibleObject through IOleWindow, and the explicit failures of what needs the
- * absent standard proxy. */
+ * hand-written IAccessible, WindowFromAccessibleObject through IOleWindow, and
+ * Wine's real standard window/client objects. Cross-process RPC is separate. */
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
 #include <windows.h>
@@ -10,7 +10,6 @@
 #include <oleacc.h>
 #include "u_check.h"
 
-#define ST_NOTSUP ((HRESULT)0x80070032)
 static const GUID IID_UNK_ = { 0x00000000, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
 static const GUID IID_IDisp_ = { 0x00020400, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
 static const GUID IID_OLEWND = { 0x00000114, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
@@ -98,14 +97,29 @@ int main(void)
 
     RegisterClassW(&wc);
     w = CreateWindowExW(0, L"ShzAccTest", L"acc", 0, 0, 0, 10, 10, 0, 0, wc.hInstance, 0);
+    U_CHECK("the real WM_GETOBJECT test window exists", w != 0);
     if (w) {
         g_obj.hwnd = w;
         hr = AccessibleObjectFromWindow(w, OBJID_CLIENT, &IID_IAcc, &p);
         U_CHECKF("AccessibleObjectFromWindow(OBJID_CLIENT) gets what the window procedure answers to WM_GETOBJECT", hr == S_OK && p == &g_obj.acc, "hr=%x", (unsigned)hr);
         if (p) IAccessible_Release((IAccessible *)p);
         p = 0;
-        U_CHECK("...an object id the window does not answer is HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED)", AccessibleObjectFromWindow(w, OBJID_WINDOW, &IID_IAcc, &p) == ST_NOTSUP && p == 0);
-        U_CHECK("CreateStdAccessibleObject (no standard proxy) is HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED)", CreateStdAccessibleObject(w, OBJID_CLIENT, &IID_IAcc, &p) == ST_NOTSUP);
+        hr = AccessibleObjectFromWindow(w, OBJID_WINDOW, &IID_IAcc, &p);
+        U_CHECK("an unanswered OBJID_WINDOW returns a real standard window object", hr == S_OK && p != 0 && p != &g_obj.acc);
+        if (p) {
+            HWND got = 0;
+            U_CHECK("the standard window object retains its actual HWND", WindowFromAccessibleObject((IAccessible *)p, &got) == S_OK && got == w);
+            IAccessible_Release((IAccessible *)p); p = 0;
+        }
+        hr = CreateStdAccessibleObject(w, OBJID_CLIENT, &IID_IAcc, &p);
+        U_CHECK("CreateStdAccessibleObject returns a real standard client object", hr == S_OK && p != 0 && p != &g_obj.acc);
+        if (p) {
+            VARIANT self, role;
+            VariantInit(&self); self.vt = VT_I4; self.lVal = CHILDID_SELF;
+            VariantInit(&role);
+            U_CHECK("the real standard client reports ROLE_SYSTEM_CLIENT", IAccessible_get_accRole((IAccessible *)p, self, &role) == S_OK && role.vt == VT_I4 && role.lVal == ROLE_SYSTEM_CLIENT);
+            VariantClear(&role); IAccessible_Release((IAccessible *)p); p = 0;
+        }
         {
             HWND got = 0;
             U_CHECK("WindowFromAccessibleObject uses IOleWindow::GetWindow", WindowFromAccessibleObject((IAccessible *)&g_obj.acc, &got) == S_OK && got == w);

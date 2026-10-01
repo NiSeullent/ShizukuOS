@@ -1,0 +1,103 @@
+--- a/dlls/oleacc/main.c
++++ b/dlls/oleacc/main.c
+@@ -90,6 +90,8 @@
+     TRACE("%p %ld %s %p\n", hwnd, idObject,
+           debugstr_guid( riidInterface ), ppvObject );
+ 
++    if (!ppvObject || !riidInterface) return E_INVALIDARG;
++    *ppvObject = NULL;
+     switch(idObject) {
+     case OBJID_CLIENT:
+         return create_client_object(hwnd, riidInterface, ppvObject);
+@@ -144,10 +146,15 @@
+         return E_FAIL;
+ 
+     if(!DuplicateHandle(server_proc, server_mapping, GetCurrentProcess(), &mapping,
+-                0, FALSE, DUPLICATE_CLOSE_SOURCE|DUPLICATE_SAME_ACCESS))
+-        return E_FAIL;
++                0, FALSE, DUPLICATE_CLOSE_SOURCE|DUPLICATE_SAME_ACCESS)) {
++        CloseHandle(server_proc);
++        return E_FAIL;
++    }
+     CloseHandle(server_proc);
+-    GlobalDeleteAtom(result);
++    if (GlobalDeleteAtom(result)) {
++        CloseHandle(mapping);
++        return E_FAIL;
++    }
+ 
+     view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+     CloseHandle(mapping);
+@@ -226,7 +233,7 @@
+     if(!mapping) {
+         CoReleaseMarshalData(stream);
+         IStream_Release(stream);
+-        return hr;
++        return E_FAIL;
+     }
+ 
+     view = MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, 0);
+@@ -412,6 +419,8 @@
+ 
+     TRACE("%p %p\n", acc, phwnd);
+ 
++    if (!acc || !phwnd) return E_INVALIDARG;
++    *phwnd = NULL;
+     hres = IAccessible_QueryInterface(acc, &IID_IOleWindow, (void**)&ow);
+     if(SUCCEEDED(hres)) {
+         hres = IOleWindow_GetWindow(ow, phwnd);
+@@ -484,17 +493,18 @@
+             break;
+     }
+ 
+-    return OLEACC_DllMain(hinstDLL, fdwReason, lpvReserved);
++    /* Local standard objects have no RPC proxy runtime to initialize. */
++    return TRUE;
+ }
+ 
+ HRESULT WINAPI DllRegisterServer(void)
+ {
+-    return OLEACC_DllRegisterServer();
++    return E_NOTIMPL; /* RPC proxy registration is unavailable. */
+ }
+ 
+ HRESULT WINAPI DllUnregisterServer(void)
+ {
+-    return OLEACC_DllUnregisterServer();
++    return E_NOTIMPL; /* RPC proxy registration is unavailable. */
+ }
+ 
+ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, void **ppv)
+@@ -506,7 +516,8 @@
+ 
+     if(IsEqualGUID(&CLSID_PSFactoryBuffer, rclsid)) {
+         TRACE("(CLSID_PSFactoryBuffer %s %p)\n", debugstr_guid(iid), ppv);
+-        return OLEACC_DllGetClassObject(rclsid, iid, ppv);
++        if (ppv) *ppv = NULL;
++        return CLASS_E_CLASSNOTAVAILABLE; /* RPC proxy factory is unavailable. */
+     }
+ 
+     FIXME("%s %s %p: stub\n", debugstr_guid(rclsid), debugstr_guid(iid), ppv);
+@@ -670,7 +681,7 @@
+ 
+     TRACE("%p %ld %ld %p %p\n", container, start, count, children, children_cnt);
+ 
+-    if(!container || !children || !children_cnt)
++    if(!container || !children || !children_cnt || start < 0 || count < 0)
+         return E_INVALIDARG;
+ 
+     for(i=0; i<count; i++)
+--- a/dlls/oleacc/oleacc_classes.idl
++++ b/dlls/oleacc/oleacc_classes.idl
+@@ -16,9 +16,8 @@
+  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+  */
+ 
+-#pragma makedep regtypelib
+-#pragma makedep proxy
+-#pragma makedep register
++/* Shizuku: local window objects retain class identities, without RPC proxies. */
++#pragma makedep header
+ 
+ #include "oleacc.idl"
+ 

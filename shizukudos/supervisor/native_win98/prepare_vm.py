@@ -38,6 +38,17 @@ def recipe(qemu, out):
             "-serial", f"file:{out / 'serial.log'}", "-qmp", f"unix:{out / 'qmp.sock'},server=on,wait=off"]
 
 
+
+def preparation_budget(inputs):
+    """Budget metadata plus complete 4 MiB firmware, not a second dense ESP.
+
+    Each copy must actually acquire FICLONE on its read-leased descriptor. If
+    clone support is unavailable, copy_fd separately reserves the measured
+    source allocation before its sparse fallback. The 17 GiB reserve remains.
+    """
+    return inputs["firmware_code"]["bytes"] + inputs["firmware_vars"]["bytes"] + (64 << 20)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("esp", "build-receipt", "firmware-code", "firmware-vars", "qemu"):
@@ -75,17 +86,19 @@ def main(argv=None):
         raise ValueError("the pinned QEMU file must be executable")
     out = BUILDER.fresh_output(args.out)
     command = recipe(inputs["qemu"]["path"], out)
-    BUILDER.space(out, 3 << 30)
+    budget = preparation_budget(inputs)
+    BUILDER.space(out, budget)
     out.mkdir()
     result = {"status": "FAIL_PREPARATION_PRESERVED", "private": True, "VM_executed": False,
               "Windows98_boot_verified": False, "MS_DOS_replaced": False,
+              "preparation_budget_bytes": budget, "retained_free_space_bytes": BUILDER.RESERVE, "copies": {},
               "input_pins": {k: {**v, "path": str(v["path"])} for k, v in inputs.items()},
               "native_members": {k: v for k, v in members.items() if k.startswith("SHZDOS/")}}
     try:
         for key, name in (("esp", "esp.img"), ("firmware_code", "OVMF_CODE.fd"), ("firmware_vars", "OVMF_VARS.fd")):
             item = inputs[key]
             with BUILDER.read_leased(item["path"], item["sha256"], item["bytes"], maximum=esp_bytes) as (fd, checkpoint):
-                BUILDER.copy_fd(fd, checkpoint, out / name, item["sha256"], item["bytes"], maximum=esp_bytes)
+                result["copies"][name] = BUILDER.copy_fd(fd, checkpoint, out / name, item["sha256"], item["bytes"], maximum=esp_bytes, prefer_reflink=True)
             if (out / name).stat().st_ino == item["path"].stat().st_ino and (out / name).stat().st_dev == item["path"].stat().st_dev:
                 raise ValueError("owned VM input must use a distinct inode")
         for item in inputs.values():
