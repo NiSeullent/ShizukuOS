@@ -120,6 +120,28 @@ class StoppedRun(unittest.TestCase):
         changed = self.boundary[:-1] + ({str(self.manifest_path): "0" * 64},)
         with self.assertRaises(ValueError): self.verify(boundaries=[self.boundary, changed])
 
+    def test_native_files_changed_during_final_stage_replay_rejected(self):
+        # Reproduce the independent-review gap: receipt and frozen stage stay
+        # unchanged while an already-consumed native file changes on replay.
+        names = ("runner-source.py", "prepared-guest-M98WASM.DLL",
+            "prepared-guest-WAS13PR.EXE", "prepared-guest-M98WARUN.EXE",
+            "guest-output-WA13.LOG", "guest-output-WARUN.LOG", "guest-output-WAOUT.LOG")
+        for name in names:
+            path = self.run_dir / name
+            old, calls = path.read_bytes(), []
+            def replay(*args):
+                calls.append(1)
+                if len(calls) == 2:
+                    path.write_bytes(old + b"late-native-drift")
+                return self.boundary
+            try:
+                with self.subTest(name=name), self.assertRaisesRegex(
+                        ValueError, "native file drift during final stage replay"):
+                    self.verify(boundaries=replay)
+                self.assertEqual(len(calls), 2)
+            finally:
+                path.write_bytes(old)
+
     def test_collector_rehash_cannot_hide_failed_child(self):
         path = self.run_dir / "guest-output-WARUN.LOG"
         raw = path.read_bytes().replace(b"child.exit-code=0\r\n", b"child.exit-code=3221225477\r\n")
