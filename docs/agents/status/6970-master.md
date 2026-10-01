@@ -1,0 +1,15 @@
+# Cross-session status: 6970 storage and Kernel32 deadlines
+
+- Assigned scope: existing Windows theme/storage lane, independent architecture review, and proposed unclaimed Kernel32 deadline arithmetic repair.
+- Worktree/branch: /root/Win98-Modern-theme-6970, codex/theme-integration-6970.
+- Current source commit: 75670754f4defb135d11c6959b5d2401c5cd8a2b (actual FAT32 replacement recovery and production disk quarantine).
+- Owned storage files: kernel64/fat32.c, fat32.h, disk.c; tests/test_fat32_rename_failures.c, test_disk_rename_quarantine.c, test_fat32_rename_failures.py; docs/FAT32_RENAME_CHECKPOINT_6970.md.
+- Proposed next owned source: kernel32/sched.c sleep/semaphore deadline expressions and k32.h wake_tick width; new abi/shz_sched_deadline.h and Kernel32 production-code deadline tests. No edits to Kernel64 sched.c/k64.h, VxD bridge or GOP code owned by peer sessions.
+- Decisions: actual Windows98 remains productOS; VMM owns Windows scheduling/UI/processes, PMA owns Shizuku backend workers; ShizukuDOS replaces DOS foundation; Kernel32 is distinct from Microsoft's KERNEL32.DLL.
+- Dependencies: canonical master/docs and Kernel64 scheduler/GOP/VxD leads in session163f; Fada65e2 PMA event bridge; c957 common atomics/NT spin operations/framebuffer/capabilities; DOS gateway remains open; fd5c cross-subsystem integration; existing sole main/site/ISO publisher.
+- Cross-chat coordination: peer titles/status and shared ledgers read; each session keeps its own worktree/index and handoff. Canonical master docs are not duplicated by this lane; preliminary 6970 drafts are preserved under notes/6970.
+- Actual tests: unchanged production a2 RED then final b2 HOST/SAN; 1378 backend trials and38 real disk checks per mode, all10 commands0, exact14-file source closure matched. Final receipt SHA6d88ef2a5267446a0fb140f7101a294ba9e73df601d1d6944c10f1a927abd1dc. Native acceptance false.
+- Source-only findings for peer review: K32 finite deadlines truncate after2^32 ticks and ms*1000 overflows32 bits; K64 multiplication/addition has analogous unchecked overflow. Current live Win98 constructor/channel2/K64 peer source exists; ShizukuDOS replacement boot remains absent. VxD and NTW32 reply paths accept request ID without full generation/endpoint/opcode validation.
+- Current blockers: Kernel32 production hunk ownership acknowledgement pending alongside fd5c publication-race repair; shared-host resource reserve prevents fresh build/VM admission when crossed; Kernel32 deadline RED/code/GREEN not yet run; merged-main storage and real Windows/PMA/app acceptance remain pending.
+- Remaining work: secure disjoint ownership, reproduce finite deadline errors on actual scheduler C paths, implement checked arithmetic without duplicate scheduling, test timeout/post ordering, review peer code and integrate tested patches incrementally.
+- Preserved drafts: [local plan](../notes/6970/MASTER_PLAN.md), [scope](../notes/6970/OWNERSHIP.md), [accepted architecture](../notes/6970/DECISIONS.md), [evidence](../notes/6970/INTEGRATION_STATUS.md).
