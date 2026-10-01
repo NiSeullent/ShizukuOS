@@ -99,14 +99,6 @@ static void copy_str(char *dst, const char *src, unsigned cap)
     for (; i < cap; ++i) dst[i] = 0;
 }
 
-static int write_refused(blk_dev_t *d)
-{
-    blk_dev_t *x;
-    for (x = blk_first(); x; x = x->next)
-        if ((x->flags & BLK_F_MOUNTED) && (x == d || x == blk_whole(d) || blk_whole(x) == d)) return 1;
-    return 0;
-}
-
 static int32_t op_query(process_t *p, uint64_t index, uint64_t out, uint64_t len, uint64_t pret)
 {
     struct shz_blk_info in;
@@ -153,7 +145,7 @@ static int32_t op_rw(process_t *p, int write, uint64_t index, uint64_t lba, uint
     if (!d) return STATUS_NO_SUCH_DEVICE;
     if (!count || count > 0x100000 || lba >= d->sectors || count > d->sectors - lba) return STATUS_INVALID_PARAMETER;
     if (write && (!d->write || (d->flags & BLK_F_READONLY))) return STATUS_MEDIA_WRITE_PROTECTED;
-    if (write && write_refused(d)) return STATUS_ACCESS_DENIED;
+    if (write && blk_user_write_busy(d)) return STATUS_ACCESS_DENIED;
     w = window_get();
     if (!w) return STATUS_INSUFFICIENT_RESOURCES;
     while (done < count && st == STATUS_SUCCESS) {
@@ -208,7 +200,7 @@ static int32_t op_batch(process_t *p, uint64_t index, uint64_t uios, uint64_t n,
         const uint64_t bytes = (uint64_t)io[i].count * d->sector_size;
         if (io[i].op > 1 || !io[i].count || io[i].lba >= d->sectors || io[i].count > d->sectors - io[i].lba) return STATUS_INVALID_PARAMETER;
         if (io[i].op && (!d->write || (d->flags & BLK_F_READONLY))) return STATUS_MEDIA_WRITE_PROTECTED;
-        if (io[i].op && write_refused(d)) return STATUS_ACCESS_DENIED;
+        if (io[i].op && blk_user_write_busy(d)) return STATUS_ACCESS_DENIED;
         off += bytes;
     }
     if (off > SYSBLK_WINDOW_BYTES) return STATUS_INVALID_PARAMETER;
@@ -267,7 +259,7 @@ static int32_t op_discard(uint64_t index, uint64_t lba, uint64_t count)
     blk_dev_t *d = dev_of(index);
     if (!d) return STATUS_NO_SUCH_DEVICE;
     if (!count || count > 0xffffffffu || lba >= d->sectors || count > d->sectors - lba) return STATUS_INVALID_PARAMETER;
-    if (write_refused(d)) return STATUS_ACCESS_DENIED;
+    if (blk_user_write_busy(d)) return STATUS_ACCESS_DENIED;
     if (!(blk_whole(d)->flags & BLK_F_DISCARD)) return STATUS_NOT_SUPPORTED;
     return blk_discard(d, lba, (unsigned)count) ? STATUS_IO_DEVICE_ERROR : STATUS_SUCCESS;
 }

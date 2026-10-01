@@ -51,6 +51,15 @@ blk_dev_t *blk_whole(blk_dev_t *d)
     return d;
 }
 
+int blk_user_write_busy(blk_dev_t *d)
+{
+    blk_dev_t *x;
+    if (!d) return 1;
+    for (x = blk_first(); x; x = x->next)
+        if ((x->flags & BLK_F_MOUNTED) && (x == d || x == blk_whole(d) || blk_whole(x) == d)) return 1;
+    return 0;
+}
+
 static int in_range(const blk_dev_t *d, uint64_t lba, unsigned n) { return d && n && lba < d->sectors && n <= d->sectors - lba; }
 
 int blk_read(blk_dev_t *d, uint64_t lba, unsigned count_, void *buf)

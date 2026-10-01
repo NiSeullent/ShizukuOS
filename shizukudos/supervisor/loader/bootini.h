@@ -11,13 +11,13 @@
  * comments, control or non-ASCII bytes, bad values -- rejects the whole file.
  *
  * BOOT.INI keys:
- *     mode = auto | supervisor | csm | kernel64
+ *     mode = auto | supervisor | csm | kernel64 | install
  *     csm_path = \EFI\SHIZUKU\CSMWRAP.EFI             absolute path on the boot volume
  *     auto_kernel64 = yes | no                        mode=auto without VMX may boot Kernel64
  *                                                     directly before trying CSM (default no)
  *     menu_timeout = 0 .. 30                          seconds the boot manager menu waits for a key
  *                                                     (A/Enter = the policy above, K = Kernel64 direct,
- *                                                     C = CSM, S = Supervisor) before it follows the
+ *                                                     I = interactive installer, C = CSM, S = Supervisor) before it follows the
  *                                                     policy; 0 = no menu (default)
  * KERNEL64.INI keys:
  *     cmdline = <printable ASCII, may be empty>       copied into shz_bootinfo_t.cmdline
@@ -31,7 +31,8 @@
 #define BOOTINI_DEFAULT_CSM_PATH "\\EFI\\SHIZUKU\\CSMWRAP.EFI"
 #define BOOTINI_MENU_TIMEOUT_MAX 30
 
-enum bootini_mode { BOOT_MODE_AUTO = 0, BOOT_MODE_SUPERVISOR = 1, BOOT_MODE_CSM = 2, BOOT_MODE_KERNEL64 = 3 };
+enum bootini_mode { BOOT_MODE_AUTO = 0, BOOT_MODE_SUPERVISOR = 1, BOOT_MODE_CSM = 2, BOOT_MODE_KERNEL64 = 3,
+                    BOOT_MODE_INSTALL = 4 };
 
 typedef struct {
     int mode;                           /* enum bootini_mode */

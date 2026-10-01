@@ -364,6 +364,13 @@ void disk_init(void)
             const int n = blk_scan_partitions(d);
             kprintf("K64 disk: %s: %d partition(s)\n", d->name, n);
         }
+    /* Formatting a mounted target would let its old FAT/journal flush corrupt
+     * the new installation later. The interactive installer operates on raw
+     * disks; defer file-system mounting to the installed system's next boot. */
+    if (k64_cmdline_has("shz.setup=interactive")) {
+        kprintf("K64 disk: interactive installer profile; file systems are not mounted\n");
+        return;
+    }
     for (d = blk_first(); d && mounted; d = d->next)
         if (d->flags & BLK_F_PARTITION)
             mounted = try_mount(d);

@@ -99,6 +99,9 @@ int blk_control(blk_dev_t *d, unsigned op, uint64_t arg, uint64_t *out);     /* 
 int blk_read_async(blk_dev_t *d, uint64_t lba, unsigned count, void *buf, blk_done_fn done, void *ctx);
 int blk_write_async(blk_dev_t *d, uint64_t lba, unsigned count, const void *buf, blk_done_fn done, void *ctx);
 blk_dev_t *blk_whole(blk_dev_t *d);             /* the whole device under a partition (itself for a whole device) */
+/* User raw writes must not race mounted file systems on this device, its
+ * whole disk or child partitions. Shared by raw I/O and the installer. */
+int blk_user_write_busy(blk_dev_t *d);
 /* Reads the partition table of a whole device (blk_part.c: MBR + EBR chain, GPT with header/array CRC and backup
  * header) and registers each partition as "<name>p<n>". Returns the number of partitions registered, 0 for an
  * unpartitioned (superfloppy) or empty device, < 0 on I/O error. */

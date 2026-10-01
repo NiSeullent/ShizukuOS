@@ -15,6 +15,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = Path(__file__).resolve().parent
@@ -59,7 +60,11 @@ def await_marker(serial, marker, proc, timeout):
 
 def boot(args, tools, disk, output, profile, write_command=None, existing=False):
     output.mkdir()
-    serial, socket = output / 'serial.log', output / 'qmp.sock'
+    serial = output / 'serial.log'
+    # Linux AF_UNIX paths are bounded independently of filesystem paths. Keep
+    # the socket short even when a portable checkout or evidence path is long.
+    sockets = tempfile.TemporaryDirectory(prefix='shzdos10-')
+    socket = Path(sockets.name) / 'qmp.sock'
     cmd = [args.qemu, '-name', 'shizuku-dos10-private-test', '-machine', 'q35',
            '-accel', args.accel, '-cpu', 'host' if args.accel == 'kvm' else 'qemu64',
            '-m', '128', '-smp', '2', '-display', 'none', '-monitor', 'none', '-vga', 'std',
@@ -133,6 +138,7 @@ def boot(args, tools, disk, output, profile, write_command=None, existing=False)
                     except subprocess.TimeoutExpired:
                         proc.kill()
                         proc.wait(timeout=5)
+            sockets.cleanup()
     result.update(qemu_exit_code=proc.returncode, seconds=round(time.monotonic() - started, 3))
     if result['qemu_exit_code'] != 0:
         raise ValueError('QEMU did not exit cleanly after the owned test')
@@ -210,7 +216,7 @@ def main(argv=None):
                   'Kernel32_Kernel64_WDDMWrapper_native_Windows98_connection_complete': False}
         (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         print(json.dumps({'status': result['status'], 'runs': len(runs), 'out': str(out)}, indent=2))
-    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
         (out / 'result.json').write_text(json.dumps({'status': 'FAIL', 'error': str(exc), 'completed_runs': runs}, indent=2) + '\n')
         print(str(exc), file=sys.stderr)
         return 1

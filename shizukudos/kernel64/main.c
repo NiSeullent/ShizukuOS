@@ -67,6 +67,13 @@ void kmain(uint64_t bootinfo_pa)
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
     sti();
+    if (k64_cmdline_has("shz.setup=interactive")) {
+        extern unsigned k64_desktop(void);
+        /* User installation starts without the diagnostic app suite. Cancelling
+         * or closing its result returns to the real production shell. */
+        setup_autostart(&bootinfo);
+        shz_exit(k64_desktop());
+    }
     if (k64_cmdline_has("shz.desktop")) {
         extern unsigned k64_desktop(void);
         /* The desktop is the boot workload. Its lifetime, rather than the QA suite,

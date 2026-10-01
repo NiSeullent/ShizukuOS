@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Boot-manager test: one MBR disk that boots FreeDOS on legacy BIOS *and* on UEFI, and Kernel64 directly on UEFI.
+r"""Boot-manager test: one MBR disk that boots FreeDOS on legacy BIOS *and* on UEFI, and Kernel64 directly on UEFI.
 
 Disk layout (built here, never shipped): an MBR partition table with one active
 FAT16 partition at LBA 63 holding
@@ -156,7 +156,7 @@ def case_table():
          "serial": ["BOOT.INI mode=auto, csm_path=\\EFI\\SHIZUKU\\CSMWRAP.EFI (default), auto_kernel64=yes",
                     "Supervisor profile not available: Intel VMX backend unusable: CPUID does not report VMX",
                     "Kernel64 direct boot (mode=auto, auto_kernel64=yes, no usable virtualization backend)"],
-         "absent": ["CSM legacy boot", "Kernel64 0.1: command line"]},
+         "absent": ["CSM legacy boot", "Kernel64 10 (ShizukuDOS): command line"]},
         {"name": "auto-k64-fallback", "ini": INI_AUTO_K64, "delete": ["::/SHZDOS/KERNEL64S.BIN"],
          "copy": [(K64_SUPERVISOR_IMAGE, "::/SHZDOS/KERNEL64S.BIN")], "cpu": INTEL_NO_VMX, "smp": 2,
          "expect": DOS_RUN,
@@ -165,7 +165,7 @@ def case_table():
                     "Kernel64 direct boot did not start (status 0x8000000000000001); falling back to the CSM legacy "
                     "BIOS profile.",
                     "CSM legacy boot (mode=auto, no usable virtualization backend)", "CSM legacy boot: CSMWrap loaded"],
-         "absent": ["ExitBootServices done", "Kernel64 0.1"]},
+         "absent": ["ExitBootServices done", "Kernel64 10 (ShizukuDOS)"]},
         {"name": "kernel64-s3", "ini": INI_KERNEL64, "cpu": INTEL_NO_VMX, "smp": 2, "expect": K64_RUN,
          "cmdline": "", "holes": True,
          "serial": ["Kernel64 direct boot (mode=kernel64)",
@@ -184,18 +184,18 @@ def case_table():
          "smp": 2, "s3": False, "expect": RETURN, "status": "Not Found",
          "serial": ["REFUSED: \\SHZDOS\\KERNEL64S.BIN not found on the boot volume",
                     "Nothing was started. Returning to firmware."],
-         "absent": ["ExitBootServices done", "Kernel64 0.1", "CSM legacy boot"]},
+         "absent": ["ExitBootServices done", "Kernel64 10 (ShizukuDOS)", "CSM legacy boot"]},
         {"name": "kernel64-wrong-image", "ini": INI_KERNEL64, "delete": ["::/SHZDOS/KERNEL64S.BIN"],
          "copy": [(K64_SUPERVISOR_IMAGE, "::/SHZDOS/KERNEL64S.BIN")], "cpu": INTEL_NO_VMX, "smp": 2, "s3": False,
          "expect": RETURN, "status": "Load Error",
          "serial": ["REFUSED: \\SHZDOS\\KERNEL64S.BIN is not the standalone (-DSHZ_STANDALONE) Kernel64 build",
                     "Nothing was started. Returning to firmware."],
-         "absent": ["ExitBootServices done", "Kernel64 0.1", "CSM legacy boot"]},
+         "absent": ["ExitBootServices done", "Kernel64 10 (ShizukuDOS)", "CSM legacy boot"]},
         {"name": "kernel64-bad-ini", "ini": INI_KERNEL64, "files": [(K64_INI_BAD, "::/SHZDOS/KERNEL64.INI")],
          "cpu": INTEL_NO_VMX, "smp": 2, "s3": False, "expect": RETURN, "status": "Invalid Parameter",
          "serial": ["REFUSED: \\SHZDOS\\KERNEL64.INI line 2: unknown key 'append' (allowed: cmdline)",
                     "The file is rejected as a whole. Nothing was started. Returning to firmware."],
-         "absent": ["ExitBootServices done", "Kernel64 0.1", "CSM legacy boot"]},
+         "absent": ["ExitBootServices done", "Kernel64 10 (ShizukuDOS)", "CSM legacy boot"]},
         {"name": "legacy", "legacy": True, "expect": DOS_RUN, "serial": []},
     ]
 
@@ -370,6 +370,9 @@ PARSER_CASES = [
     ("mode supervisor", b"mode = supervisor\n", "OK supervisor"),
     ("mode csm CRLF, case", b"MODE = Csm\r\n", "OK csm"),
     ("mode kernel64", b"mode = Kernel64\r\n", "OK kernel64 \\EFI\\SHIZUKU\\CSMWRAP.EFI 1 0 k64=0 0"),
+    ("mode install", b"mode = Install\r\n", "OK install \\EFI\\SHIZUKU\\CSMWRAP.EFI 1 0 k64=0 0"),
+    ("install with menu", b"mode=install\nmenu_timeout=5\n", "OK install \\EFI\\SHIZUKU\\CSMWRAP.EFI 1 0 k64=0 0 menu=5 1"),
+    ("install duplicate", b"mode=install\nmode=auto\n", "ERR 2 duplicate key 'mode'"),
     ("utf-8 bom", b"\xef\xbb\xbfmode = csm\n", "OK csm"),
     ("csm_path", b"csm_path = \\EFI\\CSM\\X.EFI\n", "OK auto \\EFI\\CSM\\X.EFI 0 1"),
     ("both keys", b"mode=csm\ncsm_path=\\A.EFI\n", "OK csm \\A.EFI 1 1"),
@@ -398,7 +401,8 @@ PARSER_CASES = [
     ("all four keys", b"mode=csm\ncsm_path=\\C.EFI\nauto_kernel64=no\nmenu_timeout=3\n",
      "OK csm \\C.EFI 1 1 k64=0 1 menu=3 1"),
     ("KERNEL64.INI key in BOOT.INI", b"cmdline = x\n", "ERR 1 unknown key 'cmdline'"),
-    ("invalid mode", b"mode = legacy\n", "ERR 1 invalid mode 'legacy' (expected auto, supervisor, csm or kernel64)"),
+    ("invalid mode", b"mode = legacy\n", "ERR 1 invalid mode 'legacy' (expected auto, supervisor, csm, kernel64 or install)"),
+    ("invalid installer alias", b"mode=installer\n", "ERR 1 invalid mode 'installer'"),
     ("inline comment", b"mode = csm ; x\n", "ERR 1 invalid mode 'csm ; x'"),
     ("duplicate mode", b"mode = csm\nmode = auto\n", "ERR 2 duplicate key 'mode'"),
     ("duplicate csm_path", b"csm_path=\\A.EFI\ncsm_path=\\B.EFI\n", "ERR 2 duplicate key 'csm_path'"),
@@ -452,11 +456,11 @@ K64INI_CASES = [
 ]
 
 
-def parser_host_test(work):
+def parser_host_test(work, compiler="gcc"):
     src = HERE / "loader"
     exe = work / "bootini_test"
     (work / "bootini_test.c").write_text(PARSER_DRIVER)
-    cmd = ["gcc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
+    cmd = [compiler, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
            "-fno-sanitize-recover=all", "-I", src, work / "bootini_test.c", src / "bootini.c", "-o", exe]
     run(cmd, capture=True)
     checks = []
@@ -507,13 +511,13 @@ def k64_checks(name, text, qemu_rc, case, apps):
                                 f"loader {loader_ram.group(0) if loader_ram else 'missing'}; "
                                 f"kernel {kernel_ram.group(1) + ' MiB' if kernel_ram else 'missing'}"))
     checks.append(verify._check(f"[{name}] Kernel64 read boot info ABI 1.1 (472 bytes) flagged UEFI-direct",
-                                "Kernel64 0.1: boot info ABI 1.1, 472 bytes, started directly by the UEFI boot manager "
+                                "Kernel64 10 (ShizukuDOS): boot info ABI 1.1, 472 bytes, started directly by the UEFI boot manager "
                                 "(no Supervisor)" in text))
     if case.get("cmdline"):
         checks.append(verify._check(f"[{name}] KERNEL64.INI command line reached Kernel64 verbatim",
-                                    f'Kernel64 0.1: command line "{case["cmdline"]}"' in text))
+                                    f'Kernel64 10 (ShizukuDOS): command line "{case["cmdline"]}"' in text))
     else:
-        checks.append(verify._check(f"[{name}] no KERNEL64.INI: empty command line", "Kernel64 0.1: command line" not in text))
+        checks.append(verify._check(f"[{name}] no KERNEL64.INI: empty command line", "Kernel64 10 (ShizukuDOS): command line" not in text))
     lg = re.search(r"GOP (\d+)x(\d+) (BGRX|RGBX) at 0x([0-9a-f]+)\.", text)
     kg = re.search(r"UEFI GOP framebuffer (\d+)x(\d+), pitch (\d+), (BGRX|RGBX), at ([0-9a-f]+) \((\d+) KiB\)", text)
     checks.append(verify._check(f"[{name}] GOP framebuffer handed over: Kernel64's k64_boot_framebuffer() reports the "
@@ -670,7 +674,7 @@ def run_case(case, base_disk, args, session, apps):
         checks.append(verify._check(f"[{name}] serial does not show: {needle}", needle not in text))
     if not case.get("legacy"):
         checks.append(verify._check(f"[{name}] Shizuku loader started from \\EFI\\BOOT\\BOOTX64.EFI",
-                                    "ShizukuDOS 10.0-dev Supervisor loader (UEFI x64)" in text))
+                                    "ShizukuOS development Supervisor loader (UEFI x64) - ShizukuDOS 10" in text))
     if case["expect"] == DOS_RUN:
         checks.append(verify._check(f"[{name}] DOS reached SHZEXIT (COM1 marker)", outcome == "dos-exit", outcome))
         if not case.get("legacy"):
@@ -696,7 +700,7 @@ def run_case(case, base_disk, args, session, apps):
         checks += k64_checks(name, text, qemu_rc, case, apps)
         rec["k64_evidence"] = {str(k): hex(v) for k, v in sorted(run_k64_standalone.parse(text)[0].items())}
         rec["k64_boot_lines"] = [l for l in text.splitlines() if l.startswith(("Kernel64 direct boot", "Shizuku boot manager",
-                                                                              "Kernel64 0.1:", "K64 win64 app:"))]
+                                                                              "Kernel64 10 (ShizukuDOS):", "K64 win64 app:"))]
     else:
         m = re.search(r"BdsDxe: failed to start (Boot[0-9A-F]{4}) .*?: ([A-Za-z ]+)\r?$", text, re.M)
         want = case.get("status")

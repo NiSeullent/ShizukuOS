@@ -73,7 +73,7 @@ void bootini_defaults(bootini_policy_t *p)
 const char *bootini_mode_name(int mode)
 {
     return mode == BOOT_MODE_SUPERVISOR ? "supervisor" : mode == BOOT_MODE_CSM ? "csm" :
-           mode == BOOT_MODE_KERNEL64 ? "kernel64" : "auto";
+           mode == BOOT_MODE_KERNEL64 ? "kernel64" : mode == BOOT_MODE_INSTALL ? "install" : "auto";
 }
 
 /* An absolute FAT path on the boot volume: \COMPONENT\...\FILE, printable ASCII. */
@@ -177,7 +177,7 @@ static int boot_entry(void *ctx, msg_t *m, int line, const char *key, size_t kle
         if (p->mode_set)
             return fail(m, line, "duplicate key 'mode'", 0, 0, 0);
         if (!vlen)
-            return fail(m, line, "empty value for 'mode' (expected auto, supervisor, csm or kernel64)", 0, 0, 0);
+            return fail(m, line, "empty value for 'mode' (expected auto, supervisor, csm, kernel64 or install)", 0, 0, 0);
         if (word_is(val, vlen, "auto"))
             p->mode = BOOT_MODE_AUTO;
         else if (word_is(val, vlen, "supervisor"))
@@ -186,8 +186,10 @@ static int boot_entry(void *ctx, msg_t *m, int line, const char *key, size_t kle
             p->mode = BOOT_MODE_CSM;
         else if (word_is(val, vlen, "kernel64"))
             p->mode = BOOT_MODE_KERNEL64;
+        else if (word_is(val, vlen, "install"))
+            p->mode = BOOT_MODE_INSTALL;
         else
-            return fail(m, line, "invalid mode ", val, vlen, " (expected auto, supervisor, csm or kernel64)");
+            return fail(m, line, "invalid mode ", val, vlen, " (expected auto, supervisor, csm, kernel64 or install)");
         p->mode_set = 1;
     } else if (word_is(key, klen, "csm_path")) {
         const char *why;

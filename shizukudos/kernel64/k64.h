@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include "../kcommon/khc.h"
 
-#define KVER "Kernel64 0.1"
+#define KVER "Kernel64 10 (ShizukuDOS)"
 #define PAGE_SIZE 4096ull
 #define K64_VIRT_BASE 0xffffffff80000000ull
 #define DIRECT_MAP 0xffff800000000000ull

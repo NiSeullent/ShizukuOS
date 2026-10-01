@@ -17,7 +17,17 @@ integration. Its final image SHA-256 was
 The owner ran two normal BIOS cold boots, three recovery cases, and two
 UEFI-CSMWrap cold boots. These seven disposable-guest checks passed without
 pre-start keyboard input, including keyboard-created file persistence.
-The integration owner has not repeated those VM runs at this checkpoint.
+The integration owner subsequently rebuilt DOS10 (56.345 seconds, exit 0)
+and repeated all seven runs using QEMU/KVM on fresh disk and firmware copies.
+All passed: BIOS normal cold boots plus three recovery cases, and two UEFI
+cold boots. Actual PS/2 commands created files; independent FAT byte readback
+and the second cold boot's TYPE output agreed. The source image stayed intact.
+The BIOS and UEFI result receipt hashes were respectively
+`7f452ad4fe4afc9e6caa72b64a5579d4e76d2fe88653f97a23fe66b16fe14bb7`
+and `db85bfa3f10f0b0dc69f73aef384d7908154671e95a5afce8a6c37535fe2d23d`.
+The initial long-path attempt failed before boot because its Unix socket path
+exceeded the host limit. A short temporary socket directory fixes portability;
+all five BIOS cases then passed under the original long evidence directory.
 
 The owner also freshly compiled the Supervisor and checked normal and QA ESP
 member bytes. Those test ESPs omitted optional K32/K64/Win64 guest inputs and
@@ -40,6 +50,31 @@ the actual `build_setup()` function; its EXE SHA-256 was
 Independent source review found and corrected the F2 input collision, hidden
 row click range and runtime minimum-size handling. The full runtime rebuild,
 guest installer, actual disk writes and installed-system cold boots are pending.
+
+The integration owner freshly compiled native and standalone Kernel32/Kernel64
+with the installer startup and block-device guards (468.317 seconds, exit 0).
+The installer profile inventories devices without mounting target filesystems,
+so a previous mounted filesystem cannot later flush stale state over a new
+partition table. The shared raw-write guard still refuses mounted disks and
+their whole-device/child relationships. Independent strict and sanitized host
+checks cover those guards; guest disk installation remains a separate gate.
+
+The production media embeds INSTALL.IMG inside its UEFI boot filesystem, adds
+the explicit interactive installer policy, and defaults to a persistent desktop.
+An unattended/self-test build requires explicit development options. Packaging
+rejects stale source-bound component receipts. Current media excludes the
+retired ShizukuDOS 0.1 input. Nine media-contract tests and eighteen actual
+image-I/O/ISO extent tests passed. No new complete ISO boot is claimed here.
+
+## DOS-to-Windows contract increment
+
+The DOSMGR patch reports only implemented capabilities and distinguishes the
+DX request selector for its CDS response. It does not enable unimplemented
+Windows instancing or enable WIN31SUPPORT by default. An opt-in tracing TSR
+preserves the interrupted flags and register state while recording selected
+DOS/Windows calls. Seventeen contract and actual 16-bit instruction tests
+passed; default DOS10 also compiled with the new patch. These are contract
+checks, not proof that Windows 98 has booted on the replacement DOS.
 
 The development shell's F6/Theme window offers Classic and ShizukuOS palettes
 with durable data-disk setting storage. Its real palette/record/persistence

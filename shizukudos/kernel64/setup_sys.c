@@ -45,7 +45,7 @@ static int32_t blk_query(process_t *p, uint64_t index, uint64_t out, uint64_t si
     memset(&info, 0, sizeof info);
     info.index = (uint32_t)index;
     info.flags = ((d->flags & BLK_F_PARTITION) || d->parent ? SHZ_SETUP_BLK_PARTITION : 0) |
-                 (d->flags & BLK_F_READONLY || !d->write ? SHZ_SETUP_BLK_READONLY : 0) |
+                 (d->flags & BLK_F_READONLY || !d->write || blk_user_write_busy(d) ? SHZ_SETUP_BLK_READONLY : 0) |
                  (d->flags & BLK_F_REMOVABLE ? SHZ_SETUP_BLK_REMOVABLE : 0);
     memcpy(info.name, d->name, sizeof info.name - 1);
     if (blk_ram_serial(d, info.serial, sizeof info.serial)) info.serial[0] = 0;
@@ -65,7 +65,7 @@ static int32_t blk_io(process_t *p, int write, uint64_t index, uint64_t lba, uin
     if (!count || count > SHZ_SETUP_MAX_SECTORS || !d->sector_size || d->sector_size > BOUNCE_BYTES ||
         lba >= d->sectors || count > d->sectors - lba)
         return STATUS_INVALID_PARAMETER;
-    if (write && ((d->flags & BLK_F_READONLY) || !d->write)) return STATUS_ACCESS_DENIED;
+    if (write && ((d->flags & BLK_F_READONLY) || !d->write || blk_user_write_busy(d))) return STATUS_ACCESS_DENIED;
     if (!io_lock_ready) { mutex_init(&io_lock); io_lock_ready = 1; }
     mutex_lock(&io_lock);
     if (!bounce) bounce = kmalloc(BOUNCE_BYTES);
@@ -132,14 +132,18 @@ void setup_autostart(const shz_bootinfo_t *bi)
     int faulted = 1, reaped = -1;
     uint64_t waited = 0;
     int32_t st;
-    if (!cmdline_has(cmd, "shz.setup=auto")) return;
-    kprintf("K64 setup: shz.setup=auto, %d RAM block device(s); starting %s\n", blk_ram_init(), SETUP_EXE);
+    const int interactive = cmdline_has(cmd, "shz.setup=interactive");
+    if (!interactive && !cmdline_has(cmd, "shz.setup=auto")) return;
+    kprintf("K64 setup: shz.setup=%s, %d RAM block device(s); starting %s\n",
+            interactive ? "interactive" : "auto", blk_ram_init(), SETUP_EXE);
     if (!fs_lookup(SETUP_EXE)) {
         kprintf("K64 setup: %s is not in the initial RAM archive\n", SETUP_EXE);
         kprintf("SETUP-RESULT: FAIL (installer missing)\n");
         return;
     }
-    st = ldr_create_process(0, SETUP_EXE, "SHZSETUP.EXE /unattend C:\\SHZ\\SETUP\\SHZSETUP.INI", "C:\\SHZ\\SETUP", &p, &t);
+    st = ldr_create_process(0, SETUP_EXE,
+                          interactive ? "SHZSETUP.EXE /interactive" : "SHZSETUP.EXE /unattend C:\\SHZ\\SETUP\\SHZSETUP.INI",
+                          "C:\\SHZ\\SETUP", &p, &t);
     if (st) {
         kprintf("K64 setup: SHZSETUP.EXE failed to start (%x)\n", (uint32_t)st);
         kprintf("SETUP-RESULT: FAIL (installer did not start)\n");
@@ -163,5 +167,9 @@ void setup_autostart(const shz_bootinfo_t *bi)
         for (;;) __asm__ volatile("hlt");
     }
 #endif
+    if (interactive && power_request == SHZ_SETUP_POWER_SHUTDOWN) {
+        kprintf("K64 setup: ending the standalone/domain profile after the shutdown request\n");
+        shz_exit(code != 0 || faulted || reaped != 0 ? 1 : 0);
+    }
     /* SHUTDOWN and NONE: return; kmain finishes and ends the domain (standalone: shz_exit ends the VM). */
 }

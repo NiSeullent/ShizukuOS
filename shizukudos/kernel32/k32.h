@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include "../kcommon/khc.h"
 
-#define KVER "Kernel32 0.1"
+#define KVER "Kernel32 10 (ShizukuDOS)"
 #define PAGE_SIZE 4096u
 #define VEC_TIMER 0x20
 #define VEC_DOORBELL 0x21

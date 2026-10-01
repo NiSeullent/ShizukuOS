@@ -1,0 +1,48 @@
+From: ShizukuOS contributors
+Subject: [PATCH] DOSMGR: report only implemented request support
+SPDX-License-Identifier: GPL-2.0-or-later
+
+Upstream: FDOS/kernel 5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3 (ke2046)
+Source: kernel/inthndlr.c; preserve upstream DOS-C attribution and licensing.
+Scope: WIN31SUPPORT candidate; does not enable this experimental profile.
+Protocol: RBIL INT 2F/AX=1607/BX=0015, https://delorie.com/djgpp/doc/rbinter/id/23/45.html
+
+--- a/kernel/inthndlr.c
++++ b/kernel/inthndlr.c
+@@ -2093,7 +2093,11 @@
+                    0008h: notify Windows of halting due to internal stack errors
+                    0010h: notify Windows of logical drive map change ("Insert disk X:")
+                */
+-              r.BX = r.DX;    /* sure we support everything asked for, ;-) */
++              /* No requested patch bit has a verified implementation yet.
++                 Acknowledging the API is not acknowledging every patch.
++                 DOSMGR may patch missing facilities; opt-in tests must check it.
++               */
++              r.BX = 0;      /* applied patch mask, not requested mask */
+               r.DX = 0xA2AB;  /* on succes DX:AX set to A2AB:B97Ch */
+               r.AX = 0xB97C;
+               /* FIXME: do we need to do anything special for FD kernel? */
+@@ -2109,7 +2113,7 @@
+             }
+             case 0x03:    /* get internal structure sizes */
+             {
+-              if (r.CX & 0x01) /* size of Current Directory Structure in bytes */
++              if (r.DX == 0x0001) /* exactly one supported request: CDS size */
+               {
+                 r.DX = 0xA2AB;   /* on succes DS:AX set to A2AB:B97Ch */
+                 r.AX = 0xB97C;
+@@ -2128,9 +2132,11 @@
+                    0004h: device driver chain
+                    0008h: Swappable Data Area
+                */
+-              r.DX = 0xA2AB;   /* on succes DX:AX set to A2AB:B97Ch */
+-              r.AX = 0xB97C;
+-              r.BX = 0; /* a zero here tells Windows to instance everything */
++              /* No independently instanced structures are verified.
++                 Use the DOS 5/6 unsupported response, not a success signature.
++               */
++              r.CX = 0;
++              r.DX = 0;
+               break;
+             }
+             case 0x05:    /* get device driver size */

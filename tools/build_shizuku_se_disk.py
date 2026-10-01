@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build the Windows 98 Shizuku Second Edition raw disk image (secondary artifact).
+"""Build the ShizukuOS raw disk image (secondary artifact).
 
 The product is the hybrid VM install ISO (tools/build_shizuku_se_iso.py), which
 already boots when written to a USB stick. This raw image is for VMs and tools
@@ -26,7 +26,7 @@ which legacy-boots this disk's MBR -> the same menu.
 
 Inputs are the existing build outputs (run tools/build_shizuku_se_iso.py or
 shizukudos/tools/shz.py build first); nothing is rebuilt except the small Win98
-SE overlay binaries and the 0.1 floppy. Reproducible (fixed ids and dates).
+SE overlay binaries. The retired 0.1 floppy is not shipped. Reproducible (fixed ids and dates).
 Licences and sources of the third-party parts are on the ISO (ShizukuDOS10\\).
 """
 from __future__ import annotations
@@ -43,9 +43,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import build_shizuku_se_iso as iso_builder  # noqa: E402
 import shizuku_se_media as se_media  # noqa: E402
+import shizuku_image_io as image_io  # noqa: E402
 
 BUILD = ROOT / "build"
-DISK_NAME = "windows98-shizuku-second-edition-disk.img"
+DISK_NAME = "shizukuos-development-disk.img"
 DISK_MIB = 128
 PART_START = 2048
 PART_TYPE = 0x0C          # FAT32 with LBA
@@ -54,7 +55,6 @@ DISK_SIGNATURE = 0x53485A31  # "1ZHS", fixed for reproducibility
 # K64_VOLUME_SERIAL); Kernel64 mounts this partition as D:, and Win64 programs expect the two to differ
 # (win64/tests/t_k32_file.c: "D: has a volume serial number of its own").
 VOLUME_ID = "53453938"
-SHZDOS01_PATH = "SHZ/SHZDOS01.IMG"
 SECTOR = 512
 
 
@@ -87,22 +87,23 @@ def install_syslinux(disk: Path, installer: Path, work: Path) -> None:
                     str(disk)], check=True, env=env)
 
 
-def disk_members(loader, csm, shzdos, k64, mode: str, floppy: bytes, artifacts: dict, setup_files: dict,
-                 store: dict, syslinux: dict) -> dict[str, bytes]:
-    members = dict(se_media.efi_members(loader, csm, shzdos, mode))
+def disk_members(loader, csm, shzdos, k64, mode: str, artifacts: dict, setup_files: dict,
+                 store: dict, syslinux: dict, desktop: bool = True) -> dict[str, bytes]:
+    members = dict(se_media.efi_members(loader, csm, shzdos, mode, setup_files))
+    if desktop:
+        members["SHZDOS/KERNEL64.INI"] = b"cmdline = shz.desktop\r\n"
     for name in se_media.SYSLINUX_MODULES:
         if name != "ldlinux.c32":  # written by the installer, matched to its ldlinux.sys
             members[f"syslinux/{name}"] = syslinux[name].read_bytes()
     members["syslinux/memdisk"] = syslinux["memdisk"].read_bytes()
     members["syslinux/syslinux.cfg"] = se_media.boot_menu(
-        dos16_image="/SHZDOS/DISK.IMG", shzdos01_image=f"/{SHZDOS01_PATH}", k64_dir="/SHZ/K64", setup=bool(setup_files))
+        dos16_image="/SHZDOS/DISK.IMG", k64_dir="/SHZ/K64", setup=bool(setup_files), desktop=desktop)
     for name, item in k64.items():
         members[f"SHZ/K64/{name}"] = item.data
-    members[SHZDOS01_PATH] = floppy
     members.update(setup_files)
     members.update(store)
     members.update(iso_builder.shzse_payload(artifacts))
-    edition = "Windows 98 Shizuku Second Edition"
+    edition = "ShizukuOS"
     members.update({
         f"{edition}/EDITION.TXT": iso_builder.edition_text(),
         f"{edition}/NTWrapper9x/NTWRAP9X.VXD": artifacts["NTWRAP9X.VXD"].read_bytes(),
@@ -114,9 +115,9 @@ def disk_members(loader, csm, shzdos, k64, mode: str, floppy: bytes, artifacts: 
     members["VMPROFIL.TXT"] = se_media.vm_profiles_text().encode("ascii")
     members["LIMITS.TXT"] = iso_builder.limits_text()
     members["README.TXT"] = (
-        "Windows 98 Shizuku Second Edition - raw disk image (secondary artifact)\r\n"
+        "ShizukuOS - raw disk image (secondary artifact)\r\n"
         "The same boot menu as the VM install ISO: Kernel64 (K), DOS16 (D, boots\r\n"
-        "\\SHZDOS\\DISK.IMG with memdisk), ShizukuDOS 0.1 (1, \\SHZ\\SHZDOS01.IMG)"
+        "\\SHZDOS\\DISK.IMG with memdisk), DOS10 recovery shell"
         + (", Install (I)" if setup_files else "") + ".\r\n"
         "Legacy BIOS: MBR -> syslinux. UEFI: \\EFI\\BOOT\\BOOTX64.EFI, the boot manager:\r\n"
         "no key = auto (without VMX CSMWrap legacy-boots this disk), K = Kernel64\r\n"
@@ -128,15 +129,15 @@ def disk_members(loader, csm, shzdos, k64, mode: str, floppy: bytes, artifacts: 
 
 
 def verify_disk(disk: Path, members: dict[str, bytes], syslinux: dict, sector0: bytes, work: Path) -> str:
-    data_mbr = disk.read_bytes()[:SECTOR]
+    with disk.open("rb") as src:
+        data_mbr = src.read(SECTOR)
     if data_mbr != sector0:
         raise RuntimeError("sector 0 changed after it was written")
     part = work / "partition-check.img"
-    with open(disk, "rb") as src, open(part, "wb") as dst:
-        src.seek(PART_START * SECTOR)
-        shutil.copyfileobj(src, dst, 1 << 20)
+    image_io.copy_new_sparse(disk, part, source_offset=PART_START * SECTOR)
     try:
-        vbr = part.read_bytes()[:SECTOR]
+        with part.open("rb") as src:
+            vbr = src.read(SECTOR)
         hidden = struct.unpack_from("<I", vbr, 28)[0]
         if vbr[3:11] != b"SYSLINUX" or vbr[0x52:0x5A] != b"FAT32   " or hidden != PART_START or vbr[510:] != b"\x55\xaa":
             raise RuntimeError(f"partition boot sector is not a syslinux FAT32 VBR at hidden={PART_START}: "
@@ -170,10 +171,13 @@ def main() -> int:
     parser.add_argument("--setup", type=Path, metavar="DIR")
     parser.add_argument("--loader", type=Path)
     parser.add_argument("--csmwrap", type=Path)
-    parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default="auto")
+    parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default=None)
+    parser.add_argument("--desktop", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--size-mib", type=int, default=0,
                         help=f"disk size (default: fitted to the content in 32 MiB steps, at least {DISK_MIB} MiB)")
     args = parser.parse_args()
+    if args.boot_mode is None:
+        args.boot_mode = "kernel64" if args.desktop else "auto"
     disk = (args.output or BUILD / DISK_NAME).resolve()
     work = BUILD / "shizuku-second-edition-disk-work"
     shutil.rmtree(work, ignore_errors=True)
@@ -185,13 +189,16 @@ def main() -> int:
         shzdos = se_media.shzdos_inputs()
         syslinux = se_media.syslinux()
         setup_files, setup_info = se_media.setup_payload(args.setup)
+        if args.boot_mode == "install" and not setup_files:
+            raise RuntimeError("UEFI mode=install requires the actual installer payload")
+        if args.desktop and setup_files and setup_info.get("boot_profile") != "desktop":
+            raise RuntimeError("production disk requires a desktop installer payload")
         store, store_manifest = se_media.driver_store(args.driver_package)
     except se_media.drivers.DriverPackageError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     artifacts = iso_builder.build_components(work / "components")
-    floppy = iso_builder.build_floppy(work / "components", artifacts)
-    members = disk_members(loader, csm, shzdos, k64, args.boot_mode, floppy, artifacts, setup_files, store, syslinux)
+    members = disk_members(loader, csm, shzdos, k64, args.boot_mode, artifacts, setup_files, store, syslinux, args.desktop)
     need = sum(len(d) for d in members.values()) * 11 // 10 + 8 * se_media.MIB   # + FAT32 overhead and slack
     if not args.size_mib:
         args.size_mib = max(DISK_MIB, -(-(need + se_media.MIB) // (32 * se_media.MIB)) * 32)
@@ -212,11 +219,14 @@ def main() -> int:
     digest = se_media.shzlib.sha256_file(disk)
     inputs = [loader, csm, *k64.values(), *shzdos.values()]
     receipt = {"disk": str(disk), "bytes": disk.stat().st_size, "sha256": digest,
+               "product": "ShizukuOS", "release_target": "1.0.0", "release_channel": "development",
+               "boot_profile": "desktop" if args.desktop else "self-test",
+               "distribution_origin": "https://m98.nyase.kr", "retired_dos01_shipped": False,
                "layout": {"part_start": PART_START, "part_type": PART_TYPE, "fs": "FAT32", "disk_signature": DISK_SIGNATURE},
                "inputs": [item.record() for item in inputs],
                "syslinux": se_media.syslinux_spec()["distribution"], "setup": setup_info,
                "drivers": [p["package"] for p in store_manifest["packages"]],
-               "menu": {"dos16": "/SHZDOS/DISK.IMG", "shzdos01": f"/{SHZDOS01_PATH}", "k64_dir": "/SHZ/K64",
+               "menu": {"dos16": "/SHZDOS/DISK.IMG", "k64_dir": "/SHZ/K64",
                         "keys": se_media.MENU_KEYS, "setup_entry": bool(setup_files)},
                "members": len(members)}
     receipt_path = disk.with_suffix(".json")

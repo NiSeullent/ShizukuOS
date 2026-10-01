@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Windows 98 Shizuku Second Edition VM install ISO (one hybrid image).
+"""Build the ShizukuOS development install ISO (one hybrid image).
 
 One ISO, bootable as a CD and, written to a USB stick or attached as a disk, as a
 hard disk, on legacy BIOS and on UEFI:
@@ -9,18 +9,18 @@ hard disk, on legacy BIOS and on UEFI:
   offers, also on COM1:
     Kernel64  mboot.c32 loads the Multiboot stub SHZ/K64/BOOT.ELF with module 0
               KERNEL64S.BIN and module 1 WIN64.IMG (standalone Kernel64 + Win64).
-    DOS16     memdisk boots ShizukuDOS10/dos16/shizukudos-dos16-hd32.img, the
-              ShizukuDOS 10 DOS16 FreeDOS-profile disk, from RAM.
-    0.1       memdisk boots ShizukuDOS/shizukudos.img, the ShizukuDOS 0.1 floppy.
+    DOS10     memdisk boots ShizukuDOS10/dos16/shizukudos-dos10.img, the
+              automatic ShizukuDOS 10 compatibility shell, from RAM.
     Install   only when SHZSETUP (agent I1) is present under SHZ/SETUP: Kernel64
-              with shz.setup=auto on its Multiboot command line.
+              with shz.setup=interactive on its Multiboot command line.
 - UEFI, El Torito EFI entry (platform 0xEF): ShizukuDOS10/efiboot.img, a FAT
   image with \\EFI\\BOOT\\BOOTX64.EFI (Shizuku loader and boot manager),
   \\EFI\\SHIZUKU\\CSMWRAP.EFI (+ CSMWRAP.INI) and BOOT.INI (mode = auto,
   menu_timeout = 5), and \\SHZDOS\\ (loader inputs incl. KERNEL64S.BIN). The boot
   manager's menu: no key = auto (the Supervisor with Intel VMX, otherwise CSMWrap
   -> SeaBIOS CSM -> the El Torito default entry, i.e. the same menu as legacy
-  BIOS); K = Kernel64 direct (no CSM, no VMX).
+  BIOS); K = Kernel64 direct (no CSM, no VMX); I = native interactive installer.
+  Production defaults to the development desktop; diagnostic profiles are explicit.
 - isohybrid: isohdpfx.bin MBR code in the system area, MBR partition 1 (0x00,
   active, whole image) for BIOS disk boot, MBR partition 2 (0xEF) and a GPT
   entry for the EFI image so UEFI finds \\EFI\\BOOT\\BOOTX64.EFI on a disk.
@@ -59,9 +59,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import shizuku_se_media as se_media  # noqa: E402
+import shizuku_image_io as image_io  # noqa: E402
 BUILD = ROOT / "build"
-STAGE_ROOT = BUILD / "shizuku-second-edition-stage"
-ISO_NAME = "windows98-shizuku-second-edition.iso"
+STAGE_ROOT = BUILD / "shizukuos-stage"
+ISO_NAME = "shizukuos-1.0.0-development.iso"
 # The image that contains the user's own Windows 98 files is a different,
 # private artifact. It never reuses the public image's stage or file names.
 PRIVATE_SUFFIX = "-private"
@@ -95,14 +96,7 @@ class Win98MediaError(RuntimeError):
     """The supplied --win98-media is unusable. Reported as a clear error, not a traceback."""
 
 
-def load_image_builder():
-    path = ROOT / "shizukudos" / "build_image.py"
-    spec = importlib.util.spec_from_file_location("shizuku_image", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+
 
 
 def replace_broken_symlink(path: Path) -> None:
@@ -121,17 +115,6 @@ def build_components(work: Path) -> dict[str, Path]:
         ROOT / "ntwddm" / "win98" / "build",
     ):
         replace_broken_symlink(output)
-    run(["nasm", "-f", "bin", "shizukudos/boot.asm", "-o", str(work / "boot.bin")])
-    run([
-        "nasm", "-f", "bin", "-I", "shizukudos/",
-        "shizukudos/stage2.asm", "-o", str(work / "stage2.bin"),
-    ])
-    for source, output in (
-        ("shizukudos/tests/demo_com.asm", "demo.com"),
-        ("shizukudos/tests/ret_com.asm", "ret.com"),
-        ("shizukudos/tests/std_com.asm", "std.com"),
-    ):
-        run(["nasm", "-f", "bin", source, "-o", str(work / output)])
     run(["python3", "-B", "platform/build.py"])
     run(["python3", "-B", "ntwrapper/vxd/build.py"])
     run(["python3", "-B", "ntwddm/win98/build.py"])
@@ -158,40 +141,37 @@ def build_components(work: Path) -> dict[str, Path]:
 
 
 def edition_text() -> bytes:
-    """EDITION.TXT inside the ShizukuDOS 0.1 floppy (8.3 FAT12 root, 40-column friendly)."""
     return (
-        "Windows 98 Shizuku Second Edition\r\n"
-        "This floppy is ShizukuDOS 0.1, the project's own real-mode shell.\r\n"
-        "The VM install ISO boots it from its menu (memdisk floppy). The\r\n"
-        "same menu offers ShizukuDOS 10 DOS16 (external FreeDOS profile) and\r\n"
-        "the standalone Kernel64 + Win64 runtime; on UEFI the Shizuku loader\r\n"
-        "(Supervisor with Intel VMX) or CSMWrap leads to the same menu.\r\n"
-        "Embedded on this floppy: NTW32.DLL NTWRAP9X.VXD NTWGPROB.EXE\r\n"
-        "ShizukuDOS does not replace IO.SYS and does not install or boot the\r\n"
-        "Windows 98 GUI. No completed Windows 98 installation is claimed.\r\n"
-        "Microsoft setup files are not on this floppy or in the public disc.\r\n"
+        "ShizukuOS - 1.0.0 development candidate\r\n"
+        "ShizukuDOS 10 replaces the MS-DOS foundation for Windows 98.\r\n"
+        "Kernel32, Kernel64 and WDDMWrapper are built-in system components.\r\n"
+        "The current desktop and installer validate those components;\r\n"
+        "the complete Windows 98 DOS/VMM bridge and modern apps remain in development.\r\n"
+        "ShizukuDOS 0.1 is retired and is not shipped on this medium.\r\n"
+        "ISO distribution: https://m98.nyase.kr only.\r\n"
+        "GitHub provides public development sources and patches, not ISOs.\r\n"
     ).encode("ascii")
 
 
 def limits_text() -> bytes:
     return (
-        "LIMITS\r\n"
-        "ShizukuDOS 0.1 (menu entry 0.1, floppy image in RAM): reads FAT12 root\r\n"
-        "files and runs one 8.3 COM program. No MS-DOS 7.1, no CD-ROM driver.\r\n"
-        "ShizukuDOS 10 DOS16 (menu entry DOS16): FreeDOS kernel + FreeCOM\r\n"
-        "(external, GPL) on a 32 MiB conformance disk held in RAM by memdisk;\r\n"
-        "it runs its test programs and stops. Changes are not written back.\r\n"
-        "Kernel64 (menu entry Kernel64): the standalone Long Mode kernel and\r\n"
-        "Win64 runtime run their self-tests and Win64 test programs and stop.\r\n"
-        "It is not the Supervisor; it has no Win98 or DOS domain.\r\n"
-        "UEFI: the Supervisor needs Intel VMX with EPT and unrestricted guest.\r\n"
-        "AMD SVM is detected but has no backend. Without VMX the legacy menu is\r\n"
-        "reached through CSMWrap (needs 2+ logical CPUs, Secure Boot off). Key K\r\n"
-        "in the UEFI boot manager menu starts Kernel64 directly (at most 256 MiB).\r\n"
-        "Neither profile replaces IO.SYS or installs or boots the Win98 GUI.\r\n"
-        "This is not a completed Windows 98 installation.\r\n"
-        "NTWRAP9X.VXD: the project docs record a failed VxD load on Windows 98\r\n"
-        "(Win32 error 2, VXDLDR error 6). See SHZSE\\README.TXT on the disc.\r\n"
+        "ShizukuOS development limits\r\n"
+        "The normal boot starts the persistent ShizukuOS userland.\r\n"
+        "ShizukuDOS 10 provides the normal DOS shell; separate test images\r\n"
+        "retain the FreeDOS/FreeCOM conformance workload and its exit marker.\r\n"
+        "DOS booted through memdisk resides in RAM; changes to that instance\r\n"
+        "do not persist to the source image. The normal raw DOS image is writable.\r\n"
+        "The built-in SHZSETUP installer selects and confirms a target before\r\n"
+        "writing GPT, ESP and ShizukuFS, and verifies written files.\r\n"
+        "UEFI direct Kernel64 boot uses GOP; BIOS uses the legacy boot path.\r\n"
+        "CSMWrap requires Secure Boot off and 2+ logical CPUs.\r\n"
+        "The Supervisor needs Intel VMX/EPT; AMD SVM has no backend yet.\r\n"
+        "The final design replaces Microsoft DOS for genuine Windows 98.\r\n"
+        "That integrated DOS/VMM connection and complete modern app support\r\n"
+        "are not completed by this component development image.\r\n"
+        "Microsoft media, personal VM disks and credentials are not bundled.\r\n"
+        "Current native-driver results are in the source documentation;\r\n"
+        "a built binary or descriptor alone does not prove an installed driver.\r\n"
     ).encode("ascii")
 
 
@@ -238,42 +218,7 @@ def sources_text() -> bytes:
     ).encode("ascii")
 
 
-def build_floppy(work: Path, artifacts: dict[str, Path]) -> bytes:
-    image_mod = load_image_builder()
-    files = {
-        "HELLO.TXT": b"Hello from ShizukuDOS.\r\nThis FAT12 file can be read with TYPE.\r\n",
-        "README.TXT": (
-            b"ShizukuDOS is a from-scratch experimental shell.\r\n"
-            b"BOOT chainloads the first hard disk MBR.\r\n"
-            b"Windows 98 still uses its own IO.SYS and DOS 7.1.\r\n"
-        ),
-        "CHAIN.TXT": b"START OF FAT12 CHAIN\r\n" + b"0123456789ABCDEF\r\n" * 60 + b"END OF FAT12 CHAIN\r\n",
-        "DEMO.COM": (work / "demo.com").read_bytes(),
-        "RET.COM": (work / "ret.com").read_bytes(),
-        "STD.COM": (work / "std.com").read_bytes(),
-        "EDITION.TXT": edition_text(),
-        "LIMITS.TXT": limits_text(),
-        "NTW32.DLL": artifacts["NTW32.DLL"].read_bytes(),
-        "NTWRAP9X.VXD": artifacts["NTWRAP9X.VXD"].read_bytes(),
-        "NTWQUERY.EXE": artifacts["NTWQUERY.EXE"].read_bytes(),
-        "NTWPROBE.EXE": artifacts["NTWPROBE.EXE"].read_bytes(),
-        "NTWGPROB.EXE": artifacts["NTWGPROB.EXE"].read_bytes(),
-        "NTWDDM.O": artifacts["ntwddm-i386.o"].read_bytes(),
-    }
-    image = image_mod.make_image(
-        (work / "boot.bin").read_bytes(),
-        (work / "stage2.bin").read_bytes(),
-        files,
-    )
-    if len(image) != 1474560:
-        raise RuntimeError(f"boot image is {len(image)} bytes, not 1474560")
-    if image[0:3] != b"\xeb\x3c\x90" and image[0] != 0xEB:
-        raise RuntimeError("boot image is missing the ShizukuDOS jump")
-    if image[3:11] != b"SHIZUKU ":
-        raise RuntimeError("boot image OEM name is not SHIZUKU")
-    if image[510:512] != b"\x55\xaa":
-        raise RuntimeError("boot image signature missing")
-    return image
+
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +227,7 @@ def build_floppy(work: Path, artifacts: dict[str, Path]) -> bytes:
 
 # Build outputs (relative to build/shizukudos) that are staged under ShizukuDOS10/.
 SHZ10_STAGED = (
+    "dos16/shizukudos-dos10.img",
     "dos16/shizukudos-dos16-hd32.img",
     "kernel32/KERNEL32.BIN",
     "kernel64/KERNEL64.BIN",
@@ -292,6 +238,7 @@ SHZ10_STAGED = (
 )
 # The DOS16 disk image the BIOS menu's DOS16 entry boots with memdisk (ISO 9660 path).
 DOS16_ISO_PATH = f"{SHZ10_DIR}/dos16/shizukudos-dos16-hd32.img"
+DOS16_USER_ISO_PATH = f"{SHZ10_DIR}/dos16/shizukudos-dos10.img"
 # supervisor/esp.img (96 MiB) is only cross-checked, not shipped: the ISO carries a
 # size-fitted EFI image built from the very same bytes plus CSMWrap and BOOT.INI.
 SHZ10_ESP = "supervisor/esp.img"
@@ -305,7 +252,7 @@ SHZ10_RECEIPTS = {
 # Files of supervisor/esp.img that the EFI image of the ISO must carry unchanged.
 ESP_CROSSCHECK = {
     "EFI/BOOT/BOOTX64.EFI": "supervisor/BOOTX64.EFI",
-    "SHZDOS/DISK.IMG": "dos16/shizukudos-dos16-hd32.img",
+    "SHZDOS/DISK.IMG": "dos16/shizukudos-dos10.img",
     "SHZDOS/KERNEL32.BIN": "kernel32/KERNEL32.BIN",
     "SHZDOS/KERNEL64.BIN": "kernel64/KERNEL64.BIN",
     "SHZDOS/KERNEL64S.BIN": "kernel64s/KERNEL64S.BIN",
@@ -410,22 +357,32 @@ def mcopy_out(image: Path, member: str, destination: Path) -> bytes:
 
 def check_shizukudos10_outputs(outputs: dict[str, Path], work: Path) -> str:
     """The staged files must be the ones the build receipts and the prebuilt esp.img describe."""
-    receipt = json.loads(outputs["supervisor/build-result.json"].read_text(encoding="utf-8"))["artifacts"]
+    records = {name: json.loads(outputs[name].read_text(encoding="utf-8")) for name in
+               ("supervisor/build-result.json", "win64/build-result.json", "kernels-build-result.json", "dos16/build-result.json")}
+    source_checks = [f"{name}: {se_media.verify_source_pins(records[name].get('sources_sha256'), name)} current sources"
+                     for name in ("supervisor/build-result.json", "win64/build-result.json", "kernels-build-result.json")]
+    source_checks.append(f"DOS10 user startup: {se_media.verify_source_pins(records['dos16/build-result.json'].get('user_boot', {}).get('sources_sha256'), 'DOS10')} current sources")
+    receipt = records["supervisor/build-result.json"]["artifacts"]
     receipt_keys = {
         "supervisor/BOOTX64.EFI": "BOOTX64.EFI",
         SHZ10_ESP: "esp.img",
-        "dos16/shizukudos-dos16-hd32.img": "disk.img (input)",
+        "dos16/shizukudos-dos16-hd32.img": "conformance-disk.img (input)",
+        "dos16/shizukudos-dos10.img": "disk.img (input)",
         "kernel32/KERNEL32.BIN": "KERNEL32.BIN (input)",
         "kernel64/KERNEL64.BIN": "KERNEL64.BIN (input)",
         "kernel64s/KERNEL64S.BIN": "KERNEL64S.BIN (input)",
         "win64/WIN64.IMG": "WIN64.IMG (input)",
     }
-    lines = []
+    lines = source_checks
     for rel, key in receipt_keys.items():
         actual = sha256_path(outputs[rel])
         if key not in receipt or receipt[key]["sha256"] != actual:
             raise RuntimeError(f"{rel} does not match supervisor/build-result.json ({key}); the outputs are inconsistent")
         lines.append(f"{rel} matches supervisor/build-result.json")
+    dos10 = json.loads(outputs["dos16/build-result.json"].read_text(encoding="utf-8"))["artifacts"]["dos10.img"]
+    if dos10["sha256"] != sha256_path(outputs["dos16/shizukudos-dos10.img"]):
+        raise RuntimeError("dos16/shizukudos-dos10.img does not match dos16/build-result.json")
+    lines.append("dos16/shizukudos-dos10.img matches dos16/build-result.json")
     csm = json.loads(outputs["csm/build-result.json"].read_text(encoding="utf-8"))["artifacts"]["CSMWRAP.EFI"]
     if csm["sha256"] != sha256_path(outputs["csm/CSMWRAP.EFI"]):
         raise RuntimeError("csm/CSMWRAP.EFI does not match csm/build-result.json")
@@ -536,59 +493,20 @@ def license_files(tree: Path, spec: dict) -> list[Path]:
 def shz10_readme(outputs: dict[str, Path], efi_size: int) -> bytes:
     digests = {rel: sha256_path(outputs[rel]) for rel in SHZ10_STAGED}
     return (
-        "ShizukuDOS 10.0-dev\r\n"
-        "===================\r\n"
-        "\r\n"
-        "This directory is a different product from ShizukuDOS 0.1, which is\r\n"
-        "the project's own from-scratch code (..\\ShizukuDOS\\shizukudos.img).\r\n"
-        "The two are not mixed under one label (docs/shizukudos10/BASELINE.md\r\n"
-        "section 5, in SOURCE\\).\r\n"
-        "\r\n"
-        "Built by:  python3 shizukudos/csm/build.py and\r\n"
-        "           python3 shizukudos/tools/shz.py build --profile uefi-multikernel\r\n"
-        "Boot paths on this disc (see VMPROFIL.TXT at the root):\r\n"
-        "  UEFI x64  El Torito EFI entry -> efiboot.img: \\EFI\\BOOT\\BOOTX64.EFI\r\n"
-        "            (boot manager) -> Supervisor (Intel VMX) -> virtual Real Mode\r\n"
-        "            DOS16 / Kernel32 / Kernel64. Without VMX: CSMWrap\r\n"
-        "            (\\EFI\\SHIZUKU\\CSMWRAP.EFI) -> the legacy boot menu. Menu key\r\n"
-        "            K: \\SHZDOS\\KERNEL64S.BIN directly (Kernel64 direct).\r\n"
-        "  BIOS      isolinux menu: DOS16 boots dos16\\shizukudos-dos16-hd32.img\r\n"
-        "            with memdisk; Kernel64 boots \\SHZ\\K64 (standalone, no VMX).\r\n"
-        "\r\n"
-        "Files\r\n"
-        "  efiboot.img                        FAT16 image of the El Torito EFI entry\r\n"
-        "                                     (see EFIBOOT.TXT for its contents).\r\n"
-        "  dos16\\shizukudos-dos16-hd32.img    32 MiB hard-disk image: FreeDOS kernel\r\n"
-        "                                     ke2046 + FreeCOM (external, GPL-2.0-or-\r\n"
-        "                                     later, built from pinned source with\r\n"
-        "                                     patches) and original Shizuku test\r\n"
-        "                                     programs. AUTOEXEC.BAT runs T_MODE,\r\n"
-        "                                     T_BIOS, T_COM, T_EXE, then SHZEXIT.COM:\r\n"
-        "                                     a conformance disk, not a Windows\r\n"
-        "                                     installer. No CD-ROM driver.\r\n"
-        "  supervisor\\BOOTX64.EFI             Supervisor loader (own code, GPL-2.0-only)\r\n"
-        "  kernel32\\KERNEL32.BIN              Kernel32 guest (own code, GPL-2.0-only)\r\n"
-        "  kernel64\\KERNEL64.BIN              Kernel64 guest (own code, GPL-2.0-only)\r\n"
-        "  kernel64s\\KERNEL64S.BIN            Kernel64 standalone build (Multiboot and\r\n"
-        "                                     Kernel64 direct; own code, GPL-2.0-only)\r\n"
-        "  win64\\WIN64.IMG                    Win64 runtime + test apps (own code)\r\n"
-        "  csm\\CSMWRAP.EFI                    CSMWrap + SeaBIOS CSM (external, LGPL)\r\n"
-        "  receipts\\                          build receipts of every build step\r\n"
-        "  LICENSES\\, SOURCE\\, GPL-NOTICE.TXT licence texts and corresponding source\r\n"
-        "                                     (FreeDOS, CSMWrap + submodules, syslinux)\r\n"
-        "\r\n"
-        "Requirements and limits\r\n"
-        "  - Supervisor: Intel VMX with EPT and unrestricted guest (nested VMX in\r\n"
-        "    a VM). AMD SVM is detected but has no backend: the loader refuses.\r\n"
-        "  - CSMWrap: Secure Boot off, 2 or more logical CPUs.\r\n"
-        "  - This profile does not replace IO.SYS and does not install or boot\r\n"
-        "    the Windows 98 GUI. No Windows 98 installation is claimed.\r\n"
-        "\r\n"
-        "SHA-256 of the staged files (see also the HASHES.TXT at the disc root)\r\n"
+        "ShizukuDOS 10 - ShizukuOS built-in DOS and kernel components\r\n"
+        "Kernel32 and Kernel64 serve the Windows 98 integration.\r\n"
+        "ShizukuDOS 0.1 is retired; historical source is development history.\r\n"
+        "Normal DOS startup reaches the command shell without test shutdown.\r\n"
+        "The DOS16 conformance image remains a separate testing artifact.\r\n"
+        "UEFI direct starts the Kernel64 userland using the GOP framebuffer.\r\n"
+        "CSMWrap starts the BIOS boot path; use Secure Boot off and 2+ CPUs.\r\n"
+        "The Supervisor VMX path and standalone component validation are\r\n"
+        "distinct from the unfinished genuine Windows 98 DOS/VMM connection.\r\n"
+        "LICENSES, SOURCE and GPL-NOTICE.TXT contain third-party provenance\r\n"
+        "and corresponding source, including FreeDOS/FreeCOM, CSMWrap and syslinux.\r\n"
+        "SHA-256 of staged components:\r\n"
         + "".join(f"  {digest}  {rel}\r\n" for rel, digest in digests.items())
-        + f"  EFI image size {efi_size} bytes\r\n"
-        "  supervisor/esp.img (96 MiB, same loader inputs) was cross-checked at\r\n"
-        "  build time and is not shipped.\r\n"
+        + f"EFI image size {efi_size} bytes\r\n"
     ).encode("ascii")
 
 
@@ -948,52 +866,24 @@ def media_summary(info: dict) -> str:
 
 
 def readme_text(media: dict | None, setup: bool) -> bytes:
-    text = (
-        "Windows 98 Shizuku Second Edition - VM install ISO\r\n"
-        "\r\n"
-        "One hybrid image: boot it as a CD, or write it raw to a USB stick / attach\r\n"
-        "it as a hard disk. Legacy BIOS and UEFI (see VMPROFIL.TXT).\r\n"
-        "\r\n"
-        "Legacy BIOS -> boot menu (isolinux; also on COM1 115200 8N1):\r\n"
-        "  K  Kernel64 + Win64 runtime: the standalone Long Mode kernel runs its\r\n"
-        "     self-tests and every Win64 test program in WIN64.IMG (SHZ\\K64).\r\n"
-        + ("  I  Install ShizukuDOS 10 (SHZ\\SETUP): unattended, ERASES the first disk\r\n"
-           "     without a partition table, then powers off. See SHZ\\SETUP\\README.TXT.\r\n" if setup else "")
-        + "  D  DOS16: ShizukuDOS 10 FreeDOS profile, the conformance disk image\r\n"
-        "     (ShizukuDOS10\\dos16) in RAM through memdisk.\r\n"
-        "  1  ShizukuDOS 0.1: the project's own shell, 1.44 MB floppy image\r\n"
-        "     (ShizukuDOS\\shizukudos.img) in RAM through memdisk.\r\n"
-        "UEFI x64 -> \\EFI\\BOOT\\BOOTX64.EFI, the Shizuku boot manager. Its menu waits\r\n"
-        "  5 s: no key = the Supervisor with Intel VMX, otherwise CSMWrap and the\r\n"
-        "  same legacy boot menu; K = Kernel64 direct (no CSM, no VMX, GOP).\r\n"
-        "\r\n"
-        "Other contents\r\n"
-        "  Windows 98 Shizuku Second Edition\\  NTWrapper9x, NTWin32Wrapper9x and\r\n"
-        "     NTWDDMWrapper9x binaries (also inside the 0.1 floppy).\r\n"
-        "  SHZSE\\   overlay installer for an ALREADY INSTALLED Windows 98 (copies\r\n"
-        "     the probe binaries to C:\\NTWLAB). Read SHZSE\\README.TXT first: the\r\n"
-        "     VxD load is a recorded, unfixed failure.\r\n"
-        "  DRIVERS\\ driver store: DRIVERS\\<package>\\ as shipped, HWIDS.TXT index.\r\n"
-        "  ShizukuDOS10\\  ShizukuDOS 10 build outputs, receipts, licences, source.\r\n"
-        "  VMPROFIL.TXT, HASHES.TXT, SOURCES.TXT, LIMITS.TXT\r\n"
-        "\r\n"
-        "What this disc does not do\r\n"
-        "  ShizukuDOS (either profile) cannot replace IO.SYS and cannot install or\r\n"
-        "  boot the Windows 98 GUI. This disc is not a Windows 98 installation and\r\n"
-        "  no completed Windows 98 installation is claimed.\r\n"
-    )
-    if media is None:
-        text += (
-            "\r\nMicrosoft Windows files and product keys are not included\r\n"
-            "(NOMSBASE.TXT). Rebuild with --win98-media to add your own copy.\r\n"
-        )
-    else:
-        text += (
-            "\r\nPRIVATE BUILD. WIN98\\ holds an unmodified copy of Windows 98 media\r\n"
-            "supplied by whoever ran the builder (MSBASE.TXT). It is not for\r\n"
-            "redistribution. This disc does not boot Windows 98 Setup.\r\n"
-        )
-    return text.encode("ascii")
+    return (
+        "ShizukuOS 1.0.0 development candidate - install medium\r\n"
+        "Boot the persistent userland, select the built-in installer,\r\n"
+        "or start the ShizukuDOS 10 recovery shell from the boot menu.\r\n"
+        + ("Install: choose a disk, review it, type ERASE and confirm.\r\n"
+           "SHZSETUP writes and verifies GPT + ESP + ShizukuFS.\r\n" if setup else "No installer is included on this medium.\r\n")
+        + "The installer deletes the selected disk; cancelling writes nothing.\r\n"
+        "Classic and ShizukuOS themes belong to the userland, not the website.\r\n"
+        "ShizukuDOS replaces MS-DOS for Windows 98; Kernel32/64 and the\r\n"
+        "driver wrappers are integrated components of this design.\r\n"
+        "The complete DOS/VMM connection and all modern apps are still in development.\r\n"
+        "This component build is not proof of completed Windows 98 installation.\r\n"
+        "Public ISO distribution: https://m98.nyase.kr only.\r\n"
+        "GitHub: redistributable development files and patches only.\r\n"
+        "See LIMITS.TXT, HASHES.TXT, VMPROFIL.TXT and source notices.\r\n"
+        + ("PRIVATE: your Microsoft media is included; do not distribute.\r\n" if media else
+           "No Microsoft installation files or private disks are included.\r\n")
+    ).encode("ascii")
 
 
 def msbase_text(media: dict) -> bytes:
@@ -1013,15 +903,16 @@ ISOLINUX_DIR = "isolinux"
 K64_DIR = "SHZ/K64"
 
 
-def boot_payload(syslinux: dict[str, Path], k64: dict[str, "se_media.Input"], setup: bool) -> dict[str, bytes]:
+def boot_payload(syslinux: dict[str, Path], k64: dict[str, "se_media.Input"], setup: bool,
+                 desktop: bool = True, unattended: bool = False) -> dict[str, bytes]:
     """isolinux + modules + menu, and the Kernel64 Multiboot files the menu loads."""
     payload = {f"{ISOLINUX_DIR}/isolinux.bin": syslinux["isolinux.bin"].read_bytes(),
                f"{ISOLINUX_DIR}/memdisk": syslinux["memdisk"].read_bytes()}
     for name in se_media.SYSLINUX_MODULES:
         payload[f"{ISOLINUX_DIR}/{name}"] = syslinux[name].read_bytes()
     payload[f"{ISOLINUX_DIR}/isolinux.cfg"] = se_media.boot_menu(
-        dos16_image=f"/{DOS16_ISO_PATH}", shzdos01_image="/ShizukuDOS/shizukudos.img", k64_dir=f"/{K64_DIR}",
-        setup=setup)
+        dos16_image=f"/{DOS16_USER_ISO_PATH}", k64_dir=f"/{K64_DIR}",
+        setup=setup, desktop=desktop, unattended=unattended)
     for name, item in k64.items():
         payload[f"{K64_DIR}/{name}"] = item.data
     payload[f"{K64_DIR}/README.TXT"] = (
@@ -1038,7 +929,7 @@ def boot_payload(syslinux: dict[str, Path], k64: dict[str, "se_media.Input"], se
     return payload
 
 
-def stage_tree(stage: Path, floppy: bytes, artifacts: dict[str, Path], extra: dict[str, bytes],
+def stage_tree(stage: Path, artifacts: dict[str, Path], extra: dict[str, bytes],
                media: dict | None, setup: bool) -> dict[str, bytes]:
     if stage.exists():
         rmtree_force(stage)
@@ -1059,9 +950,8 @@ def stage_tree(stage: Path, floppy: bytes, artifacts: dict[str, Path], extra: di
         ).encode("ascii")
     else:
         payload["MSBASE.TXT"] = msbase_text(media)
-    edition = "Windows 98 Shizuku Second Edition"
+    edition = "ShizukuOS"
     payload.update({
-        "ShizukuDOS/shizukudos.img": floppy,
         f"{edition}/EDITION.TXT": edition_text(),
         f"{edition}/LIMITS.TXT": limits_text(),
         f"{edition}/NTWrapper9x/NTWRAP9X.VXD": artifacts["NTWRAP9X.VXD"].read_bytes(),
@@ -1090,7 +980,7 @@ def stage_tree(stage: Path, floppy: bytes, artifacts: dict[str, Path], extra: di
     return payload
 
 
-VOLUME_ID = "W98SHIZUKU2"
+VOLUME_ID = "SHIZUKUOS"
 
 
 def pin_stage_times(stage: Path) -> None:
@@ -1102,16 +992,19 @@ def pin_stage_times(stage: Path) -> None:
     os.utime(stage, (FIXED_EPOCH, FIXED_EPOCH))
 
 
-def write_iso(stage: Path, iso_path: Path, isohdpfx: Path) -> None:
+def write_iso(stage: Path, iso_path: Path, isohdpfx: Path, payload: dict[str, bytes]) -> dict:
     iso_path.parent.mkdir(parents=True, exist_ok=True)
     pin_stage_times(stage)
+    shared = {name: {"bytes": len(data), "sha256": sha256(data)} for name, data in payload.items()
+              if name.upper().endswith("/WIN64.IMG")}
+    optimization = image_io.deduplicate_stage(stage, shared)
     temporary = iso_path.with_suffix(".iso.partial")
     temporary.unlink(missing_ok=True)
     env = dict(os.environ)
     env["SOURCE_DATE_EPOCH"] = str(FIXED_EPOCH)  # fixed ISO timestamps and GPT GUIDs (build receipts carry build times)
     run([
         "xorriso", "-as", "mkisofs",
-        "-iso-level", "3", "-J", "-joliet-long", "-R",
+        "-iso-level", "3", "-J", "-joliet-long", "-R", "--hardlinks",
         "-V", VOLUME_ID,
         "-publisher", "Win98-Modern project",
         # Legacy BIOS: isolinux, no emulation, 4 x 512 bytes loaded, boot info table patched in.
@@ -1128,6 +1021,7 @@ def write_iso(stage: Path, iso_path: Path, isohdpfx: Path) -> None:
         str(stage),
     ], env=env)
     temporary.replace(iso_path)
+    return optimization
 
 
 MEDIA_NAMES = {0: "no emulation", 1: "1.2MB floppy", 2: "1.44MB floppy", 3: "2.88MB floppy", 4: "hard disk"}
@@ -1377,11 +1271,11 @@ def main() -> int:
                              f"{se_media.rel(se_media.DEFAULT_SETUP_DIR)} with the shipped answer file); adds the "
                              "unattended Install menu entry")
     parser.add_argument("--no-setup", action="store_true", help="leave the installer and its menu entry off the medium")
-    parser.add_argument("--desktop", action="store_true",
+    parser.add_argument("--desktop", action=argparse.BooleanOptionalAction, default=True,
                         help="boot the persistent desktop and include it in the installed system")
     parser.add_argument("--loader", type=Path, help="UEFI loader to ship (default: the shizukudos build)")
     parser.add_argument("--csmwrap", type=Path, help="CSMWRAP.EFI to ship (default: shizukudos/csm/build.py output)")
-    parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default="auto",
+    parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default=None,
                         help="mode written to \\EFI\\SHIZUKU\\BOOT.INI (read by the loader's boot manager)")
     parser.add_argument("--reuse-builds", action="store_true",
                         help="package the existing build/shizukudos outputs instead of rebuilding them "
@@ -1391,8 +1285,8 @@ def main() -> int:
                         help="accepted for compatibility; the builder runs no QEMU. Boot evidence: "
                              "tools/test_shizuku_se_boot_matrix.py")
     args = parser.parse_args()
-    if args.desktop:
-        args.boot_mode = "kernel64"
+    if args.boot_mode is None:
+        args.boot_mode = "kernel64" if args.desktop else "auto"
     private = args.win98_media is not None
     tag = PRIVATE_SUFFIX if private else ""
     stage_root = BUILD / f"shizuku-second-edition{tag}-stage" if private else STAGE_ROOT
@@ -1426,24 +1320,18 @@ def main() -> int:
             setup_files, setup_info = se_media.setup_payload(args.setup)
             if args.desktop and setup_files and setup_info.get("boot_profile") != "desktop":
                 raise RuntimeError("--desktop requires an installer payload built with mkpayload.py --desktop")
+        if args.boot_mode == "install" and not setup_files:
+            raise RuntimeError("UEFI mode=install requires the actual installer payload")
         store, store_manifest = se_media.driver_store(args.driver_package)
         artifacts = build_components(work)
-        floppy = build_floppy(work, artifacts)
-        (work / "shizukudos.img").write_bytes(floppy)
-        efi_members = se_media.efi_members(loader, csm, shzdos, args.boot_mode)
+        efi_members = se_media.efi_members(loader, csm, shzdos, args.boot_mode, setup_files)
         if args.desktop:
             efi_members["SHZDOS/KERNEL64.INI"] = b"cmdline = shz.desktop\r\n"
         shz10_payload, consistency = stage_shizukudos10(work, outputs, efi_members)
         extra = {**shz10_payload, **shzse_payload(artifacts), **store, **setup_files,
-                 **boot_payload(syslinux, k64, bool(setup_files))}
-        if args.desktop:
-            menu_path = f"{ISOLINUX_DIR}/isolinux.cfg"
-            menu = extra[menu_path].replace(b"DEFAULT kernel64", b"DEFAULT desktop")
-            desktop_entry = ("\nLABEL desktop\n  MENU LABEL ^Boot Shizuku desktop\n  KERNEL mboot.c32\n"
-                             f"  APPEND /{K64_DIR}/BOOT.ELF shz.desktop --- /{K64_DIR}/KERNEL64S.BIN --- /{K64_DIR}/WIN64.IMG\n")
-            extra[menu_path] = menu + desktop_entry.encode("ascii")
-        payload = stage_tree(stage_root, floppy, artifacts, extra, media, bool(setup_files))
-        write_iso(stage_root, iso_path, syslinux["isohdpfx.bin"])
+                 **boot_payload(syslinux, k64, bool(setup_files), args.desktop)}
+        payload = stage_tree(stage_root, artifacts, extra, media, bool(setup_files))
+        optimization = write_iso(stage_root, iso_path, syslinux["isohdpfx.bin"], payload)
         report = verify_iso(iso_path, payload, efi_members, syslinux, evidence, stage_root if media else None)
         digest = sha256_path(iso_path)
         size = iso_path.stat().st_size
@@ -1460,15 +1348,18 @@ def main() -> int:
     inputs = [loader, csm, *k64.values(), *shzdos.values()]
     receipt = {
         "iso": str(iso_path), "bytes": size, "sha256": digest, "private": private,
+        "product": "ShizukuOS", "release_target": "1.0.0", "release_channel": "development",
+        "distribution_origin": "https://m98.nyase.kr",
         "volume_id": VOLUME_ID, "source_date_epoch": FIXED_EPOCH, "boot_mode": args.boot_mode,
         "boot_profile": "desktop" if args.desktop else "self-test",
+        "disk_optimization": optimization,
         "git": {"revision": git_output("rev-parse", "HEAD"), "dirty": bool(git_output("status", "--porcelain"))},
         "inputs": [item.record() for item in inputs],
         "syslinux": se_media.syslinux_spec()["distribution"],
         "setup": setup_info,
         "drivers": [{"package": p["package"], "files": len(p["files"]), "hardware_ids": len(p["hardware_ids"])}
                     for p in store_manifest["packages"]],
-        "menu": {"dos16": f"/{DOS16_ISO_PATH}", "shzdos01": "/ShizukuDOS/shizukudos.img", "k64_dir": f"/{K64_DIR}",
+        "menu": {"dos16": f"/{DOS16_USER_ISO_PATH}", "k64_dir": f"/{K64_DIR}",
                  "keys": se_media.MENU_KEYS, "setup_entry": bool(setup_files),
                  "uefi": {"boot_ini": {"mode": args.boot_mode, "menu_timeout": se_media.MENU_TIMEOUT},
                           "keys": {"auto": "a", "k64direct": "k", "csm": "c", "supervisor": "s"}}},

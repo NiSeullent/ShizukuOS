@@ -739,7 +739,10 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
 {
     static const CHAR16 kpath[] = {'\\','S','H','Z','D','O','S','\\','K','E','R','N','E','L','6','4','S','.','B','I','N',0};
     static const CHAR16 ipath[] = {'\\','S','H','Z','D','O','S','\\','W','I','N','6','4','.','I','M','G',0};
+    static const CHAR16 setup_path[] = {'\\','S','H','Z','\\','S','E','T','U','P','\\','I','N','S','T','A','L','L','.','I','M','G',0};
     static const CHAR16 cpath[] = {'\\','S','H','Z','D','O','S','\\','K','E','R','N','E','L','6','4','.','I','N','I',0};
+    static const char setup_cmdline[] = "shz.setup=interactive shz.noapps";
+    const int installer = g_policy.mode == BOOT_MODE_INSTALL;
     static char ini[BOOTINI_MAX_BYTES];
     EFI_ALLOCATE_PAGES_FN allocate_pages = (EFI_ALLOCATE_PAGES_FN)bs->allocate_pages;
     EFI_STALL_FN stall = (EFI_STALL_FN)bs->stall;
@@ -781,8 +784,8 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
             "Nothing was started. Returning to firmware.\n");
         return EFI_LOAD_ERROR;
     }
-    status = open_regular_file(root, ipath, &ifile, &g_k64.isize);
-    if (status == EFI_NOT_FOUND) {
+    status = open_regular_file(root, installer ? setup_path : ipath, &ifile, &g_k64.isize);
+    if (status == EFI_NOT_FOUND && !installer) {
         g_k64.isize = 0;
         say("Kernel64 direct boot: no \\SHZDOS\\WIN64.IMG; Kernel64 starts without an initial RAM image.\n");
     } else if (EFI_ERROR(status) || !g_k64.isize || g_k64.isize > K64_INITRD_MAX) {
@@ -790,11 +793,15 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
             ifile->close(ifile);
         kfile->close(kfile);
         root->close(root);
-        return k64_refuse(EFI_ERROR(status) ? "cannot open \\SHZDOS\\WIN64.IMG"
-                                            : "\\SHZDOS\\WIN64.IMG is empty or larger than 64 MiB",
+        return k64_refuse(installer ? (EFI_ERROR(status) ? "cannot open \\SHZ\\SETUP\\INSTALL.IMG; this boot volume has no usable installer"
+                                                       : "\\SHZ\\SETUP\\INSTALL.IMG is empty or larger than 64 MiB")
+                                   : (EFI_ERROR(status) ? "cannot open \\SHZDOS\\WIN64.IMG"
+                                                       : "\\SHZDOS\\WIN64.IMG is empty or larger than 64 MiB"),
                           EFI_ERROR(status) ? status : EFI_SUCCESS);
     }
-    status = open_regular_file(root, cpath, &cfile, &csize);
+    /* The installer has a fixed interactive command line. A broken installed
+     * desktop configuration must not turn a repair boot into unattended setup. */
+    status = installer ? EFI_NOT_FOUND : open_regular_file(root, cpath, &cfile, &csize);
     if (status == EFI_NOT_FOUND) {
         csize = 0;
     } else if (EFI_ERROR(status) || csize > sizeof ini || EFI_ERROR(status = read_all(cfile, (uint64_t)(uintptr_t)ini, csize))) {
@@ -823,6 +830,10 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
             say("\nThe file is rejected as a whole. Nothing was started. Returning to firmware.\n");
             return EFI_INVALID_PARAMETER;
         }
+    }
+    if (installer) {
+        for (i = 0; i < sizeof setup_cmdline; ++i)
+            g_k64.cmdline[i] = setup_cmdline[i];
     }
 
     /* RAM plan from the current map; recomputed from the final map after ExitBootServices. */
@@ -921,7 +932,8 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         ifile->close(ifile);
     root->close(root);
     if (EFI_ERROR(status))
-        return k64_refuse("reading \\SHZDOS\\KERNEL64S.BIN or \\SHZDOS\\WIN64.IMG failed", status);
+        return k64_refuse(installer ? "reading KERNEL64S.BIN or \\SHZ\\SETUP\\INSTALL.IMG failed"
+                                   : "reading KERNEL64S.BIN or \\SHZDOS\\WIN64.IMG failed", status);
     /* A Supervisor-profile KERNEL64.BIN would issue VMCALL (#UD without VMX) on its first line of output. Only the
      * -DSHZ_STANDALONE build carries the in-kernel COM1 exit path (kcommon/standalone_dev.h). */
     if (!bytes_contain((const uint8_t *)(uintptr_t)K64_KERNEL_PA, g_k64.ksize, "SHZ-EXIT:"))
@@ -988,7 +1000,8 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
 
     say("Kernel64 direct boot: \\SHZDOS\\KERNEL64S.BIN ");
     say_dec(g_k64.ksize);
-    say(" bytes at 1 MiB, \\SHZDOS\\WIN64.IMG ");
+    say(installer ? " bytes at 1 MiB, \\SHZ\\SETUP\\INSTALL.IMG "
+                  : " bytes at 1 MiB, \\SHZDOS\\WIN64.IMG ");
     say_dec(g_k64.isize);
     say(" bytes at 32 MiB, boot info ABI 1.1 at 0x7000, cmdline '");
     say(bi->cmdline);
@@ -1129,7 +1142,8 @@ static void boot_menu(bootini_policy_t *policy)
         say(policy->auto_kernel64 ? ": Supervisor with Intel VMX, otherwise Kernel64 direct, otherwise CSM"
                                   : ": Supervisor with Intel VMX, otherwise CSM");
     say("  (default)\n"
-        "  K           Kernel64 direct: the standalone Long Mode kernel, no Supervisor, no VMX\n"
+        "  K           ShizukuDOS Kernel64 component: Long Mode, no Supervisor, no VMX\n"
+        "  I           ShizukuOS installer: choose a disk, review, then confirm\n"
         "  C           CSM legacy BIOS: CSMWrap, then this medium's legacy boot menu\n"
         "  S           Supervisor (needs Intel VMX)\n");
     for (tick = 0; tick < ticks && mode < 0; ++tick) {
@@ -1142,6 +1156,8 @@ static void boot_menu(bootini_policy_t *policy)
             mode = policy->mode;
         else if (c == 'k')
             mode = BOOT_MODE_KERNEL64;
+        else if (c == 'i')
+            mode = BOOT_MODE_INSTALL;
         else if (c == 'c')
             mode = BOOT_MODE_CSM;
         else if (c == 's')
@@ -1187,7 +1203,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         return EFI_UNSUPPORTED;
     allocate_pages = (EFI_ALLOCATE_PAGES_FN)bs->allocate_pages;
     stall = (EFI_STALL_FN)bs->stall;
-    say("ShizukuDOS 10.0-dev Supervisor loader (UEFI x64)\n");
+    say("ShizukuOS development Supervisor loader (UEFI x64) - ShizukuDOS 10\n");
     bs->set_watchdog_timer(0, 0, 0, 0);
 
     /* 0. Boot manager policy (\EFI\SHIZUKU\BOOT.INI); a malformed file stops here. */
@@ -1207,6 +1223,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     }
     if (g_policy.mode == BOOT_MODE_KERNEL64)
         return k64_boot(image, bs, "mode=kernel64");
+    if (g_policy.mode == BOOT_MODE_INSTALL)
+        return k64_boot(image, bs, "mode=install");
     if (g_policy.mode == BOOT_MODE_AUTO && (caps.vendor == SHZ_VENDOR_AMD || !caps.vmx_usable)) {
         /* mode=auto: the Supervisor profile is not available on this machine. With
          * auto_kernel64=yes the standalone Kernel64 runs directly; otherwise (or when it

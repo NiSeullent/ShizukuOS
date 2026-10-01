@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Shared parts of the Windows 98 Shizuku Second Edition boot media.
+"""Shared parts of the ShizukuOS boot media.
 
 Used by tools/build_shizuku_se_iso.py (the product: one hybrid "VM install ISO")
 and tools/build_shizuku_se_disk.py (a secondary raw USB/HDD image). Nothing here
@@ -16,9 +16,8 @@ docs/shizukudos10/MEDIA.md):
                   Kernel64   mboot.c32 BOOT.ELF --- KERNEL64S.BIN --- WIN64.IMG
                              (Multiboot stub, module 0 kernel, module 1 initrd)
                   DOS16      memdisk harddisk, the ShizukuDOS 10 FreeDOS disk image
-                  0.1        memdisk floppy, the ShizukuDOS 0.1 floppy image
                   Install    only when SHZSETUP (\\SHZ\\SETUP) is present: Kernel64
-                             with `shz.setup=auto` on the Multiboot command line
+                             with `shz.setup=interactive` on the Multiboot command line
   UEFI         \\EFI\\BOOT\\BOOTX64.EFI = the Shizuku loader and boot manager
                (supervisor/loader). \\EFI\\SHIZUKU\\BOOT.INI: mode = auto, menu_timeout = 5.
                Its menu (console and COM1) waits 5 s for a key:
@@ -28,6 +27,7 @@ docs/shizukudos10/MEDIA.md):
                   C                  CSM: \\EFI\\SHIZUKU\\CSMWRAP.EFI (LGPL-2.1, SeaBIOS CSM
                                      LGPL-3.0) legacy-boots the SAME medium, i.e. the menu above
                   S                  Supervisor only
+                  I                  Interactive self-developed installer, INSTALL.IMG on this boot volume
                No UEFI Shell and no startup.nsh is involved.
 """
 from __future__ import annotations
@@ -48,6 +48,7 @@ sys.path.insert(0, str(ROOT / "shizukudos" / "tools"))
 sys.path.insert(0, str(ROOT / "tools"))
 import shzlib  # noqa: E402
 import shizuku_se_drivers as drivers  # noqa: E402
+import shizuku_image_io as image_io  # noqa: E402
 
 FIXED_EPOCH = 1785283200  # 2026-07-29 00:00:00 UTC, the epoch of the DOS16 image and the ISO
 MIB = 1 << 20
@@ -66,14 +67,14 @@ K64_FILES = {  # name on the media -> build output
     "WIN64.IMG": SHZ_BUILD / "win64" / "WIN64.IMG",
 }
 SHZDOS_FILES = {  # \SHZDOS files the loader reads from its own volume (supervisor/loader/loader.c)
-    "DISK.IMG": SHZ_BUILD / "dos16" / "shizukudos-dos16-hd32.img",
+    "DISK.IMG": SHZ_BUILD / "dos16" / "shizukudos-dos10.img",
     "KERNEL32.BIN": SHZ_BUILD / "kernel32" / "KERNEL32.BIN",
     "KERNEL64.BIN": SHZ_BUILD / "kernel64" / "KERNEL64.BIN",
     "KERNEL64S.BIN": SHZ_BUILD / "kernel64s" / "KERNEL64S.BIN",   # boot manager: Kernel64 direct (menu key K)
     "WIN64.IMG": SHZ_BUILD / "win64" / "WIN64.IMG",
 }
 MENU_TIMEOUT = 5                  # BOOT.INI menu_timeout: seconds the UEFI boot manager menu waits for a key
-BOOT_MODES = ("auto", "supervisor", "csm", "kernel64")
+BOOT_MODES = ("auto", "supervisor", "csm", "kernel64", "install")
 
 
 def sha256(data: bytes) -> str:
@@ -111,13 +112,28 @@ def require(path: Path, how: str) -> Path:
     return Path(path)
 
 
+def verify_source_pins(pins: dict[str, str], component: str) -> int:
+    """Refuse stale component artifacts before shipping current source beside them."""
+    if not isinstance(pins, dict) or not pins:
+        raise RuntimeError(f"{component} has no source-bound build receipt; rebuild it")
+    for name, digest in pins.items():
+        if not isinstance(name, str) or Path(name).is_absolute() or ".." in Path(name).parts:
+            raise RuntimeError(f"{component} has an invalid source path")
+        path = (ROOT / name).resolve()
+        if not path.is_relative_to(ROOT.resolve()) or not path.is_file() or shzlib.sha256_file(path) != digest:
+            raise RuntimeError(f"{component} source changed or is missing: {name}; rebuild before packaging")
+    return len(pins)
+
+
 def loader_features(data: bytes) -> dict[str, bool]:
     """What the loader binary carries: the boot manager (it opens \\EFI\\SHIZUKU\\BOOT.INI, a UTF-16 path), its
     menu (BOOT.INI menu_timeout) and the firmware-hole plan for Kernel64 direct (kernel64/standalone/memholes.h)."""
     low = data.lower()
     return {"boot_manager": "\\efi\\shizuku\\boot.ini".encode("utf-16-le") in low,
             "menu": b"Shizuku boot manager menu" in data,
-            "memholes": b"firmware hole(s) handed over at 0x6000" in data}
+            "memholes": b"firmware hole(s) handed over at 0x6000" in data,
+            "installer": "\\shz\\setup\\install.img".encode("utf-16-le") in low and
+                         b"shz.setup=interactive shz.noapps" in data}
 
 
 def loader_input(path: Path | None = None) -> Input:
@@ -130,7 +146,7 @@ def loader_input(path: Path | None = None) -> Input:
     missing = [name for name, present in features.items() if not present]
     if missing:
         raise RuntimeError(f"{path} lacks {', '.join(missing)}: the media need the UEFI boot manager with its menu and "
-                           "the Kernel64 firmware-hole plan; rebuild it with shizukudos/supervisor/build.py")
+                           "the interactive installer and Kernel64 firmware-hole plan; rebuild it with shizukudos/supervisor/build.py")
     return Input("Shizuku UEFI loader and boot manager \\EFI\\BOOT\\BOOTX64.EFI", path,
                  "--loader" if path != DEFAULT_LOADER else "shizukudos/supervisor/build.py",
                  notes=["boot manager, menu (BOOT.INI menu_timeout) and Kernel64 firmware-hole plan present"])
@@ -163,19 +179,19 @@ def shzdos_inputs() -> dict[str, Input]:
     return {name: Input(f"\\SHZDOS\\{name}", require(path, how), how) for name, path in SHZDOS_FILES.items()}
 
 
-def build_install_payload(directory: Path | None = None, desktop: bool = False) -> None:
+def build_install_payload(directory: Path | None = None, desktop: bool = True) -> None:
     """install/mkpayload.py (agent I1) with the shipped answer file (install/shzsetup.ini) into its own directory, so
     tests/run_install.py's test payload (build/shizukudos/install) and the media's never overwrite each other."""
     directory = Path(directory) if directory else DEFAULT_SETUP_DIR
     subprocess.run([sys.executable, str(ROOT / "shizukudos" / "install" / "mkpayload.py"), "--out", str(directory),
-                    *(["--desktop"] if desktop else [])],
+                    "--desktop" if desktop else "--no-desktop"],
                    check=True, timeout=1800, stdout=subprocess.DEVNULL, env=dict(os.environ,
                                                                                   SOURCE_DATE_EPOCH=str(FIXED_EPOCH)))
 
 
 def setup_payload(directory: Path | None, prefix: str = SETUP_ISO_DIR) -> tuple[dict[str, bytes], dict]:
     """\\SHZ\\SETUP on the media: INSTALL.IMG from install/mkpayload.py (agent I1) and, for reading, its answer file
-    and receipt. The Install menu entry boots Kernel64 with INSTALL.IMG as its initial RAM image and shz.setup=auto."""
+    and receipt. The Install menu entry boots Kernel64 with INSTALL.IMG as its initial RAM image and shz.setup=interactive."""
     directory = Path(directory) if directory else DEFAULT_SETUP_DIR
     info = {"directory": rel(directory), "present": False}
     image = directory / SETUP_MAIN
@@ -194,11 +210,11 @@ def setup_payload(directory: Path | None, prefix: str = SETUP_ISO_DIR) -> tuple[
                f"{prefix}/README.TXT": (
                    "\\SHZ\\SETUP - ShizukuDOS 10 installer (SHZSETUP, install/mkpayload.py)\r\n"
                    "Boot menu entry I: Kernel64 with INSTALL.IMG as its initial RAM image and the\r\n"
-                   "command line shz.setup=auto. SHZSETUP.EXE then installs unattended with the\r\n"
-                   "answer file SHZSETUP.INI packed inside INSTALL.IMG (the copy here is for\r\n"
-                   "reading): it ERASES the first empty disk it finds (AHCI, NVMe, ...) and\r\n"
-                   "writes GPT + EFI System Partition + ShizukuFS; it refuses disks that already\r\n"
-                   "have a partition table. The installed disk boots on UEFI (the Shizuku boot\r\n"
+                   "command line shz.setup=interactive. SHZSETUP.EXE opens its own installer UI.\r\n"
+                   "Select a target, review it, type ERASE and confirm to install.\r\n"
+                   "The chosen disk is erased; cancelling writes nothing. The installer\r\n"
+                   "writes GPT + EFI System Partition + ShizukuFS and verifies its files.\r\n"
+                   "The installed disk boots on UEFI (the Shizuku boot\r\n"
                    "manager, BOOT.INI mode = kernel64) and on legacy BIOS (syslinux on the ESP).\r\n"
                    "MANIFEST.JSON lists every file the installer writes, with SHA-256.\r\n"
                    f"INSTALL.IMG sha256 {sha256(image.read_bytes())}\r\n").encode("ascii")}
@@ -234,63 +250,36 @@ def syslinux_spec() -> dict:
 
 # ---------------------------------------------------------------------------- boot menu
 
-MENU_TITLE = "Windows 98 Shizuku Second Edition - ShizukuDOS 10"
-MENU_KEYS = {"kernel64": "k", "setup": "i", "dos16": "d", "shzdos01": "1"}
+MENU_TITLE = "ShizukuOS - ShizukuDOS 10"
+MENU_KEYS = {"kernel64": "k", "setup": "i", "dos16": "d"}
 
 
-def boot_menu(dos16_image: str, shzdos01_image: str, k64_dir: str = "/SHZ/K64", setup: bool = False) -> bytes:
-    """isolinux.cfg / syslinux.cfg. Paths are absolute on the boot volume; modules sit next to the config."""
+def boot_menu(dos16_image: str, k64_dir: str = "/SHZ/K64", setup: bool = False,
+              desktop: bool = True, unattended: bool = False) -> bytes:
+    """Product boot menu; unattended installation is an explicit test option."""
     mboot = f"{k64_dir}/BOOT.ELF --- {k64_dir}/KERNEL64S.BIN --- {k64_dir}/WIN64.IMG"
     lines = [
-        "# Windows 98 Shizuku Second Edition boot menu (tools/shizuku_se_media.py).",
-        "# COM1 115200 8N1 mirrors the menu and takes keys: the letter of an entry, then Enter.",
-        "SERIAL 0 115200",
-        "UI menu.c32",
-        "PROMPT 0",
-        "TIMEOUT 300",
-        f"MENU TITLE {MENU_TITLE}",
-        "DEFAULT kernel64",
-        "",
-        "LABEL kernel64",
-        "  MENU LABEL ^Kernel64 + Win64 runtime (standalone, runs its self-tests)",
-        "  TEXT HELP",
-        "  Multiboot: BOOT.ELF stub, module 0 KERNEL64S.BIN, module 1 WIN64.IMG.",
-        "  Long Mode kernel without the Supervisor; results go to COM1.",
-        "  ENDTEXT",
-        "  KERNEL mboot.c32",
-        f"  APPEND {mboot}",
+        "# ShizukuOS boot menu (tools/shizuku_se_media.py).",
+        "SERIAL 0 115200", "UI menu.c32", "PROMPT 0", "TIMEOUT 50",
+        f"MENU TITLE {MENU_TITLE}", "DEFAULT desktop" if desktop else "DEFAULT kernel64", "",
     ]
+    if desktop:
+        lines += ["LABEL desktop", "  MENU LABEL ^Start ShizukuOS", "  KERNEL mboot.c32",
+                  f"  APPEND {k64_dir}/BOOT.ELF shz.desktop --- {k64_dir}/KERNEL64S.BIN --- {k64_dir}/WIN64.IMG", ""]
+    lines += ["LABEL kernel64", "  MENU LABEL ^Kernel64 component diagnostics", "  KERNEL mboot.c32",
+              f"  APPEND {mboot}", ""]
     if setup:
-        lines += [
-            "",
-            "LABEL setup",
-            "  MENU LABEL ^Install ShizukuDOS 10 (SHZSETUP, unattended: ERASES the first empty disk)",
-            "  TEXT HELP",
-            "  Kernel64 with INSTALL.IMG and shz.setup=auto: SHZSETUP writes GPT + ESP +",
-            "  ShizukuFS to the first disk without a partition table, then powers off.",
-            "  ENDTEXT",
-            "  KERNEL mboot.c32",
-            f"  APPEND {k64_dir}/BOOT.ELF shz.setup=auto --- {k64_dir}/KERNEL64S.BIN --- /{SETUP_ISO_DIR}/{SETUP_MAIN}",
-        ]
-    lines += [
-        "",
-        "LABEL dos16",
-        "  MENU LABEL ^DOS16 - ShizukuDOS 10 FreeDOS profile (disk image in RAM)",
-        "  TEXT HELP",
-        "  memdisk emulates BIOS drive C: from the image; FreeDOS runs the",
-        "  conformance programs and reports on COM1. Nothing is written to disk.",
-        "  ENDTEXT",
-        "  KERNEL memdisk",
-        f"  INITRD {dos16_image}",
-        "  APPEND harddisk",
-        "",
-        "LABEL shzdos01",
-        "  MENU LABEL ShizukuDOS 0.^1 floppy (own code, floppy image in RAM)",
-        "  KERNEL memdisk",
-        f"  INITRD {shzdos01_image}",
-        "  APPEND floppy",
-        "",
-    ]
+        mode = "auto" if unattended else "interactive"
+        label = "Unattended installer TEST - erases the first empty disk" if unattended else "Install ShizukuOS - select and confirm the target"
+        lines += ["LABEL setup", f"  MENU LABEL ^{label}", "  TEXT HELP",
+                  "  Built-in SHZSETUP writes and verifies GPT, ESP and ShizukuFS.",
+                  "  Interactive review/cancel changes no disks." if not unattended else "  Explicit unattended test profile only.",
+                  "  ENDTEXT", "  KERNEL mboot.c32",
+                  f"  APPEND {k64_dir}/BOOT.ELF shz.setup={mode} shz.noapps --- {k64_dir}/KERNEL64S.BIN --- /{SETUP_ISO_DIR}/{SETUP_MAIN}", ""]
+    lines += ["LABEL dos16", "  MENU LABEL ^DOS10 recovery command shell", "  TEXT HELP",
+              "  ShizukuDOS 10 starts the MS-DOS compatibility bootstrap shell.",
+              "  This memdisk instance is in RAM; its changes do not persist.",
+              "  ENDTEXT", "  KERNEL memdisk", f"  INITRD {dos16_image}", "  APPEND harddisk", ""]
     return "\n".join(lines).encode("ascii")
 
 
@@ -311,7 +300,7 @@ def boot_ini(mode: str, menu_timeout: int = MENU_TIMEOUT) -> bytes:
         "; Shizuku UEFI boot manager policy (\\EFI\\BOOT\\BOOTX64.EFI).\r\n"
         "; auto: the Supervisor with Intel VMX, otherwise CSMWrap -> this medium's legacy menu.\r\n"
         "; The menu waits menu_timeout seconds: A/Enter = mode below, K = Kernel64 direct,\r\n"
-        "; C = CSM legacy BIOS, S = Supervisor. menu_timeout = 0 turns the menu off.\r\n"
+        "; I = interactive installer, C = CSM legacy BIOS, S = Supervisor. menu_timeout = 0 turns the menu off.\r\n"
         f"mode = {mode}\r\n"
         "csm_path = \\EFI\\SHIZUKU\\CSMWRAP.EFI\r\n"
         "auto_kernel64 = no\r\n"
@@ -321,7 +310,7 @@ def boot_ini(mode: str, menu_timeout: int = MENU_TIMEOUT) -> bytes:
 
 def efi_readme(loader: Input, csm: Input, mode: str) -> bytes:
     return (
-        "\\EFI - UEFI side of the Windows 98 Shizuku Second Edition media\r\n"
+        "\\EFI - UEFI side of the ShizukuOS media\r\n"
         "\r\n"
         "\\EFI\\BOOT\\BOOTX64.EFI     Shizuku UEFI loader and boot manager (project code,\r\n"
         "  GPL-2.0-only). It reads \\EFI\\SHIZUKU\\BOOT.INI and shows a menu on the\r\n"
@@ -329,6 +318,7 @@ def efi_readme(loader: Input, csm: Input, mode: str) -> bytes:
         "  with Intel VMX, otherwise CSMWRAP.EFI); K = Kernel64 direct (\\SHZDOS\\\r\n"
         "  KERNEL64S.BIN + WIN64.IMG, Long Mode, no VMX, GOP framebuffer; firmware\r\n"
         "  holes such as OVMF's S3 ACPI NVS at 8 MiB are kept out of its memory);\r\n"
+        "  I = interactive installer (\\SHZ\\SETUP\\INSTALL.IMG);\r\n"
         "  C = CSMWRAP.EFI; S = Supervisor only.\r\n" +
         "\\EFI\\SHIZUKU\\CSMWRAP.EFI  CSMWrap (LGPL-2.1) with the SeaBIOS CSM (LGPL-3.0):\r\n"
         "  PC BIOS services on UEFI-only machines; it then legacy-boots THIS\r\n"
@@ -339,14 +329,15 @@ def efi_readme(loader: Input, csm: Input, mode: str) -> bytes:
         "  the ISO.\r\n"
         "\\EFI\\SHIZUKU\\CSMWRAP.INI  CSMWrap settings: debug log on COM1.\r\n"
         f"\\EFI\\SHIZUKU\\BOOT.INI     boot manager policy, mode = {mode}, menu_timeout = {MENU_TIMEOUT}\r\n"
-        "  (modes: auto | supervisor | csm | kernel64).\r\n"
+        "  (modes: auto | supervisor | csm | kernel64 | install).\r\n"
         "\\SHZDOS\\                   files the loader reads from its own volume.\r\n"
         f"BOOTX64.EFI sha256 {sha256(loader.data)}\r\n"
         f"CSMWRAP.EFI sha256 {sha256(csm.data)}\r\n"
     ).encode("ascii")
 
 
-def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str) -> dict[str, bytes]:
+def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str,
+                setup_files: dict[str, bytes] | None = None) -> dict[str, bytes]:
     """The UEFI file set: the El Torito EFI image of the ISO, and the raw disk's FAT volume root."""
     members = {
         "EFI/BOOT/BOOTX64.EFI": loader.data,
@@ -357,6 +348,14 @@ def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str) 
     }
     for name, item in shzdos.items():
         members[f"SHZDOS/{name}"] = item.data
+    installer = f"{SETUP_ISO_DIR}/{SETUP_MAIN}"
+    if setup_files:
+        data = setup_files.get(installer, b"")
+        if not data or len(data) > 64 * MIB:
+            raise RuntimeError("the UEFI installer requires an actual INSTALL.IMG within the loader's 64 MiB limit")
+        members[installer] = data
+    elif mode == "install":
+        raise RuntimeError("UEFI mode=install requires the actual installer payload")
     return members
 
 
@@ -400,9 +399,7 @@ def make_fat(image: Path, members: dict[str, bytes], size_mib: int, fat: int, la
     if check.returncode != 0:
         raise RuntimeError(f"fsck.vfat rejects {fs}:\n{check.stdout}{check.stderr}")
     if offset:
-        with open(fs, "rb") as src, open(image, "r+b") as dst:
-            dst.seek(offset)
-            shutil.copyfileobj(src, dst, 1 << 20)
+        image_io.overlay_sparse_partial(fs, image, destination_offset=offset)
         fs.unlink()
 
 
@@ -479,7 +476,7 @@ def syslinux_payload(prefix: str) -> dict[str, bytes]:
 
 def vm_profiles_text() -> str:
     return (
-        "VM PROFILES - Windows 98 Shizuku Second Edition VM install ISO\r\n"
+        "VM PROFILES - ShizukuOS VM install ISO\r\n"
         "==============================================================\r\n"
         "Tested only in QEMU (TCG, no KVM) by tools/test_shizuku_se_boot_matrix.py:\r\n"
         "SeaBIOS and OVMF (S3 on, QEMU's default), this ISO as a CD and as a hard\r\n"
