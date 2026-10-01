@@ -1,0 +1,116 @@
+--- a/shizukudos/win64/wineport/build.py
++++ b/shizukudos/win64/wineport/build.py
+@@ -680,6 +680,37 @@
+     out.write_bytes(bytes(blob))
+ 
+ 
++def module_resource_object(parts, obj_dir, filename, description, filetype):
++    """One resource object per image; add generated VERSIONINFO only when no compiled input has RT_VERSION.
++    Checking the compiled records also covers Wine's version.rc includes and generated resources."""
++    import struct
++    parts = list(parts)
++    has_version = False
++    for part in parts:
++        data, off = part.read_bytes(), 0
++        while off + 8 <= len(data):
++            dsize, hsize = struct.unpack_from("<II", data, off)
++            end = off + hsize + dsize
++            if hsize < 12 or end > len(data):
++                raise SystemExit(f"invalid resource record in {part}")
++            if dsize and data[off + 8:off + 12] == b"\xff\xff\x10\x00":
++                has_version = True
++            off = (end + 3) & ~3
++    if not has_version:
++        parts.append(verres.compile_version(obj_dir, filename, description, filetype, fmt="res"))
++    combined, obj = obj_dir / "resources.res", obj_dir / "resources_rc.o"
++    sig = "\n".join(map(str, parts))
++    stamp = obj.with_suffix(".sig")
++    if (obj.exists() and stamp.exists() and stamp.read_text() == sig
++            and all(p.stat().st_mtime <= obj.stat().st_mtime for p in parts)):
++        return obj
++    concat_res(parts, combined)
++    merge_string_tables(combined)
++    run([WINDRES, "-J", "res", "-O", "coff", "-i", combined, "-o", obj])
++    stamp.write_text(sig)
++    return obj
++
++
+ def ensure_wmc(wine):
+     """Wine's message compiler, built with the host compiler into wineport/tools/wmc (the host configuration builds
+     only widl and wrc): tools/wmc sources, mcy.y through bison, wmc_EXTRADEFS. Like makedep's rule for this
+@@ -837,7 +868,7 @@
+             csrcs.append(shim)
+         return csrcs, res
+ 
+-    def resources(self, sources, widl_res, obj_dir):
++    def resources(self, sources, widl_res, obj_dir, filename, description, filetype):
+         """wrc (-u, makedep's defines) for every .rc that is not a `#pragma makedep header` include, then all .res
+         files (wrc, widl, wmc) merged into one COFF object with windres. No --po-dir, as in makedep's rule for this
+         configuration (po/ is in DISABLED_SUBDIRS, so LINGUAS is empty): the resources are the English ones."""
+@@ -855,19 +886,7 @@
+                       *self.m.get("defines", []), rc], [out], [wrc, *deps], cwd=rc.parent)
+             parts.append(out)
+         parts += widl_res
+-        if not parts:
+-            return None
+-        combined, obj = obj_dir / "resources.res", obj_dir / "resources_rc.o"
+-        sig = "\n".join(map(str, parts))
+-        stamp = obj.with_suffix(".sig")
+-        if (obj.exists() and stamp.exists() and stamp.read_text() == sig
+-                and all(p.stat().st_mtime <= obj.stat().st_mtime for p in parts)):
+-            return obj
+-        concat_res(parts, combined)
+-        merge_string_tables(combined)
+-        run([WINDRES, "-J", "res", "-O", "coff", "-i", combined, "-o", obj])
+-        stamp.write_text(sig)
+-        return obj
++        return module_resource_object(parts, obj_dir, filename, description, filetype)
+ 
+ 
+ def build_typelib(wine, m):
+@@ -916,6 +935,10 @@
+     notes = {} if notes is None else notes
+     d = wine / m.get("dir", f"dlls/{name}")
+     obj_dir = WOUT / "obj" / name
++    suffix = ".exe" if kind == "exe" else ".dll"
++    filename = f"{name}{suffix}"
++    description = f"Wine {filename} (ShizukuDOS port)"
++    filetype = verres.VFT_APP if kind == "exe" else verres.VFT_DLL
+     # a probe build of a disabled module writes its .def, binary and import library aside, so that the outputs the
+     # enabled configuration makes (and the export lists later modules see) stay as they are
+     out = WOUT / "probe" if probe and m.get("disabled") else OUT
+@@ -934,7 +957,7 @@
+         unixcall_obj = obj_dir / "shzw_unixcall.o"
+         compile_all([*[(s, o, md.cflags(s.name)) for s, o in zip(srcs, objs)],
+                      (HERE / "glue/unixcall.c", unixcall_obj, rt["glue_flags"])])
+-        res_obj = md.resources(sources, widl_res, obj_dir)
++        res_obj = md.resources(sources, widl_res, obj_dir, filename, description, filetype)
+         objs += [unixcall_obj, *([res_obj] if res_obj else [])]
+     else:
+         mk = makefile_vars(d / "Makefile.in") if (d / "Makefile.in").exists() else {}
+@@ -961,13 +984,10 @@
+         compile_all([*zip(srcs, objs, [flags] * len(srcs)), *zip(usrcs, uobjs, [uflags] * len(usrcs)),
+                      (HERE / "glue/unixcall.c", unixcall_obj, ucflags)])
+         objs += [*uobjs, unixcall_obj]
+-        for rc in rcs:
+-            objs.append(compile_rc(wine, rc, obj_dir / (rc.stem + "_rc.o"), includes, defines))
+-
+-    if not m.get("makedep") and not any("VERSIONINFO" in rc.read_text() or "version.rc" in rc.read_text() for rc in rcs):
+-        suffix = ".exe" if kind == "exe" else ".dll"
+-        objs.append(verres.compile_version(obj_dir, f"{name}{suffix}", f"Wine {name}{suffix} (ShizukuDOS port)",
+-                                           verres.VFT_APP if kind == "exe" else verres.VFT_DLL))
++        parts = [compile_rc(wine, rc, obj_dir / (rc.stem + "_rc.o"), includes, defines).with_suffix(".res")
++                 for rc in rcs]
++        objs.append(module_resource_object(parts, obj_dir, filename, description, filetype))
++
+     if m.get("dynamic_imports"):
+         s = dynamic_thunks(name, m["dynamic_imports"], obj_dir / "dynimports.S")
+         o = obj_dir / "dynimports.o"
+@@ -1008,7 +1028,6 @@
+         dll, _, fn = target.partition(".")
+         return fn in provided.get(dll.lower(), set())
+ 
+-    suffix = ".exe" if kind == "exe" else ".dll"
+     lines, kept = winespec.def_lines(f"{name}{suffix}", entries, forward_ok)
+     private = {winespec.def_name(e) for e in kept if "private" in e.flags}
+     lines = [l + (" PRIVATE" if l.split()[0] in private else "") if l.startswith("  ") else l for l in lines]
