@@ -1397,7 +1397,40 @@
         "requested application inventory and observed versions reviewed",
         "all requested application native Windows paths passed"
       ],
-      "applications": []
+      "applications": [
+        {
+          "name": "Chromium",
+          "version": "157.0.8080.0"
+        },
+        {
+          "name": "Supermium",
+          "version": "144.0.7559.256 R5"
+        },
+        {
+          "name": "VLC",
+          "version": "3.0.24"
+        },
+        {
+          "name": "Notepad++",
+          "version": "8.9.8.1"
+        },
+        {
+          "name": "Visual Studio Code",
+          "version": "1.140.0"
+        },
+        {
+          "name": "Legcord",
+          "version": "1.3.0"
+        },
+        {
+          "name": "LibreOffice",
+          "version": "26.8.0"
+        },
+        {
+          "name": "Steam",
+          "version": null
+        }
+      ]
     },
     {
       "id": "regression.working-paths",
