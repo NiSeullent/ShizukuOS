@@ -1,0 +1,17 @@
+LIBRARY M98SSPI
+EXPORTS
+    AcquireCredentialsHandleA=AcquireCredentialsHandleA@36
+    FreeCredentialsHandle=FreeCredentialsHandle@4
+    InitializeSecurityContextA=InitializeSecurityContextA@48
+    DeleteSecurityContext=DeleteSecurityContext@4
+    QuerySecurityPackageInfoA=QuerySecurityPackageInfoA@8
+    EnumerateSecurityPackagesA=EnumerateSecurityPackagesA@8
+    FreeContextBuffer=FreeContextBuffer@4
+    QueryContextAttributesA=QueryContextAttributesA@12
+    EncryptMessage=EncryptMessage@16
+    DecryptMessage=DecryptMessage@16
+    ApplyControlToken=ApplyControlToken@8
+    InitSecurityInterfaceA=InitSecurityInterfaceA@0
+    ExportSecurityContext=ExportSecurityContext@16
+    ImportSecurityContextA=ImportSecurityContextA@16
+    M98SspiEndInput=M98SspiEndInput@4
