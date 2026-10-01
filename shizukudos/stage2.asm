@@ -33,6 +33,7 @@ start:
     sti
     mov [boot_drive], dl
     call serial_init
+    call csmwrap_real_enter
     call cpu_detect
     mov si, banner
     call puts
@@ -1004,6 +1005,12 @@ do_bootc:
 ; Match the conventional real-mode BIOS handoff as closely as possible.
 ; Entered only after a valid target sector has been loaded at 0000:7C00.
 prepare_hard_disk_boot:
+    call csmwrap_allow_win98
+    jnc .csmwrap_ok
+    mov si, csmwrap_blocked_text
+    call puts
+    jmp shell
+.csmwrap_ok:
     cli
     xor ax, ax
     mov ds, ax
@@ -1015,7 +1022,13 @@ prepare_hard_disk_boot:
     jmp 0x0000:0x7c00
 
 do_reboot:
+    call csmwrap_allow_win98
+    jc .blocked
     int 0x19
+    jmp shell
+.blocked:
+    mov si, csmwrap_blocked_text
+    call puts
     jmp shell
 
 fatal_disk_error:
@@ -1243,6 +1256,7 @@ print_hex_nibble:
     ret
 
 %include "cpu_detect.inc"
+%include "csmwrap/handoff/gate.asm"
 
 boot_drive: db 0
 root_sector: dw 0
