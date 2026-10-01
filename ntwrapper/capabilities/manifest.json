@@ -1,0 +1,3108 @@
+{
+  "schema": "shizuku.wrapper-capabilities.v1",
+  "baseline_commit": "a648e9baa1c57289d50e58d3380827bd9239bc52",
+  "status_scope": "listed_source_contracts_and_windows98_frontend_boundaries",
+  "architecture": {
+    "product_os": "Windows98",
+    "windows_scheduler": "VMM",
+    "backend_scheduler": "Shizuku_PMA",
+    "kernel32_role": "Shizuku_backend_not_Microsoft_KERNEL32_DLL",
+    "kernel64_role": "backend_not_replacement_desktop",
+    "objects": "reuse_existing_ntwrapper_and_kernel64_objects",
+    "win98_win64_positive": false,
+    "win98_pma_positive": false,
+    "windows98_dos_replacement_verified": false
+  },
+  "source_contracts": {
+    "ntw_header": "ntwrapper/include/ntwrapper.h",
+    "shz_header": "shizukudos/abi/shz_abi.h",
+    "ntwg_header": "ntwddm/include/ntwddm.h",
+    "ntwg_implementation": "ntwddm/src/ntwddm.c",
+    "w64_implementation": "shizukudos/kernel64/subsys64.c",
+    "exports": "ntwin32/exports.def",
+    "routes": "ntwin32/routes.json",
+    "w64_header": "ntwin32/win64/ntw64.h",
+    "vxd_native": "ntwrapper/vxd/native.c",
+    "channel_plan": "shizukudos/supervisor/src/kdom.c",
+    "ipc_header": "shizukudos/abi/shz_ipc.h",
+    "ntddk_header": "shizukudos/kernel64/ntddk.h"
+  },
+  "capabilities": {
+    "ntwddm": {
+      "minimum_abi": "NTWG:1.0",
+      "advertised": [
+        {
+          "symbol": "NTWG_CAP_SOFTWARE_FILL",
+          "value": 1,
+          "status": "SOFTWARE"
+        },
+        {
+          "symbol": "NTWG_CAP_SOFTWARE_BLIT",
+          "value": 2,
+          "status": "SOFTWARE"
+        },
+        {
+          "symbol": "NTWG_CAP_LINEAR_PRESENT",
+          "value": 4,
+          "status": "SOFTWARE"
+        },
+        {
+          "symbol": "NTWG_CAP_FORMAT_CONVERSION",
+          "value": 8,
+          "status": "SOFTWARE"
+        },
+        {
+          "symbol": "NTWG_CAP_SYNC_FENCES",
+          "value": 16,
+          "status": "SOFTWARE"
+        },
+        {
+          "symbol": "NTWG_CAP_SURFACE_MAPPING",
+          "value": 32,
+          "status": "SOFTWARE"
+        }
+      ],
+      "unsupported": [
+        {
+          "symbol": "NTWG_CAP_WDDM_MINIPORT",
+          "value": 4294967296,
+          "status": "UNSUPPORTED"
+        },
+        {
+          "symbol": "NTWG_CAP_D3D",
+          "value": 8589934592,
+          "status": "UNSUPPORTED"
+        },
+        {
+          "symbol": "NTWG_CAP_GPU_ACCELERATION",
+          "value": 17179869184,
+          "status": "UNSUPPORTED"
+        }
+      ]
+    },
+    "win64": {
+      "minimum_abi": "SHZ:1.1",
+      "advertised": [
+        {
+          "symbol": "SHZ_W64_CAP_CREATE",
+          "value": 1,
+          "status": "PARTIAL"
+        },
+        {
+          "symbol": "SHZ_W64_CAP_CONSOLE_OUTPUT",
+          "value": 2,
+          "status": "PARTIAL"
+        },
+        {
+          "symbol": "SHZ_W64_CAP_CONSOLE_INPUT",
+          "value": 4,
+          "status": "PARTIAL"
+        },
+        {
+          "symbol": "SHZ_W64_CAP_KILL",
+          "value": 8,
+          "status": "PARTIAL"
+        },
+        {
+          "symbol": "SHZ_W64_CAP_POOL_ARGS",
+          "value": 16,
+          "status": "PARTIAL"
+        }
+      ],
+      "unsupported": []
+    }
+  },
+  "evidence": [
+    {
+      "id": "core-tests",
+      "kind": "SOURCE_TEST_DEFINITION",
+      "path": "platform/tests/core_test.c",
+      "anchor": "ntw_event_try_wait"
+    },
+    {
+      "id": "win32-tests",
+      "kind": "SOURCE_TEST_DEFINITION",
+      "path": "platform/test.py",
+      "anchor": "Windows 98 guest not run"
+    },
+    {
+      "id": "w64-model-tests",
+      "kind": "SOURCE_TEST_DEFINITION",
+      "path": "ntwrapper/vxd/tests/test_w64vxd.c",
+      "anchor": "PASS: VxD WIN64 bridge"
+    },
+    {
+      "id": "software-tests",
+      "kind": "SOURCE_TEST_DEFINITION",
+      "path": "ntwddm/tests/test_ntwddm.c",
+      "anchor": "ntwg_require_capabilities"
+    },
+    {
+      "id": "dib-tests",
+      "kind": "SOURCE_TEST_DEFINITION",
+      "path": "ntwddm/win98/test_adapter.c",
+      "anchor": "ntwg98_present"
+    },
+    {
+      "id": "native-v9-negative",
+      "kind": "RECORDED_NATIVE_NEGATIVE",
+      "path": "docs/shizukudos10/reports/MODERN_APPS_CAMPAIGN.md",
+      "anchor": "2026-10-01 09:28 UTC: nativeV9"
+    },
+    {
+      "id": "architecture-audit",
+      "kind": "RECORDED_ARCHITECTURE_AUDIT",
+      "path": "docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md",
+      "anchor": "channel 2"
+    },
+    {
+      "id": "ntdrv-tests",
+      "kind": "SOURCE_TEST_DEFINITION",
+      "path": "shizukudos/kernel64/ntdrv_test.c",
+      "anchor": "ntdrv_selftest"
+    },
+    {
+      "id": "ntdrv-recorded",
+      "kind": "RECORDED_BACKEND_COMPONENT",
+      "path": "docs/shizukudos10/NTDRV.md",
+      "anchor": "pended IRP"
+    }
+  ],
+  "bindings": [
+    {
+      "id": "core",
+      "declaration": "ntwrapper/include/ntwrapper.h",
+      "implementation": "ntwrapper/core.c"
+    },
+    {
+      "id": "ntw32",
+      "declaration": "ntwin32/runtime.c",
+      "implementation": "ntwin32/runtime.c"
+    },
+    {
+      "id": "ntw64",
+      "declaration": "ntwin32/win64/ntw64.h",
+      "implementation": "ntwin32/win64/ntw64.c"
+    },
+    {
+      "id": "vxd",
+      "declaration": "ntwrapper/vxd/bridge.h",
+      "implementation": "ntwrapper/vxd/bridge.c"
+    },
+    {
+      "id": "software",
+      "declaration": "ntwddm/include/ntwddm.h",
+      "implementation": "ntwddm/src/ntwddm.c"
+    },
+    {
+      "id": "dib",
+      "declaration": "ntwddm/win98/adapter.h",
+      "implementation": "ntwddm/win98/adapter.c"
+    }
+  ],
+  "providers": [
+    {
+      "id": "ntwrapper-core",
+      "module": "NTWrapper9x-core",
+      "families": [
+        "NTOBJWrapper9x",
+        "NTSYNCWrapper9x"
+      ],
+      "contract": {
+        "minimum_abi": "NTW:1",
+        "backend": "ntwrapper/core.c",
+        "thread_safety": "embedder_serialized",
+        "sync_semantics": "nonblocking_event_acquisition",
+        "ownership": "ntw_context_generation_handles_and_leases",
+        "error_model": "ntw_status",
+        "test_status": "SOURCE_BOUND",
+        "evidence": [
+          "core-tests"
+        ],
+        "limits": [
+          "Embedding kernel supplies the IRQ-safe lock; this is not an SMP object manager.",
+          "Handles never cross the domain boundary. No blocking VMM wait implementation is supplied."
+        ]
+      },
+      "apis": [
+        {
+          "name": "ntw_initialize",
+          "symbol": "ntw_initialize",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_event_create",
+          "symbol": "ntw_event_create",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_reference",
+          "symbol": "ntw_reference",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_dereference",
+          "symbol": "ntw_dereference",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_close",
+          "symbol": "ntw_close",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_event_set",
+          "symbol": "ntw_event_set",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_event_reset",
+          "symbol": "ntw_event_reset",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_event_query",
+          "symbol": "ntw_event_query",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_event_try_wait",
+          "symbol": "ntw_event_try_wait",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        },
+        {
+          "name": "ntw_shutdown",
+          "symbol": "ntw_shutdown",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "NATIVE",
+          "binding": "core"
+        }
+      ]
+    },
+    {
+      "id": "ntw32",
+      "module": "NTW32.DLL",
+      "families": [
+        "NTKERNEL32Wrapper9x",
+        "NTSYNCWrapper9x",
+        "NTUnicodeWrapper9x",
+        "NTSEHWrapper9x"
+      ],
+      "contract": {
+        "minimum_abi": "Win32:x86",
+        "backend": "ntwin32/runtime.c",
+        "thread_safety": "per_api_native_or_owned_contract",
+        "sync_semantics": "windows_native_scheduler_and_owned_sync",
+        "ownership": "windows_process_and_caller_storage",
+        "error_model": "win32_native_or_owned",
+        "test_status": "SOURCE_BOUND",
+        "evidence": [
+          "win32-tests"
+        ],
+        "limits": [
+          "Routing may select native, own or KernelEx implementations per export; owned bodies do not establish full NT behavior.",
+          "Owned contention yields through native Sleep(1); VMM retains Windows scheduling authority.",
+          "Owned UTF-8 conversion delegates other codepages; VEH registration is not CPU-trap/SEH integration."
+        ]
+      },
+      "apis": [
+        {
+          "name": "InitializeSRWLock",
+          "symbol": "NtwInitializeSRWLock",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "AcquireSRWLockExclusive",
+          "symbol": "NtwAcquireSRWLockExclusive",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "AcquireSRWLockShared",
+          "symbol": "NtwAcquireSRWLockShared",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "ReleaseSRWLockExclusive",
+          "symbol": "NtwReleaseSRWLockExclusive",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "ReleaseSRWLockShared",
+          "symbol": "NtwReleaseSRWLockShared",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "TryAcquireSRWLockExclusive",
+          "symbol": "NtwTryAcquireSRWLockExclusive",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "TryAcquireSRWLockShared",
+          "symbol": "NtwTryAcquireSRWLockShared",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "GetTickCount64",
+          "symbol": "NtwGetTickCount64",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 0,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "GetProcAddress",
+          "symbol": "NtwGetProcAddress",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 8,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "InitOnceInitialize",
+          "symbol": "NtwInitOnceInitialize",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "InitOnceBeginInitialize",
+          "symbol": "NtwInitOnceBeginInitialize",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 16,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "InitOnceComplete",
+          "symbol": "NtwInitOnceComplete",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 12,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "InitOnceExecuteOnce",
+          "symbol": "NtwInitOnceExecuteOnce",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 16,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "MultiByteToWideChar",
+          "symbol": "NtwMultiByteToWideChar",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 24,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "WideCharToMultiByte",
+          "symbol": "NtwWideCharToMultiByte",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 32,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "AddVectoredExceptionHandler",
+          "symbol": "NtwAddVectoredExceptionHandler",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 8,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        },
+        {
+          "name": "RemoveVectoredExceptionHandler",
+          "symbol": "NtwRemoveVectoredExceptionHandler",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw32"
+        }
+      ]
+    },
+    {
+      "id": "ntw64-client",
+      "module": "NTW32.DLL",
+      "families": [
+        "NTKERNEL32Wrapper9x",
+        "NTPE32PlusWrapper9x",
+        "LongModeWrapper9x"
+      ],
+      "contract": {
+        "minimum_abi": "SHZ:1.1",
+        "backend": "ntwin32/win64/ntw64.c",
+        "thread_safety": "caller_serialized",
+        "sync_semantics": "request_pump_poll_deadline_and_console_ack",
+        "ownership": "ntw32_private_handles_to_kernel64_processes",
+        "error_model": "win32_from_shz_or_ntstatus",
+        "test_status": "SOURCE_BOUND",
+        "evidence": [
+          "w64-model-tests",
+          "native-v9-negative",
+          "architecture-audit"
+        ],
+        "limits": [
+          "Requires the existing VxD, live Supervisor and channel 2 peer; positive native Windows98-to-Kernel64 execution is unverified.",
+          "Returned handles belong to NTW32.DLL; they are not native Win32 kernel handles.",
+          "Console/process protocol has no Windows USER/GDI modern-app window/input/audio bridge."
+        ]
+      },
+      "apis": [
+        {
+          "name": "NtwQuerySubsystem64",
+          "symbol": "NtwQuerySubsystem64",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw64"
+        },
+        {
+          "name": "NtwCreateProcess64W",
+          "symbol": "NtwCreateProcess64W",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 16,
+          "status": "PARTIAL",
+          "binding": "ntw64"
+        },
+        {
+          "name": "NtwWaitProcess64",
+          "symbol": "NtwWaitProcess64",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 12,
+          "status": "PARTIAL",
+          "binding": "ntw64"
+        },
+        {
+          "name": "NtwReadConsole64",
+          "symbol": "NtwReadConsole64",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 16,
+          "status": "PARTIAL",
+          "binding": "ntw64"
+        },
+        {
+          "name": "NtwWriteConsole64",
+          "symbol": "NtwWriteConsole64",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 16,
+          "status": "PARTIAL",
+          "binding": "ntw64"
+        },
+        {
+          "name": "NtwCloseConsole64",
+          "symbol": "NtwCloseConsole64",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw64"
+        },
+        {
+          "name": "NtwKillProcess64",
+          "symbol": "NtwKillProcess64",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 8,
+          "status": "PARTIAL",
+          "binding": "ntw64"
+        },
+        {
+          "name": "NtwCloseProcess64",
+          "symbol": "NtwCloseProcess64",
+          "ordinal": null,
+          "calling_convention": "stdcall",
+          "stdcall_bytes": 4,
+          "status": "PARTIAL",
+          "binding": "ntw64"
+        }
+      ]
+    },
+    {
+      "id": "vxd-transport",
+      "module": "NTWRAP9X.VXD",
+      "families": [
+        "NTDRVWrapper9x",
+        "NTIOWrapper9x",
+        "NTSYNCWrapper9x"
+      ],
+      "contract": {
+        "minimum_abi": "SHZ:1.1",
+        "backend": "ntwrapper/vxd/bridge.c",
+        "thread_safety": "up_synchronous_callback",
+        "sync_semantics": "pinned_buffers_bounded_copy_and_existing_spsc_ring",
+        "ownership": "vxd_mapping_and_sender_pool_blocks",
+        "error_model": "win32_errors",
+        "test_status": "SOURCE_BOUND",
+        "evidence": [
+          "w64-model-tests",
+          "native-v9-negative"
+        ],
+        "limits": [
+          "Source inventory includes the two C dispatch APIs only, not all VxD exports or a public NT driver ABI.",
+          "CPUID signature gates VMCALL. Native negative V9 proves absent-Supervisor rejection, not positive peer execution.",
+          "Does not replace VMM scheduling or add invented VMM service ordinals."
+        ]
+      },
+      "apis": [
+        {
+          "name": "ntwv_dioc",
+          "symbol": "ntwv_dioc",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "PARTIAL",
+          "binding": "vxd"
+        },
+        {
+          "name": "ntwv_dioc_ex",
+          "symbol": "ntwv_dioc_ex",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "PARTIAL",
+          "binding": "vxd"
+        }
+      ]
+    },
+    {
+      "id": "ntwddm-software",
+      "module": "NTWDDMWrapper9x-core",
+      "families": [
+        "NTWDDMWrapper9x",
+        "NTGDI32Wrapper9x"
+      ],
+      "contract": {
+        "minimum_abi": "NTWG:1.0",
+        "backend": "ntwddm/src/ntwddm.c",
+        "thread_safety": "caller_serialized",
+        "sync_semantics": "synchronous_cpu_render_and_context_fences",
+        "ownership": "context_generation_surfaces_exclusive_maps",
+        "error_model": "ntwg_status",
+        "test_status": "SOURCE_BOUND",
+        "evidence": [
+          "software-tests"
+        ],
+        "limits": [
+          "Only software fill/blit/format conversion/linear present/map/fences are advertised.",
+          "No asynchronous GPU queue, WDDM miniport, D3D implementation or GPU acceleration is supplied."
+        ]
+      },
+      "apis": [
+        {
+          "name": "ntwg_capabilities",
+          "symbol": "ntwg_capabilities",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_require_capabilities",
+          "symbol": "ntwg_require_capabilities",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_create",
+          "symbol": "ntwg_create",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_destroy",
+          "symbol": "ntwg_destroy",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_bind_framebuffer",
+          "symbol": "ntwg_bind_framebuffer",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_unbind_framebuffer",
+          "symbol": "ntwg_unbind_framebuffer",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_surface_create",
+          "symbol": "ntwg_surface_create",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_surface_retain",
+          "symbol": "ntwg_surface_retain",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_surface_release",
+          "symbol": "ntwg_surface_release",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_surface_map",
+          "symbol": "ntwg_surface_map",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_surface_unmap",
+          "symbol": "ntwg_surface_unmap",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_fill",
+          "symbol": "ntwg_fill",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_blit",
+          "symbol": "ntwg_blit",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_present",
+          "symbol": "ntwg_present",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        },
+        {
+          "name": "ntwg_fence_query",
+          "symbol": "ntwg_fence_query",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "SOFTWARE",
+          "binding": "software"
+        }
+      ]
+    },
+    {
+      "id": "win98-dib",
+      "module": "NTWDDMWrapper9x-Win98-DIB",
+      "families": [
+        "NTUSER32Wrapper9x",
+        "NTGDI32Wrapper9x"
+      ],
+      "contract": {
+        "minimum_abi": "NTWG:1.0",
+        "backend": "ntwddm/win98/adapter.c",
+        "thread_safety": "caller_serialized",
+        "sync_semantics": "gdi_sync_before_cpu_write_and_native_paint",
+        "ownership": "app_owned_dib_and_software_surface",
+        "error_model": "ntwg_status_and_platform_failure",
+        "test_status": "SOURCE_BOUND",
+        "evidence": [
+          "dib-tests"
+        ],
+        "limits": [
+          "Application-owned DIB adapter; Windows98 USER/GDI remains responsible for the window.",
+          "No replacement desktop or hardware display-driver/WDDM claim."
+        ]
+      },
+      "apis": [
+        {
+          "name": "ntwg98_open",
+          "symbol": "ntwg98_open",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "TRANSLATED",
+          "binding": "dib"
+        },
+        {
+          "name": "ntwg98_close",
+          "symbol": "ntwg98_close",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "TRANSLATED",
+          "binding": "dib"
+        },
+        {
+          "name": "ntwg98_present",
+          "symbol": "ntwg98_present",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "TRANSLATED",
+          "binding": "dib"
+        },
+        {
+          "name": "ntwg98_paint",
+          "symbol": "ntwg98_paint",
+          "ordinal": null,
+          "calling_convention": "cdecl",
+          "stdcall_bytes": null,
+          "status": "TRANSLATED",
+          "binding": "dib"
+        }
+      ]
+    }
+  ],
+  "catalog": [
+    {
+      "family": "NTOSKRNLWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeInitializeEvent"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeSetEvent"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeWaitForSingleObject"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeInitializeSpinLock"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeInsertQueueDpc"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeSetTimer"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "ExAllocatePoolWithTag"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IoCreateDevice"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IoAllocateIrp"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IofCallDriver"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IofCompleteRequest"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IoQueueWorkItem"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ex.c",
+          "symbol": "ExQueueWorkItem"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_mm.c",
+          "symbol": "MmMapIoSpace"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_rtl.c",
+          "symbol": "PsCreateSystemThread"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_dev.c",
+          "symbol": "IoGetDeviceProperty"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "KeInitializeEvent",
+        "KeSetEvent",
+        "KeWaitForSingleObject",
+        "KeInitializeSpinLock",
+        "KeInsertQueueDpc",
+        "KeSetTimer",
+        "ExAllocatePoolWithTag",
+        "IoCreateDevice",
+        "IoAllocateIrp",
+        "IofCallDriver",
+        "IofCompleteRequest",
+        "IoQueueWorkItem",
+        "ExQueueWorkItem",
+        "MmMapIoSpace",
+        "PsCreateSystemThread",
+        "IoGetDeviceProperty"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTHALWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_rtl.c",
+          "symbol": "HalGetBusDataByOffset"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "HalGetBusDataByOffset"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTDRVWrapper9x",
+      "category": "kernel",
+      "providers": [
+        "vxd-transport"
+      ],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IoCreateDevice"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [
+        "IoCreateDevice"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTIRPWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IoAllocateIrp"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IofCallDriver"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IofCompleteRequest"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "IoAllocateIrp",
+        "IofCallDriver",
+        "IofCompleteRequest"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTIOWrapper9x",
+      "category": "kernel",
+      "providers": [
+        "vxd-transport"
+      ],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IoCreateDevice"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IoAllocateIrp"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IofCallDriver"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IofCompleteRequest"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [
+        "IoCreateDevice",
+        "IoAllocateIrp",
+        "IofCallDriver",
+        "IofCompleteRequest"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTMEMWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/mem.c",
+          "symbol": null
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "ExAllocatePoolWithTag"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_mm.c",
+          "symbol": "MmMapIoSpace"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "ExAllocatePoolWithTag",
+        "MmMapIoSpace"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTSYNCWrapper9x",
+      "category": "kernel",
+      "providers": [
+        "ntwrapper-core",
+        "ntw32",
+        "vxd-transport"
+      ],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeInitializeEvent"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeSetEvent"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeWaitForSingleObject"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeInitializeSpinLock"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [
+        "KeInitializeEvent",
+        "KeSetEvent",
+        "KeWaitForSingleObject",
+        "KeInitializeSpinLock"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTTHREADWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/sched.c",
+          "symbol": null
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_rtl.c",
+          "symbol": "PsCreateSystemThread"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "PsCreateSystemThread"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTOBJWrapper9x",
+      "category": "kernel",
+      "providers": [
+        "ntwrapper-core"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTREGWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/registry.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTSECWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTPNPWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_dev.c",
+          "symbol": "IoGetDeviceProperty"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_pnp.c",
+          "symbol": "ntdrv_pnp_start_pending"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "IoGetDeviceProperty"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTPOWERWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDMAWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTPCIWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_rtl.c",
+          "symbol": "HalGetBusDataByOffset"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "HalGetBusDataByOffset"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTACPIWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWMIWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTETWWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTTIMERWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/objects.c",
+          "symbol": null
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeSetTimer"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "KeSetTimer"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTWORKITEMWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbol": "IoQueueWorkItem"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_ex.c",
+          "symbol": "ExQueueWorkItem"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "IoQueueWorkItem",
+        "ExQueueWorkItem"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTDPCWrapper9x",
+      "category": "kernel",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbol": "KeInsertQueueDpc"
+        },
+        {
+          "path": "shizukudos/kernel64/ntdrv_prov.c",
+          "symbol": "ntdrv_resolve_export"
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [
+        "KeInsertQueueDpc"
+      ],
+      "backend_source_status": "PARTIAL"
+    },
+    {
+      "family": "NTDLLWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/ntdll/ntdll_main.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTPELoaderWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ldr.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTPE32PlusWrapper9x",
+      "category": "runtime",
+      "providers": [
+        "ntw64-client"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "LongModeWrapper9x",
+      "category": "runtime",
+      "providers": [
+        "ntw64-client"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTSEHWrapper9x",
+      "category": "runtime",
+      "providers": [
+        "ntw32"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTTEBPEBWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/proc.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTTLSWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "ntwin32/tls/tls.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTFLSWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "ntwin32/loader/fls.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTRTLWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTAPISetWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/kernel64/ldr.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTSxSWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTManifestWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTVersionWrapper9x",
+      "category": "runtime",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTUnicodeWrapper9x",
+      "category": "runtime",
+      "providers": [
+        "ntw32"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTKERNEL32Wrapper9x",
+      "category": "win32",
+      "providers": [
+        "ntw32",
+        "ntw64-client"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTKERNELBASEWrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTUSER32Wrapper9x",
+      "category": "win32",
+      "providers": [
+        "win98-dib"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTGDI32Wrapper9x",
+      "category": "win32",
+      "providers": [
+        "ntwddm-software",
+        "win98-dib"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTADVAPI32Wrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/advapi32/reg.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTRPCRT4Wrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/rpcrt4/rpcrt4.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTOLE32Wrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/ole32/memory.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTOLEAUT32Wrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/oleaut32/variant.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTCOMBASEWrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/combase/combase.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTCOMCTL32Wrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTCOMDLG32Wrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTSHELL32Wrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTSHCOREWrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTIMM32Wrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTPSAPIWrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDBGHELPWrapper9x",
+      "category": "win32",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTMSVCRTWrapper9x",
+      "category": "crt",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTUCRTBaseWrapper9x",
+      "category": "crt",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/ucrtbase/main.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTVCRuntimeWrapper9x",
+      "category": "crt",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/vcruntime140/vcruntime.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTCPPStdRuntimeWrapper9x",
+      "category": "crt",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/msvcp140/msvcp.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTWDDMWrapper9x",
+      "category": "graphics",
+      "providers": [
+        "ntwddm-software"
+      ],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Only the explicitly listed source contracts are provided; full Windows98 integration and family behavior are not established.",
+      "frontend_status": "PARTIAL",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDXGKRNLWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTD3DKMTWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDXGIWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/dxgi/dxgi_unavailable.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTD3D9Wrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTD3D10Wrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTD3D11Wrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTD2DWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDWRITEWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDCompWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDWMAPIWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTUXTHEMEWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTGDIPLUSWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWIN32UWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWICWrapper9x",
+      "category": "graphics",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTSTORPORTWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTSCSIPORTWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTATAWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTAHCIWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTNVMEWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDISKWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTCDROMWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTVOLMGRWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTMOUNTMGRWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTFATWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTCDFSWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTCACHEWrapper9x",
+      "category": "storage",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTUSBWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTUSBHUBWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTUHCIWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTOHCIWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTEHCIWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTXHCIWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTHIDWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTKBDCLASSWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTMOUCLASSWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTGAMEINPUTWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTXInputWrapper9x",
+      "category": "usb_input",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTKSWrapper9x",
+      "category": "audio",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTPortClsWrapper9x",
+      "category": "audio",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTAudioWrapper9x",
+      "category": "audio",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWINMMWrapper9x",
+      "category": "audio",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/winmm/winmm.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTMMDEVAPIWrapper9x",
+      "category": "audio",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTAudioEndpointWrapper9x",
+      "category": "audio",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDirectSoundWrapper9x",
+      "category": "audio",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NDISWrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTNETIOWrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTTCPIPWrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWS2_32Wrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/ws2_32/ws2_32.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTIPHLPAAPIWrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDNSAPIWrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWINHTTPWrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWININETWrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTHTTPWrapper9x",
+      "category": "network",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTCRYPT32Wrapper9x",
+      "category": "security",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTBCRYPTWrapper9x",
+      "category": "security",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/bcrypt/bcrypt.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTBCryptPrimitivesWrapper9x",
+      "category": "security",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTNCRYPTWrapper9x",
+      "category": "security",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [
+        {
+          "path": "shizukudos/win64/dlls/ncrypt/ncrypt_unavailable.c",
+          "symbol": null
+        }
+      ],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "SOURCE_PRESENT_UNINVENTORIED"
+    },
+    {
+      "family": "NTSECUR32Wrapper9x",
+      "category": "security",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTSSPIWrapper9x",
+      "category": "security",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWINTRUSTWrapper9x",
+      "category": "security",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDPAPIWrapper9x",
+      "category": "security",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTDirectShowWrapper9x",
+      "category": "media",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTMediaFoundationWrapper9x",
+      "category": "media",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    },
+    {
+      "family": "NTWASAPIWrapper9x",
+      "category": "media",
+      "providers": [],
+      "binary": null,
+      "backend_refs": [],
+      "boundary": "Windows98 frontend contract is not provided by this catalog. Backend source and selected APIs are inventoried separately; unselected backend APIs are not inferred absent or unsupported. No generated DLL or successful frontend result is supplied.",
+      "frontend_status": "UNSUPPORTED",
+      "backend_apis": [],
+      "backend_source_status": "NOT_INVENTORIED"
+    }
+  ],
+  "backend_apis": [
+    {
+      "name": "KeInitializeEvent",
+      "symbol": "KeInitializeEvent",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTSYNCWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_ke.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_ke.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; source_initializes_dispatcher_header",
+      "ownership": "caller_resident_dispatcher_object",
+      "sync_semantics": "source_initializes_dispatcher_header",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Initializes notification/auto-reset type and signal state; does not allocate or validate an object address.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "KeSetEvent",
+      "symbol": "KeSetEvent",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTSYNCWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_ke.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_ke.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; up_irq_saved_state_update",
+      "ownership": "caller_resident_dispatcher_object",
+      "sync_semantics": "up_irq_saved_state_update",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Sets signal state under irq_save; boost/wait arguments are ignored by this partial provider.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "KeWaitForSingleObject",
+      "symbol": "KeWaitForSingleObject",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTSYNCWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_ke.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_ke.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; up_dispatcher_wait_or_zero_timeout_poll",
+      "ownership": "caller_resident_dispatcher_object",
+      "sync_semantics": "up_dispatcher_wait_or_zero_timeout_poll",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Nonzero waits use wait_one and its IRQL check; zero timeout polls once; mode/reason are ignored.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "KeInitializeSpinLock",
+      "symbol": "KeInitializeSpinLock",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTSYNCWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_ke.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_ke.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; caller_initialization_before_use",
+      "ownership": "caller_resident_spinlock",
+      "sync_semantics": "caller_initialization_before_use",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Initializes existing driver KSPIN_LOCK; does not demonstrate SMP ownership or VMM integration.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "KeInsertQueueDpc",
+      "symbol": "KeInsertQueueDpc",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTDPCWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_ke.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_ke.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; up_irq_saved_queue_and_dispatch_worker",
+      "ownership": "caller_dpc_until_dequeue_or_execution",
+      "sync_semantics": "up_irq_saved_queue_and_dispatch_worker",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Duplicate queued DPC returns false; source uses IRQ-saved queue mutation, not an established SMP queue.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "KeSetTimer",
+      "symbol": "KeSetTimer",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTTIMERWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_ke.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_ke.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; up_timer_list_and_timer_worker",
+      "ownership": "caller_timer_and_optional_dpc",
+      "sync_semantics": "up_timer_list_and_timer_worker",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Returns prior insertion state through timer_set; no Windows98 VMM timer callback binding.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "ExAllocatePoolWithTag",
+      "symbol": "ExAllocatePoolWithTag",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTMEMWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_ke.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_ke.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; kernel_heap_policy_no_entry_irql_check",
+      "ownership": "kernel_heap_allocation_caller_free",
+      "sync_semantics": "kernel_heap_policy_no_entry_irql_check",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Allocates actual heap bytes; this entry ignores pool type/tag; no complete NT pool/accounting semantics.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "IoCreateDevice",
+      "symbol": "IoCreateDevice",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTDRVWrapper9x",
+        "NTIOWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_io.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_io.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; up_namespace_allocation_no_entry_irql_check",
+      "ownership": "driver_device_and_namespace_record",
+      "sync_semantics": "up_namespace_allocation_no_entry_irql_check",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Allocates device extension and namespace node; exclusive argument ignored; not a Windows98 device-stack registration.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "IoAllocateIrp",
+      "symbol": "IoAllocateIrp",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTIRPWrapper9x",
+        "NTIOWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_io.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_io.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; kernel_heap_allocation",
+      "ownership": "caller_irp_until_free_or_completion",
+      "sync_semantics": "kernel_heap_allocation",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Allocates actual IRP/stack locations; full cancellation and arbitrary driver IRP semantics remain outside this inventory.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "IofCallDriver",
+      "symbol": "IofCallDriver",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTIRPWrapper9x",
+        "NTIOWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_io.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_io.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; current_thread_ms_x64_dispatch",
+      "ownership": "device_stack_dispatch_and_caller_irp",
+      "sync_semantics": "current_thread_ms_x64_dispatch",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Dispatches existing driver stack; driver callbacks use NTAPI; no Win98 IOS/PnP frontend acceptance.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "IofCompleteRequest",
+      "symbol": "IofCompleteRequest",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTIRPWrapper9x",
+        "NTIOWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_io.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_io.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; driver_completion_then_existing_waiter_signal",
+      "ownership": "irp_completion_routines_and_waiter",
+      "sync_semantics": "driver_completion_then_existing_waiter_signal",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Executes completion chain and honors STATUS_MORE_PROCESSING_REQUIRED; partial device/IRP lifetime model.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "IoQueueWorkItem",
+      "symbol": "IoQueueWorkItem",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTWORKITEMWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_io.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_io.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; up_irq_saved_queue_passive_worker",
+      "ownership": "caller_workitem_until_callback_finishes",
+      "sync_semantics": "up_irq_saved_queue_passive_worker",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "All requested queue types share one worker; duplicate queue panics; caller must retain item/device lifetime.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "ExQueueWorkItem",
+      "symbol": "ExQueueWorkItem",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTWORKITEMWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_ex.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_ex.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; existing_system_work_queue",
+      "ownership": "caller_workitem_until_callback_finishes",
+      "sync_semantics": "existing_system_work_queue",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Uses existing system worker; does not create another scheduler/fabric.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "MmMapIoSpace",
+      "symbol": "MmMapIoSpace",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTMEMWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_mm.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_mm.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; kernel_mmio_mapping_policy",
+      "ownership": "driver_mmio_mapping_and_pci_claim",
+      "sync_semantics": "kernel_mmio_mapping_policy",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Calls existing mmio_map and ntdrv_pci_note_mmio; cache argument is ignored by this partial implementation.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "PsCreateSystemThread",
+      "symbol": "PsCreateSystemThread",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTTHREADWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_rtl.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_rtl.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; kernel64_scheduler_system_thread",
+      "ownership": "kernel_thread_and_existing_kernel_handle",
+      "sync_semantics": "kernel64_scheduler_system_thread",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Actual Kernel64 thread creation with NTAPI start routine; access/object attributes/process/client-id arguments ignored.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "IoGetDeviceProperty",
+      "symbol": "IoGetDeviceProperty",
+      "families": [
+        "NTOSKRNLWrapper9x",
+        "NTPNPWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "ntoskrnl.exe",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_dev.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_dev.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; existing_device_property_namespace",
+      "ownership": "existing_pdo_and_caller_output_buffer",
+      "sync_semantics": "existing_device_property_namespace",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Existing bounded device-property provider; does not claim complete native Win98 PnP support.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    },
+    {
+      "name": "HalGetBusDataByOffset",
+      "symbol": "HalGetBusDataByOffset",
+      "families": [
+        "NTHALWrapper9x",
+        "NTPCIWrapper9x"
+      ],
+      "scope": "Kernel64_backend",
+      "module": "hal.dll",
+      "ordinal": null,
+      "calling_convention": "ms_x64",
+      "minimum_abi": "Kernel64-NTDRV:unversioned",
+      "status": "PARTIAL",
+      "source": "shizukudos/kernel64/ntdrv_rtl.c",
+      "declaration_source": "shizukudos/kernel64/ntdrv_rtl.c",
+      "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "irql": "UP CR8/dispatcher model; pci_configuration_read_no_entry_irql_check",
+      "ownership": "shizuku_pci_backend_and_caller_buffer",
+      "sync_semantics": "pci_configuration_read_no_entry_irql_check",
+      "test_status": "SOURCE_BOUND",
+      "evidence": [
+        "ntdrv-tests",
+        "ntdrv-recorded"
+      ],
+      "limits": [
+        "Supports PCI configuration bus type 4; invalid type/absent function return zero bytes, not fake success.",
+        "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
+      ]
+    }
+  ]
+}
