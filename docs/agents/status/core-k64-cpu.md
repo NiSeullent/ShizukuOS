@@ -98,6 +98,22 @@ verified aggregate contract. No new loaded-helper claim is made for that edit.
 Normal non-standalone freestanding scheduler C compilation PASS with stable
 source closure/compiler, without a Supervisor execution claim.
 
+## Private producer identity limitation (F6)
+
+The retained private `build/k64-cpu-final/build_profile.py` imports kbuild at
+line5, including its shzlib dependency, before taking the initial source map at
+line9. Persistent helper replacement between execution and that first capture
+could bind replacement file hashes to previously loaded helper logic. Matching
+the219-file maps and generated artifacts does not close this execution-identity
+gap; no race is alleged to have occurred in these retained runs.
+
+The old219-input results remain historical component behavior evidence, without
+claiming equivalence to the accepted F6 captured-helper producer. Neither the
+private producer nor these old receipts were changed to manufacture that claim.
+Root will perform the integrated fresh all-profile build and native composite
+with captured helper execution. BroadTCG360-second/63-app incompletion and the
+separate no-ACPI lowloops242 failure remain open.
+
 ## Separate preserved no-ACPI failure
 
 SMP tree `build/smp-normal-ap-noacpi-1/serial.log` has a genuine unchanged6761
@@ -116,6 +132,8 @@ threshold was changed here and no general useful-instruction guarantee is claime
 
 ## Remaining handoff
 
-Independent source review and root-owned integration are required. Native UP
+Highest independent source review approved the exact nine-file foundation,
+committed as `cbdd766b63e0e7a47504cfd5e3a8186b3c3f17d6`. Root-owned integration
+is still required. Native UP
 context/SSE/ring3/service checks do not prove AP runnable contexts, load balancing,
 IPI/TLB reclamation, object/wait concurrency, Supervisor or actual Windows98 boot.
