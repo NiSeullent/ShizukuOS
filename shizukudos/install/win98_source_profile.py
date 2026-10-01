@@ -86,8 +86,8 @@ def locale_lines(config, auto, windows, files):
                  'unambiguous observed NLSFUNC invocation required')
             require_file(files,windows+'/COMMAND/NLSFUNC.EXE');require_file(files,windows+'/COUNTRY.SYS')
             nls.append(line)
-    need(len(country)<=1 and len(nls)<=1 and (not country or len(nls)==1) and (not nls or len(country)==1),
-         'COUNTRY/NLS settings must form one unambiguous observed pair')
+    need(len(country)<=1 and len(nls)<=1 and (not country or len(nls)==1),
+         'only one observed NLS invocation allowed; COUNTRY requires that invocation')
     if country or nls:
         # Pinned ke2046 config.c and FreeCOM include/command.h use 256-byte
         # readers. CONFIG overflow can expose a suffix as a fresh command.
@@ -215,7 +215,7 @@ def generate(request_path, request_sha, out, capture_budget):
         installed_paths(member_bytes(fd,geometry,files,'MSDOS.SYS',check),selected)
         original={name:member_bytes(fd,geometry,files,name,check) if name in files else None for name in ('CONFIG.SYS','AUTOEXEC.BAT')}
         country,nls=locale_lines(original['CONFIG.SYS'] or b'',original['AUTOEXEC.BAT'] or b'',windows,files)
-        if country:
+        if country or nls:
             for name in ('COUNTRY.SYS','COMMAND/NLSFUNC.EXE'):
                 observed[windows+'/'+name]=require_file(files,windows+'/'+name)
         config=('DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\nDEVICE='+selected+'\\IFSHLP.SYS\r\nDOS=HIGH\r\n'

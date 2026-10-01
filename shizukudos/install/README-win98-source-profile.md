@@ -58,8 +58,10 @@ Original CONFIG.SYS/AUTOEXEC.BAT files are backed up byte-for-byte in
 `original-config/`, including empty originals. They are bounded ASCII inputs
 with LF/CRLF physical lines for locale parsing. Other control bytes and lone CR
 are refused; arbitrary original drivers and commands are not replayed.
-Only an unambiguous observed COUNTRY/NLSFUNC pair with present dependencies is
-retained, with dependency hashes and metadata recorded. CONFIG menus/includes,
+One unambiguous observed NLSFUNC invocation may be retained alone or with one
+observed COUNTRY setting. COUNTRY without NLSFUNC remains refused. Both
+referenced dependencies must be present, with their hashes and metadata
+recorded. CONFIG menus/includes,
 batch control flow and command operators prevent locale retention. Commands
 in retained-locale CONFIG.SYS and AUTOEXEC.BAT are bounded to 250 bytes per
 physical line, including CR and comments before comment filtering, to stay
@@ -67,8 +69,9 @@ within the pinned FreeDOS and FreeCOM 256-byte readers. CONFIG overflow must
 not expose a hidden suffix as another command. Commands
 before retained NLS must be plain ECHO ON/OFF, SET, drive selection, CD/CHDIR or
 PATH without variable expansion; batch chaining and unproven preceding commands
-are refused. No country
-or code page is invented when the pair is absent.
+are refused. No COUNTRY setting or code page is invented for an NLS-only source
+or when locale lines are absent. Preserving these observed settings does not
+prove FreeDOS locale runtime compatibility or native Windows boot.
 
 The generated CONFIG.SYS uses the existing observed HIGH configuration:
 HIMEMX `/VERBOSE`, the selected Windows IFSHLP.SYS, DOS=HIGH, FILES=30,
