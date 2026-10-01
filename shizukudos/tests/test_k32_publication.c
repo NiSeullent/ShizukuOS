@@ -54,6 +54,9 @@ static void sti(void) { host_flags |= 0x200u; }
 static void cli(void) { host_flags &= ~0x200u; }
 
 #include "../kernel32/sched.c"
+#define current (runqueues.cpu[0].current)
+#define idle_thread (runqueues.cpu[0].idle)
+uint32_t arch_cpu_id(void) { return 0; }
 
 /* Fault completion must return to the host harness, rather than change stacks. */
 static void host_thread_exit(int code) __attribute__((noreturn));

@@ -28,6 +28,7 @@ struct regs {
 
 /* ---- arch.c ---- */
 void arch_init(void);
+uint32_t arch_cpu_id(void);             /* trusted GS identity or UINT32_MAX */
 void tss_set_kernel_stack(uint32_t esp0);
 static inline uint32_t read_cr0(void) { uint32_t v; __asm__ volatile("mov %%cr0, %0" : "=r"(v)); return v; }
 static inline uint32_t read_cr2(void) { uint32_t v; __asm__ volatile("mov %%cr2, %0" : "=r"(v)); return v; }
@@ -80,7 +81,11 @@ struct thread {
     uint32_t id;
     uint32_t state;                     /* 0 free, 1 ready, 2 running, 3 blocked, 4 zombie */
     uint64_t wake_tick;                 /* 0 = no finite deadline */
-    thread_t *next;                     /* run/wait queue link */
+    thread_t *next;                     /* semaphore/mutex wait link */
+    thread_t *ready_next;               /* separate perCPU FIFO link */
+    uint32_t affinity_mask;             /* wholly contained in actual online mask */
+    uint32_t ready_cpu, ready_queued;
+    uint32_t on_cpu;                    /* ownership until saved stack is inactive */
     uint32_t stack_base;
     uint32_t proc;                      /* owning process id, 0 = kernel */
     int exit_code;
@@ -89,6 +94,12 @@ struct thread {
     ksem_t *wait_sem;
 };
 void sched_init(void);
+uint32_t sched_cpu_online_mask(void);
+int sched_validate(void);               /* bounded queue/ownership diagnostic */
+int sched_cpu_register(uint32_t cpu);    /* -2: architecture/Supervisor handoff absent */
+int thread_set_affinity(thread_t *t, uint32_t mask);
+uint32_t thread_get_affinity(thread_t *t);
+void sched_switch_complete(void);       /* assembly: destination stack, IRQs disabled */
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
 thread_t *thread_current(void);
 void thread_yield(void);
