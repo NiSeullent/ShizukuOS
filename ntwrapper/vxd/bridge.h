@@ -74,7 +74,10 @@ int ntwv_initialize(const struct ntw_lock_ops *ops);
 int ntwv_shutdown(void);
 uint32_t ntwv_dioc(const struct ntwv_dioc *request, const struct ntwv_pages *pages);
 uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *pages, const struct ntwv_hv *hv);
-void ntwv_w64_reset(void);                  /* forget the mapped channel (dynamic exit / host tests) */
+/* Forget the mapped channel only when no W64 request is admitted; otherwise
+ * leave it intact. Pending buffers remain peer-visible until a terminal reply
+ * or Supervisor-owned channel teardown: reset is not cancellation/rundown. */
+void ntwv_w64_reset(void);
 int ntwv_native_init(void);
 int ntwv_native_exit(void);
 uint32_t ntwv_native_dioc(const struct ntwv_dioc *request);

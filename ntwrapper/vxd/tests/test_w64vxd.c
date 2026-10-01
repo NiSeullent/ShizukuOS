@@ -11,6 +11,8 @@
 static unsigned checks, step, failure, locked, unlocks, writes, reads, protected_now, notifies, acks, abi_calls, chan_calls;
 static uint32_t last_unlocked[3], permission = 7, physical_xor, doorbell_pending = 0x5, hv_present = 1, abi_reply = (1u << 16) | 1u;
 static uint32_t channel_gpa = 0xe0200000u, channel_peer = 4, map_fail;
+static unsigned reenter_notify;
+static uint32_t reenter_result;
 static unsigned char buffers[3][8192];          /* user pages 0x500.. (output), 0x600.. (returned), 0x700.. (input) */
 static uint8_t channel[SHZ_IPC_REGION_SIZE] __attribute__((aligned(4096)));
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr, "line %u: %s\n", (unsigned)__LINE__, #x); exit(1); } } while (0)
@@ -44,13 +46,14 @@ static void write_alias(uint32_t address, const void *source, uint32_t bytes)
 static void read_alias(void *destination, uint32_t address, uint32_t bytes)
 { unsigned b = which_buffer(address >> 12); CHECK(protected_now && b == 2 && (address & 0xffff) + bytes <= 8192); ++reads; memcpy(destination, buffers[b] + (address & 0xffff), bytes); }
 static int hypervisor_present(void) { return (int)hv_present; }
+static void try_reenter(void);
 static int32_t hcall(uint32_t op, uint32_t a, uint32_t b, uint32_t *ebx, uint32_t *ecx)
 {
     CHECK(!protected_now);                      /* hypercalls never run inside the pinned-copy interval */
     switch (op) {
     case SHZ_HC_ABI_VERSION: ++abi_calls; if (ebx) *ebx = abi_reply; return SHZ_OK;
     case SHZ_HC_CHANNEL_INFO: ++chan_calls; if (a != 2) return SHZ_E_NOENT; if (ebx) *ebx = channel_gpa; if (ecx) *ecx = channel_peer; return SHZ_OK;
-    case SHZ_HC_NOTIFY: CHECK(a == SHZ_DOM_KERNEL64 && b == 1); ++notifies; return SHZ_OK;
+    case SHZ_HC_NOTIFY: CHECK(a == SHZ_DOM_KERNEL64 && b == 1); ++notifies; if (reenter_notify) try_reenter(); return SHZ_OK;
     case SHZ_HC_DOORBELL_ACK: ++acks; if (ebx) *ebx = doorbell_pending; doorbell_pending = 0; return SHZ_OK;
     default: return SHZ_E_UNSUPPORTED;
     }
@@ -59,6 +62,14 @@ static void *map_phys(uint32_t phys, uint32_t bytes)
 { CHECK(phys == channel_gpa && bytes == SHZ_IPC_REGION_SIZE); return map_fail ? 0 : channel; }
 static const struct ntwv_pages ops = { check_range, lock_range, unlock_range, ptes, enter, leave, write_alias, read_alias };
 static const struct ntwv_hv hv = { hypervisor_present, hcall, map_phys };
+static void try_reenter(void)
+{
+    const struct ntwv_dioc nested = { .code = NTWV_IOCTL_W64_OPEN,
+        .output = 0x00500ff0, .output_bytes = 64, .returned = 0x00600ffe };
+    reenter_notify = 0;
+    reenter_result = ntwv_dioc_ex(&nested, &ops, &hv);
+    CHECK(reenter_result == NTWV_ERROR_BUSY);
+}
 static void reset(void)
 { step = failure = locked = unlocks = writes = reads = protected_now = 0; permission = 7; physical_xor = 0; memset(buffers, 0xa5, sizeof buffers); }
 
@@ -89,11 +100,165 @@ static void k64_reply(uint64_t request_id, uint32_t opcode, int32_t status, cons
     shz_msg_hdr_t h;
     memset(&h, 0, sizeof h);
     h.flags = SHZ_MSGF_REPLY; h.opcode = opcode; h.request_id = request_id; h.src_domain = SHZ_DOM_KERNEL64;
-    h.dst_domain = SHZ_DOM_WIN98; h.generation = 1; h.status = status; h.payload_length = len;
+    h.dst_domain = SHZ_DOM_WIN98; h.generation = chdr()->generation; h.status = status; h.payload_length = len;
     CHECK(shz_ring_push(k64_tx(), &h, payload) == SHZ_OK);
 }
 
-int main(void)
+static void regression_begin(void)
+{
+    const struct ntw_lock_ops locks = { enter, leave, 0 };
+    ntwv_w64_reset();
+    reset();
+    hv_present = 1; abi_reply = (1u << 16) | 1u; channel_peer = SHZ_DOM_KERNEL64; map_fail = 0;
+    reenter_notify = 0; reenter_result = 0;
+    CHECK(shz_channel_init(channel, sizeof channel, 2, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 32, 1) == SHZ_OK);
+    CHECK(ntwv_initialize(&locks));
+}
+
+static void regression_open(void)
+{
+    struct ntwv_w64_open info;
+    reset();
+    CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == 0);
+}
+
+static shz_msg_hdr_t regression_pool_request(void)
+{
+    shz_msg_hdr_t request = { 0 }, received;
+    uint8_t frame[65], payload[SHZ_MSG_MAX_INLINE];
+    int32_t status;
+    int reason;
+    request.opcode = SHZ_OP_W64_CREATE_PROCESS; request.request_id = 0x123456;
+    memcpy(frame, &request, sizeof request); frame[64] = 'x';
+    reset();
+    CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, sizeof frame, 4, &status, 0) == 0);
+    CHECK(shz_ring_pop(k64_rx(), &received, payload, sizeof payload, &reason) == SHZ_OK);
+    CHECK(shz_pool_check(channel, chdr(), &received, SHZ_DOM_WIN98) == SHZ_OK);
+    return received;
+}
+
+static void regression(const char *name)
+{
+    uint8_t slot[SHZ_MSG_SLOT_SIZE];
+    struct ntwv_w64_open info;
+    shz_msg_hdr_t request, response = { 0 };
+    regression_begin();
+    if (!strcmp(name, "layout")) {
+        const shz_channel_hdr_t saved = *chdr();
+        unsigned i;
+        for (i = 0; i < 8; ++i) {
+            *chdr() = saved;
+            switch (i) {
+            case 0: chdr()->channel_id = 1; break;
+            case 1: chdr()->generation = 0; break;
+            case 2: chdr()->ring_ba_offset = chdr()->ring_ab_offset; break;
+            case 3: chdr()->pool_offset = chdr()->ring_ab_offset; break;
+            case 4: chdr()->slot_count = 64; break; /* disagrees with actual rings */
+            case 5: chdr()->pool_size = SHZ_IPC_REGION_SIZE; break;
+            case 6: chdr()->ring_ab_offset = 64; break; /* overlaps header/owner table */
+            default: chdr()->pool_size -= 1; break;
+            }
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == NTWV_ERROR_GEN_FAILURE);
+            CHECK(writes == 0 && !locked);
+            ntwv_w64_reset();
+        }
+        *chdr() = saved;
+    } else {
+        regression_open();
+        if (!strcmp(name, "reentrant")) {
+            uint8_t frame[64];
+            int32_t status;
+            response.opcode = SHZ_OP_W64_QUERY; response.request_id = 1;
+            memcpy(frame, &response, sizeof response);
+            reenter_notify = 1;
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, sizeof frame, 4, &status, 0) == 0);
+            CHECK(reenter_result == NTWV_ERROR_BUSY);
+            CHECK(!locked && !protected_now);
+            regression_open(); /* ownership was released on success */
+        } else if (!strcmp(name, "epoch")) {
+            request = regression_pool_request();
+            chdr()->generation = 2;
+            k64_reply(request.request_id, request.opcode, SHZ_OK, 0, 0);
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_DEV_NOT_EXIST);
+            CHECK(!writes && shz_ring_count(k64_tx()) == 1);
+            CHECK(shz_pool_check(channel, chdr(), &request, SHZ_DOM_WIN98) == SHZ_OK);
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == NTWV_ERROR_DEV_NOT_EXIST);
+            ntwv_w64_reset(); /* never releases a buffer from the new epoch */
+            CHECK(shz_pool_check(channel, chdr(), &request, SHZ_DOM_WIN98) == SHZ_OK);
+            regression_open();
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == 0 && info.generation == 2);
+        } else if (!strcmp(name, "live-layout")) {
+            const uint64_t saved = chdr()->ring_ab_offset;
+            chdr()->ring_ab_offset += 64; /* still in range, but no longer the opened layout */
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_GEN_FAILURE);
+            CHECK(!writes);
+            chdr()->ring_ab_offset = saved;
+        } else if (!strcmp(name, "duplicate")) {
+            uint8_t frame[65];
+            int32_t status;
+            request = regression_pool_request();
+            response.opcode = request.opcode; response.request_id = request.request_id;
+            memcpy(frame, &response, sizeof response); frame[64] = 'y';
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, sizeof frame, 4, &status, 0) == NTWV_ERROR_BUSY);
+            CHECK(shz_ring_count(k64_rx()) == 0 && !writes);
+        } else if (!strcmp(name, "corrupt-head")) {
+            shz_ring_hdr_t *ring = k64_tx();
+            ring->head = ring->tail + ring->slot_count + 1;
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_GEN_FAILURE);
+            CHECK(!writes && !locked);
+        } else if (!strcmp(name, "corrupt-ring")) {
+            k64_tx()->slot_count = 0x80000000u;
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_GEN_FAILURE);
+            CHECK(!writes && !locked);
+        } else if (!strcmp(name, "responses")) {
+            unsigned i;
+            request = regression_pool_request();
+            for (i = 0; i < 7; ++i) {
+                memset(&response, 0, sizeof response);
+                response.flags = SHZ_MSGF_REPLY; response.opcode = request.opcode;
+                response.request_id = request.request_id; response.generation = 1;
+                response.src_domain = SHZ_DOM_KERNEL64; response.dst_domain = SHZ_DOM_WIN98;
+                switch (i) {
+                case 0: response.generation = 2; break;
+                case 1: response.src_domain = SHZ_DOM_KERNEL32; break;
+                case 2: response.dst_domain = SHZ_DOM_KERNEL32; break;
+                case 3: response.opcode = SHZ_OP_W64_QUERY; break;
+                case 4: response.flags |= SHZ_MSGF_ONEWAY; break;
+                case 5: response.flags |= SHZ_MSGF_CANCEL; break;
+                default: response.flags |= SHZ_MSGF_BUFFER; response.buffer_length = 1; response.buffer_offset = request.buffer_offset; break;
+                }
+                CHECK(shz_ring_push(k64_tx(), &response, 0) == SHZ_OK);
+                reset();
+                CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_NO_MORE_ITEMS);
+                CHECK(!writes && shz_pool_check(channel, chdr(), &request, SHZ_DOM_WIN98) == SHZ_OK);
+                reset();
+                CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == 0 && info.pending_pool == 1);
+            }
+            k64_reply(request.request_id, request.opcode, SHZ_OK, 0, 0);
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == 0);
+            CHECK(shz_pool_check(channel, chdr(), &request, SHZ_DOM_WIN98) == SHZ_E_DENIED);
+            reset();
+            CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == 0 && info.pending_pool == 0 && info.proto_errors == 7);
+        } else {
+            CHECK(!"unknown regression");
+        }
+    }
+    ntwv_w64_reset();
+    CHECK(ntwv_shutdown());
+    printf("PASS: VxD WIN64 regression %s %u assertions\n", name, checks);
+}
+
+int main(int argc, char **argv)
 {
     const struct ntw_lock_ops locks = { enter, leave, 0 };
     struct ntwv_w64_open info;
@@ -103,6 +268,8 @@ int main(void)
     uint8_t pl[SHZ_MSG_MAX_INLINE];
     int32_t status;
     int reason;
+
+    if (argc == 2) { regression(argv[1]); return 0; }
 
     CHECK(shz_channel_init(channel, sizeof channel, 2, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 32, 1) == SHZ_OK);
     CHECK(ntwv_initialize(&locks));

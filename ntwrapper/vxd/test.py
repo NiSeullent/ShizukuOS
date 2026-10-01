@@ -56,7 +56,8 @@ def main():
         'statuses': {name: ('passed' if passed else 'failed-or-unverified') for name in
                      ('host_bridge_asan_ubsan', 'i386_control_harness', 'static_le_relocations',
                       'native_contract_constants', 'win32_probe_pe_contract', 'win64_bridge_dioc_asan_ubsan',
-                      'strict_object_flag_policy')},
+                      'strict_object_flag_policy', 'win64_parallel_admission_asan_ubsan_tsan',
+                      'win64_epoch_response_pool_validation', 'win64_corrupt_ring_bounded_failure')},
         'win64_bridge_supervisor_run': False,
         'guest_loaded': False,
         'native_vmm_calls_verified': False,

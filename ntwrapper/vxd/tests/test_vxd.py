@@ -159,5 +159,26 @@ class VxDTests(unittest.TestCase):
         result=subprocess.run([str(BUILD/'test_w64vxd')],check=True,capture_output=True,text=True)
         self.assertIn('PASS: VxD WIN64 bridge',result.stdout)
         print(result.stdout.strip())
+        for case in ('reentrant', 'layout', 'epoch', 'live-layout', 'duplicate',
+                     'responses', 'corrupt-head', 'corrupt-ring'):
+            with self.subTest(case=case):
+                result=subprocess.run([str(BUILD/'test_w64vxd'),case],check=True,
+                                      capture_output=True,text=True,timeout=10)
+                self.assertIn('PASS: VxD WIN64 regression '+case,result.stdout)
+                print(result.stdout.strip())
+
+    def test_parallel_win64_admission_under_sanitizers(self):
+        for suffix,sanitizer in (('asan','address,undefined'),('tsan','thread')):
+            with self.subTest(sanitizer=sanitizer):
+                binary=BUILD/('test_w64_admission_'+suffix)
+                command=['clang','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wpedantic','-Wshadow',
+                         '-fsanitize='+sanitizer,'-fno-omit-frame-pointer','-pthread',
+                         str(HERE/'bridge.c'),str(HERE.parent/'core.c'),str(HERE/'tests/test_w64_admission.c'),
+                         '-o',str(binary)]
+                subprocess.run(command,check=True)
+                result=subprocess.run([str(binary)],check=True,capture_output=True,text=True,timeout=10)
+                self.assertIn('PASS: VxD parallel admission',result.stdout)
+                self.assertIn('PASS: VxD shutdown-versus-entry 128 externally initialized rounds',result.stdout)
+                print(suffix+': '+result.stdout.strip())
 
 if __name__=='__main__':unittest.main()
