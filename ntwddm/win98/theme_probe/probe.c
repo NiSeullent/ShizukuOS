@@ -285,7 +285,7 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LP
 void mainCRTStartup(void)
 {
     char executable[MAX_PATH], expected_provider[MAX_PATH], log_path[MAX_PATH];
-    DWORD length, start = 0, last_repaint = 0;
+    DWORD length, start = 0;
     HMODULE provider = NULL;
     HINSTANCE instance = GetModuleHandleA(NULL);
     OSVERSIONINFOA version = {0};
@@ -349,7 +349,7 @@ void mainCRTStartup(void)
     if (!select_style(1)) goto cleanup;
     ShowWindow(main_window, SW_SHOWNORMAL);
     if (!UpdateWindow(main_window)) { record_native_failure("UpdateWindow"); goto cleanup; }
-    start = GetTickCount(); last_repaint = start;
+    start = GetTickCount();
     /* Bounded wall clock and message batches; a hung native call still needs
      * the external guest supervisor's deadline. GetTickCount wrap is safe. */
     while (!closing && !failed && !io_failed &&
@@ -367,10 +367,6 @@ void mainCRTStartup(void)
             if (message.message == WM_QUIT) { closing = 1; break; }
             TranslateMessage(&message); DispatchMessageA(&message);
             if (closing || failed || io_failed) break;
-        }
-        if (!closing && !failed && !io_failed && (DWORD)(now - last_repaint) >= 250u) {
-            last_repaint = now;
-            if (!InvalidateRect(main_window, NULL, FALSE)) record_native_failure("InvalidateRect(refresh)");
         }
         Sleep(10);
     }
