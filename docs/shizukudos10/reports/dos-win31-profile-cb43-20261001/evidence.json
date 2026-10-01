@@ -1,0 +1,178 @@
+{
+  "schema": "shizuku-dos-win31-profile-contract/v1",
+  "inputs": {
+    "source_commit": "8508c5e360fe8c24c659b719f1ed21831cbdbd4c",
+    "builder_sha256": "1ece1260ccfc5271a225331d70a8c91c31a28e5c413d15921edc1a293be875df",
+    "freedos_commit": "5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3",
+    "upstream_sha256": {
+      "makefile": "8909a9d72814e8eb1ba38480db0805e70b304c705cc9833345c2b5ca2bccd39a",
+      "mkfiles/generic.mak": "bde5baf2ac9fd964eedb518cb104ff89e2926b2ec47c7669516befa0c2533083",
+      "mkfiles/watcom.mak": "1b01d167c84ffb9d557508cec9f1251a395f9148f88b1195091e09d291f4f536",
+      "mkfiles/owlinux.mak": "33c93d86938be7acb3c2fb22616c33e2c00499e3f4d905f7652668f239b47851",
+      "hdr/portab.h": "6ab6cf2cec0a717bf46ab48aea482b7bc8a229102fbe0e15f3b13fae72d97824",
+      "hdr/win.h": "7466b0ab11d0774770f03dbb6a0065d383674f9569c8c72a95340dadd2f4b858",
+      "kernel/kernel.asm": "427070c8b1bad930eeb50d59ae4f935653b2acb292d9d827a186442a892775c4"
+    },
+    "candidate_builder_sha256": "bec1b7bd9433c0be86a1ca1b22d59ac220e71762d4b4c78c56f28a38caaee68b"
+  },
+  "builder_after_sha256": "bec1b7bd9433c0be86a1ca1b22d59ac220e71762d4b4c78c56f28a38caaee68b",
+  "patch_sha256": "a3b60e86f15341a0673c0721798353e5cd2eb806fdb583a3f66e5ca11cfe2ba8",
+  "test_script_sha256": "c588676d02beb8704dcf8e7ebafc8eefb473d7277c2971880ae1a17ad4badd42",
+  "tests_log_sha256": "d80de2e26f0648e8375808f316d4085987d6e316283e78d6461e0efcd0bd7fe6",
+  "baseline_tests": {
+    "methods": 6,
+    "failures": 4,
+    "exit_code": 1,
+    "log_sha256": "5301398404faf6fc1d5aabf0ff568f5a23c1ac31a049826678e0294cc052673a",
+    "test_script_sha256": "3a4747ae96f69c40473044126cc1b7f601454a7e890c6c68768181ef018b7171"
+  },
+  "final_tests": {
+    "methods": 6,
+    "failures": 0,
+    "exit_code": 0
+  },
+  "tools": {
+    "wcc": {
+      "sha256": "dc8e2f7b9532435592ac204e5ad7dabe0f1d9e3efbe3a91c07623e45236c1bed",
+      "bytes": 2082696,
+      "executable": "${WATCOM}/binl64/wcc"
+    },
+    "wmake": {
+      "sha256": "ca43325161481acaabf31260993fb260ca916d0ba620f0a593561d30a93cfbdd",
+      "bytes": 1213297,
+      "executable": "${WATCOM}/binl64/wmake"
+    },
+    "nasm": {
+      "sha256": "59694445d621c9e92607ac65257af511d5e9f184e7e88cfe6af1cc9c16f711d7",
+      "bytes": 1582616,
+      "executable": "/usr/bin/nasm"
+    },
+    "make": {
+      "sha256": "96076e04fc021376dff0f4696d928fdde99a86c4ea8e0bca809d16df9f86b661",
+      "bytes": 287480,
+      "executable": "/usr/bin/make"
+    }
+  },
+  "source_before_equals_after": true,
+  "upstream_source_sha256": {
+    "upstream/makefile": "8909a9d72814e8eb1ba38480db0805e70b304c705cc9833345c2b5ca2bccd39a",
+    "upstream/mkfiles/generic.mak": "bde5baf2ac9fd964eedb518cb104ff89e2926b2ec47c7669516befa0c2533083",
+    "upstream/mkfiles/watcom.mak": "1b01d167c84ffb9d557508cec9f1251a395f9148f88b1195091e09d291f4f536",
+    "upstream/mkfiles/owlinux.mak": "33c93d86938be7acb3c2fb22616c33e2c00499e3f4d905f7652668f239b47851",
+    "upstream/hdr/portab.h": "6ab6cf2cec0a717bf46ab48aea482b7bc8a229102fbe0e15f3b13fae72d97824",
+    "upstream/hdr/win.h": "7466b0ab11d0774770f03dbb6a0065d383674f9569c8c72a95340dadd2f4b858",
+    "upstream/kernel/kernel.asm": "427070c8b1bad930eeb50d59ae4f935653b2acb292d9d827a186442a892775c4"
+  },
+  "probes": {
+    "both": {
+      "exit_code": 0,
+      "configuration": "XNASM=nasm\nundefine XUPX\nALLCFLAGS=-DWIN31SUPPORT\nNASMFLAGS=-DWIN31SUPPORT\n",
+      "log_sha256": "cfd607416851da31990d63a6c7a1b3b03c4be0cc3b11b07a8f3062a2f892485f",
+      "artifacts": {
+        "kernel/contract-c.obj": {
+          "sha256": "f45adef8f82ad676c54c160a2ebd8b9a4ff8483bb100d2016430441e056fa4a3",
+          "bytes": 654
+        },
+        "kernel/contract-asm.obj": {
+          "sha256": "8a8805977a5e23cb1bab1c71814507685fb860c6a9ae5b6c922978eca797c5db",
+          "bytes": 357
+        }
+      },
+      "fixture_inputs_sha256": {
+        "shz-parent.mak": "f22bdce082333a80bee0165491a6a4a3124392e3044e7fbb9e1022d26fa974cb",
+        "kernel/shz-contract.mak": "2366a87a17b2ff291b313455bab9a1a53facec5f794407966208e6f48c32c182",
+        "kernel/contract-c.c": "3002f77e892aaae7f8e9cc1aeffdcbc4e6e8282f462b04f59b059ed13963b4ae",
+        "kernel/contract-asm.asm": "59ce92234ff068317efc891896d5bd925608d69f1bd19a5a1e3daa288e77bf63",
+        "config.mak": "d1fd03a34d78db0b5558c585c416ee60e0eba0f34602a9684d5b333e1f338b91"
+      },
+      "command": [
+        "/usr/bin/make",
+        "-f",
+        "makefile",
+        "-f",
+        "shz-parent.mak",
+        "shz-contract",
+        "XCPU=386",
+        "XFAT=32"
+      ],
+      "commands_output": "cd kernel && wmake -ms -h -f shz-contract.mak shz-contract\nwcc -zq -fo=.obj -I../hdr -3 -DWIN31SUPPORT -DI386 -DWITHFAT32 -os-s-e5-j-zl-zp1-wx-we-zgf-zff-r-ntHMA_TEXT contract-c.c\nnasm -Dowlinux -f obj -DWIN31SUPPORT -DWITHFAT32 -i../hdr/ -DXCPU=386 contract-asm.asm\n"
+    },
+    "missing-c": {
+      "exit_code": 2,
+      "configuration": "XNASM=nasm\nundefine XUPX\nNASMFLAGS=-DWIN31SUPPORT\n",
+      "log_sha256": "848cc468faf48ed4d893f1a194d05a5374886d6fe8a5feaffacbfd663119c068",
+      "artifacts": {},
+      "fixture_inputs_sha256": {
+        "shz-parent.mak": "f22bdce082333a80bee0165491a6a4a3124392e3044e7fbb9e1022d26fa974cb",
+        "kernel/shz-contract.mak": "2366a87a17b2ff291b313455bab9a1a53facec5f794407966208e6f48c32c182",
+        "kernel/contract-c.c": "3002f77e892aaae7f8e9cc1aeffdcbc4e6e8282f462b04f59b059ed13963b4ae",
+        "kernel/contract-asm.asm": "59ce92234ff068317efc891896d5bd925608d69f1bd19a5a1e3daa288e77bf63",
+        "config.mak": "205a8a4f1deb9e56d82ee8d7e10483a13c0c3d5a2ccb4335a4e2cd4189a1bf47"
+      },
+      "command": [
+        "/usr/bin/make",
+        "-f",
+        "makefile",
+        "-f",
+        "shz-parent.mak",
+        "shz-contract",
+        "XCPU=386",
+        "XFAT=32"
+      ],
+      "commands_output": "cd kernel && wmake -ms -h -f shz-contract.mak shz-contract\nwcc -zq -fo=.obj -I../hdr -3 -DI386 -DWITHFAT32 -os-s-e5-j-zl-zp1-wx-we-zgf-zff-r-ntHMA_TEXT contract-c.c\ncontract-c.c(3): Error! E1113: Expression has incomplete type\ncontract-c.c(3): Note! N2003: source conversion type is 'struct WinStartupInfo'\ncontract-c.c(3): Error! E1020: Dimension cannot be 0 or negative\ncontract-c.c(4): Error! E1113: Expression has incomplete type\ncontract-c.c(4): Note! N2003: source conversion type is 'struct WinPatchTable'\ncontract-c.c(4): Error! E1020: Dimension cannot be 0 or negative\ncontract-c.c(5): Error! E1044: Variable 'shz_contract_startup' has incomplete type\nError(E42): Last command making (shz-contract) returned a bad status\nError(E02): Make execution terminated\nmake: *** [shz-parent.mak:2: shz-contract] Error 2\n"
+    },
+    "missing-asm": {
+      "exit_code": 2,
+      "configuration": "XNASM=nasm\nundefine XUPX\nALLCFLAGS=-DWIN31SUPPORT\n",
+      "log_sha256": "9606fe4281c9d59d1b302bdb0819b55024b991bc400aeac812748fc8aa4a7861",
+      "artifacts": {
+        "kernel/contract-c.obj": {
+          "sha256": "9d9a9d4e9da59368050c5ad5fa6f6f6a9dcdfa602ee3ad7b7b6387fa5ee37846",
+          "bytes": 682
+        }
+      },
+      "fixture_inputs_sha256": {
+        "shz-parent.mak": "f22bdce082333a80bee0165491a6a4a3124392e3044e7fbb9e1022d26fa974cb",
+        "kernel/shz-contract.mak": "2366a87a17b2ff291b313455bab9a1a53facec5f794407966208e6f48c32c182",
+        "kernel/contract-c.c": "3002f77e892aaae7f8e9cc1aeffdcbc4e6e8282f462b04f59b059ed13963b4ae",
+        "kernel/contract-asm.asm": "59ce92234ff068317efc891896d5bd925608d69f1bd19a5a1e3daa288e77bf63",
+        "config.mak": "b64702a766ac3d278c28b39bf46113cd0c8f175859d69118553366a2933dc9e4"
+      },
+      "command": [
+        "/usr/bin/make",
+        "-f",
+        "makefile",
+        "-f",
+        "shz-parent.mak",
+        "shz-contract",
+        "XCPU=386",
+        "XFAT=32"
+      ],
+      "commands_output": "cd kernel && wmake -ms -h -f shz-contract.mak shz-contract\nwcc -zq -fo=.obj -I../hdr -3 -DWIN31SUPPORT -DI386 -DWITHFAT32 -os-s-e5-j-zl-zp1-wx-we-zgf-zff-r-ntHMA_TEXT contract-c.c\nnasm -Dowlinux -f obj  -DWITHFAT32 -i../hdr/ -DXCPU=386 contract-asm.asm\ncontract-asm.asm:5: error: Missing_assembly_Windows_hooks\nError(E42): Last command making (shz-contract) returned a bad status\nError(E02): Make execution terminated\nmake: *** [shz-parent.mak:2: shz-contract] Error 2\n"
+    }
+  },
+  "VM_executed": false,
+  "full_kernel_built": false,
+  "Windows98_boot_verified": false,
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "native_apps_verified": false,
+  "prior_fixture_revision_failure": {
+    "log_sha256": "f813a35e5d104d2e4f93ca4afb6218f9dfcf576e12c2d7677eeee4f6d2d4b599",
+    "methods": 6,
+    "failures": 3,
+    "cause": "Fixture changed original parent makefile before source-after check; fixed using separate shz-parent.mak without changing original inputs."
+  },
+  "artifact_scope": "Tiny real Open Watcom C object and real NASM gated upstream assembly excerpt; no complete kernel build/link/image or guest execution.",
+  "raw_receipt_sha256": "38a1d928b1789b03e408f00be3f4c7c8f7986373de6842b6046ef670ddc8c387",
+  "public_tests_log_sha256": "d80de2e26f0648e8375808f316d4085987d6e316283e78d6461e0efcd0bd7fe6",
+  "public_baseline_log_sha256": "8032b6a431e499487672c88e9c30e824b841620281b37f82d8b005b9c38e2985",
+  "public_fixture_failure_log_sha256": "1ef5163c465b64bfab611db6c7fd8d5cf655821c5fcacfb9c7e52e2efa0bfd3c",
+  "peer_review": {
+    "result": "PASS",
+    "reviewer": "publish_site",
+    "mode": "independent read-only source, provenance, physical artifact and privacy review",
+    "executed_repository_code": false,
+    "reviewed_raw_receipt_sha256": "38a1d928b1789b03e408f00be3f4c7c8f7986373de6842b6046ef670ddc8c387",
+    "scope": "one-path default WIN31 flags and source-only9-file handoff; no full kernel/VM/Windows98 acceptance"
+  }
+}
