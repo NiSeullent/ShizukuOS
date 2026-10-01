@@ -490,3 +490,10 @@ is not promoted by host/PE checks.
 The corrected TLS stage is prepared from source076ed58. All four fresh native inputs pass complete instruction/PE gates and all eight original probe-source identities are preserved. Fresh output independent review precedes native admission; host preparation does not establish Windows98 TLS, OS-provider or app support.
 
 The first actual original-v10 Script trial logged307 ordered checks and actual child exit0, but failed the required manually completed VM lifecycle. Its stopped result and logs remain preserved; strict acceptance remains false. A fresh owned trial keeps all component/observer/acceptance inputs unchanged and adds a guarded finish after the actual observer deadline. Genuine GLSL compiler work, exact isolated generator dependencies and modernWasm feature audit proceed separately. Full browser standards remain incomplete.
+
+
+## Accepted selected JavaScript runtime on Windows 98
+
+A fresh original-v10 runtime trial passed307ordered native checks and actual owned-child exit0, then finished normally with original files preserved. Strict acceptance, a fresh complete i486 supplement and244 final byte rereads after that slow supplement all passed. The selected checks cover modern syntax/numeric behavior, UTF16, Promise jobs, function/runtime lifetime, UTC/current timezone and x87 restoration. The earlier lifecycle-failed trial remains preserved. Actual supervisor exit is unobserved; only its requested exit0 is recorded.
+
+This runtime-only result does not certify MSHTML DOM, full current JavaScript or other browser standards. Fresh correctedTLS preparation is independently cleared; actual TLS guest/WinSock/OS integration remains pending. Source-groundedWasm SIMD/currentEH gaps now have a separately guarded additive implementation owner, and GLSL compiler failures remain preserved. Disk relief continues in a separate agent; large builds require actual resource admission.

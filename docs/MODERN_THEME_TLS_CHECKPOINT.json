@@ -1,5 +1,5 @@
 {
-  "schema": 10,
+  "schema": 11,
   "date": "2026-10-01",
   "branch": "codex/theme-tls-5abe",
   "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
@@ -531,6 +531,54 @@
     {
       "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/first-metadata-preflight-failure.json",
       "sha256": "99d6068e668b3957e9a3703f01d0900beb521fd8dcc195285ffca74d52090e05"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-acceptance-v2/result.json",
+      "sha256": "f0b07f8e3e050163945f9b87cc3de780cddcdb855465ec443489d45243947dfe"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-acceptance-v2/root-byte-readback.json",
+      "sha256": "18dedc579fcb9649e8ef97d452b8f99e48a6b04abdf27c8b01741d6009b87afe"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-i486-guard-script-final-v1/result.json",
+      "sha256": "8d344d9632e524e4ef367ed2b046f032460f83d67754ef52eeccbade46435801"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-trident-script-5abe-native-v2/result.json",
+      "sha256": "2a53edfecff32e2ee7d3d9af17d63245adc66e8587131d4c4d70825a1ece601b"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-native-stage-independent-review-v1/result.json",
+      "sha256": "5b9930bf871da13fd260a0db35582d76b8af936c3b2588a200063c927d1f4cf2"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/result.json",
+      "sha256": "4c8eed84646180f0108ee4dd4dc0353a2090060d05e7d061966a78f5e0dd7559"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/closure-pins.json",
+      "sha256": "9c1fded89dcd0a38fb3862f3a9a80f31c2d0a5ac50f0102b6e9d2f8f724edfd0"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/source-observations.json",
+      "sha256": "f1e3f2f95d7710e49562ffbd005f945ef1bd2a7002a523c1243139cd15f27e13"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/glsl-frontend-held-source-v4/result.json",
+      "sha256": "19c47bacfe491a07abeb2d59fdf72f70faf0b9dd0732ece8fae378f2780ae565"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/disk-followup-5abe-20261001-v2/closed-checkpoint.json",
+      "sha256": "80d2f00ac87910e317963e7badcaa1359ec85e4fae030d709ea00d2ad0b1e241"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/disk-native-closed-authorities-v1/result.json",
+      "sha256": "a78469cb04b1777f3bf9bfd0def34c864afd0fcbea591c2c837a736c5bbc314d"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema11/schema10-original.json",
+      "sha256": "961510ec86db353162d688cf165925a21bcba998dc5544d757a9ffff3a2256e4"
     }
   ],
   "theme": {
@@ -620,10 +668,11 @@
       "manifest_sha256": "e0c7af02378c03edd1e6a21d00787964ee9b6b20cb8d28d2f646f7191fed9632",
       "authority_sha256": "ad368edb18594c5b9a12823655eb9d8ebd13a28c814519996af6e1b14687c852",
       "provenance_sha256": "3776c62a6bcb80548263e664508aa38df08eea1892a5f7c8dc7253e99557f634",
-      "fresh_outputs_independent_clear": false,
+      "fresh_outputs_independent_clear": true,
       "native_protocol_verified": false,
       "winsock_verified": false,
-      "os_provider_verified": false
+      "os_provider_verified": false,
+      "independent_review_sha256": "5b9930bf871da13fd260a0db35582d76b8af936c3b2588a200063c927d1f4cf2"
     }
   },
   "applications": {
@@ -695,7 +744,7 @@
     "benchmarks/wpt-css-selected-v1/source-pin.json": "eb370b76c4acd0e1e902bc22f395ca7d529cf16774724e541cd676e7afcc4241",
     "docs/I486_NATIVE_INPUT_AUDIT.md": "3060a8ad33090feb195e8df254e03b1095fde058db81b23df5bbac2b5a885951",
     "docs/MESA_SOFTPIPE_PORT_FEASIBILITY.md": "756d0bade66c01c2cf916d12c88fc1ac7a668327f5accde116c3c9955c059644",
-    "docs/MODERN_THEME_TLS_APPS.md": "c67c0ed495be20d59750bbe868e20291df84daf0e7e2bb6c2f1b92480c4b5ab2",
+    "docs/MODERN_THEME_TLS_APPS.md": "61d371db86c8ecd3e510d131aa3d53b9440e5ddba8140cee8e5950b2d5e5c297",
     "docs/NATIVE_QA_SCHEDULING_SCOPE.md": "8f4567ff592a0ba9c192499c5b00753fdcc4cc6cd149a87b4e4520a0bd51d89e",
     "docs/THEME_NATIVE_EVIDENCE.md": "8ea864696546587527c32c92acea505888ba83717398970bb7104ad40ab47f43",
     "docs/TRIDENT_AUTOMATION_NATIVE_EVIDENCE.md": "ca6008f43eb5517caa34ca372f3bec6a6826cff8d4503d20f8a6785ad28caa5f",
@@ -715,7 +764,7 @@
     "docs/TRIDENT_WASM_QJS_BRIDGE.md": "eba468069792bfe92c9d90abefb1da24815592fb71ca3c9daff40b62b28549c2",
     "docs/TRIDENT_WASM_RUNTIME.md": "1c35259a162411ff3797f505a8acdfeb36e3b3c6793cef5bddaa2a971d8b377d",
     "docs/TRIDENT_WASM_SPEC_SELECTED.md": "78b0a07c0f51caa59a86620b57ea65f0d0d890b0b0df42980aa12e7a7e2b5524",
-    "docs/modern-apps-coordination-5abe.md": "8a41b81e9340fc692cde7fe4308dab32c12b1adcc3f69f212400a98897bb2f64",
+    "docs/modern-apps-coordination-5abe.md": "43ba377b26274f3eaa3c243601ed64f5b2ae84488c624684df43a568e86a3f29",
     "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
     "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
     "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
@@ -903,7 +952,7 @@
     "tests/test_tls13_i486_native_stage.py": "75a690a35eb31fc7f9336fd049f82d6ff17a70da878c3bc6a14bd6aeac1dd4f7",
     "docs/TLS13_I486_NATIVE_STAGE.md": "90c1fee8f44b24901dadc7a02d6b69c7b4460117ed30a8399ffaa4bd7d558564"
   },
-  "updated_utc": "2026-10-01T12:17:15.801414+00:00",
+  "updated_utc": "2026-10-01T12:45:40.139818+00:00",
   "source_commits": {
     "foundation": "a12a4a95e9f3fbddcea82d69f124876d22fb660f",
     "dns_config": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -1030,15 +1079,24 @@
       "probe_instructions_decoded": 3729,
       "post_i486_instruction_families": "absent",
       "shared_memory_atomics": false,
-      "native_execution": false,
+      "native_execution": true,
       "full_language_conformance": false,
-      "latest_native_admission": "V1_LIFECYCLE_REJECTED_V2_FRESH_GUARD_PREPARATION",
+      "latest_native_admission": "ACCEPTED_SELECTED_COMPONENT_SCRIPT_V2",
       "admission_receipt_sha256": "f39e010b0d651933aff019ee738c7dbf00b536f62b9b8f5b6d247b2a125e49af",
-      "actual_qemu_launched": false,
+      "actual_qemu_launched": true,
       "previous_actual_child_exit": 0,
       "previous_ordered_checks_observed": 307,
       "lifecycle_rejection_sha256": "545e1713815ef92b5a49d767722f3d22595e4e0e516ec69555c927fae5b2eb16",
-      "native_component_acceptance": false
+      "native_component_acceptance": true,
+      "own_vm_stopped": true,
+      "native_ordered_checks": 307,
+      "actual_owned_child_pid": 4294869171,
+      "actual_owned_child_full_dword_exit": 0,
+      "actual_supervisor_exit_verified": false,
+      "native_codepage_reported": false,
+      "strict_acceptance_sha256": "f0b07f8e3e050163945f9b87cc3de780cddcdb855465ec443489d45243947dfe",
+      "fresh_final_cpu_guard_sha256": "8d344d9632e524e4ef367ed2b046f032460f83d67754ef52eeccbade46435801",
+      "root_late_readback_sha256": "18dedc579fcb9649e8ef97d452b8f99e48a6b04abdf27c8b01741d6009b87afe"
     },
     "automation_v4": {
       "production_adapter_os_double_assertions": 3799,
@@ -1067,7 +1125,9 @@
       "strict_guard_union_independently_checked_files": 335,
       "strict_guard_complete_instructions": 471637,
       "strict_guard_complete_executable_bytes": 1481240,
-      "fresh_guard_replay_before_launch_and_final_acceptance_required": true
+      "fresh_guard_replay_before_launch_and_final_acceptance_required": true,
+      "script_selected_component_passed": true,
+      "complete_runtime_and_mshtml_automation_runs": false
     },
     "css_mshtml": {
       "fixture_build": "css-mshtml-fixture-v9",
@@ -1234,13 +1294,31 @@
       "external_toolchain_complete_closure": false
     },
     "glsl_frontend": {
-      "status": "IMPLEMENTATION_IN_PROGRESS",
+      "status": "HELD_UNACCEPTED_SOURCE_RESOURCE_GUARDED",
       "audit_sha256": "10f2383dc0e3b296a52bc8ed313782fe758d53c2ff2e54eb1f1b372551a0967f",
       "isolated_generator_dependency_sha256": "19a1d52bae7228dadb8b0fca20a86fd8d3dc3d563ca9bb0ed9e49c1919917f08",
       "full_profile_accepted": false,
       "native_verified": false,
       "webgl_verified": false,
-      "webgpu_verified": false
+      "webgpu_verified": false,
+      "held_source_sha256": "19c47bacfe491a07abeb2d59fdf72f70faf0b9dd0732ece8fae378f2780ae565",
+      "actual_normal_original_glcpp_matches": 608,
+      "full_sanitizer_accepted": false,
+      "typed_profile_accepted": false
+    },
+    "wasm_modern_features_audit": {
+      "receipt_sha256": "4c8eed84646180f0108ee4dd4dc0353a2090060d05e7d061966a78f5e0dd7559",
+      "original_files": 2001,
+      "checked_inputs": 4298,
+      "actual_tu_bindings": 98,
+      "classic_simd_supported": false,
+      "current_eh_supported": false,
+      "relaxed_simd_supported": false,
+      "new_additive_classic_scalar_profile_owner": "wasm_runtime",
+      "implementation_complete": false,
+      "native": false,
+      "browser": false,
+      "full": false
     }
   },
   "disk_optimization": {
@@ -1266,6 +1344,17 @@
       "full_range_coverage": false,
       "net_filesystem_free_gain_claimed": false,
       "checkpoint_sha256": "ea9a495c3caa92c9542ad06962b5c8ef3d4f09f4b06904e2ff9a1fe021aa2e6b"
+    },
+    "followup_v2": {
+      "status": "REFUSED_CLOSED_NO_MUTATION",
+      "closed_receipt_sha256": "80d2f00ac87910e317963e7badcaa1359ec85e4fae030d709ea00d2ad0b1e241",
+      "new_shared_bytes": 0
+    },
+    "followup_v3": {
+      "status": "ALLOCATED_ONLY_RELIEF_IN_PROGRESS",
+      "root_closed_two_native_authority_sha256": "a78469cb04b1777f3bf9bfd0def34c864afd0fcbea591c2c837a736c5bbc314d",
+      "closed": false,
+      "actual_recovery_accepted": false
     }
   }
 }
