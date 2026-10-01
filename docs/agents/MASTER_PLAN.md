@@ -115,8 +115,8 @@ Full requirements remain active; a completed slice is not the final architecture
 
 - [ ] Actual Windows 98 on ShizukuDOS meets the required native VMM, DOS, driver, GUI and modern-application gates; component/old-DOS controls cannot substitute.
 - [ ] Assemble the final1.0.0 ISO using the project installer and frozen admitted production sources; validate artifact contents, exact checksums and actual intended boot/install paths. Private Microsoft media remains private.
-- [ ] Fully refactor the official distribution website into coherent download, installation, compatibility and real-execution pages while preserving every existing92 published asset and its genuine evidence.
-- [ ] Stage and inspect the website in a real browser; validate links/download hashes, responsive layout and accessibility.
+- [x] Refactor the official distribution website source into coherent bilingual download, installation, compatibility, development and real-execution pages, preserving all92 existing public paths and75 immutable artifacts. Source7050f3e; publication remains the separate gate below.
+- [x] Stage and inspect the frozen100-asset website in real Chrome; validate exact HTTP/download hashes, desktop/mobile layout, keyboard navigation, both48-frame viewers, browser game controls and no-JavaScript original PNG/JSON access.54 regression tests and independent source review pass; see status/site-ux-c957.md.
 - [ ] Deploy through the existing m98 nginx static release with scoped ownership/lock/current-release guards, preserving rollback and the separate legacy console. Verify the actual public domain and complete ISO download; GitHub remains source/patch only.
 
 The goal is still active. Final artifacts and web deployment remain required;

@@ -105,7 +105,7 @@ Actual Windows 98 boot on replacement DOS, positive VMM→PMA work/wait/result,
 VMM responsiveness, native SMP, per-process VGA/SVGA virtualization, complete
 DOS state serialization and modern driver/application acceptance remain open.
 Original-DOS controls, absent-peer VxD rejection, inventories and host or
-standalone component tests do not satisfy these gates. The full goal explicitly includes final1.0.0 ISO, a complete m98.nyase.kr website refactor and verified nginx/public delivery after actual native acceptance. Website source preservation is underway; no live release, ISO, shared main/origin, client-global configuration or private-media publication has been performed by this lane.
+standalone component tests do not satisfy these gates. The full goal explicitly includes final1.0.0 ISO, a complete m98.nyase.kr website refactor and verified nginx/public delivery after actual native acceptance. Website source refactor7050f3e and frozen local browser verification are complete:100assets,54 regressions, both48-frame viewers and actual downloads pass; see status/site-ux-c957.md. No live release, ISO, shared main/origin, client-global configuration or private-media publication has been performed by this lane.
 
 Actual public browser baseline at20:51UTC reached a valid-HTTPS Cloudflare security challenge (HTTP403), preserved in `output/playwright/public-baseline-challenge.png`. No TLS-ignore or challenge bypass was used. This proves neither public-page delivery nor final artifact download. Local reviewed-stage preview and later normal external delivery checks remain required.
 
