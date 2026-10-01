@@ -40,7 +40,8 @@ static void deadline(int sig)
 {
     static const char message[] = "FAIL: production receive loop did not reach its next wait within 2 seconds\n";
     (void)sig;
-    (void)write(STDERR_FILENO, message, sizeof message - 1);
+    ssize_t written = write(STDERR_FILENO, message, sizeof message - 1);
+    (void)written; /* Diagnostic failure cannot turn a watchdog into success. */
     _Exit(124);
 }
 

@@ -60,3 +60,41 @@ context-switch/deadline scheduling, cross-domain and peer integration flags
 stay false. A later combined K32 compile/link and real Windows→Shizuku worker
 return path are separate acceptance work. Sole canonical/main/site/ISO owners
 retain publication; no main adoption or final deployment is presumed.
+
+## First own attempt: fixture compile failure, not assertion RED
+
+Prepared guard835dfd13 and workflowdd640bb4 ran at exact
+c9c09ed9b7bf091b028eb616d2d1b899d543aef4 in
+[run36929140107](https://github.com/NiSeullent/Win98-Modern/actions/runs/36929140107),
+job110593794449. GCC rejected the fixture watchdog's `(void)write(...)` for
+ignoring a warn_unused_result return under unchanged -Werror. No IPC case or
+native object completed. The actual four commands returned0,0,0,1 and were
+reaped without abort. Resource failure was absent, accounting verified and
+minimum free92,386,041,856B; this was a fixture compile failure, not product
+assertion RED or success. Root and an independent reviewer matched the full
+logged receipt and exact492B compiler diagnostic capture.
+
+Failure receipt60,032B SHA256
+03d9341845c9721e585d73b53a5c08438ec02a1ad37da97ba3103a1b0ee0a775;
+actual log134,771B SHA256
+a0fd054d610e6c7f0f1bb08b085a4de393e083410225683ce81343272b2a2075.
+The historical committed fixture165391eb and guard835dfd remain in Git and
+their actual proof is preserved unchanged.
+
+The own fixture successor stores the same async-signal-safe write result in
+ssize_t and discards that variable, then unconditionally exits124. No warning
+option, CHECK, case count, production code or watchdog success rule changes.
+Fixture8137B SHA256
+c3cad2b11a9ac7bae97aca531ab40817c51ede4b8cd98ded320ec09452663858;
+guard42098B SHA256
+88179baec8ff68cc5e6ef0ee1b601622521b7303e388ba9a8c4171ffa3697364.
+Only the guard's fixture digest and size pins changed. Independent static
+review cleared the narrow successor; fresh hosted execution remains pending.
+
+The companion combined K32 build at c9c09ed succeeded in run36929139750:
+all43 compile/link commands0 with30 source snapshots. Its snapshot included
+the old host fixture even though no kernel compile command compiled it.
+That broader snapshot is historical after the watchdog change; a new combined
+build is required rather than declaring the30-input current closure unchanged.
+Receipt94,786B SHA256
+d09235577283f48a5a1c08bd80e9242d061898b767d96fa63e4f2dd9b97136b2.
