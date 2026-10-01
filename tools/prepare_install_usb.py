@@ -82,6 +82,15 @@ def file_record(path: Path) -> dict:
     return {"bytes": before[2], "sha256": digest.hexdigest()}
 
 
+def read_receipt(path: Path) -> tuple[dict, dict, tuple[int, ...]]:
+    before = stamp(path)
+    raw = path.read_bytes()
+    if stamp(path) != before or len(raw) != before[2]:
+        raise PreparationError("Producer receipt changed while being read")
+    record = {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    return json.loads(raw.decode("utf-8")), record, before
+
+
 def safe_name(name: str) -> str:
     path = PurePosixPath(name)
     if (not path.parts or path.is_absolute() or ".." in path.parts or "\\" in name
@@ -188,13 +197,13 @@ def assert_same(record: dict, expected: dict, what: str) -> None:
 
 def stage(args: argparse.Namespace) -> dict:
     iso, receipt = input_file(args.iso), input_file(args.receipt)
-    proof = json.loads(receipt.read_text(encoding="utf-8"))
+    proof, receipt_before, receipt_stamp = read_receipt(receipt)
     if (proof.get("private") is not False or proof.get("boot_profile") != "desktop"
             or proof.get("boot_mode") != "kernel64" or proof.get("setup", {}).get("present") is not True
             or proof.get("git", {}).get("dirty") is not False
             or not re.fullmatch(r"[0-9a-f]{40}", str(proof.get("git", {}).get("revision", "")))):
         raise PreparationError("Clean-source public desktop/kernel64 ISO and installer receipt required")
-    iso_before, receipt_before = stamp(iso), file_record(receipt)
+    iso_before = stamp(iso)
     iso_record = file_record(iso)
     assert_same(iso_record, proof, "Public ISO")
     windows, windows_record = windows_iso(args.win98_iso) if args.win98_iso else (None, None)
@@ -261,7 +270,7 @@ def stage(args: argparse.Namespace) -> dict:
             "claims": CLAIMS, "files": tree_records(usb),
         }
         if (stamp(iso) != iso_before or file_record(iso) != iso_record
-                or file_record(receipt) != receipt_before
+                or stamp(receipt) != receipt_stamp or file_record(receipt) != receipt_before
                 or (windows and (stamp(windows) != windows_before or file_record(windows) != windows_record))):
             raise PreparationError("A source input changed during preparation")
         (usb / MANIFEST).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
@@ -317,7 +326,7 @@ def combine(args: argparse.Namespace) -> dict:
     # writable build/ workspace were explicitly selected by the `combine` caller.
     subprocess.run(argv, check=True, cwd=source)
     receipt = input_file(out.with_suffix(".json"))
-    proof = json.loads(receipt.read_text(encoding="utf-8"))
+    proof, receipt_record, receipt_stamp = read_receipt(receipt)
     record = file_record(input_file(out))
     if proof.get("private") is not True:
         raise PreparationError("Combined output did not carry the producer's private marker")
@@ -326,8 +335,10 @@ def combine(args: argparse.Namespace) -> dict:
         raise PreparationError("Owner Windows ISO changed during the private build")
     result = {"schema": "win98-modern-private-combination-v1", "private": True,
               "owner_windows_iso": windows_record, "combined_iso": record,
-              "producer_receipt": file_record(receipt), "source_commit": proof.get("git", {}).get("revision"),
+              "producer_receipt": receipt_record, "source_commit": proof.get("git", {}).get("revision"),
               "claims": CLAIMS}
+    if stamp(receipt) != receipt_stamp or file_record(receipt) != receipt_record:
+        raise PreparationError("Producer receipt changed during private combination")
     result_path = out.with_suffix(".combination.json")
     with result_path.open("x", encoding="utf-8") as stream:
         stream.write(json.dumps(result, indent=2) + "\n")

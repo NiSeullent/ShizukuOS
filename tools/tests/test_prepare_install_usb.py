@@ -1,14 +1,18 @@
 """Real ISO/FAT packaging fixtures. These never run Windows or a guest OS."""
 from __future__ import annotations
 
+import argparse
 import hashlib
+import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "prepare_install_usb.py"
 TOOLS = ("xorriso", "mkfs.fat", "mmd", "mcopy")
@@ -21,6 +25,9 @@ def sha(path: Path) -> str:
 @unittest.skipUnless(all(shutil.which(name) for name in TOOLS), "ISO/FAT fixture tools missing")
 class CopyPreparationTests(unittest.TestCase):
     def setUp(self) -> None:
+        requested_tmp = os.environ.get("TMPDIR")
+        if requested_tmp and Path(tempfile.gettempdir()).resolve() != Path(requested_tmp).resolve():
+            self.fail("Requested TMPDIR is unavailable; refusing fallback fixture storage")
         self.temp = tempfile.TemporaryDirectory(prefix="shz-usb-test-")
         self.root = Path(self.temp.name)
         self.tree = self.root / "iso-tree"
@@ -90,6 +97,90 @@ class CopyPreparationTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(script), "stage", "--iso", str(self.iso),
                                "--receipt", str(self.receipt), "--out", str(self.out), *extra],
                               capture_output=True, text=True, timeout=60)
+
+    def copied_helper(self):
+        """Load a private helper copy so race injection cannot alter project inputs."""
+        copy = self.root / "portable/prepare_install_usb.py"
+        copy.parent.mkdir(exist_ok=True)
+        shutil.copyfile(SCRIPT, copy)
+        spec = importlib.util.spec_from_file_location("usb_preparation_fixture", copy)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def combination_fixture(self) -> argparse.Namespace:
+        """Model only the producer CLI boundary; the output never boots Windows."""
+        source = self.root / "synthetic-producer"
+        (source / "tools").mkdir(parents=True)
+        builder = source / "tools/build_shizuku_se_iso.py"
+        builder.write_text(
+            "import argparse, hashlib, json\n"
+            "from pathlib import Path\n"
+            "parser = argparse.ArgumentParser(description='Synthetic producer boundary only')\n"
+            "parser.add_argument('--desktop', action='store_true')\n"
+            "parser.add_argument('--win98-media', required=True)\n"
+            "parser.add_argument('--output', type=Path, required=True)\n"
+            "parser.add_argument('--reuse-builds', action='store_true')\n"
+            "args = parser.parse_args()\n"
+            "data = b'Synthetic combination fixture; no ISO or Windows boot claim'\n"
+            "args.output.write_bytes(data)\n"
+            "proof = {'private': True, 'git': {'revision': '1' * 40, 'dirty': False},\n"
+            "         'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}\n"
+            "args.output.with_suffix('.json').write_text(json.dumps(proof), encoding='utf-8')\n",
+            encoding="utf-8")
+        return argparse.Namespace(win98_iso=self.win98, source_root=source,
+                                  out=self.root / "synthetic-combination.iso", reuse_builds=False)
+
+    def replacement_after_parse(self, module, receipt: Path, private: bool):
+        """Persistently replace validated policy bytes at the old parse/hash boundary."""
+        loads = module.json.loads
+        observed = {}
+
+        def replace(data, *args, **kwargs):
+            parsed = loads(data, *args, **kwargs)
+            self.assertFalse(observed, "Only the producer receipt should be parsed")
+            original = receipt.read_bytes()
+            replacement = dict(parsed)
+            replacement["private"] = private
+            replacement["git"] = {"revision": "2" * 40, "dirty": True}
+            changed = json.dumps(replacement).encode("utf-8")
+            receipt.write_bytes(changed)
+            observed.update(original=original, replacement=changed)
+            return parsed
+
+        return mock.patch.object(module.json, "loads", side_effect=replace), observed
+
+    def test_stage_rejects_receipt_replaced_after_parse(self) -> None:
+        helper = self.copied_helper()
+        patch, observed = self.replacement_after_parse(helper, self.receipt, private=True)
+        args = argparse.Namespace(iso=self.iso, receipt=self.receipt, out=self.out, win98_iso=None)
+        with patch, self.assertRaisesRegex(helper.PreparationError, "changed"):
+            helper.stage(args)
+        self.assertNotEqual(observed["original"], observed["replacement"])
+        self.assertEqual(self.receipt.read_bytes(), observed["replacement"])
+        self.assertFalse(self.out.exists())
+
+    def test_combine_rejects_receipt_replaced_after_parse(self) -> None:
+        helper = self.copied_helper()
+        args = self.combination_fixture()
+        receipt = args.out.with_suffix(".json")
+        patch, observed = self.replacement_after_parse(helper, receipt, private=False)
+        with patch, self.assertRaisesRegex(helper.PreparationError, "changed"):
+            helper.combine(args)
+        self.assertNotEqual(observed["original"], observed["replacement"])
+        self.assertEqual(receipt.read_bytes(), observed["replacement"])
+        self.assertFalse(args.out.with_suffix(".combination.json").exists())
+
+    def test_synthetic_combine_binds_exact_producer_receipt(self) -> None:
+        helper = self.copied_helper()
+        args = self.combination_fixture()
+        result = helper.combine(args)
+        raw = args.out.with_suffix(".json").read_bytes()
+        self.assertEqual(result["producer_receipt"],
+                         {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()})
+        self.assertEqual(result["source_commit"], "1" * 40)
+        self.assertTrue(result["private"])
+        self.assertFalse(any(result["claims"].values()))
 
     def test_public_bundle_contains_all_iso_and_exact_efi_files(self) -> None:
         before = sha(self.iso)
