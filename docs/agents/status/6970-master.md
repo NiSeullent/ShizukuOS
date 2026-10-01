@@ -2,7 +2,7 @@
 
 - Assigned scope: existing Windows theme/storage lane, independent architecture review, and accepted scoped Kernel32 deadline arithmetic repair.
 - Worktree/branch: /root/Win98-Modern-theme-6970, codex/theme-integration-6970.
-- Current tested production commits: storage75670754f4defb135d11c6959b5d2401c5cd8a2b and Kernel32 deadline6dfc4b574a023c4e4277bbc357b876cfbd82f70d.
+- Current tested production commits: storage75670754f4defb135d11c6959b5d2401c5cd8a2b, Kernel32 deadline6dfc4b574a023c4e4277bbc357b876cfbd82f70d, WinHTTP parser7c174d9184c719fea0b1b8024ee69a4ce3d0bdd4 and native SSPI binding137b1469bed3828e2bfd510db85f8d9c845479a2. These are component host/build proofs, not integrated product acceptance.
 - Owned storage files: kernel64/fat32.c, fat32.h, disk.c; tests/test_fat32_rename_failures.c, test_disk_rename_quarantine.c, test_fat32_rename_failures.py; docs/FAT32_RENAME_CHECKPOINT_6970.md.
 - Accepted next owned source: kernel32/sched.c sleep/semaphore deadline expressions and k32.h wake_tick width; new abi/shz_sched_deadline.h and Kernel32 production-code deadline tests. No edits to Kernel64 sched.c/k64.h, VxD bridge or GOP code owned by peer sessions.
 - Decisions: actual Windows98 remains productOS; VMM owns Windows scheduling/UI/processes, PMA owns Shizuku backend workers; ShizukuDOS replaces DOS foundation; Kernel32 is distinct from Microsoft's KERNEL32.DLL.
@@ -10,7 +10,7 @@
 - Cross-chat coordination: peer titles/status and shared ledgers read; each session keeps its own worktree/index and handoff. Canonical master docs are not duplicated by this lane; preliminary 6970 drafts are preserved under notes/6970.
 - Actual tests: unchanged production a2 RED then final b2 HOST/SAN; 1378 backend trials and38 real disk checks per mode, all10 commands0, exact14-file source closure matched. Final receipt SHA6d88ef2a5267446a0fb140f7101a294ba9e73df601d1d6944c10f1a927abd1dc. Native acceptance false.
 - Source-only findings for peer review: K32 finite deadlines truncate after2^32 ticks and ms*1000 overflows32 bits; K64 multiplication/addition has analogous unchecked overflow. Current live Win98 constructor/channel2/K64 peer source exists; ShizukuDOS replacement boot remains absent. VxD and NTW32 reply paths accept request ID without full generation/endpoint/opcode validation.
-- Current blockers: shared-host resource reserve prevents local build/VM admission when crossed; merged-main storage, native i486 linking, combined publication changes and real Windows/PMA/app acceptance remain pending.
+- Current blockers: shared-host resource reserve prevents local build/VM admission when crossed; merged-main storage and real Windows/PMA/app acceptance remain pending. Hosted compile/link of the combined publication/deadline source passed separately at65f5c7e; native context-switch/Windows execution is still unverified.
 - Remaining work: review peer code, combine disjoint tested patches, verify actual32-bit build/context switching and the real Win98/DOS return path, then complete product acceptance and official distribution.
 - Preserved drafts: [local plan](../notes/6970/MASTER_PLAN.md), [scope](../notes/6970/OWNERSHIP.md), [accepted architecture](../notes/6970/DECISIONS.md), [evidence](../notes/6970/INTEGRATION_STATUS.md).
 
@@ -28,3 +28,11 @@ no real executor exists in audited maina648, and InDOS==0 alone is insufficient.
 Its exact11 source pins and first actual Win98/VxD/AH30 round-trip proposal were
 acknowledged by canonical master, which assigned its Windows/NT lead the actual
 executor and retained replacement boot. Implementation/acceptance is pending.
+
+The native SSPI provider binding reused the exact canonical module source and
+passed actual prospective RED423/651 then identical HOST651/SAN651 GREEN at
+137b146. Its private-path loader/table/pointer lifetime checks preserve all five
+legacy providers. The fixture makes no credential/TLS calls; real native DLL,
+OS/K64/VMM routing and latest-app support remain pending. [Actual receipts and
+scoped source handoff](../notes/6970/NATIVE_SSPI_PROVIDER_PLAN.md#actual-identical-fixture-green-and-scoped-integration-handoff).
+No canonical/main import or final ISO deployment is inferred from source push.

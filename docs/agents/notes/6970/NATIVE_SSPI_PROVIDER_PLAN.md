@@ -107,10 +107,42 @@ verified. Raw proof stays in bounded RAM while local physical persistence
 fails the separate20GiB admission. No credential, TLS or Windows execution
 is established by these loader-boundary controls.
 
-Root's small production profile is prepared after this actual RED; identical
-HOST/ASan/UBSan GREEN and native DLL/Windows integration remain pending.
+Root's small production profile followed this actual RED. Its identical
+HOST/ASan/UBSan GREEN is recorded below; native DLL/Windows integration remains
+pending.
 The fixed prefix follows the project's actual native provider, interpreted
 using the Microsoft [ANSI dispatch-table declaration](https://learn.microsoft.com/en-us/windows/win32/api/sspi/ns-sspi-securityfunctiontablea)
 and [typed init contract](https://learn.microsoft.com/en-us/windows/win32/api/sspi/nf-sspi-initsecurityinterfacea).
 The implementation is independently authored; no third-party source code was
 copied. These modern API declarations do not certify Windows98 native support.
+
+## Actual identical-fixture GREEN and scoped integration handoff
+
+Production137b1469bed3828e2bfd510db85f8d9c845479a2 ran in hosted
+[run36927990611](https://github.com/NiSeullent/Win98-Modern/actions/runs/36927990611),
+job110589951770. HOST651 and Clang ASan/UBSan651 checks all passed. All8 actual
+commands exited0 and were reaped without abort. Both assertion stderr captures
+were empty. Nine source inputs matched before/after and current source, with
+native.c SHA25697a33c5292773ef949df251c7615eff259305b604f8d8d8d7f20b8039f98c301.
+The C fcec7015, shim49450ec8, guard1b52856e and workflow4eedf083 pins are
+identical to actual RED. Actual -M/-MD closures matched:45 GCC and49 Clang
+inputs, including complete production C bodies and real system headers.
+
+Actual logged receipt196,082B SHA256
+7e6caf33371e59a3efdc48a0bc9d25aed9c8478ee56ccab4b2c01ca1dc4bd9fc;
+actual job log458,804B SHA256
+99a03057fb75108b2122270e3b6a537d22b6f29cc025c876f523ed9ed02b24e2.
+Root independently matched the full logged JSON and both exact assertion
+captures. Hosted minimum free92,385,599,488B, final output1,912,328B,
+peak observed1,912,329B, resource failure absent and accounting verified.
+Source snapshots and resolved compiler hashes matched; implicit compiler
+backends/linkers/runtime, the loaded Python implementation and transient
+filesystem peaks are not fully attested.
+
+Sole canonical/main publishers should take restore e2473df, frozen regression
+bef7fac and production137b146 as scoped commits; this note does not claim that
+they have received, acknowledged or merged them. Kernel64 service routing,
+native_loader --providers policy, OS registration and peer-owned VMM/DOS boot
+remain unchanged. The actual proof validates provider selection/table/pointer
+lifetime using host Win32 boundaries. No credential/handshake/encryption path,
+native DLL execution, actual Windows concurrency or latest-app acceptance ran.

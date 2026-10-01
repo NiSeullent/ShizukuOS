@@ -13,6 +13,7 @@ Snapshot: 2026-10-01. This document separates source inspection, component execu
 | GOP/display/wrapper infrastructure | Existing validated RGB/BGR handoff, Kernel64 GOP backend, DOS text-to-GOP and wrapper interfaces inspected | Safe high-resolution mode/EDID policy, bitmask support, dynamic recovery console, on-demand video and actual Windows display path |
 | FAT32 rename/disk repair | Actual unchanged-production RED; final HOST/SAN PASS, 1378 trials and38 bridge checks per mode | Three-way main merge retaining independent changes, exact merged closure regression, full VFS/NT/native paths |
 | Global Windows theme source | Own source30057289 pushed; actual native global two-boot proof remains pending | Actual ShizukuDOS-backed Windows global theme/cold-boot/visual/lifecycle acceptance |
+| Native ANSI SSPI provider binding | New explicit private M98SSPI profile137b146; actual RED423/651 then identical HOST651/SAN651 PASS | Native x86 DLL/ROOT, real credential/TLS, OS/K64/VMM routing and required application execution |
 | Disk optimization | Separate exact allocation-only sharing; historical logical contents and failures preserved | Volatile shared-host free space is sampled at each build/VM admission; potential savings are not credited |
 | Whole product | Incomplete | Actual Windows98 desktop and service return path, required modern apps/drivers/APIs, stress and final official ISO |
 
@@ -45,6 +46,14 @@ RED (25 failures across110 checks), followed by the identical fixture passing
 actual logged receipt and source bindings. [Checkpoint](WINHTTP_URL_CHECKPOINT.md#actual-identical-fixture-green-and-scoped-import).
 Native Windows, HTTP/TLS-provider execution, modern applications and canonical
 main import remain separate acceptance work.
+
+The existing native provider module was restored exactly from canonical source,
+then extended with a narrow SECUR32→M98SSPI ANSI binding. Actual unchanged-source
+prospective RED423/651 was followed by identical HOST651 and Clang ASan/UBSan651
+PASS at137b146. Full table/export validation and cached module lifetime retain
+the original five get_api_table paths. [Source and actual proof](NATIVE_SSPI_PROVIDER_PLAN.md#actual-identical-fixture-green-and-scoped-integration-handoff).
+The fixture never invokes credentials or TLS and does not establish native DLL,
+Windows98, Kernel64, OS registration, application or final ISO acceptance.
 
 Fresh outside check36919558655 at maina648 observed the official homepage,
 without active VNC or a challenge, in all four normal-Chrome-identity browser
