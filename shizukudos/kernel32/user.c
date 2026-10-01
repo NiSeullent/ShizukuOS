@@ -49,7 +49,7 @@ int proc_create(const char *name, const uint8_t *image, uint32_t size, int *pid_
 {
     struct proc *p = 0;
     unsigned i, k;
-    uint32_t off;
+    uint32_t off, f;
     for (i = 1; i <= MAX_PROCS; ++i)
         if (!procs[i].used) { p = &procs[i]; break; }
     if (!p || !size || size > 0x100000)
@@ -73,14 +73,22 @@ int proc_create(const char *name, const uint8_t *image, uint32_t size, int *pid_
         return -1;
     }
     p->entry = USER_BASE;
+    /* thread_create publishes READY and restores its caller's interrupt state.
+     * Keep the UP timer masked until both ownership links are published. */
+    f = irq_save();
     p->used = 1;
     p->thread = thread_create(p->name, proc_thread, p);
     if (!p->thread) {
+        const uint32_t pd = p->pd;
         p->used = 0;
+        p->pd = 0;
+        irq_restore(f);
+        vm_free_space(pd);
         return -1;
     }
     p->thread->proc = (uint32_t)p->pid;
     if (pid_out) *pid_out = p->pid;
+    irq_restore(f);
     return 0;
 }
 
