@@ -483,3 +483,10 @@ loopback cases, and 19 application-inventory regression tests. Theme and TLS
 artifacts also pass their native PE/import gates. The exact artifacts and
 receipts are bound by `docs/MODERN_THEME_TLS_CHECKPOINT.json`; native component evidence is recorded separately, and application functionality
 is not promoted by host/PE checks.
+
+
+## Corrected TLS canonical stage and current Script lifecycle
+
+The corrected TLS stage is prepared from source076ed58. All four fresh native inputs pass complete instruction/PE gates and all eight original probe-source identities are preserved. Fresh output independent review precedes native admission; host preparation does not establish Windows98 TLS, OS-provider or app support.
+
+The first actual original-v10 Script trial logged307 ordered checks and actual child exit0, but failed the required manually completed VM lifecycle. Its stopped result and logs remain preserved; strict acceptance remains false. A fresh owned trial keeps all component/observer/acceptance inputs unchanged and adds a guarded finish after the actual observer deadline. Genuine GLSL compiler work, exact isolated generator dependencies and modernWasm feature audit proceed separately. Full browser standards remain incomplete.

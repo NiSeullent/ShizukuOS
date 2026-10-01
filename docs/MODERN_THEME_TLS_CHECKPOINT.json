@@ -1,5 +1,5 @@
 {
-  "schema": 9,
+  "schema": 10,
   "date": "2026-10-01",
   "branch": "codex/theme-tls-5abe",
   "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
@@ -479,6 +479,58 @@
     {
       "path": "docs/NATIVE_QA_SCHEDULING_SCOPE.md",
       "sha256": "8f4567ff592a0ba9c192499c5b00753fdcc4cc6cd149a87b4e4520a0bd51d89e"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-controls-v2/result.json",
+      "sha256": "ba7e77688f6a29ccb11f6d6f347628f990d5b3ccf8b7f1d541a7a1526da7cb55"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-closure-v2/result.json",
+      "sha256": "f966e20c43a210540996928cf19069f6c663ec917ed1c82888e26d2bf49c4eb3"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-independent-review-v2/result.json",
+      "sha256": "05c8c634611aba14c46b57f65ff8763d4c1cdf666b3ac928d79c495a96fdaf49"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-native-preparation-v1/result.json",
+      "sha256": "f5035a24b07c2f7508125e5dfc994e86eb7470b647763f1b002d5cde9cb4d5ef"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/graphics-compiler-audit-v1/result.json",
+      "sha256": "10f2383dc0e3b296a52bc8ed313782fe758d53c2ff2e54eb1f1b372551a0967f"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/glsl-generator-dependencies-v3/result.json",
+      "sha256": "19a1d52bae7228dadb8b0fca20a86fd8d3dc3d563ca9bb0ed9e49c1919917f08"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-rejected-v1/result.json",
+      "sha256": "545e1713815ef92b5a49d767722f3d22595e4e0e516ec69555c927fae5b2eb16"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-launch-v2/launch.py",
+      "sha256": "fa2ba409618567e2e0ffbc99e37076d38f133a774495cf70a166428427dae0a9"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/guest-files.json",
+      "sha256": "e0c7af02378c03edd1e6a21d00787964ee9b6b20cb8d28d2f646f7191fed9632"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/stage-authority.json",
+      "sha256": "ad368edb18594c5b9a12823655eb9d8ebd13a28c814519996af6e1b14687c852"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/provenance.json",
+      "sha256": "3776c62a6bcb80548263e664508aa38df08eea1892a5f7c8dc7253e99557f634"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/schema9-original.json",
+      "sha256": "a707479f9a151fbbe53919670e17d2c630c087418efdab85f0f2c35c02a5abfd"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/first-metadata-preflight-failure.json",
+      "sha256": "99d6068e668b3957e9a3703f01d0900beb521fd8dcc195285ffca74d52090e05"
     }
   ],
   "theme": {
@@ -560,6 +612,18 @@
       "native_windows": false,
       "system_tls": false,
       "native_stage_preparing": true
+    },
+    "corrected_i486_native_stage": {
+      "source_commit": "076ed584a29772a486b9944a4347e6ea5fd1e1e0",
+      "host_preparation_pass": true,
+      "stage": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1",
+      "manifest_sha256": "e0c7af02378c03edd1e6a21d00787964ee9b6b20cb8d28d2f646f7191fed9632",
+      "authority_sha256": "ad368edb18594c5b9a12823655eb9d8ebd13a28c814519996af6e1b14687c852",
+      "provenance_sha256": "3776c62a6bcb80548263e664508aa38df08eea1892a5f7c8dc7253e99557f634",
+      "fresh_outputs_independent_clear": false,
+      "native_protocol_verified": false,
+      "winsock_verified": false,
+      "os_provider_verified": false
     }
   },
   "applications": {
@@ -631,7 +695,7 @@
     "benchmarks/wpt-css-selected-v1/source-pin.json": "eb370b76c4acd0e1e902bc22f395ca7d529cf16774724e541cd676e7afcc4241",
     "docs/I486_NATIVE_INPUT_AUDIT.md": "3060a8ad33090feb195e8df254e03b1095fde058db81b23df5bbac2b5a885951",
     "docs/MESA_SOFTPIPE_PORT_FEASIBILITY.md": "756d0bade66c01c2cf916d12c88fc1ac7a668327f5accde116c3c9955c059644",
-    "docs/MODERN_THEME_TLS_APPS.md": "5b8ebead66dd76cd85ef2152a0b26f9b18b6f39b656a783e8e1ff3296a7a4c80",
+    "docs/MODERN_THEME_TLS_APPS.md": "c67c0ed495be20d59750bbe868e20291df84daf0e7e2bb6c2f1b92480c4b5ab2",
     "docs/NATIVE_QA_SCHEDULING_SCOPE.md": "8f4567ff592a0ba9c192499c5b00753fdcc4cc6cd149a87b4e4520a0bd51d89e",
     "docs/THEME_NATIVE_EVIDENCE.md": "8ea864696546587527c32c92acea505888ba83717398970bb7104ad40ab47f43",
     "docs/TRIDENT_AUTOMATION_NATIVE_EVIDENCE.md": "ca6008f43eb5517caa34ca372f3bec6a6826cff8d4503d20f8a6785ad28caa5f",
@@ -651,7 +715,7 @@
     "docs/TRIDENT_WASM_QJS_BRIDGE.md": "eba468069792bfe92c9d90abefb1da24815592fb71ca3c9daff40b62b28549c2",
     "docs/TRIDENT_WASM_RUNTIME.md": "1c35259a162411ff3797f505a8acdfeb36e3b3c6793cef5bddaa2a971d8b377d",
     "docs/TRIDENT_WASM_SPEC_SELECTED.md": "78b0a07c0f51caa59a86620b57ea65f0d0d890b0b0df42980aa12e7a7e2b5524",
-    "docs/modern-apps-coordination-5abe.md": "8c6c7a464e5c3905cd57575931f590044fb169c43a3b1e1bb2887610aa348715",
+    "docs/modern-apps-coordination-5abe.md": "8a41b81e9340fc692cde7fe4308dab32c12b1adcc3f69f212400a98897bb2f64",
     "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
     "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
     "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
@@ -833,9 +897,13 @@
     "tools/build_wasm_memory_profile.py": "44049c5ed1aeedd3b79c57e9c2be68fefb9bb25022aaf09554fc0fabdf93c07e",
     "docs/TRIDENT_WASM_QJS_MEMORY_PROFILE.md": "eaba958d7f8ae4d9547e316e03dab960084967db94cfcfa419cfd1ae3e53dc6a",
     "tests/m98_wasm_qjs_memory_host.c": "0246e23dfe5ed1b9567819f923c18f2741769035bedd362c0fc1f2f59b6088de",
-    "tools/build_wasm_qjs_memory.py": "4dcb8be74da08db7378f412c040e96f8510fe3eb9cbb6b6ad91da395afe847dd"
+    "tools/build_wasm_qjs_memory.py": "4dcb8be74da08db7378f412c040e96f8510fe3eb9cbb6b6ad91da395afe847dd",
+    "tools/stage_tls13_i486_native.py": "08516754180d5ea6b1547581c871889e4fed4dce1c57137687de68c237810498",
+    "tools/tls13_i486_native_stage_evidence.py": "ba9eb7542b099b81a43f75c474602a27a14d6ee9b2f14f9c526a8da2c6d1ef92",
+    "tests/test_tls13_i486_native_stage.py": "75a690a35eb31fc7f9336fd049f82d6ff17a70da878c3bc6a14bd6aeac1dd4f7",
+    "docs/TLS13_I486_NATIVE_STAGE.md": "90c1fee8f44b24901dadc7a02d6b69c7b4460117ed30a8399ffaa4bd7d558564"
   },
-  "updated_utc": "2026-10-01T11:59:35.882379+00:00",
+  "updated_utc": "2026-10-01T12:17:15.801414+00:00",
   "source_commits": {
     "foundation": "a12a4a95e9f3fbddcea82d69f124876d22fb660f",
     "dns_config": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -861,7 +929,8 @@
     "numeric_native_final_file_drift_fix": "0f163b1",
     "tls13_i486_correction": "3b429e1d38f5e00aa3c33cd01f9b41559fab847c",
     "wasm_browser_memory_correction": "76cb02bc64b27b6359bd012150530b431814e047",
-    "quickjs_corrected_wasm_memory": "a0d2d724e8b70ad7d3e2ad2de2519f3a5d0a62ab"
+    "quickjs_corrected_wasm_memory": "a0d2d724e8b70ad7d3e2ad2de2519f3a5d0a62ab",
+    "corrected_tls_native_stage": "076ed584a29772a486b9944a4347e6ea5fd1e1e0"
   },
   "dns_config": {
     "source_commit": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -963,9 +1032,13 @@
       "shared_memory_atomics": false,
       "native_execution": false,
       "full_language_conformance": false,
-      "latest_native_admission": "ADMITTED_OWNED_HARNESS_PREPARING",
+      "latest_native_admission": "V1_LIFECYCLE_REJECTED_V2_FRESH_GUARD_PREPARATION",
       "admission_receipt_sha256": "f39e010b0d651933aff019ee738c7dbf00b536f62b9b8f5b6d247b2a125e49af",
-      "actual_qemu_launched": false
+      "actual_qemu_launched": false,
+      "previous_actual_child_exit": 0,
+      "previous_ordered_checks_observed": 307,
+      "lifecycle_rejection_sha256": "545e1713815ef92b5a49d767722f3d22595e4e0e516ec69555c927fae5b2eb16",
+      "native_component_acceptance": false
     },
     "automation_v4": {
       "production_adapter_os_double_assertions": 3799,
@@ -1159,6 +1232,15 @@
       "standard_browser_webassembly": false,
       "full_browser_standards": false,
       "external_toolchain_complete_closure": false
+    },
+    "glsl_frontend": {
+      "status": "IMPLEMENTATION_IN_PROGRESS",
+      "audit_sha256": "10f2383dc0e3b296a52bc8ed313782fe758d53c2ff2e54eb1f1b372551a0967f",
+      "isolated_generator_dependency_sha256": "19a1d52bae7228dadb8b0fca20a86fd8d3dc3d563ca9bb0ed9e49c1919917f08",
+      "full_profile_accepted": false,
+      "native_verified": false,
+      "webgl_verified": false,
+      "webgpu_verified": false
     }
   },
   "disk_optimization": {
