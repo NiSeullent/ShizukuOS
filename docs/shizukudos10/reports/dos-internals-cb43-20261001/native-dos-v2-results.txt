@@ -1,0 +1,19 @@
+CB43 native DOS prerequisite diagnostic; no Windows boot claim
+PASS 1220_invalid_handle_AL6
+PASS 1216_invalid_system_number_carry
+PASS actual_DOS_file_open
+PASS 1220_actual_file_JFT_pointer
+PASS JFT_contains_open_system_number
+PASS 1216_resolves_actual_open_file
+PASS actual_SFT_has_open_reference
+PASS actual_DOS_file_close
+PASS actual_close_clears_JFT_byte
+PASS actual_double_close_invalid_handle_AX6
+PASS 1231_hide_selects_DL_ignores_DH_BX
+PASS 1231_report_selects_DL_ignores_DH_BX
+PASS report_enable_does_not_invent_Windows
+PASS 1231_one_shot_load_explicitly_unsupported
+PASS 1231_selector_3_rejected
+PASS 1231_selector_255_rejected
+PASS restore_reporting_state
+CHECKS 17 PASS 17 FAIL 0

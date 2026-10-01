@@ -1,0 +1,18 @@
+{
+  "schema": "shizukudos-cb43-first-native-attempt-corrected-v1",
+  "status": "EMULATOR_STARTUP_FAILURE_NOT_DOS_EXECUTION",
+  "actual_DOS_interrupts": false,
+  "emulator_CPU": "qemu32",
+  "QEMU_exit": 1,
+  "guest_report": null,
+  "guest_exit_marker": null,
+  "original_source_image_unchanged": true,
+  "elapsed_seconds": 0.96,
+  "original_result_sha256": "5930a5e0346c0c80e681885e059cc4b1ebf33fc7d86668d88202edb66d5820c9",
+  "original_result_preserved": true,
+  "original_claim_actual_DOS_interrupts": true,
+  "original_claim_was_wrong": true,
+  "correction": "QEMU exited before guest execution: CPU model qemu32 unavailable. No guest report or exit marker. Original true field is incorrect.",
+  "corrective_action": "New v2 epoch used advertised qemu64 CPU and a separate owned disk; genuine DOS execution was then recorded",
+  "qemu_log_sha256": "cb28e2dbc59eed037f5257b5ff79cfd23ceae1a8f5dfc2b1c8f27755ce7ca3bd"
+}
