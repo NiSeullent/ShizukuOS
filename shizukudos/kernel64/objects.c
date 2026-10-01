@@ -385,7 +385,8 @@ void ob_print_wait(thread_t *t)
     kprintf("K64:     waits for %s of %u object(s):", d->all ? "all" : "any", d->n);
     for (i = 0; i < d->n && i < 8; ++i) {
         const kobject_t *o = d->objs[i];
-        kprintf(" [type %x%s%s signaled %d]", o->type, o->name[0] ? " " : "", o->name, o->signaled);
+        if (o->type == OB_THREAD) kprintf(" [thread tid %llu signaled %d]", (unsigned long long)o->u.thr.tid, o->signaled);    /* a join: whose exit it waits for */
+        else kprintf(" [type %x%s%s signaled %d]", o->type, o->name[0] ? " " : "", o->name, o->signaled);
     }
     kprintf("\n");
 }

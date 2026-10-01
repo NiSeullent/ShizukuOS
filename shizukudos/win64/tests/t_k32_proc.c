@@ -600,6 +600,21 @@ static void test_heaps(void)
           "this heap is not a low-fragmentation heap (ERROR_NOT_SUPPORTED)");
     v = 0;
     CHECK(HeapSetInformation(h3, HeapCompatibilityInformation, &v, sizeof v), "HeapCompatibilityInformation 0 (standard heap)");
+    {
+        ULONG q = 99;
+        SIZE_T need = 0;
+        CHECK(HeapQueryInformation(h3, HeapCompatibilityInformation, &q, sizeof q, &need) && q == 0 && need == sizeof q,
+              "HeapQueryInformation(HeapCompatibilityInformation) reports the standard heap (0), size 4");
+        q = 99;
+        need = 0;
+        SetLastError(0);
+        CHECK(!HeapQueryInformation(h3, HeapCompatibilityInformation, &q, 2, &need) && GetLastError() == ERROR_INSUFFICIENT_BUFFER && need == sizeof q && q == 99,
+              "... a short buffer is ERROR_INSUFFICIENT_BUFFER with the needed size, buffer untouched");
+        SetLastError(0);
+        CHECK(!HeapQueryInformation(h3, (HEAP_INFORMATION_CLASS)3, &q, sizeof q, &need) && GetLastError() == ERROR_INVALID_PARAMETER,
+              "... a set-only class (HeapOptimizeResources) cannot be queried");
+        CHECK(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "HeapQueryInformation") != NULL, "HeapQueryInformation resolves through GetProcAddress (dxcompiler.dll imports it)");
+    }
     CHECK(HeapSetInformation(0, (HEAP_INFORMATION_CLASS)3, &opt, sizeof opt), "HeapOptimizeResources {1, 0}");
     opt.version = 2;
     SetLastError(0);

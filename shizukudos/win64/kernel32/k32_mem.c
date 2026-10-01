@@ -147,6 +147,15 @@ K32API BOOL WINAPI HeapSetInformation(HANDLE h, HEAP_INFORMATION_CLASS cls, PVOI
     return TRUE;
 }
 
+/* Documented: HeapCompatibilityInformation reports 0 here (a standard heap); a short buffer sets ERROR_INSUFFICIENT_BUFFER and the
+ * needed size (dxcompiler.dll imports this name; the classes that can only be set fail with ERROR_INVALID_PARAMETER). */
+K32API BOOL WINAPI HeapQueryInformation(HANDLE h, HEAP_INFORMATION_CLASS cls, PVOID info, SIZE_T len, PSIZE_T ret)
+{
+    NTSTATUS st = (NTSTATUS)RtlQueryHeapInformation(h, cls, info, len, ret);
+    if (st) { k32_nt_error(st); return FALSE; }
+    return TRUE;
+}
+
 /* ---------------------------------------------------------------- page residency (kernel64/sysk32_proc.c) */
 static NTSTATUS range_op(HANDLE proc, ULONG cls, LPCVOID addr, SIZE_T size)
 {

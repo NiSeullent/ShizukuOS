@@ -66,6 +66,46 @@ static void test_mutex(void)
     CHECK("mutex serialises a read-modify-write (20000)", shared_counter == 20000);
 }
 
+/* The scheduler table holds far more than the old 96 threads and the kernel stacks are pages, not heap blocks (a
+ * multi-process Chromium run creates a few hundred threads; run 20 stopped at "thread table full (96 slots)"). */
+#define MANY_THREADS 400
+static ksem_t many_gate;
+static volatile int many_started, many_done;
+static void many_worker(void *arg)
+{
+    (void)arg;
+    ++many_started;
+    sem_wait(&many_gate);
+    ++many_done;
+}
+static void test_many_threads(void)
+{
+    static thread_t *t[MANY_THREADS];
+    unsigned i, created = 0;
+    uint64_t waited = 0;
+    const uint64_t free_before = pmm_free_count();
+    const size_t heap_before = kheap_used();
+    uint64_t free_during, free_after;
+    size_t heap_during;
+    sem_init(&many_gate, 0);
+    many_started = many_done = 0;
+    for (i = 0; i < MANY_THREADS; ++i) {
+        t[i] = thread_create("many", many_worker, 0);
+        if (t[i]) ++created;
+    }
+    while (many_started < (int)created && waited < 2000) { thread_sleep_ms(5); waited += 5; }
+    free_during = pmm_free_count();
+    heap_during = kheap_used();
+    for (i = 0; i < created; ++i) sem_post(&many_gate);
+    for (i = 0; i < MANY_THREADS; ++i) if (t[i]) thread_join(t[i]);
+    free_after = pmm_free_count();
+    CHECK("400 kernel threads exist at once (table of 1024 slots)", created == MANY_THREADS && many_started == MANY_THREADS &&
+                                                                     many_done == MANY_THREADS);
+    CHECK("their 32 KiB kernel stacks come from the page allocator, not the 12 MiB heap",
+          free_before - free_during >= MANY_THREADS * (KSTACK_BYTES / PAGE_SIZE) && heap_during - heap_before < 64 * 1024);
+    CHECK("joining the threads returns every stack page", free_after + 16 >= free_before && kheap_used() <= heap_before + 4096);
+}
+
 static void test_heap_and_demand(void)
 {
     void *p[200];
@@ -245,6 +285,7 @@ void run_self_tests(const shz_bootinfo_t *bi)
           (uint64_t)&run_self_tests > 0xffffffff00000000ull);
     test_preempt();
     test_mutex();
+    test_many_threads();
     test_heap_and_demand();
     test_user();
     test_win64();
