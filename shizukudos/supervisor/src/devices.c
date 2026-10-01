@@ -3,8 +3,40 @@
 #include "cpu.h"
 
 static uint64_t g_tsc_hz, g_start_tsc, g_ram_bytes;
+static int native_win98;
+static dev_native_observation_t native_observation;
 volatile int dev_a20_dirty;
 void (*dev_uart_tx_hook)(uint8_t byte);
+
+const dev_native_observation_t *dev_native_observation(void)
+{
+    return native_win98?&native_observation:0;
+}
+static void native_observe(uint16_t port,int width,int write,uint32_t value,uint64_t now)
+{
+    dev_native_io_record_t *records,*record;uint32_t *count,*dropped,key=value;
+    if(!native_win98)return;
+    if(port==0x42 || port==0x61 || (port==0x43 && write && (value>>6)==2)) {
+        records=native_observation.pit;count=&native_observation.pit_count;dropped=&native_observation.pit_dropped;
+        /* Ignore refresh toggle for coalescing, retaining actual first/last values. */
+        if(port==0x61 && !write)key&=~0x10u;
+    } else if(port==0x60 || port==0x64) {
+        records=native_observation.kbc;count=&native_observation.kbc_count;dropped=&native_observation.kbc_dropped;
+    } else return;
+    if(*count) {
+        record=&records[*count-1];uint32_t previous=record->last_value;
+        if(port==0x61 && !write)previous&=~0x10u;
+        if(record->port==port && record->width==width && record->write==write && previous==key) {
+            if(record->count!=UINT32_MAX)++record->count;
+            record->last_tsc=now;record->last_value=value;return;
+        }
+    }
+    const unsigned capacity=records==native_observation.pit?DEV_NATIVE_PIT_RECORDS:DEV_NATIVE_KBC_RECORDS;
+    if(*count>=capacity){if(*dropped!=UINT32_MAX)++*dropped;return;}
+    record=&records[(*count)++];record->first_tsc=record->last_tsc=now;
+    record->first_value=record->last_value=value;record->count=1;
+    record->port=port;record->width=(uint8_t)width;record->write=(uint8_t)write;
+}
 
 uint64_t dev_uptime_us(void)
 {
@@ -166,6 +198,7 @@ struct pit_ch {
     uint8_t gate;
     uint64_t next_irq_tsc;          /* channel 0 only */
     uint8_t running;
+    uint64_t mode0_elapsed_tsc;      /* native PIT2 only: accumulated gated time */
 };
 static struct pit_ch pit[3];
 static uint8_t port61;
@@ -174,9 +207,55 @@ static uint64_t pit_period_tsc(const struct pit_ch *c)
 {
     return (uint64_t)c->reload * g_tsc_hz / PIT_HZ;
 }
+/* Original arithmetic implements the mode0 boundary without overflow or a
+ * 128-bit compiler runtime. ticks<=PIT_HZ and remainder<PIT_HZ bound products.
+ * SeaBIOS rel-1.17.0 hw/timer.c waits for terminal OUT after 0x800 PIT2 clocks. */
+static uint64_t native_pit_ticks_tsc(uint32_t ticks)
+{
+    const uint64_t whole=g_tsc_hz/PIT_HZ,remainder=g_tsc_hz%PIT_HZ;
+    return ticks*whole+(ticks*remainder+PIT_HZ-1)/PIT_HZ;
+}
+static uint64_t native_pit_elapsed(const struct pit_ch *c,uint64_t now)
+{
+    if(!c->running)return 0;
+    const uint64_t used=c->mode0_elapsed_tsc;
+    if(!c->gate)return used;
+    const uint64_t elapsed=now-c->start_tsc;
+    return elapsed>UINT64_MAX-used?UINT64_MAX:used+elapsed;
+}
+static uint16_t native_pit_ticks_mod(uint64_t elapsed)
+{
+    const uint64_t whole=(elapsed/g_tsc_hz)%65536,remainder=elapsed%g_tsc_hz;
+    uint32_t lo=0,hi=(uint32_t)PIT_HZ-1;
+    while(lo<hi) {
+        const uint32_t mid=lo+(hi-lo+1)/2;
+        if(native_pit_ticks_tsc(mid)<=remainder)lo=mid;else hi=mid-1;
+    }
+    return (uint16_t)(whole*(PIT_HZ%65536)+lo);
+}
+static void native_pit_gate(uint8_t gate,uint64_t now)
+{
+    struct pit_ch *c=&pit[2];gate=gate!=0;
+    if(native_win98 && c->mode==0 && native_observation.pit2_terminal_seen) {
+        native_observation.pit2_interval_open=0;
+        native_observation.pit2_restored_after_terminal=1;
+    }
+    if(native_win98 && c->mode==0 && gate!=c->gate) {
+        c->mode0_elapsed_tsc=native_pit_elapsed(c,now);
+        c->start_tsc=now;
+    }
+    c->gate=gate;
+}
 
 static uint16_t pit_counter(const struct pit_ch *c, uint64_t now)
 {
+    if(native_win98 && c==&pit[2] && c->mode==0) {
+        if(!c->running)return (uint16_t)c->reload;
+        const uint64_t elapsed=native_pit_elapsed(c,now);
+        /* Mode0 OUT stays high after terminal count, while the 16-bit counter
+         * continues wrapping. Gate-low freezes both pre/post-terminal count. */
+        return (uint16_t)(c->reload-native_pit_ticks_mod(elapsed));
+    }
     uint64_t ticks = (now - c->start_tsc) * PIT_HZ / g_tsc_hz;
     if (!c->running)
         return (uint16_t)c->reload;
@@ -190,6 +269,10 @@ static void pit_load(int n, uint32_t value)
     struct pit_ch *c = &pit[n];
     c->reload = value ? value : 65536;
     c->start_tsc = rdtsc();
+    if(native_win98 && n==2) {
+        c->mode0_elapsed_tsc=0;
+        if(c->mode==0){native_observation.pit2_interval_open=1;native_observation.pit2_terminal_seen=0;}
+    }
     c->running = 1;
     if (n == 0)
         c->next_irq_tsc = c->start_tsc + pit_period_tsc(c);
@@ -215,6 +298,11 @@ static void pit_write_ctrl(uint8_t v)
     c->write_hi = 0;
     c->read_hi = 0;
     c->running = 0;
+    if(native_win98 && n==2) {
+        c->mode0_elapsed_tsc=0;c->have_latch=0;
+        native_observation.pit2_interval_open=c->mode==0;
+        native_observation.pit2_terminal_seen=0;
+    }
 }
 
 static void pit_write_data(int n, uint8_t v)
@@ -294,6 +382,21 @@ static void cmos_init(uint64_t ram_bytes)
 static uint8_t kbc_out, kbc_cmd_pending, kbc_cmd, kbc_config = 0x45;
 static uint8_t kbc_out_full;
 static uint8_t a20_gate = 1;
+static uint8_t kbc_fifo[16],kbc_fifo_head,kbc_fifo_count;
+static uint8_t keyboard_pending,keyboard_scanset,keyboard_scanning,keyboard_leds,keyboard_typematic;
+
+void dev_native_win98_enable(void)
+{
+    native_win98=1;
+    memset(&native_observation,0,sizeof native_observation);
+    native_observation.start_tsc=g_start_tsc;
+    kbc_fifo_head=kbc_fifo_count=0;kbc_cmd_pending=0;kbc_out_full=0;kbc_config=0x45;
+    keyboard_pending=0;keyboard_scanset=2;keyboard_scanning=1;keyboard_leds=0;keyboard_typematic=0x2b;
+}
+static void native_keyboard_irq(void)
+{
+    if(kbc_fifo_count && (kbc_config&1) && !(kbc_config&0x10))dev_irq_raise(1);
+}
 
 int dev_a20_get(void) { return a20_gate; }
 void dev_a20_set(int enabled)
@@ -306,16 +409,87 @@ void dev_a20_set(int enabled)
 
 static uint8_t kbc_read(uint16_t port)
 {
+    if(native_win98) {
+        if(port==0x64)return (uint8_t)(0x14|(kbc_fifo_count?1:0));
+        if(!kbc_fifo_count)return 0;
+        const uint8_t value=kbc_fifo[kbc_fifo_head];
+        kbc_fifo_head=(uint8_t)((kbc_fifo_head+1)%sizeof kbc_fifo);--kbc_fifo_count;
+        native_keyboard_irq();return value;
+    }
     if (port == 0x64)
         return (uint8_t)(0x14 | (kbc_out_full ? 1 : 0));
     kbc_out_full = 0;
     return kbc_out;
 }
 
-static void kbc_reply(uint8_t v) { kbc_out = v; kbc_out_full = 1; }
+static void kbc_reply(uint8_t v)
+{
+    if(!native_win98){kbc_out=v;kbc_out_full=1;return;}
+    if(kbc_fifo_count==sizeof kbc_fifo) {
+        if(native_observation.kbc_reply_dropped!=UINT32_MAX)++native_observation.kbc_reply_dropped;
+        return;
+    }
+    kbc_fifo[(kbc_fifo_head+kbc_fifo_count)%sizeof kbc_fifo]=v;++kbc_fifo_count;
+    native_keyboard_irq();
+}
+static void native_keyboard_command(uint8_t value)
+{
+    if(keyboard_pending) {
+        const uint8_t command=keyboard_pending;keyboard_pending=0;
+        if(command==0xf0) {
+            if(value==0){kbc_reply(0xfa);kbc_reply(keyboard_scanset);}
+            else if(value<=3){keyboard_scanset=value;kbc_reply(0xfa);}else kbc_reply(0xfe);
+        } else if(command==0xed) {
+            if(value<=7){keyboard_leds=value;kbc_reply(0xfa);}else kbc_reply(0xfe);
+        } else if(command==0xf3) {
+            if(value<128){keyboard_typematic=value;kbc_reply(0xfa);}else kbc_reply(0xfe);
+        }
+        return;
+    }
+    switch(value) {
+    case 0xff: /* Genuine keyboard wire reset: ACK then BAT, no host keystroke. */
+        keyboard_scanset=2;keyboard_scanning=1;keyboard_leds=0;keyboard_typematic=0x2b;
+        kbc_reply(0xfa);kbc_reply(0xaa);break;
+    case 0xf2:kbc_reply(0xfa);kbc_reply(0xab);kbc_reply(0x83);break;
+    case 0xee:kbc_reply(0xee);break;
+    case 0xf0:case 0xed:case 0xf3:keyboard_pending=value;kbc_reply(0xfa);break;
+    case 0xf4:keyboard_scanning=1;kbc_reply(0xfa);break;
+    case 0xf5:case 0xf6:
+        keyboard_scanset=2;keyboard_leds=0;keyboard_typematic=0x2b;
+        keyboard_scanning=value==0xf6;kbc_reply(0xfa);break;
+    default:kbc_reply(0xfe);break; /* Unsupported command must not claim ACK. */
+    }
+}
+static void native_kbc_write(uint16_t port,uint8_t value)
+{
+    if(port==0x64) {
+        kbc_cmd_pending=0;
+        switch(value) {
+        case 0x20:kbc_reply(kbc_config);break;
+        case 0x60:case 0xd1:case 0xd4:kbc_cmd=value;kbc_cmd_pending=1;break;
+        case 0xaa:kbc_reply(0x55);break;
+        case 0xab:kbc_reply(0);break;
+        case 0xa9:kbc_reply(1);break; /* Explicitly no auxiliary mouse. */
+        case 0xad:kbc_config|=0x10;break;
+        case 0xae:kbc_config&=(uint8_t)~0x10;native_keyboard_irq();break;
+        case 0xa7:kbc_config|=0x20;break;
+        case 0xa8:kbc_config&=(uint8_t)~0x20;break;
+        case 0xd0:kbc_reply((uint8_t)(1|(a20_gate?2:0)));break;
+        case 0xdd:dev_a20_set(0);break;
+        case 0xdf:dev_a20_set(1);break;
+        default:break; /* Reset pulse and unknown controller commands unmodelled. */
+        }
+    } else if(kbc_cmd_pending) {
+        kbc_cmd_pending=0;
+        if(kbc_cmd==0x60){kbc_config=value;native_keyboard_irq();}
+        else if(kbc_cmd==0xd1)dev_a20_set((value>>1)&1);
+        /* D4 has no auxiliary device, and deliberately produces no ACK. */
+    } else native_keyboard_command(value);
+}
 
 static void kbc_write(uint16_t port, uint8_t v)
 {
+    if(native_win98){native_kbc_write(port,v);return;}
     if (port == 0x64) {
         switch (v) {
         case 0x20: kbc_reply(kbc_config); break;
@@ -409,6 +583,7 @@ static uint8_t vga_status(void)
 /* ---------------------------------------------------------------- dispatch */
 void dev_init(uint64_t tsc_hz, uint64_t ram_bytes)
 {
+    native_win98=0;
     external_irq_enabled = 0;
     g_tsc_hz = tsc_hz;
     g_ram_bytes = ram_bytes;
@@ -439,8 +614,12 @@ int dev_pio_in(uint16_t port, int size, uint32_t *value)
     else if (port >= 0x40 && port <= 0x42) v = pit_read_data(port - 0x40);
     else if (port == 0x43) v = 0xff;
     else if (port == 0x61) {
-        const uint64_t t = (rdtsc() - g_start_tsc) * 66667ull / g_tsc_hz;   /* ~15 us toggle */
-        v = (port61 & 0x0f) | ((t & 1) << 4) | (pit[2].running ? 0x20 : 0);
+        const uint64_t now=rdtsc(),t = (now - g_start_tsc) * 66667ull / g_tsc_hz;   /* ~15 us toggle */
+        unsigned out=pit[2].running;
+        if(native_win98 && pit[2].mode==0)
+            out=pit[2].running && native_pit_elapsed(&pit[2],now)>=native_pit_ticks_tsc(pit[2].reload);
+        if(native_win98 && pit[2].mode==0 && out)native_observation.pit2_terminal_seen=1;
+        v = (port61 & 0x0f) | ((t & 1) << 4) | (out ? 0x20 : 0);
     } else if (port == 0x60 || port == 0x64) v = kbc_read(port);
     else if (port == 0x92) v = (uint32_t)(a20_gate ? 2 : 0);
     else if (port == 0x70) v = cmos_index;
@@ -451,8 +630,10 @@ int dev_pio_in(uint16_t port, int size, uint32_t *value)
     else if (port == 0x3d5) v = crtc[crtc_index & 31];
     else if (port >= 0xcf8 && port <= 0xcff) v = 0xffffffffu;         /* PCI: no devices */
     else handled = 0;
-    if (handled)
+    if (handled) {
         *value = pack(v, size);
+        native_observe(port,size,0,*value,rdtsc());
+    }
     return handled;
 }
 
@@ -464,7 +645,7 @@ int dev_pio_out(uint16_t port, int size, uint32_t value)
     else if (port == 0xa0 || port == 0xa1) pic_write(1, port & 1, b);
     else if (port >= 0x40 && port <= 0x42) pit_write_data(port - 0x40, b);
     else if (port == 0x43) pit_write_ctrl(b);
-    else if (port == 0x61) { port61 = b; pit[2].gate = b & 1; }
+    else if (port == 0x61) { port61 = b; native_pit_gate(b&1,rdtsc()); }
     else if (port == 0x60 || port == 0x64) kbc_write(port, b);
     else if (port == 0x92) dev_a20_set((b >> 1) & 1);
     else if (port == 0x70) cmos_index = b & 0x7f;
@@ -478,6 +659,7 @@ int dev_pio_out(uint16_t port, int size, uint32_t value)
         ;                                   /* accepted and ignored: VGA, POST code, DMA, delay */
     else
         return 0;
+    native_observe(port,size,1,value,rdtsc());
     return 1;
 }
 

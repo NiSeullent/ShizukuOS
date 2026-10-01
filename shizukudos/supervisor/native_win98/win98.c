@@ -27,6 +27,26 @@ typedef struct {
 static w98_trace_t trace_ring[32];
 static uint64_t trace_count;
 static int trace_emitted;
+static int devices_emitted;
+static void device_evidence(void)
+{
+    const dev_native_observation_t *o=dev_native_observation();
+    if(devices_emitted || !o)return;
+    devices_emitted=1;
+    kprintf("W98DEVICE passive start-tsc=%llu PIT=%u KBC=%u dropped=%u/%u FIFO-dropped=%u terminal-seen=%u interval-open=%u restored=%u no-host-key-input\n",
+        o->start_tsc,o->pit_count,o->kbc_count,o->pit_dropped,o->kbc_dropped,o->kbc_reply_dropped,o->pit2_terminal_seen,o->pit2_interval_open,o->pit2_restored_after_terminal);
+    for(unsigned group=0;group<2;++group) {
+        const dev_native_io_record_t *records=group?o->kbc:o->pit;
+        const unsigned count=group?o->kbc_count:o->pit_count;
+        const unsigned capacity=group?DEV_NATIVE_KBC_RECORDS:DEV_NATIVE_PIT_RECORDS;
+        for(unsigned n=0;n<count && n<capacity;++n) {
+            const dev_native_io_record_t *r=&records[n];
+            kprintf("W98DEVICE %s port=%x width=%u write=%u first=%x last=%x count=%u tsc=%llu..%llu\n",
+                group?"KBC":"PIT",(unsigned)r->port,(unsigned)r->width,(unsigned)r->write,
+                r->first_value,r->last_value,r->count,r->first_tsc,r->last_tsc);
+        }
+    }
+}
 static const shz_blob_t *find_rom(const shz_info_t *info)
 {
     static const char name[]="SEABIOS.BIN";
@@ -51,11 +71,11 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
     rom=find_rom(info);
     if(!(info->loader_flags&SHZ_LOADER_NATIVE_WIN98) || !rom || rom->size!=W98_ROM_BYTES ||
        (rom->base&4095) || !info->guest_ram_base || (info->guest_ram_base&4095) ||
-       info->guest_ram_size!=(uint64_t)W98_RAM_MIB<<20 || !info->disk_base || info->disk_size!=W98_DISK_BYTES) {
+       info->guest_ram_size!=(uint64_t)W98_RAM_MIB<<20 || !info->disk_base || info->disk_size!=W98_DISK_BYTES || info->tsc_hz<1000000) {
         log_capture(info->last_error,sizeof info->last_error,"invalid explicit Win98 RAM/disk/SeaBIOS geometry");return -1;
     }
     memset(d,0,sizeof *d);memset(&cfg,0,sizeof cfg);
-    trace_count=0;trace_emitted=0;
+    trace_count=0;trace_emitted=0;devices_emitted=0;
     d->id=SHZ_DOM_WIN98;d->name="WIN98";d->kind=DK_WIN98;d->generation=1;
     d->ram_base=info->guest_ram_base;d->ram_size=info->guest_ram_size;
     d->fx[0]=0x7f;d->fx[1]=3;d->fx[24]=0x80;d->fx[25]=0x1f;
@@ -86,7 +106,7 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
     }
     memset(d->io_bitmap_a,0xff,4096);memset(d->io_bitmap_b,0xff,4096);memset(d->msr_bitmap,0xff,4096);
     G.info=info;G.vc=&d->vc;G.ram_base=d->ram_base;G.ram_size=d->ram_size;G.tsc_hz=info->tsc_hz;
-    dev_init(info->tsc_hz,d->ram_size);dev_uart_tx_hook=uart_tx;
+    dev_init(info->tsc_hz,d->ram_size);dev_native_win98_enable();dev_uart_tx_hook=uart_tx;
     if(w98_ata_init(&ata,(uint8_t *)(uintptr_t)info->disk_base,info->disk_size,ata_irq,0)) return -1;
     cfg.io_bitmap_a=d->io_bitmap_a;cfg.io_bitmap_b=d->io_bitmap_b;cfg.msr_bitmap=d->msr_bitmap;
     cfg.mode=VMODE_REAL;cfg.eptp=ept_pointer(&d->ept);cfg.vpid=SHZ_DOM_WIN98;
@@ -154,6 +174,8 @@ void win98_observe_exit(domain_t *d,uint32_t reason)
        reason!=EXIT_EPT_MISCONFIG && reason!=EXIT_INVALID_GUEST_STATE &&
        reason!=EXIT_EXCEPTION_NMI) return;
     trace_emitted=1;
+    if(reason==EXIT_TRIPLE_FAULT || reason==EXIT_EPT_MISCONFIG || reason==EXIT_INVALID_GUEST_STATE)
+        device_evidence(); /* terminal guest failure; never print for a resumable exception */
     kprintf("W98TRACE paused-VMCS reason=%u count=%llu guest-physical-bus=32 A20=%d\n",reason,trace_count,dev_a20_get());
     start=trace_count>32?trace_count-32:0;
     for(uint64_t n=start;n<trace_count;++n) {
@@ -253,6 +275,9 @@ int win98_ready(domain_t *d,uint64_t now)
 void win98_housekeeping(void)
 {
     if(!w98 || w98->state==SHZ_DS_FAILED || w98->state==SHZ_DS_EXITED) return;
+    const dev_native_observation_t *o=dev_native_observation();
+    if(!devices_emitted && o && o->pit2_restored_after_terminal && !o->pit2_interval_open && (rdtsc()-o->start_tsc)/G.tsc_hz>=10)
+        device_evidence(); /* observed terminal read followed by post-calibration port61 restore */
     if(dev_a20_dirty) {
         uint64_t gpa;dev_a20_dirty=0;
         for(gpa=0x100000;gpa<w98->ram_size;gpa+=4096) if(gpa&0x100000) {

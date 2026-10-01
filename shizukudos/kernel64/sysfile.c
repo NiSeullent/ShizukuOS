@@ -102,7 +102,7 @@ kobject_t *console_object(int output)
     file_t *f = kzalloc(sizeof *f);
     if (!o || !f) { if (o) ob_deref(o); if (f) kfree(f); return 0; }
     f->console = output ? 2 : 1;
-    f->access = output ? GENERIC_WRITE : GENERIC_READ;
+    f->access = GENERIC_READ | GENERIC_WRITE;
     f->options = 0x20;
     o->u.file.file = f;
     return o;
@@ -216,6 +216,8 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     if (!strcmp(path, "\\??\\CONOUT$") || !strcmp(path, "\\??\\CONIN$")) {
         o = console_object(!strcmp(path, "\\??\\CONOUT$"));
         if (!o) return STATUS_NO_MEMORY;
+        ((file_t *)o->u.file.file)->access = (uint32_t)a2;       /* Explicit opens retain the requested rights. */
+        o->u.file.access = (uint32_t)a2;
         st = handle_insert(p, o, (uint32_t)a2, &h);
         if (st) file_object_closed(o);
         ob_deref(o);

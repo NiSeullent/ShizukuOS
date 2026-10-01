@@ -37,6 +37,32 @@ The modified [upstream DOS-C/FreeDOS handler](https://github.com/FDOS/kernel/blo
 retains its authorship and GPL-2.0-or-later license; the patch does not replace
 that attribution with ShizukuOS authorship.
 
+## Experimental startup chain correction
+
+The next public patch, `../dos16/patches/0004-win-startup-chain.patch`, preserves
+an earlier caller's nonzero CX veto and leaves standard-mode notifications
+unchanged. Enhanced-mode notifications chain the incoming ES:BX startup head
+before publishing this kernel's head; receiving its own head again is
+idempotent. The real assembler structure now has the optional DWORD at offset
+18, so instance records start at 22 bytes as the existing C header requires.
+
+The [Microsoft DDK startup contract](https://dos-help.soulsphere.org/ddag31qh.hlp/Interrupt_2Fh_Function_1605h.html)
+requires preserved veto state and enhanced-mode startup data. The versioned
+layout is also documented by [Ralf Brown's Interrupt List](https://fd.lod.bz/rbil/interrup/windows/2f1605.html).
+
+`test_startup_contract.py` executes the actual patched C cases and assembles
+the actual startup data fragment. GCC and Clang with address/undefined-behavior
+sanitizers each pass 294,919 checks: every nonzero CX veto, every odd DX
+standard-mode notification, chained enhanced startup, repeated head, exit and
+subsequent startup. NASM independently checks the real symbol offset.
+
+Two complete Open Watcom kernel builds passed. The experimental
+`WIN31SUPPORT` build linked a 72,687-byte kernel. The normal disabled build
+remained byte-identical to the previous 72,239-byte production kernel.
+This patch does not enable `WIN31SUPPORT`, advertise DOSMGR patch support, or
+establish Windows 98 boot or replacement of MS-DOS. The startup structure's
+version and whole-data-segment instancing still need genuine VMM measurement.
+
 ## Opt-in control recorder
 
 `trace/dosvmm_trace.asm` is an original 386 real-mode COM TSR source. It observes
@@ -112,9 +138,10 @@ I386 and WITHFAT32 enabled. That is a C-object build, not a linked booted kernel
 Next implementation must bind actual control/candidate startup measurements
 to unchanged original media and pinned source, then implement and test:
 
-1. Startup 1605/1606 failure-state handling, startup-info chain pointers and
-   matching C/ASM versioned structure and instance-table bounds. The current
-   startup flag and whole-data-segment table are not VMM-instancing acceptance.
+1. Measure the corrected 1605/1606 veto, chain, reentry and physical C/ASM
+   layout in an actual Windows control/candidate boot, then verify versioned
+   instance-table bounds. The current startup flag and whole-data-segment
+   table are not VMM-instancing acceptance.
    Microsoft's historical [1605 notification contract](https://dos-help.soulsphere.org/ddag31qh.hlp/Interrupt_2Fh_Function_1605h.html)
    requires chained startup data and preserved failure state.
 2. Verified critical-section, local VM identifier, input polling, stack-fault

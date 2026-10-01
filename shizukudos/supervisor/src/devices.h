@@ -9,6 +9,24 @@
 #include <stdint.h>
 
 void dev_init(uint64_t tsc_hz, uint64_t ram_bytes);
+/* Opt-in actual-Windows98 firmware contracts; dev_init keeps the DOS profile. */
+#define DEV_NATIVE_PIT_RECORDS 32
+#define DEV_NATIVE_KBC_RECORDS 64
+typedef struct {
+    uint64_t first_tsc,last_tsc;
+    uint32_t first_value,last_value,count;
+    uint16_t port;
+    uint8_t width,write;
+} dev_native_io_record_t;
+typedef struct {
+    uint64_t start_tsc;
+    uint32_t pit_count,kbc_count,pit_dropped,kbc_dropped,kbc_reply_dropped,pit2_terminal_seen;
+    uint32_t pit2_interval_open,pit2_restored_after_terminal;
+    dev_native_io_record_t pit[DEV_NATIVE_PIT_RECORDS],kbc[DEV_NATIVE_KBC_RECORDS];
+} dev_native_observation_t;
+void dev_native_win98_enable(void);
+/* Passive bounded numeric I/O evidence, valid until the next dev_init. */
+const dev_native_observation_t *dev_native_observation(void);
 /* Port I/O. Return 1 if the port belongs to a modelled device. size is 1, 2 or 4. */
 int dev_pio_in(uint16_t port, int size, uint32_t *value);
 int dev_pio_out(uint16_t port, int size, uint32_t value);

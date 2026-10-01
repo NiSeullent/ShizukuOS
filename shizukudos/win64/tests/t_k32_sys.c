@@ -238,15 +238,17 @@ static void test_console(void)
     HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE), in = GetStdHandle(STD_INPUT_HANDLE), f;
     DWORD mode, got = 99, fl = 7, w;
     WCHAR buf[8];
-    CHECK(GetConsoleScreenBufferInfo(out, &a) && a.dwSize.X == 80 && a.dwSize.Y == 25 && a.srWindow.Right == 79 && a.srWindow.Bottom == 24,
-          "GetConsoleScreenBufferInfo: an 80x25 buffer and window");
+    BOOL initial_buffer_ok = GetConsoleScreenBufferInfo(out, &a) && a.dwSize.X == 80 && a.dwSize.Y == 25 && a.srWindow.Right == 79 && a.srWindow.Bottom == 24;
     WriteFile(out, "abc", 3, &w, 0);
-    CHECK(GetConsoleScreenBufferInfo(out, &b) && b.dwCursorPosition.X == a.dwCursorPosition.X + 3 && b.dwCursorPosition.Y == a.dwCursorPosition.Y,
-          "writing 3 characters moves the cursor 3 columns");
+    BOOL cursor_write_ok = GetConsoleScreenBufferInfo(out, &b) && b.dwCursorPosition.X == a.dwCursorPosition.X + 3 && b.dwCursorPosition.Y == a.dwCursorPosition.Y;
     WriteConsoleW(out, W("\r\n"), 2, &w, 0);
-    CHECK(GetConsoleScreenBufferInfo(out, &b) && b.dwCursorPosition.X == 0, "CR LF returns to column 0");
-    CHECK(SetConsoleTextAttribute(out, FOREGROUND_GREEN | FOREGROUND_INTENSITY) && GetConsoleScreenBufferInfo(out, &b) &&
-          b.wAttributes == (FOREGROUND_GREEN | FOREGROUND_INTENSITY), "SetConsoleTextAttribute is reported back");
+    BOOL cursor_crlf_ok = GetConsoleScreenBufferInfo(out, &b) && b.dwCursorPosition.X == 0;
+    BOOL attribute_ok = SetConsoleTextAttribute(out, FOREGROUND_GREEN | FOREGROUND_INTENSITY) && GetConsoleScreenBufferInfo(out, &b) &&
+          b.wAttributes == (FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    CHECK(initial_buffer_ok, "GetConsoleScreenBufferInfo: an 80x25 buffer and window");
+    CHECK(cursor_write_ok, "writing 3 characters moves the cursor 3 columns");
+    CHECK(cursor_crlf_ok, "CR LF returns to column 0");
+    CHECK(attribute_ok, "SetConsoleTextAttribute is reported back");
     SetConsoleTextAttribute(out, a.wAttributes);
     SetLastError(0);
     CHECK(!GetConsoleScreenBufferInfo(in, &b) && GetLastError() == ERROR_INVALID_HANDLE, "the input handle is no screen buffer");

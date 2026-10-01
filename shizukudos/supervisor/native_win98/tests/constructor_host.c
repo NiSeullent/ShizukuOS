@@ -6,7 +6,7 @@
 #include "../win98.c"
 #undef G
 static unsigned checks,map_calls,vmcs_calls;static int map_failure,vmcs_failure,allocation_failure=-1;static uint8_t pages[5][4096] __attribute__((aligned(4096)));static unsigned page_count;
-static unsigned generic_reads;
+static unsigned generic_reads,native_activations;
 domain_t g_dom[SHZ_MAX_DOMAINS];guest_t G;shz_info_t *g_info;uint64_t g_tsc_hz;volatile int dev_a20_dirty;void (*dev_uart_tx_hook)(uint8_t);
 #define CHECK(v) do{++checks;if(!(v)){fprintf(stderr,"FAIL line%d: %s\n",__LINE__,#v);exit(2);}}while(0)
 void kprintf(const char *format,...){(void)format;}
@@ -14,6 +14,8 @@ void log_capture(char *out,unsigned capacity,const char *format,...){(void)forma
 void serial_putc(char c){(void)c;}
 void dev_irq_raise(unsigned n){CHECK(n==14);}
 void dev_init(uint64_t hz,uint64_t bytes){CHECK(hz==1000000000ull && bytes==(128ull<<20));}
+void dev_native_win98_enable(void){++native_activations;}
+const dev_native_observation_t *dev_native_observation(void){return NULL;}
 int dev_a20_get(void){return 1;}
 uint8_t *dom_gpa_ptr(domain_t *d,uint64_t gpa,uint64_t size){if(gpa>d->ram_size || size>d->ram_size-gpa)return NULL;return (uint8_t *)(uintptr_t)(d->ram_base+gpa);}
 int dev_pio_in(uint16_t port,int bytes,uint32_t *value){++generic_reads;if(port==0x40 && bytes==1){*value=0x35;return 1;}return 0;}
@@ -31,7 +33,7 @@ int main(void)
  for(unsigned n=0;n<256u<<10;++n)bios[n]=(uint8_t)(n*37+11);
  memset(&info,0,sizeof info);memset(&caps,0,sizeof caps);info.loader_flags=SHZ_LOADER_NATIVE_WIN98;info.guest_ram_base=(uintptr_t)ram;info.guest_ram_size=128ull<<20;info.disk_base=(uintptr_t)disk;info.disk_size=2ull<<30;info.tsc_hz=1000000000ull;memcpy(info.blobs[0].name,"SEABIOS.BIN",12);info.blobs[0].base=(uintptr_t)bios;info.blobs[0].size=256u<<10;G.info=&info;
  w98_config_t config={W98_CONFIG_MAGIC,1,128,0};CHECK(w98_config_valid(&config,sizeof config));CHECK(!w98_config_valid(NULL,sizeof config));config.version=2;CHECK(!w98_config_valid(&config,sizeof config));config.version=1;config.reserved=1;CHECK(!w98_config_valid(&config,sizeof config));config.reserved=0;CHECK(!w98_config_valid(&config,15));
- CHECK(last_render==0);CHECK(win98_domain_create(&info,&caps)==0 && vmcs_calls==1 && map_calls==3);domain_t *d=&g_dom[SHZ_DOM_WIN98];CHECK(d->id==5 && d->kind==DK_WIN98 && d->state==SHZ_DS_RUNNABLE && info.domains[5].state==SHZ_DS_RUNNABLE && d->generation==1);
+ CHECK(last_render==0);CHECK(win98_domain_create(&info,&caps)==0 && vmcs_calls==1 && map_calls==3);CHECK(native_activations==1);domain_t *d=&g_dom[SHZ_DOM_WIN98];CHECK(d->id==5 && d->kind==DK_WIN98 && d->state==SHZ_DS_RUNNABLE && info.domains[5].state==SHZ_DS_RUNNABLE && d->generation==1);
  CHECK(!memcmp(ram+0xc0000,bios,0x40000));
  CHECK(ram[0xbffff]==0 && ram[0x100000]==0);
  CHECK(!memcmp(ram+0xdf790,bios+0x1f790,64));
@@ -55,8 +57,8 @@ int main(void)
  uint32_t ata_status=0;CHECK(w98_ata_in(&ata,0x1f7,1,&ata_status)==1);
  CHECK(input(d,0x1f7,1,&value)==1 && value==ata_status && generic_reads==old_reads && info.io_unhandled==old_unhandled);
  /* Invalid declared memory/ROM/configuration never constructs or publishes a new VMCS. */
- for(unsigned n=0;n<7;++n){shz_info_t bad=info;unsigned old=vmcs_calls;
-  if(n==0)bad.loader_flags=0;else if(n==1)bad.disk_size--;else if(n==2)bad.guest_ram_size=64ull<<20;else if(n==3)bad.guest_ram_base++;else if(n==4)bad.blobs[0].size--;else if(n==5)bad.blobs[0].name[0]='X';else bad.blobs[0].base++;
+ for(unsigned n=0;n<8;++n){shz_info_t bad=info;unsigned old=vmcs_calls;
+  if(n==0)bad.loader_flags=0;else if(n==1)bad.disk_size--;else if(n==2)bad.guest_ram_size=64ull<<20;else if(n==3)bad.guest_ram_base++;else if(n==4)bad.blobs[0].size--;else if(n==5)bad.blobs[0].name[0]='X';else if(n==6)bad.blobs[0].base++;else bad.tsc_hz=999999;
   CHECK(win98_domain_create(&bad,&caps)==-1 && vmcs_calls==old);
  }
  for(unsigned fail=1;fail<=3;++fail){page_count=map_calls=0;map_failure=(int)fail;CHECK(win98_domain_create(&info,&caps)==-1 && vmcs_calls==1);}map_failure=0;

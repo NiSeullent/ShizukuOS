@@ -94,10 +94,11 @@ static void console_model(void)
     SetConsoleCursorInfo(out, &original);
     ok = FillConsoleOutputCharacterW(out, 0x03a9, 10, at, &n);
     ok = ok && n == 1 && ReadConsoleOutputCharacterW(out, text, 4, at, &got) && got == 1 && text[0] == 0x03a9;
-    CHECK(ok, "fill changes actual character cell and clips at buffer end");
+    BOOL character_fill_ok = ok;
     ok = FillConsoleOutputAttribute(out, 0x1e, 10, at, &n);
     ok = ok && n == 1 && ReadConsoleOutputAttribute(out, attrs, 4, at, &got) && got == 1 && attrs[0] == 0x1e;
     ok = ok && ReadConsoleOutputCharacterW(out, text, 1, at, &got) && text[0] == 0x03a9;
+    CHECK(character_fill_ok, "fill changes actual character cell and clips at buffer end");
     CHECK(ok, "attribute fill changes attribute while preserving character");
     at.X = -1;
     CHECK(!FillConsoleOutputCharacterW(out, 'X', 1, at, &n) && !n && GetLastError() == ERROR_INVALID_PARAMETER, "negative fill coordinate rejected");

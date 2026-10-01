@@ -1,0 +1,37 @@
+From: ShizukuOS contributors
+Subject: [PATCH] Windows startup: preserve veto/chain and complete physical layout
+SPDX-License-Identifier: GPL-2.0-or-later
+
+Upstream: FDOS/kernel 5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3 (ke2046)
+Scope: experimental WIN31SUPPORT only; does not enable it or prove Win98 boot.
+Protocol: Microsoft Windows 3.1 DDK Interrupt 2F/1605 startup notification
+https://dos-help.soulsphere.org/ddag31qh.hlp/Interrupt_2Fh_Function_1605h.html
+
+--- a/kernel/inthndlr.c
++++ b/kernel/inthndlr.c
+@@ -2034,7 +2034,14 @@
+                  set to memory manager calling point to disable V86
+            ES:BX is 0000:0000, set to startup structure
+           */
+-        /* r.CX = 0x0; ** redundant and could be set nonzero by another hooked program */
++        /* Preserve a prior veto and do not advertise enhanced-mode data
++           during a standard-mode startup. This option remains experimental. */
++        if (r.CX || (r.DX & 1))
++          break;
++        /* A repeated callback receiving our head must not link it to itself. */
++        if (r.es == FP_SEG(&winStartupInfo) && r.BX == FP_OFF(&winStartupInfo))
++          break;
++        winStartupInfo.next = ((ULONG)r.es << 16) | r.BX;
+         r.es = FP_SEG(&winStartupInfo);
+         r.BX = FP_OFF(&winStartupInfo);
+         winStartupInfo.winver = r.di;  /* match what caller says it is */
+--- a/kernel/kernel.asm
++++ b/kernel/kernel.asm
+@@ -628,6 +628,7 @@
+ global _winseg1
+ _winseg1:	dw 0
+  %endif
++                dd 0 ; optional-instance pointer (WinStartupInfo offset 12h)
+ instance_table: ; should include stacks, Win may auto determine SDA region
+                 ; we simply include whole DOS data segment
+  %ifnidni __OUTPUT_FORMAT__, elf

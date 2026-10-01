@@ -1544,13 +1544,13 @@ static int32_t ldr_create_process_body(process_t *parent, const char *image_path
         st = ex->prepare(p, ex->prepare_ctx);
         if (st) goto failed;
     }
-    /* console standard handles: 4, 8 and 12 unless inherited handles already hold those values */
+    /* Default console handles grant read/write access (GetStdHandle); inherited values remain unchanged. */
     {
         kobject_t *in = console_object(0), *outo = console_object(1), *err = console_object(1);
         if (!in || !outo || !err) { st = STATUS_NO_MEMORY; goto failed; }
-        handle_insert(p, in, 0x80000000u, &std_h[0]); ob_deref(in);
-        handle_insert(p, outo, 0x40000000u, &std_h[1]); ob_deref(outo);
-        handle_insert(p, err, 0x40000000u, &std_h[2]); ob_deref(err);
+        handle_insert(p, in, 0xc0000000u, &std_h[0]); ob_deref(in);
+        handle_insert(p, outo, 0xc0000000u, &std_h[1]); ob_deref(outo);
+        handle_insert(p, err, 0xc0000000u, &std_h[2]); ob_deref(err);
     }
     st = load_dll(c, "ntdll.dll", 1, 0, 0);
     if (st) goto report_failed;
