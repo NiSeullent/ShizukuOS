@@ -267,31 +267,37 @@ def ensure_deb_upstream(name):
 
 
 def ensure_open_watcom():
-    """Return the Open Watcom root, extracting the snapshot if needed.
+    """Use only the manifest-pinned, locally supplied historical snapshot.
 
-    The manifest's URL is Open Watcom v2's rolling `Last-CI-build` release: upstream replaces the archive with every CI
-    build (it changed twice within hours on 2026-09-29/30), so a fixed sha256 cannot be a hard gate. The manifest keeps
-    the hash of the last snapshot a full verification ran with; the archive actually used is recorded next to the tree
-    (`ow/.snapshot-sha256`) and by the host suite, which rebuilds DOS16 twice and compares, so reproducibility is always
-    checked within a run. A snapshot that differs from the pin is used with a warning, never silently."""
+    Last-CI-build is a rolling provenance URL, not a retrieval source for this
+    historical archive. Check its actual bytes before considering a cached
+    tree. Refuse incomplete/unrecorded/mismatched existing trees unchanged;
+    only a new cache is extracted from the same immutable bytes that matched
+    the pin; no pathname is reopened after verification. Source-bound
+    producer receipts still have to verify the actual compiler inputs/outputs.
+    """
     spec = load_manifest()["tools"]["open-watcom-v2"]
     root = TOOLS_DIR / "ow"
     stamp = root / ".snapshot-sha256"               # the archive this tree was extracted from
     archive = TOOLS_DIR / "ow-snapshot.tar.xz"
-    if (root / "binl64" / "wcc").exists() and stamp.exists():
+    if not archive.is_file():
+        raise RuntimeError(f"Open Watcom requires locally supplied {archive} with sha256 {spec['sha256']}; "
+                           "the rolling Last-CI-build URL cannot retrieve this historical pin")
+    archive_bytes = archive.read_bytes()
+    digest = sha256_bytes(archive_bytes)
+    if digest != spec["sha256"]:
+        raise RuntimeError(f"Open Watcom archive {archive}: sha256 {digest}, manifest pins {spec['sha256']}; "
+                           "refusing tool reuse or extraction")
+    if root.exists():
+        if not (root / "binl64" / "wcc").is_file() or not stamp.is_file():
+            raise RuntimeError(f"Open Watcom existing cache {root} is incomplete or unrecorded; preserving it")
+        if stamp.read_text().strip() != digest:
+            raise RuntimeError(f"Open Watcom existing cache {root} has a mismatched snapshot stamp; preserving it")
         return root
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
-    if not archive.exists():
-        urllib.request.urlretrieve(spec["url"], archive)
-    digest = sha256_file(archive)
-    if digest != spec["sha256"]:
-        print(f"WARNING: Open Watcom snapshot {digest[:16]} differs from the pinned {spec['sha256'][:16]} "
-              f"(rolling {spec['url']}); using it", file=sys.stderr)
-    if root.exists():                                # an unrecorded or older tree: replace it by this archive
-        shutil.rmtree(root)
     root.mkdir()
-    with tarfile.open(archive) as tar:
-        tar.extractall(root)
+    with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as tar:
+        tar.extractall(root, filter="data")
     stamp.write_text(digest + "\n")
     return root
 
