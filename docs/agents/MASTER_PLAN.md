@@ -89,6 +89,7 @@
 - [ ] Close the independent canonical arrival-boundary failure: its fresh same-source guest waits5 ticks for a remaining4-tick grant. Retain both receipts; canonical163f owns diagnosis and correction.
 - [x] Run host ABI/VxD/display/kernel/firmware and production PMA service/ring gates; retain source hashes and actual scope.
 - [x] Publish tested commit SHAs, exact receipts and blockers in shared peer coordination mailboxes; continue exchange for subsequent units.
+- [x] Import peer private replacement constructor and close two independent readback validation gaps in a4fcab9;30 actual synthetic host controls pass. Return a correction-only patch to the original owner; actual DOS producer/profile/Windows boot remain separate gates.
 
 ## Complete requested sequence
 
