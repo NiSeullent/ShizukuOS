@@ -92,7 +92,7 @@ and PE checks are not guest execution evidence.
 For a disposable authorized Windows 98 clone, copy `M98THEME.DLL`,
 `M98THPRO.EXE` and `M98THSTA.EXE` from that directory to one writable guest
 directory. Freeze their SHA-256 values from the receipt first. Run each probe
-with stdout captured. Each displays a real Classic/Modern comparison for two
+with stdout captured. Each displays a real Classic/Modern comparison for fifteen
 seconds and then exits. Accept guest evidence only with `WIN98_IDENTIFIED=1`,
 the final PASS, exit code 0, matching file hashes, and a separately captured
 visible comparison. The probes check GDI pixels, clip preservation, real font
