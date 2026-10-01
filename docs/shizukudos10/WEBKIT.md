@@ -95,6 +95,24 @@ the full data archive), then CMake/Ninja with `PORT=JSCOnly`. Output: `build/shi
 |---|---|---|
 | `cloop` | `ENABLE_JIT=OFF ENABLE_C_LOOP=ON ENABLE_WEBASSEMBLY=OFF ENABLE_SAMPLING_PROFILER=OFF ENABLE_STATIC_JSC=ON` (bmalloc on Windows uses mimalloc; `USE_SYSTEM_MALLOC` is rejected there by `BPlatform.h`) | M1 |
 
+Compile flags for every WebKit unit (`build.py` `WEBKIT_FLAGS`), each forced by a failure:
+
+- `-mcx16`: libpas uses 16-byte atomics; without it clang calls `__atomic_load/store/compare_exchange`, which no library
+  of the sysroot provides (link error). With it they are inline `cmpxchg16b` (every CPU 64-bit Windows 8.1+ runs on).
+- `-fms-extensions`: JavaScriptCore's Windows x86-64 `DECLARE_CALL_FRAME` (`interpreter/CallFrame.h`) uses the MSVC
+  intrinsic `_AddressOfReturnAddress`, a clang builtin only in MS mode (without it: undefined symbol at link). WebKit's
+  own Windows builds are clang-cl, i.e. always MS mode.
+- `-DU_STATIC_IMPLEMENTATION`: ICU is linked statically.
+
+Local patches (`patches/0001-mingw-clang-portability.patch`): the MSVC `I64` literal suffix in `CurrentTime.cpp`; the
+`<Windows.h>` include spelling in `PathWalker.h` (case-sensitive host); `ThreadingWin.cpp`'s thread-naming `__try` kept
+for MSVC (clang's gnu target compiles `__try` without a handler: probe A4); `ProfilerSupport.cpp`'s `open`/`fdopen`
+shims kept for MSVC (mingw-w64 declares the POSIX names).
+
+Link: `webkit/compat/shzwk_missing.c` (stand-ins for the Windows functions the Shizuku runtime does not export yet,
+each forwarding to the real export when it appears; reports/W1.md lists them with their owners) and the Shizuku
+`libntdll.a` ahead of the sysroot's kernel32 import library (for `crt2.o`'s `__C_specific_handler`).
+
 ## 4. Running it in the guest
 
 `python3 shizukudos/tests/run_k64_webkit.py [m1|stress|probe]` puts `jsc.exe` (+ any DLLs next to it) on a FAT32 D: disk
@@ -107,6 +125,10 @@ with V8 (node 22.22.2: `W1-JSC-M1 OK parts=11 intl=1 fnv=c71a9032`); the runner 
 PASS = every part equal, the marker with the recomputed hash, exit code 0, no process fault. `stress` runs the
 `JSTests/stress` subset listed in `webkit/tests/stress-subset.txt`, one `jsc.exe` process per test, and reports pass/fail
 counts as they are.
+
+**M1 result (GUEST_RUN, QEMU TCG, 2026-09-30):** `jsc.exe` (C loop, 56 MB) printed all 11 parts equal to the expected
+values, `Intl` included (ICU 77 with the full data), and `W1-JSC-M1 OK parts=11 intl=1 fnv=c71a9032`, the hash V8
+computes; exit 0, no fault, 3.7 s of guest time. Evidence: reports/W1.md, milestone 3.
 
 ## 5. JIT (M2) — what Kernel64 must provide
 

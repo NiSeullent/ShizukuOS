@@ -16,20 +16,44 @@ CONTRACTS = REPO / "shizukudos" / "kernel64" / "apiset_contracts.txt"
 
 
 def apiset_table():
-    table = {}
+    """{(contract name without version, level): [(major, minor, shizuku host)]} from kernel64/apiset_contracts.txt:
+    rows `contract windows-host [shizuku-host]`, the shizuku host defaulting to the windows host after the
+    `@provider <windows-host> <shizuku-host>` substitutions (the Shizuku runtime has no kernelbase.dll, for example)."""
+    providers, rows = {}, []
     for line in CONTRACTS.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
         parts = line.split()
-        if len(parts) >= 2 and not line.startswith("#"):
-            table[parts[0].lower()] = parts[1].lower()
+        if parts[0] == "@provider" and len(parts) >= 3:
+            providers[parts[1].lower()] = parts[2].lower()
+        elif len(parts) >= 2:
+            rows.append((parts[0].lower(), parts[1].lower(), parts[2].lower() if len(parts) > 2 else None))
+    table = {}
+    for contract, win, shz in rows:
+        key = split_contract(contract)
+        if key:
+            table.setdefault(key[:2], []).append((key[2], key[3], shz or providers.get(win, win)))
     return table
 
 
+def split_contract(name):
+    """api-ms-win-core-synch-l1-2-0 -> ("api-ms-win-core-synch", 1, 2, 0)."""
+    stem, sep, ver = name.rpartition("-l")
+    nums = ver.split("-")
+    if not sep or len(nums) != 3 or not all(n.isdigit() for n in nums):
+        return None
+    return stem, int(nums[0]), int(nums[1]), int(nums[2])
+
+
 def contract_host(name, table):
-    """api-ms-win-core-x-l1-2-0 -> host DLL. As in apiset.c: the contract name without its version must match an entry
-    of the table, and the entry with the highest version is taken."""
-    stem = name.rpartition("-l")[0]
-    hits = sorted(k for k in table if k.rpartition("-l")[0] == stem)
-    return table[hits[-1]] if hits else None
+    """The rule of kernel64/apiset.c apiset_lookup(): the highest row of the same contract and level, which must be at
+    least the requested (major, minor) version (an l1-2-1 row satisfies l1-1-0 and l1-2-0, not l1-3-0)."""
+    key = split_contract(name)
+    if not key or key[:2] not in table:
+        return None
+    major, minor, host = max(table[key[:2]])
+    return host if (major, minor) >= (key[2], key[3]) else None
 
 
 def exports_of(path, cache):
