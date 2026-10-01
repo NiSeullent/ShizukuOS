@@ -1,0 +1,46 @@
+name: Verify public m98 homepage and ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      iso_name:
+        description: Published ISO filename
+        required: true
+        default: shizuku-modern-0.9.0-dev.iso
+      iso_sha256:
+        description: Exact published ISO SHA256
+        required: true
+      iso_bytes:
+        description: Exact published ISO size in bytes
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  external-download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify from a GitHub-hosted runner over public DNS and HTTPS
+        env:
+          M98_ISO_NAME: ${{ inputs.iso_name }}
+          M98_ISO_SHA256: ${{ inputs.iso_sha256 }}
+          M98_ISO_BYTES: ${{ inputs.iso_bytes }}
+        run: >-
+          python3 -B tools/verify_m98_public.py
+          --iso-name "$M98_ISO_NAME"
+          --iso-sha256 "$M98_ISO_SHA256"
+          --iso-bytes "$M98_ISO_BYTES"
+          --vantage "GitHub-hosted Ubuntu runner; independent of the origin host"
+          --output build/public-site-result.json
+      - name: Preserve the actual external result, including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: public-m98-distribution-evidence
+          path: build/public-site-result.json
+          if-no-files-found: error

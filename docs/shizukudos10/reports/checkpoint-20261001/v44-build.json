@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "source_record": {
+    "repository_relative_path": "build/modern-apps/app-runtime-v44-common-core/receipt.json",
+    "sha256": "284a9320d6a8dfbcdd1df8cd95de86b806c9bce4f947f91526278226648e8ff1"
+  },
+  "status": "PASS",
+  "mode": "ordinary-native-frozen-subset-build-and-immutable-runtime-merge",
+  "base_sha256": "6be2089b35ee586cd15808af62aa89e5111d15d767b8541ab5a62712a45de161",
+  "archive_sha256": "fda38ae3d12a8463b8800a87a3aa8172578b3e0d52e8f5e24651273d339b26c9",
+  "replaced_or_added": {
+    "\\SHZ\\SYS64\\ntdll.dll": "ef29998b4cb23a39d4648c84b8a0820eb43c3ab0a9b01919f9f35bf0e8b904c7",
+    "\\SHZ\\SYS64\\kernel32.dll": "00af67d08f70005a575768c22e6e1e1de6c52a3ee6c06bed1feb2e186d6f2de6",
+    "\\SHZ\\SYS64\\ucrtbase.dll": "1efc46f37e1ee5f02e5d1af2cb62cef9d4de5de1c0910f1363ef598fd3665d0d",
+    "\\SHZ\\TESTS\\T_MODULE_ANSI.EXE": "4f156cb040742247e4f81856aa901802eefc1c09d83f8a4d1a5d526ffcfe205e",
+    "\\SHZ\\TESTS\\T_SEARCH_PATH_MODE.EXE": "371dac5026a66884bd5cbb5aa345b41db2ce98656fc77844819885da0785a1fb",
+    "\\SHZ\\TESTS\\T_BASE_TOKEN.EXE": "9d8d29ce8abd60d64470601faf81f9f5b5c3581a3255080971a4e8d118b85250",
+    "\\SHZ\\TESTS\\T_AUTORUN_OBSERVE.EXE": "6a99cf1b7d898b114f022578329f19a533ce1543deb048d865cec2155915d101",
+    "\\SHZ\\TESTS\\T_UCRT_LEGACY.EXE": "a3cd4be05ffba4d128e76906d48297f1b1a74bf0e657331c12a0052a55479630",
+    "\\SHZ\\TESTS\\T_FILE2.EXE": "f708e70091e93e1c35c3edd4744fa0a1c91e644c1e31b0d875a59f19e52dfecf",
+    "\\SHZ\\TESTS\\T_RTL_BOOTSTRAP.EXE": "f340b39a49528854ed7d23f96f5a729d01fa6d10f9150883d12cbb9065a0acee"
+  },
+  "unchanged_payload_count": 211,
+  "actual_changed_import_names_found": 443,
+  "preferred_dll_ranges_no_overlap": true,
+  "rebuilt_ntdll": true,
+  "rebuilt_kernel32": true,
+  "compile_timeout_seconds": 900,
+  "guest_executed": false,
+  "app_functionality_verified": false,
+  "independent_PE_interface_record": {
+    "repository_relative_path": "build/modern-apps/app-runtime-v44-common-core/interface-independent-root.json",
+    "sha256": "f46d9b0c1af448ba8ae24b4aff9604c1f4c9b1b215744deb870645fb1e5c6109"
+  },
+  "independent_PE_interface": {
+    "status": "PASS_ACTUAL_PE_EXPORT_COMPATIBILITY_ORDINARY_NATIVE_GUEST_PENDING",
+    "NTDLL_old_ordinal_bindings": 494,
+    "NTDLL_new_fresh_nonforwarded": [
+      "RtlAnsiStringToUnicodeString",
+      "RtlCompareMemory",
+      "RtlCompareUnicodeString",
+      "RtlDuplicateUnicodeString",
+      "RtlEqualUnicodeString",
+      "RtlQueryPerformanceCounter",
+      "RtlRunOnceExecuteOnce",
+      "RtlRunOnceInitialize"
+    ],
+    "Nt_Zw_local_alias_groups": 187,
+    "NTDLL_DLL_imports": 0,
+    "K32_actual_nonforwarded_shared_entrypoints": [
+      "OpenProcessToken",
+      "OpenThreadToken",
+      "SetSearchPathMode",
+      "SearchPathA",
+      "SearchPathW",
+      "CreateFile2",
+      "CopyFile2",
+      "Module32Next"
+    ],
+    "UCRT_old_ordinals_preserved": 861,
+    "UCRT_new_named_exports": 13,
+    "UCRT_old_sameRVA_alias_groups_preserved": true,
+    "archive_sha256": "fda38ae3d12a8463b8800a87a3aa8172578b3e0d52e8f5e24651273d339b26c9",
+    "receipt_sha256": "284a9320d6a8dfbcdd1df8cd95de86b806c9bce4f947f91526278226648e8ff1",
+    "claims": {
+      "actualguest": false,
+      "application": false
+    }
+  }
+}

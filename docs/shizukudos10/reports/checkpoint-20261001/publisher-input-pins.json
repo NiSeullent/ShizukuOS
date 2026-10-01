@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "pin_date": "2026-10-01",
+  "policy": "These are tested/downloaded historical identities, not a promise that the packages remain latest. Target application archives are acquired privately and are not distributed with the repository or ISO. Preserve official checksums/REVISIONS, entire-tree hashes and actual PE versions for each new trial.",
+  "packages": [
+    {
+      "product": "Legcord",
+      "version": "1.3.0",
+      "url": "https://github.com/Legcord/Legcord/releases/download/v1.3.0/Legcord-1.3.0-win-x64.zip",
+      "sha256": "99b52c0ccfdbdb7f264dfce8cebf5343d4190f6f1b8be8a9a86369a8696f1d6a",
+      "bytes": 169732620,
+      "publisher_digest_verified": true
+    },
+    {
+      "product": "LibreOffice",
+      "version": "26.8.0",
+      "url": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/win/x86_64/LibreOffice_26.8.0_Win_x86-64.msi",
+      "sha256": "4aa6c6e1895f4055104effcb556bd3362d20c6ad707c149543304f395ef9db95",
+      "bytes": 374906880,
+      "publisher_digest_verified": true
+    },
+    {
+      "product": "Chromium",
+      "version": "157.0.8081.0",
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1708403/chrome-win.zip",
+      "revision": "1708403",
+      "source_commit": "fc75daa82260574dd02d7a1e66b58535389aca14",
+      "sha256": "ef617b90b8b267ef3de3f725dc4f422edb8c37f6cb8f406718f9e9cca56b7139",
+      "bytes": 359024276,
+      "version_pin_kind": "Actual PE RT_VERSION and retained official REVISIONS"
+    },
+    {
+      "product": "Chromium historical GUI V2",
+      "version": "157.0.8079.0",
+      "revision": "1706750",
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1706750/chrome-win.zip",
+      "sha256": "804da77eb033ac837a559f259c7e831d9440c28697f6647e860b123a410949a7",
+      "bytes": 358617751
+    },
+    {
+      "product": "Firefox",
+      "version": "157.0",
+      "url": "https://archive.mozilla.org/pub/firefox/releases/157.0/win64/ko/Firefox%20Setup%20157.0.exe",
+      "sha256": "7086a2caf747f5bba9d900dd2125ad16411080fd676d9758b1d84050879cdcf8",
+      "bytes": 93450968,
+      "publisher_checksum_url": "https://archive.mozilla.org/pub/firefox/releases/157.0/SHA512SUMS",
+      "source_commit": "8eb25af4acf031ab1e06abf1a912275083c820ed"
+    },
+    {
+      "product": "Google Chrome Enterprise x64 MSI",
+      "url": "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi",
+      "sha256": "e744ffd35f5af8d453443a1a20d96a749f396c39d2e6238868f375ea519d8dc9",
+      "bytes": 168673280,
+      "actual_browser_version_verified": true,
+      "moving_official_url": true,
+      "actual_browser_version": "154.0.8037.93",
+      "complete_browser_file_count": 267,
+      "guest_execution_verified": false,
+      "extraction_checkpoint": "google-chrome-extraction.json"
+    }
+  ]
+}

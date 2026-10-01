@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "source_record": {
+    "repository_relative_path": "build/modern-apps/app-runtime-v43-common-base/ordinary-failure.json",
+    "sha256": "338162d56a0517b98c554d716180ea47293a0bd723eaaa76fe5d877b48fb277a"
+  },
+  "status": "FAIL_ORDINARY_NATIVE_FIXTURE_LINK_NO_ARCHIVE",
+  "reason": "Final t_autorun_observe fixture used host MinGW stdio in freestanding native test; unresolved __mingw_vsnprintf and __mingw_vfprintf. Full DLL and three preceding native fixtures compiled, not final runtime PASS.",
+  "frozen_sources_unchanged": true,
+  "VM_executed": false,
+  "new_fixture_epoch_required": true,
+  "subsequent_fix": "The v2 native parent/child fixture uses the existing SHZ CRT instead of MinGW host stdio; ordinary V44 link passed. This does not revise the V43 failure."
+}
