@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#092e43">
+    <meta name="description" content="Windows 98 Shizuku's Second Edition 현대화 실험실. 현재 개발 상태, 직접 빌드 방법, KernelEx 설치 절차를 확인하세요.">
+    <title>Windows 98 Shizuku's Second Edition — 다운로드와 설치</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+    <div class="site-shell">
+      <header class="site-header">
+        <a class="brand" href="#top" aria-label="Windows 98 Shizuku's Second Edition, 맨 위로">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+          <span class="brand-type"><strong>Shizuku's Second Edition</strong><small>WINDOWS 98 MODERNIZATION LAB</small></span>
+        </a>
+        <nav class="site-nav" aria-label="주 메뉴">
+          <a href="#download">다운로드</a>
+          <a href="#install">설치 방법</a>
+          <a href="#status">현재 상태</a>
+        </nav>
+      </header>
+
+      <main id="main">
+        <section class="hero" id="top" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span> OPEN DEVELOPMENT · 개발 중</div>
+            <h1 id="hero-title">Windows 98 SE를<br><em>다시 실험합니다.</em></h1>
+            <p class="hero-lead">한국어 Windows 98 SE에서 새 API 래퍼와 DOS 부팅 후보를 직접 만들고 검증하는 프로젝트입니다. 지금은 개발 미리보기 단계이며, 완성된 운영체제나 통합 설치기는 아직 없습니다.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="#download">다운로드 현황 <span aria-hidden="true">↗</span></a>
+              <a class="button button-quiet" href="#install">직접 빌드하기 <span aria-hidden="true">→</span></a>
+            </div>
+            <p class="hero-note"><span class="note-line" aria-hidden="true"></span> Windows 98 설치 미디어와 라이선스는 별도로 준비해야 합니다.</p>
+          </div>
+          <div class="desktop-art" aria-hidden="true">
+            <div class="desktop-grid"></div>
+            <div class="float-label label-top">LAB BUILD <span>01</span></div>
+            <div class="retro-window window-back">
+              <div class="retro-titlebar"><span>compatibility.log</span><span class="window-controls">□ ×</span></div>
+              <div class="window-lines"><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="retro-window window-front">
+              <div class="retro-titlebar"><span><b class="title-icon">✦</b> SHIZUKU / STATUS</span><span class="window-controls">_ □ ×</span></div>
+              <div class="window-content">
+                <div class="screen-icon"><span>98</span></div>
+                <div class="screen-copy"><strong>Windows 98 SE</strong><span>Modernization Lab</span></div>
+                <div class="screen-rule"></div>
+                <div class="screen-status"><span class="tiny-led"></span> GUEST TESTS RUNNING</div>
+              </div>
+              <div class="retro-footer"><span>Build with care</span><span>▤ &nbsp; ●</span></div>
+            </div>
+            <div class="float-label label-bottom">KERNELEx + M98WRAP.DLL</div>
+          </div>
+        </section>
+
+        <section class="download-section section-pad" id="download" aria-labelledby="download-title">
+          <div class="section-heading">
+            <span class="section-index">01 / GET STARTED</span>
+            <h2 id="download-title">다운로드</h2>
+            <p>현재 제공 파일은 Windows 98 SE와 KernelEx용 개발 미리보기입니다. 설치 전에 제한 사항과 해시를 확인하세요.</p>
+          </div>
+          <div class="download-panel">
+            <div class="download-main">
+              <div class="release-state"><span class="release-led" aria-hidden="true"></span> 0.1.1 개발 미리보기</div>
+              <h3>API 래퍼 시험판을<br>다운로드하세요.</h3>
+              <p>ZIP에는 32비트 래퍼 DLL 4개, 소스, 라이선스 고지, 프로젝트 스킬이 있습니다. 통합 설치기나 Windows 98 이미지, 드라이버 묶음은 포함되지 않습니다. 필수 앱 5종은 아직 구동되지 않았습니다.</p>
+              <a class="button button-primary" href="https://github.com/NiSeullent/Win98-Modern/releases/download/v0.1.1-preview/win98-modern-0.1.1-preview-x86.zip">미리보기 ZIP 다운로드 <span aria-hidden="true">↓</span></a>
+              <p class="checksum">SHA-256: <code>31327b3576ba508612e3cd6a1b9605dcfa1b2af07ad82dd4263e07d9f7afd3c2</code><br><a href="https://github.com/NiSeullent/Win98-Modern/releases/download/v0.1.1-preview/win98-modern-0.1.1-preview-x86.zip.sha256">체크섬 파일</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/release/INSTALL-ko.md">자세한 설치 안내</a></p>
+            </div>
+            <div class="download-aside">
+              <div class="aside-top"><span>AVAILABLE NOW</span><span class="aside-symbol" aria-hidden="true">↗</span></div>
+              <h3>개발자용 경로</h3>
+              <p>로컬 소스가 있다면 Windows 호스트에서 <code>m98wrap.dll</code>과 검증 도구를 빌드할 수 있습니다.</p>
+              <a class="text-link" href="#build">빌드 절차 보기 <span aria-hidden="true">→</span></a>
+              <div class="aside-rule"></div>
+              <p class="microcopy">이 DLL은 Windows 98 자체가 아니라 KernelEx에 연결하는 호환성 확장입니다.</p>
+            </div>
+          </div>
+          <div class="source-license-row">
+            <div class="source-license-item">
+              <span class="small-icon" aria-hidden="true">⌘</span>
+              <div><strong>GitHub 소스 공개</strong><p>소스 코드, 라이선스, 빌드와 게스트 시험 기록을 공개 저장소에서 볼 수 있습니다.</p></div>
+              <a class="text-link" href="https://github.com/NiSeullent/Win98-Modern" target="_blank" rel="noopener noreferrer">저장소 보기 <span aria-hidden="true">↗</span></a>
+            </div>
+            <div class="source-license-item">
+              <span class="small-icon" aria-hidden="true">§</span>
+              <div><strong>오픈 소스 라이선스</strong><p>프로젝트 소스는 GPL-2.0-only입니다. Wine에서 유래한 코드와 데이터에는 LGPL-2.1-or-later 고지가 적용됩니다.</p></div>
+              <span class="license-label">GPL-2.0-only</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="install-section section-pad" id="install" aria-labelledby="install-title">
+          <div class="section-heading section-heading-split">
+            <div><span class="section-index">02 / SETUP GUIDE</span><h2 id="install-title">설치 방법</h2></div>
+            <p>직접 빌드한 DLL을 기존 Windows 98 SE 시험 VM에 연결하는 절차입니다. 설정을 바꾸기 전에 VM과 <code>core.ini</code>를 백업하세요.</p>
+          </div>
+          <div class="steps">
+            <article class="step">
+              <div class="step-number">01</div>
+              <div class="step-content"><h3>시험 환경 준비</h3><p>사용 권한이 있는 Windows 98 SE 설치 미디어로 시험 VM을 만듭니다. 이 프로젝트가 확인한 VirtualBox 환경은 BIOS/IDE, CPU 1개, RAM 128 MiB였습니다. 다른 하드웨어 구성의 동작은 별도 검증이 필요합니다.</p></div>
+              <span class="step-tag">별도 준비</span>
+            </article>
+            <article class="step">
+              <div class="step-number">02</div>
+              <div class="step-content"><h3>Unicode Layer와 KernelEx 설치</h3><p>게스트에 Microsoft Layer for Unicode를 먼저 설치해 <code>C:\WINDOWS\SYSTEM\UNICOWS.DLL</code>을 준비합니다. 이어 <a href="https://sourceforge.net/projects/kernelex/files/KernelEx/4.5.2/" target="_blank" rel="noopener noreferrer">KernelEx 4.5.2<span class="external" aria-label="새 창에서 열림"> ↗</span></a>를 설치하고 재부팅합니다.</p><p class="step-resource"><a href="https://legacyupdate.net/download-center/download/4237/platform-software-development-kit-redistributable-microsoft-layer-for-unicode-on-windows-95-98-and-me-systems-1.1.3790.0" target="_blank" rel="noopener noreferrer">Microsoft Layer for Unicode 배포 기록 <span class="external" aria-label="새 창에서 열림">↗</span></a></p></div>
+              <span class="step-tag">게스트</span>
+            </article>
+            <article class="step" id="build">
+              <div class="step-number">03</div>
+              <div class="step-content"><h3>DLL 빌드</h3><p>Windows 호스트에 Python과 32비트 LLVM MinGW의 <code>i686-w64-mingw32-gcc</code>를 준비합니다. 프로젝트 루트에서 아래 명령을 실행하면 <code>build\m98wrap.dll</code>이 생성됩니다.</p><div class="code-window"><div class="code-title"><span>PowerShell</span><span aria-hidden="true">_ □ ×</span></div><pre><code>python -m pip install -r tests/requirements.txt
+.\build.ps1</code></pre></div></div>
+              <span class="step-tag">호스트</span>
+            </article>
+            <article class="step">
+              <div class="step-number">04</div>
+              <div class="step-content"><h3>KernelEx에 연결</h3><p><code>m98wrap.dll</code>을 게스트의 KernelEx 설치 폴더에 복사합니다. 같은 폴더의 <code>core.ini</code>에서 기본 <code>contents=std,kexbases,kexbasen</code> 줄 끝에 <code>,m98wrap</code>을 추가한 뒤 재부팅합니다. 설치본 설정이 다르면 파일 전체를 덮어쓰지 말고 해당 줄만 편집하세요.</p></div>
+              <span class="step-tag">게스트</span>
+            </article>
+            <article class="step">
+              <div class="step-number">05</div>
+              <div class="step-content"><h3>동작 확인</h3><p>빌드된 <code>smoke.exe</code>와 <code>import_probe.exe</code>를 시험 VM에서 실행해 래퍼와 KernelEx의 정적 import 경로를 확인합니다. 프로젝트의 기존 128 MiB VM에서는 두 시험이 통과했습니다. 새 환경에서는 결과를 다시 확인해야 합니다.</p></div>
+              <span class="step-tag">시험</span>
+            </article>
+          </div>
+        </section>
+
+        <section class="status-section section-pad" id="status" aria-labelledby="status-title">
+          <div class="section-heading section-heading-split">
+            <div><span class="section-index">03 / PROJECT STATUS</span><h2 id="status-title">지금 가능한 것</h2></div>
+            <p>아래 내용은 현재 저장소의 구현과 Windows 98 게스트 시험 기록을 기준으로 합니다.</p>
+          </div>
+          <div class="status-grid">
+            <article class="status-card status-positive"><span class="card-kicker">검증됨 / VERIFIED</span><strong class="status-metric">37<span> APIs</span></strong><h3>KernelEx 래퍼</h3><p>Windows 98 SE 시험 게스트에서 최신 DLL의 37개 직접 호출 시험을 통과했습니다. 설치된 KernelEx 설정의 정적 import 시험은 이전 29개 빌드에서 통과했습니다. 일부 함수는 제한적으로 구현됐습니다.</p></article>
+            <article class="status-card"><span class="card-kicker">개발 중 / IN PROGRESS</span><strong class="status-metric">DOS<span> prototype</span></strong><h3>ShizukuDOS</h3><p>독립 부팅, FAT12 읽기, 제한된 COM 실행과 체인로드를 시험했습니다. Windows 98의 GUI 부팅을 대체하지는 못합니다.</p></article>
+            <article class="status-card"><span class="card-kicker">미검증 / NOT READY</span><strong class="status-metric">Next<span> steps</span></strong><h3>하드웨어와 앱 호환성</h3><p>CSM 환경의 PAE 물리 RAM 활용, Skylake급 AHCI/xHCI 드라이버, 앱별 CPU 명령어 제어, 필수 앱 실행은 아직 구현 또는 검증되지 않았습니다.</p></article>
+          </div>
+          <div class="status-footnote"><span aria-hidden="true">ⓘ</span><p>목표로 삼은 Windows API 전체 범위의 호환성 비율은 아직 계산되지 않았습니다. 개별 앱의 import 이름 일치율은 실행 성공률과 다릅니다.</p></div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div class="footer-brand"><span class="footer-sparkle" aria-hidden="true">✦</span><strong>Shizuku's Second Edition</strong><span>Windows 98 modernization lab</span></div>
+        <p>Microsoft Windows 98 SE, 설치 미디어 및 제품 키는 이 프로젝트에 포함되지 않습니다. 이 페이지는 개발 상태를 안내합니다.</p>
+        <a href="#top">맨 위로 ↑</a>
+      </footer>
+    </div>
+  </body>
+</html>

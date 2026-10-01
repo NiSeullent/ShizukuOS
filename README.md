@@ -91,3 +91,6 @@ Microsoft ISO와 설치 키는 저장소에 포함하지 않습니다.
 ## 장기 호환성 목표
 
 현재 완료 목표는 **Windows API 전체 표면의 100% 호환성**과 Chromium 150, Supermium, VLC, Notepad++, VS Code 필수 앱의 실제 구동입니다. 측정 기준과 앱별 검증 범위는 [대상 앱과 API 기준](docs/TARGET_APPS.md)에 기록합니다. 현재 KERNEL32 API 표에는 89개 항목이 있으나 모두의 완전한 의미 검증을 뜻하지는 않습니다. 날짜·시간·로캘·제품 정보 함수, 파일 핸들 경로 함수와 FAT32 스트림 오류 동작의 제한된 범위는 설치된 KernelEx 정적 import 및 직접 호출 게스트 시험을 통과했습니다. [고정 SDK 10.0.28000.2705 목록](docs/SDK_INVENTORY.md)은 후보 레코드 151,330건의 재현 가능한 집계이며, 중복·데스크톱 적용 범위를 판정하기 전이므로 최종 API 분모나 호환성 점수가 아닙니다. [PE 가져오기 측정 도구](docs/PE_IMPORT_COVERAGE.md)는 앱별 누락 API를 찾는 보조 지표입니다.
+
+
+Official website and new source/ISO distribution: **https://m98.nyase.kr**. Previous static-site branch notes are preserved in [historical documentation](docs/HISTORICAL_STATIC_SITE_README.md).
