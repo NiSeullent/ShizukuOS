@@ -531,20 +531,10 @@
     {
       "id": "wrapper.ntdwritewrapper9x",
       "category": "nt_wrapper_compatibility",
-      "description": "NTDWRITEWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "description": "NTDWRITEWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests. Original capitalization alias: NTDWriteWrapper9x.",
       "gate": "full_goal",
       "checks": [
         "NTDWRITEWrapper9x actual supported and unsupported behavior tests passed"
-      ],
-      "applications": []
-    },
-    {
-      "id": "wrapper.ntdwritewrapper9x",
-      "category": "nt_wrapper_compatibility",
-      "description": "NTDWriteWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
-      "gate": "full_goal",
-      "checks": [
-        "NTDWriteWrapper9x actual supported and unsupported behavior tests passed"
       ],
       "applications": []
     },
