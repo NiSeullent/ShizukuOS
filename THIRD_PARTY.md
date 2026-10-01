@@ -104,6 +104,15 @@ separate execution evidence.
 
 ## Independent platform path
 
+`tools/build_trident_test262_selected.py` separately obtains selected official
+Test262 fixtures from revision `7ab7fafa0003f73fc85c1b95d88094d33f7eb8bd`, pinned
+archive SHA256 `1d497a1e7430094a41d06f38db775df4a63db5d587b2a8b08aba6fad5de19585`.
+Its BSD license and all selected per-file notices remain unchanged in private
+build storage, alongside the complete original archive. This test-only input
+is not linked into the native runtime or bundled here. The original GPL-2.0-only
+host adapter provides a limited synchronous fixture protocol; its exact scope
+and preserved failures are recorded in `docs/TRIDENT_TEST262_SELECTED.md`.
+
 The new `ntwrapper/`, `ntwin32/`, `ntwddm/`, `drivers/pcie/`,
 `shizukudos/uefi/`, `shizukudos/uefi32/` and `platform/` sources are independently authored project
 code under GPL-2.0-only. The independent build does not link the legacy
