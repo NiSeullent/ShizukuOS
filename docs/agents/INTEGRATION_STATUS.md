@@ -1,5 +1,9 @@
 # Integration status
 
+Current canonical source checkpoint: e98b7eb merges reviewed cf16a11 DOS startup, strict same-byte Watcom input, persistent K32 service, corrected private constructor and USB receipt capture. K32 CPU0 GS/FIFO/affinity/live-stack foundation7e7076f is included; AP activation remains unsupported. Post-merge IPC17 host cases and i486 IPC/main pass with stable compiler-discovered closure (receipt8b97e2a4); initial invalid-bootinfo fixture failure is preserved. Older212-source combined38 and RAMfb26 PASS are historical evidence, requiring fresh runtime validation after final source imports.
+
+NASv4 is owner-verified READY (receipt6559e06c), with6GiB total163f allocation and unchanged17GiB reserve. The old unverified2GiB partial remains. A fresh source-read-leased2GiB copy is awaiting full readback before any VM start; the ordinary DOS producer runs separately in its owned NAS leaf. Normal AP2/AP4/off/TCG2 component runs pass with scheduler_cpus1; noACPI whole gate fails the low useful-phase assertion and remains preserved. Windows98 VMM/desktop/PMA roundtrip, shared SMP memory/TLB/waits, Supervisor virtual APs, installer acceptance and final ISO remain open.
+
 Status: actual source implementation continues. The earlier complete native guest failed a new measurement-fixture assertion; that failure was reproduced, corrected and preserved. The new combined KVM guest passes38/38 after focused KVM/TCG17/17. Independent fixture review approved b5c49d8, followed by a fresh four-profile build and actual combined KVM38/38 PASS; same-kernel RAMfb26 checks pass with stable source/input binding, and independent combined review approved the212-source epoch. Windows98 VMM/full boot, integrated SMP and final ISO are unfinished.
 
 | Acceptance area | Implemented behavior | Current evidence and remaining gate |
@@ -10,9 +14,9 @@ Status: actual source implementation continues. The earlier complete native gues
 | GOP/framebuffer | Validated EDID/modes,pitch/masks and failed-set restoration | Prior fresh OVMF2560x1440 and RAMfb1024x768 pixel/input evidence; same-kernel successor RAMfb26 checks PASS594.6s, input/source/helper bindingstable |
 | Native VMM/PMA endpoint | Channel2 DIOC,owned event/restricted callback,retained pages and notification lifetime | Source9853325 reviewed; stricti486/21host groups/client245 checks pass; actual Win98 load/wait/query/process exit unverified |
 | DOS replacement/startup | Genuine combined CBC/DOSMGR pipeline and standard-mode state handling | Boot55a6714 strict patch/C/NASM controls pass; full pinned producer,executor and real WIN.COM→VMM boot pending |
-| Windows98 product boot | VMM/VxD/USER/GDI/Explorer remain canonical | Actual ShizukuDOS→Windows desktop and end-to-end app request unverified; private NAS recovery hold |
+| Windows98 product boot | VMM/VxD/USER/GDI/Explorer remain canonical | Actual ShizukuDOS→Windows desktop and end-to-end app request unverified; verified NAS recovery; private copy/readback and fresh producer pending |
 | Capability source inventory |120families/56front/17backend source mapping and bounded capture/publish |78 receipt controls passed; current final-source inventory still to refresh; native behavior flags remain false |
-| Installer and distribution | Existing source-complete producers preserved; installed-source launch profile under construction | USB receipt race,full cold boot/install/restart,drivers/apps/stress and final public ISO pending |
+| Installer and distribution | Existing source-complete producers preserved; installed-source launch profile under construction | USB receipt race source reviewed and merged; full cold boot/install/restart,drivers/apps/stress and final public ISO pending |
 
 Historical failed binaries/receipts remain in `build/pma-pre-diagnostic-epoch/` and `build/pma-integrated-native-successor-20261001/`. The regression WIN64.IMG is an explicitly retained historical input, not freshly built userland. Current focused hashes and evidence are in `build/pma-arrival-final/handoff.json`; these do not establish Supervisor or Windows execution.
 

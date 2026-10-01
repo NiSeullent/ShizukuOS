@@ -1,5 +1,9 @@
 # Windows 98 modern backend integration implementation plan
 
+Current canonical source checkpoint: e98b7eb merges reviewed cf16a11 DOS startup, strict same-byte Watcom input, persistent K32 service, corrected private constructor and USB receipt capture. K32 CPU0 GS/FIFO/affinity/live-stack foundation7e7076f is included; AP activation remains unsupported. Post-merge IPC17 host cases and i486 IPC/main pass with stable compiler-discovered closure (receipt8b97e2a4); initial invalid-bootinfo fixture failure is preserved. Older212-source combined38 and RAMfb26 PASS are historical evidence, requiring fresh runtime validation after final source imports.
+
+NASv4 is owner-verified READY (receipt6559e06c), with6GiB total163f allocation and unchanged17GiB reserve. The old unverified2GiB partial remains. A fresh source-read-leased2GiB copy is awaiting full readback before any VM start; the ordinary DOS producer runs separately in its owned NAS leaf. Normal AP2/AP4/off/TCG2 component runs pass with scheduler_cpus1; noACPI whole gate fails the low useful-phase assertion and remains preserved. Windows98 VMM/desktop/PMA roundtrip, shared SMP memory/TLB/waits, Supervisor virtual APs, installer acceptance and final ISO remain open.
+
 > Agentic execution uses `superpowers:subagent-driven-development`. Implement and test existing subsystems in dependency order, with explicit ownership and independent review.
 
 **Goal:** Extend the existing native scheduler, firmware display path and Windows bridge with real tested behavior while preserving actual Windows 98 as the product OS.
@@ -92,13 +96,13 @@ The user explicitly set the continuing goal to actual Windows98 VMM connection, 
 
 Root owns the isolated boot integration and private input/output receipts. Windows lead owns the actual VMM endpoint/callback implementation, authoritative context and serialized DOS boundary; Fada retains the PMA service contract. Reuse the inactive primary boot/cb43 lanes' tested sources and preserved failed observations after inspection; do not modify their outputs or main checkout.
 
-- [ ] Integrate reviewed genuine FreeDOS DOS/XMS compatibility and persistent Kernel32 service changes using three-way source merges, retaining current compiler, timer and IPC hardening.
+- [x] Integrate reviewed genuine FreeDOS DOS/XMS compatibility and persistent Kernel32 service changes using three-way source merges, retaining current compiler, timer and IPC hardening.
 - [ ] Reproduce and resolve actual WIN.COM→ScanReg restart/return behavior, preserving original-Microsoft-DOS control separately.
 - [ ] Run actual ShizukuDOS→WIN.COM→VMM→USER/GDI/Explorer and existing Win32 applications under Supervisor; record live native boot evidence.
 - [ ] Load the actual VxD and execute Windows98 app→wrapper→PMA worker→terminal result, including wait/signal, cancellation and lifecycle cleanup.
 - [ ] Exercise genuine serialized DOS services with verified VM/thread/PSP/InDOS/error context and retained Windows semantics.
 
-Current resource facts are authoritative bytes, not the earlier summary: private native builder/controller retain17GiB, plus their measured preparation/1GiB capture budgets. Never weaken those guards. The shared disk presently has about17.6GiB free; input reuse, reversible compression of owned outputs or another legitimate storage location may resolve this, but other chats' protected images and evidence remain untouched.
+Current resources: local free space remains below the17GiB native preparation floor. The verified private NAS ext4 workspace supplies a6GiB root lane with the same17GiB reserve and explicit copy/VM/producer budgets. Other chats retain their assigned lanes and evidence.
 
 ### Task6: Integrated native SMP with Windows98 kept single-vCPU
 

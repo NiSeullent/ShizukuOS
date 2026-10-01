@@ -1,5 +1,9 @@
 # Architecture decisions
 
+Current canonical source checkpoint: e98b7eb merges reviewed cf16a11 DOS startup, strict same-byte Watcom input, persistent K32 service, corrected private constructor and USB receipt capture. K32 CPU0 GS/FIFO/affinity/live-stack foundation7e7076f is included; AP activation remains unsupported. Post-merge IPC17 host cases and i486 IPC/main pass with stable compiler-discovered closure (receipt8b97e2a4); initial invalid-bootinfo fixture failure is preserved. Older212-source combined38 and RAMfb26 PASS are historical evidence, requiring fresh runtime validation after final source imports.
+
+NASv4 is owner-verified READY (receipt6559e06c), with6GiB total163f allocation and unchanged17GiB reserve. The old unverified2GiB partial remains. A fresh source-read-leased2GiB copy is awaiting full readback before any VM start; the ordinary DOS producer runs separately in its owned NAS leaf. Normal AP2/AP4/off/TCG2 component runs pass with scheduler_cpus1; noACPI whole gate fails the low useful-phase assertion and remains preserved. Windows98 VMM/desktop/PMA roundtrip, shared SMP memory/TLB/waits, Supervisor virtual APs, installer acceptance and final ISO remain open.
+
 1. User explicitly authorized actual implementation, all permissions and parallel agents. No repeated approval gate is added for covered local build/test steps.
 2. Use the latest fetched `origin/main`, initially `a648e9b`, in a new isolated branch. The original `/root/Win98-Modern` checkout is 611 commits behind and is preserved.
 3. The current source has native Win98 opt-in sources and real channel2 creation. The older architecture audit describes its own historical tree and is not rewritten.
