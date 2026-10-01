@@ -342,3 +342,15 @@ observations admit 20 GiB plus 64 MiB and bound observed net growth to 64 MiB;
 they do not measure transient upload storage or hold the sealer's input FDs
 across the upload action. API archive and inner-file verification remains
 required before another chat adopts the artifact.
+
+## Actual selected handoff completed
+
+Fresh actual run36941495775/job110633810322 at committed/pushed3c15e59
+completed build, seven sealer controls, exact24-path upload and unchanged
+post-upload envelope validation. Root and independent consumer, resource
+and instruction/script reviewers checked actual API/log/receipt/manifest
+and downloaded ZIP bytes. [Exact artifact and native owner contract](NATIVE_PE32_RETAINED_HANDOFF.md)
+records the441,427 B archive digest, all24 inner files and their source-bound
+proof, expiry and remaining Windows runtime acceptance. It is not a native
+Windows/TLS/application or ISO PASS. No binary ZIP enters the NAS evidence
+lane, and no original receipt or historical run is relabelled.
