@@ -581,7 +581,14 @@ int main(int argc, char **argv)
         report = fopen(output, "w");
         if (!report) return 2;
     }
-    fprintf(report, "{\"case\":\"start\",\"nonce\":\"%s\",\"epoch\":%lld,\"platform\":\"%s\"}\n",
+    /* Original Win98 MSVCRT uses I64; __USE_MINGW_ANSI_STDIO=0 avoids the
+     * precompiled MinGW formatter's post-i486 instruction dependency. */
+#if defined(_WIN32)
+#define NTWST_EPOCH_FORMAT "%I64d"
+#else
+#define NTWST_EPOCH_FORMAT "%lld"
+#endif
+    fprintf(report, "{\"case\":\"start\",\"nonce\":\"%s\",\"epoch\":" NTWST_EPOCH_FORMAT ",\"platform\":\"%s\"}\n",
             nonce, (long long)mbedtls_time(NULL),
 #ifdef _WIN32
             "windows-native-build"

@@ -495,13 +495,12 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def native_build(output, hashes):
+def native_build(output, hashes, engine_build):
     import pefile
-    frozen = ROOT / "build/secure-transport/native-v5-crt"
-    upstream = ROOT / "build/secure-transport/native-v3/upstream/mbedtls-3.6.7/include"
+    frozen = engine_build
     cmake = frozen / "cmake"
     retained = [cmake / "CMakeFiles/M98TLS.dir" / (n + ".c.obj")
-                for n in ("native_runtime", "native_crt", "native_time")]
+                for n in ("native_runtime", "native_crt", "native_time", "i486_format")]
     retained += [cmake / "libntwst.a"]
     retained += [cmake / "upstream/library" / ("lib" + n + ".a")
                  for n in ("mbedtls", "mbedx509", "mbedcrypto")]
@@ -513,23 +512,34 @@ def native_build(output, hashes):
     configuration = project / "user_config.h"
     inputs = retained + [baseline, build_receipt, configuration]
     prior = json.loads(build_receipt.read_text())
-    if prior["target"] != "win98-x86" or prior["upstream"]["version"] != "3.6.7":
+    upstream = Path(prior["upstream_source"]["path"]) / "include"
+    if prior["status"] != "PASS" or prior["target"] != "win98-x86" or prior["upstream"]["version"] != "3.6.7":
         raise ValueError("require the reviewed native 3.6.7 build")
-    for n in ("transport.c", "native_runtime.c", "native_crt.c", "native_time.c", "user_config.h"):
+    # New builds explicitly bind all actual linked objects. Historical receipts
+    # stay readable; current i486 integration requires their actual code gate.
+    for path in retained:
+        if prior.get("compiled_outputs", {}).get(str(path.relative_to(frozen))) != digest(path):
+            raise ValueError("unbound retained native object: " + str(path))
+    for n in ("transport.c", "native_runtime.c", "native_crt.c", "native_time.c", "user_config.h",
+              "i486_format.c", "i486_format.h", "i486_gate.py"):
         path = project / n
         if digest(path) != prior["source_sha256"][n]:
             raise ValueError("frozen project source binding changed: " + n)
         inputs.append(path)
     input_hashes = {str(path): digest(path) for path in inputs}
     shutil.copyfile(configuration, output / "user_config.h")
+    shutil.copyfile(project / "i486_format.h", output / "i486_format.h")
     binary = output / "M98SSPI.dll"
-    command = ["i686-w64-mingw32-gcc", "-std=c11", "-Os", "-march=i486", "-Wall", "-Wextra",
+    command = ["i686-w64-mingw32-gcc", "-std=c11", "-Os", "-march=i486", "-mtune=i486",
+               "-mno-sse", "-mno-sse2", "-mno-mmx", "-mno-avx", "-D__USE_MINGW_ANSI_STDIO=0", "-Wall", "-Wextra",
+               "-fno-isolate-erroneous-paths-dereference", "-fno-isolate-erroneous-paths-attribute",
                "-Werror", "-Wpedantic", "-ffunction-sections", "-fdata-sections",
                "-DWINVER=0x0410", "-D_WIN32_WINDOWS=0x0410", "-D_WIN32_WINNT=0x0400",
                '-DMBEDTLS_USER_CONFIG_FILE="user_config.h"', "-I" + str(output),
                "-I" + str(upstream), "-shared", "-nostartfiles", "-static", "-static-libgcc",
                "-Wl,--gc-sections,--no-insert-timestamp,--subsystem,windows:4.10,"
                "--major-os-version,4,--minor-os-version,10,--entry,_M98SspiDllMain@12",
+               "-Wl,-Map," + str(output / "M98SSPI.map"),
                str(output / "sspi_native.c"), str(output / "sspi_stream.c")]
     command += list(map(str, retained))
     command += [str(output / "sspi_native.def"), "-ladvapi32", "-lcrypt32", "-o", str(binary)]
@@ -537,6 +547,7 @@ def native_build(output, hashes):
     (output / "compiler.stdout").write_text(proc.stdout)
     (output / "compiler.stderr").write_text(proc.stderr)
     audit = None
+    isa = None
     passed = False
     if proc.returncode == 0:
         pe = pefile.PE(str(binary))
@@ -553,7 +564,8 @@ def native_build(output, hashes):
             symbols = [s.name.decode("ascii") if s.name else "#" + str(s.ordinal) for s in row.imports]
             imports[dll] = symbols
             missing += [[dll, s] for s in symbols if s not in inventory.get(dll, [])]
-        forbidden = {str(i): pe.OPTIONAL_HEADER.DATA_DIRECTORY[i].Size for i in (9, 10, 13, 14)}
+        forbidden = {str(i): {"rva": pe.OPTIONAL_HEADER.DATA_DIRECTORY[i].VirtualAddress,
+                             "size": pe.OPTIONAL_HEADER.DATA_DIRECTORY[i].Size} for i in (9, 10, 13, 14)}
         relocations = sum(s.type == 3 for row in pe.DIRECTORY_ENTRY_BASERELOC for s in row.entries)
         audit = {"machine": pe.FILE_HEADER.Machine, "optional_magic": pe.OPTIONAL_HEADER.Magic,
                  "dll": bool(pe.FILE_HEADER.Characteristics & 0x2000), "timestamp": pe.FILE_HEADER.TimeDateStamp,
@@ -569,13 +581,20 @@ def native_build(output, hashes):
         passed = (audit["machine"] == 0x14c and audit["optional_magic"] == 0x10b and audit["dll"]
                   and audit["timestamp"] == 0 and audit["subsystem"] == 2 and audit["os_version"] == [4, 10]
                   and audit["subsystem_version"] == [4, 10] and audit["entry_rva"] != 0 and audit["exports_exact"]
-                  and not missing and not any(forbidden.values()) and relocations > 0)
+                  and not missing and not any(v for row in forbidden.values() for v in row.values()) and relocations > 0)
+        import importlib.util, gzip
+        spec = importlib.util.spec_from_file_location("ntwst_frozen_sspi_isa", project / "i486_gate.py")
+        scanner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(scanner)
+        isa, decoded = scanner.scan(binary)
+        (output / "disassembly.txt.gz").write_bytes(gzip.compress(decoded, mtime=0))
+        passed = passed and isa["status"] == "PASS"
     if hashes != {name: digest(HERE / name) for name in SOURCES} or input_hashes != {
             str(path): digest(path) for path in inputs}:
         passed = False
     receipt = {"schema": "win98modern.sspi-native-pe-build.v1", "passed": passed,
                "source_sha256": hashes, "retained_input_sha256": input_hashes,
-               "compiler_argv": command, "compiler_exit": proc.returncode, "audit": audit,
+               "compiler_argv": command, "compiler_exit": proc.returncode, "audit": audit, "i486_audit": isa,
                "real_tls_proven_by_this_test": False, "native_guest_proven": False,
                "native_ROOT_execution_proven": False, "os_provider_registered": False}
     (output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
@@ -590,6 +609,8 @@ def main():
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--sanitize", action="store_true")
     p.add_argument("--native", action="store_true", help="strict x86 Win98 DLL build and OEM PE inventory gate")
+    p.add_argument("--engine-build", type=Path, required=True,
+                   help="explicit frozen build.py output; host for ABI model, win98-x86 for native link")
     args = p.parse_args()
     if args.native and args.sanitize:
         p.error("native PE build and host sanitization are separate evidence domains")
@@ -601,12 +622,17 @@ def main():
     for name in SOURCES:
         shutil.copyfile(HERE / name, output / name)
     if args.native:
-        return native_build(output, hashes)
+        return native_build(output, hashes, args.engine_build.resolve())
     (output / "sspi_native_test_win32.h").write_text(SHIM)
     (output / "driver.c").write_text(DRIVER)
     compiler = "clang" if args.sanitize else "gcc"
-    headers = ROOT / "build/secure-transport/native-v3/upstream/mbedtls-3.6.7/include"
-    config = ROOT / "build/secure-transport/host-v4-gui/project"
+    headers = args.engine_build.resolve() / "upstream/mbedtls-3.6.7/include"
+    config = args.engine_build.resolve() / "project"
+    prior = json.loads((args.engine_build / "build-result.json").read_bytes())
+    if prior["status"] != "PASS" or prior["target"] != "host":
+        raise ValueError("host ABI model requires an explicit successful host engine build")
+    if digest(config / "user_config.h") != prior["source_sha256"]["user_config.h"]:
+        raise ValueError("frozen host configuration changed")
     command = [compiler, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
                "-Wpedantic", "-pthread", '-DMBEDTLS_USER_CONFIG_FILE="user_config.h"',
                "-I" + str(output), "-I" + str(config), "-I" + str(headers),

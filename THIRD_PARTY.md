@@ -72,6 +72,16 @@ Wine and ReactOS are not bundled as complete runtimes. Their NT/Unix kernel depe
   tool. Upstream code remains in ignored `build/tls13/upstream/`; a distributed
   linked binary must include the selected license notices and corresponding
   pinned source/build configuration. See `docs/MODERN_THEME_TLS_APPS.md`.
+- `ntwin32/secure_transport/` separately links verified official Mbed TLS
+  3.6.7 for its LTS transport and explicit SSPI adapter. The upstream license
+  is Apache-2.0 OR GPL-2.0-or-later; this combination selects GPL version 2.
+  Its archive identity, original adapter code, compiler-helper notices and
+  redistribution requirements are recorded in
+  `ntwin32/secure_transport/PROVENANCE.md`. Upstream sources and private test
+  certificates remain in ignored build storage. This optional TLS backend is
+  an external dependency of that component, separate from the independently
+  authored platform sources below.
+
 ## Independent platform path
 
 The new `ntwrapper/`, `ntwin32/`, `ntwddm/`, `drivers/pcie/`,

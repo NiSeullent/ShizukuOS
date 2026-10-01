@@ -22,7 +22,7 @@ ARCHIVE_SHA256 = "a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11
 ARCHIVE_BYTES = 5473689
 SOURCES = ("transport.h", "transport.c", "probe.c", "user_config.h", "native_time.c",
            "native_time_probe.c", "native_runtime.h", "native_runtime.c", "native_crt.c",
-           "native.def", "build.py")
+           "native.def", "build.py", "i486_format.c", "i486_format.h", "i486_gate.py")
 
 
 def sha(path):
@@ -107,7 +107,7 @@ def audit_pe(path):
             "native_guest_verified": False}
 
 
-def build(archive, output, target, jobs, run_probe, native_subsystem="windows"):
+def build(archive, output, target, jobs, run_probe, native_subsystem="windows", upstream_tree=None):
     if native_subsystem not in ("console", "windows"):
         raise ValueError("Require an explicit supported native subsystem")
     archive, output = archive.resolve(), output.absolute()
@@ -117,11 +117,38 @@ def build(archive, output, target, jobs, run_probe, native_subsystem="windows"):
         raise ValueError("Upstream archive differs from the pinned publisher asset")
     sources = {name: (HERE / name).read_bytes() for name in SOURCES}
     output.mkdir(parents=True, mode=0o700)
-    upstream = output / "upstream"
-    upstream.mkdir()
-    with tarfile.open(archive) as tar:
-        tar.extractall(upstream, filter="data")
-    source = upstream / ("mbedtls-" + VERSION)
+    if upstream_tree is None:
+        upstream = output / "upstream"
+        upstream.mkdir()
+        with tarfile.open(archive) as tar:
+            tar.extractall(upstream, filter="data")
+        source = upstream / ("mbedtls-" + VERSION)
+    else:
+        # Reuse only immutable original archive bytes in an earlier own build.
+        # This avoids another 50-MiB extraction; no peer/dirty source is reused.
+        source = upstream_tree.resolve()
+        if not source.is_relative_to(ROOT / "build") or source.name != "mbedtls-" + VERSION:
+            raise ValueError("reused upstream must be an earlier own ignored original archive tree")
+        with tarfile.open(archive) as tar:
+            members = tar.getmembers()
+            if len(members) > 12000:
+                raise ValueError("archive member bound")
+            for member in members:
+                relative = Path(member.name).relative_to("mbedtls-" + VERSION)
+                path = source / relative
+                if not path.resolve().is_relative_to(source):
+                    raise ValueError("archive member escaped original root")
+                if member.isfile():
+                    if not path.is_file() or path.is_symlink() or path.stat().st_size != member.size or \
+                            path.read_bytes() != tar.extractfile(member).read():
+                        raise ValueError("original upstream bytes differ: " + member.name)
+                elif member.isdir():
+                    if not path.is_dir(): raise ValueError("original upstream directory missing")
+                elif member.issym():
+                    if not path.is_symlink() or path.readlink().as_posix() != member.linkname:
+                        raise ValueError("original upstream symlink differs")
+                else:
+                    raise ValueError("unsupported original archive member")
     project = output / "project"
     project.mkdir()
     for name, data in sources.items():
@@ -140,15 +167,18 @@ target_link_libraries(ntwst PUBLIC mbedtls mbedx509 mbedcrypto)
 add_executable(TLS13PROB probe.c native_time.c)
 target_link_libraries(TLS13PROB PRIVATE ntwst)
 if(WIN32)
-  target_sources(TLS13PROB PRIVATE native_crt.c)
+  target_sources(TLS13PROB PRIVATE native_crt.c i486_format.c)
   target_link_options(TLS13PROB PRIVATE -Wl,--entry,_mainCRTStartup)
+  target_link_options(TLS13PROB PRIVATE "-Wl,-Map,${CMAKE_BINARY_DIR}/TLS13PROB.map")
   target_link_libraries(TLS13PROB PRIVATE advapi32)
   add_executable(TIMEPROB native_time_probe.c native_crt.c)
   target_link_options(TIMEPROB PRIVATE -Wl,--entry,_mainCRTStartup)
+  target_link_options(TIMEPROB PRIVATE "-Wl,-Map,${CMAKE_BINARY_DIR}/TIMEPROB.map")
   target_include_directories(TIMEPROB PRIVATE "${UPSTREAM_SOURCE}/include")
-  add_library(M98TLS SHARED transport.c native_time.c native_runtime.c native_crt.c native.def)
+  add_library(M98TLS SHARED transport.c native_time.c native_runtime.c native_crt.c i486_format.c native.def)
   target_compile_definitions(M98TLS PRIVATE NTWST_DLL_STARTUP=1)
   target_link_options(M98TLS PRIVATE -Wl,--entry,_DllMainCRTStartup@12)
+  target_link_options(M98TLS PRIVATE "-Wl,-Map,${CMAKE_BINARY_DIR}/M98TLS.map")
   target_link_libraries(M98TLS PRIVATE mbedtls mbedx509 mbedcrypto advapi32)
   set_target_properties(M98TLS PROPERTIES PREFIX "" OUTPUT_NAME "M98TLS")
 endif()
@@ -159,7 +189,7 @@ endif()
 set(CMAKE_C_COMPILER i686-w64-mingw32-gcc)
 set(CMAKE_RC_COMPILER i686-w64-mingw32-windres)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-set(CMAKE_C_FLAGS_INIT "-Os -march=i486 -ffunction-sections -fdata-sections -DWINVER=0x0410 -D_WIN32_WINDOWS=0x0410 -D_WIN32_WINNT=0x0400")
+set(CMAKE_C_FLAGS_INIT "-Os -march=i486 -mtune=i486 -mno-sse -mno-sse2 -mno-mmx -mno-avx -fno-isolate-erroneous-paths-dereference -fno-isolate-erroneous-paths-attribute -D__USE_MINGW_ANSI_STDIO=0 -ffunction-sections -fdata-sections -DWINVER=0x0410 -D_WIN32_WINDOWS=0x0410 -D_WIN32_WINNT=0x0400")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--gc-sections,--no-insert-timestamp,--subsystem,NATIVE_SUBSYSTEM:4.10,--major-os-version,4,--minor-os-version,10")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--gc-sections,--no-insert-timestamp,--subsystem,windows:4.10,--major-os-version,4,--minor-os-version,10")
 '''.replace("NATIVE_SUBSYSTEM", native_subsystem))
@@ -182,12 +212,43 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--g
                "source_sha256": {name: hashlib.sha256(data).hexdigest() for name, data in sources.items()},
                "commands": commands, "host_probe_passed": False, "native_guest_verified": False,
                "system_schannel_verified": False, "application_functionality_verified": False}
+    receipt["archive"] = {"path": str(archive), "bytes": archive.stat().st_size,
+                          "sha256": sha(archive)}
+    receipt["upstream_source"] = {"path": str(source), "original_archive_verified": True,
+                                  "reused_own_original_tree": upstream_tree is not None}
+    receipt["upstream_licenses"] = {str(p.relative_to(source)): sha(p)
+        for p in source.rglob("*") if p.is_file() and
+        (p.name.upper().startswith(("LICENSE", "COPYING", "NOTICE")) or "LICENSES" in p.parts)}
+    receipt["toolchain"] = {}
+    for name in (("i686-w64-mingw32-gcc", "i686-w64-mingw32-objdump")
+                 if target == "win98-x86" else ("cc",)):
+        executable = shutil.which(name)
+        if not executable:
+            raise ValueError("installed tool required: " + name)
+        receipt["toolchain"][name] = {"path": executable, "sha256": sha(Path(executable)),
+            "version": subprocess.run([executable, "--version"], capture_output=True,
+                                      text=True, timeout=10).stdout.splitlines()[0]}
+    if target == "win98-x86":
+        compiler = receipt["toolchain"]["i686-w64-mingw32-gcc"]["path"]
+        receipt["compiler_libraries"] = {}
+        for library in ("libgcc.a", "libmingwex.a", "libmsvcrt.a", "libkernel32.a", "libadvapi32.a"):
+            path = Path(subprocess.run([compiler, "-print-file-name=" + library],
+                capture_output=True, text=True, timeout=10, check=True).stdout.strip()).resolve()
+            receipt["compiler_libraries"][library] = {"path": str(path), "bytes": path.stat().st_size,
+                                                      "sha256": sha(path)}
+        receipt["toolchain_licenses"] = {str(p): sha(p) for package in
+            ("mingw32-gcc", "mingw32-crt", "mingw32-headers")
+            for p in (Path("/usr/share/licenses") / package).glob("*") if p.is_file()}
     try:
         binary_dir = output / "cmake"
         run(["cmake", "-S", str(project), "-B", str(binary_dir), "-G", "Ninja",
-             "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain), "-DUPSTREAM_SOURCE=" + str(source)])
+             "-DCMAKE_TOOLCHAIN_FILE=" + str(toolchain), "-DUPSTREAM_SOURCE=" + str(source),
+             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"])
         run(["cmake", "--build", str(binary_dir), "--parallel", str(jobs)])
         binary = binary_dir / ("TLS13PROB.exe" if target == "win98-x86" else "TLS13PROB")
+        receipt["compiled_inputs"] = {str(p): sha(p)
+            for directory in (source, project) for p in directory.rglob("*") if p.is_file()}
+        receipt["compile_commands_sha256"] = sha(binary_dir / "compile_commands.json")
         receipt["binary"] = {"path": str(binary.resolve()), "sha256": sha(binary), "bytes": binary.stat().st_size}
         receipt["fixtures"] = fixtures(output / "fixtures")
         if target == "win98-x86":
@@ -206,6 +267,18 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--g
             if not all(item["static_gate_passed"] for item in (receipt["pe_audit"],
                   receipt["clock_probe"]["pe_audit"], receipt["native_library"]["pe_audit"])):
                 raise RuntimeError("Native import/directory gate failed; inspect build-result.json")
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("ntwst_frozen_i486_gate", project / "i486_gate.py")
+            gate = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(gate)
+            import gzip
+            receipt["i486_audit"] = {}
+            for artifact in (binary, clock_binary, dll):
+                report, decoded = gate.scan(artifact)
+                (output / (artifact.name + ".disassembly.txt.gz")).write_bytes(gzip.compress(decoded, mtime=0))
+                receipt["i486_audit"][artifact.name] = report
+            if any(report["status"] != "PASS" for report in receipt["i486_audit"].values()):
+                raise RuntimeError("Actual linked i486 instruction gate failed; retained build-result.json")
         if run_probe:
             if target != "host":
                 raise ValueError("Only the host probe may be automatically executed")
@@ -226,6 +299,9 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-nostartfiles -static -static-libgcc -Wl,--g
         receipt["error"] = str(error)
         raise
     finally:
+        receipt["compiled_outputs"] = {str(p.relative_to(output)): sha(p)
+            for p in (output / "cmake").rglob("*") if p.is_file() and
+            (p.suffix in (".a", ".obj", ".o", ".map") or p.name == "build.ninja")}
         (output / "build-result.json").write_text(json.dumps(receipt, indent=2) + "\n")
     return {"status": receipt["status"], "target": target, "binary": receipt["binary"],
             "receipt": str(output / "build-result.json"), "host_probe_passed": receipt["host_probe_passed"],
@@ -241,12 +317,15 @@ def main():
     parser.add_argument("--run-probe", action="store_true")
     parser.add_argument("--native-subsystem", choices=("console", "windows"), default="windows",
                         help="Native file-logging probes default to GUI entry to avoid the Win98 DOS console display host")
+    parser.add_argument("--upstream-tree", type=Path,
+                        help="reuse an earlier own immutable original tree after exact archive-byte comparison")
     args = parser.parse_args()
     if not 1 <= args.jobs <= 4:
         parser.error("jobs must be between one and four")
     if args.run_probe and args.target != "host":
         parser.error("--run-probe is host-only")
-    print(json.dumps(build(args.archive, args.output, args.target, args.jobs, args.run_probe, args.native_subsystem)))
+    print(json.dumps(build(args.archive, args.output, args.target, args.jobs, args.run_probe,
+                           args.native_subsystem, args.upstream_tree)))
 
 
 if __name__ == "__main__":

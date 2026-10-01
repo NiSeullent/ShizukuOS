@@ -18,12 +18,20 @@
 #undef MBEDTLS_SSL_EARLY_DATA
 
 #if defined(_WIN32)
+/* Compile the complete native archive for the i486 baseline. Upstream's
+ * assembly and optional accelerators can emit instructions newer than i486
+ * independently of -march; no runtime hardware-dispatch claim is made here. */
+#undef MBEDTLS_HAVE_ASM
+#undef MBEDTLS_HAVE_SSE2
+#undef MBEDTLS_AESNI_C
+#undef MBEDTLS_AESCE_C
+#undef MBEDTLS_PADLOCK_C
 /* Win98's CRT lacks modern *_s date functions and *_time64 exports.
  * Use its native system clock with a 64-bit Unix epoch; retain date checks. */
 #include <stdint.h>
-#include <stdio.h>
-#define MBEDTLS_PLATFORM_SNPRINTF_MACRO __mingw_snprintf
-#define MBEDTLS_PLATFORM_VSNPRINTF_MACRO __mingw_vsnprintf
+#include "i486_format.h"
+#define MBEDTLS_PLATFORM_SNPRINTF_MACRO ntwst_i486_snprintf
+#define MBEDTLS_PLATFORM_VSNPRINTF_MACRO ntwst_i486_vsnprintf
 #define MBEDTLS_PLATFORM_TIME_TYPE_MACRO int64_t
 #define MBEDTLS_PLATFORM_TIME_MACRO ntwst_native_time
 #define MBEDTLS_PLATFORM_GMTIME_R_ALT
