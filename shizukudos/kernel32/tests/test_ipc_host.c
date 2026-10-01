@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 #include "../k32.h"
 #include "../../abi/shz_ipc.h"
 
@@ -29,7 +30,10 @@ static uint32_t host_ack(void);
 static unsigned long checks;
 #define CHECK(c) do { ++checks; if (!(c)) { \
     fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
-static uint8_t channel_memory[131072] __attribute__((aligned(4096)));
+static uint8_t channel_storage[131072] __attribute__((aligned(4096)));
+static uint8_t *channel_memory = channel_storage;
+static size_t channel_bytes = sizeof channel_storage;
+static unsigned fixture_service_mode;
 static jmp_buf stop;
 static unsigned waits, yields, acks, notifications, sleep_calls;
 static unsigned pass_limit, refill;
@@ -107,13 +111,29 @@ static long host_notify(unsigned domain, uint32_t mask)
 static void setup(void)
 {
     shz_bootinfo_t bi = {0};
-    CHECK(shz_channel_init(channel_memory, sizeof channel_memory, 0,
+    bi.magic = SHZ_BOOTINFO_MAGIC;
+    bi.abi_major = SHZ_ABI_MAJOR;
+    bi.abi_minor = SHZ_ABI_MINOR;
+    bi.size = sizeof bi;
+    bi.domain_id = SHZ_DOM_KERNEL32;
+    bi.generation = 7;
+    if (fixture_service_mode) {
+        channel_bytes = SHZ_IPC_REGION_SIZE;
+        channel_memory = mmap((void *)(uintptr_t)SHZ_IPC_GPA_BASE, channel_bytes,
+                              PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        CHECK(channel_memory == (void *)(uintptr_t)SHZ_IPC_GPA_BASE);
+        memcpy(bi.cmdline, K32_WIN98_SERVICE_CMDLINE, sizeof K32_WIN98_SERVICE_CMDLINE);
+        bi.cmdline_size = sizeof K32_WIN98_SERVICE_CMDLINE - 1;
+    }
+    CHECK(shz_channel_init(channel_memory, channel_bytes, 0,
                           SHZ_DOM_KERNEL32, SHZ_DOM_KERNEL64, 8, 7) == SHZ_OK);
     bi.channel_count = 1;
     bi.channel[0].gpa = (uintptr_t)channel_memory;
-    bi.channel[0].size = sizeof channel_memory;
+    bi.channel[0].size = channel_bytes;
     bi.channel[0].peer_domain = SHZ_DOM_KERNEL64;
+    CHECK(k32_boot_service_mode(&bi) == (int)fixture_service_mode);
     ipc_init(&bi);
+    CHECK(persistent_service == (int)fixture_service_mode);
     served = proto_errors = refused_buffers = stale_msgs = doorbells = ipc_session_end = 0;
     waits = yields = acks = notifications = sleep_calls = refill = 0;
     next_request = 1;
@@ -187,7 +207,7 @@ static void test_refill_bound(void)
     enqueue(OP_ECHO, "x", 1);
     refill = 1;
     run_passes(2);
-    CHECK(ipc_requests_served() > 0 && ipc_requests_served() <= 64);
+    CHECK(ipc_requests_served() == 64);
     CHECK(rx->head - rx->tail == 1);
     CHECK(notifications == ipc_requests_served() && yields == 2);
     CHECK(ipc_protocol_errors() == 0 && tx->head == tx->tail);
@@ -218,16 +238,35 @@ static void test_normal(void)
     CHECK(notifications == 3 && rx->tail == 3);
 }
 
+static void test_persistent_live(void)
+{
+    char payload[3];
+    shz_msg_hdr_t h;
+    setup();
+    enqueue(OP_SESSION_END, NULL, 0);
+    enqueue(OP_ECHO, "abc", 3);
+    run_passes(1);
+    CHECK(ipc_session_end == 0 && ipc_requests_served() == 2 && ipc_protocol_errors() == 0);
+    h = receive_reply(NULL, 0);
+    CHECK(h.opcode == OP_SESSION_END && h.request_id == 1 && h.status == SHZ_E_UNSUPPORTED);
+    h = receive_reply(payload, sizeof payload);
+    CHECK(h.opcode == OP_ECHO && h.request_id == 2 && h.status == SHZ_OK);
+    CHECK(h.payload_length == 3 && !memcmp(payload, "abc", 3));
+    CHECK(yields == 1 && notifications == 2 && rx->tail == 2);
+}
+
 int main(int argc, char **argv)
 {
     CHECK(argc == 2);
     signal(SIGALRM, deadline);
+    if (!strncmp(argv[1], "persistent-", 11)) { fixture_service_mode = 1; argv[1] += 11; }
     if (!strcmp(argv[1], "head")) test_unconsumed_head();
     else if (!strcmp(argv[1], "magic") || !strcmp(argv[1], "slots") || !strcmp(argv[1], "size"))
         test_invalid_metadata(argv[1]);
     else if (!strcmp(argv[1], "malformed")) test_malformed_then_valid();
     else if (!strcmp(argv[1], "refill")) test_refill_bound();
     else if (!strcmp(argv[1], "normal")) test_normal();
+    else if (!strcmp(argv[1], "live")) test_persistent_live();
     else { fprintf(stderr, "unknown case: %s\n", argv[1]); return 2; }
     printf("Kernel32 IPC %s: %lu checks passed\n", argv[1], checks);
     return 0;

@@ -1,0 +1,15 @@
+{
+  "source_commit": "8508c5e360fe8c24c659b719f1ed21831cbdbd4c",
+  "builder_sha256": "1ece1260ccfc5271a225331d70a8c91c31a28e5c413d15921edc1a293be875df",
+  "freedos_commit": "5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3",
+  "upstream_sha256": {
+    "makefile": "8909a9d72814e8eb1ba38480db0805e70b304c705cc9833345c2b5ca2bccd39a",
+    "mkfiles/generic.mak": "bde5baf2ac9fd964eedb518cb104ff89e2926b2ec47c7669516befa0c2533083",
+    "mkfiles/watcom.mak": "1b01d167c84ffb9d557508cec9f1251a395f9148f88b1195091e09d291f4f536",
+    "mkfiles/owlinux.mak": "33c93d86938be7acb3c2fb22616c33e2c00499e3f4d905f7652668f239b47851",
+    "hdr/portab.h": "6ab6cf2cec0a717bf46ab48aea482b7bc8a229102fbe0e15f3b13fae72d97824",
+    "hdr/win.h": "7466b0ab11d0774770f03dbb6a0065d383674f9569c8c72a95340dadd2f4b858",
+    "kernel/kernel.asm": "427070c8b1bad930eeb50d59ae4f935653b2acb292d9d827a186442a892775c4"
+  },
+  "candidate_builder_sha256": "bec1b7bd9433c0be86a1ca1b22d59ac220e71762d4b4c78c56f28a38caaee68b"
+}

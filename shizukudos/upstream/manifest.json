@@ -476,8 +476,8 @@
     "open-watcom-v2": {
       "kind": "toolchain (not redistributed)",
       "url": "https://github.com/open-watcom/open-watcom-v2/releases/download/Last-CI-build/ow-snapshot.tar.xz",
-      "sha256": "01f690d058c26ee5ba6730661ca56bbbfd401ac856af3fc0f4f2e0e626ed0063",
-      "note": "Rolling CI tag: upstream replaces the archive with every CI build (twice within hours on 2026-09-29/30). sha256 is the snapshot the last full verification used (2026-09-29, host suite PASS); a different archive is used with a warning, its hash is recorded in build/tools/ow/.snapshot-sha256 and by the host suite (SKIP with the used hash), and DOS16 reproducibility is compared within each run.",
+      "sha256": "4fdc24c04a02e31ffedae1690fc2c6d53fcb01464f92692adf6b17a7e890af3f",
+      "note": "Historical Open Watcom 2.0 beta Sep 28 2026 archive, previously pinned by project commits a70ab6b/33f403a and recorded by the original DOS producer. Explicitly restored after current 01f690d058c26ee5ba6730661ca56bbbfd401ac856af3fc0f4f2e0e626ed0063 could not be recovered through checked local/official paths. Supply a byte-matching local build/tools/ow-snapshot.tar.xz; the rolling Last-CI-build URL is provenance only and is never downloaded by ensure_open_watcom. Actual archive checksum and cached snapshot stamp must match before tool reuse; mismatch preserves the existing cache and fails closed. Fresh source-pinned producer verification is required; historical or exploratory receipts remain unchanged.",
       "license": "Sybase Open Watcom Public License 1.0"
     },
     "nasm": {"kind": "host tool", "min_version": "2.16"},

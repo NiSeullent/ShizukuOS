@@ -15,6 +15,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ("head", "magic", "slots", "size", "malformed", "refill", "normal")
+PERSISTENT_CASES = ("persistent-head", "persistent-refill", "persistent-live")
 K32_FLAGS = ["-m32", "-march=i486", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding",
              "-fno-builtin", "-fno-pic", "-fno-pie", "-mno-sse", "-mno-mmx", "-msoft-float",
              "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-ident", "-fno-common",
@@ -34,10 +35,11 @@ def main():
         parser.error("choose a fresh output directory to preserve earlier evidence")
     out.mkdir(parents=True)
     source = ROOT / "shizukudos/kernel32/ipc.c"
+    main_source = ROOT / "shizukudos/kernel32/main.c"
     fixture = ROOT / "shizukudos/kernel32/tests/test_ipc_host.c"
     # Snapshot project headers before asking the compiler for its exact closure.
     # A nested include changed during discovery must not acquire a later hash.
-    paths = [source, fixture, Path(__file__).resolve()]
+    paths = [source, main_source, fixture, Path(__file__).resolve()]
     snapshots = {p: p.read_bytes() for p in paths}
     initial_headers = {p.resolve(): p.read_bytes() for p in ROOT.rglob("*.h")
                        if ".git" not in p.parts and "build" not in p.parts and
@@ -97,7 +99,8 @@ def main():
     variants = (("host_gcc", "gcc", ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror"], fixture),
                 ("host_clang_asan_ubsan", "clang", ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
                                                   "-fsanitize=address,undefined", "-fno-omit-frame-pointer"], fixture),
-                ("i486", "gcc", K32_FLAGS, source))
+                ("i486", "gcc", K32_FLAGS, source),
+                ("i486_main", "gcc", K32_FLAGS, main_source))
     for label, cc, flags, translation_unit in variants:
         command = [compilers[cc], *flags, "-MM", "-MT", "k32-inputs", translation_unit]
         if not run(command, "dependencies-" + label):
@@ -133,11 +136,19 @@ def main():
             receipt["binaries_sha256"][exe.name] = digest(binaries[exe])
             for case in CASES:
                 passed = run([exe, case], cc + "-" + case) and passed
-    obj = out / "ipc-i486.o"
-    passed = run([compilers["gcc"], *K32_FLAGS, "-c", source, "-o", obj], "build-i486") and passed
-    if obj.exists():
-        binaries[obj] = obj.read_bytes()
-        receipt["binaries_sha256"][obj.name] = digest(binaries[obj])
+            # The fixed ABI GPA lies in ASAN's shadow gap; use the unsanitized
+            # GCC artifact for these real policy/channel/lifetime cases.
+            if cc == "gcc":
+                for case in PERSISTENT_CASES:
+                    passed = run([exe, case], cc + "-" + case) and passed
+    for name, translation_unit in (("ipc", source), ("main", main_source)):
+        obj = out / (name + "-i486.o")
+        passed = run([compilers["gcc"], *K32_FLAGS, "-c", translation_unit, "-o", obj],
+                     "build-i486-" + name) and passed
+        if obj.exists():
+            binaries[obj] = obj.read_bytes()
+            receipt["binaries_sha256"][obj.name] = digest(binaries[obj])
+    receipt["persistent_service_scope"] = "Real service policy and IPC receive C; fixed ABI GPA; SESSION_END refusal followed by ECHO. Main lifetime polling compiled only."
     receipt["source_compiler_binary_before_after_match"] = stable()
     receipt["changed_project_inputs"] = [str(p.relative_to(ROOT)) for p, b in snapshots.items()
                                           if not p.exists() or p.read_bytes() != b]

@@ -1,0 +1,43 @@
+scenario=20 failures=0 exit=96 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=21 failures=0 exit=96 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+PASS actual Supervisor bootinfo block: only native K32 selects service
+scenario=2 failures=0 exit=0 virtual_ms=70 replies=1 qa=1 reports=1 queries=0
+scenario=1 failures=0 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+scenario=24 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=3 failures=0 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+scenario=8 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=9 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=10 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=11 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=12 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=13 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=14 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=15 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=16 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=17 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=18 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=19 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=22 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=23 failures=0 exit=97 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+scenario=5 failures=0 exit=98 virtual_ms=0 replies=0 qa=0 reports=0 queries=1
+scenario=4 failures=0 exit=1 virtual_ms=500 replies=0 qa=0 reports=0 queries=6
+scenario=0 failures=0 exit=0 virtual_ms=30000 replies=5 qa=0 reports=0 queries=301
+scenario=7 failures=0 exit=98 virtual_ms=0 replies=0 qa=0 reports=0 queries=1
+scenario=6 failures=0 exit=98 virtual_ms=0 replies=0 qa=0 reports=0 queries=1
+test_actual_channel_identity_is_verified_before_server_start (test_lifetime.Kernel32Lifetime.test_actual_channel_identity_is_verified_before_server_start) ... ok
+test_actual_supervisor_writer_selects_only_native_kernel32 (test_lifetime.Kernel32Lifetime.test_actual_supervisor_writer_selects_only_native_kernel32) ... ok
+test_default_qa_preserves_actual_session_end_ack_and_exit (test_lifetime.Kernel32Lifetime.test_default_qa_preserves_actual_session_end_ack_and_exit) ... ok
+test_default_qa_preserves_twenty_second_exit (test_lifetime.Kernel32Lifetime.test_default_qa_preserves_twenty_second_exit) ... ok
+test_inconsistent_empty_cmdline_does_not_silently_select_qa (test_lifetime.Kernel32Lifetime.test_inconsistent_empty_cmdline_does_not_silently_select_qa) ... ok
+test_legacy_bootinfo_ignores_absent_cmdline_tail (test_lifetime.Kernel32Lifetime.test_legacy_bootinfo_ignores_absent_cmdline_tail) ... ok
+test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) ... ok
+test_native_absent_owner_is_not_success (test_lifetime.Kernel32Lifetime.test_native_absent_owner_is_not_success) ... ok
+test_native_failed_owner_closes_with_failure (test_lifetime.Kernel32Lifetime.test_native_failed_owner_closes_with_failure) ... ok
+test_native_service_survives_cap_and_qa_end_then_answers_real_ipc (test_lifetime.Kernel32Lifetime.test_native_service_survives_cap_and_qa_end_then_answers_real_ipc) ... ok
+test_native_unavailable_state_hypercall_is_not_success (test_lifetime.Kernel32Lifetime.test_native_unavailable_state_hypercall_is_not_success) ... ok
+test_native_unknown_owner_state_is_not_success (test_lifetime.Kernel32Lifetime.test_native_unknown_owner_state_is_not_success) ... ok
+
+----------------------------------------------------------------------
+Ran 12 tests in 1.070s
+
+OK

@@ -1,0 +1,187 @@
+--- a/hdr/win.h
++++ b/hdr/win.h
+@@ -4,13 +4,14 @@
+ 
+ 
+ extern UWORD winInstanced; /* internal flag marking if Windows is active */
++extern UBYTE winReportHidden; /* INT 2F/1231 DL=1,2: hide/report actual state */
+ 
+ /* contains information about data that must be kept for each active DOS
+    instance, ie data that can NOT be shared between multiple VMs.
+  */
+ struct WinStartupInfo
+ {
+-  UWORD winver;  /* this structure version, matches Windows version */
++  UWORD winver;  /* supported record version: major byte, minor byte */
+   ULONG next;    /* far pointer to next WinStartupInfo structure or NULL */
+   ULONG vddName; /* far pointer to ASCIIZ pathname of virtual device driver */
+   ULONG vddInfo; /* far pointer to vdd reference data or NULL if vddName=NULL */
+--- a/kernel/kernel.asm
++++ b/kernel/kernel.asm
+@@ -614,7 +614,7 @@
+ os_release      dw      _os_release
+ 
+ %IFDEF WIN31SUPPORT
+-                global  _winStartupInfo, _winInstanced
++                global  _winStartupInfo, _winInstanced, _winReportHidden
+ _winInstanced    dw 0 ; set to 1 on WinInit broadcast, 0 on WinExit broadcast
+ _winStartupInfo:
+                 dw 0 ; structure version (same as windows version)
+@@ -628,15 +628,16 @@
+ global _winseg1
+ _winseg1:	dw 0
+  %endif
++                dd 0 ; optional-instance table, required at +12h for version >= 4.0
+ instance_table: ; should include stacks, Win may auto determine SDA region
+                 ; we simply include whole DOS data segment
+  %ifnidni __OUTPUT_FORMAT__, elf
+-                dw seg _DATASTART, 0 ; [SEG:OFF] address of region's base
++                dw 0, seg _DATASTART ; RBIL 1605 DWORD far pointer: offset, segment
+                 dw _markEndInstanceData wrt seg _DATASTART ; size in bytes
+  %else
++                dw 0 ; offset of instance data
+ global _winseg2
+-_winseg2:	dw 0
+-                dw 0 ; [SEG:OFF] address of region's base
++_winseg2:	dw 0 ; segment of instance data
+ global _winseg3
+ _winseg3:	dw 0 ; size in bytes
+  %endif
+@@ -658,6 +659,7 @@
+                 dw _uppermem_root ; seg of last arena header in conv memory
+                                   ; this matches MS DOS's location, but 
+                                   ; do we have the same meaning?
++_winReportHidden db 0 ; presence reporting never creates an active Windows instance
+ %ENDIF ; WIN31SUPPORT
+ 
+ ;;  The first 5 sft entries appear to have to be at DS:00cc
+--- a/kernel/inthndlr.c
++++ b/kernel/inthndlr.c
+@@ -33,6 +33,10 @@
+ #include "nls.h"
+ #include "win.h"
+ #include "debug.h"
++
++#ifdef WIN31SUPPORT
++STATIC UWORD winActiveVersion; /* actual DI from 1605; not the record format version */
++#endif
+ 
+ #ifdef VERSION_STRINGS
+ BYTE *RcsId =
+@@ -1990,10 +1994,10 @@
+       /* default: unhandled requests pass through unchanged */
+       case 0x0:          /* is Windows active */
+       {
+-        if (winInstanced)
++        if (winInstanced && !winReportHidden)
+         {
+-          r.AL = (winStartupInfo.winver >> 8) & 0xFF;  /* winmajor */
+-          r.AH = winStartupInfo.winver & 0xFF;         /* winminor */
++          r.AL = (winActiveVersion >> 8) & 0xFF;  /* caller's winmajor */
++          r.AH = winActiveVersion & 0xFF;         /* caller's winminor */
+         }
+         /* return AX unchanged if Windows not active */
+         break;
+@@ -2034,10 +2038,20 @@
+                  set to memory manager calling point to disable V86
+            ES:BX is 0000:0000, set to startup structure
+           */
+-        /* r.CX = 0x0; ** redundant and could be set nonzero by another hooked program */
++        /* RBIL 1605: honor an earlier veto and chain its startup record.
++         * Do not turn a rejected startup into a reported Windows instance.
++         */
++        if (r.CX)
++          break;
++        if (r.es != FP_SEG(&winStartupInfo) || r.BX != FP_OFF(&winStartupInfo))
++          winStartupInfo.next = ((ULONG)r.es << 16) | r.BX;
+         r.es = FP_SEG(&winStartupInfo);
+         r.BX = FP_OFF(&winStartupInfo);
+-        winStartupInfo.winver = r.di;  /* match what caller says it is */
++        winActiveVersion = r.di; /* actual caller version, major in high byte */
++        /* DDK SIS_Version has major FIRST, unlike DI. Advertise only the
++         * 3.0 / 4.0 startup-record layouts this kernel actually provides.
++         */
++        winStartupInfo.winver = r.di >= 0x0400 ? 0x0004 : 0x0003;
+ #if defined __GNUC__
+         winseg1 = FP_SEG(&winStartupInfo);
+         winseg2 = FP_SEG(&DATASTART);
+@@ -2054,6 +2068,8 @@
+            Note: If Windows fatally exits then may not be called.
+          */
+         winInstanced = 0; /* internal flag marking Windows is NOT active */
++        winReportHidden = 0;
++        winActiveVersion = 0;
+         DebugPrintf(("Win exit\n"));
+         break;
+       } /* 0x06 */
+@@ -2714,8 +2730,8 @@
+        * far pointer to the entry (in ES:DI, also stored in lpCurSft) and
+        * the relative index within the SFT block (in BX). Used by network
+        * redirectors (NET.EXE) to obtain direct access to an SFT entry
+-       * given a previously-obtained SFN. See also 0x30 (find by SFN,
+-       * Windows 95 variant).
++       * given a previously-obtained SFN. INT 2F/1230 is a distinct Win95
++       * FCB-filesystem-table lookup using an SFT pointer, not an SFN.
+        */
+       {
+         int rel_idx = idx_to_sft_(r.BX);
+@@ -3353,37 +3369,32 @@
+ 
+ #if 0
+     case 0x30:
+-      /* Windows 95: Find SFT entry by system file number (SFN).
+-       * Input:  BX = system file number (SFN, i.e. the raw index value
+-       *              stored in PSP.JFT[handle], NOT the handle itself).
+-       * Output: On success: ES:DI -> SFT entry; CF=0.
+-       *         On failure: CF=1, AX=0006h (invalid handle).
+-       *
+-       * Walk the SFT chain (anchor at SysVars+04h: link->count->entries).
+-       * Count down through each SFT block until the cumulative entry
+-       * index matches BX. This is equivalent to 0x16 but selected by
+-       * raw SFN rather than by JFT handle, bypassing the PSP/JFT
+-       * indirection layer. Used by Windows 95 kernel internals.
++      /* RBIL 1230: ES:DI is an SFT pointer. Win95's separate 20-entry
++       * FCB filesystem table supplies SI:CX directory starting cluster,
++       * DX directory-entry number and BX table index. Failure is CF=1,
++       * AX=0. FreeDOS has no equivalent table; 1216 is NOT a substitute.
++       * Keep this unsupported until real FCB metadata is maintained.
+        */
+       goto not_implemented;
++#endif
+ 
+     case 0x31:
+-      /* Windows 95: Set/clear "report Windows presence to DOS programs" flag.
+-       * Input:  DX = 0000h to enable Windows load (valid for one time only,
+-	   *                    added in Windows 95 OSR2 to protect FAT32 from
+-	   *                    the earlier Windows 95 versions); 
+-	   *         DX = 0001h to clear (hide Windows from INT 2Fh/AX=1600h);
+-	   *         DX = 0002h to set   (report Windows present).
+-       * Output: AX = 0, CF = 0 on success, AX = 1, CF = 1 on error.
+-       *
+-       * Store the low bit of BX into a DOS-internal byte flag
+-       * (WinReportFlag). This flag gates the response of the
+-       * INT 2Fh/AX=1600h Windows enhanced-mode installation check:
+-       * when clear, 1600h returns AL=0 (not present); when set, it
+-       * returns the Windows version. Return the previous value in AX.
+-       */
+-      goto not_implemented;
+-#endif
++      /* RBIL 1231 selects by DL only; DH and BX are not selectors.
++       * DL=1 hides the actual 1600 state; DL=2 reports the actual state.
++       * DL=0's one-shot Windows-load gate is unsupported: there is no
++       * verified loader consumer here, so do not return fake success.
++       * Reject unsupported selectors without touching DOS error state.
++       */
++#ifdef WIN31SUPPORT
++      if (r.DL == 1 || r.DL == 2)
++      {
++        winReportHidden = (r.DL == 1);
++        r.AX = 0;
++        break;
++      }
++#endif
++      r.AX = 1;
++      goto error_carry;
+ 
+     default:
+       if (r.AL <= 0x31)

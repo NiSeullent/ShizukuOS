@@ -1,0 +1,83 @@
+{
+  "schema": "cb43-actual-dos-memory-source-only-checkpoint-v1",
+  "public_file_count_including_manifest": 13,
+  "actual_root_guest_reports": 2,
+  "actual_probe_DOS_checks_each": 11,
+  "actual_probe_DOS_failures_each": 0,
+  "actual_probe_separate_DOS_ERRORLEVEL_each": 0,
+  "independent_report_interpretation_gates_each": 28,
+  "synthetic_host_parser_test_groups": 16,
+  "synthetic_tests_execute_DOS": false,
+  "actual_LOW_largest_bytes": 572240,
+  "actual_HIGH_largest_bytes": 626224,
+  "actual_LOW_HMA_bit": 0,
+  "actual_HIGH_HMA_bit": 4096,
+  "Windows98_boot_verified": false,
+  "MSDOS_replacement_under_Windows98": false,
+  "modern_apps_verified": false,
+  "later_Windows_process_free_memory_verified": false,
+  "minimum_580_KiB_acceptance_applied": false,
+  "public_binary_included": false,
+  "files": [
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/README.md",
+      "bytes": 6626,
+      "sha256": "62a86fd040115295b26b356fd3ce966070489d8bab5f362b6be98e1a7f7ca49e"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/dos-errorlevel-marker.txt",
+      "bytes": 21,
+      "sha256": "456e7641cd18025324e4d151fcd540b810932f44c369cc04261bef90bb406aeb"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/high-interpretation.json",
+      "bytes": 5129,
+      "sha256": "8dde77d168dc2f02c1721e0f17b56c008b30e2bf0206eb46bea4b93259216d9a"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/high-memory.txt",
+      "bytes": 810,
+      "sha256": "48af4cd9ae837ae930340d783eae4d683cd34860f41e01f4704eaa31ef69e9e6"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/independent-parser-review.json",
+      "bytes": 1591,
+      "sha256": "68bbd4bb7a6ef70e414a8c474049df1a73ed7cdf317b9c5935e744e37aed3edf"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/low-interpretation.json",
+      "bytes": 5121,
+      "sha256": "c8d0151ca75a93d7a9dd98f71abceabfabd88a161750e4183a8d13ba79f48773"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/low-memory.txt",
+      "bytes": 810,
+      "sha256": "f7e6e0212c90b66ce1471b6e0d7cb4c7fb3a0321ebd106e93160ae90fdb930f2"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/native-memory-comparison-receipt.json",
+      "bytes": 7038,
+      "sha256": "eaeaab6cbab145c040a8865f18a1b85ba9f9f96dd4dcccccd45872f816df9a1a"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/parse_cbmem_report.py",
+      "bytes": 9534,
+      "sha256": "865fa35166554307e44adb7c473beeab9b3720321ac82e59887b2d991d0a5113"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/parser-source-receipt.json",
+      "bytes": 1702,
+      "sha256": "5947f14521969895eea7bbd6874f6f7d461f9c04dbf2c2e7ef48ee7a5ee0890a"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/synthetic-tests.log",
+      "bytes": 2381,
+      "sha256": "f9e0b5fb8bdb33c2d3392af294690a9d44e9ecf73036a51f4c5b5755704d8047"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-memory-comparison-cb43-20261001/test_parse_cbmem_report.py",
+      "bytes": 7799,
+      "sha256": "83da964041fca72488c36ff07e1ee7a02931673c23d47442853825764686617d"
+    }
+  ]
+}

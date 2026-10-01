@@ -662,18 +662,11 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[s
         csm_patch_names.append(patch.name)
     payload[f"{SHZ10_DIR}/SOURCE/upstream-manifest.json"] = (SHZ10 / "upstream" / "manifest.json").read_bytes()
     top = "win98-modern-shizukudos10-source"
-    source_entries: list[tuple[str, Path]] = [
-        (top, ROOT), (f"{top}/docs", ROOT / "docs"), (f"{top}/tools", ROOT / "tools")]
-    source_entries.append((f"{top}/drivers", ROOT / "drivers"))
-    # drivers/ahci_native (linked into the standalone Kernel64) and shizukufs (libsfs, Kernel64's ShizukuFS driver)
-    for relative in ("shizukudos", "docs/shizukudos10", "licenses", "tools/shizuku_se", "drivers/ahci_native",
-                     "shizukufs"):
-        source_entries += tar_entries(ROOT / relative, f"{top}/{relative}")
-    for relative in ("LICENSE", "tools/build_shizuku_se_iso.py", "tools/build_shizuku_se_disk.py",
-                     "tools/shizuku_se_media.py", "tools/shizuku_se_drivers.py",
-                     "tools/test_shizuku_se_boot_matrix.py"):
-        if (ROOT / relative).is_file():
-            source_entries.append((f"{top}/{relative}", ROOT / relative))
+    # Include every Git-tracked producer, header, resource and build recipe.
+    # The selected roots omitted shipped platform/NT wrapper/WDDM producers.
+    # Final publication separately binds these bytes to a clean source commit
+    # and the actual consumed-source receipts; tracked paths alone are no gate.
+    source_entries = [(top, ROOT), *tracked_entries(ROOT, top)]
     payload[f"{SHZ10_DIR}/SOURCE/shizukudos-source.tar.gz"] = deterministic_tar_gz(source_entries)
     revision = {"revision": git_output("rev-parse", "HEAD"), "branch": git_output("rev-parse", "--abbrev-ref", "HEAD"),
                 "dirty": bool(git_output("status", "--porcelain"))}

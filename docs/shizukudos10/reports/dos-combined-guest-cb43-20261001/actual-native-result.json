@@ -1,0 +1,29 @@
+{
+  "status": "PASS_ACTUAL_COMBINED_DOS_API_GUEST",
+  "guest_exit_marker": "0",
+  "guest_checks": 17,
+  "guest_failed": 0,
+  "source_image_sha256_before": "50d44ccf164e26fbcc06c4e3869031f6ca8353116e71f9218a5528596a39ab0a",
+  "source_image_sha256_after": "50d44ccf164e26fbcc06c4e3869031f6ca8353116e71f9218a5528596a39ab0a",
+  "source_unchanged": true,
+  "owned_disk_sha256_after": "97f7491b9c83c3eb1b1c6d2e9c137e0a80c86b6cd134e403cf1c1eb4d3589e28",
+  "kernel_sha256_readback_before": "c1c86626585c8332a8788a01ded40c8795fd449d1832c9428436038530bbe906",
+  "qemu_process_exit": 0,
+  "owned_process_stopped": true,
+  "host_stopped_after_guest_marker": true,
+  "report": {
+    "sha256": "f8419d5b465e7ba84dafa4265d446104aa4503916045e8b66e1dec440c525716",
+    "bytes": 710
+  },
+  "FAT_readback_exit": 0,
+  "elapsed_seconds": 4.42,
+  "actual_DOS_interrupts": true,
+  "combined_DOSMGR_and_CB43_kernel": true,
+  "actual_DOSMGR_exhaustive_register_tests_in_guest": false,
+  "acceleration": "TCG",
+  "Windows_media_used": false,
+  "Windows_startup_synthesized": false,
+  "Windows98_boot_verified": false,
+  "MSDOS_replaced_under_Windows98": false,
+  "native_modern_apps_verified": false
+}

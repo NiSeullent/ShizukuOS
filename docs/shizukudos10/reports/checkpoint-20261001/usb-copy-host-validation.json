@@ -1,0 +1,56 @@
+{
+  "schema": "win98-modern-usb-helper-host-validation-v1",
+  "date_utc": "2026-10-01",
+  "source_files": {
+    "prepare_install_usb.py": {
+      "bytes": 18199,
+      "sha256": "a86285789c9505e720a86d7c7946f0f15b7aeee4dd10b9a98acd9c1a2dfe7637"
+    },
+    "INSTALL_USB.md": {
+      "bytes": 7505,
+      "sha256": "095325ad891e0c75fb3f826b65b19e5fd449e973ae1def47911dc3f415c5a39f"
+    },
+    "tests/test_prepare_install_usb.py": {
+      "bytes": 8197,
+      "sha256": "fb38d43ddb17f92d8bfc56faf362c42faf4517ad6b2a41533f1c0202362cabd5"
+    },
+    "LICENSE": {
+      "bytes": 15148,
+      "sha256": "fac9da110d1433f4df0cb9f5dda9449e9aff6ee236ed240fa29e3e92926c363a"
+    }
+  },
+  "host_tests": {
+    "new_usb_fixtures": {
+      "passed": 9,
+      "failed": 0,
+      "scope": "Actual ISO9660 + FAT/mtools packaging fixtures only, synthetic file contents; no guest execution"
+    },
+    "tools_test_suite": {
+      "command": "python3 -m unittest discover -s tools/tests",
+      "ran": 46,
+      "passed": 45,
+      "skipped": 1,
+      "failed": 0
+    }
+  },
+  "owner_media_read_only_check": {
+    "bytes": 307714048,
+    "sha256": "4c1b148bfd8aa9ffa702d6756ffa32064c49bb78c00d074225db5a0f302c0873",
+    "shape": "ISO9660 with Windows 98 SETUP.EXE and WIN98 cabinet names",
+    "copied": false,
+    "extracted": false,
+    "executed": false
+  },
+  "public_helper_zip": {
+    "bytes": 17916,
+    "sha256": "f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54"
+  },
+  "claims": {
+    "actual_final_public_iso_staged": false,
+    "usb_guest_boot_verified": false,
+    "windows98_setup_verified": false,
+    "private_combined_iso_built": false,
+    "native_windows98_modern_apps_verified": false
+  },
+  "architecture_target": "ShizukuDOS replaces MS-DOS for Windows 98; Kernel32 and Kernel64 are its components"
+}

@@ -13,6 +13,7 @@
  */
 #include "k32.h"
 #include "../abi/shz_ipc.h"
+#include "service_policy.h"
 
 #define OP_ECHO 0x100
 #define OP_SUM32 0x101
@@ -29,6 +30,7 @@ static uint32_t peer;
 static ksem_t doorbell_sem;
 static volatile uint32_t doorbells;
 static uint32_t served, proto_errors, refused_buffers, stale_msgs;
+static int persistent_service;
 volatile uint32_t ipc_session_end;
 
 uint32_t ipc_requests_served(void) { return served; }
@@ -46,6 +48,9 @@ void ipc_doorbell_irq(void)
 void ipc_init(const shz_bootinfo_t *bi)
 {
     unsigned c;
+    const int mode = k32_boot_service_mode(bi);
+    KASSERT(mode >= 0);
+    persistent_service = mode == 1;
     sem_init(&doorbell_sem, 0);
     for (c = 0; c < bi->channel_count; ++c) {
         if (bi->channel[c].peer_domain != SHZ_DOM_KERNEL64)
@@ -54,6 +59,11 @@ void ipc_init(const shz_bootinfo_t *bi)
         chan_size = (size_t)bi->channel[c].size;
         chan = (shz_channel_hdr_t *)chan_base;
         KASSERT(shz_channel_valid(chan, chan_size));
+        if (persistent_service) {
+            KASSERT(chan->channel_id == bi->channel[c].channel_id && chan->generation == bi->generation);
+            KASSERT((chan->domain_a == SHZ_DOM_KERNEL32 && chan->domain_b == SHZ_DOM_KERNEL64) ||
+                    (chan->domain_b == SHZ_DOM_KERNEL32 && chan->domain_a == SHZ_DOM_KERNEL64));
+        }
         peer = bi->channel[c].peer_domain;
         rx = shz_channel_ring_rx(chan_base, chan, SHZ_DOM_KERNEL32);
         tx = shz_channel_ring_tx(chan_base, chan, SHZ_DOM_KERNEL32);
@@ -118,8 +128,15 @@ static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
         break;
     }
     case OP_SESSION_END:
-        ipc_session_end = 1;
-        reply(m, SHZ_OK, 0, 0);
+        if (persistent_service) {
+            /* This opcode ends the QA peer session, not a Win98-owned service.
+             * Do not acknowledge a shutdown that this profile did not perform.
+             */
+            reply(m, SHZ_E_UNSUPPORTED, 0, 0);
+        } else {
+            ipc_session_end = 1;
+            reply(m, SHZ_OK, 0, 0);
+        }
         break;
     default:
         reply(m, SHZ_E_UNSUPPORTED, 0, 0);
