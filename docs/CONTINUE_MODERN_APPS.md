@@ -1,6 +1,6 @@
 # 다른 환경에서 Windows 98 Modern 작업 이어가기
 
-이 문서는 2026-10-01 소스 인계 지점입니다. `main`에 통합하는 코드는 개발 중인 호환 커널과 공통 API 구현입니다. **Chrome·Chromium·Firefox·Discord/Legcord·Steam·최신 Office가 설치된 Windows 98에서 모두 동작한다는 완료 선언은 아닙니다.** 0.9 자료를 공개할 때도 아래 검증 범위를 함께 표시합니다. 실제 기록의 SHA와 공개 입력 핀은 [checkpoint-20261001](shizukudos10/reports/checkpoint-20261001/)에 있습니다.
+이 문서는 2026-10-01 소스 인계 지점입니다. 목표는 **Windows 98의 MS-DOS 기반을 ShizukuDOS로 대체**하는 것입니다. Kernel32·Kernel64·호환 라이브러리·드라이버는 모두 Windows 98용 ShizukuDOS의 구성요소이며, 별도 커널 실행 시험은 이 통합 제품을 구현하기 위한 단계입니다. `main`에 통합하는 코드는 개발 중인 호환 커널과 공통 API 구현입니다. **Chrome·Chromium·Firefox·Discord/Legcord·Steam·최신 Office가 설치된 Windows 98에서 모두 동작한다는 완료 선언은 아닙니다.** 공개 자료에도 아래 검증 범위를 함께 표시합니다. 실제 기록의 SHA와 공개 입력 핀은 [checkpoint-20261001](shizukudos10/reports/checkpoint-20261001/)에 있습니다.
 
 ## 확인된 범위와 다음 작업
 
@@ -23,10 +23,10 @@ V43의 MinGW stdio 링크 실패도 삭제하지 않았습니다. V44의 부모/
 
 ## 새 작업 환경
 
-Linux x86-64에서 시작합니다. 다음 명령은 새 소스를 받고 작업 폴더 안의 Python 가상 환경만 만듭니다.
+Linux x86-64에서 시작합니다. [공식 홈페이지](https://m98.nyase.kr/)의 해당 배포에서 소스 아카이브 또는 Git bundle과 체크섬을 받습니다. 실제 게시된 파일의 SHA-256과 source commit을 먼저 대조합니다. 소스 아카이브는 새 작업 폴더에 풀고, Git bundle을 받았다면 로컬 파일에서 복원합니다. 다음 예의 파일명은 자신이 받은 실제 bundle 이름으로 바꿉니다. 공식 페이지에 게시되지 않은 파일이 존재한다고 가정하지 않습니다.
 
 ```sh
-git clone https://github.com/NiSeullent/Win98-Modern.git
+git clone /path/to/official-source.bundle Win98-Modern
 cd Win98-Modern
 git checkout main
 python3 -m venv .venv
@@ -35,7 +35,7 @@ python3 -m pip install -r tests/requirements.txt
 python3 -m pip install Pillow
 ```
 
-필요한 실제 도구는 Python 3.10+, Git, GNU make, GCC/binutils(`gcc -m32` 컴파일 가능한 multilib 포함), NASM, x86-64 mingw-w64의 GCC/G++·dlltool·windres, mtools, dosfstools, QEMU x86-64입니다. Wine 소스의 host 도구 생성에는 bison·flex·pkg-config와 개발 헤더가 필요할 수 있습니다. 전체 ISO에는 xorriso, CSMWrap 빌드 도구, DOS16용 Open Watcom이 추가됩니다. 패키지 이름은 Linux 배포판별로 다르며 이 문서는 전역 도구나 클라이언트 설정을 자동 변경하지 않습니다.
+필요한 실제 도구는 Python 3.10+, Git, GNU make, GCC/binutils(`gcc -m32` 컴파일 가능한 multilib 포함), NASM, **x86-64 및 i686 mingw-w64**의 GCC/G++·dlltool·windres, Windows 드라이버 빌드에 쓰는 해당 DDK 헤더, mtools, dosfstools, QEMU x86-64입니다. Wine 소스의 host 도구 생성에는 bison·flex·pkg-config와 개발 헤더가 필요할 수 있습니다. 전체 ISO에는 xorriso, CSMWrap 빌드 도구, DOS16용 Open Watcom이 추가됩니다. 패키지 이름은 Linux 배포판별로 다르며 이 문서는 전역 도구나 클라이언트 설정을 자동 변경하지 않습니다.
 
 API 게스트 시험에는 접근 가능한 `/dev/kvm`이 필요합니다. native Supervisor의 VMX 시험에는 Intel VT-x/EPT와 **중첩 VMX가 실제 노출되는** 호스트 및 OVMF가 필요합니다. QEMU의 KVM 사용과 게스트 Supervisor의 VMX 동작은 각각 검증합니다. AMD에서 동일 native VMX 결과를 가정하지 않습니다. QEMU/OVMF 경로는 `shizukudos/tools/qemu.py`가 Fedora/RHEL 및 Debian/Ubuntu 위치에서 찾습니다. TCG 결과는 KVM 또는 native Supervisor 가속 증거로 계산하지 않습니다.
 
@@ -124,7 +124,7 @@ ATA/PIC/REP PIO와 생성자 host 시험 및 일반 native 링크는 확인됐�
 
 ```sh
 SOURCE_DATE_EPOCH=1785283200 python3 -B tools/build_shizuku_se_iso.py \
-  --desktop --output build/final-iso/shizuku-modern-0.9.0-dev.iso
+  --desktop --output build/final-iso/windows98-shizuku-development.iso
 ```
 
 이 빌드는 xorriso·mtools·dosfstools, 실제 GCC/MinGW/NASM 및 DOS16용 Open Watcom, manifest에 고정된 FreeDOS/FreeCOM·CSMWrap/SeaBIOS·syslinux를 요구합니다. 필요 도구가 없으면 설치 완료로 가장하지 않고 멈춥니다. `--reuse-builds`는 이미 일반 빌드와 현재 receipt를 확인한 환경에서만 사용합니다. ISO builder는 부팅 성공을 인증하지 않으며 실제 BIOS/UEFI boot matrix가 별도입니다. 최종 배포 환경의 manifest·SHA 및 부팅 기록을 확인합니다.
@@ -133,11 +133,13 @@ SOURCE_DATE_EPOCH=1785283200 python3 -B tools/build_shizuku_se_iso.py \
 
 ```sh
 python3 -B tools/build_shizuku_se_iso.py \
-  --win98-media /path/to/your/licensed-win98.iso \
+  --desktop --win98-media /path/to/your/licensed-win98.iso \
   --output build/windows98-shizuku-second-edition-private.iso
 ```
 
 공개 GitHub/공식 페이지/공개 ISO에는 Microsoft 설치 파일·제품 키·VC redistributable·앱 archive·설치 VM disk를 넣지 않습니다. 공개 ISO는 프로젝트 boot/runtime/overlay와 재현 소스입니다. 개인 ISO 또는 VM을 만들 때는 원본 부팅 가능한 disk를 보관하고 독립 복사본만 수정합니다.
+
+설치 USB에는 공개 미디어의 전체 구성과 EFI 파일을 최상위에 복사하고 본인의 Windows 98 ISO를 `OWNMEDIA/WIN98.ISO`에 넣습니다. 실제 파일 준비·원본 보존·읽기 대조 도구와 개인 통합 ISO 명령은 [INSTALL_USB.md](INSTALL_USB.md)에 있습니다. 파일이 담겼다는 결과를 Windows Setup이나 MS-DOS 대체 부팅 성공으로 계산하지 않습니다. 최종 Windows 98 설치와 부팅 경로에서 ShizukuDOS가 실제 DOS 커널과 서비스를 제공해야 합니다.
 
 ## 병합 후 작업 순서
 
@@ -147,4 +149,4 @@ python3 -B tools/build_shizuku_se_iso.py \
 
 ## 공개 배포를 서버 밖에서 확인
 
-최종 ISO를 공식 페이지에 배포한 뒤 `tools/verify_m98_public.py`에 배포 manifest의 실제 파일명·SHA256·바이트 수를 전달합니다. 이 도구는 공개 DNS와 정상 HTTPS 검증으로 한국어/영어 홈페이지, 예전 VNC 주소의 홈페이지 이동, Authorship/인계 페이지 및 **전체 ISO 다운로드 해시**를 확인합니다. origin 주소를 강제로 넣거나 Cloudflare 확인 화면을 성공으로 계산하지 않습니다. 일반 HTTP 응답 검증이며 실제 브라우저 렌더링·OS 부팅 검증과 구분합니다. `.github/workflows/verify-public-distribution.yml`을 `main`에서 수동 실행하면 이 서버 밖의 GitHub Ubuntu runner 결과를 보관합니다. 실패 기록도 그대로 남깁니다.
+최종 ISO를 공식 페이지에 배포한 뒤 `tools/verify_m98_public.py`에 배포 manifest의 실제 파일명·SHA256·바이트 수를 전달합니다. 이 도구는 공개 DNS와 정상 HTTPS 검증으로 한국어/영어 홈페이지, 예전 VNC 주소의 홈페이지 이동, Authorship/인계 페이지 및 **전체 ISO 다운로드 해시**를 확인합니다. 다른 머신에서 공식 소스에 담긴 이 도구를 직접 실행할 수 있으며 GitHub 실행 환경에 의존하지 않습니다. origin 주소를 강제로 넣거나 Cloudflare 확인 화면을 성공으로 계산하지 않습니다. 일반 HTTP 응답 검증이며 실제 브라우저 렌더링·OS 부팅 검증과 구분합니다. 실패 기록도 그대로 남깁니다.
