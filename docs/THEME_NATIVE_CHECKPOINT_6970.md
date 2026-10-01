@@ -105,3 +105,14 @@ the selected peer runtime source to the receipt. Runtime diagnostics cannot
 claim application functionality or Windows 98 execution. Full extraction and
 execution remain subject to the same storage reserve and separately verified
 guest lifecycle; the native Win98-to-Kernel64 GUI bridge remains unverified.
+
+## Integrated peer network source
+
+Reviewed peer commits `66912e3`, `b872beb`, and `c39f6c9` are integrated here as
+`1046391`, `55b9eba`, and `701149b`. They add opt-in DNS configuration, native
+theme/TLS child observers, and a Win98 TCP/CryptoAPI/UTC adapter for the verified
+TLS backend. The integrated evidence verifiers pass 31 theme and 42 TLS tests
+in this worktree. The peer retains ownership of native TLS execution and its
+failure/retry records. This integration supplies source and strict evidence
+contracts; it does not establish a native network handshake, global Schannel,
+WinHTTP/WinINet support, or network functionality in the required applications.
