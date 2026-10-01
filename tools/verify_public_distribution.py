@@ -201,18 +201,21 @@ def check_iso(path, opener, user_agent, expected_bytes, expected_sha256, max_byt
 
 
 def run_process(command, timeout, max_bytes=PROCESS_LIMIT):
-    """Capture only this child, with time and output limits checked while live."""
+    """Return bounded evidence and limit failures even after child termination."""
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
         process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
         deadline = time.monotonic() + timeout
         error = None
+        timed_out = output_limit_exceeded = False
         try:
             while process.poll() is None:
                 if os.fstat(stdout.fileno()).st_size + os.fstat(stderr.fileno()).st_size > max_bytes:
-                    error = ValueError("browser output exceeded budget")
+                    output_limit_exceeded = True
+                    error = "browser output exceeded budget"
                     break
                 if time.monotonic() >= deadline:
-                    error = TimeoutError("browser process exceeded time budget")
+                    timed_out = True
+                    error = "browser process exceeded time budget"
                     break
                 time.sleep(.05)
         finally:
@@ -223,12 +226,19 @@ def run_process(command, timeout, max_bytes=PROCESS_LIMIT):
                 except subprocess.TimeoutExpired:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=3)
-        require(os.fstat(stdout.fileno()).st_size + os.fstat(stderr.fileno()).st_size <= max_bytes, "browser output exceeded budget")
-        if error:
-            raise error
+        observed_bytes = os.fstat(stdout.fileno()).st_size + os.fstat(stderr.fileno()).st_size
+        if observed_bytes > max_bytes:
+            output_limit_exceeded = True
+            error = error or "browser output exceeded budget"
         stdout.seek(0)
         stderr.seek(0)
-        return {"returncode": process.returncode, "stdout": stdout.read(max_bytes), "stderr": stderr.read(max_bytes)}
+        # Preserve diagnostics first if a flood forces truncation; both streams
+        # together must stay within the existing capture limit.
+        captured_stderr = stderr.read(max_bytes)
+        captured_stdout = stdout.read(max_bytes - len(captured_stderr))
+        return {"returncode": process.returncode, "stdout": captured_stdout, "stderr": captured_stderr,
+                "timed_out": timed_out, "output_limit_exceeded": output_limit_exceeded,
+                "output_truncated": observed_bytes > len(captured_stdout) + len(captured_stderr), "error": error}
 
 
 def chrome_user_agent(version):
@@ -250,9 +260,16 @@ def check_browser_page(path, chrome, user_agent, out, timeout):
     require(not dom.exists() and not log.exists(), "fresh browser evidence paths required")
     dom.write_bytes(result["stdout"])
     log.write_bytes(result["stderr"])
+    evidence = {"requested_url": url, "dom": str(dom), "log": str(log), "returncode": result["returncode"],
+                "timed_out": result.get("timed_out", False),
+                "output_limit_exceeded": result.get("output_limit_exceeded", False),
+                "output_truncated": result.get("output_truncated", False)}
+    if evidence["timed_out"] or evidence["output_limit_exceeded"]:
+        return {"status": "FAIL", **evidence,
+                "error": result.get("error") or "browser time or output budget exceeded"}
     require(result["returncode"] == 0, "Chrome failed; inspect retained browser log")
     detail = validate_homepage(result["stdout"])
-    return {"status": "PASS", "requested_url": url, "dom": str(dom), "log": str(log), "returncode": 0,
+    return {"status": "PASS", **evidence,
             "normal_chrome_user_agent_explicitly_selected": True,
             "headless_default_user_agent_tested": False, **detail}
 
@@ -306,6 +323,8 @@ def main(argv=None):
         chrome = str(args.chrome.resolve(strict=True)) if args.chrome else shutil.which("google-chrome")
         require(chrome, "installed Google Chrome required; no browser download is performed")
         version_result = run_process([chrome, "--version"], 10, max_bytes=65536)
+        require(not version_result.get("timed_out") and not version_result.get("output_limit_exceeded"),
+                version_result.get("error") or "Chrome version time or output budget exceeded")
         require(version_result["returncode"] == 0, "Chrome version command failed")
         version = version_result["stdout"].decode().strip()
         user_agent = chrome_user_agent(version)

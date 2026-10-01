@@ -125,6 +125,94 @@ class ISOTests(unittest.TestCase):
 
 
 class BrowserAndEvidenceTests(unittest.TestCase):
+    def test_timed_out_browser_keeps_logs_and_cannot_pass_after_termination_exit_zero(self):
+        class Process:
+            pid, returncode = 12345, None
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout):
+                self.returncode = 0
+                return 0
+
+        def launch(command, **kwargs):
+            kwargs["stdout"].write(HOME)
+            kwargs["stdout"].flush()
+            kwargs["stderr"].write(b"browser stalled before DOM completion")
+            kwargs["stderr"].flush()
+            return Process()
+
+        with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
+            stack.enter_context(patch.object(checker.subprocess, "Popen", side_effect=launch))
+            stack.enter_context(patch.object(checker.os, "killpg"))
+            stack.enter_context(patch.object(checker.time, "monotonic", side_effect=[0, 2]))
+            try:
+                row = checker.check_browser_page("/", "/installed/chrome", "Chrome/140", Path(folder), 1)
+            except TimeoutError:
+                self.fail("Browser timeout discarded captured diagnostic evidence")
+            self.assertEqual(row["status"], "FAIL")
+            self.assertTrue(row["timed_out"])
+            self.assertEqual(row["returncode"], 0)
+            self.assertEqual(Path(row["dom"]).read_bytes(), HOME)
+            self.assertEqual(Path(row["log"]).read_bytes(), b"browser stalled before DOM completion")
+            self.assertIn("time budget", row["error"])
+
+    def test_output_limit_preserves_bounded_diagnostic_capture(self):
+        class Process:
+            pid, returncode = 12345, None
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout):
+                self.returncode = 0
+                return 0
+
+        def launch(command, **kwargs):
+            kwargs["stdout"].write(HOME + b"x" * 1024)
+            kwargs["stdout"].flush()
+            kwargs["stderr"].write(b"browser log")
+            kwargs["stderr"].flush()
+            return Process()
+
+        with patch.object(checker.subprocess, "Popen", side_effect=launch), patch.object(checker.os, "killpg"), patch.object(checker.time, "monotonic", return_value=0):
+            try:
+                result = checker.run_process(["/installed/chrome"], 1, max_bytes=256)
+            except ValueError:
+                self.fail("Output-limit failure discarded bounded diagnostics")
+        self.assertTrue(result["output_limit_exceeded"])
+        self.assertTrue(result["output_truncated"])
+        self.assertFalse(result["timed_out"])
+        self.assertLessEqual(len(result["stdout"]) + len(result["stderr"]), 256)
+        self.assertEqual(result["stderr"], b"browser log")
+        self.assertTrue(result["stdout"].startswith(HOME))
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(checker, "run_process", return_value=result):
+                row = checker.check_browser_page("/", "/installed/chrome", "Chrome/140", Path(folder), 1)
+            self.assertEqual(row["status"], "FAIL")
+            self.assertTrue(row["output_limit_exceeded"])
+            self.assertLessEqual(Path(row["dom"]).stat().st_size + Path(row["log"]).stat().st_size, 256)
+            self.assertEqual(Path(row["log"]).read_bytes(), b"browser log")
+
+    def test_timed_out_version_probe_cannot_produce_a_success_receipt(self):
+        result = {"returncode": 0, "stdout": b"Google Chrome 140.0.7339.207", "stderr": b"version probe stalled",
+                  "timed_out": True, "output_limit_exceeded": False, "output_truncated": False,
+                  "error": "browser process exceeded time budget"}
+        with tempfile.TemporaryDirectory() as folder, ExitStack() as stack:
+            out = Path(folder) / "fresh"
+            stack.enter_context(patch.object(checker.shutil, "which", return_value="/installed/chrome"))
+            stack.enter_context(patch.object(checker, "run_process", return_value=result))
+            stack.enter_context(patch.object(checker, "public_dns", return_value={"addresses": ["1.1.1.1"]}))
+            stack.enter_context(patch.object(checker, "https_opener", return_value=object()))
+            stack.enter_context(patch.object(checker, "check_http_page", return_value={"status": "PASS"}))
+            stack.enter_context(patch.object(checker, "check_browser_page", return_value={"status": "PASS"}))
+            self.assertEqual(checker.main(["--out", str(out)]), 1)
+            receipt = json.loads((out / "receipt.json").read_text())
+            self.assertEqual(receipt["status"], "FAIL")
+            self.assertIn("time budget", receipt["error"])
+            self.assertFalse(receipt["homepage_external_acceptance_verified"])
+
     def test_normal_browser_identity_is_bound_to_actual_version(self):
         ua = checker.chrome_user_agent("Google Chrome 140.0.7339.207")
         self.assertIn("Chrome/140.0.7339.207", ua)
