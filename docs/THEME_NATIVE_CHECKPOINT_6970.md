@@ -322,3 +322,38 @@ that action receives no credit. A new separate offscreen-composition probe will
 check palette and full native text masks, then compare final visible output.
 No original provider, child, observer, startup or v12 proof is changed for that
 diagnostic. Full native theme and global theme requirements remain incomplete.
+
+## Native composition v13: pixels and lifecycle verified, strict receipt refused
+
+The separate `ntwddm/win98/theme_composition` diagnostic composes the client
+scene into an owned 32bpp DIB, compares complete caption/button text masks with
+independent native Windows message-font rendering, then transfers the completed
+scene once. Host and sanitizer builds each pass 22,807 ownership, failure-path,
+pixel and transfer assertions; six parser tests and the OEM/i486 PE gates pass.
+The original theme provider, observer and startup executable remain exact copies.
+
+The stopped genuine Win98 SE v13 trial independently reads back all ten inputs,
+logs and WIN.INI. Classic -> Modern -> Classic gives 84 matching fixed background
+samples, 21 complete native-reference text masks and 63 matching destination
+samples at 32bpp. Both the theme child and observer actually exit zero without
+termination; the bootstrap's own external exit remains unobserved. QEMU exits
+zero after 509.6 seconds and 104 captures; private COW growth is 499,712 bytes.
+The 20-GiB reserve and existing write/output limits remain unchanged.
+
+The general strict verifier retains FAIL: this new builder used the literal
+`NOT-TESTED` for `native_win98`, while its static receipt schema requires
+`not_tested`. The sealed receipt, strict FAIL and raw evidence are preserved.
+The independent pixel/lifecycle results do not override that gate. A fresh
+candidate must correct the metadata and rerun the full gate.
+
+Actual screenshots show the complete Classic/Modern caption and six button
+regions, with Welcome overlapping the footer and later transient display
+damage. Complete visible client output and global themes remain unverified.
+The v13 evidence index is
+`build/theme-native-runs/win98-gop-theme-6970-autostart-v13/handoff-evidence-index.json`,
+SHA-256 `a6f6c191ae2d44146f474bf6c5e3c78444a3193383b4d781fe19be1fda956c28`.
+Root independently rehashes its 35 files, 55 source/compiler inputs and ten
+readbacks, reparses the actual composition and lifecycle logs, and verifies
+actual KVM descriptors and the stopped owned PID. Its separate audit is
+`build/native-v13-root-audit-v1/audit.json`, SHA-256
+`65e6578d4d458f45a26ec33f71ddf14cbc27f8240b0a8220f2a8f9e1587c3794`.
