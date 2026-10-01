@@ -299,3 +299,26 @@ The separately integrated TLS/SSPI correction in `bcb4a34` now passes actual
 linked i486 and OEM Win98 import/PE gates for all four artifacts, plus fresh host
 TLS and SSPI stream/lifetime checks. Native communication and OS-wide TLS remain
 unverified. See `docs/TLS_SSPI_INTEGRATION_6970.md` for retained source and receipts.
+
+## Stopped v12 automatic-start result
+
+V12 completed with the unchanged strict verifier PASS and actual Windows 98 SE
+identity. The frozen bootstrap independently witnessed normal observer exit
+zero; the observer witnessed normal theme-child exit zero, with no termination
+and checked handle cleanup. The bootstrap's own final log IO/exit is explicitly
+unobserved. Theme logs record three Classic paints, one Modern paint, three
+style selections and cleanup PASS.
+
+Independent readback matches all five staged inputs, four logs, patched WIN.INI
+and unchanged MBR/VBR. Final source guards pass 44 source/compiler checks.
+QEMU exited zero at 694.1 seconds with 143 captures; private COW growth is
+495,616 bytes. The immutable evidence index SHA-256 is
+`a0edd4726c5e3b80a69bb4cecffd2a33fdd42c638f15aad5a1be586df65e5d31`.
+
+The visual verdict remains PARTIAL: complete Classic is visible, while Modern
+shows its label/palette with missing style captions/caption background and an
+interrupted pressed rectangle. Modern appeared before the manual M action, so
+that action receives no credit. A new separate offscreen-composition probe will
+check palette and full native text masks, then compare final visible output.
+No original provider, child, observer, startup or v12 proof is changed for that
+diagnostic. Full native theme and global theme requirements remain incomplete.

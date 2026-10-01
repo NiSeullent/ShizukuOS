@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "scope": "Private COW WIN.INI argument-free native automatic-start bootstrap",
+  "native_contract": "PASS",
+  "visual_verdict": "PARTIAL",
+  "regressions": {
+    "python": 15,
+    "native_bootstrap_normal": 2922,
+    "native_bootstrap_sanitized": 2922
+  },
+  "nonce": "8a9c992e7ad355a8a745e5f70f1be20f",
+  "classic_full_scene_verified": true,
+  "modern_label_and_palette_verified": true,
+  "modern_full_scene_verified": false,
+  "manual_style_selection_verified": false,
+  "observer_normal_exit_verified": true,
+  "theme_child_normal_exit_verified": true,
+  "bootstrap_own_external_exit_verified": false,
+  "os_wide_theme_verified": false,
+  "originals_and_frozen_inputs_preserved": true,
+  "evidence": {
+    "handoff-evidence-index.json": {
+      "path": "/root/Win98-Modern-theme-6970/build/theme-native-runs/win98-gop-theme-6970-autostart-v12/handoff-evidence-index.json",
+      "sha256": "a0edd4726c5e3b80a69bb4cecffd2a33fdd42c638f15aad5a1be586df65e5d31"
+    },
+    "strict-native-verify.json": {
+      "path": "/root/Win98-Modern-theme-6970/build/theme-native-runs/win98-gop-theme-6970-autostart-v12/strict-native-verify.json",
+      "sha256": "c6512e382da9968190f4deab4e9f9b808d2d4e0179790e66911f1098a41e148d"
+    },
+    "bootstrap-lifecycle-verify.json": {
+      "path": "/root/Win98-Modern-theme-6970/build/theme-native-runs/win98-gop-theme-6970-autostart-v12/bootstrap-lifecycle-verify.json",
+      "sha256": "7d06cd880f5f936f752f7c7711023ffa468e71bebc3939811a44b9d6502399ee"
+    },
+    "visual-review-result.json": {
+      "path": "/root/Win98-Modern-theme-6970/build/theme-native-runs/win98-gop-theme-6970-autostart-v12/visual-review-result.json",
+      "sha256": "722fd1673a922b9778d10ae70e5a0d8c2cb7d4392782e2ffdb7f5b3bbe0a8721"
+    },
+    "final-source-guard-result.json": {
+      "path": "/root/Win98-Modern-theme-6970/build/theme-native-runs/win98-gop-theme-6970-autostart-v12/final-source-guard-result.json",
+      "sha256": "df0510d9fdd542a5cbc5b0953cd0bd0d0f72eee56419b519bf5548f56f0c8fce"
+    }
+  },
+  "next": "Separate composition source variant to discriminate native offscreen rendering from final display. Original v12 source and evidence stay unchanged."
+}
