@@ -57,6 +57,8 @@ start:
     inc si
     cmp si, 32
     jb .load_stage2
+    mov dword [0x0500], 0x574D5343
+    mov dword [0x0504], 0x00504152
     mov dl, [boot_drive]
     jmp 0x1000:0x0000
 
