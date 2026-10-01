@@ -158,6 +158,44 @@ class InstalledSourceProfile(unittest.TestCase):
         self.assertEqual(result['observed_members']['WINDOWS/COUNTRY.SYS']['sha256'],hashlib.sha256(b'synthetic locale data').hexdigest())
         self.assertIn('WINDOWS/COMMAND/NLSFUNC.EXE',result['observed_members'])
 
+    def test_observed_nls_only_preserves_actual_64_byte_line_and_dependencies_without_country(self):
+        nls=b'loadhigh C:\\WINDOWS\\COMMAND\\nlsfunc.exe C:\\WINDOWS\\country.sys\r\n'
+        self.assertEqual(len(nls),64)
+        self.write_member('WINDOWS/COUNTRY.SYS',b'synthetic locale data')
+        self.write_member('WINDOWS/COMMAND/NLSFUNC.EXE',b'MZ synthetic NLS fixture')
+        self.write_member('AUTOEXEC.BAT',nls);self.refresh_disk()
+        before=self.disk.read_bytes();source_members=self.fixture.inventory(self.disk)
+        try:result=self.generate()
+        except ValueError as error:self.fail('observed NLS-only invocation was refused: '+str(error))
+        self.assertEqual(result['locale'],{'country':[],'nls':[nls.decode().strip()]})
+        self.assertNotIn(b'COUNTRY=',(self.root/'profile/payloads/CONFIG.SYS').read_bytes())
+        auto=(self.root/'profile/payloads/AUTOEXEC.BAT').read_bytes()
+        self.assertEqual(auto.count(nls),1)
+        self.assertEqual(auto.count(b'C:\\WINDOWS\\WIN.COM\r\n'),1)
+        self.assertEqual((self.root/'profile/original-config/AUTOEXEC.BAT').read_bytes(),nls)
+        for name in ('WINDOWS/COUNTRY.SYS','WINDOWS/COMMAND/NLSFUNC.EXE'):
+            self.assertEqual(result['observed_members'][name],source_members[name])
+        self.assertTrue(all(result[k] is False for k in ('Windows98_boot_verified','installed_Windows98_version_verified',
+            'MSDOS_replacement_under_Windows98','native_apps_verified','VM_executed','public_artifact',
+            'drive_mapping_verified','native_bootability_verified')))
+        self.assertEqual(self.disk.read_bytes(),before)
+
+    def test_nls_only_missing_dependencies_or_duplicate_invocations_are_refused(self):
+        nls=b'loadhigh C:\\WINDOWS\\COMMAND\\nlsfunc.exe C:\\WINDOWS\\country.sys\r\n'
+        self.write_member('WINDOWS/COMMAND/NLSFUNC.EXE',b'MZ synthetic NLS fixture')
+        self.write_member('AUTOEXEC.BAT',nls);self.refresh_disk()
+        with self.assertRaises(ValueError):self.generate()
+        self.assertFalse((self.root/'profile').exists())
+        self.write_member('WINDOWS/COUNTRY.SYS',b'synthetic locale data')
+        subprocess.run(['mdel','-i',str(self.disk)+'@@16384','::WINDOWS/COMMAND/NLSFUNC.EXE'],check=True,capture_output=True)
+        self.refresh_disk()
+        with self.assertRaises(ValueError):self.generate()
+        self.assertFalse((self.root/'profile').exists())
+        self.write_member('WINDOWS/COMMAND/NLSFUNC.EXE',b'MZ synthetic NLS fixture')
+        self.write_member('AUTOEXEC.BAT',nls+nls);self.refresh_disk()
+        with self.assertRaises(ValueError):self.generate()
+        self.assertFalse((self.root/'profile').exists())
+
     def test_ambiguous_locale_or_command_injection_is_refused_before_output(self):
         for config,auto in ((b'COUNTRY=82,949,C:\\WINDOWS\\COUNTRY.SYS\r\n',b''),
                             (b'COUNTRY=82,949,C:\\OTHER\\COUNTRY.SYS\r\n',b''),
