@@ -140,10 +140,11 @@ Calc and Impress files and export/read back PDF. None has a new functional
 Windows 98 pass in this checkpoint.
 
 Peer ownership and handoff are in `docs/modern-apps-coordination-5abe.md`.
-The established guest harness maintains a selected 20-GiB disk reserve. Current
-shared-host free space is below that threshold; this checkpoint does not lower
-the reserve, delete peer evidence, or start a competing guest. Native execution
-remains pending with the guest owners.
+The established guest harness maintains a selected 20-GiB disk reserve. The
+initial checkpoint was blocked by that reserve. Dedicated disk agents later
+recovered space while preserving original images and prior evidence, enabling
+private native and AMD64 trials. Their current results and remaining limits are
+recorded in `docs/THEME_NATIVE_CHECKPOINT_6970.md`; the reserve remains unchanged.
 
 The completed host checkpoint passes 312 new theme checks normally and under
 ASan/UBSan, the existing ntwddm regression/freestanding checks, 16 real TLS
