@@ -89,7 +89,7 @@ c3cad2b11a9ac7bae97aca531ab40817c51ede4b8cd98ded320ec09452663858;
 guard42098B SHA256
 88179baec8ff68cc5e6ef0ee1b601622521b7303e388ba9a8c4171ffa3697364.
 Only the guard's fixture digest and size pins changed. Independent static
-review cleared the narrow successor; fresh hosted execution remains pending.
+review cleared the narrow successor; actual subsequent execution is below.
 
 The companion combined K32 build at c9c09ed succeeded in run36929139750:
 all43 compile/link commands0 with30 source snapshots. Its snapshot included
@@ -98,3 +98,53 @@ That broader snapshot is historical after the watchdog change; a new combined
 build is required rather than declaring the30-input current closure unchanged.
 Receipt94,786B SHA256
 d09235577283f48a5a1c08bd80e9242d061898b767d96fa63e4f2dd9b97136b2.
+
+## Actual own-header GREEN and refreshed combined build
+
+Successor f5e58113c9ffac9d5a6f6335ec0f48fec932cb0c ran in
+[run36929706181](https://github.com/NiSeullent/Win98-Modern/actions/runs/36929706181),
+job110595663225. HOST365 and Clang ASan/UBSan365 checks passed across every
+exact case. All22 actual commands exited0 and were reaped without abort or
+diagnostics. Root and an independent reviewer matched the full actual API
+log, printed receipt and all14 stdout captures. Source9 before/after/current
+matched, including the retained own IPC header892e0009, distinct from peer
+17c19bcf. Actual -M/-MD lists and source/system-header identity/hash snapshots
+matched: HOST112 inputs, sanitizer114 inputs, freestanding object8 inputs.
+
+Receipt237,539B SHA256
+f30bf864619fce437039d707388e76bff01f6d69f31afa79e30a7cefd08fd5a0;
+actual log462,327B SHA256
+7db14098f44b85dd21ed028f35ec3639f59fe38342e16fabe263840f2ec96f95.
+Minimum observed free92,385,374,208B, final output1,998,083B,
+peak observed1,998,084B, resource failure absent and self-inclusive accounting
+verified. The actual production object is5388B SHA256
+ff6171a0b8f467aaa1feda476c7f0b8b4f7c916ba63777b36086268daf4afa1f,
+ELF32 little-endian EM_386 ET_REL. It is compile-only; complete section and
+instruction-set validation, linking and execution are not claimed.
+
+The same successor ran the unchanged deadline/build workflow in
+[run36929706409](https://github.com/NiSeullent/Win98-Modern/actions/runs/36929706409).
+Deadline job110595664040 passed76 HOST and76 sanitizer checks with6 clean,
+reaped commands and eight current source pins. Build job110595734669 passed
+all43 compile/link commands with30 before/after/current source snapshots,
+including the new host fixture as an inventory input rather than a kernel
+compile input. The two K32 profiles and multiboot stub are ELF32 EM_386
+ET_EXEC with no undefined nm symbols. The stub remains an ELF32/Multiboot
+structure proof rather than a verified i486 instruction or boot execution.
+
+Deadline receipt11,729B SHA256
+f5b2ffdc1833fd7c0f971aed77d49776c1cb0157f1f4f9bf17bd3fe7456b27fb;
+build receipt94,778B SHA256
+b226695db9cdc27657957622b9d168ff82b96a6560443673bf156b763626accf.
+Build minimum free92,259,364,864B, final output1,678,865B,
+peak observed1,678,866B, no resource failure and accounting verified.
+Resolved tools/project sources are bound; full implicit toolchain/runtime and
+all transient peaks remain outside these receipts.
+
+This fresh own-header proof does not inherit peer receipt a4c302ce. Real
+semaphore scheduling, native context-switch/guest boot, Windows98/VMM,
+cross-domain execution and peer integration remain false. Raw evidence stays
+in bounded RAM while physical persistence fails the separate reserve gate.
+Source import6cceb118, guarded preparationc9c09ed and watchdog successorf5e58113
+are reviewable scoped commits for canonical integration. Main adoption and
+official ISO publication remain unverified.
