@@ -95,8 +95,10 @@ Actual publisher packages are retained outside Git beneath
 and inventory: 13 native files, AMD64 PE32+, and a Windows 10 declared OS version.
 ONLYOFFICE 9.4.0 x86 passes its official release SHA-256 and inventory: 335 native
 files and an ia32 entry point. These are package facts, not compatibility results.
-The separate official ONLYOFFICE x64 pin is recorded for the AMD64 Kernel64
-runner; the ia32 package remains available for a separate native port.
+The official ONLYOFFICE 9.4.0 x64 package also passes its release SHA-256 and
+actual inventory (335 native files). Its complete publisher layout is prepared
+for the AMD64 Kernel64 runner; the ia32 package remains available for a separate
+native port.
 
 `tools/required_app_runtime_handoff.py` supplies explicit package preparation,
 standalone image construction and diagnostic execution stages. It rejects an
@@ -116,3 +118,118 @@ in this worktree. The peer retains ownership of native TLS execution and its
 failure/retry records. This integration supplies source and strict evidence
 contracts; it does not establish a native network handshake, global Schannel,
 WinHTTP/WinINet support, or network functionality in the required applications.
+
+
+## 2026-10-01 real retry and storage recovery
+
+The dedicated disk agents completed content-preserving allocation sharing and
+narrow removal of inactive, disposable dependency-cache payload. Phase 1 newly
+shared 4,201,721,856 bytes; phase 2 independently confirmed 4,649,242,624 bytes
+(4,297,510,912 sharing plus 351,731,712 exclusive cache payload removed).
+The original images, active clones, publisher packages, final executables and
+failure receipts remain. These amounts exclude unrelated cleanup by other
+sessions. The final phase-2 checkpoint is
+`/root/Win98-Modern-boot/build/disk-optimizer-6970-phase2/checkpoint.json`.
+The native reserve remains 20 GiB plus the private 256 MiB COW headroom.
+
+The v6 private native KVM trial actually started and produced 94 captures.
+SYSTEM.INI reported missing `mshbios`; after the prompt was dismissed, inspected
+screens were black and the QMP connection reset. No desktop was observed, the
+observer was not launched, and THEME.LOG/THOBS.LOG are absent. Independent
+stopped-clone readback matched all three prepared binary hashes. This is a
+native FAIL, separately from successful original/COW preservation checks.
+Evidence is beneath
+`build/theme-native-runs/win98-gop-theme-6970-20261001-v6`.
+The v7 trial used the unchanged cold-v3 lineage which peer 5abe previously
+observed reaching the desktop. It reached the actual Korean Win98 desktop and
+Run dialog, and the owned VM exited normally with code zero after 427.8 seconds.
+The exact fresh-nonce observer command is independently present in Run history.
+Nevertheless, no probe window or observer/child log was observed; theme
+acceptance remains FAIL. All three stopped-clone binary hashes match. The
+harness does not type `=` directly, so an owned split input action supplied
+that key explicitly. A bounded early-entry diagnostic is being added to locate
+the observer pre-log failure without weakening nonce or exit requirements.
+
+## Private AMD64 Modern theme integration
+
+`ntwddm/win64/theme_provider` supplies an application-local AMD64 `UXTHEME.DLL`
+using the shared real painter. It adds checked 64-bit handle transport, private
+ANSI-to-Unicode calls, borderfill size queries, and documented partial extended
+background drawing with real ordinal 47. The explicit Modern build initializes
+its style once after lazy engine creation. All 1,889 host assertions pass
+normally and with ASan/UBSan; those checks do not execute Windows ABI endpoints.
+See that module's README for exact supported behavior and source lineage.
+
+`tools/required_theme_runtime.py` validates the actual SHZARC01 archive,
+preserves all 141 original members byte-for-byte and in order, and appends only
+this provider. Its 36 imports resolve through the actual archive's 43 AMD64
+system DLLs. Inputs include the exact generated adapter/font sources. The v2
+receipt at `build/required-theme-runtime-6970-v2/theme-overlay.json` binds the
+derived archive SHA-256
+`cac9b31ad2a9835847d8ac12372307553ff801df3e8dcf3aad5d6c6349947e2a`.
+Sixteen consumer tests pass. The run stage retains the unchanged handoff's
+source, recipe, image, firmware and resource checks, then records the actual
+sealed derived archive. It supplies neither a native Win98 AMD64 GUI bridge
+nor system-wide theme registration.
+
+## Required-app execution observations
+
+The isolated QEMU firmware fix freezes the explicitly selected split firmware
+roots into each owned run directory and supplies that private directory with
+`-L`. Twenty-nine handoff tests cover the real missing-BIOS failure and the
+sealed union's ambiguity, bounds and preservation checks. Earlier BIOS-failed
+Signal evidence remains unchanged; it was not an application compatibility
+result.
+
+Real Signal 8.28.0 baseline `signal-run-v2` mapped the publisher executable,
+started pid 60 and emitted a ten-second heartbeat, then timed out at 90.1
+seconds without a normal application exit or demonstrated UI. The Modern
+trial `signal-themed-run-v1` also started pid 60 and timed out at 90.2 seconds.
+The previous UXTHEME file-not-found trace disappeared; named provider ordinal
+probes and additional DirectWrite initialization appeared. This establishes
+loader progress, not visible theme painting or messaging. Remaining diagnostics
+include the fibers/appmodel API-set versions, KERNELBASE, downlevel Shell32,
+power notifications and modern virtual-memory entry probes. Some may be
+optional probes; their absence alone is not a proven cause of the timeout.
+All original/sealed runtime, firmware, image, tree and recipe guards pass.
+The baseline archive SHA is `2f3a3fac...16f0`; compare full hashes in each receipt.
+
+Real ONLYOFFICE 9.4.0 x64 baseline `onlyoffice-run-v1` mounted its complete
+publisher tree and mapped DesktopEditors.exe, Qt5Widgets.dll and Qt5Gui.dll.
+The loader stopped before creating the application process because Qt5Gui
+normally imports `D3D11CreateDevice` from absent D3D11.DLL. Qt also requires
+DXGI; environment flags cannot bypass a required normal import. The shipped
+D3D compiler and ANGLE libraries are present, but are not a replacement for
+D3D11. The run ended after 11.8 seconds, with all preservation checks passing.
+The guest self-test exit zero does not establish Office execution. The Modern
+comparison `onlyoffice-themed-run-v1` reproduced the same failure after 14.9
+seconds. Its wrapper verified the actual sealed derived archive and all input
+preservation checks; no theme drawing occurred before this graphics gap.
+
+These diagnostics use standalone ShizukuDOS Kernel64, have no network attached,
+and keep application functionality and native Windows 98 execution unverified.
+Legcord/LibreOffice rendering and the native TLS fixture remain peer-owned;
+the broad user objective is still incomplete.
+
+
+## Actual AMD64 painter acceptance
+
+The fresh `build/tp64-run-v2/theme-acceptance.json` trial passes 94 actual
+Windows ABI assertions and all 16,800 independently expected Classic/Modern
+button pixels in QEMU's visible framebuffer. A real USER32 window was painted;
+the exact nonce-bearing app pid 60 exited normally with code zero, and the
+kernel's raw `proc_wait` result was zero (successful teardown/reaping).
+The original and sealed source/runtime/image/firmware inputs remain unchanged.
+The minimum free space was 58,240,233,472 bytes and peak private writes plus
+captures were 2,578,355 bytes, within unchanged reserve/output limits.
+
+The first guest trial retained a FAIL because its host gate interpreted
+`reaped` as a Boolean; guest assertions and pixels alone could not override
+that verdict. After binding the real kernel caller's return-code semantics,
+the new trial used a fresh nonce and preparation. The corrected evidence gate's
+24 regression tests pass. All older attempts remain unchanged.
+
+This proves the exercised application-local AMD64 painter and visible button
+backgrounds. Text/font rendering, persisted/global themes, native Windows 98
+integration, Signal messaging and Office document editing remain unverified.
+See `ntwddm/win64/theme_probe/README.md` for supported cases and exact receipts.
