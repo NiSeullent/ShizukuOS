@@ -33,6 +33,10 @@ static uint32_t exception_count[32];
 static uint64_t timer_irqs;
 static void (*irq_handlers[256])(struct regs *);
 
+extern volatile int pma_sched_trace_enabled;
+void __attribute__((weak)) pma_sched_trace_irq(uint64_t rip, uint64_t flags)
+{ (void)rip; (void)flags; }
+
 /* Device interrupt handlers (standalone profile: legacy PIC vectors 0x20..0x2f). The handler runs with interrupts off in
  * the interrupted thread's context; the PIC EOI is sent after it returns, so it must not schedule away. */
 void irq_register(unsigned vector, void (*handler)(struct regs *)) { if (vector < 256) irq_handlers[vector] = handler; }
@@ -105,6 +109,7 @@ void isr_dispatch(struct regs *r)
         krandom_irq(r->vector, r->rip);            /* interrupt arrival times feed the entropy pool */
     switch (r->vector) {
     case VEC_TIMER:
+        if (pma_sched_trace_enabled) pma_sched_trace_irq(r->rip, r->rflags);
         ++timer_irqs;
 #ifdef SHZ_STANDALONE
         standalone_eoi();                   /* PIT IRQ0 through the 8259: acknowledge before any context switch */
