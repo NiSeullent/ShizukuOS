@@ -399,7 +399,11 @@ and full ASan/UBSan executions pass386 targeted checks and4641 unchanged selecte
 official memory/growth/bulk-memory commands. Root baseline regression also
 passes1237 predicates in both modes through a prepared observation copy that
 collects foreign-thread results after join. Original tests and failures remain
-preserved; JavaScript memory integration and native profile execution remain pending.
+preserved. Private JavaScript memory integrationv4 now passes622 checks normally
+and under full ASan/UBSan, retaining all140 original predicates except the two
+documented old no-grow outcomes. Actual allocator failures recover on the same
+instance with zero-filled new pages and retained prefix; native profile execution and
+standard browser WebAssembly remain pending. See `TRIDENT_WASM_QJS_MEMORY_PROFILE.md`.
 
 Actual software triangle rasterization through the genuine frozen Mesa TGSI
 fragment API is committed in `601e2fd`. Raster v3 passes33792 assertions in
@@ -455,7 +459,10 @@ and prepared sources remain unchanged. Actual supervisor exit remains
 unverified. This pass does not establish memoryv8, browser WebAssembly or full
 standards. A subsequent runtime-only JavaScript admission queued before run
 creation behind peer theme Win98 PID3455405 and the occupied cooperative lock.
-No peer process or guest is controlled.
+After that guest naturally ended, another fresh admission passed both complete
+six-input CPU guard replays and the original2GiB cold-source hash. The standalone
+JavaScript harness is preparing a new private run; actual guest acceptance
+remains pending. No peer process or guest is controlled.
 
 The isolated TLS i486 v1 receipt
 `1123b84ae84c35981cbf5e6e3ea9c4d4b6848cac00d2ee0b22e61be7237167b3`
