@@ -134,6 +134,71 @@ jobs:
           lfs: false
           submodules: false
 
+      - name: Prepare missing assembler on the ephemeral hosted runner
+        timeout-minutes: 3
+        run: |
+          sudo -n python3 -B - <<'PYTHON'
+          import os, selectors, shutil, signal, subprocess, time
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          reserve = 20 * 1024**3
+          assert shutil.disk_usage(root).free >= reserve + 64 * 1024**2
+          command = [
+              'env', 'DEBIAN_FRONTEND=noninteractive',
+              'apt-get', '-o', 'Acquire::Retries=0', '-o', 'DPkg::Lock::Timeout=10',
+              '--no-install-recommends', '--no-upgrade', '--no-remove', '--yes',
+              'install', 'nasm',
+          ]
+          assert os.geteuid() == 0  # monitor can terminate its own root apt/dpkg group
+          print('Hosted-only tool prerequisite:', command, flush=True)
+          child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+          watch = selectors.DefaultSelector()
+          watch.register(child.stdout, selectors.EVENT_READ)
+          capture = bytearray()
+          start = time.monotonic()
+          minimum = shutil.disk_usage(root).free
+          try:
+              while True:
+                  minimum = min(minimum, shutil.disk_usage(root).free)
+                  if minimum < reserve:
+                      raise RuntimeError('Hosted assembler preparation crossed 20 GiB reserve')
+                  if time.monotonic() - start > 120:
+                      raise RuntimeError('Hosted assembler preparation exceeded 120 seconds')
+                  status = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                  if status and status.si_pid == child.pid and not watch.get_map():
+                      break
+                  for key, _ in watch.select(0.05):
+                      block = os.read(key.fileobj.fileno(), 16384)
+                      if not block:
+                          watch.unregister(key.fileobj)
+                      else:
+                          remaining = 262144 - len(capture)
+                          capture.extend(block[:remaining])
+                          if len(block) > remaining:
+                              raise RuntimeError('Hosted assembler preparation exceeded 256 KiB log bound')
+              child.wait(timeout=5)
+          except BaseException:
+              try:
+                  os.killpg(child.pid, signal.SIGKILL)
+              except ProcessLookupError:
+                  pass
+              child.wait(timeout=5)
+              raise
+          finally:
+              watch.close()
+              child.stdout.close()
+              print(capture.decode('utf-8', errors='replace'), end='')
+              print('Hosted assembler prerequisite exit:', child.returncode,
+                    'minimum observed free:', minimum,
+                    'log bytes:', len(capture), 'direct child reaped:', child.returncode is not None)
+          assert child.returncode == 0
+          assert Path('/usr/bin/nasm').is_file()
+          assert shutil.disk_usage(root).free >= reserve + 8 * 1024**2
+          # Package installation is a separate ephemeral-host prerequisite.
+          # The unchanged build runner enforces its own fresh 8 MiB output root.
+          PYTHON
+
       - name: Bind exact revision and fresh i486 build proof
         run: |
           python3 -B - <<'PYTHON'

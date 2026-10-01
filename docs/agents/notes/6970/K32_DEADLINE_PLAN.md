@@ -33,7 +33,7 @@ The C fixture SHA-256 is ee88bc841221604fa56353a3b460c399f33cbea28fe4753b4bc44c0
 
 Independent source review covered hardware-only substitutions, accumulated assertion failures, actual long/above32-bit expiry ticks, timeout/post ordering, two waiters, rewait, resumed return and exit/join. Runner lifecycle now retains the owned process-group leader with nonreaping waitid until pipe drain/abort teardown; final receipt binds self-inclusive bytes and observed resource samples. Static inspection is not execution of those controls.
 
-An actual RED CLI admission attempt returned BLOCKED_NOT_RUN/exit3 at20,095,266,816B free versus21,483,225,088B required, without creating the requested proof root or starting a compiler. All four frozen source hashes remained unchanged. Python syntax parsing passed without bytecode output. There is no actual C compile, RED, GREEN, descendant teardown negative-control or native acceptance yet. The prepared tests are committed for continuation in another environment; no production deadline repair is included.
+An actual RED CLI admission attempt returned BLOCKED_NOT_RUN/exit3 at20,095,266,816B free versus21,483,225,088B required, without creating the requested proof root or starting a compiler. All four frozen source hashes remained unchanged. Python syntax parsing passed without bytecode output. At that preparation checkpoint, actual C compile, RED, GREEN, descendant teardown negative-control and native acceptance were still pending. The prepared test commit included no production repair. The subsequent hosted RED/GREEN and production repair are recorded below.
 
 Use a fresh absolute direct child of this checkout's build/k32-deadline-6970 for every actual proof. The runner derives paths from the checkout and rejects reused/symlinked/outside roots. Keep resource admission and compiler/sanitizer requirements when continuing.
 
@@ -72,3 +72,30 @@ Actual Windows98, VMM, context-switch assembly, thread_create, unlocked/torn
 clock reads, full64-bit counter rollover and deliberate descendant-abort
 negative control remain unverified by these receipts. Combined main imports
 must retain peer publication/storage changes and run their own closure tests.
+
+## Bilateral source integration and first freestanding build attempt
+
+Canonical master163f imported the scoped deadline repair as f617515 and the
+unchanged production fixture/guard as d1af3c23d9be4791b382893fcb281be83b8dcb6a.
+Our six-file readback matched sched/header/helper/fixture/guard/user.c across
+both worktrees. This branch imported peer publication8671fba as e314f6e and its
+source-provenance follow-up665792e as221bda8. Neither import implies main or
+Windows98 runtime acceptance.
+
+[Actual run36918008242](https://github.com/NiSeullent/Win98-Modern/actions/runs/36918008242)
+at8a0c13156dab17ce91d47313ab5a772813f5e2b5 repeated the76 HOST and76 sanitizer
+checks successfully. Its separate i486 build job110556842166 failed before any
+compiler/tool command because NASM was absent on that hosted image. The full
+11,761-byte failure receipt SHA256 is
+ac4fcc503e50b260ed9c487d60f814485c6fe429054c7c917f45f20e03bcd2c6:
+29 source pins matched current source, commands=[], resource failure absent,
+receipt accounting verified, minimum observed free92,386,455,552B.
+This actual prerequisite failure is retained; no successful build is inferred.
+
+The guarded build runner uses unchanged kbuild functions for supervisor K32,
+standalone K32 and its shared Multiboot32 stub. All build outputs/captures and
+receipt share a fresh8 MiB root, with20 GiB reserve checks. It binds the bounded
+source buffers before module loading and directly invoked tools by readonly
+FD identity/hash. GCC implicit backend programs and system headers are not
+separately enumerated. Even a later compile/link/ELF proof cannot establish
+actual guest, context-switch assembly, VMM or Windows98 execution.
