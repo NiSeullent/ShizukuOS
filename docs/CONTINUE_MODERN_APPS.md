@@ -104,7 +104,7 @@ python3 -B shizukudos/win64/tests/test_module_ansi_host.py \
 
 일반 앱 도구는 `shizukudos/tests/run_k64_chromium.py`, `run_k64_electron.py`, `run_k64_productivity.py`입니다. 기본 입력 위치는 **이번 환경에서 생성한** `build/shizukudos/{kernel64s,win64}`입니다. 필요하면 일반 `python3 shizukudos/kbuild.py`로 기본 Kernel64S 출력을 생성하거나 도구의 source-defined 입력 경로를 확인한 독립 runner를 사용합니다. 소스 내 과거 scratch 기본값 대신 `--tree/--chromium`, `--image`, `--out`을 명시합니다.
 
-GUI에는 `tools/capture_chromium_interactive_v3.py`의 `--publisher-manifest --publisher-revisions` 검증을 사용합니다. 완전한 파일 핀이 없는 이전 manifest는 `--publisher-archive`도 필요합니다. Legcord/Steam은 `tools/capture_modern_app_interactive_v5.py`로 원본 파일과 새 runtime/kernel을 명시합니다. 실제 화면을 확인한 뒤 한 번씩 입력하고 화면 generation/sequence를 기록합니다. post-autorun 추가 관찰은 K14 기능의 실제 대조 시험을 마친 뒤 사용합니다.
+GUI 도구 `tools/capture_chromium_interactive_v3.py`와 `tools/capture_modern_app_interactive_v5.py`는 기존 검토 시점의 runner SHA를 고정한 역사적 도구입니다. 이번 병합에서 runner가 변경되면 import 단계에서 정상적으로 중단하므로 새 clone에서 바로 실행할 수 있다고 가정하지 않습니다. 현재 runner의 인자·입력·판정 및 host 계약을 검토한 **새 capture epoch**를 만들어야 하며, 이전 SHA를 무조건 갱신하거나 gate를 지우지 않습니다. Chromium 새 도구는 `--publisher-manifest --publisher-revisions`와 전체 258개 파일 identity를 확인하고, 완전한 파일 핀이 없는 manifest에는 원본 `--publisher-archive` 검증도 요구합니다. 실제 화면을 확인한 뒤 입력과 화면 generation/sequence를 기록합니다. post-autorun 추가 관찰은 K14 기능의 실제 대조 시험을 마친 뒤 사용합니다.
 
 공식 public CA를 실제 crypto 경로로 적재하는 시험 helper가 별도로 필요합니다. `tools/seal_carried_public_trust.py`는 **과거 receipt와 원본 CA payload가 있는 환경의 인계 도구**이며 새 clone에서 자동 CA 생성/설치를 수행하지 않습니다. 같은 이름의 파일이나 임의 인증서를 넣어 기존 해시 검증을 우회하지 않습니다.
 
@@ -123,7 +123,8 @@ ATA/PIC/REP PIO와 생성자 host 시험 및 일반 native 링크는 확인됐�
 프로젝트 미디어는 라이선스와 해당 소스를 포함하는 Linux 일반 builder로 생성합니다. 다음은 기존 캐시 대신 필요한 source build를 수행하는 경로입니다.
 
 ```sh
-python3 -B tools/build_shizuku_se_iso.py --output build/windows98-shizuku-second-edition.iso
+SOURCE_DATE_EPOCH=1785283200 python3 -B tools/build_shizuku_se_iso.py \
+  --desktop --output build/final-iso/shizuku-modern-0.9.0-dev.iso
 ```
 
 이 빌드는 xorriso·mtools·dosfstools, 실제 GCC/MinGW/NASM 및 DOS16용 Open Watcom, manifest에 고정된 FreeDOS/FreeCOM·CSMWrap/SeaBIOS·syslinux를 요구합니다. 필요 도구가 없으면 설치 완료로 가장하지 않고 멈춥니다. `--reuse-builds`는 이미 일반 빌드와 현재 receipt를 확인한 환경에서만 사용합니다. ISO builder는 부팅 성공을 인증하지 않으며 실제 BIOS/UEFI boot matrix가 별도입니다. 최종 배포 환경의 manifest·SHA 및 부팅 기록을 확인합니다.

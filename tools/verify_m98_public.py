@@ -11,6 +11,7 @@ import json
 import re
 import sys
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -18,6 +19,22 @@ from urllib.request import Request, urlopen
 BASE = "https://m98.nyase.kr"
 USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
+
+
+class PageProbe(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.challenge = False
+        self.vnc_embed = False
+
+    def handle_starttag(self, tag, attributes):
+        values = {key.lower(): (value or "").lower() for key, value in attributes}
+        if tag == "form":
+            self.challenge |= (values.get("id") in ("challenge-form", "cf-challenge-form")
+                               or "/cdn-cgi/challenge" in values.get("action", ""))
+        if tag in ("iframe", "frame", "script"):
+            src = values.get("src", "")
+            self.vnc_embed |= bool(re.search(r"vnc|websockify|legacy-console|/core/rfb\.js", src))
 
 
 def check_page(body, headers, status, final_url, kind):
@@ -34,7 +51,11 @@ def check_page(body, headers, status, final_url, kind):
     title = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
     if not title or "just a moment" in title.group(1).lower():
         raise ValueError("Missing site title or challenge page")
-    if re.search(r"novnc|websockify|vnc_canvas|new\s+RFB\s*\(", text, re.I):
+    probe = PageProbe()
+    probe.feed(text)
+    if probe.challenge or "_cf_chl_opt" in text:
+        raise ValueError("Interactive challenge form, not the requested page")
+    if probe.vnc_embed or re.search(r"novnc|websockify|vnc_canvas|new\s+RFB\s*\(", text, re.I):
         raise ValueError("VNC interface is exposed at a public page")
     if kind == "home":
         if "Windows 98" not in text or "Shizuku" not in text:
