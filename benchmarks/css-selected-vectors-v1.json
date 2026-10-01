@@ -1,0 +1,866 @@
+{
+  "schema": 1,
+  "profile": "current-css-variables-active-fallback-core-v1",
+  "wpt_revision": "5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d",
+  "upstream_license": "BSD-3-Clause; retain exact LICENSE.md",
+  "raw_source_sha256": {
+    "LICENSE.md": "5fac07febb0e2a97fb0d7b0def149ec08b642e1ba4b9c345283ab1cbd2af6570",
+    "css/css-syntax/cdc-vs-ident-tokens.html": "5f52d414359c7e39d49e356c84af9be914f336926d31ddb94321978131d5edf9",
+    "css/css-syntax/escaped-eof.html": "dec0d40911d7247999dbb2866c5a58b7a884198285dd766bf55d5ce468c8cff2",
+    "css/css-syntax/serialize-consecutive-tokens.html": "8f51db51d5355c42a8179beed9933cfcf90f5b676f41c3ca5f913ff3f723b467",
+    "css/css-variables/css-vars-custom-property-case-sensitive-001.html": "8da3e66ac23a01cfdfbfb5eea134dd775830721ec3231c74a465f4c6502c17c8",
+    "css/css-variables/custom-properties-inherit.html": "b23eb89638f6e488c55bc3dd83188e9c0fbf586d8e9453530f14fe1f8db8d249",
+    "css/css-variables/variable-cycles.html": "a787dbc45d029c765d144309e0c003e731986595ced4555dae217e531dae39f7"
+  },
+  "syntax": [
+    {
+      "input": [
+        102,
+        111,
+        111,
+        92
+      ],
+      "tokens": [
+        {
+          "kind": "IDENT",
+          "value": [
+            102,
+            111,
+            111,
+            65533
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 1,
+      "source": "css/css-syntax/escaped-eof.html",
+      "serialize": true
+    },
+    {
+      "input": [
+        49,
+        102,
+        111,
+        111,
+        92
+      ],
+      "tokens": [
+        {
+          "kind": "DIMENSION",
+          "value": [
+            102,
+            111,
+            111,
+            65533
+          ],
+          "number": [
+            49
+          ],
+          "flags": 1,
+          "delim": 0
+        }
+      ],
+      "errors": 1,
+      "source": "css/css-syntax/escaped-eof.html",
+      "serialize": true
+    },
+    {
+      "input": [
+        117,
+        114,
+        108,
+        40,
+        102,
+        111,
+        111,
+        92
+      ],
+      "tokens": [
+        {
+          "kind": "URL",
+          "value": [
+            102,
+            111,
+            111,
+            65533
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 2,
+      "source": "css/css-syntax/escaped-eof.html",
+      "serialize": true
+    },
+    {
+      "input": [
+        34,
+        102,
+        111,
+        111,
+        92
+      ],
+      "tokens": [
+        {
+          "kind": "STRING",
+          "value": [
+            102,
+            111,
+            111
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 1,
+      "source": "css/css-syntax/escaped-eof.html",
+      "serialize": true
+    },
+    {
+      "input": [
+        35,
+        102,
+        111,
+        111,
+        92
+      ],
+      "tokens": [
+        {
+          "kind": "HASH",
+          "value": [
+            102,
+            111,
+            111,
+            65533
+          ],
+          "number": [],
+          "flags": 2,
+          "delim": 0
+        }
+      ],
+      "errors": 1,
+      "source": "css/css-syntax/escaped-eof.html",
+      "serialize": true
+    },
+    {
+      "input": [
+        45,
+        45,
+        62,
+        32,
+        45,
+        45,
+        102,
+        111,
+        111
+      ],
+      "tokens": [
+        {
+          "kind": "CDC",
+          "value": [],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "WS",
+          "value": [
+            32
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "IDENT",
+          "value": [
+            45,
+            45,
+            102,
+            111,
+            111
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "css/css-syntax/cdc-vs-ident-tokens.html",
+      "serialize": true
+    },
+    {
+      "input": [
+        60,
+        33,
+        45,
+        45
+      ],
+      "tokens": [
+        {
+          "kind": "CDO",
+          "value": [],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original algorithm example",
+      "serialize": true
+    },
+    {
+      "input": [
+        49,
+        50,
+        32,
+        45,
+        49,
+        32,
+        43,
+        46,
+        53,
+        32,
+        49,
+        101,
+        43,
+        50,
+        32,
+        49,
+        101,
+        45,
+        50,
+        112,
+        120,
+        32,
+        49,
+        101,
+        32,
+        49,
+        37
+      ],
+      "tokens": [
+        {
+          "kind": "NUMBER",
+          "value": [],
+          "number": [
+            49,
+            50
+          ],
+          "flags": 1,
+          "delim": 0
+        },
+        {
+          "kind": "WS",
+          "value": [
+            32
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "NUMBER",
+          "value": [],
+          "number": [
+            45,
+            49
+          ],
+          "flags": 1,
+          "delim": 0
+        },
+        {
+          "kind": "WS",
+          "value": [
+            32
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "NUMBER",
+          "value": [],
+          "number": [
+            43,
+            46,
+            53
+          ],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "WS",
+          "value": [
+            32
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "NUMBER",
+          "value": [],
+          "number": [
+            49,
+            101,
+            43,
+            50
+          ],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "WS",
+          "value": [
+            32
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "DIMENSION",
+          "value": [
+            112,
+            120
+          ],
+          "number": [
+            49,
+            101,
+            45,
+            50
+          ],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "WS",
+          "value": [
+            32
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "DIMENSION",
+          "value": [
+            101
+          ],
+          "number": [
+            49
+          ],
+          "flags": 1,
+          "delim": 0
+        },
+        {
+          "kind": "WS",
+          "value": [
+            32
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "PERCENTAGE",
+          "value": [],
+          "number": [
+            49
+          ],
+          "flags": 1,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original algorithm example",
+      "serialize": true
+    },
+    {
+      "input": [
+        92,
+        48,
+        32,
+        92,
+        100,
+        56,
+        48,
+        48,
+        32,
+        92,
+        49,
+        49,
+        48,
+        48,
+        48,
+        48,
+        32
+      ],
+      "tokens": [
+        {
+          "kind": "IDENT",
+          "value": [
+            65533,
+            65533,
+            65533
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original algorithm example",
+      "serialize": true
+    },
+    {
+      "input": [
+        117,
+        114,
+        108,
+        40,
+        97,
+        92,
+        50,
+        48,
+        32,
+        98,
+        41
+      ],
+      "tokens": [
+        {
+          "kind": "URL",
+          "value": [
+            97,
+            32,
+            98
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original algorithm example",
+      "serialize": true
+    },
+    {
+      "input": [
+        34,
+        97,
+        92,
+        10,
+        98,
+        34
+      ],
+      "tokens": [
+        {
+          "kind": "STRING",
+          "value": [
+            97,
+            98
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original algorithm example",
+      "serialize": true
+    },
+    {
+      "input": [
+        117,
+        114,
+        108,
+        40,
+        34,
+        120,
+        34,
+        41
+      ],
+      "tokens": [
+        {
+          "kind": "FUNCTION",
+          "value": [
+            117,
+            114,
+            108
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "STRING",
+          "value": [
+            120
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "RPAREN",
+          "value": [],
+          "number": [],
+          "flags": 0,
+          "delim": 41
+        }
+      ],
+      "errors": 0,
+      "source": "original algorithm example",
+      "serialize": true
+    },
+    {
+      "input": [
+        117,
+        114,
+        108,
+        40,
+        120,
+        32,
+        121,
+        41,
+        122
+      ],
+      "tokens": [
+        {
+          "kind": "BAD_URL",
+          "value": [],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "IDENT",
+          "value": [
+            122
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 1,
+      "source": "original algorithm example",
+      "serialize": false
+    },
+    {
+      "input": [
+        34,
+        120,
+        10,
+        121
+      ],
+      "tokens": [
+        {
+          "kind": "BAD_STRING",
+          "value": [],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "WS",
+          "value": [
+            10
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "IDENT",
+          "value": [
+            121
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 1,
+      "source": "original algorithm example",
+      "serialize": false
+    },
+    {
+      "input": [
+        97,
+        47,
+        42,
+        42,
+        47,
+        98
+      ],
+      "tokens": [
+        {
+          "kind": "IDENT",
+          "value": [
+            97
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        },
+        {
+          "kind": "IDENT",
+          "value": [
+            98
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original algorithm example",
+      "serialize": true
+    },
+    {
+      "input": [
+        97,
+        47,
+        42,
+        117,
+        110,
+        102,
+        105,
+        110,
+        105,
+        115,
+        104,
+        101,
+        100
+      ],
+      "tokens": [
+        {
+          "kind": "IDENT",
+          "value": [
+            97
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 1,
+      "source": "original algorithm example",
+      "serialize": true
+    },
+    {
+      "input": [
+        34,
+        54620,
+        44544,
+        34
+      ],
+      "tokens": [
+        {
+          "kind": "STRING",
+          "value": [
+            54620,
+            44544
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original UTF16 Korean scalar oracle",
+      "serialize": true
+    },
+    {
+      "input": [
+        35,
+        45,
+        49
+      ],
+      "tokens": [
+        {
+          "kind": "HASH",
+          "value": [
+            45,
+            49
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original unrestricted HASH flag regression",
+      "serialize": true
+    },
+    {
+      "input": [
+        35,
+        45
+      ],
+      "tokens": [
+        {
+          "kind": "HASH",
+          "value": [
+            45
+          ],
+          "number": [],
+          "flags": 0,
+          "delim": 0
+        }
+      ],
+      "errors": 0,
+      "source": "original unrestricted HASH flag regression",
+      "serialize": true
+    }
+  ],
+  "variables": [
+    {
+      "names": [
+        "--a"
+      ],
+      "values": [
+        "var(--a)"
+      ],
+      "expected": [
+        null
+      ],
+      "source": "css/css-variables/variable-cycles.html",
+      "description": "Self-cycle"
+    },
+    {
+      "names": [
+        "--a",
+        "--b"
+      ],
+      "values": [
+        "var(--b)",
+        "var(--a)"
+      ],
+      "expected": [
+        null,
+        null
+      ],
+      "source": "css/css-variables/variable-cycles.html",
+      "description": "Simple a/b cycle"
+    },
+    {
+      "names": [
+        "--x",
+        "--y",
+        "--a",
+        "--b",
+        "--c"
+      ],
+      "values": [
+        "var(--y, valid)",
+        "var(--a, valid)",
+        "var(--b, cycle)",
+        "var(--c, cycle)",
+        "var(--a, cycle)"
+      ],
+      "expected": [
+        " valid",
+        " valid",
+        null,
+        null,
+        null
+      ],
+      "source": "css/css-variables/variable-cycles.html",
+      "description": "Cycle in middle; outer fallback succeeds"
+    },
+    {
+      "names": [
+        "--x",
+        "--a",
+        "--b",
+        "--c",
+        "--y"
+      ],
+      "values": [
+        "var(--a, valid)",
+        "var(--y, var(--b, cycle))",
+        "var(--y, var(--c, cycle))",
+        "var(--y, var(--a, cycle))",
+        "valid"
+      ],
+      "expected": [
+        "valid",
+        "valid",
+        "valid",
+        "valid",
+        "valid"
+      ],
+      "source": "css/css-variables/variable-cycles.html",
+      "description": "CURRENT unused-fallback cycle remains valid"
+    },
+    {
+      "names": [
+        "--lowercasegreen",
+        "--MixedCaseGreen",
+        "--lowercasered",
+        "--MixedCaseRed",
+        "--r1",
+        "--r2",
+        "--r3",
+        "--r4"
+      ],
+      "values": [
+        "green",
+        "green",
+        "red",
+        "red",
+        "var(--lowercasegreen,red)",
+        "var(--MixedCaseGreen,red)",
+        "var(--LowerCaseRed,green)",
+        "var(--mixedcasered,green)"
+      ],
+      "expected": [
+        "green",
+        "green",
+        "red",
+        "red",
+        "green",
+        "green",
+        "green",
+        "green"
+      ],
+      "source": "css/css-variables/css-vars-custom-property-case-sensitive-001.html",
+      "description": "Case-sensitive names; core tokens only, no square paint"
+    },
+    {
+      "names": [
+        "--a",
+        "--b",
+        "--c"
+      ],
+      "values": [
+        "var(--missing) var(--b)",
+        "var(--a,blue)",
+        "var(--a,green)"
+      ],
+      "expected": [
+        null,
+        null,
+        "green"
+      ],
+      "source": "CSS Values5 substitution continue after guaranteed-invalid; original",
+      "description": "Later active substitution still detects cycle; outside fallback succeeds"
+    }
+  ],
+  "foreign_script_execution": false,
+  "browser_wpt_pass": false,
+  "hand_transcribed_core_oracles": true,
+  "not_claimed": [
+    "CSSOM exact author serialization",
+    "browser selector cascade",
+    "paint",
+    "all CSS"
+  ]
+}

@@ -104,6 +104,17 @@ separate execution evidence.
 
 ## Independent platform path
 
+The original CSS token/variable core retains selected WPT raw fixtures and their
+full BSD-3-Clause license at revision `5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d`
+under `benchmarks/wpt-css-selected-v1/`. Small project-authored oracle vectors
+record exact raw-source hashes; the foreign browser scripts are not executed.
+Three original CSSWG Bikeshed references at revision
+`f505fd10877a9c915b5d4a4028c2ad83c76d006f` remain under their W3C document license,
+with original URIs/status/editor attribution and an accompanying copyright notice
+in `benchmarks/css-standards-source-v1/NOTICE.md`. These are reference documents,
+not linked implementation code. The original component and bounded MSHTML
+consumer are GPL-2.0-only project code; neither constitutes full CSS support.
+
 `tools/build_trident_test262_selected.py` separately obtains selected official
 Test262 fixtures from revision `7ab7fafa0003f73fc85c1b95d88094d33f7eb8bd`, pinned
 archive SHA256 `1d497a1e7430094a41d06f38db775df4a63db5d587b2a8b08aba6fad5de19585`.

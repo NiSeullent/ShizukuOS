@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "upstream": "web-platform-tests/wpt",
+  "revision": "5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d",
+  "revision_committer_utc": "2026-10-01T03:06:07Z",
+  "license": "BSD-3-Clause; retain exact LICENSE.md",
+  "files": {
+    "LICENSE.md": {
+      "url": "https://raw.githubusercontent.com/web-platform-tests/wpt/5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d/LICENSE.md",
+      "sha256": "5fac07febb0e2a97fb0d7b0def149ec08b642e1ba4b9c345283ab1cbd2af6570",
+      "bytes": 1500
+    },
+    "css/css-syntax/cdc-vs-ident-tokens.html": {
+      "url": "https://raw.githubusercontent.com/web-platform-tests/wpt/5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d/css/css-syntax/cdc-vs-ident-tokens.html",
+      "sha256": "5f52d414359c7e39d49e356c84af9be914f336926d31ddb94321978131d5edf9",
+      "bytes": 662
+    },
+    "css/css-syntax/escaped-eof.html": {
+      "url": "https://raw.githubusercontent.com/web-platform-tests/wpt/5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d/css/css-syntax/escaped-eof.html",
+      "sha256": "dec0d40911d7247999dbb2866c5a58b7a884198285dd766bf55d5ce468c8cff2",
+      "bytes": 1730
+    },
+    "css/css-syntax/serialize-consecutive-tokens.html": {
+      "url": "https://raw.githubusercontent.com/web-platform-tests/wpt/5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d/css/css-syntax/serialize-consecutive-tokens.html",
+      "sha256": "8f51db51d5355c42a8179beed9933cfcf90f5b676f41c3ca5f913ff3f723b467",
+      "bytes": 4748
+    },
+    "css/css-variables/css-vars-custom-property-case-sensitive-001.html": {
+      "url": "https://raw.githubusercontent.com/web-platform-tests/wpt/5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d/css/css-variables/css-vars-custom-property-case-sensitive-001.html",
+      "sha256": "8da3e66ac23a01cfdfbfb5eea134dd775830721ec3231c74a465f4c6502c17c8",
+      "bytes": 1137
+    },
+    "css/css-variables/custom-properties-inherit.html": {
+      "url": "https://raw.githubusercontent.com/web-platform-tests/wpt/5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d/css/css-variables/custom-properties-inherit.html",
+      "sha256": "b23eb89638f6e488c55bc3dd83188e9c0fbf586d8e9453530f14fe1f8db8d249",
+      "bytes": 1950
+    },
+    "css/css-variables/variable-cycles.html": {
+      "url": "https://raw.githubusercontent.com/web-platform-tests/wpt/5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d/css/css-variables/variable-cycles.html",
+      "sha256": "a787dbc45d029c765d144309e0c003e731986595ced4555dae217e531dae39f7",
+      "bytes": 10409
+    }
+  },
+  "foreign_script_execution": false,
+  "native_browser_wpt_verified": false,
+  "full_css_verified": false
+}
