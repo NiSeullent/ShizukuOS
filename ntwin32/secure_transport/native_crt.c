@@ -8,7 +8,10 @@
 #include <windows.h>
 #include <stdlib.h>
 
-/* Public legacy MSVCRT ABI, exported by the original Win98 OEM runtime. */
+/* Imported i386 MSVCRT symbol. Pre-XP versions return void; XP and later
+ * return int. Never inspect EAX as an error code: validate the output pointers.
+ * See the upstream MinGW ABI correction dated 2024-11-27:
+ * https://sourceforge.net/p/mingw-w64/mailman/message/58846398/ */
 struct ntwst_startup_info { int newmode; };
 int __cdecl __getmainargs(int *, char ***, char ***, int, struct ntwst_startup_info *);
 
@@ -27,10 +30,12 @@ BOOL WINAPI DllMainCRTStartup(HINSTANCE instance, DWORD reason, LPVOID reserved)
 extern int main(int argc, char **argv);
 void mainCRTStartup(void)
 {
-    int argc = 0;
+    int argc = -1;
     char **argv = NULL, **environment = NULL;
     struct ntwst_startup_info startup = { 0 };
-    if (__getmainargs(&argc, &argv, &environment, 0, &startup) != 0)
+    (void)__getmainargs(&argc, &argv, &environment, 0, &startup);
+    if (argc < 1 || argc > 32767 || !argv || !environment || !argv[0]
+            || argv[argc] != NULL)
         ExitProcess(2);
     /* Native exit flushes streams before its ExitProcess; no private CRT state. */
     exit(main(argc, argv));

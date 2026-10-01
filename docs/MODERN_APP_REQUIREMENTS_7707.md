@@ -10,6 +10,12 @@ The user's broad goal remains functioning themes, current Legcord/Discord and Si
 
 `ntwin32/tls` concerns thread-local storage. It is not a secure TLS transport backend. A direct library handshake, a system API handshake and an application's actual network path are separate acceptance levels.
 
+## Browser engine direction clarified by the user on 2026-10-01
+
+Full WebKit porting is not a mandatory prerequisite. Extend the existing Trident-based engine with real modern HTML5/DOM/CSS, WebAssembly and modern JavaScript functionality, targeting the user's 2026 web-standard requirement. Ported components and current libraries may supply those features. Preserve the visible browser integration and record the exact upstream versions, supported features and remaining conformance gaps. This direction does not remove the separate Chromium/Electron application requirements.
+
+Validate HTML parsing and DOM mutations, CSS layout, events and Korean input, real JavaScript execution and asynchronous browser APIs, and real WASM validation/instantiation/execution/imports. Use selected upstream conformance fixtures plus interactive local pages and controlled HTTPS fixtures; publish the exact tested subset. A version label, an engine-loading result or a compatibility stub cannot establish support for all modern standards. All newly specified checks remain pending until their actual guest evidence is recorded. The shared handoff is `/root/Win98-Modern/.codex-collaboration/7707-trident-direction-20261001.json`.
+
 ## Newly required latest stable inputs
 
 Architecture entries below are publisher package labels, not PE headers inspected by this task. Build-time Node requirements do not mean users separately install that Node version to run the packaged app.

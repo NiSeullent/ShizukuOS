@@ -879,6 +879,35 @@
       "id": "editor.function",
       "requirement": "In official VS Code and separately VSCodium, edit/save/cold reopen a fixture, run the integrated terminal and a supported extension; VSCodium is not an official VS Code pass.",
       "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "trident.html_dom_css",
+      "requirement": "In actual Windows 98 Trident browser validate HTML parsing, DOM mutations, CSS layout, events and Korean input against identified upstream fixtures and interactive pages.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "trident.javascript",
+      "requirement": "Execute actual modern JavaScript and asynchronous browser APIs in the integrated Trident browser; record precise upstream revision and passed/failing conformance cases.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "trident.wasm",
+      "requirement": "In actual integrated Trident browser validate, instantiate and execute real WebAssembly modules and JS/host imports; reject malformed modules and report the actual supported feature subset.",
+      "status": "NOT_RUN_BY_THIS_TASK"
+    },
+    {
+      "id": "trident.https",
+      "requirement": "Fetch a controlled HTTPS fixture through the Trident browser network path with real TLS1.3 and negative certificate tests; direct backend/library execution does not count as browser HTTPS.",
+      "status": "NOT_RUN_BY_THIS_TASK"
     }
-  ]
+  ],
+  "browser_engine_direction": {
+    "user_clarified": "2026-10-01",
+    "engine": "Trident",
+    "full_webkit_port_required": false,
+    "target": "Actual modern HTML5/DOM/CSS, WebAssembly and modern JavaScript functionality; user requests 2026 web standards",
+    "strategy": "Extend existing Trident-based browser, combine source ports with modern libraries; preserve separate Chromium/Electron app goals",
+    "status": "REQUIREMENT-NOT-A-CONFORMANCE-RESULT",
+    "shared_handoff": "/root/Win98-Modern/.codex-collaboration/7707-trident-direction-20261001.json"
+  }
 }
