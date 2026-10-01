@@ -11,6 +11,7 @@
  * matching the point at which Windows drains the DPC queue.
  */
 #include "ntdrv.h"
+#include "../kcommon/pma_sync.h"
 
 #define PASSIVE_LEVEL 0
 #define APC_LEVEL 1
@@ -144,16 +145,24 @@ void NTAPI KeLowerIrql(uint8_t old)
 }
 void NTAPI KfLowerIrql(uint8_t old) { KeLowerIrql(old); }
 
-/* ---------------------------------------------------------------- spin locks (UP) */
-void NTAPI KeInitializeSpinLock(KSPIN_LOCK *l) { *l = 0; }
+/* ---------------------------------------------------------------- spin locks (UP)
+ * The exported storage stays one Windows x64 ULONG_PTR, not a native ticket
+ * lock. Atomic acquire/release now publishes protected memory, while the UP
+ * contention diagnostic and all IRQL/ISR transitions remain in force. Other
+ * driver-host state still relies on UP scheduling, so this does not enable SMP.
+ */
+_Static_assert(sizeof(KSPIN_LOCK) == sizeof(uintptr_t), "keep native NT spinlock word ABI");
+void NTAPI KeInitializeSpinLock(KSPIN_LOCK *l) { pma_word_init(l); }
 
-/* On a uniprocessor a spin lock is IRQL elevation plus a debug-only owned flag. */
+/* A same-CPU nonpreemptible owner cannot release while this caller spins. */
 static void spin_acquire(KSPIN_LOCK *l)
 {
-    if (*l) kpanic("KeAcquireSpinLock: already held (deadlock on UP)");
-    *l = 1;
+    if (!pma_word_try_lock(l)) kpanic("KeAcquireSpinLock: already held (deadlock on UP)");
 }
-static void spin_release(KSPIN_LOCK *l) { *l = 0; }
+static void spin_release(KSPIN_LOCK *l)
+{
+    if (!pma_word_unlock(l)) kpanic("KeReleaseSpinLock: not held or corrupt lock state");
+}
 
 void NTAPI KeAcquireSpinLock(KSPIN_LOCK *l, uint8_t *old) { *old = g_irql; set_irql(DISPATCH_LEVEL); spin_acquire(l); }
 void NTAPI KeReleaseSpinLock(KSPIN_LOCK *l, uint8_t old) { spin_release(l); set_irql(old); if (old < DISPATCH_LEVEL) ntdrv_dpc_queue_flush(); }
