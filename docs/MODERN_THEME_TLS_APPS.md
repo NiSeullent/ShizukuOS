@@ -103,12 +103,13 @@ must not launch as an i486-compatible trial. All original bytes, failed
 disassembly and previous results remain preserved. An isolated corrective port
 recompiles every upstream/adapter unit for i486 and replaces formatting with an
 original bounded formatter. Its initial source-preparation rejection is retained;
-corrected DLL gates and real encrypted latest/LTS host exchange remain pending.
-A fresh stage also requires stable space and the actual shared guest queue.
-The corrective latest/LTS trials now also retain actual per-translation-unit
-preprocessor evidence. Their formatter has passed 18894 normal and instrumented
-assertions; the final latest/LTS encrypted exchange and frozen artifacts remain
-pending. The original upstream configuration-assertion translation unit checks
+corrective v2 now passes both full linked DLL gates and twelve actual encrypted
+latest/LTS Linux cases. Commit3b429e1 retains471 translation-unit macro maps,
+978 successful build steps and original archive aliases. Its formatter passes
+18974 assertions normally and under full ASan/UBSan; ten actual owned-server
+startup controls cover partial lines, EOF and absolute deadlines. Corrected
+Windows execution remains pending. A fresh stage requires stable space and the
+actual shared guest queue. The original configuration-assertion unit checks
 and temporarily clears formatter definitions; any exception must identify that
 exact original unit and prove it contains no formatting calls.
 Neither v4 nor the host result is a native
@@ -191,7 +192,7 @@ Runtime and genuine document trials are staged without global registration and
 remain queued behind existing native owners. See `TRIDENT_SCRIPT_NATIVE_EVIDENCE.md`
 and `TRIDENT_NATIVE_STAGE_HANDOFF.md`.
 
-Native MSHTML display, trusted input and pixel review, actual child/supervisor
+Native modern-JavaScript MSHTML display, trusted input and pixel review, actual child/supervisor
 exits, ordinary browser script selection/navigation, origin-bound networking,
 HTML5 parser/layout and WebAssembly remain unverified or unimplemented.
 See `src/m98_trident_automation_HANDOFF.md` and
@@ -206,15 +207,18 @@ zero-import `M98CSS.DLL` has18 exports. Selected WPT references and original
 CSSWG documents retain their hashes, licenses and attribution; foreign browser
 tests have not run.
 
-Genuine MSHTML fixturev8 adds a nested parent/child DOM trial, typed width/color
+Genuine MSHTML fixturev9 adds a nested parent/child DOM trial, typed width/color
 application, independent geometry/color readback and full Korean text readback.
 Its real-token consumer passes213 assertions normally and under sanitizers.
 CSS observerv4 passes3,025 control-flow fault assertions in both modes. The
-canonical CSS stagev2 retains all source, original command logs and artifacts;
+canonical CSS stagev3 retains all source, original command logs and artifacts;
 independent review cleared87 provenance members and every executable byte of
 all three inputs. Native acceptance's eight test methods pass normally and with
-optimized Python using explicitly synthetic stopped-run evidence. Actual Win98
-DOM/style/paint and owned-child completion remain pending. See
+optimized Python using explicitly synthetic stopped-run evidence. A separate
+actual Win98 retry passes bounded DOM/styles, independent32-to168 geometry,
+both painted states and full Korean text. The owned child exits DWORD0; actual
+supervisor exit remains unverified. Old failed native evidence is preserved;
+complete modern CSS remains unfinished. See
 `TRIDENT_CSS_NATIVE_STAGE.md`.
 
 The old regex used by frozen Script/Automation builders could skip a modern
@@ -387,9 +391,13 @@ buffer views, imported exceptions and cyclic-GC/native cleanup. Its v11 receipt
 is `b3e0e6ef6b966b9c9cb0beaaaf41d8227e048fbe6245232b73d825d0584705ac`.
 This private embedding is not the standard browser WebAssembly namespace.
 Original no-grow modules exposed real page coalescing and growth failures;
-an additive guarded memory profile is correcting those semantics, zero-fill,
-32-bit allocation narrowing and table-arena alignment against unchanged
-official memory/growth/bulk-memory oracles. Failed trials remain preserved.
+additive guarded memory profilev8, committed as76cb02b, corrects those semantics,
+zero-fill,32-bit allocation narrowing and table-arena alignment. Both normal
+and full ASan/UBSan executions pass386 targeted checks and4641 unchanged selected
+official memory/growth/bulk-memory commands. Root baseline regression also
+passes1237 predicates in both modes through a prepared observation copy that
+collects foreign-thread results after join. Original tests and failures remain
+preserved; JavaScript memory integration and native profile execution remain pending.
 
 Actual software triangle rasterization through the genuine frozen Mesa TGSI
 fragment API is committed in `601e2fd`. Raster v3 passes33792 assertions in
@@ -431,18 +439,24 @@ acceptance methods; explicitly synthetic controls are not native evidence.
 Fresh canonical numeric stage v2 manifest is
 `d0948ad22afc556cf57398c6361326729e2c7afe50b6ce360513d9392f973b8b`,
 provenance `9e87ddbe5ddb43ecba1edc7d5ac49b5a6bc88a9b56f6adb27c847a9a06738587`.
-Native numeric execution remains pending; full browser Wasm remains false.
-Its fresh admission returned before run creation because peer boot's actual
-VLC Win98 guest PID3026413 and the cooperative lock occupy the native slot;
+Native numeric acceptance remains pending; full browser Wasm remains false.
+Earlier admission preserved a queue refusal behind peer VLC PID3026413. After
+that guest naturally ended, fresh admission observed a vacant Win98 slot and
+positively identified the separate Kernel64 Chromium runner by exact PID,
+start identity, image and ELF boot source. Root now owns QEMU PID3404150 and a
+fresh private numericv24 image under the cooperative lock. This actual launch
+does not establish guest probe success or the new memoryv8 profile's execution;
 no peer process or guest is controlled.
 
 The isolated TLS i486 v1 receipt
 `1123b84ae84c35981cbf5e6e3ea9c4d4b6848cac00d2ee0b22e61be7237167b3`
 passes both complete linked native DLL CPU/ABI gates and12 actual encrypted
 Linux latest/LTS exchanges, with exact60-byte positive responses. Its frozen
-sources and evidence remain retained. A fresh v2 is correcting an owned-server
-partial-startup-line deadline gap and clarifying/testing the formatter's exact
-1MiB string boundary. Corrected Windows execution, real WinSock transport and
+sources and evidence remain retained. Fresh v2 completes the owned-server
+partial-startup-line deadline correction and exact1MiB formatter boundary checks.
+Its accepted authority is98c526151545be95fe5f6cd58140ae2dfdc52d21038fe1de893387290dea1819;
+root and independent full-byte reviews clear the six committed source files.
+Corrected Windows execution, real WinSock transport and
 OS Schannel/WinHTTP/WinINet integration remain distinct mandatory gates.
 The native presentation lane is coordinated with peer6970; peer7707 retains
 the independent LTS fixture and cb43/c009 retain application-runtime integration.

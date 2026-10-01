@@ -1,5 +1,5 @@
 {
-  "schema": 6,
+  "schema": 7,
   "date": "2026-10-01",
   "branch": "codex/theme-tls-5abe",
   "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
@@ -67,6 +67,10 @@
     {
       "path": "build/checkpoint-schema6/schema5-original.json",
       "sha256": "5f78ca536c22ea2c748a50a95ba0d598c1d997726805ceaa49e9ef7f1512daa8"
+    },
+    {
+      "path": "build/checkpoint-schema7/schema6-original.json",
+      "sha256": "7332c20b3a0663073dfaeeb30a95c4d9e82bb3fade38e15698a1ed16a1daac44"
     },
     {
       "path": "build/css-core-v4/result.json",
@@ -137,6 +141,18 @@
       "sha256": "013b2e82a903644a2275fb477926052306b5eeedada88617fcf7015b0a2a10da"
     },
     {
+      "path": "build/disk-followup-5abe-20261001-v1/closed-checkpoint.json",
+      "sha256": "ea9a495c3caa92c9542ad06962b5c8ef3d4f09f4b06904e2ff9a1fe021aa2e6b"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v1/readonly-audit.json",
+      "sha256": "05b825d5dc08f75584bba6a109bbda67d1404f22c3abb8231b38e69c7a8b8d60"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v1/sharing-result.json",
+      "sha256": "a156437f67b7d39f9be3ee51ce51943ae40e0a9ddc81fa8ce4472e4c1e65d748"
+    },
+    {
       "path": "build/dns-config-v2/result.json",
       "sha256": "cc3dda3c0f4e673f0af67e2abafeb482e563b476b8d900bc6327a17cdfeac6af"
     },
@@ -151,6 +167,10 @@
     {
       "path": "build/i486-tls-supplement-v1/result.json",
       "sha256": "22f6b0ce0e9c8743415031519dd6dd3723d44dd22c04d34b735d9903153528e0"
+    },
+    {
+      "path": "build/kernel64-classification-5abe-v1/result.json",
+      "sha256": "65df20cc5680f2ae83d5049e043f51d708df2cfd6ba01afe5566f8ae42bd0524"
     },
     {
       "path": "build/modern-foundation-independent-review-v2/result.json",
@@ -193,8 +213,28 @@
       "sha256": "dbc1e147d18b033497dc0bb403522798d186acd54a255a01566f7c61432ca7ca"
     },
     {
+      "path": "build/tls13-i486-independent-review-v1/result.json",
+      "sha256": "9ef72856e5dfddb357e9e89211dcf0f01d18babe437cec30649e52fe04ebb9e3"
+    },
+    {
+      "path": "build/tls13-i486-root-readback-v2/failed-review.json",
+      "sha256": "4223bd44641f6d2e8ef11a9d543e7f630db146a0ced4fb681a1ac51d9cc3b643"
+    },
+    {
+      "path": "build/tls13-i486-root-readback-v3/result.json",
+      "sha256": "d2eaf7896235fedb8246bb7197ac24297f4a265d6dda21295b7f76bcdb8892cf"
+    },
+    {
       "path": "build/tls13-i486-v1/result.json",
       "sha256": "1123b84ae84c35981cbf5e6e3ea9c4d4b6848cac00d2ee0b22e61be7237167b3"
+    },
+    {
+      "path": "build/tls13-i486-v2/final-byte-readback.json",
+      "sha256": "7762bc0950984b3f6d5a51704c351cb3dda0c6a5bea65f0ba9f5854cfd3f2ccc"
+    },
+    {
+      "path": "build/tls13-i486-v2/result.json",
+      "sha256": "98c526151545be95fe5f6cd58140ae2dfdc52d21038fe1de893387290dea1819"
     },
     {
       "path": "build/tls13-lts-loopback-v4/pair.json",
@@ -275,6 +315,34 @@
     {
       "path": "build/trident-stager-validation-v1/result.json",
       "sha256": "edb0d2c50bfd39f0e6406a80dfd70df63db5a838f21e5e59440a2715021653b2"
+    },
+    {
+      "path": "build/wasm-memory-baseline-regression-v1/failed-preflight.json",
+      "sha256": "30d5a6dc6f96534819d339a321dec81d6724702e8de50158e7e05455d568539f"
+    },
+    {
+      "path": "build/wasm-memory-baseline-regression-v2/result.json",
+      "sha256": "52be935f933f6050c655527e6576af156f8946f1b42d38e7a747c2a5ce1902ca"
+    },
+    {
+      "path": "build/wasm-memory-profile-independent-review-v1/result.json",
+      "sha256": "e3c1ef51e2781277a8645764b08e983f7d1a71df8e48d2286f4c8c2f9de46b41"
+    },
+    {
+      "path": "build/wasm-memory-profile-v7/result.json",
+      "sha256": "6f5d0224203008944089d81eb7d05aebb943b0fdcef151365611386ff13ce010"
+    },
+    {
+      "path": "build/wasm-memory-profile-v8/result.json",
+      "sha256": "657308666b48175c0369cdac0d3c35f9888d053f7c3038c5625c1ee5209dc5dc"
+    },
+    {
+      "path": "build/wasm-memory-root-readback-v1/failed-preflight.json",
+      "sha256": "3fd5662b95426284c7a10c7e59109754008b8b69f98d17c1be638b45982777c0"
+    },
+    {
+      "path": "build/wasm-memory-root-readback-v2/result.json",
+      "sha256": "aad0cfb90a90a6fcab9626337f4782a40aa1e88b59bae4f05e8dda5e84990839"
     },
     {
       "path": "build/wasm-native-acceptance-controls-v2/result.json",
@@ -384,7 +452,7 @@
       "cmovge"
     ],
     "old_native_v7_admissible": false,
-    "i486_correction_status": "v1 both linked native DLLs/fullCPU and12realLinux encryptedcases PASS; v2 startupdeadline and exact1MiB formatterboundary source corrections with freshfour-profile build in progress",
+    "i486_correction_status": "v2_frozen_source_root_and_independent_complete_byte_reviews_passed_native_pending",
     "i486_corrective_v1": {
       "receipt_sha256": "1123b84ae84c35981cbf5e6e3ea9c4d4b6848cac00d2ee0b22e61be7237167b3",
       "full_linked_i486_gates": true,
@@ -395,6 +463,23 @@
       "frozen_original_current_source_superseded_by_v2": true,
       "native_windows": false,
       "system_tls": false
+    },
+    "i486_corrective_v2": {
+      "source_commit": "3b429e1d38f5e00aa3c33cd01f9b41559fab847c",
+      "receipt_sha256": "98c526151545be95fe5f6cd58140ae2dfdc52d21038fe1de893387290dea1819",
+      "full_linked_i486_gates": true,
+      "latest_dll_sha256": "ab59c0251bae70b6f1eb66f12009f06c576fc4c2fccca45337fe4c686bfdb701",
+      "lts_dll_sha256": "214a2b901720b8743a9de70337f6ca40da9e015c0bb3bfb26dd940191afb4b67",
+      "formatter_assertions_each": 18974,
+      "actual_owned_startup_controls": 10,
+      "real_encrypted_linux_cases": 12,
+      "actual_translation_units": 471,
+      "successful_build_steps": 978,
+      "original_regular_members": 5978,
+      "original_exact_aliases": 147,
+      "native_windows": false,
+      "system_tls": false,
+      "native_stage_preparing": true
     }
   },
   "applications": {
@@ -408,24 +493,24 @@
   "guest_constraint": {
     "selected_reserve_gib": 20,
     "prepared_copy_floor_bytes": 21991407616,
-    "free_bytes_at_checkpoint": 35041038336,
+    "free_bytes_at_checkpoint": 24297902080,
     "free_space_below_selected_reserve": false,
     "no_original_or_active_vm_logical_bytes_modified": true,
     "approved_closed_clone_allocation_sharing_only": true,
-    "native_queue_owned": false,
-    "latest_attempt_safely_blocked_before_qemu": true,
-    "root_queue_owned": false,
+    "native_queue_owned": true,
+    "latest_attempt_safely_blocked_before_qemu": false,
+    "root_queue_owned": true,
     "guard_recheck_required_before_every_trial": true,
-    "space_observation_utc": "2026-10-01T10:54:35.913510+00:00",
+    "space_observation_utc": "2026-10-01T11:40:32.686026+00:00",
     "prepared_copy_floor_with_staging_bytes": 22058516480,
-    "queue_observation": "Numeric Wasm admission safely queued behind actual peerVLC Win98 PID3026413 and occupied cooperative lock; own CSS v2 normally stopped/strictlyaccepted",
-    "mem_available_bytes_at_observation": 12405997568,
+    "queue_observation": "Root fresh numericv24 Win98 trial actually running under owned lock and pinned image/PID/start identity; acceptance pending",
+    "mem_available_bytes_at_observation": 8969691136,
     "cooperative_lock_vacant_at_observation": false,
     "actual_qa_vacant_at_observation": false,
     "actual_win98_native_slot_vacant_at_observation": false,
     "scheduling_scope_addendum": "docs/NATIVE_QA_SCHEDULING_SCOPE.md",
     "positively_identified_separate_xp_kernel64_runners_consume_win98_slot": false,
-    "root_vm_running": false
+    "root_vm_running": true
   },
   "completion": {
     "user_objective_complete": false,
@@ -466,7 +551,7 @@
     "benchmarks/wpt-css-selected-v1/source-pin.json": "eb370b76c4acd0e1e902bc22f395ca7d529cf16774724e541cd676e7afcc4241",
     "docs/I486_NATIVE_INPUT_AUDIT.md": "3060a8ad33090feb195e8df254e03b1095fde058db81b23df5bbac2b5a885951",
     "docs/MESA_SOFTPIPE_PORT_FEASIBILITY.md": "756d0bade66c01c2cf916d12c88fc1ac7a668327f5accde116c3c9955c059644",
-    "docs/MODERN_THEME_TLS_APPS.md": "99e3356f546eff4a0831cb8945b0f9fe63c44ab0684b4eac2ab485be11335e1f",
+    "docs/MODERN_THEME_TLS_APPS.md": "97461a8856a086ad34e00327c47db9abf9176067d0d79412ffc7c0e880dc2492",
     "docs/NATIVE_QA_SCHEDULING_SCOPE.md": "8f4567ff592a0ba9c192499c5b00753fdcc4cc6cd149a87b4e4520a0bd51d89e",
     "docs/THEME_NATIVE_EVIDENCE.md": "8ea864696546587527c32c92acea505888ba83717398970bb7104ad40ab47f43",
     "docs/TRIDENT_AUTOMATION_NATIVE_EVIDENCE.md": "ca6008f43eb5517caa34ca372f3bec6a6826cff8d4503d20f8a6785ad28caa5f",
@@ -486,7 +571,7 @@
     "docs/TRIDENT_WASM_QJS_BRIDGE.md": "eba468069792bfe92c9d90abefb1da24815592fb71ca3c9daff40b62b28549c2",
     "docs/TRIDENT_WASM_RUNTIME.md": "1c35259a162411ff3797f505a8acdfeb36e3b3c6793cef5bddaa2a971d8b377d",
     "docs/TRIDENT_WASM_SPEC_SELECTED.md": "78b0a07c0f51caa59a86620b57ea65f0d0d890b0b0df42980aa12e7a7e2b5524",
-    "docs/modern-apps-coordination-5abe.md": "984f32eef0c956f56879896287cfd37b8cb39af4fc7aa85912652ee902ff72b1",
+    "docs/modern-apps-coordination-5abe.md": "1dcd4be42029b5cf1e4105565e9c2263273039f2e093c452a5fc68e2b7f2eea1",
     "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
     "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
     "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
@@ -653,9 +738,21 @@
     "tools/verify_trident_script_native.py": "72916dd0e4875ae35f96d3cdd6f8f8d18f48021245d62af3e1fc7483863c4083",
     "tools/verify_wasm_native.py": "b8bf36328f72f823cc8d93b43964eef3dc1fd11d93c658f34f86ea764f717608",
     "tools/wasm_native_log.py": "236a19c807b241193b2251ea403898f8772aed9601147d9c24c3a96b8c63e34c",
-    "tools/wasm_native_stage_evidence.py": "785182f343b30bdad0a66771e2e02872ed8cb778990087ee32aa3329434b8d45"
+    "tools/wasm_native_stage_evidence.py": "785182f343b30bdad0a66771e2e02872ed8cb778990087ee32aa3329434b8d45",
+    "docs/TLS13_I486_HANDOFF.md": "7f29d787024e9fc6eb49801333a9108fadc37992d0f0b1648384a0eb62746c2a",
+    "src/m98_tls_i486_format.c": "b5bebe525dbb6cea178a8d6faba88a030230035e45d13e512d832827ae71394a",
+    "src/m98_tls_i486_format.h": "9daef87a5a35724b370ad7441fda636a247c8e531e164247dd52d5b0f16d31c9",
+    "tests/m98_tls_i486_format_host.c": "658e99e826e983a7607e05c0f30feac5a07fb99b2f5564c6240b34dd8857968b",
+    "tests/test_tls13_i486_startup.py": "504d0baeae6a506d58548af2851e60955b47e81c656cdd050b4621832578d77c",
+    "tools/build_tls13_i486.py": "dcb6801c7c8bc11e28a6518acc3e0438bb7ac9d8edcad23588706b0ea798a2fb",
+    "docs/TRIDENT_WASM_MEMORY_PROFILE.md": "9a6a3454d644ff613befdf56c972af9cf7f5f86ecd4054b46e6a06d4d528ede0",
+    "patches/wamr-f5f57c09-browser-memory-v1.patch": "c634d7e2167cc6db95842721a01e069da4338c57ad6cb7d570117f2d3b979999",
+    "profiles/wasm-browser-memory-v1.json": "ec704aca6399d81ffa18cdf8d3de11a50ff1587a22be78f88bb4affaa76166d7",
+    "tests/m98_wasm_memory_host.c": "868a8c85d73500f3584a37ed3886e4c6247184c8069c9f58010e493b27c3aa80",
+    "tests/m98_wasm_memory_spec_host.c": "e339a578adfc08ef442c7c5ba879623c522f9dca6400b229a6ab1e9e1b4d621a",
+    "tools/build_wasm_memory_profile.py": "44049c5ed1aeedd3b79c57e9c2be68fefb9bb25022aaf09554fc0fabdf93c07e"
   },
-  "updated_utc": "2026-10-01T10:58:15.752117+00:00",
+  "updated_utc": "2026-10-01T11:40:32.686026+00:00",
   "source_commits": {
     "foundation": "a12a4a95e9f3fbddcea82d69f124876d22fb660f",
     "dns_config": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -678,7 +775,9 @@
     "private_quickjs_wamr_bridge": "7b2dbff",
     "css_native_short_label_correction": "71710ba",
     "numeric_native_stage_and_verifier": "778cfd6",
-    "numeric_native_final_file_drift_fix": "0f163b1"
+    "numeric_native_final_file_drift_fix": "0f163b1",
+    "tls13_i486_correction": "3b429e1d38f5e00aa3c33cd01f9b41559fab847c",
+    "wasm_browser_memory_correction": "76cb02bc64b27b6359bd012150530b431814e047"
   },
   "dns_config": {
     "source_commit": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -901,11 +1000,14 @@
       "actual_supervisor_exit_verified": false,
       "full_modern_wasm": false,
       "standard_browser_webassembly": false,
-      "admission": "QUEUED_BEFORE_RUN_CREATION",
-      "other_actual_win98_pid": 3026413
+      "admission": "ACTUAL_OWNED_QEMU_RUNNING_ACCEPTANCE_PENDING",
+      "owned_qemu_pid": 3404150,
+      "owned_qemu_start_ticks": 2123948,
+      "owned_run": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-wasm-numeric-5abe-native-v1",
+      "stage_runtime_profile": "original_v24_not_corrective_memory_v8"
     },
     "wasm_memory_correction": {
-      "status": "additive_guarded_profile_final_closure_in_progress",
+      "status": "v8_frozen_source_root_and_independent_complete_byte_reviews_passed",
       "ordinary_and_full_sanitizer_project_assertions_each": 386,
       "ordinary_and_full_sanitizer_original_selected_commands_each": 4641,
       "old_failures_preserved": true,
@@ -916,7 +1018,18 @@
         "actual compiler table arena alignment"
       ],
       "native_execution": false,
-      "full_modern_wasm": false
+      "full_modern_wasm": false,
+      "source_commit": "76cb02bc64b27b6359bd012150530b431814e047",
+      "receipt_sha256": "657308666b48175c0369cdac0d3c35f9888d053f7c3038c5625c1ee5209dc5dc",
+      "original_explicit_exclusions": 15,
+      "actual_objects": 98,
+      "actual_build_steps": 235,
+      "full_native_i486_executable_bytes": 156008,
+      "full_native_i486_instructions": 54606,
+      "dll_sha256": "86449b2f95f494ebdecb148ab0a9c76ee5109d59fc8653c6f9f03ca8cb6684eb",
+      "root_baseline_predicates_each": 1237,
+      "root_baseline_observation_copy_only": true,
+      "javascript_integration_preparing": true
     }
   },
   "disk_optimization": {
@@ -929,6 +1042,19 @@
     "active_native_api_image_skipped": true,
     "full_range_coverage": false,
     "original_bytes_preserved": true,
-    "checkpoint_sha256": "013b2e82a903644a2275fb477926052306b5eeedada88617fcf7015b0a2a10da"
+    "checkpoint_sha256": "013b2e82a903644a2275fb477926052306b5eeedada88617fcf7015b0a2a10da",
+    "followup": {
+      "closed": true,
+      "locks_released": true,
+      "kernel_compared_shared_bytes": 48128000,
+      "source_ranges_completed": 59,
+      "source_ranges_planned": 544,
+      "differing_ranges_refused": 20,
+      "unprocessed_ranges": 485,
+      "all_three_logical_hashes_and_stat_metadata_unchanged": true,
+      "full_range_coverage": false,
+      "net_filesystem_free_gain_claimed": false,
+      "checkpoint_sha256": "ea9a495c3caa92c9542ad06962b5c8ef3d4f09f4b06904e2ff9a1fe021aa2e6b"
+    }
   }
 }
