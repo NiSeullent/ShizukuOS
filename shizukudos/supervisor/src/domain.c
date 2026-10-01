@@ -524,8 +524,8 @@ static int run_slice(domain_t *d)
     uint32_t reason;
     int rc;
 
-    if (vmptrld(d->vc.vmcs_pa)) {
-        dom_fail(d, "VMPTRLD failed");
+    if (vmx_vcpu_load(&d->vc)) {
+        dom_fail(d, "VMCS CPU ownership/load failed");
         return -1;
     }
     deliver_events(d, now);
