@@ -31,12 +31,12 @@ No --single-process: Electron 44.5.0 dies with SIGTRAP right after "app ready" u
 All three add --enable-logging=stderr so Chromium/Electron log lines reach the serial log. The Kernel64 autorun control
 file holds at most 511 characters of command line; --args replaces the default arguments.
 
-The run PASSES only when the serial log contains the expected line AND the process exited with code 0 AND no process
-fault was reported. Anything else is a FAIL, and the result names the furthest point reached, in this order of
+The run PASSES only when a nonblank expected line appears after autorun starts, the autorun result says exited with
+code 0 and faulted=0, and no loader failure, exception, Node/Electron fatal or Chromium fatal was reported. QEMU must
+finish before the host timeout with exit status 0 or 1 (the standalone isa-debug-exit success status). Anything else is a FAIL, and the result names the furthest point reached, in this order of
 precedence: loader failure (an import that did not resolve), a fatal exception (process killed by the kernel), a
-Node/V8 fatal line, a Chromium FATAL/CHECK line, the marker seen without a clean exit, a first-chance breakpoint
-(int3: a failed CHECK or delay-load that a handler turned into a process exit; the result quotes the last LoadLibrary
-refusal and GetProcAddress miss before it), the first explicitly unsupported kernel32 call ("K32 unsupported: ..."), the furthest progress line the app printed, the exit code, or the
+Node/V8 fatal line, a Chromium FATAL/CHECK line, the marker seen without a clean exit, the first explicitly
+unsupported kernel32 call ("K32 unsupported: ..."), the furthest progress line the app printed, the exit code, or the
 timeout.
 
 Result: <out>/result.json (printed in short). Exit status 0 = PASS, 1 = FAIL (the expected state today), 2 = the run
@@ -66,9 +66,7 @@ IMAGES = Path(os.environ.get("SHZ_E1_IMAGES", str(BUILD / "e1-images")))  # FAT3
 FIXED_EPOCH = 1262304000
 MARKER = "SHZ-E1-MARKER electron-min 42"
 COMMON = "--no-sandbox --disable-gpu --enable-logging=stderr --v=0"
-# Without --user-data-dir the Electron browser process stops at a CHECK right after it starts (electron.exe+0x322c975, E1.md
-# wall 15); with one it goes on. The default directory comes from a shell32 known-folder lookup (RoamingAppData) that the
-# runtime's shell32 does not answer: that is the probable cause, not a proved one (setting APPDATA alone does not help).
+# Keep Electron's profile on the writable snapshot; its browser process requires one.
 USER_DATA = " --user-data-dir=D:\\e1ud"
 APPS = {
     "minimal": {"dir": "e1min", "exe": "electron.exe", "args": COMMON + USER_DATA + " --no-first-run", "expect": MARKER},
@@ -161,7 +159,7 @@ def classify(serial, expect):
     """Furthest point reached, from the serial log after the autorun start (precedence in the module docstring).
     A runtime LoadLibrary that fails ("... LoadLibrary needs ...") is listed separately: programs probe optional DLLs."""
     all_lines = serial.splitlines()
-    start = next((i for i, l in enumerate(all_lines) if l.startswith("K64 autorun: starting")), len(all_lines))
+    start = next((i for i, l in enumerate(all_lines) if l.startswith("K64 autorun: starting ")), len(all_lines))
     lines = all_lines[start:]
     res = {}
     ldr_all = [l for l in lines if re.search(r"K64 ldr: .*(not loaded|imports|rejected|failed|cannot|lacks)", l)]
@@ -209,11 +207,14 @@ def classify(serial, expect):
     res["node_steps"] = steps
     done = re.search(r"SHZ-E1-NODE-DONE [^\n]*?(?=SHZ-E1-NODE|\n|$)", text)
     res["node_done"] = done.group(0) if done else None
-    m = re.search(r"K64 autorun: result (\w[\w-]*) exit=([0-9a-f]+) faulted=(\d)", auto[-1]) if auto else None
+    m = re.fullmatch(r"K64 autorun: result (\w[\w-]*) exit=([0-9a-fA-F]+) faulted=([01])"
+                     r"(?: reaped=-?\d+(?: \(\d+ thread\(s\) still alive\))? after \d+ ms)?",
+                     auto[-1]) if auto else None
     res["exit_code"] = int(m.group(2), 16) if m else None
     res["faulted"] = bool(int(m.group(3))) if m else None
     res["ended_by"] = m.group(1) if m else None
-    marker = bool(expect) and expect in serial
+    marker = bool(expect and expect.strip()) and expect in text
+    res["expected_line_seen"] = marker
     if ldr:
         res["furthest"] = "loader: " + ldr[0]
     elif killed:
@@ -240,15 +241,37 @@ def classify(serial, expect):
 
 def find_exe(tree, name):
     if name:
-        return name if (tree / name).exists() else None
+        return name if (tree / name).is_file() else None
     for cand in ("Code.exe", "VSCodium.exe", "Code - Insiders.exe"):
-        if (tree / cand).exists():
+        if (tree / cand).is_file():
             return cand
     return None
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+class _RunnerParser(argparse.ArgumentParser):
+    def error(self, message):
+        # Invalid CLI input needs the same persistent BLOCKED evidence as preflight.
+        raise ValueError(message)
+
+
+def blocked(out, app, reasons, **evidence):
+    record = {
+        "profile": f"kernel64-standalone + {app} Electron app on AHCI FAT32 (D:), autorun",
+        "app": app, "status": "BLOCKED", "reason": "; ".join(reasons), "blockers": reasons,
+        "expected_line_seen": False, "qemu_timed_out": False, "qemu_returncode": None,
+        **evidence, "utc": shzlib.utc_now(), "git": shzlib.git_state(),
+    }
+    shzlib.write_json(out / "result.json", record)
+    print(f"  app: {app}, status: BLOCKED")
+    for reason in reasons:
+        print(f"  {reason}")
+    print(f"  result: {out / 'result.json'}")
+    return 2
+
+
+def main(argv=None):
+
+    ap = _RunnerParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--app", choices=sorted(APPS), default="minimal")
     ap.add_argument("--tree", help="application tree (read-only): the Electron release tree for minimal/default, "
                                    "a VS Code/VSCodium tree for vscode")
@@ -265,88 +288,129 @@ def main():
     ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE",
                     help="extra environment variable of the program (repeatable; `env=` lines of the autorun control file, which "
                          "needs a kernel that reads them - kernel64/autorun.c of the E1 proposal; ignored by older kernels)")
-    ap.add_argument("--no-trace", action="store_true",
-                    help="do not pass shz.k32trace, shz.exctrace and shz.systrace (kernel32 explicit-failure and GetProcAddress-miss lines, "
-                         "first-chance hardware exceptions, failing system calls)")
-    ap.add_argument("--trace-all-syscalls", action="store_true",
-                    help="also pass shz.systrace.all: the last 70 system calls of the thread that takes the first breakpoint are printed with it")
-    args = ap.parse_args()
-    spec = APPS[args.app]
-    stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
-    for f in (stub, kernel, initrd):
-        if not f.exists():
-            print(f"missing {f}: run shizukudos/kbuild.py and shizukudos/win64/build.py first")
-            return 2
-    if not args.tree:
-        print("--tree is required (the Electron or VS Code tree, outside the repository)")
-        return 2
-    tree = Path(args.tree)
-    exe = find_exe(tree, spec["exe"])
-    if not exe:
-        print(f"no {spec['exe'] or 'Code.exe/VSCodium.exe'} in {tree}")
-        return 2
-    for tool in ("mkfs.vfat", "mcopy", "mmd"):
-        if not shutil.which(tool):
-            print(f"required tool missing: {tool}")
-            return 2
-    expect = args.expect if args.expect is not None else spec["expect"]
-    cargs = args.args if args.args is not None else spec["args"]
-    vdir = spec["dir"]
-    cmdline = f"{exe} {cargs}"
-    if len(cmdline) > 511:
-        print(f"command line is {len(cmdline)} characters; autorun.c keeps 511")
-        return 2
-    accel = ("kvm" if Path("/dev/kvm").exists() else "tcg") if args.accel == "auto" else args.accel
-    out = Path(args.out or (K64S / f"run_electron_{args.app}"))
-    out.mkdir(parents=True, exist_ok=True)
-    image = Path(args.image or (IMAGES / f"{spec.get('image', args.app)}.img"))
-    t0 = time.time()
-    overlay = {str(MINAPP): f"{vdir}/resources/app"} if args.app in ("minimal", "node") else None
-    listing = build_image(image, tree, vdir, overlay)
-    control = (f"image=D:\\{vdir}\\{exe}\r\ncmdline={cmdline}\r\ncwd=D:\\{vdir}\r\n"
-               + "".join(f"env={e}\r\n" for e in [*spec.get("env", []), *args.env])
-               + f"timeout={args.guest_timeout}\r\n").encode()
-    put_file(image, control, "K64RUN.TXT", out)
-    image_s = round(time.time() - t0, 1)
-    serial_path = out / "serial.log"
-    serial_path.unlink(missing_ok=True)
-    cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
-           *(["-vga", "std"] if args.display == "vga" else []),
-           "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
-           "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace shz.systrace" + (" shz.systrace.all" if args.trace_all_syscalls else "")),
-           "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
-           "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
-           "-device", "ide-hd,drive=d0,bus=ahci0.0"]
-    started = time.time()
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    ap.add_argument("--no-trace", action="store_true", help="do not pass shz.k32trace and shz.exctrace")
+    ap.add_argument("--trace-all-syscalls", action="store_true", help="include the last 70 system calls at the first breakpoint")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Resolve the evidence destination even when another CLI option is invalid.
+    hints = _RunnerParser(add_help=False, allow_abbrev=False)
+    hints.add_argument("--out")
+    hints.add_argument("--app", default="minimal")
     try:
-        proc.wait(timeout=args.timeout)
-        timed_out = False
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        timed_out = True
-    seconds = round(time.time() - started, 1)
-    qemu_out = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
-    serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
-    res = classify(serial, expect)
-    slines = serial.splitlines()
-    start = next((i for i, l in enumerate(slines) if l.startswith("K64 autorun: starting")), len(slines))
-    autorun_lines = slines[start:]                           # the boot self-tests before this are not the app's
-    app_lines = [l for l in autorun_lines if re.match(r"\[(win64|user) [^\]]+ pid \d+\]", l)]
-    expect_seen = bool(expect) and expect in serial
-    ok = expect_seen and res["exit_code"] == 0 and not res["faulted"] and not res["exceptions"] and not timed_out
-    record = {
-        "profile": f"kernel64-standalone + {args.app} Electron app on AHCI FAT32 (D:), autorun", "app": args.app,
-        "accel": accel, "status": "PASS" if ok else "FAIL", "expected_line": expect, "expected_line_seen": expect_seen,
-        "qemu_timed_out": timed_out, "seconds": seconds, "image_prepare_s": image_s, "image": str(image),
-        "tree": str(tree), "tree_files": len(listing), "exe": exe, "command_line": cmdline, "env": [*spec.get("env", []), *args.env], "command": cmd,
-        **res,
-        "app_output_lines": app_lines[:600], "app_output_line_count": len(app_lines),
-        "autorun_log": autorun_lines[:400],
-        "serial_tail": serial[-8000:], "qemu_output": qemu_out[-1500:], "utc": shzlib.utc_now(), "git": shzlib.git_state(),
-    }
-    shzlib.write_json(out / "result.json", record)
+        hint, _ = hints.parse_known_args(argv)
+    except ValueError:
+        hint = argparse.Namespace(out=None, app="minimal")
+    app = hint.app if hint.app in APPS else "minimal"
+    out = Path(hint.out or (K64S / f"run_electron_{app}")).resolve()
+    evidence = {}
+    stage = "command line"
+    try:
+        args = ap.parse_args(argv)
+        app = args.app
+        out = Path(args.out or (K64S / f"run_electron_{app}")).resolve()
+        spec = APPS[app]
+        stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
+        expect = args.expect if args.expect is not None else spec["expect"]
+        env = [*spec.get("env", []), *args.env]
+        evidence = {"expected_line": expect, "env": env, "tree": args.tree}
+        stage = "preflight"
+        missing = []
+        for f in (stub, kernel, initrd):
+            if not f.is_file():
+                missing.append(f"missing build input {f}: run shizukudos/kbuild.py and shizukudos/win64/build.py first")
+        tree = Path(args.tree).resolve() if args.tree else None
+        exe = None
+        if tree is None:
+            missing.append("--tree is required (the Electron or VS Code tree, outside the repository)")
+        elif not tree.is_dir():
+            missing.append(f"application tree is missing or not a directory: {tree}")
+        else:
+            exe = find_exe(tree, spec["exe"])
+            if not exe:
+                missing.append(f"no {spec['exe'] or 'Code.exe/VSCodium.exe'} in {tree}")
+        if app in ("minimal", "node"):
+            for name in ("package.json", "main.js", "index.html", "nodeprobe.js"):
+                if not (MINAPP / name).is_file():
+                    missing.append(f"missing probe input {MINAPP / name}")
+        for tool in ("mkfs.vfat", "mcopy", "mmd"):
+            if not shutil.which(tool):
+                missing.append(f"required tool missing: {tool}")
+        if not shutil.which(args.qemu):
+            missing.append(f"required QEMU missing or not executable: {args.qemu}")
+        cargs = args.args if args.args is not None else spec["args"]
+        cmdline = f"{exe or spec['exe'] or 'Code.exe'} {cargs}"
+        cmdline_bytes = len(cmdline.encode("utf-8"))
+        if cmdline_bytes > 511:
+            missing.append(f"command line is {cmdline_bytes} bytes; autorun.c keeps 511")
+        if any(c in cmdline for c in "\r\n\0"):
+            missing.append("command line contains a CR, LF or NUL")
+        for e in env:
+            if not re.fullmatch(r"[^=\r\n\0]+=[^\r\n\0]*", e):
+                missing.append(f"invalid --env value: {e!r}; expected NAME=VALUE without CR, LF or NUL")
+        if args.timeout <= 0 or args.guest_timeout <= 0:
+            missing.append("--timeout and --guest-timeout must be positive")
+        vdir = spec["dir"]
+        control = (f"image=D:\\{vdir}\\{exe}\r\ncmdline={cmdline}\r\ncwd=D:\\{vdir}\r\n"
+                   + "".join(f"env={e}\r\n" for e in env)
+                   + f"timeout={args.guest_timeout}\r\n").encode()
+        if len(control) > 4096:
+            missing.append(f"autorun control file is {len(control)} bytes; autorun.c accepts at most 4096")
+        image = Path(args.image or (IMAGES / f"{spec.get('image', app)}.img")).resolve()
+        evidence.update(tree=str(tree) if tree else None, exe=exe, command_line=cmdline, image=str(image))
+        if missing:
+            return blocked(out, app, missing, missing_prerequisites=missing, **evidence)
+        out.mkdir(parents=True, exist_ok=True)
+        accel = ("kvm" if Path("/dev/kvm").exists() else "tcg") if args.accel == "auto" else args.accel
+        evidence["accel"] = accel
+        stage = "image preparation"
+        t0 = time.time()
+        overlay = {str(MINAPP): f"{vdir}/resources/app"} if app in ("minimal", "node") else None
+        listing = build_image(image, tree, vdir, overlay)
+        put_file(image, control, "K64RUN.TXT", out)
+        image_s = round(time.time() - t0, 1)
+        evidence.update(tree_files=len(listing), image_prepare_s=image_s)
+        serial_path = out / "serial.log"
+        serial_path.unlink(missing_ok=True)
+        cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
+               *(["-vga", "std"] if args.display == "vga" else []),
+               "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
+               "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + ("" if args.no_trace else " shz.k32trace shz.exctrace shz.systrace" + (" shz.systrace.all" if args.trace_all_syscalls else "")),
+               "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
+               "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
+               "-device", "ide-hd,drive=d0,bus=ahci0.0"]
+        evidence["command"] = cmd
+        stage = "QEMU execution"
+        started = time.time()
+        qemu_rc, qemu_out, timed_out = qemu.run_bounded(cmd, args.timeout)
+        seconds = round(time.time() - started, 1)
+        evidence.update(qemu_returncode=qemu_rc, qemu_output=qemu_out[-1500:],
+                        qemu_timed_out=timed_out, seconds=seconds)
+        stage = "serial evidence"
+        serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
+        res = classify(serial, expect)
+        slines = serial.splitlines()
+        start = next((i for i, l in enumerate(slines) if l.startswith("K64 autorun: starting ")), len(slines))
+        autorun_lines = slines[start:]                       # the boot self-tests before this are not the app's
+        app_lines = [l for l in autorun_lines if re.match(r"\[(win64|user) [^\]]+ pid \d+\]", l)]
+        expect_seen = res["expected_line_seen"]
+        ok = (expect_seen and res["ended_by"] == "exited" and res["exit_code"] == 0 and res["faulted"] is False
+              and not any(res[k] for k in ("loader_failures", "exceptions", "node_fatal", "chromium_fatal"))
+              and not timed_out and qemu_rc in (0, 1))
+        record = {
+            "profile": f"kernel64-standalone + {app} Electron app on AHCI FAT32 (D:), autorun", "app": app,
+            "status": "PASS" if ok else "FAIL", **evidence, **res,
+            "app_output_lines": app_lines[:600], "app_output_line_count": len(app_lines),
+            "autorun_log": autorun_lines[:400], "serial_tail": serial[-8000:],
+            "utc": shzlib.utc_now(), "git": shzlib.git_state(),
+        }
+        stage = "result evidence"
+        shzlib.write_json(out / "result.json", record)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        reasons = [f"{stage}: {type(exc).__name__}: {exc}"]
+        try:
+            return blocked(out, app, reasons, error_type=type(exc).__name__, error_stage=stage, **evidence)
+        except OSError as write_error:
+            print(f"  BLOCKED: {reasons[0]}; cannot write {out / 'result.json'}: {write_error}")
+            return 2
     print(f"  app: {args.app} ({exe}), status: {record['status']} ({seconds} s, accel={accel})")
     print(f"  furthest point: {res['furthest']}")
     print(f"  autorun: {res['autorun_result']}")
