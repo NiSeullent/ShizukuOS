@@ -2,6 +2,7 @@
 SPDX-License-Identifier: GPL-2.0-only
 """
 import importlib.util
+import os
 from pathlib import Path
 import random
 import struct
@@ -9,7 +10,7 @@ import subprocess
 import unittest
 
 HERE = Path(__file__).resolve().parents[1]
-BUILD = HERE/'build'
+BUILD = Path(os.environ.get('NTWV_HOST_TEST_OUT',str(HERE/'build'))).resolve()
 def module(name):
     spec=importlib.util.spec_from_file_location(name,HERE/(name+'.py'))
     result=importlib.util.module_from_spec(spec);spec.loader.exec_module(result);return result
@@ -82,6 +83,22 @@ class VxDTests(unittest.TestCase):
         for length in (0,64,128,256,len(self.vxd)-1):
             with self.assertRaises(reader.LEError):reader.inspect(self.vxd[:length])
         with self.assertRaises(reader.LEError):reader.relocate(self.vxd,(0xc0000000,0xc0000000))
+
+    def test_exact_object_flags_reject_resident_missing_shared_and_permissions(self):
+        base=struct.unpack_from('<I',self.vxd,60)[0]
+        table=base+struct.unpack_from('<I',self.vxd,base+64)[0]
+        for obj,expected in enumerate((0x2065,0x2063)):
+            at=table+obj*24+8
+            self.assertEqual(struct.unpack_from('<I',self.vxd,at)[0],expected)
+            candidates={expected^(1<<bit) for bit in range(32)}
+            candidates.update((0x2245,0x2243,0x2265,0x2263,0x2045,0x2043,
+                               0x2063 if obj==0 else 0x2065))
+            candidates.discard(expected)
+            for flags in candidates:
+                with self.subTest(object=obj,flags=hex(flags)):
+                    data=bytearray(self.vxd);struct.pack_into('<I',data,at,flags)
+                    with self.assertRaisesRegex(reader.LEError,'object permissions'):
+                        reader.inspect(data)
 
     def test_bounded_elf_and_le_mutations_raise_only_format_errors(self):
         rng=random.Random(98)

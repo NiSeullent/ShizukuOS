@@ -1,0 +1,28 @@
+{
+  "schema": "zetscape.shared-engine-abi-pin.v1",
+  "origin_commit": "dd93262508ecec2969d3267b9d6d831d66fcd489",
+  "provider_export": "IEWebKitGetEngineV1",
+  "ABI": 1,
+  "license": "BSD-2-Clause",
+  "inputs": [
+    {
+      "origin": "/home/almalinux/workspace/iewebkit/include/engine.h",
+      "local": "/root/Win98-Modern-boot/apps/zetscape/upstream/engine.h",
+      "bytes": 2436,
+      "sha256": "d80a8b1d2bced21b9c30fbfe6577b66e3e71719ded719e85e946c38fbee853e2"
+    },
+    {
+      "origin": "/home/almalinux/workspace/iewebkit/host/engine_contract.c",
+      "local": "/root/Win98-Modern-boot/apps/zetscape/upstream/engine_contract.c",
+      "bytes": 1385,
+      "sha256": "dc0371e5d81b879f9cdcce96de201162d5dc8b91370ae3942b3dbdecd763c76b"
+    },
+    {
+      "origin": "/home/almalinux/workspace/iewebkit/LICENSE",
+      "local": "/root/Win98-Modern-boot/apps/zetscape/upstream/LICENSE",
+      "bytes": 1331,
+      "sha256": "6fed67b375e9bc9a9d96659760dc85b6394d0cd29c6f838eaeebd0e77134265a"
+    }
+  ],
+  "actual_provider_built": false
+}

@@ -715,6 +715,38 @@ static int contains(const struct run_result *r, const char *needle)
     return 0;
 }
 
+/* CREATE acknowledges the process object, not execution of its user entrypoint.
+ * Observe and ACK real output before a kill whose regression also requires that
+ * output. An absolute tick budget stays bounded even if unrelated events arrive. */
+static int wait_console_ready(uint32_t pid, const char *marker, struct run_result *r,
+                              uint32_t *acked_seq, uint32_t timeout_ms)
+{
+    const uint64_t start = ticks_now();
+    shz_msg_hdr_t h;
+    uint8_t pl[SHZ_MSG_MAX_INLINE];
+    memset(r, 0, sizeof *r);
+    *acked_seq = 0;
+    while (ticks_now() - start < timeout_ms) {
+        shz_w64_console_t c;
+        if (!cl_event(&h, pl, 20)) continue;
+        if (h.opcode == SHZ_OP_W64_PROCESS_EXITED) {
+            shz_w64_event_t ev;
+            memcpy(&ev, pl, sizeof ev);
+            if (ev.pid == pid) return 0;       /* exited before the readiness marker */
+        }
+        if (h.opcode != SHZ_OP_W64_CONSOLE_OUTPUT ||
+            shz_w64_console_check(&h, pl, &c) != SHZ_OK || c.pid != pid) continue;
+        if (r->text_len + c.length < sizeof r->text) {
+            memcpy(r->text + r->text_len, pl + sizeof c, c.length);
+            r->text_len += c.length;
+        }
+        cl_ack(pid, c.seq);
+        *acked_seq = c.seq;
+        if (contains(r, marker)) return 1;
+    }
+    return 0;
+}
+
 static void inject_bad_slot(int how)
 {
     const uint32_t head = cl_tx->head;
@@ -864,10 +896,14 @@ static void selftest(void)
         }
         CHECK("CONSOLE_INPUT beyond the 1024-byte stdin queue is QUEUE_FULL, earlier chunks accepted", full && k == 5);
     }
+    struct run_result ready;
+    uint32_t ready_acked;
+    CHECK("hanging probe produced its real readiness banner before KILL_PROCESS",
+          wait_console_ready(pid, "hanging until killed", &ready, &ready_acked, 10000));
     CHECK("KILL_PROCESS with exit code 0x77 is accepted", cl_simple(SHZ_OP_W64_KILL_PROCESS, pid, 0x77) == SHZ_OK);
-    collect(pid, 1, 0, 0, 0, &rr, 10000);
+    collect(pid, 1, 0, 0, ready_acked, &rr, 10000);
     CHECK("killed process reports KILLED, exit code 0x77, no fault", rr.got_exit && rr.exited.state == SHZ_W64_PS_KILLED &&
-          rr.exited.exit_code == 0x77 && rr.exited.fault_status == 0 && contains(&rr, "hanging until killed"));
+          rr.exited.exit_code == 0x77 && rr.exited.fault_status == 0 && contains(&ready, "hanging until killed"));
     CHECK("KILL of an already exited process is OK, of an unknown pid NOENT",
           cl_simple(SHZ_OP_W64_KILL_PROCESS, pid, 1) == SHZ_OK && cl_simple(SHZ_OP_W64_KILL_PROCESS, 0x7777, 1) == SHZ_E_NOENT);
     CHECK("CONSOLE_INPUT to an unknown pid is NOENT", cl_input(0x7777, "x", 1, 0) == SHZ_E_NOENT);

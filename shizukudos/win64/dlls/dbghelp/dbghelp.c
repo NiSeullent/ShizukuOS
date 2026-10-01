@@ -933,14 +933,17 @@ static int module_fixed_version(const sym_process *p, const sym_module *m, VS_FI
     return 0;
 }
 
-DLLAPI BOOL WINAPI MiniDumpWriteDump(HANDLE h, DWORD pid, HANDLE file, MINIDUMP_TYPE type, PMINIDUMP_EXCEPTION_INFORMATION const exc,
+DLLAPI BOOL WINAPI MiniDumpWriteDump(HANDLE h, DWORD volatile pid, HANDLE file, MINIDUMP_TYPE type, PMINIDUMP_EXCEPTION_INFORMATION const exc,
                                      PMINIDUMP_USER_STREAM_INFORMATION const user, PMINIDUMP_CALLBACK_INFORMATION const cb)
 {
     sym_process tmp;
     dumpbuf d;
     MINIDUMP_HEADER hdr;
     MINIDUMP_DIRECTORY dirs[8];
-    unsigned ndir = 0, i;
+    /* The SDK marks RtlCaptureContext returns_twice. Preserve state used
+     * after capture without disabling the compiler's clobber diagnostics. */
+    volatile unsigned ndir = 0;
+    unsigned i;
     CONTEXT ctx;
     DWORD tid = GetCurrentThreadId();
     DWORD64 stack_lo, stack_hi;

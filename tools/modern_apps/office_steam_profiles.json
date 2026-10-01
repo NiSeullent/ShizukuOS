@@ -1,0 +1,95 @@
+{
+  "schema": "win98modern.office-steam-profiles.v1",
+  "observed_at_utc": "2026-09-30",
+  "native_target": {
+    "platform_id": 1,
+    "major": 4,
+    "minor": 10,
+    "build": 2222,
+    "required_host": "Windows 98 itself, booted through the IO.SYS UEFI/GOP path"
+  },
+  "libreoffice": {
+    "product": "LibreOffice",
+    "download_version_observed": "26.8.0",
+    "source_tag": "libreoffice-26.8.0.3",
+    "source_commit": "bce0998afefdbc355585ca324285661a2170ba77",
+    "official_windows_architectures_observed": ["x86-64", "ARM64"],
+    "official_windows_os_requirement_observed": "Windows Server 2012 through 2022, Windows 10 or 11",
+    "source_port": "office_steam_sal_clock_pin.json",
+    "required_component_names": {
+      "launcher": ["soffice.exe"],
+      "application": ["soffice.bin"]
+    },
+    "required_native_operations": [
+      "launch_actual_suite",
+      "owned_visible_writer_window",
+      "writer_edit_save_reopen_fresh_document",
+      "owned_visible_calc_window",
+      "calc_formula_recalculate_save_reopen",
+      "clean_owned_process_exit"
+    ],
+    "remaining_ports": [
+      "complete source/toolchain architecture profile",
+      "actual SAL Unicode file/module/process/security services",
+      "actual C++ runtime, TLS, synchronization and exception lifetime",
+      "actual VCL font/text/render/input/clipboard/dialog services",
+      "genuine UNO, Writer, Calc and packaged dependency closure"
+    ],
+    "native_application_executed": false,
+    "runtime_compatibility": "unverified",
+    "primary_sources": [
+      "https://www.libreoffice.org/download/",
+      "https://www.libreoffice.org/system-requirements/",
+      "https://github.com/LibreOffice/core/tree/bce0998afefdbc355585ca324285661a2170ba77"
+    ]
+  },
+  "steam": {
+    "product": "Steam Client for Windows",
+    "channel_required": "current official Valve Windows client",
+    "exact_current_client_build": null,
+    "exact_build_reason": "No current official Windows client payload has been downloaded or inspected in this lane.",
+    "source_state": "Actual Windows client source is not present in this workspace; Valve's public steam-runtime is Linux infrastructure.",
+    "windows_support_observed": {
+      "32_bit_support_ended": "2026-01-01",
+      "future_client_architecture": "64-bit Windows only",
+      "existing_old_32_bit_client": "May continue temporarily, without updates or guaranteed functionality; not accepted as current-client proof."
+    },
+    "required_component_names": {
+      "launcher": ["steam.exe"],
+      "application": ["steamclient.dll", "steamclient64.dll"],
+      "web_helper": ["steamwebhelper.exe"]
+    },
+    "required_native_operations": [
+      "launch_actual_current_client",
+      "owned_visible_client_window",
+      "actual_current_client_update_and_server_connectivity",
+      "real_account_login_and_owned_library",
+      "install_or_verify_owned_test_game",
+      "launch_owned_game_and_receive_genuine_steam_api_callbacks",
+      "clean_owned_process_exit"
+    ],
+    "remaining_ports": [
+      "genuine Win98-hosted 64-bit process and module lifecycle",
+      "Win98-hosted GUI surfaces/input/clipboard interoperation",
+      "complete genuine client/helper/CRT/CEF binary dependency closure",
+      "real IPC, networking, TLS and authentication services",
+      "actual game/Steamworks runtime and callback integration"
+    ],
+    "disallowed_substitutes_for_application_evidence": [
+      "standalone Kernel64 boot",
+      "Steam Linux Runtime or Proton build",
+      "Steamworks SDK sample alone",
+      "import-address availability alone",
+      "forced version strings or fake-success API providers",
+      "Wine host execution"
+    ],
+    "native_application_executed": false,
+    "runtime_compatibility": "unverified",
+    "primary_sources": [
+      "https://help.steampowered.com/en/faqs/view/49A1-B944-48B8-FF00",
+      "https://github.com/ValveSoftware/steam-runtime",
+      "https://github.com/ValveSoftware/steam-for-linux",
+      "https://partner.steamgames.com/doc/sdk/api"
+    ]
+  }
+}

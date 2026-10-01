@@ -1,0 +1,14 @@
+[
+  {
+    "path": "ntwin32/native_environment/memory_probe/primary/globalmemorystatus.html",
+    "url": "https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-globalmemorystatus",
+    "bytes": 52834,
+    "sha256": "66998ff5db6ab54cdd92e54f4113e12de67f7ea1300fce27c80f990935e92ec9"
+  },
+  {
+    "path": "ntwin32/native_environment/memory_probe/primary/memorystatus.html",
+    "url": "https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-memorystatus",
+    "bytes": 53406,
+    "sha256": "47e4f8bc2f468abba8940f46aeb8ba36e5c18e39f64db25fc2267274b8188ce5"
+  }
+]

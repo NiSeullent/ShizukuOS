@@ -1,0 +1,57 @@
+{
+  "schema": "zetscape.win98-port-profile.v1",
+  "product": "Zetscape",
+  "direct_browser_target_replaces": "Chromium full source build",
+  "source_root": "apps/zetscape",
+  "native_host": {
+    "architecture": "x86",
+    "os": "Windows 98 SE",
+    "native_os_version": "4.10.2222",
+    "executable": "ZETSCAPE.EXE",
+    "os_version_emulation_allowed": false,
+    "standalone_companion_os_counts_as_win98": false
+  },
+  "engine": {
+    "implementation": "genuine shared WebCore and JavaScriptCore",
+    "host_abi_commit": "dd93262508ecec2969d3267b9d6d831d66fcd489",
+    "abi_pin": "apps/zetscape/engine_abi_pin.json",
+    "provider_filename": "ZETWEB.DLL",
+    "same_provider_ie_filename": "iewebkit-engine.dll",
+    "provider_export": "IEWebKitGetEngineV1",
+    "provider_abi": 1,
+    "required_capabilities": 63,
+    "renderer_fallback_allowed": false,
+    "provider_built": false,
+    "bringup_jsc_profile": {"c_loop": true, "jit": false, "webassembly": false},
+    "bringup_profile_satisfies_full_target": false
+  },
+  "editions": {
+    "general98se": {"software_renderer_allowed": true, "native_browsing_verified": false},
+    "shizuku": {
+      "hardware_acceleration_required": true,
+      "selection_argument": "--shizuku",
+      "argument_detects_installed_edition": false,
+      "installer_and_driver_selection_integrated": false,
+      "optional_extension_export": "ZetscapeGetExtensionsV1",
+      "extension_abi": 1,
+      "metadata_counts_as_gpu_proof": false,
+      "gpu_and_device_loss_verified": false
+    }
+  },
+  "current_host_bounds": {
+    "queued_actions": 16,
+    "copied_post_body_bytes": 16777216,
+    "total_queued_bytes": 33554432,
+    "larger_streaming_uploads_implemented": false
+  },
+  "verification": {
+    "representative_fixture_plan": "apps/zetscape/fixtures/modern_web_acceptance.json",
+    "genuine_engine_native_runtime": "observed abnormal termination; diagnosis pending",
+    "full_browser_weight_and_memory_measured": false,
+    "ordinary98se_native_browser_pass": false,
+    "shizuku_native_gpu_pass": false,
+    "full_modern_web_pass": false,
+    "required_full_web_scope": "versioned full test inventory plus real applications; subset checks cannot certify 100 percent"
+  },
+  "independent_targets_still_required": ["Legcord/Discord", "current LibreOffice", "Windows Steam", "native IO.SYS UEFI/GOP", "Internet Explorer genuine WebKit document hosting"]
+}

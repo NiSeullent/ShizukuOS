@@ -1,0 +1,4 @@
+EXPORTS
+ NtwResourceResult=NtwResourceResult@0
+ NtwResourceChecks=NtwResourceChecks@0
+ NtwPeFixture=NtwPeFixture@8

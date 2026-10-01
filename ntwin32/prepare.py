@@ -113,6 +113,31 @@ class PE:
                 return raw + rva - section_va
         raise PEError('virtual address is outside a file-backed section')
 
+    def runtime_data_rva(self, va: int, length: int, *, writable: bool = False) -> int:
+        """Validate mapped DWORD storage without treating zero-fill as file bytes.
+
+        TLS indices are loader outputs and may live in a section's virtual tail.
+        Metadata, templates and tables still use offset/map_va for every read.
+        Read-only CFG pointer storage needs protection owned by the real loader;
+        validating its address here does not install CFG or grant write access.
+        """
+        base = self.image_base()
+        if length <= 0 or va < base or va > 0xffffffff or va + length > 0x100000000:
+            raise PEError('runtime data target is outside the PE32 address range')
+        rva = va - base
+        if rva + length > self.u32(self.opt + 56):
+            raise PEError('runtime data target is outside SizeOfImage')
+        if va & 3:
+            raise PEError('runtime data target is not DWORD-aligned')
+        for (section_va, span, _raw, _raw_size), flags in zip(self.sections, self.section_flags):
+            if section_va <= rva and rva + length <= section_va + span:
+                if flags & 0x20000020 or not flags & 0x40000000 or not flags & 0xC0:
+                    raise PEError('runtime data target must be readable non-executable data')
+                if writable and not flags & 0x80000000:
+                    raise PEError('runtime data target is not writable data')
+                return rva
+        raise PEError('runtime data target is outside a mapped data section')
+
     def executable_rva(self, rva: int) -> bool:
         for (va, span, _raw, _raw_size), flags in zip(self.sections, self.section_flags):
             if flags & 0x20000000 and va <= rva < va + span:
@@ -309,7 +334,7 @@ def validate_tls(pe: PE) -> dict | None:
         raise PEError('static TLS directory has no template or callbacks')
     if raw:
         pe.map_va(start, raw)
-    pe.map_va(index, 4, writable=True)
+    pe.runtime_data_rva(index, 4, writable=True)
     callback_count = 0
     if callbacks:
         slot = callbacks
@@ -341,9 +366,10 @@ def validate_load_config(pe: PE) -> dict | None:
     cookie = pe.u32(at + 60) if declared >= 64 else 0
     seh_table = pe.u32(at + 64) if declared >= 72 else 0
     seh_count = pe.u32(at + 68) if declared >= 72 else 0
-    guard_check = guard_table = guard_count = guard_flags = 0
+    guard_check = guard_dispatch = guard_table = guard_count = guard_flags = 0
     if declared >= 92:
         guard_check = pe.u32(at + 72)
+        guard_dispatch = pe.u32(at + 76)
         guard_table = pe.u32(at + 80)
         guard_count = pe.u32(at + 84)
         guard_flags = pe.u32(at + 88)
@@ -373,8 +399,12 @@ def validate_load_config(pe: PE) -> dict | None:
             for index in range(guard_count):
                 if not pe.executable_rva(pe.u32(table_at + index * stride)):
                     raise PEError('CFG function is outside executable image')
-        if guard_check:
-            pe.map_va(guard_check, 4, writable=True)
+    for slot in (guard_check, guard_dispatch):
+        if slot:
+            pe.runtime_data_rva(slot, 4)
+            # The pointer value is initialized image data. Its section may be
+            # read-only after load; the actual loader owns temporary protection.
+            pe.map_va(slot, 4)
     return {'bytes': declared, 'cfg_instrumented': instrumented, 'cfg_functions': guard_count,
             'cfg_stride': 4 + stride_extra if declared >= 92 else 0,
             'has_security_cookie': bool(cookie), 'preserved': True,

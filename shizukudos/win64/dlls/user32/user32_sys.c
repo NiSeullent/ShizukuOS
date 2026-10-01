@@ -1030,8 +1030,24 @@ DLLAPI BOOL WINAPI FlashWindow(HWND hwnd, BOOL invert)
     fi.cbSize = sizeof fi; fi.hwnd = hwnd; fi.dwFlags = invert ? FLASHW_CAPTION : FLASHW_STOP; fi.uCount = 1; fi.dwTimeout = 0;
     return FlashWindowEx(&fi);
 }
-DLLAPI HWND WINAPI GetShellWindow(void) { return 0; }                   /* no shell runs in this system */
-DLLAPI BOOL WINAPI SetShellWindow(HWND hwnd) { (void)hwnd; SetLastError(ERROR_ACCESS_DENIED); return FALSE; }
+DLLAPI HWND WINAPI GetShellWindow(void)
+{
+    shz_wnd_t q;
+    return u32_wq(0, SHZ_WQ_SHELL, 0, &q) ? U2H(q.v0) : 0;
+}
+
+DLLAPI BOOL WINAPI SetShellWindow(HWND hwnd)
+{
+    shz_wnd_t s;
+    int32_t st;
+    U32_NEED_GFX(FALSE);
+    memset(&s, 0, sizeof s);
+    s.hwnd = H2U(hwnd);
+    s.what = SHZ_WS_SET_SHELL;
+    st = NtUserWindowSet(&s);
+    if (st < 0) { u32_err(st); return FALSE; }
+    return TRUE;
+}
 
 DLLAPI DWORD WINAPI GetGuiResources(HANDLE proc, DWORD flags)
 {

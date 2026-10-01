@@ -1,0 +1,199 @@
+--- a/gcc-15.1.1-atexit_thread.cc
++++ b/gcc-15.1.1-atexit_thread.cc
+@@ -46,6 +46,39 @@
+ #ifdef _GLIBCXX_THREAD_ATEXIT_WIN32
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++namespace {
++  // The process image already lives until exit. For a DLL acquire a real
++  // reference to the module containing the destructor, then retain upstream's
++  // balanced FreeLibrary after calling it. Hosts must not unload a DLL while
++  // another thread is executing/registering its TLS destructor.
++  bool pin_destructor_module_win9x (const void *address, HMODULE *pinned)
++  {
++    *pinned = nullptr;
++    MEMORY_BASIC_INFORMATION info = {};
++    if (VirtualQuery (address, &info, sizeof (info)) != sizeof (info)
++        || !info.AllocationBase)
++      return false;
++    HMODULE owner = static_cast<HMODULE>(info.AllocationBase);
++    if (owner == GetModuleHandleA (nullptr))
++      return true;
++    char path[MAX_PATH] = {};
++    DWORD length = GetModuleFileNameA (owner, path, MAX_PATH);
++    if (!length || length >= MAX_PATH || path[length] != '\0')
++      return false;
++    HMODULE reference = LoadLibraryA (path);
++    if (!reference)
++      return false;
++    if (reference != owner)
++      {
++        FreeLibrary (reference);
++        return false;
++      }
++    *pinned = reference;
++    return true;
++  }
++}
++#endif
+ #endif
+ 
+ // Simplify it a little for this file.
+@@ -85,6 +118,11 @@
+ 
+   // Keep a per-thread list of cleanups in gthread_key storage.
+   __gthread_key_t key;
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  // The emutls cleanup may exist before the first C++ destructor registration.
++  // Publish readiness without consulting an unrelated zero-initialized key.
++  volatile LONG key_ready;
++#endif
+   // But also support non-threaded mode.
+   elt *single_thread;
+ 
+@@ -109,26 +147,58 @@
+   // Run the stack of cleanups for the current thread.
+   void run ()
+   {
+-    void *e;
+-    if (__gthread_active_p ())
++    for (;;)
+       {
+-	e = __gthread_getspecific (key);
+-	__gthread_setspecific (key, NULL);
+-      }
+-    else
+-      {
+-	e = single_thread;
+-	single_thread = NULL;
+-      }
+-    run (e);
++        void *e;
++        if (__gthread_active_p ())
++          {
++            e = __gthread_getspecific (key);
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++            if (__gthread_setspecific (key, nullptr) != 0)
++              std::abort ();
++#else
++            __gthread_setspecific (key, NULL);
++#endif
++          }
++        else
++          {
++            e = single_thread;
++            single_thread = NULL;
++          }
++        run (e);
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++        // std::exit must drain lists registered by destructors too, before
++        // the static key owner deletes its key and emutls later frees cells.
++        if (__gthread_active_p () ? !__gthread_getspecific (key) : !single_thread)
++          break;
++#else
++        break;
++#endif
++      }
+   }
+ 
+   // Initialize the key for the cleanup stack.  We use a static local for
+   // key init/delete rather than atexit so that delete is run on dlclose.
+   void key_init() {
+     struct key_s {
+-      key_s() { __gthread_key_create (&key, run); }
+-      ~key_s() { __gthread_key_delete (key); }
++      key_s() {
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++        if (__gthread_key_create (&key, run) != 0)
++          std::abort ();
++        InterlockedExchange (&key_ready, 1);
++#else
++        __gthread_key_create (&key, run);
++#endif
++      }
++      ~key_s() {
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++        InterlockedExchange (&key_ready, 0);
++        if (__gthread_key_delete (key) != 0)
++          std::abort ();
++#else
++        __gthread_key_delete (key);
++#endif
++      }
+     };
+     static key_s ks;
+     // Also make sure the destructors are run by std::exit.
+@@ -199,18 +269,71 @@
+      increment DLL load count.  This blocks the unloading of the DLL
+      before the thread-local dtors have been called.  This does NOT help
+      if FreeLibrary/dlclose is called in excess. */
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  if (!pin_destructor_module_win9x (reinterpret_cast<const void *>(dtor),
++                                  &new_elt->dll))
++    {
++      delete new_elt;
++      // GCC's generated TLS initializer ignores this ABI return value. A
++      // new platform pin failure must stop instead of losing the destructor.
++      std::abort ();
++    }
++#else
+   GetModuleHandleExW (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+ 		      (LPCWSTR) dtor, &new_elt->dll);
+ #endif
++#endif
+ 
+   if (__gthread_active_p ())
+-    __gthread_setspecific (key, new_elt);
++    {
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++      if (__gthread_setspecific (key, new_elt) != 0)
++        {
++          if (new_elt->dll)
++            FreeLibrary (new_elt->dll);
++          delete new_elt;
++          std::abort ();
++        }
++#else
++      __gthread_setspecific (key, new_elt);
++#endif
++    }
+   else
+     single_thread = new_elt;
+ 
+   return 0;
+ }
+ 
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++// Called by the genuine libgcc emutls destructor while its original TLS cells
++// are still installed. Clear each saved list before invoking it, then drain
++// lists registered by destructors too. The later pthread key callback sees an
++// empty list and cannot invoke a destructor for an already freed emutls cell.
++extern "C" void
++__cxa_thread_atexit_emutls_drain ()
++{
++  if (__gthread_active_p ())
++    {
++      if (!InterlockedCompareExchange (&key_ready, 0, 0))
++        return;
++      for (;;)
++        {
++          void *pending = __gthread_getspecific (key);
++          if (!pending)
++            break;
++          if (__gthread_setspecific (key, nullptr) != 0)
++            std::abort ();
++          run (pending);
++        }
++    }
++  else
++    {
++      while (single_thread)
++        run ();
++    }
++}
++#endif
++
+ #endif /* _GLIBCXX_HAVE___CXA_THREAD_ATEXIT_IMPL */
+ 
+ #endif // __USING_MCFGTHREAD__

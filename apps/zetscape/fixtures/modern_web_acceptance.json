@@ -1,0 +1,169 @@
+{
+  "schema": "zetscape.modern-web-acceptance.v1",
+  "target_version": "2026-10-01-v1",
+  "license": "MIT",
+  "requested_outcome": "Standalone lightweight modern-web browser on ordinary Win98SE and actual GPU acceleration on Shizuku Win98",
+  "actual_native_run": false,
+  "representative_fixture_pass": false,
+  "ordinary_win98se_pass": false,
+  "shizuku_gpu_pass": false,
+  "full_modern_web_pass": false,
+  "coverage_percentage": null,
+  "fixture": {
+    "kind": "Independent representative assertions; not upstream WPT or full conformance",
+    "entry": "apps/zetscape/tests/index.html",
+    "result_schema": "zetscape-modern-web-page-result-v1",
+    "result_expression": "JSON.stringify(window.__zetscapeAcceptance)",
+    "expected_assertions": [
+      "dom.text_roundtrip", "dom.capture_bubble", "dom.mutation_observer",
+      "input.trusted_click", "input.trusted_keyboard", "unicode.dom_roundtrip", "unicode.normalization",
+      "layout.grid", "layout.flex", "canvas.solid", "canvas.transform", "canvas.path",
+      "canvas.png_roundtrip", "svg.geometry", "svg.raster_readback", "webgl.shader_readback",
+      "module.static_import", "module.live_binding", "module.dynamic_cache",
+      "async.promise_recovery", "async.microtask_order", "fetch.local_fixture"
+    ],
+    "deadline_seconds": 120,
+    "nonce": "Fresh external ASCII run token,1..80 characters; bind to native launch and returned results",
+    "transport": {
+      "server_started": false,
+      "permitted_fetch_origin": "http://127.0.0.1:<explicitly-authorized-port>",
+      "authorization_query": "allow-loopback-fetch=<same-fresh-nonce>",
+      "entry_query": "nonce=<fresh-nonce>",
+      "fetch_credentials": "omit",
+      "fetch_redirects": "error",
+      "fetch_timeout_seconds": 5,
+      "fetch_body_limit_bytes": 4096,
+      "external_network": "Forbidden in representative fixture",
+      "requirements": ["Root-owned explicitly authorized server", "Bind exact externally approved origin including port,server hash,URL and nonce in native receipt", "Query nonce alone does not establish approval or server ownership", "Bind loopback only", "Correct text/javascript MIME for .mjs", "application/json for payload", "No security disabling", "NIC/external-network state recorded"]
+    },
+    "presentation_controls": [
+      "Actual native owned HWND and process",
+      "Native IO evidence for three trusted clicks plus text and Enter",
+      "Visible final page capture bound to source hashes and nonce",
+      "Unicode glyph appearance separately checked with exact font evidence",
+      "Machine-readable page result returned by genuine engine integration"
+    ],
+    "fail_closed": [
+      "Every assertion ID exactly once",
+      "No missing,skipped,NOT_RUN,timeout or unknown assertions",
+      "No page errors or unhandled rejections",
+      "Same externally frozen source hashes,nonce and actual native process",
+      "Fixture page flags alone cannot prove native OS,engine identity,GPU or complete-web support"
+    ]
+  },
+  "native_engine_proof": {
+    "status": "UNVERIFIED",
+    "shared_abi": "IEWKEngineV1,ABI1,IEWebKitGetEngineV1",
+    "source_pin": "apps/zetscape/engine_abi_pin.json",
+    "optional_extension": "ZetscapeGetExtensionsV1 observations require actual native measurement; metadata is not GPU proof",
+    "required": [
+      "Actual modern rendering/JSC provider compiled from frozen source",
+      "PE32 import closure against the exact native target baseline",
+      "Actual provider load,validate,create,navigate,resize,focus,destroy calls",
+      "Engine-created document/DOM/scripts/layout and native child HWND ownership",
+      "Exact module/source/archive/runtime/member hashes for linked engine",
+      "Callbacks quiesced and owned processes/windows cleaned on shutdown"
+    ],
+    "insufficient_evidence": ["Provider-shaped fixture", "Capability bits", "Engine name", "Source digest alone", "GDI shell painting", "WTF-only diagnostics", "JSC shell syntax output"]
+  },
+  "platforms": {
+    "ordinary_win98se": {
+      "status": "UNVERIFIED",
+      "os": "Actual Win98SE 4.10.2222; not spoofed version metadata",
+      "required": [
+        "Fresh native run on an ordinary installation without Shizuku-only dependencies",
+        "Actual Win32 API behavior and all mandatory imports",
+        "Native memory/threads/timers/TLS/filesystem/module lifecycle",
+        "Actual display,input,resize,shutdown and bounded memory",
+        "Same required modern-web assertions with active backend recorded"
+      ],
+      "software_backend": "Permitted if explicitly measured; cannot earn hardware acceptance"
+    },
+    "shizuku_win98": {
+      "status": "UNVERIFIED",
+      "required": [
+        "Actual Win98SE OS evidence on the Shizuku platform",
+        "Exact platform/kernel/display/GPU driver source commits and binary hashes",
+        "Real device identity and ownership,loaded modules and initialized context",
+        "Actual browser rendering/compositing command submission to that device",
+        "Synchronization/fence/completion plus deterministic render readback",
+        "Visible native presentation of those rendered frames",
+        "Fresh software control and explicitly requested hardware run",
+        "No silent software fallback; failed hardware initialization is hardware FAIL"
+      ],
+      "hardware_evidence": {
+        "driver_commit": null, "driver_sha256": null, "device": null,
+        "submission_trace": null, "completion_trace": null, "render_readback": null,
+        "native_frame_capture": null, "software_fallback": "UNKNOWN"
+      },
+      "insufficient_evidence": [
+        "Shizuku product or driver names", "Requested acceleration flag", "A renderer string",
+        "A WebGL context or passing pixel fixture alone", "Available GPU adapter",
+        "CPU-rendered pixels copied to a GOP/framebuffer", "Scanout alone"
+      ]
+    }
+  },
+  "wpt_plan": {
+    "status": "NOT_PINNED_NOT_RUN",
+    "upstream": "https://github.com/web-platform-tests/wpt",
+    "revision": null,
+    "manifest_sha256": null,
+    "subset_selectors": [
+      "dom/events/", "dom/nodes/", "dom/mutation-observers/",
+      "html/semantics/scripting-1/the-script-element/", "html/webappapis/",
+      "css/css-grid/", "css/css-flexbox/", "css/css-contain/", "css/css-cascade/", "css/selectors/",
+      "html/canvas/", "svg/", "fetch/", "webgl/", "wasm/", "workers/", "html/semantics/embedded-content/media-elements/",
+      "wai-aria/", "content-security-policy/", "cors/"
+    ],
+    "requirements": [
+      "Freeze full upstream commit,licenses,manifest and all test/support bytes",
+      "Expand selectors to a frozen exact ordered test-ID inventory",
+      "Run unmodified tests in actual Zetscape with actual target engine",
+      "Record testharness,reftest,manual and crash/hang results separately",
+      "Preserve wptreport,reference screenshots,run_info and actual browser binary hashes",
+      "Authorized local origins/HTTPS certificates only; no global host-file changes without explicit approval",
+      "All planned IDs accounted; timeouts,crashes,skips and harness failures remain visible",
+      "No injection of polyfills or fake engine APIs to manufacture acceptance"
+    ],
+    "reference": "https://web-platform-tests.org/running-tests/from-local-system.html"
+  },
+  "full_target": {
+    "status": "UNDEFINED_COVERAGE_NOT_RUN",
+    "acceptance_rule": "No 100% or complete modern-web claim from a representative fixture or WPT subset",
+    "required_before_full_target_verdict": [
+      "Versioned finite specification/feature inventory and compatibility scope",
+      "Frozen complete WPT and ECMAScript test262 revision/manifest",
+      "Explicit denominator,all required test IDs and all subtest outcomes",
+      "Both actual platform runs,resource limits and driver/provider provenance",
+      "Separate security,network,TLS,origin,storage,media,accessibility and real-application acceptance",
+      "All unsupported or unimplemented features retained as gaps"
+    ],
+    "uncovered_categories": [
+      "Full HTML parsing/navigation/history/forms", "Full DOM and shadow/custom elements",
+      "Full CSS layout/painting/fonts/animation", "CSS container queries/subgrid/cascade layers/modern selectors",
+      "Complete ECMAScript semantics",
+      "WebAssembly/core validation/execution", "WebAssembly SIMD", "WebAssembly threads/shared memory/Atomics",
+      "Workers/service workers", "Storage and persistence",
+      "TLS/certificates/HTTP2/HTTP3", "Origins/CORS/CSP/security boundaries",
+      "Audio/video/codecs", "Accessibility/IME/printing/downloads",
+      "WebGL completeness/WebGPU", "Real contemporary web applications"
+    ]
+  },
+  "known_source_gaps": [
+    {"id":"provider","status":"UNVERIFIED","evidence":"Current shared ABI pin records actual_provider_built:false"},
+    {"id":"result_bridge","status":"MISSING_ABI_FIELD","evidence":"Pinned IEWKEngineV1 has no JavaScript-result callback/evaluate API"},
+    {"id":"gpu_bridge","status":"REAL_MEASUREMENT_PENDING","evidence":"Pinned IEWK ABI1 has no GPU telemetry; optional Zetscape extension observations and --shizuku metadata require actual driver/device/submission/completion evidence"},
+    {"id":"offline_transport","status":"REQUIRES_AUTHORIZED_LOOPBACK_SERVER","evidence":"Pinned iewk_web_url accepts HTTP(S),not file URLs; no server is started"},
+    {"id":"general_platform","status":"UNVERIFIED","evidence":"An exact import baseline or Shizuku boot run does not prove general-installation behavior"},
+    {"id":"glyphs","status":"UNVERIFIED","evidence":"DOM Unicode/normalization does not prove readable native glyphs; exact font/display evidence pending"},
+    {"id":"wasm","status":"UNSUPPORTED_IN_CURRENT_JSC_BRINGUP","evidence":"Actual pinned JSCOnly profile is C_LOOP,JIT_OFF,WASM_OFF; WebAssembly,SIMD and threads are uncovered mandatory full-target gaps"},
+    {"id":"complete_target","status":"UNVERIFIED","evidence":"Representative fixture has22 assertions; full coverage and WPT/test262 pins are absent"}
+  ],
+  "standards_references": [
+    "https://dom.spec.whatwg.org/#concept-event-dispatch",
+    "https://html.spec.whatwg.org/multipage/webappapis.html#event-loops",
+    "https://drafts.csswg.org/css-grid-1/", "https://drafts.csswg.org/css-flexbox-1/",
+    "https://web-platform-tests.org/writing-tests/",
+    "https://registry.khronos.org/OpenGL/docs/rules.html"
+  ]
+}

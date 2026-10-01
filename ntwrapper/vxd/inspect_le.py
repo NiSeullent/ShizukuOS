@@ -48,8 +48,8 @@ def inspect(data):
         size, address, flags, first, npages, reserved = struct.unpack('<6I',get(base+table+i*24,24))
         if not size or size > 16*1024*1024 or address or reserved or first != next_page or npages != (size+4095)//4096:
             raise LEError('invalid object record')
-        if flags != (0x2245 if i == 0 else 0x2243):
-            raise LEError('object permissions/residency mismatch')
+        if flags != (0x2065 if i == 0 else 0x2063):
+            raise LEError('object permissions/shared/preload policy mismatch')
         memory = bytearray(npages*4096)
         for j in range(npages):
             index = first+j

@@ -1,0 +1,45 @@
+; Shizuku native Windows 98 firmware GOP display driver.
+; Device-relative registry only. No global deletion or bundled applications.
+[Version]
+Signature="$CHICAGO$"
+Class=DISPLAY
+Provider=%Provider%
+DriverVer=09/30/2026,4.2026.0.1
+
+[DestinationDirs]
+DefaultDestDir=11
+Driver.Copy=11
+
+[SourceDisksNames]
+1="Shizuku basic graphics driver",,0
+
+[SourceDisksFiles]
+SHZGOP.DRV=1
+SHZGOP.VXD=1
+
+[Manufacturer]
+%Provider%=Models
+
+[Models]
+%DeviceDesc%=Driver.Install,PCI\CC_0300
+%DeviceDesc%=Driver.Install,*PNP0900
+
+[Driver.Install]
+CopyFiles=Driver.Copy
+AddReg=Driver.AddReg
+
+[Driver.Copy]
+SHZGOP.DRV,,,0x00000004
+SHZGOP.VXD,,,0x00000004
+
+[Driver.AddReg]
+HKR,,Ver,,4.0
+HKR,,DevLoader,,*vdd
+HKR,DEFAULT,vdd,,*vdd
+HKR,DEFAULT,drv,,SHZGOP.DRV
+HKR,DEFAULT,minivdd,,SHZGOP.VXD
+HKR,DEFAULT,RefreshRate,,-1
+
+[Strings]
+Provider="Shizuku"
+DeviceDesc="Shizuku 기본 그래픽 드라이버"

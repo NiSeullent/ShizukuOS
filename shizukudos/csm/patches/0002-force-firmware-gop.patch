@@ -1,0 +1,476 @@
+--- a/src/config.h
++++ b/src/config.h
+@@ -21,6 +21,7 @@
+     CHAR16 vgabios_path[CONFIG_VGABIOS_PATH_MAX];
+     bool iommu_disable;
+     bool verbose;
++    bool gop_only;
+     bool vga_specified;
+     uint8_t vga_bus;
+     uint8_t vga_device;
+--- a/src/config.c
++++ b/src/config.c
+@@ -14,6 +14,7 @@
+     .vgabios_path = {0},
+     .iommu_disable = true,
+     .verbose = false,
++    .gop_only = false,
+     .vga_specified = false,
+     .vga_bus = 0,
+     .vga_device = 0,
+@@ -334,6 +335,12 @@
+         } else {
+             printf("  warning: invalid value for 'serial_baud': %s\n", val);
+         }
++    } else if (streq_nocase(key, "gop_only")) {
++        bool v;
++        if (!parse_bool(val, &v))
++            panic("invalid boolean for 'gop_only': %s\n", val);
++        gConfig.gop_only = v;
++        printf("  gop_only = %s\n", v ? "true" : "false");
+     } else if (streq_nocase(key, "vgabios")) {
+         /* Convert ASCII path to CHAR16 */
+         size_t i;
+--- a/src/csmwrap.h
++++ b/src/csmwrap.h
+@@ -8,6 +8,7 @@
+ #include <edk2/E820.h>
+ #include <edk2/Pci.h>
+ #include <stdbool.h>
++#include <shzgop.h>
+ #include <libc.h>
+ #include <x86thunk.h>
+ 
+@@ -40,6 +41,8 @@
+     uint16_t vga_vendor_id;
+     uint16_t vga_device_id;
+     struct cb_framebuffer cb_fb;
++    struct shzgop_handover *gop_handover;
++    struct shzgop_locator *gop_locator;
+ };
+ 
+ extern struct csmwrap_priv priv;
+--- a/src/csmwrap.c
++++ b/src/csmwrap.c
+@@ -87,6 +87,81 @@
+     }
+ }
+ 
++static uint32_t shzgop_wire_sum(const void *data, size_t size)
++{
++    uint32_t sum = 0;
++    for (size_t i = 0; i < size; i += sizeof(uint32_t)) {
++        uint32_t word;
++        memcpy(&word, (const uint8_t *)data + i, sizeof(word));
++        sum += word;
++    }
++    return sum;
++}
++
++static void shzgop_verify_locator(struct csmwrap_priv *priv)
++{
++    struct shzgop_locator *anchor = priv->gop_locator;
++    struct shzgop_handover *fb = priv->gop_handover;
++    uintptr_t address = (uintptr_t)anchor;
++    if (!anchor || !fb || address < SHZGOP_LOCATOR_BASE
++     || address > SHZGOP_LOCATOR_END - sizeof(*anchor)
++     || (address & (SHZGOP_LOCATOR_ALIGN - 1))
++     || memcmp(anchor->magic, "SHZLOC1", 8) || anchor->major != 1
++     || anchor->minor != 0 || anchor->size != sizeof(*anchor)
++     || anchor->self_address != address || anchor->flags != SHZGOP_LOCATOR_FSEG
++     || anchor->reserved || anchor->descriptor_address != (uintptr_t)fb
++     || anchor->descriptor_size != sizeof(*fb)
++     || anchor->descriptor_checksum != fb->checksum
++     || shzgop_wire_sum(anchor, sizeof(*anchor))
++     || shzgop_wire_sum(fb, sizeof(*fb)))
++        panic("gop_only: invalid persistent F-segment locator\n");
++}
++
++/* AX=6 is the pinned SeaBIOS CSM F-segment allocator, not a guessed ROM hole.
++ * It runs only after InitializeYourself and before PrepareToBoot, whose BIOS
++ * checksum includes our allocated bytes. PCI relocation/descriptor finalizing
++ * has already completed, so the anchor binds the final descriptor checksum. */
++static void shzgop_publish_locator(struct csmwrap_priv *priv)
++{
++    EFI_IA32_REGISTER_SET regs;
++    struct shzgop_handover *fb = priv->gop_handover;
++    uintptr_t descriptor_address = (uintptr_t)fb;
++    if (!fb || descriptor_address <= 0x100000U
++     || descriptor_address > 0xfffff000U || (descriptor_address & 4095U)
++     || memcmp(fb->magic, "SHZGOP1", 8) || fb->major != 1 || fb->minor != 0
++     || fb->size != sizeof(*fb) || shzgop_wire_sum(fb, sizeof(*fb)))
++        panic("gop_only: descriptor is not finalized before locator allocation\n");
++    memset(&regs, 0, sizeof(regs));
++    regs.X.AX = Legacy16GetTableAddress;
++    regs.X.BX = 1; /* F000 region only; no E000/low-memory fallback. */
++    regs.X.CX = sizeof(struct shzgop_locator);
++    regs.X.DX = SHZGOP_LOCATOR_ALIGN;
++    bool failed = LegacyBiosFarCall86(priv->csm_efi_table->Compatibility16CallSegment,
++                                     priv->csm_efi_table->Compatibility16CallOffset,
++                                     &regs, NULL, 0);
++    uintptr_t address = ((uintptr_t)regs.X.DS << 4) + regs.X.BX;
++    if (failed || regs.X.AX || address < SHZGOP_LOCATOR_BASE
++     || address > SHZGOP_LOCATOR_END - sizeof(struct shzgop_locator)
++     || (address & (SHZGOP_LOCATOR_ALIGN - 1)))
++        panic("gop_only: SeaBIOS F-segment locator allocation failed\n");
++    struct shzgop_locator *anchor = (void *)address;
++    memset(anchor, 0, sizeof(*anchor));
++    memcpy(anchor->magic, "SHZLOC1", 8);
++    anchor->major = 1;
++    anchor->size = sizeof(*anchor);
++    anchor->self_address = address;
++    anchor->descriptor_address = descriptor_address;
++    anchor->descriptor_size = sizeof(*fb);
++    anchor->descriptor_checksum = fb->checksum;
++    anchor->flags = SHZGOP_LOCATOR_FSEG;
++    anchor->checksum = 0U - shzgop_wire_sum(anchor, sizeof(*anchor));
++    priv->gop_locator = anchor;
++    asm volatile ("" ::: "memory"); /* Require actual F-segment readback. */
++    shzgop_verify_locator(priv);
++    printf("SHZLOC1 anchor=0x%x descriptor=0x%x checksum=0x%x\n",
++           anchor->self_address, (uint32_t)descriptor_address, fb->checksum);
++}
++
+ static void *find_table(uint32_t signature, uint8_t *csm_bin_base, size_t size)
+ {
+     /* Compatibility16 header: signature[4], checksum[1], length[1], ... */
+@@ -607,6 +682,8 @@
+ 
+     /* Load configuration from csmwrap.ini next to our executable or from NVRAM */
+     config_load(sfs_dir, loaded_image ? loaded_image->FilePath : NULL);
++    if (gConfig.gop_only && (gConfig.vgabios_path[0] != 0 || gConfig.vga_specified))
++        panic("gop_only cannot be combined with vgabios or vga selection\n");
+ 
+     if (simple_wcscmp(gConfig.vgabios_path, L"cbfs") == 0) {
+         vgabios_from_cbfs = TRUE;
+@@ -874,11 +951,17 @@
+     Regs.X.ES = EFI_SEGMENT(&priv.low_stub->init_table);
+     Regs.X.BX = EFI_OFFSET(&priv.low_stub->init_table);
+ 
+-    LegacyBiosFarCall86(priv.csm_efi_table->Compatibility16CallSegment,
++    bool csm_init_failed = LegacyBiosFarCall86(priv.csm_efi_table->Compatibility16CallSegment,
+                         priv.csm_efi_table->Compatibility16CallOffset,
+                         &Regs,
+                         NULL,
+                         0);
++
++    if (gConfig.gop_only) {
++        if (csm_init_failed || Regs.X.AX)
++            panic("gop_only: SeaBIOS initialization failed before locator allocation\n");
++        shzgop_publish_locator(&priv);
++    }
+ 
+     if (priv.vga_pci_io != NULL) {
+         pci_enable_for_oprom(priv.vga_pci_bus, priv.vga_pci_devfn);
+@@ -918,6 +1001,13 @@
+                         NULL,
+                         0);
+ 
++    if (gConfig.gop_only) {
++        if (Regs.X.AX)
++            panic("gop_only: SeaBIOS PrepareToBoot failed\n");
++        shzgop_verify_locator(&priv);
++        printf("SHZLOC1 preserved through SeaBIOS PrepareToBoot\n");
++    }
++
+     memset(&Regs, 0, sizeof(EFI_IA32_REGISTER_SET));
+     Regs.X.AX = Legacy16Boot;
+     // No arguments?
+--- /dev/null
++++ b/src/shzgop.h
+@@ -0,0 +1,78 @@
++/* SPDX-License-Identifier: LGPL-2.1-only
++ * Shizuku fixed framebuffer handover. Wire fields are little-endian,
++ * pointer-free and packed; consumers must validate both coreboot checksums
++ * and this descriptor before mapping physical framebuffer memory.
++ */
++#ifndef SHZGOP_H
++#define SHZGOP_H
++#include <stddef.h>
++#include <stdint.h>
++
++#define SHZGOP_CB_TAG 0x53485a47U
++#define SHZGOP_LINEAR 1U
++#define SHZGOP_FIXED_MODE 2U
++#define SHZGOP_PCI_VALID 4U
++#define SHZGOP_LOCATOR_BASE 0x000f0000U
++#define SHZGOP_LOCATOR_END 0x00100000U
++#define SHZGOP_LOCATOR_ALIGN 16U
++#define SHZGOP_LOCATOR_FSEG 1U
++
++struct shzgop_handover {
++    uint8_t magic[8];             /* "SHZGOP1\0" */
++    uint16_t major;
++    uint16_t minor;
++    uint32_t size;
++    uint32_t checksum;            /* sum of all LE u32 words is zero */
++    uint32_t flags;
++    uint64_t framebuffer_base;    /* final, after PCI BAR relocation */
++    uint64_t framebuffer_size;    /* actual GOP Mode->FrameBufferSize */
++    uint64_t visible_bytes;       /* pitch * height, <= framebuffer_size */
++    uint32_t width;
++    uint32_t height;
++    uint32_t pitch;
++    uint32_t bits_per_pixel;
++    uint32_t red_mask;
++    uint32_t green_mask;
++    uint32_t blue_mask;
++    uint32_t reserved_mask;
++    uint16_t pci_segment;
++    uint8_t pci_bus;
++    uint8_t pci_devfn;
++    uint16_t pci_vendor;
++    uint16_t pci_device;
++    uint32_t firmware_mode;
++    uint32_t reserved;
++} __attribute__((packed));
++
++struct shzgop_cb_record {
++    uint32_t tag;
++    uint32_t size;
++    uint64_t descriptor_address;
++    uint32_t descriptor_size;
++    uint32_t reserved;
++} __attribute__((packed));
++
++/* Allocated by SeaBIOS Legacy16GetTableAddress, F000-only, aligned 16.
++ * Consumers scan only complete aligned slots in the F-segment. */
++struct shzgop_locator {
++    uint8_t magic[8];             /* "SHZLOC1\0" */
++    uint16_t major;
++    uint16_t minor;
++    uint32_t size;
++    uint32_t checksum;            /* sum of all 12 LE u32 words is zero */
++    uint32_t self_address;        /* binds the anchor to its allocated slot */
++    uint64_t descriptor_address;
++    uint32_t descriptor_size;
++    uint32_t descriptor_checksum; /* final SHZGOP1 checksum at offset 16 */
++    uint32_t flags;               /* SHZGOP_LOCATOR_FSEG */
++    uint32_t reserved;
++} __attribute__((packed));
++
++_Static_assert(sizeof(struct shzgop_handover) == 96, "SHZGOP1 wire size");
++_Static_assert(offsetof(struct shzgop_handover, framebuffer_base) == 24, "SHZGOP1 framebuffer offset");
++_Static_assert(offsetof(struct shzgop_handover, pci_segment) == 80, "SHZGOP1 PCI offset");
++_Static_assert(sizeof(struct shzgop_cb_record) == 24, "SHZGOP1 coreboot record size");
++_Static_assert(sizeof(struct shzgop_locator) == 48, "SHZLOC1 wire size");
++_Static_assert(offsetof(struct shzgop_locator, self_address) == 20, "SHZLOC1 slot offset");
++_Static_assert(offsetof(struct shzgop_locator, descriptor_address) == 24, "SHZLOC1 descriptor offset");
++#endif
+--- a/src/video.c
++++ b/src/video.c
+@@ -32,11 +32,60 @@
+     return ret;
+ }
+ 
++/* Strict checks used only by the explicit firmware GOP profile. */
++static bool shzgop_mask_linear(uint32_t mask)
++{
++    if (mask == 0)
++        return true;
++    mask >>= __builtin_ctz(mask);
++    return (mask & (mask + 1U)) == 0;
++}
++
++static bool shzgop_mode_usable(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop)
++{
++    if (!gop || !gop->Mode || !gop->Mode->Info)
++        return false;
++    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = gop->Mode->Info;
++    if (!gop->Mode->FrameBufferBase || !gop->Mode->FrameBufferSize
++     || gop->Mode->FrameBufferBase > UINT64_MAX - gop->Mode->FrameBufferSize
++     || !info->HorizontalResolution || !info->VerticalResolution
++     || info->PixelsPerScanLine < info->HorizontalResolution)
++        return false;
++
++    uint32_t bpp;
++    if (info->PixelFormat == PixelRedGreenBlueReserved8BitPerColor
++     || info->PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
++        bpp = 32;
++    } else if (info->PixelFormat == PixelBitMask) {
++        uint32_t r = info->PixelInformation.RedMask;
++        uint32_t g = info->PixelInformation.GreenMask;
++        uint32_t b = info->PixelInformation.BlueMask;
++        uint32_t a = info->PixelInformation.ReservedMask;
++        if (!r || !g || !b || (r & g) || (r & b) || (g & b)
++         || ((r | g | b) & a) || !shzgop_mask_linear(r)
++         || !shzgop_mask_linear(g) || !shzgop_mask_linear(b)
++         || !shzgop_mask_linear(a))
++            return false;
++        bpp = linear_masks_to_bpp(r, g, b, a);
++    } else {
++        return false; /* PixelBltOnly has no directly usable framebuffer. */
++    }
++    if (bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32)
++        return false;
++    uint64_t pitch = (uint64_t)info->PixelsPerScanLine * (bpp / 8);
++    if (pitch > UINT32_MAX)
++        return false;
++    uint64_t visible = pitch * info->VerticalResolution;
++    return visible <= gop->Mode->FrameBufferSize;
++}
++
+ /* True if Gop->Mode points at a directly-usable linear framebuffer. Checks
+  * are run against the current Gop->Mode without calling SetMode, so this is
+  * safe to call before deciding whether to disturb the firmware's mode. */
+ static bool gop_mode_usable(EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop)
+ {
++    if (gConfig.gop_only && !shzgop_mode_usable(Gop))
++        return false;
+     if (Gop->Mode == NULL || Gop->Mode->Info == NULL)
+         return false;
+     if (Gop->Mode->FrameBufferBase == 0)
+@@ -117,7 +166,7 @@
+         /* Prefer the firmware's current mode to avoid blanking and resizing
+          * the user's display. Only enumerate-and-SetMode if it isn't usable. */
+         bool found = gop_mode_usable(Gop);
+-        if (!found) {
++        if (!found && Gop->Mode != NULL) {
+             UINTN maxMode = Gop->Mode->MaxMode;
+             for (UINTN mode = 0; mode < maxMode; mode++) {
+                 Status = Gop->SetMode(Gop, mode);
+@@ -489,10 +538,16 @@
+ 
+     /* Mode already set by FindGopPciDevice, just query info */
+     currentMode = gop->Mode->Mode;
+-    status = gop->QueryMode(gop, currentMode, &isiz, &info);
+-    if (EFI_ERROR(status)) {
+-        printf("unable to get current video mode\n");
+-        return -1;
++    if (gConfig.gop_only) {
++        if (!shzgop_mode_usable(gop))
++            return EFI_UNSUPPORTED;
++        info = gop->Mode->Info; /* Same authoritative mode used for bounds. */
++    } else {
++        status = gop->QueryMode(gop, currentMode, &isiz, &info);
++        if (EFI_ERROR(status)) {
++            printf("unable to get current video mode\n");
++            return -1;
++        }
+     }
+ 
+     printf("%c %3d. %4d x%4d (pitch %4d fmt %d r:%06x g:%06x b:%06x)\n",
+@@ -782,9 +837,77 @@
+     gBS->FreePool(HandleBuffer);
+ }
+ 
++/* Allocate a page that remains E820-reserved after ExitBootServices.
++ * Snapshot GOP values now: no GOP protocol or mode structure may be used
++ * after ExitBootServices. The final physical base is filled after PCI init.
++ */
++static void shzgop_prepare_handover(struct csmwrap_priv *priv)
++{
++    EFI_PHYSICAL_ADDRESS page = 0xffffffffULL;
++    if (gBS->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &page) != EFI_SUCCESS
++     || page <= 0x100000 || page > 0x100000000ULL - EFI_PAGE_SIZE)
++        panic("gop_only: unable to reserve a handover page below 4GiB\n");
++    memset((void *)(uintptr_t)page, 0, EFI_PAGE_SIZE);
++    struct shzgop_handover *fb = (void *)(uintptr_t)page;
++    priv->gop_handover = fb;
++    memcpy(fb->magic, "SHZGOP1", 8);
++    fb->major = 1;
++    fb->size = sizeof(*fb);
++    fb->flags = SHZGOP_LINEAR | SHZGOP_FIXED_MODE;
++    fb->framebuffer_size = priv->gop->Mode->FrameBufferSize;
++    fb->visible_bytes = (uint64_t)priv->cb_fb.bytes_per_line * priv->cb_fb.y_resolution;
++    fb->width = priv->cb_fb.x_resolution;
++    fb->height = priv->cb_fb.y_resolution;
++    fb->pitch = priv->cb_fb.bytes_per_line;
++    fb->bits_per_pixel = priv->cb_fb.bits_per_pixel;
++    fb->red_mask = ((1ULL << priv->cb_fb.red_mask_size) - 1) << priv->cb_fb.red_mask_pos;
++    fb->green_mask = ((1ULL << priv->cb_fb.green_mask_size) - 1) << priv->cb_fb.green_mask_pos;
++    fb->blue_mask = ((1ULL << priv->cb_fb.blue_mask_size) - 1) << priv->cb_fb.blue_mask_pos;
++    fb->reserved_mask = ((1ULL << priv->cb_fb.reserved_mask_size) - 1) << priv->cb_fb.reserved_mask_pos;
++    fb->firmware_mode = priv->gop->Mode->Mode;
++
++    /* PCI metadata is optional; its validity flag is set only on success. */
++    if (FindVgaPciInfo(priv) == EFI_SUCCESS && priv->vga_pci_io) {
++        UINTN segment, bus, device, function;
++        UINT16 vendor, device_id;
++        EFI_PCI_IO_PROTOCOL *pci = priv->vga_pci_io;
++        if (pci->GetLocation(pci, &segment, &bus, &device, &function) == EFI_SUCCESS
++         && segment <= UINT16_MAX && bus <= UINT8_MAX && device <= 31 && function <= 7
++         && pci->Pci.Read(pci, EfiPciIoWidthUint16, 0, 1, &vendor) == EFI_SUCCESS
++         && pci->Pci.Read(pci, EfiPciIoWidthUint16, 2, 1, &device_id) == EFI_SUCCESS
++         && vendor != 0xffff && vendor != 0) {
++            fb->pci_segment = segment;
++            fb->pci_bus = bus;
++            fb->pci_devfn = (device << 3) | function;
++            fb->pci_vendor = vendor;
++            fb->pci_device = device_id;
++            fb->flags |= SHZGOP_PCI_VALID;
++        }
++    }
++}
++
+ EFI_STATUS csmwrap_video_init(struct csmwrap_priv *priv)
+ {
+     EFI_STATUS status;
++
++    /* This branch precedes user VBIOS and every hardware OpROM path. */
++    if (gConfig.gop_only) {
++        if (gConfig.vgabios_path[0] != 0 || gConfig.vga_specified)
++            panic("gop_only: conflicting legacy VGA configuration\n");
++        if (!shzgop_mode_usable(priv->gop)) {
++            /* FindGop may change mode/base; stop the old framebuffer console. */
++            flanterm_ctx = NULL;
++            priv->gop = NULL;
++            priv->gop_handle = NULL;
++            if (FindGop(priv) != EFI_SUCCESS)
++                panic("gop_only: no usable linear GOP framebuffer\n");
++        }
++        if (csmwrap_video_seavgabios_init(priv) != EFI_SUCCESS)
++            panic("gop_only: SeaVGABIOS framebuffer initialization failed\n");
++        shzgop_prepare_handover(priv);
++        printf("gop_only: forced firmware GOP + SeaVGABIOS; no VGA OpROM\n");
++        return EFI_SUCCESS;
++    }
+ 
+     /* Find GOP if not already found by early init */
+     if (!priv->gop) {
+--- a/src/coreboot.c
++++ b/src/coreboot.c
+@@ -1,5 +1,7 @@
+ #include <efi.h>
+ #include "csmwrap.h"
++#include "config.h"
++#include "printf.h"
+ 
+ static UINT16
+ CbCheckSum16 (
+@@ -54,6 +56,35 @@
+             table_entries++;
+         }
+ 
++        /* Publish the final address only after pci_late_initialize(). */
++        if (gConfig.gop_only) {
++            struct shzgop_handover *fb = priv->gop_handover;
++            if (!fb || priv->video_type != CSMWRAP_VIDEO_SEAVGABIOS
++             || !priv->cb_fb.physical_address || !fb->framebuffer_size
++             || fb->visible_bytes > fb->framebuffer_size
++             || priv->cb_fb.physical_address > UINT64_MAX - fb->framebuffer_size)
++                panic("gop_only: invalid final framebuffer handover\n");
++            fb->framebuffer_base = priv->cb_fb.physical_address;
++            fb->checksum = 0;
++            uint32_t sum = 0;
++            for (size_t i = 0; i < sizeof(*fb); i += sizeof(uint32_t)) {
++                uint32_t word;
++                memcpy(&word, (uint8_t *)fb + i, sizeof(word));
++                sum += word;
++            }
++            fb->checksum = 0U - sum;
++            struct shzgop_cb_record *record = p;
++            record->tag = SHZGOP_CB_TAG;
++            record->size = sizeof(*record);
++            record->descriptor_address = (uintptr_t)fb;
++            record->descriptor_size = sizeof(*fb);
++            record->reserved = 0;
++            p += sizeof(*record);
++            table_entries++;
++            printf("SHZGOP1 handover=%p base=0x%llx size=0x%llx visible=0x%llx\n",
++                   fb, fb->framebuffer_base, fb->framebuffer_size, fb->visible_bytes);
++        }
++
+         /* Last header stuff */
+         header->table_entries = table_entries;
+         header->table_bytes = (uint32_t)((uintptr_t)p - (uintptr_t)tables);

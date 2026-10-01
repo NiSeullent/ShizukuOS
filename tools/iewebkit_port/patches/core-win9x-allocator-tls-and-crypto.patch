@@ -1,0 +1,370 @@
+--- a/Source/bmalloc/mimalloc/mimalloc/include/mimalloc/prim.h
++++ b/Source/bmalloc/mimalloc/mimalloc/include/mimalloc/prim.h
+@@ -234,7 +234,15 @@
+ 
+ 
+ // defined in `init.c`; do not use these directly
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++struct mi_thread_locals_s;
++mi_decl_hidden mi_theap_t** _mi_win9x_main_theap_slot(void);
++mi_decl_hidden struct mi_thread_locals_s** _mi_win9x_dynamic_tls_slot(void);
++mi_decl_hidden bool* _mi_win9x_recursion_slot(void);
++#define __mi_theap_main (*_mi_win9x_main_theap_slot())
++#else
+ extern mi_decl_hidden mi_decl_thread mi_theap_t* __mi_theap_main;     // theap belonging to the main heap
++#endif
+ extern mi_decl_hidden bool _mi_process_is_initialized;                // has mi_process_init been called?
+ 
+ 
+@@ -282,9 +290,17 @@
+ 
+ #elif defined(_WIN32)
+ 
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++// A real TLS-held page gives an aligned, unique live-thread identity.
++mi_decl_hidden mi_threadid_t _mi_win9x_thread_id(void);
++#endif
+ static inline mi_threadid_t __mi_prim_thread_id(void) mi_attr_noexcept {
++  #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  return _mi_win9x_thread_id();
++  #else
+   // Windows: works on Intel and ARM in both 32- and 64-bit
+   return (uintptr_t)NtCurrentTeb();
++  #endif
+ }
+ 
+ #elif MI_USE_BUILTIN_THREAD_POINTER
+@@ -435,7 +451,23 @@
+ extern mi_decl_hidden size_t _mi_theap_default_expansion_slot;
+ extern mi_decl_hidden size_t _mi_theap_cached_expansion_slot;
+ 
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++#include <stdlib.h> // real abort declaration for checked OS TLS failures
++extern mi_decl_hidden volatile LONG _mi_win9x_tls_ready;
++static inline mi_theap_t* mi_win9x_theap_get(size_t* slot) {
++  if (InterlockedCompareExchange(&_mi_win9x_tls_ready, 2, 2) != 2) return NULL;
++  const DWORD saved_error = GetLastError();
++  mi_theap_t* theap = (mi_theap_t*)TlsGetValue((DWORD)*slot);
++  if (theap == NULL && GetLastError() != ERROR_SUCCESS) abort();
++  SetLastError(saved_error);
++  return theap;
++}
++#endif
++
+ static inline mi_theap_t* _mi_theap_default(void) {
++  #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  return mi_win9x_theap_get(&_mi_theap_default_slot);
++  #else
+   const size_t slot = _mi_theap_default_slot;
+   mi_theap_t* theap  = (mi_theap_t*)mi_prim_tls_slot(slot);
+   #if !MI_WIN_DIRECT_TLS
+@@ -446,9 +478,13 @@
+   }
+   #endif
+   return theap;
++  #endif
+ }
+ 
+ static inline mi_theap_t* _mi_theap_cached(void) {
++  #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  return mi_win9x_theap_get(&_mi_theap_cached_slot);
++  #else
+   const size_t slot = _mi_theap_cached_slot;
+   mi_theap_t* theap = (mi_theap_t*)mi_prim_tls_slot(slot);
+   #if !MI_WIN_DIRECT_TLS
+@@ -459,6 +495,7 @@
+   }
+   #endif
+   return theap;
++  #endif
+ }
+ 
+ #elif MI_TLS_MODEL_DYNAMIC_PTHREADS
+--- a/Source/bmalloc/mimalloc/mimalloc/src/init.c
++++ b/Source/bmalloc/mimalloc/mimalloc/src/init.c
+@@ -213,7 +213,9 @@
+ }
+ 
+ // the theap belonging to the main heap
++#if !defined(IEWEBKIT_WIN9X) || !IEWEBKIT_WIN9X
+ mi_decl_hidden mi_decl_thread mi_theap_t* __mi_theap_main = NULL;
++#endif
+ 
+ #if MI_TLS_MODEL_THREAD_LOCAL
+ // the thread-local main theap for allocation
+@@ -693,7 +695,10 @@
+ #define MI_TLS_DIRECT_SLOTS             (64)
+ #define MI_TLS_EXPANSION_SLOTS          (1024)
+ 
+-#if !MI_WIN_DIRECT_TLS
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++#define MI_TLS_INITIAL_SLOT             ((size_t)TLS_OUT_OF_INDEXES)
++#define MI_TLS_INITIAL_EXPANSION_SLOT   (0)
++#elif !MI_WIN_DIRECT_TLS
+ #define MI_TLS_INITIAL_SLOT             MI_TLS_EXPANSION_SLOT
+ #define MI_TLS_INITIAL_EXPANSION_SLOT   (MI_TLS_EXPANSION_SLOTS-1)
+ #else
+@@ -710,6 +715,9 @@
+ mi_decl_hidden size_t _mi_theap_cached_slot            = MI_TLS_INITIAL_SLOT;
+ mi_decl_hidden size_t _mi_theap_cached_expansion_slot  = MI_TLS_INITIAL_EXPANSION_SLOT;
+ 
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++mi_decl_hidden volatile LONG _mi_win9x_tls_ready = 0;
++#else
+ static size_t mi_win_tls_slot_alloc(size_t* extended) {
+   const DWORD slot = TlsAlloc();
+   if (slot==TLS_OUT_OF_INDEXES || slot >= MI_TLS_DIRECT_SLOTS + MI_TLS_EXPANSION_SLOTS - 1) {
+@@ -731,8 +739,28 @@
+     #endif
+   }
+ }
++#endif
+ 
+ mi_decl_cold mi_theap_t* _mi_win_tls_slots_init(void) {
++  #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  const DWORD saved_error = GetLastError();
++  if (InterlockedCompareExchange(&_mi_win9x_tls_ready, 1, 0) == 0) {
++    const DWORD first = TlsAlloc();
++    const DWORD second = TlsAlloc();
++    if (first == TLS_OUT_OF_INDEXES || second == TLS_OUT_OF_INDEXES) {
++      if (first != TLS_OUT_OF_INDEXES) TlsFree(first);
++      if (second != TLS_OUT_OF_INDEXES) TlsFree(second);
++      abort(); // failure reporting could recursively enter the allocator
++    }
++    _mi_theap_default_slot = first; // slot zero is valid
++    _mi_theap_cached_slot = second;
++    InterlockedExchange(&_mi_win9x_tls_ready, 2);
++  }
++  else {
++    while (InterlockedCompareExchange(&_mi_win9x_tls_ready, 2, 2) != 2) Sleep(0);
++  }
++  SetLastError(saved_error);
++  #else
+   static mi_atomic_once_t tls_slots_init;
+   if (mi_atomic_once(&tls_slots_init)) {
+     _mi_theap_default_slot = mi_win_tls_slot_alloc(&_mi_theap_default_expansion_slot);
+@@ -741,10 +769,17 @@
+       _mi_error_message(EFAULT, "unable to allocate fast TLS user slot (0x%zx)\n", _mi_theap_cached_slot);
+     }
+   }
++  #endif
+   return (mi_theap_t*)&_mi_theap_empty;
+ }
+ 
+ static void mi_win_tls_slot_set(size_t slot, size_t extended_slot, void* value) {
++  #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  MI_UNUSED(extended_slot);
++  const DWORD saved_error = GetLastError();
++  if (slot == (size_t)TLS_OUT_OF_INDEXES || !TlsSetValue((DWORD)slot, value)) abort();
++  SetLastError(saved_error);
++  #else
+   mi_assert_internal((slot >= MI_TLS_DIRECT_FIRST && slot < MI_TLS_DIRECT_FIRST + MI_TLS_DIRECT_SLOTS) || slot == MI_TLS_EXPANSION_SLOT);
+   if (slot < MI_TLS_DIRECT_FIRST + MI_TLS_DIRECT_SLOTS) {
+     mi_prim_tls_slot_set(slot, value);
+@@ -753,6 +788,7 @@
+     mi_assert_internal(extended_slot < MI_TLS_EXPANSION_SLOTS);
+     TlsSetValue((DWORD)(extended_slot + MI_TLS_DIRECT_SLOTS), value);  // use TlsSetValue to initialize the TlsExpansion array if needed
+   }
++  #endif
+ }
+ 
+ #elif MI_TLS_MODEL_DYNAMIC_PTHREADS
+--- a/Source/bmalloc/mimalloc/mimalloc/src/prim/windows/prim.c
++++ b/Source/bmalloc/mimalloc/mimalloc/src/prim/windows/prim.c
+@@ -683,7 +683,85 @@
+ // Thread pool?
+ //----------------------------------------------------------------
+ 
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++static volatile LONG mi_win9x_identity_ready = 0;
++static DWORD mi_win9x_identity_key = TLS_OUT_OF_INDEXES;
++typedef struct mi_win9x_thread_state_s {
++  mi_theap_t* main_theap;
++  struct mi_thread_locals_s* dynamic_tls;
++  bool logging_recursion;
++} mi_win9x_thread_state_t;
++
++mi_decl_hidden mi_threadid_t _mi_win9x_thread_id(void) {
++  const DWORD saved_error = GetLastError();
++  if (InterlockedCompareExchange(&mi_win9x_identity_ready, 1, 0) == 0) {
++    mi_win9x_identity_key = TlsAlloc();
++    if (mi_win9x_identity_key == TLS_OUT_OF_INDEXES) abort();
++    InterlockedExchange(&mi_win9x_identity_ready, 2);
++  }
++  else {
++    while (InterlockedCompareExchange(&mi_win9x_identity_ready, 2, 2) != 2) Sleep(0);
++  }
++  void* identity = TlsGetValue(mi_win9x_identity_key);
++  if (identity == NULL && GetLastError() != ERROR_SUCCESS) abort();
++  if (identity == NULL) {
++    // Bypass mimalloc to avoid recursion. Live VirtualAlloc reservations have
++    // unique, page-aligned bases, independently of numeric thread-id bits.
++    identity = VirtualAlloc(NULL, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++    if (identity == NULL || ((uintptr_t)identity & MI_PAGE_FLAG_MASK) != 0) abort();
++    if (!TlsSetValue(mi_win9x_identity_key, identity)) {
++      VirtualFree(identity, 0, MEM_RELEASE);
++      abort();
++    }
++  }
++  SetLastError(saved_error);
++  return (mi_threadid_t)(uintptr_t)identity;
++}
++
++mi_decl_hidden mi_theap_t** _mi_win9x_main_theap_slot(void) {
++  return &((mi_win9x_thread_state_t*)_mi_win9x_thread_id())->main_theap;
++}
++
++mi_decl_hidden struct mi_thread_locals_s** _mi_win9x_dynamic_tls_slot(void) {
++  return &((mi_win9x_thread_state_t*)_mi_win9x_thread_id())->dynamic_tls;
++}
++
++mi_decl_hidden bool* _mi_win9x_recursion_slot(void) {
++  return &((mi_win9x_thread_state_t*)_mi_win9x_thread_id())->logging_recursion;
++}
++
++static void mi_win9x_identity_thread_done(void) {
++  if (InterlockedCompareExchange(&mi_win9x_identity_ready, 2, 2) != 2) return;
++  const DWORD saved_error = GetLastError();
++  void* identity = TlsGetValue(mi_win9x_identity_key);
++  if (identity == NULL && GetLastError() != ERROR_SUCCESS) abort();
++  if (identity != NULL) {
++    if (!TlsSetValue(mi_win9x_identity_key, NULL)) abort();
++    if (!VirtualFree(identity, 0, MEM_RELEASE)) abort();
++  }
++  SetLastError(saved_error);
++}
++
++static void mi_win9x_tls_process_done(void) {
++  const DWORD saved_error = GetLastError();
++  // The host must join all owned threads before unloading its engine module.
++  if (InterlockedCompareExchange(&_mi_win9x_tls_ready, 0, 2) == 2) {
++    if (!TlsFree((DWORD)_mi_theap_default_slot)) abort();
++    if (!TlsFree((DWORD)_mi_theap_cached_slot)) abort();
++    _mi_theap_default_slot = _mi_theap_cached_slot = (size_t)TLS_OUT_OF_INDEXES;
++  }
++  if (InterlockedCompareExchange(&mi_win9x_identity_ready, 0, 2) == 2) {
++    if (!TlsFree(mi_win9x_identity_key)) abort();
++    mi_win9x_identity_key = TLS_OUT_OF_INDEXES;
++  }
++  SetLastError(saved_error);
++}
++#endif
++
+ bool _mi_prim_thread_is_in_threadpool(void) {
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++  return false; // no NT thread-pool TEB field on Win9x
++#else
+ #if (MI_ARCH_X64 || MI_ARCH_X86 || MI_ARCH_ARM64)
+   if (win_major_version >= 6) {
+     // check if this thread belongs to a windows threadpool
+@@ -694,6 +772,7 @@
+   }
+ #endif
+   return false;
++#endif
+ }
+ 
+ 
+@@ -742,9 +821,16 @@
+   }
+   else if (reason==DLL_PROCESS_DETACH) {
+     _mi_auto_process_done();
++    #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    mi_win9x_identity_thread_done();
++    mi_win9x_tls_process_done();
++    #endif
+   }
+   else if (reason==DLL_THREAD_DETACH && !_mi_is_redirected()) {
+     _mi_thread_done(NULL);
++    #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    mi_win9x_identity_thread_done(); // after genuine heap abandonment
++    #endif
+   }
+ }
+ 
+@@ -804,9 +890,15 @@
+     #pragma comment(linker, "/INCLUDE:__mi_tls_callback_pre")
+     #pragma comment(linker, "/INCLUDE:__mi_tls_callback_post")
+     #pragma data_seg(".CRT$XLB")
++    #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X && defined(__GNUC__)
++    __attribute__((section(".CRT$XLB"), used))
++    #endif
+     PIMAGE_TLS_CALLBACK _mi_tls_callback_pre[] = { &mi_win_main_attach };
+     #pragma data_seg()
+     #pragma data_seg(".CRT$XLY")
++    #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X && defined(__GNUC__)
++    __attribute__((section(".CRT$XLY"), used))
++    #endif
+     PIMAGE_TLS_CALLBACK _mi_tls_callback_post[] = { &mi_win_main_detach };
+     #pragma data_seg()
+   #endif
+@@ -921,4 +1013,3 @@
+     mi_allocator_done();
+   }
+ #endif
+-
+--- a/Source/WTF/wtf/RandomDevice.cpp
++++ b/Source/WTF/wtf/RandomDevice.cpp
+@@ -109,7 +109,11 @@
+     // FIXME: We cannot ensure that Cryptographic Service Provider context and CryptGenRandom are safe across threads.
+     // If it is safe, we can acquire context per RandomDevice.
+     HCRYPTPROV hCryptProv = 0;
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    if (!CryptAcquireContextA(&hCryptProv, nullptr, MS_DEF_PROV_A, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
++#else
+     if (!CryptAcquireContext(&hCryptProv, nullptr, MS_DEF_PROV, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
++#endif
+         CRASH();
+     if (!CryptGenRandom(hCryptProv, buffer.size(), buffer.data()))
+         CRASH();
+--- a/Source/bmalloc/mimalloc/mimalloc/src/threadlocal.c
++++ b/Source/bmalloc/mimalloc/mimalloc/src/threadlocal.c
+@@ -27,7 +27,16 @@
+ 
+ static mi_thread_locals_t mi_thread_locals_empty = { 0, {NULL} };
+ 
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++static inline mi_thread_locals_t** mi_win9x_dynamic_tls_ref(void) {
++  mi_thread_locals_t** slot = _mi_win9x_dynamic_tls_slot();
++  if (*slot == NULL) *slot = &mi_thread_locals_empty;
++  return slot;
++}
++#define mi_thread_locals (*mi_win9x_dynamic_tls_ref())
++#else
+ mi_decl_thread mi_thread_locals_t* mi_thread_locals = &mi_thread_locals_empty;  // always point to a valid `mi_thread_locals_t`
++#endif
+ 
+ // dynamically reallocate the thread local slots when needed
+ static mi_thread_locals_t* mi_thread_locals_expand(mi_thread_local_t atleast) {
+@@ -172,4 +181,3 @@
+     }
+   }
+ }
+-
+--- a/Source/bmalloc/mimalloc/mimalloc/src/options.c
++++ b/Source/bmalloc/mimalloc/mimalloc/src/options.c
+@@ -443,7 +443,11 @@
+ // variables on demand. This is why we use a _mi_preloading test on such
+ // platforms. However, C code generator may move the initial thread local address
+ // load before the `if` and we therefore split it out in a separate function.
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++#define recurse (*_mi_win9x_recursion_slot())
++#else
+ static mi_decl_thread bool recurse = false;
++#endif
+ 
+ static mi_decl_noinline bool mi_recurse_enter_prim(void) {
+   if (recurse) return false;
+@@ -454,6 +458,12 @@
+ static mi_decl_noinline void mi_recurse_exit_prim(void) {
+   recurse = false;
+ }
++
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++// options.c also forms part of upstream static.c; do not rewrite later
++// unrelated structure fields named recurse in that translation unit.
++#undef recurse
++#endif
+ 
+ static bool mi_recurse_enter(void) {
+   #if defined(__APPLE__) || defined(__ANDROID__) || defined(MI_TLS_RECURSE_GUARD)

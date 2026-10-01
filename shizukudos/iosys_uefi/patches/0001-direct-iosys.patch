@@ -1,0 +1,511 @@
+--- a/GNUmakefile
++++ b/GNUmakefile
+@@ -190,6 +190,7 @@
+ override ASFILES := $(filter %.S,$(SRCFILES))
+ ifneq ($(filter $(ARCH),ia32 x86_64),)
+ override NASMFILES := $(filter %.asm,$(SRCFILES))
++override NASMFILES := $(filter-out src/iosys_entry.asm,$(NASMFILES))
+ endif
+ override OBJ := $(addprefix obj-$(ARCH)/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o))
+ ifneq ($(filter $(ARCH),ia32 x86_64),)
+@@ -207,6 +208,15 @@
+ -include $(HEADER_DEPS)
+ 
+ obj-$(ARCH)/src/csmwrap.c.o: src/bins/Csm16.h
++
++obj-$(ARCH)/src/iosys_uefi.c.o: src/bins/iosys_entry.h
++
++src/bins/iosys_entry.bin: src/iosys_entry.asm GNUmakefile
++	mkdir -p "$(dir $@)"
++	nasm -f bin $< -o $@
++
++src/bins/iosys_entry.h: src/bins/iosys_entry.bin GNUmakefile
++	python3 -c 'import sys; data = open(sys.argv[1], "rb").read(); print("static const unsigned char shz_iosys_entry_blob[] = {" + ",".join("0x%02x" % byte for byte in data) + "};")' "$<" > "$@"
+ 
+ obj-$(ARCH)/src/video.c.o: src/bins/vgabios.h
+ 
+--- a/src/config.h
++++ b/src/config.h
+@@ -22,6 +22,7 @@
+     bool iommu_disable;
+     bool verbose;
+     bool gop_only;
++    bool iosys_boot;
+     bool vga_specified;
+     uint8_t vga_bus;
+     uint8_t vga_device;
+--- a/src/config.c
++++ b/src/config.c
+@@ -15,6 +15,7 @@
+     .iommu_disable = true,
+     .verbose = false,
+     .gop_only = false,
++    .iosys_boot = false,
+     .vga_specified = false,
+     .vga_bus = 0,
+     .vga_device = 0,
+@@ -341,6 +342,12 @@
+             panic("invalid boolean for 'gop_only': %s\n", val);
+         gConfig.gop_only = v;
+         printf("  gop_only = %s\n", v ? "true" : "false");
++    } else if (streq_nocase(key, "iosys_boot")) {
++        bool v;
++        if (!parse_bool(val, &v))
++            panic("invalid boolean for 'iosys_boot': %s\n", val);
++        gConfig.iosys_boot = v;
++        printf("  iosys_boot = %s\n", v ? "true" : "false");
+     } else if (streq_nocase(key, "vgabios")) {
+         /* Convert ASCII path to CHAR16 */
+         size_t i;
+--- a/src/csmwrap.c
++++ b/src/csmwrap.c
+@@ -15,6 +15,7 @@
+ #include <mptable.h>
+ #include <pir.h>
+ #include <config.h>
++#include <iosys_uefi.h>
+ #include <oprom.h>
+ #include <flanterm.h>
+ #include <flanterm_backends/fb.h>
+@@ -677,6 +678,7 @@
+         printf("Loaded VBIOS from CBFS (%s): %p size=0x%zx\n", vgabios_cbfs_filename, vbios_loc, (size_t)vbios_size);
+     }
+ 
++    iosys_uefi_prepare(sfs_dir, loaded_image ? loaded_image->DeviceHandle : NULL);
+     if (sfs_dir != NULL) {
+         sfs_dir->Close(sfs_dir);
+     }
+@@ -818,6 +820,7 @@
+     pci_late_initialize();
+ 
+     build_coreboot_table(&priv);
++    iosys_uefi_snapshot(&priv);
+ 
+     build_e820_map(&priv, efi_mmap, efi_mmap_size, efi_desc_size);
+     uintptr_t e820_low = (uintptr_t)&priv.low_stub->e820_map;
+@@ -923,3 +926,8 @@
++    if (gConfig.iosys_boot) {
++        if (Regs.X.AX != 0)
++            panic("iosys_boot: SeaBIOS PrepareToBoot failed\n");
++        iosys_uefi_boot();
++    }
+     memset(&Regs, 0, sizeof(EFI_IA32_REGISTER_SET));
+     Regs.X.AX = Legacy16Boot;
+     // No arguments?
+--- /dev/null
++++ b/src/iosys_uefi.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: LGPL-2.1-only */
++#ifndef SHIZUKU_IOSYS_UEFI_H
++#define SHIZUKU_IOSYS_UEFI_H
++#include <efi.h>
++struct csmwrap_priv;
++/* All filesystem/BlockIO work ends before ExitBootServices. */
++void iosys_uefi_prepare(EFI_FILE_PROTOCOL *root, EFI_HANDLE boot_device);
++/* Read only the finalized reserved handover, never an EFI GOP protocol. */
++void iosys_uefi_snapshot(struct csmwrap_priv *priv);
++/* Called after Legacy16PrepareToBoot; success never returns. */
++void iosys_uefi_boot(void) __attribute__((noreturn));
++#endif
+--- /dev/null
++++ b/src/iosys_uefi.c
+@@ -0,0 +1,250 @@
++/* SPDX-License-Identifier: LGPL-2.1-only
++ * Original guarded IO.SYS entry adapter. Microsoft bytes come exclusively
++ * from the user's disk-bound capsule and are patched only in guest memory.
++ */
++#include <efi.h>
++#include <csmwrap.h>
++#include <config.h>
++#include <iosys_uefi.h>
++#include <bins/iosys_entry.h>
++#include <printf.h>
++
++#define CAPSULE_BYTES 2688u
++#define CAPSULE_HEADER 128u
++#define VBR_BYTES 512u
++#define IO_PREFIX_BYTES 2048u
++#define HOOK_PHYSICAL 0x6000u
++#define TRAMPOLINE_PHYSICAL 0x6100u
++#define SNAPSHOT_PHYSICAL 0x6800u
++#define MARKER_PHYSICAL 0x6880u
++#define STATE_PHYSICAL 0x6900u
++#define CAPSULE_DISK_BOUND 1u
++#define CAPSULE_GOP_ENTRY_HOOK 2u
++
++static unsigned char capsule[CAPSULE_BYTES];
++static unsigned char gop_snapshot[96];
++static bool capsule_ready, snapshot_ready;
++
++static uint16_t le16(const unsigned char *p)
++{
++    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
++}
++static uint32_t le32(const unsigned char *p)
++{
++    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
++           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
++}
++static void put16(unsigned char *p, uint16_t x)
++{
++    p[0] = x; p[1] = x >> 8;
++}
++static void put32(unsigned char *p, uint32_t x)
++{
++    put16(p, (uint16_t)x); put16(p + 2, (uint16_t)(x >> 16));
++}
++static uint32_t sum32(const unsigned char *p, size_t size)
++{
++    uint32_t sum = 0;
++    for (size_t i = 0; i < size; i += 4)
++        sum += le32(p + i);
++    return sum;
++}
++
++static void validate_capsule(void)
++{
++    static const unsigned char original_entry[8] =
++        {0x42, 0x4a, 0x8b, 0x46, 0xfc, 0x8b, 0x56, 0xfe};
++    const unsigned char *vbr = capsule + CAPSULE_HEADER;
++    const unsigned char *io = vbr + VBR_BYTES;
++    if (memcmp(capsule, "SHZIO98\0", 8) || le16(capsule+8) != 1 ||
++        le16(capsule+10) != CAPSULE_HEADER || le32(capsule+12) != CAPSULE_BYTES ||
++        sum32(capsule, CAPSULE_BYTES) ||
++        le32(capsule+20) != (CAPSULE_DISK_BOUND | CAPSULE_GOP_ENTRY_HOOK) ||
++        le32(capsule+44) != IO_PREFIX_BYTES || le32(capsule+48) != VBR_BYTES ||
++        le32(capsule+52) || capsule[123] || le32(capsule+124))
++        panic("iosys_boot: invalid capsule header/checksum\n");
++    if (io[0] != 'M' || io[1] != 'Z' ||
++        memcmp(io+0x200, original_entry, sizeof(original_entry)) ||
++        io[2046] != 'M' || io[2047] != 'S' ||
++        vbr[0] != 0xeb || vbr[2] != 0x90 || vbr[510] != 0x55 || vbr[511] != 0xaa)
++        panic("iosys_boot: unsupported original IO.SYS/VBR entry\n");
++    uint32_t start = le32(capsule+24), data = le32(capsule+28);
++    uint32_t cluster = le32(capsule+32), io_lba = le32(capsule+40);
++    uint32_t sectors = le32(vbr+32), fat_size = le32(vbr+36);
++    uint32_t spc = vbr[13], fats = vbr[16], reserved = le16(vbr+14);
++    uint32_t fat_flags = le16(vbr+40);
++    uint64_t metadata_sectors = (uint64_t)reserved + (uint64_t)fats * fat_size;
++    uint64_t calculated_data = (uint64_t)start + reserved + (uint64_t)fats * fat_size;
++    uint64_t calculated_io = calculated_data + ((uint64_t)cluster - 2) * spc;
++    if (!start || le32(vbr+28) != start || le16(vbr+11) != 512 ||
++        spc < 4 || spc > 128 || (spc & (spc-1)) || !reserved ||
++        !fats || fats > 2 || !fat_size || !sectors || le16(vbr+17) || le16(vbr+22) ||
++        (uint64_t)start + sectors > 0x100000000ULL ||
++        cluster < 2 || cluster >= 0x0ffffff8 || le32(capsule+36) < IO_PREFIX_BYTES ||
++        calculated_data > 0xffffffffULL || data != calculated_data ||
++        calculated_io > 0xffffffffULL || io_lba != calculated_io || io_lba < start ||
++        (uint64_t)io_lba - start + 4 > sectors || metadata_sectors >= sectors ||
++        le16(vbr+42) || ((fat_flags & 0x80) && (fat_flags & 15)) ||
++        (capsule[122] != 0x0b && capsule[122] != 0x0c) ||
++        capsule[121] != (unsigned char)(capsule[122] | 2) ||
++        capsule[120] != vbr[64] || capsule[120] < 0x80)
++        panic("iosys_boot: capsule FAT32 geometry/entry ABI mismatch\n");
++    uint64_t clusters = ((uint64_t)sectors - metadata_sectors) / spc;
++    if (clusters < 65525 || clusters > 0x0ffffff5ULL ||
++        (uint64_t)fat_size * 128 < clusters + 2 || cluster - 2 >= clusters ||
++        le32(vbr+44) < 2 || (uint64_t)le32(vbr+44) - 2 >= clusters ||
++        (uint64_t)le32(capsule+36) > clusters * spc * 512)
++        panic("iosys_boot: capsule FAT32 allocation bounds mismatch\n");
++}
++
++static void read_capsule(EFI_FILE_PROTOCOL *root)
++{
++    EFI_FILE_PROTOCOL *file = NULL;
++    EFI_GUID info_guid = EFI_FILE_INFO_ID;
++    void *info = NULL;
++    UINTN info_bytes = 0;
++    if (!root || root->Open(root, &file, L"\\EFI\\BOOT\\IOSYS.BIN", EFI_FILE_MODE_READ, 0) != EFI_SUCCESS || !file)
++        panic("iosys_boot: cannot open private IOSYS.BIN capsule\n");
++    if (file->GetInfo(file, &info_guid, &info_bytes, NULL) != EFI_BUFFER_TOO_SMALL ||
++        info_bytes < sizeof(EFI_FILE_INFO) || info_bytes > 4096 ||
++        gBS->AllocatePool(EfiLoaderData, info_bytes, &info) != EFI_SUCCESS)
++        panic("iosys_boot: capsule file info unavailable\n");
++    EFI_STATUS status = file->GetInfo(file, &info_guid, &info_bytes, info);
++    bool valid_size = status == EFI_SUCCESS && info_bytes >= sizeof(EFI_FILE_INFO) &&
++                      ((EFI_FILE_INFO *)info)->FileSize == CAPSULE_BYTES;
++    gBS->FreePool(info);
++    if (!valid_size)
++        panic("iosys_boot: capsule must be exactly 2688 bytes\n");
++    UINTN count = CAPSULE_BYTES;
++    status = file->Read(file, &count, capsule);
++    if (status != EFI_SUCCESS || count != CAPSULE_BYTES)
++        panic("iosys_boot: short/failed capsule read\n");
++    unsigned char extra;
++    count = 1;
++    status = file->Read(file, &count, &extra);
++    EFI_STATUS close_status = file->Close(file);
++    if (status != EFI_SUCCESS || count != 0 || close_status != EFI_SUCCESS)
++        panic("iosys_boot: capsule EOF/close verification failed\n");
++    validate_capsule();
++}
++
++static void match_boot_volume(EFI_HANDLE device)
++{
++    EFI_GUID block_guid = EFI_BLOCK_IO_PROTOCOL_GUID;
++    EFI_BLOCK_IO_PROTOCOL *block = NULL;
++    if (!device || gBS->HandleProtocol(device, &block_guid, (void **)&block) != EFI_SUCCESS ||
++        !block || !block->Media || !block->ReadBlocks || !block->Media->MediaPresent ||
++        !block->Media->LogicalPartition || block->Media->BlockSize != 512)
++        panic("iosys_boot: actual EFI boot volume has no 512-byte partition BlockIO\n");
++    uint32_t align = block->Media->IoAlign;
++    if (align > EFI_PAGE_SIZE || (align > 1 && (align & (align-1))))
++        panic("iosys_boot: unsupported BlockIO alignment\n");
++    EFI_PHYSICAL_ADDRESS scratch_address = 0;
++    if (gBS->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, &scratch_address) != EFI_SUCCESS)
++        panic("iosys_boot: cannot allocate aligned disk read buffer\n");
++    unsigned char *scratch = (void *)(uintptr_t)scratch_address;
++    const unsigned char *vbr = capsule + CAPSULE_HEADER;
++    EFI_LBA lba = (EFI_LBA)le32(capsule+40) - le32(capsule+24);
++    bool matched = block->Media->LastBlock >= 3 && lba <= block->Media->LastBlock - 3;
++    uint32_t media_id = block->Media->MediaId;
++    if (matched)
++        matched = block->ReadBlocks(block, media_id, 0, VBR_BYTES, scratch) == EFI_SUCCESS &&
++                  !memcmp(scratch, vbr, VBR_BYTES);
++    if (matched)
++        matched = block->ReadBlocks(block, media_id, lba, IO_PREFIX_BYTES, scratch) == EFI_SUCCESS &&
++                  !memcmp(scratch, vbr + VBR_BYTES, IO_PREFIX_BYTES);
++    EFI_STATUS free_status = gBS->FreePages(scratch_address, 1);
++    if (!matched || free_status != EFI_SUCCESS)
++        panic("iosys_boot: capsule differs from actual boot volume VBR/IO sectors\n");
++    printf("IO98:CAPSULE-DISK-MATCH start=%u IO-lba=%u cluster=%u\n",
++           le32(capsule+24), le32(capsule+40), le32(capsule+32));
++}
++
++void iosys_uefi_prepare(EFI_FILE_PROTOCOL *root, EFI_HANDLE boot_device)
++{
++    if (!gConfig.iosys_boot)
++        return;
++    if (!gConfig.gop_only || gBootServicesExited || !gConfig.serial_port ||
++        gConfig.serial_port > 0xfff8)
++        panic("iosys_boot: requires GOP profile and valid pre-exit serial port\n");
++    read_capsule(root);
++    match_boot_volume(boot_device);
++    capsule_ready = true;
++}
++
++static void validate_snapshot(void)
++{
++    const unsigned char *p = gop_snapshot;
++    uint32_t flags = le32(p+20), base = le32(p+24), aperture = le32(p+32);
++    uint32_t visible = le32(p+40), width = le32(p+48), height = le32(p+52);
++    uint32_t pitch = le32(p+56);
++    if (memcmp(p, "SHZGOP1\0", 8) || le16(p+8) != 1 || le16(p+10) ||
++        le32(p+12) != 96 || sum32(p, 96) || (flags & 3) != 3 || (flags & ~7u) ||
++        le32(p+28) || le32(p+36) || le32(p+44) || le32(p+92) ||
++        base < 0x100000 || !aperture || aperture > 0x10000000 ||
++        aperture-1 > 0xffffffffu-base || width < 640 || width > 4096 ||
++        height < 480 || height > 4096 || pitch < width*4 || pitch > 65535 ||
++        (pitch & 3) || le32(p+60) != 32 || visible != pitch*height || visible > aperture ||
++        le32(p+64) != 0x00ff0000 || le32(p+68) != 0x0000ff00 ||
++        le32(p+72) != 0x000000ff || le32(p+76) != 0xff000000)
++        panic("iosys_boot: invalid finalized BGRX32 GOP snapshot\n");
++}
++
++void iosys_uefi_snapshot(struct csmwrap_priv *priv)
++{
++    if (!gConfig.iosys_boot)
++        return;
++    uintptr_t address = (uintptr_t)priv->gop_handover;
++    if (!capsule_ready || !gBootServicesExited || address < 0x100000 ||
++        address > 0xfffff000 || (address & (EFI_PAGE_SIZE-1)))
++        panic("iosys_boot: reserved finalized GOP handover unavailable\n");
++    /* PCI relocation is complete and build_coreboot_table has checksummed
++     * this reserved descriptor. No EFI protocol object is dereferenced. */
++    memcpy(gop_snapshot, (const void *)address, sizeof(gop_snapshot));
++    validate_snapshot();
++    snapshot_ready = true;
++}
++
++void iosys_uefi_boot(void)
++{
++    if (!gConfig.iosys_boot || !capsule_ready || !snapshot_ready || !gBootServicesExited ||
++        sizeof(shz_iosys_entry_blob) != 0x300 || STATE_PHYSICAL+24 >= CONVEN_START)
++        panic("iosys_boot: direct entry prerequisites missing\n");
++    validate_capsule();
++    validate_snapshot();
++    unsigned char *vbr = (void *)(uintptr_t)0x7c00;
++    unsigned char *prefix = (void *)(uintptr_t)0x700;
++    unsigned char state[24] = {0};
++    unsigned char stack[16] = {0};
++    put32(state, le32(capsule+32));
++    put32(state+4, le32(capsule+28));
++    put32(state+8, le32(capsule+40));
++    put16(state+12, gConfig.serial_port);
++    state[14] = capsule[121]; state[15] = capsule[120];
++    put32(state+16, le32(gop_snapshot+16));
++    put32(state+20, le32(capsule+16));
++    put16(stack, 0x0078); put16(stack+2, 0);
++    /* Preserve the current BIOS diskette vector; deliberately do not run
++     * the original VBR's scratch-table copy to physical 0522. */
++    memcpy(stack+4, (const void *)(uintptr_t)0x78, 4);
++    put32(stack+8, 0xffffffffu);
++    put32(stack+12, le32(capsule+28));
++    memcpy(vbr, capsule+CAPSULE_HEADER, VBR_BYTES);
++    vbr[2] = capsule[121];
++    memcpy(prefix, capsule+CAPSULE_HEADER+VBR_BYTES, IO_PREFIX_BYTES);
++    /* CS=0070: entry 0200 -> hook 5900. Displacement 5900-(0200+3). */
++    prefix[0x200] = 0xe9;
++    put16(prefix+0x201, 0x56fd);
++    memset(prefix+0x203, 0x90, 5);
++    memcpy((void *)(uintptr_t)HOOK_PHYSICAL, shz_iosys_entry_blob, sizeof(shz_iosys_entry_blob));
++    memcpy((void *)(uintptr_t)SNAPSHOT_PHYSICAL, gop_snapshot, sizeof(gop_snapshot));
++    memset((void *)(uintptr_t)MARKER_PHYSICAL, 0, 32);
++    memcpy((void *)(uintptr_t)STATE_PHYSICAL, state, sizeof(state));
++    memcpy((void *)(uintptr_t)0x7bf0, stack, sizeof(stack));
++    printf("IO98:ENTRY-HOOK-ARMED original=0070:0200 hook=0070:5900 snapshot=6800\n");
++    EFI_IA32_REGISTER_SET regs;
++    memset(&regs, 0, sizeof(regs));
++    LegacyBiosFarCall86(EFI_SEGMENT(TRAMPOLINE_PHYSICAL), EFI_OFFSET(TRAMPOLINE_PHYSICAL),
++                        &regs, NULL, 0);
++    panic("iosys_boot: non-returning IO.SYS bootstrap returned\n");
++}
+--- /dev/null
++++ b/src/iosys_entry.asm
+@@ -0,0 +1,146 @@
++; SPDX-License-Identifier: LGPL-2.1-only
++; Original, flat, copied real-mode code. No Microsoft code is embedded here.
++; The capsule supplies the audited original IO.SYS bytes at runtime.
++BITS 16
++ORG 0x6000
++
++%define SNAPSHOT 0x6800
++%define MARKER   0x6880
++%define STATE    0x6900
++
++; Entered as CS=0070, IP=5900 from the in-memory IO.SYS entry JMP.
++; All internal branches are relative. Data references use DS=0.
++io98_gop_hook:
++    pushf
++    cli
++    pushad
++    push ds
++    push es
++    push fs
++    push gs
++    xor ax, ax
++    mov ds, ax
++    cmp dword [SNAPSHOT], 0x475a4853     ; SHZG
++    jne .bad
++    cmp dword [SNAPSHOT+4], 0x0031504f   ; OP1, NUL
++    jne .bad
++    cmp dword [SNAPSHOT+8], 1           ; ABI major=1, minor=0
++    jne .bad
++    cmp dword [SNAPSHOT+12], 96
++    jne .bad
++    mov eax, [SNAPSHOT+20]
++    mov edx, eax
++    and eax, 3
++    cmp eax, 3                         ; linear and fixed mode
++    jne .bad
++    test edx, 0xfffffff8
++    jnz .bad
++    xor eax, eax
++    mov si, SNAPSHOT
++    mov cx, 24
++.checksum:
++    add eax, [si]
++    add si, 4
++    loop .checksum
++    test eax, eax
++    jnz .bad
++
++    ; Bounded host-capturable proof written by the actual IO entry hook.
++    ; Layout: IO98GOP1, u32 consumed=1, checksum, u64 base, width, height.
++    mov dword [MARKER], 0x38394f49      ; IO98
++    mov dword [MARKER+4], 0x31504f47    ; GOP1
++    mov dword [MARKER+8], 1
++    mov eax, [SNAPSHOT+16]
++    mov [MARKER+12], eax
++    mov eax, [SNAPSHOT+24]
++    mov [MARKER+16], eax
++    mov eax, [SNAPSHOT+28]
++    mov [MARKER+20], eax
++    mov eax, [SNAPSHOT+48]
++    mov [MARKER+24], eax
++    mov eax, [SNAPSHOT+52]
++    mov [MARKER+28], eax
++    mov si, consumed_text
++    call uart_bounded
++    pop gs
++    pop fs
++    pop es
++    pop ds
++    popad
++    popf
++    ; Exact original IO.SYS [0200:0208] displaced by the entry patch.
++    inc dx
++    dec dx
++    mov ax, [bp-4]
++    mov dx, [bp-2]
++    ; NASM ORG is physical; this executes at CS=0070, so physical 0908
++    ; corresponds to the original near target IP=0208.
++    jmp near 0x0908
++.bad:
++    mov si, failure_text
++    call uart_bounded
++    cli
++.halt:
++    hlt
++    jmp .halt
++
++; The first hook must fit below the separate trampoline at physical 6100.
++times 0x100-($-$$) db 0x90
++io98_entry_trampoline:
++    cli
++    cld
++    xor ax, ax
++    mov ds, ax
++    mov es, ax
++    mov ss, ax
++    mov sp, 0x7bf0
++    mov bp, 0x7c00
++    mov si, [STATE+2]                  ; IO first cluster, high 16
++    mov di, [STATE]                    ; IO first cluster, low 16
++    mov bx, 0x0700
++    xor cx, cx
++    mov ax, [STATE+8]                  ; LBA words, never a DL drive ABI
++    mov dx, [STATE+10]
++    push word 0x0202                   ; IF=1, DF=0, reserved bit 1
++    popf
++    jmp 0x0070:0x0200
++
++times 0x200-($-$$) db 0x90
++; At most 64 characters, each at most 65535 UART polls. Timeout halts.
++; The hook has already saved every register/segment and FLAGS.
++uart_bounded:
++    mov di, 64
++.next:
++    lodsb
++    test al, al
++    jz .done
++    dec di
++    jz .timeout
++    push ax
++    mov dx, [STATE+12]
++    add dx, 5
++    mov cx, 0xffff
++.poll:
++    in al, dx
++    test al, 0x20
++    jnz .send
++    loop .poll
++    pop ax
++    jmp .timeout
++.send:
++    pop ax
++    sub dx, 5
++    out dx, al
++    jmp .next
++.done:
++    ret
++.timeout:
++    cli
++.stop:
++    hlt
++    jmp .stop
++consumed_text: db 'IO98:GOP-CONSUMED', 13, 10, 0
++failure_text: db 'IO98:GOP-REJECTED', 13, 10, 0
++
++; Keep the code blob strictly below the independent snapshot/state pages.
++times 0x300-($-$$) db 0

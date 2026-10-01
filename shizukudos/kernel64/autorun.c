@@ -14,6 +14,8 @@
  * program's own output.
  */
 #include "fs.h"
+#include "net.h"
+#include "vfs_mounts.h"
 
 extern void k64_dump_threads(process_t *p);
 extern process_t *process_slot(unsigned i);
@@ -56,6 +58,45 @@ static void copy_value(char *dst, size_t cap, const char *src, size_t n)
     size_t i;
     for (i = 0; i < n && i + 1 < cap; ++i) dst[i] = src[i];
     dst[i] = 0;
+}
+
+/* Production boot profile: keep the real Win64 shell alive until it exits. A
+ * kernel-created process retains its creation reference until proc_wait(), which
+ * yields to its threads and safely reaps it. Do not use the QA autorun timeout. */
+unsigned k64_desktop(void)
+{
+    const char *image = "C:\\SHZ\\SYS64\\SHZDESK.EXE";
+    process_t *p = 0;
+    thread_t *t = 0;
+    int64_t code = -1;
+    int faulted = 1, pid, reaped, flush;
+    int32_t st;
+    kprintf("K64 desktop: production profile (self-tests not run)\n");
+    if (net_ensure_init()) {
+        kprintf("K64 desktop: result network-init-failed\n");
+        return 1;
+    }
+    /* Display, compositor and input use their normal, lazy initialisation when
+     * the shell calls the graphics syscalls. Only the shell can report GUI ready. */
+    kprintf("K64 desktop: starting %s\n", image);
+    st = ldr_create_process(0, image, image, "C:\\SHZ", &p, &t);
+    if (st) {
+        kprintf("K64 desktop: result start-failed status=%x\n", (uint32_t)st);
+        return 1;
+    }
+    pid = p->pid;
+    kprintf("K64 desktop: started pid %d\n", pid);
+    reaped = proc_wait(pid, &code, &faulted);
+    /* proc_wait may release the process slot; p and t are no longer usable. */
+    if (reaped) {
+        kprintf("K64 desktop: result wait-failed pid=%d rc=%d\n", pid, reaped);
+        return 1;
+    }
+    kprintf("K64 desktop: result exited exit=%x faulted=%d reaped=%d\n",
+            (uint32_t)code, faulted, reaped);
+    flush = vfs_flush_all();
+    kprintf("K64 desktop: volume flush rc %d\n", flush);
+    return code != 0 || faulted || flush != 0 ? 1 : 0;
 }
 
 void k64_autorun(void)

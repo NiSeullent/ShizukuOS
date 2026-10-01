@@ -15,6 +15,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "shzcrt.h"
+__declspec(dllimport) BOOL WINAPI SetShellWindow(HWND hwnd);
 
 static int bad;
 #define CHECK(cond, name) do { if (cond) printf("PASS: %s\n", name); else { printf("FAIL: %s (line %d)\n", name, __LINE__); ++bad; } } while (0)
@@ -56,6 +57,130 @@ static LRESULT CALLBACK main_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 static HWND popup(LPCWSTR cls, DWORD ex, int x, int y, int w, int h)
 {
     return CreateWindowExW(ex, cls, L"", WS_POPUP, x, y, w, h, 0, 0, g_inst, 0);
+}
+
+/* Shell registration crosses the process boundary; child modes use the real
+ * kernel window table, not a DLL-local imitation of GetShellWindow. */
+static int shell_child(int owner)
+{
+    HWND shell = GetShellWindow(), own;
+    HANDLE release;
+    DWORD pid = 0;
+    if (!owner) {
+        CHECK(shell && IsWindow(shell) && GetWindowThreadProcessId(shell, &pid) && pid != GetCurrentProcessId(),
+              "shell child observes another process's real window");
+        SetLastError(0);
+        CHECK(!SetShellWindow(shell) && GetLastError() == ERROR_ACCESS_DENIED,
+              "shell child cannot register another process's window");
+        own = popup(L"ShzSys", 0, 1, 1, 10, 10);
+        CHECK(own != 0, "shell child creates owned window");
+        SetLastError(0);
+        CHECK(own && !SetShellWindow(own) && GetLastError() == ERROR_ACCESS_DENIED && GetShellWindow() == shell,
+              "shell child cannot replace the existing shell");
+        if (own) DestroyWindow(own);
+        return bad ? 1 : 0;
+    }
+    release = OpenEventW(SYNCHRONIZE, FALSE, L"ShzGuiShellRelease");
+    own = popup(L"ShzSys", 0, 1, 1, 10, 10);
+    CHECK(release && own && !shell && SetShellWindow(own) && GetShellWindow() == own,
+          "shell child registers owned window");
+    if (release) {
+        CHECK(WaitForSingleObject(release, 5000) == WAIT_OBJECT_0, "shell child release event");
+        CloseHandle(release);
+    }
+    /* Intentionally leave the window alive: process/thread cleanup must remove
+     * its registration even without a user-mode DestroyWindow call. */
+    return bad ? 1 : 0;
+}
+
+static int launch_shell_child(LPCWSTR mode, PROCESS_INFORMATION *pi)
+{
+    WCHAR exe[MAX_PATH], cmd[MAX_PATH + 40];
+    STARTUPINFOW si;
+    DWORD n = GetModuleFileNameW(0, exe, MAX_PATH);
+    if (!n || n >= MAX_PATH) return 0;
+    lstrcpyW(cmd, L"\""); lstrcatW(cmd, exe); lstrcatW(cmd, L"\" "); lstrcatW(cmd, mode);
+    memset(&si, 0, sizeof si); si.cb = sizeof si;
+    memset(pi, 0, sizeof *pi);
+    if (!CreateProcessW(exe, cmd, 0, 0, FALSE, 0, 0, 0, &si, pi)) return 0;
+    CloseHandle(pi->hThread);
+    pi->hThread = 0;
+    return 1;
+}
+
+static void check_shell_child_exit(PROCESS_INFORMATION *pi, const char *name)
+{
+    DWORD code = STILL_ACTIVE;
+    int ended = WaitForSingleObject(pi->hProcess, 6000) == WAIT_OBJECT_0;
+    CHECK(ended && GetExitCodeProcess(pi->hProcess, &code) && code == 0, name);
+    CloseHandle(pi->hProcess);
+}
+
+static void test_shell_registration(void)
+{
+    HWND a, b, child, topmost, shell;
+    PROCESS_INFORMATION pi;
+    HANDLE release;
+    DWORD started, pid = 0;
+    CHECK(GetShellWindow() == 0, "shell initially absent");
+    SetLastError(0);
+    CHECK(!SetShellWindow((HWND)(uintptr_t)0xdeadbeef) && GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+          "shell invalid HWND rejected with window error");
+    SetLastError(0);
+    CHECK(!SetShellWindow(0) && GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+          "shell null HWND rejected with window error");
+    a = popup(L"ShzSys", 0, 1, 1, 10, 10);
+    b = popup(L"ShzSys", 0, 2, 2, 10, 10);
+    CHECK(a && b, "shell test windows created");
+    if (!a || !b) { if (a) DestroyWindow(a); if (b) DestroyWindow(b); return; }
+    child = CreateWindowExW(0, L"ShzSys", L"", WS_CHILD, 0, 0, 4, 4, a, 0, g_inst, 0);
+    topmost = popup(L"ShzSys", WS_EX_TOPMOST, 3, 3, 10, 10);
+    SetLastError(0);
+    CHECK(child && !SetShellWindow(child) && GetLastError() == ERROR_ACCESS_DENIED && !GetShellWindow(),
+          "shell child window rejected");
+    SetLastError(0);
+    CHECK(topmost && !SetShellWindow(topmost) && GetLastError() == ERROR_ACCESS_DENIED && !GetShellWindow(),
+          "shell topmost window rejected");
+    if (topmost) DestroyWindow(topmost);
+    SetLastError(0x1357);
+    CHECK(SetShellWindow(a) && GetShellWindow() == a && GetLastError() == 0x1357,
+          "shell owned top-level registered without clearing last error");
+    CHECK(GetWindow(b, GW_HWNDLAST) == a, "shell begins below ordinary windows");
+    CHECK(SetWindowPos(a, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) &&
+          GetWindow(b, GW_HWNDLAST) == a, "shell remains bottom after raise request");
+    CHECK(SetWindowPos(b, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) &&
+          GetWindow(b, GW_HWNDLAST) == a, "ordinary HWND_BOTTOM stays above shell");
+    CHECK(SetWindowPos(b, a, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) &&
+          GetWindow(b, GW_HWNDLAST) == a, "insertion after shell stays above shell");
+    SetLastError(0);
+    CHECK(!SetWindowPos(a, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) &&
+          GetLastError() == ERROR_ACCESS_DENIED && !(GetWindowLongW(a, GWL_EXSTYLE) & WS_EX_TOPMOST),
+          "registered shell cannot become topmost");
+    SetLastError(0);
+    CHECK(!SetShellWindow(b) && GetLastError() == ERROR_ACCESS_DENIED && GetShellWindow() == a,
+          "shell second owned HWND rejected without replacing first");
+    if (launch_shell_child(L"--shell-observer", &pi)) check_shell_child_exit(&pi, "shell cross-process observer exits successfully");
+    else CHECK(0, "shell cross-process observer launches");
+    CHECK(DestroyWindow(a) && !GetShellWindow(), "shell destruction clears registration");
+    SetLastError(0);
+    CHECK(!SetShellWindow(a) && GetLastError() == ERROR_INVALID_WINDOW_HANDLE, "shell stale HWND rejected");
+    CHECK(SetShellWindow(b) && GetShellWindow() == b, "shell replacement allowed after destruction");
+    CHECK(DestroyWindow(b) && !GetShellWindow(), "shell replacement destruction clears registration");
+    release = CreateEventW(0, TRUE, FALSE, L"ShzGuiShellRelease");
+    CHECK(release != 0, "shell process cleanup release event created");
+    if (release && launch_shell_child(L"--shell-owner", &pi)) {
+        started = GetTickCount();
+        do { shell = GetShellWindow(); if (shell) break; Sleep(10); } while (GetTickCount() - started < 4000);
+        CHECK(shell && GetWindowThreadProcessId(shell, &pid) && pid == pi.dwProcessId,
+              "shell owner child window visible to parent");
+        SetLastError(0);
+        CHECK(shell && !SetShellWindow(shell) && GetLastError() == ERROR_ACCESS_DENIED,
+              "parent cannot register child process's window");
+        SetEvent(release);
+        check_shell_child_exit(&pi, "shell owner child exits without destroying window");
+        CHECK(!GetShellWindow(), "shell process death clears registration");
+    } else CHECK(0, "shell owner child launches");
+    if (release) CloseHandle(release);
 }
 
 /* ---------------------------------------------------------------- layered windows and regions: the pixel scene */
@@ -722,7 +847,7 @@ static void test_misc(void)
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     WNDCLASSEXW wc;
     static const struct { LPCWSTR name; WNDPROC proc; } classes[] = {
@@ -740,6 +865,9 @@ int main(void)
         wc.lpszClassName = classes[i].name;
         if (!RegisterClassExW(&wc)) { printf("FAIL: RegisterClassExW\n"); return 1; }
     }
+    if (argc > 1 && !strcmp(argv[1], "--shell-observer")) return shell_child(0);
+    if (argc > 1 && !strcmp(argv[1], "--shell-owner")) return shell_child(1);
+    test_shell_registration();
     g_job_ready = CreateEventW(0, FALSE, FALSE, 0);
     g_job_done = CreateEventW(0, FALSE, FALSE, 0);
     {

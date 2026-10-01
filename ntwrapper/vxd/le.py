@@ -2,7 +2,7 @@
 """Original, intentionally narrow i386 ELF -> Windows VxD LE packager.
 
 Input: own fully linked ELF32, exactly .text/.data, retained REL relocations.
-Output: two resident preload objects, ordinal-1 DDB and internal fixups only.
+Output: two shared/preloaded 32-bit objects, ordinal-1 DDB and internal fixups only.
 No SDK libraries, imported LE writer, external services table or NT PE loader.
 SPDX-License-Identifier: GPL-2.0-only
 """
@@ -171,8 +171,10 @@ def package(elf: bytes) -> tuple[bytes, dict]:
     first_page = 1
     for number, obj in enumerate(objects):
         count = (obj['size'] + PAGE - 1) // PAGE
-        # Resident + preload + 32-bit, with separate RX and RW objects.
-        flags = 0x2245 if number == 0 else 0x2243
+        # Shared + preload + 32-bit RX/RW; permanent-resident bit 0x200 is clear.
+        # These flags passed a separate native control-only loader fixture;
+        # acceptance of the complete production driver still needs a guest run.
+        flags = 0x2065 if number == 0 else 0x2063
         tables.extend(struct.pack('<IIIIII', obj['size'], 0, flags, first_page, count, 0))
         first_page += count
     h32(0x48, len(header) + len(tables))
@@ -209,6 +211,8 @@ def package(elf: bytes) -> tuple[bytes, dict]:
     if len(result) > MAX_BYTES:
         raise FormatError('LE image exceeds limit')
     return bytes(result), {'format':'LE', 'objects':len(objects), 'pages':pages,
+        'object_flags':[0x2065,0x2063],
+        'object_policy':'shared/preloaded/big32 RX and RW; permanent-resident bit 0x200 clear',
         'internal_fixups':len(image['relocations']), 'ddb_export_ordinal':1,
         'ddb_object':image['ddb_object'], 'ddb_offset':image['ddb_offset'],
         'guest_loaded':False, 'native_vmm_calls_verified':False}

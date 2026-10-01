@@ -1,0 +1,52 @@
+From: Win98-Modern continuation
+Subject: Preserve helper CPU identity when its LAPIC is hardware-disabled
+
+The AP trampoline clears IA32_APIC_BASE.EN before entering SeaBIOS. Reading
+the disabled xAPIC MMIO ID is not a valid way to identify that CPU. KVM then
+allows the helper's yield() to enter the normal cooperative thread switch on
+an EFI-allocated stack that has no thread_info. In the measured failure ESP
+became 8 and EBP/EIP contained packed IVT pointers.
+
+Use CPUID.01H:EBX[31:24] only in the hardware-disabled case, both when recording
+the helper's ID and when yield() queries the caller. CSMWrap restricts the
+reserved helper to IDs below 255. Enabled xAPIC and x2APIC paths stay intact.
+
+--- a/seabios/src/stacks.c
++++ b/seabios/src/stacks.c
+@@ -90,6 +90,13 @@
+     if (apic_base_msr & (1 << 10)) {
+         /* x2APIC mode: read from MSR 0x802 */
+         return (u32)rdmsr(0x802);
++    } else if (!(apic_base_msr & (1 << 11))) {
++        /* The helper's LAPIC is hardware-disabled by the AP trampoline.
++         * CPUID retains its initial ID; disabled xAPIC MMIO does not. The
++         * helper selection is restricted to IDs below 255. */
++        u32 eax, ebx, ecx, edx;
++        __cpuid(1, &eax, &ebx, &ecx, &edx);
++        return ebx >> 24;
+     } else {
+         /* xAPIC mode: read from MMIO */
+         u32 lapic_base = (u32)(apic_base_msr & 0xFFFFF000);
+--- a/seabios/src/romlayout.S
++++ b/seabios/src/romlayout.S
+@@ -492,9 +492,20 @@
+ 
+ .Lread_apic_id_xapic:
+         // xAPIC mode: read APIC ID from MMIO
++        // The AP trampoline hardware-disables xAPIC. Do not read its MMIO
++        // registers in that state; CPUID's initial ID remains available.
++        testl $(1 << 11), %eax
++        jz .Lread_apic_id_disabled
+         andl $0xFFFFF000, %eax      // Mask to get base address (bits 12-31)
+         movl 0x20(%eax), %eax       // Read LAPIC ID register (base + 0x20)
+         shrl $24, %eax              // Shift to get APIC ID in bits 0-7
++        jmp .Lstore_apic_id
++
++.Lread_apic_id_disabled:
++        movl $1, %eax
++        cpuid
++        movl %ebx, %eax
++        shrl $24, %eax
+ 
+ .Lstore_apic_id:
+         movl %eax, 32(%ebp)         // Write to helper_core_id (offset 32)

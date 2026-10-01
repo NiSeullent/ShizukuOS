@@ -68,7 +68,7 @@
       "build_version": "3.1.2-25-g7f30b74",
       "seabios_version": "578d260b",
       "version_note": "Fixed copies of what `git describe --tags --always` printed for the pinned commits (CSMWrap) and `git describe --always --tags --long` (seabios submodule, no tags fetched) on 2026-09-29; fixed so later upstream tags cannot change the binary.",
-      "patches": []
+      "patches": ["shizukudos/csm/patches/0001-helper-id-with-disabled-lapic.patch"]
     },
     "syslinux": {
       "kind": "debian-binary-packages",

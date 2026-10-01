@@ -1,6 +1,47 @@
 # 100% API compatibility target and required app corpus
 
-The completion target is **100% of the Windows API surface and working execution of all five required applications**. This is an aspiration, not a current result. A count of exported names or successful imports is only a preliminary metric: an API counts as compatible only after its documented behavior is tested in the Windows 98 guest. A stub that always succeeds or always fails does not count unless that result is the correct contract for the guest state.
+The completion target is **100% of the Windows API surface and working execution of all eight required applications**: Chromium, Supermium, VLC, Notepad++, Visual Studio Code, Legcord/Discord, current open-source Office and Steam. Chromium is mandatory. This is an aspiration, not a current result. A count of exported names or successful imports is only a preliminary metric: an API counts as compatible only after its documented behavior is tested in the Windows 98 guest. A stub that always succeeds or always fails does not count unless that result is the correct contract for the guest state.
+
+The September30 user extension explicitly permits source changes and combining
+ports with current libraries. App startup alone is insufficient: Chromium must
+render interactive HTML/JavaScript, navigate HTTPS and accept input; Legcord
+must present its real Discord UI and network/authentication path; open-source
+Office must create, edit, save and reopen documents; Steam must display its real
+client and network/authentication/library behavior. Normal exit and persisted
+state are part of each acceptance. Existing app scopes remain required. Source
+ports must identify their version and changes; remote-hosted rendering must not
+be described as native Windows98 application execution. Account-dependent
+behavior requires the user's actual account session and cannot be fabricated.
+
+The Office implementation target is LibreOffice. Current publisher/version,
+architecture and dependent runtime metadata are being frozen separately from
+the previous five-app corpus. Legcord shares the Chromium/Electron work. Steam
+is a separate proprietary client compatibility target; its source availability
+must not be invented. All three additions remain unverified in the guest.
+
+Publisher metadata now identifies [Legcord1.3.0](https://github.com/Legcord/Legcord/releases/tag/v1.3.0)
+with an ia32 portable build. Its release-tag package uses Electron43.2.0;
+Electron44.2.0 is the development-branch dependency, not that release.
+[Release package source](https://raw.githubusercontent.com/Legcord/Legcord/v1.3.0/package.json).
+The current [LibreOffice download](https://www.libreoffice.org/download/)
+is26.8.0, published for Windowsx86-64/ARM64. The current
+[Steam win64 client manifest](https://client-update.steamstatic.com/steam_client_win64)
+is1788652215, SHA256
+`40ec2f2aac99fb65c62b7b60db77e8e1575e0c8b59cfeba80294eeb1c963731c`.
+Its publisher-checksum-verified bootstrap ZIP is2,668,385bytes; the actual
+steam.exe is AMD64 PE32+,5,775,512bytes, SHA256
+`48ea0576865d2dfda26001b7b210c3f7559d46e647424cd11704eb1ea842fe5a`.
+This verifies the bootstrap architecture, not full client dependency closure
+or any guest execution. Latest Office/Steam need genuine64-bit execution or
+documented source ports; version spoofing does not meet those requirements.
+
+The additive [Chromium delay-import port](../ntwin32/chromium_port/README.md)
+has1,806 host ASan/UBSan controls, including1,200 concurrent cached calls and
+a real C++/C ABI consumer. Its static reader accepts116 original chrome.exe
+delay slots and39 chrome_elf.dll slots without calling either original entry.
+The new native probe and exact two-input manifest remain pending actual
+Windows98 controls. This source component is not application success or a
+complete replacement for the browser's linked delay helper.
 
 ## Fixed reference surface
 
@@ -8,9 +49,82 @@ Use the Microsoft Windows SDK **10.0.28000.2705** (released August 2026) as the 
 
 The inventory must record stable API identity, architecture, minimum OS, interface/contract version, and feature dependencies. A numerator entry requires a guest test for success, failure, memory ownership, thread behavior, and documented edge cases as appropriate. For a native Windows 98 function, this means a guest test of the original API. New wrappers require the same behavioral tests through NTWin32Wrapper9x without KernelEx. Historical KernelEx results below remain a separate lineage. No complete denominator or 100% score has been computed yet.
 
-## Current Chromium priority — 2026-09-27
+## Current publisher targets — 2026-09-30
 
-The current target is official **Chromium 156.0.8076.0 x86**, snapshot
+The active targets are Chromium **157.0.8080.0 x86**, Google Windows snapshot
+1707946, Notepad++ **8.9.8.1 x86**, Supermium **144 R5 x86**, VLC **3.0.24 x86**
+and Visual Studio Code **1.140.0 x64**. Publisher metadata is frozen in ignored
+`build/latest-app-metadata-20260930/`; older functional/loader results below
+apply to their exact older versions, not automatically to these new targets.
+
+The current Chromium ZIP is 323,332,967 bytes, SHA-256
+`af0a1a5eb80a21ff2364b4974ca254d3a3af0bf087db9f5af4232672cb3a53df`.
+It matches Google Storage's published MD5. The publisher source revision is
+`73c8f84d67bfbad65ad4817d9839ffecb78b06ee`; its VERSION and the actual
+chrome.exe RT_VERSION resource both identify 157.0.8080.0. The executable
+remains an i386 PE32 with subsystem10.0/static TLS/load configuration; no
+header bytes were changed. [Official snapshot](https://storage.googleapis.com/chromium-browser-snapshots/Win/1707946/chrome-win.zip).
+
+The current Notepad++ ZIP is 7,821,291 bytes, SHA-256
+`65d3435b5dcbefde47c401a2666132138e76a2b62e189ad4ffe568581b6adfd2`,
+matching the publisher's release digest. Its main EXE is i386 PE32, SHA-256
+`986ffd50fb51e4b08737d1c47a4aca8e681adb628789228e5f538bfb954d2eb5`.
+[Official release](https://github.com/notepad-plus-plus/notepad-plus-plus/releases/tag/v8.9.8.1).
+
+The current VS Code archive is 355,156,158 bytes, SHA-256
+`52f47072473375767d63ea5be9ffb96a3092124223fe5ce036834a299715014e`,
+matching Microsoft's published SHA-256. The archive endpoint returned 1.140.0
+at 15:06:31 UTC; the earlier setup-endpoint result 1.139.1 is retained as
+historical metadata. Code.exe is x64 PE32+, SHA-256
+`96851792952c34ead53462ad36d973356af2e737b5ed4e433e23c4647e0d6318`.
+This downloaded target has not executed in the Windows98 guest.
+
+Read-only preflights of current chrome.exe/chrome_elf.dll/notepad++.exe retain
+exact file hashes and bounded complete PE import inventories in
+`build/latest-app-preflight-20260930/`. These are not guest launches or an
+application success. The native Windows98 GOP driver, native PE loading and
+real COM SaveDialog implementation are separate active prerequisites.
+
+The actual 8.9.8.1 trial now displays the native editor, accepts keyboard text,
+opens the registered native Save As COM implementation, writes a new 44-byte
+file and reopens that document in the same app process. Its unchanged EXE,
+installed CORE and COM provider were read back after the VM stopped. The
+overall result remains **FAIL**: 14 of 15 scoped checks passed, but ordinary
+program exit faults on a linked CRT direct NT PEB/ProcessParameters read.
+The fresh file is `Latest NPP 8.9.8.1 Windows98 Save As proof\r\n`, SHA-256
+`ab32bfab872ffd7c8a0884e06b70432d7bef6c5ac463a7bfed33aca05c3ab95d`.
+The full original result is retained in ignored
+`build/native-npp-controls/latest-npp-trial-20260930T1714/result.json`, SHA-256
+`f0ea413eaf74b72f1fd0d62c0283e357dc68dd90b66dfe7e52804a9c2b2f7003`.
+This app trial uses stock VGA. A separate cold boot now opens the saved file
+in the unchanged official application and independently confirms its exact
+44 bytes, executable, CORE and COM provider. That six-check scoped PASS is
+recorded at `build/native-npp-controls/cold-reopen-proof-20260930T1729/result.json`,
+SHA-256 `1b387e4ac6091d28a7fa79c87d038b42cc5669156dd7d05ad41a0ad431b88e53`.
+It preserves that earlier unassisted clean-exit failure. A subsequent genuine
+GOP trial now verifies unchanged8.9.8.1 native SaveAs, fresh44-byte NPPGOP,
+warm reopen and actual normal AltF4 process/helper/waiter exit0 under the
+native-proven desktop-field interpreter. Its26-gate scoped receipt is
+`run-win98-gop-latest-npp-environment-v3-20260930T1748/native-gop-latest-npp-review.json`,
+SHA256 `4969701e15e2170caa6927bdb9cd2c40a34367d3666d7487caa00f8170e1bfa5`.
+A separate25-gate cold trial reopens NPPGOP, accepts distinct keyboard text,
+saves a fresh39-byte NPEDGOP and normally exits0 again. Its receipt is
+`run-win98-gop-latest-npp-cold-v3-20260930T1807/native-gop-latest-npp-cold-keyboard-review.json`,
+SHA256 `e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175`.
+The repeat trial's mistaken SaveAll shortcut and native restoration of the
+private original document are preserved; final39/44/44-byte files match
+independent disk readbacks. Both scoped GOP results require the field
+interpreter and retain four OS-forwarded first-chance exceptions and three
+FFFFFFFF worker shutdown exits. They do not prove all-worker successful
+completion or a general NT process environment. The independent native
+loader/TLS fixtures and exact app scopes are documented in
+[the native runtime checkpoint](NATIVE_APP_RUNTIME.md). VLC prerequisites
+and their separate native API/application gates are in
+[the VLC checkpoint](VLC_COMPATIBILITY.md).
+
+## Previous Chromium priority — 2026-09-27
+
+The previous target was official **Chromium 156.0.8076.0 x86**, snapshot
 [1705698](https://storage.googleapis.com/chromium-browser-snapshots/Win/1705698/chrome-win.zip),
 identified from the publisher's `Win/LAST_CHANGE` and the actual PE version data.
 The entire 322,979,270-byte ZIP matched Google's MD5 metadata and has SHA-256

@@ -1,0 +1,29 @@
+{
+  "schema": "iewebkit-win9x-real-optional-api-port-v1",
+  "upstream_commit": "5220e80b97a253c60ed899361654142ab5021998",
+  "patch": "patches/core-win9x-optional-system-apis.patch",
+  "patch_sha256": "56bb4f31d4444b70e8a77b4a20a8d82b3fd1ecef0d9e19b032cf04f3d5b9590d",
+  "files": [
+    {
+      "path": "Source/WTF/wtf/win/SignalsWin.cpp",
+      "before_sha256": "1b894227beb6dc3fcb22f3fcbf6367c7d19e6fb3b3c17fd60702a3389c5ff607",
+      "after_sha256": "1961fc314a1868987500ef0b65b22523d7be18fc14a76f08ec2454c4daa058db"
+    },
+    {
+      "path": "Source/WTF/wtf/StackTrace.cpp",
+      "before_sha256": "67f5d1702a2f5fc3737ae36590e5fe6f85efeb8583fd5b7c2c4f2af70fd6660f",
+      "after_sha256": "5527dd5ff976c172cc9782dd978f7460473d02910d024b2ea4533c38cbb8b77f"
+    },
+    {
+      "path": "Source/bmalloc/mimalloc/mimalloc/src/prim/windows/prim.c",
+      "before_sha256": "56c25c6eb535b20c7f4f5200567fa4d8055ec2331ef1f2f1d45421f7f1aaf26c",
+      "after_sha256": "412011dba43ef7bf488b0dae8148627047b6255b71f5672a1cced224a6225f25"
+    }
+  ],
+  "capability_limits": {
+    "vectored_exception_handlers": "Require realAPI ifrequested; nativeWin98C_LOOP/JIT_OFF/WASM_OFFrequestsnone",
+    "stack_trace": "Zero capturedframes ifnativeRTLstackcaptureabsent; genuineunsupporteddiagnostic",
+    "numa": "RequirebothactualCPUidentityandoldNUMA APIs beforecalling; retainrealexistingzeroNUMAnodefallback"
+  },
+  "modern_branches_preserved": true
+}

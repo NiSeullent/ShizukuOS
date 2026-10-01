@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "implementation": "independently authored; no Wine implementation body copied",
+  "wine_era": "2001-01-12",
+  "wine_commit": "f7f1defb4f01f84d4fafc8f65d6bdef519595855",
+  "wine_primary_sources": [
+    {
+      "url": "https://raw.githubusercontent.com/wine-mirror/wine/f7f1defb4f01f84d4fafc8f65d6bdef519595855/loader/resource.c",
+      "path": "build/resource-adapter-primary-20261001/loader/resource.c",
+      "sha256": "2386f7efb07aeca2a7b321c312dc993fbc1d2c8c89246c98afbffc8bdfa3b654"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/wine-mirror/wine/f7f1defb4f01f84d4fafc8f65d6bdef519595855/loader/pe_resource.c",
+      "path": "build/resource-adapter-primary-20261001/loader/pe_resource.c",
+      "sha256": "36e75e0177fe684261c9bc46a01e1d7cf97ca97f20c5bd9246e293a3b62ce8e1"
+    }
+  ],
+  "microsoft_primary_sources": [
+    "https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#the-rsrc-section",
+    "https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-findresourceexw",
+    "https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-findresourcew",
+    "https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-loadresource",
+    "https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-lockresource",
+    "https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-sizeofresource",
+    "https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-freeresource"
+  ],
+  "existing_registry_pattern": {
+    "path": "ntwin32/native_loader/native.c",
+    "symbols": ["by_handle", "runtime_hook"],
+    "meaning": "Actual mapped base identifies state2 modules; explicit root for NULL HMODULE. Adapter does not modify or join this registry automatically."
+  },
+  "supported_profile": "PE32 mapped resources only; numeric WORD/#decimal and ASCII case-insensitive Win32 A/W keys, counted exact UTF16 internal keys; exact nonneutral language, sole-variant default selection; original/mapped metadata and payload equality; separate found/loaded provenance, borrowed handles",
+  "unsupported": ["Full language fallback and native Win98 language-policy acceptance", "MUI", "Non-ASCII ACP/Unicode case folding", "NE/16-bit resources and thunks", "Global memory ownership/free", "Automatic native-loader integration"],
+  "win98_native_acceptance": "pending; host evidence and Wine semantics are not genuine Win98 execution"
+}

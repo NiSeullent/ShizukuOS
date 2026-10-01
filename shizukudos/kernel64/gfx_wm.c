@@ -67,6 +67,7 @@ gwin_t *g_win;
 static gclass_t *g_cls;
 gqueue_t *g_fg_q;
 static uint32_t win_gen;
+static uint64_t shell_window;            /* gfx_lock: cleared when this window (or its owning thread) dies */
 static int wm_ready;
 static kmutex_t wm_init_lock;
 #define DESKTOP (&g_win[0])
@@ -434,6 +435,15 @@ static void tree_unlink(gwin_t *w)
 static void link_below(gwin_t *w, gwin_t *sib)          /* directly below sib */
 {
     w->parent = sib->parent;
+    /* The registered desktop is always the last top-level window. Even a normal
+     * HWND_BOTTOM or an insertion after the shell belongs immediately above it. */
+    if (sib->handle == shell_window && w->handle != shell_window) {
+        w->prev = sib->prev;
+        w->next = sib;
+        if (sib->prev) sib->prev->next = w; else sib->parent->child = w;
+        sib->prev = w;
+        return;
+    }
     w->prev = sib;
     w->next = sib->next;
     if (sib->next) sib->next->prev = w;
@@ -452,6 +462,7 @@ static void link_bottom(gwin_t *w, gwin_t *parent)
 static void link_top(gwin_t *w, gwin_t *parent)         /* top of the non-topmost band (top of everything if w is topmost) */
 {
     gwin_t *s = parent->child, *last = 0;
+    if (w->handle == shell_window && parent == DESKTOP) { link_bottom(w, parent); return; }
     w->parent = parent;
     if (parent == DESKTOP && !(w->exstyle & SHZ_WS_EX_TOPMOST))
         while (s && (s->exstyle & SHZ_WS_EX_TOPMOST)) { last = s; s = s->next; }
@@ -592,6 +603,7 @@ void wm_destroy_tree(gwin_t *w)
     int had = 0;
     if (!w || w == DESKTOP || !w->used) return;
     if (wm_is_visible(w) && wm_screen_rect(w, &dmg)) had = 1;
+    if (w->handle == shell_window) shell_window = 0;
     w->destroying = 1;
     while (w->child) wm_destroy_tree(w->child);
     gq_purge_window(w);
@@ -888,6 +900,12 @@ static int32_t sys_wquery(process_t *cur, uint64_t arg)
     int32_t st = STATUS_SUCCESS;
     if (copy_from_user(cur, &q, arg, sizeof q)) return STATUS_ACCESS_VIOLATION;
     mutex_lock(&gfx_lock);
+    if (q.what == SHZ_WQ_SHELL) {
+        gq_reap_dead();                  /* a just-exited owner must not leave a stale shell until gfxd's next tick */
+        q.v0 = wm_lookup(shell_window) ? shell_window : 0;
+        if (!q.v0) shell_window = 0;
+        goto done;
+    }
     w = q.hwnd ? wm_lookup(q.hwnd) : 0;
     if (q.what == SHZ_WQ_DESKTOP) { q.v0 = DESKTOP->handle; goto done; }
     if (q.what == SHZ_WQ_EXISTS) { q.v0 = w != 0; goto done; }
@@ -997,15 +1015,33 @@ static int32_t sys_wset(process_t *cur, uint64_t arg)
         if (tl && copy_from_user(cur, title, s.buf, tl * 2ull)) return STATUS_ACCESS_VIOLATION;
     }
     mutex_lock(&gfx_lock);
+    if (s.what == SHZ_WS_SET_SHELL) gq_reap_dead();
     w = wm_lookup(s.hwnd);
     if (!w) { st = STATUS_INVALID_HANDLE; goto done; }
     if (!wm_owner_ok(cur, w)) { st = STATUS_ACCESS_DENIED; goto done; }
     switch (s.what) {
+    case SHZ_WS_SET_SHELL:
+        if (w == DESKTOP || w->parent != DESKTOP || w->msgonly || w->owner ||
+            (w->style & SHZ_WS_CHILD) || (w->exstyle & SHZ_WS_EX_TOPMOST) || wm_lookup(shell_window)) {
+            st = STATUS_ACCESS_DENIED;
+            break;
+        }
+        shell_window = w->handle;
+        tree_unlink(w);
+        link_bottom(w, DESKTOP);
+        wm_damage_window(w);
+        break;
     case SHZ_WS_SET_STYLE:
     case SHZ_WS_SET_EXSTYLE: {
         shz_rect_t before, after;
         const int was = wm_is_visible(w) && wm_screen_rect(w, &before);
         const int32_t ocw = client_w(w), och = client_h(w);
+        if (w->handle == shell_window &&
+            ((s.what == SHZ_WS_SET_STYLE && (s.v0 & SHZ_WS_CHILD)) ||
+             (s.what == SHZ_WS_SET_EXSTYLE && (s.v0 & SHZ_WS_EX_TOPMOST)))) {
+            st = STATUS_ACCESS_DENIED;
+            break;
+        }
         if (s.what == SHZ_WS_SET_STYLE) { s.v1 = w->style; w->style = (uint32_t)s.v0; }
         else {
             s.v1 = w->exstyle;
@@ -1027,7 +1063,9 @@ static int32_t sys_wset(process_t *cur, uint64_t arg)
     case SHZ_WS_SET_USERDATA: s.v1 = w->userdata; w->userdata = s.v0; break;
     case SHZ_WS_SET_WNDPROC: s.v1 = w->wndproc; w->wndproc = s.v0; break;
     case SHZ_WS_SET_HINSTANCE: s.v1 = w->hinstance; w->hinstance = s.v0; break;
-    case SHZ_WS_SET_OWNER: s.v1 = w->owner; w->owner = s.v0; break;
+    case SHZ_WS_SET_OWNER:
+        if (w->handle == shell_window && s.v0) { st = STATUS_ACCESS_DENIED; break; }
+        s.v1 = w->owner; w->owner = s.v0; break;
     case SHZ_WS_SET_EXTRA: {
         const uint32_t size = s.buf_len;
         uint64_t old = 0;
@@ -1050,6 +1088,7 @@ static int32_t sys_wset(process_t *cur, uint64_t arg)
         shz_rect_t before, after;
         const int was = wm_is_visible(w) && wm_screen_rect(w, &before);
         if (!np || wm_is_descendant(w, np)) { st = STATUS_INVALID_PARAMETER; break; }
+        if (w->handle == shell_window && np != DESKTOP) { st = STATUS_ACCESS_DENIED; break; }
         if (np != DESKTOP && !wm_owner_ok(cur, np)) { st = STATUS_ACCESS_DENIED; break; }
         s.v1 = win_parent_for_query(w);
         tree_unlink(w);
@@ -1167,6 +1206,9 @@ static int32_t sys_setwindowpos(process_t *cur, uint64_t arg)
     w = wm_lookup(p.hwnd);
     if (!w) { st = STATUS_INVALID_HANDLE; goto done; }
     if (!wm_owner_ok(cur, w)) { st = STATUS_ACCESS_DENIED; goto done; }
+    if (w->handle == shell_window && !(p.flags & SWP_NOZORDER) && p.insert_after == (uint64_t)-1) {
+        st = STATUS_ACCESS_DENIED; goto done;
+    }
     if (!(p.flags & SWP_NOZORDER) && p.insert_after > 1 && p.insert_after != (uint64_t)-1 && p.insert_after != (uint64_t)-2) {
         ref = wm_lookup(p.insert_after);
         if (!ref || ref->parent != w->parent) { st = STATUS_INVALID_PARAMETER; goto done; }
@@ -1190,7 +1232,8 @@ static int32_t sys_setwindowpos(process_t *cur, uint64_t arg)
     if (sized && (client_w(w) != ocw || client_h(w) != och || (p.flags & SWP_FRAMECHANGED))) resize_invalidate(w, ocw, och, redraw_all || (p.flags & SWP_FRAMECHANGED));
     if (!(p.flags & SWP_NOZORDER) && w->parent) {
         gwin_t *par = w->parent;
-        if (p.insert_after == 0 && !ref) { tree_unlink(w); link_top(w, par); }
+        if (w->handle == shell_window) { tree_unlink(w); link_bottom(w, par); }
+        else if (p.insert_after == 0 && !ref) { tree_unlink(w); link_top(w, par); }
         else if (p.insert_after == 1 && !ref) { tree_unlink(w); link_bottom(w, par); }
         else if (p.insert_after == (uint64_t)-1) { w->exstyle |= SHZ_WS_EX_TOPMOST; tree_unlink(w); link_top(w, par); }
         else if (p.insert_after == (uint64_t)-2) { w->exstyle &= ~SHZ_WS_EX_TOPMOST; tree_unlink(w); link_top(w, par); }

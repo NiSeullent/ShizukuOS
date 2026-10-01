@@ -1,0 +1,21 @@
+{
+  "schema": "iewebkit-win98-ie5-protocol-source-pin-v1",
+  "original_host_receipt": {
+    "path": "/root/Win98-Modern-boot/build/iewebkit-win98-ie5-browser-83bd/build.json",
+    "sha256": "b98d918f41595174267737c1a9028532dae28a815c8dc3cde03d1888f2cf8456"
+  },
+  "patch": {
+    "path": "/root/Win98-Modern-boot/tools/iewebkit_port/patches/core-ie-protocol-telemetry.patch",
+    "sha256": "dcd6c5828831c3268e2a1796aacc76b45814099a2e7b3de64a7258a1a6ca21fe"
+  },
+  "source": {
+    "host/navigation_handoff.cpp": {
+      "before_sha256": "06364eba9f3a217ba7f2cde06cc94d596d577d2d7111f8efd1c3250b0e3f2df2",
+      "after_sha256": "fd87a0cef8334f3b4f85c3dc547a82372f92bb6038b44d446376f0dcd9396fb3"
+    }
+  },
+  "guard": "IEWK_NAV_DIAGNOSTIC",
+  "semantics": "Private offline telemetry only; modern/release branch and engine absence remain unchanged. No extra bind query; same match, consume-before-callback and original callback return behavior.",
+  "protocol_ingress_is_not_DocObject_Load": true,
+  "full_engine": false
+}

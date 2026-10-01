@@ -1,0 +1,172 @@
+--- a/seabios/vgasrc/cbvga.c
++++ b/seabios/vgasrc/cbvga.c
+@@ -14,11 +14,20 @@
+ #include "vgafb.h" // handle_gfx_op
+ #include "vgautil.h" // VBE_total_memory
+ #include "svgamodes.h" // svga_modes
++#include "shz_legacy_text_geometry.h"
+ 
+ static int CBmode VAR16;
+ static struct vgamode_s CBmodeinfo VAR16;
+ static struct vgamode_s CBemulinfo VAR16;
+ static u32 CBlinelength VAR16;
++/* Cached during firmware setup, before DOS can overwrite the low CB table. */
++static u8 ShzLegacyText03 VAR16;
++
++int
++shz_cbvga_is_legacy_text_mode(struct vgamode_s *mode)
++{
++    return GET_GLOBAL(ShzLegacyText03) && mode == &CBemulinfo;
++}
+ 
+ struct vgamode_s *cbvga_find_mode(int mode)
+ {
+@@ -228,13 +237,32 @@
+     if (GET_GLOBAL(HaveRunInit))
+         return 0;
+ 
++    SET_VGA(ShzLegacyText03, 0);
+     struct cb_header *cbh = find_cb_table();
+     if (!cbh) {
+         dprintf(1, "Unable to find coreboot table\n");
+         return -1;
+     }
++    /* The explicit CSMWrap GOP profile publishes this private record.
++     * Do not alter ordinary coreboot, Bochs-display, or ramfb text modes. */
++    int legacy_text = 0;
++    if (CONFIG_VGA_COREBOOT) {
++        struct { u32 tag, size; } *marker =
++            find_cb_subtable(cbh, SHZ_LEGACY_TEXT_CB_TAG);
++        if (marker) {
++            if (GET_FARVAR(0, marker->size) != 24) {
++                dprintf(1, "Invalid Shizuku GOP profile record\n");
++                return -1;
++            }
++            legacy_text = 1;
++        }
++    }
+     struct cb_framebuffer *cbfb = find_cb_subtable(cbh, CB_TAG_FRAMEBUFFER);
+     if (!cbfb) {
++        if (legacy_text) {
++            dprintf(1, "Shizuku GOP profile has no linear framebuffer\n");
++            return -1;
++        }
+         // Assume there is an EGA text framebuffer.
+         dprintf(1, "Did not find coreboot framebuffer - assuming EGA text\n");
+         SET_VGA(CBmode, 0x03);
+@@ -270,6 +298,24 @@
+         return -1;
+     }
+ 
++    struct shz_legacy_text_geometry text;
++    if (legacy_text && !shz_make_legacy_text_geometry(
++            xlines, ylines, linelength, bpp, &text)) {
++        dprintf(1, "Shizuku GOP mode cannot contain an 80x25 text viewport\n");
++        return -1;
++    }
+     cbvga_setup_modes(addr, bpp, xlines, ylines, linelength);
++    if (legacy_text) {
++        /* MM_DIRECT stays selected: character drawing still uses the GOP
++         * framebuffer, not VGA text memory. Physical CBmodeinfo and pitch
++         * are untouched; only BIOS mode 03 gets the logical viewport. */
++        SET_VGA(CBemulinfo.width, text.viewport_width);
++        SET_VGA(CBemulinfo.height, text.viewport_height);
++        SET_VGA(CBemulinfo.cwidth, text.character_width);
++        SET_VGA(CBemulinfo.cheight, text.character_height);
++        SET_VGA(ShzLegacyText03, 1);
++        dprintf(1, "Shizuku GOP mode03: 80x25, 8x16 font, physical pitch %u\n",
++                text.physical_pitch);
++    }
+     return 0;
+ }
+--- a/seabios/vgasrc/vgabios.c
++++ b/seabios/vgasrc/vgabios.c
+@@ -17,6 +17,7 @@
+ #include "vgafb.h" // vgafb_write_char
+ #include "vgahw.h" // vgahw_set_mode
+ #include "vgautil.h" // swcursor_pre_handle10
++#include "shz_legacy_text_geometry.h"
+ 
+ 
+ /****************************************************************
+@@ -297,7 +298,11 @@
+         SET_BDA(video_rows, (height / cheight) - 1);
+         SET_BDA(cursor_type, vga_emulate_text() ? 0x0607 : 0x0000);
+     }
+-    SET_BDA(video_pagesize, calc_page_size(memmodel, width, height));
++    u16 page_size = calc_page_size(memmodel, width, height);
++    if (CONFIG_VGA_COREBOOT && mode == 0x03 && vga_emulate_text()
++        && shz_cbvga_is_legacy_text_mode(vmode_g))
++        page_size = SHZ_LEGACY_TEXT_PAGE_BYTES;
++    SET_BDA(video_pagesize, page_size);
+     SET_BDA(crtc_address, CONFIG_VGA_STDVGA_PORTS ? stdvga_get_crtc() : 0);
+     SET_BDA(char_height, cheight);
+     SET_BDA(video_ctl, 0x60 | (flags & MF_NOCLEARMEM ? 0x80 : 0x00));
+--- /dev/null
++++ b/seabios/vgasrc/shz_legacy_text_geometry.h
+@@ -0,0 +1,65 @@
++/* SPDX-License-Identifier: LGPL-3.0-only
++ * Bounded logical BIOS mode-03 geometry over an existing linear framebuffer.
++ * This header has no firmware, port-I/O, allocation, or mode-setting calls.
++ * Its integer types match SeaBIOS u32/u16 without importing platform headers.
++ */
++#ifndef SHZ_LEGACY_TEXT_GEOMETRY_H
++#define SHZ_LEGACY_TEXT_GEOMETRY_H
++
++#define SHZ_LEGACY_TEXT_WIDTH 640U
++#define SHZ_LEGACY_TEXT_HEIGHT 400U
++#define SHZ_LEGACY_TEXT_COLUMNS 80U
++#define SHZ_LEGACY_TEXT_ROWS 25U
++#define SHZ_LEGACY_TEXT_CWIDTH 8U
++#define SHZ_LEGACY_TEXT_CHEIGHT 16U
++#define SHZ_LEGACY_TEXT_PAGE_BYTES 4096U
++#define SHZ_LEGACY_TEXT_CB_TAG 0x53485a47U
++
++struct shz_legacy_text_geometry {
++    unsigned int viewport_width;
++    unsigned int viewport_height;
++    unsigned int physical_pitch;
++    unsigned short columns;
++    unsigned short rows;
++    unsigned short character_width;
++    unsigned short character_height;
++    unsigned short page_bytes;
++};
++
++/* Call only after validating the firmware's framebuffer aperture and format.
++ * Rejection leaves the caller's output untouched. The viewport never changes
++ * the physical pitch, framebuffer address, or native VBE geometry.
++ */
++static inline int
++shz_make_legacy_text_geometry(unsigned int width, unsigned int height,
++                              unsigned int pitch, unsigned int depth,
++                              struct shz_legacy_text_geometry *out)
++{
++    unsigned int bytes_per_pixel;
++    if (!out || width < SHZ_LEGACY_TEXT_WIDTH || height < SHZ_LEGACY_TEXT_HEIGHT
++        || width > 65535U || height > 65535U)
++        return 0;
++    if (depth != 15U && depth != 16U && depth != 24U && depth != 32U)
++        return 0;
++    bytes_per_pixel = (depth + 7U) / 8U;
++    /* SeaVGABIOS gfx_op uses signed 32-bit scanline arithmetic. */
++    if (pitch < width * bytes_per_pixel || pitch % bytes_per_pixel
++        || pitch > 0x7fffffffU / height)
++        return 0;
++
++    out->viewport_width = SHZ_LEGACY_TEXT_WIDTH;
++    out->viewport_height = SHZ_LEGACY_TEXT_HEIGHT;
++    out->physical_pitch = pitch;
++    out->columns = SHZ_LEGACY_TEXT_COLUMNS;
++    out->rows = SHZ_LEGACY_TEXT_ROWS;
++    out->character_width = SHZ_LEGACY_TEXT_CWIDTH;
++    out->character_height = SHZ_LEGACY_TEXT_CHEIGHT;
++    out->page_bytes = SHZ_LEGACY_TEXT_PAGE_BYTES;
++    return 1;
++}
++
++/* Implemented by the optional SeaVGABIOS integration patch. */
++struct vgamode_s;
++int shz_cbvga_is_legacy_text_mode(struct vgamode_s *mode);
++
++#endif

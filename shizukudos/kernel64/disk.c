@@ -19,6 +19,7 @@
 #include "fs.h"
 #include "blk.h"
 #include "fat32.h"
+#include "vfs_mounts.h"
 
 typedef struct {
     fat32_vol_t fat;
@@ -325,7 +326,10 @@ static int try_mount(blk_dev_t *dev)
     dvol.root.backing = FSB_DISK;
     dvol.root.vol = &dvol.vol;
     dvol.root.first_cluster = dvol.fat.root_cluster;
-    if (fs_mount('D', &dvol.root)) return -1;
+    /* FAT must participate in the common volume flush/shutdown hooks too.
+     * Mounting only the fs.c namespace would leave vfs_flush_all() unaware
+     * of this writable device. disk_init runs before ShizukuFS, so D: is free. */
+    if (!vfs_mount_next(&dvol.root, &dvol.vol, "FAT32", dev->name, 0)) return -1;
     dev->flags |= BLK_F_MOUNTED;                        /* raw user-mode writes to it are refused (sysblk.c) */
     kprintf("K64 disk: D: = %s, FAT32 \"%s\" id %x, %u clusters of %u bytes, %u free, %u FAT page(s), %u sector reads, %s\n",
             dev->name, dvol.fat.label, dvol.fat.volume_id, dvol.fat.cluster_count, dvol.fat.bytes_per_cluster,
