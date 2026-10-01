@@ -30,13 +30,14 @@ records `native_win98: not_tested` and does not establish visible guest output.
 `observer.c` builds as `NTTHRUN.EXE`. It requires actual Windows 98 SE build
 2222, a fresh nonce, and absent logs; creates only the exact EXE-local child;
 waits at most 60 seconds; and records the full actual DWORD exit after a normal
-wait. Failure handling can stop and reap only that owned child. Host mocks
-exercise 4,749 ownership, lifecycle, exit and log assertions under sanitizers.
+wait. Failure handling can stop and reap only that owned child. The initial
+host mocks exercised 4,749 assertions; the bounded entry/privacy diagnostics
+raise the current count to 18,383 in normal and sanitized runs.
 
-For a guest handoff, copy the frozen DLL, `NTTHGUI.EXE` and `NTTHRUN.EXE` to a
-new private clone's `C:\VXDLAB`, with absent `THEME.LOG` and `THOBS.LOG`, and
-freeze the copied build receipt and artifact hashes. Generate a fresh
-32-character lowercase hexadecimal nonce and launch
+For a current guest handoff, copy the frozen DLL, `NTTHGUI.EXE`, `NTTHRUN.EXE`
+and the exact fresh 32-byte lower-case hexadecimal `THNONCE.TXT` challenge to
+a new private clone's `C:\VXDLAB`, with all three output logs absent. Freeze
+the copied build receipt and four input hashes, then launch
 `C:\VXDLAB\NTTHRUN.EXE --nonce=<nonce>`. Capture Modern between 10 and 20 seconds,
 Classic before 10 or after 20 seconds, and keyboard/mouse interaction. Use the
 observer's actual child exit after normal termination; a shell launch or
@@ -233,3 +234,68 @@ This proves the exercised application-local AMD64 painter and visible button
 backgrounds. Text/font rendering, persisted/global themes, native Windows 98
 integration, Signal messaging and Office document editing remain unverified.
 See `ntwddm/win64/theme_probe/README.md` for supported cases and exact receipts.
+
+## Native redraw continuation and memory acceptance
+
+The immutable v9 strict verifier passes actual Windows 98 SE identity,
+fresh nonce, both styles, normal child exit zero and checked cleanup. Its
+screens visibly identify Classic and Modern, with incomplete repaint limits.
+Removing the probe's periodic full-window redraw is committed as `d3f2f60`;
+the initial paint, explicit controls and 10/20/30-second lifecycle remain.
+
+V10 and v11 preserve separate incomplete results. Boot and shell focus delays
+consumed their bounded trials. V11 launched the exact observer at 885.4 seconds
+and stopped at 902.0 seconds, before normal completion. Its full settled
+Classic scene proves the visual improvement, but its empty THEME.LOG and
+182-byte THOBS.LOG establish no child exit or Modern transition. All four
+input and three output readbacks and 20 source hashes match; original guards
+pass, with 520,192 bytes of private COW growth. Evidence is under
+`build/theme-native-runs/win98-gop-theme-6970-20261001-v11`. A separately
+guarded automatic-start helper is being prepared; no weaker observer verdict
+or stale-log reuse is allowed. The native lane has been released.
+
+The new AMD64 basic memory bridge is committed as `ee51ef8` with its sealed
+append-only runtime consumer. Actual `build/mp64-run-v1/memory-diagnostic.json`
+passes 69 guest assertions: exact live SYS64 file/header, ANSI/Unicode basename
+and absolute loads, direct memory APIs and a genuine Kernel32 forwarder,
+zeroed allocation, reserve/commit, coherent read-only mappings, private COW,
+refusal/ownership checks and cleanup. The nonce-bearing child exits normally
+with code zero; raw `proc_wait=0` verifies successful reaping.
+
+The passing probe and retained failing Signal run use byte-identical actual
+kernel, archive, QEMU and firmware, with identical reviewed runtime/consumer
+sources. Their machine configuration differs in RAM (1 GiB versus 4 GiB);
+application payload, arguments and working directory also differ. A new
+same-input Signal comparison changes RAM alone. These results establish the
+exercised memory subset without proving Signal functionality or explaining
+its earlier KERNELBASE failure. Exact provenance and gaps are recorded in
+`docs/MEMORY_RUNTIME_LOADER_AUDIT_6970.md` and
+`docs/MODERN_MEMORY_CHECKPOINT_6970.md`.
+
+## Automatic native startup and full graphics requirement
+
+V12 replaces the late shell Run delivery with an independently guarded native
+bootstrap on its own COW clone. A verified empty `[windows] run=` in WIN.INI
+receives only the no-argument bootstrap path; the bootstrap reads a newly staged
+32-hex nonce and creates the unchanged exact observer command. The original
+WIN.INI SHA-256 `fa45041ccc42257781a0503b425cac60cce06be897aab7a1039edef05acaf12c`
+is retained. Independent patched readback matches the frozen plan and all other
+bytes, attributes and boot sectors remain unchanged. The shared lane was
+acquired after its prior owner released normally; actual KVM startup was
+observed at 10:59:40 UTC. Results are pending in
+`build/theme-native-runs/win98-gop-theme-6970-autostart-v12`. The 1200-second
+trial retains the 20-GiB floor, 256-MiB private-write and 16-MiB output limits.
+Full native Classic/Modern visibility and checked completion are still required.
+
+The user's additional requirement includes Direct2D, DirectWrite and every
+DirectX family listed in `benchmarks/modern-graphics-requirements-6970.json`.
+A separate graphics agent is implementing the genuine pinned Mesa resource and
+rendering foundation, under independent ownership/source review. This does not
+resolve the actual Office D3D11CreateDevice/DXGI blocker yet. Full export/COM
+contracts, native integration and actual Office/app functional acceptance remain
+required; successful DLL loading or a private triangle is insufficient.
+
+The separately integrated TLS/SSPI correction in `bcb4a34` now passes actual
+linked i486 and OEM Win98 import/PE gates for all four artifacts, plus fresh host
+TLS and SSPI stream/lifetime checks. Native communication and OS-wide TLS remain
+unverified. See `docs/TLS_SSPI_INTEGRATION_6970.md` for retained source and receipts.

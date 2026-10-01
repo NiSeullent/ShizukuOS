@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "recorded_date": "2026-10-01",
+  "user_requirement": "Direct2D, DirectWrite and all DirectX must work in Win98 Modern alongside the required modern applications.",
+  "full_support_verified": false,
+  "required_families": [
+    "DirectDraw",
+    "Direct3D 9",
+    "Direct3D 10 and 10.1",
+    "Direct3D 11",
+    "Direct3D 12",
+    "DXGI",
+    "Direct2D",
+    "DirectWrite",
+    "DirectInput and XInput",
+    "DirectSound, XAudio2 and X3DAudio"
+  ],
+  "existing_native_components_require_independent_validation": true,
+  "minimum_functional_scenarios": {
+    "DirectDraw": ["surface allocation and lock", "blit and clipping", "flip/present", "lost-surface restoration"],
+    "Direct3D 9": ["truthful device capabilities", "texture and buffer ownership", "real shader/indexed drawing", "present/resize/reset and cleanup"],
+    "Direct3D 10 and 10.1": ["device and resources", "shader/state pipeline", "actual render and independent readback", "resource errors and teardown"],
+    "Direct3D 11": ["real device/context", "texture/view/buffer ownership", "shader drawing with depth/blend/scissor", "DXGI presentation and resize", "required Office startup and document editing"],
+    "Direct3D 12": ["device/resources/descriptors", "queues and command lists", "barriers and fences", "real draw/compute and readback", "synchronization and teardown"],
+    "DXGI": ["truthful adapter/output enumeration", "swap-chain ownership", "present/resize", "mode and failure semantics"],
+    "Direct2D": ["factory and render targets", "paths/strokes/gradients", "transforms/clipping/alpha", "bitmap and DirectWrite text rendering", "real visible output and cleanup"],
+    "DirectWrite": ["actual font collections and fallback", "Korean/Latin and complex-script layout", "glyph metrics and shaping", "real rasterization", "font/layout lifetime and errors"],
+    "DirectInput and XInput": ["real input source", "device/state/events", "disconnect and ownership"],
+    "DirectSound, XAudio2 and X3DAudio": ["real audio output", "buffer/stream/callback ownership", "mixing and spatial behavior", "device errors and cleanup"]
+  },
+  "acceptance_rules": [
+    "These scenarios are necessary smoke and functional checks, not an exhaustive API surface or a compatibility percentage.",
+    "Complete export and COM interface contracts, behavior, errors, ownership and unsupported cases require a separate source-backed inventory.",
+    "A DLL filename, resolved import, source build or successful factory return alone does not establish support.",
+    "Hardware versus software devices and feature levels must describe real backend capabilities.",
+    "Host pixel/resource evidence, actual guest ABI/rendering, native Windows 98 integration and application functionality remain separate verdicts.",
+    "Preserve original disks, corpora, source/license lineage and the unchanged reserve/write/output limits."
+  ],
+  "first_observed_application_blocker": {
+    "application": "ONLYOFFICE 9.4.0 x64",
+    "importer": "Qt5Gui.dll",
+    "required_export": "D3D11.DLL!D3D11CreateDevice",
+    "actual_current_result": "Missing normal import prevents the application process from starting; DXGI is also required."
+  }
+}
