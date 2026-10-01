@@ -275,13 +275,14 @@ static uint64_t refresh_trace_entry, refresh_trace_irq_rip, refresh_trace_irq_fl
 static uint64_t refresh_trace_wrapper_entry;
 static unsigned refresh_trace_injected_returns;
 extern volatile int pma_sched_observe_enabled __attribute__((weak));
-enum { OBS_NONE, OBS_ORDINARY, OBS_CREDIT, OBS_FIFO };
+enum { OBS_NONE, OBS_ORDINARY, OBS_CREDIT, OBS_FIFO, OBS_GRANT };
 static unsigned selection_phase, selection_armed, selection_observed;
 static thread_t *selection_low, *selection_peer, *aged_fifo_threads[3];
 static uint64_t selection_run_start;
 static unsigned ordinary_selection_ok, credit_terminal_ok, credit_initial;
 static unsigned aged_fifo_selected, aged_fifo_seen[3], aged_fifo_selection_order[3], aged_fifo_selection_grants[3];
 static uint64_t aged_fifo_first_wait[3];
+static void grant_observe_dispatch(thread_t *t, uint64_t waited);
 static unsigned pma_aging_left(const thread_t *t)
 {
 #ifdef SCHED_AGED_SERVICE_TICKS
@@ -310,6 +311,7 @@ void pma_sched_trace_dispatch(thread_t *t, uint64_t waited)
     /* The separate self-test flag collects only bounded selection counters.
      * IRQ/RIP ring recording remains exclusive to the explicit trace flag. */
     if (&pma_sched_observe_enabled && pma_sched_observe_enabled) {
+        if (selection_phase == OBS_GRANT) grant_observe_dispatch(t, waited);
         if (selection_armed && !selection_observed && t == selection_peer && selection_low) {
             if (selection_phase == OBS_ORDINARY) {
                 ordinary_selection_ok &= !pma_aging_left(t) && selection_low->state == TS_READY &&
@@ -560,17 +562,46 @@ static void test_eligible_credit_accounting(void)
 
 /* Real scheduler lifecycle controls. Software timer deliveries at raised IRQL
  * are explicit accounting controls, not natural hardware delivery evidence. */
-static thread_t *grant_low, *grant_high, *grant_arrival;
-static ksem_t grant_gate;
+static thread_t *grant_low, *grant_high, *grant_arrival, *grant_coordinator;
+static ksem_t grant_gate, grant_complete;
 static volatile unsigned grant_stage, grant_done, grant_yield_clear, grant_wait_clear, grant_terminal;
 static unsigned grant_seen, grant_setter_ok, grant_irql_ok, grant_arrival_ok;
 static uint64_t grant_deadline, grant_run_start, grant_remaining_at_arrival, grant_arrival_wait, grant_loops;
+static unsigned grant_first_seen, grant_first_ok, grant_coordinator_blocked, grant_completed;
+static uint64_t grant_first_wait, grant_first_tick, grant_first_low_ticks, grant_body_tick;
+static struct {
+    uint64_t tick, waited, low_ticks;
+    unsigned id, role, credit;
+} grant_dispatches[16];
+static unsigned grant_dispatch_count, grant_dispatch_overflow;
+static void grant_observe_dispatch(thread_t *t, uint64_t waited)
+{
+    if (grant_stage != 3 || grant_done) return;
+    if (grant_dispatch_count < 16) {
+        const unsigned i = grant_dispatch_count++;
+        grant_dispatches[i].tick = ticks_now(); grant_dispatches[i].waited = waited;
+        grant_dispatches[i].low_ticks = grant_low->run_ticks - grant_run_start;
+        grant_dispatches[i].id = t->id; grant_dispatches[i].credit = pma_aging_left(t);
+        grant_dispatches[i].role = t == grant_coordinator ? 1 : t == grant_low ? 2 :
+            t == grant_high ? 3 : t == grant_arrival ? 4 : 0;
+    } else ++grant_dispatch_overflow;
+    if (t == grant_arrival && !grant_first_seen) {
+        grant_first_seen = 1; grant_first_wait = waited; grant_first_tick = ticks_now();
+        grant_first_low_ticks = grant_low->run_ticks - grant_run_start;
+        grant_coordinator_blocked = grant_coordinator->state == TS_BLOCKED &&
+            grant_coordinator->wait_sem == &grant_complete;
+        grant_first_ok = grant_coordinator_blocked && grant_low->state == TS_READY && !pma_aging_left(grant_low) &&
+            grant_first_low_ticks <= grant_remaining_at_arrival && waited <= grant_remaining_at_arrival;
+    }
+}
 static void grant_arrival_worker(void *arg)
 {
     (void)arg;
     const uint64_t f = irq_save();
+    grant_body_tick = ticks_now();
     grant_arrival_wait = thread_current()->max_ready_wait_ticks;
-    grant_arrival_ok = grant_low->state == TS_READY && !pma_aging_left(grant_low) &&
+    grant_arrival_ok = grant_first_seen && grant_first_ok &&
+        grant_low->state == TS_READY && !pma_aging_left(grant_low) &&
         grant_low->run_ticks - grant_run_start <= grant_remaining_at_arrival &&
         grant_arrival_wait <= grant_remaining_at_arrival;
     grant_terminal = 1;
@@ -616,6 +647,7 @@ static void grant_low_worker(void *arg)
     while (!grant_terminal && ticks_now() < end) ++grant_loops;
     const uint64_t done_flags = irq_save();
     grant_done = 1;
+    sem_post(&grant_complete);
     irq_restore(done_flags);
 }
 static void grant_high_worker(void *arg)
@@ -641,8 +673,15 @@ static void test_aging_grant_lifecycle(void)
     grant_stage = grant_done = grant_yield_clear = grant_wait_clear = grant_terminal = 0;
     grant_seen = grant_setter_ok = grant_irql_ok = grant_arrival_ok = 0;
     grant_run_start = grant_remaining_at_arrival = grant_arrival_wait = grant_loops = 0;
+    grant_first_seen = grant_first_ok = grant_dispatch_count = grant_dispatch_overflow = 0;
+    grant_first_wait = grant_first_tick = grant_first_low_ticks = grant_body_tick = 0;
+    grant_coordinator_blocked = grant_completed = 0;
+    grant_coordinator = thread_current();
+    selection_phase = OBS_GRANT;
+    if (&pma_sched_observe_enabled) pma_sched_observe_enabled = 1;
     grant_deadline = ticks_now() + 256;
     sem_init(&grant_gate, 0);
+    sem_init(&grant_complete, 0);
     grant_low = thread_create_suspended("pma-grant-low", grant_low_worker, 0);
     grant_high = thread_create_suspended("pma-grant-high", grant_high_worker, 0);
     grant_arrival = thread_create_suspended("pma-grant-new", grant_arrival_worker, 0);
@@ -651,17 +690,35 @@ static void test_aging_grant_lifecycle(void)
     KASSERT(!thread_set_sched_policy(grant_high, 31, 1, 1));
     KASSERT(!thread_set_sched_policy(grant_arrival, 31, 1, 1));
     thread_resume(grant_low); thread_resume(grant_high);
+    /* Joining keeps the coordinator READY, so it can become another aged
+     * contender and receive its own grant before the new arrival. Block it
+     * throughout the isolated measurement; finite timeout still diagnoses a
+     * stranded worker without silently claiming that isolation held. */
+    grant_completed = sem_wait_timeout(&grant_complete, 512) == 0;
     irq_restore(f);
     thread_join(grant_low); thread_join(grant_high); thread_join(grant_arrival);
+    const uint64_t observer_flags = irq_save();
+    if (&pma_sched_observe_enabled) pma_sched_observe_enabled = 0;
+    selection_phase = OBS_NONE;
+    irq_restore(observer_flags);
     PMA_CHECK("policy setters cannot renew an independent aged service grant", grant_setter_ok);
     PMA_CHECK("IRQL2 timer accounting preserves the dispatchable aged grant", grant_irql_ok);
     PMA_CHECK("yield semaphore wait and exit relinquish unused aged credit", grant_seen &&
               grant_yield_clear && grant_wait_clear && !pma_aging_left(grant_low) && sched_validate());
     PMA_CHECK("a new higher priority arrival waits only the remaining isolated aging grant", grant_seen &&
-              grant_terminal && grant_arrival_ok && grant_remaining_at_arrival > 0 && grant_remaining_at_arrival <= 4);
+              grant_completed && grant_terminal && grant_arrival_ok &&
+              grant_remaining_at_arrival > 0 && grant_remaining_at_arrival <= 4);
     kprintf("K64 PMA grant: initial=%u setters=%u irql2=%u yield_clear=%u wait_clear=%u arrival_wait=%llu remaining=%llu terminal=%u\n",
             grant_seen, grant_setter_ok, grant_irql_ok, grant_yield_clear, grant_wait_clear,
             grant_arrival_wait, grant_remaining_at_arrival, grant_arrival_ok);
+    kprintf("K64 PMA grant selection: seen=%u first_wait=%llu low_eligible=%llu first_tick=%llu body_delay=%llu coordinator_blocked=%u completed=%u records=%u overflow=%u\n",
+            grant_first_seen, grant_first_wait, grant_first_low_ticks, grant_first_tick,
+            grant_first_seen ? grant_body_tick - grant_first_tick : 0, grant_coordinator_blocked, grant_completed,
+            grant_dispatch_count, grant_dispatch_overflow);
+    for (unsigned i = 0; i < grant_dispatch_count; ++i)
+        kprintf("K64 PMA grant dispatch: role=%u id=%u tick=%llu wait=%llu grant=%u low_eligible=%llu\n",
+                grant_dispatches[i].role, grant_dispatches[i].id, grant_dispatches[i].tick,
+                grant_dispatches[i].waited, grant_dispatches[i].credit, grant_dispatches[i].low_ticks);
 }
 
 static volatile unsigned aged_fifo_done;

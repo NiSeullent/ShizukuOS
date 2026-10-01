@@ -313,3 +313,15 @@ queued timer delivery after interrupt restoration before useful thread-body
 execution; IRQ-boundary trace/probe is pending root's production freeze release.
 The failing log remains intact. No thresholds are relaxed and no production
 edits/builds are permitted while root's ramfb guest is still executing.
+
+
+## Reviewed fixture import for the isolated native SMP consumer
+
+Root approved b5c49d873990bebdf7611fbccb03f3757dbbf874 before the next own native build.
+Only its exact Kernel64 pma_tests.c correction is imported: the coordinator
+blocks on finite completion while the isolated aging arrival is measured;
+first dispatch and body observation remain distinct. The fixed four-tick
+policy, scheduler, architecture and shared header are unchanged. Root reviewed
+actual KVM/TCG17/17 evidence. This preserves the existing historical ledger
+rather than importing unrelated later canonical status claims. Original SMP
+219/221 source epochs, failed gates and their actual receipts remain unchanged.
