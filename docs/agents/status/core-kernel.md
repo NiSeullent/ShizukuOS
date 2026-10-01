@@ -261,3 +261,55 @@ independent cross-subsystem review. Owned Kernel64 sources, tests and runner
 are frozen after the final KVM/TCG/provenance executions. Root may resume peer
 imports; the disjoint Kernel32 follow-up has also finished.
 No native SMP, Windows VMM integration or Win64 priority facade completion claim.
+
+Post-merge Python-only receipt closure corrections:
+
+- Independent peer controls showed that the focused runner could accept
+  receipts omitting `sched.c`, all four core files or `main.c`. The canonical
+  runner now requires the exact complete current `kbuild.source_hashes()` map
+  before launch, and derives that complete map again afterward so additions,
+  omissions, deletions and digest drift are detected. Same-byte receipt parsing
+  and all prior semantic/artifact controls remain.
+- The evaluator, QEMU helper, shared host utility and kbuild helper are hashed
+  before importing their modules, rechecked before launch and after the run,
+  recorded in the result and included in the immutable-input gate. A persistent
+  copied-helper drift control avoids changing the real helper files.
+- The prior 10 gate controls remain; scheduler/all-core/main omissions and an
+  unexpected source-map key are rejected before modeled QEMU launch. Persistent
+  copied-helper drift is rejected after the modeled guest computation. Exact
+  old runner/control sources are SHA-verified and saved with both RED folders.
+
+Verified host-semantic fixture commands (no new native execution claim):
+
+```sh
+python3 -B shizukudos/tests/test_k64_pma_provenance.py --build-dir build/shizukudos/kernel64s --serial build/shizukudos/pma-reviewed-final/run-root-kvm/serial.log --out build/pma-k64-receipt-closure/red
+python3 -B shizukudos/tests/test_k64_pma_provenance.py --build-dir build/shizukudos/kernel64s --serial build/shizukudos/pma-reviewed-final/run-root-kvm/serial.log --out build/pma-k64-receipt-closure/green
+python3 -B shizukudos/tests/test_k64_pma_provenance.py --build-dir build/shizukudos/kernel64s --serial build/shizukudos/pma-reviewed-final/run-root-kvm/serial.log --out build/pma-k64-helper-binding/red
+python3 -B shizukudos/tests/test_k64_pma_provenance.py --build-dir build/shizukudos/kernel64s --serial build/shizukudos/pma-reviewed-final/run-root-kvm/serial.log --out build/pma-k64-helper-binding/green
+```
+
+The omitted/extra-membership RED suite exited 1 with four expected failures;
+its GREEN passed 14/14. The copied-helper drift RED suite exited 1 with its
+single expected failure; final GREEN passed 15/15. All controls use the fresh
+normal build's actual 211-source map and artifacts; the earlier successful
+serial is explicitly a mocked semantic fixture. No kernel/header changes or
+kernel compilation occurred in this follow-up.
+
+Final runner SHA-256:
+`15c7973afd26fec11e10fbafff314a7cef6ffbe40931b57bd28869c6ad820426`.
+Final control SHA-256:
+`75c9dff94cea490ab69e599a3c6cfef080d286204cfdb51651b54b7b1563c00a`.
+
+New combined native failure remains an open acceptance gate: root's fresh
+normal four-profile build completed, but the KVM service guest in
+`build/pma-integrated-native-service/serial.log` computed one PMA failure:
+873019 policy updates, low worker first useful body at tick 98 and zero loops
+inside the unchanged 80-tick window. Earlier phase observations reached gap 99
+despite completed ready residence 32. Application/bridge successes do not
+resolve this failure. The earlier interrupted-sampler proof established a
+measurement distinction; this integrated run demonstrates a separate useful
+execution starvation problem requiring native diagnosis. Candidate cause is
+queued timer delivery after interrupt restoration before useful thread-body
+execution; IRQ-boundary trace/probe is pending root's production freeze release.
+The failing log remains intact. No thresholds are relaxed and no production
+edits/builds are permitted while root's ramfb guest is still executing.

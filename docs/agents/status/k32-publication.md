@@ -182,3 +182,45 @@ All source-bound inputs and build/run receipts are under
 `build/pma-k32-provenance/source-bound`; the earlier evidence is not upgraded or
 overwritten. These checks still cover a standalone UP component, with actual
 Windows 98 integration and integrated SMP unresolved.
+
+## Host receipt closure after the deadline-helper import
+
+The merged Kernel32 scheduler reads `abi/shz_sched_deadline.h`; the earlier
+host runner's manual source list omitted that newly compiled header. Earlier
+host receipts remain historical. This Python-only repair changes no production
+kernel or header and performs no kernel guest build.
+
+`run_k32_publication_host.py` now asks the selected compiler for the actual
+project dependency graph of the host translation unit with `-MM` and the
+same preprocessing flags. The source map includes the deadline header and
+runner itself. It discovers dependencies again after execution, compares both
+membership and contents, and records before/after maps and scan commands.
+Platform system headers are outside this project-source receipt.
+
+The new control runs the actual runner and real 17-check host executable using
+temporary copied project files. A compiler control appends a comment to only
+the copied deadline header after successful compilation. Before the repair,
+the runner incorrectly reported PASS with stable inputs despite persistent
+header drift; both the omitted-header positive gate and drift negative gate
+failed in `build/pma-k32-host-closure/red`. The complete copied RED fixtures,
+runner sources, logs and receipts remain intact.
+
+Verified commands:
+
+```sh
+python3 -B shizukudos/tests/test_k32_publication_host_provenance.py --out build/pma-k32-host-closure/red
+python3 -B shizukudos/tests/test_k32_publication_host_provenance.py --out build/pma-k32-host-closure/green
+python3 -B shizukudos/tests/test_k32_publication_host_provenance.py --cc clang --out build/pma-k32-host-closure/green-clang
+```
+
+RED exited 1 with both expected control failures. GCC and Clang GREEN exited 0:
+unchanged fixtures pass all 17 actual host checks with the deadline header
+pinned; persistent copied-header drift leaves all 17 executable checks passing
+but correctly makes the runner exit 1, receipt FAIL and `inputs_stable: false`.
+Original production inputs remain unchanged throughout all controls. Root owns
+fresh actual production-host validation after this frozen repair.
+
+Final host runner SHA-256:
+`1dd81845a95ad308bda69da9678b42834098a58eb5f1e6a274139ccb82b10f4d`.
+Dedicated control SHA-256:
+`55a7be33438125a44cd71fd87c88cc7717733b6154e943cf9b3673a112cc6c97`.

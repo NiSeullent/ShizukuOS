@@ -32,8 +32,10 @@ def main():
     base_receipt = json.loads(base_receipt_path.read_text())
     original_popen = subprocess.Popen
     original_read_text, original_read_bytes = Path.read_text, Path.read_bytes
+    original_helpers = getattr(runner, "HELPER_PATHS", ())
+    original_helper_hashes = getattr(runner, "HELPER_IMPORT_HASHES", {})
     results = []
-    for name in ("unchanged", "missing-receipt", "mismatched-artifact", "stale-source", "replaced-artifact", "removed-artifact", "replaced-receipt", "receipt-read-replacement", "zero-first-low-phase-progress", "zero-second-low-phase-progress"):
+    for name in ("unchanged", "missing-receipt", "mismatched-artifact", "stale-source", "replaced-artifact", "removed-artifact", "replaced-receipt", "receipt-read-replacement", "zero-first-low-phase-progress", "zero-second-low-phase-progress", "omit-scheduler", "omit-all-core", "omit-main", "unexpected-source-key", "persistent-copied-helper-drift"):
         folder = args.out.resolve() / name
         kernel_dir = folder / "kernel64s"
         kernel_dir.mkdir(parents=True, exist_ok=True)
@@ -43,7 +45,19 @@ def main():
         receipt = json.loads(json.dumps(base_receipt))
         if name == "stale-source":
             receipt["sources_sha256"]["shizukudos/kernel64/sched.c"] = "0" * 64
+        omissions = {"omit-scheduler": ("sched.c",), "omit-all-core": ("sched.c", "k64.h", "pma_tests.c", "tests.c"),
+                     "omit-main": ("main.c",)}
+        for omitted in omissions.get(name, ()):
+            receipt["sources_sha256"].pop("shizukudos/kernel64/" + omitted)
+        if name == "unexpected-source-key":
+            receipt["sources_sha256"]["shizukudos/tests/run_k64_pma.py"] = runner.shzlib.sha256_file(Path(runner.__file__))
         receipt_path.write_text(json.dumps(receipt) + "\n")
+        helper_paths, helper_hashes = original_helpers, original_helper_hashes
+        copied_helper = folder / "copied-evaluator.py"
+        if name == "persistent-copied-helper-drift":
+            shutil.copy2(Path(runner.__file__).with_name("run_k64_standalone.py"), copied_helper)
+            helper_paths = (copied_helper,)
+            helper_hashes = {str(copied_helper.resolve()): runner.shzlib.sha256_file(copied_helper)}
         if name == "missing-receipt":
             receipt_path.unlink()
         if name == "mismatched-artifact":
@@ -89,6 +103,9 @@ def main():
                     (kernel_dir / "boot.elf").unlink()
                 if name == "replaced-receipt":
                     receipt_path.write_text("{}\n")
+                if name == "persistent-copied-helper-drift":
+                    with copied_helper.open("ab") as stream:
+                        stream.write(b"\n# controlled copied helper drift\n")
                 return b"", None
 
         def launch(command, *positional, **keywords):
@@ -102,6 +119,8 @@ def main():
                 "--out", str(folder / "run")]
         with mock.patch.object(sys, "argv", argv), mock.patch.object(subprocess, "Popen", launch), \
                 mock.patch.object(Path, "read_text", read_text), mock.patch.object(Path, "read_bytes", read_bytes), \
+                mock.patch.object(runner, "HELPER_PATHS", helper_paths, create=True), \
+                mock.patch.object(runner, "HELPER_IMPORT_HASHES", helper_hashes, create=True), \
                 contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
             try:
                 status = runner.main()
@@ -110,7 +129,7 @@ def main():
         (folder / "gate.log").write_text(log.getvalue())
         if name == "unchanged":
             passed = status == 0 and len(launches) == 1
-        elif name in ("missing-receipt", "mismatched-artifact", "stale-source"):
+        elif name in ("missing-receipt", "mismatched-artifact", "stale-source", "omit-scheduler", "omit-all-core", "omit-main", "unexpected-source-key"):
             passed = status == 2 and not launches
         elif name in ("zero-first-low-phase-progress", "zero-second-low-phase-progress"):
             result = json.loads((folder / "run/result.json").read_text())
@@ -120,6 +139,8 @@ def main():
             passed = status == 1 and len(launches) == 1 and not result["inputs_stable"] and result["status"] == "FAIL"
             if name == "receipt-read-replacement":
                 passed = passed and receipt_read == [True] and result["build_receipt_sha256"] == original_receipt_sha
+            if name == "persistent-copied-helper-drift":
+                passed = passed and result.get("runtime_helpers_sha256") == helper_hashes and result.get("runtime_helpers_stable") is False
         results.append({"case": name, "status": "PASS" if passed else "FAIL", "runner_exit": status,
                         "mock_guest_launches": len(launches)})
         print(f"[{results[-1]['status']}] {name}: runner_exit={status} guest_launches={len(launches)}")
