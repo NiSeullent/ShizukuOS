@@ -38,7 +38,16 @@ OUT = BUILD / "dos16"
 WORK = OUT / "work"
 TESTS = SHZ / "dos16" / "tests"
 CSM = BUILD / "csm"
-PATCHES = sorted((SHZ / "dos16" / "patches").glob("0*.patch"))
+# The final startup guard is based on the combined CB43/DOSMGR source. Keep
+# this dependency order explicit; an unrelated numbered patch must not enter it.
+KERNEL_PATCH_NAMES = (
+    "0001-shizukudos-branding.patch",
+    "0002-reproducible-build-date.patch",
+    "0003-cb43-win98-dos-internals.patch",
+    "0003-dosmgr-honest-contract.patch",
+    "0004-win-startup-chain.patch",
+)
+PATCHES = [SHZ / "dos16" / "patches" / name for name in KERNEL_PATCH_NAMES]
 FREECOM_PATCHES = sorted((SHZ / "dos16" / "patches").glob("freecom-*.patch"))
 USER = Path(__file__).resolve().parent / "user"
 USER_FILES = ("CONFIG.SYS", "AUTOEXEC.BAT", "SHZSTART.BAT", "RECOVER.BAT", "README.TXT")
@@ -88,7 +97,7 @@ def build_kernel(env):
     tree = fresh_copy("freedos-kernel")
     applied = []
     for patch in PATCHES:
-        run(["patch", "-p1", "-s", "-i", patch], cwd=tree)
+        run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-s", "-i", patch], cwd=tree)
         applied.append({"patch": str(patch.relative_to(REPO)), "sha256": sha256_file(patch)})
     # Both halves are required: C interrupt hooks and their assembly data.
     config = "XNASM=nasm\nundefine XUPX\nALLCFLAGS=-DWIN31SUPPORT\nNASMFLAGS=-DWIN31SUPPORT\n"

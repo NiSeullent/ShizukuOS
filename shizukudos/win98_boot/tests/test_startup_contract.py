@@ -1,21 +1,30 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Execute exact patched FreeDOS startup bodies and assemble the real layout."""
+"""Execute the combined production FreeDOS startup bodies and physical layout."""
 from pathlib import Path
-import hashlib, os, re, subprocess, tempfile, unittest
+import ast, hashlib, os, re, subprocess, tempfile, unittest
 ROOT=Path(__file__).resolve().parents[3]
 BASE=Path(os.environ.get('SHZ_FREEDOS_SOURCE',ROOT/'build/upstream/freedos-kernel'))
-PATCH=ROOT/'shizukudos/dos16/patches/0004-win-startup-chain.patch'
+PATCH_DIR=ROOT/'shizukudos/dos16/patches'
+# Read the actual producer's literal selection without running its toolchain or
+# image builder. Every selected patch is applied below to pinned source bytes.
+BUILDER=ROOT/'shizukudos/dos16/build.py'
+PATCH_NAMES=ast.literal_eval(next(node.value for node in ast.parse(BUILDER.read_text()).body
+ if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='KERNEL_PATCH_NAMES' for t in node.targets)))
+PATCHES=tuple(PATCH_DIR/name for name in PATCH_NAMES)
 PINS={'kernel/inthndlr.c':'0793e3bb94c558b6fdeb335f9e15577486b4b6ae53e987c89c095909fb363727',
 'kernel/kernel.asm':'d678196d67f88111ebf3b6b60edaa068a8feb64016073bb7b799de48160ed50f',
-'hdr/win.h':'7688c971830beb6274c490db7d97a04c7a19772e9cba1fae60e003c77b3a59f0'}
+'hdr/win.h':'7688c971830beb6274c490db7d97a04c7a19772e9cba1fae60e003c77b3a59f0',
+'kernel/main.c':'42a2ca87eb2f72d87af2d9cb2e3b7d420929de3ffcb5524211557776adeb868a',
+'hdr/version.h':'bd38e66d28be664b9ba20f5695df5a4f8f4dcd4de2fb0f7f48abdc33fd19797d'}
 class Startup(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory(prefix='dos-startup-body-');self.addCleanup(self.temp.cleanup)
   self.root=Path(self.temp.name)
-  for n in ('kernel/inthndlr.c','kernel/kernel.asm','hdr/win.h'):
+  for n in PINS:
    raw=(BASE/n).read_bytes();self.assertEqual(hashlib.sha256(raw).hexdigest(),PINS[n],n)
    p=self.root/n;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(raw)
-  if PATCH.exists():subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(PATCH)],cwd=self.root,check=True,capture_output=True)
+  for patch in PATCHES:
+   subprocess.run(['patch','--batch','--forward','--fuzz=0','-p1','-i',str(patch)],cwd=self.root,check=True,capture_output=True)
  def test_actual_startup_failure_standard_chain_and_reentry(self):
   text=(self.root/'kernel/inthndlr.c').read_text()
   a=text.index('      case 0x05:          /* Windows Startup Broadcast */')
@@ -35,7 +44,8 @@ typedef uint8_t UBYTE;typedef uint16_t UWORD;typedef uint32_t ULONG;
 #define FP_SEG(p) ((uint16_t)0x1234)
 #define FP_OFF(p) ((uint16_t)0x5678)
 struct regs {uint16_t AX,BX,CX,DX,ds,SI,es,di,BP,FLAGS;};
-UWORD winInstanced;struct WinStartupInfo winStartupInfo;
+UWORD winInstanced;UBYTE winReportHidden;UWORD winActiveVersion;
+struct WinStartupInfo winStartupInfo;
 static unsigned checks,fail;UWORD winseg1,winseg2,winseg3;
 #define CHECK(x) do {checks++;if(!(x)) {fail++;if(fail<5) fprintf(stderr,"failure line %u\n",__LINE__);}}while(0)
 static void dispatch(struct regs *pr) {
