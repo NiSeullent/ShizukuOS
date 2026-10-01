@@ -73,7 +73,8 @@ small provider-binding hunk and run identical HOST/ASan/UBSan GREEN. All temp,
 capture, binaries and self-inclusive receipt share a new8MiB root above the
 unchanged20GiB floor. No local below-floor compiler/VM exception. Tests,
 runner and workflow are prepared by disjoint agents; root owns production.
-No compiler/test has yet executed for this new profile.
+At the initial e2473df source-only checkpoint, no compiler/test had executed
+for this new profile. Actual subsequent execution is recorded below.
 
 Native_loader's --providers execution policy remains disabled. This binding
 does not register an OS provider or connect Kernel64 secur32, which currently
@@ -82,3 +83,34 @@ needs the peer-owned VMM callback/caller/lifecycle contract and separately
 reviewed versioned wire operation, handles and buffer ownership. Generic IPC
 is not an SSPI implementation. Native ROOT, OS TLS1.3, modern-app and final
 ISO acceptance remain required and unverified.
+
+## Actual unchanged-production prospective RED
+
+Frozen fixture/guard/workflow commit
+bef7fac30e080935f0639baa57561a12f911cfb3 ran in hosted
+[run36927313281](https://github.com/NiSeullent/Win98-Modern/actions/runs/36927313281),
+job110587717204. The actual ABI-qualified fixture completed651 checks:
+423 exact prospective omission failures and228 passing controls. GCC compiled
+both complete production TUs successfully. All4 commands were reaped with
+exit codes0,0,0,1; the test's1 is assertion RED, not an infrastructure failure.
+Original native.c4457ca/table.c c6fbe pins, frozen C/shim/guard and nine-input
+before/after closure matched. Actual GCC -M/-MD45-header closure matched.
+
+Actual logged receipt112,044B SHA256
+9bc7a71ec19b6e35debf644df11a681a0a1aa2516ec3e189b9ab0e730f4c0253;
+actual job log263,949B SHA256
+329287b6389e5813715ec5f8b13c7641f8347e97ec956c09607867c710cb8b59.
+Root independently matched the full printed JSON and actual assertion capture
+digests. Hosted minimum free92,387,246,080B, final output185,732B,
+peak observed185,733B, resource failure absent and self-inclusive accounting
+verified. Raw proof stays in bounded RAM while local physical persistence
+fails the separate20GiB admission. No credential, TLS or Windows execution
+is established by these loader-boundary controls.
+
+Root's small production profile is prepared after this actual RED; identical
+HOST/ASan/UBSan GREEN and native DLL/Windows integration remain pending.
+The fixed prefix follows the project's actual native provider, interpreted
+using the Microsoft [ANSI dispatch-table declaration](https://learn.microsoft.com/en-us/windows/win32/api/sspi/ns-sspi-securityfunctiontablea)
+and [typed init contract](https://learn.microsoft.com/en-us/windows/win32/api/sspi/nf-sspi-initsecurityinterfacea).
+The implementation is independently authored; no third-party source code was
+copied. These modern API declarations do not certify Windows98 native support.
