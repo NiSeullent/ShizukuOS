@@ -305,3 +305,8 @@ GPU has the first sole large-host reservation for a bounded512MiB GLSL experimen
 
 
 Publication checkpoint: user explicitly requested all project source committed and merged into main for work in another environment. The nine GLSL and six SIMD paths are frozen as unbuilt DRAFT_UNVERIFIED; source syntax/JSON/exact patch checks do not certify runtime behavior. Generic native vector ABI, complete SIMD/GC/control/OOM and fresh original-regression proof remain pending. No new native TLS VM was launched. Source-only reviewed native controller drafts are included for continuation with their canonical-path restrictions. Historical accepted source/evidence bindings remain tied to their exact original branch revisions.
+
+
+## 2026-10-01 official distribution steering
+
+Latest explicit user instruction: official homepage and new source/Git bundle/ISO publication must use https://m98.nyase.kr; do not create new GitHub pushes, PRs or releases. Relayed directly to all own collaborating agents and through both shared session coordination registries to BOOT/cb43/theming/TLS peers. BOOT primary owns /root/Win98-Modern-main-integration-20261001 and main integration; cb43 owns site/publication/ISO coordination. Secondary 5abe integration is preserved for review, but holds competing main/remote/site/ISO changes. New continuation documentation and read-only environment checker report missing cache/resources accurately; their source-only verification does not certify build or native execution. Original modern app/browser/OS objectives remain incomplete.
