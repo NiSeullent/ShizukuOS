@@ -64,6 +64,25 @@ int main(void)
     rejects_without_output_change(b);
     b = valid_bootinfo(); b.fb_size = UINT64_MAX;
     rejects_without_output_change(b);
+    /* A raw non-wrapping range still must fit the actual mapping aperture.
+     * Otherwise pci.c's page roundup/alias can wrap or overlap kernel code. */
+    b = valid_bootinfo();
+    b.fb_base = UINT64_MAX - 7;
+    b.fb_width = b.fb_height = 1;
+    b.fb_pitch = 4; b.fb_size = 4;
+    rejects_without_output_change(b);
+    b.fb_base = K64_VIRT_BASE - DIRECT_MAP;
+    rejects_without_output_change(b);
+    b.fb_base -= 4; b.fb_size = 8;
+    rejects_without_output_change(b);
+    /* Above-4-GiB firmware memory remains representable by this backend. */
+    bootinfo = valid_bootinfo();
+    bootinfo.fb_base = UINT64_C(0x100000004);
+    CHECK(k64_boot_framebuffer(&out) == 0 && out.base == bootinfo.fb_base);
+    /* The final pixel below the page-aligned aperture end is safe. */
+    b.fb_size = 4;
+    bootinfo = b;
+    CHECK(k64_boot_framebuffer(&out) == 0 && out.base == b.fb_base);
     b = valid_bootinfo(); b.fb_base = 0;
     rejects_without_output_change(b);
     b = valid_bootinfo(); b.fb_width = 0;
