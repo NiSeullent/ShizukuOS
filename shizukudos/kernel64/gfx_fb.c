@@ -20,6 +20,7 @@
  *    each row doubled to form an 8x16 cell. Nothing else exists: no other sizes, no bold/italic, no non-ASCII.
  */
 #include "gfx.h"
+#include "gfx_address.h"
 #include "../dead_screen/native.h"
 #include "pci.h"
 #include "../supervisor/src/font8x8_basic.h"
@@ -46,7 +47,7 @@ gfx_fb_t g_fb;
 /* Kernel address range for pixel buffers: DIRECT_MAP + 64 GiB. Guest RAM is at most 256 MiB and PCI BARs sit below
  * 4 GiB (64-bit BARs at 32 GiB and up), so the range is unused; it lies inside PML4 slot 256, whose PDPT is shared by
  * every process, so mappings made here are visible under every address space without touching other page tables. */
-#define ARENA_BASE (DIRECT_MAP + (64ull << 30))
+#define ARENA_BASE (DIRECT_MAP + K64_GFX_ARENA_OFFSET)
 #define ARENA_PAGES (256u * 1024u)                    /* 1 GiB of address space */
 static uint32_t arena_bits[ARENA_PAGES / 32];
 static uint32_t arena_hint;
