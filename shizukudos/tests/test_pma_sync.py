@@ -65,22 +65,41 @@ def main():
         parser.error("choose a fresh output directory to preserve prior receipts")
     out.mkdir(parents=True)
     source = ROOT / "shizukudos/kernel64/ntdrv_ke.c"
-    original = source.read_text()
+    # Every extraction and receipt digest must describe these same exact bytes.
+    # Capture compiled inputs before extraction can race a disk edit.
+    inputs = [source, Path(__file__).resolve(), ROOT / "shizukudos/kernel64/tests/test_ntdrv_spin_host.c",
+              ROOT / "shizukudos/kernel64/ntddk.h", ROOT / "shizukudos/kcommon/pma_sync.h"]
+    if not args.driver_only:
+        inputs += [ROOT / "shizukudos/tests/test_pma_sync.c"]
+    snapshots = {path: path.read_bytes() for path in inputs}
+    original_bytes = snapshots[source]
+    original = original_bytes.decode("utf-8")
     bodies = {name: body(original, name) for name in FUNCTIONS}
     (out / "ntdrv_spin_production.inc").write_text("\n\n".join(bodies.values()) + "\n")
-    inputs = [source, Path(__file__).resolve(), ROOT / "shizukudos/kernel64/tests/test_ntdrv_spin_host.c",
-              ROOT / "shizukudos/kernel64/ntddk.h"]
-    if not args.driver_only:
-        inputs += [ROOT / "shizukudos/kcommon/pma_sync.h", ROOT / "shizukudos/tests/test_pma_sync.c"]
-    before = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
-              for path in inputs if path.exists()}
-    receipt = {"status": "FAIL", "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+    before = {str(path.relative_to(ROOT)): hashlib.sha256(value).hexdigest()
+              for path, value in snapshots.items()}
+    receipt = {"status": "FAIL", "source_sha256": hashlib.sha256(original_bytes).hexdigest(),
                "sources_sha256": before,
                "production_functions": {name: hashlib.sha256(value.encode()).hexdigest()
                                         for name, value in bodies.items()},
                "guest_executed": False, "SMP_kernel_executed": False, "runs": []}
 
+    def disk_matches_snapshot():
+        return all(path.exists() and path.read_bytes() == value for path, value in snapshots.items())
+
+    receipt["source_precompile_match"] = disk_matches_snapshot()
+    if not receipt["source_precompile_match"]:
+        receipt["source_before_after_match"] = False
+        (out / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        return 1
+
     def run(command, name):
+        if not disk_matches_snapshot():
+            result = subprocess.CompletedProcess(command, 125, "", "input changed before command; refused\n")
+            (out / (name + ".log")).write_text(result.stderr)
+            receipt["runs"].append({"name": name, "command": list(map(str, command)),
+                                    "returncode": 125, "output": result.stderr})
+            return False
         try:
             result = subprocess.run(list(map(str, command)), capture_output=True, text=True, timeout=90)
         except subprocess.TimeoutExpired as error:
@@ -137,10 +156,8 @@ def main():
             passed = built and passed
             if built:
                 passed = run([exe], "tsan-run") and passed
-    after = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
-             for path in inputs if path.exists()}
-    receipt["source_before_after_match"] = before == after
-    passed = before == after and passed
+    receipt["source_before_after_match"] = disk_matches_snapshot()
+    passed = receipt["source_before_after_match"] and passed
     receipt["status"] = "PASS_HOST_SYNC_AND_DRIVER_CONTRACTS" if passed else "FAIL"
     (out / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
     return 0 if passed else 1
