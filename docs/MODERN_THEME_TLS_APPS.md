@@ -105,6 +105,12 @@ recompiles every upstream/adapter unit for i486 and replaces formatting with an
 original bounded formatter. Its initial source-preparation rejection is retained;
 corrected DLL gates and real encrypted latest/LTS host exchange remain pending.
 A fresh stage also requires stable space and the actual shared guest queue.
+The corrective latest/LTS trials now also retain actual per-translation-unit
+preprocessor evidence. Their formatter has passed 18894 normal and instrumented
+assertions; the final latest/LTS encrypted exchange and frozen artifacts remain
+pending. The original upstream configuration-assertion translation unit checks
+and temporarily clears formatter definitions; any exception must identify that
+exact original unit and prove it contains no formatting calls.
 Neither v4 nor the host result is a native
 sockets pass. See
 `tests/m98_tls13_guest_interop_HANDOFF.md` for exact frozen inputs and readback.
@@ -356,6 +362,30 @@ allocations of closed verified experiment copies, retaining full logical hashes,
 metadata and evidence. The verified official Legcord archive is retained after
 removing its reproducible extracted copy. Free space fluctuates with peer work;
 each new trial must pass the unchanged guard and shared native queue check.
+`docs/NATIVE_QA_SCHEDULING_SCOPE.md` corrects the earlier broad interpretation of
+the ZUKU lab skill: this project's admission checks the cooperative lock and
+actual other Win98 native disks, while positively identified separate XP and
+Kernel64 runners count toward resource usage. The owned admission wrapper checks
+the queue again under the lock, every frozen CSS stage member, the harness and
+the actual cold-source hash before creating one private offline run. The
+09:44:50 UTC attempt found peer boot's VLC/Qt Win98 disk active outside the
+vacant cooperative lock and returned before native run creation.
+
+The committed Script/Automation supplemental guard replays all six immutable
+native inputs against their original raw disassembly: 471637 instructions and
+1481240 executable VirtualSize bytes. The original 16-method normal and
+Python-optimized controls pass. Independent review checked 335 unique evidence
+members across the two stage receipts, including final provenance drift checks.
+The guard must run freshly both before launching either component and as a
+required conjunct of final acceptance. It does not replace the original native
+verifiers or certify actual execution. The frozen sources and stages remain
+unchanged. See `docs/TRIDENT_I486_SUPPLEMENT.md`.
+
+Next disjoint engineering slices are a private numeric QuickJS/WAMR bridge and
+actual software triangle rasterization through the frozen Mesa fragment API.
+These slices are in progress. Standard browser WebAssembly reflection, complete
+modern Wasm proposals, GLSL ES/WebGL resources and WebGPU/WGSL/compute remain
+mandatory unfinished work.
 The native presentation lane is coordinated with peer6970; peer7707 retains
 the independent LTS fixture and cb43/c009 retain application-runtime integration.
 
