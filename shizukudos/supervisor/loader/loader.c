@@ -572,6 +572,7 @@ extern const uint8_t shz_k64_tramp_start[], shz_k64_tramp_end[];
 typedef struct {
     uint64_t ksize, isize, initrd_pages, ram_size;
     int low_alloc, kernel_alloc, initrd_alloc;
+    int display_selection_failed;     /* survives page release so AUTO can refuse an unsafe display handoff */
     char cmdline[SHZ_CMDLINE_MAX];
     shz_memplan_result_t plan;          /* RAM and firmware holes (kernel64/standalone/memholes.h) */
 } k64_state_t;
@@ -987,8 +988,10 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     bi->cmdline_size = (uint32_t)i;
     if (!EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) && gop) {
         status = sd_gop_select(bs, gop, &fb, &gop_selection);
-        if (EFI_ERROR(status))
+        if (EFI_ERROR(status)) {
+            g_k64.display_selection_failed = 1;
             return k64_refuse("GOP selection could not retain a validated firmware framebuffer", status);
+        }
         bi->fb_base = fb.base;
         bi->fb_size = fb.size;
         bi->fb_width = fb.width;
@@ -1256,6 +1259,10 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
                 status = k64_boot(image, bs, "mode=auto, auto_kernel64=yes, no usable virtualization backend");
                 say("Kernel64 direct boot did not start");
                 say_status(status);
+                if (g_k64.display_selection_failed) {
+                    say("; GOP selection left no validated framebuffer. CSM fallback refused.\n");
+                    return status;
+                }
                 say("; falling back to the CSM legacy BIOS profile.\n");
             } else {
                 say("auto_kernel64=yes, but \\SHZDOS\\KERNEL64S.BIN is not on the boot volume; trying CSM.\n");
