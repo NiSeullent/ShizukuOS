@@ -1,0 +1,52 @@
+{
+  "cli_sha256": "57b18bff3e7b93a7b4858ee03f18512744104a930381ffb482544dec03a4784b",
+  "full_directx_support_verified": false,
+  "modified_upstream_license": "LGPL-2.1-or-later",
+  "own_recipe_license": "GPL-2.0-only",
+  "patch": {
+    "file": "vkd3d-hlsl-lifetime.patch",
+    "sha256": "e8b45f17167696adc7731cd880d6fe6b08c29663c3de70b7d9062d80752f3a57"
+  },
+  "prepared_sources": {
+    "hlsl.y": {
+      "git_blob": "e349029521aab6cde883200fe7460e53b4b7a546",
+      "original_sha256": "b88f4a34a9e93f36e8c84e25bfd3a6268241df03b6a820cc3b261a8d19d09b50",
+      "prepared_sha256": "ecf4ed672cf2310ca11c00fc7f497b8e9e273802d3b5aa94d6ca039b6505899b",
+      "upstream_path": "libs/vkd3d/libs/vkd3d-shader/hlsl.y"
+    },
+    "hlsl_codegen.c": {
+      "git_blob": "f1368b151aa5c614360ea4c694d3fceee3698b90",
+      "original_sha256": "f2594b5914565317ea167de6acf9edb86b5d79edd06b52b1f9db7fd8acd1b787",
+      "prepared_sha256": "3cd8f7f28efa2ad5c9059efd89752b359c47f7b155950cf4d53b6816543948c7",
+      "upstream_path": "libs/vkd3d/libs/vkd3d-shader/hlsl_codegen.c"
+    }
+  },
+  "recipe_sha256": "2c4b1d84b1d75d1f2c8d0818aa0e80c81c993be4668235b3ed897a6e0918caf4",
+  "repair_compiled": false,
+  "repair_sanitizer_verified": false,
+  "schema": 1,
+  "status": "SOURCE_PREPARATION_PASS_RUNTIME_UNVERIFIED",
+  "upstream_notices": {
+    "Wine-COPYING.LIB": {
+      "bytes": 26434,
+      "git_blob": "732811e4f1faf71870b7350f211b26e00d7bfbe9",
+      "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c",
+      "upstream_path": "COPYING.LIB"
+    },
+    "vkd3d-AUTHORS": {
+      "bytes": 657,
+      "git_blob": "70a2fb8bc119cf77b8363c666563056547e670e1",
+      "sha256": "bdb8193da040d5748b991c9edf53d44895c21e1b6e6069a4c2268e700b442f97",
+      "upstream_path": "libs/vkd3d/AUTHORS"
+    },
+    "vkd3d-COPYING": {
+      "bytes": 786,
+      "git_blob": "383003017aadfe78be08cb6aadefbf2bf426cc48",
+      "sha256": "ba2942ea4fef8b3f674577cf100a2d44c44f237a6d9514067a776f6979dad1c5",
+      "upstream_path": "libs/vkd3d/COPYING"
+    }
+  },
+  "upstream_repository": "https://github.com/wine-mirror/wine",
+  "vkd3d_version": "1.18",
+  "wine_commit": "db11d0fe6a169c457e23d007e20404643d067aa8"
+}

@@ -1,0 +1,71 @@
+--- a/libs/vkd3d/libs/vkd3d-shader/hlsl_codegen.c
++++ b/libs/vkd3d/libs/vkd3d-shader/hlsl_codegen.c
+@@ -15246,6 +15246,8 @@
+     list_init(&semantic_vars);
+     list_init(&patch_semantic_vars);
+     hlsl_block_init(&global_uniform_block);
++    hlsl_block_init(&body);
++    hlsl_block_init(&patch_body);
+ 
+     LIST_FOR_EACH_ENTRY(var, &ctx->globals->vars, struct hlsl_ir_var, scope_entry)
+     {
+@@ -15262,16 +15264,14 @@
+ 
+     process_entry_function(ctx, &semantic_vars, &body, &global_uniform_block, entry_func);
+     if (ctx->result)
+-        return ctx->result;
++        goto cleanup;
+ 
+     if (profile->type == VKD3D_SHADER_TYPE_HULL)
+     {
+         process_entry_function(ctx, &patch_semantic_vars, &patch_body, &global_uniform_block, ctx->patch_constant_func);
+         if (ctx->result)
+-            return ctx->result;
+-    }
+-
+-    hlsl_block_cleanup(&global_uniform_block);
++            goto cleanup;
++    }
+ 
+     if (profile->major_version < 4)
+     {
+@@ -15298,7 +15298,7 @@
+     }
+ 
+     if (ctx->result)
+-        return ctx->result;
++        goto cleanup;
+ 
+     generate_vsir_signature(ctx, program, entry_func, &semantic_vars);
+     if (program->shader_version.type == VKD3D_SHADER_TYPE_HULL)
+@@ -15311,7 +15311,7 @@
+     else
+         sm4_generate_rdef(ctx, reflection_data);
+     if (ctx->result)
+-        return ctx->result;
++        goto cleanup;
+ 
+     if (program->shader_version.major < 4)
+         sm1_generate_vsir(ctx, compile_info, entry_func, &semantic_vars, &body, config_flags, program);
+@@ -15321,5 +15321,10 @@
+     if (ctx->result)
+         vkd3d_shader_free_shader_code(reflection_data);
+ 
++cleanup:
++    hlsl_block_cleanup(&patch_body);
++    hlsl_block_cleanup(&body);
++    hlsl_block_cleanup(&global_uniform_block);
++
+     return ctx->result;
+ }
+--- a/libs/vkd3d/libs/vkd3d-shader/hlsl.y
++++ b/libs/vkd3d/libs/vkd3d-shader/hlsl.y
+@@ -7048,6 +7048,8 @@
+ %token <name> STRING
+ %token <name> TYPE_IDENTIFIER
+ 
++%destructor { vkd3d_free($$); } <name>
++
+ %type <scope> annotations_opt
+ 
+ %type <arrays> arrays

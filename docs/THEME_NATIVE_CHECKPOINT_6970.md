@@ -357,3 +357,36 @@ readbacks, reparses the actual composition and lifecycle logs, and verifies
 actual KVM descriptors and the stopped owned PID. Its separate audit is
 `build/native-v13-root-audit-v1/audit.json`, SHA-256
 `65e6578d4d458f45a26ec33f71ddf14cbc27f8240b0a8220f2a8f9e1587c3794`.
+
+## Fresh v14: corrected source, resource-stop before native acceptance
+
+Commit `2e153ec` corrects the static metadata and checks the owned window before
+requesting foreground once. Normal and sanitizer composition runs each pass
+22,807 assertions plus 11 foreground assertions; 14 builder/verifier cases and
+the i486/OEM PE gate pass. These results do not replace a fresh native verdict.
+
+The new v14 nonce is `0e71805ae8b57cd85263f2aee6580672`. Actual KVM descriptors
+were observed for the owned QEMU PID 3766355. The unchanged 20-GiB guard stopped
+only this VM when free space reached 21,463,748,608 bytes, 11,087,872 bytes below
+the floor. Fifty-one captures were retained; no desktop, theme child or native
+observer completion was established. Four expected native logs were genuinely
+absent. The 94,208-byte private COW, all five staged files, exact WIN.INI change,
+unchanged MBR/VBR and 48 source/compiler/receipt hashes were checked. No verifier
+PASS or normal child exit is invented.
+
+The preserved index is
+`build/theme-native-runs/win98-gop-theme-6970-autostart-v14/handoff-evidence-index.json`,
+SHA-256 `f864ef30ff55dfa9822712eac1910db9afdd4f5bde3ced7f6a25475aa197a52f`.
+Its status is `FAIL-RESOURCE-FLOOR-NATIVE-UNVERIFIED`. A later retry needs a new
+nonce, fresh source-bound preparation, sufficient resource headroom and a new
+independently observed native result. V13 evidence remains immutable.
+
+## Publication and continuation checkpoint
+
+All current source work is being merged into GitHub `main` at the user's request.
+Publication is a development checkpoint. Genuine Korean/Latin DirectWrite
+trial v2 retains FAIL despite real alpha/Latin/framebuffer progress; see
+[DirectWrite probe](DIRECTWRITE_PROBE_6970.md). The full Wine graphics compiler
+repair is not yet sanitizer-verified; see [Wine graphics port](DIRECTX_WINE_PORT_6970.md).
+System-wide themes, complete DirectX/Direct2D/DirectWrite, Signal, Legcord,
+Office functionality and OS-wide TLS 1.3 remain required and incomplete.
