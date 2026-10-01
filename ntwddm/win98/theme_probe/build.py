@@ -132,7 +132,7 @@ def main():
                       "platform/freestanding/memory.c", "-lkernel32", "-luser32", "-lgdi32", "-o", str(probe)])
         observer = run_dir / "NTTHRUN.EXE"
         run(native + ["-Wl,--entry,_mainCRTStartup", "ntwddm/win98/theme_probe/observer.c",
-                      "platform/freestanding/memory.c", "-lkernel32", "-o", str(observer)])
+                      "platform/freestanding/memory.c", "-lkernel32", "-luser32", "-o", str(observer)])
         artifacts = {path.name: {"path": str(path), "sha256": digest(path), "bytes": path.stat().st_size,
                                  "pe98_gate": gate(path, is_dll)}
                      for path, is_dll in ((dll, True), (probe, False), (observer, False))}

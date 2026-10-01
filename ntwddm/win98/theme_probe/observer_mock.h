@@ -21,8 +21,10 @@ typedef struct { HANDLE hProcess, hThread; DWORD dwProcessId, dwThreadId; } PROC
 #define VER_PLATFORM_WIN32_WINDOWS 1u
 #define LOWORD(value) ((DWORD)(value) & UINT32_C(0xffff))
 #define GENERIC_WRITE UINT32_C(0x40000000)
+#define GENERIC_READ UINT32_C(0x80000000)
 #define FILE_SHARE_READ 1u
 #define CREATE_NEW 1u
+#define OPEN_EXISTING 3u
 #define FILE_ATTRIBUTE_NORMAL UINT32_C(0x80)
 #define FILE_ATTRIBUTE_DIRECTORY UINT32_C(0x10)
 #define ERROR_FILE_NOT_FOUND 2u
@@ -30,10 +32,14 @@ typedef struct { HANDLE hProcess, hThread; DWORD dwProcessId, dwThreadId; } PROC
 #define WAIT_OBJECT_0 0u
 #define WAIT_FAILED UINT32_C(0xffffffff)
 #define WAIT_TIMEOUT 258u
+#define MB_OK 0u
+#define MB_ICONERROR 16u
 char *GetCommandLineA(void);
 DWORD GetModuleFileNameA(HANDLE, char *, DWORD);
 HANDLE CreateFileA(const char *, DWORD, DWORD, void *, DWORD, DWORD, HANDLE);
 BOOL WriteFile(HANDLE, const void *, DWORD, DWORD *, void *);
+BOOL ReadFile(HANDLE, void *, DWORD, DWORD *, void *);
+int MessageBoxA(HANDLE, const char *, const char *, unsigned);
 BOOL GetVersionExA(OSVERSIONINFOA *);
 DWORD GetFileAttributesA(const char *);
 DWORD GetLastError(void);
