@@ -62,7 +62,7 @@ packaging alone.
 
 | Component | Source and evidence guide | Current boundary |
 | --- | --- | --- |
-| Native Win98 theme | [checkpoint](THEME_NATIVE_CHECKPOINT_6970.md), `ntwddm/win98/theme_composition` | Native v13 pixels/text/lifecycle observed, strict metadata gate FAIL; corrected v14 stopped at disk floor before desktop/child proof |
+| Native Win98 theme | [checkpoint](THEME_NATIVE_CHECKPOINT_6970.md), `ntwddm/win98/theme_composition` | v15 actual app-local Classic/Modern/Classic-back and child exit/reaping observed; raw framebuffer and native desktop repaint/full appearance remain unverified |
 | AMD64 theme | `ntwddm/win64/theme_provider`, `ntwddm/win64/theme_probe` | Actual isolated Windows ABI and visible pixels verified; global Win98/app themes pending |
 | Real Mesa resources | [graphics checkpoint](DIRECTX_GRAPHICS_CONTINUATION_6970.md), `ntwddm/graphics_backend` | Actual private resources/pixels and guest lifecycle verified; full DirectX COM/device APIs pending |
 | Wine graphics/compiler | [port guide](DIRECTX_WINE_PORT_6970.md), `ntwddm/win64/directx_wine_port` | 107 genuine AMD64 objects and normal shader tests verified; memory-leak repair and linked/runtime API libraries pending |
@@ -111,7 +111,11 @@ four roots. Historical v14 plans lack this source-bound budget and cannot be
 executed with the new wrapper. Generate a fresh plan and nonce, then select its
 actual SHA-256. The immutable source-test receipt SHA-256 is
 `f5fda36ba71d1e0e4ffeda2bfcf5f596ebe750b0cc2939206f32e64af2c2d362`.
-These 60 passing checks do not establish a new native trial result.
+These 60 passing checks are source/resource validation. The subsequent one-shot
+v15 OEM control reached the real Windows 98 desktop and confirmed app-local
+composition, child exit 0 and reaping; see the checkpoint above. The original
+NEEDS review statuses and unverified raw framebuffer/desktop repaint remain.
+This does not establish ShizukuDOS replacement or system-wide theme support.
 
 A separate disk optimizer recovered exact allocated blocks without deleting
 originals, source/license trees or VM evidence. The latest bounded cache pass

@@ -390,3 +390,48 @@ trial v2 retains FAIL despite real alpha/Latin/framebuffer progress; see
 repair is not yet sanitizer-verified; see [Wine graphics port](DIRECTX_WINE_PORT_6970.md).
 System-wide themes, complete DirectX/Direct2D/DirectWrite, Signal, Legcord,
 Office functionality and OS-wide TLS 1.3 remain required and incomplete.
+
+## Fresh v15 after disk recovery: native component progress
+
+The resource-guard repair is committed as
+`d7220eb23da8b565b986c31e2a5125c163341d6e`; root repeated all 60 runner/startup
+tests before selecting a new preparation. This one actual retry used plan
+SHA-256 `5495b55ec066d20facf8ab402f0b3af3e338ce47f3c11aad7efe9818e50d3c29`
+and fresh nonce `c91d358237284e97789d37ea0ec50796`. The protected installed
+Windows 98 base and old failed v14 artifacts were preserved. This is an OEM
+native control, not proof that ShizukuDOS has replaced MS-DOS.
+
+Actual Windows 98 4.10.2222 launched the bootstrap, observer and theme child.
+The component log records Classic → Modern → Classic, 84 background samples,
+21 text regions and 63 live screen samples with no mismatches. Cleanup is PASS.
+The observer independently recorded child exit 0, reaping and closed handles,
+without forced termination; the bootstrap recorded the observer's actual exit
+0. The bootstrap's own external exit remains NOT-OBSERVED. Root read the exact
+four guest logs and inspected existing Classic/Modern/Classic-back screenshots.
+The Modern and Classic-back clients are fully in front of Welcome. Initial
+native title/background repaint and post-close desktop damage remain visible.
+
+The owned QEMU exited normally after the recorded control queue finish; both
+owned process IDs disappeared and the shared lane was released. Ninety captures
+and 452.8 seconds are retained. Execution's final aggregate host output was
+16,134,086 bytes against 16,777,216; minimum VM free space was 22,912,917,504
+bytes against the unchanged 21,474,836,480 reserve. Final/peak net exclusive
+COW growth was 499,712 bytes against 268,435,456. Final receipt byte accounting,
+originals and frozen source/input guards passed.
+
+The preserved run receipt is
+`build/theme-native-runs/win98-gop-theme-6970-autostart-v15-diskretry/result.json`,
+SHA-256 `f4cc185263f7dc1c3789576d4260715cdfc7bc7a93971c1ba8088e62e4acbc6d`.
+Its canonical NEEDS-VISUAL-REVIEW and startup NEEDS-NATIVE-AND-VISUAL-REVIEW
+statuses are retained. A separate raw framebuffer capture could not fit the
+remaining host budget and was omitted; that gate remains unverified. The
+records demonstrate app-local composition and child lifecycle progress. Native
+desktop repaint, full visible output, system-wide themes and the ShizukuDOS
+Windows 98 replacement path still require implementation and validation.
+
+The immutable scoped review in the counted bootstrap output root has SHA-256
+`d8aebc95f63db82e6e491bf8781ca1712b678662ff879856a80455dd0053804f`.
+It preserves these limitations and separately accounts for the post-trial
+review: 16,152,909 bytes, still below the fixed 16 MiB limit. Root's independent
+log/image review SHA-256 is
+`ce2bc646c581857e5c1f324abc8f64d45b1a31a5659a243a9f00f9a03a633bda`.
