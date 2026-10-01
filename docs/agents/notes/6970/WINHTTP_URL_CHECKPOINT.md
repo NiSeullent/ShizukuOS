@@ -33,3 +33,25 @@ full compiler/linker/runtime provenance or execute networking/Windows.
 No local compiler or runner was started. AST/static source checks passed;
 hosted RED must precede any small production change, followed by the identical
 fixture's HOST/ASan/UBSan GREEN. Results will be recorded here when obtained.
+
+## Actual unchanged-production RED
+
+[Run36921050473](https://github.com/NiSeullent/Win98-Modern/actions/runs/36921050473)
+atb6901b4d510248a9b226b47bbe4513c1d086a010 actually compiled the complete
+unchanged production TU with GCC13.3. The fixture exited1 after110 checks with
+exactly25 expected omission failures; passing controls were retained. The four
+actual commands exited0,0,0,1 and were reaped. Six project inputs matched
+before/after;40 actual GCC include files and compile dependency paths matched.
+
+Full46,373-byte receipt SHA256:
+8823c3547fd9934ac3f8cb260d5206c7c9616c3e144ca047c41a0e44f3112a1b.
+Root reconstructed/hashed the actual logged receipt and compared project pins
+against the exact tested source. Minimum observed free92,387,663,872B,
+final output81,428B, peak observed113,435B, no resource failure and accounting
+verified. Neither compilation nor failure involved a Windows/network call.
+
+The proposed small production fix chooses the full path end only when
+ExtraInfo is unrequested; explicitly borrowed/requested ExtraInfo keeps its
+separate suffix. No exported ABI or other request/provider path changes.
+The fixture, guarded runner and shims remain unchanged for hosted GREEN.
+Actual GREEN, canonical import and native Windows execution remain pending.
