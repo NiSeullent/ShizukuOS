@@ -152,3 +152,54 @@ Refreshed F2 VxD: 18161 bytes, SHA-256
 `4b58e25bd4e19c111bb0a5fac760db19bf3ce6d604b44e230511168717c8e2ca`.
 F2 is ready for independent review and master-scoped commit; no index or commit
 mutation was performed by this lead.
+
+## Receipt correction — external and transitive project inputs
+
+The cross-subsystem review reproduced a receipt attribution gap: the build
+manifest checked external ABI headers initially, but the test receipt's final
+source-stability check omitted them. Persistent changes to either `shz_ipc.h`
+or `shz_abi.h` could therefore publish a passing receipt with older build
+attribution. This correction changes only `ntwrapper/vxd/test.py`, its
+source-stability fixtures in `tests/test_vxd.py`, and this status file. The
+production bridge and actual project headers are untouched. The separate
+copied-channel integration fix belongs to c957 and awaits root's import.
+
+The driver now binds every manifest source plus the project dependency closure
+reported by the native i486 compiler, MinGW probe compiler, host ASan/UBSan and
+TSan variants, and NASM. The preprocessing flags match those variants. Receipt
+hashes record the initial contents; a changed or removed input prevents success
+and is named in `changed_inputs`. External ABI headers are pinned before
+dependency discovery and checked again before tests. System/toolchain headers
+are explicitly outside this project-source receipt's scope. Existing receipt
+and log bytes are copied to `host-test-history/previous-*` before starting a new
+test run, with the archive directory recorded in the new receipt.
+
+RED with the previous driver: the isolated fixtures failed five assertions
+across three test groups. Either external-header mutation was still accepted,
+an added transitive include was absent from the recorded hashes, and previous
+receipt/log bytes were overwritten. Evidence is retained at
+`build/pma-win98-vxd-receipt-binding/receipt-fixtures-red.log`.
+
+Fresh bounded check:
+
+```sh
+python3 -B -m unittest discover -s ntwrapper/vxd/tests -p test_vxd.py -k SourceStabilityTests -v
+```
+
+Exit 0: **3 tests, OK**. Controls succeed; independent persistent mutations to
+each ABI header and to a nested header absent from the fixture manifest are
+rejected. The nested header is present in both native and host dependency lists.
+The fixtures exercise temporary paths containing spaces and preserve prior
+receipt/log bytes exactly. They run the real receipt driver against copied
+project sources and dummy artifacts, emit no native or guest binary, and do not
+execute the compiled C tests. Before/after hashes confirm the actual project
+ABI headers remained unchanged. GREEN log and header-hash evidence are retained
+at `build/pma-win98-vxd-receipt-binding/receipt-fixtures-green.log` and
+`receipt-fixtures-green.json`.
+
+The existing 13 VxD groups were not repeated during the pending ABI/bridge
+import. Root must rebuild and run the complete combined suite after importing
+that fix; the three new fixture groups will make the complete suite 16 groups.
+This receipt correction adds source attribution evidence, with no new claim of
+Windows loading, real VMM calls or a positive Supervisor/PMA round trip. No Git
+index or commit mutation was performed by this lead.

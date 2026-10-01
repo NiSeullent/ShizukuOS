@@ -2,11 +2,16 @@
 SPDX-License-Identifier: GPL-2.0-only
 """
 import importlib.util
+import hashlib
+import json
 import os
 from pathlib import Path
 import random
+import shutil
 import struct
 import subprocess
+import sys
+import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parents[1]
@@ -16,6 +21,103 @@ def module(name):
     result=importlib.util.module_from_spec(spec);spec.loader.exec_module(result);return result
 writer=module('le')
 reader=module('inspect_le')
+
+
+class SourceStabilityTests(unittest.TestCase):
+    """Run the real receipt driver against isolated source copies and dummy
+    artifacts. These fixtures test attribution, not VxD execution or acceptance.
+    No project source/header is mutated by the fixtures."""
+    def prepare_fixture(self, root, changed=None, nested=False):
+        vxd=root/'ntwrapper/vxd'
+        shutil.copytree(HERE,vxd,ignore=shutil.ignore_patterns('build','__pycache__','tests'))
+        (vxd/'tests').mkdir()
+        for path in (HERE/'tests').iterdir():
+            if path.suffix in ('.c','.asm'):
+                shutil.copy2(path,vxd/'tests'/path.name)
+        shutil.copy2(HERE.parent/'core.c',root/'ntwrapper/core.c')
+        shutil.copytree(HERE.parent/'include',root/'ntwrapper/include')
+        abi=root/'shizukudos/abi'
+        shutil.copytree(HERE.parents[1]/'shizukudos/abi',abi,
+                        ignore=shutil.ignore_patterns('build','__pycache__'))
+        if nested:
+            (abi/'receipt_dependency.h').write_text('/* initial dependency fixture */\n')
+            ipc=abi/'shz_ipc.h'
+            ipc.write_text('#include "receipt_dependency.h"\n'+ipc.read_text())
+        mutation='' if changed is None else (
+            f"        target=root/{changed!r}\n"
+            "        target.write_bytes(target.read_bytes()+b'\\n/* persistent fixture mutation */\\n')\n")
+        (vxd/'tests/test_receipt_fixture.py').write_text(
+            'from pathlib import Path\nimport unittest\n'
+            'class ReceiptFixture(unittest.TestCase):\n'
+            '    def test_fixture(self):\n'
+            '        root=Path(__file__).resolve().parents[3]\n'+mutation+
+            '        self.assertTrue(root.is_dir())\n')
+        out=root/'build/vxd-fixture'
+        out.mkdir(parents=True)
+        for name in ('NTWRAP9X.VXD','NTWRAP9X.elf','NTWQUERY.EXE'):
+            (out/name).write_bytes(('receipt fixture: '+name).encode())
+        # Use native-target preprocessing flags and a manifest source set. This
+        # fixture emits no native/guest binary and runs no compiled C test.
+        sources={str(path.relative_to(root)):hashlib.sha256(path.read_bytes()).hexdigest()
+                 for path in root.rglob('*') if path.is_file() and 'build' not in path.relative_to(root).parts
+                 and path.name!='receipt_dependency.h'}
+        manifest={'sources':sources,'compiler_flags':['--target=i386-unknown-none-elf','-march=i486',
+                  '-std=c11','-ffreestanding','-mno-sse','-mno-mmx','-msoft-float'],
+                  'sha256':hashlib.sha256((out/'NTWRAP9X.VXD').read_bytes()).hexdigest(),
+                  'probe':{'sha256':hashlib.sha256((out/'NTWQUERY.EXE').read_bytes()).hexdigest()}}
+        (out/'manifest.json').write_text(json.dumps(manifest))
+        return vxd,out
+
+    def run_fixture(self, root, vxd, out):
+        result=subprocess.run([sys.executable,'-B',str(vxd/'test.py'),'--out',str(out)],
+                              cwd=root,capture_output=True,text=True,timeout=30)
+        self.assertTrue((out/'host-tests.json').is_file(),result.stdout+result.stderr)
+        return result,json.loads((out/'host-tests.json').read_text())
+
+    def test_receipt_external_header_control_and_persistent_mutations(self):
+        for changed in (None,'shizukudos/abi/shz_ipc.h','shizukudos/abi/shz_abi.h'):
+            with self.subTest(changed=changed),tempfile.TemporaryDirectory(prefix='ntwv receipt ') as folder:
+                root=Path(folder)
+                vxd,out=self.prepare_fixture(root,changed)
+                original={name:hashlib.sha256((root/name).read_bytes()).hexdigest() for name in
+                          ('shizukudos/abi/shz_ipc.h','shizukudos/abi/shz_abi.h')}
+                result,report=self.run_fixture(root,vxd,out)
+                self.assertEqual(result.returncode,0 if changed is None else 1,result.stdout+result.stderr)
+                self.assertEqual(report['passed'],changed is None)
+                self.assertEqual(report['inputs_unchanged_during_test'],changed is None)
+                for name,digest in original.items():
+                    self.assertEqual(report['hashes'].get(name),digest)
+                if changed:
+                    self.assertIn(changed,report['changed_inputs'])
+
+    def test_receipt_discovers_nested_project_include_and_rejects_its_drift(self):
+        changed='shizukudos/abi/receipt_dependency.h'
+        with tempfile.TemporaryDirectory(prefix='ntwv-receipt-nested-') as folder:
+            root=Path(folder)
+            vxd,out=self.prepare_fixture(root,changed,nested=True)
+            original=hashlib.sha256((root/changed).read_bytes()).hexdigest()
+            result,report=self.run_fixture(root,vxd,out)
+            self.assertEqual(result.returncode,1,result.stdout+result.stderr)
+            self.assertFalse(report['passed'])
+            self.assertEqual(report['hashes'].get(changed),original)
+            self.assertIn(changed,report['changed_inputs'])
+            self.assertIn(changed,report['project_dependencies']['native_i486'])
+            self.assertIn(changed,report['project_dependencies']['host_w64_asan_ubsan'])
+
+    def test_receipt_preserves_previous_receipt_and_log_before_run(self):
+        with tempfile.TemporaryDirectory(prefix='ntwv-receipt-history-') as folder:
+            root=Path(folder)
+            vxd,out=self.prepare_fixture(root)
+            previous=b'{"historical_receipt": true}\n'
+            log=b'historical receipt fixture log\n'
+            (out/'host-tests.json').write_bytes(previous)
+            (out/'host-tests.log').write_bytes(log)
+            result,report=self.run_fixture(root,vxd,out)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('previous_receipt_directory',report)
+            history=root/report['previous_receipt_directory']
+            self.assertEqual((history/'host-tests.json').read_bytes(),previous)
+            self.assertEqual((history/'host-tests.log').read_bytes(),log)
 
 class VxDTests(unittest.TestCase):
     @classmethod
