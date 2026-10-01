@@ -1,5 +1,5 @@
 {
-  "schema": 2,
+  "schema": 3,
   "date": "2026-10-01",
   "branch": "codex/theme-tls-5abe",
   "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
@@ -71,6 +71,66 @@
     {
       "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-tls13-5abe-native-v7/result.json",
       "sha256": "af59c776542dab98aec930dd973610cda0ad5f52bef00e37e258bb1231214fef"
+    },
+    {
+      "path": "build/disk-cleanup-5abe-20261001/bounded-maintenance-checkpoint.json",
+      "sha256": "013b2e82a903644a2275fb477926052306b5eeedada88617fcf7015b0a2a10da"
+    },
+    {
+      "path": "build/trident-automation-v4/result.json",
+      "sha256": "20b983e4c5c3fdbaa6beb8973d521e2cc334314aa31e1555bc8f033c3594372e"
+    },
+    {
+      "path": "build/trident-observer-v2/result.json",
+      "sha256": "7b1e29758d8df087054e3ddf502b7282b2e01ed214eee946f8bddc70a8d54206"
+    },
+    {
+      "path": "build/trident-script-v10/result.json",
+      "sha256": "7e036db6906484a046c1253e4668930c4d85645f492ce2bf9a626fd6a1cbf716"
+    },
+    {
+      "path": "build/trident-automation-verifier-v2/result.json",
+      "sha256": "cae7de247e4e4e1e165a31e91c713890ba279b3a1a236090ab750955b3c50fa8"
+    },
+    {
+      "path": "build/trident-script-observer-v10/result.json",
+      "sha256": "94c5004e13571ffd6de7e814dbbf8080fda853ac0dfd203f50b4d4e1ebb71959"
+    },
+    {
+      "path": "build/trident-script-verifier-v2/result.json",
+      "sha256": "aeb7e5a4d789bca24de7c0ecba4058db537372c91dfbc721fbf87a312041680e"
+    },
+    {
+      "path": "build/test262-selected-v5/result.json",
+      "sha256": "faa4bb2b389e69e6e20c3f5253e2479f0d8d28b865e0e1b1c0fa9fa442eca3a3"
+    },
+    {
+      "path": "build/trident-stager-validation-v1/result.json",
+      "sha256": "edb0d2c50bfd39f0e6406a80dfd70df63db5a838f21e5e59440a2715021653b2"
+    },
+    {
+      "path": "build/trident-stager-profile-controls-v1/controls.json",
+      "sha256": "3e09ee8d5ccc5b86a32e46a66ac7b45a881c6b0ab51839b8b71a175917f763fe"
+    },
+    {
+      "path": "build/trident-stager-profile-controls-v1/nonce-control-result.json",
+      "sha256": "c8c6656f1c33a9b28a01ed82421acdc71f60711d8eaf52e07ee98fd9f5846310"
+    },
+    {
+      "path": "build/tls13-native-retry-v8/queue-refusal.json",
+      "sha256": "7ce891f2c4cab915b060d0d0dec07b233e35be1f557a893e2f7bfa1d1f629716"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/trident-automation-native-5abe-20261001-v1/guest-files.json",
+      "sha256": "13eddef2f02f8bfc3a1ba331aaf8fa027e334cff8e7a2a225ddeeab517e46a9a"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/trident-script-native-5abe-20261001-v1/guest-files.json",
+      "sha256": "5ee49445c47e45537e7fbc563dea4007b345f6b6469305c5aa76c7c3e65b57eb"
+    },
+    {
+      "path": "benchmarks/modern-web-targets-v1.json",
+      "sha256": "b8194c9fa5de0d7d09419334daf70eed6195928839a3dbfbe2c3ecf1a6f16657"
     }
   ],
   "theme": {
@@ -130,12 +190,17 @@
   "guest_constraint": {
     "selected_reserve_gib": 20,
     "prepared_copy_floor_bytes": 21991407616,
-    "free_bytes_at_checkpoint": 17185447936,
-    "free_space_below_selected_reserve": true,
+    "free_bytes_at_checkpoint": 59097595904,
+    "free_space_below_selected_reserve": false,
     "no_original_or_active_vm_logical_bytes_modified": true,
     "approved_closed_clone_allocation_sharing_only": true,
     "native_queue_owned": false,
-    "latest_attempt_safely_blocked_before_qemu": true
+    "latest_attempt_safely_blocked_before_qemu": true,
+    "root_queue_owned": false,
+    "guard_recheck_required_before_every_trial": true,
+    "space_observation_utc": "2026-10-01T08:12:53.279424+00:00",
+    "prepared_copy_floor_with_staging_bytes": 22058516480,
+    "queue_observation": "peer6970 queue holder seen by independent agent08:11:27UTC; no own new native run"
   },
   "completion": {
     "user_objective_complete": false,
@@ -144,18 +209,30 @@
       "fresh_native_latest_lts_tls_dll_protocol_pass",
       "actual_win98_native_tcp_tls_network_pass",
       "system_schannel_winhttp_wininet_integration",
-      "genuine_mshtml_modern_script_execution_and_events",
-      "html5_layout_and_browser_wasm",
+      "native_runtime_and_genuine_mshtml_modern_script_events_input_paint",
+      "complete_latest_javascript_conformance",
+      "complete_latest_css_style_layout_paint",
+      "modern_browser_wasm_core_js_web_api",
+      "webgpu_wgsl_shader_compute_and_gpu_cts",
+      "webgl2_extensions_shaders_and_khronos_conformance",
+      "html5_dom_navigation_origin_transport",
       "latest_legcord_signal_libreoffice_functionality"
     ]
   },
   "owned_source_sha256": {
-    "THIRD_PARTY.md": "718e866a4bfd7ac111e4bcf220268b3db8664120144546a2c49a7576b27d8df1",
+    "THIRD_PARTY.md": "e47c1c8a920cf1aa11073cd1e3b9d3fa9790b47de3409f807b44e16256833d67",
     "benchmarks/modern-app-targets-v1.json": "b3722f3c127480e8c2ce61006dca052d997b3a635c7722b9b8ecee6621607814",
-    "docs/MODERN_THEME_TLS_APPS.md": "5c59539567f17a1b1d7995e2d7be9eb0c49c169d431107355f6409b89401e2f1",
+    "benchmarks/modern-web-targets-v1.json": "b8194c9fa5de0d7d09419334daf70eed6195928839a3dbfbe2c3ecf1a6f16657",
+    "docs/MODERN_THEME_TLS_APPS.md": "c6c36cfc7a4fc763c4de79f23e28922b2438a5e3b76847ad20ab03bd21182e8e",
     "docs/THEME_NATIVE_EVIDENCE.md": "8ea864696546587527c32c92acea505888ba83717398970bb7104ad40ab47f43",
+    "docs/TRIDENT_AUTOMATION_NATIVE_EVIDENCE.md": "ca6008f43eb5517caa34ca372f3bec6a6826cff8d4503d20f8a6785ad28caa5f",
+    "docs/TRIDENT_CSS_GPU_HANDOFF.md": "163a2c6dc4c6939145e87009c60d639ee4da4e1dc27a3168ab7d55fb9fe05cc2",
     "docs/TRIDENT_MODERNIZATION_HANDOFF.md": "cd521140d1c4e975d765697ab75a0b3b37fff42c6628ba0f449656767de63fa9",
-    "docs/modern-apps-coordination-5abe.md": "7c65222293fb57024b38e1f35a834014a2f167349fa0bfc9904edb4d35b44629",
+    "docs/TRIDENT_NATIVE_STAGE_HANDOFF.md": "6c77a3d590b2af6335e013f1d17b90019fcdd7f01ec401f37266f9a800d80ba8",
+    "docs/TRIDENT_SCRIPT_NATIVE_EVIDENCE.md": "fca20043bc1a175750e94d04edb78a16aadab943542bac3e6a9e7f7ecc3d3699",
+    "docs/TRIDENT_TEST262_SELECTED.md": "dc0bbdba15ef969c46add3fed951651ceefa4e027dec9c0fceafd87fd789cf5a",
+    "docs/TRIDENT_WASM_HANDOFF.md": "1b329a8ed8183eb9d049751c722ec8cf13b98c93457a7364f60651760309b9b9",
+    "docs/modern-apps-coordination-5abe.md": "d455a1eb0e902fa45f1f8d49bc6aaeaaa3d412bd412cc9c3ddb4509d1183a130",
     "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
     "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
     "src/m98_dns_config.c": "b0b3a4fba1d86c0806e02aa4f1688548ba00265bf0458f6baf11934631d17b33",
@@ -174,6 +251,17 @@
     "src/m98_tls13_native_HANDOFF.md": "d936e2c834fe23aef80d0b8495b41dc08285d999fba7cf37ff2973fe42fb5980",
     "src/m98_tls13_native_win32.c": "d38c25aea02848b18719414363b4adccbf14eb2d9436026fc3f48ed40edb0117",
     "src/m98_tls13_protocol_config.h": "b5fd6110715cd7ae9d3ec6bbf1fdd77f73014c768fa7f314b8ba3409246eccd1",
+    "src/m98_trident_automation.cpp": "7ecff16195548bf681170b97f0a4626c51639b3d287962e3eb6a9aaa425bf358",
+    "src/m98_trident_automation.h": "9941b31b323712ecfaaf6200aed5aed96294267398793efaeef1d9f3a94aa616",
+    "src/m98_trident_automation_HANDOFF.md": "bbe485a76f08d995a2fda094a349d7220b1894fcca6208d0d4166de15b699f5f",
+    "src/m98_trident_script.c": "40a3594813db6b232984525d5646b72f73fcaad3dbe82d8224f6f64fe81add98",
+    "src/m98_trident_script.def": "6e906a3631ce0b777fca65f6d77765b337e2659dc5d81b0b1692f2cc52f3bac6",
+    "src/m98_trident_script.h": "e63b2421d87cbb637fa24768a6d0dcaba21dd97c1cc121258ae95b0d2cd97c11",
+    "src/m98_trident_script_HANDOFF.md": "c8b89002a6188cab081ae86f3ae195d5dd2854115814451666ec285445301251",
+    "src/m98_trident_script_fp.c": "bfd4f81fb5095708e4e09d235d1bf83a8969a03a5ef5b85804037a4b6cc1daf4",
+    "src/m98_trident_script_port.c": "056a8ab07f1680b2cc252fded07424b0d1249d2ff440b881e0edb32698064ee6",
+    "src/m98_trident_script_port.h": "ad71e7b97cf61fe2e4921811a66c10853458281a01534f62743016073a987127",
+    "src/m98_trident_script_win32.c": "af04669d0899a3f18f7dd2bb2591276602345078e94dbd2ebdea7543228c86f3",
     "src/uxtheme_engine.def": "f33e0a2fe80ce964f2374cb13fea51cce4ece80845ef9e0ff811edb87cfdd350",
     "src/uxtheme_engine_HANDOFF.md": "65fcb4ea402244b64ae67eb9f777ecfebe6dd47a7c19208bb77d8f84e51360df",
     "src/uxtheme_engine_core.c": "93b106d1b068e8b5b370c76e1871060cb24a55f79635d1e6b08cf709980890a2",
@@ -197,9 +285,27 @@
     "tests/m98_tls13_native_win32_mock.c": "158551e2c6aff499ecd54d14bd9b12b862597812aa12a77473ce951c43bf21c3",
     "tests/m98_tls13_native_win32_mock.h": "246e1be4fbbfc1e7a07024d1510951e1766c2ac9fdc0163f784845b7d6a74060",
     "tests/m98_tls13_pe98.py": "d96118a18a670c0bc8c6e7c3bd4470a6e0b57a494f8827036948899b1902946f",
+    "tests/m98_trident_automation_guest.cpp": "8412218599740f20f055d478dc2e2ed9aa8fc8e2d265348d11d093de58146f27",
+    "tests/m98_trident_automation_host.cpp": "075579aea5fd610e5078449a45b5599af913f95591a7f6d798fc5cc6bdab34b6",
+    "tests/m98_trident_automation_mock.h": "ea15d7699bbfe9567d1af2ff1d2abd5f70e34fa8dfc3f044aa04cecc51b9db0a",
+    "tests/m98_trident_guest_runner.c": "84be4adf960cffd3afc5ee119a30b19467c11d0784f5b6c3966957bcaf0ea2f0",
+    "tests/m98_trident_guest_runner_HANDOFF.md": "21005e5de22bc6117faea77415ef0e5a0070a0d5ec94d711ecff1384b84f85b7",
+    "tests/m98_trident_guest_runner_mock.c": "3a485be6c2af6b9faa39b48fbf7505eb9eeb93f2203b3c83c284327e13a57cef",
+    "tests/m98_trident_script_guest.c": "d0a394a75bf757a2bef4acea14dd32a7926116ecac23a15b85c90808238bcab7",
+    "tests/m98_trident_script_host.c": "bb34d6fb5aa56b6cd25e4235e005b85987d29489b60f71ca62bf5541974cb7f0",
+    "tests/m98_trident_script_platform_host.c": "9183d9efd89b7f2087b95a94ef5194699d3713193a414bb327b5aaa47fcfe8a9",
+    "tests/m98_trident_script_port_host.c": "fee88cdc01b154f2f08a5a7d7d7cd859b399d03a7c9e717450121db56bb3d1f6",
+    "tests/m98_trident_script_sanitizer_fault.c": "f39cd3021d476b524101a0d2a0d0c2e82d4a8963e38344262b3909318207ef1e",
+    "tests/m98_trident_script_win32_mock.c": "787b0036f405ffedc8d2d05bc907090a98fd26da1a1cfea1855837074637c290",
+    "tests/m98_trident_script_win32_mock.h": "e5a434db3fe483746035b7d8ac85c2b9900c83e7156f4fef09010d7b3e01b1c4",
+    "tests/m98_trident_test262_host.c": "29e499c20223fdf7f41461bed06d4c2ce4b75672c4733f4d3697c58d4dc9fe9e",
     "tests/test_m98_tls13_guest_evidence.py": "cbaecc7eea4d5c2be8441a89eec7a0bc2553380134ea7831e7a38e20d0100557",
     "tests/test_modern_app_inventory.py": "e6e3ee9f59e30ddf786f1509d3bb389f96495ad24eea123c1c66bf5482b7c717",
     "tests/test_verify_theme_native.py": "e4688647c23432e3edd04aef4ed282c83f1b2b07221eb5be333e438ead425da1",
+    "tests/test_verify_trident_automation_native.py": "7e75c3f61bed739bf5cf4eea0b8fd0393b95df91cc9b4592b73f5ff9e0c5eac8",
+    "tests/test_verify_trident_script_native.py": "556ec1f479880379f15cc5e27b3dcc8cfab3bb6f3f30d3ae307f22b2e47fa0da",
+    "tests/trident_es2026_selected.js": "9e480643b5c227f9d51436567e3e2fc74fec0136426512fe84978452e41d98ff",
+    "tests/trident_numeric_selected.js": "bafe25adc040e784e6c536d2c616b8c78d7d358a7db12e189adea5fff9307551",
     "tests/uxtheme_engine_guest.c": "a7cf7a00ef0f075a85937993918d3ee3b3a09240b2ed62018aae7a87d3ea79dd",
     "tests/uxtheme_engine_host.c": "8b8951ba4e995035ec3c6bbf5e4f1de24b1db6bb998616ec1480c1c30ec97341",
     "tests/uxtheme_guest_runner.c": "1955957a9279445708dc1a11c2888b8d9906e0cc3cae8029a1116f893d5b5b74",
@@ -212,16 +318,29 @@
     "tools/build_tls13.py": "adce018582b146b2ec95939f3180f73e80ed8511a3ef34bff52ac63193624aaa",
     "tools/build_tls13_guest_interop.py": "d3d7c523a18e0ec4384dc05742eb43441aa7902d5fc34cd98f172fcf4d7917a6",
     "tools/build_tls13_native.py": "a0c38e56ef4f8885da42d8e407b99ae8b6abc0bcc42b3024392c8bb04cf7f59f",
+    "tools/build_trident_automation.py": "c1c15ee519730fd0447719db785d9deefb8d7a08e8192a8e61e1751434818ea5",
+    "tools/build_trident_guest_runner.py": "2845b647af18b57656eaaa38bad35bc8aba0a92825f612568458d9935957fceb",
+    "tools/build_trident_script.py": "f80ad33d1ec86bca368b0beaa35f1d4fa5e08eb07752d0a53ff61489c230b1eb",
+    "tools/build_trident_test262_selected.py": "283274869fcf460c8625cc15cf6d47c2525eaad5f422279e1a67e045cc2ac3e2",
     "tools/modern_app_inventory.py": "cbe2f50d15a8ceb7e22b977c6948a9bfe63fcfbc7e6b3ae764aec052872f560d",
+    "tools/stage_trident_automation_native.py": "8f05b9105583ff11276207af6cba6c075741bf7cc1a73ef9ad17a12b5606c8a1",
+    "tools/stage_trident_script_native.py": "532044a04549ff0b8d7d09de0be897d4c0ed044791edacdb83ed2407879ea260",
     "tools/verify_theme_native.py": "2a179ba3b3213a05b0ac35f0bc8a3afe3da61c6a27777e188ddb2798453bd569",
-    "tools/verify_tls13_guest_evidence.py": "a2a696ef416060eca4ee6a381dd5cf6ba38edce9183d0eef1ad99c1b89066226"
+    "tools/verify_tls13_guest_evidence.py": "a2a696ef416060eca4ee6a381dd5cf6ba38edce9183d0eef1ad99c1b89066226",
+    "tools/verify_trident_automation_native.py": "955be0f0d70a91fa22dbeab27074eeef223699414476d80b8b749dca22252a65",
+    "tools/verify_trident_script_native.py": "72916dd0e4875ae35f96d3cdd6f8f8d18f48021245d62af3e1fc7483863c4083"
   },
-  "updated_utc": "2026-10-01T06:49:44.848017+00:00",
+  "updated_utc": "2026-10-01T08:12:53.279424+00:00",
   "source_commits": {
     "foundation": "a12a4a95e9f3fbddcea82d69f124876d22fb660f",
     "dns_config": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
     "native_observers": "b872bebb51d71674bfe4448b914ee7c523810364",
-    "native_tcp_adapter": "c39f6c928ab1b1315294b6112d3f69e53f0189f0"
+    "native_tcp_adapter": "c39f6c928ab1b1315294b6112d3f69e53f0189f0",
+    "trident_automation": "09e628563b69bd24d84a38750174310be1bdda2e",
+    "quickjs_runtime": "eb85c4d7ade672604016203fe5ffc2007b259af6",
+    "modern_web_targets_and_automation_acceptance": "0acecf9499a48f57006f68bb400d77825bc0ea2d",
+    "script_native_acceptance": "89a6df0f4615d31a0c7b34d312d1e00d2eaec303",
+    "test262_selected": "eb6571ac6ab5a8705e64bc9d8546e54f741141df"
   },
   "dns_config": {
     "source_commit": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -232,17 +351,86 @@
     "standard_dns_module_integrated": false
   },
   "browser": {
-    "direction": "Modernize Trident toward HTML5/WASM/current JavaScript standards; full WebKit optional",
+    "direction": "Modernize actual Trident/MSHTML; full WebKit optional; latest JavaScript/CSS/browserWASM/WebGPU/WebGL all mandatory",
     "relay_to_all_live_child_agents": true,
     "cross_session_direct_acknowledgment": false,
     "shared_coordination_note": "/root/Win98-Modern-boot/docs/modern-apps-coordination-5abe.md",
-    "genuine_mshtml_automation_bridge": "in_progress",
-    "real_quickjs_runtime": "in_progress",
+    "genuine_mshtml_automation_bridge": "actual_component_host_and_PE_passed_native_pending",
+    "real_quickjs_runtime": "actual_runtime_host_sanitizer_and_i486_PE_passed_native_pending",
     "upstream_release": "2026-06-04",
     "upstream_archive_sha256": "b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a",
     "actual_native_browser_js_verified": false,
     "html5_layout_verified": false,
     "wasm_browser_verified": false,
-    "es2026_conformance_verified": false
+    "es2026_conformance_verified": false,
+    "mandatory_standards": [
+      "HTML5 DOM/layout",
+      "latest JavaScript",
+      "latest CSS",
+      "modern browser WebAssembly",
+      "WebGPU/WGSL",
+      "WebGL2/current extensions"
+    ],
+    "css_core": "real_syntax_and_variables_v2_corrections_in_progress",
+    "wasm_runtime": "pinned_real_interpreter_implementation_in_progress",
+    "complete_javascript_verified": false,
+    "complete_css_verified": false,
+    "webgpu_verified": false,
+    "webgl_verified": false,
+    "selected_test262": {
+      "revision": "7ab7fafa0003f73fc85c1b95d88094d33f7eb8bd",
+      "selected_originals": 174,
+      "executed_originals": 170,
+      "variants": 338,
+      "passed": 334,
+      "failed": 4,
+      "excluded_originals": 4,
+      "command_exit": 1,
+      "full_host_protocol": false,
+      "native_execution": false,
+      "failure_feature": "still-proposed immutable-arraybuffer, not completed ES2026",
+      "receipt_sha256": "faa4bb2b389e69e6e20c3f5253e2479f0d8d28b865e0e1b1c0fa9fa442eca3a3"
+    },
+    "runtime_v10": {
+      "interpreter_assertions": 1293,
+      "format_assertions": 32,
+      "win32_platform_os_double_assertions": 510,
+      "normal_and_sanitizers_passed": true,
+      "dll_instructions_decoded": 225883,
+      "probe_instructions_decoded": 3729,
+      "post_i486_instruction_families": "absent",
+      "shared_memory_atomics": false,
+      "native_execution": false,
+      "full_language_conformance": false
+    },
+    "automation_v4": {
+      "production_adapter_os_double_assertions": 3799,
+      "normal_and_sanitizers_passed": true,
+      "native_execution": false,
+      "genuine_mshtml_fixture_implemented": true,
+      "full_browser_dom_semantics": false
+    },
+    "native_acceptance": {
+      "runtime_ordered_checks": 307,
+      "runtime_parser_staging_methods": 44,
+      "automation_parser_methods": 43,
+      "runtime_stage_files": 176,
+      "automation_stage_files": 146,
+      "both_stages_canonical_boot_scope": true,
+      "native_runs_complete": false,
+      "global_registration": false
+    }
+  },
+  "disk_optimization": {
+    "closed": true,
+    "receipts_independently_rechecked": 20,
+    "unshared_extent_decrease_bytes": 2249388032,
+    "net_filesystem_free_gain_claimed": false,
+    "final_ranges_processed": 44,
+    "final_ranges_planned": 559,
+    "active_native_api_image_skipped": true,
+    "full_range_coverage": false,
+    "original_bytes_preserved": true,
+    "checkpoint_sha256": "013b2e82a903644a2275fb477926052306b5eeedada88617fcf7015b0a2a10da"
   }
 }

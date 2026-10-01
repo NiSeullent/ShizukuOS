@@ -147,3 +147,36 @@ TLS-v7 resultaf59c776542dab98aec930dd973610cda0ad5f52bef00e37e258bb1231214fef re
 }
 
 All on codex/theme-tls-5abe. M98NET finalv3 receipt f1501c1352763cc5ce4e74914a8b267a827824d83e9c3ff17f80746a994a86a7; independent review clear. Own source commits contain no VM/media/privatekeys and do not install global providers. Native v7 preparation stopped before QEMU due renewed disk-pressure, so latest/LTS native fullpass, actual TCP, OS Schannel/WinHTTP/WinINet and modern-app functionality remain unverified. Trident work split into real QuickJS runtime plus actual MSHTML Automation bridge, independent of peer WebKit/JSC provider ABI.
+
+## Bounded disk optimization closed 2026-10-01T07:10:13.343408+00:00
+
+Dedicated disk agent finished the approved scope. Final checkpoint /root/Win98-Modern-theme-tls-5abe/build/disk-cleanup-5abe-20261001/bounded-maintenance-checkpoint.json SHA256 013b2e82a903644a2275fb477926052306b5eeedada88617fcf7015b0a2a10da. All20 bound receipt digests were independently rechecked. The12-image FIEMAP decrease2,249,388,032 bytes is allocation evidence, not net filesystem free gain. Final VLC pass covered44/559 planned rows,6 destinations with full before/after SHA/identity/receipt preservation,97,042,432 kernel compared/shared bytes; the active native-api image was skipped. No additional ownership/regeneration-proven deletion candidate was found. Native interrupted-theme-v2 acceptance remains false. Final checkpoint space20.639GiB and later20.477GiB are instantaneous; full unchanged reserve/copy/staging budget and queue must be rechecked before a new native run. No own guest queue lock is held.
+
+User steer remains: full WebKit optional; extend actual Trident/MSHTML toward HTML5/WASM/current2026 JS. Runtime agent reports actual host selected34 ES2026 checks, while numeric/helper port and native gates are pending. Automation v3 setter metadata fix is under implementation; native MSHTML/input/browser/app support is not claimed.
+
+## Mandatory complete modern-web scope 2026-10-01T07:27:21.186202+00:00
+
+User now explicitly requires latest JavaScript, latest CSS, modern WASM, WebGPU and WebGL, all mandatory. FullWebKit remains optional; actualTrident/MSHTML visiblehost must gain real standards-capable runtime/layout/graphics seams. Ownall3liveagents receivedthissteer directly; source/capability audits split alongsidecurrentJSport/nativeTLSretry. Rootsource targetmanifest /root/Win98-Modern-theme-tls-5abe/benchmarks/modern-web-targets-v1.json SHA256 b8194c9fa5de0d7d09419334daf70eed6195928839a3dbfbe2c3ecf1a6f16657 pins primary2026editions and real acceptance gates, allfull-support/app/nativeflagsfalse. ReviewedgenuineAutomation+observer sourcecommit09e6285 is availablelocally; partialJS/COM/2Dframebuffer or WASI proof doesnotmeet fullCSS/WASM/WebGPU/WebGL objective. Peer7707queue ownership respected; ownv8notlaunched whilequeuebusy anddiskbelowfullcopyfloor.
+
+
+## Current standards implementation and queued native trials 2026-10-01T08:03:13.376586+00:00
+
+All latest JavaScript, CSS, browser WebAssembly, WebGPU and WebGL remain mandatory; full WebKit porting is optional. Runtime source commit eb85c4d adds the real bounded QuickJS 2026-06-04/i486/x87 port. Frozen runtime v10 receipt SHA256 7e036db6906484a046c1253e4668930c4d85645f492ce2bf9a626fd6a1cbf716 passes host/sanitizer and DLL/probe PE, OEM and full i486 gates. Language selected checks34 and numeric checks24 are foundations, not full conformance. Commit0acecf9 records mandatory complete standards, genuine native evidence gates, CSS/GPU and Wasm seams.
+
+Official pinned Test262 revision7ab7fafa0003f73fc85c1b95d88094d33f7eb8bd selected host fixtures measured334 passes and4 failures in338 variants;4 detach-host cases excluded. Failures are the still-proposed immutable-arraybuffer feature, with the original sources and failures preserved. No whole-language or native claim. CSS owner is implementing real Syntax tokens and custom-property resolution using current active-fallback/cycle rules and nested computed names, with primary/WPT pins and separate tests; no native style or full CSS claim.
+
+Actual Automation stage boot/build/trident-automation-native-5abe-20261001-v1/guest-files.json SHA256 13eddef2f02f8bfc3a1ba331aaf8fa027e334cff8e7a2a225ddeeab517e46a9a retains146 frozen files/32 merged source pins. Script native stage is being moved into the canonical boot receipt scope; its earlier worktree stage is preserved as host preparation only. Source receipts must remain under boot/build for the canonical harness. No global COM/script/OS provider registration.
+
+Disk space is now well above the unchanged20GiB plus measured-copy floor, but the separate current83bd Win98 QA guest run win98-iosys-gop-wtf-diag-v4-83bd-20261001m is active outside the common lock. Own next order is corrected TLSv8, then runtime-only native, then real MSHTML input/paint. No own VM or queue lock is held. We wait for peer trials to finish naturally; no peer process control or reserve waiver. Current native/full browser/app objective remains incomplete.
+
+
+## Reviewed Script/Test262 implementation 2026-10-01T08:12:00.540616+00:00
+
+{
+  "script_native_acceptance": "89a6df0f4615d31a0c7b34d312d1e00d2eaec303",
+  "test262_selected": "eb6571ac6ab5a8705e64bc9d8546e54f741141df"
+}
+
+Runtime-only native acceptance is independently reviewed: strict307orderedchecks, canonicalfreshbootstage176files,44normal/optimizedparser-and-staging tests. New v2 receipt SHA256 aeb7e5a4d789bca24de7c0ecba4058db537372c91dfbc721fbf87a312041680e binds the actual terminal completion records explicitly; no guest execution inferred. Canonicalstage manifest5ee49445c47e45537e7fbc563dea4007b345f6b6469305c5aa76c7c3e65b57eb, exact3inputs3outputs/2unchangedbuildreceipts. Historical worktree stage remains host preparation only. Official selected Test262 v5 receipt faa4bb2b389e69e6e20c3f5253e2479f0d8d28b865e0e1b1c0fa9fa442eca3a3 records334pass/4fail/4excluded and commandexit1. FullJS/native/browser/apps remain false.
+
+CSS real Syntax/Variables v1 is preserved but current grammar/substitution omissions are being corrected into freshv2 after independentreview. New disjoint wasm_runtime agent implements a pinned real interpreter foundation; no standalone/WASI/namespace result will certify browserWASM. LatestJS/CSS/WASM/WebGPU/WebGL allmandatory, HTML5actualMSHTML retained, fullWebKitoptional. CorrectedTLSv8 followed by Script/Automation native trials remain behind peer6970sharedqueue; own root has no VM/lock and never controls peers.

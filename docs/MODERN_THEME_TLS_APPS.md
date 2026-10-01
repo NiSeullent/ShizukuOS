@@ -4,9 +4,12 @@ The requested target remains functioning themes, current Legcord/Discord,
 Signal and open-source Office, broader modern application support, and OS TLS
 1.3. The new components are working foundations. Actual installed Windows 98 component API and comparison-screen evidence is now retained.
 System API integration and functional application runs remain acceptance gates.
-The browser direction is now Trident modernization toward HTML5, WebAssembly
-and current JavaScript standards. A full WebKit port is optional. See
+The browser direction is now Trident modernization toward HTML5, current
+JavaScript and CSS, modern WebAssembly, WebGPU and WebGL. All five requested
+standards families are mandatory targets; a full WebKit port is optional. See
 `TRIDENT_MODERNIZATION_HANDOFF.md` for the inspected integration seams and limits.
+The subsequent requirement and primary specification editions are recorded in
+`benchmarks/modern-web-targets-v1.json`; none is marked fully supported.
 
 ## Theme implementation
 
@@ -123,6 +126,81 @@ Native configuration execution, full DNS resolution and application operation
 remain unverified. Peer runtime owners can feed their actual DHCP snapshot into
 the portable core; their standard-module binding and other DNS exports need
 separate integration. See `src/m98_dns_config_HANDOFF.md`.
+
+## Trident implementation checkpoint
+
+The user clarified that a full WebKit port is optional. The inspected historical
+seams and missing functionality remain recorded in
+`TRIDENT_MODERNIZATION_HANDOFF.md`; subsequent implementation uses a separate
+modern-script runtime and actual Microsoft MSHTML Automation binding. It does
+not advertise QuickJS as the independent provider's named JavaScriptCore bit.
+
+Reviewed commit09e6285 adds the real IUnknown/IDispatch/IDispatchEx adapter,
+the genuine installed-MSHTML document/view fixture, a stable explicit script
+ABI and separate runtime/MSHTML child observers. The adapter preserves canonical
+COM identity, UTF16 BSTR contents, typed values and HRESULTs, selects actual
+property setters from member metadata, and queues real event calls for explicit
+UI-thread dispatch. The native fixture independently reads the actual input
+through IHTMLInputElement and requires the complete resulting text to match.
+It synthesizes no input event and provides no fake DOM or painted replacement.
+Strict Automation missing-member behavior and asynchronous callback limitations
+remain explicit; ordinary website DOM semantics need separate implementation.
+
+Frozen Automationv4 passed3799 production-adapter OS-double assertions normally
+and under ASan/UBSan, plus its own OEM import/GUI PE32 gate. Its fixture reserves
+2MiB and commits512KiB, independently of the observer's64KiB commit. Observerv2
+passed3022 script and3031 Automation fault-model assertions in both modes and
+two original-OEM/i486 PE gates. Independent source/artifact/log review cleared
+both checkpoints. These results do not establish installed MSHTML execution.
+Reviewed commiteb85c4d supplies the frozen QuickJS2026-06-04 port with selected
+current musl mathematics, actual x87 state preservation at API/callback
+boundaries, bounded UI-thread contexts and explicit lifetime ownership. Runtimev10
+passes1293 interpreter,32 formatting and510 actual-platform OS-double assertions,
+normally and under memory/undefined-behavior checks. Its DLL and native probe
+pass complete decoded i486 instruction, original OEM import, exact export and
+PE32/OS4.10/stack gates. Shared-memory/Atomics are disabled in this profile; full
+language conformance and installed Windows98 execution remain unverified.
+
+Official pinned Test262 fixtures execute through that actual runtime, using a
+limited synchronous protocol and fresh realms. Checkpointv5 records338 variants:
+334 pass and four fail on the separately proposed immutable-arraybuffer feature;
+four original detach-buffer tests are explicitly excluded because host bindings
+are absent. Failed cases cause a nonzero command exit. Original fixtures and
+failed earlier adapter trials remain preserved. See `TRIDENT_TEST262_SELECTED.md`.
+
+Commits0acecf9 and89a6df0 add strict native Automation/runtime verifiers and fresh
+canonical boot stages. Automation retains146 frozen files; runtime-only retains176.
+The runtime parser requires all307 ordered guest checks and independently
+observed actual child completion. Its44 regression methods pass normally and
+with optimized Python; these are parser/staging controls, not guest execution.
+Runtime and genuine document trials are staged without global registration and
+remain queued behind existing native owners. See `TRIDENT_SCRIPT_NATIVE_EVIDENCE.md`
+and `TRIDENT_NATIVE_STAGE_HANDOFF.md`.
+
+Native MSHTML display, trusted input and pixel review, actual child/supervisor
+exits, ordinary browser script selection/navigation, origin-bound networking,
+HTML5 parser/layout and WebAssembly remain unverified or unimplemented.
+See `src/m98_trident_automation_HANDOFF.md` and
+`tests/m98_trident_guest_runner_HANDOFF.md` for exact boundaries and evidence.
+
+## Disk optimization and retry boundary
+
+The separate disk agent finished its bounded approved scope. All20 final receipt
+digests were independently rechecked. Twelve old closed clones show a measured
+2,249,388,032-byte decrease in unshared FIEMAP extents; this is not a claim about
+the net free-space change while other sessions write concurrently. The final VLC
+pass covered44 of559 planned ranges and verified six destinations in full;
+the active native-api image was skipped. Original contents, SHA256, identity,
+mtime and prior evidence were preserved. No additional deletion candidate had
+both ownership and regeneration evidence. Interrupted themev2 remains unaccepted.
+
+The final timestamped space reading was20.639GiB and a later reading20.477GiB.
+Readiness requires the unchanged20GiB reserve, measured sparse-copy allocation,
+dirty budget and staging overhead, remeasured before every attempt. Subsequent
+concurrent cleanup can change that reading; a newly attempted trial needs its
+own result rather than inheriting a prior preparation or component result.
+Final private evidence is
+`build/disk-cleanup-5abe-20261001/bounded-maintenance-checkpoint.json`.
 
 ## Current applications and exact evidence
 
