@@ -99,3 +99,35 @@ source buffers before module loading and directly invoked tools by readonly
 FD identity/hash. GCC implicit backend programs and system headers are not
 separately enumerated. Even a later compile/link/ELF proof cannot establish
 actual guest, context-switch assembly, VMM or Windows98 execution.
+
+## Actual combined-source freestanding build PASS
+
+[Retry run36918679791](https://github.com/NiSeullent/Win98-Modern/actions/runs/36918679791)
+at65f5c7e41f4d2f5f13bf2a888cddc4f29d9e6607 installed the missing NASM prerequisite
+only on the ephemeral hosted machine, then actually compiled/linked K32,
+standalone K32 and the shared Multiboot32 stub using the unchanged kbuild flags.
+All43 commands exited0 and were reaped;29 source inputs matched before/after
+and current combined publication/deadline source. All three ELF32/i386 ET_EXEC
+files passed actual nm-u empty-output checks and bounded load/entry validation;
+the stub's valid Multiboot1 header is at offset4096 with flags3.
+
+The94,125-byte receipt SHA256 is
+21f6308a963f0e8c33853a321f2c44276e74b96767267adb0e903344d8b51572.
+Root reconstructed it from actual API job logs, rehashed and checked it; an
+independent reviewer separately reconstructed and matched the same receipt.
+Final output1,681,020B, peak observed1,681,021B, minimum observed free
+92,259,753,984B, no resource failure and self-inclusive accounting verified.
+Actual NASM preparation exited0 with1,637 captured bytes and minimum observed
+free92,260,364,288B; its package footprint is outside the8 MiB build-output scope.
+
+K32 flat image23,300B SHAbaa5524be3bd114399484c5fffb12811c8c75e7967b0cd3605ecfecb740f7655;
+standalone K32 flat25,732B SHAa9bf0fa29347160ac9a97a685dbc9bd02c186b489fddb1bd512767734c143234.
+GCC13.3, NASM2.16.01 and GNU Binutils2.42 are recorded as directly invoked tools.
+No binary/media artifact was uploaded. The same run separately repeated76
+HOST and76 ASan/UBSan deadline checks successfully.
+
+Verdict is PASS_FREESTANDING_K32_BUILD_ONLY. Native execution, guest boot,
+Windows98 integration, hardware switching and deadline behavior flags on this
+build receipt are false. The first absent-NASM failure remains above; compile/
+link acceptance does not replace the separate actual production-C behavior
+proof or establish canonical main/product/ISO acceptance.

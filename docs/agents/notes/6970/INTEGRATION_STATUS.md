@@ -31,7 +31,7 @@ checks; all6 actual GREEN commands exited0, eight-file closure matched and no
 resource failure occurred. This does not establish native i486 linking, context
 switch assembly or Windows/VMM execution. [Evidence](K32_DEADLINE_PLAN.md#actual-hosted-red-and-green).
 Canonical master163f acknowledged this lane separately from its user.c
-process-owner publication repair. Combined source/build acceptance is pending.
+process-owner publication repair. The bilateral publication/deadline source now passes an actual hosted K32/standalone K32/stub compile/link proof at65f5c7e; canonical main and Windows/VMM runtime acceptance remain pending. See the linked evidence below.
 
 [DOS executor boundary audit](DOS_GATE_BOUNDARY_AUDIT.md) confirms audited main
 lacks an actual backend-worker→DOS executor. Canonical master163f acknowledged
