@@ -124,16 +124,16 @@ untouched by this adapter. An unlock failure can occur after both output writes;
 the caller must treat the returned error as authoritative. These are adapter-level
 semantics; VWIN32 may independently normalize the Win32 count on failed calls.
 
-The native locking assumption is **uniprocessor Windows 98, synchronous DIOC**.
+The safe-copy locking assumption is **uniprocessor Windows 98, synchronous DIOC**.
 Page checks and pinning happen with the caller's original interrupt state; the
 bounded PTE validation and copy interval saves/disables/restores interrupts. This
 assumes `_CopyPageTable` remains a nonblocking metadata operation in that context.
 The current PTE policy also assumes the normal VMM Win32 private-arena page-directory
 permissions. These native assumptions require actual guest validation. The code
 and static data touched inside the interrupt-masked interval also require a
-nonpageability/lifetime check in the production guest; preload proves initial
-presence and the control fixture does not prove paging behavior for this full
-implementation. This is
+nonpageability/lifetime check in the production guest; native initialization explicitly pins both relocated image ranges. Preload
+proves initial presence, while the control fixture does not prove native paging
+behavior for this full implementation. This copy facility is
 not an SMP, asynchronous, shared-memory, DMA, or universal safe-copy facility.
 
 ## WIN64 subsystem bridge (ShizukuDOS ABI 1.1)
@@ -239,3 +239,79 @@ All implementation, tests, DOS exit stub, assembly glue, and container generatio
 here were written independently for this project. Public ABI facts and their
 limits are recorded in [REFERENCES.md](REFERENCES.md); no referenced source is
 downloaded or linked by the build.
+
+## First native PMA QUERY endpoint
+
+`pma_endpoint.h` defines four synchronous local DIOCs: REGISTER (`0x4e540020`),
+QUERY (`21`), TAKE (`22`) and CLOSE (`23`). REGISTER converts the calling process's
+Win32 event into an owned VMM ring0 handle. Trusted DIOC VM/device/process fields
+and the current VMM thread supply identity; callers cannot submit PID/TID or
+lifetime generations. The VxD allocates strictly increasing request IDs and
+nonwrapping lifetime generations. The existing PMA wire ABI and QUERY/PROCESS_EXIT
+service remain unchanged.
+
+This first path takes an exclusive channel2 lease before any legacy W64 OPEN.
+A previous legacy OPEN makes REGISTER return BUSY; a leased endpoint makes legacy
+W64 OPEN/SEND/RECV/WAIT return BUSY. Basic DIOC open/close and ordinary QUERY retain
+their compatibility. This temporary lease prevents the callback and global RECV
+from consuming each other's replies. Concurrent legacy/PMA use requires a future
+unified reply demultiplexer.
+
+A non-asynchronous VMM timer schedules a bounded restricted System VM event.
+The callback validates outer endpoint, generation, opcode and request ID before
+retaining QUERY info or the matching PROCESS_EXIT acknowledgement. It signals
+the owned Win32 event after releasing admission and IRQ protection. Win32 clients
+use their own WaitForSingleObject, then TAKE, and validate the returned ticket.
+TAKE consumes a result only after output copy and unpin succeed. A finite local
+1460 timeout is delivery failure; the old backend request remains tracked until
+its actual response drains. A dead peer or changed epoch quarantines the lease
+and refuses unload. CLOSE succeeds only after the genuine matching PROCESS_EXIT
+ACK and earlier query drain, then releases the owned handle and channel lease.
+Thread termination/device close requests the same real cleanup.
+
+Native initialization now pins both independently relocated image ranges with
+flags0 page locks. Shutdown refuses owned work/callbacks, cancels queued service
+handles only after rundown, and retains failed page-unlock records for a later
+exit retry. These are production bindings with host regression coverage; actual
+VxD load, owned-event conversion, restricted callback execution and Windows wait
+wake-up still require native guest proof. The PMA endpoint performs no DOS call,
+replaces no Windows scheduler and is not an implementation of the DOS executor.
+
+The current PMA namespace is deliberately **resident after backend admission**.
+Once any PMA request was pushed, dynamic device exit refuses to unload this image
+and its image pages stay pinned even after successful owner CLOSE. The existing
+wire contract cannot allocate a persistent native incarnation/sequence range;
+resetting BSS while Kernel64 retains anti-replay state would reuse identity.
+Never-used legacy unload remains supported. A genuine backend STALE rejection
+poisons further QUERY/REGISTER admission and retains conservative cleanup state.
+The full successor needs a negotiated backend-issued nonwrapping incarnation and
+request-ID range plus verified Supervisor domain-restart/epoch binding. This
+intermediate policy is a native lifecycle limitation, not final unload support.
+CLOSE ACK, like TAKE, remains owner-bound through output-copy/unpin failure;
+only a successful adapter commit releases its channel lease.
+
+The original-owner Win32 client/probe lives in `ntwin32/pma/`. The VxD build emits
+`PMAQUERY.EXE` from those frozen sources and the current public DIOC headers.
+`ntwin32/pma/test.py` separately exercises real client code with modeled Win32
+boundaries and decodes its actual i486 PE32. The probe owns its event, waits with
+WaitForSingleObject, validates matching QUERY info, retries genuine pending CLOSE,
+and writes logs. Build/test receipts explicitly keep native Windows execution
+unverified until the private guest runs the matched VxD and probe.
+
+Failed user-alias unlocks are now persistent ownership records, including
+partial pin unwinds. A nonblocking page-admission token covers buffered DIOCs;
+at most three alias/page-count/service records exist. Each drain tries each
+record once, outside IRQ masking, and permits new page checks/pins or backend
+admission only after every old lock actually releases. Shutdown and transport
+release retain their fences while aliases remain owned. An aborted registration
+publishes no backend request; its deferred transport rollback completes only
+after its aliases drain. A terminated owner's callback can retry retained global
+aliases and real rundown without requiring another user call. The fixtures keep
+failed locks live across calls and measure zero new pins during a blocked drain.
+
+Native notifications hold the owned event independently of broker admission
+until SetWin32Event returns. Reentrant CLOSE and REGISTER cannot close/reuse it
+in that interval. Signaling remains outside admission and IRQ protection. A
+controlled host interleaving tests CLOSE, real PROCESS_EXIT ACK and attempted
+REGISTER before the old signal returns, then verifies close/reuse afterward.
+This adversarial model does not establish actual Windows preemption reachability.

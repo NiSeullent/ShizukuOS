@@ -1,7 +1,7 @@
 ; SPDX-License-Identifier: GPL-2.0-only
 ; Linux32 user-mode harness for actual control.o. IRQ/VMM thunks are not called.
 BITS 32
-GLOBAL _start, ntwv_native_init, ntwv_native_exit, ntwv_native_dioc
+GLOBAL _start, ntwv_native_init, ntwv_native_exit, ntwv_native_dioc, ntwv_native_lifecycle
 EXTERN ntwv_control
 SECTION .data
 result: dd 1
@@ -24,6 +24,27 @@ ntwv_native_dioc:
     cmp dword [esp+4], 0x44444444
     jne fail                     ; correct ESI -> cdecl marshalling
     jmp ntwv_native_init
+ntwv_native_lifecycle:
+    cmp dword [esp+4], 0x20
+    je .valid_code
+    cmp dword [esp+4], 0x21
+    je .valid_code
+    cmp dword [esp+4], 0x0b
+    je .valid_code
+    cmp dword [esp+4], 0x0c
+    jne fail
+.valid_code:
+    cmp dword [esp+8], 0x11111111
+    jne fail
+    cmp dword [esp+12], 0x55555555
+    jne fail
+    pushfd
+    pop ecx
+    test ecx, 0x400
+    jnz fail
+    mov ecx, 0xbad
+    mov edx, 0xbad
+    ret
 _start:
     mov eax, 0x1b
     call exercise
@@ -42,6 +63,14 @@ _start:
     mov eax, 0x23
     call exercise
     mov dword [expected_eax], 1
+    mov eax, 0x20
+    call exercise
+    mov eax, 0x21
+    call exercise
+    mov eax, 0x0b
+    call exercise
+    mov eax, 0x0c
+    call exercise
     mov eax, 0x76543210
     call exercise
     cld

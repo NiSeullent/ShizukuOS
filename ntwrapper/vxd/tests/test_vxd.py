@@ -39,6 +39,10 @@ class SourceStabilityTests(unittest.TestCase):
                 shutil.copy2(path,vxd/'tests'/path.name)
         shutil.copy2(HERE.parent/'core.c',root/'ntwrapper/core.c')
         shutil.copytree(HERE.parent/'include',root/'ntwrapper/include')
+        shutil.copytree(HERE.parents[1]/'ntwin32/pma',root/'ntwin32/pma',
+                        ignore=shutil.ignore_patterns('build','__pycache__'))
+        shutil.copytree(HERE.parents[1]/'shizukudos/pma_bridge',root/'shizukudos/pma_bridge',
+                        ignore=shutil.ignore_patterns('build','__pycache__'))
         abi=root/'shizukudos/abi'
         shutil.copytree(HERE.parents[1]/'shizukudos/abi',abi,
                         ignore=shutil.ignore_patterns('build','__pycache__'))
@@ -276,6 +280,47 @@ class VxDTests(unittest.TestCase):
         symbols=subprocess.check_output(['nm','-u',str(BUILD/'NTWRAP9X.elf')],text=True)
         self.assertEqual(symbols.strip(),'')
 
+    def test_native_pma_vmm_thunk_contracts(self):
+        code=self.input['objects'][0]['data']
+        for number,count in ((0x10001,1),(0x10003,2),(0x10108,1),(0x1003f,1),
+                             (0x2a0025,1),(0x2a000e,1),(0x2a0014,1),
+                             (0x1015a,1),(0x1015b,1),(0x1003c,1),(0x1003e,1)):
+            self.assertEqual(code.count(b'\xcd\x20'+struct.pack('<I',number)),count)
+        # Owned event cdecl stack and restricted system-VM event: no timeout
+        # bypass, ring3/nested execution, or invented service identifier.
+        self.assertIn(b'\x6a\x01\xff\x74\x24\x08\xcd\x20'+struct.pack('<I',0x2a0025)+b'\x83\xc4\x08',code)
+        self.assertIn(b'\xb9\x4b\x00\x00\x00',code)
+        self.assertEqual(code.count(b'\x61\xfc\xfb\xc3'),2)
+
+    def test_native_pma_broker_actual_service_rings_and_failure_retention(self):
+        for compiler,sanitize in (('gcc',[]),('clang',['-fsanitize=address,undefined'])):
+            binary=BUILD/('test_pma_native_'+compiler)
+            subprocess.run([compiler,'-std=c11','-O1','-g','-Wall','-Wextra','-Werror',
+                            '-Wpedantic','-Wshadow','-fno-omit-frame-pointer',*sanitize,
+                            str(HERE/'bridge.c'),str(HERE/'pma_endpoint.c'),str(HERE.parent/'core.c'),
+                            str(HERE/'tests/test_pma_native.c'),'-o',str(binary)],check=True)
+            for case in ('happy','legacy','registration-failure','registration-close-failure',
+                         'forgery','lifecycle','close-mismatch','delivery-failure','wrong-vm',
+                         'timeout','epoch','mismatch','copy-failure','signal-failure','rejected',
+                         'close-copy-failure','stale','signal-race','unlock-retention',
+                         'unlock-partial-returned','unlock-bad-alias','unlock-all','unlock-inflight',
+                         'unlock-abort','unlock-rundown'):
+                with self.subTest(compiler=compiler,case=case):
+                    result=subprocess.run([str(binary),case],check=True,capture_output=True,text=True,timeout=10)
+                    self.assertIn('PASS: native PMA '+case,result.stdout)
+                    print(compiler+': '+result.stdout.strip())
+
+    def test_native_image_pin_rundown_and_failed_unlock_retry(self):
+        binary=BUILD/'test_native_lifetime'
+        subprocess.run(['clang','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wpedantic',
+                        '-Wshadow','-fsanitize=address,undefined','-fno-pie','-no-pie',
+                        str(HERE/'native.c'),str(HERE/'tests/test_native_lifetime.c'),'-o',str(binary)],check=True)
+        for case in ('normal','init-failure','init-unlock-failure','unlock-failure','reload-fence'):
+            with self.subTest(case=case):
+                result=subprocess.run([str(binary),case],check=True,capture_output=True,text=True,timeout=10)
+                self.assertIn('PASS: native image lifetime '+case,result.stdout)
+                print(result.stdout.strip())
+
     def test_guest_probe_pe_contract(self):
         data=(BUILD/'NTWQUERY.EXE').read_bytes()
         pe=struct.unpack_from('<I',data,0x3c)[0]
@@ -294,6 +339,14 @@ class VxDTests(unittest.TestCase):
         self.assertIn('DeviceIoControl',dump)
         self.assertIn(b'\\\\.\\NTWRAP9X.VXD\0',data)
 
+    def test_native_pma_win32_probe_pe_contract(self):
+        spec=importlib.util.spec_from_file_location('native_pma_client_tests',HERE.parents[1]/'ntwin32/pma/test.py')
+        client_tests=importlib.util.module_from_spec(spec);spec.loader.exec_module(client_tests)
+        contract=client_tests.pe_contract(BUILD/'PMAQUERY.EXE')
+        self.assertEqual(contract['machine'],'PE32 i386')
+        self.assertFalse(contract['crt_imports'])
+        self.assertEqual(contract['os_version'],'4.0')
+
     def test_native_control_dispatch_abi_in_i386_user_harness(self):
         subprocess.run(['nasm','-f','elf32',str(HERE/'tests/control_harness.asm'),'-o',str(BUILD/'control_harness.o')],check=True)
         subprocess.run(['ld','-m','elf_i386','-o',str(BUILD/'control_harness'),str(BUILD/'control.o'),str(BUILD/'control_harness.o')],check=True)
@@ -302,16 +355,16 @@ class VxDTests(unittest.TestCase):
 
     def test_page_failure_cleanup_and_lifecycle_under_sanitizers(self):
         command=['clang','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wpedantic','-Wconversion','-Wshadow',
-                 '-fsanitize=address,undefined','-fno-omit-frame-pointer',str(HERE/'bridge.c'),str(HERE.parent/'core.c'),
+                 '-fsanitize=address,undefined','-fno-omit-frame-pointer',str(HERE/'bridge.c'),str(HERE/'pma_endpoint.c'),str(HERE.parent/'core.c'),
                  str(HERE/'tests/test_bridge.c'),'-o',str(BUILD/'test_bridge')]
         subprocess.run(command,check=True)
         result=subprocess.run([str(BUILD/'test_bridge')],check=True,capture_output=True,text=True)
-        self.assertIn('every VMM-call failure unwound',result.stdout)
+        self.assertIn('failed aliases retained until real release',result.stdout)
         print(result.stdout.strip())
 
     def test_win64_bridge_dioc_against_kernel64_wire_library_under_sanitizers(self):
         command=['clang','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wpedantic','-Wshadow',
-                 '-fsanitize=address,undefined','-fno-omit-frame-pointer',str(HERE/'bridge.c'),str(HERE.parent/'core.c'),
+                 '-fsanitize=address,undefined','-fno-omit-frame-pointer',str(HERE/'bridge.c'),str(HERE/'pma_endpoint.c'),str(HERE.parent/'core.c'),
                  str(HERE/'tests/test_w64vxd.c'),'-o',str(BUILD/'test_w64vxd')]
         subprocess.run(command,check=True)
         result=subprocess.run([str(BUILD/'test_w64vxd')],check=True,capture_output=True,text=True)
@@ -331,7 +384,7 @@ class VxDTests(unittest.TestCase):
                 binary=BUILD/('test_w64_admission_'+suffix)
                 command=['clang','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wpedantic','-Wshadow',
                          '-fsanitize='+sanitizer,'-fno-omit-frame-pointer','-pthread',
-                         str(HERE/'bridge.c'),str(HERE.parent/'core.c'),str(HERE/'tests/test_w64_admission.c'),
+                         str(HERE/'bridge.c'),str(HERE/'pma_endpoint.c'),str(HERE.parent/'core.c'),str(HERE/'tests/test_w64_admission.c'),
                          '-o',str(binary)]
                 subprocess.run(command,check=True)
                 result=subprocess.run([str(binary)],check=True,capture_output=True,text=True,timeout=10)

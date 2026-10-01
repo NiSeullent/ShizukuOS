@@ -233,3 +233,200 @@ after. GREEN log and source evidence are saved as `manifest-capture-green.log`
 and `manifest-capture-green.json` in the same output directory. The full suite's
 current source has the original 13 VxD groups plus these four receipt groups;
 combined full acceptance remains root's responsibility after source integration.
+
+## Native Windows PMA QUERY endpoint successor (2026-10-01)
+
+Status: production endpoint and real Win32 PE probe implemented, **host component
+verification passed; native Windows VMM execution pending**. Windows VMM remains
+scheduler owner. No kernel/ABI/subsys source, media, index or commit was changed
+by this lane. Root owns integration and the private boot lane.
+
+The original `pma_endpoint.c/h` and `vmm_callbacks.asm` use the existing channel2
+and PMA QUERY/PROCESS_EXIT service. REGISTER authenticates trusted DIOC
+VM/device/process plus current VMM thread; the VxD issues nonwrapping lifetimes
+and monotonic IDs. Its temporary exclusive channel lease rejects legacy W64
+OPEN overlap deterministically, including legacy OPEN preceding REGISTER.
+Restricted System-VM callbacks use pinned Win98 service ordinals, no DOS call,
+no PEF timeout bypass and no PEF_RING0_EVENT promise. Owned Win32 event signaling
+runs after admission/IRQ protection ends. Finite local timeout keeps an old
+backend query tracked; exact real query/rundown acknowledgements are required
+before transport release. TAKE and CLOSE commit only after successful checked
+output copy/unpin. Native page locks cover independently relocated code/data;
+failed unlock records survive exit retries. Thread and VM notices use their
+separate documented EDI/EBX identity contracts.
+
+Temporary limitation approved by root: after any backend PMA admission the image
+stays resident and dynamic unload is refused, even after owner CLOSE. The wire
+ABI has no persistent VxD incarnation allocator; BSS reset would reuse identity.
+A backend STALE rejection poisons further QUERY/REGISTER admission. Never-used
+legacy unload remains supported. A source-backed successor design requests a
+backend-issued nonwrapping incarnation and request-ID range plus verified
+Supervisor domain-restart/epoch binding; it is published to Fada's original
+service owner in `MESSAGE-163f-FADA-PERSISTENT-NATIVE-INCARNATION-DESIGN.md`.
+No guessed timestamp generation or canonical ABI change was made.
+
+RED evidence remains in `build/pma-native-endpoint-red/` and
+`build/pma-native-endpoint-controls/`: old native REGISTER unsupported;
+header-only backend rejection never retiring query; failed VMM event close
+losing owned reference; failed image unlock losing retry record; CLOSE copy
+failure losing acknowledgement; reload fence absent; thread notification wrongly
+requiring an unspecified current VM. Bounded corrected controls pass. The COPY
+failure cases prove two output writes occurred before failed unpin; replies and
+close acknowledgement remain retained afterward.
+
+Fresh final commands (all exit0):
+
+```text
+python3 -B ntwrapper/vxd/build.py --out build/pma-native-endpoint-final
+python3 -B ntwrapper/vxd/test.py --out build/pma-native-endpoint-final
+python3 -B ntwin32/pma/test.py --endpoint-root /root/Win98-Modern-pma-20261002 --out build/pma-client-canonical-current
+```
+
+Strict freestanding i486 native build and all **21 VxD host test groups** passed;
+17 actual broker/bridge/service/ring cases each under GCC and Clang ASan/UBSan,
+5 modeled native image/lifetime modes, emitted service constants, original i386
+control/lifecycle harness, existing W64 and TSan shutdown/admission regressions,
+and receipt mutation/archive controls are included. Final receipt reports no
+input drift. Frozen VxD/client source hashes are in
+`build/pma-native-endpoint-controls/frozen-source-sha256.json`; independent
+post-test comparison matches every entry.
+
+- VxD 30,897 bytes SHA-256: `9df6679026c86e2bb372e7588f14ef76059aefee69fc653b58279238234744d3`.
+- VxD host receipt SHA-256: `6f191b9f6b0265c691dcb136d5f4ba4384a51cfbbdb8c39c30332cc74dc3786e`.
+- Endpoint header SHA-256: `b97af958dbd1edd352e88f35071f98423946593e4ee397ffd0751164a7c35281`.
+- Endpoint C SHA-256: `913b3f858768b1fd7ce3439ae2b50d40f3328ba5d258dee2f4ee3a9920274177`.
+- Native C SHA-256: `27e6409af8b9946b2fcde7d12074d2d1a7436006c632a48f0d1a8051a27dda4c`.
+- Bridge C SHA-256: `a3a1e5c4e484ea93de15fe205f5efdad6c1c1f8483581877c2f821138137e76b`.
+
+The exact seven frozen Fada `ntwin32/pma/` files were copied with source/target
+before/after hashes unchanged. Prior peer receipt and copy provenance are
+preserved under the controls directory. Fresh canonical client verification
+passed **245 GCC +245 Clang ASan/UBSan assertions**. Its real i486 PE32 has only
+20 old KERNEL32 imports, no CRT, OS/subsystem4.0 and reproducible timestamp0.
+PMAQUERY.EXE SHA-256 is
+`90e426d430f96afdd3c2d1ffa0f2cce72793a9892c02c2fc545d2ed7fe85e725`.
+The VxD build now emits/binds that probe, and its test receipt includes its
+compiler-discovered project closure. These tests model privileged VMM/page/
+hypercall or Win32 OS boundaries and are not live Windows proof.
+
+Actual gates: successful matched production VxD load on ShizukuDOS-backed live
+Windows98; real owned-event conversion; real restricted callback scheduling and
+WaitForSingleObject wake; matched Kernel64 QUERY and PROCESS_EXIT; paging/VM/
+thread teardown behavior and truthful close logs. Full DOS executor, unified
+multi-owner/legacy demultiplexing and final dynamic reload lifecycle remain
+separate implementation work. The endpoint milestone does not complete the
+user's boot/SMP/installer goal.
+
+## Kernel32 IPC runner transitive binding correction
+
+Only `shizukudos/tests/test_k32_ipc.py` and the new private-copy Python receipt
+control fixture changed; no production IPC/kernel/header source changed. The
+old runner's fixed seven inputs missed a newly included transitive project
+header. A private copy adds a harmless nested include; mutating that private
+header at the actual i486 compiler boundary made the old runner falsely return
+PASS with `source_compiler_binary_before_after_match=true`. The preserved RED
+log is `build/pma-native-endpoint-controls/k32-receipt-red.log`.
+
+The runner now obtains separate actual compiler `-MM` closures for GCC host,
+Clang ASan/UBSan host and freestanding i486. Initial project header bytes are
+captured before discovery; each discovered input uses that initial snapshot,
+then source/compiler/helper/binary stability gates remain active through final
+receipt. GCC cc1/collect2/as/ld and Clang's linker helper are pinned too. System
+headers are explicitly outside the `-MM` receipt scope; an unbound project
+include fails closed and is listed. No hardcoded future service_policy/deadline
+header list is required. The current native closure is recorded exactly from
+the actual checked-out translation unit.
+
+Fresh commands (exit0):
+
+```text
+K32_RECEIPT_CONTROL_OUT=build/pma-native-endpoint-controls/k32-receipt-cases python3 -B -m unittest discover -s shizukudos/tests -p test_k32_ipc_controls.py -v
+python3 -B shizukudos/tests/test_k32_ipc.py --out build/k32-ipc-closure-final2
+```
+
+The private control runs the actual existing seven IPC cases under GCC and
+Clang ASan/UBSan and builds the real i486 IPC object. Unchanged control passes;
+persistent nested-header drift during native object compilation and during
+compiler dependency discovery both produce FAIL, preserve the original header
+hash and list the changed input. All three case receipts are retained in the
+controls directory. No real project header is mutated.
+
+Fresh current-source receipt status is
+`PASS_HOST_KERNEL32_IPC_RECEIVE_CONTRACT`; seven cases per GCC/Clang sanitizers
+and strict i486 object passed, source/compiler/helper/binary before/after match.
+These are component host/compile checks, no compiled whole-kernel build or
+native guest. Existing transmit backpressure and endpoint authority limitations
+are unchanged by this runner-only correction.
+
+## Native endpoint original-owner fix round: F4 / F5
+
+The preceding native endpoint receipts are historical and were withheld by
+independent review. This successor corrects the reported failed-user-alias
+ownership and notification-handle lifetime defects; it does not change the
+shared ABI, Kernel32 runner or canonical kernel source.
+
+F4: every successful user-page lock now enters one of three bounded records
+with its original unlock function, alias page and page count. A failed unlock
+leaves that record live across calls, including partial pin unwind and an
+invalid returned alias. Buffered DIOC entry drains retained records before
+checking/pinning fresh buffers or admitting backend work. Each drain attempts
+at most three releases. Lease release, reset and shutdown refuse unresolved
+ownership. An owner-death callback retries retained records after the real
+matching PROCESS_EXIT acknowledgement; successful release can finish rundown
+without another user DIOC. A failed registration defers its lease rollback
+until its user aliases actually release.
+
+The legacy QUERY/W64 and native PMA fixtures now model failed unlock as a
+still-held lock, preserving ownership across calls instead of resetting or
+decrementing it on failure. RED controls against the previous implementation
+failed on partial-unwind shutdown and lease release. A separate controlled
+interleaving proved that release also needs to refuse an actively unpinning
+alias, before its native unlock returns. Preserved evidence is under
+`build/pma-native-fix-round1/`, including `unlock-retention-red.json`,
+`unlock-inflight-red.json` and the exact RED production/fixture source copies.
+
+F5: selecting a notification under broker admission now acquires an in-flight
+notification hold before saving the event handle. Actual VMM signaling remains
+outside broker/SPSC admission and the IRQ interval. CLOSE, owner release and
+shutdown cannot close or reuse the owned event until signaling returns. The
+controlled signal fixture reenters CLOSE, processes a real cleanup reply, tries
+CLOSE again and then REGISTER while the old signal is suspended; all attempts
+to close/reuse remain BUSY. CLOSE and same-value handle reuse succeed only after
+the signal returns. `signal-race-red.json` preserves the previous failure.
+This is modeled source-interleaving coverage; native VMM preemption reachability
+has not been established.
+
+Fresh successor commands (all exit 0):
+
+```text
+python3 -B ntwrapper/vxd/build.py --out build/pma-native-endpoint-fix-round1-final
+python3 -B ntwrapper/vxd/test.py --out build/pma-native-endpoint-fix-round1-final
+python3 -B ntwin32/pma/test.py --endpoint-root /root/Win98-Modern-pma-20261002 --out build/pma-client-fix-round1-final
+```
+
+The strict freestanding i486 build passed. All **21 VxD host test groups**
+passed, now including **25 production broker/bridge/service/ring cases under
+GCC and 25 under Clang ASan/UBSan**, five modeled native image lifetime modes,
+legacy bridge/W64 ownership controls, TSan shutdown/admission, emitted thunk,
+LE, PE and receipt controls. The actual client again passed **245 GCC +245
+Clang ASan/UBSan checks** against the combined canonical public header. The
+53-entry owned-source/client freeze map is
+`build/pma-native-fix-round1/final-frozen-source-sha256.json`; post-test hashes
+match every entry. Host and client receipts report unchanged inputs.
+
+- VxD: 30,977 bytes, SHA-256 `57f9517af89175efbec66391099317cbc42f0fc12bc616ae66360b249ad2b94d`.
+- Build manifest SHA-256: `b488d14cb11bab95a21c47c84f8bea5aee6f2f0614e649c303a7a4740b8dadb7`.
+- Host receipt SHA-256: `12a6a91402d045198cec42bf602cc47702b7ced1ea516c3339293fc69f7b10db`.
+- Client receipt SHA-256: `587ba5e428571f6ad8578bc97b869cbb0e22f82c85261f44f2fc10898d4ab177`.
+- PMAQUERY.EXE remains 14,752 bytes, SHA-256 `90e426d430f96afdd3c2d1ffa0f2cce72793a9892c02c2fc545d2ed7fe85e725`.
+
+The first full fix-round run failed only a GCC misleading-indentation warning
+in the new fixture; its failed receipt/log remain in the earlier output
+directory. The successor split that statement and reran the entire frozen
+epoch. No failed run is promoted to PASS.
+
+The exclusive lease and resident-after-backend-admission policy remain
+temporary limitations. Production VxD load, genuine Win98 owned-event wake,
+native paging/teardown, actual Windows app-to-Kernel64 reply, real DOS executor,
+AP/SMP and the final installable ISO remain live integration work. These
+component fixes establish no native Windows or full-goal completion claim.
