@@ -16,7 +16,8 @@
  * directories (long-name entries included, clusters freed), rename and move within the volume (a moved directory's
  * ".." follows it; an existing file of the new name may be replaced). FAT changes are kept in the
  * in-memory copy, tracked per FAT sector and written to every FAT copy (plus the FSInfo free count) by
- * fat32_sync(), which every mutating call ends with, so the volume on disk is consistent after each call.
+ * fat32_sync(), which every mutating call ends with. Rename has verified in-memory undo for callback failures;
+ * an uncertain undo quarantines the live volume. This is not power-loss atomicity or a persistent journal.
  * Not supported (by design, documented): FAT12/16, exFAT, GPT, sector sizes != 512, volumes with
  * FAT mirroring disabled (mounted read-only), code-page conversion of 8.3 names (ASCII only; other bytes are mapped
  * to '_'), names longer than 255 UTF-16 units, files of 4 GiB or more.
@@ -36,13 +37,15 @@
 #define FAT32_ATTR_LFN 0x0f
 
 enum { FAT32_OK = 0, FAT32_E_IO = -1, FAT32_E_FORMAT = -2, FAT32_E_NOMEM = -3, FAT32_E_CORRUPT = -4, FAT32_E_RANGE = -5,
-       FAT32_E_RDONLY = -6, FAT32_E_FULL = -7, FAT32_E_NAME = -8, FAT32_E_EXISTS = -9, FAT32_E_NOTEMPTY = -10 };
+       FAT32_E_RDONLY = -6, FAT32_E_FULL = -7, FAT32_E_NAME = -8, FAT32_E_EXISTS = -9, FAT32_E_NOTEMPTY = -10,
+       FAT32_E_RECOVERY = -11, FAT32_E_BUSY = -12 };
 
 typedef int (*fat32_read_fn)(void *ctx, uint64_t lba, void *buf512);         /* one sector, 0 = ok */
 typedef int (*fat32_write_fn)(void *ctx, uint64_t lba, const void *buf512);  /* one sector, 0 = ok; NULL: read-only */
 typedef void *(*fat32_alloc_fn)(void *ctx, uint64_t bytes);                  /* zeroed small allocation, NULL = none */
 typedef void (*fat32_free_fn)(void *ctx, void *p, uint64_t bytes);
 typedef void *(*fat32_page_fn)(void *ctx);                                   /* zeroed 4 KiB block for the FAT copy */
+struct fat32_undo;
 
 typedef struct {
     /* filled in by the caller before fat32_mount() */
@@ -69,6 +72,8 @@ typedef struct {
     uint8_t *fat_dirty;                         /* one bit per FAT sector held in memory (writable volumes) */
     uint64_t sector_lba;                        /* LBA held in `sector`, ~0 when nothing */
     uint8_t sector[FAT32_SECTOR];               /* bounce buffer: the caller serialises calls on one volume */
+    struct fat32_undo *rename_undo;             /* private active rename; callbacks must not reenter/mount/unmount */
+    uint32_t recovery_required;                /* latched until explicit unmount/recovery; mutation/read APIs reject */
 } fat32_vol_t;
 
 typedef struct { uint32_t cluster, offset; int ended; } fat32_dir_t;   /* enumeration cursor (offset within the cluster) */
@@ -128,9 +133,12 @@ int fat32_create(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t *nam
 int fat32_remove(fat32_vol_t *v, uint32_t dir_first_cluster, uint32_t dir_cluster, uint32_t dir_offset);
 /* Gives the file or directory whose short entry is at (dir_cluster, dir_offset) in src_dir_first the name `name` in
  * dst_dir_first (the same or another directory; 0 = root). Attributes, times, first cluster and size are kept; a
- * moved directory's ".." is updated. An existing file of the new name is deleted first when `replace` is set, else
+ * moved directory's ".." is updated. An existing file of the new name may be replaced when `replace` is set, else
  * FAT32_E_EXISTS (always for a directory or a read-only file); FAT32_E_NAME for a directory moved into its own
- * subtree. `out` receives the new entry. */
+ * subtree. `out` receives the new entry on success. Callback/allocator failures undo all attempted sector writes
+ * and FAT cache changes, then verify the disk before ordinary failure. Failed undo/readback returns E_RECOVERY
+ * and quarantines the live volume (including caller temporary-file deletion); no persistent recovery/power-loss
+ * guarantee. Callers serialize the volume; reentrant callback mutations return E_BUSY. */
 int fat32_rename(fat32_vol_t *v, uint32_t src_dir_first, uint32_t dir_cluster, uint32_t dir_offset, uint32_t dst_dir_first,
                  const uint16_t *name, unsigned name_len, int replace, fat32_dirent_t *out);
 int fat32_sync(fat32_vol_t *v);                 /* dirty FAT sectors to every FAT copy, FSInfo free count */
