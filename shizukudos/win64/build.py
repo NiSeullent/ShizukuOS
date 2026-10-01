@@ -402,10 +402,11 @@ def main():
     k32, k32_cmd, k32_names = build_kernel32(ntdll_names)
     modules = build_modules()
     wine_files, wine_info = build_wineport() if not args.no_wineport else ([], {})
-    apps = build_apps(sorted(modules))
-    setup_exe, _ = build_setup(sorted(modules))
-    sys_apps = build_sys_apps(sorted(modules))
-    apps.update(build_cxx_apps(sorted(modules)))
+    runtime_libs = sorted(set(modules) | set(wine_info))
+    apps = build_apps(runtime_libs)
+    setup_exe, _ = build_setup(runtime_libs)
+    sys_apps = build_sys_apps(runtime_libs)
+    apps.update(build_cxx_apps(runtime_libs))
     files = [("\\SHZ\\SYS64\\ntdll.dll", ntdll.read_bytes()), ("\\SHZ\\SYS64\\kernel32.dll", k32.read_bytes())]
     for name, m in sorted(modules.items()):
         files.append((f"\\SHZ\\SYS64\\{name}.dll", m["dll"].read_bytes()))
@@ -426,8 +427,8 @@ def main():
     # SHZPNP.EXE add-driver / load / status / unload, the path a vendor package uses.
     # tests/run_k64_ntdrv.py mounts the driver-store image.
     ntdir, drivers, nt_exports = build_ntdrv_host()
-    ntapp = build_ntdrv_app(sorted(modules))
-    pnpapp = build_ntdrv_app(sorted(modules), "t_drv_pnp")
+    ntapp = build_ntdrv_app(runtime_libs)
+    pnpapp = build_ntdrv_app(runtime_libs, "t_drv_pnp")
     files.append(("\\SHZ\\TESTS\\ECHO.SYS", drivers["echo"].read_bytes()))
     img = OUT / "WIN64.IMG"
     img.write_bytes(pack_archive(files))

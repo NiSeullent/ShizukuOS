@@ -32,7 +32,6 @@ jobs:
         shell: bash
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      CHECK_OUTPUT: ${{ runner.temp }}/public-distribution
       PUBLIC_ISO_PATH: ${{ inputs.iso_path }}
       PUBLIC_ISO_SHA256: ${{ inputs.iso_sha256 }}
       PUBLIC_ISO_BYTES: ${{ inputs.iso_bytes }}
@@ -55,7 +54,7 @@ jobs:
         # No browser/npm download, certificate bypass, origin override or secret.
         run: |
           chrome_path="$(command -v google-chrome)"
-          verification_args=(--out "$CHECK_OUTPUT" --chrome "$chrome_path" --vantage github-hosted)
+          verification_args=(--out "$RUNNER_TEMP/public-distribution" --chrome "$chrome_path" --vantage github-hosted)
           if [[ -n "$PUBLIC_ISO_PATH$PUBLIC_ISO_SHA256$PUBLIC_ISO_BYTES" ]]; then
             if [[ -z "$PUBLIC_ISO_PATH" || -z "$PUBLIC_ISO_SHA256" || -z "$PUBLIC_ISO_BYTES" ]]; then
               echo 'Supply ISO path, SHA-256 and bytes together.' >&2
