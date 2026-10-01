@@ -149,8 +149,11 @@ is not a filesystem-wide net-reclamation claim. The later v5 launch attempt
 could not acquire the cooperative guest lock and created no run. Theme and
 application owners continue their independent native tests; the TLS clone
 waited for both the shared lock and the unchanged disk-reserve gate. The
-single fresh `run-win98-gop-tls-observed-v5-7707-20261001T0718` clone is now
-preparing after acquiring that lock; execution has not yet been observed.
+single fresh `run-win98-gop-tls-observed-v5-7707-20261001T0718` preparation
+also failed the final reserve/dirty-budget guard after concurrent peer writes.
+It produced zero captures, started no QEMU, preserved both original sources
+and removed its temporary RAW through the canonical failure cleanup.
+The stopped result and frozen controller/inputs remain as preparation evidence.
 
 The user-authorized independent evaluation site is <https://m98.nyase.kr/>.
 Release `M98EVAL-20261001-R2` explicitly states **독자 사이트** and
@@ -163,3 +166,8 @@ origin bodies matched the reviewed hashes. External edge access has not been
 verified. Publication receipt:
 `/root/Win98-Modern-release-7707-v2/published-20261001T064000621364.json`,
 SHA-256 `f6d3f2830613a564e3f2b9a9604f5e8ce2906dd6bf4c9ba4751071ae70fe0613`.
+
+The independently reviewed browser source has no existing M98SSPI consumer.
+`ntwin32/secure_transport/SSPI_BROWSER_INTEGRATION_7707.md` describes the
+process-local URLMon seam and the real HTTPS-body/Trident integration still
+needed, with the native IE and separate x64 runtime ownership boundaries.

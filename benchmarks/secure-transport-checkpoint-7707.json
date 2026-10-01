@@ -94,7 +94,7 @@
     "integration_notes": "docs/MODERN_INTEGRATION_7707.md"
   },
   "continuation_20261001": {
-    "recorded_utc": "2026-10-01T07:10:58.888058+00:00",
+    "recorded_utc": "2026-10-01T07:37:28.557670+00:00",
     "scope": "Actual host protocol tests, native static/ABI evidence, failed and queued guest trials; no system-provider acceptance",
     "receipts": {
       "host_v5": {
@@ -148,6 +148,10 @@
       "disk_additional_audit": {
         "path": "/root/Win98-Modern-tls13-7707/build/disk-cleanup-v5-7707-20261001/additional-owned-cache-audit.json",
         "sha256": "254fa3ef0a6293ccac19602bb4005fe3b9657c62f374413721bb020f914a8e95"
+      },
+      "native_v5_preparation": {
+        "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-tls-observed-v5-7707-20261001T0718/result.json",
+        "sha256": "11fccb5be4ac5ca4e5a9b3d090a6b0b2cadb962866b12e2b3f76789180a722bc"
       }
     },
     "host_protocol_checks": 11,
@@ -160,7 +164,7 @@
     "sspi_native_static_imports": 47,
     "sspi_native_static_highlow_relocations": 6577,
     "native_v4_status": "FAIL: genuine Win98 SE child exit2 and no TLS13.LOG",
-    "native_v5_status": "PREPARING fresh run0718; cold-copy source verification in progress, no QEMU observed yet",
+    "native_v5_status": "NOT-STARTED: final preparation reserve/dirty guard failed after concurrent peer writes; zero captures/no QEMU; temporary RAW removed by canonical cleanup; original and prepared source unchanged",
     "native_guest_tls_verified": false,
     "sspi_native_dll_loaded": false,
     "sspi_native_ROOT_execution_verified": false,
@@ -205,6 +209,7 @@
     "sspi_provenance_scope": "Explicit source/object/static-library/config/artifact hashes; implicit compiler libraries and complete SDK headers are not independently hashed",
     "native_v5_run": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-tls-observed-v5-7707-20261001T0718",
     "controller_admission_host_tests": 20,
-    "stopped_verifier_host_tests": 20
+    "stopped_verifier_host_tests": 20,
+    "browser_https_handoff": "ntwin32/secure_transport/SSPI_BROWSER_INTEGRATION_7707.md"
   }
 }
