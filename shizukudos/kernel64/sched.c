@@ -4,11 +4,15 @@
  * The tick is the Supervisor's paravirtual timer (vector 0x20), or standalone PIT.
  * Each thread owns an FXSAVE area so user-mode SSE state survives preemption.
  *
- * The UP IRQ guard protects queue and wait-list transitions together. No queue
- * lock is held across a context switch; restoring each saved context restores
- * its interrupt state. This is not an SMP lock or a replacement for Windows VMM.
+ * PerCPU priority queues use short IRQ-off ticket admission. Native dispatch
+ * remains BSP-only until AP shared-resource/entry/IRQ/ABI dependencies are ready.
+ * No ticket is held across a context switch or external wait/object callback.
+ * Windows VMM remains authoritative; this is a backend scheduler foundation.
  */
 #include "k64.h"
+#include "sched_cpu.h"
+#include "smp_boot.h"
+_Static_assert(K64_CPU_MAX == SHZ_SMP_MAX_CPUS, "CPU identity domain must match queue storage");
 extern int ntdrv_gs_all;                     /* ntdrv_ke.c: set once the driver host runs code that reads the KPCR through GS */
 
 extern void switch_stacks(uint64_t *save_rsp, uint64_t new_rsp);
@@ -25,9 +29,49 @@ static uint32_t next_id = 1;
 static volatile uint64_t jiffies;
 static uint64_t switches;
 static uint64_t preemptions, wakeups, timeouts, ready_order;
-static struct { thread_t *head, *tail; } ready[SCHED_PRIORITY_LEVELS];
-static uint32_t ready_mask, ready_count;
-static uint64_t cpu_idle_ticks, cpu_kernel_ticks, cpu_user_ticks;
+static k64_runqueues_t runqueues;
+/* Explicit BSP compatibility mirror: AP scheduler/syscall activation is denied.
+ * Queue and CPU-accounting storage already lives in the CPU record. */
+#define ready (runqueues.cpu[0].ready)
+#define ready_mask (runqueues.cpu[0].ready_mask)
+#define ready_count (runqueues.cpu[0].ready_count)
+#define cpu_idle_ticks (runqueues.cpu[0].idle_ticks)
+#define cpu_kernel_ticks (runqueues.cpu[0].kernel_ticks)
+#define cpu_user_ticks (runqueues.cpu[0].user_ticks)
+
+typedef struct { uint64_t flags; uint32_t ticket; } queue_guard_t;
+static queue_guard_t queue_enter(void)
+{
+    queue_guard_t g;
+    g.flags = irq_save();
+    g.ticket = k64_rq_lock(&runqueues);
+    return g;
+}
+static void queue_leave(queue_guard_t g)
+{
+    k64_rq_unlock(&runqueues, g.ticket);
+    irq_restore(g.flags);
+}
+uint32_t sched_cpu_identity(void)
+{
+    const unsigned cpu = shz_smp_this_cpu();
+    return cpu < K64_CPU_MAX ? cpu : K64_CPU_NONE;
+}
+static int bsp_scheduler_owner(void) { return sched_cpu_identity() == 0; }
+uint64_t sched_cpu_online_mask(void)
+{
+    queue_guard_t g = queue_enter();
+    const uint64_t mask = runqueues.online_mask;
+    queue_leave(g);
+    return mask;
+}
+int sched_cpu_register(uint32_t cpu)
+{
+    if (cpu >= K64_CPU_MAX) return -1;
+    /* Architecture ONLINE is not scheduler ONLINE. Even an actual mapped AP
+     * cannot run this BSP syscall/current compatibility path. */
+    return cpu == 0 && bsp_scheduler_owner() && runqueues.online_mask == 1 ? 0 : -2;
+}
 uint64_t g_kstack_top;
 uint64_t g_user_rsp_scratch;
 
@@ -50,47 +94,36 @@ void sched_processor_times(uint64_t *idle, uint64_t *kernel, uint64_t *user)
     *user = cpu_user_ticks * (TICK_US * 10ull);
     irq_restore(flags);
 }
-thread_t *thread_current(void) { return current; }
+thread_t *thread_current(void) { return bsp_scheduler_owner() ? current : 0; }
 static int thread_pointer_valid(const thread_t *t);
 static void ready_enqueue(thread_t *t);
 static void ready_remove(thread_t *t);
 
 int thread_set_sched_policy(thread_t *t, unsigned priority, unsigned quantum_ticks, uint64_t cpu_mask)
 {
-    uint64_t f;
-    if (priority >= SCHED_PRIORITY_LEVELS || !quantum_ticks || quantum_ticks > SCHED_MAX_QUANTUM_TICKS || cpu_mask != 1)
-        return -1;
-    f = irq_save();
-    if (!thread_pointer_valid(t) || t == idle_thread || t->state == TS_FREE || t->state == TS_ZOMBIE) {
-        irq_restore(f);
-        return -1;
+    queue_guard_t g = queue_enter();
+    int rc = -1;
+    if (bsp_scheduler_owner() && thread_pointer_valid(t)) {
+        const int move = t->ready_queued &&
+            (priority != t->sched_priority || t->ready_cpu >= K64_CPU_MAX || !(cpu_mask & (1ull << t->ready_cpu)));
+        rc = k64_rq_policy_locked(&runqueues, t, priority, quantum_ticks, cpu_mask, jiffies, ready_order + 1);
+        if (!rc && move) ++ready_order;
     }
-    const int move = t->ready_queued && priority != t->sched_priority;
-    if (move) ready_remove(t);             /* remove under the old priority */
-    t->sched_priority = priority;
-    t->quantum_ticks = quantum_ticks;
-    /* Updating policy cannot renew the slice currently being consumed. A
-     * larger quantum takes effect on the next dispatch; a smaller one clamps
-     * the remainder. Otherwise a CPU-bound caller could avoid expiry forever. */
-    if (t->state != TS_RUNNING || t->quantum_left > quantum_ticks)
-        t->quantum_left = quantum_ticks;
-    t->cpu_mask = cpu_mask;
-    if (move) ready_enqueue(t);            /* FIFO arrival in the new priority */
-    irq_restore(f);
-    return 0;
+    queue_leave(g);
+    return rc;
 }
 
 int thread_get_sched_policy(thread_t *t, sched_policy_t *out)
 {
-    const uint64_t f = irq_save();
-    if (!out || !thread_pointer_valid(t) || t->state == TS_FREE || t->state == TS_ZOMBIE) {
-        irq_restore(f);
+    queue_guard_t g = queue_enter();
+    if (!bsp_scheduler_owner() || !out || !thread_pointer_valid(t) || t->state == TS_FREE || t->state == TS_ZOMBIE) {
+        queue_leave(g);
         return -1;
     }
     out->priority = t->sched_priority;
     out->quantum_ticks = t->quantum_ticks;
     out->cpu_mask = t->cpu_mask;
-    irq_restore(f);
+    queue_leave(g);
     return 0;
 }
 
@@ -117,42 +150,25 @@ void sched_get_stats(sched_stats_t *out)
 
 int sched_validate(void)
 {
-    uint8_t seen[MAX_THREADS] = {0};
-    unsigned p, n = 0, i;
-    uint32_t mask = 0;
     int ok = 1;
-    const uint64_t f = irq_save();
-    if (!thread_pointer_valid(current) || !thread_pointer_valid(idle_thread) || current->state != TS_RUNNING)
-        ok = 0;
-    for (p = 0; ok && p < SCHED_PRIORITY_LEVELS; ++p) {
-        thread_t *t = ready[p].head, *prev = 0;
-        if (t) mask |= 1u << p;
-        while (t) {
-            if (++n > MAX_THREADS || !thread_pointer_valid(t) || t == idle_thread ||
-                t->state != TS_READY || !t->ready_queued || t->sched_priority != p || t->ready_prev != prev) {
-                ok = 0;
-                break;
-            }
-            i = (unsigned)(t - threads);
-            if (seen[i]++) { ok = 0; break; }
-            prev = t;
-            t = t->ready_next;
-        }
-        if (prev != ready[p].tail) ok = 0;
-    }
-    if (mask != ready_mask || n != ready_count) ok = 0;
-    for (i = 0; ok && i < thread_hi; ++i) {
+    queue_guard_t g = queue_enter();
+    if (!bsp_scheduler_owner() || !thread_pointer_valid(current) || !thread_pointer_valid(idle_thread) ||
+        current->state != TS_RUNNING || current != runqueues.cpu[0].current || current->on_cpu != 0 ||
+        k64_rq_validate_locked(&runqueues)) ok = 0;
+    for (unsigned i = 0; ok && i < thread_hi; ++i) {
         thread_t *t = &threads[i];
-        const int queued = t->state == TS_READY && t != idle_thread;
-        if (t->state > TS_NEW || !!t->ready_queued != queued || !!seen[i] != queued ||
+        const int queued = t->state == TS_READY && t != idle_thread && t->on_cpu == K64_CPU_NONE;
+        if (t->state > TS_NEW || !!t->ready_queued != queued ||
             (!queued && (t->ready_prev || t->ready_next)) ||
             (t->state == TS_RUNNING && t != current) ||
+            (t->on_cpu != K64_CPU_NONE && (t->on_cpu != 0 ||
+             (t != current && t != runqueues.cpu[0].outgoing))) ||
             t->aging_service_left > SCHED_AGED_SERVICE_TICKS ||
             (t->state != TS_RUNNING && t->aging_service_left) ||
             (t->state != TS_FREE && (t->sched_priority >= SCHED_PRIORITY_LEVELS || !t->quantum_ticks ||
-             t->quantum_ticks > SCHED_MAX_QUANTUM_TICKS || t->cpu_mask != 1))) ok = 0;
+             t->quantum_ticks > SCHED_MAX_QUANTUM_TICKS || !t->cpu_mask || (t->cpu_mask & ~runqueues.online_mask)))) ok = 0;
     }
-    irq_restore(f);
+    queue_leave(g);
     return ok;
 }
 
@@ -169,6 +185,7 @@ thread_t *thread_find_tid(void *process, uint64_t tid)
  * kernel stacks of exited user threads). */
 void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx)
 {
+    if (!bsp_scheduler_owner()) return;
     unsigned i;
     for (i = 0; i < thread_hi; ++i) {
         const uint64_t f = irq_save();
@@ -184,70 +201,55 @@ static int thread_pointer_valid(const thread_t *t)
            (addr - base) % sizeof(*threads) == 0;
 }
 
-/* All runnable transitions are here; wait links are never used for run queues. */
+/* All runnable queue transitions use the same ticket. Wait links stay separate. */
+static void ready_enqueue_locked(thread_t *t)
+{
+    t->aging_service_left = 0;
+    if (t == idle_thread) return;
+    const uint32_t cpu = k64_rq_choose_locked(&runqueues, t->cpu_mask);
+    KASSERT(k64_rq_enqueue_locked(&runqueues, t, cpu, jiffies, ++ready_order) == 0);
+}
 static void ready_enqueue(thread_t *t)
 {
-    const unsigned p = t->sched_priority;
-    KASSERT(t->state == TS_READY && !t->ready_queued && p < SCHED_PRIORITY_LEVELS);
-    t->aging_service_left = 0;                  /* a queued thread owns no running service grant */
-    if (t == idle_thread) return;
-    t->ready_prev = ready[p].tail;
-    t->ready_next = 0;
-    if (ready[p].tail) ready[p].tail->ready_next = t;
-    else ready[p].head = t;
-    ready[p].tail = t;
-    t->ready_since = jiffies;
-    t->ready_order = ++ready_order;
-    t->ready_queued = 1;
-    ready_mask |= 1u << p;
-    ++ready_count;
+    queue_guard_t g = queue_enter();
+    KASSERT(bsp_scheduler_owner());
+    ready_enqueue_locked(t);
+    queue_leave(g);
 }
-
 static void ready_remove(thread_t *t)
 {
-    const unsigned p = t->sched_priority;
-    KASSERT(t->ready_queued && ready_count && p < SCHED_PRIORITY_LEVELS);
-    if (t->ready_prev) t->ready_prev->ready_next = t->ready_next;
-    else ready[p].head = t->ready_next;
-    if (t->ready_next) t->ready_next->ready_prev = t->ready_prev;
-    else ready[p].tail = t->ready_prev;
-    if (!ready[p].head) ready_mask &= ~(1u << p);
-    t->ready_prev = t->ready_next = 0;
-    t->ready_queued = 0;
-    --ready_count;
+    queue_guard_t g = queue_enter();
+    KASSERT(bsp_scheduler_owner() && k64_rq_remove_locked(&runqueues, t) == 0);
+    queue_leave(g);
 }
-
 static void make_ready(thread_t *t)
 {
-    if (t->state == TS_READY || t->state == TS_RUNNING) return;
-    if (t->state == TS_BLOCKED) ++wakeups;
-    t->state = TS_READY;
-    ready_enqueue(t);
+    queue_guard_t g = queue_enter();
+    KASSERT(bsp_scheduler_owner() && thread_pointer_valid(t));
+    if (t->state != TS_READY && t->state != TS_RUNNING) {
+        if (t->state == TS_BLOCKED) ++wakeups;
+        t->state = TS_READY;
+        t->aging_service_left = 0;
+        t->ready_since = jiffies;
+        t->ready_order = ++ready_order;
+        /* A wake during handoff cannot publish a still-executing stack. */
+        if (t->on_cpu == K64_CPU_NONE && t != idle_thread)
+            KASSERT(k64_rq_enqueue_locked(&runqueues, t, k64_rq_choose_locked(&runqueues, t->cpu_mask),
+                                         t->ready_since, t->ready_order) == 0);
+    }
+    queue_leave(g);
 }
-
 static thread_t *pick_aged(void)
 {
-    thread_t *oldest = 0;
-    int p;
-    /* Only FIFO heads can be selected. Once aged, the oldest arrival wins,
-     * independent of priority; newer arrivals cannot jump in front of it. */
-    for (p = (int)SCHED_PRIORITY_LEVELS - 1; p >= 0; --p) {
-        thread_t *t = ready[p].head;
-        if (t && jiffies - t->ready_since >= SCHED_STARVATION_TICKS &&
-            (!oldest || t->ready_order < oldest->ready_order)) oldest = t;
-    }
-    return oldest;
+    queue_guard_t g = queue_enter();
+    thread_t *t = k64_rq_aged_locked(&runqueues, 0, jiffies);
+    queue_leave(g);
+    return t;
 }
-
 static thread_t *pick_next(int *aged)
 {
-    thread_t *oldest = pick_aged();
-    int p;
-    *aged = oldest != 0;
-    if (oldest) return oldest;
-    for (p = (int)SCHED_PRIORITY_LEVELS - 1; p >= 0; --p)
-        if (ready_mask & (1u << p)) return ready[p].head;
-    return idle_thread;
+    thread_t *t = k64_rq_pick_locked(&runqueues, 0, jiffies, aged);
+    return t ? t : idle_thread;
 }
 
 static inline uint64_t rdtsc(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
@@ -269,30 +271,51 @@ static inline void fx_restore(thread_t *t) { __asm__ volatile("fxrstor (%0)" :: 
 /* Interrupts must be disabled. */
 static void schedule(int from_tick)
 {
+    KASSERT(bsp_scheduler_owner());
+    const uint32_t ticket = k64_rq_lock(&runqueues);
+    k64_cpu_sched_t *cpu = &runqueues.cpu[0];
     thread_t *prev = current, *next;
     int aged;
-    /* A yield, wait, exit or preemption relinquishes any unused grant. */
+    KASSERT(prev && prev == cpu->current && prev->on_cpu == 0 && !cpu->outgoing);
+    /* A yield/wait/exit/preemption relinquishes any unused service allocation. */
     prev->aging_service_left = 0;
     if (prev->state == TS_RUNNING) {
         prev->state = TS_READY;
-        ready_enqueue(prev);
+        prev->ready_since = jiffies;
+        prev->ready_order = ++ready_order;
     }
     next = pick_next(&aged);
+    /* Model the old enqueue-before-selection ordering without exposing the live
+     * outgoing stack. Equal-priority FIFO heads precede this virtual arrival;
+     * aged heads retain their independent priority override. */
+    if (prev->state == TS_READY && prev != idle_thread) {
+        const int prev_aged = jiffies - prev->ready_since >= SCHED_STARVATION_TICKS;
+        if ((prev_aged && (!aged || prev->ready_order < next->ready_order)) ||
+            (!aged && !prev_aged && (next == idle_thread || prev->sched_priority > next->sched_priority))) {
+            next = prev;
+            aged = prev_aged;
+        }
+    }
     next->aging_service_left = aged ? SCHED_AGED_SERVICE_TICKS : 0;
     next->quantum_left = next->quantum_ticks;
     if (next != idle_thread) {
         const uint64_t waited = jiffies - next->ready_since;
         if (waited > next->max_ready_wait_ticks) next->max_ready_wait_ticks = waited;
         if (pma_sched_trace_enabled || pma_sched_observe_enabled) pma_sched_trace_dispatch(next, waited);
-        ready_remove(next);
+        if (next->ready_queued) KASSERT(k64_rq_remove_locked(&runqueues, next) == 0);
     }
     next->state = TS_RUNNING;
     if (next == prev) {
+        k64_rq_unlock(&runqueues, ticket);
         return;
     }
-    current = next;
+    KASSERT(next->on_cpu == K64_CPU_NONE);
+    next->on_cpu = 0;
+    current = cpu->current = next;
+    cpu->outgoing = prev;
     ++switches;
     if (from_tick) ++preemptions;
+    k64_rq_unlock(&runqueues, ticket);
     tss_set_rsp0(next->stack_base + KSTACK_BYTES);
     g_kstack_top = next->stack_base + KSTACK_BYTES;
     {
@@ -325,13 +348,30 @@ static void schedule(int from_tick)
     switch_stacks(&prev->rsp, next->rsp);
 }
 
+void sched_switch_complete(void)
+{
+    /* Destination stack is active, outgoing RSP saved; IF is still clear. */
+    KASSERT(bsp_scheduler_owner());
+    const uint32_t ticket = k64_rq_lock(&runqueues);
+    k64_cpu_sched_t *cpu = &runqueues.cpu[0];
+    thread_t *t = cpu->outgoing;
+    KASSERT(t && t != current && t->on_cpu == 0);
+    cpu->outgoing = 0;
+    t->on_cpu = K64_CPU_NONE;
+    if (t->state == TS_READY && t != idle_thread)
+        KASSERT(k64_rq_enqueue_locked(&runqueues, t, k64_rq_choose_locked(&runqueues, t->cpu_mask),
+                                     t->ready_since, t->ready_order) == 0);
+    k64_rq_unlock(&runqueues, ticket);
+}
+
 void __attribute__((weak)) sched_check_timeouts(uint64_t now) { (void)now; }       /* objects.c overrides */
 void __attribute__((weak)) thread_object_signal(thread_t *t) { (void)t; }          /* objects.c overrides */
 
-static int tick_from_user;
+#define tick_from_user (runqueues.cpu[0].tick_from_user)
 
 void sched_tick_from(int user_mode)
 {
+    if (!bsp_scheduler_owner()) return;
     tick_from_user = user_mode;
     sched_tick();
 }
@@ -339,6 +379,7 @@ void sched_tick_from(int user_mode)
 void sched_tick(void)
 {
     unsigned i;
+    if (!bsp_scheduler_owner()) return;
     if (pma_sched_trace_enabled) pma_sched_trace_tick(current, jiffies);
     ++jiffies;
     if (current == idle_thread) ++cpu_idle_ticks;
@@ -412,7 +453,7 @@ static void reap_user_zombies(const void *only, int drop_holds)
         thread_t *t = &threads[i];
         if (t->state == TS_FREE || !t->proc || (only && t->proc != only)) continue;
         if (drop_holds) t->creator_hold = 0;    /* also a thread still inside thread_exit(): it is reaped at a later pass */
-        if (t->state != TS_ZOMBIE || t == current || t->creator_hold) continue;
+        if (t->state != TS_ZOMBIE || t == current || t->creator_hold || t->on_cpu != K64_CPU_NONE) continue;
         thread_object_detach(t);
         kstack_free(t->stack_base);
         t->stack_base = 0;
@@ -423,6 +464,7 @@ static void reap_user_zombies(const void *only, int drop_holds)
 
 void thread_reap_process(const void *proc)
 {
+    if (!bsp_scheduler_owner()) return;
     const uint64_t f = irq_save();
     reap_user_zombies(proc, 1);
     irq_restore(f);
@@ -430,6 +472,7 @@ void thread_reap_process(const void *proc)
 
 void thread_reap_exited(void)
 {
+    if (!bsp_scheduler_owner()) return;
     const uint64_t f = irq_save();
     reap_user_zombies(0, 0);
     irq_restore(f);
@@ -437,6 +480,7 @@ void thread_reap_exited(void)
 
 void thread_creator_release(thread_t *t)
 {
+    if (!bsp_scheduler_owner()) return;
     const uint64_t f = irq_save();
     t->creator_hold = 0;
     irq_restore(f);
@@ -458,6 +502,7 @@ static void kstack_free(uint64_t base)
 static thread_t *thread_create_state(const char *name, void (*fn)(void *), void *arg, uint32_t state)
 {
     uint64_t f = irq_save(), *sp;
+    if (!bsp_scheduler_owner()) { irq_restore(f); return 0; }
     thread_t *t = 0;
     unsigned i, k;
     reap_user_zombies(0, 0);
@@ -471,6 +516,7 @@ static thread_t *thread_create_state(const char *name, void (*fn)(void *), void 
         return 0;
     }
     memset(t, 0, sizeof *t);
+    t->ready_cpu = t->on_cpu = K64_CPU_NONE;
     t->stack_base = kstack_alloc();
     if (!t->stack_base) { irq_restore(f); kprintf("K64: no kernel stack for a new thread\n"); return 0; }
     if ((unsigned)(t - threads) >= thread_hi) thread_hi = (unsigned)(t - threads) + 1;
@@ -508,6 +554,7 @@ thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *ar
 
 void thread_resume(thread_t *t)
 {
+    if (!bsp_scheduler_owner()) return;
     const uint64_t f = irq_save();
     if (t->state == TS_NEW)
         make_ready(t);
@@ -516,6 +563,7 @@ void thread_resume(thread_t *t)
 
 void thread_discard(thread_t *t)
 {
+    if (!bsp_scheduler_owner()) return;
     const uint64_t f = irq_save();
     if (t->state == TS_NEW) {
         kstack_free(t->stack_base);
@@ -526,6 +574,7 @@ void thread_discard(thread_t *t)
 
 void thread_yield(void)
 {
+    KASSERT(bsp_scheduler_owner());
     uint64_t f = irq_save();
     schedule(0);
     irq_restore(f);
@@ -535,6 +584,7 @@ void __attribute__((weak)) thread_account_exit(thread_t *t) { (void)t; }        
 
 void thread_exit(int64_t code)
 {
+    KASSERT(bsp_scheduler_owner());
     uint64_t f = irq_save();
     (void)f;
     current->exit_code = code;
@@ -555,9 +605,10 @@ void thread_exit(int64_t code)
 
 int64_t thread_join(thread_t *t)
 {
+    if (!bsp_scheduler_owner()) return -1;
     for (;;) {
         uint64_t f = irq_save();
-        if (t->state == TS_ZOMBIE) {
+        if (t->state == TS_ZOMBIE && t->on_cpu == K64_CPU_NONE) {
             const int64_t code = t->exit_code;
             kstack_free(t->stack_base);
             t->state = TS_FREE;
@@ -571,12 +622,14 @@ int64_t thread_join(thread_t *t)
 
 void thread_block_current(void)
 {
+    KASSERT(bsp_scheduler_owner());
     current->state = TS_BLOCKED;
     schedule(0);
 }
 
 void thread_wake(thread_t *t)
 {
+    if (!bsp_scheduler_owner()) return;
     const uint64_t f = irq_save();
     if (t->state == TS_BLOCKED) {
         t->wake_tick = 0;
@@ -600,6 +653,7 @@ static uint64_t deadline_after_ms(uint64_t ms)
 
 void thread_sleep_ms(uint64_t ms)
 {
+    KASSERT(bsp_scheduler_owner());
     uint64_t f = irq_save();
     current->wake_tick = deadline_after_ms(ms);
     current->state = TS_BLOCKED;
@@ -612,6 +666,7 @@ void sem_init(ksem_t *s, int count) { s->count = count; s->waiters = 0; }
 
 static int sem_wait_common(ksem_t *s, uint64_t ms)
 {
+    KASSERT(bsp_scheduler_owner());
     uint64_t f = irq_save();
     int rc = 0;
     if (s->count > 0) {
@@ -639,6 +694,7 @@ int sem_wait_timeout(ksem_t *s, uint64_t ms) { return sem_wait_common(s, ms ? ms
 
 void sem_post(ksem_t *s)
 {
+    KASSERT(bsp_scheduler_owner());
     uint64_t f = irq_save();
     thread_t *w = s->waiters;
     if (w) {
@@ -657,6 +713,7 @@ void mutex_init(kmutex_t *m) { m->locked = 0; m->owner = 0; m->waiters = 0; }
 
 void mutex_lock(kmutex_t *m)
 {
+    KASSERT(bsp_scheduler_owner());
     for (;;) {
         uint64_t f = irq_save();
         if (!m->locked) {
@@ -677,6 +734,7 @@ void mutex_lock(kmutex_t *m)
 
 void mutex_unlock(kmutex_t *m)
 {
+    KASSERT(bsp_scheduler_owner());
     uint64_t f = irq_save();
     thread_t *w;
     KASSERT(m->locked && m->owner == current);
@@ -700,17 +758,20 @@ static void idle_loop(void *arg)
 
 void sched_init(void)
 {
+    KASSERT(bsp_scheduler_owner());
     const uint64_t table = pmm_alloc_contig((unsigned)((sizeof(thread_t) * MAX_THREADS + PAGE_SIZE - 1) / PAGE_SIZE));
     KASSERT(table);
     threads = (thread_t *)p2v(table);                                       /* zeroed: every slot is TS_FREE */
-    memset(ready, 0, sizeof ready);
-    ready_mask = ready_count = 0;
+    k64_rq_init(&runqueues, threads, MAX_THREADS, 1);
     jiffies = switches = preemptions = wakeups = timeouts = ready_order = 0;
     idle_thread = 0;
     thread_hi = 1;
     current = &threads[0];
     current->id = next_id++;
     current->state = TS_RUNNING;
+    current->ready_cpu = K64_CPU_NONE;
+    current->on_cpu = 0;
+    runqueues.cpu[0].current = current;
     current->sched_priority = SCHED_DEFAULT_PRIORITY;
     current->quantum_ticks = current->quantum_left = 1;
     current->cpu_mask = 1;
@@ -723,6 +784,7 @@ void sched_init(void)
     idle_thread = thread_create("idle", idle_loop, 0);
     KASSERT(idle_thread);
     ready_remove(idle_thread);                       /* it was created before the idle identity was known */
+    runqueues.cpu[0].idle = idle_thread;
     idle_thread->sched_priority = 0;
     idle_thread->state = TS_READY;
 }

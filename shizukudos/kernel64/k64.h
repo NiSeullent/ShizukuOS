@@ -174,9 +174,14 @@ struct thread {
     uint64_t ready_since, ready_order, cpu_mask;
     uint32_t sched_priority, quantum_ticks, quantum_left, ready_queued;
     uint64_t max_ready_wait_ticks;              /* diagnostic: longest READY-to-dispatch residence */
+    uint32_t ready_cpu, on_cpu;                  /* perCPU queue and live-stack ownership */
     uint32_t aging_service_left;                /* unrenewable aged-dispatch timer budget; RUNNING only */
 };
 void sched_init(void);
+void sched_switch_complete(void);              /* assembly destination-stack hook, IF clear */
+uint32_t sched_cpu_identity(void);              /* owner-backed physical mapping or UINT32_MAX */
+uint64_t sched_cpu_online_mask(void);
+int sched_cpu_register(uint32_t cpu);           /* -2: AP activation dependencies absent */
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
 thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg);   /* TS_NEW until thread_resume */
 void thread_resume(thread_t *t);

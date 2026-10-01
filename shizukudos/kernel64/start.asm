@@ -161,6 +161,7 @@ syscall_entry:
 
 ; void switch_stacks(uint64_t *save_rsp, uint64_t new_rsp)
 global switch_stacks
+extern sched_switch_complete
 switch_stacks:
     pushfq
     push rbp
@@ -171,6 +172,9 @@ switch_stacks:
     push r15
     mov [rdi], rsp
     mov rsp, rsi
+    ; RSP%16=0 after seven saved words: SysV CALL entry is aligned at8.
+    ; Old stack is now saved/inactive. No scheduler ticket spans this handoff.
+    call sched_switch_complete          ; before POPFQ can enable a pending timer
     pop r15
     pop r14
     pop r13
