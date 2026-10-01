@@ -167,6 +167,11 @@ static volatile int sample_done;
 static void interrupted_sampler(void *arg)
 {
     (void)arg;
+    /* Keep the captures atomic with the two intentional yields. Each other
+     * context restores its own IF, so its timer still advances. Restoring IF
+     * after each yield here could insert an extra dispatch interval before a
+     * capture and confuse that observation with actual ready residence. */
+    const uint64_t f = irq_save();
     sample_first = ticks_now();
     /* Force the two timer-switch opportunities in the old observation loop:
      * after reading the clock, and after writing that now-stale timestamp. */
@@ -177,6 +182,7 @@ static void interrupted_sampler(void *arg)
     sample_last = ticks_now();
     sample_raw_gap = sample_last - stale_last;
     sample_done = 1;
+    irq_restore(f);
 }
 static void sampler_competitor(void *arg)
 {
