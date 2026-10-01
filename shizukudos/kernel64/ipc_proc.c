@@ -9,6 +9,7 @@
  * so code that opens a handle with too few rights fails as it would on Windows.
  */
 #include "ipc.h"
+#include "../kcommon/nt_sched_policy.h"
 
 #define PROCESS_CREATE_THREAD 0x0002u
 #define PROCESS_CREATE_PROCESS 0x0080u
@@ -962,8 +963,11 @@ static int32_t sys_query_thread(process_t *p, struct regs *r, uint64_t h, uint64
     thread_t *t;
     kobject_t *o;
     int32_t st;
-    if (len < sizeof b) return STATUS_INFO_LENGTH_MISMATCH;
-    st = ipc_ref_handle(p, h, OB_THREAD, &o, 0);
+    if (len < sizeof b) {
+        if (pret && copy_to_user(p, pret, &n, 4)) return STATUS_ACCESS_VIOLATION;
+        return STATUS_INFO_LENGTH_MISMATCH;
+    }
+    st = ref_thread(p, h, THREAD_QUERY_INFORMATION, &o);
     if (st) return st;
     memset(&b, 0, sizeof b);
     {
@@ -971,19 +975,69 @@ static int32_t sys_query_thread(process_t *p, struct regs *r, uint64_t h, uint64
         t = o->u.thr.t;
         if (t) {
             b.exit_status = t->state == TS_ZOMBIE || t->state == TS_FREE ? t->exit_code : 0x103;
-            b.teb = t->state == TS_ZOMBIE ? 0 : t->teb;
+            b.teb = t->state == TS_ZOMBIE || t->state == TS_FREE ? 0 : t->teb;
         } else {
             b.exit_status = o->u.thr.exit_code;          /* reclaimed: the object kept the exit status and the ids */
         }
         b.pid = o->u.thr.pid;
         b.tid = o->u.thr.tid;
+        b.affinity = 1;                         /* fixed single-CPU contract */
+        b.prio = (int32_t)(t ? t->sched_priority : o->u.thr.last_sched_priority);
+        b.base = o->u.thr.nt_base_increment;     /* relative, not absolute native priority */
         irq_restore(f);
     }
-    b.affinity = 1; b.prio = 8; b.base = 8;
     ob_deref(o);
     if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
     if (pret && copy_to_user(p, pret, &n, 4)) return STATUS_ACCESS_VIOLATION;
     return STATUS_SUCCESS;
+}
+
+/* Partial NT user-thread policy: ThreadBasePriority (3, LONG) and
+ * ThreadAffinityMask (4, 64-bit KAFFINITY). Quantum remains native policy.
+ * Absolute ThreadPriority (2), realtime and background modes are unsupported. */
+static int32_t sys_set_thread(process_t *p, uint64_t h, uint64_t cls, uint64_t buf, uint64_t len)
+{
+    kobject_t *o;
+    thread_t *t;
+    sched_policy_t policy;
+    shz_nt_sched_projection_t projection;
+    shz_nt_sched_result_t result;
+    int32_t increment = 0, st;
+    uint64_t mask = 1, f;
+    if (cls == 2) return STATUS_NOT_SUPPORTED;
+    if (cls != 3 && cls != 4) return STATUS_INVALID_INFO_CLASS;
+    if (len != (cls == 3 ? sizeof increment : sizeof mask)) return STATUS_INFO_LENGTH_MISMATCH;
+    st = ref_thread(p, h, THREAD_SET_INFORMATION, &o);
+    if (st) return st;
+    if (copy_from_user(p, cls == 3 ? (void *)&increment : (void *)&mask, buf, len)) {
+        ob_deref(o);
+        return STATUS_ACCESS_VIOLATION;
+    }
+    f = irq_save();
+    t = attached_thread(o);
+    if (!t || t->object != o || !t->proc->used || t->proc->teardown ||
+        (uint64_t)t->proc->pid != o->u.thr.pid || thread_must_die(t)) {
+        st = STATUS_THREAD_IS_TERMINATING;
+    } else if (thread_get_sched_policy(t, &policy)) {
+        st = STATUS_THREAD_IS_TERMINATING;
+    } else if (cls == 4) {
+        st = mask != 1 ? STATUS_INVALID_PARAMETER :
+             thread_set_sched_policy(t, policy.priority, policy.quantum_ticks, mask) ? STATUS_INVALID_PARAMETER : STATUS_SUCCESS;
+    } else {
+        const uint32_t pc = t->proc->priority_class ? t->proc->priority_class : SHZ_NT_PROCESS_NORMAL;
+        result = shz_nt_sched_from_base_increment(pc, increment, &projection);
+        st = result == SHZ_NT_SCHED_UNSUPPORTED ? STATUS_NOT_SUPPORTED :
+             result != SHZ_NT_SCHED_OK ? STATUS_INVALID_PARAMETER :
+             thread_set_sched_policy(t, projection.absolute_priority, policy.quantum_ticks, policy.cpu_mask) ?
+             STATUS_INVALID_PARAMETER : STATUS_SUCCESS;
+        if (!st) {
+            o->u.thr.nt_base_increment = projection.nt_base_increment;
+            o->u.thr.last_sched_priority = projection.absolute_priority;
+        }
+    }
+    irq_restore(f);
+    ob_deref(o);
+    return st;
 }
 
 extern int64_t shz_filetime_now_ipc(void);
@@ -1093,6 +1147,7 @@ int32_t ipc_proc_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1
     case SYS_NtQueryInformationThread:
         if (a2 != 0) break;                                           /* ThreadBasicInformation only */
         return sys_query_thread(p, r, a1, a3, a4);
+    case SYS_NtSetInformationThread: return sys_set_thread(p, a1, a2, a3, a4);
     case SYS_NtQueryInformationProcess:
         if (a2 != 0 && a2 != 4 && a2 != 20 && a2 != 24 && a2 != 27 && a2 != 43) break;
         return sys_query_process(p, r, a1, a2, a3, a4);

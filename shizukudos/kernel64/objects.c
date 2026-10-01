@@ -414,6 +414,9 @@ void thread_object_detach(thread_t *t)
     o->u.thr.user_ticks = t->user_ticks;
     o->u.thr.kernel_ticks = t->kernel_ticks;
     o->u.thr.cycles = t->cycles;
+    /* Reclamation owns this TCB with interrupts off, including TS_ZOMBIE;
+     * the public native getter deliberately refuses that state. */
+    o->u.thr.last_sched_priority = t->sched_priority;
     o->u.thr.t = 0;
     t->object = 0;
     ob_deref(o);

@@ -72,12 +72,35 @@ K32API BOOL WINAPI GetExitCodeThread(HANDLE h, LPDWORD code)
 }
 
 K32API BOOL WINAPI SwitchToThread(void) { return NtYieldExecution() != STATUS_NO_YIELD_PERFORMED; }
-K32API int WINAPI GetThreadPriority(HANDLE h) { (void)h; return THREAD_PRIORITY_NORMAL; }
+K32API int WINAPI GetThreadPriority(HANDLE h)
+{
+    struct { LONG64 exit_status; ULONG64 teb, pid, tid, aff; LONG prio, base; } b;
+    NTSTATUS st = NtQueryInformationThread(h, 0, &b, sizeof b, 0);
+    if (st) { k32_nt_error(st); return THREAD_PRIORITY_ERROR_RETURN; }
+    if (b.base == -16) return THREAD_PRIORITY_IDLE;
+    if (b.base == 16) return THREAD_PRIORITY_TIME_CRITICAL;
+    if (b.base >= THREAD_PRIORITY_LOWEST && b.base <= THREAD_PRIORITY_HIGHEST) return (int)b.base;
+    shz_set_last_error(ERROR_NOT_SUPPORTED);
+    return THREAD_PRIORITY_ERROR_RETURN;
+}
 K32API BOOL WINAPI SetThreadPriority(HANDLE h, int p)
 {
-    (void)h;
-    /* Priorities have no scheduler effect yet (round-robin only); accepting the call does not claim otherwise. */
-    return p >= THREAD_PRIORITY_IDLE && p <= THREAD_PRIORITY_TIME_CRITICAL;
+    LONG increment;
+    NTSTATUS st;
+    if (p == THREAD_MODE_BACKGROUND_BEGIN || p == THREAD_MODE_BACKGROUND_END) {
+        shz_set_last_error(ERROR_NOT_SUPPORTED);
+        return FALSE;
+    }
+    switch (p) {
+    case THREAD_PRIORITY_IDLE: increment = -16; break;
+    case THREAD_PRIORITY_TIME_CRITICAL: increment = 16; break;
+    case THREAD_PRIORITY_LOWEST: case THREAD_PRIORITY_BELOW_NORMAL: case THREAD_PRIORITY_NORMAL:
+    case THREAD_PRIORITY_ABOVE_NORMAL: case THREAD_PRIORITY_HIGHEST: increment = (LONG)p; break;
+    default: shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE;
+    }
+    st = NtSetInformationThread(h, 3, &increment, sizeof increment);
+    if (st) { k32_nt_error(st); return FALSE; }
+    return TRUE;
 }
 K32API BOOL WINAPI DisableThreadLibraryCalls(HMODULE m) { (void)m; return TRUE; }
 
