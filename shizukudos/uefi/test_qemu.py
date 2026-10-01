@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import re
 import socket
 import subprocess
 import tempfile
@@ -138,6 +139,7 @@ def main():
                     "-device", "qemu-xhci,bus=rp1",
                     "-debugcon", f"file:{testdir / 'pci-debug.log'}"]
     receipt = {"artifact_sha256": digest(artifact), "command": command,
+               "test_harness_sha256": digest(Path(__file__)),
                "firmware_code_sha256": digest(Path(args.firmware_code)),
                "memory_mib": 256, "vcpus": 1, "network": "disabled", "pass": False}
     qmp = None
@@ -172,7 +174,21 @@ def main():
                 if ok and args.test_pci:
                     ok = "NTWPCIE_BRIDGE_XHCI_PASS" in (testdir / "pci-debug.log").read_text()
                 if ok:
+                    selections = re.findall(
+                        r"GOP selection: mode (\d+) (\d+)x(\d+) pitch (\d+) (BGRX|RGBX) "
+                        r"queried (\d+) EDID=(preferred|unavailable) (selected|firmware-fallback)",
+                        (testdir / "serial.log").read_text(errors="replace"))
+                    if len(selections) != 1:
+                        raise RuntimeError("No unique live GOP selection record in the firmware console log")
+                    mode, sw, sh, pitch, layout, queried, edid, policy = selections[0]
+                    if ((int(sw), int(sh)) != (width, height) or int(pitch) < width * 4 or
+                            int(pitch) % 4 or int(pitch) * height > 64 * 1024 * 1024 or
+                            int(queried) > 1024 or (int(queried) and int(mode) >= int(queried))):
+                        raise RuntimeError("Live GOP selection violates budget/pitch or disagrees with the post-exit screen")
                     receipt.update({"pass": True, "resolution": [width, height],
+                                    "gop_selection": {"mode": int(mode), "width": int(sw), "height": int(sh),
+                                                      "pitch_bytes": int(pitch), "layout": layout,
+                                                      "modes_queried": int(queried), "edid": edid, "policy": policy},
                                     "exit_boot_services": "post-exit framebuffer verified",
                                     "ntwddm": "software fill/present/fence verified",
                                     "ntwrapper": "NTWRAPPER9X_RING0_PASS",

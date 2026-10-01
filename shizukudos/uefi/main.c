@@ -28,6 +28,26 @@ static void print(EFI_SYSTEM_TABLE *st, const char *text)
     }
 }
 
+static void print_dec(EFI_SYSTEM_TABLE *st, uint32_t value)
+{
+    char digits[11];
+    unsigned n = sizeof(digits) - 1;
+    digits[n] = 0;
+    do { digits[--n] = (char)('0' + value % 10); value /= 10; } while (value);
+    print(st, digits + n);
+}
+
+static void print_gop(EFI_SYSTEM_TABLE *st, const SD_FRAMEBUFFER *fb, const SD_GOP_SELECTION *selection)
+{
+    print(st, "GOP selection: mode "); print_dec(st, selection->selected_mode);
+    print(st, " "); print_dec(st, fb->width); print(st, "x"); print_dec(st, fb->height);
+    print(st, " pitch "); print_dec(st, fb->pitch_pixels * 4);
+    print(st, fb->pixel_format ? " BGRX" : " RGBX");
+    print(st, " queried "); print_dec(st, selection->modes_queried);
+    print(st, selection->edid_preferred ? " EDID=preferred" : " EDID=unavailable");
+    print(st, selection->used_fallback ? " firmware-fallback\r\n" : " selected\r\n");
+}
+
 static int guid_equal(const EFI_GUID *a, const EFI_GUID *b)
 {
     const uint8_t *x = (const uint8_t *)a, *y = (const uint8_t *)b;
@@ -49,6 +69,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     EFI_GOP *gop = 0;
     SD_HANDOFF *h = 0;
     EFI_STATUS status;
+    SD_GOP_SELECTION selection;
     size_t i;
     if (!st || st->header.signature != EFI_SYSTEM_TABLE_SIGNATURE ||
         st->header.header_size < sizeof(*st) || !st->boot_services)
@@ -72,12 +93,13 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     h->magic = SD_HANDOFF_MAGIC;
     h->version = SD_HANDOFF_VERSION;
     h->size = sizeof(*h);
-    status = sd_framebuffer_snapshot(gop->mode, &h->framebuffer);
+    status = sd_gop_select(bs, gop, &h->framebuffer, &selection);
     if (EFI_ERROR(status)) {
         print(st, "Unsupported GOP framebuffer; no handoff attempted.\r\n");
         bs->free_pool(h);
         return status;
     }
+    print_gop(st, &h->framebuffer, &selection);
     if (st->tables && st->table_count <= 4096)
         for (i = 0; i < st->table_count; ++i) {
             if (guid_equal(&st->tables[i].guid, &acpi2_guid)) {

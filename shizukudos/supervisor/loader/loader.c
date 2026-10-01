@@ -756,6 +756,7 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     size_t map_size = 0, stride = 0, i;
     EFI_GOP *gop = 0;
     SD_FRAMEBUFFER fb;
+    SD_GOP_SELECTION gop_selection;
     EFI_STATUS status;
     char err[160];
     int line;
@@ -984,8 +985,10 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         bi->cmdline[i] = g_k64.cmdline[i];
     bi->cmdline[i] = 0;
     bi->cmdline_size = (uint32_t)i;
-    if (!EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) && gop &&
-        !EFI_ERROR(sd_framebuffer_snapshot(gop->mode, &fb))) {
+    if (!EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) && gop) {
+        status = sd_gop_select(bs, gop, &fb, &gop_selection);
+        if (EFI_ERROR(status))
+            return k64_refuse("GOP selection could not retain a validated firmware framebuffer", status);
         bi->fb_base = fb.base;
         bi->fb_size = fb.size;
         bi->fb_width = fb.width;
@@ -993,6 +996,10 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         bi->fb_pitch = fb.pitch_pixels * 4;
         bi->fb_bpp = 32;
         bi->fb_format = fb.pixel_format == 0 ? SHZ_FB_RGBX8888 : SHZ_FB_BGRX8888;
+        say("GOP selection: mode "); say_dec(gop_selection.selected_mode);
+        say(" queried "); say_dec(gop_selection.modes_queried);
+        say(gop_selection.edid_preferred ? " EDID=preferred" : " EDID=unavailable");
+        say(gop_selection.used_fallback ? " firmware-fallback\n" : " selected\n");
     }
     t0 = rdtsc_now();
     stall(50000);
@@ -1187,6 +1194,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 {
     EFI_BOOT_SERVICES *bs;
     EFI_GOP *gop = 0;
+    SD_GOP_SELECTION gop_selection;
     shz_caps_t caps;
     shz_info_t *info = (shz_info_t *)(uintptr_t)SHZ_REGION_BASE;
     EFI_ALLOCATE_PAGES_FN allocate_pages;
@@ -1285,10 +1293,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 
     /* 2. Display. */
     if (EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) || !gop ||
-        EFI_ERROR(sd_framebuffer_snapshot(gop->mode, &g_handoff.framebuffer))) {
+        EFI_ERROR(sd_gop_select(bs, gop, &g_handoff.framebuffer, &gop_selection))) {
         say("REFUSED: no usable GOP framebuffer.\n");
         return EFI_UNSUPPORTED;
     }
+    say("GOP selection: mode "); say_dec(gop_selection.selected_mode);
+    say(" "); say_dec(g_handoff.framebuffer.width); say("x"); say_dec(g_handoff.framebuffer.height);
+    say(" pitch "); say_dec(g_handoff.framebuffer.pitch_pixels * 4);
+    say(" queried "); say_dec(gop_selection.modes_queried);
+    say(gop_selection.edid_preferred ? " EDID=preferred" : " EDID=unavailable");
+    say(gop_selection.used_fallback ? " firmware-fallback\n" : " selected\n");
 
     /* 3. Disk image and memory the Supervisor will own. */
     status = load_file(image, bs, "DISK.IMG", &disk_base, &disk_size, native_win98 ? W98_DISK_BYTES : 256ull << 20);
