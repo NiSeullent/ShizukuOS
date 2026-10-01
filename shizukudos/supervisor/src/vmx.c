@@ -12,10 +12,71 @@
 #include "ept.h"
 #include "platform.h"
 
-static uint8_t vmxon_region[4096] __attribute__((aligned(4096)));
+#include "vmx_cpu_state.h"
 
-static int g_true_controls;
-static uint64_t cap_pin, cap_proc, cap_proc2, cap_exit, cap_entry;
+static vmx_cpu_topology_t cpu_topology;
+static uint8_t vmxon_regions[VMX_CPU_MAX][4096] __attribute__((aligned(4096)));
+static struct vmx_cpu_bank {
+    uint64_t basic, pin, proc, proc2, exitc, entryc;
+    unsigned true_controls, vpid;
+} cpu_banks[VMX_CPU_MAX];
+
+/* Hardware identity belongs to this root processor, not to any guest's GS. */
+static uint32_t current_apic_id(void)
+{
+    const uint32_t max = cpuid(0).eax;
+    if (max >= 0x1f) {
+        struct cpuid_regs r = cpuid_count(0x1f, 0);
+        if (r.ebx & 0xffffu) return r.edx;
+    }
+    if (max >= 0xb) {
+        struct cpuid_regs r = cpuid_count(0xb, 0);
+        if (r.ebx & 0xffffu) return r.edx;
+    }
+    if (max >= 1) {
+        struct cpuid_regs r = cpuid(1);
+        if (r.edx & (1u << 9)) return r.ebx >> 24;
+    }
+    return VMX_CPU_INVALID;
+}
+
+int vmx_hw_prepare_cpus(const uint32_t *apic_ids, unsigned count)
+{
+    return vmx_cpu_topology_init(&cpu_topology, apic_ids, count, current_apic_id());
+}
+
+static unsigned current_cpu(void)
+{
+    return vmx_cpu_find(&cpu_topology, current_apic_id());
+}
+
+static struct vmx_cpu_bank *ready_bank(unsigned *cpu)
+{
+    *cpu = current_cpu();
+    return vmx_cpu_ready(&cpu_topology, *cpu) ? 0 : &cpu_banks[*cpu];
+}
+
+/* Read the actual host descriptor registers. Never use CPU0's global tables
+ * as an AP's VMCS HOST state. This platform uses fixed descriptor shapes. */
+static int publish_host_tables(unsigned cpu)
+{
+    struct __attribute__((packed)) { uint16_t limit; uint64_t base; } gdtr, idtr;
+    uint16_t tr;
+    uint64_t low, high, base;
+    __asm__ volatile("sgdt %0" : "=m"(gdtr));
+    __asm__ volatile("sidt %0" : "=m"(idtr));
+    __asm__ volatile("str %0" : "=r"(tr));
+    if (gdtr.limit != 63 || idtr.limit != 4095 || tr != HOST_TR || !gdtr.base || !idtr.base ||
+        gdtr.base > UINT64_MAX - 64 || idtr.base > UINT64_MAX - 4096)
+        return -1;
+    low = *(const uint64_t *)(uintptr_t)(gdtr.base + HOST_TR);
+    high = *(const uint64_t *)(uintptr_t)(gdtr.base + HOST_TR + 8);
+    if (((low >> 40) & 0xffu) != 0x8b || high >> 32 ||
+        ((low & 0xffffu) | ((low >> 32) & 0xf0000u)) != 103)
+        return -1;
+    base = ((low >> 16) & 0xffffffu) | ((low >> 32) & 0xff000000u) | (high << 32);
+    return vmx_cpu_publish_tables(&cpu_topology, cpu, gdtr.base, idtr.base, base);
+}
 
 /* Required VM-execution controls for the DOS/real-mode domain. */
 #define PIN_EXT_INT_EXIT (1u << 0)
@@ -61,9 +122,30 @@ int vmx_hw_init(shz_info_t *info, const shz_caps_t *caps)
 {
     uint64_t fc, cr0, cr4;
     int err;
+    unsigned cpu = current_cpu();
+    struct vmx_cpu_bank *bank;
+    shz_caps_t local_caps;
+    if (cpu == VMX_CPU_INVALID && !__atomic_load_n(&cpu_topology.sealed, __ATOMIC_ACQUIRE)) {
+        const uint32_t bsp = current_apic_id();
+        if (vmx_hw_prepare_cpus(&bsp, 1)) return -1;
+        cpu = current_cpu();
+    }
+    if (vmx_cpu_begin(&cpu_topology, cpu)) {
+        log_capture(info->last_error, sizeof info->last_error, "VMX CPU identity/state refused");
+        return -1;
+    }
+    bank = &cpu_banks[cpu];
+    shz_probe_caps(&local_caps); /* each physical CPU's actual MSRs */
+    caps = &local_caps;
+    if (publish_host_tables(cpu)) {
+        log_capture(info->last_error, sizeof info->last_error, "VMX private host tables refused");
+        __atomic_store_n(&cpu_topology.state[cpu], VMX_CPU_FAILED, __ATOMIC_RELEASE);
+        return -1;
+    }
 
     if (!caps->vmx_usable) {
         log_capture(info->last_error, sizeof info->last_error, "VMX not usable: %s", caps->vmx_why);
+        __atomic_store_n(&cpu_topology.state[cpu], VMX_CPU_FAILED, __ATOMIC_RELEASE);
         return -1;
     }
     fc = rdmsr(MSR_IA32_FEATURE_CONTROL);
@@ -76,37 +158,61 @@ int vmx_hw_init(shz_info_t *info, const shz_caps_t *caps)
     if ((fc & 5) != 5) {
         log_capture(info->last_error, sizeof info->last_error,
                     "VMX outside SMX not permitted: FEATURE_CONTROL=%llx", fc);
+        __atomic_store_n(&cpu_topology.state[cpu], VMX_CPU_FAILED, __ATOMIC_RELEASE);
         return -1;
     }
     info->feature_control = fc;
 
-    g_true_controls = caps->vmx_true_controls;
-    cap_pin = caps->pin;
-    cap_proc = caps->proc;
-    cap_proc2 = caps->proc2;
-    cap_exit = caps->exitc;
-    cap_entry = caps->entryc;
+    bank->true_controls = caps->vmx_true_controls;
+    bank->basic = caps->vmx_basic;
+    bank->vpid = caps->vpid;
+    bank->pin = caps->pin;
+    bank->proc = caps->proc;
+    bank->proc2 = caps->proc2;
+    bank->exitc = caps->exitc;
+    bank->entryc = caps->entryc;
 
     cr0 = fixed_bits(read_cr0(), MSR_IA32_VMX_CR0_FIXED0, MSR_IA32_VMX_CR0_FIXED1);
     write_cr0(cr0);
     cr4 = fixed_bits(read_cr4() | CR4_VMXE, MSR_IA32_VMX_CR4_FIXED0, MSR_IA32_VMX_CR4_FIXED1);
     write_cr4(cr4);
 
-    memset(vmxon_region, 0, sizeof vmxon_region);
-    *(uint32_t *)vmxon_region = (uint32_t)(caps->vmx_basic & 0x7fffffff);
-    err = vmxon((uint64_t)(uintptr_t)vmxon_region);
+    memset(vmxon_regions[cpu], 0, sizeof vmxon_regions[cpu]);
+    *(uint32_t *)vmxon_regions[cpu] = (uint32_t)(caps->vmx_basic & 0x7fffffff);
+    err = vmxon((uint64_t)(uintptr_t)vmxon_regions[cpu]);
     if (err) {
         log_capture(info->last_error, sizeof info->last_error, "VMXON failed (%d)", err);
+        __atomic_store_n(&cpu_topology.state[cpu], VMX_CPU_FAILED, __ATOMIC_RELEASE);
+        return -1;
+    }
+    if (vmx_cpu_online(&cpu_topology, cpu)) {
+        vmxoff();
         return -1;
     }
     invept_all();
     info->stage = SHZ_STAGE_VMXON;
     kprintf("SHZ: VMXON ok (revision %x, true-controls=%d)\n",
-            (unsigned)(caps->vmx_basic & 0x7fffffff), g_true_controls);
+            (unsigned)(caps->vmx_basic & 0x7fffffff), bank->true_controls);
     return 0;
 }
 
-void vmx_hw_shutdown(void) { vmxoff(); }
+void vmx_hw_shutdown(void)
+{
+    const unsigned cpu = current_cpu();
+    if (!vmx_cpu_ready(&cpu_topology, cpu)) {
+        vmxoff();
+        (void)vmx_cpu_retire(&cpu_topology, cpu);
+    }
+}
+
+int vmx_vcpu_load(vcpu_t *vc)
+{
+    const unsigned cpu = current_cpu();
+    if (!vc || vc->cpu_binding_valid != 1 || !vc->vmcs_pa || (vc->vmcs_pa & 4095) ||
+        vmx_cpu_bind_allowed(&cpu_topology, cpu, vc->owner_cpu, vc->domain_id))
+        return -1;
+    return vmptrld(vc->vmcs_pa);
+}
 
 #define W(field, value) \
     do { if (vmwrite((field), (value))) { fail = #field; goto out; } } while (0)
@@ -143,18 +249,26 @@ int vmx_vcpu_init(vcpu_t *vc, shz_info_t *info, const shz_caps_t *caps, const vm
     const char *fail = 0;
     uint64_t cr0_host, cr4_host, guest_cr0, guest_cr4, guest_efer;
     int i;
+    (void)caps;
     const int real = cfg->mode == VMODE_REAL;
     const int lm = cfg->mode == VMODE_LONG64;
+    unsigned cpu;
+    struct vmx_cpu_bank *bank = ready_bank(&cpu);
+    if (!bank || vc->cpu_binding_valid ||
+        vmx_cpu_bind_allowed(&cpu_topology, cpu, cpu, cfg->vpid)) {
+        log_capture(info->last_error, sizeof info->last_error, "VMCS CPU ownership refused");
+        return -1;
+    }
 
     entry_want = ENTRY_LOAD_PAT | ENTRY_LOAD_EFER | (lm ? (1u << 9) : 0);
-    if (adjust(cap_pin, PIN_EXT_INT_EXIT | PIN_NMI_EXIT | PIN_PREEMPT_TIMER, &pin, "pin-based", info) ||
-        adjust(cap_proc, PROC_HLT_EXIT | PROC_USE_IO_BITMAPS | PROC_USE_MSR_BITMAPS | PROC_SECONDARY,
+    if (adjust(bank->pin, PIN_EXT_INT_EXIT | PIN_NMI_EXIT | PIN_PREEMPT_TIMER, &pin, "pin-based", info) ||
+        adjust(bank->proc, PROC_HLT_EXIT | PROC_USE_IO_BITMAPS | PROC_USE_MSR_BITMAPS | PROC_SECONDARY,
                &proc, "primary", info) ||
-        adjust(cap_proc2, PROC2_EPT | PROC2_UNRESTRICTED | (caps->vpid ? PROC2_VPID : 0), &proc2,
+        adjust(bank->proc2, PROC2_EPT | PROC2_UNRESTRICTED | (bank->vpid ? PROC2_VPID : 0), &proc2,
                "secondary", info) ||
-        adjust(cap_exit, EXIT_HOST_64 | EXIT_ACK_INT | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER |
+        adjust(bank->exitc, EXIT_HOST_64 | EXIT_ACK_INT | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER |
                          EXIT_LOAD_EFER, &exitc, "exit", info) ||
-        adjust(cap_entry, entry_want, &entryc, "entry", info))
+        adjust(bank->entryc, entry_want, &entryc, "entry", info))
         return -1;
     if (real) {
         info->vmx_pin = pin;
@@ -165,7 +279,7 @@ int vmx_vcpu_init(vcpu_t *vc, shz_info_t *info, const shz_caps_t *caps, const vm
     }
 
     memset(cfg->vmcs, 0, 4096);
-    *(uint32_t *)cfg->vmcs = (uint32_t)(info->vmx_basic & 0x7fffffff);
+    *(uint32_t *)cfg->vmcs = (uint32_t)(bank->basic & 0x7fffffff);
     vc->vmcs_pa = (uint64_t)(uintptr_t)cfg->vmcs;
     vc->ept_pointer = cfg->eptp;
     if (vmclear(vc->vmcs_pa) || vmptrld(vc->vmcs_pa)) {
@@ -216,9 +330,9 @@ int vmx_vcpu_init(vcpu_t *vc, shz_info_t *info, const shz_caps_t *caps, const vm
     W(VMCS_HOST_TR_SEL, HOST_TR);
     W(VMCS_HOST_FS_BASE, 0);
     W(VMCS_HOST_GS_BASE, 0);
-    W(VMCS_HOST_TR_BASE, platform_tss_base());
-    W(VMCS_HOST_GDTR_BASE, platform_gdt_base());
-    W(VMCS_HOST_IDTR_BASE, platform_idt_base());
+    W(VMCS_HOST_TR_BASE, cpu_topology.tss[cpu]);
+    W(VMCS_HOST_GDTR_BASE, cpu_topology.gdt[cpu]);
+    W(VMCS_HOST_IDTR_BASE, cpu_topology.idt[cpu]);
     W(VMCS_HOST_SYSENTER_CS, 0);
     W(VMCS_HOST_SYSENTER_ESP, 0);
     W(VMCS_HOST_SYSENTER_EIP, 0);
@@ -299,6 +413,9 @@ out:
                     vmread(VMCS_INSTR_ERROR));
         return -1;
     }
+    vc->owner_cpu = cpu;
+    vc->domain_id = cfg->vpid;
+    vc->cpu_binding_valid = 1;
     return 0;
 }
 
