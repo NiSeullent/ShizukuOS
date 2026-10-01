@@ -13,6 +13,7 @@
  * out of the page allocator, and holes inside the heap window are fenced off in the heap block list.
  */
 #include "k64.h"
+#include "cpu_memory_owner.h"
 #ifdef SHZ_STANDALONE
 #include "standalone/memholes.h"
 #endif
@@ -40,6 +41,24 @@ uint64_t kernel_pml4(void) { return kpml4; }
 static int bit_get(uint64_t i) { return page_map[i >> 3] & (1u << (i & 7)); }
 static void bit_set(uint64_t i) { page_map[i >> 3] |= (uint8_t)(1u << (i & 7)); }
 static void bit_clr(uint64_t i) { page_map[i >> 3] &= (uint8_t)~(1u << (i & 7)); }
+
+int shz_cpu_pmm_page_owned(uint64_t pa,const shz_bootinfo_t *bi)
+{
+    uint64_t i;
+    if(!bi || pa<PMM_BASE || (pa&(PAGE_SIZE-1)) || ram_top<PAGE_SIZE || pa>ram_top-PAGE_SIZE)
+        return 0;
+    i=(pa-PMM_BASE)/PAGE_SIZE;
+    if(i>=pmm_pages || !bit_get(i)) return 0;
+    /* page_map marks both allocations and initial reservations as unavailable.
+     * Only allocations can authorize a table: exclude every reserved overlap. */
+    if(bi->initrd_size && (bi->initrd_size>UINT64_MAX-bi->initrd_gpa ||
+       (pa<bi->initrd_gpa+bi->initrd_size && bi->initrd_gpa<pa+PAGE_SIZE))) return 0;
+#ifdef SHZ_STANDALONE
+    for(unsigned h=0;h<hole_count;h++)
+        if(pa<hole_end[h] && hole_gpa[h]<pa+PAGE_SIZE) return 0;
+#endif
+    return 1;
+}
 
 uint64_t pmm_alloc(void)
 {

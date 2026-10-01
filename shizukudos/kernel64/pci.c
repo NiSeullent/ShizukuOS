@@ -208,6 +208,17 @@ static int lapic_init(void)
     return 0;
 }
 
+volatile uint32_t *pci_bsp_lapic_acquire(uint64_t expected_pa,uint32_t expected_id)
+{
+    const uint64_t base=rdmsr(0x1b);
+    uint32_t a=1,b,c,d;
+    __asm__ volatile("cpuid":"+a"(a),"=b"(b),"=c"(c),"=d"(d));
+    if(!(d&(1u<<9)) || !(base&(1ull<<11)) || (base&(1ull<<10)) ||
+       (base&0x000ffffffffff000ull)!=expected_pa || (b>>24)!=expected_id || lapic_init() ||
+       lapic_id!=expected_id || (lapic[LAPIC_ID/4]>>24)!=expected_id) return 0;
+    return lapic;
+}
+
 int pci_msix_init(const pci_dev_t *d, pci_msix_t *m)
 {
     uint32_t ctl, tbl, pba;

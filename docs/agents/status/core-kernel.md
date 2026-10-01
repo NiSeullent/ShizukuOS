@@ -586,3 +586,14 @@ linked worktree`/root/Win98-Modern-k32-smp-163f-20261002`, branch
 GDT/TSS, virtual AP/IPI and context handoff contracts still require the coordinated
 next stage. USB P2 remains unapplied pending authoritative NAS recovery and valid
 race RED. Actual Windows98 VMM integration/full boot/SMP/final media remain open.
+
+## Reviewed fixture import for the isolated native SMP consumer
+
+Root approved b5c49d873990bebdf7611fbccb03f3757dbbf874 before the next own native build.
+Only its exact Kernel64 pma_tests.c correction is imported: the coordinator
+blocks on finite completion while the isolated aging arrival is measured;
+first dispatch and body observation remain distinct. The fixed four-tick
+policy, scheduler, architecture and shared header are unchanged. Root reviewed
+actual KVM/TCG17/17 evidence. This preserves the existing historical ledger
+rather than importing unrelated later canonical status claims. Original SMP
+219/221 source epochs, failed gates and their actual receipts remain unchanged.
