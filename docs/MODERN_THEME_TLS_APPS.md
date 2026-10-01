@@ -5,7 +5,7 @@ Signal and open-source Office, broader modern application support, and OS TLS
 1.3. The new components are working foundations. Actual installed Windows 98 component API and comparison-screen evidence is now retained.
 System API integration and functional application runs remain acceptance gates.
 The browser direction is now Trident modernization toward HTML5, current
-JavaScript and CSS, modern WebAssembly, WebGPU and WebGL. All five requested
+JavaScript and CSS, modern WebAssembly, WebGPU and WebGL. All six listed
 standards families are mandatory targets; a full WebKit port is optional. See
 `TRIDENT_MODERNIZATION_HANDOFF.md` for the inspected integration seams and limits.
 The subsequent requirement and primary specification editions are recorded in
@@ -94,10 +94,18 @@ fixture incorrectly required zero server certificate flags despite no requested
 client certificate; v7 corrects that assertion and logs each endpoint, while
 retaining required client certificate/hostname verification and TLS1.3. A real
 host latest/LTS exchange observes server flags128 and completes encrypted HTTP
-and shutdown. v7 is frozen for a fresh native trial. Its first preparation stopped
+and shutdown. The original v7 preparation stopped
 before QEMU because concurrent disk growth removed the required copy budget;
-zero captures and no probe execution were recorded. A retry still requires stable
-space and the shared guest queue. Neither v4 nor the host result is a native
+zero captures and no probe execution were recorded. The subsequent complete
+executable-byte audit rejected the actual latest TLS DLL: upstream X509 code and
+prebuilt MinGW formatting contain post-i486 CMOV instructions. The old v7 stage
+must not launch as an i486-compatible trial. All original bytes, failed
+disassembly and previous results remain preserved. An isolated corrective port
+recompiles every upstream/adapter unit for i486 and replaces formatting with an
+original bounded formatter. Its initial source-preparation rejection is retained;
+corrected DLL gates and real encrypted latest/LTS host exchange remain pending.
+A fresh stage also requires stable space and the actual shared guest queue.
+Neither v4 nor the host result is a native
 sockets pass. See
 `tests/m98_tls13_guest_interop_HANDOFF.md` for exact frozen inputs and readback.
 
@@ -182,6 +190,60 @@ exits, ordinary browser script selection/navigation, origin-bound networking,
 HTML5 parser/layout and WebAssembly remain unverified or unimplemented.
 See `src/m98_trident_automation_HANDOFF.md` and
 `tests/m98_trident_guest_runner_HANDOFF.md` for exact boundaries and evidence.
+
+## CSS, Wasm and graphics implementation checkpoint
+
+CSS corev4 executes real Syntax3 tokenization and Variables1 substitution with
+parent snapshots, fallback dependencies and cycle handling. Normal and
+ASan/UBSan processes pass11,827 syntax and13,289 variable assertions. The actual
+zero-import `M98CSS.DLL` has18 exports. Selected WPT references and original
+CSSWG documents retain their hashes, licenses and attribution; foreign browser
+tests have not run.
+
+Genuine MSHTML fixturev8 adds a nested parent/child DOM trial, typed width/color
+application, independent geometry/color readback and full Korean text readback.
+Its real-token consumer passes213 assertions normally and under sanitizers.
+CSS observerv4 passes3,025 control-flow fault assertions in both modes. The
+canonical CSS stagev2 retains all source, original command logs and artifacts;
+independent review cleared87 provenance members and every executable byte of
+all three inputs. Native acceptance's eight test methods pass normally and with
+optimized Python using explicitly synthetic stopped-run evidence. Actual Win98
+DOM/style/paint and owned-child completion remain pending. See
+`TRIDENT_CSS_NATIVE_STAGE.md`.
+
+The old regex used by frozen Script/Automation builders could skip a modern
+instruction after an operandless instruction. Corrected supplemental proof now
+checks every actual staged executable byte, including linked helpers; all six
+canonical Script/Automation inputs pass. Original frozen recipes and partial
+counts remain historical. The next launch and native acceptance must consume
+the corrected proof. The same full coverage gate supplies current CSS/Wasm/Mesa
+artifact checks. See `I486_NATIVE_INPUT_AUDIT.md`.
+
+WAMR runtimev24 executes actual modules from the pinned current interpreter and
+passes1,237 embedding assertions normally and under full ASan/UBSan. It meters
+normal, tail-call and start execution, accounts real allocations, separates
+validation/instantiation, enforces lifetimes and preserves the full x87 state.
+Selected official numeric suitesv5 pass5,896 commands in each execution mode;
+eight text-only malformed-source cases remain explicitly excluded. The real
+DLL's155,996 executable bytes contain54,602 checked i486/x87 instructions.
+Current macro maps retain114 actual interpreter-TU switches per configuration.
+Browser JS bindings, SIMD/EH and remaining modern Wasm proposals and native
+Win98 arithmetic still require implementation/validation. See
+`TRIDENT_WASM_RUNTIME.md` and `TRIDENT_WASM_SPEC_SELECTED.md`.
+
+Mesa foundationv2 constructs genuine TGSI fragment programs from bounded typed
+IR and executes actual quad interpolation, divergent branches, discard, fine
+derivatives, uniforms and scalar math lowering. Normal and ASan/UBSan executions
+each pass3,120 assertions. The real DLL and probe pass complete executable-byte,
+original OEM import, export and Win98 PE/stack gates. Native execution is pending.
+Full Gallium rendering, GLSL ES, GLES, WebGL2 and WebGPU/WGSL/device/compute
+remain mandatory unfinished work. See `MESA_SOFTPIPE_PORT_FEASIBILITY.md`.
+
+Independent final-byte review rechecked19,744 source/log/header/cache/artifact
+observations across the Wasm/spec/Mesa receipts. It does not provide native
+browser or application acceptance. All full standards and application flags
+remain false. These changes are saved in scoped local commits; nothing has been
+published or globally installed.
 
 ## Disk optimization and retry boundary
 

@@ -1,5 +1,5 @@
 {
-  "schema": 3,
+  "schema": 4,
   "date": "2026-10-01",
   "branch": "codex/theme-tls-5abe",
   "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
@@ -131,6 +131,58 @@
     {
       "path": "benchmarks/modern-web-targets-v1.json",
       "sha256": "b8194c9fa5de0d7d09419334daf70eed6195928839a3dbfbe2c3ecf1a6f16657"
+    },
+    {
+      "path": "build/css-core-v4/result.json",
+      "sha256": "4e20ba590fcbab02b8c5763d3a843e7631994bbc7903b39179de1d4601de058c"
+    },
+    {
+      "path": "build/css-mshtml-fixture-v8/result.json",
+      "sha256": "ecc2a2d65c9542d702705873945847b6ae64a11cbc483530112c30121e72be19"
+    },
+    {
+      "path": "build/css-mshtml-observer-v4/result.json",
+      "sha256": "5842c95b143ce736326037cdd0d7db6711fdd6fe8e6b643c1b7c19134e79bdfe"
+    },
+    {
+      "path": "build/css-mshtml-profile-controls-v2/result.json",
+      "sha256": "191f360e488e99c5f14f5738054911c7d6c3399f70f9cf8a324f16a864ab31ba"
+    },
+    {
+      "path": "build/css-native-acceptance-controls-v1/result.json",
+      "sha256": "273741b5fb5073193c880830b11fb2f46ea19f94bea39bf308473ce19ea6f2f2"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/css-mshtml-native-5abe-20261001-v2/guest-files.json",
+      "sha256": "cef8c34813161bb544dbdcf3f8ba2ab83310d738d4d75642c17231b4e520320e"
+    },
+    {
+      "path": "build/i486-canonical-supplement-v1/result.json",
+      "sha256": "e8005132e8f917adedb54b3b85e1d6bfbb0c46bfc432288db34016537bdf53c6"
+    },
+    {
+      "path": "build/i486-tls-supplement-v1/result.json",
+      "sha256": "22f6b0ce0e9c8743415031519dd6dd3723d44dd22c04d34b735d9903153528e0"
+    },
+    {
+      "path": "build/i486-tls-supplement-v1/failed-readback.json",
+      "sha256": "771041704373a2d04d7aec1515c46c9763eef93861830bf8ef4b47ebd22ce323"
+    },
+    {
+      "path": "build/wasm-runtime-v24/result.json",
+      "sha256": "26b28af54df7566a9653633078c1948ff5211714f95a836f4a3b2bb0ea773d91"
+    },
+    {
+      "path": "build/wasm-spec-selected-v5/result.json",
+      "sha256": "613537ca8f194ad7cb4f1bc8629462a37d65cd160ab4e1a3b6bd7985804c73b0"
+    },
+    {
+      "path": "build/softpipe-shader-v2/result.json",
+      "sha256": "b2c21ccdbf876d310affac58202d4b3139c30f1d71db7b696d12980dfb81cac2"
+    },
+    {
+      "path": "build/modern-foundation-independent-review-v2/result.json",
+      "sha256": "9f24bce004e5ae7820cb816f10191e43b0c7401f263b5195eec0712df9eb61f6"
     }
   ],
   "theme": {
@@ -177,7 +229,14 @@
       "independent_review": "PASS",
       "native_guest_network_verified": false,
       "global_installation": false
-    }
+    },
+    "complete_i486_instruction_gate_passed": false,
+    "old_latest_dll_actual_post_i486_instructions": [
+      "cmovg",
+      "cmovge"
+    ],
+    "old_native_v7_admissible": false,
+    "i486_correction_status": "isolated latest/LTS recompile in progress; formatter18863 normal/sanitizer assertions only; no new native DLL/interop result yet"
   },
   "applications": {
     "inventory_regression_tests": 19,
@@ -190,7 +249,7 @@
   "guest_constraint": {
     "selected_reserve_gib": 20,
     "prepared_copy_floor_bytes": 21991407616,
-    "free_bytes_at_checkpoint": 59097595904,
+    "free_bytes_at_checkpoint": 52734869504,
     "free_space_below_selected_reserve": false,
     "no_original_or_active_vm_logical_bytes_modified": true,
     "approved_closed_clone_allocation_sharing_only": true,
@@ -198,9 +257,12 @@
     "latest_attempt_safely_blocked_before_qemu": true,
     "root_queue_owned": false,
     "guard_recheck_required_before_every_trial": true,
-    "space_observation_utc": "2026-10-01T08:12:53.279424+00:00",
+    "space_observation_utc": "2026-10-01T09:24:38.245547+00:00",
     "prepared_copy_floor_with_staging_bytes": 22058516480,
-    "queue_observation": "peer6970 queue holder seen by independent agent08:11:27UTC; no own new native run"
+    "queue_observation": "Actual Chromium2245491 and Legcord2290533 plus XP QA2204872 active despite vacant cooperative lock; no own new VM",
+    "mem_available_bytes_at_observation": 12596936704,
+    "cooperative_lock_vacant_at_observation": true,
+    "actual_qa_vacant_at_observation": false
   },
   "completion": {
     "user_objective_complete": false,
@@ -220,26 +282,62 @@
     ]
   },
   "owned_source_sha256": {
-    "THIRD_PARTY.md": "e47c1c8a920cf1aa11073cd1e3b9d3fa9790b47de3409f807b44e16256833d67",
+    "LICENSE": "fac9da110d1433f4df0cb9f5dda9449e9aff6ee236ed240fa29e3e92926c363a",
+    "THIRD_PARTY.md": "84946a1f143f0df5c22060d7eba1ac2f99035258a7870894154e7c133e073e91",
+    "benchmarks/css-selected-vectors-v1.json": "60df1ccd560d2c882ade365780602786e837d8538477b06d96a8196d6018a237",
+    "benchmarks/css-standards-source-v1/NOTICE.md": "cbf0ba618ecf8e14b34e06100515d754a94f6ad436a6a70b55df3569695fc2e6",
+    "benchmarks/css-standards-source-v1/raw/css-syntax-3/Overview.bs": "8c56a01265cd95ffb1d63e4868720be25ec509c273684a67552a07e41df2463a",
+    "benchmarks/css-standards-source-v1/raw/css-values-5/Overview.bs": "e6d5093499619450110a8ce94b39a8fda8960a28c72eac49f1b2fbb051a000fd",
+    "benchmarks/css-standards-source-v1/raw/css-variables-1/Overview.bs": "5c451db91b361068771917b1145d3f36b40159ec46dfc3a029237cb418d668d1",
+    "benchmarks/css-standards-source-v1/source-pin.json": "c8f772475baeb0ba95809be945d33ec768942109f5313424eb6e9a9d9f4c364c",
     "benchmarks/modern-app-targets-v1.json": "b3722f3c127480e8c2ce61006dca052d997b3a635c7722b9b8ecee6621607814",
     "benchmarks/modern-web-targets-v1.json": "b8194c9fa5de0d7d09419334daf70eed6195928839a3dbfbe2c3ecf1a6f16657",
-    "docs/MODERN_THEME_TLS_APPS.md": "c6c36cfc7a4fc763c4de79f23e28922b2438a5e3b76847ad20ab03bd21182e8e",
+    "benchmarks/win98se-ko-oem-native-exports-v1.json": "3854198a9b2bf9f54fe0383330d09ed2ea3d0d510c3d7ba24eb13426e37b4f0d",
+    "benchmarks/wpt-css-selected-v1/raw/LICENSE.md": "5fac07febb0e2a97fb0d7b0def149ec08b642e1ba4b9c345283ab1cbd2af6570",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-syntax/cdc-vs-ident-tokens.html": "5f52d414359c7e39d49e356c84af9be914f336926d31ddb94321978131d5edf9",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-syntax/escaped-eof.html": "dec0d40911d7247999dbb2866c5a58b7a884198285dd766bf55d5ce468c8cff2",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-syntax/serialize-consecutive-tokens.html": "8f51db51d5355c42a8179beed9933cfcf90f5b676f41c3ca5f913ff3f723b467",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-variables/css-vars-custom-property-case-sensitive-001.html": "8da3e66ac23a01cfdfbfb5eea134dd775830721ec3231c74a465f4c6502c17c8",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-variables/custom-properties-inherit.html": "b23eb89638f6e488c55bc3dd83188e9c0fbf586d8e9453530f14fe1f8db8d249",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-variables/variable-cycles.html": "a787dbc45d029c765d144309e0c003e731986595ced4555dae217e531dae39f7",
+    "benchmarks/wpt-css-selected-v1/source-pin.json": "eb370b76c4acd0e1e902bc22f395ca7d529cf16774724e541cd676e7afcc4241",
+    "docs/I486_NATIVE_INPUT_AUDIT.md": "3060a8ad33090feb195e8df254e03b1095fde058db81b23df5bbac2b5a885951",
+    "docs/MESA_SOFTPIPE_PORT_FEASIBILITY.md": "756d0bade66c01c2cf916d12c88fc1ac7a668327f5accde116c3c9955c059644",
+    "docs/MODERN_THEME_TLS_APPS.md": "5f2cd1f2c336b6302a076095f646da257d5081428166eda44518a963a5bbe930",
     "docs/THEME_NATIVE_EVIDENCE.md": "8ea864696546587527c32c92acea505888ba83717398970bb7104ad40ab47f43",
     "docs/TRIDENT_AUTOMATION_NATIVE_EVIDENCE.md": "ca6008f43eb5517caa34ca372f3bec6a6826cff8d4503d20f8a6785ad28caa5f",
     "docs/TRIDENT_CSS_GPU_HANDOFF.md": "163a2c6dc4c6939145e87009c60d639ee4da4e1dc27a3168ab7d55fb9fe05cc2",
+    "docs/TRIDENT_CSS_NATIVE_FIXTURE.md": "407a16ad2ef3a4c714fdba384d9417cafd3fedeba97462c81a30c563ea6a5136",
+    "docs/TRIDENT_CSS_NATIVE_OBSERVER.md": "009a5f6deccfd48da41ffadcad549efcec99d76673eed6287d805676ca2e1af7",
+    "docs/TRIDENT_CSS_NATIVE_STAGE.md": "da1f11663ca749bdbd9eb0b3c57aa399f5aa180d676efc595139f8be360f3203",
     "docs/TRIDENT_MODERNIZATION_HANDOFF.md": "cd521140d1c4e975d765697ab75a0b3b37fff42c6628ba0f449656767de63fa9",
     "docs/TRIDENT_NATIVE_STAGE_HANDOFF.md": "6c77a3d590b2af6335e013f1d17b90019fcdd7f01ec401f37266f9a800d80ba8",
     "docs/TRIDENT_SCRIPT_NATIVE_EVIDENCE.md": "fca20043bc1a175750e94d04edb78a16aadab943542bac3e6a9e7f7ecc3d3699",
     "docs/TRIDENT_TEST262_SELECTED.md": "dc0bbdba15ef969c46add3fed951651ceefa4e027dec9c0fceafd87fd789cf5a",
     "docs/TRIDENT_WASM_HANDOFF.md": "1b329a8ed8183eb9d049751c722ec8cf13b98c93457a7364f60651760309b9b9",
-    "docs/modern-apps-coordination-5abe.md": "d455a1eb0e902fa45f1f8d49bc6aaeaaa3d412bd412cc9c3ddb4509d1183a130",
+    "docs/TRIDENT_WASM_RUNTIME.md": "1c35259a162411ff3797f505a8acdfeb36e3b3c6793cef5bddaa2a971d8b377d",
+    "docs/TRIDENT_WASM_SPEC_SELECTED.md": "78b0a07c0f51caa59a86620b57ea65f0d0d890b0b0df42980aa12e7a7e2b5524",
+    "docs/modern-apps-coordination-5abe.md": "51e12dc4101464e2c508dad50604dab4d55cc46659f20fca2c94703fd671b35a",
     "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
     "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
+    "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
+    "platform/freestanding/memory.h": "fca39e400632604dafd3895fed60674a1171f66245094f898e9f425c41c64c92",
+    "src/m98_css_HANDOFF.md": "c7b7ecd26665b16abf3a07d601e0e9b8807665158bbdb25b99f6bf684dedb7ce",
+    "src/m98_css_mshtml_values.c": "a279990dfa3d91cd7fcaf19f0d1bad250d82ae3c3c8e9ef5d23bf1c85190b189",
+    "src/m98_css_mshtml_values.h": "ae695098ccd61fe945dfcc86f293b211e63e3ce4002720c07425ebdaaf8c2d9e",
+    "src/m98_css_syntax.c": "8ef393f861decf7312738a99d39662af74aeeca6b8d4d579b5e478780071d74e",
+    "src/m98_css_syntax.h": "ac4d8db704e41107e7c4867af1a58a3bd35b8cf17198d9258d7ab0fcc493d2ee",
+    "src/m98_css_variables.c": "dcf8fb23347d88ecd27ec08473cde466d8fbbb18515522efd1aef3f935ec0d80",
+    "src/m98_css_variables.h": "2f0cdcc560d28e2890eb2b772141c9723e87a47dc37fb6aec96209e41c1c8fe8",
     "src/m98_dns_config.c": "b0b3a4fba1d86c0806e02aa4f1688548ba00265bf0458f6baf11934631d17b33",
     "src/m98_dns_config.h": "da3195ffc0be20d351711e5a289e0baa4382ae3a62d334281aa7ef98fa05ee08",
     "src/m98_dns_config_HANDOFF.md": "e7de1dcaf8a971f63bd08d8fb5db028afb6f012f9af2f7947212508e9bef5fe1",
     "src/m98_dns_win32.c": "b1a022b67aa703afbd664cb1eb661e488c09acbf0720d138536f2d02d3512de3",
     "src/m98_dns_win32.def": "61ad9640f089654bdc7a9579586534fa3c97e9eed2deeafc070931f94e0493a5",
+    "src/m98_softpipe_HANDOFF.md": "701151ffcb71aba11ba62e4c34c7165957a3be3dffce500d12865aaad08d8f40",
+    "src/m98_softpipe_port.h": "b407510ff3e5b47866b56a1bee0952b62d44d0e1966eeede93a7090bccfd9c89",
+    "src/m98_softpipe_shader.c": "d3cfa83d085feda3b48305033a9dbb4d6cb171cde08f77cc6a542ec20956893c",
+    "src/m98_softpipe_shader.h": "0e4922674f6f9aa495a38c0cf607f08f3a0ed557f19c2808a878b99ff2633173",
     "src/m98_tls13.c": "644867ad79342c3f5d81c52354d139d9f8794c66cbec519638cb396d8347e8d5",
     "src/m98_tls13.def": "eae47c8b9e29cb31acb8646fb802ec3ea25bb2aed981e4f8a2d74163824fd76e",
     "src/m98_tls13.h": "fa420d5dd9183956673814ae8f0393c758fd3b7bb5687dbaa24097bf633e7dbe",
@@ -262,13 +360,30 @@
     "src/m98_trident_script_port.c": "056a8ab07f1680b2cc252fded07424b0d1249d2ff440b881e0edb32698064ee6",
     "src/m98_trident_script_port.h": "ad71e7b97cf61fe2e4921811a66c10853458281a01534f62743016073a987127",
     "src/m98_trident_script_win32.c": "af04669d0899a3f18f7dd2bb2591276602345078e94dbd2ebdea7543228c86f3",
+    "src/m98_wasm.c": "a65110956e2e3c1088f3aa456a376096c89720f12343415401aaf661b0eb61ed",
+    "src/m98_wasm.h": "99e5899c7a4c748fcb7cc899d3ae87aa3d18e24cb90f45d9e264be8f69a3fd07",
+    "src/m98_wasm_math.c": "af185b1c699fb368bee05d039cd09e8053844b795ca16c944360c7342b29f5b7",
+    "src/m98_wasm_math.h": "ba3a6d4c198b5f9e98bb882b0fa0d292c7e2e958db8fa3733b26b82a92c6c078",
+    "src/m98_wasm_platform.c": "808bc06888f2ad1e1d22d3635a260429f4f5c32c8c7cc36681d125ffcdebc7ca",
+    "src/m98_wasm_platform_internal.h": "364c1b47b2609929a19430f1fd9c6aaa6eb92925bb088c633f3d417ee268539a",
     "src/uxtheme_engine.def": "f33e0a2fe80ce964f2374cb13fea51cce4ece80845ef9e0ff811edb87cfdd350",
     "src/uxtheme_engine_HANDOFF.md": "65fcb4ea402244b64ae67eb9f777ecfebe6dd47a7c19208bb77d8f84e51360df",
     "src/uxtheme_engine_core.c": "93b106d1b068e8b5b370c76e1871060cb24a55f79635d1e6b08cf709980890a2",
     "src/uxtheme_engine_core.h": "483885768f660ae3cb6a51ed28fd74cddadbc2314dd8901c048d7a55692f7edc",
     "src/uxtheme_engine_win32.c": "18d2a67ff2a8a9743ec1e01e055bfee3e4ded885e14203f592d91cb2ddd17167",
+    "tests/m98_css_mshtml_guest.cpp": "dd6ef3b8c989bb23daaff8f62b17a550742ff7ae18e63b9c0699804504f1b397",
+    "tests/m98_css_mshtml_runner.c": "d93285182ad14cf8ebfada86ab8eaed2053eecfdb6abb931851a325c2367e26c",
+    "tests/m98_css_mshtml_runner_mock.c": "9ea6c8dd7cc00a4586343e000d4142cb4614e9ab8d674614d04b550af41615f4",
+    "tests/m98_css_mshtml_values_host.c": "98b2a9f70e994eb7710b1b5e7863e9c1b41603a623ec3347cafe3e5dfcd10f52",
+    "tests/m98_css_native_gate.c": "ca72f4fe2014b0b59aaf8f1571502f7cba22b6c9683b27a4c68a4b1261e67196",
+    "tests/m98_css_syntax_host.c": "d0d9d5bff6e602c8dadfec514a0c7c1ae75e2288c5ad149c0d6751fca9f95241",
+    "tests/m98_css_test_support.h": "a649a2d18d8002235d39797909023834af0a4c5d80685ffba02c36ae077c2022",
+    "tests/m98_css_variables_host.c": "b3df3400c13ed12fd17b5e46f69eb6190ee46f2949dfbcf1227db9e40545e864",
     "tests/m98_dns_config_guest.c": "61c0898eba5af1dc62b14b2446d6a1ce9eedfbaea1809e086693486961f8a98a",
     "tests/m98_dns_config_host.c": "d6302f245e83da4d98c3043d868683ec3435528f19fe6cbd4c8b89bf762fb21b",
+    "tests/m98_softpipe_native_gate.c": "64d3e67c1cfd5d67d3dbaf86696a7e9b440d1740f4b300bb08f02a43bc1c3301",
+    "tests/m98_softpipe_shader_guest.c": "534d7cd8c08e749eb3029de16a1474746177fa089179fb3f9ec56c89fa0885d6",
+    "tests/m98_softpipe_shader_host.c": "8975b396a0bf6da733a216e3c8383a41577337ca8015e43191eff7f4f4d1c624",
     "tests/m98_tls13_guest_interop.c": "840f0c02780e45a44204bcf36051e7d7ca2697c06d10ac8ac40906a743fbc13e",
     "tests/m98_tls13_guest_interop_HANDOFF.md": "f7e3ea2b433dc7be72caa000b9a7ec0e1d93090c922fb701c6973feb8628c780",
     "tests/m98_tls13_guest_runner.c": "9be9086ee1fd92a2aba97eefa8b92322aa3f3f4f9609ac9dc54629c83327a27f",
@@ -299,8 +414,15 @@
     "tests/m98_trident_script_win32_mock.c": "787b0036f405ffedc8d2d05bc907090a98fd26da1a1cfea1855837074637c290",
     "tests/m98_trident_script_win32_mock.h": "e5a434db3fe483746035b7d8ac85c2b9900c83e7156f4fef09010d7b3e01b1c4",
     "tests/m98_trident_test262_host.c": "29e499c20223fdf7f41461bed06d4c2ce4b75672c4733f4d3697c58d4dc9fe9e",
+    "tests/m98_wasm_host.c": "c310b6848a277b7e430497ba1fc79ac81e018f243cd73b3526085335f7b5c5e8",
+    "tests/m98_wasm_native_gate.c": "f4f5ced2b711af33f035d021c8a527ab04d699683168c93f677684b0ad0e7bfc",
+    "tests/m98_wasm_spec_host.c": "2a8f37afa16f378ff680a0e7943fb034598e345017c1c33e3c939ef16b6e78e5",
+    "tests/test_build_softpipe_shader.py": "40b443f069a8689e9e6cb737a79e2f32883c4a68f6a8390ba42b99c8438b83b5",
+    "tests/test_css_mshtml_native_log.py": "dd8af528aa1191e09fd4e42e7d229111e617a33c63bab9ac44587839a491b4c9",
+    "tests/test_i486_instruction_gate.py": "6a0ff7367a2c32d09bebda68283b4be710cf27ddae67b21a571424655edabe51",
     "tests/test_m98_tls13_guest_evidence.py": "cbaecc7eea4d5c2be8441a89eec7a0bc2553380134ea7831e7a38e20d0100557",
     "tests/test_modern_app_inventory.py": "e6e3ee9f59e30ddf786f1509d3bb389f96495ad24eea123c1c66bf5482b7c717",
+    "tests/test_verify_css_mshtml_native.py": "824a6d97c1a9cec87d5b9280ed8658fa6d354189f1f393e72748bf3dcd30931a",
     "tests/test_verify_theme_native.py": "e4688647c23432e3edd04aef4ed282c83f1b2b07221eb5be333e438ead425da1",
     "tests/test_verify_trident_automation_native.py": "7e75c3f61bed739bf5cf4eea0b8fd0393b95df91cc9b4592b73f5ff9e0c5eac8",
     "tests/test_verify_trident_script_native.py": "556ec1f479880379f15cc5e27b3dcc8cfab3bb6f3f30d3ae307f22b2e47fa0da",
@@ -312,7 +434,12 @@
     "tests/uxtheme_guest_runner_HANDOFF.md": "ea5eded6d5b3f3cc3d4ab8621f2236408cb0937ee6cbe83d7153890e80cd8f92",
     "tests/uxtheme_guest_runner_mock.c": "ca778deb2ba15c30ee76d11bcd61d4ae1b28a9669f006750c9c0e19660e41d87",
     "tests/uxtheme_guest_runner_mock.h": "14463ce0ef37880d1667c0b7a56f44ecda0670eef6b75bcfa850aeac32e19ca3",
+    "tools/audit_i486_native_inputs.py": "d4637da446ec7b8f8b703ee38c04e78304eb5cd880781c893e8ca9bf24ae1490",
+    "tools/build_css_core.py": "4b79103d24db274d3c2ab2bb479a325d38717e147eb25a4e5482c1756e921ee1",
+    "tools/build_css_mshtml_fixture.py": "b0adbfa4c9fc910aca3868b2b0fff9e1decd4789bf93cb4573173f4e6e053730",
+    "tools/build_css_mshtml_runner.py": "32877d90771a68e98b588460f164691e1a0fed62f302525c8fc91580bee45e8a",
     "tools/build_dns_config.py": "cbc013e6ebdd6b124ead30bfddaac800f3b295470020f5115a0a3d8d4f26035e",
+    "tools/build_softpipe_shader.py": "7e2fffae6eac36b2fcc930ad295016afea7eefd2506eafd3705e2ffbb8e7c089",
     "tools/build_theme_engine.py": "d148e89dda4b301c1ab73d55a343f80c30aeda8be5ce4c4b9ac648d9e6747660",
     "tools/build_theme_guest_runner.py": "d695bf0b1f4e1408710447133bfc68eae58d29b65de9190ac4b54020c4b6901e",
     "tools/build_tls13.py": "adce018582b146b2ec95939f3180f73e80ed8511a3ef34bff52ac63193624aaa",
@@ -322,15 +449,21 @@
     "tools/build_trident_guest_runner.py": "2845b647af18b57656eaaa38bad35bc8aba0a92825f612568458d9935957fceb",
     "tools/build_trident_script.py": "f80ad33d1ec86bca368b0beaa35f1d4fa5e08eb07752d0a53ff61489c230b1eb",
     "tools/build_trident_test262_selected.py": "283274869fcf460c8625cc15cf6d47c2525eaad5f422279e1a67e045cc2ac3e2",
+    "tools/build_wasm_runtime.py": "9e10828c4f1c88fa162bde9a76c014c709a604876dc710fba424fe6c3443e506",
+    "tools/css_mshtml_native_log.py": "da8e2f3d37333861c3bb1631c0416cbc1d990eb2ed7bf7e9a8c6f37df7419c08",
+    "tools/i486_instruction_gate.py": "6ba89c7a521e6a7b17e18519f27ed3d1f860d3f8e7ed7d9c89302ea960088973",
     "tools/modern_app_inventory.py": "cbe2f50d15a8ceb7e22b977c6948a9bfe63fcfbc7e6b3ae764aec052872f560d",
+    "tools/stage_css_mshtml_native.py": "ff41d3733ea2a858afef2ac6962dde3df01991d627ce1f36d91e8cef07b34971",
     "tools/stage_trident_automation_native.py": "8f05b9105583ff11276207af6cba6c075741bf7cc1a73ef9ad17a12b5606c8a1",
     "tools/stage_trident_script_native.py": "532044a04549ff0b8d7d09de0be897d4c0ed044791edacdb83ed2407879ea260",
+    "tools/test_wasm_spec_selected.py": "c9627963de3e3ee2f62b115f88dde389acbe6eaf93a6475049e9c1f2e0fe32ad",
+    "tools/verify_css_mshtml_native.py": "0395828d88a7ab1fd9d3936d4b065e0d82ba39551ce5ecd8c3b1004818fd4f17",
     "tools/verify_theme_native.py": "2a179ba3b3213a05b0ac35f0bc8a3afe3da61c6a27777e188ddb2798453bd569",
     "tools/verify_tls13_guest_evidence.py": "a2a696ef416060eca4ee6a381dd5cf6ba38edce9183d0eef1ad99c1b89066226",
     "tools/verify_trident_automation_native.py": "955be0f0d70a91fa22dbeab27074eeef223699414476d80b8b749dca22252a65",
     "tools/verify_trident_script_native.py": "72916dd0e4875ae35f96d3cdd6f8f8d18f48021245d62af3e1fc7483863c4083"
   },
-  "updated_utc": "2026-10-01T08:12:53.279424+00:00",
+  "updated_utc": "2026-10-01T09:26:47.496723+00:00",
   "source_commits": {
     "foundation": "a12a4a95e9f3fbddcea82d69f124876d22fb660f",
     "dns_config": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -340,7 +473,13 @@
     "quickjs_runtime": "eb85c4d7ade672604016203fe5ffc2007b259af6",
     "modern_web_targets_and_automation_acceptance": "0acecf9499a48f57006f68bb400d77825bc0ea2d",
     "script_native_acceptance": "89a6df0f4615d31a0c7b34d312d1e00d2eaec303",
-    "test262_selected": "eb6571ac6ab5a8705e64bc9d8546e54f741141df"
+    "test262_selected": "eb6571ac6ab5a8705e64bc9d8546e54f741141df",
+    "css_core": "a7ff07f1cc58ca29778b328c73417fa60f038181",
+    "i486_complete_gate": "e1a877cd76e541c07caf06ba92f316c1b2ca208b",
+    "css_mshtml_native_preparation": "f7f22e27c9ce81ac4079575c3bf3b4f5922f341e",
+    "wasm_current": "b8ae76609a62d1ab072d9cd9e7152050c3d523da",
+    "mesa_tgsi": "e40cd6b1ce87ed2e314fdbde63c2098d87ef68b1",
+    "foundation_notices": "bbb5e2e00b66c7a11782128a071ba6bda612fd82"
   },
   "dns_config": {
     "source_commit": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -371,8 +510,41 @@
       "WebGPU/WGSL",
       "WebGL2/current extensions"
     ],
-    "css_core": "real_syntax_and_variables_v2_corrections_in_progress",
-    "wasm_runtime": "pinned_real_interpreter_implementation_in_progress",
+    "css_core": {
+      "build": "css-core-v4",
+      "syntax_assertions_each": 11827,
+      "variables_assertions_each": 13289,
+      "normal_and_sanitizers_passed": true,
+      "dll_sha256": "cf4f0d9a8b1afefe5f2dc8fdf6767cef398bea40cdebdf4bd8dc2d0dee75bce7",
+      "full_css": false,
+      "browser_wpt": false,
+      "native_execution": false
+    },
+    "wasm_runtime": {
+      "build": "wasm-runtime-v24",
+      "embedding_assertions_each": 1237,
+      "normal_and_full_asan_ubsan_passed": true,
+      "effective_engine_macros_each": 114,
+      "original_source_files": 2001,
+      "real_cached_engine_objects": 93,
+      "selected_official_build": "wasm-spec-selected-v5",
+      "selected_numeric_commands_each": 5896,
+      "selected_numeric_failures": 0,
+      "text_only_exclusions": 8,
+      "dll_sha256": "a0311d69d40e22c65e4182b44d4ff53988c6247f669a47901dd3f3e9d6ca29a6",
+      "complete_i486_executable_bytes": 155996,
+      "complete_i486_instructions": 54602,
+      "native_execution": false,
+      "browser_js_api": false,
+      "full_modern_wasm": false,
+      "mandatory_remaining": [
+        "SIMD",
+        "exception handling",
+        "remaining current proposals",
+        "real JavaScript/DOM/origin-bound embedding",
+        "actual Win98 arithmetic"
+      ]
+    },
     "complete_javascript_verified": false,
     "complete_css_verified": false,
     "webgpu_verified": false,
@@ -418,7 +590,52 @@
       "automation_stage_files": 146,
       "both_stages_canonical_boot_scope": true,
       "native_runs_complete": false,
-      "global_registration": false
+      "global_registration": false,
+      "complete_i486_supplement_mandatory": true,
+      "complete_i486_supplement_sha256": "e8005132e8f917adedb54b3b85e1d6bfbb0c46bfc432288db34016537bdf53c6",
+      "strict_supplement_guard_implementation": "in_progress",
+      "css_canonical_stage_ready": true,
+      "all_full_standards_flags": false
+    },
+    "css_mshtml": {
+      "fixture_build": "css-mshtml-fixture-v8",
+      "consumer_assertions_each": 213,
+      "observer_build": "css-mshtml-observer-v4",
+      "observer_fault_assertions_each": 3025,
+      "synthetic_acceptance_methods_each": 8,
+      "normal_and_optimized_python_controls_passed": true,
+      "independent_source_provenance_review": "CLEAR",
+      "canonical_stage_sha256": "cef8c34813161bb544dbdcf3f8ba2ab83310d738d4d75642c17231b4e520320e",
+      "full_executable_bytes": {
+        "M98CSS.DLL": 10308,
+        "CSS13PR.EXE": 9580,
+        "M98CSR.EXE": 1864
+      },
+      "native_styles": false,
+      "native_geometry": false,
+      "native_paint": false,
+      "native_child_exit_verified": false,
+      "native_supervisor_exit_verified": false,
+      "full_css": false
+    },
+    "mesa_fragment": {
+      "build": "softpipe-shader-v2",
+      "genuine_tgsi_fragment": true,
+      "assertions_each": 3120,
+      "normal_and_full_asan_ubsan_passed": true,
+      "dll_sha256": "f128cbe67c4bf2dde24cbbee0677e3f562f8ece11a354d328a888a6166753b93",
+      "probe_sha256": "719d1c1e012c1dc3d548f8555e16831ca8e33d0bfad4979d09480e8f40593ac0",
+      "complete_dll_executable_bytes": 59824,
+      "complete_probe_executable_bytes": 6128,
+      "compiler_headers": 180,
+      "native_execution": false,
+      "glsl_es": false,
+      "gallium_rasterization": false,
+      "gles": false,
+      "webgl": false,
+      "webgpu": false,
+      "compute": false,
+      "full_browser": false
     }
   },
   "disk_optimization": {
