@@ -264,6 +264,7 @@ class Volume:
     def chain(self, start):
         chain, bits = [], self.g['fat_bits']
         end = 0xff8 if bits == 12 else 0xfff8 if bits == 16 else 0xffffff8
+        need(2 <= start <= self.g['clusters']+1, 'invalid FAT chain start cluster')
         current = start
         while current < end:
             need(2 <= current <= self.g['clusters']+1 and current not in self.used, 'cyclic, crosslinked or invalid FAT cluster chain')
@@ -504,6 +505,7 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
                 run_tool('mcopy',['-o','-i',str(target)+'@@'+str(start*512),stage/name,'::'+name],commands)
                 check(); capacity(out,0,capture_budget)
             with target.open('r+b') as handle:
+                need(os.fstat(handle.fileno()).st_size == disk_pin['bytes'], 'replacement disk extent differs after payload tools')
                 for lba in (start, start+backup) if backup is not None else (start,):
                     handle.seek(lba*512); need(handle.write(boot) == 512,'short VBR write')
                 handle.flush(); os.fsync(handle.fileno())
@@ -516,7 +518,14 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
                 for member in payloads:
                     actual = after.get(member['guest'],{})
                     need(actual.get('bytes') == member['file']['bytes'] and actual.get('sha256') == member['file']['sha256'],'installed payload readback differs')
-                result['destination'] = {'path':str(target),'bytes':disk_pin['bytes'],'sha256':hash_fd(handle.fileno(),disk_pin['bytes'],check)}
+                destination_identity = identity(os.fstat(handle.fileno()))
+                need(destination_identity[2] == disk_pin['bytes'], 'replacement disk final extent differs')
+                def destination_checkpoint():
+                    check()
+                    need(identity(os.fstat(handle.fileno())) == destination_identity and
+                         identity(target.stat()) == destination_identity, 'replacement disk changed during final readback')
+                destination_sha = hash_fd(handle.fileno(),destination_identity[2],destination_checkpoint)
+                result['destination'] = {'path':str(target),'bytes':destination_identity[2],'sha256':destination_sha}
             need(hash_fd(disk['fd'],disk_pin['bytes'],check) == disk_pin['sha256'],'source disk changed after preparation')
             for entry in sources.values(): entry['checkpoint']()
             for row in source_rows: need(local_pin(row['path']) == row,'late recorded source drift')
