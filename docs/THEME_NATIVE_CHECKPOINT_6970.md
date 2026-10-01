@@ -435,3 +435,50 @@ It preserves these limitations and separately accounts for the post-trial
 review: 16,152,909 bytes, still below the fixed 16 MiB limit. Root's independent
 log/image review SHA-256 is
 `ce2bc646c581857e5c1f324abc8f64d45b1a31a5659a243a9f00f9a03a633bda`.
+# Actual Windows 98 system palette selector — 2026-10-01
+
+The new `ntwddm/win98/theme_selector/` is a native ANSI Windows 98 application,
+not the K64 development shell or the older process-local renderer diagnostic.
+Its Classic/ShizukuOS buttons call genuine `SetSysColors` for system indices
+0–24. It preserves the first validated Classic baseline, saves a fixed-size,
+versioned HKCU profile, reads the complete value back, and registers a bounded,
+quoted local executable command for noninteractive startup restoration.
+Failures restore the previous palette, profile and startup value; partial
+rollback failures remain explicit. Fonts and Korean character sets are retained.
+Gradient indices 26–28 and custom application renderers are not covered by this
+increment. The historical provider ABI and diagnostic records remain intact.
+
+Root executed the shared production codec/transaction tests: **139 checks passed
+normally and 139 passed under ASan/UBSan**. Four resource acceptance regressions
+passed. An initial native compile failed on two strict indentation diagnostics;
+that FAIL receipt remains at
+`build/win98-global-theme-selector/20261001T161312Z-7726f0b5/result.json`, SHA256
+`adc13863b4500a702b2b9937f60e2b3bf23eec44ccb355fad5fe7566f0db7d51`.
+The source fixes subsequently passed the actual compiler, linker and OEM PE32
+gate without relaxing warnings. A separate intervening admission rejection at
+19,726,491,648 free bytes produced no new build and is not a successful retry.
+
+Final source-bound build receipt:
+`build/win98-global-theme-selector/20261001T162314Z-9271b7bd/result.json`, SHA256
+`bc88ada224d499bd141d594e2b60b8a8399718168cb192a78adde93b8daa6738`.
+`SHZTHEME.EXE` is 27,477 bytes, SHA256
+`fa0f0149770bed9fc5a72366535b087ad382f2ce50dd2241ab7a5f680654f832`.
+The actual i486 PE32 has OS/GUI subsystem 4.10, parsed HIGHLOW relocations, no
+unsupported modern PE flags, and 36 named imports present in the pinned OEM
+inventory: ADVAPI32 7, KERNEL32 11 and USER32 18. Final build outputs including
+the receipt total 2,209,746 bytes, within the admitted 8 MiB build limit; the
+recorded free-space sample is 22,374,227,968 bytes, above the unchanged 20 GiB floor.
+
+**Actual Win98 execution, independent process repaint, native failure rollback,
+two cold boots, automatic persistence and complete visible-theme acceptance
+remain unverified.** A separately owned read-only native observer and a new
+single-COW two-cold-boot adapter are being prepared; the old v15 startup plans
+cannot validate this new component. No final ISO or production release was made
+by this source/build checkpoint. ShizukuDOS still must replace MS-DOS under real
+Windows 98, and Kernel32/Kernel64 must serve that system; this compiled component
+does not establish that architecture or all requested application functionality.
+
+The dedicated optimizer independently confirmed 378,695,680 additional bytes
+of sharing across three immutable derived binary pairs, with zero deletions and
+unchanged whole-file hashes/inodes/lengths/mtimes. Earlier reclaim is excluded;
+subsequent shared-host free-space changes belong to other workstreams.
