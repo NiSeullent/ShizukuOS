@@ -34,6 +34,14 @@ def executable():
     return bytes(data)
 
 
+def fixture_firmware(folder):
+    folder.mkdir()
+    for name in handoff.FIRMWARE_REQUIRED:
+        (folder / name).write_bytes(("firmware fixture " + name).encode())
+    (folder / "not-firmware.txt").write_bytes(b"never copied")
+    return folder
+
+
 class PackageCase(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -195,6 +203,7 @@ class PackageCase(unittest.TestCase):
             path.write_bytes(b"immutable runtime fixture")
         qemu = self.folder / "qemu-fixture"
         qemu.write_bytes(b"never executed")
+        firmware = fixture_firmware(self.folder / "firmware")
         spec, control = handoff.runtime_spec("onlyoffice_x64", "DesktopEditors.exe", 60)
         image_receipt = self.folder / "image.json"
         handoff.write_json(image_receipt, {"schema": 1, "status": "PREPARED", "stage": "standalone-kernel64-image",
@@ -221,7 +230,7 @@ class PackageCase(unittest.TestCase):
         runner.shzlib = SimpleNamespace(write_json=lambda path, value: path.write_text(json.dumps(value)))
         productivity = SimpleNamespace(runner=runner, classify_product=lambda *args: {})
         with patch.object(handoff, "load_peer", return_value=(productivity, hashes)), patch.object(handoff, "check_space"):
-            code = handoff.run_image(image_receipt, out, qemu, "kvm", 90, 4096)
+            code = handoff.run_image(image_receipt, out, qemu, "kvm", 90, 4096, [firmware])
         result = json.loads((out / "result.json").read_text())
         self.assertEqual(code, 1)
         self.assertEqual(result["status"], "FAIL")
@@ -231,6 +240,9 @@ class PackageCase(unittest.TestCase):
         self.assertTrue(result["image_preserved"])
         self.assertTrue(result["runtime_inputs_preserved"])
         self.assertTrue(result["sealed_runtime_inputs_preserved"])
+        self.assertTrue(result["sealed_firmware_preserved"])
+        self.assertTrue(result["firmware_sources_preserved"])
+        self.assertEqual(set(result["sealed_firmware"]["files"]), handoff.FIRMWARE_REQUIRED)
         self.assertEqual(result["resource_guard"]["reserve_bytes"], 20 * handoff.GIB)
         self.assertTrue(result["runtime_sources_preserved"])
         self.assertEqual(set(result["runtime_input_hashes"]), {"boot_stub", "kernel", "win64_initrd", "qemu"})
@@ -262,7 +274,10 @@ class ResourceGuard(unittest.TestCase):
         self.qemu.write_bytes(b"never executed")
         self.out = self.folder / "run"
         self.out.mkdir()
-        self.guard = handoff.GuardedSubprocess(self.qemu, self.out)
+        firmware = fixture_firmware(self.folder / "firmware")
+        with patch.object(handoff, "check_space"):
+            self.firmware = handoff.seal_firmware(handoff.firmware_manifest([firmware]), self.out / "runtime-firmware")
+        self.guard = handoff.GuardedSubprocess(self.qemu, self.out, self.firmware)
         self.addCleanup(self.guard.close)
 
     def test_unlinked_owned_snapshot_is_counted_without_counting_other_descriptors(self):
@@ -289,10 +304,13 @@ class ResourceGuard(unittest.TestCase):
         captured = {}
         def popen(command, **kwargs):
             captured.update(kwargs)
+            captured["command"] = command
             return child
         with patch.object(handoff, "check_space"), patch.object(handoff.subprocess, "Popen", side_effect=popen):
             proc = self.guard.Popen([str(self.qemu)], stdout=handoff.subprocess.PIPE)
         self.assertEqual(captured["env"]["TMPDIR"], str(self.guard.snapshot))
+        self.assertEqual(captured["command"], [str(self.qemu), "-L", self.firmware["path"]])
+        self.assertEqual(self.guard.record["actual_qemu_command"], captured["command"])
         self.assertIs(captured["stdout"], self.guard.output)
         with patch.object(handoff.shutil, "disk_usage", return_value=SimpleNamespace(free=handoff.RESERVE - 1)):
             self.assertEqual(proc.wait(timeout=1), -9)
@@ -329,6 +347,116 @@ class ResourceGuard(unittest.TestCase):
                 handoff.extract_signal(self.qemu, self.folder / "archive", self.out)
         self.assertTrue(child.killed)
         self.assertEqual(child.returncode, -9)
+
+
+class FirmwareBoundaries(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.folder = Path(self.temporary.name)
+        self.addCleanup(self.temporary.cleanup)
+        self.source = fixture_firmware(self.folder / "source")
+
+    def seal(self, manifest):
+        with patch.object(handoff, "check_space"):
+            return handoff.seal_firmware(manifest, self.folder / "sealed")
+
+    def test_split_package_roots_are_copied_once_and_nonfirmware_is_excluded(self):
+        bios = self.folder / "bios-package"
+        bios.mkdir()
+        (self.source / "bios-256k.bin").rename(bios / "bios-256k.bin")
+        manifest = handoff.firmware_manifest([self.source, bios])
+        sealed = self.seal(manifest)
+        self.assertEqual(set(sealed["files"]), handoff.FIRMWARE_REQUIRED)
+        self.assertTrue(handoff.sealed_firmware_preserved(sealed))
+        self.assertTrue(handoff.firmware_sources_preserved(manifest))
+        self.assertEqual(sealed["source_directories"], [str(self.source), str(bios)])
+
+    def test_package_symlink_keeps_target_provenance_and_seals_regular_content(self):
+        link = self.source / "bios-256k.bin"
+        original = link.read_bytes()
+        target = self.folder / "bios-package-object"
+        target.write_bytes(original)
+        link.unlink()
+        link.symlink_to(target)
+        manifest = handoff.firmware_manifest([self.source])
+        sealed = self.seal(manifest)
+        row = sealed["files"][link.name]
+        self.assertEqual(row["source_entry"], str(link))
+        self.assertEqual(row["source_path"], str(target))
+        self.assertEqual(row["source_symlink"], str(target))
+        self.assertFalse(Path(row["path"]).is_symlink())
+        self.assertEqual(Path(row["path"]).read_bytes(), original)
+
+    def test_missing_and_unresolved_firmware_are_rejected(self):
+        path = self.source / "bios-256k.bin"
+        path.unlink()
+        with self.assertRaisesRegex(handoff.HandoffError, "missing"):
+            handoff.firmware_manifest([self.source])
+        path.symlink_to(self.folder / "nonexistent-package-object")
+        with self.assertRaises(OSError):
+            handoff.firmware_manifest([self.source])
+
+    def test_special_file_ambiguous_basename_and_inventory_bounds_reject(self):
+        path = self.source / "bios-256k.bin"
+        data = path.read_bytes()
+        path.unlink()
+        os.mkfifo(path)
+        with self.assertRaisesRegex(handoff.HandoffError, "regular"):
+            handoff.firmware_manifest([self.source])
+        path.unlink()
+        path.write_bytes(data)
+        other = self.folder / "other"
+        other.mkdir()
+        (other / path.name).write_bytes(data)
+        with self.assertRaisesRegex(handoff.HandoffError, "ambiguous"):
+            handoff.firmware_manifest([self.source, other])
+        with patch.object(handoff, "FIRMWARE_MAX_BYTES", 1), self.assertRaisesRegex(handoff.HandoffError, "bounded"):
+            handoff.firmware_manifest([self.source])
+        with patch.object(handoff, "FIRMWARE_MAX_FILES", 1), self.assertRaisesRegex(handoff.HandoffError, "bounded"):
+            handoff.firmware_manifest([self.source])
+
+    def test_source_changed_between_inventory_and_sealing_is_rejected(self):
+        manifest = handoff.firmware_manifest([self.source])
+        path = self.source / "bios-256k.bin"
+        data = path.read_bytes()
+        path.write_bytes(b"X" + data[1:])
+        with self.assertRaisesRegex(handoff.HandoffError, "changed before sealing"):
+            self.seal(manifest)
+        self.assertFalse((self.folder / "sealed").exists())
+
+    def test_mutated_seal_cannot_launch_qemu_and_firmware_override_is_rejected(self):
+        manifest = handoff.firmware_manifest([self.source])
+        sealed = self.seal(manifest)
+        out, qemu = self.folder / "run", self.folder / "qemu"
+        out.mkdir()
+        qemu.write_bytes(b"never executed")
+        guard = handoff.GuardedSubprocess(qemu, out, sealed)
+        self.addCleanup(guard.close)
+        with patch.object(handoff.subprocess, "Popen") as launch:
+            for args in (("-L", "/unsealed"), ("-L/unsealed",), ("-bios", "/unsealed/bios.bin"), ("-device", "VGA,romfile=/unsealed")):
+                with self.assertRaisesRegex(handoff.HandoffError, "override"):
+                    guard.Popen([str(qemu), *args])
+            path = Path(sealed["files"]["bios-256k.bin"]["path"])
+            path.chmod(0o600)
+            path.write_bytes(b"changed firmware")
+            with self.assertRaisesRegex(handoff.HandoffError, "changed before guest"):
+                guard.Popen([str(qemu)])
+            launch.assert_not_called()
+
+    def test_symlink_retargeting_invalidates_source_but_not_owned_copy(self):
+        path = self.source / "bios-256k.bin"
+        data = path.read_bytes()
+        first, second = self.folder / "first", self.folder / "second"
+        first.write_bytes(data)
+        second.write_bytes(data)
+        path.unlink()
+        path.symlink_to(first)
+        manifest = handoff.firmware_manifest([self.source])
+        sealed = self.seal(manifest)
+        path.unlink()
+        path.symlink_to(second)
+        self.assertFalse(handoff.firmware_sources_preserved(manifest))
+        self.assertTrue(handoff.sealed_firmware_preserved(sealed))
 
 
 class ContractBoundaries(unittest.TestCase):

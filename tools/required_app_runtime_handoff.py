@@ -7,6 +7,8 @@ image calls the existing productivity image builder; run starts its generic runn
 Nothing downloads, installs into Windows 98, changes peer source, or supplies a
 synthetic success marker. Kernel64 accepts AMD64 PE32+ only. An x86 ONLYOFFICE
 package is rejected before extraction. A startup diagnostic is never an app pass.
+Run requires explicit firmware package directories and uses a sealed private -L
+directory so relocating the QEMU executable cannot drop its PC/VGA boot data.
 """
 from __future__ import annotations
 
@@ -35,6 +37,11 @@ METADATA_MARGIN = 128 * 1024**2
 RUN_WRITE_BUDGET = 256 * 1024**2
 RUN_STDERR_BUDGET = 16 * 1024**2
 RUN_POLL_SECONDS = 0.1
+FIRMWARE_MAX_FILES = 64
+FIRMWARE_MAX_BYTES = 32 * 1024**2
+# The frozen peer scenario uses PC, standard VGA, and the multiboot ELF stub.
+FIRMWARE_REQUIRED = frozenset(("bios-256k.bin", "vgabios-stdvga.bin", "kvmvapic.bin",
+                               "multiboot.bin", "multiboot_dma.bin"))
 FLAGS = {"windows98_execution_verified": False, "standalone_kernel64_execution_verified": False,
          "app_functionality_verified": False}
 PEER_FILES = ("shizukudos/tests/run_k64_productivity.py", "shizukudos/tests/run_k64_electron.py",
@@ -377,10 +384,107 @@ def seal_runtime_inputs(inputs: dict[str, Path], directory: Path) -> dict:
     return records
 
 
+def firmware_manifest(directories: list[Path]) -> dict:
+    """Inventory explicit package data roots without guessing host search paths."""
+    if not directories or len(directories) > 8:
+        raise HandoffError("one to eight explicit firmware directories required")
+    roots, files, total = [], {}, 0
+    for requested in directories:
+        if not requested.is_absolute():
+            raise HandoffError("firmware directory must be absolute")
+        root = requested.resolve(strict=True)
+        if not root.is_dir() or str(root) in roots:
+            raise HandoffError("firmware directory is not a unique directory")
+        roots.append(str(root))
+        for entry in sorted(root.iterdir()):
+            if entry.suffix.lower() not in (".bin", ".rom"):
+                continue
+            if entry.name in files:
+                raise HandoffError("ambiguous firmware basename: " + entry.name)
+            # Distribution data may link to a separate firmware package. Keep
+            # both paths and the link text; copy the resolved regular object.
+            link = os.readlink(entry) if entry.is_symlink() else None
+            source = entry.resolve(strict=True)
+            before = source.stat()
+            if not stat.S_ISREG(before.st_mode) or before.st_size <= 0:
+                raise HandoffError("firmware input is not a nonempty regular file")
+            total += before.st_size
+            if len(files) + 1 > FIRMWARE_MAX_FILES or total > FIRMWARE_MAX_BYTES:
+                raise HandoffError("firmware inventory exceeds bounded count or bytes")
+            checksum = digest_file(source)
+            if (entry.resolve(strict=True) != source
+                    or (os.readlink(entry) if entry.is_symlink() else None) != link
+                    or corpus.inventory.file_identity(source.stat()) != corpus.inventory.file_identity(before)):
+                raise HandoffError("firmware input changed during inventory")
+            files[entry.name] = {"source_entry": str(entry), "source_path": str(source),
+                                 "source_symlink": link, "bytes": before.st_size, "sha256": checksum}
+    if not FIRMWARE_REQUIRED.issubset(files):
+        raise HandoffError("required PC/VGA/multiboot firmware missing: " + ", ".join(sorted(FIRMWARE_REQUIRED - files.keys())))
+    return {"source_directories": roots, "files": files, "bytes": total}
+
+
+def firmware_sources_preserved(manifest: dict) -> bool:
+    try:
+        for row in manifest["files"].values():
+            entry, source = Path(row["source_entry"]), Path(row["source_path"])
+            if (entry.resolve(strict=True) != source
+                    or (os.readlink(entry) if entry.is_symlink() else None) != row["source_symlink"]
+                    or source.stat().st_size != row["bytes"] or digest_file(source) != row["sha256"]):
+                return False
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def seal_firmware(manifest: dict, directory: Path) -> dict:
+    if not firmware_sources_preserved(manifest):
+        raise HandoffError("firmware input changed before sealing")
+    directory.mkdir()
+    records = {}
+    for name, row in manifest["files"].items():
+        source, target = Path(row["source_path"]), directory / name
+        descriptor = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(descriptor, "rb") as stream, target.open("xb") as output:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size != row["bytes"]:
+                raise HandoffError("firmware input changed before copy")
+            checksum, total = hashlib.sha256(), 0
+            for block in iter(lambda: stream.read(1024**2), b""):
+                check_space(directory, 0)
+                output.write(block)
+                checksum.update(block)
+                total += len(block)
+                if total > row["bytes"]:
+                    raise HandoffError("firmware input grew during copy")
+            if (total != row["bytes"] or checksum.hexdigest() != row["sha256"]
+                    or corpus.inventory.file_identity(before) != corpus.inventory.file_identity(os.fstat(stream.fileno()))):
+                raise HandoffError("firmware input changed during copy")
+        target.chmod(0o400)
+        if digest_file(target) != row["sha256"]:
+            raise HandoffError("sealed firmware digest mismatch")
+        records[name] = {**row, "path": str(target.resolve())}
+    if not firmware_sources_preserved(manifest):
+        raise HandoffError("firmware source changed before sealed receipt")
+    return {"path": str(directory.resolve()), "source_directories": manifest["source_directories"],
+            "files": records, "bytes": manifest["bytes"]}
+
+
+def sealed_firmware_preserved(sealed: dict) -> bool:
+    directory = Path(sealed["path"])
+    try:
+        if directory.is_symlink() or set(path.name for path in directory.iterdir()) != set(sealed["files"]):
+            return False
+        return all(Path(row["path"]).parent == directory and Path(row["path"]).stat().st_size == row["bytes"]
+                   and digest_file(Path(row["path"])) == row["sha256"] for row in sealed["files"].values())
+    except (OSError, ValueError):
+        return False
+
+
 class GuardedSubprocess:
     """Bound this runner's one QEMU child, including its unlinked snapshot file."""
-    def __init__(self, qemu: Path, out: Path):
+    def __init__(self, qemu: Path, out: Path, firmware: dict):
         self.qemu, self.out = qemu.resolve(), out.resolve()
+        self.firmware = firmware
         self.snapshot = self.out / "qemu-snapshot"
         self.snapshot.mkdir()
         self.output_path = self.out / "qemu-host-output.log"
@@ -418,6 +522,14 @@ class GuardedSubprocess:
     def Popen(self, command, **kwargs):
         if self.child is not None or Path(command[0]).resolve() != self.qemu:
             raise HandoffError("runtime attempted an unowned or additional child")
+        if any(arg.startswith("-L") or arg in ("-bios", "-option-rom", "-fw_cfg")
+               or "romfile=" in arg for arg in command[1:]):
+            raise HandoffError("runtime attempted to override sealed firmware")
+        if not sealed_firmware_preserved(self.firmware):
+            raise HandoffError("sealed firmware changed before guest launch")
+        command = [command[0], "-L", self.firmware["path"], *command[1:]]
+        self.record["actual_qemu_command"] = list(command)
+        self.record["firmware_directory"] = self.firmware["path"]
         check_space(self.out, RUN_WRITE_BUDGET)
         self.output = self.output_path.open("xb")
         environment = dict(kwargs.pop("env", os.environ))
@@ -528,7 +640,8 @@ def build_image(prepared_path: Path, peer: Path, image: Path, receipt_path: Path
     return result
 
 
-def run_image(receipt_path: Path, out: Path, qemu: Path, accel: str, timeout: int, memory: int) -> int:
+def run_image(receipt_path: Path, out: Path, qemu: Path, accel: str, timeout: int, memory: int,
+              firmware_directories: list[Path]) -> int:
     receipt = read_json(receipt_path)
     if receipt.get("status") != "PREPARED" or receipt.get("stage") != "standalone-kernel64-image" or receipt.get("source_hashes") != source_hashes():
         raise HandoffError("not a current source-bound Kernel64 image receipt")
@@ -551,7 +664,8 @@ def run_image(receipt_path: Path, out: Path, qemu: Path, accel: str, timeout: in
     runner = productivity.runner
     runtime_inputs = {"boot_stub": runner.K64S / "boot.elf", "kernel": runner.K64S / "KERNEL64S.BIN",
                       "win64_initrd": runner.WIN64 / "WIN64.IMG", "qemu": qemu}
-    copy_bytes = sum(path.stat().st_size for path in runtime_inputs.values())
+    firmware = firmware_manifest(firmware_directories)
+    copy_bytes = sum(path.stat().st_size for path in runtime_inputs.values()) + firmware["bytes"] + FIRMWARE_MAX_FILES * 4096
     check_space(out.parent, copy_bytes + RUN_WRITE_BUDGET)
     input_hashes = {name: {"path": str(path.resolve()), "sha256": digest_file(path), "bytes": path.stat().st_size}
                     for name, path in runtime_inputs.items()}
@@ -568,12 +682,14 @@ def run_image(receipt_path: Path, out: Path, qemu: Path, accel: str, timeout: in
     sealed_inputs = seal_runtime_inputs(runtime_inputs, out / "runtime-inputs")
     if any(row["sha256"] != input_hashes[key]["sha256"] for key, row in sealed_inputs.items()):
         raise HandoffError("runtime input changed before sealing")
+    sealed_firmware = seal_firmware(firmware, out / "runtime-firmware")
     write_json(out / "runtime-seal.json", {"schema": 1, "stage": "sealed-standalone-runtime-inputs",
                "required_handoff_receipt_sha256": handoff_hash, "image_sha256": receipt["image"]["sha256"],
                "runtime_worktree": receipt["runtime_worktree"], "runtime_source_hashes": peer_hashes,
                "source_hashes": source_hashes(), "sealed_runtime_input_hashes": sealed_inputs,
+               "sealed_firmware": sealed_firmware,
                "payload_executed": False, **FLAGS})
-    guard = GuardedSubprocess(Path(sealed_inputs["qemu"]["path"]), out)
+    guard = GuardedSubprocess(Path(sealed_inputs["qemu"]["path"]), out, sealed_firmware)
     runner.K64S = runner.WIN64 = out / "runtime-inputs"
     runner.subprocess = guard
     runner.APPS[name] = spec
@@ -605,6 +721,10 @@ def run_image(receipt_path: Path, out: Path, qemu: Path, accel: str, timeout: in
                        "windows98_execution_verified": False, "network_attached": False,
                        "required_handoff_receipt_sha256": handoff_hash, "runtime_input_hashes": input_hashes,
                        "sealed_runtime_input_hashes": sealed_inputs,
+                       "sealed_firmware": sealed_firmware,
+                       "sealed_firmware_preserved": sealed_firmware_preserved(sealed_firmware),
+                       "firmware_sources_preserved": firmware_sources_preserved(firmware),
+                       "actual_qemu_command": guard.record.get("actual_qemu_command"),
                        "sealed_runtime_inputs_preserved": all(digest_file(Path(row["path"])) == row["sha256"] for row in sealed_inputs.values()),
                        "resource_guard": guard.record,
                        "runtime_inputs_preserved": all(digest_file(path) == input_hashes[name]["sha256"] for name, path in runtime_inputs.items()),
@@ -634,6 +754,8 @@ def main(argv=None) -> int:
     run_parser = stages.add_parser("run", allow_abbrev=False)
     for option in ("receipt", "out", "qemu"):
         run_parser.add_argument("--" + option, type=Path, required=True)
+    run_parser.add_argument("--firmware-dir", type=Path, action="append", required=True,
+                            help="explicit PC, VGA, and multiboot firmware package directory; repeat for split packages")
     run_parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm")
     run_parser.add_argument("--timeout", type=int, default=90)
     run_parser.add_argument("--memory", type=int, default=4096)
@@ -644,7 +766,7 @@ def main(argv=None) -> int:
         elif args.stage == "image":
             result = build_image(args.prepared, args.runtime_worktree, args.image, args.receipt, args.guest_timeout)
         else:
-            return run_image(args.receipt, args.out, args.qemu, args.accel, args.timeout, args.memory)
+            return run_image(args.receipt, args.out, args.qemu, args.accel, args.timeout, args.memory, args.firmware_dir)
     except (HandoffError, corpus.CorpusError, corpus.inventory.PEError, OSError, ValueError, KeyError, TypeError, RuntimeError, zipfile.BadZipFile) as error:
         parser.exit(2, "BLOCKED: " + str(error) + "\n")
     print(json.dumps({key: result[key] for key in ("status", "stage", "app", "app_functionality_verified")}))
