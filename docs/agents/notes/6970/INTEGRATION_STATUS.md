@@ -38,3 +38,16 @@ lacks an actual backend-worker→DOS executor. Canonical master163f acknowledged
 the audit and assigned its Windows/NT lead that boundary; replacement boot
 stays with master. Implementation/acceptance remains unverified; independent
 common locks do not establish DOS replacement.
+
+The scoped WinHTTP URL parser repair7c174d9 has actual unchanged-production
+RED (25 failures across110 checks), followed by the identical fixture passing
+110 HOST and110 ASan/UBSan checks. Root and an independent agent verified the
+actual logged receipt and source bindings. [Checkpoint](WINHTTP_URL_CHECKPOINT.md#actual-identical-fixture-green-and-scoped-import).
+Native Windows, HTTP/TLS-provider execution, modern applications and canonical
+main import remain separate acceptance work.
+
+Fresh outside check36919558655 at maina648 observed the official homepage,
+without active VNC or a challenge, in all four normal-Chrome-identity browser
+routes. All four direct HTTP requests returned403, so the check correctly
+retains overallFAIL and external acceptancefalse. No ISO was supplied to or
+verified by that run. Browser observation alone does not certify distribution.

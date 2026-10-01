@@ -55,3 +55,36 @@ ExtraInfo is unrequested; explicitly borrowed/requested ExtraInfo keeps its
 separate suffix. No exported ABI or other request/provider path changes.
 The fixture, guarded runner and shims remain unchanged for hosted GREEN.
 Actual GREEN, canonical import and native Windows execution remain pending.
+
+## Actual identical-fixture GREEN and scoped import
+
+The reviewed production repair is committed and pushed in
+7c174d9184c719fea0b1b8024ee69a4ce3d0bdd4. It changes only the path-end
+decision: omitted ExtraInfo keeps the query/fragment in UrlPath; requested
+copied or borrowed ExtraInfo remains separate. Production SHA256 is
+a4e92796e9f6d6a8f4423e65b6197555320625e0245adb1d651290afbd8bd990.
+The fixture, runner and two declaration shims are unchanged from actual RED.
+
+[Run36921574928](https://github.com/NiSeullent/Win98-Modern/actions/runs/36921574928)
+at that exact commit passed110 HOST checks and110 Clang ASan/UBSan checks.
+Both test error captures were empty. All eight actual commands exited0 and
+were reaped, without an abort. Six project inputs matched before/after;
+40 GCC and45 Clang actual include files matched their recorded dependency
+paths and before/after hashes.
+
+Full88,231-byte receipt SHA256:
+cd61f021c19fe4c26162998168383b29144c711c181b19a45cb40afe4cb2e043.
+Root and an independent agent reconstructed the complete receipt from actual
+job output and computed the same digest. Minimum observed free92,386,070,528B,
+final output1,712,697B, peak1,712,698B; no resource failure, accounting verified.
+
+Canonical master163f and the main publisher can import prepared fixture/runner/
+workflow commitb6901b4 and narrow production repair7c174d9. Preserve any later
+independent WinHTTP changes with a scoped merge and source-bound validation.
+Canonical adoption and main integration have not been observed.
+
+These results verify this parser repair through the actual production C
+translation unit on the host. No native Windows DLL, networking, HTTP engine,
+OS TLS provider or modern application acceptance is established. The bounded
+raw receipts remain in RAM; shared-host disk reserve does not currently admit
+local compiler/VM work or physical proof persistence.
