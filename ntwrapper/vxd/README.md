@@ -48,7 +48,7 @@ The build produces:
 | `host-tests.log` | unittest and sanitizer result log bound by the receipt |
 
 `test.py` requires artifacts matching the current build manifest. It also detects
-source/artifact changes during testing. Its eleven existing test groups cover actual emitted
+source/artifact changes during testing. Its container and dispatch groups cover actual emitted
 LE relocations at three independent load-base pairs, cross-page fixup records,
 malformed containers, 1,000 bounded mutations, exact native service constants
 (including the single guarded `VMCALL`/`CPUID`), missing ELF imports, the PE probe
@@ -60,6 +60,16 @@ The C bridge tests run under ASan/UBSan. A freestanding i386 user-process harnes
 executes the actual assembly control dispatcher with substituted C entrypoints;
 it tests registers, stack balance, direction flag, and carry/result conventions.
 It does **not** execute privileged interrupt masking or VMM service instructions.
+
+The current suite has thirteen test groups. The WIN64 tests additionally execute
+reentrant admission, channel geometry/epoch changes, duplicate pool request IDs,
+foreign/stale/wrong-opcode responses and corrupt ring indices. A real pthread
+overlap test runs under ASan/UBSan and TSan: a paused owner retains the endpoint,
+an overlapping caller receives `ERROR_BUSY` before any page callback, then the
+owner resumes and a subsequent request succeeds. It also checks shutdown refuses
+that admitted owner and races shutdown against W64 entry across 128 externally
+initialized rounds. These remain host tests of the
+production C boundary, not native VMM scheduling evidence.
 
 ## Implemented native path
 
@@ -141,14 +151,18 @@ not hand over in the same request.
 
 | Control code | Input | Output | Result |
 | --- | --- | --- | --- |
-| `0x4e540010` `W64_OPEN` | none | 64-byte `struct ntwv_w64_open` (ABI version, channel id, domains, generation, ring depth, pool size, counters) | 50 without the Supervisor signature, 1306 on an ABI major mismatch, 55 when no Kernel64 channel is announced, 8 when the window cannot be mapped, 31 when the window is not a Kernel64/Win98 channel |
-| `0x4e540011` `W64_SEND` | 64-byte header + inline payload (<= 192) [+ up to 3,840 bytes of pool data, at most 4,096 in total] | `int32` status | 87 for inconsistent lengths, 170 when the transmit ring is full or four pool blocks are still awaiting replies, 8 when the pool is exhausted |
-| `0x4e540012` `W64_RECV` | none | one 256-byte slot (header + payload, zero padded) | 259 (`ERROR_NO_MORE_ITEMS`) when the receive ring is empty; malformed slots are consumed, counted and never returned |
+| `0x4e540010` `W64_OPEN` | none | 64-byte `struct ntwv_w64_open` (ABI version, channel id, domains, generation, ring depth, pool size, counters) | 50 without the Supervisor signature, 1306 on an ABI major mismatch, 55 when no Kernel64 channel is announced or the opened epoch changed, 8 when the window cannot be mapped, 31 for invalid/changed layout |
+| `0x4e540011` `W64_SEND` | 64-byte header + inline payload (<= 192) [+ up to 3,840 bytes of pool data, at most 4,096 in total] | `int32` status | 87 for inconsistent lengths, 170 for overlap, a full transmit ring, four outstanding pool blocks or a duplicate outstanding pool request ID, 8 when the pool is exhausted |
+| `0x4e540012` `W64_RECV` | none | one 256-byte slot (header + payload, zero padded) | 259 (`ERROR_NO_MORE_ITEMS`) when no acceptable frame is found in one bounded ring-depth drain; invalid frames are consumed and counted; corrupt nonconsumable indices return 31 |
 | `0x4e540013` `W64_WAIT` | `uint32` timeout (advisory) | `uint32` doorbell mask | acknowledges the doorbell; **does not block** in this revision |
 
 Pool data attached to a `SEND` is copied into a block the VxD allocates in the
 channel pool (owned by the Win98 domain); the block is released when the reply
-carrying the same request id is received. The user buffers follow the same
+carrying the same request id and opcode is received from Kernel64 for Win98 in
+the live channel generation. Foreign or stale frames, invalid flag combinations
+and unsupported incoming pool references are dropped before delivery or pool
+release. A pool request ID cannot be reused while its block is outstanding.
+The user buffers follow the same
 policy as the query: private arena only, no overlap, pinned, PTE-validated under
 disabled interrupts, input copied into kernel memory before any ring or
 hypercall work, and the reply copied out after re-validation. The host test
@@ -157,12 +171,37 @@ hypercall work, and the reply copied out after re-validation. The host test
 injects malformed slots, exhausts the ring and the pool bookkeeping, and fails
 each of the 19 VMM calls of a `SEND` in turn.
 
+Each W64 DIOC takes an atomic, nonblocking admission token covering scratch
+buffers, both ring endpoints and pool bookkeeping. Overlapping/reentrant W64
+calls return 170 before page pinning; the token is released on every normal
+success/error return. Shutdown refuses an admitted request, and reset leaves
+its state intact. Readiness and query selftest flags use consistent atomic
+accesses, including checks before admission, so shutdown cannot race a plain
+lifecycle read. Initialization remains externally serialized with every entry
+and lifecycle operation because it initializes the underlying object context.
+The original QUERY controls and payload remain unchanged. The original bounded interrupt-masked safe-copy intervals
+retain their Windows 98 single-vCPU assumptions; admission does not broaden
+those VMM page-service assumptions to SMP.
+
+OPEN validates disjoint header/owner-table, ring and pool ranges, aligned bounded
+slot/pool sizes, ring/header agreement and the announced channel ID. Operations
+compare the live geometry and generation with the captured layout. Epoch changes
+return 55 until explicit reset/reopen; layout corruption returns 31. Reset forgets
+local state and never frees outstanding pool blocks because the peer may still
+consume queued requests. Those blocks require a terminal response or a proven
+Supervisor-owned channel teardown; this revision has no cancellation/rundown
+acknowledgement.
+
 Limits: `W64_WAIT` is non-blocking (a blocking wait needs the Supervisor's
 doorbell vector hooked through VPICD); `_MapPhysToLinear` mappings are never
 released; the VxD does not verify that the Win98 domain is really `SHZ_DOM_WIN98`
-beyond the channel header the Supervisor initialised. None of this has run
-inside Windows 98 or under the Supervisor: the only native loader evidence is
-the failed absolute-path load recorded in `docs/VXD_LOADER_TRIAGE.md`.
+beyond the channel header the Supervisor initialised. NTW32's caller serialization
+and the absence of per-process reply ownership remain limits even though the VxD
+now enforces endpoint admission. The refreshed artifact has not run inside
+Windows 98 or under the Supervisor. Frozen prior native production load/query
+and absent-Supervisor `W64_OPEN=50` evidence is preserved in
+[the application campaign](../../docs/shizukudos10/reports/MODERN_APPS_CAMPAIGN.md);
+it does not validate this new artifact or a positive live Kernel64 channel.
 
 ## Guest probe
 
