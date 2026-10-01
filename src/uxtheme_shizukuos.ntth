@@ -1,0 +1,12 @@
+name ShizukuOS
+class BUTTON
+part 1 state 1 bgtype borderfill bordersize 1 bordercolor 3D7890 filltype solid fillcolor EDF5F9 textcolor 12283B
+part 1 state 2 bgtype borderfill bordersize 1 bordercolor 40A5C5 filltype solid fillcolor DCEFF7 textcolor 12283B
+part 1 state 3 bgtype borderfill bordersize 1 bordercolor 0E6680 filltype solid fillcolor BEDFEA textcolor 12283B
+part 1 state 4 bgtype borderfill bordersize 1 bordercolor A6B6C3 filltype solid fillcolor E8EEF2 textcolor 526575
+class WINDOW
+part 1 state 1 bgtype borderfill bordersize 1 bordercolor 102A43 filltype horzgradient fillcolor 102A43 gradient1 102A43 gradient2 167C9C textcolor FFFFFF
+part 1 state 2 bgtype borderfill bordersize 1 bordercolor A6B6C3 filltype solid fillcolor E8EEF2 textcolor 526575
+part 7 state 1 bgtype borderfill bordersize 1 bordercolor 3D7890 filltype solid fillcolor F5F9FC textcolor 12283B
+part 8 state 1 bgtype borderfill bordersize 1 bordercolor 3D7890 filltype solid fillcolor F5F9FC textcolor 12283B
+part 9 state 1 bgtype borderfill bordersize 1 bordercolor 3D7890 filltype solid fillcolor F5F9FC textcolor 12283B
