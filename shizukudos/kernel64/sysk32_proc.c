@@ -12,7 +12,8 @@
  *    by Kernel64, so a locked page stays resident as documented.
  *  - Process and module lists come from the process table and the loader's module list.
  */
-#include "fs.h"
+#include "ipc.h"
+#include "../kcommon/nt_sched_policy.h"
 
 extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 extern int64_t filetime_now(void);
@@ -609,6 +610,65 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
     }
 }
 
+/* Retarget published user threads, including initialized TS_NEW threads.
+ * The bounded native slot table and the entire two-pass operation share one
+ * IRQ guard: every possible refusal precedes the first policy mutation. */
+static int32_t set_process_priority_class(process_t *cur, uint64_t h, uint64_t buf, uint64_t len)
+{
+    process_t *p;
+    kobject_t *o;
+    uint32_t cls;
+    uint64_t f;
+    unsigned pass, i;
+    thread_t *t;
+    int32_t st;
+    shz_nt_sched_projection_t projection;
+    shz_nt_sched_result_t result;
+    sched_policy_t policy;
+    if (len != sizeof cls) return STATUS_INFO_LENGTH_MISMATCH;
+    st = ipc_ref_process(cur, h, PROCESS_SET_INFORMATION, &p, &o);
+    if (st) return st;
+    if (copy_from_user(cur, &cls, buf, sizeof cls)) { ob_deref(o); return STATUS_ACCESS_VIOLATION; }
+    result = shz_nt_sched_from_win32(cls, 0, &projection);
+    if (result != SHZ_NT_SCHED_OK) {
+        ob_deref(o);
+        return result == SHZ_NT_SCHED_UNSUPPORTED ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+    }
+    f = irq_save();
+    if (!p || !p->used || p->object != o || p->terminated || p->teardown || p->exit_owner) {
+        st = STATUS_PROCESS_IS_TERMINATING;
+        goto out;
+    }
+    for (pass = 0; pass < 2; ++pass) {
+        for (i = 0; (t = thread_slot(i)) != 0; ++i) {
+            kobject_t *to = t->object;
+            if (t->proc != p || !to || to->type != OB_THREAD || to->u.thr.t != t ||
+                to->u.thr.pid != (uint64_t)p->pid || t->state == TS_FREE || t->state == TS_ZOMBIE || thread_must_die(t))
+                continue;                        /* kernel, unpublished, foreign or terminating thread */
+            result = shz_nt_sched_from_base_increment(cls, to->u.thr.nt_base_increment, &projection);
+            if (result != SHZ_NT_SCHED_OK || thread_get_sched_policy(t, &policy) ||
+                policy.priority >= SCHED_PRIORITY_LEVELS || !policy.quantum_ticks ||
+                policy.quantum_ticks > SCHED_MAX_QUANTUM_TICKS || policy.cpu_mask != 1) {
+                st = result == SHZ_NT_SCHED_UNSUPPORTED ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+                goto out;
+            }
+            if (pass) {
+                /* Pass 0 proves these native user TCBs are valid and their
+                 * quantum/mask are supported. IRQ exclusion keeps those
+                 * preconditions stable; the native setter cannot refuse. */
+                (void)thread_set_sched_policy(t, projection.absolute_priority, policy.quantum_ticks, policy.cpu_mask);
+                to->u.thr.last_sched_priority = projection.absolute_priority;
+            }
+        }
+    }
+    p->priority_class = cls;
+    st = STATUS_SUCCESS;
+out:
+    irq_restore(f);
+    ob_deref(o);
+    return st;
+}
+
 /* NtShzSetK32(ULONG class, HANDLE handle, PVOID buffer, ULONG length) */
 int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len)
 {
@@ -636,15 +696,7 @@ int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t
         irq_restore(f);
         return STATUS_SUCCESS;
     }
-    case K32S_PRIORITY_CLASS: {
-        process_t *p = proc_of_handle(cur, h);
-        uint32_t v;
-        if (!p) return STATUS_INVALID_HANDLE;
-        if (len < 4 || copy_from_user(cur, &v, buf, 4)) return STATUS_ACCESS_VIOLATION;
-        if (v != 0x40 && v != 0x4000 && v != 0x20 && v != 0x8000 && v != 0x80 && v != 0x100) return STATUS_INVALID_PARAMETER;
-        p->priority_class = v;
-        return STATUS_SUCCESS;
-    }
+    case K32S_PRIORITY_CLASS: return set_process_priority_class(cur, h, buf, len);
     case K32S_PROCESS_MEM_PRIORITY: case K32S_PROCESS_POWER: {
         process_t *p = proc_of_handle(cur, h);
         uint32_t v[2] = { 0, 0 };

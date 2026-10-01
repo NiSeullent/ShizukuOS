@@ -53,7 +53,10 @@ struct kobject {
         struct { int count, max; } sem;
         /* t is 0 once the exited thread was reclaimed (sched.c); the other fields then answer queries */
         struct { thread_t *t; int64_t exit_code; uint64_t tid; uint64_t pid;
-                 uint64_t create_tick, exit_tick, user_ticks, kernel_ticks, cycles; } thr;
+                 uint64_t create_tick, exit_tick, user_ticks, kernel_ticks, cycles;
+                 /* NT base increment is relative (including saturation +/-16).
+                  * The absolute native priority survives TCB reclamation. */
+                 int32_t nt_base_increment; uint32_t last_sched_priority; } thr;
         struct { void *sock; } net;         /* OB_SOCKET: sock_t * (net_sock.c) */
         struct { process_t *p; } proc;
         struct { void *file; uint32_t access; void *io; } file;   /* io: completion port / notification modes (ipc_io.c) */
