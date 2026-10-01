@@ -97,6 +97,22 @@ normal child exit and reaping. Keep the unchanged 20 GiB free-space floor,
 256 MiB private write limit and 16 MiB host output limit. Budget additional
 room for source closures, compiler outputs and ISO staging before allocation.
 
+Commit `d7220eb23da8b565b986c31e2a5125c163341d6e` connects the combined
+host-output guard to startup preparation and execution. The four fresh roots
+are the stage, consumer, run and unique bootstrap build. Only the exact private
+`run/windows-uefi.raw` is excluded; its existing FIEMAP/COW guard remains.
+Checks sample logical regular-file bytes at operation boundaries and resource
+polls; this is measured enforcement, not an atomic allocation quota. An observed
+overshoot remains FAIL after cleanup or rollback. Final receipt accounting
+includes the receipt itself. Root repeated all 38 runner and 22 startup tests,
+including an actual synthetic FAT INI rollback. Use `python3 -B` for both
+preparation and execution so module imports do not create caches outside these
+four roots. Historical v14 plans lack this source-bound budget and cannot be
+executed with the new wrapper. Generate a fresh plan and nonce, then select its
+actual SHA-256. The immutable source-test receipt SHA-256 is
+`f5fda36ba71d1e0e4ffeda2bfcf5f596ebe750b0cc2939206f32e64af2c2d362`.
+These 60 passing checks do not establish a new native trial result.
+
 A separate disk optimizer recovered exact allocated blocks without deleting
 originals, source/license trees or VM evidence. The latest bounded cache pass
 reclaimed 50,470,912 bytes; it is not credited with unrelated global free-space
@@ -124,5 +140,24 @@ actual browser processes timed out.
 Two offline data-URL controls also timed out with no DOM, isolating a local
 CLI failure before website access; the exact cause is unresolved. Preserve
 the historical Cloudflare block and the later local failure separately.
-Outside-host browser and new USB/ISO installation/publication acceptance remain
-pending. Preserve these results rather than calling the whole deployment PASS.
+The local Playwright control subsequently rendered all four routes with the
+installed Chrome 153. More importantly, actual GitHub-hosted Ubuntu 24.04 run
+[36883269900](https://github.com/NiSeullent/Win98-Modern/actions/runs/36883269900)
+checked main `ad7c8343a380e44ba48b77f98a4d5058dcdb7ca7` with installed Chrome
+154. All four browser routes passed: Korean/English ShizukuOS homepages, no
+challenge and no active VNC UI. Normal public DNS and certificate validation
+were used. The verifier explicitly selected the normal installed Chrome
+User-Agent; default HeadlessChrome identity was not tested. The actual run,
+revision, GitHub Actions runner group and `ubuntu-24.04` label were verified
+against the GitHub API. The original hosted receipt SHA-256 is
+`ff0611e9bdcbdc24e9a45a0e2cbb44c7e21f8d4cb9eef4c54d934a2428bebb93`;
+the independent root review SHA-256 is
+`4ecfea584bac4bfdc2cc01df430e0c4f4e94137b700e79afeace6d47b3aca222`.
+
+All four raw Python HTTP requests in that same run received HTTP 403, so the
+combined workflow correctly remained **FAIL**. Browser acceptance and raw
+HTTP acceptance are separate findings; do not change the failed receipt or
+relax its checks. No ISO was requested by this run. New USB/ISO installation,
+complete download verification and Windows 98 replacement acceptance remain
+pending. The public ShizukuOS name follows the integrated product design;
+ShizukuDOS still replaces MS-DOS in the required Windows 98 system.
