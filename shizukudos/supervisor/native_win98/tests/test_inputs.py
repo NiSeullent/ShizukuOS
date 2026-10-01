@@ -170,8 +170,12 @@ class InputTests(unittest.TestCase):
         config = self.root / "config"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(BUILDER.main(["--make-config", str(config)]), 0)
+        kernel32, kernel64 = self.root / "synthetic-kernel32", self.root / "synthetic-kernel64"
+        kernel32.write_bytes(b"synthetic Kernel32 input; not executable")
+        kernel64.write_bytes(b"synthetic Kernel64 input; not executable")
         args = []
-        for name, path in (("disk", disk), ("rom", rom), ("config", config)):
+        for name, path in (("disk", disk), ("rom", rom), ("config", config),
+                           ("kernel32", kernel32), ("kernel64", kernel64)):
             args += ["--" + name, str(path), "--" + name + "-sha256", BUILDER.file_sha(path)]
         output = io.StringIO()
         before = set(self.root.iterdir())
@@ -185,6 +189,21 @@ class InputTests(unittest.TestCase):
         with self.assertRaises(FileExistsError), contextlib.redirect_stdout(io.StringIO()):
             BUILDER.main(["--make-config", str(config)])
         self.assertEqual(config.read_bytes(), BUILDER.config_bytes())
+
+    def test_cli_missing_foundation_worker_refuses_before_private_reads(self):
+        # The actual publisher needs both real worker domains. A disk-only ESP
+        # must fail before media reads/copies, not later during native boot.
+        for absent in ('kernel32', 'kernel64'):
+            args = []
+            for name in ('disk', 'rom', 'config', 'kernel32', 'kernel64'):
+                if name != absent:
+                    args += ['--' + name, str(self.input), '--' + name + '-sha256', self.pin]
+            output = self.root / ('refused-' + absent)
+            with self.subTest(absent=absent), mock.patch.object(BUILDER, 'pinned_hash', side_effect=AssertionError('private read before required worker check')), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    BUILDER.main(args + ['--out', str(output), '--validate-only'])
+                self.assertEqual(error.exception.code, 2)
+                self.assertFalse(output.exists())
 
     def test_cli_missing_private_pins_refuses_without_output(self):
         output = self.root / "refused-output"

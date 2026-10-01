@@ -3,6 +3,8 @@
  * self-tests; keep serving other domains until the peer ends its session.
  */
 #include "k32.h"
+#include "service_policy.h"
+#include "../boot_profile/win98_foundation.h"
 
 extern volatile uint32_t ipc_session_end;
 extern void report_final(void);
@@ -12,7 +14,13 @@ void kmain(const shz_bootinfo_t *bi)
 {
     thread_t *server = 0;
     uint64_t waited_ms = 0;
+    int service_mode;
     if (bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR || bi->domain_id != SHZ_DOM_KERNEL32)
+        shz_exit(97);
+    service_mode = shz_win98_foundation_policy(bi);
+    if (!service_mode)
+        service_mode = k32_boot_service_mode(bi); /* reviewed earlier native profile */
+    if (service_mode < 0)
         shz_exit(97);
     arch_init();
     kprintf("%s: Protected Mode kernel starting, %u MiB RAM, tsc %u kHz\n", KVER, (uint32_t)(bi->ram_size >> 20),
@@ -25,6 +33,25 @@ void kmain(const shz_bootinfo_t *bi)
         ipc_init(bi);
         server = thread_create("ipc-server", ipc_server_thread, 0);
         KASSERT(server);
+    }
+    if (service_mode) {
+        KASSERT(server);
+        kprintf("%s: native Win98 component service active; QA session limits disabled\n", KVER);
+        for (;;) {
+            hcreg_t state = SHZ_DS_UNUSED;
+            const long status = shz_hcall(SHZ_HC_DOMAIN_STATE, SHZ_DOM_WIN98, 0, &state);
+            if (status != SHZ_OK)
+                shz_exit(98);
+            if (state == SHZ_DS_EXITED) {
+                kprintf("%s: Win98 owner exited; component service stopping\n", KVER);
+                shz_exit(0);
+            }
+            if (state == SHZ_DS_FAILED)
+                shz_exit(1);
+            if (state != SHZ_DS_RUNNABLE && state != SHZ_DS_WAITING)
+                shz_exit(98);
+            thread_sleep_ms(100);
+        }
     }
     run_self_tests(bi);
     if (server) {

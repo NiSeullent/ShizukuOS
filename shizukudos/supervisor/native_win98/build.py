@@ -247,7 +247,7 @@ def validate_contents(name, fd):
 
 
 def source_files():
-    files = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi")
+    files = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi", "shizukudos/boot_profile")
              for p in (ROOT / folder).rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld", ".py")}
     files.update(ROOT / p for p in ("shizukudos/tools/shzlib.py", "shizukudos/kernel64/standalone/memholes.h"))
     # The ordinary Supervisor payload links the existing CSMWrap glyph source.
@@ -341,9 +341,9 @@ def main(argv=None):
             stream.write(config_bytes())
         print(json.dumps({"config": str(path), "bytes": 16, "sha256": file_sha(path)}))
         return 0
-    required = ("disk", "rom", "config")
+    required = ("disk", "rom", "config", "kernel32", "kernel64")
     if any(not getattr(args, name) or not getattr(args, name + "_sha256") for name in required):
-        parser.error("explicit disk, ROM, config and each SHA-256 are required")
+        parser.error("explicit disk, ROM, config, Kernel32, Kernel64 and each SHA-256 are required for the native Win98 foundation")
     if args.win64_img and not args.kernel64:
         parser.error("WIN64.IMG requires an explicit Kernel64 input")
     sizes = {"disk": DISK_BYTES, "rom": ROM_BYTES, "config": 16}

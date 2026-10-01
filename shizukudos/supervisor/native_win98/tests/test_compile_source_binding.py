@@ -30,7 +30,7 @@ class CompileSourceBindingTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "copied-source"
         # Copy public source only; no binaries, media, build outputs or .git.
         suffixes = {".c", ".h", ".asm", ".ld", ".py"}
-        sources = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi")
+        sources = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi", "shizukudos/boot_profile")
                    for p in (ROOT / folder).rglob("*") if p.is_file() and p.suffix in suffixes}
         sources.update(ROOT / p for p in (*GLYPHS, "shizukudos/tools/shzlib.py",
                                          "shizukudos/kernel64/standalone/memholes.h"))
@@ -123,6 +123,8 @@ class CompileSourceBindingTests(unittest.TestCase):
         error, result = self.compile_control()
         self.assertIsNone(error)
         self.assertEqual(result["status"], "PASS_NATIVE_SUPERVISOR_COMPONENT_COMPILE_NOT_RUN")
+        self.assertIn("shizukudos/boot_profile/win98_foundation.h", result["sources_sha256"])
+
         self.assertTrue(result["source_before_after_match"])
         self.assertEqual(result["commands"], [["mock-build-boundary", "payload"],
                                               ["mock-build-boundary", "loader"]])
@@ -140,6 +142,9 @@ class CompileSourceBindingTests(unittest.TestCase):
 
     def test_existing_video_source_mutation_is_rejected(self):
         self.assert_mutation_fails("shizukudos/supervisor/src/video.c")
+
+    def test_foundation_policy_mutation_is_rejected(self):
+        self.assert_mutation_fails("shizukudos/boot_profile/win98_foundation.h")
 
     def test_cp437_implementation_mutation_is_rejected(self):
         self.assert_mutation_fails(GLYPHS[0])
