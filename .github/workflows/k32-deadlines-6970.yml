@@ -9,12 +9,16 @@ name: Kernel32 finite deadline host proof
       - .github/workflows/k32-deadlines-6970.yml
       - shizukudos/tests/test_sched_deadlines_k32.c
       - shizukudos/tests/test_sched_deadlines_k32.py
-      - shizukudos/kernel32/sched.c
-      - shizukudos/kernel32/k32.h
-      - shizukudos/kernel32/start.asm
-      - shizukudos/kcommon/khc.h
-      - shizukudos/abi/shz_abi.h
-      - shizukudos/abi/shz_sched_deadline.h
+      - shizukudos/tests/build_k32_deadlines_6970.py
+      - shizukudos/kernel32/**
+      - shizukudos/kcommon/**
+      - shizukudos/abi/*.h
+      - shizukudos/kbuild.py
+      - shizukudos/tools/shzlib.py
+      - shizukudos/kernel64/standalone/boot32.c
+      - shizukudos/kernel64/standalone/boot_pm.asm
+      - shizukudos/kernel64/standalone/boot.ld
+      - shizukudos/kernel64/standalone/memholes.h
   workflow_dispatch:
 
 permissions:
@@ -110,4 +114,94 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
               stream.write(f"Kernel32 production C verdict: {result['result']}\n\n")
               stream.write('HOST hardware-boundary fixture; actual Windows98/VMM, assembly switching and full counter rollover remain unverified.\n')
+          PYTHON
+
+  build-i486:
+    needs: deadlines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the exact combined source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Bind exact revision and fresh i486 build proof
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import os, re, subprocess
+          root = Path.cwd().resolve()
+          expected = os.environ['GITHUB_SHA']
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert re.fullmatch(r'[0-9a-f]{40}', expected) and actual == expected
+          run_id = os.environ['GITHUB_RUN_ID']
+          attempt = os.environ['GITHUB_RUN_ATTEMPT']
+          assert run_id.isdigit() and attempt.isdigit()
+          proof = root / 'build/k32-build-6970' / f'actions-{run_id}-{attempt}'
+          assert not proof.exists()
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write(f'PMA_K32_BUILD_PROOF={proof}\n')
+          print(f'Exact combined checkout {actual}; build proof {proof}')
+          PYTHON
+
+      - name: Compile and link actual i486 Kernel32 profiles under resource guards
+        run: |
+          python3 -B shizukudos/tests/build_k32_deadlines_6970.py --output-root "$PMA_K32_BUILD_PROOF"
+
+      - name: Record bounded build receipt without publishing binaries
+        if: always()
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import hashlib, json, os, stat
+          root = Path.cwd().resolve()
+          value = os.environ.get('PMA_K32_BUILD_PROOF')
+          if not value:
+              print('Build proof setup did not finish; no result adopted.')
+              raise SystemExit(0)
+          proof = Path(value)
+          assert proof.parent == root / 'build/k32-build-6970'
+          receipt = proof / 'result.json'
+          if not receipt.exists():
+              print('No build receipt; no compiled or executed result adopted.')
+              raise SystemExit(0)
+          assert not receipt.is_symlink()
+          info = receipt.stat()
+          assert stat.S_ISREG(info.st_mode) and info.st_size <= 131072
+          data = receipt.read_bytes()
+          result = json.loads(data)
+          print('Build receipt SHA256:', hashlib.sha256(data).hexdigest())
+          print(data.decode(), end='')
+          incomplete_failure = (
+              set(result) == {'result', 'receipt_accounting_verified', 'error'}
+              and result['result'] == 'FAIL'
+              and result['receipt_accounting_verified'] is False
+              and isinstance(result['error'], str)
+          )
+          if incomplete_failure:
+              print('Incomplete build failure receipt; no success adopted.')
+          else:
+              assert result['native_execution_verified'] is False
+              assert result['windows98_integration_verified'] is False
+              assert result['guest_boot_verified'] is False
+          budget = 131072
+          for path in sorted(proof.glob('command-*.stderr')):
+              assert not path.is_symlink() and path.stat().st_size <= 524288
+              if path.stat().st_size:
+                  assert path.stat().st_size <= budget
+                  budget -= path.stat().st_size
+                  print(f'Actual {path.name}:')
+                  print(path.read_text(), end='')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f"Actual i486 build verdict: {result['result']}\n\n")
+              stream.write('Compile/link and ELF structure only; guest/Windows98/VMM execution remain unverified.\n')
           PYTHON
