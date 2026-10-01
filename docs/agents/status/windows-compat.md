@@ -203,3 +203,33 @@ that fix; the three new fixture groups will make the complete suite 16 groups.
 This receipt correction adds source attribution evidence, with no new claim of
 Windows loading, real VMM calls or a positive Supervisor/PMA round trip. No Git
 index or commit mutation was performed by this lead.
+
+## Receipt follow-up — manifest capture and initial snapshot
+
+Independent fd5c commit `04fb9dfd968b0d0c0f6a798cde1d13ab0acac2cc`
+identified a separate capture race. The driver parsed the manifest from one read
+and then hashed its path in the initial snapshot. A persistent replacement
+between those operations could bind the receipt to different bytes than those
+used to select and validate its build inputs.
+
+An additional fixture replaces only a private manifest immediately after its
+first read, adding an external dependency present only in the replacement. RED
+on the previously reviewed driver: exit **0**, `passed: true` and
+`inputs_unchanged_during_test: true`. The new assertion correctly failed;
+`build/pma-win98-vxd-receipt-binding/manifest-capture-red.log` preserves it.
+
+The narrow correction captures manifest bytes once, parses those bytes and
+compares their SHA-256 to the initial snapshot before dependency discovery or
+the test child. The compiler-derived closure, external initial/final hashes and
+previous-receipt archive remain intact. The fixture requires refusal before any
+compiler scan or test subprocess and before publishing a receipt. It adapts the
+independent capture scenario to the existing copied-project fixtures rather
+than replacing the newer driver with fd5c's earlier manifest-only variant.
+
+Fresh bounded `SourceStabilityTests` command above: exit **0**, **4 tests, OK**.
+The original unchanged/header/nested-include/archive cases remain green alongside
+the controlled manifest replacement. Actual ABI-header hashes match before and
+after. GREEN log and source evidence are saved as `manifest-capture-green.log`
+and `manifest-capture-green.json` in the same output directory. The full suite's
+current source has the original 13 VxD groups plus these four receipt groups;
+combined full acceptance remains root's responsibility after source integration.

@@ -2,7 +2,9 @@
 SPDX-License-Identifier: GPL-2.0-only
 """
 import importlib.util
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -13,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = Path(__file__).resolve().parents[1]
 BUILD = Path(os.environ.get('NTWV_HOST_TEST_OUT',str(HERE/'build'))).resolve()
@@ -118,6 +121,59 @@ class SourceStabilityTests(unittest.TestCase):
             history=root/report['previous_receipt_directory']
             self.assertEqual((history/'host-tests.json').read_bytes(),previous)
             self.assertEqual((history/'host-tests.log').read_bytes(),log)
+
+    def test_receipt_rejects_manifest_replacement_after_parse_capture(self):
+        with tempfile.TemporaryDirectory(prefix='ntwv-receipt-manifest-') as folder:
+            root=Path(folder)
+            vxd,out=self.prepare_fixture(root)
+            manifest_path=out/'manifest.json'
+            replacement=json.loads(manifest_path.read_bytes())
+            new_source='shizukudos/abi/replacement_manifest_input.h'
+            (root/new_source).write_bytes(b'/* declared only by replacement manifest */\n')
+            replacement['sources'][new_source]=hashlib.sha256((root/new_source).read_bytes()).hexdigest()
+            replacement_bytes=json.dumps(replacement).encode()
+            spec=importlib.util.spec_from_file_location('ntwv_manifest_fixture',vxd/'test.py')
+            runner=importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(runner)
+            read_text,read_bytes=Path.read_text,Path.read_bytes
+            real_run=subprocess.run
+            replaced=False
+            calls=[]
+
+            def after_read(path,data):
+                nonlocal replaced
+                if path==manifest_path and not replaced:
+                    manifest_path.write_bytes(replacement_bytes)
+                    replaced=True
+                return data
+
+            def captured_text(path,*args,**kwargs):
+                return after_read(path,read_text(path,*args,**kwargs))
+
+            def captured_bytes(path,*args,**kwargs):
+                return after_read(path,read_bytes(path,*args,**kwargs))
+
+            def tracked_run(command,**kwargs):
+                calls.append(command)
+                return real_run(command,**kwargs)
+
+            with mock.patch.object(Path,'read_text',captured_text), \
+                 mock.patch.object(Path,'read_bytes',captured_bytes), \
+                 mock.patch.object(runner.subprocess,'run',tracked_run), \
+                 mock.patch.object(sys,'argv',[str(vxd/'test.py'),'--out',str(out)]), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    status=runner.main()
+                except SystemExit as error:
+                    status=error.code
+            self.assertTrue(replaced)
+            report_path=out/'host-tests.json'
+            report=json.loads(report_path.read_bytes()) if report_path.is_file() else {}
+            self.assertIsInstance(status,str,{'status':status,'passed':report.get('passed'),
+                                  'inputs_unchanged_during_test':report.get('inputs_unchanged_during_test')})
+            self.assertIn('Build manifest changed',status)
+            self.assertEqual(calls,[],'No compiler dependency scan or test child may run after manifest capture drift')
+            self.assertFalse(report_path.exists())
 
 class VxDTests(unittest.TestCase):
     @classmethod

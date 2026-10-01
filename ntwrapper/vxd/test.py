@@ -104,7 +104,9 @@ def main():
     BUILD=args.out.resolve()
     if BUILD!=(HERE/'build').resolve() and (BUILD==(ROOT/'build').resolve() or not BUILD.is_relative_to((ROOT/'build').resolve())):
         parser.error('--out must be the normal build directory or a component directory under project build/')
-    manifest = json.loads((BUILD/'manifest.json').read_text())
+    manifest_path = BUILD/'manifest.json'
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
     paths = {p for p in HERE.rglob('*') if p.is_file() and
              'build' not in p.relative_to(HERE).parts and
              '__pycache__' not in p.relative_to(HERE).parts}
@@ -113,8 +115,10 @@ def main():
     # change during dependency discovery cannot acquire a later initial hash.
     paths.update((HERE.parent/'core.c', HERE.parent/'include/ntwrapper.h',
                   ROOT/'shizukudos/abi/shz_abi.h', ROOT/'shizukudos/abi/shz_ipc.h',
-                  BUILD/'NTWRAP9X.VXD', BUILD/'NTWRAP9X.elf', BUILD/'NTWQUERY.EXE', BUILD/'manifest.json'))
+                  BUILD/'NTWRAP9X.VXD', BUILD/'NTWRAP9X.elf', BUILD/'NTWQUERY.EXE', manifest_path))
     before = {str(p.relative_to(ROOT)): digest(p) for p in sorted(paths)}
+    if before[str(manifest_path.relative_to(ROOT))] != hashlib.sha256(manifest_bytes).hexdigest():
+        raise SystemExit('Build manifest changed; rebuild before testing')
     for name, expected in manifest['sources'].items():
         if before[str(project_source(name).relative_to(ROOT))] != expected:
             raise SystemExit('Build inputs changed; rebuild before testing: '+name)
