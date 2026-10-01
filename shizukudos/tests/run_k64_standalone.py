@@ -6,6 +6,13 @@ Profile: QEMU -kernel (Multiboot stub) -> Kernel64 (SHZ_STANDALONE: hypercalls s
 -> self-tests, then the Win64 apps from WIN64.IMG. This exercises Kernel64, the PE32+ loader and the user-mode
 ntdll/kernel32 for real. It does NOT exercise the Supervisor, VMX, EPT or multi-domain IPC (those need Intel VMX
 in L1 and are covered by supervisor/test_qemu.py on a VMX host).
+
+--display controls the emulated device while the host display stays disabled:
+  none (default): no graphics device under -nodefaults.
+  bochs: -device VGA (QEMU's standard VGA with the Bochs VBE interface).
+  virtio: -device virtio-vga (virtio GPU in 2D mode, without virgl).
+All guest checks still run for every choice. This standalone profile does not
+prove an actual Windows 98 boot, Supervisor integration or SMP operation.
 """
 import argparse
 import json
@@ -23,6 +30,9 @@ from shzlib import BUILD  # noqa: E402
 
 K64S = BUILD / "kernel64s"
 WIN64 = BUILD / "win64"
+DISPLAY_DEVICES = {"none": None, "bochs": "VGA", "virtio": "virtio-vga"}
+PROFILE_SCOPE = ("Standalone Kernel64 and WIN64.IMG component regression only; "
+                 "no actual Windows 98 boot, Supervisor/VMX/EPT integration, SMP or pixel-output proof")
 
 
 def check(name, ok, detail=""):
@@ -138,6 +148,9 @@ def main():
     ap.add_argument("--accel", choices=("auto", "kvm", "tcg"), default="auto")
     ap.add_argument("--timeout", type=int, default=240)
     ap.add_argument("--memory", default="256")
+    ap.add_argument("--display", choices=tuple(DISPLAY_DEVICES), default="none",
+                    help="emulated display: none (default), bochs (-device VGA), or virtio "
+                         "(-device virtio-vga, 2D); host display remains disabled; all guest checks run")
     ap.add_argument("--out", default=str(BUILD / "kernel64s" / "run"))
     args = ap.parse_args()
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
@@ -152,6 +165,14 @@ def main():
     cmd = [args.qemu, "-machine", "pc", "-accel", accel, "-cpu", "max", "-m", args.memory, "-nodefaults", "-display", "none",
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}", "-serial", f"file:{serial_path}",
            "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot"]
+    display_device = DISPLAY_DEVICES[args.display]
+    if display_device is not None:
+        cmd.extend(["-device", display_device])
+    display = {"backend": args.display, "qemu_device": display_device, "host_display": "none"}
+    inputs = {name: {"path": str(path.resolve()), "sha256_before": shzlib.sha256_file(path)}
+              for name, path in (("stub", stub), ("kernel", kernel), ("win64_image", initrd))}
+    shzlib.write_json(out / "inputs-before.json", {"scope": PROFILE_SCOPE, "display": display,
+                      "inputs": inputs, "command": cmd, "timeout_seconds": args.timeout, "utc": shzlib.utc_now()})
     started = time.time()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
@@ -165,10 +186,20 @@ def main():
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     ev, exit_code = parse(serial)
     checks = evaluate(serial, ev, exit_code, proc.returncode, memory=args.memory)
+    for name, artifact in inputs.items():
+        try:
+            artifact["sha256_after"] = shzlib.sha256_file(artifact["path"])
+        except OSError as exc:
+            artifact["sha256_after"] = None
+            artifact["error_after"] = str(exc)
+        artifact["unchanged"] = artifact["sha256_before"] == artifact["sha256_after"]
+        checks.append(check(f"{name} input SHA-256 unchanged after QEMU", artifact["unchanged"],
+                            f"before={artifact['sha256_before']} after={artifact['sha256_after']}"))
     if timed_out:
         checks.insert(0, check("run finished before the timeout", False, f"{args.timeout}s, accel={accel}"))
     status = "PASS" if all(x["status"] == "PASS" for x in checks) else "FAIL"
     record = {"profile": "kernel64-standalone (no Supervisor, no VMX)", "accel": accel, "status": status, "checks": checks,
+              "scope": PROFILE_SCOPE, "display": display, "inputs": inputs, "timeout_seconds": args.timeout,
               "seconds": round(time.time() - started, 1), "evidence": {str(k): hex(v) for k, v in sorted(ev.items())},
               "command": cmd, "qemu_output": qemu_out[-1500:], "serial_tail": serial[-4000:], "utc": shzlib.utc_now(),
               "git": shzlib.git_state()}
