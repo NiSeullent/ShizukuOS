@@ -322,6 +322,22 @@ def stopped_observation(runner, cow, state, disk):
             "owned_writer_stopped": child is None or child.poll() is not None}
 
 
+def acquire_native_lock(stream, wait_seconds):
+    """Wait in bounded short intervals; never touch the current lock owner's VM."""
+    if not 0 <= wait_seconds <= 1200:
+        raise ConsumerError("Native lock wait must be between zero and 1200 seconds")
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ConsumerError("Native guest lane remained busy through the selected wait bound")
+            time.sleep(min(0.2, remaining))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--peer-root", type=Path, required=True)
@@ -329,8 +345,11 @@ def main(argv=None):
     for name in ("canonical", "adapter", "cow"):
         parser.add_argument("--" + name + "-sha256", required=True)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--lock-wait-seconds", type=int, default=0)
     parser.add_argument("native", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if not 0 <= args.lock_wait_seconds <= 1200:
+        parser.error("Native lock wait must be between zero and 1200 seconds")
     native = args.native[1:] if args.native[:1] == ["--"] else args.native
     trial, native = native_arguments(native)
     peer, consumer, destination = validate_paths(trial, args.peer_root, args.consumer_dir)
@@ -341,6 +360,7 @@ def main(argv=None):
                "private_runner": {"path": str(private), "sha256": digest(private.read_bytes())},
                "native_arguments": native, "run_directory": str(destination),
                "execute_requested": args.execute, "vm_started": False,
+               "lock_wait_bound_seconds": args.lock_wait_seconds, "native_lock_acquired": False,
                "native_theme_acceptance": "not-established", "visual_review_required": True,
                "adapter_functions": list(FUNCTIONS), "io_sys_entry_adapter_executed": False,
                "allocation_scope": "net exclusive FIEMAP file data; metadata/staging excluded; independent free-space floor"}
@@ -356,7 +376,11 @@ def main(argv=None):
         if not lock_path.is_file():
             raise ConsumerError("Shared native guest lock must already exist")
         lock_stream = lock_path.open("rb")
-        fcntl.flock(lock_stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        receipt["status"] = "WAITING-FOR-NATIVE-LANE"
+        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+        acquire_native_lock(lock_stream, args.lock_wait_seconds)
+        receipt.update(status="PREPARING", native_lock_acquired=True)
+        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
         runner, cow, state = configure_runner(private, Path(frozen["cow"]["frozen"]), functions, peer)
         original_argv = sys.argv
         try:

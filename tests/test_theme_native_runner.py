@@ -69,6 +69,32 @@ class NativeArguments(unittest.TestCase):
             consumer.native_arguments(arguments() + ["--accel", "tcg"])
 
 
+class NativeLock(unittest.TestCase):
+    def test_busy_lane_times_out_without_touching_the_owner(self):
+        # Separate opens of one file exercise actual flock ownership.
+        with tempfile.NamedTemporaryFile() as file, open(file.name, 'rb') as contender:
+            consumer.fcntl.flock(file, consumer.fcntl.LOCK_EX | consumer.fcntl.LOCK_NB)
+            with self.assertRaisesRegex(consumer.ConsumerError, 'remained busy'):
+                consumer.acquire_native_lock(contender, 0)
+            consumer.fcntl.flock(file, consumer.fcntl.LOCK_UN)
+            consumer.acquire_native_lock(contender, 0)
+
+    def test_released_lane_can_be_acquired_after_bounded_wait(self):
+        calls = Mock(side_effect=[BlockingIOError(), None])
+        with patch.object(consumer.fcntl, 'flock', calls), patch.object(consumer.time, 'sleep') as sleep:
+            consumer.acquire_native_lock(Mock(), 1)
+        self.assertEqual(calls.call_count, 2)
+        sleep.assert_called_once()
+        self.assertLessEqual(sleep.call_args.args[0], 0.2)
+
+    def test_invalid_wait_bound_fails_before_lock_access(self):
+        with patch.object(consumer.fcntl, 'flock') as lock:
+            for bound in (-1, 1201):
+                with self.assertRaises(consumer.ConsumerError):
+                    consumer.acquire_native_lock(Mock(), bound)
+        lock.assert_not_called()
+
+
 class FrozenSources(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
