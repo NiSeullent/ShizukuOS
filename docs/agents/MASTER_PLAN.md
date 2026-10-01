@@ -90,6 +90,7 @@
 - [x] Commit reviewed partial NT runtime consumer ad6fdfa;3348 host checks per compiler, seven real units, targeted320-input ntdll/kernel32 link and actual321/0 API guest execution verified. Preserve whole API guest FAIL from earlier PMA useful work361<1000.
 - [x] Correct omitted pe_parse.h in899bf2e;217 real C dependency units plus independent header and omitted-C controls pass. Preserve old213 strict-build failure and qualification of historical212 maps.
 - [x] Verify distinct ROOT214-source frozen four-profile build, focused11/35 PMA, K32 nine-check and full38/38 historical-archive guest with151 app exits and48 total service checks.
+- [x] Collect one independently reviewed bounded spinner diagnostic:602/605 records,320 paired IRQ/tick entries,1241 stable inputs. Preserve original361 FAIL and two later diagnostic failures; no production acceptance or inferred original cause.
 - [ ] Diagnose and close the distinct current-DLL API guest's earlier PMA useful-work failure without relaxing thresholds or exit gates; passing historical-archive regression does not close it.
 - [x] Run host ABI/VxD/display/kernel/firmware and production PMA service/ring gates; retain source hashes and actual scope.
 - [x] Publish tested commit SHAs, exact receipts and blockers in shared peer coordination mailboxes; continue exchange for subsequent units.
