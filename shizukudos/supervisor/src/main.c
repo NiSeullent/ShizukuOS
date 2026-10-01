@@ -8,6 +8,7 @@
 #include "domain.h"
 #include "platform.h"
 #include "vbios_image.h"
+#include "../native_win98/win98.h"
 
 static void print_caps(const shz_caps_t *c)
 {
@@ -60,6 +61,10 @@ void sup_main(shz_info_t *info)
     info->host_cr0 = read_cr0();
     info->host_cr4 = read_cr4();
 
+    if (info->loader_flags & SHZ_LOADER_NATIVE_WIN98) {
+        if (win98_domain_create(info, &caps))
+            platform_fail(info, info->last_error[0] ? info->last_error : "Win98 domain creation failed");
+    } else {
     if (dos_domain_create(info, &caps, vbios_image, sizeof vbios_image))
         platform_fail(info, info->last_error[0] ? info->last_error : "DOS16 domain creation failed");
     kprintf("SHZ: DOS16 domain created: %llu MiB RAM at %llx, RAM disk %llu KiB at %llx\n",
@@ -67,6 +72,7 @@ void sup_main(shz_info_t *info)
     info->domains[SHZ_DOM_DOS16].kind = DK_DOS16;
     info->domains[SHZ_DOM_DOS16].generation = 1;
     info->domains[SHZ_DOM_DOS16].state = SHZ_DS_RUNNABLE;
+    }
     rc = kernel_domain_create(info, &caps, DK_KERNEL32);
     if (rc < 0)
         platform_fail(info, info->last_error);

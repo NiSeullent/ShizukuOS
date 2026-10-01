@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Boot matrix of the Windows 98 Shizuku Second Edition media in QEMU.
+"""Component diagnostic boot matrix of ShizukuOS development media in QEMU.
 
 Cells: {SeaBIOS, OVMF} x {ISO as CD, ISO as hard disk (the USB-stick case: the
 same bytes written raw), raw disk image}. In every cell each boot-menu entry is
@@ -12,21 +12,12 @@ letter + Enter), and judged only from host-side evidence:
             T_HELLO checks) and, in addition, every other T_*.EXE listed in the
             win64 build receipt's WIN64.IMG archive reported
             "K64 win64 app: <name> exit=0 faulted=0" (tests.c runs them all).
-  dos16     SHZ-EXIT:0 on COM1, then guest memory over QMP: memdisk's mBFT
+  dos16     normal DOS10 startup and actual PS/2 commands, then guest memory
+            over QMP: memdisk's mBFT
             table (ACPI-style checksum) in conventional memory gives the
             address and size of the live RAM disk; those bytes are carved out
-            and judged by shizukudos/dos16/verify.py (RESULT.TXT, T_COM.OUT,
-            T_EXE.OUT byte-exact) plus the DOS16 banner in the text page.
-  shzdos01  the ShizukuDOS 0.1 prompt "A:\\>" on COM1, then DIR lists
-            NTW32.DLL, NTWRAP9X.VXD and NTWGPROB.EXE and the prompt returns.
-  install   one row: boot the medium's Install entry (I) with a blank 512 MiB disk
-            on AHCI port 0 (the medium on port 1), SHZSETUP installs unattended and
-            powers off; the written disk is checked on the host by agent I1's
-            shizukudos/install/tests/verify_disk.py against the payload the medium
-            ships; then the installed disk alone boots on OVMF (S3 on: boot manager,
-            BOOT.INI mode = kernel64 -> Kernel64 direct) and on SeaBIOS (GPT
-            protective MBR -> the ESP's syslinux -> mboot.c32 -> Kernel64); both must
-            finish Kernel64's self-tests with SHZ-EXIT:0.
+            and checked for exact guest-created file bytes and a permanent
+            prompt. This RAM disk does not persist after QEMU exits.
   k64direct OVMF only: key K at the UEFI boot manager menu (not the legacy menu).
             Kernel64 direct boot, no CSM: the same Kernel64 evidence as above
             through shizukudos/supervisor/test_bootmgr.py's k64_checks (loader
@@ -50,6 +41,9 @@ written), isa-debug-exit (Kernel64 ends the VM). Evidence per run under
 build/shizuku-se-matrix/<run>/<firmware>-<medium>-<entry>/ (serial.log,
 result.json); matrix.json and matrix.md summarise the run.
 QEMU is a development tool; nothing here is a claim about real hardware.
+The production desktop uses run_k64_desktop.py; interactive installation uses
+test_shizukuos_installer_vm.py. This matrix does not establish Windows 98
+startup or required modern application compatibility.
 """
 from __future__ import annotations
 
@@ -78,15 +72,17 @@ import qemu as qemu_tools  # noqa: E402
 import run_k64_standalone as k64check  # noqa: E402
 import shzlib  # noqa: E402
 import verify as dos16verify  # noqa: E402
+import fatimg  # noqa: E402
+import test_user_boot as dos10boot  # noqa: E402
 
 BUILD = ROOT / "build"
-DEFAULT_ISO = BUILD / "windows98-shizuku-second-edition.iso"
-DEFAULT_DISK = BUILD / "windows98-shizuku-second-edition-disk.img"
+DEFAULT_ISO = BUILD / "shizukuos-1.0.0-development.iso"
+DEFAULT_DISK = BUILD / "shizukuos-development-disk.img"
 OUT = BUILD / "shizuku-se-matrix"
 WIN64_RECEIPT = BUILD / "shizukudos" / "win64" / "build-result.json"
 FIRMWARES = ("seabios", "ovmf")
 MEDIA = ("iso-cd", "iso-hdd", "disk", "iso-usb")  # iso-usb (xHCI mass storage) is optional, not in the default set
-ENTRIES = ("kernel64", "dos16", "shzdos01", "k64direct", "install")  # install: only on media built with SHZSETUP
+ENTRIES = ("kernel64", "dos16", "k64direct")
 INSTALL_TARGET_MIB = 512
 UEFI_ONLY = {"k64direct"}
 UEFI_MENU = b"Shizuku boot manager menu: press a key"
@@ -458,13 +454,16 @@ def judge_dos16(qmp, run_dir: Path, pristine: bytes, keep: bool) -> tuple[list[d
     info["ramdisk_sha256"] = shzlib.sha256_bytes(data)
     checks.append(check("RAM disk sector 0 == the image's MBR (it is the DOS16 disk)", data[:512] == pristine[:512]))
     checks.append(check("RAM disk differs from the pristine image (the guest wrote its results)", data != pristine))
-    more, text = dos16verify.verify_disk(disk)
-    checks += [dict(c, check=f"dos16/verify.py: {c['check']}") for c in more]
-    info["result_txt"] = text
+    payload = fatimg.read_bytes(fatimg.partition_spec(disk), "USER.OK")
+    checks.append(check("actual DOS10 RAM-disk file matches PS/2-selected bytes",
+                        payload == b"DOS10-MATRIX-FILE\r\n", repr(payload)))
+    info["guest_file_sha256"] = shzlib.sha256_bytes(payload)
+    info["persists_after_vm_exit"] = False
     screen = qemu_tools.decode_text_page(qemu_tools.read_guest_memory(qmp, 0xB8000, 4000, run_dir / "b8000.bin"))
     (run_dir / "b8000.bin").unlink(missing_ok=True)
     (run_dir / "screen.txt").write_text("\n".join(screen) + "\n")
-    checks += [dict(c, check=f"dos16/verify.py: {c['check']}") for c in dos16verify.verify_screen(screen)]
+    checks += [check("actual permanent DOS10 shell prompt visible", any("SHZC:\\>" in row for row in screen)),
+               check("TYPE displayed the actual guest-created file", any("DOS10-MATRIX-FILE" == row for row in screen))]
     if not keep:
         disk.unlink(missing_ok=True)
     return checks, info
@@ -477,19 +476,21 @@ def stutter(literal: str) -> str:
     return "".join(re.escape(ch) + "+" for ch in literal)
 
 
-def boot_path_checks(firmware: str, medium: str, entry: str, text: str, command: list[str]) -> list[dict]:
+def boot_path_checks(firmware: str, medium: str, entry: str, text: str, command: list[str], policy=None) -> list[dict]:
     banner = "SYSLINUX 6.04" if medium == "disk" else "ISOLINUX 6.04"
     if firmware == "seabios":
         return [check("legacy BIOS: QEMU's SeaBIOS (no UEFI flash in the command line)",
                       not any("pflash" in c for c in command)),
                 check(f"legacy BIOS: {banner} started from the medium", banner in text)]
+    policy = policy or {"mode": "auto", "menu_timeout": 5}
+    mode, timeout = policy["mode"], policy["menu_timeout"]
     steps = [("OVMF BDS starts the medium's UEFI boot option",
               r"BdsDxe: starting Boot\w+ \"UEFI (QEMU (DVD-ROM|HARDDISK)|QEMU QEMU USB HARDDRIVE)"),
              ("\\EFI\\BOOT\\BOOTX64.EFI = the Shizuku loader started", r"Supervisor loader \(UEFI x64\)"),
-             ("boot manager read \\EFI\\SHIZUKU\\BOOT.INI: mode=auto, menu_timeout=5",
-              r"Boot manager: \\EFI\\SHIZUKU\\BOOT\.INI mode=auto, csm_path=\\EFI\\SHIZUKU\\CSMWRAP\.EFI, "
-              r"auto_kernel64=no, menu_timeout=5"),
-             ("boot manager menu shown", r"Shizuku boot manager menu: press a key within 5 seconds")]
+             (f"boot manager read recorded policy: mode={mode}, menu_timeout={timeout}",
+              r"Boot manager: \\EFI\\SHIZUKU\\BOOT\.INI mode=" + re.escape(mode) +
+              r", csm_path=\\EFI\\SHIZUKU\\CSMWRAP\.EFI, auto_kernel64=no, menu_timeout=" + str(timeout)),
+             ("boot manager menu shown", r"Shizuku boot manager menu: press a key within " + str(timeout) + r" seconds")]
     if entry == "k64direct":
         steps += [("key K typed on COM1 chose Kernel64 direct", r"Boot manager menu: key 'K': mode=kernel64 for this boot"),
                   ("Kernel64 direct boot started, no CSM", r"Kernel64 direct boot \(mode=kernel64\)"),
@@ -497,10 +498,8 @@ def boot_path_checks(firmware: str, medium: str, entry: str, text: str, command:
                    r"ExitBootServices done \(0x[0-9a-f]+ call\(s\)\); Kernel64 RAM \[0, 0x[0-9a-f]+\); "
                    r"0x[0-9a-f]+ firmware hole\(s\) handed over at 0x6000")]
     else:
-        steps += [("no key: BOOT.INI policy followed", r"Boot manager menu: no key within 5 seconds; BOOT.INI mode=auto\."),
-                  ("no usable virtualization backend under TCG", r"Supervisor profile not available: "),
-                  ("boot manager chose the CSM legacy boot",
-                   r"CSM legacy boot \(mode=auto, no usable virtualization backend\)"),
+        steps += [("key C typed on COM1 selected the CSM path", r"Boot manager menu: key 'C': mode=csm for this boot"),
+                  ("boot manager chose the explicitly selected CSM legacy boot", r"CSM legacy boot \(mode=csm\)"),
                   ("CSMWrap BIOS proxy on a reserved AP", stutter("BIOS proxy ready (AP ") + r"\d+\)+"),
                   ("CSMWrap boot device = the controller of the medium",
                    stutter("bootdev: Boot device: PCI ") + (r"[0-9a-f]{2}:[0-9a-f]{2}\.\d" if medium == "iso-usb"
@@ -573,6 +572,12 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
                     checks += judge_k64direct(serial.data()[mark:], proc.returncode, allocator)
                 menu = None                                   # the legacy menu is not used by this entry
             else:
+                if firmware == "ovmf":
+                    uefi = wait_for(serial, proc, lambda d: UEFI_MENU in d, args.menu_timeout)
+                    checks.append(check("UEFI menu reached before explicit CSM selection", bool(uefi)))
+                    if not uefi:
+                        raise ValueError("UEFI menu was not available for the requested legacy entry")
+                    serial.send(b"c")
                 menu = wait_for(serial, proc, lambda d: MENU_READY in d, args.menu_timeout)
                 record["menu_seconds"] = round(time.time() - started, 1)
                 checks.append(check("boot menu reached (menu.c32 on COM1)", bool(menu), f"{record['menu_seconds']} s"))
@@ -599,28 +604,23 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
                                         done.group(0).decode().strip() if done else "none"))
                     checks += judge_kernel64(serial.data()[mark:], proc.returncode)
                 elif entry == "dos16":
-                    done = wait_for(serial, proc, lambda d: re.search(rb"(?m)^SHZ-EXIT:(\d+)\r?$", d),
+                    ready = wait_for(serial, proc, lambda d: b"SHZ-DOS10: READY NORMAL" in d,
                                     args.timeout, mark)
                     record["seconds"] = round(time.time() - started, 1)
-                    checks.append(check("DOS16 AUTOEXEC reached SHZEXIT: SHZ-EXIT:0 on COM1",
-                                        bool(done) and done.group(1) == b"0",
-                                        done.group(0).decode().strip() if done else "none"))
-                    if done and proc.poll() is None:
+                    checks.append(check("DOS10 startup leaves a usable shell without conformance exit",
+                                        bool(ready) and b"SHZ-EXIT:" not in serial.data()[mark:]))
+                    if ready and proc.poll() is None:
+                        dos10boot.send_text(qmp, "echo DOS10-MATRIX-FILE>USER.OK\n")
+                        dos10boot.send_text(qmp, "type USER.OK\n")
+                        dos10boot.send_text(qmp, "SHZREADY.COM P\n")
+                        probe = wait_for(serial, proc, lambda d: b"SHZ-DOS10: USER PROBE" in d, 30, mark)
+                        checks.append(check("actual PS/2 input reached the DOS10 user probe", bool(probe)))
+                        if not probe:
+                            raise ValueError("DOS10 keyboard input did not reach the guest")
+                        time.sleep(0.2)
                         more, info = judge_dos16(qmp, run_dir, ctx["dos16_image"], args.keep_ramdisk)
                         checks += more
                         record["dos16"] = info
-                else:
-                    prompt = wait_for(serial, proc, lambda d: b"A:\\>" in d, args.timeout, mark)
-                    checks.append(check("ShizukuDOS 0.1 prompt A:\\> on COM1", bool(prompt)))
-                    if prompt:
-                        mark2 = len(serial.data())
-                        serial.send(b"DIR\r")
-                        names = (b"NTW32   .DLL", b"NTWRAP9X.VXD", b"NTWGPROB.EXE")
-                        listed = wait_for(serial, proc, lambda d: all(n in d for n in names) and d.rstrip().endswith(
-                            b"A:\\>"), 120, mark2)
-                        checks.append(check("DIR lists NTW32.DLL, NTWRAP9X.VXD, NTWGPROB.EXE and the prompt returns",
-                                            bool(listed)))
-                    record["seconds"] = round(time.time() - started, 1)
         except Exception as exc:  # a harness failure is a FAIL of this run, recorded, never a PASS
             checks.append(check("harness", False, f"{type(exc).__name__}: {exc}"))
         finally:
@@ -640,7 +640,9 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
         record["qemu_exit_code"] = proc.returncode
     log = run_dir / "serial.log"
     text = clean(log.read_bytes()) if log.exists() else ""
-    checks = boot_path_checks(firmware, medium, entry, text, record["command"]) + checks
+    kind = "disk" if medium == "disk" else "iso"
+    policy = ctx[kind]["receipt"]["menu"].get("uefi", {}).get("boot_ini")
+    checks = boot_path_checks(firmware, medium, entry, text, record["command"], policy) + checks
     record["checks"] = checks
     record["status"] = "PASS" if checks and all(c["status"] == "PASS" for c in checks) else "FAIL"
     (run_dir / "result.json").write_text(json.dumps(record, indent=2) + "\n")
@@ -816,9 +818,15 @@ def run_install_row(args, firmware: str, medium: str, image: Path, run_dir: Path
 
 # ---------------------------------------------------------------------------- main
 
-def media_context(iso: Path, disk: Path) -> dict:
+def media_context(iso: Path, disk: Path, media=None) -> dict:
+    media = list(MEDIA[:3] if media is None else media)
+    if not media or any(name not in MEDIA for name in media):
+        raise ValueError("select at least one supported medium")
+    selected = {"disk" if name == "disk" else "iso" for name in media}
     ctx = {}
     for name, path in (("iso", iso), ("disk", disk)):
+        if name not in selected:
+            continue
         receipt = path.with_suffix(".json")
         if not path.is_file() or not receipt.is_file():
             raise SystemExit(f"{path} or its receipt {receipt} is missing: build it first "
@@ -828,17 +836,22 @@ def media_context(iso: Path, disk: Path) -> dict:
         if data["sha256"] != digest:
             raise SystemExit(f"{path} does not match its receipt {receipt}")
         ctx[name] = {"path": str(path), "sha256": digest, "bytes": path.stat().st_size, "receipt": data}
-    ctx["keys"] = ctx["iso"]["receipt"]["menu"]["keys"]
+    first = "iso" if "iso" in selected else "disk"
+    ctx["keys"] = ctx[first]["receipt"]["menu"]["keys"]
     ctx["loads"] = {}
     for medium, key in (("iso-cd", "iso"), ("iso-hdd", "iso"), ("iso-usb", "iso"), ("disk", "disk")):
+        if medium not in media:
+            continue
         menu = ctx[key]["receipt"]["menu"]
+        if menu["keys"] != ctx["keys"]:
+            raise SystemExit("selected media disagree on boot-menu keys; rebuild a coherent media set")
         k64 = [f"{menu['k64_dir']}/KERNEL64S.BIN", f"{menu['k64_dir']}/WIN64.IMG"]
-        ctx["loads"][medium] = {"kernel64": k64, "dos16": [menu["dos16"]], "shzdos01": [menu["shzdos01"]]}
+        ctx["loads"][medium] = {"kernel64": k64, "dos16": [menu["dos16"]]}
         ctx.setdefault("setup_entry", {})[medium] = menu.get("setup_entry", False)
         info = ctx[key]["receipt"].get("setup", {})
         ctx.setdefault("setup", {})[medium] = {"directory": ROOT / info["directory"]} if info.get("present") else None
     # The DOS16 image the menu boots, as built (the same bytes are on the ISO and, as \SHZDOS\DISK.IMG, on the disk).
-    dos16 = next(i for i in ctx["iso"]["receipt"]["inputs"] if i["name"].endswith("DISK.IMG"))
+    dos16 = next(i for i in ctx[first]["receipt"]["inputs"] if i["name"] == "DISK.IMG")
     ctx["dos16_image"] = (ROOT / dos16["path"]).read_bytes()
     if shzlib.sha256_bytes(ctx["dos16_image"]) != dos16["sha256"]:
         raise SystemExit("the DOS16 image in build/ changed since the ISO was built; rebuild the media")
@@ -858,13 +871,15 @@ def write_summary(out: Path, runs: list[dict], ctx: dict, args) -> dict:
     summary = {"utc": shzlib.utc_now(), "git": shzlib.git_state(), "qemu": qemu_tools.qemu_version(args.qemu),
                "ovmf_code_sha256": shzlib.sha256_file(args.ovmf_code), "hardware": {
                    "machine": "q35", "accel": "tcg", "cpu": "max", "smp": args.smp, "memory_mib": args.memory},
-               "media": {k: {x: ctx[k][x] for x in ("path", "sha256", "bytes")} for k in ("iso", "disk")},
+               "media": {k: {x: ctx[k][x] for x in ("path", "sha256", "bytes")}
+                         for k in ("iso", "disk") if k in ctx},
                "s3": "QEMU default (on) for OVMF", "cells": cells,
                "verdict": "PASS" if cells and all(c["status"] == "PASS" for c in cells) else "FAIL"}
     (out / "matrix.json").write_text(json.dumps(summary, indent=2) + "\n")
     columns = [e for e in ENTRIES if any(r["entry"] == e for r in runs)]
     lines = [f"# Shizuku SE boot matrix {summary['utc']}", "",
-             f"ISO sha256 `{ctx['iso']['sha256']}`, disk sha256 `{ctx['disk']['sha256']}`; QEMU TCG q35, -cpu max, "
+             ", ".join(f"{key} sha256 `{ctx[key]['sha256']}`" for key in ("iso", "disk") if key in ctx) +
+             "; QEMU TCG q35, -cpu max, "
              f"{args.smp} vCPUs, {args.memory} MiB.", "",
              "| firmware | medium | " + " | ".join(columns) + " | cell |",
              "|---|---|" + "---|" * len(columns) + "---|"]
@@ -888,7 +903,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--firmware", nargs="+", choices=FIRMWARES, default=list(FIRMWARES))
     ap.add_argument("--media", nargs="+", choices=MEDIA, default=list(MEDIA[:3]))
     ap.add_argument("--entries", nargs="+", choices=ENTRIES, default=list(ENTRIES),
-                    help="menu entries to boot (k64direct only on OVMF; install only on --install-media)")
+                    help="component entries to boot (k64direct only on OVMF, requires a self-test profile)")
     ap.add_argument("--install-media", nargs="+", choices=MEDIA, default=["iso-cd"],
                     help="media whose Install entry the install row boots (each: install + host check + 2 boots)")
     ap.add_argument("--install-timeout", type=int, default=2400)
@@ -902,7 +917,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--timeout", type=int, default=1200, help="seconds per entry after it was selected")
     ap.add_argument("--keep-ramdisk", action="store_true")
     args = ap.parse_args(argv)
-    ctx = media_context(args.iso.resolve(), args.disk.resolve())
+    ctx = media_context(args.iso.resolve(), args.disk.resolve(), args.media)
+    if "k64direct" in args.entries and "ovmf" in args.firmware:
+        for medium in args.media:
+            kind = "disk" if medium == "disk" else "iso"
+            if ctx[kind]["receipt"].get("boot_profile") != "self-test":
+                ap.error("k64direct diagnostics require explicit --no-desktop media; verify the production desktop "
+                         "with shizukudos/tests/run_k64_desktop.py --boot-iso instead")
     run_name = args.run_name or "run-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     out = OUT / run_name
     out.mkdir(parents=True, exist_ok=True)
@@ -927,6 +948,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"    {record['status']} in {record.get('seconds', '?')} s"
                       + "".join(f"\n      FAIL {c['check']}: {c['detail'][:160]}" for c in bad), flush=True)
     for key, path in (("iso", args.iso), ("disk", args.disk)):
+        if key not in ctx:
+            continue
         if shzlib.sha256_file(path.resolve()) != ctx[key]["sha256"]:
             raise SystemExit(f"{path} changed during the matrix run")
     summary = write_summary(out, runs, ctx, args)

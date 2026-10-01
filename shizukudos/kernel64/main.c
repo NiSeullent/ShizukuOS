@@ -3,6 +3,7 @@
  */
 #include "proc_internal.h"
 #include "fs.h"
+#include "boot_channel_peer.h"
 
 static shz_bootinfo_t bootinfo;
 int initrd_files = -1;                          /* -1: none or rejected; read by the Win64 self-test */
@@ -38,6 +39,9 @@ void kmain(uint64_t bootinfo_pa)
     memcpy(&bootinfo, bi, bi->size < sizeof bootinfo ? bi->size : sizeof bootinfo);
     bootinfo.size = bi->size < sizeof bootinfo ? bi->size : sizeof bootinfo;
     bootinfo.cmdline[SHZ_CMDLINE_MAX - 1] = 0;
+    const int has_kernel32_peer = k64_boot_has_kernel32_peer(&bootinfo);
+    if (has_kernel32_peer < 0)
+        shz_exit(97); /* Malformed peer handoff is a real failure. */
     arch_init();
     mem_init(&bootinfo);
     krandom_init(&bootinfo, sizeof bootinfo);       /* before anything that needs random bytes (ASLR, user RNG) */
@@ -90,7 +94,7 @@ void kmain(uint64_t bootinfo_pa)
 #ifdef SHZ_STANDALONE
     { extern void k64_autorun_observe(void); k64_autorun_observe(); } /* explicit bounded post-autorun observation */
 #endif
-    if (bootinfo.channel_count) {
+    if (has_kernel32_peer) {
         ipc64_init(&bootinfo);
         if (ipc64_run_tests())
             kprintf("K64: IPC tests reported failures\n");

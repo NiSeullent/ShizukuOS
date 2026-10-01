@@ -48,8 +48,16 @@ host contracts. The current frontend and disk writer compiled and linked via
 the actual `build_setup()` function; its EXE SHA-256 was
 `e2f6b625a07048d49010751027aa05f173580bcedf815940a99c0f43b82ac387`.
 Independent source review found and corrected the F2 input collision, hidden
-row click range and runtime minimum-size handling. The full runtime rebuild,
-guest installer, actual disk writes and installed-system cold boots are pending.
+row click range and runtime minimum-size handling. The production runtime
+rebuild subsequently completed in 1942.049 seconds (exit 0), preserving all
+778 recorded source bytes plus the syscall-header guard. It includes enabled
+Wine adapters, 149 C checks, one C++ check, ten Wine checks, the installer,
+desktop and four development drivers. WIN64.IMG contains 221 members
+(22,337,355 bytes, SHA-256
+`f3f48eb6854eec1a09798566e87699fe40919ee2072b7ed4e734f5d3e39028dd`).
+Guest installation, actual disk writes and installed-system cold boots remain
+separate acceptance gates. Compiling this runtime does not establish Chromium,
+Discord, Office or Steam behavior.
 
 The integration owner freshly compiled native and standalone Kernel32/Kernel64
 with the installer startup and block-device guards (468.317 seconds, exit 0).
@@ -65,6 +73,31 @@ An unattended/self-test build requires explicit development options. Packaging
 rejects stale source-bound component receipts. Current media excludes the
 retired ShizukuDOS 0.1 input. Nine media-contract tests and eighteen actual
 image-I/O/ISO extent tests passed. No new complete ISO boot is claimed here.
+
+The diagnostic matrix now validates only selected media, accepts the current
+DOS10 menu without the retired input, and checks PS/2-created RAM-disk files
+instead of expecting the conformance profile to exit. It selects CSM explicitly
+from the UEFI menu and checks the recorded firmware policy. Production desktop
+media cannot pass as a diagnostic direct-boot profile. Eleven input/policy
+regressions passed; current ISO matrix guest runs remain a separate gate.
+
+## Optional native Windows 98 domain
+
+The 32-file native-domain handoff was checked against its frozen hashes and
+reviewed independently. Only its small deltas were applied to the loader and
+Kernel64 entry point, preserving interactive installation. The integration
+owner freshly compiled all native and standalone kernels (173.893 seconds,
+exit 0), the merged Supervisor, and ten strict/sanitized C programs with 6,358
+checks. Supervisor's normal and conformance ESP build also passed with the
+current kernels/runtime (32.381 seconds, exit 0).
+
+The native domain requires explicit Supervisor policy, an exact opt-in config,
+an owned SHA-pinned installed disk and an explicit SeaBIOS ROM. Preparing or
+compiling this path does not verify its actual VMCS boot or replace the disk's
+original DOS. A separate newly cloned UEFI original-DOS control reached the
+actual Korean Windows 98 desktop while recording DOS/VMM calls. Its Windows
+GUI is a comparison control, not replacement-DOS acceptance. Private media
+and raw control evidence are excluded from public source commits.
 
 ## DOS-to-Windows contract increment
 

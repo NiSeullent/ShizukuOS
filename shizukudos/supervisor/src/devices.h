@@ -17,6 +17,8 @@ void dev_poll(uint64_t now_tsc);
 /* Highest-priority pending unmasked interrupt vector, or -1. Marks it in service. */
 int dev_ack_irq(void);
 int dev_irq_pending(void);
+/* Real additive peripheral edge request; first use enables slave cascade modelling. */
+void dev_irq_raise(unsigned line);
 /* TSC value of the next timer event (for the VMX preemption timer). */
 uint64_t dev_next_event_tsc(void);
 /* Guest-visible A20 gate changes must reach the EPT layer. */

@@ -28,7 +28,8 @@ PAYLOAD_BASE = 0x04002000
 ESP_MIB = 96
 
 PAYLOAD_C = ["main.c", "platform.c", "console.c", "caps.c", "vmx.c", "ept.c", "devices.c", "video.c", "bios.c",
-             "domain.c", "dos.c", "kdom.c", "pool.c", "lib.c"]
+             "domain.c", "dos.c", "kdom.c", "pool.c", "lib.c",
+             "../native_win98/ata_pio.c", "../native_win98/string_pio.c", "../native_win98/win98.c"]
 PAYLOAD_ASM = ["entry.asm", "vmx_asm.asm"]
 CFLAGS = ["-m64", "-march=x86-64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin",
           "-fno-stack-protector", "-fno-pie", "-fno-pic", "-mno-red-zone", "-mgeneral-regs-only",
@@ -58,7 +59,9 @@ def build_payload():
     OUT.joinpath("obj").mkdir(exist_ok=True)
     commands = []
     for name in PAYLOAD_C:
-        obj = OUT / "obj" / (name[:-2] + ".o")
+        obj = OUT / "obj" / (Path(name).stem + ".o")
+        if obj in objs:
+            raise RuntimeError(f"duplicate payload object name: {name}")
         cmd = ["gcc", *CFLAGS, "-I", OUT, "-I", SRC / "src", "-I", SHZ / "abi", "-c", SRC / "src" / name, "-o", obj]
         run(cmd)
         commands.append(cmd)

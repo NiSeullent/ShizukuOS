@@ -220,14 +220,15 @@ def main() -> int:
     inputs = [loader, csm, *k64.values(), *shzdos.values()]
     receipt = {"disk": str(disk), "bytes": disk.stat().st_size, "sha256": digest,
                "product": "ShizukuOS", "release_target": "1.0.0", "release_channel": "development",
-               "boot_profile": "desktop" if args.desktop else "self-test",
+               "boot_profile": "desktop" if args.desktop else "self-test", "boot_mode": args.boot_mode,
                "distribution_origin": "https://m98.nyase.kr", "retired_dos01_shipped": False,
                "layout": {"part_start": PART_START, "part_type": PART_TYPE, "fs": "FAT32", "disk_signature": DISK_SIGNATURE},
                "inputs": [item.record() for item in inputs],
                "syslinux": se_media.syslinux_spec()["distribution"], "setup": setup_info,
                "drivers": [p["package"] for p in store_manifest["packages"]],
                "menu": {"dos16": "/SHZDOS/DISK.IMG", "k64_dir": "/SHZ/K64",
-                        "keys": se_media.MENU_KEYS, "setup_entry": bool(setup_files)},
+                        "keys": se_media.MENU_KEYS, "setup_entry": bool(setup_files),
+                        "uefi": {"boot_ini": {"mode": args.boot_mode, "menu_timeout": se_media.MENU_TIMEOUT}}},
                "members": len(members)}
     receipt_path = disk.with_suffix(".json")
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")

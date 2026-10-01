@@ -123,6 +123,21 @@ def boot(args, tools, disk, output, profile, write_command=None, existing=False)
                     raise ValueError('Guest BIOS does not carry the real CSM table/proxy signatures')
             if not result['persistent_prompt'] or not result['reopened_text_seen']:
                 raise ValueError('Actual permanent prompt or reopened guest file text is missing')
+            if args.png:
+                from PIL import Image
+                ppm, png = output / 'screen.ppm', output / 'screen.png'
+                qmp.call('stop')
+                try:
+                    qmp.call('screendump', {'filename': str(ppm)})
+                    with Image.open(ppm) as captured:
+                        rgb = captured.convert('RGB')
+                        if not any(lo != hi for lo, hi in rgb.getextrema()):
+                            raise ValueError('Actual guest screenshot is blank')
+                        rgb.save(png)
+                        result['screenshot'] = {'path': str(png), 'sha256': digest(png),
+                                                'width': rgb.width, 'height': rgb.height}
+                finally:
+                    qmp.call('cont')
             qmp.call('quit')
             quit_requested = True
         finally:
@@ -158,7 +173,13 @@ def main(argv=None):
     p.add_argument('--firmware-vars', type=Path)
     p.add_argument('--timeout', type=int, default=120)
     p.add_argument('--recovery', action='store_true', help='Also test missing/nonzero startup and SHZSAFE.TAG recovery (BIOS recommended)')
+    p.add_argument('--png', action='store_true', help='Keep real QMP guest screenshots as PNG (requires Pillow)')
     args = p.parse_args(argv)
+    if args.png:
+        try:
+            from PIL import Image
+        except ImportError:
+            p.error('--png requires the installed Pillow screenshot reader')
     if not 10 <= args.timeout <= 600:
         p.error('timeout must be 10..600 seconds')
     image = ordinary(args.image)

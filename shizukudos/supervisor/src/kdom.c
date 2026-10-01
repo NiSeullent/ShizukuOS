@@ -204,7 +204,7 @@ int ipc_channels_create(shz_info_t *info)
             d->chan[c].hpa = hpa;
             d->chan[c].peer = peers[1 - i];
             d->chan[c].mapped = 1;
-            {
+            if (d->kind != DK_WIN98) {
                 shz_bootinfo_t *bi = (shz_bootinfo_t *)(uintptr_t)(d->ram_base + SHZ_BOOTINFO_GPA);
                 bi->channel[bi->channel_count].gpa = gpa;
                 bi->channel[bi->channel_count].size = SHZ_IPC_REGION_SIZE;

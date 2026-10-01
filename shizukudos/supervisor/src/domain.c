@@ -9,6 +9,7 @@
 #include "devices.h"
 #include "pool.h"
 #include "video.h"
+#include "../native_win98/win98.h"
 
 domain_t g_dom[SHZ_MAX_DOMAINS];
 shz_info_t *g_info;
@@ -119,6 +120,7 @@ static void handle_cpuid(domain_t *d)
             r.ecx |= 1u << 31;          /* hypervisor present */
             r.edx &= ~(1u << 28);       /* no hyper-threading */
             r.ebx = (r.ebx & 0x0000ffffu) | (1u << 16);   /* one logical processor, APIC ID 0 */
+            if (d->kind == DK_WIN98) r.edx &= ~(1u << 17);
             r.edx &= ~(1u << 9);        /* no local APIC is modelled */
         } else if (leaf == 4) {
             r.eax &= ~0xfc000000u;      /* single core */
@@ -372,11 +374,14 @@ static int kernel_ready(domain_t *d, uint64_t now)
 
 static void deliver_events(domain_t *d, uint64_t now)
 {
-    int vector = -1, is_timer = 0, is_dos = d->kind == DK_DOS16;
+    int vector = -1, is_timer = 0, win98_doorbell = 0, is_dos = d->kind == DK_DOS16 || d->kind == DK_WIN98;
     if (is_dos) {
         dev_poll(now);
         if (dev_irq_pending())
             vector = -2;                       /* resolved at acceptance time */
+        else if (d->kind == DK_WIN98 && d->doorbell_vector && d->doorbell_pending && !d->doorbell_signaled) {
+            vector = d->doorbell_vector; win98_doorbell = 1;
+        }
     } else if (d->timer_period && now >= d->timer_next) {
         vector = d->timer_vector;
         is_timer = 1;
@@ -389,7 +394,7 @@ static void deliver_events(domain_t *d, uint64_t now)
         return;
     }
     if (vmx_guest_interruptible()) {
-        if (is_dos)
+        if (is_dos && !win98_doorbell)
             vector = dev_ack_irq();
         if (vector >= 0) {
             vmx_inject_external((uint8_t)vector);
@@ -397,7 +402,7 @@ static void deliver_events(domain_t *d, uint64_t now)
             ++g_info->injected_irqs;
             if (is_timer) {
                 do d->timer_next += d->timer_period; while (d->timer_next <= now);
-            } else if (!is_dos) {
+            } else if (!is_dos || win98_doorbell) {
                 d->doorbell_signaled = 1;
             }
         }
@@ -412,8 +417,8 @@ static void arm_preemption_timer(domain_t *d, uint64_t now)
 {
     uint64_t budget = g_tsc_hz / 1000;                 /* 1 ms slice */
     uint64_t next = 0, ticks;
-    if (d->kind == DK_DOS16)
-        next = dos_next_event_tsc();
+    if (d->kind == DK_DOS16 || d->kind == DK_WIN98)
+        next = dev_next_event_tsc();
     else if (d->timer_period)
         next = d->timer_next;
     /* An event that is already due but could not be injected (guest not interruptible) is
@@ -465,7 +470,12 @@ static void handle_exit(domain_t *d, uint32_t reason)
     default:
         break;
     }
-    if (d->kind == DK_DOS16) {
+    if (d->kind == DK_WIN98) {
+        if (reason == EXIT_VMCALL) { hcall_vmcall(d); return; }
+        if (win98_handle_exit(d, reason)) return;
+        if (reason == EXIT_RDMSR) { handle_msr(d, 0); return; }
+        if (reason == EXIT_WRMSR) { handle_msr(d, 1); return; }
+    } else if (d->kind == DK_DOS16) {
         if (dos_handle_exit(d, reason))
             return;
     } else {
@@ -517,7 +527,13 @@ static int run_slice(domain_t *d)
     deliver_events(d, now);
     arm_preemption_timer(d, now);
     fx_restore(d);
-    rc = vmx_enter(&d->vc);
+    {
+        const uint64_t host_cr2 = read_cr2();
+        const int mixed = (g_info->loader_flags & SHZ_LOADER_NATIVE_WIN98) != 0;
+        if (mixed) write_cr2(d->guest_cr2);
+        rc = vmx_enter(&d->vc);
+        if (mixed) { d->guest_cr2 = read_cr2(); write_cr2(host_cr2); }
+    }
     fx_save(d);
     if (rc) {
         dom_fail(d, "VM entry failed (VMfail %d, error %llu)", rc, vmread(VMCS_INSTR_ERROR));
@@ -545,6 +561,7 @@ static int run_slice(domain_t *d)
         if (rdtsc() - d->last_snapshot_tsc > g_tsc_hz / 100)
             vmx_snapshot(&g_info->last_exit);
     }
+    if (d->kind == DK_WIN98) win98_housekeeping();
     record_state(d, rdtsc());
     return 0;
 }
@@ -568,7 +585,7 @@ int sched_run(shz_info_t *info)
             ++live;
             if (!pick) {
                 if (d->state == SHZ_DS_WAITING) {
-                    const int ready = d->kind == DK_DOS16 ? dos_ready(d, now) : kernel_ready(d, now);
+                    const int ready = d->kind == DK_DOS16 ? dos_ready(d, now) : d->kind == DK_WIN98 ? win98_ready(d, now) : kernel_ready(d, now);
                     if (ready) {
                         d->state = SHZ_DS_RUNNABLE;
                         pick = d;
@@ -582,8 +599,8 @@ int sched_run(shz_info_t *info)
             break;
         if (!pick) {
             /* everything is idle: keep the display and input alive, then spin briefly */
-            dos_housekeeping();
-            bios_poll_input();
+            if (info->loader_flags & SHZ_LOADER_NATIVE_WIN98) win98_housekeeping();
+            else { dos_housekeeping(); bios_poll_input(); }
             pause_cpu();
             continue;
         }

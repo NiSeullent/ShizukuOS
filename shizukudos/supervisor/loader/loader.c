@@ -36,6 +36,7 @@
 #include "../include/shz_info.h"
 #include "../src/caps.h"
 #include "images.h"
+#include "../native_win98/config.h"
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 /* A real absolute address keeps a base-relocation section in the PE image. */
@@ -1193,6 +1194,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     EFI_STATUS status;
     uint64_t addr = SHZ_REGION_BASE, guest = 0, disk_base = 0, disk_size = 0, t0, t1;
     size_t i;
+    unsigned native_win98 = 0;
+    uint64_t native_config_base = 0, native_config_size = 0;
 
     if (!st || st->header.signature != EFI_SYSTEM_TABLE_SIGNATURE || !st->boot_services)
         return EFI_INVALID_PARAMETER;
@@ -1269,6 +1272,17 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     }
     say("Virtualization: Intel VMX with EPT and Unrestricted Guest available.\n");
 
+    /* A separate fixed opt-in config selects installed Win98; no default policy changes. */
+    status = load_file(image, bs, "WIN98CFG.BIN", &native_config_base, &native_config_size, sizeof(w98_config_t));
+    if (status != EFI_NOT_FOUND) {
+        if (EFI_ERROR(status) || g_policy.mode != BOOT_MODE_SUPERVISOR ||
+            !w98_config_valid((const w98_config_t *)(uintptr_t)native_config_base, native_config_size)) {
+            say("REFUSED: malformed Win98 opt-in config or non-Supervisor policy.\n");
+            return EFI_ERROR(status) ? status : EFI_INVALID_PARAMETER;
+        }
+        native_win98 = 1;
+    }
+
     /* 2. Display. */
     if (EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) || !gop ||
         EFI_ERROR(sd_framebuffer_snapshot(gop->mode, &g_handoff.framebuffer))) {
@@ -1277,13 +1291,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     }
 
     /* 3. Disk image and memory the Supervisor will own. */
-    status = load_file(image, bs, "DISK.IMG", &disk_base, &disk_size, 256ull << 20);
+    status = load_file(image, bs, "DISK.IMG", &disk_base, &disk_size, native_win98 ? W98_DISK_BYTES : 256ull << 20);
     if (EFI_ERROR(status)) {
         say("REFUSED: cannot read \\SHZDOS\\DISK.IMG from the boot volume (status ");
         say_hex(status);
         say(").\n");
         return status;
     }
+    if (native_win98 && disk_size != W98_DISK_BYTES) { say("REFUSED: Win98 requires exact owned 2 GiB cold disk.\n"); return EFI_INVALID_PARAMETER; }
     status = allocate_pages(EFI_ALLOCATE_ADDRESS, EFI_MEM_LOADER_DATA, (size_t)(SHZ_REGION_SIZE >> 12), &addr);
     if (EFI_ERROR(status)) {
         say("REFUSED: fixed Supervisor region at 64 MiB is not free (status ");
@@ -1291,7 +1306,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         say(").\n");
         return status;
     }
-    status = allocate_pages(EFI_ALLOCATE_ANY_PAGES, EFI_MEM_LOADER_DATA, (size_t)((uint64_t)GUEST_RAM_MIB << 8), &guest);
+    status = allocate_pages(EFI_ALLOCATE_ANY_PAGES, EFI_MEM_LOADER_DATA, (size_t)((uint64_t)(native_win98 ? W98_RAM_MIB : GUEST_RAM_MIB) << 8), &guest);
     if (EFI_ERROR(status)) {
         say("REFUSED: cannot allocate guest RAM.\n");
         return status;
@@ -1300,13 +1315,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     /* 3b. Optional guest kernels and their initial RAM image: each present file adds a domain. */
     {
         static const struct { const char *name; uint64_t max; } wanted[] = {
-            {"KERNEL32.BIN", 8ull << 20}, {"KERNEL64.BIN", 16ull << 20}, {"WIN64.IMG", 64ull << 20}};
+            {"KERNEL32.BIN", 8ull << 20}, {"KERNEL64.BIN", 16ull << 20}, {"WIN64.IMG", 64ull << 20}, {"SEABIOS.BIN", W98_ROM_BYTES}};
         size_t w, slot = 0;
         for (w = 0; w < sizeof wanted / sizeof wanted[0]; ++w) {
             uint64_t base = 0, size = 0;
             size_t k;
+            if (w == 3 && !native_win98) continue;
             status = load_file(image, bs, wanted[w].name, &base, &size, wanted[w].max);
-            if (status == EFI_NOT_FOUND)
+            if (status == EFI_NOT_FOUND && (w != 3 || !native_win98))
                 continue;
             if (EFI_ERROR(status)) {
                 say("REFUSED: cannot read guest kernel image ");
@@ -1314,6 +1330,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
                 say("\n");
                 return status;
             }
+            if (w == 3 && size != W98_ROM_BYTES) { say("REFUSED: exact 256 KiB SeaBIOS ROM required.\n"); return EFI_INVALID_PARAMETER; }
             for (k = 0; wanted[w].name[k] && k < 15; ++k)
                 g_blobs[slot].name[k] = wanted[w].name[k];
             g_blobs[slot].base = base;
@@ -1351,7 +1368,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     info->fb_pitch_pixels = g_handoff.framebuffer.pitch_pixels;
     info->fb_format = g_handoff.framebuffer.pixel_format;
     info->guest_ram_base = guest;
-    info->guest_ram_size = (uint64_t)GUEST_RAM_MIB << 20;
+    info->guest_ram_size = (uint64_t)(native_win98 ? W98_RAM_MIB : GUEST_RAM_MIB) << 20;
+    if (native_win98) info->loader_flags |= SHZ_LOADER_NATIVE_WIN98;
     info->disk_base = disk_base;
     info->disk_size = disk_size;
     info->region_base = SHZ_REGION_BASE;

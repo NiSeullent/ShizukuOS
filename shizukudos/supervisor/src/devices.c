@@ -18,6 +18,8 @@ struct pic {
     uint8_t auto_eoi, init_done;
 };
 static struct pic pic[2];
+static int external_irq_enabled;
+static void pic_refresh_cascade(void);
 
 static void pic_reset(struct pic *p, uint8_t base)
 {
@@ -52,6 +54,20 @@ static int pic_pick(const struct pic *p)
     return -1;
 }
 
+static void pic_refresh_cascade(void)
+{
+    if (!external_irq_enabled) return;
+    if (pic_pick(&pic[1]) >= 0) pic[0].irr |= 4u;
+    else pic[0].irr &= (uint8_t)~4u;
+}
+void dev_irq_raise(unsigned line)
+{
+    if (line >= 16) return;
+    external_irq_enabled = 1;
+    irq_raise((int)line);
+    pic_refresh_cascade();
+}
+
 int dev_irq_pending(void)
 {
     int m = pic_pick(&pic[0]);
@@ -72,9 +88,10 @@ int dev_ack_irq(void)
         if (s < 0)
             return -1;
         pic[1].irr &= (uint8_t)~(1u << s);
-        pic[1].isr |= (uint8_t)(1u << s);
+        if (!external_irq_enabled || !pic[1].auto_eoi) pic[1].isr |= (uint8_t)(1u << s);
         pic[0].irr &= (uint8_t)~4u;
-        pic[0].isr |= 4u;
+        if (!external_irq_enabled || !pic[0].auto_eoi) pic[0].isr |= 4u;
+        pic_refresh_cascade();
         return pic[1].base + s;
     }
     pic[0].irr &= (uint8_t)~(1u << m);
@@ -125,6 +142,7 @@ static void pic_write(int n, int a0, uint8_t v)
         default: p->imr = v; break;         /* OCW1 */
         }
     }
+    pic_refresh_cascade();
 }
 
 static uint8_t pic_read(int n, int a0)
@@ -391,6 +409,7 @@ static uint8_t vga_status(void)
 /* ---------------------------------------------------------------- dispatch */
 void dev_init(uint64_t tsc_hz, uint64_t ram_bytes)
 {
+    external_irq_enabled = 0;
     g_tsc_hz = tsc_hz;
     g_ram_bytes = ram_bytes;
     g_start_tsc = rdtsc();

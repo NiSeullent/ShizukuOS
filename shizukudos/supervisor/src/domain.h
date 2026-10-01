@@ -13,7 +13,7 @@
 #include "../include/shz_info.h"
 #include "../../abi/shz_abi.h"
 
-typedef enum { DK_DOS16 = 0, DK_KERNEL32 = 1, DK_KERNEL64 = 2 } dom_kind_t;
+typedef enum { DK_DOS16 = 0, DK_KERNEL32 = 1, DK_KERNEL64 = 2, DK_WIN98 = 3 } dom_kind_t;
 
 typedef struct domain {
     uint32_t id;
@@ -23,6 +23,7 @@ typedef struct domain {
     uint32_t generation;
     vcpu_t vc;
     ept_t ept;
+    uint64_t guest_cr2;                 /* opt-in mixed Win98/K64 fault context */
     uint64_t ram_base, ram_size;        /* private RAM: guest-physical [0, ram_size) */
     uint8_t *io_bitmap_a, *io_bitmap_b, *msr_bitmap;
     /* paravirtual timer and doorbell (Kernel32/Kernel64) */

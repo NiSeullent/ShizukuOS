@@ -20,6 +20,8 @@
 #define SHZ_MAX_DOMAINS 8
 #define SHZ_EVIDENCE_SLOTS 32
 #define SHZ_MAX_BLOBS 8
+/* Explicit opt-in installed Win98/SeaBIOS profile; absent flag preserves DOS. */
+#define SHZ_LOADER_NATIVE_WIN98 1u
 
 enum shz_stage {
     SHZ_STAGE_NONE = 0,
