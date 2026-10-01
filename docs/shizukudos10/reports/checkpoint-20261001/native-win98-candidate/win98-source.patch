@@ -1,0 +1,1101 @@
+--- a/shizukudos/supervisor/loader/loader.c
++++ b/shizukudos/supervisor/loader/loader.c
+@@ -36,6 +36,7 @@
+ #include "../include/shz_info.h"
+ #include "../src/caps.h"
+ #include "images.h"
++#include "../native_win98/config.h"
+ 
+ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
+ /* A real absolute address keeps a base-relocation section in the PE image. */
+@@ -1177,6 +1178,8 @@
+     EFI_STATUS status;
+     uint64_t addr = SHZ_REGION_BASE, guest = 0, disk_base = 0, disk_size = 0, t0, t1;
+     size_t i;
++    unsigned native_win98 = 0;
++    uint64_t native_config_base = 0, native_config_size = 0;
+ 
+     if (!st || st->header.signature != EFI_SYSTEM_TABLE_SIGNATURE || !st->boot_services)
+         return EFI_INVALID_PARAMETER;
+@@ -1251,6 +1254,17 @@
+     }
+     say("Virtualization: Intel VMX with EPT and Unrestricted Guest available.\n");
+ 
++    /* A separate fixed opt-in config selects installed Win98; no default policy changes. */
++    status = load_file(image, bs, "WIN98CFG.BIN", &native_config_base, &native_config_size, sizeof(w98_config_t));
++    if (status != EFI_NOT_FOUND) {
++        if (EFI_ERROR(status) || g_policy.mode != BOOT_MODE_SUPERVISOR ||
++            !w98_config_valid((const w98_config_t *)(uintptr_t)native_config_base, native_config_size)) {
++            say("REFUSED: malformed Win98 opt-in config or non-Supervisor policy.\n");
++            return EFI_ERROR(status) ? status : EFI_INVALID_PARAMETER;
++        }
++        native_win98 = 1;
++    }
++
+     /* 2. Display. */
+     if (EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) || !gop ||
+         EFI_ERROR(sd_framebuffer_snapshot(gop->mode, &g_handoff.framebuffer))) {
+@@ -1259,13 +1273,14 @@
+     }
+ 
+     /* 3. Disk image and memory the Supervisor will own. */
+-    status = load_file(image, bs, "DISK.IMG", &disk_base, &disk_size, 256ull << 20);
++    status = load_file(image, bs, "DISK.IMG", &disk_base, &disk_size, native_win98 ? W98_DISK_BYTES : 256ull << 20);
+     if (EFI_ERROR(status)) {
+         say("REFUSED: cannot read \\SHZDOS\\DISK.IMG from the boot volume (status ");
+         say_hex(status);
+         say(").\n");
+         return status;
+     }
++    if (native_win98 && disk_size != W98_DISK_BYTES) { say("REFUSED: Win98 requires exact owned 2 GiB cold disk.\n"); return EFI_INVALID_PARAMETER; }
+     status = allocate_pages(EFI_ALLOCATE_ADDRESS, EFI_MEM_LOADER_DATA, (size_t)(SHZ_REGION_SIZE >> 12), &addr);
+     if (EFI_ERROR(status)) {
+         say("REFUSED: fixed Supervisor region at 64 MiB is not free (status ");
+@@ -1273,7 +1288,7 @@
+         say(").\n");
+         return status;
+     }
+-    status = allocate_pages(EFI_ALLOCATE_ANY_PAGES, EFI_MEM_LOADER_DATA, (size_t)((uint64_t)GUEST_RAM_MIB << 8), &guest);
++    status = allocate_pages(EFI_ALLOCATE_ANY_PAGES, EFI_MEM_LOADER_DATA, (size_t)((uint64_t)(native_win98 ? W98_RAM_MIB : GUEST_RAM_MIB) << 8), &guest);
+     if (EFI_ERROR(status)) {
+         say("REFUSED: cannot allocate guest RAM.\n");
+         return status;
+@@ -1282,13 +1297,14 @@
+     /* 3b. Optional guest kernels and their initial RAM image: each present file adds a domain. */
+     {
+         static const struct { const char *name; uint64_t max; } wanted[] = {
+-            {"KERNEL32.BIN", 8ull << 20}, {"KERNEL64.BIN", 16ull << 20}, {"WIN64.IMG", 64ull << 20}};
++            {"KERNEL32.BIN", 8ull << 20}, {"KERNEL64.BIN", 16ull << 20}, {"WIN64.IMG", 64ull << 20}, {"SEABIOS.BIN", W98_ROM_BYTES}};
+         size_t w, slot = 0;
+         for (w = 0; w < sizeof wanted / sizeof wanted[0]; ++w) {
+             uint64_t base = 0, size = 0;
+             size_t k;
++            if (w == 3 && !native_win98) continue;
+             status = load_file(image, bs, wanted[w].name, &base, &size, wanted[w].max);
+-            if (status == EFI_NOT_FOUND)
++            if (status == EFI_NOT_FOUND && (w != 3 || !native_win98))
+                 continue;
+             if (EFI_ERROR(status)) {
+                 say("REFUSED: cannot read guest kernel image ");
+@@ -1296,6 +1312,7 @@
+                 say("\n");
+                 return status;
+             }
++            if (w == 3 && size != W98_ROM_BYTES) { say("REFUSED: exact 256 KiB SeaBIOS ROM required.\n"); return EFI_INVALID_PARAMETER; }
+             for (k = 0; wanted[w].name[k] && k < 15; ++k)
+                 g_blobs[slot].name[k] = wanted[w].name[k];
+             g_blobs[slot].base = base;
+@@ -1333,7 +1350,8 @@
+     info->fb_pitch_pixels = g_handoff.framebuffer.pitch_pixels;
+     info->fb_format = g_handoff.framebuffer.pixel_format;
+     info->guest_ram_base = guest;
+-    info->guest_ram_size = (uint64_t)GUEST_RAM_MIB << 20;
++    info->guest_ram_size = (uint64_t)(native_win98 ? W98_RAM_MIB : GUEST_RAM_MIB) << 20;
++    if (native_win98) info->loader_flags |= SHZ_LOADER_NATIVE_WIN98;
+     info->disk_base = disk_base;
+     info->disk_size = disk_size;
+     info->region_base = SHZ_REGION_BASE;
+--- a/shizukudos/supervisor/include/shz_info.h
++++ b/shizukudos/supervisor/include/shz_info.h
+@@ -20,6 +20,8 @@
+ #define SHZ_MAX_DOMAINS 8
+ #define SHZ_EVIDENCE_SLOTS 32
+ #define SHZ_MAX_BLOBS 8
++/* Explicit opt-in installed Win98/SeaBIOS profile; absent flag preserves DOS. */
++#define SHZ_LOADER_NATIVE_WIN98 1u
+ 
+ enum shz_stage {
+     SHZ_STAGE_NONE = 0,
+--- a/shizukudos/supervisor/src/main.c
++++ b/shizukudos/supervisor/src/main.c
+@@ -8,6 +8,7 @@
+ #include "domain.h"
+ #include "platform.h"
+ #include "vbios_image.h"
++#include "../native_win98/win98.h"
+ 
+ static void print_caps(const shz_caps_t *c)
+ {
+@@ -60,6 +61,10 @@
+     info->host_cr0 = read_cr0();
+     info->host_cr4 = read_cr4();
+ 
++    if (info->loader_flags & SHZ_LOADER_NATIVE_WIN98) {
++        if (win98_domain_create(info, &caps))
++            platform_fail(info, info->last_error[0] ? info->last_error : "Win98 domain creation failed");
++    } else {
+     if (dos_domain_create(info, &caps, vbios_image, sizeof vbios_image))
+         platform_fail(info, info->last_error[0] ? info->last_error : "DOS16 domain creation failed");
+     kprintf("SHZ: DOS16 domain created: %llu MiB RAM at %llx, RAM disk %llu KiB at %llx\n",
+@@ -67,6 +72,7 @@
+     info->domains[SHZ_DOM_DOS16].kind = DK_DOS16;
+     info->domains[SHZ_DOM_DOS16].generation = 1;
+     info->domains[SHZ_DOM_DOS16].state = SHZ_DS_RUNNABLE;
++    }
+     rc = kernel_domain_create(info, &caps, DK_KERNEL32);
+     if (rc < 0)
+         platform_fail(info, info->last_error);
+--- a/shizukudos/supervisor/src/domain.h
++++ b/shizukudos/supervisor/src/domain.h
+@@ -13,7 +13,7 @@
+ #include "../include/shz_info.h"
+ #include "../../abi/shz_abi.h"
+ 
+-typedef enum { DK_DOS16 = 0, DK_KERNEL32 = 1, DK_KERNEL64 = 2 } dom_kind_t;
++typedef enum { DK_DOS16 = 0, DK_KERNEL32 = 1, DK_KERNEL64 = 2, DK_WIN98 = 3 } dom_kind_t;
+ 
+ typedef struct domain {
+     uint32_t id;
+@@ -23,6 +23,7 @@
+     uint32_t generation;
+     vcpu_t vc;
+     ept_t ept;
++    uint64_t guest_cr2;                 /* opt-in mixed Win98/K64 fault context */
+     uint64_t ram_base, ram_size;        /* private RAM: guest-physical [0, ram_size) */
+     uint8_t *io_bitmap_a, *io_bitmap_b, *msr_bitmap;
+     /* paravirtual timer and doorbell (Kernel32/Kernel64) */
+--- a/shizukudos/supervisor/src/domain.c
++++ b/shizukudos/supervisor/src/domain.c
+@@ -9,6 +9,7 @@
+ #include "devices.h"
+ #include "pool.h"
+ #include "video.h"
++#include "../native_win98/win98.h"
+ 
+ domain_t g_dom[SHZ_MAX_DOMAINS];
+ shz_info_t *g_info;
+@@ -119,6 +120,7 @@
+             r.ecx |= 1u << 31;          /* hypervisor present */
+             r.edx &= ~(1u << 28);       /* no hyper-threading */
+             r.ebx = (r.ebx & 0x0000ffffu) | (1u << 16);   /* one logical processor, APIC ID 0 */
++            if (d->kind == DK_WIN98) r.edx &= ~(1u << 17);
+             r.edx &= ~(1u << 9);        /* no local APIC is modelled */
+         } else if (leaf == 4) {
+             r.eax &= ~0xfc000000u;      /* single core */
+@@ -372,11 +374,14 @@
+ 
+ static void deliver_events(domain_t *d, uint64_t now)
+ {
+-    int vector = -1, is_timer = 0, is_dos = d->kind == DK_DOS16;
++    int vector = -1, is_timer = 0, win98_doorbell = 0, is_dos = d->kind == DK_DOS16 || d->kind == DK_WIN98;
+     if (is_dos) {
+         dev_poll(now);
+         if (dev_irq_pending())
+             vector = -2;                       /* resolved at acceptance time */
++        else if (d->kind == DK_WIN98 && d->doorbell_vector && d->doorbell_pending && !d->doorbell_signaled) {
++            vector = d->doorbell_vector; win98_doorbell = 1;
++        }
+     } else if (d->timer_period && now >= d->timer_next) {
+         vector = d->timer_vector;
+         is_timer = 1;
+@@ -389,7 +394,7 @@
+         return;
+     }
+     if (vmx_guest_interruptible()) {
+-        if (is_dos)
++        if (is_dos && !win98_doorbell)
+             vector = dev_ack_irq();
+         if (vector >= 0) {
+             vmx_inject_external((uint8_t)vector);
+@@ -397,7 +402,7 @@
+             ++g_info->injected_irqs;
+             if (is_timer) {
+                 do d->timer_next += d->timer_period; while (d->timer_next <= now);
+-            } else if (!is_dos) {
++            } else if (!is_dos || win98_doorbell) {
+                 d->doorbell_signaled = 1;
+             }
+         }
+@@ -412,8 +417,8 @@
+ {
+     uint64_t budget = g_tsc_hz / 1000;                 /* 1 ms slice */
+     uint64_t next = 0, ticks;
+-    if (d->kind == DK_DOS16)
+-        next = dos_next_event_tsc();
++    if (d->kind == DK_DOS16 || d->kind == DK_WIN98)
++        next = dev_next_event_tsc();
+     else if (d->timer_period)
+         next = d->timer_next;
+     /* An event that is already due but could not be injected (guest not interruptible) is
+@@ -465,7 +470,12 @@
+     default:
+         break;
+     }
+-    if (d->kind == DK_DOS16) {
++    if (d->kind == DK_WIN98) {
++        if (reason == EXIT_VMCALL) { hcall_vmcall(d); return; }
++        if (win98_handle_exit(d, reason)) return;
++        if (reason == EXIT_RDMSR) { handle_msr(d, 0); return; }
++        if (reason == EXIT_WRMSR) { handle_msr(d, 1); return; }
++    } else if (d->kind == DK_DOS16) {
+         if (dos_handle_exit(d, reason))
+             return;
+     } else {
+@@ -517,7 +527,13 @@
+     deliver_events(d, now);
+     arm_preemption_timer(d, now);
+     fx_restore(d);
+-    rc = vmx_enter(&d->vc);
++    {
++        const uint64_t host_cr2 = read_cr2();
++        const int mixed = (g_info->loader_flags & SHZ_LOADER_NATIVE_WIN98) != 0;
++        if (mixed) write_cr2(d->guest_cr2);
++        rc = vmx_enter(&d->vc);
++        if (mixed) { d->guest_cr2 = read_cr2(); write_cr2(host_cr2); }
++    }
+     fx_save(d);
+     if (rc) {
+         dom_fail(d, "VM entry failed (VMfail %d, error %llu)", rc, vmread(VMCS_INSTR_ERROR));
+@@ -545,6 +561,7 @@
+         if (rdtsc() - d->last_snapshot_tsc > g_tsc_hz / 100)
+             vmx_snapshot(&g_info->last_exit);
+     }
++    if (d->kind == DK_WIN98) win98_housekeeping();
+     record_state(d, rdtsc());
+     return 0;
+ }
+@@ -568,7 +585,7 @@
+             ++live;
+             if (!pick) {
+                 if (d->state == SHZ_DS_WAITING) {
+-                    const int ready = d->kind == DK_DOS16 ? dos_ready(d, now) : kernel_ready(d, now);
++                    const int ready = d->kind == DK_DOS16 ? dos_ready(d, now) : d->kind == DK_WIN98 ? win98_ready(d, now) : kernel_ready(d, now);
+                     if (ready) {
+                         d->state = SHZ_DS_RUNNABLE;
+                         pick = d;
+@@ -582,8 +599,8 @@
+             break;
+         if (!pick) {
+             /* everything is idle: keep the display and input alive, then spin briefly */
+-            dos_housekeeping();
+-            bios_poll_input();
++            if (info->loader_flags & SHZ_LOADER_NATIVE_WIN98) win98_housekeeping();
++            else { dos_housekeeping(); bios_poll_input(); }
+             pause_cpu();
+             continue;
+         }
+--- a/shizukudos/supervisor/src/kdom.c
++++ b/shizukudos/supervisor/src/kdom.c
+@@ -204,7 +204,7 @@
+             d->chan[c].hpa = hpa;
+             d->chan[c].peer = peers[1 - i];
+             d->chan[c].mapped = 1;
+-            {
++            if (d->kind != DK_WIN98) {
+                 shz_bootinfo_t *bi = (shz_bootinfo_t *)(uintptr_t)(d->ram_base + SHZ_BOOTINFO_GPA);
+                 bi->channel[bi->channel_count].gpa = gpa;
+                 bi->channel[bi->channel_count].size = SHZ_IPC_REGION_SIZE;
+--- a/shizukudos/supervisor/src/devices.c
++++ b/shizukudos/supervisor/src/devices.c
+@@ -18,6 +18,8 @@
+     uint8_t auto_eoi, init_done;
+ };
+ static struct pic pic[2];
++static int external_irq_enabled;
++static void pic_refresh_cascade(void);
+ 
+ static void pic_reset(struct pic *p, uint8_t base)
+ {
+@@ -50,6 +52,20 @@
+             return i;
+     }
+     return -1;
++}
++
++static void pic_refresh_cascade(void)
++{
++    if (!external_irq_enabled) return;
++    if (pic_pick(&pic[1]) >= 0) pic[0].irr |= 4u;
++    else pic[0].irr &= (uint8_t)~4u;
++}
++void dev_irq_raise(unsigned line)
++{
++    if (line >= 16) return;
++    external_irq_enabled = 1;
++    irq_raise((int)line);
++    pic_refresh_cascade();
+ }
+ 
+ int dev_irq_pending(void)
+@@ -72,9 +88,10 @@
+         if (s < 0)
+             return -1;
+         pic[1].irr &= (uint8_t)~(1u << s);
+-        pic[1].isr |= (uint8_t)(1u << s);
++        if (!external_irq_enabled || !pic[1].auto_eoi) pic[1].isr |= (uint8_t)(1u << s);
+         pic[0].irr &= (uint8_t)~4u;
+-        pic[0].isr |= 4u;
++        if (!external_irq_enabled || !pic[0].auto_eoi) pic[0].isr |= 4u;
++        pic_refresh_cascade();
+         return pic[1].base + s;
+     }
+     pic[0].irr &= (uint8_t)~(1u << m);
+@@ -125,6 +142,7 @@
+         default: p->imr = v; break;         /* OCW1 */
+         }
+     }
++    pic_refresh_cascade();
+ }
+ 
+ static uint8_t pic_read(int n, int a0)
+@@ -391,6 +409,7 @@
+ /* ---------------------------------------------------------------- dispatch */
+ void dev_init(uint64_t tsc_hz, uint64_t ram_bytes)
+ {
++    external_irq_enabled = 0;
+     g_tsc_hz = tsc_hz;
+     g_ram_bytes = ram_bytes;
+     g_start_tsc = rdtsc();
+--- a/shizukudos/supervisor/src/devices.h
++++ b/shizukudos/supervisor/src/devices.h
+@@ -17,6 +17,8 @@
+ /* Highest-priority pending unmasked interrupt vector, or -1. Marks it in service. */
+ int dev_ack_irq(void);
+ int dev_irq_pending(void);
++/* Real additive peripheral edge request; first use enables slave cascade modelling. */
++void dev_irq_raise(unsigned line);
+ /* TSC value of the next timer event (for the VMX preemption timer). */
+ uint64_t dev_next_event_tsc(void);
+ /* Guest-visible A20 gate changes must reach the EPT layer. */
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/README.md
+@@ -0,0 +1,38 @@
++# Opt-in installed Windows 98 domain
++
++This candidate boots an installed, privately copied 2 GiB Windows 98 disk inside
++the Supervisor. The existing DOS/default boot path remains the default. Opt-in
++requires `mode=supervisor` and an exact 16-byte `WIN98CFG.BIN` containing the
++versioned magic, 128 MiB RAM profile and zero reserved field. An actual 256 KiB
++SeaBIOS ROM supplies the reset vector, IVT, BIOS data area and boot flow.
++
++The constructor creates an actual VMCS and EPT mapping for RAM and the real ROM,
++then initializes a primary ATA PIO device backed by the owned disk bytes. ATA
++read/write/identify/status and IRQ14 use the same device model as the host
++fixtures. Sector writes publish only after all 512 bytes arrive. Unsupported
++commands return an ATA error. REP IN/OUT emulates bounded real elements,
++segment access, 386 non-PAE page translation, page faults and A/D updates before
++port side effects. PIC cascade support is enabled by actual external IRQ
++raises; the original timer-only path stays unchanged.
++
++`build_candidate.py --out <fresh-owned-directory>` validates inputs only.
++Adding `--build` constructs a separate 2304 MiB ESP, exact owned disk copy,
++SeaBIOS/config files, native K64 and genuine tiny Win64 runtime. Every installed
++payload is read back in full, and the original cold disk is read-leased and
++hashed before/after. The command never executes a VM. It preserves the 17 GiB
++disk floor plus its bounded preparation budget and preserves failed output.
++
++The ordinary native foundation has already run successfully under root-owned
++VM execution. This opt-in Win98 candidate has compiled and passed host device,
++paging, constructor and lease fixtures. Those results do not establish that
++Windows 98 boots, maps a VMM channel, renders a desktop or runs current apps.
++The next gate is a root-owned, offline 4096 MiB L1 with fresh ESP/VARS clones.
++Display currently renders actual B8000 text. VGA graphics, input and installed
++Win98 VMM integration still require actual boot evidence and further generic
++device work. The shared ABI and Kernel64 sources are unchanged by this stage.
++
++The system SeaBIOS binary is pinned independently of the peer's source checkout.
++Original and compiled-source SHA receipts identify all consumed bytes. The
++constructor host fixture uses explicit VMCS/EPT callbacks; it never executes
++VMX. Device/paging fixtures execute the actual production C bodies on host
++memory. They provide semantic checks, not a native Win98 boot claim.
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/ata_pio.c
+@@ -0,0 +1,181 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * Genuine bounded primary-channel master ATA PIO backing. Advertises LBA28 and
++ * synchronous sector writes only; DMA, LBA48 and multiple-sector DRQ are absent.
++ * Unknown commands abort instead of reporting fictitious device completion.
++ */
++#include "ata_pio.h"
++#include <string.h>
++#define READY 0x50u
++#define DRQ 0x08u
++#define ERR 0x01u
++#define ABRT 0x04u
++#define IDNF 0x10u
++
++static void interrupt(w98_ata_t *a)
++{
++    if (!a->irq) {
++        a->irq = 1;
++        if (!(a->control & 2) && a->raise_irq) a->raise_irq(a->opaque);
++    }
++}
++static void abort_command(w98_ata_t *a, uint8_t error)
++{
++    a->error = error; a->status = READY | ERR;
++    a->remaining = a->word = 0; a->writing = a->identify = 0;
++    ++a->rejected_commands; interrupt(a);
++}
++static void reset(w98_ata_t *a)
++{
++    a->features = a->lba1 = a->lba2 = a->error = a->irq = 0;
++    a->lba0 = a->count = 1; a->device = 0xa0;
++    a->status = READY; a->remaining = a->word = 0;
++    a->writing = a->identify = a->command = 0;
++}
++int w98_ata_init(w98_ata_t *a, uint8_t *disk, uint64_t bytes,
++                 void (*raise_irq)(void *), void *opaque)
++{
++    if (!a || !disk || bytes < 512 || bytes > (2ull << 30) || bytes % 512) return -1;
++    memset(a, 0, sizeof *a); a->disk = disk; a->bytes = bytes;
++    a->sectors = (uint32_t)(bytes / 512); a->raise_irq = raise_irq; a->opaque = opaque;
++    reset(a); return 0;
++}
++static void id_word(w98_ata_t *a, unsigned index, uint16_t value)
++{
++    a->buffer[2*index] = (uint8_t)value; a->buffer[2*index+1] = (uint8_t)(value >> 8);
++}
++static void id_string(w98_ata_t *a, unsigned first, unsigned words, const char *s)
++{
++    unsigned i; int ended = 0;
++    for (i = 0; i < words*2; ++i) {
++        uint8_t c = ' ';
++        if (!ended) { if (*s) c = (uint8_t)*s++; else ended = 1; }
++        a->buffer[first*2 + (i ^ 1)] = c;
++    }
++}
++static void identify(w98_ata_t *a)
++{
++    uint32_t cylinders = a->sectors / (16*63);
++    if (cylinders > 16383) cylinders = 16383;
++    memset(a->buffer, 0, sizeof a->buffer);
++    id_word(a, 0, 0x0040); id_word(a, 1, (uint16_t)cylinders);
++    id_word(a, 3, 16); id_word(a, 6, 63);
++    id_string(a, 10, 10, "SHZ-OWNED-RAM-0001");
++    id_string(a, 23, 4, "0.1"); id_string(a, 27, 20, "Shizuku owned RAM ATA PIO disk");
++    id_word(a, 49, 1u << 9); /* LBA supported; DMA deliberately absent. */
++    id_word(a, 53, 1); id_word(a, 54, (uint16_t)cylinders);
++    id_word(a, 55, 16); id_word(a, 56, 63);
++    id_word(a, 57, (uint16_t)(cylinders*16*63)); id_word(a, 58, (uint16_t)((cylinders*16*63) >> 16));
++    id_word(a, 60, (uint16_t)a->sectors); id_word(a, 61, (uint16_t)(a->sectors >> 16));
++    id_word(a, 80, 0x0010); /* ATA-4 revision; no DMA/multiple/LBA48/cache claim. */
++    a->remaining = 1; a->word = 0; a->writing = 0; a->identify = 1;
++    a->status = READY | DRQ; interrupt(a);
++}
++static void update_taskfile(w98_ata_t *a)
++{
++    a->count = (uint8_t)a->remaining;
++    if (a->device & 0x40) {
++        a->lba0 = (uint8_t)a->lba; a->lba1 = (uint8_t)(a->lba >> 8); a->lba2 = (uint8_t)(a->lba >> 16);
++        a->device = (uint8_t)((a->device & 0xf0) | ((a->lba >> 24) & 15));
++    } else {
++        uint32_t cylinder = a->lba / (16*63), remainder = a->lba % (16*63);
++        a->lba0 = (uint8_t)(remainder % 63 + 1);
++        a->lba1 = (uint8_t)cylinder; a->lba2 = (uint8_t)(cylinder >> 8);
++        a->device = (uint8_t)((a->device & 0xf0) | (remainder / 63));
++    }
++}
++static void next_sector(w98_ata_t *a)
++{
++    a->word = 0;
++    if (!a->writing) memcpy(a->buffer, a->disk + (uint64_t)a->lba*512, 512);
++    else memset(a->buffer, 0, 512);
++    a->status = READY | DRQ;
++    if (!a->writing) interrupt(a);
++}
++static void start_command(w98_ata_t *a, uint8_t command)
++{
++    uint32_t lba; unsigned count = a->count ? a->count : 256;
++    a->command = command; a->error = a->irq = 0;
++    a->remaining = a->word = 0; a->writing = a->identify = 0;
++    if (a->device & 0x10) { a->status = 0; return; } /* No slave disk. */
++    if (command == 0xec) { identify(a); return; }
++    if (command == 0xe7) { a->status = READY; interrupt(a); return; } /* All writes already reside in owned backing. */
++    if (command == 0x91 || (command & 0xf0) == 0x10) {
++        /* Fixed geometry accepts matching initialize parameters; recalibrate has no moving head. */
++        if (command == 0x91 && (a->count != 63 || (a->device & 15) != 15)) { abort_command(a, ABRT); return; }
++        a->status = READY; interrupt(a); return;
++    }
++    if (command != 0x20 && command != 0x21 && command != 0x30 && command != 0x31 && command != 0x40 && command != 0x41) {
++        abort_command(a, ABRT); return;
++    }
++    if (a->device & 0x40) {
++        lba = ((uint32_t)(a->device & 15) << 24) | ((uint32_t)a->lba2 << 16) | ((uint32_t)a->lba1 << 8) | a->lba0;
++    } else {
++        if (!a->lba0 || a->lba0 > 63) { abort_command(a, IDNF); return; }
++        lba = (((uint32_t)a->lba2 << 8) | a->lba1)*16*63 + (uint32_t)(a->device & 15)*63 + a->lba0-1;
++    }
++    if (lba >= a->sectors || count > a->sectors-lba) { abort_command(a, IDNF); return; }
++    a->lba = lba; a->remaining = (uint16_t)count;
++    if (command == 0x40 || command == 0x41) {
++        a->lba += count; a->remaining = 0; update_taskfile(a); a->status = READY; interrupt(a); return;
++    }
++    a->writing = command == 0x30 || command == 0x31;
++    next_sector(a);
++}
++static int data_transfer(w98_ata_t *a, unsigned bytes, uint32_t *value, int writing)
++{
++    unsigned i;
++    if ((bytes != 2 && bytes != 4) || !(a->status & DRQ) || a->writing != writing ||
++        a->word + bytes/2 > 256 || !a->remaining) { abort_command(a, ABRT); return -1; }
++    for (i = 0; i < bytes; ++i) {
++        unsigned index = a->word*2 + i;
++        if (writing) a->buffer[index] = (uint8_t)(*value >> (8*i));
++        else *value = (*value & ~(0xffu << (8*i))) | ((uint32_t)a->buffer[index] << (8*i));
++    }
++    a->word = (uint16_t)(a->word + bytes/2);
++    if (a->word == 256) {
++        if (a->identify) { a->identify = 0; a->remaining = 0; a->status = READY; return 0; }
++        if (writing) { memcpy(a->disk + (uint64_t)a->lba*512, a->buffer, 512); ++a->sectors_written; }
++        else ++a->sectors_read;
++        ++a->lba; --a->remaining; update_taskfile(a);
++        a->status = READY;
++        if (writing) interrupt(a);
++        if (a->remaining) next_sector(a);
++    }
++    return 0;
++}
++int w98_ata_in(w98_ata_t *a, uint16_t port, unsigned bytes, uint32_t *value)
++{
++    uint8_t v;
++    if (!a || !value) return 0;
++    if (port == 0x1f0) { *value = 0xffffffffu; (void)data_transfer(a, bytes, value, 0); return 1; }
++    if (port != 0x3f6 && (port < 0x1f1 || port > 0x1f7)) return 0;
++    if (bytes != 1) { abort_command(a, ABRT); *value = 0xffffffffu; return 1; }
++    if (a->device & 0x10) { *value = 0; return 1; }
++    switch (port) {
++    case 0x1f1: v=a->error; break; case 0x1f2: v=a->count; break;
++    case 0x1f3: v=a->lba0; break; case 0x1f4: v=a->lba1; break; case 0x1f5: v=a->lba2; break;
++    case 0x1f6: v=a->device; break; default: v=a->status; if (port==0x1f7) a->irq=0; break;
++    }
++    *value=v; return 1;
++}
++int w98_ata_out(w98_ata_t *a, uint16_t port, unsigned bytes, uint32_t value)
++{
++    if (!a) return 0;
++    if (port==0x1f0) { (void)data_transfer(a,bytes,&value,1); return 1; }
++    if (port != 0x3f6 && (port < 0x1f1 || port > 0x1f7)) return 0;
++    if (bytes != 1) { abort_command(a, ABRT); return 1; }
++    switch(port) {
++    case 0x1f1: a->features=(uint8_t)value; break; case 0x1f2: a->count=(uint8_t)value; break;
++    case 0x1f3: a->lba0=(uint8_t)value; break; case 0x1f4: a->lba1=(uint8_t)value; break;
++    case 0x1f5: a->lba2=(uint8_t)value; break; case 0x1f6: a->device=(uint8_t)value; break;
++    case 0x1f7: if (!(a->control & 4)) start_command(a,(uint8_t)value); break;
++    case 0x3f6: {
++        uint8_t old=a->control; a->control=(uint8_t)value;
++        if (value & 4) { a->status=0x80; a->remaining=a->word=0; a->irq=0; }
++        else if (old & 4) reset(a);
++        if ((old & 2) && !(value & 2) && a->irq && a->raise_irq) a->raise_irq(a->opaque);
++        break;
++    }
++    }
++    return 1;
++}
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/ata_pio.h
+@@ -0,0 +1,23 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef SHZ_WIN98_ATA_PIO_H
++#define SHZ_WIN98_ATA_PIO_H
++#include <stdint.h>
++#define W98_ATA_SECTOR 512u
++typedef struct {
++    uint8_t *disk;
++    uint64_t bytes;
++    uint32_t sectors, lba;
++    uint16_t remaining, word;
++    uint8_t features, count, lba0, lba1, lba2, device, control;
++    uint8_t status, error, command, writing, identify, irq;
++    uint8_t buffer[W98_ATA_SECTOR];
++    void (*raise_irq)(void *opaque);
++    void *opaque;
++    uint64_t sectors_read, sectors_written, rejected_commands;
++} w98_ata_t;
++/* The supplied disk belongs to this VM; there is no host file/device access here. */
++int w98_ata_init(w98_ata_t *, uint8_t *disk, uint64_t bytes,
++                 void (*raise_irq)(void *), void *opaque);
++int w98_ata_in(w98_ata_t *, uint16_t port, unsigned bytes, uint32_t *value);
++int w98_ata_out(w98_ata_t *, uint16_t port, unsigned bytes, uint32_t value);
++#endif
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/build_candidate.py
+@@ -0,0 +1,142 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only
++"""Build a fresh owned opt-in SeaBIOS/Win98 ESP; no VM or existing build writes.
++
++Uses the real current native K64 already root-tested, the frozen new ordinary
++Supervisor payload/EFI, and an exact read-leased copy of the installed cold disk.
++The result is a boot candidate, never evidence that Windows 98 or apps booted.
++"""
++import sys
++sys.dont_write_bytecode=True
++import argparse,contextlib,fcntl,hashlib,importlib.util,json,os,shutil,signal,stat,struct,subprocess
++from pathlib import Path
++ROOT=next(p for p in Path(__file__).resolve().parents if (p/'shizukudos/kbuild.py').is_file())
++BASE=ROOT/'build/modern-apps/native-foundation-current-build-v2'
++COMPILE=ROOT/'build/modern-apps/native-foundation-source-v1/win98-compile-v1'
++BASE_SHA='b65ce5dda18fae3d08f934f1ffdac14bbfb64b07e086296a55e9dd838491aad3'
++COMPILE_SHA='51afab793e996623b3119dec7067605c2a242391a9f2492755bdc6b3baebe5c7'
++COLD=Path('/path/to/your/private-installed-win98.raw')
++COLD_SHA='518d18d5e286cb0eb63065d8d896d0d3ee743289f220fb62083f6176b5925db7'
++ROM=Path('/usr/share/seabios/bios-256k.bin')
++ROM_SHA='9280e87aa94f281b33086df8cf1ad0a0221a9b78e7afe5a7585bc7d3d0234aef'
++
++def stable(s):return s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns
++
++def pinned_hash(path,expected):
++    if not path.is_absolute() or path.resolve()!=path:raise ValueError('canonical pinned file required')
++    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
++    try:
++        before=os.fstat(fd)
++        if not stat.S_ISREG(before.st_mode) or not before.st_size:raise ValueError('nonempty regular input required')
++        digest=hashlib.sha256()
++        while block:=os.read(fd,1<<20):digest.update(block)
++        if stable(before)!=stable(os.fstat(fd)) or stable(before)!=stable(path.stat()) or digest.hexdigest()!=expected:raise ValueError('input SHA/identity drift')
++        return before.st_size
++    finally:os.close(fd)
++
++def file_sha(path):
++    if path.resolve()!=path:raise ValueError('canonical owned artifact required')
++    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
++    try:
++        before=os.fstat(fd)
++        if not stat.S_ISREG(before.st_mode):raise ValueError('regular artifact required')
++        digest=hashlib.sha256()
++        while block:=os.read(fd,1<<20):digest.update(block)
++        if stable(before)!=stable(os.fstat(fd)) or stable(before)!=stable(path.stat()):raise ValueError('artifact changed during hash')
++        return digest.hexdigest()
++    finally:os.close(fd)
++
++def input_pins():
++    receipts={BASE/'foundation-build-receipt.json':BASE_SHA,COMPILE/'result.json':COMPILE_SHA}
++    for p,h in receipts.items():pinned_hash(p,h)
++    base=json.loads((BASE/'foundation-build-receipt.json').read_text());compiled=json.loads((COMPILE/'result.json').read_text())
++    if base['status']!='PASS_NATIVE_FOUNDATION_BUILD_NOT_RUN' or compiled['status']!='PASS_ORDINARY_NATIVE_PAYLOAD_EFI_BUILD_NOT_RUN':raise ValueError('genuine ordinary build receipts required')
++    pins=dict(receipts)
++    for name,digest in base['sources_sha256'].items():pins[BASE/'source'/name]=digest
++    for name,digest in base['artifacts'].items():pins[BASE/name]=digest
++    for name,digest in compiled['source_pins'].items():pins[COMPILE/'source'/name]=digest
++    for name,digest in compiled['artifacts'].items():pins[COMPILE/name]=digest
++    pins[ROM]=ROM_SHA
++    for p,h in pins.items():pinned_hash(p,h)
++    if ROM.stat().st_size!=256<<10:raise ValueError('exact genuine256KiB ROM required')
++    return pins
++
++@contextlib.contextmanager
++def read_leased(path,expected,size):
++    if path.resolve()!=path:raise ValueError('canonical cold source required')
++    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC);previous=signal.getsignal(signal.SIGIO);broken=[False];lease=False
++    try:
++        before=os.fstat(fd)
++        if not stat.S_ISREG(before.st_mode) or before.st_size!=size:raise ValueError('cold disk geometry mismatch')
++        signal.signal(signal.SIGIO,lambda *_:broken.__setitem__(0,True))
++        fcntl.fcntl(fd,fcntl.F_SETOWN,os.getpid());fcntl.fcntl(fd,fcntl.F_SETLEASE,fcntl.F_RDLCK);lease=True
++        def checkpoint():
++            if broken[0] or stable(before)!=stable(os.fstat(fd)) or stable(before)!=stable(path.stat()) or fcntl.fcntl(fd,fcntl.F_GETLEASE)!=fcntl.F_RDLCK:raise RuntimeError('cold source lease/identity changed')
++        checkpoint();digest=hashlib.sha256()
++        while block:=os.read(fd,1<<20):checkpoint();digest.update(block)
++        checkpoint()
++        if digest.hexdigest()!=expected:raise ValueError('cold source SHA mismatch')
++        os.lseek(fd,0,os.SEEK_SET);yield fd,checkpoint
++        checkpoint()
++    finally:
++        if lease:fcntl.fcntl(fd,fcntl.F_SETLEASE,fcntl.F_UNLCK)
++        os.close(fd);signal.signal(signal.SIGIO,previous)
++
++def copy_fd(fd,checkpoint,destination,expected,size):
++    digest=hashlib.sha256();written=0
++    with destination.open('xb') as stream:
++        while block:=os.read(fd,1<<20):
++            checkpoint();space(destination,margin=1<<20);stream.write(block);digest.update(block);written+=len(block)
++        stream.flush();os.fsync(stream.fileno())
++    checkpoint()
++    if written!=size or digest.hexdigest()!=expected:raise ValueError('owned cold copy SHA/extent mismatch')
++    pinned_hash(destination,expected)
++
++def space(out,initial=False,margin=0):
++    required=(17<<30)+((7<<30) if initial else margin)
++    if shutil.disk_usage(out.parent).free<required:raise RuntimeError('17GiB floor plus7GiB initial owned copy/ESP/readback budget required')
++
++def main():
++    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('--out',type=Path,required=True);ap.add_argument('--build',action='store_true');a=ap.parse_args();out=a.out
++    if not out.is_absolute() or out.resolve()!=out or not out.is_relative_to(ROOT/'build/modern-apps') or out.exists():ap.error('fresh canonical output under owned build/modern-apps required')
++    pins=input_pins()
++    if not a.build:
++        with read_leased(COLD,COLD_SHA,2<<30):pass
++        print(json.dumps({'status':'VALIDATED_NO_BUILD_OR_VM','source_pins':len(pins),'cold_source_sha256':COLD_SHA}));return
++    space(out,True);out.mkdir();result={'status':'FAIL_BUILD_PRESERVED','VM_executed':False,'Windows98_boot_verified':False,'native_W64_positive_verified':False,'input_pins':{str(p):h for p,h in pins.items()},'cold_source_sha256':COLD_SHA,'commands':[]}
++    try:
++        with read_leased(COLD,COLD_SHA,2<<30) as (fd,checkpoint):
++            disk=out/'disk-owned.img';copy_fd(fd,checkpoint,disk,COLD_SHA,2<<30)
++            runtime=out/'runtime';(runtime/'kernel64').mkdir(parents=True);(runtime/'win64').mkdir()
++            for name,relative in [('KERNEL64.BIN','kernel64'),('WIN64.IMG','win64')]:
++                source=BASE/'source/build/shizukudos'/relative/name;shutil.copyfile(source,runtime/relative/name)
++            variables=out/'OVMF_VARS.fd';shutil.copyfile(BASE/'OVMF_VARS.fd',variables)
++            sys.path.insert(0,str(COMPILE/'source/shizukudos/tools'));sys.modules.pop('shzlib',None)
++            spec=importlib.util.spec_from_file_location('owned_win98_esp',COMPILE/'source/shizukudos/supervisor/build.py');b=importlib.util.module_from_spec(spec);spec.loader.exec_module(b)
++            b.OUT=out/'esp-build';b.OUT.mkdir();b.BUILD=runtime;b.ESP_MIB=2304
++            def run(command,**kwargs):
++                checkpoint();space(out,margin=2<<30);actual=[str(x) for x in command];result['commands'].append(actual)
++                kwargs.pop('timeout',None);r=subprocess.run(actual,cwd=out,check=True,timeout=900,**({'capture_output':True,'text':True} if kwargs.pop('capture',False) else {}),**kwargs)
++                checkpoint();space(out);return r
++            b.run=run
++            loader=COMPILE/'source/build/shizukudos/supervisor/BOOTX64.EFI';esp=b.build_esp(loader,disk)
++            run(['mmd','-i',esp,'::/EFI/SHIZUKU'],env={'MTOOLS_SKIP_CHECK':'1','PATH':'/usr/bin:/bin'})
++            policy=out/'BOOT.INI';policy.write_bytes(b'mode=supervisor\n')
++            config=out/'WIN98CFG.BIN';config.write_bytes(struct.pack('<4I',0x38395753,1,128,0))
++            bios=out/'SEABIOS.BIN';shutil.copyfile(ROM,bios)
++            for source,target in [(policy,'::/EFI/SHIZUKU/BOOT.INI'),(config,'::/SHZDOS/WIN98CFG.BIN'),(bios,'::/SHZDOS/SEABIOS.BIN')]:run(['mcopy','-i',esp,source,target],env={'MTOOLS_SKIP_CHECK':'1','PATH':'/usr/bin:/bin'})
++            fsck=run(['fsck.vfat','-n',esp],capture=True);(out/'esp-fsck.log').write_text(fsck.stdout+fsck.stderr)
++            # Every payload on the owned ESP is read back in full; pathname alone is no proof.
++            checks=[]
++            for target,source in [('::/SHZDOS/DISK.IMG',disk),('::/SHZDOS/SEABIOS.BIN',bios),('::/SHZDOS/WIN98CFG.BIN',config),('::/SHZDOS/KERNEL64.BIN',runtime/'kernel64/KERNEL64.BIN'),('::/SHZDOS/WIN64.IMG',runtime/'win64/WIN64.IMG'),('::/EFI/BOOT/BOOTX64.EFI',loader)]:
++                extracted=out/('readback-'+source.name);run(['mcopy','-i',esp,target,extracted],env={'MTOOLS_SKIP_CHECK':'1','PATH':'/usr/bin:/bin'})
++                expected=file_sha(source) if source!=disk else COLD_SHA
++                pinned_hash(extracted,expected);checks.append({'ESP_path':target,'SHA':expected,'whole_bytes_verified':True})
++            checkpoint()
++        if input_pins()!=pins:raise RuntimeError('frozen compile/foundation/ROM source drift')
++        pinned_hash(COLD,COLD_SHA)
++        result.update(status='PASS_OWNED_WIN98_BOOT_CANDIDATE_NOT_RUN',readbacks=checks,artifacts={str(p.relative_to(out)):file_sha(p) for p in [esp,variables,config,bios]},cold_source_unchanged=True,source_before_after_match=True,expected_next_gate='root-owned4096MiB actual L1/VMX genuine SeaBIOS boot on isolated installed2GiB Win98 disk; not yet GUI/channel/app verified')
++    except BaseException as exc:result['error']=f'{type(exc).__name__}: {exc}';raise
++    finally:(out/'result.json').write_text(json.dumps(result,indent=2)+'\n')
++    print(json.dumps({'status':result['status'],'receipt':str(out/'result.json')}))
++if __name__=='__main__':main()
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/config.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef SHZ_WIN98_CONFIG_H
++#define SHZ_WIN98_CONFIG_H
++#include <stdint.h>
++#define W98_CONFIG_MAGIC 0x38395753u
++#define W98_CONFIG_VERSION 1u
++#define W98_RAM_MIB 128u
++#define W98_DISK_BYTES (2ull << 30)
++#define W98_ROM_BYTES (256u << 10)
++typedef struct {uint32_t magic,version,ram_mib,reserved;} w98_config_t;
++static inline int w98_config_valid(const w98_config_t *c,uint64_t size)
++{return size==sizeof *c && c->magic==W98_CONFIG_MAGIC && c->version==W98_CONFIG_VERSION && c->ram_mib==W98_RAM_MIB && !c->reserved;}
++#endif
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/string_pio.c
+@@ -0,0 +1,113 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#include "string_pio.h"
++#define PE 1u
++#define WP 0x10000u
++#define PG 0x80000000u
++#define PSE 0x10u
++#define PAE 0x20u
++static uint32_t get32(const uint8_t *p)
++{
++    return (uint32_t)p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
++}
++static void put32(uint8_t *p, uint32_t v)
++{
++    unsigned n; for(n=0;n<4;++n) p[n]=(uint8_t)(v>>(8*n));
++}
++struct resolved { uint8_t *byte, *pde, *pte; uint32_t directory, table; };
++static int fault(w98_io_fault_t *f, unsigned vector, unsigned error, uint32_t linear)
++{
++    f->vector=vector; f->error=error; f->linear=linear; return -1;
++}
++/* Non-PAE 386 paging; no invented translation for unsupported PAE/PSE-36. */
++static int resolve(w98_memory_t *m, uint32_t linear, int write, struct resolved *r, w98_io_fault_t *f)
++{
++    uint32_t gpa=linear, pde=0, pte=0, error=(write?2u:0u)|(m->cpl==3?4u:0u);
++    r->pde=r->pte=0;
++    if(m->cr0&PG) {
++        uint8_t *p;
++        if(!(m->cr0&PE) || m->cr4&PAE) return -2;
++        p=m->physical(m->opaque,(m->cr3&0xfffff000u)+((linear>>22)*4),4,0);
++        if(!p) return -2;
++        pde=get32(p);
++        if(!(pde&1)) return fault(f,14,error,linear);
++        if(pde&0x80) {
++            if(!(m->cr4&PSE) || pde&0x003fe000u) return fault(f,14,error|9u,linear);
++            gpa=(pde&0xffc00000u)|(linear&0x003fffffu);
++        } else {
++            p=m->physical(m->opaque,(pde&0xfffff000u)+(((linear>>12)&1023u)*4),4,0);
++            if(!p) return -2;
++            pte=get32(p);
++            if(!(pte&1)) return fault(f,14,error,linear);
++            gpa=(pte&0xfffff000u)|(linear&4095u);
++        }
++        if((m->cpl==3 && (!(pde&4) || (!(pde&0x80) && !(pte&4)))) ||
++           (write && (m->cpl==3 || m->cr0&WP) && (!(pde&2) || (!(pde&0x80) && !(pte&2)))))
++            return fault(f,14,error|1u,linear);
++        r->pde=m->physical(m->opaque,(m->cr3&0xfffff000u)+((linear>>22)*4),4,1);
++        if(!r->pde) return -2;
++        r->directory=pde|0x20u|((write && pde&0x80)?0x40u:0u);
++        if(!(pde&0x80)) {
++            r->pte=m->physical(m->opaque,(pde&0xfffff000u)+(((linear>>12)&1023u)*4),4,1);
++            if(!r->pte) return -2;
++            r->table=pte|0x20u|(write?0x40u:0u);
++        }
++    }
++    r->byte=m->physical(m->opaque,gpa,1,write);
++    return r->byte?0:-2;
++}
++static uint64_t assign_index(uint64_t original, uint32_t value, unsigned bits)
++{
++    return bits==16 ? (original&~0xffffull)|(value&0xffffu) : value;
++}
++int w98_string_pio(w98_memory_t *m, w98_string_io_t *s, const w98_ports_t *p, w98_io_fault_t *f, unsigned budget)
++{
++    uint32_t mask, count, index;
++    unsigned done=0;
++    f->vector=f->error=f->linear=f->completed=0;
++    if((s->address_bits!=16 && s->address_bits!=32) ||
++       (s->width!=1 && s->width!=2 && s->width!=4) || !budget || budget>64) return -2;
++    mask=s->address_bits==16?0xffffu:0xffffffffu;
++    count=s->repeat?(uint32_t)s->count&mask:1;
++    index=(uint32_t)s->index&mask;
++    if(!count) return 0;
++    while(count && done<budget) {
++        struct resolved bytes[4];
++        uint32_t linear=s->segment_base+index, value=0, last;
++        unsigned n;int rc;
++        if(index>0xffffffffu-(s->width-1)) return fault(f,s->segment_is_ss?12:13,0,linear);
++        last=index+s->width-1;
++        if(s->segment_ar&0x10000u || !(s->segment_ar&0x80u) || !(s->segment_ar&0x10u) ||
++           (s->input && ((s->segment_ar&8u) || !(s->segment_ar&2u))) ||
++           (!s->input && (s->segment_ar&8u) && !(s->segment_ar&2u))) return fault(f,s->segment_is_ss?12:13,0,linear);
++        /* Data expand-down: limit is the excluded lower bound; D/B selects upper bound. */
++        if(!(s->segment_ar&8u) && s->segment_ar&4u) {
++            uint32_t top=s->segment_ar&0x4000u?0xffffffffu:0xffffu;
++            if(index<=s->segment_limit || last>top) return fault(f,s->segment_is_ss?12:13,0,linear);
++        } else if(last>s->segment_limit) return fault(f,s->segment_is_ss?12:13,0,linear);
++        if(s->alignment_check && (linear&(s->width-1))) return fault(f,17,0,linear);
++        /* Resolve every byte before any port side effect, including a split-page element. */
++        for(n=0;n<s->width;++n) {
++            rc=resolve(m,linear+n,(int)s->input,&bytes[n],f);
++            if(rc) return rc;
++        }
++        /* The walk precedes the operand operation. A target that aliases its own
++         * page table must overwrite A/D bits just as a hardware store would. */
++        for(n=0;n<s->width;++n) {
++            if(bytes[n].pde) put32(bytes[n].pde,get32(bytes[n].pde)|(bytes[n].directory&0x60u));
++            if(bytes[n].pte) put32(bytes[n].pte,get32(bytes[n].pte)|(bytes[n].table&0x60u));
++        }
++        if(s->input) {
++            if(!p->input(p->opaque,s->port,s->width,&value)) return -3;
++            for(n=0;n<s->width;++n) *bytes[n].byte=(uint8_t)(value>>(n*8));
++        } else {
++            for(n=0;n<s->width;++n) value|=(uint32_t)*bytes[n].byte<<(n*8);
++            if(!p->output(p->opaque,s->port,s->width,value)) return -3;
++        }
++        index=(s->direction_down?index-s->width:index+s->width)&mask;
++        s->index=assign_index(s->index,index,s->address_bits);
++        ++done;f->completed=done;
++        if(s->repeat) { --count; s->count=assign_index(s->count,count,s->address_bits); }
++        else count=0;
++    }
++    return count?1:0;
++}
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/string_pio.h
+@@ -0,0 +1,32 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef SHZ_WIN98_STRING_PIO_H
++#define SHZ_WIN98_STRING_PIO_H
++#include <stdint.h>
++/* Only actual domain-owned guest physical memory is returned by this callback. */
++typedef struct {
++    void *opaque;
++    uint8_t *(*physical)(void *, uint32_t gpa, unsigned bytes, int write);
++    uint32_t cr0, cr3, cr4;
++    unsigned cpl;
++} w98_memory_t;
++typedef struct {
++    uint64_t index, count;
++    uint32_t segment_base, segment_limit, segment_ar;
++    unsigned address_bits, width, input, repeat, direction_down, alignment_check, segment_is_ss;
++    uint16_t port;
++} w98_string_io_t;
++typedef struct {
++    unsigned vector, error;
++    uint32_t linear;
++    unsigned completed;
++} w98_io_fault_t;
++typedef struct {
++    void *opaque;
++    int (*input)(void *, uint16_t, unsigned, uint32_t *);
++    int (*output)(void *, uint16_t, unsigned, uint32_t);
++} w98_ports_t;
++/* 0 complete, 1 bounded progress/re-enter, -1 architectural fault,
++ * -2 unsupported addressing/physical mapping, -3 unsupported port.
++ * A failing transfer performs no port operation for that element. */
++int w98_string_pio(w98_memory_t *, w98_string_io_t *, const w98_ports_t *, w98_io_fault_t *, unsigned budget);
++#endif
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/win98.c
+@@ -0,0 +1,164 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * Explicit installed-Win98 domain. Executes genuine SeaBIOS on an actual VMCS;
++ * the BIOS constructs its own IVT/BDA/boot flow. No Shizuku low-memory bootinfo.
++ */
++#include "win98.h"
++#include "config.h"
++#include "ata_pio.h"
++#include "string_pio.h"
++#include "../src/console.h"
++#include "../src/cpu.h"
++#include "../src/devices.h"
++#include "../src/guest.h"
++#include "../src/pool.h"
++#include "../src/video.h"
++static domain_t *w98;
++static w98_ata_t ata;
++static const shz_blob_t *rom;
++static uint64_t last_render;
++static const shz_blob_t *find_rom(const shz_info_t *info)
++{
++    static const char name[]="SEABIOS.BIN";
++    unsigned i,k;
++    for(i=0;i<SHZ_MAX_BLOBS;++i) {
++        for(k=0;k<sizeof name && info->blobs[i].name[k]==name[k];++k) {}
++        if(k==sizeof name && info->blobs[i].size) return &info->blobs[i];
++    }
++    return 0;
++}
++static void uart_tx(uint8_t c)
++{
++    serial_putc((char)c);++G.info->guest_console_bytes;
++}
++static void ata_irq(void *unused)
++{
++    (void)unused;dev_irq_raise(14);
++}
++int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
++{
++    domain_t *d=&g_dom[SHZ_DOM_WIN98];vmx_cfg_t cfg;uint8_t *ram;
++    rom=find_rom(info);
++    if(!(info->loader_flags&SHZ_LOADER_NATIVE_WIN98) || !rom || rom->size!=W98_ROM_BYTES ||
++       (rom->base&4095) || !info->guest_ram_base || (info->guest_ram_base&4095) ||
++       info->guest_ram_size!=(uint64_t)W98_RAM_MIB<<20 || !info->disk_base || info->disk_size!=W98_DISK_BYTES) {
++        log_capture(info->last_error,sizeof info->last_error,"invalid explicit Win98 RAM/disk/SeaBIOS geometry");return -1;
++    }
++    memset(d,0,sizeof *d);memset(&cfg,0,sizeof cfg);
++    d->id=SHZ_DOM_WIN98;d->name="WIN98";d->kind=DK_WIN98;d->generation=1;
++    d->ram_base=info->guest_ram_base;d->ram_size=info->guest_ram_size;
++    d->fx[0]=0x7f;d->fx[1]=3;d->fx[24]=0x80;d->fx[25]=0x1f;
++    ram=(uint8_t *)(uintptr_t)d->ram_base;memset(ram,0,d->ram_size);
++    /* Standard ISA alias is the final128KiB; full ROM is also mapped at the top
++     * of the real32-bit physical bus for SeaBIOS's genuine protected-mode code. */
++    memcpy(ram+0xe0000,(const void *)(uintptr_t)(rom->base+rom->size-0x20000),0x20000);
++    if(ept_init(&d->ept) || ept_map(&d->ept,0,d->ram_base,d->ram_size,EPT_RWX|EPT_WB,1) ||
++       ept_map(&d->ept,0x100000000ull-rom->size,rom->base,rom->size,EPT_R|EPT_X|EPT_WB,1)) {
++        log_capture(info->last_error,sizeof info->last_error,"Win98 EPT RAM/real-ROM construction failed");return -1;
++    }
++    d->io_bitmap_a=pool_alloc_pages(1);d->io_bitmap_b=pool_alloc_pages(1);d->msr_bitmap=pool_alloc_pages(1);cfg.vmcs=pool_alloc_pages(1);
++    if(!d->io_bitmap_a || !d->io_bitmap_b || !d->msr_bitmap || !cfg.vmcs) {
++        log_capture(info->last_error,sizeof info->last_error,"Win98 Supervisor pool exhausted");return -1;
++    }
++    memset(d->io_bitmap_a,0xff,4096);memset(d->io_bitmap_b,0xff,4096);memset(d->msr_bitmap,0xff,4096);
++    G.info=info;G.vc=&d->vc;G.ram_base=d->ram_base;G.ram_size=d->ram_size;G.tsc_hz=info->tsc_hz;
++    dev_init(info->tsc_hz,d->ram_size);dev_uart_tx_hook=uart_tx;
++    if(w98_ata_init(&ata,(uint8_t *)(uintptr_t)info->disk_base,info->disk_size,ata_irq,0)) return -1;
++    cfg.io_bitmap_a=d->io_bitmap_a;cfg.io_bitmap_b=d->io_bitmap_b;cfg.msr_bitmap=d->msr_bitmap;
++    cfg.mode=VMODE_REAL;cfg.eptp=ept_pointer(&d->ept);cfg.vpid=SHZ_DOM_WIN98;
++    cfg.cs_sel=0xf000;cfg.rip=0xfff0;cfg.rsp=0;cfg.cr3=0;
++    if(vmx_vcpu_init(&d->vc,info,caps,&cfg)) return -1;
++    w98=d;d->state=SHZ_DS_RUNNABLE;
++    info->domains[d->id].kind=d->kind;info->domains[d->id].generation=d->generation;info->domains[d->id].state=d->state;
++    kprintf("SHZ: real Win98 VMCS created RAM=%lluMiB SeaBIOS=%llu owned ATA=%llu bytes (boot unverified)\n",d->ram_size>>20,rom->size,ata.bytes);
++    return 0;
++}
++static uint8_t *physical(void *opaque,uint32_t gpa,unsigned bytes,int write)
++{
++    domain_t *d=opaque;
++    if(!dev_a20_get()) gpa&=~0x100000u;
++    if(gpa>=0x100000000ull-rom->size) {
++        const uint64_t offset=gpa-(0x100000000ull-rom->size);
++        if(write || bytes>rom->size-offset) return 0;
++        return (uint8_t *)(uintptr_t)(rom->base+offset);
++    }
++    return dom_gpa_ptr(d,gpa,bytes);
++}
++static int input(void *unused,uint16_t port,unsigned bytes,uint32_t *value)
++{
++    (void)unused;
++    if(w98_ata_in(&ata,port,bytes,value) || dev_pio_in(port,(int)bytes,value)) return 1;
++    ++G.info->io_unhandled;*value=0xffffffffu;return 1; /* absent hardware floats high */
++}
++static int output(void *unused,uint16_t port,unsigned bytes,uint32_t value)
++{
++    (void)unused;
++    if(w98_ata_out(&ata,port,bytes,value) || dev_pio_out(port,(int)bytes,value)) return 1;
++    if(port==0x402) {uart_tx((uint8_t)value);return 1;} /* SeaBIOS genuine debug output */
++    ++G.info->io_unhandled;return 1; /* no device consumes an absent port write */
++}
++static void handle_io(domain_t *d)
++{
++    uint64_t q=vmread(VMCS_EXIT_QUAL);unsigned bytes=(unsigned)(q&7)+1;
++    const int in=(int)((q>>3)&1);uint16_t port=(uint16_t)(q>>16);uint32_t value;
++    ++G.info->io_exits;
++    if(bytes!=1 && bytes!=2 && bytes!=4) {dom_fail(d,"invalid Win98 port width");return;}
++    if(q&0x10) {
++        uint64_t instruction=vmread(VMCS_EXIT_INSTR_INFO),flags=vmread(VMCS_GUEST_RFLAGS);
++        const unsigned address=(unsigned)((instruction>>7)&7),segment=in?0:(unsigned)((instruction>>15)&7);
++        const unsigned reg=in?GPR_RDI:GPR_RSI;
++        w98_memory_t memory={d,physical,(uint32_t)vmread(VMCS_GUEST_CR0),(uint32_t)vmread(VMCS_GUEST_CR3),(uint32_t)vmread(VMCS_GUEST_CR4),(unsigned)(vmread(VMCS_GUEST_CS_SEL)&3)};
++        w98_string_io_t s;w98_io_fault_t f;const w98_ports_t ports={d,input,output};int rc;
++        if(address>1 || segment>5) {dom_fail(d,"unsupported Win98 string addressing");return;}
++        if(flags&0x20000) memory.cpl=3;
++        memset(&s,0,sizeof s);s.index=d->vc.gpr[reg];s.count=d->vc.gpr[GPR_RCX];
++        s.segment_base=(uint32_t)vmread(VMCS_GUEST_ES_BASE+segment*2);
++        s.segment_limit=(uint32_t)vmread(VMCS_GUEST_ES_LIMIT+segment*2);
++        s.segment_ar=(uint32_t)vmread(VMCS_GUEST_ES_AR+segment*2);
++        s.address_bits=address==0?16:32;s.width=bytes;s.input=(unsigned)in;s.repeat=(unsigned)((q>>5)&1);
++        s.direction_down=(unsigned)((flags>>10)&1);s.alignment_check=memory.cpl==3 && (memory.cr0&0x40000) && (flags&0x40000);s.segment_is_ss=segment==2;s.port=port;
++        rc=w98_string_pio(&memory,&s,&ports,&f,64);
++        d->vc.gpr[reg]=s.index;d->vc.gpr[GPR_RCX]=s.count;
++        if(rc==0) dom_advance_rip();
++        else if(rc==-1) {
++            if(f.vector==14) d->guest_cr2=f.linear;
++            vmx_inject_exception((uint8_t)f.vector,1,f.error);
++        } else if(rc<0) dom_fail(d,"unimplemented Win98 string mapping/port %x rc=%d",port,rc);
++        return; /* bounded progress keeps RIP on REP and reschedules genuine remaining elements */
++    }
++    if(in) {
++        input(d,port,bytes,&value);
++        if(bytes==1) d->vc.gpr[GPR_RAX]=(d->vc.gpr[GPR_RAX]&~0xffull)|(value&0xff);
++        else if(bytes==2) d->vc.gpr[GPR_RAX]=(d->vc.gpr[GPR_RAX]&~0xffffull)|(value&0xffff);
++        else d->vc.gpr[GPR_RAX]=value;
++    } else output(d,port,bytes,(uint32_t)d->vc.gpr[GPR_RAX]);
++    dom_advance_rip();
++}
++int win98_handle_exit(domain_t *d,uint32_t reason)
++{
++    if(reason==EXIT_IO) {handle_io(d);return 1;}
++    if(reason==EXIT_HLT) {
++        dom_advance_rip();
++        if(!(vmread(VMCS_GUEST_RFLAGS)&0x200)) dom_fail(d,"Win98 halted with interrupts disabled");
++        else d->state=SHZ_DS_WAITING;
++        return 1;
++    }
++    return 0;
++}
++int win98_ready(domain_t *d,uint64_t now)
++{
++    dev_poll(now);
++    return dev_irq_pending() || (d->doorbell_vector && d->doorbell_pending && !d->doorbell_signaled);
++}
++void win98_housekeeping(void)
++{
++    if(!w98 || w98->state==SHZ_DS_FAILED || w98->state==SHZ_DS_EXITED) return;
++    if(dev_a20_dirty) {
++        uint64_t gpa;dev_a20_dirty=0;
++        for(gpa=0x100000;gpa<w98->ram_size;gpa+=4096) if(gpa&0x100000) {
++            const uint64_t physical=w98->ram_base+(dev_a20_get()?gpa:gpa&~0x100000ull);
++            if(ept_remap_page(&w98->ept,gpa,physical,EPT_RWX|EPT_WB)) {dom_fail(w98,"Win98 A20 EPT update failed");return;}
++        }
++        ept_invalidate();
++    }
++    if(rdtsc()-last_render>G.tsc_hz/20) {last_render=rdtsc();video_render();}
++}
+--- /dev/null
++++ b/shizukudos/supervisor/native_win98/win98.h
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef SHZ_WIN98_DOMAIN_H
++#define SHZ_WIN98_DOMAIN_H
++#include "../src/domain.h"
++int win98_domain_create(shz_info_t *,const shz_caps_t *);
++int win98_handle_exit(domain_t *,uint32_t);
++int win98_ready(domain_t *,uint64_t);
++void win98_housekeeping(void);
++#endif

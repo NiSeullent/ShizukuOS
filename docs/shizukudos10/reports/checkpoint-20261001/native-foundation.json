@@ -1,0 +1,205 @@
+{
+  "schema": 1,
+  "source_record": {
+    "repository_relative_path": "build/modern-apps/native-foundation-k64-actual-v1/result.json",
+    "sha256": "fa1b4238bdf4515292d18878ea417dd77a13354e85086cf712d78bdb0eda8d0f"
+  },
+  "status": "PASS",
+  "VM_executed": true,
+  "Windows98_positive_verified": false,
+  "K32_IPC_configured_or_verified": false,
+  "checks": [
+    {
+      "check": "actual handoff magic/version/size",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "Supervisor guest-exit stage",
+      "status": "PASS",
+      "detail": "GUEST_EXIT"
+    },
+    {
+      "check": "real L1 VMX/EPT/unrestricted backend",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "actual CPU vendor/native backend error-free",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "Supervisor root64 paging/VMXE",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "DOS genuine first/last real-mode VMCS",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "DOS actual normal exit request0",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "virtual timer/real I/O/hypercalls",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "configured DOS16/nativeK64 only",
+      "status": "PASS",
+      "detail": "['DOS16', 'KERNEL64']"
+    },
+    {
+      "check": "DOS actual domain exit0/no error",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "native K64 actual exit0/no domain error",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "K64 real Long Mode VMCS/higher-half RIP",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "K64 guest CR0/CR3 matches VMCS",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "native timer/thread/mutex/heap/demand-page tests",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "native genuine SSE ring3 exits42/42",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "native actual faults contained",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "native ring3 real8GiB address/pattern",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "native user exception counts",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "native physical pages returned",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "K64 completion marker/zero self-test failures",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "real T_HELLO twice exit7/reaped/no fault",
+      "status": "PASS",
+      "detail": "0x600000007"
+    },
+    {
+      "check": "app-written actual above4GiB/AMD64/argc2",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "second real app no page leak and3 initrd files",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "both actual app console markers",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "RESULT.TXT exists",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "T_MODE real mode (CR0.PE=0, EFLAGS.VM=0)",
+      "status": "PASS",
+      "detail": "T_MODE PASS CR0=00000010 CR4=00000000 EFL=00000246"
+    },
+    {
+      "check": "T_BIOS platform contract",
+      "status": "PASS",
+      "detail": "T_BIOS PASS CONV=0000027F EXT=0000FC00 EQUIP=00000222"
+    },
+    {
+      "check": "T_COM DOS services",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "T_EXE MZ program",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "T_EXE exit code 42 seen by batch file",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "batch completed",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "T_COM.OUT contents",
+      "status": "PASS",
+      "detail": "b'SHZ-COM-FILE-OK 0123456789ABCDEF\\r\\n'"
+    },
+    {
+      "check": "T_EXE.OUT 400 lines byte-exact",
+      "status": "PASS",
+      "detail": "7200 bytes"
+    },
+    {
+      "check": "kernel banner shows ShizukuDOS branding",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "check": "independent L0/KVM registers match actual DOS/Supervisor-root/native VMCS",
+      "status": "PASS",
+      "detail": "[{'DOS_real_mode': False, 'Supervisor_VMX_root': True, 'native_K64_long_mode': False}, {'DOS_real_mode': False, 'Supervisor_VMX_root': True, 'native_K64_long_mode': False}]"
+    },
+    {
+      "check": "owned QEMU normal exit0",
+      "status": "PASS",
+      "detail": "0"
+    },
+    {
+      "check": "frozen221-source/six-artifact/reader/firmware inputs unchanged",
+      "status": "PASS",
+      "detail": ""
+    }
+  ],
+  "DOS_result_text": "T_MODE PASS CR0=00000010 CR4=00000000 EFL=00000246\nT_BIOS PASS CONV=0000027F EXT=0000FC00 EQUIP=00000222\nT_COM PASS\nT_EXE PASS argc=3\nT_EXE_EXITCODE PASS\nDONE\n",
+  "qemu_exit_code": 0,
+  "owned_QEMU_stopped": true,
+  "frozen_inputs_unchanged": true,
+  "actual_pass_count": 37,
+  "scope": "Genuine Supervisor VMX/EPT native K64 and two console PE exits of 7; configured domains were DOS16 and KERNEL64. Installed Windows 98 and its VMM/app channel were not tested by this result.",
+  "curation_note": "Recorded check labels/details retained except development filesystem prefixes removed; VMX mode label clarified as DOS, Supervisor-root and native."
+}

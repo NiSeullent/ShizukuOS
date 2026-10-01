@@ -189,25 +189,11 @@
   ],
   "current_checkpoint": {
     "native_compatibility_kernel": "UEFI/VMX/EPT standalone Kernel64 foundation passed37 checks. Installed Windows98 constructor/bridge and modern app functionality remain pending.",
-    "office": "Latest LibreOffice26.8.0.3 previous startup stopped at missing SetSearchPathMode; actual V44 shared search-path contract passed50checks. Full app retry/document functionality remain pending.",
-    "firefox": "Official Firefox157.0 package verified; previous startup stopped at missing OpenProcessToken. Actual V44 token19/RTL57/file37guest contract checks passed; full Firefox startup/GUI remain pending.",
+    "office": "Latest LibreOffice26.8.0.3 startup stopped at missing SetSearchPathMode; new shared implementation is staged for guest validation.",
+    "firefox": "Official Firefox157.0 package verified; startup stopped at missing OpenProcessToken; new shared implementation is staged for guest validation.",
     "google_chrome": "Official enterprise MSI downloaded and SHA-256 retained; embedded browser payload/version and startup are not yet verified.",
-    "steam": "Original client previous startup stopped at missing Module32Next. Actual V44 common module enumeration contract passed45checks; actual Steam CEF/login/library/game remain pending.",
+    "steam": "Original client startup stopped at missing Module32Next; corrected common module enumeration awaits actual guest verification.",
     "ordinary_v43": "Full ordinary build failed at parent-child fixture console linkage. The failure is preserved; no runtime archive or actual VM pass is claimed.",
-    "release_0_9_complete": false,
-    "ordinary_v44": "PASS ordinary NTDLL/KERNEL32/UCRT and7 actual native test EXEs. Static443imports verified; six real standalone guest API contracts passed252checks with normalexit0 and unchanged inputs.",
-    "v44_contract_checks": {
-      "module_enumeration": 45,
-      "search_path": 50,
-      "token": 19,
-      "ucrt_legacy": 44,
-      "create_file2_copy_file2": 37,
-      "rtl_bootstrap": 57,
-      "total": 252,
-      "platform": "ShizukuDOS Kernel64 standalone",
-      "native_windows98": false,
-      "application_functionality": false
-    }
-  },
-  "v44_contract_record": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/v44-contracts.json"
+    "release_0_9_complete": false
+  }
 }

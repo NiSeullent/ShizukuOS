@@ -1,0 +1,117 @@
+{
+  "status": "COMPLETE_OFFICIAL_GOOGLE_CHROME_154_PACKAGE_STATIC_VERIFICATION_PASS_GUEST_PENDING",
+  "closed_at_utc": "2026-10-01T12:49:23.130014+00:00",
+  "browser_version": "154.0.8037.93",
+  "official_source": "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi",
+  "official_final_url": "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi",
+  "version_scope": "MSI updater resource 156.0.8067.0 is a wrapper version; extracted browser, offline manifest and all three browser core PEs identify 154.0.8037.93. Latest metadata is retained win64/stable versions list, not inferred from MSI filename.",
+  "core_pe_identities": {
+    "154.0.8037.93/chrome.dll": {
+      "path": "154.0.8037.93/chrome.dll",
+      "bytes": 302709400,
+      "sha256": "3a4c451878fc9fef50a84463d06724ad09e54b6bce03d74285c3544eb1947fd3",
+      "machine": "0x8664",
+      "size_image": 305598464,
+      "image_base": "0x180000000",
+      "version_resources": [
+        {
+          "CompanyName": "Google LLC",
+          "FileDescription": "Google Chrome",
+          "FileVersion": "154.0.8037.93",
+          "InternalName": "chrome_dll",
+          "LegalCopyright": "Copyright 2026 Google LLC. All rights reserved.",
+          "OriginalFilename": "chrome.dll",
+          "ProductName": "Google Chrome",
+          "ProductVersion": "154.0.8037.93",
+          "CompanyShortName": "Google",
+          "ProductShortName": "Chrome",
+          "LastChange": "f89f3a4363808e117c592adedcf9947882ac3b79-refs/branch-heads/8037@{#1590}",
+          "Official Build": "1"
+        }
+      ],
+      "debug": [
+        {
+          "guid": "7f3c21a9-74c5-532d-4c4c-44205044422e",
+          "age": 1,
+          "pdb": "chrome.dll.pdb"
+        }
+      ]
+    },
+    "154.0.8037.93/chrome_elf.dll": {
+      "path": "154.0.8037.93/chrome_elf.dll",
+      "bytes": 2804888,
+      "sha256": "9a7f6582209029edcadd6a4c61abd034bd50feb80e5e2d5e18ea2a6bfc0af264",
+      "machine": "0x8664",
+      "size_image": 2977792,
+      "image_base": "0x180000000",
+      "version_resources": [
+        {
+          "CompanyName": "Google LLC",
+          "FileDescription": "Google Chrome",
+          "FileVersion": "154.0.8037.93",
+          "InternalName": "chrome_elf_dll",
+          "LegalCopyright": "Copyright 2026 Google LLC. All rights reserved.",
+          "OriginalFilename": "chrome_elf.dll",
+          "ProductName": "Google Chrome",
+          "ProductVersion": "154.0.8037.93",
+          "CompanyShortName": "Google",
+          "ProductShortName": "Chrome",
+          "LastChange": "f89f3a4363808e117c592adedcf9947882ac3b79-refs/branch-heads/8037@{#1590}",
+          "Official Build": "1"
+        }
+      ],
+      "debug": [
+        {
+          "guid": "11eaf490-5bbc-1cb1-4c4c-44205044422e",
+          "age": 1,
+          "pdb": "chrome_elf.dll.pdb"
+        }
+      ]
+    },
+    "chrome.exe": {
+      "path": "chrome.exe",
+      "bytes": 4512408,
+      "sha256": "1e9412868bbc9faff92d129babd17331e7ceab0702cc07db02a34f3438ae04f2",
+      "machine": "0x8664",
+      "size_image": 4603904,
+      "image_base": "0x140000000",
+      "version_resources": [
+        {
+          "CompanyName": "Google LLC",
+          "FileDescription": "Google Chrome",
+          "FileVersion": "154.0.8037.93",
+          "InternalName": "chrome_exe",
+          "LegalCopyright": "Copyright 2026 Google LLC. All rights reserved.",
+          "OriginalFilename": "chrome.exe",
+          "ProductName": "Google Chrome",
+          "ProductVersion": "154.0.8037.93",
+          "CompanyShortName": "Google",
+          "ProductShortName": "Chrome",
+          "LastChange": "f89f3a4363808e117c592adedcf9947882ac3b79-refs/branch-heads/8037@{#1590}",
+          "Official Build": "1"
+        }
+      ],
+      "debug": [
+        {
+          "guid": "fca3a130-ba40-4db0-4c4c-44205044422e",
+          "age": 1,
+          "pdb": "chrome.exe.pdb"
+        }
+      ]
+    }
+  },
+  "complete_browser_file_count": 267,
+  "complete_browser_bytes": 511700188,
+  "file_inventory_sha256_algorithm": "sha256 of json.dumps(files,sort_keys=True,separators=(comma,colon)).encode(UTF8)",
+  "file_inventory_sha256": "4285b0756eb9fb9bfee81c824058d76c0432a077dc288a2d913f63cf33387dfd",
+  "all_archive_entries_CRC_verified": true,
+  "all_complete_browser_file_sha256_reverified": true,
+  "vendor_executables_unmodified": true,
+  "authenticode_signature_validation_performed": false,
+  "host_installer_or_browser_executed": false,
+  "guest_executed": false,
+  "app_functionality_verified": false,
+  "windows98_execution_verified": false,
+  "original_receipt_sha256": "a1c7e8cf9c6a34bdff9d0c8087262b46f33bd074caefb35809c06362dfd08758",
+  "schema": "win98modern.google-chrome-extraction-checkpoint.v1"
+}

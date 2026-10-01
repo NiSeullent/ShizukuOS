@@ -1,0 +1,190 @@
+{
+  "schema": 1,
+  "status": "SOURCE_CANDIDATES_HOST_AND_NATIVE_LINK_VALIDATED_ACTUAL_INSTALLED_WIN98_BOOT_PENDING",
+  "source_receipt": {
+    "repository_relative_path": "build/modern-apps/native-foundation-source-v1/win98-candidate-source-receipt-v1.json",
+    "sha256": "6031b293d3a310b96c49698c3e4b7ec8ec7a7ecd13632f1cb8da097fe7f5aefb"
+  },
+  "source_count": 18,
+  "entries": [
+    {
+      "path": "source/shizukudos/supervisor/include/shz_info.h",
+      "original_sha256": "03ede36a69488ca96ecdc25d5f379e851c960e9580eab59b06f352e90df3bda7",
+      "export_sha256": "03ede36a69488ca96ecdc25d5f379e851c960e9580eab59b06f352e90df3bda7",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/loader/bootini.h",
+      "original_sha256": "5d9f969fc05c91528b235ca3bba66974a14d20e519f1ae52c1071bb816c49b0a",
+      "export_sha256": "5d9f969fc05c91528b235ca3bba66974a14d20e519f1ae52c1071bb816c49b0a",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/loader/loader.c",
+      "original_sha256": "3cb33444388a0d9fb823583002ba3a867db81e75e3c8147336a53179fb4aaef1",
+      "export_sha256": "3cb33444388a0d9fb823583002ba3a867db81e75e3c8147336a53179fb4aaef1",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/README.md",
+      "original_sha256": "be02510af8e516a4e5e887b15f7e24fbe6157aa5f3e398940846981410797ea1",
+      "export_sha256": "be02510af8e516a4e5e887b15f7e24fbe6157aa5f3e398940846981410797ea1",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/ata_pio.c",
+      "original_sha256": "f8ee1059fe317bc25aa375d9d59353d96567a0cabc0fa70dd2a2f4b30c02e89b",
+      "export_sha256": "f8ee1059fe317bc25aa375d9d59353d96567a0cabc0fa70dd2a2f4b30c02e89b",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/ata_pio.h",
+      "original_sha256": "766c900b0185ab25f2542ed64cac13793e3c78b984d3db7cc53281b14ce7cfc0",
+      "export_sha256": "766c900b0185ab25f2542ed64cac13793e3c78b984d3db7cc53281b14ce7cfc0",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/build_candidate.py",
+      "original_sha256": "717e51cd5992376eaf199839b5bd6d2013212835e5c422f26540cfa37a95bb10",
+      "export_sha256": "01c1478b382e01715cacc28f74f3a91677ebb9d12afb3e203c683f509438a4de",
+      "transformations": [
+        "Historical machine-private cold disk path replaced with explicit placeholder. Historical build/receipt pins still require regeneration; not a fresh-clone executable runner."
+      ]
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/config.h",
+      "original_sha256": "daf85da70c2bb640feb2aabdaf297b7b4d8a72fd4e136595de2c6ca26ab395cf",
+      "export_sha256": "daf85da70c2bb640feb2aabdaf297b7b4d8a72fd4e136595de2c6ca26ab395cf",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/string_pio.c",
+      "original_sha256": "7c685be965749ecd264bcf59ee674b43654e1824077f50e11f3d9718c2e69e70",
+      "export_sha256": "7c685be965749ecd264bcf59ee674b43654e1824077f50e11f3d9718c2e69e70",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/string_pio.h",
+      "original_sha256": "c0a733924150b5d9dbd7b4521910085a393e7f7f15f5ccf7597280db734129f8",
+      "export_sha256": "c0a733924150b5d9dbd7b4521910085a393e7f7f15f5ccf7597280db734129f8",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/win98.c",
+      "original_sha256": "d56a0e9fea25356072aab936d521fc609447197dbf4bd936589792fa6253afc2",
+      "export_sha256": "d56a0e9fea25356072aab936d521fc609447197dbf4bd936589792fa6253afc2",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/native_win98/win98.h",
+      "original_sha256": "98153d23fe23e85c920a3871f333eb60a36e03743965fbb7cd77739c93753bda",
+      "export_sha256": "98153d23fe23e85c920a3871f333eb60a36e03743965fbb7cd77739c93753bda",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/src/devices.c",
+      "original_sha256": "08c9d1ed097edcae1384a9e732fd4dab760de8ff73a541f75da8f1da80beb16e",
+      "export_sha256": "08c9d1ed097edcae1384a9e732fd4dab760de8ff73a541f75da8f1da80beb16e",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/src/devices.h",
+      "original_sha256": "1466044ef299a1fc4664975a875643b6b289a5d743ea5c644ba3e59ee8bd1fd9",
+      "export_sha256": "1466044ef299a1fc4664975a875643b6b289a5d743ea5c644ba3e59ee8bd1fd9",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/src/domain.c",
+      "original_sha256": "e8ec9d6d80a2b320dc2e28b77222dbd9aeb77d881381613eb843f2bf6db6f64e",
+      "export_sha256": "e8ec9d6d80a2b320dc2e28b77222dbd9aeb77d881381613eb843f2bf6db6f64e",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/src/domain.h",
+      "original_sha256": "84da0a953e7e2e0be2c47eb306cd48f8ad0c5715ecdcc1bd50348fb31f915e06",
+      "export_sha256": "84da0a953e7e2e0be2c47eb306cd48f8ad0c5715ecdcc1bd50348fb31f915e06",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/src/kdom.c",
+      "original_sha256": "cc6e561694aced029469678d8a7079fd8c3263508872c489a2eed48901d5f5e5",
+      "export_sha256": "cc6e561694aced029469678d8a7079fd8c3263508872c489a2eed48901d5f5e5",
+      "transformations": []
+    },
+    {
+      "path": "source/shizukudos/supervisor/src/main.c",
+      "original_sha256": "cc22ef586c6295f85063d4d57dd0bdbe5ed662a3fcfd44e893b998066fc9b88c",
+      "export_sha256": "cc22ef586c6295f85063d4d57dd0bdbe5ed662a3fcfd44e893b998066fc9b88c",
+      "transformations": []
+    }
+  ],
+  "patches": [
+    {
+      "path": "win98-source.patch",
+      "original_sha256": "d3f44110fb913c7ea25b1ea063c258b2cf305a565acb50be7e6399a09bab9d01",
+      "export_sha256": "06bd5eb18cb699f42444df935bb6b6b06831307f9af850f6e1a7c378ac571aca",
+      "transformations": [
+        "Machine-private cold disk path removed."
+      ]
+    },
+    {
+      "path": "peer-dispatch.patch",
+      "original_sha256": "b0054c23dfed9af1468aa8ec4f12abb53f16bc41fa558a896eeb4c925382d393",
+      "export_sha256": "b0054c23dfed9af1468aa8ec4f12abb53f16bc41fa558a896eeb4c925382d393",
+      "transformations": []
+    }
+  ],
+  "host_fixture_sources": [
+    {
+      "path": "host-fixtures/ata_host.c",
+      "sha256": "998073c68ea439f9b79c14e607259c4699f38d67831db6ea74ebf81aca7d3b3a"
+    },
+    {
+      "path": "host-fixtures/string_host.c",
+      "sha256": "0d0b51d9d7887158d0d5457e8d6bfe2e0c53245cf68e03db95c95179e3deda72"
+    },
+    {
+      "path": "host-fixtures/pic_host.c",
+      "sha256": "1bed9596f208ddcf5bda3eb7590b21603466b5d02718b2a446716ff66ba95243"
+    },
+    {
+      "path": "host-fixtures/constructor_host.c",
+      "sha256": "3d268cd3490c45e9fe0e26b85f92a99f073a38d355e39198225e2f24a4eecef9"
+    },
+    {
+      "path": "host-fixtures/constructor-body.c",
+      "sha256": "877da86e210d236b17928c3a7e006df8a38fd69f1df011fe95e959114b53be69"
+    },
+    {
+      "path": "host-fixtures/producer_host.py",
+      "sha256": "600e148520672e52bddf049e2f2c231c1661b2f8d1a1e6ab1daaa4303fffdd5c"
+    }
+  ],
+  "generic_peer_dispatch": {
+    "source_record": {
+      "repository_relative_path": "build/modern-apps/native-win98-k64-peer-v1/result.json",
+      "sha256": "1d40093f3152d3342c668b333579018fc6c0d6728eb296b33cb22814eec058d6"
+    },
+    "entries": [
+      {
+        "path": "peer-dispatch-source/shizukudos/kernel64/main.c",
+        "sha256": "ee2379592b6088cdd3dd92b6fed3567211d7d28b4e31a4ca96a2c4a3560ebd0d"
+      },
+      {
+        "path": "peer-dispatch-source/shizukudos/kernel64/boot_channel_peer.h",
+        "sha256": "a72e27e51de1e33eef755f6e3164e1a21e68714e52e1b00e6ed2f1dcf3fe6933"
+      }
+    ],
+    "actual_VM_executed": false,
+    "standalone_compiled": false
+  },
+  "host_checks_per_GCC_and_sanitizer": {
+    "ATA": 1554,
+    "string_PIO": 1450,
+    "PIC": 70,
+    "constructor": 46
+  },
+  "Windows98_boot_verified": false,
+  "native_Win64_app_verified": false,
+  "integration_instruction": "Review/apply to an isolated worktree and regenerate all ordinary build/source receipts; the default live Supervisor and ABI were not overwritten by this export."
+}

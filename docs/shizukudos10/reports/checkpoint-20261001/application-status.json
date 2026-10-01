@@ -1,0 +1,99 @@
+{
+  "schema": 1,
+  "scope": "Historical actual runs at the stated runtime epochs; V44 common APIs passed fixtures but final application retries are pending.",
+  "records": [
+    {
+      "name": "Chromium headless",
+      "source_record": {
+        "repository_relative_path": "build/modern-apps/chromium-v34-k13-multiprocess-actual/result.json",
+        "sha256": "7aa0079ee82c01e06fd4117111d05776177eb7c93f16cad1126f809282df0f63"
+      },
+      "status": "PASS",
+      "expected_line": "<p id=\"m\">ShizukuDOS M2 probe 42</p>",
+      "expected_line_seen": true,
+      "autorun_result": "K64 autorun: result exited exit=0 faulted=0 reaped=0 after 238850 ms",
+      "loader_failures": [],
+      "exceptions": [],
+      "chromium_fatal": [],
+      "exit_code": 0,
+      "faulted": false,
+      "furthest": "process exited with exit code 0x0",
+      "windows98_execution_verified": false,
+      "full_application_functionality_verified": false
+    },
+    {
+      "name": "LibreOffice before V44",
+      "source_record": {
+        "repository_relative_path": "build/modern-apps/libreoffice-v42-k13-actual/result.json",
+        "sha256": "c84d90fbf72e932b760eb62aa93402a3e4fa831985fc327a857129db61b520b7"
+      },
+      "status": "FAIL",
+      "expected_line": "LibreOffice 26.8.0",
+      "expected_line_seen": false,
+      "autorun_result": "K64 autorun: result exited exit=ffffffff faulted=0 reaped=0 after 2200 ms",
+      "loader_failures": [
+        "K64 ldr: soffice.bin not loaded: sal3.dll needs KERNEL32.dll!SetSearchPathMode: not exported by the DLL [c0000139]"
+      ],
+      "exceptions": [],
+      "chromium_fatal": [],
+      "exit_code": null,
+      "faulted": true,
+      "furthest": "required product output absent after autorun start; loader: K64 ldr: soffice.bin not loaded: sal3.dll needs KERNEL32.dll!SetSearchPathMode: not exported by the DLL [c0000139]",
+      "windows98_execution_verified": false,
+      "full_application_functionality_verified": false
+    },
+    {
+      "name": "Firefox before V44",
+      "source_record": {
+        "repository_relative_path": "build/modern-apps/firefox-v42-k13-version-actual/result.json",
+        "sha256": "bf8aae2cd0c3602ff6bd83d7b3f6423f632e53c852ab6fee90fd9e32f3898f1a"
+      },
+      "status": "FAIL",
+      "expected_line": "Mozilla Firefox 157.0",
+      "expected_line_seen": false,
+      "autorun_result": "K64 autorun: result start-failed status=c0000139",
+      "loader_failures": [
+        "K64 ldr: firefox.exe not loaded: mozglue.dll needs api-ms-win-core-processthreads-l1-1-0.dll -> kernel32.dll!OpenProcessToken: not exported by the DLL [c0000139]"
+      ],
+      "exceptions": [],
+      "chromium_fatal": [],
+      "exit_code": null,
+      "faulted": true,
+      "furthest": "required product output absent after autorun start; loader: K64 ldr: firefox.exe not loaded: mozglue.dll needs api-ms-win-core-processthreads-l1-1-0.dll -> kernel32.dll!OpenProcessToken: not exported by the DLL [c0000139]",
+      "windows98_execution_verified": false,
+      "full_application_functionality_verified": false
+    },
+    {
+      "name": "Chromium GUI V2",
+      "source_record": {
+        "repository_relative_path": "build/modern-apps/chromium-v34-k13-interactive-v2-gdi-correct-inputs-actual/observation.json",
+        "sha256": "7df897aa1f8e2504cfe40fcd99ea8b47683c847cc4b0366860fe8a59e0d7a97b"
+      },
+      "status": "FAIL_NONZERO_APP_EXIT_PAGE_NOT_LOADED",
+      "actual_version": "157.0.8079.0",
+      "actual_snapshot_revision": "1706750",
+      "raw_publisher_label_incorrect": true,
+      "actual_publisher": "https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/1706750/",
+      "captures": 82,
+      "inputs_unchanged": true,
+      "tree_sha256": "6af7aa2155a2163122c8af25eb246e128a0068a1292bde9f83dbb5103b9ad75e",
+      "autorun_result": "K64 autorun: result exited exit=c0000005 faulted=0 reaped=0 after 594810 ms",
+      "first_chance_exceptions": [
+        "K64 exc: pid 60 tid 64 first-chance c0000005 at chrome.dll+a0cbbc4 (1 0) rsp 7ffffffde510"
+      ],
+      "full_application_functionality_verified": false,
+      "windows98_execution_verified": false,
+      "observed": "Actual toolbar, address bar, no-sandbox banner and white page; persistent shared-memory corruption preceded the c0000005 app exit. GDI presentation does not establish page functionality."
+    }
+  ],
+  "provenance_correction_record": {
+    "repository_relative_path": "build/modern-apps/chromium-provenance-gui-v3/semantic-provenance-correction.json",
+    "sha256": "d5f5bb3869b3698c89419acc24c6272d186ea55ba819596f6c7fb94489bb776a"
+  },
+  "chromium_headless_provenance_limit": "Their legacy result JSON lacks executable/tree SHA pins; image path and root prepared package provenance support this identification, without claiming a new disk-image byte audit.",
+  "additional_unfinished_apps": {
+    "Legcord": "Actual Welcome/setup was rendered; Discord login/chat and post-setup relaunch not verified.",
+    "Steam": "Stock preinstalled client reached its loader; new Module32Next fixture now passes. Full CEF, login/library/game remain unverified.",
+    "Google Chrome": "Official Google enterprise x64 MSI downloaded and pinned; browser payload extraction/version/guest execution pending."
+  }
+}

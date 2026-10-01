@@ -36,3 +36,10 @@ scoped current-symlink swap. The publisher verifies original PNG hashes, catalog
 scope, exact loopback HTTPS bodies and all retained downloads. External public
 Cloudflare delivery is checked separately from origin publication. No client-global
 configuration, DNS or Nginx configuration is changed.
+
+The additive V44 checkpoint records252actual standalone Kernel64 API contract
+checks (module45/search50/token19/UCRT44/file37/RTL57) and ordinary build closure,
+while full app/native functionality stays pending. Scoped Nginx `no-transform`
+preserves exact HTML through the public edge; standard Chrome request-UA public
+DNS/TLS requests matched all eleven reviewed route bodies. A normal headless
+browser challenge and independent outside-host verification remain separate.

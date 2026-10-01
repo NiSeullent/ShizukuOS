@@ -118,3 +118,11 @@ trial. `authorship/handoff.html` links to the GitHub main source and continuatio
 document so work can resume in another environment. Google Chrome and Firefox are
 also required current targets. This publication is a development checkpoint; no
 completed0.9/full-modern-app/native-Windows98 claim is made.
+
+The2026-10-01 Authorship checkpoint also records V44 ordinary build/static443imports
+and252actual standalone guest API checks, without native Win98/app acceptance.
+The active scoped Nginx route adds `no-transform` alongside `no-store` so public
+HTML remains byte-for-byte with reviewed source. PublicDNS HTTPS/normal TLS checks
+with a standard Chrome request User-Agent returned exact200 bodies for eleven
+routes, including oldVNC redirects and component download. Independent outside-host
+verification and the final development ISO remain separate gates.
