@@ -1,0 +1,51 @@
+PASS SFT first entry
+PASS SFT first block boundary
+PASS SFT traversal skips empty block
+PASS SFT final chain entry
+PASS SFT chain end rejects index
+PASS SFT negative index rejects
+PASS SFT invalid unsigned index rejects
+PASS closed SFT rejects actual file lookup
+PASS opened SFT resolves actual file lookup
+PASS JFT handle resolves system file number
+PASS closed JFT byte rejects handle
+PASS out of range JFT rejects handle
+PASS 1216 real chain pointer and relative index
+PASS 1216 invalid SFN preserves pointer
+PASS 1220 returns JFT pointer not SFT pointer
+PASS 1220 closed in-range slot remains a readable JFT byte
+PASS 1220 invalid handle uses AL=6 and preserves AH/pointer
+PASS 1600 idle never invents Windows
+PASS 1231 hide uses DL only and preserves other flags/registers
+PASS 1231 report does not create an instance
+PASS 1600 remains idle after report-enable
+PASS 1231 one-shot loader honestly unsupported
+PASS 1231 selector 3 rejects safely
+PASS 1231 selector 255 rejects safely
+PASS 1605 prior veto preserves registers and idle state
+PASS 1605 chains actual prior startup record
+PASS 1605 caller supplied version with null optional data
+PASS 1605 repeat never forms self-referential chain
+PASS 1600 reports caller supplied version only
+PASS 1231 hides reporting without destroying active state
+PASS 1231 restores genuine active-state reporting
+PASS 1606 clears active and reporting state
+PASS 1600 idle after exit
+PASS startup record C layout matches 4.0 offsets
+PASS 1605 3.0 record major byte first, actual 3.10 version separate
+PASS 1600 actual Windows version distinct from supported record version
+PASS 1231 no-Windows-support profile rejects hide
+PASS 1231 no-Windows-support profile rejects report
+PASS 1607 idle query reports no Windows and actual host-adapted table/driver pointers
+PASS 1605 then1607 query reports actual active state
+PASS 1607 CX1 all65536 patch masks validated as unapplied
+PASS 1607 CX3 all65536 structure selectors validate onlyDX1
+PASS 1607 CX4 all65536 instancing masks reject honestly
+PASS 1607 all65535 otherBX devices preserve frame after productionCF clear
+PASS 1607 all65530 unknownCX functions preserve frame
+PASS Windows productionAH guard never dispatches unrelated1507
+PASS 1607 CX2 disable follows realDOS5/6 no-op reply
+PASS 1231 hides presence without changingDOSMGR instanced query
+PASS 1606 then1607 query clears actual active/presence state
+DOSMGR_REGISTER_FRAMES 327673 PASS
+CHECKS 49 PASS

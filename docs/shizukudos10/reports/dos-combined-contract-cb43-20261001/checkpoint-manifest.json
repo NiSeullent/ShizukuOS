@@ -1,0 +1,75 @@
+{
+  "schema": "shizukudos-cb43-combined-source-only-checkpoint-v1",
+  "public_files_including_manifest": 12,
+  "source_binaries_published": false,
+  "full_combined_WIN31_C_and_NASM_source_build": true,
+  "host_assertions_passed": 49,
+  "exhaustive_DOSMGR_register_frames_passed": 327673,
+  "linked_instance_layout_checks_passed": 14,
+  "linked_DOSMGR_table_checks_passed": 9,
+  "native_CDS_88_compile_assertion_passed": true,
+  "failed_checks": 0,
+  "combined_diagnostic_guest_executed": false,
+  "Windows98_boot_verified": false,
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "native_modern_apps_verified": false,
+  "pristine_source_file_count": 287,
+  "patched_configured_source_file_count": 288,
+  "files": [
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/README.md",
+      "bytes": 10649,
+      "sha256": "cd265056db8e390049b0c29deee0f12a6b10a195a61f4208483878f3ee90ba49"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/combined-contract-result.json",
+      "bytes": 5744,
+      "sha256": "f9594adb04f8216cd5078ade1c249b10235e8392889e7dee59f4e5443b25099b"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/diagnostic-build-provenance.json",
+      "bytes": 2571,
+      "sha256": "0ed783c89c27fceb48bb5d26eec9f9bfa4b109bb267f692ae4a225de603789f4"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/diagnostic-image-manifest.json",
+      "bytes": 5277,
+      "sha256": "d9187d320a7cbd0c92c5583b513b25f940bb2a976d520083813744f2bdd2deb9"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/diagnostic-image-static.json",
+      "bytes": 1917,
+      "sha256": "2e6822b2a6984a750e5638334c783f917c5e0f95dcab999b157f6455134a47b1"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/host-results.txt",
+      "bytes": 2447,
+      "sha256": "82fc04404d5db116103b56534491d17cfdab574b4ccd41456241dfbdf17192d4"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/kernel-build.log",
+      "bytes": 11603,
+      "sha256": "0910b06455a78eb1c49c281ff4267052b67d05836d007095f22bbf4849a6e5f0"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/linked-layout.json",
+      "bytes": 1558,
+      "sha256": "5eef10b269fea33d2aa9be5676305e746be10aac6c2a80059b356f9aa4e121c7"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/source-build-receipt.json",
+      "bytes": 94986,
+      "sha256": "891e76c07ee93923eb1f582709694b8155581b7b0feb22963a449d66ce1ed056"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/toolchain-receipt.json",
+      "bytes": 3808,
+      "sha256": "1ecc1e1de4596c9d10105e585c78da596ebc91c4ec3e8c047a22ae8945b5f4db"
+    },
+    {
+      "path": "docs/shizukudos10/reports/dos-combined-contract-cb43-20261001/verify_combined_contract.py",
+      "bytes": 13635,
+      "sha256": "e81345d8208c92f836ccd1b9e07e6d676e747e1ef2212a1790e6872815cb9dae"
+    }
+  ]
+}
