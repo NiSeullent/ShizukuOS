@@ -99,11 +99,33 @@ BACKEND_CONTRACTS = {
     "IofCallDriver": ("device_stack_dispatch_and_caller_irp", "current_thread_ms_x64_dispatch"),
     "IofCompleteRequest": ("irp_completion_routines_and_waiter", "driver_completion_then_existing_waiter_signal"),
     "IoQueueWorkItem": ("caller_workitem_until_callback_finishes", "up_irq_saved_queue_passive_worker"),
-    "ExQueueWorkItem": ("caller_workitem_until_callback_finishes", "existing_system_work_queue"),
+    "ExQueueWorkItem": ("caller_workitem_until_callback_finishes", "existing_system_work_queue_or_inline_allocation_failure"),
     "MmMapIoSpace": ("driver_mmio_mapping_and_pci_claim", "kernel_mmio_mapping_policy"),
     "PsCreateSystemThread": ("kernel_thread_and_existing_kernel_handle", "kernel64_scheduler_system_thread"),
     "IoGetDeviceProperty": ("existing_pdo_and_caller_output_buffer", "existing_device_property_namespace"),
     "HalGetBusDataByOffset": ("shizuku_pci_backend_and_caller_buffer", "pci_configuration_read_no_entry_irql_check"),
+}
+BACKEND_DEPENDENCIES = {
+    "KeSetTimer": [{"path": "shizukudos/kernel64/ntdrv_ke.c", "symbols": ["timer_set", "timer_arm"]}],
+    "ExQueueWorkItem": [{"path": "shizukudos/kernel64/ntdrv_io.c", "symbols": [
+        "ntdrv_queue_system_work", "syswork_run", "IoQueueWorkItem", "queue_item", "work_thread"]}],
+}
+BACKEND_SOURCE_SEMANTICS = {
+    "KeSetTimer": {
+        "return_value": "previous_Header.SignalState_nonzero",
+        "inserted_state": "set_before_bounded_timer_list_admission",
+        "due_time": "negative_magnitude_div_10000_minimum_one_tick_nonnegative_one_tick",
+        "timer_capacity": 32,
+    },
+    "ExQueueWorkItem": {
+        "normal_execution": "existing_PASSIVE_system_worker",
+        "allocation_failure_execution": "synchronous_callback_at_caller_irql",
+        "queue_type": "ignored",
+    },
+}
+BACKEND_IRQL = {
+    "KeSetTimer": "UP CR8/dispatcher model; up_timer_list_and_timer_worker",
+    "ExQueueWorkItem": "UP CR8/dispatcher model; normal PASSIVE system worker; allocation failure executes synchronously at caller IRQL without lowering it",
 }
 
 
@@ -141,6 +163,63 @@ def definition(source, symbol):
     match = re.search(expression, c_text(source))
     require(match is not None, "missing function definition for symbol " + symbol)
     return match.group(0)
+
+
+def function_body(source, symbol):
+    # A brace-balanced lexical slice, not a C parser or behavioral proof. Match
+    # only the selected definition so an unrelated helper/comment cannot satisfy
+    # a contract after the relevant implementation has drifted.
+    clean = c_text(source)
+    signature = definition(source, symbol)
+    start = clean.index(signature) + len(signature)
+    depth = 1
+    for end in range(start, len(clean)):
+        if clean[end] == "{":
+            depth += 1
+        elif clean[end] == "}":
+            depth -= 1
+            if depth == 0:
+                return clean[start:end]
+    raise ValidationError("unterminated function definition for symbol " + symbol)
+
+
+def backend_source_contract(name, source, dependencies):
+    if name == "KeSetTimer":
+        wrapper = function_body(source, name)
+        timer = function_body(dependencies[0], "timer_set")
+        arm = function_body(dependencies[0], "timer_arm")
+        compact = re.sub(r"\s+", "", timer)
+        require("returntimer_set(t,due.QuadPart,0,dpc);" in re.sub(r"\s+", "", wrapper),
+                "timer wrapper source contract drift")
+        require("uint8_twas=t->Header.SignalState!=0;" in compact and "returnwas;" in compact,
+                "timer signal return source contract drift")
+        require("uint64_trel_ms=due_100ns<0?(uint64_t)(-due_100ns)/10000:1;" in compact and
+                "t->DueTime=ticks_now()+(rel_ms?rel_ms:1);" in compact,
+                "timer due-time source contract drift")
+        require("t->Header.SignalState=0;t->Header.Inserted=1;timer_arm(t);" in compact,
+                "timer insertion admission source contract drift")
+        require("staticKTIMER*timer_list[32];" in re.sub(r"\s+", "", c_text(dependencies[0])) and
+                "if(timer_count<32)timer_list[timer_count++]=t;" in re.sub(r"\s+", "", arm),
+                "timer list capacity source contract drift")
+    elif name == "ExQueueWorkItem":
+        wrapper = re.sub(r"\s+", "", function_body(source, name))
+        helper = re.sub(r"\s+", "", function_body(dependencies[0], "ntdrv_queue_system_work"))
+        dispatch = re.sub(r"\s+", "", function_body(dependencies[0], "IoQueueWorkItem"))
+        queue = re.sub(r"\s+", "", function_body(dependencies[0], "queue_item"))
+        callback = re.sub(r"\s+", "", function_body(dependencies[0], "syswork_run"))
+        worker = re.sub(r"\s+", "", function_body(dependencies[0], "work_thread"))
+        require("(void)queue_type;ntdrv_queue_system_work(w->WorkerRoutine,w->Parameter,w);" in wrapper,
+                "work wrapper source contract drift")
+        require("structsyswork*s=kzalloc(sizeof*s);" in helper and "if(!s){fn(ctx);return;}" in helper,
+                "work allocation-failure fallback source contract drift")
+        require("s->fn=fn;s->ctx=ctx;IoQueueWorkItem(&s->item,syswork_run,0,s);" in helper,
+                "work provider queue source contract drift")
+        require("(void)queue_type;queue_item(item,routine,0,ctx);" in dispatch and
+                'thread_create("",work_thread,0)' in queue and "sem_post(&wq_sem);" in queue and
+                "elseroutine(dev,ctx);" in worker,
+                "work dispatch source contract drift")
+        require("structsyswork*s=ctx;" in callback and "s->fn(s->ctx);kfree(s);" in callback,
+                "work callback source contract drift")
 
 
 def public_symbols(source, prefix):
@@ -384,9 +463,13 @@ def validate_manifest(manifest, root=ROOT):
         require(found is not None, "missing backend export table " + table)
         tables[module] = set(re.findall(r"\bE\((\w+)\)", found.group(1)))
     for api in manifest["backend_apis"]:
+        require(isinstance(api, dict), "backend API must be an object")
+        name = api.get("name")
+        require(isinstance(name, str) and name in BACKEND_SLICE, "unknown backend API symbol")
+        extra_fields = ("source_dependencies", "source_semantics") if name in BACKEND_DEPENDENCIES else ()
         fields(api, ("name", "symbol", "families", "scope", "module", "ordinal", "calling_convention", "minimum_abi",
                      "status", "source", "declaration_source", "resolver_source", "irql", "ownership", "sync_semantics",
-                     "test_status", "evidence", "limits"), "backend API")
+                     "test_status", "evidence", "limits") + extra_fields, "backend API")
         require(api["scope"] == "Kernel64_backend", "backend scope cannot claim Windows98 frontend acceptance")
         name = api["name"]
         require(isinstance(name, str) and name in BACKEND_SLICE and api["symbol"] == name, "unknown backend API symbol")
@@ -401,6 +484,20 @@ def validate_manifest(manifest, root=ROOT):
                 api["resolver_source"] == resolver_path, "backend source binding mismatch")
         signature = definition(read(api["source"]), name)
         require("NTAPI" in signature, "backend Microsoft x64 ABI calling attribute missing: " + name)
+        if name in BACKEND_DEPENDENCIES:
+            require(api["source_dependencies"] == BACKEND_DEPENDENCIES[name], "backend dependency binding mismatch")
+            require(api["irql"] == BACKEND_IRQL[name], "backend IRQL contract mismatch")
+            wanted = BACKEND_SOURCE_SEMANTICS[name]
+            fields(api["source_semantics"], wanted, "backend source semantics")
+            require(all(type(api["source_semantics"][key]) is type(value) and api["source_semantics"][key] == value
+                        for key, value in wanted.items()), "backend source semantics mismatch")
+            dependencies = []
+            for ref in api["source_dependencies"]:
+                dependency = read(ref["path"])
+                for symbol in ref["symbols"]:
+                    definition(dependency, symbol)
+                dependencies.append(dependency)
+            backend_source_contract(name, read(api["source"]), dependencies)
         module = "hal.dll" if name.startswith("Hal") else "ntoskrnl.exe"
         require(api["module"] == module and name in tables[module], "backend export binding mismatch: " + name)
         sequence(api["families"], "backend API families")
