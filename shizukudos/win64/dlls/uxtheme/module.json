@@ -1,0 +1,4 @@
+{"description": "Microsoft UxTheme Library (no visual styles)",
+ "libs": ["user32"],
+ "ordinals": {"RefreshImmersiveColorPolicyState": 104, "ShouldAppsUseDarkMode": 132, "AllowDarkModeForWindow": 133, "SetPreferredAppMode": 135,
+              "FlushMenuThemes": 136, "IsDarkModeAllowedForWindow": 137, "ShouldSystemUseDarkMode": 138, "DrawThemeBackgroundEx": 47}}
