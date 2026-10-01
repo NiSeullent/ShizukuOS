@@ -381,11 +381,69 @@ required conjunct of final acceptance. It does not replace the original native
 verifiers or certify actual execution. The frozen sources and stages remain
 unchanged. See `docs/TRIDENT_I486_SUPPLEMENT.md`.
 
-Next disjoint engineering slices are a private numeric QuickJS/WAMR bridge and
-actual software triangle rasterization through the frozen Mesa fragment API.
-These slices are in progress. Standard browser WebAssembly reflection, complete
-modern Wasm proposals, GLSL ES/WebGL resources and WebGPU/WGSL/compute remain
-mandatory unfinished work.
+The private numeric QuickJS/WAMR bridge is committed in `7b2dbff`: actual
+normal and full ASan/UBSan tests each pass140 checks, including BigInt, branded
+buffer views, imported exceptions and cyclic-GC/native cleanup. Its v11 receipt
+is `b3e0e6ef6b966b9c9cb0beaaaf41d8227e048fbe6245232b73d825d0584705ac`.
+This private embedding is not the standard browser WebAssembly namespace.
+Original no-grow modules exposed real page coalescing and growth failures;
+an additive guarded memory profile is correcting those semantics, zero-fill,
+32-bit allocation narrowing and table-arena alignment against unchanged
+official memory/growth/bulk-memory oracles. Failed trials remain preserved.
+
+Actual software triangle rasterization through the genuine frozen Mesa TGSI
+fragment API is committed in `601e2fd`. Raster v3 passes33792 assertions in
+each normal/full ASan-UBSan run; receipt
+`26d7055953bb6e0915df675ea0c0797c07e0c5704b00ef16f077e1867da3164f`
+binds complete native PE/OEM/i486 code. The bounded raster profile covers
+literal edges, helper derivatives, depth, defined straight-alpha composition
+and transactional failure. Its floating-point guarantee covers the three outer
+raster provider callbacks; nested trusted Mesa providers must preserve the
+internal FP environment. See `docs/TRIDENT_SOFTWARE_RASTER.md`.
+Standard browser WebAssembly reflection, complete modern Wasm proposals,
+GLSL ES/WebGL resources and WebGPU/WGSL/compute remain mandatory unfinished work.
+
+The first actual CSS native run was strictly rejected: genuine original
+MSHTML5.00.2614.3500 activated, but style width32 corresponded to offsets46/36.
+The original zero-border/padding fixture and failed child exit1 remain retained.
+Correction `71710ba` changes only the long box labels to `P`/`C`, preserving
+the independent32-to168 geometry oracle. Fresh fixture v9 passes213 normal
+and full-sanitizer checks. Its new canonical stage v3 has manifest
+`11a2aa48b735e26212db048a78dfb5c64f6da1e95f8ef436fd4f5c4a2f18d7da`.
+A separate actual native retry passed genuine styles, independent32-to168
+offset geometry, both actual gray and blue/green/Korean painted states, exact
+Korean UTF16 readback and released resources. The owned child PID4294516485
+exited with full DWORD0; requested supervisor exit0 remains separate from
+unverified actual supervisor completion. Strict native acceptance receipt is
+`c5abb5104fb8d1e51f6d6cf4d805fd02a2253a64d21d6cbccfa9453acdf86ee3`,
+with106 actual stage/native/source files rehashed before and after acceptance.
+Original disks and frozen sources remain unchanged. This bounded consumer
+does not certify arbitrary
+stylesheet selectors, cascade, layout or complete modern CSS.
+
+Numeric native Wasm probe/observer source is committed in `8ea3da3`; its actual
+host/full-sanitizer shared probe checks each pass244. The stage/verifier source
+commits `778cfd6` and `0f163b1` freeze2785 evidence members, require an independent
+approved provenance hash and exactly265 ordered native checks. The corrective
+final check rehashes all seven consumed native executable/harness/log files
+after the final stage replay. Normal/Python-optimized controls pass6 log and7
+acceptance methods; explicitly synthetic controls are not native evidence.
+Fresh canonical numeric stage v2 manifest is
+`d0948ad22afc556cf57398c6361326729e2c7afe50b6ce360513d9392f973b8b`,
+provenance `9e87ddbe5ddb43ecba1edc7d5ac49b5a6bc88a9b56f6adb27c847a9a06738587`.
+Native numeric execution remains pending; full browser Wasm remains false.
+Its fresh admission returned before run creation because peer boot's actual
+VLC Win98 guest PID3026413 and the cooperative lock occupy the native slot;
+no peer process or guest is controlled.
+
+The isolated TLS i486 v1 receipt
+`1123b84ae84c35981cbf5e6e3ea9c4d4b6848cac00d2ee0b22e61be7237167b3`
+passes both complete linked native DLL CPU/ABI gates and12 actual encrypted
+Linux latest/LTS exchanges, with exact60-byte positive responses. Its frozen
+sources and evidence remain retained. A fresh v2 is correcting an owned-server
+partial-startup-line deadline gap and clarifying/testing the formatter's exact
+1MiB string boundary. Corrected Windows execution, real WinSock transport and
+OS Schannel/WinHTTP/WinINet integration remain distinct mandatory gates.
 The native presentation lane is coordinated with peer6970; peer7707 retains
 the independent LTS fixture and cb43/c009 retain application-runtime integration.
 
