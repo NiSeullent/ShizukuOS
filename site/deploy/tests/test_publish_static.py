@@ -76,7 +76,11 @@ class IsoPublication(unittest.TestCase):
         self.assertFalse(metadata['validation']['windows98_installer_complete'])
         self.assertFalse(metadata['validation']['latest_apps_complete'])
         self.assertEqual(metadata['validation']['boot_status'], 'not-verified-for-this-download')
-        self.assertEqual(candidate.name, 'downloads/shizuku-modern-development-1234567890ab-' + self.digest[:12] + '.iso')
+        self.assertEqual(metadata['product'], 'ShizukuOS')
+        self.assertEqual(metadata['release_target'], '1.0.0')
+        self.assertEqual(metadata['release_channel'], 'development')
+        self.assertEqual(metadata['distribution_origin'], 'https://m98.nyase.kr')
+        self.assertEqual(candidate.name, 'downloads/shizukuos-development-1234567890ab-' + self.digest[:12] + '.iso')
 
     def desktop_evidence(self):
         # Contract from run_k64_desktop.py; this is a disposable host fixture,

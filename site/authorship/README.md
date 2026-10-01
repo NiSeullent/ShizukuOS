@@ -1,4 +1,4 @@
-# Authorship — published development checkpoint
+# ShizukuOS Authorship — 1.0.0 development candidate
 
 This additive official-page bundle contains six genuine, unchanged guest PNGs.
 They are bounded by `evidence.json` SHA-256 hashes; thumbnails use CSS containment
@@ -28,7 +28,7 @@ screen, without full Discord or native Windows98 functionality.
 
 `handoff.html` links to GitHub main source, `docs/CONTINUE_MODERN_APPS.md`, campaign
 results and development instructions. This is a source/development checkpoint,
-not a completed0.9 release or all-app compatibility claim. Proprietary Windows
+not a completed1.0.0 release or all-app compatibility claim. The archived0.9 preparation name remains a provenance identifier. Proprietary Windows
 media, keys, original app installers and VM images are excluded.
 
 Publication uses the existing immutable `/srv/m98/releases` origin procedure and

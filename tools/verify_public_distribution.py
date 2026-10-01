@@ -128,8 +128,8 @@ def validate_homepage(body, headers=None):
     other_scripts = html.lower().replace("/cdn-cgi/challenge-platform/scripts/jsd/main.js", "")
     require("challenge-platform" not in other_scripts, "challenge-platform interstitial returned")
     require(not parser.vnc and "novnc" not in title.lower(), "active noVNC interface returned")
-    require(title and re.search(r"windows\s*98", visible, re.I) and re.search(r"shizuku", visible, re.I),
-            "Windows 98 Shizuku homepage branding absent")
+    require(title and re.search(r"\bshizukuos\b", title, re.I) and re.search(r"\bshizukuos\b", visible, re.I),
+            "ShizukuOS homepage branding absent")
     return {"title": title, "body_bytes": len(body), "sha256": hashlib.sha256(body).hexdigest(),
             "homepage_branding_verified": True, "challenge_absent": True, "novnc_ui_absent": True}
 

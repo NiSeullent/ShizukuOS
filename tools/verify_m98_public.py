@@ -58,7 +58,7 @@ def check_page(body, headers, status, final_url, kind):
     if probe.vnc_embed or re.search(r"novnc|websockify|vnc_canvas|new\s+RFB\s*\(", text, re.I):
         raise ValueError("VNC interface is exposed at a public page")
     if kind == "home":
-        if "Windows 98" not in text or "Shizuku" not in text:
+        if "ShizukuOS" not in text:
             raise ValueError("Official homepage markers are missing")
     elif kind == "authorship" and "Authorship" not in text:
         raise ValueError("Authorship page marker is missing")

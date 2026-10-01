@@ -1,6 +1,6 @@
 # 다른 환경에서 이어서 개발하기
 
-공개 소스: <https://github.com/NiSeullent/Win98-Modern>. 제품 이름은 **Windows 98 Shizuku Modern Edition**입니다. 이 문서는 2026-10-01 개발 상태를 기준으로 소스부터 다시 시작하는 방법을 설명합니다. `main`의 실제 커밋을 기록하고, 옛 작업 폴더의 `build/`가 있다고 가정하지 마세요.
+공개 소스: <https://github.com/NiSeullent/Win98-Modern>. 제품 이름은 **ShizukuOS**이며 버전 **1.0.0 development candidate(개발 후보)**입니다. 최종 ISO는 `m98.nyase.kr`에서만 배포하고 GitHub는 소스·패치 저장소로 사용합니다. 실제 Windows 98을 위한 MS-DOS 대체 기반은 **ShizukuDOS 10**이고 Kernel32·Kernel64도 그 구성요소입니다. 이 문서는 2026-10-01 개발 상태를 기준으로 소스부터 다시 시작하는 방법을 설명합니다. `main`의 실제 커밋을 기록하고, 옛 작업 폴더의 `build/`가 있다고 가정하지 마세요.
 
 ## 1. 소스와 작업 환경
 

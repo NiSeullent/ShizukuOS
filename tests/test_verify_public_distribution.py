@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("public_distribution", ROOT / "tools/verify_public_distribution.py")
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
-HOME = b'<html><head><title>Windows 98 Shizuku</title></head><body><h1>Windows 98 Shizuku Second Edition</h1></body></html>'
+HOME = b'<html><head><title>ShizukuOS</title></head><body><h1>ShizukuOS</h1></body></html>'
 
 
 def iso_fixture():
@@ -54,8 +54,9 @@ class URLTests(unittest.TestCase):
 
 class HomepageTests(unittest.TestCase):
     def test_real_branding_is_required(self):
-        self.assertEqual(checker.validate_homepage(HOME)["title"], "Windows 98 Shizuku")
-        for body in [b"<html><title>Hello</title>OK</html>", b"<html><title>Windows 98</title>No project homepage</html>"]:
+        self.assertEqual(checker.validate_homepage(HOME)["title"], "ShizukuOS")
+        for body in [b"<html><title>Hello</title>OK</html>", b"<html><title>Windows 98</title>No project homepage</html>",
+                     b"<html><title>Windows 98 Shizuku</title>Windows 98 Shizuku Second Edition</html>"]:
             with self.assertRaises(ValueError):
                 checker.validate_homepage(body)
 

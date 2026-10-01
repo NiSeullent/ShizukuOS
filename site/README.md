@@ -1,4 +1,8 @@
-# Windows 98 Shizuku Modern Edition
+# ShizukuOS
+
+Current product name: **ShizukuOS**. **1.0.0 is the release target; this is a development candidate.** The official ISO belongs only on `https://m98.nyase.kr/`; GitHub hosts public source and patches, never the ISO or Microsoft media. Existing downloadable component ZIP filenames and recorded hashes remain historical artifact identities.
+
+ShizukuDOS 10 replaces MS-DOS as the Windows 98 foundation; Kernel32 and Kernel64 are components of that foundation. Standalone profiles are component tests. Classic and ShizukuOS palettes are selectable in the development userland shell, with bounded data-volume settings. Full native Windows 98 window/control theming and persistent selection still require native acceptance. The website palette is not evidence of that acceptance.
 
 `index.html` is the distribution page; `preview.html` shows recorded genuine
 guest captures with a timeline, playback, original hashes and scope.
