@@ -163,3 +163,33 @@ void __cdecl _free_locale(_locale_t loc)
 }
 IMP(_free_locale);
 #endif
+
+#if SHZ_PART == 12 || SHZ_PART == 13
+#include <sys/stat.h>
+static int shz_chmod_w(const wchar_t *path, int mode)
+{
+    DWORD a = GetFileAttributesW(path);
+    if (a == INVALID_FILE_ATTRIBUTES) { errno = ENOENT; return -1; }
+    a = (mode & _S_IWRITE) ? (a & ~FILE_ATTRIBUTE_READONLY) : (a | FILE_ATTRIBUTE_READONLY);
+    if (!SetFileAttributesW(path, a ? a : FILE_ATTRIBUTE_NORMAL)) { errno = EACCES; return -1; }
+    return 0;
+}
+#endif
+
+#if SHZ_PART == 12  /* _wchmod: only the read-only attribute is meaningful on Windows */
+int __cdecl _wchmod(const wchar_t *path, int mode)
+{
+    return shz_chmod_w(path, mode);
+}
+IMP(_wchmod);
+#endif
+
+#if SHZ_PART == 13  /* _chmod */
+int __cdecl _chmod(const char *path, int mode)
+{
+    wchar_t w[MAX_PATH];
+    if (!MultiByteToWideChar(CP_ACP, 0, path, -1, w, MAX_PATH)) { errno = ENOENT; return -1; }
+    return shz_chmod_w(w, mode);
+}
+IMP(_chmod);
+#endif

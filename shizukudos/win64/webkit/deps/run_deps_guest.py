@@ -4,7 +4,7 @@
 
 Builds deps/tests/t_*.c(pp) (deps/build.py --tests), packs them with WKRUN.EXE, every dependency DLL
 (build/shizukudos/webkit/deps/bin) and the toolchain runtime DLLs (libc++.dll, libunwind.dll) into D:\\WK, checks every
-import statically against the Shizuku system DLLs (tests/wkguest.py import_check), boots Kernel64 once and lets
+import statically against the Shizuku system DLLs (port/tests/wkguest.py import_check), boots Kernel64 once and lets
 WKRUN.EXE run each check. A check passes when its process exits 0 and it printed no FAIL line.
 
 Result: build/shizukudos/webkit/run_deps/result.json (+ serial.log). Exit code 0 only if every check passed.
@@ -17,20 +17,20 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "tests"))
-import build as deps  # noqa: E402
-import toolchain as tc  # noqa: E402
+sys.path.insert(0, str(HERE.parent / "port" / "tests"))
+import build_deps as deps  # noqa: E402
 import wkguest  # noqa: E402
-from toolchain import BUILD, run  # noqa: E402
+import importcheck  # noqa: E402  (W1's, imported through build_deps' path)
+import shzlib  # noqa: E402
+from shzlib import run  # noqa: E402
 
-OUT = BUILD / "webkit" / "run_deps"
+OUT = deps.w1.OUT / "run_deps"
 
 
 def build_wkrun():
-    exe = BUILD / "webkit" / "WKRUN.EXE"
-    exe.parent.mkdir(parents=True, exist_ok=True)
-    run([tc.TC / "bin" / f"{tc.TRIPLE}-clang", "-O2", "-Wall", "-Wextra", "-Werror", HERE.parent / "tests" / "wkrun.c",
-         "-o", exe], env=deps.env())
+    exe = deps.w1.OUT / "WKRUN.EXE"
+    run([*deps.CC, "-O2", "-Wall", "-Wextra", "-Werror", HERE.parent / "port" / "tests" / "wkrun.c", "-o", exe],
+        env=deps.env())
     return exe
 
 
@@ -44,10 +44,9 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     tests = deps.build_tests(only)
     wkrun = build_wkrun()
-    dlls = sorted((deps.PREFIX / "bin").glob("*.dll")) + sorted((tc.SYSROOT / "bin").glob("*.dll"))
-    data = sorted((HERE / "tests" / "data").glob("*")) if (HERE / "tests" / "data").exists() else []
-    files = [wkrun, *tests.values(), *dlls, *data]
-    misses, imports = wkguest.import_check([f for f in files if f.suffix.lower() in (".exe", ".dll")])
+    files = [wkrun, *tests.values(), *deps.runtime_dlls()]
+    report, _ = importcheck.check([str(f) for f in files])
+    misses = [f"{img}: {m}" for img, r in report.items() for m in r["missing"]]
     spec = json.loads((HERE / "tests" / "tests.json").read_text())
     listing = "".join(f"{n}|600|{Path(e).name} {spec.get(n, {}).get('args', '')}".rstrip() + "\r\n"
                       for n, e in tests.items())
@@ -73,8 +72,8 @@ def main():
               "memory_mib": a.memory, "image_mib": size, "command": cmd, "import_misses": misses, "checks": checks,
               "packaged": {Path(f).name: Path(f).stat().st_size for f in files}, "loader": res["loader"],
               "exceptions": [e for e in res["exceptions"] if not re.search(r"process (fault|wild|high) \(pid", e)],
-              "autorun": res["autorun"], "utc": tc.shzlib.utc_now(), "git": tc.shzlib.git_state()}
-    tc.shzlib.write_json(OUT / "result.json", record)
+              "autorun": res["autorun"], "utc": shzlib.utc_now(), "git": shzlib.git_state()}
+    shzlib.write_json(OUT / "result.json", record)
     for n, c in checks.items():
         print(f"  [{c['status']}] {n}: exit={c['exit']} ms={c['ms']} pass_lines={c['pass_lines']}"
               + (f" first_fail={c['fail_lines'][0]}" if c["fail_lines"] else ""))

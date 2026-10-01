@@ -1,0 +1,12 @@
+diff --git a/Source/cmake/WebKitCommon.cmake b/Source/cmake/WebKitCommon.cmake
+index d0385b2c1..9ad0addff 100644
+--- a/Source/cmake/WebKitCommon.cmake
++++ b/Source/cmake/WebKitCommon.cmake
+@@ -79,6 +79,7 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
+         JSCOnly
+         Mac
+         PlayStation
++        Shizuku
+         WPE
+         Win
+     )

@@ -1,0 +1,38 @@
+diff --git a/libxslt/xsltlocale.c b/libxslt/xsltlocale.c
+index 1d7f253..37276c2 100644
+--- a/libxslt/xsltlocale.c
++++ b/libxslt/xsltlocale.c
+@@ -541,18 +541,31 @@ end:
+ }
+ 
+ 
++/* ShizukuDOS: EnumSystemLocalesA is resolved at run time so that libxslt.dll loads on a kernel32 without it
++ * (shizukudos/win64/webkit/deps/patches/libxslt); without it the locale list stays empty (no language-specific
++ * xsl:sort collation, as for an unknown locale). */
++typedef BOOL (WINAPI *xsltEnumSystemLocalesAFn)(LOCALE_ENUMPROCA, DWORD);
++
++static BOOL
++xsltEnumSystemLocalesA(LOCALE_ENUMPROCA proc, DWORD flags) {
++    xsltEnumSystemLocalesAFn fn = (xsltEnumSystemLocalesAFn) (void (*)(void))
++        GetProcAddress(GetModuleHandleA("kernel32.dll"), "EnumSystemLocalesA");
++    return fn ? fn(proc, flags) : FALSE;
++}
++
+ static void
+ xsltEnumSupportedLocales(void) {
+     xmlRMutexLock(xsltLocaleMutex);
+     if (xsltLocaleListSize <= 0) {
+ 	size_t len;
+ 
+-	EnumSystemLocalesA(xsltCountSupportedLocales, LCID_SUPPORTED);
++	xsltEnumSystemLocalesA(xsltCountSupportedLocales, LCID_SUPPORTED);
+ 
+ 	len = xsltLocaleListSize * sizeof(xsltRFC1766Info);
+ 	xsltLocaleList = xmlMalloc(len);
+ 	memset(xsltLocaleList, 0, len);
+-	EnumSystemLocalesA(xsltIterateSupportedLocales, LCID_SUPPORTED);
++	if (xsltLocaleList != NULL)
++	    xsltEnumSystemLocalesA(xsltIterateSupportedLocales, LCID_SUPPORTED);
+     }
+     xmlRMutexUnlock(xsltLocaleMutex);
+ }

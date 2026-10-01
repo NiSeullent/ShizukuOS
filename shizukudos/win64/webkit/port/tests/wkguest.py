@@ -4,11 +4,8 @@
 Profile: standalone Kernel64 under QEMU (the run_k64_chromium.py profile): `-kernel` Multiboot stub, KERNEL64S.BIN and
 WIN64.IMG as initrd, `shz.noapps shz.autorun=D:\\K64RUN.TXT`, and a FAT32 image on AHCI mounted as D:. The image holds
 one directory D:\\WK with the programs, the DLLs they need beside them, and WKRUN.TXT; the autorun program is WKRUN.EXE,
-which starts every listed program in turn and prints one `WKRUN-RESULT` line per program.
-
-Before any guest run, `import_check()` resolves every import of every packaged PE statically: API-set contracts through
-kernel64/apiset_contracts.txt (the table the loader is generated from), then the exporting DLL either packaged or one of
-the Shizuku system DLLs in build/shizukudos/win64 (Shizuku modules and the Wine port). A miss is reported by name.
+which starts every listed program in turn and prints one `WKRUN-RESULT` line per program. Static import checks before a
+guest run use W1's webkit/importcheck.py.
 """
 import json
 import os
@@ -20,7 +17,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SHZ = HERE.parents[2]
+SHZ = HERE.parents[3]
 sys.path.insert(0, str(SHZ / "tools"))
 import qemu  # noqa: E402
 import shzlib  # noqa: E402
@@ -29,80 +26,12 @@ from shzlib import BUILD, run  # noqa: E402
 K64S = BUILD / "kernel64s"
 WIN64 = BUILD / "win64"
 FIXED_EPOCH = 1785283200          # tools/fatimg.py convention
-APISET = SHZ / "kernel64" / "apiset_contracts.txt"
 
 
 def mtools_env():
     env = dict(os.environ)
     env.update({"MTOOLS_SKIP_CHECK": "1", "TZ": "UTC", "SOURCE_DATE_EPOCH": str(FIXED_EPOCH)})
     return env
-
-
-def apiset_table():
-    table = {}
-    for line in APISET.read_text().splitlines():
-        line = line.split("#", 1)[0].strip()
-        if not line:
-            continue
-        parts = line.split()
-        if len(parts) >= 2:
-            table[parts[0].lower()] = parts[1].lower()
-    return table
-
-
-def _pe_exports_imports(path):
-    import pefile
-    pe = pefile.PE(str(path), fast_load=True)
-    pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
-                                           pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"],
-                                           pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT"]])
-    exports = set()
-    for s in getattr(getattr(pe, "DIRECTORY_ENTRY_EXPORT", None), "symbols", []) or []:
-        if s.name:
-            exports.add(s.name.decode())
-        exports.add(f"#{s.ordinal}")
-    imports, delay = [], []
-    for attr, out in (("DIRECTORY_ENTRY_IMPORT", imports), ("DIRECTORY_ENTRY_DELAY_IMPORT", delay)):
-        for d in getattr(pe, attr, []) or []:
-            for i in d.imports:
-                out.append((d.dll.decode().lower(), i.name.decode() if i.name else f"#{i.ordinal}"))
-    return exports, imports, delay
-
-
-def system_dlls():
-    """name -> path of every DLL the Shizuku build packs into WIN64.IMG's system directory."""
-    found = {}
-    for p in list(WIN64.glob("*.dll")) + list((WIN64 / "wineport").glob("*.dll")):
-        found.setdefault(p.name.lower(), p)
-    return found
-
-
-def import_check(files):
-    """files: packaged PE paths (EXEs and DLLs that sit together in D:\\WK). Returns (misses, report)."""
-    table = apiset_table()
-    packaged = {Path(f).name.lower(): Path(f) for f in files}
-    sysd = system_dlls()
-    cache = {}
-
-    def exports_of(dll):
-        if dll not in cache:
-            p = packaged.get(dll) or sysd.get(dll)
-            cache[dll] = _pe_exports_imports(p)[0] if p else None
-        return cache[dll]
-
-    misses, report = [], {}
-    for f in files:
-        _, imps, delay = _pe_exports_imports(f)
-        per = {"imports": len(imps), "delay_imports": len(delay), "dlls": sorted({d for d, _ in imps})}
-        for dll, name in imps:
-            host = table.get(dll.removesuffix(".dll"), dll) if dll.startswith(("api-ms-", "ext-ms-")) else dll
-            ex = exports_of(host)
-            if ex is None:
-                misses.append(f"{Path(f).name}: {dll} (-> {host}) not available")
-            elif name not in ex:
-                misses.append(f"{Path(f).name}: {dll}!{name} not exported by {host}")
-        report[Path(f).name] = per
-    return sorted(set(misses)), report
 
 
 def make_image(image, files, wkrun_txt, extra_mib=64):
@@ -138,8 +67,9 @@ def autorun(image, timeout_s, program="D:\\WK\\WKRUN.EXE", cmdline=None, cwd="D:
 
 
 def run_qemu(image, serial_path, memory="1024", timeout=3600, display="none", extra=(), qemu_bin=None, trace=True,
-             monitor=None):
-    """Boots standalone Kernel64 with the image as D:. Returns (seconds, timed_out, qemu_output, command)."""
+             monitor=None, snapshot=True):
+    """Boots standalone Kernel64 with the image as D: (snapshot=False keeps what the guest writes, for get_file()).
+    Returns (seconds, timed_out, qemu_output, command, accel)."""
     stub, kernel, initrd = K64S / "boot.elf", K64S / "KERNEL64S.BIN", WIN64 / "WIN64.IMG"
     for f in (stub, kernel, initrd):
         if not f.exists():
@@ -152,7 +82,7 @@ def run_qemu(image, serial_path, memory="1024", timeout=3600, display="none", ex
            "-kernel", str(stub), "-initrd", f"{kernel},{initrd}",
            "-append", "shz.noapps shz.autorun=D:\\K64RUN.TXT" + (" shz.k32trace shz.exctrace" if trace else ""),
            "-serial", f"file:{serial_path}", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04", "-no-reboot",
-           "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw,snapshot=on",
+           "-device", "ahci,id=ahci0", "-drive", f"if=none,id=d0,file={image},format=raw{',snapshot=on' if snapshot else ''}",
            "-device", "ide-hd,drive=d0,bus=ahci0.0", *(["-qmp", f"unix:{monitor},server,nowait"] if monitor else []),
            *extra]
     started = time.time()
@@ -166,6 +96,12 @@ def run_qemu(image, serial_path, memory="1024", timeout=3600, display="none", ex
         timed_out = True
     out = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
     return round(time.time() - started, 1), timed_out, out, [str(c) for c in cmd], accel
+
+
+def get_file(image, name, dest):
+    """Copies ::<name> (e.g. "WK/r1.bmp") out of the FAT32 image; returns dest, or None when the guest did not write it."""
+    r = subprocess.run(["mcopy", "-o", "-i", str(image), "::" + name, str(dest)], env=mtools_env(), capture_output=True)
+    return Path(dest) if r.returncode == 0 and Path(dest).exists() else None
 
 
 def parse_serial(serial):
