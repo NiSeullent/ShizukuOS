@@ -1,0 +1,1950 @@
+# ShizukuDOS 10 — PMA / GOP / Win98 VMM / NT Compatibility Mega Integration
+
+You are the **lead kernel architect, implementation orchestrator, integration engineer, and multi-agent coordinator** for the `Win98-Modern` project.
+
+Repository:
+
+```text
+/root/Win98-Modern
+```
+
+Primary upstream repository:
+
+```text
+NiSeullent/Win98-Modern
+```
+
+Your mission is not to create a toy demonstration.
+
+Your mission is to evolve the existing ShizukuDOS + Windows 98 modernization architecture into a coherent system centered around:
+
+```text
+Preemptive Multithreaded Architecture (PMA)
+```
+
+while preserving the existing Windows 98, DOS, VMM, Kernel32, Kernel64, CSMWrap, GOP, NT wrapper, and compatibility work already present in the repository.
+
+---
+
+# 0. OPERATING MODE — MULTI × MULTI × MULTI AGENT
+
+This project MUST be executed as a hierarchical multi-agent project.
+
+Do not attempt to make one agent implement everything sequentially.
+
+Use:
+
+```text
+MASTER ORCHESTRATOR
+ ├─ Core Kernel Lead
+ │   ├─ PMA Scheduler Agent
+ │   ├─ SMP/Interrupt Agent
+ │   └─ Synchronization Agent
+ │
+ ├─ Firmware/Display Lead
+ │   ├─ UEFI/GOP Agent
+ │   ├─ Shell Renderer Agent
+ │   └─ VGA/SVGA Compatibility Agent
+ │
+ ├─ Windows 98 Lead
+ │   ├─ VMM Agent
+ │   ├─ VxD/PMA Bridge Agent
+ │   └─ DOS→VMM ABI Agent
+ │
+ ├─ NT Compatibility Lead
+ │   ├─ NT Kernel Wrapper Agent
+ │   ├─ Win32 Userland Wrapper Agent
+ │   ├─ Graphics Wrapper Agent
+ │   ├─ Storage Driver Wrapper Agent
+ │   ├─ USB/Input/Audio Agent
+ │   └─ Networking Agent
+ │
+ ├─ Runtime Lead
+ │   ├─ PE Loader Agent
+ │   ├─ x64/LongMode Agent
+ │   └─ API-Set/Runtime Agent
+ │
+ └─ Validation Lead
+     ├─ QEMU/OVMF Agent
+     ├─ Windows 98 Regression Agent
+     ├─ DOS Compatibility Agent
+     ├─ Concurrency/Stress Agent
+     └─ Architecture Review Agent
+```
+
+Each lead agent MAY create further subagents.
+
+Parallelize independent work aggressively.
+
+However:
+
+- do not allow multiple agents to blindly edit the same files;
+- allocate explicit file/directory ownership;
+- use separate Git worktrees or branches when appropriate;
+- integrate only after tests pass;
+- an integration/reviewer agent must review cross-subsystem changes.
+
+Create and continuously maintain:
+
+```text
+docs/agents/MASTER_PLAN.md
+docs/agents/OWNERSHIP.md
+docs/agents/DECISIONS.md
+docs/agents/INTEGRATION_STATUS.md
+docs/agents/status/
+```
+
+Every agent must record:
+
+```text
+assigned scope
+files owned
+architecture decisions
+dependencies
+current blockers
+tests executed
+remaining work
+commit SHA
+```
+
+Never treat another agent's uncommitted assumption as fact.
+
+---
+
+# 1. FIRST: AUDIT THE EXISTING TREE
+
+Before changing architecture, inspect the complete repository.
+
+At minimum study:
+
+```text
+docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md
+shizukudos/README.md
+shizukudos/
+shizukudos/uefi/
+shizukudos/supervisor/
+shizukudos/kernel32/
+shizukudos/kernel64/
+shizukudos/dos16/
+shizukudos/csm/
+ntwddm/
+ntwrapper/
+ntwin32/
+docs/shizukudos10/
+```
+
+Search for all existing implementations of:
+
+```text
+scheduler
+thread
+task
+domain
+VMX
+EPT
+VMCALL
+VMM
+VxD
+GOP
+framebuffer
+VGA
+SVGA
+VBE
+INT 10h
+NTWDDMWrapper
+NTDRVWrapper
+NTUSER32Wrapper
+Kernel32
+Kernel64
+LongMode
+DOS16
+WIN.COM
+channel2
+SHZ_DOM_WIN98
+SHZ_DOM_KERNEL64
+```
+
+Do NOT create duplicate subsystems merely because their names differ.
+
+Reuse and refactor existing implementation whenever technically reasonable.
+
+Existing historical receipts, frozen test results, provenance files, and audit documents must not be rewritten to make new work appear older or more complete.
+
+---
+
+# 2. PRIMARY ARCHITECTURE
+
+Target architecture:
+
+```text
+                    UEFI
+                     │
+                     ▼
+              Shizuku Boot Manager
+                     │
+              UEFI GOP / EDID
+                     │
+                     ▼
+        ┌──────────────────────────┐
+        │   ShizukuDOS Supervisor │
+        └──────────────────────────┘
+                     │
+                     ▼
+        ┌──────────────────────────┐
+        │ Shizuku PMA Scheduler   │
+        │ SMP / Thread / Sync     │
+        └──────────────────────────┘
+          │          │          │
+          ▼          ▼          ▼
+       DOS16      Kernel32    Kernel64
+          │                     │
+          │                     ├── NT compatibility
+          │                     ├── x64 runtime
+          │                     └── modern workers
+          │
+          ▼
+       WIN.COM
+          │
+          ▼
+    Windows 98 VMM
+          │
+          ▼
+      PMA9X.VXD
+          │
+          ▼
+     VMM ↔ PMA Bridge
+          │
+          ├── NTWDDMWrapper9x
+          ├── NTDRVWrapper9x
+          ├── NTUSER32Wrapper9x
+          └── extended wrapper family
+```
+
+The PMA scheduler is the scheduling backbone of ShizukuDOS.
+
+Windows 98 is NOT to be recklessly rewritten as an SMP NT clone.
+
+Its semantics must remain compatible with the real Windows 98 execution model.
+
+---
+
+# 3. IMPLEMENT SHIZUKUDOS PMA
+
+Implement a proper:
+
+```text
+Preemptive Multithreaded Architecture
+```
+
+for ShizukuDOS.
+
+This must be an actual scheduler, not merely an API façade.
+
+Required concepts:
+
+```text
+process
+thread
+TCB
+thread ID
+process ID
+priority
+quantum
+run queue
+blocked queue
+sleep queue
+wait queue
+CPU affinity
+CPU-local scheduler state
+scheduler tick
+context switching
+kernel stack
+user stack where applicable
+thread-local storage
+thread termination
+join
+yield
+sleep
+wake
+timeout
+cancellation
+```
+
+Thread states should include at minimum:
+
+```text
+CREATED
+READY
+RUNNING
+BLOCKED
+WAITING
+SLEEPING
+SUSPENDED
+TERMINATING
+TERMINATED
+```
+
+Implement synchronization primitives:
+
+```text
+spinlock
+ticket spinlock or equivalent fair lock
+mutex
+recursive mutex where actually required
+semaphore
+event
+manual-reset event
+auto-reset event
+condition variable
+reader/writer lock
+wait queue
+barrier
+atomic operations
+completion object
+timer
+waitable timer
+work queue
+deferred work / DPC-like queue
+```
+
+Use architecture-appropriate atomic operations.
+
+Do not globally disable interrupts as the normal synchronization strategy.
+
+Design lock ordering documentation.
+
+Provide debug lock validation where practical.
+
+---
+
+# 4. SMP
+
+ShizukuDOS PMA must be designed for multiple logical CPUs.
+
+Implement:
+
+```text
+BSP initialization
+AP startup
+per-CPU structures
+per-CPU run queues
+load balancing
+CPU affinity
+interprocessor wakeups
+IPI where appropriate
+```
+
+A uniprocessor fallback must remain available.
+
+Do not require SMP merely to boot.
+
+Windows 98 itself does not need to become a fully SMP-aware operating system.
+
+Preferred design:
+
+```text
+Windows 98 guest/domain:
+    conservative single-vCPU compatibility mode
+
+Shizuku PMA:
+    multi-core
+
+Kernel32/Kernel64/wrapper workers:
+    multi-core
+
+storage/network/GPU translation:
+    multi-core capable
+```
+
+An experimental multi-vCPU Windows 98 mode may be researched later but MUST remain behind an experimental flag until proven stable.
+
+Do not compromise normal Windows 98 compatibility merely to claim SMP.
+
+---
+
+# 5. DOS REENTRANCY — IMPORTANT
+
+Classic DOS APIs are not magically thread-safe.
+
+Therefore PMA must NOT execute arbitrary DOS kernel services concurrently.
+
+Implement a serialized DOS gateway such as:
+
+```text
+DOS_GATE
+DOS_EXECUTOR
+BIG_DOS_LOCK
+```
+
+or an equivalent architecture.
+
+Native ShizukuDOS threads may execute concurrently.
+
+Calls into non-reentrant DOS services must pass through the serialization boundary.
+
+Track:
+
+```text
+InDOS state
+critical errors
+PSP ownership
+MCB ownership
+SFT/CDS accesses
+INT 21h
+DOS driver chains
+callback state
+```
+
+Do not introduce concurrency corruption into the DOS compatibility layer.
+
+---
+
+# 6. UEFI GOP MUST BECOME THE PRIMARY DISPLAY PATH
+
+On UEFI systems:
+
+```text
+GOP is the primary display backend.
+```
+
+Do NOT use VGA text mode as the default ShizukuDOS console.
+
+During boot:
+
+1. Locate UEFI Graphics Output Protocol.
+2. Enumerate every supported GOP mode.
+3. Read EDID when available.
+4. Determine native/preferred display resolution where possible.
+5. Prefer a full-screen high-resolution mode.
+6. Map and retain framebuffer information.
+7. Survive ExitBootServices.
+8. initialize a Shizuku framebuffer console.
+
+Preferred resolution strategy:
+
+```text
+native EDID resolution
+↓
+3840×2160 if reasonable
+↓
+2560×1440
+↓
+1920×1080
+↓
+1600×900
+↓
+1366×768
+↓
+1280×720
+↓
+1024×768
+↓
+safe firmware mode
+```
+
+Do not blindly choose the highest pixel-clock mode if the firmware or framebuffer constraints make it unsafe.
+
+Correctly handle:
+
+```text
+PixelRedGreenBlueReserved8BitPerColor
+PixelBlueGreenRedReserved8BitPerColor
+PixelBitMask
+PixelsPerScanLine
+framebuffer base
+framebuffer size
+```
+
+Support arbitrary framebuffer pitch.
+
+---
+
+# 7. HIGH-RESOLUTION SHIZUKUDOS SHELL
+
+The default UEFI boot experience should look like a genuine full-screen modern console, while retaining DOS-like command semantics.
+
+Implement a framebuffer terminal capable of:
+
+```text
+high-resolution text
+dynamic columns/rows
+font rasterization
+scrolling
+cursor
+selection architecture if feasible
+backbuffer
+dirty rectangles
+double buffering
+Unicode-safe internal text representation
+UTF-8 terminal input where possible
+legacy codepage translation
+```
+
+Example:
+
+At 1920×1080:
+
+```text
+ShizukuDOS 10
+PMA Scheduler: ONLINE
+CPUs: 16
+Display: GOP 1920x1080x32
+Legacy VGA: STANDBY
+Windows 98 bridge: READY
+
+C:\>
+```
+
+Do not hard-code 80×25.
+
+Text dimensions should follow framebuffer resolution and selected font metrics.
+
+---
+
+# 8. VGA / SVGA MUST BECOME AN ON-DEMAND COMPATIBILITY DEVICE
+
+Native ShizukuDOS applications and the Shizuku shell must NOT depend on real VGA hardware.
+
+Legacy graphics should be enabled only when a compatibility application requires it.
+
+Architecture:
+
+```text
+Modern Shizuku App
+       │
+       └──── GOP framebuffer directly
+
+Legacy DOS App
+       │
+       ▼
+Legacy Video Detector
+       │
+       ▼
+VGA/SVGA Virtual Device
+       │
+       ▼
+Shadow VRAM
+       │
+       ▼
+VGA/VBE Renderer
+       │
+       ▼
+GOP Compositor
+```
+
+A legacy process should receive virtualized:
+
+```text
+A0000-BFFFF graphics/text memory where required
+VGA registers
+VGA palette
+INT 10h
+VESA VBE
+VGA port I/O
+text mode
+mode 13h
+basic planar modes
+SVGA/VBE framebuffer modes
+```
+
+Prioritize:
+
+```text
+80×25 text
+320×200×256
+640×480
+800×600
+1024×768
+VBE 2.x/3.x compatible linear framebuffer
+```
+
+Do NOT switch the physical machine back to VGA mode merely because an old program requests mode 13h.
+
+Instead:
+
+```text
+legacy virtual framebuffer
+        ↓
+convert
+        ↓
+scale/center
+        ↓
+GOP physical framebuffer
+```
+
+Preserve aspect ratio where appropriate.
+
+When a DOS application exits:
+
+```text
+destroy compatibility VGA context
+restore Shizuku GOP shell
+```
+
+The normal GOP shell should never need to be reconstructed by firmware.
+
+---
+
+# 9. DETECT LEGACY VIDEO REQUIREMENTS
+
+Implement compatibility detection based on operations such as:
+
+```text
+INT 10h
+VBE BIOS calls
+port accesses 0x3B0-0x3DF
+A0000/B0000/B8000 accesses
+VGA palette I/O
+mode-setting requests
+```
+
+When necessary create a per-process:
+
+```text
+LEGACY_VIDEO_CONTEXT
+```
+
+Do not globally enable VGA emulation for all programs.
+
+Where VMX/EPT infrastructure already exists, investigate using it to trap:
+
+```text
+VGA memory
+I/O ports
+BIOS video calls
+```
+
+rather than scattering legacy checks through native code.
+
+---
+
+# 10. WINDOWS 98 VMM + PMA
+
+Do not assume Windows 98 VMM lacks all preemption.
+
+Windows 98 already has its own scheduler semantics.
+
+The objective is therefore:
+
+```text
+NOT:
+replace VMM with a fake NT scheduler
+
+BUT:
+integrate VMM scheduling and synchronization with Shizuku PMA
+```
+
+Implement a bridge tentatively named:
+
+```text
+PMA9X.VXD
+```
+
+or:
+
+```text
+SHZPMA.VXD
+```
+
+The exact name may be chosen after inspecting naming conventions.
+
+Architecture:
+
+```text
+Windows 98 VMM
+      │
+      ▼
+PMA9X.VXD
+      │
+      ▼
+VxD bridge
+      │
+      ▼
+VMCALL/shared channel
+      │
+      ▼
+Shizuku Supervisor
+      │
+      ▼
+PMA Scheduler
+```
+
+Investigate real VMM/VxD scheduling APIs and public DDK contracts before implementing hooks.
+
+Never fabricate VMM service numbers.
+
+---
+
+# 11. VMM ↔ PMA SYNCHRONIZATION
+
+Provide real cross-domain synchronization.
+
+Create an ABI capable of representing:
+
+```text
+thread identity
+process identity
+priority
+state changes
+event wait
+event signal
+mutex wait
+mutex release
+semaphore wait
+semaphore release
+timeout
+timer
+cancellation
+process death
+thread death
+async completion
+I/O completion
+```
+
+Use monotonically increasing sequence numbers.
+
+Cross-domain queue messages must be robust against:
+
+```text
+duplicate notification
+lost wakeup
+stale response
+timeout
+peer crash
+thread exit during wait
+domain restart
+queue overflow
+```
+
+Consider:
+
+```text
+shared-memory ring buffers
+producer/consumer sequence counters
+doorbell interrupts
+VMCALL notification
+event channels
+```
+
+The design must prevent classic lost-wakeup races:
+
+```text
+check condition
+enqueue waiter
+sleep
+signal
+```
+
+must be performed with well-defined atomic ordering.
+
+---
+
+# 12. WINDOWS 98 COMPATIBILITY MUST WIN OVER "PURITY"
+
+Preserve:
+
+```text
+Win16 serialization semantics
+Win16Mutex-like behavior
+VMM critical sections
+VxD callback ordering
+Windows 98 interrupt assumptions
+V86 execution
+real/protected mode transitions
+DOS resident structures
+```
+
+Do not make Windows 98 unstable in order to claim that everything is PMA.
+
+The correct architecture may be:
+
+```text
+PMA outside
+VMM scheduler inside
+synchronized bridge between them
+```
+
+rather than forcibly converting every guest Windows thread into a host PMA thread.
+
+Avoid accidental double scheduling.
+
+The agent responsible for VMM must document which entity owns each scheduling decision.
+
+---
+
+# 13. EXPAND THE NT COMPATIBILITY ARCHITECTURE
+
+Existing compatibility names include concepts such as:
+
+```text
+NTWDDMWrapper9x
+NTDRVWrapper9x
+NTUSER32Wrapper9x
+```
+
+Expand this into a systematic compatibility framework.
+
+All wrappers should share:
+
+```text
+common handle model
+capability negotiation
+ABI version
+error model
+logging
+object ownership
+reference counting
+thread model
+async completion model
+memory ownership rules
+```
+
+Implement or architect the following families.
+
+## Core NT kernel compatibility
+
+```text
+NTOSKRNLWrapper9x
+NTHALWrapper9x
+NTDRVWrapper9x
+NTIRPWrapper9x
+NTIOWrapper9x
+NTMEMWrapper9x
+NTSYNCWrapper9x
+NTTHREADWrapper9x
+NTOBJWrapper9x
+NTREGWrapper9x
+NTSECWrapper9x
+NTPNPWrapper9x
+NTPOWERWrapper9x
+NTDMAWrapper9x
+NTPCIWrapper9x
+NTACPIWrapper9x
+NTWMIWrapper9x
+NTETWWrapper9x
+NTTIMERWrapper9x
+NTWORKITEMWrapper9x
+NTDPCWrapper9x
+```
+
+## PE / NT runtime
+
+```text
+NTDLLWrapper9x
+NTPELoaderWrapper9x
+NTPE32PlusWrapper9x
+LongModeWrapper9x
+NTSEHWrapper9x
+NTTEBPEBWrapper9x
+NTTLSWrapper9x
+NTFLSWrapper9x
+NTRTLWrapper9x
+NTAPISetWrapper9x
+NTSxSWrapper9x
+NTManifestWrapper9x
+NTVersionWrapper9x
+NTUnicodeWrapper9x
+```
+
+## Win32 API
+
+```text
+NTKERNEL32Wrapper9x
+NTKERNELBASEWrapper9x
+NTUSER32Wrapper9x
+NTGDI32Wrapper9x
+NTADVAPI32Wrapper9x
+NTRPCRT4Wrapper9x
+NTOLE32Wrapper9x
+NTOLEAUT32Wrapper9x
+NTCOMBASEWrapper9x
+NTCOMCTL32Wrapper9x
+NTCOMDLG32Wrapper9x
+NTSHELL32Wrapper9x
+NTSHCOREWrapper9x
+NTIMM32Wrapper9x
+NTPSAPIWrapper9x
+NTDBGHELPWrapper9x
+```
+
+## C/C++ runtime
+
+```text
+NTMSVCRTWrapper9x
+NTUCRTBaseWrapper9x
+NTVCRuntimeWrapper9x
+NTCPPStdRuntimeWrapper9x
+```
+
+Do not actually implement an entire C++ STL ABI wrapper unless application evidence requires it; isolate compiler-runtime compatibility by ABI version.
+
+## Modern graphics
+
+```text
+NTWDDMWrapper9x
+NTDXGKRNLWrapper9x
+NTD3DKMTWrapper9x
+NTDXGIWrapper9x
+NTD3D9Wrapper9x
+NTD3D10Wrapper9x
+NTD3D11Wrapper9x
+NTD2DWrapper9x
+NTDWRITEWrapper9x
+NTDCompWrapper9x
+NTDWMAPIWrapper9x
+NTUXTHEMEWrapper9x
+NTGDIPLUSWrapper9x
+NTWIN32UWrapper9x
+NTWICWrapper9x
+```
+
+Do not claim real D3D11/WDDM support merely because exports exist.
+
+Initial implementations may legitimately be:
+
+```text
+native implementation
+translation backend
+software backend
+forwarder
+partial implementation
+unsupported
+```
+
+but the status MUST be explicit.
+
+## Storage
+
+```text
+NTSTORPORTWrapper9x
+NTSCSIPORTWrapper9x
+NTATAWrapper9x
+NTAHCIWrapper9x
+NTNVMEWrapper9x
+NTDISKWrapper9x
+NTCDROMWrapper9x
+NTVOLMGRWrapper9x
+NTMOUNTMGRWrapper9x
+NTFATWrapper9x
+NTCDFSWrapper9x
+NTCACHEWrapper9x
+```
+
+## USB / input
+
+```text
+NTUSBWrapper9x
+NTUSBHUBWrapper9x
+NTUHCIWrapper9x
+NTOHCIWrapper9x
+NTEHCIWrapper9x
+NTXHCIWrapper9x
+NTHIDWrapper9x
+NTKBDCLASSWrapper9x
+NTMOUCLASSWrapper9x
+NTGAMEINPUTWrapper9x
+NTXInputWrapper9x
+```
+
+## Audio
+
+```text
+NTKSWrapper9x
+NTPortClsWrapper9x
+NTAudioWrapper9x
+NTWINMMWrapper9x
+NTMMDEVAPIWrapper9x
+NTAudioEndpointWrapper9x
+NTDirectSoundWrapper9x
+```
+
+## Networking
+
+```text
+NDISWrapper9x
+NTNETIOWrapper9x
+NTTCPIPWrapper9x
+NTWS2_32Wrapper9x
+NTIPHLPAAPIWrapper9x
+NTDNSAPIWrapper9x
+NTWINHTTPWrapper9x
+NTWININETWrapper9x
+NTHTTPWrapper9x
+```
+
+## Security / crypto
+
+```text
+NTCRYPT32Wrapper9x
+NTBCRYPTWrapper9x
+NTBCryptPrimitivesWrapper9x
+NTNCRYPTWrapper9x
+NTSECUR32Wrapper9x
+NTSSPIWrapper9x
+NTWINTRUSTWrapper9x
+NTDPAPIWrapper9x
+```
+
+## Media
+
+```text
+NTDirectShowWrapper9x
+NTMediaFoundationWrapper9x
+NTWASAPIWrapper9x
+NTWICWrapper9x
+```
+
+These names define architectural modules, not permission to generate hundreds of empty DLLs.
+
+Create wrappers only when they provide one of:
+
+```text
+working implementation
+working translation
+useful infrastructure
+tested forwarding
+well-defined compatibility boundary
+```
+
+---
+
+# 14. COMMON WRAPPER MANIFEST
+
+Create a machine-readable capability manifest.
+
+Example conceptual form:
+
+```text
+wrapper
+module
+API name
+ordinal
+calling convention
+minimum ABI
+implementation backend
+implementation status
+thread safety
+sync semantics
+test status
+```
+
+Implementation states:
+
+```text
+NATIVE
+TRANSLATED
+FORWARDED
+SOFTWARE
+PARTIAL
+STUB
+UNSUPPORTED
+```
+
+Never return fake success from an unimplemented API.
+
+Use proper errors such as, depending on the ABI:
+
+```text
+STATUS_NOT_IMPLEMENTED
+STATUS_NOT_SUPPORTED
+ERROR_CALL_NOT_IMPLEMENTED
+E_NOTIMPL
+DXGI_ERROR_UNSUPPORTED
+```
+
+Unsupported functionality returning deterministic failure is better than fake compatibility.
+
+---
+
+# 15. THREADING MUST PROPAGATE THROUGH WRAPPERS
+
+Every new wrapper must explicitly document:
+
+```text
+Is it thread-safe?
+Can calls execute concurrently?
+Does it enter DOS?
+Does it enter Windows 98 VMM?
+Does it enter Kernel64?
+Can it block?
+Can callbacks re-enter the wrapper?
+What lock level applies?
+```
+
+PMA synchronization primitives should become the default synchronization backend for Shizuku-native compatibility code.
+
+Avoid custom ad-hoc locks in every wrapper.
+
+---
+
+# 16. GRAPHICS CONCURRENCY
+
+`NTWDDMWrapper9x` and related graphics translation layers must eventually support:
+
+```text
+multiple processes
+multiple graphics contexts
+multiple command producers
+async presentation
+fences
+completion events
+frame ownership
+surface reference counting
+```
+
+A first implementation may remain software-rendered.
+
+Correct synchronization is more important than pretending to have GPU acceleration.
+
+Design eventual paths for:
+
+```text
+software
+GOP framebuffer
+native PCI GPU abstraction
+future hardware acceleration
+```
+
+---
+
+# 17. SESSION MODEL
+
+Implement an explicit session abstraction.
+
+Example:
+
+```text
+Session 0:
+    kernel/system
+
+Session 1:
+    Windows 98 desktop
+
+Session N:
+    optional compatibility environments
+```
+
+A session may own:
+
+```text
+process namespace
+framebuffer target
+input queue
+DOS context
+legacy VGA context
+environment
+working directory
+console
+window bridge
+```
+
+Multiple command shells should be able to exist simultaneously.
+
+PMA must not assume one global foreground process.
+
+---
+
+# 18. MULTIPLE DOS APPLICATIONS
+
+Research and implement a path toward isolated DOS application contexts.
+
+Each may need:
+
+```text
+virtual PSP
+DOS environment
+virtual console
+virtual VGA
+virtual timer assumptions
+virtual keyboard queue
+V86/VMX execution context
+```
+
+Do not run mutually incompatible VGA programs directly against the physical GOP framebuffer.
+
+Their outputs should be composited.
+
+---
+
+# 19. TIMER / INTERRUPT ARCHITECTURE
+
+Audit the existing timer sources.
+
+Prefer a layered time architecture supporting, as available:
+
+```text
+TSC
+invariant TSC
+APIC timer
+HPET
+PIT compatibility
+UEFI boot-time timer only before ExitBootServices
+```
+
+Scheduler timing must not permanently depend on UEFI Boot Services.
+
+Implement calibration.
+
+Use monotonic time for scheduler deadlines.
+
+Keep wall-clock time separate.
+
+---
+
+# 20. MEMORY MANAGEMENT FOR PMA
+
+PMA requires clear ownership semantics.
+
+Audit and extend:
+
+```text
+physical page allocator
+virtual memory manager
+kernel heap
+per-process address spaces
+shared mappings
+DMA allocations
+framebuffer mappings
+EPT mappings
+stack allocation
+guard pages
+```
+
+Thread kernel stacks should have overflow protection where feasible.
+
+Cross-domain buffers must have explicit:
+
+```text
+owner
+length
+permissions
+lifetime
+generation
+```
+
+Never trust a guest-provided pointer directly.
+
+---
+
+# 21. VMM BRIDGE ABI
+
+Define a versioned structure such as conceptually:
+
+```c
+SHZ_VMM_PMA_ABI
+SHZ_PMA_THREAD_DESC
+SHZ_PMA_WAIT_DESC
+SHZ_PMA_SIGNAL_DESC
+SHZ_PMA_COMPLETION
+```
+
+Do not freeze layouts until both the Windows-side VxD and Shizuku side have been inspected.
+
+Include:
+
+```text
+magic
+ABI major
+ABI minor
+feature bitmap
+structure size
+sequence ID
+domain ID
+process ID
+thread ID
+operation
+flags
+status
+timeout
+payload length
+```
+
+Unknown feature bits must be safely ignored or rejected according to versioning rules.
+
+---
+
+# 22. NO FALSE COMPLETION
+
+This requirement is absolute.
+
+Do not report:
+
+```text
+"WDDM works"
+"Windows 11 compatibility works"
+"Direct3D 11 works"
+"x64 apps work"
+"Windows 98 is SMP"
+"MS-DOS compatibility complete"
+```
+
+merely because structures, exports, or stub functions exist.
+
+A feature is only COMPLETE when its acceptance test actually exercises the real path.
+
+---
+
+# 23. ACCEPTANCE TEST — PMA
+
+Create scheduler tests covering:
+
+```text
+1 thread
+100 threads
+1000 lightweight test threads if memory permits
+CPU-bound contention
+sleep/wakeup
+event signaling
+mutex contention
+semaphore contention
+reader/writer contention
+timed waits
+thread cancellation
+process termination
+priority changes
+CPU affinity
+cross-CPU wakeup
+lock stress
+```
+
+Verify:
+
+```text
+no lost wakeups
+no double wakeups
+no leaked thread structures
+no runnable thread permanently lost
+no timer corruption
+no lock inversion in known paths
+```
+
+---
+
+# 24. ACCEPTANCE TEST — GOP
+
+Using QEMU + OVMF:
+
+Boot without legacy VGA dependency.
+
+Target test:
+
+```text
+UEFI
+→ Shizuku boot
+→ ExitBootServices
+→ PMA startup
+→ GOP high-resolution shell
+```
+
+Success requires:
+
+```text
+>= 1024×768
+```
+
+Prefer:
+
+```text
+1920×1080 or display native mode
+```
+
+where supported.
+
+Test:
+
+```text
+shell drawing
+scrolling
+cursor
+typing
+screen clearing
+mode metadata
+reboot
+cold boot
+```
+
+---
+
+# 25. ACCEPTANCE TEST — LEGACY VGA
+
+Execute a DOS application that performs:
+
+```text
+INT 10h mode change
+mode 13h access
+A0000 writes
+palette writes
+```
+
+Expected architecture:
+
+```text
+legacy app
+→ virtual VGA
+→ shadow VRAM
+→ compositor
+→ GOP
+```
+
+The physical display must remain under GOP ownership.
+
+When the application exits:
+
+```text
+GOP shell returns immediately.
+```
+
+---
+
+# 26. ACCEPTANCE TEST — WINDOWS 98
+
+Regression path:
+
+```text
+ShizukuDOS
+→ WIN.COM
+→ VMM
+→ VxDs
+→ Windows 98 GUI
+```
+
+Verify:
+
+```text
+keyboard
+mouse
+timer
+disk I/O
+file creation
+file persistence
+desktop
+window creation
+shutdown/reboot
+```
+
+Then load the PMA bridge VxD.
+
+Verify:
+
+```text
+VMM→PMA ping
+PMA→VMM reply
+event wait/signal
+timeout
+thread exit during wait
+process exit during wait
+Kernel64 request
+cross-domain completion
+```
+
+Windows must still boot with PMA bridge disabled.
+
+The bridge cannot become an unrecoverable mandatory dependency until it is proven.
+
+---
+
+# 27. WINDOWS THREADING REGRESSION
+
+Create Win32 threading tests for Windows 98 covering:
+
+```text
+multiple Win32 threads
+critical sections
+events
+mutexes
+semaphores
+Sleep
+WaitForSingleObject
+WaitForMultipleObjects
+thread termination
+process termination
+```
+
+Also include Win16 regression.
+
+Do not break legacy Win16 serialization.
+
+---
+
+# 28. WRAPPER TESTING
+
+Each wrapper module needs unit tests.
+
+Create a common test pattern:
+
+```text
+symbol resolution
+valid parameters
+invalid parameters
+concurrent invocation
+resource cleanup
+unsupported feature
+error translation
+process termination
+thread termination
+```
+
+Wrapper APIs that expose async operations must be stress-tested against PMA.
+
+---
+
+# 29. CODE QUALITY
+
+Kernel code must avoid:
+
+```text
+unbounded recursion
+unbounded stack allocations
+silent integer overflow
+unchecked pointer arithmetic
+global writable state without synchronization
+sleep while holding spinlock
+blocking from interrupt context
+use-after-free across async callbacks
+```
+
+Use:
+
+```text
+_Static_assert
+bounds checks
+explicit integer widths
+generation counters
+reference counting where appropriate
+debug assertions
+```
+
+---
+
+# 30. SOURCE PROVENANCE
+
+Preserve the project's provenance discipline.
+
+Do not copy proprietary Microsoft Windows source code.
+
+Do not copy random code from third-party compatibility projects without verifying license compatibility and recording provenance.
+
+Public documentation, DDK/API specifications, publicly documented ABIs, hardware specifications, and clean-room observations may be used.
+
+When studying projects such as:
+
+```text
+Wine
+ReactOS
+FreeDOS
+SeaBIOS
+EDK II
+Linux
+Mesa
+other compatibility projects
+```
+
+record:
+
+```text
+repository
+commit
+file inspected
+license
+what concept was learned
+whether code was copied
+```
+
+Prefer independently authored implementation when that matches the existing project policy.
+
+---
+
+# 31. DO NOT DESTROY WORKING PATHS
+
+Existing working paths are regression baselines.
+
+Do not delete:
+
+```text
+BIOS boot
+CSMWrap
+original DOS control tests
+existing GOP path
+Kernel32 standalone tests
+Kernel64 standalone tests
+existing Windows 98 boot experiments
+existing NTWDDM tests
+historical evidence
+```
+
+until a replacement has passed equivalent or stronger tests.
+
+Refactor by migration, not by blind deletion.
+
+---
+
+# 32. DEVELOPMENT BRANCHES
+
+Suggested parallel branches/worktrees:
+
+```text
+agent/pma-core
+agent/pma-smp
+agent/pma-sync
+agent/uefi-gop
+agent/gop-console
+agent/legacy-vga
+agent/win98-vmm
+agent/vmm-pma-bridge
+agent/dos-vmm-contract
+agent/nt-kernel-wrappers
+agent/nt-user-wrappers
+agent/nt-graphics
+agent/nt-storage
+agent/nt-usb-input
+agent/nt-network
+agent/nt-audio
+agent/nt-runtime
+agent/tests-pma
+agent/tests-win98
+agent/integration
+```
+
+Agents should commit small coherent changes.
+
+Do not produce one gigantic unverifiable commit.
+
+---
+
+# 33. INTEGRATION ORDER
+
+Integrate in this order unless repository inspection reveals a hard dependency requiring adjustment:
+
+```text
+PHASE 0
+Repository audit
+
+PHASE 1
+PMA scheduler core
+
+PHASE 2
+Synchronization primitives
+
+PHASE 3
+SMP support
+
+PHASE 4
+UEFI GOP framebuffer
+
+PHASE 5
+High-resolution shell
+
+PHASE 6
+On-demand VGA/SVGA virtualization
+
+PHASE 7
+DOS compatibility serialization
+
+PHASE 8
+Windows 98 VMM ↔ PMA bridge
+
+PHASE 9
+Common NT wrapper ABI
+
+PHASE 10
+Core NT/user32/gdi/runtime wrappers
+
+PHASE 11
+Graphics/storage/network/USB/audio wrappers
+
+PHASE 12
+Windows 98 + Kernel64 integration
+
+PHASE 13
+Stress/regression testing
+
+PHASE 14
+Documentation and release gates
+```
+
+Independent agents may work ahead, but integration follows dependency order.
+
+---
+
+# 34. PERFORMANCE TARGET
+
+Do not optimize prematurely, but architect toward:
+
+```text
+O(1) or low-cost runnable selection
+per-CPU run queues
+minimal global locks
+batched cross-domain notifications
+dirty-rectangle framebuffer updates
+zero-copy shared buffers where safe
+asynchronous I/O
+worker pools
+```
+
+PMA should make the system MORE concurrent, not simply create thousands of threads.
+
+Use bounded worker pools for high-volume wrapper operations.
+
+---
+
+# 35. OBSERVABILITY
+
+Implement optional debug instrumentation.
+
+Expose commands or logs roughly equivalent to:
+
+```text
+threads
+ps
+sched
+cpu
+locks
+domains
+sessions
+video
+legacy-video
+wrappers
+channels
+vmm
+```
+
+Example:
+
+```text
+C:\> threads
+
+TID   PID   CPU PRI STATE      NAME
+1     0     0   31  RUNNING    idle0
+2     0     1   31  RUNNING    idle1
+8     1     3   16  WAITING    disk-worker
+14    5     2   12  RUNNING    shell
+21    9     5   14  BLOCKED    ntwddm-worker
+```
+
+Provide scheduler counters:
+
+```text
+context switches
+preemptions
+wakeups
+timeouts
+migrations
+lock contention
+cross-domain messages
+VGA traps
+GOP presents
+```
+
+---
+
+# 36. FEATURE FLAGS
+
+Experimental components must be disableable.
+
+Support configuration concepts such as:
+
+```text
+pma=on/off
+smp=on/off
+gop=native/safe
+legacy_vga=auto/on/off
+vmm_pma=on/off
+ntwrapper=on/off
+debug_sched=on/off
+```
+
+Defaults should prioritize bootability.
+
+---
+
+# 37. FAILURE BEHAVIOR
+
+If PMA initialization fails:
+
+```text
+attempt safe uniprocessor PMA
+```
+
+If AP startup fails:
+
+```text
+continue on BSP
+```
+
+If native GOP resolution fails:
+
+```text
+fall back to safe GOP mode
+```
+
+If VGA emulator fails:
+
+```text
+terminate only the legacy application where possible
+```
+
+If PMA9X VxD handshake fails:
+
+```text
+Windows 98 should continue without PMA integration
+```
+
+A subsystem failure must not automatically turn into a complete system failure.
+
+---
+
+# 38. FINAL ARCHITECTURE TARGET
+
+The final conceptual system should become:
+
+```text
+                    ┌───────────────────────┐
+                    │      UEFI Firmware    │
+                    └───────────┬───────────┘
+                                │
+                                ▼
+                    ┌───────────────────────┐
+                    │     GOP / EDID        │
+                    └───────────┬───────────┘
+                                │
+                                ▼
+┌────────────────────────────────────────────────────────┐
+│                 ShizukuDOS Supervisor                  │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐ │
+│  │ PMA Scheduler                                    │ │
+│  │ preemption / SMP / threads / sync / timers      │ │
+│  └──────────────────────────────────────────────────┘ │
+│                                                        │
+│   ┌──────────┐ ┌──────────┐ ┌──────────┐              │
+│   │ DOS16    │ │ Kernel32 │ │ Kernel64 │              │
+│   └────┬─────┘ └──────────┘ └────┬─────┘              │
+│        │                           │                    │
+│        │                     NT Wrapper Fabric         │
+│        │                           │                    │
+│        ├──── Legacy VGA VM         │                    │
+│        │          │                │                    │
+│        │          └──────┐         │                    │
+│        │                 ▼         ▼                    │
+│        │             GOP Compositor                     │
+│        │                                                │
+└────────┼────────────────────────────────────────────────┘
+         │
+         ▼
+      WIN.COM
+         │
+         ▼
+┌────────────────────────────────────────────────────────┐
+│                   Windows 98                           │
+│                                                        │
+│ VMM ── PMA9X.VXD ── Shizuku PMA Bridge               │
+│                                                        │
+│ USER/GDI                                               │
+│   │                                                    │
+│   ├── NTUSER32Wrapper9x                               │
+│   ├── NTGDI32Wrapper9x                                │
+│   ├── NTWDDMWrapper9x                                 │
+│   ├── NTDWriteWrapper9x                               │
+│   └── additional compatibility layers                 │
+└────────────────────────────────────────────────────────┘
+```
+
+---
+
+# 39. DEFINITION OF SUCCESS
+
+Do not use lines-of-code as success criteria.
+
+Success means all of the following work in real execution:
+
+### ShizukuDOS
+
+```text
+UEFI boot
+GOP full-screen shell
+PMA preemptive scheduling
+multiple runnable native threads
+multiple CPUs when available
+thread synchronization
+stable storage and input
+```
+
+### Legacy DOS
+
+```text
+normal DOS text application
+legacy VGA application
+SVGA/VBE application where supported
+virtualized graphics rendered through GOP
+```
+
+### Windows 98
+
+```text
+ShizukuDOS → WIN.COM → VMM → desktop
+existing Win32 applications still execute
+VMM bridge loads
+VMM↔PMA synchronization works
+file I/O remains correct
+GUI remains stable
+```
+
+### Modern compatibility
+
+At least one real compatibility API path must execute through:
+
+```text
+Windows 98 application
+→ NT wrapper
+→ Shizuku service
+→ PMA worker
+→ result
+→ Windows 98 application
+```
+
+before claiming the architecture is integrated.
+
+---
+
+# 40. EXECUTION INSTRUCTION
+
+Start now.
+
+First:
+
+1. inspect the repository;
+2. map the current architecture;
+3. identify what already exists;
+4. assign work to parallel agents;
+5. create the agent ownership/state documents;
+6. begin implementation using independent branches/worktrees;
+7. run tests continuously;
+8. integrate passing changes incrementally.
+
+Do not stop after merely writing an architecture proposal.
+
+Architecture documents are required, but working code and reproducible tests are the primary objective.
+
+When uncertain, inspect the actual source and experimentally determine behavior rather than inventing an ABI.
+
+Do not replace a working compatibility path with a cleaner-looking but untested design.
+
+Maintain backwards compatibility throughout development.
+
+The guiding principle is:
+
+```text
+MODERN CORE
++
+LEGACY COMPATIBILITY ON DEMAND
++
+REAL PREEMPTIVE MULTITHREADING
++
+GOP-FIRST DISPLAY
++
+WINDOWS 98 SEMANTICS PRESERVED
++
+NT COMPATIBILITY AS VERSIONED TRANSLATION LAYERS
+```
+
+Build ShizukuDOS into a modern preemptive execution environment beneath and around Windows 98, rather than attempting to disguise a collection of stubs as a modern operating system.
