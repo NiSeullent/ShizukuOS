@@ -1,6 +1,6 @@
 # Historical gh-pages source archive
 
-The four original files from `origin/gh-pages` commit `8452c81d074a64212e3df0ccfc8b851c2eb03d37` are preserved byte for byte in this directory. Current Korean/English distribution and preview pages remain under `site/`, with the scoped Nginx deployment configuration under `site/deploy/`. Historical UI text and claims are not current release acceptance evidence. The unrelated branch history is connected using an explicit `ours` merge after this source archive was committed.
+The four original files from `origin/gh-pages` commit `8452c81d074a64212e3df0ccfc8b851c2eb03d37` are preserved byte for byte in this directory. Current Korean/English distribution and preview pages remain under `site/`, with the scoped Nginx deployment configuration under `site/deploy/`. Historical UI text and claims are not current release acceptance evidence. The historical branch is already an ancestor of the integrated history; the ancestry audit verifies that connection. Preserving these originals keeps the historical UI reviewable without replacing the current site.
 
 ```json
 [

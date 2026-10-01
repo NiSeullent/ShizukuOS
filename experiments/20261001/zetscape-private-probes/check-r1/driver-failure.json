@@ -1,0 +1,10 @@
+{
+  "schema": "zetscape.failed-capability-check-attempt.v1",
+  "status": "DRIVER_ABORTED_WITHOUT_COMPLETE_RECEIPT",
+  "attempt": "early private r1 candidate",
+  "reason": "preprocessor-only CPU/ENABLE expressions were used in C++ and the initial inline driver did not preserve complete results; candidate corrected in r2",
+  "compiler_result_claimed_pass": false,
+  "superseded_by": "private/check-r2/syntax-reference-receipt.json",
+  "guest_executed": false,
+  "native_wasm_pass": false
+}

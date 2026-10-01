@@ -1,0 +1,72 @@
+--- a/tools/iewebkit_port/core_jsc_native.cpp
++++ b/tools/iewebkit_port/core_jsc_native.cpp
+@@ -3,6 +3,7 @@
+ // No browser, document renderer, network, or replacement JS implementation.
+ #include "config.h"
+ #include <JavaScriptCore/JavaScript.h>
++#include "wasm_cases.h"
+ #include <windows.h>
+ #include <cstdio>
+ #include <cstring>
+@@ -36,7 +37,7 @@
+ 
+ int main(int argc, char** argv)
+ {
+-    if (argc != 3 || std::strcmp(argv[1], "C:\\GOPLAB\\JSCNAT.LOG")
++    if (argc != 3 || std::strcmp(argv[1], "C:\\GOPLAB\\WASM83BD.LOG")
+         || !std::strlen(argv[2]) || std::strlen(argv[2]) > 80
+         || std::strspn(argv[2], "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != std::strlen(argv[2]))
+         return 10;
+@@ -45,7 +46,7 @@
+                             CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+     if (logHandle == INVALID_HANDLE_VALUE)
+         return 2;
+-    bool logs = line("scope", "actual-pinned-JavaScriptCore-C-API") && line("nonce", argv[2]);
++    bool logs = line("scope", "actual-pinned-JavaScriptCore-Wasm-subset") && line("nonce", argv[2]);
+     OSVERSIONINFOA version { };
+     version.dwOSVersionInfoSize = sizeof(version);
+     bool target = GetVersionExA(&version) && version.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS
+@@ -62,7 +63,11 @@
+     }
+     // Persist the stage before entering real engine initialization, which may
+     // abort if another actual Win9x portability dependency remains unresolved.
+-    if (!line("stage", "before-JSContextGroupCreate")) {
++    logs = flag("build.c-loop", ENABLE(C_LOOP)) && logs;
++    logs = flag("build.jit", ENABLE(JIT)) && logs;
++    logs = flag("build.webassembly", ENABLE(WEBASSEMBLY)) && logs;
++    logs = flag("full-browser-pass", false) && logs;
++    if (!logs || !line("stage", "before-JSContextGroupCreate")) {
+         CloseHandle(logHandle);
+         return 4;
+     }
+@@ -100,6 +105,21 @@
+     value = evaluate(context, "throw new Error('83bd-native-exception-control')", &exception);
+     bool exceptionControl = !value && exception && JSValueIsObject(context, exception);
+     logs = flag("jsc.exception-control", exceptionControl) && logs;
++    bool wasmSubset = ENABLE(WEBASSEMBLY);
++    for (const auto& test : wasm83bdCases) {
++        exception = nullptr;
++        if (!line("stage", test.name)) {
++            logs = false;
++            wasmSubset = false;
++            break;
++        }
++        value = evaluate(context, test.script, &exception);
++        bool passed = value && !exception && JSValueIsBoolean(context, value)
++            && JSValueToBoolean(context, value);
++        logs = flag(test.name, passed) && logs;
++        wasmSubset = passed && wasmSubset;
++    }
++    logs = flag("wasm.subset", wasmSubset) && logs;
+     // Exercise genuine C API collection and release, without claiming that a
+     // log before return proves subsequent CRT/TLS process teardown succeeded.
+     JSGarbageCollect(context);
+@@ -108,7 +128,7 @@
+     logs = flag("jsc.context.released", true) && logs;
+     JSContextGroupRelease(group);
+     logs = flag("jsc.group.released", true) && logs;
+-    bool success = arithmetic && unicode && bigInteger && international && exceptionControl && logs;
++    bool success = arithmetic && unicode && bigInteger && international && exceptionControl && wasmSubset && logs;
+     if (!line("exit", success ? "0" : "6"))
+         success = false;
+     CloseHandle(logHandle);

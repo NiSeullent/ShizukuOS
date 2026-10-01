@@ -1,0 +1,102 @@
+{
+  "schema": "win98modern.historical-source-archive.v1",
+  "original_ref": "codex/publish-snapshot-boot-20261001",
+  "files": [
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/check-r1/driver-failure.json",
+      "archived_path": "experiments/20261001/zetscape-private-probes/check-r1/driver-failure.json",
+      "git_blob": "feb062f333c1bc41fa10e6c7ad401cd641a398bb",
+      "sha256": "f1dfd9b9974651f0e5c8c88619fa804984805f6047eacf5657cc887efff84d97",
+      "bytes": 490,
+      "kind": "historical compiler metadata"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/check-r1/wasm-caller.d",
+      "archived_path": "experiments/20261001/zetscape-private-probes/check-r1/wasm-caller.d",
+      "git_blob": "30668dbf776dca269efa868c1f7af9184d2f3f22",
+      "sha256": "2996506713af68ec28d0efc6519b2842142e7f19f501881a3b2774ba784ef93b",
+      "bytes": 5215,
+      "kind": "historical compiler metadata"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/check-r2/compiler-results.json",
+      "archived_path": "experiments/20261001/zetscape-private-probes/check-r2/compiler-results.json",
+      "git_blob": "255dd48ee320556c0a70c04ece8ff4db018b14ae",
+      "sha256": "9e28ea6b3a67bbae329f4851d4f573c6e122b5f58962946f3a8aefb2abc3ca44",
+      "bytes": 15347,
+      "kind": "historical compiler metadata"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/check-r2/effective-features.d",
+      "archived_path": "experiments/20261001/zetscape-private-probes/check-r2/effective-features.d",
+      "git_blob": "06aa731f7d31d7cab9d311bde0c0039ac1f73882",
+      "sha256": "72a11e72f91570ab0169aaf0f00de972bbe97cb07aadb5e5419a1f437553a9c2",
+      "bytes": 4145,
+      "kind": "historical compiler metadata"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/check-r2/syntax-reference-receipt.json",
+      "archived_path": "experiments/20261001/zetscape-private-probes/check-r2/syntax-reference-receipt.json",
+      "git_blob": "564ae3a410b8037e61de83099d8e359c29c65a4b",
+      "sha256": "53005a3a3231addd1a9d154c21c6e12fe19d3fabac2eba0dfaace0a191052230",
+      "bytes": 19380,
+      "kind": "historical compiler metadata"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/check-r2/wasm-caller.d",
+      "archived_path": "experiments/20261001/zetscape-private-probes/check-r2/wasm-caller.d",
+      "git_blob": "bf2da6db5a2a63603fd3228f690f198f3a3cff32",
+      "sha256": "d49a6a0c25998a6feab520ba90aec8039776d2bd3d445392b3ebe3fb481400f1",
+      "bytes": 5215,
+      "kind": "historical compiler metadata"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/probe-r1/core_jsc_native_wasm.cpp",
+      "archived_path": "experiments/20261001/zetscape-private-probes/probe-r1/core_jsc_native_wasm.cpp",
+      "git_blob": "1454e53ddbb593ed1868ae07216f0c0520beba10",
+      "sha256": "4b69e23ad52ace5604721b4d7a761171b024a54d0dfb86e7f20516c2b64cabe4",
+      "bytes": 6510,
+      "kind": "source"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/probe-r1/native-jsc-modern-wasm.patch",
+      "archived_path": "experiments/20261001/zetscape-private-probes/probe-r1/native-jsc-modern-wasm.patch",
+      "git_blob": "7d1a69043cff4f78cf752bf22a612db1dbe3736d",
+      "sha256": "123c4d865365ea5083bf55f5f6553e71b13ba2f790aeb3229a622aec9cec72d3",
+      "bytes": 3421,
+      "kind": "source"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/probe-r1/probe-source-pin.json",
+      "archived_path": "experiments/20261001/zetscape-private-probes/probe-r1/probe-source-pin.json",
+      "git_blob": "75ea71cf3eaf42ef661ba9ee352a1be500326b6e",
+      "sha256": "7777e2b2fbe32d4dcdcf5a27b1bb06122f38deb44b02db2c29061da66ae44f2c",
+      "bytes": 1293,
+      "kind": "source"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/probe-r2/core_jsc_native_wasm.cpp",
+      "archived_path": "experiments/20261001/zetscape-private-probes/probe-r2/core_jsc_native_wasm.cpp",
+      "git_blob": "61e12d1a49cac520f0caf29607c28514ba54c48c",
+      "sha256": "759845e1f6902090093f77921015ae3df278055bff97a5664cc654a7230db6cd",
+      "bytes": 6506,
+      "kind": "source"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/probe-r2/native-jsc-modern-wasm.patch",
+      "archived_path": "experiments/20261001/zetscape-private-probes/probe-r2/native-jsc-modern-wasm.patch",
+      "git_blob": "ca95c8a1a68c53f7d29403d58a552d2da528341a",
+      "sha256": "880d4deda45c69cb42b6ec94db0f1d69ec96dcf41649c3a338c6dd970b0e00e7",
+      "bytes": 3417,
+      "kind": "source"
+    },
+    {
+      "original_path": "tools/iewebkit_port/zetscape_capabilities_83bd/private/probe-r2/probe-source-pin.json",
+      "archived_path": "experiments/20261001/zetscape-private-probes/probe-r2/probe-source-pin.json",
+      "git_blob": "8142c4079092e520da8d241c482c7a926ca3144f",
+      "sha256": "1ce31c29c5d46d8cd257a654b0fce00df4762b8f0bbca2fdfad033f3395bde4f",
+      "bytes": 1293,
+      "kind": "source"
+    }
+  ]
+}
