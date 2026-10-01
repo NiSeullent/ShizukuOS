@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#008080">
+  <meta name="description" content="ShizukuOS 앱별 개발 현황. 실제 Windows 98의 제한된 앱 시험과 독립 구성요소 시험을 원본 기록으로 확인하세요.">
+  <title>앱 지원 현황 · ShizukuOS</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css?v=20261001-refactor1">
+  <link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/apps.html">
+  <link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/apps.html">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+<header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>1.0.0 개발 중</small></span></a><nav class="site-nav" aria-label="주 메뉴"><a href="./index.html">프로젝트</a><a href="./downloads.html">다운로드</a><a href="./install.html">설치 안내</a><a href="./apps.html" aria-current="page">앱 지원</a><a href="./develop.html">개발·소스</a><a class="language-link" href="./en/apps.html" lang="en" hreflang="en">English</a></nav></header>
+<main id="main">
+  <nav class="breadcrumbs" aria-label="현재 위치"><a href="./index.html">홈</a><span aria-hidden="true">/</span><span>앱 지원 현황</span></nav>
+  <section class="page-hero" aria-labelledby="page-title">
+    <p class="eyebrow">앱마다, 실제 기록으로</p>
+    <h1 id="page-title">어디까지 실행됐을까요?</h1>
+    <p class="lead">편집·저장부터 브라우저와 오피스까지. 확인한 동작과 남은 작업을 앱별로 표시합니다.</p>
+    <p>아래는 <time datetime="2026-10-01">2026년 10월 1일</time>에 고정한 공개 기록입니다. 버전은 해당 시험의 입력이며, 현재 최신 버전이라는 뜻은 아닙니다.</p>
+    <div class="hero-actions"><a class="button primary" href="./preview.html?view=latest-npp-gop">Notepad++ 실제 화면</a><a class="button secondary" href="./preview.html?view=vlc-qt-video-gop">VLC 실제 화면</a></div>
+  </section>
+
+  <aside class="scope-note" aria-labelledby="scope-title">
+    <h2 id="scope-title">실행 환경을 함께 확인하세요.</h2>
+    <p>Notepad++와 VLC의 제한된 시험은 실제 Windows 98에서 기록했습니다. 이 기록은 기존 DOS 부팅 경로의 대조 시험이며, ShizukuDOS로 MS-DOS를 교체한 Windows 98 부팅을 입증하지 않습니다.</p>
+    <p>독립 Kernel64 실행기, API 시험, Linux·XP 등의 다른 환경에서 얻은 결과도 Windows 98의 앱 지원 완료로 계산하지 않습니다. <strong>ShizukuDOS 기반의 Windows 98 통합과 전체 앱 기능은 아직 검증 중입니다.</strong></p>
+  </aside>
+
+  <section aria-labelledby="support-title">
+    <div class="section-heading"><div><p class="eyebrow">지원 현황</p><h2 id="support-title">확인된 동작과 다음 단계</h2></div><a href="./continuation/modern-apps-guide.md">상세 시험 인계 기록</a></div>
+    <div class="table-wrap" role="region" aria-labelledby="support-title" tabindex="0">
+      <table>
+        <caption>2026-10-01 공개 증거 기준 · 모든 앱의 ShizukuDOS 기반 Windows 98 최종 수락은 미완료</caption>
+        <thead><tr><th scope="col">앱 · 고정 버전</th><th scope="col">확인한 환경과 동작</th><th scope="col">남은 기능</th><th scope="col">원본 기록</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Notepad++<br><span class="small">8.9.8.1</span></th><td><span class="status-pill ready">제한된 실제 시험</span><p>실제 Windows 98 GOP에서 전용 호환 실행기로 편집·저장·다음 부팅 후 다시 열기·정상 종료를 확인했습니다.</p></td><td>실행기 없이 정상 종료한 결과는 아닙니다. ShizukuDOS 부팅 기반과의 통합, 전체 편집기 기능은 미검증입니다.</td><td><a href="./preview.html?view=latest-npp-gop">GOP 시험</a><br><a href="./preview.html?view=latest-npp">이전 종료 실패</a></td></tr>
+          <tr><th scope="row">VLC<br><span class="small">3.0.24</span></th><td><span class="status-pill component">부분 동작</span><p>실제 Windows 98 GOP에서 Qt 메뉴·재생 버튼과 160 × 120 시험 영상의 내용 변화를 확인했습니다.</p></td><td>RPCRT4 종료 오류가 남았습니다. 음성 출력, 별도 부팅에서 진단 실행의 영향, 전체 플레이어 기능은 미검증입니다.</td><td><a href="./preview.html?view=vlc-qt-video-gop">Qt 플레이어 시험</a><br><a href="./preview.html?view=vlc-first-startup">첫 실행 실패</a></td></tr>
+          <tr><th scope="row">Google Chrome<br><span class="small">154.0.8037.93</span></th><td><span class="status-pill pending">입력 검증</span><p>공식 Enterprise x64 MSI에서 브라우저 원본 267개 파일과 실제 PE 버전을 확인했습니다.</p></td><td>Windows 98 실행, 브라우저 화면·탐색·로그인·종료는 미검증입니다. MSI 업데이트 프로그램의 버전과 브라우저 버전은 다릅니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/google-chrome-extraction.json">추출 기록</a></td></tr>
+          <tr><th scope="row">Firefox<br><span class="small">157.0</span></th><td><span class="status-pill pending">시작 실패 보존</span><p>Mozilla 원본 패키지를 확인했습니다. 이전 독립 Kernel64 실행은 OpenProcessToken 연결에서 중단됐습니다.</p></td><td>공통 API 수정 뒤 실제 앱 재시험, 브라우징·프로필·다중 프로세스·정상 종료와 Windows 98 연결이 필요합니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">앱 실행 기록</a></td></tr>
+          <tr><th scope="row">Chromium<br><span class="small">GUI 157.0.8079.0 · revision 1706750<br>입력 핀 157.0.8081.0 · revision 1708403</span></th><td><span class="status-pill component">독립 실행 시험</span><p>독립 Kernel64의 이전 headless 시험은 JavaScript DOM 결과 42와 종료를 확인했습니다. GUI V2는 도구 모음 표시 후 페이지 로드에 실패했습니다.</p></td><td>GUI 공유 메모리 오류와 c0000005 종료, 정확한 패키지 해시를 묶은 재시험, 실제 Windows 98 브라우징이 남았습니다. 이전 headless 기록의 EXE·전체 트리 해시 한계도 보존합니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">GUI·headless 기록</a><br><a href="./preview.html?view=native-app-foundations">Win98 공통 기능 시험</a></td></tr>
+          <tr><th scope="row">Legcord / Discord<br><span class="small">Legcord 1.3.0</span></th><td><span class="status-pill component">독립 설치 화면</span><p>독립 64비트 실행기에서 원본 Legcord의 실제 Welcome·설정 화면을 표시했습니다.</p></td><td>설정 후 재실행·Discord 로그인·채팅·음성·정상 종료와 Windows 98 내부의 화면·입력 연결은 미검증입니다.</td><td><a href="./preview.html?view=legcord-runtime-setup">설치 화면과 시험 범위</a></td></tr>
+          <tr><th scope="row">LibreOffice<br><span class="small">패키지 26.8.0 · 앱 26.8.0.3</span></th><td><span class="status-pill pending">시작 실패 보존</span><p>공식 MSI와 앱 파일을 확인했습니다. 이전 독립 Kernel64 실행은 SetSearchPathMode 연결에서 중단됐습니다.</p></td><td>수정한 공통 API 위에서 버전 출력·문서 열기·편집·저장·PDF 변환을 재시험하고 Windows 98과 연결해야 합니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">시작 실패 기록</a></td></tr>
+          <tr><th scope="row">Steam<br><span class="small">win64 manifest 1788652215<br>2026-09-30 입력 핀</span></th><td><span class="status-pill pending">로더 진단</span><p>공식 bootstrap의 체크섬과 AMD64 형식을 확인했습니다. 별도 독립 실행기의 기존 설치 클라이언트는 로더에 도달했고, 누락됐던 Module32Next의 공통 API 시험을 추가했습니다.</p></td><td>bootstrap 검증은 전체 클라이언트 의존성 검증이 아닙니다. 신규 설치, 실제 CEF·로그인·라이브러리·게임·정상 종료와 Windows 98 실행은 미검증입니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">공식 입력 핀</a><br><a href="./continuation/modern-apps-guide.md">클라이언트 인계 기록</a></td></tr>
+          <tr><th scope="row">Supermium<br><span class="small">144.0.7559.256 R5 · x86<br>2026-09-30 목표 핀</span></th><td><span class="status-pill pending">로더 실패 보존</span><p>이전 KernelEx 기반 Windows 98 대조 시험은 NTDLL.LdrGetProcedureAddress 누락으로 중단됐습니다. 브라우저 기능을 확인한 결과가 아닙니다.</p></td><td>새 호환 계층에서 원본 입력을 고정해 실제 브라우징·정상 종료와 ShizukuDOS 기반 Windows 98 연결을 시험해야 합니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/benchmarks/app-guest-checkpoint-provider19.json">이전 로더 실패</a><br><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">목표 버전과 범위</a></td></tr>
+          <tr><th scope="row">Visual Studio Code<br><span class="small">1.140.0 · x64<br>2026-09-30 입력 핀</span></th><td><span class="status-pill pending">입력 검증</span><p>공식 아카이브와 Microsoft 체크섬, 원본 Code.exe의 x64 PE 형식을 확인했습니다. 이 고정 입력의 실제 실행은 아직 검증하지 않았습니다.</p></td><td>독립 실행과 Windows 98 연결, 편집·저장·확장·터미널·정상 종료를 실제 앱으로 확인해야 합니다. VSCodium의 시험으로 공식 VS Code 실행을 대신하지 않습니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md#current-publisher-targets--2026-09-30">다운로드·해시·현재 목표</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">입력 출처: <a href="./evidence/preview.json">실제 화면 manifest</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/publisher-input-pins.json">2026-10-01 공식 패키지 핀</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">2026-09-30 목표와 과거 시험</a> · <a href="./continuation/modern-apps-guide.md">앱별 인계 문서</a>. 앱 원본은 이 사이트의 호환 구성 ZIP에 포함되지 않습니다.</p>
+  </section>
+
+  <section id="evidence" aria-labelledby="evidence-title">
+    <div class="section-heading"><div><p class="eyebrow">원본 화면 기록</p><h2 id="evidence-title">13개 모음, 48개의 실제 캡처</h2></div><a href="./preview.html">전체 뷰어 열기</a></div>
+    <p>각 모음에 실행 환경·확인한 동작·오류·미검증 범위를 함께 표시합니다. 아래 링크는 같은 원본 기록을 선택해 엽니다.</p>
+    <div class="card-grid">
+      <article class="info-card"><h3>실제 Windows 98 · GOP</h3><ul><li><a href="./preview.html?view=native-gop-monitor">모니터 출력·시작 메뉴·그리기</a></li><li><a href="./preview.html?view=native-gop-surface">실제 화면 메모리</a></li><li><a href="./preview.html?view=native-driver-install">그래픽 드라이버 설치</a></li><li><a href="./preview.html?view=native-gop-file">기본 메모장 저장·다시 열기</a></li></ul></article>
+      <article class="info-card"><h3>편집기·플레이어</h3><ul><li><a href="./preview.html?view=latest-npp-gop">Notepad++ GOP 제한 시험</a></li><li><a href="./preview.html?view=vlc-qt-video-gop">VLC Qt 플레이어·영상·종료 오류</a></li><li><a href="./preview.html?view=vlc-video-gop">VLC 영상 출력·Qt 로드 실패</a></li></ul></article>
+      <article class="info-card"><h3>이전 기록과 공통 기능</h3><ul><li><a href="./preview.html?view=native-win98">이전 Windows 98 VGA·파일 시험</a></li><li><a href="./preview.html?view=latest-npp">이전 Notepad++ 종료 실패</a></li><li><a href="./preview.html?view=vlc-first-startup">VLC 첫 실행 오류</a></li><li><a href="./preview.html?view=native-app-foundations">작업 스레드·함수 연결·대기 시험</a></li></ul></article>
+      <article class="info-card"><h3>독립 구성요소 시험</h3><ul><li><a href="./preview.html?view=independent-gop">Kernel64 자체 GOP 데스크톱</a></li><li><a href="./preview.html?view=legcord-runtime-setup">Legcord 독립 설치 화면</a></li></ul><p>이 두 모음은 Microsoft Windows 98 실행 화면이 아닙니다.</p></article>
+    </div>
+  </section>
+  <section class="final-download" aria-labelledby="next-title"><h2 id="next-title">시험 범위를 읽고 시작하세요.</h2><p>현재 다운로드는 드라이버와 호환 구성의 개발 미리보기입니다. 최종 1.0.0 통합 설치 ISO의 완료와 구분합니다.</p><div class="hero-actions"><a class="button primary" href="./downloads.html">다운로드와 체크섬</a><a class="button secondary" href="./install.html">설치 준비 안내</a></div></section>
+</main>
+<footer class="site-footer"><span>ShizukuOS · 1.0.0 개발판</span><nav aria-label="하단 메뉴"><a href="./develop.html">소스·라이선스</a><a href="./authorship/">출처</a><a href="./en/apps.html" lang="en" hreflang="en">English</a></nav></footer>
+</body>
+</html>

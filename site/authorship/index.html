@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="ShizukuOS의 제작과 검증 기록. 실제 Windows 98의 Notepad++·UEFI GOP 화면과 독립 실행기의 Chromium·Legcord 결과를 확인하세요.">
-<title>Authorship · ShizukuOS</title><link rel="stylesheet" href="./styles.css"><link rel="icon" type="image/svg+xml" href="../favicon.svg"></head>
+<title>Authorship · ShizukuOS</title><link rel="stylesheet" href="./styles.css"><link rel="icon" type="image/svg+xml" href="../favicon.svg"><link rel="stylesheet" href="../styles.css?v=20261001-refactor1"></head>
 <body><a class="skip" href="#main">본문으로 건너뛰기</a><div class="shell">
-<header><a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">S</span><span>ShizukuOS<small>Development candidate</small></span></a><nav aria-label="주 메뉴"><a href="../index.html">다운로드</a><a href="../preview.html">실제 실행 화면</a><a href="#credits" aria-current="page">Authorship</a><a href="./handoff.html">작업 이어가기</a></nav></header>
+<header class="top site-header"><a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>1.0.0 개발 중</small></span></a><nav class="site-nav" aria-label="주 메뉴"><a href="../index.html">프로젝트</a><a href="../downloads.html">다운로드</a><a href="../install.html">설치 안내</a><a href="../apps.html">앱 지원</a><a href="../develop.html">개발·소스</a><a href="../preview.html">실행 기록</a></nav></header>
 <main id="main"><section class="intro"><p class="eyebrow">AUTHORSHIP / 개발·검증 기록</p><div class="intro-line"><h1>직접 만들고,<br>실제로 확인한 기록.</h1><span class="version">개발 체크포인트</span></div>
 <p class="lead">ShizukuOS을 개발하며 확인한 화면과 실행 결과입니다. 원본 사진을 그대로 보여 드리고, 각 프로그램이 현재 동작하는 환경을 함께 표시합니다.</p>
-<p class="date">2026년 10월 1일 기준 · 소스와 현재 검증 결과를 공개합니다. ShizukuOS 1.0.0은 개발 목표이며 최종판은 아직 출시되지 않았습니다.</p></section>
+<p class="scope-note" lang="en">Historical development records below are in Korean. <a href="../en/apps.html">English app support</a> and <a href="../en/develop.html">project architecture</a> distinguish original-DOS Windows 98 controls from unfinished ShizukuDOS integration.</p><p class="date">2026년 10월 1일 기준 · 소스와 현재 검증 결과를 공개합니다. ShizukuOS 1.0.0은 개발 목표이며 최종판은 아직 출시되지 않았습니다.</p></section>
 <section class="gallery" aria-label="실제 실행 결과"><article class="card" id="npp">
 <a class="capture" href="./images/npp-cold-open.png" aria-label="실제 Windows 98에서 Notepad++로 저장한 파일을 다시 연 원본 화면 원본 보기"><img src="./images/npp-cold-open.png" width="1280" height="800" alt="실제 Windows 98에서 Notepad++로 저장한 파일을 다시 연 원본 화면" loading="lazy"><span>실제 실행 원본 · 크게 보기 ↗</span></a>
 <div class="card-copy"><span class="badge">실제 Windows 98 · GOP</span><h2>Notepad++ 8.9.8.1</h2><p>저장한 파일을 다시 부팅한 뒤 열고, 다른 내용을 직접 입력해 새 파일로 저장했습니다. 앱의 정상 종료도 확인했습니다.</p><p class="scope">전용 앱 호환 실행기를 사용한 결과입니다. 새 39바이트 파일의 재부팅 후 열기는 아직 별도 시험하지 않았습니다.</p><a class="record-link" href="../preview.html?view=latest-npp-gop">실행 기록 보기 →</a> <a class="record-link extra" href="./images/npp-keyboard-saved.png">직접 입력·저장 원본 →</a></div></article>

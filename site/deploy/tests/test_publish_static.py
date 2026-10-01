@@ -46,7 +46,7 @@ class ComponentInstallerProof(unittest.TestCase):
     def test_optional_original_component_frames_are_localized_and_scope_stays_incomplete(self):
         prepared = self.prepare()
         self.assertIsNone(prepared['iso'])
-        self.assertEqual(len(prepared['assets']), 97)
+        self.assertEqual(len(prepared['assets']), 105)
         self.assertEqual(prepared['component_installer_proof'], self.manifest)
         for flag in ('microsoft_media_included', 'windows98_boot_verified', 'ms_dos_replaced', 'latest_apps_complete', 'pixel_transform'):
             self.assertIs(self.manifest[flag], False)
@@ -106,7 +106,7 @@ class ComponentInstallerProof(unittest.TestCase):
     def test_default_pages_do_not_gain_or_claim_component_proof(self):
         prepared = publisher.prepare_assets()
         self.assertIsNone(prepared.get('component_installer_proof'))
-        self.assertEqual(len(prepared['assets']), 92)
+        self.assertEqual(len(prepared['assets']), 100)
         self.assertNotIn('evidence/component-installer/manifest.json', prepared['assets'])
         for name in ('index.html', 'en/index.html'):
             self.assertEqual(prepared['assets'][name], (publisher.SITE / name).read_bytes())
@@ -409,7 +409,7 @@ class IsoPublication(unittest.TestCase):
         with self.iso.open('r+b') as stream: stream.write(b'changed')
         with self.assertRaises(ValueError): candidate.copy_to(self.root / 'stale.iso')
 
-    def test_rendered_languages_share_four_iso_ctas_and_keep_zip_download(self):
+    def test_rendered_languages_share_admitted_iso_slot_and_keep_zip_download(self):
         candidate = self.open_iso()
         self.assertTrue(hasattr(publisher, 'render_iso_homepage'), 'ISO home page rendering is absent')
         for language, name, prefix in [('ko', 'index.html', './'), ('en', 'en/index.html', '../')]:
@@ -417,7 +417,7 @@ class IsoPublication(unittest.TestCase):
                 original = (publisher.SITE / name).read_bytes()
                 rendered = publisher.render_iso_homepage(original, candidate.metadata, language)
                 parser = Anchors(); parser.feed(rendered.decode())
-                self.assertEqual(parser.downloads.count(prefix + candidate.name), 4)
+                self.assertEqual(parser.downloads.count(prefix + candidate.name), 1)
                 self.assertIn(prefix + 'downloads/shizuku-modern-preview-2026.10.01.zip', parser.downloads)
                 self.assertIn(self.digest[:12], rendered.decode())
                 self.assertIn(prefix + 'downloads/release.json', rendered.decode())
@@ -426,7 +426,7 @@ class IsoPublication(unittest.TestCase):
         self.assertTrue(hasattr(publisher, 'prepare_assets'), 'testable static preparation is absent')
         prepared = publisher.prepare_assets()
         self.assertIsNone(prepared['iso'])
-        self.assertEqual(len(prepared['assets']), 92)
+        self.assertEqual(len(prepared['assets']), 100)
         for name, data in prepared['assets'].items():
             self.assertEqual(data, (publisher.SITE / name).read_bytes(), name)
         self.assertNotIn('downloads/release.json', prepared['assets'])
@@ -436,7 +436,7 @@ class IsoPublication(unittest.TestCase):
         before = {name: (publisher.SITE / name).read_bytes() for name in ['index.html', 'en/index.html']}
         prepared = publisher.prepare_assets(self.iso, COMMIT)
         self.addCleanup(prepared['iso'].close)
-        self.assertEqual(len(prepared['assets']) + 1, 95)
+        self.assertEqual(len(prepared['assets']) + 1, 103)
         checksum = prepared['assets'][prepared['iso'].name + '.sha256'].decode('ascii')
         self.assertEqual(checksum, self.digest + '  ' + Path(prepared['iso'].name).name + '\n')
         metadata = json.loads(prepared['assets']['downloads/release.json'])
@@ -446,7 +446,7 @@ class IsoPublication(unittest.TestCase):
     def test_component_proof_cannot_replace_exact_shipped_iso_boot_evidence(self):
         prepared = publisher.prepare_assets(self.iso, COMMIT, component_installer_proof=PROOF)
         self.addCleanup(prepared['iso'].close)
-        self.assertEqual(len(prepared['assets']) + 1, 100)
+        self.assertEqual(len(prepared['assets']) + 1, 108)
         metadata = json.loads(prepared['assets']['downloads/release.json'])
         self.assertEqual(metadata['validation']['boot_status'], 'not-verified-for-this-download')
         self.assertFalse(metadata['validation']['windows98_installer_complete'])
@@ -516,7 +516,7 @@ class IsoPublication(unittest.TestCase):
         self.assertEqual(len(records), 1)
         receipt = json.loads(records[0].read_bytes())
         self.assertEqual(receipt['component_installer_proof'], json.loads((PROOF / 'manifest.json').read_bytes()))
-        self.assertEqual(receipt['origin_check_count'], 97)
+        self.assertEqual(receipt['origin_check_count'], 105)
         self.assertFalse(receipt['public_edge_verified'])
         self.assertNotIn('iso_release', receipt)
         checks = {row['path']: row for row in receipt['origin_checks']}
@@ -664,7 +664,7 @@ class IsoPublication(unittest.TestCase):
         receipt_path, = (self.root / 'build/m98-self-host').glob('release-*.json')
         receipt = json.loads(receipt_path.read_text())
         self.assertNotEqual((base / 'current').resolve(), previous)
-        self.assertEqual(receipt['origin_check_count'], 95)
+        self.assertEqual(receipt['origin_check_count'], 103)
         self.assertTrue(receipt['iso_head_and_range_verified'])
         self.assertEqual(receipt['iso_release'], prepared['iso'].metadata)
         self.assertFalse(receipt['public_edge_verified'])

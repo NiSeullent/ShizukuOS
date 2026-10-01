@@ -4,8 +4,14 @@ Current product name: **ShizukuOS**. **1.0.0 is the release target; this is a de
 
 ShizukuDOS 10 replaces MS-DOS as the Windows 98 foundation; Kernel32 and Kernel64 are components of that foundation. Standalone profiles are component tests. Classic and ShizukuOS palettes are selectable in the development userland shell, with bounded data-volume settings. Full native Windows 98 window/control theming and persistent selection still require native acceptance. The website palette is not evidence of that acceptance.
 
-`index.html` is the distribution page; `preview.html` shows recorded genuine
-guest captures with a timeline, playback, original hashes and scope.
+`index.html` is the project home. Bilingual `downloads.html`, `install.html`,
+`apps.html` and `develop.html` provide artifact identities, manual prerequisites,
+frozen app targets and the actual Windows98 integration contract. The default
+prepared site preserves all92 existing public paths and adds exactly eight
+pages (100assets). `preview.html` shows recorded genuine guest captures with
+a timeline, playback, original hashes and scope. Its13collections and48frames
+remain unchanged; original-DOS Windows98 controls remain separate from pending
+ShizukuDOS replacement boot.
 `preview.js` never simulates a running VM. The live connection remains
 explicitly disconnected until an authenticated VM endpoint is available.
 
@@ -144,11 +150,17 @@ with an ISO9660 primary descriptor; source links and special files are refused.
 The publisher retains the input handle, hashes and copies it in1MiB chunks,
 checks the immutable copy, and derives a versioned download name from the source
 commit and artifact hash. It adds the ISO, its `.sha256` and shared
-`downloads/release.json` to the existing reviewed asset set. Both home pages show
-four links to that ISO, its exact size, source commit and verification scope;
+`downloads/release.json` to the existing reviewed asset set. Both home and download pages render exactly one reviewed ISO slot in each
+language, showing the same admitted file, its exact byte size, full SHA256,
+source commit and verification scope;
 the existing compatibility ZIPs remain available as component downloads. These
-ISO home pages are rendered only in the new static release. Source ZIP pages,
-recorded screenshots and their evidence manifests are not overwritten.
+ISO home pages are rendered only in the new static release. Source pages, recorded screenshots and their evidence manifests are not
+overwritten. Download card metadata, visible byte sizes and checksums, and
+each card’s actual file and checksum links must match the served artifact.
+Final1.0.0 Windows98 installation remains visibly pending even when a separate
+development boot image is available. OptionalISO adds three assets (103total),
+originalcomponent-installer proof adds five (105total), and both total108; the
+existing128asset ceiling remains unchanged.
 
 The release manifest identifies a **public development boot image**, excludes
 Microsoft Windows98 media, and does not claim a completed Windows98 installer or
