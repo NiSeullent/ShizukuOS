@@ -37,7 +37,8 @@ typedef struct ntw64_info {
 BOOL WINAPI NtwQuerySubsystem64(ntw64_info_t *info);
 /* path: 1..260 UTF-16 units; path + cmdline + cwd <= 2,008 units (4,016 bytes through the VxD). Arguments that
  * do not fit one 192-byte frame travel in a shared-pool buffer. FALSE/2 when Kernel64 cannot find the image,
- * 193 for a bad image, 8 when all four Kernel64 slots are busy, 4 when eight handles are open here. */
+ * 193 for a bad image, 8 when all four Kernel64 slots are busy, 4 when all local records are occupied
+ * or retired after generation exhaustion (retired records can have no open handle). */
 BOOL WINAPI NtwCreateProcess64W(LPCWSTR path, LPCWSTR cmdline, LPCWSTR cwd, HANDLE *handle);
 BOOL WINAPI NtwWaitProcess64(HANDLE handle, DWORD timeout_ms, DWORD *exit_code);           /* FALSE/1460 on timeout */
 BOOL WINAPI NtwReadConsole64(HANDLE handle, void *buffer, DWORD capacity, DWORD *got);      /* blocks; FALSE/38 at end */
