@@ -7,6 +7,9 @@
 #include "../../abi/shz_abi.h"
 #include "memholes.h"
 #include "native_firmware.h"
+#ifdef STUB_K32
+#include "k32_cmdline.h"
+#endif
 
 #ifdef STUB_K32                                    /* Kernel32: 32-bit Protected Mode, paging off, EBX = bootinfo */
 #define STUB_DOMAIN SHZ_DOM_KERNEL32
@@ -25,7 +28,9 @@ extern char stub_end[];                            /* boot.ld: end of the stub i
 struct mbi {
     uint32_t flags, mem_lower, mem_upper, boot_device, cmdline, mods_count, mods_addr, syms[4];
     uint32_t mmap_length, mmap_addr;
+    uint32_t drives_length, drives_addr, config_table, boot_loader_name;
 };
+_Static_assert(__builtin_offsetof(struct mbi, boot_loader_name)==64, "Multiboot1 boot-loader offset");
 struct mod { uint32_t start, end, string, reserved; };
 struct mmap_entry { uint32_t size; uint64_t base, length; uint32_t type; } __attribute__((packed));
 
@@ -142,12 +147,24 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     }
     if (ksize == 0 || ksize > 0x100000u) fail("kernel image size (file + bss must stay below 3 MiB), ", ksize);
     if (INITRD_GPA + isize > ram) fail("initrd does not fit in RAM, size=", isize);
-    if (mbi->flags & 4) {                          /* Multiboot command line, copied verbatim (QEMU and GRUB put the image
-                                                      path first) before any copy below can overwrite it; unprintable
-                                                      bytes become '?', anything past 255 bytes is dropped */
+    if (mbi->flags & 4) {                          /* Capture before module copies. K64 retains its historical raw,
+                                                      sanitized/truncated line; K32 uses a bounded adapter only for
+                                                      the exact advertised QEMU image-name prefix. */
         const volatile char *src = (const volatile char *)mbi->cmdline;
+#ifdef STUB_K32
+        int image_prefix=0;
+        if (mbi->flags & (1u<<9)) {
+            if (!mbi->boot_loader_name || mbi->boot_loader_name > ram-5)
+                fail("K32 boot-loader name outside RAM", mbi->boot_loader_name);
+            image_prefix=shz_mb1_loader_is_qemu((const volatile char *)mbi->boot_loader_name);
+        }
+        const int copied=shz_mb1_k32_cmdline(cmdline,sizeof cmdline,src,image_prefix);
+        if (copied<0) fail("K32 command line malformed or truncated", 0);
+        cmdline_len=(uint32_t)copied;
+#else
         for (cmdline_len = 0; cmdline_len < SHZ_CMDLINE_MAX - 1 && src[cmdline_len]; ++cmdline_len)
             cmdline[cmdline_len] = (src[cmdline_len] >= 0x20 && src[cmdline_len] < 0x7f) ? src[cmdline_len] : '?';
+#endif
     }
 
     zero(KERNEL_GPA, 0x300000u - KERNEL_GPA);      /* bss of the kernel image reads as zero, as after the Supervisor's memset */
