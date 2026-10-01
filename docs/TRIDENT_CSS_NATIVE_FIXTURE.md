@@ -24,6 +24,27 @@ Actual `IHTMLStyle.pixelWidth` and independent `IHTMLElement.offsetWidth` must
 both match before and after mutation. A genuine UTF16 Korean text setter and
 the original document/view cleanup paths are exercised.
 
+The first actual offline Windows98SE/MSHTML5.00.2614.3500 trial,
+`/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-css-mshtml-5abe-native-v1`,
+failed the initial geometry check: both actual style pixel widths were32, but
+parent/child offset widths were46/36. Gray background values were real VT_BSTR
+and passed. The owned child PID4294888941 exited with the full DWORD value1;
+its stdout was flushed and handles closed. Requested supervisor exit15 is a
+separate observation and does not prove actual supervisor exit. Cleanup released
+the client-site references, component and all core allocations. This failure did
+not reach the modified geometry or Korean-text phases.
+
+Both original boxes already specified zero border, margin and padding. The
+unbreakable `Parent`/`Child` labels under16px Arial are a source-grounded possible
+cause of the old layout engine's enlarged minimum width; that explanation remains
+an inference pending a fresh guest trial. The corrected fixture uses single-glyph
+`P`/`C` labels inside the same genuinely nested boxes, with their explanation
+outside. The geometry oracles remain32px initially and168px after mutation for
+both independent pixelWidth and offsetWidth queries. Typed gray/blue/green color
+checks, complete Korean UTF16 setter/readback, parent identity, snapshot lifetime,
+timers and cleanup are unchanged. The original frozen fixture-v8, stage-v2 and
+failed guest logs remain preserved; a fresh build is not native confirmation.
+
 Original `data-var-*`/`data-use-*` fixture attributes do not imply stock Trident
 parses arbitrary modern CSS. Color setters alone do not prove painted colors;
 width/style/geometry logs alone do not prove pixels. The visible10second initial
