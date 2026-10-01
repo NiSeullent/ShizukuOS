@@ -1,0 +1,83 @@
+{
+  "schema": "win98modern.official-downloads.v1",
+  "version": "0.9.0-dev",
+  "publication_state": "helper_source_available_other_artifacts_pending",
+  "official_origin": "https://m98.nyase.kr",
+  "source_commit": null,
+  "full_modern_apps_verified": false,
+  "native_windows98_modern_apps_verified": false,
+  "items": [
+    {
+      "role": "development_iso",
+      "name_ko": "프로젝트 개발 ISO",
+      "name_en": "Project development ISO",
+      "state": "pending",
+      "url": null,
+      "sha256": null,
+      "bytes": null,
+      "source_commit": null
+    },
+    {
+      "role": "source_archive",
+      "name_ko": "전체 소스 압축 파일",
+      "name_en": "Full source archive",
+      "state": "pending",
+      "url": null,
+      "sha256": null,
+      "bytes": null,
+      "source_commit": null
+    },
+    {
+      "role": "main_git_bundle",
+      "name_ko": "main Git bundle",
+      "name_en": "main Git bundle",
+      "state": "pending",
+      "url": null,
+      "sha256": null,
+      "bytes": null,
+      "source_commit": null
+    },
+    {
+      "role": "usb_helpers",
+      "name_ko": "Windows 98용 ShizukuDOS USB 조합 도구",
+      "name_en": "ShizukuDOS for Windows98 USB helper source ZIP",
+      "state": "ready",
+      "url": "/downloads/win98-modern-usb-helper.zip",
+      "sha256": "f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54",
+      "bytes": 17916,
+      "source_commit": "899c51ec6f4c731fe3181570feec0fa52bfbd591",
+      "scope": "Helper source/docs/license only; no ISO or Windows media. Host preparation fixtures 9 PASS; actual USB boot/Windows Setup not verified."
+    }
+  ],
+  "private_media_policy": {
+    "windows_media_published": false,
+    "product_keys_published": false,
+    "vendor_app_installers_published": false,
+    "vm_disks_published": false,
+    "own_windows98_iso_processing": "User-provided media remains local/private; never uploaded to official downloads."
+  },
+  "usb_scope": {
+    "uefi_file_copy_preparation_verified": false,
+    "bios_hybrid_image_boot_verified": false,
+    "windows98_setup_boot_verified": false,
+    "private_combined_iso_scope": "Packaging own licensed media alone does not prove Windows98 Setup boot or modern application support.",
+    "helper_source_package_verified": true,
+    "helper_host_fixture_checks": 9,
+    "full_public_usb_payload_available": false
+  },
+  "guide_provenance": {
+    "modern_original_sha256": "69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f",
+    "modern_web_sha256": "69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f",
+    "modern_web_changes": [],
+    "environment_source_sha256": "22371d3abfaf731d9cd39b60ccb5b8e8e83012317ae042eb71edf0fc47cdf060",
+    "policy_source_sha256": "16d663f0743af8eaafd9ac6ea84b2884939ffbae5cf9695abc5e771d15b165d4"
+  },
+  "architecture_goal": {
+    "project": "ShizukuDOS for Windows98",
+    "replaces": "MS-DOS",
+    "kernel32_kernel64_scope": "Windows98 integration components of ShizukuDOS",
+    "separate_standalone_os_goal": false,
+    "standalone_trials": "Experimental foundation/API validation only",
+    "installed_windows98_complete": false
+  }
+}

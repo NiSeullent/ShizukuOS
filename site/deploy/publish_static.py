@@ -38,6 +38,28 @@ AUTHORSHIP_IMAGES = {
 }
 
 
+CONTINUATION_STATIC = ('continuation/index.html', 'continuation/guide.html',
+                       'continuation/styles.css', 'continuation/downloads.json',
+                       'continuation/modern-apps-guide.md',
+                       'continuation/environment-guide.md',
+                       'continuation/official-distribution.md')
+# Artifact bytes and source revisions are reviewed outside the web manifest.
+# Add each final artifact here only after its producer/boot/source review closes.
+CONTINUATION_DOWNLOAD_PINS = {
+    'usb_helpers': {
+        'path': 'downloads/win98-modern-usb-helper.zip',
+        'sha256': 'f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54',
+        'bytes': 17916,
+        'source_commit': '899c51ec6f4c731fe3181570feec0fa52bfbd591',
+    },
+}
+CONTINUATION_GUIDE_PINS = {
+    'continuation/modern-apps-guide.md': '69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f',
+    'continuation/environment-guide.md': '22371d3abfaf731d9cd39b60ccb5b8e8e83012317ae042eb71edf0fc47cdf060',
+    'continuation/official-distribution.md': '16d663f0743af8eaafd9ac6ea84b2884939ffbae5cf9695abc5e771d15b165d4',
+}
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -118,6 +140,82 @@ def add_authorship_assets(assets):
     return len(records)
 
 
+
+def add_continuation_assets(assets):
+    """Publish local guidance plus only independently pinned public artifacts."""
+    assets.update({name: (SITE / name).read_bytes() for name in CONTINUATION_STATIC})
+    for path, expected in CONTINUATION_GUIDE_PINS.items():
+        if sha(assets[path]) != expected:
+            raise ValueError('Reviewed continuation guide changed: ' + path)
+    manifest = json.loads(assets['continuation/downloads.json'])
+    if (manifest['schema'] != 'win98modern.official-downloads.v1'
+            or manifest['version'] != '0.9.0-dev'
+            or manifest['official_origin'] != 'https://m98.nyase.kr'
+            or manifest['source_commit'] is not None
+            or manifest['full_modern_apps_verified'] is not False
+            or manifest['native_windows98_modern_apps_verified'] is not False):
+        raise ValueError('Reviewed incomplete official download checkpoint required')
+    goal = manifest['architecture_goal']
+    if (goal['project'] != 'ShizukuDOS for Windows98'
+            or goal['replaces'] != 'MS-DOS'
+            or goal['kernel32_kernel64_scope'] != 'Windows98 integration components of ShizukuDOS'
+            or goal['separate_standalone_os_goal'] is not False
+            or goal['installed_windows98_complete'] is not False):
+        raise ValueError('Windows98 ShizukuDOS architecture goal differs')
+    privacy = manifest['private_media_policy']
+    for field in ('windows_media_published', 'product_keys_published',
+                  'vendor_app_installers_published', 'vm_disks_published'):
+        if privacy[field] is not False:
+            raise ValueError('Private media cannot be published: ' + field)
+    scope = manifest['usb_scope']
+    for field in ('uefi_file_copy_preparation_verified', 'bios_hybrid_image_boot_verified',
+                  'windows98_setup_boot_verified', 'full_public_usb_payload_available'):
+        if scope[field] is not False:
+            raise ValueError('Actual final USB/Setup scope has not been reviewed: ' + field)
+    if (scope['helper_source_package_verified'] is not True
+            or scope['helper_host_fixture_checks'] != 9):
+        raise ValueError('Reviewed helper source package evidence required')
+    provenance = manifest['guide_provenance']
+    for field, path in (('modern_original_sha256', 'continuation/modern-apps-guide.md'),
+                        ('modern_web_sha256', 'continuation/modern-apps-guide.md'),
+                        ('environment_source_sha256', 'continuation/environment-guide.md'),
+                        ('policy_source_sha256', 'continuation/official-distribution.md')):
+        if provenance[field] != CONTINUATION_GUIDE_PINS[path]:
+            raise ValueError('Continuation guide provenance differs: ' + field)
+    rows = manifest['items']
+    roles = {'development_iso', 'source_archive', 'main_git_bundle', 'usb_helpers'}
+    if len(rows) != len(roles) or {row['role'] for row in rows} != roles:
+        raise ValueError('Official artifact role allowlist differs')
+    ready = 0
+    for row in rows:
+        role = row['role']
+        if role not in CONTINUATION_DOWNLOAD_PINS:
+            if (row['state'] != 'pending'
+                    or any(row[field] is not None for field in ('url', 'sha256', 'bytes', 'source_commit'))):
+                raise ValueError('Unreviewed artifact must remain pending: ' + role)
+            continue
+        pin = CONTINUATION_DOWNLOAD_PINS[role]
+        path = Path(pin['path'])
+        if (path.is_absolute() or len(path.parts) != 2 or path.parts[0] != 'downloads'
+                or path.name in ('.', '..') or path.suffix not in ('.iso', '.zip', '.gz', '.bundle')):
+            raise ValueError('Only bounded reviewed artifact paths are permitted')
+        if (row['state'] != 'ready' or row['url'] != '/' + pin['path']
+                or row['sha256'] != pin['sha256'] or row['bytes'] != pin['bytes']
+                or row['source_commit'] != pin['source_commit']):
+            raise ValueError('Reviewed official artifact metadata differs: ' + role)
+        data = (SITE / pin['path']).read_bytes()
+        if len(data) != pin['bytes'] or sha(data) != pin['sha256']:
+            raise ValueError('Reviewed official artifact bytes changed: ' + role)
+        checksum_path = pin['path'] + '.sha256'
+        checksum = (SITE / checksum_path).read_bytes()
+        if checksum != (pin['sha256'] + '  ' + path.name + '\n').encode('ascii'):
+            raise ValueError('Reviewed official artifact checksum changed: ' + role)
+        assets[pin['path']] = data
+        assets[checksum_path] = checksum
+        ready += 1
+    return {'ready_artifacts': ready, 'pending_artifacts': len(rows) - ready,
+            'state': manifest['publication_state']}
+
 def main():
     manifest = json.loads((SITE / 'evidence/preview.json').read_text())
     if manifest['schema'] != 1 or manifest['live']['available']:
@@ -125,6 +223,7 @@ def main():
     assets = {name: (SITE / name).read_bytes() for name in STATIC}
     validate_translation(manifest, json.loads(assets['en/evidence/preview.json']))
     authorship_images = add_authorship_assets(assets)
+    continuation = add_continuation_assets(assets)
     # Each redistributed component download remains bound to its reviewed bytes.
     expected_downloads = {
         'downloads/SHZGOP.zip': '5fdc6ca5942012b6d29a291ca85e6ad4e5ca28421477394bfd2909c64f9c5dbb',
@@ -203,6 +302,7 @@ def main():
                'preview_images': len(images), 'collections': len(manifest['collections']),
                'authorship_images': authorship_images,
                'authorship_state': 'development_checkpoint',
+               'continuation': continuation,
                'languages': ['ko', 'en'], 'game_demo_native_execution': False,
                'scope': 'Exact loopback HTTPS origin bodies with m98 Host/SNI. Public Cloudflare challenge is not counted as successful external fetch.'}
     path = output / ('release-' + stamp + '.json')

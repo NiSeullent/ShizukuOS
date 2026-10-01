@@ -174,7 +174,7 @@
   ],
   "publication_target": "https://m98.nyase.kr/authorship/",
   "source_branch": "main",
-  "handoff_document": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/CONTINUE_MODERN_APPS.md",
+  "handoff_document": "https://m98.nyase.kr/continuation/guide.html",
   "required_targets": [
     "Google Chrome",
     "Chromium",
@@ -209,5 +209,7 @@
       "application_functionality": false
     }
   },
-  "v44_contract_record": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/v44-contracts.json"
+  "v44_contract_record": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/v44-contracts.json",
+  "official_download_manifest": "https://m98.nyase.kr/continuation/downloads.json",
+  "new_project_publication_destination": "https://m98.nyase.kr"
 }
