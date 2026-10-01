@@ -65,8 +65,10 @@ void mainCRTStartup(void)
 {
 #ifdef M98_THEME_STATIC
     HMODULE dll=GetModuleHandleA("M98THEME.DLL");
+    const char *title="Classic and Modern - M98THEME static import";
 #else
     HMODULE dll=LoadLibraryA("M98THEME.DLL");
+    const char *title="Classic and Modern - M98THEME direct DLL";
 #endif
     active_fn active, app;
     color_fn color; margins_fn margins; content_fn content; font_fn font;
@@ -82,8 +84,10 @@ void mainCRTStartup(void)
         say("WIN98_IDENTIFIED=1\r\n");
     else say("WIN98_IDENTIFIED=0\r\n");
 #ifdef M98_THEME_STATIC
+    say("PROBE_MODE=static-import\r\n");
 #define RESOLVE(v,n) do { v=n; CHECK(v,#n); } while(0)
 #else
+    say("PROBE_MODE=direct-dll\r\n");
 #define RESOLVE(v,n) do { v=(void *)GetProcAddress(dll,#n); CHECK(v,#n); } while(0)
 #endif
     RESOLVE(style,M98SetThemeStyle); RESOLVE(open_theme,OpenThemeData);
@@ -113,8 +117,10 @@ void mainCRTStartup(void)
     old_mode=SetBkMode(memory,OPAQUE);c=SetTextColor(memory,RGB(203,44,61));
     CHECK(draw_text(h,memory,1,1,L"Theme: A&B!",-1,DT_CALCRECT|DT_SINGLELINE,&r,NULL)==S_OK&&r.right>r.left,"formatted punctuation text sizing");
     CHECK(GetBkMode(memory)==OPAQUE&&GetTextColor(memory)==RGB(203,44,61),"text restores caller DC");
-    if(GetACP()==949)
+    if(GetACP()==949) {
+        say("ACP=949\r\n");
         CHECK(draw_text(h,memory,1,1,L"\xd14c\xb9c8",-1,DT_CALCRECT|DT_SINGLELINE,&r,NULL)==S_OK,"exact Korean ACP text");
+    }
     if(GetACP()==1252)
         CHECK(draw_text(h,memory,1,1,L"\x2212",1,DT_CALCRECT,&r,NULL)==HRESULT_FROM_WIN32(ERROR_NO_UNICODE_TRANSLATION),"reject silent best-fit minus mapping");
     if(GetACP()!=65001)
@@ -124,14 +130,15 @@ void mainCRTStartup(void)
     CHECK(close_theme(stale)==S_OK&&close_theme(stale)==E_HANDLE,"stale handle close and double-close rejection");
     wc.lpfnWndProc=window_proc;wc.hInstance=GetModuleHandleA(NULL);wc.lpszClassName="M98ThemeAcceptance";
     wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);CHECK(RegisterClassA(&wc),"register visible window");
-    window=CreateWindowExA(0,wc.lpszClassName,"Classic and Modern - M98THEME opt-in",WS_OVERLAPPEDWINDOW,
+    window=CreateWindowExA(0,wc.lpszClassName,title,WS_OVERLAPPEDWINDOW,
                            30,30,400,190,NULL,NULL,wc.hInstance,NULL);CHECK(window,"create visible window");
     h=open_theme(window,L"BUTTON");CHECK(h&&get_window(window)==h,"window theme association");
     CHECK(set_window(window,L"",L"")==S_OK&&notifications==1&&!open_theme(window,L"BUTTON"),"per-window disable and WM_THEMECHANGED");
     CHECK(set_window(window,NULL,NULL)==S_OK&&notifications==2,"reset per-window override");
     CHECK(close_theme(h)==S_OK&&!get_window(window),"close clears window association");
     ShowWindow(window,SW_SHOWNORMAL);UpdateWindow(window); start=GetTickCount();
-    while(GetTickCount()-start<2000) { while(PeekMessageA(&message,NULL,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageA(&message);}Sleep(10); }
+    /* Keep each bounded comparison visible across the guest capture interval. */
+    while(GetTickCount()-start<15000) { while(PeekMessageA(&message,NULL,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageA(&message);}Sleep(10); }
     DestroyWindow(window);UnregisterClassA(wc.lpszClassName,wc.hInstance);
     SelectObject(memory,previous);DeleteObject(bitmap);DeleteDC(memory);ReleaseDC(NULL,screen);
     CHECK(style(0)==S_OK&&!active()&&!app(),"disable provider");
