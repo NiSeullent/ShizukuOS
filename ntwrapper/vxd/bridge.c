@@ -18,12 +18,26 @@ _Static_assert(sizeof(struct ntwv_dioc) == 48, "VWIN32 DIOC ABI");
 _Static_assert(sizeof(struct ntwv_query) == 32, "query wire ABI");
 _Static_assert(sizeof(struct ntwv_w64_open) == 64, "W64 open wire ABI");
 static struct ntw_context context;
+/* Readiness/query flags may be observed outside W64 admission. Keep every
+ * access atomic; this does not permit concurrent context initialization. */
 static uint32_t live, selftest;
+/* One owner for the SPSC endpoints, pending table and request scratch. Never
+ * spin or sleep here: a preempting/reentrant caller must let the owner finish. */
+static uint32_t w64_admitted;
+
+static int w64_enter(void)
+{
+    uint32_t expected = 0;
+    return __atomic_compare_exchange_n(&w64_admitted, &expected, 1, 0,
+                                        __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+}
+
+static void w64_leave(void) { __atomic_store_n(&w64_admitted, 0, __ATOMIC_RELEASE); }
 
 int ntwv_initialize(const struct ntw_lock_ops *ops)
 {
     ntw_handle handle;
-    if (live || ntw_initialize(&context, ops) != NTW_OK)
+    if (__atomic_load_n(&live, __ATOMIC_ACQUIRE) || ntw_initialize(&context, ops) != NTW_OK)
         return 0;
     /* Real object behavior, before exposing any request interface. */
     if (ntw_event_create(&context, 0, 0, NTW_EVENT_ALL, &handle) != NTW_OK)
@@ -37,7 +51,8 @@ int ntwv_initialize(const struct ntw_lock_ops *ops)
     }
     if (ntw_close(&context, handle) != NTW_OK)
         goto failed;
-    selftest = live = 1;
+    __atomic_store_n(&selftest, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&live, 1, __ATOMIC_RELEASE);
     return 1;
 failed:
     (void)ntw_shutdown(&context);
@@ -46,9 +61,15 @@ failed:
 
 int ntwv_shutdown(void)
 {
-    if (!live || ntw_shutdown(&context) != NTW_OK)
+    if (!w64_enter())
         return 0;
-    live = selftest = 0;
+    if (!__atomic_load_n(&live, __ATOMIC_ACQUIRE) || ntw_shutdown(&context) != NTW_OK) {
+        w64_leave();
+        return 0;
+    }
+    __atomic_store_n(&live, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&selftest, 0, __ATOMIC_RELAXED);
+    w64_leave();
     return 1;
 }
 
@@ -135,8 +156,8 @@ static uint32_t dioc_query(const struct ntwv_dioc *request, const struct ntwv_pa
      * occur inside the bounded PTE-validation / 36-byte-copy interval. */
     saved = ops->enter(0);
     if (writable_alias(ops, &output) && writable_alias(ops, &returned)) {
-        reply.initialized = live;
-        reply.selftest = selftest;
+        reply.initialized = __atomic_load_n(&live, __ATOMIC_ACQUIRE);
+        reply.selftest = __atomic_load_n(&selftest, __ATOMIC_ACQUIRE);
         ops->write(output.alias + output.offset, &reply, bytes);
         ops->write(returned.alias + returned.offset, &bytes, 4);
         result = 0;
@@ -155,16 +176,65 @@ static struct {
     uint8_t *base;
     uint32_t bytes;
     shz_channel_hdr_t *hdr;
+    shz_channel_hdr_t layout;              /* Supervisor-owned layout captured at OPEN */
     shz_ring_hdr_t *tx, *rx;
     uint32_t channel_id, self, peer, generation, abi;
     uint32_t sent, received, proto_errors, notify_errors;
-    struct { int used; uint64_t request_id, offset; uint32_t length; } pending[NTWV_W64_PENDING_POOL];
+    struct { int used; uint64_t request_id, offset; uint32_t length, opcode; } pending[NTWV_W64_PENDING_POOL];
 } w64;
-static uint8_t w64_in[NTWV_W64_SEND_MAX], w64_out[SHZ_MSG_SLOT_SIZE];   /* UP synchronous: one request at a time */
+static uint8_t w64_in[NTWV_W64_SEND_MAX], w64_out[SHZ_MSG_SLOT_SIZE];   /* protected by w64_admitted */
 
 void ntwv_w64_reset(void)
 {
-    ntwv_fill(&w64, 0, sizeof w64);         /* the VMM keeps the physical mapping; nothing else to release */
+    if (!w64_enter())
+        return;                            /* an admitted operation still owns the mapping */
+    /* The VMM keeps the physical mapping. Outstanding pool blocks must stay
+     * allocated: the peer may still consume their queued requests. There is no
+     * cancellation/rundown acknowledgement in this transport revision. */
+    ntwv_fill(&w64, 0, sizeof w64);
+    w64_leave();
+}
+
+static int w64_layout_valid(const shz_channel_hdr_t *c, uint32_t channel_id)
+{
+    uint64_t ring_bytes, table_bytes;
+    if (c->magic != SHZ_CHANNEL_MAGIC || c->abi_major != SHZ_ABI_MAJOR ||
+        c->channel_id != channel_id || !c->generation ||
+        !((c->domain_a == SHZ_DOM_WIN98 && c->domain_b == SHZ_DOM_KERNEL64) ||
+          (c->domain_b == SHZ_DOM_WIN98 && c->domain_a == SHZ_DOM_KERNEL64)) ||
+        c->slot_count < 2 || (c->slot_count & (c->slot_count - 1)) ||
+        c->slot_count > (SHZ_IPC_REGION_SIZE - sizeof *c - 2 * sizeof(shz_ring_hdr_t)) /
+                        (2 * SHZ_MSG_SLOT_SIZE) ||
+        !c->pool_size || (c->pool_size % SHZ_POOL_BLOCK) || (c->pool_offset % SHZ_POOL_BLOCK) ||
+        (c->ring_ab_offset % 64) || (c->ring_ba_offset % 64))
+        return 0;
+    ring_bytes = shz_ring_bytes(c->slot_count);
+    table_bytes = (c->pool_size / SHZ_POOL_BLOCK + 63) & ~UINT64_C(63);
+    /* Keep header/owner table, both rings and pool disjoint and in the mapped
+     * window. Bound the slot count before the size_t arithmetic above. */
+    return shz_channel_valid(c, SHZ_IPC_REGION_SIZE) &&
+           shz_range_ok(sizeof *c, table_bytes, c->ring_ab_offset) &&
+           shz_range_ok(c->ring_ab_offset, ring_bytes, c->ring_ba_offset) &&
+           shz_range_ok(c->ring_ba_offset, ring_bytes, c->pool_offset);
+}
+
+static uint32_t w64_live(void)
+{
+    shz_channel_hdr_t now;
+    const shz_channel_hdr_t *opened = &w64.layout;
+    if (!w64.open)
+        return NTWV_ERROR_NOT_READY;
+    ntwv_copy(&now, w64.hdr, sizeof now);
+    if (now.generation != w64.generation)
+        return NTWV_ERROR_DEV_NOT_EXIST;      /* explicit reset/reopen required after restart */
+    if (!w64_layout_valid(&now, w64.channel_id) ||
+        now.abi_minor != opened->abi_minor || now.domain_a != opened->domain_a || now.domain_b != opened->domain_b ||
+        now.ring_ab_offset != opened->ring_ab_offset || now.ring_ba_offset != opened->ring_ba_offset ||
+        now.pool_offset != opened->pool_offset || now.pool_size != opened->pool_size || now.slot_count != opened->slot_count ||
+        !shz_ring_valid(w64.tx) || !shz_ring_valid(w64.rx) ||
+        w64.tx->slot_count != opened->slot_count || w64.rx->slot_count != opened->slot_count)
+        return NTWV_ERROR_GEN_FAILURE;
+    return 0;
 }
 
 static uint32_t pending_count(void)
@@ -186,8 +256,8 @@ static void fill_open(struct ntwv_w64_open *o)
     o->self_domain = w64.self;
     o->peer_domain = w64.peer;
     o->generation = w64.generation;
-    o->slot_count = w64.open ? w64.hdr->slot_count : 0;
-    o->pool_bytes = w64.open ? (uint32_t)w64.hdr->pool_size : 0;
+    o->slot_count = w64.open ? w64.layout.slot_count : 0;
+    o->pool_bytes = w64.open ? (uint32_t)w64.layout.pool_size : 0;
     o->sent = w64.sent;
     o->received = w64.received;
     o->proto_errors = w64.proto_errors;
@@ -199,7 +269,7 @@ static uint32_t w64_open(const struct ntwv_hv *hv)
 {
     uint32_t ver = 0, c;
     if (w64.open)
-        return 0;
+        return w64_live();
     if (!hv->hypervisor_present())
         return NTWV_ERROR_NOT_SUPPORTED;            /* no Shizuku Supervisor: VMCALL must never run */
     if (hv->hcall(SHZ_HC_ABI_VERSION, 0, 0, &ver, 0) != SHZ_OK)
@@ -214,21 +284,21 @@ static uint32_t w64_open(const struct ntwv_hv *hv)
         hdr = hv->map_phys(gpa, SHZ_IPC_REGION_SIZE);
         if (!hdr)
             return NTWV_ERROR_NOT_ENOUGH_MEMORY;
-        if (!shz_channel_valid(hdr, SHZ_IPC_REGION_SIZE) ||
-            !((hdr->domain_a == SHZ_DOM_WIN98 && hdr->domain_b == SHZ_DOM_KERNEL64) ||
-              (hdr->domain_b == SHZ_DOM_WIN98 && hdr->domain_a == SHZ_DOM_KERNEL64)))
+        ntwv_copy(&w64.layout, hdr, sizeof w64.layout);
+        if (!w64_layout_valid(&w64.layout, c))
             return NTWV_ERROR_GEN_FAILURE;        /* the Supervisor named a channel that is not ours */
         w64.base = (uint8_t *)hdr;
         w64.bytes = SHZ_IPC_REGION_SIZE;
         w64.hdr = hdr;
         w64.self = SHZ_DOM_WIN98;
         w64.peer = SHZ_DOM_KERNEL64;
-        w64.tx = shz_channel_ring_tx(w64.base, hdr, w64.self);
-        w64.rx = shz_channel_ring_rx(w64.base, hdr, w64.self);
-        if (!shz_ring_valid(w64.tx) || !shz_ring_valid(w64.rx))
+        w64.tx = shz_channel_ring_tx(w64.base, &w64.layout, w64.self);
+        w64.rx = shz_channel_ring_rx(w64.base, &w64.layout, w64.self);
+        if (!shz_ring_valid(w64.tx) || !shz_ring_valid(w64.rx) ||
+            w64.tx->slot_count != w64.layout.slot_count || w64.rx->slot_count != w64.layout.slot_count)
             return NTWV_ERROR_GEN_FAILURE;
-        w64.channel_id = hdr->channel_id;
-        w64.generation = hdr->generation;
+        w64.channel_id = w64.layout.channel_id;
+        w64.generation = w64.layout.generation;
         w64.abi = ver;
         w64.open = 1;
         return 0;
@@ -236,13 +306,22 @@ static uint32_t w64_open(const struct ntwv_hv *hv)
     return NTWV_ERROR_DEV_NOT_EXIST;
 }
 
-static void release_pending(uint64_t request_id)
+static int pending_reply_matches(const shz_msg_hdr_t *h)
 {
     uint32_t i;
     for (i = 0; i < NTWV_W64_PENDING_POOL; ++i)
-        if (w64.pending[i].used && w64.pending[i].request_id == request_id) {
-            (void)shz_pool_release(w64.base, w64.hdr, w64.self, w64.pending[i].offset, w64.pending[i].length, 0);
-            w64.pending[i].used = 0;
+        if (w64.pending[i].used && w64.pending[i].request_id == h->request_id)
+            return w64.pending[i].opcode == h->opcode;
+    return 1;                               /* inline requests have no pool lease here */
+}
+
+static void release_pending(const shz_msg_hdr_t *h)
+{
+    uint32_t i;
+    for (i = 0; i < NTWV_W64_PENDING_POOL; ++i)
+        if (w64.pending[i].used && w64.pending[i].request_id == h->request_id && w64.pending[i].opcode == h->opcode) {
+            if (shz_pool_release(w64.base, &w64.layout, w64.self, w64.pending[i].offset, w64.pending[i].length, 0) == SHZ_OK)
+                w64.pending[i].used = 0;
         }
 }
 
@@ -253,11 +332,15 @@ static uint32_t w64_send(const struct ntwv_hv *hv, uint32_t in_bytes, uint32_t *
     uint64_t off = 0;
     int32_t status;
     int rc;
-    if (!w64.open)
-        return NTWV_ERROR_NOT_READY;
+    const uint32_t live_result = w64_live();
+    if (live_result)
+        return live_result;
     ntwv_copy(&h, w64_in, sizeof h);
     if (h.payload_length > SHZ_MSG_MAX_INLINE || in_bytes < sizeof h + h.payload_length)
         return NTWV_ERROR_INVALID_PARAMETER;
+    for (i = 0; i < NTWV_W64_PENDING_POOL; ++i)
+        if (w64.pending[i].used && w64.pending[i].request_id == h.request_id)
+            return NTWV_ERROR_BUSY;           /* one completion cannot retire two buffers */
     extra = in_bytes - (uint32_t)sizeof h - h.payload_length;
     /* The VxD, not the application, names the endpoints and the generation; a buffer reference only
      * ever comes from data the application handed over in this same request. */
@@ -272,7 +355,7 @@ static uint32_t w64_send(const struct ntwv_hv *hv, uint32_t in_bytes, uint32_t *
             if (!w64.pending[i].used) { slot = i; break; }
         if (slot == NTWV_W64_PENDING_POOL || (h.flags & SHZ_MSGF_ONEWAY))
             return NTWV_ERROR_BUSY;             /* pool blocks are freed by the matching reply */
-        off = shz_pool_alloc(w64.base, w64.hdr, w64.self, extra);
+        off = shz_pool_alloc(w64.base, &w64.layout, w64.self, extra);
         if (!off)
             return NTWV_ERROR_NOT_ENOUGH_MEMORY;
         ntwv_copy(w64.base + off, w64_in + sizeof h + h.payload_length, extra);
@@ -283,7 +366,7 @@ static uint32_t w64_send(const struct ntwv_hv *hv, uint32_t in_bytes, uint32_t *
     rc = shz_ring_push(w64.tx, &h, w64_in + sizeof h);
     if (rc != SHZ_OK) {
         if (extra)
-            (void)shz_pool_release(w64.base, w64.hdr, w64.self, off, extra, 0);
+            (void)shz_pool_release(w64.base, &w64.layout, w64.self, off, extra, 0);
         return rc == SHZ_E_QUEUE_FULL ? NTWV_ERROR_BUSY : NTWV_ERROR_INVALID_PARAMETER;
     }
     if (extra) {
@@ -291,6 +374,7 @@ static uint32_t w64_send(const struct ntwv_hv *hv, uint32_t in_bytes, uint32_t *
         w64.pending[slot].request_id = h.request_id;
         w64.pending[slot].offset = off;
         w64.pending[slot].length = extra;
+        w64.pending[slot].opcode = h.opcode;
     }
     ++w64.sent;
     if (hv->hcall(SHZ_HC_NOTIFY, w64.peer, 1, 0, 0) != SHZ_OK)
@@ -305,31 +389,47 @@ static uint32_t w64_recv(uint32_t *out_len)
 {
     shz_msg_hdr_t h;
     int rc, reason;
-    if (!w64.open)
-        return NTWV_ERROR_NOT_READY;
-    for (;;) {
+    uint32_t budget, live_result = w64_live();
+    if (live_result)
+        return live_result;
+    for (budget = 0; budget < w64.layout.slot_count; ++budget) {
         rc = shz_ring_pop(w64.rx, &h, w64_out + sizeof h, SHZ_MSG_MAX_INLINE, &reason);
         if (rc == SHZ_E_NOENT)
             return NTWV_ERROR_NO_MORE_ITEMS;
-        if (rc == SHZ_OK)
-            break;
-        ++w64.proto_errors;                     /* malformed slot: consumed, never shown to the application */
+        if (rc != SHZ_OK) {
+            ++w64.proto_errors;
+            /* A corrupt head cannot be consumed. Never retry it indefinitely. */
+            if (rc != SHZ_E_PROTO || reason == SHZ_PR_HEAD_CORRUPT)
+                return NTWV_ERROR_GEN_FAILURE;
+            continue;
+        }
+        live_result = w64_live();
+        if (live_result)
+            return live_result;
+        if (h.src_domain != w64.peer || h.dst_domain != w64.self || h.generation != w64.generation ||
+            (h.flags != SHZ_MSGF_REPLY && h.flags != SHZ_MSGF_ONEWAY) || h.buffer_length || h.buffer_offset ||
+            ((h.flags & SHZ_MSGF_REPLY) && !pending_reply_matches(&h))) {
+            ++w64.proto_errors;
+            continue;                         /* no delivery or pool retirement for a foreign response */
+        }
+        ntwv_copy(w64_out, &h, sizeof h);
+        if (h.payload_length < SHZ_MSG_MAX_INLINE)
+            ntwv_fill(w64_out + sizeof h + h.payload_length, 0, SHZ_MSG_MAX_INLINE - h.payload_length);
+        if (h.flags & SHZ_MSGF_REPLY)
+            release_pending(&h);
+        ++w64.received;
+        *out_len = SHZ_MSG_SLOT_SIZE;
+        return 0;
     }
-    ntwv_copy(w64_out, &h, sizeof h);
-    if (h.payload_length < SHZ_MSG_MAX_INLINE)
-        ntwv_fill(w64_out + sizeof h + h.payload_length, 0, SHZ_MSG_MAX_INLINE - h.payload_length);
-    if (h.flags & SHZ_MSGF_REPLY)
-        release_pending(h.request_id);
-    ++w64.received;
-    *out_len = SHZ_MSG_SLOT_SIZE;
-    return 0;
+    return NTWV_ERROR_NO_MORE_ITEMS;           /* bounded drain even if the peer keeps producing garbage */
 }
 
 static uint32_t w64_wait(const struct ntwv_hv *hv, uint32_t *out_len)
 {
     uint32_t mask = 0;
-    if (!w64.open)
-        return NTWV_ERROR_NOT_READY;
+    const uint32_t live_result = w64_live();
+    if (live_result)
+        return live_result;
     /* Non-blocking in this revision: the doorbell state is acknowledged and reported; NTW32.DLL polls with
      * Sleep(1) between RECV calls. Blocking on the doorbell needs a VPICD-hooked vector (see the README). */
     if (hv->hcall(SHZ_HC_DOORBELL_ACK, 0, 0, &mask, 0) != SHZ_OK)
@@ -434,7 +534,7 @@ uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *
 {
     if (!request)
         return NTWV_ERROR_INVALID_PARAMETER;
-    if (!live)
+    if (!__atomic_load_n(&live, __ATOMIC_ACQUIRE))
         return NTWV_ERROR_NOT_READY;
     if (request->code == 0)
         return 0; /* DIOC_OPEN/GETVERSION handshake; no user buffer access. */
@@ -442,8 +542,17 @@ uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *
         return 1; /* DIOC_CLOSEHANDLE: documented VXD_SUCCESS. */
     if (request->code == NTWV_IOCTL_QUERY)
         return dioc_query(request, ops);
-    if (request->code >= NTWV_IOCTL_W64_OPEN && request->code <= NTWV_IOCTL_W64_WAIT)
-        return hv ? dioc_w64(request, ops, hv) : NTWV_ERROR_NOT_SUPPORTED;
+    if (request->code >= NTWV_IOCTL_W64_OPEN && request->code <= NTWV_IOCTL_W64_WAIT) {
+        uint32_t result;
+        if (!hv)
+            return NTWV_ERROR_NOT_SUPPORTED;
+        if (!w64_enter())
+            return NTWV_ERROR_BUSY;
+        /* Recheck after admission: dynamic shutdown takes the same gate. */
+        result = __atomic_load_n(&live, __ATOMIC_ACQUIRE) ? dioc_w64(request, ops, hv) : NTWV_ERROR_NOT_READY;
+        w64_leave();
+        return result;
+    }
     return NTWV_ERROR_NOT_SUPPORTED;
 }
 
