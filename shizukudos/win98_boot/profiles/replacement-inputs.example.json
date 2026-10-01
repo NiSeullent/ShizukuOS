@@ -1,0 +1,12 @@
+{
+  "schema": "shizukuos.private-replacement-profile.v1",
+  "disk": {"path": "/private/original-windows98.img", "bytes": 2147483648, "sha256": "REPLACE_WITH_REVIEWED_ACTUAL_SHA256"},
+  "boot_template": {"kind": "fat32lba", "file": {"path": "/private/source-build/boot/fat32lba.bin", "bytes": 512, "sha256": "REPLACE_WITH_REVIEWED_ACTUAL_SHA256"}},
+  "freedos_source": "/private/source-build/freedos-kernel",
+  "build_receipt": {"path": "/private/source-build/build-result.json", "bytes": 1, "sha256": "REPLACE_WITH_REVIEWED_ACTUAL_SIZE_AND_SHA256"},
+  "build_source_root": "/private/reviewed-project-source",
+  "payloads": [
+    {"guest": "KERNEL.SYS", "file": {"path": "/private/source-build/kernel.sys", "bytes": 1, "sha256": "REPLACE_WITH_REVIEWED_ACTUAL_SIZE_AND_SHA256"}},
+    {"guest": "COMMAND.COM", "file": {"path": "/private/source-build/command.com", "bytes": 1, "sha256": "REPLACE_WITH_REVIEWED_ACTUAL_SIZE_AND_SHA256"}}
+  ]
+}
