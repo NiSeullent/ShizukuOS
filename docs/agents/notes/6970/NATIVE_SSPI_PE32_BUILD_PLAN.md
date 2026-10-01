@@ -1,5 +1,11 @@
 # Native provider bridge: actual PE32 and SDK ABI build
 
+Current actual result: source e4abae7bb3adffcee787f0f8535ac34d4363caaa
+passed the fourth hosted build and two independent actual-evidence reviews.
+This is PE32 build/SDK ABI acceptance only; Windows loading, TLS and application
+acceptance remain unverified. The original plan and failed attempts below are
+preserved as historical records.
+
 Windows 98 remains the product OS. ShizukuDOS replaces MS-DOS, with Kernel32
 and Kernel64 serving Windows. Canonical owns the DOS/VMM/startup path, 7707
 owns secure_transport, cb43 owns the native loader and the existing publisher
@@ -222,3 +228,61 @@ exact source hashes and unchanged prior guard functions without executing
 the helper, compiler or build runner locally. The recipe modification is
 explicitly reported; no Windows, TLS, application or ISO acceptance follows
 from this source review.
+
+## Actual fourth attempt: build and SDK ABI accepted
+
+[Run 36938006092](https://github.com/NiSeullent/Win98-Modern/actions/runs/36938006092),
+job 110622699132, ran exact source e4abae7bb3adffcee787f0f8535ac34d4363caaa
+and returned `PASS_BUILD_AND_SDK_ABI_ONLY`. All 19 build commands exited zero,
+were reaped and had no abort or stderr. Root and independent reviewers matched
+all 38 actual captures, totaling 139,531 B, against the receipt digests.
+Actual SDK compilation passed the fixture's 36 static assertions and the
+production's two existing assertions, without executing an SSPI function.
+
+Four actual -M/-MD include manifests matched (93/13/88/98 paths), with a
+100-header union. All 14 source inputs matched before/after, the committed
+revision and current source bytes. Direct compiler, selected linker, objdump,
+control Python, parser source and kernel32 import-library pins matched before
+and after. This does not attest full implicit toolchain or loaded Python/parser
+code. Checkout provenance was independently checked through workflow/API;
+the runner's independent-checkout/self-loaded-code flags remain false.
+
+Both separately queried actual linker scripts extracted 10,650 B of default
+script and generated 10,737 B after relocation/alignment/two internal markers.
+Independent data-only reconstruction matched both generated hashes and
+preserved all original commands, notices and pseudo-relocation tail bytes.
+The observed linker version is GNU Binutils 2.41.90.20240122; studying the 2.42
+template does not certify this executable as that release. The pinned runner
+checked all retained raw/default/generated script inputs again before its
+final verdict; separate after-snapshot records were not printed.
+
+Actual DLL/probe layouts place both empty tables in readonly nonexecuting
+`.rdata` (flags 0x40000040), with starts at RVA8192/8200 and internal ends at
+8200/8208. Both spans are exactly 8 B and markers are excluded from exports.
+The DLL retains exactly three named executable stdcall bridge exports.
+The original instruction gate accepted all 3,728 DLL and 1,276 probe executable
+VirtualSize bytes, respectively 1,054/369 instructions, without gaps or newer
+instructions. Reviewers independently reconstructed every disassembly row and
+section-byte hash. Binaries were not downloaded or rehashed locally.
+
+Actual controls passed: text15 (5 accepted/10 rejected), actual-layout5,
+COFF22 (5 accepted/17 rejected), PE10 and four original i486 methods. The
+original fifth filesystem/scan method and full relocation semantics remain
+unverified. No scanner waiver or PE rewriting was used.
+
+Actual receipt 169,218 B SHA256:
+5b5ea0eacf4d7400eae29618bb52ab901283a6eec8dad4c4864ba3693f702013.
+Actual job log 580,418 B SHA256:
+1bb22cfb4c985b34e50a88f769f45d7ae409881ebe00b040f9c597dc09a6d273.
+Preparation receipt 2,524 B SHA256:
+78d1558f1e751443e8499681425c73cff44b96da35d5225dcd7e009622649bb1.
+Preparation's three commands exited zero and were reaped; its apt/pip logs
+contain warnings. GHA line normalization loses original apt formatting, so
+the original apt capture digest was not independently reconstructed.
+
+Minimum observed build free space was 91,852,673,024 B. Resource failure was
+null; final counted bytes 585,883 equal prior output416,665 plus receipt169,218,
+with observed peak585,884. The result preserves all native Windows loading,
+provider execution, engine-link, credentials, TLS/network, OS registration,
+Kernel64, application and ISO claims as false. The existing disabled
+`native_loader --providers` policy remains unchanged.

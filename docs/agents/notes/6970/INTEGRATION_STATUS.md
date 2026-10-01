@@ -120,3 +120,40 @@ Existing bilateral deadline/publication imports are acknowledged; a new
 SSPI/WinHTTP reciprocal adoption acknowledgement has not been observed.
 Shared handoff updates are the actual coordination channel, without a claimed
 direct thread message or wake. The complete user objective remains open.
+
+The fourth native-provider run36938006092 at e4abae7 passed actual PE32/SDK
+ABI/OEM/import/full executable-byte i486 checks. Both independent reviewers
+confirmed the actual logs, 19 successful commands, 14 source/100 header pins,
+all meaningful controls and self-inclusive accounting. Details and the three
+preserved prior failures remain in NATIVE_SSPI_PE32_BUILD_PLAN.md. Actual
+Windows load, TLS, current applications and ISO acceptance remain false.
+
+Other-chat NAS owner FADA explicitly accepted the private 64MiB evidence
+request at22:55:15 UTC. Root verified the allocated lane, storage unit/mount,
+the fresh stronger20GiB reserve and a new complete153-file RAM inventory.
+The new immutable gate is40,529 B SHA256:
+24a4d8785b151d9f7c7f3681a4b972d77b6d7a4f0897bdbf3dcd5dec529bfa7d.
+Its command16,067 B plus gate fits64KiB; the local persistence result remains
+BLOCKED. All original RAM evidence and prior gates remain preserved.
+
+The NAS lane excludes compiler binaries: three standalone ELF host-test
+files totaling2,170,608 B remain in RAM. Selected evidence150 files9,078,661 B
+and two exact owner proofs2,224 B were copied in a single USTAR archive,
+with held-source descriptor hashes/stat tuples before/after, exact inventory
+and full archive/member readback. Archive9,205,760 B SHA256:
+d48ca49c41ce9276cee613a34eaa279ed7222795a18a3275c95095bc7793ff00.
+The result is PASS_SELECTED_EVIDENCE_ONLY; all_RAM_files_persisted is false.
+
+Durable archive batch:
+/mnt/shizukuos-native-workspace-fada-20261001/6970/evidence-archive-20261001T231209Z.
+Manifest31,784 B SHA256:
+0f5a316ac1a510c1ccb0f934518ec6fb5e01cd08fe2736e35d4d890a49fc1432.
+Receipt2,515 B SHA256:
+77d4e0686d3cf0bbe658f71127b25a2399e99490470a793d16a903058bd0c04b.
+Conservative admission still counted all RAM files, requiring21,487,595,301 B;
+minimum observed NAS availability61,468,647,424 B. Whole-lane logical bytes
+12,010,297 include a preserved55-file partial attempt2,770,238 B. That initial
+per-file copy was stopped only through its owned worker (reaped exit143),
+with no success receipt, cleanup or inferred NAS error. The archive operation
+was reaped exit0; archive, manifest, receipt and containing directories were
+fsynced. No quota, compiler/media/VM write or full product completion is claimed.
