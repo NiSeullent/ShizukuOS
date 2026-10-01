@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FILES = ["kernel64/proc_internal.h", "kernel64/ipc.h", "kernel64/proc.c", "kernel64/objects.c",
          "kernel64/ipc_proc.c", "kernel64/sysk32_proc.c", "kernel64/sysx.c", "win64/kernel32/k32_core.c",
          "win64/kernel32/k32_misc.c", "kernel64/sched.c", "kernel64/ipc_core.c", "kernel64/ntsys.h",
+         "kernel64/smp_boot.c", "kernel64/k64.h", "kernel64/sched_cpu.h", "kernel64/smp_boot.h",
          "kcommon/nt_sched_policy.h", "tests/test_nt_thread_priority.c", "tests/test_nt_thread_priority.py"]
 
 
@@ -91,9 +92,11 @@ def main():
         f = out / "frozen" / p.relative_to(ROOT); f.parent.mkdir(parents=True, exist_ok=True); f.write_bytes(data)
         artifacts[f] = data
     sources = {p.name: data.decode() for p, data in snapshots.items() if p.suffix == ".c"}
-    pieces = []
+    pieces = [function(sources["smp_boot.c"], name) for name in ("initial_apic_id", "shz_smp_this_cpu")]
+    pieces.append(re.search(r"^typedef struct[^\n]+queue_guard_t;", sources["sched.c"], re.M)[0])
     for filename, names in [
-        ("sched.c", ["thread_pointer_valid", "ready_enqueue", "ready_remove",
+        ("sched.c", ["sched_cpu_identity", "bsp_scheduler_owner", "sched_cpu_register", "queue_enter", "queue_leave",
+                      "thread_pointer_valid", "ready_enqueue_locked", "ready_enqueue", "ready_remove", "thread_current",
                       "thread_set_sched_policy", "thread_get_sched_policy"]),
         ("ipc_core.c", ["ipc_ref_handle", "ipc_ref_process"]),
         ("ipc_proc.c", ["ref_thread", "attached_thread", "sys_query_thread"]),
@@ -103,6 +106,7 @@ def main():
         if filename == "ipc_proc.c":
             pieces.append(re.search(r"^struct thread_basic[^\n]+", sources[filename], re.M)[0])
         pieces.extend(function(sources[filename], n) for n in names)
+    pieces.extend(function(sources["sched.c"], n) for n in ("sched_switch_complete", "reap_user_zombies", "thread_reap_exited"))
     pieces.append(function(sources["ipc_proc.c"], "sys_set_thread", optional=True))
     pieces.append(function(sources["sysk32_proc.c"], "set_process_priority_class", optional=True))
     pieces.append(function(sources["ipc_proc.c"], "ipc_proc_syscall"))
@@ -124,11 +128,20 @@ def main():
     layout = out / "object-layout.inc"
     layout.write_text(schema[start:block_end(schema, schema.index("{", start))] + ";\n")
     artifacts[layout] = layout.read_bytes()
+    # Use the actual complete TCB layout and scheduler types/constants. Host
+    # process/handle/IRQ/TLS boundaries remain explicitly modeled by the fixture.
+    schema = snapshots[ROOT / "shizukudos/kernel64/k64.h"].decode()
+    start = schema.index("typedef struct thread thread_t;")
+    end = block_end(schema, schema.index("{", schema.index("struct thread {", start)))
+    layout = out / "thread-layout.inc"
+    layout.write_text(schema[start:end] + ";\n")
+    artifacts[layout] = layout.read_bytes()
     compilers = {n: Path(shutil.which(n)).resolve() for n in ["gcc", "clang"] +
                  (["x86_64-w64-mingw32-gcc"] if args.compile_units else [])}
     compiler_bytes = {n: p.read_bytes() for n, p in compilers.items()}
-    result = {"status": "FAIL", "scope": "Actual production dispatch/wrapper/init/retarget bodies with host platform adapters",
+    result = {"status": "FAIL", "scope": "Actual NT dispatch/wrapper/init/retarget, native queue/policy/identity/reclaim bodies and TCB/object schemas with host platform adapters",
               "guest_executed": False, "native_windows98_verified": False, "full_runtime_built": False,
+              "ap_executed": False, "hardware_context_switch_executed": False,
               "source_sha256": {str(p.relative_to(ROOT)): sha(b) for p,b in snapshots.items()},
               "compiler_sha256": {n: sha(b) for n,b in compiler_bytes.items()},
               "records": [], "artifacts_sha256": {str(p.relative_to(out)): sha(b) for p,b in artifacts.items()}}

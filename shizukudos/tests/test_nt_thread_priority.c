@@ -1,42 +1,28 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Host contracts execute extracted, unchanged production function bodies.
- * Fixtures adapt privileged IRQ, allocation, handle-table, user-copy, resume
- * and blocking TLS boundaries. Real native pointer and queue bodies run here;
- * preemption, privileged IRQs and Windows 98 acceptance remain untested. */
+ * Fixtures adapt privileged IRQ, process/handle tables, allocation, user-copy,
+ * resume and blocking TLS boundaries. Real TCB/object schemas, queue/policy,
+ * CPUID identity and reclaim bodies run here. The topology fixture maps one
+ * permitted host CPU; no AP, hardware context switch or Windows 98 runs. */
+#define _GNU_SOURCE
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
+#include <sched.h>
 #include "ntsys.h"
 #include "nt_sched_policy.h"
 
-typedef struct thread thread_t;
-typedef struct process process_t;
-typedef struct kobject kobject_t;
-enum { TS_FREE, TS_READY, TS_RUNNING, TS_BLOCKED, TS_ZOMBIE, TS_NEW };
+#include "thread-layout.inc" /* complete actual production TCB schema */
 enum { OB_THREAD = 1, OB_PROCESS = 2, OB_JOB = 3 };
 #define CURRENT_THREAD_HANDLE UINT64_C(0xfffffffffffffffe)
 #define CURRENT_PROCESS_HANDLE UINT64_MAX
 #define THREAD_SET_INFORMATION 0x20u
 #define THREAD_QUERY_INFORMATION 0x40u
 #define PROCESS_SET_INFORMATION 0x200u
-#define SCHED_PRIORITY_LEVELS 32u
-#define SCHED_MAX_QUANTUM_TICKS 16u
 #define VK_STACK 1u
 #define K32S_PRIORITY_CLASS 1
-typedef struct { uint32_t priority, quantum_ticks; uint64_t cpu_mask; } sched_policy_t;
-struct thread {
-    int state, id, kill_pending, ready_queued, suspend_count, creator_hold;
-    process_t *proc;
-    kobject_t *object;
-    uint32_t sched_priority, quantum_ticks, quantum_left, aging_service_left;
-    thread_t *ready_prev, *ready_next;
-    uint64_t ready_since, ready_order;
-    uint64_t cpu_mask, user_stack, user_rip, user_rsp, user_arg, user_arg2, tid, teb, user_gs_base;
-    int64_t exit_code;
-    uint64_t create_tick, exit_tick, user_ticks, kernel_ticks, cycles;
-};
 #include "object-layout.inc" /* the actual production object schema */
 struct process {
     int used, pid, terminated, teardown, threads_alive;
@@ -77,13 +63,12 @@ static process_t processes[2];
 static thread_t slots[12], *current, *idle_thread;
 static thread_t *threads = slots;
 static unsigned thread_hi = 12;
-static struct { thread_t *head, *tail; } ready[SCHED_PRIORITY_LEVELS];
-static uint32_t ready_mask, ready_count;
 static uint64_t jiffies, ready_order;
 static kobject_t objects[20];
 static struct { kobject_t *obj; uint32_t access; } handles[20];
 static unsigned checks, failures, irq_depth, allocation;
 static unsigned freed_vads;
+static unsigned freed_stacks;
 static unsigned char teb_storage[12][8192];
 static uint64_t reject_read, reject_write;
 static DWORD last_error;
@@ -91,9 +76,16 @@ static int tls_mode, fail_create_object;
 #define CHECK(x) do { ++checks; if (!(x)) { ++failures; if (failures < 30) \
     fprintf(stderr, "line %d: %s\n", __LINE__, #x); } } while (0)
 #define KASSERT(x) CHECK(x)
+#include "sched_cpu.h" /* unchanged native queue/policy and ticket primitives */
+#include "smp_acpi.h"
+static k64_runqueues_t runqueues;
+static shz_smp_topology_t topology;
+#define ready (runqueues.cpu[0].ready)
+#define ready_mask (runqueues.cpu[0].ready_mask)
+#define ready_count (runqueues.cpu[0].ready_count)
 static uint64_t irq_save(void) { return irq_depth++; }
 static void irq_restore(uint64_t f) { CHECK(irq_depth == f + 1); irq_depth = (unsigned)f; }
-static thread_t *thread_current(void) { return current; }
+thread_t *thread_current(void);
 static thread_t *thread_slot(unsigned i) { CHECK(irq_depth != 0); return i < 12 ? &slots[i] : NULL; }
 static void ready_enqueue(thread_t *t);
 static void ob_ref(kobject_t *o) { CHECK(o != NULL); ++o->refs; }
@@ -131,6 +123,7 @@ static void user_thread_main(void *p) { (void)p; }
 static thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg) {
     (void)name; (void)fn; (void)arg;
     thread_t *t = &slots[allocation++]; memset(t, 0, sizeof *t); t->state = TS_NEW;
+    t->ready_cpu = t->on_cpu = K64_CPU_NONE;
     t->sched_priority = 16; t->quantum_ticks = 6; t->quantum_left = 6; t->cpu_mask = 1; return t;
 }
 static void thread_discard(thread_t *t) { CHECK(t->state == TS_NEW); t->state = TS_FREE; }
@@ -162,6 +155,7 @@ static DWORD k32_nt_error(NTSTATUS st) {
     shz_set_last_error(e); return e;
 }
 static int32_t unrelated_route(void) { CHECK(0); return STATUS_NOT_SUPPORTED; }
+static void kstack_free(uint64_t base) { CHECK(base != 0 && irq_depth != 0); ++freed_stacks; }
 #define sys_create_user_process(...) unrelated_route()
 #define sys_open_process(...) unrelated_route()
 #define sys_open_thread(...) unrelated_route()
@@ -181,6 +175,15 @@ static int32_t unrelated_route(void) { CHECK(0); return STATUS_NOT_SUPPORTED; }
 #define sys_is_in_job(...) unrelated_route()
 #include "production.inc"
 
+/* Only topology publication is a fixture. Both physical CPUID reading and the
+ * production lookup run unchanged, on the single process-affinity CPU. */
+static void owner_identity(unsigned cpu) {
+    const uint32_t actual = initial_apic_id();
+    memset(&topology, 0, sizeof topology);
+    topology.count = cpu == 1 ? 2 : 1;
+    topology.apic_id[0] = cpu == 0 ? actual : actual ^ 0xffu;
+    if (cpu == 1) topology.apic_id[1] = actual;
+}
 static int32_t dispatch(uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t ret) {
     struct regs r = {ret}; int handled = 0;
     int32_t st = ipc_proc_syscall(&processes[0], &r, num, a1, a2, a3, a4, &handled);
@@ -202,20 +205,27 @@ static void thread_user_tls_init(process_t *p, thread_t *t) {
 static HANDLE H(unsigned h) { return (HANDLE)(uintptr_t)h; }
 static void reset(void) {
     memset(processes, 0, sizeof processes); memset(slots, 0, sizeof slots); memset(objects, 0, sizeof objects);
-    memset(handles, 0, sizeof handles); memset(ready, 0, sizeof ready);
-    irq_depth = ready_count = ready_mask = 0; ready_order = 0; jiffies = 100;
+    memset(handles, 0, sizeof handles); k64_rq_init(&runqueues, slots, 12, 1);
+    owner_identity(0);
+    irq_depth = 0; ready_order = 0; jiffies = 100;
     reject_read = reject_write = 0; allocation = 3; tls_mode = fail_create_object = 0; last_error = 0;
-    freed_vads = 0;
+    freed_vads = freed_stacks = 0;
+    for (unsigned i = 0; i < 12; ++i) slots[i].ready_cpu = slots[i].on_cpu = K64_CPU_NONE;
     for (unsigned i = 0; i < 2; ++i) {
         processes[i].used = 1; processes[i].pid = 100 + (int)i;
         processes[i].object = &objects[i]; objects[i].type = OB_PROCESS; objects[i].refs = 4; objects[i].u.proc.p = &processes[i];
     }
     current = &slots[0]; idle_thread = &slots[11];
+    runqueues.cpu[0].current = current; runqueues.cpu[0].idle = idle_thread;
+    current->on_cpu = 0;
+    idle_thread->state = TS_READY; idle_thread->quantum_ticks = idle_thread->quantum_left = 6;
+    idle_thread->cpu_mask = 1; /* a valid idle TCB: refusal must exercise the idle-owner rule */
     for (unsigned i = 0; i < 3; ++i) {
         thread_t *t = &slots[i]; kobject_t *o = &objects[i+2];
         t->state = i ? TS_READY : TS_RUNNING; t->id = (int)i; t->proc = &processes[i == 1]; t->object = o;
         t->sched_priority = 8; t->quantum_ticks = 6; t->quantum_left = 2; t->cpu_mask = 1;
         t->aging_service_left = i ? 0 : 3; /* READY owns no running service grant */
+        t->stack_base = 0x100000 + i * 0x10000;
         t->teb = 0x10000 + i * 4096; t->tid = 204 + i*4;
         o->type = OB_THREAD; o->refs = 3; o->u.thr.t = t; o->u.thr.pid = (uint64_t)t->proc->pid;
         o->u.thr.tid = t->tid; o->u.thr.last_sched_priority = 8;
@@ -325,7 +335,9 @@ static void check_affinity_and_lifetime(void) {
      * Reclamation must retain that value, rather than the API's last cache. */
     CHECK(thread_set_sched_policy(&slots[1], 19, 6, 1) == 0);
     slots[1].kill_pending = 1; CHECK(set_raw(8, 0) == STATUS_THREAD_IS_TERMINATING);
-    slots[1].kill_pending = 0; slots[1].state = TS_ZOMBIE; slots[1].exit_code = 42;
+    slots[1].kill_pending = 0;
+    { uint64_t f = irq_save(); ready_remove(&slots[1]); irq_restore(f); }
+    slots[1].state = TS_ZOMBIE; slots[1].exit_code = 42;
     struct thread_basic b; ULONG n;
     CHECK(NtQueryInformationThread(H(8), 0, &b, 48, &n) == 0 && b.base == 16 && b.prio == 19 && b.exit_status == 42);
     CHECK(set_raw(8, 0) == STATUS_THREAD_IS_TERMINATING);
@@ -445,10 +457,123 @@ static void check_native_requeue(void) {
     CHECK(slots[0].state == TS_RUNNING && slots[0].quantum_left == 2 && slots[0].aging_service_left == 3);
     CHECK(ready_count == 2 && ready_mask == (1u << 8));
 }
+
+static void check_ticket_and_owner_boundaries(void) {
+    reset();
+    const uint64_t outer = irq_save();
+    uint32_t next = runqueues.lock.next;
+    sched_policy_t p = {99, 88, 77};
+    CHECK(thread_get_sched_policy(&slots[1], &p) == 0);
+    CHECK(p.priority == 8 && p.quantum_ticks == 6 && p.cpu_mask == 1);
+    CHECK(irq_depth == 1 && runqueues.lock.next == next + 1 &&
+          runqueues.lock.owner == runqueues.lock.next && runqueues.lock.reservation == 0);
+    const uint64_t arrival = slots[1].ready_order, since = slots[1].ready_since;
+    next = runqueues.lock.next;
+    CHECK(thread_set_sched_policy(&slots[1], 8, 6, 1) == 0);
+    CHECK(irq_depth == 1 && runqueues.lock.next == next + 1 && runqueues.lock.owner == runqueues.lock.next);
+    CHECK(slots[1].ready_cpu == 0 && slots[1].on_cpu == K64_CPU_NONE &&
+          slots[1].ready_order == arrival && slots[1].ready_since == since && ready_count == 2);
+    static const struct { unsigned priority, quantum; uint64_t mask; } bad[] = {
+        {32, 6, 1}, {8, 0, 1}, {8, 17, 1}, {8, 6, 0}, {8, 6, 2}, {8, 6, UINT64_MAX}
+    };
+    for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; ++i) {
+        next = runqueues.lock.next;
+        CHECK(thread_set_sched_policy(&slots[1], bad[i].priority, bad[i].quantum, bad[i].mask) == -1);
+        CHECK(irq_depth == 1 && runqueues.lock.next == next + 1 && runqueues.lock.owner == runqueues.lock.next);
+        CHECK(slots[1].sched_priority == 8 && slots[1].quantum_ticks == 6 && slots[1].cpu_mask == 1 &&
+              slots[1].ready_order == arrival && ready[8].head == &slots[1] && ready_count == 2);
+    }
+    thread_t foreign = {0};
+    thread_t *invalid[] = {NULL, &foreign, (thread_t *)((uintptr_t)&slots[1] + 1), idle_thread, &slots[10]};
+    for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0]; ++i) {
+        next = runqueues.lock.next;
+        CHECK(thread_set_sched_policy(invalid[i], 8, 6, 1) == -1);
+        CHECK(irq_depth == 1 && runqueues.lock.next == next + 1 && runqueues.lock.owner == runqueues.lock.next);
+    }
+    CHECK(thread_get_sched_policy(&slots[1], NULL) == -1 && irq_depth == 1);
+    slots[10].state = TS_ZOMBIE;
+    p = (sched_policy_t){99, 88, 77}; next = runqueues.lock.next;
+    CHECK(thread_get_sched_policy(&slots[10], &p) == -1);
+    CHECK(p.priority == 99 && p.quantum_ticks == 88 && p.cpu_mask == 77);
+    CHECK(thread_set_sched_policy(&slots[10], 8, 6, 1) == -1);
+    CHECK(irq_depth == 1 && runqueues.lock.next == next + 2 && runqueues.lock.owner == runqueues.lock.next);
+    slots[10].state = TS_FREE;
+    for (unsigned i = 0; i < 2; ++i) {
+        owner_identity(i ? 32 : 1);
+        CHECK(sched_cpu_identity() == (i ? K64_CPU_NONE : 1));
+        CHECK(sched_cpu_register(1) == -2 && sched_cpu_register(32) == -1 && thread_current() == NULL);
+        p = (sched_policy_t){99, 88, 77}; next = runqueues.lock.next;
+        CHECK(thread_get_sched_policy(&slots[1], &p) == -1);
+        CHECK(p.priority == 99 && p.quantum_ticks == 88 && p.cpu_mask == 77);
+        CHECK(thread_set_sched_policy(&slots[1], 15, 6, 1) == -1);
+        CHECK(irq_depth == 1 && runqueues.lock.next == next + 2 && runqueues.lock.owner == runqueues.lock.next);
+        CHECK(set_raw(8, 2) == STATUS_THREAD_IS_TERMINATING && objects[3].refs == 3);
+        uint32_t cls = 0x80;
+        CHECK(host_k32_set(&processes[0], 1, 20, (uintptr_t)&cls, 4) == STATUS_INVALID_PARAMETER);
+        CHECK(processes[0].priority_class == 0 && slots[0].sched_priority == 8 && slots[2].sched_priority == 8);
+        CHECK(objects[0].refs == 4 && objects[2].u.thr.nt_base_increment == 0 &&
+              slots[1].sched_priority == 8 && slots[1].ready_order == arrival && ready_count == 2);
+        CHECK(irq_depth == 1 && runqueues.lock.owner == runqueues.lock.next && runqueues.lock.reservation == 0);
+    }
+    owner_identity(0);
+    CHECK(sched_cpu_identity() == 0 && sched_cpu_register(0) == 0);
+    queue_guard_t guard = queue_enter();
+    CHECK(k64_rq_validate_locked(&runqueues) == 0);
+    queue_leave(guard);
+    irq_restore(outer);
+    CHECK(irq_depth == 0 && runqueues.lock.owner == runqueues.lock.next);
+}
+
+static void check_actual_handoff_reclaim(void) {
+    reset();
+    CHECK(SetThreadPriority(H(8), 15));
+    CHECK(thread_set_sched_policy(&slots[1], 19, 6, 1) == 0);
+    const uint64_t outer = irq_save();
+    ready_remove(&slots[1]);
+    slots[1].state = TS_ZOMBIE; slots[1].exit_code = 42;
+    slots[1].on_cpu = 0; runqueues.cpu[0].outgoing = &slots[1];
+    thread_reap_exited();
+    CHECK(slots[1].state == TS_ZOMBIE && slots[1].object == &objects[3] && freed_stacks == 0);
+    CHECK(objects[3].u.thr.t == &slots[1] && objects[3].refs == 3 && irq_depth == 1);
+    const uint32_t ticket = runqueues.lock.next;
+    sched_switch_complete(); /* actual destination-stack completion body; no hardware switch */
+    CHECK(slots[1].on_cpu == K64_CPU_NONE && runqueues.cpu[0].outgoing == NULL && !slots[1].ready_queued);
+    CHECK(irq_depth == 1 && runqueues.lock.next == ticket + 1 && runqueues.lock.owner == runqueues.lock.next);
+    CHECK(current == &slots[0] && current->on_cpu == 0 && current->quantum_left == 2 && current->aging_service_left == 3);
+    thread_reap_exited();
+    CHECK(slots[1].state == TS_FREE && slots[1].stack_base == 0 && slots[1].object == NULL && freed_stacks == 1);
+    CHECK(objects[3].u.thr.t == NULL && objects[3].refs == 2 && objects[3].u.thr.last_sched_priority == 19);
+    CHECK(objects[3].u.thr.nt_base_increment == 16 && objects[3].u.thr.exit_code == 42);
+    irq_restore(outer);
+    struct thread_basic b; ULONG n;
+    CHECK(NtQueryInformationThread(H(8), 0, &b, 48, &n) == 0 && b.prio == 19 && b.base == 16 && b.tid == 208);
+    /* Reuse this exact host TCB slot for a new identity, retaining the old
+     * object handle. This proves the production cache seam, not guest reuse. */
+    thread_t *t = &slots[1]; memset(t, 0, sizeof *t);
+    t->state = TS_NEW; t->proc = &processes[0]; t->object = &objects[12]; t->tid = 900;
+    t->sched_priority = 8; t->quantum_ticks = t->quantum_left = 6; t->cpu_mask = 1;
+    t->ready_cpu = t->on_cpu = K64_CPU_NONE;
+    objects[12].type = OB_THREAD; objects[12].refs = 3; objects[12].u.thr.t = t;
+    objects[12].u.thr.pid = 100; objects[12].u.thr.tid = 900; objects[12].u.thr.last_sched_priority = 8;
+    handles[9].obj = &objects[12]; handles[9].access = THREAD_QUERY_INFORMATION | THREAD_SET_INFORMATION;
+    CHECK(set_raw(36, 1) == 0 && t->sched_priority == 9 && objects[12].u.thr.nt_base_increment == 1);
+    CHECK(NtQueryInformationThread(H(8), 0, &b, 48, &n) == 0 && b.prio == 19 && b.base == 16 && b.pid == 101 && b.tid == 208);
+    CHECK(GetThreadPriority(H(8)) == 15 && set_raw(8, 1) == STATUS_THREAD_IS_TERMINATING);
+    CHECK(objects[3].refs == 2 && objects[12].refs == 3 && irq_depth == 0);
+}
 int main(void) {
+    cpu_set_t allowed, single;
+    if (sched_getaffinity(0, sizeof allowed, &allowed)) return 2;
+    unsigned cpu;
+    for (cpu = 0; cpu < CPU_SETSIZE && !CPU_ISSET(cpu, &allowed); ++cpu) { }
+    if (cpu == CPU_SETSIZE) return 2;
+    CPU_ZERO(&single); CPU_SET(cpu, &single);
+    if (sched_setaffinity(0, sizeof single, &single)) return 2;
+    printf("NT_CPU_BOUNDARY: process_cpu_affinity=[%u], actual_APIC_id=%u\n", cpu, initial_apic_id());
     reset(); check_queries(); check_maps(); check_affinity_and_lifetime(); check_retarget_and_init();
     check_retarget_table_and_refusals();
     check_native_requeue();
+    check_ticket_and_owner_boundaries(); check_actual_handoff_reclaim();
     CHECK(irq_depth == 0);
     printf("NT_THREAD_PRIORITY_HOST: %u checks, %u failures\n", checks, failures);
     return failures ? 1 : 0;
