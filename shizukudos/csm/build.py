@@ -17,9 +17,12 @@ changes whenever new tags appear (and would describe *this* repository in a
 the manifest and a SeaBIOS `.version` file, so SeaBIOS's buildversion.py neither
 calls git nor appends a build timestamp and host name.
 
-Local patches: none. The pinned tree builds unmodified with gcc/nasm/xxd, and the two
-reproducibility fixes above are make/`.version` inputs, not source changes. Any future
-change goes to shizukudos/csm/patches/*.patch (applied with `patch -p1`, hashed in the receipt).
+Local patches are carried under patches/. The helper-ID patch retains the BIOS proxy's
+CPU identity after its LAPIC is hardware-disabled. The pinned tree builds with gcc/nasm and a binary-to-C
+converter: xxd when installed, otherwise a build-local Python replacement for its two
+`xxd -i` calls. The receipt identifies and hashes that replacement. The two reproducibility
+fixes above are make/`.version` inputs, not source changes. Any future upstream change
+goes to shizukudos/csm/patches/*.patch (applied with `patch -p1`, hashed in the receipt).
 
 Outputs (build/shizukudos/csm/): CSMWRAP.EFI, Csm16.bin, vgabios.bin, build-result.json.
 """
@@ -34,11 +37,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import shzlib  # noqa: E402
 from shzlib import BUILD, REPO, SHZ, run, sha256_file  # noqa: E402
 
-OUT = BUILD / "csm"
+DEFAULT_OUT = BUILD / "csm"
+OUT = DEFAULT_OUT
 WORK = OUT / "work"
-PATCHES = sorted((SHZ / "csm" / "patches").glob("*.patch"))
+FIRMWARE_GOP_PATCH = SHZ / "csm" / "patches" / "0002-force-firmware-gop.patch"
+PATCHES = sorted(p for p in (SHZ / "csm" / "patches").glob("*.patch") if p != FIRMWARE_GOP_PATCH)
 UPSTREAM = "csmwrap"
 FIXED_EPOCH = "1785283200"  # same fixed stamp as fatimg.FIXED_EPOCH
+XXD_INCLUDE_FALLBACK = r'''#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+# Build-local replacement for the pinned CSMWrap tree's two `xxd -i` calls.
+import sys
+from pathlib import Path
+
+if len(sys.argv) != 3 or sys.argv[1] != "-i" or sys.argv[2] not in ("Csm16.bin", "vgabios.bin"):
+    raise SystemExit("CSMWrap xxd fallback supports only -i Csm16.bin or -i vgabios.bin")
+data = Path(sys.argv[2]).read_bytes()
+name = sys.argv[2].replace(".", "_")
+print("unsigned char " + name + "[] = {")
+for start in range(0, len(data), 12):
+    row = data[start:start + 12]
+    suffix = "," if start + len(row) < len(data) else ""
+    print("  " + ", ".join("0x%02x" % byte for byte in row) + suffix)
+print("};")
+print("unsigned int " + name + "_len = " + str(len(data)) + ";")
+'''
 
 
 def build_env():
@@ -47,6 +70,21 @@ def build_env():
                 # a .git-free tree inside this repository must never see the repository's git state
                 "GIT_CEILING_DIRECTORIES": str(WORK)})
     return env
+
+
+def prepare_binary_embedding(env):
+    """Keep upstream unmodified without installing xxd or changing the host PATH."""
+    xxd = shutil.which("xxd", path=env.get("PATH"))
+    if xxd:
+        return {"backend": "xxd", "path": xxd}
+    tools = WORK / "host-tools"
+    tools.mkdir(parents=True, exist_ok=True)
+    helper = tools / "xxd"
+    helper.write_text(XXD_INCLUDE_FALLBACK)
+    helper.chmod(0o755)
+    env["PATH"] = str(tools) + os.pathsep + env.get("PATH", os.defpath)
+    return {"backend": "python3-xxd-i-fallback", "path": str(helper.relative_to(REPO)),
+            "sha256": sha256_file(helper), "reason": "xxd absent from the build environment PATH"}
 
 
 def fresh_tree(spec):
@@ -69,22 +107,37 @@ def fresh_tree(spec):
 
 
 def main():
+    global OUT, WORK
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--jobs", type=int, default=max(1, min(4, os.cpu_count() or 1)))
+    parser.add_argument("--out", type=Path, default=OUT,
+                        help="Separate build artifact directory under build/shizukudos for firmware comparisons")
+    parser.add_argument("--firmware-gop", action="store_true",
+                        help="Include the opt-in gop_only configuration and reserved framebuffer handover patch")
     args = parser.parse_args()
+    OUT = args.out.resolve()
+    if OUT == BUILD.resolve() or not OUT.is_relative_to(BUILD.resolve()):
+        parser.error("--out must be a component directory under build/shizukudos")
+    if args.firmware_gop and OUT == DEFAULT_OUT.resolve():
+        parser.error("--firmware-gop requires a separate --out; the default CSM artifacts are preserved")
+    WORK = OUT / "work"
     manifest = shzlib.load_manifest()
     spec = manifest["upstreams"][UPSTREAM]
     OUT.mkdir(parents=True, exist_ok=True)
     tree = fresh_tree(spec)
     env = build_env()
+    binary_embedding = prepare_binary_embedding(env)
     applied = []
-    for patch in PATCHES:
+    selected_patches = PATCHES + ([FIRMWARE_GOP_PATCH] if args.firmware_gop else [])
+    for patch in selected_patches:
         run(["patch", "-p1", "-s", "-i", patch], cwd=tree)
         applied.append({"patch": str(patch.relative_to(REPO)), "sha256": sha256_file(patch)})
     # `all` is `make seabios` followed by `make bin-x86_64/csmwrap.efi`; both see the same fixed version.
     cmd = ["make", f"-j{args.jobs}", "ARCH=x86_64", f"BUILD_VERSION={spec['build_version']}", "all"]
-    proc = run(cmd, cwd=tree, env=env, timeout=1200, capture=True)
+    proc = run(cmd, cwd=tree, env=env, timeout=1200, capture=True, check=False)
     (OUT / "make.log").write_text(proc.stdout)
+    if proc.returncode:
+        raise RuntimeError(f"CSMWrap make failed ({proc.returncode}); full diagnostics: {OUT / 'make.log'}")
     efi = tree / "bin-x86_64" / "csmwrap.efi"
     csm16 = tree / "seabios" / "out" / "Csm16.bin"
     vgabios = tree / "seabios" / "out" / "vgabios.bin"
@@ -111,6 +164,7 @@ def main():
                                       for k, v in spec["submodules"].items()}},
         },
         "patches": applied,
+        "binary_embedding": binary_embedding,
         "toolchain": {name: shzlib.tool_version(name, vargs) for name, vargs in
                       (("gcc", ("--version",)), ("ld", ("--version",)), ("nasm", ("-v",)), ("make", ("--version",)),
                        ("xxd", ("-v",)), ("python3", ("--version",)))},
@@ -129,6 +183,25 @@ def main():
                             "origin": "SeaVGABIOS (CONFIG_VGA_COREBOOT), embedded in CSMWRAP.EFI"},
         },
     }
+    if args.firmware_gop:
+        receipt["firmware_gop"] = {
+            "compiled_support": True,
+            "abi": {"magic": "SHZGOP1", "major": 1, "minor": 0,
+                    "descriptor_bytes": 96, "coreboot_tag": 0x53485a47},
+            "persistent_locator": {"magic": "SHZLOC1", "major": 1, "minor": 0,
+                                   "bytes": 48, "physical_scan_base": 0xf0000,
+                                   "physical_scan_bytes": 0x10000, "alignment": 16,
+                                   "allocator": "SeaBIOS Legacy16GetTableAddress AX=6 BX=1 CX=48 DX=16",
+                                   "descriptor_binding": "self physical address and final SHZGOP1 checksum",
+                                   "runtime_lifetime": "pending actual Windows VMM/reboot capture"},
+            "enabled_by_config": "gop_only=true in csmwrap.ini next to CSMWRAP.EFI",
+            "default": False,
+            "handover": "SHZGOP1 ABI 1.0: 96-byte reserved descriptor, private CB tag 0x53485a47; additive SHZLOC1 ABI 1.0 allocator-backed F-segment anchor",
+            "runtime_validation": "pending; build success does not establish a native Windows display driver",
+            "build_script_sha256": sha256_file(Path(__file__)),
+            "patched_sources": {name: sha256_file(tree / "src" / name) for name in
+                                ("config.h", "config.c", "csmwrap.h", "csmwrap.c", "video.c", "coreboot.c", "shzgop.h")},
+        }
     shzlib.write_json(OUT / "build-result.json", receipt)
     print(json.dumps(receipt["artifacts"], indent=2))
 

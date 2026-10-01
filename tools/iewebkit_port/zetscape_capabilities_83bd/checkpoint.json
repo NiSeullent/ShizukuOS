@@ -1,0 +1,151 @@
+{
+  "schema": "zetscape.capability-source-checkpoint.v1",
+  "as_of": "2026-10-01",
+  "ownership": "/root/Win98-Modern-boot/tools/iewebkit_port/zetscape_capabilities_83bd",
+  "inputs": [
+    {
+      "path": "README.md",
+      "size_bytes": 9825,
+      "sha256": "a19fd08b3b827a55581c8bba2fd081cbc15f02aa1d24c5d8e697f83ec960145f"
+    },
+    {
+      "path": "effective_features.cpp",
+      "size_bytes": 835,
+      "sha256": "43907ccfb5ef6396871613a61f4db04347cf1f405ed4757284d1072c00c45bbf"
+    },
+    {
+      "path": "prepare_probe.py",
+      "size_bytes": 6675,
+      "sha256": "ca52c5b390d571e2654df083d166b2245fc9c8de8d50ed4b1cffcba29ac99eb8"
+    },
+    {
+      "path": "private/check-r1/driver-failure.json",
+      "size_bytes": 490,
+      "sha256": "f1dfd9b9974651f0e5c8c88619fa804984805f6047eacf5657cc887efff84d97"
+    },
+    {
+      "path": "private/check-r1/wasm-caller.d",
+      "size_bytes": 5215,
+      "sha256": "2996506713af68ec28d0efc6519b2842142e7f19f501881a3b2774ba784ef93b"
+    },
+    {
+      "path": "private/check-r2/compiler-results.json",
+      "size_bytes": 15347,
+      "sha256": "9e28ea6b3a67bbae329f4851d4f573c6e122b5f58962946f3a8aefb2abc3ca44"
+    },
+    {
+      "path": "private/check-r2/effective-features.d",
+      "size_bytes": 4145,
+      "sha256": "72a11e72f91570ab0169aaf0f00de972bbe97cb07aadb5e5419a1f437553a9c2"
+    },
+    {
+      "path": "private/check-r2/syntax-reference-receipt.json",
+      "size_bytes": 19380,
+      "sha256": "53005a3a3231addd1a9d154c21c6e12fe19d3fabac2eba0dfaace0a191052230"
+    },
+    {
+      "path": "private/check-r2/wasm-caller.d",
+      "size_bytes": 5215,
+      "sha256": "d49a6a0c25998a6feab520ba90aec8039776d2bd3d445392b3ebe3fb481400f1"
+    },
+    {
+      "path": "private/probe-r1/core_jsc_native_wasm.cpp",
+      "size_bytes": 6510,
+      "sha256": "4b69e23ad52ace5604721b4d7a761171b024a54d0dfb86e7f20516c2b64cabe4"
+    },
+    {
+      "path": "private/probe-r1/native-jsc-modern-wasm.patch",
+      "size_bytes": 3421,
+      "sha256": "123c4d865365ea5083bf55f5f6553e71b13ba2f790aeb3229a622aec9cec72d3"
+    },
+    {
+      "path": "private/probe-r1/probe-source-pin.json",
+      "size_bytes": 1293,
+      "sha256": "7777e2b2fbe32d4dcdcf5a27b1bb06122f38deb44b02db2c29061da66ae44f2c"
+    },
+    {
+      "path": "private/probe-r2/core_jsc_native_wasm.cpp",
+      "size_bytes": 6506,
+      "sha256": "759845e1f6902090093f77921015ae3df278055bff97a5664cc654a7230db6cd"
+    },
+    {
+      "path": "private/probe-r2/native-jsc-modern-wasm.patch",
+      "size_bytes": 3417,
+      "sha256": "880d4deda45c69cb42b6ec94db0f1d69ec96dcf41649c3a338c6dd970b0e00e7"
+    },
+    {
+      "path": "private/probe-r2/probe-source-pin.json",
+      "size_bytes": 1293,
+      "sha256": "1ce31c29c5d46d8cd257a654b0fce00df4762b8f0bbca2fdfad033f3395bde4f"
+    },
+    {
+      "path": "profile.json",
+      "size_bytes": 9732,
+      "sha256": "4c85f6779c3dcb6155f372e55744a785506e2e97a625a2026fc08824314210f0"
+    },
+    {
+      "path": "source_controls.py",
+      "size_bytes": 2139,
+      "sha256": "e112750741d3dbff402603b31a4194a84eb7461aec3d66e57e408e0031cc3f1f"
+    },
+    {
+      "path": "syntax_check.py",
+      "size_bytes": 8599,
+      "sha256": "66789e264dac39092d778db19a6fac657c81c6f800e713484ad9ba19d7bdeddb"
+    },
+    {
+      "path": "wasm_cases.h",
+      "size_bytes": 3432,
+      "sha256": "7cbd4b4e37c3eb2a170b6f3a672bffc61e951744a3881bfbf51f7b7bf80e4146"
+    }
+  ],
+  "active_probe": "private/probe-r2",
+  "active_syntax_receipt": "private/check-r2/syntax-reference-receipt.json",
+  "checks": {
+    "genuine_c_api_pinned_header_syntax": "PASS",
+    "actual_effective_feature_assertions": "PASS",
+    "host_v8_reference_8_cases": "PASS",
+    "unsupported_reference_8_rejections": "PASS",
+    "source_preimage_output_guards_6_cases": "PASS"
+  },
+  "commands": [
+    [
+      "python3",
+      "-B",
+      "tools/iewebkit_port/zetscape_capabilities_83bd/prepare_probe.py",
+      "--output",
+      "private/probe-r2"
+    ],
+    [
+      "python3",
+      "-B",
+      "tools/iewebkit_port/zetscape_capabilities_83bd/syntax_check.py",
+      "--staged",
+      "private/probe-r2",
+      "--output",
+      "private/check-r2"
+    ],
+    [
+      "python3",
+      "-B",
+      "tools/iewebkit_port/zetscape_capabilities_83bd/source_controls.py"
+    ]
+  ],
+  "canonical_sources_modified": false,
+  "actual_source_snapshot_pins_reverified": true,
+  "heavy_build_started": false,
+  "windows_executable_produced": false,
+  "guest_executed": false,
+  "native_wasm_pass": false,
+  "gpu_pass": false,
+  "full_browser_pass": false,
+  "bytes_before_checkpoint": 113469,
+  "limits": [
+    "Patch expands an actual JSC probe; it does not implement a Wasm backend.",
+    "Runtime initializer/CRT/TLS repair and real JSC link remain dependencies.",
+    "Wasm+C_LOOP/JSVALUE32_64/IPInt x86 constraints require genuine execution/calling/trap/JS bridges.",
+    "Actual Win98 GPU transport/backend remains missing; existing GOP is software and Kernel64 shzgpu is a separate ABI.",
+    "Declared two-page Wasm memory is not measured JSC virtual-memory reservation.",
+    "Full modern-web conformance/native browser/GPU acceptance remain unverified."
+  ]
+}

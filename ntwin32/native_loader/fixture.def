@@ -1,0 +1,3 @@
+LIBRARY PE32FIX
+EXPORTS
+ NtwPeFixture=NtwPeFixture@8

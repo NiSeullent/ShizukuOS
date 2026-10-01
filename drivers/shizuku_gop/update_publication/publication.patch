@@ -1,0 +1,215 @@
+--- baseline/vxd_vesa.c
++++ candidate/vxd_vesa.c
+@@ -18,6 +18,35 @@
+ static blit_t frame;
+ static BOOL ready=FALSE, hires=FALSE;
+ static BOOL timer_running=FALSE;
++/* Ring-0, single-CPU publication metadata. Never held across a VMM wait. */
++static volatile DWORD publication_depth=0;
++static volatile BOOL publication_inflight=FALSE, publication_fault=FALSE;
++static wram_publication_cursor_t publication_cursor;
++typedef char publication_cursor_size[(sizeof(wram_publication_cursor_t)==8212)?1:-1];
++static DWORD publication_irq_enter(void);
++#pragma aux publication_irq_enter = "pushfd" "pop eax" "cli" value [eax] modify [];
++static void publication_irq_leave(DWORD saved);
++#pragma aux publication_irq_leave = "push eax" "popfd" parm [eax] modify [];
++
++static void publication_damage(DWORD l,DWORD t,DWORD r,DWORD b) {
++    /* This field is a pending boolean; do not let upstream's ++ wrap it. */
++    if(frame.num_changes) frame.num_changes=1;
++    wram_changes(&frame,l,t,r,b);
++    frame.num_changes=1;
++}
++static void publication_begin(void) {
++    if(publication_depth==0xffffffffUL) publication_fault=TRUE;
++    else publication_depth++;
++}
++static void publication_snapshot_cursor(void) {
++    publication_cursor.visible=wram->regs.s.cursor_visible;
++    publication_cursor.x=wram->regs.s.cursor_x;
++    publication_cursor.y=wram->regs.s.cursor_y;
++    publication_cursor.w=wram->regs.s.cursor_w;
++    publication_cursor.h=wram->regs.s.cursor_h;
++    memcpy(publication_cursor.andmask,wram->cursor.andmask,sizeof(publication_cursor.andmask));
++    memcpy(publication_cursor.xormask,wram->cursor.xormask,sizeof(publication_cursor.xormask));
++}
+ WORD vesa_version=0x0200;
+ DWORD vram_phy=0;
+ static DWORD cfg_in(WORD port);
+@@ -25,7 +54,31 @@
+ static void cfg_out(WORD port,DWORD value);
+ #pragma aux cfg_out = "out dx,eax" parm [dx] [eax];
+ static void draw(blit_t *b) {
+-    if(ready && hires && b->num_changes) { wram_blit(b); b->num_changes=0; }
++    DWORD saved;
++    unsigned pass;
++    BOOL again;
++    blit_t pending;
++    /* A failed timer gets one bounded follow-up, never an unbounded drain. */
++    for(pass=0;pass<2;pass++) {
++        saved=publication_irq_enter();
++        if(!ready || !hires || publication_depth || publication_fault ||
++           publication_inflight || !b->num_changes) {
++            publication_irq_leave(saved); return;
++        }
++        pending=*b;
++        b->num_changes=0;
++        publication_inflight=TRUE;
++        /* 8,212 bounded bytes; pixel copy happens with caller EFLAGS restored. */
++        publication_snapshot_cursor();
++        publication_irq_leave(saved);
++        wram_publication_blit(&pending,&publication_cursor);
++        saved=publication_irq_enter();
++        publication_inflight=FALSE;
++        /* New damage belongs to the live descriptor and must survive this copy. */
++        again=!timer_running && !publication_depth && b->num_changes;
++        publication_irq_leave(saved);
++        if(!again) return;
++    }
+ }
+ BOOL VESA_init_hw(void) {
+     unsigned char *rom, *descriptor;
+@@ -85,6 +138,7 @@
+     frame.dst_pitch=native_mode.pitch; frame.dst_mode=MODE_32; frame.dst_scans=1;
+     wram->regs.s.width=native_mode.width; wram->regs.s.height=native_mode.height;
+     wram->regs.s.pitch=native_mode.pitch; wram->regs.s.mode=MODE_32;
++    publication_depth=0; publication_inflight=FALSE; publication_fault=FALSE;
+     ready=TRUE;
+     timer_running=async_blit_init(&frame,draw);
+     dbg_printf("SHZGOP READY base=%lX aperture=%ld width=%ld height=%ld pitch=%ld\n",
+@@ -96,15 +150,28 @@
+     return ready && w==native_mode.width && h==native_mode.height && bpp==32;
+ }
+ BOOL VESA_setmode(DWORD w,DWORD h,DWORD bpp,DWORD rr_min,DWORD rr_max) {
++    DWORD saved;
+     (void)rr_min; (void)rr_max;
+     if(!VESA_validmode(w,h,bpp)) return FALSE;
+-    hires=TRUE; wram_changes(&frame,0,0,w,h); draw(&frame);
++    saved=publication_irq_enter();
++    hires=TRUE; publication_damage(0,0,w,h);
++    publication_irq_leave(saved); draw(&frame);
+     dbg_printf("SHZGOP MODE %ldx%ldx32 pitch=%ld\n",w,h,native_mode.pitch);
+     return TRUE;
+ }
+-void VESA_clear(void) { if(ready) memset(hda->vram_pm32,0,hda->stride); }
+-void VESA_HIRES_enable(void) { hires=TRUE; }
+-void VESA_HIRES_disable(void) { hires=FALSE; }
++void VESA_clear(void) {
++    if(!ready) return;
++    FBHDA_access_begin(0); memset(hda->vram_pm32,0,hda->stride); FBHDA_access_end(0);
++}
++void VESA_HIRES_enable(void) {
++    DWORD saved=publication_irq_enter();
++    hires=TRUE;
++    if(ready) publication_damage(0,0,hda->width,hda->height);
++    publication_irq_leave(saved);
++}
++void VESA_HIRES_disable(void) {
++    DWORD saved=publication_irq_enter(); hires=FALSE; publication_irq_leave(saved);
++}
+ BOOL VESA_check_switch(DWORD mode) { (void)mode; return FALSE; }
+ BOOL VESA_check_int10h(DWORD vm,PCRS_32 regs) {
+     (void)vm;
+@@ -122,20 +189,32 @@
+     return TRUE;
+ }
+ void FBHDA_access_begin(DWORD flags) {
++    DWORD saved;
+     (void)flags; if(!ready) return;
+-    FBHDA_lock(); wram_changes(&frame,0,0,hda->width,hda->height); FBHDA_unlock();
++    saved=publication_irq_enter(); publication_begin();
++    publication_damage(0,0,hda->width,hda->height); publication_irq_leave(saved);
+ }
+ void FBHDA_access_rect(DWORD l,DWORD t,DWORD r,DWORD b) {
++    DWORD saved;
+     if(!ready) return;
++    saved=publication_irq_enter();
++    /* Even an empty/clipped BeginAccess has a matching EndAccess. */
++    publication_begin();
+     if(l>hda->width) l=hda->width; if(r>hda->width) r=hda->width;
+     if(t>hda->height) t=hda->height; if(b>hda->height) b=hda->height;
+-    if(l>=r || t>=b) return;
+-    FBHDA_lock(); wram_changes(&frame,l,t,r,b); FBHDA_unlock();
++    if(l<r && t<b) publication_damage(l,t,r,b);
++    publication_irq_leave(saved);
+ }
+ void FBHDA_access_end(DWORD flags) {
++    DWORD saved;
++    BOOL publish;
+     (void)flags; if(!ready) return;
+-    FBHDA_lock(); if(fb_lock_cnt>0) fb_lock_cnt--;
+-    if(!timer_running && !fb_lock_cnt) draw(&frame); FBHDA_unlock();
++    saved=publication_irq_enter();
++    if(publication_depth) publication_depth--;
++    else publication_fault=TRUE;
++    publish=!timer_running && !publication_depth;
++    publication_irq_leave(saved);
++    if(publish) draw(&frame);
+ }
+ BOOL FBHDA_swap(DWORD offset,DWORD flags) {
+     if(!ready || offset) return FALSE;
+--- baseline/wram.h
++++ candidate/wram.h
+@@ -169,7 +169,14 @@
+ extern wram_t *wram;
+ 
+ BOOL wram_init(DWORD bytes);
+-void wram_blit(blit_t *blit);
++/* Private candidate only: immutable, bounded cursor snapshot per publication. */
++typedef struct _wram_publication_cursor_t {
++    DWORD visible;
++    LONG x,y,w,h;
++    DWORD andmask[CURSOR_DMAX*CURSOR_DMAX];
++    DWORD xormask[CURSOR_DMAX*CURSOR_DMAX];
++} wram_publication_cursor_t;
++void wram_publication_blit(blit_t *blit,const wram_publication_cursor_t *cursor);
+ void wram_clear_target(blit_t *blit);
+ void wram_clear();
+ BOOL wram_swap(void *virtptr, blit_t *blit);
+--- baseline/vxd_wram.c
++++ candidate/vxd_wram.c
+@@ -140,14 +140,13 @@
+ typedef DWORD (*readfn_h)(DWORD x, DWORD y);
+ typedef void (*writefn_h)(blit_t *blit, DWORD x, DWORD y, DWORD px32);
+ 
+-void wram_blit(blit_t *blit)
++void wram_publication_blit(blit_t *blit,const wram_publication_cursor_t *cursor)
+ {
+ 	readfn_h readfn = NULL;
+ 	writefn_h writefn = NULL;
+ 	DWORD x, y, sx, sy;
+ 	pixel_32_t px;
+-	LONG cursor_ex = wram->regs.s.cursor_x + wram->regs.s.cursor_w;
+-	LONG cursor_ey = wram->regs.s.cursor_y + wram->regs.s.cursor_h;
++	DWORD cursor_dx, cursor_dy;
+ 	DWORD scans = blit->dst_scans;
+ 
+ 	switch(wram->regs.s.mode)
+@@ -182,17 +181,17 @@
+ 				px.c.g = wram->gamma.green[px.c.g];
+ 				px.c.b = wram->gamma.blue[px.c.b];
+ 			}
+-			if(wram->regs.s.cursor_visible)
++			/* Unsigned differences avoid signed x+w overflow. Invalid cursor
++			 * dimensions draw no cursor; framebuffer publication still proceeds. */
++			cursor_dx=x-(DWORD)cursor->x;
++			cursor_dy=y-(DWORD)cursor->y;
++			if(cursor->visible && cursor->w>0 && cursor->w<=CURSOR_DMAX &&
++			   cursor->h>0 && cursor->h<=CURSOR_DMAX &&
++			   cursor_dx<(DWORD)cursor->w && cursor_dy<(DWORD)cursor->h)
+ 			{
+-				if((LONG)x >= wram->regs.s.cursor_x && (LONG)x < cursor_ex)
+-				{
+-					if((LONG)y >= wram->regs.s.cursor_y && (LONG)y < cursor_ey)
+-					{
+-						DWORD cp = ((y - wram->regs.s.cursor_y)*CURSOR_DMAX) + (x - wram->regs.s.cursor_x);
+-						px.dw &= wram->cursor.andmask[cp];
+-						px.dw ^= wram->cursor.xormask[cp];
+-					}
+-				}
++				DWORD cp=cursor_dy*CURSOR_DMAX+cursor_dx;
++				px.dw &= cursor->andmask[cp];
++				px.dw ^= cursor->xormask[cp];
+ 			}
+ 
+ 			for(sy = 0; sy < scans; sy++)

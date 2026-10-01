@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Kernel64 entry (C): CPU tables, memory, scheduler, timer, self-tests.
+ * Kernel64 entry (C): CPU tables, memory, scheduler, timer and the selected boot profile.
  */
 #include "proc_internal.h"
 #include "fs.h"
@@ -67,6 +67,12 @@ void kmain(uint64_t bootinfo_pa)
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
     sti();
+    if (k64_cmdline_has("shz.desktop")) {
+        extern unsigned k64_desktop(void);
+        /* The desktop is the boot workload. Its lifetime, rather than the QA suite,
+         * decides when this profile exits; the normal-exit hook shuts down volumes. */
+        shz_exit(k64_desktop());
+    }
     run_self_tests(&bootinfo);
     /* NT driver host: the single init call. A complete no-op unless the initrd carries
      * \SHZ\DRIVERS (only tests/run_k64_ntdrv.py mounts such an image), so default runs are

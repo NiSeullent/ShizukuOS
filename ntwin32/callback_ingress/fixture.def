@@ -1,0 +1,4 @@
+LIBRARY CIFIX
+EXPORTS
+ CiBind=CiBind@4
+ CiWord=CiWord@4

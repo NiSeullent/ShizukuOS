@@ -1,0 +1,6 @@
+LIBRARY RPFIX
+EXPORTS
+ rpcfix_snapshot=rpcfix_snapshot@0
+ rpcfix_state DATA
+ rpcfix_flag DATA
+ rpcfix_store_site

@@ -7,32 +7,40 @@ NTWrapper9x core to a real i386 VxD control procedure and emits a Linear Executa
 records. It does not import KernelEx, an NT kernel, a proprietary DDK library, or
 third-party VxD implementation code.
 
-**Current evidence is host-only. Windows 98 loading, VMM service execution,
-and the Win32 query have not yet been verified in a Windows guest.** The build
-manifest and host receipt deliberately record those fields as false. A generated
-LE file and a relocation simulator are not evidence of successful Windows loading.
+**The refreshed production driver has host evidence only. Its Windows 98 load,
+VMM service execution and Win32 query remain unverified.** A separate control-only
+fixture with code/data flags `0x2065/0x2063` passed actual Windows 98 SE load and
+unload (CF=0, AX=0, DOS exit=0). The otherwise identical shared fixture retaining
+permanent-resident bit `0x0200` failed with CF=1, AX=6. This production candidate
+adopts the accepted flags, with shared/preloaded 32-bit RX code and RW data; it
+does not inherit that fixture's native verdict. Earlier complete-driver failures
+and default artifacts remain archived. The manifest and host receipt keep the
+production native fields false.
 
 ## Build and host validation
 
 From the repository root:
 
 ```sh
-python3 -B ntwrapper/vxd/build.py
-python3 -B ntwrapper/vxd/test.py
-python3 -B ntwrapper/vxd/inspect_le.py ntwrapper/vxd/build/NTWRAP9X.VXD
+python3 -B ntwrapper/vxd/build.py --out build/shizukudos/ntwrapper-vxd-shared-nonresident
+python3 -B ntwrapper/vxd/test.py --out build/shizukudos/ntwrapper-vxd-shared-nonresident
+python3 -B ntwrapper/vxd/inspect_le.py build/shizukudos/ntwrapper-vxd-shared-nonresident/NTWRAP9X.VXD
 ```
 
 Required installed tools are Python 3, Clang with the i386 bare-metal target,
 NASM, GNU `ld`/`nm`, and `i686-w64-mingw32-gcc`/`objdump`. `CLANG` and `MINGW_CC`
 override the build compilers. Host sanitizer tests use `clang` directly. All
-generated files stay in `ntwrapper/vxd/build/`; the commands do not install or load
+generated files stay in the explicitly selected `build/` component in this trial,
+preserving earlier `ntwrapper/vxd/build/` artifacts. The existing CLI default
+remains `ntwrapper/vxd/build/` for deliberately requested normal rebuilds.
+Commands do not install or load
 a driver, operate hardware, download dependencies, or alter a guest.
 
 The build produces:
 
 | File | Purpose |
 | --- | --- |
-| `NTWRAP9X.VXD` | i486 LE driver with separate resident code/data objects |
+| `NTWRAP9X.VXD` | i486 LE driver with shared/preloaded RX/RW objects, flags `0x2065/0x2063` |
 | `NTWRAP9X.elf` | intermediate ELF containing retained relocation metadata |
 | `NTWQUERY.EXE` | freestanding i486 PE32 guest query probe, Windows 4.10 subsystem |
 | `manifest.json` | exact driver/probe hashes, compiler versions, build input hashes |
@@ -40,11 +48,14 @@ The build produces:
 | `host-tests.log` | unittest and sanitizer result log bound by the receipt |
 
 `test.py` requires artifacts matching the current build manifest. It also detects
-source/artifact changes during testing. Its eleven test groups cover actual emitted
+source/artifact changes during testing. Its eleven existing test groups cover actual emitted
 LE relocations at three independent load-base pairs, cross-page fixup records,
 malformed containers, 1,000 bounded mutations, exact native service constants
 (including the single guarded `VMCALL`/`CPUID`), missing ELF imports, the PE probe
 contract, page-operation failure cleanup, and the WIN64 subsystem bridge model.
+A further group rejects every single-bit object-flag change, the earlier
+resident/nonshared layouts, and swapped RX/RW permissions; the reader accepts
+only the two exact production flags.
 The C bridge tests run under ASan/UBSan. A freestanding i386 user-process harness
 executes the actual assembly control dispatcher with substituted C entrypoints;
 it tests registers, stack balance, direction flag, and carry/result conventions.
@@ -108,7 +119,11 @@ Page checks and pinning happen with the caller's original interrupt state; the
 bounded PTE validation and copy interval saves/disables/restores interrupts. This
 assumes `_CopyPageTable` remains a nonblocking metadata operation in that context.
 The current PTE policy also assumes the normal VMM Win32 private-arena page-directory
-permissions. These native assumptions require actual guest validation. This is
+permissions. These native assumptions require actual guest validation. The code
+and static data touched inside the interrupt-masked interval also require a
+nonpageability/lifetime check in the production guest; preload proves initial
+presence and the control fixture does not prove paging behavior for this full
+implementation. This is
 not an SMP, asynchronous, shared-memory, DMA, or universal safe-copy facility.
 
 ## WIN64 subsystem bridge (ShizukuDOS ABI 1.1)

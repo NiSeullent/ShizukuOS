@@ -592,7 +592,10 @@ def shz10_readme(outputs: dict[str, Path], efi_size: int) -> bytes:
     ).encode("ascii")
 
 
-def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], revision: dict) -> bytes:
+def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], revision: dict,
+                 csm_patches: list[str], watcom_snapshot: str) -> bytes:
+    if len(watcom_snapshot) != 64 or any(c not in "0123456789abcdef" for c in watcom_snapshot):
+        raise RuntimeError("DOS build receipt has no valid actual Open Watcom snapshot hash")
     lines = [
         "ShizukuDOS 10.0-dev - licence and source notice",
         "===============================================",
@@ -616,7 +619,8 @@ def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], 
         "SeaBIOS CSM in csm\\CSMWRAP.EFI (and \\EFI\\SHIZUKU\\CSMWRAP.EFI in",
         "efiboot.img); syslinux in \\isolinux\\ at the disc root.",
         "FreeDOS is built from source with local patches, CSMWrap from the pinned",
-        "tree without patches, syslinux is the unmodified Ubuntu build. Licence",
+        ("tree with the local patches listed below, syslinux is the unmodified Ubuntu build. Licence"
+         if csm_patches else "tree without patches, syslinux is the unmodified Ubuntu build. Licence"),
         "texts are in LICENSES\\.",
     ]
     if "wine" in tar_names:
@@ -639,14 +643,17 @@ def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], 
         lines.append(f"  {tar_name}   {name}")
     lines.append("  patches\\   FreeDOS patches, applied in this order:")
     lines += [f"    {patch}" for patch in patches]
+    if csm_patches:
+        lines.append("  csm-patches\\   CSMWrap/SeaBIOS patches, applied in this order:")
+        lines += [f"    {patch}" for patch in csm_patches]
     lines += [
         "  upstream-manifest.json   pinned commits, licences and build recipes",
         "  shizukudos-source.tar.gz   the Shizuku source that builds everything else",
         "                             here (build scripts, loader, Supervisor, kernels,",
         "                             media builders)",
         "",
-        "Build toolchain: Open Watcom v2 snapshot, SHA-256",
-        f"  {manifest['tools']['open-watcom-v2']['sha256']}",
+        "Build toolchain: Open Watcom v2 snapshot actually used, SHA-256",
+        f"  {watcom_snapshot}",
         "  (Sybase Open Watcom Public License 1.0), NASM, mtools, gcc. The",
         "  toolchain itself is not redistributed on this disc.",
         "",
@@ -662,6 +669,10 @@ def shz10_notice(manifest: dict, tar_names: dict[str, str], patches: list[str], 
         "No Microsoft code is in this directory.",
         "",
     ]
+    reference = manifest["tools"]["open-watcom-v2"]["sha256"]
+    if reference != watcom_snapshot:
+        lines += ["Open Watcom uses a rolling upstream download. The reference manifest",
+                  f"snapshot differs from this build: {reference}", ""]
     return "\r\n".join(lines).encode("ascii")
 
 
@@ -722,6 +733,15 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[s
         raise RuntimeError("shizukudos/dos16/patches has no patches; the FreeDOS build recipe is incomplete")
     for patch in patches:
         payload[f"{SHZ10_DIR}/SOURCE/patches/{patch.name}"] = patch.read_bytes()
+    csm_patches = json.loads(outputs["csm/build-result.json"].read_text())["patches"]
+    csm_patch_names = []
+    for applied in csm_patches:
+        patch = (ROOT / applied["patch"]).resolve()
+        if (not patch.is_relative_to((SHZ10 / "csm" / "patches").resolve())
+                or sha256_path(patch) != applied["sha256"]):
+            raise RuntimeError("CSMWrap's applied patch differs from its build receipt")
+        payload[f"{SHZ10_DIR}/SOURCE/csm-patches/{patch.name}"] = patch.read_bytes()
+        csm_patch_names.append(patch.name)
     payload[f"{SHZ10_DIR}/SOURCE/upstream-manifest.json"] = (SHZ10 / "upstream" / "manifest.json").read_bytes()
     top = "win98-modern-shizukudos10-source"
     source_entries: list[tuple[str, Path]] = [
@@ -739,7 +759,9 @@ def stage_shizukudos10(work: Path, outputs: dict[str, Path], efi_members: dict[s
     payload[f"{SHZ10_DIR}/SOURCE/shizukudos-source.tar.gz"] = deterministic_tar_gz(source_entries)
     revision = {"revision": git_output("rev-parse", "HEAD"), "branch": git_output("rev-parse", "--abbrev-ref", "HEAD"),
                 "dirty": bool(git_output("status", "--porcelain"))}
-    payload[f"{SHZ10_DIR}/GPL-NOTICE.TXT"] = shz10_notice(manifest, tar_names, [p.name for p in patches], revision)
+    payload[f"{SHZ10_DIR}/GPL-NOTICE.TXT"] = shz10_notice(manifest, tar_names, [p.name for p in patches], revision,
+        csm_patch_names,
+        json.loads(outputs["dos16/build-result.json"].read_text())["toolchain"]["open-watcom"]["snapshot_sha256"])
     payload[f"{SHZ10_DIR}/README.TXT"] = shz10_readme(outputs, len(efi))
     return payload, consistency
 
@@ -1355,6 +1377,8 @@ def main() -> int:
                              f"{se_media.rel(se_media.DEFAULT_SETUP_DIR)} with the shipped answer file); adds the "
                              "unattended Install menu entry")
     parser.add_argument("--no-setup", action="store_true", help="leave the installer and its menu entry off the medium")
+    parser.add_argument("--desktop", action="store_true",
+                        help="boot the persistent desktop and include it in the installed system")
     parser.add_argument("--loader", type=Path, help="UEFI loader to ship (default: the shizukudos build)")
     parser.add_argument("--csmwrap", type=Path, help="CSMWRAP.EFI to ship (default: shizukudos/csm/build.py output)")
     parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default="auto",
@@ -1367,6 +1391,8 @@ def main() -> int:
                         help="accepted for compatibility; the builder runs no QEMU. Boot evidence: "
                              "tools/test_shizuku_se_boot_matrix.py")
     args = parser.parse_args()
+    if args.desktop:
+        args.boot_mode = "kernel64"
     private = args.win98_media is not None
     tag = PRIVATE_SUFFIX if private else ""
     stage_root = BUILD / f"shizuku-second-edition{tag}-stage" if private else STAGE_ROOT
@@ -1393,19 +1419,29 @@ def main() -> int:
         if args.no_setup:
             setup_files, setup_info = {}, {"present": False, "note": "--no-setup"}
         else:
-            if args.setup is None and not (args.reuse_builds and
-                                           (se_media.DEFAULT_SETUP_DIR / se_media.SETUP_MAIN).is_file()):
+            if args.setup is None and (args.desktop or not (args.reuse_builds and
+                                           (se_media.DEFAULT_SETUP_DIR / se_media.SETUP_MAIN).is_file())):
                 print("== install/mkpayload.py --out " + se_media.rel(se_media.DEFAULT_SETUP_DIR), flush=True)
-                se_media.build_install_payload()
+                se_media.build_install_payload(desktop=args.desktop)
             setup_files, setup_info = se_media.setup_payload(args.setup)
+            if args.desktop and setup_files and setup_info.get("boot_profile") != "desktop":
+                raise RuntimeError("--desktop requires an installer payload built with mkpayload.py --desktop")
         store, store_manifest = se_media.driver_store(args.driver_package)
         artifacts = build_components(work)
         floppy = build_floppy(work, artifacts)
         (work / "shizukudos.img").write_bytes(floppy)
         efi_members = se_media.efi_members(loader, csm, shzdos, args.boot_mode)
+        if args.desktop:
+            efi_members["SHZDOS/KERNEL64.INI"] = b"cmdline = shz.desktop\r\n"
         shz10_payload, consistency = stage_shizukudos10(work, outputs, efi_members)
         extra = {**shz10_payload, **shzse_payload(artifacts), **store, **setup_files,
                  **boot_payload(syslinux, k64, bool(setup_files))}
+        if args.desktop:
+            menu_path = f"{ISOLINUX_DIR}/isolinux.cfg"
+            menu = extra[menu_path].replace(b"DEFAULT kernel64", b"DEFAULT desktop")
+            desktop_entry = ("\nLABEL desktop\n  MENU LABEL ^Boot Shizuku desktop\n  KERNEL mboot.c32\n"
+                             f"  APPEND /{K64_DIR}/BOOT.ELF shz.desktop --- /{K64_DIR}/KERNEL64S.BIN --- /{K64_DIR}/WIN64.IMG\n")
+            extra[menu_path] = menu + desktop_entry.encode("ascii")
         payload = stage_tree(stage_root, floppy, artifacts, extra, media, bool(setup_files))
         write_iso(stage_root, iso_path, syslinux["isohdpfx.bin"])
         report = verify_iso(iso_path, payload, efi_members, syslinux, evidence, stage_root if media else None)
@@ -1425,6 +1461,7 @@ def main() -> int:
     receipt = {
         "iso": str(iso_path), "bytes": size, "sha256": digest, "private": private,
         "volume_id": VOLUME_ID, "source_date_epoch": FIXED_EPOCH, "boot_mode": args.boot_mode,
+        "boot_profile": "desktop" if args.desktop else "self-test",
         "git": {"revision": git_output("rev-parse", "HEAD"), "dirty": bool(git_output("status", "--porcelain"))},
         "inputs": [item.record() for item in inputs],
         "syslinux": se_media.syslinux_spec()["distribution"],

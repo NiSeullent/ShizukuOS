@@ -1,0 +1,55 @@
+{
+  "schema": "iewebkit-actual-win9x-allocator-tls-and-crypto-port-v2",
+  "upstream_commit": "5220e80b97a253c60ed899361654142ab5021998",
+  "patch": "patches/core-win9x-allocator-tls-and-crypto.patch",
+  "patch_sha256": "2ec58c9d6e15ef27cb288c82dba9ee8e0868099b2b3fe646431974c7e5aab4c0",
+  "files": [
+    {
+      "path": "Source/bmalloc/mimalloc/mimalloc/include/mimalloc/prim.h",
+      "before_sha256": "8cd6039a16578b2a0f1a10aa3f5655d1523c16b782cdced4dc0aeceb968ee2e3",
+      "after_sha256": "a66c90c2157243cf7879407fef3551075660327ac1d1d6382ec418e1e89e481e"
+    },
+    {
+      "path": "Source/bmalloc/mimalloc/mimalloc/src/init.c",
+      "before_sha256": "6ca201e66cd8a6253aa7a49a02ce4e2a78dbb784590b6c981f0a86797e2d1a14",
+      "after_sha256": "ba299c1d4d4cf7e32b7df0ea317bd39ee5277f237e927e32c4ea088265d715c5"
+    },
+    {
+      "path": "Source/bmalloc/mimalloc/mimalloc/src/prim/windows/prim.c",
+      "before_sha256": "412011dba43ef7bf488b0dae8148627047b6255b71f5672a1cced224a6225f25",
+      "after_sha256": "068b2842466200396f9a85ff805bdf811a345b028bc5fc2ba8bf9e76b95af1e9"
+    },
+    {
+      "path": "Source/WTF/wtf/RandomDevice.cpp",
+      "before_sha256": "dceb6005e5d9762e65c7213cd28465847def2ec5cd8f9cd8323b486ba704390d",
+      "after_sha256": "1e2b03443d6bf510c48c21d276684bb16b05d96cb4e1b4b0b645430b611bd6a2"
+    },
+    {
+      "path": "Source/bmalloc/mimalloc/mimalloc/src/threadlocal.c",
+      "before_sha256": "45b14df16dee692ed0515e0da61bf477d23fe503da9eaf3b438ef62202f5877f",
+      "after_sha256": "b634beebd15055881eced03b30695985c63fd228672e71c7071dd74d444e2aab"
+    },
+    {
+      "path": "Source/bmalloc/mimalloc/mimalloc/src/options.c",
+      "before_sha256": "66923db208586382f61bb1d2af6aafc0d953e8a05ce1df9a1a523a69c433d72d",
+      "after_sha256": "3efdeec71964e45a5a382cb4280cded03d7fe3a4935aabfbce76063318043831"
+    }
+  ],
+  "selection": "ExplicitIEWEBKIT_WIN9X=1 onactualmimalloc-obj CMake target; normalNTbranches retained",
+  "native_v3_failure": {
+    "binary_sha256": "0554e029684dca0c43f31af30cb70adf50c3fd9f9e76931061e09f48b1fcd33c",
+    "eip": "0x005d2316",
+    "edx": "0x000005e5",
+    "operation": "__mi_theap_default NT FS-slotread duringinitializeMainThread",
+    "crypto_W_error": 120,
+    "crypto_A_acquire_and_generate": true,
+    "stable_stopped_disk_log_bytes": 282
+  },
+  "thread_identity": "RealTlsAlloc/TlsGetValue/TlsSetValue helduniquealignedVirtualAlloc page; freedaftergenuineheapthreadcleanup",
+  "tls_failure_policy": "Atomicpublish; zero-validOSslotindices/TLS_OUT_OF_INDEXES sentinel; preserveGetLastError; primitivefailures abortwithoutrecursiveallocatorlogging",
+  "callback_policy": "RealWin32TLS callbacks beforeconstructors/afterdestructors; explicitGNUsections onlyWin9x; heapcleanup precedesidentityrelease",
+  "random_policy": "ActualANSI MSdefaultCSP+CryptGenRandom verifiedonWin98; strongOSrandom/failclosed; modernupstreamacquireunchanged",
+  "native_new_port": "NOT-VERIFIED",
+  "allocator_owned_TLS": "Main-theap,dynamic-thread-locals,andlogging-recursionstate liveinexistingOS-TLS-heldidentitypage; noGNUemutlscells lostbeforepost-XLF heapcleanup",
+  "v4_review_failure": "GCCemutls cells freedbyWinpthread CRT$XLF beforeallocatorCRT$XLY; oldmain-theap readNULL skippedheapabandonment; v4static-onlypreserved"
+}

@@ -1,0 +1,10 @@
+LIBRARY NTWLDC.DLL
+EXPORTS
+    np_parse
+    np_parse_limited
+    np_load_config
+    np_load_config_limited
+    np_load_config_cookie
+    np_load_config_cookie_limited
+    np_load_config_execution_profile
+    np_load_config_execution_profile_limited

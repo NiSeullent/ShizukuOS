@@ -5,6 +5,7 @@ Everything here is host-side. Nothing installs software or touches the host
 boot configuration; downloads go to the ignored build/ directory only.
 """
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -13,7 +14,7 @@ import sys
 import tarfile
 import time
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 REPO = Path(__file__).resolve().parents[2]
 SHZ = REPO / "shizukudos"
@@ -39,6 +40,12 @@ def sha256_bytes(data):
 
 def run(command, cwd=None, env=None, timeout=300, capture=False, check=True):
     """Run one command, recording the whole command line for evidence."""
+    # A loaded build host may spend most of its wall time waiting for memory
+    # or I/O. Opt in per invocation; explicitly bounded test timeouts stay intact.
+    if timeout == 300 and os.environ.get("SHZ_COMMAND_TIMEOUT_SECONDS"):
+        timeout = int(os.environ["SHZ_COMMAND_TIMEOUT_SECONDS"])
+        if not 1 <= timeout <= 3600:
+            raise ValueError("SHZ_COMMAND_TIMEOUT_SECONDS must be in 1..3600")
     command = [str(x) for x in command]
     result = subprocess.run(command, cwd=cwd, env=env, timeout=timeout, check=False,
                             stdout=subprocess.PIPE if capture else None,
@@ -131,11 +138,101 @@ def _fetch_pinned(url, dest, sha256):
     return dest
 
 
+def _deb_data_member(package):
+    """Read Debian's simple ar container, rejecting truncation and ambiguity."""
+    members = {}
+    with Path(package).open("rb") as stream:
+        if stream.read(8) != b"!<arch>\n":
+            raise RuntimeError(f"{package}: not an ar Debian package")
+        end = Path(package).stat().st_size
+        while stream.tell() < end:
+            header = stream.read(60)
+            if len(header) != 60 or header[58:] != b"`\n":
+                raise RuntimeError(f"{package}: invalid or truncated ar header")
+            try:
+                name = header[:16].decode("ascii").strip().removesuffix("/")
+                size_text = header[48:58].decode("ascii").strip()
+            except UnicodeDecodeError as exc:
+                raise RuntimeError(f"{package}: non-ASCII ar header") from exc
+            if not name or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-" for c in name):
+                raise RuntimeError(f"{package}: unsupported ar member name {name!r}")
+            if not size_text or not size_text.isdecimal() or name in members:
+                raise RuntimeError(f"{package}: invalid size or duplicate ar member {name!r}")
+            size = int(size_text)
+            if size > end - stream.tell():
+                raise RuntimeError(f"{package}: truncated ar member {name!r}")
+            members[name] = (stream.tell(), size)
+            stream.seek(size, 1)
+            if size & 1 and stream.read(1) != b"\n":
+                raise RuntimeError(f"{package}: invalid ar alignment padding")
+        names = list(members)
+        if not names or names[0] != "debian-binary" or members[names[0]][1] != 4:
+            raise RuntimeError(f"{package}: missing Debian package version")
+        stream.seek(members["debian-binary"][0])
+        if stream.read(4) != b"2.0\n":
+            raise RuntimeError(f"{package}: unsupported Debian package version")
+        controls = [n for n in names if n == "control.tar" or n.startswith("control.tar.")]
+        data = [n for n in names if n == "data.tar" or n.startswith("data.tar.")]
+        if len(controls) != 1 or len(data) != 1 or names.index(controls[0]) > names.index(data[0]):
+            raise RuntimeError(f"{package}: needs one control archive followed by one data archive")
+        name = data[0]
+        stream.seek(members[name][0])
+        return name, stream.read(members[name][1])
+
+
+def _deb_tar_filter(member, destination):
+    """Keep package paths portable and let tarfile enforce link containment."""
+    path = PurePosixPath(member.name)
+    if (not member.name or "\x00" in member.name or "\\" in member.name or PureWindowsPath(member.name).drive
+            or path.is_absolute() or ".." in path.parts or (path == PurePosixPath(".") and not member.isdir())):
+        raise RuntimeError(f"unsafe Debian archive path: {member.name!r}")
+    if member.issym() or member.islnk():
+        target = member.linkname
+        if not target or "\x00" in target or "\\" in target or PureWindowsPath(target).drive or PurePosixPath(target).is_absolute():
+            raise RuntimeError(f"unsafe Debian archive link: {member.name!r} -> {target!r}")
+    return tarfile.data_filter(member, destination)
+
+
+def _extract_deb_payload(package, root):
+    """Build-local fallback for hosts without dpkg-deb; never runs maintainer scripts."""
+    if not hasattr(tarfile, "data_filter"):
+        raise RuntimeError("Debian fallback requires Python tarfile.data_filter (Python 3.12 or a security-backported version)")
+    root = Path(root)
+    if root.is_symlink():
+        raise RuntimeError(f"Debian extraction root is a symlink: {root}")
+    name, payload = _deb_data_member(package)
+    if name == "data.tar.zst":
+        zstd = shutil.which("zstd")
+        if not zstd:
+            raise RuntimeError(f"{package}: data.tar.zst requires dpkg-deb or the zstd decompressor")
+        result = subprocess.run([zstd, "-d", "-q", "-c"], input=payload, capture_output=True, timeout=300)
+        if result.returncode:
+            raise RuntimeError(f"{package}: zstd decompression failed: {result.stderr.decode(errors='replace')[-400:]}")
+        payload = result.stdout
+    elif name not in ("data.tar", "data.tar.gz", "data.tar.xz", "data.tar.bz2"):
+        raise RuntimeError(f"{package}: unsupported Debian data compression: {name}")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:*") as archive:
+            members = archive.getmembers()  # Validate all headers before writing any package files.
+            seen = set()
+            for member in members:
+                normalized = str(PurePosixPath(member.name))
+                if normalized in seen:
+                    raise RuntimeError(f"{package}: duplicate tar path {member.name!r}")
+                seen.add(normalized)
+                _deb_tar_filter(member, str(root))
+            root.mkdir(parents=True, exist_ok=True)
+            # Revalidate at each write too: earlier members may have created links.
+            archive.extractall(root, members=members, filter=_deb_tar_filter)
+    except (tarfile.TarError, EOFError) as exc:
+        raise RuntimeError(f"{package}: invalid or unsafe Debian data archive: {exc}") from exc
+
+
 def ensure_deb_upstream(name):
     """Fetch and unpack a `kind: debian-binary-packages` upstream (never modified).
 
     Layout under build/upstream/<name>/: downloads/ (the pinned .deb and Debian source files, each
-    checked against its manifest sha256), root/ (every .deb unpacked with dpkg-deb -x). Every file the
+    checked against its manifest sha256), root/ (dpkg-deb -x, or a checked ar/tar fallback). Every file the
     manifest lists under "files" is checked in root/. Returns {"root", "downloads", "spec"}."""
     spec = load_manifest()["upstreams"][name]
     if spec.get("kind") != "debian-binary-packages":
@@ -148,17 +245,24 @@ def ensure_deb_upstream(name):
             _fetch_pinned(item["url"], downloads / item["file"], item["sha256"])
     stamp = root / ".unpacked-from"
     want = "\n".join(sorted(p["sha256"] for p in spec["packages"].values()))
-    if not (stamp.exists() and stamp.read_text() == want):
+    unpack = not (stamp.exists() and stamp.read_text() == want)
+    if unpack:
         if root.exists():
             shutil.rmtree(root)
         root.mkdir(parents=True)
+        dpkg_deb = shutil.which("dpkg-deb")
         for item in spec["packages"].values():
-            run(["dpkg-deb", "-x", downloads / item["file"], root])
-        stamp.write_text(want)
+            package = downloads / item["file"]
+            if dpkg_deb:
+                run([dpkg_deb, "-x", package, root])
+            else:
+                _extract_deb_payload(package, root)
     for relative, digest in spec["files"].items():
         path = root / relative
         if not path.is_file() or sha256_file(path) != digest:
             raise RuntimeError(f"{name}: {relative} missing or not the pinned file (sha256 {digest})")
+    if unpack:
+        stamp.write_text(want)
     return {"root": root, "downloads": downloads, "spec": spec}
 
 

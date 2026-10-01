@@ -1,0 +1,19 @@
+{
+  "upstream_commit": "5220e80b97a253c60ed899361654142ab5021998",
+  "upstream_file": "Source/WTF/wtf/win/RunLoopWin.cpp",
+  "upstream_sha256": "05a54453b904666b363590370f9c7e97898cc449a921712f41ca9ced116d5c79",
+  "modified_sha256": "a7f555113e030f3fdb056b3f68fdc782f142308d2c77ff827836f9dd860de3a9",
+  "patch_sha256": "b1f49d38ce669f1b243db4586077c7c18f13955b947b8af1dfe9e380ac32b30e",
+  "fixture_uses_same_backend_header": true,
+  "full_engine": false,
+  "guest_status": "pending",
+  "scope": "Win9x WTF message-window backend; no engine capabilities exported",
+  "upstream_url": "https://raw.githubusercontent.com/WebKit/WebKit/5220e80b97a253c60ed899361654142ab5021998/Source/WTF/wtf/win/RunLoopWin.cpp",
+  "archive_sha256": "846fd19ccedbae1dbfe904f26dbf2d68a800a33a50caf2ad5222c8dcb3f25682",
+  "archive_url": "https://webkitgtk.org/releases/webkitgtk-2.54.0.tar.xz",
+  "own_source_license": "MIT",
+  "upstream_license": "BSD-style Apple notice remains in pinned RunLoopWin.cpp",
+  "patch": "patches/webkit-2.54.0-win9x-runloop-window.patch",
+  "new_header": "src/RunLoopWin9x.h",
+  "native_fixture": "src/runloop_native.c"
+}

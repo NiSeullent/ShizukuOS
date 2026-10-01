@@ -3,6 +3,7 @@
 SPDX-License-Identifier: GPL-2.0-only
 """
 from pathlib import Path
+import argparse
 import hashlib
 import json
 import os
@@ -11,17 +12,33 @@ import sys
 from le import package
 
 HERE = Path(__file__).resolve().parent
-BUILD = HERE / 'build'
 ROOT = HERE.parents[1]
+BUILD = HERE / 'build'
 
 def run(args):
     subprocess.run([str(x) for x in args], check=True, cwd=HERE)
 
 def main():
-    BUILD.mkdir(exist_ok=True)
+    global BUILD
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out',type=Path,default=BUILD,
+                        help='Isolated refreshed build directory under project build/')
+    args=parser.parse_args()
+    BUILD=args.out.resolve()
+    if BUILD!=(HERE/'build').resolve() and (BUILD==(ROOT/'build').resolve() or not BUILD.is_relative_to((ROOT/'build').resolve())):
+        parser.error('--out must be the normal build directory or a component directory under project build/')
+    BUILD.mkdir(parents=True,exist_ok=True)
+    source_paths=(HERE/'control.asm',HERE/'bridge.c',HERE/'bridge.h',HERE/'native.c',
+                  HERE/'link.ld',HERE/'le.py',HERE/'inspect_le.py',HERE/'build.py',HERE/'query_probe.c',
+                  HERE.parent/'core.c',HERE.parent/'include/ntwrapper.h',
+                  ROOT/'shizukudos/abi/shz_abi.h',ROOT/'shizukudos/abi/shz_ipc.h')
+    source_hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in source_paths}
     compiler = os.environ.get('CLANG', 'clang')
     mingw = os.environ.get('MINGW_CC', 'i686-w64-mingw32-gcc')
-    common = ['--target=i386-unknown-none-elf', '-march=i486', '-std=c11', '-Oz',
+    # Clang may fold large IOCTL indices into a lookup-table displacement with
+    # an ELF addend outside its object (e.g. table - 4 * 0x4e540010). Keep the
+    # narrow LE relocation contract by lowering switches to branches instead.
+    common = ['--target=i386-unknown-none-elf', '-march=i486', '-std=c11', '-Oz', '-fno-jump-tables',
               '-ffreestanding', '-fno-builtin', '-fno-pic', '-fno-pie',
               '-fno-stack-protector', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables',
               '-mno-sse', '-mno-mmx', '-msoft-float', '-mstack-alignment=4',
@@ -41,17 +58,19 @@ def main():
          HERE/'query_probe.c', '-o', BUILD/'NTWQUERY.EXE', '-lkernel32'])
     info['sha256'] = hashlib.sha256(binary).hexdigest()
     info['bytes'] = len(binary)
+    info['compiler_flags'] = common
     info['tools'] = {tool: subprocess.check_output([tool, '--version'], text=True).splitlines()[0]
                      for tool in (compiler, mingw, 'nasm', 'ld')}
     info['probe'] = {'name': 'NTWQUERY.EXE',
                      'sha256': hashlib.sha256((BUILD/'NTWQUERY.EXE').read_bytes()).hexdigest(),
                      'bytes': (BUILD/'NTWQUERY.EXE').stat().st_size,
                      'guest_executed': False}
-    info['sources'] = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                       for p in (HERE/'control.asm', HERE/'bridge.c', HERE/'bridge.h', HERE/'native.c',
-                                 HERE/'link.ld', HERE/'le.py', HERE/'build.py', HERE/'query_probe.c',
-                                 HERE.parent/'core.c', HERE.parent/'include/ntwrapper.h',
-                                 ROOT/'shizukudos/abi/shz_abi.h', ROOT/'shizukudos/abi/shz_ipc.h')}
+    if source_hashes!={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in source_paths}:
+        raise RuntimeError('Build inputs changed while compiling; no manifest written')
+    info['sources'] = source_hashes
+    info['output_directory'] = str(BUILD.relative_to(ROOT))
+    info['status'] = 'HOST-BUILD-PASS'
+    info['native_validation'] = 'pending for production driver; control-only fixture success is not production load/VMM/query proof'
     (BUILD/'manifest.json').write_text(json.dumps(info, indent=2)+'\n')
     print(json.dumps(info, indent=2))
     return 0

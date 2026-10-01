@@ -1,0 +1,116 @@
+--- a/src/block.c
++++ b/src/block.c
+@@ -32,6 +32,8 @@
+ u8 CDCount;
+ struct drive_s *IDMap[3][BUILD_MAX_EXTDRIVE] VARFSEG;
+ u8 *bounce_buf_fl VARFSEG;
++// Opt-in storage profile: actual allocated capacity, never a sector-size alias.
++u32 bounce_buf_size VARFSEG;
+ 
+ struct drive_s *
+ getDrive(u8 exttype, u8 extdriveoffset)
+@@ -56,12 +58,22 @@
+     if (bounce_buf_fl)
+         return 0;
+ 
+-    u8 *buf = malloc_low(CDROM_SECTOR_SIZE);
++    // This patch is selected only by the separate private storage builder.
++    // Permanent ZoneLow owns the buffer; malloc_finalize reserves its ROM span.
++    u32 size = 16384;
++    u8 *buf = malloc_low(size);
++    if (!buf) {
++        size = CDROM_SECTOR_SIZE;
++        buf = malloc_low(size);
++    }
+     if (!buf) {
+         warn_noalloc();
+         return -1;
+     }
++    bounce_buf_size = size;
+     bounce_buf_fl = buf;
++    dprintf(1, "SHZ STORAGE V86BOUNCE capacity=%u base=%p fallback=%u\n",
++            size, buf, size == CDROM_SECTOR_SIZE);
+     return 0;
+ }
+ 
+@@ -558,19 +570,24 @@
+ process_op_32_v86bounce(struct disk_op_s *op)
+ {
+     ASSERT16();
++    u16 orig_count = op->count;
++    if (!orig_count)
++        return 0;
++
+     u8 *bounce = GET_GLOBAL(bounce_buf_fl);
+-    if (!bounce)
+-        return call32(process_op_32, MAKE_FLATPTR(GET_SEG(SS), op),
+-                      DISK_RET_EPARAM);
+-
++    u32 capacity = GET_GLOBAL(bounce_buf_size);
+     u16 blksize = GET_FLATPTR(op->drive_fl->blksize);
+-    u16 max_chunk = CDROM_SECTOR_SIZE / blksize;
+-    if (!max_chunk)
+-        max_chunk = 1;
+-
++    // Never DMA directly to an unverified V86 caller when allocation failed.
++    // Preserve the original 64 KiB request boundary, including the last chunk.
++    if (!bounce || (capacity != 16384 && capacity != CDROM_SECTOR_SIZE)
++        || !blksize || blksize > capacity
++        || orig_count > 65536u / blksize) {
++        op->count = 0;
++        return DISK_RET_EPARAM;
++    }
++    u16 max_chunk = capacity / blksize;
+     int iswrite = (op->command == CMD_WRITE);
+     void *orig_buf = op->buf_fl;
+-    u16 orig_count = op->count;
+     u64 orig_lba = op->lba;
+     u16 done = 0;
+     int rc = 0;
+@@ -579,29 +596,34 @@
+         u16 this_count = orig_count - done;
+         if (this_count > max_chunk)
+             this_count = max_chunk;
+-
+         u32 this_bytes = (u32)this_count * blksize;
+         void *this_buf = orig_buf + (u32)done * blksize;
+-
+         if (iswrite)
+             memcpy_fl(bounce, this_buf, this_bytes);
+-
+         op->buf_fl = bounce;
+         op->count = this_count;
+         op->lba = orig_lba + done;
+ 
+         rc = call32(process_op_32, MAKE_FLATPTR(GET_SEG(SS), op),
+                     DISK_RET_EPARAM);
+-
+-        if (rc) {
+-            done += op->count;
++        u16 completed = op->count;
++        if (completed > this_count) {
++            // Reject the invalid completion before copying or advancing.
++            completed = 0;
++            rc = DISK_RET_EPARAM;
++        } else if (rc && completed == this_count) {
++            // Normal process_op also clears an unchanged count on error.
++            // AHCI does not certify partial transfer bytes on an error.
++            completed = 0;
++        } else if (!rc && completed != this_count) {
++            // A short success violates the full-chunk completion contract.
++            rc = DISK_RET_EPARAM;
++        }
++        if (!iswrite && completed)
++            memcpy_fl(this_buf, bounce, (u32)completed * blksize);
++        done += completed;
++        if (rc)
+             break;
+-        }
+-
+-        if (!iswrite)
+-            memcpy_fl(this_buf, bounce, this_bytes);
+-
+-        done += this_count;
+     }
+ 
+     op->buf_fl = orig_buf;

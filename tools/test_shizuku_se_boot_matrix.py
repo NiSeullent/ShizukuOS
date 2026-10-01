@@ -32,7 +32,8 @@ letter + Enter), and judged only from host-side evidence:
             through shizukudos/supervisor/test_bootmgr.py's k64_checks (loader
             RAM == kernel RAM, ABI 1.1 UEFI-direct boot info, GOP handover, the
             firmware holes the loader handed over == the holes Kernel64 applied,
-            CSMWrap never ran), plus OVMF's S3 ACPI NVS at 8 MiB fenced off.
+            CSMWrap never ran), plus the actual firmware-hole handoff, page
+            reservation bitmap and heap block fences read independently over QMP.
 
 Each run also checks the boot path from the COM1 log: legacy BIOS runs show the
 isolinux/syslinux banner with no UEFI firmware in the command line; OVMF runs
@@ -40,7 +41,8 @@ show, in order, BDS starting the medium, the Shizuku loader, BOOT.INI read
 (mode=auto, menu_timeout=5), the boot manager menu, then either no key -> auto
 -> CSM legacy boot -> CSMWrap's boot device -> the isolinux/syslinux banner, or
 key K -> Kernel64 direct. The UEFI Shell must never start (no startup.nsh path).
-OVMF runs keep QEMU's default S3 setting (on), so OVMF reserves ACPI NVS at 8 MiB.
+OVMF runs keep QEMU's default S3 setting. Firmware reservations vary by build;
+the observed ranges and allocator state are checked rather than a fixed NVS address.
 
 Hardware for every run: q35, TCG, -cpu max, 2 vCPUs (CSMWrap keeps one), 512
 MiB, AHCI port 0 (CD read-only; disks with snapshot=on so the images are never
@@ -228,16 +230,201 @@ def judge_kernel64(raw: bytes, qemu_rc) -> list[dict]:
     return checks
 
 
-def judge_k64direct(raw: bytes, qemu_rc) -> list[dict]:
+HEAP_START, PMM_START = 0x300000, 0xF00000
+KERNEL_ALIAS, DIRECT_MAP = 0xFFFFFFFF80000000, 0xFFFF800000000000
+HOLE_MAGIC, HEAP_MAGIC = 0x454C4F48, 0x4B48454150363421
+HOLE_LINE = re.compile(
+    r"^\s+firmware hole (0x[0-9a-f]+) size (0x[0-9a-f]+) "
+    r"\(occupied by (.+?) \[(0x[0-9a-f]+)-(0x[0-9a-f]+)\]\): "
+    r"(fenced off in Kernel64's heap|kept out of Kernel64's page allocator)\.?$", re.M)
+NON_RECLAIMABLE = {
+    "EfiReservedMemoryType", "EfiRuntimeServicesCode", "EfiRuntimeServicesData", "EfiUnusableMemory",
+    "EfiACPIReclaimMemory", "EfiACPIMemoryNVS", "EfiMemoryMappedIO", "EfiMemoryMappedIOPortSpace",
+    "EfiPalCode", "EfiPersistentMemory", "EfiUnacceptedMemoryType", "OEM/OS-defined type",
+}
+
+
+def decode_hole_table(data: bytes) -> list[tuple[int, int]]:
+    """The real memholes.h ABI, including its checksum and zeroed unused fields."""
+    if len(data) != 272:
+        raise ValueError("firmware-hole table must be 272 bytes")
+    magic, count = struct.unpack_from("<II", data)
+    if magic != HOLE_MAGIC or not 1 <= count <= 16:
+        raise ValueError("firmware-hole magic/count invalid or no hole exercised")
+    words = struct.unpack_from("<" + "I" * (4 * count), data, 8)
+    checksum, reserved = struct.unpack_from("<II", data, 264)
+    if checksum != (~(magic + count + sum(words)) & 0xFFFFFFFF):
+        raise ValueError("firmware-hole checksum invalid")
+    if reserved or any(data[8 + 16 * count:264]):
+        raise ValueError("firmware-hole unused fields are not zero")
+    return [struct.unpack_from("<QQ", data, 8 + 16 * i) for i in range(count)]
+
+
+def hole_ranges(text: str) -> tuple[list[tuple[int, int]], int]:
+    ram = re.search(r"Kernel64 RAM \[0, (0x[0-9a-f]+)\)", text)
+    if not ram:
+        raise ValueError("final loader RAM size missing")
+    top = int(ram.group(1), 16)
+    initrd = re.search(r"\\SHZDOS\\WIN64\.IMG (\d+) bytes at (\d+) MiB", text)
+    if not 64 << 20 <= top <= 256 << 20 or top & ((1 << 21) - 1) or not initrd:
+        raise ValueError("invalid RAM bounds or missing initial archive range")
+    image_base = int(initrd.group(2)) << 20
+    image_end = image_base + int(initrd.group(1))
+    lines = list(HOLE_LINE.finditer(text))
+    if not lines or len(lines) != len(re.findall(r"^\s+firmware hole ", text, re.M)) or len(lines) > 16:
+        raise ValueError("missing/malformed firmware-hole descriptions")
+    holes, previous = [], HEAP_START
+    for line in lines:
+        base, size, owner, first, last, policy = line.groups()
+        base, size, first, last = (int(n, 16) for n in (base, size, first, last))
+        end = base + size
+        if (owner not in NON_RECLAIMABLE or not size or base & 4095 or size & 4095 or
+                base < previous or end > top or not first <= last < (1 << 64) or
+                first & 4095 or (last + 1) & 4095 or first >= end or last < base or
+                (base < image_end and end > image_base) or
+                policy != ("fenced off in Kernel64's heap" if base < PMM_START else
+                           "kept out of Kernel64's page allocator")):
+            raise ValueError(f"invalid hole type/range/owner/policy: {line.group(0).strip()}")
+        holes.append((base, size))
+        previous = end
+    return holes, top
+
+
+def heap_segments(holes: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    segments, start = [], HEAP_START
+    for base, size in holes:
+        if base >= PMM_START:
+            break
+        if base > start:
+            segments.append((start, base))
+        start = min(base + size, PMM_START)
+    if start < PMM_START:
+        segments.append((start, PMM_START))
+    return segments
+
+
+def validate_heap_chain(head: int, segments: list[tuple[int, bytes]], direct: int) -> int:
+    """Prove the live linked blocks cover usable heap RAM and cannot bridge a hole."""
+    pointer, count = head, 0
+    limit = sum(len(data) for _, data in segments) // 32
+    for index, (base, data) in enumerate(segments):
+        end, expected = base + len(data), base
+        while expected < end:
+            count += 1
+            if count > limit or pointer != direct + expected or expected + 32 > end:
+                raise ValueError("heap chain missing, cyclic, out of RAM, or skips usable bytes")
+            size, used, following, magic = struct.unpack_from("<QQQQ", data, expected - base)
+            stop = expected + 32 + size
+            if magic != HEAP_MAGIC or used not in (0, 1) or size & 15 or stop > end:
+                raise ValueError("heap block invalid or overlaps reserved firmware memory")
+            if stop == end and index + 1 < len(segments) and (size != 0 or used != 1):
+                raise ValueError("heap hole boundary lacks a used zero-size sentinel")
+            pointer, expected = following, stop
+        wanted = direct + segments[index + 1][0] if index + 1 < len(segments) else 0
+        if pointer != wanted:
+            raise ValueError("heap chain does not resume at the next usable segment")
+    if not segments or not count:
+        raise ValueError("no usable heap blocks inspected")
+    return count
+
+
+def capture_allocator(qmp, run_dir: Path, ctx: dict) -> dict:
+    """Paused-guest physical reads; symbol addresses are bound to the shipped kernel."""
+    receipt = json.loads((BUILD / "shizukudos/kernels-build-result.json").read_text())
+    kernel = receipt["kernels"]["kernel64-standalone"]
+    elf = BUILD / "shizukudos/kernel64s/kernel64s.elf"
+    shipped = next(i for i in ctx["iso"]["receipt"]["inputs"] if i["name"].endswith("KERNEL64S.BIN"))
+    if shzlib.sha256_file(elf) != kernel["elf_sha256"] or kernel["sha256"] != shipped["sha256"]:
+        raise ValueError("allocator ELF does not match the source-bound shipped kernel")
+    symbols = subprocess.check_output(["nm", "-S", "--defined-only", str(elf)], text=True, timeout=30)
+    (run_dir / "allocator-symbols.txt").write_text(symbols)
+    addresses = {}
+    sizes = {"heap_head": 8, "page_map": 0x20000, "phys_base_va": 8,
+             "hole_count": 4, "hole_gpa": 128, "hole_end": 128}
+    for name, size in sizes.items():
+        match = re.search(r"^([0-9a-f]+) ([0-9a-f]+) [a-zA-Z] " + name + r"$", symbols, re.M)
+        if not match:
+            raise ValueError(f"allocator symbol {name} missing")
+        address = int(match.group(1), 16) - KERNEL_ALIAS
+        if int(match.group(2), 16) != size or not 0x100000 <= address <= HEAP_START - size:
+            raise ValueError(f"allocator symbol {name} outside the kernel image window")
+        addresses[name] = address
+    def read(name, address, size):
+        return qemu_tools.read_guest_memory(qmp, address, size, run_dir / (name + ".bin"))
+    table = read("firmware-handoff", 0x6000, 272)
+    holes = decode_hole_table(table)
+    # The handoff's safety bounds must be checked before any derived guest reads.
+    end = HEAP_START
+    for base, size in holes:
+        if not size or base & 4095 or size & 4095 or base < end or base + size > 256 << 20:
+            raise ValueError("unsafe firmware-hole geometry")
+        end = base + size
+    direct = struct.unpack("<Q", read("direct-map", addresses["phys_base_va"], 8))[0]
+    if direct != DIRECT_MAP:
+        raise ValueError("allocator has not switched to the expected direct map")
+    count = struct.unpack("<I", read("allocator-hole-count", addresses["hole_count"], 4))[0]
+    if count != len(holes):
+        raise ValueError("allocator hole count differs from the real handoff")
+    bases = struct.unpack("<" + "Q" * count, read("allocator-hole-base", addresses["hole_gpa"], count * 8))
+    ends = struct.unpack("<" + "Q" * count, read("allocator-hole-end", addresses["hole_end"], count * 8))
+    if list(zip(bases, (z - a for a, z in zip(bases, ends)))) != holes:
+        raise ValueError("allocator ranges differ from the real handoff")
+    bitmap = read("allocator-page-map", addresses["page_map"], 0x20000)
+    reserved = 0
+    for base, size in holes:
+        for page in range(max(base, PMM_START), base + size, 4096):
+            bit = (page - PMM_START) // 4096
+            if not bitmap[bit // 8] & (1 << (bit % 8)):
+                raise ValueError(f"firmware page {page:#x} is free in the live allocator")
+            reserved += 1
+    head = struct.unpack("<Q", read("allocator-heap-head", addresses["heap_head"], 8))[0]
+    segments = [(a, read(f"allocator-heap-{i}", a, z - a))
+                for i, (a, z) in enumerate(heap_segments(holes))]
+    blocks = validate_heap_chain(head, segments, direct)
+    return {"elf": str(elf), "elf_sha256": kernel["elf_sha256"], "symbols": addresses,
+            "holes": holes, "pmm_reserved_pages": reserved, "heap_blocks": blocks,
+            "handoff_sha256": shzlib.sha256_bytes(table)}
+
+
+def firmware_hole_checks(text: str, allocator: dict | None) -> list[dict]:
+    checks = []
+    try:
+        holes, top = hole_ranges(text)
+        announced = re.search(r"Kernel64 direct boot: RAM .*?, (\d+) firmware hole\(s\) below it", text)
+        handed = re.search(r"0x([0-9a-f]+) firmware hole\(s\) handed over at 0x6000", text)
+        stats = re.search(r"K64: (\d+) firmware memory hole\(s\): (\d+) page\(s\) kept out of the page allocator, "
+                          r"(\d+) KiB of the heap fenced off", text)
+        heap = sum(max(0, min(a + n, PMM_START) - a) for a, n in holes if a < PMM_START)
+        pages = sum(max(0, min(a + n, top) - max(a, PMM_START)) // 4096 for a, n in holes)
+        counts = bool(announced and handed and stats) and (
+            int(announced.group(1)) == int(handed.group(1), 16) == int(stats.group(1)) == len(holes))
+        checks.append(check("firmware holes: every observed type/range/policy valid and counts agree", counts,
+                            str([(hex(a), hex(n)) for a, n in holes])))
+        checks.append(check("firmware holes: exact heap KiB and PMM page exclusions agree with observed ranges",
+                            bool(stats) and (int(stats.group(2)), int(stats.group(3))) == (pages, heap // 1024),
+                            f"expected pages={pages}, heap KiB={heap // 1024}; {stats.group(0) if stats else 'missing'}"))
+        checks.append(check("firmware holes: independent handoff and live allocator ranges match the loader",
+                            bool(allocator) and [tuple(h) for h in allocator["holes"]] == holes and
+                            allocator["pmm_reserved_pages"] == pages and allocator["heap_blocks"] > 0,
+                            str(allocator) if allocator else "QMP allocator evidence missing"))
+        checks.append(check("firmware holes: allocator workloads pass with reserved ranges fenced",
+                            all(marker in text for marker in (
+                                "K64 test PASS: kernel heap survives interleaved alloc/free",
+                                "K64 test PASS: no physical pages leaked by five processes",
+                                "K64 test PASS: second Win64 process returns every physical page"))))
+    except (ValueError, KeyError, TypeError) as exc:
+        checks.append(check("firmware holes: complete valid evidence", False, str(exc)))
+    return checks
+
+
+def judge_k64direct(raw: bytes, qemu_rc, allocator: dict | None = None) -> list[dict]:
     """Kernel64 direct boot: C2's k64_checks (shizukudos/supervisor/test_bootmgr.py) on this run's COM1 log."""
     import test_bootmgr  # noqa: E402  (shizukudos/supervisor; imported only for these cells)
     text = raw.decode("latin-1").replace("\r", "")
     apps = expected_win64_apps()
     checks = [dict(c, check=c["check"].replace("[k64direct] ", "test_bootmgr.k64_checks: "))
               for c in test_bootmgr.k64_checks("k64direct", text, qemu_rc, {"cmdline": "", "holes": True}, apps)]
-    checks.append(check("OVMF S3 ACPI NVS at 8 MiB is a firmware hole fenced off in Kernel64's heap (not RAM)",
-                        bool(re.search(r"firmware hole 0x0000000000800000 size 0x[0-9a-f]+ \(occupied by "
-                                       r"EfiACPIMemoryNVS[^\n]*: fenced off in Kernel64's heap", text))))
+    checks += firmware_hole_checks(text, allocator)
     return checks
 
 
@@ -356,9 +543,26 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
                                     f"{record['menu_seconds']} s"))
                 if menu:
                     mark = len(serial.data())
+                    selected = time.time()
                     serial.send(b"k")
+                    allocator = None
+                    ready = wait_for(serial, proc, lambda d: b"K64 test PASS: kernel heap survives interleaved alloc/free" in d,
+                                     args.timeout, mark)
+                    checks.append(check("allocator stress marker reached before independent QMP inspection", bool(ready)))
+                    if ready and proc.poll() is None:
+                        qmp.call("stop")
+                        try:
+                            allocator = capture_allocator(qmp, run_dir, ctx)
+                            record["allocator"] = allocator
+                            checks.append(check("independent QMP: live heap excludes holes and PMM reserves every firmware page", True,
+                                                f"{allocator['heap_blocks']} heap blocks, {allocator['pmm_reserved_pages']} reserved PMM pages"))
+                        except Exception as exc:
+                            checks.append(check("independent QMP: live heap excludes holes and PMM reserves every firmware page", False,
+                                                f"{type(exc).__name__}: {exc}"))
+                        finally:
+                            qmp.call("cont")
                     done = wait_for(serial, proc, lambda d: re.search(rb"(?m)^SHZ-EXIT:([0-9a-f]+)\r?$", d),
-                                    args.timeout, mark)
+                                    max(0, args.timeout - (time.time() - selected)), mark)
                     try:
                         proc.wait(timeout=30)  # isa-debug-exit ends the VM right after SHZ-EXIT
                     except subprocess.TimeoutExpired:
@@ -366,7 +570,7 @@ def run_entry(args, firmware: str, medium: str, image: Path, entry: str, run_dir
                     record["seconds"] = round(time.time() - started, 1)
                     checks.append(check("Kernel64 printed SHZ-EXIT", bool(done),
                                         done.group(0).decode().strip() if done else "none"))
-                    checks += judge_k64direct(serial.data()[mark:], proc.returncode)
+                    checks += judge_k64direct(serial.data()[mark:], proc.returncode, allocator)
                 menu = None                                   # the legacy menu is not used by this entry
             else:
                 menu = wait_for(serial, proc, lambda d: MENU_READY in d, args.menu_timeout)

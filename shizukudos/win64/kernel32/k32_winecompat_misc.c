@@ -91,6 +91,53 @@ K32API PVOID WINAPI DelayLoadFailureHook(LPCSTR dll, LPCSTR proc)
 
 typedef PVOID (WINAPI *delay_sys_hook)(LPCSTR, LPCSTR);
 
+/* Binutils 2.44 puts dlltool's delay IAT in read-only .idata. Change only the
+ * pointer's page while publishing it, then restore its exact old protection.
+ * The lock covers both module slots and IAT slots: two imports can share a page.
+ * Never hold it across LoadLibrary/GetProcAddress or a user failure hook. */
+static RTL_SRWLOCK delay_patch_lock = {0};
+
+static BOOL delay_publish(PVOID *slot, PVOID value, BOOL only_if_empty, PVOID *previous)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    DWORD saved_error = GetLastError(), error = 0, old = 0, ignored, writable;
+    PVOID prior = NULL;
+    BOOL changed_protection = FALSE, ok = FALSE;
+    if ((ULONG_PTR)slot & (sizeof *slot - 1)) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    RtlAcquireSRWLockExclusive(&delay_patch_lock);
+    if (!VirtualQuery(slot, &mbi, sizeof mbi)) { error = GetLastError(); goto done; }
+    if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) {
+        error = ERROR_NOACCESS;
+        goto done;
+    }
+    writable = mbi.Protect & 0xff;
+    if (writable == PAGE_READONLY || writable == PAGE_EXECUTE_READ) {
+        writable = writable == PAGE_EXECUTE_READ ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
+        if (!VirtualProtect(slot, sizeof *slot, writable, &old)) { error = GetLastError(); goto done; }
+        changed_protection = TRUE;
+    } else if (writable != PAGE_READWRITE && writable != PAGE_WRITECOPY &&
+               writable != PAGE_EXECUTE_READWRITE && writable != PAGE_EXECUTE_WRITECOPY) {
+        error = ERROR_NOACCESS;
+        goto done;
+    }
+    prior = only_if_empty ? InterlockedCompareExchangePointer(slot, value, NULL) : InterlockedExchangePointer(slot, value);
+    if (changed_protection && !VirtualProtect(slot, sizeof *slot, old, &ignored)) {
+        error = GetLastError();
+        /* Do not return an apparently resolved import after a restore failure.
+         * Undo our publication while the page is still writable, then retry the
+         * restoration. Preserve the first failure even if that retry succeeds. */
+        if (!only_if_empty || !prior) InterlockedCompareExchangePointer(slot, prior, value);
+        VirtualProtect(slot, sizeof *slot, old, &ignored);
+        goto done;
+    }
+    if (previous) *previous = prior;
+    ok = TRUE;
+done:
+    RtlReleaseSRWLockExclusive(&delay_patch_lock);
+    SetLastError(ok ? saved_error : error);
+    return ok;
+}
+
 K32API PVOID WINAPI ResolveDelayLoadedAPI(PVOID base, const SHZ_DELAYLOAD_DESCRIPTOR *desc, PVOID dll_hook, delay_sys_hook sys_hook,
                                           PIMAGE_THUNK_DATA thunk, ULONG flags)
 {
@@ -103,20 +150,32 @@ K32API PVOID WINAPI ResolveDelayLoadedAPI(PVOID base, const SHZ_DELAYLOAD_DESCRI
     ULONG_PTR index = thunk - iat;
     LPCSTR proc;
     PVOID fn = NULL;
+    DWORD failure_error = 0;
 #undef PTR
     (void)dll_hook; (void)flags;
+    if (!range_ok(slot, sizeof *slot, FALSE)) { SetLastError(ERROR_NOACCESS); return NULL; }
     if (IMAGE_SNAP_BY_ORDINAL(names[index].u1.Ordinal)) proc = (LPCSTR)(ULONG_PTR)IMAGE_ORDINAL(names[index].u1.Ordinal);
     else proc = (const char *)((IMAGE_IMPORT_BY_NAME *)(rva ? b + names[index].u1.AddressOfData
                                                            : (BYTE *)(ULONG_PTR)names[index].u1.AddressOfData))->Name;
     if (!(mod = *slot)) {
         if ((mod = LoadLibraryA(dll))) {
-            HMODULE prev = InterlockedCompareExchangePointer((PVOID *)slot, mod, NULL);
+            PVOID prev;
+            if (!delay_publish((PVOID *)slot, mod, TRUE, &prev)) {
+                DWORD error = GetLastError();
+                FreeLibrary(mod);
+                SetLastError(error);
+                return NULL;
+            }
             if (prev) { FreeLibrary(mod); mod = prev; }
-        }
+        } else failure_error = GetLastError();
     }
-    if (mod) fn = (PVOID)GetProcAddress(mod, proc);
+    if (mod) {
+        fn = (PVOID)GetProcAddress(mod, proc);
+        if (!fn) failure_error = GetLastError();
+    }
     if (!fn) fn = sys_hook ? sys_hook(dll, proc) : DelayLoadFailureHook(dll, proc);
-    if (fn) thunk->u1.Function = (ULONG_PTR)fn;
+    if (failure_error) SetLastError(failure_error);
+    if (fn && !delay_publish((PVOID *)&thunk->u1.Function, fn, FALSE, NULL)) return NULL;
     return fn;
 }
 

@@ -77,3 +77,33 @@ follows the public Vista `D3DKMT` device/context/present contracts without
 copying `d3dkmthk.h`. Per-file differences are in
 [`ntwddm/PROVENANCE.md`](ntwddm/PROVENANCE.md). This does not change the
 historical KernelEx UXTHEME bridge above.
+
+## Native Shizuku GOP display package
+
+`drivers/shizuku_gop/build.py` pins MIT-licensed VMDisp9x at
+`d778a911035d414dea9ac852a638a7052c21c400` and the MIT-licensed fixlink
+tool at `a2a74447daea3197255f3a4fb5cfb0c5a453dcc8`. The native display
+frontend and MiniVDD retain the upstream copyright and license notices.
+The GOP descriptor parser and framebuffer backend are original GPL-2.0-only
+project code. The combined development ZIP includes complete frozen compiled
+sources, the source-adaptation patch, GPL/MIT notices and the linked Open
+Watcom runtime's Sybase Open Watcom Public License notice. See
+`drivers/shizuku_gop/NOTICE.md` and the exact build receipt for file provenance.
+Neither Microsoft's DIBEngine binary nor any Windows disk is redistributed.
+
+## VLC geographical compatibility data
+
+`src/m98_vlc_geo.inc` contains factual GEOID/name/region records extracted
+from Wine11.0 [`tools/make_unicode`](https://github.com/wine-mirror/wine/blob/wine-11.0/tools/make_unicode),
+SHA256 `f0284d8eee7f213cb5ff1db1264fd90d689fe3a36358451574a0511fa019e637`.
+The input retains Alexandre Julliard's copyright and LGPL2.1-or-later notice.
+ISO alpha3/numeric facts come from the pinned system iso-codes
+`iso_3166-1.json`, SHA256
+`f01b812b57fba9f31ff621bf33e7c7570a01964dbeb5be2167e94decf538c89f`.
+Only literal factual records are extracted; neither upstream Perl generator
+nor downloaded code is executed or incorporated as implementation code.
+The exact301-record output and extraction receipt are documented in
+`docs/VLC_COMPATIBILITY.md`. `tools/generate_vlc_geo.py` and the bounded
+locale parser, Win98 registry/version/NLS adapters are independently written
+GPL2.0-only project code. The source and data attribution remain in the table
+header; supported lookup fields do not imply full modern geography/NLS support.

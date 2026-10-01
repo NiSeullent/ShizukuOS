@@ -1,0 +1,39 @@
+{
+  "schema": "win98modern.browser-source-port-profile.v1",
+  "app": "legcord",
+  "as_of": "2026-09-30",
+  "version": "1.3.0",
+  "source_commit": "c8d91f61296019bb0c45f375535de8c93cf26ee1",
+  "source_url": "https://github.com/Legcord/Legcord/tree/c8d91f61296019bb0c45f375535de8c93cf26ee1",
+  "release_metadata_url": "https://api.github.com/repos/Legcord/Legcord/releases/latest",
+  "release_published_at": "2026-07-26T18:56:07Z",
+  "guest_target": {"os": "win98se", "os_version": "4.10.2222", "arch": "x86"},
+  "upstream_windows_minimum": "Windows 10",
+  "electron": {"version": "43.2.0", "chromium": "150.0.7871.129", "node_runtime": "24.18.0", "release_url": "https://releases.electronjs.org/release/v43.2.0", "platform_documentation": "https://raw.githubusercontent.com/electron/electron/v43.2.0/README.md"},
+  "source_build": {"node_host": ">=26", "package_manager": "pnpm@11.10.0", "documentation": "https://raw.githubusercontent.com/Legcord/Legcord/c8d91f61296019bb0c45f375535de8c93cf26ee1/package.json"},
+  "ia32_candidate": {
+    "name": "Legcord-1.3.0-win-ia32.zip",
+    "bytes": 153902184,
+    "sha256": "f348283e64cb1aaaccb7fd3a4d7851c3c95131eef38fa087dc243dbbb604341c",
+    "url": "https://github.com/Legcord/Legcord/releases/download/v1.3.0/Legcord-1.3.0-win-ia32.zip",
+    "downloaded": false,
+    "pe_inventory_verified": false,
+    "architecture_match_is_runtime_compatibility": false
+  },
+  "prerequisites": [
+    {"id": "electron-runtime", "state": "missing-native-acceptance", "reuse": ["tools/modern_apps/chromium_port_profile.json", "tools/app_preflight.py"], "required": "Port actual Electron43.2.0 Chromium150+Node24/libuv and native PE/CRT/process/IPC/text/graphics/network primitives to Win98; changing Windows version checks is insufficient."},
+    {"id": "software-entry", "state": "new-source-native-unverified", "source": "tools/modern_apps/legcord_win9x_entry.cjs", "required": "Frozen actual Legcord entry in an exact ia32 Electron runtime with app.disableHardwareAcceleration before app startup; no mock Discord UI."},
+    {"id": "node-libuv-io", "state": "missing-native-acceptance", "required": "Real Node async filesystem/network/process/pipe/completion and threadpool semantics; do not infer these from old static import coverage."},
+    {"id": "native-optional-features", "state": "source-policy-required", "required": "Make updater/native game detection/venmic/screen capture optional source features in the frozen Legcord build. Unsupported hooks must fail explicitly; no current compatibility claim."},
+    {"id": "discord-rendering", "state": "missing-native-acceptance", "required": "Actual Legcord webContents loads and renders the Discord UI using the ported Electron runtime. A local fixture is a preceding engine test, not a Discord PASS."}
+  ],
+  "acceptance": [
+    "Frozen ia32 Electron/Legcord/source/package lock/native dependency provenance and actual Win98 OS/nonce proof.",
+    "Actual Legcord startup/main+preload/renderer IPC, real Discord login UI and network/certificate/WebSocket behavior in separately authorized network scope.",
+    "Real typed input, navigation and UI state readback without sending account messages unless explicitly authorized.",
+    "Optional capture/game detection/updater feature scope recorded, owned processes/threads shut down and external exit observed."
+  ],
+  "guest_executed": false,
+  "runtime_compatibility": "unverified",
+  "browser_pass": false
+}

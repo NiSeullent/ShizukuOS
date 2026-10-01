@@ -1,0 +1,266 @@
+{
+  "schema": "zetscape.fixture-source-pin.v2",
+  "fixture_version": 1,
+  "provenance_version": 2,
+  "source": [
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/index.html",
+        "bytes": 2486,
+        "sha256": "bd63514844a87e5b8048250d5fa28fc25f08423187a7588049d2a48ce8118e19"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/index.html",
+        "bytes": 2486,
+        "sha256": "bd63514844a87e5b8048250d5fa28fc25f08423187a7588049d2a48ce8118e19"
+      },
+      "native_payload": true
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/harness.js",
+        "bytes": 4344,
+        "sha256": "0d43229103ac19701cc8a436e8766936dc11c2b6f0852a33010f9f459143a2e1"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/harness.js",
+        "bytes": 4344,
+        "sha256": "0d43229103ac19701cc8a436e8766936dc11c2b6f0852a33010f9f459143a2e1"
+      },
+      "native_payload": true
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/layout.js",
+        "bytes": 4081,
+        "sha256": "421faca31ed1242d78d008c2727ebebbfffc05319a229929ac3ae5d5ac7c5534"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/layout.js",
+        "bytes": 4081,
+        "sha256": "421faca31ed1242d78d008c2727ebebbfffc05319a229929ac3ae5d5ac7c5534"
+      },
+      "native_payload": true
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/canvas.js",
+        "bytes": 6198,
+        "sha256": "98b28beae255a3e4da54556dc16c7f30fd5f08089ac16f767995d03d3293cd4d"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/canvas.js",
+        "bytes": 6198,
+        "sha256": "98b28beae255a3e4da54556dc16c7f30fd5f08089ac16f767995d03d3293cd4d"
+      },
+      "native_payload": true
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/async.mjs",
+        "bytes": 3966,
+        "sha256": "d6a27442d7e6306584dfeac727e0cf7f760754cb081d157b5707ec2bc7ae89f0"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/async.mjs",
+        "bytes": 3966,
+        "sha256": "d6a27442d7e6306584dfeac727e0cf7f760754cb081d157b5707ec2bc7ae89f0"
+      },
+      "native_payload": true
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/counter.mjs",
+        "bytes": 181,
+        "sha256": "6c8938544b1483d8c9dfb98e885e980142669780394fb92b8b293738cb661d26"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/counter.mjs",
+        "bytes": 181,
+        "sha256": "6c8938544b1483d8c9dfb98e885e980142669780394fb92b8b293738cb661d26"
+      },
+      "native_payload": true
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/fetch_payload.json",
+        "bytes": 69,
+        "sha256": "d73b2a82ff6be5ab79b9e5c8db489b52a363a2cc2ee0a4ef279655a46b9732bc"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/fetch_payload.json",
+        "bytes": 69,
+        "sha256": "d73b2a82ff6be5ab79b9e5c8db489b52a363a2cc2ee0a4ef279655a46b9732bc"
+      },
+      "native_payload": true
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/README.md",
+        "bytes": 4584,
+        "sha256": "46c793d9b2866029471da3dc47048562d3c44ebd29713f3da54c1652654b7458"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/README.md",
+        "bytes": 4584,
+        "sha256": "46c793d9b2866029471da3dc47048562d3c44ebd29713f3da54c1652654b7458"
+      },
+      "native_payload": false
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/LICENSE",
+        "bytes": 1086,
+        "sha256": "07f1c8f3673e4696fbe568e095338721a4d013fa5c4bcfd2c40c6809408cc550"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/LICENSE",
+        "bytes": 1086,
+        "sha256": "07f1c8f3673e4696fbe568e095338721a4d013fa5c4bcfd2c40c6809408cc550"
+      },
+      "native_payload": false
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/tests/source_check.py",
+        "bytes": 8059,
+        "sha256": "df6558602a990dc96160cbe0aa2507cfa21305e3c713321caf15f80be39d8299"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/source_check.py",
+        "bytes": 8059,
+        "sha256": "df6558602a990dc96160cbe0aa2507cfa21305e3c713321caf15f80be39d8299"
+      },
+      "native_payload": false
+    },
+    {
+      "original": {
+        "path": "/root/Win98-Modern-boot/apps/zetscape/fixtures/modern_web_acceptance.json",
+        "bytes": 10411,
+        "sha256": "d7470489b7cb0e4dcd556cc7fddba4c7e892eab31e70f87d63e98ff3348d9e3b"
+      },
+      "frozen": {
+        "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v2/modern_web_acceptance.json",
+        "bytes": 10411,
+        "sha256": "d7470489b7cb0e4dcd556cc7fddba4c7e892eab31e70f87d63e98ff3348d9e3b"
+      },
+      "native_payload": false
+    }
+  ],
+  "checkpoint": {
+    "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-checkpoint-v5.json",
+    "bytes": 4963,
+    "sha256": "0c43a0cffbc6eb1b07f68ca9be780fcadd08c86000e0b8166f84c3f2f601fecb"
+  },
+  "previous_frozen_pin": {
+    "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/source_pin.json",
+    "bytes": 6329,
+    "sha256": "fc6bbf4b4dd3ecb3b924220f518510ae9c9dd559b5e2d6e79a0f4bb85e2c6613"
+  },
+  "historical_unchanged_inputs": [
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/LICENSE",
+      "bytes": 1086,
+      "sha256": "07f1c8f3673e4696fbe568e095338721a4d013fa5c4bcfd2c40c6809408cc550"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/README.md",
+      "bytes": 4570,
+      "sha256": "ce22170abdf3dc0ec72681f2dda31d8480d2569f5c6377501513ef2212a09c48"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/async.mjs",
+      "bytes": 3966,
+      "sha256": "d6a27442d7e6306584dfeac727e0cf7f760754cb081d157b5707ec2bc7ae89f0"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/canvas.js",
+      "bytes": 6198,
+      "sha256": "98b28beae255a3e4da54556dc16c7f30fd5f08089ac16f767995d03d3293cd4d"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/counter.mjs",
+      "bytes": 181,
+      "sha256": "6c8938544b1483d8c9dfb98e885e980142669780394fb92b8b293738cb661d26"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/fetch_payload.json",
+      "bytes": 69,
+      "sha256": "d73b2a82ff6be5ab79b9e5c8db489b52a363a2cc2ee0a4ef279655a46b9732bc"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/harness.js",
+      "bytes": 4344,
+      "sha256": "0d43229103ac19701cc8a436e8766936dc11c2b6f0852a33010f9f459143a2e1"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/index.html",
+      "bytes": 2486,
+      "sha256": "bd63514844a87e5b8048250d5fa28fc25f08423187a7588049d2a48ce8118e19"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/layout.js",
+      "bytes": 4081,
+      "sha256": "421faca31ed1242d78d008c2727ebebbfffc05319a229929ac3ae5d5ac7c5534"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/modern_web_acceptance.json",
+      "bytes": 10411,
+      "sha256": "d7470489b7cb0e4dcd556cc7fddba4c7e892eab31e70f87d63e98ff3348d9e3b"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/source_check.py",
+      "bytes": 7995,
+      "sha256": "a2d336b00c0da9ef71e236dc7584153337058a4367b65b2852324a9518d75311"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-v1/source_pin.json",
+      "bytes": 6329,
+      "sha256": "fc6bbf4b4dd3ecb3b924220f518510ae9c9dd559b5e2d6e79a0f4bb85e2c6613"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-checkpoint-v1.json",
+      "bytes": 4659,
+      "sha256": "2e21980eb62dd01b23fbb73825c5c0a156f4753ceae32ac899de2fb3f15be256"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-checkpoint-v2.json",
+      "bytes": 4650,
+      "sha256": "ffe8ea14f1125100648092d2ff64db130a6750a692d7469bbeffd0a2cdc9e438"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-checkpoint-v3.json",
+      "bytes": 4660,
+      "sha256": "15a14dfea837eaf7797a96aefcf891d540922a448099257eb8c1cac762135d12"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/zetscape-83bd/fixture-source-checkpoint-v4.json",
+      "bytes": 4835,
+      "sha256": "d4b6a668d48929c630df8332ca8169006b2e894dc0c55af57755c16e1f02ed4d"
+    }
+  ],
+  "integration_fix": {
+    "old_path": "/root/Win98-Modern-boot/fixtures/modern_web_acceptance.json",
+    "canonical_path": "/root/Win98-Modern-boot/apps/zetscape/fixtures/modern_web_acceptance.json",
+    "acceptance_bytes_unchanged": true
+  },
+  "source_checks_passed": true,
+  "assertion_count": 22,
+  "native_payload_count": 7,
+  "native_engine_executed": false,
+  "ordinary_win98se_pass": false,
+  "shizuku_gpu_pass": false,
+  "full_modern_web_pass": false,
+  "native_result_bridge_ready": false,
+  "loopback_server_started": false,
+  "abi_pin": {
+    "path": "/root/Win98-Modern-boot/apps/zetscape/engine_abi_pin.json",
+    "bytes": 1043,
+    "sha256": "036828b25f18f7af669ffc7f5afaf6c84c93d113d3b06d910c70aaf2284a938e"
+  },
+  "optional_extension_observed_source": {
+    "path": "/root/Win98-Modern-boot/apps/zetscape/zetscape_extensions.h",
+    "bytes": 1333,
+    "sha256": "41994aecb558ea1b4914bfcde5a73bd9934c187bdfa01efcde1207c1398f882c"
+  }
+}

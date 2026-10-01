@@ -1,0 +1,15 @@
+This optional patch adapts SeaBIOS block.c from CSMWrap's pinned SeaBIOS
+commit 578d260b94f62150bf6ab9149784287bd1154f06, within CSMWrap commit
+7f30b740c352ee952eb596bf10ae263a8a5da4c7.
+
+SeaBIOS block.c credits Kevin O'Connor (2008, 2009) and MandrakeSoft S.A.
+(2002) and is distributed under GNU Lesser General Public License v3.
+The copied build tree retains its original notices and COPYING/COPYING.LESSER.
+This directory's additions are distributed under LGPL-3.0-only.
+
+The starting private firmware also includes the separately receipt-pinned
+helper-ID and GOP handover patches. Their existing files and artifacts are
+inputs only; this candidate does not modify them.
+
+No Microsoft binaries or licensed guest disks are included in this directory
+or produced as part of its firmware/host build.

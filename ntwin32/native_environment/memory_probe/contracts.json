@@ -1,0 +1,13 @@
+{
+  "schema": "win98modern.memory-status-contract.v1",
+  "primary_sources": [
+    {"url": "https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-globalmemorystatus", "contract": "VOID result; volatile snapshots; raw 32-bit reporting limitations; no last-error success contract"},
+    {"url": "https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-memorystatus", "contract": "dwLength is set by function; load 0-100; physical/pagefile/virtual totals and available counts; PE32 eight DWORD layout"}
+  ],
+  "native_os": "original VER_PLATFORM_WIN32_WINDOWS 4.10 build low word 2222",
+  "oem_kernel_path": "build/iewebkit-win98-installed-audit-83bd/KERNEL32.DLL",
+  "oem_kernel_sha256": "6771ab74633e9de1359864bd4306a2ed669bec50de7ac9bb9978c05bf04563ca",
+  "oem_named_rvas": {"GlobalMemoryStatus": 199829, "GetSystemTime": 201194, "GetTickCount": 27320},
+  "native_executed": false,
+  "application_success": false
+}

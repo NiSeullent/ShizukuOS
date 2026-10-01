@@ -13,9 +13,13 @@ int k32_trace_on(void)
 {
     if (!trace_state) {
         static const WCHAR name[] = { 'S','H','Z','_','K','3','2','T','R','A','C','E', 0 };
+        const DWORD error = GetLastError();
         WCHAR v[8];
         const DWORD n = GetEnvironmentVariableW(name, v, 8);
         trace_state = n == 1 && v[0] == '1' ? 2 : 1;
+        /* An absent diagnostic setting must not replace the API's real error
+         * with ERROR_ENVVAR_NOT_FOUND on this process's first traced failure. */
+        SetLastError(error);
     }
     return trace_state == 2;
 }

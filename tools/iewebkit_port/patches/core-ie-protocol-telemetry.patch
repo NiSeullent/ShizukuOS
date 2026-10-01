@@ -1,0 +1,189 @@
+--- a/host/navigation_handoff.cpp
++++ b/host/navigation_handoff.cpp
+@@ -3,6 +3,66 @@
+ #include <cstring>
+ #include <cwchar>
+ #include <new>
++
++#include "navigation_trace.h"
++#ifdef IEWK_NAV_DIAGNOSTIC
++/* Offline private protocol telemetry. Observe callback results without changing
++ * URLMon ownership, bind eligibility, pending consumption or engine failures. */
++static LONG diagnostic_starts;
++static void protocol_trace(DWORD event, const char *field, DWORD value) {
++  char key[96];
++  wsprintfA(key, "Handoff.%lu.%s", event, field);
++  iewk_navigation_trace(key, value);
++}
++static void protocol_text(DWORD event, const char *field, const char *value,
++                          DWORD bytes) {
++  char key[96];
++  wsprintfA(key, "Handoff.%lu.%s", event, field);
++  HANDLE file = CreateFileA("C:\\ZUKUQA\\IENAV.LOG", GENERIC_WRITE,
++                            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
++                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
++  if (file == INVALID_HANDLE_VALUE)
++    return;
++  DWORD high = 0, size = GetFileSize(file, &high), written = 0;
++  DWORD key_bytes = static_cast<DWORD>(lstrlenA(key));
++  if (!high && size != INVALID_FILE_SIZE && bytes <= IEWK_URL_LIMIT &&
++      size <= 65536UL - bytes - key_bytes - 3 &&
++      SetFilePointer(file, 0, NULL, FILE_END) != INVALID_SET_FILE_POINTER) {
++    if (WriteFile(file, key, key_bytes, &written, NULL) && written == key_bytes &&
++        WriteFile(file, "=", 1, &written, NULL) && written == 1 &&
++        WriteFile(file, value, bytes, &written, NULL) && written == bytes)
++      WriteFile(file, "\r\n", 2, &written, NULL);
++    FlushFileBuffers(file);
++  }
++  CloseHandle(file);
++}
++static void protocol_url(DWORD event, LPCWSTR url) {
++  char ascii[IEWK_URL_LIMIT + 1];
++  DWORD length = 0;
++  bool valid = url != NULL;
++  while (valid && length < IEWK_URL_LIMIT && url[length]) {
++    if (url[length] < 33 || url[length] > 126)
++      valid = false;
++    else {
++      ascii[length] = static_cast<char>(url[length]);
++      ++length;
++    }
++  }
++  valid = valid && length && !url[length];
++  protocol_trace(event, "url.valid", valid);
++  if (!valid)
++    return;
++  ascii[length] = 0;
++  protocol_text(event, "url", ascii, length);
++  const char *segment = std::strrchr(ascii, '/');
++  DWORD count = segment ? static_cast<DWORD>(std::strlen(++segment)) : 0;
++  bool nonce_valid = count && count <= 80 &&
++      std::strspn(segment, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") == count;
++  protocol_trace(event, "nonce.valid", nonce_valid);
++  if (nonce_valid)
++    protocol_text(event, "nonce", segment, count);
++}
++#endif
+ 
+ const CLSID IEWK_DOCUMENT_CLASS = {
+     0x9b07cc1a,
+@@ -215,6 +275,16 @@
+ HRESULT HandoffProtocol::Start(LPCWSTR url, IInternetProtocolSink *sink,
+                                IInternetBindInfo *bind, DWORD flags,
+                                HANDLE_PTR reserved) {
++#ifdef IEWK_NAV_DIAGNOSTIC
++  DWORD event = static_cast<DWORD>(InterlockedIncrement(&diagnostic_starts));
++  protocol_trace(event, "enter", 1);
++  protocol_url(event, url);
++  protocol_trace(event, "flags", flags);
++  protocol_trace(event, "parse_url", (flags & PI_PARSE_URL) != 0);
++  protocol_trace(event, "attached", factory->attached);
++  protocol_trace(event, "thread_match", factory->thread == GetCurrentThreadId());
++  protocol_trace(event, "pending.present", factory->pending[0] != 0);
++#endif
+   if (!url || !sink || !bind)
+     return E_INVALIDARG;
+   if (started)
+@@ -224,33 +294,97 @@
+   DWORD bind_flags = 0;
+   std::memset(&info, 0, sizeof info);
+   info.cbSize = sizeof info;
+-  bool eligible = factory->matches(url) && !(flags & PI_PARSE_URL);
++  bool matched = factory->matches(url);
++  bool eligible = matched && !(flags & PI_PARSE_URL);
++#ifdef IEWK_NAV_DIAGNOSTIC
++  protocol_trace(event, "matched", matched);
++  protocol_trace(event, "eligible.before_bind", eligible);
++#endif
+   if (eligible) {
++#ifdef IEWK_NAV_DIAGNOSTIC
++    protocol_trace(event, "bind.enter", 1);
++#endif
+     HRESULT hr = bind->GetBindInfo(&bind_flags, &info);
++#ifdef IEWK_NAV_DIAGNOSTIC
++    protocol_trace(event, "bind.hr", static_cast<DWORD>(hr));
++    protocol_trace(event, "bind.flags", bind_flags);
++    protocol_trace(event, "bind.verb", info.dwBindVerb);
++    protocol_trace(event, "bind.bytes", info.cbstgmedData);
++    protocol_trace(event, "bind.tymed", info.stgmedData.tymed);
++#endif
+     eligible = SUCCEEDED(hr) && info.dwBindVerb == BINDVERB_GET &&
+                info.cbstgmedData == 0 && info.stgmedData.tymed == TYMED_NULL;
+     ReleaseBindInfo(&info);
+   }
++#ifdef IEWK_NAV_DIAGNOSTIC
++  protocol_trace(event, "eligible", eligible);
++  protocol_trace(event, "delegated", !eligible);
++#endif
+   if (!eligible) {
+     delegated = true;
++#ifdef IEWK_NAV_DIAGNOSTIC
++    HRESULT result = original ? original->Start(url, sink, bind, flags, reserved)
++                              : INET_E_UNKNOWN_PROTOCOL;
++    protocol_trace(event, "return.hr", static_cast<DWORD>(result));
++    return result;
++#else
+     return original ? original->Start(url, sink, bind, flags, reserved)
+                     : INET_E_UNKNOWN_PROTOCOL;
+-  }
++#endif
++  }
++#ifdef IEWK_NAV_DIAGNOSTIC
++  protocol_trace(event, "pending.before_consume", factory->pending[0] != 0);
++#endif
+   factory->pending[0] = 0; /* Consume before callbacks can re-enter URLMon. */
++#ifdef IEWK_NAV_DIAGNOSTIC
++  protocol_trace(event, "pending.after_consume", factory->pending[0] != 0);
++#endif
+   AddRef();
+   sink->AddRef();
++#ifdef IEWK_NAV_DIAGNOSTIC
++  protocol_trace(event, "report.clsid.enter", 1);
++#endif
+   HRESULT hr =
+       sink->ReportProgress(BINDSTATUS_CLSIDCANINSTANTIATE, DOCUMENT_ID);
+-  if (SUCCEEDED(hr) && !aborted)
++#ifdef IEWK_NAV_DIAGNOSTIC
++  protocol_trace(event, "report.clsid.hr", static_cast<DWORD>(hr));
++#endif
++  if (SUCCEEDED(hr) && !aborted) {
++#ifdef IEWK_NAV_DIAGNOSTIC
++    protocol_trace(event, "report.mime.enter", 1);
++#endif
+     hr = sink->ReportProgress(BINDSTATUS_MIMETYPEAVAILABLE,
+                               L"application/x-iewebkit-document");
+-  if (SUCCEEDED(hr) && !aborted)
++#ifdef IEWK_NAV_DIAGNOSTIC
++    protocol_trace(event, "report.mime.hr", static_cast<DWORD>(hr));
++#endif
++  }
++  if (SUCCEEDED(hr) && !aborted) {
++#ifdef IEWK_NAV_DIAGNOSTIC
++    protocol_trace(event, "report.data.enter", 1);
++#endif
+     hr = sink->ReportData(BSCF_FIRSTDATANOTIFICATION |
+                               BSCF_LASTDATANOTIFICATION |
+                               BSCF_DATAFULLYAVAILABLE,
+                           0, 0);
+-  if (!aborted)
++#ifdef IEWK_NAV_DIAGNOSTIC
++    protocol_trace(event, "report.data.hr", static_cast<DWORD>(hr));
++#endif
++  }
++  if (!aborted) {
++#ifdef IEWK_NAV_DIAGNOSTIC
++    protocol_trace(event, "report.result.enter", 1);
++    protocol_trace(event, "report.result.input_hr", static_cast<DWORD>(hr));
++    HRESULT result = sink->ReportResult(hr, 0, NULL);
++    protocol_trace(event, "report.result.hr", static_cast<DWORD>(result));
++#else
+     sink->ReportResult(hr, 0, NULL);
++#endif
++  }
++#ifdef IEWK_NAV_DIAGNOSTIC
++  protocol_trace(event, "aborted", aborted);
++  protocol_trace(event, "return.hr", static_cast<DWORD>(hr));
++#endif
+   sink->Release();
+   Release();
+   return hr;

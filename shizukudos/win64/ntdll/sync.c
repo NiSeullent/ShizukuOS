@@ -209,8 +209,23 @@ SHZ_EXPORT NTSTATUS NTAPI RtlLeaveCriticalSection(RTL_CRITICAL_SECTION *cs)
 #define SRW_WAIT 2u
 #define SRW_ONE 4u
 
-static int validate_srw_excl(const void *p) { return (*(const volatile ULONG_PTR *)p & SRW_EXCL) != 0; }
-static int validate_srw_busy(const void *p) { return (*(const volatile ULONG_PTR *)p & ~(ULONG_PTR)SRW_WAIT) != 0; }
+/* park() invokes validation while holding the address's bucket lock. A
+ * release/reacquire can happen after Acquire observed SRW_WAIT but before
+ * park validates; that new owner has no WAIT bit. Publish WAIT for the
+ * current owner under the bucket lock before linking the waiter, so its
+ * release either wakes that queued waiter or validation sees a free word.
+ * A CAS also closes release/reacquire during validation itself. */
+static int validate_srw_wait(const void *p, ULONG_PTR busy_mask)
+{
+    volatile ULONG_PTR *word = (volatile ULONG_PTR *)p;
+    for (;;) {
+        const ULONG_PTR old = *word;
+        if (!(old & busy_mask)) return 0;
+        if (__sync_bool_compare_and_swap(word, old, old | SRW_WAIT)) return 1;
+    }
+}
+static int validate_srw_excl(const void *p) { return validate_srw_wait(p, SRW_EXCL); }
+static int validate_srw_busy(const void *p) { return validate_srw_wait(p, ~(ULONG_PTR)SRW_WAIT); }
 
 SHZ_EXPORT VOID NTAPI RtlInitializeSRWLock(RTL_SRWLOCK *l) { l->Ptr = 0; }
 

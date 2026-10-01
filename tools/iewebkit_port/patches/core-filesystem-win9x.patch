@@ -1,0 +1,209 @@
+--- a/Source/WTF/wtf/win/FileSystemWin.cpp
++++ b/Source/WTF/wtf/win/FileSystemWin.cpp
+@@ -44,6 +44,9 @@
+ #include <wtf/text/StringBuilder.h>
+ #include <wtf/text/win/WCharStringExtras.h>
+ #include <wtf/win/PathWalker.h>
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++#include <wtf/win/FileSystemWin9x.h>
++#endif
+ 
+ namespace WTF {
+ 
+@@ -51,16 +54,29 @@
+ 
+ static const ULONGLONG kSecondsFromFileTimeToTimet = 11644473600;
+ 
+-static bool getFindData(String path, WIN32_FIND_DATAW& findData)
+-{
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++using PlatformFindData = WIN32_FIND_DATAA;
++#else
++using PlatformFindData = WIN32_FIND_DATAW;
++#endif
++
++static bool getFindData(String path, PlatformFindData& findData)
++{
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    auto encodedPath = fileSystemRepresentation(path);
++    if (encodedPath.isNull())
++        return false;
++    HANDLE handle = FindFirstFileA(encodedPath.data(), &findData);
++#else
+     HANDLE handle = FindFirstFileW(path.wideCharacters().span().data(), &findData);
++#endif
+     if (handle == INVALID_HANDLE_VALUE)
+         return false;
+     FindClose(handle);
+     return true;
+ }
+ 
+-static void fileCreationTimeFromFindData(const WIN32_FIND_DATAW& findData, time_t& time)
++static void fileCreationTimeFromFindData(const PlatformFindData& findData, time_t& time)
+ {
+     ULARGE_INTEGER fileTime;
+     fileTime.HighPart = findData.ftCreationTime.dwHighDateTime;
+@@ -78,7 +94,7 @@
+ 
+ std::optional<WallTime> fileCreationTime(const String& path)
+ {
+-    WIN32_FIND_DATAW findData;
++    PlatformFindData findData;
+     if (!getFindData(path, findData))
+         return std::nullopt;
+ 
+@@ -89,6 +105,13 @@
+ 
+ CString fileSystemRepresentation(const String& path)
+ {
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    auto widePath = path.wideCharacters();
++    char encodedPath[MAX_PATH];
++    if (!iewkWin9xPathFromWide(widePath.span().data(), path.length(), encodedPath, sizeof(encodedPath)))
++        return CString();
++    return CString(encodedPath);
++#else
+     auto characters = StringView(path).upconvertedCharacters();
+     int size = WideCharToMultiByte(CP_ACP, 0, wcharFrom(characters), path.length(), 0, 0, 0, 0);
+ 
+@@ -98,6 +121,7 @@
+     WideCharToMultiByte(CP_ACP, 0, wcharFrom(characters), path.length(), buffer.data(), buffer.size(), 0, 0);
+ 
+     return string;
++#endif
+ }
+ 
+ static String storageDirectory(DWORD pathIdentifier)
+@@ -133,7 +157,15 @@
+ static String generateTemporaryPath(const Function<bool(const String&)>& action)
+ {
+     wchar_t tempPath[MAX_PATH];
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    char encodedTempPath[MAX_PATH];
++    DWORD tempPathLength = ::GetTempPathA(std::size(encodedTempPath), encodedTempPath);
++    if (!tempPathLength || tempPathLength >= std::size(encodedTempPath)
++        || !iewkWin9xPathToWide(encodedTempPath, tempPathLength, tempPath, std::size(tempPath)))
++        return String();
++#else
+     int tempPathLength = ::GetTempPathW(std::size(tempPath), tempPath);
++#endif
+     if (tempPathLength <= 0 || static_cast<size_t>(tempPathLength) >= std::size(tempPath))
+         return String();
+ 
+@@ -168,9 +200,19 @@
+ 
+     String proposedPath = generateTemporaryPath([&handle](const String& proposedPath) {
+         // use CREATE_NEW to avoid overwriting an existing file with the same name
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++        auto encodedPath = fileSystemRepresentation(proposedPath);
++        if (encodedPath.isNull())
++            return true; // Stop without substituting an unrepresentable filename.
++        handle = FileHandle::adopt(::CreateFileA(encodedPath.data(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
++        DWORD error = GetLastError();
++        // A name collision retries; other errors terminate with an invalid handle.
++        return handle || (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS);
++#else
+         handle = FileHandle::adopt(::CreateFileW(proposedPath.wideCharacters().span().data(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
+ 
+         return handle || GetLastError() == ERROR_ALREADY_EXISTS;
++#endif
+     });
+ 
+     if (!handle)
+@@ -203,8 +245,15 @@
+     if (failIfFileExists)
+         creationDisposition = CREATE_NEW;
+ 
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    auto encodedPath = fileSystemRepresentation(path);
++    if (encodedPath.isNull())
++        return FileHandle();
++    return FileHandle::adopt(CreateFileA(encodedPath.data(), desiredAccess, shareMode, nullptr, creationDisposition, FILE_ATTRIBUTE_NORMAL, nullptr), lockMode);
++#else
+     String destination = path;
+     return FileHandle::adopt(CreateFile(destination.wideCharacters().span().data(), desiredAccess, shareMode, nullptr, creationDisposition, FILE_ATTRIBUTE_NORMAL, nullptr), lockMode);
++#endif
+ }
+ 
+ String localUserSpecificStorageDirectory()
+@@ -240,7 +289,14 @@
+ std::optional<uint32_t> volumeFileBlockSize(const String& path)
+ {
+     DWORD sectorsPerCluster, bytesPerSector, freeClusters, totalClusters;
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    auto encodedPath = fileSystemRepresentation(path);
++    if (encodedPath.isNull())
++        return std::nullopt;
++    if (!GetDiskFreeSpaceA(encodedPath.data(), &sectorsPerCluster, &bytesPerSector, &freeClusters, &totalClusters))
++#else
+     if (!GetDiskFreeSpaceW(path.wideCharacters().span().data(), &sectorsPerCluster, &bytesPerSector, &freeClusters, &totalClusters))
++#endif
+         return std::nullopt;
+ 
+     return sectorsPerCluster * bytesPerSector;
+--- a/Source/JavaScriptCore/jsc.cpp
++++ b/Source/JavaScriptCore/jsc.cpp
+@@ -1227,7 +1227,14 @@
+ 
+ static RefPtr<Uint8Array> fillBufferWithContentsOfFile(const String& fileName)
+ {
++#if OS(WINDOWS) && defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    auto encodedFileName = FileSystem::fileSystemRepresentation(fileName);
++    if (encodedFileName.isNull())
++        return nullptr;
++    FILE* f = fopen(encodedFileName.data(), "rb");
++#else
+     FILE* f = fopen(fileName.utf8().data(), "rb");
++#endif
+     if (!f) {
+         fprintf(stderr, "Could not open file: %s\n", fileName.utf8().data());
+         return nullptr;
+@@ -1264,7 +1271,14 @@
+ static bool fillBufferWithContentsOfFile(const String& fileName, Vector<char>& buffer)
+ {
+     struct stat statBuf;
++#if OS(WINDOWS) && defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    auto encodedFileName = FileSystem::fileSystemRepresentation(fileName);
++    std::optional<CString> fileNameUTF;
++    if (!encodedFileName.isNull())
++        fileNameUTF = WTF::move(encodedFileName);
++#else
+     auto fileNameUTF = fileName.tryGetUTF8();
++#endif
+     if (!fileNameUTF.has_value()) {
+         fprintf(stderr, "Error when parsing file name: %s\n", fileName.ascii().data());
+         return false;
+@@ -1436,7 +1450,19 @@
+ static bool fetchModuleFromLocalFileSystem(const URL& fileURL, Vector& buffer)
+ {
+     String fileName = fileURL.fileSystemPath();
+-#if OS(WINDOWS)
++#if OS(WINDOWS) && defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    // Win9x uses ACP paths, without the NT-only long UNC prefix.
++    fileName = makeStringByReplacingAll(fileName, '/', '\\');
++    auto pathName = FileSystem::fileSystemRepresentation(fileName);
++    if (pathName.isNull())
++        return false;
++    struct stat status { };
++    if (stat(pathName.data(), &status))
++        return false;
++    if ((status.st_mode & S_IFMT) != S_IFREG)
++        return false;
++    FILE* f = fopen(pathName.data(), "rb");
++#elif OS(WINDOWS)
+     // https://msdn.microsoft.com/en-us/library/windows/desktop/aa365247.aspx#maxpath
+     // Use long UNC to pass the long path name to the Windows APIs.
+     // These also appear to turn off handling forward slashes as
+@@ -2264,7 +2290,12 @@
+     URL filePath = computeFilePath(vm, globalObject, callFrame);
+     RETURN_IF_EXCEPTION(scope, encodedJSValue());
+ 
++#if OS(WINDOWS) && defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    auto encodedFileName = FileSystem::fileSystemRepresentation(filePath.fileSystemPath());
++    FILE* descriptor = encodedFileName.isNull() ? nullptr : fopen(encodedFileName.data(), "r");
++#else
+     FILE* descriptor = fopen(filePath.fileSystemPath().ascii().data(), "r");
++#endif
+     if (!descriptor)
+         return throwVMException(globalObject, scope, createURIError(globalObject, makeString("Could not open file at "_s, filePath.string(), " fopen had error: "_s, safeStrerror(errno).span())));
+ 

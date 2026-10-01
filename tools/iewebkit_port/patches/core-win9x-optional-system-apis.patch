@@ -1,0 +1,76 @@
+--- a/Source/WTF/wtf/win/SignalsWin.cpp
++++ b/Source/WTF/wtf/win/SignalsWin.cpp
+@@ -152,7 +152,17 @@
+ 
+     for (unsigned i = 0; i < numberOfSignals; ++i) {
+         if (handlers.numberOfHandlers[i]) {
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++            // C_LOOP has no JIT/Wasm fault handlers. If a profile requests
++            // one, require a real available API; never finalize a fake hook.
++            using RegisterVectoredHandler = PVOID (WINAPI*)(ULONG, PVECTORED_EXCEPTION_HANDLER);
++            HMODULE kernel = GetModuleHandleA("kernel32.dll");
++            auto registerHandler = kernel ? std::bit_cast<RegisterVectoredHandler>(GetProcAddress(kernel, "AddVectoredExceptionHandler")) : nullptr;
++            RELEASE_ASSERT_WITH_MESSAGE(registerHandler, "Native platform lacks required vectored exception handling");
++            RELEASE_ASSERT_WITH_MESSAGE(registerHandler(1, vectoredHandler), "Vectored exception registration failed");
++#else
+             AddVectoredExceptionHandler(1, vectoredHandler);
++#endif
+             break;
+         }
+     }
+--- a/Source/WTF/wtf/StackTrace.cpp
++++ b/Source/WTF/wtf/StackTrace.cpp
+@@ -45,7 +45,16 @@
+ #if HAVE(BACKTRACE)
+     *size = backtrace(stack, *size);
+ #elif OS(WINDOWS)
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    // Optional diagnostic capability: Win9x has no native RTL stack capture.
++    // Preserve the existing unsupported-platform result when it is absent.
++    using CaptureBacktrace = USHORT (WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
++    HMODULE kernel = GetModuleHandleA("kernel32.dll");
++    auto capture = kernel ? std::bit_cast<CaptureBacktrace>(GetProcAddress(kernel, "RtlCaptureStackBackTrace")) : nullptr;
++    *size = capture && *size > 0 ? capture(0, *size, stack, nullptr) : 0;
++#else
+     *size = RtlCaptureStackBackTrace(0, *size, stack, nullptr);
++#endif
+ #else
+     UNUSED_PARAM(stack);
+     *size = 0;
+--- a/Source/bmalloc/mimalloc/mimalloc/src/prim/windows/prim.c
++++ b/Source/bmalloc/mimalloc/mimalloc/src/prim/windows/prim.c
+@@ -64,12 +64,14 @@
+ // Similarly, GetNumaProcessorNodeEx is only supported since Windows 7  (and GetNumaNodeProcessorMask is not supported on xbox)
+ typedef struct MI_PROCESSOR_NUMBER_S { WORD Group; BYTE Number; BYTE Reserved; } MI_PROCESSOR_NUMBER;
+ 
++typedef DWORD (__stdcall *PGetCurrentProcessorNumber)(VOID);
+ typedef VOID (__stdcall *PGetCurrentProcessorNumberEx)(MI_PROCESSOR_NUMBER* ProcNumber);
+ typedef BOOL (__stdcall *PGetNumaProcessorNodeEx)(MI_PROCESSOR_NUMBER* Processor, PUSHORT NodeNumber);
+ typedef BOOL (__stdcall* PGetNumaNodeProcessorMaskEx)(USHORT Node, PGROUP_AFFINITY ProcessorMask);
+ typedef BOOL (__stdcall *PGetNumaProcessorNode)(UCHAR Processor, PUCHAR NodeNumber);
+ typedef BOOL (__stdcall* PGetNumaNodeProcessorMask)(UCHAR Node, PULONGLONG ProcessorMask);
+ typedef BOOL (__stdcall* PGetNumaHighestNodeNumber)(PULONG Node);
++static PGetCurrentProcessorNumber pGetCurrentProcessorNumber = NULL;
+ static PGetCurrentProcessorNumberEx pGetCurrentProcessorNumberEx = NULL;
+ static PGetNumaProcessorNodeEx      pGetNumaProcessorNodeEx = NULL;
+ static PGetNumaNodeProcessorMaskEx  pGetNumaNodeProcessorMaskEx = NULL;
+@@ -172,6 +174,7 @@
+   // Try to use Win7+ numa API
+   hDll = LoadLibrary(TEXT("kernel32.dll"));
+   if (hDll != NULL) {
++    pGetCurrentProcessorNumber = (PGetCurrentProcessorNumber)(void (*)(void))GetProcAddress(hDll, "GetCurrentProcessorNumber");
+     pGetCurrentProcessorNumberEx = (PGetCurrentProcessorNumberEx)(void (*)(void))GetProcAddress(hDll, "GetCurrentProcessorNumberEx");
+     pGetNumaProcessorNodeEx = (PGetNumaProcessorNodeEx)(void (*)(void))GetProcAddress(hDll, "GetNumaProcessorNodeEx");
+     pGetNumaNodeProcessorMaskEx = (PGetNumaNodeProcessorMaskEx)(void (*)(void))GetProcAddress(hDll, "GetNumaNodeProcessorMaskEx");
+@@ -471,9 +474,9 @@
+     BOOL ok = (*pGetNumaProcessorNodeEx)(&pnum, &nnode);
+     if (ok) { numa_node = nnode; }
+   }
+-  else if (pGetNumaProcessorNode != NULL) {
++  else if (pGetNumaProcessorNode != NULL && pGetCurrentProcessorNumber != NULL) {
+     // Vista or earlier, use older API that is limited to 64 processors. Issue #277
+-    DWORD pnum = GetCurrentProcessorNumber();
++    DWORD pnum = (*pGetCurrentProcessorNumber)();
+     UCHAR nnode = 0;
+     BOOL ok = pGetNumaProcessorNode((UCHAR)pnum, &nnode);
+     if (ok) { numa_node = nnode; }

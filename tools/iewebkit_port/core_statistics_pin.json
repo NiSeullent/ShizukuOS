@@ -1,0 +1,20 @@
+{
+  "schema": "iewebkit-win9x-fastmalloc-statistics-port-v1",
+  "upstream_commit": "5220e80b97a253c60ed899361654142ab5021998",
+  "patch": "patches/core-win9x-fastmalloc-statistics.patch",
+  "patch_sha256": "cd9e2d93ec0963d02cba58a5d5cb4ef76adb97a7685a28d11fee5619d745ec23",
+  "files": [
+    {
+      "path": "Source/WTF/wtf/FastMalloc.cpp",
+      "before_sha256": "bd97fe24e86c9a9b0d3c67ba696ef0c66876dcbaca13e9433ff6c87e3e75d1f6",
+      "after_sha256": "1ffda98a480538a8c523c60b19470e2df60832e78d13067fcf61f32ba5965815"
+    }
+  ],
+  "requires_header": {
+    "path": "Source/WTF/wtf/win/core_MemoryWin9x.h",
+    "sha256": "cd04e99740faaa06e73b2e207d4a186e152318c7c35d36cf04e3f91a76b54440"
+  },
+  "measurement": "committed-private-virtual-byte-proxy-not-resident-or-peak-working-set",
+  "unknown_statistics_value": 0,
+  "reason": "Real linked WTF memory monitor caller reaches GetProcessMemoryInfo; PSAPI is absent from pinned Win98 native baseline."
+}

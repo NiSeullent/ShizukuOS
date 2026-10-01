@@ -150,8 +150,22 @@ static int win64_run(int64_t *code, int *faulted)
 }
 
 /* Every other T_*.EXE in \\SHZ\\TESTS is a self-checking Win64 program: it must exit 0 without a fault. It prints its own
- * PASS/FAIL lines through the console; a hung program is killed after WIN64_APP_TIMEOUT_MS. */
+ * PASS/FAIL lines through the console; a hung program is killed at its bounded workload deadline. */
 #define WIN64_APP_TIMEOUT_MS 60000u
+
+/* t_ipc_exit.c has finite waits for readiness/termination (10s + 5s),
+ * two lifecycle probes (2 * 10s), three exit races (3 * 10s), and ten
+ * full T_NET_LOOP children (10 * 120s). Keep the standard 60s allowance
+ * for loading/setup/cleanup in addition to those declared waits. The
+ * host's whole-boot deadline still bounds a stalled QA run. */
+#define WIN64_IPC_EXIT_CHILD_WAITS_MS (10000u + 5000u + 2u * 10000u + 3u * 10000u + 10u * 120000u)
+
+static unsigned win64_app_timeout_ms(const char *name)
+{
+    return !strcmp(name, "T_IPC_EXIT.EXE")
+        ? WIN64_APP_TIMEOUT_MS + WIN64_IPC_EXIT_CHILD_WAITS_MS
+        : WIN64_APP_TIMEOUT_MS;
+}
 #define WIN64_MAX_APPS 128
 #define WIN64_TESTS_PREFIX "\\SHZ\\TESTS\\"
 static void win64_run_others(void)
@@ -189,16 +203,20 @@ static void win64_run_others(void)
         int64_t code = -1;
         int faulted = 1, reaped = -1;
         int32_t st;
-        uint64_t waited = 0;
+        const unsigned timeout_ms = win64_app_timeout_ms(names[i]);
         memcpy(path, WIN64_TESTS_PREFIX, sizeof WIN64_TESTS_PREFIX - 1);
         memcpy(path + sizeof WIN64_TESTS_PREFIX - 1, names[i], strlen(names[i]) + 1);
         memcpy(cmd, names[i], strlen(names[i]) + 1);
+        if (timeout_ms != WIN64_APP_TIMEOUT_MS)
+            kprintf("K64 win64: %s workload deadline %u ms (declared child waits %u ms + standard %u ms)\n",
+                    names[i], timeout_ms, WIN64_IPC_EXIT_CHILD_WAITS_MS, WIN64_APP_TIMEOUT_MS);
         st = ldr_create_process(0, path, cmd, "C:\\SHZ\\TESTS", &p, &t);
         if (st == 0) {
-            while (!(p->terminated && p->threads_alive == 0) && waited++ < WIN64_APP_TIMEOUT_MS)
+            const uint64_t started = ticks_now();
+            while (!(p->terminated && p->threads_alive == 0) && ticks_now() - started < timeout_ms)
                 thread_sleep_ms(1);
             if (!p->terminated) {
-                kprintf("K64 win64: %s timed out after %u ms, terminating\n", names[i], WIN64_APP_TIMEOUT_MS);
+                kprintf("K64 win64: %s timed out after %u ms, terminating\n", names[i], timeout_ms);
                 process_terminate(p, 0x102, 1);
             }
             reaped = proc_wait(p->pid, &code, &faulted);

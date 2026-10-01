@@ -1,0 +1,34 @@
+{
+  "schema": "zetscape.genuine-jsc-wasm-probe-patch.v1",
+  "upstream_commit": "5220e80b97a253c60ed899361654142ab5021998",
+  "preimage": {
+    "path": "/root/Win98-Modern-boot/tools/iewebkit_port/core_jsc_native.cpp",
+    "sha256": "1d38eab54d9bd6f166d6811188087170a27c4c62118a6913fe0cac7657d630e0",
+    "size_bytes": 5646
+  },
+  "staged_source": {
+    "path": "core_jsc_native_wasm.cpp",
+    "sha256": "759845e1f6902090093f77921015ae3df278055bff97a5664cc654a7230db6cd",
+    "size_bytes": 6506
+  },
+  "patch": {
+    "path": "native-jsc-modern-wasm.patch",
+    "sha256": "880d4deda45c69cb42b6ec94db0f1d69ec96dcf41649c3a338c6dd970b0e00e7",
+    "size_bytes": 3417
+  },
+  "extra_header": {
+    "path": "/root/Win98-Modern-boot/tools/iewebkit_port/zetscape_capabilities_83bd/wasm_cases.h",
+    "sha256": "7cbd4b4e37c3eb2a170b6f3a672bffc61e951744a3881bfbf51f7b7bf80e4146",
+    "size_bytes": 3432
+  },
+  "required_log": "C:\\GOPLAB\\WASM83BD.LOG",
+  "required_cases": 8,
+  "current_profile_wasm_enabled": false,
+  "expected_current_native_outcome": "Unsupported Wasm is a failure; runtime initialization can fail earlier.",
+  "canonical_source_modified": false,
+  "engine_built": false,
+  "guest_executed": false,
+  "full_wasm_conformance_pass": false,
+  "browser_pass": false,
+  "gpu_pass": false
+}

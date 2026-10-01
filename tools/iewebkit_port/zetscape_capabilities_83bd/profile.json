@@ -1,0 +1,237 @@
+{
+  "schema": "zetscape.genuine-engine-modern-web-prerequisites.v1",
+  "as_of": "2026-10-01",
+  "target": {
+    "os": "Win98SE",
+    "version": "4.10.2222",
+    "process_arch": "x86",
+    "edition_acceptance_separate": [
+      "ordinary98se",
+      "shizuku-win98"
+    ],
+    "os_version_faking_allowed": false
+  },
+  "upstream": {
+    "release": "WebKitGTK 2.54.0",
+    "commit": "5220e80b97a253c60ed899361654142ab5021998",
+    "archive_sha256": "846fd19ccedbae1dbfe904f26dbf2d68a800a33a50caf2ad5222c8dcb3f25682",
+    "manifest_origin": "/home/almalinux/workspace/iewebkit/porting/webkit-source.json"
+  },
+  "observed_source_inputs": [
+    {
+      "path": "/root/Win98-Modern-boot/tools/iewebkit_port/core_jsc_native.cpp",
+      "sha256": "1d38eab54d9bd6f166d6811188087170a27c4c62118a6913fe0cac7657d630e0",
+      "size_bytes": 5646
+    },
+    {
+      "path": "/root/Win98-Modern-boot/tools/iewebkit_port/core_profile.json",
+      "sha256": "98a7053a909c104310cc6a9f0641db2af461b9b7a36a8d7ad79bad1dfe8b530d",
+      "size_bytes": 952
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/webkitgtk-2.54.0/Source/cmake/WebKitFeatures.cmake",
+      "sha256": "1bb5a1869afd814bd914a98bb51dc404addfa861a7364340b342b0360ad089e4",
+      "size_bytes": 36393
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/webkitgtk-2.54.0/Source/cmake/OptionsJSCOnly.cmake",
+      "sha256": "fb07111adb1978a859bfa22fb3cc148898b0ff6b8444a026b62357ef5b5ce4d4",
+      "size_bytes": 5318
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/webkitgtk-2.54.0/Source/cmake/OptionsWin.cmake",
+      "sha256": "cd7d45e71194d145affa5228b92af1b7a8e1f69e05781993305142e9d20f2ec2",
+      "size_bytes": 7586
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/webkitgtk-2.54.0/Source/WTF/wtf/PlatformEnable.h",
+      "sha256": "501ec2d23c15b1af729a2a9985cdd093161bc2513f7c34f4640f240860d642d9",
+      "size_bytes": 32264
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/webkitgtk-2.54.0/Source/WTF/wtf/PlatformUse.h",
+      "sha256": "3eaf865d131699e643e079a417a37d28ef88de525c6361d213e24c3460b075be",
+      "size_bytes": 10477
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/webkitgtk-2.54.0/Source/JavaScriptCore/llint/InPlaceInterpreter.asm",
+      "sha256": "646d3f9f626a83dbfc5d37ac89075d51893e7b098b7a0bdc62f64ed801c964ff",
+      "size_bytes": 93239
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/webkitgtk-2.54.0/Source/JavaScriptCore/wasm/WasmCapabilities.h",
+      "sha256": "37d7fd101d138a46d36148b749c68dc9d8f486cca6e53af8f170a47131b6a679",
+      "size_bytes": 1651
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/iewebkit-core-83bd/build-jsc-win9x/cmakeconfig.h",
+      "sha256": "65becf92311c7c05a574ab7ad2093d233eb2119579ae549140006a3d1aed3670",
+      "size_bytes": 6402
+    },
+    {
+      "path": "/root/Win98-Modern-boot/apps/zetscape/port_profile.json",
+      "sha256": "5b99c0eafaaa523ca4f78ddf6432a6d54c74e4f3082486e03575e095e5cbb1cb",
+      "size_bytes": 2399
+    },
+    {
+      "path": "/root/Win98-Modern-boot/apps/zetscape/upstream/engine.h",
+      "sha256": "d80a8b1d2bced21b9c30fbfe6577b66e3e71719ded719e85e946c38fbee853e2",
+      "size_bytes": 2436
+    },
+    {
+      "path": "/root/Win98-Modern-boot/apps/zetscape/zetscape_extensions.h",
+      "sha256": "41994aecb558ea1b4914bfcde5a73bd9934c187bdfa01efcde1207c1398f882c",
+      "size_bytes": 1333
+    },
+    {
+      "path": "/root/Win98-Modern-boot/drivers/shizuku_gop/backend.c",
+      "sha256": "e56d59945113765ccae9accfaebb9b81f3e4a974ed18c899dd420745559e6ef5",
+      "size_bytes": 6807
+    },
+    {
+      "path": "/root/Win98-Modern-boot/drivers/shizuku_gop/gop_contract.h",
+      "sha256": "1be5f74f44823d4ebf5cb0595548eb416902dabe61bece46723266c9132fdead",
+      "size_bytes": 6088
+    },
+    {
+      "path": "/root/Win98-Modern-boot/shizukudos/win64/include/shzgpu.h",
+      "sha256": "9e83de7e7b9c004f5b7aeb8bcac40dca33c9b1f95adab47cd0bed46a368d0eb7",
+      "size_bytes": 8833
+    },
+    {
+      "path": "/root/Win98-Modern-boot/shizukudos/win64/dlls/shzgpu/shzgpu.c",
+      "sha256": "7378f67dffe4e19c93482b7f69187515aae14a5598cd7d1ec13cd18153cab010",
+      "size_bytes": 4613
+    },
+    {
+      "path": "/root/Win98-Modern-boot/shizukudos/win64/build.py",
+      "sha256": "9db537456fd8d25b228524cb8981bcb94dab4c66853e287796b6d347818703b6",
+      "size_bytes": 24560
+    }
+  ],
+  "effective_generated_features": {
+    "IEWEBKIT_WIN9X": 1,
+    "ENABLE_C_LOOP": 1,
+    "ENABLE_JIT": 0,
+    "ENABLE_DFG_JIT": 0,
+    "ENABLE_FTL_JIT": 0,
+    "ENABLE_WEBASSEMBLY": 0,
+    "ENABLE_WEBGL": 0,
+    "ENABLE_WEBGPU": 0
+  },
+  "feature_check": "effective_features.cpp compiled against the actual configured x86 JSC compiler/header graph",
+  "cache_discrepancy": {
+    "name": "ENABLE_WEBGL",
+    "cache_value": "ON",
+    "generated_header_value": 0,
+    "override_source": "Source/cmake/OptionsJSCOnly.cmake explicitly disables WebGL/WebGPU/WebCore",
+    "cache_does_not_prove_compiled_support": true
+  },
+  "wasm_constraints": [
+    {
+      "source": "Source/cmake/WebKitFeatures.cmake",
+      "actual_constraint": "ENABLE_WEBASSEMBLY conflicts with ENABLE_C_LOOP"
+    },
+    {
+      "source": "Source/WTF/wtf/PlatformUse.h and PlatformEnable.h",
+      "actual_constraint": "x86 selects JSVALUE32_64; PlatformEnable forcibly disables JIT/DFG/FTL"
+    },
+    {
+      "source": "Source/JavaScriptCore/llint/InPlaceInterpreter.asm",
+      "actual_constraint": "IPInt register definitions omit x86; JS-to-Wasm entry emits error for C_LOOP"
+    }
+  ],
+  "next_patch": {
+    "kind": "Genuine JSC C API Wasm acceptance probe, not a Wasm backend implementation",
+    "source_pin": "/root/Win98-Modern-boot/tools/iewebkit_port/zetscape_capabilities_83bd/private/probe-r2/probe-source-pin.json",
+    "source_pin_sha256": "1ce31c29c5d46d8cd257a654b0fce00df4762b8f0bbca2fdfad033f3395bde4f",
+    "patch_sha256": "880d4deda45c69cb42b6ec94db0f1d69ec96dcf41649c3a338c6dd970b0e00e7",
+    "current_profile_expected_result": "Native runtime may abort earlier; disabled Wasm must FAIL, never skip",
+    "cases": 8,
+    "module_bytes": 92,
+    "module_sha256": "9a62c36f162364314370e6baa9c2a06b85b73e24b282c4b65f0999d85d6def73",
+    "maximum_wasm_memory_bytes": 131072,
+    "link_and_execution_pending": true
+  },
+  "syntax_and_reference": {
+    "receipt": "/root/Win98-Modern-boot/tools/iewebkit_port/zetscape_capabilities_83bd/private/check-r2/syntax-reference-receipt.json",
+    "sha256": "53005a3a3231addd1a9d154c21c6e12fe19d3fabac2eba0dfaace0a191052230",
+    "status": "SYNTAX_AND_HOST_REFERENCE_PASS",
+    "host_reference_is_native_jsc_proof": false,
+    "engine_linked": false
+  },
+  "graphics": {
+    "shared_abi": {
+      "capabilities": 63,
+      "covers": [
+        "HTML",
+        "CSS",
+        "DOM",
+        "JSC",
+        "verified-TLS",
+        "origin-isolation"
+      ],
+      "has_driver_contract": false,
+      "certifies_wasm_webgl_webgpu": false
+    },
+    "ordinary_win98se": {
+      "genuine_software_renderer_allowed": true,
+      "actual_webcore_provider_built": false,
+      "required_backend_work": [
+        "Win98 native layout/paint/fonts/input/presentation",
+        "real WebGL shader API/execution/readback even when software",
+        "real supported WebGPU implementation/backend"
+      ]
+    },
+    "shizuku_win98": {
+      "hardware_acceleration_required": true,
+      "gop_backend_sets_FB_FORCE_SOFTWARE": true,
+      "cpu_framebuffer_copy_is_hardware_rendering": false,
+      "root_extension_flags_are_gpu_proof": false,
+      "root_extension_has_webgpu_hardware_bit": false,
+      "kernel64_shzgpu_is_x86_win98_transport": false,
+      "kernel64_api_reference": [
+        "ShzGpuQuery",
+        "ShzGpuGetCapset",
+        "ShzGpuCreateContext",
+        "ShzGpuCreateResource",
+        "ShzGpuSubmit",
+        "ShzGpuReadback",
+        "ShzGpuDestroyResource",
+        "ShzGpuDestroyContext"
+      ],
+      "missing_connection": [
+        "actual x86 Win98 GPU user/kernel transport and owned-device resource lifecycle",
+        "genuine WebCore/ANGLE/EGL or WGL backend with fences/readback/window presentation",
+        "real WebGPU implementation and supported driver API",
+        "separate software and hardware native runs with no silent fallback"
+      ]
+    },
+    "hardware_pass": false,
+    "webgl_pass": false,
+    "webgpu_pass": false
+  },
+  "dependencies": [
+    "repair actual WTF initializer/CRT/TLS abort with fresh native evidence",
+    "regenerate correct paired runtime graph and link real JSC",
+    "implement genuine x86 Wasm execution/calling/trap/memory/JS bridge instead of flipping flags",
+    "restore/build real WebCore and shared IE/Zetscape provider",
+    "complete explicit versioned modern JS/CSS/Wasm/WebGL/WebGPU test inventory and real application tests"
+  ],
+  "variant_selection": {
+    "canonical_ie_variant": "No exact IE5.5/Win98SE/x86/legacy-inproc selection; no WinME fallback used",
+    "standalone_target": "root apps/zetscape/port_profile.json actual Win98SE"
+  },
+  "gaps": [
+    "full Wasm SIMD/threads/Atomics/GC/reference types/exceptions/tail calls/multiple memories/memory64/streaming/async browser integration",
+    "full JavaScript/CSS standards and finite conformance denominator",
+    "provider navigation/rendering/input/history/TLS/origin teardown",
+    "actual driver-backed WebGL/WebGPU device-loss/resource accounting"
+  ],
+  "canonical_sources_modified": false,
+  "guest_executed": false,
+  "native_wasm_pass": false,
+  "ordinary_win98se_pass": false,
+  "shizuku_gpu_pass": false,
+  "full_modern_web_pass": false
+}

@@ -1,0 +1,7 @@
+LIBRARY M98LOC
+EXPORTS
+    get_api_table
+    GetGeoInfoW=m98_vlc_GetGeoInfoW@20
+    GetUserDefaultUILanguage=m98_vlc_GetUserDefaultUILanguage@0
+    GetUserGeoID=m98_vlc_GetUserGeoID@4
+    IsValidLanguageGroup=m98_vlc_IsValidLanguageGroup@8

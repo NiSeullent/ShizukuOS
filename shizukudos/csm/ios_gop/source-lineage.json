@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "csmwrap_commit": "7f30b740c352ee952eb596bf10ae263a8a5da4c7",
+  "prerequisite": "Explicit firmware GOP profile from shizukudos/csm/patches/0002-force-firmware-gop.patch; ordinary profile remains unchanged.",
+  "upstream_source_sha256": {
+    "seabios/vgasrc/cbvga.c": "10f50e4206b2ae94a0fcc99dfaccdc429bf5d6e65b6dbef67ffd52e0a0227de8",
+    "seabios/vgasrc/vgabios.c": "57572e631c5afc27bb39037c8660fb3d1574439436391cced01918855de1d93b"
+  },
+  "helper_sha256": "2211d0813f7b11c20092a756cd099840bb3248bbfbad8083a82e1cc1df211eb8",
+  "patch_sha256": "45b517f1e1464278faa3003e8721fc0fbe5c8e3f41b78b7b654fc55a326f4267",
+  "patch_path": "shizukudos/csm/ios_gop/patches/0001-legacy-gop-mode03-text-geometry.patch",
+  "license": "LGPL-3.0-only",
+  "scope": "BIOS INT10 mode03 logical text geometry/page metadata; no IO.SYS binary modification, GOP protocol call, native display driver, or descriptor persistence change.",
+  "host_fixture_sha256": {
+    "tests/fixtures/seabios/vgasrc/cbvga.c": "10f50e4206b2ae94a0fcc99dfaccdc429bf5d6e65b6dbef67ffd52e0a0227de8",
+    "tests/fixtures/seabios/vgasrc/vgabios.c": "11d3ee668d63637896058680e444c27af295b5886925e38c3ced5367b148c0e4"
+  },
+  "host_fixture_scope": {
+    "cbvga.c": "Unmodified pinned upstream file",
+    "vgabios.c": "Pinned upstream license/includes and complete calc_page_size, vga_set_mode, handle_100f functions only; omitted unrelated interrupt handlers."
+  },
+  "upstream_function_sha256": {
+    "calc_page_size": "d48e3bab6fbc37f6945bf164a7c88b3ee7a30ca864d29ed8587f5bc57e36bb5b",
+    "vga_set_mode": "b9d19af1962a614be8bd019b311162ec10951c45b1c2d0004dcfd4c2bb703bdf",
+    "handle_100f": "0106ab8e4786b7ededa0a2e7790f4b942792e2886128fec80f9ab164a410be10"
+  },
+  "seabios_commit": "578d260b94f62150bf6ab9149784287bd1154f06",
+  "repositories": {
+    "csmwrap": "https://github.com/CSMWrap/CSMWrap.git",
+    "seabios": "https://github.com/CSMWrap/seabios-csmwrap.git"
+  }
+}

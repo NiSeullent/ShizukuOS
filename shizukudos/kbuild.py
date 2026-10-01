@@ -22,7 +22,9 @@ K32_FLAGS = ["-m32", "-march=i486", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-W
              "-fno-builtin", "-fno-pic", "-fno-pie", "-mno-sse", "-mno-mmx", "-msoft-float",
              "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-ident", "-fno-common",
              "-mpreferred-stack-boundary=2", "-fwrapv", "-fno-strict-aliasing", "-fno-tree-loop-distribute-patterns"]
-K64_FLAGS = ["-m64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin",
+# Pin the guest ISA: a distribution GCC may default to x86-64-v3 and emit
+# BMI2 even for integer-only code, which faults on baseline x86-64 CPUs.
+K64_FLAGS = ["-m64", "-march=x86-64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin",
              "-fno-pic", "-fno-pie", "-mcmodel=kernel", "-mno-red-zone", "-mgeneral-regs-only",
              "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-ident", "-fno-common",
              "-fwrapv", "-fno-strict-aliasing", "-fno-tree-loop-distribute-patterns"]
@@ -37,7 +39,7 @@ def build_standalone_stub(k32=False):
     out.mkdir(parents=True, exist_ok=True)
     asm_o, c_o, elf = out / "boot.asm.o", out / "boot32.o", out / "boot.elf"
     run(["nasm", "-f", "elf32", "-w+all", "-o", asm_o, STUB_DIR / ("boot_pm.asm" if k32 else "boot.asm")])
-    run(["gcc", "-m32", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin", "-fno-pic",
+    run(["gcc", "-m32", "-march=i486", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin", "-fno-pic",
          "-fno-pie", "-fno-stack-protector", "-mno-sse", "-mno-mmx", "-fno-asynchronous-unwind-tables", "-fno-ident",
          "-fno-tree-loop-distribute-patterns", *(["-DSTUB_K32"] if k32 else []), "-c", STUB_DIR / "boot32.c", "-o", c_o])
     run(["ld", "-m", "elf_i386", "-nostdlib", "-z", "noexecstack", "--no-warn-rwx-segments", "-T", STUB_DIR / "boot.ld",
@@ -48,6 +50,15 @@ def build_standalone_stub(k32=False):
 
 def sources(directory, suffix):
     return sorted((SHZ / directory).glob(f"*{suffix}"))
+
+
+def source_hashes():
+    directories = [SHZ / name for name in ("kernel32", "kernel64", "kcommon", "abi", "win64/include")]
+    directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native"]
+    paths = {p for directory in directories for p in directory.rglob("*")
+             if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
+    paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c"])
+    return {str(p.relative_to(REPO)): sha256_file(p) for p in sorted(paths)}
 
 
 def build_kernel(name, directory, cflags, nasm_fmt, ld_emul, out_name, extra_c=()):
@@ -97,6 +108,7 @@ def main():
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     results = {}
+    built_sources = source_hashes()
     k32 = build_kernel("kernel32", "kernel32", K32_FLAGS, "elf32", "elf_i386", "KERNEL32.BIN")
     # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.
     # ShizukuFS v1 (ext4 format, jbd2): the portable libsfs sources are linked freestanding (kernel64/sfs_mount.c).
@@ -127,11 +139,12 @@ def main():
     results["kernel32-standalone"] = {"bytes": k32s["bytes"], "sha256": k32s["sha256"], "elf_sha256": k32s["elf_sha256"],
                                       "stub_sha256": stub32["sha256"],
                                       "commands": [[str(x) for x in c] for c in k32s["commands"]]}
+    if source_hashes() != built_sources:
+        raise RuntimeError("kernel sources changed during build; no verified receipt written")
     shzlib.write_json(BUILD / "kernels-build-result.json", {
         "built_utc": shzlib.utc_now(), "git": shzlib.git_state(), "kernels": results,
         "kernel32_machine": "EM_386 ELF32", "kernel64_machine": "EM_X86_64 ELF64",
-        "sources_sha256": {str(p.relative_to(REPO)): sha256_file(p) for d in ("kernel32", "kernel64", "kcommon")
-                           for p in sorted((SHZ / d).glob("*")) if p.is_file()}})
+        "sources_sha256": built_sources})
     print(json.dumps({k: {"bytes": v["bytes"], "sha256": v["sha256"]} for k, v in results.items()}, indent=2))
 
 

@@ -1,0 +1,200 @@
+--- a/Source/WTF/wtf/win/RunLoopWin.cpp
++++ b/Source/WTF/wtf/win/RunLoopWin.cpp
+@@ -28,27 +28,52 @@
+ 
+ #include <wtf/WindowsExtras.h>
+ 
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++#include "RunLoopWin9x.h"
++#define RunLoopDefWindowProc DefWindowProcA
++#define RunLoopPeekMessage PeekMessageA
++#define RunLoopDispatchMessage DispatchMessageA
++#define RunLoopPostMessage PostMessageA
++using RunLoopCreateStruct = CREATESTRUCTA;
++#else
++#define RunLoopDefWindowProc DefWindowProc
++#define RunLoopPeekMessage PeekMessage
++#define RunLoopDispatchMessage DispatchMessage
++#define RunLoopPostMessage PostMessage
++using RunLoopCreateStruct = CREATESTRUCT;
++#endif
++
+ namespace WTF {
+ 
+ static const UINT PerformWorkMessage = WM_USER + 1;
+ static const UINT SetTimerMessage = WM_USER + 2;
+ static const UINT FireTimerMessage = WM_USER + 3;
++#if !defined(IEWEBKIT_WIN9X) || !IEWEBKIT_WIN9X
+ static const LPCWSTR kRunLoopMessageWindowClassName = L"RunLoopMessageWindow";
++#endif
+ 
+ LRESULT CALLBACK RunLoop::RunLoopWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+ {
++    #if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    if (RunLoop* runLoop = static_cast<RunLoop*>(iewkRunLoopGetContextA(hWnd)))
++#else
+     if (RunLoop* runLoop = static_cast<RunLoop*>(getWindowPointer(hWnd, 0)))
++#endif
+         return runLoop->wndProc(hWnd, message, wParam, lParam);
+ 
+     if (message == WM_CREATE) {
+-        LPCREATESTRUCT createStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
++        const RunLoopCreateStruct* createStruct = reinterpret_cast<const RunLoopCreateStruct*>(lParam);
+ 
+         // Associate the RunLoop with the window.
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++        iewkRunLoopSetContextA(hWnd, createStruct->lpCreateParams);
++#else
+         setWindowPointer(hWnd, 0, createStruct->lpCreateParams);
++#endif
+         return 0;
+     }
+ 
+-    return ::DefWindowProc(hWnd, message, wParam, lParam);
++    return ::RunLoopDefWindowProc(hWnd, message, wParam, lParam);
+ }
+ 
+ LRESULT RunLoop::wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+@@ -67,7 +92,7 @@
+         return 0;
+     }
+ 
+-    return ::DefWindowProc(hWnd, message, wParam, lParam);
++    return ::RunLoopDefWindowProc(hWnd, message, wParam, lParam);
+ }
+ 
+ void RunLoop::run()
+@@ -76,7 +101,7 @@
+     while (true) {
+         runLoop.fireTimers();
+         MSG message;
+-        while (BOOL result = ::PeekMessage(&message, nullptr, 0, 0, PM_REMOVE)) {
++        while (BOOL result = ::RunLoopPeekMessage(&message, nullptr, 0, 0, PM_REMOVE)) {
+             if (result == -1)
+                 break;
+             if (message.message == WM_QUIT)
+@@ -119,7 +144,7 @@
+         auto timer = m_timers.last();
+         if (timer->m_nextFireDate > now)
+             return;
+-        ::PostMessage(m_runLoopMessageWindow, FireTimerMessage, std::bit_cast<uintptr_t>(timer), 0LL);
++        ::RunLoopPostMessage(m_runLoopMessageWindow, FireTimerMessage, std::bit_cast<uintptr_t>(timer), 0LL);
+         m_timers.removeLast();
+     }
+ }
+@@ -145,18 +170,26 @@
+ 
+ void RunLoop::registerRunLoopMessageWindowClass()
+ {
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    bool result = iewkRunLoopRegisterClassA(RunLoop::RunLoopWndProc);
++#else
+     WNDCLASS windowClass = { };
+     windowClass.lpfnWndProc = RunLoop::RunLoopWndProc;
+     windowClass.cbWndExtra = sizeof(RunLoop*);
+     windowClass.lpszClassName = kRunLoopMessageWindowClassName;
+     bool result = ::RegisterClass(&windowClass);
++#endif
+     RELEASE_ASSERT(result);
+ }
+ 
+ RunLoop::RunLoop()
+ {
++#if defined(IEWEBKIT_WIN9X) && IEWEBKIT_WIN9X
++    m_runLoopMessageWindow = iewkRunLoopCreateWindowA(this);
++#else
+     m_runLoopMessageWindow = ::CreateWindow(kRunLoopMessageWindowClassName, nullptr, 0,
+         CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, HWND_MESSAGE, nullptr, nullptr, this);
++#endif
+     RELEASE_ASSERT(::IsWindow(m_runLoopMessageWindow));
+ }
+ 
+@@ -169,7 +202,7 @@
+ {
+     // FIXME: No need to wake up the run loop if we've already called dispatch
+     // before the run loop has had the time to respond.
+-    ::PostMessage(m_runLoopMessageWindow, PerformWorkMessage, reinterpret_cast<WPARAM>(this), 0);
++    ::RunLoopPostMessage(m_runLoopMessageWindow, PerformWorkMessage, reinterpret_cast<WPARAM>(this), 0);
+ 
+     if (m_wakeUpCallback)
+         m_wakeUpCallback();
+@@ -180,7 +213,7 @@
+     auto& runLoop = RunLoop::currentSingleton();
+     runLoop.fireTimers();
+     MSG message;
+-    while (::PeekMessage(&message, nullptr, 0, 0, PM_REMOVE)) {
++    while (::RunLoopPeekMessage(&message, nullptr, 0, 0, PM_REMOVE)) {
+         if (message.message == WM_QUIT)
+             return CycleResult::Stop;
+ 
+@@ -195,7 +228,7 @@
+         return;
+ 
+     ::TranslateMessage(&message);
+-    ::DispatchMessage(&message);
++    ::RunLoopDispatchMessage(&message);
+ }
+ 
+ // RunLoop::Timer
+@@ -252,7 +285,7 @@
+     });
+     // If this is the first timer now, we need to cycle the run loop so we don't sleep through it
+     if (m_runLoop->m_timers.last() == this)
+-        ::PostMessage(m_runLoop->m_runLoopMessageWindow, SetTimerMessage, std::bit_cast<uintptr_t>(this), interval.millisecondsAs<UINT>());
++        ::RunLoopPostMessage(m_runLoop->m_runLoopMessageWindow, SetTimerMessage, std::bit_cast<uintptr_t>(this), interval.millisecondsAs<UINT>());
+ }
+ 
+ void RunLoop::TimerBase::stop()
+--- /dev/null
++++ b/Source/WTF/wtf/win/RunLoopWin9x.h
+@@ -0,0 +1,50 @@
++/* IEWebKit Win9x backend for the pinned WTF RunLoopWin.cpp.
++ * This port contains no document renderer or JavaScript substitute.
++ * Copyright (c) 2026 IEWebKit contributors. SPDX-License-Identifier: MIT
++ */
++#pragma once
++#include <windows.h>
++#include <stdint.h>
++
++#if !defined(_WIN32) || !defined(__i386__)
++#error The Win9x RunLoop backend requires the native Win32 x86 ABI.
++#endif
++
++#define IEWK_RUNLOOP_CLASS_A "IEWKWin9xRunLoopMessageWindow"
++
++/* A hidden, unowned popup supplies a real message queue on Win9x. Unlike
++ * HWND_MESSAGE it can receive broadcasts; the WTF WndProc only handles its
++ * own work/timer messages and delegates other messages to DefWindowProcA.
++ * No WS_VISIBLE style and no ShowWindow call are used.
++ */
++static inline ATOM iewkRunLoopRegisterClassA(WNDPROC callback)
++{
++    WNDCLASSA klass = { 0 };
++    klass.lpfnWndProc = callback;
++    klass.cbWndExtra = sizeof(void*);
++    klass.hInstance = GetModuleHandleA(NULL);
++    klass.lpszClassName = IEWK_RUNLOOP_CLASS_A;
++    return RegisterClassA(&klass);
++}
++
++static inline HWND iewkRunLoopCreateWindowA(void* context)
++{
++    return CreateWindowExA(WS_EX_TOOLWINDOW, IEWK_RUNLOOP_CLASS_A, "", WS_POPUP,
++        0, 0, 0, 0, NULL, NULL, GetModuleHandleA(NULL), context);
++}
++
++static inline void* iewkRunLoopGetContextA(HWND window)
++{
++    return (void*)(uintptr_t)(uint32_t)GetWindowLongA(window, 0);
++}
++
++static inline void iewkRunLoopSetContextA(HWND window, void* context)
++{
++    SetWindowLongA(window, 0, (LONG)(uintptr_t)context);
++}
++
++static inline DWORD iewkRunLoopWait(DWORD timeout)
++{
++    return MsgWaitForMultipleObjectsEx(0, NULL, timeout, QS_ALLINPUT,
++        MWMO_INPUTAVAILABLE);
++}
