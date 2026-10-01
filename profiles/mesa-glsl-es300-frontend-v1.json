@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "kind": "genuine-mesa-compiler-only-es300-profile",
+  "status": "DRAFT_UNVERIFIED",
+  "current_generation_built": false,
+  "typed_hir_build_verified": false,
+  "full_sanitizer_pass_verified": false,
+  "resource_guard_controls_executed": false,
+  "archive_sha256": "1628058a8d2c0615975de5a15ab7bbb9638c50000b5bed9456ff423ea034a81f",
+  "source_pin_sha256": "71b5e6199051ac9baa9b1bfb21816324cf57325039cf4dcbd9f9c110ebcf4efa",
+  "patched_sources": {
+    "src/compiler/glsl/glcpp/glcpp.h": {
+      "before_sha256": "73b64c7a67c2fc527f8d1ae8f9f7f9be61af18394f95027085f4591b1f9426e4",
+      "after_sha256": "1fdcb2558c7899174f2c0134c0b32fb49c9ef7397c63d8cfcab5151d7a1eed76"
+    },
+    "src/compiler/glsl/glcpp/pp.c": {
+      "before_sha256": "bde71a8ada1fb91b07faec073c5bebb9d421980230cd2dd70f77d774077ce346",
+      "after_sha256": "7863871a14f45d03fa5afd0d4d58a62a222d7d541f8633b26d7f8876a17fdb1f"
+    },
+    "src/compiler/glsl/glcpp/glcpp-parse.y": {
+      "before_sha256": "b6eac80221c3a8bf620f178d8f54a0681c9bdf118f75527421b2682a86f68642",
+      "after_sha256": "a039b3bceff0c10aed882710c11ba1b64df7b559c46e115a27335e2def0d1271"
+    },
+    "src/compiler/glsl/glsl_parser_extras.h": {
+      "before_sha256": "9ce02a185a41776644492902910acfa7e908631876721118eddb0234c94d42c4",
+      "after_sha256": "d3d62884508063d896360aad822321c4a3f95cfde3253ba865483661284e13fe"
+    },
+    "src/compiler/glsl/ast_to_hir.cpp": {
+      "before_sha256": "1920c4e52b8e3b2df0cabcaaf3e53e26144da9cc58b53eedc32980132f5a2e7c",
+      "after_sha256": "aa484458b2d8248a4a02050ac0d7d49d16dc29fb0f50f7bbcc0951c991fb7bb0"
+    },
+    "src/compiler/glsl/glsl_parser_extras.cpp": {
+      "before_sha256": "9e51f12009e8b99971def84d156830e61367d7e782576b323559051857d33965",
+      "after_sha256": "5055b6d92a365c7c36b9aafbfb5642c34766342a1040611444266a082b786056"
+    },
+    "src/util/strtod.c": {
+      "before_sha256": "2ea61e98b2647db776e9eda1d067b4a9c6b130935a3f91c4b9fff0c768ab5ccb",
+      "after_sha256": "04f8287be436284ebb393ce70483cf4cf7c849ae463fe2d5f5681020a2ec56a9"
+    }
+  },
+  "stages": [
+    "vertex",
+    "fragment"
+  ],
+  "language_version": 300,
+  "extensions": false,
+  "backend_lowering": false,
+  "gl_context": false,
+  "pipe_screen": false,
+  "webgl": false,
+  "webgpu": false,
+  "native_execution": false
+}

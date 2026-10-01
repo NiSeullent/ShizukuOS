@@ -1,0 +1,3 @@
+# Reviewed native TLS controller drafts
+
+These exact source-only drafts were reviewed; no native run was launched. They retain the original canonical Linux workspace and owned build-output paths. Do not import or execute the finish/control files directly: both have top-level actions. Recreate the original private build layout and reviewed stage, recheck queue/resource/source authority, then copy them to their original launch directory before using them. The finish gate uses140monotonicseconds from preservation of a completed GUI launch receipt. Historical source hashes are preserved; any adaptation requires a fresh authority and review. Windows media/disks and private fixtures must be supplied locally.

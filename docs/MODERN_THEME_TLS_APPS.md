@@ -497,3 +497,13 @@ The first actual original-v10 Script trial logged307 ordered checks and actual c
 A fresh original-v10 runtime trial passed307ordered native checks and actual owned-child exit0, then finished normally with original files preserved. Strict acceptance, a fresh complete i486 supplement and244 final byte rereads after that slow supplement all passed. The selected checks cover modern syntax/numeric behavior, UTF16, Promise jobs, function/runtime lifetime, UTC/current timezone and x87 restoration. The earlier lifecycle-failed trial remains preserved. Actual supervisor exit is unobserved; only its requested exit0 is recorded.
 
 This runtime-only result does not certify MSHTML DOM, full current JavaScript or other browser standards. Fresh correctedTLS preparation is independently cleared; actual TLS guest/WinSock/OS integration remains pending. Source-groundedWasm SIMD/currentEH gaps now have a separately guarded additive implementation owner, and GLSL compiler failures remain preserved. Disk relief continues in a separate agent; large builds require actual resource admission.
+
+
+## Closed disk relief and native TLS acceptance preparation
+
+Separate disk optimization recovered914931712B of previously unshared allocation without changing original or six completed trial disk contents. All seven full hashes and file identities are preserved, and all locks are released. Filesystem-wide free movement remains separate.
+
+Corrected TLS native acceptance source83d896b has passed53 normal/53 optimized host controls plus independent source and actual-stage review. The actual Windows98 TLS run still must pass all24 original checks, observed child exit and normallyfinished VM lifecycle. Genuine GLSL and scalar SIMD profiles remain under separate resource-guarded development; complete browser standards, OS TLS and modern application compatibility remain incomplete.
+
+
+Publication checkpoint: user explicitly requested all project source committed and merged into main for work in another environment. The nine GLSL and six SIMD paths are frozen as unbuilt DRAFT_UNVERIFIED; source syntax/JSON/exact patch checks do not certify runtime behavior. Generic native vector ABI, complete SIMD/GC/control/OOM and fresh original-regression proof remain pending. No new native TLS VM was launched. Source-only reviewed native controller drafts are included for continuation with their canonical-path restrictions. Historical accepted source/evidence bindings remain tied to their exact original branch revisions.

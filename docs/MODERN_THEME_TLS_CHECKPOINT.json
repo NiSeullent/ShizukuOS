@@ -1,5 +1,5 @@
 {
-  "schema": 11,
+  "schema": 12,
   "date": "2026-10-01",
   "branch": "codex/theme-tls-5abe",
   "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
@@ -37,8 +37,24 @@
       "sha256": "af59c776542dab98aec930dd973610cda0ad5f52bef00e37e258bb1231214fef"
     },
     {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-trident-script-5abe-native-v2/result.json",
+      "sha256": "2a53edfecff32e2ee7d3d9af17d63245adc66e8587131d4c4d70825a1ece601b"
+    },
+    {
       "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-wasm-numeric-5abe-native-v1/result.json",
       "sha256": "05a1ade263a68fad49dae82f6c2d66117e094a91268c10de7ba15d80e0dd408c"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/guest-files.json",
+      "sha256": "e0c7af02378c03edd1e6a21d00787964ee9b6b20cb8d28d2f646f7191fed9632"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/provenance.json",
+      "sha256": "3776c62a6bcb80548263e664508aa38df08eea1892a5f7c8dc7253e99557f634"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/stage-authority.json",
+      "sha256": "ad368edb18594c5b9a12823655eb9d8ebd13a28c814519996af6e1b14687c852"
     },
     {
       "path": "/root/Win98-Modern-boot/build/trident-automation-native-5abe-20261001-v1/guest-files.json",
@@ -57,6 +73,90 @@
       "sha256": "9e87ddbe5ddb43ecba1edc7d5ac49b5a6bc88a9b56f6adb27c847a9a06738587"
     },
     {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/first-metadata-preflight-failure.json",
+      "sha256": "99d6068e668b3957e9a3703f01d0900beb521fd8dcc195285ffca74d52090e05"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/schema9-original.json",
+      "sha256": "a707479f9a151fbbe53919670e17d2c630c087418efdab85f0f2c35c02a5abfd"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema11/schema10-original.json",
+      "sha256": "961510ec86db353162d688cf165925a21bcba998dc5544d757a9ffff3a2256e4"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/disk-followup-5abe-20261001-v2/closed-checkpoint.json",
+      "sha256": "80d2f00ac87910e317963e7badcaa1359ec85e4fae030d709ea00d2ad0b1e241"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/disk-native-closed-authorities-v1/result.json",
+      "sha256": "a78469cb04b1777f3bf9bfd0def34c864afd0fcbea591c2c837a736c5bbc314d"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/glsl-frontend-held-source-v4/result.json",
+      "sha256": "19c47bacfe491a07abeb2d59fdf72f70faf0b9dd0732ece8fae378f2780ae565"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/glsl-generator-dependencies-v3/result.json",
+      "sha256": "19a1d52bae7228dadb8b0fca20a86fd8d3dc3d563ca9bb0ed9e49c1919917f08"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/graphics-compiler-audit-v1/result.json",
+      "sha256": "10f2383dc0e3b296a52bc8ed313782fe758d53c2ff2e54eb1f1b372551a0967f"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-native-preparation-v1/result.json",
+      "sha256": "f5035a24b07c2f7508125e5dfc994e86eb7470b647763f1b002d5cde9cb4d5ef"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-native-stage-independent-review-v1/result.json",
+      "sha256": "5b9930bf871da13fd260a0db35582d76b8af936c3b2588a200063c927d1f4cf2"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-closure-v2/result.json",
+      "sha256": "f966e20c43a210540996928cf19069f6c663ec917ed1c82888e26d2bf49c4eb3"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-controls-v2/result.json",
+      "sha256": "ba7e77688f6a29ccb11f6d6f347628f990d5b3ccf8b7f1d541a7a1526da7cb55"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-independent-review-v2/result.json",
+      "sha256": "05c8c634611aba14c46b57f65ff8763d4c1cdf666b3ac928d79c495a96fdaf49"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-i486-guard-script-final-v1/result.json",
+      "sha256": "8d344d9632e524e4ef367ed2b046f032460f83d67754ef52eeccbade46435801"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-acceptance-v2/result.json",
+      "sha256": "f0b07f8e3e050163945f9b87cc3de780cddcdb855465ec443489d45243947dfe"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-acceptance-v2/root-byte-readback.json",
+      "sha256": "18dedc579fcb9649e8ef97d452b8f99e48a6b04abdf27c8b01741d6009b87afe"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-launch-v2/launch.py",
+      "sha256": "fa2ba409618567e2e0ffbc99e37076d38f133a774495cf70a166428427dae0a9"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-rejected-v1/result.json",
+      "sha256": "545e1713815ef92b5a49d767722f3d22595e4e0e516ec69555c927fae5b2eb16"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/closure-pins.json",
+      "sha256": "9c1fded89dcd0a38fb3862f3a9a80f31c2d0a5ac50f0102b6e9d2f8f724edfd0"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/result.json",
+      "sha256": "4c8eed84646180f0108ee4dd4dc0353a2090060d05e7d061966a78f5e0dd7559"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/source-observations.json",
+      "sha256": "f1e3f2f95d7710e49562ffbd005f945ef1bd2a7002a523c1243139cd15f27e13"
+    },
+    {
       "path": "benchmarks/media/legcord-1.3.0/archive-receipt.json",
       "sha256": "033902afd518abfafdf85f91d1870a1fd6f68e0b6cee61dae6295227b20cac03"
     },
@@ -67,6 +167,10 @@
     {
       "path": "benchmarks/modern-web-targets-v1.json",
       "sha256": "b8194c9fa5de0d7d09419334daf70eed6195928839a3dbfbe2c3ecf1a6f16657"
+    },
+    {
+      "path": "build/checkpoint-schema12/schema11-original.json",
+      "sha256": "f2d478234ef890a09fa1c501afdac5ad22e491f375ccf2e70e0c175137d58bf4"
     },
     {
       "path": "build/checkpoint-schema6/schema5-original.json",
@@ -165,6 +269,38 @@
       "sha256": "a156437f67b7d39f9be3ee51ce51943ae40e0a9ddc81fa8ce4472e4c1e65d748"
     },
     {
+      "path": "build/disk-followup-5abe-20261001-v3/FOLLOWUP_HANDOFF.md",
+      "sha256": "866ad71f008fc671e19bfbec6780b51a4141b6e1730eb4e4ee3e3488edc2d48d"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/closed-checkpoint.json",
+      "sha256": "04c83c06be079743738f2644a6db144e24cb19048afbde7727e66290541cbd54"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/readonly-audit.json",
+      "sha256": "8c9e0bd01961906eac7451facdfb6b52fd34a3cc025c1456430223191813b0af"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/share_closed_owned.py",
+      "sha256": "1b4cfe35e6c8523877439a448f67018aec146ff757d6afb792eb7f93ef9d1e68"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/sharing-plan.json",
+      "sha256": "087c24e194f7b04c7caee470f3901e81bd8c4b02ea2112582a165dc14b27e234"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/sharing-ranges.jsonl",
+      "sha256": "75e8d2b652b95416b811eb74caff279641e062c7e390962a3963e0be3e4ab301"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/sharing-result.json",
+      "sha256": "774561c60cefa67a6bae8c469e08688c38bdbe8aeec99a167750c96bee86725f"
+    },
+    {
+      "path": "build/disk-followup-root-review-v1/result.json",
+      "sha256": "b4c3216fe26645f661ab7bd8f4e74dd212db2b31a8703d844043e0389d35340c"
+    },
+    {
       "path": "build/dns-config-v2/result.json",
       "sha256": "cc3dda3c0f4e673f0af67e2abafeb482e563b476b8d900bc6327a17cdfeac6af"
     },
@@ -227,6 +363,22 @@
     {
       "path": "build/tls13-i486-independent-review-v1/result.json",
       "sha256": "9ef72856e5dfddb357e9e89211dcf0f01d18babe437cec30649e52fe04ebb9e3"
+    },
+    {
+      "path": "build/tls13-i486-native-verifier-independent-review-v1/result.json",
+      "sha256": "0f634c32cc2e715280de86d00da099db1ddc6bc8e5adad095423b5fe09496547"
+    },
+    {
+      "path": "build/tls13-i486-native-verifier-root-review-v1/result.json",
+      "sha256": "290b03ed487001bfb624d8b5d6ce70e6f0cf6de43a957c85d1b465a4cebe59b3"
+    },
+    {
+      "path": "build/tls13-i486-native-verifier-stage-binding-v1/result.json",
+      "sha256": "a430a4d048d3696298f828274280ea552b387b04eb2852e3a0c15ed57f0e0915"
+    },
+    {
+      "path": "build/tls13-i486-native-verifier-v1/result.json",
+      "sha256": "35c84f712bc8593132768bbcee8f4bd6e88d06e4863918b8741cc21579fed380"
     },
     {
       "path": "build/tls13-i486-root-readback-v2/failed-review.json",
@@ -479,106 +631,6 @@
     {
       "path": "docs/NATIVE_QA_SCHEDULING_SCOPE.md",
       "sha256": "8f4567ff592a0ba9c192499c5b00753fdcc4cc6cd149a87b4e4520a0bd51d89e"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-controls-v2/result.json",
-      "sha256": "ba7e77688f6a29ccb11f6d6f347628f990d5b3ccf8b7f1d541a7a1526da7cb55"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-closure-v2/result.json",
-      "sha256": "f966e20c43a210540996928cf19069f6c663ec917ed1c82888e26d2bf49c4eb3"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-independent-review-v2/result.json",
-      "sha256": "05c8c634611aba14c46b57f65ff8763d4c1cdf666b3ac928d79c495a96fdaf49"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-native-preparation-v1/result.json",
-      "sha256": "f5035a24b07c2f7508125e5dfc994e86eb7470b647763f1b002d5cde9cb4d5ef"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/graphics-compiler-audit-v1/result.json",
-      "sha256": "10f2383dc0e3b296a52bc8ed313782fe758d53c2ff2e54eb1f1b372551a0967f"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/glsl-generator-dependencies-v3/result.json",
-      "sha256": "19a1d52bae7228dadb8b0fca20a86fd8d3dc3d563ca9bb0ed9e49c1919917f08"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-rejected-v1/result.json",
-      "sha256": "545e1713815ef92b5a49d767722f3d22595e4e0e516ec69555c927fae5b2eb16"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-launch-v2/launch.py",
-      "sha256": "fa2ba409618567e2e0ffbc99e37076d38f133a774495cf70a166428427dae0a9"
-    },
-    {
-      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/guest-files.json",
-      "sha256": "e0c7af02378c03edd1e6a21d00787964ee9b6b20cb8d28d2f646f7191fed9632"
-    },
-    {
-      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/stage-authority.json",
-      "sha256": "ad368edb18594c5b9a12823655eb9d8ebd13a28c814519996af6e1b14687c852"
-    },
-    {
-      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/provenance.json",
-      "sha256": "3776c62a6bcb80548263e664508aa38df08eea1892a5f7c8dc7253e99557f634"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/schema9-original.json",
-      "sha256": "a707479f9a151fbbe53919670e17d2c630c087418efdab85f0f2c35c02a5abfd"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/first-metadata-preflight-failure.json",
-      "sha256": "99d6068e668b3957e9a3703f01d0900beb521fd8dcc195285ffca74d52090e05"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-acceptance-v2/result.json",
-      "sha256": "f0b07f8e3e050163945f9b87cc3de780cddcdb855465ec443489d45243947dfe"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-acceptance-v2/root-byte-readback.json",
-      "sha256": "18dedc579fcb9649e8ef97d452b8f99e48a6b04abdf27c8b01741d6009b87afe"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-i486-guard-script-final-v1/result.json",
-      "sha256": "8d344d9632e524e4ef367ed2b046f032460f83d67754ef52eeccbade46435801"
-    },
-    {
-      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-trident-script-5abe-native-v2/result.json",
-      "sha256": "2a53edfecff32e2ee7d3d9af17d63245adc66e8587131d4c4d70825a1ece601b"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-native-stage-independent-review-v1/result.json",
-      "sha256": "5b9930bf871da13fd260a0db35582d76b8af936c3b2588a200063c927d1f4cf2"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/result.json",
-      "sha256": "4c8eed84646180f0108ee4dd4dc0353a2090060d05e7d061966a78f5e0dd7559"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/closure-pins.json",
-      "sha256": "9c1fded89dcd0a38fb3862f3a9a80f31c2d0a5ac50f0102b6e9d2f8f724edfd0"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/source-observations.json",
-      "sha256": "f1e3f2f95d7710e49562ffbd005f945ef1bd2a7002a523c1243139cd15f27e13"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/glsl-frontend-held-source-v4/result.json",
-      "sha256": "19c47bacfe491a07abeb2d59fdf72f70faf0b9dd0732ece8fae378f2780ae565"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/disk-followup-5abe-20261001-v2/closed-checkpoint.json",
-      "sha256": "80d2f00ac87910e317963e7badcaa1359ec85e4fae030d709ea00d2ad0b1e241"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/disk-native-closed-authorities-v1/result.json",
-      "sha256": "a78469cb04b1777f3bf9bfd0def34c864afd0fcbea591c2c837a736c5bbc314d"
-    },
-    {
-      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema11/schema10-original.json",
-      "sha256": "961510ec86db353162d688cf165925a21bcba998dc5544d757a9ffff3a2256e4"
     }
   ],
   "theme": {
@@ -672,7 +724,20 @@
       "native_protocol_verified": false,
       "winsock_verified": false,
       "os_provider_verified": false,
-      "independent_review_sha256": "5b9930bf871da13fd260a0db35582d76b8af936c3b2588a200063c927d1f4cf2"
+      "independent_review_sha256": "5b9930bf871da13fd260a0db35582d76b8af936c3b2588a200063c927d1f4cf2",
+      "native_verifier": {
+        "source_commit": "83d896bbd34f18054616c46883dc0d3119594bf1",
+        "normal_methods": 53,
+        "optimized_methods": 53,
+        "source_independent_clear": true,
+        "independent_review_sha256": "0f634c32cc2e715280de86d00da099db1ddc6bc8e5adad095423b5fe09496547",
+        "root_review_sha256": "290b03ed487001bfb624d8b5d6ce70e6f0cf6de43a957c85d1b465a4cebe59b3",
+        "actual_stage_binding_files": 7660,
+        "actual_stage_binding_bytes": 388955724,
+        "native_trial_accepted": false,
+        "os_tls_verified": false,
+        "winsock_verified": false
+      }
     }
   },
   "applications": {
@@ -950,9 +1015,12 @@
     "tools/stage_tls13_i486_native.py": "08516754180d5ea6b1547581c871889e4fed4dce1c57137687de68c237810498",
     "tools/tls13_i486_native_stage_evidence.py": "ba9eb7542b099b81a43f75c474602a27a14d6ee9b2f14f9c526a8da2c6d1ef92",
     "tests/test_tls13_i486_native_stage.py": "75a690a35eb31fc7f9336fd049f82d6ff17a70da878c3bc6a14bd6aeac1dd4f7",
-    "docs/TLS13_I486_NATIVE_STAGE.md": "90c1fee8f44b24901dadc7a02d6b69c7b4460117ed30a8399ffaa4bd7d558564"
+    "docs/TLS13_I486_NATIVE_STAGE.md": "90c1fee8f44b24901dadc7a02d6b69c7b4460117ed30a8399ffaa4bd7d558564",
+    "tools/verify_tls13_i486_native.py": "0b660a00a9f88009038b6e46b2876d4b54411ab53296d04beaa0f92aeac100c8",
+    "tests/test_tls13_i486_native.py": "6c2c18ee31f8cb86d37c92a3326c2deafed62173f4c4ae5583f443aac4fa8eb9",
+    "docs/TLS13_I486_NATIVE_EVIDENCE.md": "c63cdfa46d06c7401ac2e246f8f37a0377df55d984074362f464c458127d6653"
   },
-  "updated_utc": "2026-10-01T12:45:40.139818+00:00",
+  "updated_utc": "2026-10-01T13:02:29.126045+00:00",
   "source_commits": {
     "foundation": "a12a4a95e9f3fbddcea82d69f124876d22fb660f",
     "dns_config": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -979,7 +1047,8 @@
     "tls13_i486_correction": "3b429e1d38f5e00aa3c33cd01f9b41559fab847c",
     "wasm_browser_memory_correction": "76cb02bc64b27b6359bd012150530b431814e047",
     "quickjs_corrected_wasm_memory": "a0d2d724e8b70ad7d3e2ad2de2519f3a5d0a62ab",
-    "corrected_tls_native_stage": "076ed584a29772a486b9944a4347e6ea5fd1e1e0"
+    "corrected_tls_native_stage": "076ed584a29772a486b9944a4347e6ea5fd1e1e0",
+    "corrected_tls_native_verifier": "83d896bbd34f18054616c46883dc0d3119594bf1"
   },
   "dns_config": {
     "source_commit": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
@@ -1294,7 +1363,7 @@
       "external_toolchain_complete_closure": false
     },
     "glsl_frontend": {
-      "status": "HELD_UNACCEPTED_SOURCE_RESOURCE_GUARDED",
+      "status": "DRAFT_UNVERIFIED_SOURCE_FROZEN_FOR_MAIN_PUBLICATION",
       "audit_sha256": "10f2383dc0e3b296a52bc8ed313782fe758d53c2ff2e54eb1f1b372551a0967f",
       "isolated_generator_dependency_sha256": "19a1d52bae7228dadb8b0fca20a86fd8d3dc3d563ca9bb0ed9e49c1919917f08",
       "full_profile_accepted": false,
@@ -1318,7 +1387,8 @@
       "implementation_complete": false,
       "native": false,
       "browser": false,
-      "full": false
+      "full": false,
+      "new_integer_data_simd_profile_status": "SIX_DRAFT_UNVERIFIED_SOURCE_PATHS_FROZEN_FOR_MAIN_PUBLICATION"
     }
   },
   "disk_optimization": {
@@ -1351,10 +1421,49 @@
       "new_shared_bytes": 0
     },
     "followup_v3": {
-      "status": "ALLOCATED_ONLY_RELIEF_IN_PROGRESS",
+      "status": "BOUNDED_SCOPE_CLOSED_CONTENT_INTEGRITY_PASS_WITH_PARTIAL_ALLOCATION_COVERAGE",
+      "closed": true,
       "root_closed_two_native_authority_sha256": "a78469cb04b1777f3bf9bfd0def34c864afd0fcbea591c2c837a736c5bbc314d",
-      "closed": false,
-      "actual_recovery_accepted": false
+      "actual_recovery_accepted": true,
+      "actual_new_destination_unshared_extent_decrease_bytes": 914931712,
+      "kernel_compared_shared_bytes": 939941888,
+      "already_shared_counter_bytes": 25010176,
+      "processed_ranges": 127,
+      "planned_ranges": 422,
+      "different_destination_ranges_refused": 145,
+      "full_seven_original_and_closed_copy_before_after_hashes_passed": true,
+      "all_raw_stat_fields_preserved": true,
+      "all_owned_locks_released": true,
+      "root_raw_reopened": false,
+      "checkpoint_sha256": "04c83c06be079743738f2644a6db144e24cb19048afbde7727e66290541cbd54",
+      "root_review_sha256": "b4c3216fe26645f661ab7bd8f4e74dd212db2b31a8703d844043e0389d35340c",
+      "net_system_free_delta_attributed": false,
+      "native_compiler_reserve_waived": false
     }
+  },
+  "publication": {
+    "user_requested": true,
+    "target_branch": "main",
+    "all_current_project_source_requested": true,
+    "remote_upload_complete": false,
+    "main_merge_complete": false,
+    "accepted_historical_source_bindings_remain_branch_specific": true
+  },
+  "draft_source_sha256": {
+    "src/m98_glsl_frontend.h": "f362c468b47291c03bdf39d99b70e228bd07eb157617c525147026385fb63462",
+    "src/m98_glsl_frontend.cpp": "714d06937f7e483ec89203eaf6df9e11bc01d6117692564891f1e9a9596c40cd",
+    "src/m98_glsl_frontend_port.h": "4932602f670bfb4cb180841cd15ca06bb45bcc7cf19d743ef44c2d0b6351c85e",
+    "src/m98_glsl_frontend_port.c": "0e03aea8454fa43207b3dd45f1b13c3055f0ddf41d8e98cf7601866d92323579",
+    "tests/m98_glsl_frontend_host.cpp": "d52698b2f4e08c8f9944e48e07085ddc48334d74b80336d2cd8f15a91fc3d98f",
+    "tools/build_glsl_frontend.py": "8cc9712a2f38814d63cd2a6d85f86b4bd87cf10432628ebad1f3d5948be6eaa3",
+    "profiles/mesa-glsl-es300-frontend-v1.json": "2b7a6c7dbc533eb5547ba34240c526a388eb47a3f249b5d5c64b2adf355a308d",
+    "patches/mesa-26.2.3-glsl-es300-frontend-v1.patch": "ce33accc979d6635f8bac2667e0fefbd04701b8b5f62f9d85f4f5aae466957f1",
+    "docs/TRIDENT_GLSL_FRONTEND.md": "50c1f837c5039baeac0ff5a8c1c0873d2b2c439fec5696d6934df7f59112eed6",
+    "profiles/wasm-i486-simd-v1.json": "b08c4596b7b0bf28484296dedd0f6c598b508897a2ee6c4957339d24fc9352ad",
+    "patches/wamr-f5f57c09-i486-simd-v1.patch": "eae298312541838d8823dbae9efc8389022266f9a8e50a3ddb0e1d15bc0facfc",
+    "tools/build_wasm_simd_profile.py": "6b014fb857347d29c6d1a661402335ddc589c473bd3b01f685e103a115d9d68f",
+    "tests/m98_wasm_simd_host.c": "64b7e0e40d3269511b20f6e90cdf02397f3b07d345aee959a570171b4feca577",
+    "tests/m98_wasm_simd_spec_host.c": "15cbe821436c3c3dd5f89909c5ab8d76abe0950bd7965333bb8e58aafa87c015",
+    "docs/TRIDENT_WASM_SIMD_PROFILE.md": "902aade011a0fb7daae2eeabb635853ad80f1f34de6acae418452d3988f530a7"
   }
 }

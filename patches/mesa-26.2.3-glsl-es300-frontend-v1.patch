@@ -1,0 +1,984 @@
+--- a/src/compiler/glsl/glcpp/glcpp.h
++++ b/src/compiler/glsl/glcpp/glcpp.h
+@@ -185,6 +185,14 @@
+ 		glcpp_parser_t *data,
+ 		unsigned version,
+ 		bool es);
++
++/* Compiler-only immutable preprocessing resources; no GL context. */
++struct m98_glsl_pp_config {
++ const struct gl_extensions *extensions;
++ gl_api api;
++ bool disable_line_continuations;
++ bool allow_extra_pp_tokens;
++};
+ 
+ struct glcpp_parser {
+ 	linear_ctx *linalloc;
+@@ -213,7 +221,7 @@
+ 	const struct gl_extensions *extension_list;
+ 	void *state;
+ 	gl_api api;
+-	struct gl_context *gl_ctx;
++	const struct m98_glsl_pp_config *config;
+ 	unsigned version;
+ 
+ 	/**
+@@ -232,7 +240,7 @@
+ };
+ 
+ glcpp_parser_t *
+-glcpp_parser_create(struct gl_context *gl_ctx,
++glcpp_parser_create(const struct m98_glsl_pp_config *config,
+                     glcpp_extension_iterator extensions, void *state);
+ 
+ int
+@@ -247,7 +255,7 @@
+ int
+ glcpp_preprocess(void *ralloc_ctx, const char **shader, char **info_log,
+ 		 glcpp_extension_iterator extensions, void *state,
+-		 struct gl_context *g_ctx);
++		 const struct m98_glsl_pp_config *config);
+ 
+ /* Functions for writing to the info log */
+ 
+--- a/src/compiler/glsl/glcpp/pp.c
++++ b/src/compiler/glsl/glcpp/pp.c
+@@ -25,7 +25,7 @@
+ #include <string.h>
+ #include <ctype.h>
+ #include "glcpp.h"
+-#include "main/mtypes.h"
++#include "main/consts_exts.h"
+ 
+ void
+ glcpp_error (YYLTYPE *locp, glcpp_parser_t *parser, const char *fmt, ...)
+@@ -224,13 +224,13 @@
+ int
+ glcpp_preprocess(void *ralloc_ctx, const char **shader, char **info_log,
+                  glcpp_extension_iterator extensions, void *state,
+-                 struct gl_context *gl_ctx)
++                 const struct m98_glsl_pp_config *config)
+ {
+ 	int errors;
+ 	glcpp_parser_t *parser =
+-		glcpp_parser_create(gl_ctx, extensions, state);
+-
+-	if (! gl_ctx->Const.DisableGLSLLineContinuations)
++		glcpp_parser_create(config, extensions, state);
++
++	if (! config->disable_line_continuations)
+ 		*shader = remove_line_continuations(parser, *shader);
+ 
+ 	glcpp_lex_set_source_string (parser, *shader);
+--- a/src/compiler/glsl/glcpp/glcpp-parse.y
++++ b/src/compiler/glsl/glcpp/glcpp-parse.y
+@@ -29,18 +29,8 @@
+ #include <inttypes.h>
+ 
+ #include "glcpp.h"
+-#include "main/mtypes.h"
++#include "main/consts_exts.h"
+ #include "util/strndup.h"
+-
+-const char *
+-_mesa_lookup_shader_include(struct gl_context *ctx, char *path,
+-                            bool error_check);
+-
+-size_t
+-_mesa_get_shader_include_cursor(struct gl_shared_state *shared);
+-
+-void
+-_mesa_set_shader_include_cursor(struct gl_shared_state *shared, size_t cursor);
+ 
+ static void
+ yyerror(YYLTYPE *locp, glcpp_parser_t *parser, const char *error);
+@@ -353,78 +343,8 @@
+       }
+    }
+ |  HASH_TOKEN INCLUDE NEWLINE {
+-      size_t include_cursor = _mesa_get_shader_include_cursor(parser->gl_ctx->Shared);
+-
+-      /* Remove leading and trailing "" or <> */
+-      char *start = strchr($2, '"');
+-      if (!start) {
+-         _mesa_set_shader_include_cursor(parser->gl_ctx->Shared, 0);
+-         start = strchr($2, '<');
+-      }
+-      char *path = strndup(start + 1, strlen(start + 1) - 1);
+-
+-      const char *shader =
+-         _mesa_lookup_shader_include(parser->gl_ctx, path, false);
+-      free(path);
+-
+-      if (!shader)
+-         glcpp_error(&@1, parser, "%s not found", $2);
+-      else {
+-         /* Create a temporary parser with the same settings */
+-         glcpp_parser_t *tmp_parser =
+-            glcpp_parser_create(parser->gl_ctx, parser->extensions, parser->state);
+-         tmp_parser->version_set = true;
+-         tmp_parser->version = parser->version;
+-
+-         /* Set the shader source and run the lexer */
+-         glcpp_lex_set_source_string(tmp_parser, shader);
+-
+-         /* Copy any existing define macros to the temporary
+-          * shade include parser.
+-          */
+-         struct define_include di;
+-         di.parser = tmp_parser;
+-         di.loc = &@1;
+-
+-         hash_table_call_foreach(parser->defines,
+-                  glcpp_parser_copy_defines,
+-                  &di);
+-
+-         /* Print out '#include' to the glsl parser. We do this
+-          * so that it can do the error checking require to
+-          * make sure the ARB_shading_language_include
+-          * extension is enabled.
+-          */
+-         _mesa_string_buffer_printf(parser->output, "#include\n");
+-
+-         /* Parse the include string before adding to the
+-          * preprocessor output.
+-          */
+-         glcpp_parser_parse(tmp_parser);
+-         _mesa_string_buffer_printf(parser->info_log, "%s",
+-                     tmp_parser->info_log->buf);
+-         _mesa_string_buffer_printf(parser->output, "%s",
+-                     tmp_parser->output->buf);
+-
+-         /* Copy any new define macros to the parent parser
+-          * and steal the memory of our temp parser so we don't
+-          * free these new defines before they are no longer
+-          * needed.
+-          */
+-         di.parser = parser;
+-         di.loc = &@1;
+-         ralloc_steal(parser, tmp_parser);
+-
+-         hash_table_call_foreach(tmp_parser->defines,
+-                  glcpp_parser_copy_defines,
+-                  &di);
+-
+-         /* Destroy tmp parser memory we no longer need */
+-         glcpp_lex_destroy(tmp_parser->scanner);
+-         _mesa_hash_table_destroy(tmp_parser->defines, NULL);
+-      }
+-
+-      _mesa_set_shader_include_cursor(parser->gl_ctx->Shared, include_cursor);
++      /* The compiler-only profile has no shared GL include registry. */
++      glcpp_error(&@1, parser, "shader includes unsupported by compiler-only profile");
+    }
+ |  HASH_TOKEN IF pp_tokens NEWLINE {
+       /* Be careful to only evaluate the 'if' expression if
+@@ -784,7 +704,7 @@
+ junk:
+    /* empty */
+ |  pp_tokens {
+-      if (parser->gl_ctx->Const.AllowExtraPPTokens)
++      if (parser->config->allow_extra_pp_tokens)
+          glcpp_warning(&@1, parser, "extra tokens at end of directive");
+       else
+          glcpp_error(&@1, parser, "extra tokens at end of directive");
+@@ -1507,7 +1427,7 @@
+ #define INITIAL_PP_OUTPUT_BUF_SIZE 4048
+ 
+ glcpp_parser_t *
+-glcpp_parser_create(struct gl_context *gl_ctx,
++glcpp_parser_create(const struct m98_glsl_pp_config *config,
+                     glcpp_extension_iterator extensions, void *state)
+ {
+    glcpp_parser_t *parser;
+@@ -1542,11 +1462,11 @@
+                                                  INITIAL_PP_OUTPUT_BUF_SIZE);
+    parser->error = 0;
+ 
+-   parser->gl_ctx = gl_ctx;
++   parser->config = config;
+    parser->extensions = extensions;
+-   parser->extension_list = &gl_ctx->Extensions;
++   parser->extension_list = config->extensions;
+    parser->state = state;
+-   parser->api = gl_ctx->API;
++   parser->api = config->api;
+    parser->version = 0;
+    parser->version_set = false;
+ 
+--- a/src/compiler/glsl/glsl_parser_extras.h
++++ b/src/compiler/glsl/glsl_parser_extras.h
+@@ -81,7 +81,10 @@
+ 
+ 
+ struct _mesa_glsl_parse_state {
+-   _mesa_glsl_parse_state(struct gl_context *_ctx, mesa_shader_stage stage,
++   _mesa_glsl_parse_state(const struct gl_constants *_consts,
++                          const struct gl_extensions *_exts,
++                          const struct pipe_caps *_caps, gl_api _api,
++                          mesa_shader_stage stage,
+                           void *mem_ctx);
+ 
+    DECLARE_RZALLOC_CXX_OPERATORS(_mesa_glsl_parse_state);
+@@ -380,7 +383,7 @@
+    void process_version_directive(YYLTYPE *locp, int version,
+                                   const char *ident);
+ 
+-   struct gl_context *const ctx; /* only to be used for debug callback. */
++   /* Compiler-only immutable resources replace GL context/debug lifecycle. */
+    const struct gl_extensions *exts;
+    const struct gl_constants *consts;
+    const struct pipe_caps *caps;
+@@ -1125,6 +1128,7 @@
+ #endif
+ 
+ struct glcpp_parser;
++struct m98_glsl_pp_config;
+ struct _mesa_glsl_parse_state;
+ 
+ struct gl_context;
+@@ -1144,8 +1148,8 @@
+ 
+ extern int glcpp_preprocess(void *ctx, const char **shader, char **info_log,
+                             glcpp_extension_iterator extensions,
+-                            struct _mesa_glsl_parse_state *state,
+-                            struct gl_context *gl_ctx);
++                            void *state,
++                            const struct m98_glsl_pp_config *config);
+ 
+ #ifdef __cplusplus
+ }
+--- a/src/compiler/glsl/ast_to_hir.cpp
++++ b/src/compiler/glsl/ast_to_hir.cpp
+@@ -3922,8 +3922,8 @@
+    }
+ 
+    bool force_explict_uniform_loc_zero =
+-      state->ctx->Const.ForceExplicitUniformLocZero && qual->flags.q.uniform &&
+-      strcmp(state->ctx->Const.ForceExplicitUniformLocZero, var->name) == 0;
++      state->consts->ForceExplicitUniformLocZero && qual->flags.q.uniform &&
++      strcmp(state->consts->ForceExplicitUniformLocZero, var->name) == 0;
+ 
+    if (qual->flags.q.explicit_location || force_explict_uniform_loc_zero) {
+       apply_explicit_location(qual, var, state, loc,
+--- a/src/compiler/glsl/glsl_parser_extras.cpp
++++ b/src/compiler/glsl/glsl_parser_extras.cpp
+@@ -26,20 +26,13 @@
+ #include <string.h>
+ #include <assert.h>
+ 
+-#include "main/context.h"
+-#include "main/debug_output.h"
++#include "main/mtypes.h"
+ #include "main/formats.h"
+-#include "main/shaderobj.h"
+ #include "util/u_atomic.h" /* for p_atomic_cmpxchg */
+ #include "util/ralloc.h"
+-#include "util/disk_cache.h"
+-#include "util/log.h"
+-#include "util/mesa-blake3.h"
+ #include "ast.h"
+ #include "glsl_parser_extras.h"
+ #include "glsl_parser.h"
+-#include "glsl_to_nir.h"
+-#include "ir_optimization.h"
+ #include "builtin_functions.h"
+ #include "pipe/p_screen.h"
+ 
+@@ -60,11 +53,14 @@
+    {  20,  21,  30,  31,  32,  33,  40,  41,  42,  43,  44,  45, 46 };
+ 
+ 
+-_mesa_glsl_parse_state::_mesa_glsl_parse_state(struct gl_context *_ctx,
++_mesa_glsl_parse_state::_mesa_glsl_parse_state(const struct gl_constants *_consts,
++                                               const struct gl_extensions *_exts,
++                                               const struct pipe_caps *_caps,
++                                               gl_api _api,
+ 					       mesa_shader_stage stage,
+                                                void *mem_ctx)
+-   : ctx(_ctx), exts(&_ctx->Extensions), consts(&_ctx->Const), caps(&_ctx->screen->caps),
+-     api(_ctx->API), cs_ms_input_local_size_specified(false), cs_ms_input_local_size(),
++   : exts(_exts), consts(_consts), caps(_caps),
++     api(_api), cs_ms_input_local_size_specified(false), cs_ms_input_local_size(),
+      switch_state(), warnings_enabled(true)
+ {
+    assert(stage < MESA_SHADER_MESH_STAGES);
+@@ -84,10 +80,10 @@
+ 
+    /* Set default language version and extensions */
+    this->language_version = 110;
+-   this->forced_language_version = ctx->Const.ForceGLSLVersion;
+-   if (ctx->Const.GLSLZeroInit == 1) {
++   this->forced_language_version = consts->ForceGLSLVersion;
++   if (consts->GLSLZeroInit == 1) {
+       this->zero_init = (1u << ir_var_auto) | (1u << ir_var_temporary) | (1u << ir_var_shader_out);
+-   } else if (ctx->Const.GLSLZeroInit == 2) {
++   } else if (consts->GLSLZeroInit == 2) {
+       this->zero_init = (1u << ir_var_auto) | (1u << ir_var_temporary) | (1u << ir_var_function_out);
+    } else {
+       this->zero_init = 0;
+@@ -98,110 +94,110 @@
+    this->ARB_texture_rectangle_enable = true;
+ 
+    /* OpenGL ES 2.0 has different defaults from desktop GL. */
+-   if (_mesa_is_gles2(ctx)) {
++   if (api == API_OPENGLES2) {
+       this->language_version = 100;
+       this->es_shader = true;
+       this->ARB_texture_rectangle_enable = false;
+    }
+ 
+-   this->extensions = &ctx->Extensions;
+-
+-   this->Const.MaxLights = ctx->Const.MaxLights;
+-   this->Const.MaxClipPlanes = ctx->Const.MaxClipPlanes;
+-   this->Const.MaxTextureUnits = ctx->Const.MaxTextureUnits;
+-   this->Const.MaxTextureCoords = ctx->Const.MaxTextureCoordUnits;
+-   this->Const.MaxVertexAttribs = ctx->Const.Program[MESA_SHADER_VERTEX].MaxAttribs;
+-   this->Const.MaxVertexUniformComponents = ctx->Const.Program[MESA_SHADER_VERTEX].MaxUniformComponents;
+-   this->Const.MaxVertexTextureImageUnits = ctx->Const.Program[MESA_SHADER_VERTEX].MaxTextureImageUnits;
+-   this->Const.MaxCombinedTextureImageUnits = ctx->Const.MaxCombinedTextureImageUnits;
+-   this->Const.MaxTextureImageUnits = ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxTextureImageUnits;
+-   this->Const.MaxFragmentUniformComponents = ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxUniformComponents;
+-   this->Const.MinProgramTexelOffset = ctx->Const.MinProgramTexelOffset;
+-   this->Const.MaxProgramTexelOffset = ctx->Const.MaxProgramTexelOffset;
+-
+-   this->Const.MaxDrawBuffers = ctx->Const.MaxDrawBuffers;
+-
+-   this->Const.MaxDualSourceDrawBuffers = ctx->Const.MaxDualSourceDrawBuffers;
++   this->extensions = exts;
++
++   this->Const.MaxLights = consts->MaxLights;
++   this->Const.MaxClipPlanes = consts->MaxClipPlanes;
++   this->Const.MaxTextureUnits = consts->MaxTextureUnits;
++   this->Const.MaxTextureCoords = consts->MaxTextureCoordUnits;
++   this->Const.MaxVertexAttribs = consts->Program[MESA_SHADER_VERTEX].MaxAttribs;
++   this->Const.MaxVertexUniformComponents = consts->Program[MESA_SHADER_VERTEX].MaxUniformComponents;
++   this->Const.MaxVertexTextureImageUnits = consts->Program[MESA_SHADER_VERTEX].MaxTextureImageUnits;
++   this->Const.MaxCombinedTextureImageUnits = consts->MaxCombinedTextureImageUnits;
++   this->Const.MaxTextureImageUnits = consts->Program[MESA_SHADER_FRAGMENT].MaxTextureImageUnits;
++   this->Const.MaxFragmentUniformComponents = consts->Program[MESA_SHADER_FRAGMENT].MaxUniformComponents;
++   this->Const.MinProgramTexelOffset = consts->MinProgramTexelOffset;
++   this->Const.MaxProgramTexelOffset = consts->MaxProgramTexelOffset;
++
++   this->Const.MaxDrawBuffers = consts->MaxDrawBuffers;
++
++   this->Const.MaxDualSourceDrawBuffers = consts->MaxDualSourceDrawBuffers;
+ 
+    /* 1.50 constants */
+-   this->Const.MaxVertexOutputComponents = ctx->Const.Program[MESA_SHADER_VERTEX].MaxOutputComponents;
+-   this->Const.MaxGeometryInputComponents = ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxInputComponents;
+-   this->Const.MaxGeometryOutputComponents = ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxOutputComponents;
+-   this->Const.MaxGeometryShaderInvocations = ctx->Const.MaxGeometryShaderInvocations;
+-   this->Const.MaxFragmentInputComponents = ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxInputComponents;
+-   this->Const.MaxGeometryTextureImageUnits = ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxTextureImageUnits;
+-   this->Const.MaxGeometryOutputVertices = ctx->Const.MaxGeometryOutputVertices;
+-   this->Const.MaxGeometryTotalOutputComponents = ctx->Const.MaxGeometryTotalOutputComponents;
+-   this->Const.MaxGeometryUniformComponents = ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxUniformComponents;
+-
+-   this->Const.MaxVertexAtomicCounters = ctx->Const.Program[MESA_SHADER_VERTEX].MaxAtomicCounters;
+-   this->Const.MaxTessControlAtomicCounters = ctx->Const.Program[MESA_SHADER_TESS_CTRL].MaxAtomicCounters;
+-   this->Const.MaxTessEvaluationAtomicCounters = ctx->Const.Program[MESA_SHADER_TESS_EVAL].MaxAtomicCounters;
+-   this->Const.MaxGeometryAtomicCounters = ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxAtomicCounters;
+-   this->Const.MaxFragmentAtomicCounters = ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxAtomicCounters;
+-   this->Const.MaxComputeAtomicCounters = ctx->Const.Program[MESA_SHADER_COMPUTE].MaxAtomicCounters;
+-   this->Const.MaxCombinedAtomicCounters = ctx->Const.MaxCombinedAtomicCounters;
+-   this->Const.MaxAtomicBufferBindings = ctx->Const.MaxAtomicBufferBindings;
++   this->Const.MaxVertexOutputComponents = consts->Program[MESA_SHADER_VERTEX].MaxOutputComponents;
++   this->Const.MaxGeometryInputComponents = consts->Program[MESA_SHADER_GEOMETRY].MaxInputComponents;
++   this->Const.MaxGeometryOutputComponents = consts->Program[MESA_SHADER_GEOMETRY].MaxOutputComponents;
++   this->Const.MaxGeometryShaderInvocations = consts->MaxGeometryShaderInvocations;
++   this->Const.MaxFragmentInputComponents = consts->Program[MESA_SHADER_FRAGMENT].MaxInputComponents;
++   this->Const.MaxGeometryTextureImageUnits = consts->Program[MESA_SHADER_GEOMETRY].MaxTextureImageUnits;
++   this->Const.MaxGeometryOutputVertices = consts->MaxGeometryOutputVertices;
++   this->Const.MaxGeometryTotalOutputComponents = consts->MaxGeometryTotalOutputComponents;
++   this->Const.MaxGeometryUniformComponents = consts->Program[MESA_SHADER_GEOMETRY].MaxUniformComponents;
++
++   this->Const.MaxVertexAtomicCounters = consts->Program[MESA_SHADER_VERTEX].MaxAtomicCounters;
++   this->Const.MaxTessControlAtomicCounters = consts->Program[MESA_SHADER_TESS_CTRL].MaxAtomicCounters;
++   this->Const.MaxTessEvaluationAtomicCounters = consts->Program[MESA_SHADER_TESS_EVAL].MaxAtomicCounters;
++   this->Const.MaxGeometryAtomicCounters = consts->Program[MESA_SHADER_GEOMETRY].MaxAtomicCounters;
++   this->Const.MaxFragmentAtomicCounters = consts->Program[MESA_SHADER_FRAGMENT].MaxAtomicCounters;
++   this->Const.MaxComputeAtomicCounters = consts->Program[MESA_SHADER_COMPUTE].MaxAtomicCounters;
++   this->Const.MaxCombinedAtomicCounters = consts->MaxCombinedAtomicCounters;
++   this->Const.MaxAtomicBufferBindings = consts->MaxAtomicBufferBindings;
+    this->Const.MaxVertexAtomicCounterBuffers =
+-      ctx->Const.Program[MESA_SHADER_VERTEX].MaxAtomicBuffers;
++      consts->Program[MESA_SHADER_VERTEX].MaxAtomicBuffers;
+    this->Const.MaxTessControlAtomicCounterBuffers =
+-      ctx->Const.Program[MESA_SHADER_TESS_CTRL].MaxAtomicBuffers;
++      consts->Program[MESA_SHADER_TESS_CTRL].MaxAtomicBuffers;
+    this->Const.MaxTessEvaluationAtomicCounterBuffers =
+-      ctx->Const.Program[MESA_SHADER_TESS_EVAL].MaxAtomicBuffers;
++      consts->Program[MESA_SHADER_TESS_EVAL].MaxAtomicBuffers;
+    this->Const.MaxGeometryAtomicCounterBuffers =
+-      ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxAtomicBuffers;
++      consts->Program[MESA_SHADER_GEOMETRY].MaxAtomicBuffers;
+    this->Const.MaxFragmentAtomicCounterBuffers =
+-      ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxAtomicBuffers;
++      consts->Program[MESA_SHADER_FRAGMENT].MaxAtomicBuffers;
+    this->Const.MaxComputeAtomicCounterBuffers =
+-      ctx->Const.Program[MESA_SHADER_COMPUTE].MaxAtomicBuffers;
++      consts->Program[MESA_SHADER_COMPUTE].MaxAtomicBuffers;
+    this->Const.MaxCombinedAtomicCounterBuffers =
+-      ctx->Const.MaxCombinedAtomicBuffers;
++      consts->MaxCombinedAtomicBuffers;
+    this->Const.MaxAtomicCounterBufferSize =
+-      ctx->Const.MaxAtomicBufferSize;
++      consts->MaxAtomicBufferSize;
+ 
+    /* ARB_enhanced_layouts constants */
+-   this->Const.MaxTransformFeedbackBuffers = ctx->Const.MaxTransformFeedbackBuffers;
+-   this->Const.MaxTransformFeedbackInterleavedComponents = ctx->Const.MaxTransformFeedbackInterleavedComponents;
++   this->Const.MaxTransformFeedbackBuffers = consts->MaxTransformFeedbackBuffers;
++   this->Const.MaxTransformFeedbackInterleavedComponents = consts->MaxTransformFeedbackInterleavedComponents;
+ 
+    /* Compute shader constants */
+    for (unsigned i = 0; i < ARRAY_SIZE(this->Const.MaxComputeWorkGroupCount); i++)
+-      this->Const.MaxComputeWorkGroupCount[i] = ctx->Const.MaxComputeWorkGroupCount[i];
++      this->Const.MaxComputeWorkGroupCount[i] = consts->MaxComputeWorkGroupCount[i];
+    for (unsigned i = 0; i < ARRAY_SIZE(this->Const.MaxComputeWorkGroupSize); i++)
+-      this->Const.MaxComputeWorkGroupSize[i] = ctx->Const.MaxComputeWorkGroupSize[i];
+-
+-   this->Const.MaxComputeTextureImageUnits = ctx->Const.Program[MESA_SHADER_COMPUTE].MaxTextureImageUnits;
+-   this->Const.MaxComputeUniformComponents = ctx->Const.Program[MESA_SHADER_COMPUTE].MaxUniformComponents;
+-
+-   this->Const.MaxImageUnits = ctx->Const.MaxImageUnits;
+-   this->Const.MaxCombinedShaderOutputResources = ctx->Const.MaxCombinedShaderOutputResources;
+-   this->Const.MaxImageSamples = ctx->Const.MaxImageSamples;
+-   this->Const.MaxVertexImageUniforms = ctx->Const.Program[MESA_SHADER_VERTEX].MaxImageUniforms;
+-   this->Const.MaxTessControlImageUniforms = ctx->Const.Program[MESA_SHADER_TESS_CTRL].MaxImageUniforms;
+-   this->Const.MaxTessEvaluationImageUniforms = ctx->Const.Program[MESA_SHADER_TESS_EVAL].MaxImageUniforms;
+-   this->Const.MaxGeometryImageUniforms = ctx->Const.Program[MESA_SHADER_GEOMETRY].MaxImageUniforms;
+-   this->Const.MaxFragmentImageUniforms = ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxImageUniforms;
+-   this->Const.MaxComputeImageUniforms = ctx->Const.Program[MESA_SHADER_COMPUTE].MaxImageUniforms;
+-   this->Const.MaxCombinedImageUniforms = ctx->Const.MaxCombinedImageUniforms;
++      this->Const.MaxComputeWorkGroupSize[i] = consts->MaxComputeWorkGroupSize[i];
++
++   this->Const.MaxComputeTextureImageUnits = consts->Program[MESA_SHADER_COMPUTE].MaxTextureImageUnits;
++   this->Const.MaxComputeUniformComponents = consts->Program[MESA_SHADER_COMPUTE].MaxUniformComponents;
++
++   this->Const.MaxImageUnits = consts->MaxImageUnits;
++   this->Const.MaxCombinedShaderOutputResources = consts->MaxCombinedShaderOutputResources;
++   this->Const.MaxImageSamples = consts->MaxImageSamples;
++   this->Const.MaxVertexImageUniforms = consts->Program[MESA_SHADER_VERTEX].MaxImageUniforms;
++   this->Const.MaxTessControlImageUniforms = consts->Program[MESA_SHADER_TESS_CTRL].MaxImageUniforms;
++   this->Const.MaxTessEvaluationImageUniforms = consts->Program[MESA_SHADER_TESS_EVAL].MaxImageUniforms;
++   this->Const.MaxGeometryImageUniforms = consts->Program[MESA_SHADER_GEOMETRY].MaxImageUniforms;
++   this->Const.MaxFragmentImageUniforms = consts->Program[MESA_SHADER_FRAGMENT].MaxImageUniforms;
++   this->Const.MaxComputeImageUniforms = consts->Program[MESA_SHADER_COMPUTE].MaxImageUniforms;
++   this->Const.MaxCombinedImageUniforms = consts->MaxCombinedImageUniforms;
+ 
+    /* ARB_viewport_array */
+-   this->Const.MaxViewports = ctx->Const.MaxViewports;
++   this->Const.MaxViewports = consts->MaxViewports;
+ 
+    /* tessellation shader constants */
+-   this->Const.MaxPatchVertices = ctx->Const.MaxPatchVertices;
+-   this->Const.MaxTessGenLevel = ctx->Const.MaxTessGenLevel;
+-   this->Const.MaxTessControlInputComponents = ctx->Const.Program[MESA_SHADER_TESS_CTRL].MaxInputComponents;
+-   this->Const.MaxTessControlOutputComponents = ctx->Const.Program[MESA_SHADER_TESS_CTRL].MaxOutputComponents;
+-   this->Const.MaxTessControlTextureImageUnits = ctx->Const.Program[MESA_SHADER_TESS_CTRL].MaxTextureImageUnits;
+-   this->Const.MaxTessEvaluationInputComponents = ctx->Const.Program[MESA_SHADER_TESS_EVAL].MaxInputComponents;
+-   this->Const.MaxTessEvaluationOutputComponents = ctx->Const.Program[MESA_SHADER_TESS_EVAL].MaxOutputComponents;
+-   this->Const.MaxTessEvaluationTextureImageUnits = ctx->Const.Program[MESA_SHADER_TESS_EVAL].MaxTextureImageUnits;
+-   this->Const.MaxTessPatchComponents = ctx->Const.MaxTessPatchComponents;
+-   this->Const.MaxTessControlTotalOutputComponents = ctx->Const.MaxTessControlTotalOutputComponents;
+-   this->Const.MaxTessControlUniformComponents = ctx->Const.Program[MESA_SHADER_TESS_CTRL].MaxUniformComponents;
+-   this->Const.MaxTessEvaluationUniformComponents = ctx->Const.Program[MESA_SHADER_TESS_EVAL].MaxUniformComponents;
++   this->Const.MaxPatchVertices = consts->MaxPatchVertices;
++   this->Const.MaxTessGenLevel = consts->MaxTessGenLevel;
++   this->Const.MaxTessControlInputComponents = consts->Program[MESA_SHADER_TESS_CTRL].MaxInputComponents;
++   this->Const.MaxTessControlOutputComponents = consts->Program[MESA_SHADER_TESS_CTRL].MaxOutputComponents;
++   this->Const.MaxTessControlTextureImageUnits = consts->Program[MESA_SHADER_TESS_CTRL].MaxTextureImageUnits;
++   this->Const.MaxTessEvaluationInputComponents = consts->Program[MESA_SHADER_TESS_EVAL].MaxInputComponents;
++   this->Const.MaxTessEvaluationOutputComponents = consts->Program[MESA_SHADER_TESS_EVAL].MaxOutputComponents;
++   this->Const.MaxTessEvaluationTextureImageUnits = consts->Program[MESA_SHADER_TESS_EVAL].MaxTextureImageUnits;
++   this->Const.MaxTessPatchComponents = consts->MaxTessPatchComponents;
++   this->Const.MaxTessControlTotalOutputComponents = consts->MaxTessControlTotalOutputComponents;
++   this->Const.MaxTessControlUniformComponents = consts->Program[MESA_SHADER_TESS_CTRL].MaxUniformComponents;
++   this->Const.MaxTessEvaluationUniformComponents = consts->Program[MESA_SHADER_TESS_EVAL].MaxUniformComponents;
+ 
+    /* GL 4.5 / OES_sample_variables */
+-   this->Const.MaxSamples = ctx->Const.MaxSamples;
++   this->Const.MaxSamples = consts->MaxSamples;
+ 
+    this->current_function = NULL;
+    this->toplevel_ir = NULL;
+@@ -229,9 +225,9 @@
+     * outside the compatibility contexts of 3.x.
+     */
+    this->num_supported_versions = 0;
+-   if (_mesa_is_desktop_gl(ctx)) {
++   if (api == API_OPENGL_COMPAT || api == API_OPENGL_CORE) {
+       for (unsigned i = 0; i < ARRAY_SIZE(known_desktop_glsl_versions); i++) {
+-         if (known_desktop_glsl_versions[i] <= ctx->Const.GLSLVersion) {
++         if (known_desktop_glsl_versions[i] <= consts->GLSLVersion) {
+             this->supported_versions[this->num_supported_versions].ver
+                = known_desktop_glsl_versions[i];
+             this->supported_versions[this->num_supported_versions].gl_ver
+@@ -241,25 +237,25 @@
+          }
+       }
+    }
+-   if (_mesa_is_gles2_compatible(ctx)) {
++   if (api == API_OPENGLES2) {
+       this->supported_versions[this->num_supported_versions].ver = 100;
+       this->supported_versions[this->num_supported_versions].gl_ver = 20;
+       this->supported_versions[this->num_supported_versions].es = true;
+       this->num_supported_versions++;
+    }
+-   if (_mesa_is_gles3_compatible(ctx)) {
++   if (api == API_OPENGLES2 && consts->GLSLVersion >= 300) {
+       this->supported_versions[this->num_supported_versions].ver = 300;
+       this->supported_versions[this->num_supported_versions].gl_ver = 30;
+       this->supported_versions[this->num_supported_versions].es = true;
+       this->num_supported_versions++;
+    }
+-   if (_mesa_is_gles31_compatible(ctx)) {
++   if (api == API_OPENGLES2 && consts->GLSLVersion >= 310) {
+       this->supported_versions[this->num_supported_versions].ver = 310;
+       this->supported_versions[this->num_supported_versions].gl_ver = 31;
+       this->supported_versions[this->num_supported_versions].es = true;
+       this->num_supported_versions++;
+    }
+-   if (_mesa_is_gles32_compatible(ctx)) {
++   if (api == API_OPENGLES2 && consts->GLSLVersion >= 320) {
+       this->supported_versions[this->num_supported_versions].ver = 320;
+       this->supported_versions[this->num_supported_versions].gl_ver = 32;
+       this->supported_versions[this->num_supported_versions].es = true;
+@@ -285,7 +281,7 @@
+ 
+    this->supported_version_string = supported;
+ 
+-   if (ctx->Const.ForceGLSLExtensionsWarn)
++   if (consts->ForceGLSLExtensionsWarn)
+       _mesa_glsl_process_extension("all", NULL, "warn", NULL, this);
+ 
+    this->default_uniform_qualifier = new(this) ast_type_qualifier();
+@@ -322,19 +318,19 @@
+    memset(this->atomic_counter_offsets, 0,
+           sizeof(this->atomic_counter_offsets));
+    this->allow_extension_directive_midshader =
+-      ctx->Const.AllowGLSLExtensionDirectiveMidShader;
++      consts->AllowGLSLExtensionDirectiveMidShader;
+    this->alias_shader_extension =
+-      ctx->Const.AliasShaderExtension;
++      consts->AliasShaderExtension;
+    this->allow_vertex_texture_bias =
+-      ctx->Const.AllowVertexTextureBias;
++      consts->AllowVertexTextureBias;
+    this->allow_glsl_120_subset_in_110 =
+-      ctx->Const.AllowGLSL120SubsetIn110;
++      consts->AllowGLSL120SubsetIn110;
+    this->allow_glsl_embedded_structure_declarations =
+-      ctx->Const.AllowGLSLEmbeddedStructureDeclarations;
++      consts->AllowGLSLEmbeddedStructureDeclarations;
+    this->allow_builtin_variable_redeclaration =
+-      ctx->Const.AllowGLSLBuiltinVariableRedeclaration;
++      consts->AllowGLSLBuiltinVariableRedeclaration;
+    this->ignore_write_to_readonly_var =
+-      ctx->Const.GLSLIgnoreWriteToReadonlyVar;
++      consts->GLSLIgnoreWriteToReadonlyVar;
+ 
+    this->cs_input_local_size_variable_specified = false;
+ 
+@@ -525,7 +521,6 @@
+                GLenum type, const char *fmt, va_list ap)
+ {
+    bool error = (type == MESA_DEBUG_TYPE_ERROR);
+-   GLuint msg_id = 0;
+ 
+    assert(state->info_log != NULL);
+ 
+@@ -543,12 +538,8 @@
+ 
+    ralloc_vasprintf_append(&state->info_log, fmt, ap);
+ 
+-   const char *const msg = &state->info_log[msg_offset];
+-   struct gl_context *ctx = state->ctx;
+-
+-   /* Report the error via GL_ARB_debug_output. */
+-   _mesa_shader_debug(ctx, type, &msg_id, msg);
+-
++   /* Original diagnostic text is retained; no GL debug dispatcher exists. */
++   (void) msg_offset;
+    ralloc_strcat(&state->info_log, "\n");
+ }
+ 
+@@ -2273,345 +2264,24 @@
+    }
+ }
+ 
+-static void
+-opt_shader(const struct pipe_screen *screen,
+-           const struct gl_constants *consts,
+-           const struct gl_extensions *exts,
+-           struct gl_shader *shader,
+-           linear_ctx *linalloc)
+-{
+-   assert(shader->CompileStatus != COMPILE_FAILURE &&
+-          !shader->ir->is_empty());
+-
+-   /* Do some optimization at compile time to reduce shader IR size
+-    * and reduce later work if the same shader is linked multiple times.
+-    *
+-    * Run it just once, since NIR will do the real optimization.
+-    */
+-   do_common_optimization(shader->ir, false, shader->Stage, screen);
+-
+-   validate_ir_tree(shader->ir);
+-
+-   enum ir_variable_mode other;
+-   switch (shader->Stage) {
+-   case MESA_SHADER_VERTEX:
+-      other = ir_var_shader_in;
+-      break;
+-   case MESA_SHADER_FRAGMENT:
+-      other = ir_var_shader_out;
+-      break;
+-   default:
+-      /* Something invalid to ensure optimize_dead_builtin_uniforms
+-       * doesn't remove anything other than uniforms or constants.
+-       */
+-      other = ir_var_mode_count;
+-      break;
+-   }
+-
+-   optimize_dead_builtin_variables(shader->ir, other);
+-
+-   lower_vector_derefs(shader, linalloc);
+-
+-   lower_packing_builtins(shader->ir, exts->ARB_shading_language_packing,
+-                          exts->ARB_gpu_shader5,
+-                          consts->GLSLHasHalfFloatPacking);
+-   do_mat_op_to_vec(shader->ir);
+-
+-   lower_instructions(shader->ir, consts->ForceGLSLAbsSqrt,
+-                      exts->ARB_gpu_shader5);
+-
+-   do_vec_index_to_cond_assign(shader->ir);
+-
+-   validate_ir_tree(shader->ir);
+-}
+-
+-static bool
+-can_skip_compile(struct gl_context *ctx, struct gl_shader *shader,
+-                 const char *source, const blake3_hash source_blake3,
+-                 bool force_recompile, bool source_has_shader_include)
+-{
+-   if (!force_recompile) {
+-      if (ctx->Cache) {
+-         char buf[BLAKE3_HEX_LEN];
+-         disk_cache_compute_key(ctx->Cache, source, strlen(source),
+-                                shader->disk_cache_blake3);
+-         if (disk_cache_has_key(ctx->Cache, shader->disk_cache_blake3)) {
+-            /* We've seen this shader before and know it compiles */
+-            if (ctx->_Shader->Flags & GLSL_CACHE_INFO) {
+-               _mesa_blake3_format(buf, shader->disk_cache_blake3);
+-               fprintf(stderr, "deferring compile of shader: %s\n", buf);
+-            }
+-            shader->CompileStatus = COMPILE_SKIPPED;
+-
+-            free((void *)shader->FallbackSource);
+-
+-            /* Copy pre-processed shader include to fallback source otherwise
+-             * we have no guarantee the shader include source tree has not
+-             * changed.
+-             */
+-            if (source_has_shader_include) {
+-               shader->FallbackSource = strdup(source);
+-               memcpy(shader->fallback_source_blake3, source_blake3,
+-                      BLAKE3_OUT_LEN);
+-            } else {
+-               shader->FallbackSource = NULL;
+-            }
+-            memcpy(shader->compiled_source_blake3, source_blake3,
+-                   BLAKE3_OUT_LEN);
+-            return true;
+-         }
+-      }
+-   } else {
+-      /* We should only ever end up here if a re-compile has been forced by a
+-       * shader cache miss. In which case we can skip the compile if its
+-       * already been done by a previous fallback or the initial compile call.
+-       */
+-      if (shader->CompileStatus == COMPILE_SUCCESS)
+-         return true;
+-   }
+-
+-   return false;
+-}
+-
+-static void
+-log_compile_skip(struct gl_context *ctx, struct gl_shader *shader)
+-{
+-   if (ctx->_Shader->Flags & GLSL_DUMP) {
+-      _mesa_log("No GLSL IR for shader %d (shader may be from cache)\n",
+-                shader->Name);
+-   }
+-}
+-
+-void
+-_mesa_glsl_compile_shader(struct gl_context *ctx, struct gl_shader *shader,
+-                          FILE *dump_ir_file, bool dump_ast, bool dump_hir,
+-                          bool force_recompile)
+-{
+-   const char *source;
+-   const uint8_t *source_blake3;
+-
+-   if (force_recompile && shader->FallbackSource) {
+-      source = shader->FallbackSource;
+-      source_blake3 = shader->fallback_source_blake3;
+-   } else {
+-      source = shader->Source;
+-      source_blake3 = shader->source_blake3;
+-   }
+-
+-   /* Note this will be true for shaders the have #include inside comments
+-    * however that should be rare enough not to worry about.
+-    */
+-   bool source_has_shader_include =
+-      strstr(source, "#include") == NULL ? false : true;
+-
+-   /* If there was no shader include we can check the shader cache and skip
+-    * compilation before we run the preprocessor. We never skip compiling
+-    * shaders that use ARB_shading_language_include because we would need to
+-    * keep duplicate copies of the shader include source tree and paths.
+-    */
+-   if (!source_has_shader_include &&
+-       can_skip_compile(ctx, shader, source, source_blake3, force_recompile,
+-                        false)) {
+-      log_compile_skip(ctx, shader);
+-      return;
+-   }
+-
+-    struct _mesa_glsl_parse_state *state =
+-      new(shader) _mesa_glsl_parse_state(ctx, shader->Stage, shader);
+-
+-   if (ctx->Const.GenerateTemporaryNames)
+-      (void) p_atomic_cmpxchg(&ir_variable::temporaries_allocate_names,
+-                              false, true);
+-
+-   if (!source_has_shader_include || !force_recompile) {
+-      state->error = glcpp_preprocess(state, &source, &state->info_log,
+-                                      add_builtin_defines, state, ctx);
+-   }
+-
+-   /* Now that we have run the preprocessor we can check the shader cache and
+-    * skip compilation if possible for those shaders that contained a shader
+-    * include.
+-    */
+-   if (source_has_shader_include &&
+-       can_skip_compile(ctx, shader, source, source_blake3, force_recompile,
+-                        true)) {
+-      log_compile_skip(ctx, shader);
+-      return;
+-   }
+-
++/* Genuine compiler-only front-end entry, without cache/NIR/driver state. */
++int m98_mesa_frontend_parse(_mesa_glsl_parse_state *state, const char **source,
++                            ir_exec_list *hir)
++{
++   state->error = m98_glsl_port_preprocess(state, source, &state->info_log,
++                                          state, add_builtin_defines,
++                                          state->exts, state->api, 0);
+    if (!state->error) {
+-     _mesa_glsl_lexer_ctor(state, source);
+-     _mesa_glsl_parse(state);
+-     _mesa_glsl_lexer_dtor(state);
+-     do_late_parsing_checks(state);
+-   }
+-
+-   if (dump_ast) {
+-      ir_foreach_list_typed(ast_node, ast, link, &state->translation_unit) {
+-         ast->print();
+-      }
+-      printf("\n\n");
+-   }
+-
+-   ralloc_free(shader->ir);
+-   ralloc_free(shader->nir);
+-   shader->nir = NULL;
+-   shader->ir = new(shader) ir_exec_list;
++      _mesa_glsl_lexer_ctor(state, *source);
++      _mesa_glsl_parse(state);
++      _mesa_glsl_lexer_dtor(state);
++      do_late_parsing_checks(state);
++   }
+    if (!state->error && !state->translation_unit.is_empty())
+-      _mesa_ast_to_hir(shader->ir, state);
+-
+-   if (!state->error) {
+-      validate_ir_tree(shader->ir);
+-
+-      /* Print out the unoptimized IR. */
+-      if (dump_hir) {
+-         _mesa_print_ir(stdout, shader->ir, state);
+-      }
+-   }
+-
+-   if (shader->InfoLog)
+-      ralloc_free(shader->InfoLog);
+-
++      _mesa_ast_to_hir(hir, state);
+    if (!state->error)
+-      set_shader_inout_layout(shader, state);
+-
+-   shader->CompileStatus = state->error ? COMPILE_FAILURE : COMPILE_SUCCESS;
+-   shader->InfoLog = state->info_log;
+-   shader->Version = state->language_version;
+-   shader->IsES = state->es_shader;
+-   shader->has_implicit_conversions = state->has_implicit_conversions();
+-   shader->has_implicit_int_to_uint_conversion =
+-      state->has_implicit_int_to_uint_conversion();
+-   shader->KHR_shader_subgroup_basic_enable = state->KHR_shader_subgroup_basic_enable;
+-
+-   if (!state->error && !shader->ir->is_empty()) {
+-      if (state->es_shader &&
+-          (ctx->screen->shader_caps[shader->Stage].fp16 ||
+-           ctx->screen->shader_caps[shader->Stage].int16))
+-         lower_precision(ctx->screen, shader->Stage, shader->ir);
+-
+-      lower_builtins(shader->ir);
+-      assign_subroutine_indexes(state);
+-      lower_subroutine(shader->ir, state);
+-      opt_shader(ctx->screen, &ctx->Const, &ctx->Extensions, shader,
+-                 state->linalloc);
+-   }
+-
+-   if (!force_recompile) {
+-      free((void *)shader->FallbackSource);
+-
+-      /* Copy pre-processed shader include to fallback source otherwise we
+-       * have no guarantee the shader include source tree has not changed.
+-       */
+-      if (source_has_shader_include) {
+-         shader->FallbackSource = strdup(source);
+-         memcpy(shader->fallback_source_blake3, source_blake3, BLAKE3_OUT_LEN);
+-      } else {
+-         shader->FallbackSource = NULL;
+-      }
+-   }
+-
+-   if (ctx->_Shader && ctx->_Shader->Flags & GLSL_DUMP) {
+-      if (shader->CompileStatus) {
+-         assert(shader->ir);
+-         _mesa_log("GLSL IR for shader %d:\n", shader->Name);
+-         _mesa_print_ir(mesa_log_get_file(), shader->ir, NULL);
+-         _mesa_log("\n\n");
+-      } else {
+-         _mesa_log("GLSL shader %d failed to compile.\n", shader->Name);
+-      }
+-      if (shader->InfoLog && shader->InfoLog[0] != 0) {
+-         _mesa_log("GLSL shader %d info log:\n", shader->Name);
+-         _mesa_log("%s\n", shader->InfoLog);
+-      }
+-   }
+-
+-   if (dump_ir_file) {
+-      if (shader->CompileStatus) {
+-         assert(shader->ir);
+-         _mesa_print_ir(dump_ir_file, shader->ir, NULL);
+-      }
+-   }
+-
+-   if (shader->CompileStatus == COMPILE_SUCCESS) {
+-      memcpy(shader->compiled_source_blake3, source_blake3, BLAKE3_OUT_LEN);
+-
+-      shader->nir = glsl_to_nir(shader, ctx->screen->nir_options[shader->Stage],
+-                                source_blake3);
+-   }
+-
+-   delete state->symbols;
+-   ralloc_free(state);
+-
+-   if (ctx->Cache && shader->CompileStatus == COMPILE_SUCCESS) {
+-      char blake3_buf[BLAKE3_HEX_LEN];
+-      disk_cache_put_key(ctx->Cache, shader->disk_cache_blake3);
+-      if (ctx->_Shader->Flags & GLSL_CACHE_INFO) {
+-         _mesa_blake3_format(blake3_buf, shader->disk_cache_blake3);
+-         fprintf(stderr, "marking shader: %s\n", blake3_buf);
+-      }
+-   }
+-}
+-
+-} /* extern "C" */
+-/**
+- * Do the set of common optimizations passes
+- *
+- * \param ir                          List of instructions to be optimized
+- * \param linked                      Is the shader linked?  This enables
+- *                                    optimizations passes that remove code at
+- *                                    global scope and could cause linking to
+- *                                    fail.
+- * \param uniform_locations_assigned  Have locations already been assigned for
+- *                                    uniforms?  This prevents the declarations
+- *                                    of unused uniforms from being removed.
+- *                                    The setting of this flag only matters if
+- *                                    \c linked is \c true.
+- * \param options                     The driver's preferred shader options.
+- * \param native_integers             Selects optimizations that depend on the
+- *                                    implementations supporting integers
+- *                                    natively (as opposed to supporting
+- *                                    integers in floating point registers).
+- */
+-bool
+-do_common_optimization(ir_exec_list *ir, bool linked, mesa_shader_stage stage,
+-                       const struct pipe_screen *screen)
+-{
+-   const bool debug = false;
+-   bool progress = false;
+-
+-#define OPT(PASS, ...) do {                                             \
+-      if (debug) {                                                      \
+-         fprintf(stderr, "START GLSL optimization %s\n", #PASS);        \
+-         const bool opt_progress = PASS(__VA_ARGS__);                   \
+-         progress = opt_progress || progress;                           \
+-         if (opt_progress)                                              \
+-            _mesa_print_ir(stderr, ir, NULL);                           \
+-         fprintf(stderr, "GLSL optimization %s: %s progress\n",         \
+-                 #PASS, opt_progress ? "made" : "no");                  \
+-      } else {                                                          \
+-         progress = PASS(__VA_ARGS__) || progress;                      \
+-      }                                                                 \
+-   } while (false)
+-
+-   OPT(propagate_invariance, ir);
+-   OPT(do_if_simplification, ir);
+-   OPT(opt_flatten_nested_if_blocks, ir);
+-
+-   OPT(do_dead_code_unlinked, ir);
+-   OPT(do_tree_grafting, ir);
+-   OPT(do_minmax_prune, ir);
+-   OPT(do_rebalance_tree, ir);
+-   OPT(do_algebraic, ir);
+-   OPT(do_lower_jumps, ir, true, !screen->shader_caps[stage].cont_supported);
+-
+-   /* If an optimization pass fails to preserve the invariant flag, calling
+-    * the pass only once earlier may result in incorrect code generation. Always call
+-    * propagate_invariance() last to avoid this possibility.
+-    */
+-   OPT(propagate_invariance, ir);
+-
+-#undef OPT
+-
+-   return progress;
+-}
++      validate_ir_tree(hir);
++   return state->error;
++}
++
++} /* extern C: original front-end helpers */
+--- a/src/util/strtod.c
++++ b/src/util/strtod.c
+@@ -49,7 +49,7 @@
+ static void
+ _mesa_locale_init_once(void)
+ {
+-   loc = newlocale(LC_CTYPE_MASK, "C", NULL);
++   loc = newlocale(LC_NUMERIC_MASK, "C", NULL);
+    atexit(_mesa_locale_fini);
+ }
+ 
