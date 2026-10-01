@@ -138,7 +138,7 @@ when run without ISO options. To publish a reviewed public development ISO, use
 `python3 site/deploy/publish_static.py --iso build/<public-image>.iso --iso-source-commit <40-character-lowercase-commit>`.
 The adjacent builder receipt `<public-image>.json` must identify the same path,
 size, SHA256 and source commit, with `private: false`. An ISO containing supplied
-Microsoft media is refused. ISO files must be regular files of at most256MiB
+Microsoft media is refused. ISO files must be regular files of at most 512 MiB
 with an ISO9660 primary descriptor; source links and special files are refused.
 
 The publisher retains the input handle, hashes and copies it in1MiB chunks,
@@ -172,7 +172,7 @@ Older publishers may not use this lock, so rollback also checks that `current`
 still points to this transaction's release and preserves a later foreign release.
 The ownership check is not an atomic compare-and-swap against non-cooperating
 writers. This does not alter Nginx, DNS, services, VMs or original media. The8MiB limit for small
-static assets and the Dead Screen WASM loader remains separate from the256MiB ISO
+static assets and the Dead Screen WASM loader remains separate from the 512 MiB ISO
 bound, and the128-asset allowlist limit remains in force. Origin checks do not
 establish unchallenged access through the public Cloudflare edge.
 

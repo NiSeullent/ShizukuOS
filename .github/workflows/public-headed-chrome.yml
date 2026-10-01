@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Public headed Chrome acceptance
+'on':
+  workflow_dispatch:
+    inputs:
+      iso_path:
+        description: 'Optional public .iso path on m98.nyase.kr; supply all three ISO fields'
+        required: false
+        type: string
+      iso_sha256:
+        description: 'Exact lowercase SHA-256 from the publisher receipt'
+        required: false
+        type: string
+      iso_bytes:
+        description: 'Exact ISO byte count from the publisher receipt'
+        required: false
+        type: string
+permissions:
+  contents: read
+jobs:
+  headed:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PUBLIC_ISO_PATH: ${{ inputs.iso_path }}
+      PUBLIC_ISO_SHA256: ${{ inputs.iso_sha256 }}
+      PUBLIC_ISO_BYTES: ${{ inputs.iso_bytes }}
+    steps:
+      - name: Check out public source without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          lfs: false
+          submodules: false
+      - name: Run meaningful offline download and lifecycle controls
+        run: node --test tools/tests/test_public_chrome.mjs
+      - name: Run installed headed Chrome on an owned Xvfb display
+        shell: bash
+        run: |
+          chrome_path="$(command -v google-chrome)"
+          xvfb_path="$(command -v Xvfb)"
+          verification_args=(--out "$RUNNER_TEMP/public-headed-chrome-evidence" --chrome "$chrome_path" --xvfb "$xvfb_path")
+          if [[ -n "$PUBLIC_ISO_PATH$PUBLIC_ISO_SHA256$PUBLIC_ISO_BYTES" ]]; then
+            if [[ -z "$PUBLIC_ISO_PATH" || -z "$PUBLIC_ISO_SHA256" || -z "$PUBLIC_ISO_BYTES" ]]; then
+              echo 'Supply all three ISO fields.' >&2
+              exit 2
+            fi
+            verification_args+=(--iso-path "$PUBLIC_ISO_PATH" --iso-sha256 "$PUBLIC_ISO_SHA256" --iso-bytes "$PUBLIC_ISO_BYTES")
+          fi
+          node tools/verify_public_chrome.mjs "${verification_args[@]}"
+      - name: Retain only JSON, public DOM and diagnostic log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-headed-chrome-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/public-headed-chrome-evidence/result.json
+            ${{ runner.temp }}/public-headed-chrome-evidence/route-*.html
+            ${{ runner.temp }}/public-headed-chrome-evidence/diagnostic.log
+          if-no-files-found: error
+          retention-days: 30
