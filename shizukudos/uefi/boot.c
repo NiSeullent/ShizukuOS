@@ -3,17 +3,45 @@
  */
 #include "boot.h"
 
+/* Independently authored from UEFI 2.10 sections 12.9.2.1/2/5 and 12.10,
+ * and VESA E-EDID Release A Revision 2 sections 3.6.4, 3.10, 3.12.
+ * Only supported firmware modes are set; EDID never supplies hardware timings. */
+static int framebuffer_format(const EFI_GOP_INFO *i, uint32_t *format)
+{
+    if (i->version != 0) return 0;
+    if (i->pixel_format <= 1) { *format = i->pixel_format; return 1; }
+    if (i->pixel_format != 2 || i->green_mask != 0x0000ff00u ||
+        i->reserved_mask != 0xff000000u) return 0;
+    if (i->red_mask == 0x000000ffu && i->blue_mask == 0x00ff0000u) {
+        *format = 0; return 1;
+    }
+    if (i->red_mask == 0x00ff0000u && i->blue_mask == 0x000000ffu) {
+        *format = 1; return 1;
+    }
+    return 0;
+}
+
+static int mode_safe(const EFI_GOP_INFO *i, uint32_t *format)
+{
+    return framebuffer_format(i, format) && i->width >= 320 && i->height >= 200 &&
+        i->width <= 8192 && i->height <= 8192 && i->pixels_per_scan_line >= i->width &&
+        i->pixels_per_scan_line <= UINT32_MAX / 4 &&
+        (uint64_t)i->pixels_per_scan_line * 4 * i->height <= SD_GOP_VISIBLE_LIMIT;
+}
+
 EFI_STATUS sd_framebuffer_snapshot(const EFI_GOP_MODE *mode, SD_FRAMEBUFFER *out)
 {
     const EFI_GOP_INFO *i;
     uint64_t needed;
+    uint32_t format;
     if (!mode || !out || !mode->info || mode->info_size < sizeof(EFI_GOP_INFO))
         return EFI_INVALID_PARAMETER;
     i = mode->info;
-    /* Only direct, documented 32-bit RGB/BGR layouts are implemented. */
-    if (i->version != 0 || i->pixel_format > 1)
+    /* Canonical 32-bit masks normalize to the unchanged RGBX/BGRX handoff. */
+    if (!framebuffer_format(i, &format))
         return EFI_UNSUPPORTED;
     if (i->width < 320 || i->height < 200 || i->pixels_per_scan_line < i->width ||
+        i->pixels_per_scan_line > UINT32_MAX / 4 ||
         !mode->framebuffer_base || (mode->framebuffer_base & 3))
         return EFI_INVALID_PARAMETER;
     needed = (uint64_t)i->pixels_per_scan_line * i->height;
@@ -28,7 +56,149 @@ EFI_STATUS sd_framebuffer_snapshot(const EFI_GOP_MODE *mode, SD_FRAMEBUFFER *out
     out->width = i->width;
     out->height = i->height;
     out->pitch_pixels = i->pixels_per_scan_line;
-    out->pixel_format = i->pixel_format;
+    out->pixel_format = format;
+    return EFI_SUCCESS;
+}
+
+static int edid_geometry(const EFI_EDID_ACTIVE *active, uint32_t *width, uint32_t *height)
+{
+    static const uint8_t header[8] = {0,255,255,255,255,255,255,0};
+    const uint8_t *e;
+    unsigned i, block, blocks;
+    uint32_t w, h, hblank, vblank;
+    if (!active || !active->edid || active->size < 128 || active->size > 32768 ||
+        (active->size & 127)) return 0;
+    e = active->edid;
+    for (i = 0; i < 8; ++i) if (e[i] != header[i]) return 0;
+    if (e[18] != 1 || (e[19] != 3 && e[19] != 4) ||
+        (e[19] == 3 && !(e[24] & 2))) return 0;
+    blocks = (unsigned)e[126] + 1;
+    if (blocks > active->size / 128) return 0;
+    for (block = 0; block < blocks; ++block) {
+        uint8_t sum = 0;
+        for (i = 0; i < 128; ++i) sum = (uint8_t)(sum + e[block * 128 + i]);
+        if (sum) return 0;
+    }
+    e += 54; /* The first detailed timing is the preferred timing in EDID 1.3/1.4. */
+    if (!(e[0] | e[1]) || (e[17] & 0x80)) return 0; /* descriptor or interlaced timing */
+    w = e[2] | ((uint32_t)(e[4] & 0xf0) << 4);
+    h = e[5] | ((uint32_t)(e[7] & 0xf0) << 4);
+    hblank = e[3] | ((uint32_t)(e[4] & 15) << 8);
+    vblank = e[6] | ((uint32_t)(e[7] & 15) << 8);
+    if (w < 320 || h < 200 || !hblank || !vblank) return 0;
+    *width = w; *height = h;
+    return 1;
+}
+
+static int gop_edid(EFI_BOOT_SERVICES *bs, EFI_GOP *gop, uint32_t *w, uint32_t *h)
+{
+    EFI_GUID gop_guid = {0x9042a9de,0x23dc,0x4a38,{0x96,0xfb,0x7a,0xde,0xd0,0x80,0x51,0x6a}};
+    EFI_GUID active_guid = {0xbd8c1056,0x9f36,0x44ec,{0x92,0xa8,0xa6,0x33,0x7f,0x81,0x79,0x86}};
+    EFI_HANDLE *handles = 0;
+    size_t count = 0, i;
+    int valid = 0;
+    EFI_STATUS status;
+    if (!bs->locate_handle_buffer || !bs->handle_protocol || !bs->free_pool) return 0;
+    status = bs->locate_handle_buffer(2 /* ByProtocol */, &gop_guid, 0, &count, &handles);
+    if (!EFI_ERROR(status) && handles && count <= 256)
+        for (i = 0; i < count; ++i) {
+            EFI_GOP *instance = 0;
+            EFI_EDID_ACTIVE *active = 0;
+            if (EFI_ERROR(bs->handle_protocol(handles[i], &gop_guid, (void **)&instance)) || instance != gop)
+                continue;
+            /* Never borrow a global EDID from an unrelated display/controller.
+             * Multi-output GOP handles without an associated active EDID use the ladder. */
+            if (!EFI_ERROR(bs->handle_protocol(handles[i], &active_guid, (void **)&active)))
+                valid = edid_geometry(active, w, h);
+            break;
+        }
+    if (handles) bs->free_pool(handles);
+    return valid;
+}
+
+EFI_STATUS sd_gop_select(EFI_BOOT_SERVICES *bs, EFI_GOP *gop, SD_FRAMEBUFFER *out,
+                         SD_GOP_SELECTION *result)
+{
+    static const uint32_t ladder[][2] = {{3840,2160},{2560,1440},{1920,1080},{1600,900},
+                                        {1366,768},{1280,720},{1024,768}};
+    struct { uint32_t index; EFI_GOP_INFO info; } candidates[8];
+    SD_GOP_SELECTION local = {0};
+    SD_FRAMEBUFFER original, selected;
+    EFI_GOP_INFO original_info;
+    EFI_STATUS status;
+    uint32_t original_mode, count, index, format, tier, w, h;
+    if (!bs || !gop || !gop->mode || !out) return EFI_INVALID_PARAMETER;
+    status = sd_framebuffer_snapshot(gop->mode, &original);
+    if (EFI_ERROR(status)) return status;
+    if (!mode_safe(gop->mode->info, &format) || !gop->mode->max_mode ||
+        gop->mode->mode >= gop->mode->max_mode) return EFI_UNSUPPORTED;
+    original_mode = gop->mode->mode;
+    original_info = *gop->mode->info;
+    count = gop->mode->max_mode;
+    local.original_mode = local.selected_mode = original_mode;
+    local.used_fallback = 1;
+    *out = original;
+    if (result) *result = local;
+    if (!gop->query_mode || !gop->set_mode || !bs->free_pool || count > SD_GOP_MODE_LIMIT)
+        return EFI_SUCCESS; /* A bounded, validated current framebuffer is still usable. */
+    local.edid_preferred = (uint32_t)gop_edid(bs, gop, &local.preferred_width, &local.preferred_height);
+    for (tier = 0; tier < 8; ++tier) candidates[tier].index = UINT32_MAX;
+    for (index = 0; index < count; ++index) {
+        EFI_GOP_INFO *info = 0;
+        size_t bytes = 0;
+        ++local.modes_queried;
+        status = gop->query_mode(gop, index, &bytes, &info);
+        if (!EFI_ERROR(status) && info && bytes >= sizeof(*info) && mode_safe(info, &format) &&
+            (index != original_mode || (info->width == original.width && info->height == original.height &&
+             info->pixels_per_scan_line == original.pitch_pixels && format == original.pixel_format)))
+            for (tier = 0; tier < 8; ++tier) {
+                w = tier ? ladder[tier - 1][0] : local.preferred_width;
+                h = tier ? ladder[tier - 1][1] : local.preferred_height;
+                if ((!tier && !local.edid_preferred) || info->width != w || info->height != h) continue;
+                if (candidates[tier].index == UINT32_MAX ||
+                    info->pixels_per_scan_line < candidates[tier].info.pixels_per_scan_line) {
+                    candidates[tier].index = index;
+                    candidates[tier].info = *info;
+                }
+            }
+        if (info) bs->free_pool(info);
+    }
+    for (tier = 0; tier < 8; ++tier) {
+        const EFI_GOP_INFO *expected = &candidates[tier].info;
+        index = candidates[tier].index;
+        if (index == UINT32_MAX) continue;
+        if (index == original_mode) {
+            /* A preferred current mode needs no reset or screen clear. */
+            local.used_fallback = 0;
+            if (result) *result = local;
+            return EFI_SUCCESS;
+        }
+        status = gop->set_mode(gop, index);
+        if (!EFI_ERROR(status) && gop->mode && gop->mode->mode == index &&
+            !EFI_ERROR(sd_framebuffer_snapshot(gop->mode, &selected)) &&
+            mode_safe(gop->mode->info, &format) && selected.width == expected->width &&
+            selected.height == expected->height && selected.pitch_pixels == expected->pixels_per_scan_line &&
+            framebuffer_format(expected, &format) && selected.pixel_format == format) {
+            *out = selected;
+            local.selected_mode = index;
+            local.used_fallback = 0;
+            if (result) *result = local;
+            return EFI_SUCCESS;
+        }
+        /* A rejected SetMode can partially program hardware without updating
+         * any published Mode fields. Always actively restore it before another
+         * attempt or fallback; unchanged metadata cannot prove hardware state. */
+        status = gop->set_mode(gop, original_mode);
+        if (EFI_ERROR(status) || !gop->mode || gop->mode->mode != original_mode ||
+            EFI_ERROR(sd_framebuffer_snapshot(gop->mode, &selected)) ||
+            !mode_safe(gop->mode->info, &format) || selected.width != original_info.width ||
+            selected.height != original_info.height || selected.pitch_pixels != original_info.pixels_per_scan_line ||
+            selected.pixel_format != original.pixel_format)
+            return EFI_DEVICE_ERROR;
+        original = selected; /* Some firmware relocates its aperture during restoration. */
+        *out = original;
+    }
+    if (result) *result = local;
     return EFI_SUCCESS;
 }
 

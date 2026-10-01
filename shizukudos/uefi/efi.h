@@ -17,6 +17,7 @@ typedef uint16_t CHAR16;
 #define EFI_UNSUPPORTED (EFI_ERROR_BIT | 3)
 #define EFI_BUFFER_TOO_SMALL (EFI_ERROR_BIT | 5)
 #define EFI_DEVICE_ERROR (EFI_ERROR_BIT | 7)
+#define EFI_NOT_FOUND (EFI_ERROR_BIT | 14)
 #define EFI_OUT_OF_RESOURCES (EFI_ERROR_BIT | 9)
 #define EFI_ABORTED (EFI_ERROR_BIT | 21)
 #define EFI_ERROR(s) (((s) & EFI_ERROR_BIT) != 0)
@@ -52,7 +53,9 @@ typedef struct {
     EFI_STATUS (EFIAPI *free_pool)(void *);
     void *create_event, *set_timer, *wait_for_event, *signal_event, *close_event;
     void *check_event, *install_protocol_interface, *reinstall_protocol_interface;
-    void *uninstall_protocol_interface, *handle_protocol, *reserved;
+    void *uninstall_protocol_interface;
+    EFI_STATUS (EFIAPI *handle_protocol)(EFI_HANDLE, EFI_GUID *, void **);
+    void *reserved;
     void *register_protocol_notify, *locate_handle, *locate_device_path;
     void *install_configuration_table, *load_image, *start_image, *exit;
     void *unload_image;
@@ -61,7 +64,8 @@ typedef struct {
     EFI_STATUS (EFIAPI *set_watchdog_timer)(size_t, uint64_t, size_t, CHAR16 *);
     void *connect_controller, *disconnect_controller, *open_protocol;
     void *close_protocol, *open_protocol_information, *protocols_per_handle;
-    void *locate_handle_buffer;
+    EFI_STATUS (EFIAPI *locate_handle_buffer)(uint32_t, EFI_GUID *, void *,
+                                             size_t *, EFI_HANDLE **);
     EFI_STATUS (EFIAPI *locate_protocol)(EFI_GUID *, void *, void **);
     void *install_multiple_protocol_interfaces, *uninstall_multiple_protocol_interfaces;
     void *calculate_crc32, *copy_mem, *set_mem, *create_event_ex;
@@ -93,7 +97,14 @@ typedef struct {
     uint64_t framebuffer_base;
     size_t framebuffer_size;
 } EFI_GOP_MODE;
-typedef struct { void *query_mode, *set_mode, *blt; EFI_GOP_MODE *mode; } EFI_GOP;
+typedef struct EFI_GOP EFI_GOP;
+struct EFI_GOP {
+    EFI_STATUS (EFIAPI *query_mode)(EFI_GOP *, uint32_t, size_t *, EFI_GOP_INFO **);
+    EFI_STATUS (EFIAPI *set_mode)(EFI_GOP *, uint32_t);
+    void *blt;
+    EFI_GOP_MODE *mode;
+};
+typedef struct { uint32_t size; uint8_t *edid; } EFI_EDID_ACTIVE;
 
 _Static_assert(sizeof(void *) == 8, "This loader requires the x64 UEFI ABI");
 _Static_assert(sizeof(EFI_TABLE_HEADER) == 24, "UEFI header layout");
@@ -104,4 +115,8 @@ _Static_assert(offsetof(EFI_BOOT_SERVICES, locate_protocol) == 320, "LocateProto
 _Static_assert(offsetof(EFI_SYSTEM_TABLE, boot_services) == 96, "SystemTable ABI");
 _Static_assert(sizeof(EFI_GOP_INFO) == 36, "GOP information ABI");
 _Static_assert(sizeof(EFI_GOP_MODE) == 40, "GOP mode ABI");
+_Static_assert(sizeof(EFI_GOP) == 32, "GOP protocol ABI");
+_Static_assert(offsetof(EFI_EDID_ACTIVE, edid) == 8, "EDID active ABI");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, handle_protocol) == 152, "HandleProtocol ABI");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, locate_handle_buffer) == 312, "LocateHandleBuffer ABI");
 #endif
