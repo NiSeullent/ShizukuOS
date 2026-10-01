@@ -67,6 +67,141 @@ class PrivateLimits(unittest.TestCase):
         self.assertEqual(resource.getrlimit(resource.RLIMIT_FSIZE), before)
 
 
+class HostBudgetPlan(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(hasattr(startup, "host_output_guard"), "Source-bound four-root guard is missing")
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "build/theme-native-runs").mkdir(parents=True)
+        (self.root / "tools").mkdir()
+        source = self.root / "tools/theme_native_runner.py"
+        source.write_bytes(b"guard source fixture")
+        self.peer = self.root / "peer"
+        self.stage = self.peer / "build/theme-entry6970-autostart-test"
+        self.stage.mkdir(parents=True)
+        self.bootstrap = self.root / "build/theme-startup-bootstrap-0123456789ab"
+        self.bootstrap.mkdir()
+        self.consumer_dir = self.root / "build/theme-native-consumer-6970-autostart-test"
+        self.run = self.root / "build/theme-native-runs/win98-gop-theme-6970-autostart-test"
+        self.consumer = startup.load_module(ROOT / "tools/theme_native_runner.py", "startup_budget_test_consumer")
+        self.plan = {"owner_root": str(self.root), "peer_root": str(self.peer),
+                     "guest_manifest": str(self.stage / "guest-files.json"),
+                     "consumer_directory": str(self.consumer_dir), "run_directory": str(self.run),
+                     "bootstrap_build_directory": str(self.bootstrap),
+                     "host_output_guard_source_sha256": startup.sha(source),
+                     "host_output_budget": {"schema": 1,
+                         "roots": [str(p) for p in (self.stage, self.consumer_dir, self.run, self.bootstrap)],
+                         "excluded_private_cow": str(self.run / "windows-uefi.raw"),
+                         "limit_bytes": 16 * 1024**2, "reserve_bytes": 20 * 1024**3}}
+
+    def guard(self):
+        with patch.object(startup, "ROOT", self.root):
+            return startup.host_output_guard(self.plan, self.consumer)
+
+    def test_source_bound_exact_scope_counts_bootstrap_and_stage(self):
+        (self.stage / "input").write_bytes(b"abc")
+        (self.bootstrap / "host-test").write_bytes(b"defg")
+        self.assertEqual(self.guard().check("pre-execute")["used_bytes"], 7)
+        self.assertFalse(self.consumer_dir.exists())
+        self.assertFalse(self.run.exists())
+
+    def test_legacy_plan_wrong_source_hash_scope_and_relaxed_cap_rejected(self):
+        original = json.loads(json.dumps(self.plan))
+        for change in ("legacy", "hash", "scope", "cap"):
+            self.plan = json.loads(json.dumps(original))
+            if change == "legacy":
+                self.plan.pop("host_output_budget")
+            elif change == "hash":
+                self.plan["host_output_guard_source_sha256"] = "0" * 64
+            elif change == "scope":
+                self.plan["host_output_budget"]["roots"][0] = str(self.peer)
+            else:
+                self.plan["host_output_budget"]["limit_bytes"] += 1
+            with self.subTest(change=change), self.assertRaises(startup.StartupError):
+                self.guard()
+
+    def test_stale_consumer_or_symlink_stage_refused(self):
+        self.consumer_dir.mkdir()
+        with self.assertRaises(startup.StartupError):
+            self.guard()
+        self.consumer_dir.rmdir()
+        self.stage.rename(self.peer / "saved")
+        self.stage.symlink_to(self.peer / "saved", target_is_directory=True)
+        with self.assertRaises(startup.StartupError):
+            self.guard()
+
+    def test_bootstrap_compile_output_is_counted_with_existing_stage_bytes(self):
+        self.bootstrap.rmdir()
+        (self.stage / "source").write_bytes(b"x" * 10)
+        guard = self.consumer.HostOutputGuard([self.stage, self.consumer_dir, self.run, self.bootstrap],
+                                              self.run / "windows-uefi.raw", limit=16)
+        def small_compiler_output(argv):
+            if "-o" in argv:
+                Path(argv[argv.index("-o") + 1]).write_bytes(b"y" * 10)
+            return b"fixture compiler\n"
+        with patch.object(startup, "SOURCE_FILES", ()), \
+                patch.object(startup.shutil, "which", return_value=sys.executable), \
+                patch.object(startup, "command", side_effect=small_compiler_output), \
+                self.assertRaises(self.consumer.HostOutputError):
+            startup.build_bootstrap(self.root, build_dir=self.bootstrap, host_guard=guard)
+        self.assertEqual((self.bootstrap / "bootstrap-host").stat().st_size, 10)
+        self.assertEqual(guard.to_dict()["peak_bytes"], 20)
+
+    def test_execute_command_overshoot_stays_fail_even_when_cleanup_returns_zero(self):
+        private = self.bootstrap / "runner.py"
+        private.write_bytes(b"fixture runner")
+        base_receipt = self.bootstrap / "base-receipt.json"
+        base_receipt.write_bytes(b"fixture base receipt")
+        limit = 4096
+        self.plan.update(schema=1, kind="native-theme-empty-winini-run-on-owned-cow-v1",
+                         reserve_bytes=startup.RESERVE, cow_quota_bytes=startup.QUOTA,
+                         runtime_bound_seconds=1200, output_limit_bytes=limit,
+                         consumer_source=str(self.root / "tools/theme_native_runner.py"),
+                         base_receipt=str(base_receipt), base_receipt_sha256=startup.sha(base_receipt),
+                         private_runner_sha256=startup.sha(private), consumer_arguments=["--"])
+        self.plan["host_output_budget"]["limit_bytes"] = limit
+        plan_path = self.stage / "startup-plan.json"
+        plan_path.write_text(json.dumps(self.plan))
+        def command_output(argv, **kwargs):
+            Path(argv[-1]).write_bytes(b"z" * limit)
+            return ""
+        runner = SimpleNamespace(reuse_prepared=lambda *a, **k: ({}, {}),
+                                 prepare_guest_files=lambda *a, **k: {"immutable_sources": {}},
+                                 command=command_output)
+        fake = SimpleNamespace(ConsumerError=self.consumer.ConsumerError,
+                               HostOutputError=self.consumer.HostOutputError,
+                               HostOutputGuard=self.consumer.HostOutputGuard,
+                               reviewed_functions=lambda source: {},
+                               configure_runner=lambda *a, **k: (runner, object(), {}))
+        observed = {}
+        def fake_native_main(argv, *, host_guard):
+            self.consumer_dir.mkdir()
+            self.run.mkdir()
+            guarded, _, _ = fake.configure_runner(private, private, {}, self.peer, host_guard=host_guard)
+            path = self.run / "serial.log"
+            try:
+                guarded.command(["fixture-write", path])
+            except self.consumer.HostOutputError:
+                observed["peak"] = host_guard.to_dict()["peak_bytes"]
+                path.unlink()
+            else:
+                self.fail("Actual command output escaped the combined guard")
+            return 0  # Cleanup's successful return must not erase the observed failure.
+        fake.main = fake_native_main
+        with patch.object(startup, "ROOT", self.root), patch.object(startup, "OUTPUT_LIMIT", limit), \
+                patch.object(startup, "load_module", return_value=fake), \
+                patch.object(startup, "source_guard"), patch.object(startup, "validate_manifest"):
+            code = startup.execute_plan(plan_path, startup.sha(plan_path))
+        final = json.loads((self.consumer_dir / "startup-trial-result.json").read_text())
+        self.assertEqual(code, 1)
+        self.assertGreater(observed["peak"], limit)
+        self.assertEqual(final["status"], "FAIL")
+        self.assertEqual(final["consumer_exit_code"], 0)
+        self.assertEqual(final["host_output_budget"]["status"], "FAIL")
+        self.assertIn("Resource host-output FAIL", final["resource_failure"])
+
+
 @unittest.skipUnless(all(shutil.which(x) for x in ("mformat", "mmd", "mcopy", "mdir", "mattrib", "cp")), "mtools required")
 class RealFATCOW(unittest.TestCase):
     def setUp(self):
@@ -130,7 +265,8 @@ class RealFATCOW(unittest.TestCase):
 
     def apply(self, **changes):
         return startup.apply_startup(self.disk, self.run, self.partition, self.args, self.plan, self.cow,
-                                     self.consumer.ensure_unopened, provenance=changes.get("provenance", self.provenance))
+                                     self.consumer.ensure_unopened, provenance=changes.get("provenance", self.provenance),
+                                     host_guard=changes.get("host_guard"))
 
     def original_guest(self):
         result = self.run / "check-current-WIN.INI"
@@ -144,6 +280,34 @@ class RealFATCOW(unittest.TestCase):
         self.assertEqual(startup.sha(self.base), self.base_sha)
         self.assertTrue(record["attributes_preserved"] and record["boot_sectors_preserved"])
         self.assertLessEqual(record["cow_net_exclusive_growth_bytes"], startup.QUOTA)
+
+    def test_actual_startup_readback_overshoot_fails_before_ini_write(self):
+        roots = [self.stage, self.run]
+        existing = sum(p.stat().st_size for root in roots for p in root.rglob("*") if p.is_file() and p != self.disk)
+        guard = self.consumer.HostOutputGuard(roots, self.disk, limit=existing + 1)
+        with self.assertRaises(self.consumer.HostOutputError):
+            self.apply(host_guard=guard)
+        self.assertEqual(self.original_guest(), INI)
+        self.assertEqual(startup.sha(self.base), self.base_sha)
+        self.assertGreater(guard.to_dict()["peak_bytes"], existing + 1)
+
+    @unittest.skipUnless(shutil.which("mtype"), "mtype required for memory-only rollback verification")
+    def test_postwrite_readback_overshoot_restores_ini_without_more_host_readbacks(self):
+        roots = [self.stage, self.run]
+        existing = sum(p.stat().st_size for root in roots for p in root.rglob("*") if p.is_file() and p != self.disk)
+        manifest = json.loads(Path(self.plan["guest_manifest"]).read_text())
+        before_readback = existing + sum(p["bytes"] for p in manifest["inputs"]) + len(INI) + len(startup.insert_empty_run(INI)[0])
+        guard = self.consumer.HostOutputGuard(roots, self.disk, limit=before_readback)
+        with self.assertRaises(self.consumer.HostOutputError):
+            self.apply(host_guard=guard)
+        self.assertEqual(self.original_guest(), INI)
+        self.assertEqual(startup.sha(self.base), self.base_sha)
+        record = json.loads((self.run / "automatic-startup-preparation.json").read_text())
+        self.assertEqual(record["status"], "FAIL")
+        self.assertTrue(record["INI_rollback_matches_original"])
+        self.assertTrue(record["host_output_failure_remains_latched"])
+        self.assertFalse((self.run / "startup-rollback-WIN.INI").exists())
+        self.assertEqual(guard.to_dict()["status"], "FAIL")
 
     def test_existing_output_is_refused_before_ini_write(self):
         f = self.run / "old.log"; f.write_bytes(b"old")

@@ -3,6 +3,10 @@
 import importlib.util
 import contextlib
 import io
+import json
+import os
+import socket
+import subprocess
 import sys
 from pathlib import Path
 import tempfile
@@ -32,6 +36,245 @@ def arguments():
         result += ["--" + name, "/synthetic/" + name]
     return result + ["--guest-files-manifest-sha", "a" * 64, "--run-name", "win98-gop-theme-6970-test",
                      "--manual-gui", "--firmware-gop", "--replace-csmwrap"]
+
+
+class HostOutputBudget(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(hasattr(consumer, "HostOutputGuard"), "Aggregate host-output guard is missing")
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.roots = [self.base / name for name in ("stage", "consumer", "run", "bootstrap")]
+        for path in self.roots:
+            path.mkdir()
+        self.disk = self.roots[2] / "windows-uefi.raw"
+
+    def guard(self, limit=16):
+        return consumer.HostOutputGuard(self.roots, self.disk, limit=limit)
+
+    def test_combined_four_roots_fail_even_when_every_file_is_under_limit(self):
+        for root in self.roots:
+            (root / "output").write_bytes(b"12345")
+        guard = self.guard()
+        with self.assertRaises(consumer.HostOutputError):
+            guard.check("before-launch")
+        self.assertEqual(guard.to_dict()["used_bytes"], 20)
+        self.assertEqual(guard.to_dict()["status"], "FAIL")
+
+    def test_only_exact_private_cow_is_excluded_and_vars_sources_and_other_raw_count(self):
+        self.disk.write_bytes(b"x" * 8192)
+        (self.roots[0] / "source.py").write_bytes(b"1234")
+        (self.roots[2] / "OVMF_VARS.fd").write_bytes(b"5678")
+        guard = self.guard(limit=8)
+        self.assertEqual(guard.check("preparation")["used_bytes"], 8)
+        (self.roots[1] / "other.raw").write_bytes(b"9")
+        with self.assertRaises(consumer.HostOutputError):
+            guard.check("poll")
+        self.assertEqual(guard.to_dict()["peak_bytes"], 9)
+
+    def test_overshoot_remains_failed_after_output_is_deleted(self):
+        guard = self.guard(limit=8)
+        path = self.roots[2] / "serial.log"
+        path.write_bytes(b"123456789")
+        with self.assertRaises(consumer.HostOutputError):
+            guard.check("poll")
+        path.unlink()
+        with self.assertRaises(consumer.HostOutputError):
+            guard.check("final")
+        self.assertEqual(guard.to_dict()["peak_bytes"], 9)
+
+    def test_zero_byte_unix_socket_allowed_but_symlinks_always_refused(self):
+        with socket.socket(socket.AF_UNIX) as ipc:
+            ipc.bind(str(self.roots[2] / "qmp.sock"))
+            self.assertEqual(self.guard().check("poll")["used_bytes"], 0)
+        (self.roots[2] / "link").symlink_to(self.roots[0], target_is_directory=True)
+        with self.assertRaises(consumer.HostOutputError):
+            self.guard().check("poll")
+
+    def test_replaced_root_cow_inode_or_cow_alias_is_refused(self):
+        guard = self.guard()
+        guard.check("initial")
+        self.roots[0].rename(self.base / "saved-stage")
+        self.roots[0].mkdir()
+        with self.assertRaises(consumer.HostOutputError):
+            guard.check("replaced-root")
+        self.disk.write_bytes(b"cow")
+        guard = self.guard()
+        guard.check("initial")
+        self.disk.rename(self.roots[2] / "saved-cow")
+        self.disk.write_bytes(b"cow")
+        with self.assertRaises(consumer.HostOutputError):
+            guard.check("replaced-cow")
+        os.link(self.disk, self.roots[2] / "alias")
+        with self.assertRaises(consumer.HostOutputError):
+            self.guard().check("aliased-cow")
+
+    def test_unsafe_overlapping_scopes_wrong_exclusion_or_relaxed_limit_refused(self):
+        for roots, disk, limit in [([Path("relative")], self.disk, 16),
+                                   ([self.roots[0], self.roots[0]], self.disk, 16),
+                                   ([self.base, self.roots[2]], self.disk, 16),
+                                   (self.roots, self.base / "peer.raw", 16),
+                                   (self.roots, self.disk, 16 * 1024**2 + 1)]:
+            with self.subTest(roots=roots, limit=limit), self.assertRaises(consumer.ConsumerError):
+                consumer.HostOutputGuard(roots, disk, limit=limit)
+
+    def configured(self, guard):
+        private = self.roots[1] / "runner.py"
+        private.write_bytes(b"# private\n")
+        cow_path = self.roots[1] / "cow.py"
+        cow_path.write_bytes(b"# cow\n")
+        qemu = SimpleNamespace(launch=Mock(side_effect=AssertionError("VM must not launch")))
+        self.original_launch = qemu.launch
+        shzlib = SimpleNamespace(write_json=lambda path, data: Path(path).write_text(__import__('json').dumps(data)))
+        self.shzlib = shzlib
+        runner = SimpleNamespace(reuse_prepared=Mock(), DIRTY_BUDGET=256 * 1024**2, RESERVE=20 * 1024**3,
+                                 capture=lambda *a, **k: (self.roots[2] / "capture").write_bytes(b"x" * 64),
+                                 collect_guest_files=lambda *a, **k: (self.roots[2] / "readback").write_bytes(b"x" * 64))
+        cow = SimpleNamespace(__file__=str(cow_path))
+        modules = {"qemu": qemu, "shzlib": shzlib, "theme_native_pinned_runner": runner, "theme_native_pinned_cow": cow}
+        with patch.object(consumer, "load_module", side_effect=lambda name, path: modules[name]):
+            configured, _, state = consumer.configure_runner(private, cow_path, {}, self.base,
+                                                              host_guard=guard)
+        return configured, qemu, state
+
+    def test_runtime_capture_and_readback_enforce_combined_budget(self):
+        for operation in ("capture", "collect_guest_files"):
+            with self.subTest(operation=operation):
+                guard = self.guard(limit=32)
+                runner, _, _ = self.configured(guard)
+                with self.assertRaises(consumer.HostOutputError):
+                    getattr(runner, operation)()
+                self.assertGreater(guard.to_dict()["peak_bytes"], 32)
+                for name in ("capture", "readback"):
+                    (self.roots[2] / name).unlink(missing_ok=True)
+
+    def test_prelaunch_and_resource_poll_reject_growth_without_launching_vm(self):
+        guard = self.guard(limit=32)
+        runner, qemu, _ = self.configured(guard)
+        (self.roots[2] / "serial.log").write_bytes(b"x" * 64)
+        with self.assertRaises(consumer.HostOutputError):
+            qemu.launch([], self.roots[2])
+        with self.assertRaises(consumer.HostOutputError):
+            runner._iosys_cow_growth(self.disk, {}, object())
+
+    def test_final_native_result_is_fail_when_result_write_itself_exceeds_cap(self):
+        guard = self.guard(limit=32)
+        self.configured(guard)
+        result = self.roots[2] / "result.json"
+        with self.assertRaises(consumer.HostOutputError):
+            self.shzlib.write_json(result, {"profile": "actual-win98-uefi-csmwrap", "status": "PASS"})
+        data = json.loads(result.read_text())
+        self.assertEqual(data["status"], "FAIL")
+        self.assertEqual(data["host_output_budget"]["status"], "FAIL")
+        self.assertGreater(data["host_output_budget"]["peak_bytes"], 32)
+        self.assertIn("Resource host-output FAIL", data["resource_failure"])
+
+    def test_other_json_payload_schema_is_preserved_and_still_guarded(self):
+        guard = self.guard(limit=32)
+        self.configured(guard)
+        target = self.roots[2] / "other.json"
+        value = ["ok"]
+        self.shzlib.write_json(target, value)
+        self.assertEqual(json.loads(target.read_text()), value)
+        with self.assertRaises(consumer.HostOutputError):
+            self.shzlib.write_json(target, ["x" * 64])
+
+    def test_source_freeze_overshoot_records_resource_fail_before_vm_or_lock(self):
+        roots = self.roots
+        roots[1].rmdir()
+        guard = self.guard(limit=32)
+        def freeze(*args, **kwargs):
+            roots[1].mkdir()
+            private = roots[1] / "runner.py"
+            private.write_bytes(b"x" * 64)
+            return {}, private, {}
+        argv = ["--peer-root", str(self.base), "--consumer-dir", str(roots[1])]
+        for name in ("canonical", "adapter", "cow"):
+            argv += ["--" + name + "-sha256", "a" * 64]
+        argv += ["--", *arguments()]
+        with patch.object(consumer, "validate_paths", return_value=(self.base, roots[1], roots[2])), \
+                patch.object(consumer, "freeze_sources", side_effect=freeze), \
+                patch.object(consumer, "acquire_native_lock") as lock, contextlib.redirect_stdout(io.StringIO()):
+            code = consumer.main(argv, host_guard=guard)
+        self.assertEqual(code, 1)
+        lock.assert_not_called()
+        data = json.loads((roots[1] / "consumer-result.json").read_text())
+        self.assertEqual(data["status"], "FAIL")
+        self.assertFalse(data["vm_started"])
+        self.assertGreater(data["host_output_budget"]["peak_bytes"], 32)
+
+    def test_guard_for_other_arguments_cannot_hide_actual_consumer_output(self):
+        argv = ["--peer-root", str(self.base), "--consumer-dir", str(self.roots[1])]
+        for name in ("canonical", "adapter", "cow"):
+            argv += ["--" + name + "-sha256", "a" * 64]
+        argv += ["--", *arguments()]
+        with patch.object(consumer, "validate_paths", return_value=(self.base, self.base / "unwatched", self.roots[2])), \
+                patch.object(consumer, "freeze_sources") as freeze, \
+                self.assertRaisesRegex(consumer.ConsumerError, "does not cover"):
+            consumer.main(argv, host_guard=self.guard())
+        freeze.assert_not_called()
+
+    def test_postlaunch_overshoot_stops_only_returned_owned_child_handle(self):
+        self.disk.write_bytes(b"cow")
+        guard = self.guard(limit=32)
+        _, qemu, state = self.configured(guard)
+        child = SimpleNamespace(poll=Mock(return_value=None), kill=Mock(), wait=Mock())
+        def fake_launch(*args, **kwargs):
+            (self.roots[2] / "qemu.stderr").write_bytes(b"x" * 64)
+            return child
+        self.original_launch.side_effect = fake_launch
+        with self.assertRaises(consumer.HostOutputError):
+            qemu.launch([], self.roots[2])
+        self.assertIs(state["child"], child)
+        child.kill.assert_called_once_with()
+        child.wait.assert_called_once_with(timeout=5)
+
+    def test_success_receipt_includes_its_own_final_bytes_in_measured_peak(self):
+        guard = self.guard(limit=4096)
+        self.configured(guard)
+        path = self.roots[2] / "result.json"
+        self.shzlib.write_json(path, {"profile": "actual-win98-uefi-csmwrap", "status": "PASS"})
+        record = json.loads(path.read_text())
+        actual = sum(p.stat().st_size for root in self.roots for p in root.rglob("*") if p.is_file() and p != self.disk)
+        self.assertEqual(record["host_output_budget"]["used_bytes"], actual)
+        self.assertEqual(record["host_output_budget"]["peak_bytes"], actual)
+
+    def test_failure_receipt_does_not_follow_refused_symlink(self):
+        guard = self.guard(limit=4096)
+        self.configured(guard)
+        original = self.base / "peer-result.json"
+        original.write_bytes(b"unchanged peer")
+        path = self.roots[2] / "result.json"
+        path.symlink_to(original)
+        with self.assertRaises(consumer.ConsumerError):
+            self.shzlib.write_json(path, {"profile": "actual-win98-uefi-csmwrap", "status": "PASS"})
+        self.assertEqual(original.read_bytes(), b"unchanged peer")
+
+    def test_failure_receipt_does_not_write_to_replaced_root(self):
+        guard = self.guard(limit=4096)
+        self.configured(guard)
+        guard.check("before-root-change")
+        self.roots[2].rename(self.base / "original-run")
+        self.roots[2].mkdir()
+        path = self.roots[2] / "result.json"
+        with self.assertRaises(consumer.ConsumerError):
+            self.shzlib.write_json(path, {"profile": "actual-win98-uefi-csmwrap", "status": "PASS"})
+        self.assertFalse(path.exists())
+
+    def test_fifo_receipt_is_refused_without_blocking_failure_reporting(self):
+        os.mkfifo(self.roots[2] / "result.json")
+        code = """import importlib.util,json,pathlib,sys
+spec=importlib.util.spec_from_file_location('fifo_guard',sys.argv[1])
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+roots=[pathlib.Path(p) for p in json.loads(sys.argv[2])]
+guard=module.HostOutputGuard(roots,roots[2]/'windows-uefi.raw',limit=4096)
+try: guard.write_receipt(roots[2]/'result.json',{'status':'PASS'},'fifo-test')
+except module.ConsumerError: sys.exit(0)
+sys.exit(3)
+"""
+        completed = subprocess.run([sys.executable, "-B", "-c", code, str(PATH),
+                                    json.dumps([str(p) for p in self.roots])], capture_output=True, timeout=2)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
 
 
 class NativeArguments(unittest.TestCase):
