@@ -42,6 +42,16 @@ existing driver fabric, not an exhaustive inventory of its exports. Existing
 NTDLL, loader, registry and Win64 DLL sources are separately referenced as reuse
 candidates; they are not declared absent.
 
+Two selected backend rows also bind helper definitions and explicit
+`source_semantics` to the inspected source. `KeSetTimer` returns the prior signal
+state, marks insertion before attempting admission to a 32-entry list, and
+approximates absolute due time with one tick. `ExQueueWorkItem` normally uses the
+existing worker, but allocation failure executes its callback synchronously at
+caller IRQL. Its per-API dependencies include the implementation in `ntdrv_io.c`.
+The validator checks these narrow lexical contracts inside the relevant helper
+bodies. Source changes require reviewing the recorded partial semantics; these
+checks do not establish timer or work-item runtime behavior.
+
 Current source advertises software graphics mask `0x3f` and W64 process/console
 mask `0x1f`. WDDM miniport, D3D and GPU bits remain explicitly unsupported. The
 existing W64 frontend requires caller serialization and its custom handles are

@@ -2768,6 +2768,21 @@
       "source": "shizukudos/kernel64/ntdrv_ke.c",
       "declaration_source": "shizukudos/kernel64/ntdrv_ke.c",
       "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
+      "source_dependencies": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_ke.c",
+          "symbols": [
+            "timer_set",
+            "timer_arm"
+          ]
+        }
+      ],
+      "source_semantics": {
+        "return_value": "previous_Header.SignalState_nonzero",
+        "inserted_state": "set_before_bounded_timer_list_admission",
+        "due_time": "negative_magnitude_div_10000_minimum_one_tick_nonnegative_one_tick",
+        "timer_capacity": 32
+      },
       "irql": "UP CR8/dispatcher model; up_timer_list_and_timer_worker",
       "ownership": "caller_timer_and_optional_dpc",
       "sync_semantics": "up_timer_list_and_timer_worker",
@@ -2777,7 +2792,9 @@
         "ntdrv-recorded"
       ],
       "limits": [
-        "Returns prior insertion state through timer_set; no Windows98 VMM timer callback binding.",
+        "Returns the prior Header.SignalState != 0 through timer_set, rather than the prior Header.Inserted state; no Windows98 VMM timer callback binding.",
+        "Sets Header.Inserted before admission to the bounded 32-entry timer list; a full list can leave Inserted set without scheduling that timer.",
+        "Negative due time is converted from 100 ns magnitude to milliseconds with a minimum one-tick delay; nonnegative absolute due time is approximated as one tick, not Windows absolute-time semantics.",
         "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
       ]
     },
@@ -2975,16 +2992,34 @@
       "source": "shizukudos/kernel64/ntdrv_ex.c",
       "declaration_source": "shizukudos/kernel64/ntdrv_ex.c",
       "resolver_source": "shizukudos/kernel64/ntdrv_prov.c",
-      "irql": "UP CR8/dispatcher model; existing_system_work_queue",
+      "source_dependencies": [
+        {
+          "path": "shizukudos/kernel64/ntdrv_io.c",
+          "symbols": [
+            "ntdrv_queue_system_work",
+            "syswork_run",
+            "IoQueueWorkItem",
+            "queue_item",
+            "work_thread"
+          ]
+        }
+      ],
+      "source_semantics": {
+        "normal_execution": "existing_PASSIVE_system_worker",
+        "allocation_failure_execution": "synchronous_callback_at_caller_irql",
+        "queue_type": "ignored"
+      },
+      "irql": "UP CR8/dispatcher model; normal PASSIVE system worker; allocation failure executes synchronously at caller IRQL without lowering it",
       "ownership": "caller_workitem_until_callback_finishes",
-      "sync_semantics": "existing_system_work_queue",
+      "sync_semantics": "existing_system_work_queue_or_inline_allocation_failure",
       "test_status": "SOURCE_BOUND",
       "evidence": [
         "ntdrv-tests",
         "ntdrv-recorded"
       ],
       "limits": [
-        "Uses existing system worker; does not create another scheduler/fabric.",
+        "Normally queues through ntdrv_io.c to the existing PASSIVE system worker; allocation failure calls the callback synchronously at caller IRQL with no explicit lowering.",
+        "queue_type is ignored; this partial implementation does not guarantee deferred PASSIVE execution for every call and creates no second scheduler or object fabric.",
         "Source binding and existing recorded component evidence only; this invocation runs no driver or Windows98 backend integration."
       ]
     },
