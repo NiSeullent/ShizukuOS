@@ -110,3 +110,96 @@ when moved between logical processors.
 
 The dependency order below is a design inference from these hardware rules
 and the audited singleton kernel state; it is not an assertion of working SMP.
+
+## Owned native firmware implementation, 2026-10-01
+
+Normal `standalone/boot32.c` now captures the entire variable-length Multiboot
+E820 map before any copy or memory-layout traversal. The private1568-byte
+record at physical0x6800 ends at0x6e20, below bootinfo0x7000 and after the whole
+memholes structure. It retains all rows, including denials; malformed size,
+pointer/count/range overflow or a hidden65th row clears the whole record and
+fails closed. An absent map explicitly clears stale metadata. The RAM planner
+uses only the validated captured rows and subtracts overlapping reservations.
+The inter-kernel ABI and Core scheduler/architecture files are untouched.
+
+The actual SeaBIOS diagnostic places RSDT0x0ffe2270/0x0ffe232c in its reserved
+RAM tail. Primary SeaBIOS1.17.0 sources show ZoneHigh is taken from original
+E820_RAM, reserved for firmware, then unused space returned. QEMU10.1.0's
+`etc/e820` retains the original machine map. `qemu_firmware.h` therefore acquires
+the real fw_cfg signature, supported bridge/subsystem identity, bounded complete
+directory and complete original map before admitting any reserved-table read.
+The complete read must have original RAM coverage and BIOS type1/2/3/4 coverage;
+any original nonRAM or conflicting firmware row denies it. VGA/ROM windows are
+excluded from SDT admission, and no result grants heap/PMM eligibility.
+Version-pinned source bytes/SHA manifests are preserved in
+`build/smp-primary-firmware-sources-1/manifest.json`.
+
+Production `cpu_firmware.c` performs real port reads and installs read-only NX
+maps only for proved firmware bytes beyond managed RAM. RSDP BIOS discovery
+uses only ACPI's fixed BDA/EBDA/F-segment search windows; after discovery, only
+the exact found RSDP span retains that exception. Parsed SDTs require RAM proof.
+The native footer is rejected for direct UEFI/absent metadata; the retained
+UEFI ACPI writer and Supervisor handoff remain future required implementation.
+
+Host receipts preserve runtime feature-absence RED, a duplicate-fw_cfg-selector
+RED, and GCC plus Clang ASan/UBSan GREEN:40 native map checks and39 QEMU proof
+checks. A separate20-check actual-C5000 retirement guard also passed, but will
+be archived and retired in favor of Fada's single common guard. That peer now
+uses retired0x1000, actual initialCR3 capture, checked old boot-root shapes and
+private kernel-half+single4KiB identity mapping. Review requested full ownership
+validation of the final PT node, which its initial level1 early return omitted.
+
+Root separately approved the5000 alternative after correcting an earlier
+assumption: native Multiboot GDT/code/stack lives at or above4MiB; only the
+UEFI-direct loader owns trampoline/GDT5000. The alternative remains historical
+review evidence, not a second production startup path.
+
+The first normal-main/normal-stub receipt at `build/smp-normal-firmware-1`
+remains **FAIL**: four-CPU firmware ownership passed, but two-CPU and SMP-off
+boots hit the old Core scheduler lifecycle assertion. Its entire219-source
+snapshot, original compiled inputs and actual logs are archived with ZIP SHA256
+`34e2dcab5cb98774913df43d5f023c1dcdb612a0e904f1bd8fe3e39924f810f1`.
+
+Own commit `2c1385e` imported only the independently reviewed Core four-file
+change from `644c94f`; it did not overwrite the canonical checkout. The fresh
+normal-main receipt `build/smp-normal-firmware-reviewed-core-2/result.json`
+observed real2CPU/4CPU/SMP-off **PASS**, with receipt SHA256
+`be64ae57e4f66edb2d08053c6194e3180a8214da526089ba6255c0ff18836069`.
+Its self-contained219-source/input/log archive SHA256 is
+`d096acff39de8fe6930243d20a9e206f6aaa1c452db0f44bd5e25c9b0b41e611`.
+These observations do not relabel the original failure or certify later Core
+epochs. A distinct actual normal-main four-CPU run in
+`build/smp-normal-ap-red-2/result.json` had zero AP workers and zero IPI records;
+this required-feature RED is retained alongside the original full-SMP RED.
+
+Independent review found the native producer executed `kbuild.py` and its
+transitive `shzlib.py` before taking its initial source snapshot. The private
+actual-helper control in `build/smp-native-runner-provenance-red-1` reproduced
+both persistent after-load replacements reaching the compiler boundary while
+the later snapshot would describe different bytes. No historical receipt was
+proved raced, and all historical evidence remains unchanged.
+
+The corrected producer captures the complete219-file closure before executing
+repository helpers, executes the captured helper bytes directly, and compares
+the loaded builder's inventory and current bytes before any compiler or VM.
+It retains source/artifact/tool guards before and after execution. Its optional
+compiled-input reuse requires every compiled source, stub, helper and tool to
+match the prior native PASS; only the producer itself may differ. It copies
+exact validated machine bytes and records the original receipt SHA. Three
+actual-helper replacement controls and three actual-input reuse controls passed
+in `build/smp-native-runner-provenance-green-4`; changed C/artifacts were denied.
+
+The new source-bound real2CPU/4CPU/SMP-off run at
+`build/smp-normal-firmware-bound-3/result.json` observed **PASS** with all219
+source/tool/artifact/origin-receipt guards unchanged. Receipt SHA256:
+`4c204adc4c4aef12f01385a6c2ef08bcf394409b3af0bfe6be740a4a138a5e4a`.
+Only the producer changed from the prior compiled closure; no unnecessary
+kernel rebuild was performed. Its complete source/input/log/control ZIP SHA256:
+`8f789cac8321462108e31f992ab500b8f122e97fc76f56031552bce0b0d0ade5`.
+
+This milestone proves bounded retained firmware consumption and source-bound
+normal boot. It does not start APs. Fada's backend remains unimported until its
+final PT-node ownership defect is fixed, reviewed and frozen. Its private
+architecture consumer and real AP/IPI integration remain the next Task1 work.
+Per-CPU scheduler, allocators/waits/TLB, Kernel32/NT workers, Supervisor VMX,
+actual Windows98 VMM service execution and final ISO remain required Tasks2–5.

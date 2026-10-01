@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "../../abi/shz_abi.h"
 #include "memholes.h"
+#include "native_firmware.h"
 
 #ifdef STUB_K32                                    /* Kernel32: 32-bit Protected Mode, paging off, EBX = bootinfo */
 #define STUB_DOMAIN SHZ_DOM_KERNEL32
@@ -51,13 +52,24 @@ static void zero(uint32_t dst, uint32_t n)
 }
 
 static shz_memplan_result_t plan;
+static shz_native_firmware_t native_firmware;
+
+static int loader_read(void *unused, uint64_t pa, void *out, uint32_t bytes)
+{
+    uint8_t *dst = out;
+    const volatile uint8_t *src = (const volatile uint8_t *)(uint32_t)pa;
+    uint32_t i;
+    (void)unused;
+    for (i = 0; i < bytes; ++i) dst[i] = src[i];
+    return 1;
+}
 
 /* RAM size and the firmware holes below it (memholes.h: the same plan the UEFI boot manager uses for its direct
  * Kernel64 boot). Without a Multiboot memory map: the classic mem_upper, contiguous RAM from 1 MiB, no holes. */
 static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
 {
     static shz_memplan_t runs;
-    uint32_t off, ram, i;
+    uint32_t ram, i;
 
     shz_memplan_init(&runs);
     if (!(mbi->flags & MB_INFO_MEM_MAP) || !mbi->mmap_length) {
@@ -66,13 +78,19 @@ static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
         shz_memplan_add(&runs, 0, (uint64_t)mbi->mem_lower << 10);
         shz_memplan_add(&runs, KERNEL_GPA, ram);
     } else {
-        for (off = 0; off + 24 <= mbi->mmap_length; off += ((const struct mmap_entry *)(mbi->mmap_addr + off))->size + 4) {
-            const struct mmap_entry *e = (const struct mmap_entry *)(mbi->mmap_addr + off);
+        for (i = 0; i < native_firmware.count; ++i) {
+            const shz_native_firmware_range_t *e = &native_firmware.range[i];
             uint64_t b = e->base, x = e->base + e->length;
             if (e->type != 1 || !e->length || b >= (1ull << 32))
                 continue;
             if (x > (1ull << 32)) x = 1ull << 32;
             shz_memplan_add(&runs, b, x);
+        }
+        /* A reservation overlapping RAM wins, as for the UEFI map reader. */
+        for (i = 0; i < native_firmware.count; ++i) {
+            const shz_native_firmware_range_t *e = &native_firmware.range[i];
+            if (e->type != 1 && e->length)
+                shz_memplan_remove(&runs, e->base, e->base + e->length);
         }
     }
     if (!shz_memplan_solve(&runs, MAX_RAM, 64u << 20, INITRD_GPA, isize, &plan))
@@ -105,6 +123,13 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
 
     if (magic != MB_MAGIC) fail("not entered by a Multiboot loader, eax=", magic);
     if (!(mbi->flags & 1)) fail("no memory info", mbi->flags);
+    {
+        const uint64_t source_limit = mbi->mem_upper >= 0x3FFC00u ? UINT64_C(0xffffffff) :
+                                      ((uint64_t)mbi->mem_upper + 1024u) << 10;
+        const int captured = shz_native_firmware_capture(&native_firmware, !!(mbi->flags & MB_INFO_MEM_MAP),
+                mbi->mmap_addr, mbi->mmap_length, source_limit, loader_read, 0);
+        if (captured < 0) fail("malformed or incomplete firmware map", mbi->mmap_length);
+    }
     if (!(mbi->flags & 8) || mbi->mods_count < 1) fail("need module 0 = KERNEL64 image, flags=", mbi->flags);
     mods = (const struct mod *)mbi->mods_addr;
     ksize = mods[0].end - mods[0].start;
@@ -142,6 +167,10 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
         zero(SHZ_MEMHOLES_GPA, sizeof(shz_memholes_t));
         shz_memholes_write(holes, &plan);
     }
+    /* Captured before copies: the loader's map may itself have occupied low memory.
+     * An absent map writes an explicit zero record rather than retaining stale bytes. */
+    copy(SHZ_NATIVE_FIRMWARE_GPA, (uint32_t)&native_firmware, sizeof(native_firmware));
+    say("SHZ-STUB: native firmware ranges "); hex(native_firmware.count); say("\n");
 #else
     (void)pml4; (void)pdpt_lo; (void)pd; (void)pdpt_hi;
 #endif
