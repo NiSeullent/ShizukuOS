@@ -86,7 +86,11 @@
 - [x] Import reviewed b9f170c scheduler, d461529 PMA service, 402f2cb GOP AUTO, 6dfc4b5 K32 deadlines, 97bafff bounded K32 IPC and merged compiler-derived VxD receipt closure.
 - [x] Run fresh `python3 -B shizukudos/kbuild.py` atd08e1cb (212stableinputs) and preserve the still-current105input source-bound Supervisor compile. These are compile/component evidence.
 - [x] Import the independently reviewed four-file canonical644c94f finite aging grant; fresh212-input build, focused11-check/35-assertion guest and full standalone38/38 guest pass at the frozen fcb36a0 epoch.
-- [ ] Close the independent canonical arrival-boundary failure: its fresh same-source guest waits5 ticks for a remaining4-tick grant. Retain both receipts; canonical163f owns diagnosis and correction.
+- [x] Independently verify canonical b5c49d8 coordinator-isolated successor:38/38 full UP component checks and151 archived apps pass; retain original5/4 failure and natural-attribution limit.
+- [x] Commit reviewed partial NT runtime consumer ad6fdfa;3348 host checks per compiler, seven real units, targeted320-input ntdll/kernel32 link and actual321/0 API guest execution verified. Preserve whole API guest FAIL from earlier PMA useful work361<1000.
+- [x] Correct omitted pe_parse.h in899bf2e;217 real C dependency units plus independent header and omitted-C controls pass. Preserve old213 strict-build failure and qualification of historical212 maps.
+- [x] Verify distinct ROOT214-source frozen four-profile build, focused11/35 PMA, K32 nine-check and full38/38 historical-archive guest with151 app exits and48 total service checks.
+- [ ] Diagnose and close the distinct current-DLL API guest's earlier PMA useful-work failure without relaxing thresholds or exit gates; passing historical-archive regression does not close it.
 - [x] Run host ABI/VxD/display/kernel/firmware and production PMA service/ring gates; retain source hashes and actual scope.
 - [x] Publish tested commit SHAs, exact receipts and blockers in shared peer coordination mailboxes; continue exchange for subsequent units.
 - [x] Import peer private replacement constructor and close two independent readback validation gaps in a4fcab9;30 actual synthetic host controls pass. Return a correction-only patch to the original owner; actual DOS producer/profile/Windows boot remain separate gates.

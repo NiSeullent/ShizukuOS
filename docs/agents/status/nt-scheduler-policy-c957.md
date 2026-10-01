@@ -1,7 +1,7 @@
 # c957 partial NT priority projection
 
 Source commit `f1e7750` contains only the common helper and its two tests.
-The new common nt_sched_policy.h is a pure, unwired projection helper. It
+At that frozen epoch, common nt_sched_policy.h is a pure, unwired projection helper. It
 accepts five non-realtime Win32 process classes and seven documented thread
 levels:35 combinations. It retains the process class, requested relative
 level, NT base increment and projected absolute base priority. Normal/normal
@@ -13,7 +13,7 @@ scalars before arithmetic, including INT32 extremes.
 
 This implements no NTSTATUS, thread information class, handle resolution,
 access rights, process/thread object storage, dynamic boosting, quantum,
-affinity, API behavior or runtime mutation. No existing runtime consumes it.
+affinity, API behavior or runtime mutation. No runtime at that epoch consumes it.
 The Win64 frontend/IPC setters and user-thread initialization remain separate
 coordinated work; fd5c owns IPC/object seams and163f owns scheduler/init seams.
 The shared mailbox is `MESSAGE-c957-FD5C-163F-NT-SCHEDULER-CONTRACT-AUDIT.md`.
@@ -43,7 +43,11 @@ Source SHA256:
 | tests/test_nt_sched_policy.c | `d5065a5f3cebbe25dda06e2850a066a60cba8cc322872f41f4005742d397dfbb` |
 | tests/test_nt_sched_policy.py | `a4811c3ce08e209cbf0f776a185b55d73f262553779da978016da047079c4c73` |
 
-The new common header increases kbuild's complete source inventory212→213
+The new common header increases kbuild's declared source inventory212→213
 even while unused. Prior212-source whole-kernel receipts retain their frozen
 epoch and are historical for subsequent complete-tree builds. No new whole
 kernel, Win64 runtime, VM, private media or NAS build is claimed here.
+
+The later reviewed runtime consumer is separately recorded in [nt-runtime-priority-c957.md](nt-runtime-priority-c957.md). Historical helper RED/GREEN evidence above remains unchanged.
+
+Subsequent strict frozen compilation found pe_parse.h missing from that declared inventory. Old212/213 maps did not bind its bytes; raw historical results remain unchanged. The separately reviewed899bf2e correction and217-unit compiler-dependency regression now cover214 declared kernel sources, recorded in scheduler-integration-c957.md.

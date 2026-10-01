@@ -26,11 +26,12 @@ specific implementation slices only.
 | Closed NTW64 handles | 8c51a72; root GCC/Clang ASan each 2162440 lifetime checks over 65528 create/release cycles, plus failure/deferred-close groups | Slots retire at generation exhaustion; transport mocked; no unlimited reuse claim |
 | Kernel32 publication | 8671fba; root 17 production checks in GCC/Clang ASan; fresh isolated KVM guest passes all nine original checks | Fresh updated v2 guest passes12 total checks/44preemptions/31ms wait/50ms sleep; standalone backend, not Windows 98/Supervisor/SMP |
 | Kernel32 guest provenance | 665792e imported; current receipts bind source/evaluator/build before/after hashes and immutable artifacts; root control regressions executed | Fresh v2 guest PASS, artifacts/receipt/36-source closure stable; 12 runner controls PASS; prior guest receipt remains historical |
-| Kernel64 PMA policy | Reviewed644c94f four-file finite aging source imported as fcb36a0; fresh212-input four-profile build, focused11-check/35-assertion and full38/38 ROOT guests pass | Canonical same-source actual guest independently fails arrival wait5/remaining4; correction remains owner163f's lane. All earlier failed receipts preserved; no VMM/SMP acceptance |
+| Kernel64 PMA policy | Reviewed finite aging plus2d429dc coordinator-isolated fixture; corrected214-source frozen build, focused11/35 and full38/38 historical-archive regression pass; canonical successor also independently passes | Current-DLL API guest retains earlier PMA useful-work FAIL361<1000. Original canonical5/4 and all earlier failures preserved; no VMM/SMP acceptance |
 | PMA event/completion service | d461529 production-reviewed; host GCC/Clang ASan3429 each; ABI GCC37764/ASan+TSan37716 each and2000 threaded exchanges pass; ROOT full successor passes16PMA plus32legacy Win64 checks,48total | Actual standalone fixture/rings only; historical sampler/loader/scheduler failures retained; no native VMM delivery proof |
 | PE DLL collision successor | d08e1cb allows non-stripped empty-directory DLL fallback mapping; GCC/Clang ASan and independent reviewer each20cases251checks pass | Actual archived WinMM/T_GUI_STATUS passes with all151apps in source-bound full38/38 guest; no nativeWindows98 or ten-required-modern-app acceptance |
 | Website preservation/refactor/publication | Source7050f3e;54 tests and independent review;100 assets, both48-frame viewers, desktop/mobile/keyboard/games/noJS and5 actual ZIP downloads pass. New nginx current213716 and100 normal-headed public HTTPS body hashes verified | Final ISO and native proof not published; prior public headless403 retained; generic direct/headless access not inferred; NAS/large-artifact publication floors retained |
-| Partial NT priority projection | Unwired common helper supports35 non-realtime class/level combinations and Win32±15 ↔ NT±16 sentinels; GCC/Clang ASan each3456 checks and i486/x64 freestanding consumers pass with independent review | Runtime handle/rights/object-lifetime/API/init wiring remains pending; helper adds inventory input213 and does not change scheduling behavior |
+| Common NT priority projection | f1e7750 helper supports35 ordinary class/level combinations and Win32±15 ↔ NT±16;3456 GCC/Clang checks and i486/x64 consumers pass | Historical helper-only epoch; later runtime consumer is separately verified |
+| Partial NT runtime priority APIs | ad6fdfa11-file consumer reviewed;3348/0 GCC and Clang,249 inputs/seven real units. Actual targeted320-input DLL link and321/0 API guest checks pass; archived baseline321/149 retained | Whole current-DLL guest FAIL/QEMU3 from earlier PMA assertion. Five ordinary classes/seven levels/UP mask1 only; full runtime/native Windows98/dynamic boosts/limited rights/process creation remain pending; see status/nt-runtime-priority-c957.md |
 | DOS boundary audit | Pinned actual FreeDOS entry, EXEC, exit and reentry paths inspected; see status/dos-boundary-audit-c957.md | Executor/VMM callback prerequisites assigned to163f Windows/NT lead; an INT21 lock alone misses real transfers; actual DOS gate/boot pending |
 | Private replacement preparation | a4fcab9 imports peer f7f1aea and closes appended-extent/invalid-EOC readback findings; original25PASS and targeted3RED retained; corrected30 actual synthetic FAT/mcopy/NASM controls and independent review pass | Source preparation only; recognized producer closure remains partial, NAS/resource/native boot owners unchanged, all actual Windows replacement/native flags false |
 
@@ -46,15 +47,11 @@ runner/helper identities. All151 historical fixture EXEs exit0/faulted0,
 and16 PMA checks. Older descriptions of48 additional legacy checks were an
 overcount; raw receipts/logs remain unchanged.
 
-Canonical's separate actual guest with the same212 source/five helper
-identities fails the arrival boundary5/remaining4. Its modeled READY/BLOCKED
-coordinator control supports possible aged-thread fixture interference but
-does not close the natural guest failure. Both real guest receipts are
-retained. Owner163f handles the reviewed correction and fresh acceptance.
+Canonical's original same-inventory arrival5/remaining4 failure remains preserved. Its independently reviewed b5c49d8 fixture successor now passes38/38 and151 apps in210.27seconds, with passive first selection4/remaining4 and a blocked coordinator. This closes that successor's isolated UP acceptance; original natural PIT attribution and actual Windows98/native acceptance remain separate. ROOT imported only the reviewed fixture in2d429dc for its new NT epoch.
 
-The new unused NT projection header extends complete kbuild inventory to213;
-the212-input whole-kernel receipts remain historical at their frozen epoch.
-This helper has host/freestanding verification only and no existing consumer.
+Reviewed ad6fdfa wires the NT projection to the bounded runtime consumer. The subsequent899bf2e header inventory correction yields214 declared sources;217 actual GCC dependency units and two mutation controls pass. Frozen four-profile build passes109.48 seconds. Fresh focused11/35 PMA, K32 nine-check and full historical-archive38/38 guests pass; the latter executes151 ordinary EXEs without faults in226.46 seconds. Exact build/serial/receipt identities are in status/scheduler-integration-c957.md. Historical212/213 maps omitted pe_parse.h and retain the explicit qualification below.
+
+Current ntdll/kernel32 and committed f15a938 guest probe execute321 API checks/0 failures with app exit0/faulted0. **The whole four-member API guest remains FAIL/QEMU3** because an earlier PMA first-phase useful-work assertion records361<1000. The distinct historical-archive full regression does not erase it. Independent read-only reviewers verify all archive/source/artifact/evaluator/serial identities and both API/global outcomes. Full current runtime, native Windows98 and final ISO remain pending.
 
 Official static nginx current is `/srv/m98/releases/20261001T213716` with100
 files/5,181,666 bytes; previous152940 is preserved. Both publication locks,
@@ -150,4 +147,10 @@ valid-HTTPS Cloudflare403 challenge, preserved unchanged. The later normal
 headed public delivery success is a separate receipt; final artifact download
 and general direct/headless access are not inferred from it.
 
-Fresh current-loader capability CLI report: `build/pma-c957-cap-receipt-ldr-final/capabilities.json`; all58currentprojecthashes rechecked,120/56/17 inventory, native/behavior flagsfalse. The prior report remains historical at its captured pre-loader source epoch.
+Retained historical loader source-only capability CLI report: `build/pma-c957-cap-receipt-ldr-final/capabilities.json`; 58 project hashes rechecked at that captured epoch,120/56/17 inventory, native/behavior flagsfalse. The prior report remains historical at its captured pre-loader source epoch.
+
+## Newly discovered build inventory gap
+
+An actual build from the recorded213 files failed at ldr.c because win64/pe_parse.h was absent from kbuild.source_hashes. That header is compiled by ldr.c/ntdrv_ldr.c/pe_parse.c but was omitted by the declared inventory. Frozen failure `build/pma-c957-kernels-nt-arrival-v1/` is retained. Prior212/213 receipts still bind their declared inputs and raw execution results, but earlier complete-local-header claims need this qualification. Reviewed source899bf2e adds the missing inventory entry;217 real C dependency units, two mutation controls and a distinct frozen214-source four-profile build now pass. These fresh proofs do not retroactively bind the omitted header in old receipts. NT host249-header and targeted-DLL320-source receipts already include pe_parse.h and remain unchanged.
+
+Fresh NT-source capability inventory report `build/pma-c957-nt-runtime-capability-current/result.json`, SHA256 `e745b11eaed2e97b17c6cba4223ef77760a9e209d373175932fc8df9b0457b1a`, validates120/56/17 entries and58 current source pins. This is source inventory only; native/behavior-positive flags remain false. The prior loader report retains its historical source epoch.
