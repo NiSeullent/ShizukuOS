@@ -5,6 +5,7 @@
 #include "../dead_screen/native.h"
 #include "fs.h"
 #include "boot_channel_peer.h"
+#include "gfx_address.h"
 
 static shz_bootinfo_t bootinfo;
 int initrd_files = -1;                          /* -1: none or rejected; read by the Win64 self-test */
@@ -15,11 +16,11 @@ int k64_boot_framebuffer(k64_boot_fb_t *out)
     /* fb_bpp follows fb_format in the ABI tail, so this size check covers both.
      * Validate before changing the caller's output or allowing a backend to map
      * the advertised range. GOP rows are addressed as whole 32-bit pixels.
-     * The direct-map aperture ends at the page-aligned kernel image alias;
-     * staying inside it also keeps mmio_map's page roundup from wrapping. */
+     * MMIO aliases must end before the first private graphics page arena;
+     * its page-aligned boundary also keeps mmio_map's roundup out of it. */
     if (!out || !SHZ_BOOTINFO_HAS(b, fb_bpp) || !b->fb_base || (b->fb_base & 3) ||
         b->fb_base > UINT64_MAX - b->fb_size ||
-        b->fb_base + b->fb_size > K64_VIRT_BASE - DIRECT_MAP || b->fb_bpp != 32 ||
+        b->fb_base + b->fb_size > K64_GFX_ARENA_OFFSET || b->fb_bpp != 32 ||
         (b->fb_format != SHZ_FB_RGBX8888 && b->fb_format != SHZ_FB_BGRX8888) || !b->fb_width || !b->fb_height ||
         (b->fb_pitch & 3) || b->fb_pitch / 4 < b->fb_width ||
         (uint64_t)b->fb_pitch * b->fb_height > b->fb_size)
