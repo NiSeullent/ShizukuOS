@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "status": "DRAFT_UNVERIFIED",
+  "source_sha256": {
+    "src/m98_glsl_frontend.h": "f362c468b47291c03bdf39d99b70e228bd07eb157617c525147026385fb63462",
+    "src/m98_glsl_frontend.cpp": "714d06937f7e483ec89203eaf6df9e11bc01d6117692564891f1e9a9596c40cd",
+    "src/m98_glsl_frontend_port.h": "4932602f670bfb4cb180841cd15ca06bb45bcc7cf19d743ef44c2d0b6351c85e",
+    "src/m98_glsl_frontend_port.c": "0e03aea8454fa43207b3dd45f1b13c3055f0ddf41d8e98cf7601866d92323579",
+    "tests/m98_glsl_frontend_host.cpp": "d52698b2f4e08c8f9944e48e07085ddc48334d74b80336d2cd8f15a91fc3d98f",
+    "tools/build_glsl_frontend.py": "8cc9712a2f38814d63cd2a6d85f86b4bd87cf10432628ebad1f3d5948be6eaa3",
+    "profiles/mesa-glsl-es300-frontend-v1.json": "2b7a6c7dbc533eb5547ba34240c526a388eb47a3f249b5d5c64b2adf355a308d",
+    "patches/mesa-26.2.3-glsl-es300-frontend-v1.patch": "ce33accc979d6635f8bac2667e0fefbd04701b8b5f62f9d85f4f5aae466957f1",
+    "docs/TRIDENT_GLSL_FRONTEND.md": "50c1f837c5039baeac0ff5a8c1c0873d2b2c439fec5696d6934df7f59112eed6",
+    "profiles/wasm-i486-simd-v1.json": "b08c4596b7b0bf28484296dedd0f6c598b508897a2ee6c4957339d24fc9352ad",
+    "patches/wamr-f5f57c09-i486-simd-v1.patch": "eae298312541838d8823dbae9efc8389022266f9a8e50a3ddb0e1d15bc0facfc",
+    "tools/build_wasm_simd_profile.py": "6b014fb857347d29c6d1a661402335ddc589c473bd3b01f685e103a115d9d68f",
+    "tests/m98_wasm_simd_host.c": "64b7e0e40d3269511b20f6e90cdf02397f3b07d345aee959a570171b4feca577",
+    "tests/m98_wasm_simd_spec_host.c": "15cbe821436c3c3dd5f89909c5ab8d76abe0950bd7965333bb8e58aafa87c015",
+    "docs/TRIDENT_WASM_SIMD_PROFILE.md": "902aade011a0fb7daae2eeabb635853ad80f1f34de6acae418452d3988f530a7"
+  },
+  "python_ast_and_profile_json_checked": true,
+  "exact_patch_replay_checked_by_authors": true,
+  "current_glsl_profile_built": false,
+  "current_simd_profile_built": false,
+  "glsl_previous_normal_comparisons": 608,
+  "full_glsl_sanitizer_pass": false,
+  "glsl_typed_build_pass": false,
+  "simd_native_vector_call_abi_guard_missing": true,
+  "simd_new_engine_required_original_predicates": [
+    1237,
+    386,
+    4641,
+    622
+  ],
+  "all_browser_standards_complete": false,
+  "modern_apps_complete": false,
+  "corrected_tls_actual_native_trial_pending": true,
+  "native_and_build_resource_floors_preserved": true
+}

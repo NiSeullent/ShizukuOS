@@ -82,7 +82,91 @@ Wine and ReactOS are not bundled as complete runtimes. Their NT/Unix kernel depe
   an external dependency of that component, separate from the independently
   authored platform sources below.
 
+## Optional Trident script extension
+
+The original `src/m98_trident_script*` embedding and
+`src/m98_trident_automation*` adapter use GPL-2.0-only project code. The real
+interpreter is [QuickJS 2026-06-04](https://bellard.org/quickjs/), pinned to the
+official archive SHA256
+`b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a`.
+Its MIT license credits Fabrice Bellard and Charlie Gordon; upstream copyright
+and license notices remain in the ignored, verified source and build output.
+Distributing a linked binary requires including those notices. Platform changes
+and original embedding sources remain separate from the pinned upstream input.
+This extension does not replace Microsoft's MSHTML implementation or copy it.
+`tests/trident_es2026_selected.js` is original semantic-test code based on the
+linked public ECMAScript2026 specification; it is not a copied Test262 suite
+and does not certify full ECMAScript or browser conformance.
+
+The portability build also selects the mathematical source subset from official
+[musl revision c4e1bb3994c14ed5112c894d15a451bf00f0d501](https://git.musl-libc.org/cgit/musl/commit/?id=c4e1bb3994c14ed5112c894d15a451bf00f0d501),
+archive SHA256
+`b124fa46818a524d373a176b3262a9c26f421d5972073110f3fe51690a9ac4f1`.
+Original source copies and COPYRIGHT remain beside the prepared local source;
+the umbrella MIT grant and applicable Sun, FreeBSD and Arm per-file notices all
+remain required. Local helper names and platform declarations are adapted in
+prepared copies, with exact hashes and build recipes recorded separately.
+No complete musl runtime or prebuilt musl binary is linked. The original project
+formatting adapter is GPL-2.0-only; native basic math uses explicitly audited
+installed-system CRT exports. Host math and original Windows CRT results require
+separate execution evidence.
+
+## Optional current Wasm execution component
+
+`src/m98_wasm*` and its original build/test adapters are GPL-2.0-only project
+code. The selected interpreter uses official WebAssembly Micro Runtime revision
+`f5f57c09aee623436f5fb87a90798fdd2cdf39fd`, archive SHA256
+`620d40c4c67269f371a46ef4923d398ef96cdf569a7f66e6aab70788e235f907`.
+All 2,001 original regular files, the original archive and the complete
+Apache-2.0 WITH LLVM-exception license remain in private build storage. The
+original exception explicitly discusses GPLv2 combined software; plain
+Apache-2.0 compatibility is not assumed. Prepared portability patches and exact
+original/prepared hashes remain separate. This work publishes no combined binary.
+See `docs/TRIDENT_WASM_RUNTIME.md` for the tested profile and unfinished features.
+
+The selected numeric tests retain official WebAssembly specification sources at
+`bc030375d734de845aa2246b783ca6a7ee865eb4` with their original license and notices.
+Pinned WABT 1.0.42, archive SHA256
+`84895407a6bbb80e918f33b16b2fb2206021c150b6bc9ff6f761263a745ab131`,
+is a host-only fixture compiler with its original license retained. Neither
+foreign test scripts nor a WABT runtime are linked into the Win98 DLL. Exact
+selected tests, exclusions and results are in `docs/TRIDENT_WASM_SPEC_SELECTED.md`.
+
+## Optional Mesa fragment execution component
+
+`src/m98_softpipe_shader*` and the original port/build/test adapters are
+GPL-2.0-only project code. The selected genuine TGSI interpreter/build/parser
+and scalar helpers use official Mesa 26.2.3, archive SHA256
+`1628058a8d2c0615975de5a15ab7bbb9638c50000b5bed9456ff423ea034a81f`.
+The original archive, complete selected source snapshot, MIT and BSL-1.0 license
+texts and applicable per-file notices remain in private build storage. Prepared
+allocation/binding/scalar portability changes preserve the originals separately.
+The pinned enum generator is executed as a build dependency with its exact
+command and output retained. No complete Mesa driver is bundled, and the typed
+TGSI fragment component does not establish GLES, WebGL or WebGPU support.
+See `docs/MESA_SOFTPIPE_PORT_FEASIBILITY.md` and `src/m98_softpipe_HANDOFF.md`.
+
 ## Independent platform path
+
+The original CSS token/variable core retains selected WPT raw fixtures and their
+full BSD-3-Clause license at revision `5cd8e3fa0a6c4ca11fa565f7c0956802c8e0045d`
+under `benchmarks/wpt-css-selected-v1/`. Small project-authored oracle vectors
+record exact raw-source hashes; the foreign browser scripts are not executed.
+Three original CSSWG Bikeshed references at revision
+`f505fd10877a9c915b5d4a4028c2ad83c76d006f` remain under their W3C document license,
+with original URIs/status/editor attribution and an accompanying copyright notice
+in `benchmarks/css-standards-source-v1/NOTICE.md`. These are reference documents,
+not linked implementation code. The original component and bounded MSHTML
+consumer are GPL-2.0-only project code; neither constitutes full CSS support.
+
+`tools/build_trident_test262_selected.py` separately obtains selected official
+Test262 fixtures from revision `7ab7fafa0003f73fc85c1b95d88094d33f7eb8bd`, pinned
+archive SHA256 `1d497a1e7430094a41d06f38db775df4a63db5d587b2a8b08aba6fad5de19585`.
+Its BSD license and all selected per-file notices remain unchanged in private
+build storage, alongside the complete original archive. This test-only input
+is not linked into the native runtime or bundled here. The original GPL-2.0-only
+host adapter provides a limited synchronous fixture protocol; its exact scope
+and preserved failures are recorded in `docs/TRIDENT_TEST262_SELECTED.md`.
 
 The new `ntwrapper/`, `ntwin32/`, `ntwddm/`, `drivers/pcie/`,
 `shizukudos/uefi/`, `shizukudos/uefi32/` and `platform/` sources are independently authored project

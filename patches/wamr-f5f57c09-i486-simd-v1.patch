@@ -1,0 +1,521 @@
+--- a/core/iwasm/common/wasm_loader_common.c
++++ b/core/iwasm/common/wasm_loader_common.c
+@@ -155,7 +155,7 @@
+ is_valid_value_type_for_interpreter(uint8 value_type)
+ {
+ #if (WASM_ENABLE_WAMR_COMPILER == 0) && (WASM_ENABLE_JIT == 0) \
+-    && (WASM_ENABLE_SIMDE == 0)
++    && (WASM_ENABLE_SIMDE == 0) && (M98_WASM_SCALAR_SIMD == 0)
+     /*
+      * Note: regardless of WASM_ENABLE_SIMD, our classic interpreters don't
+      * have SIMD implemented.
+--- a/core/iwasm/interpreter/wasm_loader.c
++++ b/core/iwasm/interpreter/wasm_loader.c
+@@ -323,7 +323,7 @@
+ 
+ #if WASM_ENABLE_SIMD != 0
+ #if (WASM_ENABLE_WAMR_COMPILER != 0) || (WASM_ENABLE_JIT != 0) \
+-    || (WASM_ENABLE_FAST_INTERP != 0)
++    || (WASM_ENABLE_FAST_INTERP != 0) || (M98_WASM_SCALAR_SIMD != 0)
+ static V128
+ read_i8x16(uint8 *p_buf, char *error_buf, uint32 error_buf_size)
+ {
+@@ -829,14 +829,24 @@
+                 break;
+ #if WASM_ENABLE_SIMD != 0
+ #if (WASM_ENABLE_WAMR_COMPILER != 0) || (WASM_ENABLE_JIT != 0) \
+-    || (WASM_ENABLE_FAST_INTERP != 0)
++    || (WASM_ENABLE_FAST_INTERP != 0) || (M98_WASM_SCALAR_SIMD != 0)
+             /* v128.const */
+             case INIT_EXPR_TYPE_V128_CONST:
+             {
+                 uint64 high, low;
+ 
++#if M98_WASM_SCALAR_SIMD != 0
++                uint32 secondary;
++                read_leb_uint32(p, p_end, secondary);
++                if (secondary != SIMD_v128_const) {
++                    set_error_buf(error_buf, error_buf_size,
++                                  "unsupported SIMD initializer");
++                    goto fail;
++                }
++#else
+                 CHECK_BUF(p, p_end, 1);
+                 (void)read_uint8(p);
++#endif
+ 
+                 CHECK_BUF(p, p_end, 16);
+                 wasm_runtime_read_v128(p, &high, &low);
+@@ -1990,6 +2000,13 @@
+             set_error_buf(error_buf, error_buf_size, "invalid field type");
+             goto fail;
+         }
++#if M98_WASM_SCALAR_SIMD != 0
++        if (ref_type.ref_type == VALUE_TYPE_V128) {
++            set_error_buf(error_buf, error_buf_size,
++                          "v128 GC heap storage unsupported");
++            goto fail;
++        }
++#endif
+         type->fields[i].field_type = ref_type.ref_type;
+         if (need_ref_type_map) {
+             type->ref_type_maps[j].index = i;
+@@ -2054,6 +2071,13 @@
+         return false;
+     }
+ 
++#if M98_WASM_SCALAR_SIMD != 0
++    if (ref_type.ref_type == VALUE_TYPE_V128) {
++        set_error_buf(error_buf, error_buf_size,
++                      "v128 GC heap storage unsupported");
++        return false;
++    }
++#endif
+     if (wasm_is_reftype_anyref(ref_type.ref_type)) {
+         LOG_ERROR("Not support using anyref in array element type");
+         return false;
+@@ -4532,7 +4556,7 @@
+                     }
+ #if WASM_ENABLE_SIMD != 0
+ #if (WASM_ENABLE_WAMR_COMPILER != 0) || (WASM_ENABLE_JIT != 0) \
+-    || (WASM_ENABLE_FAST_INTERP != 0)
++    || (WASM_ENABLE_FAST_INTERP != 0) || (M98_WASM_SCALAR_SIMD != 0)
+                     /* TODO: check func type, if it has v128 param or result,
+                              report error */
+ #endif
+@@ -7841,8 +7865,11 @@
+             case WASM_OP_SELECT:
+             case WASM_OP_DROP_64:
+             case WASM_OP_SELECT_64:
+-#if WASM_ENABLE_SIMDE != 0
++#if WASM_ENABLE_SIMDE != 0 || M98_WASM_SCALAR_SIMD != 0
+             case WASM_OP_SELECT_128:
++#endif
++#if M98_WASM_SCALAR_SIMD != 0
++            case WASM_OP_DROP_128:
+ #endif
+                 break;
+ 
+@@ -8284,7 +8311,7 @@
+ 
+ #if WASM_ENABLE_SIMD != 0
+ #if (WASM_ENABLE_WAMR_COMPILER != 0) || (WASM_ENABLE_JIT != 0) \
+-    || (WASM_ENABLE_FAST_INTERP != 0)
++    || (WASM_ENABLE_FAST_INTERP != 0) || (M98_WASM_SCALAR_SIMD != 0)
+             case WASM_OP_SIMD_PREFIX:
+             {
+                 uint32 opcode1;
+@@ -8309,8 +8336,17 @@
+                     case SIMD_v128_load32_splat:
+                     case SIMD_v128_load64_splat:
+                     case SIMD_v128_store:
+-                        /* memarg align */
+-                        skip_leb_uint32(p, p_end);
++#if M98_WASM_SCALAR_SIMD != 0
++                        /* Valid non-minimal align encodings must not desync control scans. */
++                        {
++                            uint32 flags;
++                            read_leb_uint32(p, p_end, flags);
++                            if (flags & OPT_MEMIDX_FLAG)
++                                skip_leb_uint32(p, p_end);
++                        }
++#else
++                        skip_leb_align(p, p_end);
++#endif
+                         /* memarg offset */
+                         skip_leb_mem_offset(p, p_end);
+                         break;
+@@ -10773,6 +10809,23 @@
+         GET_LOCAL_REFTYPE();                                           \
+     } while (0)
+ 
++#if M98_WASM_SCALAR_SIMD != 0
++static bool
++m98_scalar_simd_supported(uint32 op)
++{
++    switch (op) {
++        case SIMD_v128_load: case SIMD_v128_store: case SIMD_v128_const:
++        case SIMD_v8x16_shuffle: case SIMD_v8x16_swizzle:
++        case SIMD_i32x4_splat: case SIMD_i32x4_extract_lane:
++        case SIMD_i32x4_replace_lane: case SIMD_i32x4_add:
++        case SIMD_v128_not: case SIMD_v128_and: case SIMD_v128_andnot:
++        case SIMD_v128_or: case SIMD_v128_xor: case SIMD_v128_bitselect:
++            return true;
++        default: return false;
++    }
++}
++#endif
++
+ static bool
+ check_memory(WASMModule *module, char *error_buf, uint32 error_buf_size)
+ {
+@@ -10809,7 +10862,7 @@
+ 
+ #if WASM_ENABLE_SIMD != 0
+ #if (WASM_ENABLE_WAMR_COMPILER != 0) || (WASM_ENABLE_JIT != 0) \
+-    || (WASM_ENABLE_FAST_INTERP != 0)
++    || (WASM_ENABLE_FAST_INTERP != 0) || (M98_WASM_SCALAR_SIMD != 0)
+ static bool
+ check_simd_memory_access_align(uint8 opcode, uint32 align, char *error_buf,
+                                uint32 error_buf_size)
+@@ -13323,10 +13376,13 @@
+                     }
+ #if WASM_ENABLE_SIMD != 0
+ #if (WASM_ENABLE_WAMR_COMPILER != 0) || (WASM_ENABLE_JIT != 0) \
+-    || (WASM_ENABLE_FAST_INTERP != 0)
++    || (WASM_ENABLE_FAST_INTERP != 0) || (M98_WASM_SCALAR_SIMD != 0)
+                     else if (*(loader_ctx->frame_ref - 1) == VALUE_TYPE_V128) {
+                         loader_ctx->frame_ref -= 4;
+                         loader_ctx->stack_cell_num -= 4;
++#if M98_WASM_SCALAR_SIMD != 0
++                        *(p - 1) = WASM_OP_DROP_128;
++#endif
+ #if WASM_ENABLE_FAST_INTERP != 0
+                         skip_label();
+                         loader_ctx->frame_offset -= 4;
+@@ -13420,8 +13476,11 @@
+                             break;
+ #if WASM_ENABLE_SIMD != 0
+ #if (WASM_ENABLE_WAMR_COMPILER != 0) || (WASM_ENABLE_JIT != 0) \
+-    || (WASM_ENABLE_FAST_INTERP != 0)
++    || (WASM_ENABLE_FAST_INTERP != 0) || (M98_WASM_SCALAR_SIMD != 0)
+                         case VALUE_TYPE_V128:
++#if M98_WASM_SCALAR_SIMD != 0
++                            *(p - 1) = WASM_OP_SELECT_128;
++#endif
+ #if WASM_ENABLE_SIMDE != 0
+                             if (loader_ctx->p_code_compiled) {
+                                 uint8 opcode_tmp = WASM_OP_SELECT_128;
+@@ -13993,6 +14052,9 @@
+ #if (WASM_ENABLE_WAMR_COMPILER == 0) && (WASM_ENABLE_JIT == 0) \
+     && (WASM_ENABLE_FAST_JIT == 0) && (WASM_ENABLE_DEBUG_INTERP == 0)
+                 if (local_offset < 0x80
++#if M98_WASM_SCALAR_SIMD != 0
++                    && local_type != VALUE_TYPE_V128
++#endif
+ #if WASM_ENABLE_GC != 0
+                     && !wasm_is_type_reftype(local_type)
+ #endif
+@@ -14075,6 +14137,9 @@
+ #if (WASM_ENABLE_WAMR_COMPILER == 0) && (WASM_ENABLE_JIT == 0) \
+     && (WASM_ENABLE_FAST_JIT == 0) && (WASM_ENABLE_DEBUG_INTERP == 0)
+                 if (local_offset < 0x80
++#if M98_WASM_SCALAR_SIMD != 0
++                    && local_type != VALUE_TYPE_V128
++#endif
+ #if WASM_ENABLE_GC != 0
+                     && !wasm_is_type_reftype(local_type)
+ #endif
+@@ -14157,6 +14222,9 @@
+ #if (WASM_ENABLE_WAMR_COMPILER == 0) && (WASM_ENABLE_JIT == 0) \
+     && (WASM_ENABLE_FAST_JIT == 0) && (WASM_ENABLE_DEBUG_INTERP == 0)
+                 if (local_offset < 0x80
++#if M98_WASM_SCALAR_SIMD != 0
++                    && local_type != VALUE_TYPE_V128
++#endif
+ #if WASM_ENABLE_GC != 0
+                     && !wasm_is_type_reftype(local_type)
+ #endif
+@@ -16180,7 +16248,7 @@
+ 
+ #if WASM_ENABLE_SIMD != 0
+ #if (WASM_ENABLE_WAMR_COMPILER != 0) || (WASM_ENABLE_JIT != 0) \
+-    || (WASM_ENABLE_FAST_INTERP != 0)
++    || (WASM_ENABLE_FAST_INTERP != 0) || (M98_WASM_SCALAR_SIMD != 0)
+             case WASM_OP_SIMD_PREFIX:
+             {
+                 uint32 opcode1;
+@@ -16196,6 +16264,13 @@
+                 emit_byte(loader_ctx, opcode1);
+ #endif
+ 
++#if M98_WASM_SCALAR_SIMD != 0
++                if (!m98_scalar_simd_supported(opcode1)) {
++                    set_error_buf(error_buf, error_buf_size,
++                                  "unsupported scalar SIMD instruction");
++                    goto fail;
++                }
++#endif
+                 /* follow the order of enum WASMSimdEXTOpcode in wasm_opcode.h
+                  */
+                 switch (opcode1) {
+@@ -16214,7 +16289,7 @@
+                     {
+                         CHECK_MEMORY();
+ 
+-                        pb_read_leb_uint32(p, p_end, align); /* align */
++                        pb_read_leb_memarg(p, p_end, align); /* align/memidx */
+                         if (!check_simd_memory_access_align(
+                                 opcode1, align, error_buf, error_buf_size)) {
+                             goto fail;
+@@ -16238,7 +16313,7 @@
+                     {
+                         CHECK_MEMORY();
+ 
+-                        pb_read_leb_uint32(p, p_end, align); /* align */
++                        pb_read_leb_memarg(p, p_end, align); /* align/memidx */
+                         if (!check_simd_memory_access_align(
+                                 opcode1, align, error_buf, error_buf_size)) {
+                             goto fail;
+@@ -16485,7 +16560,7 @@
+ 
+                         CHECK_MEMORY();
+ 
+-                        pb_read_leb_uint32(p, p_end, align); /* align */
++                        pb_read_leb_memarg(p, p_end, align); /* align/memidx */
+                         if (!check_simd_memory_access_align(
+                                 opcode1, align, error_buf, error_buf_size)) {
+                             goto fail;
+@@ -16522,7 +16597,7 @@
+                     {
+                         CHECK_MEMORY();
+ 
+-                        pb_read_leb_uint32(p, p_end, align); /* align */
++                        pb_read_leb_memarg(p, p_end, align); /* align/memidx */
+                         if (!check_simd_memory_access_align(
+                                 opcode1, align, error_buf, error_buf_size)) {
+                             goto fail;
+--- a/core/iwasm/interpreter/wasm_opcode.h
++++ b/core/iwasm/interpreter/wasm_opcode.h
+@@ -285,6 +285,14 @@
+     WASM_OP_GET_GLOBAL_V128 = 0xe0,
+     WASM_OP_SET_GLOBAL_V128 = 0xe1,
+     WASM_OP_SELECT_128 = 0xe2,
++#endif
++
++#if M98_WASM_SCALAR_SIMD != 0
++#if WASM_ENABLE_SIMD == 0 || WASM_ENABLE_SIMDE != 0     || WASM_ENABLE_FAST_INTERP != 0 || WASM_ENABLE_LABELS_AS_VALUES != 0     || WASM_ENABLE_JIT != 0 || WASM_ENABLE_WAMR_COMPILER != 0
++#error "M98 scalar SIMD requires classic switch interpreter without JIT/SIMDe"
++#endif
++    WASM_OP_SELECT_128 = 0xe2,
++    WASM_OP_DROP_128 = 0xe3,
+ #endif
+ 
+     /* Post-MVP extend op prefix */
+--- a/core/iwasm/interpreter/wasm_interp_classic.c
++++ b/core/iwasm/interpreter/wasm_interp_classic.c
+@@ -456,6 +456,28 @@
+ #else
+ #define CLEAR_FRAME_REF(p, n) (void)0
+ #endif /* end of WASM_ENABLE_GC != 0 */
++
++#if M98_WASM_SCALAR_SIMD != 0
++/* Four aligned 32-bit cells; never cast a frame or unaligned memory to V128. */
++static void
++m98_simd_read(const uint8 *bytes, uint32 words[4])
++{
++    uint32 i;
++    for (i = 0; i < 4; i++)
++        words[i] = (uint32)bytes[4*i] | ((uint32)bytes[4*i+1] << 8)
++                 | ((uint32)bytes[4*i+2] << 16) | ((uint32)bytes[4*i+3] << 24);
++}
++static void
++m98_simd_write(uint8 *bytes, const uint32 words[4])
++{
++    uint32 i, j;
++    for (i = 0; i < 4; i++)
++        for (j = 0; j < 4; j++)
++            bytes[4*i+j] = (uint8)(words[i] >> (8*j));
++}
++#define M98_PUSH_V128(words) do { memcpy(frame_sp, (words), 16); CLEAR_FRAME_REF(frame_sp, 4); frame_sp += 4; } while (0)
++#define M98_POP_V128(words) do {     frame_sp -= 4; memcpy((words), frame_sp, 16);     CLEAR_FRAME_REF(frame_sp, 4); } while (0)
++#endif
+ 
+ #define skip_leb(p) while (*p++ & 0x80)
+ 
+@@ -2488,6 +2510,20 @@
+                 HANDLE_OP_END();
+             }
+ 
++#if M98_WASM_SCALAR_SIMD != 0
++            HANDLE_OP(WASM_OP_DROP_128)
++            {
++                frame_sp -= 4; CLEAR_FRAME_REF(frame_sp, 4);
++                HANDLE_OP_END();
++            }
++            HANDLE_OP(WASM_OP_SELECT_128)
++            {
++                cond = (uint32)POP_I32(); frame_sp -= 4;
++                if (!cond) memcpy(frame_sp - 4, frame_sp, 16);
++                CLEAR_FRAME_REF(frame_sp - 4, 8);
++                HANDLE_OP_END();
++            }
++#endif
+             HANDLE_OP(WASM_OP_SELECT)
+             {
+                 cond = (uint32)POP_I32();
+@@ -2518,6 +2554,14 @@
+                 type = *frame_ip++;
+ 
+                 cond = (uint32)POP_I32();
++#if M98_WASM_SCALAR_SIMD != 0
++                if (type == VALUE_TYPE_V128) {
++                    frame_sp -= 4;
++                    if (!cond) memcpy(frame_sp - 4, frame_sp, 16);
++                    CLEAR_FRAME_REF(frame_sp - 4, 8);
++                    HANDLE_OP_END();
++                }
++#endif
+                 if (type == VALUE_TYPE_I64 || type == VALUE_TYPE_F64
+ #if WASM_ENABLE_GC != 0 && UINTPTR_MAX == UINT64_MAX
+                     || wasm_is_type_reftype(type)
+@@ -4163,6 +4207,11 @@
+                 GET_LOCAL_INDEX_TYPE_AND_OFFSET();
+ 
+                 switch (local_type) {
++#if M98_WASM_SCALAR_SIMD != 0
++                    case VALUE_TYPE_V128:
++                        M98_PUSH_V128(frame_lp + local_offset);
++                        break;
++#endif
+                     case VALUE_TYPE_I32:
+                     case VALUE_TYPE_F32:
+ #if WASM_ENABLE_REF_TYPES != 0 && WASM_ENABLE_GC == 0
+@@ -4214,6 +4263,14 @@
+                 GET_LOCAL_INDEX_TYPE_AND_OFFSET();
+ 
+                 switch (local_type) {
++#if M98_WASM_SCALAR_SIMD != 0
++                    case VALUE_TYPE_V128:
++                        frame_sp -= 4;
++                        memcpy(frame_lp + local_offset, frame_sp, 16);
++                        CLEAR_FRAME_REF(frame_sp, 4);
++                        CLEAR_FRAME_REF(frame_lp + local_offset, 4);
++                        break;
++#endif
+                     case VALUE_TYPE_I32:
+                     case VALUE_TYPE_F32:
+ #if WASM_ENABLE_REF_TYPES != 0 && WASM_ENABLE_GC == 0
+@@ -4260,6 +4317,12 @@
+                 GET_LOCAL_INDEX_TYPE_AND_OFFSET();
+ 
+                 switch (local_type) {
++#if M98_WASM_SCALAR_SIMD != 0
++                    case VALUE_TYPE_V128:
++                        memcpy(frame_lp + local_offset, frame_sp - 4, 16);
++                        CLEAR_FRAME_REF(frame_lp + local_offset, 4);
++                        break;
++#endif
+                     case VALUE_TYPE_I32:
+                     case VALUE_TYPE_F32:
+ #if WASM_ENABLE_REF_TYPES != 0 && WASM_ENABLE_GC == 0
+@@ -4311,6 +4374,14 @@
+                 bh_assert(global_idx < module->e->global_count);
+                 global = globals + global_idx;
+                 global_addr = get_global_addr(global_data, global);
++#if M98_WASM_SCALAR_SIMD != 0
++                if (global->type == VALUE_TYPE_V128) {
++                    uint32 words[4];
++                    m98_simd_read((uint8 *)global_addr, words);
++                    M98_PUSH_V128(words);
++                    HANDLE_OP_END();
++                }
++#endif
+                 /* clang-format off */
+ #if WASM_ENABLE_GC == 0
+                 PUSH_I32(*(uint32 *)global_addr);
+@@ -4345,6 +4416,14 @@
+                 bh_assert(global_idx < module->e->global_count);
+                 global = globals + global_idx;
+                 global_addr = get_global_addr(global_data, global);
++#if M98_WASM_SCALAR_SIMD != 0
++                if (global->type == VALUE_TYPE_V128) {
++                    uint32 words[4];
++                    M98_POP_V128(words);
++                    m98_simd_write((uint8 *)global_addr, words);
++                    HANDLE_OP_END();
++                }
++#endif
+                 /* clang-format off */
+ #if WASM_ENABLE_GC == 0
+                 *(int32 *)global_addr = POP_I32();
+@@ -6595,10 +6674,89 @@
+         HANDLE_OP(WASM_OP_CATCH_ALL)
+         HANDLE_OP(EXT_OP_TRY)
+ #endif
++#if M98_WASM_SCALAR_SIMD != 0
++            HANDLE_OP(WASM_OP_SIMD_PREFIX)
++            {
++                uint32 op, a[4], b[4], mask[4], i, lane, scalar, flags;
++                uint8 ab[16], bb[16], rb[16];
++                read_leb_uint32(frame_ip, frame_ip_end, op);
++                switch (op) {
++                    case SIMD_v128_const:
++                        m98_simd_read(frame_ip, a); frame_ip += 16;
++                        M98_PUSH_V128(a); break;
++                    case SIMD_v128_load:
++                    case SIMD_v128_store:
++                    {
++                        uint32 addr;
++                        read_leb_memarg(frame_ip, frame_ip_end, flags);
++                        read_leb_mem_offset(frame_ip, frame_ip_end, offset);
++                        if (op == SIMD_v128_store) M98_POP_V128(a);
++                        addr = (uint32)POP_I32();
++                        CHECK_MEMORY_OVERFLOW(16);
++                        if (op == SIMD_v128_load) {
++                            m98_simd_read(maddr, a); M98_PUSH_V128(a);
++                        }
++                        else m98_simd_write(maddr, a);
++                        break;
++                    }
++                    case SIMD_i32x4_splat:
++                        scalar = (uint32)POP_I32();
++                        for (i = 0; i < 4; i++) a[i] = scalar;
++                        M98_PUSH_V128(a); break;
++                    case SIMD_i32x4_extract_lane:
++                        lane = *frame_ip++; M98_POP_V128(a);
++                        CLEAR_FRAME_REF(frame_sp, 1);
++                        *frame_sp++ = a[lane]; break;
++                    case SIMD_i32x4_replace_lane:
++                        lane = *frame_ip++; scalar = (uint32)POP_I32();
++                        M98_POP_V128(a); a[lane] = scalar;
++                        M98_PUSH_V128(a); break;
++                    case SIMD_v128_not:
++                        M98_POP_V128(a);
++                        for (i = 0; i < 4; i++) a[i] = ~a[i];
++                        M98_PUSH_V128(a); break;
++                    case SIMD_v128_bitselect:
++                        M98_POP_V128(mask); M98_POP_V128(b); M98_POP_V128(a);
++                        for (i = 0; i < 4; i++)
++                            a[i] = (a[i] & mask[i]) | (b[i] & ~mask[i]);
++                        M98_PUSH_V128(a); break;
++                    case SIMD_v8x16_shuffle:
++                    case SIMD_v8x16_swizzle:
++                        M98_POP_V128(b); M98_POP_V128(a);
++                        m98_simd_write(ab, a); m98_simd_write(bb, b);
++                        for (i = 0; i < 16; i++) {
++                            lane = op == SIMD_v8x16_shuffle ? frame_ip[i] : bb[i];
++                            rb[i] = lane < 16 ? ab[lane]
++                                    : op == SIMD_v8x16_shuffle ? bb[lane-16] : 0;
++                        }
++                        if (op == SIMD_v8x16_shuffle) frame_ip += 16;
++                        m98_simd_read(rb, a); M98_PUSH_V128(a); break;
++                    case SIMD_i32x4_add:
++                    case SIMD_v128_and: case SIMD_v128_andnot:
++                    case SIMD_v128_or: case SIMD_v128_xor:
++                        M98_POP_V128(b); M98_POP_V128(a);
++                        for (i = 0; i < 4; i++) {
++                            if (op == SIMD_i32x4_add) a[i] += b[i];
++                            else if (op == SIMD_v128_and) a[i] &= b[i];
++                            else if (op == SIMD_v128_andnot) a[i] &= ~b[i];
++                            else if (op == SIMD_v128_or) a[i] |= b[i];
++                            else a[i] ^= b[i];
++                        }
++                        M98_PUSH_V128(a); break;
++                    default:
++                        wasm_set_exception(module, "unsupported scalar SIMD instruction");
++                        goto got_exception;
++                }
++                HANDLE_OP_END();
++            }
++#endif
++
++#if M98_WASM_SCALAR_SIMD == 0
+         /* SIMD isn't supported by interpreter, but when JIT is
+            enabled, `iwasm --interp <wasm_file>` may be run to
+            trigger the SIMD opcode in interpreter */
+         HANDLE_OP(WASM_OP_SIMD_PREFIX)
++#endif
+         HANDLE_OP(WASM_OP_UNUSED_0x16)
+         HANDLE_OP(WASM_OP_UNUSED_0x17)
+         HANDLE_OP(WASM_OP_UNUSED_0x27)

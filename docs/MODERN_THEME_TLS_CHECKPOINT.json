@@ -1,20 +1,436 @@
 {
-  "schema": 1,
+  "schema": 12,
   "date": "2026-10-01",
   "branch": "codex/theme-tls-5abe",
   "base_revision": "abc160b429f5498a2a5328b05af29e099964d54a",
   "evidence": [
     {
-      "path": "build/theme-engine/result.json",
+      "path": "/root/Win98-Modern-boot/build/css-mshtml-native-5abe-20261001-v2/guest-files.json",
+      "sha256": "cef8c34813161bb544dbdcf3f8ba2ab83310d738d4d75642c17231b4e520320e"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/css-mshtml-native-5abe-20261001-v3/guest-files.json",
+      "sha256": "11a2aa48b735e26212db048a78dfb5c64f6da1e95f8ef436fd4f5c4a2f18d7da"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/css-mshtml-native-5abe-20261001-v3/provenance.json",
+      "sha256": "70663a634c603eabb757894c988142ac1524467b0c1139b8530c5bdceea8b383"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-css-mshtml-5abe-native-v2/result.json",
+      "sha256": "0c725ca51b88f91b90f79a84e82548a1e07febd6ff75d3ab2dbb79b17ea06e4d"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-theme-5abe-native-v1/result.json",
+      "sha256": "28328280a25dad4996616bf105a63e00ed1f6e16c70f4a64142a62a2d095761b"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-theme-5abe-native-v3/result.json",
+      "sha256": "6db0a7b8926debce4fde8d5f57986b12b1ad710068b18c2155614eb5b377dbb0"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-tls13-5abe-native-v4/result.json",
+      "sha256": "89b8b33afa48b63ec7de2ab66dd59bbb5c878f53f87c92cc78f105714851447c"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-tls13-5abe-native-v7/result.json",
+      "sha256": "af59c776542dab98aec930dd973610cda0ad5f52bef00e37e258bb1231214fef"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-trident-script-5abe-native-v2/result.json",
+      "sha256": "2a53edfecff32e2ee7d3d9af17d63245adc66e8587131d4c4d70825a1ece601b"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-wasm-numeric-5abe-native-v1/result.json",
+      "sha256": "05a1ade263a68fad49dae82f6c2d66117e094a91268c10de7ba15d80e0dd408c"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/guest-files.json",
+      "sha256": "e0c7af02378c03edd1e6a21d00787964ee9b6b20cb8d28d2f646f7191fed9632"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/provenance.json",
+      "sha256": "3776c62a6bcb80548263e664508aa38df08eea1892a5f7c8dc7253e99557f634"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1/stage-authority.json",
+      "sha256": "ad368edb18594c5b9a12823655eb9d8ebd13a28c814519996af6e1b14687c852"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/trident-automation-native-5abe-20261001-v1/guest-files.json",
+      "sha256": "13eddef2f02f8bfc3a1ba331aaf8fa027e334cff8e7a2a225ddeeab517e46a9a"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/trident-script-native-5abe-20261001-v1/guest-files.json",
+      "sha256": "5ee49445c47e45537e7fbc563dea4007b345f6b6469305c5aa76c7c3e65b57eb"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/wasm-numeric-native-5abe-20261001-v2/guest-files.json",
+      "sha256": "d0948ad22afc556cf57398c6361326729e2c7afe50b6ce360513d9392f973b8b"
+    },
+    {
+      "path": "/root/Win98-Modern-boot/build/wasm-numeric-native-5abe-20261001-v2/provenance.json",
+      "sha256": "9e87ddbe5ddb43ecba1edc7d5ac49b5a6bc88a9b56f6adb27c847a9a06738587"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/first-metadata-preflight-failure.json",
+      "sha256": "99d6068e668b3957e9a3703f01d0900beb521fd8dcc195285ffca74d52090e05"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema10/schema9-original.json",
+      "sha256": "a707479f9a151fbbe53919670e17d2c630c087418efdab85f0f2c35c02a5abfd"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/checkpoint-schema11/schema10-original.json",
+      "sha256": "961510ec86db353162d688cf165925a21bcba998dc5544d757a9ffff3a2256e4"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/disk-followup-5abe-20261001-v2/closed-checkpoint.json",
+      "sha256": "80d2f00ac87910e317963e7badcaa1359ec85e4fae030d709ea00d2ad0b1e241"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/disk-native-closed-authorities-v1/result.json",
+      "sha256": "a78469cb04b1777f3bf9bfd0def34c864afd0fcbea591c2c837a736c5bbc314d"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/glsl-frontend-held-source-v4/result.json",
+      "sha256": "19c47bacfe491a07abeb2d59fdf72f70faf0b9dd0732ece8fae378f2780ae565"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/glsl-generator-dependencies-v3/result.json",
+      "sha256": "19a1d52bae7228dadb8b0fca20a86fd8d3dc3d563ca9bb0ed9e49c1919917f08"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/graphics-compiler-audit-v1/result.json",
+      "sha256": "10f2383dc0e3b296a52bc8ed313782fe758d53c2ff2e54eb1f1b372551a0967f"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-native-preparation-v1/result.json",
+      "sha256": "f5035a24b07c2f7508125e5dfc994e86eb7470b647763f1b002d5cde9cb4d5ef"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-native-stage-independent-review-v1/result.json",
+      "sha256": "5b9930bf871da13fd260a0db35582d76b8af936c3b2588a200063c927d1f4cf2"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-closure-v2/result.json",
+      "sha256": "f966e20c43a210540996928cf19069f6c663ec917ed1c82888e26d2bf49c4eb3"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-controls-v2/result.json",
+      "sha256": "ba7e77688f6a29ccb11f6d6f347628f990d5b3ccf8b7f1d541a7a1526da7cb55"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/tls13-i486-stage-independent-review-v2/result.json",
+      "sha256": "05c8c634611aba14c46b57f65ff8763d4c1cdf666b3ac928d79c495a96fdaf49"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-i486-guard-script-final-v1/result.json",
+      "sha256": "8d344d9632e524e4ef367ed2b046f032460f83d67754ef52eeccbade46435801"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-acceptance-v2/result.json",
+      "sha256": "f0b07f8e3e050163945f9b87cc3de780cddcdb855465ec443489d45243947dfe"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-acceptance-v2/root-byte-readback.json",
+      "sha256": "18dedc579fcb9649e8ef97d452b8f99e48a6b04abdf27c8b01741d6009b87afe"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-launch-v2/launch.py",
+      "sha256": "fa2ba409618567e2e0ffbc99e37076d38f133a774495cf70a166428427dae0a9"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/trident-script-native-rejected-v1/result.json",
+      "sha256": "545e1713815ef92b5a49d767722f3d22595e4e0e516ec69555c927fae5b2eb16"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/closure-pins.json",
+      "sha256": "9c1fded89dcd0a38fb3862f3a9a80f31c2d0a5ac50f0102b6e9d2f8f724edfd0"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/result.json",
+      "sha256": "4c8eed84646180f0108ee4dd4dc0353a2090060d05e7d061966a78f5e0dd7559"
+    },
+    {
+      "path": "/root/Win98-Modern-theme-tls-5abe/build/wasm-modern-features-audit-v1/source-observations.json",
+      "sha256": "f1e3f2f95d7710e49562ffbd005f945ef1bd2a7002a523c1243139cd15f27e13"
+    },
+    {
+      "path": "benchmarks/media/legcord-1.3.0/archive-receipt.json",
+      "sha256": "033902afd518abfafdf85f91d1870a1fd6f68e0b6cee61dae6295227b20cac03"
+    },
+    {
+      "path": "benchmarks/media/legcord-1.3.0/inventory.json",
+      "sha256": "2a2a2741ef5c49dffcb7d54a41fc7c0899100ee7ec9e4ab50207f60a57f685d4"
+    },
+    {
+      "path": "benchmarks/modern-web-targets-v1.json",
+      "sha256": "b8194c9fa5de0d7d09419334daf70eed6195928839a3dbfbe2c3ecf1a6f16657"
+    },
+    {
+      "path": "build/checkpoint-schema12/schema11-original.json",
+      "sha256": "f2d478234ef890a09fa1c501afdac5ad22e491f375ccf2e70e0c175137d58bf4"
+    },
+    {
+      "path": "build/checkpoint-schema6/schema5-original.json",
+      "sha256": "5f78ca536c22ea2c748a50a95ba0d598c1d997726805ceaa49e9ef7f1512daa8"
+    },
+    {
+      "path": "build/checkpoint-schema7/schema6-original.json",
+      "sha256": "7332c20b3a0663073dfaeeb30a95c4d9e82bb3fade38e15698a1ed16a1daac44"
+    },
+    {
+      "path": "build/checkpoint-schema8/schema7-original.json",
+      "sha256": "d32dc2abe139ef929a8319c8ec48d8998b69c5edfa1afe69026ac96fcfc08661"
+    },
+    {
+      "path": "build/checkpoint-schema9/schema8-original.json",
+      "sha256": "613ffffc1b01ef81968c5125f07b4acd4861b94134c7f8d5a29cfe1bd834a596"
+    },
+    {
+      "path": "build/css-core-v4/result.json",
+      "sha256": "4e20ba590fcbab02b8c5763d3a843e7631994bbc7903b39179de1d4601de058c"
+    },
+    {
+      "path": "build/css-mshtml-fixture-v8/result.json",
+      "sha256": "ecc2a2d65c9542d702705873945847b6ae64a11cbc483530112c30121e72be19"
+    },
+    {
+      "path": "build/css-mshtml-fixture-v9/final-byte-audit.json",
+      "sha256": "9c07ac642a26e3e67140603def29c0f3bcb7bd598de0cd2d284dd0da5119af86"
+    },
+    {
+      "path": "build/css-mshtml-fixture-v9/result.json",
+      "sha256": "4e31eafcb1965753cff29f5b44a4ad9057853c54378804e3dfa435eed76dbe42"
+    },
+    {
+      "path": "build/css-mshtml-observer-v4/result.json",
+      "sha256": "5842c95b143ce736326037cdd0d7db6711fdd6fe8e6b643c1b7c19134e79bdfe"
+    },
+    {
+      "path": "build/css-mshtml-profile-controls-v2/result.json",
+      "sha256": "191f360e488e99c5f14f5738054911c7d6c3399f70f9cf8a324f16a864ab31ba"
+    },
+    {
+      "path": "build/css-native-acceptance-controls-v1/result.json",
+      "sha256": "273741b5fb5073193c880830b11fb2f46ea19f94bea39bf308473ce19ea6f2f2"
+    },
+    {
+      "path": "build/css-native-acceptance-v1/paint-review.json",
+      "sha256": "7704b6fe0e0b787d5dbf47ec2700a7060920764844292344e17ebc44e432c5de"
+    },
+    {
+      "path": "build/css-native-acceptance-v1/result.json",
+      "sha256": "c5abb5104fb8d1e51f6d6cf4d805fd02a2253a64d21d6cbccfa9453acdf86ee3"
+    },
+    {
+      "path": "build/css-native-failed-readback-v1/result.json",
+      "sha256": "ba984def88d911b8b2238361283b61d2380e576720059b4a0f793af7b296a93a"
+    },
+    {
+      "path": "build/css-native-launch-v1/launch.py",
+      "sha256": "6c79963fa74160fddba66f82f2f03269b90e7df9da65b0cdc6cf65482db35e26"
+    },
+    {
+      "path": "build/css-native-launch-v3/generation.json",
+      "sha256": "bcc49b8bacaf28d52be06e8df54a959bc38d407ef4dadfbe7a27aa7e7695cefc"
+    },
+    {
+      "path": "build/css-native-preflight-v1/result.json",
+      "sha256": "d24d1d54fe86416849635141a40f1b2bbf3c264bbae4132256d221439e9e72f4"
+    },
+    {
+      "path": "build/css-native-preflight-v11/completion.json",
+      "sha256": "ceb117956dbd152d30c33c453cc42cca9e8784f6dc160ddcda17faa2f6dabcd4"
+    },
+    {
+      "path": "build/css-native-preflight-v11/preflight.json",
+      "sha256": "0e83969972f8f41d187ec30e49d40e4b1fe325d01e98a7ade838471e237472dc"
+    },
+    {
+      "path": "build/css-native-preflight-v2/preflight.json",
+      "sha256": "fb636e10a2876cb306794687777eec332147f075e4267b1a6288cb6ac239a365"
+    },
+    {
+      "path": "build/disk-cleanup-5abe-20261001/bounded-maintenance-checkpoint.json",
+      "sha256": "013b2e82a903644a2275fb477926052306b5eeedada88617fcf7015b0a2a10da"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v1/closed-checkpoint.json",
+      "sha256": "ea9a495c3caa92c9542ad06962b5c8ef3d4f09f4b06904e2ff9a1fe021aa2e6b"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v1/readonly-audit.json",
+      "sha256": "05b825d5dc08f75584bba6a109bbda67d1404f22c3abb8231b38e69c7a8b8d60"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v1/sharing-result.json",
+      "sha256": "a156437f67b7d39f9be3ee51ce51943ae40e0a9ddc81fa8ce4472e4c1e65d748"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/FOLLOWUP_HANDOFF.md",
+      "sha256": "866ad71f008fc671e19bfbec6780b51a4141b6e1730eb4e4ee3e3488edc2d48d"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/closed-checkpoint.json",
+      "sha256": "04c83c06be079743738f2644a6db144e24cb19048afbde7727e66290541cbd54"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/readonly-audit.json",
+      "sha256": "8c9e0bd01961906eac7451facdfb6b52fd34a3cc025c1456430223191813b0af"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/share_closed_owned.py",
+      "sha256": "1b4cfe35e6c8523877439a448f67018aec146ff757d6afb792eb7f93ef9d1e68"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/sharing-plan.json",
+      "sha256": "087c24e194f7b04c7caee470f3901e81bd8c4b02ea2112582a165dc14b27e234"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/sharing-ranges.jsonl",
+      "sha256": "75e8d2b652b95416b811eb74caff279641e062c7e390962a3963e0be3e4ab301"
+    },
+    {
+      "path": "build/disk-followup-5abe-20261001-v3/sharing-result.json",
+      "sha256": "774561c60cefa67a6bae8c469e08688c38bdbe8aeec99a167750c96bee86725f"
+    },
+    {
+      "path": "build/disk-followup-root-review-v1/result.json",
+      "sha256": "b4c3216fe26645f661ab7bd8f4e74dd212db2b31a8703d844043e0389d35340c"
+    },
+    {
+      "path": "build/dns-config-v2/result.json",
+      "sha256": "cc3dda3c0f4e673f0af67e2abafeb482e563b476b8d900bc6327a17cdfeac6af"
+    },
+    {
+      "path": "build/i486-canonical-supplement-v1/result.json",
+      "sha256": "e8005132e8f917adedb54b3b85e1d6bfbb0c46bfc432288db34016537bdf53c6"
+    },
+    {
+      "path": "build/i486-tls-supplement-v1/failed-readback.json",
+      "sha256": "771041704373a2d04d7aec1515c46c9763eef93861830bf8ef4b47ebd22ce323"
+    },
+    {
+      "path": "build/i486-tls-supplement-v1/result.json",
+      "sha256": "22f6b0ce0e9c8743415031519dd6dd3723d44dd22c04d34b735d9903153528e0"
+    },
+    {
+      "path": "build/kernel64-classification-5abe-v1/result.json",
+      "sha256": "65df20cc5680f2ae83d5049e043f51d708df2cfd6ba01afe5566f8ae42bd0524"
+    },
+    {
+      "path": "build/modern-foundation-independent-review-v2/result.json",
+      "sha256": "9f24bce004e5ae7820cb816f10191e43b0c7401f263b5195eec0712df9eb61f6"
+    },
+    {
+      "path": "build/peer-session-observation-5abe-20261001-v1/result.json",
+      "sha256": "a4609b031dbea861e11bc80b731fcfa1c6e70f97fb3b31a41f9074fda7da5cb6"
+    },
+    {
+      "path": "build/softpipe-raster-v3/final-byte-audit.json",
+      "sha256": "f234c646f03d6094ee98bc75b523a8782e0b212a3ee91d1b1a79dfb76aab003f"
+    },
+    {
+      "path": "build/softpipe-raster-v3/result.json",
+      "sha256": "26d7055953bb6e0915df675ea0c0797c07e0c5704b00ef16f077e1867da3164f"
+    },
+    {
+      "path": "build/softpipe-shader-v2/result.json",
+      "sha256": "b2c21ccdbf876d310affac58202d4b3139c30f1d71db7b696d12980dfb81cac2"
+    },
+    {
+      "path": "build/test262-selected-v5/result.json",
+      "sha256": "faa4bb2b389e69e6e20c3f5253e2479f0d8d28b865e0e1b1c0fa9fa442eca3a3"
+    },
+    {
+      "path": "build/theme-engine/native-v1-source-receipt.json",
       "sha256": "d1c7ad7cf4811355a22f493e7bb977c6fd5379fff84b023c91d27bef3adb95be"
+    },
+    {
+      "path": "build/theme-engine/native-v3-visual-review.json",
+      "sha256": "3d26923e96a242b1b7c01504e57d9eebbbab701698c2e8492ac0dbdf88ae98c5"
+    },
+    {
+      "path": "build/theme-native-verifier-v3/checkpoint.json",
+      "sha256": "98218f3f59140c46ebeebd0430c0ba471baa79d8c1be95f24bb0320f7a8dc657"
+    },
+    {
+      "path": "build/tls13-guest-interop-v7/build-result.json",
+      "sha256": "dbc1e147d18b033497dc0bb403522798d186acd54a255a01566f7c61432ca7ca"
+    },
+    {
+      "path": "build/tls13-i486-independent-review-v1/result.json",
+      "sha256": "9ef72856e5dfddb357e9e89211dcf0f01d18babe437cec30649e52fe04ebb9e3"
+    },
+    {
+      "path": "build/tls13-i486-native-verifier-independent-review-v1/result.json",
+      "sha256": "0f634c32cc2e715280de86d00da099db1ddc6bc8e5adad095423b5fe09496547"
+    },
+    {
+      "path": "build/tls13-i486-native-verifier-root-review-v1/result.json",
+      "sha256": "290b03ed487001bfb624d8b5d6ce70e6f0cf6de43a957c85d1b465a4cebe59b3"
+    },
+    {
+      "path": "build/tls13-i486-native-verifier-stage-binding-v1/result.json",
+      "sha256": "a430a4d048d3696298f828274280ea552b387b04eb2852e3a0c15ed57f0e0915"
+    },
+    {
+      "path": "build/tls13-i486-native-verifier-v1/result.json",
+      "sha256": "35c84f712bc8593132768bbcee8f4bd6e88d06e4863918b8741cc21579fed380"
+    },
+    {
+      "path": "build/tls13-i486-root-readback-v2/failed-review.json",
+      "sha256": "4223bd44641f6d2e8ef11a9d543e7f630db146a0ced4fb681a1ac51d9cc3b643"
+    },
+    {
+      "path": "build/tls13-i486-root-readback-v3/result.json",
+      "sha256": "d2eaf7896235fedb8246bb7197ac24297f4a265d6dda21295b7f76bcdb8892cf"
+    },
+    {
+      "path": "build/tls13-i486-stage-closure-v1/result.json",
+      "sha256": "25db69bc9e97ce4b63836c05e6e52c18ad0cfc054efa6c138a0a1e654566d0a5"
+    },
+    {
+      "path": "build/tls13-i486-stage-controls-v1/result.json",
+      "sha256": "ddc581f17b45fe85c4b3e5181b8328cf8a229c54dc0fe47f932c75c95732e470"
+    },
+    {
+      "path": "build/tls13-i486-stage-controls-v2/result.json",
+      "sha256": "ba7e77688f6a29ccb11f6d6f347628f990d5b3ccf8b7f1d541a7a1526da7cb55"
+    },
+    {
+      "path": "build/tls13-i486-stage-independent-review-v1/result.json",
+      "sha256": "cd066dec000bd14a5fc48e8f6f96c6a465ada92f10a3944c654d7250c24d4d4c"
+    },
+    {
+      "path": "build/tls13-i486-v1/result.json",
+      "sha256": "1123b84ae84c35981cbf5e6e3ea9c4d4b6848cac00d2ee0b22e61be7237167b3"
+    },
+    {
+      "path": "build/tls13-i486-v2/final-byte-readback.json",
+      "sha256": "7762bc0950984b3f6d5a51704c351cb3dda0c6a5bea65f0ba9f5854cfd3f2ccc"
+    },
+    {
+      "path": "build/tls13-i486-v2/result.json",
+      "sha256": "98c526151545be95fe5f6cd58140ae2dfdc52d21038fe1de893387290dea1819"
+    },
+    {
+      "path": "build/tls13-lts-loopback-v4/pair.json",
+      "sha256": "3c47f2004643459c04fb8bc22db454d0d8eb3cecc1887fba7b588f2725121c15"
+    },
+    {
+      "path": "build/tls13-native-net-v3/result.json",
+      "sha256": "f1501c1352763cc5ce4e74914a8b267a827824d83e9c3ff17f80746a994a86a7"
+    },
+    {
+      "path": "build/tls13-native-retry-v8/queue-refusal.json",
+      "sha256": "7ce891f2c4cab915b060d0d0dec07b233e35be1f557a893e2f7bfa1d1f629716"
     },
     {
       "path": "build/tls13/host/build-result.json",
       "sha256": "b9d7869e65ac28c6e8a4065a52a0ce04d51bac9ea8b45dce8ab8695e0fcb476a"
-    },
-    {
-      "path": "build/tls13/tests/result.json",
-      "sha256": "38987c0d7157303f19e213fd5f07ad2f4298f90491c21dcad319dbbc5d69e3f9"
     },
     {
       "path": "build/tls13/pe32/build-result.json",
@@ -25,12 +441,196 @@
       "sha256": "74efbf580d1dfa7dc6342312a721f5bf927046762bce1ee18c4b3305e4d2eb46"
     },
     {
-      "path": "benchmarks/media/legcord-1.3.0/archive-receipt.json",
-      "sha256": "033902afd518abfafdf85f91d1870a1fd6f68e0b6cee61dae6295227b20cac03"
+      "path": "build/tls13/tests/result.json",
+      "sha256": "38987c0d7157303f19e213fd5f07ad2f4298f90491c21dcad319dbbc5d69e3f9"
     },
     {
-      "path": "benchmarks/media/legcord-1.3.0/inventory.json",
-      "sha256": "2a2a2741ef5c49dffcb7d54a41fc7c0899100ee7ec9e4ab50207f60a57f685d4"
+      "path": "build/trident-automation-v4/result.json",
+      "sha256": "20b983e4c5c3fdbaa6beb8973d521e2cc334314aa31e1555bc8f033c3594372e"
+    },
+    {
+      "path": "build/trident-automation-verifier-v2/result.json",
+      "sha256": "cae7de247e4e4e1e165a31e91c713890ba279b3a1a236090ab750955b3c50fa8"
+    },
+    {
+      "path": "build/trident-i486-guard-automation-v1/result.json",
+      "sha256": "a669cd0a35a1ff343f7c7e38bf3eee8f1a7175978a06535d0b6fd4dc0cf5035e"
+    },
+    {
+      "path": "build/trident-i486-guard-controls-v2/result.json",
+      "sha256": "ba039e953faf01f30c16cc39d5a1bb107abfc4a8a79d636d12f8a6afb7ca18f9"
+    },
+    {
+      "path": "build/trident-i486-guard-independent-review-v2/result.json",
+      "sha256": "dac94ecd64abb4a1fe1ce1e12103779ac83a8ea844c241867da9610ce3467802"
+    },
+    {
+      "path": "build/trident-i486-guard-script-v1/result.json",
+      "sha256": "8d344d9632e524e4ef367ed2b046f032460f83d67754ef52eeccbade46435801"
+    },
+    {
+      "path": "build/trident-observer-v2/result.json",
+      "sha256": "7b1e29758d8df087054e3ddf502b7282b2e01ed214eee946f8bddc70a8d54206"
+    },
+    {
+      "path": "build/trident-script-native-preflight-v1/preflight.json",
+      "sha256": "c32f24a897262888186d29d694eb911fa3e9fddfecb744439476d2e973f7811b"
+    },
+    {
+      "path": "build/trident-script-native-preflight-v2/preflight.json",
+      "sha256": "6bf6b7581272c6cdf977d8659572c53ffbe2266d52f5f06f6caea3416de63488"
+    },
+    {
+      "path": "build/trident-script-native-preflight-v3/after-cold-hash-cpu-guard.json",
+      "sha256": "da931cb7612efe463d5b3051aa13cedb99a82138e549b65349d0a0d46bbadbb3"
+    },
+    {
+      "path": "build/trident-script-native-preflight-v3/before-cold-hash-cpu-guard.json",
+      "sha256": "da931cb7612efe463d5b3051aa13cedb99a82138e549b65349d0a0d46bbadbb3"
+    },
+    {
+      "path": "build/trident-script-native-preflight-v3/preflight.json",
+      "sha256": "f39e010b0d651933aff019ee738c7dbf00b536f62b9b8f5b6d247b2a125e49af"
+    },
+    {
+      "path": "build/trident-script-observer-v10/result.json",
+      "sha256": "94c5004e13571ffd6de7e814dbbf8080fda853ac0dfd203f50b4d4e1ebb71959"
+    },
+    {
+      "path": "build/trident-script-v10/result.json",
+      "sha256": "7e036db6906484a046c1253e4668930c4d85645f492ce2bf9a626fd6a1cbf716"
+    },
+    {
+      "path": "build/trident-script-verifier-v2/result.json",
+      "sha256": "aeb7e5a4d789bca24de7c0ecba4058db537372c91dfbc721fbf87a312041680e"
+    },
+    {
+      "path": "build/trident-stager-profile-controls-v1/controls.json",
+      "sha256": "3e09ee8d5ccc5b86a32e46a66ac7b45a881c6b0ab51839b8b71a175917f763fe"
+    },
+    {
+      "path": "build/trident-stager-profile-controls-v1/nonce-control-result.json",
+      "sha256": "c8c6656f1c33a9b28a01ed82421acdc71f60711d8eaf52e07ee98fd9f5846310"
+    },
+    {
+      "path": "build/trident-stager-validation-v1/result.json",
+      "sha256": "edb0d2c50bfd39f0e6406a80dfd70df63db5a838f21e5e59440a2715021653b2"
+    },
+    {
+      "path": "build/wasm-memory-baseline-regression-v1/failed-preflight.json",
+      "sha256": "30d5a6dc6f96534819d339a321dec81d6724702e8de50158e7e05455d568539f"
+    },
+    {
+      "path": "build/wasm-memory-baseline-regression-v2/result.json",
+      "sha256": "52be935f933f6050c655527e6576af156f8946f1b42d38e7a747c2a5ce1902ca"
+    },
+    {
+      "path": "build/wasm-memory-profile-independent-review-v1/result.json",
+      "sha256": "e3c1ef51e2781277a8645764b08e983f7d1a71df8e48d2286f4c8c2f9de46b41"
+    },
+    {
+      "path": "build/wasm-memory-profile-v7/result.json",
+      "sha256": "6f5d0224203008944089d81eb7d05aebb943b0fdcef151365611386ff13ce010"
+    },
+    {
+      "path": "build/wasm-memory-profile-v8/result.json",
+      "sha256": "657308666b48175c0369cdac0d3c35f9888d053f7c3038c5625c1ee5209dc5dc"
+    },
+    {
+      "path": "build/wasm-memory-root-readback-v1/failed-preflight.json",
+      "sha256": "3fd5662b95426284c7a10c7e59109754008b8b69f98d17c1be638b45982777c0"
+    },
+    {
+      "path": "build/wasm-memory-root-readback-v2/result.json",
+      "sha256": "aad0cfb90a90a6fcab9626337f4782a40aa1e88b59bae4f05e8dda5e84990839"
+    },
+    {
+      "path": "build/wasm-native-acceptance-controls-v2/result.json",
+      "sha256": "c6abd7193f921e36fedbed90d316238c0fc7559542f100f5776162d7cf7b26dd"
+    },
+    {
+      "path": "build/wasm-native-acceptance-v1/result.json",
+      "sha256": "375493e73d749079e931caae98e8e0c589649cf68e19602fd94927e9fa1a0812"
+    },
+    {
+      "path": "build/wasm-native-acceptance-v1/root-byte-readback.json",
+      "sha256": "bab04e8f77b05ad212fbe248433149b437bb10e835959f399146aadee9b8647c"
+    },
+    {
+      "path": "build/wasm-native-final-controls-readback-v1/result.json",
+      "sha256": "1c1eef7ef19019a508f38a73e772958c5fcf56379f6b26044b8e1364186b966b"
+    },
+    {
+      "path": "build/wasm-native-launch-v1/generation.json",
+      "sha256": "c132450e33a3e00c5fd2621701b9aae8882c3bec191adc051cc322387ac8255e"
+    },
+    {
+      "path": "build/wasm-native-observer-v3/result.json",
+      "sha256": "c94de5b5458ab9f1945e4f8421c425c9d1422a62b9b9fb57e3200a2c9eae0c18"
+    },
+    {
+      "path": "build/wasm-native-preflight-v1/preflight.json",
+      "sha256": "11668b9798bd68b033ae1ff3cb65d28a6582c5e696baba654f9055654f92dd13"
+    },
+    {
+      "path": "build/wasm-native-preflight-v2/completion.json",
+      "sha256": "ad189a38a5f0c6ce330dc99762b63969a0d2094fb786af52dfe4472b46ab831f"
+    },
+    {
+      "path": "build/wasm-native-preflight-v2/preflight.json",
+      "sha256": "87ef3a8f8e19ee0e8c5c786eb5c971f26498c14571b5139f65e0ba20689d28e6"
+    },
+    {
+      "path": "build/wasm-native-probe-v6/result.json",
+      "sha256": "8db17f7ec0db13f2b265617c66755621661b9c16ac3431d0d901b10783fe8629"
+    },
+    {
+      "path": "build/wasm-native-stage-controls-v1/result.json",
+      "sha256": "9de8e0b0c0e542c91ea59eff027e9d2f26fe146807a31f570793059210318b7f"
+    },
+    {
+      "path": "build/wasm-native-stage-independent-review-v1/result.json",
+      "sha256": "d604b8d7329398a8d8473155b627616f5b461013317f96ef3b13835f9e060ee0"
+    },
+    {
+      "path": "build/wasm-native-stage-independent-review-v2/result.json",
+      "sha256": "7ff29a24487985a1a5dd1c7fb8d827790ace9fc3ab301043b3a806c5e32fdd59"
+    },
+    {
+      "path": "build/wasm-qjs-independent-review-v1/result.json",
+      "sha256": "2eaa52bdf4c61a7179aa0650e5a4836139ecd900c4269c9ff3781636c5b0cfab"
+    },
+    {
+      "path": "build/wasm-qjs-memory-root-review-v1/result.json",
+      "sha256": "445b44dac08036cdf675dc5e2a686925ea240c6d06abca1f52a89469a64a9fd0"
+    },
+    {
+      "path": "build/wasm-qjs-memory-v1/result.json",
+      "sha256": "8d82f1b2cedda692beb6ffc2d6cfbac0bfc6009c7f7ffa5e51fbbaf2edecc142"
+    },
+    {
+      "path": "build/wasm-qjs-memory-v3/result.json",
+      "sha256": "a740a077b1fa567314634fba5dbf78ca16578c2b55b806f3135d77eef4d56516"
+    },
+    {
+      "path": "build/wasm-qjs-memory-v4/result.json",
+      "sha256": "01ffc91cb052b9c6c7e4c217267b6f8ffc6f447333da46446c3ebb3b2c447307"
+    },
+    {
+      "path": "build/wasm-qjs-v11/result.json",
+      "sha256": "b3e0e6ef6b966b9c9cb0beaaaf41d8227e048fbe6245232b73d825d0584705ac"
+    },
+    {
+      "path": "build/wasm-runtime-v24/result.json",
+      "sha256": "26b28af54df7566a9653633078c1948ff5211714f95a836f4a3b2bb0ea773d91"
+    },
+    {
+      "path": "build/wasm-spec-selected-v5/result.json",
+      "sha256": "613537ca8f194ad7cb4f1bc8629462a37d65cd160ab4e1a3b6bd7985804c73b0"
+    },
+    {
+      "path": "docs/NATIVE_QA_SCHEDULING_SCOPE.md",
+      "sha256": "8f4567ff592a0ba9c192499c5b00753fdcc4cc6cd149a87b4e4520a0bd51d89e"
     }
   ],
   "theme": {
@@ -41,9 +641,16 @@
     "system_theme_installed": false,
     "artifacts": {
       "M98THEME.DLL": "236cfbb5fd802edf16ed1a3b3663709f1992b59d6a3b92fabc0e64ff3e8df048",
-      "M98THPRO.EXE": "ee852730054371acaa531bfcf2ebdadb376a3afde753d9d705198705ce6e46cd",
-      "M98THSTA.EXE": "7bdaa673dea7866a3682a39a3a2256d5530c48639dd6ef8a17514aa1d287dab9"
-    }
+      "M98THPRO.EXE": "f6f9446a008f3e2ad49aa239ec9dd0da79506a30e7c9b9ae2f70621cc4b1ef65",
+      "M98THSTA.EXE": "d83c6af825159ec6b338bb583ffc4813675d3a62946f60b96f37f2598cf8fa1c",
+      "M98THRUN.EXE": "35e4db62dd5da7f73d97999069d501f28e426545e33672f77a117ee18cfffed9"
+    },
+    "native_v1_api_direct_and_static_actual_exit_zero": true,
+    "native_current_both_comparison_frames_reviewed": true,
+    "native_current_direct_actual_exit_zero": true,
+    "native_current_static_final_exit_verified": false,
+    "evidence_parser_regressions": 31,
+    "supervisor_model_assertions": 4504
   },
   "tls13": {
     "backend": "Mbed TLS 4.2.0 + TF-PSA-Crypto 1.2.0",
@@ -52,7 +659,86 @@
     "native_pe_gate_passed": true,
     "native_guest_validated": false,
     "os_schannel_integrated": false,
-    "dll_sha256": "8691fa74eeb9dbf02d53f7dc45a5c15c8f9d3c9960f222112621ef6351d621b9"
+    "dll_sha256": "8691fa74eeb9dbf02d53f7dc45a5c15c8f9d3c9960f222112621ef6351d621b9",
+    "native_v4_actual_child_exit": 1,
+    "native_v4_protocol_verdict": "FAIL_PRESERVED",
+    "native_v7_attempt": "PREP_FAIL_NO_QEMU",
+    "native_v7_manifest_sha256": "1f3601ec2cdff904340a5e7fc34371d1c36b4c6cfe728e894ad2ddb40828ddb0",
+    "evidence_parser_regressions": 42,
+    "latest_lts_actual_host_http_passed": true,
+    "lts_server_peer_verify_flags_informational": 128,
+    "client_certificate_authentication_requested": false,
+    "native_adapter": {
+      "source_commit": "c39f6c928ab1b1315294b6112d3f69e53f0189f0",
+      "dll_sha256": "74a189e75bb4f2c95e4033833448328be696424d66c26ae55c0928f5246677a8",
+      "controller_model_assertions": 40571,
+      "win32_os_double_assertions": 799,
+      "real_host_tcp_tls_cases": 8,
+      "independent_review": "PASS",
+      "native_guest_network_verified": false,
+      "global_installation": false
+    },
+    "complete_i486_instruction_gate_passed": false,
+    "old_latest_dll_actual_post_i486_instructions": [
+      "cmovg",
+      "cmovge"
+    ],
+    "old_native_v7_admissible": false,
+    "i486_correction_status": "v2_frozen_source_root_and_independent_complete_byte_reviews_passed_native_pending",
+    "i486_corrective_v1": {
+      "receipt_sha256": "1123b84ae84c35981cbf5e6e3ea9c4d4b6848cac00d2ee0b22e61be7237167b3",
+      "full_linked_i486_gates": true,
+      "latest_dll_sha256": "9b0a6d7e88f52d636215379b239ced17d97325d550f99fbce81c250ba8a29b6f",
+      "lts_dll_sha256": "0bcd0afb60be4e14d9e8da4f7ceaa8e913c9afdbf61b67992a99e387b4b76695",
+      "real_host_encrypted_cases": 12,
+      "formatter_assertions_each": 18894,
+      "frozen_original_current_source_superseded_by_v2": true,
+      "native_windows": false,
+      "system_tls": false
+    },
+    "i486_corrective_v2": {
+      "source_commit": "3b429e1d38f5e00aa3c33cd01f9b41559fab847c",
+      "receipt_sha256": "98c526151545be95fe5f6cd58140ae2dfdc52d21038fe1de893387290dea1819",
+      "full_linked_i486_gates": true,
+      "latest_dll_sha256": "ab59c0251bae70b6f1eb66f12009f06c576fc4c2fccca45337fe4c686bfdb701",
+      "lts_dll_sha256": "214a2b901720b8743a9de70337f6ca40da9e015c0bb3bfb26dd940191afb4b67",
+      "formatter_assertions_each": 18974,
+      "actual_owned_startup_controls": 10,
+      "real_encrypted_linux_cases": 12,
+      "actual_translation_units": 471,
+      "successful_build_steps": 978,
+      "original_regular_members": 5978,
+      "original_exact_aliases": 147,
+      "native_windows": false,
+      "system_tls": false,
+      "native_stage_preparing": true
+    },
+    "corrected_i486_native_stage": {
+      "source_commit": "076ed584a29772a486b9944a4347e6ea5fd1e1e0",
+      "host_preparation_pass": true,
+      "stage": "/root/Win98-Modern-boot/build/tls13-i486-native-5abe-20261001-v1",
+      "manifest_sha256": "e0c7af02378c03edd1e6a21d00787964ee9b6b20cb8d28d2f646f7191fed9632",
+      "authority_sha256": "ad368edb18594c5b9a12823655eb9d8ebd13a28c814519996af6e1b14687c852",
+      "provenance_sha256": "3776c62a6bcb80548263e664508aa38df08eea1892a5f7c8dc7253e99557f634",
+      "fresh_outputs_independent_clear": true,
+      "native_protocol_verified": false,
+      "winsock_verified": false,
+      "os_provider_verified": false,
+      "independent_review_sha256": "5b9930bf871da13fd260a0db35582d76b8af936c3b2588a200063c927d1f4cf2",
+      "native_verifier": {
+        "source_commit": "83d896bbd34f18054616c46883dc0d3119594bf1",
+        "normal_methods": 53,
+        "optimized_methods": 53,
+        "source_independent_clear": true,
+        "independent_review_sha256": "0f634c32cc2e715280de86d00da099db1ddc6bc8e5adad095423b5fe09496547",
+        "root_review_sha256": "290b03ed487001bfb624d8b5d6ce70e6f0cf6de43a957c85d1b465a4cebe59b3",
+        "actual_stage_binding_files": 7660,
+        "actual_stage_binding_bytes": 388955724,
+        "native_trial_accepted": false,
+        "os_tls_verified": false,
+        "winsock_verified": false
+      }
+    }
   },
   "applications": {
     "inventory_regression_tests": 19,
@@ -64,44 +750,720 @@
   },
   "guest_constraint": {
     "selected_reserve_gib": 20,
-    "free_space_below_selected_reserve": true,
-    "no_peer_disk_or_vm_modified": true
+    "prepared_copy_floor_bytes": 21991407616,
+    "free_bytes_at_checkpoint": 31499649024,
+    "free_space_below_selected_reserve": false,
+    "no_original_or_active_vm_logical_bytes_modified": true,
+    "approved_closed_clone_allocation_sharing_only": true,
+    "native_queue_owned": true,
+    "latest_attempt_safely_blocked_before_qemu": false,
+    "root_queue_owned": true,
+    "guard_recheck_required_before_every_trial": true,
+    "space_observation_utc": "2026-10-01T11:57:03.438911+00:00",
+    "prepared_copy_floor_with_staging_bytes": 22058516480,
+    "queue_observation": "Own standaloneQuickJS harness admitted after natural peer theme shutdown; sourcecold and190member CPUguard rechecks passed; actualQEMU/307checks pending",
+    "mem_available_bytes_at_observation": 11183521792,
+    "cooperative_lock_vacant_at_observation": false,
+    "actual_qa_vacant_at_observation": false,
+    "actual_win98_native_slot_vacant_at_observation": false,
+    "scheduling_scope_addendum": "docs/NATIVE_QA_SCHEDULING_SCOPE.md",
+    "positively_identified_separate_xp_kernel64_runners_consume_win98_slot": false,
+    "root_vm_running": false
   },
   "completion": {
     "user_objective_complete": false,
     "pending": [
-      "native_theme_direct_and_static_import_probes",
-      "native_tls_entropy_clock_socket_and_trust_adapter",
+      "complete_current_theme_static_exit_and_peer_interactive_system_controls",
+      "fresh_native_latest_lts_tls_dll_protocol_pass",
+      "actual_win98_native_tcp_tls_network_pass",
       "system_schannel_winhttp_wininet_integration",
+      "native_runtime_and_genuine_mshtml_modern_script_events_input_paint",
+      "complete_latest_javascript_conformance",
+      "complete_latest_css_style_layout_paint",
+      "modern_browser_wasm_core_js_web_api",
+      "webgpu_wgsl_shader_compute_and_gpu_cts",
+      "webgl2_extensions_shaders_and_khronos_conformance",
+      "html5_dom_navigation_origin_transport",
       "latest_legcord_signal_libreoffice_functionality"
     ]
   },
   "owned_source_sha256": {
-    "THIRD_PARTY.md": "718e866a4bfd7ac111e4bcf220268b3db8664120144546a2c49a7576b27d8df1",
+    "LICENSE": "fac9da110d1433f4df0cb9f5dda9449e9aff6ee236ed240fa29e3e92926c363a",
+    "THIRD_PARTY.md": "84946a1f143f0df5c22060d7eba1ac2f99035258a7870894154e7c133e073e91",
+    "benchmarks/css-selected-vectors-v1.json": "60df1ccd560d2c882ade365780602786e837d8538477b06d96a8196d6018a237",
+    "benchmarks/css-standards-source-v1/NOTICE.md": "cbf0ba618ecf8e14b34e06100515d754a94f6ad436a6a70b55df3569695fc2e6",
+    "benchmarks/css-standards-source-v1/raw/css-syntax-3/Overview.bs": "8c56a01265cd95ffb1d63e4868720be25ec509c273684a67552a07e41df2463a",
+    "benchmarks/css-standards-source-v1/raw/css-values-5/Overview.bs": "e6d5093499619450110a8ce94b39a8fda8960a28c72eac49f1b2fbb051a000fd",
+    "benchmarks/css-standards-source-v1/raw/css-variables-1/Overview.bs": "5c451db91b361068771917b1145d3f36b40159ec46dfc3a029237cb418d668d1",
+    "benchmarks/css-standards-source-v1/source-pin.json": "c8f772475baeb0ba95809be945d33ec768942109f5313424eb6e9a9d9f4c364c",
     "benchmarks/modern-app-targets-v1.json": "b3722f3c127480e8c2ce61006dca052d997b3a635c7722b9b8ecee6621607814",
-    "docs/MODERN_THEME_TLS_APPS.md": "cecfa1f26bcfb72629af68bc6848f1f82f07ed02af88d3e6d9cfcb94c870065a",
-    "docs/modern-apps-coordination-5abe.md": "c8f822a93f42e41351d925136ce3a8ea35a3b5f3b88a64cdd5b9674518c1c1fb",
+    "benchmarks/modern-web-targets-v1.json": "b8194c9fa5de0d7d09419334daf70eed6195928839a3dbfbe2c3ecf1a6f16657",
+    "benchmarks/win98se-ko-oem-native-exports-v1.json": "3854198a9b2bf9f54fe0383330d09ed2ea3d0d510c3d7ba24eb13426e37b4f0d",
+    "benchmarks/wpt-css-selected-v1/raw/LICENSE.md": "5fac07febb0e2a97fb0d7b0def149ec08b642e1ba4b9c345283ab1cbd2af6570",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-syntax/cdc-vs-ident-tokens.html": "5f52d414359c7e39d49e356c84af9be914f336926d31ddb94321978131d5edf9",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-syntax/escaped-eof.html": "dec0d40911d7247999dbb2866c5a58b7a884198285dd766bf55d5ce468c8cff2",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-syntax/serialize-consecutive-tokens.html": "8f51db51d5355c42a8179beed9933cfcf90f5b676f41c3ca5f913ff3f723b467",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-variables/css-vars-custom-property-case-sensitive-001.html": "8da3e66ac23a01cfdfbfb5eea134dd775830721ec3231c74a465f4c6502c17c8",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-variables/custom-properties-inherit.html": "b23eb89638f6e488c55bc3dd83188e9c0fbf586d8e9453530f14fe1f8db8d249",
+    "benchmarks/wpt-css-selected-v1/raw/css/css-variables/variable-cycles.html": "a787dbc45d029c765d144309e0c003e731986595ced4555dae217e531dae39f7",
+    "benchmarks/wpt-css-selected-v1/source-pin.json": "eb370b76c4acd0e1e902bc22f395ca7d529cf16774724e541cd676e7afcc4241",
+    "docs/I486_NATIVE_INPUT_AUDIT.md": "3060a8ad33090feb195e8df254e03b1095fde058db81b23df5bbac2b5a885951",
+    "docs/MESA_SOFTPIPE_PORT_FEASIBILITY.md": "756d0bade66c01c2cf916d12c88fc1ac7a668327f5accde116c3c9955c059644",
+    "docs/MODERN_THEME_TLS_APPS.md": "61d371db86c8ecd3e510d131aa3d53b9440e5ddba8140cee8e5950b2d5e5c297",
+    "docs/NATIVE_QA_SCHEDULING_SCOPE.md": "8f4567ff592a0ba9c192499c5b00753fdcc4cc6cd149a87b4e4520a0bd51d89e",
+    "docs/THEME_NATIVE_EVIDENCE.md": "8ea864696546587527c32c92acea505888ba83717398970bb7104ad40ab47f43",
+    "docs/TRIDENT_AUTOMATION_NATIVE_EVIDENCE.md": "ca6008f43eb5517caa34ca372f3bec6a6826cff8d4503d20f8a6785ad28caa5f",
+    "docs/TRIDENT_CSS_GPU_HANDOFF.md": "163a2c6dc4c6939145e87009c60d639ee4da4e1dc27a3168ab7d55fb9fe05cc2",
+    "docs/TRIDENT_CSS_NATIVE_FIXTURE.md": "24d7095019e1a5fb39a1aa06a435587bd275617ca0cebbd1edfc4f94af3df5af",
+    "docs/TRIDENT_CSS_NATIVE_OBSERVER.md": "009a5f6deccfd48da41ffadcad549efcec99d76673eed6287d805676ca2e1af7",
+    "docs/TRIDENT_CSS_NATIVE_STAGE.md": "da1f11663ca749bdbd9eb0b3c57aa399f5aa180d676efc595139f8be360f3203",
+    "docs/TRIDENT_I486_SUPPLEMENT.md": "e27d4dc10cb3fd8881e6fc8e9028426928d2eaae31e1206ff3c30057504c278f",
+    "docs/TRIDENT_MODERNIZATION_HANDOFF.md": "cd521140d1c4e975d765697ab75a0b3b37fff42c6628ba0f449656767de63fa9",
+    "docs/TRIDENT_NATIVE_STAGE_HANDOFF.md": "6c77a3d590b2af6335e013f1d17b90019fcdd7f01ec401f37266f9a800d80ba8",
+    "docs/TRIDENT_SCRIPT_NATIVE_EVIDENCE.md": "fca20043bc1a175750e94d04edb78a16aadab943542bac3e6a9e7f7ecc3d3699",
+    "docs/TRIDENT_SOFTWARE_RASTER.md": "2546db392ee9eacde7b2b3596c945658c8647a25612fdeebeeea27b109968025",
+    "docs/TRIDENT_TEST262_SELECTED.md": "dc0bbdba15ef969c46add3fed951651ceefa4e027dec9c0fceafd87fd789cf5a",
+    "docs/TRIDENT_WASM_HANDOFF.md": "1b329a8ed8183eb9d049751c722ec8cf13b98c93457a7364f60651760309b9b9",
+    "docs/TRIDENT_WASM_NATIVE_OBSERVER.md": "bda0c7b71670bdf1e376d387631c780dd945d82c6d7cc24e8791e4d2d352d8d1",
+    "docs/TRIDENT_WASM_NATIVE_STAGE.md": "f92a101b333a49a5b18ca8e4c343045b337e66de7abacb222a591dade64ebd32",
+    "docs/TRIDENT_WASM_QJS_BRIDGE.md": "eba468069792bfe92c9d90abefb1da24815592fb71ca3c9daff40b62b28549c2",
+    "docs/TRIDENT_WASM_RUNTIME.md": "1c35259a162411ff3797f505a8acdfeb36e3b3c6793cef5bddaa2a971d8b377d",
+    "docs/TRIDENT_WASM_SPEC_SELECTED.md": "78b0a07c0f51caa59a86620b57ea65f0d0d890b0b0df42980aa12e7a7e2b5524",
+    "docs/modern-apps-coordination-5abe.md": "43ba377b26274f3eaa3c243601ed64f5b2ae84488c624684df43a568e86a3f29",
     "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
     "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
+    "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
+    "platform/freestanding/memory.h": "fca39e400632604dafd3895fed60674a1171f66245094f898e9f425c41c64c92",
+    "src/m98_css_HANDOFF.md": "c7b7ecd26665b16abf3a07d601e0e9b8807665158bbdb25b99f6bf684dedb7ce",
+    "src/m98_css_mshtml_values.c": "a279990dfa3d91cd7fcaf19f0d1bad250d82ae3c3c8e9ef5d23bf1c85190b189",
+    "src/m98_css_mshtml_values.h": "ae695098ccd61fe945dfcc86f293b211e63e3ce4002720c07425ebdaaf8c2d9e",
+    "src/m98_css_syntax.c": "8ef393f861decf7312738a99d39662af74aeeca6b8d4d579b5e478780071d74e",
+    "src/m98_css_syntax.h": "ac4d8db704e41107e7c4867af1a58a3bd35b8cf17198d9258d7ab0fcc493d2ee",
+    "src/m98_css_variables.c": "dcf8fb23347d88ecd27ec08473cde466d8fbbb18515522efd1aef3f935ec0d80",
+    "src/m98_css_variables.h": "2f0cdcc560d28e2890eb2b772141c9723e87a47dc37fb6aec96209e41c1c8fe8",
+    "src/m98_dns_config.c": "b0b3a4fba1d86c0806e02aa4f1688548ba00265bf0458f6baf11934631d17b33",
+    "src/m98_dns_config.h": "da3195ffc0be20d351711e5a289e0baa4382ae3a62d334281aa7ef98fa05ee08",
+    "src/m98_dns_config_HANDOFF.md": "e7de1dcaf8a971f63bd08d8fb5db028afb6f012f9af2f7947212508e9bef5fe1",
+    "src/m98_dns_win32.c": "b1a022b67aa703afbd664cb1eb661e488c09acbf0720d138536f2d02d3512de3",
+    "src/m98_dns_win32.def": "61ad9640f089654bdc7a9579586534fa3c97e9eed2deeafc070931f94e0493a5",
+    "src/m98_softpipe_HANDOFF.md": "701151ffcb71aba11ba62e4c34c7165957a3be3dffce500d12865aaad08d8f40",
+    "src/m98_softpipe_port.h": "b407510ff3e5b47866b56a1bee0952b62d44d0e1966eeede93a7090bccfd9c89",
+    "src/m98_softpipe_raster.c": "69db2811a618eb40b25de084330d0d60e85775e7f4cc03b404da6f8e1fe4bca7",
+    "src/m98_softpipe_raster.h": "988a6ff62c2af73f66ad83ea5619ec7f48f1bd9acf100e27f7efc6c7fec124d7",
+    "src/m98_softpipe_shader.c": "d3cfa83d085feda3b48305033a9dbb4d6cb171cde08f77cc6a542ec20956893c",
+    "src/m98_softpipe_shader.h": "0e4922674f6f9aa495a38c0cf607f08f3a0ed557f19c2808a878b99ff2633173",
     "src/m98_tls13.c": "644867ad79342c3f5d81c52354d139d9f8794c66cbec519638cb396d8347e8d5",
     "src/m98_tls13.def": "eae47c8b9e29cb31acb8646fb802ec3ea25bb2aed981e4f8a2d74163824fd76e",
     "src/m98_tls13.h": "fa420d5dd9183956673814ae8f0393c758fd3b7bb5687dbaa24097bf633e7dbe",
     "src/m98_tls13_HANDOFF.md": "9aa80cd3a4c7d278c1e6f8db6f736f0917f2b1f93366386b60b6e254389a3747",
     "src/m98_tls13_config.h": "8f2dd8f8be762f2989f6fb8530febf45df294faaefef6f13db0f5f8829f4fad3",
+    "src/m98_tls13_native.c": "bf115794ff5c5bf2b547bcd05d5064de41577c55b1efdf3fad5324b1964046eb",
+    "src/m98_tls13_native.def": "10afd3869d5faec588ae24cce93800b41fe82ab2c67378ae8fedee2e34730f1e",
+    "src/m98_tls13_native.h": "bd4c7c7132841f327aeda0006012f1c7e4a71ea36d204b147afcc82e9aa5a76b",
+    "src/m98_tls13_native_HANDOFF.md": "d936e2c834fe23aef80d0b8495b41dc08285d999fba7cf37ff2973fe42fb5980",
+    "src/m98_tls13_native_win32.c": "d38c25aea02848b18719414363b4adccbf14eb2d9436026fc3f48ed40edb0117",
     "src/m98_tls13_protocol_config.h": "b5fd6110715cd7ae9d3ec6bbf1fdd77f73014c768fa7f314b8ba3409246eccd1",
+    "src/m98_trident_automation.cpp": "7ecff16195548bf681170b97f0a4626c51639b3d287962e3eb6a9aaa425bf358",
+    "src/m98_trident_automation.h": "9941b31b323712ecfaaf6200aed5aed96294267398793efaeef1d9f3a94aa616",
+    "src/m98_trident_automation_HANDOFF.md": "bbe485a76f08d995a2fda094a349d7220b1894fcca6208d0d4166de15b699f5f",
+    "src/m98_trident_script.c": "40a3594813db6b232984525d5646b72f73fcaad3dbe82d8224f6f64fe81add98",
+    "src/m98_trident_script.def": "6e906a3631ce0b777fca65f6d77765b337e2659dc5d81b0b1692f2cc52f3bac6",
+    "src/m98_trident_script.h": "e63b2421d87cbb637fa24768a6d0dcaba21dd97c1cc121258ae95b0d2cd97c11",
+    "src/m98_trident_script_HANDOFF.md": "c8b89002a6188cab081ae86f3ae195d5dd2854115814451666ec285445301251",
+    "src/m98_trident_script_fp.c": "bfd4f81fb5095708e4e09d235d1bf83a8969a03a5ef5b85804037a4b6cc1daf4",
+    "src/m98_trident_script_port.c": "056a8ab07f1680b2cc252fded07424b0d1249d2ff440b881e0edb32698064ee6",
+    "src/m98_trident_script_port.h": "ad71e7b97cf61fe2e4921811a66c10853458281a01534f62743016073a987127",
+    "src/m98_trident_script_win32.c": "af04669d0899a3f18f7dd2bb2591276602345078e94dbd2ebdea7543228c86f3",
+    "src/m98_wasm.c": "a65110956e2e3c1088f3aa456a376096c89720f12343415401aaf661b0eb61ed",
+    "src/m98_wasm.h": "99e5899c7a4c748fcb7cc899d3ae87aa3d18e24cb90f45d9e264be8f69a3fd07",
+    "src/m98_wasm_math.c": "af185b1c699fb368bee05d039cd09e8053844b795ca16c944360c7342b29f5b7",
+    "src/m98_wasm_math.h": "ba3a6d4c198b5f9e98bb882b0fa0d292c7e2e958db8fa3733b26b82a92c6c078",
+    "src/m98_wasm_platform.c": "808bc06888f2ad1e1d22d3635a260429f4f5c32c8c7cc36681d125ffcdebc7ca",
+    "src/m98_wasm_platform_internal.h": "364c1b47b2609929a19430f1fd9c6aaa6eb92925bb088c633f3d417ee268539a",
+    "src/m98_wasm_qjs.c": "a154a0b2d960ad3a8ebe3c129c61b1fcdf1e2ed67ea4285a557cf6193b285590",
+    "src/m98_wasm_qjs.h": "4aeab6bf2cdb791274363eab81adc88232c109f9c88e4a8517c3d612e74944e0",
     "src/uxtheme_engine.def": "f33e0a2fe80ce964f2374cb13fea51cce4ece80845ef9e0ff811edb87cfdd350",
-    "src/uxtheme_engine_HANDOFF.md": "3c0af6ae6cf743b57a5349a1e9a63fa69165fbcabb8218b09aabf132f1350f5f",
+    "src/uxtheme_engine_HANDOFF.md": "65fcb4ea402244b64ae67eb9f777ecfebe6dd47a7c19208bb77d8f84e51360df",
     "src/uxtheme_engine_core.c": "93b106d1b068e8b5b370c76e1871060cb24a55f79635d1e6b08cf709980890a2",
     "src/uxtheme_engine_core.h": "483885768f660ae3cb6a51ed28fd74cddadbc2314dd8901c048d7a55692f7edc",
     "src/uxtheme_engine_win32.c": "18d2a67ff2a8a9743ec1e01e055bfee3e4ded885e14203f592d91cb2ddd17167",
+    "tests/m98_css_mshtml_guest.cpp": "f38cecb6f9500260113f0953cc6707aa132ab240adf769e8fa30b11237e24206",
+    "tests/m98_css_mshtml_runner.c": "d93285182ad14cf8ebfada86ab8eaed2053eecfdb6abb931851a325c2367e26c",
+    "tests/m98_css_mshtml_runner_mock.c": "9ea6c8dd7cc00a4586343e000d4142cb4614e9ab8d674614d04b550af41615f4",
+    "tests/m98_css_mshtml_values_host.c": "98b2a9f70e994eb7710b1b5e7863e9c1b41603a623ec3347cafe3e5dfcd10f52",
+    "tests/m98_css_native_gate.c": "ca72f4fe2014b0b59aaf8f1571502f7cba22b6c9683b27a4c68a4b1261e67196",
+    "tests/m98_css_syntax_host.c": "d0d9d5bff6e602c8dadfec514a0c7c1ae75e2288c5ad149c0d6751fca9f95241",
+    "tests/m98_css_test_support.h": "a649a2d18d8002235d39797909023834af0a4c5d80685ffba02c36ae077c2022",
+    "tests/m98_css_variables_host.c": "b3df3400c13ed12fd17b5e46f69eb6190ee46f2949dfbcf1227db9e40545e864",
+    "tests/m98_dns_config_guest.c": "61c0898eba5af1dc62b14b2446d6a1ce9eedfbaea1809e086693486961f8a98a",
+    "tests/m98_dns_config_host.c": "d6302f245e83da4d98c3043d868683ec3435528f19fe6cbd4c8b89bf762fb21b",
+    "tests/m98_softpipe_native_gate.c": "64d3e67c1cfd5d67d3dbaf86696a7e9b440d1740f4b300bb08f02a43bc1c3301",
+    "tests/m98_softpipe_raster_host.c": "f2a06d83faa2aa7715e808aa4fddcb39c278f685817e4983d3302b8b3581583c",
+    "tests/m98_softpipe_shader_guest.c": "534d7cd8c08e749eb3029de16a1474746177fa089179fb3f9ec56c89fa0885d6",
+    "tests/m98_softpipe_shader_host.c": "8975b396a0bf6da733a216e3c8383a41577337ca8015e43191eff7f4f4d1c624",
+    "tests/m98_tls13_guest_interop.c": "840f0c02780e45a44204bcf36051e7d7ca2697c06d10ac8ac40906a743fbc13e",
+    "tests/m98_tls13_guest_interop_HANDOFF.md": "f7e3ea2b433dc7be72caa000b9a7ec0e1d93090c922fb701c6973feb8628c780",
+    "tests/m98_tls13_guest_runner.c": "9be9086ee1fd92a2aba97eefa8b92322aa3f3f4f9609ac9dc54629c83327a27f",
+    "tests/m98_tls13_guest_runner_mock.c": "5c7fd1f4e8495ad5c680a7355ed7d265956d01af75b983244923b3347e3f1311",
+    "tests/m98_tls13_guest_runner_mock.h": "8195a20d0c5dbbc576bd00ce314411cd03f107b1110612a2c425089c5aca8ebc",
     "tests/m98_tls13_host.c": "bed4b9c93dda734113bae88b93abcd9013c0c9da1a25dfe2f949cac27a5522ff",
     "tests/m98_tls13_integration.py": "bc4a6edbf19f942631fc55692db76dd20304538b44977cbdb72ea914d1933fa8",
+    "tests/m98_tls13_interop_controller.c": "742ee0bbc121e89a59b48b30f1b9820da87620618b8be7a59be5ed37f727e4e6",
+    "tests/m98_tls13_lts_loopback_server.c": "d40d7caa5c7bd2bd710f0087cf2db617c5dd05923735e5fc8667c61a6603ce11",
+    "tests/m98_tls13_native_controller.c": "78d429540227aef5be55b8fc87f2090e0602349906bf265a5087a3a660647203",
+    "tests/m98_tls13_native_guest.c": "3220fa0d8b6dbada184a8f9f6bc6a8694a97a6ae15378b912cd6d3fb42673fb4",
+    "tests/m98_tls13_native_integration.py": "ba0f3c4f07655d341c09463d87bb21014e6381caf85149559d386c03451528e2",
+    "tests/m98_tls13_native_posix.c": "314ae5e9450e235b7431f19d5d83c237a9552cb41f32099197ff3b715706a617",
+    "tests/m98_tls13_native_win32_mock.c": "158551e2c6aff499ecd54d14bd9b12b862597812aa12a77473ce951c43bf21c3",
+    "tests/m98_tls13_native_win32_mock.h": "246e1be4fbbfc1e7a07024d1510951e1766c2ac9fdc0163f784845b7d6a74060",
     "tests/m98_tls13_pe98.py": "d96118a18a670c0bc8c6e7c3bd4470a6e0b57a494f8827036948899b1902946f",
+    "tests/m98_trident_automation_guest.cpp": "8412218599740f20f055d478dc2e2ed9aa8fc8e2d265348d11d093de58146f27",
+    "tests/m98_trident_automation_host.cpp": "075579aea5fd610e5078449a45b5599af913f95591a7f6d798fc5cc6bdab34b6",
+    "tests/m98_trident_automation_mock.h": "ea15d7699bbfe9567d1af2ff1d2abd5f70e34fa8dfc3f044aa04cecc51b9db0a",
+    "tests/m98_trident_guest_runner.c": "84be4adf960cffd3afc5ee119a30b19467c11d0784f5b6c3966957bcaf0ea2f0",
+    "tests/m98_trident_guest_runner_HANDOFF.md": "21005e5de22bc6117faea77415ef0e5a0070a0d5ec94d711ecff1384b84f85b7",
+    "tests/m98_trident_guest_runner_mock.c": "3a485be6c2af6b9faa39b48fbf7505eb9eeb93f2203b3c83c284327e13a57cef",
+    "tests/m98_trident_script_guest.c": "d0a394a75bf757a2bef4acea14dd32a7926116ecac23a15b85c90808238bcab7",
+    "tests/m98_trident_script_host.c": "bb34d6fb5aa56b6cd25e4235e005b85987d29489b60f71ca62bf5541974cb7f0",
+    "tests/m98_trident_script_platform_host.c": "9183d9efd89b7f2087b95a94ef5194699d3713193a414bb327b5aaa47fcfe8a9",
+    "tests/m98_trident_script_port_host.c": "fee88cdc01b154f2f08a5a7d7d7cd859b399d03a7c9e717450121db56bb3d1f6",
+    "tests/m98_trident_script_sanitizer_fault.c": "f39cd3021d476b524101a0d2a0d0c2e82d4a8963e38344262b3909318207ef1e",
+    "tests/m98_trident_script_win32_mock.c": "787b0036f405ffedc8d2d05bc907090a98fd26da1a1cfea1855837074637c290",
+    "tests/m98_trident_script_win32_mock.h": "e5a434db3fe483746035b7d8ac85c2b9900c83e7156f4fef09010d7b3e01b1c4",
+    "tests/m98_trident_test262_host.c": "29e499c20223fdf7f41461bed06d4c2ce4b75672c4733f4d3697c58d4dc9fe9e",
+    "tests/m98_wasm_guest.c": "c30e5e98f494d596e6bdb9c2d78dcda0dedb9be64acd29d58692e38c97053819",
+    "tests/m98_wasm_guest_HANDOFF.md": "c6ec7169eaa733ecf9ddd9fb089005ca5e6e3979160ded1b92b85d1eb69dde1d",
+    "tests/m98_wasm_guest_runner.c": "9519b5c68ffd875b8455146d2a2ed881452ce4c60f4a76918e61c1bbe8c171dd",
+    "tests/m98_wasm_guest_runner_mock.c": "d414236189a9a43e3a2c8382dea2d8cd40f3f42b9b07c781e1a9c25c448166ee",
+    "tests/m98_wasm_host.c": "c310b6848a277b7e430497ba1fc79ac81e018f243cd73b3526085335f7b5c5e8",
+    "tests/m98_wasm_native_gate.c": "f4f5ced2b711af33f035d021c8a527ab04d699683168c93f677684b0ad0e7bfc",
+    "tests/m98_wasm_qjs_host.c": "27192cd85032f166a1b7711e9edf92d9f01d19476c8a20418a4fdb8930dc65e8",
+    "tests/m98_wasm_spec_host.c": "2a8f37afa16f378ff680a0e7943fb034598e345017c1c33e3c939ef16b6e78e5",
+    "tests/test_build_softpipe_shader.py": "40b443f069a8689e9e6cb737a79e2f32883c4a68f6a8390ba42b99c8438b83b5",
+    "tests/test_css_mshtml_native_log.py": "dd8af528aa1191e09fd4e42e7d229111e617a33c63bab9ac44587839a491b4c9",
+    "tests/test_i486_instruction_gate.py": "6a0ff7367a2c32d09bebda68283b4be710cf27ddae67b21a571424655edabe51",
+    "tests/test_m98_tls13_guest_evidence.py": "cbaecc7eea4d5c2be8441a89eec7a0bc2553380134ea7831e7a38e20d0100557",
     "tests/test_modern_app_inventory.py": "e6e3ee9f59e30ddf786f1509d3bb389f96495ad24eea123c1c66bf5482b7c717",
-    "tests/uxtheme_engine_guest.c": "556e85255679f3d70ecf8f2ae82047b6bd519fe2cf49fcd15da083719770c672",
+    "tests/test_verify_css_mshtml_native.py": "824a6d97c1a9cec87d5b9280ed8658fa6d354189f1f393e72748bf3dcd30931a",
+    "tests/test_verify_theme_native.py": "e4688647c23432e3edd04aef4ed282c83f1b2b07221eb5be333e438ead425da1",
+    "tests/test_verify_trident_automation_native.py": "7e75c3f61bed739bf5cf4eea0b8fd0393b95df91cc9b4592b73f5ff9e0c5eac8",
+    "tests/test_verify_trident_i486_supplement.py": "a206a3066fd4f5df4dd2a0afbe75508ac438703e420b3d573c7fd2acf11a5d35",
+    "tests/test_verify_trident_script_native.py": "556ec1f479880379f15cc5e27b3dcc8cfab3bb6f3f30d3ae307f22b2e47fa0da",
+    "tests/test_wasm_native_acceptance.py": "718405b4f45aa88adba5215d6cc4611f3e5a6d22fdccc3af215b27f0b169e106",
+    "tests/test_wasm_native_log.py": "a18a1948a7d0a65b2d1655c3d39814620367547750575a893fdc0e38faf72eea",
+    "tests/test_wasm_native_stage.py": "0775d3bda295f8bd43fe129b1003f044dd9653ea6a927b94cc4e6a7965cf346e",
+    "tests/trident_es2026_selected.js": "9e480643b5c227f9d51436567e3e2fc74fec0136426512fe84978452e41d98ff",
+    "tests/trident_numeric_selected.js": "bafe25adc040e784e6c536d2c616b8c78d7d358a7db12e189adea5fff9307551",
+    "tests/uxtheme_engine_guest.c": "a7cf7a00ef0f075a85937993918d3ee3b3a09240b2ed62018aae7a87d3ea79dd",
     "tests/uxtheme_engine_host.c": "8b8951ba4e995035ec3c6bbf5e4f1de24b1db6bb998616ec1480c1c30ec97341",
+    "tests/uxtheme_guest_runner.c": "1955957a9279445708dc1a11c2888b8d9906e0cc3cae8029a1116f893d5b5b74",
+    "tests/uxtheme_guest_runner_HANDOFF.md": "ea5eded6d5b3f3cc3d4ab8621f2236408cb0937ee6cbe83d7153890e80cd8f92",
+    "tests/uxtheme_guest_runner_mock.c": "ca778deb2ba15c30ee76d11bcd61d4ae1b28a9669f006750c9c0e19660e41d87",
+    "tests/uxtheme_guest_runner_mock.h": "14463ce0ef37880d1667c0b7a56f44ecda0670eef6b75bcfa850aeac32e19ca3",
+    "tools/audit_i486_native_inputs.py": "d4637da446ec7b8f8b703ee38c04e78304eb5cd880781c893e8ca9bf24ae1490",
+    "tools/build_css_core.py": "4b79103d24db274d3c2ab2bb479a325d38717e147eb25a4e5482c1756e921ee1",
+    "tools/build_css_mshtml_fixture.py": "b0adbfa4c9fc910aca3868b2b0fff9e1decd4789bf93cb4573173f4e6e053730",
+    "tools/build_css_mshtml_runner.py": "32877d90771a68e98b588460f164691e1a0fed62f302525c8fc91580bee45e8a",
+    "tools/build_dns_config.py": "cbc013e6ebdd6b124ead30bfddaac800f3b295470020f5115a0a3d8d4f26035e",
+    "tools/build_softpipe_raster.py": "665b80be5bb527296fe3db64c9c8eceaf88f30b640b92ba808ee54df42e3da9f",
+    "tools/build_softpipe_shader.py": "7e2fffae6eac36b2fcc930ad295016afea7eefd2506eafd3705e2ffbb8e7c089",
     "tools/build_theme_engine.py": "d148e89dda4b301c1ab73d55a343f80c30aeda8be5ce4c4b9ac648d9e6747660",
+    "tools/build_theme_guest_runner.py": "d695bf0b1f4e1408710447133bfc68eae58d29b65de9190ac4b54020c4b6901e",
     "tools/build_tls13.py": "adce018582b146b2ec95939f3180f73e80ed8511a3ef34bff52ac63193624aaa",
-    "tools/modern_app_inventory.py": "cbe2f50d15a8ceb7e22b977c6948a9bfe63fcfbc7e6b3ae764aec052872f560d"
+    "tools/build_tls13_guest_interop.py": "d3d7c523a18e0ec4384dc05742eb43441aa7902d5fc34cd98f172fcf4d7917a6",
+    "tools/build_tls13_native.py": "a0c38e56ef4f8885da42d8e407b99ae8b6abc0bcc42b3024392c8bb04cf7f59f",
+    "tools/build_trident_automation.py": "c1c15ee519730fd0447719db785d9deefb8d7a08e8192a8e61e1751434818ea5",
+    "tools/build_trident_guest_runner.py": "2845b647af18b57656eaaa38bad35bc8aba0a92825f612568458d9935957fceb",
+    "tools/build_trident_script.py": "f80ad33d1ec86bca368b0beaa35f1d4fa5e08eb07752d0a53ff61489c230b1eb",
+    "tools/build_trident_test262_selected.py": "283274869fcf460c8625cc15cf6d47c2525eaad5f422279e1a67e045cc2ac3e2",
+    "tools/build_wasm_guest.py": "7eafa4e31606e74e666e4304bf74369b406f1381f0982ec81a53fd0f4fd94d60",
+    "tools/build_wasm_guest_runner.py": "e476fb3653a8b63adcbe311b196bf38ddde03a030857f42af897104560f02777",
+    "tools/build_wasm_qjs.py": "f65a796228fa9ad8f33a1a2c5e67e175ec62c813ce6757e6b2f6706e767ce028",
+    "tools/build_wasm_runtime.py": "9e10828c4f1c88fa162bde9a76c014c709a604876dc710fba424fe6c3443e506",
+    "tools/css_mshtml_native_log.py": "da8e2f3d37333861c3bb1631c0416cbc1d990eb2ed7bf7e9a8c6f37df7419c08",
+    "tools/i486_instruction_gate.py": "6ba89c7a521e6a7b17e18519f27ed3d1f860d3f8e7ed7d9c89302ea960088973",
+    "tools/modern_app_inventory.py": "cbe2f50d15a8ceb7e22b977c6948a9bfe63fcfbc7e6b3ae764aec052872f560d",
+    "tools/stage_css_mshtml_native.py": "ff41d3733ea2a858afef2ac6962dde3df01991d627ce1f36d91e8cef07b34971",
+    "tools/stage_trident_automation_native.py": "8f05b9105583ff11276207af6cba6c075741bf7cc1a73ef9ad17a12b5606c8a1",
+    "tools/stage_trident_script_native.py": "532044a04549ff0b8d7d09de0be897d4c0ed044791edacdb83ed2407879ea260",
+    "tools/stage_wasm_native.py": "f6a00ec95f5894715b5564bd27872405343a8cb5d464ab9bd122a5853f5a0cf3",
+    "tools/test_wasm_spec_selected.py": "c9627963de3e3ee2f62b115f88dde389acbe6eaf93a6475049e9c1f2e0fe32ad",
+    "tools/verify_css_mshtml_native.py": "0395828d88a7ab1fd9d3936d4b065e0d82ba39551ce5ecd8c3b1004818fd4f17",
+    "tools/verify_theme_native.py": "2a179ba3b3213a05b0ac35f0bc8a3afe3da61c6a27777e188ddb2798453bd569",
+    "tools/verify_tls13_guest_evidence.py": "a2a696ef416060eca4ee6a381dd5cf6ba38edce9183d0eef1ad99c1b89066226",
+    "tools/verify_trident_automation_native.py": "955be0f0d70a91fa22dbeab27074eeef223699414476d80b8b749dca22252a65",
+    "tools/verify_trident_i486_supplement.py": "7a71eaedea7cffdfecd0b3c5f3183f4e29924563c1250b4be1a5f62dbff86256",
+    "tools/verify_trident_script_native.py": "72916dd0e4875ae35f96d3cdd6f8f8d18f48021245d62af3e1fc7483863c4083",
+    "tools/verify_wasm_native.py": "b8bf36328f72f823cc8d93b43964eef3dc1fd11d93c658f34f86ea764f717608",
+    "tools/wasm_native_log.py": "236a19c807b241193b2251ea403898f8772aed9601147d9c24c3a96b8c63e34c",
+    "tools/wasm_native_stage_evidence.py": "785182f343b30bdad0a66771e2e02872ed8cb778990087ee32aa3329434b8d45",
+    "docs/TLS13_I486_HANDOFF.md": "7f29d787024e9fc6eb49801333a9108fadc37992d0f0b1648384a0eb62746c2a",
+    "src/m98_tls_i486_format.c": "b5bebe525dbb6cea178a8d6faba88a030230035e45d13e512d832827ae71394a",
+    "src/m98_tls_i486_format.h": "9daef87a5a35724b370ad7441fda636a247c8e531e164247dd52d5b0f16d31c9",
+    "tests/m98_tls_i486_format_host.c": "658e99e826e983a7607e05c0f30feac5a07fb99b2f5564c6240b34dd8857968b",
+    "tests/test_tls13_i486_startup.py": "504d0baeae6a506d58548af2851e60955b47e81c656cdd050b4621832578d77c",
+    "tools/build_tls13_i486.py": "dcb6801c7c8bc11e28a6518acc3e0438bb7ac9d8edcad23588706b0ea798a2fb",
+    "docs/TRIDENT_WASM_MEMORY_PROFILE.md": "9a6a3454d644ff613befdf56c972af9cf7f5f86ecd4054b46e6a06d4d528ede0",
+    "patches/wamr-f5f57c09-browser-memory-v1.patch": "c634d7e2167cc6db95842721a01e069da4338c57ad6cb7d570117f2d3b979999",
+    "profiles/wasm-browser-memory-v1.json": "ec704aca6399d81ffa18cdf8d3de11a50ff1587a22be78f88bb4affaa76166d7",
+    "tests/m98_wasm_memory_host.c": "868a8c85d73500f3584a37ed3886e4c6247184c8069c9f58010e493b27c3aa80",
+    "tests/m98_wasm_memory_spec_host.c": "e339a578adfc08ef442c7c5ba879623c522f9dca6400b229a6ab1e9e1b4d621a",
+    "tools/build_wasm_memory_profile.py": "44049c5ed1aeedd3b79c57e9c2be68fefb9bb25022aaf09554fc0fabdf93c07e",
+    "docs/TRIDENT_WASM_QJS_MEMORY_PROFILE.md": "eaba958d7f8ae4d9547e316e03dab960084967db94cfcfa419cfd1ae3e53dc6a",
+    "tests/m98_wasm_qjs_memory_host.c": "0246e23dfe5ed1b9567819f923c18f2741769035bedd362c0fc1f2f59b6088de",
+    "tools/build_wasm_qjs_memory.py": "4dcb8be74da08db7378f412c040e96f8510fe3eb9cbb6b6ad91da395afe847dd",
+    "tools/stage_tls13_i486_native.py": "08516754180d5ea6b1547581c871889e4fed4dce1c57137687de68c237810498",
+    "tools/tls13_i486_native_stage_evidence.py": "ba9eb7542b099b81a43f75c474602a27a14d6ee9b2f14f9c526a8da2c6d1ef92",
+    "tests/test_tls13_i486_native_stage.py": "75a690a35eb31fc7f9336fd049f82d6ff17a70da878c3bc6a14bd6aeac1dd4f7",
+    "docs/TLS13_I486_NATIVE_STAGE.md": "90c1fee8f44b24901dadc7a02d6b69c7b4460117ed30a8399ffaa4bd7d558564",
+    "tools/verify_tls13_i486_native.py": "0b660a00a9f88009038b6e46b2876d4b54411ab53296d04beaa0f92aeac100c8",
+    "tests/test_tls13_i486_native.py": "6c2c18ee31f8cb86d37c92a3326c2deafed62173f4c4ae5583f443aac4fa8eb9",
+    "docs/TLS13_I486_NATIVE_EVIDENCE.md": "c63cdfa46d06c7401ac2e246f8f37a0377df55d984074362f464c458127d6653"
+  },
+  "updated_utc": "2026-10-01T13:02:29.126045+00:00",
+  "source_commits": {
+    "foundation": "a12a4a95e9f3fbddcea82d69f124876d22fb660f",
+    "dns_config": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
+    "native_observers": "b872bebb51d71674bfe4448b914ee7c523810364",
+    "native_tcp_adapter": "c39f6c928ab1b1315294b6112d3f69e53f0189f0",
+    "trident_automation": "09e628563b69bd24d84a38750174310be1bdda2e",
+    "quickjs_runtime": "eb85c4d7ade672604016203fe5ffc2007b259af6",
+    "modern_web_targets_and_automation_acceptance": "0acecf9499a48f57006f68bb400d77825bc0ea2d",
+    "script_native_acceptance": "89a6df0f4615d31a0c7b34d312d1e00d2eaec303",
+    "test262_selected": "eb6571ac6ab5a8705e64bc9d8546e54f741141df",
+    "css_core": "a7ff07f1cc58ca29778b328c73417fa60f038181",
+    "i486_complete_gate": "e1a877cd76e541c07caf06ba92f316c1b2ca208b",
+    "css_mshtml_native_preparation": "f7f22e27c9ce81ac4079575c3bf3b4f5922f341e",
+    "wasm_current": "b8ae76609a62d1ab072d9cd9e7152050c3d523da",
+    "mesa_tgsi": "e40cd6b1ce87ed2e314fdbde63c2098d87ef68b1",
+    "foundation_notices": "bbb5e2e00b66c7a11782128a071ba6bda612fd82",
+    "trident_i486_supplement_guard": "e006360c83e0f0081bc135b4e969229cb1866e8b",
+    "numeric_wasm_probe_observer": "8ea3da3",
+    "genuine_mesa_transactional_raster": "601e2fd",
+    "private_quickjs_wamr_bridge": "7b2dbff",
+    "css_native_short_label_correction": "71710ba",
+    "numeric_native_stage_and_verifier": "778cfd6",
+    "numeric_native_final_file_drift_fix": "0f163b1",
+    "tls13_i486_correction": "3b429e1d38f5e00aa3c33cd01f9b41559fab847c",
+    "wasm_browser_memory_correction": "76cb02bc64b27b6359bd012150530b431814e047",
+    "quickjs_corrected_wasm_memory": "a0d2d724e8b70ad7d3e2ad2de2519f3a5d0a62ab",
+    "corrected_tls_native_stage": "076ed584a29772a486b9944a4347e6ea5fd1e1e0",
+    "corrected_tls_native_verifier": "83d896bbd34f18054616c46883dc0d3119594bf1"
+  },
+  "dns_config": {
+    "source_commit": "66912e3a0f80f22232ec3383a4bdc8e91557b53e",
+    "host_assertions": 11609,
+    "independent_review": "PASS",
+    "dll_sha256": "140755641ccb2443d44f46d520220ac832cc8fe429aa37f24ce1947c6f4f4065",
+    "native_guest_verified": false,
+    "standard_dns_module_integrated": false
+  },
+  "browser": {
+    "direction": "Modernize actual Trident/MSHTML; full WebKit optional; latest JavaScript/CSS/browserWASM/WebGPU/WebGL all mandatory",
+    "relay_to_all_live_child_agents": true,
+    "cross_session_direct_acknowledgment": false,
+    "shared_coordination_note": "/root/Win98-Modern-boot/docs/modern-apps-coordination-5abe.md",
+    "genuine_mshtml_automation_bridge": "actual_component_host_and_PE_passed_native_pending",
+    "real_quickjs_runtime": "actual_runtime_host_sanitizer_and_i486_PE_passed_native_pending",
+    "upstream_release": "2026-06-04",
+    "upstream_archive_sha256": "b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a",
+    "actual_native_browser_js_verified": false,
+    "html5_layout_verified": false,
+    "wasm_browser_verified": false,
+    "es2026_conformance_verified": false,
+    "mandatory_standards": [
+      "HTML5 DOM/layout",
+      "latest JavaScript",
+      "latest CSS",
+      "modern browser WebAssembly",
+      "WebGPU/WGSL",
+      "WebGL2/current extensions"
+    ],
+    "css_core": {
+      "build": "css-core-v4",
+      "syntax_assertions_each": 11827,
+      "variables_assertions_each": 13289,
+      "normal_and_sanitizers_passed": true,
+      "dll_sha256": "cf4f0d9a8b1afefe5f2dc8fdf6767cef398bea40cdebdf4bd8dc2d0dee75bce7",
+      "full_css": false,
+      "browser_wpt": false,
+      "native_execution": false
+    },
+    "wasm_runtime": {
+      "build": "wasm-runtime-v24",
+      "embedding_assertions_each": 1237,
+      "normal_and_full_asan_ubsan_passed": true,
+      "effective_engine_macros_each": 114,
+      "original_source_files": 2001,
+      "real_cached_engine_objects": 93,
+      "selected_official_build": "wasm-spec-selected-v5",
+      "selected_numeric_commands_each": 5896,
+      "selected_numeric_failures": 0,
+      "text_only_exclusions": 8,
+      "dll_sha256": "a0311d69d40e22c65e4182b44d4ff53988c6247f669a47901dd3f3e9d6ca29a6",
+      "complete_i486_executable_bytes": 155996,
+      "complete_i486_instructions": 54602,
+      "native_execution": true,
+      "browser_js_api": false,
+      "full_modern_wasm": false,
+      "mandatory_remaining": [
+        "SIMD",
+        "exception handling",
+        "remaining current proposals",
+        "real JavaScript/DOM/origin-bound embedding",
+        "full selected native spec commands"
+      ],
+      "native_scope": "original_v24_numeric_C_ABI_only",
+      "native_ordered_checks": 265,
+      "native_child_pid": 4294877739,
+      "native_child_full_dword_exit": 0,
+      "native_actual_supervisor_exit_verified": false,
+      "native_memory_v8": false,
+      "native_selected_official_suite": false
+    },
+    "complete_javascript_verified": false,
+    "complete_css_verified": false,
+    "webgpu_verified": false,
+    "webgl_verified": false,
+    "selected_test262": {
+      "revision": "7ab7fafa0003f73fc85c1b95d88094d33f7eb8bd",
+      "selected_originals": 174,
+      "executed_originals": 170,
+      "variants": 338,
+      "passed": 334,
+      "failed": 4,
+      "excluded_originals": 4,
+      "command_exit": 1,
+      "full_host_protocol": false,
+      "native_execution": false,
+      "failure_feature": "still-proposed immutable-arraybuffer, not completed ES2026",
+      "receipt_sha256": "faa4bb2b389e69e6e20c3f5253e2479f0d8d28b865e0e1b1c0fa9fa442eca3a3"
+    },
+    "runtime_v10": {
+      "interpreter_assertions": 1293,
+      "format_assertions": 32,
+      "win32_platform_os_double_assertions": 510,
+      "normal_and_sanitizers_passed": true,
+      "dll_instructions_decoded": 225883,
+      "probe_instructions_decoded": 3729,
+      "post_i486_instruction_families": "absent",
+      "shared_memory_atomics": false,
+      "native_execution": true,
+      "full_language_conformance": false,
+      "latest_native_admission": "ACCEPTED_SELECTED_COMPONENT_SCRIPT_V2",
+      "admission_receipt_sha256": "f39e010b0d651933aff019ee738c7dbf00b536f62b9b8f5b6d247b2a125e49af",
+      "actual_qemu_launched": true,
+      "previous_actual_child_exit": 0,
+      "previous_ordered_checks_observed": 307,
+      "lifecycle_rejection_sha256": "545e1713815ef92b5a49d767722f3d22595e4e0e516ec69555c927fae5b2eb16",
+      "native_component_acceptance": true,
+      "own_vm_stopped": true,
+      "native_ordered_checks": 307,
+      "actual_owned_child_pid": 4294869171,
+      "actual_owned_child_full_dword_exit": 0,
+      "actual_supervisor_exit_verified": false,
+      "native_codepage_reported": false,
+      "strict_acceptance_sha256": "f0b07f8e3e050163945f9b87cc3de780cddcdb855465ec443489d45243947dfe",
+      "fresh_final_cpu_guard_sha256": "8d344d9632e524e4ef367ed2b046f032460f83d67754ef52eeccbade46435801",
+      "root_late_readback_sha256": "18dedc579fcb9649e8ef97d452b8f99e48a6b04abdf27c8b01741d6009b87afe"
+    },
+    "automation_v4": {
+      "production_adapter_os_double_assertions": 3799,
+      "normal_and_sanitizers_passed": true,
+      "native_execution": false,
+      "genuine_mshtml_fixture_implemented": true,
+      "full_browser_dom_semantics": false
+    },
+    "native_acceptance": {
+      "runtime_ordered_checks": 307,
+      "runtime_parser_staging_methods": 44,
+      "automation_parser_methods": 43,
+      "runtime_stage_files": 176,
+      "automation_stage_files": 146,
+      "both_stages_canonical_boot_scope": true,
+      "native_runs_complete": false,
+      "global_registration": false,
+      "complete_i486_supplement_mandatory": true,
+      "complete_i486_supplement_sha256": "e8005132e8f917adedb54b3b85e1d6bfbb0c46bfc432288db34016537bdf53c6",
+      "strict_supplement_guard_implementation": "frozen_independently_reviewed",
+      "css_canonical_stage_ready": true,
+      "all_full_standards_flags": false,
+      "strict_guard_methods_each": 16,
+      "strict_guard_script_checked_files": 190,
+      "strict_guard_automation_checked_files": 162,
+      "strict_guard_union_independently_checked_files": 335,
+      "strict_guard_complete_instructions": 471637,
+      "strict_guard_complete_executable_bytes": 1481240,
+      "fresh_guard_replay_before_launch_and_final_acceptance_required": true,
+      "script_selected_component_passed": true,
+      "complete_runtime_and_mshtml_automation_runs": false
+    },
+    "css_mshtml": {
+      "fixture_build": "css-mshtml-fixture-v9",
+      "consumer_assertions_each": 213,
+      "observer_build": "css-mshtml-observer-v4",
+      "observer_fault_assertions_each": 3025,
+      "synthetic_acceptance_methods_each": 8,
+      "normal_and_optimized_python_controls_passed": true,
+      "independent_source_provenance_review": "CLEAR",
+      "canonical_stage_sha256": "11a2aa48b735e26212db048a78dfb5c64f6da1e95f8ef436fd4f5c4a2f18d7da",
+      "full_executable_bytes": {
+        "M98CSS.DLL": 10308,
+        "CSS13PR.EXE": 9580,
+        "M98CSR.EXE": 1864
+      },
+      "native_styles": true,
+      "native_geometry": true,
+      "native_paint": true,
+      "native_child_exit_verified": true,
+      "native_supervisor_exit_verified": false,
+      "full_css": false,
+      "fixture_receipt_sha256": "4e31eafcb1965753cff29f5b44a4ad9057853c54378804e3dfa435eed76dbe42",
+      "canonical_stage_provenance_sha256": "70663a634c603eabb757894c988142ac1524467b0c1139b8530c5bdceea8b383",
+      "native_child_exit": 0,
+      "native_child_pid": 4294516485,
+      "native_supervisor_requested_exit_code": 0,
+      "native_acceptance_receipt_sha256": "c5abb5104fb8d1e51f6d6cf4d805fd02a2253a64d21d6cbccfa9453acdf86ee3",
+      "paint_review_sha256": "7704b6fe0e0b787d5dbf47ec2700a7060920764844292344e17ebc44e432c5de",
+      "actual_mshtml_version": "5.00.2614.3500",
+      "all_full_css_and_browser_flags": false,
+      "supplemental_final_drift_checked_paths": 106,
+      "prior_native_failed_child_exit": 1,
+      "prior_native_failed_offsets": [
+        46,
+        36
+      ],
+      "prior_failed_evidence_preserved": true
+    },
+    "mesa_fragment": {
+      "build": "softpipe-shader-v2",
+      "genuine_tgsi_fragment": true,
+      "assertions_each": 3120,
+      "normal_and_full_asan_ubsan_passed": true,
+      "dll_sha256": "f128cbe67c4bf2dde24cbbee0677e3f562f8ece11a354d328a888a6166753b93",
+      "probe_sha256": "719d1c1e012c1dc3d548f8555e16831ca8e33d0bfad4979d09480e8f40593ac0",
+      "complete_dll_executable_bytes": 59824,
+      "complete_probe_executable_bytes": 6128,
+      "compiler_headers": 180,
+      "native_execution": false,
+      "glsl_es": false,
+      "gallium_rasterization": false,
+      "gles": false,
+      "webgl": false,
+      "webgpu": false,
+      "compute": false,
+      "full_browser": false
+    },
+    "wasm_js_bridge": {
+      "status": "private_numeric_host_full_sanitizer_passed",
+      "frozen_abi_unchanged": true,
+      "standard_browser_webassembly_verified": false,
+      "native_execution": false,
+      "assertions_each": 140,
+      "receipt_sha256": "b3e0e6ef6b966b9c9cb0beaaaf41d8227e048fbe6245232b73d825d0584705ac",
+      "actual_real_cyclic_gc_fault_corrected_and_retained": true,
+      "real_no_grow_memory_gap_preserved": true
+    },
+    "mesa_raster": {
+      "status": "genuine_tgsi_transactional_triangle_host_full_sanitizer_passed",
+      "frozen_fragment_api_unchanged": true,
+      "webgl_verified": false,
+      "webgpu_verified": false,
+      "native_execution": false,
+      "assertions_each": 33792,
+      "receipt_sha256": "26d7055953bb6e0915df675ea0c0797c07e0c5704b00ef16f077e1867da3164f",
+      "full_native_PE_i486_gates": true,
+      "nested_trusted_mesa_provider_fp_isolation": false,
+      "outer_three_raster_callback_fp_scope": true
+    },
+    "wasm_numeric_native": {
+      "source_commits": [
+        "8ea3da3",
+        "778cfd6",
+        "0f163b1"
+      ],
+      "probe_assertions_each": 244,
+      "observer_fault_assertions_each": 3022,
+      "required_ordered_native_checks": 265,
+      "canonical_stage_manifest_sha256": "d0948ad22afc556cf57398c6361326729e2c7afe50b6ce360513d9392f973b8b",
+      "canonical_stage_provenance_sha256": "9e87ddbe5ddb43ecba1edc7d5ac49b5a6bc88a9b56f6adb27c847a9a06738587",
+      "evidence_members": 2785,
+      "evidence_bytes": 104283716,
+      "normal_and_optimized_log_methods": 6,
+      "normal_and_optimized_acceptance_methods": 7,
+      "independent_review_sha256": "7ff29a24487985a1a5dd1c7fb8d827790ace9fc3ab301043b3a806c5e32fdd59",
+      "native_execution": true,
+      "actual_supervisor_exit_verified": false,
+      "full_modern_wasm": false,
+      "standard_browser_webassembly": false,
+      "admission": "ACTUAL_OWNED_NATIVE_COMPONENT_ACCEPTED_VM_STOPPED_LOCK_RELEASED",
+      "owned_qemu_pid": 3404150,
+      "owned_qemu_start_ticks": 2123948,
+      "owned_run": "/root/Win98-Modern-boot/build/shizukudos/csm/run-win98-gop-wasm-numeric-5abe-native-v1",
+      "stage_runtime_profile": "original_v24_not_corrective_memory_v8",
+      "native_ordered_checks": 265,
+      "native_shared_real_engine_checks": 244,
+      "actual_child_pid": 4294877739,
+      "actual_child_full_dword_exit": 0,
+      "stdout_flushed": true,
+      "handles_closed": true,
+      "original_system_crt": true,
+      "complete_x87_boundary": true,
+      "acceptance_sha256": "375493e73d749079e931caae98e8e0c589649cf68e19602fd94927e9fa1a0812",
+      "root_final_twice_readback_sha256": "bab04e8f77b05ad212fbe248433149b437bb10e835959f399146aadee9b8647c",
+      "root_final_twice_checked_paths": 2827,
+      "harness_result_sha256": "05a1ade263a68fad49dae82f6c2d66117e094a91268c10de7ba15d80e0dd408c",
+      "own_vm_running": false,
+      "own_lock_held": false
+    },
+    "wasm_memory_correction": {
+      "status": "v8_frozen_source_root_and_independent_complete_byte_reviews_passed",
+      "ordinary_and_full_sanitizer_project_assertions_each": 386,
+      "ordinary_and_full_sanitizer_original_selected_commands_each": 4641,
+      "old_failures_preserved": true,
+      "guards": [
+        "declared 64KiB pages independent of module grow opcodes",
+        "initial and new-tail zero-fill",
+        "uint64 to32 callback size narrowing rejection",
+        "actual compiler table arena alignment"
+      ],
+      "native_execution": false,
+      "full_modern_wasm": false,
+      "source_commit": "76cb02bc64b27b6359bd012150530b431814e047",
+      "receipt_sha256": "657308666b48175c0369cdac0d3c35f9888d053f7c3038c5625c1ee5209dc5dc",
+      "original_explicit_exclusions": 15,
+      "actual_objects": 98,
+      "actual_build_steps": 235,
+      "full_native_i486_executable_bytes": 156008,
+      "full_native_i486_instructions": 54606,
+      "dll_sha256": "86449b2f95f494ebdecb148ab0a9c76ee5109d59fc8653c6f9f03ca8cb6684eb",
+      "root_baseline_predicates_each": 1237,
+      "root_baseline_observation_copy_only": true,
+      "javascript_integration_preparing": false
+    },
+    "wasm_js_memory_profile": {
+      "source_commit": "a0d2d724e8b70ad7d3e2ad2de2519f3a5d0a62ab",
+      "receipt_sha256": "01ffc91cb052b9c6c7e4c217267b6f8ffc6f447333da46446c3ebb3b2c447307",
+      "root_review_sha256": "445b44dac08036cdf675dc5e2a686925ea240c6d06abca1f52a89469a64a9fd0",
+      "normal_and_full_sanitizer_assertions_each": 622,
+      "original_bridge_predicates_each": 140,
+      "documented_literal_predicate_deltas": 2,
+      "all_other_original_test_bytes_unchanged": true,
+      "actual_original_selected_objects": 116,
+      "actual_fresh_objects": 4,
+      "actual_MMD_dependency_sets": 4,
+      "actual_build_steps": 10,
+      "root_twice_checked_paths": 4574,
+      "actual_reallocation_fault_point_both_initial_pages": 14,
+      "actual_measured_initial_vm_bytes": 201514,
+      "separate_growth_budget_bytes": 299818,
+      "native_execution": false,
+      "standard_browser_webassembly": false,
+      "full_browser_standards": false,
+      "external_toolchain_complete_closure": false
+    },
+    "glsl_frontend": {
+      "status": "DRAFT_UNVERIFIED_SOURCE_FROZEN_FOR_MAIN_PUBLICATION",
+      "audit_sha256": "10f2383dc0e3b296a52bc8ed313782fe758d53c2ff2e54eb1f1b372551a0967f",
+      "isolated_generator_dependency_sha256": "19a1d52bae7228dadb8b0fca20a86fd8d3dc3d563ca9bb0ed9e49c1919917f08",
+      "full_profile_accepted": false,
+      "native_verified": false,
+      "webgl_verified": false,
+      "webgpu_verified": false,
+      "held_source_sha256": "19c47bacfe491a07abeb2d59fdf72f70faf0b9dd0732ece8fae378f2780ae565",
+      "actual_normal_original_glcpp_matches": 608,
+      "full_sanitizer_accepted": false,
+      "typed_profile_accepted": false
+    },
+    "wasm_modern_features_audit": {
+      "receipt_sha256": "4c8eed84646180f0108ee4dd4dc0353a2090060d05e7d061966a78f5e0dd7559",
+      "original_files": 2001,
+      "checked_inputs": 4298,
+      "actual_tu_bindings": 98,
+      "classic_simd_supported": false,
+      "current_eh_supported": false,
+      "relaxed_simd_supported": false,
+      "new_additive_classic_scalar_profile_owner": "wasm_runtime",
+      "implementation_complete": false,
+      "native": false,
+      "browser": false,
+      "full": false,
+      "new_integer_data_simd_profile_status": "SIX_DRAFT_UNVERIFIED_SOURCE_PATHS_FROZEN_FOR_MAIN_PUBLICATION"
+    }
+  },
+  "disk_optimization": {
+    "closed": true,
+    "receipts_independently_rechecked": 20,
+    "unshared_extent_decrease_bytes": 2249388032,
+    "net_filesystem_free_gain_claimed": false,
+    "final_ranges_processed": 44,
+    "final_ranges_planned": 559,
+    "active_native_api_image_skipped": true,
+    "full_range_coverage": false,
+    "original_bytes_preserved": true,
+    "checkpoint_sha256": "013b2e82a903644a2275fb477926052306b5eeedada88617fcf7015b0a2a10da",
+    "followup": {
+      "closed": true,
+      "locks_released": true,
+      "kernel_compared_shared_bytes": 48128000,
+      "source_ranges_completed": 59,
+      "source_ranges_planned": 544,
+      "differing_ranges_refused": 20,
+      "unprocessed_ranges": 485,
+      "all_three_logical_hashes_and_stat_metadata_unchanged": true,
+      "full_range_coverage": false,
+      "net_filesystem_free_gain_claimed": false,
+      "checkpoint_sha256": "ea9a495c3caa92c9542ad06962b5c8ef3d4f09f4b06904e2ff9a1fe021aa2e6b"
+    },
+    "followup_v2": {
+      "status": "REFUSED_CLOSED_NO_MUTATION",
+      "closed_receipt_sha256": "80d2f00ac87910e317963e7badcaa1359ec85e4fae030d709ea00d2ad0b1e241",
+      "new_shared_bytes": 0
+    },
+    "followup_v3": {
+      "status": "BOUNDED_SCOPE_CLOSED_CONTENT_INTEGRITY_PASS_WITH_PARTIAL_ALLOCATION_COVERAGE",
+      "closed": true,
+      "root_closed_two_native_authority_sha256": "a78469cb04b1777f3bf9bfd0def34c864afd0fcbea591c2c837a736c5bbc314d",
+      "actual_recovery_accepted": true,
+      "actual_new_destination_unshared_extent_decrease_bytes": 914931712,
+      "kernel_compared_shared_bytes": 939941888,
+      "already_shared_counter_bytes": 25010176,
+      "processed_ranges": 127,
+      "planned_ranges": 422,
+      "different_destination_ranges_refused": 145,
+      "full_seven_original_and_closed_copy_before_after_hashes_passed": true,
+      "all_raw_stat_fields_preserved": true,
+      "all_owned_locks_released": true,
+      "root_raw_reopened": false,
+      "checkpoint_sha256": "04c83c06be079743738f2644a6db144e24cb19048afbde7727e66290541cbd54",
+      "root_review_sha256": "b4c3216fe26645f661ab7bd8f4e74dd212db2b31a8703d844043e0389d35340c",
+      "net_system_free_delta_attributed": false,
+      "native_compiler_reserve_waived": false
+    }
+  },
+  "publication": {
+    "user_requested": true,
+    "target_branch": "main",
+    "all_current_project_source_requested": true,
+    "remote_upload_complete": false,
+    "main_merge_complete": false,
+    "accepted_historical_source_bindings_remain_branch_specific": true
+  },
+  "draft_source_sha256": {
+    "src/m98_glsl_frontend.h": "f362c468b47291c03bdf39d99b70e228bd07eb157617c525147026385fb63462",
+    "src/m98_glsl_frontend.cpp": "714d06937f7e483ec89203eaf6df9e11bc01d6117692564891f1e9a9596c40cd",
+    "src/m98_glsl_frontend_port.h": "4932602f670bfb4cb180841cd15ca06bb45bcc7cf19d743ef44c2d0b6351c85e",
+    "src/m98_glsl_frontend_port.c": "0e03aea8454fa43207b3dd45f1b13c3055f0ddf41d8e98cf7601866d92323579",
+    "tests/m98_glsl_frontend_host.cpp": "d52698b2f4e08c8f9944e48e07085ddc48334d74b80336d2cd8f15a91fc3d98f",
+    "tools/build_glsl_frontend.py": "8cc9712a2f38814d63cd2a6d85f86b4bd87cf10432628ebad1f3d5948be6eaa3",
+    "profiles/mesa-glsl-es300-frontend-v1.json": "2b7a6c7dbc533eb5547ba34240c526a388eb47a3f249b5d5c64b2adf355a308d",
+    "patches/mesa-26.2.3-glsl-es300-frontend-v1.patch": "ce33accc979d6635f8bac2667e0fefbd04701b8b5f62f9d85f4f5aae466957f1",
+    "docs/TRIDENT_GLSL_FRONTEND.md": "50c1f837c5039baeac0ff5a8c1c0873d2b2c439fec5696d6934df7f59112eed6",
+    "profiles/wasm-i486-simd-v1.json": "b08c4596b7b0bf28484296dedd0f6c598b508897a2ee6c4957339d24fc9352ad",
+    "patches/wamr-f5f57c09-i486-simd-v1.patch": "eae298312541838d8823dbae9efc8389022266f9a8e50a3ddb0e1d15bc0facfc",
+    "tools/build_wasm_simd_profile.py": "6b014fb857347d29c6d1a661402335ddc589c473bd3b01f685e103a115d9d68f",
+    "tests/m98_wasm_simd_host.c": "64b7e0e40d3269511b20f6e90cdf02397f3b07d345aee959a570171b4feca577",
+    "tests/m98_wasm_simd_spec_host.c": "15cbe821436c3c3dd5f89909c5ab8d76abe0950bd7965333bb8e58aafa87c015",
+    "docs/TRIDENT_WASM_SIMD_PROFILE.md": "902aade011a0fb7daae2eeabb635853ad80f1f34de6acae418452d3988f530a7"
   }
 }

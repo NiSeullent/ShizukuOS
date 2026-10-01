@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "repository": "w3c/csswg-drafts",
+  "revision": "f505fd10877a9c915b5d4a4028c2ad83c76d006f",
+  "commit_utc": "2026-09-30T20:17:33Z",
+  "files": {
+    "css-syntax-3/Overview.bs": {
+      "url": "https://raw.githubusercontent.com/w3c/csswg-drafts/f505fd10877a9c915b5d4a4028c2ad83c76d006f/css-syntax-3/Overview.bs",
+      "sha256": "8c56a01265cd95ffb1d63e4868720be25ec509c273684a67552a07e41df2463a",
+      "bytes": 148219
+    },
+    "css-variables-1/Overview.bs": {
+      "url": "https://raw.githubusercontent.com/w3c/csswg-drafts/f505fd10877a9c915b5d4a4028c2ad83c76d006f/css-variables-1/Overview.bs",
+      "sha256": "5c451db91b361068771917b1145d3f36b40159ec46dfc3a029237cb418d668d1",
+      "bytes": 37177
+    },
+    "css-values-5/Overview.bs": {
+      "url": "https://raw.githubusercontent.com/w3c/csswg-drafts/f505fd10877a9c915b5d4a4028c2ad83c76d006f/css-values-5/Overview.bs",
+      "sha256": "e6d5093499619450110a8ce94b39a8fda8960a28c72eac49f1b2fbb051a000fd",
+      "bytes": 205541
+    }
+  },
+  "purpose": "Read-only primary algorithm profile; no scripts executed",
+  "foreign_script_execution": false
+}

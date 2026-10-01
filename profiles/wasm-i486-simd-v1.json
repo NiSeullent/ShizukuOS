@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "kind": "classic-i486-scalar-integer-data-SIMD-subset",
+  "upstream_revision": "f5f57c09aee623436f5fb87a90798fdd2cdf39fd",
+  "memory_profile_receipt_sha256": "657308666b48175c0369cdac0d3c35f9888d053f7c3038c5625c1ee5209dc5dc",
+  "patch": "patches/wamr-f5f57c09-i486-simd-v1.patch",
+  "patch_sha256": "eae298312541838d8823dbae9efc8389022266f9a8e50a3ddb0e1d15bc0facfc",
+  "config_delta": {
+    "M98_WASM_SCALAR_SIMD": 1,
+    "WASM_ENABLE_SIMD": 1,
+    "WASM_ENABLE_SIMDE": 0
+  },
+  "sources": [
+    {
+      "path": "core/iwasm/common/wasm_loader_common.c",
+      "basis_sha256": "135906084ef815e31bc38d0e8fd7db4db8e0a8d4bd4f35d421111e6d935c5536",
+      "patched_sha256": "dc50dd0ee865e7db3b5f542f4794d3ab58dee1d0985bf200936b313dc4a94ed7"
+    },
+    {
+      "path": "core/iwasm/interpreter/wasm_loader.c",
+      "basis_sha256": "cb1ef7e86c683c83cb658c2aec3b2a74dd8ca5327a28fe87e972b910c228e733",
+      "patched_sha256": "c50576015bc34dd0bf6fc0310667e622646a5588f402959cfd08089db837d762"
+    },
+    {
+      "path": "core/iwasm/interpreter/wasm_opcode.h",
+      "basis_sha256": "f490e2617466f37b7dcf96f811218b0a2402196f05b3fb5d1c3ed49ca2a281e2",
+      "patched_sha256": "609d055d3896c086c4d8d391bed6313d183340c44a3c73ef428aa13c1bfcd4ad"
+    },
+    {
+      "path": "core/iwasm/interpreter/wasm_interp_classic.c",
+      "basis_sha256": "7b8612dd18c8860d6fc2227f50f72e3428f29c2d7e5f2dd4bb30f2871af932ab",
+      "patched_sha256": "14199074f9f520e76795d0127ed391ff07ab07595578e2ce265c397eb9080f3a"
+    }
+  ],
+  "supported_secondary_opcodes": [
+    0,
+    11,
+    12,
+    13,
+    14,
+    17,
+    27,
+    28,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    174
+  ],
+  "unsupported_vector_gc_heap": true,
+  "scalar_numeric_boundary_only": true,
+  "full_fixed_simd": false,
+  "relaxed_simd": false,
+  "current_exception_handling": false,
+  "native_execution": false,
+  "browser_js_api": false,
+  "full_modern_wasm": false,
+  "full_modern_js": false,
+  "full_css": false,
+  "webgpu": false,
+  "webgl": false,
+  "modern_apps": false
+}
