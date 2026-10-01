@@ -32,7 +32,6 @@ jobs:
         shell: bash
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      CHECK_OUTPUT: ${{ runner.temp }}/public-distribution
       PUBLIC_ISO_PATH: ${{ inputs.iso_path }}
       PUBLIC_ISO_SHA256: ${{ inputs.iso_sha256 }}
       PUBLIC_ISO_BYTES: ${{ inputs.iso_bytes }}
@@ -51,6 +50,8 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/public-distribution-tests.log"
 
       - name: Check public routes with the installed Chrome and optional ISO
+        env:
+          CHECK_OUTPUT: ${{ runner.temp }}/public-distribution
         # The Ubuntu hosted image must already include Google Chrome.
         # No browser/npm download, certificate bypass, origin override or secret.
         run: |
