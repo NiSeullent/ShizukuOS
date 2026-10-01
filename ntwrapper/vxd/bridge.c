@@ -212,7 +212,11 @@ static int w64_layout_valid(const shz_channel_hdr_t *c, uint32_t channel_id)
     table_bytes = (c->pool_size / SHZ_POOL_BLOCK + 63) & ~UINT64_C(63);
     /* Keep header/owner table, both rings and pool disjoint and in the mapped
      * window. Bound the slot count before the size_t arithmetic above. */
-    return shz_channel_valid(c, SHZ_IPC_REGION_SIZE) &&
+    /* c is only a copied header, never a mapped channel window. The shared
+     * channel validator now also dereferences ring headers, so it cannot run
+     * on this snapshot. Validate its bounded geometry here; OPEN/live check
+     * the actual mapped ring headers separately before any transport use. */
+    return shz_range_ok(c->pool_offset, c->pool_size, SHZ_IPC_REGION_SIZE) &&
            shz_range_ok(sizeof *c, table_bytes, c->ring_ab_offset) &&
            shz_range_ok(c->ring_ab_offset, ring_bytes, c->ring_ba_offset) &&
            shz_range_ok(c->ring_ba_offset, ring_bytes, c->pool_offset);
