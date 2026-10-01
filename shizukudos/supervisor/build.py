@@ -185,7 +185,7 @@ def main():
                for p in guest_kernel_files()},
         },
         "sources_sha256": {str(p.relative_to(REPO)): sha256_file(p) for p in sources},
-        "font": "shizukudos/supervisor/src/font8x8_basic.h (public domain, Daniel Hepper / IBM VGA lineage)",
+        "font": "shizukudos/csmwrap/video/font8x8_basic.h via cp437.c (public-domain ASCII font; documented CP437 approximations)",
     }
     shzlib.write_json(OUT / "build-result.json", receipt)
     print(json.dumps({k: v for k, v in receipt["artifacts"].items()}, indent=2))
