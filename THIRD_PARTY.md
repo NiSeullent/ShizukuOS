@@ -102,6 +102,41 @@ formatting adapter is GPL-2.0-only; native basic math uses explicitly audited
 installed-system CRT exports. Host math and original Windows CRT results require
 separate execution evidence.
 
+## Optional current Wasm execution component
+
+`src/m98_wasm*` and its original build/test adapters are GPL-2.0-only project
+code. The selected interpreter uses official WebAssembly Micro Runtime revision
+`f5f57c09aee623436f5fb87a90798fdd2cdf39fd`, archive SHA256
+`620d40c4c67269f371a46ef4923d398ef96cdf569a7f66e6aab70788e235f907`.
+All 2,001 original regular files, the original archive and the complete
+Apache-2.0 WITH LLVM-exception license remain in private build storage. The
+original exception explicitly discusses GPLv2 combined software; plain
+Apache-2.0 compatibility is not assumed. Prepared portability patches and exact
+original/prepared hashes remain separate. This work publishes no combined binary.
+See `docs/TRIDENT_WASM_RUNTIME.md` for the tested profile and unfinished features.
+
+The selected numeric tests retain official WebAssembly specification sources at
+`bc030375d734de845aa2246b783ca6a7ee865eb4` with their original license and notices.
+Pinned WABT 1.0.42, archive SHA256
+`84895407a6bbb80e918f33b16b2fb2206021c150b6bc9ff6f761263a745ab131`,
+is a host-only fixture compiler with its original license retained. Neither
+foreign test scripts nor a WABT runtime are linked into the Win98 DLL. Exact
+selected tests, exclusions and results are in `docs/TRIDENT_WASM_SPEC_SELECTED.md`.
+
+## Optional Mesa fragment execution component
+
+`src/m98_softpipe_shader*` and the original port/build/test adapters are
+GPL-2.0-only project code. The selected genuine TGSI interpreter/build/parser
+and scalar helpers use official Mesa 26.2.3, archive SHA256
+`1628058a8d2c0615975de5a15ab7bbb9638c50000b5bed9456ff423ea034a81f`.
+The original archive, complete selected source snapshot, MIT and BSL-1.0 license
+texts and applicable per-file notices remain in private build storage. Prepared
+allocation/binding/scalar portability changes preserve the originals separately.
+The pinned enum generator is executed as a build dependency with its exact
+command and output retained. No complete Mesa driver is bundled, and the typed
+TGSI fragment component does not establish GLES, WebGL or WebGPU support.
+See `docs/MESA_SOFTPIPE_PORT_FEASIBILITY.md` and `src/m98_softpipe_HANDOFF.md`.
+
 ## Independent platform path
 
 The original CSS token/variable core retains selected WPT raw fixtures and their
