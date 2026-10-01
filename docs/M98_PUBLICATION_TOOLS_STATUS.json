@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "official_site": "https://m98.nyase.kr",
+  "status": "SOURCE_ONLY_HOLD_FOR_PRIMARY_OWNER",
+  "tools_source_sha256": {
+    "tools/remaster_continuation_iso.py": "548cfd58a94a341d5c463593da087c8646dbd7ca5e95f4eb67c38b5cdf4173f8",
+    "docs/ISO_CONTINUATION_RELEASE.md": "a77f1fd4755321f72c304946f64b181470a74fbeeb970b38731277a743949c50",
+    "tools/publish_m98_continuation.py": "b81d111830fd5a6023822baa29afc62f6a91c9432c286e168bdcef9826699f30",
+    "docs/M98_CONTINUATION_PUBLICATION.md": "22b3984406a8ce051422ca2a83eefa244758b7e73604527884cd5eea331dd7b4"
+  },
+  "verification": {
+    "all_python_ast_parsed": true,
+    "remaster_source_inspection_controls_pass": 11,
+    "publisher_manifest_and_page_controls": "Agent verified; filesystem/origin paths unexecuted",
+    "environment_checker_actual_exit": 2,
+    "environment_checker_missing_cache_and_resource_report_expected": true
+  },
+  "actual_new_iso_remastered": false,
+  "actual_iso_vm_boot_validated": false,
+  "actual_site_switched": false,
+  "actual_origin_or_public_download_verified_by_these_tools": false,
+  "new_github_publication_performed": false,
+  "primary_worktree_modified": false,
+  "full_standards_apps_os_verified": false
+}

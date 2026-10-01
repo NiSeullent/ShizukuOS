@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "kind": "read-only-primary-w2-merge-preservation-review",
+  "status": "CHANGES_REQUIRED",
+  "utc": "2026-10-01T13:47:46.919029+00:00",
+  "primary_worktree": "/root/Win98-Modern-main-integration-20261001",
+  "reference_worktree": "/root/Win98-Modern-publish-20261001",
+  "reference_commit": "257f1e5",
+  "primary_sha256": {
+    "shizukudos/win64/wineport/build.py": "b98b99f0ca30885533e8273b04e7d7d375623820bdcffb28b6e6175bfa6a48a9",
+    "shizukudos/upstream/manifest.json": "d1431eb15ebe581013d63b28089e7d198766a78905ad5a4b317988810a8a5918",
+    "shizukudos/win64/wineport/modules.json": "6bfc56714a6e548cb6d942ffdfaf4ecfc40e2471b0d88eecf8f2e69ad293c530",
+    "shizukudos/win64/trident/comrt/tridentrt.rc": "163d381868519c2518d76527f0b4d70f44c2c9c9ca38058b3c1af8f0fd742076",
+    "shizukudos/win64/tools/verres.py": "46fc68f79d6c901e1404831acb828f31b7cc3fb059d8167f9834312cfd264d66"
+  },
+  "reference_sha256": {
+    "shizukudos/win64/wineport/build.py": "eadeedb3e6165622f4133f738589e2fdd0761978775a159e841023ba89733ea5",
+    "shizukudos/upstream/manifest.json": "77e491dd115d5d9f280bb7d090d3b19a9b1c3e68708081bec8fbb20f1908982f"
+  },
+  "checks": {
+    "python_ast_parses": true,
+    "json_parses": true,
+    "both_0007_0200_patch_entries_present": true,
+    "exact_all_eight_patch_files_listed": true,
+    "makedep_generation_preserved": true,
+    "disabled_probe_output_isolated": true,
+    "source_exclusion_preserved": true,
+    "mk_assigned_in_both_module_branches": true,
+    "rcs_is_only_evaluated_in_plain_branch": true,
+    "no_mk_or_rcs_unbound_scope_finding": true,
+    "generated_version_fallback_all_module_branches_preserved": false,
+    "single_module_resource_object_preserved": false
+  },
+  "findings": [
+    {
+      "priority": 1,
+      "file": "/root/Win98-Modern-main-integration-20261001/shizukudos/win64/wineport/build.py",
+      "line": 967,
+      "title": "Makedep modules skip generated VERSIONINFO fallback",
+      "evidence": "The conditional expression uses literal False for all m.get(\"makedep\") truthy cases. Makedep.resources at lines 858-859 returns None when no resource parts exist and does not add VERSIONINFO to parts that lack RT_VERSION.",
+      "effect": "A makedep module without its own compiled version resource has no generated version resource, so the all-built-images fallback from the reviewed merge resolution is absent.",
+      "minimal_fix": "Restore module_resource_object from 257f1e5; pass filename/description/filetype through Makedep.resources and merge generated fmt=\"res\" only if actual compiled inputs contain no RT_VERSION."
+    },
+    {
+      "priority": 2,
+      "file": "/root/Win98-Modern-main-integration-20261001/shizukudos/win64/wineport/build.py",
+      "line": 964,
+      "title": "Plain module fallback is linked as a separate resource object",
+      "evidence": "Lines 964-965 append each compiled RC COFF object, then line 969 appends generated VERSIONINFO COFF independently. Current tridentrt config supplies tridentrt.rc, which contains STRINGTABLE and no VERSIONINFO/version.rc. The local verres helper explicitly documents that image resources and VERSIONINFO share one resource object.",
+      "effect": "The merge no longer preserves the reviewed single-resource-object path for a real configured module; separate resource directories can collide or lose entries. No artifact execution or native failure was inferred.",
+      "minimal_fix": "Reuse each compiled RC .res, add fallback only if compiled RT_VERSION is absent, and convert the combined resources once; restore only the resource-related diff from 257f1e5."
+    }
+  ],
+  "minimal_proposed_patch": "--- a/shizukudos/win64/wineport/build.py\n+++ b/shizukudos/win64/wineport/build.py\n@@ -680,6 +680,37 @@\n     out.write_bytes(bytes(blob))\n \n \n+def module_resource_object(parts, obj_dir, filename, description, filetype):\n+    \"\"\"One resource object per image; add generated VERSIONINFO only when no compiled input has RT_VERSION.\n+    Checking the compiled records also covers Wine's version.rc includes and generated resources.\"\"\"\n+    import struct\n+    parts = list(parts)\n+    has_version = False\n+    for part in parts:\n+        data, off = part.read_bytes(), 0\n+        while off + 8 <= len(data):\n+            dsize, hsize = struct.unpack_from(\"<II\", data, off)\n+            end = off + hsize + dsize\n+            if hsize < 12 or end > len(data):\n+                raise SystemExit(f\"invalid resource record in {part}\")\n+            if dsize and data[off + 8:off + 12] == b\"\\xff\\xff\\x10\\x00\":\n+                has_version = True\n+            off = (end + 3) & ~3\n+    if not has_version:\n+        parts.append(verres.compile_version(obj_dir, filename, description, filetype, fmt=\"res\"))\n+    combined, obj = obj_dir / \"resources.res\", obj_dir / \"resources_rc.o\"\n+    sig = \"\\n\".join(map(str, parts))\n+    stamp = obj.with_suffix(\".sig\")\n+    if (obj.exists() and stamp.exists() and stamp.read_text() == sig\n+            and all(p.stat().st_mtime <= obj.stat().st_mtime for p in parts)):\n+        return obj\n+    concat_res(parts, combined)\n+    merge_string_tables(combined)\n+    run([WINDRES, \"-J\", \"res\", \"-O\", \"coff\", \"-i\", combined, \"-o\", obj])\n+    stamp.write_text(sig)\n+    return obj\n+\n+\n def ensure_wmc(wine):\n     \"\"\"Wine's message compiler, built with the host compiler into wineport/tools/wmc (the host configuration builds\n     only widl and wrc): tools/wmc sources, mcy.y through bison, wmc_EXTRADEFS. Like makedep's rule for this\n@@ -837,7 +868,7 @@\n             csrcs.append(shim)\n         return csrcs, res\n \n-    def resources(self, sources, widl_res, obj_dir):\n+    def resources(self, sources, widl_res, obj_dir, filename, description, filetype):\n         \"\"\"wrc (-u, makedep's defines) for every .rc that is not a `#pragma makedep header` include, then all .res\n         files (wrc, widl, wmc) merged into one COFF object with windres. No --po-dir, as in makedep's rule for this\n         configuration (po/ is in DISABLED_SUBDIRS, so LINGUAS is empty): the resources are the English ones.\"\"\"\n@@ -855,19 +886,7 @@\n                       *self.m.get(\"defines\", []), rc], [out], [wrc, *deps], cwd=rc.parent)\n             parts.append(out)\n         parts += widl_res\n-        if not parts:\n-            return None\n-        combined, obj = obj_dir / \"resources.res\", obj_dir / \"resources_rc.o\"\n-        sig = \"\\n\".join(map(str, parts))\n-        stamp = obj.with_suffix(\".sig\")\n-        if (obj.exists() and stamp.exists() and stamp.read_text() == sig\n-                and all(p.stat().st_mtime <= obj.stat().st_mtime for p in parts)):\n-            return obj\n-        concat_res(parts, combined)\n-        merge_string_tables(combined)\n-        run([WINDRES, \"-J\", \"res\", \"-O\", \"coff\", \"-i\", combined, \"-o\", obj])\n-        stamp.write_text(sig)\n-        return obj\n+        return module_resource_object(parts, obj_dir, filename, description, filetype)\n \n \n def build_typelib(wine, m):\n@@ -916,6 +935,10 @@\n     notes = {} if notes is None else notes\n     d = wine / m.get(\"dir\", f\"dlls/{name}\")\n     obj_dir = WOUT / \"obj\" / name\n+    suffix = \".exe\" if kind == \"exe\" else \".dll\"\n+    filename = f\"{name}{suffix}\"\n+    description = f\"Wine {filename} (ShizukuDOS port)\"\n+    filetype = verres.VFT_APP if kind == \"exe\" else verres.VFT_DLL\n     # a probe build of a disabled module writes its .def, binary and import library aside, so that the outputs the\n     # enabled configuration makes (and the export lists later modules see) stay as they are\n     out = WOUT / \"probe\" if probe and m.get(\"disabled\") else OUT\n@@ -934,7 +957,7 @@\n         unixcall_obj = obj_dir / \"shzw_unixcall.o\"\n         compile_all([*[(s, o, md.cflags(s.name)) for s, o in zip(srcs, objs)],\n                      (HERE / \"glue/unixcall.c\", unixcall_obj, rt[\"glue_flags\"])])\n-        res_obj = md.resources(sources, widl_res, obj_dir)\n+        res_obj = md.resources(sources, widl_res, obj_dir, filename, description, filetype)\n         objs += [unixcall_obj, *([res_obj] if res_obj else [])]\n     else:\n         mk = makefile_vars(d / \"Makefile.in\") if (d / \"Makefile.in\").exists() else {}\n@@ -961,13 +984,10 @@\n         compile_all([*zip(srcs, objs, [flags] * len(srcs)), *zip(usrcs, uobjs, [uflags] * len(usrcs)),\n                      (HERE / \"glue/unixcall.c\", unixcall_obj, ucflags)])\n         objs += [*uobjs, unixcall_obj]\n-        for rc in rcs:\n-            objs.append(compile_rc(wine, rc, obj_dir / (rc.stem + \"_rc.o\"), includes, defines))\n-\n-    if not any(\"VERSIONINFO\" in rc.read_text() or \"version.rc\" in rc.read_text() for rc in rcs) if not m.get(\"makedep\") else False:\n-        suffix = \".exe\" if kind == \"exe\" else \".dll\"\n-        objs.append(verres.compile_version(obj_dir, f\"{name}{suffix}\", f\"Wine {name}{suffix} (ShizukuDOS port)\",\n-                                           verres.VFT_APP if kind == \"exe\" else verres.VFT_DLL))\n+        parts = [compile_rc(wine, rc, obj_dir / (rc.stem + \"_rc.o\"), includes, defines).with_suffix(\".res\")\n+                 for rc in rcs]\n+        objs.append(module_resource_object(parts, obj_dir, filename, description, filetype))\n+\n     if m.get(\"dynamic_imports\"):\n         s = dynamic_thunks(name, m[\"dynamic_imports\"], obj_dir / \"dynimports.S\")\n         o = obj_dir / \"dynimports.o\"\n@@ -1008,7 +1028,6 @@\n         dll, _, fn = target.partition(\".\")\n         return fn in provided.get(dll.lower(), set())\n \n-    suffix = \".exe\" if kind == \"exe\" else \".dll\"\n     lines, kept = winespec.def_lines(f\"{name}{suffix}\", entries, forward_ok)\n     private = {winespec.def_name(e) for e in kept if \"private\" in e.flags}\n     lines = [l + (\" PRIVATE\" if l.split()[0] in private else \"\") if l.startswith(\"  \") else l for l in lines]\n",
+  "authority_limits": {
+    "primary_files_modified": false,
+    "git_index_modified": false,
+    "repository_scripts_executed": false,
+    "builds_tests_vm_executed": false,
+    "network_used": false,
+    "runtime_resource_failure_claimed": false,
+    "full_goal_complete": false
+  },
+  "primary_bytes_reread_unchanged": true,
+  "official_publication_url": "https://m98.nyase.kr",
+  "new_github_push_pr_release_authorized": false,
+  "separate_patch_proposal": {
+    "path": "/root/Win98-Modern-theme-tls-5abe/build/publication-20261001/primary-w2-resource-fix.patch",
+    "sha256": "c59a79dbc11e0ba27105ad4278d348d8104a1457c10c8768b97ffd627c9a4689",
+    "base_source_sha256": "0bed8ccb89b33df1cb3a984cac2f1ea65e3f5f2a1a75cfc4718bce11d56984ff",
+    "proposed_source_sha256": "eadeedb3e6165622f4133f738589e2fdd0761978775a159e841023ba89733ea5",
+    "prior_audit_source_sha256": "b98b99f0ca30885533e8273b04e7d7d375623820bdcffb28b6e6175bfa6a48a9",
+    "primary_change_since_initial_audit": "Only line 967 normalized equivalent conditional expression to short-circuit and; both findings persist.",
+    "in_memory_unified_patch_applied": true,
+    "in_memory_python_ast_parses": true,
+    "all_nonresource_top_level_functions_unchanged": true,
+    "all_other_makedep_methods_unchanged": true,
+    "legacy_and_makedep_single_resource_object_callers_verified": true,
+    "primary_base_bytes_reread_unchanged_after_verification": true,
+    "patch_applied_to_primary": false,
+    "build_or_runtime_acceptance": false,
+    "previous_review_record_sha256": "bbd847b18fbf97ea084408b62b87c5b2540469f3d034b67c9c3863bfcd7c19bb",
+    "updated_utc": "2026-10-01T13:51:10.954802+00:00"
+  }
+}
