@@ -41,7 +41,7 @@
   "cpu_parser_controls": {
     "tests": 3,
     "adversarial_cases_within_tests": true,
-    "log_sha256": "ce2c9776c47071751fe695215331f608fab3c9a270e907b27765ef11070e301d"
+    "log_sha256": "9c455bbb1b346a0f27ad32e4bf93424666a69b5900130a0d6279538ae3c2d077"
   },
   "artifacts": {
     "M98THEME.DLL": {
