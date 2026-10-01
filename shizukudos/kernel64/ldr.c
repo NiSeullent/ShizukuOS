@@ -61,6 +61,8 @@
 #include "fs.h"
 #include "kwin.h"
 #include "apiset.h"
+#include "ldr_lifetime.h"
+#include "../win64/include/shz_loader_protocol.h"
 #include "../win64/pe_parse.h"
 
 #define SYS64_DIR "\\SHZ\\SYS64"
@@ -87,6 +89,7 @@ typedef struct { uint32_t page, count; uint64_t off; } reloc_block_t;   /* one .
 
 /* A lazily mapped (disk-backed) image: its VK_IMAGE descriptors point here and ldr_image_fault() fills their pages. */
 typedef struct image_map {
+    shz_ldr_image_life_t life;           /* module owner plus active, possibly blocked, page-ins */
     fsnode_t *node;                     /* the file */
     kview_t *view;                      /* its kernel view (parser, relocation blocks) */
     const uint8_t *file;                /* view->base */
@@ -102,6 +105,7 @@ typedef struct image_map {
 
 typedef struct module {
     struct module *next;
+    shz_ldr_life_t life;                /* explicit references, startup/pin roots and import edges */
     char name[64];                      /* lowercase base name, e.g. "kernel32.dll" */
     char path[PATH_CAP];
     char dir[PATH_CAP];                 /* directory of `path` (no trailing backslash) */
@@ -110,7 +114,7 @@ typedef struct module {
     image_map_t *img;                   /* lazily mapped (disk-backed) image, else NULL */
     pe_info_t info;
     uint64_t base;
-    int state;                          /* 0 loading, 1 mapped and linked */
+    int state;                          /* 0 loading, 1 mapped and linked, 2 prepared for retirement */
     int is_dll;
     int has_tls;
     uint32_t tls_index, tls_align;
@@ -119,7 +123,55 @@ typedef struct module {
     uint32_t init_seq;
     uint32_t delay_imports;             /* thunks in the (validated) delay-load directory */
     int published;
+    uint64_t entry_va;                  /* actual published PEB loader entry (batch storage retained) */
 } module_t;
+
+typedef struct {
+    uint64_t token, owner_tid;
+    unsigned count;
+    module_t *nodes[];                  /* reverse dependency-completion order */
+} ldr_retirement_t;
+
+static void image_metadata_free(image_map_t *im)
+{
+    kfree(im->blocks);
+    kfree(im);
+}
+
+static void image_owner_retire(image_map_t *im)
+{
+    uint64_t f;
+    int release;
+    if (!im) return;
+    f = irq_save();
+    release = shz_ldr_image_retire(&im->life);
+    irq_restore(f);
+    if (release) image_metadata_free(im);
+}
+
+static void module_edges_free(module_t *m)
+{
+    shz_ldr_edge_t *e = m->life.edges;
+    while (e) { shz_ldr_edge_t *next = e->next; kfree(e); e = next; }
+    m->life.edges = 0;
+}
+
+static void module_life_links(process_t *p)
+{
+    module_t *m;
+    for (m = p->modules; m; m = m->next) m->life.next = m->next ? &m->next->life : 0;
+}
+
+static int32_t module_edge(module_t *from, module_t *to)
+{
+    shz_ldr_edge_t *e;
+    if (to->life.retiring) return STATUS_DLL_NOT_FOUND;
+    if (from == to || shz_ldr_life_has_edge(&from->life, &to->life)) return STATUS_SUCCESS;
+    e = kzalloc(sizeof *e);
+    if (!e) return STATUS_NO_MEMORY;
+    e->to = &to->life; e->next = from->life.edges; from->life.edges = e;
+    return STATUS_SUCCESS;
+}
 
 /* The first (deepest) failure of one load request; printed once by the entry point that started the request. */
 typedef struct {
@@ -589,13 +641,24 @@ static void relocate_page(image_map_t *im, uint64_t page_rva, uint8_t *pg, uint3
 
 int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr)
 {
-    image_map_t *im = v->img;
-    const uint64_t va = addr & ~(PAGE_SIZE - 1), rva = va - im->base;
-    const pe_info_t *o = &im->info;
+    image_map_t *im;
+    const uint64_t va = addr & ~(PAGE_SIZE - 1);
+    uint64_t rva, flags;
+    const pe_info_t *o;
+    int32_t result = 0;
     uint64_t pa, file_off = 0, n = 0, done = 0;
     uint8_t *pg;
     unsigned i;
-    if (va < im->base || rva >= o->size_of_image) return STATUS_ACCESS_VIOLATION;
+    flags = irq_save();
+    im = v->img;
+    if (p->teardown || !im || shz_ldr_image_acquire(&im->life)) {
+        irq_restore(flags);
+        return STATUS_ACCESS_VIOLATION;
+    }
+    irq_restore(flags);
+    rva = va - im->base;
+    o = &im->info;
+    if (va < im->base || rva >= o->size_of_image) { result = STATUS_ACCESS_VIOLATION; goto done; }
     if (rva < ((o->size_of_headers + 4095ull) & ~4095ull)) {       /* headers */
         file_off = rva;
         n = o->size_of_headers - rva < PAGE_SIZE ? o->size_of_headers - rva : PAGE_SIZE;
@@ -615,29 +678,36 @@ int ldr_image_fault(process_t *p, vad_t *v, uint64_t addr)
         }
     }
     pa = pmm_alloc();                                               /* zeroed: bss tails and gaps read as zero */
-    if (!pa) return STATUS_NO_MEMORY;
+    if (!pa) { result = STATUS_NO_MEMORY; goto done; }
     pg = (uint8_t *)p2v(pa);
     if (n && (fs_read(im->node, file_off, pg, n, &done) || done != n)) {
         pmm_free(pa);
         kprintf("K64 ldr: %s: page rva %llx: read of %llu bytes at file offset %llx failed\n", im->name, rva, n, file_off);
-        return STATUS_IN_PAGE_ERROR;
+        result = STATUS_IN_PAGE_ERROR; goto done;
     }
     if (im->delta && im->nblocks) {
         const uint64_t before = im->relocs_applied;
         relocate_page(im, rva, pg, (uint32_t)rva);
         if (rva) relocate_page(im, rva, pg, (uint32_t)(rva - PAGE_SIZE));   /* DIR64/HIGHLOW straddling in */
         if (im->relocs_applied != before) ++im->reloc_pages;
-        if (im->view->io_errors) { pmm_free(pa); return STATUS_IN_PAGE_ERROR; }
+        if (im->view->io_errors) { pmm_free(pa); result = STATUS_IN_PAGE_ERROR; goto done; }
     }
     /* The reads may have blocked (volume mutex): another thread of the process may have faulted the page in, or changed
      * or freed the range (the descriptor array can even have been reallocated), so look the descriptor up again. */
-    if (vm_lookup(p->pml4, va, 0)) { pmm_free(pa); return 0; }
+    flags = irq_save();
     v = vad_find(p, va);
-    if (!v || v->img != im || v->state != VAD_COMMITTED) { pmm_free(pa); return STATUS_ACCESS_VIOLATION; }
-    if (vm_map(p->pml4, va, pa, prot_to_ptflags(v->prot))) { pmm_free(pa); return STATUS_NO_MEMORY; }
-    ++im->pages_in;
-    im->bytes_read += n;
-    return 0;
+    if (p->teardown || im->life.retired || !v || v->img != im || v->state != VAD_COMMITTED) {
+        pmm_free(pa); result = STATUS_ACCESS_VIOLATION;
+    } else if (vm_lookup(p->pml4, va, 0)) pmm_free(pa);
+    else if (vm_map(p->pml4, va, pa, prot_to_ptflags(v->prot))) { pmm_free(pa); result = STATUS_NO_MEMORY; }
+    else { ++im->pages_in; im->bytes_read += n; }
+    irq_restore(flags);
+done:
+    flags = irq_save();
+    { int release = shz_ldr_image_release(&im->life);
+      irq_restore(flags);
+      if (release) image_metadata_free(im); }
+    return result;
 }
 
 /* ---------------------------------------------------------------- mapping */
@@ -841,9 +911,10 @@ static int32_t resolve_export(ldr_ctx_t *c, module_t *m, const char *sym, int or
             int ord = 0;
             for (q = 1; fn[q] >= '0' && fn[q] <= '9' && ord < 65536; ++q) ord = ord * 10 + (fn[q] - '0');
             if (fn[q] || q == 1) return fail(c, STATUS_INVALID_IMAGE_FORMAT, m->name, "", 0, fwd, "malformed forwarder");
-            return resolve_export(c, target, 0, ord, depth + 1, va);
-        }
-        return resolve_export(c, target, fn, -1, depth + 1, va);
+            st = resolve_export(c, target, 0, ord, depth + 1, va);
+        } else st = resolve_export(c, target, fn, -1, depth + 1, va);
+        if (!st) st = module_edge(m, target);
+        return st;
     }
 }
 
@@ -887,6 +958,7 @@ static int import_cb(void *ctx, const char *dll, const char *name, uint16_t hint
             c->import_func = by_ord ? 0 : name;
             fmt_dec(c->import_ord, sizeof c->import_ord, "#", hint);
             st = resolve_export(c, target, name, by_ord ? hint : -1, 0, &va);
+            if (!st) st = module_edge(x->m, target);
         }
         if (st && is_api) annotate_apiset(c, x->m->name, dll, host);
     }
@@ -996,6 +1068,7 @@ static int32_t load_module_file(ldr_ctx_t *c, const char *name, fsnode_t *node, 
         kview_t *v = kview_get(node);
         if (v) m->img = kzalloc(sizeof *m->img);
         if (!v || !m->img) { kfree(m); return fail(c, STATUS_NO_MEMORY, name, "", 0, "", "no file view for the image"); }
+        m->img->life.refs = 1;
         m->img->node = node;
         m->img->view = v;
         m->img->file = (const uint8_t *)v->base;
@@ -1024,6 +1097,7 @@ static int32_t load_module_file(ldr_ctx_t *c, const char *name, fsnode_t *node, 
     m->is_dll = (m->info.characteristics & PE_CHAR_DLL) != 0;
     m->state = 0;
     m->next = p->modules;
+    m->life.next = m->next ? &m->next->life : 0;
     p->modules = m;                                             /* visible while loading: circular imports terminate */
     st = map_module(c, m);
     if (st) return st;
@@ -1042,7 +1116,11 @@ static int32_t load_dll(ldr_ctx_t *c, const char *name, int system_only, int dep
     fsnode_t *node;
     base_name(name, key, sizeof key);
     m = find_module(c->p, key);
-    if (m) { if (out) *out = m; return STATUS_SUCCESS; }
+    if (m) {
+        if (m->life.retiring) return fail(c, STATUS_DLL_NOT_FOUND, 0, key, 0, 0, "DLL is being unloaded");
+        if (out) *out = m;
+        return STATUS_SUCCESS;
+    }
     if (depth > MAX_DEPTH) return fail(c, STATUS_DLL_NOT_FOUND, 0, key, 0, 0, "import nesting deeper than 24 levels");
     node = locate_file(c, name, system_only, path, sizeof path);
     if (!node) return fail(c, STATUS_DLL_NOT_FOUND, 0, key, 0, 0, has_path(name) ? "file not found" : "DLL not found");
@@ -1050,6 +1128,19 @@ static int32_t load_dll(ldr_ctx_t *c, const char *name, int system_only, int dep
 }
 
 /* Unmaps and forgets every module added after `mark` (the head of the list when the failed request started). */
+static void module_incoming_remove(process_t *p, module_t *target)
+{
+    module_t *m;
+    for (m = p->modules; m; m = m->next) {
+        shz_ldr_edge_t **pp = &m->life.edges;
+        while (*pp) {
+            shz_ldr_edge_t *e = *pp;
+            if (e->to == &target->life) { *pp = e->next; kfree(e); }
+            else pp = &e->next;
+        }
+    }
+}
+
 static void rollback(process_t *p, module_t *mark, unsigned tls_mark)
 {
     while (p->modules && p->modules != mark) {
@@ -1059,9 +1150,12 @@ static void rollback(process_t *p, module_t *mark, unsigned tls_mark)
             uint64_t b = m->base, sz = 0;
             vad_free(p, &b, &sz, MEM_RELEASE);
         }
-        if (m->img) { kfree(m->img->blocks); kfree(m->img); }
+        module_incoming_remove(p, m);
+        module_edges_free(m);
+        image_owner_retire(m->img);
         kfree(m);
     }
+    module_life_links(p);
     p->tls_slots = tls_mark;
 }
 
@@ -1077,11 +1171,13 @@ void ldr_release_modules(process_t *p)
                     "pages, %llu fixups); file view %llu of %llu pages\n", m->name, p->pid, m->img->pages_in,
                     m->info.size_of_image / 4096, m->img->bytes_read, m->img->reloc_pages, m->img->relocs_applied,
                     m->img->view->resident, m->img->view->npages);
-            kfree(m->img->blocks);
-            kfree(m->img);
+            image_owner_retire(m->img);
         }
+        module_edges_free(m);
         kfree(m);
     }
+    kfree(p->ldr_retirement);
+    p->ldr_retirement = 0;
     p->modules = 0;
 }
 
@@ -1128,7 +1224,7 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
     memcpy(entry + 0x48, &uf, 16);
     memcpy(entry + 0x58, &ub, 16);
     *(uint32_t *)(entry + 0x68) = (m->is_dll ? LDR_IMAGE_DLL : 0) | (in_init_list ? LDR_NEEDS_INIT : 0);
-    *(uint16_t *)(entry + 0x6c) = 1;                         /* load count */
+    *(uint16_t *)(entry + 0x6c) = m->life.root || m->life.pinned ? 0xffff : (uint16_t)m->life.refs;                         /* load count */
     *(uint16_t *)(entry + 0x6e) = m->has_tls ? (uint16_t)m->tls_index : 0xffff;
     if (uwrite(p, entry_va, entry, sizeof entry) || uwrite(p, strings_va, wfull, nf * 2 + 2) ||
         uwrite(p, strings_va + LDR_BASENAME_OFF, wbase, nb * 2 + 2))
@@ -1137,6 +1233,7 @@ static int publish_module(process_t *p, module_t *m, uint64_t entry_va, uint64_t
         return -1;
     if (in_init_list && !is_exe && list_append(p, p->ldr_va + 0x30, entry_va + 0x20)) return -1;
     m->published = 1;
+    m->entry_va = entry_va;
     return 0;
 }
 
@@ -1171,6 +1268,7 @@ static int32_t publish_all(process_t *p, module_t *exe)
     if (!order) return STATUS_NO_MEMORY;
     for (m = p->modules; m; m = m->next)
         if (!m->published && m->state == 1) order[n++] = m;
+    if (!n) { kfree(order); return STATUS_SUCCESS; }
     /* sort ascending by init_seq (dependency completion order) */
     for (i = 0; i < n; ++i)
         for (j = i + 1; j < n; ++j)
@@ -1464,6 +1562,7 @@ static int32_t ldr_create_process_body(process_t *parent, const char *image_path
                   "the executable has no entry point");
         goto report_failed;
     }
+    { module_t *root; for (root = p->modules; root; root = root->next) root->life.root = 1; }
     st = publish_all(p, exe);
     if (st) goto failed;
     if (build_params(p, image_path, cmdline, cwd, ex, std_h)) { st = STATUS_NO_MEMORY; goto failed; }
@@ -1517,7 +1616,7 @@ int32_t ldr_load_module_runtime(process_t *p, const char *name, uint32_t flags, 
     module_t *m = 0, *mark;
     unsigned tls_mark;
     int32_t st;
-    int is_api;
+    int is_api, added_ref = 0;
     ldr_ctx_t *c = kzalloc(sizeof *c);
     if (!c) return STATUS_NO_MEMORY;
     if ((flags & LLF_SEARCH_DLL_LOAD_DIR) && !(name[0] == '\\' || (name[0] && name[1] == ':'))) {
@@ -1546,19 +1645,174 @@ int32_t ldr_load_module_runtime(process_t *p, const char *name, uint32_t flags, 
         st = load_dll(c, is_api ? host : name, is_api, 0, &m);
         if (st && is_api) annotate_apiset(c, "LoadLibrary", nm, host);
     }
+    if (!st) {
+        if (m->life.refs >= 0xfffeu || shz_ldr_life_addref(&m->life, 0)) st = STATUS_NO_MEMORY;
+        else added_ref = 1;
+    }
     if (!st) st = publish_all(p, 0);
     if (st) {
+        if (added_ref) --m->life.refs;
         report(c, nm, st);
         rollback(p, mark, tls_mark);
         mutex_unlock(&p->ldr_lock);
         kfree(c);
         return st;
     }
+    { uint16_t count = m->life.root || m->life.pinned ? 0xffff : (uint16_t)m->life.refs;
+      if (m->entry_va) uwrite(p, m->entry_va + 0x6c, &count, 2); }
     tls_extend_threads(p, tls_mark);
     mutex_unlock(&p->ldr_lock);
     kfree(c);
     *base_out = m->base;
     return STATUS_SUCCESS;
+}
+
+/* ---------------------------------------------------------------- dynamic lifetime
+ * Startup images are roots. LoadLibrary/AddRef own explicit references; eager
+ * imports and forwarded exports own unique graph edges. No kernel mutex spans
+ * user callbacks: PREPARE reserves a set and COMMIT alone releases its images.
+ * Static TLS retirement is explicitly unsupported in this first bounded port.
+ */
+static int module_loadcount(process_t *p, module_t *m)
+{
+    uint16_t count = m->life.root || m->life.pinned ? 0xffff : (uint16_t)m->life.refs;
+    return m->entry_va ? uwrite(p, m->entry_va + 0x6c, &count, sizeof count) : 0;
+}
+
+static int module_lists_valid(process_t *p, module_t *m)
+{
+    unsigned i;
+    vad_t *v = vad_find(p, m->base);
+    if (!m->published || !m->entry_va || !v || v->alloc_base != m->base || v->kind == VK_VIEW) return -1;
+    for (i = 0; i < 3; ++i) {
+        uint64_t at = m->entry_va + i * 16, fl, bl, back;
+        if (uread64(p, at, &fl) || uread64(p, at + 8, &bl) ||
+            uread64(p, fl + 8, &back) || back != at || uread64(p, bl, &back) || back != at) return -1;
+    }
+    return 0;
+}
+
+static int module_lists_unlink(process_t *p, module_t *m)
+{
+    unsigned i;
+    for (i = 0; i < 3; ++i) {
+        uint64_t at = m->entry_va + i * 16, fl, bl;
+        if (uread64(p, at, &fl) || uread64(p, at + 8, &bl) ||
+            uwrite64(p, bl, fl) || uwrite64(p, fl + 8, bl) ||
+            uwrite64(p, at, at) || uwrite64(p, at + 8, at)) return -1;
+    }
+    return 0;
+}
+
+int32_t ldr_lifetime_control(process_t *p, uint64_t op, uint64_t base, uint64_t out, uint64_t capacity)
+{
+    module_t *m, *root = 0;
+    unsigned total = 0, count = 0, i, j, dropped = 0;
+    ldr_retirement_t *tx = 0;
+    shz_ldr_retire_buffer *buffer = 0;
+    int32_t st = STATUS_SUCCESS;
+    if (op > SHZ_LDR_PREPARE || (op == SHZ_LDR_PREPARE && capacity > SHZ_LDR_RETIRE_MAX)) return STATUS_INVALID_PARAMETER;
+    mutex_lock(&p->ldr_lock);
+    for (m = p->modules; m; m = m->next) { if (m->base == base) root = m; ++total; }
+    if (!root || root->state != 1 || root->life.retiring) { st = STATUS_DLL_NOT_FOUND; goto done; }
+    if (op != SHZ_LDR_PREPARE) {
+        uint32_t refs_before = root->life.refs;
+        unsigned pin_before = root->life.pinned;
+        if (op == SHZ_LDR_ADDREF && root->life.refs >= 0xfffeu) { st = STATUS_NO_MEMORY; goto done; }
+        if (shz_ldr_life_addref(&root->life, op == SHZ_LDR_PIN)) { st = STATUS_INVALID_PARAMETER; goto done; }
+        if (module_loadcount(p, root)) {
+            root->life.refs = refs_before; root->life.pinned = pin_before;
+            st = STATUS_ACCESS_VIOLATION;
+        }
+        goto done;
+    }
+    if (p->ldr_retirement) { st = STATUS_NOT_SUPPORTED; goto done; } /* recursive retirement cannot duplicate callbacks */
+    if (!root->life.refs && !root->life.root && !root->life.pinned) { st = STATUS_INVALID_PARAMETER; goto done; }
+    if (total > SHZ_LDR_RETIRE_MAX || p->ldr_retire_sequence == UINT64_MAX) { st = STATUS_NOT_SUPPORTED; goto done; }
+    tx = kzalloc(sizeof *tx + (uint64_t)total * sizeof *tx->nodes);
+    buffer = kzalloc(sizeof *buffer + (uint64_t)total * sizeof *buffer->Entries);
+    if (!tx || !buffer) { st = STATUS_NO_MEMORY; goto done; }
+    if (root->life.refs) { --root->life.refs; dropped = 1; }
+    shz_ldr_life_mark(&((module_t *)p->modules)->life);
+    for (m = p->modules; m; m = m->next) {
+        if (m->life.reachable || m->state != 1) continue;
+        /* Existing per-thread TLS arrays and templates have shared allocation
+         * ownership. Do not fabricate safe reclamation or silently pin them. */
+        if (m->has_tls) { st = STATUS_NOT_SUPPORTED; goto restore; }
+        if (module_lists_valid(p, m)) { st = STATUS_ACCESS_VIOLATION; goto restore; }
+        { uint32_t flags;
+          if (kread(p, m->entry_va + 0x68, &flags, sizeof flags)) { st = STATUS_ACCESS_VIOLATION; goto restore; }
+          if (flags & 0x80000001u) { st = STATUS_NOT_SUPPORTED; goto restore; } } /* init pending or callback active */
+        tx->nodes[count++] = m;
+    }
+    if (count > capacity) { st = STATUS_BUFFER_TOO_SMALL; goto restore; }
+    for (i = 0; i < count; ++i)
+        for (j = i + 1; j < count; ++j)
+            if (tx->nodes[j]->init_seq > tx->nodes[i]->init_seq) { m = tx->nodes[i]; tx->nodes[i] = tx->nodes[j]; tx->nodes[j] = m; }
+    tx->count = count;
+    tx->owner_tid = thread_current()->tid;
+    tx->token = count ? p->ldr_retire_sequence + 1 : 0;
+    buffer->Token = tx->token; buffer->Count = count;
+    for (i = 0; i < count; ++i) buffer->Entries[i] = tx->nodes[i]->entry_va;
+    if (copy_to_user(p, out, buffer, sizeof *buffer + (uint64_t)count * sizeof *buffer->Entries)) {
+        st = STATUS_ACCESS_VIOLATION; goto restore;
+    }
+    if (module_loadcount(p, root)) { st = STATUS_ACCESS_VIOLATION; goto restore; }
+    if (count) {
+        for (i = 0; i < count; ++i) { tx->nodes[i]->life.retiring = 1; tx->nodes[i]->state = 2; }
+        p->ldr_retire_sequence = tx->token;
+        p->ldr_retirement = tx;
+        tx = 0;
+    }
+    goto done;
+restore:
+    if (dropped) ++root->life.refs;
+    module_loadcount(p, root);
+done:
+    kfree(buffer); kfree(tx);
+    mutex_unlock(&p->ldr_lock);
+    return st;
+}
+
+int32_t ldr_lifetime_commit(process_t *p, uint64_t token)
+{
+    ldr_retirement_t *tx;
+    unsigned i;
+    int32_t st = STATUS_SUCCESS;
+    mutex_lock(&p->ldr_lock);
+    tx = p->ldr_retirement;
+    if (!tx || !token || token != tx->token || tx->owner_tid != thread_current()->tid) {
+        st = STATUS_INVALID_PARAMETER; goto done;
+    }
+    /* Callbacks may have appended unrelated modules. Revalidate actual links
+     * before the first irreversible unlink; never accept caller-supplied lists. */
+    for (i = 0; i < tx->count; ++i)
+        if (tx->nodes[i] && module_lists_valid(p, tx->nodes[i])) { st = STATUS_ACCESS_VIOLATION; goto done; }
+    for (i = 0; i < tx->count; ++i) {
+        module_t *m = tx->nodes[i], **pp;
+        uint64_t f, base, size = 0;
+        if (!m) continue;
+        base = m->base;
+        if (module_lists_unlink(p, m)) { st = STATUS_ACCESS_VIOLATION; goto done; }
+        st = vad_free(p, &base, &size, MEM_RELEASE);
+        if (st) goto done;                  /* real failure is not an unload success */
+        f = irq_save();
+        for (pp = (module_t **)&p->modules; *pp && *pp != m; pp = &(*pp)->next) {}
+        if (*pp) *pp = m->next;
+        irq_restore(f);
+        module_life_links(p);
+        module_incoming_remove(p, m);
+        module_edges_free(m);
+        image_owner_retire(m->img);
+        kfree(m);
+        tx->nodes[i] = 0;
+    }
+    module_life_links(p);
+    p->ldr_retirement = 0;
+    kfree(tx);
+done:
+    mutex_unlock(&p->ldr_lock);
+    return st;
 }
 
 uint64_t ldr_module_export(process_t *p, uint64_t base, const char *symbol, uint64_t ordinal)

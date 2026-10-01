@@ -1,0 +1,362 @@
+E1 proposal 2/2: bring-up diagnostics
+
+shz.exctrace: first occurrence of every failing system call (by name and status) and every NtCreateFile/NtOpenFile with its
+path and status; shz.k32trace: ExitProcess/TerminateProcess(self) caller and return addresses, failed CreateFileW,
+CreateNamedPipeW and CreateProcessW with their paths and errors; autorun control file: env=NAME=VALUE lines.
+
+
+diff --git a/shizukudos/kernel64/autorun.c b/shizukudos/kernel64/autorun.c
+index a5e493d..f6445ee 100644
+--- a/shizukudos/kernel64/autorun.c
++++ b/shizukudos/kernel64/autorun.c
+@@ -9,6 +9,7 @@
+  *   cmdline=chrome.exe --headless ...        command line (default: the image path)
+  *   cwd=D:\chrome-win                        current directory (default: the image's directory)
+  *   timeout=900                              seconds before the process is terminated (default 600)
++ *   env=NAME=VALUE                           one extra environment variable (repeatable, 511 bytes in all)
+  * The kernel prints "K64 autorun: ..." lines (start, periodic heartbeat with the process' CPU and memory counters, and the
+  * final exit code / fault / timeout) that the host runner parses. Nothing here decides success: the runner checks the
+  * program's own output.
+@@ -58,6 +59,20 @@ static void copy_value(char *dst, size_t cap, const char *src, size_t n)
+     dst[i] = 0;
+ }
+ 
++/* Extra environment variables of the autorun process, from `env=NAME=VALUE` lines of the control file, as "N=V\0N=V\0" (the loader
++ * appends them to the default environment of the process it creates; ldr.c build_params). Empty outside an autorun. */
++char k64_autorun_env[512];
++
++static void add_env(const char *v, size_t vl)
++{
++    size_t used = 0;
++    while (used < sizeof k64_autorun_env - 1 && k64_autorun_env[used]) used += strlen(k64_autorun_env + used) + 1;
++    if (!vl || used + vl + 2 > sizeof k64_autorun_env) return;
++    memcpy(k64_autorun_env + used, v, vl);
++    k64_autorun_env[used + vl] = 0;
++    k64_autorun_env[used + vl + 1] = 0;
++}
++
+ void k64_autorun(void)
+ {
+     char ctl[128], image[200], cmdline[512], cwd[160];
+@@ -93,6 +108,7 @@ void k64_autorun(void)
+             if (kl == 5 && !strncmp(k, "image", 5)) copy_value(image, sizeof image, v, vl);
+             else if (kl == 7 && !strncmp(k, "cmdline", 7)) copy_value(cmdline, sizeof cmdline, v, vl);
+             else if (kl == 3 && !strncmp(k, "cwd", 3)) copy_value(cwd, sizeof cwd, v, vl);
++            else if (kl == 3 && !strncmp(k, "env", 3)) add_env(v, vl);
+             else if (kl == 7 && !strncmp(k, "timeout", 7)) {
+                 uint64_t s = 0, j;
+                 for (j = 0; j < vl && v[j] >= '0' && v[j] <= '9'; ++j) s = s * 10 + (uint64_t)(v[j] - '0');
+@@ -111,6 +127,7 @@ void k64_autorun(void)
+     kprintf("K64 autorun: starting %s (cwd %s, timeout %u s)\n", image, cwd, (unsigned)timeout_s);
+     kprintf("K64 autorun: command line: %s\n", cmdline[0] ? cmdline : image);
+     st = ldr_create_process(0, image, cmdline[0] ? cmdline : image, cwd, &p, &t);
++    k64_autorun_env[0] = 0;                               /* consumed: later kernel-created processes get the default environment */
+     if (st) {
+         kprintf("K64 autorun: process creation failed, status %x\n", (uint32_t)st);
+         kprintf("K64 autorun: result start-failed status=%x\n", (uint32_t)st);
+diff --git a/shizukudos/kernel64/ldr.c b/shizukudos/kernel64/ldr.c
+index d803134..e8dbcdc 100644
+--- a/shizukudos/kernel64/ldr.c
++++ b/shizukudos/kernel64/ldr.c
+@@ -1278,6 +1278,8 @@ static uint64_t put_wraw(process_t *p, uint64_t at, const uint16_t *s, uint32_t
+     return at + chars * 2ull + 2;
+ }
+ 
++extern char k64_autorun_env[512];
++
+ static int build_params(process_t *p, const char *image, const char *cmdline, const char *cwd, const ldr_create_ex_t *ex,
+                         const uint32_t std_h[3])
+ {
+@@ -1301,6 +1303,10 @@ static int build_params(process_t *p, const char *image, const char *cmdline, co
+             at = put_wstr(p, at, default_env[i], &len);
+         }
+         if (k64_cmdline_has("shz.k32trace")) at = put_wstr(p, at, "SHZ_K32TRACE=1", &len);   /* kernel32 k32_trace.c */
++        {
++            const char *e;
++            for (e = k64_autorun_env; *e; e += strlen(e) + 1) at = put_wstr(p, at, e, &len);   /* autorun.c: env= lines */
++        }
+         { uint16_t z = 0; uwrite(p, at, &z, 2); at += 2; }
+     }
+     at = (at + 15) & ~15ull;
+diff --git a/shizukudos/kernel64/syscall.c b/shizukudos/kernel64/syscall.c
+index 171b464..c048dea 100644
+--- a/shizukudos/kernel64/syscall.c
++++ b/shizukudos/kernel64/syscall.c
+@@ -141,6 +141,49 @@ int __attribute__((weak)) ipc_syscall_override(process_t *p, struct regs *r, uin
+     return 0;
+ }
+ 
++/* `shz.exctrace`: the first occurrence of every (system call, error status) pair, by name, at most 300 per boot. A program that
++ * gives up after an unsupported call or information class leaves the call's name and status behind. Statuses that are
++ * ordinary control flow (pending, timeout, end of file, no more entries, buffer overflow, name not found) are skipped. */
++static const char *sys_name(uint32_t num)
++{
++    switch (num) {
++#define X(name, n) case n: return #name;
++    SYSCALL_LIST(X)
++    SYSCALL_LIST_REGISTRY(X)
++    SYSCALL_LIST_GRAPHICS(X)
++    SYSCALL_LIST_NET(X)
++    SYSCALL_LIST_K32(X)
++    SYSCALL_LIST_MISC(X)
++    SYSCALL_LIST_GPU(X)
++    SYSCALL_LIST_SETUP(X)
++    SYSCALL_LIST_BLK(X)
++    SYSCALL_LIST_NTDRV(X)
++    SYSCALL_LIST_IPC_MISC(X)
++    SYSCALL_LIST_IPC(X)
++#undef X
++    default: return "?";
++    }
++}
++
++static void trace_syscall_failure(process_t *p, struct regs *r, uint32_t num, int32_t st, uint64_t a1, uint64_t a2)
++{
++    static int enabled = -1;
++    static struct { uint32_t num; int32_t st; } seen[300];
++    static unsigned nseen;
++    unsigned i;
++    if ((st & 0xc0000000) != 0xc0000000) return;
++    if (st == (int32_t)0xc0000034 || st == (int32_t)0xc000000f || st == (int32_t)0xc0000011 || st == (int32_t)0xc000011a) return;
++    if (enabled < 0) enabled = k64_cmdline_has("shz.exctrace");
++    if (!enabled || nseen >= 300) return;
++    for (i = 0; i < nseen; ++i)
++        if (seen[i].num == num && seen[i].st == st) return;
++    seen[nseen].num = num; seen[nseen].st = st; ++nseen;
++    if (num == SYS_NtQueryInformationFile || num == SYS_NtSetInformationFile || num == SYS_NtQueryVolumeInformationFile)
++        kprintf("K64 sys: pid %d %s (0x%x) class %llu -> %x (a1=%llx)\n", p->pid, sys_name(num), num, (uint64_t)stack_arg(p, r, 5), (uint32_t)st, a1);
++    else
++        kprintf("K64 sys: pid %d %s (0x%x) -> %x (a1=%llx a2=%llx)\n", p->pid, sys_name(num), num, (uint32_t)st, a1, a2);
++}
++
+ int syscall_dispatch(struct regs *r)
+ {
+     process_t *p = current_process();
+@@ -193,6 +236,7 @@ int syscall_dispatch(struct regs *r)
+         else st = STATUS_INVALID_SYSTEM_SERVICE;
+     }
+ done:
++    trace_syscall_failure(p, r, num, st, a1, a2);
+     cli();
+     if (st == (int32_t)0x7fff0001) {                    /* NtContinue already rewrote the whole frame */
+         check_kill();
+diff --git a/shizukudos/kernel64/sysfile.c b/shizukudos/kernel64/sysfile.c
+index 63b9974..37dd8a8 100644
+--- a/shizukudos/kernel64/sysfile.c
++++ b/shizukudos/kernel64/sysfile.c
+@@ -816,6 +816,23 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
+     return STATUS_SUCCESS;
+ }
+ 
++/* `shz.exctrace`: one line per NtCreateFile/NtOpenFile with the path it was asked for and its status (at most 900 per boot), so a
++ * program that gives up on a missing file or a path form this system does not know leaves the name behind. Expected
++ * probes (a missing optional file) show up too: the status says which kind of failure it was. */
++static int32_t trace_open_failure(process_t *p, uint32_t num, uint64_t oa_uva, int32_t st)
++{
++    static int enabled = -1;
++    static unsigned lines;
++    struct objattr oa;
++    char path[300];
++    if (enabled < 0) enabled = k64_cmdline_has("shz.exctrace");
++    if (!enabled || lines >= 900) return st;
++    if (copy_from_user(p, &oa, oa_uva, sizeof oa) || !oa.name || read_ustr(p, oa.name, path, sizeof path)) return st;
++    ++lines;
++    kprintf("K64 fs: pid %d %s %s -> %x\n", p->pid, num == SYS_NtOpenFile ? "NtOpenFile" : "NtCreateFile", path, (uint32_t)st);
++    return st;
++}
++
+ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+                          int *handled)
+ {
+@@ -825,8 +842,8 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
+         if (ntdrv_file_dispatch(p, r, num, a1, &dst)) return dst;
+     }
+     switch (num) {
+-    case SYS_NtCreateFile: return sys_create_file(p, r, a1, a2, a3, a4, 0);
+-    case SYS_NtOpenFile: return sys_create_file(p, r, a1, a2, a3, a4, 1);
++    case SYS_NtCreateFile: return trace_open_failure(p, num, a3, sys_create_file(p, r, a1, a2, a3, a4, 0));
++    case SYS_NtOpenFile: return trace_open_failure(p, num, a3, sys_create_file(p, r, a1, a2, a3, a4, 1));
+     case SYS_NtReadFile: return sys_rw_file(p, r, a1, 0);
+     case SYS_NtWriteFile: return sys_rw_file(p, r, a1, 1);
+     case SYS_NtQueryInformationFile: return sys_query_info_file(p, r, a1, a2, a3, a4);
+diff --git a/shizukudos/win64/kernel32/k32.h b/shizukudos/win64/kernel32/k32.h
+index 9778da2..2ac11b9 100644
+--- a/shizukudos/win64/kernel32/k32.h
++++ b/shizukudos/win64/kernel32/k32.h
+@@ -74,6 +74,8 @@ void k32_console_track(const char *s, DWORD n);         /* the screen-buffer cur
+ int k32_trace_on(void);
+ void k32_trace3(const char *a, const char *b, const char *c);
+ void k32_trace_hex(const char *a, const char *b, ULONG_PTR v);
++void k32_trace_failed_path(const char *fn, const WCHAR *path, DWORD error, ULONG_PTR extra);   /* a failed call that took a path */
++void k32_trace_exit(const char *what, ULONG_PTR code, void *caller);   /* ExitProcess / TerminateProcess(self): code and caller */
+ BOOL k32_unsupported(const char *fn, const char *what, DWORD err);   /* sets `err` as last error, reports it, returns FALSE */
+ /* UTF-8 <-> UTF-16 helpers (k32_file.c). n < 0 means NUL-terminated (the terminator is converted too). Return 0 when the
+  * output buffer is too small. */
+diff --git a/shizukudos/win64/kernel32/k32_core.c b/shizukudos/win64/kernel32/k32_core.c
+index c4d593d..b2cd1b8 100644
+--- a/shizukudos/win64/kernel32/k32_core.c
++++ b/shizukudos/win64/kernel32/k32_core.c
+@@ -43,12 +43,14 @@ K32API HANDLE WINAPI GetCurrentThread(void) { return CURRENT_THREAD; }
+ K32API DWORD WINAPI GetCurrentProcessId(void) { return shz_pid(); }
+ K32API DWORD WINAPI GetCurrentThreadId(void) { return shz_tid(); }
+ 
+-K32API VOID WINAPI ExitProcess(UINT code) { RtlExitUserProcess((NTSTATUS)code); }
++K32API VOID WINAPI ExitProcess(UINT code) { k32_trace_exit("ExitProcess", code, __builtin_return_address(0)); RtlExitUserProcess((NTSTATUS)code); }
+ K32API VOID WINAPI ExitThread(DWORD code) { RtlExitUserThread((NTSTATUS)code); }
+ 
+ K32API BOOL WINAPI TerminateProcess(HANDLE h, UINT code)
+ {
+-    NTSTATUS st = NtTerminateProcess(h, (NTSTATUS)code);
++    NTSTATUS st;
++    if (h == CURRENT_PROCESS) k32_trace_exit("TerminateProcess(self)", code, __builtin_return_address(0));
++    st = NtTerminateProcess(h, (NTSTATUS)code);
+     if (st) { k32_nt_error(st); return FALSE; }
+     return TRUE;
+ }
+diff --git a/shizukudos/win64/kernel32/k32_ipc_io.c b/shizukudos/win64/kernel32/k32_ipc_io.c
+index d477caf..32c108b 100644
+--- a/shizukudos/win64/kernel32/k32_ipc_io.c
++++ b/shizukudos/win64/kernel32/k32_ipc_io.c
+@@ -58,8 +58,19 @@ static int is_console_name(LPCWSTR n, const char *want)
+     return n[i] == 0;
+ }
+ 
++static HANDLE create_file_impl(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp, DWORD flags,
++                               HANDLE tmpl);
++
+ K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp, DWORD flags,
+                                  HANDLE tmpl)
++{
++    HANDLE h = create_file_impl(name, access, share, sa, disp, flags, tmpl);
++    if (h == INVALID_HANDLE_VALUE) k32_trace_failed_path("CreateFileW", name, GetLastError(), access);
++    return h;
++}
++
++static HANDLE create_file_impl(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp, DWORD flags,
++                               HANDLE tmpl)
+ {
+     WCHAR nt[320];
+     SHZ_UNICODE_STRING us;
+@@ -388,8 +399,19 @@ static NTSTATUS pipe_fsctl(HANDLE h, LPOVERLAPPED ov, ULONG code, PVOID in, ULON
+     return sync_wait(h, NtFsControlFile(h, 0, 0, 0, iosb, code, in, in_len, out, out_len), iosb);
+ }
+ 
++static HANDLE create_named_pipe_impl(LPCWSTR name, DWORD open_mode, DWORD pipe_mode, DWORD max_inst, DWORD out_size,
++                                     DWORD in_size, DWORD timeout_ms, LPSECURITY_ATTRIBUTES sa);
++
+ K32API HANDLE WINAPI CreateNamedPipeW(LPCWSTR name, DWORD open_mode, DWORD pipe_mode, DWORD max_inst, DWORD out_size,
+                                       DWORD in_size, DWORD timeout_ms, LPSECURITY_ATTRIBUTES sa)
++{
++    HANDLE h = create_named_pipe_impl(name, open_mode, pipe_mode, max_inst, out_size, in_size, timeout_ms, sa);
++    if (h == INVALID_HANDLE_VALUE) k32_trace_failed_path("CreateNamedPipeW", name, GetLastError(), open_mode);
++    return h;
++}
++
++static HANDLE create_named_pipe_impl(LPCWSTR name, DWORD open_mode, DWORD pipe_mode, DWORD max_inst, DWORD out_size,
++                                     DWORD in_size, DWORD timeout_ms, LPSECURITY_ATTRIBUTES sa)
+ {
+     static const char pfx[] = "\\\\.\\pipe\\";
+     WCHAR nt[300];
+diff --git a/shizukudos/win64/kernel32/k32_ipc_proc.c b/shizukudos/win64/kernel32/k32_ipc_proc.c
+index 32cb618..d40f794 100644
+--- a/shizukudos/win64/kernel32/k32_ipc_proc.c
++++ b/shizukudos/win64/kernel32/k32_ipc_proc.c
+@@ -172,8 +172,24 @@ static WCHAR *heap_wdup_env(const void *env, BOOL unicode, ULONG *chars)
+     return w;
+ }
+ 
++static BOOL create_process_impl(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL inherit,
++                                DWORD flags, LPVOID env, LPCWSTR dir, LPSTARTUPINFOW si, LPPROCESS_INFORMATION pi);
++
+ K32API BOOL WINAPI CreateProcessW(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL inherit,
+                                   DWORD flags, LPVOID env, LPCWSTR dir, LPSTARTUPINFOW si, LPPROCESS_INFORMATION pi)
++{
++    const BOOL ok = create_process_impl(app, cmd, pa, ta, inherit, flags, env, dir, si, pi);
++    if (!ok) {
++        const DWORD e = GetLastError();
++        k32_trace_failed_path("CreateProcessW(app)", app, e, flags);
++        k32_trace_failed_path("CreateProcessW(cmdline)", cmd, e, inherit);
++        k32_trace_failed_path("CreateProcessW(dir)", dir, e, si ? si->dwFlags : 0);
++    }
++    return ok;
++}
++
++static BOOL create_process_impl(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta, BOOL inherit,
++                                DWORD flags, LPVOID env, LPCWSTR dir, LPSTARTUPINFOW si, LPPROCESS_INFORMATION pi)
+ {
+     WCHAR image[300], cwd[300], *cmdline = 0, *envw = 0;
+     SHZ_CREATE_PROCESS c;
+diff --git a/shizukudos/win64/kernel32/k32_trace.c b/shizukudos/win64/kernel32/k32_trace.c
+index fbe85bc..fa1c61a 100644
+--- a/shizukudos/win64/kernel32/k32_trace.c
++++ b/shizukudos/win64/kernel32/k32_trace.c
+@@ -81,3 +81,69 @@ void k32_trace_hex(const char *a, const char *b, ULONG_PTR v)
+     line[n++] = '\n';
+     NtShzDebugPrint(line, n);
+ }
++
++
++/* Who ended the process: "K32 trace: <what> code=0x<code> caller=0x<pc> image=0x<base> rva=0x<pc-base>". The return address of the
++ * exit call names the code that gave up (the image's base lets the host turn it into an RVA). */
++void k32_trace_exit(const char *what, ULONG_PTR code, void *caller)
++{
++    char line[240];
++    unsigned n = 0;
++    PVOID base = 0;
++    if (!k32_trace_on()) return;
++    RtlPcToFileHeader(caller, &base);
++    n = put(line, n, sizeof line, "K32 trace: ");
++    n = put(line, n, sizeof line, what);
++    n = put(line, n, sizeof line, " code=0x");
++    n = put_hex(line, n, sizeof line, code);
++    n = put(line, n, sizeof line, " caller=0x");
++    n = put_hex(line, n, sizeof line, (ULONG_PTR)caller);
++    n = put(line, n, sizeof line, " image=0x");
++    n = put_hex(line, n, sizeof line, (ULONG_PTR)base);
++    n = put(line, n, sizeof line, " rva=0x");
++    n = put_hex(line, n, sizeof line, base ? (ULONG_PTR)caller - (ULONG_PTR)base : 0);
++    line[n++] = '\n';
++    NtShzDebugPrint(line, n);
++    {   /* return addresses on the stack: a word inside a loaded image whose preceding bytes are a call instruction */
++        const ULONG_PTR *w = (const ULONG_PTR *)__builtin_frame_address(0);
++        const ULONG_PTR *top = *(const ULONG_PTR *const *)(shz_teb() + 8);      /* TEB.StackBase */
++        unsigned shown = 0;
++        for (; w + 1 < top && w < (const ULONG_PTR *)__builtin_frame_address(0) + 2048 && shown < 24; ++w) {
++            const unsigned char *pc = (const unsigned char *)*w;
++            PVOID b = 0;
++            if ((ULONG_PTR)pc < 0x10000 || !RtlPcToFileHeader((PVOID)pc, &b) || !b) continue;
++            if ((ULONG_PTR)pc < (ULONG_PTR)b + 0x1000 + 8) continue;          /* the headers: no code, and pc[-6] must stay inside the image */
++            if (!(pc[-5] == 0xe8 || (pc[-6] == 0xff && pc[-5] == 0x15) || (pc[-2] == 0xff && (pc[-1] & 0xf8) == 0xd0) ||
++                  (pc[-3] == 0x41 && pc[-2] == 0xff && (pc[-1] & 0xf8) == 0xd0))) continue;
++            n = 0;
++            n = put(line, n, sizeof line, "K32 trace: exit stack image=0x");
++            n = put_hex(line, n, sizeof line, (ULONG_PTR)b);
++            n = put(line, n, sizeof line, " rva=0x");
++            n = put_hex(line, n, sizeof line, (ULONG_PTR)pc - (ULONG_PTR)b);
++            line[n++] = '\n';
++            NtShzDebugPrint(line, n);
++            ++shown;
++        }
++    }
++}
++
++/* "K32 trace: <fn> failed: <path> error=0x<e> flags/access=0x<x>", at most 200 lines per process: the wide path is printed as ASCII
++ * ('?' above 0x7e). Used for CreateFileW, CreateNamedPipeW and CreateProcessW, where a Node/libuv failure usually names a path. */
++void k32_trace_failed_path(const char *fn, const WCHAR *path, DWORD error, ULONG_PTR extra)
++{
++    static volatile LONG lines;
++    char line[300];
++    unsigned n = 0, i;
++    if (!k32_trace_on() || lines >= 200) return;
++    InterlockedIncrement(&lines);
++    n = put(line, n, sizeof line, "K32 trace: ");
++    n = put(line, n, sizeof line, fn);
++    n = put(line, n, sizeof line, " failed: ");
++    for (i = 0; path && path[i] && i < 160 && n + 1 < sizeof line; ++i) line[n++] = path[i] < 0x7f && path[i] >= 0x20 ? (char)path[i] : '?';
++    n = put(line, n, sizeof line, " error=0x");
++    n = put_hex(line, n, sizeof line, error);
++    n = put(line, n, sizeof line, " extra=0x");
++    n = put_hex(line, n, sizeof line, extra);
++    line[n++] = '\n';
++    NtShzDebugPrint(line, n);
++}

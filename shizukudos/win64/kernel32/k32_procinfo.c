@@ -624,7 +624,14 @@ static BOOL module_entry(HANDLE h, LPMODULEENTRY32W me, int first)
     if (first) s->mod_pos = 0;
     if (s->mod_pos < s->nmods) {
         WCHAR path[300];
+        const char *basename, *at;
         k = &s->mods[s->mod_pos++];
+        /* The loader's name is a normalized lookup key. Display the original
+         * module filename from this snapshot's actual loaded path instead. */
+        basename = k->path;
+        for (at = k->path; *at; ++at)
+            if (*at == '\\' || *at == '/' || *at == ':') basename = at + 1;
+        if (!*basename) basename = k->name;
         me->th32ModuleID = 1;
         me->th32ProcessID = s->owner_pid;
         me->GlblcntUsage = 0xffff;
@@ -632,7 +639,7 @@ static BOOL module_entry(HANDLE h, LPMODULEENTRY32W me, int first)
         me->modBaseAddr = (BYTE *)(ULONG_PTR)k->base;
         me->modBaseSize = (DWORD)k->size;
         me->hModule = (HMODULE)(ULONG_PTR)k->base;
-        if (!k32_utf8_to_wide(k->name, -1, me->szModule, MAX_MODULE_NAME32 + 1)) me->szModule[0] = 0;
+        if (!k32_utf8_to_wide(basename, -1, me->szModule, MAX_MODULE_NAME32 + 1)) me->szModule[0] = 0;
         if (format_path(k->path, 0, path, 300) > 0 && k32_wlen(path) < MAX_PATH) memcpy(me->szExePath, path, (k32_wlen(path) + 1) * sizeof(WCHAR));
         else me->szExePath[0] = 0;
         ok = TRUE;
@@ -745,8 +752,8 @@ K32API BOOL WINAPI Wow64GetThreadContext(HANDLE h, PWOW64_CONTEXT ctx)
 
 K32API BOOL WINAPI IsThreadAFiber(void)
 {
-    /* TEB.SameTebFlags (0x17ee) bit 2 is HasFiberData. ConvertThreadToFiber does not exist in this kernel32, so it is never set,
-     * but the flag is what Windows reports and what is read here. */
+    /* TEB.SameTebFlags (0x17ee) bit 2 is HasFiberData. The cooperative fiber
+     * family sets/clears this bit during forward/reverse conversion. */
     return (*(const USHORT *)(shz_teb() + 0x17ee) & 4) != 0;
 }
 

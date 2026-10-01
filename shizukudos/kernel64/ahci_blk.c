@@ -4,21 +4,23 @@
  * STANDALONE PROFILE ONLY: under the Supervisor no disk is passed through and port I/O is trapped, so
  * ahci_blk_init() reports "no device" there. QEMU fixture: -device ahci + ide-hd (ICH9 8086:2922, class 010601).
  *
- * ahci_native's contract: callbacks return nonzero on success; one 512-byte sector per command; the core polls
+ * ahci_native's contract: callbacks return nonzero on success; up to four 512-byte sectors per command; the core polls
  * PxCI/PxTFD with now_us() as its deadline clock (the TSC here, so it also works with interrupts masked) and never
  * touches memory outside the one 4 KiB DMA block it was given. The disk is opened with allow_write=1: blk_write()
- * issues WRITE DMA EXT per sector and blk_flush() FLUSH CACHE EXT when IDENTIFY advertises it (QEMU's disks do);
+ * issues bounded WRITE DMA EXT and blk_flush() FLUSH CACHE EXT when IDENTIFY advertises it (QEMU's disks do);
  * without that command blk_flush() has nothing to issue and returns success (the legacy FLUSH CACHE is not used).
  */
 #include "blk.h"
 #include "pci.h"
 #ifdef SHZ_STANDALONE
 #include "../../drivers/ahci_native/ahci.h"
+#include "../../drivers/ahci_native/ahci_clock.h"
 
 static struct ahci_device disk;
 static volatile uint32_t *abar;
 static uint32_t abar_bytes;
 static uint64_t dma_pa;
+static uint64_t tsc_per_ms;
 static int ready;
 static kmutex_t blk_lock;
 static blk_dev_t dev;
@@ -66,8 +68,7 @@ static uint64_t tsc_now_us(void *ctx)
     uint32_t lo, hi;
     (void)ctx;
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
-    /* Nominal 1 GHz TSC (bootinfo tsc_hz under QEMU TCG). A faster TSC only shortens the generous timeouts. */
-    return (((uint64_t)hi << 32) | lo) / 1000u;
+    return ahci_ticks_to_us(((uint64_t)hi << 32) | lo, tsc_per_ms);
 }
 static void relax(void *ctx) { (void)ctx; __asm__ volatile("pause" ::: "memory"); }
 
@@ -78,15 +79,19 @@ static int ahci_read(blk_dev_t *d, uint64_t lba, unsigned count, void *buf)
     (void)d;
     if (!ready) return -1;
     mutex_lock(&blk_lock);                          /* one command at a time: the core is not reentrant */
-    while (count--) {
-        rc = ahci_read_sector(&disk, lba, b, 512);
+    while (count) {
+        const unsigned n = count < AHCI_MAX_SECTORS ? count : AHCI_MAX_SECTORS;
+        rc = ahci_read_sectors(&disk, lba, n, b, (size_t)n * AHCI_SECTOR_BYTES);
         if (rc != AHCI_OK) {
-            kprintf("K64 ahci: read lba %llu failed (%d) is=%x tfd=%x serr=%x\n", lba, rc, disk.last_is, disk.last_tfd, disk.last_serr);
+            kprintf("K64 ahci: read lba %llu count %u failed (%d) is=%x tfd=%x serr=%x deadline_reason=%u elapsed_us=%llu polls=%u limit_us=%u\n",
+                    lba, n, rc, disk.last_is, disk.last_tfd, disk.last_serr, disk.last_wait_reason,
+                    disk.last_wait_elapsed_us, disk.last_wait_polls, disk.timeout_us);
             if (disk.state != AHCI_READY) ready = 0;    /* the core closed the port after an error */
             break;
         }
-        ++lba;
-        b += 512;
+        lba += n;
+        b += (size_t)n * AHCI_SECTOR_BYTES;
+        count -= n;
     }
     mutex_unlock(&blk_lock);
     return rc == AHCI_OK ? 0 : -1;
@@ -99,15 +104,19 @@ static int ahci_write(blk_dev_t *d, uint64_t lba, unsigned count, const void *bu
     (void)d;
     if (!ready) return -1;
     mutex_lock(&blk_lock);
-    while (count--) {
-        rc = ahci_write_sector(&disk, lba, b, 512);
+    while (count) {
+        const unsigned n = count < AHCI_MAX_SECTORS ? count : AHCI_MAX_SECTORS;
+        rc = ahci_write_sectors(&disk, lba, n, b, (size_t)n * AHCI_SECTOR_BYTES);
         if (rc != AHCI_OK) {
-            kprintf("K64 ahci: write lba %llu failed (%d) is=%x tfd=%x serr=%x\n", lba, rc, disk.last_is, disk.last_tfd, disk.last_serr);
+            kprintf("K64 ahci: write lba %llu count %u failed (%d) is=%x tfd=%x serr=%x deadline_reason=%u elapsed_us=%llu polls=%u limit_us=%u\n",
+                    lba, n, rc, disk.last_is, disk.last_tfd, disk.last_serr, disk.last_wait_reason,
+                    disk.last_wait_elapsed_us, disk.last_wait_polls, disk.timeout_us);
             if (disk.state != AHCI_READY) ready = 0;
             break;
         }
-        ++lba;
-        b += 512;
+        lba += n;
+        b += (size_t)n * AHCI_SECTOR_BYTES;
+        count -= n;
     }
     mutex_unlock(&blk_lock);
     return rc == AHCI_OK ? 0 : -1;
@@ -123,7 +132,9 @@ static int ahci_flush_dev(blk_dev_t *d)
     mutex_lock(&blk_lock);
     rc = ahci_flush(&disk);
     if (rc != AHCI_OK) {
-        kprintf("K64 ahci: FLUSH CACHE EXT failed (%d) is=%x tfd=%x serr=%x\n", rc, disk.last_is, disk.last_tfd, disk.last_serr);
+        kprintf("K64 ahci: FLUSH CACHE EXT failed (%d) is=%x tfd=%x serr=%x deadline_reason=%u elapsed_us=%llu polls=%u limit_us=%u\n",
+                rc, disk.last_is, disk.last_tfd, disk.last_serr, disk.last_wait_reason,
+                disk.last_wait_elapsed_us, disk.last_wait_polls, disk.timeout_us);
         if (disk.state != AHCI_READY) ready = 0;
     } else {
         ++flushes;
@@ -143,6 +154,7 @@ int ahci_blk_init(void)
     struct ahci_ops ops = { 0, mmio_read, mmio_write, dma_allocate, dma_release, dma_sync, tsc_now_us, relax };
     struct ahci_config cfg = { 0x010601, 0, 0, AHCI_AUTO_PORT, 5000000, 1, 1 };
     mutex_init(&blk_lock);
+    tsc_per_ms = blk_tsc_per_ms();                 /* existing PIT measurement also works with interrupts off */
     for (i = 0; i < n; ++i)
         if (all[i].class_code == 1 && all[i].subclass == 6 && all[i].prog_if == 1) { d = &all[i]; break; }
     if (!d) { kprintf("K64 ahci: no AHCI controller (class 010601) on PCI bus 0\n"); return -1; }
@@ -175,7 +187,7 @@ int ahci_blk_init(void)
     dev.driver = "ahci";                            /* storage-track metadata (blk.h extensions) */
     dev.irq_mode = "poll";
     dev.queue_depth = 1;
-    dev.max_sectors = 1;
+    dev.max_sectors = AHCI_MAX_SECTORS;
     pci_claim(d, "ahci_blk (AHCI SATA)");
     return blk_register(&dev);
 }

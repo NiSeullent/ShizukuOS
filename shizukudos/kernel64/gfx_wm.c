@@ -61,6 +61,8 @@
  *  follows shz_nc_insets()).
  */
 #include "gfx.h"
+#include "gfx_present_layout.h"
+#include "gfx_written_coverage.h"
 
 kmutex_t gfx_lock;
 gwin_t *g_win;
@@ -280,6 +282,22 @@ static void blit_surface(const uint32_t *src, int sw, int sh, int ox, int oy, co
     }
 }
 
+/* Unpainted WS_EX_TRANSPARENT client pixels preserve the already composed
+ * parent/lower-window bits. Every genuinely submitted pixel is opaque here,
+ * even gray or alpha-zero RGB data; layering keeps its separate existing path.
+ */
+static void blit_written_surface(const gwin_t *w,int ox,int oy,const shz_rect_t *clip)
+{
+    shz_rect_t sr={ox,oy,ox+w->sw,oy+w->sh},o;
+    int x,y;
+    if(!w->surf || !w->written || !rc_isect(&sr,clip,&o)) return;
+    for(y=o.top;y<o.bottom;++y) {
+        for(x=o.left;x<o.right;++x)
+            if(shz_written_has(w->written,w->sw,w->sh,x-ox,y-oy))
+                *tgt_at(x,y)=w->surf[(uint64_t)(uint32_t)(y-oy)*(uint32_t)w->sw+(uint32_t)(x-ox)];
+    }
+}
+
 #define WS_EX_LAYERED_ 0x00080000u
 #define WS_EX_TRANSPARENT_ 0x00000020u
 #define LWA_COLORKEY_ 1u
@@ -287,6 +305,10 @@ static void blit_surface(const uint32_t *src, int sw, int sh, int ox, int oy, co
 #define ULW_COLORKEY_ 1u
 #define ULW_ALPHA_ 2u
 static int is_layered(const gwin_t *w) { return (w->exstyle & WS_EX_LAYERED_) && w->parent == DESKTOP; }
+static int has_transparent_client(const gwin_t *w)
+{
+    return (w->exstyle & (WS_EX_TRANSPARENT_ | WS_EX_LAYERED_)) == WS_EX_TRANSPARENT_;
+}
 
 static uint32_t *g_under;                                           /* mode 1: what was below the window (screen sized) */
 
@@ -377,7 +399,8 @@ static void compose_plain(gwin_t *w, int ox, int oy, const shz_rect_t *c)
     cy = oy + w->nct;
     cr.left = cx; cr.top = cy; cr.right = cx + client_w(w); cr.bottom = cy + client_h(w);
     if (!rc_isect(c, &cr, &cc)) return;
-    blit_surface(w->surf, w->sw, w->sh, cx, cy, &cc);
+    if(has_transparent_client(w)) blit_written_surface(w,cx,cy,&cc);
+    else blit_surface(w->surf, w->sw, w->sh, cx, cy, &cc);
     for (ch = w->child; ch && ch->next; ch = ch->next) { }          /* bottom-most child first */
     for (; ch; ch = ch->prev)
         compose_win(ch, cx + ch->x, cy + ch->y, &cc);
@@ -386,7 +409,8 @@ static void compose_plain(gwin_t *w, int ox, int oy, const shz_rect_t *c)
 /* Does w, composed normally, paint every pixel of r (screen) opaquely? Then nothing below it needs drawing. */
 static int covers_opaquely(const gwin_t *w, const shz_rect_t *r)
 {
-    if (w->msgonly || !(w->style & SHZ_WS_VISIBLE) || (w->style & SHZ_WS_MINIMIZE) || w->rgn || is_layered(w)) return 0;
+    if (w->msgonly || !(w->style & SHZ_WS_VISIBLE) || (w->style & SHZ_WS_MINIMIZE) || w->rgn || is_layered(w) ||
+        has_transparent_client(w)) return 0;
     return r->left >= w->x && r->top >= w->y && r->right <= w->x + w->w && r->bottom <= w->y + w->h;
 }
 
@@ -528,18 +552,28 @@ static int32_t win_apply_size(gwin_t *w, int32_t nw, int32_t nh, int *redraw_all
     if ((uint64_t)cw * (uint64_t)ch * 4u > GFX_MAX_SURF_BYTES) return STATUS_NO_MEMORY;
     if (w != DESKTOP && (cw != w->sw || ch != w->sh)) {
         uint32_t *ns = 0;
+        uint8_t *nwrites = 0;
         if (cw && ch) {
             uint64_t i, n = (uint64_t)cw * (uint64_t)ch;
             int32_t y, cpw = cw < w->sw ? cw : w->sw, cph = ch < w->sh ? ch : w->sh;
             ns = gfx_pages_alloc(n * 4);
             if (!ns) return STATUS_NO_MEMORY;
+            if(w->written) {
+                uint64_t bytes=shz_written_bytes(cw,ch);
+                nwrites=gfx_pages_alloc(bytes);
+                if(!nwrites) { gfx_pages_free(ns,n*4);return STATUS_NO_MEMORY; }
+                memset(nwrites,0,(size_t)bytes);
+                shz_written_copy(nwrites,cw,ch,w->written,w->sw,w->sh);
+            }
             for (i = 0; i < n; ++i) ns[i] = FACE;
             if (w->surf)
                 for (y = 0; y < cph; ++y)
                     memcpy(ns + (uint64_t)y * (uint32_t)cw, w->surf + (uint64_t)y * (uint32_t)w->sw, (size_t)cpw * 4);
         }
         if (w->surf) gfx_pages_free(w->surf, (uint64_t)w->sw * (uint64_t)w->sh * 4);
+        if(w->written) gfx_pages_free(w->written,shz_written_bytes(w->sw,w->sh));
         w->surf = ns;
+        w->written = nwrites;
         w->sw = cw;
         w->sh = ch;
     }
@@ -581,6 +615,7 @@ static void free_window_memory(gwin_t *w)
     if (w->rgn) kfree(w->rgn);
     w->rgn = 0;
     if (w->surf) gfx_pages_free(w->surf, (uint64_t)w->sw * (uint64_t)w->sh * 4);
+    if(w->written) gfx_pages_free(w->written,shz_written_bytes(w->sw,w->sh));
     if (w->title) kfree(w->title);
     if (w->extra) kfree(w->extra);
     if (w->cls && w->cls->nwin) --w->cls->nwin;
@@ -1459,18 +1494,53 @@ done:
 }
 
 /* ---------------------------------------------------------------- present (user-mode bitmap -> window surface) */
+#include "gfx_render_trace.h"
 int32_t gfx_syscall_present(process_t *cur, uint64_t arg)
 {
     shz_present_t p;
-    gwin_t *w;
+    shz_present_layout_t layout;
+    gwin_t *w = 0;
+    uint32_t *pixels = 0;
     int32_t st = STATUS_SUCCESS;
     shz_rect_t r, vis, dmg;
-    int32_t y, sx, sy;
+    int32_t y, sx, sy, sw, sh;
+    int checked;
+    int staged = 0, damaged = 0;
+    uint64_t framebuffers_before;
     if (copy_from_user(cur, &p, arg, sizeof p)) return STATUS_ACCESS_VIOLATION;
     mutex_lock(&gfx_lock);
+    framebuffers_before = g_fb.stat_presents;
     w = p.hwnd == DESKTOP->handle ? DESKTOP : wm_lookup(p.hwnd);
     if (!w) { st = STATUS_INVALID_HANDLE; goto done; }
-    if (w != DESKTOP && !wm_owner_ok(cur, w)) { st = STATUS_ACCESS_DENIED; goto done; }
+    /* Every window currently belongs to the same desktop. GetDC on Windows
+     * permits drawing a window owned by another process on that desktop:
+     * Chromium's software GPU worker uses exactly this path. The HWND must
+     * still be live, and all pixel reads below use the CALLER's address space.
+     * Keep mutation/readback ownership checks in the other window operations.
+     * A future multi-desktop/session backend must check desktop access here.
+     */
+    sw = w == DESKTOP && !w->surf ? (int32_t)g_fb.width : w->sw;
+    sh = w == DESKTOP && !w->surf ? (int32_t)g_fb.height : w->sh;
+    checked = shz_present_layout(&p, sw, sh, GFX_MAX_SURF_BYTES,
+                                  USER_MIN, USER_TOP, &layout);
+    if (checked == SHZ_PRESENT_BAD_LAYOUT) { st = STATUS_INVALID_PARAMETER; goto done; }
+    if (checked == SHZ_PRESENT_BAD_ADDRESS) { st = STATUS_ACCESS_VIOLATION; goto done; }
+    if (checked == SHZ_PRESENT_EMPTY) goto done;
+    r = layout.rect;
+    /* Stage the actual caller pixels before changing the window. A fault in
+     * a later row must not leave an unreported, partially changed surface.
+     * No user pointer is retained by the compositor after the call returns.
+     */
+    pixels = gfx_pages_alloc(layout.packed_bytes);
+    if (!pixels) { st = STATUS_NO_MEMORY; goto done; }
+    for (y = r.top; y < r.bottom; ++y)
+        if (copy_from_user(cur, (uint8_t *)pixels + (uint64_t)(y - r.top) * layout.row_bytes,
+                           p.bits + layout.source_offset + (uint64_t)(y - r.top) * p.stride,
+                           layout.row_bytes)) {
+            st = STATUS_ACCESS_VIOLATION;
+            goto done;
+        }
+    staged = 1;
     if (w == DESKTOP && !DESKTOP->surf) {                                    /* the desktop surface exists once someone draws on it */
         const uint64_t n = (uint64_t)g_fb.width * g_fb.height;
         uint64_t i;
@@ -1480,22 +1550,29 @@ int32_t gfx_syscall_present(process_t *cur, uint64_t arg)
         DESKTOP->sw = (int32_t)g_fb.width;
         DESKTOP->sh = (int32_t)g_fb.height;
     }
-    if (p.surf_w != w->sw || p.surf_h != w->sh) { st = STATUS_INVALID_PARAMETER; goto done; }
-    r.left = p.x; r.top = p.y; r.right = p.x + p.w; r.bottom = p.y + p.h;
-    vis.left = 0; vis.top = 0; vis.right = w->sw; vis.bottom = w->sh;
-    if (!rc_isect(&r, &vis, &r)) goto done;
+    if (!w->surf) { st = STATUS_INVALID_PARAMETER; goto done; }
+    if(w!=DESKTOP && !w->written) {
+        uint64_t bytes=shz_written_bytes(w->sw,w->sh);
+        w->written=gfx_pages_alloc(bytes);
+        if(!w->written) { st=STATUS_NO_MEMORY;goto done; }
+        memset(w->written,0,(size_t)bytes);
+    }
     for (y = r.top; y < r.bottom; ++y)
-        if (copy_from_user(cur, w->surf + (uint64_t)y * (uint32_t)w->sw + (uint32_t)r.left,
-                           p.bits + (uint64_t)(uint32_t)y * p.stride + (uint64_t)(uint32_t)r.left * 4, (uint64_t)(r.right - r.left) * 4)) {
-            st = STATUS_ACCESS_VIOLATION;
-            goto done;
-        }
+        memcpy(w->surf + (uint64_t)y * (uint32_t)w->sw + (uint32_t)r.left,
+               (uint8_t *)pixels + (uint64_t)(y - r.top) * layout.row_bytes,
+               (size_t)layout.row_bytes);
+    if(w->written) shz_written_mark(w->written,w->sw,w->sh,r.left,r.top,r.right,r.bottom);
     if (w == DESKTOP || wm_is_visible(w)) {
         wm_client_origin(w, &sx, &sy);
         dmg.left = r.left + sx; dmg.top = r.top + sy; dmg.right = r.right + sx; dmg.bottom = r.bottom + sy;
-        if (w == DESKTOP || (wm_screen_rect(w, &vis) && rc_isect(&dmg, &vis, &dmg))) wm_damage(&dmg);
+        if (w == DESKTOP || (wm_screen_rect(w, &vis) && rc_isect(&dmg, &vis, &dmg))) {
+            wm_damage(&dmg);
+            damaged = 1;
+        }
     }
 done:
+    gfx_render_trace_present(cur,&p,w,st,staged ? pixels : 0,&layout,damaged ? &dmg : 0,framebuffers_before);
+    if (pixels) gfx_pages_free(pixels, layout.packed_bytes);
     mutex_unlock(&gfx_lock);
     return st;
 }
@@ -1573,7 +1650,8 @@ static int32_t winop_print(process_t *cur, gwin_t *w, shz_winop_t *o)
                 memcpy(buf + (uint64_t)y * (uint32_t)pw, w->layer + (uint64_t)y * (uint32_t)w->lw, (size_t)(pw < w->lw ? pw : w->lw) * 4);
         } else if (client_only) {
             gwin_t *ch;
-            blit_surface(w->surf, w->sw, w->sh, 0, 0, &all);
+            if(has_transparent_client(w)) blit_written_surface(w,0,0,&all);
+            else blit_surface(w->surf, w->sw, w->sh, 0, 0, &all);
             for (ch = w->child; ch && ch->next; ch = ch->next) { }
             for (; ch; ch = ch->prev) compose_win(ch, ch->x, ch->y, &all);
         } else {

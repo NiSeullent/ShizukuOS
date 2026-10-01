@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Original AHCI implementation from public interface facts. See REFERENCES.md.
  * Commands: IDENTIFY DEVICE, READ DMA EXT and, when the caller opted in (ahci_config.allow_write), WRITE DMA EXT and
- * FLUSH CACHE EXT. One slot, one 512-byte sector per command, polled completion.
+ * FLUSH CACHE EXT. One slot, at most four 512-byte sectors per command, polled completion.
  */
 #include "ahci.h"
 
@@ -9,6 +9,8 @@ enum { CAP=0, GHC=4, IS=8, PI=12, VS=16, CAP2=36, BOHC=40,
        CLB=0, CLBU=4, FB=8, FBU=12, PIS=16, PIE=20, CMD=24,
        TFD=32, SIG=36, SSTS=40, SERR=48, SACT=52, CI=56, FBS=64,
        FIS_OFFSET=1024, TABLE_OFFSET=1280, DATA_OFFSET=2048 };
+_Static_assert(DATA_OFFSET + AHCI_MAX_SECTORS * AHCI_SECTOR_BYTES <= AHCI_DMA_BYTES,
+               "bounded transfer must fit the owned DMA arena");
 #define GHC_AE UINT32_C(0x80000000)
 #define CAP_64 UINT32_C(0x80000000)
 #define PORT_ERRORS UINT32_C(0x7d800010)
@@ -44,9 +46,21 @@ static void begin(struct ahci_device *a, struct deadline *d)
 static int expired(struct ahci_device *a, struct deadline *d, uint32_t limit)
 {
     uint64_t now=a->ops.now_us(a->ops.context);
-    if (now<d->last) return AHCI_CLOCK;
+    if (now<d->last) {
+        if (!a->last_wait_reason) {
+            a->last_wait_reason=3; a->last_wait_polls=d->polls;
+            a->last_wait_elapsed_us=d->last-d->start;
+        }
+        return AHCI_CLOCK;
+    }
     d->last=now;
-    if (now-d->start>=limit || ++d->polls>=AHCI_POLL_LIMIT) return AHCI_TIMEOUT;
+    if (now-d->start>=limit || ++d->polls>=AHCI_POLL_LIMIT) {
+        if (!a->last_wait_reason) {
+            a->last_wait_reason=now-d->start>=limit ? 1u : 2u;
+            a->last_wait_polls=d->polls; a->last_wait_elapsed_us=now-d->start;
+        }
+        return AHCI_TIMEOUT;
+    }
     a->ops.relax(a->ops.context);
     return AHCI_OK;
 }
@@ -193,13 +207,16 @@ int ahci_parse_identify(const uint8_t data[512], struct ahci_identity *out)
 
 /* Opcodes: 0xec IDENTIFY DEVICE and 0x25 READ DMA EXT (device to host, 512 bytes), 0x35 WRITE DMA EXT (host to
  * device, the 512 bytes at `input`), 0xea FLUSH CACHE EXT (no data, no PRDT). */
-static int issue(struct ahci_device *a,uint8_t command,uint64_t lba,const void *input)
+static int issue(struct ahci_device *a,uint8_t command,uint64_t lba,unsigned count,const void *input)
 {
     uint8_t *memory=a->dma.cpu,*table=memory+TABLE_OFFSET;
     uint64_t table_bus=a->dma.bus+TABLE_OFFSET,data_bus=a->dma.bus+DATA_OFFSET;
-    uint32_t value,active,status,expect_bytes=512; struct deadline d; unsigned i; int result;
+    uint32_t value,active,status,expect_bytes; struct deadline d; unsigned i; int result;
     if (command!=0xec && command!=0x25 && command!=0x35 && command!=0xea) return AHCI_UNSUPPORTED;
     if ((command==0x35)!=(input!=0)) return AHCI_INVALID;
+    if ((command==0xec && count!=1) || (command==0xea && count!=0) ||
+        ((command==0x25 || command==0x35) && (!count || count>AHCI_MAX_SECTORS))) return AHCI_INVALID;
+    expect_bytes=count*AHCI_SECTOR_BYTES;
     if ((result=rd(a,a->port_base+CMD,&status))!=0) return result;
     if ((status&(CMD_ST|CMD_FRE|CMD_CR|CMD_FR))!=(CMD_ST|CMD_FRE|CMD_CR|CMD_FR))
         return AHCI_DEVICE_ERROR;
@@ -209,7 +226,7 @@ static int issue(struct ahci_device *a,uint8_t command,uint64_t lba,const void *
     if ((result=wait_bits(a,a->port_base+TFD,0x88,0,a->timeout_us))!=0) return result;
     if ((result=clear_status(a))!=0) return result;
     zero(memory,32); zero(table,256);
-    if (input) copy(memory+DATA_OFFSET,input,512); else zero(memory+DATA_OFFSET,512);
+    if (input) copy(memory+DATA_OFFSET,input,expect_bytes); else zero(memory+DATA_OFFSET,expect_bytes);
     if (command==0xea) {
         put32(memory,5u); expect_bytes=0; /* 20-byte CFIS, no PRDT: non-data command */
     } else {
@@ -220,44 +237,47 @@ static int issue(struct ahci_device *a,uint8_t command,uint64_t lba,const void *
     table[0]=0x27; table[1]=0x80; table[2]=command;
     if (command==0x25 || command==0x35) {
         uint32_t lower=(uint32_t)lba,upper=(uint32_t)(lba>>24);
-        table[7]=0x40; table[12]=1;
+        table[7]=0x40; table[12]=(uint8_t)count;
         for(i=0;i<3;++i) { table[4+i]=(uint8_t)(lower>>(i*8)); table[8+i]=(uint8_t)(upper>>(i*8)); }
     } else if (command==0xea) {
         table[7]=0x40;
     }
     if (expect_bytes) {
         put32(table+128,(uint32_t)data_bus); put32(table+132,(uint32_t)(data_bus>>32));
-        put32(table+140,511); /* exact 512 bytes, no interrupt-on-completion */
+        put32(table+140,expect_bytes-1u); /* exact transfer bytes, no interrupt-on-completion */
     }
     if ((result=sync_area(a,0,32,1))!=0 ||
         (result=sync_area(a,TABLE_OFFSET,256,1))!=0 ||
-        (result=sync_area(a,DATA_OFFSET,512,1))!=0) return result;
+        (result=sync_area(a,DATA_OFFSET,expect_bytes ? expect_bytes : 512u,1))!=0) return result;
     if ((result=wr(a,a->port_base+CI,1))!=0) return result;
     begin(a,&d);
     for (;;) {
         if ((result=rd(a,a->port_base+PIS,&a->last_is))!=0 ||
-            (result=rd(a,a->port_base+TFD,&a->last_tfd))!=0 ||
             (result=rd(a,a->port_base+SSTS,&status))!=0 ||
-            (result=rd(a,a->port_base+CI,&value))!=0 ||
-            (result=rd(a,a->port_base+SACT,&active))!=0) return result;
+            (result=rd(a,a->port_base+CI,&value))!=0) return result;
         /* PxTFD may still contain the initial signature or prior status while
          * this command is pending. New interrupt error bits are authoritative
          * during execution; final TFD is validated after CI/SACT clear. */
         if (a->last_is&PORT_ERRORS) return AHCI_DEVICE_ERROR;
         if ((status&0xf0fu)!=0x103u) return AHCI_NO_DEVICE;
-        if (!value && !active) break;
-        if ((value&~1u) || active) return AHCI_BUSY;
+        /* This exclusive HBA never submits NCQ. SACT is checked before issue
+         * and after CI clears; polling TFD/SACT while our non-NCQ command is
+         * pending adds two unnecessary trapped MMIO reads each iteration. */
+        if (!value) break;
+        if (value&~1u) return AHCI_BUSY;
         if ((result=expired(a,&d,a->timeout_us))!=0) return result;
     }
     /* Completion may race the earlier status reads. Sample final status only
      * after observing CI/SACT clear; never accept a late task-file error. */
     if ((result=rd(a,a->port_base+PIS,&a->last_is))!=0 ||
         (result=rd(a,a->port_base+TFD,&a->last_tfd))!=0 ||
-        (result=rd(a,a->port_base+SSTS,&status))!=0) return result;
+        (result=rd(a,a->port_base+SSTS,&status))!=0 ||
+        (result=rd(a,a->port_base+SACT,&active))!=0) return result;
+    if (active) return AHCI_BUSY;
     if ((a->last_is&PORT_ERRORS) || (a->last_tfd&0xa9u)) return AHCI_DEVICE_ERROR;
     if ((status&0xf0fu)!=0x103u) return AHCI_NO_DEVICE;
     if ((result=sync_area(a,0,32,0))!=0 ||
-        (result=sync_area(a,DATA_OFFSET,512,0))!=0) return result;
+        (result=sync_area(a,DATA_OFFSET,expect_bytes ? expect_bytes : 512u,0))!=0) return result;
     return get32(memory+4)==expect_bytes ? AHCI_OK : AHCI_DEVICE_ERROR;
 }
 
@@ -342,44 +362,55 @@ int ahci_open(struct ahci_device *a,const struct ahci_ops *ops,const struct ahci
         (result=wr(a,a->port_base+CMD,value|CMD_FRE|CMD_ST))!=0 ||
         (result=wait_bits(a,a->port_base+CMD,CMD_CR,CMD_CR,STOP_US))!=0)
         return fail(a,result);
-    if ((result=issue(a,0xec,0,0))!=0) return fail(a,result);
+    if ((result=issue(a,0xec,0,1,0))!=0) return fail(a,result);
     if ((result=ahci_parse_identify((uint8_t *)a->dma.cpu+DATA_OFFSET,&a->identity))!=0)
         return fail(a,result);
     a->state=AHCI_READY; return AHCI_OK;
 }
 
-int ahci_read_sector(struct ahci_device *a,uint64_t lba,void *out,size_t bytes)
+int ahci_read_sectors(struct ahci_device *a,uint64_t lba,unsigned count,void *out,size_t bytes)
 {
     int result; uintptr_t start=(uintptr_t)out,dma,context;
-    if (!a || a->state!=AHCI_READY || !out || bytes<512 || lba>=a->identity.sectors ||
-        lba>=UINT64_C(0x0001000000000000) || start>UINTPTR_MAX-512u) return AHCI_INVALID;
+    size_t transfer=(size_t)count*AHCI_SECTOR_BYTES;
+    if (!a || a->state!=AHCI_READY || !out || !count || count>AHCI_MAX_SECTORS ||
+        bytes<transfer || lba>=a->identity.sectors || count>a->identity.sectors-lba ||
+        lba>=UINT64_C(0x0001000000000000) || count>UINT64_C(0x0001000000000000)-lba ||
+        start>UINTPTR_MAX-transfer) return AHCI_INVALID;
     dma=(uintptr_t)a->dma.cpu; context=(uintptr_t)a;
-    if ((start<=dma ? dma-start<512u : start-dma<AHCI_DMA_BYTES) ||
-        (start<=context ? context-start<512u : start-context<sizeof(*a))) return AHCI_INVALID;
-    if ((result=issue(a,0x25,lba,0))!=0) return fail(a,result);
-    copy(out,(uint8_t *)a->dma.cpu+DATA_OFFSET,512);
+    if ((start<=dma ? dma-start<transfer : start-dma<AHCI_DMA_BYTES) ||
+        (start<=context ? context-start<transfer : start-context<sizeof(*a))) return AHCI_INVALID;
+    if ((result=issue(a,0x25,lba,count,0))!=0) return fail(a,result);
+    copy(out,(uint8_t *)a->dma.cpu+DATA_OFFSET,transfer);
+    return AHCI_OK;
+}
+
+int ahci_read_sector(struct ahci_device *a,uint64_t lba,void *out,size_t bytes)
+{ return ahci_read_sectors(a,lba,1,out,bytes); }
+
+int ahci_write_sectors(struct ahci_device *a,uint64_t lba,unsigned count,const void *in,size_t bytes)
+{
+    int result; uintptr_t start=(uintptr_t)in,dma,context;
+    size_t transfer=(size_t)count*AHCI_SECTOR_BYTES;
+    if (!a || a->state!=AHCI_READY || !in || !count || count>AHCI_MAX_SECTORS ||
+        bytes!=transfer || lba>=a->identity.sectors || count>a->identity.sectors-lba ||
+        lba>=UINT64_C(0x0001000000000000) || count>UINT64_C(0x0001000000000000)-lba ||
+        start>UINTPTR_MAX-transfer) return AHCI_INVALID;
+    if (!a->writable) return AHCI_UNSUPPORTED;
+    dma=(uintptr_t)a->dma.cpu; context=(uintptr_t)a;
+    if ((start<=dma ? dma-start<transfer : start-dma<AHCI_DMA_BYTES) ||
+        (start<=context ? context-start<transfer : start-context<sizeof(*a))) return AHCI_INVALID;
+    if ((result=issue(a,0x35,lba,count,in))!=0) return fail(a,result);
     return AHCI_OK;
 }
 
 int ahci_write_sector(struct ahci_device *a,uint64_t lba,const void *in,size_t bytes)
-{
-    int result; uintptr_t start=(uintptr_t)in,dma,context;
-    if (!a || a->state!=AHCI_READY || !in || bytes!=512 || lba>=a->identity.sectors ||
-        lba>=UINT64_C(0x0001000000000000) || start>UINTPTR_MAX-512u) return AHCI_INVALID;
-    if (!a->writable) return AHCI_UNSUPPORTED;
-    dma=(uintptr_t)a->dma.cpu; context=(uintptr_t)a;
-    if ((start<=dma ? dma-start<512u : start-dma<AHCI_DMA_BYTES) ||
-        (start<=context ? context-start<512u : start-context<sizeof(*a))) return AHCI_INVALID;
-    if ((result=issue(a,0x35,lba,in))!=0) return fail(a,result);
-    return AHCI_OK;
-}
-
+{ return ahci_write_sectors(a,lba,1,in,bytes); }
 int ahci_flush(struct ahci_device *a)
 {
     int result;
     if (!a || a->state!=AHCI_READY) return AHCI_INVALID;
     if (!a->writable) return AHCI_UNSUPPORTED;
     if (!(a->identity.features&AHCI_FEATURE_FLUSH_EXT)) return AHCI_UNSUPPORTED;
-    if ((result=issue(a,0xea,0,0))!=0) return fail(a,result);
+    if ((result=issue(a,0xea,0,0,0))!=0) return fail(a,result);
     return AHCI_OK;
 }

@@ -95,12 +95,19 @@ SHZ_EXPORT NTSTATUS NTAPI LdrUnlockLoaderLock(ULONG flags, ULONG_PTR cookie)
  * DLL tracking register one). A registered callback receives LDR_DLL_NOTIFICATION_REASON_LOADED (1) for every module a
  * run-time LdrLoadDll maps (the module and the dependencies it pulled in, in load order, after their DllMain(PROCESS_ATTACH)
  * ran), with the loader lock held, as on Windows. Modules the kernel loader maps before user mode runs (the executable and its
- * load-time imports) were loaded before anything could register, as on Windows. There is no LDR_DLL_NOTIFICATION_REASON_UNLOADED
- * (2): Kernel64 never unmaps an image (LdrUnloadDll only drops the reference count), so no module is ever unloaded.
+ * load-time imports) were loaded before anything could register, as on Windows. A genuine dynamic retirement reports
+ * LDR_DLL_NOTIFICATION_REASON_UNLOADED (2) while the image is mapped and before the kernel commit.
  * Flags must be 0 (reserved). The cookie is the address of the registration record; unregistering takes the loader lock. */
 typedef struct { ULONG Flags; const SHZ_UNICODE_STRING *FullDllName, *BaseDllName; PVOID DllBase; ULONG SizeOfImage; } SHZ_LDR_DLL_NOTIFICATION;
 typedef VOID (NTAPI *SHZ_LDR_NOTIFY_FN)(ULONG reason, const SHZ_LDR_DLL_NOTIFICATION *data, PVOID context);
-typedef struct notify_reg { struct notify_reg *next; SHZ_LDR_NOTIFY_FN fn; PVOID context; } notify_reg_t;
+typedef struct notify_reg {
+    struct notify_reg *next, *retired_next;
+    SHZ_LDR_NOTIFY_FN fn; PVOID context;
+    ULONG64 sequence; unsigned active;
+} notify_reg_t;
+static ULONG64 g_notify_sequence;
+static unsigned g_notify_depth;
+static notify_reg_t *g_notify_retired;
 static notify_reg_t *g_notify;          /* registration order; protected by the loader lock */
 
 SHZ_EXPORT NTSTATUS NTAPI LdrRegisterDllNotification(ULONG flags, SHZ_LDR_NOTIFY_FN fn, PVOID context, PVOID *cookie)
@@ -109,8 +116,12 @@ SHZ_EXPORT NTSTATUS NTAPI LdrRegisterDllNotification(ULONG flags, SHZ_LDR_NOTIFY
     if (flags || !fn || !cookie) return STATUS_INVALID_PARAMETER;
     r = RtlAllocateHeap(ShzProcessHeap(), 0, sizeof *r);
     if (!r) return STATUS_NO_MEMORY;
-    r->next = 0; r->fn = fn; r->context = context;
+    r->next = 0; r->retired_next = 0; r->fn = fn; r->context = context; r->active = 1;
     ShzLoaderLock();
+    if (g_notify_sequence == ~(ULONG64)0) {
+        ShzLoaderUnlock(); RtlFreeHeap(ShzProcessHeap(), 0, r); return STATUS_NO_MEMORY;
+    }
+    r->sequence = ++g_notify_sequence;
     for (tail = &g_notify; *tail; tail = &(*tail)->next) {}
     *tail = r;
     ShzLoaderUnlock();
@@ -125,24 +136,53 @@ SHZ_EXPORT NTSTATUS NTAPI LdrUnregisterDllNotification(PVOID cookie)
     if (!r) return STATUS_INVALID_PARAMETER;
     ShzLoaderLock();
     for (pp = &g_notify; *pp; pp = &(*pp)->next)
-        if (*pp == r) { *pp = r->next; st = STATUS_SUCCESS; break; }
+        if (*pp == r) {
+            *pp = r->next; r->active = 0; st = STATUS_SUCCESS;
+            if (g_notify_depth) { r->retired_next = g_notify_retired; g_notify_retired = r; }
+            else RtlFreeHeap(ShzProcessHeap(), 0, r);
+            break;
+        }
     ShzLoaderUnlock();
-    if (!st) RtlFreeHeap(ShzProcessHeap(), 0, r);
     return st;
 }
 
-/* Called by LdrLoadDll with the loader lock held, after a successful load: every module appended to the load-order list after
- * `last_before` (the tail before the load; NULL head pointer = the whole list) is reported LOADED to each registration. */
-void ShzNotifyLoaded(LIST_ENTRY *last_before)
+/* Registration records remain owned throughout recursive dispatch, including
+ * self-unregistration. New registrations never receive an already active event. */
+static void notify_entry(ULONG reason, SHZ_LDR_ENTRY *e)
+{
+    const ULONG64 snapshot = g_notify_sequence;
+    SHZ_LDR_DLL_NOTIFICATION d;
+    notify_reg_t *r;
+    d.Flags = 0; d.FullDllName = &e->FullDllName; d.BaseDllName = &e->BaseDllName;
+    d.DllBase = e->DllBase; d.SizeOfImage = e->SizeOfImage;
+    ++g_notify_depth;
+    for (r = g_notify; r && r->sequence <= snapshot; r = r->next)
+        if (r->active) r->fn(reason, &d, r->context);
+    if (!--g_notify_depth) while (g_notify_retired) {
+        r = g_notify_retired; g_notify_retired = r->retired_next;
+        RtlFreeHeap(ShzProcessHeap(), 0, r);
+    }
+}
+
+void ShzNotifyUnloaded(SHZ_LDR_ENTRY *e) { notify_entry(2, e); }
+
+/* Called with the exact newly published range captured by LdrLoadDll before
+ * attach callbacks. An attach may genuinely retire the unrelated prior tail,
+ * whose retained entry is then self-linked, or recursively load another batch
+ * which has already received its own notifications. Neither changes this range.
+ * first == head means no new image. The explicit root reference and its import
+ * edges retain the new images; CALLBACK_ACTIVE protects notification reentry. */
+void ShzNotifyLoaded(LIST_ENTRY *first, LIST_ENTRY *last)
 {
     SHZ_PEB_LDR_DATA *ldr = PEB_LDR(shz_peb());
     LIST_ENTRY *head = &ldr->InLoadOrderModuleList, *l;
-    for (l = last_before->Flink; l != head; l = l->Flink) {
+    for (l = first; l != head; l = l->Flink) {
         SHZ_LDR_ENTRY *e = CONTAINING_RECORD(l, SHZ_LDR_ENTRY, InLoadOrderLinks);
-        SHZ_LDR_DLL_NOTIFICATION d;
-        notify_reg_t *r;
-        d.Flags = 0; d.FullDllName = &e->FullDllName; d.BaseDllName = &e->BaseDllName; d.DllBase = e->DllBase; d.SizeOfImage = e->SizeOfImage;
-        for (r = g_notify; r; r = r->next) r->fn(1, &d, r->context);
+        ULONG active = e->Flags & SHZ_LDR_CALLBACK_ACTIVE;
+        e->Flags |= SHZ_LDR_CALLBACK_ACTIVE;
+        notify_entry(1, e);
+        e->Flags = (e->Flags & ~SHZ_LDR_CALLBACK_ACTIVE) | active;
+        if (l == last) break;         /* recursively loaded modules already received their own event */
     }
 }
 

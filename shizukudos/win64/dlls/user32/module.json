@@ -1,1 +1,1 @@
-{"libs": ["gdi32"]}
+{"libs": ["gdi32", "ucrtbase"]}

@@ -8,17 +8,19 @@ well-defined on x86-64 (unaligned loads are supported by the hardware) but not b
 sanitizer is turned off for this one test; every other UBSan check and the full AddressSanitizer stay on and guard the
 200000-iteration unwind-data fuzz and the 100000-iteration __C_specific_handler fuzz.
 """
+import argparse
+import tempfile
 import subprocess
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-BUILD = HERE.parents[2] / "build" / "shizukudos" / "win64" / "petest"
+
 
 
 def run(cmd, **kw):
-    r = subprocess.run([str(x) for x in cmd], capture_output=True, text=True, **kw)
+    r = subprocess.run([str(x) for x in cmd], capture_output=True, text=True, timeout=60, **kw)
     if r.returncode:
         sys.stderr.write(r.stdout + r.stderr)
         raise SystemExit(f"failed: {' '.join(map(str, cmd))}")
@@ -26,14 +28,20 @@ def run(cmd, **kw):
 
 
 def main():
-    BUILD.mkdir(parents=True, exist_ok=True)
-    src = [HERE / "test_unwind.c", ROOT / "ntdll" / "unwind.c"]
-    common = ["-std=c11", "-Wall", "-Wextra", "-I", HERE / "hostshim"]
-    run(["gcc", "-O2", *common, "-Wno-pragmas", *src, "-o", BUILD / "test_unwind"])
-    print(run([BUILD / "test_unwind"]).strip().splitlines()[-1])
-    run(["clang", "-g", "-O1", "-fsanitize=address,undefined", "-fno-sanitize=alignment", "-fno-sanitize-recover=all",
-         "-fno-omit-frame-pointer", *common, *src, "-o", BUILD / "test_unwind_asan"])
-    print("ASan/UBSan:", run([BUILD / "test_unwind_asan"]).strip().splitlines()[-1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--build-dir", type=Path, help="isolated output directory; default: a fresh temporary directory")
+    args = parser.parse_args()
+    build = args.build_dir or Path(tempfile.mkdtemp(prefix="shz-unwind-host-"))
+    build.mkdir(parents=True, exist_ok=True)
+    print("Isolated host outputs:", build)
+    common = ["-std=c11", "-Wall", "-Wextra", "-DSHZ_UNWIND_HOST_TEST", "-I", HERE / "hostshim"]
+    for name in ("test_unwind", "test_unwind_robustness"):
+        src = [HERE / (name + ".c"), ROOT / "ntdll" / "unwind.c"]
+        run(["gcc", "-O2", *common, "-Wno-pragmas", *src, "-o", build / name])
+        print(run([build / name]).strip().splitlines()[-1])
+        run(["clang", "-g", "-O1", "-fsanitize=address,undefined", "-fno-sanitize=alignment", "-fno-sanitize-recover=all",
+             "-fno-omit-frame-pointer", *common, *src, "-o", build / (name + "_asan")])
+        print("ASan/UBSan:", run([build / (name + "_asan")]).strip().splitlines()[-1])
 
 
 if __name__ == "__main__":

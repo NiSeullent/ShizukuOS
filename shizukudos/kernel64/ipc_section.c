@@ -18,6 +18,7 @@
  * Page lookup tables live in physical pages (two levels, 512 entries each), so big sections cost almost no kernel heap.
  */
 #include "ipc.h"
+#include "ipc_section_security.h"
 
 #define SEC_FILE 0x800000u
 #define SEC_IMAGE 0x1000000u
@@ -53,6 +54,62 @@ struct view {
 static int prot_writable(uint32_t p) { p &= 0xff; return p == PAGE_READWRITE || p == PAGE_EXECUTE_READWRITE; }
 static int prot_cow(uint32_t p) { p &= 0xff; return p == PAGE_WRITECOPY || p == PAGE_EXECUTE_WRITECOPY; }
 static int prot_exec(uint32_t p) { p &= 0xff; return p >= PAGE_EXECUTE && p <= PAGE_EXECUTE_WRITECOPY; }
+
+static int section_security_read(void *p, uint64_t addr, void *out, size_t n)
+{
+    return copy_from_user(p, out, addr, n);
+}
+
+/* Capture creation attributes before allocating the section. The object owns
+ * the returned descriptor, using its existing sd lifetime/query support. */
+static int32_t section_security_capture(process_t *p, uint64_t oa, void **sd, uint32_t *len)
+{
+    struct ipc_objattr a;
+    uint8_t *scratch, *saved;
+    int32_t st;
+    *sd = 0; *len = 0;
+    if (!oa) return 0;
+    if (copy_from_user(p, &a, oa, sizeof a)) return STATUS_ACCESS_VIOLATION;
+    if (!a.sd) return 0;
+    scratch = kmalloc(SHZ_SEC_MAX);
+    if (!scratch) return STATUS_INSUFFICIENT_RESOURCES;
+    st = shz_sec_capture(p, section_security_read, a.sd, scratch, len);
+    saved = !st ? kmalloc(*len) : 0;
+    if (!st && !saved) st = STATUS_INSUFFICIENT_RESOURCES;
+    if (!st) { memcpy(saved, scratch, *len); *sd = saved; }
+    kfree(scratch);
+    return st;
+}
+
+int32_t ipc_section_duplicate_access(kobject_t *o, uint32_t granted, uint32_t *desired)
+{
+    const uint64_t f = irq_save();
+    int32_t st;
+    *desired = shz_sec_section_access(*desired);
+    st = shz_sec_section_check(o->sd, o->sd_len, granted, *desired);
+    irq_restore(f);
+    return st;
+}
+
+static int32_t sys_open_section(process_t *p, uint64_t ph, uint64_t access, uint64_t oa)
+{
+    char name[48];
+    uint32_t oattrs = 0, a = (uint32_t)access;
+    kobject_t *o;
+    uint64_t f;
+    int32_t st = ipc_name_from_oa(p, oa, name, sizeof name, &oattrs);
+    if (st) return st;
+    if (!name[0]) return STATUS_OBJECT_NAME_INVALID;
+    f = irq_save();
+    o = ob_find_named(OB_SECTION, name);
+    if (o) ob_ref(o);
+    irq_restore(f);
+    if (!o) return STATUS_OBJECT_NAME_NOT_FOUND;
+    if (o->type != OB_SECTION) { ob_deref(o); return STATUS_OBJECT_TYPE_MISMATCH; }
+    st = ipc_section_duplicate_access(o, 0, &a);
+    if (st) { ob_deref(o); return st; }
+    return ipc_give_handle(p, o, a, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
+}
 
 /* ---------------------------------------------------------------- section pages (interrupts off) */
 static uint64_t *leaf_of(section_t *s, uint64_t idx, int create)
@@ -261,42 +318,49 @@ static int32_t sys_create_section(process_t *p, struct regs *r, uint64_t ph, uin
         if (ex) {
             if (ex->type != OB_SECTION) { ob_deref(ex); return STATUS_OBJECT_TYPE_MISMATCH; }
             if (!(oattrs & OBJ_OPENIF_ATTR)) { ob_deref(ex); return STATUS_OBJECT_NAME_COLLISION; }
-            st = ipc_give_handle(p, ex, (uint32_t)access, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
+            uint32_t a = (uint32_t)access;
+            st = ipc_section_duplicate_access(ex, 0, &a);
+            if (st) { ob_deref(ex); return st; }
+            st = ipc_give_handle(p, ex, a, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
             return st ? st : STATUS_OBJECT_NAME_EXISTS;
         }
     }
     s = kzalloc(sizeof *s);
     if (!s) return STATUS_INSUFFICIENT_RESOURCES;
+    void *sd = 0;
+    uint32_t sd_len = 0;
+    st = section_security_capture(p, oa, &sd, &sd_len);
+    if (st) { kfree(s); return st; }
     if (fh) {
         uint32_t faccess = 0;
         file_t *file;
         st = ipc_ref_handle(p, fh, OB_FILE, &fobj, &faccess);
-        if (st) { kfree(s); return st == STATUS_OBJECT_TYPE_MISMATCH ? STATUS_INVALID_HANDLE : st; }
+        if (st) { kfree(sd); kfree(s); return st == STATUS_OBJECT_TYPE_MISMATCH ? STATUS_INVALID_HANDLE : st; }
         file = fobj->u.file.file;
-        if (!file || !file->node || file->node->is_dir) { ob_deref(fobj); kfree(s); return STATUS_INVALID_PARAMETER; }
+        if (!file || !file->node || file->node->is_dir) { ob_deref(fobj); kfree(sd); kfree(s); return STATUS_INVALID_PARAMETER; }
         if (!(faccess & (GENERIC_READ_ACCESS | GENERIC_ALL_ACCESS | FILE_READ_DATA_ACCESS)) && !(faccess & 0x120089)) {
-            ob_deref(fobj); kfree(s); return STATUS_ACCESS_DENIED;
+            ob_deref(fobj); kfree(sd); kfree(s); return STATUS_ACCESS_DENIED;
         }
         s->file_writable = (faccess & (GENERIC_WRITE_ACCESS | GENERIC_ALL_ACCESS | FILE_WRITE_DATA_ACCESS)) != 0;
-        if (prot_writable(pb) && !s->file_writable) { ob_deref(fobj); kfree(s); return STATUS_ACCESS_DENIED; }
+        if (prot_writable(pb) && !s->file_writable) { ob_deref(fobj); kfree(sd); kfree(s); return STATUS_ACCESS_DENIED; }
         if (!prot_writable(pb)) s->file_writable = 0;                   /* only a writable section writes the file */
         if (size == 0) size = (int64_t)file->node->size;
-        if (size == 0) { ob_deref(fobj); kfree(s); return STATUS_MAPPED_FILE_SIZE_ZERO; }
+        if (size == 0) { ob_deref(fobj); kfree(sd); kfree(s); return STATUS_MAPPED_FILE_SIZE_ZERO; }
         if ((uint64_t)size > file->node->size) {
             if (!prot_writable(pb) || fs_truncate(file->node, (uint64_t)size)) {   /* Windows extends the file */
-                ob_deref(fobj); kfree(s); return STATUS_SECTION_TOO_BIG;
+                ob_deref(fobj); kfree(sd); kfree(s); return STATUS_SECTION_TOO_BIG;
             }
         }
         s->node = file->node;
         ++s->node->open_count;                           /* the file stays until the section dies */
         ob_deref(fobj);
     } else if (size == 0) {
-        kfree(s);
+        kfree(sd); kfree(s);
         return STATUS_INVALID_PARAMETER_4;
     }
     if ((uint64_t)size > MAX_SECTION_BYTES) {
         if (s->node) --s->node->open_count;
-        kfree(s);
+        kfree(sd); kfree(s);
         return STATUS_SECTION_TOO_BIG;
     }
     s->size = (uint64_t)size;
@@ -307,12 +371,13 @@ static int32_t sys_create_section(process_t *p, struct regs *r, uint64_t ph, uin
     o = s->dir ? ob_create(OB_SECTION, name) : 0;
     if (!o) {
         if (s->node) --s->node->open_count;
-        kfree(s->dir); kfree(s);
+        kfree(s->dir); kfree(sd); kfree(s);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     o->u.file.file = s;
+    o->sd = sd; o->sd_len = sd_len;
     ++ipc_stat_sections;
-    return ipc_give_handle(p, o, (uint32_t)access, (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
+    return ipc_give_handle(p, o, shz_sec_section_access((uint32_t)access), (oattrs & OBJ_INHERIT_ATTR) != 0, ph, 0);
 }
 
 /* NtMapViewOfSection(Section, Process, PVOID *Base, ULONG_PTR ZeroBits, SIZE_T CommitSize, PLARGE_INTEGER Offset,
@@ -471,7 +536,7 @@ int32_t ipc_section_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t
     *handled = 1;
     switch (num) {
     case SYS_NtCreateSection: return sys_create_section(p, r, a1, a2, a3, a4);
-    case SYS_NtOpenSection: return ipc_open_named(p, OB_SECTION, a1, a2, a3);
+    case SYS_NtOpenSection: return sys_open_section(p, a1, a2, a3);
     case SYS_NtMapViewOfSection: return sys_map_view(p, r, a1, a2, a3, a4);
     case SYS_NtUnmapViewOfSection: return sys_unmap_view(p, a1, a2);
     case SYS_NtQuerySection: return sys_query_section(p, r, a1, a2, a3, a4);

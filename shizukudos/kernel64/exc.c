@@ -26,7 +26,7 @@ static void describe(process_t *p, uint64_t a, char *out, unsigned cap);
 
 /* `shz.exctrace` on the kernel command line: one line per hardware exception handed to user mode (first chance), with
  * the module return addresses of the stack, so a fault that a program's own filter swallows (crash reporters) still
- * leaves evidence. At most 256 lines per boot. */
+ * leaves evidence. At most 256 exceptions per boot. */
 static void trace_first_chance(process_t *p, thread_t *t, const struct regs *r, uint32_t code, uint64_t info0, uint64_t info1)
 {
     static int enabled = -1;
@@ -39,6 +39,10 @@ static void trace_first_chance(process_t *p, thread_t *t, const struct regs *r, 
     if (code == 0x80000003u) { extern void k64_systrace_dump(void); k64_systrace_dump(); }     /* the failing calls that led to a CHECK */
     describe(p, r->rip, d, sizeof d);
     kprintf("K64 exc: pid %d tid %llu first-chance %x at %s (%llx %llx) rsp %llx\n", p->pid, t->tid, code, d, info0, info1, r->rsp);
+    kprintf("K64 exc:   regs rax=%llx rbx=%llx rcx=%llx rdx=%llx rsi=%llx rdi=%llx rbp=%llx flags=%llx vector=%llu error=%llx\n",
+            r->rax, r->rbx, r->rcx, r->rdx, r->rsi, r->rdi, r->rbp, r->rflags, r->vector, r->error);
+    kprintf("K64 exc:   regs r8=%llx r9=%llx r10=%llx r11=%llx r12=%llx r13=%llx r14=%llx r15=%llx\n",
+            r->r8, r->r9, r->r10, r->r11, r->r12, r->r13, r->r14, r->r15);
     for (k = 0; k < 512 && shown < 10; ++k) {
         uint64_t v;
         unsigned j, is_mod = 0;

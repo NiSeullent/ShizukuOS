@@ -544,11 +544,23 @@ DLLAPI DWORD WINAPI MsgWaitForMultipleObjectsEx(DWORD n, const HANDLE *handles, 
         t.op = SHZ_TOP_QUEUESTATUS;
         t.a = mask;
         if (NtUserThreadOp(&t) < 0) return WAIT_FAILED;
-        if (t.out0 && !(flags & MWMO_WAITALL)) return WAIT_OBJECT_0 + n;
+        if (t.out0 && !(flags & MWMO_WAITALL)) {
+            /* Ready handles retain array-order priority over the queue,
+             * including zero-time polling and a pending APC. */
+            if (n) {
+                r = WaitForMultipleObjectsEx(n, handles, FALSE, 0, (flags & MWMO_ALERTABLE) != 0);
+                if (r != WAIT_TIMEOUT) return r;
+            }
+            return WAIT_OBJECT_0 + n;
+        }
         if (ms != INFINITE) {
             const DWORD el = GetTickCount() - start;
-            if (el >= ms) return WAIT_TIMEOUT;
-            timeout = ms - el;
+            /* Retain the existing WAITALL queue boundary; CoWait explicitly
+             * refuses STA WAITALL until mask-specific atomic input exists. */
+            if (el >= ms && (flags & MWMO_WAITALL)) return WAIT_TIMEOUT;
+            /* Even an expired/zero deadline must poll the actual objects once;
+             * an already signaled object is not an elapsed-time failure. */
+            timeout = el >= ms ? 0 : ms - el;
         }
         if (t.out1 != 0xffffffffull && (timeout == INFINITE || t.out1 + 1 < timeout)) { timeout = (DWORD)t.out1 + 1; timer_limited = 1; }
         r = WaitForMultipleObjectsEx(n + 1, all, (flags & MWMO_WAITALL) != 0, timeout, (flags & MWMO_ALERTABLE) != 0);
@@ -557,6 +569,7 @@ DLLAPI DWORD WINAPI MsgWaitForMultipleObjectsEx(DWORD n, const HANDLE *handles, 
             t.op = SHZ_TOP_QUEUESTATUS;
             t.a = mask;
             if (NtUserThreadOp(&t) >= 0 && t.out0) return r;
+            if (ms != INFINITE && GetTickCount() - start >= ms) return WAIT_TIMEOUT;
             Sleep(1);                                              /* something is pending, but not what the caller asked for */
             continue;
         }

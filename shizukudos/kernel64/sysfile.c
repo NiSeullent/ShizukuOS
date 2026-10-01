@@ -100,11 +100,38 @@ kobject_t *console_object(int output)
 {
     kobject_t *o = ob_create(OB_FILE, 0);
     file_t *f = kzalloc(sizeof *f);
-    if (!o || !f) return 0;
+    if (!o || !f) { if (o) ob_deref(o); if (f) kfree(f); return 0; }
     f->console = output ? 2 : 1;
     f->access = output ? GENERIC_WRITE : GENERIC_READ;
+    f->options = 0x20;
     o->u.file.file = f;
     return o;
+}
+
+/* The NUL device (\\??\\NUL): a file object that takes every write and reports end of file on every read. */
+static kobject_t *null_object(uint32_t access, uint32_t options)
+{
+    kobject_t *o = ob_create(OB_FILE, 0);
+    file_t *f = kzalloc(sizeof *f);
+    if (!o || !f) { if (o) ob_deref(o); if (f) kfree(f); return 0; }
+    f->console = 3;
+    f->access = access;
+    f->options = options;
+    o->u.file.file = f;
+    o->u.file.access = access;
+    return o;
+}
+
+static int path_is_nul(const char *path)
+{
+    static const char want[] = "\\??\\nul";
+    unsigned i;
+    for (i = 0; want[i]; ++i) {
+        char c = path[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+        if (c != want[i]) return 0;
+    }
+    return path[i] == 0;
 }
 
 static file_t *file_of(process_t *p, uint64_t h, kobject_t **obj)
@@ -173,14 +200,27 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     /* A drive letter without a mounted volume names no device (Windows: the \??\Z: link is missing, so the path is not found). */
     if (path[0] == '\\' && path[1] == '?' && path[2] == '?' && path[3] == '\\' && path[4] && path[5] == ':' && !fs_root_of(path[4]))
         return STATUS_OBJECT_PATH_NOT_FOUND;
+    if (path_is_nul(path)) {
+        if (options & FILE_DIRECTORY_FILE) return STATUS_NOT_A_DIRECTORY;
+        o = null_object((uint32_t)a2, options);
+        if (!o) return STATUS_NO_MEMORY;
+        st = handle_insert(p, o, (uint32_t)a2, &h);
+        if (st) file_object_closed(o);
+        ob_deref(o);
+        if (st) return st;
+        if (copy_to_user(p, a1, &(uint64_t){h}, 8)) { handle_close(p, h); return STATUS_ACCESS_VIOLATION; }
+        set_iosb(p, a4, STATUS_SUCCESS, IO_OPENED);
+        return STATUS_SUCCESS;
+    }
     /* console pseudo-devices */
     if (!strcmp(path, "\\??\\CONOUT$") || !strcmp(path, "\\??\\CONIN$")) {
         o = console_object(path[6] == 'O');
         if (!o) return STATUS_NO_MEMORY;
         st = handle_insert(p, o, (uint32_t)a2, &h);
+        if (st) file_object_closed(o);
         ob_deref(o);
         if (st) return st;
-        if (copy_to_user(p, a1, &(uint64_t){h}, 8)) return STATUS_ACCESS_VIOLATION;
+        if (copy_to_user(p, a1, &(uint64_t){h}, 8)) { handle_close(p, h); return STATUS_ACCESS_VIOLATION; }
         set_iosb(p, a4, STATUS_SUCCESS, IO_OPENED);
         return STATUS_SUCCESS;
     }
@@ -217,18 +257,20 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     if (n->is_dir && (a2 & (GENERIC_WRITE | FILE_WRITE_DATA))) return STATUS_FILE_IS_A_DIRECTORY;
     f = kzalloc(sizeof *f);
     o = ob_create(OB_FILE, 0);
-    if (!f || !o) return STATUS_NO_MEMORY;
+    if (!f || !o) { if (o) ob_deref(o); if (f) kfree(f); return STATUS_NO_MEMORY; }
     f->node = n;
     f->access = (uint32_t)a2;
+    f->options = options;
     f->append = (a2 & FILE_APPEND_DATA) && !(a2 & FILE_WRITE_DATA);
     ++n->open_count;
     if (options & FILE_DELETE_ON_CLOSE) n->delete_pending = 1;
     o->u.file.file = f;
     o->u.file.access = (uint32_t)a2;
     st = handle_insert(p, o, (uint32_t)a2, &h);
+    if (st) file_object_closed(o);
     ob_deref(o);
     if (st) return st;
-    if (copy_to_user(p, a1, &(uint64_t){h}, 8)) return STATUS_ACCESS_VIOLATION;
+    if (copy_to_user(p, a1, &(uint64_t){h}, 8)) { handle_close(p, h); return STATUS_ACCESS_VIOLATION; }
     set_iosb(p, a4, STATUS_SUCCESS, info);
     return STATUS_SUCCESS;
 }
@@ -242,6 +284,22 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
     uint8_t *tmp;
     uint64_t chunk;
     if (!f) return STATUS_INVALID_HANDLE;
+    if (f->console == 3) {                                  /* NUL: real access and caller-buffer checks */
+        int32_t st = write || !len ? STATUS_SUCCESS : STATUS_END_OF_FILE;
+        if (write ? !(f->access & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA)) :
+                    !(f->access & (GENERIC_READ | GENERIC_ALL | FILE_READ_DATA))) return STATUS_ACCESS_DENIED;
+        if (write) {
+            uint8_t discard[256];
+            uint64_t left = len, at = buf;
+            while (left) {
+                uint64_t n = left < sizeof discard ? left : sizeof discard;
+                if (copy_from_user(p, discard, at, n)) return STATUS_ACCESS_VIOLATION;
+                at += n; left -= n;
+            }
+        }
+        set_iosb(p, iosb, st, write ? len : 0);
+        return st;
+    }
     if (f->console) {
         if (write) {
             char line[128];
@@ -335,6 +393,35 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
 struct basicinfo { uint64_t create, access, write, change; uint32_t attrs, pad; };
 struct stdinfo { int64_t alloc, eof; uint32_t links; uint8_t delete_pending, directory; uint16_t pad; };
 
+/* The volume-relative name of the file behind `f` as UTF-16 (FileNameInformation and FileAllInformation); STATUS_SUCCESS or
+ * STATUS_OBJECT_NAME_INVALID when it does not fit. The complete chain is bounded without silently discarding ancestors.
+ * FileAllInformation layout: Microsoft ntifs.h FILE_ALL_INFORMATION, fixed size 104, FileName offset 100:
+ * https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_all_information
+ * The original E1 proposal is preserved under docs/shizukudos10/reports/e1-proposed/. */
+static int32_t file_name_utf16(const file_t *f, uint16_t *w, uint32_t cap, uint32_t *nchars_out)
+{
+    const fsnode_t *chain[128];
+    uint32_t depth = 0, nchars = 0;
+    const fsnode_t *n;
+    if (!cap) return STATUS_OBJECT_NAME_INVALID;
+    for (n = f->node; n && n->parent; n = n->parent) {
+        if (depth == sizeof chain / sizeof chain[0]) return STATUS_OBJECT_NAME_INVALID;
+        chain[depth++] = n;
+    }
+    if (!depth) { w[nchars++] = '\\'; }
+    while (depth) {
+        const fsnode_t *c = chain[--depth];
+        int wn;
+        if (nchars + 1 >= cap) return STATUS_OBJECT_NAME_INVALID;
+        w[nchars++] = '\\';
+        wn = utf8_to_utf16(c->name, w + nchars, cap - nchars);
+        if (wn < 0) return STATUS_OBJECT_NAME_INVALID;
+        nchars += (uint32_t)wn;
+    }
+    *nchars_out = nchars;
+    return STATUS_SUCCESS;
+}
+
 static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb, uint64_t buf, uint64_t len)
 {
     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
@@ -347,7 +434,7 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         memset(&b, 0, sizeof b);
         if (f->node) { b.create = node_time(f->node, 0); b.write = node_time(f->node, 2); b.access = node_time(f->node, 1);
                        b.change = b.write; b.attrs = f->node->attrs; }
-        else b.attrs = f->console ? 0x40 : FILE_ATTRIBUTE_NORMAL;      /* console pseudo-device: FILE_ATTRIBUTE_DEVICE marks it for GetFileType */
+        else b.attrs = f->console == 1 || f->console == 2 ? 0x40 : FILE_ATTRIBUTE_NORMAL;      /* console pseudo-device: FILE_ATTRIBUTE_DEVICE marks it for GetFileType */
         if (copy_to_user(p, buf, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
         set_iosb(p, iosb, STATUS_SUCCESS, sizeof b);
         return STATUS_SUCCESS;
@@ -362,6 +449,45 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
         set_iosb(p, iosb, STATUS_SUCCESS, sizeof s);
         return STATUS_SUCCESS;
     }
+    case 18: {                                           /* FileAllInformation (what libuv's stat asks for): 104 bytes without the name */
+        uint8_t all[104];
+        uint16_t w[512];
+        struct basicinfo b;
+        struct stdinfo sd;
+        int64_t idx = f->node ? (int64_t)node_file_id(f->node) : 0;
+        uint32_t nchars = 0, total, room, copy, access = f->access, mode = f->options & 0x183e, zero = 0;
+        int64_t pos = (int64_t)f->pos;
+        int32_t st = STATUS_SUCCESS;
+        if (len < sizeof all) return STATUS_INFO_LENGTH_MISMATCH;
+        memset(&b, 0, sizeof b);
+        memset(&sd, 0, sizeof sd);
+        if (f->node) {
+            b.create = node_time(f->node, 0); b.write = node_time(f->node, 2); b.access = node_time(f->node, 1);
+            b.change = b.write; b.attrs = f->node->attrs;
+            sd.eof = (int64_t)f->node->size; sd.alloc = (int64_t)((f->node->size + 4095) & ~4095ull);
+            sd.directory = f->node->is_dir; sd.delete_pending = f->node->delete_pending; sd.links = 1;
+            st = file_name_utf16(f, w, 512, &nchars);
+            if (st) return st;
+        } else {
+            b.attrs = f->console == 1 || f->console == 2 ? 0x40 : FILE_ATTRIBUTE_NORMAL;
+        }
+        memset(all, 0, sizeof all);
+        memcpy(all + 0, &b, 40);                          /* FILE_BASIC_INFORMATION */
+        memcpy(all + 40, &sd, 24);                        /* FILE_STANDARD_INFORMATION */
+        memcpy(all + 64, &idx, 8);                        /* FILE_INTERNAL_INFORMATION */
+        memcpy(all + 72, &zero, 4);                       /* FILE_EA_INFORMATION: no extended attributes */
+        memcpy(all + 76, &access, 4);                     /* FILE_ACCESS_INFORMATION */
+        memcpy(all + 80, &pos, 8);                        /* FILE_POSITION_INFORMATION */
+        memcpy(all + 88, &mode, 4);                       /* FILE_MODE_INFORMATION: FILE_SYNCHRONOUS_IO_NONALERT */
+        memcpy(all + 92, &zero, 4);                       /* FILE_ALIGNMENT_INFORMATION: byte aligned */
+        total = nchars * 2;
+        memcpy(all + 96, &total, 4);                      /* FILE_NAME_INFORMATION.FileNameLength; the name follows at 100 */
+        room = (uint32_t)len - 100;
+        copy = total < room ? total : room & ~1u;
+        if (copy_to_user(p, buf, all, 100) || (copy && copy_to_user(p, buf + 100, w, copy))) return STATUS_ACCESS_VIOLATION;
+        set_iosb(p, iosb, copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS, 100 + copy);
+        return copy < total ? STATUS_BUFFER_OVERFLOW : STATUS_SUCCESS;
+    }
     case 6: {                                            /* FileInternalInformation: {LARGE_INTEGER IndexNumber} */
         int64_t idx = f->node ? (int64_t)node_file_id(f->node) : 0;
         if (len < 8) return STATUS_BUFFER_TOO_SMALL;
@@ -371,21 +497,12 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle
     }
     case 9: {                                            /* FileNameInformation: {ULONG FileNameLength; WCHAR FileName[]}, volume-relative */
         uint16_t w[512];
-        const fsnode_t *chain[24];
-        uint32_t depth = 0, nchars = 0, total, room, copy;
-        const fsnode_t *n;
+        uint32_t nchars = 0, total, room, copy;
+        int32_t st;
         if (!f->node) return STATUS_INVALID_PARAMETER;
         if (len < 4) return STATUS_BUFFER_TOO_SMALL;
-        for (n = f->node; n && n->parent && depth < 24; n = n->parent) chain[depth++] = n;
-        if (!depth) { w[nchars++] = '\\'; }
-        while (depth) {
-            const fsnode_t *c = chain[--depth];
-            if (nchars + 1 >= 512) return STATUS_OBJECT_NAME_INVALID;
-            w[nchars++] = '\\';
-            const int wn = utf8_to_utf16(c->name, w + nchars, 512 - nchars);
-            if (wn < 0) return STATUS_OBJECT_NAME_INVALID;
-            nchars += (uint32_t)wn;
-        }
+        st = file_name_utf16(f, w, 512, &nchars);
+        if (st) return st;
         total = nchars * 2;
         room = (uint32_t)len - 4;
         copy = total < room ? total : room & ~1u;
@@ -631,6 +748,8 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
     const uint64_t name_us = (uint64_t)stack_arg(p, r, 10);
     file_t *f = file_of(p, handle, 0);
     fsnode_t *c;
+    fsnode_t *next_child;
+    unsigned dot_phase;
     uint64_t idx = 0, written = 0, prev_at = 0;
     unsigned name_off, len_off;
     int first_call;
@@ -657,14 +776,29 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
     }
     f->dir_started = 1;
     fs_populate(f->node);                                /* disk directory: enumerate on first use */
-    for (c = f->node->child; c; c = c->sibling) {
+    next_child = f->node->child;
+    dot_phase = f->node->parent ? 0 : 2;                  /* volume roots have no parent entries */
+    while (dot_phase < 2 || next_child) {
         uint8_t entry[112 + FS_NAME_MAX * 2 + 8];
         uint16_t wname[FS_NAME_MAX];
         uint32_t nchars = 0, size;
+        const char *entry_name;
+        int hierarchy_entry = dot_phase < 2;
         int wn;
+        /* NT callers enumerate the real directory and parent identities as
+         * '.' and '..'. libuv skips these names before reporting empty lists;
+         * omitting them made its first empty scan fail with NO_SUCH_FILE. */
+        if (hierarchy_entry) {
+            c = dot_phase == 0 ? f->node : f->node->parent;
+            entry_name = dot_phase++ == 0 ? "." : "..";
+        } else {
+            c = next_child;
+            next_child = c->sibling;
+            entry_name = c->name;
+        }
         if (c->delete_pending) continue;
         if (idx++ < f->dir_index) continue;
-        wn = utf8_to_utf16(c->name, wname, FS_NAME_MAX);
+        wn = utf8_to_utf16(entry_name, wname, FS_NAME_MAX);
         nchars = wn < 0 ? 0 : (uint32_t)wn;
         if (f->dir_pattern && !wild(f->dir_pattern, wname)) { ++f->dir_index; continue; }
         memset(entry, 0, name_off);
@@ -679,7 +813,7 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle
             *(uint64_t *)(entry + 48) = (c->size + 4095) & ~4095ull;
             *(uint32_t *)(entry + 56) = c->attrs;
         }
-        if ((cls == 3 || cls == 37) && c->alias[0]) {                          /* ShortName: the 8.3 alias */
+        if ((cls == 3 || cls == 37) && !hierarchy_entry && c->alias[0]) {       /* ShortName: the 8.3 alias */
             unsigned k;
             for (k = 0; c->alias[k] && k < 12; ++k) *(uint16_t *)(entry + 70 + 2 * k) = (uint8_t)c->alias[k];
             entry[68] = (uint8_t)(k * 2);

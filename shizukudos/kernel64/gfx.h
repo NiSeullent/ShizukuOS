@@ -98,6 +98,7 @@ struct gwin {
     int32_t x, y, w, h;                             /* window rectangle: parent client coordinates (screen for top-level) */
     int32_t ncl, nct, ncr, ncb;                     /* non-client insets */
     uint32_t *surf;                                 /* client surface, sw*sh dwords 0x00RRGGBB (gfx_pages_alloc) */
+    uint8_t *written;                               /* lazy one-bit coverage of actual client submissions; never a color key */
     int32_t sw, sh;
     shz_rect_t upd[SHZ_UPD_RECTS];                  /* update region: disjoint rectangles, client coordinates */
     uint32_t nupd;
