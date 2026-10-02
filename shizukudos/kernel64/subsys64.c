@@ -640,7 +640,33 @@ void subsys64_start(const shz_bootinfo_t *bi)
 /* ================================================================== standalone loopback self-test
  * The service runs on its own kernel thread over a channel in kernel memory; this thread is the client and
  * sends byte-identical frames to what NTWRAP9X.VXD puts on the ring for NTW32.DLL. */
-static uint8_t loop_chan[131072] __attribute__((aligned(4096)));
+/* The optional standalone test channel belongs to the heap, not the boot image.
+ * Keep its full capacity and page alignment; the service thread must be joined
+ * before releasing the backing allocation. */
+/* LOOPBACK_STORAGE_BEGIN: host regression exercises these actual helpers. */
+#define LOOP_CHAN_BYTES 131072u
+#define LOOP_CHAN_ALIGN 4096u
+static uint8_t *loop_chan;
+static void *loop_chan_storage;
+
+static int loop_channel_allocate(void)
+{
+    if (loop_chan_storage) return 0;
+    void *storage = kmalloc(LOOP_CHAN_BYTES + LOOP_CHAN_ALIGN - 1);
+    if (!storage) return 0;
+    loop_chan_storage = storage;
+    loop_chan = (uint8_t *)(((uintptr_t)storage + LOOP_CHAN_ALIGN - 1) &
+                           ~(uintptr_t)(LOOP_CHAN_ALIGN - 1));
+    return 1;
+}
+
+static void loop_channel_release(void)
+{
+    kfree(loop_chan_storage);
+    loop_chan_storage = 0;
+    loop_chan = 0;
+}
+/* LOOPBACK_STORAGE_END */
 static unsigned passed, failed;
 #define CHECK(name, cond) do { if (cond) { kprintf("K64 subsys64 PASS: %s\n", name); ++passed; } \
     else { kprintf("K64 subsys64 FAIL: %s\n", name); ++failed; } } while (0)
@@ -1292,8 +1318,13 @@ static void selftest(void)
     uint32_t pid;
     const uint64_t free_before = pmm_free_count();
 
-    KASSERT(shz_channel_init(loop_chan, sizeof loop_chan, 2, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 32, 1) == SHZ_OK);
-    bind_channel(loop_chan, sizeof loop_chan, SHZ_DOM_WIN98);
+    if (!loop_channel_allocate()) {
+        kprintf("K64 subsys64: loopback channel allocation failed; self-test failed\n");
+        shz_evidence(31, 0x57340001ull);
+        return;
+    }
+    KASSERT(shz_channel_init(loop_chan, LOOP_CHAN_BYTES, 2, SHZ_DOM_KERNEL64, SHZ_DOM_WIN98, 32, 1) == SHZ_OK);
+    bind_channel(loop_chan, LOOP_CHAN_BYTES, SHZ_DOM_WIN98);
     cl_tx = shz_channel_ring_tx(loop_chan, chan, SHZ_DOM_WIN98);
     cl_rx = shz_channel_ring_rx(loop_chan, chan, SHZ_DOM_WIN98);
     svc = thread_create("w64svc", service_thread, 0);
@@ -1491,6 +1522,12 @@ static void selftest(void)
     kprintf("K64 PMA bridge: %u passed, %u failed\n", pma_passed, pma_failed);
     KASSERT(passed <= 255 && failed <= 255);
     shz_evidence(31, 0x57340000ull | ((uint64_t)passed << 8) | failed);
+    /* pma_shutdown_selftest joined svc above: no service can touch the channel. */
+    chan_base = 0;
+    chan_size = 0;
+    chan = 0;
+    rx = tx = cl_rx = cl_tx = 0;
+    loop_channel_release();
 }
 
 void subsys64_start(const shz_bootinfo_t *bi)
