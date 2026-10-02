@@ -27,6 +27,26 @@ class InputTests(unittest.TestCase):
         self.data = b"owned real host fixture\r\n" * 100
         self.input.write_bytes(self.data)
         self.pin = hashlib.sha256(self.data).hexdigest()
+        if os.environ.get('SHZ_NATIVE_INPUT_TEST_ROOT'):
+            # Tiny host tmpfs has no 17 GiB production media capacity. Model
+            # that capacity only for this fixture; keep actual 6 GiB+160 MiB
+            # RAM/FS floors and production space() arithmetic unchanged.
+            real_space = BUILDER.space
+            def fixture_space(path, remaining=0):
+                stats = os.statvfs(self.root)
+                free = stats.f_bavail * stats.f_frsize
+                mem = int(next(row.split()[1] for row in Path('/proc/meminfo').read_text().splitlines() if row.startswith('MemAvailable:'))) * 1024
+                assert free >= (6 << 30) + (160 << 20) and mem >= (6 << 30) + (160 << 20)
+                assert self.root == Path(path).parent or self.root in Path(path).parents
+                usage = shutil._ntuple_diskusage(free + BUILDER.RESERVE, 0, free + BUILDER.RESERVE)
+                with mock.patch.object(BUILDER.shutil, 'disk_usage', return_value=usage):
+                    real_space(path, remaining)
+            capacity = mock.patch.object(BUILDER, 'space', fixture_space)
+            capacity.start();self.addCleanup(capacity.stop)
+            spec = importlib.util.spec_from_file_location('input_fixture_capacity', HERE/'test_input_lease_lifetime.py')
+            helper = importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+            child_capacity = mock.patch.object(BUILDER, 'command', helper.fixture_worker_capacity_command(BUILDER.command))
+            child_capacity.start();self.addCleanup(child_capacity.stop)
 
     def tearDown(self):
         self.folder.cleanup()
