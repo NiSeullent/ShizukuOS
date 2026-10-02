@@ -613,11 +613,8 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
 /* Retarget published user threads, including initialized TS_NEW threads.
  * The bounded native slot table and the entire two-pass operation share one
  * IRQ guard: every possible refusal precedes the first policy mutation. */
-static int32_t set_process_priority_class(process_t *cur, uint64_t h, uint64_t buf, uint64_t len)
+int32_t ipc_set_process_priority_class(process_t *p, kobject_t *o, uint32_t cls)
 {
-    process_t *p;
-    kobject_t *o;
-    uint32_t cls;
     uint64_t f;
     unsigned pass, i;
     thread_t *t;
@@ -625,17 +622,13 @@ static int32_t set_process_priority_class(process_t *cur, uint64_t h, uint64_t b
     shz_nt_sched_projection_t projection;
     shz_nt_sched_result_t result;
     sched_policy_t policy;
-    if (len != sizeof cls) return STATUS_INFO_LENGTH_MISMATCH;
-    st = ipc_ref_process(cur, h, PROCESS_SET_INFORMATION, &p, &o);
-    if (st) return st;
-    if (copy_from_user(cur, &cls, buf, sizeof cls)) { ob_deref(o); return STATUS_ACCESS_VIOLATION; }
     result = shz_nt_sched_from_win32(cls, 0, &projection);
     if (result != SHZ_NT_SCHED_OK) {
-        ob_deref(o);
         return result == SHZ_NT_SCHED_UNSUPPORTED ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
     }
     f = irq_save();
-    if (!p || !p->used || p->object != o || p->terminated || p->teardown || p->exit_owner) {
+    if (!p || !o || o->type != OB_PROCESS || o->u.proc.p != p ||
+        !p->used || p->object != o || p->terminated || p->teardown || p->exit_owner) {
         st = STATUS_PROCESS_IS_TERMINATING;
         goto out;
     }
@@ -665,6 +658,20 @@ static int32_t set_process_priority_class(process_t *cur, uint64_t h, uint64_t b
     st = STATUS_SUCCESS;
 out:
     irq_restore(f);
+    return st;
+}
+
+static int32_t set_process_priority_class(process_t *cur, uint64_t h, uint64_t buf, uint64_t len)
+{
+    process_t *p;
+    kobject_t *o;
+    uint32_t cls;
+    int32_t st;
+    if (len != sizeof cls) return STATUS_INFO_LENGTH_MISMATCH;
+    st = ipc_ref_process(cur, h, PROCESS_SET_INFORMATION, &p, &o);
+    if (st) return st;
+    st = copy_from_user(cur, &cls, buf, sizeof cls) ? STATUS_ACCESS_VIOLATION :
+         ipc_set_process_priority_class(p, o, cls);
     ob_deref(o);
     return st;
 }

@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Host contracts execute extracted, unchanged production function bodies.
  * Fixtures adapt privileged IRQ, process/handle tables, allocation, user-copy,
- * resume and blocking TLS boundaries. Real TCB/object schemas, queue/policy,
- * CPUID identity and reclaim bodies run here. The topology fixture maps one
+ * resume, clock and blocking TLS boundaries. Real complete TCB/process/object
+ * schemas, queue/policy, CPUID identity, object refs and reclaim bodies run here. The topology fixture maps one
  * permitted host CPU; no AP, hardware context switch or Windows 98 runs. */
 #define _GNU_SOURCE
 #include <stdint.h>
@@ -13,25 +13,26 @@
 #include <sched.h>
 #include "ntsys.h"
 #include "nt_sched_policy.h"
+#if __has_include("nt_process_priority.h")
+#include "nt_process_priority.h"
+#else
+/* The pre-implementation RED freezes the independently specified native ABI;
+ * this declaration supplies no implementation or conversion algorithm. */
+typedef struct { uint8_t Foreground, PriorityClass; } shz_nt_process_priority_t;
+#define SHZ_NT_PROCESS_PRIORITY_INFO_CLASS 18u
+#endif
 
 #include "thread-layout.inc" /* complete actual production TCB schema */
-enum { OB_THREAD = 1, OB_PROCESS = 2, OB_JOB = 3 };
 #define CURRENT_THREAD_HANDLE UINT64_C(0xfffffffffffffffe)
 #define CURRENT_PROCESS_HANDLE UINT64_MAX
 #define THREAD_SET_INFORMATION 0x20u
 #define THREAD_QUERY_INFORMATION 0x40u
 #define PROCESS_SET_INFORMATION 0x200u
-#define VK_STACK 1u
+#define PROCESS_QUERY_INFORMATION 0x400u
+#define PROCESS_QUERY_LIMITED_INFORMATION 0x1000u
 #define K32S_PRIORITY_CLASS 1
-#include "object-layout.inc" /* the actual production object schema */
-struct process {
-    int used, pid, terminated, teardown, threads_alive;
-    thread_t *exit_owner, *main_thread;
-    uint64_t next_tid;
-    uint32_t priority_class;
-    char name[32];
-    kobject_t *object;
-};
+#define K32Q_PROCESS_INFO 3
+#include "process-layout.inc" /* actual complete process, VAD, handle and object declarations */
 struct regs { uint64_t arg5; };
 typedef void *HANDLE;
 typedef int BOOL;
@@ -53,11 +54,21 @@ typedef uint64_t ULONG64, DWORD_PTR;
 #define THREAD_PRIORITY_ERROR_RETURN INT32_MAX
 #define THREAD_MODE_BACKGROUND_BEGIN 0x10000
 #define THREAD_MODE_BACKGROUND_END 0x20000
+#define PROCESS_MODE_BACKGROUND_BEGIN 0x100000
+#define PROCESS_MODE_BACKGROUND_END 0x200000
+#define IDLE_PRIORITY_CLASS 0x40u
+#define BELOW_NORMAL_PRIORITY_CLASS 0x4000u
+#define NORMAL_PRIORITY_CLASS 0x20u
+#define ABOVE_NORMAL_PRIORITY_CLASS 0x8000u
+#define HIGH_PRIORITY_CLASS 0x80u
+#define REALTIME_PRIORITY_CLASS 0x100u
 #define ERROR_INVALID_HANDLE 6u
 #define ERROR_ACCESS_DENIED 5u
 #define ERROR_INVALID_PARAMETER 87u
 #define ERROR_NOT_SUPPORTED 50u
 #define ERROR_NOACCESS 998u
+#define ERROR_PROCESS_MODE_ALREADY_BACKGROUND 402u
+#define ERROR_PROCESS_MODE_NOT_BACKGROUND 403u
 
 static process_t processes[2];
 static thread_t slots[12], *current, *idle_thread;
@@ -73,6 +84,8 @@ static unsigned char teb_storage[12][8192];
 static uint64_t reject_read, reject_write;
 static DWORD last_error;
 static int tls_mode, fail_create_object;
+static kobject_t *named_head, *timers_head[20];
+static unsigned timer_count, destroyed_vads, freed_heap;
 #define CHECK(x) do { ++checks; if (!(x)) { ++failures; if (failures < 30) \
     fprintf(stderr, "line %d: %s\n", __LINE__, #x); } } while (0)
 #define KASSERT(x) CHECK(x)
@@ -88,8 +101,14 @@ static void irq_restore(uint64_t f) { CHECK(irq_depth == f + 1); irq_depth = (un
 thread_t *thread_current(void);
 static thread_t *thread_slot(unsigned i) { CHECK(irq_depth != 0); return i < 12 ? &slots[i] : NULL; }
 static void ready_enqueue(thread_t *t);
-static void ob_ref(kobject_t *o) { CHECK(o != NULL); ++o->refs; }
-static void ob_deref(kobject_t *o) { CHECK(o && o->refs); --o->refs; }
+void ob_ref(kobject_t *o);
+void ob_deref(kobject_t *o);
+void ipc_object_free(kobject_t *o);
+static void kfree(void *p) { if (p) ++freed_heap; } /* static fixture storage */
+static void vad_destroy(process_t *p) { (void)p; ++destroyed_vads; }
+static void reg_key_object_free(kobject_t *o) { (void)o; CHECK(0); }
+void token_object_free(kobject_t *o) { (void)o; CHECK(0); }
+static void kprintf(const char *f, ...) { (void)f; CHECK(0); }
 static int32_t handle_ref(process_t *p, uint64_t h, uint32_t type, kobject_t **out, uint32_t *access) {
     (void)p;
     if (!h || h % 4 || h / 4 >= 20 || !handles[h / 4].obj) return STATUS_INVALID_HANDLE;
@@ -109,10 +128,9 @@ static int copy_to_user(process_t *p, uint64_t dst, const void *src, uint64_t n)
     (void)p; if (!dst || dst == reject_write) return -1; memcpy((void *)(uintptr_t)dst, src, (size_t)n); return 0;
 }
 static int64_t stack_arg(process_t *p, struct regs *r, unsigned n) { (void)p; CHECK(n == 5); return (int64_t)r->arg5; }
-static process_t *proc_of_handle(process_t *p, uint64_t h) {
-    if (h == CURRENT_PROCESS_HANDLE) return p;
-    kobject_t *o = handle_lookup(p, h, OB_PROCESS); return o ? o->u.proc.p : NULL;
-}
+static uint64_t ticks_now(void) { return jiffies; }
+static int64_t shz_filetime_now_ipc(void) { return 100000000; }
+static uint64_t thread_cycles_now(thread_t *t) { return t->cycles; } /* clock adapter */
 static int vad_alloc(process_t *p, uint64_t *b, uint64_t *n, unsigned a, unsigned pr, unsigned k) {
     (void)p; (void)n; (void)a; (void)pr; (void)k; *b = 0x100000; return 0;
 }
@@ -141,6 +159,24 @@ static void thread_resume(thread_t *t) { CHECK(irq_depth != 0 && t->object); t->
 static void thread_user_tls_init(process_t *p, thread_t *t);
 static int32_t dispatch(uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t ret);
 static int32_t host_k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len);
+static int32_t host_k32_query(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len, uint64_t retlen);
+static HANDLE GetCurrentProcess(void) { return (HANDLE)(uintptr_t)CURRENT_PROCESS_HANDLE; }
+static DWORD GetCurrentProcessId(void) { return (DWORD)processes[0].pid; }
+static LONG InterlockedCompareExchange(volatile LONG *p, LONG value, LONG expected) {
+    __atomic_compare_exchange_n(p, &expected, value, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); return expected;
+}
+static NTSTATUS NtShzSetK32(ULONG cls, HANDLE h, void *b, ULONG n) {
+    return host_k32_set(&processes[0], cls, (uintptr_t)h, (uintptr_t)b, n);
+}
+static NTSTATUS NtShzQueryK32(ULONG cls, HANDLE h, void *b, ULONG n, ULONG *ret) {
+    return host_k32_query(&processes[0], cls, (uintptr_t)h, (uintptr_t)b, n, (uintptr_t)ret);
+}
+static NTSTATUS NtQueryInformationProcess(HANDLE h, ULONG cls, void *b, ULONG n, ULONG *ret) {
+    return dispatch(SYS_NtQueryInformationProcess, (uintptr_t)h, cls, (uintptr_t)b, n, (uintptr_t)ret);
+}
+static NTSTATUS NtSetInformationProcess(HANDLE h, ULONG cls, void *b, ULONG n) {
+    return dispatch(SYS_NtSetInformationProcess, (uintptr_t)h, cls, (uintptr_t)b, n, 0);
+}
 static NTSTATUS NtQueryInformationThread(HANDLE h, ULONG cls, void *b, ULONG n, ULONG *ret) {
     return dispatch(SYS_NtQueryInformationThread, (uintptr_t)h, cls, (uintptr_t)b, n, (uintptr_t)ret);
 }
@@ -150,7 +186,7 @@ static NTSTATUS NtSetInformationThread(HANDLE h, ULONG cls, void *b, ULONG n) {
 static void shz_set_last_error(DWORD e) { last_error = e; }
 static DWORD k32_nt_error(NTSTATUS st) {
     DWORD e = st == STATUS_INVALID_HANDLE ? ERROR_INVALID_HANDLE : st == STATUS_ACCESS_DENIED ||
-        st == STATUS_THREAD_IS_TERMINATING ? ERROR_ACCESS_DENIED : st == STATUS_NOT_SUPPORTED ? ERROR_NOT_SUPPORTED :
+        st == STATUS_THREAD_IS_TERMINATING || st == STATUS_PROCESS_IS_TERMINATING ? ERROR_ACCESS_DENIED : st == STATUS_NOT_SUPPORTED ? ERROR_NOT_SUPPORTED :
         st == STATUS_ACCESS_VIOLATION ? ERROR_NOACCESS : ERROR_INVALID_PARAMETER;
     shz_set_last_error(e); return e;
 }
@@ -164,7 +200,6 @@ static void kstack_free(uint64_t base) { CHECK(base != 0 && irq_depth != 0); ++f
 #define sys_suspend_resume(...) unrelated_route()
 #define sys_terminate_thread(...) unrelated_route()
 #define sys_duplicate(...) unrelated_route()
-#define sys_query_process(...) unrelated_route()
 #define create_with_inherit(...) unrelated_route()
 #define sys_create_job(...) unrelated_route()
 #define ipc_open_named(...) unrelated_route()
@@ -192,7 +227,8 @@ static int32_t dispatch(uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uin
 static void thread_user_tls_init(process_t *p, thread_t *t) {
     CHECK(irq_depth == 0);
     CHECK(t->object && t->state == TS_NEW && t->object->u.thr.nt_base_increment == 0);
-    uint32_t expected = p->priority_class == 0x80 ? 13 : 8;
+    uint32_t expected = p->priority_class == 0x40 ? 4 : p->priority_class == 0x4000 ? 6 :
+        p->priority_class == 0x8000 ? 10 : p->priority_class == 0x80 ? 13 : 8;
     CHECK(t->sched_priority == expected && t->object->u.thr.last_sched_priority == expected);
     if (tls_mode) {
         uint32_t cls = 0x80;
@@ -202,14 +238,14 @@ static void thread_user_tls_init(process_t *p, thread_t *t) {
         CHECK(SetThreadPriority((HANDLE)(uintptr_t)32, 2));
     }
 }
-static HANDLE H(unsigned h) { return (HANDLE)(uintptr_t)h; }
+static HANDLE H(uint64_t h) { return (HANDLE)(uintptr_t)h; }
 static void reset(void) {
     memset(processes, 0, sizeof processes); memset(slots, 0, sizeof slots); memset(objects, 0, sizeof objects);
     memset(handles, 0, sizeof handles); k64_rq_init(&runqueues, slots, 12, 1);
     owner_identity(0);
     irq_depth = 0; ready_order = 0; jiffies = 100;
     reject_read = reject_write = 0; allocation = 3; tls_mode = fail_create_object = 0; last_error = 0;
-    freed_vads = freed_stacks = 0;
+    freed_vads = freed_stacks = destroyed_vads = freed_heap = timer_count = 0; named_head = NULL;
     for (unsigned i = 0; i < 12; ++i) slots[i].ready_cpu = slots[i].on_cpu = K64_CPU_NONE;
     for (unsigned i = 0; i < 2; ++i) {
         processes[i].used = 1; processes[i].pid = 100 + (int)i;
@@ -561,6 +597,172 @@ static void check_actual_handoff_reclaim(void) {
     CHECK(GetThreadPriority(H(8)) == 15 && set_raw(8, 1) == STATUS_THREAD_IS_TERMINATING);
     CHECK(objects[3].refs == 2 && objects[12].refs == 3 && irq_depth == 0);
 }
+/* Independent native ordinals and process bases from ReactOS NDK/query and
+ * Microsoft's scheduling table. No expected cell uses a production mapper. */
+static const uint32_t process_classes[] = {0x40, 0x4000, 0x20, 0x8000, 0x80};
+static const uint8_t native_classes[] = {1, 5, 2, 6, 3};
+static const int process_bases[] = {4, 6, 8, 10, 13};
+struct process_basic_test { int64_t exit_status; uint64_t peb, affinity; int64_t base_priority; uint64_t pid, ppid; };
+static int32_t set_process_raw(uint64_t h, uint8_t cls, uint8_t foreground) {
+    shz_nt_process_priority_t p = {foreground, cls};
+    return NtSetInformationProcess((HANDLE)(uintptr_t)h, 18, &p, sizeof p);
+}
+static void check_process_default_and_table(void) {
+    reset();
+    shz_nt_process_priority_t out = {0x5a, 0x5a}; ULONG n = 0;
+    CHECK(sizeof out == 2 && offsetof(shz_nt_process_priority_t, PriorityClass) == 1);
+    NTSTATUS default_status = NtQueryInformationProcess(GetCurrentProcess(), 18, &out, sizeof out, &n);
+    CHECK(default_status == 0);
+    printf("NT_PROCESS_DEFAULT_OBSERVED: status=0x%08x length=%u foreground=%u ordinal=%u\n",
+           (unsigned)default_status, n, out.Foreground, out.PriorityClass);
+    CHECK(n == 2 && out.Foreground == 0 && out.PriorityClass == 2 && GetPriorityClass(GetCurrentProcess()) == 0x20);
+    static const int levels[] = {-15, -2, -1, 0, 1, 2, 15};
+    static const uint32_t expected[5][7] = {{1,2,3,4,5,6,15},{1,4,5,6,7,8,15},
+        {1,6,7,8,9,10,15},{1,8,9,10,11,12,15},{1,11,12,13,14,15,15}};
+    for (unsigned raw = 0; raw < 2; ++raw) for (unsigned c = 0; c < 5; ++c) for (unsigned k = 0; k < 7; ++k) {
+        reset(); handles[6].access |= PROCESS_QUERY_INFORMATION;
+        CHECK(SetThreadPriority(H(8), levels[k]));
+        CHECK(raw ? set_process_raw(25, native_classes[c], 0) == 0 : SetPriorityClass(H(24), process_classes[c]));
+        CHECK(processes[1].priority_class == process_classes[c] && GetPriorityClass(H(24)) == process_classes[c]);
+        CHECK(NtQueryInformationProcess(H(25), 18, &out, 2, &n) == 0);
+        CHECK(n == 2 && out.Foreground == 0 && out.PriorityClass == native_classes[c]);
+        struct process_basic_test basic;
+        CHECK(NtQueryInformationProcess(H(24), 0, &basic, sizeof basic, &n) == 0);
+        if (c == 4 && k == 3) printf("NT_PROCESS_BASIC_HIGH_OBSERVED: raw=%u base=%lld stored_class=0x%x\n",
+                                   raw, (long long)basic.base_priority, processes[1].priority_class);
+        CHECK(n == 48 && basic.base_priority == process_bases[c] && basic.pid == 101 && basic.affinity == 1);
+        CHECK(slots[1].sched_priority == expected[c][k] && objects[3].u.thr.last_sched_priority == expected[c][k]);
+        CHECK(GetThreadPriority(H(8)) == levels[k] && objects[3].u.thr.nt_base_increment ==
+              (levels[k] == -15 ? -16 : levels[k] == 15 ? 16 : levels[k]));
+        CHECK(slots[1].quantum_ticks == 6 && slots[1].quantum_left == 6 && slots[1].cpu_mask == 1 &&
+              slots[1].aging_service_left == 0 && slots[0].sched_priority == 8 && ready_count == 2);
+        CHECK(objects[1].refs == 4 && irq_depth == 0 && runqueues.lock.next == runqueues.lock.owner);
+    }
+    for (unsigned c = 0; c < 5; ++c) {
+        reset();
+        CHECK(set_process_raw(CURRENT_PROCESS_HANDLE, native_classes[c], 0) == 0);
+        thread_t *created = NULL;
+        CHECK(start_thread_common(&processes[0], 0x1000, 0x40000, 0, 0, 65536, 1, &created) == 0);
+        CHECK(created && created->state == TS_NEW && created->sched_priority == (uint32_t)process_bases[c] &&
+              created->object->u.thr.nt_base_increment == 0 && created->object->u.thr.last_sched_priority == (uint32_t)process_bases[c]);
+    }
+}
+static void check_process_rights_and_buffers(void) {
+    reset(); shz_nt_process_priority_t p = {0, 3}; ULONG n = 0;
+    struct { shz_nt_process_priority_t p; unsigned char tail[6]; } out;
+    handles[6].access = PROCESS_SET_INFORMATION;
+    CHECK(SetPriorityClass(H(24), 0x80));
+    CHECK(NtQueryInformationProcess(H(24), 18, &out.p, 2, &n) == STATUS_ACCESS_DENIED);
+    const DWORD set_only_class = GetPriorityClass(H(24));
+    CHECK(set_only_class == 0 && last_error == ERROR_ACCESS_DENIED && objects[1].refs == 4);
+    printf("NT_PROCESS_SET_ONLY_GET_OBSERVED: class=0x%x error=%u\n", set_only_class, last_error);
+    for (unsigned rights = 0; rights < 2; ++rights) {
+        handles[6].access = rights ? PROCESS_QUERY_LIMITED_INFORMATION : PROCESS_QUERY_INFORMATION;
+        CHECK(NtQueryInformationProcess(H(24), 18, &out.p, 2, &n) == 0 && out.p.PriorityClass == 3 && n == 2);
+        CHECK(GetPriorityClass(H(24)) == 0x80);
+        CHECK(set_process_raw(24, 2, 0) == STATUS_ACCESS_DENIED);
+        CHECK(!SetPriorityClass(H(24), 0x20) && last_error == ERROR_ACCESS_DENIED);
+        CHECK(processes[1].priority_class == 0x80 && objects[1].refs == 4);
+    }
+    handles[6].access = PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION;
+    for (unsigned size = 0; size < 7; ++size) if (size != 2) {
+        memset(&out, 0x5a, sizeof out); n = 0;
+        CHECK(NtQueryInformationProcess(H(24), 18, &out.p, size, &n) == STATUS_INFO_LENGTH_MISMATCH);
+        CHECK(n == 2 && out.p.Foreground == 0x5a && out.tail[0] == 0x5a);
+        CHECK(NtSetInformationProcess(H(24), 18, &p, size) == STATUS_INFO_LENGTH_MISMATCH);
+        CHECK(processes[1].priority_class == 0x80 && slots[1].sched_priority == 13 && objects[1].refs == 4);
+    }
+    memset(&out, 0x5a, sizeof out);
+    CHECK(NtQueryInformationProcess(H(24), 18, &out.p, 2, &n) == 0 && n == 2 && out.p.PriorityClass == 3);
+    for (unsigned i = 0; i < sizeof out.tail; ++i) CHECK(out.tail[i] == 0x5a);
+    reject_write = (uintptr_t)&out;
+    CHECK(NtQueryInformationProcess(H(24), 18, &out.p, 2, &n) == STATUS_ACCESS_VIOLATION);
+    reject_write = (uintptr_t)&n;
+    CHECK(NtQueryInformationProcess(H(24), 18, &out.p, 2, &n) == STATUS_ACCESS_VIOLATION);
+    CHECK(NtQueryInformationProcess(H(24), 18, &out.p, 1, &n) == STATUS_ACCESS_VIOLATION);
+    reject_write = 0; reject_read = (uintptr_t)&p;
+    CHECK(NtSetInformationProcess(H(24), 18, &p, 2) == STATUS_ACCESS_VIOLATION);
+    reject_read = 0;
+    CHECK(NtSetInformationProcess(H(24), 18, NULL, 2) == STATUS_ACCESS_VIOLATION);
+    CHECK(NtQueryInformationProcess(H(24), 18, NULL, 2, &n) == STATUS_ACCESS_VIOLATION);
+    CHECK(objects[1].refs == 4 && processes[1].priority_class == 0x80 && slots[1].sched_priority == 13);
+    static const uint64_t invalid[] = {0, 999, UINT64_C(0x100000018)};
+    for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0]; ++i) {
+        CHECK(set_process_raw(invalid[i], 2, 0) == STATUS_INVALID_HANDLE);
+        CHECK(NtQueryInformationProcess(H(invalid[i]), 18, &out.p, 2, NULL) == STATUS_INVALID_HANDLE);
+        CHECK(GetPriorityClass(H(invalid[i])) == 0 && last_error == ERROR_INVALID_HANDLE);
+    }
+    CHECK(set_process_raw(8, 2, 0) == STATUS_OBJECT_TYPE_MISMATCH);
+    CHECK(NtQueryInformationProcess(H(8), 18, &out.p, 2, NULL) == STATUS_OBJECT_TYPE_MISMATCH);
+    CHECK(set_process_raw(CURRENT_THREAD_HANDLE, 2, 0) == STATUS_OBJECT_TYPE_MISMATCH);
+    CHECK(NtQueryInformationProcess(H(24), 0x7fff, &out, sizeof out, &n) == STATUS_INVALID_INFO_CLASS);
+    CHECK(NtSetInformationProcess(H(24), 0x7fff, &p, 2) == STATUS_INVALID_INFO_CLASS);
+}
+static void check_process_refusals_and_batch(void) {
+    reset(); handles[5].access |= PROCESS_QUERY_INFORMATION;
+    static const uint8_t invalid[] = {0, 7, 255};
+    for (unsigned i = 0; i < sizeof invalid; ++i) CHECK(set_process_raw(20, invalid[i], 0) == STATUS_INVALID_PARAMETER);
+    CHECK(set_process_raw(20, 4, 0) == STATUS_NOT_SUPPORTED);
+    CHECK(set_process_raw(20, 2, 1) == STATUS_NOT_SUPPORTED);
+    CHECK(set_process_raw(20, 2, 255) == STATUS_NOT_SUPPORTED);
+    const BOOL bg_begin = SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);
+    const DWORD bg_begin_error = last_error;
+    CHECK(!bg_begin && bg_begin_error == ERROR_NOT_SUPPORTED);
+    const BOOL bg_end = SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_END);
+    CHECK(!bg_end && last_error == ERROR_NOT_SUPPORTED);
+    printf("NT_PROCESS_BACKGROUND_OBSERVED: begin=%d begin_error=%u end=%d end_error=%u\n",
+           bg_begin, bg_begin_error, bg_end, last_error);
+    CHECK(!SetPriorityClass(GetCurrentProcess(), 0) && last_error == ERROR_INVALID_PARAMETER);
+    CHECK(!SetPriorityClass(GetCurrentProcess(), 0x123) && last_error == ERROR_INVALID_PARAMETER);
+    CHECK(!SetPriorityClass(GetCurrentProcess(), 0x100) && last_error == ERROR_NOT_SUPPORTED);
+    CHECK(GetPriorityClass(GetCurrentProcess()) == 0x20 && slots[0].sched_priority == 8 && objects[0].refs == 4);
+    for (unsigned bad = 0; bad < 4; ++bad) {
+        reset();
+        if (!bad) objects[4].u.thr.nt_base_increment = 7;
+        else if (bad == 1) slots[2].cpu_mask = 2;
+        else if (bad == 2) slots[2].quantum_ticks = 0;
+        else slots[2].sched_priority = 32;
+        const uint64_t arrival = slots[2].ready_order, since = slots[2].ready_since;
+        CHECK(set_process_raw(20, 3, 0) == STATUS_INVALID_PARAMETER);
+        CHECK(processes[0].priority_class == 0 && slots[0].sched_priority == 8 && slots[2].sched_priority == (bad == 3 ? 32u : 8u));
+        CHECK(objects[2].u.thr.last_sched_priority == 8 && objects[4].u.thr.last_sched_priority == 8 &&
+              slots[0].quantum_left == 2 && slots[0].aging_service_left == 3 && objects[0].refs == 4);
+        CHECK(slots[2].ready_order == arrival && slots[2].ready_since == since && ready_count == 2 &&
+              ready[8].head == &slots[1] && ready[8].tail == &slots[2] && irq_depth == 0 && runqueues.lock.next == runqueues.lock.owner);
+    }
+    reset(); const uint64_t outer = irq_save(); owner_identity(1);
+    CHECK(set_process_raw(20, 3, 0) == STATUS_INVALID_PARAMETER);
+    CHECK(processes[0].priority_class == 0 && slots[0].sched_priority == 8 && slots[2].sched_priority == 8 && irq_depth == 1);
+    owner_identity(0); irq_restore(outer);
+    CHECK(set_process_raw(20, 3, 0) == 0 && slots[0].sched_priority == 13 && slots[2].sched_priority == 13);
+    CHECK(slots[0].quantum_left == 2 && slots[0].aging_service_left == 3 && ready[13].head == &slots[2] &&
+          slots[2].ready_cpu == 0 && slots[2].on_cpu == K64_CPU_NONE && ready_count == 2);
+    queue_guard_t guard = queue_enter(); CHECK(k64_rq_validate_locked(&runqueues) == 0); queue_leave(guard);
+}
+static void check_process_retained_lifetime(void) {
+    reset(); handles[6].access |= PROCESS_QUERY_INFORMATION;
+    process_t *p = &processes[1]; kobject_t *o = &objects[1];
+    p->priority_class = 0x80; p->terminated = 1; p->teardown = 2; p->exit_code = 42; o->signaled = 1;
+    shz_nt_process_priority_t priority; struct process_basic_test basic; ULONG n;
+    CHECK(NtQueryInformationProcess(H(24), 18, &priority, 2, &n) == 0 && priority.PriorityClass == 3 && priority.Foreground == 0);
+    CHECK(GetPriorityClass(H(24)) == 0x80);
+    CHECK(NtQueryInformationProcess(H(24), 0, &basic, sizeof basic, &n) == 0 && basic.base_priority == 13 && basic.exit_status == 42);
+    CHECK(set_process_raw(24, 2, 0) == STATUS_PROCESS_IS_TERMINATING && p->priority_class == 0x80 && o->refs == 4);
+    o->refs = 1; ob_ref(o); /* held object reference survives closing the last fixture handle */
+    handles[6].obj = NULL; ob_deref(o);
+    CHECK(o->refs == 1 && p->used == 1 && destroyed_vads == 0);
+    CHECK(NtQueryInformationProcess(H(24), 18, &priority, 2, NULL) == STATUS_INVALID_HANDLE);
+    handles[10].obj = o; handles[10].access = PROCESS_QUERY_INFORMATION;
+    CHECK(NtQueryInformationProcess(H(40), 18, &priority, 2, NULL) == 0 && priority.PriorityClass == 3 && o->refs == 1);
+    handles[10].obj = NULL; ob_deref(o); /* actual production ref/free bodies reclaim the exact process slot */
+    CHECK(o->refs == 0 && p->used == 0 && destroyed_vads == 1);
+    memset(p, 0, sizeof *p); p->used = 1; p->pid = 700; p->priority_class = 0x4000; p->object = &objects[14];
+    objects[14].type = OB_PROCESS; objects[14].refs = 1; objects[14].u.proc.p = p;
+    handles[6].obj = &objects[14]; handles[6].access = PROCESS_QUERY_INFORMATION;
+    CHECK(NtQueryInformationProcess(H(24), 18, &priority, 2, &n) == 0 && priority.PriorityClass == 5 && n == 2);
+    CHECK(NtQueryInformationProcess(H(24), 0, &basic, sizeof basic, &n) == 0 && basic.pid == 700 && basic.base_priority == 6);
+    CHECK(objects[14].refs == 1 && o->refs == 0 && irq_depth == 0);
+}
 int main(void) {
     cpu_set_t allowed, single;
     if (sched_getaffinity(0, sizeof allowed, &allowed)) return 2;
@@ -574,6 +776,15 @@ int main(void) {
     check_retarget_table_and_refusals();
     check_native_requeue();
     check_ticket_and_owner_boundaries(); check_actual_handoff_reclaim();
+    const unsigned baseline_checks = checks, baseline_failures = failures;
+    printf("NT_THREAD_PRIORITY_BASELINE: %u checks, %u failures\n", checks, failures);
+#define PROCESS_CASE(fn) do { unsigned c = checks, f = failures; fn(); \
+    printf("NT_PROCESS_PRIORITY_CASE: %s %u checks, %u failures\n", #fn, checks-c, failures-f); } while (0)
+    PROCESS_CASE(check_process_default_and_table);
+    PROCESS_CASE(check_process_rights_and_buffers);
+    PROCESS_CASE(check_process_refusals_and_batch);
+    PROCESS_CASE(check_process_retained_lifetime);
+    printf("NT_PROCESS_PRIORITY_HOST: %u checks, %u failures\n", checks-baseline_checks, failures-baseline_failures);
     CHECK(irq_depth == 0);
     printf("NT_THREAD_PRIORITY_HOST: %u checks, %u failures\n", checks, failures);
     return failures ? 1 : 0;

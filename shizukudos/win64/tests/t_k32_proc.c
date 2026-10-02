@@ -3,6 +3,8 @@
  * mitigation policies, toolhelp, PSAPI (image names, mapped files, memory counters, working set), VirtualLock / Discard / Prefetch,
  * thread contexts, DebugBreak, InitOnce, heaps. Expectations are the documented Win32 semantics or relations between independent
  * measurements (e.g. a page this program touched must be in its working set), never values read back from the implementation.
+ * Process background mode is explicitly unsupported by the selected Kernel64
+ * backend; its refusals must preserve the real priority and memory settings.
  */
 #include "k32test.h"
 #include <tlhelp32.h>
@@ -121,16 +123,18 @@ static void test_counts_priority(void)
     CHECK_ERR(ERROR_INVALID_PARAMETER, "... with ERROR_INVALID_PARAMETER");
     CHECK(SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS), "back to NORMAL_PRIORITY_CLASS");
     SetLastError(0);
-    CHECK(!SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_END), "PROCESS_MODE_BACKGROUND_END outside background mode fails");
-    CHECK_ERR(ERROR_PROCESS_MODE_NOT_BACKGROUND, "... with ERROR_PROCESS_MODE_NOT_BACKGROUND");
-    CHECK(SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN), "PROCESS_MODE_BACKGROUND_BEGIN");
+    CHECK(!SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_END), "unsupported PROCESS_MODE_BACKGROUND_END fails");
+    CHECK_ERR(ERROR_NOT_SUPPORTED, "... with ERROR_NOT_SUPPORTED");
+    CHECK(!SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN), "unsupported PROCESS_MODE_BACKGROUND_BEGIN fails");
+    CHECK_ERR(ERROR_NOT_SUPPORTED, "... with ERROR_NOT_SUPPORTED");
     SetLastError(0);
-    CHECK(!SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN), "a second BEGIN fails");
-    CHECK_ERR(ERROR_PROCESS_MODE_ALREADY_BACKGROUND, "... with ERROR_PROCESS_MODE_ALREADY_BACKGROUND");
-    CHECK(GetProcessInformation(GetCurrentProcess(), ProcessMemoryPriority, &mp, sizeof mp) && mp.MemoryPriority == MEMORY_PRIORITY_VERY_LOW,
-          "background mode runs at very low memory priority");
-    CHECK(SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_END), "PROCESS_MODE_BACKGROUND_END");
-    CHECK(GetPriorityClass(GetCurrentProcess()) == NORMAL_PRIORITY_CLASS, "background mode leaves the priority class alone");
+    CHECK(!SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN), "a repeated unsupported BEGIN still fails");
+    CHECK_ERR(ERROR_NOT_SUPPORTED, "... with ERROR_NOT_SUPPORTED");
+    CHECK(GetProcessInformation(GetCurrentProcess(), ProcessMemoryPriority, &mp, sizeof mp) && mp.MemoryPriority == MEMORY_PRIORITY_NORMAL,
+          "unsupported background requests leave actual default memory priority unchanged");
+    CHECK(!SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_END), "unsupported END after refused BEGIN still fails");
+    CHECK_ERR(ERROR_NOT_SUPPORTED, "... with ERROR_NOT_SUPPORTED");
+    CHECK(GetPriorityClass(GetCurrentProcess()) == NORMAL_PRIORITY_CLASS, "unsupported background requests leave the real priority class unchanged");
 
     CHECK(GetThreadPriorityBoost(GetCurrentThread(), &b) && b == FALSE, "priority boosting is enabled by default");
     CHECK(SetThreadPriorityBoost(GetCurrentThread(), TRUE) && GetThreadPriorityBoost(GetCurrentThread(), &b) && b == TRUE,
@@ -143,6 +147,11 @@ static void test_counts_priority(void)
     CHECK(SetProcessInformation(GetCurrentProcess(), ProcessMemoryPriority, &mp, sizeof mp), "SetProcessInformation(ProcessMemoryPriority, LOW)");
     mp.MemoryPriority = 0;
     CHECK(GetProcessInformation(GetCurrentProcess(), ProcessMemoryPriority, &mp, sizeof mp) && mp.MemoryPriority == MEMORY_PRIORITY_LOW, "... reported back");
+    CHECK(!SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN), "background mode remains unsupported with a stored LOW memory setting");
+    CHECK_ERR(ERROR_NOT_SUPPORTED, "... with ERROR_NOT_SUPPORTED");
+    CHECK(GetProcessInformation(GetCurrentProcess(), ProcessMemoryPriority, &mp, sizeof mp) && mp.MemoryPriority == MEMORY_PRIORITY_LOW &&
+          GetPriorityClass(GetCurrentProcess()) == NORMAL_PRIORITY_CLASS,
+          "unsupported background mode preserves the actual stored LOW memory setting and process class");
     mp.MemoryPriority = 0;
     SetLastError(0);
     CHECK(!SetProcessInformation(GetCurrentProcess(), ProcessMemoryPriority, &mp, sizeof mp), "memory priority 0 is invalid");

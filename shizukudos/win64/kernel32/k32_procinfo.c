@@ -6,8 +6,9 @@
  *
  * What the numbers mean here (all measured, none invented):
  *  - Times: 1 ms scheduler ticks charged to the interrupted thread (user or kernel mode), cycles: TSC while the thread ran.
- *  - Priority class, priority boost, memory priority and power throttling are stored per process / thread and reported
- *    back; the round-robin scheduler of Kernel64 does not act on any of them (there is nothing to boost or throttle).
+ *  - Supported non-realtime priority classes retarget actual native thread base
+ *    priorities. Foreground boosts and resource background scheduling are
+ *    unsupported. Boost, memory and power settings remain reported metadata.
  *  - Mitigation policies: DEP is reported on (Kernel64 maps data pages non-executable for every process and it cannot be
  *    turned off); nothing else is enforced, so every other policy reads all-zero and asking to enable one fails with
  *    ERROR_NOT_SUPPORTED.
@@ -16,6 +17,8 @@
  *    registered WER runtime exception modules are kept in a list that nothing will ever call.
  */
 #include "k32.h"
+#include "../include/nt_ipc.h"
+#include "../../kcommon/nt_process_priority.h"
 #include <tlhelp32.h>
 #include <psapi.h>
 
@@ -94,36 +97,33 @@ K32API BOOL WINAPI IsWow64Process(HANDLE h, PBOOL wow64)
 }
 
 /* ---------------------------------------------------------------- priority class and boost */
-static volatile LONG g_background;                        /* PROCESS_MODE_BACKGROUND_BEGIN .. END (the calling process) */
-
-static BOOL is_self(HANDLE h)
-{
-    ULONG v[6];
-    if (h == GetCurrentProcess()) return TRUE;
-    return NtShzQueryK32(K32Q_PROCESS_INFO, h, v, sizeof v, 0) == 0 && v[2] == GetCurrentProcessId();
-}
-
 K32API DWORD WINAPI GetPriorityClass(HANDLE h)
 {
-    ULONG v[6];
-    if (!process_info(h, v)) return 0;
-    return v[4];
+    shz_nt_process_priority_t value;
+    shz_nt_sched_result_t result;
+    uint32_t cls;
+    NTSTATUS st = NtQueryInformationProcess(h, SHZ_NT_PROCESS_PRIORITY_INFO_CLASS, &value, sizeof value, 0);
+    if (st) { fail_st(st); return 0; }
+    result = shz_nt_process_class_from_native(value.PriorityClass, &cls);
+    if (result != SHZ_NT_SCHED_OK) {
+        fail_err(result == SHZ_NT_SCHED_UNSUPPORTED ? ERROR_NOT_SUPPORTED : ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    return cls;
 }
 
 K32API BOOL WINAPI SetPriorityClass(HANDLE h, DWORD cls)
 {
-    ULONG v = cls;
+    shz_nt_process_priority_t value;
+    shz_nt_sched_result_t result;
     NTSTATUS st;
     if (cls == PROCESS_MODE_BACKGROUND_BEGIN || cls == PROCESS_MODE_BACKGROUND_END) {
-        if (!is_self(h)) return fail_err(ERROR_INVALID_PARAMETER);         /* background mode applies to the caller only */
-        if (cls == PROCESS_MODE_BACKGROUND_BEGIN) {
-            if (InterlockedCompareExchange(&g_background, 1, 0) != 0) return fail_err(ERROR_PROCESS_MODE_ALREADY_BACKGROUND);
-        } else if (InterlockedCompareExchange(&g_background, 0, 1) != 1) {
-            return fail_err(ERROR_PROCESS_MODE_NOT_BACKGROUND);
-        }
-        return TRUE;
+        return fail_err(ERROR_NOT_SUPPORTED);
     }
-    st = NtShzSetK32(K32S_PRIORITY_CLASS, h, &v, sizeof v);
+    result = shz_nt_process_class_to_native(cls, &value);
+    if (result != SHZ_NT_SCHED_OK)
+        return fail_err(result == SHZ_NT_SCHED_UNSUPPORTED ? ERROR_NOT_SUPPORTED : ERROR_INVALID_PARAMETER);
+    st = NtSetInformationProcess(h, SHZ_NT_PROCESS_PRIORITY_INFO_CLASS, &value, sizeof value);
     if (st) return fail_st(st);
     return TRUE;
 }
@@ -199,8 +199,7 @@ K32API BOOL WINAPI GetProcessInformation(HANDLE h, PROCESS_INFORMATION_CLASS cls
     case ProcessMemoryPriority:
         if (size != sizeof(MEMORY_PRIORITY_INFORMATION)) return fail_err(ERROR_BAD_LENGTH);
         if ((st = NtShzQueryK32(K32Q_PROCESS_SETTINGS, h, s, sizeof s, 0))) return fail_st(st);
-        /* background mode runs the process at very low memory priority (documented for PROCESS_MODE_BACKGROUND_BEGIN) */
-        ((MEMORY_PRIORITY_INFORMATION *)info)->MemoryPriority = g_background && is_self(h) ? MEMORY_PRIORITY_VERY_LOW : s[0];
+        ((MEMORY_PRIORITY_INFORMATION *)info)->MemoryPriority = s[0];
         return TRUE;
     case ProcessAppMemoryInfo: {
         struct { ULONG64 total, freep, commit, peak_commit, kheap_total, kheap_used; ULONG procs, threads, handles, pad; } sys;

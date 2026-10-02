@@ -116,6 +116,9 @@ int32_t ipc_give_handle(process_t *p, kobject_t *o, uint32_t access, int inherit
 /* Handle -> referenced object (pseudo handles -1 / -2 included, low tag bits ignored). */
 int32_t ipc_ref_handle(process_t *p, uint64_t h, uint32_t type, kobject_t **out, uint32_t *access);
 int32_t ipc_ref_process(process_t *cur, uint64_t h, uint32_t need_access, process_t **out, kobject_t **obj);
+/* The caller holds `obj` for `p` and validates transport rights/user buffers.
+ * Uses the existing UP IRQ-atomic two-pass native retarget; keeps the reference. */
+int32_t ipc_set_process_priority_class(process_t *p, kobject_t *obj, uint32_t cls);
 void ipc_handle_opened(kobject_t *o);   /* counts handles of IPC objects (pipe ends, ports, jobs) */
 int32_t ipc_open_named(process_t *p, uint32_t type, uint64_t ph, uint64_t access, uint64_t oa);
 /* Section duplication preserves previously granted rights; newly requested

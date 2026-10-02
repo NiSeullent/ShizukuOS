@@ -17,6 +17,7 @@ FILES = ["kernel64/proc_internal.h", "kernel64/ipc.h", "kernel64/proc.c", "kerne
          "kernel64/ipc_proc.c", "kernel64/sysk32_proc.c", "kernel64/sysx.c", "win64/kernel32/k32_core.c",
          "win64/kernel32/k32_misc.c", "kernel64/sched.c", "kernel64/ipc_core.c", "kernel64/ntsys.h",
          "kernel64/smp_boot.c", "kernel64/k64.h", "kernel64/sched_cpu.h", "kernel64/smp_boot.h",
+         "win64/kernel32/k32_procinfo.c",
          "kcommon/nt_sched_policy.h", "tests/test_nt_thread_priority.c", "tests/test_nt_thread_priority.py"]
 
 
@@ -75,7 +76,7 @@ def case(source, label):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--compile-units", action="store_true", help="compile only the seven changed translation units")
+    parser.add_argument("--compile-units", action="store_true", help="compile only eight actual priority translation units")
     args = parser.parse_args()
     out = args.out.resolve()
     if out.exists():
@@ -100,20 +101,31 @@ def main():
                       "thread_set_sched_policy", "thread_get_sched_policy"]),
         ("ipc_core.c", ["ipc_ref_handle", "ipc_ref_process"]),
         ("ipc_proc.c", ["ref_thread", "attached_thread", "sys_query_thread"]),
-        ("objects.c", ["thread_object_detach"]),
+        ("objects.c", ["ob_ref", "ob_deref", "thread_object_detach"]),
         ("proc.c", ["thread_must_die", "release_thread_user_memory", "start_thread_common"]),
     ]:
         if filename == "ipc_proc.c":
             pieces.append(re.search(r"^struct thread_basic[^\n]+", sources[filename], re.M)[0])
         pieces.extend(function(sources[filename], n) for n in names)
     pieces.extend(function(sources["sched.c"], n) for n in ("sched_switch_complete", "reap_user_zombies", "thread_reap_exited"))
+    pieces.append("void ipc_object_free(kobject_t *o) { switch (o->type) {\n" +
+                  case(sources["ipc_core.c"], "OB_PROCESS") + "default: break; } }\n")
+    pieces.extend(function(sources["sysk32_proc.c"], n) for n in ("proc_of_handle", "live_threads", "put_out"))
+    pieces.append(function(sources["ipc_proc.c"], "sys_query_process"))
     pieces.append(function(sources["ipc_proc.c"], "sys_set_thread", optional=True))
+    pieces.append(function(sources["sysk32_proc.c"], "ipc_set_process_priority_class", optional=True))
     pieces.append(function(sources["sysk32_proc.c"], "set_process_priority_class", optional=True))
+    pieces.append(function(sources["ipc_proc.c"], "sys_set_process_priority", optional=True))
     pieces.append(function(sources["ipc_proc.c"], "ipc_proc_syscall"))
     pieces.append("static int32_t host_generic_syscall(process_t *p, struct regs *r, uint32_t num, "
                   "uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4) { switch(num) {\n" +
                   case(sources["sysx.c"], "SYS_NtQueryInformationThread") +
                   case(sources["sysx.c"], "SYS_NtSetInformationThread") +
+                  case(sources["sysx.c"], "SYS_NtQueryInformationProcess") +
+                  case(sources["sysx.c"], "SYS_NtSetInformationProcess") +
+                  "default: return STATUS_INVALID_INFO_CLASS; } }\n")
+    pieces.append("static int32_t host_k32_query(process_t *cur, uint64_t cls,uint64_t h,uint64_t buf,uint64_t len,uint64_t retlen) "
+                  "{ switch(cls) {\n" + case(sources["sysk32_proc.c"], "K32Q_PROCESS_INFO") +
                   "default: return STATUS_INVALID_INFO_CLASS; } }\n")
     pieces.append("static int32_t host_k32_set(process_t *cur, uint64_t cls,uint64_t h,uint64_t buf,uint64_t len) "
                   "{ switch(cls) {\n" + case(sources["sysk32_proc.c"], "K32S_PRIORITY_CLASS") +
@@ -121,12 +133,29 @@ def main():
     for filename, names in [("k32_core.c", ["GetThreadPriority", "SetThreadPriority"]),
                             ("k32_misc.c", ["SetThreadAffinityMask"])]:
         pieces.extend(function(sources[filename], n) for n in names)
+    procinfo = sources["k32_procinfo.c"]
+    background = re.search(r"^static volatile LONG g_background;[^\n]*", procinfo, re.M)
+    if background:
+        pieces.append(background[0])
+    pieces.extend(function(procinfo, n, optional=n == "is_self") for n in
+                  ("fail_st", "fail_err", "process_info", "is_self", "GetPriorityClass", "SetPriorityClass"))
     generated = out / "production.inc"; generated.write_text("\n\n".join(pieces) + "\n")
     artifacts[generated] = generated.read_bytes()
     schema = snapshots[ROOT / "shizukudos/kernel64/proc_internal.h"].decode()
     start = schema.index("struct kobject {")
     layout = out / "object-layout.inc"
     layout.write_text(schema[start:block_end(schema, schema.index("{", start))] + ";\n")
+    artifacts[layout] = layout.read_bytes()
+    # Include the complete unchanged production process/VAD/handle/object
+    # declarations, rather than a priority-only process substitute.
+    start = schema.index("/* ---- virtual address descriptors ---- */")
+    end = block_end(schema, schema.index("{", schema.index("struct process {", start)))
+    layout = out / "process-layout.inc"
+    ipc_schema = snapshots[ROOT / "shizukudos/kernel64/ipc.h"].decode()
+    clock_schema = snapshots[ROOT / "shizukudos/kernel64/k64.h"].decode()
+    layout.write_text(schema[start:end] + ";\n" +
+                      re.search(r"^struct ipc_ustr[^\n]+", ipc_schema, re.M)[0] + "\n" +
+                      re.search(r"^#define TICK_US[^\n]+", clock_schema, re.M)[0] + "\n")
     artifacts[layout] = layout.read_bytes()
     # Use the actual complete TCB layout and scheduler types/constants. Host
     # process/handle/IRQ/TLS boundaries remain explicitly modeled by the fixture.
@@ -139,7 +168,7 @@ def main():
     compilers = {n: Path(shutil.which(n)).resolve() for n in ["gcc", "clang"] +
                  (["x86_64-w64-mingw32-gcc"] if args.compile_units else [])}
     compiler_bytes = {n: p.read_bytes() for n, p in compilers.items()}
-    result = {"status": "FAIL", "scope": "Actual NT dispatch/wrapper/init/retarget, native queue/policy/identity/reclaim bodies and TCB/object schemas with host platform adapters",
+    result = {"status": "FAIL", "scope": "Actual NT process/thread dispatch/wrapper/init/retarget, native queue/policy/identity/reclaim/ref/free bodies and complete TCB/process/object schemas with host platform adapters",
               "guest_executed": False, "native_windows98_verified": False, "full_runtime_built": False,
               "ap_executed": False, "hardware_context_switch_executed": False,
               "source_sha256": {str(p.relative_to(ROOT)): sha(b) for p,b in snapshots.items()},
@@ -187,7 +216,7 @@ def main():
     if args.compile_units:
         # Compile real translation units only, never link or rebuild a runtime.
         for rel in FILES:
-            if rel not in FILES[2:9] or not rel.endswith(".c"):
+            if rel not in FILES[2:9] + ["win64/kernel32/k32_procinfo.c"] or not rel.endswith(".c"):
                 continue
             src = out / "frozen/shizukudos" / rel; obj = out / (src.stem + ".o")
             flags = ["-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
