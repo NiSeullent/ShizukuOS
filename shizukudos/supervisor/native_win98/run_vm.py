@@ -3,8 +3,8 @@
 """Run one bounded owned native Windows98 VM plan; preserve failures as evidence.
 
 L0 KVM hosts L1 OVMF/Supervisor, which must itself create the L2 Windows98 VMCS.
-Its installed disk still starts original Microsoft DOS. Never count component,
-QEMU exit, VMCS launch or original DOS success as ShizukuDOS replacement.
+The explicitly selected private disk has unverified DOS/Windows execution.
+QEMU exit or VMCS launch never proves the Windows98 foundation.
 """
 import argparse
 from contextlib import ExitStack
@@ -12,6 +12,8 @@ import ctypes
 import hashlib
 import importlib.util
 import json
+import os
+import sys
 from pathlib import Path
 import shutil
 import subprocess
@@ -117,6 +119,13 @@ def timeout_valid(value):
     return type(value) is int and 20<=value<=900
 
 
+def get_custody(fd):
+    if fd is None:raise ValueError("run this CLI through the independently admitted task guardian")
+    module=sys.modules.get("native_custody_rpc")
+    if module is None:raise ValueError("guardian held-byte bootstrap required")
+    return module.Client(fd,os.getppid())
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--plan',type=Path,required=True)
@@ -125,7 +134,9 @@ def main():
     parser.add_argument('--runtime-sources-sha256',required=True,
                         help='SHA256 of the sorted four-helper SHA map; see helper_identity()')
     parser.add_argument('--timeout',type=int,default=300)
+    parser.add_argument('--custody-fd',type=int,help=argparse.SUPPRESS)
     args=parser.parse_args()
+    custody=get_custody(args.custody_fd)
     if not timeout_valid(args.timeout):parser.error('timeout must be 20..900 seconds')
     plan_size=args.plan.stat().st_size
     if not 0<plan_size<=16<<20:parser.error('private plan must be nonempty and at most 16 MiB')
@@ -148,15 +159,18 @@ def main():
     for relative,source in paths.items():
         if source.stat().st_size>1<<20:parser.error('one runtime source exceeded 1 MiB')
         target=frozen/relative;target.parent.mkdir(parents=True,exist_ok=True)
-        target.write_bytes(source.read_bytes());source_pins[relative]=sha(target)
+        target.write_bytes(source.read_bytes())
+        if custody is not None:custody.admit_frozen(target,relative)
+        source_pins[relative]=sha(target)
         source_sizes[relative]=target.stat().st_size
         if relative in helper_pins and source_pins[relative]!=helper_pins[relative]:
             parser.error('runtime helper changed while freezing')
     native=frozen/'shizukudos/supervisor/native_win98'
-    capture=load('native_run_capture',native/'owned_capture.py')
-    guards=load('native_run_guards',native/'build.py')
-    preparation=load('native_run_preparation',native/'prepare_vm.py')
-    info_helper=load('native_run_info',frozen/'shizukudos/tools/shzinfo.py')
+    loader=custody.load if custody is not None else load
+    capture=loader('native_run_capture',native/'owned_capture.py')
+    guards=loader('native_run_guards',native/'build.py')
+    preparation=loader('native_run_preparation',native/'prepare_vm.py')
+    info_helper=loader('native_run_info',frozen/'shizukudos/tools/shzinfo.py')
     build_pin=plan['input_pins']['build_receipt']
     guards.pinned_hash(Path(build_pin['path']),build_pin['sha256'],build_pin['bytes'],16<<20)
     built=json.loads(Path(build_pin['path']).read_text())
@@ -172,9 +186,11 @@ def main():
     header_name='shizukudos/supervisor/include/shz_info.h'
     header=Path(build_pin['path']).parent/'source'/header_name
     if sha(header)!=built['sources_sha256'][header_name]:raise ValueError('evidence header differs from source-bound builder')
-    target=frozen/header_name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(header.read_bytes());source_pins[header_name]=sha(target)
+    target=frozen/header_name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(header.read_bytes())
+    if custody is not None:custody.admit_frozen(target,header_name)
+    source_pins[header_name]=sha(target)
     source_sizes[header_name]=target.stat().st_size
-    layout_bytes=info_helper.selfcheck(frozen)
+    layout_bytes=(custody.layout(info_helper,target) if custody is not None else info_helper.selfcheck(frozen))
     qemu=Path(plan['input_pins']['qemu']['path'])
     recipe=preparation.recipe(qemu,out)
     if recipe!=plan['qemu_argv']:raise ValueError('VM argv differs from the exact source recipe')
@@ -187,12 +203,12 @@ def main():
         parser.error('17 GiB reserve plus the 1 GiB bounded capture budget required')
     if capture.available_memory_bytes()<capture.MEMORY_ADMISSION:
         parser.error('6 GiB MemAvailable required for the owned 4 GiB VM and host margin')
-    record={'status':'NATIVE_CAPTURE_PREPARING','scope':'L1 UEFI Supervisor -> actual L2 original-MS-DOS installed Windows98 control; ShizukuDOS replacement incomplete',
+    record={'status':'NATIVE_CAPTURE_PREPARING','scope':'L1 UEFI Supervisor -> L2 Windows98 domain using the explicitly selected private disk; DOS and Windows execution unverified',
             'requested_timeout_seconds':args.timeout,'cleanup_wait_budget_seconds':16,
             'plan_sha256':args.plan_sha256,'builder_receipt_sha256':build_pin['sha256'],
             'runtime_helpers_identity_sha256':identity,'preparation_helper_source_pins_verified':preparation_pins is not None,
             'source_pins':source_pins,'C_Python_evidence_layout_bytes':layout_bytes,'firmware_bytes':4<<20,'L1_memory_bytes':4<<30,'L2_memory_bytes':128<<20,
-            'VM_executed':False,'Windows98_GUI_verified':False,'native_Windows98_complete':False,'ShizukuDOS_replaces_MS_DOS_validated':False,'all_modern_apps_validated':False,
+            'VM_executed':False,'SMP_verified':False,'ISO_verified':False,'Windows98_GUI_verified':False,'native_Windows98_complete':False,'ShizukuDOS_replaces_MS_DOS_validated':False,'all_modern_apps_validated':False,
             'sampled_ESP_write_budget_bytes':WRITE_BUDGET,'write_budget_verified':False,'captures':[],
             'retained_free_space_bytes':RESERVE,'preflight_capture_budget_bytes':capture.PREFLIGHT_BUDGET,
             'log_limit_per_stream_bytes':capture.LOG_LIMIT,'capture_total_limit_bytes':capture.CAPTURE_LIMIT,
@@ -232,12 +248,17 @@ def main():
         command[serial]=f'file:/proc/self/fd/{logs.writers["serial.log"]}'
         command += ['-debugcon',f'file:/proc/self/fd/{logs.writers["e9.log"]}','-global','isa-debugcon.iobase=0xe9']
         capture.atomic_json(out/'native-command.json',command);record['command_sha256']=sha(out/'native-command.json')
-        child=subprocess.Popen(command,cwd=out,stdout=subprocess.DEVNULL,stderr=logs.writers['native-qemu.stderr'],
-                               pass_fds=(logs.writers['serial.log'],logs.writers['e9.log']))
-        logs.close_writers();start=time.monotonic()
-        record['owned_pid']=child.pid;record['VM_executed']=True
+        child=(custody.spawn(command,logs.writers) if custody is not None else
+               subprocess.Popen(command,cwd=out,stdout=subprocess.DEVNULL,stderr=logs.writers['native-qemu.stderr'],
+                                pass_fds=(logs.writers['serial.log'],logs.writers['e9.log'])))
+        # The real guardian spawn ACK (or modeled host Popen) is the boundary.
+        record['owned_pid']=child.pid;record['VM_executed']=True;start=time.monotonic()
+        if custody is not None:
+            capture.atomic_json(out/'native-command.json',child.args);record['command_sha256']=sha(out/'native-command.json')
+        logs.close_writers()
         print(json.dumps({'stage':'native-owned-VM-started','pid':child.pid}),flush=True)
         monitor=capture.OwnedQMP(out/'qmp.sock',child.pid,start+args.timeout,pump=pump)
+        if custody is not None:custody.admit_qmp(monitor)
         next_capture=10
         while child.poll() is None and time.monotonic()-start<args.timeout:
             elapsed=time.monotonic()-start;pump()
@@ -314,7 +335,14 @@ def main():
         record['unresolved_owned_child']=child is not None and not record.get('owned_child_reaped',False)
         try:leases.close()
         except (Exception,KeyboardInterrupt) as error:record['lease_integrity_verified']=False;fail('lease_release',error)
-        verified=(record['VM_executed'] and record['write_budget_verified'] and record.get('owned_child_reaped')
+        record['VM_launch_may_have_occurred']=bool(custody is not None and custody.launch_requested and not record['VM_executed'])
+        external_verified=False
+        if custody is not None:
+            try:
+                record['external_custody']=custody.ordinary('status')
+                external_verified=(record['external_custody'].get('custody_admitted') is True and record['external_custody'].get('owned_child_reaped') is True)
+            except (Exception,KeyboardInterrupt) as error:fail('external_custody',error)
+        verified=((custody is None or external_verified) and record['VM_executed'] and record['write_budget_verified'] and record.get('owned_child_reaped')
                   and not record.get('forced_cleanup') and not record.get('cleanup_errors') and record.get('qemu_exit_code')==0
                   and (record.get('quit_acknowledged') or record.get('natural_exit_observed'))
                   and record['lease_integrity_verified'] and record['original_disk_unchanged']
@@ -337,6 +365,7 @@ def main():
             record['receipt_persisted']=False;record['collection_verified']=False;fail('receipt',error)
         print(json.dumps({'stage':'native-complete','status':record['status'],'collection_verified':record['collection_verified'],
                           'receipt_persisted':record['receipt_persisted'],'original_disk_unchanged':record['original_disk_unchanged']}),flush=True)
+    if custody is not None:custody.close()
     return 0 if record['collection_verified'] and record['receipt_persisted'] else 1
 
 if __name__=='__main__':raise SystemExit(main())
