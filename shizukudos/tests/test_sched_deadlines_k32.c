@@ -18,6 +18,8 @@ static uint32_t host_read_cr3(void);
 static void host_write_cr3(uint32_t value);
 static void host_sti(void);
 static void host_cli(void);
+static uint32_t host_flags(void);
+static uint32_t host_stack_pointer(void);
 void boundary_switch(uint32_t *save_esp, uint32_t new_esp);
 
 /* Include the real header first; retain its types and ABI, and substitute only
@@ -28,6 +30,8 @@ void boundary_switch(uint32_t *save_esp, uint32_t new_esp);
 #define write_cr3 host_write_cr3
 #define sti host_sti
 #define cli host_cli
+#define k32_flags host_flags
+#define k32_stack_pointer host_stack_pointer
 #define switch_stacks boundary_switch
 #include "../kernel32/sched.c"
 #undef irq_save
@@ -36,6 +40,8 @@ void boundary_switch(uint32_t *save_esp, uint32_t new_esp);
 #undef write_cr3
 #undef sti
 #undef cli
+#undef k32_flags
+#undef k32_stack_pointer
 #undef switch_stacks
 #define current (runqueues.cpu[0].current)
 #define idle_thread (runqueues.cpu[0].idle)
@@ -88,6 +94,9 @@ static uint32_t host_read_cr3(void) { return host_cr3; }
 static void host_write_cr3(uint32_t value) { host_cr3 = value; }
 static void host_sti(void) { host_if = 1; }
 static void host_cli(void) { host_if = 0; }
+/* Default-UP only: no real native destination stack exists in this fixture. */
+static uint32_t host_flags(void) { return host_if ? 0x200u : 0; }
+static uint32_t host_stack_pointer(void) { return 0; }
 uint32_t kernel_space(void) { return 0x1000; }
 uint32_t proc_page_directory(uint32_t pid)
 {

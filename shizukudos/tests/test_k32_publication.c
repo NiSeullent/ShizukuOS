@@ -17,6 +17,8 @@
 #define write_cr3 native_write_cr3
 #define sti native_sti
 #define cli native_cli
+#define k32_flags native_k32_flags
+#define k32_stack_pointer native_k32_stack_pointer
 #include "../kernel32/k32.h"
 #undef irq_save
 #undef irq_restore
@@ -25,6 +27,8 @@
 #undef write_cr3
 #undef sti
 #undef cli
+#undef k32_flags
+#undef k32_stack_pointer
 
 static uint32_t host_flags, host_cr3;
 static unsigned observing, watch_publication, timer_observations, failures;
@@ -52,6 +56,9 @@ static uint32_t read_cr3(void) { return host_cr3; }
 static void write_cr3(uint32_t pd) { host_cr3 = pd; }
 static void sti(void) { host_flags |= 0x200u; }
 static void cli(void) { host_flags &= ~0x200u; }
+/* Preserve modeled IRQ state; no native AP stack is admitted by this host. */
+static uint32_t k32_flags(void) { return host_flags; }
+static uint32_t k32_stack_pointer(void) { return 0; }
 
 #include "../kernel32/sched.c"
 #define current (runqueues.cpu[0].current)

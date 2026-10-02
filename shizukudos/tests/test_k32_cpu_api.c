@@ -19,6 +19,9 @@ static uint32_t hi_cr3(void) { return 0x1000; }
 static void hi_setcr3(uint32_t f) { (void)f; }
 static void hi_sti(void) { host_flags |= 0x200; }
 static void hi_cli(void) { host_flags &= ~0x200u; }
+/* Default-UP host boundaries; this fixture never admits a native AP stack. */
+static uint32_t hi_flags(void) { return host_flags; }
+static uint32_t hi_stack_pointer(void) { return 0; }
 extern uint32_t sched_cpu_online_mask(void) __attribute__((weak));
 extern int sched_cpu_register(uint32_t) __attribute__((weak));
 extern int thread_set_affinity(thread_t *, uint32_t) __attribute__((weak));
@@ -29,6 +32,8 @@ extern uint32_t thread_get_affinity(thread_t *) __attribute__((weak));
 #define write_cr3 hi_setcr3
 #define sti hi_sti
 #define cli hi_cli
+#define k32_flags hi_flags
+#define k32_stack_pointer hi_stack_pointer
 #include "../kernel32/sched.c"
 #undef irq_save
 #undef irq_restore
@@ -36,6 +41,8 @@ extern uint32_t thread_get_affinity(thread_t *) __attribute__((weak));
 #undef write_cr3
 #undef sti
 #undef cli
+#undef k32_flags
+#undef k32_stack_pointer
 static unsigned char heap[65536] __attribute__((aligned(16)));
 static size_t allocated;
 void *kmalloc(size_t n) { if(allocated+n>sizeof heap) return 0; void *p=heap+allocated; allocated+=n; return p; }
