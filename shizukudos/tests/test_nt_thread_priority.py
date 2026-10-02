@@ -96,7 +96,7 @@ def main():
     pieces = [function(sources["smp_boot.c"], name) for name in ("initial_apic_id", "shz_smp_this_cpu")]
     pieces.append(re.search(r"^typedef struct[^\n]+queue_guard_t;", sources["sched.c"], re.M)[0])
     for filename, names in [
-        ("sched.c", ["sched_cpu_identity", "bsp_scheduler_owner", "sched_cpu_register", "queue_enter", "queue_leave",
+        ("sched.c", ["sched_cpu_identity", "bsp_scheduler_owner", "sched_owner_context", "sched_cpu_register", "queue_enter", "queue_leave",
                       "thread_pointer_valid", "ready_enqueue_locked", "ready_enqueue", "ready_remove", "thread_current",
                       "thread_set_sched_policy", "thread_get_sched_policy"]),
         ("ipc_core.c", ["ipc_ref_handle", "ipc_ref_process"]),

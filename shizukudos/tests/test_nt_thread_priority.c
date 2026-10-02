@@ -763,6 +763,42 @@ static void check_process_retained_lifetime(void) {
     CHECK(NtQueryInformationProcess(H(24), 0, &basic, sizeof basic, &n) == 0 && basic.pid == 700 && basic.base_priority == 6);
     CHECK(objects[14].refs == 1 && o->refs == 0 && irq_depth == 0);
 }
+static void check_current_context_publication(void) {
+    /* Keep reset and the compatibility mirror used by reclaim bodies intact.
+     * Divergence is confined to these getter/NT-current-handle controls. */
+    for (unsigned masked = 0; masked < 2; ++masked) {
+        reset(); const uint64_t outer = masked ? irq_save() : 0;
+        current = &slots[1];
+        k64_runqueues_t before = runqueues;
+        CHECK(thread_current() == &slots[0] && current == &slots[1]);
+        CHECK(irq_depth == masked);
+        CHECK(memcmp(&runqueues, &before, sizeof before) == 0);
+        struct thread_basic basic; ULONG bytes = 0;
+        CHECK(NtQueryInformationThread(H(CURRENT_THREAD_HANDLE), 0, &basic, sizeof basic, &bytes) == 0 &&
+              bytes == 48 && basic.pid == 100 && basic.tid == 204);
+        CHECK(irq_depth == masked);
+
+        current = &slots[0]; runqueues.cpu[0].current = NULL;
+        before = runqueues;
+        CHECK(thread_current() == NULL && current == &slots[0]);
+        CHECK(irq_depth == masked);
+        CHECK(memcmp(&runqueues, &before, sizeof before) == 0);
+
+        runqueues.cpu[0].current = &slots[0];
+        runqueues.cpu[1].current = &slots[2]; owner_identity(1);
+        before = runqueues;
+        CHECK(sched_cpu_identity() == 1 && thread_current() == NULL && runqueues.online_mask == 1);
+        CHECK(irq_depth == masked);
+        CHECK(memcmp(&runqueues, &before, sizeof before) == 0);
+
+        owner_identity(32); before = runqueues;
+        CHECK(sched_cpu_identity() == K64_CPU_NONE && thread_current() == NULL && current == &slots[0]);
+        CHECK(irq_depth == masked);
+        CHECK(memcmp(&runqueues, &before, sizeof before) == 0);
+        owner_identity(0); runqueues.cpu[1].current = NULL;
+        if (masked) irq_restore(outer);
+    }
+}
 int main(void) {
     cpu_set_t allowed, single;
     if (sched_getaffinity(0, sizeof allowed, &allowed)) return 2;
@@ -786,6 +822,10 @@ int main(void) {
     PROCESS_CASE(check_process_retained_lifetime);
     printf("NT_PROCESS_PRIORITY_HOST: %u checks, %u failures\n", checks-baseline_checks, failures-baseline_failures);
     CHECK(irq_depth == 0);
+    printf("NT_PRIORITY_EXISTING_CASES: %u checks, %u failures\n", checks, failures);
+    const unsigned context_checks = checks, context_failures = failures;
+    check_current_context_publication();
+    printf("NT_DISPATCH_CURRENT_CONTEXT_HOST: %u checks, %u failures\n", checks-context_checks, failures-context_failures);
     printf("NT_THREAD_PRIORITY_HOST: %u checks, %u failures\n", checks, failures);
     return failures ? 1 : 0;
 }
