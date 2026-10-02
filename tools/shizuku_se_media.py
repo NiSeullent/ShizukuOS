@@ -198,15 +198,31 @@ def setup_payload(directory: Path | None, prefix: str = SETUP_ISO_DIR) -> tuple[
     if not image.is_file():
         info["note"] = f"{rel(image)} not found (install/mkpayload.py): no \\SHZ\\SETUP and no Install menu entry"
         return {}, info
-    receipt = json.loads((directory / "mkpayload-result.json").read_text())
-    if receipt["outputs"]["INSTALL.IMG"]["sha256"] != sha256(image.read_bytes()):
+    # Public media accepts only the existing development installer envelope.
+    # Private native ESP imports have a separate explicitly private producer.
+    import importlib.util
+    guard_path = ROOT / "shizukudos/install/native_payload_ingest.py"
+    spec = importlib.util.spec_from_file_location("private_native_payload_public_guard", guard_path)
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    if image.stat().st_size > 64 << 20:
+        raise ValueError("public INSTALL.IMG exceeds the development installer bound")
+    for metadata in (directory / "mkpayload-result.json", directory / "payload" / "manifest.json"):
+        if not 0 < metadata.stat().st_size <= guard.MAX_JSON:
+            raise ValueError("public installer metadata exceeds its input bound")
+    image_bytes = image.read_bytes()
+    receipt = json.loads((directory / "mkpayload-result.json").read_text(), object_pairs_hook=guard.unique)
+    manifest_bytes = (directory / "payload" / "manifest.json").read_bytes()
+    manifest = json.loads(manifest_bytes, object_pairs_hook=guard.unique)
+    guard.require_public_payload(manifest, receipt, image_bytes)
+    if receipt["outputs"]["INSTALL.IMG"]["sha256"] != sha256(image_bytes):
         raise RuntimeError(f"{image} does not match {directory / 'mkpayload-result.json'}")
     answer = (directory / "shzsetup.ini").read_bytes()
     if answer != (ROOT / "shizukudos" / "install" / "shzsetup.ini").read_bytes():
         raise RuntimeError(f"{directory} was built with another answer file than install/shzsetup.ini; the media ship "
                            "the product answer file (rebuild with install/mkpayload.py --out)")
-    payload = {f"{prefix}/INSTALL.IMG": image.read_bytes(), f"{prefix}/SHZSETUP.INI": answer,
-               f"{prefix}/MANIFEST.JSON": (directory / "payload" / "manifest.json").read_bytes(),
+    payload = {f"{prefix}/INSTALL.IMG": image_bytes, f"{prefix}/SHZSETUP.INI": answer,
+               f"{prefix}/MANIFEST.JSON": manifest_bytes,
                f"{prefix}/README.TXT": (
                    "\\SHZ\\SETUP - ShizukuDOS 10 installer (SHZSETUP, install/mkpayload.py)\r\n"
                    "Boot menu entry I: Kernel64 with INSTALL.IMG as its initial RAM image and the\r\n"
@@ -217,10 +233,9 @@ def setup_payload(directory: Path | None, prefix: str = SETUP_ISO_DIR) -> tuple[
                    "The installed disk boots on UEFI (the Shizuku boot\r\n"
                    "manager, BOOT.INI mode = kernel64) and on legacy BIOS (syslinux on the ESP).\r\n"
                    "MANIFEST.JSON lists every file the installer writes, with SHA-256.\r\n"
-                   f"INSTALL.IMG sha256 {sha256(image.read_bytes())}\r\n").encode("ascii")}
-    manifest = json.loads(payload[f"{prefix}/MANIFEST.JSON"])
+                   f"INSTALL.IMG sha256 {sha256(image_bytes)}\r\n").encode("ascii")}
     info.update(present=True, bios_boot=receipt.get("bios_boot"),
-                boot_profile=manifest.get("boot_profile", "self-test"), install_img_sha256=sha256(image.read_bytes()),
+                boot_profile=manifest.get("boot_profile", "self-test"), install_img_sha256=sha256(image_bytes),
                 files={name: sha256(data) for name, data in payload.items()})
     return payload, info
 
