@@ -34,16 +34,44 @@ enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32
        K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13, K32Q_CPU_CLOCK = 14, K32Q_SAME_OBJECT = 15, K32Q_THREAD_NAME = 16 };
 enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
        K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10,
-       K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12, K32S_THREAD_NAME = 13 };
+       K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12, K32S_THREAD_NAME = 13, K32S_PROCESS_AFFINITY = 14 };
 #define THREAD_NAME_MAX_BYTES 65534u            /* SetThreadDescription: a UNICODE_STRING length (USHRT_MAX, as Windows/Wine bound it) */
 
 /* FILETIME of a scheduler tick: the wall clock at the first query minus the ticks counted by then gives the boot instant once,
  * so a thread's creation or exit time reads the same on every query. */
-static uint64_t tick_to_filetime(uint64_t tick)
+static uint64_t prepare_time_epoch(void)
 {
     static uint64_t boot_ft;
-    if (!boot_ft) boot_ft = (uint64_t)filetime_now() - ticks_now() * TICK_100NS;
-    return boot_ft + tick * TICK_100NS;
+    static int initialized;
+    uint64_t f = irq_save(), base = boot_ft;
+    const int ready = initialized;
+    irq_restore(f);
+    if (!ready) {
+        /* WALLTIME may hypercall. Prepare outside the snapshot/publication guard. */
+        const uint64_t candidate = (uint64_t)filetime_now() - ticks_now() * TICK_100NS;
+        f = irq_save();
+        if (!initialized) { boot_ft = candidate; initialized = 1; }
+        base = boot_ft;
+        irq_restore(f);
+    }
+    return base;
+}
+
+static uint64_t tick_to_filetime(uint64_t tick)
+{
+    return prepare_time_epoch() + tick * TICK_100NS;
+}
+
+/* A zero alternative mask preserves the legacy settings query's access policy. */
+static int32_t ref_query_object(process_t *cur, uint64_t h, uint32_t type, uint32_t alternatives, kobject_t **out)
+{
+    kobject_t *o;
+    uint32_t access = 0;
+    int32_t st = ipc_ref_handle(cur, h, type, &o, &access);
+    if (st) return st;
+    if (alternatives && !(access & alternatives)) { ob_deref(o); return STATUS_ACCESS_DENIED; }
+    *out = o;
+    return STATUS_SUCCESS;
 }
 
 static process_t *proc_of_handle(process_t *cur, uint64_t h)
@@ -71,15 +99,18 @@ void thread_account_exit(thread_t *t)
 
 struct times { uint64_t create_ft, exit_ft, kernel_100ns, user_100ns, cycles; };
 
-static int32_t thread_times(process_t *cur, uint64_t h, struct times *out, uint32_t *settings)
+static int32_t thread_times(process_t *cur, uint64_t h, struct times *out, uint32_t *settings, uint32_t alternatives)
 {
     thread_t *t = 0;
     kobject_t *o = 0;
     uint64_t f, create, exit_tick = 0, ut, kt, cyc;
-    if (h == CURRENT_THREAD_HANDLE) t = thread_current();
-    else if (!(o = handle_lookup(cur, h, OB_THREAD))) return STATUS_INVALID_HANDLE;
+    int32_t st = ref_query_object(cur, h, OB_THREAD, alternatives, &o);
+    if (st) return st;
     f = irq_save();                                             /* an exited thread may be reclaimed at any preemption */
-    if (o) t = o->u.thr.t;
+    t = o->u.thr.t;
+    if (t && (t->object != o || t->state == TS_FREE)) {
+        irq_restore(f); ob_deref(o); return STATUS_INVALID_HANDLE;
+    }
     if (t) {
         create = t->create_tick; ut = t->user_ticks; kt = t->kernel_ticks; cyc = thread_cycles_now(t);
         if (t->state == TS_ZOMBIE) exit_tick = t->exit_tick;
@@ -91,6 +122,7 @@ static int32_t thread_times(process_t *cur, uint64_t h, struct times *out, uint3
         if (settings) { settings[0] = 0; settings[1] = 5; settings[2] = 0; settings[3] = 0; }
     }
     irq_restore(f);
+    ob_deref(o);
     if (out) {
         out->create_ft = tick_to_filetime(create);
         out->exit_ft = exit_tick ? tick_to_filetime(exit_tick) : 0;
@@ -423,32 +455,53 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
     switch (cls) {
     case K32Q_THREAD_TIMES: {
         struct times t;
-        int32_t st = thread_times(cur, h, &t, 0);
+        int32_t st = thread_times(cur, h, &t, 0, THREAD_QUERY_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION);
         return st ? st : put_out(cur, buf, len, retlen, &t, sizeof t);
     }
     case K32Q_THREAD_SETTINGS: {
         uint32_t s[4];
-        int32_t st = thread_times(cur, h, 0, s);
+        int32_t st = thread_times(cur, h, 0, s, 0);
         return st ? st : put_out(cur, buf, len, retlen, s, sizeof s);
     }
     case K32Q_PROCESS_TIMES: {
-        process_t *p = proc_of_handle(cur, h);
+        process_t *p;
+        kobject_t *o;
         struct times t;
-        uint64_t ut, kt, cyc;
-        if (!p) return STATUS_INVALID_HANDLE;
+        uint64_t ut, kt, cyc, create, exit_tick, f;
+        int32_t st = ref_query_object(cur, h, OB_PROCESS, PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, &o);
+        if (st) return st;
+        f = irq_save();
+        p = o->u.proc.p;
+        if (!p || !p->used || p->object != o) {
+            irq_restore(f); ob_deref(o); return STATUS_INVALID_HANDLE;
+        }
         ut = p->dead_user_ticks; kt = p->dead_kernel_ticks; cyc = p->dead_cycles;
         live_threads(p, &ut, &kt, &cyc);
-        t.create_ft = tick_to_filetime(p->create_tick);
-        t.exit_ft = p->terminated && p->exit_tick ? tick_to_filetime(p->exit_tick) : 0;
+        create = p->create_tick;
+        exit_tick = p->terminated ? p->exit_tick : 0;
+        irq_restore(f);
+        ob_deref(o);
+        t.create_ft = tick_to_filetime(create);
+        t.exit_ft = exit_tick ? tick_to_filetime(exit_tick) : 0;
         t.kernel_100ns = kt * TICK_100NS; t.user_100ns = ut * TICK_100NS; t.cycles = cyc;
         return put_out(cur, buf, len, retlen, &t, sizeof t);
     }
     case K32Q_PROCESS_INFO: {                                   /* {handles, threads, pid, ppid, priority class, reserved} */
-        process_t *p = proc_of_handle(cur, h);
+        process_t *p;
+        kobject_t *o;
         uint32_t v[6];
-        if (!p) return STATUS_INVALID_HANDLE;
+        int32_t st = ref_query_object(cur, h, OB_PROCESS, PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, &o);
+        uint64_t f;
+        if (st) return st;
+        f = irq_save();
+        p = o->u.proc.p;
+        if (!p || !p->used || p->object != o) {
+            irq_restore(f); ob_deref(o); return STATUS_INVALID_HANDLE;
+        }
         v[0] = p->handle_count; v[1] = live_threads(p, 0, 0, 0); v[2] = (uint32_t)p->pid; v[3] = (uint32_t)p->parent_pid;
         v[4] = p->priority_class ? p->priority_class : 0x20; v[5] = 0;
+        irq_restore(f);
+        ob_deref(o);
         return put_out(cur, buf, len, retlen, v, sizeof v);
     }
     case K32Q_PROCESS_SETTINGS: {                               /* {memory priority, power throttling control, state} */
@@ -676,6 +729,28 @@ static int32_t set_process_priority_class(process_t *cur, uint64_t h, uint64_t b
     return st;
 }
 
+/* CPU0 is the immutable affinity of every existing and future user thread.
+ * Accept its idempotent setting with SET rights; no wider CPU mask is supported. */
+static int32_t set_process_affinity_mask(process_t *cur, uint64_t h, uint64_t buf, uint64_t len)
+{
+    process_t *p;
+    kobject_t *o;
+    uint64_t mask, f;
+    int32_t st;
+    if (len != sizeof mask) return STATUS_INFO_LENGTH_MISMATCH;
+    st = ipc_ref_process(cur, h, PROCESS_SET_INFORMATION, &p, &o);
+    if (st) return st;
+    if (copy_from_user(cur, &mask, buf, sizeof mask)) { ob_deref(o); return STATUS_ACCESS_VIOLATION; }
+    if (mask != 1) { ob_deref(o); return STATUS_INVALID_PARAMETER; }
+    f = irq_save();
+    if (!p || !p->used || p->object != o || o->u.proc.p != p) st = STATUS_INVALID_HANDLE;
+    else if (p->terminated || p->teardown || p->exit_owner) st = STATUS_PROCESS_IS_TERMINATING;
+    else st = STATUS_SUCCESS;
+    irq_restore(f);
+    ob_deref(o);
+    return st;
+}
+
 /* NtShzSetK32(ULONG class, HANDLE handle, PVOID buffer, ULONG length) */
 int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len)
 {
@@ -704,6 +779,7 @@ int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t
         return STATUS_SUCCESS;
     }
     case K32S_PRIORITY_CLASS: return set_process_priority_class(cur, h, buf, len);
+    case K32S_PROCESS_AFFINITY: return set_process_affinity_mask(cur, h, buf, len);
     case K32S_PROCESS_MEM_PRIORITY: case K32S_PROCESS_POWER: {
         process_t *p = proc_of_handle(cur, h);
         uint32_t v[2] = { 0, 0 };

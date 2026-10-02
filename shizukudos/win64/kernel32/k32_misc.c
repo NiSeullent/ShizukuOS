@@ -325,7 +325,16 @@ K32API BOOL WINAPI GetComputerNameW(LPWSTR buf, LPDWORD n)
     *n = 7;
     return TRUE;
 }
-K32API BOOL WINAPI GetProcessAffinityMask(HANDLE p, PDWORD_PTR pm, PDWORD_PTR sm) { (void)p; *pm = 1; *sm = 1; return TRUE; }
+K32API BOOL WINAPI GetProcessAffinityMask(HANDLE p, PDWORD_PTR pm, PDWORD_PTR sm)
+{
+    ULONG measured[6];
+    NTSTATUS st;
+    if (!pm || !sm) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
+    st = NtShzQueryK32(K32Q_PROCESS_INFO, p, measured, sizeof measured, 0);
+    if (st) { k32_nt_error(st); return FALSE; }
+    *pm = 1; *sm = 1;
+    return TRUE;
+}
 K32API DWORD_PTR WINAPI SetThreadAffinityMask(HANDLE t, DWORD_PTR m)
 {
     struct { LONG64 exit_status; ULONG64 teb, pid, tid, aff; LONG prio, base; } b;

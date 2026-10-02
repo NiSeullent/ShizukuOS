@@ -130,6 +130,7 @@ NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
 #define K32S_SUSPEND_PROCESS 11     /* every thread of the process (NtSuspendProcess) */
 #define K32S_RESUME_PROCESS 12      /* NtResumeProcess */
 #define K32S_THREAD_NAME 13         /* thread handle: UTF-16 text without terminator (len 0 clears); > 65534 bytes is INVALID_PARAMETER */
+#define K32S_PROCESS_AFFINITY 14    /* process SET_INFORMATION: exact ULONG64 mask; CPU0 mask 1 only */
 
 /* advapi32 support calls 0x9d-0x9e (kernel64/sysk32_sec.c; operation codes as in kernel64/ntsys.h) */
 NTSTATUS NTAPI NtShzToken(ULONG_PTR op, ULONG_PTR, ULONG_PTR, ULONG_PTR);
