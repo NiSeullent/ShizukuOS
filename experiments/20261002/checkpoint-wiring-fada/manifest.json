@@ -1,0 +1,10 @@
+[
+  {
+    "path": "shizukudos/supervisor/native_win98/run_vm.py",
+    "sha256": "33849b7096d1926adb99194bc2dae1d6b279f6d1baa413d07885d9a76ace8156"
+  },
+  {
+    "path": "shizukudos/supervisor/native_win98/tests/test_controller_main.py",
+    "sha256": "2c3b68522a5af6c0dab5af92b70f77dd359db8b17236d62a7c8bbf377a1da2b3"
+  }
+]
