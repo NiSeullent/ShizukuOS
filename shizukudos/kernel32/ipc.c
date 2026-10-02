@@ -48,7 +48,7 @@ void ipc_doorbell_irq(void)
 void ipc_init(const shz_bootinfo_t *bi)
 {
     unsigned c;
-    const int mode = k32_boot_service_mode(bi);
+    const int mode = k32_boot_runtime_service_mode(bi);
     KASSERT(mode >= 0);
     persistent_service = mode == 1;
     sem_init(&doorbell_sem, 0);
