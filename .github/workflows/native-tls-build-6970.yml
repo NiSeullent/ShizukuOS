@@ -258,7 +258,7 @@ jobs:
           import hashlib,os,stat,sys,types
           from pathlib import Path
           root=Path.cwd().resolve()
-          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': '853be88c87a0496d84b5c53ee7f320e7e3b3d63de8f85ae584c6285603bad41e', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '65bb6326ad62b1392cd8e99c18d2e3f3a31361fd4f22b56a04817cc6856537c5', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': '5ff8c7cdf5730c3819f005803f87ff327bf3e31d2c7e06077a3d4e473027b3ee'}
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'aba211a9b3bcc34582a9efbf98830f616b40713abf9646850b1e4f2c827d49f0', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '65bb6326ad62b1392cd8e99c18d2e3f3a31361fd4f22b56a04817cc6856537c5', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': '5ff8c7cdf5730c3819f005803f87ff327bf3e31d2c7e06077a3d4e473027b3ee'}
           before={}
           identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
           for relative,expected in pins.items():
@@ -335,6 +335,14 @@ jobs:
               data=read(p,524288,expected);retained_control_text+=len(data);assert retained_control_text<=524288
               print('Actual quiescent retained file:',str(relative),'bytes='+str(len(data)),'sha256='+hashlib.sha256(data).hexdigest())
               print(data.decode('utf-8'),end='')
+          retained_ninja_text=0
+          for name in ('build.ninja','CMakeFiles/rules.ninja'):
+              p=proof/'cmake'/name
+              expected=receipt.get('configured_generator_inputs',{}).get(str(p))
+              if expected is None:continue
+              data=read(p,2097152,expected);retained_ninja_text+=len(data);assert retained_ninja_text<=4194304
+              print('Actual retained Ninja file:',str(p.relative_to(proof)),'bytes='+str(len(data)),'sha256='+hashlib.sha256(data).hexdigest())
+              print(data.decode('utf-8'),end='')
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as stream:
               stream.write(f"Current native TLS/SSPI build: {receipt['result']}\n\nActual compile/import/ISA proof only; native Windows, credentials, TLS negotiation, default ROOT, sockets, OS/K64/applications and ISO stay unverified.\n")
           PYTHON
@@ -382,8 +390,8 @@ jobs:
           for path,pin in console['files'].items():
               path=Path(path);assert read(path,2097152)[1]==pin
               selected[path]=pin
-          assert parser_controls['result']=='PASS_PARSER_CONTROLS_ONLY' and parser_controls['completed']==12 and parser_controls['failures']==0
-          assert len(parser_controls['cases'])==12 and all(row['result']=='PASS' and row['actual']==row['expected'] for row in parser_controls['cases'])
+          assert parser_controls['result']=='PASS_PARSER_CONTROLS_ONLY' and parser_controls['completed']==14 and parser_controls['failures']==0
+          assert len(parser_controls['cases'])==14 and all(row['result']=='PASS' and row['actual']==row['expected'] for row in parser_controls['cases'])
           assert parser_controls['basis_build_sha256']==console['files'][str(proof/'cmake/build.ninja')]['sha256']
           assert parser_controls['basis_rules_sha256']==console['files'][str(proof/'cmake/CMakeFiles/rules.ninja')]['sha256']
           for key in ('mutated_graphs_written_or_executed','process_execution_verified','native_execution_verified','windows98_integration_verified','tls_execution_verified'):assert parser_controls[key] is False

@@ -86,3 +86,10 @@ pointer table is not a64-bit wire representation. Own137b profile binding
 is tested source; canonical still has its earlier profile and reciprocal
 SSPI/WinHTTP adoption ACK remains pending. Provider/table identity alone
 does not prove credential or TLS execution.
+
+
+2026-10-02: Five current guarded TLS hosted attempts remain failed. The fifth
+retains actual child control text but no PE artifact. Bounded workdir parser
+support and 14 graph controls are reviewed source only. Obtain a genuine
+new four-PE artifact before a separately guarded GUI TLS13PRB/probe-pin
+successor packet; do not relabel TLS13PROB or reuse historical DLL digests.

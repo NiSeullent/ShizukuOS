@@ -508,18 +508,34 @@ def compile_recipe(row, cmake, cc):
     return common, Path(row['file']).resolve(strict=True), obj, output
 
 
-def ninja_console_plan(build_raw, rules_raw, compile_targets):
+def ninja_console_plan(build_raw, rules_raw, compile_targets, cmake_directory):
     """Fail-closed validation of this CMake graph, not a general Ninja evaluator.
 
     Only the two directly retained generated files are accepted. Selected
     writers must carry their own literal console binding; top-level variables,
     inherited pools and a configure option alone never establish that fact.
     Paths may use Ninja's literal space/colon/dollar escapes, but variable path
-    expansion, additional includes/subninjas and dynamic dependencies fail.
+    expansion except the one exact CMake workdir prefix, additional
+    includes/subninjas and dynamic dependencies fail.
     """
     if (not isinstance(compile_targets, list) or len(compile_targets) != 126
             or len(set(compile_targets)) != 126):
         raise ValueError('console graph requires exact 126 unique compiler outputs')
+
+    context = {'stage':'generated-graph-framing', 'file':None, 'physical_line':None,
+               'logical_line_bytes':0, 'logical_line_sha256':None}
+    context_raw = b''
+
+    def failure(message, fragment=None):
+        raw = context_raw if fragment is None else fragment.encode()
+        prefix = raw[:256].decode('utf-8', errors='ignore')
+        error = ValueError(message)
+        error.observation = {'schema':'native-tls-ninja-parser-failure-6970-v1', **context,
+            'reason':message[:256], 'context_utf8':prefix, 'context_prefix_bytes':len(prefix.encode()),
+            'context_total_bytes':len(raw), 'context_sha256':digest(raw),
+            'context_kind':'logical-line-prefix' if fragment is None else 'offending-path-fragment',
+            'native_execution_verified':False, 'tls_execution_verified':False}
+        return error
 
     def canonical(name):
         # Ninja canonicalizes node names before producer lookup. Refuse every
@@ -528,20 +544,54 @@ def ninja_console_plan(build_raw, rules_raw, compile_targets):
         if (not name or '\\' in name or '//' in name
                 or any(part in ('.','..') for part in name.split('/'))
                 or Path(name).as_posix() != name):
-            raise ValueError('noncanonical decoded Ninja output/dependency refused')
+            raise failure('noncanonical decoded Ninja output/dependency refused',name)
+
+    expected_directory = str(cmake_directory)
+    canonical(expected_directory)
+    if not Path(expected_directory).is_absolute():
+        raise failure('absolute expected owned CMake directory required')
+    expected_workdir = expected_directory + '/'
+    workdir, workdir_binding = None, None
+
+    def literal_workdir(value):
+        decoded, at = [], 0
+        while at < len(value):
+            if value[at] == '$':
+                at += 1
+                if at >= len(value) or value[at] not in (' ', ':', '$'):
+                    raise failure('workdir binding must be literal, not recursive',value)
+            decoded.append(value[at]); at += 1
+        return ''.join(decoded)
 
     def paths(text):
-        tokens, token, at = [], [], 0
+        tokens, token, at, expanded = [], [], 0, False
+        def flush():
+            nonlocal token, expanded
+            if token:
+                value = ''.join(token)
+                if expanded and (not value.startswith(expected_workdir)
+                        or not Path(value).is_relative_to(Path(expected_directory))):
+                    raise failure('expanded workdir suffix escaped expected CMake directory',value)
+                tokens.append(value); token = []
+            expanded = False
         while at < len(text):
             char = text[at]
             if char == '$':
-                at += 1
-                if at >= len(text) or text[at] not in (' ', ':', '$'):
-                    raise ValueError('unsupported Ninja variable/path escape')
-                token.append(text[at])
+                if at + 1 < len(text) and text[at + 1] in (' ', ':', '$'):
+                    at += 1; token.append(text[at])
+                else:
+                    braced, plain = '${cmake_ninja_workdir}', '$cmake_ninja_workdir'
+                    width = len(braced) if text.startswith(braced,at) else 0
+                    if not width and text.startswith(plain,at):
+                        end = at + len(plain)
+                        if end == len(text) or not re.match(r'[A-Za-z_0-9.+-]',text[end]):
+                            width = len(plain)
+                    if not width or token or workdir is None:
+                        raise failure('unsupported/unbound Ninja variable/path escape',text[at:])
+                    token.extend(workdir); expanded = True
+                    at += width - 1
             elif char.isspace() or char in ':|':
-                if token:
-                    tokens.append(''.join(token)); token = []
+                flush()
                 if char == ':':
                     tokens.append(':')
                 elif char == '|':
@@ -552,59 +602,71 @@ def ninja_console_plan(build_raw, rules_raw, compile_targets):
             else:
                 token.append(char)
             at += 1
-        if token:
-            tokens.append(''.join(token))
+        flush()
         if len(tokens) > 8192:
-            raise ValueError('Ninja edge token bound')
+            raise failure('Ninja edge token bound')
         return tokens
 
     edges, producers, rules, includes = [], {}, {}, []
     top_names = set()
     for filename, raw in (('build.ninja', build_raw), ('CMakeFiles/rules.ninja', rules_raw)):
+        context_raw = b''
+        context.update(stage='generated-graph-framing',file=filename,physical_line=None,
+                       logical_line_bytes=0,logical_line_sha256=None)
         if (not isinstance(raw, bytes) or not raw or len(raw) > 2 * 1024**2
                 or b'\r' in raw or b'\0' in raw or not raw.endswith(b'\n')):
-            raise ValueError('bounded LF generated Ninja file required')
-        text = raw.decode('utf-8', errors='strict')
+            raise failure('bounded LF generated Ninja file required')
+        try:
+            text = raw.decode('utf-8', errors='strict')
+        except UnicodeError as error:
+            context_raw = raw
+            raise failure('generated Ninja input is not UTF-8') from error
         physical = text.splitlines(keepends=True)
         if len(physical) > 32768 or any(len(line.encode()) > 65536 for line in physical):
-            raise ValueError('generated Ninja line/count bound')
+            raise failure('generated Ninja line/count bound')
         records, current, index = [], None, 0
         while index < len(physical):
             begin = index
             line = physical[index].removesuffix('\n'); index += 1
+            context_raw = line.encode()
+            context.update(stage='generated-graph-continuation',file=filename,physical_line=begin+1,
+                           logical_line_bytes=len(context_raw),logical_line_sha256=digest(context_raw))
             while line.endswith('$') and ((len(line) - len(line.rstrip('$'))) & 1):
                 if index >= len(physical):
-                    raise ValueError('truncated Ninja continuation')
+                    raise failure('truncated Ninja continuation')
                 line = line[:-1] + physical[index].lstrip(' ').removesuffix('\n')
                 index += 1
                 if len(line.encode()) > 65536:
-                    raise ValueError('generated Ninja logical line bound')
+                    raise failure('generated Ninja logical line bound')
+            context_raw = line.encode()
+            context.update(stage='generated-graph-directive',file=filename,physical_line=begin+1,
+                           logical_line_bytes=len(context_raw),logical_line_sha256=digest(context_raw))
             if not line.strip() or line.lstrip().startswith('#'):
                 continue
             if line.startswith((' ', '\t')):
                 binding = re.fullmatch(r'  ([A-Za-z_][A-Za-z_0-9]*) = (.*)', line)
                 if current is None or binding is None:
-                    raise ValueError('unsupported generated Ninja binding context')
+                    raise failure('unsupported generated Ninja binding context')
                 name, value = binding.groups()
                 if name in current['bindings']:
-                    raise ValueError('duplicate generated Ninja block binding')
+                    raise failure('duplicate generated Ninja block binding')
                 current['bindings'][name] = value
                 current['end'] = index
                 continue
             current = None
             if line.startswith('build '):
                 if filename != 'build.ninja':
-                    raise ValueError('build edges outside retained build.ninja')
+                    raise failure('build edges outside retained build.ninja')
                 tokens = paths(line[6:])
                 if tokens.count(':') != 1:
-                    raise ValueError('generated Ninja build delimiter ambiguous')
+                    raise failure('generated Ninja build delimiter ambiguous')
                 colon = tokens.index(':'); out, tail = tokens[:colon], tokens[colon + 1:]
                 if (not out or not tail or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9.+-]*', tail[0])
                         or out.count('|') > 1 or any(x in out for x in ('||', '|@'))):
-                    raise ValueError('unsupported generated Ninja build edge')
+                    raise failure('unsupported generated Ninja build edge')
                 outputs = [x for x in out if x != '|']
                 if len(outputs) != len(set(outputs)) or len(outputs) > 256:
-                    raise ValueError('duplicate/unbounded generated Ninja edge outputs')
+                    raise failure('duplicate/unbounded generated Ninja edge outputs')
                 for output in outputs:
                     canonical(output)
                 dependencies, categories, category = [], {'explicit': [], 'implicit': [], 'order': [], 'validation': []}, 'explicit'
@@ -612,7 +674,7 @@ def ninja_console_plan(build_raw, rules_raw, compile_targets):
                 for token in tail[1:]:
                     if token in ('|', '||', '|@'):
                         if token in seen:
-                            raise ValueError('duplicate Ninja dependency separator')
+                            raise failure('duplicate Ninja dependency separator')
                         seen.add(token)
                         category = {'|':'implicit', '||':'order', '|@':'validation'}[token]
                     else:
@@ -624,82 +686,95 @@ def ninja_console_plan(build_raw, rules_raw, compile_targets):
                 records.append(current); edges.append(current)
                 for output in outputs:
                     if output in producers:
-                        raise ValueError('duplicate generated Ninja producer: ' + output)
+                        raise failure('duplicate generated Ninja producer: ' + output)
                     producers[output] = current
                 if len(edges) > 8192 or len(producers) > 16384:
-                    raise ValueError('generated Ninja graph bound')
+                    raise failure('generated Ninja graph bound')
             elif line.startswith('rule '):
                 name = line[5:]
                 if filename != 'CMakeFiles/rules.ninja' or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9.+-]*', name) or name in rules:
-                    raise ValueError('duplicate/unsupported generated Ninja rule')
+                    raise failure('duplicate/unsupported generated Ninja rule')
                 current = {'file':filename, 'begin':begin, 'end':index, 'bindings':{}, 'rule':name}
                 records.append(current); rules[name] = current
             elif line.startswith('include '):
                 if filename != 'build.ninja' or paths(line[8:]) != ['CMakeFiles/rules.ninja']:
-                    raise ValueError('unbound generated Ninja include')
+                    raise failure('unbound generated Ninja include')
                 includes.append(line[8:])
             elif line.startswith(('subninja ', 'pool ')):
-                raise ValueError('additional Ninja file or pool declaration refused')
+                raise failure('additional Ninja file or pool declaration refused')
             elif line.startswith('default '):
                 if filename != 'build.ninja' or not paths(line[8:]):
-                    raise ValueError('unsupported Ninja default context')
+                    raise failure('unsupported Ninja default context')
             else:
                 binding = re.fullmatch(r'([A-Za-z_][A-Za-z_0-9]*) = (.*)', line)
                 if binding is None or binding[1] in ('pool', 'dyndep'):
-                    raise ValueError('unsupported generated Ninja top-level directive')
+                    raise failure('unsupported generated Ninja top-level directive')
                 key = (filename, binding[1])
                 if key in top_names:
-                    raise ValueError('duplicate generated Ninja top-level variable')
+                    raise failure('duplicate generated Ninja top-level variable')
                 top_names.add(key)
+                if binding[1] == 'cmake_ninja_workdir':
+                    if filename != 'build.ninja' or workdir is not None:
+                        raise failure('duplicate/foreign CMake workdir binding')
+                    workdir = literal_workdir(binding[2])
+                    if workdir != expected_workdir or len(workdir.encode()) > 4096:
+                        raise failure('literal CMake workdir differs from expected owned directory',binding[2])
+                    workdir_binding = {'literal':workdir,'physical_lines':[begin,index],
+                                      'block_sha256':digest(''.join(physical[begin:index]).encode())}
         for record in records:
             record['block_sha256'] = digest(''.join(physical[record['begin']:record['end']]).encode())
+    context_raw = b''
+    context.update(stage='generated-graph-writer-closure',file='build.ninja',physical_line=None,
+                   logical_line_bytes=0,logical_line_sha256=None)
     if includes != ['CMakeFiles/rules.ninja']:
-        raise ValueError('exact single retained Ninja rule include required')
+        raise failure('exact single retained Ninja rule include required')
+    if workdir_binding is None:
+        raise failure('one literal MAIN CMake workdir binding required')
 
     def relative(name):
         path = Path(name)
         if path.is_absolute() or any(p in ('', '.', '..') for p in name.split('/')) or '\\' in name:
-            raise ValueError('selected Ninja output must be a safe relative path')
+            raise failure('selected Ninja output must be a safe relative path')
 
     def writer(name, kind):
         relative(name)
         edge = producers.get(name)
         if edge is None or not edge['rule'].startswith(kind + '__') or edge['rule'] not in rules:
-            raise ValueError('selected Ninja writer rule/output mismatch: ' + name)
+            raise failure('selected Ninja writer rule/output mismatch: ' + name)
         rule = rules[edge['rule']]
         if (edge['bindings'].get('pool') != 'console' or 'dyndep' in edge['bindings']
                 or 'pool' in rule['bindings'] or 'dyndep' in rule['bindings']
                 or not rule['bindings'].get('command')):
-            raise ValueError('selected Ninja writer lacks its own literal console pool: ' + name)
+            raise failure('selected Ninja writer lacks its own literal console pool: ' + name)
         return edge
 
     def alias(name, kind, basename):
         cursor, history, seen = name, [], set()
         for _ in range(4):
             if cursor in seen:
-                raise ValueError('cycle in selected Ninja alias')
+                raise failure('cycle in selected Ninja alias')
             seen.add(cursor); edge = producers.get(cursor)
             if edge is None:
-                raise ValueError('selected Ninja alias/output missing: ' + cursor)
+                raise failure('selected Ninja alias/output missing: ' + cursor)
             if edge['rule'] != 'phony':
                 if Path(cursor).name != basename:
-                    raise ValueError('selected Ninja alias resolves unexpected artifact')
+                    raise failure('selected Ninja alias resolves unexpected artifact')
                 return cursor, writer(cursor, kind), history
             relative(cursor)
             if (len(edge['outputs']) != 1 or len(edge['categories']['explicit']) != 1
                     or any(edge['categories'][key] for key in ('implicit','order','validation'))
                     or edge['bindings']):
-                raise ValueError('selected Ninja phony alias must resolve one direct output')
+                raise failure('selected Ninja phony alias must resolve one direct output')
             history.append({'alias':cursor, 'direct_output':edge['categories']['explicit'][0],
                             'block_sha256':edge['block_sha256'],
                             'physical_lines':[edge['begin'],edge['end']]})
             cursor = edge['categories']['explicit'][0]
-        raise ValueError('selected Ninja alias depth bound')
+        raise failure('selected Ninja alias depth bound')
 
     selected, identities, rows = [], set(), []
     def retain(target, output, edge, phase, aliases):
         if id(edge) in identities:
-            raise ValueError('selected Ninja writer bound more than once')
+            raise failure('selected Ninja writer bound more than once')
         identities.add(id(edge)); selected.append(edge)
         rows.append({'target':target, 'output':output, 'outputs':edge['outputs'], 'rule':edge['rule'],
                      'phase':phase, 'pool':'console', 'edge_block_sha256':edge['block_sha256'],
@@ -723,14 +798,14 @@ def ninja_console_plan(build_raw, rules_raw, compile_targets):
             or 'dyndep' in regenerate['bindings']
             or 'pool' in rules['RERUN_CMAKE']['bindings']
             or not rules['RERUN_CMAKE']['bindings'].get('command')):
-        raise ValueError('manifest regeneration edge lacks literal console binding')
+        raise failure('manifest regeneration edge lacks literal console binding')
     # Any producer reached through a selected writer's complete dependency list
     # must be one of these frozen writers or a command-free phony edge. This
     # excludes hidden custom writers even if their own pool looks acceptable.
     visited, pending = set(), [name for edge in (*selected,regenerate) for name in edge['dependencies']]
     while pending:
         if len(visited) > 16384:
-            raise ValueError('selected Ninja dependency reachability bound')
+            raise failure('selected Ninja dependency reachability bound')
         name = pending.pop()
         if name in visited:
             continue
@@ -738,9 +813,9 @@ def ninja_console_plan(build_raw, rules_raw, compile_targets):
         if edge is None:
             continue
         if edge['rule'] != 'phony' and id(edge) not in identities and edge is not regenerate:
-            raise ValueError('unbound writer reachable from selected Ninja targets: ' + name)
+            raise failure('unbound writer reachable from selected Ninja targets: ' + name)
         if edge['rule'] == 'phony' and edge['bindings']:
-            raise ValueError('reachable Ninja phony edge has bindings')
+            raise failure('reachable Ninja phony edge has bindings')
         pending.extend(edge['dependencies'])
     return {'schema':'native-tls-literal-console-graph-6970-v1',
             'status':'PASS_LITERAL_SELECTED_EDGES_ONLY', 'compile_count':126,
@@ -750,11 +825,12 @@ def ninja_console_plan(build_raw, rules_raw, compile_targets):
                 'rule_block_sha256':rules['RERUN_CMAKE']['block_sha256'],
                 'physical_lines':[regenerate['begin'],regenerate['end']]},
             'reachable_dependency_names':len(visited), 'retained_files':['build.ninja','CMakeFiles/rules.ninja'],
+            'cmake_ninja_workdir':workdir_binding,
             'configure_or_try_compile_group_containment_verified':False,
             'escaped_writers_excluded_verified':False, 'continuous_group_stop_verified':False}
 
 
-def ninja_console_controls(baseline, rules, targets, actual_plan):
+def ninja_console_controls(baseline, rules, targets, actual_plan, cmake_directory):
     """Selective memory mutations of the actual admitted, retained graph bytes.
 
     No mutated graph is written or executed. Positive acceptance and rejected
@@ -794,6 +870,10 @@ def ninja_console_controls(baseline, rules, targets, actual_plan):
                                  (': '+first['rule']+' generated6970-control.h ').encode(),1)
     if b'generated6970-control.h' in baseline or b'UNBOUND_CONTROL_6970' in rules:
         raise ValueError('actual console control name collision')
+    binding = actual_plan['cmake_ninja_workdir']
+    binding_line = block(build_lines,binding['physical_lines'],binding['block_sha256'])
+    if len(binding_line.splitlines()) != 1:
+        raise ValueError('actual workdir control requires one physical literal binding')
     controls = [
         ('positive-literal-full-graph', True, baseline, rules),
         ('negative-missing-object-pool', False, replace(baseline,object_line,unpooled),rules),
@@ -817,6 +897,9 @@ def ninja_console_controls(baseline, rules, targets, actual_plan):
          +b'build generated6970-control.h: UNBOUND_CONTROL_6970\n  pool = console\n',
          rules+b'rule UNBOUND_CONTROL_6970\n  command = harmless-not-executed\n'),
         ('negative-unpooled-regeneration', False, replace(baseline,regen_line,regen_line.replace(b'  pool = console\n',b'',1)),rules),
+        ('negative-wrong-literal-workdir',False,replace(baseline,binding_line,
+            b'cmake_ninja_workdir = /wrong-owned-directory-6970/\n'),rules),
+        ('negative-unknown-path-variable',False,baseline+b'build ${unbound_6970_workdir}file: phony\n',rules),
     ]
     cases = []
     for name, expected, build_raw, rules_raw in controls:
@@ -824,7 +907,7 @@ def ninja_console_controls(baseline, rules, targets, actual_plan):
             raise ValueError('actual console control input/time bound')
         accepted, error = True, None
         try:
-            report = ninja_console_plan(build_raw, rules_raw, targets)
+            report = ninja_console_plan(build_raw, rules_raw, targets, cmake_directory)
             if report['selected_writer_count'] != 135 or report['status'] != 'PASS_LITERAL_SELECTED_EDGES_ONLY':
                 raise ValueError('positive console graph report differs')
         except ValueError as failure:
@@ -839,6 +922,46 @@ def ninja_console_controls(baseline, rules, targets, actual_plan):
             'mutated_graphs_written_or_executed':False, 'elapsed_seconds':time.monotonic()-started,
             'process_execution_verified':False, 'native_execution_verified':False,
             'windows98_integration_verified':False, 'tls_execution_verified':False}
+
+
+def compact_tu_headers(receipt):
+    """The existing lossless header-index representation, for PASS and FAIL.
+
+    Build both replacement arrays before changing the receipt. Repeated calls
+    on the same header map preserve the already indexed arrays unchanged.
+    """
+    keys = [key for key in ('CMake_actual_TU_dependencies','SSPI_actual_TU_dependencies') if key in receipt]
+    if not keys:
+        return
+    headers = receipt.get('headers_before')
+    if not isinstance(headers,dict):
+        raise ValueError('TU header compaction requires actual header pin map')
+    names = sorted(headers)
+    index = {name:at for at,name in enumerate(names)}
+    replacements = {}
+    for key in keys:
+        rows = receipt[key]
+        if not isinstance(rows,list):
+            raise ValueError('TU header compaction requires actual unit rows')
+        compact = []
+        for unit in rows:
+            if not isinstance(unit,dict):
+                raise ValueError('TU header compaction requires unit dictionaries')
+            if 'headers' in unit:
+                if 'header_indices' in unit or not isinstance(unit['headers'],list):
+                    raise ValueError('TU header representation is ambiguous')
+                compact.append({**{k:v for k,v in unit.items() if k!='headers'},
+                                'header_indices':[index[path] for path in unit['headers']]})
+            else:
+                values = unit.get('header_indices')
+                if (receipt.get('TU_header_index_order')!='lexicographic_headers_before_path_keys'
+                        or not isinstance(values,list)
+                        or any(not isinstance(at,int) or isinstance(at,bool) or not 0<=at<len(names) for at in values)):
+                    raise ValueError('existing TU header indices invalid')
+                compact.append(unit)
+        replacements[key] = compact
+    receipt.update(replacements)
+    receipt['TU_header_index_order']='lexicographic_headers_before_path_keys'
 
 
 def build(output, prep, expected_preparation_sha):
@@ -1081,16 +1204,20 @@ def build(output, prep, expected_preparation_sha):
                 raise ValueError('actual generated console graph differs from retained generator input')
             console_raw[name],console_pins[str(path)]=raw,pin
         compile_targets=[compile_recipe(row,cmake,cc)[3] for row in graph]
-        console_plan=ninja_console_plan(console_raw['build.ninja'],console_raw['CMakeFiles/rules.ninja'],compile_targets)
+        try:
+            console_plan=ninja_console_plan(console_raw['build.ninja'],console_raw['CMakeFiles/rules.ninja'],compile_targets,cmake)
+        except ValueError as error:
+            receipt['Ninja_console_parser_failure_observation']=getattr(error,'observation',None)
+            raise
         console_plan['files']=console_pins
         receipt['Ninja_console_graph']=console_plan
         receipt['Ninja_console_graph_before_after_equal']=False
         guard.check()
         receipt['Ninja_console_parser_controls']=ninja_console_controls(
-            console_raw['build.ninja'],console_raw['CMakeFiles/rules.ninja'],compile_targets,console_plan)
+            console_raw['build.ninja'],console_raw['CMakeFiles/rules.ninja'],compile_targets,console_plan,cmake)
         guard.check()
         if (receipt['Ninja_console_parser_controls']['result']!='PASS_PARSER_CONTROLS_ONLY'
-                or receipt['Ninja_console_parser_controls']['completed']!=12
+                or receipt['Ninja_console_parser_controls']['completed']!=14
                 or receipt['Ninja_console_parser_controls']['failures']!=0
                 or any(row['result']!='PASS' for row in receipt['Ninja_console_parser_controls']['cases'])):
             raise ValueError('actual generated graph parser controls failed')
@@ -1415,14 +1542,6 @@ def build(output, prep, expected_preparation_sha):
         receipt['upstream_before_after_equal']=True
         receipt['compiled_outputs']={str(p.relative_to(output)):guard.pin(p,maximum=8*1024**2)
             for p in sorted(output.rglob('*')) if p.is_file() and p.suffix in ('.a','.obj','.o','.map','.ld','.rsp')}
-        # TU references use indices into lexical header keys, not repeated paths.
-        # Actual -M/-MD files remain separately retained and hashed.
-        header_index={path:i for i,path in enumerate(sorted(headers))}
-        receipt['TU_header_index_order']='lexicographic_headers_before_path_keys'
-        for key in ('CMake_actual_TU_dependencies','SSPI_actual_TU_dependencies'):
-            receipt[key]=[{**{k:v for k,v in unit.items() if k!='headers'},
-                           'header_indices':[header_index[path] for path in unit['headers']]}
-                          for unit in receipt[key]]
         receipt['recipe_changes']=['explicit gcc-win32 backend','separate original upstream input',
             'explicit selected windres/ar/ranlib paths',
             'exact literal CMake recipe copied without original helper execution','GEN_FILES explicitly OFF',
@@ -1438,6 +1557,11 @@ def build(output, prep, expected_preparation_sha):
         raise
     finally:
         try:
+            try:
+                compact_tu_headers(receipt)
+            except (ValueError,KeyError,TypeError) as error:
+                receipt['result']='FAIL'
+                receipt['TU_header_compaction_error']=str(error)[:2048]
             closed=guard.close_receipt(receipt,output/'result.json')
             print('Current TLS build receipt SHA256:',closed['sha256'])
             print(json.dumps({k:closed[k] for k in ('result','bytes')}))

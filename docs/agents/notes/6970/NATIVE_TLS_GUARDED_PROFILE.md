@@ -327,3 +327,45 @@ not emitted. Bounded first group-mismatch diagnostics retain snapshot
 digests, predicate bits, numeric leader and at most eight changed rows,
 plus classified last-scan instability. All prior acceptance, timeouts,
 signal/reap order, strict count and capacity predicates remain unchanged.
+
+
+## Fifth actual attempt and bounded parser successor
+
+RUN36952074301/JOB110666985724 at902357de659da50cfba82822a2b43f401a4db1ac
+finished FAIL. All33 production commands exited0/reaped; the ten actual
+quiescent controls passed in3.567s. The parser refused an unsupported Ninja
+variable/path escape before compiler-object or link stages. The exact token
+and full graph bodies were absent from this failed transfer, so the CMake
+workdir variable is a prospective supported syntax, not a proven fifth cause.
+No four-PE, native Windows, TLS or application acceptance exists.
+
+The actual job log now retains10 closed child receipts and16 stdout/stderr
+text bodies. Their26 full size/SHA checks total42,929B, with the15-byte raw
+consumer observation kept separately from its empty retained stdout file.
+All66 main capture bodies total25,147B; shared controls add65B, so the parent
+normal counter is25,212B and raw decoder counter15B. The closed133,986B
+receipt accounts2,046,334B with minimum91,697,188,864B. Artifact count0.
+Root and three independent reviewers verified the actual failed evidence.
+Root review23,080B SHAc7e8ebc11a187e5beef0a3ac5172788e7904a8173f653060c6bee80910299d7d
+is closed in `/dev/shm/win98-hosted-native-tls-6970-36952074301`.
+Eleven binary control fixture bodies remain metadata-only in this transfer.
+
+The next builder101,346B SHAaba211a9b3bcc34582a9efbf98830f616b40713abf9646850b1e4f2c827d49f0
+and workflow35,050B SHAba98146d2f86bce86e48785dec707e217d3868e29d3c790314e4c30ee7cf790c
+received two independent source-only reviews. Only one literal MAIN
+cmake_ninja_workdir equal to the owned CMake directory plus slash is accepted.
+Only its exact token-start braced or name-bounded plain reference is expanded;
+all expanded outputs/dependencies remain canonical and contained before maps.
+Unknown, recursive, duplicate, foreign and unbound variables are refused.
+The original12 graph controls plus wrong-workdir and unknown-variable negatives
+make14 hosted controls. Failure receipts add bounded parser file/line/stage,
+logical-line digest/length and at most256 UTF-8 bytes of offending context.
+Always-logging retains the two actual generated Ninja files with full expected
+pins, at most2MiB each and4MiB aggregate, even after parser failure.
+
+The existing lossless lexicographic header-index representation now runs at
+one idempotent finally-before-receipt boundary for PASS and FAIL. It preserves
+all actual unit/header facts and format; compaction errors retain FAIL. The
+32MiB output,1MiB self-inclusive receipt,256KiB normal captures,20GiB reserve,
+strict count predicates and signal/reap ordering are unchanged. These new
+parser controls and final-source builds have not run at this checkpoint.
