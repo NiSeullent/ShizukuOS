@@ -5,6 +5,7 @@
 #define SHZ_BLK_AUTHORITY_HOST_SHIM_H
 #define K64_H
 #define K64_PCI_H
+#define K64_PROC_INTERNAL_H
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>

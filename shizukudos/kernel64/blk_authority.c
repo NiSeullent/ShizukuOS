@@ -99,7 +99,9 @@ void blk_authority_leave(blk_dev_t *d,int result,int changed_epoch)
 {
     struct blk_authority_claim *e=entry(whole(d));
     if(e && (result || changed_epoch))bump(e);
-    if(e && result)e->poisoned=1;
+    /* Ordinary unclaimed errors invalidate pinned observations, but preserve
+     * legacy retry semantics. Claimed driver uncertainty is quarantined by
+     * io()/flush(); no claimed target can enter this ordinary path. */
     mutex_unlock(&lock);
 }
 int blk_authority_bind_boot_roles(blk_dev_t *boot,blk_dev_t *system)

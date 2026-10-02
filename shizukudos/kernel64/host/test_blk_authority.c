@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "blk_authority_host_shim.h"
 #include "../blk_authority.h"
+#include "../vfs_mounts.h"
 #include <stdio.h>
 #include <time.h>
 static unsigned checks,failures,reads,writes,flushes,controls,random_seq;
@@ -33,7 +34,7 @@ static int write_driver(blk_dev_t *d,uint64_t l,unsigned n,const void *b)
 }
 static int flush_driver(blk_dev_t *d){(void)d;flushes++;return failing?-1:0;}
 static int discard_driver(blk_dev_t *d,uint64_t l,unsigned n){(void)d;(void)l;(void)n;writes++;return 0;}
-static int control_driver(blk_dev_t *d,unsigned op,uint64_t a,uint64_t *o){(void)d;(void)op;(void)a;(void)o;controls++;return 0;}
+static int control_driver(blk_dev_t *d,unsigned op,uint64_t a,uint64_t *o){(void)d;(void)op;(void)a;(void)o;controls++;return failing?-2:0;}
 static void device(blk_dev_t *d,const char *name)
 {
  memset(d,0,sizeof *d);strcpy(d->name,name);d->sector_size=512;d->sectors=64;d->flags=BLK_F_FLUSH;
@@ -58,14 +59,38 @@ int main(int argc,char **argv)
  device(&boot,"boot");device(&source,"source");device(&other,"other");device(&target,"target");
  partition=target;strcpy(partition.name,"targetp1");partition.parent=&target;partition.flags=BLK_F_PARTITION;
  partition.start_lba=4;partition.sectors=16;CHECK(blk_register(&partition)==0);
- CHECK(blk_authority_pin_source(&source,&sources[0])==0);sources[1]=sources[0];
+ CHECK(blk_authority_pin_source(&source,&sources[0])==0);
+ stale=sources[0].identity;failing=1;
+ CHECK(blk_read(&source,0,1,out)!=0);failing=0;
+ CHECK(blk_read(&source,0,1,out)==0);
+ CHECK(blk_authority_pin_source(&source,&sources[0])==0);
+ CHECK(stale.generation!=sources[0].identity.generation);
+ stale=sources[0].identity;failing=1;
+ CHECK(blk_control(&source,BLK_CTL_STATS,0,0)==-2);failing=0;
+ CHECK(blk_control(&source,BLK_CTL_STATS,0,0)==0);
+ CHECK(blk_read(&source,0,1,out)==0);
+ CHECK(blk_authority_pin_source(&source,&sources[0])==0);
+ CHECK(stale.generation!=sources[0].identity.generation);
+ CHECK(blk_read(&partition,16,1,out)!=0);
+ CHECK(blk_read(&partition,0,1,out)==0);
+ sources[1]=sources[0];
  CHECK(blk_authority_review(&target,sources,&review)!=0); /* missing actual roles */
  CHECK(blk_authority_bind_boot_roles(0,&boot)!=0);
  CHECK(blk_authority_bind_boot_roles(&boot,&boot)==0); /* explicit kernel-observation model */
  CHECK(blk_authority_review(&boot,sources,&review)!=0);
  CHECK(blk_authority_review(&source,sources,&review)!=0);
  CHECK(blk_authority_review(&partition,sources,&review)!=0);
- CHECK(blk_authority_mark_mounted(&other)==0);
+ {fsnode_t mount_root={0};fsvol_t volume={0};
+ CHECK(vfs_mount_next(&mount_root,&volume,"fixture","other",0)==0);
+ CHECK(!(other.flags&BLK_F_MOUNTED));CHECK(vfs_mount_count()==0);
+ CHECK(blk_read(&other,0,1,out)==0);
+ mount_root.is_dir=1;
+ CHECK(vfs_mount_next(&mount_root,&volume,"fixture","other",0)=='D');
+ CHECK(other.flags&BLK_F_MOUNTED);CHECK(vfs_mount_count()==1);
+ mount_root.is_dir=0;
+ CHECK(vfs_mount_next(&mount_root,&volume,"fixture","other",0)==0);
+ CHECK(other.flags&BLK_F_MOUNTED);CHECK(vfs_mount_count()==1);
+ }
  CHECK(blk_authority_review(&other,sources,&review)!=0);
  CHECK(blk_authority_review(&target,sources,&review)==0);stale=review;
  CHECK(memcmp(review.whole_id,sources[0].identity.whole_id,16)!=0);
