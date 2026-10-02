@@ -2,6 +2,7 @@
  * Kernel64 volume mount table (see vfs_mounts.h).
  */
 #include "vfs_mounts.h"
+#include "blk_authority.h"
 
 static vfs_mount_t table[VFS_MAX_MOUNTS];
 static unsigned count;
@@ -19,6 +20,9 @@ char vfs_mount_next(fsnode_t *root, fsvol_t *vol, const char *fstype, const char
 {
     char l;
     if (count >= VFS_MAX_MOUNTS || !root || !vol) return 0;
+    /* Kernel mount owner resolves its actual registered device before exposing
+     * namespace state. A claim or unknown device refuses the mount. */
+    if (!device || blk_authority_mark_mounted(blk_find(device))) return 0;
     for (l = 'D'; l <= 'Z'; ++l) {
         if (fs_root_of(l)) continue;
         if (fs_mount(l, root)) continue;
