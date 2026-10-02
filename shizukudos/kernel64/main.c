@@ -39,6 +39,219 @@ int k64_boot_framebuffer(k64_boot_fb_t *out)
 
 const char *k64_boot_cmdline(void) { return bootinfo.cmdline; }
 
+/* ROOT_K64_AP_CONSUMER_BEGIN */
+#ifdef SHZ_STANDALONE
+/* BSP storage survives every finite batch; no payload is placed on an AP's
+ * stack and the oracle never reads the provider's copied job/result. */
+static uint8_t k64_ap_payload[16][4096];
+static uint64_t k64_ap_cookie[16], k64_ap_expected[16], k64_ap_history[512];
+static uint8_t k64_ap_done[16];
+
+static __attribute__((noreturn)) void k64_ap_component_fail(const char *phase,
+        unsigned generation, unsigned slot, uint64_t cookie, int rc)
+{
+    kprintf("SMP-WORK FAIL: phase=%s generation=%u slot=%u cookie=%llx result=%d root_cleanup_attempted=0 exit=98\n",
+            phase, generation, slot, cookie, rc);
+    /* Exit98 bypasses shutdown/VFS callbacks while private AP admission may
+     * remain closed. A failed send/move can already have committed ownership. */
+    shz_exit(98);
+}
+
+static int k64_ap_component_budget(uint64_t start, unsigned *spins)
+{
+    if (ticks_now() - start >= 500 || *spins >= 100000000u)
+        return 0;
+    ++*spins;
+    return 1;
+}
+
+static uint64_t k64_ap_reference(const uint8_t *payload)
+{
+    uint64_t value = 14695981039346656037ull;
+    for (unsigned traversal = 0; traversal != 256; ++traversal)
+        for (unsigned byte = 0; byte != 4096; ++byte) {
+            value ^= (uint64_t)payload[byte];
+            value *= 1099511628211ull;
+        }
+    return value;
+}
+
+static uint64_t k64_ap_eligibility(uint64_t online, unsigned sequence)
+{
+    unsigned count = 0;
+    for (unsigned cpu = 1; cpu != 32; ++cpu)
+        count += !!(online & (1ull << cpu));
+    if (!count)
+        return 0;
+    unsigned selected = sequence % count;
+    for (unsigned cpu = 1; cpu != 32; ++cpu)
+        if ((online & (1ull << cpu)) && selected-- == 0)
+            return 1ull << cpu;
+    return 0;
+}
+
+static void k64_ap_component_empty(unsigned generation, uint64_t online)
+{
+    const uint64_t start = ticks_now();
+    unsigned spins = 0;
+    if (generation == 1 || generation == 16) {
+        if (online & (1ull << 2)) {
+            const unsigned destination = generation == 1 ? 2 : 1;
+            for (;;) {
+                if (!k64_ap_component_budget(start, &spins))
+                    k64_ap_component_fail("move-deadline", generation, 0, 0, -1);
+                const int rc = sched_ap_work_migrate(1, 0, destination);
+                if (rc == 0) {
+                    kprintf("SMP-WORK MOVE: generation=%u origin=1 slot=0 destination=%u result=0\n",
+                            generation, destination);
+                    break;
+                }
+                if (rc != K64_AP_WORK_BUSY)
+                    k64_ap_component_fail("move", generation, 0, 0, rc);
+                __asm__ volatile("pause");
+            }
+        } else if (generation == 1) {
+            /* These two operations are explicit native2 negative controls.
+             * They cannot be treated as retries of a failed positive move. */
+            const int offline = sched_ap_work_migrate(1, 0, 2);
+            if (offline != -1)
+                k64_ap_component_fail("offline-control", generation, 0, 0, offline);
+            kprintf("SMP-WORK REFUSAL: origin=1 slot=0 destination=2 result=-1 offline=1\n");
+            for (;;) {
+                if (!k64_ap_component_budget(start, &spins))
+                    k64_ap_component_fail("self-control-deadline", generation, 0, 0, -1);
+                const int rc = sched_ap_work_migrate(1, 0, 1);
+                if (rc == -1) {
+                    kprintf("SMP-WORK REFUSAL: origin=1 slot=0 destination=1 result=-1 self=1\n");
+                    break;
+                }
+                if (rc != K64_AP_WORK_BUSY)
+                    k64_ap_component_fail("self-control", generation, 0, 0, rc);
+                __asm__ volatile("pause");
+            }
+        }
+    }
+    for (;;) {
+        if (!k64_ap_component_budget(start, &spins))
+            k64_ap_component_fail("empty-deadline", generation, 0, 0, -1);
+        if (sched_cpu_online_mask() != online)
+            k64_ap_component_fail("empty-online", generation, 0, 0, -1);
+        const uint64_t end = ticks_now();
+        if (end - start >= 500)
+            k64_ap_component_fail("empty-return-deadline", generation, 0, 0, -1);
+        if (end - start >= 20) {
+            kprintf("SMP-WORK EMPTY: generation=%u start=%llu end=%llu online=%llx\n",
+                    generation, start, end, online);
+            return;
+        }
+        __asm__ volatile("pause");
+    }
+}
+
+static void k64_persistent_ap_component(void)
+{
+    if (tests_failed())
+        k64_ap_component_fail("up-qa", 0, 0, 0, -1);
+    thread_reap_exited();
+    int rc = sched_ap_work_quiescent();
+    if (rc)
+        k64_ap_component_fail("quiescent", 0, 0, 0, rc);
+    rc = shz_cpu_workers_start();
+    if (rc)
+        k64_ap_component_fail("start", 0, 0, 0, rc);
+    const uint64_t online = sched_cpu_online_mask();
+    if (!(online & 1) || !(online & 2) || (online >> 32))
+        k64_ap_component_fail("online", 0, 0, 0, -1);
+    unsigned submitted = 0, completed = 0, released = 0;
+    for (unsigned generation = 1; generation <= 32; ++generation) {
+        const uint64_t start = ticks_now();
+        unsigned spins = 0, remaining = 16;
+        for (unsigned slot = 0; slot != 16; ++slot) {
+            for (unsigned byte = 0; byte != 4096; ++byte)
+                k64_ap_payload[slot][byte] = (uint8_t)((generation * 17u + slot * 29u + byte * 7u) ^
+                        (byte >> 3) ^ (generation >> 3));
+            k64_ap_expected[slot] = k64_ap_reference(k64_ap_payload[slot]);
+            k64_ap_cookie[slot] = 0;
+            k64_ap_done[slot] = 0;
+        }
+        for (unsigned slot = 0; slot != 16; ++slot) {
+            if (!k64_ap_component_budget(start, &spins))
+                k64_ap_component_fail("submit-deadline", generation, slot, 0, -1);
+            const uint64_t eligible = k64_ap_eligibility(online, (generation - 1) * 16 + slot);
+            rc = sched_ap_work_submit(k64_ap_payload[slot], 4096, eligible, &k64_ap_cookie[slot]);
+            if (rc)
+                k64_ap_component_fail("submit", generation, slot, k64_ap_cookie[slot], rc);
+            if (!k64_ap_component_budget(start, &spins))
+                k64_ap_component_fail("submit-return-deadline", generation, slot, k64_ap_cookie[slot], -1);
+            if (!k64_ap_cookie[slot])
+                k64_ap_component_fail("zero-cookie", generation, slot, 0, -1);
+            for (unsigned prior = 0; prior != submitted; ++prior)
+                if (k64_ap_history[prior] == k64_ap_cookie[slot])
+                    k64_ap_component_fail("duplicate-cookie", generation, slot, k64_ap_cookie[slot], -1);
+            k64_ap_history[submitted++] = k64_ap_cookie[slot];
+        }
+        while (remaining) {
+            if (sched_cpu_online_mask() != online)
+                k64_ap_component_fail("poll-online", generation, 0, 0, -1);
+            for (unsigned slot = 0; slot != 16; ++slot) {
+                if (k64_ap_done[slot])
+                    continue;
+                if (!k64_ap_component_budget(start, &spins))
+                    k64_ap_component_fail("poll-deadline", generation, slot, k64_ap_cookie[slot], -1);
+                uint64_t actual = 0;
+                rc = sched_ap_work_poll(k64_ap_cookie[slot], &actual);
+                if (!k64_ap_component_budget(start, &spins))
+                    k64_ap_component_fail("poll-return-deadline", generation, slot, k64_ap_cookie[slot], -1);
+                if (!rc)
+                    continue;
+                if (rc != 1)
+                    k64_ap_component_fail("poll", generation, slot, k64_ap_cookie[slot], rc);
+                if (actual != k64_ap_expected[slot])
+                    k64_ap_component_fail("digest", generation, slot, k64_ap_cookie[slot], -1);
+                const uint64_t observed = actual;
+                ++completed;
+                rc = sched_ap_work_release(k64_ap_cookie[slot]);
+                if (rc)
+                    k64_ap_component_fail("release", generation, slot, k64_ap_cookie[slot], rc);
+                if (!k64_ap_component_budget(start, &spins))
+                    k64_ap_component_fail("release-return-deadline", generation, slot, k64_ap_cookie[slot], -1);
+                ++released;
+                rc = sched_ap_work_poll(k64_ap_cookie[slot], &actual);
+                if (rc != -1)
+                    k64_ap_component_fail("stale-poll", generation, slot, k64_ap_cookie[slot], rc);
+                if (!k64_ap_component_budget(start, &spins))
+                    k64_ap_component_fail("stale-poll-return-deadline", generation, slot, k64_ap_cookie[slot], -1);
+                rc = sched_ap_work_release(k64_ap_cookie[slot]);
+                if (rc != -1)
+                    k64_ap_component_fail("stale-release", generation, slot, k64_ap_cookie[slot], rc);
+                if (!k64_ap_component_budget(start, &spins))
+                    k64_ap_component_fail("stale-release-return-deadline", generation, slot, k64_ap_cookie[slot], -1);
+                k64_ap_done[slot] = 1;
+                --remaining;
+                kprintf("SMP-WORK JOB: generation=%u slot=%u cookie=%llx digest=%llx expected=%llx released=1\n",
+                        generation, slot, k64_ap_cookie[slot], observed, k64_ap_expected[slot]);
+            }
+            if (remaining)
+                __asm__ volatile("pause");
+        }
+        if (!k64_ap_component_budget(start, &spins))
+            k64_ap_component_fail("generation-return-deadline", generation, 0, 0, -1);
+        if (generation == 1 || generation == 16 || generation == 31)
+            k64_ap_component_empty(generation, online);
+    }
+    if (submitted != 512 || completed != 512 || released != 512)
+        k64_ap_component_fail("totals", 32, 0, 0, -1);
+    rc = sched_ap_work_stop();
+    if (rc)
+        k64_ap_component_fail("stop", 32, 0, 0, rc);
+    if (sched_cpu_online_mask() != 1 || sched_validate() != 1 || sched_ap_work_quiescent())
+        k64_ap_component_fail("stopped-validation", 32, 0, 0, -1);
+    kprintf("SMP-WORK consumer: submitted=%u completed=%u released=%u batches=32 empty=3 scheduler_cpus=1 result=0\n",
+            submitted, completed, released);
+}
+#endif
+/* ROOT_K64_AP_CONSUMER_END */
+
 void kmain(uint64_t bootinfo_pa)
 {
     const uint64_t initial_cr3=read_cr3();
@@ -126,6 +339,10 @@ void kmain(uint64_t bootinfo_pa)
         shz_exit(k64_desktop());
     }
     run_self_tests(&bootinfo);
+#ifdef SHZ_STANDALONE
+    if (shz_cpu_workers_requested())
+        k64_persistent_ap_component();
+#endif
     /* NT driver host: the single init call. A complete no-op unless the initrd carries
      * \SHZ\DRIVERS (only tests/run_k64_ntdrv.py mounts such an image), so default runs are
      * unaffected. See docs/shizukudos10/NTDRV.md and kernel64/ntdrv_*.c. */
