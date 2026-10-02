@@ -68,14 +68,22 @@ class LeaseUnion:
         try:
             before=os.fstat(fd);need(stat.S_ISREG(before.st_mode) and before.st_size==row['bytes'],'regular exact input')
             fcntl.fcntl(fd,fcntl.F_SETOWN,os.getpid());fcntl.fcntl(fd,fcntl.F_SETLEASE,fcntl.F_RDLCK)
-            entry={'fd':fd,'pin':dict(row),'identity':identity(before)};self.rows[name]=entry
-            need(full_hash(fd,row['bytes'],self.check)==row['sha256'],'full leased SHA mismatch');return entry
+            entry={'fd':fd,'pin':dict(row),'identity':identity(before),'full_SHA_admitted':False};self.rows[name]=entry
+            need(full_hash(fd,row['bytes'],self.check)==row['sha256'],'full leased SHA mismatch')
+            entry['full_SHA_admitted']=True;self.check();return entry
         except BaseException:
             self.rows.pop(name,None);os.close(fd);raise
     def check(self):
         need(not self.broken,'guardian lease break requested')
+        ancestors=set()
         for path,row in self.rows.items():
-            need(fcntl.fcntl(row['fd'],fcntl.F_GETLEASE)==fcntl.F_RDLCK and identity(os.fstat(row['fd']))==row['identity'] and identity(Path(path).stat())==row['identity'],'guardian lease/path identity changed')
+            p=Path(path);ancestors.update((p,*p.parents))
+            info=os.fstat(row['fd'])
+            need(stat.S_ISREG(info.st_mode) and fcntl.fcntl(row['fd'],fcntl.F_GETFL)&os.O_ACCMODE==os.O_RDONLY and
+                 fcntl.fcntl(row['fd'],fcntl.F_GETLEASE)==fcntl.F_RDLCK and fcntl.fcntl(row['fd'],fcntl.F_GETOWN)==os.getpid() and
+                 identity(info)==row['identity'] and identity(p.stat())==row['identity'],'guardian lease/path identity changed')
+        # Deduplicate only within this checkpoint; never cache namespace checks.
+        need(not any(p.is_symlink() for p in ancestors),'guardian original ancestor became a symlink')
     def raw(self,row,maximum):
         entry=self.add(row);need(row['bytes']<=maximum,'bounded metadata/source');raw=os.pread(entry['fd'],row['bytes']+1,0)
         need(len(raw)==row['bytes'] and hashlib.sha256(raw).hexdigest()==row['sha256'],'held raw snapshot differs');self.check();return raw
@@ -364,9 +372,30 @@ def recovery_tick(owner,controller,group,recovery_stop):
 class Server:
     def __init__(self,channel,owner,sources,output):
         self.channel,self.owner,self.sources,self.output=channel,owner,sources,Path(output);self.sequence=0;self.frozen=set()
+        self.originals={name:dict(entry) for name,entry in owner.union.rows.items() if entry.get('full_SHA_admitted') is True}
+        self.borrowed=set()
+    def original(self,row):
+        name=str(pin(row));entry=self.originals.get(name);current=self.owner.union.rows.get(name)
+        need(entry is not None and current is not None and entry['pin']==row==current['pin'] and
+             current.get('full_SHA_admitted') is True and entry['fd']==current['fd'] and entry['identity']==current['identity'],'only initially full-SHA-admitted original pins')
+        need(fcntl.fcntl(entry['fd'],fcntl.F_GETOWN)==os.getpid(),'guardian retains original lease signal ownership')
+        return name,entry
     def dispatch(self,row,rights):
         need(set(row)=={'id','op','params'} and type(row['id']) is int and row['id']==self.sequence+1 and type(row['params']) is dict,'strict ordered request')
         self.sequence=row['id'];op,p=row['op'],row['params']
+        if op=='original':
+            need(not rights and set(p)=={'pin'},'one exact original pin and no request rights')
+            self.owner.union.check();name,entry=self.original(p['pin'])
+            need(name not in self.borrowed,'original descriptor already borrowed')
+            self.borrowed.add(name);self.owner.union.check()
+            return {'pin':dict(entry['pin']),'identity':list(entry['identity']),'guardian_pid':os.getpid(),
+                    'guardian_full_SHA_admitted':True},[entry['fd']]
+        if op=='original-check':
+            need(not rights and set(p)=={'pins'} and type(p['pins']) is list and 0<len(p['pins'])<=128,'bounded exact borrowed-original checkpoint')
+            self.owner.union.check();seen=set()
+            for item in p['pins']:
+                name,_=self.original(item);need(name in self.borrowed and name not in seen,'only unique previously borrowed originals');seen.add(name)
+            self.owner.union.check();return True,[]
         if op=='frozen':
             need(not rights and set(p)=={'path','relative'} and p['relative'] in self.sources,'only approved frozen source')
             source=self.sources[p['relative']];target=self.output/'runtime-source'/p['relative']
@@ -568,7 +597,10 @@ def main():
     group.owner_pid=os.getpid()
     left,right=socket.socketpair(socket.AF_UNIX,socket.SOCK_SEQPACKET);left.setsockopt(socket.SOL_SOCKET,socket.SO_PASSCRED,1);right.setsockopt(socket.SOL_SOCKET,socket.SO_PASSCRED,1)
     rpcrow=sources['shizukudos/supervisor/native_win98/custody_rpc.py'];runrow=sources['shizukudos/supervisor/native_win98/run_vm.py'];rpcfd=union.rows[rpcrow['path']]['fd'];runfd=union.rows[runrow['path']]['fd']
-    command=[sys.executable,'-B','-c',CONTROLLER_BOOTSTRAP,str(rpcfd),str(runfd),rpcrow['path'],runrow['path'],rpcrow['sha256'],runrow['sha256'],'--custody-fd',str(right.fileno()),'--repo',manifest['repo'],'--plan',manifest['plan']['path'],'--plan-sha256',manifest['plan']['sha256'],'--runtime-sources-sha256',helper_identity,'--timeout',str(manifest['timeout'])]
+    runtime_names=(*HELPERS,'shizukudos/supervisor/native_win98/run_vm.py','shizukudos/supervisor/native_win98/owned_capture.py','shizukudos/supervisor/include/shz_info.h')
+    runtime_pins=json.dumps({name:sources[name] for name in runtime_names},separators=(',',':'),allow_nan=False)
+    need(len(runtime_pins.encode())<=rpc.MAX_PACKET,'bounded seven-source original pin map')
+    command=[sys.executable,'-B','-c',CONTROLLER_BOOTSTRAP,str(rpcfd),str(runfd),rpcrow['path'],runrow['path'],rpcrow['sha256'],runrow['sha256'],'--custody-fd',str(right.fileno()),'--repo',manifest['repo'],'--plan',manifest['plan']['path'],'--plan-sha256',manifest['plan']['sha256'],'--plan-bytes',str(manifest['plan']['bytes']),'--runtime-source-pins-json',runtime_pins,'--runtime-sources-sha256',helper_identity,'--timeout',str(manifest['timeout'])]
     controller_status=None
     try:
         need(not stopped[0],'guardian cancellation requested')
