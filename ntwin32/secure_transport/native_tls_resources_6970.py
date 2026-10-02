@@ -34,6 +34,11 @@ MAX_DIRECTORIES = 256
 MAX_FILES = 8192
 SAMPLE_SECONDS = 0.05
 COMMAND_TIMEOUT_LIMIT = 360  # Explicit new TLS profile; older bridge stays at 60.
+QUIESCENCE_TIMEOUT = 1.0
+PROC_ENTRY_LIMIT = 4096
+GROUP_MEMBER_LIMIT = 128
+GROUP_TASK_LIMIT = 1024
+PROC_STAT_LIMIT = 8192
 INVALID_RECEIPT_SCHEMA = "native-tls-resource-invalid-receipt-v1"
 
 
@@ -101,6 +106,291 @@ def _write_all(fd, data):
         view = view[n:]
 
 
+class _OwnedGroupObservation:
+    """Linux observed stop scope; neither a writer census nor a kernel freeze.
+
+    The unreaped Popen leader pins the signal target through normal cleanup.
+    Every observed process and thread must be signal-stopped (T) or zombie (Z).
+    Tracing-stop (t) is deliberately refused: a tracer owns its restart.
+    Escaped descendants and asynchronous kernel writes are not attested.
+    """
+
+    def __init__(self, guard, proc, deadline):
+        self.guard = guard
+        self.proc = proc
+        self.deadline = deadline
+        self.proc_fd = os.open("/proc", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        self.paused = False
+        self.verified = False
+        self.pause_deadline = None
+        self.pause_started = None
+        self.quiet_snapshot = None
+        self.telemetry = {"pause_attempts": 0, "verified_pauses": 0,
+                          "stop_requests": 0, "continue_requests": 0,
+                          "stop_no_live_group_observations": 0,
+                          "continue_no_live_group_observations": 0,
+                          "maximum_members": 0, "maximum_tasks": 0,
+                          "total_pause_seconds": 0.0, "longest_pause_seconds": 0.0,
+                          "verified_observation_sha256": None,
+                          "observation_digest_scope": "last_completed_postcount_snapshot",
+                          "escaped_writers_excluded_verified": False,
+                          "continuous_group_stop_verified": False,
+                          "failure_stop_retained_until_owned_kill": False,
+                          "filesystem_quota_verified": False}
+        try:
+            leader = self._read_process(proc.pid)[0]
+            if (leader["pid"] != proc.pid or leader["pgrp"] != proc.pid
+                    or leader["session"] != proc.pid or leader["uid"] != os.getuid()
+                    or proc.returncode is not None):
+                raise ResourceFailure("owned unreaped session/group leader required")
+            self.leader_token = self._token(leader)
+        except BaseException:
+            os.close(self.proc_fd)
+            self.proc_fd = None
+            raise
+
+    @staticmethod
+    def _token(row):
+        return tuple(row[k] for k in ("pid", "startticks", "pgrp", "session", "uid"))
+
+    def check_time(self):
+        now = time.monotonic()
+        if now > self.deadline:
+            raise self.guard._fail("owned command wall timeout crossed during observation")
+        if self.pause_deadline is not None and now > self.pause_deadline:
+            raise self.guard._fail("owned group stop confirmation exceeded one second")
+
+    def _stat_row(self, directory, expected_pid, *, tgid=None):
+        self.check_time()
+        fd = os.open("stat", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        try:
+            raw = os.read(fd, PROC_STAT_LIMIT + 1)
+            if len(raw) > PROC_STAT_LIMIT or not raw.endswith(b"\n"):
+                raise ResourceFailure("bounded proc stat record required")
+        finally:
+            os.close(fd)
+        end = raw.rfind(b")")
+        first = raw.find(b" (")
+        if first < 1 or end <= first:
+            raise ResourceFailure("malformed proc stat identity")
+        try:
+            pid = int(raw[:first])
+            fields = raw[end + 1:].split()
+            if len(fields) < 20:
+                raise ValueError("short stat")
+            state = fields[0].decode("ascii")
+            pgrp, session, ticks = int(fields[2]), int(fields[3]), int(fields[19])
+        except (ValueError, UnicodeError) as error:
+            raise ResourceFailure("malformed proc stat numeric/state fields") from error
+        if (pid != expected_pid or len(state) != 1 or state not in "RSDZTtWXxKPI"
+                or pgrp < 0 or session < 0 or ticks < 0):
+            raise ResourceFailure("invalid proc stat task identity")
+        uid = os.fstat(directory).st_uid
+        row = {"pid": pid if tgid is None else tgid, "startticks": ticks,
+               "pgrp": pgrp, "session": session, "uid": uid, "state": state}
+        if tgid is not None:
+            row["tid"] = pid
+        return row
+
+    def _read_process(self, pid, *, tasks=False):
+        directory = os.open(str(pid), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=self.proc_fd)
+        task_root = None
+        try:
+            row = self._stat_row(directory, pid)
+            if not tasks:
+                return row, [], True
+            task_root = os.open("task", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=directory)
+            names = sorted(os.listdir(task_root))
+            if len(names) > GROUP_TASK_LIMIT or any(not n.isdigit() for n in names):
+                raise ResourceFailure("bounded numeric owned task listing required")
+            threads = []
+            for name in names:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=task_root)
+                try:
+                    threads.append(self._stat_row(child, int(name), tgid=pid))
+                finally:
+                    os.close(child)
+            after = self._stat_row(directory, pid)
+            stable = (self._token(after) == self._token(row)
+                      and sorted(os.listdir(task_root)) == names)
+            return after, threads, stable
+        finally:
+            if task_root is not None:
+                os.close(task_root)
+            os.close(directory)
+
+    def leader(self):
+        if self.proc.returncode is not None or self.proc_fd is None:
+            raise self.guard._fail("group observer cannot signal a reaped leader")
+        row = self._read_process(self.proc.pid)[0]
+        if self._token(row) != self.leader_token:
+            raise self.guard._fail("owned group leader identity changed")
+        return row
+
+    def observe(self):
+        """Only numeric stat metadata; no command line, environment or payload."""
+        self.guard._sample()
+        leader = self.leader()
+        names = sorted(n for n in os.listdir(self.proc_fd) if n.isdigit())
+        if len(names) > PROC_ENTRY_LIMIT:
+            raise ResourceFailure("proc process-list observation exceeds 4096 entries")
+        members, threads = [], []
+        stable = True
+        for index, name in enumerate(names):
+            self.check_time()
+            if index % 32 == 0:
+                self.guard._sample()
+            pid = int(name)
+            try:
+                row = self._read_process(pid)[0]
+                if row["pgrp"] != self.proc.pid:
+                    continue
+                row, task_rows, unchanged = self._read_process(pid, tasks=True)
+                if row["pgrp"] != self.proc.pid:
+                    stable = False
+                    continue
+                members.append(row)
+                threads.extend(task_rows)
+                stable = stable and unchanged
+            except (FileNotFoundError, ProcessLookupError):
+                if pid == self.proc.pid:
+                    raise ResourceFailure("owned unreaped leader disappeared during observation")
+                stable = False
+                continue
+            if len(members) > GROUP_MEMBER_LIMIT or len(threads) > GROUP_TASK_LIMIT:
+                raise ResourceFailure("owned group member/task observation bound crossed")
+        leader = self.leader()
+        return {"leader": leader, "members": sorted(members, key=lambda r: r["pid"]),
+                "tasks": sorted(threads, key=lambda r: (r["pid"], r["tid"])),
+                "stable": stable}
+
+    def _validated(self, observation):
+        if (not isinstance(observation, dict) or set(observation) != {"leader", "members", "tasks", "stable"}
+                or not isinstance(observation["stable"], bool)
+                or not isinstance(observation["members"], list)
+                or not isinstance(observation["tasks"], list)
+                or not 1 <= len(observation["members"]) <= GROUP_MEMBER_LIMIT
+                or not 1 <= len(observation["tasks"]) <= GROUP_TASK_LIMIT):
+            raise ResourceFailure("invalid bounded group observation schema")
+        process_keys = {"pid", "startticks", "pgrp", "session", "uid", "state"}
+        tagged_rows = [(observation["leader"], process_keys)]
+        tagged_rows += [(row, process_keys) for row in observation["members"]]
+        tagged_rows += [(row, process_keys | {"tid"}) for row in observation["tasks"]]
+        for row, expected in tagged_rows:
+            if (not isinstance(row, dict) or set(row) != expected
+                    or any(not isinstance(row[k], int) or isinstance(row[k], bool) or row[k] < 0
+                           for k in expected - {"state"})
+                    or row["pid"] <= 0 or row.get("tid", 1) <= 0
+                    or row["pgrp"] != self.proc.pid or row["session"] != self.proc.pid
+                    or row["uid"] != os.getuid()
+                    or not isinstance(row["state"], str) or row["state"] not in tuple("RSDZTtWXxKPI")):
+                raise ResourceFailure("owned group observation identity/state invalid")
+            if row["state"] == "t":
+                raise ResourceFailure("tracing-stop is not an owned signal-stop")
+        members = observation["members"]
+        tasks = observation["tasks"]
+        pids = [r["pid"] for r in members]
+        tids = [r.get("tid") for r in tasks]
+        if (len(set(pids)) != len(pids) or None in tids or len(set(tids)) != len(tids)
+                or any(r["pid"] not in pids for r in tasks)
+                or any(not any(t["pid"] == r["pid"] and t["tid"] == r["pid"]
+                               and t["startticks"] == r["startticks"] for t in tasks) for r in members)
+                or not any(self._token(r) == self.leader_token for r in members)
+                or self._token(observation["leader"]) != self.leader_token):
+            raise ResourceFailure("owned group process/task membership identity invalid")
+        self.telemetry["maximum_members"] = max(self.telemetry["maximum_members"], len(members))
+        self.telemetry["maximum_tasks"] = max(self.telemetry["maximum_tasks"], len(tasks))
+        return observation
+
+    def _snapshot(self):
+        return self._validated(self.guard._group_observer(self.proc))
+
+    @staticmethod
+    def _quiet(snapshot):
+        return snapshot["stable"] and all(r["state"] in ("T", "Z")
+                                          for r in snapshot["members"] + snapshot["tasks"])
+
+    def pause(self):
+        self.pause_started = time.monotonic()
+        self.pause_deadline = min(self.deadline, self.pause_started + QUIESCENCE_TIMEOUT)
+        self.telemetry["pause_attempts"] += 1
+        previous = None
+        while True:
+            self.check_time()
+            self.leader()
+            self.telemetry["stop_requests"] += 1
+            try:
+                os.killpg(self.proc.pid, signal.SIGSTOP)
+            except ProcessLookupError:
+                # A held zombie leader can outlive every signalable member.
+                # Accept no-recipient only with fresh complete all-Z evidence;
+                # the same two-scan and post-count checks still apply.
+                no_live = self._snapshot()
+                if (not no_live["stable"] or any(r["state"] != "Z"
+                        for r in no_live["members"] + no_live["tasks"])):
+                    raise ResourceFailure("owned group stop had no live recipient without all-zombie evidence")
+                self.telemetry["stop_no_live_group_observations"] += 1
+            self.paused = True
+            current = self._snapshot()
+            if self._quiet(current) and current == previous:
+                self.quiet_snapshot = current
+                self.verified = True
+                self.pause_deadline = None
+                self.telemetry["verified_pauses"] += 1
+                return
+            previous = current if self._quiet(current) else None
+            time.sleep(0.001)
+
+    def verify_paused(self):
+        self.check_time()
+        if not self.paused or not self.verified:
+            raise ResourceFailure("recursive observation requires a verified owned stop scope")
+        current = self._snapshot()
+        if not self._quiet(current) or current != self.quiet_snapshot:
+            raise ResourceFailure("owned group changed or resumed during recursive observation")
+        raw = json.dumps(current, sort_keys=True, separators=(",", ":")).encode()
+        self.telemetry["verified_observation_sha256"] = hashlib.sha256(raw).hexdigest()
+
+    def finish_pause(self, success):
+        try:
+            if success:
+                self.leader()
+                self.telemetry["continue_requests"] += 1
+                try:
+                    os.killpg(self.proc.pid, signal.SIGCONT)
+                except ProcessLookupError:
+                    no_live = self._snapshot()
+                    if (not no_live["stable"] or any(r["state"] != "Z"
+                            for r in no_live["members"] + no_live["tasks"])):
+                        raise ResourceFailure("owned group continue had no recipient without all-zombie evidence")
+                    self.telemetry["continue_no_live_group_observations"] += 1
+                self.paused = False
+        finally:
+            if success and self.pause_started is not None:
+                elapsed = time.monotonic() - self.pause_started
+                self.telemetry["total_pause_seconds"] += elapsed
+                self.telemetry["longest_pause_seconds"] = max(self.telemetry["longest_pause_seconds"], elapsed)
+                self.pause_started = None
+            elif self.paused:
+                self.telemetry["failure_stop_retained_until_owned_kill"] = True
+            self.pause_deadline = None
+            self.verified = False
+
+    def close(self):
+        # Called only after run's final kill request, before the leader is reaped.
+        if self.pause_started is not None:
+            elapsed = time.monotonic() - self.pause_started
+            self.telemetry["total_pause_seconds"] += elapsed
+            self.telemetry["longest_pause_seconds"] = max(self.telemetry["longest_pause_seconds"], elapsed)
+            self.pause_started = None
+        if self.proc_fd is not None:
+            os.close(self.proc_fd)
+            self.proc_fd = None
+
+
 class Guard:
     """One fresh root, one observed 32-MiB budget, one immutable final receipt."""
 
@@ -115,11 +405,14 @@ class Guard:
         self.capture_bytes = 0
         self.decoder_bytes = 0
         self.input_pin_failure_observation = None
+        self.output_replacement_observation = None
         self.commands = []
         self.root_fd = None
         self._closed = False
         self._sealed = False
         self._running = False
+        self._active_group = None
+        self._quiescence_depth = 0
         self._labels = set()
         self.repository_fd = _absolute_directory(self.repository)
         try:
@@ -167,6 +460,8 @@ class Guard:
             os.close(fd)
 
     def _sample(self, *, failure_evidence=False):
+        if self._active_group is not None:
+            self._active_group.check_time()
         if (_inode(os.fstat(self.repository_fd)) != self.repository_identity
                 or _inode(self.repository.lstat()) != self.repository_identity):
             raise self._fail("repository identity changed")
@@ -218,7 +513,64 @@ class Guard:
             os.close(fd)
             raise self._fail(error)
 
+    def _group_observer(self, proc):
+        """Injectable bounded stat observer; no hook may bypass validation."""
+        group = self._active_group
+        if group is None or group.proc is not proc or proc.returncode is not None:
+            raise self._fail("group observation requires the active unreaped owned command")
+        return group.observe()
+
     def count(self, *, failure_evidence=False):
+        """Retain strict inode checks, pausing only the active owned group.
+
+        Nested observations reuse the verified scope and never resume it early.
+        A failed observation leaves the group stopped for run's existing kill
+        before reap. Outside commands the original traversal is unchanged.
+        """
+        group = self._active_group
+        if group is None:
+            if self._quiescence_depth:
+                raise self._fail("orphaned recursive stop scope")
+            return self._count_files(failure_evidence=failure_evidence)
+        if self._quiescence_depth:
+            if not group.paused or not group.verified:
+                raise self._fail("nested recursive observation lacks verified stop scope")
+            self._quiescence_depth += 1
+            try:
+                return self._count_files(failure_evidence=failure_evidence)
+            finally:
+                self._quiescence_depth -= 1
+        success = False
+        try:
+            group.pause()
+            self._quiescence_depth = 1
+            value = self._count_files(failure_evidence=failure_evidence)
+            group.verify_paused()
+            success = True
+            return value
+        except (OSError, ResourceFailure) as error:
+            raise self._fail(error)
+        finally:
+            self._quiescence_depth = 0
+            try:
+                group.finish_pause(success)
+            except (OSError, ResourceFailure) as error:
+                raise self._fail(error)
+
+    def _replacement(self, reason, parent, name, before, held, named):
+        if self.output_replacement_observation is None:
+            try:
+                directory = os.readlink(f"/proc/self/fd/{parent}")
+            except OSError:
+                directory = "<unavailable-held-parent>"
+            self.output_replacement_observation = {
+                "path": (directory + "/" + name)[:4096], "leaf": name[:255],
+                "before_identity": identity(before), "held_identity": identity(held),
+                "named_identity": identity(named), "reason": reason,
+                "specific_producer_operation_verified": False}
+        raise ResourceFailure(reason)
+
+    def _count_files(self, *, failure_evidence=False):
         """FD-anchored recursive named-file logical bytes; retry only churn."""
         self._root()
         for attempt in range(4):
@@ -293,7 +645,8 @@ class Guard:
                         if (not stat.S_ISDIR(named.st_mode)
                                 or _inode(named) != _inode(old)
                                 or identity(named) != identity(current)):
-                            raise ResourceFailure("observed named directory identity changed")
+                            self._replacement("observed named directory identity changed",
+                                              parent, name, old, current, named)
                     if sorted(os.listdir(fd)) != names:
                         stable = False
                 for fd, parent, name, old in files:
@@ -301,7 +654,8 @@ class Guard:
                     named = os.stat(name, dir_fd=parent, follow_symlinks=False)
                     if (_inode(current) != _inode(old) or _inode(named) != _inode(old)
                             or current.st_nlink != 1 or named.st_nlink != 1):
-                        raise ResourceFailure("observed file inode/type/link changed")
+                        self._replacement("observed file inode/type/link changed",
+                                          parent, name, old, current, named)
                     total += max(0, current.st_size - old.st_size, named.st_size - old.st_size)
                     self.peak = max(self.peak, total)
                     if total > LIMIT:
@@ -503,6 +857,7 @@ class Guard:
         reaped = False
         kill = "NOT_REQUESTED"
         leader_observed = False
+        group = None
         rc = None
         start = time.monotonic()
         hashes = {name: hashlib.sha256() for name in ("stdout", "stderr")}
@@ -530,6 +885,8 @@ class Guard:
                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, start_new_session=True,
                                     preexec_fn=limits, close_fds=True)
+            group = _OwnedGroupObservation(self, proc, start + timeout)
+            self._active_group = group
             selector = selectors.DefaultSelector()
             for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
                 os.set_blocking(stream.fileno(), False)
@@ -587,6 +944,16 @@ class Guard:
                     kill = "FAILED_BEFORE_REAP"
                     aborted = aborted or str(error)
                     self._fail(error)
+                # Clear the observation/signal boundary only after the final
+                # owned-group kill request, and before any operation can reap.
+                self._active_group = None
+                self._quiescence_depth = 0
+                if group is not None:
+                    try:
+                        group.close()
+                    except OSError as error:
+                        aborted = aborted or str(error)
+                        self._fail(error)
                 try:
                     rc = proc.wait(timeout=5)
                     reaped = True
@@ -644,6 +1011,7 @@ class Guard:
                                   "elapsed_seconds": time.monotonic() - start,
                                   "timeout_seconds": timeout, "reap_timeout_seconds": 5,
                                   "profile_command_timeout_limit_seconds": COMMAND_TIMEOUT_LIMIT,
+                                  "quiescence": dict(group.telemetry) if group is not None else None,
                                   "whole_process_group_reaped_verified": False})
         if aborted:
             raise ResourceFailure(aborted)
@@ -685,14 +1053,47 @@ class Guard:
             if any(c["returncode"] != 0 or not c["reaped"] or c["aborted"] for c in self.commands):
                 self._fail("a prior owned command failed or was not reaped")
             minimal = receipt.get("schema") == INVALID_RECEIPT_SCHEMA
+            strings, references, rows = [], {}, []
+            string_bytes = 0
+            if not minimal:
+                try:
+                    for command in self.commands:
+                        row = dict(command)
+                        indices = []
+                        for argument in command["argv"]:
+                            if argument not in references:
+                                if (len(strings) >= 8192
+                                        or string_bytes + len(argument.encode("utf-8")) > 256 * 1024):
+                                    raise ResourceFailure("lossless command argv table byte/count bound crossed")
+                                references[argument] = len(strings)
+                                strings.append(argument)
+                                string_bytes += len(argument.encode("utf-8"))
+                            indices.append(references[argument])
+                        del row["argv"]
+                        row["argv_refs"] = indices
+                        rows.append(row)
+                except (KeyError, TypeError, UnicodeError, ResourceFailure) as error:
+                    self._fail(error)
+                    receipt.clear()
+                    receipt.update(schema=INVALID_RECEIPT_SCHEMA, result="FAIL", evidence_complete=False,
+                                   error=str(error)[:2048], native_execution_verified=False,
+                                   windows98_integration_verified=False, tls_execution_verified=False)
+                    minimal = True
+                    rows, strings, string_bytes = [], [], 0
             receipt.update(result="FAIL" if self.failure else desired,
                            reserve_bytes=RESERVE, output_limit_bytes=LIMIT,
                            receipt_limit_bytes=RECEIPT_LIMIT, capture_limit_bytes_aggregate=CAPTURE_LIMIT,
-                           commands=[] if minimal else self.commands,
+                           commands=rows,
+                           command_argv_encoding="lossless-string-table-v1",
+                           command_argv_string_table=strings,
+                           command_argv_string_table_utf8_bytes=string_bytes,
+                           command_argv_string_table_count_limit=8192,
+                           command_argv_string_table_byte_limit=256 * 1024,
                            command_records_retained=not minimal,
                            command_count=len(self.commands), captured_normal_bytes=self.capture_bytes,
                            decoder_observed_bytes=self.decoder_bytes, resource_failure=self.failure,
                            input_pin_failure_observation=self.input_pin_failure_observation,
+                           output_replacement_observation=self.output_replacement_observation,
                            minimum_observed_free_bytes=self.minimum_free,
                            peak_observed_output_bytes=self.peak, available_at_receipt_bytes=free,
                            receipt_accounting_verified=verified,
@@ -700,6 +1101,16 @@ class Guard:
                                            "profile_command_timeout_limit_seconds": COMMAND_TIMEOUT_LIMIT,
                                            "input_hash_limit_seconds": 60,
                                            "sample_interval_seconds": SAMPLE_SECONDS,
+                                           "owned_group_quiescent_observations_required": True,
+                                           "quiescence_model": "Linux owned process-and-task T/Z snapshots before/after strict count",
+                                           "continuous_group_stop_verified": False,
+                                           "group_stop_confirmation_limit_seconds": QUIESCENCE_TIMEOUT,
+                                           "group_member_observation_limit": GROUP_MEMBER_LIMIT,
+                                           "group_task_observation_limit": GROUP_TASK_LIMIT,
+                                           "proc_process_observation_limit": PROC_ENTRY_LIMIT,
+                                           "command_wall_time_includes_group_pauses": True,
+                                           "unmanaged_or_escaped_writers_excluded_verified": False,
+                                           "pending_asynchronous_kernel_writes_excluded_verified": False,
                                            "filesystem_quota_verified": False,
                                            "continuous_minimum_free_verified": False,
                                            "all_transient_or_unlinked_file_peaks_observed": False,

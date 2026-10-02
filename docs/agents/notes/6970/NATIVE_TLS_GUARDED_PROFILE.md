@@ -160,3 +160,99 @@ unchanged. The resource guard and four-observation rule are unchanged;
 this scheduling reduces membership churn and requires actual hosted
 verification. Every object command remains bounded360s; archive/link
 commands120s; global capture256KiB/receipt1MiB/whole proof32MiB still apply.
+
+## Third actual configuration failure and quiescent observation design
+
+Selected dispatch36948426556/job110655693496 at75c4b7f1f05bd55fe50caeb898d80e611efacae4
+failed on held/named file inode/type/link mismatch during active CMake
+configuration. First32 commands exited0/reaped; command33 was aborted,
+killed before reap and reaped-9 after0.895s. The actual replaced leaf or
+operation was not serialized. Normal tool atomic rename is a supported
+hypothesis, not a proven filename fact. Independent review matched all
+66captures/24,456B. No graph, complete object/link/PE proof, sealed
+artifact or native/TLS acceptance resulted.
+
+The closed70,567B FAILreceipt SHA43f3533230d518f1c1f76c25277c0cb6869db51cb7643c3737b6d056885d69bb
+accounts1,268,694B output, observed minimum91,707,346,944B. Raw186,527B
+SHAf0431c4e65a64036f5fa1d511a06bf137515c555b71ff438d3ff59b602bb32b3
+is immutable under `/dev/shm/win98-hosted-native-tls-6970-36948426556`.
+
+New source under implementation wraps active-command recursive
+observations in a reentrant owned-group pause. Retain the unreaped leader
+PID/starttime/PGID/session token through every STOP/CONT/KILL request.
+After group SIGSTOP, enumerate all current members and every task/thread
+with bounded proc reads. Require two matching snapshots whose tasks are
+T or Z; traced-stop t is rejected. Reissue STOP for a concurrently born
+member until the1s handshake deadline; fail closed on unconfirmed or
+changed identities. Recheck task identities/states after the original
+strict directory/file count. Nested checks share the verified pause and
+must not resume early. Success resumes only the retained owned group;
+failure keeps it stopped for existing owned KILL/reap cleanup. Clear
+active observation ownership before leader reap; never signal afterward.
+Paused time remains inside the original command deadline.
+
+All original inode/type/link/replacement checks and four-observation
+rule remain. This observes writers that stay in the owned group, not
+escaped/session-detached processes, external writers, continuous space,
+physical quota or unseen transient allocations. Per-command bounded
+pause telemetry stays in the proof. No private VM or native PE executes.
+
+A separate new source-only quiescent control helper requires actual
+hosted STOP/CONT on atomic replacement, multithread/fork writers, and
+leader-Z/live-descendant scenarios. It also checks nesting, failure
+cleanup and actual named file/directory substitution. Deterministic
+proc/deadline/cap faults are explicitly recorded as injection, not actual
+uncooperative-kernel evidence. Control fixtures reside under the same
+32MiB proof root with a512KiB fixture budget, nested captures charged
+to the global256KiB pool, and compact exact capture data retained in
+the control report. Expected negative fixture FAILs remain separate
+epochs and never excuse a production command failure. All controls need
+actual hosted PASS before CMake configuration. Older14 general resource
+controls remain NOT_EXECUTED; no claim of their completion is made.
+
+To keep the same1MiB receipt cap, command argv may use explicit lossless
+string-table encoding: top `command_argv_encoding`,
+`command_argv_string_table`; each command `argv_refs` reconstructs its
+exact original argument strings in order. Internal command records and
+all return/reap/capture hashes remain intact. No opaque truncation or
+capacity increase is allowed; oversized receipts still fail closed.
+
+The quiescent helper defines ten ordered hosted cases: four actual
+process-positive cases, four explicit observer/cap/consumer injected
+negative cases, and two actual filesystem substitutions triggered at
+deterministic stat boundaries outside an active command. Those last two
+exercise the original named-inode predicates directly; they are not
+claimed as frozen-group tests. Each child case preserves its own closed
+PASS/expected-FAIL receipt and captures. Parent aggregate capture/decoder
+counters are inherited as child pool baselines and only the observed
+deltas are charged back, with explicit baseline metadata. A4KiB retained
+control-payload allowance is admitted before controls. New control files
+and their source are explicitly retained; production argv can be exactly
+reconstructed from its string table. Per-command snapshot digest is the
+last completed post-count observation, with bounded numeric pause totals,
+not a hash/retention of every group inventory. New source/control
+validation remains pending until an actual hosted run.
+
+Control process commands use a3s wall deadline plus the existing owned
+leader reap allowance up to5s. Per-case5s and total60s are measured
+completed-case acceptance gates, not absolute preemption of every read
+or cleanup operation. A late result fails acceptance; cleanup is never
+skipped to make the timing appear successful.
+
+The reviewed hosted successor freezes builder72,018B
+SHAf38c25db0f43219e5e839cf8f503644d409cf4e0663c6fc0516a08f04341e032,
+resource64,508B SHA2172922a8d5a7d28f7d710a364a6200a9f1bd998cb6cbba9c8eeafcad66ea550,
+control30,656B SHA5ff8c7cdf5730c3819f005803f87ff327bf3e31d2c7e06077a3d4e473027b3ee,
+and unchanged stream22,653B SHA0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f.
+Root and independent source reviews bind exact closed child receipts,
+capture paths/full hashes, lossless argv reconstruction and shared pool
+accounting to explicitly retained transfer files. All25 production/support
+pins and seven workflow inline AST blocks match. The original strict count
+AST is unchanged after normalizing only the two bounded failure-diagnostic
+calls. These are source checks; ten-case hosted execution is still pending.
+
+Actual new cross-chat coordination ACK at01:15 UTC records that6970
+ten-controls integration is pending and avoids duplicate jobs. This is
+progress coordination, not a new TLS build/runtime adoption or reviewed
+7707 guest-probe successor. ShizukuDOS replaces MS-DOS beneath Windows98;
+Windows98 remains the visible product OS and its VMM/UI owner.

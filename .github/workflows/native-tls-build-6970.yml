@@ -258,7 +258,7 @@ jobs:
           import hashlib,os,stat,sys,types
           from pathlib import Path
           root=Path.cwd().resolve()
-          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'c966394ee6f1bfaead5793dd9054c8fb21297266b4d63b523877c36e6923825d', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '46cc096f84683c75888d103705e63ed0b57bf922e512f0694c6719e6054c2a2e'}
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'f38c25db0f43219e5e839cf8f503644d409cf4e0663c6fc0516a08f04341e032', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '2172922a8d5a7d28f7d710a364a6200a9f1bd998cb6cbba9c8eeafcad66ea550', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': '5ff8c7cdf5730c3819f005803f87ff327bf3e31d2c7e06077a3d4e473027b3ee'}
           before={}
           identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
           for relative,expected in pins.items():
@@ -358,6 +358,16 @@ jobs:
           assert x['result']=='PASS_CURRENT_NATIVE_TLS_SSPI_BUILD_ONLY' and x['receipt_accounting_verified'] and x['resource_failure'] is None
           for key in ('native_execution_verified','windows98_integration_verified','credential_execution_verified','network_execution_verified','os_tls_provider_verified','os_registration_verified','kernel64_backend_verified','application_compatibility_verified','default_ROOT_chain_validation_verified','final_ISO_verified','TLS_execution_verified','TLS_negotiation_verified','real_tls_proven_by_this_test','native_guest_proven','native_ROOT_execution_proven'):assert x[key] is False
           selected={proof/'result.json':receipt_pin}
+          controls=x['quiescent_controls']
+          assert controls['result']=='PASS_QUIESCENT_GUARD_CONTROLS_ONLY' and controls['completed']==10 and controls['failures']==0
+          assert controls['actual_controls_execution_verified'] is True and controls['expected_negative_commands_added_to_parent'] is False
+          for key in ('native_execution_verified','windows98_integration_verified','tls_execution_verified','escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified'):assert controls[key] is False
+          assert len(controls['proof_files'])<=320
+          for item in controls['proof_files']:
+              path=Path(item['path']);assert path==proof/item['relative_path'] and path.is_relative_to(proof/'tmp')
+              pin={k:v for k,v in item.items() if k not in ('path','relative_path')}
+              assert read(path,524288)[1]==pin and path not in selected
+              selected[path]=pin
           for name,pin in x['compiled_outputs'].items():selected[proof/name]=pin
           for item in x['PEs'].values():
               for key in ('artifact','compressed_decode'):
@@ -382,7 +392,54 @@ jobs:
                   path=proof/(c['label']+'.'+stream);data,pin=read(path,262144)
                   assert pin['sha256']==c['captured_sha256'][stream]
                   capture_total+=len(data);selected[path]=pin
-          assert capture_total==x['captured_normal_bytes']<=262144
+          control_capture_total=control_raw_total=0
+          assert len(controls['cases'])==10
+          previous_capture=previous_decoder=None
+          for case in controls['cases']:
+              assert case['result']=='PASS' and case['executed'] is True
+              child_path=Path(case['child_receipt_path']);assert child_path in selected
+              data,pin=read(child_path,524288);assert pin['sha256']==case['child_receipt_sha256']
+              child=json.loads(data)
+              assert child['control']==case['name'] and child['result']==case['expected_child_epoch']==case['child_epoch']
+              assert child['receipt_accounting_verified'] is True and child['command_count']==case['expected_command_count']==len(case['commands'])
+              assert child['command_argv_encoding']=='lossless-string-table-v1'
+              assert child['inherited_parent_capture_bytes']==case['capture_pool_offset']
+              assert child['inherited_parent_decoder_bytes']==case['decoder_pool_offset']
+              if previous_capture is not None:assert case['capture_pool_offset']==previous_capture and case['decoder_pool_offset']==previous_decoder
+              case_capture=case_raw=0
+              assert len(case['capture_payloads'])==len(case['commands'])==len(child['commands'])
+              for record,actual,payload in zip(case['commands'],child['commands'],case['capture_payloads']):
+                  for key,value in record.items():
+                      if key!='argv_sha256':assert actual[key]==value
+                  assert len(child['command_argv_string_table'])<=8192
+                  assert all(isinstance(i,int) and not isinstance(i,bool) and 0<=i<len(child['command_argv_string_table']) for i in actual['argv_refs'])
+                  argv=[child['command_argv_string_table'][i] for i in actual['argv_refs']]
+                  assert hashlib.sha256(json.dumps(argv,separators=(',',':')).encode()).hexdigest()==record['argv_sha256']
+                  captured=0
+                  for stream in ('stdout','stderr'):
+                      value=bytes.fromhex(payload[stream+'_hex']);assert len(value)<=4096
+                      capture_path=child_path.parent/(actual['label']+'.'+stream)
+                      assert capture_path in selected and read(capture_path,4096)[0]==value
+                      assert hashlib.sha256(value).hexdigest()==actual['captured_sha256'][stream]==record['captured_sha256'][stream]
+                      captured+=len(value)
+                      if stream=='stderr' or not actual['raw_stdout_stream']:
+                          assert len(value)==actual['full_'+stream+'_bytes'] and hashlib.sha256(value).hexdigest()==actual['full_'+stream+'_sha256']
+                  assert captured==actual['captured_bytes']==record['captured_bytes']
+                  case_capture+=captured
+                  if actual['raw_stdout_stream']:
+                      value=bytes.fromhex(case['consumer_payload_hex']);assert len(value)<=4096
+                      assert len(value)==actual['full_stdout_bytes'] and hashlib.sha256(value).hexdigest()==actual['full_stdout_sha256']
+                      assert case['stream_consumer_raised_before_delivery_commit'] is True and actual['stdout_delivered_to_consumer_bytes']==0
+                      case_capture+=len(value);case_raw+=len(value)
+              assert case_capture==case['capture_pool_delta']==child['control_capture_pool_delta']
+              assert case_raw==case['decoder_pool_delta']==child['control_decoder_pool_delta']
+              previous_capture=case['capture_pool_offset']+case_capture
+              previous_decoder=case['decoder_pool_offset']+case_raw
+              assert previous_capture==child['captured_normal_bytes'] and previous_decoder==child['decoder_observed_bytes']
+              control_capture_total+=case_capture;control_raw_total+=case_raw
+          assert control_capture_total==controls['capture_bytes_charged_to_parent']==controls['capture_payload_bytes']<=4096
+          assert control_raw_total==controls['raw_bytes_charged_to_parent']<=4096
+          assert capture_total+control_capture_total==x['captured_normal_bytes']<=262144
           entries={}
           for path,pin in sorted(selected.items()):
               assert path.is_relative_to(root) and not any(c in str(path) for c in '\r\n')

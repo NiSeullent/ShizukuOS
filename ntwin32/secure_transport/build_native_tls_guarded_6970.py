@@ -36,7 +36,8 @@ ARCHIVE_SHA = 'a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6'
 ARCHIVE_URL = 'https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2'
 PRODUCTION = {'ntwin32/secure_transport/build.py': (19667, 'a9f96b6a4501104b1929a669af4a0f4f6db9b7e68e56ad7241274783f44d787b'), 'ntwin32/secure_transport/i486_format.c': (6346, '3d5a6fd5895801d350ffeffe563e6bf858801fc24ac1139fec07e058d1346965'), 'ntwin32/secure_transport/i486_format.h': (663, '3f7a57cb7c545ba180a2dbb33fdfaf2f2c4bfa31f5cf02a01118cdbfd571a42d'), 'ntwin32/secure_transport/i486_gate.py': (8829, '85e976035c70478e9a2f021a37aa6925dd20ad85f089c7d06a18efadb7b9730f'), 'ntwin32/secure_transport/native.def': (302, '88c1d2cd388bc5d958d8473589fcf18d12d48e1c53da6fb3b2e396aba24b8c82'), 'ntwin32/secure_transport/native_crt.c': (1699, 'dff0e07803d0a6f708b597d6fc54225c6502c2293814e77fe2d95f821cae882f'), 'ntwin32/secure_transport/native_runtime.c': (1423, '268c5eae7b09145ea1ff971e24313b6a0b19cd7a8f85f8dcd44c886e6435cfa8'), 'ntwin32/secure_transport/native_runtime.h': (495, '6425fd3cad0c0a02a48851caf7337b55453ee6259bd35e79496d2de68769ea2e'), 'ntwin32/secure_transport/native_time.c': (2207, '8103149774591687c15554438925e303c99ba42fa1c6a9b4254a6ee6fae99031'), 'ntwin32/secure_transport/native_time_probe.c': (6364, '98c3d61a6cb585d9ce1822c5a233737c7d1d66fe29c16eb2968771814a4459da'), 'ntwin32/secure_transport/probe.c': (28767, '39fa6b3915de7aa2378173fc7ca3258267176e20cb2dd451ea795816d3b15585'), 'ntwin32/secure_transport/sspi_native.c': (35445, '32b6bbd23d7ed61c40d86e08711c631140dfeb3ee6e5e1a6427d9eebb2955672'), 'ntwin32/secure_transport/sspi_native.def': (769, 'd31e87e33f0b51bb175265e0f05a073749e1785d3d4d2cb34713ae7dd59566a7'), 'ntwin32/secure_transport/sspi_native.h': (1972, '172f12027a18b9d04a81936da4169f62793f25aa6d09d13edbc1da4bf81f280c'), 'ntwin32/secure_transport/sspi_native_host_test.py': (45452, 'a1ecceca9c7989d7559b610e6266285b00ba915c3a6f1880a13744d88424aea2'), 'ntwin32/secure_transport/sspi_stream.c': (16139, '873407d0cb80072957d6dacb1c2b4ba0c96eb9cd3b81ab93159c4668610c8ac1'), 'ntwin32/secure_transport/sspi_stream.h': (5600, '87c9038c2a5411a63b6e9cb942f1d6da04f7aaded296933357d5fdfad02b79e2'), 'ntwin32/secure_transport/transport.c': (13450, '353556e66a46c807480436015e1f85c0f80e93988d0d3e581cef4aa9d386b604'), 'ntwin32/secure_transport/transport.h': (3792, '7f3f364ab97fd58d94c03f80432a94b99c0ad28b71b48bc4d0ee4920e3191cda'), 'ntwin32/secure_transport/user_config.h': (1635, '578949f773d5189b149804013880786b2b258c1837fa32d4e9a117031ca31ab6')}
 SUPPORT = {'benchmarks/win98se-ko-oem-native-exports-v1.json': (1866608, '3854198a9b2bf9f54fe0383330d09ed2ea3d0d510c3d7ba24eb13426e37b4f0d'), 'ntwin32/secure_transport/i486_gate_test.py': (5194, '6e90e48f6f690efd29d2db7035478589bca4f140f3c28f05960c9bd0b5a4af69'), 'ntwin32/legacy_provider_bridge/pe_link_script_6970.py': (26070, '9a98336d9c5a0bc417ed816454d3188e79dc4cf326a52bfabad73df8c903b55b'), 'ntwin32/legacy_provider_bridge/build_native_pe32_guarded_6970.py': (76927, 'b7d627c71076b6cbdb1e65d896ab798e4fe3688067ef7b0a1774243d2c3010d9'), 'ntwin32/legacy_provider_bridge/test_native_sspi_6970.py': (41247, '1b52856e537b298ea253d564754afefc35eb340bd7f7090fc1b30786bfa4f44e')}
-NEW_HELPERS = ('native_tls_resources_6970.py', 'i486_stream_6970.py')
+NEW_HELPERS = ('native_tls_resources_6970.py', 'i486_stream_6970.py',
+               'native_tls_quiescent_controls_6970.py')
 FALSE_FLAGS = ('native_execution_verified', 'windows98_integration_verified',
                'network_execution_verified', 'credential_execution_verified',
                'os_tls_provider_verified', 'os_registration_verified',
@@ -100,9 +101,209 @@ def load(path, expected, name, guard=None):
     exec(compile(raw, str(path), 'exec'), module.__dict__)
     if regular(path, 2 * 1024**2)[1] != pin:
         raise ValueError('helper changed while loading verified bytes')
+    module.__6970_bound_source_sha256__ = pin['sha256']
+    module.__6970_bound_source_bytes__ = pin['bytes']
     if guard:
         guard.check()
     return module
+
+
+def require_quiescent_controls(report, controls, guard, resources, source_pins, python_pin, offsets):
+    """Bind actual closed child epochs without promoting expected FAIL commands."""
+    def require(condition, message):
+        if not condition:
+            raise ValueError('quiescent controls: ' + message)
+
+    def natural(value):
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    def payload(value):
+        require(isinstance(value, str) and len(value) <= 8192
+                and re.fullmatch(r'[0-9a-f]*', value) is not None and len(value) % 2 == 0,
+                'bounded canonical payload hex required')
+        return bytes.fromhex(value)
+
+    require(isinstance(report, dict)
+            and report.get('schema') == 'native-tls-quiescent-controls-6970.v1'
+            and report.get('result') == 'PASS_QUIESCENT_GUARD_CONTROLS_ONLY'
+            and type(report.get('completed')) is int and report['completed'] == 10
+            and type(report.get('failures')) is int and report['failures'] == 0,
+            'complete ten-case PASS required')
+    cases = report.get('cases')
+    require(isinstance(cases, list) and len(cases) == 10
+            and tuple(row.get('name') for row in cases if isinstance(row, dict)) == controls.CONTROL_NAMES,
+            'exact declared ordered case names required')
+    for key in ('resource_source_before_after_equal', 'control_source_before_after_equal',
+                'selected_python_before_after_equal', 'actual_controls_execution_verified',
+                'fault_injection_is_not_unmanaged_writer_attestation'):
+        require(report.get(key) is True, 'required observation absent: ' + key)
+    for key in ('expected_negative_commands_added_to_parent', 'escaped_writers_excluded_verified',
+                'continuous_group_stop_verified', 'filesystem_quota_verified',
+                'native_execution_verified', 'windows98_integration_verified', 'tls_execution_verified'):
+        require(report.get(key) is False, 'unsupported scope claim: ' + key)
+    require(report.get('resource_source') == source_pins['ntwin32/secure_transport/native_tls_resources_6970.py']
+            and report.get('control_source') == source_pins['ntwin32/secure_transport/native_tls_quiescent_controls_6970.py']
+            and report.get('selected_python') == python_pin,
+            'exact loaded source and selected Python pins required')
+    require(len(guard.commands) == offsets['commands'], 'child commands entered production inventory')
+    require(report.get('fixture_bytes_limit') == controls.FIXTURE_BYTES_LIMIT
+            and report.get('case_timeout_seconds') == controls.CASE_SECONDS
+            and report.get('total_timeout_seconds') == controls.TOTAL_SECONDS
+            and isinstance(report.get('elapsed_seconds'), (int, float))
+            and not isinstance(report['elapsed_seconds'], bool)
+            and 0 <= report['elapsed_seconds'] <= controls.TOTAL_SECONDS, 'bounded actual control time required')
+    records = report.get('proof_files')
+    require(isinstance(records, list) and 0 < len(records) <= 320, 'explicit bounded proof files required')
+    pins, inodes, total = {}, set(), 0
+    for record in records:
+        require(isinstance(record, dict) and set(record) == {'path', 'relative_path', 'bytes', 'sha256', 'identity'},
+                'exact proof pin fields required')
+        path = Path(record['path'])
+        relative = Path(record['relative_path'])
+        require(path.is_absolute() and str(path) == record['path'] and path.is_relative_to(guard.tmp)
+                and not relative.is_absolute() and '..' not in relative.parts
+                and guard.output / relative == path and str(path) not in pins,
+                'duplicate or escaped control proof path')
+        pin = guard.pin(path, maximum=controls.FIXTURE_BYTES_LIMIT)
+        require(pin == {key: record[key] for key in ('bytes', 'sha256', 'identity')}, 'actual proof bytes changed')
+        token = tuple(pin['identity'][:2])
+        require(token not in inodes, 'duplicate control proof inode')
+        inodes.add(token)
+        pins[str(path)] = pin
+        total += pin['bytes']
+    require(total <= controls.FIXTURE_BYTES_LIMIT, 'actual control proof file sum exceeds 512 KiB')
+    captured = decoded = embedded = 0
+    for index, row in enumerate(cases):
+        expected = controls.CONTROL_EXPECTATIONS[row['name']]
+        require(row.get('result') == 'PASS' and row.get('executed') is True
+                and row.get('expected_child_epoch') == expected['child_epoch']
+                and row.get('child_epoch') == expected['child_epoch']
+                and row.get('injected_fault') is expected['injected_fault']
+                and row.get('expected_negative_reason') == expected['reason']
+                and type(row.get('expected_command_count')) is int
+                and row['expected_command_count'] == expected['command_count']
+                and type(row.get('command_count')) is int and row['command_count'] == expected['command_count'],
+                'actual child epoch/fault/command classification differs')
+        require(isinstance(row.get('elapsed_seconds'), (int, float)) and not isinstance(row['elapsed_seconds'], bool)
+                and 0 <= row['elapsed_seconds'] <= controls.CASE_SECONDS, 'case wall bound differs')
+        for key in ('capture_pool_delta', 'decoder_pool_delta', 'capture_pool_offset', 'decoder_pool_offset'):
+            require(natural(row.get(key)), 'actual pool counter required: ' + key)
+        require(row['capture_pool_offset'] == offsets['capture'] + captured
+                and row['decoder_pool_offset'] == offsets['decoder'] + decoded, 'inherited pool offset differs')
+        captured += row['capture_pool_delta']
+        decoded += row['decoder_pool_delta']
+        reason = row.get('observed_error')
+        require(reason is None if expected['reason'] is None else
+                isinstance(reason, str) and expected['reason'] in reason, 'expected actual failure reason absent')
+        observation = row.get('observation')
+        require(isinstance(observation, dict), 'actual case observations required')
+        if index < 8:
+            require(natural(observation.get('early_continue_requests'))
+                    and observation['early_continue_requests'] == 0, 'nested pause resumed early')
+        if index < 4:
+            require(natural(observation.get('paused_scans')) and observation['paused_scans'] > 0,
+                    'positive case did not observe a paused traversal')
+        if index == 1:
+            require(observation.get('maximum_members', 0) >= 3 and observation.get('maximum_tasks', 0) >= 5,
+                    'actual threads/late fork not observed')
+        if index == 2:
+            require(observation.get('zombie_leader_live_member') is True, 'zombie leader/live child not observed')
+        if index == 3:
+            require(observation.get('nested_checks') == 1 and observation.get('nested_pause_retained') is True,
+                    'nested paused count not exercised')
+        if index >= 4:
+            require(natural(observation.get('fault_injections')) and observation['fault_injections'] > 0,
+                    'named negative boundary not exercised')
+        if index >= 8:
+            require(observation.get('actual_rename_performed') is True
+                    and observation.get('stat_boundary_calls', 0) >= 2, 'real inode substitution not exercised')
+        child_path = row.get('child_receipt_path')
+        expected_child_path = guard.tmp / ('quiescent-%02d' % index) / 'result.json'
+        require(child_path == str(expected_child_path) and child_path in pins
+                and row.get('child_receipt_sha256') == pins[child_path]['sha256'],
+                'child closed receipt absent from exact proof set')
+        raw, pin = regular(Path(child_path), controls.FIXTURE_BYTES_LIMIT)
+        require(pin == pins[child_path], 'closed child receipt changed during read')
+        child = json.loads(raw)
+        require(child.get('schema') == 'native-tls-quiescent-control-child-6970.v1'
+                and child.get('control') == row['name'] and child.get('result') == expected['child_epoch']
+                and child.get('expected_negative') is expected['injected_fault']
+                and child.get('receipt_accounting_verified') is True
+                and child.get('command_count') == row['command_count'], 'actual child receipt classification differs')
+        for key in ('native_execution_verified', 'windows98_integration_verified', 'tls_execution_verified'):
+            require(child.get(key) is False, 'child unsupported scope claim: ' + key)
+        actual_commands = child.get('commands')
+        commands, capture_payloads = row.get('commands'), row.get('capture_payloads')
+        require(isinstance(actual_commands, list) and isinstance(commands, list) and isinstance(capture_payloads, list)
+                and len(actual_commands) == len(commands) == len(capture_payloads) == row['command_count'],
+                'actual command/payload count differs')
+        strings = child.get('command_argv_string_table')
+        require(child.get('command_argv_encoding') == 'lossless-string-table-v1'
+                and isinstance(strings, list) and len(strings) <= 8192
+                and all(isinstance(value, str) for value in strings) and len(set(strings)) == len(strings)
+                and sum(len(value.encode()) for value in strings) <= 256 * 1024, 'lossless actual argv table required')
+        row_payload = 0
+        consumer = payload(row.get('consumer_payload_hex', ''))
+        for command, actual, capture in zip(commands, actual_commands, capture_payloads):
+            require(isinstance(command, dict) and isinstance(actual, dict) and isinstance(capture, dict),
+                    'actual command metadata required')
+            require(command.get('label') == 'control', 'exact declared child command label required')
+            refs = actual.get('argv_refs')
+            require(isinstance(refs, list) and 0 < len(refs) <= 256
+                    and all(natural(value) and value < len(strings) for value in refs), 'actual argv refs invalid')
+            argv = [strings[value] for value in refs]
+            require(command.get('argv_sha256') == digest(json.dumps(argv, separators=(',', ':')).encode())
+                    and all(actual.get(key) == value for key, value in command.items() if key != 'argv_sha256'),
+                    'compact command differs from closed actual command')
+            require(command.get('reaped') is True and command.get('raw_stdout_stream') is (index == 7),
+                    'actual cleanup/stream classification differs')
+            quiescence = command.get('quiescence')
+            require(isinstance(quiescence, dict), 'actual command stop observations absent')
+            if index < 4:
+                require(command.get('returncode') == 0 and command.get('aborted') is None
+                        and command.get('nonreaping_leader_exit_observed') is True
+                        and quiescence.get('verified_pauses', 0) > 0 and quiescence.get('continue_requests', 0) > 0
+                        and (command.get('group_kill') == 'REQUESTED_BEFORE_REAP'
+                             or command.get('group_kill') == 'NO_SUCH_GROUP_BEFORE_REAP'
+                             and quiescence.get('stop_no_live_group_observations', 0) > 0),
+                        'positive actual process/stop cleanup failed')
+            else:
+                require(command.get('returncode') == -9 and command.get('group_kill') == 'REQUESTED_BEFORE_REAP'
+                        and isinstance(command.get('aborted'), str) and expected['reason'] in command['aborted']
+                        and quiescence.get('failure_stop_retained_until_owned_kill') is True,
+                        'negative actual command did not fail/kill at expected boundary')
+            for key in ('escaped_writers_excluded_verified', 'continuous_group_stop_verified', 'filesystem_quota_verified'):
+                require(quiescence.get(key) is False, 'command unsupported stop scope: ' + key)
+            stdout, stderr = payload(capture.get('stdout_hex')), payload(capture.get('stderr_hex'))
+            for stream, data in (('stdout', stdout), ('stderr', stderr)):
+                capture_path = str(expected_child_path.parent / ('control.' + stream))
+                require(capture_path in pins and pins[capture_path]['bytes'] == len(data)
+                        and pins[capture_path]['sha256'] == digest(data),
+                        'actual capture file absent or differs from embedded payload')
+            require(command.get('captured_bytes') == len(stdout) + len(stderr)
+                    and command.get('captured_sha256') == {'stdout': digest(stdout), 'stderr': digest(stderr)}
+                    and command.get('full_stderr_bytes') == len(stderr)
+                    and command.get('full_stderr_sha256') == digest(stderr), 'actual capture length/SHA differs')
+            full_stdout = consumer if index == 7 else stdout
+            require(command.get('full_stdout_bytes') == len(full_stdout)
+                    and command.get('full_stdout_sha256') == digest(full_stdout), 'actual full stdout digest differs')
+            if index == 7:
+                require(bool(consumer) and not stdout and command.get('stdout_delivered_to_consumer_bytes') == 0
+                        and row.get('stream_consumer_raised_before_delivery_commit') is True,
+                        'raised consumer raw/delivery boundary differs')
+            row_payload += len(stdout) + len(stderr)
+        row_payload += len(consumer)
+        require(row_payload == row['capture_pool_delta']
+                and row['decoder_pool_delta'] == (len(consumer) if index == 7 else 0),
+                'actual case payload differs from inherited charge')
+        embedded += row_payload
+    require(embedded == captured == report.get('capture_payload_bytes') == report.get('capture_bytes_charged_to_parent')
+            and embedded <= controls.PAYLOAD_LIMIT
+            and decoded == report.get('raw_bytes_charged_to_parent')
+            and guard.capture_bytes == offsets['capture'] + captured <= resources.CAPTURE_LIMIT
+            and guard.decoder_bytes == offsets['decoder'] + decoded <= resources.DECODER_LIMIT,
+            'actual shared pool accounting differs')
+    return pins
 
 
 def prepare(prep):
@@ -353,6 +554,10 @@ def build(output, prep, expected_preparation_sha):
         stream_name = 'ntwin32/secure_transport/i486_stream_6970.py'
         stream = load(ROOT / stream_name, (source_pins[stream_name]['bytes'], source_pins[stream_name]['sha256']),
                       'native_tls_stream_frozen', guard)
+        quiescent_name = 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py'
+        quiescent_controls = load(ROOT / quiescent_name,
+            (source_pins[quiescent_name]['bytes'], source_pins[quiescent_name]['sha256']),
+            'native_tls_quiescent_controls_frozen', guard)
         guard.check()
         receipt['stream_controls'] = stream.run_controls(gate)
         receipt['resource_control_plan']=resources.hosted_control_plan()
@@ -449,6 +654,11 @@ def build(output, prep, expected_preparation_sha):
                 system_libraries.add(selected)
         receipt['tool_inputs_before'] = tools.copy()
         receipt['readonly_system_input_paths'] = sorted(system_input_paths)
+        control_offsets = {'commands':len(guard.commands), 'capture':guard.capture_bytes,
+                           'decoder':guard.decoder_bytes}
+        receipt['quiescent_controls'] = quiescent_controls.run_controls(guard, resources, python)
+        quiescent_pins = require_quiescent_controls(receipt['quiescent_controls'], quiescent_controls,
+            guard, resources, source_pins, tools[python], control_offsets)
         # Original in-memory ISA methods run through the existing exact-byte loader.
         r = guard.run([python, '-B', '-c', bridge.I486_CONTROL_CHILD,
                        str(HERE / 'i486_gate.py'), PRODUCTION[gate_name][1],
@@ -825,6 +1035,12 @@ def build(output, prep, expected_preparation_sha):
                     readonly_system_input=path in system_input_paths)!=pin:
                 raise ValueError('actual selected tool/library/parser changed')
         receipt['tool_inputs_before_after_equal']=True
+        for path,pin in quiescent_pins.items():
+            if guard.pin(Path(path),maximum=quiescent_controls.FIXTURE_BYTES_LIMIT)!=pin:
+                raise ValueError('actual closed quiescent control proof changed during build')
+        if guard.capture_bytes>resources.CAPTURE_LIMIT or guard.decoder_bytes>resources.DECODER_LIMIT:
+            raise ValueError('final actual parent capture/raw pools exceeded unchanged limits')
+        receipt['quiescent_control_proof_files_before_after_equal']=True
         for relative,pin in source_pins.items():
             if regular(ROOT/relative,2*1024**2)[1]!=pin:
                 raise ValueError('original source/helper changed')
