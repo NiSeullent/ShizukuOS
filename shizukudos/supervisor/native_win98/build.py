@@ -309,7 +309,9 @@ def assemble(out, copies, loader, receipt):
     with esp.open("xb") as stream:
         stream.truncate(ESP_MIB << 20)
         owned_esp = stable(os.fstat(stream.fileno()))[:3]
-    command(["mkfs.vfat", "-F", "32", "-n", "SHZWIN98", "-i", "53485739", esp], receipt)
+    # Avoid mkfs.fat's default whole-track rounding at the 2304 MiB extent.
+    # The strict inserter requires the FAT BPB to cover every owned sector.
+    command(["mkfs.vfat", "-F", "32", "-g", "1/1", "-n", "SHZWIN98", "-i", "53485739", esp], receipt)
     command(["mmd", "-i", esp, "::/EFI", "::/EFI/BOOT", "::/EFI/SHIZUKU", "::/SHZDOS"], receipt)
     policy = out / "BOOT.INI"
     policy.write_bytes(b"mode=supervisor\r\nmenu_timeout=0\r\n")

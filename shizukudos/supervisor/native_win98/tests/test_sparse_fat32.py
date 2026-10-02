@@ -47,7 +47,7 @@ class ActualSparseAssembly(unittest.TestCase):
         self.assertLessEqual(allocated, 64 << 20)
         self.folder.cleanup()
 
-    def assemble(self):
+    def assemble(self, esp_mib=40):
         out = self.root/'out'; out.mkdir()
         receipt = {'commands': []}
         # Only the tiny host fixture models production capacity. All actual
@@ -59,7 +59,7 @@ class ActualSparseAssembly(unittest.TestCase):
             if len(argv) > 3 and argv[1:3] == ['-B', '-c']:
                 argv[3] = "import shutil\nshutil.disk_usage=lambda p:shutil._ntuple_diskusage(64<<30,0,64<<30)\n" + argv[3]
             return real_command(argv, receipt, **kwargs)
-        with mock.patch.object(B, 'ESP_MIB', 40), mock.patch.object(B.shutil, 'disk_usage', return_value=capacity), mock.patch.object(B, 'command', side_effect=fixture_capacity):
+        with mock.patch.object(B, 'ESP_MIB', esp_mib), mock.patch.object(B.shutil, 'disk_usage', return_value=capacity), mock.patch.object(B, 'command', side_effect=fixture_capacity):
             esp, members = B.assemble(out, {'DISK.IMG': self.source}, self.loader, receipt)
         return esp, members, receipt
 
@@ -85,6 +85,25 @@ class ActualSparseAssembly(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('standalone_frozen_guards', path)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         self.assertEqual(module.config_bytes(), B.config_bytes())
+
+    def test_production_2304_mib_esp_has_exact_fat_extent_and_real_member(self):
+        # Default mkfs.fat CHS rounds this actual logical size down by 18
+        # sectors. Exercise the ordinary assembler and strict packer at the
+        # production extent with tiny real data, under the same physical cap.
+        esp, members, receipt = self.assemble(2304)
+        with esp.open('rb') as stream:
+            boot = stream.read(512)
+            backup_sector = struct.unpack_from('<H', boot, 50)[0]
+            stream.seek(backup_sector * 512)
+            backup = stream.read(512)
+        self.assertEqual(esp.stat().st_size, 2304 << 20)
+        self.assertEqual(struct.unpack_from('<I', boot, 32)[0], esp.stat().st_size // 512)
+        self.assertEqual(backup, boot)
+        self.assertEqual(members['SHZDOS/DISK.IMG']['sha256'], self.pin)
+        self.assertTrue(receipt['disk_insertion']['independent_mtype_verified'])
+        self.assertTrue(receipt['disk_insertion']['result']['fat']['mirrors_verified'])
+        self.assertEqual(receipt['disk_insertion']['result']['esp']['sha256'], B.file_sha(esp))
+        self.assertLess(esp.stat().st_blocks * 512, 64 << 20)
 
 
 class WorkerControls(ActualSparseAssembly):
