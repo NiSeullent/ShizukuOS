@@ -78,7 +78,7 @@ made. The complete logical budget and remaining-byte capacity checks still
 apply even to an all-zero source. Destination extent/hash are read back in both
 modes. Disk sizes above 64 MiB
 are confined to the reserved NAS lane
-`/mnt/shizukuos-native-workspace-fada-20261001/fada/replacement`; small synthetic
+`/root/_drive/0001/volume1/working_stuff_by_nyase/root6970/replacement`; small synthetic
 host controls use private temporary directories. Root allocates and coordinates
 real NAS jobs. No large NAS copy is launched by the test suite.
 An output inside a Git checkout must be under an explicitly ignored `build/`

@@ -18,7 +18,7 @@ import tempfile
 
 FLOOR = 17 << 30
 MAX_DISK = 8 << 30
-LANE = Path('/mnt/shizukuos-native-workspace-fada-20261001/fada/replacement')
+LANE = Path('/root/_drive/0001/volume1/working_stuff_by_nyase/root6970/replacement')
 KERNEL_COMMIT = '5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3'
 FREECOM_COMMIT = '04fc21a9f6792abe9048598e8f2d048b4f6cd0e5'
 SYS_SHA = 'b8737d520d9c35fdbefadbea213c3528800a18f2580a70afb7f620cba6c59f59'
