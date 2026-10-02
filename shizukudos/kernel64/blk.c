@@ -3,6 +3,7 @@
  * partitions found by blk_part.c become devices of their own that bounds-check and forward to the parent.
  */
 #include "blk.h"
+#include "blk_authority.h"
 #include "pci.h"
 
 static blk_dev_t *head, *tail;
@@ -14,6 +15,7 @@ int blk_register(blk_dev_t *d)
 {
     uint64_t f;
     if (!d || !d->name[0] || !d->sector_size || !d->sectors || !d->read || blk_find(d->name)) return -1;
+    if (!d->parent && !(d->flags & BLK_F_PARTITION) && blk_authority_register(d)) return -1;
     f = irq_save();
     d->next = 0;
     d->reg_index = count;
@@ -62,31 +64,44 @@ int blk_user_write_busy(blk_dev_t *d)
 
 static int in_range(const blk_dev_t *d, uint64_t lba, unsigned n) { return d && n && lba < d->sectors && n <= d->sectors - lba; }
 
-int blk_read(blk_dev_t *d, uint64_t lba, unsigned count_, void *buf)
+/* Resolve partitions under the authority lock and call the actual whole
+ * driver directly. Recursing through part_read/write would reacquire the lock.
+ * Bound/cycle/translation overflow checks precede the whole operation. */
+static blk_dev_t *io_whole(blk_dev_t *d,uint64_t *lba,unsigned n)
 {
-    int rc;
-    if (!in_range(d, lba, count_) || !buf) return -1;
-    rc = d->read(d, lba, count_, buf);
-    if (!rc) { d->reads += count_; ++d->read_ops; } else ++d->errors;
-    return rc;
+    unsigned depth=0;
+    while(d && d->parent) {
+        if(++depth>BLK_MAX_DEVICES || !in_range(d,*lba,n) || d->start_lba>UINT64_MAX-*lba)return 0;
+        *lba+=d->start_lba;d=d->parent;
+    }
+    return in_range(d,*lba,n)?d:0;
 }
-
-int blk_write(blk_dev_t *d, uint64_t lba, unsigned count_, const void *buf)
+int blk_read(blk_dev_t *d,uint64_t lba,unsigned count_,void *buf)
 {
-    int rc;
-    if (!d || !d->write || (d->flags & BLK_F_READONLY) || !in_range(d, lba, count_) || !buf) return -1;
-    rc = d->write(d, lba, count_, buf);
-    if (!rc) { d->writes += count_; ++d->write_ops; } else ++d->errors;
-    return rc;
+    blk_dev_t *w;uint64_t abs=lba;int rc;
+    if(!in_range(d,lba,count_)||!buf||blk_authority_enter(d,0))return -1;
+    w=io_whole(d,&abs,count_);rc=w?w->read(w,abs,count_,buf):-1;
+    if(!rc){d->reads+=count_;++d->read_ops;if(w!=d){w->reads+=count_;++w->read_ops;}}
+    else ++d->errors;
+    blk_authority_leave(d,rc,0);return rc;
 }
-
+int blk_write(blk_dev_t *d,uint64_t lba,unsigned count_,const void *buf)
+{
+    blk_dev_t *w;uint64_t abs=lba;int rc=-1;
+    if(!d||!d->write||(d->flags&BLK_F_READONLY)||!in_range(d,lba,count_)||!buf||blk_authority_enter(d,1))return -1;
+    w=io_whole(d,&abs,count_);
+    if(w&&w->write&&!(w->flags&BLK_F_READONLY))rc=w->write(w,abs,count_,buf);
+    if(!rc){d->writes+=count_;++d->write_ops;if(w!=d){w->writes+=count_;++w->write_ops;}}
+    else ++d->errors;
+    blk_authority_leave(d,rc,0);return rc;
+}
 int blk_flush(blk_dev_t *d)
 {
-    int rc;
-    if (!d) return -1;
-    rc = d->flush ? d->flush(d) : 0;
-    if (!rc) ++d->flushes; else ++d->errors;
-    return rc;
+    blk_dev_t *w;int rc;
+    if(!d||blk_authority_enter(d,1))return -1;
+    w=blk_whole(d);rc=w&&w->flush?w->flush(w):0;
+    if(!rc)++d->flushes;else ++d->errors;
+    blk_authority_leave(d,rc,0);return rc;
 }
 
 /* Walks a partition chain down to the whole device, translating the LBA. */
@@ -102,9 +117,10 @@ int blk_discard(blk_dev_t *d, uint64_t lba, unsigned count_)
     int rc;
     if (!in_range(d, lba, count_) || (d->flags & BLK_F_READONLY)) return -1;
     w = resolve(d, &lba);
-    if (!w->discard) return -1;
+    if (!w->discard || blk_authority_enter(d,1)) return -1;
     rc = w->discard(w, lba, count_);
     if (!rc) ++d->discards; else ++d->errors;
+    blk_authority_leave(d,rc,0);
     return rc;
 }
 
@@ -112,7 +128,9 @@ int blk_control(blk_dev_t *d, unsigned op, uint64_t arg, uint64_t *out)
 {
     blk_dev_t *w = blk_whole(d);
     if (!w) return -1;
-    return w->control ? w->control(w, op, arg, out) : -2;
+    if (!w->control) return -2;
+    if (blk_authority_enter(d,1)) return -1;
+    { int rc=w->control(w,op,arg,out);blk_authority_leave(d,rc,1);return rc; }
 }
 
 int blk_read_async(blk_dev_t *d, uint64_t lba, unsigned count_, void *buf, blk_done_fn done, void *ctx)
@@ -121,6 +139,10 @@ int blk_read_async(blk_dev_t *d, uint64_t lba, unsigned count_, void *buf, blk_d
     uint64_t abs = lba;
     if (!in_range(d, lba, count_) || !buf || !done) return -1;
     w = resolve(d, &abs);
+    if (w->read_async) {
+        if (blk_authority_enter(d,0))return -1;
+        blk_authority_leave(d,0,0);
+    }
     if (w->read_async && w->read_async(w, abs, count_, buf, done, ctx) == 0) {
         d->reads += count_; ++d->read_ops;
         return 0;
@@ -135,6 +157,10 @@ int blk_write_async(blk_dev_t *d, uint64_t lba, unsigned count_, const void *buf
     uint64_t abs = lba;
     if (!d || !d->write || (d->flags & BLK_F_READONLY) || !in_range(d, lba, count_) || !buf || !done) return -1;
     w = resolve(d, &abs);
+    if (w->write_async) {
+        if (blk_authority_enter(d,1))return -1;
+        blk_authority_leave(d,0,0);
+    }
     if (w->write_async && w->write_async(w, abs, count_, buf, done, ctx) == 0) {
         d->writes += count_; ++d->write_ops;
         return 0;
@@ -162,7 +188,7 @@ uint64_t blk_kva_to_pa(const void *kva)
     return 0;
 }
 
-static inline uint64_t rdtsc64(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
+static inline __attribute__((unused)) uint64_t rdtsc64(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
 
 uint64_t blk_tsc_per_ms(void)
 {
