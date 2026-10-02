@@ -30,7 +30,9 @@ ESP_MIB = 96
 PAYLOAD_C = ["main.c", "platform.c", "console.c", "caps.c", "vmx.c", "ept.c", "devices.c", "video.c", "bios.c",
              "domain.c", "dos.c", "kdom.c", "pool.c", "lib.c",
              "../../csmwrap/video/cp437.c",
-             "../native_win98/ata_pio.c", "../native_win98/string_pio.c", "../native_win98/win98.c", "../native_win98/l1_vga.c"]
+             "../native_win98/ata_pio.c", "../native_win98/string_pio.c", "../native_win98/win98.c", "../native_win98/l1_vga.c",
+             "../native_win98/persistent_disk.c", "../native_win98/virtio_blk.c", "../native_win98/virtio_native.c",
+             "../native_win98/persistence.c"]
 PAYLOAD_ASM = ["entry.asm", "vmx_asm.asm"]
 CFLAGS = ["-m64", "-march=x86-64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin",
           "-fno-stack-protector", "-fno-pie", "-fno-pic", "-mno-red-zone", "-mgeneral-regs-only",

@@ -65,10 +65,31 @@ and checked afterward; external cc1/as/ld, standard includes and library closure
 are not completely pinned. Freestanding component compilation/linking is not
 a complete Supervisor build or actual hardware proof.
 
-Loader blob loading, the native domain's actual call/teardown and source-list
-selection still belong to the canonical owner. They are deliberately absent
-from this isolated component patch. Actual optional runtime admission, physical
-flush correctness, Windows boot, apps, cold-boot persistence and SMP acceptance
-are all false until the exact owned native execution and independent restart
-readback establish them. Existing default-source and historical host proofs
-retain their original epochs and qualifications.
+The integrated candidate adds strict `win98_persistence=yes|no` BOOT.INI
+policy, default no. Yes requires native Supervisor mode and the separate exact
+192-byte `SHZDOS/W98PERS.BIN`; malformed explicit input refuses launch. The
+Supervisor source list includes the transport and mapper. Native attachment
+follows idle ATA, VGA admission and successful VMCS initialization, before the
+domain becomes runnable. No WIN98CFG, shz_info or reserved-bit ABI is reused.
+
+The domain keeps the storage object and all DMA pages static for its entire
+Supervisor lifetime. An exact native domain/generation/VMCS/immutable CPU-owner
+binding guards each begin immediately before VM entry and end immediately after
+actual return, including VM-entry failure. Checked VMCS-load failures never
+begin execution. Terminal housekeeping closes new entry, requires no running
+epoch and matched entry/return counts (including a never-entered domain), then
+attempts final flush/reset once. Failure retains pages and refuses reinit;
+terminal domain state alone cannot authorize cleanup. Scheduler housekeeping
+also covers early load, begin, entry and end failures. Current native launch
+policy remains one CPU; these hooks make no full SMP lifetime claim.
+
+The 23 new actual host C controls exercise parser/default/refusal, the real
+native constructor/epoch/stop code, and real scheduler/run_slice ordering.
+Privileged CPU/VMX and native storage attachment/flush are callback models.
+The prior standalone 19-file component proof keeps its original source epoch.
+The source ABI and producer maps are integrated, but an outer producer still
+must bind the exact owned QEMU device/resource epoch before optional execution.
+Actual optional runtime admission, physical flush correctness, Windows boot,
+apps, cold-boot persistence and SMP acceptance remain false until exact owned
+native execution and independent restart readback establish them. Existing
+default-source and historical host proofs retain their original qualifications.

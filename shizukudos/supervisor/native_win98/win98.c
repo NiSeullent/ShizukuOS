@@ -7,6 +7,7 @@
 #include "ata_pio.h"
 #include "string_pio.h"
 #include "l1_vga.h"
+#include "persistence.h"
 #include "../src/console.h"
 #include "../src/cpu.h"
 #include "../src/devices.h"
@@ -21,6 +22,16 @@ static uint8_t *absent_lapic;
 #define W98_ABSENT_LAPIC_GPA 0xfee00000u
 static uint64_t last_render;
 static w98_l1_vga_t vga;
+/* Never recycled during this Supervisor lifetime, including uncertain reset.
+ * The nested virtio object retains all selected device DMA pages. */
+static w98_persistence_t persistence;
+static struct {
+    domain_t *domain;
+    shz_info_t *info;
+    uint64_t vmcs, entered, returned;
+    uint32_t owner_cpu, generation, running, closing, finalized;
+    int finish_result;
+} persistence_epoch;
 static const shz_blob_t *vga_blob(const shz_info_t *info,const char *name,int *error)
 {
     const shz_blob_t *found=0;
@@ -77,6 +88,73 @@ static int win98_vga_init(domain_t *d,shz_info_t *info,const shz_caps_t *caps)
     return w98_l1_vga_init(&vga,(const w98_vga_config_t *)(uintptr_t)c->base,c->size,
         (const uint8_t *)(uintptr_t)r->base,r->size,&ops);
 }
+static int persistence_binding(const domain_t *d)
+{
+    return d && d==w98 && d==persistence_epoch.domain && d==&g_dom[SHZ_DOM_WIN98] &&
+        d->id==SHZ_DOM_WIN98 && d->kind==DK_WIN98 && d->generation==persistence_epoch.generation &&
+        __atomic_load_n(&d->vc.cpu_binding_valid,__ATOMIC_ACQUIRE)==1 &&
+        d->vc.domain_id==SHZ_DOM_WIN98 && d->vc.vmcs_pa==persistence_epoch.vmcs &&
+        d->vc.owner_cpu==persistence_epoch.owner_cpu;
+}
+int win98_execution_begin(domain_t *d)
+{
+    uint32_t idle=0;
+    if(d && d->kind!=DK_WIN98)return 0;
+    if(!persistence.device.owned)return 0; /* unchanged RAM baseline */
+    if(!persistence_binding(d) || d->state!=SHZ_DS_RUNNABLE ||
+       __atomic_load_n(&persistence_epoch.closing,__ATOMIC_ACQUIRE) ||
+       persistence_epoch.entered==~0ull || persistence_epoch.returned!=persistence_epoch.entered ||
+       !__atomic_compare_exchange_n(&persistence_epoch.running,&idle,1,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return -1;
+    if(!persistence_binding(d) || d->state!=SHZ_DS_RUNNABLE ||
+       __atomic_load_n(&persistence_epoch.closing,__ATOMIC_ACQUIRE)){
+        __atomic_store_n(&persistence_epoch.running,0,__ATOMIC_RELEASE);return -1;
+    }
+    ++persistence_epoch.entered;return 0;
+}
+int win98_execution_end(domain_t *d)
+{
+    if(d && d->kind!=DK_WIN98)return 0;
+    if(!persistence.device.owned)return 0;
+    if(!persistence_binding(d) || !__atomic_load_n(&persistence_epoch.running,__ATOMIC_ACQUIRE) ||
+       !persistence_epoch.entered || persistence_epoch.returned!=persistence_epoch.entered-1)return -1;
+    persistence_epoch.returned=persistence_epoch.entered;
+    __atomic_store_n(&persistence_epoch.running,0,__ATOMIC_RELEASE);return 0;
+}
+static int win98_persistence_finalize(void)
+{
+    uint32_t virgin=0;domain_t *d=persistence_epoch.domain;
+    if(!persistence.device.owned)return 0;
+    if(!persistence_binding(d) || (d->state!=SHZ_DS_FAILED && d->state!=SHZ_DS_EXITED))return -1;
+    /* Close new entry first; an entry already in flight must return before
+     * finishing. The later begin recheck cannot race a device flush into L2. */
+    __atomic_store_n(&persistence_epoch.closing,1,__ATOMIC_RELEASE);
+    if(__atomic_load_n(&persistence_epoch.running,__ATOMIC_ACQUIRE) ||
+       persistence_epoch.returned!=persistence_epoch.entered)return -1;
+    if(!__atomic_compare_exchange_n(&persistence_epoch.finalized,&virgin,1,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return persistence_epoch.finish_result;
+    persistence_epoch.finish_result=w98_persistence_finish(&persistence);
+    if(!persistence.device.reset_acknowledged)persistence_epoch.finish_result=-1;
+    if(persistence_epoch.finish_result){
+        d->state=SHZ_DS_FAILED;persistence_epoch.info->domains[d->id].state=SHZ_DS_FAILED;
+        log_capture(persistence_epoch.info->domains[d->id].error,sizeof persistence_epoch.info->domains[d->id].error,
+            "persistence final flush/reset failed; static DMA retained");
+    }
+    kprintf("W98PERSIST stopped entered=%llu returned=%llu flush-reset-result=%d reset-ack=%u static-DMA-retained=1 coldboot-unverified\n",
+        persistence_epoch.entered,persistence_epoch.returned,persistence_epoch.finish_result,persistence.device.reset_acknowledged);
+    return persistence_epoch.finish_result;
+}
+static int win98_persistence_init(domain_t *d,shz_info_t *info,const shz_caps_t *caps)
+{
+    int error=0;const shz_blob_t *c=vga_blob(info,"W98PERS.BIN",&error);
+    if(error)return -1;
+    if(!c)return 0;
+    if(!caps->hypervisor_bit || c->size!=sizeof(w98_persist_config_t) ||
+       (c->base&7) || c->base>~0ull-c->size || !d->vc.vmcs_pa || (d->vc.vmcs_pa&4095) ||
+       __atomic_load_n(&d->vc.cpu_binding_valid,__ATOMIC_ACQUIRE)!=1 || d->vc.domain_id!=SHZ_DOM_WIN98)return -1;
+    if(w98_persistence_attach_native(&persistence,&ata,(const w98_persist_config_t *)(uintptr_t)c->base,c->size,info))return -1;
+    persistence_epoch.domain=d;persistence_epoch.info=info;persistence_epoch.vmcs=d->vc.vmcs_pa;
+    persistence_epoch.owner_cpu=d->vc.owner_cpu;persistence_epoch.generation=d->generation;
+    return 0;
+}
 /* Passive fixed ring: no control, register, memory or delivery writes. */
 typedef struct {
     uint64_t sequence,rip,cs_base,cr0,cr3,rsp,qual,rax,rdx;
@@ -127,6 +205,7 @@ static void ata_irq(void *unused)
 int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
 {
     domain_t *d=&g_dom[SHZ_DOM_WIN98];vmx_cfg_t cfg;uint8_t *ram;
+    if(persistence.device.owned){log_capture(info->last_error,sizeof info->last_error,"owned persistence DMA lifetime remains retained");return -1;}
     rom=find_rom(info);
     if(!(info->loader_flags&SHZ_LOADER_NATIVE_WIN98) || !rom || rom->size!=W98_ROM_BYTES ||
        (rom->base&4095) || !info->guest_ram_base || (info->guest_ram_base&4095) ||
@@ -174,6 +253,9 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
     cfg.mode=VMODE_REAL;cfg.eptp=ept_pointer(&d->ept);cfg.vpid=SHZ_DOM_WIN98;
     cfg.cs_sel=0xf000;cfg.rip=0xfff0;cfg.rsp=0;cfg.cr3=0;
     if(vmx_vcpu_init(&d->vc,info,caps,&cfg)) return -1;
+    if(win98_persistence_init(d,info,caps)){
+        log_capture(info->last_error,sizeof info->last_error,"explicit persistence device/member admission failed; no RAM fallback");return -1;
+    }
     w98=d;d->state=SHZ_DS_RUNNABLE;
     info->domains[d->id].kind=d->kind;info->domains[d->id].generation=d->generation;info->domains[d->id].state=d->state;
     kprintf("SHZ: real Win98 VMCS created RAM=%lluMiB SeaBIOS=%llu owned ATA=%llu bytes (boot unverified)\n",d->ram_size>>20,rom->size,ata.bytes);
@@ -348,7 +430,8 @@ int win98_ready(domain_t *d,uint64_t now)
 }
 void win98_housekeeping(void)
 {
-    if(!w98 || w98->state==SHZ_DS_FAILED || w98->state==SHZ_DS_EXITED) return;
+    if(!w98)return;
+    if(w98->state==SHZ_DS_FAILED || w98->state==SHZ_DS_EXITED){(void)win98_persistence_finalize();return;}
     const dev_native_observation_t *o=dev_native_observation();
     if(!devices_emitted && o && o->pit2_restored_after_terminal && !o->pit2_interval_open && (rdtsc()-o->start_tsc)/G.tsc_hz>=10)
         device_evidence(); /* observed terminal read followed by post-calibration port61 restore */

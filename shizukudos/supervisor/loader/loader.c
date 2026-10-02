@@ -38,6 +38,7 @@
 #include "images.h"
 #include "../native_win98/config.h"
 #include "../native_win98/l1_vga.h"
+#include "../native_win98/persistence_config.h"
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 /* A real absolute address keeps a base-relocation section in the PE image. */
@@ -1230,6 +1231,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     if(g_policy.win98_vga && g_policy.mode!=BOOT_MODE_SUPERVISOR){
         say("REFUSED: explicit native VGA policy cannot switch boot mode.\n");return EFI_INVALID_PARAMETER;
     }
+    if(g_policy.win98_persistence && g_policy.mode!=BOOT_MODE_SUPERVISOR){
+        say("REFUSED: explicit persistence policy cannot switch boot mode.\n");return EFI_INVALID_PARAMETER;
+    }
     if (g_policy.mode == BOOT_MODE_CSM)
         return csm_boot(image, bs, &g_policy, "mode=csm");
 
@@ -1304,6 +1308,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     if(g_policy.win98_vga && !native_win98){
         say("REFUSED: explicit VGA requires installed-Win98 opt-in config.\n");return EFI_INVALID_PARAMETER;
     }
+    if(g_policy.win98_persistence && !native_win98){
+        say("REFUSED: explicit persistence requires installed-Win98 opt-in config.\n");return EFI_INVALID_PARAMETER;
+    }
 
     /* 2. Display. */
     if (EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) || !gop ||
@@ -1344,13 +1351,15 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     {
         static const struct { const char *name; uint64_t max; } wanted[] = {
             {"KERNEL32.BIN", 8ull << 20}, {"KERNEL64.BIN", 16ull << 20}, {"WIN64.IMG", 64ull << 20}, {"SEABIOS.BIN", W98_ROM_BYTES},
-            {"VGACFG.BIN",sizeof(w98_vga_config_t)}, {"VGAROM.BIN",W98_VGA_ROM_BYTES}};
+            {"VGACFG.BIN",sizeof(w98_vga_config_t)}, {"VGAROM.BIN",W98_VGA_ROM_BYTES},
+            {"W98PERS.BIN",sizeof(w98_persist_config_t)}};
         size_t w, slot = 0;
         for (w = 0; w < sizeof wanted / sizeof wanted[0]; ++w) {
             uint64_t base = 0, size = 0;
             size_t k;
             if (w == 3 && !native_win98) continue;
-            if (w >= 4 && !g_policy.win98_vga) continue;
+            if ((w == 4 || w == 5) && !g_policy.win98_vga) continue;
+            if (w == 6 && !g_policy.win98_persistence) continue;
             status = load_file(image, bs, wanted[w].name, &base, &size, wanted[w].max);
             if (status == EFI_NOT_FOUND && w < 4 && (w != 3 || !native_win98))
                 continue;
@@ -1364,6 +1373,10 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
             if((w==4 && size!=sizeof(w98_vga_config_t)) || (w==5 && size!=W98_VGA_ROM_BYTES)){
                 say("REFUSED: exact explicit VGA binding/ROM extents required.\n");return EFI_INVALID_PARAMETER;
             }
+            if(w==6 && size!=sizeof(w98_persist_config_t)){
+                say("REFUSED: exact separate 192-byte persistence binding required.\n");return EFI_INVALID_PARAMETER;
+            }
+            if(slot>=SHZ_MAX_BLOBS){say("REFUSED: Supervisor named blob slots exhausted.\n");return EFI_INVALID_PARAMETER;}
             for (k = 0; wanted[w].name[k] && k < 15; ++k)
                 g_blobs[slot].name[k] = wanted[w].name[k];
             g_blobs[slot].base = base;
