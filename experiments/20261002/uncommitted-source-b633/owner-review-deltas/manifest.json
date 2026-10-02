@@ -1,0 +1,76 @@
+[
+  {
+    "cohort": "boot-site",
+    "origin_worktree": "/root/Win98-Modern-boot",
+    "base_commit": "3a9f0c4bc840075971797edaa42fdb65f1672cab",
+    "patch": "experiments/20261002/uncommitted-source-b633/owner-review-deltas/boot-site.patch",
+    "bytes": 25930,
+    "sha256": "73719fa81ff48ff3890d507bfbcebff629cd190dc9d79d879c6e9524985e6a16",
+    "files": [
+      {
+        "path": "site/README.md",
+        "sha256": "cbbc6b59e87d54e89544c2c538b57e5b47fe383a24e7eecd93a80a79760f204d"
+      },
+      {
+        "path": "site/authorship/README.md",
+        "sha256": "206c3a762a2f6c5db74e71b300f5cf9463e2dde1d58aade8eda885480a9fad44"
+      },
+      {
+        "path": "site/authorship/evidence.json",
+        "sha256": "72e51a8e6d40d52bd960612477e85f17b29820a75538c37b983ce1f3691b3044"
+      },
+      {
+        "path": "site/authorship/handoff.html",
+        "sha256": "29e0a603fb9d4a590bdb49f35c1aebe9dbced85cc11d1fa7645c76fb692d3f4c"
+      },
+      {
+        "path": "site/deploy/m98-locations.conf",
+        "sha256": "e5e4cd76b9aad82264bb63101edded8fc95f29251529f89f633951a26dbb86c9"
+      },
+      {
+        "path": "site/deploy/publish_static.py",
+        "sha256": "1f5a9a867540559f8d0e6a792560731cfd89850e8dcbfc58573da1e4205df34d"
+      },
+      {
+        "path": "site/en/index.html",
+        "sha256": "243745dd64e04901676e2d40828d692fe63f41270e1697f39ae5e0fc13957446"
+      },
+      {
+        "path": "site/index.html",
+        "sha256": "3534673d4427d341c89233256ac2c0eb42ed3af454937fbbcf8a10d2b034f6e7"
+      }
+    ],
+    "activation": "pending original owner review; not applied"
+  },
+  {
+    "cohort": "smp-memory",
+    "origin_worktree": "/root/Win98-Modern-smp-memory-163f-20261002",
+    "base_commit": "a269fb5f91a0298453bc40abbb6c5fc2765d136e",
+    "patch": "experiments/20261002/uncommitted-source-b633/owner-review-deltas/smp-memory.patch",
+    "bytes": 27507,
+    "sha256": "1f34a2f7644716d2a27b407821009a8de8c2fb00112168665a07379fe2f9ab6a",
+    "files": [
+      {
+        "path": "shizukudos/kernel64/cpu_bringup.c",
+        "sha256": "ed491e7bb2ab89a03c9473ca23e147dc1f36144f5c316eff4072289820702128"
+      },
+      {
+        "path": "shizukudos/kernel64/cpu_memory_owner.h",
+        "sha256": "93b058070dc9c393e781e4edd8cf3363521747fd8855ffdae918da4e32144e54"
+      },
+      {
+        "path": "shizukudos/kernel64/mem.c",
+        "sha256": "7b158b73a29efb23d94d34257bdb9dff721f8d4eeb70e6dfb064850d113800f8"
+      },
+      {
+        "path": "shizukudos/tests/run_k64_ap_bringup.py",
+        "sha256": "9391e6f28cc5110d2652e11201272bb2226de075529f869135b64d3961ca1e94"
+      },
+      {
+        "path": "shizukudos/tests/test_k64_pmm_owner.c",
+        "sha256": "8711e4c20874896ae255cf2cdb2f6f4bba00457cf3f69fd082ba5f52e92cce6c"
+      }
+    ],
+    "activation": "pending original owner review; not applied"
+  }
+]

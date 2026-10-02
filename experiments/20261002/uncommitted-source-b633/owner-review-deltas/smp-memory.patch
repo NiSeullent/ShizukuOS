@@ -1,0 +1,515 @@
+diff --git a/shizukudos/kernel64/cpu_bringup.c b/shizukudos/kernel64/cpu_bringup.c
+index b3aa05f..eafde6f 100644
+--- a/shizukudos/kernel64/cpu_bringup.c
++++ b/shizukudos/kernel64/cpu_bringup.c
+@@ -6,6 +6,7 @@
+ #include "cpu_firmware.h"
+ #include "cpu_memory_owner.h"
+ #include "cpu_arch_bringup.h"
++#include "cpu_memory_stress.h"
+ #include "pci.h"
+ extern uint64_t arch_timer_irqs(void);
+ static shz_cpu_firmware_t firmware;
+@@ -139,6 +140,8 @@ static uint32_t work_hash(unsigned cpu,unsigned loops)
+                 else jobs[j].bsp_seen=1;
+             }
+         }
++        if(i==(cpu?750000u:1250000u) && k64_cmdline_has("shz.memory=test"))
++            if(shz_cpu_memory_stress(cpu)) shz_cpu_arch_fault(cpu);
+     }
+     return value;
+ }
+@@ -245,6 +248,7 @@ void shz_cpu_bringup_verify(void)
+            wait_for(&jobs[0].wake,i) || wait_for(&jobs[0].verify,i)) bad=1;
+     }
+     if(canary!=0x534d50415053544bull) bad=1;
++    if(k64_cmdline_has("shz.memory=test")) shz_cpu_memory_stress_report();
+ report:
+     for(unsigned i=0;i<count;i++) {
+         bad+=__atomic_load_n(&jobs[i].bad,__ATOMIC_ACQUIRE);
+diff --git a/shizukudos/kernel64/cpu_memory_owner.h b/shizukudos/kernel64/cpu_memory_owner.h
+index edc0909..b16fbd2 100644
+--- a/shizukudos/kernel64/cpu_memory_owner.h
++++ b/shizukudos/kernel64/cpu_memory_owner.h
+@@ -2,9 +2,10 @@
+ #ifndef SHZ_CPU_MEMORY_OWNER_H
+ #define SHZ_CPU_MEMORY_OWNER_H
+ #include "k64.h"
+-/* Read-only Task1 admission observer. BSP uses this with IRQs disabled before
+- * AP release; APs do not allocate, free or mutate page tables in this phase.
+- * The real bootinfo excludes initrd reservations; the PMM also excludes retained
+- * firmware holes. This is not a cross-CPU allocator synchronization API. */
++/* Read-only serialized allocation observer. Requires actual allocation
++ * provenance, excludes bootinfo initrd/retained holes and rejects unknown CPUs.
++ * This observes live state only; it does not pin a frame or supply page-table
++ * mutation, translation shootdown or lifetime ownership. Admission callers
++ * keep their table/resource allocations stable throughout validation. */
+ int shz_cpu_pmm_page_owned(uint64_t pa,const shz_bootinfo_t *boot);
+ #endif
+diff --git a/shizukudos/kernel64/mem.c b/shizukudos/kernel64/mem.c
+index db20da8..9133cd3 100644
+--- a/shizukudos/kernel64/mem.c
++++ b/shizukudos/kernel64/mem.c
+@@ -14,6 +14,7 @@
+  */
+ #include "k64.h"
+ #include "cpu_memory_owner.h"
++#include "mem_lock.h"
+ #ifdef SHZ_STANDALONE
+ #include "standalone/memholes.h"
+ #endif
+@@ -31,6 +32,10 @@ static unsigned hole_count;
+ #endif
+ 
+ static uint8_t page_map[MAX_PAGES / 8];
++/* Unavailable bits include firmware/initrd reservations. Only allocation APIs
++ * set these live provenance bits; a reserved frame can never be freed. */
++static uint8_t page_allocated[MAX_PAGES / 8];
++static shz_mem_lock_t pmm_lock,heap_lock;
+ static uint64_t pmm_pages, pmm_free_pages, pmm_hint;
+ static uint64_t kpml4;
+ static uint64_t ram_top;
+@@ -41,52 +46,62 @@ uint64_t kernel_pml4(void) { return kpml4; }
+ static int bit_get(uint64_t i) { return page_map[i >> 3] & (1u << (i & 7)); }
+ static void bit_set(uint64_t i) { page_map[i >> 3] |= (uint8_t)(1u << (i & 7)); }
+ static void bit_clr(uint64_t i) { page_map[i >> 3] &= (uint8_t)~(1u << (i & 7)); }
++static int allocation_get(uint64_t i) { return page_allocated[i>>3]&(1u<<(i&7)); }
++static void allocation_set(uint64_t i) { page_allocated[i>>3]|=(uint8_t)(1u<<(i&7)); }
++static void allocation_clear(uint64_t i) { page_allocated[i>>3]&=(uint8_t)~(1u<<(i&7)); }
+ 
+ int shz_cpu_pmm_page_owned(uint64_t pa,const shz_bootinfo_t *bi)
+ {
+-    uint64_t i;
++    uint64_t i;int owned=0;shz_mem_guard_t guard;
+     if(!bi || pa<PMM_BASE || (pa&(PAGE_SIZE-1)) || ram_top<PAGE_SIZE || pa>ram_top-PAGE_SIZE)
+         return 0;
+     i=(pa-PMM_BASE)/PAGE_SIZE;
+-    if(i>=pmm_pages || !bit_get(i)) return 0;
++    guard=shz_mem_lock_enter(&pmm_lock);if(!guard.valid) return 0;
++    if(i>=pmm_pages || !bit_get(i) || !allocation_get(i)) goto done;
+     /* page_map marks both allocations and initial reservations as unavailable.
+      * Only allocations can authorize a table: exclude every reserved overlap. */
+     if(bi->initrd_size && (bi->initrd_size>UINT64_MAX-bi->initrd_gpa ||
+-       (pa<bi->initrd_gpa+bi->initrd_size && bi->initrd_gpa<pa+PAGE_SIZE))) return 0;
++       (pa<bi->initrd_gpa+bi->initrd_size && bi->initrd_gpa<pa+PAGE_SIZE))) goto done;
+ #ifdef SHZ_STANDALONE
+     for(unsigned h=0;h<hole_count;h++)
+-        if(pa<hole_end[h] && hole_gpa[h]<pa+PAGE_SIZE) return 0;
++        if(pa<hole_end[h] && hole_gpa[h]<pa+PAGE_SIZE) goto done;
+ #endif
+-    return 1;
++    owned=1;
++done:
++    shz_mem_lock_leave(&pmm_lock,guard);return owned;
+ }
+ 
+ uint64_t pmm_alloc(void)
+ {
+-    uint64_t f = irq_save(), n, i;
++    uint64_t n, i;const shz_mem_guard_t guard=shz_mem_lock_enter(&pmm_lock);
++    if(!guard.valid) return 0;
+     for (n = 0; n < pmm_pages; ++n) {
+         i = (pmm_hint + n) % pmm_pages;
+         if (!bit_get(i)) {
+             bit_set(i);
++            allocation_set(i);
+             pmm_hint = i + 1;
+             --pmm_free_pages;
+-            irq_restore(f);
++            shz_mem_lock_leave(&pmm_lock,guard);
+             memset((void *)p2v(PMM_BASE + i * PAGE_SIZE), 0, PAGE_SIZE);
+             return PMM_BASE + i * PAGE_SIZE;
+         }
+     }
+-    irq_restore(f);
++    shz_mem_lock_leave(&pmm_lock,guard);
+     return 0;
+ }
+ 
+ void pmm_free(uint64_t pa)
+ {
+-    uint64_t f = irq_save(), i;
++    const shz_mem_guard_t guard=shz_mem_lock_enter(&pmm_lock);uint64_t i;
++    KASSERT(guard.valid);
+     KASSERT(pa >= PMM_BASE && !(pa & 0xfff));
+     i = (pa - PMM_BASE) / PAGE_SIZE;
+-    KASSERT(i < pmm_pages && bit_get(i));       /* double free or foreign page */
++    KASSERT(i < pmm_pages && bit_get(i) && allocation_get(i)); /* live allocation only */
+     bit_clr(i);
++    allocation_clear(i);
+     ++pmm_free_pages;
+-    irq_restore(f);
++    shz_mem_lock_leave(&pmm_lock,guard);
+ }
+ 
+ /* A run of n physically contiguous zeroed pages (kernel stacks, the scheduler's thread table), searched top-down so the runs stay
+@@ -96,10 +111,11 @@ static uint64_t contig_hint;
+ 
+ uint64_t pmm_alloc_contig(unsigned n)
+ {
+-    uint64_t f, i, run, start, base = 0;
++    uint64_t i, run, start, base = 0;shz_mem_guard_t guard;
+     unsigned pass;
+     if (!n) return 0;
+-    f = irq_save();
++    guard=shz_mem_lock_enter(&pmm_lock);if(!guard.valid) return 0;
++    if(n>pmm_pages) { shz_mem_lock_leave(&pmm_lock,guard);return 0; }
+     for (pass = 0; pass < 2 && !base; ++pass) {
+         start = (!pass && contig_hint && contig_hint <= pmm_pages) ? contig_hint : pmm_pages;
+         run = 0;
+@@ -110,33 +126,38 @@ uint64_t pmm_alloc_contig(unsigned n)
+             if (++run == n) { base = i + 1; break; }                                        /* base is stored +1: 0 means none */
+         }
+     }
+-    if (!base) { irq_restore(f); return 0; }
++    if (!base) { shz_mem_lock_leave(&pmm_lock,guard); return 0; }
+     --base;
+-    for (i = 0; i < n; ++i) bit_set(base + i);
++    for (i = 0; i < n; ++i) { bit_set(base + i);allocation_set(base+i); }
+     pmm_free_pages -= n;
+     contig_hint = base;
+-    irq_restore(f);
++    shz_mem_lock_leave(&pmm_lock,guard);
+     memset((void *)p2v(PMM_BASE + base * PAGE_SIZE), 0, (size_t)n * PAGE_SIZE);
+     return PMM_BASE + base * PAGE_SIZE;
+ }
+ 
+ void pmm_free_contig(uint64_t pa, unsigned n)
+ {
+-    uint64_t f, i;
++    uint64_t i,j;const shz_mem_guard_t guard=shz_mem_lock_enter(&pmm_lock);
++    KASSERT(guard.valid);
+     KASSERT(pa >= PMM_BASE && !(pa & 0xfff));
+-    f = irq_save();
+     i = (pa - PMM_BASE) / PAGE_SIZE;
+-    KASSERT(i + n <= pmm_pages);
++    KASSERT(i<=pmm_pages && n<=pmm_pages-i);
++    /* Validate the entire subrun before changing any state. Valid partial
++     * allocation frees and the previous valid zero-count operation remain. */
++    for(j=0;j<n;j++) KASSERT(bit_get(i+j) && allocation_get(i+j));
+     for (; n; --n, ++i) {
+-        KASSERT(bit_get(i));
+         bit_clr(i);
++        allocation_clear(i);
+         ++pmm_free_pages;
+     }
+     if (i > contig_hint) contig_hint = i;
+-    irq_restore(f);
++    shz_mem_lock_leave(&pmm_lock,guard);
+ }
+ 
+-uint64_t pmm_free_count(void) { return pmm_free_pages; }
++uint64_t pmm_free_count(void)
++{ const shz_mem_guard_t g=shz_mem_lock_enter(&pmm_lock);if(!g.valid) return 0;
++  const uint64_t n=pmm_free_pages;shz_mem_lock_leave(&pmm_lock,g);return n; }
+ uint64_t pmm_total_count(void) { return pmm_pages; }
+ 
+ /* ---------------------------------------------------------------- paging */
+@@ -306,13 +327,14 @@ static void heap_init(void)
+ 
+ void *kmalloc(size_t n)
+ {
+-    uint64_t f = irq_save();
++    if(n>SIZE_MAX-15) return 0;
++    const shz_mem_guard_t guard=shz_mem_lock_enter(&heap_lock);if(!guard.valid) return 0;
+     struct hblock *b;
+     n = (n + 15) & ~(size_t)15;
+     for (b = heap_head; b; b = b->next) {
+         KASSERT(b->magic == HMAGIC);
+         if (!b->used && b->size >= n) {
+-            if (b->size >= n + sizeof *b + 32) {
++            if (b->size - n >= sizeof *b + 32) {
+                 struct hblock *rest = (struct hblock *)((uint8_t *)(b + 1) + n);
+                 rest->size = b->size - n - sizeof *b;
+                 rest->used = 0;
+@@ -323,11 +345,11 @@ void *kmalloc(size_t n)
+             }
+             b->used = 1;
+             heap_used_bytes += b->size;
+-            irq_restore(f);
++            shz_mem_lock_leave(&heap_lock,guard);
+             return b + 1;
+         }
+     }
+-    irq_restore(f);
++    shz_mem_lock_leave(&heap_lock,guard);
+     return 0;
+ }
+ 
+@@ -340,10 +362,15 @@ void *kzalloc(size_t n)
+ 
+ void kfree(void *p)
+ {
+-    uint64_t f = irq_save();
++    if(!p) return;
++    const shz_mem_guard_t guard=shz_mem_lock_enter(&heap_lock);KASSERT(guard.valid);
+     struct hblock *b, *n;
+-    if (!p) { irq_restore(f); return; }
+-    b = (struct hblock *)p - 1;
++    const uint64_t address=(uint64_t)p;
++    KASSERT(!(address&15) && address>=p2v(HEAP_PA)+sizeof *b && address<p2v(PMM_BASE));
++    /* Establish real free-list membership before reading a caller-derived
++     * header; a forged interior header or misaligned pointer is not a block. */
++    for(b=heap_head;b && b+1!=p;b=b->next) KASSERT(b->magic==HMAGIC);
++    KASSERT(b);
+     KASSERT(b->magic == HMAGIC && b->used);
+     b->used = 0;
+     heap_used_bytes -= b->size;
+@@ -352,10 +379,12 @@ void kfree(void *p)
+             n->size += sizeof *n + n->next->size;
+             n->next = n->next->next;
+         }
+-    irq_restore(f);
++    shz_mem_lock_leave(&heap_lock,guard);
+ }
+ 
+-size_t kheap_used(void) { return heap_used_bytes; }
++size_t kheap_used(void)
++{ const shz_mem_guard_t g=shz_mem_lock_enter(&heap_lock);if(!g.valid) return 0;
++  const size_t n=heap_used_bytes;shz_mem_lock_leave(&heap_lock,g);return n; }
+ size_t kheap_total(void) { return heap_total_bytes; }   /* HEAP_BYTES minus block headers and fenced firmware holes */
+ 
+ /* ---------------------------------------------------------------- init */
+@@ -386,6 +415,7 @@ void mem_init(const shz_bootinfo_t *bi)
+     pmm_pages = (ram_top - PMM_BASE) / PAGE_SIZE;
+     pmm_free_pages = pmm_pages;
+     memset(page_map, 0, sizeof page_map);
++    memset(page_allocated,0,sizeof page_allocated);
+     if (bi->initrd_size) {                      /* keep the initial RAM image out of the allocator */
+         first_initrd_page = (bi->initrd_gpa - PMM_BASE) / PAGE_SIZE;
+         last_initrd_page = (bi->initrd_gpa + bi->initrd_size - 1 - PMM_BASE) / PAGE_SIZE;
+diff --git a/shizukudos/tests/run_k64_ap_bringup.py b/shizukudos/tests/run_k64_ap_bringup.py
+index aa9aa59..fa56673 100644
+--- a/shizukudos/tests/run_k64_ap_bringup.py
++++ b/shizukudos/tests/run_k64_ap_bringup.py
+@@ -12,6 +12,8 @@ from pathlib import Path
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ PRODUCER = REPO / "shizukudos/tests/run_k64_native_firmware.py"
++FIXTURE_SHA = "6761e4cd35de1672406e01dc356303fa84773baf71096fe3fd3a15391f9fed3b"
++KNOWN_FAILURE = "K64 PMA FAIL: each low-priority policy phase executes useful CPU work"
+ 
+ 
+ def digest(path):
+@@ -44,6 +46,87 @@ def expected_hash(cpu, loops):
+     return value
+ 
+ 
++def admit_memory_component(args, built, before):
++    """Admit only the recorded singleton Core failure, retaining whole FAIL.
++
++    A terminal producer receipt exists only after both builds and all three
++    native runs. Check its complete artifacts, captured helpers and raw runs;
++    this grants no scheduler/UP/whole-kernel acceptance.
++    """
++    def require(condition, message):
++        if not condition:
++            raise SystemExit("known-failure component rejected: " + message)
++    require(args.memory_test and args.mode == "bringup" and args.cpus in (2, 4) and
++            args.accel == "kvm" and not args.expect_red, "only KVM AP-memory 2/4 profiles")
++    require(built.get("status") == "FAIL" and built.get("sources_unchanged") is True,
++            "terminal unchanged failed producer required")
++    require(before.get("shizukudos/kernel64/pma_tests.c") == FIXTURE_SHA, "fixture changed")
++    require(built.get("helper_execution") == "compile/exec of captured pre-import bytes; current closure checked before compiler" and
++            built.get("compiled_input_provenance") == {"mode": "fresh build from captured source/helper closure"} and
++            built.get("executed_helpers_sha256") == {name: before[name] for name in
++                ("shizukudos/tools/shzlib.py", "shizukudos/kbuild.py")}, "compiled helper/build provenance changed")
++    inputs = built.get("compiled_inputs_sha256", {})
++    require(len(inputs) == 3 and {Path(p).name for p in inputs} == {"KERNEL64S.BIN", "kernel64s.elf", "boot.elf"},
++            "complete compiled artifact set required")
++    for path, sha in inputs.items():
++        data = Path(path).read_bytes()
++        require(bool(data) and hashlib.sha256(data).hexdigest() == sha and
++                (not path.endswith(".elf") or data[:4] == b"\x7fELF"), "compiled artifact changed/incomplete")
++    tools = built.get("tools", {})
++    require(set(tools) == {"gcc", "nasm", "ld", "nm", "objcopy", "objdump", "cc1", "qemu", "bios", "python"},
++            "complete compiler/runtime tool set required")
++    require(all(digest(row["path"]) == row["sha256"] for row in tools.values()), "tool bytes changed")
++    proof = {}
++    build_log = args.receipt.resolve().parent / "build.log"
++    build_bytes = build_log.read_bytes()
++    require(not re.search(rb"(?:fatal error:|error:|undefined reference|compilation terminated)", build_bytes, re.I),
++            "compiler/build error present")
++    proof[str(build_log)] = hashlib.sha256(build_bytes).hexdigest()
++    runs = built.get("runs", [])
++    require(len(runs) == 3 and [(r.get("cpus"), r.get("firmware_enabled")) for r in runs] == [(2, True), (4, True), (4, False)],
++            "exact original firmware 2/4/off terminal runs required")
++    bin_path = next(p for p in inputs if p.endswith("KERNEL64S.BIN"))
++    stub_path = next(p for p in inputs if p.endswith("boot.elf"))
++    for index, row in enumerate(runs):
++        command = row["command"]
++        require(row.get("timed_out") is False and row.get("sources_and_inputs_unchanged") is True and
++                row.get("qemu_returncode") == (3 if index == 2 else 1) and
++                row.get("expected_behavior") is (index != 2), "original run failure/timeout/EXIT drift")
++        serial_arg = command[command.index("-serial") + 1]
++        require(serial_arg.startswith("file:"), "missing original serial file")
++        serial = Path(serial_arg[5:])
++        expected = [tools["qemu"]["path"], "-machine", "pc", "-bios", tools["bios"]["path"], "-accel", "kvm",
++                    "-cpu", "max", "-m", "256", "-smp", str(row["cpus"]), "-kernel", stub_path,
++                    "-initrd", bin_path, "-append", "shz.pma=test shz.smp=firmware-test" + (" smp=off" if index == 2 else ""),
++                    "-display", "none", "-monitor", "none", "-serial", serial_arg, "-no-reboot", "-device",
++                    "isa-debug-exit,iobase=0xf4,iosize=0x04"]
++        require(command == expected, "original machine/profile drift")
++        data = serial.read_bytes()
++        require(hashlib.sha256(data).hexdigest() == row["serial_sha256"], "original serial bytes changed")
++        text = data.decode("utf-8", errors="strict")
++        errors = re.findall(r"^.*(?:FAIL|PANIC|ASSERT|EXCEPTION).*$", text, re.M)
++        require(errors == ([KNOWN_FAILURE] if index == 2 else []), "additional/different failure")
++        require(re.findall(r"^SHZ-EXIT:(\d+)$", text, re.M) == ["1" if index == 2 else "0"] and
++                re.findall(r"^K64 PMA summary: failures=(\d+).* ready=0 live=2 cpus=1$", text, re.M) ==
++                ["1" if index == 2 else "0"], "original terminal summary/EXIT drift")
++        metadata = re.findall(r"SMP-FIRMWARE: retained=(\d+) original=(\d+) machine_ram=([0-9a-f]+) managed_ram=([0-9a-f]+)", text)
++        ownership = re.findall(r"SMP-FIRMWARE: test page_admitted=(\d+) reserved_reads=(\d+)", text)
++        if index == 2:
++            require(not metadata and not ownership and "SMP-BRINGUP:" not in text, "off profile unexpectedly activated")
++        else:
++            require(len(metadata) == len(ownership) == 1 and 1 <= int(metadata[0][0]) <= 64 and
++                    1 <= int(metadata[0][1]) <= 64 and int(metadata[0][2], 16) == 0x10000000 and
++                    int(metadata[0][3], 16) < 0x10000000 and ownership[0][0] == "1" and int(ownership[0][1]) > 0,
++                    "original firmware component did not pass")
++        stderr = serial.with_name(serial.name.replace(".serial.log", ".qemu.log"))
++        error_bytes = stderr.read_bytes()
++        require(not re.search(rb"(?:error:|fatal|failed|could not)", error_bytes, re.I), "original QEMU error")
++        proof[str(serial)] = row["serial_sha256"]
++        proof[str(stderr)] = hashlib.sha256(error_bytes).hexdigest()
++    return {"failure": KNOWN_FAILURE, "fixture_sha256": FIXTURE_SHA, "whole_status": "FAIL",
++            "terminal_build_artifacts_verified": True, "original_logs_sha256": proof}
++
++
+ def evaluate(text, rc, cpus):
+     workers = re.findall(r"SMP-AP CPU: cpu=(\d+) apic=(\d+) actual=(\d+) cr3=([0-9a-f]+) stack=([0-9a-f]+) "
+                          r"gdt=([0-9a-f]+) idt=([0-9a-f]+) tss=([0-9a-f]+) hash=([0-9a-f]+) loops=(\d+) "
+@@ -82,6 +165,9 @@ def main():
+     parser.add_argument("--out", type=Path, required=True)
+     parser.add_argument("--cpus", type=int, choices=(1, 2, 4), default=4)
+     parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm")
++    parser.add_argument("--memory-test", action="store_true")
++    parser.add_argument("--known-core-failure-component", action="store_true",
++                        help="only AP-memory KVM2/4 after exact singleton Core failure; overall result remains FAIL")
+     parser.add_argument("--mode",choices=("bringup","off","no-acpi","no-ipi","withhold-verify","return-ap"),default="bringup")
+     parser.add_argument("--expect-red", action="store_true", help="preserve missing-feature runtime RED, not a PASS")
+     args = parser.parse_args()
+@@ -90,7 +176,7 @@ def main():
+     receipt_bytes = args.receipt.read_bytes()
+     receipt_sha = hashlib.sha256(receipt_bytes).hexdigest()
+     built = json.loads(receipt_bytes)
+-    if built.get("status") != "PASS":
++    if built.get("status") != "PASS" and not args.known_core_failure_component:
+         raise SystemExit("producer whole-kernel firmware gate must pass before this AP execution")
+     evaluator_sha = digest(__file__)
+     before,kbuild = capture_compiled_sources()
+@@ -98,6 +184,7 @@ def main():
+         return {**kbuild.source_hashes(), str(PRODUCER.relative_to(REPO)): digest(PRODUCER)}
+     if before != built["sources_sha256"]:
+         raise SystemExit("complete compiled dependency closure differs from current sources")
++    admission = admit_memory_component(args, built, before) if args.known_core_failure_component else None
+     inputs = built["compiled_inputs_sha256"]
+     kernel = next(p for p in inputs if p.endswith("KERNEL64S.BIN"))
+     stub = next(p for p in inputs if p.endswith("boot.elf"))
+@@ -105,14 +192,15 @@ def main():
+     def stable():
+         return sources() == before and digest(__file__) == evaluator_sha and digest(args.receipt) == receipt_sha and \
+             all(digest(p) == h for p, h in inputs.items()) and \
+-            all(digest(row["path"]) == row["sha256"] for row in tools.values())
++            all(digest(row["path"]) == row["sha256"] for row in tools.values()) and \
++            (not admission or all(digest(p) == h for p, h in admission["original_logs_sha256"].items()))
+     if not stable():
+         raise SystemExit("compiled input/evaluator/tool bytes changed before launch")
+     serial = out / "serial.log"
+     option="bringup" if args.mode in ("off","no-acpi") else args.mode
+     command = [tools["qemu"]["path"], "-machine", "pc,acpi=off" if args.mode=="no-acpi" else "pc", "-bios", tools["bios"]["path"], "-accel", args.accel,
+                "-cpu", "max", "-m", "256", "-smp", str(args.cpus), "-kernel", stub, "-initrd", kernel,
+-               "-append", "shz.pma=test shz.smp="+option+(" smp=off" if args.mode=="off" else ""), "-display", "none", "-monitor", "none",
++               "-append", "shz.pma=test shz.smp="+option+(" smp=off" if args.mode=="off" else "")+(" shz.memory=test" if args.memory_test else ""), "-display", "none", "-monitor", "none",
+                "-serial", f"file:{serial}", "-no-reboot", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
+     start = time.monotonic()
+     try:
+@@ -127,6 +215,16 @@ def main():
+     observed_red = args.expect_red and not passed and not timeout and rc == 1 and "SHZ-EXIT:0\n" in text and \
+         evidence["worker_rows"] == evidence["ipi_rows"] == 0 and "backend pending integration" in text
+     mode_expected=passed
++    if args.memory_test and args.mode=="bringup":
++        memory=re.findall(r"SMP-MEM CPU: cpu=(\d+) actual=(\d+) rounds=(\d+) singles=(\d+) run_pages=(\d+) heaps=(\d+) IF=(\d+) bad=(\d+)",text)
++        total=re.findall(r"SMP-MEM summary: cpus=(\d+) ready=(\d+) complete=(\d+) pages=(\d+)/(\d+) heap=(\d+)/(\d+) overlap_rounds=(\d+) duplicate=(\d+) corrupt=(\d+) bad=(\d+) scheduler_cpus=1",text)
++        memory_ok=len(memory)==args.cpus and {int(row[0]) for row in memory}==set(range(args.cpus)) and len(total)==1
++        if memory_ok:
++            row=total[0]
++            memory_ok=row[:3]==(str(args.cpus),)*3 and row[3]==row[4] and row[5]==row[6] and row[7:]==("128","0","0","0")
++            for row in memory:
++                cpu=int(row[0]);memory_ok=memory_ok and row==(str(cpu),str(cpu),"128","128",str(128*(1+cpu%4)),"128","1","0")
++        mode_expected=passed and memory_ok;evidence["memory_rows"]=memory;evidence["memory_summary"]=total
+     healthy=not timeout and rc==1 and "SHZ-EXIT:0\n" in text
+     if args.mode=="off":
+         mode_expected=healthy and evidence["worker_rows"]==evidence["ipi_rows"]==0 and not evidence["resources"] and "SMP-FIRMWARE:" not in text
+@@ -142,8 +240,10 @@ def main():
+         mode_expected=healthy and not passed and bool(re.search(r"SMP-AP aborted: discovered=2 arch_online=1 state1=3 retained=1 retry=-2 error=-7",text))
+     valid = unchanged and not timeout and (observed_red if args.expect_red else mode_expected)
+     result = {"scope": "normal main AP bringup component; existing scheduler must still report1; not full SMP/Windows acceptance",
+-              "status": "RED" if observed_red else "PASS" if valid else "FAIL",
+-              "ap_component_pass":passed,"expected_behavior": valid,"mode":args.mode,"cpus": args.cpus, "command": command, "qemu_returncode": rc,
++              "status": "FAIL" if admission else "RED" if observed_red else "PASS" if valid else "FAIL",
++              "whole_acceptance": False, "known_failure_preserved": bool(admission), "known_failure_admission": admission,
++              "memory_component_pass": bool(valid and args.memory_test),
++              "ap_component_pass":passed,"expected_behavior": valid,"mode":args.mode,"memory_test":args.memory_test,"cpus": args.cpus, "command": command, "qemu_returncode": rc,
+               "timed_out": timeout, "elapsed_seconds": time.monotonic() - start, "actual_evidence": evidence,
+               "sources_sha256": before, "producer_receipt_sha256": receipt_sha, "evaluator_sha256": evaluator_sha,
+               "executed_helpers_sha256": {name:before[name] for name in ("shizukudos/kbuild.py","shizukudos/tools/shzlib.py")},
+diff --git a/shizukudos/tests/test_k64_pmm_owner.c b/shizukudos/tests/test_k64_pmm_owner.c
+index d47e456..4cf4b02 100644
+--- a/shizukudos/tests/test_k64_pmm_owner.c
++++ b/shizukudos/tests/test_k64_pmm_owner.c
+@@ -1,45 +1,14 @@
+ /* SPDX-License-Identifier: GPL-2.0-only
+- * Execute the actual PMM ownership observer against the real bitmap and
+- * reservation state. Unused privileged kernel functions are linker-discarded.
++ * Serialized observer regression entry: use the same actual allocator/provider
++ * host boundary as the concurrency control, rather than treating initial
++ * unavailable bits as caller allocation provenance. Historical20 checks remain
++ * frozen with their original source in the previous227-source AP milestone.
+  */
+-#include <stdio.h>
+-#include <stdlib.h>
+-#define SHZ_STANDALONE 1
+-#include "../kernel64/k64.h"
+-extern int shz_cpu_pmm_page_owned(uint64_t,const shz_bootinfo_t *) __attribute__((weak));
+-#include "../kernel64/mem.c"
+-static unsigned checks;
+-#define CHECK(x) do { ++checks; if(!(x)) { fprintf(stderr,"FAIL line%u: %s\n",__LINE__,#x); exit(1); } } while(0)
++#define main shz_memory_control_main
++#include "test_k64_memory_concurrency.c"
++#undef main
+ int main(void)
+ {
+-    int (*volatile owned)(uint64_t,const shz_bootinfo_t *)=shz_cpu_pmm_page_owned;
+-    shz_bootinfo_t bi={0};
+-    CHECK(owned!=0); /* Missing implementation is runtime RED, not a link failure. */
+-    pmm_pages=64; ram_top=PMM_BASE+pmm_pages*PAGE_SIZE;
+-    memset(page_map,0,sizeof page_map); hole_count=0;
+-    CHECK(!owned(PMM_BASE,&bi));
+-    bit_set(0); CHECK(owned(PMM_BASE,&bi));
+-    bit_clr(0); CHECK(!owned(PMM_BASE,&bi));
+-    bit_set(0); CHECK(!owned(PMM_BASE,0));
+-    CHECK(!owned(PMM_BASE-4096,&bi)); CHECK(!owned(PMM_BASE+1,&bi));
+-    CHECK(!owned(ram_top,&bi)); CHECK(!owned(UINT64_MAX-4095,&bi));
+-    bit_set(63); CHECK(owned(ram_top-4096,&bi));
+-    hole_count=1; hole_gpa[0]=PMM_BASE; hole_end[0]=PMM_BASE+4096;
+-    CHECK(!owned(PMM_BASE,&bi)); CHECK(owned(ram_top-4096,&bi));
+-    hole_gpa[0]=PMM_BASE+4095; hole_end[0]=PMM_BASE+8192;
+-    CHECK(!owned(PMM_BASE,&bi));
+-    hole_count=0;
+-    bi.initrd_gpa=PMM_BASE; bi.initrd_size=4096;
+-    CHECK(!owned(PMM_BASE,&bi)); CHECK(owned(ram_top-4096,&bi));
+-    bi.initrd_gpa=PMM_BASE+4095; bi.initrd_size=1;
+-    CHECK(!owned(PMM_BASE,&bi));
+-    bi.initrd_gpa=PMM_BASE-1; bi.initrd_size=2;
+-    CHECK(!owned(PMM_BASE,&bi));
+-    bi.initrd_gpa=UINT64_MAX-1; bi.initrd_size=4;
+-    CHECK(!owned(PMM_BASE,&bi));
+-    bi.initrd_gpa=PMM_BASE; bi.initrd_size=0;
+-    CHECK(owned(PMM_BASE,&bi));
+-    bit_clr(63); CHECK(!owned(ram_top-4096,&bi));
+-    printf("PASS actual PMM allocation/reservation ownership: %u checks\n",checks);
+-    return 0;
++    char *arguments[]={"pmm-owner","observer"};
++    return shz_memory_control_main(2,arguments);
+ }

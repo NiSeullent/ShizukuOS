@@ -58,6 +58,60 @@ def await_marker(serial, marker, proc, timeout):
     raise ValueError('Guest startup/input marker was not reached within the bounded timeout')
 
 
+def snapshot_failure(tools, qmp, serial, output, result):
+    """Best-effort bounded evidence, while the owned guest is still available."""
+    snapshot = {'qmp_available': qmp is not None, 'guest_stopped': False,
+                'captures': {}, 'errors': {}}
+    result['failure_snapshot'] = snapshot
+
+    def capture(name, operation):
+        try:
+            return True, operation()
+        except Exception as exc:
+            snapshot['errors'][name] = f'{type(exc).__name__}: {exc}'
+            return False, None
+
+    if qmp is None:
+        snapshot['errors']['qmp'] = 'QMP unavailable at the time of failure'
+    else:
+        # Each monitor read has a short socket deadline; guest memory is capped
+        # at the first MiB, including the IVT, real-mode stacks and VGA page.
+        if getattr(qmp, 'socket', None) is not None:
+            capture('qmp_timeout', lambda: qmp.socket.settimeout(2))
+        snapshot['guest_stopped'], _ = capture('stop', lambda: qmp.call('stop'))
+
+        def registers():
+            state = tools.cpu_state(qmp)
+            result['cpu_registers'] = state
+            path = output / 'failure-registers.txt'
+            path.write_text(state)
+            snapshot['captures']['cpu_registers'] = {'path': path.name}
+        capture('cpu_registers', registers)
+
+        raw_path = output / 'failure-screen.bin'
+        available, raw = capture('vga_raw', lambda: tools.read_guest_memory(qmp, 0xB8000, 4000, raw_path))
+        if available:
+            snapshot['captures']['vga_raw'] = {'path': raw_path.name, 'address': 0xB8000, 'size': 4000}
+
+            def screen_text():
+                screen = tools.decode_text_page(raw)
+                result['screen'] = screen
+                path = output / 'failure-screen.txt'
+                path.write_text('\n'.join(screen) + '\n')
+                snapshot['captures']['vga_text'] = {'path': path.name}
+            capture('vga_text', screen_text)
+
+        memory_path = output / 'failure-memory-000000-0fffff.bin'
+        available, _ = capture('low_memory', lambda: tools.read_guest_memory(qmp, 0, 1 << 20, memory_path))
+        if available:
+            snapshot['captures']['low_memory'] = {'path': memory_path.name, 'address': 0, 'size': 1 << 20}
+
+    def serial_text():
+        result['serial_text'] = serial.read_bytes().decode('ascii', 'replace')
+        snapshot['captures']['serial'] = {'path': serial.name}
+    capture('serial', serial_text)
+
+
 def boot(args, tools, disk, output, profile, write_command=None, existing=False):
     output.mkdir()
     serial = output / 'serial.log'
@@ -83,6 +137,7 @@ def boot(args, tools, disk, output, profile, write_command=None, existing=False)
     proc = None
     qmp = None
     quit_requested = False
+    failure = None
     with (output / 'qemu.stderr').open('wb') as errors:
         try:
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors)
@@ -140,20 +195,48 @@ def boot(args, tools, disk, output, profile, write_command=None, existing=False)
                     qmp.call('cont')
             qmp.call('quit')
             quit_requested = True
+        except BaseException as exc:
+            failure = exc
+            result.update(status='FAIL', error=str(exc), error_type=type(exc).__name__)
+            try:
+                snapshot_failure(tools, qmp, serial, output, result)
+            except BaseException as snapshot_exc:
+                result.setdefault('failure_snapshot', {}).setdefault('errors', {})['snapshot'] = (
+                    f'{type(snapshot_exc).__name__}: {snapshot_exc}')
+            raise
         finally:
-            if qmp:
-                qmp.close()
-            if proc:
+            try:
                 try:
-                    proc.wait(timeout=10 if quit_requested else 0.1)
-                except subprocess.TimeoutExpired:
-                    proc.terminate()
+                    if qmp:
+                        qmp.close()
+                finally:
                     try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=5)
-            sockets.cleanup()
+                        if proc:
+                            try:
+                                proc.wait(timeout=10 if quit_requested else 0.1)
+                            except subprocess.TimeoutExpired:
+                                proc.terminate()
+                                try:
+                                    proc.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    proc.kill()
+                                    proc.wait(timeout=5)
+                    finally:
+                        sockets.cleanup()
+            except BaseException as cleanup_exc:
+                if failure is None:
+                    raise
+                result['failure_snapshot']['errors']['cleanup'] = f'{type(cleanup_exc).__name__}: {cleanup_exc}'
+            finally:
+                if failure is not None:
+                    result.update(qemu_exit_code=proc.returncode if proc is not None else None,
+                                  seconds=round(time.monotonic() - started, 3))
+                    try:
+                        (output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+                    except BaseException:
+                        # An unwritable evidence directory cannot replace the
+                        # original startup/input exception being propagated.
+                        pass
     result.update(qemu_exit_code=proc.returncode, seconds=round(time.monotonic() - started, 3))
     if result['qemu_exit_code'] != 0:
         raise ValueError('QEMU did not exit cleanly after the owned test')
