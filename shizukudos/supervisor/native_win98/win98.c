@@ -8,6 +8,7 @@
 #include "string_pio.h"
 #include "l1_vga.h"
 #include "persistence.h"
+#include "native_device_gate.h"
 #include "../src/console.h"
 #include "../src/cpu.h"
 #include "../src/devices.h"
@@ -80,6 +81,7 @@ static int win98_vga_init(domain_t *d,shz_info_t *info,const shz_caps_t *caps)
     memset(&vga,0,sizeof vga);
     if(error)return -1;
     if(!c && !r)return 0;
+    c=w98_native_device_gate_blob("VGACFG.BIN");r=w98_native_device_gate_blob("VGAROM.BIN");
     if(!c || !r || !caps->hypervisor_bit || c->size!=sizeof(w98_vga_config_t) ||
        (c->base&7) || c->base>~0ull-c->size || r->base>~0ull-r->size)return -1;
     const w98_vga_config_t *binding=(const w98_vga_config_t *)(uintptr_t)c->base;
@@ -147,6 +149,7 @@ static int win98_persistence_init(domain_t *d,shz_info_t *info,const shz_caps_t 
     int error=0;const shz_blob_t *c=vga_blob(info,"W98PERS.BIN",&error);
     if(error)return -1;
     if(!c)return 0;
+    c=w98_native_device_gate_blob("W98PERS.BIN");if(!c)return -1;
     if(!caps->hypervisor_bit || c->size!=sizeof(w98_persist_config_t) ||
        (c->base&7) || c->base>~0ull-c->size || !d->vc.vmcs_pa || (d->vc.vmcs_pa&4095) ||
        __atomic_load_n(&d->vc.cpu_binding_valid,__ATOMIC_ACQUIRE)!=1 || d->vc.domain_id!=SHZ_DOM_WIN98)return -1;
@@ -246,6 +249,9 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
     G.info=info;G.vc=&d->vc;G.ram_base=d->ram_base;G.ram_size=d->ram_size;G.tsc_hz=info->tsc_hz;
     dev_init(info->tsc_hz,d->ram_size);dev_native_win98_enable();dev_uart_tx_hook=uart_tx;
     if(w98_ata_init(&ata,(uint8_t *)(uintptr_t)info->disk_base,info->disk_size,ata_irq,0)) return -1;
+    if(w98_native_device_gate(info,caps)){
+        log_capture(info->last_error,sizeof info->last_error,"optional native device epoch policy/grant refused before device initialization");return -1;
+    }
     if(win98_vga_init(d,info,caps)) {
         log_capture(info->last_error,sizeof info->last_error,"explicit VGA device/ROM/PAT admission failed");return -1;
     }
