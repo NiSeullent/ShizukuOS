@@ -96,7 +96,7 @@ class Expectations:
     """Immutable byte expectations, never a current process/resource grant."""
     def __init__(self, vga, rom, storage, raw_bars):
         need((vga is None) == (rom is None), 'VGA config/ROM pair required')
-        need(type(raw_bars) is dict and set(raw_bars) == ({1} if vga is not None else set()) | ({2} if storage is not None else set()), 'exact selected roles required')
+        need(type(raw_bars) is dict and all(type(role) is int for role in raw_bars) and set(raw_bars) == ({1} if vga is not None else set()) | ({2} if storage is not None else set()), 'exact selected roles required')
         need(vga is not None or storage is not None, 'optional device selection required')
         self.hashes = (digest(vga) if vga is not None else bytes(32), digest(storage) if storage is not None else bytes(32))
         self.rom_hash = digest(rom) if rom is not None else bytes(32)
