@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Single private native task guardian; host proof never proves a guest boot."""
+"""Single private native task guardian; host proof never proves a guest boot.
+
+Optional manifest pci_preparation selects an original observation pin and ten
+independent producer_pins; sources must also pin tools/native_pci_preparation.py.
+Held descriptor admission checks the actual private target recipe before spawn.
+This optional comparison confers no device authority and does not alter argv.
+"""
 import argparse
 import ctypes
 import fcntl
@@ -38,6 +44,7 @@ SOURCES=(*HELPERS,'shizukudos/supervisor/native_win98/run_vm.py',
          'shizukudos/supervisor/native_win98/task_custody.py',
          'shizukudos/supervisor/native_win98/disk_lineage.py')
 NATIVE_EPOCH_SOURCE='shizukudos/supervisor/native_win98/native_epoch_host.py'
+PCI_PREPARATION_SOURCE='tools/native_pci_preparation.py'
 
 def identity(s):return s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns
 
@@ -534,6 +541,12 @@ class Server:
         if op=='qmp':
             need(not p and len(rights)==1,'one exact QMP descriptor');fd=rights.pop();return self.owner.admit_qmp(fd),[]
         need(not rights,'unexpected descriptor rights')
+        if op=='live-check':
+            need(not p,'empty live owner check')
+            self.owner.assert_owned();need(self.owner.qmp is not None,'guardian-admitted QMP required')
+            peer=struct.unpack('3i',self.owner.qmp.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+            need(peer[:2]==(self.owner.process.pid,os.getuid()),'current held QMP peer differs')
+            self.owner.assert_owned();return True,[]
         if op=='poll':need(not p,'empty poll request');return self.owner.poll(),[]
         if op=='wait':need(set(p)=={'seconds'},'exact wait request');return self.owner.wait(p['seconds']),[]
         if op=='signal':need(set(p)=={'signal'},'exact signal request');self.owner.signal(p['signal']);return True,[]
@@ -605,16 +618,26 @@ def admit_runtime_sources(repo,sources,union):
     # Declaring the native module admits bytes only, never a device grant.
     need(isinstance(repo,Path) and repo.is_absolute() and repo.resolve()==repo,'canonical source root')
     legacy=set(SOURCES)
-    need(type(sources) is dict and set(sources) in (legacy,legacy|{NATIVE_EPOCH_SOURCE}),'exact legacy or native runtime source closure')
+    need(type(sources) is dict and legacy<=set(sources)<=legacy|{NATIVE_EPOCH_SOURCE,PCI_PREPARATION_SOURCE},'exact legacy or native runtime source closure')
     for relative,row in sources.items():need(pin(row,1<<20)==repo/relative,'approved source path differs');union.add(row)
     need(globals().get('__executed_sha256__')==sources[SOURCES[-2]]['sha256'] and getattr(rpc,'__executed_sha256__',None)==sources[SOURCES[-3]]['sha256'],'guardian and RPC must execute independently pinned held bytes')
     return sources
 
 
+def admit_pci_preparation(manifest,plan,sources,union):
+    """Optional original selection stays prospective and under guardian custody."""
+    need(('pci_preparation' in manifest)==(PCI_PREPARATION_SOURCE in sources),
+         'PCI selection and retained adapter source must be declared together')
+    if 'pci_preparation' not in manifest:return None
+    adapter=admitted_module('admitted_pci_preparation',sources[PCI_PREPARATION_SOURCE],union)
+    result=adapter.admit_selection(manifest['pci_preparation'],plan,union.raw)
+    union.check();return result
+
+
 def admit_manifest(manifest,union):
     fields={'schema','plan','repo','sources','lineage','producers','limits','timeout'}
     need(type(manifest) is dict and fields<=set(manifest) and
-         set(manifest)<=fields|{'preparation_receipt','optional_native_inputs','optional_native_provenance'} and
+         set(manifest)<=fields|{'preparation_receipt','optional_native_inputs','optional_native_provenance','pci_preparation'} and
          manifest['schema']=='shizukuos.native-custody-manifest.v1','exact task manifest')
     need(type(manifest['timeout']) is int and 20<=manifest['timeout']<=900,'existing observation timeout')
     repo=Path(manifest['repo']);need(repo.is_absolute() and repo.resolve()==repo,'canonical source root')
@@ -664,6 +687,7 @@ def admit_manifest(manifest,union):
     helper_identity=hashlib.sha256(json.dumps(helpers,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     prep=admitted_module('admitted_preparation',sources[HELPERS[1]],union)
     argv=prep.recipe(Path(plan['input_pins']['qemu']['path']),out);need(argv==plan['qemu_argv'],'actual independently reconstructed recipe differs')
+    admit_pci_preparation(manifest,plan,sources,union)
     # Sender descriptor numbers are symbolic placeholders until SCM transport.
     argv=list(argv);argv[argv.index('-serial')+1]='file:/proc/self/fd/0';argv+=['-debugcon','file:/proc/self/fd/1','-global','isa-debugcon.iobase=0xe9']
     return plan,built,sources,proof,argv,helper_identity
@@ -752,9 +776,14 @@ def main():
     left,right=socket.socketpair(socket.AF_UNIX,socket.SOCK_SEQPACKET);left.setsockopt(socket.SOL_SOCKET,socket.SO_PASSCRED,1);right.setsockopt(socket.SOL_SOCKET,socket.SO_PASSCRED,1)
     rpcrow=sources['shizukudos/supervisor/native_win98/custody_rpc.py'];runrow=sources['shizukudos/supervisor/native_win98/run_vm.py'];rpcfd=union.rows[rpcrow['path']]['fd'];runfd=union.rows[runrow['path']]['fd']
     runtime_names=(*HELPERS,'shizukudos/supervisor/native_win98/run_vm.py','shizukudos/supervisor/native_win98/owned_capture.py','shizukudos/supervisor/include/shz_info.h')
+    if 'pci_preparation' in manifest:runtime_names+= (PCI_PREPARATION_SOURCE,)
     runtime_pins=json.dumps({name:sources[name] for name in runtime_names},separators=(',',':'),allow_nan=False)
-    need(len(runtime_pins.encode())<=rpc.MAX_PACKET,'bounded seven-source original pin map')
+    need(len(runtime_pins.encode())<=rpc.MAX_PACKET,'bounded exact runtime original pin map')
     command=[sys.executable,'-B','-c',CONTROLLER_BOOTSTRAP,str(rpcfd),str(runfd),rpcrow['path'],runrow['path'],rpcrow['sha256'],runrow['sha256'],'--custody-fd',str(right.fileno()),'--repo',manifest['repo'],'--plan',manifest['plan']['path'],'--plan-sha256',manifest['plan']['sha256'],'--plan-bytes',str(manifest['plan']['bytes']),'--runtime-source-pins-json',runtime_pins,'--runtime-sources-sha256',helper_identity,'--timeout',str(manifest['timeout'])]
+    if 'pci_preparation' in manifest:
+        selected=json.dumps(manifest['pci_preparation'],separators=(',',':'),allow_nan=False)
+        need(len(selected.encode())<=rpc.MAX_PACKET,'bounded explicit PCI preparation selection')
+        command+=['--pci-preparation-json',selected]
     controller_status=None
     try:
         configure_native_reaper(owner,manifest['sources'],union)

@@ -16,6 +16,8 @@ import os
 import sys
 from pathlib import Path
 import shutil
+import socket
+import struct
 import subprocess
 import time
 
@@ -181,6 +183,7 @@ def main():
     parser.add_argument('--custody-fd',type=int,help=argparse.SUPPRESS)
     parser.add_argument('--plan-bytes',type=int,help=argparse.SUPPRESS)
     parser.add_argument('--runtime-source-pins-json',help=argparse.SUPPRESS)
+    parser.add_argument('--pci-preparation-json',help=argparse.SUPPRESS)
     args=parser.parse_args()
     custody=get_custody(args.custody_fd)
     leases=ExitStack()
@@ -193,6 +196,14 @@ def main():
 
 def run_plan(args,parser,custody,leases):
     borrowed=GuardianOriginalInputs(custody,leases) if custody is not None else None
+    pci_raw=getattr(args,'pci_preparation_json',None)
+    pci_selection=None; pci_adapter=None; pci_expected=None
+    if pci_raw is not None:
+        if borrowed is None or type(pci_raw) is not str or len(pci_raw.encode())>16384:
+            raise ValueError('PCI preparation requires bounded guardian-selected retained originals')
+        pci_selection=json.loads(pci_raw,object_pairs_hook=unique_fields)
+        if type(pci_selection) is not dict:raise ValueError('explicit PCI selection object required')
+    runtime_names=RUNTIME_ORIGINALS+ (('tools/native_pci_preparation.py',) if pci_selection is not None else ())
     if not timeout_valid(args.timeout):parser.error('timeout must be 20..900 seconds')
     plan_size=args.plan_bytes if borrowed is not None else args.plan.stat().st_size
     if type(plan_size) is not int or not 0<plan_size<=16<<20:parser.error('private plan must be nonempty and at most 16 MiB')
@@ -205,14 +216,14 @@ def run_plan(args,parser,custody,leases):
         raw=args.runtime_source_pins_json
         if type(raw) is not str or len(raw.encode())>16384:raise ValueError('bounded exact runtime original pin map required')
         runtime_pins=json.loads(raw,object_pairs_hook=unique_fields)
-        if type(runtime_pins) is not dict or set(runtime_pins)!=set(RUNTIME_ORIGINALS):raise ValueError('exact seven runtime original pins required')
+        if type(runtime_pins) is not dict or set(runtime_pins)!=set(runtime_names):raise ValueError('exact runtime original pins including selected adapter required')
         for item in runtime_pins.values():
             if type(item) is not dict or set(item)!={'path','bytes','sha256'} or type(item['bytes']) is not int or not 0<item['bytes']<=1<<20 or type(item['sha256']) is not str:
                 raise ValueError('bounded typed runtime original source pin')
         helper_pins={name:runtime_pins[name]['sha256'] for name in HELPERS}
         identity=hashlib.sha256(json.dumps(helper_pins,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         if identity!=args.runtime_sources_sha256:parser.error('explicit runtime helper identity differs')
-        for name in RUNTIME_ORIGINALS:
+        for name in runtime_names:
             item=runtime_pins[name]
             expected=(Path(__file__) if name.endswith('/run_vm.py') else Path(__file__).with_name('owned_capture.py')) if name in RUNTIME_ORIGINALS[4:6] else args.repo/name
             if name==RUNTIME_ORIGINALS[-1]:expected=Path(plan['input_pins']['build_receipt']['path']).parent/'source'/name
@@ -230,6 +241,7 @@ def run_plan(args,parser,custody,leases):
     paths={name:args.repo/name for name in HELPERS}
     paths.update({'shizukudos/supervisor/native_win98/run_vm.py':Path(__file__),
                   'shizukudos/supervisor/native_win98/owned_capture.py':Path(__file__).with_name('owned_capture.py')})
+    if pci_selection is not None:paths['tools/native_pci_preparation.py']=args.repo/'tools/native_pci_preparation.py'
     source_pins={};source_sizes={}
     for relative,source in paths.items():
         if borrowed is None:
@@ -249,6 +261,10 @@ def run_plan(args,parser,custody,leases):
     guards=loader('native_run_guards',native/'build.py')
     preparation=loader('native_run_preparation',native/'prepare_vm.py')
     info_helper=loader('native_run_info',frozen/'shizukudos/tools/shzinfo.py')
+    if pci_selection is not None:
+        pci_adapter=loader('native_run_pci_preparation',frozen/'tools/native_pci_preparation.py')
+        pci_expected=pci_adapter.admit_selection(pci_selection,plan,borrowed.read)
+        borrowed.check()
     build_pin=plan['input_pins']['build_receipt']
     if borrowed is None:
         guards.pinned_hash(Path(build_pin['path']),build_pin['sha256'],build_pin['bytes'],16<<20)
@@ -388,6 +404,13 @@ def run_plan(args,parser,custody,leases):
         monitor.call('stop');record['final_pause_acknowledged']=True
         last_writes=esp_write_bytes(monitor.call('query-blockstats'),last_writes)
         record['write_budget_verified']=True;record['status']=evidence_status(last_info)
+        if pci_expected is not None:
+            def pci_guard():
+                pump();borrowed.check()
+                if custody.ordinary('live-check') is not True:raise ValueError('guardian live/QMP identity refused')
+                peer=struct.unpack('3i',monitor.socket.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+                if peer[:2]!=(child.pid,os.getuid()):raise ValueError('current QMP peer differs from guardian child')
+            record['pci_preparation']=pci_adapter.current_qmp_observation(pci_expected,monitor,pci_guard)
     except (Exception,KeyboardInterrupt) as error:fail('capture',error)
     finally:
         cleaning=True;cleanup_owned(child,monitor,record,pump=pump)

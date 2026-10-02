@@ -204,3 +204,91 @@ def validate_observation(observed, expected_producer_pins, read_pinned, target_p
         result.append({'role': role, 'bdf': pair['bdf'], 'raw_bars': list(words[4:10])})
     need(result[0]['bdf'] != result[1]['bdf'], 'selected device BDF collision')
     return result
+
+
+def admit_selection(selection, target_plan, read_pinned):
+    """Caller manifest selects independent pins; receipt JSON cannot select them."""
+    need(type(selection) is dict and set(selection) == {'observation', 'producer_pins'},
+         'explicit original observation and independent producer pins required')
+    raw = held_bytes(selection['observation'], 4 << 20, read_pinned)
+    observed = json.loads(raw, object_pairs_hook=unique_pairs,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite observation')))
+    return validate_observation(observed, selection['producer_pins'], read_pinned, target_plan)
+
+
+def current_qmp_observation(expected, monitor, guard):
+    """Prospective stopped-device comparison only; never send PROBE or GRANT.
+
+    Production caller binds monitor to guardian-owned child with SO_PEERCRED and
+    invokes the guardian's live pidfd/cgroup/source checks around every request.
+    The existing native gate still requires its own fresh PROBE/REPORT/GRANT.
+    """
+    need(type(expected) is list and len(expected) == 2 and callable(guard), 'admitted pair and live owner guard required')
+    expected=copy.deepcopy(expected)
+    for role,row in enumerate(expected,1):
+        need(type(row) is dict and set(row)=={'role','bdf','raw_bars'} and
+             type(row['role']) is int and row['role']==role and type(row['bdf']) is int and 0<=row['bdf']<=255 and
+             type(row['raw_bars']) is list and len(row['raw_bars'])==6 and
+             all(type(word) is int and 0<=word<=0xffffffff for word in row['raw_bars']), 'exact immutable prospective selected device shape required')
+    need(expected[0]['bdf']!=expected[1]['bdf'],'prospective selected BDF collision')
+    transcripts = []
+    def call(command, arguments=None):
+        guard()
+        result = monitor.call(command, arguments)
+        raw = json.dumps(result, separators=(',', ':'), allow_nan=False).encode()
+        need(len(raw) <= 1 << 20, 'bounded current QMP response required')
+        guard()
+        transcripts.append({'command': command, 'arguments': arguments, 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)})
+        return result
+    def paused():
+        status = call('query-status')
+        need(type(status) is dict and status.get('running') is False and status.get('status') == 'paused', 'current QMP must be paused')
+    paused()
+    flat = call('human-monitor-command', {'command-line': 'info mtree -f'})
+    need(type(flat) is str and flat.endswith('\n\n') and len(flat) <= 1 << 20, 'complete bounded current FlatView required')
+    sections = flat.replace('\r\n', '\n').split('FlatView #')[1:]
+    selected = [s for s in sections if re.search(r'^ AS "memory", root: system$', s, re.M)]
+    need(len(selected) == 1 and re.search(r'^ Root memory region: system$', selected[0], re.M), 'sole current memory/system FlatView required')
+    apertures = []
+    for line in selected[0].splitlines():
+        match = re.fullmatch(r'  ([0-9a-f]{16})-([0-9a-f]{16}) \(prio -?[0-9]+, i/o\): pcie-mmcfg-mmio', line)
+        if match:
+            lo, hi = int(match[1], 16), int(match[2], 16) + 1
+            need(0 < lo < hi <= 1 << 64 and lo % (1 << 20) == 0 and (hi-lo) % (1 << 20) == 0 and 1 << 20 <= hi-lo <= 256 << 20, 'current ECAM geometry differs')
+            apertures.append((lo, hi))
+    need(len(apertures) == 1, 'sole exact current ECAM aperture required')
+    lo, hi = apertures[0]
+    pci = call('query-pci')
+    need(type(pci) is list and 0 < len(pci) <= 32, 'bounded current PCI buses required')
+    buses = [b for b in pci if type(b) is dict and type(b.get('bus')) is int and b['bus'] == 0]
+    need(len(buses) == 1 and type(buses[0].get('devices')) is list and len(buses[0]['devices']) <= 256, 'one actual bus-zero device inventory required')
+    for row in expected:
+        bdf, role, bars = row['bdf'], row['role'], row['raw_bars']
+        devices = [d for d in buses[0]['devices'] if type(d) is dict and
+                   type(d.get('slot')) is int and type(d.get('function')) is int and
+                   d['slot'] == bdf >> 3 and d['function'] == bdf & 7]
+        need(len(devices) == 1, 'unambiguous current selected BDF required')
+        address = lo + bdf * 4096
+        need(address + 40 <= hi, 'current selected ECAM extent required')
+        words = None
+        for _ in range(2):
+            text = call('human-monitor-command', {'command-line': 'xp /10wx 0x%x' % address})
+            parsed = parse_snapshot(text, address)
+            need(words is None or parsed == words, 'unstable current PCI DWORDs')
+            words = parsed
+        vendor, device = words[0] & 65535, words[0] >> 16
+        need((vendor == 0x1234 and device == 0x1111) if role == 1 else
+             (vendor == 0x1af4 and device in (0x1001, 0x1042)), 'current selected device ID differs')
+        need(words[2] >> 8 == (0x030000 if role == 1 else 0x010000) and
+             not words[3] & 0x7f0000 and words[1] & 3 == 3 and list(words[4:]) == bars,
+             'current class/header/decode/raw BAR differs')
+        ident, klass = devices[0].get('id'), devices[0].get('class_info')
+        need(type(ident) is dict and type(klass) is dict and
+             type(ident.get('vendor')) is int and ident['vendor'] == vendor and
+             type(ident.get('device')) is int and ident['device'] == device and
+             type(klass.get('class')) is int and klass['class'] == words[2] >> 16,
+             'current QMP PCI inventory and ECAM identity differ')
+    paused()
+    return {'status': 'CURRENT_PAUSED_PCI_PREPARATION_MATCH_NOT_DEVICE_AUTHORITY',
+            'HostGrant_transmitted': False, 'Windows98_boot_verified': False,
+            'device_authority_admitted': False, 'transcripts': transcripts}

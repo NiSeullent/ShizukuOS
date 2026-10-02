@@ -208,5 +208,53 @@ class PreparationAdapter(unittest.TestCase):
         with self.assertRaises(ValueError): adapter.validate_observation(observed, pins, reader, plan)
 
 
+class ActualCallerControls(unittest.TestCase):
+    def selection(self):
+        observed,pins,reader,plan=fixture()
+        raw=json.dumps(observed).encode()
+        row={'path':'/synthetic/observation','bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()}
+        def held(pin,maximum):
+            return raw if pin['path']==row['path'] else reader(pin,maximum)
+        return {'observation':row,'producer_pins':pins},plan,held
+
+    def test_original_observation_hash_and_target_plan_required(self):
+        selected,plan,held=self.selection()
+        self.assertEqual(len(adapter.admit_selection(selected,plan,held)),2)
+        selected['observation']['sha256']='a'*64
+        with self.assertRaises(ValueError):adapter.admit_selection(selected,plan,held)
+        selected,plan,held=self.selection()
+        with self.assertRaises(ValueError):adapter.admit_selection(selected,{},held)
+
+    def test_current_paused_qmp_has_exact_device_raw_bars_and_no_grant(self):
+        selected,plan,held=self.selection()
+        expected=adapter.admit_selection(selected,plan,held)
+        observed,_,_,_=fixture()
+        class Monitor:
+            def __init__(self):self.calls=[];self.changed=False
+            def call(self,command,arguments=None):
+                self.calls.append((command,arguments))
+                if command=='query-status':return {'running':False,'status':'paused'}
+                if command=='query-pci':return [{'bus':0,'devices':[
+                    {'slot':1,'function':0,'id':{'vendor':0x1234,'device':0x1111},'class_info':{'class':0x0300}},
+                    {'slot':2,'function':0,'id':{'vendor':0x1af4,'device':0x1001},'class_info':{'class':0x0100}}]}]
+                line=arguments['command-line']
+                if line=='info mtree -f':return 'FlatView #0\n AS "memory", root: system\n Root memory region: system\n  00000000e0000000-00000000efffffff (prio 0, i/o): pcie-mmcfg-mmio\n\n'
+                address=int(line.split()[-1],16)
+                role=1 if address==0xe0008000 else 2
+                words=list(observed['devices'][str(role)]['reads'][0]['words'])
+                if self.changed:words[4]^=16
+                return text(words,address)
+        monitor=Monitor();guarded=[]
+        result=adapter.current_qmp_observation(expected,monitor,lambda:guarded.append(True))
+        self.assertFalse(result['HostGrant_transmitted']);self.assertFalse(result['device_authority_admitted'])
+        self.assertEqual(len(guarded),2*len(monitor.calls))
+        self.assertEqual(set(c for c,_ in monitor.calls),{'query-status','query-pci','human-monitor-command'})
+        monitor.changed=True
+        with self.assertRaises(ValueError):adapter.current_qmp_observation(expected,monitor,lambda:None)
+        monitor.changed=False
+        with self.assertRaisesRegex(ValueError,'owner failed'):
+            adapter.current_qmp_observation(expected,monitor,lambda:(_ for _ in ()).throw(ValueError('owner failed')))
+
+
 if __name__ == '__main__':
     unittest.main()
