@@ -7,6 +7,8 @@
 #include "cpu_memory_owner.h"
 #include "cpu_arch_bringup.h"
 #include "cpu_memory_stress.h"
+#include "cpu_tlb.h"
+#include "cpu_tlb_stress.h"
 #include "pci.h"
 extern uint64_t arch_timer_irqs(void);
 static shz_cpu_firmware_t firmware;
@@ -28,6 +30,8 @@ static int owned_span(uint64_t pa,uint64_t bytes)
         if(!shz_cpu_pmm_page_owned(p,owner_boot)) return 0;
     return 1;
 }
+static int tlb_owned(void *ctx,uint64_t pa,uint64_t bytes)
+{ (void)ctx;return owned_span(pa,bytes); }
 static int table_read(void *ctx,uint64_t pa,void *out,size_t bytes)
 {
     (void)ctx;const uint64_t page=pa&~4095ull;
@@ -104,6 +108,7 @@ void shz_cpu_arch_ipi(unsigned reason,uint64_t stack)
     jobs[cpu].irq_stack=stack;
     if(cpu && (stack>=shz_smp_cpus[cpu].irq_stack_top || stack<shz_smp_cpus[cpu].irq_stack_top-KSTACK_BYTES)) shz_cpu_arch_fault(cpu);
     if(reason) {
+        shz_cpu_tlb_ipi();
         __atomic_add_fetch(&jobs[cpu].verify_delivered,1,__ATOMIC_RELEASE);
         if(cpu==1 && k64_cmdline_has("shz.smp=withhold-verify")) return;
     }
@@ -142,6 +147,8 @@ static uint32_t work_hash(unsigned cpu,unsigned loops)
         }
         if(i==(cpu?750000u:1250000u) && k64_cmdline_has("shz.memory=test"))
             if(shz_cpu_memory_stress(cpu)) shz_cpu_arch_fault(cpu);
+        if(i==(cpu?1500000u:2000000u) && k64_cmdline_has("shz.tlb=test"))
+            if(shz_cpu_tlb_stress(cpu)) shz_cpu_arch_fault(cpu);
     }
     return value;
 }
@@ -213,6 +220,7 @@ void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi,uint64_t initial_cr3)
         kprintf("SMP-BRINGUP: ACPI unavailable, scheduler CPUs=1\n");return;
     }
     if(!pci_bsp_lapic_acquire(found.lapic_pa,apic_id()) || shz_cpu_arch_allocate(found.count) || !kernel_contract()) return;
+    if(k64_cmdline_has("shz.tlb=test") && shz_cpu_tlb_stress_prepare(found.count,tlb_owned,0)) return;
     const uint64_t scratch=pmm_alloc();if(!scratch || !owned_span(scratch,PAGE_SIZE)) return;
     pmm_free(scratch);if(shz_cpu_pmm_page_owned(scratch,owner_boot)) return;
     irq_register(SHZ_SMP_VEC_RESCHEDULE,bsp_wake);irq_register(SHZ_SMP_VEC_TLB,bsp_verify);
@@ -249,6 +257,7 @@ void shz_cpu_bringup_verify(void)
     }
     if(canary!=0x534d50415053544bull) bad=1;
     if(k64_cmdline_has("shz.memory=test")) shz_cpu_memory_stress_report();
+    if(k64_cmdline_has("shz.tlb=test")) shz_cpu_tlb_stress_report();
 report:
     for(unsigned i=0;i<count;i++) {
         bad+=__atomic_load_n(&jobs[i].bad,__ATOMIC_ACQUIRE);
