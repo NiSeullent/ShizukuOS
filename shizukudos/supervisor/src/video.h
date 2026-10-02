@@ -11,4 +11,6 @@ void video_init(void);
 void video_int10(void);                     /* handles the INT 10h call in the guest registers */
 void video_render(void);                    /* draws the text page to the framebuffer if it changed */
 void video_clear(uint8_t attr);
+/* Irreversible for this Supervisor lifetime: hardware VGA owns the display. */
+void video_native_vga_own(void);
 #endif

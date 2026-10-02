@@ -14,6 +14,8 @@ static uint8_t cur_row, cur_col;
 static uint16_t cursor_shape = 0x0607;
 static uint32_t last_hash;
 static int last_render_valid;
+static int native_vga_owner;
+void video_native_vga_own(void) { native_vga_owner = 1; last_render_valid = 0; }
 static struct {
     uint64_t base, size, guest_ram;
     uint32_t width, height, pitch, format;
@@ -252,6 +254,7 @@ static void put_glyph(volatile uint32_t *fb, unsigned pitch, unsigned x, unsigne
 
 void video_render(void)
 {
+    if (native_vga_owner) return;
     shz_info_t *info = G.info;
     const uint16_t *page = text_page();
     volatile uint32_t *fb;

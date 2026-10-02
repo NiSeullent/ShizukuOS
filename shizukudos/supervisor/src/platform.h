@@ -16,6 +16,9 @@ extern const uint64_t isr_table[256];
 
 /* Installs the Supervisor's own GDT/IDT/TSS and identity page tables. */
 void platform_init(shz_info_t *info);
+/* Explicit bound std-VGA only: exact legacy aperture and 16 MiB LFB use an
+ * inherited actual PAT UC slot. Never changes global PAT or unrelated leaves. */
+int platform_vga_uc(uint64_t lfb_base,uint64_t lfb_bytes);
 uint64_t platform_gdt_base(void);
 uint64_t platform_idt_base(void);
 uint64_t platform_tss_base(void);
