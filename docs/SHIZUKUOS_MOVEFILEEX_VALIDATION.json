@@ -1,0 +1,124 @@
+{
+  "OS_acceptance_verified": false,
+  "actual_frozen_validation": {
+    "SDK_dependency_members": 207,
+    "SDK_header_members": 204,
+    "address_undefined_sanitizer_checks": 8135,
+    "bytes": 41917,
+    "commands_exit_zero": 6,
+    "host_stdout": "PASS 8135 production function host checks (native execution false)",
+    "normal_production_function_checks": 8135,
+    "official_Win64_SDK_function_COFF_compile": true,
+    "other_dependency_members": 3,
+    "passed": true,
+    "raw_logs": 12,
+    "receipt": "build/movefileex-bounds-v1/green-v2/result.json",
+    "sha256": "e1a9d5caf70d0cda388d989b3f67a90bb52ecbb0a6ad334eef299902fffcc1dd",
+    "source_and_dependency_late_drift": false
+  },
+  "behaviour": {
+    "bounded_controlled_converter_lengths": [
+      302,
+      319
+    ],
+    "converter_WCHAR_capacity": 320,
+    "counted_request_NUL_required": false,
+    "destination_WCHAR_capacity_after": 320,
+    "destination_WCHAR_capacity_before": 300,
+    "handle_cleanup_checked": true,
+    "observed_whole_stack_overflow_or_sanitizer_crash": false,
+    "oversized_buffer_created_or_accessed": false,
+    "real_converter_lengths_preserved": [
+      299,
+      300,
+      301
+    ],
+    "reported_oversized_length_guard": 321
+  },
+  "guest_execution": false,
+  "historical_receipts_preserved": [
+    {
+      "bytes": 4907,
+      "commands": 1,
+      "passed": true,
+      "receipt": "build/movefileex-bounds-v1/capacity/result.json",
+      "scope": "Actual original-source compile-time array-capacity assertion rejection. The original function was not run.",
+      "sha256": "b90b353428964515cf54706c1179dcc546f3b588bb5d53b628579d4634c2498f"
+    },
+    {
+      "bytes": 2980,
+      "commands": 1,
+      "passed": false,
+      "receipt": "build/movefileex-bounds-v1/red/result.json",
+      "scope": "Earlier harness compilation failure; not product failure evidence.",
+      "sha256": "b86cec492ee736b15d9894b188186a268a3d222065ce4b6a0170c610e8f60b96"
+    },
+    {
+      "bytes": 5131,
+      "commands": 3,
+      "passed": false,
+      "receipt": "build/movefileex-bounds-v1/red-v2/result.json",
+      "scope": "Superseded 301-rejection oracle and unavailable GCC sanitizer libraries; not product failure evidence.",
+      "sha256": "6b943a464aa0aa25248667a30d19950a7b7d99b891b9e31941490902924126a5"
+    },
+    {
+      "bytes": 1838,
+      "commands": 0,
+      "passed": false,
+      "receipt": "build/movefileex-bounds-v1/green/result.json",
+      "scope": "Wrong unified hunk line rejected before compilation; corrected in green-v2.",
+      "sha256": "ca7a52aa474601848426d13fe6ef21781cb21316ccc7175615ae2eabe4545557"
+    }
+  ],
+  "independent_review": {
+    "additional_concrete_blocker": false,
+    "performed": true,
+    "scope": "Read-only exact preimage/hunk/output/raw-log/207 dependency-member byte closure and ABI review; no second execution."
+  },
+  "limits": [
+    "The current native kernel rename path separately rejects character counts >=260; this patch does not establish end-to-end long-path support.",
+    "The host checks extract exact production function bytes and supply OS dependencies; they do not execute Windows or an app.",
+    "MOVEFILE_WRITE_THROUGH, cross-volume copy, all flag combinations, actual filesystem durability, and crash recovery are outside this patch acceptance."
+  ],
+  "modern_app_functionality_verified": false,
+  "native_Windows_execution": false,
+  "production_preimage": {
+    "bytes": 21916,
+    "path": "shizukudos/win64/kernel32/k32_file.c",
+    "sha256": "0ceafb9186cf370c2f1b5bdcfec166e6a5aa6a2c67e6c2b77ab3c748d0ccd415"
+  },
+  "resources": {
+    "CPU_seconds_per_child": 60,
+    "RSS_limit_bytes": 536870912,
+    "admitted_available_memory_bytes": 9043755008,
+    "admitted_free_bytes": 21745594368,
+    "aggregate_wall_seconds": 3.635577948996797,
+    "aggregate_wall_seconds_limit": 90,
+    "lowest_sampled_free_bytes": 21741809664,
+    "memory_floor_bytes": 6442450944,
+    "reserve_bytes": 21474836480,
+    "sampled_RSS_high_water_bytes": 141144064,
+    "sampling_limit": "50ms RSS/disk/memory samples are not an atomic reservation. Only this newly owned child group is killed on guard failure.",
+    "shared_output_budget_bytes": 8388608
+  },
+  "schema": 1,
+  "scope": "Source-only additive MoveFileExW counted-name capacity patch against an exact committed production preimage. No application acceptance.",
+  "source_files": {
+    "patches/kernel32/movefileex-path-bounds.patch": {
+      "bytes": 795,
+      "sha256": "5ad78efa54f4b26ceec031f382b0d78f7382c1e41b889f027010be6d8880cbed"
+    },
+    "tests/movefileex_path_bounds_host.c": {
+      "bytes": 8751,
+      "sha256": "8d3b86a17c69e5ff645f22bfaad0ef2c02f28ad8a4c0c7b7ecb10e2a31c44e7d"
+    },
+    "tools/test_movefileex_path_bounds.py": {
+      "bytes": 16082,
+      "sha256": "2945a84570f00d964e504cbb72765689933466b4e1ea27be954426ec626e8f69"
+    }
+  },
+  "tested_patched_source": {
+    "bytes": 22072,
+    "sha256": "1b2bbfe22b8eb163b23b16f9fc17c3d977ed7c62e515309db585abdeb642cc88"
+  }
+}

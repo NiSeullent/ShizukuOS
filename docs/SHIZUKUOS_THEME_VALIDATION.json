@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "kind": "ShizukuOS userland appearance source validation",
+  "result": "HOST_SANITIZER_PE_OEM_FULL_BYTE_CPU_PASS",
+  "build_receipt": {
+    "path": "build/shizukuos-theme-v4/result.json",
+    "sha256": "c9d8fdc57d4b5986297f44edbcbdc88b107088768ea39accac7c800d80b0af28"
+  },
+  "source_sha256": {
+    "src/uxtheme_engine_core.c": "07086150eeed1ac668f7ab0fe9bc3b79f79948323afb4ddfb0139511e6635832",
+    "src/uxtheme_engine_core.h": "d61be0bee84af34a763966250882d24c38f0f06001415175e9e522354f468be9",
+    "src/uxtheme_shizukuos_style.h": "7d4c9781f9525bbafc8f397f389a7a20935586b6c3341b659d30f1a4298ac47e",
+    "src/uxtheme_shizukuos.ntth": "d34d2d8bf3cdb7e1f5e6313be6b88c0671b4aa227aa2aea0dd1ff926461b11d4",
+    "src/uxtheme_user_profile.c": "be7b0178fa3b39934b934da5b19d6e0972c430bba9a602a566d8e8048db95f0c",
+    "apps/shizukuos-appearance/main.c": "432b1eb39000900e01c23db04d4c42c26586ce6d41ec80ba6fcfd1cff58f8528",
+    "src/uxtheme_engine_win32.c": "237a3cd8bc7481a5b6cc25e8f10e10d7feb0d734058df85bd8d66544b393cade",
+    "src/uxtheme_engine.def": "ed2c5e09d1fc064afb48dd62193e0c70b145b67ecc420a4254c2045f8c8d3a59",
+    "src/uxtheme_sysfont.c": "074ab49bcc030baf53238cc0d05f42fcc218654172e82f510ea975af0ee87057",
+    "ntwddm/src/nttheme.c": "24ef85329065c4981cbf64e2f67b334477f40255abdb71e47e30a41cbb5916af",
+    "ntwddm/src/ntstyle.c": "0c4e059baec0d7d57f2328c2f763a28a72d44a319c849d0e943c6268533f23a7",
+    "ntwddm/include/nttheme.h": "b2eabef81916ba0a9c50204db24928f9b2f6fd4a74dc76457bdd7e73b07163d3",
+    "ntwddm/include/ntwddm.h": "d561123913b531e7e82bef0a2107c44954ecdef237f43a6280eaf9bd39c11950",
+    "platform/freestanding/memory.c": "760c18d590552682fe0fed741f26ba35dd532024a2c1bc63e256e56d83ec512a",
+    "platform/freestanding/memory.h": "fca39e400632604dafd3895fed60674a1171f66245094f898e9f425c41c64c92",
+    "benchmarks/win98se-ko-oem-native-exports-v1.json": "3854198a9b2bf9f54fe0383330d09ed2ea3d0d510c3d7ba24eb13426e37b4f0d",
+    "tests/uxtheme_engine_host.c": "8b8951ba4e995035ec3c6bbf5e4f1de24b1db6bb998616ec1480c1c30ec97341",
+    "tests/uxtheme_engine_guest.c": "a7cf7a00ef0f075a85937993918d3ee3b3a09240b2ed62018aae7a87d3ea79dd",
+    "tests/uxtheme_shizukuos_host.c": "3c1784130ef9807e2b75fa3f05f7a0bb17da52bd5066b67b256bff6718f48904",
+    "tests/uxtheme_user_profile_host.c": "ad6a1104c1cfc38390c4e92f55387a11a4ba6c0518a21c384792794acf0bba4f",
+    "tests/uxtheme_profile_win32_mock.h": "779951ba1ccae13a0935250c26787fa201126aa7707e53b6dc0b6864194cb0cc",
+    "tools/i486_instruction_gate.py": "6ba89c7a521e6a7b17e18519f27ed3d1f860d3f8e7ed7d9c89302ea960088973",
+    "tests/test_i486_instruction_gate.py": "6a0ff7367a2c32d09bebda68283b4be710cf27ddae67b21a571424655edabe51",
+    "tools/build_theme_engine.py": "d5f7e2e70caf5529a922dbf316af1675d620987d69dfc7fa507c97ceb9cb5271"
+  },
+  "host_checks": {
+    "classic_modern": 312,
+    "shizukuos_style_pixels": 3606,
+    "production_profile_mocked_registry": 264,
+    "each_normal_and_asan_ubsan_leak_checks": true
+  },
+  "cpu_parser_controls": {
+    "tests": 3,
+    "adversarial_cases_within_tests": true,
+    "log_sha256": "9c455bbb1b346a0f27ad32e4bf93424666a69b5900130a0d6279538ae3c2d077"
+  },
+  "artifacts": {
+    "M98THEME.DLL": {
+      "sha256": "721e3700b978f12cf7d535cb9ff8ed02bc0262a464a88011aa86804d845308b4",
+      "bytes": 42298,
+      "pe98_gate": "pass",
+      "i486_instructions": 4176,
+      "full_executable_byte_coverage": true
+    },
+    "M98THPRO.EXE": {
+      "sha256": "f6f9446a008f3e2ad49aa239ec9dd0da79506a30e7c9b9ae2f70621cc4b1ef65",
+      "bytes": 21019,
+      "pe98_gate": "pass",
+      "i486_instructions": 965,
+      "full_executable_byte_coverage": true
+    },
+    "M98THSTA.EXE": {
+      "sha256": "739a89caa689e6d95c6263011d045b05dcaa8caf66195eb4bddc418a98bb018d",
+      "bytes": 22792,
+      "pe98_gate": "pass",
+      "i486_instructions": 811,
+      "full_executable_byte_coverage": true
+    },
+    "SHZAPPEAR.EXE": {
+      "sha256": "df5a10b4970e42ec672e423e0812b8e11aa8d63e7930dfe7ffefa118dd80e6de",
+      "bytes": 18693,
+      "pe98_gate": "pass",
+      "i486_instructions": 767,
+      "full_executable_byte_coverage": true
+    }
+  },
+  "independent_source_review_sha256": {
+    "shizukuos-appearance-source-review.json": "705d9b1003d0056e61a874f84102aa02cd0550accde870b795cae9ec7ba51c3d",
+    "shizukuos-theme-native-next.json": "5d494953c6690214e164ec7665cb3180dc55cee16bf649f99878750dac59a301"
+  },
+  "review_findings_fixed": [
+    "DrawThemeText flags2 argument and SDK ABI guards",
+    "Enter and Escape actions; radio/action control groups",
+    "Fresh/empty guard also protects the default historical output directory"
+  ],
+  "theme_profile": {
+    "registry_key": "HKCU\\Software\\ShizukuOS\\Appearance",
+    "value": "ThemeStyle REG_DWORD",
+    "styles": [
+      1,
+      3
+    ],
+    "default": 3
+  },
+  "historical_theme_engine_receipt_unchanged_sha256": "8bded593d1533a1969bdcdf6d82b783baeba50fa4056e700cc8f2c94e83f37fb",
+  "native_windows98_execution": false,
+  "native_gui_input_save_restart": false,
+  "os_wide_theme_installed": false,
+  "shizukudos_msdos_replacement_verified": false,
+  "final_installer_iso_100_verified": false,
+  "all_modern_apps_web_standards_verified": false,
+  "public_distribution": "https://m98.nyase.kr",
+  "github_policy": "Public patch/development source only; no ISO/runtime distributions/private files",
+  "remaining_owners": {
+    "peer6970": "AMD64 style3/default/profile integration",
+    "BOOT": "Shell/commoncontrols/installer, shared native Windows98 guest acceptance, actual ShizukuDOS replacement boot"
+  },
+  "command_evidence": {
+    "completed_steps": 18,
+    "all_returncodes_zero": true,
+    "raw_stdout_stderr_logs_sha256_bound": true,
+    "sanitizer_environment_bound": true
+  },
+  "tdd_style_missing_feature_red_receipt_sha256": "b39770b37a580508c8b6613eb5d49b3515b5a4919e9fe7b2aed361ea32e92dd5",
+  "negative_controls": {
+    "path": "build/shizukuos-theme-negative-agent-v2/result.json",
+    "sha256": "0a12ccaa71c5b87c81ad0b040ad9a4ea43090b615b24343b84854ebe86167a9d",
+    "source": "tests/test_theme_engine_build_gate.py",
+    "source_sha256": "84b36a92d9b50fe6988c9e7c6bbd8dde65468dd3a023159858a0bc443b03e6e2",
+    "python_optimized": true,
+    "individual_malformed_directory_fields_rejected": 8,
+    "sdk_positive_syntax_pass": true,
+    "sdk_missing_flags2_rejected": true,
+    "default_existing_output_rejected": true,
+    "historical_tree_unchanged": true,
+    "native_execution": false
+  }
+}

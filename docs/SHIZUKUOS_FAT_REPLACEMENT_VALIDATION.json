@@ -1,0 +1,167 @@
+{
+  "MS_DOS_replacement_verified": false,
+  "actual_frozen_validation": {
+    "bytes": 35127,
+    "commands_exit_zero": 11,
+    "commands_with_expected_returncode": 12,
+    "freestanding_kernel_flags_compile": true,
+    "freestanding_object": {
+      "bytes": 26520,
+      "sha256": "99eaa33ffd2efbfbfaede78d27f774909920f2e6b4a36c40edbc93d5fe48d905"
+    },
+    "freestanding_undefined_symbols": [],
+    "full_address_undefined_sanitizer_assertions": 157994,
+    "full_address_undefined_sanitizer_cases": 165,
+    "genuine_original_RED_exit": 1,
+    "normal_and_sanitizer_stdout_bytes": 10487,
+    "normal_and_sanitizer_stdout_sha256": "e8cb4f22590d3f7edf3400607a492d27ee85cdddcbb7cbb7ddd039908c65efb1",
+    "normal_assertions": 157994,
+    "normal_cases": 165,
+    "original_batch_assertions": 28226,
+    "original_external_image_walker": "compiled only; mkfs/mtools/fsck image suite not run",
+    "original_inputs_rehashed": 89,
+    "output_members_rehashed": 38,
+    "raw_logs": 24,
+    "receipt": "build/fat32-replace-save-v4/result.json",
+    "sanitizer_leak_checks_enabled": true,
+    "sha256": "b3d092a5dcb21a6ae87d1f312cb7e6c76df11ff16226bf7e26f1bef9574148fd",
+    "source_late_drift": false,
+    "status": "REAL_HOST_REPLACEMENT_REGRESSION_PASS_KERNEL_PENDING"
+  },
+  "cold_boot_profile_persistence_verified": false,
+  "crash_atomicity_verified": false,
+  "full_Office_save_acceptance": false,
+  "historical_generations_preserved": [
+    {
+      "actual_commands": 2,
+      "bytes": 6203,
+      "receipt": "build/fat32-replace-save-v1/red-result.json",
+      "scope": "Genuine original production data-loss RED; failed OLD saved-file lookup after fresh remount.",
+      "sha256": "f65db94881019d107879bd099174dfd3e79bf7fe1df911d19fb225d8f8773074"
+    },
+    {
+      "actual_commands": 10,
+      "bytes": 19281,
+      "receipt": "build/fat32-replace-save-v1/result.json",
+      "scope": "Earlier successful narrower controls, retained with their own older source generation.",
+      "sha256": "f1f96efc6ac82bf149ebcbac543a62c7809d78cd1520527648eabd8116dbbde1"
+    },
+    {
+      "actual_commands": 2,
+      "bytes": 2396,
+      "receipt": "build/fat32-replace-save-v2/failed-green.json",
+      "scope": "Controller tried stable hashing while compiler output grew; aborted/reaped, no native run.",
+      "sha256": "fcc24a68422d103f238d68018f3e69ba6986776cb3ca4c3065b92ceb6c913925"
+    },
+    {
+      "actual_commands": 5,
+      "bytes": 5147,
+      "receipt": "build/fat32-replace-save-v3/failed-green.json",
+      "scope": "Actual fixture case setup was overwritten by cached later creation; corrected by ordering and literal fresh-remount case-byte assertion.",
+      "sha256": "26b2e224c80f867a66e7b234720013eeb4315e4e2634aec830b2925aac487d6e"
+    }
+  ],
+  "kernel_execution": false,
+  "later_failed_trees_preserved": [
+    {
+      "receipt_sha256": "fcc24a68422d103f238d68018f3e69ba6986776cb3ca4c3065b92ceb6c913925",
+      "tree_preserved": true
+    },
+    {
+      "receipt_sha256": "26b2e224c80f867a66e7b234720013eeb4315e4e2634aec830b2925aac487d6e",
+      "tree_preserved": true
+    }
+  ],
+  "native_execution": false,
+  "original_RED": {
+    "RED_mode_difference": "--red skips only the additive failed-output sentinel assertion; actual I/O error, old destination bytes and fresh-remount oracles remain required. GREEN never skips the sentinel.",
+    "portable_RED_exit": 1,
+    "portable_RED_literal": "OLD_DESTINATION_SURVIVES_FAILED_REPLACE: missing after real remount",
+    "receipt_sha256": "f65db94881019d107879bd099174dfd3e79bf7fe1df911d19fb225d8f8773074"
+  },
+  "persistent_IO_rollback_guaranteed": false,
+  "prior_accepted_tree_preserved": true,
+  "production_preimages": {
+    "shizukudos/kernel64/fat32.c": {
+      "bytes": 45297,
+      "sha256": "dc3dc2fc1023fd3e64a7fe8a42134ee4de538c69f7f2c9a2767205db2528faee"
+    },
+    "shizukudos/kernel64/fat32.h": {
+      "bytes": 9979,
+      "sha256": "dc7c67603d0c250e7639717ca6656e425167be6ca6f3c4fdf899cb8fa5bcc053"
+    }
+  },
+  "remaining_limits": [
+    "General rename to an absent target remains outside this repair.",
+    "Only source/destination chain sharing is checked; this does not repair global namespace crosslinks.",
+    "The transport is byte-memory sector callbacks; no storage barrier, power-loss, journal or durable rollback guarantee.",
+    "Persistent recovery failure requires read-only inspection/recovery before writable remount.",
+    "Actual integrated Kernel64 execution, Office save/reopen and cold-boot profile persistence must be tested separately."
+  ],
+  "resources": {
+    "combined_generation_output_bytes": 6930886,
+    "cumulative_command_seconds": 53.641556886002945,
+    "limits": {
+      "RAM": 6442450944,
+      "admission_remaining_budget": 12981776,
+      "aggregate_seconds": 90,
+      "before_receipt_sampled_high_water": 7646084,
+      "combined_generations_budget": true,
+      "individual_seconds": 60,
+      "minimum_sampled_free": 21761695744,
+      "output_budget": 16777216,
+      "own_RSS": 536870912,
+      "prior_output_bytes": 3795440,
+      "reserve": 21474836480,
+      "sample_period_seconds": 0.05,
+      "sampled_RSS_high_water": 158113792,
+      "transient_overshoot_possible": true
+    }
+  },
+  "review": {
+    "independent_readonly_review": {
+      "additional_concrete_blocker": false,
+      "completed": true,
+      "independent_reviewed_markdown_sha256": "b097f700e7ebbaa71c85aa067ea348b73892b44f8df9ad6ff72ac6ab2981d1c6",
+      "scope": "Exact preimages/two-file five-hunk byte replay, final three source pins, 89 inputs/38 outputs/24 logs, preserved histories, rollback/chain-sharing/order and acceptance limits; no execution or changes."
+    },
+    "root_readonly_input_output_raw_log_byte_closure": true
+  },
+  "schema": "shizukuos.fat32-existing-replacement-source-validation.v1",
+  "scope": "Additive exact-preimage patch and real production FAT host regression. Production files in this worktree and the primary checkout are unchanged by this handoff.",
+  "source_files": {
+    "patches/kernel64/fat32-safe-replace.patch": {
+      "bytes": 13924,
+      "sha256": "4bb296281b52bad6a09dce30039664ce6dab3eb4494e49cee89452bb3c1cf44d"
+    },
+    "shizukudos/tests/test_fat32_replace_failure.c": {
+      "bytes": 22742,
+      "sha256": "01b17d3f3af999b204d2f5b0a4fc2f7eb685e5df9717252757e449cf8c2de023"
+    },
+    "tools/test_fat32_replace_failure.py": {
+      "bytes": 22571,
+      "sha256": "1a3ece589abffac8324a35e4fa82e1df598ab8d221ed9ce23957180f8b917d10"
+    }
+  },
+  "tested_behaviour": [
+    "Existing regular-file replacement retains destination SFN alias, NT case byte and LFN slots.",
+    "Source unlink precedes target publication, including same-sector partial-write callbacks.",
+    "Old chain is freed after namespace writes, then all FAT copies and FSInfo synchronize.",
+    "Recoverable read/write/allocation failure preserves exact old destination after actual temporary-file removal and a fresh FAT mount.",
+    "No new data or directory-name slots needed for existing-target replacement, including full volumes.",
+    "Empty files, fragmented chains, maximum 255-unit source LFN, same/different directories, full/partial write errors, prohibited types and unchanged output on failure are exercised.",
+    "Validated acyclic chains share a suffix exactly when their terminal cluster IDs match; corrupt/shared input disables writes before caller cleanup.",
+    "Oversized source metadata with a shared suffix also disables writes before returning CORRUPT.",
+    "Persistent/torn rollback returns an error and disables further writes; raw outputs explicitly expose remaining orphan/mirror/FSInfo gaps."
+  ],
+  "tested_patched_production": {
+    "shizukudos/kernel64/fat32.c": {
+      "bytes": 54389,
+      "sha256": "d85176e1d88820985a117bd035391fd105d359bc29c1d7ffc451c48632c1cddf"
+    },
+    "shizukudos/kernel64/fat32.h": {
+      "bytes": 10784,
+      "sha256": "4d9aa926b8227d296ab2209e2fa5897b4d1469ac8ed4a6e76c37bf74df99b89f"
+    }
+  }
+}

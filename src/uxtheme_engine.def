@@ -2,6 +2,8 @@ LIBRARY M98THEME.DLL
 EXPORTS
  M98SetThemeStyle=m98e_M98SetThemeStyle
  M98GetThemeStyle=m98e_M98GetThemeStyle
+ ShizukuOSLoadUserTheme=m98e_ShizukuOSLoadUserTheme
+ ShizukuOSSaveUserTheme=m98e_ShizukuOSSaveUserTheme
  OpenThemeData=m98e_OpenThemeData
  CloseThemeData=m98e_CloseThemeData
  IsThemeActive=m98e_IsThemeActive

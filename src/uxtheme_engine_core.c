@@ -4,6 +4,7 @@
  * while still allowing those handles to be closed, as WM_THEMECHANGED requires.
  */
 #include "uxtheme_engine_core.h"
+#include "uxtheme_shizukuos_style.h"
 
 typedef struct m98_theme_slot {
     uint32_t generation;
@@ -77,11 +78,13 @@ void m98_theme_engine_dispose(m98_theme_engine *e)
 ntth_status m98_theme_engine_style(m98_theme_engine *e, uint32_t style)
 {
     ntth_status status;
-    if (!e || style > M98_THEME_MODERN) return NTTH_E_INVALID;
+    if (!e || style > M98_THEME_SHIZUKUOS) return NTTH_E_INVALID;
     if (style == e->style) return NTTH_OK;
     /* Loading even on OFF invalidates the prior style generation. */
     status = style == M98_THEME_CLASSIC ?
         ntth_session_load(e->session, ntth_builtin_classic_text, ntth_builtin_classic_length) :
+        style == M98_THEME_SHIZUKUOS ?
+        ntth_session_load(e->session, m98_shizukuos_style_text, m98_shizukuos_style_length) :
         ntth_session_load(e->session, ntth_builtin_modern_text, ntth_builtin_modern_length);
     if (status == NTTH_OK) e->style = style;
     return status;

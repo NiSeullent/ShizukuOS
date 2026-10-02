@@ -1,0 +1,278 @@
+{
+  "acceptance_rules": [
+    "Freeze current official package/version/architecture/tree hashes and the exact integrated OS/runtime image for each trial.",
+    "Keep standalone Kernel64 and Microsoft-DOS Windows98 controls labeled separately from the real ShizukuDOS replacement target.",
+    "A visible window, a launcher exit, loader import coverage, --version or a source/host test does not establish full app functionality.",
+    "Collect raw input/output, actual app and descendant exit status, independent flushed-file readback, relaunch and cold-boot evidence.",
+    "TLS1.3 must be proved through the actual consumer stack including hostname, expiry and trust rejection cases.",
+    "Record GPU-disabled diagnostic runs separately; WebGL/WebGPU claims require actual backend and output readback.",
+    "No credentials, private Windows media, application packages or runtime binaries belong in the public source commit."
+  ],
+  "actual_windows98_on_shizukudos_app_compatibility_verified": false,
+  "all_current_app_functionality_verified": false,
+  "architecture_contract": "ShizukuDOS replaces MS-DOS for actual Windows98. Kernel32/Kernel64, Supervisor and WDDM are components for this Windows98 path. Standalone Kernel64 execution and original-Microsoft-DOS Windows98 controls do not prove final replacement architecture.",
+  "handoff_order": [
+    "BOOTowner: finishrealShizukuDOSreplacementWindows98 boot/positiveKernel32/64 bridge beforeproductacceptance.",
+    "Appsownercb43: integratecurrentrealports in onefrozenlatestimage, re-run exactOfficeSetSearchPathMode/FirefoxOpenProcessToken/SteamModule32Next walls; retainedfailurelogs unchanged.",
+    "Appsowner: finishLegcord actualsetup/relaunchandnormalexit first, thenauthorizedfixturefunctionalworkflow; source-onlySignal currentinput/nativeaddoninventory lane.",
+    "TLSowner: actualWin98 TCP/TLS1.3 entropy/time/trust/hostname negativecases plus realOSSchannel/WinHTTP/WinINet consumerbinding; Linux componentproof isnotOSorappTLSacceptance.",
+    "Releaseowner: onlymarkeachconcretecurrentapp/function verifiedafterreplacementtargetevidence; officialm98 ISO1.0.0 andmainmerge/sourcepublication areseparateowneractions."
+  ],
+  "historical_runtime_observations": [
+    {
+      "app": "legcord",
+      "evidence_kind": "actual-publisher-standalone-display-observation",
+      "full_app_functionality_verified": false,
+      "guest_os": "ShizukuDOS Kernel64 standalone",
+      "limits": "Network adapter attached does not establish DNS/TLS1.3, authenticated service exchange or app functions. GPU disabled, so not aWebGL/WebGPU acceleration proof.",
+      "real_display_observation": "Welcome/setup then ChooseWindowStyle Step2 of5; setup unfinished in finalscreen0112",
+      "retained_receipt": {
+        "bytes": 67720,
+        "name": "observation.json",
+        "sha256": "ea1e2cf9d0a328183eb2c6a6f54dc58a14721026db5fc58a82c3ca01fbb9ba79"
+      },
+      "version": "1.3.0-x64",
+      "windows98_execution_verified": false
+    },
+    {
+      "app": "signal",
+      "evidence_kind": "NOT_RUN_INPUT_NOT_FOUND_IN_INSPECTED_ROOTS",
+      "full_app_functionality_verified": false,
+      "limits": "Manifest/source/version reference only. NoSignal package, installedinput receipt or actualnativeSignal run found in these inspected applicationroots. This is a scopedabsence observation, not a host-wideproof.",
+      "version": "8.28.0"
+    },
+    {
+      "actual_autorun_result": "K64 autorun: result exited exit=ffffffff faulted=0 reaped=0 after 2200 ms",
+      "app": "libreoffice",
+      "current_source_inference": "No claim that the former missing API remains absent in the latest integrated source. Retest a newly frozen image.",
+      "evidence_kind": "standalone-kernel64-product-command",
+      "full_app_functionality_verified": false,
+      "guest_os": "ShizukuDOS Kernel64 standalone",
+      "limits": "ThisV42 failure belongs to its frozenruntime. Newer cb43 source now hasSetSearchPathMode and otherports; no claim they remain absent in newestsource. Host parser/conversiontests and --version cannot substituteWriter/Calc/Impress workflows.",
+      "observed_first_wall": "sal3.dll needsKERNEL32.SetSearchPathMode: notexported[c0000139]",
+      "retained_receipt": {
+        "bytes": 21904,
+        "name": "result.json",
+        "sha256": "c84d90fbf72e932b760eb62aa93402a3e4fa831985fc327a857129db61b520b7"
+      },
+      "scenario": "console-version-command",
+      "status": "FAIL",
+      "version": "26.8.0",
+      "windows98_execution_verified": false
+    },
+    {
+      "actual_autorun_result": "K64 autorun: result start-failed status=c0000139",
+      "app": "firefox",
+      "current_source_inference": "No claim that the former missing API remains absent in the latest integrated source. Retest a newly frozen image.",
+      "full_app_functionality_verified": false,
+      "guest_os": "ShizukuDOS Kernel64 standalone",
+      "limits": "Current source has realOpenProcessToken; actualnewestintegratedruntime retry is needed. Version-only command is notbrowserUI/functionality.",
+      "observed_first_wall": "mozglue.dll APIsetkernel32.OpenProcessToken absent[c0000139]",
+      "retained_receipt": {
+        "bytes": 18208,
+        "name": "result.json",
+        "sha256": "bf8aae2cd0c3602ff6bd83d7b3f6423f632e53c852ab6fee90fd9e32f3898f1a"
+      },
+      "scenario": "official-console-version-command-only",
+      "status": "FAIL",
+      "version": "157.0",
+      "windows98_execution_verified": false
+    },
+    {
+      "actual_autorun_result": "K64 autorun: result exited exit=0 faulted=0 reaped=0 after 238850 ms",
+      "actual_selected_scope": "Headless localHTML JavaScript6*7 writesDOM42; actualautorun normalexit0/fault0",
+      "app": "chromium",
+      "guest_os": "standaloneKernel64 viaQEMU-kernel",
+      "retained_receipt": {
+        "bytes": 37627,
+        "name": "result.json",
+        "sha256": "7aa0079ee82c01e06fd4117111d05776177eb7c93f16cad1126f809282df0f63"
+      },
+      "windows98_execution_verified": false
+    },
+    {
+      "actual_autorun_result": "K64 autorun: result timeout exit=102 faulted=1 reaped=0 after 500000 ms",
+      "app": "steam",
+      "current_source_inference": "No claim that the former missing API remains absent in the latest integrated source. Retest a newly frozen image.",
+      "full_app_functionality_verified": false,
+      "guest_os": "ShizukuDOS Kernel64 standalone",
+      "limits": "Updater/TLS/download progress does not establishLogin/library/game. CurrentModule32Next sourceexists; retrynewimage afterreal integration.",
+      "observed_loader_walls": [
+        "steamui.dll KERNEL32.Module32Next missing",
+        "crashhandler64.dll WinINet.HttpQueryInfoW DLLnotfound"
+      ],
+      "retained_receipt": {
+        "bytes": 12776,
+        "name": "observation.json",
+        "sha256": "95c5ae17d973fba5f0186527d99e28a832645c9f2959ade7159d2b6d92e42def"
+      },
+      "windows98_execution_verified": false
+    },
+    {
+      "app": "notepad++",
+      "boot_scope": "OriginalMicrosoftDOS IO.SYS control underUEFI/CSMWrap/SeaBIOS/GOP; notShizukuDOS replacement",
+      "guest_os": "actualinstalledMicrosoftWindows98",
+      "limits": {
+        "MSHBIOS_DOS_virtualization_supported": false,
+        "MSHBIOS_warning_retained": true,
+        "Windows_clean_shutdown_verified": false,
+        "armed_retired_threads": 146,
+        "full_project_complete": false,
+        "individual_worker_success_claimed": false,
+        "new_NPEDGOP_cold_reopen_verified": false,
+        "old_NPPGOP_cold_reopen_verified": true,
+        "other_first_chance_exceptions_passed_to_OS": 4,
+        "other_second_chance_exceptions_logged": 0,
+        "requires_native_field_interpreter": true,
+        "secure_events": 1,
+        "unassisted_NPP_exit_verified": false,
+        "verifier_events": 0,
+        "warm_reopen_this_trial_claimed": false,
+        "worker_shutdown_exit_ffffffff_count": 3
+      },
+      "retained_receipt": {
+        "bytes": 15082,
+        "name": "native-gop-latest-npp-cold-keyboard-review.json",
+        "sha256": "e945062ad535c5e2b61f7ee39be91c308d1103b29ff3d44d0f5b2e3455d40175"
+      },
+      "status": "SCOPED-NATIVE-GOP-NPP-COLD-KEYBOARD-PASS",
+      "version": "8.9.8.1"
+    }
+  ],
+  "new_native_execution_by_this_document": false,
+  "observed_utc": "2026-10-01T16:26:05.771598+00:00",
+  "os_tls13_verified": false,
+  "required_execution_matrix": [
+    {
+      "app": "Legcord1.3.0",
+      "current_acceptance": "INCOMPLETE_SETUP_ONLY_STANDALONE",
+      "install": "InstallofficialIA32 orX64 input via actualtargetinstaller/knownportablelayout; preserveoriginalfullpackage digests. Verifyprofile/configwrite andnormalfirstlaunch.",
+      "launch_ui": "Finishreal5-step setup, interactiveDiscordUI/text/input/window repaint, actualwindow integration onWin98. Mandatoryuser Chromium --no-sandbox option recorded; disabledGPU isdiagnostic only.",
+      "meaningful_workflows": "Authorizedtest endpoint/account: send/receive knowntext, exactattachmentbytes, syntheticmic/outputloopback and selectedvoiceworkflow. Thisauditsendsnone.",
+      "network_and_login": "First localcontrolledTLS1.3 trustedhostname success, untrusted/wronghostname/expired rejection and DNS/socketoracles throughactual consumerstack. RealDiscordlogin only with explicitlyauthorizedisolatedtestaccount; noexistingcredential reuse.",
+      "restart": "ColdbootactualShizukuDOSWindows98 path and repeatselectedworkflow withsamepinnedinput.",
+      "save_reopen": "Persistsettings/profile, normalclosewithactualchild+descendantexits, relaunchandverifyconfig/UI."
+    },
+    {
+      "app": "Signal8.28.0",
+      "current_acceptance": "NOT_RUN_INPUT_MISSING",
+      "install": "Acquire officialcurrentX64/ARM64 orcurrent-sourcex86port includinglibsignal/RingRTC/SQLCipher; version/hash/nativeaddonclosure beforetest. NoSignalinputpresent in inspectedroots.",
+      "launch_ui": "Actualtargetinstall, interactiveQR/setup/render/input, realencryptedDB creation andnativeaddons.",
+      "meaningful_workflows": "Authorizedfixturepair: textreceive/send, knownattachmentintegrity, syntheticdeviceaudio and selectedcall. Noactualmessaging/callsperformedbythisaudit.",
+      "network_and_login": "ControlledactualTLS1.3 stack/negativecases; linkonlyexplicitlyauthorizedisolatedmobiletestdevice/account. Do notsubstitutemockserver successfor realSignalserviceacceptance.",
+      "restart": "ColdbootreplacementWindows98path; reopenpersistentencryptedDB/profile, repeatselectedworkflow.",
+      "save_reopen": "Normalexitandreadback encrypteddatabase, reopenexactfixturehistory withrealcrypto; checkrandomness/time/fileflush prerequisites."
+    },
+    {
+      "app": "LibreOffice26.8.0",
+      "current_acceptance": "V42_STANDALONE_VERSION_LOADER_FAIL",
+      "install": "ActualcurrentMSIinstallationandregisteredprofile/fonts/VCdependencies onreplacementtarget, separatelyrecordextractedportable diagnostic layout.",
+      "launch_ui": "Writer/Calc/Impress interactivewindows, menus,input, renderingandtheme. --version/headless conversionalone ispartial.",
+      "meaningful_workflows": "WriterKorean/UnicodeeditODT+DOCX; Calcformula42andODS/XLSX; Impress3slidesODP/PPTX; PDFexport/readback; clipboard/font/theme+printdialog. BaseonlyifclaimedwithJava/driverprerequisite.",
+      "network_and_login": "Coreofflineworkflows require noaccount. ExerciseexplicitownedHTTPS1.3 download/importfixture viaactualOSconsumer ifnetworkfeatureclaimed; do notforceirrelevantlogin.",
+      "restart": "ColdbootreplacementWindows98 and reopenall3fixtureformats, verifyformulas/layoutandnormalexit.",
+      "save_reopen": "Actualappsave/reopen eachdocument; independentODF/XML/formula/PDFcontentchecks fromflushedfreshownedoutput. Existingrun_libreoffice_conversion.py onlypreparedselectedWriterconversion/roundtrip/PDFgate, notactualexecutedOfficeorCalc/ImpressGUI."
+    },
+    {
+      "app": "CurrentChrome/Chromium/Firefox",
+      "current_acceptance": "CHROMIUM_HEADLESS_COMPONENT_PASS_GUI_FAIL_FIREFOX_LOADER_FAIL",
+      "install": "Freezeexactofficialrelease/revision+PEversion+wholepackagehash, actualtargetinstall/profile. Chromiumsnapshot mustnot masqueradeasGoogleChrome stable.",
+      "launch_ui": "ActualWin98GUIpage,input/multiprocessandnormalexit, separatelyretainsuccessfulheadlessDOMsubset.",
+      "meaningful_workflows": "JS/CSS/DOM/Wasm, WebGL2+extensions, WebGPU/WGSL withactualdevice/backend andreadback; multitabnavigation/input/clipboard; actualrendering/hashoracles.",
+      "network_and_login": "OwnedTLS1.3 HTMLfixturepositive/negative, DNS, downloadexactknownbytes; noexternalaccountlogin needed.",
+      "restart": "ColdbootreplacementWindows98 and reopensameprofile/fixture; retestclaimedacceleratedGPU separatelyfrom --disable-gpu diagnostics.",
+      "save_reopen": "Profileprefs/bookmarkanddownloadsave/readback, browsercloseandallchildreap, repeat afterrelaunch."
+    },
+    {
+      "app": "Otherclaimedmodernapps: Notepad++, VLC, officialVSCode, Steam",
+      "current_acceptance": "INDIVIDUAL_SCOPES_ONLY_NO_BROADCOMPATIBILITY_PASS",
+      "install": "Maintainboundedexplicitcurrentversion/hashmatrix perapp; nouniversalallapps label. Code1.140.0 needsnewinput; VSCodium isseparateproduct.",
+      "launch_ui": "Realinteractiveappfunctions onreplacementWin98, notstubexports/staticloader orerrordialog.",
+      "meaningful_workflows": "NPPUnicodeedit/find/save; VLCknownaudio/video playback/seekandactualoutput; Codeedit/save+terminalfixture; Steam authorizedfixturegame launch/input/exit.",
+      "network_and_login": "Ownedlocalnetworkfixtures; externallogin onlyexplicitauthorizedtestfixture; Steamlogin/library/game remainsseparate gate.",
+      "restart": "ColdbootreplacementWin98 and repeatselectedworkflows. NPPcurrentold44B coldreopenproof isretained; new39B reopen+unassistedexit remainpending.",
+      "save_reopen": "Independentflushedfile/configreadback andnormalexit, withfullchildstatus."
+    }
+  ],
+  "schema": "shizukuos.app-acceptance-matrix.v1",
+  "scope": "Audited historical runtime observations plus explicit next acceptance criteria; no new app execution. Versions are observed on this date, not permanently latest.",
+  "shizukudos_ms_dos_replacement_verified": false,
+  "source_audit": {
+    "bytes": 35007,
+    "receipt": "build/publication-20261001/shizukuos-latest-app-native-validation-audit-v1.json",
+    "sha256": "3f8ad8f13259edf8c7455d311472bbda48ea0f3ecf35ef97d91b98abc144b947"
+  },
+  "upstream_versions_observed": [
+    {
+      "app": "Legcord (Discord)",
+      "latest_stable_observed": "1.3.0",
+      "official_architectures_observed": [
+        "ia32",
+        "x64",
+        "arm64"
+      ],
+      "package_digests_source": "https://github.com/Legcord/Legcord/releases/expanded_assets/v1.3.0",
+      "resolved_release": "https://github.com/Legcord/Legcord/releases/tag/v1.3.0",
+      "source": "https://raw.githubusercontent.com/Legcord/Legcord/v1.3.0/package.json",
+      "source_build_node_requirement": ">=26; this is a source-build prerequisite, not proof the packaged application requires a separate Node installation",
+      "upstream_runtime": "Electron43.2.0"
+    },
+    {
+      "app": "Signal Desktop",
+      "latest_stable_observed": "8.28.0",
+      "native_dependencies": {
+        "RingRTC": "2.71.0",
+        "SQLCipher": "4.1.0",
+        "libsignal-client": "0.100.0"
+      },
+      "resolved_release": "https://github.com/signalapp/Signal-Desktop/releases/tag/v8.28.0",
+      "source": "https://raw.githubusercontent.com/signalapp/Signal-Desktop/v8.28.0/package.json",
+      "source_windows_build_architectures": [
+        "x64",
+        "arm64"
+      ],
+      "system_requirements_source": "https://support.signal.org/hc/en-us/articles/360008216551-Installing-Signal",
+      "upstream_runtime": "Electron44.1.0",
+      "upstream_windows_requirement": "Windows10 or11; desktop must link to Signal on Android/iPhone"
+    },
+    {
+      "app": "LibreOffice",
+      "latest_stable_observed": "26.8.0",
+      "official_windows_architectures": [
+        "x64",
+        "arm64"
+      ],
+      "selected_payload_product_resource_version": "26.8.0.3",
+      "source": "https://www.libreoffice.org/download/",
+      "system_requirements_source": "https://www.libreoffice.org/system-requirements/",
+      "upstream_windows_requirement": "WindowsServer2012 through2022, Windows10/11; up to1.5GB disk; optionalJava notably forBase"
+    },
+    {
+      "app": "Firefox",
+      "latest_stable_observed": "157.0",
+      "source": "https://www.firefox.com/en-US/releases/",
+      "system_requirements_source": "https://www.firefox.com/en-US/firefox/157.0/system-requirements/",
+      "upstream_windows_requirement": "Windows10 or later, 32-bit and64-bit"
+    },
+    {
+      "app": "Notepad++",
+      "latest_stable_observed": "8.9.8.1",
+      "source": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/tag/v8.9.8.1"
+    },
+    {
+      "app": "VisualStudioCode",
+      "latest_stable_observed": "1.140.0",
+      "official_windows_architectures": [
+        "x64",
+        "arm64"
+      ],
+      "released": "2026-09-30",
+      "source": "https://code.visualstudio.com/updates/v1_140"
+    },
+    {
+      "app": "VLC",
+      "latest_stable_observed": "3.0.24",
+      "source": "https://download.videolan.org/vlc/last/"
+    }
+  ]
+}

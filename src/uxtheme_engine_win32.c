@@ -100,6 +100,7 @@ DWORD WINAPI m98e_M98GetThemeStyle(void)
     if (SUCCEEDED(enter())) { style = m98_theme_engine_get_style(engine); LeaveCriticalSection(&lock); }
     return style;
 }
+
 BOOL WINAPI m98e_IsThemeActive(void)
 {
     BOOL active = FALSE;

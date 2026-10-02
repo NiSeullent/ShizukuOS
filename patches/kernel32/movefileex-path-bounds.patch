@@ -1,0 +1,21 @@
+--- a/shizukudos/win64/kernel32/k32_file.c
++++ b/shizukudos/win64/kernel32/k32_file.c
+@@ -216,12 +216,17 @@
+     HANDLE h;
+     SHZ_IO_STATUS_BLOCK iosb;
+     WCHAR nt[320];
+-    struct { BYTE replace, pad[7]; HANDLE root; ULONG len; WCHAR name[300]; } ri;
++    struct { BYTE replace, pad[7]; HANDLE root; ULONG len; WCHAR name[320]; } ri;
+     NTSTATUS st;
+     size_t n;
+     st = open_path(from, DELETE, FILE_OPEN_D, 0, &h, 0);
+     if (st) { k32_nt_error(st); return FALSE; }
+     st = k32_dos_to_nt(to, nt, 320);
+     if (st) { NtClose(h); k32_nt_error(st); return FALSE; }
+     n = k32_wlen(nt);
++    if (n > sizeof(ri.name) / sizeof(ri.name[0])) {
++        NtClose(h);
++        shz_set_last_error(ERROR_FILENAME_EXCED_RANGE);
++        return FALSE;
++    }
+     memset(&ri, 0, sizeof ri);

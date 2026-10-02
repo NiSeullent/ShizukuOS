@@ -1,0 +1,244 @@
+--- a/shizukudos/kernel64/fat32.c
++++ b/shizukudos/kernel64/fat32.c
+@@ -928,6 +928,188 @@
+     return rc ? rc : rc2;
+ }
+ 
++/* Existing regular-file replacement keeps the target alias/case/LFN slots.
++ * At most 20 source LFN slots plus its SFN span three sectors; the target SFN
++ * adds at most one. Beforeimages are collected before any namespace write.
++ * Source SFN removal precedes target publication even in the same sector:
++ * a write callback can modify only part of a sector before reporting failure.
++ * This is recoverable-I/O undo, NOT a journal or a power-loss/flush guarantee.
++ */
++struct replace_page {
++    uint64_t lba;
++    uint8_t before[FAT32_SECTOR], after[FAT32_SECTOR];
++    unsigned changed;
++};
++struct replace_undo {
++    struct replace_page pages[4];
++    unsigned count, source_page, source_offset, destination_page;
++};
++static int replace_page_get(fat32_vol_t *v, struct replace_undo *u, uint64_t lba)
++{
++    unsigned i;
++    int rc;
++    for (i = 0; i < u->count; ++i) if (u->pages[i].lba == lba) return (int)i;
++    if (u->count == 4) return FAT32_E_CORRUPT;
++    if ((rc = read_sector(v, lba, u->pages[i].before))) return rc;
++    f32_copy(u->pages[i].after, u->pages[i].before, FAT32_SECTOR);
++    u->pages[i].lba = lba;
++    ++u->count;
++    return (int)i;
++}
++/* Same checksum ownership rule as erase_entry, with no writes during the walk. */
++static int replace_collect_source(fat32_vol_t *v, struct replace_undo *u, uint32_t dir_first,
++                                  uint32_t dir_cluster, uint32_t dir_offset, const uint8_t source[32])
++{
++    uint32_t lc[20], lo[20], cl = dir_first ? dir_first : v->root_cluster, off = 0, guard = 0;
++    unsigned nl = 0, i;
++    const uint8_t sum = short_checksum(source);
++    int rc;
++    for (;;) {
++        const uint8_t *e;
++        if (!valid_cluster(v, cl) || ++guard > 65536 * 32) return FAT32_E_CORRUPT;
++        if (off >= v->bytes_per_cluster) {
++            const uint32_t next = fat32_fat_entry(v, cl);
++            if (next >= EOC) return FAT32_E_CORRUPT;
++            cl = next; off = 0; continue;
++        }
++        if ((rc = bounce(v, fat32_cluster_lba(v, cl) + off / FAT32_SECTOR))) return rc;
++        e = v->sector + off % FAT32_SECTOR;
++        if (!e[0]) return FAT32_E_CORRUPT;
++        if (cl == dir_cluster && off == dir_offset) {
++            for (i = 0; i < 32; ++i) if (e[i] != source[i]) return FAT32_E_CORRUPT;
++            break;
++        }
++        if (e[0] != 0xe5 && (e[11] & 0x3f) == FAT32_ATTR_LFN) {
++            if (e[0] & 0x40) nl = 0;
++            if (nl < 20) { lc[nl] = cl; lo[nl++] = off; }
++        } else nl = 0;
++        off += 32;
++    }
++    for (i = 0; i <= nl; ++i) {
++        const uint32_t c = i < nl ? lc[i] : dir_cluster, o = i < nl ? lo[i] : dir_offset;
++        int page = replace_page_get(v, u, fat32_cluster_lba(v, c) + o / FAT32_SECTOR);
++        uint8_t *e;
++        if (page < 0) return page;
++        e = u->pages[page].after + o % FAT32_SECTOR;
++        if (i < nl && e[13] != sum) continue;
++        e[0] = 0xe5;
++        u->pages[page].changed = 1;
++        if (i == nl) { u->source_page = (unsigned)page; u->source_offset = o % FAT32_SECTOR; }
++    }
++    return FAT32_OK;
++}
++static void replace_chain_values(fat32_vol_t *v, const fat32_chain_t *c, uint32_t last_value, int release)
++{
++    uint32_t i, j;
++    for (i = 0; i < c->nruns; ++i) {
++        const fat32_run_t *r = &c->runs[i];
++        for (j = 0; j < r->count; ++j) {
++            const uint32_t next = j + 1 < r->count ? r->start + j + 1 :
++                                  i + 1 < c->nruns ? c->runs[i + 1].start : last_value;
++            fat_set(v, r->start + j, release ? 0 : next);
++        }
++    }
++}
++static int replace_file(fat32_vol_t *v, uint32_t src_dir, uint32_t src_cluster, uint32_t src_offset,
++                         const uint8_t source[32], const fat32_dirent_t *target, fat32_dirent_t *out)
++{
++    const fat32_dirent_t destination = *target;
++    const uint32_t source_first = ((uint32_t)rd16(source + 20) << 16) | rd16(source + 26);
++    fat32_chain_t old_chain = {0}, new_chain = {0};
++    struct replace_undo *u = 0;
++    uint8_t restore[FAT32_SECTOR];
++    uint32_t old_last = 0, i;
++    unsigned published = 0, freed = 0;
++    int rc, page;
++    if ((source_first && !valid_cluster(v, source_first)) ||
++        (destination.first_cluster && !valid_cluster(v, destination.first_cluster))) {
++        v->write = 0; v->sector_lba = ~0ull; return FAT32_E_CORRUPT;
++    }
++    if ((rc = fat32_chain_build(v, destination.first_cluster, &old_chain))) goto done;
++    if ((rc = fat32_chain_build(v, source_first, &new_chain))) goto done;
++    if ((uint64_t)old_chain.total_clusters * v->bytes_per_cluster < destination.size ||
++        (uint64_t)new_chain.total_clusters * v->bytes_per_cluster < rd32(source + 28)) { rc = FAT32_E_CORRUPT; goto done; }
++    /* Validated FAT next pointers form a functional acyclic graph. If chains
++     * share any cluster they share their suffix, hence the same terminal
++     * cluster. Compare those cluster IDs (not equal EOC values), avoiding a
++     * quadratic run-pair scan for large fragmented documents. */
++    if (old_chain.nruns && new_chain.nruns) {
++        const fat32_run_t *a = &old_chain.runs[old_chain.nruns - 1];
++        const fat32_run_t *b = &new_chain.runs[new_chain.nruns - 1];
++        if (a->start + a->count - 1 == b->start + b->count - 1) { rc = FAT32_E_CORRUPT; goto done; }
++    }
++    if (old_chain.nruns) {
++        const fat32_run_t *last = &old_chain.runs[old_chain.nruns - 1];
++        old_last = fat32_fat_entry(v, last->start + last->count - 1);
++    }
++    u = v->alloc(v->ctx, sizeof *u);
++    if (!u) { rc = FAT32_E_NOMEM; goto done; }
++    f32_zero(u, sizeof *u);
++    if ((rc = replace_collect_source(v, u, src_dir, src_cluster, src_offset, source))) goto done;
++    page = replace_page_get(v, u, fat32_cluster_lba(v, destination.dir_cluster) + destination.dir_offset / FAT32_SECTOR);
++    if (page < 0) { rc = page; goto done; }
++    u->destination_page = (unsigned)page;
++    /* Existing callers end successful mutations with sync. Complete any
++     * already pending FAT/FSInfo updates before this operation's namespace. */
++    if ((rc = fat32_sync(v))) goto done;
++    /* No duplicate live namespace even if a sector is partially written. */
++    page = (int)u->source_page;
++    if ((rc = write_sector(v, u->pages[page].lba, u->pages[page].after))) goto undo;
++    for (i = 0; i < u->count; ++i) if (i != u->source_page && u->pages[i].changed)
++        if ((rc = write_sector(v, u->pages[i].lba, u->pages[i].after))) goto undo;
++    {
++        struct replace_page *p = &u->pages[u->destination_page];
++        uint8_t *e = p->after + destination.dir_offset % FAT32_SECTOR;
++        /* SFN11, NTRes/case12 and LFN checksum/name stay the destination's. */
++        e[11] = source[11]; f32_copy(e + 13, source + 13, 19);
++        published = 1; /* even a failed callback may have changed this sector */
++        if ((rc = write_sector(v, p->lba, p->after))) goto undo;
++    }
++    freed = 1;
++    replace_chain_values(v, &old_chain, old_last, 1);
++    if ((rc = fat32_sync(v))) goto undo;
++    *out = destination;
++    out->attr = source[11]; out->first_cluster = source_first; out->size = rd32(source + 28);
++    out->ctenth = source[13]; out->ctime = rd16(source + 14); out->cdate = rd16(source + 16); out->adate = rd16(source + 18);
++    out->mtime = rd16(source + 22); out->mdate = rd16(source + 24);
++    rc = FAT32_OK;
++    goto done;
++undo:
++    /* Restore every old FAT value into ALL copies before reviving its name.
++     * fat_set preserves reserved bits and reverses free_clusters; allocation
++     * never occurs here, so alloc_hint is unchanged. Every affected sector is
++     * dirty again even if the failed sync had already cleared its dirty bit. */
++    if (freed) {
++        replace_chain_values(v, &old_chain, old_last, 0);
++        if (fat32_sync(v)) goto poison;
++    }
++    if (published) {
++        const struct replace_page *p = &u->pages[u->destination_page];
++        f32_copy(restore, p->before, FAT32_SECTOR);
++        /* Target undo must not resurrect source while target may still
++         * reference it; especially important with same-sector partial I/O. */
++        if (u->destination_page == u->source_page) restore[u->source_offset] = 0xe5;
++        if (write_sector(v, p->lba, restore)) goto poison;
++    }
++    for (i = 0; i < u->count; ++i) if (u->pages[i].changed)
++        if (write_sector(v, u->pages[i].lba, u->pages[i].before)) goto poison;
++    v->sector_lba = ~0ull;
++    goto done;
++poison:
++    /* Persistent/torn recovery is not an atomic-save guarantee. Do not let
++     * caller temp deletion or another mutation free an uncertain live chain.
++     * A fresh read-only inspection/recovery is required before write remount.
++     * Keep the original I/O error; never report a successful rollback. */
++    v->write = 0; v->sector_lba = ~0ull;
++done:
++    /* Caller failure cleanup must not free an already cross-linked/corrupt
++     * source chain. This does not validate every unrelated namespace chain. */
++    if (rc == FAT32_E_CORRUPT) { v->write = 0; v->sector_lba = ~0ull; }
++    if (u) v->free(v->ctx, u, sizeof *u);
++    fat32_chain_free(v, &new_chain); fat32_chain_free(v, &old_chain);
++    return rc;
++}
++
+ int fat32_rename(fat32_vol_t *v, uint32_t src_dir_first, uint32_t dir_cluster, uint32_t dir_offset, uint32_t dst_dir_first,
+                  const uint16_t *name, unsigned name_len, int replace, fat32_dirent_t *out)
+ {
+@@ -935,7 +1117,8 @@
+     const uint32_t src_dir = src_dir_first ? src_dir_first : v->root_cluster;
+     const uint32_t dst_dir = dst_dir_first ? dst_dir_first : v->root_cluster;
+     fat32_dir_t d;
+-    fat32_dirent_t *old = out;                                    /* scratch until make_entry fills it */
++    fat32_dirent_t destination;
++    fat32_dirent_t *old = &destination;                           /* output unchanged until success */
+     uint32_t first;
+     int rc, rc2, is_dir;
+     if (!v->write) return FAT32_E_RDONLY;
+@@ -960,9 +1143,8 @@
+     while ((rc = fat32_dir_next(v, &d, old)) == 1) {
+         if (old->dir_cluster == dir_cluster && old->dir_offset == dir_offset) continue;
+         if (!names_equal_ci(old->name, old->name_len, name, name_len)) continue;
+-        if (!replace || (old->attr & FAT32_ATTR_DIR) || (old->attr & FAT32_ATTR_RO)) return FAT32_E_EXISTS;
+-        if ((rc = fat32_remove(v, dst_dir_first, old->dir_cluster, old->dir_offset))) return rc;
+-        break;
++        if (!replace || is_dir || (old->attr & FAT32_ATTR_DIR) || (old->attr & FAT32_ATTR_RO)) return FAT32_E_EXISTS;
++        return replace_file(v, src_dir_first, dir_cluster, dir_offset, e, old, out);
+     }
+     if (rc < 0) return rc;
+     rc = make_entry(v, dst_dir_first, name, name_len, is_dir, 0, 0, e, dst_dir == src_dir ? dir_cluster : 0,
+--- a/shizukudos/kernel64/fat32.h
++++ b/shizukudos/kernel64/fat32.h
+@@ -16,7 +16,8 @@
+  * directories (long-name entries included, clusters freed), rename and move within the volume (a moved directory's
+  * ".." follows it; an existing file of the new name may be replaced). FAT changes are kept in the
+  * in-memory copy, tracked per FAT sector and written to every FAT copy (plus the FSInfo free count) by
+- * fat32_sync(), which every mutating call ends with, so the volume on disk is consistent after each call.
++ * fat32_sync(), which successful mutating calls end with. The write callback has no storage-barrier or failed-
++ * sector atomicity guarantee: I/O failures and power loss do not imply a consistent or durable volume.
+  * Not supported (by design, documented): FAT12/16, exFAT, GPT, sector sizes != 512, volumes with
+  * FAT mirroring disabled (mounted read-only), code-page conversion of 8.3 names (ASCII only; other bytes are mapped
+  * to '_'), names longer than 255 UTF-16 units, files of 4 GiB or more.
+@@ -135,9 +136,15 @@
+ int fat32_remove(fat32_vol_t *v, uint32_t dir_first_cluster, uint32_t dir_cluster, uint32_t dir_offset);
+ /* Gives the file or directory whose short entry is at (dir_cluster, dir_offset) in src_dir_first the name `name` in
+  * dst_dir_first (the same or another directory; 0 = root). Attributes, times, first cluster and size are kept; a
+- * moved directory's ".." is updated. An existing file of the new name is deleted first when `replace` is set, else
+- * FAT32_E_EXISTS (always for a directory or a read-only file); FAT32_E_NAME for a directory moved into its own
+- * subtree. `out` receives the new entry. */
++ * moved directory's ".." is updated. An existing regular file may be replaced by another regular file when
++ * `replace` is set, retaining the destination's existing spelling, SFN alias, case flags and LFN slots. Old data
++ * clusters are reclaimed only after source unlink and destination metadata writes succeed. Recoverable I/O
++ * errors restore beforeimages and old FAT values before returning the error; persistent rollback errors poison
++ * v->write (read-only) and require inspection/recovery before writable remount. Detected corrupt/shared input
++ * chains also poison writes so failure cleanup cannot free the saved file. This is a source/destination pair
++ * check, not a global namespace crosslink repair. No crash-atomicity or storage-
++ * barrier/durable rollback is promised. FAT32_E_EXISTS without replace, for DIR/RO targets or DIR-over-file;
++ * FAT32_E_NAME for a directory moved into its own subtree. `out` is published only on successful replacement. */
+ int fat32_rename(fat32_vol_t *v, uint32_t src_dir_first, uint32_t dir_cluster, uint32_t dir_offset, uint32_t dst_dir_first,
+                  const uint16_t *name, unsigned name_len, int replace, fat32_dirent_t *out);
+ int fat32_sync(fat32_vol_t *v);                 /* dirty FAT sectors to every FAT copy, FSInfo free count */
