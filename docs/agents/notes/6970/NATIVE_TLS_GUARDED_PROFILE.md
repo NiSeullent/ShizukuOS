@@ -83,6 +83,13 @@ build.py, sspi_native_host_test.py, production C/configuration, ISA gate,
 bridge guard/linker helper and every historical receipt remain unchanged.
 Locally validate source syntax/data only; execute controls/build only in
 the separately admitted hosted runner after independent source review.
+GitHub returned404 for the new dispatch-only workflow registration after
+source5fb1ea9 was pushed. Use the already registered native-provider
+workflow's explicit `build_current_native_tls` dispatch input as a carrier
+for the new reusable TLS job at the same revision. This mode skips the
+old bridge job and leaves its8MiB/256KiB producer unchanged. Existing
+bridge-mode dispatch defaults remain false for this new input. No main
+branch or default-branch configuration change is needed.
 Actual guest verification requires a fresh owner-reviewed DLL/probe-pin
 successor, SSPWATCH/fullDWORD/log contract and native Win98 runtime.
 Default ROOT validation, sockets, OS/K64 routing and applications remain

@@ -22,6 +22,11 @@ name: Native provider PE32 and SDK ABI build
       - ntwin32/secure_transport/i486_gate_test.py
   workflow_dispatch:
     inputs:
+      build_current_native_tls:
+        description: Run the separate reviewed current TLS/SSPI build profile
+        required: false
+        default: false
+        type: boolean
       retain_native_handoff:
         description: Retain verified project PE32 files and their exact source/proof handoff
         required: false
@@ -36,7 +41,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  current-native-tls:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_current_native_tls }}
+    uses: ./.github/workflows/native-tls-build-6970.yml
+
   native-provider-build:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.build_current_native_tls) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     defaults:

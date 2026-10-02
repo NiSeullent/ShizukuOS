@@ -3,6 +3,7 @@ name: Current native TLS and SSPI guarded build
 
 'on':
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
