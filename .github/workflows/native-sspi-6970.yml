@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Prospective native32 SSPI binding only; no OS/native/TLS-app claim or artifacts.
+name: Native32 SSPI provider binding host proof
+
+'on':
+  push:
+    branches: [codex/theme-integration-6970]
+    paths:
+      - .github/workflows/native-sspi-6970.yml
+      - ntwin32/legacy_provider_bridge/test_native_sspi_6970.c
+      - ntwin32/legacy_provider_bridge/test_native_sspi_6970.py
+      - ntwin32/legacy_provider_bridge/host_sspi_6970/**
+      - ntwin32/legacy_provider_bridge/native.c
+      - ntwin32/legacy_provider_bridge/table.c
+      - ntwin32/legacy_provider_bridge/table.h
+      - ntwin32/secure_transport/sspi_native.c
+      - ntwin32/secure_transport/sspi_native.def
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-sspi-6970-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-provider-binding:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Bind unchanged prospective-feature RED or implemented-source GREEN
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import hashlib, os, re, subprocess
+          root = Path.cwd().resolve()
+          expected = os.environ['GITHUB_SHA']
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert re.fullmatch(r'[0-9a-f]{40}', expected) and actual == expected
+          run_id, attempt = os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT']
+          assert run_id.isdigit() and attempt.isdigit()
+          production = root / 'ntwin32/legacy_provider_bridge/native.c'
+          old_sha = '4457ca742c23368f759ef74ed5e45f3a3a119e1c8ab3a6cd4d3ecbc2e7640968'
+          phase = 'red' if hashlib.sha256(production.read_bytes()).hexdigest() == old_sha else 'green'
+          proof = root / 'build/native-sspi-6970' / f'actions-{run_id}-{attempt}-{phase}'
+          assert not proof.exists()
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write(f'PMA_NATIVE_SSPI_PHASE={phase}\nPMA_NATIVE_SSPI_PROOF={proof}\n')
+          print(f'Exact checkout {actual}; phase {phase}; proof {proof}')
+          PYTHON
+
+      - name: Execute both full production translation units with loader boundaries
+        run: |
+          python3 -B ntwin32/legacy_provider_bridge/test_native_sspi_6970.py --phase "$PMA_NATIVE_SSPI_PHASE" --output-root "$PMA_NATIVE_SSPI_PROOF"
+
+      - name: Record the bounded assertion receipt without uploading binaries
+        if: always()
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import hashlib, json, os, stat
+          root = Path.cwd().resolve()
+          value = os.environ.get('PMA_NATIVE_SSPI_PROOF')
+          if not value:
+              print('Proof setup did not finish; no result adopted.')
+              raise SystemExit(0)
+          proof = Path(value)
+          assert proof.parent == root / 'build/native-sspi-6970'
+          path = proof / 'result.json'
+          if not path.exists():
+              print('No receipt; no compile or assertion result adopted.')
+              raise SystemExit(0)
+          assert not path.is_symlink()
+          info = path.stat()
+          assert stat.S_ISREG(info.st_mode) and info.st_size <= 262144
+          data = path.read_bytes()
+          result = json.loads(data)
+          print('Receipt SHA256:', hashlib.sha256(data).hexdigest())
+          print(data.decode(), end='')
+          incomplete_failure = (
+              result.get('result') == 'FAIL'
+              and result.get('receipt_accounting_verified') is False
+              and isinstance(result.get('error'), str)
+              and (
+                  set(result) == {'result', 'receipt_accounting_verified', 'error'}
+                  or result.get('schema') == 'native-sspi-host-invalid-receipt-v1'
+              )
+          )
+          if incomplete_failure:
+              print('Incomplete failure receipt; no successful result adopted.')
+          else:
+              for key in (
+                  'native_execution_verified', 'windows98_integration_verified',
+                  'network_execution_verified', 'os_tls_provider_verified',
+                  'application_compatibility_verified', 'actual_windows_dll_abi_verified',
+                  'os_registration_verified', 'kernel64_backend_verified',
+                  'credential_execution_verified', 'concurrent_join_verified',
+                  'real_provider_dll_execution_verified', 'abi_reference_compiled_or_executed',
+              ):
+                  assert result[key] is False
+          for name in ('host-run.stdout', 'host-run.stderr', 'sanitizer-run.stdout', 'sanitizer-run.stderr'):
+              capture = proof / name
+              if capture.exists():
+                  assert not capture.is_symlink() and capture.stat().st_size <= 262144
+                  print(f'Actual {name}:')
+                  print(capture.read_text(), end='')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f"Production native32 SSPI binding assertion verdict: {result['result']}\n\n")
+              stream.write('Loader binding fixture only; OS registration, native DLL/ROOT, K64 service, credential/TLS and application execution remain unverified.\n')
+          PYTHON

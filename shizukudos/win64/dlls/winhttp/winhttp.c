@@ -246,7 +246,9 @@ DLLAPI BOOL WINAPI WinHttpCrackUrl(LPCWSTR url, DWORD len, DWORD flags, LPURL_CO
     {
         const WCHAR *q;
         for (q = path; q < end && *q != '?' && *q != '#'; ++q) ;
-        SET(lpszUrlPath, dwUrlPathLength, path, (size_t)(q - path));
+        /* NULL plus nonzero length requests a borrowed ExtraInfo field. */
+        const WCHAR *path_end = (uc->lpszExtraInfo || uc->dwExtraInfoLength) ? q : end;
+        SET(lpszUrlPath, dwUrlPathLength, path, (size_t)(path_end - path));
         SET(lpszExtraInfo, dwExtraInfoLength, q, (size_t)(end - q));
     }
 #undef SET

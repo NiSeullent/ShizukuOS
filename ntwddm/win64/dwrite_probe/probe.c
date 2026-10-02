@@ -68,29 +68,51 @@ static int same_face_file(IDWriteFontFace *face) {
     }
     return ok;
 }
-typedef struct Renderer { IDWriteTextRenderer iface;volatile LONG refs;IDWriteBitmapRenderTarget *target;IDWriteRenderingParams *params;const WCHAR *chars;const UINT16 *expected;UINT32 count,seen,shape_errors; } Renderer;
+typedef struct Renderer { IDWriteTextRenderer iface;volatile LONG refs;IDWriteBitmapRenderTarget *target;IDWriteRenderingParams *params;const WCHAR *chars;const UINT16 *expected;UINT32 count,seen,shape_errors,row; } Renderer;
 static ULONG STDMETHODCALLTYPE render_add(IDWriteTextRenderer *p) { return increment(&((Renderer*)p)->refs); }
 static ULONG STDMETHODCALLTYPE render_release(IDWriteTextRenderer *p) { return decrement(&((Renderer*)p)->refs); }
 static HRESULT STDMETHODCALLTYPE render_query(IDWriteTextRenderer *p,REFIID id,void **out) { if(!out)return E_POINTER;*out=0;if(equal(id,&IID_IUnknown,sizeof *id)||equal(id,&IID_IDWriteTextRenderer,sizeof *id)||equal(id,&IID_IDWritePixelSnapping,sizeof *id)){*out=p;render_add(p);return S_OK;}return E_NOINTERFACE; }
 static HRESULT STDMETHODCALLTYPE render_snapping(IDWriteTextRenderer *p,void *ctx,BOOL *disabled) { (void)p;(void)ctx;if(!disabled)return E_POINTER;*disabled=FALSE;return S_OK; }
 static HRESULT STDMETHODCALLTYPE render_transform(IDWriteTextRenderer *p,void *ctx,DWRITE_MATRIX *m) { (void)p;(void)ctx;if(!m)return E_POINTER;zero(m,sizeof *m);m->m11=m->m22=1.0f;return S_OK; }
 static HRESULT STDMETHODCALLTYPE render_dip(IDWriteTextRenderer *p,void *ctx,FLOAT *dip) { (void)p;(void)ctx;if(!dip)return E_POINTER;*dip=1.0f;return S_OK; }
+static void render_skipped(Renderer *r,const char *reason) {
+    text("DW64 DRAW SKIPPED row=");number(r->row);text(" reason=");text(reason);
+    text(" errors=");number(r->shape_errors);text("\r\n");
+}
 static HRESULT STDMETHODCALLTYPE render_glyphs(IDWriteTextRenderer *p,void *ctx,FLOAT x,FLOAT y,DWRITE_MEASURING_MODE mode,const DWRITE_GLYPH_RUN *run,const DWRITE_GLYPH_RUN_DESCRIPTION *desc,IUnknown *effect) {
-    Renderer *r=(Renderer*)p;UINT32 i;RECT bounds;(void)ctx;(void)effect;
-    if(!run||!run->fontFace||!run->glyphIndices||!run->glyphCount||run->glyphCount>64)return E_INVALIDARG;
+    Renderer *r=(Renderer*)p;UINT32 i;RECT bounds;HRESULT hr;(void)ctx;(void)effect;
+    if(!run||!run->fontFace||!run->glyphIndices||!run->glyphCount||run->glyphCount>64){render_skipped(r,"invalid-run");return E_INVALIDARG;}
     ++callback_runs;callback_glyphs+=run->glyphCount;if(!same_face_file(run->fontFace))++wrong_faces;
     for(i=0;i<run->glyphCount;++i)if(!run->glyphIndices[i])++missing_glyphs;
     if(!desc||!desc->string||!desc->clusterMap||desc->stringLength!=run->glyphCount||desc->textPosition>r->count||desc->stringLength>r->count-desc->textPosition||run->isSideways||(run->bidiLevel&1)){
-        ++r->shape_errors;return E_FAIL;
+        ++r->shape_errors;render_skipped(r,"invalid-description");return E_FAIL;
     }
     for(i=0;i<run->glyphCount;++i){
-        UINT32 position=desc->textPosition+i,bit=1u<<position;
-        if((r->seen&bit)||desc->clusterMap[i]!=i||desc->string[i]!=r->chars[position]||run->glyphIndices[i]!=r->expected[position])++r->shape_errors;
+        UINT32 position=desc->textPosition+i,bit=1u<<position,mask=0;
+        /* Diagnostic bits preserve the existing one-error-per-position rule. */
+        if(r->seen&bit)mask|=1u;
+        if(desc->clusterMap[i]!=i)mask|=2u;
+        if(desc->string[i]!=r->chars[position])mask|=4u;
+        if(run->glyphIndices[i]!=r->expected[position])mask|=8u;
+        if(mask){
+            ++r->shape_errors;
+            text("DW64 MISMATCH row=");number(r->row);text(" position=");number(position);
+            text(" local=");number(i);text(" text_position=");number(desc->textPosition);
+            text(" mask=");hex(mask);text(" expected_utf16=");hex(r->chars[position]);
+            text(" actual_utf16=");hex(desc->string[i]);text(" expected_glyph=");number(r->expected[position]);
+            text(" actual_glyph=");number(run->glyphIndices[i]);text(" expected_cluster=");number(i);
+            text(" actual_cluster=");number(desc->clusterMap[i]);text(" seen=");hex(r->seen);
+            text(" bit=");hex(bit);text("\r\n");
+        }
         r->seen|=bit;
     }
     check(!r->shape_errors,"layout_callback_exact_private_cmap_utf16_and_cluster_order");
-    if(r->shape_errors)return E_FAIL;
-    return IDWriteBitmapRenderTarget_DrawGlyphRun(r->target,x,y,mode,run,r->params,RGB(15,35,65),&bounds);
+    if(r->shape_errors){render_skipped(r,"shape-errors");return E_FAIL;}
+    text("DW64 DRAW CALL row=");number(r->row);text(" text_position=");number(desc->textPosition);
+    text(" string_length=");number(desc->stringLength);text(" glyphs=");number(run->glyphCount);text("\r\n");
+    hr=IDWriteBitmapRenderTarget_DrawGlyphRun(r->target,x,y,mode,run,r->params,RGB(15,35,65),&bounds);
+    text("DW64 DRAW RETURN row=");number(r->row);text(" hr=");hex((unsigned)hr);text("\r\n");
+    return hr;
 }
 static HRESULT STDMETHODCALLTYPE render_underline(IDWriteTextRenderer *p,void *ctx,FLOAT x,FLOAT y,const DWRITE_UNDERLINE *u,IUnknown *effect) { (void)p;(void)ctx;(void)x;(void)y;(void)u;(void)effect;return E_NOTIMPL; }
 static HRESULT STDMETHODCALLTYPE render_strike(IDWriteTextRenderer *p,void *ctx,FLOAT x,FLOAT y,const DWRITE_STRIKETHROUGH *u,IUnknown *effect) { (void)p;(void)ctx;(void)x;(void)y;(void)u;(void)effect;return E_NOTIMPL; }
@@ -161,7 +183,7 @@ static void layout_trial(IDWriteFactory *factory,IDWriteFontCollection *collecti
     zero(&renderer,sizeof renderer);renderer.iface.lpVtbl=&renderer_vtable;renderer.refs=1;renderer.target=target;renderer.params=params;renderer_live=1;
     for(row=0;row<2;++row){
         IDWriteTextLayout *layout=0;DWRITE_TEXT_METRICS metrics;HDC dc=IDWriteBitmapRenderTarget_GetMemoryDC(target);const WCHAR *chars=row?korean:latin;unsigned count=row?8:2;before=callback_glyphs;
-        renderer.chars=chars;renderer.expected=row?expected_korean_layout:expected_latin_layout;renderer.count=count;renderer.seen=renderer.shape_errors=0;
+        renderer.chars=chars;renderer.expected=row?expected_korean_layout:expected_latin_layout;renderer.count=count;renderer.seen=renderer.shape_errors=0;renderer.row=row;
         check(dc!=0,"actual_dwrite_memory_dc");if(!dc)break;
         check(PatBlt(dc,0,0,WIDTH,ROW_HEIGHT,WHITENESS)&&GdiFlush(),"clear_real_dwrite_target");
         if(!result(IDWriteFactory_CreateTextLayout(factory,chars,count,format,WIDTH-16.0f,ROW_HEIGHT,&layout),row?"create_korean_text_layout":"create_latin_text_layout")||!layout)continue;

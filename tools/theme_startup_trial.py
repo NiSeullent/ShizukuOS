@@ -38,6 +38,7 @@ QUOTA = 256 * 1024**2
 OUTPUT_LIMIT = 16 * 1024**2
 MAX_INI = 64 * 1024
 SOURCE_FILES = ("tools/theme_startup_trial.py", "tests/test_theme_startup_trial.py",
+                "tools/theme_native_runner.py", "tests/test_theme_native_runner.py",
                 "ntwddm/win98/theme_startup/launcher.c", "ntwddm/win98/theme_startup/launcher_mock_test.c",
                 "ntwddm/win98/theme_probe/observer_mock.h", "benchmarks/win98se-ko-oem-native-exports-v1.json")
 
@@ -211,8 +212,19 @@ def validate_manifest(plan):
     return manifest
 
 
-def apply_startup(disk, run_dir, partition, args, plan, cow, ensure_unopened, *, provenance):
+def apply_startup(disk, run_dir, partition, args, plan, cow, ensure_unopened, *, provenance, host_guard=None):
     """Called after unchanged canonical input preparation, before QEMU launch."""
+    def startup_command(argv):
+        if host_guard:
+            host_guard.check("before-INI-preparation-command")
+        try:
+            return command(argv)
+        finally:
+            if host_guard:
+                host_guard.check("after-INI-preparation-command")
+
+    if host_guard:
+        host_guard.check("before-INI-preparation")
     run_dir = safe(run_dir)
     disk = safe(disk)
     require(run_dir == safe(plan["run_directory"]) and disk == run_dir / "windows-uefi.raw", "Owned run/disk path mismatch")
@@ -239,7 +251,7 @@ def apply_startup(disk, run_dir, partition, args, plan, cow, ensure_unopened, *,
     for item in manifest["inputs"]:
         target = run_dir / ("startup-input-" + Path(item["source"]).name)
         require(not target.exists(), "Startup readback path is stale")
-        command(["mcopy", "-i", spec, "::/VXDLAB/" + Path(item["source"]).name, target])
+        startup_command(["mcopy", "-i", spec, "::/VXDLAB/" + Path(item["source"]).name, target])
         require(sha(target) == item["sha256"], "Prepared startup artifact differs")
     original = run_dir / "startup-before-WIN.INI"
     replacement = run_dir / "startup-edited-WIN.INI"
@@ -247,13 +259,13 @@ def apply_startup(disk, run_dir, partition, args, plan, cow, ensure_unopened, *,
     receipt_path = run_dir / "automatic-startup-preparation.json"
     require(not any(x.exists() for x in (original, replacement, readback, receipt_path)), "Startup preparation evidence already exists")
     sectors(disk, partition)
-    command(["mcopy", "-i", spec, GUEST_INI, original])
+    startup_command(["mcopy", "-i", spec, GUEST_INI, original])
     data = bounded(original, MAX_INI)
     require(sha(original) == plan["source_win_ini_sha256"] and
             sha(run_dir / "before-install-WIN.INI") == sha(original), "Original INI differs from plan/canonical backup")
     patched, edit = insert_empty_run(data)
     require(hashlib.sha256(patched).hexdigest() == plan["edited_win_ini_sha256"], "Planned INI patch differs")
-    attributes = command(["mattrib", "-i", spec, GUEST_INI])
+    attributes = startup_command(["mattrib", "-i", spec, GUEST_INI])
     require(re.fullmatch(rb"\s*A\s+::/WINDOWS/WIN.INI\r?\n", attributes) is not None,
             "Only the verified archive-only writable INI attribute is supported")
     baseline = cow.observe_allocations(disk)
@@ -268,10 +280,10 @@ def apply_startup(disk, run_dir, partition, args, plan, cow, ensure_unopened, *,
     try:
         require(identity(disk) == before_identity, "Owned disk identity changed before write")
         record["write_attempted"] = True
-        command(["mcopy", "-o", "-i", spec, replacement, GUEST_INI])
-        command(["mcopy", "-i", spec, GUEST_INI, readback])
+        startup_command(["mcopy", "-o", "-i", spec, replacement, GUEST_INI])
+        startup_command(["mcopy", "-i", spec, GUEST_INI, readback])
         require(bounded(readback, MAX_INI) == patched, "INI readback differs from exact planned bytes")
-        require(command(["mattrib", "-i", spec, GUEST_INI]) == attributes, "INI attributes changed")
+        require(startup_command(["mattrib", "-i", spec, GUEST_INI]) == attributes, "INI attributes changed")
         record["boot_sectors_after"] = sectors(disk, partition)
         after = cow.observe_allocations(disk)
         growth = cow.net_exclusive_growth_bytes(baseline, after)
@@ -284,19 +296,51 @@ def apply_startup(disk, run_dir, partition, args, plan, cow, ensure_unopened, *,
                       cow_net_exclusive_growth_bytes=growth, cow_quota_bytes=QUOTA, free_bytes=free,
                       reserve_bytes=RESERVE, cow_baseline=baseline.to_dict(), cow_after=after.to_dict(),
                       allocation_scope="separate stopped prelaunch INI change; native VM COW baseline/guard remain unchanged")
+        if host_guard:
+            host_guard.write_receipt(receipt_path, record, "automatic-startup-preparation-receipt")
+        else:
+            write_json_new(receipt_path, record)
     except BaseException as error:
+        record["status"] = "FAIL"
         record["error"] = str(error)
         if record["write_attempted"] and identity(disk) == before_identity:
             try:
-                command(["mcopy", "-o", "-i", spec, original, GUEST_INI])
-                rollback = run_dir / "startup-rollback-WIN.INI"
-                command(["mcopy", "-i", spec, GUEST_INI, rollback])
-                record["INI_rollback_matches_original"] = bounded(rollback, MAX_INI) == data
+                if host_guard and host_guard.failure:
+                    # Preserve FAIL, but restore the exact owned guest bytes without
+                    # adding another host readback file after the observed overshoot.
+                    ensure_unopened(disk)
+                    require(identity(disk) == before_identity and disk.stat().st_nlink == 1 and
+                            bounded(original, MAX_INI) == data, "Resource rollback identity/backup changed")
+                    require(shutil.disk_usage(run_dir).free >= RESERVE + QUOTA, "Resource rollback reserve floor")
+                    source_guard(plan)
+                    sectors(disk, partition)
+                    before = cow.observe_allocations(disk)
+                    require(cow.net_exclusive_growth_bytes(baseline, before) <= QUOTA, "Resource rollback COW quota")
+                    command(["mcopy", "-o", "-i", spec, original, GUEST_INI])
+                    restored = command(["mtype", "-i", spec, GUEST_INI])
+                    require(restored == data and identity(disk) == before_identity, "Resource rollback readback/identity mismatch")
+                    sectors(disk, partition)
+                    after = cow.observe_allocations(disk)
+                    require(cow.net_exclusive_growth_bytes(baseline, after) <= QUOTA and
+                            shutil.disk_usage(run_dir).free >= RESERVE + QUOTA, "Resource rollback COW/space bound")
+                    record.update(INI_rollback_matches_original=True, rollback_host_readback_added=False,
+                                  host_output_failure_remains_latched=True)
+                else:
+                    startup_command(["mcopy", "-o", "-i", spec, original, GUEST_INI])
+                    rollback = run_dir / "startup-rollback-WIN.INI"
+                    startup_command(["mcopy", "-i", spec, GUEST_INI, rollback])
+                    record["INI_rollback_matches_original"] = bounded(rollback, MAX_INI) == data
             except Exception as rollback_error:
                 record["rollback_error"] = str(rollback_error)
-        write_json_new(receipt_path, record)
+        if host_guard:
+            try:
+                host_guard.write_receipt(receipt_path, record, "automatic-startup-preparation-receipt")
+            except RuntimeError:
+                if not host_guard.failure:
+                    raise
+        else:
+            write_json_new(receipt_path, record)
         raise
-    write_json_new(receipt_path, record)
     return record
 
 
@@ -308,9 +352,44 @@ def load_module(path, name):
     return module
 
 
-def build_bootstrap(root):
-    build = root / "build" / ("theme-startup-bootstrap-" + uuid.uuid4().hex[:12])
+def host_output_guard(plan, consumer):
+    """Bind the four fresh output roots and the current guard source to a plan."""
+    root = safe(plan.get("owner_root", ""))
+    require(root == ROOT, "Startup owner root differs from this source checkout")
+    peer = safe(plan.get("peer_root", ""))
+    stage = safe(Path(plan.get("guest_manifest", "")).parent)
+    require(stage.is_dir() and stage.is_relative_to(peer / "build") and
+            stage.name.startswith("theme-entry6970-autostart-"), "Stage host-output scope")
+    destination = safe(plan.get("run_directory", ""), exists=False)
+    consumer_dir = safe(plan.get("consumer_directory", ""), exists=False)
+    require(destination.parent == root / "build/theme-native-runs" and
+            re.fullmatch(r"win98-gop-theme-6970-autostart-[A-Za-z0-9_-]+", destination.name), "Run host-output scope")
+    require(consumer_dir.parent == root / "build" and
+            consumer_dir.name.startswith("theme-native-consumer-6970-autostart-"), "Consumer host-output scope")
+    require(not destination.exists() and not consumer_dir.exists(), "Host-output consumer/run is stale")
+    bootstrap = safe(plan.get("bootstrap_build_directory", ""))
+    require(bootstrap.is_dir() and bootstrap.parent == root / "build" and
+            re.fullmatch(r"theme-startup-bootstrap-[0-9a-f]{12}", bootstrap.name), "Bootstrap host-output scope")
+    require(plan.get("host_output_guard_source_sha256") == sha(root / "tools/theme_native_runner.py"),
+            "Host-output guard source changed or is absent from the plan")
+    expected = {"schema": 1, "roots": [str(p) for p in (stage, consumer_dir, destination, bootstrap)],
+                "excluded_private_cow": str(destination / "windows-uefi.raw"),
+                "limit_bytes": OUTPUT_LIMIT, "reserve_bytes": RESERVE}
+    require(plan.get("host_output_budget") == expected, "Exact source-bound combined host-output budget required")
+    try:
+        return consumer.HostOutputGuard([stage, consumer_dir, destination, bootstrap],
+                                        destination / "windows-uefi.raw", limit=OUTPUT_LIMIT, reserve=RESERVE)
+    except consumer.ConsumerError as error:
+        raise StartupError(str(error)) from error
+
+
+def build_bootstrap(root, *, build_dir=None, host_guard=None):
+    build = build_dir or root / "build" / ("theme-startup-bootstrap-" + uuid.uuid4().hex[:12])
+    if host_guard:
+        host_guard.check("before-bootstrap-build")
     build.mkdir()
+    if host_guard:
+        host_guard.check("after-bootstrap-directory")
     sources = {name: sha(root / name) for name in SOURCE_FILES}
     compilers = {}
     commands = []
@@ -320,9 +399,15 @@ def build_bootstrap(root):
                            "version": command([resolved, "--version"]).decode().splitlines()[0]}
 
     def build_command(argv):
-        result = command(argv)
-        commands.append([str(x) for x in argv])
-        return result
+        if host_guard:
+            host_guard.check("before-bootstrap-command")
+        try:
+            result = command(argv)
+            commands.append([str(x) for x in argv])
+            return result
+        finally:
+            if host_guard:
+                host_guard.check("after-bootstrap-command")
     host_results = {}
     for name, flags in (("host", []), ("sanitizer", ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"])):
         artifact = build / ("bootstrap-" + name)
@@ -346,6 +431,8 @@ def build_bootstrap(root):
               "native_win98": "NOT-TESTED", "automatic_startup": "NOT-VERIFIED",
               "scope": "argument-free bootstrap; unchanged observer/child/theme acceptance remains separate"}
     write_json_new(build / "result.json", result)
+    if host_guard:
+        host_guard.check("after-bootstrap-receipt")
     return build, result
 
 
@@ -358,12 +445,19 @@ def prepare(args):
     consumer_dir = safe(args.consumer_dir, exists=False)
     require(base.is_relative_to(peer / "build/shizukudos/csm") and stage.is_relative_to(peer / "build") and
             stage.name.startswith("theme-entry6970-autostart-") and not stage.exists(), "Fresh owned stage/base scope")
-    require(consumer_dir.is_relative_to(root / "build") and not consumer_dir.exists(), "Fresh owned consumer required")
+    require(consumer_dir.parent == root / "build" and
+            consumer_dir.name.startswith("theme-native-consumer-6970-autostart-") and
+            not consumer_dir.exists(), "Fresh owned consumer required")
     require(re.fullmatch(r"win98-gop-theme-6970-autostart-[A-Za-z0-9_-]+", args.run_name), "Fresh owned run name")
     run_dir = root / "build/theme-native-runs" / args.run_name
     require(not run_dir.exists(), "Owned automatic run already exists")
     consumer_source = root / "tools/theme_native_runner.py"
     consumer = load_module(consumer_source, "theme_startup_consumer_prepare")
+    build_dir = root / "build" / ("theme-startup-bootstrap-" + uuid.uuid4().hex[:12])
+    host_guard = consumer.HostOutputGuard([stage, consumer_dir, run_dir, build_dir], run_dir / "windows-uefi.raw",
+                                          limit=OUTPUT_LIMIT, reserve=RESERVE)
+    host_guard.check("before-startup-preparation")
+    require(shutil.disk_usage(root / "build").free >= RESERVE + QUOTA + OUTPUT_LIMIT, "Preparation reserve floor")
     consumer.ensure_unopened(base / "windows-uefi.raw")
     prior = json.loads(bounded(base / "result.json", 8 * 1024**2))
     require(prior.get("status") in ("PASS", "NEEDS-VISUAL-REVIEW") and prior.get("qemu_exit_code") == 0 and
@@ -377,11 +471,13 @@ def prepare(args):
     for name in NAMES[:-1]:
         item = next(x for x in old_manifest["inputs"] if Path(x["source"]).name == name)
         require(sha(old / name) == item["sha256"], "Frozen theme artifact differs")
-    build_dir, bootstrap = build_bootstrap(root)
+    build_dir, bootstrap = build_bootstrap(root, build_dir=build_dir, host_guard=host_guard)
     require(shutil.disk_usage(root / "build").free >= RESERVE + QUOTA, "Preparation reserve floor")
     stage.mkdir(mode=0o700)
     ini = stage / "source-WIN.INI"
+    host_guard.check("before-source-INI-readback")
     command(["mcopy", "-i", str(base / "windows-uefi.raw") + "@@" + str(prior["partition"]["start_lba"] * 512), GUEST_INI, ini])
+    host_guard.check("after-source-INI-readback")
     patched, edit = insert_empty_run(bounded(ini, MAX_INI))
     write_new(stage / "expected-WIN.INI", patched)
     nonce = secrets.token_hex(16)
@@ -393,6 +489,7 @@ def prepare(args):
     shutil.copyfile(build_dir / "result.json", stage / "bootstrap-build-result.json")
     write_new(stage / "consumer-source.py", timeout_adaptation(bounded(consumer_source, 2 * 1024**2), canonical=False))
     shutil.copyfile(Path(__file__), stage / "startup-source.py")
+    host_guard.check("after-startup-stage-copies")
     manifest = {"schema": 1, "kind": "isolated-guest-file-inputs",
                 "inputs": [{"source": str(stage / name), "guest": GUEST_DIR + name,
                             "bytes": (stage / name).stat().st_size, "sha256": sha(stage / name)} for name in NAMES],
@@ -408,7 +505,6 @@ def prepare(args):
     peer_sources = {name: {"path": str(peer / relative), "sha256": sha(peer / relative)}
                     for name, relative in consumer.SOURCE_FILES.items()}
     sources += list(peer_sources.values())
-    sources.append({"path": str(consumer_source), "sha256": sha(consumer_source)})
     functions = consumer.reviewed_functions(bounded(peer / consumer.SOURCE_FILES["adapter"], 2 * 1024**2))
     private_sha = hashlib.sha256(timeout_adaptation(functions["private_reflink_runner"](
         bounded(peer / consumer.SOURCE_FILES["canonical"], 2 * 1024**2)), canonical=True)).hexdigest()
@@ -435,6 +531,10 @@ def prepare(args):
             "consumer_source": str(stage / "consumer-source.py"), "consumer_arguments": consumer_args,
             "reserve_bytes": RESERVE, "cow_quota_bytes": QUOTA, "runtime_bound_seconds": 1200,
             "output_limit_bytes": OUTPUT_LIMIT,
+            "bootstrap_build_directory": str(build_dir),
+            "host_output_guard_source_sha256": sha(consumer_source),
+            "host_output_budget": host_guard.configuration(),
+            "host_output_preparation_observation": host_guard.check("before-startup-plan-write"),
             "private_timeout_adaptation": "Only the two privately frozen parser upper bounds change from 900 to explicitly authorized 1200 seconds; shared source and all other guards unchanged",
             "vm_started": False, "startup_execution": "NOT-VERIFIED",
             "scope": "additional one-value WIN.INI mutation only on fresh owned COW clone; observer/child/style gates unchanged",
@@ -442,6 +542,7 @@ def prepare(args):
                                           "https://www.pcjs.org/documents/books/mspl13/win/w3sdkart/"],
             "startup_semantics_limit": "Only an executable path is inserted. Bootstrap creates the exact argument-bearing observer command; native startup is not yet verified."}
     write_json_new(stage / "startup-plan.json", plan)
+    host_guard.check("after-startup-plan-write")
     source_guard(plan)
     validate_manifest(plan)
     for path in stage.iterdir():
@@ -450,7 +551,8 @@ def prepare(args):
     print(json.dumps({"status": "PREPARED-NATIVE-UNVERIFIED", "vm_started": False, "nonce": nonce,
                       "manifest": str(stage / "guest-files.json"), "manifest_sha256": sha(stage / "guest-files.json"),
                       "plan": str(stage / "startup-plan.json"), "plan_sha256": sha(stage / "startup-plan.json"),
-                      "bootstrap_receipt": str(build_dir / "result.json")}, indent=2))
+                      "bootstrap_receipt": str(build_dir / "result.json"),
+                      "host_output_budget": host_guard.check("prepared-startup-stage")}, indent=2))
 
 
 def execute_plan(path, selected_sha):
@@ -471,6 +573,8 @@ def execute_plan(path, selected_sha):
     consumer = load_module(safe(plan["consumer_source"]), "theme_startup_pinned_consumer")
     consumer.ROOT = root
     consumer.OUTPUT_ROOT = root / "build/theme-native-runs"
+    host_guard = host_output_guard(plan, consumer)
+    host_guard.check("before-startup-execution")
     original_configure = consumer.configure_runner
     original_reviewed = consumer.reviewed_functions
     startup_state = {}
@@ -481,18 +585,23 @@ def execute_plan(path, selected_sha):
         functions["private_reflink_runner"] = lambda value: timeout_adaptation(original_reflink(value), canonical=True)
         return functions
 
-    def configure(private, cow_path, functions, peer):
-        runner, cow, state = original_configure(private, cow_path, functions, peer)
+    def configure(private, cow_path, functions, peer, *, host_guard=None):
+        require(host_guard is not None, "Combined host-output guard must reach the native runner")
+        runner, cow, state = original_configure(private, cow_path, functions, peer, host_guard=host_guard)
         require(sha(private) == plan["private_runner_sha256"], "Private canonical runner changed")
         original_reuse, original_prepare = runner.reuse_prepared, runner.prepare_guest_files
         original_command = runner.command
 
         def guarded_command(argv, cwd=None, timeout=120):
+            host_guard.check("before-startup-command")
             target = Path(argv[-1]) if argv else Path("/")
             allowed = {"guest-output-" + name for name in OUTPUTS}
-            if argv and str(argv[0]) == "mcopy" and target.parent == Path(plan["run_directory"]) and target.name in allowed:
-                return output_command(argv, cwd=cwd, timeout=timeout)
-            return original_command(argv, cwd=cwd, timeout=timeout)
+            try:
+                if argv and str(argv[0]) == "mcopy" and target.parent == Path(plan["run_directory"]) and target.name in allowed:
+                    return output_command(argv, cwd=cwd, timeout=timeout)
+                return original_command(argv, cwd=cwd, timeout=timeout)
+            finally:
+                host_guard.check("after-startup-command")
 
         def reuse(*positional, **keywords):
             partition, provenance = original_reuse(*positional, **keywords)
@@ -500,14 +609,16 @@ def execute_plan(path, selected_sha):
             return partition, provenance
 
         def prepare_files(disk, run, partition, args):
+            host_guard.check("before-automatic-startup-preparation")
             require("child" not in state, "Startup preparation attempted after QEMU launch")
             source_guard(plan)
             value = original_prepare(disk, run, partition, args)
             startup = apply_startup(disk, run, partition, args, plan, cow, consumer.ensure_unopened,
-                                    provenance=startup_state.get("provenance", {}))
+                                    provenance=startup_state.get("provenance", {}), host_guard=host_guard)
             value["automatic_startup"] = startup
             value["immutable_sources"].update({item["path"]: item["sha256"] for item in plan["immutable_sources"]})
             value["immutable_sources"][str(path)] = selected_sha
+            host_guard.check("after-automatic-startup-preparation")
             return value
 
         runner.reuse_prepared, runner.prepare_guest_files = reuse, prepare_files
@@ -519,12 +630,13 @@ def execute_plan(path, selected_sha):
     args = plan["consumer_arguments"][:]
     require("--execute" not in args, "Ambiguous execution flag in plan")
     args.insert(args.index("--"), "--execute")
-    code = consumer.main(args)
+    code = consumer.main(args, host_guard=host_guard)
     final = {"schema": 1, "status": "FAIL", "native_acceptance": "NOT-ESTABLISHED",
              "selected_plan": str(path), "selected_plan_sha256": selected_sha,
              "consumer_exit_code": code, "output_limit_bytes": OUTPUT_LIMIT,
              "runtime_bound_seconds": 1200, "reserve_bytes": RESERVE, "cow_quota_bytes": QUOTA}
     try:
+        host_guard.check("before-startup-final-receipt")
         source_guard(plan)
         require(sha(path) == selected_sha, "Startup plan changed during trial")
         record = Path(plan["run_directory"]) / "automatic-startup-preparation.json"
@@ -534,7 +646,19 @@ def execute_plan(path, selected_sha):
     except Exception as error:
         code = 1
         final["error"] = str(error)
-    write_json_new(Path(plan["consumer_directory"]) / "startup-trial-result.json", final)
+    final["host_output_budget"] = host_guard.to_dict()
+    if host_guard.failure:
+        final.update(status="FAIL", resource_failure=host_guard.failure)
+        code = 1
+    final_path = Path(plan["consumer_directory"]) / "startup-trial-result.json"
+    require(not final_path.exists() and not final_path.is_symlink(), "Startup final receipt is stale")
+    try:
+        host_guard.write_receipt(final_path, final, "startup-final-receipt")
+    except consumer.HostOutputError as error:
+        final.update(status="FAIL", resource_failure=str(error), host_output_budget=host_guard.to_dict())
+        print(json.dumps({"status": "FAIL", "resource_failure": str(error),
+                          "host_output_budget": host_guard.to_dict()}, indent=2))
+        code = 1
     return code
 
 

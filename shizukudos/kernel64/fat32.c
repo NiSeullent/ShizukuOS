@@ -14,11 +14,37 @@ static void wr32(uint8_t *p, uint32_t v) { wr16(p, v); wr16(p + 2, v >> 16); }
 static void f32_copy(void *d, const void *s, uint64_t n) { uint8_t *dd = d; const uint8_t *ss = s; while (n--) *dd++ = *ss++; }
 static void f32_zero(void *d, uint64_t n) { uint8_t *dd = d; while (n--) *dd++ = 0; }
 
+typedef struct undo_sector {
+    struct undo_sector *next;
+    uint64_t lba;
+    uint8_t before[FAT32_SECTOR];
+} undo_sector_t;
+typedef struct fat32_undo {
+    undo_sector_t *sectors;
+    uint8_t *cache;
+    uint64_t cache_bytes, sector_limit, sector_count;
+    uint32_t free_clusters, alloc_hint, fsinfo_dirty;
+    int error, in_callback;
+} fat32_undo_t;
+
+static int operation_guard(const fat32_vol_t *v)
+{
+    if (v->recovery_required) return FAT32_E_RECOVERY;
+    if (v->rename_undo && v->rename_undo->in_callback) return FAT32_E_BUSY;
+    return v->rename_undo ? v->rename_undo->error : 0;
+}
+
 static int read_sector(fat32_vol_t *v, uint64_t lba, void *buf)
 {
+    fat32_undo_t *tx = v->rename_undo;
+    int rc = operation_guard(v);
+    if (rc) return rc;
     if (lba >= v->disk_sectors) return FAT32_E_RANGE;
     ++v->sector_reads;
-    return v->read(v->ctx, lba, buf) ? FAT32_E_IO : FAT32_OK;
+    if (tx) tx->in_callback = 1;
+    rc = v->read(v->ctx, lba, buf) ? FAT32_E_IO : FAT32_OK;
+    if (tx) { tx->in_callback = 0; if (rc) tx->error = rc; }
+    return rc;
 }
 
 /* Reads `lba` into the bounce buffer unless it is already there (nested directory walks and partial file reads
@@ -59,6 +85,7 @@ int fat32_mount(fat32_vol_t *v)
     uint32_t i, total, fatsz, spc, reserved, nfats, root, clusters;
     uint64_t first_data;
     int rc;
+    v->rename_undo = 0; v->recovery_required = 0;
     if (!v->read || !v->alloc || !v->free || !v->alloc_page || !v->disk_sectors) return FAT32_E_FORMAT;
     v->fat_pages = 0; v->fat_npages = 0; v->part_lba = 0; v->part_sectors = 0; v->sector_reads = 0; v->sector_lba = ~0ull;
     v->sector_writes = 0; v->fat_dirty = 0; v->fsinfo_sector = 0; v->fsinfo_dirty = 0; v->free_clusters = 0; v->alloc_hint = 2;
@@ -203,6 +230,8 @@ int fat32_dir_next(fat32_vol_t *v, fat32_dir_t *d, fat32_dirent_t *out)
     uint8_t lfn_sum = 0, lfn_expect = 0;
     int lfn_len = 0, lfn_valid = 0;
     uint32_t guard = 0;
+    int blocked = operation_guard(v);
+    if (blocked) return blocked;
     f32_zero(lfn, sizeof lfn);
     while (!d->ended) {
         const uint8_t *e;
@@ -293,6 +322,8 @@ static int chain_add(fat32_vol_t *v, fat32_chain_t *c, uint32_t cur)
 
 int fat32_chain_build(fat32_vol_t *v, uint32_t first_cluster, fat32_chain_t *c)
 {
+    int blocked = operation_guard(v);
+    if (blocked) return blocked;
     uint32_t cur = first_cluster, n = 0;
     c->runs = 0; c->nruns = 0; c->cap = 0; c->total_clusters = 0;
     if (!first_cluster) return FAT32_OK;                                   /* empty file */
@@ -324,6 +355,8 @@ static uint32_t chain_cluster(const fat32_chain_t *c, uint32_t idx)
 
 int fat32_read(fat32_vol_t *v, const fat32_chain_t *c, uint32_t size, uint64_t off, void *buf, uint64_t len, uint64_t *done)
 {
+    int blocked = operation_guard(v);
+    if (blocked) { *done = 0; return blocked; }
     uint8_t *dst = buf;
     *done = 0;
     if (off >= size) return FAT32_OK;
@@ -411,10 +444,30 @@ void fat32_dostime(uint64_t t, uint16_t *date, uint16_t *time)
 /* ---------------------------------------------------------------- writing */
 static int write_sector(fat32_vol_t *v, uint64_t lba, const void *buf)
 {
+    fat32_undo_t *tx = v->rename_undo;
+    int rc = operation_guard(v);
+    if (rc) return rc;
     if (!v->write) return FAT32_E_RDONLY;
     if (lba < v->part_lba || lba >= v->disk_sectors) return FAT32_E_RANGE;
+    if (tx) {
+        undo_sector_t *node;
+        for (node = tx->sectors; node && node->lba != lba; node = node->next) {}
+        if (!node) {
+            if (tx->sector_count == tx->sector_limit) return tx->error = FAT32_E_FULL;
+            tx->in_callback = 1;
+            node = v->alloc(v->ctx, sizeof *node);
+            tx->in_callback = 0;
+            if (!node) return tx->error = FAT32_E_NOMEM;
+            rc = read_sector(v, lba, node->before); /* actual media, never the already-edited bounce buffer */
+            if (rc) { tx->in_callback = 1; v->free(v->ctx, node, sizeof *node); tx->in_callback = 0; return rc; }
+            node->lba = lba; node->next = tx->sectors; tx->sectors = node; ++tx->sector_count;
+        }
+        tx->in_callback = 1;
+    }
     ++v->sector_writes;
-    if (v->write(v->ctx, lba, buf)) {
+    rc = v->write(v->ctx, lba, buf);
+    if (tx) { tx->in_callback = 0; if (rc) tx->error = FAT32_E_IO; }
+    if (rc) {
         if (v->sector_lba == lba) v->sector_lba = ~0ull;                /* content unknown after a failed write */
         return FAT32_E_IO;
     }
@@ -437,6 +490,8 @@ int fat32_sync(fat32_vol_t *v)
 {
     uint32_t sec, k;
     int rc;
+    int blocked = operation_guard(v);
+    if (blocked) return blocked;
     if (!v->write || !v->fat_dirty) return FAT32_E_RDONLY;
     for (sec = 0; sec < v->fat_sectors && sec < v->fat_npages * 8; ++sec) {
         if (!(v->fat_dirty[sec >> 3] & (1u << (sec & 7)))) continue;
@@ -531,6 +586,8 @@ static int write_range(fat32_vol_t *v, const fat32_chain_t *c, uint64_t off, con
 int fat32_write(fat32_vol_t *v, fat32_chain_t *c, uint32_t *first_cluster, uint32_t *size, uint64_t off, const void *buf,
                 uint64_t len)
 {
+    int blocked = operation_guard(v);
+    if (blocked) return blocked;
     const uint64_t end = off + len;
     int rc, rc2;
     if (!v->write) return FAT32_E_RDONLY;
@@ -546,6 +603,8 @@ int fat32_write(fat32_vol_t *v, fat32_chain_t *c, uint32_t *first_cluster, uint3
 
 int fat32_truncate(fat32_vol_t *v, fat32_chain_t *c, uint32_t *first_cluster, uint32_t *size, uint32_t new_size)
 {
+    int blocked = operation_guard(v);
+    if (blocked) return blocked;
     int rc = FAT32_OK, rc2;
     if (!v->write) return FAT32_E_RDONLY;
     if (new_size > *size) {
@@ -581,6 +640,8 @@ int fat32_truncate(fat32_vol_t *v, fat32_chain_t *c, uint32_t *first_cluster, ui
 int fat32_set_entry(fat32_vol_t *v, uint32_t dir_cluster, uint32_t dir_offset, uint32_t first_cluster, uint32_t size,
                     uint16_t date, uint16_t time)
 {
+    int blocked = operation_guard(v);
+    if (blocked) return blocked;
     uint64_t lba;
     uint8_t *e;
     int rc;
@@ -703,6 +764,8 @@ static int make_entry(fat32_vol_t *v, uint32_t dir_first_cluster, const uint16_t
     unsigned nlfn = 0, need, run = 0, i, base_len, k;
     const uint32_t dir_first = dir_first_cluster ? dir_first_cluster : v->root_cluster;
     int err = 0, rc, rc2;
+    int blocked = operation_guard(v);
+    if (blocked) return blocked;
     if (!v->write) return FAT32_E_RDONLY;
     if (!name_valid(name, name_len)) return FAT32_E_NAME;
     if (dir_has_other(v, dir_first_cluster, 0, name, name_len, &err, skip_cluster, skip_offset)) return FAT32_E_EXISTS;
@@ -912,6 +975,8 @@ static int free_chain(fat32_vol_t *v, uint32_t first)
 
 int fat32_remove(fat32_vol_t *v, uint32_t dir_first_cluster, uint32_t dir_cluster, uint32_t dir_offset)
 {
+    int blocked = operation_guard(v);
+    if (blocked) return blocked;
     uint8_t e[32];
     uint32_t first;
     int rc, rc2, err = 0;
@@ -928,7 +993,7 @@ int fat32_remove(fat32_vol_t *v, uint32_t dir_first_cluster, uint32_t dir_cluste
     return rc ? rc : rc2;
 }
 
-int fat32_rename(fat32_vol_t *v, uint32_t src_dir_first, uint32_t dir_cluster, uint32_t dir_offset, uint32_t dst_dir_first,
+static int rename_impl(fat32_vol_t *v, uint32_t src_dir_first, uint32_t dir_cluster, uint32_t dir_offset, uint32_t dst_dir_first,
                  const uint16_t *name, unsigned name_len, int replace, fat32_dirent_t *out)
 {
     uint8_t e[32];
@@ -980,4 +1045,64 @@ int fat32_rename(fat32_vol_t *v, uint32_t src_dir_first, uint32_t dir_cluster, u
     }
     rc2 = fat32_sync(v);
     return rc ? rc : rc2;
+}
+
+int fat32_rename(fat32_vol_t *v, uint32_t src_dir_first, uint32_t dir_cluster, uint32_t dir_offset, uint32_t dst_dir_first,
+                 const uint16_t *name, unsigned name_len, int replace, fat32_dirent_t *out)
+{
+    fat32_undo_t tx;
+    undo_sector_t *node;
+    uint32_t page;
+    uint64_t fat_bytes, dirty_bytes, cached_sectors;
+    int rc = operation_guard(v), uncertain = 0;
+    if (rc) return rc;
+    if (v->rename_undo) return FAT32_E_BUSY;
+    if (!v->write || !v->fat_dirty) return FAT32_E_RDONLY;
+    if (!v->fat_npages || v->fat_npages > MAX_FAT_PAGES || !out) return FAT32_E_FORMAT;
+    f32_zero(&tx, sizeof tx);
+    fat_bytes = (uint64_t)v->fat_npages * 4096;
+    dirty_bytes = v->fat_npages + 1;
+    tx.cache_bytes = fat_bytes + dirty_bytes;
+    tx.free_clusters = v->free_clusters; tx.alloc_hint = v->alloc_hint; tx.fsinfo_dirty = v->fsinfo_dirty;
+    cached_sectors = (uint64_t)v->fat_npages * 8;
+    if (cached_sectors > v->fat_sectors) cached_sectors = v->fat_sectors;
+    /* All mirrored cached FAT sectors + at most two directory-growth clusters,
+     * source/target LFNs, '..' and FSInfo. No file-size/128-sector ceiling. */
+    tx.sector_limit = (uint64_t)v->nfats * cached_sectors + 2u * v->spc + 32u;
+    v->rename_undo = &tx;
+    tx.in_callback = 1;
+    tx.cache = v->alloc(v->ctx, tx.cache_bytes);
+    tx.in_callback = 0;
+    if (!tx.cache) { v->rename_undo = 0; return FAT32_E_NOMEM; }
+    for (page = 0; page < v->fat_npages; ++page) f32_copy(tx.cache + (uint64_t)page * 4096, v->fat_pages[page], 4096);
+    f32_copy(tx.cache + fat_bytes, v->fat_dirty, dirty_bytes);
+    rc = rename_impl(v, src_dir_first, dir_cluster, dir_offset, dst_dir_first, name, name_len, replace, out);
+    if (!rc && tx.error) rc = tx.error;
+    if (rc) {
+        uint8_t verify[FAT32_SECTOR];
+        for (node = tx.sectors; node; node = node->next) {
+            tx.in_callback = 1; ++v->sector_writes;
+            if (v->write(v->ctx, node->lba, node->before)) uncertain = 1;
+            tx.in_callback = 0;
+        }
+        for (node = tx.sectors; node; node = node->next) {
+            unsigned byte;
+            tx.in_callback = 1; ++v->sector_reads;
+            if (v->read(v->ctx, node->lba, verify)) uncertain = 1;
+            else for (byte = 0; byte < FAT32_SECTOR; ++byte) if (verify[byte] != node->before[byte]) { uncertain = 1; break; }
+            tx.in_callback = 0;
+        }
+        for (page = 0; page < v->fat_npages; ++page) f32_copy(v->fat_pages[page], tx.cache + (uint64_t)page * 4096, 4096);
+        f32_copy(v->fat_dirty, tx.cache + fat_bytes, dirty_bytes);
+        v->free_clusters = tx.free_clusters; v->alloc_hint = tx.alloc_hint; v->fsinfo_dirty = tx.fsinfo_dirty;
+        v->sector_lba = ~0ull; f32_zero(v->sector, sizeof v->sector);
+        if (uncertain) { v->recovery_required = 1; rc = FAT32_E_RECOVERY; }
+    }
+    while ((node = tx.sectors)) {
+        tx.sectors = node->next; tx.in_callback = 1;
+        v->free(v->ctx, node, sizeof *node); tx.in_callback = 0;
+    }
+    tx.in_callback = 1; v->free(v->ctx, tx.cache, tx.cache_bytes); tx.in_callback = 0;
+    v->rename_undo = 0;
+    return rc;
 }

@@ -50,6 +50,8 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/public-distribution-tests.log"
 
       - name: Check public routes with the installed Chrome and optional ISO
+        env:
+          CHECK_OUTPUT: ${{ runner.temp }}/public-distribution
         # The Ubuntu hosted image must already include Google Chrome.
         # No browser/npm download, certificate bypass, origin override or secret.
         run: |

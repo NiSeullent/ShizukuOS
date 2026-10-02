@@ -36,9 +36,15 @@ SOURCE_FILES = {
     "shzlib": "shizukudos/tools/shzlib.py",
 }
 FUNCTIONS = ("private_reflink_runner", "quiescent_cow_observation")
+HOST_OUTPUT_LIMIT = 16 * 1024**2
 
 
 class ConsumerError(RuntimeError):
+    pass
+
+
+class HostOutputError(ConsumerError):
+    """A latched resource failure, never a native acceptance result."""
     pass
 
 
@@ -76,6 +82,168 @@ def read_source(path):
     if identity(before) != identity(after) or len(data) != before.st_size:
         raise ConsumerError("Source changed while being read")
     return data
+
+
+class HostOutputGuard:
+    """Sample all owned host files; only the exact private COW is excluded.
+
+    Checks are performed at resource polls and before/after output operations.
+    An observed overshoot is sticky even if an output subsequently disappears.
+    This is measured enforcement, not an atomic filesystem allocation quota.
+    """
+    def __init__(self, roots, private_cow, *, limit=HOST_OUTPUT_LIMIT, reserve=20 * 1024**3):
+        self.roots = tuple(safe_path(path, existing=False) for path in roots)
+        self.private_cow = safe_path(private_cow, existing=False)
+        if (not self.roots or len(set(self.roots)) != len(self.roots)
+                or any(a != b and a.is_relative_to(b) for a in self.roots for b in self.roots)
+                or self.private_cow.name != "windows-uefi.raw" or self.private_cow.parent not in self.roots
+                or not 1 <= limit <= HOST_OUTPUT_LIMIT or not 20 * 1024**3 <= reserve <= 64 * 1024**3):
+            raise ConsumerError("Unsafe host-output scope, exclusion or resource limit")
+        self.limit, self.reserve = limit, reserve
+        self.identities, self.cow_identity = {}, None
+        self.used = self.peak = 0
+        self.phase, self.failure, self.checked = "not-checked", None, False
+        self.per_root = {}
+
+    def configuration(self):
+        return {"schema": 1, "roots": [str(path) for path in self.roots],
+                "excluded_private_cow": str(self.private_cow), "limit_bytes": self.limit,
+                "reserve_bytes": self.reserve}
+
+    def to_dict(self):
+        return {**self.configuration(), "status": "FAIL" if self.failure else "PASS" if self.checked else "NOT-CHECKED",
+                "used_bytes": self.used, "peak_bytes": self.peak, "phase": self.phase,
+                "per_root_bytes": dict(self.per_root), "failure": self.failure,
+                "private_cow_identity": self.cow_identity,
+                "measurement": "regular-file logical bytes; zero-byte Unix sockets allowed; sampled checks; overshoot latched",
+                "peak_scope": "highest observed sample; final receipt bytes are stabilized by the writer; not an atomic allocation quota"}
+
+    def check(self, phase, *, require_cow=False):
+        self.phase = phase
+        total, per_root = 0, {}
+        try:
+            for root in self.roots:
+                safe_path(root, existing=False)
+                if not root.exists():
+                    if root in self.identities:
+                        raise ConsumerError("Owned output root disappeared")
+                    per_root[str(root)] = 0
+                    continue
+                info = root.stat()
+                if not stat.S_ISDIR(info.st_mode):
+                    raise ConsumerError("Owned output root is not a directory")
+                identity = (info.st_dev, info.st_ino)
+                if self.identities.setdefault(root, identity) != identity:
+                    raise ConsumerError("Owned output root inode changed")
+                subtotal, pending = 0, [root]
+                while pending:
+                    directory = safe_path(pending.pop())
+                    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    try:
+                        entries = os.scandir(descriptor)
+                        with entries:
+                            for entry in entries:
+                                info = entry.stat(follow_symlinks=False)
+                                path = directory / entry.name
+                                if stat.S_ISLNK(info.st_mode):
+                                    raise ConsumerError("Symlink in owned output scope")
+                                if stat.S_ISDIR(info.st_mode):
+                                    pending.append(path)
+                                elif stat.S_ISREG(info.st_mode):
+                                    if info.st_nlink != 1:
+                                        raise ConsumerError("Aliased output/private COW inode")
+                                    if path == self.private_cow:
+                                        identity = (info.st_dev, info.st_ino)
+                                        if self.cow_identity is None:
+                                            self.cow_identity = identity
+                                        if self.cow_identity != identity:
+                                            raise ConsumerError("Private COW inode changed")
+                                    else:
+                                        subtotal += info.st_size
+                                elif not (stat.S_ISSOCK(info.st_mode) and info.st_size == 0):
+                                    raise ConsumerError("Unsupported file type in owned output scope")
+                    finally:
+                        os.close(descriptor)
+                per_root[str(root)] = subtotal
+                total += subtotal
+                if (root.stat().st_dev, root.stat().st_ino) != self.identities[root]:
+                    raise ConsumerError("Owned output root changed during measurement")
+            self.used, self.per_root = total, per_root
+            self.peak = max(self.peak, total)
+            if require_cow and not self.private_cow.is_file():
+                raise ConsumerError("Private COW absent before owned VM launch/poll")
+            if total > self.limit:
+                raise ConsumerError(f"Combined host output exceeded {self.limit} bytes: observed {total}")
+            for root in self.roots:
+                existing = root
+                while not existing.exists():
+                    existing = existing.parent
+                if shutil.disk_usage(existing).free < self.reserve:
+                    raise ConsumerError("Host-output check reached the unchanged free-space reserve")
+            self.checked = True
+            if self.failure:
+                raise HostOutputError(self.failure)
+            return self.to_dict()
+        except (OSError, ConsumerError) as error:
+            self.failure = self.failure or "Resource host-output FAIL: " + str(error)
+            raise HostOutputError(self.failure) from error
+
+    def write_owned_json(self, path, data):
+        """Write only beneath an unchanged owned root, without following links."""
+        descriptor = None
+        try:
+            path = safe_path(path, existing=False)
+            root = next((root for root in self.roots if path != root and path.is_relative_to(root)), None)
+            if root is None or root not in self.identities:
+                raise ConsumerError("Receipt is outside a measured owned output root")
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) != self.identities[root]:
+                raise ConsumerError("Receipt root inode changed")
+            relative = path.relative_to(root)
+            for component in relative.parts[:-1]:
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = child
+            output = os.open(relative.name, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             0o600, dir_fd=descriptor)
+            with os.fdopen(output, "w") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ConsumerError("Receipt must be an unaliased regular file")
+                stream.truncate(0)
+                stream.write(json.dumps(data, indent=2) + "\n")
+        except (OSError, ConsumerError) as error:
+            self.failure = self.failure or "Resource host-output FAIL: " + str(error)
+            raise HostOutputError(self.failure) from error
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    def write_receipt(self, path, data, phase):
+        """Persist a bounded, stable sample including this receipt's own bytes."""
+        try:
+            self.check(phase)
+        except HostOutputError:
+            pass  # A failure remains latched; an owned FAIL receipt may still be saved.
+        for _ in range(8):
+            if self.failure:
+                data.update(status="FAIL", resource_failure=self.failure)
+            snapshot = self.to_dict()
+            data["host_output_budget"] = snapshot
+            self.write_owned_json(path, data)
+            try:
+                self.check(phase)
+            except HostOutputError:
+                pass
+            if snapshot == self.to_dict():
+                if self.failure:
+                    raise HostOutputError(self.failure)
+                return
+        self.failure = self.failure or "Resource host-output FAIL: final receipt measurement did not stabilize"
+        data.update(status="FAIL", resource_failure=self.failure, host_output_budget=self.to_dict())
+        self.write_owned_json(path, data)
+        raise HostOutputError(self.failure)
 
 
 def reviewed_functions(source):
@@ -233,7 +401,7 @@ def ensure_unopened(path):
                 raise ConsumerError("Retained source is mapped by process " + process.name)
 
 
-def configure_runner(private, cow_path, functions, peer):
+def configure_runner(private, cow_path, functions, peer, *, host_guard=None):
     helpers = private.parent.parent / "tools"
     qemu = load_module("qemu", helpers / "qemu.py")
     shzlib = load_module("shzlib", helpers / "shzlib.py")
@@ -248,6 +416,8 @@ def configure_runner(private, cow_path, functions, peer):
     original_write = shzlib.write_json
 
     def reuse(run, run_dir, disk, *positional, **keywords):
+        if host_guard:
+            host_guard.check("before-private-source-reuse")
         previous = runner.CSM
         runner.CSM = peer / "build/shizukudos/csm"
         try:
@@ -262,6 +432,8 @@ def configure_runner(private, cow_path, functions, peer):
             return partition, receipt
         finally:
             runner.CSM = previous
+            if host_guard:
+                host_guard.check("after-private-source-reuse")
 
     def capture(disk):
         observation = cow.observe_allocations(disk)
@@ -269,6 +441,8 @@ def configure_runner(private, cow_path, functions, peer):
         return observation.to_dict()
 
     def growth(disk, result, monitor):
+        if host_guard:
+            host_guard.check("before-resource-poll", require_cow=True)
         observation, used, elapsed = functions["quiescent_cow_observation"](
             disk, monitor, cow, state["baseline"], runner.DIRTY_BUDGET, runner.RESERVE)
         budget = result["sparse_budget"]
@@ -276,15 +450,28 @@ def configure_runner(private, cow_path, functions, peer):
                       cow_peak_net_exclusive_growth_bytes=max(0, used, budget.get("cow_peak_net_exclusive_growth_bytes", 0)),
                       cow_quiescent_samples=budget.get("cow_quiescent_samples", 0) + 1,
                       cow_maximum_sampling_seconds=max(elapsed, budget.get("cow_maximum_sampling_seconds", 0)))
+        if host_guard:
+            host_guard.check("after-resource-poll", require_cow=True)
         return used
 
     def launch(*positional, **keywords):
+        if host_guard:
+            host_guard.check("before-launch", require_cow=True)
         child = original_launch(*positional, **keywords)
         state["child"] = child
+        if host_guard:
+            try:
+                host_guard.check("after-launch", require_cow=True)
+            except HostOutputError:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait(timeout=5)
+                raise
         return child
 
     def write_result(path, data):
-        if isinstance(data, dict) and data.get("profile") == "actual-win98-uefi-csmwrap":
+        native_result = isinstance(data, dict) and data.get("profile") == "actual-win98-uefi-csmwrap"
+        if native_result:
             data["private_cow_consumer"] = {
                 "consumer_receipt": str(private.parents[3] / "consumer-result.json"),
                 "canonical_source_adapted": True, "copy_mode": "cp --reflink=always --sparse=auto",
@@ -295,7 +482,30 @@ def configure_runner(private, cow_path, functions, peer):
             }
             if "sparse_budget" in data:
                 data["sparse_budget"]["policy"] = "verified filesystem COW clone; paused FIEMAP net exclusive growth; independent reserve floor"
-        return original_write(path, data)
+        if host_guard and native_result:
+            return host_guard.write_receipt(path, data, "canonical-final-receipt")
+        if host_guard:
+            host_guard.check("before-result-write")
+            host_guard.write_owned_json(path, data)
+            host_guard.check("after-result-write")
+            return
+        value = original_write(path, data)
+        return value
+
+    if host_guard:
+        def bounded_operation(name, operation):
+            def wrapped(*positional, **keywords):
+                host_guard.check("before-" + name)
+                try:
+                    return operation(*positional, **keywords)
+                finally:
+                    host_guard.check("after-" + name)
+            return wrapped
+        for name in ("capture", "capture_vga_scanout", "capture_gop_handover", "capture_cpu0_code",
+                     "capture_proxy_diagnostics", "capture_failure_cpus", "collect_boot_logs",
+                     "collect_interaction_file", "collect_native_trial", "collect_guest_files", "prepare_guest_files"):
+            if hasattr(runner, name):
+                setattr(runner, name, bounded_operation(name, getattr(runner, name)))
 
     runner.reuse_prepared = reuse
     runner._iosys_cow_capture, runner._iosys_cow_growth = capture, growth
@@ -338,7 +548,7 @@ def acquire_native_lock(stream, wait_seconds):
             time.sleep(min(0.2, remaining))
 
 
-def main(argv=None):
+def main(argv=None, *, host_guard=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--peer-root", type=Path, required=True)
     parser.add_argument("--consumer-dir", type=Path, required=True)
@@ -353,56 +563,87 @@ def main(argv=None):
     native = args.native[1:] if args.native[:1] == ["--"] else args.native
     trial, native = native_arguments(native)
     peer, consumer, destination = validate_paths(trial, args.peer_root, args.consumer_dir)
-    frozen, private, functions = freeze_sources(peer, consumer, {
-        name: getattr(args, name + "_sha256") for name in ("canonical", "adapter", "cow")})
-    receipt = {"schema": 1, "status": "PREPARED", "sources": frozen,
-               "consumer_sha256": digest(read_source(Path(__file__).resolve())),
-               "private_runner": {"path": str(private), "sha256": digest(private.read_bytes())},
-               "native_arguments": native, "run_directory": str(destination),
+    host_guard = host_guard or HostOutputGuard([consumer, destination], destination / "windows-uefi.raw",
+                                             reserve=trial.reserve_gib * 1024**3)
+    if (consumer not in host_guard.roots or destination not in host_guard.roots
+            or host_guard.private_cow != destination / "windows-uefi.raw"
+            or host_guard.reserve < trial.reserve_gib * 1024**3):
+        raise ConsumerError("Host-output guard does not cover the actual consumer/run and selected reserve")
+    receipt = {"schema": 1, "status": "FAIL", "native_arguments": native, "run_directory": str(destination),
                "execute_requested": args.execute, "vm_started": False,
                "lock_wait_bound_seconds": args.lock_wait_seconds, "native_lock_acquired": False,
                "native_theme_acceptance": "not-established", "visual_review_required": True,
                "adapter_functions": list(FUNCTIONS), "io_sys_entry_adapter_executed": False,
                "allocation_scope": "net exclusive FIEMAP file data; metadata/staging excluded; independent free-space floor"}
     receipt_path = consumer / "consumer-result.json"
-    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
-    if not args.execute:
-        print(json.dumps({"status": "PREPARED", "vm_started": False, "receipt": str(receipt_path)}))
-        return 0
+
+    def write_receipt():
+        host_guard.write_owned_json(receipt_path, receipt)
+
     code = 1
     lock_stream = None
     try:
-        lock_path = safe_path(peer / "build/modern-app-native-guest.lock")
-        if not lock_path.is_file():
-            raise ConsumerError("Shared native guest lock must already exist")
-        lock_stream = lock_path.open("rb")
-        receipt["status"] = "WAITING-FOR-NATIVE-LANE"
-        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
-        acquire_native_lock(lock_stream, args.lock_wait_seconds)
-        receipt.update(status="PREPARING", native_lock_acquired=True)
-        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
-        runner, cow, state = configure_runner(private, Path(frozen["cow"]["frozen"]), functions, peer)
-        original_argv = sys.argv
-        try:
-            sys.argv = [str(private), *native]
-            code = runner.main()
-        finally:
-            sys.argv = original_argv
-            receipt["vm_started"] = "child" in state
-            receipt["cow_final"] = stopped_observation(runner, cow, state, destination / "windows-uefi.raw")
-        receipt["canonical_exit_code"] = code
-        sources_unchanged = all(digest(read_source(Path(item["origin"]))) == item["sha256"] for item in frozen.values())
-        receipt["peer_sources_unchanged"] = sources_unchanged
-        if not sources_unchanged or not receipt.get("cow_final") or receipt["cow_final"]["status"] != "PASS":
-            code = 1
-        receipt["status"] = "NEEDS-VISUAL-REVIEW" if code == 0 else "FAIL"
+        host_guard.check("before-source-freeze")
+        frozen, private, functions = freeze_sources(peer, consumer, {
+            name: getattr(args, name + "_sha256") for name in ("canonical", "adapter", "cow")})
+        receipt.update(status="PREPARED", sources=frozen,
+                       consumer_sha256=digest(read_source(Path(__file__).resolve())),
+                       private_runner={"path": str(private), "sha256": digest(private.read_bytes())},
+                       host_output_budget=host_guard.check("after-source-freeze"))
+        write_receipt()
+        host_guard.check("after-prepared-receipt")
+        if not args.execute:
+            code = 0
+        else:
+            lock_path = safe_path(peer / "build/modern-app-native-guest.lock")
+            if not lock_path.is_file():
+                raise ConsumerError("Shared native guest lock must already exist")
+            lock_stream = lock_path.open("rb")
+            receipt["status"] = "WAITING-FOR-NATIVE-LANE"
+            write_receipt()
+            host_guard.check("before-native-lock-wait")
+            acquire_native_lock(lock_stream, args.lock_wait_seconds)
+            receipt.update(status="PREPARING", native_lock_acquired=True)
+            write_receipt()
+            host_guard.check("after-native-lock-acquired")
+            runner, cow, state = configure_runner(private, Path(frozen["cow"]["frozen"]), functions, peer,
+                                                  host_guard=host_guard)
+            original_argv = sys.argv
+            try:
+                sys.argv = [str(private), *native]
+                code = runner.main()
+            finally:
+                sys.argv = original_argv
+                receipt["vm_started"] = "child" in state
+                receipt["cow_final"] = stopped_observation(runner, cow, state, destination / "windows-uefi.raw")
+            receipt["canonical_exit_code"] = code
+            sources_unchanged = all(digest(read_source(Path(item["origin"]))) == item["sha256"] for item in frozen.values())
+            receipt["peer_sources_unchanged"] = sources_unchanged
+            if not sources_unchanged or not receipt.get("cow_final") or receipt["cow_final"]["status"] != "PASS":
+                code = 1
+            receipt["status"] = "NEEDS-VISUAL-REVIEW" if code == 0 else "FAIL"
+            receipt["host_output_budget"] = host_guard.check("after-owned-run")
     except BaseException as error:
         receipt.update(status="FAIL", error=str(error))
         code = 1
     finally:
-        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
-        if lock_stream is not None:
-            lock_stream.close()
+        receipt["host_output_budget"] = host_guard.to_dict()
+        if host_guard.failure:
+            receipt.update(status="FAIL", resource_failure=host_guard.failure)
+            code = 1
+        try:
+            if consumer.exists():
+                host_guard.write_receipt(receipt_path, receipt, "consumer-final-receipt")
+            else:
+                receipt["host_output_budget"] = host_guard.check("consumer-final-receipt")
+        except (OSError, ConsumerError) as error:
+            receipt.update(status="FAIL", receipt_write_error=str(error), host_output_budget=host_guard.to_dict())
+            if host_guard.failure:
+                receipt["resource_failure"] = host_guard.failure
+            code = 1
+        finally:
+            if lock_stream is not None:
+                lock_stream.close()
     print(json.dumps({"status": receipt["status"], "vm_started": receipt["vm_started"],
                       "receipt": str(receipt_path), "error": receipt.get("error")}))
     return code

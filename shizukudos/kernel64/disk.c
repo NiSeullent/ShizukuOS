@@ -118,10 +118,12 @@ static int commit_entry(disk_vol_t *d, fsnode_t *n, uint32_t first, uint32_t siz
     int rc;
     now_dos(&date, &time);
     rc = fat32_set_entry(&d->fat, n->dir_cluster, n->dir_offset, first, size, date, time);
-    n->first_cluster = first;
-    n->size = size;
-    n->ftime_m = fat32_filetime(date, time, 0);
-    n->attrs = (n->attrs & ~(uint32_t)FILE_ATTRIBUTE_NORMAL) | FILE_ATTRIBUTE_ARCHIVE;
+    if (!rc) {
+        n->first_cluster = first;
+        n->size = size;
+        n->ftime_m = fat32_filetime(date, time, 0);
+        n->attrs = (n->attrs & ~(uint32_t)FILE_ATTRIBUTE_NORMAL) | FILE_ATTRIBUTE_ARCHIVE;
+    }
     return rc;
 }
 
@@ -133,11 +135,12 @@ static int vol_write(fsvol_t *v, fsnode_t *n, uint64_t off, const void *buf, uin
     int rc, rc2;
     if (n->view) return -1;                         /* the file backs a mapped image: its cached pages must not change */
     mutex_lock(&d->lock);
+    if (d->fat.recovery_required) { mutex_unlock(&d->lock); return -1; }
     c = node_chain(d, n);
     if (!c) { mutex_unlock(&d->lock); return -1; }
     first = n->first_cluster; size = (uint32_t)n->size;
     rc = fat32_write(&d->fat, c, &first, &size, off, buf, len);
-    rc2 = commit_entry(d, n, first, size);          /* also after a partial failure: allocated clusters stay reachable */
+    rc2 = rc == FAT32_E_RECOVERY ? rc : commit_entry(d, n, first, size); /* ordinary partial failure keeps allocated clusters reachable */
     if (!rc && !rc2) ++writes_ok;
     mutex_unlock(&d->lock);
     if (rc || rc2) kprintf("K64 disk: write %s at %llu (+%llu) failed (%d/%d)\n", n->name, off, len, rc, rc2);
@@ -153,11 +156,12 @@ static int vol_truncate(fsvol_t *v, fsnode_t *n, uint64_t new_size)
     if (n->view) return -1;
     if (new_size > 0xffffffffull) return -2;
     mutex_lock(&d->lock);
+    if (d->fat.recovery_required) { mutex_unlock(&d->lock); return -1; }
     c = node_chain(d, n);
     if (!c) { mutex_unlock(&d->lock); return -1; }
     first = n->first_cluster; size = (uint32_t)n->size;
     rc = fat32_truncate(&d->fat, c, &first, &size, (uint32_t)new_size);
-    rc2 = commit_entry(d, n, first, size);
+    rc2 = rc == FAT32_E_RECOVERY ? rc : commit_entry(d, n, first, size);
     mutex_unlock(&d->lock);
     return rc == FAT32_E_FULL ? -2 : (rc || rc2) ? -1 : 0;
 }
@@ -247,6 +251,7 @@ static int vol_flush(fsvol_t *v)
     blk_dev_t *w;
     int rc;
     mutex_lock(&d->lock);
+    if (d->fat.recovery_required) { mutex_unlock(&d->lock); return -1; }
     rc = blk_flush(d->dev);
     for (w = d->dev; w->parent; w = w->parent) ;
     kprintf("K64 disk: flush %s: rc %d; %s: %llu sectors read, %llu written, %u cache flush(es); D: %u write(s), "
@@ -405,7 +410,7 @@ int disk_volume_info(const fsnode_t *n, uint32_t *serial, char label[12], uint64
     *total_clusters = d->fat.cluster_count;
     *free_clusters = d->fat.free_clusters;
     *sectors_per_cluster = d->fat.spc;
-    *writable = n->vol->write != 0;
+    *writable = n->vol->write && d->fat.write && !d->fat.recovery_required;
     mutex_unlock(&d->lock);
     return 0;
 }

@@ -1,0 +1,272 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Public-source HOST arithmetic/queue evidence. Results are logs; no binary/media publication.
+name: Kernel32 finite deadline host proof
+
+'on':
+  push:
+    branches: [codex/theme-integration-6970]
+    paths:
+      - .github/workflows/k32-deadlines-6970.yml
+      - shizukudos/tests/test_sched_deadlines_k32.c
+      - shizukudos/tests/test_sched_deadlines_k32.py
+      - shizukudos/tests/build_k32_deadlines_6970.py
+      - shizukudos/kernel32/**
+      - shizukudos/kcommon/**
+      - shizukudos/abi/*.h
+      - shizukudos/kbuild.py
+      - shizukudos/tools/shzlib.py
+      - shizukudos/kernel64/standalone/boot32.c
+      - shizukudos/kernel64/standalone/boot_pm.asm
+      - shizukudos/kernel64/standalone/boot.ld
+      - shizukudos/kernel64/standalone/memholes.h
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k32-deadlines-6970-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deadlines:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Bind source revision, phase and fresh proof path
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import os, re, subprocess
+          root = Path.cwd().resolve()
+          expected = os.environ['GITHUB_SHA']
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert re.fullmatch(r'[0-9a-f]{40}', expected) and actual == expected
+          run_id = os.environ['GITHUB_RUN_ID']
+          attempt = os.environ['GITHUB_RUN_ATTEMPT']
+          assert run_id.isdigit() and attempt.isdigit()
+          phase = 'green' if (root / 'shizukudos/abi/shz_sched_deadline.h').is_file() else 'red'
+          proof = root / 'build/k32-deadline-6970' / f'actions-{run_id}-{attempt}-{phase}'
+          assert not proof.exists()
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write(f'PMA_DEADLINE_PHASE={phase}\nPMA_DEADLINE_PROOF={proof}\n')
+          print(f'Exact checkout {actual}; phase {phase}; proof {proof}')
+          PYTHON
+
+      - name: Execute actual production C with guarded resource admission
+        run: |
+          python3 -B shizukudos/tests/test_sched_deadlines_k32.py             --phase "$PMA_DEADLINE_PHASE" --output-root "$PMA_DEADLINE_PROOF"
+
+      - name: Record the actual bounded receipt and assertions
+        if: always()
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import hashlib, json, os, stat
+          root = Path.cwd().resolve()
+          proof_value = os.environ.get('PMA_DEADLINE_PROOF')
+          if not proof_value:
+              print('Proof setup did not finish; no result adopted.')
+              raise SystemExit(0)
+          proof = Path(proof_value)
+          assert proof.parent == root / 'build/k32-deadline-6970'
+          receipt = proof / 'result.json'
+          if not receipt.exists():
+              print('No receipt: admission/earlier execution did not establish a result.')
+              raise SystemExit(0)
+          assert not receipt.is_symlink()
+          info = receipt.stat()
+          assert stat.S_ISREG(info.st_mode) and info.st_size <= 65536
+          data = receipt.read_bytes()
+          result = json.loads(data)
+          print('Receipt SHA256:', hashlib.sha256(data).hexdigest())
+          print(data.decode(), end='')
+          incomplete_failure = (
+              set(result) == {'result', 'receipt_accounting_verified', 'error'}
+              and result['result'] == 'FAIL'
+              and result['receipt_accounting_verified'] is False
+              and isinstance(result['error'], str)
+          )
+          if incomplete_failure:
+              print('Incomplete failure receipt; no successful result adopted.')
+          else:
+              assert result['native_execution_verified'] is False
+              assert result['windows98_integration_verified'] is False
+          for name in ('host-run.stdout', 'host-run.stderr', 'sanitizer-run.stdout', 'sanitizer-run.stderr'):
+              path = proof / name
+              if path.exists():
+                  assert not path.is_symlink() and path.stat().st_size <= 262144
+                  print(f'Actual {name}:')
+                  print(path.read_text(), end='')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f"Kernel32 production C verdict: {result['result']}\n\n")
+              stream.write('HOST hardware-boundary fixture; actual Windows98/VMM, assembly switching and full counter rollover remain unverified.\n')
+          PYTHON
+
+  build-i486:
+    needs: deadlines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the exact combined source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Prepare missing assembler on the ephemeral hosted runner
+        timeout-minutes: 3
+        run: |
+          sudo -n python3 -B - <<'PYTHON'
+          import os, selectors, shutil, signal, subprocess, time
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          reserve = 20 * 1024**3
+          assert shutil.disk_usage(root).free >= reserve + 64 * 1024**2
+          command = [
+              'env', 'DEBIAN_FRONTEND=noninteractive',
+              'apt-get', '-o', 'Acquire::Retries=0', '-o', 'DPkg::Lock::Timeout=10',
+              '--no-install-recommends', '--no-upgrade', '--no-remove', '--yes',
+              'install', 'nasm',
+          ]
+          assert os.geteuid() == 0  # monitor can terminate its own root apt/dpkg group
+          print('Hosted-only tool prerequisite:', command, flush=True)
+          child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+          watch = selectors.DefaultSelector()
+          watch.register(child.stdout, selectors.EVENT_READ)
+          capture = bytearray()
+          start = time.monotonic()
+          minimum = shutil.disk_usage(root).free
+          try:
+              while True:
+                  minimum = min(minimum, shutil.disk_usage(root).free)
+                  if minimum < reserve:
+                      raise RuntimeError('Hosted assembler preparation crossed 20 GiB reserve')
+                  if time.monotonic() - start > 120:
+                      raise RuntimeError('Hosted assembler preparation exceeded 120 seconds')
+                  status = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                  if status and status.si_pid == child.pid and not watch.get_map():
+                      break
+                  for key, _ in watch.select(0.05):
+                      block = os.read(key.fileobj.fileno(), 16384)
+                      if not block:
+                          watch.unregister(key.fileobj)
+                      else:
+                          remaining = 262144 - len(capture)
+                          capture.extend(block[:remaining])
+                          if len(block) > remaining:
+                              raise RuntimeError('Hosted assembler preparation exceeded 256 KiB log bound')
+              child.wait(timeout=5)
+          except BaseException:
+              try:
+                  os.killpg(child.pid, signal.SIGKILL)
+              except ProcessLookupError:
+                  pass
+              child.wait(timeout=5)
+              raise
+          finally:
+              watch.close()
+              child.stdout.close()
+              print(capture.decode('utf-8', errors='replace'), end='')
+              print('Hosted assembler prerequisite exit:', child.returncode,
+                    'minimum observed free:', minimum,
+                    'log bytes:', len(capture), 'direct child reaped:', child.returncode is not None)
+          assert child.returncode == 0
+          assert Path('/usr/bin/nasm').is_file()
+          assert shutil.disk_usage(root).free >= reserve + 8 * 1024**2
+          # Package installation is a separate ephemeral-host prerequisite.
+          # The unchanged build runner enforces its own fresh 8 MiB output root.
+          PYTHON
+
+      - name: Bind exact revision and fresh i486 build proof
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import os, re, subprocess
+          root = Path.cwd().resolve()
+          expected = os.environ['GITHUB_SHA']
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert re.fullmatch(r'[0-9a-f]{40}', expected) and actual == expected
+          run_id = os.environ['GITHUB_RUN_ID']
+          attempt = os.environ['GITHUB_RUN_ATTEMPT']
+          assert run_id.isdigit() and attempt.isdigit()
+          proof = root / 'build/k32-build-6970' / f'actions-{run_id}-{attempt}'
+          assert not proof.exists()
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write(f'PMA_K32_BUILD_PROOF={proof}\n')
+          print(f'Exact combined checkout {actual}; build proof {proof}')
+          PYTHON
+
+      - name: Compile and link actual i486 Kernel32 profiles under resource guards
+        run: |
+          python3 -B shizukudos/tests/build_k32_deadlines_6970.py --output-root "$PMA_K32_BUILD_PROOF"
+
+      - name: Record bounded build receipt without publishing binaries
+        if: always()
+        run: |
+          python3 -B - <<'PYTHON'
+          from pathlib import Path
+          import hashlib, json, os, stat
+          root = Path.cwd().resolve()
+          value = os.environ.get('PMA_K32_BUILD_PROOF')
+          if not value:
+              print('Build proof setup did not finish; no result adopted.')
+              raise SystemExit(0)
+          proof = Path(value)
+          assert proof.parent == root / 'build/k32-build-6970'
+          receipt = proof / 'result.json'
+          if not receipt.exists():
+              print('No build receipt; no compiled or executed result adopted.')
+              raise SystemExit(0)
+          assert not receipt.is_symlink()
+          info = receipt.stat()
+          assert stat.S_ISREG(info.st_mode) and info.st_size <= 131072
+          data = receipt.read_bytes()
+          result = json.loads(data)
+          print('Build receipt SHA256:', hashlib.sha256(data).hexdigest())
+          print(data.decode(), end='')
+          incomplete_failure = (
+              set(result) == {'result', 'receipt_accounting_verified', 'error'}
+              and result['result'] == 'FAIL'
+              and result['receipt_accounting_verified'] is False
+              and isinstance(result['error'], str)
+          )
+          if incomplete_failure:
+              print('Incomplete build failure receipt; no success adopted.')
+          else:
+              assert result['native_execution_verified'] is False
+              assert result['windows98_integration_verified'] is False
+              assert result['guest_boot_verified'] is False
+          budget = 131072
+          for path in sorted(proof.glob('command-*.stderr')):
+              assert not path.is_symlink() and path.stat().st_size <= 524288
+              if path.stat().st_size:
+                  assert path.stat().st_size <= budget
+                  budget -= path.stat().st_size
+                  print(f'Actual {path.name}:')
+                  print(path.read_text(), end='')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+              stream.write(f"Actual i486 build verdict: {result['result']}\n\n")
+              stream.write('Compile/link and ELF structure only; guest/Windows98/VMM execution remain unverified.\n')
+          PYTHON
