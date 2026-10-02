@@ -162,8 +162,12 @@ class FrozenSourceControls(unittest.TestCase):
             with self.assertRaises(ValueError):union.close()
     def test_unadmitted_frozen_source_blocks_spawn(self):
         with tempfile.TemporaryDirectory() as td:
-            server=g.Server(None,None,{'build.py':{}},Path(td))
-            with self.assertRaises(ValueError):server.dispatch({'id':1,'op':'spawn','params':{}},[])
+            union=g.LeaseUnion()
+            try:
+                owner=__import__('types').SimpleNamespace(union=union)
+                server=g.Server(None,owner,{'build.py':{}},Path(td))
+                with self.assertRaises(ValueError):server.dispatch({'id':1,'op':'spawn','params':{}},[])
+            finally:union.close()
 
 
 class AdditionalBoundaries(unittest.TestCase):

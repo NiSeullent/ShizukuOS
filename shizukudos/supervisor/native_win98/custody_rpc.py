@@ -29,6 +29,49 @@ def pairs(rows):
         need(key not in result,'duplicate RPC JSON field');result[key]=value
     return result
 
+def original_pin(row):
+    need(type(row) is dict and set(row)=={'path','bytes','sha256'},'exact borrowed original pin')
+    need(type(row['path']) is str,'literal original path');path=Path(row['path'])
+    need(path.is_absolute() and str(path)==row['path'] and path.resolve()==path and
+         not any(p.is_symlink() for p in (path,*path.parents)) and
+         not any(path==p or p in path.parents for p in map(Path,('/dev','/proc','/sys'))),'canonical nonvirtual borrowed original path')
+    need(type(row['bytes']) is int and 0<row['bytes']<=8<<30 and type(row['sha256']) is str and
+         re.fullmatch('[0-9a-f]{64}',row['sha256']) and row['sha256']!='0'*64,'bounded literal original extent/SHA')
+    return path
+
+class BorrowedOriginal:
+    """One received duplicate of the guardian's open file description.
+
+    This never establishes or changes a lease. SHA provenance belongs to the
+    guardian's initial full read; final guardian full read/closure is pending.
+    """
+    def __init__(self,client,row,fd,answer):
+        self.client,self.pin,self.fd=client,dict(row),fd;self.closed=False
+        need(type(answer) is dict and set(answer)=={'pin','identity','guardian_pid','guardian_full_SHA_admitted'} and
+             answer['pin']==row and answer['guardian_full_SHA_admitted'] is True and
+             type(answer['guardian_pid']) is int and answer['guardian_pid']==client.channel.peer_pid,'exact actual guardian original admission')
+        ident=answer['identity'];need(type(ident) is list and len(ident)==5 and
+             all(type(v) is int and v>=0 for v in ident) and ident[2]==row['bytes'],'five literal original identity fields')
+        self.identity=tuple(ident);self.guardian_pid=answer['guardian_pid'];self.local_check()
+    def local_check(self,ancestors=None):
+        need(not self.closed,'borrowed original already closed');p=Path(self.pin['path']);s=os.fstat(self.fd)
+        need(stat.S_ISREG(s.st_mode) and fcntl.fcntl(self.fd,fcntl.F_GETFL)&os.O_ACCMODE==os.O_RDONLY and
+             fcntl.fcntl(self.fd,fcntl.F_GETLEASE)==fcntl.F_RDLCK and fcntl.fcntl(self.fd,fcntl.F_GETOWN)==self.guardian_pid and
+             (s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)==self.identity and
+             (lambda v:(v.st_dev,v.st_ino,v.st_size,v.st_mtime_ns,v.st_ctime_ns))(p.stat())==self.identity,'borrowed actual readonly identity/guardian lease changed')
+        if ancestors is None:need(not any(q.is_symlink() for q in (p,*p.parents)),'borrowed original ancestor became a symlink')
+        else:ancestors.update((p,*p.parents))
+    def check(self):self.client.check_originals()
+    def __enter__(self):self.check();return self
+    def __exit__(self,*_):
+        try:self.check()
+        finally:self.close()
+    def close(self):
+        if not self.closed:
+            self.closed=True
+            try:os.close(self.fd)
+            finally:self.client.originals.pop(self.pin['path'],None)
+
 class Channel:
     def __init__(self,sock,peer_pid):
         need(sock.family==socket.AF_UNIX and sock.type & 15==socket.SOCK_SEQPACKET,'inherited Unix seqpacket required')
@@ -67,6 +110,7 @@ class Channel:
 class Client:
     def __init__(self,fd,guardian_pid):
         self.channel=Channel(socket.socket(fileno=fd),guardian_pid);self.sequence=0;self.frozen_fds={};self.launch_requested=False
+        self.originals={};self.original_requests=set()
     def call(self,operation,parameters=None,fds=(),timeout=5):
         self.sequence+=1
         self.channel.send({'id':self.sequence,'op':operation,'params':parameters or {}},fds,timeout)
@@ -84,6 +128,23 @@ class Client:
             for fd in rights:os.close(fd)
             raise ValueError('unexpected response rights')
         return value
+    def borrow_original(self,row):
+        name=str(original_pin(row));need(name not in self.original_requests,'duplicate original admission request')
+        self.original_requests.add(name);answer,rights=self.call('original',{'pin':dict(row)})
+        try:
+            need(len(rights)==1,'exactly one borrowed original descriptor')
+            value=BorrowedOriginal(self,row,rights[0],answer);self.originals[name]=value;return value
+        except BaseException:
+            for fd in rights:os.close(fd)
+            raise
+    def check_originals(self):
+        if not self.originals:return
+        ancestors=set()
+        for entry in self.originals.values():entry.local_check(ancestors)
+        need(not any(p.is_symlink() for p in ancestors),'borrowed original ancestor became a symlink')
+        need(self.ordinary('original-check',{'pins':[entry.pin for entry in self.originals.values()]}) is True,'guardian original checkpoint refused')
+        for entry in self.originals.values():entry.local_check(ancestors)
+        need(not any(p.is_symlink() for p in ancestors),'borrowed original namespace changed during checkpoint')
     def admit_frozen(self,path,relative):
         row,rights=self.call('frozen',{'path':str(path),'relative':relative})
         try:
@@ -155,8 +216,17 @@ class Client:
         finally:
             for fd in rights:os.close(fd)
     def close(self):
-        for fd,_ in self.frozen_fds.values():os.close(fd)
-        self.frozen_fds.clear();self.channel.socket.close()
+        errors=[]
+        for entry in list(self.originals.values()):
+            try:entry.close()
+            except BaseException as error:errors.append(error)
+        for fd,_ in self.frozen_fds.values():
+            try:os.close(fd)
+            except BaseException as error:errors.append(error)
+        self.frozen_fds.clear()
+        try:self.channel.socket.close()
+        except BaseException as error:errors.append(error)
+        if errors:raise errors[0]
 
 class Process:
     """Only observations/signals of the guardian's one real Popen child."""
