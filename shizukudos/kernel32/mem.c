@@ -11,6 +11,7 @@
  */
 #include "k32.h"
 #include "../kcommon/pma_sync.h"
+#include "smp_native.h"
 
 #define HEAP_BASE 0x00200000u
 #define HEAP_SIZE 0x00200000u
@@ -270,4 +271,69 @@ void mem_init(const shz_bootinfo_t *bi)
     }
     write_cr3(pd);
     write_cr0(read_cr0() | 0x80010000u);                    /* PG | WP */
+}
+
+/* Narrow BSP-before-INIT seams. Observations do not pin allocations. */
+int k32_pmm_owned(uint32_t pa)
+{
+    if(pa<PMM_BASE || (pa&4095)) return 0;
+    memory_guard_t g=memory_enter(&pmm_lock);
+    const uint32_t i=(pa-PMM_BASE)/PAGE_SIZE;
+    const int ok=i<pmm_pages && bit_get(i);
+    memory_leave(&pmm_lock,g);return ok;
+}
+int k32_heap_owned(uint32_t base,uint32_t bytes)
+{
+    if(!bytes || base<HEAP_BASE+sizeof(struct hblock) || base>=HEAP_BASE+HEAP_SIZE ||
+       bytes>HEAP_BASE+HEAP_SIZE-base) return 0;
+    memory_guard_t g=memory_enter(&heap_lock);int ok=0;unsigned budget=HEAP_SIZE/16;
+    for(struct hblock *b=heap_head;b && budget--;b=b->next) {
+        if((uintptr_t)b<HEAP_BASE || (uintptr_t)b>HEAP_BASE+HEAP_SIZE-sizeof *b || b->magic!=HMAGIC) break;
+        if((uint32_t)(uintptr_t)(b+1)==base) { ok=b->used && bytes<=b->size;break; }
+    }
+    memory_leave(&heap_lock,g);return ok;
+}
+static uint32_t native_tables[16],native_pages[512];
+static unsigned native_table_count,native_page_count;
+int k32_vm_native_map(uint32_t page,int uc)
+{
+    if((page&4095) || arch_cpu_id()!=0 || (k32_flags()&0x200) || k32_ap_started() ||
+       !k32_pmm_owned(kernel_pd) || (uc!=0 && uc!=1)) return -1;
+    uint32_t *pde=pde_of(kernel_pd,page),*pt;
+    if(*pde&PTE_P) {
+        if((*pde&0x80) || !k32_pmm_owned(*pde&~4095u)) return -1;
+        pt=(uint32_t *)(*pde&~4095u);
+        const uint32_t old=pt[(page>>12)&1023];
+        if(old&PTE_P) return (old&~0x60u)==(page|1u|(uc?0x1au:0u)) ? 0 : -1;
+    } else {
+        if(native_table_count==16) return -1;
+        const uint32_t table=pmm_alloc();if(!table)return -1;
+        native_tables[native_table_count++]=table;*pde=table|3u;pt=(uint32_t *)table;
+    }
+    if(native_page_count==512) return -1;
+    native_pages[native_page_count++]=page;
+    pt[(page>>12)&1023]=page|1u|(uc?0x1au:0u);invlpg(page);return 0;
+}
+void k32_vm_native_rollback(void)
+{
+    KASSERT(arch_cpu_id()==0 && !(k32_flags()&0x200) && !k32_ap_started());
+    for(unsigned i=0;i<native_page_count;i++) {
+        uint32_t page=native_pages[i],*pde=pde_of(kernel_pd,page);
+        ((uint32_t *)(*pde&~4095u))[(page>>12)&1023]=0;invlpg(page);
+    }
+    for(unsigned i=0;i<native_table_count;i++) {
+        for(unsigned j=0;j<1024;j++) if((((uint32_t *)kernel_pd)[j]&~4095u)==native_tables[i]) ((uint32_t *)kernel_pd)[j]=0;
+        pmm_free(native_tables[i]);
+    }
+    native_page_count=native_table_count=0;
+}
+int k32_vm_native_root_owned(void)
+{
+    if(read_cr3()!=kernel_pd || (read_cr4()&0x20) || !k32_pmm_owned(kernel_pd)) return 0;
+    for(unsigned i=0;i<1024;i++) {
+        uint32_t pde=((uint32_t *)kernel_pd)[i];if(!(pde&1))continue;
+        uint32_t pt=pde&~4095u;if((pde&0x80) || pt==kernel_pd || !k32_pmm_owned(pt))return 0;
+        for(unsigned j=0;j<i;j++) if((((uint32_t *)kernel_pd)[j]&~4095u)==pt)return 0;
+    }
+    return 1;
 }

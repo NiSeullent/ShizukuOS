@@ -3,6 +3,7 @@
  * gate, argument validation, and containment of user faults.
  */
 #include "k32.h"
+#include "smp_native.h"
 
 extern void enter_user(uint32_t entry, uint32_t user_esp);
 
@@ -47,6 +48,7 @@ static void proc_thread(void *arg)
 
 int proc_create(const char *name, const uint8_t *image, uint32_t size, int *pid_out)
 {
+    if(k32_ap_active() || arch_cpu_id()!=0) return -1;
     struct proc *p = 0;
     unsigned i, k;
     uint32_t off, f;

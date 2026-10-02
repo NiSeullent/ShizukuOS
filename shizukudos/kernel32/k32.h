@@ -2,7 +2,7 @@
  * Shizuku Kernel32: a separate x86 Protected Mode kernel (i486 instruction set).
  * Independent GDT/IDT/TSS, paging, physical/virtual memory, heap, preemptive scheduler,
  * ring-3 processes with an int 0x80 system-call gate, and an IPC endpoint speaking the
- * inter-kernel ABI. It shares no code or state with Kernel64.
+ * inter-kernel ABI. CPU entry/state are private; the portable firmware parser is reused.
  */
 #ifndef K32_H
 #define K32_H
@@ -30,6 +30,8 @@ struct regs {
 void arch_init(void);
 uint32_t arch_cpu_id(void);             /* trusted GS identity or UINT32_MAX */
 void tss_set_kernel_stack(uint32_t esp0);
+static inline uint32_t k32_stack_pointer(void) { uint32_t v; __asm__ volatile("mov %%esp, %0" : "=r"(v)); return v; }
+static inline uint32_t k32_flags(void) { uintptr_t v; __asm__ volatile("pushf; pop %0" : "=r"(v)); return v; }
 static inline uint32_t read_cr0(void) { uint32_t v; __asm__ volatile("mov %%cr0, %0" : "=r"(v)); return v; }
 static inline uint32_t read_cr2(void) { uint32_t v; __asm__ volatile("mov %%cr2, %0" : "=r"(v)); return v; }
 static inline uint32_t read_cr3(void) { uint32_t v; __asm__ volatile("mov %%cr3, %0" : "=r"(v)); return v; }
@@ -71,6 +73,12 @@ uint32_t vm_translate(uint32_t pd, uint32_t va);   /* physical or 0 */
 void *kmalloc(size_t n);
 void kfree(void *p);
 size_t kheap_used(void);
+uint32_t kernel_space(void);
+int k32_pmm_owned(uint32_t pa);
+int k32_heap_owned(uint32_t base, uint32_t bytes);
+int k32_vm_native_map(uint32_t page, int uc);
+void k32_vm_native_rollback(void);
+int k32_vm_native_root_owned(void);
 
 /* ---- sched.c ---- */
 typedef struct thread thread_t;
@@ -88,6 +96,7 @@ struct thread {
     uint32_t on_cpu;                    /* ownership until saved stack is inactive */
     uint32_t stack_base;
     uint32_t proc;                      /* owning process id, 0 = kernel */
+    uint32_t native_tag;                /* private preallocated cohort only */
     int exit_code;
     char name[16];
     uint64_t run_ticks;

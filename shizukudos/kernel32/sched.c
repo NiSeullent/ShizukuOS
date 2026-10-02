@@ -6,6 +6,7 @@
  */
 #include "k32.h"
 #include "sched_cpu.h"
+#include "smp_native.h"
 #include "../abi/shz_sched_deadline.h"
 
 _Static_assert(TICK_US > 0, "finite deadlines require a positive tick interval");
@@ -84,7 +85,9 @@ uint32_t thread_get_affinity(thread_t *t)
 int thread_set_affinity(thread_t *t, uint32_t mask)
 {
     sched_guard_t g = guard_enter();
-    int rc = cpu_context() ? k32_rq_affinity_locked(&runqueues, t, mask) : -1;
+    int rc = cpu_context() && k32_rq_valid(&runqueues,t) &&
+        ((!t->native_tag && mask==1) || (t->native_tag==K32_AP_TAG && !t->proc && mask==t->affinity_mask))
+        ? k32_rq_affinity_locked(&runqueues, t, mask) : -1;
     guard_leave(g);
     return rc;
 }
@@ -161,7 +164,8 @@ static void schedule(void)
     ++switches;
     k32_rq_unlock(&runqueues, ticket);
     tss_set_kernel_stack(next->stack_base + STACK_BYTES);
-    const uint32_t pd = proc_page_directory(next->proc), want = pd ? pd : kernel_space();
+    const uint32_t pd = cpu ? 0 : proc_page_directory(next->proc), want = pd ? pd : kernel_space();
+    if(cpu) KASSERT(next->native_tag==K32_AP_TAG && !next->proc);
     if (read_cr3() != want) write_cr3(want);
     switch_stacks(&prev->esp, next->esp);
 }
@@ -211,7 +215,7 @@ static void thread_trampoline(void (*fn)(void *), void *arg)
     fn(arg);
     thread_exit(0);
 }
-thread_t *thread_create(const char *name, void (*fn)(void *), void *arg)
+static thread_t *create_internal(const char *name, void (*fn)(void *), void *arg, unsigned cpu, int staged)
 {
     sched_guard_t g = guard_enter();
     thread_t *t = 0;
@@ -222,9 +226,10 @@ thread_t *thread_create(const char *name, void (*fn)(void *), void *arg)
     memset(t, 0, sizeof *t);
     t->state = TS_ALLOCATING;
     t->ready_cpu = t->on_cpu = K32_CPU_NONE;
-    t->affinity_mask = 1;
+    t->affinity_mask = 1u<<cpu;
+    t->native_tag = staged ? K32_AP_TAG : 0;
     k32_rq_unlock(&runqueues, g.ticket);
-    /* Global allocator is still UP; AP activation cannot bypass that gate. */
+    /* BSP stages allocation outside the scheduler ticket, before INIT. */
     uint32_t base = (uint32_t)kmalloc(STACK_BYTES);
     g.ticket = k32_rq_lock(&runqueues);
     if (!base) { t->state = TS_FREE; guard_leave(g); return 0; }
@@ -242,9 +247,14 @@ thread_t *thread_create(const char *name, void (*fn)(void *), void *arg)
     *--sp = 0; /* esi */
     *--sp = 0; /* edi */
     t->esp = (uint32_t)sp;
-    make_ready_locked(t);
+    if(!staged) make_ready_locked(t);
     guard_leave(g);
     return t;
+}
+thread_t *thread_create(const char *name, void (*fn)(void *), void *arg)
+{
+    if(arch_cpu_id()!=0 || k32_ap_active()) return 0;
+    return create_internal(name,fn,arg,0,0);
 }
 void thread_yield(void)
 {
@@ -264,6 +274,7 @@ void thread_exit(int code)
 }
 int thread_join(thread_t *t)
 {
+    if(arch_cpu_id()!=0)k32_ap_fault(arch_cpu_id(),0x704);
     for (;;) {
         sched_guard_t g = guard_enter();
         KASSERT(k32_rq_valid(&runqueues, t) && t != thread_current());
@@ -286,6 +297,7 @@ int thread_join(thread_t *t)
 }
 void thread_sleep_ms(uint32_t ms)
 {
+    if(arch_cpu_id()!=0)k32_ap_fault(arch_cpu_id(),0x703);
     sched_guard_t g = guard_enter();
     thread_t *t = thread_current();
     KASSERT(t);
@@ -295,9 +307,10 @@ void thread_sleep_ms(uint32_t ms)
     schedule();
     irq_restore(g.flags);
 }
-void sem_init(ksem_t *s, int count) { s->count = count; s->waiters = 0; }
+void sem_init(ksem_t *s, int count) { if(arch_cpu_id()!=0)k32_ap_fault(arch_cpu_id(),0x705); s->count = count; s->waiters = 0; }
 static int sem_wait_common(ksem_t *s, uint32_t ms)
 {
+    if(arch_cpu_id()!=0)k32_ap_fault(arch_cpu_id(),0x703);
     sched_guard_t g = guard_enter();
     thread_t *t = thread_current();
     KASSERT(t);
@@ -321,6 +334,7 @@ void sem_wait(ksem_t *s) { sem_wait_common(s, 0); }
 int sem_wait_timeout(ksem_t *s, uint32_t ms) { return sem_wait_common(s, ms ? ms : 1); }
 void sem_post(ksem_t *s)
 {
+    if(arch_cpu_id()!=0)k32_ap_fault(arch_cpu_id(),0x703);
     sched_guard_t g = guard_enter();
     thread_t *w = s->waiters;
     if (w) {
@@ -332,9 +346,10 @@ void sem_post(ksem_t *s)
     } else ++s->count;
     guard_leave(g);
 }
-void mutex_init(kmutex_t *m) { m->locked = 0; m->owner = 0; m->waiters = 0; m->depth = 0; }
+void mutex_init(kmutex_t *m) { if(arch_cpu_id()!=0)k32_ap_fault(arch_cpu_id(),0x706); m->locked = 0; m->owner = 0; m->waiters = 0; m->depth = 0; }
 void mutex_lock(kmutex_t *m)
 {
+    if(arch_cpu_id()!=0)k32_ap_fault(arch_cpu_id(),0x703);
     for (;;) {
         sched_guard_t g = guard_enter();
         thread_t *t = thread_current();
@@ -352,6 +367,7 @@ void mutex_lock(kmutex_t *m)
 }
 void mutex_unlock(kmutex_t *m)
 {
+    if(arch_cpu_id()!=0)k32_ap_fault(arch_cpu_id(),0x703);
     sched_guard_t g = guard_enter();
     KASSERT(m->locked && m->owner == thread_current());
     m->locked = 0;
@@ -386,3 +402,110 @@ void sched_init(void)
     guard_leave(g);
 }
 void sched_start_idle(void) { }
+
+/* Private native-only staged admission; public CPU registration stays closed. */
+static void staged_idle(void *unused) { (void)unused; k32_ap_fault(arch_cpu_id(),0x701); }
+int k32_ap_sched_prepare(unsigned cpu,void (*worker)(void *))
+{
+    if(arch_cpu_id()!=0 || (k32_flags()&0x200) || k32_ap_started() || !worker ||
+       !cpu || cpu>=k32_ap_count() || cpu>=K32_AP_MAX || k32_ap_cpus[cpu].idle) return -1;
+    k32_ap_cpu_t *c=&k32_ap_cpus[cpu];
+    c->idle=create_internal("ap-idle",staged_idle,0,cpu,1);
+    if(!c->idle)return -1;
+    c->idle_base=c->idle->stack_base;
+    for(unsigned i=0;i<2;i++) {
+        c->worker[i]=create_internal("ap-worker",worker,(void *)(uintptr_t)(cpu*2+i),cpu,1);
+        if(!c->worker[i])return -1;
+    }
+    return 0;
+}
+int k32_ap_sched_online(unsigned cpu,uint32_t esp)
+{
+    if(!cpu || cpu>=k32_ap_count() || cpu>=K32_AP_MAX || arch_cpu_id()!=cpu ||
+       (k32_flags()&0x200) || !k32_ap_active() || !k32_ap_started() || !k32_ap_root_owned())return -1;
+    k32_ap_cpu_t *ap=&k32_ap_cpus[cpu];uint32_t actual=k32_stack_pointer();
+    if(ap->phase!=1 || esp<ap->idle_base || esp>=ap->idle_base+K32_AP_STACK ||
+       actual<ap->idle_base || actual>=ap->idle_base+K32_AP_STACK)return -1;
+    sched_guard_t g=guard_enter();k32_cpu_sched_t *c=&runqueues.cpu[cpu];int ok=1;
+    thread_t *list[3]={ap->idle,ap->worker[0],ap->worker[1]};
+    if(k32_rq_cpu_online(&runqueues,cpu) || c->current || c->idle || c->head || c->outgoing)ok=0;
+    for(unsigned i=0;i<3;i++) {
+        thread_t *t=list[i];
+        if(!k32_rq_valid(&runqueues,t) || t->native_tag!=K32_AP_TAG || t->proc ||
+           t->state!=TS_ALLOCATING || t->on_cpu!=K32_CPU_NONE || t->ready_queued ||
+           t->affinity_mask!=(1u<<cpu))ok=0;
+        for(unsigned j=0;j<i;j++)if(t==list[j])ok=0;
+    }
+    if(ok) {
+        ap->idle_sp=actual;
+        c->idle=c->current=ap->idle;ap->idle->state=TS_RUNNING;ap->idle->on_cpu=cpu;
+        runqueues.online_mask|=1u<<cpu;
+        for(unsigned i=0;i<2;i++)make_ready_locked(ap->worker[i]);
+        __atomic_add_fetch(&ap->request,1,__ATOMIC_RELEASE);__atomic_store_n(&ap->phase,2,__ATOMIC_RELEASE);
+    }
+    guard_leave(g);return ok?0:-1;
+}
+void k32_ap_sched_tick(unsigned cpu,int ipi)
+{
+    if(!cpu || cpu!=arch_cpu_id() || cpu>=k32_ap_count() || !cpu_context()) return;
+    sched_guard_t g=guard_enter();
+    thread_t *t=thread_current();
+    if(!t || t->native_tag!=K32_AP_TAG || t->proc) { guard_leave(g);k32_ap_fault(cpu,0x702); }
+    if(!ipi)++t->run_ticks;
+    else __atomic_store_n(&k32_ap_cpus[cpu].ack,__atomic_load_n(&k32_ap_cpus[cpu].request,__ATOMIC_ACQUIRE),__ATOMIC_RELEASE);
+    k32_rq_unlock(&runqueues,g.ticket);schedule();irq_restore(g.flags);
+}
+int k32_ap_sched_terminal(unsigned cpu)
+{
+    if(!cpu || cpu>=k32_ap_count())return 0;
+    sched_guard_t g=guard_enter();int ok=1;
+    for(unsigned i=0;i<2;i++) {
+        thread_t *t=k32_ap_cpus[cpu].worker[i];
+        if(!k32_rq_reapable_locked(&runqueues,t))ok=0;
+    }
+    guard_leave(g);return ok;
+}
+int k32_ap_sched_withdraw(unsigned cpu,uint32_t esp)
+{
+    if(!cpu || cpu>=k32_ap_count() || arch_cpu_id()!=cpu || (k32_flags()&0x200) ||
+       !k32_ap_active() || !k32_ap_started())return -1;
+    k32_ap_cpu_t *ap=&k32_ap_cpus[cpu];const uint32_t actual=k32_stack_pointer();
+    if(esp<ap->boot || esp>=ap->boot+K32_AP_STACK || actual<ap->boot ||
+       actual>=ap->boot+K32_AP_STACK || ap->phase!=3)return -1;
+    sched_guard_t g=guard_enter();k32_cpu_sched_t *c=&runqueues.cpu[cpu];int ok=0;
+    if(k32_rq_cpu_online(&runqueues,cpu) && c->current==ap->idle && c->idle==ap->idle &&
+       !c->outgoing && !c->head && ap->idle->on_cpu==cpu) {
+        ok=1;for(unsigned i=0;i<2;i++)if(!k32_rq_reapable_locked(&runqueues,ap->worker[i]))ok=0;
+        if(ok) {
+            ap->idle->state=TS_ZOMBIE;ap->idle->on_cpu=K32_CPU_NONE;
+            c->current=c->idle=0;runqueues.online_mask&=~(1u<<cpu);
+            ap->withdraw_sp=actual;
+            __atomic_store_n(&ap->withdrawn,1,__ATOMIC_RELEASE);
+        }
+    }
+    guard_leave(g);return ok?0:-1;
+}
+int k32_ap_sched_discard(unsigned cpu)
+{
+    if(arch_cpu_id()!=0 || !cpu || cpu>=k32_ap_count())return -1;
+    k32_ap_cpu_t *ap=&k32_ap_cpus[cpu];
+    if(k32_ap_started() && !__atomic_load_n(&ap->withdrawn,__ATOMIC_ACQUIRE))return -1;
+    thread_t *list[3]={ap->idle,ap->worker[0],ap->worker[1]};
+    uint32_t bases[3]={0};sched_guard_t g=guard_enter();
+    /* Validate the WHOLE set before changing any state or allocator account. */
+    for(unsigned i=0;i<3;i++)if(list[i]) {
+        thread_t *t=list[i];
+        if(!k32_rq_valid(&runqueues,t) || t->native_tag!=K32_AP_TAG || t->on_cpu!=K32_CPU_NONE ||
+           t->ready_queued || (t->state!=TS_ALLOCATING && t->state!=TS_ZOMBIE)) { guard_leave(g);return -1; }
+        for(unsigned j=0;j<i;j++)if(t==list[j]) { guard_leave(g);return -1; }
+        bases[i]=t->stack_base;
+    }
+    for(unsigned i=0;i<3;i++)if(list[i])list[i]->state=TS_ALLOCATING;
+    k32_rq_unlock(&runqueues,g.ticket);
+    for(unsigned i=0;i<3;i++)if(bases[i])kfree((void *)bases[i]);
+    g.ticket=k32_rq_lock(&runqueues);
+    for(unsigned i=0;i<3;i++)if(list[i]) {
+        memset(list[i],0,sizeof *list[i]);list[i]->on_cpu=list[i]->ready_cpu=K32_CPU_NONE;
+    }
+    ap->idle=ap->worker[0]=ap->worker[1]=0;guard_leave(g);return 0;
+}

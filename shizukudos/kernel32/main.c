@@ -3,6 +3,7 @@
  * self-tests; keep serving other domains until the peer ends its session.
  */
 #include "k32.h"
+#include "smp_native.h"
 #include "service_policy.h"
 #include "../boot_profile/win98_foundation.h"
 
@@ -17,8 +18,11 @@ void kmain(const shz_bootinfo_t *bi)
     int service_mode;
     if (bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR || bi->domain_id != SHZ_DOM_KERNEL32)
         shz_exit(97);
-    service_mode = shz_win98_foundation_policy(bi);
-    if (!service_mode)
+    unsigned native_count=0;
+    const int native_policy=k32_ap_policy(bi,&native_count);
+    if(native_policy<0 || (native_policy && k32_ap_snapshot(bi,native_count)))shz_exit(97);
+    service_mode = native_policy ? 0 : shz_win98_foundation_policy(bi);
+    if (!service_mode && !native_policy)
         service_mode = k32_boot_service_mode(bi); /* reviewed earlier native profile */
     if (service_mode < 0)
         shz_exit(97);
@@ -28,6 +32,10 @@ void kmain(const shz_bootinfo_t *bi)
     mem_init(bi);
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
+    if(native_count) {
+        const int native_result=k32_ap_run();
+        shz_exit(native_result==1?0:98);
+    }
     sti();
     if (bi->channel_count) {
         ipc_init(bi);
