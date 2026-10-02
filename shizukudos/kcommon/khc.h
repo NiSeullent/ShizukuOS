@@ -22,8 +22,10 @@ static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_ou
 #else
 static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
 {
-    hcreg_t status, value;
-    __asm__ volatile("vmcall" : "=a"(status), "=b"(value) : "a"(op), "b"(a), "c"(b) : "memory", "cc");
+    hcreg_t status = op, value = a, argument = b;
+    /* DOMAIN_STATE and CHANNEL_INFO also return RCX. The generic helper
+     * discards that result, but callers' live C values must survive it. */
+    __asm__ volatile("vmcall" : "+a"(status), "+b"(value), "+c"(argument) : : "memory", "cc");
     if (value_out)
         *value_out = value;
     return (long)status;
@@ -40,8 +42,9 @@ static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_ou
 #else
 static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
 {
-    hcreg_t status, value;
-    __asm__ volatile("vmcall" : "=a"(status), "=b"(value) : "a"(op), "b"(a), "c"(b) : "memory", "cc");
+    hcreg_t status = op, value = a, argument = b;
+    /* EAX/EBX/ECX are read-write for the same Supervisor ABI as Kernel64. */
+    __asm__ volatile("vmcall" : "+a"(status), "+b"(value), "+c"(argument) : : "memory", "cc");
     if (value_out)
         *value_out = value;
     return (long)(int32_t)status;

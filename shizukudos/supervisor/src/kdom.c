@@ -11,6 +11,7 @@
 #include "domain.h"
 #include "pool.h"
 #include "../../abi/shz_ipc.h"
+#include "../../boot_profile/win98_foundation.h"
 #include "../../kernel32/service_policy.h"
 
 #define BOOT_GDT_GPA 0x6000u
@@ -185,11 +186,66 @@ static const struct { uint32_t a, b; } channel_plan[SHZ_MAX_CHANNELS] = {
 
 static int alive(uint32_t id) { return id < SHZ_MAX_DOMAINS && g_dom[id].state && g_dom[id].id == id; }
 
+/* Publish the runtime policy only after genuine native domains and their
+ * channels exist. A configured loader bit or stale EXITED domain alone cannot
+ * create a Windows owner or a worker service channel. */
+static int win98_foundation_publish(shz_info_t *info)
+{
+    static const char command[] = "shz.foundation=win98";
+    static const uint32_t ids[] = {SHZ_DOM_WIN98, SHZ_DOM_KERNEL32, SHZ_DOM_KERNEL64};
+    static const dom_kind_t kinds[] = {DK_WIN98, DK_KERNEL32, DK_KERNEL64};
+    shz_bootinfo_t *workers[2], candidates[2];
+    unsigned i;
+    if (!info->loader_flags) return 0;
+    if (info->loader_flags != SHZ_LOADER_NATIVE_WIN98) goto refused;
+    for (i = 0; i < 3; ++i) {
+        domain_t *d = &g_dom[ids[i]];
+        if (d->id != ids[i] || d->kind != kinds[i] || !d->generation ||
+            (d->state != SHZ_DS_RUNNABLE && d->state != SHZ_DS_WAITING)) goto refused;
+        if (i) {
+            if (!d->ram_base || d->ram_size < SHZ_BOOTINFO_GPA + sizeof(shz_bootinfo_t) ||
+                d->ram_base > UINT64_MAX - SHZ_BOOTINFO_GPA - sizeof(shz_bootinfo_t)) goto refused;
+            workers[i - 1] = (shz_bootinfo_t *)(uintptr_t)(d->ram_base + SHZ_BOOTINFO_GPA);
+            if (workers[i - 1]->size != sizeof(shz_bootinfo_t) ||
+                workers[i - 1]->domain_id != d->id || workers[i - 1]->generation != d->generation)
+                goto refused;
+        }
+    }
+    if (!g_dom[SHZ_DOM_KERNEL32].chan[0].mapped ||
+        g_dom[SHZ_DOM_KERNEL32].chan[0].peer != SHZ_DOM_KERNEL64 ||
+        !g_dom[SHZ_DOM_KERNEL64].chan[0].mapped ||
+        g_dom[SHZ_DOM_KERNEL64].chan[0].peer != SHZ_DOM_KERNEL32 ||
+        !g_dom[SHZ_DOM_KERNEL64].chan[2].mapped ||
+        g_dom[SHZ_DOM_KERNEL64].chan[2].peer != SHZ_DOM_WIN98 ||
+        !g_dom[SHZ_DOM_WIN98].chan[2].mapped ||
+        g_dom[SHZ_DOM_WIN98].chan[2].peer != SHZ_DOM_KERNEL64) goto refused;
+    for (i = 0; i < 2; ++i) {
+        memcpy(&candidates[i], workers[i], sizeof candidates[i]);
+        memset(candidates[i].cmdline, 0, sizeof candidates[i].cmdline);
+        memcpy(candidates[i].cmdline, command, sizeof command);
+        candidates[i].cmdline_size = sizeof command - 1;
+        if (shz_win98_foundation_policy(&candidates[i]) != 1) goto refused;
+    }
+    for (i = 0; i < 2; ++i) {
+        memcpy(workers[i]->cmdline, candidates[i].cmdline, sizeof workers[i]->cmdline);
+        workers[i]->cmdline_size = candidates[i].cmdline_size;
+    }
+    kprintf("SHZ: native Win98 foundation policy published after channel construction\n");
+    return 0;
+refused:
+    log_capture(info->last_error, sizeof info->last_error,
+                "native Win98 foundation lacks live owners or validated worker channels");
+    return -1;
+}
+
 int ipc_channels_create(shz_info_t *info)
 {
     unsigned c;
-    if (!info->ipc_base || info->ipc_size < (uint64_t)SHZ_MAX_CHANNELS * SHZ_IPC_REGION_SIZE)
-        return 0;
+    if (!info->ipc_base || info->ipc_size < (uint64_t)SHZ_MAX_CHANNELS * SHZ_IPC_REGION_SIZE) {
+        if (!info->loader_flags) return 0;
+        log_capture(info->last_error, sizeof info->last_error, "native Win98 foundation lacks IPC backing");
+        return -1;
+    }
     for (c = 0; c < SHZ_MAX_CHANNELS; ++c) {
         const uint32_t a = channel_plan[c].a, b = channel_plan[c].b;
         const uint64_t hpa = info->ipc_base + (uint64_t)c * SHZ_IPC_REGION_SIZE;
@@ -224,5 +280,5 @@ int ipc_channels_create(shz_info_t *info)
         kprintf("SHZ: IPC channel %u: %s <-> %s at gpa %llx (generation 1)\n", c, g_dom[a].name, g_dom[b].name,
                 SHZ_IPC_GPA_BASE + (uint64_t)c * SHZ_IPC_REGION_SIZE);
     }
-    return 0;
+    return win98_foundation_publish(info);
 }

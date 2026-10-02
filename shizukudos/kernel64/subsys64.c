@@ -454,7 +454,11 @@ static int pump_slot(w64_slot_t *s)
 {
     unsigned stream;
     int progressed = 0;
-    if (!s->reaped && s->proc && s->proc->terminated && s->proc->threads_alive == 0) {
+    /* The last thread drops threads_alive before releasing process resources.
+     * proc_wait can block while teardown is still running, defeating the outer
+     * shutdown deadline. Keep pumping until teardown makes reaping ready. */
+    if (!s->reaped && s->proc && s->proc->terminated && s->proc->threads_alive == 0 &&
+        s->proc->teardown == 2) {
         int64_t code = 0;
         int faulted = 0;
         if (proc_wait(s->pid, &code, &faulted) == 0) {
@@ -514,6 +518,22 @@ static void service_loop(void)
         uint8_t payload[SHZ_MSG_MAX_INLINE];
         int reason, rc, busy;
         unsigned i, receive_budget = 64;
+#ifndef SHZ_STANDALONE
+        {   /* Native workers belong to the actual Windows domain. A failed or
+             * exited owner cannot leave this service admitting work forever. */
+            hcreg_t owner_state = SHZ_DS_UNUSED;
+            const long owner_rc = shz_hcall(SHZ_HC_DOMAIN_STATE, peer, 0, &owner_state);
+            if (owner_rc != SHZ_OK ||
+                (owner_state != SHZ_DS_RUNNABLE && owner_state != SHZ_DS_WAITING)) {
+                kprintf("K64 subsys64: native owner ended: status %ld state %u\n",
+                        owner_rc, (unsigned)owner_state);
+                shutdown_requested = 1;
+                shutdown_deadline = ticks_now() + W64_SHUTDOWN_WAIT_MS;
+                KASSERT(shz_pma_service_shutdown(&pma_service) == SHZ_OK);
+                break;
+            }
+        }
+#endif
         if (pma_service.generation < chan->generation) {
             /* A Supervisor-owned channel epoch fences every old identity,
              * request and reply. Never re-stamp an old completion as new. */

@@ -6,6 +6,7 @@
 #include "fs.h"
 #include "boot_channel_peer.h"
 #include "gfx_address.h"
+#include "../boot_profile/win98_foundation.h"
 #include "cpu_bringup.h"
 
 static shz_bootinfo_t bootinfo;
@@ -46,6 +47,11 @@ void kmain(uint64_t bootinfo_pa)
     k64_boot_fb_t fb;
     if (bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR || bi->domain_id != SHZ_DOM_KERNEL64 ||
         bi->size < __builtin_offsetof(shz_bootinfo_t, fb_base))
+        shz_exit(97);
+    /* Read the actual writer's bounded tail before normalization can hide a
+     * malformed terminator. A standalone command cannot invent a Win98 peer. */
+    const int foundation_mode = shz_win98_foundation_policy(bi);
+    if (foundation_mode < 0)
         shz_exit(97);
     /* Copy what the writer provided (`size`); a 1.0 writer's missing tail stays zero. */
     memcpy(&bootinfo, bi, bi->size < sizeof bootinfo ? bi->size : sizeof bootinfo);
@@ -89,6 +95,22 @@ void kmain(uint64_t bootinfo_pa)
 #endif
     sti();
     shz_cpu_bringup_verify();
+    if (foundation_mode) {
+        hcreg_t state = SHZ_DS_UNUSED;
+        long status;
+        /* Initialize the shared doorbell semaphore before either service uses
+         * its IRQ. Windows owns this worker lifetime; QA suites are separate
+         * acceptance workloads and must not delay real Windows requests. */
+        ipc64_init(&bootinfo);
+        kprintf("%s: native Win98 foundation service active\n", KVER);
+        subsys64_start(&bootinfo);
+        status = shz_hcall(SHZ_HC_DOMAIN_STATE, SHZ_DOM_WIN98, 0, &state);
+        if (status != SHZ_OK ||
+            (state != SHZ_DS_RUNNABLE && state != SHZ_DS_WAITING &&
+             state != SHZ_DS_EXITED && state != SHZ_DS_FAILED))
+            shz_exit(98);
+        shz_exit(state == SHZ_DS_FAILED ? 1 : 0);
+    }
     ds_native_control();
     if (k64_cmdline_has("shz.setup=interactive")) {
         extern unsigned k64_desktop(void);

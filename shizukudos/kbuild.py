@@ -59,11 +59,12 @@ def sources(directory, suffix):
 
 
 def source_hashes():
-    directories = [SHZ / name for name in ("kernel32", "kernel64", "kcommon", "abi", "pma_bridge", "win64/include", "dead_screen")]
+    directories = [SHZ / name for name in ("kernel32", "kernel64", "kcommon", "abi", "pma_bridge", "win64/include", "dead_screen", "boot_profile")]
     directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native"]
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
-    paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c", SHZ / "win64/pe_parse.h",
+    paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
+                  SHZ / "win64/pe_parse.h",
                   SHZ / "supervisor/src/font8x8_basic.h"])
     return {str(p.relative_to(REPO)): sha256_file(p) for p in sorted(paths)}
 
@@ -110,7 +111,19 @@ def build_kernel(name, directory, cflags, nasm_fmt, ld_emul, out_name, extra_c=(
 
 
 def main():
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    global BUILD
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", type=Path, help="new canonical private output directory; default keeps the existing build location")
+    args = parser.parse_args()
+    if args.out is not None:
+        output = args.out
+        if not output.is_absolute() or output.resolve() != output or output.exists() or not output.parent.is_dir():
+            parser.error("--out requires a new canonical absolute directory with an existing parent")
+        if output.is_relative_to(REPO) and not output.is_relative_to(REPO / "build"):
+            parser.error("--out cannot write generated kernels into visible project sources")
+        if shutil.disk_usage(output.parent).free < (17 << 30) + (64 << 20):
+            parser.error("--out requires the retained 17 GiB reserve plus a 64 MiB component budget")
+        BUILD = output
     for tool in ("nasm", "gcc", "ld", "nm", "objcopy", "objdump"):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
