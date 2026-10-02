@@ -94,43 +94,81 @@ def file_sha(path):
     return digest.hexdigest()
 
 
+class ReadLeaseRegistry:
+    """One break latch and complete live-FD checks; nested leases propagate SIGIO."""
+    def __init__(self):
+        self.broken = False
+        self.checkpoints = []
+
+    def __enter__(self):
+        self.previous = signal.getsignal(signal.SIGIO)
+        signal.signal(signal.SIGIO, self.break_requested)
+        return self
+
+    def break_requested(self, *args):
+        self.broken = True
+        if callable(self.previous):
+            self.previous(*args)
+
+    def check(self):
+        if self.broken:
+            raise RuntimeError("source read lease break requested")
+        for checkpoint in self.checkpoints:
+            checkpoint()
+
+    def __exit__(self, *unused):
+        try:
+            self.check()
+        finally:
+            signal.signal(signal.SIGIO, self.previous)
+
+
 @contextlib.contextmanager
-def read_leased(path, expected, size, maximum=DISK_BYTES):
+def read_leased(path, expected, size=None, maximum=DISK_BYTES, *, registry=None):
     """An actual Linux read lease blocks writers; a break request fails the run."""
     path, expected = safe_path(path), pin_format(expected)
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
-    previous, broken, leased = signal.getsignal(signal.SIGIO), [False], False
-    try:
-        before = os.fstat(fd)
-        if not stat.S_ISREG(before.st_mode) or not 0 < size <= maximum or before.st_size != size:
-            raise ValueError("leased regular input geometry mismatch")
-        signal.signal(signal.SIGIO, lambda *_: broken.__setitem__(0, True))
-        fcntl.fcntl(fd, fcntl.F_SETOWN, os.getpid())
-        fcntl.fcntl(fd, fcntl.F_SETLEASE, fcntl.F_RDLCK)
-        leased = True
-
-        def checkpoint():
-            if broken[0] or stable(before) != stable(os.fstat(fd)) or stable(before) != stable(path.stat()) or fcntl.fcntl(fd, fcntl.F_GETLEASE) != fcntl.F_RDLCK:
-                raise RuntimeError("source read lease or identity changed")
-
-        checkpoint()
-        digest = hashlib.sha256()
-        while block := os.read(fd, 1 << 20):
-            checkpoint()
-            digest.update(block)
-        checkpoint()
-        if digest.hexdigest() != expected:
-            raise ValueError("leased source SHA mismatch")
-        os.lseek(fd, 0, os.SEEK_SET)
-        yield fd, checkpoint
-        checkpoint()
-    finally:
+    with contextlib.ExitStack() as stack:
+        if registry is None:
+            registry = stack.enter_context(ReadLeaseRegistry())
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        leased, checkpoint = False, None
         try:
-            if leased:
-                fcntl.fcntl(fd, fcntl.F_SETLEASE, fcntl.F_UNLCK)
+            before = os.fstat(fd)
+            if size is None:
+                size = before.st_size
+            if not stat.S_ISREG(before.st_mode) or type(size) is not int or not 0 < size <= maximum or before.st_size != size:
+                raise ValueError("leased regular input geometry mismatch")
+            fcntl.fcntl(fd, fcntl.F_SETOWN, os.getpid())
+            fcntl.fcntl(fd, fcntl.F_SETLEASE, fcntl.F_RDLCK)
+            leased = True
+
+            def checkpoint():
+                if registry.broken or safe_path(path) != path or stable(before) != stable(os.fstat(fd)) or stable(before) != stable(path.stat()) or fcntl.fcntl(fd, fcntl.F_GETLEASE) != fcntl.F_RDLCK:
+                    raise RuntimeError("source read lease or identity changed")
+
+            registry.checkpoints.append(checkpoint)
+            registry.check()
+            digest, consumed = hashlib.sha256(), 0
+            while block := os.read(fd, min(1 << 20, size - consumed + 1)):
+                registry.check()
+                consumed += len(block)
+                if consumed > size:
+                    raise ValueError("leased source exceeds its exact extent")
+                digest.update(block)
+            registry.check()
+            if consumed != size or digest.hexdigest() != expected:
+                raise ValueError("leased source SHA/extent mismatch")
+            os.lseek(fd, 0, os.SEEK_SET)
+            yield fd, registry.check
+            registry.check()
         finally:
-            os.close(fd)
-            signal.signal(signal.SIGIO, previous)
+            if checkpoint is not None and checkpoint in registry.checkpoints:
+                registry.checkpoints.remove(checkpoint)
+            try:
+                if leased:
+                    fcntl.fcntl(fd, fcntl.F_SETLEASE, fcntl.F_UNLCK)
+            finally:
+                os.close(fd)
 
 
 def space(path, remaining=0):
@@ -497,77 +535,96 @@ def main(argv=None, *, receipt_sink=None):
     # The current loader gives K64 64 MiB and puts its archive at 32 MiB.
     # Larger archives require an explicit RAM/layout change, not a success claim.
     maximum = {"kernel32": 8 << 20, "kernel64": 16 << 20, "win64_img": 32 << 20}
-    inputs = {}
+    selected = {}
     for name, target in targets.items():
         path, pin = getattr(args, name), getattr(args, name + "_sha256")
         if bool(path) != bool(pin):
             parser.error("each optional input requires its SHA-256 pair")
         if path:
-            path, pin = safe_path(path), pin_format(pin)
-            size = pinned_hash(path, pin, sizes.get(name), maximum.get(name, DISK_BYTES))
-            inputs[target] = {"path": path, "sha256": pin, "bytes": size}
-    for name, item in inputs.items():
-        with read_leased(item["path"], item["sha256"], item["bytes"]) as (fd, checkpoint):
-            validate_contents(name, fd)
-            checkpoint()
-    if args.validate_only:
-        print(json.dumps({"status": "PASS_EXPLICIT_INPUT_VALIDATION_NO_BUILD_OR_VM", "input_files": len(inputs),
-                          "Windows98_installation_identity_verified": False, "Windows98_executed": False}))
-        return 0
-    if not args.out:
-        parser.error("a new --out private directory is required for building")
-    out = fresh_output(args.out)
-    budget = preparation_budget(inputs)
-    space(out, budget)
-    out.mkdir()
-    receipt = {"status": "FAIL_BUILD_PRESERVED", "private": True, "commands": [],
-               "preparation_budget_bytes": budget, "retained_free_space_bytes": RESERVE, "copies": {},
-               "input_pins": {n: {**item, "path": str(item["path"])} for n, item in inputs.items()},
-               "Windows98_installation_identity_verified": False, "VM_executed": False,
-               "Windows98_boot_verified": False, "MS_DOS_replaced": False, "native_Win64_app_verified": False}
+            selected[target] = {"path": safe_path(path), "sha256": pin_format(pin),
+                                "required_size": sizes.get(name), "maximum": maximum.get(name, DISK_BYTES)}
+    out, receipt = None, None
     try:
-        copies = {}
-        for name, item in inputs.items():
-            destination = out / name
-            with read_leased(item["path"], item["sha256"], item["bytes"]) as (fd, checkpoint):
+        with contextlib.ExitStack() as stack:
+            registry = stack.enter_context(ReadLeaseRegistry())
+            inputs, descriptors = {}, {}
+            for name, item in selected.items():
+                fd, checkpoint = stack.enter_context(read_leased(item["path"], item["sha256"],
+                                                                 item["required_size"], item["maximum"], registry=registry))
+                inputs[name] = {"path": item["path"], "sha256": item["sha256"], "bytes": os.fstat(fd).st_size}
+                descriptors[name] = fd
+            for name, fd in descriptors.items():
                 validate_contents(name, fd)
-                checkpoint()
-                receipt["copies"][name] = copy_fd(fd, checkpoint, destination, item["sha256"], item["bytes"], prefer_reflink=True)
-            copies[name] = destination
-        files = source_files()
-        pins = {str(p.relative_to(ROOT)): file_sha(p) for p in files}
-        snapshot = out / "source"
-        for source in files:
-            relative = source.relative_to(ROOT)
-            pinned_hash(source, pins[str(relative)], source.stat().st_size, 16 << 20)
-            destination = snapshot / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, destination)
-            if file_sha(destination) != pins[str(relative)]:
-                raise ValueError("source snapshot hash differs")
-        components = out / "components"
-        command([sys.executable, snapshot / "shizukudos/supervisor/native_win98/compile.py", "--out", components], receipt, timeout=300)
-        compiled = json.loads((components / "result.json").read_text())
-        if compiled["status"] != "PASS_NATIVE_SUPERVISOR_COMPONENT_COMPILE_NOT_RUN":
-            raise ValueError("ordinary native component compilation did not complete")
-        loader = components / "BOOTX64.EFI"
-        if file_sha(loader) != compiled["artifacts"]["BOOTX64.EFI"]["sha256"]:
-            raise ValueError("new loader does not match its compilation receipt")
-        esp, members = assemble(out, copies, loader, receipt)
-        if pins != {str(p.relative_to(ROOT)): file_sha(p) for p in files}:
-            raise ValueError("public source changed during private preparation")
-        for item in inputs.values():
-            pinned_hash(item["path"], item["sha256"], item["bytes"])
-        receipt.update(status="PASS_PRIVATE_WIN98_DOMAIN_ESP_PREPARED_NOT_RUN", sources_sha256=pins,
-                       members=members, artifact={"path": esp.name, "bytes": esp.stat().st_size, "sha256": file_sha(esp)},
-                       source_before_after_match=True, originals_before_after_match=True,
-                       boot_path="UEFI Supervisor -> explicit Win98 VMCS -> SeaBIOS -> selected private disk; guest boot unverified",
-                       next_gate="Actual isolated L1/VMX DOS and Windows boot, VMM channel, GUI, app and replacement verification")
+                registry.check()
+            if not args.validate_only:
+                if not args.out:
+                    parser.error("a new --out private directory is required for building")
+                out = fresh_output(args.out)
+                budget = preparation_budget(inputs)
+                space(out, budget)
+                out.mkdir()
+                receipt = {"status": "FAIL_BUILD_PRESERVED", "private": True, "commands": [],
+                           "preparation_budget_bytes": budget, "retained_free_space_bytes": RESERVE, "copies": {},
+                           "input_pins": {n: {**item, "path": str(item["path"])} for n, item in inputs.items()},
+                           "Windows98_installation_identity_verified": False, "VM_executed": False,
+                           "Windows98_boot_verified": False, "MS_DOS_replaced": False, "native_Win64_app_verified": False}
+                copies = {}
+                for name, item in inputs.items():
+                    destination = out / name
+                    registry.check()
+                    receipt["copies"][name] = copy_fd(descriptors[name], registry.check, destination,
+                                                      item["sha256"], item["bytes"], prefer_reflink=True)
+                    registry.check()
+                    copies[name] = destination
+                files = source_files()
+                pins = {str(p.relative_to(ROOT)): file_sha(p) for p in files}
+                snapshot = out / "source"
+                for source in files:
+                    registry.check()
+                    relative = source.relative_to(ROOT)
+                    pinned_hash(source, pins[str(relative)], source.stat().st_size, 16 << 20)
+                    destination = snapshot / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source, destination)
+                    if file_sha(destination) != pins[str(relative)]:
+                        raise ValueError("source snapshot hash differs")
+                    registry.check()
+                components = out / "components"
+                command([sys.executable, snapshot / "shizukudos/supervisor/native_win98/compile.py", "--out", components], receipt, timeout=300)
+                registry.check()
+                compiled = json.loads((components / "result.json").read_text())
+                if compiled["status"] != "PASS_NATIVE_SUPERVISOR_COMPONENT_COMPILE_NOT_RUN":
+                    raise ValueError("ordinary native component compilation did not complete")
+                loader = components / "BOOTX64.EFI"
+                if file_sha(loader) != compiled["artifacts"]["BOOTX64.EFI"]["sha256"]:
+                    raise ValueError("new loader does not match its compilation receipt")
+                registry.check()
+                esp, members = assemble(out, copies, loader, receipt)
+                registry.check()
+                if pins != {str(p.relative_to(ROOT)): file_sha(p) for p in files}:
+                    raise ValueError("public source changed during private preparation")
+                artifact = {"path": esp.name, "bytes": esp.stat().st_size, "sha256": file_sha(esp)}
+                registry.check()
+                success = {"sources_sha256": pins, "members": members, "artifact": artifact,
+                           "source_before_after_match": True, "originals_before_after_match": True,
+                           "original_input_leases_held_through_artifact_finalization": True,
+                           "boot_path": "UEFI Supervisor -> explicit Win98 VMCS -> SeaBIOS -> selected private disk; guest boot unverified",
+                           "next_gate": "Actual isolated L1/VMX DOS and Windows boot, VMM channel, GUI, app and replacement verification"}
+            registry.check()
+        # Every mandatory lease unlock/FD close must succeed before PASS escapes.
+        if args.validate_only:
+            print(json.dumps({"status": "PASS_EXPLICIT_INPUT_VALIDATION_NO_BUILD_OR_VM", "input_files": len(inputs),
+                              "Windows98_installation_identity_verified": False, "Windows98_executed": False}))
+            return 0
+        receipt.update(status="PASS_PRIVATE_WIN98_DOMAIN_ESP_PREPARED_NOT_RUN", **success)
     except BaseException as error:
-        receipt["error"] = str(error)
+        if receipt is not None:
+            receipt["status"] = "FAIL_BUILD_PRESERVED"
+            receipt["error"] = str(error)
         raise
     finally:
-        (out / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        if receipt is not None:
+            (out / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
     if receipt_sink is not None:
         receipt_sink((json.dumps(receipt, indent=2) + "\n").encode())
     print(json.dumps({"status": receipt["status"], "private_ESP": str(esp), "sha256": receipt["artifact"]["sha256"]}))

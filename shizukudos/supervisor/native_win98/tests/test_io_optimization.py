@@ -17,12 +17,29 @@ B=importlib.util.module_from_spec(spec);spec.loader.exec_module(B)
 
 class OptimizedIO(unittest.TestCase):
     def setUp(self):
-        self.folder=tempfile.TemporaryDirectory(prefix='shz-native-io-',dir=HERE.parents[3]/'build')
+        self.folder=tempfile.TemporaryDirectory(prefix='shz-native-io-',dir=os.environ.get('SHZ_NATIVE_INPUT_TEST_ROOT',HERE.parents[3]/'build'))
         self.root=Path(self.folder.name)
         self.source=self.root/'sparse-source'
         with self.source.open('xb') as stream:
             stream.write(b'first-marker');stream.seek(8*1024*1024-17);stream.write(b'last-marker-exact!')
         self.pin=B.file_sha(self.source);self.size=self.source.stat().st_size
+        if os.environ.get('SHZ_NATIVE_INPUT_TEST_ROOT'):
+            real_space=B.space
+            def fixture_space(path,remaining=0):
+                # Explicit tiny fixture capacity model; actual host/RAM floors
+                # remain observed and production reserve arithmetic is real.
+                if isinstance(B.shutil.disk_usage,mock.Mock):return real_space(path,remaining)
+                stats=os.statvfs(self.root);free=stats.f_bavail*stats.f_frsize
+                mem=int(next(row.split()[1] for row in Path('/proc/meminfo').read_text().splitlines() if row.startswith('MemAvailable:')))*1024
+                assert free>=(6<<30)+(160<<20) and mem>=(6<<30)+(160<<20)
+                assert self.root==Path(path).parent or self.root in Path(path).parents
+                usage=shutil._ntuple_diskusage(free+B.RESERVE,0,free+B.RESERVE)
+                with mock.patch.object(B.shutil,'disk_usage',return_value=usage):real_space(path,remaining)
+            capacity=mock.patch.object(B,'space',fixture_space);capacity.start();self.addCleanup(capacity.stop)
+            spec=importlib.util.spec_from_file_location('io_fixture_capacity',HERE/'test_input_lease_lifetime.py')
+            helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+            child_capacity=mock.patch.object(B,'command',helper.fixture_worker_capacity_command(B.command))
+            child_capacity.start();self.addCleanup(child_capacity.stop)
     def tearDown(self):self.folder.cleanup()
     def copy(self,**kwargs):
         target=self.root/'copy'
