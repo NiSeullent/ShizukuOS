@@ -47,6 +47,40 @@ def frame(kind, extent, count):
     return struct.pack('<IHHII', 0x31454457, 1, kind, extent, count)
 
 
+# Local copy of the reviewed native_epoch_guard_pump.py checked_select function.
+# Original source SHA256:
+# 74a5fc3fad170e370dbd39e2b8fea23bd2fad5c8bc1bfa49dfd86975e6642c3a
+# Keep this in the admitted epoch source; no unpinned helper import is required.
+def checked_select(readers, writers, deadline_ns, guard):
+    """Check the owner guard around one <=25ms select under an absolute deadline.
+
+    Readiness is refused if the deadline expires during the wait or postguard.
+    A select exception remains primary if postguard also fails; that later
+    refusal is retained as its explicit cause. No wait is retried or renewed.
+    """
+    if type(deadline_ns) is not int:
+        raise TypeError("an absolute integer monotonic deadline is required")
+    if not callable(guard):
+        raise TypeError("the actual owner guard is required")
+    guard()
+    remaining_ns = deadline_ns - time.monotonic_ns()
+    if remaining_ns <= 0:
+        raise TimeoutError("the original wait deadline expired")
+    timeout = min(25_000_000, remaining_ns) / 1_000_000_000
+    try:
+        ready = select.select(readers, writers, [], timeout)
+    except BaseException as first_error:
+        try:
+            guard()
+        except BaseException as guard_error:
+            raise first_error from guard_error
+        raise
+    guard()
+    if time.monotonic_ns() >= deadline_ns:
+        raise TimeoutError("the original wait deadline expired")
+    return ready
+
+
 @dataclass(frozen=True)
 class Device:
     role: int
@@ -273,17 +307,22 @@ class PrivateListener:
         self._parent(); s = self.path.lstat()
         need(stat.S_ISSOCK(s.st_mode) and s.st_uid == os.getuid() and s.st_nlink == 1 and stat.S_IMODE(s.st_mode) == 0o600 and (s.st_dev, s.st_ino) == self.socket_identity, 'owned listener name changed')
 
-    def accept(self, pid, uid, deadline_ns):
+    def accept(self, pid, uid, deadline_ns, guard=None):
         need(not self.accepted, 'single-use connector consumed'); self.accepted = True
+        need(callable(guard), 'actual outer owner guard required for connector')
         integer(pid, 1, 1 << 30); integer(uid, 0, 1 << 30)
+        def checked():
+            guard(); self.check()
         while True:
-            self.check(); left = (deadline_ns - time.monotonic_ns()) / 1e9; need(left > 0, 'original connector deadline expired')
-            if select.select([self.sock], [], [], min(.025, left))[0]:
+            if checked_select([self.sock], [], deadline_ns, checked)[0]:
                 peer, _ = self.sock.accept()
                 try:
                     observed = struct.unpack('3i', peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
                     need(observed[:2] == (pid, uid), 'COM2 connecting peer differs from current owned child')
-                    peer.setblocking(False); self.check(); return peer
+                    peer.setblocking(False); checked()
+                    if time.monotonic_ns() >= deadline_ns:
+                        raise TimeoutError('the original connector deadline expired')
+                    return peer
                 except BaseException: peer.close(); raise
 
     def close(self):
@@ -583,12 +622,14 @@ class HostGrant:
     No existing caller wires this. Outer source/recipe/ESP/ROM lineage admission
     and actual custody through reap remain mandatory before real optional use.
     """
-    def __init__(self, attempt, binding, monitor, listener, esp, monitor_source):
+    def __init__(self, attempt, binding, monitor, listener, esp, monitor_source, guard=None):
         need(type(attempt) is Attempt and type(binding) is ProcessBinding and type(listener) is PrivateListener, 'concrete owned context required')
         need(attempt.owner is None and listener.owner is None, 'fresh unbound policy/channel ownership required')
         # Once associated with an already-created child, even constructor
         # refusal must preserve policy/channel custody until exact reap.
         attempt.owner = listener.owner = binding
+        need(callable(guard), 'actual outer owner guard required for host exchange')
+        self.guard = guard; guard()
         binding.check()
         need(type(esp) is OwnedESP, 'concrete owned ESP context required')
         need(binding.executable.path.name in ('qemu-kvm', 'qemu-system-x86_64'), 'approved QEMU executable role required')
@@ -611,19 +652,27 @@ class HostGrant:
             need(self.exchange_stop_ns == self.original_exchange_stop_ns and time.monotonic_ns() < self.exchange_stop_ns, 'unchanged additional10s exchange bound expired')
         if self.peer is not None: need(struct.unpack('3i', self.peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[:2] == (self.binding.process.pid, os.getuid()), 'current COM2 peer changed')
 
+    def _guarded_check(self):
+        # The caller supplies actual bootstrap/union/group/resource/cancellation
+        # checks. Local device context checks cannot substitute for that guard.
+        need(callable(getattr(self, 'guard', None)), 'actual outer owner guard required for host exchange')
+        self.guard(); self.check()
+
     def transfer(self, data, extent, send=False):
         result = bytearray()
         while len(result) < extent:
-            self.check(); need(self.transport_calls < 4096, 'finite shared COM2 transfer budget'); self.transport_calls += 1
-            left = (self.attempt.original_deadline_ns - time.monotonic_ns()) / 1e9
-            ready = select.select([] if send else [self.peer], [self.peer] if send else [], [], min(.025, max(0, left)))
+            self._guarded_check(); need(self.transport_calls < 4096, 'finite shared COM2 transfer budget'); self.transport_calls += 1
+            deadline_ns = self.attempt.original_deadline_ns
+            if getattr(self, 'exchange_stop_ns', None) is not None:
+                deadline_ns = min(deadline_ns, self.exchange_stop_ns)
+            ready = checked_select([] if send else [self.peer], [self.peer] if send else [], deadline_ns, self._guarded_check)
             if (ready[1] if send else ready[0]):
                 if send:
                     n = self.peer.send(data[len(result):extent]); need(n > 0, 'COM2 closed during write'); result.extend(b'\0' * n)
                     if extent == 272: self.grant_bytes_written += n
                 else:
                     raw = self.peer.recv(extent - len(result) + 1); need(raw and len(result) + len(raw) <= extent, 'COM2 closed/surplus frame'); result.extend(raw)
-            self.check()
+            self._guarded_check()
         return bytes(result)
 
     def observe(self, observations):
@@ -643,16 +692,17 @@ class HostGrant:
     def exchange(self):
         need(not self.attempt.consumed, 'single-use host attempt consumed'); self.attempt.consumed = True
         try:
-            self.check(); self.peer = self.listener.accept(self.binding.process.pid, os.getuid(), self.attempt.original_deadline_ns)
+            self._guarded_check(); self.peer = self.listener.accept(self.binding.process.pid, os.getuid(), self.attempt.original_deadline_ns, guard=self._guarded_check)
             ready = self.transfer(None, 48); validate_ready(ready, self.attempt.nonce)
             self.exchange_stop_ns = self.original_exchange_stop_ns = min(self.attempt.original_deadline_ns, time.monotonic_ns() + 10_000_000_000)
             self.attempt.exchange_stop_ns = self.attempt.original_exchange_stop_ns = self.exchange_stop_ns
             self.transfer(frame(1, 48, 0) + self.attempt.nonce, 48, True)
             report = self.transfer(None, 256); observed = validate_report(report, self.attempt.expected, self.attempt.nonce)
-            self.qmp.call('stop'); self.qmp.paused()
-            first = self.observe(observed); last = self.observe(observed)
+            self._guarded_check(); self.qmp.call('stop'); self.qmp.paused()
+            self._guarded_check(); first = self.observe(observed)
+            self._guarded_check(); last = self.observe(observed)
             need(first == last, 'current paused PCI/RAM/ECAM/ESP/cache epoch changed')
-            self.check(); self.transfer(grant(report), 272, True); self.qmp.paused(); self.check()
+            self._guarded_check(); self.transfer(grant(report), 272, True); self.qmp.paused(); self._guarded_check()
             return {'schema': 'shizukuos.native-device-host-grant.v1', 'host_grant_transmitted': True,
                     'owned_process': self.binding.check(), 'original_host_deadline_ns': self.attempt.original_deadline_ns,
                     'policy': {'bytes': 256, 'sha256': digest(self.attempt.policy).hex(), 'inode': self.attempt.policy_identity[:2], 'sealed': True},

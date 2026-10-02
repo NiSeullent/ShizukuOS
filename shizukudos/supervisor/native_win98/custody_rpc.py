@@ -8,6 +8,8 @@ import shutil
 import importlib.machinery
 import importlib.util
 import json
+import math
+import select
 import os
 from pathlib import Path
 import socket
@@ -110,20 +112,58 @@ class Channel:
 class Client:
     def __init__(self,fd,guardian_pid):
         self.channel=Channel(socket.socket(fileno=fd),guardian_pid);self.sequence=0;self.frozen_fds={};self.launch_requested=False
-        self.originals={};self.original_requests=set()
-    def call(self,operation,parameters=None,fds=(),timeout=5):
-        self.sequence+=1
-        self.channel.send({'id':self.sequence,'op':operation,'params':parameters or {}},fds,timeout)
-        row,rights=self.channel.receive(timeout)
+        self.originals={};self.original_requests=set();self._calling=False;self._failed=False
+    def _wait_ready(self,writing,stop,pump):
+        """Local-only pumping around bounded readiness; never starts an RPC."""
+        while True:
+            if pump is not None:pump()
+            remaining=stop-time.monotonic()
+            if remaining<=0:raise TimeoutError('original custody RPC deadline expired')
+            readers=[] if writing else [self.channel.socket]
+            writers=[self.channel.socket] if writing else []
+            try:ready=select.select(readers,writers,[],min(.025,remaining))
+            except BaseException as first:
+                if pump is not None:
+                    try:pump()
+                    except BaseException as later:raise first from later
+                raise
+            if pump is not None:pump()
+            if time.monotonic()>=stop:raise TimeoutError('original custody RPC deadline expired')
+            if ready[1] if writing else ready[0]:return
+    def call(self,operation,parameters=None,fds=(),timeout=5,pump=None):
+        need(not self._calling,'nested custody RPC is forbidden')
+        need(not self._failed,'custody RPC has an unresolved response; guardian recovery required')
+        need(type(timeout) in (int,float) and math.isfinite(timeout) and timeout>0,'finite positive custody RPC timeout required')
+        need(pump is None or callable(pump),'local-only callable pump required')
+        stop=time.monotonic()+timeout;self._calling=True;sent=False;aligned=False;rights=[]
+        def remaining():
+            left=stop-time.monotonic()
+            if left<=0:raise TimeoutError('original custody RPC deadline expired')
+            return left
         try:
-            need(set(row)=={'id','ok','result'} and row['id']==self.sequence and type(row['ok']) is bool,'exact ordered RPC response')
+            self._wait_ready(True,stop,pump)
+            # A failed pre-write pump must not consume a sequence number.
+            self.sequence+=1;sent=True
+            self.channel.send({'id':self.sequence,'op':operation,'params':parameters or {}},fds,remaining())
+            self._wait_ready(False,stop,pump)
+            row,rights=self.channel.receive(remaining())
+            need(set(row)=={'id','ok','result'} and type(row['id']) is int and row['id']==self.sequence and type(row['ok']) is bool,'exact ordered RPC response')
+            aligned=True
+            # Received rights remain owned here until every post-read check passes.
+            if pump is not None:pump()
+            remaining()
             if not row['ok']:raise RuntimeError('custody refused: '+str(row['result'])[:512])
-            return row['result'],rights
+            result,rights=(row['result'],rights),[]
+            return result
         except BaseException:
             for fd in rights:os.close(fd)
+            # An unconsumed/uncertain response forbids another request. The actual
+            # guardian retains the child, source leases and recovery responsibility.
+            if sent and not aligned:self._failed=True
             raise
-    def ordinary(self,operation,parameters=None,timeout=5):
-        value,rights=self.call(operation,parameters,timeout=timeout)
+        finally:self._calling=False
+    def ordinary(self,operation,parameters=None,timeout=5,pump=None):
+        value,rights=self.call(operation,parameters,timeout=timeout,pump=pump)
         if rights:
             for fd in rights:os.close(fd)
             raise ValueError('unexpected response rights')

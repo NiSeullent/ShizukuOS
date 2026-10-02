@@ -260,20 +260,20 @@ class LinuxOwnership(unittest.TestCase):
         child = subprocess.Popen([sys.executable, '-B', '-c',
                                   'import socket,sys,time;s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(b"READY");time.sleep(3)', str(listener.path)])
         try:
-            connection = listener.accept(child.pid, os.getuid(), time.monotonic_ns() + 1_000_000_000)
+            connection = listener.accept(child.pid, os.getuid(), time.monotonic_ns() + 1_000_000_000, guard=lambda: None)
             try:
                 self.assertEqual(struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0], child.pid)
                 self.assertTrue(select.select([connection], [], [], 1)[0])
                 self.assertEqual(connection.recv(5), b'READY')
             finally: connection.close()
-            with self.assertRaises(ValueError): listener.accept(child.pid, os.getuid(), time.monotonic_ns() + 1_000_000_000)
+            with self.assertRaises(ValueError): listener.accept(child.pid, os.getuid(), time.monotonic_ns() + 1_000_000_000, guard=lambda: None)
         finally: child.kill(); child.wait(timeout=2); listener.close()
 
     def test_listener_foreign_parent_and_replacement(self):
         listener = host.PrivateListener(self.path / 'com2.sock')
         foreign = socket.socket(socket.AF_UNIX); foreign.connect(str(listener.path))
         try:
-            with self.assertRaises(ValueError): listener.accept(os.getpid() + 1, os.getuid(), time.monotonic_ns() + 1_000_000_000)
+            with self.assertRaises(ValueError): listener.accept(os.getpid() + 1, os.getuid(), time.monotonic_ns() + 1_000_000_000, guard=lambda: None)
         finally: foreign.close(); listener.close()
         listener = host.PrivateListener(self.path / 'second.sock')
         old = self.path / 'old.sock'; listener.path.rename(old); listener.path.write_bytes(b'foreign')
@@ -297,7 +297,7 @@ class LinuxOwnership(unittest.TestCase):
         try:
             binding = self.binding(child, argv)
             # Empty ESP object is only an early-refusal fixture: no large file.
-            with self.assertRaises(ValueError): host.HostGrant(attempt, binding, None, listener, host.OwnedESP.__new__(host.OwnedESP), None)
+            with self.assertRaises(ValueError): host.HostGrant(attempt, binding, None, listener, host.OwnedESP.__new__(host.OwnedESP), None, guard=lambda: None)
             with self.assertRaises(ValueError): attempt.close()
             with self.assertRaises(ValueError): listener.close()
             self.assertEqual(os.fstat(attempt.policy_fd).st_size, 256)
@@ -569,6 +569,7 @@ class ModeledHardwareExchange(unittest.TestCase):
                     if command == 'query-named-block-nodes': return [row]
                     return {'running': False, 'status': 'paused'} if command == 'query-status' else {}
             exchange = host.HostGrant.__new__(host.HostGrant)
+            exchange.guard = lambda: None
             exchange.attempt, exchange.binding, exchange.listener, exchange.esp = attempt, binding, listener, esp
             exchange.qmp = QMPHardwareModel(); exchange.peer = None
             exchange.exchange_stop_ns = exchange.original_exchange_stop_ns = None
