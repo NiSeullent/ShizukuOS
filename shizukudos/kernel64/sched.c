@@ -12,6 +12,9 @@
 #include "k64.h"
 #include "sched_cpu.h"
 #include "smp_boot.h"
+#ifdef SHZ_STANDALONE
+#include "cpu_arch_bringup.h"
+#endif
 _Static_assert(K64_CPU_MAX == SHZ_SMP_MAX_CPUS, "CPU identity domain must match queue storage");
 extern int ntdrv_gs_all;                     /* ntdrv_ke.c: set once the driver host runs code that reads the KPCR through GS */
 
@@ -30,6 +33,14 @@ static volatile uint64_t jiffies;
 static uint64_t switches;
 static uint64_t preemptions, wakeups, timeouts, ready_order;
 static k64_runqueues_t runqueues;
+#ifdef SHZ_STANDALONE
+static unsigned ap_cohort_count;
+static volatile uint32_t ap_cohort_stop;
+static thread_t *ap_cohort_idle[K64_CPU_MAX];
+static struct { thread_t *thread; uint64_t loops,seen; uint32_t hash; } ap_cohort_work[K64_CPU_MAX][2];
+static uint64_t ap_cohort_boot_rsp[K64_CPU_MAX];
+extern void sched_ap_stack_enter(uint64_t *save_boot,uint64_t idle_top,unsigned cpu);
+#endif
 /* `current` and `idle_thread` are BSP compatibility mirrors for shared UP-only
  * wait/process paths. Dispatch and entry consume the actual owner's CPU record. */
 
@@ -52,6 +63,14 @@ uint32_t sched_cpu_identity(void)
     return cpu < K64_CPU_MAX ? cpu : K64_CPU_NONE;
 }
 static int bsp_scheduler_owner(void) { return sched_cpu_identity() == 0; }
+static int native_cohort_owner(uint32_t cpu)
+{
+#ifdef SHZ_STANDALONE
+    return cpu && ap_cohort_count;
+#else
+    (void)cpu;return 0;
+#endif
+}
 static k64_cpu_sched_t *sched_owner_context(void)
 {
     const uint32_t cpu = sched_cpu_identity();
@@ -84,7 +103,7 @@ void __attribute__((weak)) pma_sched_trace_tick(thread_t *t, uint64_t now)
 { (void)t; (void)now; }
 
 uint64_t ticks_now(void) { return jiffies; }
-uint64_t sched_switch_count(void) { return switches; }
+uint64_t sched_switch_count(void) { queue_guard_t g=queue_enter();const uint64_t n=switches;queue_leave(g);return n; }
 void sched_processor_times(uint64_t *idle, uint64_t *kernel, uint64_t *user)
 {
     const uint64_t flags = irq_save();
@@ -118,7 +137,9 @@ int thread_set_sched_policy(thread_t *t, unsigned priority, unsigned quantum_tic
 {
     queue_guard_t g = queue_enter();
     int rc = -1;
-    if (bsp_scheduler_owner() && thread_pointer_valid(t)) {
+    if (bsp_scheduler_owner() && thread_pointer_valid(t) &&
+        ((!t->ap_kernel_cohort && cpu_mask == 1) ||
+         (t->ap_kernel_cohort && cpu_mask && !(cpu_mask & 1) && !(cpu_mask & ~runqueues.online_mask)))) {
         const int move = t->ready_queued &&
             (priority != t->sched_priority || t->ready_cpu >= K64_CPU_MAX || !(cpu_mask & (1ull << t->ready_cpu)));
         rc = k64_rq_policy_locked(&runqueues, t, priority, quantum_ticks, cpu_mask, jiffies, ready_order + 1);
@@ -145,9 +166,8 @@ int thread_get_sched_policy(thread_t *t, sched_policy_t *out)
 void sched_get_stats(sched_stats_t *out)
 {
     unsigned i;
-    uint64_t f;
     if (!out) return;
-    f = irq_save();
+    queue_guard_t g=queue_enter();
     memset(out, 0, sizeof *out);
     out->ticks = jiffies;
     out->context_switches = switches;
@@ -162,7 +182,7 @@ void sched_get_stats(sched_stats_t *out)
         out->live_threads += threads[i].state != TS_FREE;
         out->zombie_threads += threads[i].state == TS_ZOMBIE;
     }
-    irq_restore(f);
+    queue_leave(g);
 }
 
 int sched_validate(void)
@@ -316,7 +336,7 @@ static void schedule(int from_tick)
     const uint64_t waited = jiffies - next->ready_since;
     const int changed = k64_rq_dispatch_locked(&runqueues, id, next, aged, jiffies);
     KASSERT(changed >= 0);
-    const int observe = next != cpu->idle && (pma_sched_trace_enabled || pma_sched_observe_enabled);
+    const int observe = !native_cohort_owner(id) && next != cpu->idle && (pma_sched_trace_enabled || pma_sched_observe_enabled);
     if (changed) {
         if (!id) current = next;
         ++switches;
@@ -387,11 +407,12 @@ void sched_tick(void)
     const uint32_t id = sched_cpu_identity();
     thread_t *running = cpu->current;
     KASSERT(running && running->on_cpu == id && running->state == TS_RUNNING);
-    if (pma_sched_trace_enabled) pma_sched_trace_tick(running, jiffies);
+    if (!native_cohort_owner(id) && pma_sched_trace_enabled) pma_sched_trace_tick(running, jiffies);
     /* Only BSP owns wall time and global UP timeout/object callbacks. Future
      * AP service interrupts charge their actual CPU/thread, never this clock. */
     queue_guard_t accounting = queue_enter();
     if (!id) ++jiffies;
+    ++cpu->service_ticks;
     if (running == cpu->idle) ++cpu->idle_ticks;
     else if (cpu->tick_from_user) ++cpu->user_ticks;
     else ++cpu->kernel_ticks;
@@ -593,7 +614,7 @@ void thread_discard(thread_t *t)
 
 void thread_yield(void)
 {
-    KASSERT(bsp_scheduler_owner());
+    KASSERT(bsp_scheduler_owner() || k64_rq_cohort_safe(thread_current()));
     uint64_t f = irq_save();
     schedule(0);
     irq_restore(f);
@@ -603,6 +624,19 @@ void __attribute__((weak)) thread_account_exit(thread_t *t) { (void)t; }        
 
 void thread_exit(int64_t code)
 {
+#ifdef SHZ_STANDALONE
+    if (!bsp_scheduler_owner()) {
+        uint64_t f = irq_save();(void)f;
+        thread_t *t = thread_current();
+        KASSERT(ap_cohort_count && k64_rq_cohort_safe(t));
+        queue_guard_t g = queue_enter();
+        t->exit_code=code;t->exit_tick=jiffies;t->state=TS_ZOMBIE;
+        t->aging_service_left=0;
+        queue_leave(g);
+        /* Kernel cohort has no process accounting/waitable object callbacks. */
+        for (;;) { schedule(0);cli(); }
+    }
+#endif
     KASSERT(bsp_scheduler_owner());
     uint64_t f = irq_save();
     (void)f;
@@ -808,4 +842,200 @@ void sched_init(void)
     runqueues.cpu[0].idle = idle_thread;
     idle_thread->sched_priority = 0;
     idle_thread->state = TS_READY;
+}
+
+#ifdef SHZ_STANDALONE
+static void ap_cohort_worker(void *arg)
+{
+    const unsigned slot=(unsigned)(uintptr_t)arg,cpu=slot/2,which=slot%2;
+    thread_t *t=ap_cohort_work[cpu][which].thread;
+    uint32_t hash=0x534d5043u^slot;uint64_t loops=0,seen=0;
+    const uint64_t until=ticks_now()+300;
+    for (;;) {
+        const uint64_t flags=irq_save();const uint64_t charged=t->run_ticks;irq_restore(flags);
+        if(charged>=16 || ticks_now()>=until || __atomic_load_n(&ap_cohort_stop,__ATOMIC_ACQUIRE)) break;
+        const uint32_t owner=sched_cpu_identity();
+        KASSERT(owner && owner<K64_CPU_MAX && thread_current()==t && t->on_cpu==owner);
+        seen|=1ull<<owner;
+        for(unsigned i=0;i<2048;i++) { hash=(hash<<5)|(hash>>27);hash^=0x9e3779b9u;hash+=(uint32_t)loops++; }
+    }
+    ap_cohort_work[cpu][which].hash=hash;
+    ap_cohort_work[cpu][which].loops=loops;ap_cohort_work[cpu][which].seen=seen;
+    thread_exit(loops>=1000 && t->run_ticks>=16 ? 0:-1);
+}
+static void ap_cohort_unused_idle(void *arg) { (void)arg;KASSERT(0); }
+#endif
+int sched_ap_cohort_prepare(unsigned count)
+{
+#ifndef SHZ_STANDALONE
+    (void)count;return -2;
+#else
+    if(!bsp_scheduler_owner() || !threads || count<2 || count>K64_CPU_MAX || ap_cohort_count ||
+       runqueues.online_mask!=1) return -1;
+    const uint64_t flags=irq_save();
+    for(unsigned cpu=1;cpu<count;cpu++) {
+        ap_cohort_idle[cpu]=thread_create_suspended("ap-idle",ap_cohort_unused_idle,0);
+        if(!ap_cohort_idle[cpu]) goto rollback;
+        ap_cohort_idle[cpu]->ap_kernel_cohort=1;
+        for(unsigned i=0;i<2;i++) {
+            thread_t *t=thread_create_suspended("ap-cohort",ap_cohort_worker,(void *)(uintptr_t)(cpu*2+i));
+            if(!t) goto rollback;
+            t->ap_kernel_cohort=1;ap_cohort_work[cpu][i].thread=t;
+        }
+    }
+    ap_cohort_stop=0;ap_cohort_count=count;irq_restore(flags);return 0;
+rollback:
+    for(unsigned cpu=1;cpu<count;cpu++) {
+        if(ap_cohort_idle[cpu]) { thread_discard(ap_cohort_idle[cpu]);ap_cohort_idle[cpu]=0; }
+        for(unsigned i=0;i<2;i++) if(ap_cohort_work[cpu][i].thread) {
+            thread_discard(ap_cohort_work[cpu][i].thread);ap_cohort_work[cpu][i].thread=0;
+        }
+    }
+    irq_restore(flags);return -1;
+#endif
+}
+int sched_ap_cohort_resources(int (*owned)(uint64_t,uint64_t))
+{
+#ifndef SHZ_STANDALONE
+    (void)owned;return -2;
+#else
+    if(!bsp_scheduler_owner() || !owned || !ap_cohort_count || runqueues.online_mask!=1) return -1;
+    /* BSP pre-INIT only: owner callback runs with no scheduler ticket held. */
+    for(unsigned cpu=1;cpu<ap_cohort_count;cpu++) for(unsigned i=0;i<3;i++) {
+        thread_t *t=i?ap_cohort_work[cpu][i-1].thread:ap_cohort_idle[cpu];
+        if(!k64_rq_cohort_safe(t) || t->state!=TS_NEW || t->on_cpu!=K64_CPU_NONE ||
+           t->ready_queued || t->stack_base<phys_base_va ||
+           !owned(t->stack_base-phys_base_va,KSTACK_BYTES)) return -1;
+    }
+    return 0;
+#endif
+}
+/* Actual destination-stack callbacks used by start.asm. They never allocate. */
+void sched_ap_stack_main(unsigned cpu)
+{
+#ifdef SHZ_STANDALONE
+    uint64_t rsp;__asm__ volatile("mov %%rsp,%0":"=r"(rsp));
+    KASSERT(cpu && cpu<ap_cohort_count && sched_cpu_identity()==cpu);
+    thread_t *idle=ap_cohort_idle[cpu];
+    KASSERT(idle && rsp>=idle->stack_base && rsp<idle->stack_base+KSTACK_BYTES);
+    queue_guard_t g=queue_enter();KASSERT(!(g.flags&0x200));
+    KASSERT(k64_rq_admit_cohort_locked(&runqueues,cpu,idle)==0);
+    queue_leave(g);
+    KASSERT(shz_cpu_arch_sched_timer(cpu,1)==0);
+    while(!__atomic_load_n(&ap_cohort_stop,__ATOMIC_ACQUIRE)) __asm__ volatile("sti; hlt; cli":::"memory");
+    KASSERT(shz_cpu_arch_sched_timer(cpu,0)==0);
+    KASSERT(arch_sched_entry_set_stack(cpu,shz_smp_cpus[cpu].boot_stack_top)==0);
+    KASSERT(shz_cpu_arch_sched_restore(cpu)==0);
+#else
+    (void)cpu;KASSERT(0);
+#endif
+}
+void sched_ap_stack_leave_complete(unsigned cpu)
+{
+#ifdef SHZ_STANDALONE
+    uint64_t rsp;__asm__ volatile("mov %%rsp,%0":"=r"(rsp));
+    const uint64_t top=cpu<K64_CPU_MAX?shz_smp_cpus[cpu].boot_stack_top:0;
+    KASSERT(cpu && cpu<ap_cohort_count && sched_cpu_identity()==cpu && rsp<top && rsp>=top-KSTACK_BYTES);
+    queue_guard_t g=queue_enter();KASSERT(!(g.flags&0x200));
+    KASSERT(k64_rq_withdraw_cohort_locked(&runqueues,cpu)==0);
+    queue_leave(g);
+#else
+    (void)cpu;KASSERT(0);
+#endif
+}
+int sched_ap_cohort_enter(unsigned cpu)
+{
+#ifndef SHZ_STANDALONE
+    (void)cpu;return -2;
+#else
+    if(!cpu || cpu>=ap_cohort_count || sched_cpu_identity()!=cpu || read_cr3()!=kernel_pml4() ||
+       __atomic_load_n(&shz_smp_cpus[cpu].state,__ATOMIC_ACQUIRE)!=SHZ_SMP_CPU_ONLINE) return -1;
+    const uint64_t flags=irq_save();
+    if(flags&0x200) { irq_restore(flags);return -1; }
+    thread_t *idle=ap_cohort_idle[cpu];
+    if(!k64_rq_cohort_safe(idle) || idle->state!=TS_NEW || idle->on_cpu!=K64_CPU_NONE ||
+       arch_sched_entry_bind(cpu,idle->stack_base+KSTACK_BYTES) || shz_cpu_arch_sched_install(cpu)) {
+        irq_restore(flags);return -1;
+    }
+    sched_ap_stack_enter(&ap_cohort_boot_rsp[cpu],idle->stack_base+KSTACK_BYTES,cpu);
+    irq_restore(flags);return 0;
+#endif
+}
+void sched_ap_reschedule(void)
+{
+    const uint32_t cpu=sched_cpu_identity();
+    queue_guard_t g=queue_enter();
+    KASSERT(cpu && k64_rq_online(&runqueues,cpu) && k64_rq_cohort_safe(runqueues.cpu[cpu].current));
+    runqueues.cpu[cpu].reschedule_ack=runqueues.cpu[cpu].reschedule_request;
+    queue_leave(g);schedule(0);
+}
+int sched_ap_cohort_finish(void)
+{
+#ifndef SHZ_STANDALONE
+    return -2;
+#else
+    if(!bsp_scheduler_owner() || !ap_cohort_count) return -1;
+    const unsigned count=ap_cohort_count;
+    const uint64_t want=(1ull<<count)-1,deadline=ticks_now()+500;unsigned spins=0;
+    while(sched_cpu_online_mask()!=want) {
+        if(ticks_now()>=deadline || ++spins>=100000000u) return -1;
+        __asm__ volatile("pause");
+    }
+    queue_guard_t g=queue_enter();
+    for(unsigned cpu=1;cpu<count;cpu++) {
+        for(unsigned i=0;i<2;i++) {
+            thread_t *t=ap_cohort_work[cpu][i].thread;
+            KASSERT(k64_rq_cohort_safe(t) && t->state==TS_NEW && t->on_cpu==K64_CPU_NONE);
+            t->cpu_mask=1ull<<cpu;t->state=TS_READY;
+            KASSERT(k64_rq_enqueue_locked(&runqueues,t,cpu,jiffies,++ready_order)==0);
+        }
+        ++runqueues.cpu[cpu].reschedule_request;
+    }
+    queue_leave(g);
+    for(unsigned cpu=1;cpu<count;cpu++) if(shz_smp_send_ipi(cpu,SHZ_SMP_VEC_RESCHEDULE)) return -1;
+    unsigned migrated=0;
+    for(;;) {
+        unsigned done=0,acks=0;g=queue_enter();
+        for(unsigned cpu=1;cpu<count;cpu++) for(unsigned i=0;i<2;i++)
+            done+=k64_rq_reapable_locked(&runqueues,ap_cohort_work[cpu][i].thread);
+        for(unsigned cpu=1;cpu<count;cpu++) acks+=runqueues.cpu[cpu].reschedule_ack==runqueues.cpu[cpu].reschedule_request;
+        thread_t *move=ap_cohort_work[1][0].thread;
+        const int eligible=count>2 && !migrated && move->state==TS_READY && move->on_cpu==K64_CPU_NONE && move->run_ticks>=4;
+        queue_leave(g);
+        if(eligible && !thread_set_sched_policy(move,move->sched_priority,move->quantum_ticks,4)) {
+            migrated=1;
+            g=queue_enter();++runqueues.cpu[1].reschedule_request;++runqueues.cpu[2].reschedule_request;queue_leave(g);
+            if(shz_smp_send_ipi(1,SHZ_SMP_VEC_RESCHEDULE) || shz_smp_send_ipi(2,SHZ_SMP_VEC_RESCHEDULE)) return -1;
+        }
+        if(done==(count-1)*2 && acks==count-1) break;
+        if(ticks_now()>=deadline || ++spins>=100000000u) return -1;
+        __asm__ volatile("pause");
+    }
+    int bad=count>2 && !migrated;
+    for(unsigned cpu=1;cpu<count;cpu++) {
+        g=queue_enter();const uint64_t ticks=runqueues.cpu[cpu].service_ticks,request=runqueues.cpu[cpu].reschedule_request,ack=runqueues.cpu[cpu].reschedule_ack;queue_leave(g);
+        kprintf("SMP-DISPATCH CPU: cpu=%u service_ticks=%llu request=%llu ack=%llu\n",cpu,ticks,request,ack);
+        bad|=!ticks || !request || ack!=request;
+        for(unsigned i=0;i<2;i++) {
+            thread_t *t=ap_cohort_work[cpu][i].thread;
+            kprintf("SMP-DISPATCH THREAD: origin=%u slot=%u ticks=%llu loops=%llu seen=%llx exit=%lld live=%u queued=%u\n",cpu,i,t->run_ticks,ap_cohort_work[cpu][i].loops,ap_cohort_work[cpu][i].seen,t->exit_code,t->on_cpu,t->ready_queued);
+            bad|=t->exit_code!=0 || t->run_ticks<16 || ap_cohort_work[cpu][i].loops<1000;
+        }
+    }
+    if(count>2) bad|=(ap_cohort_work[1][0].seen&6)!=6;
+    __atomic_store_n(&ap_cohort_stop,1,__ATOMIC_RELEASE);
+    for(unsigned cpu=1;cpu<count;cpu++) if(shz_smp_send_ipi(cpu,SHZ_SMP_VEC_RESCHEDULE)) return -1;
+    while(sched_cpu_online_mask()!=1) {
+        if(ticks_now()>=deadline || ++spins>=100000000u) return -1;
+        __asm__ volatile("pause");
+    }
+    /* All cohort stacks are now inactive; only BSP can reclaim these slots. */
+    for(unsigned cpu=1;cpu<count;cpu++) {
+        for(unsigned i=0;i<2;i++) { ap_cohort_work[cpu][i].thread->cpu_mask=1;bad|=thread_join(ap_cohort_work[cpu][i].thread)!=0; }
+        thread_discard(ap_cohort_idle[cpu]);
+    }
+    ap_cohort_count=0;
+    kprintf("SMP-DISPATCH summary: cpus=%u workers=%u migrated=%u bad=%u scheduler_cpus=%u\n",count,(count-1)*2,migrated,(unsigned)bad,(unsigned)(sched_cpu_online_mask()==1));
+    return bad?-1:0;
+#endif
 }

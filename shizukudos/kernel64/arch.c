@@ -4,6 +4,9 @@
  */
 #include "k64.h"
 #include "smp_boot.h"
+#ifdef SHZ_STANDALONE
+#include "cpu_arch_bringup.h"
+#endif
 #include "../dead_screen/native.h"
 
 extern void load_gdt(void *gdtr, uint16_t tss_sel);
@@ -54,7 +57,13 @@ static int entry_stack_valid(uint64_t top)
 int arch_sched_entry_bind(uint32_t cpu, uint64_t top)
 {
     if (cpu >= SHZ_SMP_MAX_CPUS || shz_smp_this_cpu() != cpu || !entry_stack_valid(top)) return -1;
-    if (cpu) return -2;                     /* AP private TSS/IDT handoff not admitted */
+    if (cpu) {
+#ifdef SHZ_STANDALONE
+        return shz_cpu_arch_sched_stack(cpu, top, 1);
+#else
+        return -2;                         /* Supervisor virtual-AP protocol absent */
+#endif
+    }
     const uint64_t flags = irq_save();
     if (flags & 0x200) { irq_restore(flags); return -1; }
     shz_smp_cpus[cpu].syscall_kstack = top;
@@ -67,7 +76,13 @@ int arch_sched_entry_bind(uint32_t cpu, uint64_t top)
 int arch_sched_entry_set_stack(uint32_t cpu, uint64_t top)
 {
     if (cpu >= SHZ_SMP_MAX_CPUS || shz_smp_this_cpu() != cpu || !entry_stack_valid(top)) return -1;
-    if (cpu) return -2;
+    if (cpu) {
+#ifdef SHZ_STANDALONE
+        return shz_cpu_arch_sched_stack(cpu, top, 0);
+#else
+        return -2;
+#endif
+    }
     const uint64_t flags = irq_save();
     if ((flags & 0x200) || rdmsr(MSR_KERNEL_GS_BASE) != (uint64_t)&shz_smp_cpus[cpu]) {
         irq_restore(flags);
@@ -139,6 +154,10 @@ void vm_set_demand_range(uint64_t lo, uint64_t hi) { demand_lo = lo; demand_hi =
 
 void isr_dispatch(struct regs *r)
 {
+#ifdef SHZ_STANDALONE
+    /* AP task-stack vectors cannot enter shared entropy/device/user callbacks. */
+    if (shz_smp_this_cpu()) { shz_cpu_arch_sched_irq(r); return; }
+#endif
     if (r->vector < 32)
         ++exception_count[r->vector];
     else

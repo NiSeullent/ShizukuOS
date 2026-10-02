@@ -227,6 +227,39 @@ switch_stacks:
     popfq
     ret
 
+; Explicit preallocated AP cohort: transfer from retained bootstrap stack to
+; idle task stack. No IRQ enable or scheduler ticket in assembly. Both callbacks
+; run only after their destination RSP is active; ordinary GS/FX stay untouched.
+section .text.ap_cohort
+global sched_ap_stack_enter
+extern sched_ap_stack_main, sched_ap_stack_leave_complete
+sched_ap_stack_enter:
+    push rbp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 8                         ; saved bootstrap RSP%16=0
+    mov r12, rdi                       ; save slot survives the idle C lifetime
+    mov r13d, edx                      ; actual logical identity argument
+    mov [r12], rsp
+    mov rsp, rsi                       ; checked idle top%16=0
+    mov edi, r13d
+    call sched_ap_stack_main           ; publish only on actual idle stack
+    mov rsp, [r12]                     ; idle stack is now inactive
+    mov edi, r13d
+    call sched_ap_stack_leave_complete ; revoke only on bootstrap destination
+    add rsp, 8
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+section .text
+
 ; void enter_user(uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2): iretq to ring 3
 ; with RCX = arg, RDX = arg2 (the first two Win64 arguments) and every other register cleared
 ; so no kernel state leaks.

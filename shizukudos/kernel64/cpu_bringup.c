@@ -16,6 +16,8 @@ static const shz_bootinfo_t *owner_boot;
 static uint64_t initial_root;
 static unsigned admitted,resources_owned;
 static int backend_result;
+static unsigned dispatch_count,dispatch_mode;
+static uint64_t dispatch_rsdp;
 static volatile uint32_t release_work,cancel_work,ipi_turn,fatal;
 static struct {
     uint32_t actual,apic,progress,checkpoint,parked,bsp_seen,ap_seen,done,ping_done,bad,hash,wake,verify,verify_delivered;
@@ -93,6 +95,7 @@ static int resources_check(unsigned count,uint64_t bootstrap)
                (i && overlap(arch,8192,prior,stack_bytes)) || (i && j && overlap(arch,8192,prior_arch,8192))) return -1;
         }
     }
+    if(dispatch_mode && (count!=dispatch_count || sched_ap_cohort_resources(owned_span))) return -1;
     resources_owned=count;
     kprintf("SMP-RESOURCE: owned=%u final_cr3=%llx bootstrap_cr3=%llx identity_bytes=4096 before_INIT=1\n",count,kernel_pml4(),bootstrap);
     return 0;
@@ -161,6 +164,12 @@ static void ap_entry(unsigned cpu)
        jobs[cpu].apic!=shz_smp_cpus[cpu].apic_id || jobs[cpu].cr3!=kernel_pml4() || shz_smp_cpu_online(cpu)) {
         shz_cpu_arch_fault(cpu);return;
     }
+    if(dispatch_mode) {
+        if(sched_ap_cohort_enter(cpu)) { shz_cpu_arch_fault(cpu);return; }
+        /* Dispatch stopped on the retained bootstrap stack; private F1 stays
+         * live for the established architecture/TLB resource lifetime. */
+        for(;;) __asm__ volatile("sti; hlt; cli":::"memory");
+    }
     if(k64_cmdline_has("shz.smp=return-ap")) return;
     for(;;) {
         cli();if(__atomic_load_n(&release_work,__ATOMIC_ACQUIRE)) { sti();break; }
@@ -195,8 +204,9 @@ static void report_abort(int error)
 }
 void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi,uint64_t initial_cr3)
 {
-    if(k64_cmdline_has("smp=off") || (!k64_cmdline_has("shz.smp=bringup") && !k64_cmdline_has("shz.smp=firmware-test") &&
+    if(k64_cmdline_has("smp=off") || (!k64_cmdline_has("shz.smp=dispatch") && !k64_cmdline_has("shz.smp=bringup") && !k64_cmdline_has("shz.smp=firmware-test") &&
        !k64_cmdline_has("shz.smp=no-ipi") && !k64_cmdline_has("shz.smp=return-ap") && !k64_cmdline_has("shz.smp=withhold-verify"))) return;
+    dispatch_mode=k64_cmdline_has("shz.smp=dispatch");
     owner_boot=bi;initial_root=initial_cr3;
     const int rc=shz_cpu_firmware_prepare(bi,&firmware);
     if(rc!=1) { kprintf("SMP-BRINGUP: firmware unavailable rc=%d, scheduler CPUs=1\n",rc);return; }
@@ -219,7 +229,15 @@ void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi,uint64_t initial_cr3)
        shz_smp_acpi_probe(shz_cpu_firmware_read,&firmware,rsdp,apic_id(),&found)) {
         kprintf("SMP-BRINGUP: ACPI unavailable, scheduler CPUs=1\n");return;
     }
-    if(!pci_bsp_lapic_acquire(found.lapic_pa,apic_id()) || shz_cpu_arch_allocate(found.count) || !kernel_contract()) return;
+    volatile uint32_t *endpoint=pci_bsp_lapic_acquire(found.lapic_pa,apic_id());
+    if(!endpoint || shz_cpu_arch_allocate(found.count) || !kernel_contract()) return;
+    if(dispatch_mode) {
+        if(found.count<2 || k64_cmdline_has("shz.memory=test") || k64_cmdline_has("shz.tlb=test") ||
+           shz_cpu_arch_sched_timer_prepare(endpoint)) return;
+        dispatch_count=found.count;dispatch_rsdp=rsdp;
+        kprintf("SMP-DISPATCH prepared: cpus=%u INIT_deferred=1 scheduler_cpus=1\n",found.count);
+        return;                            /* sched_init has not run yet */
+    }
     if(k64_cmdline_has("shz.tlb=test") && shz_cpu_tlb_stress_prepare(found.count,tlb_owned,0)) return;
     const uint64_t scratch=pmm_alloc();if(!scratch || !owned_span(scratch,PAGE_SIZE)) return;
     pmm_free(scratch);if(shz_cpu_pmm_page_owned(scratch,owner_boot)) return;
@@ -231,6 +249,23 @@ void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi,uint64_t initial_cr3)
 }
 void shz_cpu_bringup_verify(void)
 {
+    if(dispatch_mode && !k64_cmdline_has("smp=off")) {
+        int rc=-1;
+        const uint64_t flags=irq_save();
+        if(dispatch_count && !sched_ap_cohort_prepare(dispatch_count) &&
+           !shz_smp_boot_set_resource_check(resources_check)) {
+            backend_result=shz_smp_boot_start_with_reader(dispatch_rsdp,ap_entry,shz_cpu_firmware_read,&firmware,initial_root);
+            /* Provider reset precedes this rebind, and IF is still clear. */
+            thread_t *bsp=thread_current();
+            KASSERT(bsp && arch_sched_entry_bind(0,bsp->stack_base+KSTACK_BYTES)==0);
+            if(backend_result==(int)dispatch_count) rc=0;
+        }
+        irq_restore(flags);
+        if(!rc) rc=sched_ap_cohort_finish();
+        kprintf("SMP-DISPATCH admission: backend=%d owned=%u result=%d\n",backend_result,resources_owned,rc);
+        if(rc) shz_exit(98);                /* explicit cohort cannot silently pass UP */
+        return;
+    }
     if(k64_cmdline_has("smp=off") || backend_result<=0) return;
     const unsigned count=(unsigned)backend_result;unsigned completed=0,bad=__atomic_load_n(&fatal,__ATOMIC_ACQUIRE);
     const uint64_t deadline=arch_timer_irqs()+2000;unsigned spins=0;

@@ -57,7 +57,7 @@ void irq_register(unsigned vector, void (*handler)(struct regs *));      /* devi
 typedef void (*irq_handler_t)(struct regs *);
 irq_handler_t irq_handler_get(unsigned vector);                         /* current handler (NULL if none): lets a driver avoid stealing a shared line */
 void tss_set_rsp0(uint64_t rsp0);
-int arch_sched_entry_bind(uint32_t cpu, uint64_t top);       /* IF-off, actual BSP; AP unsupported */
+int arch_sched_entry_bind(uint32_t cpu, uint64_t top);       /* IF-off, actual private owner; native cohort only on AP */
 int arch_sched_entry_set_stack(uint32_t cpu, uint64_t top);  /* no fallback to BSP TSS */
 static inline uint64_t read_cr0(void) { uint64_t v; __asm__ volatile("mov %%cr0, %0" : "=r"(v)); return v; }
 static inline uint64_t read_cr2(void) { uint64_t v; __asm__ volatile("mov %%cr2, %0" : "=r"(v)); return v; }
@@ -178,13 +178,19 @@ struct thread {
     uint32_t sched_priority, quantum_ticks, quantum_left, ready_queued;
     uint64_t max_ready_wait_ticks;              /* diagnostic: longest READY-to-dispatch residence */
     uint32_t ready_cpu, on_cpu;                  /* perCPU queue and live-stack ownership */
+    uint32_t ap_kernel_cohort;                  /* private preallocated native kernel cohort only */
     uint32_t aging_service_left;                /* unrenewable aged-dispatch timer budget; RUNNING only */
 };
 void sched_init(void);
 void sched_switch_complete(void);              /* assembly destination-stack hook, IF clear */
 uint32_t sched_cpu_identity(void);              /* owner-backed physical mapping or UINT32_MAX */
 uint64_t sched_cpu_online_mask(void);
-int sched_cpu_register(uint32_t cpu);           /* -2: AP activation dependencies absent */
+int sched_cpu_register(uint32_t cpu);           /* general AP admission remains unsupported */
+int sched_ap_cohort_prepare(unsigned count);
+int sched_ap_cohort_resources(int (*owned)(uint64_t,uint64_t));
+int sched_ap_cohort_enter(unsigned cpu);         /* actual preallocated private entry; returns after stack revocation */
+int sched_ap_cohort_finish(void);               /* BSP bounded stop/drain, before normal UP QA */
+void sched_ap_reschedule(void);                 /* private task-stack F0 only */
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
 thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg);   /* TS_NEW until thread_resume */
 void thread_resume(thread_t *t);
@@ -219,7 +225,8 @@ void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx);   /* ever
 /* Higher numerical priority selects first. An aged FIFO head receives service
  * after 32 ticks; with N competing ready threads and stable policies its next
  * dispatch is bounded by 32 + (N + 1) * 16 eligible ticks. IRQ/IRQL deferral is
- * outside that bound. CPU mask 1 is the only supported affinity (no APs yet).
+ * outside that bound. Normal threads support CPU mask1; only the explicit
+ * preallocated native kernel cohort may use admitted AP masks.
  * Policy updates are atomic and return -1 for invalid/dead/foreign TCBs. */
 int thread_set_sched_policy(thread_t *t, unsigned priority, unsigned quantum_ticks, uint64_t cpu_mask);
 int thread_get_sched_policy(thread_t *t, sched_policy_t *out);
