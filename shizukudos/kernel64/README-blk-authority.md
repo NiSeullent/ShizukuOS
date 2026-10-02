@@ -47,7 +47,7 @@ exclusion for ShizukuFS rather than inferring roles from filesystem labels.
 
 Successful release changes the target generation before clearing ownership;
 old reviews/tokens cannot be reused. Control calls change the device epoch even
-if metadata appears unchanged. Any actual driver error poisons the whole/claim
+if metadata appears unchanged. An actual driver error during claimed I/O poisons the whole/claim
 and retains exclusive custody; further I/O/release refuses. There is no force,
 boolean quiescence assertion or fake recovery path. A later independently
 observed reset/recovery protocol is needed before reclaiming an uncertain
@@ -98,3 +98,5 @@ Remaining concrete integration gates:
    private disk installation, UEFI native Windows98/VMM/GOP desktop and cold-boot
    file readback. Host tests, per-boot IDs and component ISO success do not prove
    hardware identity, Windows startup, persistence or application acceptance.
+
+Ordinary unclaimed read/control errors advance the observation epoch and invalidate stale source pins without permanently disabling filesystem retries. Failed namespace publication leaves a previously unmounted device unmounted; existing mounted exclusions remain intact. Mount and claim publication serialize on the same authority lock.
