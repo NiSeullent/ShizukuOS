@@ -7,6 +7,7 @@
 #include "../../abi/shz_abi.h"
 #include "memholes.h"
 #include "native_firmware.h"
+#include "module_relocation.h"
 #ifdef STUB_K32
 #include "k32_cmdline.h"
 #endif
@@ -49,7 +50,7 @@ static void __attribute__((noreturn)) fail(const char *msg, uint32_t value)
 }
 static void copy(uint32_t dst, uint32_t src, uint32_t n)
 {
-    __asm__ volatile("rep movsb" : "+D"(dst), "+S"(src), "+c"(n) : : "memory");
+    shz_stub_move((volatile uint8_t *)dst, (const volatile uint8_t *)src, n);
 }
 static void zero(uint32_t dst, uint32_t n)
 {
@@ -58,6 +59,7 @@ static void zero(uint32_t dst, uint32_t n)
 
 static shz_memplan_result_t plan;
 static shz_native_firmware_t native_firmware;
+static shz_memplan_t runs;
 
 static int loader_read(void *unused, uint64_t pa, void *out, uint32_t bytes)
 {
@@ -71,9 +73,8 @@ static int loader_read(void *unused, uint64_t pa, void *out, uint32_t bytes)
 
 /* RAM size and the firmware holes below it (memholes.h: the same plan the UEFI boot manager uses for its direct
  * Kernel64 boot). Without a Multiboot memory map: the classic mem_upper, contiguous RAM from 1 MiB, no holes. */
-static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
+static void memory_ranges(const struct mbi *mbi)
 {
-    static shz_memplan_t runs;
     uint32_t ram, i;
 
     shz_memplan_init(&runs);
@@ -98,6 +99,11 @@ static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
                 shz_memplan_remove(&runs, e->base, e->base + e->length);
         }
     }
+}
+
+static uint32_t memory_layout(uint32_t isize)
+{
+    uint32_t i;
     if (!shz_memplan_solve(&runs, MAX_RAM, 64u << 20, INITRD_GPA, isize, &plan))
         fail(plan.why, (uint32_t)plan.at);
 #ifdef STUB_K32
@@ -120,8 +126,8 @@ static uint32_t memory_layout(const struct mbi *mbi, uint32_t isize)
 void stub_prepare(uint32_t magic, const struct mbi *mbi)
 {
     static char cmdline[SHZ_CMDLINE_MAX];          /* stub .bss (above 4 MiB), untouched by the copies below */
-    const struct mod *mods;
-    uint32_t ksize, isize = 0, ram, i, cmdline_len = 0;
+    struct mod mods[2];                           /* Snapshot descriptors before kernel zero/initrd relocation. */
+    uint32_t ksize, isize = 0, ram, i, cmdline_len = 0, has_initrd;
     volatile shz_bootinfo_t *bi = (volatile shz_bootinfo_t *)SHZ_BOOTINFO_GPA;
     volatile uint32_t *pml4 = (volatile uint32_t *)0x1000, *pdpt_lo = (volatile uint32_t *)0x2000,
                       *pd = (volatile uint32_t *)0x3000, *pdpt_hi = (volatile uint32_t *)0x4000;
@@ -136,17 +142,29 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
         if (captured < 0) fail("malformed or incomplete firmware map", mbi->mmap_length);
     }
     if (!(mbi->flags & 8) || mbi->mods_count < 1) fail("need module 0 = KERNEL64 image, flags=", mbi->flags);
-    mods = (const struct mod *)mbi->mods_addr;
-    ksize = mods[0].end - mods[0].start;
-    if (mbi->mods_count > 1) isize = mods[1].end - mods[1].start;
-    ram = memory_layout(mbi, isize);
-    if (ram < (64u << 20)) fail("need at least 64 MiB, have ", ram);
-    for (i = 0; i < mbi->mods_count && i < 2; ++i) {
-        if (mods[i].start < (uint32_t)stub_end || mods[i].end > INITRD_GPA)
-            fail("module placed where the copy would corrupt it: start=", mods[i].start);
+    memory_ranges(mbi);
+    has_initrd = mbi->mods_count > 1;
+    {
+        const uint64_t descriptors_end = (uint64_t)mbi->mods_addr + (has_initrd ? 2u : 1u) * sizeof(struct mod);
+        const volatile struct mod *source = (const volatile struct mod *)mbi->mods_addr;
+        if (!mbi->mods_addr || descriptors_end > UINT32_MAX ||
+            !shz_memplan_covers(&runs, mbi->mods_addr, descriptors_end))
+            fail("module descriptors outside usable RAM", mbi->mods_addr);
+        for (i = 0; i < (has_initrd ? 2u : 1u); ++i) {
+            mods[i].start = source[i].start; mods[i].end = source[i].end;
+            mods[i].string = source[i].string; mods[i].reserved = source[i].reserved;
+        }
     }
+    if (mods[0].end <= mods[0].start || (has_initrd && mods[1].end < mods[1].start))
+        fail("reversed or empty kernel module extent", mods[0].start);
+    ksize = mods[0].end - mods[0].start;
+    if (has_initrd) isize = mods[1].end - mods[1].start;
+    ram = memory_layout(isize);
+    if (ram < (64u << 20)) fail("need at least 64 MiB, have ", ram);
     if (ksize == 0 || ksize > 0x100000u) fail("kernel image size (file + bss must stay below 3 MiB), ", ksize);
-    if (INITRD_GPA + isize > ram) fail("initrd does not fit in RAM, size=", isize);
+    if (!shz_stub_relocation_valid(&runs, ram, (uint32_t)stub_end, mods[0].start, mods[0].end,
+                has_initrd ? mods[1].start : 0, has_initrd ? mods[1].end : 0, has_initrd))
+        fail("module relocation outside safe usable RAM", mods[0].start);
     if (mbi->flags & 4) {                          /* Capture before module copies. K64 retains its historical raw,
                                                       sanitized/truncated line; K32 uses a bounded adapter only for
                                                       the exact advertised QEMU image-name prefix. */
