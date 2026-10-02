@@ -6,13 +6,18 @@ Used by tools/build_shizuku_se_iso.py (the product: one hybrid "VM install ISO")
 and tools/build_shizuku_se_disk.py (a secondary raw USB/HDD image). Nothing here
 boots anything; it resolves inputs and assembles bytes.
 
-Boot design (exercised by tools/test_shizuku_se_boot_matrix.py, documented in
-docs/shizukudos10/MEDIA.md):
+Default product ISO with setup enters the interactive installer immediately:
+  BIOS: isolinux DEFAULT setup, PROMPT 0, NOESCAPE 1, one LABEL and no menu.c32.
+  UEFI: BOOT.INI mode = install, menu_timeout = 0.
+The installed desktop profile is independent of this live installer entry.
+Explicit non-install component profiles and the secondary raw disk retain the
+menus below; their existing boot matrix is tools/test_shizuku_se_boot_matrix.py
+and component documentation is docs/shizukudos10/MEDIA.md:
 
   Legacy BIOS  CD       El Torito default entry = isolinux.bin (no emulation)
                USB/HDD  ISO: isohdpfx.bin MBR -> isolinux.bin (isohybrid)
                         raw disk: syslinux mbr.bin -> active FAT32 -> ldlinux.sys
-               -> the same menu.c32 menu (also on COM1, 115200 8N1):
+               -> the component menu.c32 menu (also on COM1, 115200 8N1):
                   Kernel64   mboot.c32 BOOT.ELF --- KERNEL64S.BIN --- WIN64.IMG
                              (Multiboot stub, module 0 kernel, module 1 initrd)
                   DOS16      memdisk harddisk, the ShizukuDOS 10 FreeDOS disk image
@@ -270,8 +275,18 @@ MENU_KEYS = {"kernel64": "k", "setup": "i", "dos16": "d"}
 
 
 def boot_menu(dos16_image: str, k64_dir: str = "/SHZ/K64", setup: bool = False,
-              desktop: bool = True, unattended: bool = False) -> bytes:
+              desktop: bool = True, unattended: bool = False, direct_install: bool = False) -> bytes:
     """Product boot menu; unattended installation is an explicit test option."""
+    if direct_install:
+        if not setup or unattended:
+            raise ValueError("direct installer entry requires interactive setup")
+        # Syslinux doc/syslinux.txt: without UI, DEFAULT + PROMPT 0 boots
+        # automatically. NOESCAPE prevents modifier keys from opening a prompt.
+        # TIMEOUT 0 only disables the prompt timer; it is not the boot trigger.
+        return ("SERIAL 0 115200\nDEFAULT setup\nPROMPT 0\nNOESCAPE 1\n"
+                "LABEL setup\n  KERNEL mboot.c32\n"
+                f"  APPEND {k64_dir}/BOOT.ELF shz.setup=interactive shz.noapps --- "
+                f"{k64_dir}/KERNEL64S.BIN --- /{SETUP_ISO_DIR}/{SETUP_MAIN}\n").encode("ascii")
     mboot = f"{k64_dir}/BOOT.ELF --- {k64_dir}/KERNEL64S.BIN --- {k64_dir}/WIN64.IMG"
     lines = [
         "# ShizukuOS boot menu (tools/shizuku_se_media.py).",
@@ -323,12 +338,15 @@ def boot_ini(mode: str, menu_timeout: int = MENU_TIMEOUT) -> bytes:
     ).encode("ascii")
 
 
-def efi_readme(loader: Input, csm: Input, mode: str) -> bytes:
+def efi_readme(loader: Input, csm: Input, mode: str, menu_timeout: int = MENU_TIMEOUT) -> bytes:
     return (
         "\\EFI - UEFI side of the ShizukuOS media\r\n"
         "\r\n"
         "\\EFI\\BOOT\\BOOTX64.EFI     Shizuku UEFI loader and boot manager (project code,\r\n"
-        "  GPL-2.0-only). It reads \\EFI\\SHIZUKU\\BOOT.INI and shows a menu on the\r\n"
+        "  GPL-2.0-only). It reads \\EFI\\SHIZUKU\\BOOT.INI. With menu_timeout=0\r\n"
+        "  it immediately starts the selected mode; install opens SHZSETUP's\r\n"
+        "  interactive target selection and confirmation UI. With a nonzero timeout\r\n"
+        "  it shows a menu on the\r\n"
         "  console and COM1: A/Enter or no key = BOOT.INI mode (auto: the Supervisor\r\n"
         "  with Intel VMX, otherwise CSMWRAP.EFI); K = Kernel64 direct (\\SHZDOS\\\r\n"
         "  KERNEL64S.BIN + WIN64.IMG, Long Mode, no VMX, GOP framebuffer; firmware\r\n"
@@ -338,12 +356,12 @@ def efi_readme(loader: Input, csm: Input, mode: str) -> bytes:
         "\\EFI\\SHIZUKU\\CSMWRAP.EFI  CSMWrap (LGPL-2.1) with the SeaBIOS CSM (LGPL-3.0):\r\n"
         "  PC BIOS services on UEFI-only machines; it then legacy-boots THIS\r\n"
         "  medium (El Torito default entry on a CD, the MBR on a disk), i.e. the\r\n"
-        "  same boot menu a legacy BIOS shows.\r\n"
+        "  same BIOS boot configuration (direct installer on the default ISO).\r\n"
         "  Needs Secure Boot OFF (nothing here is signed) and 2 or more logical\r\n"
         "  CPUs (it keeps one for itself). Source and licences: \\ShizukuDOS10\\ on\r\n"
         "  the ISO.\r\n"
         "\\EFI\\SHIZUKU\\CSMWRAP.INI  CSMWrap settings: debug log on COM1.\r\n"
-        f"\\EFI\\SHIZUKU\\BOOT.INI     boot manager policy, mode = {mode}, menu_timeout = {MENU_TIMEOUT}\r\n"
+        f"\\EFI\\SHIZUKU\\BOOT.INI     boot manager policy, mode = {mode}, menu_timeout = {menu_timeout}\r\n"
         "  (modes: auto | supervisor | csm | kernel64 | install).\r\n"
         "\\SHZDOS\\                   files the loader reads from its own volume.\r\n"
         f"BOOTX64.EFI sha256 {sha256(loader.data)}\r\n"
@@ -352,14 +370,15 @@ def efi_readme(loader: Input, csm: Input, mode: str) -> bytes:
 
 
 def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str,
-                setup_files: dict[str, bytes] | None = None) -> dict[str, bytes]:
+                setup_files: dict[str, bytes] | None = None,
+                menu_timeout: int = MENU_TIMEOUT) -> dict[str, bytes]:
     """The UEFI file set: the El Torito EFI image of the ISO, and the raw disk's FAT volume root."""
     members = {
         "EFI/BOOT/BOOTX64.EFI": loader.data,
         "EFI/SHIZUKU/CSMWRAP.EFI": csm.data,
         "EFI/SHIZUKU/CSMWRAP.INI": csmwrap_ini(),
-        "EFI/SHIZUKU/BOOT.INI": boot_ini(mode),
-        "EFI/SHIZUKU/README.TXT": efi_readme(loader, csm, mode),
+        "EFI/SHIZUKU/BOOT.INI": boot_ini(mode, menu_timeout),
+        "EFI/SHIZUKU/README.TXT": efi_readme(loader, csm, mode, menu_timeout),
     }
     for name, item in shzdos.items():
         members[f"SHZDOS/{name}"] = item.data
@@ -489,7 +508,21 @@ def syslinux_payload(prefix: str) -> dict[str, bytes]:
     return payload
 
 
-def vm_profiles_text() -> str:
+def vm_profiles_text(direct_install: bool = False) -> str:
+    if direct_install:
+        return (
+            "VM PROFILE - interactive installer entry\r\n"
+            "BIOS: isolinux DEFAULT setup / PROMPT 0 / NOESCAPE 1, without menu.c32.\r\n"
+            "UEFI: BOOT.INI mode = install, menu_timeout = 0.\r\n"
+            "Both paths boot Kernel64 with INSTALL.IMG and\r\n"
+            "shz.setup=interactive shz.noapps. SHZSETUP opens its installer GUI.\r\n"
+            "Select a disk, review the target and explicitly confirm before writes.\r\n"
+            "Cancelling changes no target disk. No unattended erase is selected.\r\n"
+            "The desktop option describes the installed system's profile.\r\n"
+            "This entry policy has host checks; it is not new VM boot evidence.\r\n"
+            "Actual Windows 98 DOS replacement, GOP and modern apps remain unverified.\r\n"
+            "See tools/test_shizukuos_installer_vm.py for the separate bounded guest check.\r\n"
+        )
     return (
         "VM PROFILES - ShizukuOS VM install ISO\r\n"
         "==============================================================\r\n"

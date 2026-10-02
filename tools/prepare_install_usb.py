@@ -27,10 +27,10 @@ MANIFEST = "USB-MANIFEST.JSON"
 EFI_REQUIRED = {
     "EFI/BOOT/BOOTX64.EFI", "EFI/SHIZUKU/BOOT.INI", "EFI/SHIZUKU/CSMWRAP.EFI",
     "EFI/SHIZUKU/CSMWRAP.INI", "EFI/SHIZUKU/README.TXT", "SHZDOS/DISK.IMG",
-    "SHZDOS/KERNEL32.BIN", "SHZDOS/KERNEL64.BIN", "SHZDOS/KERNEL64S.BIN", "SHZDOS/WIN64.IMG",
+    "SHZ/SETUP/INSTALL.IMG", "SHZDOS/KERNEL32.BIN", "SHZDOS/KERNEL64.BIN", "SHZDOS/KERNEL64S.BIN", "SHZDOS/WIN64.IMG",
 }
 PUBLIC_REQUIRED = {
-    EFI_IMAGE, "SHZ/K64/BOOT.ELF", "SHZ/K64/KERNEL64S.BIN", "SHZ/K64/WIN64.IMG",
+    EFI_IMAGE, "isolinux/isolinux.cfg", "SHZ/K64/BOOT.ELF", "SHZ/K64/KERNEL64S.BIN", "SHZ/K64/WIN64.IMG",
     "SHZ/SETUP/INSTALL.IMG", "SHZ/SETUP/MANIFEST.JSON", "ShizukuDOS10/GPL-NOTICE.TXT",
     "ShizukuDOS10/SOURCE/shizukudos-source.tar.gz",
     "ShizukuDOS10/LICENSES/Shizuku-LICENSE-GPL-2.0.txt",
@@ -195,14 +195,44 @@ def assert_same(record: dict, expected: dict, what: str) -> None:
         raise PreparationError(f"{what} bytes differ from their exact receipt")
 
 
+def installer_boot_policy(proof, bios, efi):
+    """Read actual policies independently of producer helpers or receipt claims."""
+    if (proof.get('boot_profile') != 'installer' or proof.get('boot_mode') != 'install'
+            or proof.get('installed_system_profile') not in ('desktop', 'self-test')):
+        raise PreparationError('Installer media receipt and independent installed system profile required')
+    lines = [' '.join(line.split()) for line in bios.decode('ascii').splitlines()
+             if line.strip() and not line.lstrip().startswith('#')]
+    expected = ['SERIAL 0 115200', 'DEFAULT setup', 'PROMPT 0', 'NOESCAPE 1',
+                'LABEL setup', 'KERNEL mboot.c32',
+                'APPEND /SHZ/K64/BOOT.ELF shz.setup=interactive shz.noapps --- '
+                '/SHZ/K64/KERNEL64S.BIN --- /SHZ/SETUP/INSTALL.IMG']
+    if lines != expected:
+        raise PreparationError('BIOS must directly enter its single interactive installer label without a menu')
+    values = {}
+    for line in efi.decode('ascii').splitlines():
+        line = line.strip()
+        if not line or line.startswith(('#', ';', '[')):
+            continue
+        if '=' not in line:
+            raise PreparationError('Malformed EFI boot policy')
+        key, value = (part.strip() for part in line.split('=', 1))
+        key = key.lower()
+        if key in values:
+            raise PreparationError('Duplicate EFI policy key')
+        values[key] = value
+    if values.get('mode') != 'install' or values.get('menu_timeout') != '0':
+        raise PreparationError('UEFI must enter install with menu_timeout=0')
+    return {'bios_single_interactive_installer': True, 'uefi_mode': 'install', 'menu_timeout': 0}
+
+
 def stage(args: argparse.Namespace) -> dict:
     iso, receipt = input_file(args.iso), input_file(args.receipt)
     proof, receipt_before, receipt_stamp = read_receipt(receipt)
-    if (proof.get("private") is not False or proof.get("boot_profile") != "desktop"
-            or proof.get("boot_mode") != "kernel64" or proof.get("setup", {}).get("present") is not True
+    if (proof.get("private") is not False or proof.get("boot_profile") != "installer"
+            or proof.get("boot_mode") != "install" or proof.get("setup", {}).get("present") is not True
             or proof.get("git", {}).get("dirty") is not False
             or not re.fullmatch(r"[0-9a-f]{40}", str(proof.get("git", {}).get("revision", "")))):
-        raise PreparationError("Clean-source public desktop/kernel64 ISO and installer receipt required")
+        raise PreparationError("Clean-source public installer ISO and installer receipt required")
     iso_before = stamp(iso)
     iso_record = file_record(iso)
     assert_same(iso_record, proof, "Public ISO")
@@ -218,7 +248,7 @@ def stage(args: argparse.Namespace) -> dict:
         raise PreparationError("Producer receipt lacks the complete EFI loader/runtime inventory")
     for name in efi_expected:
         safe_name(name)
-        if not name.startswith(("EFI/", "SHZDOS/")):
+        if not name.startswith(("EFI/", "SHZDOS/")) and name != "SHZ/SETUP/INSTALL.IMG":
             raise PreparationError("Unexpected EFI volume member")
     reserve(out.parent, 3 * iso_record["bytes"] + (windows_record["bytes"] if windows_record else 0))
     work = Path(tempfile.mkdtemp(prefix=f".{out.name}-", dir=out.parent))
@@ -241,9 +271,12 @@ def stage(args: argparse.Namespace) -> dict:
                 assert_same(file_record(target), record, f"Existing USB member {name}")
             else:
                 shutil.copyfile(efi / name, target)
-        config = (usb / "EFI/SHIZUKU/BOOT.INI").read_text(encoding="ascii")
-        if not re.search(r"^\s*mode\s*=\s*kernel64\s*$", config, re.MULTILINE):
-            raise PreparationError("Copied EFI policy must use the genuine Kernel64 direct path")
+        if any(Path(name).name.lower() == "menu.c32" for name in names):
+            raise PreparationError("Installer ISO unexpectedly carries the boot menu module")
+        boot_policy = installer_boot_policy(proof, (usb / "isolinux/isolinux.cfg").read_bytes(),
+                                           (usb / "EFI/SHIZUKU/BOOT.INI").read_bytes())
+        if not actual_efi["SHZ/SETUP/INSTALL.IMG"]["bytes"]:
+            raise PreparationError("EFI installer archive must not be empty")
         if windows:
             destination = usb / "OWNMEDIA/WIN98.ISO"
             destination.parent.mkdir()
@@ -254,7 +287,7 @@ def stage(args: argparse.Namespace) -> dict:
             "That is the integration target; this file preparation does not prove it is complete.\n"
             "Copy these files to the ROOT of a FAT32 USB partition.\n"
             "EFI/BOOT/BOOTX64.EFI and SHZDOS must remain at their exact paths.\n"
-            "File-copy preparation targets UEFI Kernel64 direct boot. BIOS boot sectors are not installed.\n"
+            "File-copy preparation targets the interactive UEFI installer immediately. BIOS boot sectors are not installed.\n"
             "For BIOS, write the official hybrid ISO as an image using a tool you normally use.\n"
             "Place your own Windows 98 ISO at OWNMEDIA/WIN98.ISO; the folder then becomes PRIVATE.\n"
             "A copied Windows ISO is preserved media. It is not a bootable nested ISO or verified Setup.\n"
@@ -264,7 +297,8 @@ def stage(args: argparse.Namespace) -> dict:
         result = {
             "schema": "win98-modern-usb-copy-v1", "private": windows is not None,
             "public_iso": iso_record, "producer_receipt": receipt_before,
-            "source_commit": proof["git"]["revision"], "boot_profile": "desktop",
+            "source_commit": proof["git"]["revision"], "boot_profile": "installer",
+            "installed_system_profile": proof["installed_system_profile"], "boot_policy": boot_policy,
             "architecture_target": "ShizukuDOS replaces MS-DOS for Windows 98; Kernel32 and Kernel64 are its components",
             "efi_members_verified": len(actual_efi), "owner_windows_iso": windows_record,
             "claims": CLAIMS, "files": tree_records(usb),

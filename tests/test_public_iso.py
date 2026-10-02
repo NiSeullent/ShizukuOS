@@ -99,5 +99,35 @@ class PhysicalCatalog(unittest.TestCase):
                     GATE.physical_catalog(path)
 
 
+
+
+class InstallerPolicyTests(unittest.TestCase):
+    BIOS = (b'SERIAL 0 115200\nDEFAULT setup\nPROMPT 0\nNOESCAPE 1\nLABEL setup\n'
+            b' KERNEL mboot.c32\n APPEND /SHZ/K64/BOOT.ELF shz.setup=interactive shz.noapps --- '
+            b'/SHZ/K64/KERNEL64S.BIN --- /SHZ/SETUP/INSTALL.IMG\n')
+    EFI = b'mode = install\r\nmenu_timeout = 0\r\n'
+    PROOF = {'boot_profile': 'installer', 'boot_mode': 'install', 'installed_system_profile': 'desktop'}
+
+    def test_actual_policy_admission_and_independent_desktop_profile(self):
+        for profile in ('desktop', 'self-test'):
+            result = GATE.installer_boot_policy(dict(self.PROOF, installed_system_profile=profile), self.BIOS, self.EFI)
+            self.assertEqual(result['menu_timeout'], 0)
+
+    def test_bad_actual_bios_or_efi_policy_is_rejected(self):
+        for bios in (self.BIOS + b'UI menu.c32\n', self.BIOS + b'LABEL diagnostic\n',
+                     self.BIOS.replace(b'interactive', b'auto'), self.BIOS.replace(b'NOESCAPE 1', b'NOESCAPE 0'),
+                     self.BIOS.replace(b'INSTALL.IMG', b'WIN64.IMG')):
+            with self.subTest(bios=bios), self.assertRaises(ValueError):
+                GATE.installer_boot_policy(self.PROOF, bios, self.EFI)
+        for efi in (self.EFI.replace(b'install', b'kernel64'), self.EFI.replace(b'= 0', b'= 5'),
+                    self.EFI + b'mode=kernel64\n', self.EFI + b'menu_timeout=0\n'):
+            with self.subTest(efi=efi), self.assertRaises(ValueError):
+                GATE.installer_boot_policy(self.PROOF, self.BIOS, efi)
+
+    def test_old_desktop_media_receipt_is_rejected(self):
+        with self.assertRaises(ValueError):
+            GATE.installer_boot_policy(dict(self.PROOF, boot_profile='desktop'), self.BIOS, self.EFI)
+
+
 if __name__ == '__main__':
     unittest.main()

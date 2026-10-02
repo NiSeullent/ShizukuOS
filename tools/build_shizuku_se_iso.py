@@ -5,8 +5,9 @@ One ISO, bootable as a CD and, written to a USB stick or attached as a disk, as 
 hard disk, on legacy BIOS and on UEFI:
 
 - BIOS, El Torito default entry: isolinux.bin (no emulation, boot info table),
-  pinned syslinux 6.04 (shizukudos/upstream/manifest.json "syslinux"). menu.c32
-  offers, also on COM1:
+  pinned syslinux 6.04 (shizukudos/upstream/manifest.json "syslinux"). With setup
+  present, DEFAULT setup/PROMPT 0 directly opens the interactive installer GUI.
+  Explicit diagnostic profiles retain menu.c32, which offers on COM1:
     Kernel64  mboot.c32 loads the Multiboot stub SHZ/K64/BOOT.ELF with module 0
               KERNEL64S.BIN and module 1 WIN64.IMG (standalone Kernel64 + Win64).
     DOS10     memdisk boots ShizukuDOS10/dos16/shizukudos-dos10.img, the
@@ -15,12 +16,13 @@ hard disk, on legacy BIOS and on UEFI:
               with shz.setup=interactive on its Multiboot command line.
 - UEFI, El Torito EFI entry (platform 0xEF): ShizukuDOS10/efiboot.img, a FAT
   image with \\EFI\\BOOT\\BOOTX64.EFI (Shizuku loader and boot manager),
-  \\EFI\\SHIZUKU\\CSMWRAP.EFI (+ CSMWRAP.INI) and BOOT.INI (mode = auto,
-  menu_timeout = 5), and \\SHZDOS\\ (loader inputs incl. KERNEL64S.BIN). The boot
-  manager's menu: no key = auto (the Supervisor with Intel VMX, otherwise CSMWrap
+  \\EFI\\SHIZUKU\\CSMWRAP.EFI (+ CSMWRAP.INI) and BOOT.INI (mode = install,
+  menu_timeout = 0 with setup), and \\SHZDOS\\ (loader inputs incl. KERNEL64S.BIN).
+  Explicit modes other than install retain the boot manager menu: no key = auto (the Supervisor with Intel VMX, otherwise CSMWrap
   -> SeaBIOS CSM -> the El Torito default entry, i.e. the same menu as legacy
   BIOS); K = Kernel64 direct (no CSM, no VMX); I = native interactive installer.
-  Production defaults to the development desktop; diagnostic profiles are explicit.
+  With setup present, the medium opens the interactive installer immediately.
+  --desktop selects the installed system's profile; diagnostic boot modes are explicit.
 - isohybrid: isohdpfx.bin MBR code in the system area, MBR partition 1 (0x00,
   active, whole image) for BIOS disk boot, MBR partition 2 (0xEF) and a GPT
   entry for the EFI image so UEFI finds \\EFI\\BOOT\\BOOTX64.EFI on a disk.
@@ -167,7 +169,8 @@ def edition_text() -> bytes:
 def limits_text() -> bytes:
     return (
         "ShizukuOS development limits\r\n"
-        "The normal boot starts the persistent ShizukuOS userland.\r\n"
+        "The default install medium starts the interactive installer GUI.\r\n"
+        "The installed desktop profile starts the persistent ShizukuOS userland.\r\n"
         "ShizukuDOS 10 provides the normal DOS shell; separate test images\r\n"
         "retain the FreeDOS/FreeCOM conformance workload and its exit marker.\r\n"
         "DOS booted through memdisk resides in RAM; changes to that instance\r\n"
@@ -885,11 +888,12 @@ def media_summary(info: dict) -> str:
     )
 
 
-def readme_text(media: dict | None, setup: bool) -> bytes:
+def readme_text(media: dict | None, setup: bool, direct_install: bool = False) -> bytes:
     return (
         "ShizukuOS 1.0.0 development candidate - install medium\r\n"
-        "Boot the persistent userland, select the built-in installer,\r\n"
-        "or start the ShizukuDOS 10 recovery shell from the boot menu.\r\n"
+        + ("Boot directly into the interactive installer GUI; no boot-choice menu is shown.\r\n"
+           if direct_install else
+           "This explicit boot profile retains the component boot-choice menu.\r\n")
         + ("Install: choose a disk, review it, type ERASE and confirm.\r\n"
            "SHZSETUP writes and verifies GPT + ESP + ShizukuFS.\r\n" if setup else "No installer is included on this medium.\r\n")
         + "The installer deletes the selected disk; cancelling writes nothing.\r\n"
@@ -914,7 +918,7 @@ def msbase_text(media: dict) -> bytes:
         "were not modified. Do not redistribute this image. Only sizes and\r\n"
         "hashes of the source are recorded here:\r\n"
         + "".join(line + "\r\n" for line in media_summary(media).splitlines())
-        + "The boot menu still offers the ShizukuDOS entries, not Windows 98 Setup.\r\n"
+        + "The ShizukuOS installer is separate from original Windows 98 Setup.\r\n"
         "The builder did not run Setup and installed nothing.\r\n"
     ).encode("ascii")
 
@@ -924,19 +928,22 @@ K64_DIR = "SHZ/K64"
 
 
 def boot_payload(syslinux: dict[str, Path], k64: dict[str, "se_media.Input"], setup: bool,
-                 desktop: bool = True, unattended: bool = False) -> dict[str, bytes]:
+                 desktop: bool = True, unattended: bool = False,
+                 direct_install: bool = False) -> dict[str, bytes]:
     """isolinux + modules + menu, and the Kernel64 Multiboot files the menu loads."""
     payload = {f"{ISOLINUX_DIR}/isolinux.bin": syslinux["isolinux.bin"].read_bytes(),
                f"{ISOLINUX_DIR}/memdisk": syslinux["memdisk"].read_bytes()}
     for name in se_media.SYSLINUX_MODULES:
+        if direct_install and name == "menu.c32":
+            continue
         payload[f"{ISOLINUX_DIR}/{name}"] = syslinux[name].read_bytes()
     payload[f"{ISOLINUX_DIR}/isolinux.cfg"] = se_media.boot_menu(
         dos16_image=f"/{DOS16_USER_ISO_PATH}", k64_dir=f"/{K64_DIR}",
-        setup=setup, desktop=desktop, unattended=unattended)
+        setup=setup, desktop=desktop, unattended=unattended, direct_install=direct_install)
     for name, item in k64.items():
         payload[f"{K64_DIR}/{name}"] = item.data
     payload[f"{K64_DIR}/README.TXT"] = (
-        "SHZ\\K64 - standalone Kernel64 + Win64 runtime (boot menu entry K)\r\n"
+        "SHZ\\K64 - standalone Kernel64 + Win64 runtime and installer boot support\r\n"
         "BOOT.ELF       Multiboot (ELF32) stub; loaded by mboot.c32 or by QEMU:\r\n"
         "               qemu-system-x86_64 -kernel BOOT.ELF -initrd KERNEL64S.BIN,WIN64.IMG\r\n"
         "KERNEL64S.BIN  Kernel64 built with SHZ_STANDALONE (module 0)\r\n"
@@ -950,13 +957,13 @@ def boot_payload(syslinux: dict[str, Path], k64: dict[str, "se_media.Input"], se
 
 
 def stage_tree(stage: Path, artifacts: dict[str, Path], extra: dict[str, bytes],
-               media: dict | None, setup: bool) -> dict[str, bytes]:
+               media: dict | None, setup: bool, direct_install: bool = False) -> dict[str, bytes]:
     if stage.exists():
         rmtree_force(stage)
     stage.mkdir(parents=True)
     payload: dict[str, bytes] = {
-        "README.TXT": readme_text(media, setup),
-        "VMPROFIL.TXT": se_media.vm_profiles_text().encode("ascii"),
+        "README.TXT": readme_text(media, setup, direct_install),
+        "VMPROFIL.TXT": se_media.vm_profiles_text(direct_install=direct_install).encode("ascii"),
         "SOURCES.TXT": sources_text(),
         "LIMITS.TXT": limits_text(),
     }
@@ -1276,6 +1283,19 @@ def verify_iso(iso_path: Path, payload: dict[str, bytes], efi_members: dict[str,
     return report
 
 
+def iso_boot_policy(desktop: bool, setup: bool, boot_mode: str | None) -> tuple[str, int, bool]:
+    """Resolve live media entry independently of the installed desktop profile."""
+    if boot_mode is not None:
+        if boot_mode not in se_media.BOOT_MODES:
+            raise ValueError("unsupported explicit UEFI boot mode")
+        if boot_mode == "install" and not setup:
+            raise ValueError("UEFI mode=install requires the actual installer payload")
+        return ("install", 0, True) if boot_mode == "install" else (boot_mode, se_media.MENU_TIMEOUT, False)
+    if setup:
+        return "install", 0, True
+    return ("kernel64" if desktop else "auto"), se_media.MENU_TIMEOUT, False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -1289,10 +1309,10 @@ def main() -> int:
     parser.add_argument("--setup", type=Path, metavar="DIR",
                         help="install/mkpayload.py output directory to ship under \\SHZ\\SETUP (default: built into "
                              f"{se_media.rel(se_media.DEFAULT_SETUP_DIR)} with the shipped answer file); adds the "
-                             "unattended Install menu entry")
+                             "interactive installer GUI")
     parser.add_argument("--no-setup", action="store_true", help="leave the installer and its menu entry off the medium")
     parser.add_argument("--desktop", action=argparse.BooleanOptionalAction, default=True,
-                        help="boot the persistent desktop and include it in the installed system")
+                        help="include the persistent desktop in the installed system; setup media opens the installer GUI")
     parser.add_argument("--loader", type=Path, help="UEFI loader to ship (default: the shizukudos build)")
     parser.add_argument("--csmwrap", type=Path, help="CSMWRAP.EFI to ship (default: shizukudos/csm/build.py output)")
     parser.add_argument("--boot-mode", choices=se_media.BOOT_MODES, default=None,
@@ -1305,8 +1325,8 @@ def main() -> int:
                         help="accepted for compatibility; the builder runs no QEMU. Boot evidence: "
                              "tools/test_shizuku_se_boot_matrix.py")
     args = parser.parse_args()
-    if args.boot_mode is None:
-        args.boot_mode = "kernel64" if args.desktop else "auto"
+    args.boot_mode, menu_timeout, direct_install = iso_boot_policy(
+        args.desktop, not args.no_setup, args.boot_mode)
     private = args.win98_media is not None
     tag = PRIVATE_SUFFIX if private else ""
     stage_root = BUILD / f"shizuku-second-edition{tag}-stage" if private else STAGE_ROOT
@@ -1344,13 +1364,15 @@ def main() -> int:
             raise RuntimeError("UEFI mode=install requires the actual installer payload")
         store, store_manifest = se_media.driver_store(args.driver_package)
         artifacts = build_components(work)
-        efi_members = se_media.efi_members(loader, csm, shzdos, args.boot_mode, setup_files)
+        efi_members = se_media.efi_members(loader, csm, shzdos, args.boot_mode, setup_files,
+                                         menu_timeout=menu_timeout)
         if args.desktop:
             efi_members["SHZDOS/KERNEL64.INI"] = b"cmdline = shz.desktop\r\n"
         shz10_payload, consistency = stage_shizukudos10(work, outputs, efi_members)
         extra = {**shz10_payload, **shzse_payload(artifacts), **store, **setup_files,
-                 **boot_payload(syslinux, k64, bool(setup_files), args.desktop)}
-        payload = stage_tree(stage_root, artifacts, extra, media, bool(setup_files))
+                 **boot_payload(syslinux, k64, bool(setup_files), args.desktop,
+                                direct_install=direct_install)}
+        payload = stage_tree(stage_root, artifacts, extra, media, bool(setup_files), direct_install)
         optimization = write_iso(stage_root, iso_path, syslinux["isohdpfx.bin"], payload)
         report = verify_iso(iso_path, payload, efi_members, syslinux, evidence, stage_root if media else None)
         digest = sha256_path(iso_path)
@@ -1371,7 +1393,8 @@ def main() -> int:
         "product": "ShizukuOS", "release_target": "1.0.0", "release_channel": "development",
         "distribution_origin": "https://m98.nyase.kr",
         "volume_id": VOLUME_ID, "source_date_epoch": FIXED_EPOCH, "boot_mode": args.boot_mode,
-        "boot_profile": "desktop" if args.desktop else "self-test",
+        "boot_profile": "installer" if direct_install else ("desktop" if args.desktop else "self-test"),
+        "installed_system_profile": "desktop" if args.desktop else "self-test",
         "disk_optimization": optimization,
         "git": {"revision": git_output("rev-parse", "HEAD"), "dirty": bool(git_output("status", "--porcelain"))},
         "inputs": [item.record() for item in inputs],
@@ -1380,9 +1403,12 @@ def main() -> int:
         "drivers": [{"package": p["package"], "files": len(p["files"]), "hardware_ids": len(p["hardware_ids"])}
                     for p in store_manifest["packages"]],
         "menu": {"dos16": f"/{DOS16_USER_ISO_PATH}", "k64_dir": f"/{K64_DIR}",
-                 "keys": se_media.MENU_KEYS, "setup_entry": bool(setup_files),
-                 "uefi": {"boot_ini": {"mode": args.boot_mode, "menu_timeout": se_media.MENU_TIMEOUT},
-                          "keys": {"auto": "a", "k64direct": "k", "csm": "c", "supervisor": "s"}}},
+                 "keys": {} if direct_install else se_media.MENU_KEYS,
+                 "setup_entry": bool(setup_files), "visible": not direct_install,
+                 "bios_default": "setup" if direct_install else ("desktop" if args.desktop else "kernel64"),
+                 "uefi": {"boot_ini": {"mode": args.boot_mode, "menu_timeout": menu_timeout},
+                          "keys": {} if not menu_timeout else
+                          {"auto": "a", "k64direct": "k", "csm": "c", "supervisor": "s"}}},
         "efi_members": {name: {"bytes": len(data), "sha256": sha256(data)} for name, data in sorted(efi_members.items())},
         "payload_files": len(payload),
     }

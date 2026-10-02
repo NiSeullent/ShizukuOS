@@ -123,6 +123,36 @@ def command(argv):
     return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=180).stdout
 
 
+def installer_boot_policy(proof, bios, efi):
+    """Read actual policies independently of producer helpers or receipt claims."""
+    if (proof.get('boot_profile') != 'installer' or proof.get('boot_mode') != 'install'
+            or proof.get('installed_system_profile') not in ('desktop', 'self-test')):
+        raise ValueError('Installer media receipt and independent installed system profile required')
+    lines = [' '.join(line.split()) for line in bios.decode('ascii').splitlines()
+             if line.strip() and not line.lstrip().startswith('#')]
+    expected = ['SERIAL 0 115200', 'DEFAULT setup', 'PROMPT 0', 'NOESCAPE 1',
+                'LABEL setup', 'KERNEL mboot.c32',
+                'APPEND /SHZ/K64/BOOT.ELF shz.setup=interactive shz.noapps --- '
+                '/SHZ/K64/KERNEL64S.BIN --- /SHZ/SETUP/INSTALL.IMG']
+    if lines != expected:
+        raise ValueError('BIOS must directly enter its single interactive installer label without a menu')
+    values = {}
+    for line in efi.decode('ascii').splitlines():
+        line = line.strip()
+        if not line or line.startswith(('#', ';', '[')):
+            continue
+        if '=' not in line:
+            raise ValueError('Malformed EFI boot policy')
+        key, value = (part.strip() for part in line.split('=', 1))
+        key = key.lower()
+        if key in values:
+            raise ValueError('Duplicate EFI policy key')
+        values[key] = value
+    if values.get('mode') != 'install' or values.get('menu_timeout') != '0':
+        raise ValueError('UEFI must enter install with menu_timeout=0')
+    return {'bios_single_interactive_installer': True, 'uefi_mode': 'install', 'menu_timeout': 0}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--iso', type=Path, required=True)
@@ -139,8 +169,8 @@ def main():
     if command(['git', '-C', str(source_root), 'status', '--porcelain', '--untracked-files=no']).strip():
         parser.error('Tracked source has uncommitted changes')
     proof = json.loads(args.receipt.read_text())
-    if proof.get('private') is not False or proof.get('boot_profile') != 'desktop' or not proof.get('setup', {}).get('present'):
-        parser.error('Public desktop ISO with actual carried installer required')
+    if proof.get('private') is not False or proof.get('boot_profile') != 'installer' or not proof.get('setup', {}).get('present'):
+        parser.error('Public installer ISO with actual carried installer required')
     before = file_digest(iso)
     if proof.get('sha256') != before or proof.get('bytes') != iso.stat().st_size:
         parser.error('Final ISO bytes differ from builder receipt')
@@ -155,7 +185,7 @@ def main():
         raise ValueError('Duplicate ISO inventory')
     public_inventory(names)
     required = {'SHZ/K64/BOOT.ELF', 'SHZ/K64/KERNEL64S.BIN', 'SHZ/K64/WIN64.IMG',
-                'SHZ/SETUP/INSTALL.IMG', 'SHZ/SETUP/MANIFEST.JSON',
+                'SHZ/SETUP/INSTALL.IMG', 'SHZ/SETUP/MANIFEST.JSON', 'isolinux/isolinux.cfg',
                 'ShizukuDOS10/efiboot.img', 'ShizukuDOS10/GPL-NOTICE.TXT',
                 'ShizukuDOS10/SOURCE/shizukudos-source.tar.gz',
                 'ShizukuDOS10/SOURCE/upstream-manifest.json',
@@ -166,13 +196,23 @@ def main():
     picked = ['ShizukuDOS10/SOURCE/shizukudos-source.tar.gz',
               'ShizukuDOS10/receipts/kernels-build-result.json',
               'ShizukuDOS10/receipts/win64-build-result.json',
-              'SHZ/K64/KERNEL64S.BIN', 'SHZ/K64/WIN64.IMG', 'SHZ/SETUP/MANIFEST.JSON']
+              'SHZ/K64/KERNEL64S.BIN', 'SHZ/K64/WIN64.IMG', 'SHZ/SETUP/MANIFEST.JSON',
+              'isolinux/isolinux.cfg', 'ShizukuDOS10/efiboot.img', 'SHZ/SETUP/INSTALL.IMG']
     extract = ['xorriso', '-osirrox', 'on', '-indev', str(iso)]
     for name in picked:
         if name not in names:
             raise ValueError('Missing source-bound kernel/runtime receipt')
         extract += ['-extract', '/' + name, str(out / Path(name).name)]
     command(extract)
+    if any(Path(name).name.lower() == 'menu.c32' for name in names):
+        raise ValueError('Installer ISO unexpectedly carries the boot menu module')
+    efi_ini = out / 'BOOT.INI'
+    efi_installer = out / 'efi-INSTALL.IMG'
+    command(['mcopy', '-i', str(out / 'efiboot.img'), '::/EFI/SHIZUKU/BOOT.INI', str(efi_ini)])
+    command(['mcopy', '-i', str(out / 'efiboot.img'), '::/SHZ/SETUP/INSTALL.IMG', str(efi_installer)])
+    boot_policy = installer_boot_policy(proof, (out / 'isolinux.cfg').read_bytes(), efi_ini.read_bytes())
+    if not (out / 'INSTALL.IMG').stat().st_size or file_digest(efi_installer) != file_digest(out / 'INSTALL.IMG'):
+        raise ValueError('UEFI and BIOS carry different or empty installer archives')
     sources = source_members((out / 'shizukudos-source.tar.gz').read_bytes())
     minimum = {'LICENSE', 'platform/build.py', 'ntwrapper/core.c', 'ntwrapper/vxd/build.py',
                'ntwin32/runtime.c', 'ntwin32/prepare.py', 'ntwddm/src/ntwddm.c',
@@ -208,7 +248,8 @@ def main():
     result = {'status': 'PASS_STATIC_PUBLIC_ISO_FINAL_SOURCE_BOUND', 'iso': str(iso),
               'bytes': iso.stat().st_size, 'sha256': before, 'source_commit': args.source_commit,
               'catalog': catalog, 'payload_files': len(names), 'project_source_files': len(sources),
-              'actual_consumed_source_pins': len(consumed), 'desktop': True, 'installer_carried': True,
+              'actual_consumed_source_pins': len(consumed), 'boot_profile': 'installer', 'boot_policy': boot_policy,
+              'installed_system_profile': proof['installed_system_profile'], 'installer_carried': True,
               'Windows98_media_or_publisher_binary_in_inventory': False,
               'VM_executed': False, 'boot_verified': False, 'modern_app_complete': False,
               'verifier_sha256': file_digest(Path(__file__))}

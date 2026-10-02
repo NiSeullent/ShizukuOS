@@ -36,8 +36,9 @@ class CopyPreparationTests(unittest.TestCase):
             "EFI/BOOT/BOOTX64.EFI": b"MZ synthetic packaging fixture; not executable",
             "EFI/SHIZUKU/CSMWRAP.EFI": b"MZ synthetic CSM packaging fixture",
             "EFI/SHIZUKU/CSMWRAP.INI": b"serial=true\r\n",
-            "EFI/SHIZUKU/BOOT.INI": b"mode = kernel64\r\nmenu_timeout = 5\r\n",
+            "EFI/SHIZUKU/BOOT.INI": b"mode = install\r\nmenu_timeout = 0\r\n",
             "EFI/SHIZUKU/README.TXT": b"synthetic fixture\r\n",
+            "SHZ/SETUP/INSTALL.IMG": b"owned installer fixture",
             "SHZDOS/DISK.IMG": b"DOS fixture",
             "SHZDOS/KERNEL32.BIN": b"K32 fixture",
             "SHZDOS/KERNEL64.BIN": b"K64 fixture",
@@ -49,7 +50,7 @@ class CopyPreparationTests(unittest.TestCase):
         with image.open("wb") as stream:
             stream.truncate(8 << 20)
         self.run_tool(["mkfs.fat", "-F", "16", "-s", "1", str(image)])
-        self.run_tool(["mmd", "-i", str(image), "::/EFI", "::/EFI/BOOT", "::/EFI/SHIZUKU", "::/SHZDOS"])
+        self.run_tool(["mmd", "-i", str(image), "::/EFI", "::/EFI/BOOT", "::/EFI/SHIZUKU", "::/SHZDOS", "::/SHZ", "::/SHZ/SETUP"])
         for i, (name, data) in enumerate(self.efi.items()):
             member = self.root / f"member-{i}"
             member.write_bytes(data)
@@ -61,11 +62,18 @@ class CopyPreparationTests(unittest.TestCase):
             member = self.tree / name
             member.parent.mkdir(parents=True, exist_ok=True)
             member.write_bytes(f"Synthetic packaging fixture: {name}\n".encode())
+        (self.tree / "SHZ/SETUP/INSTALL.IMG").write_bytes(self.efi["SHZ/SETUP/INSTALL.IMG"])
+        bios = self.tree / "isolinux/isolinux.cfg"
+        bios.parent.mkdir()
+        bios.write_text("SERIAL 0 115200\nDEFAULT setup\nPROMPT 0\nNOESCAPE 1\nLABEL setup\n"
+                        "  KERNEL mboot.c32\n  APPEND /SHZ/K64/BOOT.ELF shz.setup=interactive shz.noapps --- "
+                        "/SHZ/K64/KERNEL64S.BIN --- /SHZ/SETUP/INSTALL.IMG\n", encoding="ascii")
         self.iso = self.root / "public.iso"
         self.make_iso(self.tree, self.iso)
         self.receipt = self.root / "public.json"
         self.proof = {
-            "private": False, "boot_profile": "desktop", "boot_mode": "kernel64",
+            "private": False, "boot_profile": "installer", "boot_mode": "install",
+            "installed_system_profile": "desktop",
             "setup": {"present": True}, "git": {"revision": "1" * 40, "dirty": False},
             "sha256": sha(self.iso), "bytes": self.iso.stat().st_size,
             "efi_members": {name: {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
@@ -97,6 +105,25 @@ class CopyPreparationTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(script), "stage", "--iso", str(self.iso),
                                "--receipt", str(self.receipt), "--out", str(self.out), *extra],
                               capture_output=True, text=True, timeout=60)
+
+    def test_menu_and_wrong_installer_archive_are_rejected_after_exact_iso_rehash(self):
+        for mutation in ("menu", "archive"):
+            with self.subTest(mutation=mutation):
+                cfg = self.tree / "isolinux/isolinux.cfg"
+                original = cfg.read_bytes()
+                archive = self.tree / "SHZ/SETUP/INSTALL.IMG"
+                if mutation == "menu":
+                    cfg.write_bytes(original + b"UI menu.c32\n")
+                else:
+                    archive.write_bytes(b"different installer archive")
+                self.make_iso(self.tree, self.iso)
+                self.proof.update(sha256=sha(self.iso), bytes=self.iso.stat().st_size)
+                self.write_receipt()
+                result = self.stage()
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertFalse(self.out.exists())
+                cfg.write_bytes(original)
+                archive.write_bytes(self.efi["SHZ/SETUP/INSTALL.IMG"])
 
     def copied_helper(self):
         """Load a private helper copy so race injection cannot alter project inputs."""
