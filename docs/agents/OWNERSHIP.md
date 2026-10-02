@@ -59,3 +59,14 @@ Latest reviewed handoff: isolatedK32 CPU-local FIFO/GS/affinity/live-stack hando
 ## 2026-10-02 — root6970 guardian lifecycle candidate
 
 Root6970 owns this isolated candidate and its four new Python test files. disk_optimizer independently reviews; boot_regression_runner_6970 runs unchanged eligible custody/controller regressions. FADA retains the coherent private native boot/COM2/sole-QMP integration; 163F retains canonical main integration; c957 owns disjoint pending-RPC controller support and website/ISO. No peer checkout/index/private media is modified.
+
+
+### 2026-10-02 13:00 UTC — root6970 parallel-agent expansion
+
+| Agent | Scope | Exclusive new notes lane |
+| --- | --- | --- |
+| boot_regression_runner_6970 | Read-only tracked-Git/main prerequisite review | main-integration-review |
+| stale_order_source_design_6970 | Read-only guardian policy/COM2/sole-QMP/exchange caller analysis | guardian-review |
+| nas_disk_capacity_6970 | Separate resource readiness and duplicate-artifact assessment | resource-readiness |
+
+All lanes are beneath volume1/working_stuff_by_nyase/root6970/native-caller-wiring-20261002T1244. No cleanup deletion, peer checkout/index change, private-media access or VM launch is assigned. FADA retains private boot/coherent caller, 163F canonical/main, c957 controller support and official-site/ISO publication.

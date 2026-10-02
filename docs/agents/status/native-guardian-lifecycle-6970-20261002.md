@@ -112,3 +112,10 @@ its separate focused activation tests, whose dedicated placement is modeled.
 The 19-case environment check is resolved; native HostGrant caller integration
 and actual Windows 98 boot/persistence remain pending. No QEMU/Windows guest or
 private media was used for these regressions.
+
+
+### 2026-10-02 13:00 UTC — root6970 parallel-agent expansion
+
+Assigned scope: root integration coordination with three live parallel agents. Owned files: append-only entries in the four central agent documents and this status; isolated notes lanes only. Source commit af433d6328b3a347667a8714270724e3b61b41cd and documentation parent8358d043b271f58cde8fc8fb7fffddbfeb59aa53 remain the tested public unit.
+
+Dependencies/blockers: canonical main e455f01a5be61b5d507ebb66e1a3ae93a17846f5 lacks native_win98; guardian sole-QMP/policy/COM2/actual-exchange caller is not connected. Main review, caller analysis and disk/NAS readiness execute independently. FADA retains actual boot and private media. Tests: no new runtime test or VM; existing44 focused and47 partitioned original assertions remain qualified PASS. Remaining: review exact agent receipts, produce the coherent caller, coordinate canonical adoption, then actual Windows98 boot validation. TLS remains held.

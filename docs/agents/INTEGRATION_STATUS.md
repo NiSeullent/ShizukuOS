@@ -53,3 +53,8 @@ Root6970 candidate validation: 44 focused tests pass against one frozen combined
 ## 2026-10-02 — root6970 delegated regression coverage
 
 The unchanged af433d6 source now has 47 distinct original custody/controller cases passing across28+18+1, with44 focused cases for91 unique PASS items. The prior single-full47 NOT_RUN and first19 pathname-error receipts remain immutable. Dedicated unit/readiness/caps and terminal cleanup are recorded in the dated supplementary section of docs/agents/status/native-guardian-lifecycle-6970-20261002.md. No source change, QEMU/private media/Win98 boot or canonical main adoption is implied.
+
+
+### 2026-10-02 13:00 UTC — root6970 parallel-agent expansion
+
+Main prerequisite review found eight modify/delete conflicts for the scoped support delta; canonical main remains unchanged. Root-space/memory readiness observations are 30.44 GiB free and 10.44 GiB MemAvailable versus the public preflight floors of 18 GiB free and 6 GiB memory. The separate resource agent's owned 77-byte NAS fsync/readback probe passed without EIO and was removed. These are source/readiness checks, not Windows boot or ISO acceptance. Existing focused44 plus partitioned-original47 PASS evidence is frozen; no test rerun was needed for this documentation-only update.

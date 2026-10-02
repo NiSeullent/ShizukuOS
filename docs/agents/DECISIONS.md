@@ -42,3 +42,8 @@ Latest reviewed handoff: isolatedK32 CPU-local FIFO/GS/affinity/live-stack hando
 ## 2026-10-02 — root6970 guardian lifecycle candidate
 
 A manifest may contain the original nine source roles or those nine plus native_epoch_host.py. The guardian loads that extra role from held full-SHA-admitted bytes and admits its concrete ProcessBinding as the single waiter before spawn ACK. The controller still freezes its original six executed snapshots. A successful 272-byte grant exchange can hand back its exact existing OwnedQMP parser once, within the original deadline and under the actual guard. No new device authority, RPC operation, reconnected monitor or inferred zero exit status is introduced.
+
+
+### 2026-10-02 13:00 UTC — root6970 parallel-agent expansion
+
+Windows98 remains the product and ShizukuDOS replaces MS-DOS; Kernel32/64 are its backends. Preserve one guardian-owned QMP reader and one original deadline while joining policy/COM2/exchange. Current main lacks native_win98: an isolated three-commit support cherry-pick is not self-contained. A full-branch fast-forward includes 740 prerequisite commits; it is not a review of only the scoped support unit. Prepare a finite dependency closure for canonical-owner review.
