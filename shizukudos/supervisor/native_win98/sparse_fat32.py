@@ -319,19 +319,33 @@ def prepare(request_path, request_sha, result_path, executed_sha, executed_bytes
         for base, count in spans(allocated, g, source['bytes'], check):
             block = read_exact(data['source']['fd'], consumed, count, check)
             digest.update(block)
-            if not any(block):
+            if block.count(0) == len(block):
                 need(read_exact(data['esp']['fd'], base, count, check) == bytes(count), 'skipped destination region is not zero')
                 omitted += count
             else:
-                # Mixed source ranges retain small zero omission granularity;
-                # whole-zero ranges need only one bounded source/dest read.
+                # Classify at the original 4KiB omission granularity, then
+                # coalesce equal adjacent classes inside this <=1MiB span.
+                # NAS latency must not turn a contiguous run into one write
+                # and repeated lease/path/capacity checks per 4KiB page.
+                run_at, run_zero = 0, None
                 for pos in range(0, count, 4096):
                     chunk = block[pos:pos+4096]
-                    if not any(chunk):
-                        need(read_exact(data['esp']['fd'], base+pos, len(chunk), check) == bytes(len(chunk)), 'skipped destination region is not zero')
-                        omitted += len(chunk)
-                    else:
-                        write(base+pos, chunk); written += len(chunk)
+                    zero = chunk.count(0) == len(chunk)
+                    if run_zero is not None and zero != run_zero:
+                        length = pos-run_at
+                        if run_zero:
+                            need(read_exact(data['esp']['fd'], base+run_at, length, check) == bytes(length), 'skipped destination region is not zero')
+                            omitted += length
+                        else:
+                            write(base+run_at, block[run_at:pos]); written += length
+                        run_at = pos
+                    run_zero = zero
+                length = count-run_at
+                if run_zero:
+                    need(read_exact(data['esp']['fd'], base+run_at, length, check) == bytes(length), 'skipped destination region is not zero')
+                    omitted += length
+                else:
+                    write(base+run_at, block[run_at:]); written += length
             consumed += count
         padding = wanted*g['cluster_bytes']-source['bytes']
         if padding:
