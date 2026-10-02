@@ -5,6 +5,7 @@
 #ifndef K32_SERVICE_POLICY_H
 #define K32_SERVICE_POLICY_H
 #include "../abi/shz_abi.h"
+#include "../boot_profile/win98_foundation.h"
 
 #define K32_WIN98_SERVICE_CMDLINE "shz.k32-service=win98"
 
@@ -37,5 +38,21 @@ static inline int k32_boot_service_mode(const shz_bootinfo_t *bi)
         bi->channel[0].size != SHZ_IPC_REGION_SIZE)
         return -1;
     return 1;
+}
+
+/* Entry and IPC must select the same lifetime from the original handoff.
+ * An explicit malformed foundation is refused; only its zero decision may
+ * fall back to the reviewed legacy service or diagnostic profile.
+ */
+static inline int k32_boot_runtime_service_mode(const shz_bootinfo_t *bi)
+{
+    int mode;
+    if (!bi || bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR ||
+        bi->domain_id != SHZ_DOM_KERNEL32)
+        return -1;
+    mode = shz_win98_foundation_policy(bi);
+    if (mode != 0)
+        return mode;
+    return k32_boot_service_mode(bi);
 }
 #endif

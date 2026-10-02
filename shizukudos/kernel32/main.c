@@ -17,9 +17,7 @@ void kmain(const shz_bootinfo_t *bi)
     int service_mode;
     if (bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR || bi->domain_id != SHZ_DOM_KERNEL32)
         shz_exit(97);
-    service_mode = shz_win98_foundation_policy(bi);
-    if (!service_mode)
-        service_mode = k32_boot_service_mode(bi); /* reviewed earlier native profile */
+    service_mode = k32_boot_runtime_service_mode(bi);
     if (service_mode < 0)
         shz_exit(97);
     arch_init();
