@@ -14,6 +14,7 @@
  * returns, as on Windows.
  */
 #include "ipc.h"
+#include "auth_policy.h"
 #include "office_sync_rights.h"
 
 extern uint64_t ticks_now(void);
@@ -70,7 +71,8 @@ int32_t ipc_name_from_oa(process_t *p, uint64_t oa_va, char *out, size_t cap, ui
         (w[4] | 32) == 'l' && w[5] == '\\')
         skip = 6;
     if (n - skip == 0 && n) return STATUS_OBJECT_NAME_INVALID;
-    return utf16_to_utf8(w + skip, n - skip, out, cap) < 0 ? STATUS_OBJECT_NAME_INVALID : STATUS_SUCCESS;
+    if(utf16_to_utf8(w + skip,n - skip,out,cap)<0)return STATUS_OBJECT_NAME_INVALID;
+    return shz_auth_object_name(p,out,cap);
 }
 
 void ipc_handle_opened(kobject_t *o)
@@ -125,7 +127,14 @@ int32_t ipc_ref_handle(process_t *p, uint64_t h, uint32_t type, kobject_t **out,
         return STATUS_SUCCESS;
     }
     if (h > 0xffffffffull) return STATUS_INVALID_HANDLE;
-    return handle_ref(p, h & ~3ull, type, out, access);   /* the two low bits are tag bits, ignored as on NT */
+    {
+        int32_t st=handle_ref(p,h & ~3ull,type,&o,access);
+        if(st)return st;
+        if((o->type==OB_NPIPE||o->type==0x50u)&&!shz_auth_special_allowed(p,o->type)){ob_deref(o);return STATUS_ACCESS_DENIED;}
+        if((o->type==OB_PROCESS&&!shz_auth_process_access(p,o->u.proc.p))||
+           (o->type==OB_THREAD&&!shz_auth_thread_access(p,o->u.thr.pid))) {ob_deref(o);return STATUS_ACCESS_DENIED;}
+        *out=o;return STATUS_SUCCESS;
+    }
 }
 
 int32_t ipc_ref_process(process_t *cur, uint64_t h, uint32_t need_access, process_t **out, kobject_t **obj)
@@ -210,6 +219,7 @@ void ipc_object_free(kobject_t *o)
         vad_destroy(pp);
         kfree(pp->handles);
         pp->handles = 0;
+        shz_auth_process_gone(pp);
         pp->used = 0;
         break;
     }

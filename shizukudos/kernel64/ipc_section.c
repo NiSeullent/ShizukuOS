@@ -18,6 +18,7 @@
  * Page lookup tables live in physical pages (two levels, 512 entries each), so big sections cost almost no kernel heap.
  */
 #include "ipc.h"
+#include "auth_policy.h"
 #include "ipc_section_security.h"
 
 #define SEC_FILE 0x800000u
@@ -338,6 +339,7 @@ static int32_t sys_create_section(process_t *p, struct regs *r, uint64_t ph, uin
         if (st) { kfree(sd); kfree(s); return st == STATUS_OBJECT_TYPE_MISMATCH ? STATUS_INVALID_HANDLE : st; }
         file = fobj->u.file.file;
         if (!file || !file->node || file->node->is_dir) { ob_deref(fobj); kfree(sd); kfree(s); return STATUS_INVALID_PARAMETER; }
+        if(!shz_auth_node_access(p,file->node,prot_writable(pb))){ob_deref(fobj);kfree(sd);kfree(s);return STATUS_ACCESS_DENIED;}
         if (!(faccess & (GENERIC_READ_ACCESS | GENERIC_ALL_ACCESS | FILE_READ_DATA_ACCESS)) && !(faccess & 0x120089)) {
             ob_deref(fobj); kfree(sd); kfree(s); return STATUS_ACCESS_DENIED;
         }
@@ -404,6 +406,7 @@ static int32_t sys_map_view(process_t *p, struct regs *r, uint64_t hsec, uint64_
     st = get_section(p, hsec, &so, &access);
     if (st) return st;
     s = so->u.file.file;
+    if(s->node&&!shz_auth_node_access(p,s->node,prot_writable(pb))){ob_deref(so);return STATUS_ACCESS_DENIED;}
     /* The handle's rights and the section's protection bound the view's protection (MapViewOfFile table): a writable view
      * needs a writable section, an executable view an executable one; copy-on-write works on any section. */
     if ((prot_writable(pb) && !(access & SECTION_MAP_WRITE)) || (prot_exec(pb) && !(access & SECTION_MAP_EXECUTE)) ||
@@ -523,6 +526,7 @@ static int32_t sys_flush_vm(process_t *p, uint64_t hproc, uint64_t pbase, uint64
     irq_restore(f);
     ob_deref(po);
     if (!so) return STATUS_NOT_MAPPED_VIEW;
+    {section_t *s=so->u.file.file;if(s->node&&!shz_auth_node_access(target,s->node,1)){ob_deref(so);return STATUS_ACCESS_DENIED;}}
     section_write_back(so->u.file.file, first, count);
     ob_deref(so);
     if (copy_to_user(p, pbase, &base, 8) || copy_to_user(p, psize, &size, 8)) return STATUS_ACCESS_VIOLATION;

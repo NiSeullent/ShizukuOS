@@ -3,6 +3,7 @@
  * creation. Structures use the Windows x64 layouts the ntdll layer expects.
  */
 #include "fs.h"
+#include "auth_policy.h"
 #include "pci.h"
 #include "office_sync_rights.h"
 
@@ -37,8 +38,9 @@ static int32_t object_name(process_t *p, uint64_t oa_va, char *out, size_t cap)
     if (u.length && copy_from_user(p, tmp, u.buffer, u.length)) return STATUS_ACCESS_VIOLATION;
     if (u.length / 2 > 6 && (tmp[0] | 32) == 'l' && (tmp[1] | 32) == 'o' && (tmp[2] | 32) == 'c' && (tmp[3] | 32) == 'a' &&
         (tmp[4] | 32) == 'l' && tmp[5] == '\\')          /* "Local\" is this single session's namespace: "x" == "Local\x" */
-        return utf16_to_utf8(tmp + 6, u.length / 2 - 6, out, cap) < 0 ? STATUS_OBJECT_NAME_INVALID : STATUS_SUCCESS;
-    return utf16_to_utf8(tmp, u.length / 2, out, cap) < 0 ? STATUS_OBJECT_NAME_INVALID : STATUS_SUCCESS;
+    { if(utf16_to_utf8(tmp+6,u.length/2-6,out,cap)<0)return STATUS_OBJECT_NAME_INVALID; }
+    else if(utf16_to_utf8(tmp,u.length/2,out,cap)<0)return STATUS_OBJECT_NAME_INVALID;
+    return shz_auth_object_name(p,out,cap);
 }
 
 static int32_t give_handle(process_t *p, kobject_t *o, uint64_t user_ptr, uint32_t access)
@@ -58,7 +60,12 @@ static kobject_t *object_for_handle_access(process_t *p,uint64_t h,uint32_t *acc
     if(h==CURRENT_PROCESS_HANDLE){if(access)*access=0x1fffffu;ob_ref(p->object);*status=STATUS_SUCCESS;return p->object;}
     if(h==CURRENT_THREAD_HANDLE){if(access)*access=0x1fffffu;ob_ref(thread_current()->object);*status=STATUS_SUCCESS;return thread_current()->object;}
     *status=handle_ref(p,h,0,&o,access);
-    return *status?0:o;
+    if (*status) return 0;
+    if ((o->type==OB_PROCESS&&!shz_auth_process_access(p,o->u.proc.p)) ||
+        (o->type==OB_THREAD&&!shz_auth_thread_access(p,o->u.thr.pid))) {
+        ob_deref(o); *status=STATUS_ACCESS_DENIED; return 0;
+    }
+    return o;
 }
 static kobject_t *object_for_wait(process_t *p,uint64_t h,int32_t *status)
 {
@@ -305,6 +312,10 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
             /* Apply the same current-descriptor policy as the IPC route. */
             if (access & 0x02000000u) access = granted | (access & ~0x02000000u);
             st = ipc_section_duplicate_access(o, granted, &access);
+        }
+        if(!st&&o->type!=OB_SECTION&&!(options&2)) {
+            if(access&0x02000000u)access=(access&~0x02000000u)|granted;
+            if(access&~granted)st=STATUS_ACCESS_DENIED;
         }
         if (!st) st = give_handle(p, o, a4, access);
         else ob_deref(o);

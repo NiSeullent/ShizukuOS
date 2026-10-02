@@ -1,17 +1,18 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * advapi32.dll: access tokens, privileges, impersonation, AccessCheck and account-name lookup.
  *
- * Kernel64 has one interactive user (ntreg.h SHZ_USER_SID_A, name SHZ_USER_NAME_W) in logon session 1 at medium
- * integrity, without administrator rights. Every process has a primary token (kernel64/sysk32_obj.c) that describes
- * exactly that identity; this module renders it in the Windows information classes: user, groups (Everyone, Local,
- * Console Logon, Interactive, Authenticated Users, This Organization, Users, the logon SID, the integrity label),
- * the standard-user privileges (SeShutdown, SeChangeNotify [enabled], SeUndock, SeIncreaseWorkingSet, SeTimeZone),
- * owner, primary group, default DACL, statistics, elevation (not elevated, default type, no linked token), session 1.
- * Integrity can be lowered (SetTokenInformation(TokenIntegrityLevel)), privileges enabled/disabled among those held.
+ * Kernel64 binds account subjects to fresh process tokens. This module renders
+ * each queried token's authentication ID, integrity, session and elevation.
+ * Before enrollment the legacy anonymous token retains ntreg.h's user RID1001;
+ * after enrollment it uses RID0, distinct from account UID1001. Account names,
+ * groups and the five standard-user privileges remain a limited compatibility
+ * model; these helpers do not grant kernel account roles or administrator rights.
  *
  * What the kernel does not have is refused explicitly: restricted tokens (CreateRestrictedToken), AppContainer tokens,
  * CreateProcessAsUser with a token different from the caller's. AccessCheck evaluates a descriptor against a token as
- * Windows does (it is pure computation); Kernel64 itself performs no access checks on its objects.
+ * a pure descriptor computation using the requested token. Kernel64's separate
+ * account admission hooks enforce supported process, file and device routes;
+ * this module does not establish complete NT DACL or native Windows98 enforcement.
  */
 #define _ADVAPI32_
 #include "nt.h"
@@ -21,6 +22,7 @@
 #include <securitybaseapi.h>
 #include <aclapi.h>
 #include "sec_int.h"
+#include "../../../abi/shz_auth.h"
 
 /* ---------------------------------------------------------------- diagnostics */
 BOOL sec_unsupported(const char *fn, const char *what, DWORD err)
@@ -43,25 +45,53 @@ BOOL sec_unsupported(const char *fn, const char *what, DWORD err)
 }
 
 /* ---------------------------------------------------------------- the identity */
-static BYTE user_sid_buf[SECURITY_MAX_SID_SIZE], group_sid_buf[SECURITY_MAX_SID_SIZE];
-static volatile LONG ident_ready;
+/* Immutable records preserve the existing helper's static-storage lifetime.
+ * No caller identity is cached or published through a shared mutable SID. */
+typedef struct { BYTE revision,count; SID_IDENTIFIER_AUTHORITY authority; DWORD sub[5]; } account_sid;
+#define ACCOUNT_SID(rid) {SID_REVISION,5,{{0,0,0,0,0,5}},{21,2210311251u,3305482031u,1094512843u,(rid)}}
+static const account_sid anonymous_sid=ACCOUNT_SID(0),bootstrap_sid=ACCOUNT_SID(MAXDWORD),primary_group_sid=ACCOUNT_SID(513);
+static const account_sid account_sids[]={
+    ACCOUNT_SID(1000),ACCOUNT_SID(1001),ACCOUNT_SID(1002),ACCOUNT_SID(1003),
+    ACCOUNT_SID(1004),ACCOUNT_SID(1005),ACCOUNT_SID(1006),ACCOUNT_SID(1007),
+    ACCOUNT_SID(1008),ACCOUNT_SID(1009),ACCOUNT_SID(1010),ACCOUNT_SID(1011),
+    ACCOUNT_SID(1012),ACCOUNT_SID(1013),ACCOUNT_SID(1014),ACCOUNT_SID(1015)
+};
+_Static_assert(sizeof(account_sid)==28,"machine-domain SID layout");
+_Static_assert(sizeof account_sids/sizeof *account_sids==SHZ_ACCOUNT_LIMIT,"current account SID storage bound");
+#undef ACCOUNT_SID
 
-static void ident_init(void)
+static DWORD token_user_rid(const shz_token_info *t)
 {
-    if (ident_ready) return;
-    {
-        PSID s = 0;
-        if (ConvertStringSidToSidW(SHZ_USER_SID_W, &s)) {
-            memcpy(user_sid_buf, s, GetLengthSid(s));
-            memcpy(group_sid_buf, s, GetLengthSid(s));
-            *GetSidSubAuthority((PSID)group_sid_buf, *GetSidSubAuthorityCount((PSID)group_sid_buf) - 1) = 513;   /* "None" */
-            LocalFree(s);
-        }
+    DWORD uid=(DWORD)(t->auth_id>>32);
+    if(uid)return uid;
+    if(t->auth_id==0x4e7) {
+        shz_auth_reply reply={0};
+        if(!NtShzToken(SHZ_AUTH_QUERY,0,sizeof reply,(ULONG_PTR)&reply)&&
+           reply.version==SHZ_AUTH_VERSION&&!reply.reserved&&!reply.accounts)return 1001;
     }
-    ident_ready = 1;
+    return 0;       /* Unknown authority/identity cannot become account UID1001. */
 }
-PSID sec_user_sid(void) { ident_init(); return (PSID)user_sid_buf; }
-PSID sec_primary_group_sid(void) { ident_init(); return (PSID)group_sid_buf; }
+
+static void token_user_sid(const shz_token_info *t,BYTE *out)
+{
+    account_sid s=anonymous_sid;
+    s.sub[4]=token_user_rid(t);
+    memcpy(out,&s,sizeof s);
+}
+
+PSID sec_user_sid(void)
+{
+    shz_token_info t;HANDLE h=0;DWORD uid=0;
+    if(!NtOpenProcessToken(CURRENT_PROCESS,TOKEN_QUERY,&h)) {
+        NTSTATUS st=NtShzToken(SHZ_TOK_QUERY,(ULONG_PTR)h,(ULONG_PTR)&t,sizeof t);
+        NtClose(h);
+        if(!st)uid=token_user_rid(&t);
+    }
+    if(uid==MAXDWORD)return (PSID)&bootstrap_sid;
+    if(uid>=1000&&uid-1000<SHZ_ACCOUNT_LIMIT)return (PSID)&account_sids[uid-1000];
+    return (PSID)&anonymous_sid;
+}
+PSID sec_primary_group_sid(void) { return (PSID)&primary_group_sid; }
 
 typedef struct { BYTE auth; BYTE count; DWORD sub[2]; DWORD attrs; } group_def;
 #define GRP_STD (SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED)
@@ -200,7 +230,9 @@ DLLAPI BOOL WINAPI GetTokenInformation(HANDLE token, TOKEN_INFORMATION_CLASS cls
     if (!token_info(token, &t)) return FALSE;
     switch (cls) {
     case TokenUser: case TokenOwner: case TokenPrimaryGroup: {
-        const PSID s = cls == TokenPrimaryGroup ? sec_primary_group_sid() : sec_user_sid();
+        PSID s = (PSID)sid;
+        if(cls==TokenPrimaryGroup)memcpy(sid,sec_primary_group_sid(),sizeof primary_group_sid);
+        else token_user_sid(&t,sid);
         if (cls == TokenUser) {
             TOKEN_USER *u = oreserve(&o, sizeof *u, 8);
             PSID p = oput_sid(&o, s);
@@ -249,7 +281,8 @@ DLLAPI BOOL WINAPI GetTokenInformation(HANDLE token, TOKEN_INFORMATION_CLASS cls
         label_sid(0, sys);
         sys[7] = 5; ((SID *)sys)->SubAuthority[0] = 18;                   /* S-1-5-18 SYSTEM */
         InitializeAcl(acl, sizeof aclbuf, ACL_REVISION);
-        sec_add_simple_ace(acl, ACCESS_ALLOWED_ACE_TYPE, 0, GENERIC_ALL, sec_user_sid(), MAXDWORD);
+        token_user_sid(&t,sid);
+        sec_add_simple_ace(acl, ACCESS_ALLOWED_ACE_TYPE, 0, GENERIC_ALL, (PSID)sid, MAXDWORD);
         sec_add_simple_ace(acl, ACCESS_ALLOWED_ACE_TYPE, 0, GENERIC_ALL, (PSID)sys, MAXDWORD);
         acl->AclSize = (WORD)sec_acl_used(acl);
         p = oreserve(&o, acl->AclSize, 4);
@@ -289,7 +322,8 @@ DLLAPI BOOL WINAPI GetTokenInformation(HANDLE token, TOKEN_INFORMATION_CLASS cls
     case TokenLinkedToken:
         shz_set_last_error(ERROR_NO_SUCH_LOGON_SESSION);                  /* not a split (UAC) token */
         return FALSE;
-    case TokenElevation: case TokenHasRestrictions: case TokenVirtualizationAllowed: case TokenVirtualizationEnabled:
+    case TokenElevation: {DWORD *v=oreserve(&o,4,4);if(v)*v=t.elevation_type==2&&t.integrity_rid>=0x3000;break;}
+    case TokenHasRestrictions: case TokenVirtualizationAllowed: case TokenVirtualizationEnabled:
     case TokenUIAccess: case TokenIsAppContainer: case TokenAppContainerNumber: case TokenIsRestricted: {
         DWORD *v = oreserve(&o, 4, 4);
         if (v) *v = 0;
@@ -464,7 +498,8 @@ static BOOL token_has_sid(const shz_token_info *t, PSID sid)
 {
     BYTE buf[SECURITY_MAX_SID_SIZE];
     unsigned i;
-    if (EqualSid(sid, sec_user_sid())) return TRUE;
+    token_user_sid(t,buf);
+    if (EqualSid(sid, (PSID)buf)) return TRUE;
     for (i = 0; i < NGROUPS; ++i) { group_sid(i, t, buf); if (EqualSid(sid, (PSID)buf)) return TRUE; }
     return FALSE;
 }
@@ -516,7 +551,7 @@ static BOOL impersonate_copy(HANDLE token, SECURITY_IMPERSONATION_LEVEL level)
 {
     HANDLE dup = 0;
     BOOL ok;
-    if (!DuplicateTokenEx(token, TOKEN_ALL_ACCESS, 0, level, TokenImpersonation, &dup)) return FALSE;
+    if (!DuplicateTokenEx(token, TOKEN_IMPERSONATE | TOKEN_QUERY, 0, level, TokenImpersonation, &dup)) return FALSE;
     ok = set_thread_token(0, dup);
     NtClose(dup);
     return ok;
@@ -526,7 +561,7 @@ DLLAPI BOOL WINAPI ImpersonateSelf(SECURITY_IMPERSONATION_LEVEL level)
 {
     HANDLE tok = 0;
     BOOL ok;
-    if (!OpenProcessToken(CURRENT_PROCESS, TOKEN_DUPLICATE, &tok)) return FALSE;
+    if (!OpenProcessToken(CURRENT_PROCESS, TOKEN_DUPLICATE | TOKEN_IMPERSONATE | TOKEN_QUERY, &tok)) return FALSE;
     ok = impersonate_copy(tok, level);
     NtClose(tok);
     return ok;
@@ -540,8 +575,8 @@ DLLAPI BOOL WINAPI ImpersonateLoggedOnUser(HANDLE token)
     return impersonate_copy(token, SecurityImpersonation);
 }
 
-/* The client of a named pipe is a process of the same (only) user: its token is duplicated for impersonation, as the
- * server would get it on Windows (at SecurityImpersonation). */
+/* Duplicate a queryable client's admitted token. Activated account policy may
+ * reject pipe use; this helper does not bypass that kernel admission. */
 DLLAPI BOOL WINAPI ImpersonateNamedPipeClient(HANDLE pipe)
 {
     ULONG pid = 0;
@@ -550,7 +585,7 @@ DLLAPI BOOL WINAPI ImpersonateNamedPipeClient(HANDLE pipe)
     if (!GetNamedPipeClientProcessId(pipe, &pid)) return FALSE;
     proc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
     if (!proc) return FALSE;
-    ok = OpenProcessToken(proc, TOKEN_DUPLICATE, &tok) && impersonate_copy(tok, SecurityImpersonation);
+    ok = OpenProcessToken(proc, TOKEN_DUPLICATE | TOKEN_IMPERSONATE | TOKEN_QUERY, &tok) && impersonate_copy(tok, SecurityImpersonation);
     if (tok) NtClose(tok);
     NtClose(proc);
     return ok;
@@ -620,11 +655,25 @@ DLLAPI BOOL WINAPI AccessCheck(PSECURITY_DESCRIPTOR psd, HANDLE token, DWORD des
 DLLAPI BOOL WINAPI CreateProcessAsUserW(HANDLE token, LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta,
                                         BOOL inherit, DWORD flags, LPVOID env, LPCWSTR dir, LPSTARTUPINFOW si, LPPROCESS_INFORMATION pi)
 {
-    shz_token_info t;
+    shz_token_info t,current;
+    HANDLE primary=0;
+    BOOL queried;
     if (!token_info(token, &t)) return FALSE;
     if (t.type != TokenPrimary) { shz_set_last_error(ERROR_BAD_TOKEN_TYPE); return FALSE; }
-    if (t.integrity_rid != 0x2000 || t.session != 1)                        /* a child always gets the default token */
-        return sec_unsupported("CreateProcessAsUserW", "a token that differs from the default one", ERROR_NOT_SUPPORTED);
+    if(!nt_ok(NtOpenProcessToken(CURRENT_PROCESS,TOKEN_QUERY,&primary)))return FALSE;
+    queried=token_info(primary,&current);
+    NtClose(primary);
+    if(!queried)return FALSE;
+    if(current.type!=TokenPrimary||t.auth_id!=current.auth_id||t.integrity_rid!=current.integrity_rid||
+       t.session!=current.session||t.flags!=current.flags) {
+        shz_set_last_error(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+    /* The loader inherits its caller's account, never adopts the supplied token.
+     * Fresh child tokens have default privilege flags; nondefault anonymous
+     * metadata and modified privileges cannot be represented by this route. */
+    if(t.flags||(!(t.auth_id>>32)&&(t.auth_id!=0x4e7||t.integrity_rid!=0x2000||t.session!=1)))
+        return sec_unsupported("CreateProcessAsUserW", "nondefault anonymous token or modified privilege flags", ERROR_NOT_SUPPORTED);
     return CreateProcessW(app, cmd, pa, ta, inherit, flags, env, dir, si, pi);
 }
 
@@ -654,9 +703,10 @@ PSID sec_sid_for_name(LPCWSTR name)
     for (; *name; ++name) if (*name == '\\') bs = name + 1;                  /* DOMAIN\name -> name */
     name = bs;
     if (wieq(name, L"CURRENT_USER") || wieq(name, SHZ_USER_NAME_W)) {
-        const DWORD n = GetLengthSid(sec_user_sid());
+        PSID current=sec_user_sid();
+        const DWORD n = GetLengthSid(current);
         s = LocalAlloc(LMEM_FIXED, n);
-        if (s) memcpy(s, sec_user_sid(), n);
+        if (s) memcpy(s, current, n);
         return s;
     }
     for (i = 0; i < sizeof accounts / sizeof accounts[0]; ++i)

@@ -3,6 +3,7 @@
  * semantics).
  */
 #include "fs.h"
+#include "auth_policy.h"
 
 struct ustr { uint16_t length, maxlen; uint32_t pad; uint64_t buffer; };
 struct objattr { uint32_t length, pad; uint64_t root, name; uint32_t attributes, pad2; uint64_t sd, sqos; };
@@ -226,6 +227,7 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
         set_iosb(p, a4, STATUS_SUCCESS, IO_OPENED);
         return STATUS_SUCCESS;
     }
+    if(!shz_auth_path_access(p,path,(a2 & (GENERIC_WRITE|GENERIC_ALL|DELETE_ACCESS|FILE_WRITE_DATA|FILE_APPEND_DATA|FILE_WRITE_ATTRIBUTES|0x40000u|0x80000u))||disposition!=FILE_OPEN||(options&FILE_DELETE_ON_CLOSE)))return STATUS_ACCESS_DENIED;
     {   /* NT driver host: a "\Device\..." / "\??\..." / "\DosDevices\..." name opens a device (IRP_MJ_CREATE) */
         int32_t dst = ntdrv_open_device_file(p, path, (uint32_t)a2, a1, a4);
         if (dst != (int32_t)0x7fff0002) return dst;
@@ -596,6 +598,7 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, 
         chars = *(uint32_t *)(hdr + 16) / 2;
         if (chars >= 260 || len < 20 + chars * 2ull || copy_from_user(p, w, buf + 20, chars * 2ull)) return STATUS_INVALID_PARAMETER;
         if (utf16_to_utf8(w, chars, newpath, sizeof newpath) < 0) return STATUS_OBJECT_NAME_INVALID;
+        if(!shz_auth_path_access(p,newpath,1))return STATUS_ACCESS_DENIED;
         {                                                /* the target directory must be on the file's volume (a disk volume refuses renames above) */
             char dpath[300];
             size_t cut = strlen(newpath);
@@ -869,6 +872,11 @@ int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1
                          int *handled)
 {
     *handled = 1;
+    if(num==SYS_NtReadFile||num==SYS_NtWriteFile||num==SYS_NtSetInformationFile||num==SYS_NtQueryInformationFile||num==SYS_NtQueryDirectoryFile||num==SYS_NtFlushBuffersFile) {
+        file_t *f=file_of(p,a1,0);
+        const int write=num==SYS_NtWriteFile||(num==SYS_NtSetInformationFile&&stack_arg(p,r,5)!=14);
+        if(f&&f->node&&!shz_auth_node_access(p,f->node,write))return STATUS_ACCESS_DENIED;
+    }
     if (num == SYS_NtReadFile || num == SYS_NtWriteFile) {      /* device handle? -> IRP path */
         int32_t dst;
         if (ntdrv_file_dispatch(p, r, num, a1, &dst)) return dst;

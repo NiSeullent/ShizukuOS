@@ -59,6 +59,7 @@
  * Modules mapped by a failed attempt are unmapped again, so a later attempt starts from a clean state.
  */
 #include "fs.h"
+#include "auth_policy.h"
 #include "kwin.h"
 #include "apiset.h"
 #include "ldr_lifetime.h"
@@ -1066,6 +1067,7 @@ static int32_t load_module_file(ldr_ctx_t *c, const char *name, fsnode_t *node, 
     module_t *m = kzalloc(sizeof *m);
     int32_t st;
     int rc;
+    if(!shz_auth_node_access(p,node,0)){kfree(m);return STATUS_ACCESS_DENIED;}
     if (!m) return fail(c, STATUS_NO_MEMORY, name, "", 0, "", "out of kernel memory");
     scopy(m->name, sizeof m->name, name);
     scopy(m->path, sizeof m->path, path);
@@ -1508,7 +1510,8 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
     }
     p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
     p->console_sink_gen = parent ? parent->console_sink_gen : 0;
-    st = ldr_create_process_body(parent, image_path, cmdline, cwd, ex, p, out_thread);
+    st = shz_auth_inherit(parent,p);
+    if (!st) st = ldr_create_process_body(parent, image_path, cmdline, cwd, ex, p, out_thread);
     if (st) {
         process_terminate(p, st, 0);
         p->parent_pid = 0;                                          /* the creation reference is dropped right here */
@@ -1517,6 +1520,7 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
         ob_deref(p->object);                                        /* frees the slot (ipc_object_free) */
         return st;
     }
+    shz_auth_process_ready(p);
     if (out_proc) *out_proc = p;
     return STATUS_SUCCESS;
 }

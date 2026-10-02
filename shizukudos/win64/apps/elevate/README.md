@@ -1,0 +1,7 @@
+# elevate and account commands
+
+Managed Kernel64 account/elevation companion. `elevate ADMIN IMAGE [COMMAND]` authenticates in a masked dialog and starts a fresh elevated child through the kernel. `--login USER IMAGE` starts a normal account session, `--sandbox IMAGE` creates a low-integrity child, and `--status` shows the actual subject and backend status. Passwords are never command arguments. Each launch authenticates separately; there is no reusable elevation ticket.
+
+Initial `--enroll USER` is only granted to the fixed kernel-launched enrollment program selected by the explicit development boot option `shz.accounts=setup`. Ordinary programs, including a manually launched copy of elevate.exe, cannot bootstrap enrollment. Only a high-integrity administrator may `--register USER`. The initial store is volatile and requires enrollment again after reboot; no persistent security guarantee is made.
+
+This PE64 companion requires the updated Kernel64 runtime. It cannot execute directly under native Windows98. Native Windows98 authentication needs the NTW64 bridge plus protected credential UI and secret-storage integration. The masked dialog is not a verified secure desktop. Shared native Windows98 memory, firmware and device DMA remain outside this backend's process/profile gates. Do not describe this as full Windows UAC or NT account isolation.

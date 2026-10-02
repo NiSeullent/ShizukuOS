@@ -4,6 +4,7 @@
  * arguments; the semantics are the kernel's.
  */
 #include "ntdll_int.h"
+#include "../../abi/shz_token_ops.h"
 
 /* ---------------------------------------------------------------- tokens */
 NTSTATUS NTAPI NtOpenProcessTokenEx(HANDLE process, ACCESS_MASK access, ULONG attrs, PHANDLE token)
@@ -30,9 +31,11 @@ NTSTATUS NTAPI NtDuplicateToken(HANDLE token, ACCESS_MASK access, SHZ_OBJECT_ATT
                                 PHANDLE out)
 {
     ULONG level = 0;
-    (void)access; (void)effective_only;
+    if (effective_only || (oa && oa->SecurityDescriptor)) return (NTSTATUS)0xc00000bb;
     if (oa && oa->SecurityQualityOfService) level = ((const ULONG *)oa->SecurityQualityOfService)[1];
-    return NtShzToken(SHZ_TOK_DUPLICATE, (ULONG_PTR)token, type | (level << 8), (ULONG_PTR)out);
+    if ((type != 1 && type != 2) || level > 3) return (NTSTATUS)0xc000000d;
+    return NtShzToken(SHZ_TOKEN_OP_DUPLICATE_EX, (ULONG_PTR)token,
+                      (ULONG_PTR)shz_token_duplicate_pack(access, type, level), (ULONG_PTR)out);
 }
 
 /* ---------------------------------------------------------------- whole-process suspension (kernel64/sysk32_proc.c) */

@@ -9,6 +9,7 @@
  * procedure that ignores WM_PAINT is asked again, exactly like the real thing.
  */
 #include "gfx.h"
+#include "gfx_auth.h"
 
 #define WM_QUIT 0x0012u
 #define WM_PAINT 0x000fu
@@ -276,6 +277,7 @@ static int32_t sys_sendmessage(process_t *cur, uint64_t arg)
     if (s.id == 0) {
         w = wm_lookup(s.hwnd);
         if (!w) { st = STATUS_INVALID_HANDLE; goto out; }
+        if(!gfx_auth_window(cur,w)){st=STATUS_ACCESS_DENIED;goto out;}
         if (w->q == q) { s.result_kind = SHZ_SEND_SAME_THREAD; s.wndproc = w->wndproc; goto out; }
         if (w->pid != (uint32_t)cur->pid) { st = STATUS_NOT_SUPPORTED; goto out; }      /* no cross-process marshalling */
         if (gq_thread_dead(w->q)) { s.result_kind = SHZ_SEND_FAILED; s.result = 0; goto out; }
@@ -745,7 +747,6 @@ static int32_t sys_postmessage(process_t *cur, uint64_t hwnd, uint64_t msg, uint
     gqueue_t *q;
     gwin_t *w;
     int32_t st;
-    (void)cur;
     mutex_lock(&gfx_lock);
     if (!hwnd) {
         q = gq_current(1);
@@ -756,6 +757,7 @@ static int32_t sys_postmessage(process_t *cur, uint64_t hwnd, uint64_t msg, uint
         w = wm_lookup(hwnd);
         if (!w || !w->q) st = STATUS_INVALID_HANDLE;
         else if (gq_thread_dead(w->q)) st = STATUS_INVALID_HANDLE;
+        else if(!gfx_auth_window(cur,w))st=STATUS_ACCESS_DENIED;
         else st = post_to(w->q, hwnd, (uint32_t)msg, wparam, (int64_t)lparam);
     }
     mutex_unlock(&gfx_lock);
@@ -783,6 +785,7 @@ static int32_t sys_threadop(process_t *cur, uint64_t arg)
         for (i = 0; i < GFX_MAX_QUEUES; ++i)
             if (g_queues[i].used && g_queues[i].thread->tid == t.a && !gq_thread_dead(&g_queues[i])) q = &g_queues[i];
         if (!q) { st = STATUS_INVALID_CID; break; }
+        if(!gfx_auth_queue(cur,q)){st=STATUS_ACCESS_DENIED;break;}
         st = post_to(q, 0, (uint32_t)t.b, t.c, (int64_t)t.d);
         break;
     case SHZ_TOP_QUEUESTATUS: {

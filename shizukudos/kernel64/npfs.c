@@ -18,6 +18,7 @@
  * gone drain what is buffered, then fail with STATUS_PIPE_BROKEN; writes then fail with STATUS_PIPE_CLOSING.
  */
 #include "ipc.h"
+#include "auth_policy.h"
 
 #define FSCTL_PIPE_DISCONNECT 0x110004u
 #define FSCTL_PIPE_LISTEN 0x110008u
@@ -464,6 +465,7 @@ static int32_t sys_create_pipe(process_t *p, struct regs *r, uint64_t ph, uint64
     n = pipe_name_of(w, chars, &nm);
     if (n <= 0) return STATUS_OBJECT_NAME_INVALID;
     if (n >= PIPE_NAME_MAX) return STATUS_OBJECT_NAME_INVALID;
+    if(!shz_auth_special_allowed(p,OB_NPIPE))return STATUS_NOT_SUPPORTED;
     if (type > 1 || read_mode > 1 || completion > 1 || (read_mode == FILE_PIPE_MESSAGE && type != FILE_PIPE_MESSAGE))
         return STATUS_INVALID_PARAMETER;
     if (!max_inst) return STATUS_INVALID_PARAMETER;
@@ -525,6 +527,7 @@ static int32_t sys_create_pipe(process_t *p, struct regs *r, uint64_t ph, uint64
 static int32_t open_client(process_t *p, struct regs *r, uint32_t num, uint64_t ph, uint64_t access, uint64_t oa, uint64_t piosb,
                            const uint16_t *nm, int n)
 {
+    if(!shz_auth_special_allowed(p,OB_NPIPE))return STATUS_NOT_SUPPORTED;
     const uint32_t options = (uint32_t)stack_arg(p, r, num == SYS_NtOpenFile ? 6 : 9);
     struct ipc_objattr a;
     npipe_t *pp;

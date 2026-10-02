@@ -6,6 +6,7 @@
  * the object's acquire semantics (auto-reset event, mutant ownership, semaphore count).
  */
 #include "proc_internal.h"
+#include "auth_policy.h"
 
 #define MAX_WAIT 64
 typedef struct waitdesc {
@@ -118,6 +119,7 @@ kobject_t *handle_lookup(process_t *p, uint64_t handle, uint32_t type)
     if (handle & 3 || !handle || handle > (uint64_t)p->handle_cap * 4ull) return 0;
     o = p->handles[handle / 4 - 1].obj;
     if (!o || (type && o->type != type)) return 0;
+    if(!shz_auth_handle_allowed(p,o))return 0;
     return o;
 }
 
@@ -129,6 +131,7 @@ int32_t handle_ref(process_t *p, uint64_t handle, uint32_t type, kobject_t **out
         o = p->handles[handle / 4 - 1].obj;
     if (!o) { irq_restore(f); return STATUS_INVALID_HANDLE; }
     if (type && o->type != type) { irq_restore(f); return STATUS_OBJECT_TYPE_MISMATCH; }
+    if(!shz_auth_handle_allowed(p,o)){irq_restore(f);return STATUS_ACCESS_DENIED;}
     ++o->refs;
     if (access) *access = p->handles[handle / 4 - 1].access;
     irq_restore(f);
