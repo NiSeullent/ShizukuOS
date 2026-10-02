@@ -12,6 +12,7 @@
 #include <windows.h>
 #include <bcrypt.h>
 #include "plat.h"                       /* before shzcrt.h, whose malloc/free macros would rename plat_t members */
+#include "native_install.h"
 #include "blkio.h"
 #include "interactive_ui.h"
 #include "shzcrt.h"
@@ -96,6 +97,67 @@ static uint64_t now(void *c)
     return t < 116444736000000000ull ? 0 : (t - 116444736000000000ull) / 10000000ull;
 }
 
+/* Development entry only. The kernel storage-authority adapter is not yet
+ * supplied. NULL native ops refuse before file opens, device enumeration or
+ * writes. Final importer/UI will supply its own admitted pin and reviewed
+ * whole tuple; command-line text cannot provide whole-device authority. */
+static int native_cli(const plat_t *p, int argc, char **argv)
+{
+    native_setup_request_v1_t q;
+    native_setup_result_v1_t r;
+    unsigned seen = 0;
+    int i;
+    memset(&q, 0, sizeof q);
+    q.version = NATIVE_SETUP_VERSION; q.bytes = sizeof q;
+    q.reviewed_target.disk.sector_size = 512;
+    if (argc < 3 || strlen(argv[2]) > NATIVE_SETUP_PATH_MAX) goto bad;
+    q.manifest_path = argv[2];
+    for (i = 3; i < argc; i += 2) {
+        const char *s;
+        unsigned bit, j;
+        if (i + 1 >= argc) goto bad;
+        s = argv[i + 1];
+        if (!strcmp(argv[i], "/sim")) {
+            bit = 1; if (!*s || strlen(s) > NATIVE_SETUP_PATH_MAX) goto bad; q.sim_path = s;
+        } else if (!strcmp(argv[i], "/manifest-sha256")) {
+            bit = 2; if (strlen(s) != 64) goto bad;
+            for (j = 0; j < 32; ++j) {
+                unsigned a, b; char x = s[2*j], y = s[2*j+1];
+                if (x >= '0' && x <= '9') a = (unsigned)(x-'0');
+                else if (x >= 'a' && x <= 'f') a = (unsigned)(x-'a'+10); else goto bad;
+                if (y >= '0' && y <= '9') b = (unsigned)(y-'0');
+                else if (y >= 'a' && y <= 'f') b = (unsigned)(y-'a'+10); else goto bad;
+                q.admitted_manifest_sha256[j] = (uint8_t)(a*16+b);
+            }
+        } else if (!strcmp(argv[i], "/target")) {
+            bit = 4; if (!*s || strlen(s) >= sizeof q.reviewed_target.disk.name) goto bad;
+            strcpy(q.reviewed_target.disk.name, s);
+        } else if (!strcmp(argv[i], "/serial")) {
+            bit = 8; if (!*s || strlen(s) >= sizeof q.reviewed_target.disk.serial) goto bad;
+            strcpy(q.reviewed_target.disk.serial, s);
+        } else if (!strcmp(argv[i], "/sectors")) {
+            uint64_t n = 0; bit = 16; if (!*s) goto bad;
+            for (j = 0; s[j]; ++j) {
+                unsigned d;
+                if (s[j] < '0' || s[j] > '9') goto bad;
+                d = (unsigned)(s[j]-'0'); if (n > (UINT64_MAX-d)/10) goto bad; n = n*10+d;
+            }
+            if (!n || n > UINT64_MAX/512) goto bad;
+            q.reviewed_target.disk.sectors = n;
+        } else if (!strcmp(argv[i], "/confirm")) {
+            bit = 32; if (strcmp(s, "ERASE")) goto bad; q.confirmation = s;
+        } else goto bad;
+        if (seen & bit) goto bad;
+        seen |= bit;
+    }
+    if (seen != 63) goto bad;
+    setup_run_native(p, 0, &q, &r);
+    return r.ok ? 0 : 1;
+bad:
+    shz_puts("NATIVE-SETUP-RESULT: FAIL invalid explicit native command line (no disk writes)\n");
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     plat_t P = {0, out, al, fr, f_open, f_read, f_close, sha_begin, sha_update, sha_end, rnd, now,
@@ -103,6 +165,7 @@ int main(int argc, char **argv)
     const char *answer = "C:\\SHZ\\SETUP\\SHZSETUP.INI", *payload = "C:\\SHZ\\SETUP\\PAYLOAD";
     setup_result_t r;
     int i, unattended = 0;
+    if (argc > 1 && !strcmp(argv[1], "/native")) return native_cli(&P, argc, argv);
     interactive = 1;
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "/unattend") && i + 1 < argc) { answer = argv[++i]; unattended = 1; }
