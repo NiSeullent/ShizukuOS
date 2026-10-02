@@ -4,6 +4,9 @@
 #define SHZ_CPU_ARCH_SCHED_COHORT 1
 #include "k64.h"
 #include "smp_boot.h"
+#define SHZ_CPU_ARCH_NMI_BYTES 8192u
+#define SHZ_CPU_ARCH_BYTES 16384u
+#define SHZ_CPU_ARCH_PAGES (SHZ_CPU_ARCH_BYTES / PAGE_SIZE)
 typedef struct __attribute__((packed)) { uint16_t limit; uint64_t base; } shz_cpu_dtr_t;
 typedef struct __attribute__((packed)) {
     uint16_t lo,selector; uint8_t ist,type; uint16_t mid; uint32_t hi,zero;
@@ -14,9 +17,11 @@ typedef struct __attribute__((packed)) {
 } shz_cpu_tss_t;
 typedef struct {
     shz_cpu_gate_t idt[256]; uint64_t gdt[7]; shz_cpu_tss_t tss;
+    uint8_t nmi_stack[SHZ_CPU_ARCH_NMI_BYTES] __attribute__((aligned(16)));
 } shz_cpu_arch_tables_t;
 _Static_assert(sizeof(shz_cpu_gate_t)==16 && sizeof(shz_cpu_tss_t)==104,"x86 descriptor formats");
-_Static_assert(sizeof(shz_cpu_arch_tables_t)<=8192,"private AP tables fit two PMM pages");
+_Static_assert(sizeof(shz_cpu_arch_tables_t)<=SHZ_CPU_ARCH_BYTES,"private AP tables and NMI stack fit four PMM pages");
+_Static_assert(SHZ_CPU_ARCH_PAGES==4 && offsetof(shz_cpu_arch_tables_t,nmi_stack)%16==0,"private NMI stack resource and alignment");
 int shz_cpu_arch_build_tables(shz_cpu_arch_tables_t *,uint64_t boot,uint64_t irq,uint64_t df);
 int shz_cpu_arch_allocate(unsigned count);
 int shz_cpu_arch_enter(unsigned cpu);
