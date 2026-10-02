@@ -30,6 +30,8 @@
 #define BOOTINI_PATH_MAX 128            /* including the terminating NUL */
 #define BOOTINI_DEFAULT_CSM_PATH "\\EFI\\SHIZUKU\\CSMWRAP.EFI"
 #define BOOTINI_MENU_TIMEOUT_MAX 30
+#define BOOTINI_WIN98_VGA 1
+#define BOOTINI_WIN98_PERSISTENCE 1
 
 enum bootini_mode { BOOT_MODE_AUTO = 0, BOOT_MODE_SUPERVISOR = 1, BOOT_MODE_CSM = 2, BOOT_MODE_KERNEL64 = 3,
                     BOOT_MODE_INSTALL = 4 };
@@ -39,7 +41,11 @@ typedef struct {
     char csm_path[BOOTINI_PATH_MAX];    /* ASCII, starts with '\' */
     int auto_kernel64;                  /* mode=auto without VMX: try Kernel64 direct boot before CSM */
     int menu_timeout;                   /* seconds; 0 = no boot manager menu */
+    int win98_vga;                      /* explicit native VGA pair, default no */
+    int win98_persistence;              /* separate W98PERS.BIN, default no */
     int mode_set, csm_path_set, auto_kernel64_set, menu_timeout_set;  /* which keys the file provided */
+    int win98_vga_set;
+    int win98_persistence_set;
 } bootini_policy_t;
 
 /* Built-in policy used when BOOT.INI does not exist: mode=auto, default csm_path, auto_kernel64=no, no menu. */
