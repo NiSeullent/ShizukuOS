@@ -227,6 +227,549 @@ def encode_main_command_columns(rows):
             "command_records_encoding_roundtrip_verified": True}
 
 
+def _stale_canonical(value):
+    """Bounded strict JSON value bytes, without changing any cached value."""
+    def check(item):
+        kind = type(item)
+        if kind in (type(None), bool, int, float, str):
+            return
+        if kind is list:
+            for child in item:
+                check(child)
+            return
+        if kind is dict:
+            for key, child in item.items():
+                if type(key) is not str:
+                    raise TypeError("cached JSON object requires string keys")
+                check(child)
+            return
+        raise TypeError("cached value is not JSON")
+
+    check(value)
+    data = bytearray()
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"),
+                               ensure_ascii=True, allow_nan=False)
+    for chunk in encoder.iterencode(value):
+        if len(chunk) > LIMIT - len(data):
+            raise ValueError("cached canonical value exceeds logical profile")
+        data.extend(chunk.encode("ascii"))
+    return bytes(data)
+
+
+def _stale_cached_refusal_diagnostic(observer, base, fresh_snapshot):
+    """Pure optional enrichment; caller has already admitted its original base.
+
+    Full canonical equality alone aliases cache slots. A snapshot leader and
+    its equal member occurrence remain separately charged within a table.
+    """
+    snapshots, instabilities = [], []
+    snapshot_raw, instability_raw = [], []
+    unpinnable = False
+
+    def error_descriptor(error, reason="CACHED_VALUE_ENCODING_OR_SCHEMA_REFUSED"):
+        nonlocal unpinnable
+        unpinnable = True
+        name = type(error).__name__.encode("utf-8")[:128].decode("utf-8", errors="ignore")
+        return {"state": "UNPINNABLE", "table_index": None,
+                "error_class": name, "reason_code": reason}
+
+    def check_snapshot(value):
+        if (type(value) is not dict or set(value) != {"leader", "members", "tasks", "stable"}
+                or type(value["stable"]) is not bool or type(value["members"]) is not list
+                or type(value["tasks"]) is not list
+                or not 1 <= len(value["members"]) <= GROUP_MEMBER_LIMIT
+                or not 1 <= len(value["tasks"]) <= GROUP_TASK_LIMIT):
+            raise TypeError("cached snapshot shape refused")
+        keys = {"pid", "ppid", "startticks", "pgrp", "session", "uid", "state"}
+        for row, expected in ([(value["leader"], keys)]
+                              + [(row, keys) for row in value["members"]]
+                              + [(row, keys | {"tid"}) for row in value["tasks"]]):
+            if (type(row) is not dict or set(row) != expected
+                    or any(type(row[key]) is not int or row[key] < 0 for key in expected - {"state"})
+                    or type(row["state"]) is not str or len(row["state"]) != 1):
+                raise TypeError("cached numeric row shape refused")
+
+    def check_instability(value):
+        if (type(value) is not dict
+                or set(value) != {"scope", "total_events", "classification_counts", "events", "events_truncated"}
+                or type(value["scope"]) is not str or type(value["total_events"]) is not int
+                or value["total_events"] < 0 or type(value["classification_counts"]) is not dict
+                or type(value["events"]) is not list or len(value["events"]) > GROUP_DIAGNOSTIC_ROW_LIMIT
+                or type(value["events_truncated"]) is not bool):
+            raise TypeError("cached scan metadata shape refused")
+        if any(type(key) is not str or type(count) is not int or count < 0
+               for key, count in value["classification_counts"].items()):
+            raise TypeError("cached scan classification counts refused")
+        for event in value["events"]:
+            if (type(event) is not dict or not {"pid", "reason", "classification"} <= set(event)
+                    or not set(event) <= {"pid", "reason", "classification", "absence_exception_class", "absence_errno"}
+                    or type(event["pid"]) is not int or event["pid"] <= 0
+                    or type(event["reason"]) is not str or type(event["classification"]) is not str
+                    or ("absence_exception_class" in event and type(event["absence_exception_class"]) is not str)
+                    or ("absence_errno" in event and event["absence_errno"] is not None
+                        and type(event["absence_errno"]) is not int)):
+                raise TypeError("cached numeric event shape refused")
+
+    def add(value, table, raws, checker):
+        if value is None:
+            return {"state": "ABSENT", "table_index": None}
+        try:
+            checker(value)
+            raw = _stale_canonical(value)
+            for index, previous in enumerate(raws):
+                if previous == raw:
+                    break
+            else:
+                index = len(table)
+                copied = json.loads(raw)
+                if _stale_canonical(copied) != raw:
+                    raise ValueError("cached JSON copy canonical bytes changed")
+                table.append({"canonical_bytes": len(raw),
+                              "canonical_sha256": hashlib.sha256(raw).hexdigest(),
+                              "mode": "FULL", "value": copied})
+                raws.append(raw)
+            return {"state": "AVAILABLE", "table_index": index,
+                    "canonical_bytes": len(raw), "canonical_sha256": hashlib.sha256(raw).hexdigest()}
+        except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError) as error:
+            return error_descriptor(error)
+
+    snapshot_values = (fresh_snapshot, observer.last_scan_snapshot, observer.last_validated_snapshot)
+    snapshot_refs = {name: add(value, snapshots, snapshot_raw, check_snapshot)
+                     for name, value in zip(("fresh_snapshot", "last_scan_snapshot", "last_validated_snapshot"),
+                                            snapshot_values)}
+    scan_ref = add(observer.last_scan_instability, instabilities, instability_raw, check_instability)
+    wrapper = observer.last_validated_scan_instability
+    wrapper_metadata_ref = {"state": "ABSENT", "table_index": None}
+    if wrapper is None:
+        wrapper_ref = {"state": "ABSENT", "metadata_table_index": None}
+    else:
+        try:
+            if (type(wrapper) is not dict or set(wrapper) != {"matches_returned_snapshot", "metadata"}
+                    or type(wrapper["matches_returned_snapshot"]) is not bool):
+                raise TypeError("cached validated scan wrapper shape refused")
+            wrapper_metadata_ref = add(wrapper["metadata"], instabilities, instability_raw, check_instability)
+            raw = _stale_canonical(wrapper)
+            if wrapper_metadata_ref["state"] == "UNPINNABLE":
+                raise TypeError("cached validated scan metadata unpinnable")
+            wrapper_ref = {"state": "AVAILABLE", "canonical_bytes": len(raw),
+                           "canonical_sha256": hashlib.sha256(raw).hexdigest(),
+                           "matches_returned_snapshot": wrapper["matches_returned_snapshot"],
+                           "metadata_table_index": wrapper_metadata_ref["table_index"]}
+        except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError) as error:
+            wrapper_ref = error_descriptor(error)
+            del wrapper_ref["table_index"]
+            wrapper_ref["metadata_table_index"] = None
+            if type(wrapper) is dict and type(wrapper.get("matches_returned_snapshot")) is bool:
+                wrapper_ref["matches_returned_snapshot"] = wrapper["matches_returned_snapshot"]
+
+    def equal(left, right, raws):
+        if left["state"] != "AVAILABLE" or right["state"] != "AVAILABLE":
+            return None
+        return raws[left["table_index"]] == raws[right["table_index"]]
+
+    stored = {}
+    for key, attribute in (("completed_at_monotonic", "last_validated_completed_at"),
+                           ("pause_attempt", "last_validated_pause_attempt"),
+                           ("pause_iteration", "last_validated_pause_iteration")):
+        try:
+            value = getattr(observer, attribute)
+            if value is not None:
+                if key == "completed_at_monotonic":
+                    if type(value) not in (int, float) or not 0 <= value < float("inf"):
+                        raise TypeError("cached completion time requires a finite nonnegative scalar")
+                elif type(value) is not int or value < 0:
+                    raise TypeError("cached pause phase requires a nonnegative integer scalar")
+            stored[key] = json.loads(_stale_canonical(value))
+        except (TypeError, ValueError, OverflowError, RecursionError, UnicodeError) as error:
+            stored[key] = error_descriptor(error)
+    evidence = {
+        "schema": "owned-stale-cached-scan-evidence-6970-v1",
+        "scope": "existing_completed_cached_numeric_values_at_stale_refusal",
+        "source_labels": {"fresh_snapshot": "caller_already_structurally_validated_fresh_argument",
+                          "last_scan_snapshot": "last_actual_numeric_scan_cache",
+                          "last_validated_snapshot": "last_structurally_validated_snapshot_may_be_unstable"},
+        "snapshot_refs": snapshot_refs,
+        "instability_refs": {"last_scan_instability": scan_ref,
+                             "last_validated_scan_instability": wrapper_ref},
+        "bindings": {
+            "fresh_equals_last_scan_snapshot": equal(snapshot_refs["fresh_snapshot"], snapshot_refs["last_scan_snapshot"], snapshot_raw),
+            "fresh_equals_last_validated_snapshot": equal(snapshot_refs["fresh_snapshot"], snapshot_refs["last_validated_snapshot"], snapshot_raw),
+            "validated_metadata_equals_last_scan_instability": equal(wrapper_metadata_ref, scan_ref, instability_raw)},
+        "stored_validation": stored, "snapshot_table": snapshots, "instability_table": instabilities,
+        "complete_original_scan_event_history_verified": False,
+        "failure_instant_snapshot_verified": False, "scheduled_event_birth_or_ownership_verified": False,
+        "exit_verified": False, "reap_verified": False, "continuous_group_stop_verified": False,
+        "producer_cause_verified": False, "kernel_cause_verified": False,
+        "new_proc_read_performed_for_diagnostic": False, "retry_or_acceptance_relaxation_applied": False}
+    base_rows = base["sampled_row_count"]
+
+    def measured(candidate):
+        retained_rows = retained_events = 0
+        sampled = truncated = False
+        for entry in candidate["snapshot_table"]:
+            if entry["mode"] == "FULL":
+                retained_rows += 1 + len(entry["value"]["members"]) + len(entry["value"]["tasks"])
+            else:
+                retained_rows += len(entry["sampled_rows"])
+                sampled = True
+                truncated = truncated or entry["sampled_rows_truncated"]
+        for entry in candidate["instability_table"]:
+            if entry["mode"] == "FULL":
+                retained_events += len(entry["value"]["events"])
+            else:
+                retained_events += len(entry["events"])
+                sampled = True
+                truncated = truncated or entry["events_retention_truncated"]
+        combined = base_rows + retained_rows + retained_events
+        if combined > GROUP_DIAGNOSTIC_ROW_LIMIT:
+            return None
+        mode = "UNPINNABLE" if unpinnable else "SAMPLED" if sampled else "FULL"
+        candidate["retention"] = {"mode": mode, "base_numeric_rows": base_rows,
+                                  "snapshot_rows": retained_rows, "scan_events": retained_events,
+                                  "combined_rows_and_events": combined,
+                                  "full_cached_values_retained": not unpinnable and not sampled,
+                                  "samples_truncated": truncated, "diagnostic_bytes": 0}
+        diagnostic = {**base, "cached_scan_evidence": candidate}
+        for _ in range(32):
+            raw = _stale_canonical(diagnostic)
+            if len(raw) > GROUP_FAILURE_DIAGNOSTIC_LIMIT:
+                return None
+            if candidate["retention"]["diagnostic_bytes"] == len(raw):
+                return diagnostic
+            candidate["retention"]["diagnostic_bytes"] = len(raw)
+        return None
+
+    full = measured(evidence)
+    if full is not None:
+        return full
+    # Full pins remain; samples replace full values only in independent copies.
+    queues = []
+    for index, entry in enumerate(instabilities):
+        complete = dict(entry)
+        value = entry.pop("value")
+        entry.update(mode="SAMPLED", scope=value["scope"], total_events=value["total_events"],
+                     classification_counts=value["classification_counts"],
+                     cached_events_truncated=value["events_truncated"], cached_event_count=len(value["events"]),
+                     events=[], events_retention_truncated=bool(value["events"]))
+        queues.append(("events", index, value["events"], complete))
+    for index, entry in enumerate(snapshots):
+        complete = dict(entry)
+        value = entry.pop("value")
+        rows = [{"kind": "leader", "row": value["leader"]}]
+        rows += [{"kind": "member", "row": row} for row in value["members"]]
+        rows += [{"kind": "task", "row": row} for row in value["tasks"]]
+        entry.update(mode="SAMPLED", stable=value["stable"], member_count=len(value["members"]),
+                     task_count=len(value["tasks"]), sampled_rows=[], sampled_row_total=len(rows),
+                     sampled_rows_truncated=bool(rows))
+        queues.append(("rows", index, rows, complete))
+    # The zero-sample summaries themselves must fit without sacrificing base.
+    selected = measured(evidence)
+    if selected is None:
+        return base
+    available = GROUP_DIAGNOSTIC_ROW_LIMIT - base_rows
+    for kind, index, values, complete in queues:
+        entry = instabilities[index] if kind == "events" else snapshots[index]
+        key, flag = (("events", "events_retention_truncated") if kind == "events"
+                     else ("sampled_rows", "sampled_rows_truncated"))
+        for item in values:
+            if available == 0:
+                break
+            entry[key].append(item)
+            entry[flag] = len(entry[key]) < len(values)
+            candidate = measured(evidence)
+            if candidate is None:
+                entry[key].pop()
+                entry[flag] = len(entry[key]) < len(values)
+                break
+            available -= 1
+            selected = candidate
+        if len(entry[key]) == len(values):
+            # All occurrences were charged already; restore the exact FULL
+            # cached value only if its actual wire representation also fits.
+            sampled_entry = dict(entry)
+            entry.clear()
+            entry.update(complete)
+            candidate = measured(evidence)
+            if candidate is None:
+                entry.clear()
+                entry.update(sampled_entry)
+            else:
+                selected = candidate
+    # Re-measure after any rejected tail sample to remove its temporary count.
+    selected = measured(evidence)
+    return base if selected is None else selected
+
+
+def hosted_stale_cached_diagnostic_controls():
+    """Explicit hosted synthetic metadata checks; no Guard or process epoch.
+
+    These assertions are authored before the recorder enrichment. Their runtime
+    results must come from the admitted, verified hosted caller, never import.
+    """
+    started = time.monotonic()
+    names = ("matching-caches-full", "mismatched-cache-phases-full",
+             "joint-row-event-overflow", "diagnostic-byte-overflow",
+             "cached-encoding-refusal", "confirmed-absence-base-unchanged",
+             "original-base-refusal-unchanged")
+    modes = ("FULL", "FULL", "SAMPLED", "SAMPLED", "UNPINNABLE",
+             "UNCHANGED_BASE", "UNCHANGED_REFUSAL")
+    cases = []
+    input_equal = telemetry_equal = True
+
+    def stamp(value):
+        kind = type(value)
+        if kind is dict:
+            return ("dict", tuple((key, stamp(item)) for key, item in value.items()))
+        if kind is list:
+            return ("list", tuple(stamp(item) for item in value))
+        if kind is set:
+            return ("synthetic-set", id(value), tuple(sorted(value)))
+        if kind is float:
+            return ("float", value.hex())
+        return (kind.__name__, value)
+
+    def row(pid, state="S"):
+        return {"pid": pid, "ppid": 99 if pid == 100 else 100,
+                "startticks": 10000 + pid, "pgrp": 100, "session": 100,
+                "uid": 1001, "state": state}
+
+    def snapshot(size=1, state="T", stable=False):
+        members = [row(100, state)] + [row(201 + index, state) for index in range(size - 1)]
+        return {"leader": dict(members[0]), "members": members,
+                "tasks": [dict(item, tid=item["pid"]) for item in members], "stable": stable}
+
+    def metadata(reason="numeric_process_or_task_disappeared"):
+        return {"scope": "last_actual_numeric_proc_scan", "total_events": 1,
+                "classification_counts": {"before_group_classification_unknown": 1},
+                "events": [{"pid": 700, "reason": reason,
+                            "classification": "before_group_classification_unknown",
+                            "absence_exception_class": "FileNotFoundError", "absence_errno": 2}],
+                "events_truncated": False}
+
+    def observer(fresh, scan=None, instability=None, matches=True):
+        value = _OwnedGroupObservation.__new__(_OwnedGroupObservation)
+        value.pause_started = started
+        value.pause_deadline = started + 1
+        value.deadline = started + 60
+        value.pause_iteration = 5
+        value.telemetry = {"pause_attempts": 3, "stop_requests": 2,
+                           "sentinel_counter": 17, "last_stale_schedule_observation": None}
+        value.last_scan_snapshot = fresh if scan is None else scan
+        value.last_scan_instability = metadata() if instability is None else instability
+        value.last_validated_snapshot = fresh
+        value.last_validated_scan_instability = {
+            "matches_returned_snapshot": matches, "metadata": value.last_scan_instability}
+        value.last_validated_completed_at = started
+        value.last_validated_pause_attempt = 3
+        value.last_validated_pause_iteration = 5
+        value.guard = type("SyntheticGuardMetadataState", (), {})()
+        value.guard.failure = "synthetic-kept-failure"
+        value.guard.capture_bytes, value.guard.decoder_bytes = 23, 11
+        value.guard.minimum_free, value.guard.peak = 29, 31
+        value.guard.commands = []
+        return value
+
+    def exercise(value, fresh, stale=None, classification="REFUSED_RECHECK_PRECONDITION", **kwargs):
+        nonlocal input_equal, telemetry_equal
+        stale = row(200) if stale is None else stale
+        def inputs():
+            return [stale, fresh, value.last_scan_snapshot, value.last_scan_instability,
+                    value.last_validated_snapshot, value.last_validated_scan_instability,
+                    value.last_validated_completed_at, value.last_validated_pause_attempt,
+                    value.last_validated_pause_iteration]
+        before = stamp(inputs())
+        counters = {key: item for key, item in value.telemetry.items()
+                    if key != "last_stale_schedule_observation"}
+        guard_before = stamp(value.guard.__dict__)
+        result = value._record_stale_schedule_observation(stale, fresh, classification, **kwargs)
+        same_input = before == stamp(inputs())
+        same_counters = (counters == {key: item for key, item in value.telemetry.items()
+                                     if key != "last_stale_schedule_observation"}
+                         and guard_before == stamp(value.guard.__dict__))
+        input_equal = input_equal and same_input
+        telemetry_equal = telemetry_equal and same_counters
+        assert same_input and same_counters, "metadata control mutated input/counters/latch"
+        diagnostic = value.telemetry["last_stale_schedule_observation"]
+        assert len(_stale_canonical(diagnostic)) <= GROUP_FAILURE_DIAGNOSTIC_LIMIT
+        evidence = diagnostic.get("cached_scan_evidence")
+        actual_mode = ("UNCHANGED_REFUSAL" if result is False else
+                       "UNCHANGED_BASE" if evidence is None else evidence["retention"]["mode"])
+        if evidence is not None:
+            retained = evidence["retention"]
+            assert retained["combined_rows_and_events"] == (
+                retained["base_numeric_rows"] + retained["snapshot_rows"] + retained["scan_events"])
+            assert retained["combined_rows_and_events"] <= GROUP_DIAGNOSTIC_ROW_LIMIT
+            assert retained["diagnostic_bytes"] == len(_stale_canonical(diagnostic))
+            for key, original in (("fresh_snapshot", fresh),
+                                  ("last_scan_snapshot", value.last_scan_snapshot),
+                                  ("last_validated_snapshot", value.last_validated_snapshot)):
+                descriptor = evidence["snapshot_refs"][key]
+                if descriptor["state"] == "AVAILABLE":
+                    raw = _stale_canonical(original)
+                    entry = evidence["snapshot_table"][descriptor["table_index"]]
+                    assert descriptor["canonical_bytes"] == entry["canonical_bytes"] == len(raw)
+                    assert descriptor["canonical_sha256"] == entry["canonical_sha256"] == hashlib.sha256(raw).hexdigest()
+            wrapper = evidence["instability_refs"]["last_validated_scan_instability"]
+            if wrapper["state"] == "AVAILABLE":
+                raw = _stale_canonical(value.last_validated_scan_instability)
+                assert wrapper["canonical_bytes"] == len(raw)
+                assert wrapper["canonical_sha256"] == hashlib.sha256(raw).hexdigest()
+                raw_metadata = _stale_canonical(value.last_validated_scan_instability["metadata"])
+                entry = evidence["instability_table"][wrapper["metadata_table_index"]]
+                assert entry["canonical_bytes"] == len(raw_metadata)
+                assert entry["canonical_sha256"] == hashlib.sha256(raw_metadata).hexdigest()
+            for table in (evidence["snapshot_table"], evidence["instability_table"]):
+                for entry in table:
+                    if entry["mode"] == "FULL":
+                        raw = _stale_canonical(entry["value"])
+                        assert entry["canonical_bytes"] == len(raw)
+                        assert entry["canonical_sha256"] == hashlib.sha256(raw).hexdigest()
+        return result, actual_mode, diagnostic
+
+    for index, (name, expected_mode) in enumerate(zip(names, modes)):
+        if time.monotonic() - started > 60:
+            raise ResourceFailure("hosted stale cached metadata controls exceeded 60 seconds")
+        result = actual_mode = None
+        details = {}
+        try:
+            if index == 0:
+                fresh = snapshot(2)
+                result, actual_mode, diagnostic = exercise(observer(fresh), fresh)
+                evidence = diagnostic["cached_scan_evidence"]
+                assert len(evidence["snapshot_table"]) == len(evidence["instability_table"]) == 1
+                assert {item["table_index"] for item in evidence["snapshot_refs"].values()} == {0}
+                assert all(value is True for value in evidence["bindings"].values())
+                assert evidence["instability_refs"]["last_validated_scan_instability"]["matches_returned_snapshot"] is True
+                assert evidence["retention"]["snapshot_rows"] == 5
+                assert evidence["retention"]["scan_events"] == 1
+                assert evidence["retention"]["combined_rows_and_events"] == 7
+            elif index == 1:
+                fresh, scan = snapshot(), snapshot(state="R")
+                result, actual_mode, diagnostic = exercise(observer(fresh, scan, matches=False), fresh)
+                evidence = diagnostic["cached_scan_evidence"]
+                refs = evidence["snapshot_refs"]
+                assert refs["fresh_snapshot"]["table_index"] == refs["last_validated_snapshot"]["table_index"]
+                assert refs["last_scan_snapshot"]["table_index"] != refs["fresh_snapshot"]["table_index"]
+                assert evidence["instability_refs"]["last_validated_scan_instability"]["matches_returned_snapshot"] is False
+                assert evidence["bindings"] == {"fresh_equals_last_scan_snapshot": False,
+                    "fresh_equals_last_validated_snapshot": True, "validated_metadata_equals_last_scan_instability": True}
+                assert evidence["retention"]["combined_rows_and_events"] == 8
+            elif index == 2:
+                fresh = snapshot(3)
+                result, actual_mode, diagnostic = exercise(observer(fresh), fresh)
+                evidence = diagnostic["cached_scan_evidence"]
+                entry = evidence["snapshot_table"][0]
+                assert entry["mode"] == "SAMPLED" and entry["sampled_row_total"] == 7
+                assert entry["sampled_rows_truncated"] is True and len(entry["sampled_rows"]) == 6
+                prefix = ([{"kind": "leader", "row": fresh["leader"]}]
+                          + [{"kind": "member", "row": item} for item in fresh["members"]]
+                          + [{"kind": "task", "row": item} for item in fresh["tasks"]])[:6]
+                assert _stale_canonical(entry["sampled_rows"]) == _stale_canonical(prefix)
+                assert evidence["instability_table"][0]["value"]["events_truncated"] is False
+                assert evidence["retention"]["combined_rows_and_events"] == 8
+            elif index == 3:
+                fresh, instability = snapshot(), metadata("x" * 20000)
+                original = _stale_canonical(instability)
+                result, actual_mode, diagnostic = exercise(observer(fresh, instability=instability), fresh)
+                entry = diagnostic["cached_scan_evidence"]["instability_table"][0]
+                assert entry["canonical_bytes"] == len(original)
+                assert entry["canonical_sha256"] == hashlib.sha256(original).hexdigest()
+                assert entry["mode"] == "SAMPLED" and entry["events"] == []
+                assert entry["cached_events_truncated"] is False and entry["events_retention_truncated"] is True
+            elif index == 4:
+                for bad in ({1}, float("nan")):
+                    fresh, instability = snapshot(), metadata(bad)
+                    result, actual_mode, diagnostic = exercise(observer(fresh, instability=instability), fresh)
+                    evidence = diagnostic["cached_scan_evidence"]
+                    for item in evidence["instability_refs"].values():
+                        assert item["state"] == "UNPINNABLE"
+                        assert "canonical_bytes" not in item and "canonical_sha256" not in item
+                    assert result is True and actual_mode == "UNPINNABLE"
+                for key, bad in (("absence_exception_class", {"row": row(701)}),
+                                 ("absence_errno", [row(701)]), ("absence_errno", True)):
+                    fresh, instability = snapshot(), metadata()
+                    instability["events"][0][key] = bad
+                    result, actual_mode, diagnostic = exercise(observer(fresh, instability=instability), fresh)
+                    for item in diagnostic["cached_scan_evidence"]["instability_refs"].values():
+                        assert item["state"] == "UNPINNABLE"
+                        assert "canonical_bytes" not in item and "canonical_sha256" not in item
+                    assert result is True and actual_mode == "UNPINNABLE"
+                for attribute, key, bad in (
+                        ("last_validated_completed_at", "completed_at_monotonic", float("nan")),
+                        ("last_validated_completed_at", "completed_at_monotonic", {1}),
+                        ("last_validated_completed_at", "completed_at_monotonic", {"row": row(701)}),
+                        ("last_validated_completed_at", "completed_at_monotonic", [row(701)]),
+                        ("last_validated_pause_attempt", "pause_attempt", True),
+                        ("last_validated_pause_iteration", "pause_iteration", False)):
+                    fresh = snapshot()
+                    value = observer(fresh)
+                    setattr(value, attribute, bad)
+                    result, actual_mode, diagnostic = exercise(value, fresh)
+                    item = diagnostic["cached_scan_evidence"]["stored_validation"][key]
+                    assert item["state"] == "UNPINNABLE" and item["table_index"] is None
+                    assert set(item) == {"state", "table_index", "error_class", "reason_code"}
+                    assert "canonical_bytes" not in item and "canonical_sha256" not in item
+                    assert result is True and actual_mode == "UNPINNABLE"
+            elif index == 5:
+                fresh = snapshot(stable=True)
+                result, actual_mode, diagnostic = exercise(observer(fresh), fresh,
+                    classification="CONFIRMED_NONLEADER_PROC_ABSENCE", read_performed=True,
+                    absence_error=FileNotFoundError(2, "synthetic errno fixture"))
+                assert "cached_scan_evidence" not in diagnostic
+                assert diagnostic["schema"] == "owned-stale-stop-schedule-observation-6970-v1"
+                assert set(diagnostic) == {
+                    "schema", "scope", "classification", "scheduled_row", "scheduled_birth_token",
+                    "current_row", "fresh_snapshot_sha256", "fresh_snapshot_stable", "fresh_member_count",
+                    "fresh_task_count", "snapshot_temporal_scope", "numeric_process_read_performed",
+                    "numeric_process_read_scope", "absence_exception_class", "absence_errno",
+                    "process_absence_observed", "candidate_STOP_sent_during_reconciliation",
+                    "observed_at_monotonic", "pause_started_at_monotonic", "pause_deadline_monotonic",
+                    "command_deadline_monotonic", "pause_attempt", "pause_iteration",
+                    "stop_requests_before_reconciliation", "sampled_row_count", "diagnostic_row_limit",
+                    "diagnostic_byte_limit", "complete_recheck_history_retained", "exit_verified",
+                    "reap_verified", "historical_escape_cause_verified", "producer_cause_verified",
+                    "kernel_cause_verified", "new_proc_read_performed_for_diagnostic"}
+                assert diagnostic["classification"] == "CONFIRMED_NONLEADER_PROC_ABSENCE"
+                assert diagnostic["process_absence_observed"] is True and diagnostic["absence_errno"] == 2
+                assert diagnostic["absence_exception_class"] == "FileNotFoundError"
+            else:
+                fresh, stale = snapshot(), row(200)
+                stale.update(ppid=10 ** 4000, startticks=10 ** 4000, pgrp=10 ** 4000)
+                result, actual_mode, diagnostic = exercise(observer(fresh), fresh, stale=stale)
+                assert "cached_scan_evidence" not in diagnostic
+                assert diagnostic["scope"] in ("stale_schedule_diagnostic_size_refused",
+                                                "stale_schedule_diagnostic_encoding_refused")
+                assert diagnostic["process_absence_acceptance_authorized"] is False
+            assert result is (index != 6) and actual_mode == expected_mode
+            if "cached_scan_evidence" in diagnostic:
+                details = dict(diagnostic["cached_scan_evidence"]["retention"])
+            case_result, error = "PASS", None
+        except AssertionError as failure:
+            case_result, error = "FAIL", str(failure)[:128]
+        cases.append({"name": name, "result": case_result,
+                      "expected_return": index != 6, "actual_return": result,
+                      "expected_retention": expected_mode, "actual_retention": actual_mode,
+                      "retention_observation": details, "error": error})
+    elapsed = time.monotonic() - started
+    if not 0 <= elapsed <= 60:
+        raise ResourceFailure("hosted stale cached metadata controls exceeded 60 seconds")
+    failures = sum(item["result"] != "PASS" for item in cases)
+    report = {"schema": "native-tls-stale-cached-diagnostic-controls-6970-v1",
+              "result": ("PASS_CACHED_NUMERIC_METADATA_CONTROLS_ONLY" if failures == 0 else
+                         "FAIL_CACHED_NUMERIC_METADATA_CONTROLS_ONLY"),
+              "completed": len(cases), "failures": failures, "cases": cases,
+              "synthetic_inputs_only": True, "input_before_after_equal": input_equal,
+              "telemetry_counters_before_after_equal": telemetry_equal,
+              "new_commands_or_child_epochs": False,
+              "capture_bytes_charged_to_parent": 0, "decoder_bytes_charged_to_parent": 0,
+              "actual_proc_reads_verified": False, "process_control_execution_verified": False,
+              "native_execution_verified": False, "windows98_integration_verified": False,
+              "tls_execution_verified": False, "elapsed_seconds": elapsed}
+    if len(_stale_canonical(report)) + 1 > 8192 - 512:
+        raise ResourceFailure("hosted stale metadata report exceeds reserved main-receipt bound")
+    return report
+
+
 class _OwnedGroupObservation:
     """Linux observed stop scope; neither a writer census nor a kernel freeze.
 
@@ -722,6 +1265,13 @@ class _OwnedGroupObservation:
                     "exit_verified": False, "reap_verified": False,
                     "historical_escape_cause_verified": False}
                 return False
+            if classification == "REFUSED_RECHECK_PRECONDITION":
+                try:
+                    diagnostic = _stale_cached_refusal_diagnostic(self, diagnostic, fresh_snapshot)
+                except BaseException:
+                    # Optional cache evidence cannot replace an admitted base
+                    # or change the original recorder's True return value.
+                    pass
             self.telemetry["last_stale_schedule_observation"] = diagnostic
             return True
         except BaseException:

@@ -2373,6 +2373,54 @@ def build(output, prep, expected_preparation_sha):
         count_pins = require_count_epoch_controls(receipt['count_epoch_controls'], count_controls,
             guard, resources, source_pins, receipt['pidfd_controls']['fixture_build'], count_offsets)
         receipt['main_command_codec_controls'] = main_command_codec_controls(resources, guard)
+        # Synthetic cached-data checks receive no live Guard or process object.
+        cached_before = (encode(guard.commands), len(guard.commands), guard.capture_bytes,
+                         guard.decoder_bytes, guard.failure)
+        cached = resources.hosted_stale_cached_diagnostic_controls()
+        receipt['stale_cached_diagnostic_controls'] = cached
+        cached_after = (encode(guard.commands), len(guard.commands), guard.capture_bytes,
+                        guard.decoder_bytes, guard.failure)
+        if cached_before != cached_after:
+            raise ValueError('cached diagnostic controls changed actual parent state')
+        cached.update(actual_parent_command_count=cached_before[1],
+            actual_parent_command_records_before_after_equal=True,
+            actual_parent_capture_pools_before_after_equal=True,
+            actual_parent_failure_before_after_equal=True)
+        cached_names = ('matching-caches-full', 'mismatched-cache-phases-full',
+            'joint-row-event-overflow', 'diagnostic-byte-overflow', 'cached-encoding-refusal',
+            'confirmed-absence-base-unchanged', 'original-base-refusal-unchanged')
+        cached_retention = ('FULL', 'FULL', 'SAMPLED', 'SAMPLED', 'UNPINNABLE',
+                            'UNCHANGED_BASE', 'UNCHANGED_REFUSAL')
+        cached_raw = (json.dumps(cached, sort_keys=True, separators=(',', ':'),
+                                ensure_ascii=True, allow_nan=False) + '\n').encode('ascii')
+        if (len(cached_raw) > 8192
+                or cached['schema'] != 'native-tls-stale-cached-diagnostic-controls-6970-v1'
+                or cached['result'] != 'PASS_CACHED_NUMERIC_METADATA_CONTROLS_ONLY'
+                or type(cached['completed']) is not int or cached['completed'] != 7
+                or type(cached['failures']) is not int or cached['failures'] != 0
+                or type(cached['cases']) is not list or len(cached['cases']) != 7
+                or tuple(case['name'] for case in cached['cases']) != cached_names
+                or type(cached['elapsed_seconds']) not in (int, float)
+                or not 0 <= cached['elapsed_seconds'] <= 60):
+            raise ValueError('cached diagnostic control report schema or bound failed')
+        for index, case in enumerate(cached['cases']):
+            if (case['result'] != 'PASS' or case['expected_return'] is not (index < 6)
+                    or case['actual_return'] is not (index < 6)
+                    or case['expected_retention'] != cached_retention[index]
+                    or case['actual_retention'] != cached_retention[index]):
+                raise ValueError('cached diagnostic control case failed')
+        for key in ('synthetic_inputs_only', 'input_before_after_equal',
+                    'telemetry_counters_before_after_equal'):
+            if cached[key] is not True:
+                raise ValueError('cached diagnostic synthetic state changed')
+        for key in ('new_commands_or_child_epochs', 'actual_proc_reads_verified',
+                    'process_control_execution_verified', 'native_execution_verified',
+                    'windows98_integration_verified', 'tls_execution_verified'):
+            if cached[key] is not False:
+                raise ValueError('cached diagnostic control exceeds metadata scope')
+        for key in ('capture_bytes_charged_to_parent', 'decoder_bytes_charged_to_parent'):
+            if type(cached[key]) is not int or cached[key] != 0:
+                raise ValueError('cached diagnostic controls changed capture pools')
         # Original in-memory ISA methods run through the existing exact-byte loader.
         r = guard.run([python, '-B', '-c', bridge.I486_CONTROL_CHILD,
                        str(HERE / 'i486_gate.py'), PRODUCTION[gate_name][1],
