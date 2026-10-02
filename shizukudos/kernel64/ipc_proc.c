@@ -9,7 +9,7 @@
  * so code that opens a handle with too few rights fails as it would on Windows.
  */
 #include "ipc.h"
-#include "../kcommon/nt_sched_policy.h"
+#include "../kcommon/nt_process_priority.h"
 
 #define PROCESS_CREATE_THREAD 0x0002u
 #define PROCESS_CREATE_PROCESS 0x0080u
@@ -1042,7 +1042,36 @@ static int32_t sys_set_thread(process_t *p, uint64_t h, uint64_t cls, uint64_t b
 
 extern int64_t shz_filetime_now_ipc(void);
 
-/* ProcessBasicInformation (0), ProcessTimes (4), ProcessHandleCount (20), ProcessSessionInformation (24),
+/* The native class-18 transport shares the private Win32 retarget core.
+ * Foreground scheduling and realtime/resource-background policies are outside
+ * this UP backend; a successful call only changes supported base priorities. */
+static int32_t sys_set_process_priority(process_t *cur, uint64_t h, uint64_t buf, uint64_t len)
+{
+    process_t *p;
+    kobject_t *o;
+    shz_nt_process_priority_t value;
+    shz_nt_sched_result_t result;
+    uint32_t cls;
+    int32_t st;
+    if (len != sizeof value) return STATUS_INFO_LENGTH_MISMATCH;
+    st = ipc_ref_process(cur, h, PROCESS_SET_INFORMATION, &p, &o);
+    if (st) return st;
+    if (copy_from_user(cur, &value, buf, sizeof value)) {
+        st = STATUS_ACCESS_VIOLATION;
+    } else if (value.Foreground) {
+        st = STATUS_NOT_SUPPORTED;
+    } else {
+        result = shz_nt_process_class_from_native(value.PriorityClass, &cls);
+        st = result == SHZ_NT_SCHED_UNSUPPORTED ? STATUS_NOT_SUPPORTED :
+             result != SHZ_NT_SCHED_OK ? STATUS_INVALID_PARAMETER :
+             ipc_set_process_priority_class(p, o, cls);
+    }
+    ob_deref(o);
+    return st;
+}
+
+/* ProcessBasicInformation (0), ProcessTimes (4), ProcessPriorityClass (18),
+ * ProcessHandleCount (20), ProcessSessionInformation (24),
  * ProcessImageFileName (27) and ProcessImageFileNameWin32 (43); other classes stay with sysx.c. */
 static int32_t sys_query_process(process_t *p, struct regs *r, uint64_t h, uint64_t cls, uint64_t buf, uint64_t len)
 {
@@ -1051,17 +1080,66 @@ static int32_t sys_query_process(process_t *p, struct regs *r, uint64_t h, uint6
     kobject_t *o;
     uint8_t out[600];
     uint32_t n = 0;
-    int32_t st = ipc_ref_process(p, h, 0, &t, &o);
+    int32_t st;
+    if (cls == SHZ_NT_PROCESS_PRIORITY_INFO_CLASS) {
+        uint32_t access = 0;
+        n = sizeof(shz_nt_process_priority_t);
+        if (len != n) {
+            if (pret && copy_to_user(p, pret, &n, 4)) return STATUS_ACCESS_VIOLATION;
+            return STATUS_INFO_LENGTH_MISMATCH;
+        }
+        st = ipc_ref_handle(p, h, OB_PROCESS, &o, &access);
+        if (st) return st;
+        /* GetPriorityClass's modern contract permits either query right. */
+        if (!(access & (PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION))) {
+            ob_deref(o);
+            return STATUS_ACCESS_DENIED;
+        }
+        t = o->u.proc.p;
+    } else {
+        st = ipc_ref_process(p, h, 0, &t, &o);
+    }
     if (st) return st;
     memset(out, 0, sizeof out);
     switch (cls) {
     case 0: {
         struct { int64_t exit_status; uint64_t peb, affinity; int64_t base_priority; uint64_t pid, ppid; } b;
-        b.exit_status = t->object->signaled ? t->exit_code : 0x103;     /* STILL_ACTIVE until the last thread is gone */
-        b.peb = t->teardown ? 0 : t->peb; b.affinity = 1; b.base_priority = 8; b.pid = (uint64_t)t->pid;
+        shz_nt_sched_projection_t projection;
+        shz_nt_sched_result_t result;
+        const uint64_t f = irq_save();
+        if (!t || !t->used || t->object != o) {
+            st = STATUS_INVALID_HANDLE;
+            irq_restore(f);
+            break;
+        }
+        result = shz_nt_sched_from_win32(t->priority_class ? t->priority_class : SHZ_NT_PROCESS_NORMAL, 0, &projection);
+        if (result != SHZ_NT_SCHED_OK) {
+            st = result == SHZ_NT_SCHED_UNSUPPORTED ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+            irq_restore(f);
+            break;
+        }
+        b.exit_status = o->signaled ? t->exit_code : 0x103;     /* STILL_ACTIVE until the last thread is gone */
+        b.peb = t->teardown ? 0 : t->peb; b.affinity = 1;
+        b.base_priority = projection.absolute_priority; b.pid = (uint64_t)t->pid;
         b.ppid = t->parent_pid;
+        irq_restore(f);
         memcpy(out, &b, sizeof b);
         n = sizeof b;
+        break;
+    }
+    case SHZ_NT_PROCESS_PRIORITY_INFO_CLASS: {
+        shz_nt_process_priority_t value;
+        shz_nt_sched_result_t result;
+        const uint64_t f = irq_save();
+        if (!t || !t->used || t->object != o) {
+            st = STATUS_INVALID_HANDLE;
+        } else {
+            result = shz_nt_process_class_to_native(t->priority_class ? t->priority_class : SHZ_NT_PROCESS_NORMAL, &value);
+            st = result == SHZ_NT_SCHED_UNSUPPORTED ? STATUS_NOT_SUPPORTED :
+                 result != SHZ_NT_SCHED_OK ? STATUS_INVALID_PARAMETER : STATUS_SUCCESS;
+            if (!st) memcpy(out, &value, sizeof value);
+        }
+        irq_restore(f);
         break;
     }
     case 4: {                                            /* KERNEL_USER_TIMES: create, exit, kernel, user */
@@ -1095,6 +1173,7 @@ static int32_t sys_query_process(process_t *p, struct regs *r, uint64_t h, uint6
     default: break;
     }
     ob_deref(o);
+    if (st) return st;
     if (len < n) {
         if (pret) copy_to_user(p, pret, &n, 4);
         return STATUS_INFO_LENGTH_MISMATCH;
@@ -1149,8 +1228,12 @@ int32_t ipc_proc_syscall(process_t *p, struct regs *r, uint32_t num, uint64_t a1
         return sys_query_thread(p, r, a1, a3, a4);
     case SYS_NtSetInformationThread: return sys_set_thread(p, a1, a2, a3, a4);
     case SYS_NtQueryInformationProcess:
-        if (a2 != 0 && a2 != 4 && a2 != 20 && a2 != 24 && a2 != 27 && a2 != 43) break;
+        if (a2 != 0 && a2 != 4 && a2 != SHZ_NT_PROCESS_PRIORITY_INFO_CLASS &&
+            a2 != 20 && a2 != 24 && a2 != 27 && a2 != 43) break;
         return sys_query_process(p, r, a1, a2, a3, a4);
+    case SYS_NtSetInformationProcess:
+        if (a2 != SHZ_NT_PROCESS_PRIORITY_INFO_CLASS) break;
+        return sys_set_process_priority(p, a1, a3, a4);
     case SYS_NtCreateEvent: case SYS_NtCreateMutant: case SYS_NtCreateSemaphore: case SYS_NtCreateFile: case SYS_NtOpenFile:
         return create_with_inherit(p, r, num, a1, a2, a3, a4);
     case SYS_NtCreateJobObject: return sys_create_job(p, a1, a2, a3);
