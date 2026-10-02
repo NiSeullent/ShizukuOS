@@ -6,18 +6,77 @@
 #include "config.h"
 #include "ata_pio.h"
 #include "string_pio.h"
+#include "l1_vga.h"
 #include "../src/console.h"
 #include "../src/cpu.h"
 #include "../src/devices.h"
 #include "../src/guest.h"
 #include "../src/pool.h"
 #include "../src/video.h"
+#include "../src/platform.h"
 static domain_t *w98;
 static w98_ata_t ata;
 static const shz_blob_t *rom;
 static uint8_t *absent_lapic;
 #define W98_ABSENT_LAPIC_GPA 0xfee00000u
 static uint64_t last_render;
+static w98_l1_vga_t vga;
+static const shz_blob_t *vga_blob(const shz_info_t *info,const char *name,int *error)
+{
+    const shz_blob_t *found=0;
+    for(unsigned i=0;i<SHZ_MAX_BLOBS;++i){unsigned k=0;
+        while(k<16 && name[k] && info->blobs[i].name[k]==name[k])++k;
+        if(k<16 && !name[k] && !info->blobs[i].name[k]){if(found || !info->blobs[i].base || !info->blobs[i].size){*error=1;return 0;}found=&info->blobs[i];}}
+    return found;
+}
+static uint32_t vga_cfg_read(void *unused,uint16_t bdf,unsigned off)
+{
+    (void)unused;const uint32_t saved=inl(0xcf8);
+    outl(0xcf8,0x80000000u|(uint32_t)bdf<<8|(off&252));
+    const uint32_t value=inl(0xcfc);outl(0xcf8,saved);return value;
+}
+static int vga_in(void *unused,uint16_t port,unsigned n,uint32_t *value)
+{(void)unused;*value=n==1?inb(port):n==2?inw(port):inl(port);return 0;}
+static int vga_out(void *unused,uint16_t port,unsigned n,uint32_t value)
+{(void)unused;if(n==1)outb(port,(uint8_t)value);else if(n==2)outw(port,(uint16_t)value);else outl(port,value);return 0;}
+static int vga_map(void *opaque,uint32_t g,uint64_t h,uint32_t n,uint64_t flags)
+{
+    domain_t *d=opaque;
+    for(uint32_t off=0;off<n;off+=4096){if(ept_remap_page(&d->ept,g+off,h+off,flags))return -1;
+        if(g==0xa0000 && !dev_a20_get() && ept_remap_page(&d->ept,g+off+0x100000,h+off,flags))return -1;}
+    ept_invalidate();return 0;
+}
+static int vga_uc(void *unused,uint64_t base,uint64_t bytes)
+{(void)unused;return platform_vga_uc(base,bytes);}
+static int vga_owner(void *unused)
+{(void)unused;video_native_vga_own();return 0;}
+static int vga_a20(void *unused){(void)unused;return dev_a20_get();}
+static int vga_owned_overlap(const shz_info_t *info,const domain_t *d,const w98_vga_config_t *c)
+{
+    const uint64_t ranges[][2]={{info->region_base,info->region_size},{d->ram_base,d->ram_size},
+        {info->disk_base,info->disk_size},{info->k32_ram_base,info->k32_ram_size},{info->k64_ram_base,info->k64_ram_size},
+        {info->memmap_base,info->memmap_bytes}};
+    for(unsigned i=0;i<sizeof ranges/sizeof ranges[0];++i){uint64_t b=ranges[i][0],n=ranges[i][1];
+        if(n && (b>~0ull-n || (b<c->lfb_base+c->lfb_bytes && c->lfb_base<b+n)))return 1;}
+    for(unsigned i=0;i<SHZ_MAX_BLOBS;++i){uint64_t b=info->blobs[i].base,n=info->blobs[i].size;
+        if(n && (b>~0ull-n || (b<c->lfb_base+c->lfb_bytes && c->lfb_base<b+n)))return 1;}
+    return 0;
+}
+static int win98_vga_init(domain_t *d,shz_info_t *info,const shz_caps_t *caps)
+{
+    int error=0;
+    const shz_blob_t *c=vga_blob(info,"VGACFG.BIN",&error),*r=vga_blob(info,"VGAROM.BIN",&error);
+    memset(&vga,0,sizeof vga);
+    if(error)return -1;
+    if(!c && !r)return 0;
+    if(!c || !r || !caps->hypervisor_bit || c->size!=sizeof(w98_vga_config_t) ||
+       (c->base&7) || c->base>~0ull-c->size || r->base>~0ull-r->size)return -1;
+    const w98_vga_config_t *binding=(const w98_vga_config_t *)(uintptr_t)c->base;
+    if(!w98_vga_config_valid(binding,c->size) || vga_owned_overlap(info,d,binding))return -1;
+    const w98_vga_ops_t ops={d,vga_cfg_read,vga_in,vga_out,vga_map,vga_uc,vga_owner,vga_a20};
+    return w98_l1_vga_init(&vga,(const w98_vga_config_t *)(uintptr_t)c->base,c->size,
+        (const uint8_t *)(uintptr_t)r->base,r->size,&ops);
+}
 /* Passive fixed ring: no control, register, memory or delivery writes. */
 typedef struct {
     uint64_t sequence,rip,cs_base,cr0,cr3,rsp,qual,rax,rdx;
@@ -108,6 +167,9 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
     G.info=info;G.vc=&d->vc;G.ram_base=d->ram_base;G.ram_size=d->ram_size;G.tsc_hz=info->tsc_hz;
     dev_init(info->tsc_hz,d->ram_size);dev_native_win98_enable();dev_uart_tx_hook=uart_tx;
     if(w98_ata_init(&ata,(uint8_t *)(uintptr_t)info->disk_base,info->disk_size,ata_irq,0)) return -1;
+    if(win98_vga_init(d,info,caps)) {
+        log_capture(info->last_error,sizeof info->last_error,"explicit VGA device/ROM/PAT admission failed");return -1;
+    }
     cfg.io_bitmap_a=d->io_bitmap_a;cfg.io_bitmap_b=d->io_bitmap_b;cfg.msr_bitmap=d->msr_bitmap;
     cfg.mode=VMODE_REAL;cfg.eptp=ept_pointer(&d->ept);cfg.vpid=SHZ_DOM_WIN98;
     cfg.cs_sel=0xf000;cfg.rip=0xfff0;cfg.rsp=0;cfg.cr3=0;
@@ -122,6 +184,8 @@ static uint8_t *physical(void *opaque,uint32_t gpa,unsigned bytes,int write)
     domain_t *d=opaque;
     if(!bytes) return 0;
     if(!dev_a20_get()) gpa&=~0x100000u;
+    uint8_t *device_pointer;
+    if(w98_l1_vga_physical(&vga,gpa,bytes,write,&device_pointer))return device_pointer;
     if(gpa>=W98_ABSENT_LAPIC_GPA && gpa-W98_ABSENT_LAPIC_GPA<4096) {
         const unsigned offset=gpa-W98_ABSENT_LAPIC_GPA;
         if(write || !absent_lapic || bytes>4096-offset) return 0;
@@ -142,6 +206,10 @@ static const uint8_t *trace_read(domain_t *d,uint64_t gpa,unsigned bytes)
        bytes>0x100000000ull-gpa || !d->ram_base ||
        d->ram_base>~0ull-d->ram_size || !rom->base ||
        rom->base>~0ull-rom->size) return 0;
+    /* Device reads change real VGA latches; passive trace must not touch it. */
+    uint8_t *device_pointer;uint32_t bus=(uint32_t)gpa;
+    if(!dev_a20_get())bus&=~0x100000u;
+    if(w98_l1_vga_physical(&vga,bus,bytes,0,&device_pointer))return 0;
     return physical(d,(uint32_t)gpa,bytes,0);
 }
 static void trace_memory(domain_t *d,const char *name,uint64_t linear,unsigned bytes)
@@ -207,6 +275,9 @@ void win98_observe_exit(domain_t *d,uint32_t reason)
 static int input(void *unused,uint16_t port,unsigned bytes,uint32_t *value)
 {
     (void)unused;
+    int handled=w98_l1_vga_in(&vga,port,bytes,value);
+    if(handled<0){dom_fail(w98,"owned VGA input failed");return 0;}
+    if(handled)return 1;
     /* Configured SeaBIOS debugcon has an 8-bit E9 presence signature. */
     if(port==0x402 && bytes==1) {*value=0xe9;return 1;}
     if(w98_ata_in(&ata,port,bytes,value) || dev_pio_in(port,(int)bytes,value)) return 1;
@@ -215,6 +286,9 @@ static int input(void *unused,uint16_t port,unsigned bytes,uint32_t *value)
 static int output(void *unused,uint16_t port,unsigned bytes,uint32_t value)
 {
     (void)unused;
+    int handled=w98_l1_vga_out(&vga,port,bytes,value);
+    if(handled<0){dom_fail(w98,"owned VGA output/mapping failed");return 0;}
+    if(handled)return 1;
     if(w98_ata_out(&ata,port,bytes,value) || dev_pio_out(port,(int)bytes,value)) return 1;
     if(port==0x402) {uart_tx((uint8_t)value);return 1;} /* SeaBIOS genuine debug output */
     ++G.info->io_unhandled;return 1; /* no device consumes an absent port write */
@@ -249,11 +323,11 @@ static void handle_io(domain_t *d)
         return; /* bounded progress keeps RIP on REP and reschedules genuine remaining elements */
     }
     if(in) {
-        input(d,port,bytes,&value);
+        if(!input(d,port,bytes,&value))return;
         if(bytes==1) d->vc.gpr[GPR_RAX]=(d->vc.gpr[GPR_RAX]&~0xffull)|(value&0xff);
         else if(bytes==2) d->vc.gpr[GPR_RAX]=(d->vc.gpr[GPR_RAX]&~0xffffull)|(value&0xffff);
         else d->vc.gpr[GPR_RAX]=value;
-    } else output(d,port,bytes,(uint32_t)d->vc.gpr[GPR_RAX]);
+    } else if(!output(d,port,bytes,(uint32_t)d->vc.gpr[GPR_RAX]))return;
     dom_advance_rip();
 }
 int win98_handle_exit(domain_t *d,uint32_t reason)
@@ -280,9 +354,12 @@ void win98_housekeeping(void)
         device_evidence(); /* observed terminal read followed by post-calibration port61 restore */
     if(dev_a20_dirty) {
         uint64_t gpa;dev_a20_dirty=0;
+        if(w98_l1_vga_sync_a20(&vga,dev_a20_get())){dom_fail(w98,"Win98 VGA A20 update failed");return;}
         for(gpa=0x100000;gpa<w98->ram_size;gpa+=4096) if(gpa&0x100000) {
-            const uint64_t physical=w98->ram_base+(dev_a20_get()?gpa:gpa&~0x100000ull);
-            if(ept_remap_page(&w98->ept,gpa,physical,EPT_RWX|EPT_WB)) {dom_fail(w98,"Win98 A20 EPT update failed");return;}
+            const uint64_t bus=dev_a20_get()?gpa:gpa&~0x100000ull;
+            uint64_t target=w98->ram_base+bus,flags=EPT_RWX|EPT_WB;
+            w98_l1_vga_page(&vga,(uint32_t)bus,&target,&flags);
+            if(ept_remap_page(&w98->ept,gpa,target,flags)) {dom_fail(w98,"Win98 A20 EPT update failed");return;}
         }
         ept_invalidate();
     }

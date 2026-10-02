@@ -67,6 +67,7 @@ void bootini_defaults(bootini_policy_t *p)
     p->csm_path[i] = 0;
     p->auto_kernel64 = 0;
     p->menu_timeout = 0;
+    p->win98_vga = p->win98_vga_set = 0;
     p->mode_set = p->csm_path_set = p->auto_kernel64_set = p->menu_timeout_set = 0;
 }
 
@@ -227,8 +228,14 @@ static int boot_entry(void *ctx, msg_t *m, int line, const char *key, size_t kle
             return fail(m, line, "invalid menu_timeout ", val, vlen, " (expected whole seconds 0 to 30)");
         p->menu_timeout = seconds;
         p->menu_timeout_set = 1;
+    } else if (word_is(key,klen,"win98_vga")) {
+        if(p->win98_vga_set)return fail(m,line,"duplicate key 'win98_vga'",0,0,0);
+        if(word_is(val,vlen,"yes"))p->win98_vga=1;
+        else if(word_is(val,vlen,"no"))p->win98_vga=0;
+        else return fail(m,line,"invalid win98_vga ",val,vlen," (expected yes or no)");
+        p->win98_vga_set=1;
     } else {
-        return fail(m, line, "unknown key ", key, klen, " (allowed: mode, csm_path, auto_kernel64, menu_timeout)");
+        return fail(m, line, "unknown key ", key, klen, " (allowed: mode, csm_path, auto_kernel64, menu_timeout, win98_vga)");
     }
     return 0;
 }
@@ -236,7 +243,12 @@ static int boot_entry(void *ctx, msg_t *m, int line, const char *key, size_t kle
 int bootini_parse(const char *text, size_t len, bootini_policy_t *p, char *err, size_t errlen)
 {
     bootini_defaults(p);
-    return parse_lines(text, len, err, errlen, boot_entry, p);
+    int result=parse_lines(text,len,err,errlen,boot_entry,p);
+    if(!result && p->win98_vga && p->mode!=BOOT_MODE_SUPERVISOR){
+        msg_t m={err,errlen,0};if(errlen)err[0]=0;
+        return fail(&m,1,"win98_vga=yes requires mode=supervisor",0,0,0);
+    }
+    return result;
 }
 
 typedef struct {
