@@ -1,0 +1,164 @@
+{
+  "schema": "shizukudos-cb43-dos-api-diagnostic-image-v1",
+  "vm_started": false,
+  "native_checks": "NOT RUN",
+  "windows_boot": "NOT TESTED",
+  "image": {
+    "file": "cb43-dos-internals.img",
+    "sha256": "50d44ccf164e26fbcc06c4e3869031f6ca8353116e71f9218a5528596a39ab0a",
+    "bytes": 33546240
+  },
+  "payload": [
+    {
+      "file": "KERNEL.SYS",
+      "sha256": "c1c86626585c8332a8788a01ded40c8795fd449d1832c9428436038530bbe906",
+      "bytes": 72751
+    },
+    {
+      "file": "COMMAND.COM",
+      "sha256": "27c91c0c27d7aac140fd3dbeb4c20592ae6fae0555d4e310cf749e2102bd3e50",
+      "bytes": 88188
+    },
+    {
+      "file": "CONFIG.SYS",
+      "sha256": "3cb255a9aa2c3c387e1d454e2d05e045959386ecbaf0f1a4ee41dfb247b0371d",
+      "bytes": 67
+    },
+    {
+      "file": "AUTOEXEC.BAT",
+      "sha256": "80abd152d1e437f09dfbdae99ee898a3e73950e2bcce0e303ee478dbbd1634bd",
+      "bytes": 143
+    },
+    {
+      "file": "CBDOSINT.EXE",
+      "sha256": "3ca3e46043d489597572f540d8fa13240585da6598f69c410aa913b9cc7212a3",
+      "bytes": 14324
+    },
+    {
+      "file": "SHZEXIT.COM",
+      "sha256": "9e71170dac88c04b5d3bffedc223b44634302cbfecc6765b07a86ca3aaa54d27",
+      "bytes": 65
+    }
+  ],
+  "boot_template": {
+    "sha256": "545a556405919560022ecbc55b48cff5e8047c655b30f81ac59762da9bb4fa39",
+    "bytes": 512
+  },
+  "source": [
+    {
+      "file": "shizukudos/dos16/tests/build_cb43_dos_diagnostic.py",
+      "sha256": "2b333d72c225b557e7b521b7b2350301affef18cb978ea5477fa6807fb119745"
+    },
+    {
+      "file": "shizukudos/dos16/tests/cb43_dos_internals.c",
+      "sha256": "9bae00d4354c19e45efae1b18de2b7f7056ee118e864050d88c097c086c18214"
+    },
+    {
+      "file": "shizukudos/dos16/tests/verify_cb43_dos_layout.py",
+      "sha256": "879b7c2ff229dfec9505a8d0917c057a6893781c2c0469338ae2b36a3504d267"
+    },
+    {
+      "file": "shizukudos/dos16/tests/shzexit.asm",
+      "sha256": "fc568723029497459f8b06356ccfa2e88fa0971c2c2783e2e4abb22b63f1a2fe"
+    },
+    {
+      "file": "shizukudos/dos16/mbr.asm",
+      "sha256": "7b4f0e9aedc072f58e093b73f6847ad5b465fbdfe6a82ca3672b61c0d36051ce"
+    },
+    {
+      "file": "shizukudos/tools/fatimg.py",
+      "sha256": "c6dcd8c09130002ca9423aaf70ac61f6b34293cb793ad0b5345f4f62ea6f327c"
+    },
+    {
+      "file": "shizukudos/tools/shzlib.py",
+      "sha256": "bcbe177f38f327989b7815d55eaa3046bd8b5e8255753edf072bdf4f0bdb2329"
+    }
+  ],
+  "compile_commands": [
+    [
+      "wcl",
+      "-zq",
+      "-bt=dos",
+      "-ms",
+      "-os",
+      "-wx",
+      "-we",
+      "-fe=CBDOSINT.EXE",
+      "-fo=./",
+      "<repo>/shizukudos/dos16/tests/cb43_dos_internals.c"
+    ],
+    [
+      "nasm",
+      "-f",
+      "bin",
+      "-w+all",
+      "-o",
+      "SHZEXIT.COM",
+      "<repo>/shizukudos/dos16/tests/shzexit.asm"
+    ],
+    [
+      "nasm",
+      "-f",
+      "bin",
+      "-w+all",
+      "-o",
+      "mbr.bin",
+      "<repo>/shizukudos/dos16/mbr.asm"
+    ]
+  ],
+  "image_construction": "fatimg.make_hdd(size_mib=32); install_freedos_boot; copy_in; read back every file",
+  "kernel_layout": {
+    "schema": "shizukudos-cb43-linked-dos-layout-v1",
+    "passed": 14,
+    "failed": 0,
+    "checks": [
+      "actual DOS linked executable has MZ header",
+      "startup info belongs to DOS data group",
+      "first SFT fixed address DS:00CC preserved",
+      "startup instance table points to DOS data segment",
+      "4.0 optional instance pointer is an actual linked zero DWORD",
+      "IIS_Ptr bytes encode offset-low then segment-high",
+      "MZ relocation targets IIS_Ptr segment word",
+      "MZ relocation never targets IIS_Ptr offset word",
+      "actual instance item length covers complete DOS data group",
+      "instance list has actual zero pointer and zero length terminator",
+      "instance table and presence flag do not overlap fixed SFT",
+      "flattened kernel startup pointer has actual load-segment relocation",
+      "flattened kernel IIS_Ptr resolves actual DOS DS:0000",
+      "flattened kernel preserves optional NULL pointer"
+    ],
+    "kernel_exe_sha256": "43b788b1ea80ee484a69d344c848c674d06c346ce1799b992d19db994a132cfd",
+    "kernel_sys_sha256": "c1c86626585c8332a8788a01ded40c8795fd449d1832c9428436038530bbe906",
+    "dos_group_link_segment": 122,
+    "startup_offset": 154,
+    "instance_table_offset": 176,
+    "instance_bytes": 6430,
+    "limits": [
+      "Source-link byte/relocation checks, no Windows boot",
+      "Uncompressed exeflat load segment 0x60 profile"
+    ]
+  },
+  "resource_budget": {
+    "disk_image_MiB_max": 32,
+    "guest_RAM_MiB": 128,
+    "guest_CPUs": 1,
+    "disk_reserve_GiB": 17,
+    "suggested_time_limit_seconds": 120
+  },
+  "reviewed_guest_requirements": [
+    "TCG only",
+    "-nic none",
+    "own serial file",
+    "dedicated image only",
+    "no Windows or Microsoft inputs",
+    "no CSM or main builder"
+  ],
+  "end_marker": "SHZ-EXIT:0 or SHZ-EXIT:1 on COM1; guest then halts",
+  "limits": [
+    "No VM was launched by this producer",
+    "No synthetic Windows startup broadcast",
+    "No Windows 98, Setup or native modern application success claim"
+  ],
+  "raw_private_record_sha256": "b1399bd3ae9549c266edbadba44ea80d9788c9e4b553f5c3f4fbce49743e4fca",
+  "privacy": "Only actual workspace prefixes normalized; no bytes or execution results fabricated"
+}

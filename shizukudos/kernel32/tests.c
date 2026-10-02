@@ -19,6 +19,20 @@ static unsigned failures;
 #define CHECK(name, cond) do { if (cond) kprintf("K32 test PASS: %s\n", name); \
     else { kprintf("K32 test FAIL: %s\n", name); ++failures; } } while (0)
 
+/* PerCPU foundation on the actual BSP. AP execution is intentionally gated. */
+static void test_cpu_state(void)
+{
+    thread_t *t = thread_current();
+    CHECK("trusted BSP CPU identity and current ownership", arch_cpu_id() == 0 && t && t->on_cpu == 0);
+    CHECK("online and affinity policy match actual UP support", sched_cpu_online_mask() == 1 &&
+          thread_get_affinity(t) == 1 && thread_set_affinity(t, 1) == 0);
+    CHECK("offline affinity rejects without mutation", thread_set_affinity(t, 2) == -1 &&
+          thread_set_affinity(t, 0) == -1 && thread_get_affinity(t) == 1);
+    CHECK("AP online requires absent architecture handshake", sched_cpu_register(1) == -2 &&
+          sched_cpu_register(32) == -1 && sched_cpu_online_mask() == 1);
+    CHECK("perCPU FIFO and saved-stack ownership are conserved", sched_validate() == 0);
+}
+
 /* ---- preemption ---- */
 static volatile uint32_t spin_count[2];
 static volatile int spin_stop;
@@ -186,6 +200,7 @@ void run_self_tests(const shz_bootinfo_t *bi)
     shz_evidence(0, read_cr0());
     shz_evidence(1, read_cr3());
     CHECK("paging enabled with write-protect", (read_cr0() & 0x80010001u) == 0x80010001u && (read_cr3() & 0xfff) == 0);
+    test_cpu_state();
     test_preempt();
     test_mutex();
     test_semaphore();
@@ -193,6 +208,8 @@ void run_self_tests(const shz_bootinfo_t *bi)
     test_heap();
     test_demand_paging();
     test_user();
+    /* Ring3 supplies user GS; every syscall/IRQ returns to trusted kernel GS. */
+    test_cpu_state();
     shz_evidence(31, 0);
 }
 

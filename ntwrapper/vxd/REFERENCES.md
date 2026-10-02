@@ -54,3 +54,41 @@ the manifest and intermediate/final artifacts, plus the test log. Those receipts
 provide local provenance and change detection; they are not upstream signatures
 or evidence of a guest pass. An actual guest receipt must be recorded separately
 with the tested driver/probe hashes, OS identity, log, and test conditions.
+
+## Native QUERY callback contracts (Win98 DDK, pinned archive)
+
+Original Microsoft interface topics were extracted and read from [OTHER.CHM](https://github.com/fapablazacl/win98-ddk-toolchain/blob/0c662d32378b9940ed90aee682f4eb5daf816e6a/98DDK/help/OTHER.CHM), SHA-256
+`25bf75cb60f1545147eb868fd2ab2b2452c3d4d559b5e2f440c07a9db187e127`.
+The service declaration order is pinned by [VMM.INC](https://github.com/fapablazacl/win98-ddk-toolchain/blob/0c662d32378b9940ed90aee682f4eb5daf816e6a/98DDK/inc/win98/VMM.INC), SHA-256
+`d640c2994970fabe36c6d4f47ac94b719554d19dc036807c56fe9252ded6d1b2`,
+and [VWIN32.INC](https://github.com/fapablazacl/win98-ddk-toolchain/blob/0c662d32378b9940ed90aee682f4eb5daf816e6a/98DDK/inc/win98/VWIN32.INC), SHA-256
+`cc2bacfd25cdf5cdda3abe3396b1d0389a9a1c09f4226fbfdb7a0bd218049e2e`.
+The project incorporates original wrappers and factual constants only.
+
+| Binding | Encoded DWORD | Original contract/topic |
+| --- | --- | --- |
+| Get_Cur_VM_Handle / Get_Sys_VM_Handle | `10001` / `10003` | returns EBX VM handle |
+| Get_Cur_Thread_Handle / Get_System_Time | `10108` / `1003f` | EDI thread / EAX milliseconds |
+| Call_Restricted_Event / Cancel_Restricted_Event | `1015a` / `1015b` | `kernel_8th5`, `8tip`, `8tdk`; EAX boost, EBX System VM, ECX flags, EDX ref, ESI callback/handle, EDI timeout |
+| Set_Global_Time_Out / Cancel_Time_Out | `1003c` / `1003e` | `92sz`; non-asynchronous VMM timer, EAX ms/EDX ref/ESI callback or returned handle |
+| _VWIN32_OpenVxDHandle | `2a0025` | VWIN32.H inline declaration: cdecl handle, type1 event, caller cleanup |
+| _VWIN32_SetWin32Event / _VWIN32_CloseVxDHandle | `2a000e` / `2a0014` | `4fn4` / `4fld`: EAX owned ring0 handle, EAX nonzero success; signal only in System VM |
+
+The scheduled restricted event uses flags `0x4b`: WAIT_FOR_STI,
+WAIT_NOT_CRIT, ALWAYS_SCHED, WAIT_NOT_NESTED_EXEC. It deliberately has no
+PEF_TIME_OUT restriction bypass and no PEF_RING0_EVENT promise. It executes
+original C in the selected System VM; it performs no DOS/nested execution,
+blocking wait or priority adjustment. Its Win32 event handle is an owned ring0
+reference. Signaling occurs after both admission and IRQ masking end. Timer
+callbacks only enqueue the restricted event. Callback thunks marshal EBX/EDI/EDX,
+clear DF and return with IF enabled as the original topic requires. The original
+`8whh`/`8whi` page-lock topics support flags0 residency locks on the two relocated
+code/data ranges; PAGEMAPGLOBAL remains for DIOC aliases. No DDK declaration or
+host test establishes successful execution in the live Windows VMM.
+
+Thread_Not_Executeable (`20`) and Destroy_Thread (`21`) specify only EDI's
+thread handle (`9chj`/`9cdt`); no current-VM identity is inferred. VM_Not_Executeable
+(`0b`) and Destroy_VM (`0c`) specify EBX's VM handle (pinned VMM.H comments).
+Both notification families return carry clear and request real retained cleanup.
+The source uses these separate authoritative identities rather than a guessed
+process-notification register convention.

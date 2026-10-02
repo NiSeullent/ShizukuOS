@@ -1,0 +1,31 @@
+{
+  "schema": "shizukudos-cb43-linked-dos-layout-v1",
+  "passed": 14,
+  "failed": 0,
+  "checks": [
+    "actual DOS linked executable has MZ header",
+    "startup info belongs to DOS data group",
+    "first SFT fixed address DS:00CC preserved",
+    "startup instance table points to DOS data segment",
+    "4.0 optional instance pointer is an actual linked zero DWORD",
+    "IIS_Ptr bytes encode offset-low then segment-high",
+    "MZ relocation targets IIS_Ptr segment word",
+    "MZ relocation never targets IIS_Ptr offset word",
+    "actual instance item length covers complete DOS data group",
+    "instance list has actual zero pointer and zero length terminator",
+    "instance table and presence flag do not overlap fixed SFT",
+    "flattened kernel startup pointer has actual load-segment relocation",
+    "flattened kernel IIS_Ptr resolves actual DOS DS:0000",
+    "flattened kernel preserves optional NULL pointer"
+  ],
+  "kernel_exe_sha256": "dcf20d3cb99b9347a4134d1e2d27757888686f374d11ee70068681f78939e4e5",
+  "kernel_sys_sha256": "62194db22e7d157865f9767c78ca3ecf7d7977d720a99a1afe8c8c02b1aebb3f",
+  "dos_group_link_segment": 122,
+  "startup_offset": 154,
+  "instance_table_offset": 176,
+  "instance_bytes": 6430,
+  "limits": [
+    "Source-link byte/relocation checks, no Windows boot",
+    "Uncompressed exeflat load segment 0x60 profile"
+  ]
+}

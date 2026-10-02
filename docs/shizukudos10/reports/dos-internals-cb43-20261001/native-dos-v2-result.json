@@ -1,0 +1,28 @@
+{
+  "status": "PASS_ACTUAL_DOS_API_GUEST",
+  "guest_exit_marker": "0",
+  "guest_checks": 17,
+  "guest_failed": 0,
+  "source_image_sha256_before": "48632369aebe7bc2a609c2589e662d3c9c5bace4763645f9a7834ffc83ede129",
+  "source_image_sha256_after": "48632369aebe7bc2a609c2589e662d3c9c5bace4763645f9a7834ffc83ede129",
+  "source_unchanged": true,
+  "owned_disk_sha256_after": "c830bc707d39aa19d54871205ccf8ce6e0667806a1f6829d3e67e9c6ec4013b5",
+  "qemu_process_exit": 0,
+  "owned_process_stopped": true,
+  "host_stopped_after_guest_marker": true,
+  "report": {
+    "sha256": "f8419d5b465e7ba84dafa4265d446104aa4503916045e8b66e1dec440c525716",
+    "bytes": 710
+  },
+  "FAT_readback_exit": 0,
+  "elapsed_seconds": 10.15,
+  "actual_DOS_interrupts": true,
+  "acceleration": "TCG",
+  "Windows_media_used": false,
+  "Windows_startup_synthesized": false,
+  "Windows98_boot_verified": false,
+  "MSDOS_replaced_under_Windows98": false,
+  "native_modern_apps_verified": false,
+  "receipt_epoch": "root-dos-api-v2",
+  "original_receipt_sha256": "1233b61ba69c15fa92d22abab677ca82642f9fccb4ae0a2a69cdcc524b9aef0b"
+}

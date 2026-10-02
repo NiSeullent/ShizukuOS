@@ -4,6 +4,7 @@
  * unhandled exceptions when no user-mode dispatcher is registered).
  */
 #include "proc_internal.h"
+#include "../kcommon/nt_sched_policy.h"
 
 extern void enter_user(uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2);
 extern void vm_set_demand_range(uint64_t lo, uint64_t hi);
@@ -161,6 +162,8 @@ static void user_thread_main(void *arg)
     enter_user(t->user_rip, t->user_rsp, t->user_arg, t->user_arg2);
 }
 
+static void release_thread_user_memory(process_t *p, thread_t *t);
+
 static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2,
                                uint64_t stack_size, int suspended, thread_t **out)
 {
@@ -199,15 +202,35 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
     t->user_gs_base = t->teb;
     tobj = ob_create(OB_THREAD, 0);
     if (!tobj) { thread_discard(t); return -1; }
-    tobj->u.thr.t = t;
-    tobj->u.thr.tid = t->tid;                   /* the id queries report once the thread was reclaimed */
-    tobj->u.thr.pid = (uint64_t)p->pid;
-    t->object = tobj;
-    ob_ref(p->object);                          /* the thread keeps its process object (and slot) until it is reaped (objects.c
-                                                   thread_object_detach drops it) */
-    t->creator_hold = out != 0;                 /* the caller reads t->object after the thread may already have run */
-    ++p->threads_alive;
-    if (!p->main_thread) p->main_thread = t;
+    {
+        shz_nt_sched_projection_t projection;
+        sched_policy_t policy;
+        const uint64_t f = irq_save();
+        const uint32_t cls = p->priority_class ? p->priority_class : SHZ_NT_PROCESS_NORMAL;
+        /* A retarget sees either an unpublished TCB or a fully initialized
+         * user policy. TLS may block, so it runs after this publication. */
+        if (p->terminated || p->exit_owner ||
+            shz_nt_sched_from_win32(cls, 0, &projection) != SHZ_NT_SCHED_OK ||
+            thread_get_sched_policy(t, &policy) ||
+            thread_set_sched_policy(t, projection.absolute_priority, policy.quantum_ticks, policy.cpu_mask)) {
+            irq_restore(f);
+            release_thread_user_memory(p, t);
+            thread_discard(t);
+            ob_deref(tobj);
+            return -1;
+        }
+        tobj->u.thr.t = t;
+        tobj->u.thr.tid = t->tid;
+        tobj->u.thr.pid = (uint64_t)p->pid;
+        tobj->u.thr.nt_base_increment = projection.nt_base_increment;
+        tobj->u.thr.last_sched_priority = projection.absolute_priority;
+        t->object = tobj;
+        ob_ref(p->object);                     /* held until thread_object_detach */
+        t->creator_hold = out != 0;
+        ++p->threads_alive;
+        if (!p->main_thread) p->main_thread = t;
+        irq_restore(f);
+    }
     thread_user_tls_init(p, t);
     if (out) *out = t;
     {

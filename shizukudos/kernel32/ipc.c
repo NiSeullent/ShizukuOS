@@ -13,12 +13,14 @@
  */
 #include "k32.h"
 #include "../abi/shz_ipc.h"
+#include "service_policy.h"
 
 #define OP_ECHO 0x100
 #define OP_SUM32 0x101
 #define OP_CRC32 0x102
 #define OP_TIME 0x103
 #define OP_SESSION_END 0x1f0
+#define RX_PASS_BUDGET 32u
 
 static void *chan_base;
 static size_t chan_size;
@@ -28,6 +30,7 @@ static uint32_t peer;
 static ksem_t doorbell_sem;
 static volatile uint32_t doorbells;
 static uint32_t served, proto_errors, refused_buffers, stale_msgs;
+static int persistent_service;
 volatile uint32_t ipc_session_end;
 
 uint32_t ipc_requests_served(void) { return served; }
@@ -45,6 +48,9 @@ void ipc_doorbell_irq(void)
 void ipc_init(const shz_bootinfo_t *bi)
 {
     unsigned c;
+    const int mode = k32_boot_service_mode(bi);
+    KASSERT(mode >= 0);
+    persistent_service = mode == 1;
     sem_init(&doorbell_sem, 0);
     for (c = 0; c < bi->channel_count; ++c) {
         if (bi->channel[c].peer_domain != SHZ_DOM_KERNEL64)
@@ -53,6 +59,11 @@ void ipc_init(const shz_bootinfo_t *bi)
         chan_size = (size_t)bi->channel[c].size;
         chan = (shz_channel_hdr_t *)chan_base;
         KASSERT(shz_channel_valid(chan, chan_size));
+        if (persistent_service) {
+            KASSERT(chan->channel_id == bi->channel[c].channel_id && chan->generation == bi->generation);
+            KASSERT((chan->domain_a == SHZ_DOM_KERNEL32 && chan->domain_b == SHZ_DOM_KERNEL64) ||
+                    (chan->domain_b == SHZ_DOM_KERNEL32 && chan->domain_a == SHZ_DOM_KERNEL64));
+        }
         peer = bi->channel[c].peer_domain;
         rx = shz_channel_ring_rx(chan_base, chan, SHZ_DOM_KERNEL32);
         tx = shz_channel_ring_tx(chan_base, chan, SHZ_DOM_KERNEL32);
@@ -117,8 +128,15 @@ static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
         break;
     }
     case OP_SESSION_END:
-        ipc_session_end = 1;
-        reply(m, SHZ_OK, 0, 0);
+        if (persistent_service) {
+            /* This opcode ends the QA peer session, not a Win98-owned service.
+             * Do not acknowledge a shutdown that this profile did not perform.
+             */
+            reply(m, SHZ_E_UNSUPPORTED, 0, 0);
+        } else {
+            ipc_session_end = 1;
+            reply(m, SHZ_OK, 0, 0);
+        }
         break;
     default:
         reply(m, SHZ_E_UNSUPPORTED, 0, 0);
@@ -133,13 +151,24 @@ void ipc_server_thread(void *arg)
         shz_msg_hdr_t m;
         uint8_t payload[SHZ_MSG_MAX_INLINE];
         int reason, rc;
+        unsigned budget;
         sem_wait_timeout(&doorbell_sem, 20);          /* also polls: a doorbell may race the wait */
         shz_doorbell_ack();
-        while ((rc = shz_ring_pop(rx, &m, payload, sizeof payload, &reason)) != SHZ_E_NOENT) {
+        /* Bound work even when a peer replenishes the ring continuously. */
+        for (budget = 0; budget < RX_PASS_BUDGET; ++budget) {
+            rc = shz_ring_pop(rx, &m, payload, sizeof payload, &reason);
+            if (rc == SHZ_E_NOENT)
+                break;
             if (rc == SHZ_OK)
                 handle(&m, payload);
-            else
+            else {
                 ++proto_errors;
+                /* Malformed frames are consumed; invalid metadata and a
+                 * corrupt producer index are not. Retry them after a wait. */
+                if (rc != SHZ_E_PROTO || reason == SHZ_PR_HEAD_CORRUPT)
+                    break;
+            }
         }
+        thread_yield();                             /* pending doorbells can make the next wait immediate */
     }
 }

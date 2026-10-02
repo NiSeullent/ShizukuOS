@@ -187,3 +187,54 @@ and allocator hashes match 6970's pinned upstream observations. They do not
 establish a successful Windows boot on that DOS implementation. Source reads,
 hashes and public declaration inspection were the only checks; no execution
 acceptance is claimed.
+
+## Native endpoint prerequisite implemented; actual DOS execution remains next
+
+The audit above is historical source-only evidence. Its blocked CHM contract
+reads have now been completed from the pinned original Win98 DDK archive.
+Owned extraction evidence is `/tmp/windows-ddk-contracts-0nfax5hz/`: source hashes,
+6849 extracted topic files, extraction manifest and topic texts. No DDK bodies
+were incorporated. `OTHER.CHM` SHA remains
+`25bf75cb60f1545147eb868fd2ab2b2452c3d4d559b5e2f440c07a9db187e127`.
+Current native callback source and tests are described in windows-compat.md and
+ntwrapper/vxd/REFERENCES.md; the former missing event-delivery seam now has a
+real production implementation and PE Win32 probe, with host-only verification.
+
+Exact Win98 topics establish these facts for the next DOS executor work:
+
+- DOSMGR_Get_IndosPtr (`9fhy`) returns a low-linear word: low byte ErrorMode,
+  high byte InDOS. Mapping another VM adds that VM's high-linear base. The
+  pointer is tied to the real DOSMGR/DOS instance, not an arbitrary preceding
+  byte inferred from another DOS implementation.
+- DOSMGR_Get_DOS_Crit_Status (`9fhx`) returns ZF set when DOS is available,
+  ZF clear in DOS's critical section. It is neither an owner-PSP lookup nor
+  proof that Windows critical sections or all reentrancy gates are safe.
+- Exec_VxD_Int (`92wg`) includes a register-only AX3000/int21 example; its
+  DWORD interrupt argument is popped by the service. It preserves client
+  state internally, returns register changes, and prohibits selector-changing
+  operations. AH34 pointer-returning behavior is a different contract.
+- Begin_Nest_V86_Exec (`92ut`) serializes System-VM V86 execution through its
+  V86 mutex. Save_Client_State/Restore_Client_State (`92wk`/`92wi`) are actual
+  services, not a memcpy of guessed client state.
+- Call_Restricted_Event (`8th5`/`8tip`) can select a specific initial VMM
+  thread with PEF_THREAD_EVENT; timeout callback CF bypasses restrictions.
+  PEF_RING0_EVENT prohibits DOS/nested execution/blocking. The new QUERY
+  callback has no DOS execution and cannot be repurposed as that executor.
+
+Next concrete implementation prerequisites are an original-owner negotiated
+reverse command/completion envelope (existing PMA QUERY semantics stay intact),
+a retained request tied to the actual System-VM initial thread and its client
+state, a checked live DOSMGR pointer/lifetime gate including both InDOS and
+ErrorMode plus DOS/Windows critical-state restrictions, and an authoritative
+matching PSP for the command's actual DOS process. Only after those conditions
+are enforced should a dedicated non-ring0 restricted callback save/nest/perform
+real AH30/restore/end and publish the exact matching completion. Service IDs
+must continue to derive from pinned declarations. Root/Fada own the ABI/backend
+successor in a separate source epoch; no opcode was guessed here.
+
+The private boot owner must first demonstrate live Windows98 on the intended
+ShizukuDOS replacement and run the matched VxD/PMAQUERY probe. Microsoft-DOS
+control boot is only a control. There is still no actual DOS executor callback
+or real AH30 completion proof. The root boot lane uses the current17GiB private
+reserve (`18253611008` bytes), plus capture reserve when applicable; this lane
+has not weakened any media/resource guard or launched a private guest.

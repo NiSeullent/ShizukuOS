@@ -12,6 +12,7 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 import sys
+import tempfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -561,6 +562,7 @@ def validate_manifest(manifest, root=ROOT):
         nonempty(entry["boundary"], "catalog boundary")
     require(families == set(wanted_families), "architectural family coverage is incomplete")
     require(all(set(a["families"]) <= families for a in manifest["backend_apis"]), "unknown backend family reference")
+    verify_source_snapshot(root, hashes)
     return {
         "schema": "shizuku.wrapper-capabilities.receipt.v1", "manifest_schema": SCHEMA,
         "baseline_commit": manifest["baseline_commit"], "validation_scope": "source_inventory",
@@ -573,14 +575,53 @@ def validate_manifest(manifest, root=ROOT):
     }
 
 
-def load_manifest(path):
+def verify_source_snapshot(root, hashes):
+    """Reject persistent changes to the bytes used by the source checks."""
+    root = Path(root).resolve()
+    for name, digest in hashes.items():
+        target = (root / name).resolve()
+        require(target.is_relative_to(root) and target.is_file(), "source snapshot missing or outside project: " + name)
+        require(hashlib.sha256(target.read_bytes()).hexdigest() == digest, "source changed during validation: " + name)
+
+
+def parse_manifest(raw):
     def unique_pairs(pairs):
         out = {}
         for key, value in pairs:
             require(key not in out, "duplicate JSON field: " + key)
             out[key] = value
         return out
-    return json.loads(Path(path).read_text(), object_pairs_hook=unique_pairs)
+    return json.loads(raw, object_pairs_hook=unique_pairs)
+
+
+def load_manifest(path):
+    return parse_manifest(Path(path).read_bytes())
+
+
+def publish_receipt(path, encoded, verify):
+    """Publish only a stable snapshot, restoring any old receipt on drift."""
+    prior = path.read_bytes() if path.exists() else None
+    staged = None
+    published = False
+    try:
+        with tempfile.NamedTemporaryFile(prefix="." + path.name + ".", suffix=".tmp", dir=path.parent, delete=False) as temporary:
+            staged = Path(temporary.name)
+        staged.write_text(encoded, encoding="utf-8")
+        verify()
+        staged.replace(path)
+        published = True
+        verify()
+    except (ValidationError, OSError, ValueError):
+        if published:
+            if prior is None:
+                path.unlink()
+            else:
+                staged.write_bytes(prior)
+                staged.replace(path)
+        raise
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
 
 
 def main(argv=None):
@@ -589,14 +630,24 @@ def main(argv=None):
     parser.add_argument("--out", type=Path, help="Explicitly write a fresh JSON receipt; otherwise read-only stdout")
     args = parser.parse_args(argv)
     try:
-        report = validate_manifest(load_manifest(args.manifest))
-        report["manifest_sha256"] = hashlib.sha256(args.manifest.read_bytes()).hexdigest()
-        report["validator_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        validator = Path(__file__)
+        validator_raw = validator.read_bytes()
+        manifest_raw = args.manifest.read_bytes()
+        report = validate_manifest(parse_manifest(manifest_raw))
+        report["manifest_sha256"] = hashlib.sha256(manifest_raw).hexdigest()
+        report["validator_sha256"] = hashlib.sha256(validator_raw).hexdigest()
+
+        def verify():
+            verify_source_snapshot(ROOT, report["source_sha256"])
+            require(args.manifest.read_bytes() == manifest_raw, "manifest changed during validation")
+            require(validator.read_bytes() == validator_raw, "validator changed during validation")
+
         encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        verify()
         if args.out is not None:
             require(args.out.resolve().is_relative_to((ROOT / "build").resolve()), "receipt output must be under project build/")
             args.out.parent.mkdir(parents=True, exist_ok=True)
-            args.out.write_text(encoded)
+            publish_receipt(args.out, encoded, verify)
             print("PASS: source capability inventory: %d families, %d frontend APIs, %d backend APIs; receipt %s; behavior/native tests not run" %
                   (report["family_count"], report["api_count"], report["backend_api_count"], args.out))
         else:

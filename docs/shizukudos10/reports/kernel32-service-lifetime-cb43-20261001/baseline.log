@@ -1,0 +1,303 @@
+scenario=2 failures=0 exit=0 virtual_ms=70 replies=1 qa=1 reports=1 queries=0
+scenario=1 failures=0 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+scenario=3 failures=0 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+test_actual_channel_identity_is_verified_before_server_start (test_lifetime.Kernel32Lifetime.test_actual_channel_identity_is_verified_before_server_start) ... 
+  test_actual_channel_identity_is_verified_before_server_start (test_lifetime.Kernel32Lifetime.test_actual_channel_identity_is_verified_before_server_start) (case=20) ... FAIL
+  test_actual_channel_identity_is_verified_before_server_start (test_lifetime.Kernel32Lifetime.test_actual_channel_identity_is_verified_before_server_start) (case=21) ... FAIL
+test_actual_supervisor_writer_selects_only_native_kernel32 (test_lifetime.Kernel32Lifetime.test_actual_supervisor_writer_selects_only_native_kernel32) ... FAIL
+test_default_qa_preserves_actual_session_end_ack_and_exit (test_lifetime.Kernel32Lifetime.test_default_qa_preserves_actual_session_end_ack_and_exit) ... ok
+test_default_qa_preserves_twenty_second_exit (test_lifetime.Kernel32Lifetime.test_default_qa_preserves_twenty_second_exit) ... ok
+test_legacy_bootinfo_ignores_absent_cmdline_tail (test_lifetime.Kernel32Lifetime.test_legacy_bootinfo_ignores_absent_cmdline_tail) ... ok
+test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) ... 
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=8) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=9) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=10) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=11) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=12) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=13) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=14) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=15) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=16) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=17) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=18) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=19) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=22) ... FAIL
+  test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=23) ... FAIL
+test_native_absent_owner_is_not_success (test_lifetime.Kernel32Lifetime.test_native_absent_owner_is_not_success) ... FAIL
+test_native_failed_owner_closes_with_failure (test_lifetime.Kernel32Lifetime.test_native_failed_owner_closes_with_failure) ... FAIL
+test_native_service_survives_cap_and_qa_end_then_answers_real_ipc (test_lifetime.Kernel32Lifetime.test_native_service_survives_cap_and_qa_end_then_answers_real_ipc) ... FAIL
+test_native_unavailable_state_hypercall_is_not_success (test_lifetime.Kernel32Lifetime.test_native_unavailable_state_hypercall_is_not_success) ... FAIL
+test_native_unknown_owner_state_is_not_success (test_lifetime.Kernel32Lifetime.test_native_unknown_owner_state_is_not_success) ... FAIL
+
+======================================================================
+FAIL: test_actual_channel_identity_is_verified_before_server_start (test_lifetime.Kernel32Lifetime.test_actual_channel_identity_is_verified_before_server_start) (case=20)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 58, in test_actual_channel_identity_is_verified_before_server_start
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=20 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL real channel generation/domain mismatch refused before server creation
+
+
+======================================================================
+FAIL: test_actual_channel_identity_is_verified_before_server_start (test_lifetime.Kernel32Lifetime.test_actual_channel_identity_is_verified_before_server_start) (case=21)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 58, in test_actual_channel_identity_is_verified_before_server_start
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=21 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL real channel generation/domain mismatch refused before server creation
+
+
+======================================================================
+FAIL: test_actual_supervisor_writer_selects_only_native_kernel32 (test_lifetime.Kernel32Lifetime.test_actual_supervisor_writer_selects_only_native_kernel32)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 97, in test_actual_supervisor_writer_selects_only_native_kernel32
+    self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+AssertionError: 3 != 0 : 
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=8)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=8 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=9)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=9 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=10)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=10 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=11)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=11 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=12)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=12 failures=1 exit=0 virtual_ms=0 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=13)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: -11 != 0 : 
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=14)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=14 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=15)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=15 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=16)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=16 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=17)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=17 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=18)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=18 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=19)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=19 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=22)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=22 failures=1 exit=96 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+production KASSERT ${STAGE}/source/shizukudos/kernel32/ipc.c:55
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_malformed_native_policy_is_refused_before_initialization (test_lifetime.Kernel32Lifetime.test_malformed_native_policy_is_refused_before_initialization) (case=23)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 53, in test_malformed_native_policy_is_refused_before_initialization
+    self.run_case(case)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=23 failures=1 exit=96 virtual_ms=0 replies=0 qa=0 reports=0 queries=0
+production KASSERT ${STAGE}/source/shizukudos/kernel32/ipc.c:55
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+======================================================================
+FAIL: test_native_absent_owner_is_not_success (test_lifetime.Kernel32Lifetime.test_native_absent_owner_is_not_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 42, in test_native_absent_owner_is_not_success
+    self.run_case(5)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=5 failures=2 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL native terminal/error did not masquerade as QA
+FAIL native failure/unknown/unavailable owner state failed closed
+
+
+======================================================================
+FAIL: test_native_failed_owner_closes_with_failure (test_lifetime.Kernel32Lifetime.test_native_failed_owner_closes_with_failure)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 39, in test_native_failed_owner_closes_with_failure
+    self.run_case(4)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=4 failures=2 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL native terminal/error did not masquerade as QA
+FAIL native failure/unknown/unavailable owner state failed closed
+
+
+======================================================================
+FAIL: test_native_service_survives_cap_and_qa_end_then_answers_real_ipc (test_lifetime.Kernel32Lifetime.test_native_service_survives_cap_and_qa_end_then_answers_real_ipc)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 27, in test_native_service_survives_cap_and_qa_end_then_answers_real_ipc
+    self.run_case(0)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=0 failures=5 exit=0 virtual_ms=70 replies=1 qa=1 reports=1 queries=0
+FAIL persistent native service lived beyond QA20second cap
+FAIL native service did not report unexecuted QA completion
+FAIL SESSION_END honestly refused and did not end persistent service
+FAIL all four real services answered after20seconds and QA-session request
+FAIL actual lifecycle queried Win98 domain5
+
+
+======================================================================
+FAIL: test_native_unavailable_state_hypercall_is_not_success (test_lifetime.Kernel32Lifetime.test_native_unavailable_state_hypercall_is_not_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 48, in test_native_unavailable_state_hypercall_is_not_success
+    self.run_case(7)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=7 failures=2 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL native terminal/error did not masquerade as QA
+FAIL native failure/unknown/unavailable owner state failed closed
+
+
+======================================================================
+FAIL: test_native_unknown_owner_state_is_not_success (test_lifetime.Kernel32Lifetime.test_native_unknown_owner_state_is_not_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 45, in test_native_unknown_owner_state_is_not_success
+    self.run_case(6)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=6 failures=2 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL native terminal/error did not masquerade as QA
+FAIL native failure/unknown/unavailable owner state failed closed
+
+
+----------------------------------------------------------------------
+Ran 11 tests in 1.076s
+
+FAILED (failures=22)

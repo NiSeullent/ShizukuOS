@@ -347,32 +347,9 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         }
         return STATUS_INVALID_INFO_CLASS;
     }
-    case SYS_NtQueryInformationThread: {
-        thread_t *t = a1 == CURRENT_THREAD_HANDLE ? thread_current() : 0;
-        kobject_t *to = 0;
-        if (!t && !(to = handle_lookup(p, a1, OB_THREAD))) return STATUS_INVALID_HANDLE;
-        if (a2 == 0) {                                      /* ThreadBasicInformation */
-            struct { int64_t exit_status; uint64_t teb; uint64_t pid, tid; uint64_t affinity; int32_t prio, base; } b;
-            uint64_t f;
-            if (a4 < sizeof b) return STATUS_BUFFER_TOO_SMALL;
-            f = irq_save();                                 /* an exited thread may be reclaimed (sched.c) at any preemption */
-            if (to) t = to->u.thr.t;
-            if (t) {
-                b.exit_status = t->state == TS_ZOMBIE ? t->exit_code : 0x103;
-                b.teb = t->teb; b.pid = (uint64_t)p->pid; b.tid = t->id * 4ull;
-            } else {                                        /* exited and reclaimed: the object kept what is still defined */
-                b.exit_status = to->u.thr.exit_code;
-                b.teb = 0; b.pid = to->u.thr.pid; b.tid = to->u.thr.tid;
-            }
-            irq_restore(f);
-            b.affinity = 1; b.prio = 8; b.base = 8;
-            if (copy_to_user(p, a3, &b, sizeof b)) return STATUS_ACCESS_VIOLATION;
-            return STATUS_SUCCESS;
-        }
-        return STATUS_INVALID_INFO_CLASS;
-    }
+    case SYS_NtQueryInformationThread: return STATUS_INVALID_INFO_CLASS; /* class 0 is owned by ipc_proc.c */
     case SYS_NtSetInformationProcess: return STATUS_INVALID_INFO_CLASS;   /* nothing settable yet; entry points come from ntdll exports */
-    case SYS_NtSetInformationThread: return STATUS_SUCCESS;             /* priorities, names: accepted, no effect */
+    case SYS_NtSetInformationThread: return STATUS_INVALID_INFO_CLASS;   /* validated policy classes are owned by ipc_proc.c */
     case SYS_NtCreateProcessEx: {                           /* (PHANDLE proc, PHANDLE thread, PUNICODE path, PUNICODE cmd, PUNICODE cwd) */
         struct ustr u;
         uint16_t w[260];

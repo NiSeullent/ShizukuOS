@@ -24,6 +24,11 @@ static unsigned arch_calls, mem_calls, sched_calls, timer_calls, sti_calls, ipc_
 static unsigned service_calls, service_sequence, owner_calls;
 static unsigned qa_calls, ntdrv_calls, setup_calls, autorun_calls, desktop_calls, control_calls, report_calls;
 static unsigned fs_calls, archive_calls, random_calls, ds_calls, disk_calls, thread_calls;
+#if defined(TEST_KERNEL64)
+static unsigned bringup_prepare_calls, bringup_verify_calls, bringup_prepare_sequence, bringup_verify_sequence;
+static uint64_t mock_read_cr3(void) { return 0x1000; }
+#define read_cr3 mock_read_cr3
+#endif
 static uint64_t simulated_ms;
 static uint32_t final_owner_state;
 static long owner_hcall_status;
@@ -131,6 +136,17 @@ int fs_load_archive(const uint8_t *data, uint64_t length)
     return 7;
 }
 void disk_init(void) { ++disk_calls; ++sequence; }
+void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi, uint64_t initial_cr3)
+{
+    CHECK(bi != NULL && bi->magic == SHZ_BOOTINFO_MAGIC && initial_cr3 == 0x1000);
+    CHECK(mem_calls == 1 && arch_calls == 1 && sti_calls == 0);
+    ++bringup_prepare_calls; bringup_prepare_sequence = ++sequence;
+}
+void shz_cpu_bringup_verify(void)
+{
+    CHECK(bringup_prepare_calls == 1 && sti_calls == 1 && sched_calls == 1);
+    ++bringup_verify_calls; bringup_verify_sequence = ++sequence;
+}
 void pci_log_devices(void) { }
 void setup_autostart(const shz_bootinfo_t *bi) { (void)bi; ++setup_calls; ++sequence; }
 unsigned k64_desktop(void) { ++desktop_calls; ++sequence; return 0; }
@@ -219,6 +235,8 @@ static void normal_initialization(void)
     CHECK(fs_calls == 0 && archive_calls == 0 && random_calls == 0 && ds_calls == 0 && disk_calls == 0 && control_calls == 0 && service_sequence == 0);
 #else
     CHECK(fs_calls == 1 && archive_calls == 1 && random_calls == 1 && ds_calls == 1 && disk_calls == 1);
+    CHECK(bringup_prepare_calls == 1 && bringup_verify_calls == 1);
+    CHECK(bringup_prepare_sequence < bringup_verify_sequence);
     CHECK(initrd_files == 7);
 #endif
 }
@@ -271,6 +289,9 @@ int main(int argc, char **argv)
         CHECK(exit_code == 97);
         CHECK(arch_calls == 0 && mem_calls == 0 && sched_calls == 0 && timer_calls == 0 && sti_calls == 0);
         CHECK(qa_calls == 0 && service_calls == 0 && thread_calls == 0 && ipc_calls == 0);
+#if defined(TEST_KERNEL64)
+        CHECK(bringup_prepare_calls == 0 && bringup_verify_calls == 0);
+#endif
     } else {
         CHECK(exit_code == wanted_exit);
         normal_initialization();
@@ -286,6 +307,7 @@ int main(int argc, char **argv)
             CHECK(simulated_ms >= 30000); /* Both RUNNABLE and WAITING persisted beyond the old20s QA limit. */
 #else
             CHECK(control_calls == 0 && service_calls == 1 && owner_calls == 1);
+            CHECK(bringup_verify_sequence < service_sequence);
             CHECK(ipc_sequence < service_sequence);
 #endif
         }

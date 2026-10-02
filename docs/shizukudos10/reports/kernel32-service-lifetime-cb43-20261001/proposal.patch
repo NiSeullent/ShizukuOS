@@ -1,0 +1,180 @@
+From: ShizukuOS contributors
+Subject: [PROPOSAL] Kernel32: opt-in native Windows98 component lifetime
+SPDX-License-Identifier: GPL-2.0-only
+Source-Commit: 8508c5e360fe8c24c659b719f1ed21831cbdbd4c
+Scope: no ABI layout/flags or Kernel64/runtime changes; host-only acceptance
+
+--- a/shizukudos/kernel32/ipc.c
++++ b/shizukudos/kernel32/ipc.c
+@@ -13,6 +13,7 @@
+  */
+ #include "k32.h"
+ #include "../abi/shz_ipc.h"
++#include "service_policy.h"
+ 
+ #define OP_ECHO 0x100
+ #define OP_SUM32 0x101
+@@ -28,6 +29,7 @@
+ static ksem_t doorbell_sem;
+ static volatile uint32_t doorbells;
+ static uint32_t served, proto_errors, refused_buffers, stale_msgs;
++static int persistent_service;
+ volatile uint32_t ipc_session_end;
+ 
+ uint32_t ipc_requests_served(void) { return served; }
+@@ -45,6 +47,9 @@
+ void ipc_init(const shz_bootinfo_t *bi)
+ {
+     unsigned c;
++    const int mode = k32_boot_service_mode(bi);
++    KASSERT(mode >= 0);
++    persistent_service = mode == 1;
+     sem_init(&doorbell_sem, 0);
+     for (c = 0; c < bi->channel_count; ++c) {
+         if (bi->channel[c].peer_domain != SHZ_DOM_KERNEL64)
+@@ -53,6 +58,11 @@
+         chan_size = (size_t)bi->channel[c].size;
+         chan = (shz_channel_hdr_t *)chan_base;
+         KASSERT(shz_channel_valid(chan, chan_size));
++        if (persistent_service) {
++            KASSERT(chan->channel_id == bi->channel[c].channel_id && chan->generation == bi->generation);
++            KASSERT((chan->domain_a == SHZ_DOM_KERNEL32 && chan->domain_b == SHZ_DOM_KERNEL64) ||
++                    (chan->domain_b == SHZ_DOM_KERNEL32 && chan->domain_a == SHZ_DOM_KERNEL64));
++        }
+         peer = bi->channel[c].peer_domain;
+         rx = shz_channel_ring_rx(chan_base, chan, SHZ_DOM_KERNEL32);
+         tx = shz_channel_ring_tx(chan_base, chan, SHZ_DOM_KERNEL32);
+@@ -117,8 +127,15 @@
+         break;
+     }
+     case OP_SESSION_END:
+-        ipc_session_end = 1;
+-        reply(m, SHZ_OK, 0, 0);
++        if (persistent_service) {
++            /* This opcode ends the QA peer session, not a Win98-owned service.
++             * Do not acknowledge a shutdown that this profile did not perform.
++             */
++            reply(m, SHZ_E_UNSUPPORTED, 0, 0);
++        } else {
++            ipc_session_end = 1;
++            reply(m, SHZ_OK, 0, 0);
++        }
+         break;
+     default:
+         reply(m, SHZ_E_UNSUPPORTED, 0, 0);
+--- a/shizukudos/kernel32/main.c
++++ b/shizukudos/kernel32/main.c
+@@ -3,6 +3,7 @@
+  * self-tests; keep serving other domains until the peer ends its session.
+  */
+ #include "k32.h"
++#include "service_policy.h"
+ 
+ extern volatile uint32_t ipc_session_end;
+ extern void report_final(void);
+@@ -12,7 +13,11 @@
+ {
+     thread_t *server = 0;
+     uint64_t waited_ms = 0;
++    int service_mode;
+     if (bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR || bi->domain_id != SHZ_DOM_KERNEL32)
++        shz_exit(97);
++    service_mode = k32_boot_service_mode(bi);
++    if (service_mode < 0)
+         shz_exit(97);
+     arch_init();
+     kprintf("%s: Protected Mode kernel starting, %u MiB RAM, tsc %u kHz\n", KVER, (uint32_t)(bi->ram_size >> 20),
+@@ -25,6 +30,25 @@
+         ipc_init(bi);
+         server = thread_create("ipc-server", ipc_server_thread, 0);
+         KASSERT(server);
++    }
++    if (service_mode) {
++        KASSERT(server);
++        kprintf("%s: native Win98 component service active; QA session limits disabled\n", KVER);
++        for (;;) {
++            hcreg_t state = SHZ_DS_UNUSED;
++            const long status = shz_hcall(SHZ_HC_DOMAIN_STATE, SHZ_DOM_WIN98, 0, &state);
++            if (status != SHZ_OK)
++                shz_exit(98);
++            if (state == SHZ_DS_EXITED) {
++                kprintf("%s: Win98 owner exited; component service stopping\n", KVER);
++                shz_exit(0);
++            }
++            if (state == SHZ_DS_FAILED)
++                shz_exit(1);
++            if (state != SHZ_DS_RUNNABLE && state != SHZ_DS_WAITING)
++                shz_exit(98);
++            thread_sleep_ms(100);
++        }
+     }
+     run_self_tests(bi);
+     if (server) {
+--- a/shizukudos/supervisor/src/kdom.c
++++ b/shizukudos/supervisor/src/kdom.c
+@@ -11,6 +11,7 @@
+ #include "domain.h"
+ #include "pool.h"
+ #include "../../abi/shz_ipc.h"
++#include "../../kernel32/service_policy.h"
+ 
+ #define BOOT_GDT_GPA 0x6000u
+ #define BOOT_PML4_GPA 0x1000u
+@@ -111,6 +112,13 @@
+         bi->initrd_size = initrd->size;
+     }
+     bi->tsc_hz = info->tsc_hz;
++    /* Native Win98 is the explicit owner of this K32 service lifetime. The
++     * existing ABI1.1 command line carries policy; default DOS/QA stays empty.
++     */
++    if (!lm && info->loader_flags == SHZ_LOADER_NATIVE_WIN98) {
++        memcpy(bi->cmdline, K32_WIN98_SERVICE_CMDLINE, sizeof K32_WIN98_SERVICE_CMDLINE);
++        bi->cmdline_size = sizeof K32_WIN98_SERVICE_CMDLINE - 1;
++    }
+ 
+     if (ept_init(&d->ept) || ept_map(&d->ept, 0, base, size, EPT_RWX | EPT_WB, 0)) {
+         log_capture(info->last_error, sizeof info->last_error, "%s: EPT construction failed", d->name);
+--- /dev/null
++++ b/shizukudos/kernel32/service_policy.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: GPL-2.0-only
++ * Opt-in Windows98 component lifetime through the existing ABI1.1 cmdline.
++ * Supervisor owns the writer; this does not add an ABI flag or a Windows RPC.
++ */
++#ifndef K32_SERVICE_POLICY_H
++#define K32_SERVICE_POLICY_H
++#include "../abi/shz_abi.h"
++
++#define K32_WIN98_SERVICE_CMDLINE "shz.k32-service=win98"
++
++/* 0: original QA profile; 1: explicit native Win98 service; -1: refused.
++ * Older writers have no cmdline tail and retain the original QA profile.
++ * A nonempty K32 cmdline is a policy request, never silently treated as QA.
++ */
++static inline int k32_boot_service_mode(const shz_bootinfo_t *bi)
++{
++    const char expected[] = K32_WIN98_SERVICE_CMDLINE;
++    uint32_t i;
++    if (!bi || bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR ||
++        bi->domain_id != SHZ_DOM_KERNEL32)
++        return -1;
++    if (!SHZ_BOOTINFO_HAS(bi, cmdline_size))
++        return 0;
++    if (bi->cmdline_size == 0) {
++        if (bi->size > __builtin_offsetof(shz_bootinfo_t, cmdline) && bi->cmdline[0])
++            return -1;
++        return 0;
++    }
++    if (!SHZ_BOOTINFO_HAS(bi, cmdline) || bi->abi_minor < 1 || bi->flags || !bi->generation ||
++        bi->cmdline_size != sizeof expected - 1 || bi->channel_count != 1)
++        return -1;
++    for (i = 0; i < sizeof expected; ++i)
++        if (bi->cmdline[i] != expected[i])
++            return -1;
++    if (bi->channel[0].peer_domain != SHZ_DOM_KERNEL64 || bi->channel[0].channel_id >= SHZ_MAX_CHANNELS ||
++        bi->channel[0].gpa != SHZ_IPC_GPA_BASE + (uint64_t)bi->channel[0].channel_id * SHZ_IPC_REGION_SIZE ||
++        bi->channel[0].size != SHZ_IPC_REGION_SIZE)
++        return -1;
++    return 1;
++}
++#endif

@@ -1,0 +1,45 @@
+{
+  "schema": "shizuku-dos-win31-proposal-source-handoff/v1",
+  "source_commit": "8508c5e360fe8c24c659b719f1ed21831cbdbd4c",
+  "patch_paths": [
+    "shizukudos/dos16/build.py"
+  ],
+  "payloads": {
+    "README.md": {
+      "bytes": 5904,
+      "sha256": "024974413417da9abbf68aff55aa9a306ee656e8f0e45549cb63145a5233ad05"
+    },
+    "proposal.patch": {
+      "bytes": 1948,
+      "sha256": "a3b60e86f15341a0673c0721798353e5cd2eb806fdb583a3f66e5ca11cfe2ba8"
+    },
+    "test_win31_profile.py": {
+      "bytes": 8405,
+      "sha256": "c588676d02beb8704dcf8e7ebafc8eefb473d7277c2971880ae1a17ad4badd42"
+    },
+    "inputs.json": {
+      "bytes": 977,
+      "sha256": "06cd93a5b37a2b66dd952802008da61da4720949a6933bec87e33df110063824"
+    },
+    "tests.log": {
+      "bytes": 994,
+      "sha256": "d80de2e26f0648e8375808f316d4085987d6e316283e78d6461e0efcd0bd7fe6"
+    },
+    "baseline.log": {
+      "bytes": 4202,
+      "sha256": "8032b6a431e499487672c88e9c30e824b841620281b37f82d8b005b9c38e2985"
+    },
+    "fixture-failure.log": {
+      "bytes": 3511,
+      "sha256": "1ef5163c465b64bfab611db6c7fd8d5cf655821c5fcacfb9c7e52e2efa0bfd3c"
+    },
+    "evidence.json": {
+      "bytes": 9771,
+      "sha256": "fca1877c2a50e595a73d05ac463dec06177a1b196bf2b701f9c1ba1dd9430b43"
+    }
+  },
+  "public_runtime_binaries": false,
+  "Windows98_boot_verified": false,
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "native_apps_verified": false
+}

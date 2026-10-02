@@ -1,0 +1,21 @@
+test_allocator_and_umb_are_measured_not_inferred (test_parse_cbmem_report.ReportTests.test_allocator_and_umb_are_measured_not_inferred) ... ok
+test_duplicate_missing_unknown_and_reordered_fields_rejected (test_parse_cbmem_report.ReportTests.test_duplicate_missing_unknown_and_reordered_fields_rejected) ... ok
+test_exact_separate_marker_required (test_parse_cbmem_report.ReportTests.test_exact_separate_marker_required) ... ok
+test_header_footer_and_crlf_malformed (test_parse_cbmem_report.ReportTests.test_header_footer_and_crlf_malformed) ... ok
+test_high_uses_actual_raw_bit (test_parse_cbmem_report.ReportTests.test_high_uses_actual_raw_bit) ... ok
+test_kib_and_bios_consistency (test_parse_cbmem_report.ReportTests.test_kib_and_bios_consistency) ... ok
+test_nonzero_real_errorlevel_rejects_even_complete_report (test_parse_cbmem_report.ReportTests.test_nonzero_real_errorlevel_rejects_even_complete_report) ... ok
+test_normal_path_phase_counter_and_failure_gates (test_parse_cbmem_report.ReportTests.test_normal_path_phase_counter_and_failure_gates) ... ok
+test_only_actual_owned_valid_block_is_accepted (test_parse_cbmem_report.ReportTests.test_only_actual_owned_valid_block_is_accepted) ... ok
+test_preserves_undefined_success_registers_and_raw_flags (test_parse_cbmem_report.ReportTests.test_preserves_undefined_success_registers_and_raw_flags) ... ok
+test_resize_allocator_raw_carry_and_ax_contracts (test_parse_cbmem_report.ReportTests.test_resize_allocator_raw_carry_and_ax_contracts) ... ok
+test_single_FreeCOM_trailing_space_marker_preserved (test_parse_cbmem_report.ReportTests.test_single_FreeCOM_trailing_space_marker_preserved) ... ok
+test_true_version_and_raw_hma_consistency (test_parse_cbmem_report.ReportTests.test_true_version_and_raw_hma_consistency) ... ok
+test_unknown_source_identity_preserves_raw_but_never_decodes_hma (test_parse_cbmem_report.ReportTests.test_unknown_source_identity_preserves_raw_but_never_decodes_hma) ... ok
+test_valid_low_below_580_is_scoped_pass_and_never_windows_proof (test_parse_cbmem_report.ReportTests.test_valid_low_below_580_is_scoped_pass_and_never_windows_proof) ... ok
+test_zero_largest_is_a_valid_measurement_not_580_gate (test_parse_cbmem_report.ReportTests.test_zero_largest_is_a_valid_measurement_not_580_gate) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.012s
+
+OK

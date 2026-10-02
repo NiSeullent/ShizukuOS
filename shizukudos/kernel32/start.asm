@@ -55,7 +55,8 @@ isr_common:
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
+    mov ax, 0x30
+    mov gs, ax                ; trusted CPU anchor before any C/IRQ state access
     cld
     push esp
     call isr_dispatch
@@ -70,6 +71,7 @@ isr_common:
 
 ; void switch_stacks(uint32_t *save_esp, uint32_t new_esp)
 global switch_stacks
+extern sched_switch_complete
 switch_stacks:
     mov eax, [esp + 4]
     mov edx, [esp + 8]
@@ -80,6 +82,15 @@ switch_stacks:
     push edi
     mov [eax], esp
     mov esp, edx
+    ; Old ESP is saved and inactive. Publish outgoing ownership on new stack,
+    ; before POPFD can enable a timer. Preserve volatile scratch registers.
+    push eax
+    push ecx
+    push edx
+    call sched_switch_complete
+    pop edx
+    pop ecx
+    pop eax
     pop edi
     pop esi
     pop ebx
@@ -113,8 +124,9 @@ gdt_flush:
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
     mov ss, ax
+    mov ax, 0x30
+    mov gs, ax
     jmp 0x08:.reload
 .reload:
     mov ax, [esp + 8]

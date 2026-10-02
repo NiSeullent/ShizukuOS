@@ -1,0 +1,54 @@
+{
+  "schema": "cb43-cbmem-parser-source-validation-receipt-v1",
+  "inputs_hash_scope": "Physicalsource/log/result identities at closure after execution; not falsely labelled as prebuild pins.",
+  "parser": {
+    "file": "parse_cbmem_report.py",
+    "bytes": 9534,
+    "sha256": "865fa35166554307e44adb7c473beeab9b3720321ac82e59887b2d991d0a5113"
+  },
+  "tests": {
+    "file": "test_parse_cbmem_report.py",
+    "bytes": 7799,
+    "sha256": "83da964041fca72488c36ff07e1ee7a02931673c23d47442853825764686617d"
+  },
+  "Python": {
+    "bytes": 15800,
+    "sha256": "9bfe08d337835ca006fbd133cd4e86948beddb60e54f98f6f951ae425b7ba001",
+    "version": "3.12.14"
+  },
+  "host_test_command": [
+    "python3",
+    "-B",
+    "-m",
+    "unittest",
+    "-v",
+    "test_parse_cbmem_report"
+  ],
+  "synthetic_host_test_groups_passed": 16,
+  "synthetic_host_test_failures": 0,
+  "synthetic_tests_execute_DOS": false,
+  "synthetic_test_log": {
+    "file": "synthetic-tests.log",
+    "bytes": 2381,
+    "sha256": "f9e0b5fb8bdb33c2d3392af294690a9d44e9ecf73036a51f4c5b5755704d8047"
+  },
+  "actual_report_interpretation_exit_codes": {
+    "low": 0,
+    "high": 0
+  },
+  "offline_interpretation_command_template": [
+    "python3",
+    "-B",
+    "parse_cbmem_report.py",
+    "<report>",
+    "<separate_marker>",
+    "--kernel-sha256",
+    "62194db22e7d157865f9767c78ca3ecf7d7977d720a99a1afe8c8c02b1aebb3f",
+    "--probe-sha256",
+    "0a93f6402ada0478ae6d95f1e02169e8f7fdd5b30c1353c0ec9d54bf00048c18"
+  ],
+  "offline_source_agent_executed_DOS_VM": false,
+  "runtime_provenance": "native-memory-comparison-receipt.json; root executed actual guests independently",
+  "public_binary_included": false,
+  "Windows98_verified": false
+}

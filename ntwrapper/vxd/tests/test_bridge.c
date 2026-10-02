@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 static unsigned checks, step, failure, locked, unlocks, writes, protected_now;
-static uint32_t last_unlocked[2], permission = 7, physical_xor;
+static uint32_t held_alias[2], last_unlocked[4], permission = 7, physical_xor;
 static unsigned char buffers[2][8192];
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr,"line %u: %s\n",(unsigned)__LINE__,#x); exit(1); } } while(0)
 static int fail(void) { return ++step == failure; }
@@ -13,9 +13,9 @@ static void leave(void *p,uintptr_t saved) { (void)p; CHECK(protected_now && sav
 static uint32_t check_range(uint32_t page,uint32_t count,uint32_t flags)
 { CHECK(!protected_now && flags==0 && count==2 && (page==0x500 || page==0x600)); return fail()?count-1:count; }
 static uint32_t lock_range(uint32_t page,uint32_t count,uint32_t flags)
-{ CHECK(!protected_now && count==2 && flags==NTWV_MAP_GLOBAL); if(fail()) return 0; ++locked; return page==0x500?0xc1000000:0xc2000000; }
+{ CHECK(!protected_now && count==2 && flags==NTWV_MAP_GLOBAL); if(fail()) return 0; unsigned b=page==0x500?0u:1u;CHECK(!held_alias[b]);held_alias[b]=1;++locked; return page==0x500?0xc1000000:0xc2000000; }
 static uint32_t unlock_range(uint32_t page,uint32_t count,uint32_t flags)
-{ CHECK(!protected_now && count==2 && flags==NTWV_MAP_GLOBAL && locked>0 && unlocks<2); --locked;last_unlocked[unlocks++]=page;return fail()?0:1; }
+{ CHECK(!protected_now && count==2 && flags==NTWV_MAP_GLOBAL && locked>0 && unlocks<4);unsigned b=page==0xc1000?0u:1u;CHECK(held_alias[b]);last_unlocked[unlocks++]=page;if(fail())return 0;--locked;held_alias[b]=0;return 1; }
 static uint32_t ptes(uint32_t page,uint32_t count,uint32_t *out,uint32_t flags)
 { unsigned i; CHECK(protected_now && count==2 && flags==0);if(fail())return 0;for(i=0;i<count;++i)out[i]=((page==0x500||page==0xc1000)?0x00100000u:0x00200000u)+i*4096u+permission;
   if(page>=0xc0000)out[0]^=physical_xor;return 1; }
@@ -24,7 +24,7 @@ static void write_alias(uint32_t address,const void *source,uint32_t bytes)
 static void read_alias(void *destination,uint32_t address,uint32_t bytes)
 { (void)destination;(void)address;(void)bytes;CHECK(0); /* the query path never reads application memory */ }
 static const struct ntwv_pages ops={check_range,lock_range,unlock_range,ptes,enter,leave,write_alias,read_alias};
-static void reset(void) { step=failure=locked=unlocks=writes=protected_now=0;permission=7;physical_xor=0;memset(buffers,0xa5,sizeof(buffers)); }
+static void reset(void) { CHECK(!locked);step=failure=unlocks=writes=protected_now=0;permission=7;physical_xor=0;memset(buffers,0xa5,sizeof(buffers)); }
 int main(void)
 {
     const struct ntw_lock_ops locks={enter,leave,0};
@@ -45,9 +45,10 @@ int main(void)
     CHECK(bytes==32 && reply.magic==NTWV_QUERY_MAGIC && reply.abi==1 && reply.core_abi==NTW_ABI_VERSION && reply.max_objects==NTW_MAX_OBJECTS && reply.initialized==1 && reply.selftest==1 && reply.features==1);
     for(which=1;which<=total;++which) {
         reset();failure=which;CHECK(ntwv_dioc(&request,&ops)==NTWV_ERROR_NOACCESS);
-        CHECK(!locked && !protected_now);
+        CHECK(!protected_now);
         if(which<=8)CHECK(writes==0);
         if(unlocks==2)CHECK(last_unlocked[0]==0xc2000 && last_unlocked[1]==0xc1000);
+        if(locked){failure=0;step=unlocks=writes=0;CHECK(ntwv_dioc(&request,&ops)==0 && !locked);}
     }
     reset();permission=5;CHECK(ntwv_dioc(&request,&ops)==NTWV_ERROR_NOACCESS && !writes && !locked);
     reset();permission=3;CHECK(ntwv_dioc(&request,&ops)==NTWV_ERROR_NOACCESS && !writes && !locked);
@@ -67,6 +68,6 @@ int main(void)
     CHECK(ntwv_shutdown());CHECK(!ntwv_shutdown());
     CHECK(ntwv_dioc(&request,&ops)==NTWV_ERROR_NOT_READY);
     CHECK(ntwv_initialize(&locks));CHECK(ntwv_shutdown());
-    printf("PASS: VxD bridge %u assertions; every VMM-call failure unwound\n",checks);
+    printf("PASS: VxD bridge %u assertions; failed aliases retained until real release\n",checks);
     return 0;
 }

@@ -9,7 +9,9 @@
 #include <string.h>
 
 static unsigned checks, step, failure, locked, unlocks, writes, reads, protected_now, notifies, acks, abi_calls, chan_calls;
-static uint32_t last_unlocked[3], permission = 7, physical_xor, doorbell_pending = 0x5, hv_present = 1, abi_reply = (1u << 16) | 1u;
+static void (*unlock_interleave)(void);
+static uint32_t held_alias[3], held_pages[3], unlock_fail_mask, bad_alias, all_locks, all_checks, all_pin_calls;
+static uint32_t last_unlocked[64], permission = 7, physical_xor, doorbell_pending = 0x5, hv_present = 1, abi_reply = (1u << 16) | 1u;
 static uint32_t channel_gpa = 0xe0200000u, channel_peer = 4, map_fail;
 static unsigned reenter_notify;
 static uint32_t reenter_result;
@@ -27,11 +29,11 @@ static unsigned which_buffer(uint32_t page)
     return 2;
 }
 static uint32_t check_range(uint32_t page, uint32_t count, uint32_t flags)
-{ CHECK(!protected_now && flags == 0 && count >= 1 && count <= 2); (void)which_buffer(page); return fail() ? count - 1 : count; }
+{ CHECK(!protected_now && flags == 0 && count >= 1 && count <= 2); (void)which_buffer(page);++all_checks; return fail() ? count - 1 : count; }
 static uint32_t lock_range(uint32_t page, uint32_t count, uint32_t flags)
-{ CHECK(!protected_now && flags == NTWV_MAP_GLOBAL && count >= 1 && count <= 2); if (fail()) return 0; ++locked; return 0xc1000000u + 0x1000000u * which_buffer(page); }
+{ CHECK(!protected_now && flags == NTWV_MAP_GLOBAL && count >= 1 && count <= 2); ++all_pin_calls; if (fail()) return 0; unsigned b=which_buffer(page); CHECK(!held_alias[b]); held_alias[b]=1;held_pages[b]=count; ++locked; ++all_locks; return 0xc1000000u + 0x1000000u * b + bad_alias; }
 static uint32_t unlock_range(uint32_t page, uint32_t count, uint32_t flags)
-{ (void)count; CHECK(!protected_now && flags == NTWV_MAP_GLOBAL && locked > 0 && unlocks < 3); --locked; last_unlocked[unlocks++] = page; return fail() ? 0 : 1; }
+{ unsigned b=which_buffer(page); CHECK(!protected_now && flags == NTWV_MAP_GLOBAL && locked > 0 && unlocks < 64 && held_alias[b] && held_pages[b]==count); last_unlocked[unlocks++] = page; if(unlock_interleave){void (*hook)(void)=unlock_interleave;unlock_interleave=0;hook();} int failed=fail(); if(failed || (unlock_fail_mask&(1u<<b)))return 0; --locked;held_alias[b]=0;return 1; }
 static uint32_t ptes(uint32_t page, uint32_t count, uint32_t *out, uint32_t flags)
 {
     unsigned i, b = which_buffer(page);
@@ -71,7 +73,7 @@ static void try_reenter(void)
     CHECK(reenter_result == NTWV_ERROR_BUSY);
 }
 static void reset(void)
-{ step = failure = locked = unlocks = writes = reads = protected_now = 0; permission = 7; physical_xor = 0; memset(buffers, 0xa5, sizeof buffers); }
+{ CHECK(!locked); step = failure = unlocks = writes = reads = protected_now = 0; permission = 7; physical_xor = 0; memset(buffers, 0xa5, sizeof buffers); }
 
 static shz_channel_hdr_t *chdr(void) { return (shz_channel_hdr_t *)channel; }
 static shz_ring_hdr_t *k64_rx(void) { return shz_channel_ring_rx(channel, chdr(), SHZ_DOM_KERNEL64); }
@@ -82,7 +84,7 @@ static uint32_t dioc(uint32_t code, const void *in, uint32_t in_bytes, uint32_t 
 {
     struct ntwv_dioc request = { 0 };
     uint32_t result;
-    step = locked = unlocks = writes = reads = protected_now = 0;    /* per-call counters; `failure` etc. stay */
+    step = unlocks = writes = reads = protected_now = 0;    /* per-call counters; `failure` etc. stay */
     request.code = code;
     request.output = 0x00500ff0; request.output_bytes = out_bytes; request.returned = 0x00600ffe;
     if (in_bytes) {                             /* an oversize count is rejected before any byte is read */
@@ -438,7 +440,8 @@ int main(int argc, char **argv)
         reset(); CHECK(ntwv_dioc_ex(&request, &ops, &hv) == NTWV_ERROR_NOT_SUPPORTED);
     }
 
-    /* 9. every VMM-call failure while sending unwinds (no locked pages, no writes before validation) */
+    /* 9. Failures keep every acquired alias owned until real release; a
+     * failed unlock drains before the next admitted safe-copy request. */
     memset(&h, 0, sizeof h);
     h.opcode = SHZ_OP_W64_QUERY; h.request_id = 0x4444; h.payload_length = 8;
     memcpy(frame, &h, sizeof h); memcpy(frame + 64, "payload!", 8);
@@ -450,8 +453,9 @@ int main(int argc, char **argv)
         for (w = 1; w <= total; ++w) {
             reset(); failure = w;
             CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 72, 4, &status, &returned) == NTWV_ERROR_NOACCESS);
-            CHECK(!locked && !protected_now);
+            CHECK(!protected_now);
             if (w <= 12) CHECK(writes == 0 && reads == 0);   /* 3 x (check, lock) + 6 PTE lookups precede the copy */
+            if(locked) {failure=0;CHECK(dioc(NTWV_IOCTL_QUERY,0,0,32,0,0)==0 && !locked);}
         }
         /* 3 x (check, lock) + 6 PTE lookups precede the send; the 4 reply-side PTE lookups and 3 unlocks follow it, so
          * exactly those 7 failures leave a frame on the ring while still reporting NOACCESS (the error is authoritative) */
@@ -479,6 +483,6 @@ int main(int argc, char **argv)
     reset(); CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == 0 && info.sent == 0);
     CHECK(ntwv_shutdown());
     reset(); CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == NTWV_ERROR_NOT_READY);
-    printf("PASS: VxD WIN64 bridge %u assertions; frames validated with the Kernel64 library; every VMM-call failure unwound\n", checks);
+    printf("PASS: VxD WIN64 bridge %u assertions; frames validated with the Kernel64 library; failed aliases retained until real release\n", checks);
     return 0;
 }

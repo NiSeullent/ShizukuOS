@@ -4,7 +4,7 @@ BITS 32
 GLOBAL ntwv_ddb, ntwv_control, ntwv_irq_enter, ntwv_irq_leave
 GLOBAL ntwv_vmm_check, ntwv_vmm_lock, ntwv_vmm_unlock, ntwv_vmm_ptes, ntwv_vmm_map_phys
 GLOBAL ntwv_vmcall, ntwv_cpuid
-EXTERN ntwv_native_init, ntwv_native_exit, ntwv_native_dioc
+EXTERN ntwv_native_init, ntwv_native_exit, ntwv_native_dioc, ntwv_native_lifecycle
 
 SECTION .ddb progbits alloc noexec write align=4
 ntwv_ddb:
@@ -31,6 +31,14 @@ ntwv_control:
     je .shutdown
     cmp eax, 0x23              ; W32_DEVICEIOCONTROL; ESI = VWIN32 DIOC
     je .dioc
+    cmp eax, 0x20              ; THREAD_NOT_EXECUTEABLE; EDI = thread
+    je .lifecycle
+    cmp eax, 0x21              ; DESTROY_THREAD
+    je .lifecycle
+    cmp eax, 0x0b              ; VM_NOT_EXECUTEABLE; EBX = VM
+    je .lifecycle
+    cmp eax, 0x0c              ; DESTROY_VM
+    je .lifecycle
     mov eax, 1                 ; ignore other broadcast notifications
     jmp .success
 .initialize:
@@ -47,6 +55,14 @@ ntwv_control:
     push esi
     call ntwv_native_dioc
     add esp, 4
+    jmp .success
+.lifecycle:
+    push edi
+    push ebx
+    push eax
+    call ntwv_native_lifecycle
+    add esp, 12
+    mov eax, 1                 ; lifecycle broadcast cannot be failed
 .success:
     and dword [esp + 32], ~1   ; DIOC uses EAX error + clear carry
 .restore:

@@ -1,0 +1,18 @@
+test_inconsistent_empty_cmdline_does_not_silently_select_qa (test_lifetime.Kernel32Lifetime.test_inconsistent_empty_cmdline_does_not_silently_select_qa) ... FAIL
+
+======================================================================
+FAIL: test_inconsistent_empty_cmdline_does_not_silently_select_qa (test_lifetime.Kernel32Lifetime.test_inconsistent_empty_cmdline_does_not_silently_select_qa)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_lifetime.py", line 61, in test_inconsistent_empty_cmdline_does_not_silently_select_qa
+    self.run_case(24)
+  File "${STAGE}/test_lifetime.py", line 23, in run_case
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 1 != 0 : scenario=24 failures=1 exit=0 virtual_ms=20020 replies=0 qa=1 reports=1 queries=0
+FAIL malformed native policy rejected before hardware/service/QA initialization
+
+
+----------------------------------------------------------------------
+Ran 1 test in 1.519s
+
+FAILED (failures=1)

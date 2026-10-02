@@ -149,6 +149,7 @@ typedef struct vcpu {
     uint64_t vmcs_pa;
     uint64_t ept_pointer;
     uint64_t pending_irq_window;    /* interrupt-window exiting currently requested */
+    uint32_t owner_cpu, cpu_binding_valid; /* 0 virgin, 2 retained construction, 1 ready; owner immutable */
     uint8_t exit_stack[VCPU_EXIT_STACK_BYTES] __attribute__((aligned(16)));
 } vcpu_t;
 
@@ -172,6 +173,8 @@ typedef struct {
     uint8_t *io_bitmap_a, *io_bitmap_b, *msr_bitmap;
 } vmx_cfg_t;
 
+int vmx_hw_prepare_cpus(const uint32_t *apic_ids, unsigned count);
+int vmx_vcpu_load(vcpu_t *vc);             /* ownership checked before VMPTRLD */
 void msr_bitmap_allow(uint8_t *bitmap, uint32_t msr, int read, int write);
 int vmx_enter(vcpu_t *vc);                /* vmx_asm.asm: 0 = VM exit, 1/2 = VMfailInvalid/Valid */
 void vmx_exit_entry(void);                /* vmx_asm.asm: VMCS HOST_RIP */

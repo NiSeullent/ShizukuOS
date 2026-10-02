@@ -7,6 +7,7 @@
 #include "boot_channel_peer.h"
 #include "gfx_address.h"
 #include "../boot_profile/win98_foundation.h"
+#include "cpu_bringup.h"
 
 static shz_bootinfo_t bootinfo;
 int initrd_files = -1;                          /* -1: none or rejected; read by the Win64 self-test */
@@ -40,6 +41,7 @@ const char *k64_boot_cmdline(void) { return bootinfo.cmdline; }
 
 void kmain(uint64_t bootinfo_pa)
 {
+    const uint64_t initial_cr3=read_cr3();
     /* The boot mapping still shows physical memory at the kernel alias. */
     const shz_bootinfo_t *bi = (const shz_bootinfo_t *)(K64_VIRT_BASE + bootinfo_pa);
     k64_boot_fb_t fb;
@@ -60,6 +62,7 @@ void kmain(uint64_t bootinfo_pa)
         shz_exit(97); /* Malformed peer handoff is a real failure. */
     arch_init();
     mem_init(&bootinfo);
+    shz_cpu_bringup_prepare(&bootinfo,initial_cr3);
     ds_native_init();
     krandom_init(&bootinfo, sizeof bootinfo);       /* before anything that needs random bytes (ASLR, user RNG) */
     kprintf("%s: Long Mode kernel starting, %u MiB RAM, rip above 4 GiB, tsc %u kHz\n", KVER,
@@ -91,6 +94,7 @@ void kmain(uint64_t bootinfo_pa)
     ds_native_timer_ready();
 #endif
     sti();
+    shz_cpu_bringup_verify();
     if (foundation_mode) {
         hcreg_t state = SHZ_DS_UNUSED;
         long status;

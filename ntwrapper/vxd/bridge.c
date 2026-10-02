@@ -7,6 +7,7 @@
  *                          channel to Kernel64 (shizukudos/abi/shz_ipc.h), exposed to NTW32.DLL.
  */
 #include "bridge.h"
+#include "pma_endpoint.h"
 
 static void ntwv_copy(void *d, const void *s, size_t n) { uint8_t *a = d; const uint8_t *b = s; while (n--) *a++ = *b++; }
 static void ntwv_fill(void *d, int c, size_t n) { uint8_t *a = d; while (n--) *a++ = (uint8_t)c; }
@@ -23,7 +24,23 @@ static struct ntw_context context;
 static uint32_t live, selftest;
 /* One owner for the SPSC endpoints, pending table and request scratch. Never
  * spin or sleep here: a preempting/reentrant caller must let the owner finish. */
-static uint32_t w64_admitted;
+static uint32_t w64_admitted, endpoint_leased, legacy_opened;
+/* One buffered DIOC acquires at most input/output/returned aliases. Failed
+ * unlocks remain owned across calls, using the exact service/alias/count. */
+#define NTWV_ALIAS_RECORDS 3u
+static uint32_t page_admitted, page_owned, page_retained, endpoint_abort_pending;
+static struct {
+    uint32_t alias_page, count, held, failed;
+    uint32_t (*unlock)(uint32_t, uint32_t, uint32_t);
+} alias_records[NTWV_ALIAS_RECORDS];
+static int page_drain(void);
+static uint32_t pending_count(void);
+static int page_enter(void)
+{
+    uint32_t expected=0;
+    return __atomic_compare_exchange_n(&page_admitted,&expected,1,0,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED);
+}
+static void page_leave(void) { __atomic_store_n(&page_admitted,0,__ATOMIC_RELEASE); }
 
 static int w64_enter(void)
 {
@@ -37,7 +54,8 @@ static void w64_leave(void) { __atomic_store_n(&w64_admitted, 0, __ATOMIC_RELEAS
 int ntwv_initialize(const struct ntw_lock_ops *ops)
 {
     ntw_handle handle;
-    if (__atomic_load_n(&live, __ATOMIC_ACQUIRE) || ntw_initialize(&context, ops) != NTW_OK)
+    if (__atomic_load_n(&page_admitted, __ATOMIC_ACQUIRE) || __atomic_load_n(&page_owned, __ATOMIC_ACQUIRE) ||
+        __atomic_load_n(&live, __ATOMIC_ACQUIRE) || ntw_initialize(&context, ops) != NTW_OK)
         return 0;
     /* Real object behavior, before exposing any request interface. */
     if (ntw_event_create(&context, 0, 0, NTW_EVENT_ALL, &handle) != NTW_OK)
@@ -61,21 +79,59 @@ failed:
 
 int ntwv_shutdown(void)
 {
-    if (!w64_enter())
+    if (!page_enter())
         return 0;
-    if (!__atomic_load_n(&live, __ATOMIC_ACQUIRE) || ntw_shutdown(&context) != NTW_OK) {
+    if (!page_drain() || !w64_enter()) { page_leave(); return 0; }
+    if (endpoint_leased || !__atomic_load_n(&live, __ATOMIC_ACQUIRE) || ntw_shutdown(&context) != NTW_OK) {
         w64_leave();
+        page_leave();
         return 0;
     }
     __atomic_store_n(&live, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&selftest, 0, __ATOMIC_RELAXED);
     w64_leave();
+    page_leave();
     return 1;
 }
 
 struct pinned {
-    uint32_t original_page, count, alias, offset;
+    uint32_t original_page, count, alias, offset, record;
 };
+
+static int release_alias(uint32_t at)
+{
+    if(!alias_records[at].held) return 1;
+    if(!alias_records[at].unlock(alias_records[at].alias_page,alias_records[at].count,NTWV_MAP_GLOBAL)) {
+        if(!alias_records[at].failed) {
+            alias_records[at].failed=1;
+            __atomic_add_fetch(&page_retained,1,__ATOMIC_RELEASE);
+        }
+        return 0;
+    }
+    if(alias_records[at].failed) __atomic_sub_fetch(&page_retained,1,__ATOMIC_RELEASE);
+    alias_records[at].held=alias_records[at].failed=0;
+    __atomic_sub_fetch(&page_owned,1,__ATOMIC_RELEASE);
+    return 1;
+}
+static int page_drain(void)
+{
+    int complete=1;
+    /* At most three original aliases, one attempt each; no new lock/admission
+     * can occur until all failures have actually released their records. */
+    for(uint32_t at=0;at<NTWV_ALIAS_RECORDS;++at)
+        if(alias_records[at].held && !release_alias(at)) complete=0;
+    if(complete && __atomic_load_n(&endpoint_abort_pending,__ATOMIC_ACQUIRE)) {
+        if(!w64_enter()) return 0;
+        if(pending_count()) complete=0;
+        else {
+            endpoint_leased=0;
+            __atomic_store_n(&endpoint_abort_pending,0,__ATOMIC_RELEASE);
+        }
+        w64_leave();
+    }
+    return complete;
+}
+static int unpin(struct pinned *range) { return release_alias(range->record); }
 
 static int user_range(uint32_t address, uint32_t bytes)
 {
@@ -88,20 +144,28 @@ static int user_range(uint32_t address, uint32_t bytes)
 static int pin(const struct ntwv_pages *ops, uint32_t address, uint32_t bytes,
                struct pinned *range)
 {
-    uint32_t alias;
+    uint32_t alias, at;
     range->original_page = address >> 12;
     range->offset = address & 4095u;
     range->count = (range->offset + bytes + 4095u) >> 12;
     range->alias = 0;
+    for(at=0;at<NTWV_ALIAS_RECORDS && alias_records[at].held;++at) { }
+    if(at==NTWV_ALIAS_RECORDS) return 0;
     if (ops->check(range->original_page, range->count, 0) != range->count)
         return 0;
     alias = ops->lock(range->original_page, range->count, NTWV_MAP_GLOBAL);
     if (!alias)
         return 0;
+    range->record=at;
+    alias_records[at].alias_page=alias>>12;
+    alias_records[at].count=range->count;
+    alias_records[at].unlock=ops->unlock;
+    alias_records[at].held=1; alias_records[at].failed=0;
+    __atomic_add_fetch(&page_owned,1,__ATOMIC_RELEASE);
     /* The service contract returns a page-aligned system alias. */
     if (alias < 0x80000000u || (alias & 4095u) != 0 ||
         range->count > ((UINT32_MAX - alias) >> 12) + 1) {
-        (void)ops->unlock(alias >> 12, range->count, NTWV_MAP_GLOBAL);
+        (void)unpin(range);
         return 0;
     }
     range->alias = alias;
@@ -148,7 +212,7 @@ static uint32_t dioc_query(const struct ntwv_dioc *request, const struct ntwv_pa
     if (!pin(ops, request->output, bytes, &output))
         return NTWV_ERROR_NOACCESS;
     if (!pin(ops, request->returned, 4, &returned)) {
-        (void)ops->unlock(output.alias >> 12, output.count, NTWV_MAP_GLOBAL);
+        (void)unpin(&output);
         return NTWV_ERROR_NOACCESS;
     }
     /* Win98 uniprocessor, synchronous callback only. Both aliases are pinned
@@ -163,9 +227,9 @@ static uint32_t dioc_query(const struct ntwv_dioc *request, const struct ntwv_pa
         result = 0;
     }
     ops->leave(0, saved);
-    if (!ops->unlock(returned.alias >> 12, returned.count, NTWV_MAP_GLOBAL))
+    if (!unpin(&returned))
         result = NTWV_ERROR_NOACCESS;
-    if (!ops->unlock(output.alias >> 12, output.count, NTWV_MAP_GLOBAL))
+    if (!unpin(&output))
         result = NTWV_ERROR_NOACCESS;
     return result;
 }
@@ -188,10 +252,15 @@ void ntwv_w64_reset(void)
 {
     if (!w64_enter())
         return;                            /* an admitted operation still owns the mapping */
+    if (endpoint_leased || __atomic_load_n(&page_retained,__ATOMIC_ACQUIRE)) {
+        w64_leave();
+        return;                            /* native endpoint still owns replies */
+    }
     /* The VMM keeps the physical mapping. Outstanding pool blocks must stay
      * allocated: the peer may still consume their queued requests. There is no
      * cancellation/rundown acknowledgement in this transport revision. */
     ntwv_fill(&w64, 0, sizeof w64);
+    legacy_opened = 0;
     w64_leave();
 }
 
@@ -445,11 +514,14 @@ static uint32_t w64_wait(const struct ntwv_hv *hv, uint32_t *out_len)
 
 static uint32_t w64_handle(const struct ntwv_hv *hv, uint32_t code, uint32_t in_bytes, uint32_t *out_len)
 {
+    if (w64.open)
+        legacy_opened = 1;
     switch (code) {
     case NTWV_IOCTL_W64_OPEN: {
         const uint32_t result = w64_open(hv);
         if (result)
             return result;
+        legacy_opened = 1;
         fill_open((struct ntwv_w64_open *)w64_out);
         *out_len = sizeof(struct ntwv_w64_open);
         return 0;
@@ -459,6 +531,96 @@ static uint32_t w64_handle(const struct ntwv_hv *hv, uint32_t code, uint32_t in_
     case NTWV_IOCTL_W64_WAIT: return w64_wait(hv, out_len);
     default: return NTWV_ERROR_NOT_SUPPORTED;
     }
+}
+
+uint32_t ntwv_endpoint_acquire(const struct ntwv_hv *hv, struct ntwv_w64_open *info)
+{
+    uint32_t result;
+    if (!hv || !hv->hypervisor_present || !hv->hcall || !hv->map_phys || !info)
+        return NTWV_ERROR_INVALID_PARAMETER;
+    if (!w64_enter())
+        return NTWV_ERROR_BUSY;
+    if (!__atomic_load_n(&live, __ATOMIC_ACQUIRE))
+        result = NTWV_ERROR_NOT_READY;
+    else if (endpoint_leased || legacy_opened || __atomic_load_n(&page_retained,__ATOMIC_ACQUIRE))
+        result = NTWV_ERROR_BUSY;
+    else {
+        result = w64_open(hv);
+        if (!result) {
+            /* A lease must not inherit another client's queued work. */
+            if (__atomic_load_n(&w64.tx->head, __ATOMIC_ACQUIRE) !=
+                    __atomic_load_n(&w64.tx->tail, __ATOMIC_ACQUIRE) ||
+                __atomic_load_n(&w64.rx->head, __ATOMIC_ACQUIRE) !=
+                    __atomic_load_n(&w64.rx->tail, __ATOMIC_ACQUIRE) || pending_count())
+                result = NTWV_ERROR_BUSY;
+            else {
+                endpoint_leased = 1;
+                fill_open(info);
+            }
+        }
+    }
+    w64_leave();
+    return result;
+}
+
+uint32_t ntwv_endpoint_send(const struct ntwv_hv *hv, const shz_msg_hdr_t *header, const void *payload)
+{
+    uint32_t result, bytes = 0;
+    if (!header || !payload || header->payload_length > SHZ_MSG_MAX_INLINE || !hv)
+        return NTWV_ERROR_INVALID_PARAMETER;
+    if (!w64_enter())
+        return NTWV_ERROR_BUSY;
+    if (!endpoint_leased || !__atomic_load_n(&live, __ATOMIC_ACQUIRE))
+        result = NTWV_ERROR_NOT_READY;
+    else {
+        ntwv_copy(w64_in, header, sizeof *header);
+        ntwv_copy(w64_in + sizeof *header, payload, header->payload_length);
+        result = w64_send(hv, (uint32_t)sizeof *header + header->payload_length, &bytes);
+    }
+    w64_leave();
+    return result;
+}
+
+uint32_t ntwv_endpoint_recv(void *slot)
+{
+    uint32_t result, bytes = 0;
+    if (!slot)
+        return NTWV_ERROR_INVALID_PARAMETER;
+    if (!w64_enter())
+        return NTWV_ERROR_BUSY;
+    result = endpoint_leased && __atomic_load_n(&live, __ATOMIC_ACQUIRE) ?
+        w64_recv(&bytes) : NTWV_ERROR_NOT_READY;
+    if (!result)
+        ntwv_copy(slot, w64_out, bytes);
+    w64_leave();
+    return result;
+}
+
+uint32_t ntwv_endpoint_release(void)
+{
+    uint32_t result = 0;
+    /* A lifecycle callback can retry failed aliases too, but it must not
+     * interfere with a DIOC currently pinning/copying/unpinning them. */
+    if(__atomic_load_n(&page_owned,__ATOMIC_ACQUIRE)) {
+        if(!page_enter()) return NTWV_ERROR_BUSY;
+        result=page_drain() ? 0u : NTWV_ERROR_BUSY;
+        page_leave();
+        if(result) return result;
+    }
+    if (!w64_enter())
+        return NTWV_ERROR_BUSY;
+    if (!endpoint_leased || pending_count() || __atomic_load_n(&page_owned,__ATOMIC_ACQUIRE))
+        result = NTWV_ERROR_BUSY;
+    else
+        endpoint_leased = 0;
+    w64_leave();
+    return result;
+}
+void ntwv_endpoint_abort_registration(void)
+{
+    /* Registration publishes no backend work. Queue its transport rollback;
+     * the caller's aliases still have to release before the lease can end. */
+    __atomic_store_n(&endpoint_abort_pending,1,__ATOMIC_RELEASE);
 }
 
 static int ranges_overlap(uint32_t a, uint32_t a_bytes, uint32_t b, uint32_t b_bytes)
@@ -496,12 +658,12 @@ static uint32_t dioc_w64(const struct ntwv_dioc *request, const struct ntwv_page
     if (request->input_bytes && !pin(ops, request->input, request->input_bytes, &input))
         return NTWV_ERROR_NOACCESS;
     if (!pin(ops, request->output, out_need, &output)) {
-        if (input.alias) (void)ops->unlock(input.alias >> 12, input.count, NTWV_MAP_GLOBAL);
+        if (input.alias) (void)unpin(&input);
         return NTWV_ERROR_NOACCESS;
     }
     if (!pin(ops, request->returned, 4, &returned)) {
-        (void)ops->unlock(output.alias >> 12, output.count, NTWV_MAP_GLOBAL);
-        if (input.alias) (void)ops->unlock(input.alias >> 12, input.count, NTWV_MAP_GLOBAL);
+        (void)unpin(&output);
+        if (input.alias) (void)unpin(&input);
         return NTWV_ERROR_NOACCESS;
     }
     /* Bounded interval 1: validate every alias and copy the input into kernel memory. */
@@ -525,16 +687,84 @@ static uint32_t dioc_w64(const struct ntwv_dioc *request, const struct ntwv_page
             ops->leave(0, saved);
         }
     }
-    if (!ops->unlock(returned.alias >> 12, returned.count, NTWV_MAP_GLOBAL))
+    if (!unpin(&returned))
         result = NTWV_ERROR_NOACCESS;
-    if (!ops->unlock(output.alias >> 12, output.count, NTWV_MAP_GLOBAL))
+    if (!unpin(&output))
         result = NTWV_ERROR_NOACCESS;
-    if (input.alias && !ops->unlock(input.alias >> 12, input.count, NTWV_MAP_GLOBAL))
+    if (input.alias && !unpin(&input))
         result = NTWV_ERROR_NOACCESS;
     return result;
 }
 
-uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *ops, const struct ntwv_hv *hv)
+static uint32_t dioc_pma(const struct ntwv_dioc *request, const struct ntwv_pages *ops)
+{
+    uint8_t input_data[sizeof(struct ntwv_pma_registration)] = { 0 };
+    uint8_t output_data[sizeof(struct ntwv_pma_result)] = { 0 };
+    struct pinned input = { 0 }, output, returned;
+    uint32_t in_need = 0, out_need = 0, out_len = 0, result = NTWV_ERROR_NOACCESS;
+    uintptr_t saved;
+    int ok;
+    switch (request->code) {
+    case NTWV_IOCTL_PMA_REGISTER: in_need = sizeof(struct ntwv_pma_registration); out_need = sizeof(struct ntwv_pma_owner); break;
+    case NTWV_IOCTL_PMA_QUERY: out_need = sizeof(struct ntwv_pma_ticket); break;
+    case NTWV_IOCTL_PMA_TAKE: out_need = sizeof(struct ntwv_pma_result); break;
+    case NTWV_IOCTL_PMA_CLOSE: out_need = 4; break;
+    default: return NTWV_ERROR_NOT_SUPPORTED;
+    }
+    if (request->overlapped || request->input_bytes != in_need ||
+        (in_need ? !user_range(request->input, in_need) : request->input != 0) ||
+        !user_range(request->output, out_need) || !user_range(request->returned, 4) ||
+        ranges_overlap(request->output, out_need, request->returned, 4) ||
+        ranges_overlap(request->input, in_need, request->output, out_need) ||
+        ranges_overlap(request->input, in_need, request->returned, 4))
+        return NTWV_ERROR_INVALID_PARAMETER;
+    if (request->output_bytes < out_need)
+        return NTWV_ERROR_INSUFFICIENT_BUFFER;
+    if (!ops || !ops->check || !ops->lock || !ops->unlock || !ops->ptes || !ops->enter ||
+        !ops->leave || !ops->write || !ops->read)
+        return NTWV_ERROR_NOT_SUPPORTED;
+    if (in_need && !pin(ops, request->input, in_need, &input))
+        return NTWV_ERROR_NOACCESS;
+    if (!pin(ops, request->output, out_need, &output)) {
+        if (input.alias) (void)unpin(&input);
+        return NTWV_ERROR_NOACCESS;
+    }
+    if (!pin(ops, request->returned, 4, &returned)) {
+        (void)unpin(&output);
+        if (input.alias) (void)unpin(&input);
+        return NTWV_ERROR_NOACCESS;
+    }
+    saved = ops->enter(0);
+    ok = (!input.alias || alias_ok(ops, &input, 0)) && writable_alias(ops, &output) && writable_alias(ops, &returned);
+    if (ok && input.alias)
+        ops->read(input_data, input.alias + input.offset, in_need);
+    ops->leave(0, saved);
+    if (ok) {
+        result = ntwv_pma_dispatch(request, input_data, output_data, &out_len);
+        if (!result) {
+            saved = ops->enter(0);
+            if (out_len <= out_need && writable_alias(ops, &output) && writable_alias(ops, &returned)) {
+                ops->write(output.alias + output.offset, output_data, out_len);
+                ops->write(returned.alias + returned.offset, &out_len, 4);
+            } else
+                result = NTWV_ERROR_NOACCESS;
+            ops->leave(0, saved);
+        }
+    }
+    if (!unpin(&returned)) result = NTWV_ERROR_NOACCESS;
+    if (!unpin(&output)) result = NTWV_ERROR_NOACCESS;
+    if (input.alias && !unpin(&input)) result = NTWV_ERROR_NOACCESS;
+    if (!result && request->code == NTWV_IOCTL_PMA_TAKE) {
+        struct ntwv_pma_result taken;
+        ntwv_copy(&taken, output_data, sizeof taken);
+        result = ntwv_pma_take_ack(request, taken.request_id);
+    }
+    if (!result && request->code == NTWV_IOCTL_PMA_CLOSE)
+        result = ntwv_pma_close_ack(request);
+    return result;
+}
+
+static uint32_t dispatch_dioc(const struct ntwv_dioc *request, const struct ntwv_pages *ops, const struct ntwv_hv *hv)
 {
     if (!request)
         return NTWV_ERROR_INVALID_PARAMETER;
@@ -546,6 +776,8 @@ uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *
         return 1; /* DIOC_CLOSEHANDLE: documented VXD_SUCCESS. */
     if (request->code == NTWV_IOCTL_QUERY)
         return dioc_query(request, ops);
+    if (request->code >= NTWV_IOCTL_PMA_REGISTER && request->code <= NTWV_IOCTL_PMA_CLOSE)
+        return dioc_pma(request, ops);
     if (request->code >= NTWV_IOCTL_W64_OPEN && request->code <= NTWV_IOCTL_W64_WAIT) {
         uint32_t result;
         if (!hv)
@@ -553,11 +785,30 @@ uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *
         if (!w64_enter())
             return NTWV_ERROR_BUSY;
         /* Recheck after admission: dynamic shutdown takes the same gate. */
-        result = __atomic_load_n(&live, __ATOMIC_ACQUIRE) ? dioc_w64(request, ops, hv) : NTWV_ERROR_NOT_READY;
+        result = !__atomic_load_n(&live, __ATOMIC_ACQUIRE) ? NTWV_ERROR_NOT_READY :
+            endpoint_leased ? NTWV_ERROR_BUSY : dioc_w64(request, ops, hv);
         w64_leave();
         return result;
     }
     return NTWV_ERROR_NOT_SUPPORTED;
+}
+
+uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *ops, const struct ntwv_hv *hv)
+{
+    uint32_t result;
+    if(!request) return NTWV_ERROR_INVALID_PARAMETER;
+    if(!__atomic_load_n(&live,__ATOMIC_ACQUIRE)) return NTWV_ERROR_NOT_READY;
+    if(request->code!=NTWV_IOCTL_QUERY &&
+       !(request->code>=NTWV_IOCTL_W64_OPEN && request->code<=NTWV_IOCTL_W64_WAIT) &&
+       !(request->code>=NTWV_IOCTL_PMA_REGISTER && request->code<=NTWV_IOCTL_PMA_CLOSE))
+        return dispatch_dioc(request,ops,hv);
+    if(!page_enter()) return NTWV_ERROR_BUSY;
+    result=!__atomic_load_n(&live,__ATOMIC_ACQUIRE) ? NTWV_ERROR_NOT_READY :
+           !page_drain() ? NTWV_ERROR_NOACCESS : dispatch_dioc(request,ops,hv);
+    if(!__atomic_load_n(&page_owned,__ATOMIC_ACQUIRE) &&
+       __atomic_load_n(&endpoint_abort_pending,__ATOMIC_ACQUIRE) && !page_drain())
+        result=NTWV_ERROR_NOACCESS;
+    page_leave(); return result;
 }
 
 uint32_t ntwv_dioc(const struct ntwv_dioc *request, const struct ntwv_pages *ops)

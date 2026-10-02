@@ -1,0 +1,38 @@
+{
+  "schema": "shizukudos-cb43-primary-authorities-v1",
+  "RBIL": {
+    "author": "Ralf Brown",
+    "original_corpus_url": "https://www.cs.cmu.edu/~ralf/interrupt-list/inter61c.zip",
+    "archive_sha256": "d7a059a1700c765adb9d4bf9dbe6289621aca6ff09c0583192764ee47e2b690a",
+    "INTERRUP_K_sha256": "e877ec59b6103e1768e8a5781fc2ed19de8ee62641c9ee85b3c52328d182bae7",
+    "INTERRUP_L_sha256": "f1351f2eac53e5f392bc352b983522ceb565a50913433fe46928e7dfdace0452",
+    "contracts": [
+      "INT2F 1216 SFN traversal",
+      "INT2F 1220 invalid handle returns AL=6",
+      "INT2F 1230 distinct FCB table lookup",
+      "INT2F 1231 DL selection",
+      "INT2F 1605 tables 02631 and 02632"
+    ]
+  },
+  "Microsoft_DDK": {
+    "author": "Microsoft",
+    "document": "Windows 3.0 DDK Virtual Device Adaptation Guide, Appendix D.2.1",
+    "faithful_mirror_url": "https://www.pcjs.org/documents/books/mspl13/win/w3ddkvxd/",
+    "contracts": [
+      "SIS_Version major byte before minor byte",
+      "Startup record chaining via previous ES:BX",
+      "IIS_Ptr is a pointer DWORD followed by WORD byte size"
+    ]
+  },
+  "FreeDOS": {
+    "author": "FreeDOS kernel contributors; DOS-C copyright Pasquale J. Villani",
+    "source_url": "https://github.com/FDOS/kernel/tree/5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3",
+    "author_review_url": "https://sourceforge.net/p/freedos/mailman/freedos-devel/thread/a527e93966582aa438a51aad7d10f6a5@metalpunks.info/",
+    "source_preimages": "source-preimages.json",
+    "license": "GPL-2.0-or-later"
+  },
+  "interpretation": {
+    "pointer_word_order": "Inference from primary DWORD pointer contract, Intel x86 far-pointer layout and actual linker relocation target; validated in linked MZ and flattened bytes",
+    "scope": "These primary contracts and scoped DOS diagnostics do not prove Windows98 compatibility"
+  }
+}

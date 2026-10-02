@@ -1,0 +1,75 @@
+{
+  "schema": "cb43-memory-primary-contracts-v1",
+  "RBIL": {
+    "author": "Ralf Brown",
+    "author_index": "https://www.cs.cmu.edu/~ralf/files.html",
+    "archive_acquisition": "inputs/primary-source-receipt.json",
+    "contracts": [
+      {
+        "file": "INTERRUP.B",
+        "entry": "B-12",
+        "contract": "INT12 AX contiguous base memory KB from0040:0013; not free memory"
+      },
+      {
+        "file": "INTERRUP.F",
+        "entry": "D-213306",
+        "contract": "actual DOS5+ version BX/revisionDL/flagsDH; DHbit4 means DOSinHMA; BH<100 BL>=5 guard needed for a version interpretation"
+      },
+      {
+        "file": "INTERRUP.G",
+        "entry": "D-2148",
+        "contract": "BX requested paragraphs; CF1 AX7/8 and BXlargest; CF0AXownedsegment"
+      },
+      {
+        "file": "INTERRUP.G",
+        "entry": "D-2149",
+        "contract": "ESownedblock release; CF0success CF1AX7/9"
+      },
+      {
+        "file": "INTERRUP.G",
+        "entry": "D-214A",
+        "contract": "ESblock/BXnewparagraphs; CF0success CF1AX7/8/9"
+      },
+      {
+        "file": "INTERRUP.G",
+        "table": "01628",
+        "contract": "MCBoffset0 typeM/Z, offset1 PSPowner, offset3 paragraphsize"
+      }
+    ],
+    "consumed_preimages": [
+      {
+        "file": "INTERRUP.B",
+        "bytes": 360893,
+        "sha256": "ad57c1cf5d8209c8dae8d09e28b07974fbcebbb566ad2a376106cf09900d4e98"
+      },
+      {
+        "file": "INTERRUP.F",
+        "bytes": 278190,
+        "sha256": "58be5f66a47ba9c1c7b25ca2a6a702c5efc5599f11101bf8ac2efd42b701e4d8"
+      },
+      {
+        "file": "INTERRUP.G",
+        "bytes": 365004,
+        "sha256": "c5b2d94333c06a19b44f80580266ae16dc1fb23206bf8bef3770101a980dd7de"
+      }
+    ]
+  },
+  "FreeDOS": {
+    "pinned_source": "https://github.com/FDOS/kernel/tree/5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3",
+    "consumed_combined_files": [
+      {
+        "file": "kernel/inthndlr.c",
+        "bytes": 116496,
+        "sha256": "e44dc4ccb2dd964d00ef067a2d24a881cdf8d7c5f1a2dc1722cd6b6f291f16ab"
+      },
+      {
+        "file": "kernel/inithma.c",
+        "bytes": 10807,
+        "sha256": "b4e2ba10f6c36e9d6b507e93858e58a01212bb7b3a5976b113015f6c7833b3cd"
+      }
+    ],
+    "scope": "Source: real MoveKernelToHMA success setsLoL.version_flags0x10; AX3306 returnsactualversion_flags. This probe only records raw values, no CONFIG inference."
+  },
+  "DOS_executed": false,
+  "Windows98_verified": false
+}

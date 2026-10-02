@@ -1,0 +1,50 @@
+{
+  "schema": "cb43-conventional-memory-native-layout-v1",
+  "static_checks": 20,
+  "checks": [
+    "unique native layout record",
+    "actual image end",
+    "actual code order",
+    "PSP included in exact retained paragraphs",
+    "retained block below 64 KiB",
+    "whole 2048-byte report buffer retained",
+    "stack does not overlap report",
+    "whole 1024-byte own stack retained",
+    "own stack top at retained image end",
+    "no released code data or stack",
+    "actual shrink size immediate",
+    "actual SP immediate",
+    "actual AH4A shrink vector",
+    "actual FFFF paragraph AH48 query vector",
+    "actual exceptional own allocation release vector",
+    "actual AX3306 query",
+    "actual own PSP query",
+    "actual BIOS INT12 query",
+    "actual allocator strategy query",
+    "actual UMB link query"
+  ],
+  "layout": {
+    "entry": 258,
+    "shrink": 552,
+    "query": 728,
+    "release": 774,
+    "report_start": 2080,
+    "report_end": 4128,
+    "stack_bottom": 4128,
+    "stack_top": 5152,
+    "image_end": 5152,
+    "keep_paras": 322,
+    "keep_immediate": 553,
+    "stack_immediate": 264
+  },
+  "COM_bytes": 4896,
+  "COM_sha256": "0a93f6402ada0478ae6d95f1e02169e8f7fdd5b30c1353c0ec9d54bf00048c18",
+  "DOS_executed": false,
+  "free_conventional_memory_measured": false,
+  "Windows98_verified": false,
+  "unsafe_binary_mutations_rejected": [
+    "keep_immediate",
+    "stack_immediate",
+    "query"
+  ]
+}

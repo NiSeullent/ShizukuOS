@@ -17,7 +17,10 @@ struct __attribute__((packed)) tss32 {
     uint16_t trap, iomap;
 };
 
-static uint64_t gdt[6];
+/* Selector0x30 is private kernel data, absent from the user descriptor set.
+ * APs need their own GDT/TSS/anchor before any online handshake. */
+static struct { uint32_t magic, id; } bsp_identity = { 0x32435055u, 0 };
+static uint64_t gdt[7];
 static struct tss32 tss;
 static struct idt_gate idt[256];
 static uint32_t exception_count[32];
@@ -29,7 +32,16 @@ static uint64_t gdt_entry(uint32_t base, uint32_t limit, uint8_t access, uint8_t
            ((uint64_t)(((limit >> 16) & 0xf) | (flags << 4)) << 48) | ((uint64_t)(base >> 24) << 56);
 }
 
-void tss_set_kernel_stack(uint32_t esp0) { tss.esp0 = esp0; }
+uint32_t arch_cpu_id(void)
+{
+    uint16_t selector;
+    uint32_t magic, id;
+    __asm__ volatile("mov %%gs, %0" : "=r"(selector));
+    if (selector != 0x30) return UINT32_MAX;
+    __asm__ volatile("movl %%gs:0, %0; movl %%gs:4, %1" : "=r"(magic), "=r"(id));
+    return magic == 0x32435055u && id == 0 ? id : UINT32_MAX;
+}
+void tss_set_kernel_stack(uint32_t esp0) { KASSERT(arch_cpu_id() == 0); tss.esp0 = esp0; }
 
 void arch_init(void)
 {
@@ -44,6 +56,7 @@ void arch_init(void)
     gdt[3] = gdt_entry(0, 0xfffff, 0xfa, 0xc);      /* 0x18 user code (DPL 3) */
     gdt[4] = gdt_entry(0, 0xfffff, 0xf2, 0xc);      /* 0x20 user data (DPL 3) */
     gdt[5] = gdt_entry((uint32_t)&tss, sizeof tss - 1, 0x89, 0x0);   /* 0x28 available 32-bit TSS */
+    gdt[6] = gdt_entry((uint32_t)&bsp_identity, sizeof bsp_identity - 1, 0x92, 0x4); /* 0x30 CPU anchor */
     gdtr.limit = sizeof gdt - 1;
     gdtr.base = (uint32_t)gdt;
     for (i = 0; i < 256; ++i) {

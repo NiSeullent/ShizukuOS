@@ -1,0 +1,47 @@
+test_actual_default_config_reaches_real_watcom_and_nasm (__main__.BuilderContract.test_actual_default_config_reaches_real_watcom_and_nasm) ... FAIL
+test_compilation_configuration_drift_is_rejected (__main__.BuilderContract.test_compilation_configuration_drift_is_rejected) ... ok
+test_default_both_flags_and_actual_configuration_pin (__main__.BuilderContract.test_default_both_flags_and_actual_configuration_pin) ... ok
+test_missing_assembly_definition_is_rejected_by_real_nasm (__main__.BuilderContract.test_missing_assembly_definition_is_rejected_by_real_nasm) ... FAIL
+test_missing_c_definition_is_rejected_by_real_header_compilation (__main__.BuilderContract.test_missing_c_definition_is_rejected_by_real_header_compilation) ... FAIL
+test_production_main_copies_exact_kernel_provenance_into_receipt (__main__.BuilderContract.test_production_main_copies_exact_kernel_provenance_into_receipt) ... ok
+
+======================================================================
+FAIL: test_actual_default_config_reaches_real_watcom_and_nasm (__main__.BuilderContract.test_actual_default_config_reaches_real_watcom_and_nasm)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_win31_profile.py", line 114, in test_actual_default_config_reaches_real_watcom_and_nasm
+    result = compile_probe(self.tree, (self.tree / "config.mak").read_text())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "${STAGE}/test_win31_profile.py", line 77, in compile_probe
+    assert sha(tree / relative) == digest, "consumed source changed"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: consumed source changed
+
+======================================================================
+FAIL: test_missing_assembly_definition_is_rejected_by_real_nasm (__main__.BuilderContract.test_missing_assembly_definition_is_rejected_by_real_nasm)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_win31_profile.py", line 128, in test_missing_assembly_definition_is_rejected_by_real_nasm
+    result = compile_probe(self.tree, CONFIG.replace("NASMFLAGS=-DWIN31SUPPORT\n", ""))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "${STAGE}/test_win31_profile.py", line 77, in compile_probe
+    assert sha(tree / relative) == digest, "consumed source changed"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: consumed source changed
+
+======================================================================
+FAIL: test_missing_c_definition_is_rejected_by_real_header_compilation (__main__.BuilderContract.test_missing_c_definition_is_rejected_by_real_header_compilation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_win31_profile.py", line 123, in test_missing_c_definition_is_rejected_by_real_header_compilation
+    result = compile_probe(self.tree, CONFIG.replace("ALLCFLAGS=-DWIN31SUPPORT\n", ""))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "${STAGE}/test_win31_profile.py", line 77, in compile_probe
+    assert sha(tree / relative) == digest, "consumed source changed"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: consumed source changed
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.564s
+
+FAILED (failures=3)

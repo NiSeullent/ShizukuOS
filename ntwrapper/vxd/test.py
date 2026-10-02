@@ -31,24 +31,35 @@ def dependency_closure(manifest):
     -MM excludes system/toolchain headers; those are outside this receipt's scope.
     No object, executable, or generated dependency file is written here.
     """
-    bridge, core = HERE / 'bridge.c', HERE.parent / 'core.c'
+    bridge, core, broker = HERE / 'bridge.c', HERE.parent / 'core.c', HERE / 'pma_endpoint.c'
     clang = os.environ.get('CLANG', 'clang')
     mingw = os.environ.get('MINGW_CC', 'i686-w64-mingw32-gcc')
     host = ['-std=c11', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
             '-Wpedantic', '-Wshadow', '-fno-omit-frame-pointer']
     cases = (
-        ('native_i486', clang, manifest['compiler_flags'], [bridge, HERE / 'native.c', core]),
+        ('native_i486', clang, manifest['compiler_flags'], [bridge, HERE / 'native.c', broker, core]),
         ('probe_mingw', mingw, ['-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', '-march=i486',
                               '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-nostdlib'],
          [HERE / 'query_probe.c']),
+        ('pma_probe_mingw', mingw, ['-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', '-Wpedantic',
+                                   '-march=i486', '-mno-sse', '-mno-mmx', '-msoft-float',
+                                   '-ffreestanding', '-fno-builtin', '-fno-stack-protector',
+                                   '-DWINVER=0x0410', '-D_WIN32_WINNT=0x0400', '-I', str(HERE)],
+         [ROOT / 'ntwin32/pma/client.c', ROOT / 'ntwin32/pma/probe.c']),
         ('host_bridge_asan_ubsan', 'clang', [*host, '-Wconversion', '-fsanitize=address,undefined'],
-         [bridge, core, HERE / 'tests/test_bridge.c']),
+         [bridge, broker, core, HERE / 'tests/test_bridge.c']),
         ('host_w64_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined'],
-         [bridge, core, HERE / 'tests/test_w64vxd.c']),
+         [bridge, broker, core, HERE / 'tests/test_w64vxd.c']),
         ('host_admission_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined', '-pthread'],
-         [bridge, core, HERE / 'tests/test_w64_admission.c']),
+         [bridge, broker, core, HERE / 'tests/test_w64_admission.c']),
+        ('host_pma_gcc', 'gcc', host,
+         [bridge, broker, core, HERE / 'tests/test_pma_native.c']),
+        ('host_pma_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined'],
+         [bridge, broker, core, HERE / 'tests/test_pma_native.c']),
+        ('host_native_lifetime_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined', '-fno-pie'],
+         [HERE / 'native.c', HERE / 'tests/test_native_lifetime.c']),
         ('host_admission_tsan', 'clang', [*host, '-fsanitize=thread', '-pthread'],
-         [bridge, core, HERE / 'tests/test_w64_admission.c']),
+         [bridge, broker, core, HERE / 'tests/test_w64_admission.c']),
     )
     commands, closure = [], {}
 
@@ -70,7 +81,7 @@ def dependency_closure(manifest):
 
     for label, compiler, flags, sources in cases:
         scan(label, [compiler, *flags, '-MM', '-MT', 'ntwv-inputs', *map(str, sources)])
-    for source in (HERE / 'control.asm', HERE / 'tests/control_harness.asm'):
+    for source in (HERE / 'control.asm', HERE / 'vmm_callbacks.asm', HERE / 'tests/control_harness.asm'):
         scan('assembly_i386', ['nasm', '-M', '-MT', 'ntwv-inputs', '-f', 'elf32', str(source)])
     return closure, commands
 
@@ -116,6 +127,8 @@ def main():
     paths.update((HERE.parent/'core.c', HERE.parent/'include/ntwrapper.h',
                   ROOT/'shizukudos/abi/shz_abi.h', ROOT/'shizukudos/abi/shz_ipc.h',
                   BUILD/'NTWRAP9X.VXD', BUILD/'NTWRAP9X.elf', BUILD/'NTWQUERY.EXE', manifest_path))
+    if 'pma_probe' in manifest:
+        paths.add(BUILD/'PMAQUERY.EXE')
     before = {str(p.relative_to(ROOT)): digest(p) for p in sorted(paths)}
     if before[str(manifest_path.relative_to(ROOT))] != hashlib.sha256(manifest_bytes).hexdigest():
         raise SystemExit('Build manifest changed; rebuild before testing')
@@ -124,6 +137,8 @@ def main():
             raise SystemExit('Build inputs changed; rebuild before testing: '+name)
     if digest(BUILD/'NTWRAP9X.VXD') != manifest['sha256'] or digest(BUILD/'NTWQUERY.EXE') != manifest['probe']['sha256']:
         raise SystemExit('Build artifact hash does not match manifest')
+    if 'pma_probe' in manifest and digest(BUILD/'PMAQUERY.EXE') != manifest['pma_probe']['sha256']:
+        raise SystemExit('PMA probe artifact hash does not match manifest')
     dependencies, dependency_commands = dependency_closure(manifest)
     for dependency_paths in dependencies.values():
         for path in dependency_paths - paths:
@@ -148,6 +163,7 @@ def main():
         'inputs_unchanged_during_test': unchanged,
         'artifact_sha256': manifest['sha256'],
         'probe_sha256': manifest['probe']['sha256'],
+        'pma_probe_sha256': manifest.get('pma_probe', {}).get('sha256'),
         'hashes': before,
         'changed_inputs': changed,
         'project_dependencies': {name: sorted(str(p.relative_to(ROOT)) for p in paths)
@@ -160,7 +176,8 @@ def main():
                      ('host_bridge_asan_ubsan', 'i386_control_harness', 'static_le_relocations',
                       'native_contract_constants', 'win32_probe_pe_contract', 'win64_bridge_dioc_asan_ubsan',
                       'strict_object_flag_policy', 'win64_parallel_admission_asan_ubsan_tsan',
-                      'win64_epoch_response_pool_validation', 'win64_corrupt_ring_bounded_failure')},
+                      'win64_epoch_response_pool_validation', 'win64_corrupt_ring_bounded_failure', 'native_pma_broker_actual_rings_gcc_asan_ubsan',
+                      'native_pma_service_thunks_static', 'native_image_residency_model')},
         'win64_bridge_supervisor_run': False,
         'guest_loaded': False,
         'native_vmm_calls_verified': False,

@@ -1,0 +1,58 @@
+{
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "VM_executed": false,
+  "Windows98_boot_verified": false,
+  "actual_native_link_producer_sha256": "44f231f0106afab2be97236ceacaa63dce11490f861c82ad3f4e84ece9657f16",
+  "existing_native_artifacts_verified_unchanged": {
+    "source/build/shizukudos/kernel32/KERNEL32.BIN": {
+      "bytes": 23428,
+      "sha256": "d330c69af72ac9695478eb3c7f8e8b8bfa24cead629129c7b4b6dbbfb8693527"
+    },
+    "source/build/shizukudos/kernel32/kernel32.elf": {
+      "bytes": 38400,
+      "sha256": "f8fdac9d34e6f29d01597a39d4d691478e96563677e27ddf5d651d9e45fbd8aa"
+    },
+    "source/build/shizukudos/kernel64/KERNEL64.BIN": {
+      "bytes": 693584,
+      "sha256": "914cf6ed84fe0f601df54c66ac12540bbd73f6cb8b6ea26e1ce95c9a10e06e03"
+    },
+    "source/build/shizukudos/kernel64/kernel64.elf": {
+      "bytes": 799976,
+      "sha256": "d1d4de0932f834b7abac786afa6c2304f3997e9ecd0c4ab72af924fb596e66a2"
+    },
+    "source/build/shizukudos/supervisor/BOOTX64.EFI": {
+      "bytes": 160256,
+      "sha256": "1e666d558952ef6e30d3aa8cd9123e0dbe0192f02c9f53eecd2f14147ec94f6a"
+    },
+    "source/build/shizukudos/supervisor/payload.bin": {
+      "bytes": 127526,
+      "sha256": "2d00fb191bfc89caf6f01946c185b4150431ce377a7b015d68b5c25740af94e7"
+    },
+    "source/build/shizukudos/supervisor/payload.elf": {
+      "bytes": 148496,
+      "sha256": "26c3dafb9ac5bfc071411cd78f1a3f2a4a600dc2f9d2845fad69846f68f318c4"
+    }
+  },
+  "existing_native_receipt_sha256": "25b93f6f4ea12865f7988af049ce78e70cb53b942a390fbbbbc2f704dc333c96",
+  "existing_native_source_commit": "7158f51ab413e168088fd2ab13e8a023ebadc3ca",
+  "final_producer_native_link_reexecuted": false,
+  "independent_readonly_source_review": "PASS for final203c producer and8558 tests; all material runtime/same-FD/loader-limit/private-permissions/argv0 findings closed. Reviewer did not execute repository scripts.",
+  "private_build_executed": false,
+  "public_binary_included": false,
+  "raw_private_record_sha256": "28347748240c0747ccc26fe71d40cd9e9ab0e9caa4d8d64f9100d868c776e94e",
+  "schema": 1,
+  "source_files": {
+    "tests/test_win98_supervisor_candidate.py": {
+      "bytes": 19584,
+      "sha256": "8558b119b1340cb4dacd7ddc488ededa6233982974a06c1fbc6b54570abbfc69"
+    },
+    "tools/build_win98_supervisor_candidate.py": {
+      "bytes": 42167,
+      "sha256": "203c5c620464ed8c54ae0212e8c8e4fc09815b136c26854b5436b414b823411c"
+    }
+  },
+  "status": "PASS_REVIEW_FIX_TESTS_AND_READONLY_MTOOLS_DISPATCH",
+  "test_log_sha256": "1bd964650bca7e4ddc086e6a77b25a5a63f1a17090f092c6d5b5ab10c9e379a1",
+  "test_methods": 21,
+  "tests_exit_code": 0
+}

@@ -30,6 +30,9 @@ uint64_t pci_bar(const pci_dev_t *d, unsigned idx, uint64_t *size, int *is_io);
 void pci_enable(const pci_dev_t *d, int io, int mem, int bus_master);
 /* Maps [pa, pa+size) uncached at DIRECT_MAP + pa (kernel only) and returns the virtual address; NULL on failure. */
 void *mmio_map(uint64_t pa, uint64_t size);
+/* Reuse the existing BSP MSI/LAPIC owner for native AP bringup. Expected
+ * topology/address identity must match actual BSP CPUID and APIC_BASE. */
+volatile uint32_t *pci_bsp_lapic_acquire(uint64_t expected_pa,uint32_t expected_id);
 void pci_log_devices(void);
 /* Driver binding record: a kernel driver calls pci_claim() once it owns the function, so user mode can list which device
  * each driver drives (NtQuerySystemInformation class 0x101). pci_claimed_by() returns the driver name or NULL. */

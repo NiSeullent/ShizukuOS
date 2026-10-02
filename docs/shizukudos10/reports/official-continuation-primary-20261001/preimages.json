@@ -1,0 +1,128 @@
+{
+  "schema": "shizukuos.official-continuation-proposal.preimages.v1",
+  "source_snapshot_commit": "8508c5e360fe8c24c659b719f1ed21831cbdbd4c",
+  "requested_earlier_commit": "6a18ee1f4af4261963fd87e7a759e070630ffc5b",
+  "committed_preimages": {
+    "6a18ee1f4af4261963fd87e7a759e070630ffc5b": {
+      "site/deploy/publish_static.py": {
+        "bytes": 41392,
+        "sha256": "5dfd2ffc0bea1006f755c5965c7e6129e3958173239966af310cd96fef18f51f"
+      },
+      "site/deploy/tests/test_publish_static.py": {
+        "bytes": 33475,
+        "sha256": "92393189e5a18078bbe0dce74327eb46d7055f33b2ea2765969c6098f1cc0d44"
+      },
+      "site/index.html": {
+        "bytes": 11575,
+        "sha256": "e6394476e5d445585528c821fe0671bff1a56efa33f21626d2d0b48115c6653c"
+      },
+      "site/en/index.html": {
+        "bytes": 11693,
+        "sha256": "8c3adb4dc59cebe2388ca8deba103a223eafc2d9aa20f8bf2c31fc71f99f23eb"
+      },
+      "site/authorship/handoff.html": {
+        "bytes": 4486,
+        "sha256": "e311c2e11865c77a8868c826d5e7175137e9f8f2d2ddbf5ceca33cfc0d321e28"
+      }
+    },
+    "8508c5e360fe8c24c659b719f1ed21831cbdbd4c": {
+      "site/deploy/publish_static.py": {
+        "bytes": 41392,
+        "sha256": "5dfd2ffc0bea1006f755c5965c7e6129e3958173239966af310cd96fef18f51f"
+      },
+      "site/deploy/tests/test_publish_static.py": {
+        "bytes": 33475,
+        "sha256": "92393189e5a18078bbe0dce74327eb46d7055f33b2ea2765969c6098f1cc0d44"
+      },
+      "site/index.html": {
+        "bytes": 11575,
+        "sha256": "e6394476e5d445585528c821fe0671bff1a56efa33f21626d2d0b48115c6653c"
+      },
+      "site/en/index.html": {
+        "bytes": 11693,
+        "sha256": "8c3adb4dc59cebe2388ca8deba103a223eafc2d9aa20f8bf2c31fc71f99f23eb"
+      },
+      "site/authorship/handoff.html": {
+        "bytes": 4486,
+        "sha256": "e311c2e11865c77a8868c826d5e7175137e9f8f2d2ddbf5ceca33cfc0d321e28"
+      }
+    }
+  },
+  "modified_file_preimages": [
+    {
+      "path": "site/authorship/handoff.html",
+      "bytes": 4486,
+      "sha256": "e311c2e11865c77a8868c826d5e7175137e9f8f2d2ddbf5ceca33cfc0d321e28"
+    },
+    {
+      "path": "site/deploy/publish_static.py",
+      "bytes": 41392,
+      "sha256": "5dfd2ffc0bea1006f755c5965c7e6129e3958173239966af310cd96fef18f51f"
+    },
+    {
+      "path": "site/deploy/tests/test_publish_static.py",
+      "bytes": 33475,
+      "sha256": "92393189e5a18078bbe0dce74327eb46d7055f33b2ea2765969c6098f1cc0d44"
+    },
+    {
+      "path": "site/en/index.html",
+      "bytes": 11693,
+      "sha256": "8c3adb4dc59cebe2388ca8deba103a223eafc2d9aa20f8bf2c31fc71f99f23eb"
+    },
+    {
+      "path": "site/index.html",
+      "bytes": 11575,
+      "sha256": "e6394476e5d445585528c821fe0671bff1a56efa33f21626d2d0b48115c6653c"
+    }
+  ],
+  "source_dirty_at_snapshot": false,
+  "frozen_continuation_source_receipt_sha256": "62ab1723b1d29af09a17406671061f087f9b8f828560dab51a04dfc62012c218",
+  "exact_nine_historical_assets": [
+    {
+      "path": "site/continuation/downloads.json",
+      "bytes": 3154,
+      "sha256": "20488553f97a4e3d7f0f4618c07f55dcd815e62268d4832a3d0edf9ee370c838"
+    },
+    {
+      "path": "site/continuation/environment-guide.md",
+      "bytes": 6814,
+      "sha256": "22371d3abfaf731d9cd39b60ccb5b8e8e83012317ae042eb71edf0fc47cdf060"
+    },
+    {
+      "path": "site/continuation/guide.html",
+      "bytes": 31403,
+      "sha256": "8bb10240a11d925ca191f1b3e26c1ee906670860051e89ff86f00c474bbbb160"
+    },
+    {
+      "path": "site/continuation/index.html",
+      "bytes": 6440,
+      "sha256": "19747185348f7e7675e01bd73cd5752b7aacc54099ba1a29f188d5a7b19e6e3c"
+    },
+    {
+      "path": "site/continuation/modern-apps-guide.md",
+      "bytes": 19961,
+      "sha256": "69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f"
+    },
+    {
+      "path": "site/continuation/official-distribution.md",
+      "bytes": 2339,
+      "sha256": "16d663f0743af8eaafd9ac6ea84b2884939ffbae5cf9695abc5e771d15b165d4"
+    },
+    {
+      "path": "site/continuation/styles.css",
+      "bytes": 1380,
+      "sha256": "535bf65880d2ca123df6a6137c5c21e88c51b8d80def4a9c83d26b5f89ff1797"
+    },
+    {
+      "path": "site/downloads/win98-modern-usb-helper.zip",
+      "bytes": 17916,
+      "sha256": "f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54"
+    },
+    {
+      "path": "site/downloads/win98-modern-usb-helper.zip.sha256",
+      "bytes": 94,
+      "sha256": "86b77cc378c2ed69b9255fdfecd3175f482f39423c4a26df2f8835edacaa780b"
+    }
+  ],
+  "conflict_policy": "Preserve primary publisher and current branding during the e6 merge. Apply only after exact existing-file preimages and any already-present new-file hashes match."
+}

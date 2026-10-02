@@ -38,7 +38,16 @@ OUT = BUILD / "dos16"
 WORK = OUT / "work"
 TESTS = SHZ / "dos16" / "tests"
 CSM = BUILD / "csm"
-PATCHES = sorted((SHZ / "dos16" / "patches").glob("0*.patch"))
+# The final startup guard is based on the combined CB43/DOSMGR source. Keep
+# this dependency order explicit; an unrelated numbered patch must not enter it.
+KERNEL_PATCH_NAMES = (
+    "0001-shizukudos-branding.patch",
+    "0002-reproducible-build-date.patch",
+    "0003-cb43-win98-dos-internals.patch",
+    "0003-dosmgr-honest-contract.patch",
+    "0004-win-startup-chain.patch",
+)
+PATCHES = [SHZ / "dos16" / "patches" / name for name in KERNEL_PATCH_NAMES]
 FREECOM_PATCHES = sorted((SHZ / "dos16" / "patches").glob("freecom-*.patch"))
 USER = Path(__file__).resolve().parent / "user"
 USER_FILES = ("CONFIG.SYS", "AUTOEXEC.BAT", "SHZSTART.BAT", "RECOVER.BAT", "README.TXT")
@@ -88,19 +97,26 @@ def build_kernel(env):
     tree = fresh_copy("freedos-kernel")
     applied = []
     for patch in PATCHES:
-        run(["patch", "-p1", "-s", "-i", patch], cwd=tree)
+        run(["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-s", "-i", patch], cwd=tree)
         applied.append({"patch": str(patch.relative_to(REPO)), "sha256": sha256_file(patch)})
-    (tree / "config.mak").write_text("XNASM=nasm\nundefine XUPX\n")
+    # Both halves are required: C interrupt hooks and their assembly data.
+    config = "XNASM=nasm\nundefine XUPX\nALLCFLAGS=-DWIN31SUPPORT\nNASMFLAGS=-DWIN31SUPPORT\n"
+    config_path = tree / "config.mak"
+    config_path.write_text(config)
+    make_config = {"text": config, "sha256": sha256_file(config_path),
+                   "c_defines": ["WIN31SUPPORT"], "nasm_defines": ["WIN31SUPPORT"]}
     commands = []
     cmd = ["make", "all", "XCPU=386", "XFAT=32"]
     run(cmd, cwd=tree, env=env, timeout=600, capture=True)
+    if sha256_file(config_path) != make_config["sha256"]:
+        raise RuntimeError("FreeDOS compilation configuration changed during build")
     commands.append(" ".join(cmd))
     kernel = tree / "bin" / "kernel.sys"
     boot = tree / "boot" / "fat16com.bin"
     if not kernel.exists() or not boot.exists():
         raise RuntimeError("FreeDOS kernel build produced no kernel.sys / fat16com.bin")
     return {"tree": tree, "kernel": kernel, "boot_fat16": boot, "sys": tree / "bin" / "sys.com",
-            "patches": applied, "commands": commands}
+            "patches": applied, "commands": commands, "make_config": make_config}
 
 
 def build_freecom(env):
@@ -285,6 +301,7 @@ def main():
         "upstream": {k: {"commit": v["commit"], "ref": v["ref"], "license": v["license"]}
                      for k, v in manifest["upstreams"].items()},
         "patches": kernel["patches"] + freecom["patches"],
+        "kernel_make_config": kernel["make_config"],
         "user_boot": user_receipt,
         "toolchain": {
             "open-watcom": {"snapshot_sha256": snapshot,

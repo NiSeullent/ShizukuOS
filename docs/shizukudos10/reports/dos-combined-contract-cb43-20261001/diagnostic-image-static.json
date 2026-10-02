@@ -1,0 +1,57 @@
+{
+  "schema": "shizukudos-cb43-combined-image-static-v1",
+  "image_sha256": "50d44ccf164e26fbcc06c4e3869031f6ca8353116e71f9218a5528596a39ab0a",
+  "image_bytes": 33546240,
+  "MBR_signature": "55AA",
+  "active_partition": true,
+  "partition_start_sector": 63,
+  "partition_sectors": 65457,
+  "payload_readback": [
+    {
+      "file": "KERNEL.SYS",
+      "bytes": 72751,
+      "sha256": "c1c86626585c8332a8788a01ded40c8795fd449d1832c9428436038530bbe906",
+      "readback_verified": true
+    },
+    {
+      "file": "COMMAND.COM",
+      "bytes": 88188,
+      "sha256": "27c91c0c27d7aac140fd3dbeb4c20592ae6fae0555d4e310cf749e2102bd3e50",
+      "readback_verified": true
+    },
+    {
+      "file": "CONFIG.SYS",
+      "bytes": 67,
+      "sha256": "3cb255a9aa2c3c387e1d454e2d05e045959386ecbaf0f1a4ee41dfb247b0371d",
+      "readback_verified": true
+    },
+    {
+      "file": "AUTOEXEC.BAT",
+      "bytes": 143,
+      "sha256": "80abd152d1e437f09dfbdae99ee898a3e73950e2bcce0e303ee478dbbd1634bd",
+      "readback_verified": true
+    },
+    {
+      "file": "CBDOSINT.EXE",
+      "bytes": 14324,
+      "sha256": "3ca3e46043d489597572f540d8fa13240585da6598f69c410aa913b9cc7212a3",
+      "readback_verified": true
+    },
+    {
+      "file": "SHZEXIT.COM",
+      "bytes": 65,
+      "sha256": "9e71170dac88c04b5d3bffedc223b44634302cbfecc6765b07a86ca3aaa54d27",
+      "readback_verified": true
+    }
+  ],
+  "FAT_check_exit": 0,
+  "FAT_result": "fsck.fat 4.2 (2021-01-31)\ndiagnostic-fat16-v2.img: 7 files, 347/64916 clusters",
+  "image_unchanged": true,
+  "VM_executed": false,
+  "actual_DOS_interrupts_executed": false,
+  "native_result": "NOT RUN",
+  "Windows98_boot_verified": false,
+  "ShizukuDOS_replaces_MSDOS_verified": false,
+  "raw_private_record_sha256": "eff17a586e4c2089d38ca49980dd644138d6d50698f55b7c8257bbe136d5802c",
+  "privacy": "Only actual workspace prefixes normalized; no bytes or execution results fabricated"
+}

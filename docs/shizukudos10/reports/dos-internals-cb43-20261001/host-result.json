@@ -1,0 +1,77 @@
+{
+  "schema": "shizukudos-cb43-dos-internals-host-v1",
+  "upstream_commit": "5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3",
+  "patch_sha256": "a68f2a6bec6b378f69727bd32b386c097ed926323a98c5e34fb109ccdda10ce0",
+  "preimages": [
+    {
+      "path": "hdr/win.h",
+      "preimage_sha256": "7688c971830beb6274c490db7d97a04c7a19772e9cba1fae60e003c77b3a59f0",
+      "postimage_sha256": "f9ea9584c81a8228b9dcd53758732941bb11435773dbd5ec7b4383375a61f17b"
+    },
+    {
+      "path": "kernel/kernel.asm",
+      "preimage_sha256": "d678196d67f88111ebf3b6b60edaa068a8feb64016073bb7b799de48160ed50f",
+      "postimage_sha256": "b9832660e1afed09338588902589e94f12b1e5309b5ad7b351da187cf9e2c13d"
+    },
+    {
+      "path": "kernel/inthndlr.c",
+      "preimage_sha256": "0793e3bb94c558b6fdeb335f9e15577486b4b6ae53e987c89c095909fb363727",
+      "postimage_sha256": "78c2e33034de50bedd627619544c606328f4559b9b6b0e12d6b79683b98b7407"
+    },
+    {
+      "path": "kernel/dosfns.c",
+      "preimage_sha256": "9be568d1aef728738aea0d906c55beafc198b7625a036e269fbc1ce11b2cc816",
+      "postimage_sha256": "9be568d1aef728738aea0d906c55beafc198b7625a036e269fbc1ce11b2cc816"
+    }
+  ],
+  "fixture_source_sha256": "844121f36f1f991b4e88e8611dc2cd5be36863cb2ea3413990e0dc2874fa72e5",
+  "host_binary_sha256": "aa5c5b72a3a248255b425e232d16452934417dbf0e7652d620ad03d801082f52",
+  "host_checks": [
+    "SFT first entry",
+    "SFT first block boundary",
+    "SFT traversal skips empty block",
+    "SFT final chain entry",
+    "SFT chain end rejects index",
+    "SFT negative index rejects",
+    "SFT invalid unsigned index rejects",
+    "closed SFT rejects actual file lookup",
+    "opened SFT resolves actual file lookup",
+    "JFT handle resolves system file number",
+    "closed JFT byte rejects handle",
+    "out of range JFT rejects handle",
+    "1216 real chain pointer and relative index",
+    "1216 invalid SFN preserves pointer",
+    "1220 returns JFT pointer not SFT pointer",
+    "1220 closed in-range slot remains a readable JFT byte",
+    "1220 invalid handle uses AL=6 and preserves AH/pointer",
+    "1600 idle never invents Windows",
+    "1231 hide uses DL only and preserves other flags/registers",
+    "1231 report does not create an instance",
+    "1600 remains idle after report-enable",
+    "1231 one-shot loader honestly unsupported",
+    "1231 selector 3 rejects safely",
+    "1231 selector 255 rejects safely",
+    "1605 prior veto preserves registers and idle state",
+    "1605 chains actual prior startup record",
+    "1605 caller supplied version with null optional data",
+    "1605 repeat never forms self-referential chain",
+    "1600 reports caller supplied version only",
+    "1231 hides reporting without destroying active state",
+    "1231 restores genuine active-state reporting",
+    "1606 clears active and reporting state",
+    "1600 idle after exit",
+    "startup record C layout matches 4.0 offsets",
+    "1605 3.0 record major byte first, actual 3.10 version separate",
+    "1600 actual Windows version distinct from supported record version",
+    "1231 no-Windows-support profile rejects hide",
+    "1231 no-Windows-support profile rejects report"
+  ],
+  "passed": 38,
+  "failed": 0,
+  "limits": [
+    "Selected production C bodies with host far-pointer adaptation",
+    "No native DOS execution",
+    "No Windows 98 boot or modern application claim",
+    "1230 and 1231/DL=0 remain unsupported"
+  ]
+}

@@ -1,0 +1,61 @@
+test_actual_default_config_reaches_real_watcom_and_nasm (__main__.BuilderContract.test_actual_default_config_reaches_real_watcom_and_nasm) ... FAIL
+test_compilation_configuration_drift_is_rejected (__main__.BuilderContract.test_compilation_configuration_drift_is_rejected) ... FAIL
+test_default_both_flags_and_actual_configuration_pin (__main__.BuilderContract.test_default_both_flags_and_actual_configuration_pin) ... FAIL
+test_missing_assembly_definition_is_rejected_by_real_nasm (__main__.BuilderContract.test_missing_assembly_definition_is_rejected_by_real_nasm) ... ok
+test_missing_c_definition_is_rejected_by_real_header_compilation (__main__.BuilderContract.test_missing_c_definition_is_rejected_by_real_header_compilation) ... ok
+test_production_main_copies_exact_kernel_provenance_into_receipt (__main__.BuilderContract.test_production_main_copies_exact_kernel_provenance_into_receipt) ... FAIL
+
+======================================================================
+FAIL: test_actual_default_config_reaches_real_watcom_and_nasm (__main__.BuilderContract.test_actual_default_config_reaches_real_watcom_and_nasm)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_win31_profile.py", line 108, in test_actual_default_config_reaches_real_watcom_and_nasm
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+AssertionError: 2 != 0 : cd kernel && wmake -ms -h -f shz-contract.mak shz-contract
+wcc -zq -fo=.obj -I../hdr -3 -DI386 -DWITHFAT32 -os-s-e5-j-zl-zp1-wx-we-zgf-zff-r-ntHMA_TEXT contract.c
+contract.c(3): Error! E1113: Expression has incomplete type
+contract.c(3): Note! N2003: source conversion type is 'struct WinStartupInfo'
+contract.c(3): Error! E1020: Dimension cannot be 0 or negative
+contract.c(4): Error! E1113: Expression has incomplete type
+contract.c(4): Note! N2003: source conversion type is 'struct WinPatchTable'
+contract.c(4): Error! E1020: Dimension cannot be 0 or negative
+contract.c(5): Error! E1044: Variable 'shz_contract_startup' has incomplete type
+Error(E42): Last command making (shz-contract) returned a bad status
+Error(E02): Make execution terminated
+make: *** [makefile:151: shz-contract] Error 2
+
+
+======================================================================
+FAIL: test_compilation_configuration_drift_is_rejected (__main__.BuilderContract.test_compilation_configuration_drift_is_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_win31_profile.py", line 128, in test_compilation_configuration_drift_is_rejected
+    with self.assertRaisesRegex(RuntimeError, "configuration changed"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_default_both_flags_and_actual_configuration_pin (__main__.BuilderContract.test_default_both_flags_and_actual_configuration_pin)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_win31_profile.py", line 98, in test_default_both_flags_and_actual_configuration_pin
+    self.assertEqual((self.tree / "config.mak").read_text(), CONFIG)
+AssertionError: 'XNAS[13 chars]ine XUPX\n' != 'XNAS[13 chars]ine XUPX\nALLCFLAGS=-DWIN31SUPPORT\nNASMFLAGS=-DWIN31SUPPORT\n'
+  XNASM=nasm
+  undefine XUPX
++ ALLCFLAGS=-DWIN31SUPPORT
++ NASMFLAGS=-DWIN31SUPPORT
+
+
+======================================================================
+FAIL: test_production_main_copies_exact_kernel_provenance_into_receipt (__main__.BuilderContract.test_production_main_copies_exact_kernel_provenance_into_receipt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "${STAGE}/test_win31_profile.py", line 150, in test_production_main_copies_exact_kernel_provenance_into_receipt
+    self.assertIsNotNone(saved[0].get("kernel_make_config"))
+AssertionError: unexpectedly None
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.339s
+
+FAILED (failures=4)

@@ -37,6 +37,9 @@ void boundary_switch(uint32_t *save_esp, uint32_t new_esp);
 #undef sti
 #undef cli
 #undef switch_stacks
+#define current (runqueues.cpu[0].current)
+#define idle_thread (runqueues.cpu[0].idle)
+uint32_t arch_cpu_id(void) { return 0; }
 
 static unsigned checks, failures;
 static int host_if = 1, escape_armed, switch_depth, free_allowed;
@@ -122,6 +125,7 @@ void kpanic(const char *format, ...)
 void boundary_switch(uint32_t *save_esp, uint32_t new_esp)
 {
     if (host_if || !new_esp) fixture_error("context switch outside IRQ-off boundary");
+    sched_switch_complete(); /* actual destination-stack completion body */
     if (switch_depth) {
         if (current != resume_thread || save_esp != &idle_thread->esp)
             fixture_error("unexpected nested resume context");
@@ -150,10 +154,13 @@ void boundary_switch(uint32_t *save_esp, uint32_t new_esp)
 static void reset(uint64_t now)
 {
     memset(threads, 0, sizeof threads);     /* production storage and real TCB type */
+    k32_rq_init(&runqueues,threads,MAX_THREADS,1);
+    for(unsigned i=0;i<MAX_THREADS;i++){threads[i].ready_cpu=threads[i].on_cpu=K32_CPU_NONE;threads[i].affinity_mask=1;}
     current = &threads[0];
     idle_thread = &threads[1];
     current->id = 1;
     current->state = TS_RUNNING;
+    current->on_cpu = 0;
     current->esp = 0x101;
     current->stack_base = 0x10000;
     idle_thread->id = 2;
@@ -215,9 +222,11 @@ static void select_second(void)
 {
     if (current != idle_thread) fixture_error("second worker selection requires parked first worker");
     idle_thread->state = TS_READY;
+    idle_thread->on_cpu = K32_CPU_NONE;
     current = &threads[2];
     current->id = 3;
     current->state = TS_RUNNING;
+    current->on_cpu = 0;
     current->esp = 0x301;
     current->stack_base = 0x30000;
 }
