@@ -14,6 +14,7 @@
 #include "smp_boot.h"
 #ifdef SHZ_STANDALONE
 #include "cpu_arch_bringup.h"
+#include "kernel_ap_work.h"
 #endif
 _Static_assert(K64_CPU_MAX == SHZ_SMP_MAX_CPUS, "CPU identity domain must match queue storage");
 extern int ntdrv_gs_all;                     /* ntdrv_ke.c: set once the driver host runs code that reads the KPCR through GS */
@@ -37,10 +38,22 @@ static k64_runqueues_t runqueues;
 static unsigned ap_cohort_count;
 static volatile uint32_t ap_cohort_stop;
 static thread_t *ap_cohort_idle[K64_CPU_MAX];
-static struct { thread_t *thread; uint64_t loops,seen; uint32_t hash; } ap_cohort_work[K64_CPU_MAX][2];
+static struct { thread_t *thread; uint64_t loops,seen,completed_count,completed_cpu_mask; uint32_t hash; } ap_cohort_work[K64_CPU_MAX][2];
 static uint64_t ap_cohort_boot_rsp[K64_CPU_MAX];
+static shz_ap_work_pool_t *ap_work_pool;       /* pre-INIT allocation; retained until every AP stack is inactive */
+#define AP_WORK_PAGES ((sizeof(shz_ap_work_pool_t)+PAGE_SIZE-1)/PAGE_SIZE)
+static int work_resources_live(void) { return ap_work_pool!=0; }
 extern void sched_ap_stack_enter(uint64_t *save_boot,uint64_t idle_top,unsigned cpu);
 #endif
+static int restricted_slot(const thread_t *t) { return t->ap_kernel_cohort==K64_AP_WORKER_CLASS; }
+static int general_admission_closed(void)
+{
+#ifdef SHZ_STANDALONE
+    return work_resources_live();
+#else
+    return 0;
+#endif
+}
 /* `current` and `idle_thread` are BSP compatibility mirrors for shared UP-only
  * wait/process paths. Dispatch and entry consume the actual owner's CPU record. */
 
@@ -137,7 +150,7 @@ int thread_set_sched_policy(thread_t *t, unsigned priority, unsigned quantum_tic
 {
     queue_guard_t g = queue_enter();
     int rc = -1;
-    if (bsp_scheduler_owner() && thread_pointer_valid(t) &&
+    if (bsp_scheduler_owner() && thread_pointer_valid(t) && !restricted_slot(t) &&
         ((!t->ap_kernel_cohort && cpu_mask == 1) ||
          (t->ap_kernel_cohort && cpu_mask && !(cpu_mask & 1) && !(cpu_mask & ~runqueues.online_mask)))) {
         const int move = t->ready_queued &&
@@ -219,7 +232,7 @@ thread_t *thread_find_tid(void *process, uint64_t tid)
 {
     unsigned i;
     for (i = 0; i < thread_hi; ++i)
-        if (threads[i].state != TS_FREE && threads[i].state != TS_ZOMBIE && threads[i].proc == process && threads[i].tid == tid)
+        if (!restricted_slot(&threads[i]) && threads[i].state != TS_FREE && threads[i].state != TS_ZOMBIE && threads[i].proc == process && threads[i].tid == tid)
             return &threads[i];
     return 0;
 }
@@ -231,6 +244,7 @@ void sched_for_each_thread(void (*fn)(thread_t *, void *), void *ctx)
     if (!bsp_scheduler_owner()) return;
     unsigned i;
     for (i = 0; i < thread_hi; ++i) {
+        if (restricted_slot(&threads[i])) continue; /* immutable class before any AP-owned mutable field/callback */
         const uint64_t f = irq_save();
         if (threads[i].state != TS_FREE) fn(&threads[i], ctx);
         irq_restore(f);
@@ -290,10 +304,11 @@ static thread_t *pick_next(uint32_t id, int *aged)
 
 static inline uint64_t rdtsc(void) { uint32_t lo, hi; __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi)); return ((uint64_t)hi << 32) | lo; }
 
-thread_t *thread_slot(unsigned i) { return i < thread_hi ? &threads[i] : 0; }
+thread_t *thread_slot(unsigned i) { return i < thread_hi && !restricted_slot(&threads[i]) ? &threads[i] : 0; }
 
 uint64_t thread_cycles_now(thread_t *t)
 {
+    if(restricted_slot(t))return 0; /* AP cycle fields are not BSP/driver policy inputs */
     const uint64_t f = irq_save();
     uint64_t c = t->cycles;
     if (t == thread_current() && t->tsc_in) c += rdtsc() - t->tsc_in;
@@ -353,7 +368,7 @@ static void schedule(int from_tick)
         if (read_cr3() != want)
             write_cr3(want);
     }
-    if (prev->teb || next->teb || ntdrv_gs_all) {      /* ntdrv_gs_all: hosted drivers read a per-thread KPCR through GS (ntdrv_ke.c) */
+    if (!id && (prev->teb || next->teb || ntdrv_gs_all)) { /* AP restricted contexts never consume BSP driver GS policy */
         prev->user_gs_base = rdmsr(MSR_GS_BASE);
         wrmsr(MSR_GS_BASE, next->user_gs_base);
     }
@@ -386,6 +401,9 @@ void sched_switch_complete(void)
     const uint32_t ticket = k64_rq_lock(&runqueues);
     KASSERT(k64_rq_complete_locked(&runqueues, id));
     k64_rq_unlock(&runqueues, ticket);
+#ifdef SHZ_STANDALONE
+    if (id && ap_work_pool) shz_cpu_arch_work_complete(id);
+#endif
 }
 
 void __attribute__((weak)) sched_check_timeouts(uint64_t now) { (void)now; }       /* objects.c overrides */
@@ -427,7 +445,7 @@ void sched_tick(void)
 #endif
     cpu->tick_from_user = 0;
     for (i = 0; !id && i < thread_hi; ++i)
-        if (threads[i].state == TS_BLOCKED && threads[i].wake_tick && threads[i].wake_tick <= jiffies) {
+        if (!restricted_slot(&threads[i]) && threads[i].state == TS_BLOCKED && threads[i].wake_tick && threads[i].wake_tick <= jiffies) {
             threads[i].wake_tick = 0;
             if (threads[i].wait_sem) {
                 ksem_t *s = threads[i].wait_sem;
@@ -442,7 +460,7 @@ void sched_tick(void)
             ++timeouts;
             make_ready(&threads[i]);
         }
-    if (!id) sched_check_timeouts(jiffies);
+    if (!id && !general_admission_closed()) sched_check_timeouts(jiffies);
 #ifdef SHZ_STANDALONE
     {   /* IRQL >= DISPATCH_LEVEL (CR8, written by a hosted NT driver through the DDK's inline KfRaiseIrql, or by the
          * driver host's own KeRaiseIrql) means "no dispatching": the tick still counts and wakes sleepers, but the
@@ -491,6 +509,7 @@ static void reap_user_zombies(const void *only, int drop_holds)
     unsigned i;
     for (i = 0; i < thread_hi; ++i) {
         thread_t *t = &threads[i];
+        if (restricted_slot(t)) continue;
         if (t->state == TS_FREE || !t->proc || (only && t->proc != only)) continue;
         if (drop_holds) t->creator_hold = 0;    /* also a thread still inside thread_exit(): it is reaped at a later pass */
         if (t->state != TS_ZOMBIE || t == current || t->creator_hold || t->on_cpu != K64_CPU_NONE) continue;
@@ -520,7 +539,7 @@ void thread_reap_exited(void)
 
 void thread_creator_release(thread_t *t)
 {
-    if (!bsp_scheduler_owner()) return;
+    if (!bsp_scheduler_owner() || restricted_slot(t)) return;
     const uint64_t f = irq_save();
     t->creator_hold = 0;
     irq_restore(f);
@@ -542,7 +561,7 @@ static void kstack_free(uint64_t base)
 static thread_t *thread_create_state(const char *name, void (*fn)(void *), void *arg, uint32_t state)
 {
     uint64_t f = irq_save(), *sp;
-    if (!bsp_scheduler_owner()) { irq_restore(f); return 0; }
+    if (!bsp_scheduler_owner() || general_admission_closed()) { irq_restore(f); return 0; }
     thread_t *t = 0;
     unsigned i, k;
     reap_user_zombies(0, 0);
@@ -594,7 +613,7 @@ thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *ar
 
 void thread_resume(thread_t *t)
 {
-    if (!bsp_scheduler_owner()) return;
+    if (!bsp_scheduler_owner() || general_admission_closed()) return;
     const uint64_t f = irq_save();
     if (t->state == TS_NEW)
         make_ready(t);
@@ -604,6 +623,7 @@ void thread_resume(thread_t *t)
 void thread_discard(thread_t *t)
 {
     if (!bsp_scheduler_owner()) return;
+    if (general_admission_closed()) return;
     const uint64_t f = irq_save();
     if (t->state == TS_NEW) {
         kstack_free(t->stack_base);
@@ -659,6 +679,7 @@ void thread_exit(int64_t code)
 int64_t thread_join(thread_t *t)
 {
     if (!bsp_scheduler_owner()) return -1;
+    if (restricted_slot(t) && sched_cpu_online_mask()!=1) return -1;
     for (;;) {
         uint64_t f = irq_save();
         if (t->state == TS_ZOMBIE && t->on_cpu == K64_CPU_NONE) {
@@ -682,6 +703,7 @@ void thread_block_current(void)
 
 void thread_wake(thread_t *t)
 {
+    if (restricted_slot(t)) return; /* work wakes use the descriptor/queue ticket path only */
     if (!bsp_scheduler_owner()) return;
     const uint64_t f = irq_save();
     if (t->state == TS_BLOCKED) {
@@ -845,6 +867,47 @@ void sched_init(void)
 }
 
 #ifdef SHZ_STANDALONE
+static int ap_work_complete_locked(unsigned origin,unsigned which,unsigned slot,uint64_t cookie,unsigned cpu,uint64_t digest)
+{
+    if(!ap_work_pool || !origin || origin>=ap_cohort_count || which>=2 || !cpu ||
+       !k64_rq_online(&runqueues,cpu))return -1;
+    thread_t *t=ap_cohort_work[origin][which].thread;
+    if(!k64_rq_valid(&runqueues,t) || !restricted_slot(t) || !k64_rq_cohort_safe(t) ||
+       runqueues.cpu[cpu].current!=t || t->on_cpu!=cpu || t->state!=TS_RUNNING ||
+       t->cpu_mask!=(1ull<<cpu) || ap_cohort_work[origin][which].completed_count==UINT64_MAX ||
+       ap_cohort_work[origin][which].loops==UINT64_MAX ||
+       shz_ap_work_complete_locked(ap_work_pool,slot,cookie,cpu,t->id,digest))return -1;
+    ++ap_cohort_work[origin][which].completed_count;
+    ap_cohort_work[origin][which].completed_cpu_mask|=1ull<<cpu;
+    ++ap_cohort_work[origin][which].loops;return 0;
+}
+static void ap_work_worker(void *arg)
+{
+    const unsigned origin=(unsigned)(uintptr_t)arg/2,which=(unsigned)(uintptr_t)arg%2;
+    thread_t *t=thread_current();
+    KASSERT(origin && t && restricted_slot(t));
+    for(;;) {
+        const unsigned cpu=sched_cpu_identity();unsigned slot=0;
+        queue_guard_t g=queue_enter();
+        KASSERT(cpu && cpu<K64_CPU_MAX && t==ap_cohort_work[origin][which].thread &&
+            k64_rq_cohort_safe(t) && t->on_cpu==cpu && (t->cpu_mask&(1ull<<cpu)) && ap_work_pool);
+        ap_cohort_work[origin][which].seen|=1ull<<cpu;
+        const int claimed=shz_ap_work_claim_locked(ap_work_pool,cpu,t->id,&slot);
+        const int done=ap_work_pool->state==SHZ_AP_WORK_DRAINING && !claimed;
+        if(!claimed && !done) KASSERT(k64_rq_work_park_locked(&runqueues,cpu,t)==0);
+        /* IF must remain clear between conditional park and stack transfer;
+         * CPU0 can wake in this gap, but completion alone releases on_cpu. */
+        k64_rq_unlock(&runqueues,g.ticket);
+        if(done) { irq_restore(g.flags);thread_exit(0); }
+        if(!claimed) { schedule(0);irq_restore(g.flags);continue; }
+        shz_ap_work_job_t *job=&ap_work_pool->job[slot];const uint64_t cookie=job->cookie;
+        irq_restore(g.flags);
+        const uint64_t digest=shz_ap_work_digest(job->payload,job->bytes);
+        g=queue_enter();
+        KASSERT(ap_work_complete_locked(origin,which,slot,cookie,cpu,digest)==0);
+        queue_leave(g);
+    }
+}
 static void ap_cohort_worker(void *arg)
 {
     const unsigned slot=(unsigned)(uintptr_t)arg,cpu=slot/2,which=slot%2;
@@ -864,23 +927,19 @@ static void ap_cohort_worker(void *arg)
     thread_exit(loops>=1000 && t->run_ticks>=16 ? 0:-1);
 }
 static void ap_cohort_unused_idle(void *arg) { (void)arg;KASSERT(0); }
-#endif
-int sched_ap_cohort_prepare(unsigned count)
+static int ap_cohort_prepare_internal(unsigned count,void (*worker)(void *),unsigned immutable_class)
 {
-#ifndef SHZ_STANDALONE
-    (void)count;return -2;
-#else
     if(!bsp_scheduler_owner() || !threads || count<2 || count>K64_CPU_MAX || ap_cohort_count ||
        runqueues.online_mask!=1) return -1;
     const uint64_t flags=irq_save();
     for(unsigned cpu=1;cpu<count;cpu++) {
         ap_cohort_idle[cpu]=thread_create_suspended("ap-idle",ap_cohort_unused_idle,0);
         if(!ap_cohort_idle[cpu]) goto rollback;
-        ap_cohort_idle[cpu]->ap_kernel_cohort=1;
+        ap_cohort_idle[cpu]->ap_kernel_cohort=immutable_class;
         for(unsigned i=0;i<2;i++) {
-            thread_t *t=thread_create_suspended("ap-cohort",ap_cohort_worker,(void *)(uintptr_t)(cpu*2+i));
+            thread_t *t=thread_create_suspended("ap-cohort",worker,(void *)(uintptr_t)(cpu*2+i));
             if(!t) goto rollback;
-            t->ap_kernel_cohort=1;ap_cohort_work[cpu][i].thread=t;
+            t->ap_kernel_cohort=immutable_class;ap_cohort_work[cpu][i].thread=t;
         }
     }
     ap_cohort_stop=0;ap_cohort_count=count;irq_restore(flags);return 0;
@@ -892,6 +951,14 @@ rollback:
         }
     }
     irq_restore(flags);return -1;
+}
+#endif
+int sched_ap_cohort_prepare(unsigned count)
+{
+#ifndef SHZ_STANDALONE
+    (void)count;return -2;
+#else
+    return ap_cohort_prepare_internal(count,ap_cohort_worker,1);
 #endif
 }
 int sched_ap_cohort_resources(int (*owned)(uint64_t,uint64_t))
@@ -906,7 +973,18 @@ int sched_ap_cohort_resources(int (*owned)(uint64_t,uint64_t))
         if(!k64_rq_cohort_safe(t) || t->state!=TS_NEW || t->on_cpu!=K64_CPU_NONE ||
            t->ready_queued || t->stack_base<phys_base_va ||
            !owned(t->stack_base-phys_base_va,KSTACK_BYTES)) return -1;
+        if(ap_work_pool) {
+            const uint64_t base=(uint64_t)ap_work_pool,bytes=AP_WORK_PAGES*PAGE_SIZE;
+            if(t->stack_base<base+bytes && base<t->stack_base+KSTACK_BYTES) return -1;
+        }
+        for(unsigned c=1;c<=cpu;c++) for(unsigned j=0;j<3;j++) {
+            if(c==cpu && j>=i) break;
+            thread_t *prior=j?ap_cohort_work[c][j-1].thread:ap_cohort_idle[c];
+            if(t->stack_base<prior->stack_base+KSTACK_BYTES && prior->stack_base<t->stack_base+KSTACK_BYTES) return -1;
+        }
     }
+    if(ap_work_pool && ((uint64_t)ap_work_pool<phys_base_va ||
+       !owned((uint64_t)ap_work_pool-phys_base_va,AP_WORK_PAGES*PAGE_SIZE))) return -1;
     return 0;
 #endif
 }
@@ -922,7 +1000,13 @@ void sched_ap_stack_main(unsigned cpu)
     KASSERT(k64_rq_admit_cohort_locked(&runqueues,cpu,idle)==0);
     queue_leave(g);
     KASSERT(shz_cpu_arch_sched_timer(cpu,1)==0);
-    while(!__atomic_load_n(&ap_cohort_stop,__ATOMIC_ACQUIRE)) __asm__ volatile("sti; hlt; cli":::"memory");
+    for(;;) {
+        queue_guard_t check=queue_enter();
+        const int stopping=__atomic_load_n(&ap_cohort_stop,__ATOMIC_ACQUIRE) &&
+            (!ap_work_pool || runqueues.cpu[cpu].reschedule_ack==runqueues.cpu[cpu].reschedule_request);
+        queue_leave(check);if(stopping)break;
+        __asm__ volatile("sti; hlt; cli":::"memory");
+    }
     KASSERT(shz_cpu_arch_sched_timer(cpu,0)==0);
     KASSERT(arch_sched_entry_set_stack(cpu,shz_smp_cpus[cpu].boot_stack_top)==0);
     KASSERT(shz_cpu_arch_sched_restore(cpu)==0);
@@ -939,6 +1023,7 @@ void sched_ap_stack_leave_complete(unsigned cpu)
     queue_guard_t g=queue_enter();KASSERT(!(g.flags&0x200));
     KASSERT(k64_rq_withdraw_cohort_locked(&runqueues,cpu)==0);
     queue_leave(g);
+    if(ap_work_pool) shz_cpu_arch_work_finish(cpu);
 #else
     (void)cpu;KASSERT(0);
 #endif
@@ -1037,5 +1122,241 @@ int sched_ap_cohort_finish(void)
     ap_cohort_count=0;
     kprintf("SMP-DISPATCH summary: cpus=%u workers=%u migrated=%u bad=%u scheduler_cpus=%u\n",count,(count-1)*2,migrated,(unsigned)bad,(unsigned)(sched_cpu_online_mask()==1));
     return bad?-1:0;
+#endif
+}
+
+int sched_ap_work_quiescent(void)
+{
+    if(!bsp_scheduler_owner() || !threads || general_admission_closed()) return -1;
+    queue_guard_t g=queue_enter();k64_cpu_sched_t *c=&runqueues.cpu[0];
+    int ok=runqueues.online_mask==1 && c->current && c->idle && !c->outgoing &&
+        !c->ready_count && !c->ready_mask && c->current->state==TS_RUNNING &&
+        c->current->on_cpu==0 && c->idle->state==TS_READY && !c->idle->ready_queued &&
+        c->idle->on_cpu==K64_CPU_NONE && read_cr3()==kernel_pml4();
+    for(unsigned i=0;ok && i<thread_hi;i++) {
+        thread_t *t=&threads[i];
+        if(t->state==TS_FREE) continue;
+        if((t!=c->current && t!=c->idle) || t->proc || t->object || t->ipc || t->teb ||
+           t->wait_sem || t->wait_multi || t->next || t->user_rip || t->user_rsp ||
+           t->wake_tick || t->ready_queued || t->creator_hold || t->ap_kernel_cohort) ok=0;
+    }
+    queue_leave(g);return ok?0:-1;
+}
+int sched_ap_work_prepare(unsigned count)
+{
+#ifndef SHZ_STANDALONE
+    (void)count;return -2;
+#else
+    if(!shz_cpu_arch_work_available(count) || sched_ap_work_quiescent() ||
+       ap_cohort_prepare_internal(count,ap_work_worker,K64_AP_WORKER_CLASS)) return -1;
+    const uint64_t pa=pmm_alloc_contig(AP_WORK_PAGES);
+    if(!pa) {
+        for(unsigned c=1;c<count;c++) { thread_discard(ap_cohort_idle[c]);for(unsigned i=0;i<2;i++)thread_discard(ap_cohort_work[c][i].thread); }
+        ap_cohort_count=0;return -1;
+    }
+    ap_work_pool=(shz_ap_work_pool_t *)p2v(pa);
+    shz_ap_work_init(ap_work_pool,((1ull<<count)-1)&~1ull);
+    for(unsigned c=1;c<count;c++)shz_cpu_arch_work_enable(c);
+    return 0;
+#endif
+}
+uint64_t sched_ap_work_resource(uint64_t *bytes)
+{
+#ifdef SHZ_STANDALONE
+    if(!bsp_scheduler_owner() || !ap_work_pool || !bytes) return 0;
+    *bytes=AP_WORK_PAGES*PAGE_SIZE;return (uint64_t)ap_work_pool-phys_base_va;
+#else
+    (void)bytes;return 0;
+#endif
+}
+int sched_ap_work_overlaps(uint64_t physical,uint64_t bytes)
+{
+#ifndef SHZ_STANDALONE
+    (void)physical;(void)bytes;return -2;
+#else
+    if(!bsp_scheduler_owner() || !ap_work_pool || !bytes || physical>UINT64_MAX-bytes ||
+       physical>UINT64_MAX-phys_base_va || physical+phys_base_va>UINT64_MAX-bytes || runqueues.online_mask!=1)return -1;
+    const uint64_t base=physical+phys_base_va;
+    for(unsigned c=1;c<ap_cohort_count;c++)for(unsigned i=0;i<3;i++) {
+        const thread_t *t=i?ap_cohort_work[c][i-1].thread:ap_cohort_idle[c];
+        if(!t || (base<t->stack_base+KSTACK_BYTES && t->stack_base<base+bytes))return -1;
+    }
+    return 0;
+#endif
+}
+#ifdef SHZ_STANDALONE
+static int ap_work_failed(void)
+{ queue_guard_t g=queue_enter();shz_ap_work_fail_locked(ap_work_pool);queue_leave(g);return -1; }
+static int ap_work_coverage_locked(thread_t *moving,unsigned destination,uint64_t *coverage)
+{
+    uint64_t mask=0;
+    for(unsigned c=1;c<ap_cohort_count;c++)for(unsigned i=0;i<2;i++) {
+        const thread_t *t=ap_cohort_work[c][i].thread;
+        if(!k64_rq_valid(&runqueues,t) || !restricted_slot(t) || !k64_rq_cohort_safe(t) ||
+           (t->state!=TS_BLOCKED && t->state!=TS_READY && t->state!=TS_RUNNING) ||
+           !t->cpu_mask || (t->cpu_mask&(t->cpu_mask-1)) || (t->cpu_mask&1) ||
+           (t->cpu_mask&~ap_work_pool->mask) || (t->cpu_mask&~runqueues.online_mask))return -1;
+        for(unsigned prior=1;prior<=c;prior++)for(unsigned j=0;j<2;j++)
+            if((prior<c || j<i) && ap_cohort_work[prior][j].thread==t)return -1;
+        mask|=t==moving?1ull<<destination:t->cpu_mask;
+    }
+    *coverage=mask;return 0;
+}
+static int ap_work_signal(uint64_t mask,int stop)
+{
+    queue_guard_t g=queue_enter();
+    for(unsigned c=1;c<ap_cohort_count;c++)for(unsigned i=0;i<2;i++) {
+            thread_t *t=ap_cohort_work[c][i].thread;
+            if(t->state==TS_NEW && (mask&(1ull<<c))) {
+                t->cpu_mask=1ull<<c;t->state=TS_READY;
+                KASSERT(!k64_rq_enqueue_locked(&runqueues,t,c,jiffies,++ready_order));
+            } else if(t->state==TS_BLOCKED && (t->cpu_mask&mask))
+                KASSERT(!k64_rq_work_wake_locked(&runqueues,t,jiffies,++ready_order));
+    }
+    for(unsigned c=1;c<ap_cohort_count;c++)if(mask&(1ull<<c)) {
+        if(runqueues.cpu[c].reschedule_request==UINT64_MAX) { queue_leave(g);return ap_work_failed(); }
+        ++runqueues.cpu[c].reschedule_request;
+    }
+    if(stop)__atomic_store_n(&ap_cohort_stop,1,__ATOMIC_RELEASE);
+    queue_leave(g);
+    for(unsigned c=1;c<ap_cohort_count;c++)if(mask&(1ull<<c))
+        if(shz_smp_send_ipi(c,SHZ_SMP_VEC_RESCHEDULE)) return ap_work_failed();
+    return 0;
+}
+static int ap_work_wait(int terminal)
+{
+    const uint64_t start=ticks_now();unsigned spins=0;
+    for(;;) {
+        int ok=1;queue_guard_t g=queue_enter();
+        for(unsigned c=1;c<ap_cohort_count;c++) {
+            ok&=runqueues.cpu[c].reschedule_ack==runqueues.cpu[c].reschedule_request;
+            if(terminal)for(unsigned i=0;i<2;i++)ok&=k64_rq_reapable_locked(&runqueues,ap_cohort_work[c][i].thread);
+        }
+        queue_leave(g);if(ok) return 0;
+        if(ticks_now()-start>=500 || ++spins>=100000000u) return ap_work_failed();
+        __asm__ volatile("pause");
+    }
+}
+#endif
+int sched_ap_work_start(void)
+{
+#ifndef SHZ_STANDALONE
+    return -2;
+#else
+    if(!bsp_scheduler_owner() || !ap_work_pool) return -1;
+    const uint64_t want=(1ull<<ap_cohort_count)-1,start=ticks_now();unsigned spins=0;
+    while(sched_cpu_online_mask()!=want) {
+        if(ticks_now()-start>=500 || ++spins>=100000000u) return ap_work_failed();
+        __asm__ volatile("pause");
+    }
+    queue_guard_t g=queue_enter();const int rc=shz_ap_work_start_locked(ap_work_pool,want&~1ull);queue_leave(g);
+    if(rc) return -1;
+    if(ap_work_signal(want&~1ull,0) || ap_work_wait(0)) return -1;
+    return 0; /* successful empty interval keeps queues, timers and workers online */
+#endif
+}
+int sched_ap_work_submit(const void *data,unsigned bytes,uint64_t mask,uint64_t *cookie)
+{
+#ifndef SHZ_STANDALONE
+    (void)data;(void)bytes;(void)mask;(void)cookie;return -2;
+#else
+    if(!bsp_scheduler_owner() || !ap_work_pool || !cookie) return -1;
+    queue_guard_t g=queue_enter();uint64_t coverage=0;
+    const int rc=ap_work_coverage_locked(0,0,&coverage) || !(mask&coverage)?-1:
+        shz_ap_work_submit_locked(ap_work_pool,data,bytes,mask,cookie);
+    queue_leave(g);if(rc) return rc;
+    return ap_work_signal(mask,0); /* accepted cookie remains retained if actual send fails */
+#endif
+}
+int sched_ap_work_poll(uint64_t cookie,uint64_t *digest)
+{
+#ifndef SHZ_STANDALONE
+    (void)cookie;(void)digest;return -2;
+#else
+    if(!bsp_scheduler_owner() || !ap_work_pool) return -1;
+    queue_guard_t g=queue_enter();const int rc=shz_ap_work_poll_locked(ap_work_pool,cookie,digest);queue_leave(g);return rc;
+#endif
+}
+int sched_ap_work_release(uint64_t cookie)
+{
+#ifndef SHZ_STANDALONE
+    (void)cookie;return -2;
+#else
+    if(!bsp_scheduler_owner() || !ap_work_pool) return -1;
+    queue_guard_t g=queue_enter();const int rc=shz_ap_work_release_locked(ap_work_pool,cookie);queue_leave(g);return rc;
+#endif
+}
+int sched_ap_work_migrate(unsigned origin,unsigned slot,unsigned destination)
+{
+#ifndef SHZ_STANDALONE
+    (void)origin;(void)slot;(void)destination;return -2;
+#else
+    if(!bsp_scheduler_owner() || !ap_work_pool || !origin || origin>=ap_cohort_count ||
+       slot>=2 || !destination || destination>=ap_cohort_count)return -1;
+    /* External architecture readers never run under the queue ticket. RUNNING
+     * below excludes normal stop/withdraw; this is not a hardware health lease. */
+    const uint64_t architecture=shz_cpu_arch_work_online_mask();
+    queue_guard_t g=queue_enter();thread_t *t=ap_cohort_work[origin][slot].thread;
+    uint64_t coverage=0;
+    if(ap_work_pool->state!=SHZ_AP_WORK_RUNNING || !k64_rq_valid(&runqueues,t) ||
+       !(architecture&(1ull<<destination)) || !(architecture&t->cpu_mask) ||
+       ap_work_coverage_locked(t,destination,&coverage)) { queue_leave(g);return -1; }
+    for(unsigned i=0;i<SHZ_AP_WORK_SLOTS;i++) {
+        const shz_ap_work_job_t *j=&ap_work_pool->job[i];
+        if(((j->state==SHZ_AP_JOB_RUNNING || j->state==SHZ_AP_JOB_DONE) && j->worker==t->id) ||
+           (j->state==SHZ_AP_JOB_QUEUED && !(j->mask&coverage))) { queue_leave(g);return -1; }
+    }
+    const uint64_t prior=t->cpu_mask;
+    if(t->state!=TS_BLOCKED || t->on_cpu!=K64_CPU_NONE || t->ready_queued) {
+        queue_leave(g);return K64_AP_WORK_BUSY; /* no policy/queue/IPI mutation */
+    }
+    const int rc=k64_rq_work_move_locked(&runqueues,t,destination);queue_leave(g);
+    if(rc)return rc;
+    if(ap_work_signal(prior|(1ull<<destination),0) || ap_work_wait(0))return -1;
+    return 0;
+#endif
+}
+int sched_ap_work_stop(void)
+{
+#ifndef SHZ_STANDALONE
+    return -2;
+#else
+    if(!bsp_scheduler_owner() || !ap_work_pool) return -1;
+    queue_guard_t g=queue_enter();int rc=0;
+    if(ap_work_pool->state==SHZ_AP_WORK_RUNNING)rc=shz_ap_work_drain_locked(ap_work_pool);
+    else if(ap_work_pool->state!=SHZ_AP_WORK_DRAINING)rc=-1;
+    const uint64_t mask=ap_work_pool->mask;queue_leave(g);
+    if(rc || ap_work_signal(mask,0) || ap_work_wait(1)) return -1;
+    g=queue_enter();const unsigned retained=ap_work_pool->occupied;queue_leave(g);
+    if(retained) return -2; /* DONE results remain pollable; caller must release and retry drain */
+    if(ap_work_signal(mask,1))return -1;
+    const uint64_t start=ticks_now();unsigned spins=0;
+    for(;;) {
+        int done=sched_cpu_online_mask()==1;
+        for(unsigned c=1;c<ap_cohort_count;c++)done&=shz_cpu_arch_work_ready(c);
+        if(done)break;
+        if(ticks_now()-start>=500 || ++spins>=100000000u)return ap_work_failed();
+        __asm__ volatile("pause");
+    }
+    for(unsigned c=1;c<ap_cohort_count;c++) {
+        KASSERT(shz_cpu_arch_work_report(c)==0);
+        kprintf("SMP-WORK CPU: cpu=%u service_ticks=%llu request=%llu ack=%llu\n",c,
+            runqueues.cpu[c].service_ticks,runqueues.cpu[c].reschedule_request,runqueues.cpu[c].reschedule_ack);
+        for(unsigned i=0;i<2;i++) {
+            thread_t *t=ap_cohort_work[c][i].thread;
+            kprintf("SMP-WORK THREAD: origin=%u slot=%u tid=%u jobs=%llu completed=%llu completed_mask=%llx ticks=%llu seen=%llx owner_mask=%llx state=%u live=%u queued=%u\n",
+                c,i,t->id,ap_cohort_work[c][i].loops,ap_cohort_work[c][i].completed_count,
+                ap_cohort_work[c][i].completed_cpu_mask,t->run_ticks,ap_cohort_work[c][i].seen,t->cpu_mask,t->state,t->on_cpu,t->ready_queued);
+        }
+        for(unsigned i=0;i<2;i++) { thread_t *t=ap_cohort_work[c][i].thread;t->cpu_mask=1;KASSERT(thread_join(t)==0); }
+        /* Public discard is closed for the entire retained work lifetime. */
+        thread_t *idle=ap_cohort_idle[c];KASSERT(idle->state==TS_NEW && idle->on_cpu==K64_CPU_NONE);
+        kstack_free(idle->stack_base);idle->stack_base=0;idle->state=TS_FREE;
+    }
+    kprintf("SMP-WORK stopped: cpus=%u submitted=%llu completed=%llu pending=%u occupied=%u scheduler_cpus=1\n",
+        ap_cohort_count,ap_work_pool->submitted,ap_work_pool->completed,
+        shz_ap_work_pending_locked(ap_work_pool),ap_work_pool->occupied);
+    pmm_free_contig((uint64_t)ap_work_pool-phys_base_va,AP_WORK_PAGES);
+    ap_work_pool=0;ap_cohort_count=0;return 0;
 #endif
 }

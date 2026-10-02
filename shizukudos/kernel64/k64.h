@@ -128,6 +128,7 @@ enum { TS_FREE = 0, TS_READY = 1, TS_RUNNING = 2, TS_BLOCKED = 3, TS_ZOMBIE = 4,
 #define SCHED_STARVATION_TICKS 32u
 /* Aged FIFO service is independent of the configured base quantum. */
 #define SCHED_AGED_SERVICE_TICKS 4u
+#define K64_AP_WORKER_CLASS 2u               /* immutable, published before INIT; never a general wait/object thread */
 typedef struct { uint32_t priority, quantum_ticks; uint64_t cpu_mask; } sched_policy_t;
 typedef struct {
     uint64_t ticks, context_switches, preemptions, wakeups, timeouts;
@@ -178,7 +179,7 @@ struct thread {
     uint32_t sched_priority, quantum_ticks, quantum_left, ready_queued;
     uint64_t max_ready_wait_ticks;              /* diagnostic: longest READY-to-dispatch residence */
     uint32_t ready_cpu, on_cpu;                  /* perCPU queue and live-stack ownership */
-    uint32_t ap_kernel_cohort;                  /* private preallocated native kernel cohort only */
+    uint32_t ap_kernel_cohort;                  /* immutable pre-INIT: 1 historical cohort, 2 restricted work service */
     uint32_t aging_service_left;                /* unrenewable aged-dispatch timer budget; RUNNING only */
 };
 void sched_init(void);
@@ -191,6 +192,19 @@ int sched_ap_cohort_resources(int (*owned)(uint64_t,uint64_t));
 int sched_ap_cohort_enter(unsigned cpu);         /* actual preallocated private entry; returns after stack revocation */
 int sched_ap_cohort_finish(void);               /* BSP bounded stop/drain, before normal UP QA */
 void sched_ap_reschedule(void);                 /* private task-stack F0 only */
+int sched_ap_work_quiescent(void);              /* actual BSP queue/live/wait owners, before first INIT */
+int sched_ap_work_prepare(unsigned count);      /* BSP prealloc only; zero online AP schedulers */
+int sched_ap_work_start(void);                  /* actual AP online+F0 ACK, leaves empty service online */
+int sched_ap_work_submit(const void *,unsigned bytes,uint64_t ap_mask,uint64_t *cookie);
+int sched_ap_work_poll(uint64_t cookie,uint64_t *digest);
+int sched_ap_work_release(uint64_t cookie);
+#define K64_AP_WORK_BUSY (-3) /* migration refused before mutation; saved park not yet reached */
+/* BUSY may be waited/retried boundedly. Other negatives never imply no commit:
+ * an owner move followed by failed F0/ACK retains resources and closes service. */
+int sched_ap_work_migrate(unsigned origin,unsigned slot,unsigned destination); /* saved parked/no job reference; private BSP only */
+int sched_ap_work_stop(void);                   /* finite drain, real ACK+inactive stacks; retains on failure */
+uint64_t sched_ap_work_resource(uint64_t *bytes);
+int sched_ap_work_overlaps(uint64_t physical,uint64_t bytes); /* pre-INIT external resource exclusion */
 thread_t *thread_create(const char *name, void (*fn)(void *), void *arg);
 thread_t *thread_create_suspended(const char *name, void (*fn)(void *), void *arg);   /* TS_NEW until thread_resume */
 void thread_resume(thread_t *t);
