@@ -6,6 +6,7 @@
 #include "platform.h"
 #include "console.h"
 #include "cpu.h"
+#include "../include/ap_boot.h"
 
 #define MAX_GIB 64
 #define PTE_P 1ull
@@ -18,14 +19,15 @@
 uint8_t sup_stack[65536] __attribute__((section(".bss.stack"), aligned(4096)));
 
 static uint64_t gdt[8] __attribute__((aligned(16)));
-static struct __attribute__((packed)) {
+struct __attribute__((packed)) host_tss {
     uint32_t reserved0;
     uint64_t rsp[3];
     uint64_t reserved1;
     uint64_t ist[7];
     uint64_t reserved2;
     uint16_t reserved3, iopb;
-} tss __attribute__((aligned(16)));
+};
+static struct host_tss tss __attribute__((aligned(16)));
 
 struct __attribute__((packed)) idt_gate {
     uint16_t off0, sel;
@@ -41,6 +43,16 @@ static uint64_t pd[MAX_GIB][512] __attribute__((aligned(4096)));
 static uint8_t window_is_ram[MAX_GIB * 512 / 8];
 
 static shz_info_t *g_info;
+/* Private roots share only the immutable identity hierarchy built on the BSP.
+ * This component never mutates mappings once AP initialization starts. */
+static struct ap_platform {
+    uint64_t root[512] __attribute__((aligned(4096)));
+    uint8_t stack[SHZ_AP_STACK_BYTES] __attribute__((aligned(4096)));
+    uint64_t gdt[8] __attribute__((aligned(16)));
+    struct host_tss tss __attribute__((aligned(16)));
+    struct idt_gate idt[256] __attribute__((aligned(16)));
+    unsigned ready;
+} ap_platform[SHZ_SMP_MAX_CPUS] __attribute__((aligned(4096)));
 
 uint64_t platform_gdt_base(void) { return (uint64_t)(uintptr_t)gdt; }
 uint64_t platform_idt_base(void) { return (uint64_t)(uintptr_t)idt; }
@@ -170,4 +182,46 @@ void platform_init(shz_info_t *info)
     write_cr3((uint64_t)(uintptr_t)pml4);
     load_descriptor_tables(&gdtr, &idtr, HOST_TR);
     kprintf("SHZ: platform: own GDT/IDT/TSS, identity map %llu GiB (2 MiB pages)\n", gib);
+}
+
+int platform_ap_prepare(unsigned cpu,uint64_t *cr3,uint64_t *stack)
+{
+    if(!cpu || cpu>=SHZ_SMP_MAX_CPUS || !g_info || ap_platform[cpu].ready) return -1;
+    struct ap_platform *p=&ap_platform[cpu];
+    uint64_t base=(uint64_t)(uintptr_t)&p->tss;
+    memcpy(p->root,pml4,sizeof p->root);
+    p->gdt[1]=0x00af9b000000ffffull;
+    p->gdt[2]=0x00cf93000000ffffull;
+    p->tss.iopb=sizeof p->tss;
+    p->tss.rsp[0]=(uint64_t)(uintptr_t)(p->stack+sizeof p->stack);
+    p->gdt[3]=(sizeof p->tss-1)|((base&0xffffffull)<<16)|(0x89ull<<40)|(((base>>24)&255)<<56);
+    p->gdt[4]=base>>32;
+    memcpy(p->idt,idt,sizeof p->idt);
+    *cr3=(uint64_t)(uintptr_t)p->root;
+    *stack=(uint64_t)(uintptr_t)(p->stack+sizeof p->stack);
+    if(*cr3>UINT32_MAX || (*cr3&4095)) return -1;
+    p->ready=1;
+    return 0;
+}
+
+int platform_apic_uncached(uint64_t pa)
+{
+    if(read_cr3()!=(uint64_t)(uintptr_t)pml4 || pa>UINT32_MAX) return 0;
+    const uint64_t expected_pdpt=(uint64_t)(uintptr_t)pdpt;
+    if((pml4[0]&~UINT64_C(0xfff))!=expected_pdpt || !(pml4[0]&PTE_P)) return 0;
+    unsigned gib=(unsigned)(pa>>30);
+    if((pdpt[gib]&~UINT64_C(0xfff))!=(uint64_t)(uintptr_t)pd[gib] || !(pdpt[gib]&PTE_P)) return 0;
+    return shz_ap_lapic_pte_ok(pd[gib][(pa>>21)&511],pa);
+}
+
+int platform_ap_enter(unsigned cpu,uint64_t *gdt_base,uint64_t *idt_base,uint64_t *tss_base)
+{
+    if(!cpu || cpu>=SHZ_SMP_MAX_CPUS || !ap_platform[cpu].ready) return -1;
+    struct ap_platform *p=&ap_platform[cpu];
+    if(read_cr3()!=(uint64_t)(uintptr_t)p->root || (read_cr4()&((1ull<<17)|(1ull<<7)))) return -1;
+    struct dtr gdtr={sizeof p->gdt-1,(uint64_t)(uintptr_t)p->gdt};
+    struct dtr idtr={sizeof p->idt-1,(uint64_t)(uintptr_t)p->idt};
+    load_descriptor_tables(&gdtr,&idtr,HOST_TR);
+    *gdt_base=gdtr.base; *idt_base=idtr.base; *tss_base=(uint64_t)(uintptr_t)&p->tss;
+    return 0;
 }

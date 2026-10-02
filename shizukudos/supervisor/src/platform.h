@@ -19,5 +19,8 @@ void platform_init(shz_info_t *info);
 uint64_t platform_gdt_base(void);
 uint64_t platform_idt_base(void);
 uint64_t platform_tss_base(void);
+int platform_ap_prepare(unsigned cpu, uint64_t *cr3, uint64_t *stack);
+int platform_ap_enter(unsigned cpu, uint64_t *gdt, uint64_t *idt, uint64_t *tss);
+int platform_apic_uncached(uint64_t pa);
 void platform_fail(shz_info_t *info, const char *message) __attribute__((noreturn));
 #endif

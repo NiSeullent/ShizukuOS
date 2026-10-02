@@ -9,6 +9,7 @@
 #include "platform.h"
 #include "vbios_image.h"
 #include "../native_win98/win98.h"
+#include "ap_start.h"
 
 static void print_caps(const shz_caps_t *c)
 {
@@ -55,11 +56,15 @@ void sup_main(shz_info_t *info)
     if (!caps.vmx_usable)
         platform_fail(info, caps.vmx_cpuid ? "Intel VMX backend unavailable on this CPU/firmware"
                                            : "no supported virtualization backend (VMX/SVM)");
+    if (shz_ap_seal(info))
+        platform_fail(info, "AP resource/topology sealing refused before INIT");
     if (vmx_hw_init(info, &caps))
         platform_fail(info, info->last_error[0] ? info->last_error : "VMXON failed");
     info->cap_bits |= SHZ_CAP_BACKEND_VMX;
     info->host_cr0 = read_cr0();
     info->host_cr4 = read_cr4();
+    if (shz_ap_start(info))
+        platform_fail(info, "AP startup/work failed; resources retained, no retry");
 
     if (info->loader_flags & SHZ_LOADER_NATIVE_WIN98) {
         if (win98_domain_create(info, &caps))
