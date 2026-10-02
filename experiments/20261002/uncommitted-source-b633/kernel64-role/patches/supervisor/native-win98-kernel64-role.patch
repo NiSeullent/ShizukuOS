@@ -1,0 +1,115 @@
+--- a/shizukudos/supervisor/native_win98/build.py
++++ b/shizukudos/supervisor/native_win98/build.py
+@@ -246,6 +246,42 @@
+     os.lseek(fd, 0, os.SEEK_SET)
+ 
+ 
++def unique_json_object(pairs):
++    result = {}
++    for name, value in pairs:
++        if name in result:
++            raise ValueError("duplicate kernel build receipt key")
++        result[name] = value
++    return result
++
++
++def validate_kernel64_role(kernel, receipt_path, expected):
++    """Bind an explicit Kernel64 input to the producer's Supervisor role.
++
++    A caller-pinned ordinary build receipt is provenance, not a signature or
++    proof that this kernel boots or serves a native Windows98 peer.
++    """
++    receipt_path, expected = safe_path(receipt_path), pin_format(expected)
++    maximum = 1 << 20
++    size = pinned_hash(receipt_path, expected, maximum=maximum)
++    with read_leased(receipt_path, expected, size, maximum=maximum) as (fd, checkpoint):
++        with os.fdopen(os.dup(fd), "rb") as stream:
++            document = json.loads(stream.read(maximum + 1), object_pairs_hook=unique_json_object)
++        checkpoint()
++    kernels = document.get("kernels") if isinstance(document, dict) else None
++    role = kernels.get("kernel64") if isinstance(kernels, dict) else None
++    if not isinstance(role, dict):
++        raise ValueError("kernel build receipt lacks the Supervisor kernel64 role")
++    digest, extent = role.get("sha256"), role.get("bytes")
++    if not isinstance(digest, str) or not re.fullmatch("[0-9a-f]{64}", digest) or \
++       type(extent) is not int or not 0 < extent <= 16 << 20:
++        raise ValueError("invalid Supervisor kernel64 receipt SHA/size")
++    if digest != kernel["sha256"] or extent != kernel["bytes"]:
++        raise ValueError("Kernel64 input differs from the Supervisor kernel64 build role")
++    return {"path": receipt_path, "sha256": expected, "bytes": size,
++            "kernel64": {"sha256": digest, "bytes": extent}}
++
++
+ def source_files():
+     files = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi")
+              for p in (ROOT / folder).rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld", ".py")}
+@@ -326,11 +362,14 @@
+     for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64-img"):
+         parser.add_argument("--" + name, type=Path)
+         parser.add_argument("--" + name + "-sha256")
++    parser.add_argument("--kernel-build-receipt", type=Path, help="explicit kernel build receipt required with --kernel64")
++    parser.add_argument("--kernel-build-receipt-sha256", help="exact SHA-256 of the explicit kernel build receipt")
+     parser.add_argument("--out", type=Path)
+     parser.add_argument("--validate-only", action="store_true", help="check all explicit inputs without output or compilation")
+     args = parser.parse_args(argv)
+     if args.make_config:
+-        if any(getattr(args, name) for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64_img", "out")):
++        if any(getattr(args, name) for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64_img", "out",
++                                                        "kernel_build_receipt", "kernel_build_receipt_sha256")):
+             parser.error("--make-config is separate from private build inputs")
+         path = safe_path(args.make_config)
+         with path.open("xb") as stream:
+@@ -357,13 +396,22 @@
+             path, pin = safe_path(path), pin_format(pin)
+             size = pinned_hash(path, pin, sizes.get(name), maximum.get(name, DISK_BYTES))
+             inputs[target] = {"path": path, "sha256": pin, "bytes": size}
++    kernel_receipt = None
++    if args.kernel64:
++        if not args.kernel_build_receipt or not args.kernel_build_receipt_sha256:
++            parser.error("--kernel64 requires an explicit kernel build receipt and its SHA-256")
++        kernel_receipt = validate_kernel64_role(inputs["KERNEL64.BIN"], args.kernel_build_receipt,
++                                                args.kernel_build_receipt_sha256)
++    elif args.kernel_build_receipt or args.kernel_build_receipt_sha256:
++        parser.error("kernel build receipt options require --kernel64")
+     for name, item in inputs.items():
+         with read_leased(item["path"], item["sha256"], item["bytes"]) as (fd, checkpoint):
+             validate_contents(name, fd)
+             checkpoint()
+     if args.validate_only:
+         print(json.dumps({"status": "PASS_EXPLICIT_INPUT_VALIDATION_NO_BUILD_OR_VM", "input_files": len(inputs),
+-                          "Windows98_installation_identity_verified": False, "Windows98_executed": False}))
++                          "Windows98_installation_identity_verified": False, "Windows98_executed": False,
++                          "kernel64_role_verified": kernel_receipt is not None}))
+         return 0
+     if not args.out:
+         parser.error("a new --out private directory is required for building")
+@@ -374,12 +422,18 @@
+     receipt = {"status": "FAIL_BUILD_PRESERVED", "private": True, "commands": [],
+                "preparation_budget_bytes": budget, "retained_free_space_bytes": RESERVE, "copies": {},
+                "input_pins": {n: {**item, "path": str(item["path"])} for n, item in inputs.items()},
++               "kernel64_role_binding": ({**kernel_receipt, "path": str(kernel_receipt["path"])}
++                                         if kernel_receipt is not None else None),
+                "Windows98_installation_identity_verified": False, "VM_executed": False,
+                "Windows98_boot_verified": False, "MS_DOS_replaced": False, "native_Win64_app_verified": False}
+     try:
+         copies = {}
+         for name, item in inputs.items():
+             destination = out / name
++            if name == "KERNEL64.BIN":
++                if validate_kernel64_role(item, args.kernel_build_receipt,
++                                          args.kernel_build_receipt_sha256) != kernel_receipt:
++                    raise ValueError("Kernel64 role binding changed before copying")
+             with read_leased(item["path"], item["sha256"], item["bytes"]) as (fd, checkpoint):
+                 validate_contents(name, fd)
+                 checkpoint()
+@@ -409,6 +463,10 @@
+             raise ValueError("public source changed during private preparation")
+         for item in inputs.values():
+             pinned_hash(item["path"], item["sha256"], item["bytes"])
++        if kernel_receipt is not None:
++            if validate_kernel64_role(inputs["KERNEL64.BIN"], args.kernel_build_receipt,
++                                      args.kernel_build_receipt_sha256) != kernel_receipt:
++                raise ValueError("Kernel64 role binding changed before publishing")
+         receipt.update(status="PASS_PRIVATE_WIN98_DOMAIN_ESP_PREPARED_NOT_RUN", sources_sha256=pins,
+                        members=members, artifact={"path": esp.name, "bytes": esp.stat().st_size, "sha256": file_sha(esp)},
+                        source_before_after_match=True, originals_before_after_match=True,

@@ -1,0 +1,304 @@
+diff --git a/site/README.md b/site/README.md
+index 825a45a..8c547ca 100644
+--- a/site/README.md
++++ b/site/README.md
+@@ -118,3 +118,11 @@ trial. `authorship/handoff.html` links to the GitHub main source and continuatio
+ document so work can resume in another environment. Google Chrome and Firefox are
+ also required current targets. This publication is a development checkpoint; no
+ completed0.9/full-modern-app/native-Windows98 claim is made.
++
++The2026-10-01 Authorship checkpoint also records V44 ordinary build/static443imports
++and252actual standalone guest API checks, without native Win98/app acceptance.
++The active scoped Nginx route adds `no-transform` alongside `no-store` so public
++HTML remains byte-for-byte with reviewed source. PublicDNS HTTPS/normal TLS checks
++with a standard Chrome request User-Agent returned exact200 bodies for eleven
++routes, including oldVNC redirects and component download. Independent outside-host
++verification and the final development ISO remain separate gates.
+diff --git a/site/authorship/README.md b/site/authorship/README.md
+index 67a4cf1..25e708a 100644
+--- a/site/authorship/README.md
++++ b/site/authorship/README.md
+@@ -36,3 +36,10 @@ scoped current-symlink swap. The publisher verifies original PNG hashes, catalog
+ scope, exact loopback HTTPS bodies and all retained downloads. External public
+ Cloudflare delivery is checked separately from origin publication. No client-global
+ configuration, DNS or Nginx configuration is changed.
++
++The additive V44 checkpoint records252actual standalone Kernel64 API contract
++checks (module45/search50/token19/UCRT44/file37/RTL57) and ordinary build closure,
++while full app/native functionality stays pending. Scoped Nginx `no-transform`
++preserves exact HTML through the public edge; standard Chrome request-UA public
++DNS/TLS requests matched all eleven reviewed route bodies. A normal headless
++browser challenge and independent outside-host verification remain separate.
+diff --git a/site/authorship/evidence.json b/site/authorship/evidence.json
+index 6138f6d..bf1d40a 100644
+--- a/site/authorship/evidence.json
++++ b/site/authorship/evidence.json
+@@ -174,7 +174,7 @@
+   ],
+   "publication_target": "https://m98.nyase.kr/authorship/",
+   "source_branch": "main",
+-  "handoff_document": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/CONTINUE_MODERN_APPS.md",
++  "handoff_document": "https://m98.nyase.kr/continuation/guide.html",
+   "required_targets": [
+     "Google Chrome",
+     "Chromium",
+@@ -189,11 +189,27 @@
+   ],
+   "current_checkpoint": {
+     "native_compatibility_kernel": "UEFI/VMX/EPT standalone Kernel64 foundation passed37 checks. Installed Windows98 constructor/bridge and modern app functionality remain pending.",
+-    "office": "Latest LibreOffice26.8.0.3 startup stopped at missing SetSearchPathMode; new shared implementation is staged for guest validation.",
+-    "firefox": "Official Firefox157.0 package verified; startup stopped at missing OpenProcessToken; new shared implementation is staged for guest validation.",
++    "office": "Latest LibreOffice26.8.0.3 previous startup stopped at missing SetSearchPathMode; actual V44 shared search-path contract passed50checks. Full app retry/document functionality remain pending.",
++    "firefox": "Official Firefox157.0 package verified; previous startup stopped at missing OpenProcessToken. Actual V44 token19/RTL57/file37guest contract checks passed; full Firefox startup/GUI remain pending.",
+     "google_chrome": "Official enterprise MSI downloaded and SHA-256 retained; embedded browser payload/version and startup are not yet verified.",
+-    "steam": "Original client startup stopped at missing Module32Next; corrected common module enumeration awaits actual guest verification.",
++    "steam": "Original client previous startup stopped at missing Module32Next. Actual V44 common module enumeration contract passed45checks; actual Steam CEF/login/library/game remain pending.",
+     "ordinary_v43": "Full ordinary build failed at parent-child fixture console linkage. The failure is preserved; no runtime archive or actual VM pass is claimed.",
+-    "release_0_9_complete": false
+-  }
++    "release_0_9_complete": false,
++    "ordinary_v44": "PASS ordinary NTDLL/KERNEL32/UCRT and7 actual native test EXEs. Static443imports verified; six real standalone guest API contracts passed252checks with normalexit0 and unchanged inputs.",
++    "v44_contract_checks": {
++      "module_enumeration": 45,
++      "search_path": 50,
++      "token": 19,
++      "ucrt_legacy": 44,
++      "create_file2_copy_file2": 37,
++      "rtl_bootstrap": 57,
++      "total": 252,
++      "platform": "ShizukuDOS Kernel64 standalone",
++      "native_windows98": false,
++      "application_functionality": false
++    }
++  },
++  "v44_contract_record": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/v44-contracts.json",
++  "official_download_manifest": "https://m98.nyase.kr/continuation/downloads.json",
++  "new_project_publication_destination": "https://m98.nyase.kr"
+ }
+diff --git a/site/authorship/handoff.html b/site/authorship/handoff.html
+index 065a0af..93a59a3 100644
+--- a/site/authorship/handoff.html
++++ b/site/authorship/handoff.html
+@@ -1,7 +1,7 @@
+ <!doctype html>
+ <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Windows 98 Shizuku Modern Edition 개발 체크포인트와 다른 환경에서 이어서 작업하는 방법."><title>작업 이어가기 · Authorship</title><link rel="stylesheet" href="./styles.css"><link rel="icon" type="image/svg+xml" href="../favicon.svg"><link rel="canonical" href="https://m98.nyase.kr/authorship/handoff.html"></head>
+ <body><a class="skip" href="#main">본문으로 건너뛰기</a><div class="shell"><header><a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">98</span><span>Windows 98<small>Shizuku Modern Edition</small></span></a><nav aria-label="주 메뉴"><a href="../index.html">다운로드</a><a href="./">Authorship</a><a href="./handoff.html" aria-current="page">작업 이어가기</a></nav></header>
+-<main id="main"><section class="intro"><p class="eyebrow">CONTINUATION / 다른 환경에서 이어가기</p><div class="intro-line"><h1>소스와 기록을 받아,<br>여기서 이어가세요.</h1><span class="version">개발 체크포인트</span></div><p class="lead">현재 소스와 구현 상태는 GitHub의 main 브랜치로 통합합니다. 실제 실행에서 확인한 결과와 아직 해결할 부분을 함께 기록해 다음 환경에서도 같은 지점에서 시작할 수 있게 합니다.</p><p class="date">2026년 10월 1일 기준 · 최신 앱의 완전한 Windows 98 구동과 0.9 완성판은 아직 검증 중입니다.</p><div class="credit-links"><a href="https://github.com/NiSeullent/Win98-Modern/tree/main">main 브랜치 소스 받기 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/CONTINUE_MODERN_APPS.md">환경 준비·인계 문서 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/MODERN_APPS_CAMPAIGN.md">현대 앱 실행 시험과 공통 호환 기능 기록 ↗</a><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/skills/win98-modern-lab/SKILL.md">개발·검증 절차 ↗</a></div></section>
++<main id="main"><section class="intro"><p class="eyebrow">CONTINUATION / 다른 환경에서 이어가기</p><div class="intro-line"><h1>소스와 기록을 받아,<br>여기서 이어가세요.</h1><span class="version">개발 체크포인트</span></div><p class="lead">Windows 98의 MS-DOS 기반을 ShizukuDOS로 대체하고 Kernel32·Kernel64와 호환 구성요소를 통합하는 작업입니다. 현재 소스와 구현 상태는 공식 사이트에서 받을 통합 자료로 이어갑니다. 실제 실행에서 확인한 결과와 아직 해결할 부분을 함께 기록해 다음 환경에서도 같은 지점에서 시작할 수 있게 합니다.</p><p class="date">2026년 10월 1일 기준 · 최신 앱의 완전한 Windows 98 구동과 0.9 완성판은 아직 검증 중입니다.</p><div class="credit-links"><a href="../continuation/">공식 소스·ISO·USB 배포 상태 →</a><a href="../continuation/guide.html">환경 준비·인계 안내서 →</a><a href="../continuation/modern-apps-guide.md" download>현대 앱·커널 안내서 받기 →</a><a href="../continuation/official-distribution.md" download>공식 배포 기준 →</a></div></section>
+ <section class="progress"><h2>현재 확인된 동작</h2><p>실제 Windows 98에서 Notepad++ 편집·저장·다시 열기와 UEFI GOP 화면 출력을 확인했습니다. VLC는 메뉴와 움직이는 영상을 표시했으며 종료 오류가 남아 있습니다. 독립 64비트 실행기에서는 Chromium의 DOM 계산 결과와 Legcord 설정 화면을 확인했습니다. Chromium 그래픽 시험은 도구 모음까지 표시한 뒤 페이지 로딩과 종료 오류가 남았습니다.</p></section>
+-<section class="credits"><div><p class="eyebrow">NEXT / 남은 구현</p><h2>공통 호환 기능부터 연결합니다.</h2><p>Chrome·Chromium·Firefox·Discord·Steam·최신 Office를 위한 공통 커널, 파일·문자열·프로세스 기능과 화면·입력을 확장하고 있습니다. 실제 UEFI/VMX/EPT 기반 64비트 실행기 기초 시험 37개는 통과했지만, 설치된 Windows 98과 현대 앱을 연결하는 전체 경로는 아직 검증되지 않았습니다.</p><p>최근 일반 빌드는 부모·자식 프로세스 시험 프로그램의 연결 단계에서 실패했습니다. 수정된 원본과 실패 기록을 보존했으며 새 전체 빌드·실행 시험은 다음 체크포인트에서 계속합니다.</p></div><div><p class="eyebrow">SETUP / 준비 범위</p><h2>본인 환경에서 준비할 것</h2><p>인계 문서의 도구 버전과 빌드 경로를 확인하고, 앱 원본은 각 공식 배포처에서 다시 받아 해시를 비교하세요. 실제 게스트 시험에는 적법하게 보유한 Windows 98 설치본과 가상화 환경이 필요합니다.</p><p>이 웹 페이지와 소스 저장소는 Windows 설치 미디어, 제품 키, 앱 원본 설치 패키지, 가상머신 디스크를 배포하지 않습니다. 화면은 실제 기록이며 웹에서 Windows 98이 실행되는 실시간 콘솔이 아닙니다.</p><p lang="en">The source checkpoint and handoff document are linked above. Modern app support and native Windows 98 integration remain incomplete; standalone runtime evidence is labelled separately.</p></div></section></main>
++<section class="credits"><div><p class="eyebrow">NEXT / 남은 구현</p><h2>공통 호환 기능부터 연결합니다.</h2><p>Chrome·Chromium·Firefox·Discord·Steam·최신 Office를 위한 공통 커널, 파일·문자열·프로세스 기능과 화면·입력을 확장하고 있습니다. 실제 UEFI/VMX/EPT 기반 64비트 실행기 기초 시험 37개는 통과했지만, 설치된 Windows 98과 현대 앱을 연결하는 전체 경로는 아직 검증되지 않았습니다.</p><p>공통 런타임 V44의 일반 빌드와 실제 독립 게스트 API 시험 252개를 통과했습니다. 모듈 열거·검색 경로·토큰·UCRT·파일 복사·RTL 기능을 확인한 결과이며, 현대 앱의 기능 시험과 설치된 Windows 98 연결은 별도로 남아 있습니다. 앞선 V43 빌드 실패 기록도 보존했습니다.</p></div><div><p class="eyebrow">SETUP / 준비 범위</p><h2>본인 환경에서 준비할 것</h2><p>인계 문서의 도구 버전과 빌드 경로를 확인하고, 앱 원본은 각 공식 배포처에서 다시 받아 해시를 비교하세요. 실제 게스트 시험에는 적법하게 보유한 Windows 98 설치본과 가상화 환경이 필요합니다.</p><p>이 웹 페이지와 소스 저장소는 Windows 설치 미디어, 제품 키, 앱 원본 설치 패키지, 가상머신 디스크를 배포하지 않습니다. 화면은 실제 기록이며 웹에서 Windows 98이 실행되는 실시간 콘솔이 아닙니다.</p><p lang="en">The source checkpoint and handoff document are linked above. Modern app support and native Windows 98 integration remain incomplete; standalone runtime evidence is labelled separately.</p></div></section></main>
+ <footer><p>Windows 98 Shizuku Modern Edition · 개발 체크포인트</p><a href="./">실제 화면과 검증 범위 →</a></footer></div></body></html>
+diff --git a/site/deploy/m98-locations.conf b/site/deploy/m98-locations.conf
+index 3220b15..7fc9104 100644
+--- a/site/deploy/m98-locations.conf
++++ b/site/deploy/m98-locations.conf
+@@ -6,36 +6,36 @@ absolute_redirect off;
+ # HTML must not retain the old console entry in browser or intermediary caches.
+ location = / {
+     include /srv/conf.d/nginx/snippets/security-headers.conf;
+-    add_header Cache-Control "no-store, max-age=0" always;
++    add_header Cache-Control "no-store, max-age=0, no-transform" always;
+     try_files /index.html =404;
+ }
+ location = /index.html {
+     include /srv/conf.d/nginx/snippets/security-headers.conf;
+-    add_header Cache-Control "no-store, max-age=0" always;
++    add_header Cache-Control "no-store, max-age=0, no-transform" always;
+     try_files $uri =404;
+ }
+ location = /preview.html {
+     include /srv/conf.d/nginx/snippets/security-headers.conf;
+-    add_header Cache-Control "no-store, max-age=0" always;
++    add_header Cache-Control "no-store, max-age=0, no-transform" always;
+     try_files $uri =404;
+ }
+ location = /preview { return 302 /preview.html; }
+ location = /en { return 302 /en/; }
+ location ~ \.html$ {
+     include /srv/conf.d/nginx/snippets/security-headers.conf;
+-    add_header Cache-Control "no-store, max-age=0" always;
++    add_header Cache-Control "no-store, max-age=0, no-transform" always;
+     try_files $uri =404;
+ }
+ 
+ # Old bookmarked console entries now lead to the distribution page.
+ location = /vnc.html {
+     include /srv/conf.d/nginx/snippets/security-headers.conf;
+-    add_header Cache-Control "no-store, max-age=0" always;
++    add_header Cache-Control "no-store, max-age=0, no-transform" always;
+     return 302 /;
+ }
+ location = /vnc_lite.html {
+     include /srv/conf.d/nginx/snippets/security-headers.conf;
+-    add_header Cache-Control "no-store, max-age=0" always;
++    add_header Cache-Control "no-store, max-age=0, no-transform" always;
+     return 302 /;
+ }
+ 
+@@ -74,5 +74,7 @@ location = /websockify {
+ }
+ 
+ location / {
++    include /srv/conf.d/nginx/snippets/security-headers.conf;
++    add_header Cache-Control "no-store, max-age=0, no-transform" always;
+     try_files $uri $uri/ =404;
+ }
+diff --git a/site/deploy/publish_static.py b/site/deploy/publish_static.py
+index 2f37d0f..ad5d093 100644
+--- a/site/deploy/publish_static.py
++++ b/site/deploy/publish_static.py
+@@ -38,6 +38,28 @@ AUTHORSHIP_IMAGES = {
+ }
+ 
+ 
++CONTINUATION_STATIC = ('continuation/index.html', 'continuation/guide.html',
++                       'continuation/styles.css', 'continuation/downloads.json',
++                       'continuation/modern-apps-guide.md',
++                       'continuation/environment-guide.md',
++                       'continuation/official-distribution.md')
++# Artifact bytes and source revisions are reviewed outside the web manifest.
++# Add each final artifact here only after its producer/boot/source review closes.
++CONTINUATION_DOWNLOAD_PINS = {
++    'usb_helpers': {
++        'path': 'downloads/win98-modern-usb-helper.zip',
++        'sha256': 'f5492becf55ecbfea079c829d473133cbe6073dbcb1b762a94f933f5679d9e54',
++        'bytes': 17916,
++        'source_commit': '899c51ec6f4c731fe3181570feec0fa52bfbd591',
++    },
++}
++CONTINUATION_GUIDE_PINS = {
++    'continuation/modern-apps-guide.md': '69b1fc3c9afdfd21ba46acdcb66fa7d26b0459f96b2528f86d891297b466013f',
++    'continuation/environment-guide.md': '22371d3abfaf731d9cd39b60ccb5b8e8e83012317ae042eb71edf0fc47cdf060',
++    'continuation/official-distribution.md': '16d663f0743af8eaafd9ac6ea84b2884939ffbae5cf9695abc5e771d15b165d4',
++}
++
++
+ def sha(data):
+     return hashlib.sha256(data).hexdigest()
+ 
+@@ -118,6 +140,82 @@ def add_authorship_assets(assets):
+     return len(records)
+ 
+ 
++
++def add_continuation_assets(assets):
++    """Publish local guidance plus only independently pinned public artifacts."""
++    assets.update({name: (SITE / name).read_bytes() for name in CONTINUATION_STATIC})
++    for path, expected in CONTINUATION_GUIDE_PINS.items():
++        if sha(assets[path]) != expected:
++            raise ValueError('Reviewed continuation guide changed: ' + path)
++    manifest = json.loads(assets['continuation/downloads.json'])
++    if (manifest['schema'] != 'win98modern.official-downloads.v1'
++            or manifest['version'] != '0.9.0-dev'
++            or manifest['official_origin'] != 'https://m98.nyase.kr'
++            or manifest['source_commit'] is not None
++            or manifest['full_modern_apps_verified'] is not False
++            or manifest['native_windows98_modern_apps_verified'] is not False):
++        raise ValueError('Reviewed incomplete official download checkpoint required')
++    goal = manifest['architecture_goal']
++    if (goal['project'] != 'ShizukuDOS for Windows98'
++            or goal['replaces'] != 'MS-DOS'
++            or goal['kernel32_kernel64_scope'] != 'Windows98 integration components of ShizukuDOS'
++            or goal['separate_standalone_os_goal'] is not False
++            or goal['installed_windows98_complete'] is not False):
++        raise ValueError('Windows98 ShizukuDOS architecture goal differs')
++    privacy = manifest['private_media_policy']
++    for field in ('windows_media_published', 'product_keys_published',
++                  'vendor_app_installers_published', 'vm_disks_published'):
++        if privacy[field] is not False:
++            raise ValueError('Private media cannot be published: ' + field)
++    scope = manifest['usb_scope']
++    for field in ('uefi_file_copy_preparation_verified', 'bios_hybrid_image_boot_verified',
++                  'windows98_setup_boot_verified', 'full_public_usb_payload_available'):
++        if scope[field] is not False:
++            raise ValueError('Actual final USB/Setup scope has not been reviewed: ' + field)
++    if (scope['helper_source_package_verified'] is not True
++            or scope['helper_host_fixture_checks'] != 9):
++        raise ValueError('Reviewed helper source package evidence required')
++    provenance = manifest['guide_provenance']
++    for field, path in (('modern_original_sha256', 'continuation/modern-apps-guide.md'),
++                        ('modern_web_sha256', 'continuation/modern-apps-guide.md'),
++                        ('environment_source_sha256', 'continuation/environment-guide.md'),
++                        ('policy_source_sha256', 'continuation/official-distribution.md')):
++        if provenance[field] != CONTINUATION_GUIDE_PINS[path]:
++            raise ValueError('Continuation guide provenance differs: ' + field)
++    rows = manifest['items']
++    roles = {'development_iso', 'source_archive', 'main_git_bundle', 'usb_helpers'}
++    if len(rows) != len(roles) or {row['role'] for row in rows} != roles:
++        raise ValueError('Official artifact role allowlist differs')
++    ready = 0
++    for row in rows:
++        role = row['role']
++        if role not in CONTINUATION_DOWNLOAD_PINS:
++            if (row['state'] != 'pending'
++                    or any(row[field] is not None for field in ('url', 'sha256', 'bytes', 'source_commit'))):
++                raise ValueError('Unreviewed artifact must remain pending: ' + role)
++            continue
++        pin = CONTINUATION_DOWNLOAD_PINS[role]
++        path = Path(pin['path'])
++        if (path.is_absolute() or len(path.parts) != 2 or path.parts[0] != 'downloads'
++                or path.name in ('.', '..') or path.suffix not in ('.iso', '.zip', '.gz', '.bundle')):
++            raise ValueError('Only bounded reviewed artifact paths are permitted')
++        if (row['state'] != 'ready' or row['url'] != '/' + pin['path']
++                or row['sha256'] != pin['sha256'] or row['bytes'] != pin['bytes']
++                or row['source_commit'] != pin['source_commit']):
++            raise ValueError('Reviewed official artifact metadata differs: ' + role)
++        data = (SITE / pin['path']).read_bytes()
++        if len(data) != pin['bytes'] or sha(data) != pin['sha256']:
++            raise ValueError('Reviewed official artifact bytes changed: ' + role)
++        checksum_path = pin['path'] + '.sha256'
++        checksum = (SITE / checksum_path).read_bytes()
++        if checksum != (pin['sha256'] + '  ' + path.name + '\n').encode('ascii'):
++            raise ValueError('Reviewed official artifact checksum changed: ' + role)
++        assets[pin['path']] = data
++        assets[checksum_path] = checksum
++        ready += 1
++    return {'ready_artifacts': ready, 'pending_artifacts': len(rows) - ready,
++            'state': manifest['publication_state']}
++
+ def main():
+     manifest = json.loads((SITE / 'evidence/preview.json').read_text())
+     if manifest['schema'] != 1 or manifest['live']['available']:
+@@ -125,6 +223,7 @@ def main():
+     assets = {name: (SITE / name).read_bytes() for name in STATIC}
+     validate_translation(manifest, json.loads(assets['en/evidence/preview.json']))
+     authorship_images = add_authorship_assets(assets)
++    continuation = add_continuation_assets(assets)
+     # Each redistributed component download remains bound to its reviewed bytes.
+     expected_downloads = {
+         'downloads/SHZGOP.zip': '5fdc6ca5942012b6d29a291ca85e6ad4e5ca28421477394bfd2909c64f9c5dbb',
+@@ -203,6 +302,7 @@ def main():
+                'preview_images': len(images), 'collections': len(manifest['collections']),
+                'authorship_images': authorship_images,
+                'authorship_state': 'development_checkpoint',
++               'continuation': continuation,
+                'languages': ['ko', 'en'], 'game_demo_native_execution': False,
+                'scope': 'Exact loopback HTTPS origin bodies with m98 Host/SNI. Public Cloudflare challenge is not counted as successful external fetch.'}
+     path = output / ('release-' + stamp + '.json')
+diff --git a/site/en/index.html b/site/en/index.html
+index 23c207b..292b9a7 100644
+--- a/site/en/index.html
++++ b/site/en/index.html
+@@ -7,7 +7,7 @@
+ <link rel="canonical" href="https://m98.nyase.kr/en/index.html"><link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/index.html"><link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/index.html"></head>
+ <body class="download-page">
+ <a class="skip" href="#main">Skip to content</a>
+-<header class="top"><a class="brand" href="./index.html">Windows 98 <strong>Shizuku Modern Edition</strong></a><nav aria-label="Main navigation"><a href="./preview.html">Real screenshots</a><a href="../authorship/">Authorship</a><a href="./dead-screen.html">Play the demo</a><a href="../index.html" lang="ko" hreflang="ko" aria-label="Korean version">한국어</a><a class="nav-download" href="../downloads/shizuku-modern-preview-2026.10.01.zip" download>Download</a></nav></header>
++<header class="top"><a class="brand" href="./index.html">Windows 98 <strong>Shizuku Modern Edition</strong></a><nav aria-label="Main navigation"><a href="./preview.html">Real screenshots</a><a href="../authorship/">Authorship</a><a href="../continuation/">Source & USB</a><a href="./dead-screen.html">Play the demo</a><a href="../index.html" lang="ko" hreflang="ko" aria-label="Korean version">한국어</a><a class="nav-download" href="../downloads/shizuku-modern-preview-2026.10.01.zip" download>Download</a></nav></header>
+ <main id="main">
+ <section class="download-hero" aria-labelledby="hero-title">
+ <div class="hero-copy"><p class="eyebrow">WINDOWS 98 SHIZUKU MODERN EDITION</p><h1 id="hero-title">Windows 98.<br><span>Today’s apps.</span></h1><p class="lead">Real Windows 98. A UEFI boot.<br>Notepad++ edited, saved and reopened.</p>
+diff --git a/site/index.html b/site/index.html
+index 155072b..034df05 100644
+--- a/site/index.html
++++ b/site/index.html
+@@ -7,7 +7,7 @@
+ <link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/index.html"><link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/index.html"></head>
+ <body class="download-page">
+ <a class="skip" href="#main">본문으로 건너뛰기</a>
+-<header class="top"><a class="brand" href="./index.html">Windows 98 <strong>Shizuku Modern Edition</strong></a><nav aria-label="주 메뉴"><a href="./preview.html">실제 실행 화면</a><a href="./authorship/">Authorship</a><a href="./dead-screen.html">게임 체험</a><a href="./en/index.html" lang="en" hreflang="en" aria-label="English version">English</a><a class="nav-download" href="./downloads/shizuku-modern-preview-2026.10.01.zip" download>다운로드</a></nav></header>
++<header class="top"><a class="brand" href="./index.html">Windows 98 <strong>Shizuku Modern Edition</strong></a><nav aria-label="주 메뉴"><a href="./preview.html">실제 실행 화면</a><a href="./authorship/">Authorship</a><a href="./continuation/">소스·USB 준비</a><a href="./dead-screen.html">게임 체험</a><a href="./en/index.html" lang="en" hreflang="en" aria-label="English version">English</a><a class="nav-download" href="./downloads/shizuku-modern-preview-2026.10.01.zip" download>다운로드</a></nav></header>
+ <main id="main">
+ <section class="download-hero" aria-labelledby="hero-title">
+ <div class="hero-copy"><p class="eyebrow">WINDOWS 98 SHIZUKU MODERN EDITION</p><h1 id="hero-title">Windows 98에서<br><span>최신 Notepad++.</span></h1><p class="lead">UEFI로 부팅한 Windows 98에서<br>편집하고, 저장하고, 다시 열었습니다.</p>

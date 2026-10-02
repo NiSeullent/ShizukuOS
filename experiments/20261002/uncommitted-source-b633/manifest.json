@@ -1,0 +1,250 @@
+{
+  "canonical_base": "40fd4e6c2d9d80f020bbc5e9bdf9ac5d7ec8b707",
+  "source_snapshots": [
+    {
+      "group": "storage-authority",
+      "origin_worktree": "/dev/shm/Win98-Modern-native-storage-163f-20261002",
+      "origin_path": "shizukudos/kernel64/storage_authority.c",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/storage-authority/shizukudos/kernel64/storage_authority.c",
+      "bytes": 18199,
+      "sha256": "f1f12516caae2ab0ed80972a9ea81cdaeebd107e2bf34480334bd021420a47c8",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "storage-authority",
+      "origin_worktree": "/dev/shm/Win98-Modern-native-storage-163f-20261002",
+      "origin_path": "shizukudos/kernel64/storage_authority.h",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/storage-authority/shizukudos/kernel64/storage_authority.h",
+      "bytes": 3210,
+      "sha256": "4659bd21d4bf8029755de4124936a76e1335a8e4f71988ce32ecfd4f42478cc7",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "storage-authority",
+      "origin_worktree": "/dev/shm/Win98-Modern-native-storage-163f-20261002",
+      "origin_path": "shizukudos/tests/run_storage_authority_red_host.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/storage-authority/shizukudos/tests/run_storage_authority_red_host.py",
+      "bytes": 20854,
+      "sha256": "7e9b7d0d2610026e68fcc121799de6fdc7c58383ed95e235c41ff85101ad356c",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "storage-authority",
+      "origin_worktree": "/dev/shm/Win98-Modern-native-storage-163f-20261002",
+      "origin_path": "shizukudos/tests/test_storage_authority_red_host.c",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/storage-authority/shizukudos/tests/test_storage_authority_red_host.c",
+      "bytes": 15983,
+      "sha256": "53bbd431aeac2215fc3144077f71b8a5fa5b9391a78a7db09e41ff97421b0f8b",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "fat32-install-bridge",
+      "origin_worktree": "/root/Win98-Modern-native-fat32-c957-20261002",
+      "origin_path": "shizukudos/win64/setup/native_fat32_install_bridge.c",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/fat32-install-bridge/shizukudos/win64/setup/native_fat32_install_bridge.c",
+      "bytes": 2345,
+      "sha256": "81a55c9827d3cb9ece27e440988d6727c2dc177c84ea6eafe37f6351e4ecc832",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "fat32-install-bridge",
+      "origin_worktree": "/root/Win98-Modern-native-fat32-c957-20261002",
+      "origin_path": "shizukudos/win64/setup/native_fat32_install_bridge.h",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/fat32-install-bridge/shizukudos/win64/setup/native_fat32_install_bridge.h",
+      "bytes": 1095,
+      "sha256": "3442ffb8dde218a0ab7c74a4c749ba4fd12be5e9e0830b2d9145790e63226bf0",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "fat32-install-bridge",
+      "origin_worktree": "/root/Win98-Modern-native-fat32-c957-20261002",
+      "origin_path": "shizukudos/install/tests/native_fat32_install_bridge_host.c",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/fat32-install-bridge/shizukudos/install/tests/native_fat32_install_bridge_host.c",
+      "bytes": 8002,
+      "sha256": "3e177737f2f926419b9fbe64b2c00ecdfe540a58f63c90420bfeac9d8d008131",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "fat32-install-bridge",
+      "origin_worktree": "/root/Win98-Modern-native-fat32-c957-20261002",
+      "origin_path": "shizukudos/install/tests/test_native_fat32_install_bridge_host.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/fat32-install-bridge/shizukudos/install/tests/test_native_fat32_install_bridge_host.py",
+      "bytes": 12165,
+      "sha256": "6de8c9327d6ff6d17dffe5d31d676c5073e2ce6fa9d4620f06f89c2994d42803",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "fat32-install-bridge",
+      "origin_worktree": "/root/Win98-Modern-native-fat32-c957-20261002",
+      "origin_path": "docs/agents/status/native-fat32-install-bridge-c957.md",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/fat32-install-bridge/docs/agents/status/native-fat32-install-bridge-c957.md",
+      "bytes": 4497,
+      "sha256": "e6ae35de23c192554241c3c2d590d180b33dc983a75ce6d77430a9af60b12e93",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "passive-trace",
+      "origin_worktree": "/root/Win98-Modern-native-integrated-fada-20261002",
+      "origin_path": "shizukudos/supervisor/native_win98/TRACE_OBSERVATION.md",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/passive-trace/shizukudos/supervisor/native_win98/TRACE_OBSERVATION.md",
+      "bytes": 1981,
+      "sha256": "df53d71e2996d409a524d76cdc3c2442f24e08a08e0063fa74487fa66184b11d",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "passive-trace",
+      "origin_worktree": "/root/Win98-Modern-native-integrated-fada-20261002",
+      "origin_path": "shizukudos/supervisor/native_win98/trace_observation.h",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/passive-trace/shizukudos/supervisor/native_win98/trace_observation.h",
+      "bytes": 2966,
+      "sha256": "fce428f6eec81a715a91ba9239299c9dfcfdd4fa1db5b8630680c59604a99a24",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "passive-trace",
+      "origin_worktree": "/root/Win98-Modern-native-integrated-fada-20261002",
+      "origin_path": "shizukudos/supervisor/native_win98/tests/trace_observation_host.c",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/passive-trace/shizukudos/supervisor/native_win98/tests/trace_observation_host.c",
+      "bytes": 9319,
+      "sha256": "871aad0c93f8088c88d4840a7df1338d7fba4d494d9b2eefe6e954dbec279e90",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "passive-trace",
+      "origin_worktree": "/root/Win98-Modern-native-integrated-fada-20261002",
+      "origin_path": "shizukudos/supervisor/native_win98/tests/test_native_epoch_runtime.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/passive-trace/shizukudos/supervisor/native_win98/tests/test_native_epoch_runtime.py",
+      "bytes": 9963,
+      "sha256": "64b97cfab7126ba50053aba608750cee37a701317e65d721ed4827994025c728",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "kernel64-role",
+      "origin_worktree": "/root/Win98-Modern-theme-tls-5abe",
+      "origin_path": "patches/supervisor/native-win98-kernel64-role.patch",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/kernel64-role/patches/supervisor/native-win98-kernel64-role.patch",
+      "bytes": 7072,
+      "sha256": "1dd94a2482d2e3dd5027d3f050bc3ebc274d17bf8999626b8ca32edbe936a37b",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "kernel64-role",
+      "origin_worktree": "/root/Win98-Modern-theme-tls-5abe",
+      "origin_path": "tests/test_native_win98_kernel64_role.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/kernel64-role/tests/test_native_win98_kernel64_role.py",
+      "bytes": 15552,
+      "sha256": "25aade73cf551f7799d28b7b247686afd473ce8bb8dc4cb2570ff026d739a0fa",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "kernel64-role",
+      "origin_worktree": "/root/Win98-Modern-theme-tls-5abe",
+      "origin_path": "tools/test_native_win98_kernel64_role.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/kernel64-role/tools/test_native_win98_kernel64_role.py",
+      "bytes": 15307,
+      "sha256": "8050eaf74ee72e528a0b292f94a3723686ee38c3f54b4767585d8994d4c2dc6a",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "active-tls",
+      "origin_worktree": "/root/Win98-Modern-theme-6970",
+      "origin_path": "ntwin32/secure_transport/native_tls_stale_order_controls_6970.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/active-tls/ntwin32/secure_transport/native_tls_stale_order_controls_6970.py",
+      "bytes": 58284,
+      "sha256": "29d0c6eeba338db552bddc02b4965aca044083333641949069525a6f98d40bbb",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "active-tls",
+      "origin_worktree": "/root/Win98-Modern-theme-6970",
+      "origin_path": "docs/agents/plans/native-tls-unstable-stale-refresh-6970.md",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/active-tls/docs/agents/plans/native-tls-unstable-stale-refresh-6970.md",
+      "bytes": 20436,
+      "sha256": "ee550681d4c304846e70420cd7d2f4f8978b6c1d29347acc4750b4f1af91d95b",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "dos-failure-plan",
+      "origin_worktree": "/root/Win98-Modern-opcode-evidence-b524",
+      "origin_path": "docs/superpowers/plans/2026-10-02-dos10-failure-evidence.md",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/dos-failure-plan/docs/superpowers/plans/2026-10-02-dos10-failure-evidence.md",
+      "bytes": 1774,
+      "sha256": "27d779de9f06693b02baead7b5ac4c6b46ddd9813a3d8b352037433daa7d17c5",
+      "activation": "historical source snapshot only"
+    },
+    {
+      "group": "owner-review-usb",
+      "origin_worktree": "/root/Win98-Modern-apps-cb43",
+      "origin_path": "tools/prepare_install_usb.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/owner-review-usb/tools/prepare_install_usb.py",
+      "bytes": 18199,
+      "sha256": "a86285789c9505e720a86d7c7946f0f15b7aeee4dd10b9a98acd9c1a2dfe7637",
+      "activation": "pending original owner review; not applied"
+    },
+    {
+      "group": "owner-review-usb",
+      "origin_worktree": "/root/Win98-Modern-apps-cb43",
+      "origin_path": "tools/tests/test_prepare_install_usb.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/owner-review-usb/tools/tests/test_prepare_install_usb.py",
+      "bytes": 8197,
+      "sha256": "fb38d43ddb17f92d8bfc56faf362c42faf4517ad6b2a41533f1c0202362cabd5",
+      "activation": "pending original owner review; not applied"
+    },
+    {
+      "group": "owner-review-usb",
+      "origin_worktree": "/root/Win98-Modern-apps-cb43",
+      "origin_path": "tools/verify_m98_public.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/owner-review-usb/tools/verify_m98_public.py",
+      "bytes": 7704,
+      "sha256": "7e8c144533b06bfb13f8df8f7d861ec23c2e0f0a444f2292f8a4d64c56c8001f",
+      "activation": "pending original owner review; not applied"
+    },
+    {
+      "group": "owner-review-smp",
+      "origin_worktree": "/root/Win98-Modern-smp-memory-163f-20261002",
+      "origin_path": "shizukudos/tests/test_k64_ap_memory_admission.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/owner-review-smp/shizukudos/tests/test_k64_ap_memory_admission.py",
+      "bytes": 9948,
+      "sha256": "67a4c89a434a1565a8c7474c065416c050c834363a5e12612116d99815361e5e",
+      "activation": "pending original owner review; not applied"
+    },
+    {
+      "group": "owner-review-smp",
+      "origin_worktree": "/root/Win98-Modern-smp-memory-163f-20261002",
+      "origin_path": "shizukudos/tests/test_k64_memory_concurrency.c",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/owner-review-smp/shizukudos/tests/test_k64_memory_concurrency.c",
+      "bytes": 11855,
+      "sha256": "2a5753308745a978c4f8c46ea2e298248f9a18d013c2483c46f25d6ac196250d",
+      "activation": "pending original owner review; not applied"
+    },
+    {
+      "group": "owner-review-smp",
+      "origin_worktree": "/root/Win98-Modern-smp-memory-163f-20261002",
+      "origin_path": "shizukudos/tests/test_k64_memory_concurrency.py",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/owner-review-smp/shizukudos/tests/test_k64_memory_concurrency.py",
+      "bytes": 7478,
+      "sha256": "a786e5afd9156ca3adda12df8795a266d77d3fdbb5fc8a08188c799c7f7a90af",
+      "activation": "pending original owner review; not applied"
+    },
+    {
+      "group": "owner-review-smp",
+      "origin_worktree": "/root/Win98-Modern-smp-memory-163f-20261002",
+      "origin_path": "docs/agents/status/smp-memory.md",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/owner-review-smp/docs/agents/status/smp-memory.md",
+      "bytes": 5870,
+      "sha256": "b66fd7889d6dd470a6b7f680f816f34ef37eff9ad69aba71c70dc48bf6d690de",
+      "activation": "pending original owner review; not applied"
+    },
+    {
+      "group": "owner-review-smp",
+      "origin_worktree": "/root/Win98-Modern-smp-memory-163f-20261002",
+      "origin_path": "docs/plans/2026-10-02-k64-smp-memory-serialization.md",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/owner-review-smp/docs/plans/2026-10-02-k64-smp-memory-serialization.md",
+      "bytes": 5273,
+      "sha256": "2bdc0ddba2d1c27b2d6c397af10bd01c1f8f2459d49393f301e99ed502465495",
+      "activation": "pending original owner review; not applied"
+    }
+  ],
+  "VM_executed": false,
+  "runtime_adoption": false
+}
