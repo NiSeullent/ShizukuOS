@@ -20,7 +20,14 @@ _old=os.environ.get('TMPDIR')
 os.environ['TMPDIR']=_TEMP.name
 try:
  spec=importlib.util.spec_from_file_location('provider_fixture',Path(__file__).with_name('test_native_install_host_fada.py'))
- fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
+ fixture=importlib.util.module_from_spec(spec)
+ # Reuse the existing byte fixtures and assertions; replace its legacy model
+ # scope label because this suite links the actual provider/pure relocator.
+ original=Path(spec.origin).read_text()
+ label="'prior_producer_device_roles_and_peer_adapter_modeled':True"
+ if original.count(label)!=1:raise RuntimeError('fixture evidence label changed; review reuse')
+ original=original.replace(label,"'prior_producer_device_roles_modeled':True,'actual_provider_and_pure_relocator':True")
+ exec(compile(original,spec.origin,'exec'),fixture.__dict__)
 finally:
  if _old is None:os.environ.pop('TMPDIR',None)
  else:os.environ['TMPDIR']=_old
