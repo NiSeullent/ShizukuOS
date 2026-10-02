@@ -30,6 +30,7 @@ static void reset(w98_ata_t *a)
     a->lba0 = a->count = 1; a->device = 0xa0;
     a->status = READY; a->remaining = a->word = 0;
     a->writing = a->identify = a->command = 0;
+    if (a->backend_failed) { a->status = READY | ERR; a->error = ABRT; }
 }
 int w98_ata_init(w98_ata_t *a, uint8_t *disk, uint64_t bytes,
                  void (*raise_irq)(void *), void *opaque)
@@ -38,6 +39,19 @@ int w98_ata_init(w98_ata_t *a, uint8_t *disk, uint64_t bytes,
     memset(a, 0, sizeof *a); a->disk = disk; a->bytes = bytes;
     a->sectors = (uint32_t)(bytes / 512); a->raise_irq = raise_irq; a->opaque = opaque;
     reset(a); return 0;
+}
+int w98_ata_attach_backend(w98_ata_t *a, uint32_t optin, const w98_disk_backend_t *b)
+{
+    if (!a || !b || optin != W98_DISK_BACKEND_OPTIN || !a->disk || !a->bytes ||
+        b->bytes != a->bytes || !b->read_sector || !b->write_sector || !b->flush ||
+        a->backend_attached || a->backend_failed || a->status != READY ||
+        a->remaining || a->word || a->writing || a->identify || (a->control & 4)) return -1;
+    a->backend = *b; a->backend_attached = 1;
+    return 0;
+}
+static void backend_failure(w98_ata_t *a)
+{
+    a->backend_failed = 1; ++a->backend_errors; abort_command(a, ABRT);
 }
 static void id_word(w98_ata_t *a, unsigned index, uint16_t value)
 {
@@ -59,14 +73,15 @@ static void identify(w98_ata_t *a)
     memset(a->buffer, 0, sizeof a->buffer);
     id_word(a, 0, 0x0040); id_word(a, 1, (uint16_t)cylinders);
     id_word(a, 3, 16); id_word(a, 6, 63);
-    id_string(a, 10, 10, "SHZ-OWNED-RAM-0001");
-    id_string(a, 23, 4, "0.1"); id_string(a, 27, 20, "Shizuku owned RAM ATA PIO disk");
+    id_string(a, 10, 10, a->backend_attached ? "SHZ-OWNED-BLK-0001" : "SHZ-OWNED-RAM-0001");
+    id_string(a, 23, 4, "0.1"); id_string(a, 27, 20, a->backend_attached ? "Shizuku owned block ATA PIO disk" : "Shizuku owned RAM ATA PIO disk");
     id_word(a, 49, 1u << 9); /* LBA supported; DMA deliberately absent. */
     id_word(a, 53, 1); id_word(a, 54, (uint16_t)cylinders);
     id_word(a, 55, 16); id_word(a, 56, 63);
     id_word(a, 57, (uint16_t)(cylinders*16*63)); id_word(a, 58, (uint16_t)((cylinders*16*63) >> 16));
     id_word(a, 60, (uint16_t)a->sectors); id_word(a, 61, (uint16_t)(a->sectors >> 16));
     id_word(a, 80, 0x0010); /* ATA-4 revision; no DMA/multiple/LBA48/cache claim. */
+    if (a->backend_attached) { id_word(a, 83, 0x4000u | (1u << 12)); id_word(a, 86, 1u << 12); }
     a->remaining = 1; a->word = 0; a->writing = 0; a->identify = 1;
     a->status = READY | DRQ; interrupt(a);
 }
@@ -86,7 +101,11 @@ static void update_taskfile(w98_ata_t *a)
 static void next_sector(w98_ata_t *a)
 {
     a->word = 0;
-    if (!a->writing) memcpy(a->buffer, a->disk + (uint64_t)a->lba*512, 512);
+    if (!a->writing) {
+        if (a->backend_attached) {
+            if (a->backend.read_sector(a->backend.opaque, a->lba, a->buffer)) { backend_failure(a); return; }
+        } else memcpy(a->buffer, a->disk + (uint64_t)a->lba*512, 512);
+    }
     else memset(a->buffer, 0, 512);
     a->status = READY | DRQ;
     if (!a->writing) interrupt(a);
@@ -98,7 +117,11 @@ static void start_command(w98_ata_t *a, uint8_t command)
     a->remaining = a->word = 0; a->writing = a->identify = 0;
     if (a->device & 0x10) { a->status = 0; return; } /* No slave disk. */
     if (command == 0xec) { identify(a); return; }
-    if (command == 0xe7) { a->status = READY; interrupt(a); return; } /* All writes already reside in owned backing. */
+    if (a->backend_failed) { abort_command(a, ABRT); return; }
+    if (command == 0xe7) {
+        if (a->backend_attached && a->backend.flush(a->backend.opaque)) { backend_failure(a); return; }
+        a->status = READY; interrupt(a); return;
+    }
     if (command == 0x91 || (command & 0xf0) == 0x10) {
         /* Fixed geometry accepts matching initialize parameters; recalibrate has no moving head. */
         if (command == 0x91 && (a->count != 63 || (a->device & 15) != 15)) { abort_command(a, ABRT); return; }
@@ -116,6 +139,11 @@ static void start_command(w98_ata_t *a, uint8_t command)
     if (lba >= a->sectors || count > a->sectors-lba) { abort_command(a, IDNF); return; }
     a->lba = lba; a->remaining = (uint16_t)count;
     if (command == 0x40 || command == 0x41) {
+        if (a->backend_attached) {
+            unsigned i;
+            for (i = 0; i < count; ++i)
+                if (a->backend.read_sector(a->backend.opaque, lba+i, a->buffer)) { backend_failure(a); return; }
+        }
         a->lba += count; a->remaining = 0; update_taskfile(a); a->status = READY; interrupt(a); return;
     }
     a->writing = command == 0x30 || command == 0x31;
@@ -134,7 +162,12 @@ static int data_transfer(w98_ata_t *a, unsigned bytes, uint32_t *value, int writ
     a->word = (uint16_t)(a->word + bytes/2);
     if (a->word == 256) {
         if (a->identify) { a->identify = 0; a->remaining = 0; a->status = READY; return 0; }
-        if (writing) { memcpy(a->disk + (uint64_t)a->lba*512, a->buffer, 512); ++a->sectors_written; }
+        if (writing) {
+            if (a->backend_attached &&
+                (a->backend.write_sector(a->backend.opaque, a->lba, a->buffer) ||
+                 a->backend.flush(a->backend.opaque))) { backend_failure(a); return -1; }
+            memcpy(a->disk + (uint64_t)a->lba*512, a->buffer, 512); ++a->sectors_written;
+        }
         else ++a->sectors_read;
         ++a->lba; --a->remaining; update_taskfile(a);
         a->status = READY;
