@@ -48,3 +48,8 @@ Latest reviewed handoff: isolatedK32 CPU-local FIFO/GS/affinity/live-stack hando
 ## 2026-10-02 — root6970 guardian lifecycle candidate
 
 Root6970 candidate validation: 44 focused tests pass against one frozen combined source epoch (10 source admission, 13 actual Linux child lifecycle, 15 modeled-hardware/real-transport monitor handoff, 6 real gated Python activation). Existing custody/controller regression status and exact receipts are recorded in docs/agents/status/native-guardian-lifecycle-6970-20261002.md. Candidate is not canonical main adoption or Win98 desktop/modern-app/ISO acceptance.
+
+
+## 2026-10-02 — root6970 delegated regression coverage
+
+The unchanged af433d6 source now has 47 distinct original custody/controller cases passing across28+18+1, with44 focused cases for91 unique PASS items. The prior single-full47 NOT_RUN and first19 pathname-error receipts remain immutable. Dedicated unit/readiness/caps and terminal cleanup are recorded in the dated supplementary section of docs/agents/status/native-guardian-lifecycle-6970-20261002.md. No source change, QEMU/private media/Win98 boot or canonical main adoption is implied.

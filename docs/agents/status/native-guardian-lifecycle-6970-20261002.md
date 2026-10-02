@@ -72,3 +72,43 @@ bridge, NT/runtime/driver wrappers, themes, TLS 1.3, Direct2D/DirectWrite/Direct
 Legcord/Signal/current office applications, USB/integrated ISO and external
 `m98.nyase.kr` official-site release acceptance remain in scope and unproved by
 this host source unit.
+
+
+## Supplementary delegated regressions — 2026-10-02
+
+The remaining original cases now have actual delegated cgroup coverage at the
+unchanged `af433d6328b3a347667a8714270724e3b61b41cd` source epoch. Original
+coverage is 47 distinct cases across 28 + 18 + 1, with no skips. It is not a
+single execution of the 47-case suite. Together with the 44 focused tests, 91
+distinct test items have passed. The earlier NOT_RUN_ENVIRONMENT receipt and
+all failed attempt records remain immutable.
+
+A direct PID1 service connection without `--pipe` or `--wait`, followed by
+journal stdio and a Python-opened owned log, allowed the dedicated unit to run.
+Readiness checked the exact MainPID, sole owned unit member, Delegate=yes,
+CPUQuota=100%, MemoryMax=384 MiB, TasksMax=64 and RuntimeMaxSec=180 before
+authorizing the tests. No shared cgroup, unrelated service, global configuration
+or SELinux enforcement/policy was changed.
+
+The first delegated cohort passed 18 cases and had one environment error: the
+fixture socket pathname exceeded the AF_UNIX capacity before its assertion.
+Only that original method was retried with a fresh short 0700 TMPDIR and its
+original setUpClass dependency initialized; it passed. Passing cases were not
+repeated, source bytes and assertions were not changed, and the owned units
+were stopped with MainPID=0 and their exact kernel cgroup directories absent.
+
+The aggregate receipt is in the NAS regression-runner environment-diagnosis
+lane: `aggregate-original47-result.json`, 18052 bytes, SHA256
+`2ee0914a44a11b2c6bbdcbec8b9f99b850802162497727ba0c99f24750aff5f5`.
+The root primary supplementary audit checked all 52 evidence file and archive
+member pins, all 47 source files, exact case partitions, readiness and terminal
+properties. The earlier independent source/72-test review remains unchanged;
+this supplementary runtime evidence was audited by the primary agent.
+
+These original delegated tests exercise the unchanged default guardian waiter
+with real Python children and real TaskGroup placement, limits, descendants,
+cleanup, pidfds, waits and QMP peer credentials. The new native reaper still has
+its separate focused activation tests, whose dedicated placement is modeled.
+The 19-case environment check is resolved; native HostGrant caller integration
+and actual Windows 98 boot/persistence remain pending. No QEMU/Windows guest or
+private media was used for these regressions.
