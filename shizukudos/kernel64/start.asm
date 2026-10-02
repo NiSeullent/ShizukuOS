@@ -22,8 +22,28 @@ _start:
 section .text
 extern isr_dispatch
 extern syscall_dispatch
-extern g_kstack_top
-extern g_user_rsp_scratch
+
+; Pure register classification shared by real ISR entry and host boundary
+; controls. NT KPCR/TEB can be high addresses, so GS sign is not an invariant.
+; Only CPL0 RIP after the first SWAPGS and before completion of the last belongs
+; to the temporary anchor interval. No GS access, C call or global frame flag.
+%macro ENTRY_GS_CLASSIFY 0
+    xor eax, eax
+    test sil, 3
+    jnz %%done
+    lea rdx, [rel syscall_gs_window_start]
+    cmp rdi, rdx
+    jb %%done
+    lea rdx, [rel syscall_gs_window_end]
+    cmp rdi, rdx
+    jae %%done
+    mov eax, 1
+%%done:
+%endmacro
+global arch_entry_needs_gs_restore
+arch_entry_needs_gs_restore:
+    ENTRY_GS_CLASSIFY
+    ret
 
 %macro STUB_NOERR 1
 stub_%1:
@@ -65,8 +85,24 @@ isr_common:
     push r14
     push r15
     cld
-    mov rdi, rsp
+    mov r12, rsp                        ; saved frame survives calls/context switches
+    mov rdi, [r12 + 136]                 ; interrupted RIP (struct regs)
+    mov rsi, [r12 + 144]                 ; interrupted CS
+    ENTRY_GS_CLASSIFY
+    mov r13, rax                        ; correction belongs to this frame only
+    test eax, eax
+    jz .gs_ready
+    swapgs                              ; ordinary NT GS before any C/GS consumer
+.gs_ready:
+    lfence                              ; both conditional SWAPGS paths before C/GS consumers
+    and rsp, -16                        ; SysV CALL entry RSP%16=8
+    mov rdi, r12
     call isr_dispatch
+    test r13, r13
+    jz .gs_returned
+    swapgs                              ; resume interrupted temporary anchor interval
+.gs_returned:
+    mov rsp, r12
     pop r15
     pop r14
     pop r13
@@ -89,11 +125,18 @@ isr_common:
 ; interrupts masked by SFMASK. Windows-style convention: EAX = number, R10/RDX/R8/R9 = args.
 ; A full struct regs is built so the dispatcher, faults and thread switching share one layout.
 global syscall_entry
+global syscall_gs_window_start, syscall_gs_window_end
 syscall_entry:
-    mov [rel g_user_rsp_scratch], rsp
-    mov rsp, [rel g_kstack_top]
+    swapgs
+syscall_gs_window_start:                 ; first instruction with temporary anchor GS
+    lfence                              ; trusted anchor before the first GS memory access
+    mov [gs:8], rsp
+    mov rsp, [gs:0]
     push qword 0x1b                     ; ss (user data 0x18, RPL 3)
-    push qword [rel g_user_rsp_scratch] ; rsp
+    push qword [gs:8]                    ; user rsp (per-CPU anchor)
+    swapgs                              ; this instruction is still inside the window
+syscall_gs_window_end:                   ; ordinary thread NT GS restored
+    lfence                              ; restored NT GS before any C/GS consumer
     push r11                            ; rflags
     push qword 0x23                     ; cs (user code 0x20, RPL 3)
     push rcx                            ; rip

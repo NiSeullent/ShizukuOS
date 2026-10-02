@@ -116,6 +116,49 @@ static inline thread_t *k64_rq_pick_locked(k64_runqueues_t *r, uint32_t cpu, uin
         if (r->cpu[cpu].ready_mask & (1u << p)) return r->cpu[cpu].ready[p].head;
     return 0;
 }
+/* Publish a selected context without exposing the outgoing live stack. The
+ * caller already recorded its READY/BLOCKED/ZOMBIE transition under this ticket.
+ * Neither helper transfers stacks or invokes callbacks. */
+static inline int k64_rq_dispatch_locked(k64_runqueues_t *r, uint32_t cpu,
+                                       thread_t *next, int aged, uint64_t now)
+{
+    if (!k64_rq_online(r, cpu) || !k64_rq_valid(r, next)) return -1;
+    k64_cpu_sched_t *c = &r->cpu[cpu];
+    thread_t *prev = c->current;
+    if (!k64_rq_valid(r, prev) || prev->on_cpu != cpu || c->outgoing || prev->ready_queued ||
+        prev->state == TS_RUNNING || next->state != TS_READY || !next->cpu_mask ||
+        (next->cpu_mask & ~r->online_mask) || !(next->cpu_mask & (1ull << cpu)) ||
+        (next != prev && next->on_cpu != K64_CPU_NONE) ||
+        (next->ready_queued && next->ready_cpu != cpu) ||
+        (!next->ready_queued && next != prev && next != c->idle)) return -1;
+    if (next->ready_queued && k64_rq_remove_locked(r, next)) return -1;
+    next->aging_service_left = aged ? SCHED_AGED_SERVICE_TICKS : 0;
+    next->quantum_left = next->quantum_ticks;
+    const uint64_t waited = now - next->ready_since;
+    if (next != c->idle && waited > next->max_ready_wait_ticks) next->max_ready_wait_ticks = waited;
+    next->state = TS_RUNNING;
+    if (next == prev) return 0;
+    next->on_cpu = cpu;
+    c->current = next;
+    c->outgoing = prev;
+    return 1;
+}
+static inline thread_t *k64_rq_complete_locked(k64_runqueues_t *r, uint32_t cpu)
+{
+    if (!k64_rq_online(r, cpu)) return 0;
+    k64_cpu_sched_t *c = &r->cpu[cpu];
+    thread_t *t = c->outgoing;
+    if (!k64_rq_valid(r, t) || !k64_rq_valid(r, c->current) || t == c->current ||
+        t->on_cpu != cpu || c->current->on_cpu != cpu || c->current->state != TS_RUNNING ||
+        t->ready_queued || (t->state != TS_READY && t->state != TS_BLOCKED && t->state != TS_ZOMBIE) ||
+        !t->cpu_mask || (t->cpu_mask & ~r->online_mask)) return 0;
+    t->on_cpu = K64_CPU_NONE;
+    if (t->state == TS_READY && t != c->idle)
+        KASSERT(k64_rq_enqueue_locked(r, t, k64_rq_choose_locked(r, t->cpu_mask),
+                                     t->ready_since, t->ready_order) == 0);
+    c->outgoing = 0;
+    return t;
+}
 static inline int k64_rq_policy_locked(k64_runqueues_t *r, thread_t *t, uint32_t priority,
                                       uint32_t quantum, uint64_t mask, uint64_t now, uint64_t order)
 {

@@ -157,7 +157,7 @@ static void user_thread_main(void *arg)
     }
     write_cr3(p->pml4);
     tss_set_rsp0(t->stack_base + KSTACK_BYTES);
-    g_kstack_top = t->stack_base + KSTACK_BYTES;
+    sched_set_current_kstack(t->stack_base + KSTACK_BYTES);
     wrmsr(MSR_GS_BASE, t->teb);                 /* GS:[0x30] is the TEB self pointer, as on Windows x64 */
     enter_user(t->user_rip, t->user_rsp, t->user_arg, t->user_arg2);
 }

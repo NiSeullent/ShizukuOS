@@ -57,6 +57,8 @@ void irq_register(unsigned vector, void (*handler)(struct regs *));      /* devi
 typedef void (*irq_handler_t)(struct regs *);
 irq_handler_t irq_handler_get(unsigned vector);                         /* current handler (NULL if none): lets a driver avoid stealing a shared line */
 void tss_set_rsp0(uint64_t rsp0);
+int arch_sched_entry_bind(uint32_t cpu, uint64_t top);       /* IF-off, actual BSP; AP unsupported */
+int arch_sched_entry_set_stack(uint32_t cpu, uint64_t top);  /* no fallback to BSP TSS */
 static inline uint64_t read_cr0(void) { uint64_t v; __asm__ volatile("mov %%cr0, %0" : "=r"(v)); return v; }
 static inline uint64_t read_cr2(void) { uint64_t v; __asm__ volatile("mov %%cr2, %0" : "=r"(v)); return v; }
 static inline uint64_t read_cr3(void) { uint64_t v; __asm__ volatile("mov %%cr3, %0" : "=r"(v)); return v; }
@@ -77,6 +79,7 @@ static inline void cli(void) { __asm__ volatile("cli" ::: "memory"); }
 #define MSR_SFMASK 0xc0000084u
 #define MSR_FS_BASE 0xc0000100u
 #define MSR_GS_BASE 0xc0000101u
+#define MSR_KERNEL_GS_BASE 0xc0000102u
 
 /* ---- mem.c ---- */
 void mem_init(const shz_bootinfo_t *bi);
@@ -267,7 +270,7 @@ int syscall_dispatch(struct regs *r);      /* nonzero: leave through IRETQ with 
 int user_fault(struct regs *r);
 uint64_t user_syscall_count(void);
 uint64_t proc_pml4(process_t *p);
-extern uint64_t g_kstack_top;                   /* read by syscall_entry */
+extern uint64_t g_kstack_top;                   /* CPU0 compatibility mirror; entry reads CPU anchor */
 extern uint64_t g_user_rsp_scratch;
 
 /* ---- setup_sys.c: `shz.setup=auto` on the kernel command line runs \SHZ\SETUP\SHZSETUP.EXE (called by kmain) ---- */
