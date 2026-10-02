@@ -1,0 +1,17 @@
+# Canonical NT time host dispatcher adapter checkpoint
+
+Owner `/root/review_smp_memory`; isolated branch `codex/nt-time-dispatch-host-163f-20261002`, base 1712a923387c328bae689dd6637b35fa99e6f6f5. Exact ownership is the time producer Python and this unique plan/status pair. No commit or canonical import has been made; a fresh independent review is required.
+
+The one-line adapter extracts the actual canonical `sched_owner_context` before `thread_current`. The fixture C, assertions, reset, production source and producer timeout/SIGINT admission/owned-group cleanup are unchanged. It supplies the real helper, rather than a mock or an altered scheduler. This is an actual-C UP host component, not AP/object lifetime, hardware context-switch, native Windows98 or final ISO acceptance.
+
+## Actual paired execution
+
+- Preserved compile RED: `build/nt-time-dispatch-host-163f/red-1/result.json`, SHA `971498c81bef31b6a9dfce711224882b7ab2a30d4b7dcd07b90bfb904239adef`. GCC and Clang each exited1 with undeclared `sched_owner_context` from the actual `thread_current`; no fixture binary or runtime contract executed. Frozen273 source pins and279 artifacts are stable. The earlier missing output-parent setup error preceded compilation and is not counted as RED.
+- Actual GREEN: `build/nt-time-dispatch-host-163f/green-1/result.json`, SHA `bc7d1c6fbe85ba48cbf0d7fc7799fb74e91a2f772d8b7bb71b07f892b9152a08`. GCC O2 and Clang ASan/UBSan each record normal1292/0, clock-zero34/0 and clock-wrap34/0. Seven actual freestanding/native frontend TUs compile. All15 commands are admitted with factual exit0/reaped leader and no timeout, interruption or cleanup failure. Frozen273 sources and301 artifacts remain stable.
+- RED/GREEN local source maps differ only in this one Python line. C assertion bytes are identical. The extracted actual helper SHA is `ec013d3e2379fae055ed84b1c8bb23bf805341f6028497e95776a432e8a222f7`; its frozen body appears before `thread_current` in GREEN and is absent in RED.
+
+The outer before manifest binds663 production/tool-helper paths, four existing fixture paths and Python/GCC/Clang/Mingw identities before commands. All663 production paths and three unmodified fixture paths remain identical afterward. GREEN alone needs Mingw through `--compile-units`; shared GCC/Clang identities match across both runs. No `.pyc` exists before or after. Complete current/frozen local source and artifact maps, raw command logs and before-use generated schema/include pins are preserved.
+
+`command_admitted`, `owned_group_live_members`, `run_owned` and lexical extractor bodies are byte-identical to base. The previously reviewed timeout/SIGINT cleanup controls are retained by that exact body identity; no redundant control or VM execution is claimed here. Privileged IRQ/copy/clock/heap/VAD/static storage and controlled ZOMBIE publication remain explicit inherited host boundaries. System headers, compiler support/sysroots/libraries and Python runtime bytes are outside the sealed external closure; tools are hashed, not copied. No SDK duplicates or NAS operations occur.
+
+The unique ignored output leaf contains a bounded exact3/source/proof archive and manifest/handoff. Its aggregate ceiling is48MiB; sealing checks the actual logical total. No index/source mutation outside the three owned paths, no production edits, and no old priority fixture changes were made. Separate canonical combined host, kernel/DLL/probe/native acceptance remains root-owned work; this producer adapter checkpoint does not replace it.

@@ -234,7 +234,7 @@ def main():
         sources = {p.name: b.decode() for p,b in snapshots.items() if p.suffix == ".c"}
         pieces = [function(sources["smp_boot.c"], n) for n in ["initial_apic_id", "shz_smp_this_cpu"]]
         pieces.append(re.search(r"^typedef struct[^\n]+queue_guard_t;", sources["sched.c"], re.M)[0])
-        for filename,names in [("sched.c", ["sched_cpu_identity", "bsp_scheduler_owner", "queue_enter", "queue_leave", "thread_pointer_valid", "ready_enqueue_locked", "ready_enqueue", "ready_remove", "thread_current", "ticks_now", "rdtsc", "thread_slot"]),
+        for filename,names in [("sched.c", ["sched_cpu_identity", "bsp_scheduler_owner", "sched_owner_context", "queue_enter", "queue_leave", "thread_pointer_valid", "ready_enqueue_locked", "ready_enqueue", "ready_remove", "thread_current", "ticks_now", "rdtsc", "thread_slot"]),
                                ("objects.c", ["ob_ref", "ob_deref", "handle_insert", "handle_lookup", "handle_ref", "handle_close", "thread_object_detach"]),
                                ("ipc_core.c", ["ipc_ref_handle", "ipc_ref_process", "ipc_handle_closed"])]:
             pieces += [function(sources[filename],n) for n in names]
