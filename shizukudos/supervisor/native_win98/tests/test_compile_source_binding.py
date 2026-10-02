@@ -33,7 +33,8 @@ class CompileSourceBindingTests(unittest.TestCase):
         sources = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi", "shizukudos/boot_profile")
                    for p in (ROOT / folder).rglob("*") if p.is_file() and p.suffix in suffixes}
         sources.update(ROOT / p for p in (*GLYPHS, "shizukudos/tools/shzlib.py",
-                                         "shizukudos/kernel64/standalone/memholes.h"))
+                                         "shizukudos/kernel64/standalone/memholes.h",
+                                         "shizukudos/kernel32/service_policy.h"))
         for source in sources:
             copied = self.root / source.relative_to(ROOT)
             copied.parent.mkdir(parents=True, exist_ok=True)
@@ -145,6 +146,9 @@ class CompileSourceBindingTests(unittest.TestCase):
 
     def test_foundation_policy_mutation_is_rejected(self):
         self.assert_mutation_fails("shizukudos/boot_profile/win98_foundation.h")
+
+    def test_kernel32_service_policy_mutation_is_rejected(self):
+        self.assert_mutation_fails("shizukudos/kernel32/service_policy.h")
 
     def test_cp437_implementation_mutation_is_rejected(self):
         self.assert_mutation_fails(GLYPHS[0])

@@ -249,7 +249,8 @@ def validate_contents(name, fd):
 def source_files():
     files = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi", "shizukudos/boot_profile")
              for p in (ROOT / folder).rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld", ".py")}
-    files.update(ROOT / p for p in ("shizukudos/tools/shzlib.py", "shizukudos/kernel64/standalone/memholes.h"))
+    files.update(ROOT / p for p in ("shizukudos/tools/shzlib.py", "shizukudos/kernel64/standalone/memholes.h",
+                                  "shizukudos/kernel32/service_policy.h"))
     # The ordinary Supervisor payload links the existing CSMWrap glyph source.
     # Pin its implementation, interface and included font outside Supervisor/.
     files.update(ROOT / "shizukudos/csmwrap/video" / name
