@@ -130,6 +130,15 @@ class _OwnedGroupObservation:
         self.quiet_scan_instability = None
         self.last_scan_instability = None
         self.last_scan_snapshot = None
+        self.last_validated_snapshot = None
+        self.last_validated_completed_at = None
+        self.last_validated_pause_attempt = None
+        self.last_validated_pause_iteration = None
+        self.last_validated_scan_instability = None
+        self.pause_iteration = 0
+        self.pause_stop_requests_start = 0
+        self.pause_stage = "not_started"
+        self.pause_candidate_snapshot = None
         self.telemetry = {"pause_attempts": 0, "verified_pauses": 0,
                           "stop_requests": 0, "continue_requests": 0,
                           "stop_no_live_group_observations": 0,
@@ -164,6 +173,22 @@ class _OwnedGroupObservation:
         if now > self.deadline:
             raise self.guard._fail("owned command wall timeout crossed during observation")
         if self.pause_deadline is not None and now > self.pause_deadline:
+            try:
+                self._record_stop_timeout_observation(now)
+            except BaseException:
+                # Diagnostic failure cannot change the original timeout or
+                # its STOP/kill-before-reap cleanup path.
+                try:
+                    if self.telemetry["failure_observation"] is None:
+                        self.telemetry["failure_observation"] = {
+                            "scope": "stop_timeout_diagnostic_encoding_refused",
+                            "snapshot_temporal_scope": "last_completed_before_timeout",
+                            "timeout_instant_snapshot_verified": False,
+                            "producer_cause_verified": False, "kernel_cause_verified": False,
+                            "new_proc_read_performed_for_diagnostic": False,
+                            "retry_or_acceptance_relaxation_applied": False}
+                except BaseException:
+                    pass
             raise self.guard._fail("owned group stop confirmation exceeded one second")
 
     def _stat_row(self, directory, expected_pid, *, tgid=None):
@@ -339,7 +364,15 @@ class _OwnedGroupObservation:
         return observation
 
     def _snapshot(self):
-        return self._validated(self.guard._group_observer(self.proc))
+        snapshot = self._validated(self.guard._group_observer(self.proc))
+        self.last_validated_snapshot = snapshot
+        self.last_validated_completed_at = time.monotonic()
+        self.last_validated_pause_attempt = self.telemetry["pause_attempts"]
+        self.last_validated_pause_iteration = self.pause_iteration
+        self.last_validated_scan_instability = {
+            "matches_returned_snapshot": self.last_scan_snapshot == snapshot,
+            "metadata": self.last_scan_instability}
+        return snapshot
 
     @staticmethod
     def _quiet(snapshot):
@@ -350,24 +383,36 @@ class _OwnedGroupObservation:
         self.pause_started = time.monotonic()
         self.pause_deadline = min(self.deadline, self.pause_started + QUIESCENCE_TIMEOUT)
         self.telemetry["pause_attempts"] += 1
+        self.pause_iteration = 0
+        self.pause_stop_requests_start = self.telemetry["stop_requests"]
+        self.pause_stage = "pause_entry"
+        self.pause_candidate_snapshot = None
         previous = None
         while True:
+            self.pause_iteration += 1
+            self.pause_candidate_snapshot = previous
+            self.pause_stage = "loop_deadline_check"
             self.check_time()
+            self.pause_stage = "leader_validation"
             self.leader()
             self.telemetry["stop_requests"] += 1
+            self.pause_stage = "stop_signal"
             try:
                 os.killpg(self.proc.pid, signal.SIGSTOP)
             except ProcessLookupError:
                 # A held zombie leader can outlive every signalable member.
                 # Accept no-recipient only with fresh complete all-Z evidence;
                 # the same two-scan and post-count checks still apply.
+                self.pause_stage = "no_live_recipient_snapshot"
                 no_live = self._snapshot()
                 if (not no_live["stable"] or any(r["state"] != "Z"
                         for r in no_live["members"] + no_live["tasks"])):
                     raise ResourceFailure("owned group stop had no live recipient without all-zombie evidence")
                 self.telemetry["stop_no_live_group_observations"] += 1
             self.paused = True
+            self.pause_stage = "stop_confirmation_snapshot"
             current = self._snapshot()
+            self.pause_stage = "quiet_candidate_comparison"
             if self._quiet(current) and current == previous:
                 self.quiet_snapshot = current
                 self.quiet_scan_instability = {
@@ -376,9 +421,99 @@ class _OwnedGroupObservation:
                 self.verified = True
                 self.pause_deadline = None
                 self.telemetry["verified_pauses"] += 1
+                self.pause_stage = "verified_pause"
                 return
             previous = current if self._quiet(current) else None
+            self.pause_stage = "existing_between_attempts_sleep"
             time.sleep(0.001)
+
+    def _record_stop_timeout_observation(self, now):
+        """Cached completed numeric evidence, never a new timeout-time scan."""
+        if self.telemetry["failure_observation"] is not None:
+            return
+        snapshot = self.last_validated_snapshot
+        candidate = self.pause_candidate_snapshot
+        samples = []
+
+        def summary(value, retain_samples):
+            if value is None:
+                return {"available": False}
+            raw = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+            counts = {}
+            for kind in ("members", "tasks"):
+                states = {}
+                for row in value[kind]:
+                    states[row["state"]] = states.get(row["state"], 0) + 1
+                    if retain_samples and len(samples) < GROUP_DIAGNOSTIC_ROW_LIMIT:
+                        samples.append({"kind": kind, "row": dict(row)})
+                counts[kind] = {"count": len(value[kind]), "state_counts": states}
+            return {"available": True,
+                    "canonical_full_snapshot_sha256": hashlib.sha256(raw).hexdigest(),
+                    "stable": value["stable"],
+                    "all_members_and_tasks_T_or_Z": all(row["state"] in ("T", "Z")
+                        for row in value["members"] + value["tasks"]),
+                    "member_task_state_counts": counts}
+
+        snapshot_summary = summary(snapshot, True)
+        scan_instability = self.last_validated_scan_instability
+        if scan_instability is not None and scan_instability["metadata"] is not None:
+            metadata = scan_instability["metadata"]
+            available_rows = GROUP_DIAGNOSTIC_ROW_LIMIT - len(samples)
+            retained_events = metadata["events"][:available_rows]
+            scan_instability = {
+                "matches_returned_snapshot": scan_instability["matches_returned_snapshot"],
+                "metadata": {**metadata, "events": retained_events,
+                    "events_truncated": (metadata["events_truncated"]
+                                         or len(retained_events) < len(metadata["events"]))}}
+        diagnostic = {
+            "scope": "first_stop_confirmation_timeout_cached_completed_numeric_metadata_only",
+            "snapshot_temporal_scope": "last_completed_before_timeout",
+            "timeout_instant_snapshot_verified": False,
+            "last_completed_validated_snapshot": snapshot_summary,
+            "last_completed_snapshot_at_monotonic": self.last_validated_completed_at,
+            "last_completed_snapshot_age_seconds": (
+                None if self.last_validated_completed_at is None
+                else max(0.0, now - self.last_validated_completed_at)),
+            "last_completed_snapshot_pause_attempt": self.last_validated_pause_attempt,
+            "last_completed_snapshot_pause_iteration": self.last_validated_pause_iteration,
+            "last_completed_actual_scan_instability": scan_instability,
+            "last_quiet_candidate_for_current_attempt": summary(candidate, False),
+            "last_completed_equals_current_attempt_quiet_candidate": (
+                None if snapshot is None or candidate is None else snapshot == candidate),
+            "sampled_rows": samples,
+            "sampled_row_total": (0 if snapshot is None else
+                                  len(snapshot["members"]) + len(snapshot["tasks"])),
+            "sampled_rows_truncated": (False if snapshot is None else
+                len(snapshot["members"]) + len(snapshot["tasks"]) > len(samples)),
+            "sampled_numeric_rows_and_instability_events_share_limit": True,
+            "timeout_checked_at_monotonic": now,
+            "pause_started_at_monotonic": self.pause_started,
+            "pause_deadline_monotonic": self.pause_deadline,
+            "command_deadline_monotonic": self.deadline,
+            "pause_elapsed_seconds": (None if self.pause_started is None
+                                       else max(0.0, now - self.pause_started)),
+            "current_pause_attempt": self.telemetry["pause_attempts"],
+            "current_pause_iteration": self.pause_iteration,
+            "current_pause_stop_requests": self.telemetry["stop_requests"] - self.pause_stop_requests_start,
+            "total_stop_requests": self.telemetry["stop_requests"],
+            "stage": self.pause_stage,
+            "diagnostic_row_limit": GROUP_DIAGNOSTIC_ROW_LIMIT,
+            "diagnostic_byte_limit": GROUP_FAILURE_DIAGNOSTIC_LIMIT,
+            "producer_cause_verified": False, "kernel_cause_verified": False,
+            "new_proc_read_performed_for_diagnostic": False,
+            "retry_or_acceptance_relaxation_applied": False}
+        raw = json.dumps(diagnostic, sort_keys=True, separators=(",", ":")).encode()
+        if len(raw) > GROUP_FAILURE_DIAGNOSTIC_LIMIT:
+            diagnostic = {"scope": "stop_timeout_diagnostic_size_refused",
+                          "complete_diagnostic_sha256": hashlib.sha256(raw).hexdigest(),
+                          "complete_diagnostic_bytes": len(raw),
+                          "diagnostic_byte_limit": GROUP_FAILURE_DIAGNOSTIC_LIMIT,
+                          "snapshot_temporal_scope": "last_completed_before_timeout",
+                          "timeout_instant_snapshot_verified": False,
+                          "producer_cause_verified": False, "kernel_cause_verified": False,
+                          "new_proc_read_performed_for_diagnostic": False,
+                          "retry_or_acceptance_relaxation_applied": False}
+        self.telemetry["failure_observation"] = diagnostic
 
     def verify_paused(self):
         self.check_time()

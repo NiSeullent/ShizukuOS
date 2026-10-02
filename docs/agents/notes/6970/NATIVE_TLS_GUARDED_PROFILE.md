@@ -369,3 +369,55 @@ all actual unit/header facts and format; compaction errors retain FAIL. The
 32MiB output,1MiB self-inclusive receipt,256KiB normal captures,20GiB reserve,
 strict count predicates and signal/reap ordering are unchanged. These new
 parser controls and final-source builds have not run at this checkpoint.
+
+
+## Sixth actual attempt: admitted graph, incomplete first object
+
+RUN36953407912/JOB110671052494 at99f2d4d1c679e56bce50998866201a412fc77901
+completedFAIL. Actual generated files334,333B+8,045B were fully retained
+and matched their configured input pins. The135 selected writer edges,
+9 aliases, console regeneration and exact literal owned workdir binding
+match the source-bound graph report. All14 actual selective parser cases
+passed in0.354s; all10 real quiescent controls passed in3.588s. These are
+component acceptance only; final graph/source/header/tool closure isfalse.
+
+The first159 production commands, including126 actual-M discovery calls,
+exited0/reaped. The160th command `cmake-object-0` failed after1.108s with
+owned group stop confirmation exceeded one second. It retained STOP until
+kill-9 before reap, had5 pause attempts/4 verified pauses/250STOP requests,
+and maximum2 members/2 tasks. No failure snapshot was recorded, so neither
+nonquiet state, membership drift, unrelated proc disappearance nor scan
+cost is established as the cause. No object/actual-MD/link/four-PE exists.
+
+All320 retained main capture files total25,274B and match their hashes.
+319 streams also match their complete observed bytes. The last stdout is
+only128 of189 observed bytes:61B were not retained and its full observed
+hash is metadata-only. Ten full child receipts and16 output text bodies
+are42,927B; child50B plus retained thrown consumer15B give parent25,339B
+normal captures and raw decoder15B/delivery0. The618,807B closed receipt
+SHA382a0d2e4254d7096ff7f19f00c0a435fe47b408361f26ac05d2b6026556cddf
+accounts3,679,705B/minimum91,697,598,464B. Artifacts0/nativeTLSfalse.
+Root38,634B review SHA5fb3fdd558a22cf141b69d3d0f5b2b548acd12dc4dcfb9af9b077860cde82ef3
+and two independent full failed-scope reviews remain separate from success.
+
+Prospective resource78,380B SHA2803ad3a357395c3fe82d875fe6c4c3e070c15d0a8bf328fcc0a155d73424878
+and workflow35,050B SHAdc075a53d98f0e762e07e4865fafe7035d76de8c98444552036413f434635a20
+add first bounded cached timeout metadata. Successfully validated completed
+snapshots carry state counts, canonical full digest, at most8 shared numeric
+sample/event rows, current attempt/stage/iteration and deadlines. Their
+scope is last-completed-before-timeout, never the timeout instant or a
+producer/kernel cause. No new proc read, signal, retry or sleep is added.
+The original1s predicate/message and command wall time, limits, cleanup,
+strict traversal and validators remain intact. Final source review is
+static only; no seventh-source runtime acceptance is claimed.
+
+A separate reviewed RAM metadata-only command13,741B SHA8c9c7fd38c316c5500b4bb1e4bd753ab4074213dcf1bfdded20023d12dc76ea7
+closed a47,685B gate SHA528ea08a5a0160cc818de496756377af1b7203e474915f3ad99ed2d0573020fb.
+Its lossless stat-table/signedctime format retains all ten actual stat facts
+and source SHA/listings, prior166 and four binary exclusions. The combined
+61,426B stays within64KiB. Root full-read213 complete files/18,528,208B,
+58 prefixes and directory listings. Local continuation remainsBLOCKED:
+5,524,238,336B available versus21,494,417,374B conservative requirement.
+This metadata audit authorizes no local build/helper exception and performs
+no NAS copy or cleanup credit. Fresh NAS47member incremental admission is
+separate; preserve all historical failed epochs and binary exclusions.
