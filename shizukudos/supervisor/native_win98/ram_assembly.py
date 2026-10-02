@@ -118,7 +118,7 @@ class Placement:
         root = Path(self.plan['scratch']['path'])
         need(tmpfs_fd(self.fds['scratch']), 'scratch must remain actual tmpfs')
         names = os.listdir(self.fds['scratch'])
-        need(set(names) <= {'esp-win98.img', 'ram-placement.json', 'disk-insertion-request.json', 'disk-insertion.json'},
+        need(set(names) <= {'esp-win98.img', 'disk-source.img', 'ram-placement.json', 'disk-insertion-request.json', 'disk-insertion.json'},
              'foreign RAM workspace entry refused')
         used = 0
         for name in names:
