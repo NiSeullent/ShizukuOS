@@ -618,36 +618,71 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
         return put_out(cur, buf, len, retlen, &s, sizeof s);
     }
     case K32Q_PROCESS_MEMORY: {
-        process_t *p = proc_of_handle(cur, h);
+        kobject_t *o;
+        process_t *p;
         uint64_t m[5], f;
-        if (!p) return STATUS_INVALID_HANDLE;
-        sample_peaks(p);
+        int32_t st = ref_query_object(cur, h, OB_PROCESS,
+                                     PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, &o);
+        if (st) return st;
         f = irq_save();
-        m[0] = p->page_faults; m[1] = vm_count_user_pages(p->pml4) * PAGE_SIZE; m[2] = p->peak_ws_pages * PAGE_SIZE;
-        m[3] = private_commit(p); m[4] = p->peak_commit;
+        p = o->u.proc.p;
+        if (!p || !p->used || p->object != o) st = STATUS_INVALID_HANDLE;
+        else if (p->terminated || p->teardown) st = STATUS_PROCESS_IS_TERMINATING;
+        else if (!p->pml4) st = STATUS_INVALID_HANDLE;
+        else {
+            /* Keep the sample and snapshot in one UP address-space guard. */
+            sample_peaks(p);
+            m[0] = p->page_faults; m[1] = vm_count_user_pages(p->pml4) * PAGE_SIZE; m[2] = p->peak_ws_pages * PAGE_SIZE;
+            m[3] = private_commit(p); m[4] = p->peak_commit;
+        }
         irq_restore(f);
+        ob_deref(o);
+        if (st) return st;
         return put_out(cur, buf, len, retlen, m, sizeof m);
     }
     case K32Q_WORKING_SET_EX: {                                 /* in/out array of {VirtualAddress, attributes} */
-        process_t *p = proc_of_handle(cur, h);
-        uint64_t n = len / 16, i;
-        if (!p) return STATUS_INVALID_HANDLE;
-        if (!n || len % 16) return STATUS_INFO_LENGTH_MISMATCH;
+        kobject_t *o;
+        process_t *p;
+        uint64_t n = len / 16, i, f;
+        int32_t st = ref_query_object(cur, h, OB_PROCESS, PROCESS_QUERY_INFORMATION, &o);
+        if (st) return st;
+        if (!n || len % 16) { ob_deref(o); return STATUS_INFO_LENGTH_MISMATCH; }
+        f = irq_save();
+        p = o->u.proc.p;
+        st = !p || !p->used || p->object != o ? STATUS_INVALID_HANDLE :
+             p->terminated || p->teardown ? STATUS_PROCESS_IS_TERMINATING :
+             p->pml4 ? STATUS_SUCCESS : STATUS_INVALID_HANDLE;
+        irq_restore(f);
+        if (st) { ob_deref(o); return st; }
         for (i = 0; i < n; ++i) {
             uint64_t e[2], flags = 0;
             vad_t *v;
-            if (copy_from_user(cur, e, buf + i * 16, 16)) return STATUS_ACCESS_VIOLATION;
-            e[1] = 0;
-            v = e[0] < USER_TOP ? vad_find(p, e[0] & ~(PAGE_SIZE - 1)) : 0;
-            if (v && vm_lookup(p->pml4, e[0], &flags) && (flags & PT_U)) {
-                e[1] = 1ull                                        /* Valid */
-                     | (1ull << 1)                                 /* ShareCount 1: only this process maps the page */
-                     | ((uint64_t)(v->prot & 0x7ff) << 4);         /* Win32Protection */
-                if (vlock_find(p, e[0] & ~(PAGE_SIZE - 1)) >= 0) e[1] |= 1ull << 22;       /* Locked */
+            if (copy_from_user(cur, e, buf + i * 16, 16)) { ob_deref(o); return STATUS_ACCESS_VIOLATION; }
+            /* Caller copies permit target teardown; recheck each UP snapshot. */
+            f = irq_save();
+            p = o->u.proc.p;
+            st = !p || !p->used || p->object != o ? STATUS_INVALID_HANDLE :
+                 p->terminated || p->teardown ? STATUS_PROCESS_IS_TERMINATING :
+                 p->pml4 ? STATUS_SUCCESS : STATUS_INVALID_HANDLE;
+            if (!st) {
+                e[1] = 0;
+                v = e[0] < USER_TOP ? vad_find(p, e[0] & ~(PAGE_SIZE - 1)) : 0;
+                if (v && vm_lookup(p->pml4, e[0], &flags) && (flags & PT_U)) {
+                    e[1] = 1ull                                        /* Valid */
+                         | (1ull << 1)                                 /* ShareCount 1: only this process maps the page */
+                         | ((uint64_t)(v->prot & 0x7ff) << 4);         /* Win32Protection */
+                    if (vlock_find(p, e[0] & ~(PAGE_SIZE - 1)) >= 0) e[1] |= 1ull << 22;       /* Locked */
+                }
             }
-            if (copy_to_user(cur, buf + i * 16, e, 16)) return STATUS_ACCESS_VIOLATION;
+            irq_restore(f);
+            if (st) { ob_deref(o); return st; }
+            if (copy_to_user(cur, buf + i * 16, e, 16)) { ob_deref(o); return STATUS_ACCESS_VIOLATION; }
         }
-        if (retlen) { uint32_t rl = (uint32_t)len; copy_to_user(cur, retlen, &rl, 4); }
+        ob_deref(o);
+        if (retlen) {
+            uint32_t rl = (uint32_t)len;
+            if (copy_to_user(cur, retlen, &rl, 4)) return STATUS_ACCESS_VIOLATION;
+        }
         return STATUS_SUCCESS;
     }
     case K32Q_IMAGE_PATH: {                                     /* the executable's path: "\SHZ\TESTS\T_X.EXE" (C:) or "D:\..." */
