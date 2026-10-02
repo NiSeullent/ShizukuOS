@@ -41,9 +41,10 @@ const char *k64_boot_cmdline(void) { return bootinfo.cmdline; }
 
 /* ROOT_K64_AP_CONSUMER_BEGIN */
 #ifdef SHZ_STANDALONE
-/* BSP storage survives every finite batch; no payload is placed on an AP's
- * stack and the oracle never reads the provider's copied job/result. */
-static uint8_t k64_ap_payload[16][4096];
+/* One BSP scratch allocation survives all batches. Submission copies its bytes
+ * before returning; the oracle never reads the provider's job/result. Keeping
+ * payloads out of BSS preserves the loader's fixed image/heap boundary. */
+static uint8_t *k64_ap_payload;
 static uint64_t k64_ap_cookie[16], k64_ap_expected[16], k64_ap_history[512];
 static uint8_t k64_ap_done[16];
 
@@ -156,6 +157,9 @@ static void k64_persistent_ap_component(void)
     int rc = sched_ap_work_quiescent();
     if (rc)
         k64_ap_component_fail("quiescent", 0, 0, 0, rc);
+    k64_ap_payload = kmalloc(4096);
+    if (!k64_ap_payload)
+        k64_ap_component_fail("payload-alloc", 0, 0, 0, -1);
     rc = shz_cpu_workers_start();
     if (rc)
         k64_ap_component_fail("start", 0, 0, 0, rc);
@@ -168,19 +172,20 @@ static void k64_persistent_ap_component(void)
         unsigned spins = 0, remaining = 16;
         for (unsigned slot = 0; slot != 16; ++slot) {
             for (unsigned byte = 0; byte != 4096; ++byte)
-                k64_ap_payload[slot][byte] = (uint8_t)((generation * 17u + slot * 29u + byte * 7u) ^
+                k64_ap_payload[byte] = (uint8_t)((generation * 17u + slot * 29u + byte * 7u) ^
                         (byte >> 3) ^ (generation >> 3));
-            k64_ap_expected[slot] = k64_ap_reference(k64_ap_payload[slot]);
+            k64_ap_expected[slot] = k64_ap_reference(k64_ap_payload);
             k64_ap_cookie[slot] = 0;
             k64_ap_done[slot] = 0;
-        }
-        for (unsigned slot = 0; slot != 16; ++slot) {
             if (!k64_ap_component_budget(start, &spins))
                 k64_ap_component_fail("submit-deadline", generation, slot, 0, -1);
             const uint64_t eligible = k64_ap_eligibility(online, (generation - 1) * 16 + slot);
-            rc = sched_ap_work_submit(k64_ap_payload[slot], 4096, eligible, &k64_ap_cookie[slot]);
+            rc = sched_ap_work_submit(k64_ap_payload, 4096, eligible, &k64_ap_cookie[slot]);
             if (rc)
                 k64_ap_component_fail("submit", generation, slot, k64_ap_cookie[slot], rc);
+            /* Poison the submitted source immediately, including the final
+             * slot, so a borrowed source cannot satisfy the saved oracle. */
+            memset(k64_ap_payload, 0xa5, 4096);
             if (!k64_ap_component_budget(start, &spins))
                 k64_ap_component_fail("submit-return-deadline", generation, slot, k64_ap_cookie[slot], -1);
             if (!k64_ap_cookie[slot])
@@ -246,6 +251,8 @@ static void k64_persistent_ap_component(void)
         k64_ap_component_fail("stop", 32, 0, 0, rc);
     if (sched_cpu_online_mask() != 1 || sched_validate() != 1 || sched_ap_work_quiescent())
         k64_ap_component_fail("stopped-validation", 32, 0, 0, -1);
+    kfree(k64_ap_payload);
+    k64_ap_payload = 0;
     kprintf("SMP-WORK consumer: submitted=%u completed=%u released=%u batches=32 empty=3 scheduler_cpus=1 result=0\n",
             submitted, completed, released);
 }
