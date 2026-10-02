@@ -38,7 +38,8 @@ ARCHIVE_URL = 'https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6
 PRODUCTION = {'ntwin32/secure_transport/build.py': (19667, 'a9f96b6a4501104b1929a669af4a0f4f6db9b7e68e56ad7241274783f44d787b'), 'ntwin32/secure_transport/i486_format.c': (6346, '3d5a6fd5895801d350ffeffe563e6bf858801fc24ac1139fec07e058d1346965'), 'ntwin32/secure_transport/i486_format.h': (663, '3f7a57cb7c545ba180a2dbb33fdfaf2f2c4bfa31f5cf02a01118cdbfd571a42d'), 'ntwin32/secure_transport/i486_gate.py': (8829, '85e976035c70478e9a2f021a37aa6925dd20ad85f089c7d06a18efadb7b9730f'), 'ntwin32/secure_transport/native.def': (302, '88c1d2cd388bc5d958d8473589fcf18d12d48e1c53da6fb3b2e396aba24b8c82'), 'ntwin32/secure_transport/native_crt.c': (1699, 'dff0e07803d0a6f708b597d6fc54225c6502c2293814e77fe2d95f821cae882f'), 'ntwin32/secure_transport/native_runtime.c': (1423, '268c5eae7b09145ea1ff971e24313b6a0b19cd7a8f85f8dcd44c886e6435cfa8'), 'ntwin32/secure_transport/native_runtime.h': (495, '6425fd3cad0c0a02a48851caf7337b55453ee6259bd35e79496d2de68769ea2e'), 'ntwin32/secure_transport/native_time.c': (2207, '8103149774591687c15554438925e303c99ba42fa1c6a9b4254a6ee6fae99031'), 'ntwin32/secure_transport/native_time_probe.c': (6364, '98c3d61a6cb585d9ce1822c5a233737c7d1d66fe29c16eb2968771814a4459da'), 'ntwin32/secure_transport/probe.c': (28767, '39fa6b3915de7aa2378173fc7ca3258267176e20cb2dd451ea795816d3b15585'), 'ntwin32/secure_transport/sspi_native.c': (35445, '32b6bbd23d7ed61c40d86e08711c631140dfeb3ee6e5e1a6427d9eebb2955672'), 'ntwin32/secure_transport/sspi_native.def': (769, 'd31e87e33f0b51bb175265e0f05a073749e1785d3d4d2cb34713ae7dd59566a7'), 'ntwin32/secure_transport/sspi_native.h': (1972, '172f12027a18b9d04a81936da4169f62793f25aa6d09d13edbc1da4bf81f280c'), 'ntwin32/secure_transport/sspi_native_host_test.py': (45452, 'a1ecceca9c7989d7559b610e6266285b00ba915c3a6f1880a13744d88424aea2'), 'ntwin32/secure_transport/sspi_stream.c': (16139, '873407d0cb80072957d6dacb1c2b4ba0c96eb9cd3b81ab93159c4668610c8ac1'), 'ntwin32/secure_transport/sspi_stream.h': (5600, '87c9038c2a5411a63b6e9cb942f1d6da04f7aaded296933357d5fdfad02b79e2'), 'ntwin32/secure_transport/transport.c': (13450, '353556e66a46c807480436015e1f85c0f80e93988d0d3e581cef4aa9d386b604'), 'ntwin32/secure_transport/transport.h': (3792, '7f3f364ab97fd58d94c03f80432a94b99c0ad28b71b48bc4d0ee4920e3191cda'), 'ntwin32/secure_transport/user_config.h': (1635, '578949f773d5189b149804013880786b2b258c1837fa32d4e9a117031ca31ab6')}
 SUPPORT = {'benchmarks/win98se-ko-oem-native-exports-v1.json': (1866608, '3854198a9b2bf9f54fe0383330d09ed2ea3d0d510c3d7ba24eb13426e37b4f0d'), 'ntwin32/secure_transport/i486_gate_test.py': (5194, '6e90e48f6f690efd29d2db7035478589bca4f140f3c28f05960c9bd0b5a4af69'), 'ntwin32/legacy_provider_bridge/pe_link_script_6970.py': (26070, '9a98336d9c5a0bc417ed816454d3188e79dc4cf326a52bfabad73df8c903b55b'), 'ntwin32/legacy_provider_bridge/build_native_pe32_guarded_6970.py': (76927, 'b7d627c71076b6cbdb1e65d896ab798e4fe3688067ef7b0a1774243d2c3010d9'), 'ntwin32/legacy_provider_bridge/test_native_sspi_6970.py': (41247, '1b52856e537b298ea253d564754afefc35eb340bd7f7090fc1b30786bfa4f44e')}
 NEW_HELPERS = ('native_tls_resources_6970.py', 'i486_stream_6970.py',
-               'native_tls_quiescent_controls_6970.py', 'native_tls_pidfd_controls_6970.py')
+               'native_tls_quiescent_controls_6970.py', 'native_tls_pidfd_controls_6970.py',
+               'native_tls_stale_order_controls_6970.py')
 FALSE_FLAGS = ('native_execution_verified', 'windows98_integration_verified',
                'network_execution_verified', 'credential_execution_verified',
                'os_tls_provider_verified', 'os_registration_verified',
@@ -599,6 +600,320 @@ def require_pidfd_controls(report, controls, guard, resources, source_pins, tool
             and guard.capture_bytes==offsets['capture']+prep_capture+captured<=resources.CAPTURE_LIMIT
             and guard.decoder_bytes==offsets['decoder']<=resources.DECODER_LIMIT
             and sum(pin['bytes'] for pin in pins.values())<=8*1024**2, 'actual fixture/shared pool bounds differ')
+    return pins
+
+
+def require_stale_order_controls(report, controls, guard, resources, source_pins, fixture, offsets):
+    """Independently read two closed epochs and their actual numeric evidence."""
+    def require(condition, message):
+        if not condition:
+            raise ValueError('stale-order controls: ' + message)
+
+    def natural(value):
+        return type(value) is int and value >= 0
+
+    def duration(value, limit):
+        return type(value) in (int, float) and 0 <= value <= limit
+
+    def canonical(value):
+        raw = json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
+        require(len(raw) <= 16384, 'numeric diagnostic byte bound')
+        return raw
+
+    def token(row):
+        return [row[key] for key in ('pid','startticks','pgrp','session','uid')]
+
+    def snapshot(value, count, leader_pid=None, transitional=False):
+        require(isinstance(value,dict) and set(value)=={'leader','members','tasks','stable'}
+                and value.get('stable') is True
+                and isinstance(value.get('leader'),dict)
+                and isinstance(value.get('members'),list) and isinstance(value.get('tasks'),list)
+                and len(value['members'])==len(value['tasks'])==count,
+                'complete stable single-thread fixture snapshot required')
+        members={row.get('pid'):row for row in value['members'] if isinstance(row,dict)}
+        leader=value['leader']
+        require(len(members)==count and leader.get('pid') in members
+                and set(leader)==set(members[leader['pid']])
+                and all(item==members[leader['pid']].get(key) for key,item in leader.items()
+                        if not transitional or key!='state')
+                and (not transitional or leader.get('state') in ('S','R','T'))
+                and (leader_pid is None or leader['pid']==leader_pid), 'snapshot leader/member identity differs')
+        for row in members.values():
+            require(set(row)=={'pid','ppid','startticks','pgrp','session','uid','state'}
+                    and all(natural(row[key]) for key in ('pid','ppid','startticks','pgrp','session','uid'))
+                    and row['pid']>0 and row['pgrp']==row['session']==leader['pid']
+                    and row['uid']==os.getuid()
+                    and (not transitional or row['state'] in ('S','R','T')),
+                    'actual process row identity differs')
+        require({row.get('pid') for row in value['tasks']}==set(members)
+                and all(set(row)==set(members[row['pid']])|{'tid'} and row.get('tid')==row['pid']
+                        and all(row[key]==item for key,item in members[row['pid']].items()
+                                if not transitional or key!='state')
+                        and (not transitional or row.get('state') in ('S','R','T'))
+                        for row in value['tasks']), 'actual process/task rows differ')
+        return members
+
+    names=('positive-stale-order-reaped-child','negative-stale-order-live-omission')
+    require(isinstance(report,dict) and report.get('schema')=='native-tls-stale-order-controls-6970-v1'
+            and report.get('result')=='PASS_STALE_ORDER_CONTROLS_ONLY'
+            and type(report.get('completed')) is int and report['completed']==2
+            and type(report.get('failures')) is int and report['failures']==0
+            and controls.CONTROL_NAMES==names, 'exact two-case completed PASS required')
+    cases=report.get('cases')
+    require(isinstance(cases,list) and len(cases)==2 and tuple(row.get('name') for row in cases)==names,
+            'exact ordered cases required')
+    for key in ('resource_source_before_after_equal','control_source_before_after_equal',
+                'fixture_source_before_after_equal','fixture_before_after_equal','actual_controls_execution_verified',
+                'case_pool_charges_exclude_parent_prepare_commands',
+                'schedule_gap_is_not_production_exit_cause_attestation',
+                'omission_is_not_actual_process_group_escape_attestation'):
+        require(report.get(key) is True, 'required envelope absent: '+key)
+    for key in ('parent_commands_added','original_production_and_support_sources_changed',
+                'expected_negative_commands_added_to_parent','host_elf_object_binary_transfer_authorized',
+                'tool_dynamic_runtime_closure_verified','escaped_writers_excluded_verified',
+                'continuous_group_stop_verified','filesystem_quota_verified','native_execution_verified',
+                'windows98_integration_verified','tls_execution_verified'):
+        require(report.get(key) is False, 'unsupported scope claim: '+key)
+    require(report.get('resource_source')==source_pins['ntwin32/secure_transport/native_tls_resources_6970.py']
+            and report.get('control_source')==source_pins['ntwin32/secure_transport/native_tls_stale_order_controls_6970.py']
+            and report.get('fixture_build')==fixture and report.get('source_input_count_delta')==1
+            and report.get('fixture_bytes_limit')==8*1024**2 and report.get('case_timeout_seconds')==5
+            and report.get('total_timeout_seconds')==60 and duration(report.get('elapsed_seconds'),60)
+            and report.get('parent_command_count_before')==report.get('parent_command_count_after')
+                ==len(guard.commands)==offsets['commands'], 'source/fixture/parent-command envelope differs')
+    expected_paths=[guard.tmp/('stale-order-%02d'%i)/name for i in range(2)
+                    for name in ('result.json','control.stdout','control.stderr')]
+    records=report.get('proof_files')
+    require(isinstance(records,list) and len(records)==6
+            and [row.get('path') for row in records]==[str(path) for path in expected_paths],
+            'exact six ordered text proof files required')
+    pins,raws,inodes={},{},set()
+    for record,path in zip(records,expected_paths):
+        require(set(record)=={'path','relative_path','bytes','sha256','identity'}
+                and record['relative_path']==str(path.relative_to(guard.output)), 'exact text proof envelope differs')
+        raw,pin=regular(path,resources.RECEIPT_LIMIT)
+        require(guard.pin(path,maximum=resources.RECEIPT_LIMIT)==pin
+                =={key:record[key] for key in ('bytes','sha256','identity')}
+                and tuple(pin['identity'][:2]) not in inodes, 'held proof bytes/identity differ or duplicate')
+        inodes.add(tuple(pin['identity'][:2]))
+        pins[str(path)],raws[str(path)]=pin,raw
+    captured=0
+    for index,row in enumerate(cases):
+        positive=index==0
+        reason=None if positive else 'owned stale stop candidate remains present'
+        epoch='PASS_CONTROL_CHILD' if positive else 'FAIL'
+        require(row.get('result')=='PASS' and row.get('executed') is True
+                and row.get('expected_child_epoch')==row.get('child_epoch')==epoch
+                and row.get('injected_fault') is (not positive) and row.get('stop_request_expected') is True
+                and row.get('expected_negative_reason')==reason
+                and row.get('expected_command_count')==row.get('command_count')==1
+                and duration(row.get('elapsed_seconds'),5), 'actual case classification/wall bound differs')
+        require(all(natural(row.get(key)) for key in
+                    ('capture_pool_offset','decoder_pool_offset','capture_pool_delta','decoder_pool_delta'))
+                and row['capture_pool_offset']==offsets['capture']+captured
+                and row['decoder_pool_offset']==offsets['decoder'] and row['decoder_pool_delta']==0,
+                'actual inherited pool continuity differs')
+        observed=row.get('observation')
+        require(isinstance(observed,dict) and observed.get('observed_fork_ppid_ready') is True
+                and observed.get('ready_before_any_stop') is True
+                and observed.get('stale_child_stop_requests')==observed.get('wrong_target_stop_requests')
+                    ==observed.get('early_continue_requests')==0
+                and observed.get('injected_fault_count')==int(not positive)
+                and observed.get('gap_marker_observed_before_stop') is False
+                and observed.get('dedicated_numeric_process_read_modified') is False
+                and observed.get('resource_counter_or_signal_result_modified') is False
+                and observed.get('schedule_gap_is_not_production_exit_cause_attestation') is True
+                and observed.get('omission_is_not_actual_process_group_escape_attestation') is True
+                and duration(observed.get('readiness_wait_seconds'),1), 'actual observations/scope differ')
+        ready=observed.get('readiness_snapshot')
+        members=snapshot(ready,2)
+        leader=ready['leader']
+        children=[item for item in members.values() if item['pid']!=leader['pid'] and item['ppid']==leader['pid']]
+        require(len(children)==1 and all(item['state'] in ('S','R') for item in members.values())
+                and observed.get('readiness_sha256')==digest(canonical(ready)), 'actual fork S/R readiness differs')
+        scheduled=children[0]
+        inputs=observed.get('reconciliation_inputs')
+        require(observed.get('reconciliation_calls')==1 and isinstance(inputs,list) and len(inputs)==1
+                and inputs[0].get('scheduled_row')==scheduled, 'real reconciliation call binding differs')
+        fresh=inputs[0].get('fresh_snapshot')
+        # The pre-count process scan is sequential. Accepted STOP may take
+        # effect between its member/task/top-level leader reads. Preserve the
+        # actual states here; the later two all-T/Z scans remain mandatory.
+        fresh_members=snapshot(fresh,1,leader['pid'],transitional=positive)
+        require(token(fresh['leader'])==token(leader)
+                and fresh['leader']['state'] in (('S','R','T') if positive else ('T',))
+                and scheduled['pid'] not in fresh_members
+                and inputs[0].get('fresh_snapshot_sha256')==digest(canonical(fresh)), 'actual fresh missing-child snapshot differs')
+        child_path=expected_paths[index*3]
+        pin=pins[str(child_path)]
+        require(row.get('child_receipt_path')==str(child_path) and row.get('child_receipt_sha256')==pin['sha256']
+                and row.get('child_receipt_bytes')==pin['bytes'], 'closed child receipt pin differs')
+        child=json.loads(raws[str(child_path)])
+        require(child.get('schema')=='native-tls-stale-order-control-child-6970-v1'
+                and child.get('control')==names[index] and child.get('result')==epoch
+                and child.get('expected_negative') is (not positive) and child.get('injected_fault') is (not positive)
+                and child.get('stop_request_expected') is True and child.get('receipt_accounting_verified') is True
+                and child.get('command_count')==1 and child.get('observed_control_error') is None
+                and child.get('actual_control_observation')==observed
+                and child.get('expected_fault_observed')==row.get('observed_error')
+                and child.get('fixture_elf_sha256')==fixture['elf']['sha256']
+                and child.get('inherited_parent_capture_bytes')==row['capture_pool_offset']
+                and child.get('inherited_parent_decoder_bytes')==row['decoder_pool_offset']
+                and child.get('reserve_bytes')==resources.RESERVE and child.get('output_limit_bytes')==resources.LIMIT
+                and child.get('receipt_limit_bytes')==resources.RECEIPT_LIMIT
+                and child.get('capture_limit_bytes_aggregate')==resources.CAPTURE_LIMIT
+                and child.get('command_records_retained') is True
+                and natural(child.get('minimum_observed_free_bytes'))
+                and child['minimum_observed_free_bytes']>=resources.RESERVE
+                and natural(child.get('available_at_receipt_bytes'))
+                and child['available_at_receipt_bytes']>=resources.RESERVE+resources.LIMIT
+                and child.get('final_output_bytes')==sum(pins[str(path)]['bytes'] for path in expected_paths[index*3:index*3+3])
+                    <=resources.LIMIT
+                and child.get('output_bytes_before_receipt')==child['final_output_bytes']-pin['bytes']
+                and all(child.get(key) is False for key in
+                    ('native_execution_verified','windows98_integration_verified','tls_execution_verified')),
+                'closed child identity/resource/scope differs')
+        model=child.get('resource_model')
+        require(isinstance(model,dict) and model.get('profile_command_timeout_limit_seconds')==360
+                and model.get('group_stop_confirmation_limit_seconds')==1
+                and model.get('owned_group_quiescent_observations_required') is True
+                and model.get('command_wall_time_includes_group_pauses') is True
+                and all(model.get(key) is False for key in
+                    ('PPID_is_birth_token','outside_group_parents_signalled','numeric_PID_STOP_fallback',
+                     'continuous_group_stop_verified','unmanaged_or_escaped_writers_excluded_verified',
+                     'pending_asynchronous_kernel_writes_excluded_verified','filesystem_quota_verified',
+                     'continuous_minimum_free_verified','all_transient_or_unlinked_file_peaks_observed',
+                     'implicit_backend_runtime_attestation_verified')), 'unchanged closed resource model required')
+        strings=child.get('command_argv_string_table')
+        require(child.get('command_argv_encoding')=='lossless-string-table-v1'
+                and isinstance(strings,list) and len(strings)<=8192 and len(set(strings))==len(strings)
+                and all(isinstance(value,str) for value in strings) and sum(len(value.encode()) for value in strings)<=256*1024
+                and isinstance(child.get('commands'),list) and len(child['commands'])==1
+                and isinstance(row.get('commands'),list) and len(row['commands'])==1
+                and isinstance(row.get('capture_payloads'),list) and len(row['capture_payloads'])==1,
+                'bounded actual command envelope required')
+        actual,command,capture=child['commands'][0],row['commands'][0],row['capture_payloads'][0]
+        refs=actual.get('argv_refs')
+        require(isinstance(refs,list) and all(natural(ref) and ref<len(strings) for ref in refs), 'invalid actual argv refs')
+        argv=[strings[ref] for ref in refs]
+        require(argv==[fixture['elf']['path'],'reap' if positive else 'reap-live']
+                and command.get('label')=='control' and command.get('argv_sha256')==digest(json.dumps(argv,separators=(',',':')).encode())
+                and all(actual.get(key)==value for key,value in command.items() if key!='argv_sha256')
+                and command.get('reaped') is True and command.get('raw_stdout_stream') is False,
+                'actual raw-fork invocation/owned cleanup differs')
+        q=command.get('quiescence')
+        require(isinstance(q,dict) and q.get('stop_signal_model')=='pidfd-process-parent-first-flags0-v1'
+                and q.get('observation_row_schema')=='owned-process-task-ppid-v2'
+                and natural(observed.get('stop_requests')) and observed['stop_requests']>0
+                and q.get('pidfd_stop_requests')==observed['stop_requests']
+                and q.get('stale_schedule_absence_checks')==1 and q.get('stale_schedule_birth_refusals')==0
+                and all(q.get(key) is False for key in
+                    ('escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified')),
+                'actual leader pidfd STOP/reconciliation model differs')
+        samples=observed.get('signal_samples')
+        require(isinstance(samples,list) and len(samples)==min(observed['stop_requests'],8)
+                and 1<=len(samples)<=8 and all(sample=={'pid':leader['pid'],'flags':0,
+                    'accepted_process_targeted_request':True} for sample in samples)
+                and observed.get('signal_samples_truncated') is (observed['stop_requests']>8)
+                and q.get('stop_requests')==observed['stop_requests']+observed.get('all_zombie_group_stop_requests',-1),
+                'bounded actual leader signal observations differ')
+        diagnostic=q.get('last_stale_schedule_observation')
+        require(isinstance(diagnostic,dict) and len(canonical(diagnostic))<=16384
+                and diagnostic.get('schema')=='owned-stale-stop-schedule-observation-6970-v1'
+                and diagnostic.get('scope')=='last_completed_stale_schedule_numeric_metadata_only'
+                and diagnostic.get('scheduled_row')==scheduled and diagnostic.get('scheduled_birth_token')==token(scheduled)
+                and diagnostic.get('fresh_snapshot_sha256')==digest(canonical(fresh))
+                and diagnostic.get('fresh_snapshot_stable') is True
+                and diagnostic.get('fresh_member_count')==diagnostic.get('fresh_task_count')==1
+                and diagnostic.get('snapshot_temporal_scope')=='completed_fresh_group_before_numeric_presence_read'
+                and diagnostic.get('numeric_process_read_performed') is True
+                and diagnostic.get('numeric_process_read_scope')=='held_proc_fd_numeric_process_tasks_false'
+                and diagnostic.get('diagnostic_row_limit')==8 and diagnostic.get('diagnostic_byte_limit')==16384
+                and diagnostic.get('sampled_row_count')==(1 if positive else 2)
+                and all(diagnostic.get(key) is False for key in
+                    ('candidate_STOP_sent_during_reconciliation','complete_recheck_history_retained','exit_verified',
+                     'reap_verified','historical_escape_cause_verified','producer_cause_verified','kernel_cause_verified',
+                     'new_proc_read_performed_for_diagnostic')), 'bounded real numeric reconciliation diagnostic differs')
+        began,at,deadline=(diagnostic.get(key) for key in
+                          ('pause_started_at_monotonic','observed_at_monotonic','pause_deadline_monotonic'))
+        require(all(type(value) in (int,float) for value in (began,at,deadline))
+                and 0<=began<=at<=deadline and deadline-began<=1
+                and type(diagnostic.get('command_deadline_monotonic')) in (int,float)
+                and deadline<=diagnostic['command_deadline_monotonic']
+                and natural(diagnostic.get('pause_attempt')) and diagnostic['pause_attempt']>0
+                and natural(diagnostic.get('pause_iteration')) and diagnostic['pause_iteration']>0
+                and natural(diagnostic.get('stop_requests_before_reconciliation'))
+                and diagnostic['stop_requests_before_reconciliation']>0, 'original absolute one-second deadline differs')
+        if positive:
+            require(command.get('returncode')==0 and command.get('aborted') is None and row.get('observed_error') is None
+                    and child.get('resource_failure') is None
+                    and observed.get('paused_scans',0)>0 and q.get('verified_pauses',0)>0 and q.get('continue_requests',0)>0
+                    and q.get('failure_stop_retained_until_owned_kill') is False
+                    and (command.get('group_kill')=='REQUESTED_BEFORE_REAP'
+                         or command.get('group_kill')=='NO_SUCH_GROUP_BEFORE_REAP'
+                         and q.get('stop_no_live_group_observations',0)>0 and observed.get('all_zombie_group_stop_requests',0)>0)
+                    and observed.get('scheduling_gap_exercised') is True and observed.get('gap_child_absence_observed') is True
+                    and duration(observed.get('gap_wait_seconds'),1)
+                    and observed.get('reap_marker_verified_in_final_physical_capture') is True
+                    and (observed.get('gap_absence_exception_class'),observed.get('gap_absence_errno'))
+                        in (('FileNotFoundError',2),('ProcessLookupError',3))
+                    and q.get('confirmed_nonleader_proc_absences')==1 and q.get('stale_schedule_completed_rescans',0)>0
+                    and q.get('stale_schedule_live_refusals')==0
+                    and diagnostic.get('classification')=='CONFIRMED_NONLEADER_PROC_ABSENCE'
+                    and diagnostic.get('process_absence_observed') is True and diagnostic.get('current_row') is None
+                    and (diagnostic.get('absence_exception_class'),diagnostic.get('absence_errno'))
+                        in (('FileNotFoundError',2),('ProcessLookupError',3)), 'actual positive absence/rescan/count/CONT differs')
+            survivor=observed.get('gap_surviving_leader_row')
+            require(isinstance(survivor,dict) and token(survivor)==token(leader) and survivor.get('state') in ('S','R')
+                    and observed.get('omitted_child_pid') is None and observed.get('omission_actual_snapshot') is None
+                    and observed.get('omission_returned_snapshot') is None, 'positive gap leader/injection differs')
+        else:
+            require(command.get('returncode')==-9 and command.get('group_kill')=='REQUESTED_BEFORE_REAP'
+                    and isinstance(child.get('resource_failure'),str) and reason in child['resource_failure']
+                    and isinstance(command.get('aborted'),str) and reason in command['aborted']
+                    and isinstance(row.get('observed_error'),str) and reason in row['observed_error']
+                    and q.get('failure_stop_retained_until_owned_kill') is True
+                    and q.get('verified_pauses')==q.get('continue_requests')==q.get('confirmed_nonleader_proc_absences')
+                        ==q.get('stale_schedule_completed_rescans')==0 and q.get('stale_schedule_live_refusals')==1
+                    and observed.get('scheduling_gap_exercised') is False and observed.get('gap_child_absence_observed') is False
+                    and observed.get('reap_marker_verified_in_final_physical_capture') is False
+                    and diagnostic.get('classification')=='REFUSED_STILL_PRESENT'
+                    and diagnostic.get('process_absence_observed') is False
+                    and diagnostic.get('absence_exception_class') is None and diagnostic.get('absence_errno') is None,
+                    'actual live omission did not refuse/hold STOP/kill/reap')
+            before=observed.get('omission_actual_snapshot')
+            present=snapshot(before,2,leader['pid'])
+            returned={**before,'members':[item for item in before['members'] if item['pid']!=scheduled['pid']],
+                      'tasks':[item for item in before['tasks'] if item['pid']!=scheduled['pid']]}
+            current=diagnostic.get('current_row')
+            require(present[leader['pid']]['state']=='T' and token(present[scheduled['pid']])==token(scheduled)
+                    and present[scheduled['pid']]['state'] in ('S','R')
+                    and observed.get('omitted_child_pid')==scheduled['pid']
+                    and observed.get('omission_actual_snapshot_sha256')==digest(canonical(before))
+                    and observed.get('omission_returned_snapshot')==returned==fresh
+                    and observed.get('omission_returned_snapshot_sha256')==digest(canonical(returned))
+                    and isinstance(current,dict) and token(current)==token(scheduled)
+                    and current.get('ppid')==leader['pid'] and current.get('state') in ('S','R'),
+                    'real live child, declared one-boundary omission and numeric refusal differ')
+        physical=0
+        for stream in ('stdout','stderr'):
+            data=raws[str(child_path.parent/('control.'+stream))]
+            expected=b'REAP_OK\n' if positive and stream=='stdout' else b''
+            require(data==expected and capture.get(stream+'_hex')==data.hex()
+                    and command.get('captured_sha256',{}).get(stream)==digest(data)
+                    and command.get('full_'+stream+'_sha256')==digest(data)
+                    and command.get('full_'+stream+'_bytes')==len(data), 'actual complete physical capture differs')
+            physical+=len(data)
+        require(physical==command.get('captured_bytes')==row['capture_pool_delta']==child.get('control_capture_pool_delta')
+                and child.get('control_decoder_pool_delta')==0
+                and child.get('captured_normal_bytes')==row['capture_pool_offset']+physical
+                and child.get('decoder_observed_bytes')==offsets['decoder'], 'closed physical inherited pool charge differs')
+        captured+=physical
+    require(captured==report.get('capture_bytes_charged_to_parent')==report.get('capture_payload_bytes')==8
+            and report.get('raw_bytes_charged_to_parent')==0
+            and guard.capture_bytes==offsets['capture']+captured<=resources.CAPTURE_LIMIT
+            and guard.decoder_bytes==offsets['decoder']<=resources.DECODER_LIMIT
+            and sum(pin['bytes'] for pin in pins.values())<=8*1024**2, 'actual combined pool/fixture bounds differ')
     return pins
 
 
@@ -1314,6 +1629,10 @@ def build(output, prep, expected_preparation_sha):
         pidfd_controls = load(ROOT / pidfd_name,
             (source_pins[pidfd_name]['bytes'], source_pins[pidfd_name]['sha256']),
             'native_tls_pidfd_controls_frozen', guard)
+        stale_name = 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py'
+        stale_controls = load(ROOT / stale_name,
+            (source_pins[stale_name]['bytes'], source_pins[stale_name]['sha256']),
+            'native_tls_stale_order_controls_frozen', guard)
         guard.check()
         receipt['stream_controls'] = stream.run_controls(gate)
         receipt['resource_control_plan']=resources.hosted_control_plan()
@@ -1422,6 +1741,12 @@ def build(output, prep, expected_preparation_sha):
         pidfd_pins = require_pidfd_controls(receipt['pidfd_controls'], pidfd_controls, guard,
             resources, source_pins, {'as':(native_as,tools[native_as]), 'ld':(native_ld,tools[native_ld])},
             pidfd_offsets)
+        stale_offsets = {'commands':len(guard.commands), 'capture':guard.capture_bytes,
+                         'decoder':guard.decoder_bytes}
+        receipt['stale_order_controls'] = stale_controls.run_controls(guard, resources,
+            receipt['pidfd_controls']['fixture_build'])
+        stale_pins = require_stale_order_controls(receipt['stale_order_controls'], stale_controls,
+            guard, resources, source_pins, receipt['pidfd_controls']['fixture_build'], stale_offsets)
         # Original in-memory ISA methods run through the existing exact-byte loader.
         r = guard.run([python, '-B', '-c', bridge.I486_CONTROL_CHILD,
                        str(HERE / 'i486_gate.py'), PRODUCTION[gate_name][1],
@@ -1844,6 +2169,10 @@ def build(output, prep, expected_preparation_sha):
             if guard.pin(Path(path),maximum=pidfd_controls.FIXTURE_BYTES_LIMIT)!=pin:
                 raise ValueError('actual pidfd text proof or metadata-only host fixture changed during build')
         receipt['pidfd_control_proof_files_before_after_equal']=True
+        for path,pin in stale_pins.items():
+            if guard.pin(Path(path),maximum=stale_controls.FIXTURE_BYTES_LIMIT)!=pin:
+                raise ValueError('actual closed stale-order text control proof changed during build')
+        receipt['stale_order_control_proof_files_before_after_equal']=True
         for relative,pin in source_pins.items():
             if regular(ROOT/relative,2*1024**2)[1]!=pin:
                 raise ValueError('original source/helper changed')

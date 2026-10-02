@@ -266,7 +266,7 @@ jobs:
           import hashlib,os,stat,sys,types
           from pathlib import Path
           root=Path.cwd().resolve()
-          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': '1d2e59eea56726f85b75f179d3a4484758a0dfd98e9483068c33dd77bcd14b71', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '7c5e2c615dec28c338ece68c14cf0d6dddfb8d723d01ded62d85036ee423db18', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '2f86d53ec0e5e4e7cf899df9b063b939f30659ac538aa91d720c26852fa897c3'}
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': '54854637dd7b6b5643106657995ba4f5896d3897845206af851bdfdc298f3828', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': 'e1bb9d986a6300360437ed20e413dc291510b2d83820958e048330d0e1c4fa88', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '46149184b734e221f267eed268711dbd94c754ee102256276cdd2cafe6a58071', 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py': '36282f2bdabf25c7cd970e426de1c3a835346c000888cc1761c33a952c012aae'}
           before={}
           identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
           for relative,expected in pins.items():
@@ -334,14 +334,17 @@ jobs:
               print('Actual capture:',p.name)
               print(data.decode('utf-8',errors='replace'),end='')
           retained_control_text=0
-          for key,title in (('quiescent_controls','quiescent'),('pidfd_controls','pidfd')):
+          for key,title in (('quiescent_controls','quiescent'),('pidfd_controls','pidfd'),('stale_order_controls','stale-order')):
               group=receipt.get(key,{})
-              fixture=group.get('fixture_build',{})
+              fixture=group.get('fixture_build',{}) if key=='pidfd_controls' else {}
               fixture_text={fixture[name]['path'] for name in ('source','map') if name in fixture}
               if key=='pidfd_controls':
                   allowed={proof/'tmp'/('pidfd-%02d'%index)/name for index in range(5) for name in ('result.json','control.stdout','control.stderr')}
                   allowed.update((proof/'tmp/pidfd-fixture.S',proof/'tmp/pidfd-fixture.map'))
                   assert fixture_text<=set(map(str,allowed))
+              elif key=='stale_order_controls':
+                  allowed={proof/'tmp'/('stale-order-%02d'%index)/name for index in range(2) for name in ('result.json','control.stdout','control.stderr')}
+                  assert not fixture_text
               else:
                   allowed={proof/'tmp'/('quiescent-%02d'%index)/name for index in range(10) for name in (('result.json','control.stdout','control.stderr') if index<8 else ('result.json',))}
               seen=set()
@@ -350,7 +353,7 @@ jobs:
                   assert not relative.is_absolute() and '..' not in relative.parts
                   assert p==proof/relative and p.is_relative_to(proof/'tmp') and not any(c in str(relative) for c in '\r\n')
                   child_text=p.name in ('result.json','control.stdout','control.stderr')
-                  if key=='pidfd_controls':
+                  if key in ('pidfd_controls','stale_order_controls'):
                       assert child_text or str(p) in fixture_text
                       assert p.suffix not in ('.o','.ELF')
                   elif not child_text:continue
@@ -359,7 +362,7 @@ jobs:
                   data=read(p,524288,expected);retained_control_text+=len(data);assert retained_control_text<=524288
                   print('Actual '+title+' retained file:',str(relative),'bytes='+str(len(data)),'sha256='+hashlib.sha256(data).hexdigest())
                   print(data.decode('utf-8'),end='')
-              if group.get('result') in ('PASS_QUIESCENT_GUARD_CONTROLS_ONLY','PASS_PIDFD_VFORK_CONTROLS_ONLY'):assert seen==allowed
+              if group.get('result') in ('PASS_QUIESCENT_GUARD_CONTROLS_ONLY','PASS_PIDFD_VFORK_CONTROLS_ONLY','PASS_STALE_ORDER_CONTROLS_ONLY'):assert seen==allowed
           retained_ninja_text=0
           for name in ('build.ninja','CMakeFiles/rules.ninja'):
               p=proof/'cmake'/name
@@ -486,6 +489,26 @@ jobs:
               path=Path(item['path']);assert path==proof/item['relative_path'] and path not in selected
               pin={k:item[k] for k in ('bytes','sha256','identity')}
               assert read(path,524288)[1]==pin;selected[path]=pin
+          stale=x['stale_order_controls']
+          stale_names=('positive-stale-order-reaped-child','negative-stale-order-live-omission')
+          assert stale['schema']=='native-tls-stale-order-controls-6970-v1' and stale['result']=='PASS_STALE_ORDER_CONTROLS_ONLY'
+          assert stale['completed']==2 and stale['failures']==0 and [case['name'] for case in stale['cases']]==list(stale_names)
+          assert stale['case_timeout_seconds']==5 and stale['total_timeout_seconds']==60 and 0<=stale['elapsed_seconds']<=60
+          assert stale['fixture_bytes_limit']==8*1024**2 and stale['fixture_build']==fixture
+          for key in ('actual_controls_execution_verified','resource_source_before_after_equal','control_source_before_after_equal','fixture_source_before_after_equal','fixture_before_after_equal'):assert stale[key] is True
+          for key in ('expected_negative_commands_added_to_parent','host_elf_object_binary_transfer_authorized','tool_dynamic_runtime_closure_verified','escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified','native_execution_verified','windows98_integration_verified','tls_execution_verified'):assert stale[key] is False
+          assert stale['source_input_count_delta']==1 and stale['original_production_and_support_sources_changed'] is False
+          assert stale['case_pool_charges_exclude_parent_prepare_commands'] is True
+          assert stale['schedule_gap_is_not_production_exit_cause_attestation'] is True and stale['omission_is_not_actual_process_group_escape_attestation'] is True
+          assert stale['parent_commands_added'] is False
+          assert stale['parent_command_count_before']==stale['parent_command_count_after']==max(fixture['command_indexes'])+1
+          assert x['stale_order_control_proof_files_before_after_equal'] is True
+          stale_paths={proof/'tmp'/('stale-order-%02d'%index)/name for index in range(2) for name in ('result.json','control.stdout','control.stderr')}
+          assert len(stale['proof_files'])==6 and {Path(item['path']) for item in stale['proof_files']}==stale_paths
+          for item in stale['proof_files']:
+              path=Path(item['path']);assert path==proof/item['relative_path'] and path not in selected
+              pin={k:item[k] for k in ('bytes','sha256','identity')}
+              assert read(path,524288)[1]==pin;selected[path]=pin
           excluded_fixture_binaries={fixture_paths['object'],fixture_paths['elf']}
           assert not excluded_fixture_binaries&{proof/name for name in x['compiled_outputs']}
           for name,pin in x['compiled_outputs'].items():selected[proof/name]=pin
@@ -498,9 +521,11 @@ jobs:
           selected[proof/'cmake/compile_commands.json']=x['compile_commands']
           selected[Path(x['direct_system_CMake_inputs']['path'])]=x['direct_system_CMake_inputs']['manifest']
           for relative,pin in x['source_inputs_before'].items():selected[root/relative]=pin
-          assert len(x['source_inputs_before'])==30 and 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py' in x['source_inputs_before']
+          assert len(x['source_inputs_before'])==31 and 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py' in x['source_inputs_before'] and 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py' in x['source_inputs_before']
           assert pidfd['resource_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_resources_6970.py']
           assert pidfd['control_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_pidfd_controls_6970.py']
+          assert stale['resource_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_resources_6970.py']
+          assert stale['control_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_stale_order_controls_6970.py']
           for path,pin in x['source_copies_before'].items():selected[Path(path)]=pin
           selected[root/'LICENSE']=read(root/'LICENSE',1048576)[1]
           upstream=json.loads(read(prep/'upstream-preparation.json',2097152)[0])
@@ -516,7 +541,7 @@ jobs:
                   assert pin['sha256']==c['captured_sha256'][stream]
                   capture_total+=len(data);selected[path]=pin
           control_capture_total=control_raw_total=0
-          assert len(controls['cases'])==10 and len(pidfd['cases'])==5
+          assert len(controls['cases'])==10 and len(pidfd['cases'])==5 and len(stale['cases'])==2
           old_last=controls['cases'][-1]
           old_capture_end=old_last['capture_pool_offset']+old_last['capture_pool_delta']
           old_decoder_end=old_last['decoder_pool_offset']+old_last['decoder_pool_delta']
@@ -525,7 +550,10 @@ jobs:
           assert fixture['prepare_capture_pool_delta']==prep_capture and fixture['prepare_decoder_pool_delta']==0
           assert fixture['capture_pool_after_prepare']==old_capture_end+prep_capture and fixture['decoder_pool_after_prepare']==old_decoder_end
           assert pidfd['cases'][0]['capture_pool_offset']==old_capture_end+prep_capture and pidfd['cases'][0]['decoder_pool_offset']==old_decoder_end
-          for group in (controls,pidfd):
+          pidfd_last=pidfd['cases'][-1]
+          assert stale['cases'][0]['capture_pool_offset']==pidfd_last['capture_pool_offset']+pidfd_last['capture_pool_delta']
+          assert stale['cases'][0]['decoder_pool_offset']==pidfd_last['decoder_pool_offset']+pidfd_last['decoder_pool_delta']
+          for group in (controls,pidfd,stale):
               previous_capture=previous_decoder=None
               group_capture_total=group_raw_total=0
               for case_index,case in enumerate(group['cases']):
@@ -571,6 +599,80 @@ jobs:
                       else:
                           assert leader['state']=='D';blocking=leader
                       assert sum(row['pid']!=blocking['pid'] and row['ppid']==blocking['pid'] and row['state'] in ('S','R') for row in members)==1
+                  elif group is stale:
+                      assert child_path==proof/'tmp'/('stale-order-%02d'%case_index)/'result.json'
+                      assert child['schema']=='native-tls-stale-order-control-child-6970-v1'
+                      assert len(data)==case['child_receipt_bytes']
+                      assert child['reserve_bytes']==reserve and child['output_limit_bytes']==limit and child['receipt_limit_bytes']==1048576 and child['capture_limit_bytes_aggregate']==262144
+                      assert child['minimum_observed_free_bytes']>=reserve and child['available_at_receipt_bytes']>=reserve+limit
+                      assert child['final_output_bytes']==sum(selected[path]['bytes'] for path in stale_paths if path.parent==child_path.parent)<=limit
+                      assert child['output_bytes_before_receipt']==child['final_output_bytes']-len(data)
+                      assert child['command_records_retained'] is True
+                      for key in ('native_execution_verified','windows98_integration_verified','tls_execution_verified'):assert child[key] is False
+                      model=child['resource_model']
+                      assert model['profile_command_timeout_limit_seconds']==360 and model['group_stop_confirmation_limit_seconds']==1
+                      assert model['owned_group_quiescent_observations_required'] is True and model['command_wall_time_includes_group_pauses'] is True
+                      for key in ('PPID_is_birth_token','outside_group_parents_signalled','numeric_PID_STOP_fallback','continuous_group_stop_verified','unmanaged_or_escaped_writers_excluded_verified','pending_asynchronous_kernel_writes_excluded_verified','filesystem_quota_verified','continuous_minimum_free_verified','all_transient_or_unlinked_file_peaks_observed','implicit_backend_runtime_attestation_verified'):assert model[key] is False
+                      assert case['expected_command_count']==1 and child['expected_negative'] is (case_index==1)
+                      assert case['expected_child_epoch']==('PASS_CONTROL_CHILD' if case_index==0 else 'FAIL')
+                      assert case['injected_fault'] is (case_index==1) and case['stop_request_expected'] is True
+                      assert child['injected_fault'] is case['injected_fault'] and child['stop_request_expected'] is True
+                      assert child['fixture_elf_sha256']==fixture['elf']['sha256']
+                      assert child['observed_control_error'] is None and child['expected_fault_observed']==case['observed_error']
+                      assert 0<=case['elapsed_seconds']<=5
+                      observation=case['observation'];assert child['actual_control_observation']==observation
+                      assert observation['observed_fork_ppid_ready'] is True and observation['ready_before_any_stop'] is True
+                      assert observation['gap_marker_observed_before_stop'] is False and observation['reap_marker_verified_in_final_physical_capture'] is (case_index==0)
+                      assert observation['dedicated_numeric_process_read_modified'] is False and observation['resource_counter_or_signal_result_modified'] is False
+                      assert observation['schedule_gap_is_not_production_exit_cause_attestation'] is True and observation['omission_is_not_actual_process_group_escape_attestation'] is True
+                      assert observation['stale_child_stop_requests']==observation['wrong_target_stop_requests']==observation['early_continue_requests']==0
+                      assert observation['injected_fault_count']==case_index and observation['stop_requests']>0
+                      assert 0<=observation['readiness_wait_seconds']<=1
+                      snapshot=observation['readiness_snapshot']
+                      assert set(snapshot)=={'leader','members','tasks','stable'} and snapshot['stable'] is True
+                      assert hashlib.sha256(json.dumps(snapshot,sort_keys=True,separators=(',',':')).encode()).hexdigest()==observation['readiness_sha256']
+                      members,tasks=snapshot['members'],snapshot['tasks'];assert len(members)==len(tasks)==2
+                      by_pid={row['pid']:row for row in members};leader=snapshot['leader']
+                      assert len(by_pid)==2 and leader==by_pid.get(leader['pid'])
+                      for row in members:
+                          assert set(row)=={'pid','ppid','startticks','pgrp','session','uid','state'}
+                          assert all(type(row[key]) is int and row[key]>=0 for key in ('pid','ppid','startticks','pgrp','session','uid'))
+                          assert row['pid']>0 and row['pgrp']==row['session']==leader['pid'] and row['uid']==os.getuid() and row['state'] in ('S','R')
+                      assert {row['pid'] for row in tasks}==set(by_pid)
+                      for row in tasks:
+                          assert set(row)==set(by_pid[row['pid']])|{'tid'} and row['tid']==row['pid']
+                          assert all(row[key]==value for key,value in by_pid[row['pid']].items())
+                      child_pid=next(pid for pid in by_pid if pid!=leader['pid'])
+                      assert by_pid[child_pid]['ppid']==leader['pid']
+                      if case_index==0:
+                          assert observation['scheduling_gap_exercised'] is True and observation['gap_child_absence_observed'] is True
+                          assert 0<=observation['gap_wait_seconds']<=1
+                          assert observation['gap_absence_exception_class'] in ('FileNotFoundError','ProcessLookupError') and type(observation['gap_absence_errno']) is int
+                          assert observation['gap_absence_errno']=={'FileNotFoundError':2,'ProcessLookupError':3}[observation['gap_absence_exception_class']]
+                          surviving=observation['gap_surviving_leader_row']
+                          assert set(surviving)==set(leader) and surviving['state'] in ('S','R')
+                          assert type(surviving['ppid']) is int and surviving['ppid']>=0
+                          for key in ('pid','startticks','pgrp','session','uid'):assert surviving[key]==leader[key]
+                          assert observation['omitted_child_pid'] is None and observation['omission_actual_snapshot'] is None and observation['omission_returned_snapshot'] is None
+                      else:
+                          assert observation['scheduling_gap_exercised'] is False and observation['gap_child_absence_observed'] is False
+                          assert observation['omitted_child_pid']==child_pid
+                          actual_snapshot=observation['omission_actual_snapshot'];returned_snapshot=observation['omission_returned_snapshot']
+                          for key,value in (('omission_actual_snapshot',actual_snapshot),('omission_returned_snapshot',returned_snapshot)):
+                              assert set(value)=={'leader','members','tasks','stable'} and value['stable'] is True
+                              assert hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()==observation[key+'_sha256']
+                          assert len(actual_snapshot['members'])==len(actual_snapshot['tasks'])==2
+                          assert actual_snapshot['leader']['pid']==leader['pid'] and actual_snapshot['leader']['state']=='T'
+                          assert {row['pid'] for row in actual_snapshot['members']}==set(by_pid)
+                          for row in actual_snapshot['members']:
+                              assert set(row)==set(leader) and type(row['ppid']) is int and row['ppid']>=0
+                              for key in ('pid','startticks','pgrp','session','uid'):assert row[key]==by_pid[row['pid']][key]
+                          actual_by_pid={row['pid']:row for row in actual_snapshot['members']}
+                          assert actual_snapshot['leader']==actual_by_pid[leader['pid']] and {row['pid'] for row in actual_snapshot['tasks']}==set(actual_by_pid)
+                          for row in actual_snapshot['tasks']:assert row==dict(actual_by_pid[row['pid']],tid=row['pid'])
+                          actual_child=next(row for row in actual_snapshot['members'] if row['pid']==child_pid)
+                          assert actual_child['ppid']==leader['pid'] and actual_child['state'] in ('S','R')
+                          assert returned_snapshot=={'leader':actual_snapshot['leader'],'members':[row for row in actual_snapshot['members'] if row['pid']!=child_pid],'tasks':[row for row in actual_snapshot['tasks'] if row['pid']!=child_pid],'stable':True}
                   assert child['inherited_parent_capture_bytes']==case['capture_pool_offset']
                   assert child['inherited_parent_decoder_bytes']==case['decoder_pool_offset']
                   if previous_capture is not None:assert case['capture_pool_offset']==previous_capture and case['decoder_pool_offset']==previous_decoder
@@ -594,6 +696,83 @@ jobs:
                           assert case['expected_negative_reason']==reason
                           if reason:assert reason in case['observed_error'] and reason in actual['aborted']
                           else:assert case['observed_error'] is None and observation['paused_scans']>0 and q['verified_pauses']>0 and q['continue_requests']>0
+                      elif group is stale:
+                          assert argv==[str(fixture_paths['elf']),'reap' if case_index==0 else 'reap-live'] and actual['label']=='control' and actual['raw_stdout_stream'] is False
+                          q=actual['quiescence']
+                          assert q['stop_signal_model']=='pidfd-process-parent-first-flags0-v1' and q['observation_row_schema']=='owned-process-task-ppid-v2'
+                          for key in ('escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified'):assert q[key] is False
+                          assert q['stop_requests']>0 and q['pidfd_stop_requests']>0
+                          assert q['pidfd_stop_requests']==observation['stop_requests']
+                          assert q['stop_requests']==observation['stop_requests']+observation['all_zombie_group_stop_requests']
+                          samples=observation['signal_samples'];assert 1<=len(samples)<=8 and type(observation['signal_samples_truncated']) is bool
+                          assert all(sample=={'pid':leader['pid'],'flags':0,'accepted_process_targeted_request':True} for sample in samples)
+                          assert len(samples)==min(observation['stop_requests'],8) and observation['signal_samples_truncated'] is (observation['stop_requests']>8)
+                          assert actual['group_kill']=='REQUESTED_BEFORE_REAP' or (case_index==0 and actual['group_kill']=='NO_SUCH_GROUP_BEFORE_REAP' and q['stop_no_live_group_observations']>0 and observation['all_zombie_group_stop_requests']>0)
+                          inputs=observation['reconciliation_inputs']
+                          assert len(inputs)==observation['reconciliation_calls']==q['stale_schedule_absence_checks']==1 and q['stale_schedule_birth_refusals']==0
+                          for key in ('stale_schedule_absence_checks','confirmed_nonleader_proc_absences','stale_schedule_completed_rescans','stale_schedule_live_refusals','stale_schedule_birth_refusals'):assert type(q[key]) is int and q[key]>=0
+                          diagnostic=q['last_stale_schedule_observation']
+                          assert diagnostic['schema']=='owned-stale-stop-schedule-observation-6970-v1' and diagnostic['scope']=='last_completed_stale_schedule_numeric_metadata_only'
+                          assert diagnostic['classification']==('CONFIRMED_NONLEADER_PROC_ABSENCE' if case_index==0 else 'REFUSED_STILL_PRESENT')
+                          assert diagnostic['scheduled_row']==by_pid[child_pid]
+                          assert diagnostic['scheduled_birth_token']==[by_pid[child_pid][key] for key in ('pid','startticks','pgrp','session','uid')]
+                          assert diagnostic['fresh_snapshot_stable'] is True and diagnostic['numeric_process_read_performed'] is True
+                          assert diagnostic['snapshot_temporal_scope']=='completed_fresh_group_before_numeric_presence_read' and diagnostic['numeric_process_read_scope']=='held_proc_fd_numeric_process_tasks_false'
+                          assert diagnostic['candidate_STOP_sent_during_reconciliation'] is False and diagnostic['new_proc_read_performed_for_diagnostic'] is False
+                          for key in ('complete_recheck_history_retained','exit_verified','reap_verified','historical_escape_cause_verified','producer_cause_verified','kernel_cause_verified'):assert diagnostic[key] is False
+                          assert diagnostic['diagnostic_row_limit']==8 and diagnostic['diagnostic_byte_limit']==16384 and diagnostic['sampled_row_count']==1+case_index
+                          assert len(json.dumps(diagnostic,sort_keys=True,separators=(',',':')).encode())<=16384
+                          assert diagnostic['pause_started_at_monotonic']<=diagnostic['observed_at_monotonic']<=diagnostic['pause_deadline_monotonic']<=diagnostic['pause_started_at_monotonic']+1
+                          assert diagnostic['pause_deadline_monotonic']<=diagnostic['command_deadline_monotonic']
+                          assert type(diagnostic['pause_attempt']) is int and diagnostic['pause_attempt']>0 and type(diagnostic['pause_iteration']) is int and diagnostic['pause_iteration']>0
+                          assert diagnostic['stop_requests_before_reconciliation']>0
+                          matched=[]
+                          for entry in inputs:
+                              scheduled=entry['scheduled_row'];fresh=entry['fresh_snapshot']
+                              assert scheduled==by_pid[child_pid] and set(fresh)=={'leader','members','tasks','stable'} and fresh['stable'] is True
+                              digest=hashlib.sha256(json.dumps(fresh,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+                              assert digest==entry['fresh_snapshot_sha256']
+                              assert all(row['pid']!=child_pid for row in fresh['members']+fresh['tasks'])
+                              assert fresh['leader']['pid']==leader['pid'] and fresh['leader']['state'] in (('S','R','T') if case_index==0 else ('T',))
+                              assert set(fresh['leader'])==set(leader) and type(fresh['leader']['ppid']) is int and fresh['leader']['ppid']>=0
+                              for key in ('pid','startticks','pgrp','session','uid'):assert fresh['leader'][key]==leader[key]
+                              assert len(fresh['members'])==len(fresh['tasks'])==1
+                              if case_index==0:
+                                  # Process, task and final leader stat reads
+                                  # are sequential during accepted STOP delivery.
+                                  # This presence recheck precedes strict counting.
+                                  member,task=fresh['members'][0],fresh['tasks'][0]
+                                  assert set(member)==set(fresh['leader']) and set(task)==set(member)|{'tid'} and task['tid']==leader['pid']
+                                  for row in (member,task):
+                                      assert row['state'] in ('S','R','T')
+                                      for key,value in fresh['leader'].items():
+                                          if key!='state':assert row[key]==value
+                              else:
+                                  assert fresh['members']==[fresh['leader']]
+                                  assert fresh['tasks'][0]==dict(fresh['leader'],tid=leader['pid'])
+                              if digest==diagnostic['fresh_snapshot_sha256']:matched.append(fresh)
+                          assert len(matched)==1 and diagnostic['fresh_member_count']==len(matched[0]['members'])==1 and diagnostic['fresh_task_count']==len(matched[0]['tasks'])==1
+                          reason=None if case_index==0 else 'owned stale stop candidate remains present'
+                          assert case['expected_negative_reason']==reason
+                          if reason:
+                              assert reason in case['observed_error'] and reason in actual['aborted']
+                              assert reason in child['resource_failure'] and bytes.fromhex(payload['stdout_hex'])==bytes.fromhex(payload['stderr_hex'])==b''
+                              assert q['verified_pauses']==q['continue_requests']==0 and q['failure_stop_retained_until_owned_kill'] is True
+                              assert returned_snapshot==matched[0]
+                              assert q['confirmed_nonleader_proc_absences']==q['stale_schedule_completed_rescans']==0 and q['stale_schedule_live_refusals']==1
+                              assert diagnostic['process_absence_observed'] is False and diagnostic['absence_exception_class'] is None and diagnostic['absence_errno'] is None
+                              current_row=diagnostic['current_row'];assert set(current_row)==set(by_pid[child_pid]) and current_row['state'] in ('S','R')
+                              for key in ('pid','startticks','pgrp','session','uid'):assert current_row[key]==by_pid[child_pid][key]
+                              assert current_row['ppid']==leader['pid']
+                          else:
+                              assert case['observed_error'] is None and observation['paused_scans']>0 and q['verified_pauses']>0 and q['continue_requests']>0
+                              assert child['resource_failure'] is None
+                              assert q['failure_stop_retained_until_owned_kill'] is False
+                              assert bytes.fromhex(payload['stdout_hex'])==b'REAP_OK\n' and bytes.fromhex(payload['stderr_hex'])==b''
+                              assert q['confirmed_nonleader_proc_absences']==q['stale_schedule_completed_rescans']==1 and q['stale_schedule_live_refusals']==0
+                              assert diagnostic['process_absence_observed'] is True and diagnostic['current_row'] is None
+                              assert diagnostic['absence_exception_class'] in ('FileNotFoundError','ProcessLookupError') and type(diagnostic['absence_errno']) is int
+                              assert diagnostic['absence_errno']=={'FileNotFoundError':2,'ProcessLookupError':3}[diagnostic['absence_exception_class']]
                       if case['expected_child_epoch']=='FAIL':
                           assert actual['returncode']==-9 and actual['reaped'] is True and actual['group_kill']=='REQUESTED_BEFORE_REAP' and actual['aborted']
                           q=actual['quiescence']
@@ -625,13 +804,13 @@ jobs:
                   group_capture_total+=case_capture;group_raw_total+=case_raw
               assert group_capture_total==group['capture_bytes_charged_to_parent']==group['capture_payload_bytes']<=4096
               assert group_raw_total==group['raw_bytes_charged_to_parent']<=4096
-              if group is pidfd:assert group_raw_total==0
+              if group is pidfd or group is stale:assert group_raw_total==0
               control_capture_total+=group_capture_total;control_raw_total+=group_raw_total
-          assert control_capture_total<=8192 and control_raw_total<=8192
+          assert control_capture_total<=12288 and control_raw_total<=8192
           assert capture_total+control_capture_total==x['captured_normal_bytes']<=262144
           assert not excluded_fixture_binaries&set(selected)
-          retained_child_paths={Path(item['path']) for group in (controls,pidfd) for item in group['proof_files'] if Path(item['path']).name in ('result.json','control.stdout','control.stderr')}
-          assert len(retained_child_paths)==41
+          retained_child_paths={Path(item['path']) for group in (controls,pidfd,stale) for item in group['proof_files'] if Path(item['path']).name in ('result.json','control.stdout','control.stderr')}
+          assert len(retained_child_paths)==47
           assert sum(selected[path]['bytes'] for path in retained_child_paths|{fixture_paths['source'],fixture_paths['map']})<=524288
           entries={}
           for path,pin in sorted(selected.items()):
@@ -653,7 +832,7 @@ jobs:
               'closed_build_receipt':receipt_pin,'original_closed_output_bytes':before,
               'proof_limit_bytes':limit,'maximum_new_manifest_bytes':524288,
               'host_control_compiled_outputs_excluded':sorted(str(path.relative_to(root)) for path in excluded_fixture_binaries),
-              'host_control_binary_transfer_authorized':False,'retained_child_text_count':41,'pidfd_fixture_text_count':2,
+              'host_control_binary_transfer_authorized':False,'retained_child_text_count':47,'pidfd_fixture_text_count':2,
               'source_committed_blobs_independently_queried':False,
               'native_execution_verified':False,'TLS_negotiation_verified':False,'NAS_binary_admission':False}
           data=(json.dumps(manifest,sort_keys=True,separators=(',',':'))+'\n').encode();assert len(data)<=524288 and before+len(data)<=limit

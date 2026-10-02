@@ -160,6 +160,12 @@ class _OwnedGroupObservation:
                           "parent_first_deferrals": 0,
                           "dynamic_root_stop_requests": 0,
                           "initial_pre_stop_snapshots": 0,
+                          "stale_schedule_absence_checks": 0,
+                          "confirmed_nonleader_proc_absences": 0,
+                          "stale_schedule_completed_rescans": 0,
+                          "stale_schedule_live_refusals": 0,
+                          "stale_schedule_birth_refusals": 0,
+                          "last_stale_schedule_observation": None,
                           "filesystem_quota_verified": False}
         try:
             self.proc_fd = os.open("/proc", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -531,6 +537,114 @@ class _OwnedGroupObservation:
         self.check_time()
         return True
 
+    def _record_stale_schedule_observation(self, stale_row, fresh_snapshot,
+                                           classification, *, current_row=None,
+                                           read_performed=False, absence_error=None):
+        """Latest bounded numeric evidence; no new diagnostic proc reads."""
+        try:
+            raw_snapshot = json.dumps(fresh_snapshot, sort_keys=True,
+                                      separators=(",", ":")).encode()
+            absent = classification == "CONFIRMED_NONLEADER_PROC_ABSENCE"
+            diagnostic = {
+                "schema": "owned-stale-stop-schedule-observation-6970-v1",
+                "scope": "last_completed_stale_schedule_numeric_metadata_only",
+                "classification": classification,
+                "scheduled_row": dict(stale_row),
+                "scheduled_birth_token": list(self._token(stale_row)),
+                "current_row": None if current_row is None else dict(current_row),
+                "fresh_snapshot_sha256": hashlib.sha256(raw_snapshot).hexdigest(),
+                "fresh_snapshot_stable": fresh_snapshot["stable"],
+                "fresh_member_count": len(fresh_snapshot["members"]),
+                "fresh_task_count": len(fresh_snapshot["tasks"]),
+                "snapshot_temporal_scope": "completed_fresh_group_before_numeric_presence_read",
+                "numeric_process_read_performed": read_performed,
+                "numeric_process_read_scope": "held_proc_fd_numeric_process_tasks_false",
+                "absence_exception_class": (None if absence_error is None
+                                             else type(absence_error).__name__),
+                "absence_errno": None if absence_error is None else absence_error.errno,
+                "process_absence_observed": absent,
+                "candidate_STOP_sent_during_reconciliation": False,
+                "observed_at_monotonic": time.monotonic(),
+                "pause_started_at_monotonic": self.pause_started,
+                "pause_deadline_monotonic": self.pause_deadline,
+                "command_deadline_monotonic": self.deadline,
+                "pause_attempt": self.telemetry["pause_attempts"],
+                "pause_iteration": self.pause_iteration,
+                "stop_requests_before_reconciliation": self.telemetry["stop_requests"],
+                "sampled_row_count": 1 + int(current_row is not None),
+                "diagnostic_row_limit": GROUP_DIAGNOSTIC_ROW_LIMIT,
+                "diagnostic_byte_limit": GROUP_FAILURE_DIAGNOSTIC_LIMIT,
+                "complete_recheck_history_retained": False,
+                "exit_verified": False, "reap_verified": False,
+                "historical_escape_cause_verified": False,
+                "producer_cause_verified": False, "kernel_cause_verified": False,
+                "new_proc_read_performed_for_diagnostic": False}
+            raw = json.dumps(diagnostic, sort_keys=True, separators=(",", ":")).encode()
+            if (diagnostic["sampled_row_count"] > GROUP_DIAGNOSTIC_ROW_LIMIT
+                    or len(raw) > GROUP_FAILURE_DIAGNOSTIC_LIMIT):
+                self.telemetry["last_stale_schedule_observation"] = {
+                    "scope": "stale_schedule_diagnostic_size_refused",
+                    "complete_diagnostic_sha256": hashlib.sha256(raw).hexdigest(),
+                    "complete_diagnostic_bytes": len(raw),
+                    "diagnostic_byte_limit": GROUP_FAILURE_DIAGNOSTIC_LIMIT,
+                    "process_absence_acceptance_authorized": False,
+                    "exit_verified": False, "reap_verified": False,
+                    "historical_escape_cause_verified": False}
+                return False
+            self.telemetry["last_stale_schedule_observation"] = diagnostic
+            return True
+        except BaseException:
+            # A recording failure cannot authorize skipping a process or
+            # replace the original refusal from a failed presence read.
+            self.telemetry["last_stale_schedule_observation"] = {
+                "scope": "stale_schedule_diagnostic_encoding_refused",
+                "process_absence_acceptance_authorized": False,
+                "exit_verified": False, "reap_verified": False,
+                "historical_escape_cause_verified": False}
+            return False
+
+    def _confirm_absent_schedule_member(self, stale_row, fresh_snapshot):
+        """Reconcile only a missing nonleader using its actual process read."""
+        self.check_time()
+        fresh_snapshot = self._validated(fresh_snapshot)
+        pid = stale_row["pid"]
+        if (pid == self.proc.pid or not fresh_snapshot["stable"]
+                or any(row["pid"] == pid for row in fresh_snapshot["members"])):
+            self._record_stale_schedule_observation(
+                stale_row, fresh_snapshot, "REFUSED_RECHECK_PRECONDITION")
+            raise ResourceFailure("owned stop candidate disappeared from current group")
+        self.telemetry["stale_schedule_absence_checks"] += 1
+        try:
+            # tasks=False is essential: a disappearing task is not proof that
+            # its process is absent. No signal, wait or reap targets this PID.
+            current_row, _, _ = self._read_process(pid, tasks=False)
+        except (FileNotFoundError, ProcessLookupError) as error:
+            expected_errno = 2 if isinstance(error, FileNotFoundError) else 3
+            if error.errno != expected_errno:
+                self._record_stale_schedule_observation(
+                    stale_row, fresh_snapshot, "REFUSED_PROCESS_READ_ERROR",
+                    read_performed=True)
+                raise
+            self.telemetry["confirmed_nonleader_proc_absences"] += 1
+            retained = self._record_stale_schedule_observation(
+                stale_row, fresh_snapshot, "CONFIRMED_NONLEADER_PROC_ABSENCE",
+                read_performed=True, absence_error=error)
+            self.check_time()
+            if not retained:
+                raise ResourceFailure("owned stale stop candidate diagnostic exceeded bound")
+            return True
+        except (OSError, ResourceFailure):
+            self._record_stale_schedule_observation(
+                stale_row, fresh_snapshot, "REFUSED_PROCESS_READ_ERROR",
+                read_performed=True)
+            raise
+        self.telemetry["stale_schedule_live_refusals"] += 1
+        self._record_stale_schedule_observation(
+            stale_row, fresh_snapshot, "REFUSED_STILL_PRESENT",
+            current_row=current_row, read_performed=True)
+        self.check_time()
+        raise ResourceFailure("owned stale stop candidate remains present")
+
     def pause(self):
         self.pause_started = time.monotonic()
         self.pause_deadline = min(self.deadline, self.pause_started + QUIESCENCE_TIMEOUT)
@@ -549,6 +663,7 @@ class _OwnedGroupObservation:
             self.pause_candidate_snapshot = previous
             self.pause_stage = "loop_deadline_check"
             self.check_time()
+            reconciled_absence = False
             if (current["stable"] and all(row["state"] == "Z"
                     for row in current["members"] + current["tasks"])):
                 # Only a complete all-Z snapshot permits the legacy no-live
@@ -574,7 +689,20 @@ class _OwnedGroupObservation:
                     fresh_members, _ = self._forest(fresh)
                     row = fresh_members.get(pid)
                     if row is None:
-                        raise ResourceFailure("owned stop candidate disappeared from current group")
+                        self.pause_stage = "missing_nonleader_numeric_process_recheck"
+                        if self._confirm_absent_schedule_member(members[pid], fresh):
+                            # Never continue this stale schedule or compare a
+                            # later observation to an earlier quiet candidate.
+                            previous = None
+                            self.pause_candidate_snapshot = None
+                            reconciled_absence = True
+                            break
+                    if self._token(row) != self._token(members[pid]):
+                        self.telemetry["stale_schedule_birth_refusals"] += 1
+                        self._record_stale_schedule_observation(
+                            members[pid], fresh, "REFUSED_SCHEDULE_BIRTH_IDENTITY_CHANGE",
+                            current_row=row)
+                        raise ResourceFailure("owned stop schedule birth identity changed")
                     if row["state"] == "Z":
                         continue
                     tasks = [task for task in fresh["tasks"] if task["pid"] == pid]
@@ -586,6 +714,8 @@ class _OwnedGroupObservation:
                         sent.add(token)
             self.pause_stage = "stop_confirmation_snapshot"
             current = self._snapshot()
+            if reconciled_absence:
+                self.telemetry["stale_schedule_completed_rescans"] += 1
             self.pause_stage = "quiet_candidate_comparison"
             self.check_time()
             if self._quiet(current) and current == previous:

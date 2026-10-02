@@ -89,6 +89,16 @@ _start:
     testl %eax,%eax
     jnz .Lstuck
     movq %rbx,%rdi
+    leaq .Lreap_name(%rip),%rsi
+    call .Lequal
+    testl %eax,%eax
+    jnz .Lreap_short
+    movq %rbx,%rdi
+    leaq .Lreap_live_name(%rip),%rsi
+    call .Lequal
+    testl %eax,%eax
+    jnz .Lreap_live
+    movq %rbx,%rdi
     leaq .Lnested_name(%rip),%rsi
     call .Lequal
     testl %eax,%eax
@@ -191,6 +201,57 @@ _start:
     jne .Lfail
     addq $16,%rsp
     ret
+.Lreap_short:
+    xorl %r15d,%r15d
+    jmp .Lreap_parent
+.Lreap_live:
+    movl $1,%r15d
+.Lreap_parent:
+    movl $57,%eax
+    syscall
+    testq %rax,%rax
+    js .Lfail
+    jz .Lreap_child
+    movq %rax,%r14
+    call .Lwait
+    leaq .Lreap_ok(%rip),%rsi
+    movl $.Lreap_ok_end-.Lreap_ok,%edx
+    call .Lwrite
+    xorl %edi,%edi
+    movl $350000000,%esi
+    call .Lbounded_delay
+    jmp .Lexit_ok
+.Lreap_child:
+    xorl %edi,%edi
+    movl $160000000,%esi
+    testl %r15d,%r15d
+    jz .Lreap_child_delay
+    movl $2,%edi
+    xorl %esi,%esi
+.Lreap_child_delay:
+    call .Lbounded_delay
+    jmp .Lexit_ok
+.Lbounded_delay:
+    subq $32,%rsp
+    movq %rdi,0(%rsp)
+    movq %rsi,8(%rsp)
+.Lbounded_delay_again:
+    movl $35,%eax
+    movq %rsp,%rdi
+    leaq 16(%rsp),%rsi
+    syscall
+    testq %rax,%rax
+    jz .Lbounded_delay_done
+    cmpq $-4,%rax
+    jne .Lfail
+    movq 16(%rsp),%rax
+    movq %rax,0(%rsp)
+    movq 24(%rsp),%rax
+    movq %rax,8(%rsp)
+    jmp .Lbounded_delay_again
+.Lbounded_delay_done:
+    addq $32,%rsp
+    ret
 .Lleaf:
     leaq .Lleaf_ok(%rip),%rsi
     movl $.Lleaf_ok_end-.Lleaf_ok,%edx
@@ -236,6 +297,10 @@ _start:
 .Ldirect_name: .asciz "direct"
 .Lstuck_name: .asciz "stuck"
 .Lnested_name: .asciz "nested"
+.Lreap_name: .asciz "reap"
+.Lreap_live_name: .asciz "reap-live"
+.Lreap_ok: .ascii "REAP_OK\n"
+.Lreap_ok_end:
 .Lready: .ascii "VFORK_READY\n"
 .Lready_end:
 .Lleaf_ok: .ascii "LEAF_OK\n"
