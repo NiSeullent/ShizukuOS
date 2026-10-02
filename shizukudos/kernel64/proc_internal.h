@@ -56,7 +56,9 @@ struct kobject {
                  uint64_t create_tick, exit_tick, user_ticks, kernel_ticks, cycles;
                  /* NT base increment is relative (including saturation +/-16).
                   * The absolute native priority survives TCB reclamation. */
-                 int32_t nt_base_increment; uint32_t last_sched_priority; } thr;
+                 int32_t nt_base_increment; uint32_t last_sched_priority;
+                 /* Actual stored settings captured before TCB reclamation. */
+                 uint32_t last_boost_disabled, last_mem_priority, last_power_control, last_power_state; } thr;
         struct { void *sock; } net;         /* OB_SOCKET: sock_t * (net_sock.c) */
         struct { process_t *p; } proc;
         struct { void *file; uint32_t access; void *io; } file;   /* io: completion port / notification modes (ipc_io.c) */

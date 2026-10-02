@@ -417,6 +417,10 @@ void thread_object_detach(thread_t *t)
     /* Reclamation owns this TCB with interrupts off, including TS_ZOMBIE;
      * the public native getter deliberately refuses that state. */
     o->u.thr.last_sched_priority = t->sched_priority;
+    o->u.thr.last_boost_disabled = t->boost_disabled != 0;
+    o->u.thr.last_mem_priority = t->mem_priority;
+    o->u.thr.last_power_control = t->power_control;
+    o->u.thr.last_power_state = t->power_state;
     o->u.thr.t = 0;
     t->object = 0;
     ob_deref(o);

@@ -119,6 +119,7 @@ NTSTATUS NTAPI NtShzSetK32(ULONG cls, HANDLE h, PVOID buf, ULONG len);
 #define K32Q_THREAD_NAME 16         /* thread handle: the SetThreadDescription text (UTF-16, no terminator), *ret = its bytes */
 #define K32Q_PROCESS_QUERY_ACCESS 17 /* process QUERY_INFORMATION: zero payload, optional *ret = 0 */
 #define K32Q_MAPPED_FILE_PATH 18    /* process QUERY_INFORMATION: address in, retained PID and loaded-image path out */
+#define K32Q_THREAD_SETTINGS_STRICT 19 /* same16B settings as12, requires full THREAD_QUERY_INFORMATION */
 typedef struct { ULONG64 address; ULONG pid, reserved; char path[256]; } SHZ_K32_MAPPED_FILE_PATH;
 typedef char shz_k32_mapped_file_path_size[(sizeof(SHZ_K32_MAPPED_FILE_PATH) == 272) ? 1 : -1];
 #define K32S_PRIORITY_CLASS 1       /* ULONG class value (process handle) */
