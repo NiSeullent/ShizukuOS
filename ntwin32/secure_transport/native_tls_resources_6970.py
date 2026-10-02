@@ -39,6 +39,8 @@ PROC_ENTRY_LIMIT = 4096
 GROUP_MEMBER_LIMIT = 128
 GROUP_TASK_LIMIT = 1024
 PROC_STAT_LIMIT = 8192
+GROUP_DIAGNOSTIC_ROW_LIMIT = 8
+GROUP_FAILURE_DIAGNOSTIC_LIMIT = 16 * 1024
 INVALID_RECEIPT_SCHEMA = "native-tls-resource-invalid-receipt-v1"
 
 
@@ -125,6 +127,9 @@ class _OwnedGroupObservation:
         self.pause_deadline = None
         self.pause_started = None
         self.quiet_snapshot = None
+        self.quiet_scan_instability = None
+        self.last_scan_instability = None
+        self.last_scan_snapshot = None
         self.telemetry = {"pause_attempts": 0, "verified_pauses": 0,
                           "stop_requests": 0, "continue_requests": 0,
                           "stop_no_live_group_observations": 0,
@@ -133,6 +138,7 @@ class _OwnedGroupObservation:
                           "total_pause_seconds": 0.0, "longest_pause_seconds": 0.0,
                           "verified_observation_sha256": None,
                           "observation_digest_scope": "last_completed_postcount_snapshot",
+                          "failure_observation": None,
                           "escaped_writers_excluded_verified": False,
                           "continuous_group_stop_verified": False,
                           "failure_stop_retained_until_owned_kill": False,
@@ -239,33 +245,60 @@ class _OwnedGroupObservation:
             raise ResourceFailure("proc process-list observation exceeds 4096 entries")
         members, threads = [], []
         stable = True
+        instability = {"scope": "last_actual_numeric_proc_scan",
+                       "total_events": 0, "classification_counts": {},
+                       "events": [], "events_truncated": False}
+
+        def note_instability(pid, reason, classification):
+            instability["total_events"] += 1
+            counts = instability["classification_counts"]
+            counts[classification] = counts.get(classification, 0) + 1
+            if len(instability["events"]) < GROUP_DIAGNOSTIC_ROW_LIMIT:
+                instability["events"].append({"pid": pid, "reason": reason,
+                                              "classification": classification})
+            else:
+                instability["events_truncated"] = True
+
         for index, name in enumerate(names):
             self.check_time()
             if index % 32 == 0:
                 self.guard._sample()
             pid = int(name)
+            initially_classified_owned = False
             try:
                 row = self._read_process(pid)[0]
                 if row["pgrp"] != self.proc.pid:
                     continue
+                initially_classified_owned = True
                 row, task_rows, unchanged = self._read_process(pid, tasks=True)
                 if row["pgrp"] != self.proc.pid:
                     stable = False
+                    note_instability(pid, "group_changed_after_initial_owned_classification",
+                                     "after_owned_group_classification")
                     continue
                 members.append(row)
                 threads.extend(task_rows)
                 stable = stable and unchanged
+                if not unchanged:
+                    note_instability(pid, "owned_task_listing_or_process_token_changed",
+                                     "after_owned_group_classification")
             except (FileNotFoundError, ProcessLookupError):
                 if pid == self.proc.pid:
                     raise ResourceFailure("owned unreaped leader disappeared during observation")
                 stable = False
+                note_instability(pid, "numeric_process_or_task_disappeared",
+                                 "after_owned_group_classification" if initially_classified_owned
+                                 else "before_group_classification_unknown")
                 continue
             if len(members) > GROUP_MEMBER_LIMIT or len(threads) > GROUP_TASK_LIMIT:
                 raise ResourceFailure("owned group member/task observation bound crossed")
         leader = self.leader()
-        return {"leader": leader, "members": sorted(members, key=lambda r: r["pid"]),
-                "tasks": sorted(threads, key=lambda r: (r["pid"], r["tid"])),
-                "stable": stable}
+        observation = {"leader": leader, "members": sorted(members, key=lambda r: r["pid"]),
+                       "tasks": sorted(threads, key=lambda r: (r["pid"], r["tid"])),
+                       "stable": stable}
+        self.last_scan_instability = instability
+        self.last_scan_snapshot = observation
+        return observation
 
     def _validated(self, observation):
         if (not isinstance(observation, dict) or set(observation) != {"leader", "members", "tasks", "stable"}
@@ -337,6 +370,9 @@ class _OwnedGroupObservation:
             current = self._snapshot()
             if self._quiet(current) and current == previous:
                 self.quiet_snapshot = current
+                self.quiet_scan_instability = {
+                    "matches_returned_snapshot": self.last_scan_snapshot == current,
+                    "metadata": self.last_scan_instability}
                 self.verified = True
                 self.pause_deadline = None
                 self.telemetry["verified_pauses"] += 1
@@ -350,9 +386,65 @@ class _OwnedGroupObservation:
             raise ResourceFailure("recursive observation requires a verified owned stop scope")
         current = self._snapshot()
         if not self._quiet(current) or current != self.quiet_snapshot:
+            self._record_failure_observation(current)
             raise ResourceFailure("owned group changed or resumed during recursive observation")
         raw = json.dumps(current, sort_keys=True, separators=(",", ":")).encode()
         self.telemetry["verified_observation_sha256"] = hashlib.sha256(raw).hexdigest()
+
+    def _record_failure_observation(self, current):
+        """First failure only; bounded metadata never changes acceptance/retry."""
+        if self.telemetry["failure_observation"] is not None:
+            return
+        reference = self.quiet_snapshot
+        counts, changes, total = {}, [], 0
+        for kind, keys in (("members", ("pid",)), ("tasks", ("pid", "tid"))):
+            before = {tuple(row[key] for key in keys): row for row in reference[kind]}
+            after = {tuple(row[key] for key in keys): row for row in current[kind]}
+            added, removed = set(after) - set(before), set(before) - set(after)
+            changed = {key for key in set(before) & set(after) if before[key] != after[key]}
+            counts[kind] = {"reference_count": len(before), "current_count": len(after),
+                            "added": len(added), "removed": len(removed), "changed": len(changed)}
+            for key in sorted(added | removed | changed):
+                total += 1
+                if len(changes) < GROUP_DIAGNOSTIC_ROW_LIMIT:
+                    changes.append({"kind": kind, "key": list(key),
+                                    "reference": before.get(key), "current": after.get(key)})
+
+        def snapshot_summary(snapshot):
+            raw = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
+            return {"canonical_full_snapshot_sha256": hashlib.sha256(raw).hexdigest(),
+                    "stable": snapshot["stable"],
+                    "all_members_and_tasks_T_or_Z": all(row["state"] in ("T", "Z")
+                        for row in snapshot["members"] + snapshot["tasks"]),
+                    "leader": dict(snapshot["leader"])}
+
+        diagnostic = {"scope": "first_verify_paused_mismatch_numeric_metadata_only",
+                      "reference": snapshot_summary(reference),
+                      "current": snapshot_summary(current),
+                      "snapshots_equal": reference == current,
+                      "member_task_difference_counts": counts,
+                      "member_task_differences": changes,
+                      "member_task_difference_total": total,
+                      "member_task_differences_truncated": total > len(changes),
+                      "reference_last_actual_scan_instability": self.quiet_scan_instability,
+                      "current_last_actual_scan_instability": {
+                          "matches_returned_snapshot": self.last_scan_snapshot == current,
+                          "metadata": self.last_scan_instability},
+                      "diagnostic_row_limit": GROUP_DIAGNOSTIC_ROW_LIMIT,
+                      "diagnostic_byte_limit": GROUP_FAILURE_DIAGNOSTIC_LIMIT,
+                      "producer_cause_verified": False,
+                      "kernel_cause_verified": False,
+                      "retry_or_acceptance_relaxation_applied": False}
+        raw = json.dumps(diagnostic, sort_keys=True, separators=(",", ":")).encode()
+        if len(raw) > GROUP_FAILURE_DIAGNOSTIC_LIMIT:
+            # Preserve the original failure even if bounded detail cannot fit.
+            diagnostic = {"scope": "failure_diagnostic_size_refused",
+                          "complete_diagnostic_sha256": hashlib.sha256(raw).hexdigest(),
+                          "complete_diagnostic_bytes": len(raw),
+                          "diagnostic_byte_limit": GROUP_FAILURE_DIAGNOSTIC_LIMIT,
+                          "producer_cause_verified": False, "kernel_cause_verified": False,
+                          "retry_or_acceptance_relaxation_applied": False}
+        self.telemetry["failure_observation"] = diagnostic
 
     def finish_pause(self, success):
         try:

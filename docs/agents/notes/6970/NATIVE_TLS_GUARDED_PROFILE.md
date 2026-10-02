@@ -256,3 +256,74 @@ ten-controls integration is pending and avoids duplicate jobs. This is
 progress coordination, not a new TLS build/runtime adoption or reviewed
 7707 guest-probe successor. ShizukuDOS replaces MS-DOS beneath Windows98;
 Windows98 remains the visible product OS and its VMM/UI owner.
+
+## Fourth actual control PASS and production observation FAIL
+
+Dispatch36950399479/job110661860715 at a05c76919412a9470cdb8861f00a15f828def33c
+completed failure; old provider job110661861805 skipped and artifact count0.
+All ten quiescent controls reported actual PASS in3.654s. Their four
+positive child epochs and six expected negative FAIL epochs remained
+separate from165 production commands. Retained control payload65B
+includes15B thrown consumer payload with delivery commit0. All330 main
+capture files/26,232B match the raw log and closed command hashes; plus
+controls equals the26,297B parent capture counter. Root independently
+read all29 committed source blobs at the exact dispatch commit.
+
+The first164 production commands exited0/reaped/nonaborted. Actual-M
+discovery covered126 TUs and450 before-header pins. Five object targets
+finished; `cmake-object-5`, targetTLS13PROB/i486_format.c.obj, failed after
+0.188s with `owned group changed or resumed during recursive observation`.
+It was killed-9 before reap, with failure STOP retained; stdout was only
+the128B entering-directory line and stderr empty. No complete object,
+actual-M/-MD, final source/header/tool closure, link or four-PE proof exists.
+The exact differing process/task snapshot is not retained; do not infer
+which process changed or whether unrelated proc churn caused this FAIL.
+
+Closed543,795B receipt SHA892633e6be962f265f1b2e348ec5c7a5680c4308b4aeba6306a8361d6c294026
+accounts3,722,369B with minimum91,704,045,568B. Raw677,582B
+SHA661ffe0fd3e1aa5e100e56efdd157431f3fdad2bd3931bb01005834acdcbd264
+and root48,693B review SHA6131f86d29ac8fb90f8824efd56e2667b08b70df434639d33554a99d3af65764
+are frozen in `/dev/shm/win98-hosted-native-tls-6970-36950399479`.
+The failed run did not transfer its37 physical child proof files, so
+independent review covers their source-bound printed execution report,
+embedded payload and pin metadata; it does not claim a second physical
+readback of absent child files. Later always-log retention adds only
+bounded child result JSON/capture text, with full actual pin checks.
+
+The observed Ninja version is1.11.1. Its [official subprocess source](https://raw.githubusercontent.com/ninja-build/ninja/v1.11.1/src/subprocess-posix.cc)
+creates a new process group for non-console commands. Its console jobs
+inherit the calling group. Last object telemetry maximum1member/1task
+is consistent with this producer-scope issue, but does not prove the
+exact fourth failure cause. The next source-only change selects CMake
+compile/link console pools and verifies every selected generated object,
+archive and PE edge has its own literal console pool before spawning.
+Configure flags alone are insufficient; configure/try_compile is outside
+that post-configure guarantee. Strict count/group predicates stay intact;
+bounded failure snapshots will record actual mismatch facts. No fifth
+dispatch or native/TLS/OS/application/ISO acceptance is claimed here.
+
+The corrected console successor freezes builder94,679B
+SHA853be88c87a0496d84b5c53ee7f320e7e3b3d63de8f85ae584c6285603bad41e
+and diagnostic-only resource70,236B
+SHA65bb6326ad62b1392cd8e99c18d2e3f3a31361fd4f22b56a04817cc6856537c5.
+Two complete generated Ninja buffers are pinned before every selected
+spawn and at final closure. Every decoded output/dependency must already
+use canonical spelling; alternate `./`, parent, duplicate-separator and
+backslash spellings are refused before producer lookup. Selected135
+writer edges and the literal-console RERUN_CMAKE edge seed full dependency
+reachability. Any other reachable non-phony writer is refused, including
+unexpected VERIFY_GLOBS. This retains normal canonical absolute external
+input leaves; it does not implement a general Ninja variable evaluator.
+
+Twelve separate hosted parser controls use the exact actual generated
+buffers: one unchanged positive and eleven selectively mutated negatives.
+They include canonical and `./` hidden writers and a regeneration dependency
+writer. Mutated buffers are neither written nor executed. The ten real
+process/filesystem quiescent controls remain unchanged. Transfer sealing
+requires both sets, final graph equality and explicitly retains the two
+physical Ninja files. Always-log child JSON/capture text requires full
+actual size/SHA/nine-stat pins and a512KiB aggregate; binary fixtures are
+not emitted. Bounded first group-mismatch diagnostics retain snapshot
+digests, predicate bits, numeric leader and at most eight changed rows,
+plus classified last-scan instability. All prior acceptance, timeouts,
+signal/reap order, strict count and capacity predicates remain unchanged.

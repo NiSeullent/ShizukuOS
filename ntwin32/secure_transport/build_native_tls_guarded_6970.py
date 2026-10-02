@@ -508,6 +508,339 @@ def compile_recipe(row, cmake, cc):
     return common, Path(row['file']).resolve(strict=True), obj, output
 
 
+def ninja_console_plan(build_raw, rules_raw, compile_targets):
+    """Fail-closed validation of this CMake graph, not a general Ninja evaluator.
+
+    Only the two directly retained generated files are accepted. Selected
+    writers must carry their own literal console binding; top-level variables,
+    inherited pools and a configure option alone never establish that fact.
+    Paths may use Ninja's literal space/colon/dollar escapes, but variable path
+    expansion, additional includes/subninjas and dynamic dependencies fail.
+    """
+    if (not isinstance(compile_targets, list) or len(compile_targets) != 126
+            or len(set(compile_targets)) != 126):
+        raise ValueError('console graph requires exact 126 unique compiler outputs')
+
+    def canonical(name):
+        # Ninja canonicalizes node names before producer lookup. Refuse every
+        # alternate spelling here so ./hidden cannot conceal a real writer.
+        # Absolute source leaves remain supported without filesystem resolution.
+        if (not name or '\\' in name or '//' in name
+                or any(part in ('.','..') for part in name.split('/'))
+                or Path(name).as_posix() != name):
+            raise ValueError('noncanonical decoded Ninja output/dependency refused')
+
+    def paths(text):
+        tokens, token, at = [], [], 0
+        while at < len(text):
+            char = text[at]
+            if char == '$':
+                at += 1
+                if at >= len(text) or text[at] not in (' ', ':', '$'):
+                    raise ValueError('unsupported Ninja variable/path escape')
+                token.append(text[at])
+            elif char.isspace() or char in ':|':
+                if token:
+                    tokens.append(''.join(token)); token = []
+                if char == ':':
+                    tokens.append(':')
+                elif char == '|':
+                    if at + 1 < len(text) and text[at + 1] in ('|', '@'):
+                        at += 1; tokens.append('|' + text[at])
+                    else:
+                        tokens.append('|')
+            else:
+                token.append(char)
+            at += 1
+        if token:
+            tokens.append(''.join(token))
+        if len(tokens) > 8192:
+            raise ValueError('Ninja edge token bound')
+        return tokens
+
+    edges, producers, rules, includes = [], {}, {}, []
+    top_names = set()
+    for filename, raw in (('build.ninja', build_raw), ('CMakeFiles/rules.ninja', rules_raw)):
+        if (not isinstance(raw, bytes) or not raw or len(raw) > 2 * 1024**2
+                or b'\r' in raw or b'\0' in raw or not raw.endswith(b'\n')):
+            raise ValueError('bounded LF generated Ninja file required')
+        text = raw.decode('utf-8', errors='strict')
+        physical = text.splitlines(keepends=True)
+        if len(physical) > 32768 or any(len(line.encode()) > 65536 for line in physical):
+            raise ValueError('generated Ninja line/count bound')
+        records, current, index = [], None, 0
+        while index < len(physical):
+            begin = index
+            line = physical[index].removesuffix('\n'); index += 1
+            while line.endswith('$') and ((len(line) - len(line.rstrip('$'))) & 1):
+                if index >= len(physical):
+                    raise ValueError('truncated Ninja continuation')
+                line = line[:-1] + physical[index].lstrip(' ').removesuffix('\n')
+                index += 1
+                if len(line.encode()) > 65536:
+                    raise ValueError('generated Ninja logical line bound')
+            if not line.strip() or line.lstrip().startswith('#'):
+                continue
+            if line.startswith((' ', '\t')):
+                binding = re.fullmatch(r'  ([A-Za-z_][A-Za-z_0-9]*) = (.*)', line)
+                if current is None or binding is None:
+                    raise ValueError('unsupported generated Ninja binding context')
+                name, value = binding.groups()
+                if name in current['bindings']:
+                    raise ValueError('duplicate generated Ninja block binding')
+                current['bindings'][name] = value
+                current['end'] = index
+                continue
+            current = None
+            if line.startswith('build '):
+                if filename != 'build.ninja':
+                    raise ValueError('build edges outside retained build.ninja')
+                tokens = paths(line[6:])
+                if tokens.count(':') != 1:
+                    raise ValueError('generated Ninja build delimiter ambiguous')
+                colon = tokens.index(':'); out, tail = tokens[:colon], tokens[colon + 1:]
+                if (not out or not tail or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9.+-]*', tail[0])
+                        or out.count('|') > 1 or any(x in out for x in ('||', '|@'))):
+                    raise ValueError('unsupported generated Ninja build edge')
+                outputs = [x for x in out if x != '|']
+                if len(outputs) != len(set(outputs)) or len(outputs) > 256:
+                    raise ValueError('duplicate/unbounded generated Ninja edge outputs')
+                for output in outputs:
+                    canonical(output)
+                dependencies, categories, category = [], {'explicit': [], 'implicit': [], 'order': [], 'validation': []}, 'explicit'
+                seen = set()
+                for token in tail[1:]:
+                    if token in ('|', '||', '|@'):
+                        if token in seen:
+                            raise ValueError('duplicate Ninja dependency separator')
+                        seen.add(token)
+                        category = {'|':'implicit', '||':'order', '|@':'validation'}[token]
+                    else:
+                        canonical(token)
+                        dependencies.append(token); categories[category].append(token)
+                current = {'file':filename, 'begin':begin, 'end':index, 'outputs':outputs,
+                           'rule':tail[0], 'dependencies':dependencies, 'categories':categories,
+                           'bindings':{}}
+                records.append(current); edges.append(current)
+                for output in outputs:
+                    if output in producers:
+                        raise ValueError('duplicate generated Ninja producer: ' + output)
+                    producers[output] = current
+                if len(edges) > 8192 or len(producers) > 16384:
+                    raise ValueError('generated Ninja graph bound')
+            elif line.startswith('rule '):
+                name = line[5:]
+                if filename != 'CMakeFiles/rules.ninja' or not re.fullmatch(r'[A-Za-z_][A-Za-z_0-9.+-]*', name) or name in rules:
+                    raise ValueError('duplicate/unsupported generated Ninja rule')
+                current = {'file':filename, 'begin':begin, 'end':index, 'bindings':{}, 'rule':name}
+                records.append(current); rules[name] = current
+            elif line.startswith('include '):
+                if filename != 'build.ninja' or paths(line[8:]) != ['CMakeFiles/rules.ninja']:
+                    raise ValueError('unbound generated Ninja include')
+                includes.append(line[8:])
+            elif line.startswith(('subninja ', 'pool ')):
+                raise ValueError('additional Ninja file or pool declaration refused')
+            elif line.startswith('default '):
+                if filename != 'build.ninja' or not paths(line[8:]):
+                    raise ValueError('unsupported Ninja default context')
+            else:
+                binding = re.fullmatch(r'([A-Za-z_][A-Za-z_0-9]*) = (.*)', line)
+                if binding is None or binding[1] in ('pool', 'dyndep'):
+                    raise ValueError('unsupported generated Ninja top-level directive')
+                key = (filename, binding[1])
+                if key in top_names:
+                    raise ValueError('duplicate generated Ninja top-level variable')
+                top_names.add(key)
+        for record in records:
+            record['block_sha256'] = digest(''.join(physical[record['begin']:record['end']]).encode())
+    if includes != ['CMakeFiles/rules.ninja']:
+        raise ValueError('exact single retained Ninja rule include required')
+
+    def relative(name):
+        path = Path(name)
+        if path.is_absolute() or any(p in ('', '.', '..') for p in name.split('/')) or '\\' in name:
+            raise ValueError('selected Ninja output must be a safe relative path')
+
+    def writer(name, kind):
+        relative(name)
+        edge = producers.get(name)
+        if edge is None or not edge['rule'].startswith(kind + '__') or edge['rule'] not in rules:
+            raise ValueError('selected Ninja writer rule/output mismatch: ' + name)
+        rule = rules[edge['rule']]
+        if (edge['bindings'].get('pool') != 'console' or 'dyndep' in edge['bindings']
+                or 'pool' in rule['bindings'] or 'dyndep' in rule['bindings']
+                or not rule['bindings'].get('command')):
+            raise ValueError('selected Ninja writer lacks its own literal console pool: ' + name)
+        return edge
+
+    def alias(name, kind, basename):
+        cursor, history, seen = name, [], set()
+        for _ in range(4):
+            if cursor in seen:
+                raise ValueError('cycle in selected Ninja alias')
+            seen.add(cursor); edge = producers.get(cursor)
+            if edge is None:
+                raise ValueError('selected Ninja alias/output missing: ' + cursor)
+            if edge['rule'] != 'phony':
+                if Path(cursor).name != basename:
+                    raise ValueError('selected Ninja alias resolves unexpected artifact')
+                return cursor, writer(cursor, kind), history
+            relative(cursor)
+            if (len(edge['outputs']) != 1 or len(edge['categories']['explicit']) != 1
+                    or any(edge['categories'][key] for key in ('implicit','order','validation'))
+                    or edge['bindings']):
+                raise ValueError('selected Ninja phony alias must resolve one direct output')
+            history.append({'alias':cursor, 'direct_output':edge['categories']['explicit'][0],
+                            'block_sha256':edge['block_sha256'],
+                            'physical_lines':[edge['begin'],edge['end']]})
+            cursor = edge['categories']['explicit'][0]
+        raise ValueError('selected Ninja alias depth bound')
+
+    selected, identities, rows = [], set(), []
+    def retain(target, output, edge, phase, aliases):
+        if id(edge) in identities:
+            raise ValueError('selected Ninja writer bound more than once')
+        identities.add(id(edge)); selected.append(edge)
+        rows.append({'target':target, 'output':output, 'outputs':edge['outputs'], 'rule':edge['rule'],
+                     'phase':phase, 'pool':'console', 'edge_block_sha256':edge['block_sha256'],
+                     'rule_block_sha256':rules[edge['rule']]['block_sha256'], 'aliases':aliases,
+                     'edge_physical_lines':[edge['begin'],edge['end']],
+                     'rule_physical_lines':[rules[edge['rule']]['begin'],rules[edge['rule']]['end']]})
+    for target in compile_targets:
+        retain(target, target, writer(target, 'C_COMPILER'), 'object', [])
+    for target in ('everest','p256m','mbedcrypto','mbedx509','mbedtls','ntwst'):
+        output, edge, history = alias(target, 'C_STATIC_LIBRARY_LINKER', 'lib' + target + '.a')
+        retain(target, output, edge, 'archive', history)
+    for target, suffix, kind in (('TLS13PROB','.exe','C_EXECUTABLE_LINKER'),
+                                 ('TIMEPROB','.exe','C_EXECUTABLE_LINKER'),
+                                 ('M98TLS','.dll','C_SHARED_LIBRARY_LINKER')):
+        output, edge, history = alias(target, kind, target + suffix)
+        retain(target, output, edge, 'PE-link', history)
+    regenerate = producers.get('build.ninja')
+    if (regenerate is None or regenerate['rule'] != 'RERUN_CMAKE'
+            or regenerate['rule'] not in rules
+            or regenerate['bindings'].get('pool') != 'console'
+            or 'dyndep' in regenerate['bindings']
+            or 'pool' in rules['RERUN_CMAKE']['bindings']
+            or not rules['RERUN_CMAKE']['bindings'].get('command')):
+        raise ValueError('manifest regeneration edge lacks literal console binding')
+    # Any producer reached through a selected writer's complete dependency list
+    # must be one of these frozen writers or a command-free phony edge. This
+    # excludes hidden custom writers even if their own pool looks acceptable.
+    visited, pending = set(), [name for edge in (*selected,regenerate) for name in edge['dependencies']]
+    while pending:
+        if len(visited) > 16384:
+            raise ValueError('selected Ninja dependency reachability bound')
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name); edge = producers.get(name)
+        if edge is None:
+            continue
+        if edge['rule'] != 'phony' and id(edge) not in identities and edge is not regenerate:
+            raise ValueError('unbound writer reachable from selected Ninja targets: ' + name)
+        if edge['rule'] == 'phony' and edge['bindings']:
+            raise ValueError('reachable Ninja phony edge has bindings')
+        pending.extend(edge['dependencies'])
+    return {'schema':'native-tls-literal-console-graph-6970-v1',
+            'status':'PASS_LITERAL_SELECTED_EDGES_ONLY', 'compile_count':126,
+            'archive_count':6, 'PE_count':3, 'selected_writer_count':len(rows), 'edges':rows,
+            'manifest_regeneration_edge':{'output':'build.ninja', 'rule':'RERUN_CMAKE', 'pool':'console',
+                'edge_block_sha256':regenerate['block_sha256'],
+                'rule_block_sha256':rules['RERUN_CMAKE']['block_sha256'],
+                'physical_lines':[regenerate['begin'],regenerate['end']]},
+            'reachable_dependency_names':len(visited), 'retained_files':['build.ninja','CMakeFiles/rules.ninja'],
+            'configure_or_try_compile_group_containment_verified':False,
+            'escaped_writers_excluded_verified':False, 'continuous_group_stop_verified':False}
+
+
+def ninja_console_controls(baseline, rules, targets, actual_plan):
+    """Selective memory mutations of the actual admitted, retained graph bytes.
+
+    No mutated graph is written or executed. Positive acceptance and rejected
+    ambiguity/pool/writer cases use the same whole-buffer production parser.
+    """
+    started = time.monotonic()
+    build_lines, rule_lines = baseline.splitlines(keepends=True), rules.splitlines(keepends=True)
+    def block(lines, bounds, sha):
+        value = b''.join(lines[bounds[0]:bounds[1]])
+        if not value or digest(value) != sha:
+            raise ValueError('actual control block source binding mismatch')
+        return value
+    def replace(raw, before, after):
+        if raw.count(before) != 1 or before == after:
+            raise ValueError('actual console control mutation must be unique')
+        return raw.replace(before, after, 1)
+    first = actual_plan['edges'][0]
+    object_line = block(build_lines,first['edge_physical_lines'],first['edge_block_sha256'])
+    first_rule = block(rule_lines,first['rule_physical_lines'],first['rule_block_sha256'])
+    if object_line.count(b'  pool = console\n') != 1:
+        raise ValueError('actual object console binding not uniquely mutable')
+    unpooled = object_line.replace(b'  pool = console\n',b'',1)
+    archive = next(row for row in actual_plan['edges'] if row['target'] == 'ntwst')
+    archive_line = block(build_lines,archive['edge_physical_lines'],archive['edge_block_sha256'])
+    history = archive['aliases'][0]
+    alias_line = block(build_lines,history['physical_lines'],history['block_sha256'])
+    if len(alias_line.splitlines()) != 1:
+        raise ValueError('actual alias control requires one physical alias line')
+    regeneration = actual_plan['manifest_regeneration_edge']
+    regen_line = block(build_lines,regeneration['physical_lines'],regeneration['edge_block_sha256'])
+    if regen_line.count(b'  pool = console\n') != 1:
+        raise ValueError('actual regeneration binding not uniquely mutable')
+    wrong_rule = next(row['rule'] for row in actual_plan['edges'] if row['phase'] == 'PE-link')
+    archive_wrong = re.sub(rb': ' + re.escape(archive['rule'].encode()) + rb'(?=[ \n])',
+                           b': ' + wrong_rule.encode(),archive_line,count=1)
+    hidden = object_line.replace((': '+first['rule']+' ').encode(),
+                                 (': '+first['rule']+' generated6970-control.h ').encode(),1)
+    if b'generated6970-control.h' in baseline or b'UNBOUND_CONTROL_6970' in rules:
+        raise ValueError('actual console control name collision')
+    controls = [
+        ('positive-literal-full-graph', True, baseline, rules),
+        ('negative-missing-object-pool', False, replace(baseline,object_line,unpooled),rules),
+        ('negative-inherited-rule-pool', False, replace(baseline,object_line,unpooled),
+         replace(rules,first_rule,first_rule.replace(('rule '+first['rule']+'\n').encode(),
+             ('rule '+first['rule']+'\n  pool = console\n').encode(),1))),
+        ('negative-variable-pool', False, replace(baseline,object_line,object_line.replace(b'pool = console',b'pool = $selected_pool',1)),rules),
+        ('negative-duplicate-producer', False, baseline+object_line,rules),
+        ('negative-ambiguous-archive-alias', False, replace(baseline,alias_line,alias_line[:-1]+b' extra.a\n'),rules),
+        ('negative-archive-wrong-rule-kind', False, replace(baseline,archive_line,archive_wrong),rules),
+        ('negative-unbound-include', False, baseline+b'include other.ninja\n',rules),
+        ('negative-reachable-hidden-writer', False,
+         replace(baseline,object_line,hidden)+b'build generated6970-control.h: UNBOUND_CONTROL_6970\n  pool = console\n',
+         rules+b'rule UNBOUND_CONTROL_6970\n  command = harmless-not-executed\n'),
+        ('negative-noncanonical-hidden-writer', False,
+         replace(baseline,object_line,hidden.replace(b' generated6970-control.h ',b' ./generated6970-control.h ',1))
+         +b'build generated6970-control.h: UNBOUND_CONTROL_6970\n  pool = console\n',
+         rules+b'rule UNBOUND_CONTROL_6970\n  command = harmless-not-executed\n'),
+        ('negative-regeneration-hidden-writer', False,
+         replace(baseline,regen_line,regen_line.replace(b': RERUN_CMAKE ',b': RERUN_CMAKE generated6970-control.h ',1))
+         +b'build generated6970-control.h: UNBOUND_CONTROL_6970\n  pool = console\n',
+         rules+b'rule UNBOUND_CONTROL_6970\n  command = harmless-not-executed\n'),
+        ('negative-unpooled-regeneration', False, replace(baseline,regen_line,regen_line.replace(b'  pool = console\n',b'',1)),rules),
+    ]
+    cases = []
+    for name, expected, build_raw, rules_raw in controls:
+        if time.monotonic() - started > 60 or len(build_raw) > 2 * 1024**2 or len(rules_raw) > 2 * 1024**2:
+            raise ValueError('actual console control input/time bound')
+        accepted, error = True, None
+        try:
+            report = ninja_console_plan(build_raw, rules_raw, targets)
+            if report['selected_writer_count'] != 135 or report['status'] != 'PASS_LITERAL_SELECTED_EDGES_ONLY':
+                raise ValueError('positive console graph report differs')
+        except ValueError as failure:
+            accepted, error = False, str(failure)[:256]
+        cases.append({'name':name, 'expected':'accept' if expected else 'reject',
+                      'actual':'accept' if accepted else 'reject', 'result':'PASS' if accepted == expected else 'FAIL',
+                      'build_sha256':digest(build_raw), 'rules_sha256':digest(rules_raw), 'error':error})
+    failures = sum(case['result'] != 'PASS' for case in cases)
+    return {'schema':'native-tls-console-parser-controls-6970-v1', 'completed':len(cases),
+            'failures':failures, 'result':'PASS_PARSER_CONTROLS_ONLY' if not failures else 'FAIL', 'cases':cases,
+            'basis_build_sha256':digest(baseline), 'basis_rules_sha256':digest(rules),
+            'mutated_graphs_written_or_executed':False, 'elapsed_seconds':time.monotonic()-started,
+            'process_execution_verified':False, 'native_execution_verified':False,
+            'windows98_integration_verified':False, 'tls_execution_verified':False}
+
+
 def build(output, prep, expected_preparation_sha):
     components(output)
     if output.parent != ROOT / 'build/native-tls-proof-6970':
@@ -720,7 +1053,9 @@ def build(output, prep, expected_preparation_sha):
         r = guard.run([cmake_tool, '-S', str(project), '-B', str(cmake), '-G', 'Ninja',
                        '-DCMAKE_TOOLCHAIN_FILE=' + str(project / 'toolchain.cmake'),
                        '-DUPSTREAM_SOURCE=' + str(tree), '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
-                       '-DCMAKE_MAKE_PROGRAM=' + ninja, '-DGEN_FILES=OFF'], 'cmake-configure', timeout=120)
+                       '-DCMAKE_MAKE_PROGRAM=' + ninja, '-DGEN_FILES=OFF',
+                       '-DCMAKE_JOB_POOL_COMPILE=console', '-DCMAKE_JOB_POOL_LINK=console'],
+                       'cmake-configure', timeout=120)
         if r.returncode:
             raise ValueError('actual CMake configure failed')
         receipt['CMake_identification_before_TU_header_freeze_verified'] = False
@@ -738,6 +1073,31 @@ def build(output, prep, expected_preparation_sha):
                 generator_pins[str(p)] = guard.pin(p, maximum=2 * 1024**2)
         receipt['configured_generator_inputs'] = generator_pins
         receipt['upstream_generated_files_explicitly_disabled'] = True
+        console_raw, console_pins = {}, {}
+        for name in ('build.ninja','CMakeFiles/rules.ninja'):
+            path=cmake/name
+            raw,pin=regular(path,2*1024**2)
+            if pin!=generator_pins.get(str(path)) or guard.pin(path,maximum=2*1024**2)!=pin:
+                raise ValueError('actual generated console graph differs from retained generator input')
+            console_raw[name],console_pins[str(path)]=raw,pin
+        compile_targets=[compile_recipe(row,cmake,cc)[3] for row in graph]
+        console_plan=ninja_console_plan(console_raw['build.ninja'],console_raw['CMakeFiles/rules.ninja'],compile_targets)
+        console_plan['files']=console_pins
+        receipt['Ninja_console_graph']=console_plan
+        receipt['Ninja_console_graph_before_after_equal']=False
+        guard.check()
+        receipt['Ninja_console_parser_controls']=ninja_console_controls(
+            console_raw['build.ninja'],console_raw['CMakeFiles/rules.ninja'],compile_targets,console_plan)
+        guard.check()
+        if (receipt['Ninja_console_parser_controls']['result']!='PASS_PARSER_CONTROLS_ONLY'
+                or receipt['Ninja_console_parser_controls']['completed']!=12
+                or receipt['Ninja_console_parser_controls']['failures']!=0
+                or any(row['result']!='PASS' for row in receipt['Ninja_console_parser_controls']['cases'])):
+            raise ValueError('actual generated graph parser controls failed')
+        def check_console_graph():
+            for path,pin in console_pins.items():
+                if guard.pin(Path(path),maximum=2*1024**2)!=pin:
+                    raise ValueError('actual console graph changed before/during selected production command')
         deps = output / 'dependencies'
         deps.mkdir(mode=0o700)
         units, headers, before_dep_total, objects = [], {}, 0, set()
@@ -769,6 +1129,7 @@ def build(output, prep, expected_preparation_sha):
         schedule = receipt['CMake_sequential_schedule'] = []
         receipt['CMake_schedule_parallel_jobs'] = 1
         for index, unit in enumerate(units):
+            check_console_graph()
             label = 'cmake-object-' + str(index)
             schedule.append({'phase':'object','target':unit['target'],'label':label,
                              'command_index':len(guard.commands),'timeout_seconds':360})
@@ -787,6 +1148,7 @@ def build(output, prep, expected_preparation_sha):
             unit['object_pin'] = guard.pin(Path(unit['object']), maximum=8 * 1024**2)
         receipt['CMake_actual_TU_dependencies'] = units
         for target in ('everest','p256m','mbedcrypto','mbedx509','mbedtls','ntwst'):
+            check_console_graph()
             label = 'cmake-archive-' + target
             schedule.append({'phase':'archive','target':target,'label':label,
                              'command_index':len(guard.commands),'timeout_seconds':120})
@@ -799,6 +1161,7 @@ def build(output, prep, expected_preparation_sha):
         for p in sorted(cmake.rglob('*.a')):
             engine_link_inputs[str(p)]=guard.pin(p,maximum=8*1024**2)
         for target in ('TLS13PROB','TIMEPROB','M98TLS'):
+            check_console_graph()
             check_scripts()
             label = 'cmake-link-' + target
             schedule.append({'phase':'PE-link','target':target,'label':label,
@@ -1014,6 +1377,8 @@ def build(output, prep, expected_preparation_sha):
         for path,pin in generator_pins.items():
             if guard.pin(Path(path),maximum=2*1024**2)!=pin:
                 raise ValueError('configured generator input changed during build')
+        check_console_graph()
+        receipt['Ninja_console_graph_before_after_equal']=True
         receipt['configured_generator_inputs_before_after_equal']=True
         current_system_cmake={str(p):guard.pin(p,maximum=8*1024**2)
             for p in sorted(system_cmake.rglob('*')) if p.is_file()}
@@ -1064,6 +1429,7 @@ def build(output, prep, expected_preparation_sha):
             'Ninja keepdepfile/keeprsp','SSPI TU object split with original flags/order',
             'Ninja objects/archives/final-links scheduled separately for before-link content pins',
             'sequential one graph object, dependency-ordered archive or PE target per command with jobs=1',
+            'literal console compile/link pools verified on all135 actual selected Ninja writers plus manifest regeneration edge',
             'readonly lifecycle linker script and -t trace','bounded full-stream ISA framing']
         receipt['result']='PASS_CURRENT_NATIVE_TLS_SSPI_BUILD_ONLY'
     except BaseException as error:
