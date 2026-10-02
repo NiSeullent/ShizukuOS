@@ -257,10 +257,10 @@ def source_files():
     return sorted(files)
 
 
-def command(argv, receipt, cwd=None, timeout=120):
+def command(argv, receipt, cwd=None, timeout=120, *, pass_fds=()):
     argv = list(map(str, argv))
     receipt["commands"].append(argv)
-    subprocess.run(argv, cwd=cwd, check=True, timeout=timeout, stdout=subprocess.DEVNULL)
+    subprocess.run(argv, cwd=cwd, check=True, timeout=timeout, stdout=subprocess.DEVNULL, pass_fds=pass_fds)
 
 
 def verify_esp_member(esp, name, expected, size, receipt, timeout=120):
@@ -307,6 +307,7 @@ def assemble(out, copies, loader, receipt):
     esp = out / "esp-win98.img"
     with esp.open("xb") as stream:
         stream.truncate(ESP_MIB << 20)
+        owned_esp = stable(os.fstat(stream.fileno()))[:3]
     command(["mkfs.vfat", "-F", "32", "-n", "SHZWIN98", "-i", "53485739", esp], receipt)
     command(["mmd", "-i", esp, "::/EFI", "::/EFI/BOOT", "::/EFI/SHIZUKU", "::/SHZDOS"], receipt)
     policy = out / "BOOT.INI"
@@ -314,12 +315,151 @@ def assemble(out, copies, loader, receipt):
     members = {"EFI/BOOT/BOOTX64.EFI": loader, "EFI/SHIZUKU/BOOT.INI": policy,
                **{"SHZDOS/" + name: source for name, source in copies.items()}}
     identities = {}
+    # Keep every ordinary boot/member producer. The large disk is inserted
+    # last, so no subsequent mtools writer changes its FAT/FSInfo metadata.
     for name, source in members.items():
+        if name == "SHZDOS/DISK.IMG":
+            continue
         size, pin = source.stat().st_size, file_sha(source)
         space(out, size)
         command(["mcopy", "-i", esp, source, "::/" + name], receipt)
         verify_esp_member(esp, name, pin, size, receipt)
         identities[name] = {"bytes": size, "sha256": pin}
+        space(out)
+    if "SHZDOS/DISK.IMG" in members:
+        source = safe_path(members["SHZDOS/DISK.IMG"])
+        size, pin = source.stat().st_size, file_sha(source)
+        space(out, size)
+        if stable(esp.stat())[:3] != owned_esp:
+            raise ValueError("fresh owned ESP inode/extent changed before disk insertion")
+        # Lazy worker execution: run_vm's frozen four-helper guards do not
+        # require a sibling packer merely to import this module.
+        helper = HERE / "sparse_fat32.py"
+        helper_size, helper_sha = helper.stat().st_size, file_sha(helper)
+        request_path, result_path = out / "disk-insertion-request.json", out / "disk-insertion.json"
+        request = {"schema": "shizukuos.sparse-fat32-request.v1", "member": "SHZDOS/DISK.IMG",
+                   "source": {"path": str(source), "bytes": size, "sha256": pin, "identity": list(stable(source.stat()))},
+                   "esp": {"path": str(safe_path(esp)), "bytes": esp.stat().st_size, "identity": list(stable(esp.stat()))},
+                   "producer": {"sha256": helper_sha, "bytes": helper_size}, "result": str(safe_path(result_path))}
+        raw = (json.dumps(request, indent=2) + "\n").encode()
+        with os.fdopen(os.open(request_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600), "wb") as stream:
+            if stream.write(raw) != len(raw):
+                raise OSError("short private insertion request write")
+            stream.flush(); os.fsync(stream.fileno())
+        request_sha = hashlib.sha256(raw).hexdigest()
+        # Only this held, read-leased helper FD crosses exec. The worker opens
+        # and owns source/ESP descriptions and leases independently.
+        bootstrap = ("import hashlib,os,sys\n"
+                     "fd,n,name,pin=int(sys.argv[1]),int(sys.argv[2]),sys.argv[3],sys.argv[4]\n"
+                     "parts=[];at=0\n"
+                     "while at<n:\n"
+                     " b=os.pread(fd,n-at,at)\n"
+                     " if not b:raise ValueError('held worker source EOF')\n"
+                     " parts.append(b);at+=len(b)\n"
+                     "body=b''.join(parts)\n"
+                     "if hashlib.sha256(body).hexdigest()!=pin:raise ValueError('held worker SHA differs')\n"
+                     "g={'__name__':'__main__','__file__':name,'_EXECUTED_SOURCE_SHA256':pin,'_EXECUTED_SOURCE_BYTES':n}\n"
+                     "sys.argv=[name,*sys.argv[5:]]\n"
+                     "exec(compile(body,name,'exec'),g)\n")
+        return_read, return_write = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            if os.fpathconf(return_write, 'PC_PIPE_BUF') < 512:
+                raise ValueError("512-byte atomic metadata return unavailable")
+            with read_leased(helper, helper_sha, helper_size, maximum=1 << 20) as (helper_fd, checkpoint):
+                checkpoint()
+                deadline = time.monotonic() + 120
+                try:
+                    command([sys.executable, "-B", "-c", bootstrap, str(helper_fd), str(helper_size), str(helper), helper_sha,
+                         "--request", request_path, "--request-sha256", request_sha, "--result", result_path, "--return-fd", str(return_write)],
+                            receipt, timeout=120, pass_fds=(helper_fd, return_write))
+                finally:
+                    os.close(return_write); return_write = None
+                packet = bytearray()
+                with selectors.DefaultSelector() as selector:
+                    selector.register(return_read, selectors.EVENT_READ)
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or not selector.select(remaining):
+                            raise TimeoutError("producer return exceeded original child deadline")
+                        part = os.read(return_read, 513-len(packet))
+                        if not part:
+                            break
+                        packet.extend(part)
+                        if len(packet) > 512:
+                            raise ValueError("producer return exceeded 512 bytes")
+                def unique_packet(pairs):
+                    value = {}
+                    for key, item in pairs:
+                        if key in value:
+                            raise ValueError("duplicate producer return field")
+                        value[key] = item
+                    return value
+                returned = json.loads(bytes(packet), object_pairs_hook=unique_packet)
+                if (type(returned) is not dict or set(returned) != {"schema", "bytes", "sha256"} or
+                    returned["schema"] != "shizukuos.sparse-fat32-return.v1" or type(returned["bytes"]) is not int or
+                    not 0 < returned["bytes"] <= 64 << 10 or type(returned["sha256"]) is not str or
+                    returned["sha256"] != pin_format(returned["sha256"])):
+                    raise ValueError("exact bounded producer return required")
+                checkpoint()
+                pinned_hash(request_path, request_sha, len(raw), maximum=64 << 10)
+                result_size, result_sha = returned["bytes"], returned["sha256"]
+                pinned_hash(result_path, result_sha, result_size, maximum=64 << 10)
+                def unique_result_object(pairs):
+                    value = {}
+                    for key, item in pairs:
+                        if key in value:
+                            raise ValueError("duplicate insertion result field")
+                        value[key] = item
+                    return value
+                with read_leased(result_path, result_sha, result_size, maximum=64 << 10) as (result_fd, result_checkpoint):
+                    result = json.loads(os.pread(result_fd, result_size, 0), object_pairs_hook=unique_result_object)
+                    if set(result) != {"schema", "status", "request_sha256", "producer_sha256", "producer_bytes", "source", "esp", "member", "fat", "result_inode", "Windows98_executed", "VM_executed", "Windows98_boot_verified"}:
+                        raise ValueError("exact insertion result schema required")
+                    if (result["schema"] != "shizukuos.sparse-fat32-result.v1" or
+                        result["status"] != "PRIVATE_FAT32_MEMBER_INSERTED_NOT_RUN" or
+                        result["request_sha256"] != request_sha or result["producer_sha256"] != helper_sha or result["producer_bytes"] != helper_size or
+                        any(result[k] is not False for k in ("Windows98_executed", "VM_executed", "Windows98_boot_verified")) or
+                        result["result_inode"] != list(stable(os.fstat(result_fd))[:2])):
+                        raise ValueError("insertion result source/request/owned inode differs")
+                    supplied = result["source"]
+                    if (set(supplied) != {"path", "bytes", "sha256", "identity", "before_sha256", "streamed_sha256", "lease_finalized"} or
+                        any(supplied[k] != request["source"][k] for k in ("path", "bytes", "sha256", "identity")) or
+                        list(stable(source.stat())) != supplied["identity"] or
+                        supplied["before_sha256"] != pin or supplied["streamed_sha256"] != pin or supplied["lease_finalized"] is not True):
+                        raise ValueError("insertion source identity/hash differs")
+                    target, member, fat = result["esp"], result["member"], result["fat"]
+                    if (set(target) != {"path", "bytes", "identity", "sha256", "independent_inode", "fsync_completed"} or
+                        target["path"] != request["esp"]["path"] or target["bytes"] != request["esp"]["bytes"] or
+                        target["identity"] != list(stable(esp.stat())) or target["identity"][:3] != list(owned_esp) or
+                        target["independent_inode"] is not True or target["fsync_completed"] is not True or
+                        file_sha(esp) != pin_format(target["sha256"])):
+                        raise ValueError("post-worker owned ESP identity/hash differs")
+                    if (set(member) != {"path", "bytes", "sha256", "clusters", "cluster_bytes", "zero_bytes_omitted", "data_bytes_written", "padding_zero_bytes"} or
+                        member["path"] != "SHZDOS/DISK.IMG" or member["bytes"] != size or member["sha256"] != pin or
+                        any(type(member[k]) is not int or member[k] < 0 for k in ("clusters", "cluster_bytes", "zero_bytes_omitted", "data_bytes_written", "padding_zero_bytes")) or
+                        member["zero_bytes_omitted"] + member["data_bytes_written"] != size or not member["cluster_bytes"] or
+                        not 512 <= member["cluster_bytes"] <= 65536 or member["cluster_bytes"] & (member["cluster_bytes"]-1) or
+                        member["clusters"] != (size+member["cluster_bytes"]-1)//member["cluster_bytes"] or
+                        member["clusters"] * member["cluster_bytes"] != size + member["padding_zero_bytes"] or
+                        set(fat) != {"copies", "free_clusters_before", "free_clusters_after", "next_free", "mirrors_verified", "FSInfo_copies"} or
+                        fat["copies"] != 2 or fat["FSInfo_copies"] != 2 or fat["mirrors_verified"] is not True or
+                        any(type(fat[k]) is not int or fat[k] < 0 for k in ("copies", "FSInfo_copies", "free_clusters_before", "free_clusters_after", "next_free")) or
+                        fat["free_clusters_before"] - fat["free_clusters_after"] != member["clusters"]):
+                        raise ValueError("insertion member/FAT accounting differs")
+                    verify_esp_member(esp, "SHZDOS/DISK.IMG", pin, size, receipt)
+                    for name, item in identities.items():
+                        verify_esp_member(esp, name, item["sha256"], item["bytes"], receipt)
+                    if list(stable(esp.stat())) != target["identity"] or list(stable(source.stat())) != supplied["identity"]:
+                        raise ValueError("ESP changed during independent member readback")
+                    result_checkpoint(); checkpoint()
+                    receipt["disk_insertion"] = {"result": result, "result_sha256": result_sha, "request_sha256": request_sha,
+                                                 "helper_sha256": helper_sha, "independent_mtype_verified": True}
+                checkpoint()
+        finally:
+            if return_write is not None:
+                os.close(return_write)
+            os.close(return_read)
+        identities["SHZDOS/DISK.IMG"] = {"bytes": size, "sha256": pin}
         space(out)
     return esp, identities
 
