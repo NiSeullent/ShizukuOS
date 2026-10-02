@@ -15,6 +15,7 @@
  * same, so overlapped reads with events, completion ports and completion routines behave as on Windows.
  */
 #include "ipc.h"
+#include "auth_policy.h"
 
 #define NT_ERROR(s) ((uint32_t)(s) >= 0xC0000000u)
 #define PORT_USER_PACKET_LIMIT 16384u
@@ -565,6 +566,8 @@ static int32_t file_rw(process_t *p, struct regs *r, uint32_t num, uint64_t a1, 
     struct ipc_iosb v = { 0, 0 };
     st = ipc_ref_handle(p, a1, OB_FILE, &fobj, 0);
     if (st) return st;
+    {file_t *file=fobj->u.file.file;
+     if(file&&file->node&&!shz_auth_node_access(p,file->node,num==SYS_NtWriteFile)){ob_deref(fobj);return STATUS_ACCESS_DENIED;}}
     st = irp_prepare(p, fobj, a2, a3, a4, iosb, num == SYS_NtReadFile ? IRP_READ : IRP_WRITE, &irp);
     ob_deref(fobj);
     if (st) return st;
@@ -622,6 +625,8 @@ static int32_t file_control(process_t *p, struct regs *r, uint32_t num, uint64_t
     if (st) return st;
     if (o->type != OB_FILE && o->type != OB_NPIPE && o->type != OB_SOCKET) { ob_deref(o); return STATUS_OBJECT_TYPE_MISMATCH; }
     if (o->type != OB_FILE) { ob_deref(o); return STATUS_INVALID_DEVICE_REQUEST; }   /* no device IOCTLs on pipes/sockets */
+    {file_t *file=o->u.file.file;
+     if(file&&file->node&&!shz_auth_node_access(p,file->node,1)){ob_deref(o);return STATUS_ACCESS_DENIED;}}
     st = irp_prepare(p, o, event, apc, apc_ctx, iosb, IRP_FLUSH, &irp);
     if (st) { ob_deref(o); return st; }
     f = o->u.file.file;

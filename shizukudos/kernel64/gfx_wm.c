@@ -61,6 +61,7 @@
  *  follows shz_nc_insets()).
  */
 #include "gfx.h"
+#include "gfx_auth.h"
 #include "../dead_screen/native.h"
 #include "gfx_present_layout.h"
 #include "gfx_written_coverage.h"
@@ -209,7 +210,12 @@ int wm_screen_rect(gwin_t *w, shz_rect_t *r)
  * pixels; every clip rectangle handed down is already inside the target. */
 static uint32_t *tgt_px;
 static uint32_t tgt_w, tgt_h;
-static void tgt_backbuffer(void) { tgt_px = g_fb.back; tgt_w = g_fb.width; tgt_h = g_fb.height; }
+static process_t *tgt_subject; /* PrintWindow uses its caller, screen uses foreground. */
+static void tgt_backbuffer(void) { tgt_px = g_fb.back; tgt_w = g_fb.width; tgt_h = g_fb.height;tgt_subject=0; }
+static int render_authorized(const gwin_t *w)
+{
+    return tgt_subject?gfx_auth_window(tgt_subject,w):gfx_auth_screen_window(w);
+}
 static inline uint32_t *tgt_at(int x, int y) { return tgt_px + (uint64_t)(uint32_t)y * tgt_w + (uint32_t)x; }
 
 static int is_active_root(const gwin_t *w) { return g_fg_q && g_fg_q->active == w->handle; }
@@ -352,7 +358,7 @@ static void compose_plain(gwin_t *w, int ox, int oy, const shz_rect_t *c);
 static void compose_win(gwin_t *w, int ox, int oy, const shz_rect_t *clip)
 {
     shz_rect_t wr = { ox, oy, ox + w->w, oy + w->h }, c;
-    if (w->msgonly || !(w->style & SHZ_WS_VISIBLE) || (w->style & SHZ_WS_MINIMIZE)) return;
+    if (!render_authorized(w) || w->msgonly || !(w->style & SHZ_WS_VISIBLE) || (w->style & SHZ_WS_MINIMIZE)) return;
     if (!rc_isect(clip, &wr, &c)) return;
     if (w->rgn) {                                                   /* SetWindowRgn: compose once per region rectangle */
         uint32_t i;
@@ -411,7 +417,7 @@ static void compose_plain(gwin_t *w, int ox, int oy, const shz_rect_t *c)
 /* Does w, composed normally, paint every pixel of r (screen) opaquely? Then nothing below it needs drawing. */
 static int covers_opaquely(const gwin_t *w, const shz_rect_t *r)
 {
-    if (w->msgonly || !(w->style & SHZ_WS_VISIBLE) || (w->style & SHZ_WS_MINIMIZE) || w->rgn || is_layered(w) ||
+    if (!render_authorized(w) || w->msgonly || !(w->style & SHZ_WS_VISIBLE) || (w->style & SHZ_WS_MINIMIZE) || w->rgn || is_layered(w) ||
         has_transparent_client(w)) return 0;
     return r->left >= w->x && r->top >= w->y && r->right <= w->x + w->w && r->bottom <= w->y + w->h;
 }
@@ -507,13 +513,28 @@ static void raise_top(gwin_t *w)
 }
 
 /* ---------------------------------------------------------------- activation */
+static void foreground_changed(gqueue_t *before)
+{
+    uint64_t n,i;shz_rect_t all={0,0,(int32_t)g_fb.width,(int32_t)g_fb.height};
+    if(before==g_fg_q)return;
+    if(before && g_fg_q && gfx_auth_queue(before->proc,g_fg_q) && gfx_auth_queue(g_fg_q->proc,before))return;
+    /* Discard shared pixels and historical input before a different authority
+     * gets the screen. Existing per-window surfaces remain kernel-owned. */
+    n=(uint64_t)g_fb.width*g_fb.height;
+    if(g_fb.back)memset(g_fb.back,0,(size_t)n*4);
+    if(g_under)memset(g_under,0,(size_t)n*4);
+    if(DESKTOP->surf)for(i=0;i<(uint64_t)(uint32_t)DESKTOP->sw*(uint32_t)DESKTOP->sh;i++)DESKTOP->surf[i]=SHZ_DESKTOP_RGB;
+    gin_auth_transition();wm_damage(&all);
+}
 static uint64_t wm_activate(gwin_t *top, int raise)
 {
     gqueue_t *q = top->q;
+    gqueue_t *before=g_fg_q;
     const uint64_t prev = g_fg_q ? g_fg_q->active : 0;
     q->active = top->handle;                                            /* focus is NOT moved here: user32's DefWindowProc(WM_ACTIVATE) calls SetFocus */
     g_fg_q = q;
     if (raise) raise_top(top);
+    foreground_changed(before);
     if (prev && prev != top->handle) {                                  /* its caption turns inactive */
         gwin_t *pw = wm_lookup(prev);
         if (pw) wm_damage_window(pw);
@@ -527,6 +548,7 @@ static void wm_fix_activation(void)
 {
     unsigned i;
     gwin_t *w;
+    gqueue_t *before=g_fg_q;
     for (i = 0; i < GFX_MAX_QUEUES; ++i) {
         gqueue_t *q = &g_queues[i];
         gwin_t *a;
@@ -546,9 +568,11 @@ static void wm_fix_activation(void)
         if (w->q && wm_is_visible(w) && !(w->exstyle & SHZ_WS_EX_NOACTIVATE) && !(w->style & SHZ_WS_DISABLED)) {
             w->q->active = w->handle;
             g_fg_q = w->q;
+            foreground_changed(before);
             wm_damage_window(w);                                        /* its caption turns active */
             return;
         }
+    foreground_changed(before);
 }
 
 /* ---------------------------------------------------------------- window life cycle */
@@ -762,7 +786,11 @@ static int32_t sys_classop(process_t *cur, uint64_t arg)
     case SHZ_CLASS_GETNAME:
         w = wm_lookup(o.hwnd);
         if (!w || !w->cls) { st = STATUS_INVALID_HANDLE; break; }
+        if(!gfx_auth_window(cur,w)){st=STATUS_ACCESS_DENIED;break;}
         c = w->cls;
+        if(o.op==SHZ_CLASS_SETLONG && (!wm_owner_ok(cur,w) || c->pid!=(uint32_t)cur->pid)) {
+            st=STATUS_ACCESS_DENIED;break;
+        }
         if (o.op == SHZ_CLASS_GETNAME) {
             uint32_t n = c->name_len, cap = o.buf_len;
             if (cap == 0) { st = STATUS_BUFFER_TOO_SMALL; break; }
@@ -790,7 +818,7 @@ static int32_t sys_classop(process_t *cur, uint64_t arg)
             case -8: slot = &c->menu; break;
             case -24: slot = &c->wndproc; break;
             default:
-                if (o.index >= 0 && o.index + 8 <= c->cb_cls && c->extra) {
+                if (o.index >= 0 && o.index <= (int64_t)c->cb_cls - 8 && c->extra) {
                     uint64_t x;
                     memcpy(&x, c->extra + o.index, 8);
                     v = x;
@@ -938,14 +966,18 @@ static int32_t sys_wquery(process_t *cur, uint64_t arg)
     mutex_lock(&gfx_lock);
     if (q.what == SHZ_WQ_SHELL) {
         gq_reap_dead();                  /* a just-exited owner must not leave a stale shell until gfxd's next tick */
-        q.v0 = wm_lookup(shell_window) ? shell_window : 0;
-        if (!q.v0) shell_window = 0;
+        if (!wm_lookup(shell_window)) shell_window = 0;
+        q.v0 = gfx_auth_handle(cur,shell_window);
         goto done;
     }
     w = q.hwnd ? wm_lookup(q.hwnd) : 0;
-    if (q.what == SHZ_WQ_DESKTOP) { q.v0 = DESKTOP->handle; goto done; }
-    if (q.what == SHZ_WQ_EXISTS) { q.v0 = w != 0; goto done; }
+    if (q.what == SHZ_WQ_DESKTOP) {
+        if(!gfx_auth_desktop(cur,0)){st=STATUS_ACCESS_DENIED;goto done;}
+        q.v0 = DESKTOP->handle; goto done;
+    }
+    if (q.what == SHZ_WQ_EXISTS) { q.v0 = gfx_auth_window(cur,w); goto done; }
     if (!w) { st = STATUS_INVALID_HANDLE; goto done; }
+    if(!gfx_auth_window(cur,w)){st=STATUS_ACCESS_DENIED;goto done;}
     switch (q.what) {
     case SHZ_WQ_RECT: {
         int32_t ox, oy;
@@ -971,8 +1003,8 @@ static int32_t sys_wquery(process_t *cur, uint64_t arg)
     case SHZ_WQ_USERDATA: q.v0 = w->userdata; break;
     case SHZ_WQ_WNDPROC: q.v0 = w->wndproc; break;
     case SHZ_WQ_HINSTANCE: q.v0 = w->hinstance; break;
-    case SHZ_WQ_PARENT: q.v0 = win_parent_for_query(w); break;
-    case SHZ_WQ_OWNER: q.v0 = w->owner && wm_lookup(w->owner) ? w->owner : 0; break;
+    case SHZ_WQ_PARENT: q.v0 = gfx_auth_handle(cur,win_parent_for_query(w)); break;
+    case SHZ_WQ_OWNER: q.v0 = gfx_auth_handle(cur,w->owner); break;
     case SHZ_WQ_THREAD: q.v0 = w->tid; q.v1 = w->pid; break;
     case SHZ_WQ_TEXT: {
         uint32_t n;
@@ -1014,7 +1046,7 @@ static int32_t sys_wquery(process_t *cur, uint64_t arg)
         case 5: o = w->child; break;
         default: st = STATUS_INVALID_PARAMETER;
         }
-        q.v0 = o ? o->handle : 0;
+        q.v0 = gfx_auth_window(cur,o) ? o->handle : 0;
         break;
     case SHZ_WQ_ANCESTOR:
         switch (q.index) {                                  /* GA_PARENT, GA_ROOT, GA_ROOTOWNER */
@@ -1023,11 +1055,11 @@ static int32_t sys_wquery(process_t *cur, uint64_t arg)
         case 3: o = wm_toplevel(w); while (o->owner && wm_lookup(o->owner)) o = wm_toplevel(wm_lookup(o->owner)); break;
         default: st = STATUS_INVALID_PARAMETER;
         }
-        q.v0 = o ? o->handle : 0;
+        q.v0 = gfx_auth_window(cur,o) ? o->handle : 0;
         break;
     case SHZ_WQ_ISCHILD: {
         gwin_t *anc = wm_lookup(q.v0);
-        q.v0 = anc && anc != w && wm_is_descendant(anc, w) && anc != DESKTOP;
+        q.v0 = gfx_auth_window(cur,anc) && anc != w && wm_is_descendant(anc, w) && anc != DESKTOP;
         break;
     }
     default: st = STATUS_INVALID_PARAMETER;
@@ -1216,7 +1248,7 @@ static int32_t sys_showwindow(process_t *cur, uint64_t arg)
         gq_invalidate(w, &full, 1, SHZ_INV_ERASE);
     }
     if (activate && w->parent == DESKTOP && !(w->exstyle & SHZ_WS_EX_NOACTIVATE) && (w->style & SHZ_WS_VISIBLE) &&
-        !(w->style & SHZ_WS_MINIMIZE) && !(w->style & SHZ_WS_DISABLED)) {
+        !(w->style & SHZ_WS_MINIMIZE) && !(w->style & SHZ_WS_DISABLED) && gfx_auth_activate(cur,w)) {
         s.prev_active = wm_activate(w, 1);
         s.activated = 1;
     }
@@ -1286,7 +1318,7 @@ static int32_t sys_setwindowpos(process_t *cur, uint64_t arg)
     if (moved) p.changed |= SHZ_POS_MOVED;
     if (sized) p.changed |= SHZ_POS_SIZED;
     if (!(p.flags & SWP_NOACTIVATE) && !(p.flags & SWP_NOZORDER) && w->parent == DESKTOP && wm_is_visible(w) &&
-        !(w->exstyle & SHZ_WS_EX_NOACTIVATE) && !(w->style & SHZ_WS_DISABLED))
+        !(w->exstyle & SHZ_WS_EX_NOACTIVATE) && !(w->style & SHZ_WS_DISABLED) && gfx_auth_activate(cur,w))
         p.prev_active = wm_activate(w, 0);
     p.new_rect.left = w->x; p.new_rect.top = w->y; p.new_rect.right = w->x + w->w; p.new_rect.bottom = w->y + w->h;
     if (wm_is_visible(w) && wm_screen_rect(w, &after)) { if (was_vis) rc_union(&after, &before); wm_damage(&after); }
@@ -1329,16 +1361,18 @@ static int32_t sys_focus(process_t *cur, uint64_t arg)
         if (!w) { st = STATUS_INVALID_HANDLE; break; }
         w = wm_toplevel(w);
         if (w->q != q) { st = STATUS_ACCESS_DENIED; break; }
+        if(!gfx_auth_activate(cur,w)){st=STATUS_ACCESS_DENIED;break;}
         f.result = wm_lookup(q->active) ? q->active : 0;
         f.result2 = wm_activate(w, 1);
         wm_damage_window(w);
         break;
-    case SHZ_FOCUS_GETFOREGROUND: f.result = g_fg_q && wm_lookup(g_fg_q->active) ? g_fg_q->active : 0; break;
+    case SHZ_FOCUS_GETFOREGROUND: f.result = g_fg_q ? gfx_auth_handle(cur,g_fg_q->active) : 0; break;
     case SHZ_FOCUS_SETFOREGROUND:
         w = wm_lookup(f.hwnd);
         if (!w) { st = STATUS_INVALID_HANDLE; break; }
         w = wm_toplevel(w);
         if (!wm_is_visible(w) || w == DESKTOP) { st = STATUS_UNSUCCESSFUL; break; }
+        if(!gfx_auth_activate(cur,w)){st=STATUS_ACCESS_DENIED;break;}
         f.result2 = wm_activate(w, 1);
         f.result = w->handle;
         wm_damage_window(w);
@@ -1361,15 +1395,16 @@ done:
     return st;
 }
 
-static uint64_t enum_collect(gwin_t *parent, const shz_enum_t *e, uint64_t *out, uint64_t max, uint64_t n)
+static uint64_t enum_collect(process_t *cur,gwin_t *parent, const shz_enum_t *e, uint64_t *out, uint64_t max, uint64_t n)
 {
     gwin_t *c;
     for (c = parent->child; c; c = c->next) {
+        if(!gfx_auth_window(cur,c))continue;
         if (!(e->flags & SHZ_ENUM_THREAD) || c->tid == e->tid) {
             if (n < max) out[n] = c->handle;
             ++n;
         }
-        if (e->flags & SHZ_ENUM_RECURSE) n = enum_collect(c, e, out, max, n);
+        if (e->flags & SHZ_ENUM_RECURSE) n = enum_collect(cur,c, e, out, max, n);
     }
     return n;
 }
@@ -1386,7 +1421,8 @@ static int32_t sys_enumwindows(process_t *cur, uint64_t arg)
     mutex_lock(&gfx_lock);
     parent = e.parent ? wm_lookup(e.parent) : DESKTOP;
     if (!parent) { st = STATUS_INVALID_HANDLE; goto done; }
-    n = enum_collect(parent, &e, tmp, e.max, 0);
+    if(parent!=DESKTOP && !gfx_auth_window(cur,parent)){st=STATUS_ACCESS_DENIED;goto done;}
+    n = enum_collect(cur,parent, &e, tmp, e.max, 0);
     if (n > e.max) n = e.max;
     if (n && copy_to_user(cur, e.out, tmp, n * 8)) st = STATUS_ACCESS_VIOLATION;
     e.count = n;
@@ -1427,6 +1463,7 @@ static gwin_t *hit_test(gwin_t *parent, int ox, int oy, int x, int y)
 {
     gwin_t *c;
     for (c = parent->child; c; c = c->next) {
+        if(!gfx_auth_screen_window(c))continue;
         const int cx = ox + c->x, cy = oy + c->y;
         gwin_t *r;
         if (c->msgonly || !(c->style & SHZ_WS_VISIBLE) || (c->style & SHZ_WS_MINIMIZE)) continue;
@@ -1446,6 +1483,7 @@ static gwin_t *input_hit(gwin_t *parent, int ox, int oy, int x, int y)
 {
     gwin_t *c;
     for (c = parent->child; c; c = c->next) {
+        if(!gfx_auth_screen_window(c))continue;
         const int cx = ox + c->x, cy = oy + c->y;
         gwin_t *r;
         if (c->msgonly || !(c->style & SHZ_WS_VISIBLE) || (c->style & SHZ_WS_MINIMIZE)) continue;
@@ -1469,6 +1507,7 @@ static int32_t sys_hittest(process_t *cur, int64_t x, int64_t y, uint64_t out)
     uint64_t h;
     mutex_lock(&gfx_lock);
     w = hit_test(DESKTOP, 0, 0, (int)x, (int)y);
+    if(!gfx_auth_window(cur,w?w:DESKTOP)){mutex_unlock(&gfx_lock);return STATUS_ACCESS_DENIED;}
     h = w ? w->handle : DESKTOP->handle;
     mutex_unlock(&gfx_lock);
     return copy_to_user(cur, out, &h, 8) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
@@ -1556,12 +1595,14 @@ int32_t gfx_syscall_present(process_t *cur, uint64_t arg)
     framebuffers_before = g_fb.stat_presents;
     w = p.hwnd == DESKTOP->handle ? DESKTOP : wm_lookup(p.hwnd);
     if (!w) { st = STATUS_INVALID_HANDLE; goto done; }
+    if(w==DESKTOP ? !gfx_auth_desktop(cur,1) : !gfx_auth_window(cur,w)){st=STATUS_ACCESS_DENIED;goto done;}
     /* Every window currently belongs to the same desktop. GetDC on Windows
      * permits drawing a window owned by another process on that desktop:
      * Chromium's software GPU worker uses exactly this path. The HWND must
      * still be live, and all pixel reads below use the CALLER's address space.
      * Keep mutation/readback ownership checks in the other window operations.
-     * A future multi-desktop/session backend must check desktop access here.
+     * Subject gates above retain same-subject worker drawing, while denying a
+     * different subject or a stale owning queue. This is one shared desktop.
      */
     sw = w == DESKTOP && !w->surf ? (int32_t)g_fb.width : w->sw;
     sh = w == DESKTOP && !w->surf ? (int32_t)g_fb.height : w->sh;
@@ -1687,6 +1728,7 @@ static int32_t winop_print(process_t *cur, gwin_t *w, shz_winop_t *o)
     buf = gfx_pages_alloc((uint64_t)pw * (uint64_t)ph * 4);
     if (!buf) return STATUS_NO_MEMORY;
     tgt_px = buf; tgt_w = (uint32_t)pw; tgt_h = (uint32_t)ph;
+    tgt_subject=cur;
     {
         const shz_rect_t all = { 0, 0, pw, ph };
         if (is_layered(w) && w->lmode == 2 && w->layer && !client_only) {
@@ -1730,6 +1772,7 @@ static int32_t sys_winop(process_t *cur, uint64_t arg)
     mutex_lock(&gfx_lock);
     w = wm_lookup(o.hwnd);
     if (!w) { st = STATUS_INVALID_HANDLE; goto done; }
+    if(!gfx_auth_window(cur,w)){st=STATUS_ACCESS_DENIED;goto done;}
     if (!wm_owner_ok(cur, w) && o.op != SHZ_WOP_GET_LAYERED && o.op != SHZ_WOP_GET_REGION && o.op != SHZ_WOP_GET_AFFINITY) {
         st = STATUS_ACCESS_DENIED;
         goto done;

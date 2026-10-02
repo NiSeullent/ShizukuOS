@@ -9,6 +9,7 @@
  * so code that opens a handle with too few rights fails as it would on Windows.
  */
 #include "ipc.h"
+#include "auth_policy.h"
 #include "../kcommon/nt_process_priority.h"
 
 #define PROCESS_CREATE_THREAD 0x0002u
@@ -715,6 +716,7 @@ static int32_t sys_open_process(process_t *p, uint64_t ph, uint64_t access, uint
         irq_restore(f);
     }
     if (!o) return STATUS_INVALID_CID;
+    if(!shz_auth_process_access(p,o->u.proc.p)){ob_deref(o);return STATUS_ACCESS_DENIED;}
     return ipc_give_handle(p, o, max_allowed((uint32_t)access, PROCESS_ALL_ACCESS), (a.attributes & OBJ_INHERIT_ATTR) != 0, ph, 0);
 }
 
@@ -730,6 +732,7 @@ static int32_t sys_open_thread(process_t *p, uint64_t ph, uint64_t access, uint6
     o = thread_object_by_tid(cid.tid);
     if (!o) return STATUS_INVALID_CID;
     if (cid.pid && o->u.thr.pid != cid.pid) { ob_deref(o); return STATUS_INVALID_CID; }
+    if(!shz_auth_thread_access(p,o->u.thr.pid)){ob_deref(o);return STATUS_ACCESS_DENIED;}
     return ipc_give_handle(p, o, max_allowed((uint32_t)access, THREAD_ALL_ACCESS), (a.attributes & OBJ_INHERIT_ATTR) != 0, ph, 0);
 }
 
@@ -932,6 +935,10 @@ static int32_t sys_duplicate(process_t *p, struct regs *r, uint64_t hsp, uint64_
              * any expansion must pass its current security descriptor. */
             if (a & MAXIMUM_ALLOWED_ACCESS) a = access | (a & ~MAXIMUM_ALLOWED_ACCESS);
             st = ipc_section_duplicate_access(o, access, &a);
+        }
+        if(!st&&o->type!=OB_SECTION&&!(options&DUPLICATE_SAME_ACCESS)) {
+            if(a&MAXIMUM_ALLOWED_ACCESS)a=(a&~MAXIMUM_ALLOWED_ACCESS)|access;
+            if(a&~access)st=STATUS_ACCESS_DENIED;
         }
         if (!st) {
             ob_ref(o);

@@ -2,6 +2,7 @@
  * Kernel64 system-call dispatcher (Windows x64 register convention, see ntsys.h).
  */
 #include "proc_internal.h"
+#include "auth_policy.h"
 
 extern void count_syscall(void);
 extern void check_kill(void);
@@ -240,6 +241,7 @@ int syscall_dispatch(struct regs *r)
     count_syscall();
     if (!p) { r->rax = (uint64_t)(int64_t)STATUS_INVALID_SYSTEM_SERVICE; return 0; }
     sti();                                              /* SFMASK cleared IF; kernel work is preemptible */
+    if (!shz_auth_syscall_allowed(p,num)) { st=STATUS_ACCESS_DENIED; goto done; }
     if (ipc_syscall_override(p, r, num, a1, a2, a3, a4, &st))
         goto done;
     switch (num) {

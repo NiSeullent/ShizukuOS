@@ -14,6 +14,7 @@
  * program's own output.
  */
 #include "fs.h"
+#include "auth_policy.h"
 #include "net.h"
 #include "vfs_mounts.h"
 
@@ -71,6 +72,17 @@ unsigned k64_desktop(void)
     int64_t code = -1;
     int faulted = 1, pid, reaped, flush;
     int32_t st;
+    if(k64_cmdline_has("shz.accounts=setup")) {
+        const char *enroll="C:\\SHZ\\SYS64\\ELEVATE.EXE";
+        fsnode_t *enrollment=fs_lookup(enroll);
+        ldr_create_ex_t ex;
+        if(!enrollment||!enrollment->readonly||enrollment->backing!=FSB_RAM)return 1;
+        memset(&ex,0,sizeof ex);ex.prepare=shz_auth_bootstrap_prepare;
+        st=ldr_create_process_ex(0,enroll,"ELEVATE.EXE --enroll admin","C:\\SHZ",&ex,&p,&t);
+        if(st)return 1;
+        if(proc_wait(p->pid,&code,&faulted)||code||faulted)return 1;
+        p=0;t=0;
+    }
     kprintf("K64 desktop: production profile (self-tests not run)\n");
     if (net_ensure_init()) {
         kprintf("K64 desktop: result network-init-failed\n");

@@ -28,6 +28,7 @@
  *  hardware (SendInput can inject WM_MOUSEHWHEEL), extra mouse buttons on PS/2 hardware, touch and pen, low-level hooks.
  */
 #include "gfx.h"
+#include "gfx_auth.h"
 #include "../dead_screen/native.h"
 #include "pci.h"
 #include "../win64/include/shzpointer.h"
@@ -295,7 +296,8 @@ static void state_key(uint8_t *st, uint8_t vk, int down)
 void gin_queue_init(gqueue_t *q)
 {
     unsigned i;
-    for (i = 0; i < 256; ++i) q->keys[i] = g_async[i];
+    int allowed=!g_fg_q || gfx_auth_queue(q->proc,g_fg_q);
+    for (i = 0; i < 256; ++i) q->keys[i] = allowed?g_async[i]:0;
     q->cursor = 0;
 }
 
@@ -349,10 +351,11 @@ static int hotkey_fire(uint8_t vk, int repeat)
         gqueue_t *q = 0;
         unsigned k;
         if (!h->used || h->vk != vk || (h->mods & 0xf) != mods) continue;
-        if (repeat && (h->mods & MOD_NOREPEAT)) return 1;
         for (k = 0; k < GFX_MAX_QUEUES; ++k)
             if (g_queues[k].used && g_queues[k].thread_id == h->thread_id) q = &g_queues[k];
-        if (q) gq_post(q, h->hwnd, WM_HOTKEY, (uint64_t)h->id, (int64_t)(mods | ((uint32_t)vk << 16)));
+        if(!q || !g_fg_q || !gfx_auth_queue(q->proc,g_fg_q) || !gfx_auth_queue(q->proc,q))continue;
+        if (repeat && (h->mods & MOD_NOREPEAT)) return 1;
+        gq_post(q, h->hwnd, WM_HOTKEY, (uint64_t)h->id, (int64_t)(mods | ((uint32_t)vk << 16)));
         return 1;
     }
     return 0;
@@ -369,6 +372,8 @@ typedef struct { int used; uint32_t pid, dev, flags; uint64_t target; } grawreg_
 static grawreg_t g_rawreg[GIN_RAWREG];
 static shz_rawrec_t *g_raw;                                 /* [GIN_RAWRING] (gin_tables_init) */
 static uint32_t g_raw_ids[GIN_RAWRING];
+static gqueue_t *g_raw_owner[GIN_RAWRING];
+static uint32_t g_raw_thread[GIN_RAWRING];
 static uint32_t g_raw_next = 1;
 static int g_injecting;                                     /* inside SendInput: raw records have no device handle */
 
@@ -403,12 +408,14 @@ static void raw_post(uint32_t dev, shz_rawrec_t *rec)
         if (r->target && !w) { r->used = 0; continue; }             /* the target window is gone */
         if (!w && fg) { w = wm_lookup(g_fg_q->focus); if (!w) w = wm_lookup(g_fg_q->active); }
         if (!w || !w->q) continue;
+        if(w->pid!=r->pid || !g_fg_q || !gfx_auth_queue(w->q->proc,w->q) || !gfx_auth_queue(w->q->proc,g_fg_q))continue;
         id = g_raw_next++;
         if (!g_raw_next) g_raw_next = 1;
         slot = id % GIN_RAWRING;
         rec->wparam = fg ? 0u : 1u;                                 /* RIM_INPUT / RIM_INPUTSINK */
         g_raw[slot] = *rec;
         g_raw_ids[slot] = id;
+        g_raw_owner[slot]=w->q;g_raw_thread[slot]=w->q->thread_id;
         gq_post(w->q, w->handle, WM_INPUT_, rec->wparam, (int64_t)id);
     }
 }
@@ -523,10 +530,10 @@ static gwin_t *mouse_target(int *captured)
     gwin_t *w;
     unsigned i;
     *captured = 0;
-    if (g_fg_q && (w = wm_lookup(g_fg_q->capture)) != 0) { *captured = 1; return w; }
+    if (g_fg_q && (w = wm_lookup(g_fg_q->capture)) != 0 && gfx_auth_screen_window(w)) { *captured = 1; return w; }
     if (g_buttons)
         for (i = 0; i < GFX_MAX_QUEUES; ++i)
-            if (g_queues[i].used && (w = wm_lookup(g_queues[i].capture)) != 0) { *captured = 1; return w; }
+            if (g_queues[i].used && (w = wm_lookup(g_queues[i].capture)) != 0 && gfx_auth_screen_window(w)) { *captured = 1; return w; }
     w = wm_input_hit(g_ptr_x, g_ptr_y);
     if (w && (wm_toplevel(w)->style & SHZ_WS_DISABLED)) return 0;
     return w;
@@ -877,6 +884,13 @@ int32_t gfx_syscall_input(process_t *cur, uint64_t arg)
     q = gq_current(1);
     if (!q) { st = STATUS_NO_MEMORY; goto out; }
     in.out0 = in.out1 = 0;
+    switch(in.op) {
+    case SHZ_IN_GETASYNCKEYSTATE:case SHZ_IN_GETCURSORPOS:case SHZ_IN_SETCURSORPOS:
+    case SHZ_IN_SENDINPUT:case SHZ_IN_CLIPCURSOR:case SHZ_IN_GETCLIPCURSOR:
+    case SHZ_IN_CURSORINFO:case SHZ_IN_INFO:
+        if(!gfx_auth_desktop(cur,1)){st=STATUS_ACCESS_DENIED;goto out;}
+        break;
+    }
     switch (in.op) {
     case SHZ_IN_GETKEYSTATE: in.out0 = q->keys[in.a & 0xff]; break;
     case SHZ_IN_GETKEYBOARDSTATE:
@@ -1022,6 +1036,8 @@ int32_t gfx_syscall_input(process_t *cur, uint64_t arg)
     case SHZ_IN_RAWGET: {
         const uint32_t id = (uint32_t)in.a, slot = id % GIN_RAWRING;
         if (!id || g_raw_ids[slot] != id) { st = STATUS_INVALID_HANDLE; break; }
+        if(!g_raw_owner[slot] || g_raw_owner[slot]->thread_id!=g_raw_thread[slot] ||
+           !gfx_auth_queue(cur,g_raw_owner[slot])){st=STATUS_ACCESS_DENIED;break;}
         if (in.buf_len < sizeof(shz_rawrec_t) || copy_to_user(cur, in.buf, &g_raw[slot], sizeof(shz_rawrec_t))) st = STATUS_ACCESS_VIOLATION;
         break;
     }
@@ -1052,6 +1068,19 @@ void gin_queue_gone(gqueue_t *q)
     unsigned i;
     for (i = 0; i < GIN_HOTKEYS; ++i)
         if (g_hot[i].used && g_hot[i].thread_id == q->thread_id) g_hot[i].used = 0;
+    for(i=0;i<GIN_RAWRING;i++)if(g_raw_owner[i]==q){g_raw_ids[i]=0;g_raw_owner[i]=0;g_raw_thread[i]=0;}
+}
+
+void gin_auth_transition(void)
+{
+    unsigned i;
+    memset(g_pressed,0,sizeof g_pressed);g_clip_on=0;
+    memset(g_raw_ids,0,sizeof g_raw_ids);memset(g_raw_owner,0,sizeof g_raw_owner);memset(g_raw_thread,0,sizeof g_raw_thread);
+    for(i=0;i<GFX_MAX_QUEUES;i++)if(g_queues[i].used) {
+        memset(g_queues[i].keys,0,sizeof g_queues[i].keys);
+        if(!g_fg_q || !gfx_auth_queue(g_fg_q->proc,g_queues+i) || !gfx_auth_queue(g_queues[i].proc,g_fg_q))g_queues[i].capture=0;
+    }
+    pointer_update();
 }
 
 /* A window is being destroyed (lock held): hot keys registered for it go away. */

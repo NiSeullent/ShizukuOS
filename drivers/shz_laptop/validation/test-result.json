@@ -1,0 +1,1442 @@
+{
+  "schema": 1,
+  "module": "common controller sessions and laptop protocol adapters",
+  "sources_sha256": {
+    "drivers/ahci_native/ahci.c": "99351bcf1638cbb10d68c6e6249cbec52e373e314f124939740ae38f5a5c0fe4",
+    "drivers/ahci_native/ahci.h": "3da5bb0f21675c16faa227032e8bf4661d1f8dedd686c0769164ec4deb05170f",
+    "drivers/ahci_native/ahci_clock.h": "7cda7aee4f8b79e92d6f718e1a2fe962e69eced51ec416510b2853314e5b169f",
+    "drivers/ahci_native/test_ahci.c": "d90261f0b871e55cddfd598be2ddd8e10235f978a05cd3ea71cb083ced233a84",
+    "drivers/common/README.md": "4f4904b3b9587028fecb8caf2219fdb9c2af2d0f7d0d56cb54e4c123cd3053cc",
+    "drivers/common/device.c": "af4ce83770b6d86b7581aa857f651b69cb86eb31c117c8fb8c2eb88d8f3e211c",
+    "drivers/common/device.h": "0b16e71c99a59d6f25630e5e99f35c2260fe2df6584312455784e60bb90fde84",
+    "drivers/common/native_sessions.c": "7912ba0369becb88bed813915cf444b3701ef46614769077d793fc8cc6f5448e",
+    "drivers/common/native_sessions.h": "91060572727fc15c9f9eabe6c0866699322fc1b6547adca6e7acf845e8423bdf",
+    "drivers/common/test_ahci_session.c": "2ffe8a6a3d2316ead4496214b18b47076df8a0b53ed56051215683dd52574b8a",
+    "drivers/common/test_device.c": "79dbac524352e9d7d5492feefb856786ed8612471e95921b4d4484c79b6d4af2",
+    "drivers/common/test_xhci_session.c": "b082fc8667c57ba06490514b505e05959262e873ff7eedda022b41a7e47d7744",
+    "drivers/shz_laptop/README.md": "f73ef3ea2bb6681f8ce317d7d172c12397a688c320cdabd938f7906ab2c10390",
+    "drivers/shz_laptop/acpi.c": "481b7063efa10231d46a9006e25e891b3013fb85a27bbd97ba362a75010c2ab9",
+    "drivers/shz_laptop/ec.c": "42a7f89e597c0e3005013763d042f11934c0f78be4f26f9c3ee66d039bf432aa",
+    "drivers/shz_laptop/hid.c": "876280c1a9b3333d95f7030758c1d14516d18b571cd7568230cb558189c333b5",
+    "drivers/shz_laptop/hidi2c.c": "b9fced3cc7c72a9ebfbb3e01a37991f88c301e229cb45a1792afd310b2923493",
+    "drivers/shz_laptop/internal.h": "4234f1c6b211edbe0ce016f369994b3cc85b53bafaea7bc1fe33d2d12a5a64af",
+    "drivers/shz_laptop/laptop.h": "b8f32e49b55aea8788128cda8a6fac8bb4618709be974b262845caf5dcb84899",
+    "drivers/shz_laptop/sensors.c": "b5ee57d1252f5de3b11135a7deb38cd5c560d128da9f087c74f8dac8b27aab4c",
+    "drivers/shz_laptop/test.py": "e0634047b682309dd5f9a6db42b98c0038482e48c3976b552ca17cbc00746094",
+    "drivers/shz_laptop/test_acpi.c": "3473f02e29ebb7332eb93427e6f6c0a3dd068302afa7d4f3ea10d711010f7253",
+    "drivers/shz_laptop/test_ec.c": "b8f298da589e2fd0c58aba8b3239e52afcdd3128b864540b661d3a491d5bb75d",
+    "drivers/shz_laptop/test_hid.c": "70f795f4a036c06f79fed527d20f25da0fc36745f29779d2255df3244b40b95d",
+    "drivers/shz_laptop/test_sensors.c": "dd22adc6eec53cbab768c369ef45b226f5e755935762db05d7b50732826dadef",
+    "drivers/xhci_native/test_xhci.c": "baa6518ab4db3523632ef0029844b4eda92f51c5d9e82a7cab9cbfc384ee8f57",
+    "drivers/xhci_native/xhci.c": "7024e5dca32f08d29b1b0cf2a04e9b02fa51ef1c18cc6752027216affa6af277",
+    "drivers/xhci_native/xhci.h": "abe09154388f0c336950433b6063c7fe0f774e1e559882dea81c268895a8303d",
+    "drivers/xhci_native/xhci_internal.h": "f67712f46e9fe78d54397216300a924fe0932cb2bb39ba1b843af1863ccf262a"
+  },
+  "host": {
+    "gcc": {
+      "compiler": "gcc (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+      "suites": [
+        {
+          "test": "drivers/common/test_device.c",
+          "passed": true,
+          "assertions": 72,
+          "log_sha256": "f913447957f27ded9906bfbd5f982f079f32290dc611b2fc41729e6e26d29eba",
+          "binary_sha256": "5ad01a6014e73477eb26ccad36be6dc0be2149c32a54fd07cd7c0acb1d3de116",
+          "output": "common lifecycle: 72 assertions PASS\n"
+        },
+        {
+          "test": "drivers/common/test_ahci_session.c",
+          "passed": true,
+          "assertions": 15292704,
+          "log_sha256": "f896d5ccc6bb44de60e3201aa69b5b3b5b27e0ed8fdd823cd4e80445a137a04a",
+          "binary_sha256": "a610f2d827f65b57b1efc93018b77dfc1edc4a3ae24f8d4f5f38a91af12b567b",
+          "output": "Fault injected after each of 92 MMIO/allocation/sync operations\nWrite path: fault injected after each of 114 MMIO/allocation/sync operations\nBatch read: fault injected after each of 92 callbacks\nBatch write: fault injected after each of 92 callbacks\nPASS: AHCI native core 15291823 assertions; no model DMA freed while active\nAHCI actual core/session: 15292704 cumulative assertions PASS\n"
+        },
+        {
+          "test": "drivers/common/test_xhci_session.c",
+          "passed": true,
+          "assertions": 3032878,
+          "log_sha256": "a5d301a9c052dd05f0e5d2b1427d6be71098cedd2d598c7f49f130f3604b8b82",
+          "binary_sha256": "caff7872f467c046973e084ee9eff61bdef989243a0e1df90a4d85e40b32a889",
+          "output": "Injected failure after each of 64 MMIO/byte/DMA/sync operations\nPASS: original xHCI model 3032648 assertions; command/event wraps and DMA lifetime checked\nxHCI actual core/session: 3032878 cumulative assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_acpi.c",
+          "passed": true,
+          "assertions": 23,
+          "log_sha256": "16290bc43f209cecbaade0c5f5701a76749352792451bfd720c484da19fe68bb",
+          "binary_sha256": "b95253860dbc1dd1517d042aabaf7d13d628cfe8e9889c03636e6803ca02011b",
+          "output": "ACPI fixed tables/power: 23 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_ec.c",
+          "passed": true,
+          "assertions": 51,
+          "log_sha256": "3cbf052cec54eafb8174ab3425d409d5d88086c38be21714a2a515216ae91b93",
+          "binary_sha256": "9469be4a700509894c9b5231671d64ed14ea0f2dc5c041839598a1a17cb61bf1",
+          "output": "ACPI EC protocol: 51 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_hid.c",
+          "passed": true,
+          "assertions": 12965,
+          "log_sha256": "d4cfed91e60aa3928e6d0a203c168a02a900a66d4aa0a5bffc99f68402e097e2",
+          "binary_sha256": "0598c513c06df9de8d63d73f86013cbebce98a48a9cae02ddbd6bcd4a62fd2d4",
+          "output": "HID descriptors/input/I2C lifecycle: 12965 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_sensors.c",
+          "passed": true,
+          "assertions": 64,
+          "log_sha256": "9d1148fe8f39fb1350f6b32dc8d9fafecf692586e25d92985ce0f83726acbc0e",
+          "binary_sha256": "17d53e02026836f0ecd489df336f1eec429c01f737aff0f7c4ac580a89734e40",
+          "output": "ACPI battery/thermal/lid/power: 64 assertions PASS\n"
+        }
+      ],
+      "passed": true
+    },
+    "clang": {
+      "compiler": "clang version 21.1.8 (AlmaLinux OS Foundation 21.1.8-1.el10.alma.1)",
+      "suites": [
+        {
+          "test": "drivers/common/test_device.c",
+          "passed": true,
+          "assertions": 72,
+          "log_sha256": "f913447957f27ded9906bfbd5f982f079f32290dc611b2fc41729e6e26d29eba",
+          "binary_sha256": "8652d4aa2ef5bea46e50ae0510ed5cd6986762f06cbbc3c0756fc279b6c234b3",
+          "output": "common lifecycle: 72 assertions PASS\n"
+        },
+        {
+          "test": "drivers/common/test_ahci_session.c",
+          "passed": true,
+          "assertions": 15292704,
+          "log_sha256": "f896d5ccc6bb44de60e3201aa69b5b3b5b27e0ed8fdd823cd4e80445a137a04a",
+          "binary_sha256": "74dcb7b700a7d7cf51c1722d4fabc2f280425f5fcbeadd29b9a602fa51ee4452",
+          "output": "Fault injected after each of 92 MMIO/allocation/sync operations\nWrite path: fault injected after each of 114 MMIO/allocation/sync operations\nBatch read: fault injected after each of 92 callbacks\nBatch write: fault injected after each of 92 callbacks\nPASS: AHCI native core 15291823 assertions; no model DMA freed while active\nAHCI actual core/session: 15292704 cumulative assertions PASS\n"
+        },
+        {
+          "test": "drivers/common/test_xhci_session.c",
+          "passed": true,
+          "assertions": 3032878,
+          "log_sha256": "a5d301a9c052dd05f0e5d2b1427d6be71098cedd2d598c7f49f130f3604b8b82",
+          "binary_sha256": "1bac1c14bb9c048ae17fb0dfe6608f9db7dd93e06a5375bae504b8e6b904b2bd",
+          "output": "Injected failure after each of 64 MMIO/byte/DMA/sync operations\nPASS: original xHCI model 3032648 assertions; command/event wraps and DMA lifetime checked\nxHCI actual core/session: 3032878 cumulative assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_acpi.c",
+          "passed": true,
+          "assertions": 23,
+          "log_sha256": "16290bc43f209cecbaade0c5f5701a76749352792451bfd720c484da19fe68bb",
+          "binary_sha256": "58e8b474aa4b6d30a83ba3c58211d9a872f45462a8c3d5d1c703f2ac72e3a2a4",
+          "output": "ACPI fixed tables/power: 23 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_ec.c",
+          "passed": true,
+          "assertions": 51,
+          "log_sha256": "3cbf052cec54eafb8174ab3425d409d5d88086c38be21714a2a515216ae91b93",
+          "binary_sha256": "05f9e3e0e7af0e6d5a26321854b62ed960f4d167e005fb805044328ecce0f91a",
+          "output": "ACPI EC protocol: 51 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_hid.c",
+          "passed": true,
+          "assertions": 12965,
+          "log_sha256": "d4cfed91e60aa3928e6d0a203c168a02a900a66d4aa0a5bffc99f68402e097e2",
+          "binary_sha256": "71c9a6606224c2b6fc34b277fd5f5a82448d540eb41847ce8424527e5abedc0b",
+          "output": "HID descriptors/input/I2C lifecycle: 12965 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_sensors.c",
+          "passed": true,
+          "assertions": 64,
+          "log_sha256": "9d1148fe8f39fb1350f6b32dc8d9fafecf692586e25d92985ce0f83726acbc0e",
+          "binary_sha256": "4d74a5c97a7537bf2076ad3aad788995128325f0f34339f67edbb5dc7e902b7b",
+          "output": "ACPI battery/thermal/lid/power: 64 assertions PASS\n"
+        }
+      ],
+      "passed": true
+    },
+    "clang_sanitized": {
+      "compiler": "clang version 21.1.8 (AlmaLinux OS Foundation 21.1.8-1.el10.alma.1)",
+      "suites": [
+        {
+          "test": "drivers/common/test_device.c",
+          "passed": true,
+          "assertions": 72,
+          "log_sha256": "f913447957f27ded9906bfbd5f982f079f32290dc611b2fc41729e6e26d29eba",
+          "binary_sha256": "fdb523fad5da09a3f96b4c3055657a4e670693a6267265714dd3f9c1587446e0",
+          "output": "common lifecycle: 72 assertions PASS\n"
+        },
+        {
+          "test": "drivers/common/test_ahci_session.c",
+          "passed": true,
+          "assertions": 15292704,
+          "log_sha256": "f896d5ccc6bb44de60e3201aa69b5b3b5b27e0ed8fdd823cd4e80445a137a04a",
+          "binary_sha256": "1bc7137ec9cf09aa33c16953cb1a24bc3ee231a870a737f76ef36a481ca2575e",
+          "output": "Fault injected after each of 92 MMIO/allocation/sync operations\nWrite path: fault injected after each of 114 MMIO/allocation/sync operations\nBatch read: fault injected after each of 92 callbacks\nBatch write: fault injected after each of 92 callbacks\nPASS: AHCI native core 15291823 assertions; no model DMA freed while active\nAHCI actual core/session: 15292704 cumulative assertions PASS\n"
+        },
+        {
+          "test": "drivers/common/test_xhci_session.c",
+          "passed": true,
+          "assertions": 3032878,
+          "log_sha256": "a5d301a9c052dd05f0e5d2b1427d6be71098cedd2d598c7f49f130f3604b8b82",
+          "binary_sha256": "cf487ca8abe0fd1a146e5dade520a6376a2b7981bf37b3b1c5242055540cb66a",
+          "output": "Injected failure after each of 64 MMIO/byte/DMA/sync operations\nPASS: original xHCI model 3032648 assertions; command/event wraps and DMA lifetime checked\nxHCI actual core/session: 3032878 cumulative assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_acpi.c",
+          "passed": true,
+          "assertions": 23,
+          "log_sha256": "16290bc43f209cecbaade0c5f5701a76749352792451bfd720c484da19fe68bb",
+          "binary_sha256": "11a87325fcad54e26abd9397ac8207c5f964c88d346555ecac1f12e557525c79",
+          "output": "ACPI fixed tables/power: 23 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_ec.c",
+          "passed": true,
+          "assertions": 51,
+          "log_sha256": "3cbf052cec54eafb8174ab3425d409d5d88086c38be21714a2a515216ae91b93",
+          "binary_sha256": "df746aa9072d0ca847b503c7f5d97fb8c98c4dc9962f0718aa192883ce4388dd",
+          "output": "ACPI EC protocol: 51 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_hid.c",
+          "passed": true,
+          "assertions": 12965,
+          "log_sha256": "d4cfed91e60aa3928e6d0a203c168a02a900a66d4aa0a5bffc99f68402e097e2",
+          "binary_sha256": "6834f7d6fa5546bf5ef0be073b5401ffaef593529386beadf6b0af17df9e806e",
+          "output": "HID descriptors/input/I2C lifecycle: 12965 assertions PASS\n"
+        },
+        {
+          "test": "drivers/shz_laptop/test_sensors.c",
+          "passed": true,
+          "assertions": 64,
+          "log_sha256": "9d1148fe8f39fb1350f6b32dc8d9fafecf692586e25d92985ce0f83726acbc0e",
+          "binary_sha256": "92b7d4d88a80c1f35d2a9ae28c46b8ff544f83583b333c18cda51c4efb31d8db",
+          "output": "ACPI battery/thermal/lid/power: 64 assertions PASS\n"
+        }
+      ],
+      "passed": true
+    }
+  },
+  "i486": {
+    "gcc": {
+      "flags": [
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wpedantic",
+        "-Wconversion",
+        "-Wshadow",
+        "-fno-builtin",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-pie",
+        "-fno-pic",
+        "-fno-stack-protector",
+        "-march=i486",
+        "-mno-sse",
+        "-mno-sse2",
+        "-mno-mmx",
+        "-msoft-float",
+        "-fno-asynchronous-unwind-tables",
+        "-fstack-usage",
+        "-m32"
+      ],
+      "undefined_symbols": [],
+      "passed": true,
+      "linked_sha256": "ce2e6117274b477499640a293aae535468e32a78adc3162f17a2e95c39deb250",
+      "size_bytes": 45336,
+      "all_internal_frames_sum_bytes": 16268,
+      "frames": [
+        {
+          "function": "drivers/common/device.c:3:5:shz_device_bind",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/device.c:17:5:shz_device_stop",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/device.c:46:5:shz_device_start",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/device.c:63:5:shz_device_resume",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/device.c:68:5:shz_device_admit",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/device.c:84:5:shz_device_complete",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:1:a_valid",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:1:a_release",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:1:a_now",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:1:a_relax",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:1:x_valid",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:1:x_release",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:1:x_now",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:1:x_relax",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:104:12:ahci_buffer_valid",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:60:12:a_close",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:55:12:a_start",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:72:12:x_close",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:66:12:x_start",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:1:a_allocate",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:1:a_write",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:1:x_allocate",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:1:x_write",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:97:12:a_done",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:1:a_sync",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:1:x_sync",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:1:a_read",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:61:12:x_write8",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:1:x_read",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:80:5:shz_ahci_bind",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:88:5:shz_xhci_bind",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:111:5:shz_ahci_read",
+          "bytes": 2160,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:121:5:shz_ahci_write",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:128:5:shz_ahci_flush",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:133:5:shz_xhci_noop",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:3:12:fixed_register",
+          "bytes": 48,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:57:12:fixed_write",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:55:12:fixed_read",
+          "bytes": 112,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:66:12:ack_register",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:87:12:enabled",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:14:5:shz_parse_fadt",
+          "bytes": 128,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:34:5:shz_parse_ecdt",
+          "bytes": 200,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:59:5:shz_fixed_events",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:77:5:shz_fixed_ack",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:92:5:shz_fixed_enable",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:108:5:shz_fixed_reset",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:12:12:owner_valid",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:6:12:status_read",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:34:12:wait_status",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:45:12:begin",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:63:12:receive.part.0",
+          "bytes": 112,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:58:12:send",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:18:5:shz_ec_open",
+          "bytes": 112,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:69:5:shz_ec_read",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:78:5:shz_ec_write",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:86:5:shz_ec_query",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:95:5:shz_ec_close",
+          "bytes": 32,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:105:5:shz_ec_recover",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/hid.c:3:5:shz_hid_parse_descriptor",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hid.c:42:5:shz_hid_parse_report",
+          "bytes": 3012,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hid.c:146:5:shz_hid_decode",
+          "bytes": 64,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hid.c:174:5:shz_hid_pointer",
+          "bytes": 1800,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:23:12:interrupt",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:6:12:transfer",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:45:12:enumerate.constprop",
+          "bytes": 2752,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:75:5:shz_hidi2c_open",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:90:5:shz_hidi2c_input",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:105:5:shz_hidi2c_stop",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:121:5:shz_hidi2c_resume",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:3:12:evaluate",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:20:5:shz_acpi_battery",
+          "bytes": 304,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:60:5:shz_acpi_temperature",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:84:5:shz_acpi_lid",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:87:5:shz_acpi_ac_power",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:90:5:shz_ec_sensor_read",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:33:12:rd",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:38:12:wr",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:46:12:expired",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:67:12:wait_bits",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:89:12:clear_status",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:78:12:stop_port",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:210:12:issue",
+          "bytes": 128,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:102:5:ahci_close",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:173:5:ahci_parse_identify",
+          "bytes": 96,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:284:5:ahci_open",
+          "bytes": 176,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:371:5:ahci_read_sectors",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:387:5:ahci_read_sector",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:390:5:ahci_write_sectors",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:406:5:ahci_write_sector",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:408:5:ahci_flush",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:92:12:legacy_byte",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:268:12:publish",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:37:12:address_reg",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:8:6:xhci_i_zero",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:10:6:xhci_i_copy",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:12:10:xhci_i_get32",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:17:6:xhci_i_put32",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:23:6:xhci_i_put64",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:27:5:xhci_i_read",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:32:5:xhci_i_write",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:44:5:xhci_i_sync",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:51:6:xhci_i_begin",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:53:5:xhci_i_expired",
+          "bytes": 64,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:66:12:wait_bits",
+          "bytes": 80,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:75:12:halt_reset",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:137:5:xhci_close",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:185:12:open_slots",
+          "bytes": 192,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:176:5:xhci_i_fail",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:264:5:xhci_open",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:266:5:xhci_open_one_slot",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:278:5:xhci_i_health",
+          "bytes": 32,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:290:5:xhci_i_event.part.0",
+          "bytes": 96,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:290:5:xhci_i_event",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:323:5:xhci_i_ack",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:329:5:xhci_i_command",
+          "bytes": 128,
+          "kind": "dynamic,bounded"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:381:5:xhci_noop",
+          "bytes": 48,
+          "kind": "dynamic,bounded"
+        }
+      ]
+    },
+    "clang": {
+      "flags": [
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-Wpedantic",
+        "-Wconversion",
+        "-Wshadow",
+        "-fno-builtin",
+        "-ffreestanding",
+        "-fno-builtin",
+        "-fno-pie",
+        "-fno-pic",
+        "-fno-stack-protector",
+        "-march=i486",
+        "-mno-sse",
+        "-mno-sse2",
+        "-mno-mmx",
+        "-msoft-float",
+        "-fno-asynchronous-unwind-tables",
+        "-fstack-usage",
+        "--target=i386-unknown-none-elf"
+      ],
+      "undefined_symbols": [],
+      "passed": true,
+      "linked_sha256": "e14d496fa240687f04b16b1a144c3b971d81cbe4c47fc08bb8ed859ae204c355",
+      "size_bytes": 48140,
+      "all_internal_frames_sum_bytes": 12837,
+      "frames": [
+        {
+          "function": "drivers/common/device.c:3:shz_device_bind",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/device.c:17:shz_device_stop",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/device.c:46:shz_device_start",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/device.c:63:shz_device_resume",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/device.c:68:shz_device_admit",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/device.c:84:shz_device_complete",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:80:shz_ahci_bind",
+          "bytes": 40,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:a_valid",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:55:a_start",
+          "bytes": 36,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:60:a_close",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:88:shz_xhci_bind",
+          "bytes": 40,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:x_valid",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:66:x_start",
+          "bytes": 40,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:72:x_close",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:111:shz_ahci_read",
+          "bytes": 2088,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:121:shz_ahci_write",
+          "bytes": 40,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:128:shz_ahci_flush",
+          "bytes": 40,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:133:shz_xhci_noop",
+          "bytes": 40,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:a_read",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:a_write",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:a_allocate",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:a_release",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:a_sync",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:a_now",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:39:a_relax",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:x_read",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:x_write",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:x_allocate",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:x_release",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:x_sync",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:x_now",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:40:x_relax",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/common/native_sessions.c:61:x_write8",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:14:shz_parse_fadt",
+          "bytes": 108,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:3:fixed_register",
+          "bytes": 32,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/internal.h:19:shz_gas_valid",
+          "bytes": 17,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:34:shz_parse_ecdt",
+          "bytes": 200,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:59:shz_fixed_events",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:55:fixed_read",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:77:shz_fixed_ack",
+          "bytes": 32,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:92:shz_fixed_enable",
+          "bytes": 64,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:57:fixed_write",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/acpi.c:108:shz_fixed_reset",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:18:shz_ec_open",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/internal.h:19:shz_gas_valid",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:69:shz_ec_read",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:45:begin",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:58:send",
+          "bytes": 32,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:63:receive",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:78:shz_ec_write",
+          "bytes": 76,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:34:wait_status",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:86:shz_ec_query",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:95:shz_ec_close",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:6:status_read",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/ec.c:105:shz_ec_recover",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hid.c:3:shz_hid_parse_descriptor",
+          "bytes": 32,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hid.c:42:shz_hid_parse_report",
+          "bytes": 3076,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hid.c:146:shz_hid_decode",
+          "bytes": 64,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hid.c:174:shz_hid_pointer",
+          "bytes": 1756,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:75:shz_hidi2c_open",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:45:enumerate",
+          "bytes": 2700,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:90:shz_hidi2c_input",
+          "bytes": 28,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:6:transfer",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:105:shz_hidi2c_stop",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:16:command",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/hidi2c.c:121:shz_hidi2c_resume",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:20:shz_acpi_battery",
+          "bytes": 212,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:3:evaluate",
+          "bytes": 40,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:60:shz_acpi_temperature",
+          "bytes": 28,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:84:shz_acpi_lid",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:87:shz_acpi_ac_power",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/shz_laptop/sensors.c:90:shz_ec_sensor_read",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:102:ahci_close",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:78:stop_port",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:173:ahci_parse_identify",
+          "bytes": 92,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:284:ahci_open",
+          "bytes": 124,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:133:handoff",
+          "bytes": 48,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:89:clear_status",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:67:wait_bits",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:152:wait_signature",
+          "bytes": 52,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:210:issue",
+          "bytes": 92,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:371:ahci_read_sectors",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:387:ahci_read_sector",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:390:ahci_write_sectors",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:406:ahci_write_sector",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:408:ahci_flush",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/ahci_native/ahci.c:46:expired",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:8:xhci_i_zero",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:10:xhci_i_copy",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:12:xhci_i_get32",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:17:xhci_i_put32",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:23:xhci_i_put64",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:27:xhci_i_read",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:32:xhci_i_write",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:44:xhci_i_sync",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:51:xhci_i_begin",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:53:xhci_i_expired",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:137:xhci_close",
+          "bytes": 20,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:75:halt_reset",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:37:address_reg",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:176:xhci_i_fail",
+          "bytes": 12,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:264:xhci_open",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:185:open_slots",
+          "bytes": 192,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:266:xhci_open_one_slot",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:278:xhci_i_health",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:290:xhci_i_event",
+          "bytes": 44,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:323:xhci_i_ack",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:329:xhci_i_command",
+          "bytes": 76,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:268:publish",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:381:xhci_noop",
+          "bytes": 4,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:66:wait_bits",
+          "bytes": 40,
+          "kind": "static"
+        },
+        {
+          "function": "drivers/xhci_native/xhci.c:101:legacy_handoff",
+          "bytes": 36,
+          "kind": "static"
+        }
+      ]
+    }
+  },
+  "scope": {
+    "actual_production_c": true,
+    "existing_native_core_models": true,
+    "actual_win98_bound": false,
+    "physical_hardware": false,
+    "aml_evaluator_supplied": false,
+    "i2c_host_bound": false,
+    "system_suspend_implemented": false,
+    "driver_binary_compatibility_claim": false
+  },
+  "passed": true
+}

@@ -4,6 +4,7 @@
  * unhandled exceptions when no user-mode dispatcher is registered).
  */
 #include "proc_internal.h"
+#include "auth_policy.h"
 #include "../kcommon/nt_sched_policy.h"
 
 extern void enter_user(uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2);
@@ -15,6 +16,7 @@ extern void vm_set_demand_range(uint64_t lo, uint64_t hi);
 #define PEB_BYTES 0x1000
 
 static process_t procs[MAX_PROCS + 1];
+static unsigned char reserved_slots[MAX_PROCS + 1];
 
 /* IPC hooks (kernel64/ipc_core.c; no-ops when it is not linked). */
 void __attribute__((weak)) ipc_thread_exit(thread_t *t) { (void)t; }               /* cancel its I/O, drop its APCs */
@@ -51,34 +53,39 @@ process_t *process_create_empty(const char *name)
     process_t *p = 0;
     unsigned i, k;
     thread_reap_exited();                       /* exited threads drop their process references: dead processes' slots */
-    for (i = 1; i <= MAX_PROCS; ++i)
-        if (!procs[i].used) { p = &procs[i]; break; }
+    {const uint64_t f=irq_save();
+     for(i=1;i<=MAX_PROCS;i++)if(!procs[i].used&&!reserved_slots[i]){p=&procs[i];reserved_slots[i]=1;break;}
+     irq_restore(f);}
     if (!p) {
         kprintf("K64: process table full (%u slots)\n", (unsigned)MAX_PROCS);
         return 0;
     }
     memset(p, 0, sizeof *p);
     p->pml4 = vm_new_space();
-    if (!p->pml4)
-        return 0;
+    if (!p->pml4) goto failed;
     p->handle_cap = HANDLE_CAP_FULL;
     p->handles = kzalloc(sizeof(handle_entry_t) * HANDLE_CAP_FULL);
     if (!p->handles) {                  /* heap pressure: a small table still works for most programs */
         p->handle_cap = HANDLE_CAP_MIN;
         p->handles = kzalloc(sizeof(handle_entry_t) * HANDLE_CAP_MIN);
     }
-    if (!p->handles) { vm_free_space(p->pml4); return 0; }
+    if (!p->handles) { vm_free_space(p->pml4); goto failed; }
     vad_init(p);
     p->pid = (int)alloc_client_id();
     for (k = 0; name[k] && k < sizeof p->name - 1; ++k) p->name[k] = name[k];
     sem_init(&p->exited, 0);
     p->object = ob_create(OB_PROCESS, 0);
+    if(!p->object){kfree(p->handles);vm_free_space(p->pml4);goto failed;}
     p->object->u.proc.p = p;
     p->mmap_hint = 0x0000000010000000ull;
     p->next_tid = 4;                    /* thread ids are multiples of 4, like NT */
     p->create_tick = ticks_now();
-    p->used = 1;
+    if(shz_auth_process_pending(p)){p->object->u.proc.p=0;ob_deref(p->object);kfree(p->handles);vm_free_space(p->pml4);goto failed;}
+    {const uint64_t f=irq_save();p->used=1;reserved_slots[i]=0;irq_restore(f);}
     return p;
+failed:
+    {const uint64_t f=irq_save();reserved_slots[i]=0;irq_restore(f);}
+    return 0;
 }
 
 /* Windows x64 TEB layout (documented offsets). */
@@ -411,6 +418,7 @@ int proc_create_flat(const char *name, const uint8_t *image, uint64_t size, int 
         if (!pa || vm_map(p->pml4, base + off, pa, prot_to_ptflags(PAGE_EXECUTE_READWRITE))) return -1;
         if (off < size) memcpy((void *)p2v(pa), image + off, n);
     }
+    shz_auth_process_ready(p);
     p->image_base = base;
     p->entry = base;
     if (process_start_thread(p, p->entry, 0, 0, 0))
