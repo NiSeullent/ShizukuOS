@@ -110,6 +110,7 @@ def main():
     pieces.extend(function(sources["sched.c"], n) for n in ("sched_switch_complete", "reap_user_zombies", "thread_reap_exited"))
     pieces.append("void ipc_object_free(kobject_t *o) { switch (o->type) {\n" +
                   case(sources["ipc_core.c"], "OB_PROCESS") + "default: break; } }\n")
+    pieces.append(function(sources["sysk32_proc.c"], "ref_query_object", optional=True))
     pieces.extend(function(sources["sysk32_proc.c"], n) for n in ("proc_of_handle", "live_threads", "put_out"))
     pieces.append(function(sources["ipc_proc.c"], "sys_query_process"))
     pieces.append(function(sources["ipc_proc.c"], "sys_set_thread", optional=True))

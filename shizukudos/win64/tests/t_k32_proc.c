@@ -724,6 +724,319 @@ static void test_description(void)
     SetThreadDescription(GetCurrentThread(), L"t_k32_proc main");
 }
 
+/* ---------------------------------------------------------------- checked time-query rights and retained child totals
+ * Additional component checks; the original test bodies and main sequence are
+ * preserved. No CPU-work threshold or timing ratio is required here. */
+typedef struct {
+    FILETIME creation, exit, kernel, user;
+    ULONG64 cycles;
+    DWORD handles;
+    BOOL wow64;
+} tq_values;
+typedef struct { ULONG64 before; tq_values value; ULONG64 after; } tq_guard;
+static const char *const tq_names[6] = {
+    "GetProcessTimes", "GetThreadTimes", "QueryProcessCycleTime",
+    "QueryThreadCycleTime", "GetProcessHandleCount", "IsWow64Process"
+};
+#define TQ_SENTINEL 0x5a5a5a5a5a5a5a5aull
+
+static HANDLE tq_target(unsigned kind, HANDLE process, HANDLE thread)
+{
+    return kind == 1 || kind == 3 ? thread : process;
+}
+static BOOL tq_get(unsigned kind, HANDLE handle, tq_values *v)
+{
+    switch (kind) {
+    case 0: return GetProcessTimes(handle, &v->creation, &v->exit, &v->kernel, &v->user);
+    case 1: return GetThreadTimes(handle, &v->creation, &v->exit, &v->kernel, &v->user);
+    case 2: return QueryProcessCycleTime(handle, &v->cycles);
+    case 3: return QueryThreadCycleTime(handle, &v->cycles);
+    case 4: return GetProcessHandleCount(handle, &v->handles);
+    default: return IsWow64Process(handle, &v->wow64);
+    }
+}
+static void tq_success(unsigned kind, HANDLE handle)
+{
+    tq_guard out;
+    tq_values expected;
+    BOOL ok, measured;
+    memset(&out, 0x5a, sizeof out);
+    expected = out.value;
+    ok = tq_get(kind, handle, &out.value);
+    if (kind < 2) {
+        expected.creation = out.value.creation; expected.exit = out.value.exit;
+        expected.kernel = out.value.kernel; expected.user = out.value.user;
+        measured = ft_u64(out.value.creation) != 0 && ft_u64(out.value.creation) != TQ_SENTINEL &&
+                   ft_u64(out.value.exit) == 0 && ft_u64(out.value.kernel) != TQ_SENTINEL &&
+                   ft_u64(out.value.user) != TQ_SENTINEL;
+    } else if (kind < 4) {
+        expected.cycles = out.value.cycles;
+        measured = out.value.cycles != TQ_SENTINEL;
+    } else if (kind == 4) {
+        expected.handles = out.value.handles;
+        measured = out.value.handles != 0x5a5a5a5a;
+    } else {
+        expected.wow64 = out.value.wow64;
+        measured = out.value.wow64 == FALSE; /* this fixture is a native x64 image */
+    }
+    CHECKV(ok && measured, "one independent query right permits the real getter",
+           "%s handle=%p error=%lu", tq_names[kind], handle, (unsigned long)GetLastError());
+    CHECKV(out.before == TQ_SENTINEL && out.after == TQ_SENTINEL &&
+           !memcmp(&out.value, &expected, sizeof expected),
+           "the getter writes only its documented output fields",
+           "%s handle=%p", tq_names[kind], handle);
+}
+static void tq_refusal(unsigned kind, HANDLE handle, DWORD error)
+{
+    tq_guard out, before;
+    memset(&out, 0x5a, sizeof out); before = out;
+    SetLastError(0);
+    CHECKV(!tq_get(kind, handle, &out.value) && GetLastError() == error &&
+           !memcmp(&out, &before, sizeof out),
+           "a refused getter reports the contract error and preserves every output byte",
+           "%s handle=%p error=%lu expected=%lu", tq_names[kind], handle,
+           (unsigned long)GetLastError(), (unsigned long)error);
+}
+static void tq_affinity_get(HANDLE handle)
+{
+    struct { DWORD_PTR before, process, system, after; } out;
+    memset(&out, 0x5a, sizeof out);
+    CHECK(GetProcessAffinityMask(handle, &out.process, &out.system) &&
+          out.process == 1 && out.system == 1 &&
+          out.before == (DWORD_PTR)TQ_SENTINEL && out.after == (DWORD_PTR)TQ_SENTINEL,
+          "either process query right reads exactly the real UP affinity masks");
+}
+static void tq_affinity_refusal(HANDLE handle, DWORD error)
+{
+    struct { DWORD_PTR before, process, system, after; } out, before;
+    memset(&out, 0x5a, sizeof out); before = out;
+    SetLastError(0);
+    CHECK(!GetProcessAffinityMask(handle, &out.process, &out.system) &&
+          GetLastError() == error && !memcmp(&out, &before, sizeof out),
+          "refused affinity getter preserves both masks and adjacent bytes");
+}
+static void tq_affinity_set_refusal(HANDLE handle, DWORD_PTR mask, DWORD error)
+{
+    SetLastError(0);
+    CHECKV(!SetProcessAffinityMask(handle, mask) && GetLastError() == error,
+           "affinity setter refuses unsupported masks or missing target rights",
+           "handle=%p mask=%llu error=%lu expected=%lu", handle, (ULONGLONG)mask,
+           (unsigned long)GetLastError(), (unsigned long)error);
+}
+static void tq_affinity_null(HANDLE handle, unsigned missing)
+{
+    DWORD_PTR process = (DWORD_PTR)TQ_SENTINEL, system = (DWORD_PTR)TQ_SENTINEL;
+    SetLastError(0);
+    CHECK(!GetProcessAffinityMask(handle, missing == 0 || missing == 2 ? NULL : &process,
+                                 missing == 1 || missing == 2 ? NULL : &system) &&
+          GetLastError() == ERROR_INVALID_PARAMETER &&
+          process == (DWORD_PTR)TQ_SENTINEL && system == (DWORD_PTR)TQ_SENTINEL,
+          "NULL affinity output is ERROR_INVALID_PARAMETER with other output preserved");
+}
+
+static void tq_retained_child(void)
+{
+    static const WCHAR child_name[] = L"T_HELLO.EXE";
+    struct { ULONG64 before; WCHAR path[MAX_PATH]; ULONG64 after; } name;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    HANDLE process[2] = {NULL, NULL}, thread[2] = {NULL, NULL}, set_only = NULL;
+    const DWORD process_rights[2] = {PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION};
+    const DWORD thread_rights[2] = {THREAD_QUERY_INFORMATION, THREAD_QUERY_LIMITED_INFORMATION};
+    tq_values pt[2], tt[2];
+    BOOL pt_ok[2], tt_ok[2], pc_ok[2], tc_ok[2], configured, resumed, natural;
+    DWORD n, at, i, kind, process_wait = WAIT_FAILED, thread_wait = WAIT_FAILED, process_code = 0, thread_code = 0;
+    memset(&name, 0x5a, sizeof name);
+    n = GetModuleFileNameW(NULL, name.path, MAX_PATH);
+    CHECK(n > 0 && n < MAX_PATH && name.path[n] == 0 &&
+          name.before == TQ_SENTINEL && name.after == TQ_SENTINEL,
+          "capture the complete sibling-fixture path within guarded bounds");
+    if (!n || n >= MAX_PATH || name.path[n] != 0) return;
+    at = n;
+    while (at && name.path[at - 1] != '\\' && name.path[at - 1] != '/') --at;
+    CHECK(at > 0 && at + sizeof child_name / sizeof child_name[0] <= MAX_PATH,
+          "the existing T_HELLO name including its NUL fits the original directory");
+    if (!at || at + sizeof child_name / sizeof child_name[0] > MAX_PATH) return;
+    for (i = 0; i < sizeof child_name / sizeof child_name[0]; ++i) name.path[at + i] = child_name[i];
+    CHECK(name.before == TQ_SENTINEL && name.after == TQ_SENTINEL &&
+          name.path[at + sizeof child_name / sizeof child_name[0] - 1] == 0,
+          "bounded child-name replacement preserves path guards and terminates");
+    memset(&si, 0, sizeof si); si.cb = sizeof si;
+    memset(&pi, 0, sizeof pi);
+    natural = CreateProcessW(name.path, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+    CHECK(natural, "create the existing sole-thread exit-seven fixture suspended");
+    if (!natural) return;
+    natural = FALSE;
+    for (i = 0; i < 2; ++i) {
+        process[i] = OpenProcess(process_rights[i], FALSE, pi.dwProcessId);
+        CHECK(process[i] != NULL, "open one independent child process query right before dispatch");
+        thread[i] = OpenThread(thread_rights[i], FALSE, pi.dwThreadId);
+        CHECK(thread[i] != NULL, "open one independent primary-thread query right before dispatch");
+    }
+    set_only = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pi.dwProcessId);
+    CHECK(set_only != NULL, "open the child SET-only process handle before dispatch");
+    if (!process[0] || !process[1] || !thread[0] || !thread[1] || !set_only) goto cleanup;
+    configured = SetProcessAffinityMask(set_only, 1);
+    CHECK(configured, "SET-only child handle accepts mask one before first dispatch");
+    if (!configured) goto cleanup;
+    for (i = 0; i < 2; ++i)
+        for (kind = 0; kind < 6; ++kind) tq_success(kind, tq_target(kind, process[i], thread[i]));
+    resumed = ResumeThread(pi.hThread) == 1;
+    CHECK(resumed, "resume the suspended child exactly once");
+    if (!resumed) goto cleanup;
+    process_wait = WaitForSingleObject(pi.hProcess, 5000);
+    CHECK(process_wait == WAIT_OBJECT_0, "the real child process finishes within a bounded wait");
+    thread_wait = WaitForSingleObject(pi.hThread, 5000);
+    CHECK(thread_wait == WAIT_OBJECT_0, "the real primary thread also finishes before final aggregation");
+    if (process_wait != WAIT_OBJECT_0 || thread_wait != WAIT_OBJECT_0) goto cleanup;
+    configured = GetExitCodeProcess(pi.hProcess, &process_code) && process_code == 7;
+    CHECK(configured, "the existing child retains its natural process exit-seven result");
+    resumed = GetExitCodeThread(pi.hThread, &thread_code) && thread_code == 7;
+    CHECK(resumed, "the retained primary thread reports the same natural exit-seven result");
+    natural = configured && resumed;
+    if (!natural) goto cleanup;
+    memset(pt, 0, sizeof pt); memset(tt, 0, sizeof tt);
+    for (i = 0; i < 2; ++i) {
+        pt_ok[i] = GetProcessTimes(process[i], &pt[i].creation, &pt[i].exit, &pt[i].kernel, &pt[i].user);
+        CHECK(pt_ok[i], "an independent query right reads retained final process times");
+        tt_ok[i] = GetThreadTimes(thread[i], &tt[i].creation, &tt[i].exit, &tt[i].kernel, &tt[i].user);
+        CHECK(tt_ok[i], "an independent query right reads retained primary-thread times");
+        pc_ok[i] = QueryProcessCycleTime(process[i], &pt[i].cycles);
+        CHECK(pc_ok[i], "an independent query right reads retained process cycles");
+        tc_ok[i] = QueryThreadCycleTime(thread[i], &tt[i].cycles);
+        CHECK(tc_ok[i], "an independent query right reads retained primary-thread cycles");
+        CHECK(pt_ok[i] && tt_ok[i] && ft_u64(pt[i].kernel) == ft_u64(tt[i].kernel) &&
+              ft_u64(pt[i].user) == ft_u64(tt[i].user),
+              "the naturally exited sole-thread process has exactly its primary-thread CPU totals");
+        CHECK(pc_ok[i] && tc_ok[i] && pt[i].cycles == tt[i].cycles,
+              "the naturally exited sole-thread process has exactly its primary-thread cycle total");
+        CHECK(pt_ok[i] && tt_ok[i] && ft_u64(pt[i].creation) != 0 && ft_u64(tt[i].creation) != 0 &&
+              ft_u64(pt[i].exit) >= ft_u64(pt[i].creation) && ft_u64(tt[i].exit) >= ft_u64(tt[i].creation),
+              "both retained objects report completed lifetimes without a CPU-work threshold");
+    }
+    CHECK(pt_ok[0] && pt_ok[1] && tt_ok[0] && tt_ok[1] && pc_ok[0] && pc_ok[1] && tc_ok[0] && tc_ok[1] &&
+          !memcmp(&pt[0], &pt[1], sizeof pt[0]) && !memcmp(&tt[0], &tt[1], sizeof tt[0]),
+          "QUERY and LIMITED-only handles return identical immutable final totals");
+cleanup:
+    /* Never count forced or failed cleanup as natural exit or as final totals. */
+    if (process_wait != WAIT_OBJECT_0 || thread_wait != WAIT_OBJECT_0) {
+        CHECK(TerminateProcess(pi.hProcess, 99), "terminate a failed child only for bounded cleanup");
+        CHECK(WaitForSingleObject(pi.hProcess, 2000) == WAIT_OBJECT_0, "failed child process cleanup is bounded");
+        CHECK(WaitForSingleObject(pi.hThread, 2000) == WAIT_OBJECT_0, "failed primary-thread cleanup is bounded");
+    }
+    for (i = 0; i < 2; ++i) {
+        if (thread[i]) CHECK(CloseHandle(thread[i]), "close the retained child thread query handle");
+        if (process[i]) CHECK(CloseHandle(process[i]), "close the retained child process query handle");
+    }
+    if (set_only) CHECK(CloseHandle(set_only), "close the child SET-only process handle");
+    CHECK(CloseHandle(pi.hThread), "close the original child primary-thread handle");
+    CHECK(CloseHandle(pi.hProcess), "close the original child process handle");
+}
+
+static void test_query_rights_and_retained_times(void)
+{
+    const DWORD process_rights[2] = {PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION};
+    const DWORD thread_rights[2] = {THREAD_QUERY_INFORMATION, THREAD_QUERY_LIMITED_INFORMATION};
+    const HANDLE invalid = (HANDLE)(ULONG_PTR)0x7ffffffc;
+    HANDLE process[2] = {NULL, NULL}, thread[2] = {NULL, NULL}, ps = NULL, ts = NULL, event = NULL, oldp, oldt;
+    DWORD before = 0, count = 0, i, kind;
+    BOOL closed_p, closed_t;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &before), "capture the real handle count before query-right fixtures");
+    for (i = 0; i < 2; ++i) {
+        process[i] = OpenProcess(process_rights[i], FALSE, GetCurrentProcessId());
+        CHECK(process[i] != NULL, "open one independent process query right");
+        thread[i] = OpenThread(thread_rights[i], FALSE, GetCurrentThreadId());
+        CHECK(thread[i] != NULL, "open one independent thread query right");
+    }
+    ps = OpenProcess(PROCESS_SET_INFORMATION, FALSE, GetCurrentProcessId());
+    CHECK(ps != NULL, "open a SET-only process handle for getter refusal and affinity setting");
+    ts = OpenThread(THREAD_SET_INFORMATION, FALSE, GetCurrentThreadId());
+    CHECK(ts != NULL, "open a SET-only thread handle for getter refusal");
+    if (!process[0] || !process[1] || !thread[0] || !thread[1] || !ps || !ts) goto cleanup;
+    CHECK(GetProcessHandleCount(process[1], &count) && count == before + 6,
+          "LIMITED-only process info accounts for exactly the six real opened handles");
+    event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    CHECK(event != NULL, "create a real counted event beside the restricted query handles");
+    CHECK(GetProcessHandleCount(process[1], &count) && count == before + 7,
+          "the protected handle count increases by exactly one for that event");
+    if (event) {
+        BOOL closed = CloseHandle(event);
+        CHECK(closed, "close the counted event");
+        if (closed) event = NULL;
+        else goto cleanup;
+    }
+    CHECK(GetProcessHandleCount(process[0], &count) && count == before + 6,
+          "closing the event restores the real protected process handle count");
+    for (i = 0; i < 2; ++i) {
+        for (kind = 0; kind < 6; ++kind) tq_success(kind, tq_target(kind, process[i], thread[i]));
+        tq_affinity_get(process[i]);
+        tq_affinity_set_refusal(process[i], 1, ERROR_ACCESS_DENIED);
+    }
+    for (kind = 0; kind < 6; ++kind) tq_refusal(kind, tq_target(kind, ps, ts), ERROR_ACCESS_DENIED);
+    tq_affinity_refusal(ps, ERROR_ACCESS_DENIED);
+    CHECK(SetProcessAffinityMask(ps, 1), "SET-only process handle permits the idempotent actual UP mask");
+    tq_affinity_set_refusal(ps, 0, ERROR_INVALID_PARAMETER);
+    tq_affinity_set_refusal(ps, 2, ERROR_INVALID_PARAMETER);
+    tq_affinity_set_refusal(ps, (DWORD_PTR)1 << 63, ERROR_INVALID_PARAMETER);
+    tq_affinity_get(process[1]);
+    for (i = 0; i < 4; ++i) {
+        for (kind = 0; kind < 6; ++kind)
+            tq_success(kind, (HANDLE)((ULONG_PTR)tq_target(kind, process[0], thread[0]) | i));
+        tq_affinity_get((HANDLE)((ULONG_PTR)process[0] | i));
+        CHECK(SetProcessAffinityMask((HANDLE)((ULONG_PTR)ps | i), 1),
+              "affinity setter accepts the two defined real process-handle tag bits");
+    }
+    for (kind = 0; kind < 6; ++kind) {
+        tq_refusal(kind, (HANDLE)((ULONG_PTR)tq_target(kind, process[0], thread[0]) | (ULONG_PTR)(1ull << 32)),
+                   ERROR_INVALID_HANDLE);
+        tq_refusal(kind, tq_target(kind, thread[0], process[0]), ERROR_INVALID_HANDLE);
+        tq_refusal(kind, invalid, ERROR_INVALID_HANDLE);
+    }
+    tq_affinity_refusal(thread[0], ERROR_INVALID_HANDLE);
+    tq_affinity_set_refusal(ts, 1, ERROR_INVALID_HANDLE);
+    tq_affinity_refusal((HANDLE)((ULONG_PTR)process[0] | (ULONG_PTR)(1ull << 32)), ERROR_INVALID_HANDLE);
+    tq_affinity_set_refusal((HANDLE)((ULONG_PTR)ps | (ULONG_PTR)(1ull << 32)), 1, ERROR_INVALID_HANDLE);
+    tq_affinity_refusal(invalid, ERROR_INVALID_HANDLE);
+    tq_affinity_set_refusal(invalid, 1, ERROR_INVALID_HANDLE);
+    for (i = 0; i < 3; ++i) tq_affinity_null(process[0], i);
+    SetLastError(0);
+    CHECK(!QueryProcessCycleTime(process[0], NULL) && GetLastError() == ERROR_INVALID_PARAMETER,
+          "NULL process-cycle output is explicitly invalid");
+    SetLastError(0);
+    CHECK(!QueryThreadCycleTime(thread[0], NULL) && GetLastError() == ERROR_INVALID_PARAMETER,
+          "NULL thread-cycle output is explicitly invalid");
+    SetLastError(0);
+    CHECK(!GetProcessHandleCount(process[0], NULL) && GetLastError() == ERROR_INVALID_PARAMETER,
+          "NULL process-handle-count output is explicitly invalid");
+    SetLastError(0);
+    CHECK(!IsWow64Process(process[0], NULL) && GetLastError() == ERROR_INVALID_PARAMETER,
+          "NULL Wow64 output is explicitly invalid");
+    oldp = process[0]; oldt = thread[0];
+    closed_p = CloseHandle(oldp); CHECK(closed_p, "close the real QUERY-only process handle");
+    closed_t = CloseHandle(oldt); CHECK(closed_t, "close the real QUERY-only thread handle");
+    if (closed_p) process[0] = NULL;
+    if (closed_t) thread[0] = NULL;
+    if (closed_p && closed_t) {
+        /* No handle allocation between close and these refusal checks. */
+        for (kind = 0; kind < 6; ++kind) tq_refusal(kind, tq_target(kind, oldp, oldt), ERROR_INVALID_HANDLE);
+        tq_affinity_refusal(oldp, ERROR_INVALID_HANDLE);
+        tq_affinity_set_refusal(oldp, 1, ERROR_INVALID_HANDLE);
+    }
+cleanup:
+    if (event) CHECK(CloseHandle(event), "close a counted event after failed setup");
+    for (i = 0; i < 2; ++i) {
+        if (thread[i]) CHECK(CloseHandle(thread[i]), "close the independent thread query handle");
+        if (process[i]) CHECK(CloseHandle(process[i]), "close the independent process query handle");
+    }
+    if (ts) CHECK(CloseHandle(ts), "close the SET-only thread handle");
+    if (ps) CHECK(CloseHandle(ps), "close the SET-only process handle");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &count) && count == before,
+          "all query-right fixture handles are released");
+    tq_retained_child();
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &count) && count == before,
+          "all natural or failed-child fixture handles are released");
+}
+
 int main(void)
 {
     test_restart();
@@ -739,5 +1052,6 @@ int main(void)
     test_initonce();
     test_packages_wer();
     test_heaps();
+    test_query_rights_and_retained_times();
     return k32t_finish("t_k32_proc");
 }

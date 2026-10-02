@@ -7,12 +7,11 @@
 
 K32API BOOL WINAPI SetProcessAffinityMask(HANDLE process, DWORD_PTR mask)
 {
-    ULONG measured[6];
-    NTSTATUS status = NtShzQueryK32(K32Q_PROCESS_INFO, process, measured, sizeof measured, 0);
+    ULONG64 native_mask = (ULONG64)mask;
+    NTSTATUS status = NtShzSetK32(K32S_PROCESS_AFFINITY, process, &native_mask, sizeof native_mask);
     if (status) { k32_nt_error(status); return FALSE; }
-    if (mask != 1) { shz_set_last_error(ERROR_INVALID_PARAMETER); return FALSE; }
     /* Every existing/future thread already executes only CPU 0. No synthetic
-     * affinity state is necessary. Handle access rights inherit the existing
-     * NtShzQueryK32 contract; SET_INFORMATION enforcement needs kernel work. */
+     * affinity state is necessary. The backend checks SET rights and active
+     * process identity before accepting the existing CPU0 mask. */
     return TRUE;
 }
