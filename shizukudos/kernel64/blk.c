@@ -93,7 +93,7 @@ int blk_write(blk_dev_t *d,uint64_t lba,unsigned count_,const void *buf)
     if(w&&w->write&&!(w->flags&BLK_F_READONLY))rc=w->write(w,abs,count_,buf);
     if(!rc){d->writes+=count_;++d->write_ops;if(w!=d){w->writes+=count_;++w->write_ops;}}
     else ++d->errors;
-    blk_authority_leave(d,rc,0);return rc;
+    blk_authority_leave(d,rc,1);return rc;
 }
 int blk_flush(blk_dev_t *d)
 {
@@ -120,7 +120,7 @@ int blk_discard(blk_dev_t *d, uint64_t lba, unsigned count_)
     if (!w->discard || blk_authority_enter(d,1)) return -1;
     rc = w->discard(w, lba, count_);
     if (!rc) ++d->discards; else ++d->errors;
-    blk_authority_leave(d,rc,0);
+    blk_authority_leave(d,rc,1);
     return rc;
 }
 

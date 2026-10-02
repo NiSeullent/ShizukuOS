@@ -73,6 +73,10 @@ int main(int argc,char **argv)
  CHECK(stale.generation!=sources[0].identity.generation);
  CHECK(blk_read(&partition,16,1,out)!=0);
  CHECK(blk_read(&partition,0,1,out)==0);
+ stale=sources[0].identity;CHECK(blk_write(&source,0,1,data)==0);
+ CHECK(blk_authority_pin_source(&source,&sources[0])==0);CHECK(stale.generation!=sources[0].identity.generation);
+ stale=sources[0].identity;CHECK(blk_discard(&source,0,1)==0);
+ CHECK(blk_authority_pin_source(&source,&sources[0])==0);CHECK(stale.generation!=sources[0].identity.generation);
  sources[1]=sources[0];
  CHECK(blk_authority_review(&target,sources,&review)!=0); /* missing actual roles */
  CHECK(blk_authority_bind_boot_roles(0,&boot)!=0);

@@ -100,3 +100,5 @@ Remaining concrete integration gates:
    hardware identity, Windows startup, persistence or application acceptance.
 
 Ordinary unclaimed read/control errors advance the observation epoch and invalidate stale source pins without permanently disabling filesystem retries. Failed namespace publication leaves a previously unmounted device unmounted; existing mounted exclusions remain intact. Mount and claim publication serialize on the same authority lock.
+
+Successful ordinary synchronous writes and discards also advance the device epoch, invalidating source pins/reviews minted before source content changed. Claim-held sources remain mutation-protected. Async-capable sources/targets remain ineligible until completion-custody is implemented.
