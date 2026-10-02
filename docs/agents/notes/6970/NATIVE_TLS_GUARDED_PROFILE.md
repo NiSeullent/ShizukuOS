@@ -129,3 +129,34 @@ closed FAIL receipt15,903B
 SHA895952168ed4533c5c3ac05240e9c058aa0968418d32da8de63ad808cb763f39.
 Its actual command count is0, whole proof15,903B, and minimum observed
 free91,708,686,336B. It remains its own failed epoch.
+
+## Second actual execution and scheduling repair
+
+Dispatch36947752840/job110653598376 at committed/pushed e8c2290d0f0bedc31b7c398612859ba9b10e1d70
+proved the current selected compiler is a protected root-owned0755 regular
+file with link count2:1,594,728B SHAadac5e5dd0cc701ad89a45d5fe36d56656b85d30d8e0df1f61c614fd4ed6041d.
+This newly observed identity does not retroactively fill the first failed
+epoch's missing stat. Actual CMake graph had126TUs and450 deduplicated
+headers. Root and independent reviewer matched all320 captures/33,101B.
+First159 commands exited0/reaped without abort. The160th Ninja batch
+compiled through reported93/126 objects before recursive membership
+failed to stabilize within four observations. The owned command was
+killed before reap, exited-9 and was reaped; no compiler stderr. This is
+a closed resource failure, not complete object/PE or TLS success.
+
+Actual FAILreceipt579,527B SHA6a69fb44f116210b8dae269c9cdaf382db2bac3899e45b4829461fa83b282adc
+accounts5,457,106B output; observed minimum91,697,836,032B. Raw721,808B
+SHAab354fd2a20294ba945820d7d5f58493851cc82fcd25f6de9b4f69b94eee7886
+is preserved under `/dev/shm/win98-hosted-native-tls-6970-36947752840`.
+No proof was sealed/uploaded and no artifact was retained.
+
+Producer-only repair schedules one graph-bound Ninja object target per
+command with `-j1`, retaining actual recipe flags and keepdepfile/keeprsp.
+Build archives one at a time in leaf-first order: everest,p256m,mbedcrypto,
+mbedx509,mbedtls,ntwst. Then build TLS13PROB,TIMEPROB,M98TLS separately.
+SSPI's two observed TUs, original ordered link inputs, before-link
+object/archive pins, actual-M/-MD closure and final full-byte audits stay
+unchanged. The resource guard and four-observation rule are unchanged;
+this scheduling reduces membership churn and requires actual hosted
+verification. Every object command remains bounded360s; archive/link
+commands120s; global capture256KiB/receipt1MiB/whole proof32MiB still apply.

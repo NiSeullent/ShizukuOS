@@ -556,10 +556,16 @@ def build(output, prep, expected_preparation_sha):
             units.append({'object':str(obj), 'source':str(source), 'target':target,
                           'before_M':manifest, 'headers':[str(p) for p in included]})
         receipt['headers_before'] = headers
-        r = guard.run([ninja,'-C',str(cmake),'-j','2','-d','keepdepfile','-d','keeprsp',
-                       *(unit['target'] for unit in units)], 'cmake-production-objects', timeout=360)
-        if r.returncode:
-            raise ValueError('actual CMake/Ninja compile failed')
+        schedule = receipt['CMake_sequential_schedule'] = []
+        receipt['CMake_schedule_parallel_jobs'] = 1
+        for index, unit in enumerate(units):
+            label = 'cmake-object-' + str(index)
+            schedule.append({'phase':'object','target':unit['target'],'label':label,
+                             'command_index':len(guard.commands),'timeout_seconds':360})
+            r = guard.run([ninja,'-C',str(cmake),'-j','1','-d','keepdepfile','-d','keeprsp',
+                           unit['target']], label, timeout=360)
+            if r.returncode:
+                raise ValueError('actual CMake/Ninja compile failed: ' + unit['target'])
         md_total = 0
         for index, unit in enumerate(units):
             dep = Path(unit['object'] + '.d')
@@ -570,20 +576,27 @@ def build(output, prep, expected_preparation_sha):
             unit['actual_MD'] = manifest
             unit['object_pin'] = guard.pin(Path(unit['object']), maximum=8 * 1024**2)
         receipt['CMake_actual_TU_dependencies'] = units
-        r=guard.run([cmake_tool,'--build',str(cmake),'--parallel','2','--target',
-                     'ntwst','mbedtls','mbedx509','mbedcrypto','everest','p256m','--',
-                     '-d','keepdepfile','-d','keeprsp'],'cmake-production-archives',timeout=120)
-        if r.returncode:
-            raise ValueError('production archive generation failed')
+        for target in ('everest','p256m','mbedcrypto','mbedx509','mbedtls','ntwst'):
+            label = 'cmake-archive-' + target
+            schedule.append({'phase':'archive','target':target,'label':label,
+                             'command_index':len(guard.commands),'timeout_seconds':120})
+            r=guard.run([cmake_tool,'--build',str(cmake),'--parallel','1','--target',target,'--',
+                         '-d','keepdepfile','-d','keeprsp'],label,timeout=120)
+            if r.returncode:
+                raise ValueError('production archive generation failed: ' + target)
         engine_link_inputs={unit['object']:unit['object_pin'] for unit in units}
         engine_link_inputs[str(project/'native.def')]=source_copies[str(project/'native.def')]
         for p in sorted(cmake.rglob('*.a')):
             engine_link_inputs[str(p)]=guard.pin(p,maximum=8*1024**2)
-        check_scripts()
-        r=guard.run([cmake_tool,'--build',str(cmake),'--parallel','2','--',
-                     '-d','keepdepfile','-d','keeprsp'],'cmake-final-links',timeout=120)
-        if r.returncode:
-            raise ValueError('actual engine final links failed')
+        for target in ('TLS13PROB','TIMEPROB','M98TLS'):
+            check_scripts()
+            label = 'cmake-link-' + target
+            schedule.append({'phase':'PE-link','target':target,'label':label,
+                             'command_index':len(guard.commands),'timeout_seconds':120})
+            r=guard.run([cmake_tool,'--build',str(cmake),'--parallel','1','--target',target,'--',
+                         '-d','keepdepfile','-d','keeprsp'],label,timeout=120)
+            if r.returncode:
+                raise ValueError('actual engine final link failed: ' + target)
         for path,pin in engine_link_inputs.items():
             if guard.pin(Path(path),maximum=8*1024**2)!=pin:
                 raise ValueError('pre-bound engine link object/archive changed')
@@ -834,6 +847,7 @@ def build(output, prep, expected_preparation_sha):
             'exact literal CMake recipe copied without original helper execution','GEN_FILES explicitly OFF',
             'Ninja keepdepfile/keeprsp','SSPI TU object split with original flags/order',
             'Ninja objects/archives/final-links scheduled separately for before-link content pins',
+            'sequential one graph object, dependency-ordered archive or PE target per command with jobs=1',
             'readonly lifecycle linker script and -t trace','bounded full-stream ISA framing']
         receipt['result']='PASS_CURRENT_NATIVE_TLS_SSPI_BUILD_ONLY'
     except BaseException as error:

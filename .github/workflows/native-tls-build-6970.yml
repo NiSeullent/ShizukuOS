@@ -258,7 +258,7 @@ jobs:
           import hashlib,os,stat,sys,types
           from pathlib import Path
           root=Path.cwd().resolve()
-          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'd68107d2920e3d22e484921f6b968d80e6202520032bd96285daf456dd10a3c4', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '46cc096f84683c75888d103705e63ed0b57bf922e512f0694c6719e6054c2a2e'}
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'c966394ee6f1bfaead5793dd9054c8fb21297266b4d63b523877c36e6923825d', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '46cc096f84683c75888d103705e63ed0b57bf922e512f0694c6719e6054c2a2e'}
           before={}
           identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
           for relative,expected in pins.items():
