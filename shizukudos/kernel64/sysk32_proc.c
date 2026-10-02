@@ -32,7 +32,7 @@ extern int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t 
 enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32Q_PROCESS_LIST = 4, K32Q_MODULE_LIST = 5,
        K32Q_SYSTEM_PERF = 7, K32Q_PROCESS_MEMORY = 8, K32Q_WORKING_SET_EX = 9, K32Q_IMAGE_PATH = 10, K32Q_FIRMWARE = 11,
        K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13, K32Q_CPU_CLOCK = 14, K32Q_SAME_OBJECT = 15, K32Q_THREAD_NAME = 16,
-       K32Q_PROCESS_QUERY_ACCESS = 17, K32Q_MAPPED_FILE_PATH = 18 };
+       K32Q_PROCESS_QUERY_ACCESS = 17, K32Q_MAPPED_FILE_PATH = 18, K32Q_THREAD_SETTINGS_STRICT = 19 };
 enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
        K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10,
        K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12, K32S_THREAD_NAME = 13, K32S_PROCESS_AFFINITY = 14 };
@@ -73,6 +73,133 @@ static int32_t ref_query_object(process_t *cur, uint64_t h, uint32_t type, uint3
     if (alternatives && !(access & alternatives)) { ob_deref(o); return STATUS_ACCESS_DENIED; }
     *out = o;
     return STATUS_SUCCESS;
+}
+
+/* Settings validate pseudo-current identity before publishing a reference.
+ * Ordinary handles retain the common typed/tagged handle-table semantics. */
+static int32_t ref_settings_object(process_t *cur, uint64_t h, uint32_t type, uint32_t alternatives, kobject_t **out)
+{
+    kobject_t *o;
+    uint32_t access = 0;
+    int32_t st;
+    if (h == CURRENT_PROCESS_HANDLE || h == CURRENT_THREAD_HANDLE) {
+        const uint64_t f = irq_save();
+        if (!cur || !cur->used || !cur->object || cur->object->type != OB_PROCESS || cur->object->u.proc.p != cur) {
+            irq_restore(f); return STATUS_INVALID_HANDLE;
+        }
+        if (h == CURRENT_PROCESS_HANDLE) o = cur->object;
+        else {
+            thread_t *t = thread_current();
+            if (!t || t->proc != cur || t->state == TS_FREE || !t->object) {
+                irq_restore(f); return STATUS_INVALID_HANDLE;
+            }
+            o = t->object;
+            if (o->type != OB_THREAD) { irq_restore(f); return STATUS_OBJECT_TYPE_MISMATCH; }
+            if (o->u.thr.t != t || o->u.thr.pid != (uint64_t)cur->pid) {
+                irq_restore(f); return STATUS_INVALID_HANDLE;
+            }
+        }
+        if (o->type != type) { irq_restore(f); return STATUS_OBJECT_TYPE_MISMATCH; }
+        ob_ref(o);
+        irq_restore(f);
+    } else {
+        st = ipc_ref_handle(cur, h, type, &o, &access);
+        if (st) return st;
+        if (!(access & alternatives)) { ob_deref(o); return STATUS_ACCESS_DENIED; }
+    }
+    *out = o;
+    return STATUS_SUCCESS;
+}
+
+/* Snapshot metadata only; neither clocks nor cycle accounting are involved.
+ * A detached object's zero-initialized cache is not a captured snapshot. */
+static int32_t query_thread_settings(process_t *cur, uint64_t h, uint32_t alternatives, uint32_t settings[4])
+{
+    kobject_t *o;
+    thread_t *t;
+    process_t *p;
+    uint64_t f;
+    int32_t st = ref_settings_object(cur, h, OB_THREAD, alternatives, &o);
+    if (st) return st;
+    f = irq_save();
+    t = o->u.thr.t;
+    if (t) {
+        p = t->proc;
+        if (t->object != o || t->state == TS_FREE || !p || !p->used || !p->object ||
+            p->object->type != OB_PROCESS || p->object->u.proc.p != p || o->u.thr.pid != (uint64_t)p->pid)
+            st = STATUS_INVALID_HANDLE;
+        else {
+            settings[0] = t->boost_disabled != 0; settings[1] = t->mem_priority;
+            settings[2] = t->power_control; settings[3] = t->power_state;
+        }
+    } else if (o->u.thr.last_mem_priority < 1 || o->u.thr.last_mem_priority > 5) st = STATUS_INVALID_HANDLE;
+    else {
+        settings[0] = o->u.thr.last_boost_disabled; settings[1] = o->u.thr.last_mem_priority;
+        settings[2] = o->u.thr.last_power_control; settings[3] = o->u.thr.last_power_state;
+    }
+    irq_restore(f);
+    ob_deref(o);
+    return st;
+}
+
+/* Keep the object across caller copies, then re-resolve under the UP guard.
+ * Transport rights precede private length/value checks for these setters. */
+static int32_t set_process_settings(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len)
+{
+    kobject_t *o;
+    process_t *p;
+    uint32_t v[2] = { 0, 0 };
+    const uint32_t width = cls == K32S_PROCESS_POWER ? 8u : 4u;
+    uint64_t f;
+    int32_t st = ref_settings_object(cur, h, OB_PROCESS, PROCESS_SET_INFORMATION, &o);
+    if (st) return st;
+    if (len < width || copy_from_user(cur, v, buf, width)) { st = STATUS_ACCESS_VIOLATION; goto done; }
+    if (cls == K32S_PROCESS_MEM_PRIORITY && (v[0] < 1 || v[0] > 5)) { st = STATUS_INVALID_PARAMETER; goto done; }
+    f = irq_save();
+    p = o->u.proc.p;
+    if (!p || !p->used || p->object != o) st = STATUS_INVALID_HANDLE;
+    else if (p->terminated || p->teardown || p->exit_owner) st = STATUS_PROCESS_IS_TERMINATING;
+    else if (cls == K32S_PROCESS_MEM_PRIORITY) p->mem_priority = v[0];
+    else { p->power_control = v[0]; p->power_state = v[1]; }
+    irq_restore(f);
+done:
+    ob_deref(o);
+    return st;
+}
+
+static int32_t set_thread_settings(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t len)
+{
+    kobject_t *o;
+    thread_t *t;
+    process_t *p;
+    uint32_t v, v2 = 0;
+    const uint32_t rights = THREAD_SET_INFORMATION | (cls == K32S_THREAD_BOOST ? THREAD_SET_LIMITED_INFORMATION : 0);
+    uint64_t f;
+    int32_t st = ref_settings_object(cur, h, OB_THREAD, rights, &o);
+    if (st) return st;
+    if (len < 4 || copy_from_user(cur, &v, buf, 4)) { st = STATUS_ACCESS_VIOLATION; goto done; }
+    if (cls == K32S_THREAD_POWER && (len < 8 || copy_from_user(cur, &v2, buf + 4, 4))) {
+        st = STATUS_ACCESS_VIOLATION; goto done;
+    }
+    if (cls == K32S_THREAD_MEM_PRIORITY && (v < 1 || v > 5)) { st = STATUS_INVALID_PARAMETER; goto done; }
+    f = irq_save();
+    t = o->u.thr.t;
+    if (!t) st = STATUS_THREAD_IS_TERMINATING;
+    else {
+        p = t->proc;
+        if (t->object != o || t->state == TS_FREE || !p || !p->used || !p->object ||
+            p->object->type != OB_PROCESS || p->object->u.proc.p != p || o->u.thr.pid != (uint64_t)p->pid)
+            st = STATUS_INVALID_HANDLE;
+        else if (t->state == TS_ZOMBIE || p->terminated || p->teardown || p->exit_owner || thread_must_die(t))
+            st = STATUS_THREAD_IS_TERMINATING;
+        else if (cls == K32S_THREAD_BOOST) t->boost_disabled = v != 0;
+        else if (cls == K32S_THREAD_MEM_PRIORITY) t->mem_priority = v;
+        else { t->power_control = v; t->power_state = v2; }
+    }
+    irq_restore(f);
+done:
+    ob_deref(o);
+    return st;
 }
 
 static process_t *proc_of_handle(process_t *cur, uint64_t h)
@@ -500,9 +627,10 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
         int32_t st = thread_times(cur, h, &t, 0, THREAD_QUERY_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION);
         return st ? st : put_out(cur, buf, len, retlen, &t, sizeof t);
     }
-    case K32Q_THREAD_SETTINGS: {
+    case K32Q_THREAD_SETTINGS: case K32Q_THREAD_SETTINGS_STRICT: {
         uint32_t s[4];
-        int32_t st = thread_times(cur, h, 0, s, 0);
+        const uint32_t rights = THREAD_QUERY_INFORMATION | (cls == K32Q_THREAD_SETTINGS ? THREAD_QUERY_LIMITED_INFORMATION : 0);
+        int32_t st = query_thread_settings(cur, h, rights, s);
         return st ? st : put_out(cur, buf, len, retlen, s, sizeof s);
     }
     case K32Q_PROCESS_TIMES: {
@@ -568,11 +696,19 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
     case K32Q_MAPPED_FILE_PATH:
         return query_mapped_file_path(cur, h, buf, len, retlen);
     case K32Q_PROCESS_SETTINGS: {                               /* {memory priority, power throttling control, state} */
-        process_t *p = proc_of_handle(cur, h);
+        process_t *p;
+        kobject_t *o;
         uint32_t v[3];
-        if (!p) return STATUS_INVALID_HANDLE;
-        v[0] = p->mem_priority ? p->mem_priority : 5; v[1] = p->power_control; v[2] = p->power_state;
-        return put_out(cur, buf, len, retlen, v, sizeof v);
+        uint64_t f;
+        int32_t st = ref_settings_object(cur, h, OB_PROCESS, PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, &o);
+        if (st) return st;
+        f = irq_save();
+        p = o->u.proc.p;
+        if (!p || !p->used || p->object != o) st = STATUS_INVALID_HANDLE;
+        else { v[0] = p->mem_priority ? p->mem_priority : 5; v[1] = p->power_control; v[2] = p->power_state; }
+        irq_restore(f);
+        ob_deref(o);
+        return st ? st : put_out(cur, buf, len, retlen, v, sizeof v);
     }
     case K32Q_PROCESS_LIST: {
         unsigned i, n = 0;
@@ -878,40 +1014,10 @@ int32_t k32_set(process_t *cur, uint64_t cls, uint64_t h, uint64_t buf, uint64_t
     }
     case K32S_PRIORITY_CLASS: return set_process_priority_class(cur, h, buf, len);
     case K32S_PROCESS_AFFINITY: return set_process_affinity_mask(cur, h, buf, len);
-    case K32S_PROCESS_MEM_PRIORITY: case K32S_PROCESS_POWER: {
-        process_t *p = proc_of_handle(cur, h);
-        uint32_t v[2] = { 0, 0 };
-        if (!p) return STATUS_INVALID_HANDLE;
-        if (len < (cls == K32S_PROCESS_POWER ? 8u : 4u) || copy_from_user(cur, v, buf, cls == K32S_PROCESS_POWER ? 8 : 4))
-            return STATUS_ACCESS_VIOLATION;
-        if (cls == K32S_PROCESS_MEM_PRIORITY) {
-            if (v[0] < 1 || v[0] > 5) return STATUS_INVALID_PARAMETER;
-            p->mem_priority = v[0];
-        } else {
-            p->power_control = v[0]; p->power_state = v[1];
-        }
-        return STATUS_SUCCESS;
-    }
-    case K32S_THREAD_BOOST: case K32S_THREAD_MEM_PRIORITY: case K32S_THREAD_POWER: {
-        thread_t *t = 0;
-        kobject_t *o = 0;
-        uint32_t v, v2 = 0;
-        uint64_t f;
-        if (len < 4 || copy_from_user(cur, &v, buf, 4)) return STATUS_ACCESS_VIOLATION;
-        if (cls == K32S_THREAD_POWER && (len < 8 || copy_from_user(cur, &v2, buf + 4, 4))) return STATUS_ACCESS_VIOLATION;
-        if (cls == K32S_THREAD_MEM_PRIORITY && (v < 1 || v > 5)) return STATUS_INVALID_PARAMETER;
-        if (h == CURRENT_THREAD_HANDLE) t = thread_current();
-        else if (!(o = handle_lookup(cur, h, OB_THREAD))) return STATUS_INVALID_HANDLE;
-        f = irq_save();
-        if (o) t = o->u.thr.t;
-        if (t && t->state != TS_ZOMBIE) {
-            if (cls == K32S_THREAD_BOOST) t->boost_disabled = v != 0;
-            else if (cls == K32S_THREAD_MEM_PRIORITY) t->mem_priority = v;
-            else { t->power_control = v; t->power_state = v2; }
-        }
-        irq_restore(f);
-        return t ? STATUS_SUCCESS : STATUS_THREAD_IS_TERMINATING;
-    }
+    case K32S_PROCESS_MEM_PRIORITY: case K32S_PROCESS_POWER:
+        return set_process_settings(cur, cls, h, buf, len);
+    case K32S_THREAD_BOOST: case K32S_THREAD_MEM_PRIORITY: case K32S_THREAD_POWER:
+        return set_thread_settings(cur, cls, h, buf, len);
     case K32S_THREAD_NAME: {                                    /* SetThreadDescription: buf/len = the UTF-16 text (len 0 clears) */
         thread_t *t = 0;
         kobject_t *o = 0;

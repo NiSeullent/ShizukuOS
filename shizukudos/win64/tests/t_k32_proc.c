@@ -1831,6 +1831,534 @@ cleanup:
     CHECK(GetProcessHandleCount(GetCurrentProcess(), &count) && count == before,
           "held-memory tests release every fixture page and restore the exact parent handle count");
 }
+/* ---------------------------------------------------------------- held settings, modern rights and retained scalar metadata
+ * Append-only Kernel64 subset: stored settings have no demonstrated boost,
+ * eviction or power-policy effect. The preceding 866 checks remain intact.
+ * Query19 is independently full-QUERY; query12 retains boost/group validation.
+ * Natural exit and bounded churn do not prove a particular TCB slot was reused;
+ * the separate host fixture exercises actual thread_object_detach and reuse. */
+/* Normal-success count: 551 added = 409 current/right/buffer/restore checks
+ * + 142 natural-child/retained/churn/close checks; total 866 + 551 = 1417.
+ * Failure-only forced cleanup is deliberately outside this success count. */
+LONG NTAPI NtShzSetK32(ULONG, HANDLE, PVOID, ULONG);
+#define QS_DENIED ((LONG)0xc0000022u)
+#define QS_INVALID_HANDLE ((LONG)0xc0000008u)
+#define QS_TYPE_MISMATCH ((LONG)0xc0000024u)
+#define QS_ACCESS_VIOLATION ((LONG)0xc0000005u)
+#define QS_INVALID_PARAMETER ((LONG)0xc000000du)
+#define QS_SHORT ((LONG)0xc0000023u)
+#define QS_PROCESS_EXITED ((LONG)0xc000010au)
+#define QS_THREAD_EXITED ((LONG)0xc000004bu)
+typedef struct { ULONG64 before; ULONG value[4]; BYTE tail[16]; ULONG64 after; } qs_raw_guard;
+typedef struct { ULONG before, value, after; } qs_length_guard;
+typedef struct { ULONG64 before; MEMORY_PRIORITY_INFORMATION value; ULONG64 after; } qs_memory_guard;
+typedef struct { ULONG64 before; THREAD_PTS value; ULONG64 after; } qs_power_guard;
+typedef struct { ULONG64 before; BOOL value; ULONG64 after; } qs_bool_guard;
+typedef struct { ULONG64 before; GROUP_AFFINITY value; ULONG64 after; } qs_group_guard;
+
+static DWORD qs_error(LONG status)
+{
+    return status == QS_DENIED || status == QS_PROCESS_EXITED || status == QS_THREAD_EXITED ?
+           ERROR_ACCESS_DENIED : ERROR_INVALID_HANDLE;
+}
+static void qs_raw_query(ULONG selector, HANDLE h, LONG status, const ULONG *expected, ULONG words)
+{
+    qs_raw_guard out;
+    qs_length_guard length;
+    BOOL ok;
+    memset(&out, 0x5a, sizeof out); memset(&length, 0x5a, sizeof length);
+    ok = NtShzQueryK32(selector, h, out.value, words * 4, &length.value) == status;
+    if (!status) ok = ok && length.value == words * 4 && memcmp(out.value, expected, words * 4) == 0 &&
+        mq_edges(&out, sizeof out, sizeof out.before, words * 4) &&
+        mq_edges(&length, sizeof length, sizeof length.before, sizeof length.value);
+    else ok = ok && mq_edges(&out, sizeof out, 0, 0) && mq_edges(&length, sizeof length, 0, 0);
+    CHECK(ok, "private settings query uses its literal expected words or preserves both poisoned outputs on refusal");
+}
+static void qs_process_query(HANDLE h, LONG status, const ULONG expected[3])
+{
+    qs_memory_guard memory;
+    qs_power_guard power;
+    BOOL ok;
+    qs_raw_query(13, h, status, expected, 3);
+    memset(&memory, 0x5a, sizeof memory); SetLastError(0x5a5a);
+    ok = GetProcessInformation(h, ProcessMemoryPriority, &memory.value, sizeof memory.value);
+    CHECK(status ? !ok && GetLastError() == qs_error(status) && mq_edges(&memory, sizeof memory, 0, 0) :
+          ok && memory.value.MemoryPriority == expected[0] &&
+          mq_edges(&memory, sizeof memory, sizeof memory.before, sizeof memory.value),
+          "process memory getter enforces query rights and writes only its four-byte stored value");
+    memset(&power, 0x5a, sizeof power); power.value.Version = 1; SetLastError(0x5a5a);
+    ok = GetProcessInformation(h, ProcessPowerThrottling, &power.value, sizeof power.value);
+    CHECK(status ? !ok && GetLastError() == qs_error(status) && power.value.Version == 1 &&
+          mq_edges(&power, sizeof power, sizeof power.before, 4) :
+          ok && power.value.Version == 1 && power.value.ControlMask == expected[1] &&
+          power.value.StateMask == expected[2] &&
+          mq_edges(&power, sizeof power, sizeof power.before, sizeof power.value),
+          "process power getter reports the literal stored pair and preserves rejected output");
+}
+static void qs_thread_query(HANDLE h, LONG legacy_status, LONG strict_status, const ULONG expected[4])
+{
+    qs_memory_guard memory;
+    qs_power_guard power;
+    qs_bool_guard boost;
+    qs_group_guard group;
+    BOOL ok;
+    qs_raw_query(12, h, legacy_status, expected, 4);
+    qs_raw_query(19, h, strict_status, expected, 4);
+    memset(&boost, 0x5a, sizeof boost); SetLastError(0x5a5a);
+    ok = GetThreadPriorityBoost(h, &boost.value);
+    CHECK(legacy_status ? !ok && GetLastError() == qs_error(legacy_status) && mq_edges(&boost, sizeof boost, 0, 0) :
+          ok && boost.value == (expected[0] != 0) &&
+          mq_edges(&boost, sizeof boost, sizeof boost.before, sizeof boost.value),
+          "boost getter retains QUERY or LIMITED and its normalized stored boolean");
+    memset(&memory, 0x5a, sizeof memory); SetLastError(0x5a5a);
+    ok = GetThreadInformation(h, THREAD_MEMORY_PRIORITY_CLASS, &memory.value, sizeof memory.value);
+    CHECK(strict_status ? !ok && GetLastError() == qs_error(strict_status) && mq_edges(&memory, sizeof memory, 0, 0) :
+          ok && memory.value.MemoryPriority == expected[1] &&
+          mq_edges(&memory, sizeof memory, sizeof memory.before, sizeof memory.value),
+          "thread memory getter uses direct full-QUERY settings and preserves a denied four-byte output");
+    memset(&power, 0x5a, sizeof power); power.value.Version = 1; SetLastError(0x5a5a);
+    ok = GetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, &power.value, sizeof power.value);
+    CHECK(strict_status ? !ok && GetLastError() == qs_error(strict_status) && power.value.Version == 1 &&
+          mq_edges(&power, sizeof power, sizeof power.before, 4) :
+          ok && power.value.Version == 1 && power.value.ControlMask == expected[2] &&
+          power.value.StateMask == expected[3] &&
+          mq_edges(&power, sizeof power, sizeof power.before, sizeof power.value),
+          "the retained local thread-power getter uses strict QUERY with its unchanged twelve-byte schema");
+    memset(&group, 0x5a, sizeof group); SetLastError(0x5a5a);
+    ok = GetThreadGroupAffinity(h, &group.value);
+    CHECK(legacy_status ? !ok && GetLastError() == qs_error(legacy_status) && mq_edges(&group, sizeof group, 0, 0) :
+          ok && group.value.Mask == 1 && group.value.Group == 0 && group.value.Reserved[0] == 0 &&
+          group.value.Reserved[1] == 0 && group.value.Reserved[2] == 0 &&
+          mq_edges(&group, sizeof group, sizeof group.before, sizeof group.value),
+          "the indirect legacy settings consumer admits QUERY or LIMITED and reports only the actual CPU0 group");
+}
+static void qs_set_refusal(HANDLE h, BOOL thread, LONG status)
+{
+    ULONG value[2] = {3, 1};
+    MEMORY_PRIORITY_INFORMATION memory = {3};
+    THREAD_PTS power = {1, 1, 1};
+    BOOL ok;
+    if (thread) {
+        CHECK(NtShzSetK32(2, h, value, 4) == status, "raw boost mutation refuses missing rights or departed ownership");
+        SetLastError(0x5a5a); ok = SetThreadPriorityBoost(h, TRUE);
+        CHECK(!ok && GetLastError() == qs_error(status), "public boost refusal preserves the backend status translation");
+    }
+    CHECK(NtShzSetK32(thread ? 3 : 9, h, value, 4) == status,
+          "raw memory settings mutation refuses the selected handle before changing metadata");
+    SetLastError(0x5a5a);
+    ok = thread ? SetThreadInformation(h, THREAD_MEMORY_PRIORITY_CLASS, &memory, sizeof memory) :
+                  SetProcessInformation(h, ProcessMemoryPriority, &memory, sizeof memory);
+    CHECK(!ok && GetLastError() == qs_error(status), "public memory settings mutation translates the selected refusal");
+    CHECK(NtShzSetK32(thread ? 8 : 10, h, value, 8) == status,
+          "raw power settings mutation refuses the selected handle without storing either word");
+    SetLastError(0x5a5a);
+    ok = thread ? SetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, &power, sizeof power) :
+                  SetProcessInformation(h, ProcessPowerThrottling, &power, sizeof power);
+    CHECK(!ok && GetLastError() == qs_error(status), "public power mutation translates refusal after valid frontend checks");
+}
+static void qs_denied_widths(HANDLE h, BOOL thread)
+{
+    const ULONG process_ops[2] = {9, 10}, thread_ops[3] = {2, 3, 8};
+    const ULONG *ops = thread ? thread_ops : process_ops;
+    ULONG value[3] = {0, 0xabcdef01u, 0x12345678u};
+    unsigned i, j;
+    for (i = 0; i < (thread ? 3u : 2u); ++i) {
+        ULONG width = ops[i] == 8 || ops[i] == 10 ? 8 : 4;
+        ULONG lengths[4] = {0, width - 1, width, width + 4};
+        for (j = 0; j < 4; ++j)
+            CHECK(NtShzSetK32(ops[i], h, value, lengths[j]) == QS_DENIED,
+                  "selected setter rights precede zero, short, invalid-value and oversized safe payloads");
+    }
+}
+static void qs_buffers(HANDLE process, HANDLE thread)
+{
+    const ULONG selectors[3] = {13, 12, 19}, widths[3] = {12, 16, 16};
+    qs_raw_guard out;
+    qs_length_guard length;
+    unsigned i, j;
+    for (i = 0; i < 3; ++i) {
+        HANDLE h = i == 0 ? process : thread;
+        ULONG short_lengths[2] = {0, widths[i] - 1};
+        for (j = 0; j < 2; ++j) {
+            memset(&out, 0x5a, sizeof out); memset(&length, 0x5a, sizeof length);
+            CHECK(NtShzQueryK32(selectors[i], h, out.value, short_lengths[j], &length.value) == QS_SHORT &&
+                  length.value == widths[i] && mq_edges(&out, sizeof out, 0, 0) &&
+                  mq_edges(&length, sizeof length, sizeof length.before, sizeof length.value),
+                  "short settings output receives its exact required width without scalar or guard writes");
+        }
+        memset(&out, 0x5a, sizeof out); memset(&length, 0x5a, sizeof length);
+        CHECK(NtShzQueryK32(selectors[i], h, out.value, sizeof out.value + sizeof out.tail, &length.value) == 0 &&
+              length.value == widths[i] && mq_edges(&out, sizeof out, sizeof out.before, widths[i]) &&
+              mq_edges(&length, sizeof length, sizeof length.before, sizeof length.value),
+              "oversized settings output changes only its twelve or sixteen bytes and required length");
+        memset(&out, 0x5a, sizeof out);
+        CHECK(NtShzQueryK32(selectors[i], h, out.value, widths[i], NULL) == 0 &&
+              mq_edges(&out, sizeof out, sizeof out.before, widths[i]),
+              "settings query accepts an absent optional ReturnLength without widening its output");
+    }
+}
+static void qs_public_contracts(HANDLE process, HANDLE thread)
+{
+    qs_memory_guard memory;
+    qs_power_guard power;
+    unsigned kind, i;
+    const DWORD sizes[2] = {3, 5}, power_sizes[2] = {11, 13};
+    for (kind = 0; kind < 2; ++kind) {
+        HANDLE h = kind ? thread : process;
+        BOOL ok;
+        SetLastError(0x5a5a);
+        ok = kind ? GetThreadInformation(h, THREAD_MEMORY_PRIORITY_CLASS, NULL, 4) :
+                    GetProcessInformation(h, ProcessMemoryPriority, NULL, 4);
+        CHECK(!ok && GetLastError() == ERROR_INVALID_PARAMETER, "NULL public memory output retains its parameter refusal");
+        SetLastError(0x5a5a);
+        ok = kind ? SetThreadInformation(h, THREAD_MEMORY_PRIORITY_CLASS, NULL, 4) :
+                    SetProcessInformation(h, ProcessMemoryPriority, NULL, 4);
+        CHECK(!ok && GetLastError() == ERROR_INVALID_PARAMETER, "NULL public memory input retains its parameter refusal");
+        for (i = 0; i < 2; ++i) {
+            memset(&memory, 0x5a, sizeof memory); SetLastError(0x5a5a);
+            ok = kind ? GetThreadInformation(h, THREAD_MEMORY_PRIORITY_CLASS, &memory.value, sizes[i]) :
+                        GetProcessInformation(h, ProcessMemoryPriority, &memory.value, sizes[i]);
+            CHECK(!ok && GetLastError() == ERROR_BAD_LENGTH && mq_edges(&memory, sizeof memory, 0, 0),
+                  "public memory getter rejects both sides of exact four bytes without output writes");
+            SetLastError(0x5a5a);
+            ok = kind ? SetThreadInformation(h, THREAD_MEMORY_PRIORITY_CLASS, &memory.value, sizes[i]) :
+                        SetProcessInformation(h, ProcessMemoryPriority, &memory.value, sizes[i]);
+            CHECK(!ok && GetLastError() == ERROR_BAD_LENGTH && mq_edges(&memory, sizeof memory, 0, 0),
+                  "public memory setter preserves its exact-size validation before kernel rights");
+        }
+        for (i = 0; i < 2; ++i) {
+            memory.value.MemoryPriority = i ? 6 : 0; SetLastError(0x5a5a);
+            ok = kind ? SetThreadInformation(h, THREAD_MEMORY_PRIORITY_CLASS, &memory.value, 4) :
+                        SetProcessInformation(h, ProcessMemoryPriority, &memory.value, 4);
+            CHECK(!ok && GetLastError() == ERROR_INVALID_PARAMETER,
+                  "admitted SET memory priority refuses zero and six rather than storing an invented value");
+        }
+        SetLastError(0x5a5a);
+        ok = kind ? GetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, NULL, 12) :
+                    GetProcessInformation(h, ProcessPowerThrottling, NULL, 12);
+        CHECK(!ok && GetLastError() == ERROR_INVALID_PARAMETER, "NULL public power output retains parameter precedence");
+        SetLastError(0x5a5a);
+        ok = kind ? SetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, NULL, 12) :
+                    SetProcessInformation(h, ProcessPowerThrottling, NULL, 12);
+        CHECK(!ok && GetLastError() == ERROR_INVALID_PARAMETER, "NULL public power input retains parameter precedence");
+        for (i = 0; i < 2; ++i) {
+            memset(&power, 0x5a, sizeof power); power.value.Version = 1; SetLastError(0x5a5a);
+            ok = kind ? GetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, &power.value, power_sizes[i]) :
+                        GetProcessInformation(h, ProcessPowerThrottling, &power.value, power_sizes[i]);
+            CHECK(!ok && GetLastError() == ERROR_BAD_LENGTH && power.value.Version == 1 &&
+                  mq_edges(&power, sizeof power, sizeof power.before, 4),
+                  "public power getter rejects short and long twelve-byte layouts without output changes");
+            SetLastError(0x5a5a);
+            ok = kind ? SetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, &power.value, power_sizes[i]) :
+                        SetProcessInformation(h, ProcessPowerThrottling, &power.value, power_sizes[i]);
+            CHECK(!ok && GetLastError() == ERROR_BAD_LENGTH,
+                  "public power setter checks its exact twelve-byte layout before backend rights");
+            memset(&power, 0x5a, sizeof power); power.value.Version = i ? 2 : 0; SetLastError(0x5a5a);
+            ok = kind ? GetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, &power.value, 12) :
+                        GetProcessInformation(h, ProcessPowerThrottling, &power.value, 12);
+            CHECK(!ok && GetLastError() == ERROR_INVALID_PARAMETER && power.value.Version == (i ? 2u : 0u) &&
+                  mq_edges(&power, sizeof power, sizeof power.before, 4),
+                  "public power getter rejects a non-one version without replacing its poisoned masks");
+            SetLastError(0x5a5a);
+            ok = kind ? SetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, &power.value, 12) :
+                        SetProcessInformation(h, ProcessPowerThrottling, &power.value, 12);
+            CHECK(!ok && GetLastError() == ERROR_INVALID_PARAMETER, "public power setter preserves non-one version refusal");
+        }
+        for (i = 0; i < 2; ++i) {
+            power.value.Version = 1;
+            power.value.ControlMask = i ? 0 : (kind ? 2 : 8);
+            power.value.StateMask = i ? 1 : 0; SetLastError(0x5a5a);
+            ok = kind ? SetThreadInformation(h, THREAD_POWER_THROTTLING_CLASS, &power.value, 12) :
+                        SetProcessInformation(h, ProcessPowerThrottling, &power.value, 12);
+            CHECK(!ok && GetLastError() == ERROR_INVALID_PARAMETER,
+                  "public power stores refuse unknown control bits and state bits outside control");
+        }
+    }
+    SetLastError(0x5a5a);
+    CHECK(!GetThreadPriorityBoost(thread, NULL) && GetLastError() == ERROR_INVALID_PARAMETER,
+          "boost getter retains safe NULL output validation");
+    SetLastError(0x5a5a);
+    CHECK(!GetThreadGroupAffinity(thread, NULL) && GetLastError() == ERROR_INVALID_PARAMETER,
+          "indirect group-affinity consumer retains safe NULL validation");
+    SetLastError(0x5a5a);
+    CHECK(!Wow64GetThreadContext(thread, NULL) && GetLastError() == ERROR_NOACCESS,
+          "unsupported WOW64 context wrapper retains its safe NULL refusal");
+    memset(&memory, 0x5a, sizeof memory); SetLastError(0x5a5a);
+    CHECK(!GetThreadInformation(thread, 1, &memory.value, 4) && GetLastError() == ERROR_INVALID_PARAMETER &&
+          mq_edges(&memory, sizeof memory, 0, 0), "absolute-CPU settings getter remains unsupported");
+    SetLastError(0x5a5a);
+    CHECK(!SetThreadInformation(thread, 2, &memory.value, 4) && GetLastError() == ERROR_NOT_SUPPORTED,
+          "dynamic-code thread settings remain explicitly unsupported");
+}
+static void qs_store_literals(HANDLE process, HANDLE thread)
+{
+    MEMORY_PRIORITY_INFORMATION memory = {2};
+    THREAD_PTS power = {1, 5, 1};
+    CHECK(SetProcessInformation(process, ProcessMemoryPriority, &memory, 4), "SET-only process handle stores literal priority two");
+    CHECK(SetProcessInformation(process, ProcessPowerThrottling, &power, 12), "SET-only process handle stores literal power five/one");
+    CHECK(SetThreadPriorityBoost(thread, TRUE), "full SET thread handle stores disabled boost without QUERY");
+    memory.MemoryPriority = 3;
+    CHECK(SetThreadInformation(thread, THREAD_MEMORY_PRIORITY_CLASS, &memory, 4), "SET-only thread handle stores literal priority three");
+    power.ControlMask = power.StateMask = 1;
+    CHECK(SetThreadInformation(thread, THREAD_POWER_THROTTLING_CLASS, &power, 12), "SET-only thread handle stores literal power one/one");
+}
+static void qs_raw_widths(HANDLE process, HANDLE thread, HANDLE process_query, HANDLE thread_query)
+{
+    const ULONG ops[5] = {9, 10, 2, 3, 8};
+    const ULONG widths[5] = {4, 8, 4, 4, 8};
+    const ULONG wild_process[3] = {2, 0x80000005u, 0xdeadbeefu};
+    const ULONG wild_thread[4] = {1, 3, 0x80000001u, 0x76543210u};
+    ULONG value[3];
+    unsigned i, j;
+    for (i = 0; i < 5; ++i) {
+        HANDLE h = i < 2 ? process : thread;
+        value[0] = ops[i] == 9 ? 2 : ops[i] == 3 ? 3 : ops[i] == 10 ? 5 : 1;
+        value[1] = 1; value[2] = 0x13572468u;
+        for (j = 0; j < 2; ++j)
+            CHECK(NtShzSetK32(ops[i], h, value, j ? widths[i] - 1 : 0) == QS_ACCESS_VIOLATION,
+                  "admitted private setter retains zero and short payload ACCESS_VIOLATION");
+        CHECK(NtShzSetK32(ops[i], h, value, widths[i] + 4) == 0,
+              "oversized private setter consumes only its existing four or eight bytes");
+    }
+    for (i = 0; i < 2; ++i) {
+        value[0] = i ? 6 : 0;
+        CHECK(NtShzSetK32(9, process, value, 4) == QS_INVALID_PARAMETER, "raw process memory priority rejects zero and six");
+        CHECK(NtShzSetK32(3, thread, value, 4) == QS_INVALID_PARAMETER, "raw thread memory priority rejects zero and six");
+    }
+    value[0] = 7;
+    CHECK(NtShzSetK32(2, thread, value, 4) == 0, "raw nonzero boost value normalizes to the stored boolean");
+    CHECK(NtShzSetK32(10, process, (PVOID)(wild_process + 1), 8) == 0,
+          "raw process power keeps its existing unvalidated two-word metadata contract");
+    CHECK(NtShzSetK32(8, thread, (PVOID)(wild_thread + 2), 8) == 0,
+          "raw thread power keeps its existing unvalidated two-word metadata contract");
+    qs_process_query(process_query, 0, wild_process);
+    qs_thread_query(thread_query, 0, 0, wild_thread);
+    qs_store_literals(process, thread);
+}
+static void qs_wow64_consumer(HANDLE thread, DWORD error)
+{
+    struct { ULONG64 before; WOW64_CONTEXT value; ULONG64 after; } out;
+    memset(&out, 0x5a, sizeof out); SetLastError(0x5a5a);
+    CHECK(!Wow64GetThreadContext(thread, &out.value) && GetLastError() == error && mq_edges(&out, sizeof out, 0, 0),
+          "WOW64 indirect settings validation is rights-aware but still supplies no native x86 context");
+}
+static void qs_natural_child(void)
+{
+    static const WCHAR child_name[] = L"T_HELLO.EXE";
+    const ULONG expected_process[3] = {3, 4, 4}, expected_thread[4] = {1, 1, 1, 0};
+    const DWORD process_rights[3] = {PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION};
+    const DWORD thread_rights[4] = {THREAD_QUERY_INFORMATION, THREAD_QUERY_LIMITED_INFORMATION,
+                                 THREAD_SET_INFORMATION, THREAD_SET_LIMITED_INFORMATION};
+    struct { ULONG64 before; WCHAR value[MAX_PATH]; ULONG64 after; } path;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    HANDLE process[3] = {NULL, NULL, NULL}, thread[4] = {NULL, NULL, NULL, NULL};
+    MEMORY_PRIORITY_INFORMATION memory = {3};
+    THREAD_PTS power = {1, 4, 4};
+    ULONG boost = 1;
+    DWORD count = 0, after = 0, n, at, pc = 0, tc = 0, pw = WAIT_FAILED, tw = WAIT_FAILED;
+    unsigned i;
+    BOOL ok;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &count), "capture the exact parent handle count before retained settings");
+    memset(&path, 0x5a, sizeof path); n = GetModuleFileNameW(NULL, path.value, MAX_PATH);
+    CHECK(n && n < MAX_PATH && path.value[n] == 0 && mq_edges(&path, sizeof path, sizeof path.before, sizeof path.value),
+          "capture the existing fixture directory with bounded guarded path storage");
+    if (!n || n >= MAX_PATH || path.value[n] != 0) return;
+    at = n; while (at && path.value[at - 1] != '\\' && path.value[at - 1] != '/') --at;
+    CHECK(at && at + sizeof child_name / sizeof child_name[0] <= MAX_PATH, "natural settings child name and NUL fit MAX_PATH");
+    if (!at || at + sizeof child_name / sizeof child_name[0] > MAX_PATH) return;
+    for (i = 0; i < sizeof child_name / sizeof child_name[0]; ++i) path.value[at + i] = child_name[i];
+    CHECK(path.value[at + sizeof child_name / sizeof child_name[0] - 1] == 0 &&
+          mq_edges(&path, sizeof path, sizeof path.before, sizeof path.value), "child path replacement preserves both guards");
+    memset(&si, 0, sizeof si); si.cb = sizeof si; memset(&pi, 0, sizeof pi);
+    ok = CreateProcessW(path.value, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+    CHECK(ok, "create only the existing natural exit-seven fixture suspended for real settings mutation");
+    if (!ok) return;
+    for (i = 0; i < 3; ++i) {
+        process[i] = OpenProcess(process_rights[i], FALSE, pi.dwProcessId);
+        CHECK(process[i] != NULL, "hold each distinct settings right on the real child process");
+        if (!process[i]) goto cleanup;
+    }
+    for (i = 0; i < 4; ++i) {
+        thread[i] = OpenThread(thread_rights[i], FALSE, pi.dwThreadId);
+        CHECK(thread[i] != NULL, "hold each distinct settings right on the child's actual primary thread");
+        if (!thread[i]) goto cleanup;
+    }
+    CHECK(SetProcessInformation(process[2], ProcessMemoryPriority, &memory, 4), "store nondefault child process priority three");
+    CHECK(SetProcessInformation(process[2], ProcessPowerThrottling, &power, 12), "store nondefault child process power four/four");
+    CHECK(SetThreadPriorityBoost(thread[3], TRUE), "SET_LIMITED alone stores nondefault child boost disable");
+    memory.MemoryPriority = 1;
+    CHECK(SetThreadInformation(thread[2], THREAD_MEMORY_PRIORITY_CLASS, &memory, 4), "store distinct child thread memory priority one");
+    power.ControlMask = 1; power.StateMask = 0;
+    CHECK(SetThreadInformation(thread[2], THREAD_POWER_THROTTLING_CLASS, &power, 12), "store distinct child thread power one/zero");
+    qs_process_query(process[0], 0, expected_process); qs_process_query(process[1], 0, expected_process);
+    qs_thread_query(thread[0], 0, 0, expected_thread); qs_thread_query(thread[1], 0, QS_DENIED, expected_thread);
+    qs_process_query(process[2], QS_DENIED, expected_process);
+    qs_thread_query(thread[2], QS_DENIED, QS_DENIED, expected_thread);
+    qs_thread_query(thread[3], QS_DENIED, QS_DENIED, expected_thread);
+    ok = ResumeThread(pi.hThread) == 1;
+    CHECK(ok, "resume the settings fixture exactly once for its natural existing exit");
+    if (!ok) goto cleanup;
+    pw = WaitForSingleObject(pi.hProcess, 5000); CHECK(pw == WAIT_OBJECT_0, "natural settings child process finishes within five seconds");
+    tw = WaitForSingleObject(pi.hThread, 5000); CHECK(tw == WAIT_OBJECT_0, "natural settings primary thread finishes before retained assertions");
+    if (pw != WAIT_OBJECT_0 || tw != WAIT_OBJECT_0) goto cleanup;
+    ok = GetExitCodeProcess(pi.hProcess, &pc) && pc == 7;
+    CHECK(ok, "the retained process confirms natural exit seven rather than forced cleanup");
+    if (!ok) goto cleanup;
+    ok = GetExitCodeThread(pi.hThread, &tc) && tc == 7;
+    CHECK(ok, "the independently retained primary thread confirms the same natural exit seven");
+    if (!ok) goto cleanup;
+    qs_process_query(process[0], 0, expected_process); qs_process_query(process[1], 0, expected_process);
+    qs_thread_query(thread[0], 0, 0, expected_thread); qs_thread_query(thread[1], 0, QS_DENIED, expected_thread);
+    qs_set_refusal(process[2], FALSE, QS_PROCESS_EXITED);
+    qs_set_refusal(thread[2], TRUE, QS_THREAD_EXITED);
+    CHECK(NtShzSetK32(2, thread[3], &boost, 4) == QS_THREAD_EXITED,
+          "SET_LIMITED boost refuses the naturally departed real thread");
+    SetLastError(0x5a5a);
+    CHECK(!SetThreadPriorityBoost(thread[3], TRUE) && GetLastError() == ERROR_ACCESS_DENIED,
+          "public retained SET_LIMITED boost translates THREAD_IS_TERMINATING");
+    qs_set_refusal(process[0], FALSE, QS_DENIED); qs_set_refusal(thread[0], TRUE, QS_DENIED);
+    for (i = 0; i < 4; ++i) {
+        HANDLE churn = CreateThread(NULL, 0, quick_thread, NULL, 0, NULL);
+        DWORD wait = WAIT_FAILED, code = 0;
+        CHECK(churn != NULL, "create one of exactly four bounded post-exit churn threads");
+        if (!churn) continue;
+        wait = WaitForSingleObject(churn, 5000);
+        CHECK(wait == WAIT_OBJECT_0, "each churn thread completes within its checked bounded wait");
+        CHECK(wait == WAIT_OBJECT_0 && GetExitCodeThread(churn, &code) && code == 7,
+              "each churn control has its own natural exit seven, without claiming a specific slot reuse");
+        if (wait != WAIT_OBJECT_0) {
+            CHECK(TerminateThread(churn, 99), "failed churn termination is separate cleanup with no natural-success credit");
+            CHECK(WaitForSingleObject(churn, 2000) == WAIT_OBJECT_0, "failed churn cleanup has its own bounded wait");
+        }
+        CHECK(CloseHandle(churn), "close each completed or separately cleaned churn handle");
+    }
+    qs_thread_query(thread[0], 0, 0, expected_thread); qs_thread_query(thread[1], 0, QS_DENIED, expected_thread);
+    qs_set_refusal(thread[2], TRUE, QS_THREAD_EXITED);
+    qs_process_query(process[0], 0, expected_process);
+cleanup:
+    if (pw != WAIT_OBJECT_0 || tw != WAIT_OBJECT_0) {
+        CHECK(TerminateProcess(pi.hProcess, 99), "failed settings child termination is separate cleanup only");
+        CHECK(WaitForSingleObject(pi.hProcess, 2000) == WAIT_OBJECT_0, "failed settings process cleanup has a checked bounded wait");
+        CHECK(WaitForSingleObject(pi.hThread, 2000) == WAIT_OBJECT_0, "failed settings primary-thread cleanup has a checked bounded wait");
+    }
+    for (i = 0; i < 4; ++i) if (thread[i]) CHECK(CloseHandle(thread[i]), "close every independent retained settings thread handle");
+    for (i = 0; i < 3; ++i) if (process[i]) CHECK(CloseHandle(process[i]), "close every independent retained settings process handle");
+    CHECK(CloseHandle(pi.hThread), "close the original natural settings primary-thread handle");
+    CHECK(CloseHandle(pi.hProcess), "close the original natural settings process handle");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &after) && after == count,
+          "retained settings and four bounded churn controls restore the exact parent handle count");
+}
+static void test_held_settings(void)
+{
+    const DWORD process_rights[4] = {PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SET_INFORMATION, PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION};
+    const DWORD thread_rights[5] = {THREAD_QUERY_INFORMATION, THREAD_QUERY_LIMITED_INFORMATION,
+        THREAD_SET_INFORMATION, THREAD_SET_LIMITED_INFORMATION, THREAD_QUERY_INFORMATION | THREAD_QUERY_LIMITED_INFORMATION};
+    const ULONG expected_process[3] = {2, 5, 1}, expected_thread[4] = {1, 3, 1, 1};
+    HANDLE process[4] = {NULL, NULL, NULL, NULL}, thread[5] = {NULL, NULL, NULL, NULL, NULL};
+    HANDLE closed_process = NULL, closed_thread = NULL, bad_process[5], bad_thread[5];
+    ULONG saved_process[3] = {0}, saved_thread[4] = {0}, restored_process[3], restored_thread[4], length = 0, value[2] = {3, 1};
+    LONG status, bad_status[5] = {QS_TYPE_MISMATCH, QS_TYPE_MISMATCH, QS_INVALID_HANDLE, QS_INVALID_HANDLE, QS_INVALID_HANDLE};
+    MEMORY_PRIORITY_INFORMATION memory = {3};
+    THREAD_PTS power = {1, 1, 1};
+    DWORD before = 0, after = 0;
+    unsigned i, tag;
+    BOOL saved = FALSE, ok;
+    CHECK(sizeof(MEMORY_PRIORITY_INFORMATION) == 4 && sizeof(THREAD_PTS) == 12 &&
+          sizeof(PROCESS_POWER_THROTTLING_STATE) == 12 && sizeof(ULONG) == 4 &&
+          THREAD_SET_LIMITED_INFORMATION == 0x400 && THREAD_QUERY_LIMITED_INFORMATION == 0x800,
+          "actual public settings schemas and independent literal LIMITED rights match the selected ABI");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &before), "capture the parent handle count before held settings");
+    status = NtShzQueryK32(13, GetCurrentProcess(), saved_process, sizeof saved_process, &length);
+    CHECK(status == 0 && length == 12, "capture original process settings solely for restoration on every changed-current path");
+    if (status || length != 12) goto cleanup;
+    length = 0; status = NtShzQueryK32(12, GetCurrentThread(), saved_thread, sizeof saved_thread, &length);
+    CHECK(status == 0 && length == 16, "capture original thread settings solely for restoration without using them as a test oracle");
+    if (status || length != 16) goto cleanup;
+    saved = TRUE;
+    for (i = 0; i < 4; ++i) {
+        process[i] = OpenProcess(process_rights[i], FALSE, GetCurrentProcessId());
+        CHECK(process[i] != NULL, "open independent process QUERY, LIMITED, SET and combined-query settings handles");
+        if (!process[i]) goto cleanup;
+    }
+    for (i = 0; i < 5; ++i) {
+        thread[i] = OpenThread(thread_rights[i], FALSE, GetCurrentThreadId());
+        CHECK(thread[i] != NULL, "open independent thread QUERY, LIMITED, SET, SET_LIMITED and combined-query handles");
+        if (!thread[i]) goto cleanup;
+    }
+    qs_store_literals(process[2], thread[2]);
+    for (i = 0; i < 4; ++i) qs_process_query(process[i], i == 2 ? QS_DENIED : 0, expected_process);
+    for (i = 0; i < 5; ++i)
+        qs_thread_query(thread[i], i == 2 || i == 3 ? QS_DENIED : 0,
+                        i == 0 || i == 4 ? 0 : QS_DENIED, expected_thread);
+    for (i = 0; i < 4; ++i) if (i != 2) qs_set_refusal(process[i], FALSE, QS_DENIED);
+    for (i = 0; i < 5; ++i) if (i != 2 && i != 3) qs_set_refusal(thread[i], TRUE, QS_DENIED);
+    qs_denied_widths(process[0], FALSE); qs_denied_widths(thread[0], TRUE);
+    CHECK(SetThreadPriorityBoost(thread[3], TRUE), "SET_LIMITED-only boost mutation succeeds without SET or QUERY");
+    CHECK(NtShzSetK32(3, thread[3], value, 4) == QS_DENIED, "SET_LIMITED does not authorize raw thread memory mutation");
+    SetLastError(0x5a5a);
+    CHECK(!SetThreadInformation(thread[3], THREAD_MEMORY_PRIORITY_CLASS, &memory, 4) && GetLastError() == ERROR_ACCESS_DENIED,
+          "SET_LIMITED does not authorize public thread memory mutation");
+    CHECK(NtShzSetK32(8, thread[3], value, 8) == QS_DENIED, "SET_LIMITED does not authorize raw thread power mutation");
+    SetLastError(0x5a5a);
+    CHECK(!SetThreadInformation(thread[3], THREAD_POWER_THROTTLING_CLASS, &power, 12) && GetLastError() == ERROR_ACCESS_DENIED,
+          "SET_LIMITED does not authorize public thread power mutation");
+    qs_process_query(process[0], 0, expected_process); qs_thread_query(thread[0], 0, 0, expected_thread);
+    qs_buffers(process[0], thread[0]); qs_public_contracts(process[2], thread[2]);
+    qs_raw_widths(process[2], thread[2], process[0], thread[0]);
+    qs_process_query(GetCurrentProcess(), 0, expected_process); qs_thread_query(GetCurrentThread(), 0, 0, expected_thread);
+    qs_wow64_consumer(thread[0], ERROR_INVALID_PARAMETER);
+    qs_wow64_consumer(thread[1], ERROR_INVALID_PARAMETER);
+    qs_wow64_consumer(thread[2], ERROR_ACCESS_DENIED);
+    for (tag = 0; tag < 4; ++tag) {
+        qs_process_query((HANDLE)(((ULONG_PTR)process[0] & ~(ULONG_PTR)3) | tag), 0, expected_process);
+        qs_thread_query((HANDLE)(((ULONG_PTR)thread[0] & ~(ULONG_PTR)3) | tag), 0, 0, expected_thread);
+    }
+    bad_process[0] = thread[0]; bad_process[1] = GetCurrentThread(); bad_process[2] = NULL;
+    bad_process[3] = (HANDLE)((ULONG_PTR)process[0] | ((ULONG_PTR)1 << 32)); bad_process[4] = (HANDLE)(ULONG_PTR)0x7fff1;
+    bad_thread[0] = process[0]; bad_thread[1] = GetCurrentProcess(); bad_thread[2] = NULL;
+    bad_thread[3] = (HANDLE)((ULONG_PTR)thread[0] | ((ULONG_PTR)1 << 32)); bad_thread[4] = (HANDLE)(ULONG_PTR)0x7fff1;
+    for (i = 0; i < 5; ++i) {
+        qs_process_query(bad_process[i], bad_status[i], expected_process);
+        qs_thread_query(bad_thread[i], bad_status[i], bad_status[i], expected_thread);
+        qs_set_refusal(bad_process[i], FALSE, bad_status[i]); qs_set_refusal(bad_thread[i], TRUE, bad_status[i]);
+    }
+    closed_process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_INFORMATION, FALSE, GetCurrentProcessId());
+    CHECK(closed_process != NULL, "open a process settings handle solely for immediate close refusal");
+    if (closed_process) {
+        HANDLE old = closed_process;
+        ok = CloseHandle(closed_process); CHECK(ok, "close the process settings handle before any slot republication");
+        if (ok) { closed_process = NULL; qs_process_query(old, QS_INVALID_HANDLE, expected_process); qs_set_refusal(old, FALSE, QS_INVALID_HANDLE); }
+    }
+    closed_thread = OpenThread(THREAD_QUERY_INFORMATION | THREAD_SET_INFORMATION, FALSE, GetCurrentThreadId());
+    CHECK(closed_thread != NULL, "open a thread settings handle solely for immediate close refusal");
+    if (closed_thread) {
+        HANDLE old = closed_thread;
+        ok = CloseHandle(closed_thread); CHECK(ok, "close the thread settings handle before any slot republication");
+        if (ok) { closed_thread = NULL; qs_thread_query(old, QS_INVALID_HANDLE, QS_INVALID_HANDLE, expected_thread); qs_set_refusal(old, TRUE, QS_INVALID_HANDLE); }
+    }
+    qs_process_query(process[0], 0, expected_process); qs_thread_query(thread[0], 0, 0, expected_thread);
+    qs_natural_child();
+cleanup:
+    if (saved) {
+        CHECK(NtShzSetK32(9, GetCurrentProcess(), saved_process, 4) == 0, "restore original current process memory metadata");
+        CHECK(NtShzSetK32(10, GetCurrentProcess(), saved_process + 1, 8) == 0, "restore original current process power words exactly");
+        CHECK(NtShzSetK32(2, GetCurrentThread(), saved_thread, 4) == 0, "restore original current thread boost boolean");
+        CHECK(NtShzSetK32(3, GetCurrentThread(), saved_thread + 1, 4) == 0, "restore original current thread memory metadata");
+        CHECK(NtShzSetK32(8, GetCurrentThread(), saved_thread + 2, 8) == 0, "restore original current thread power words exactly");
+        CHECK(NtShzQueryK32(13, GetCurrentProcess(), restored_process, sizeof restored_process, NULL) == 0 &&
+              memcmp(restored_process, saved_process, sizeof saved_process) == 0, "verify exact restoration of all original process settings");
+        CHECK(NtShzQueryK32(12, GetCurrentThread(), restored_thread, sizeof restored_thread, NULL) == 0 &&
+              memcmp(restored_thread, saved_thread, sizeof saved_thread) == 0, "verify exact restoration of all original thread settings");
+    }
+    if (closed_thread) CHECK(CloseHandle(closed_thread), "close a failed temporary thread settings handle");
+    if (closed_process) CHECK(CloseHandle(closed_process), "close a failed temporary process settings handle");
+    for (i = 0; i < 5; ++i) if (thread[i]) CHECK(CloseHandle(thread[i]), "close every independently selected thread settings handle");
+    for (i = 0; i < 4; ++i) if (process[i]) CHECK(CloseHandle(process[i]), "close every independently selected process settings handle");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &after) && after == before,
+          "settings tests restore current metadata and the exact original parent handle count");
+}
 int main(void)
 {
     test_restart();
@@ -1849,5 +2377,6 @@ int main(void)
     test_query_rights_and_retained_times();
     test_strict_process_queries();
     test_held_memory_queries();
+    test_held_settings();
     return k32t_finish("t_k32_proc");
 }

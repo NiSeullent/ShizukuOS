@@ -289,14 +289,14 @@ K32API BOOL WINAPI GetThreadInformation(HANDLE h, THREAD_INFORMATION_CLASS cls_,
     switch (cls) {
     case SHZ_ThreadMemoryPriority:
         if (size != sizeof(MEMORY_PRIORITY_INFORMATION)) return fail_err(ERROR_BAD_LENGTH);
-        if ((st = NtShzQueryK32(K32Q_THREAD_SETTINGS, h, s, sizeof s, 0))) return fail_st(st);
+        if ((st = NtShzQueryK32(K32Q_THREAD_SETTINGS_STRICT, h, s, sizeof s, 0))) return fail_st(st);
         ((MEMORY_PRIORITY_INFORMATION *)info)->MemoryPriority = s[1];
         return TRUE;
     case SHZ_ThreadPowerThrottling: {
         SHZ_THREAD_POWER_THROTTLING_STATE *p = info;
         if (size != sizeof *p) return fail_err(ERROR_BAD_LENGTH);
         if (p->Version != 1) return fail_err(ERROR_INVALID_PARAMETER);
-        if ((st = NtShzQueryK32(K32Q_THREAD_SETTINGS, h, s, sizeof s, 0))) return fail_st(st);
+        if ((st = NtShzQueryK32(K32Q_THREAD_SETTINGS_STRICT, h, s, sizeof s, 0))) return fail_st(st);
         p->ControlMask = s[2];
         p->StateMask = s[3];
         return TRUE;
