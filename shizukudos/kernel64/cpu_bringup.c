@@ -88,11 +88,11 @@ static int resources_check(unsigned count,uint64_t bootstrap)
         if(top<phys_base_va+KSTACK_BYTES) return -1;
         const uint64_t stack=top-phys_base_va-KSTACK_BYTES,arch=i?shz_cpu_arch_resource(i):0;
         if(shz_smp_cpus[i].irq_stack_top!=top+KSTACK_BYTES || shz_smp_cpus[i].df_stack_top!=top+KSTACK_BYTES+8192 ||
-           !owned_span(stack,stack_bytes) || (i && (!owned_span(arch,8192) || overlap(stack,stack_bytes,arch,8192)))) return -1;
+           !owned_span(stack,stack_bytes) || (i && (!owned_span(arch,SHZ_CPU_ARCH_BYTES) || overlap(stack,stack_bytes,arch,SHZ_CPU_ARCH_BYTES)))) return -1;
         for(unsigned j=0;j<i;j++) {
             const uint64_t prior=shz_smp_cpus[j].boot_stack_top-phys_base_va-KSTACK_BYTES,prior_arch=j?shz_cpu_arch_resource(j):0;
-            if(overlap(stack,stack_bytes,prior,stack_bytes) || (j && overlap(stack,stack_bytes,prior_arch,8192)) ||
-               (i && overlap(arch,8192,prior,stack_bytes)) || (i && j && overlap(arch,8192,prior_arch,8192))) return -1;
+            if(overlap(stack,stack_bytes,prior,stack_bytes) || (j && overlap(stack,stack_bytes,prior_arch,SHZ_CPU_ARCH_BYTES)) ||
+               (i && overlap(arch,SHZ_CPU_ARCH_BYTES,prior,stack_bytes)) || (i && j && overlap(arch,SHZ_CPU_ARCH_BYTES,prior_arch,SHZ_CPU_ARCH_BYTES))) return -1;
         }
     }
     if(dispatch_mode && (count!=dispatch_count || sched_ap_cohort_resources(owned_span))) return -1;
