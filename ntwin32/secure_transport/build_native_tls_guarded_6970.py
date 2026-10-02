@@ -1973,6 +1973,183 @@ def ninja_console_controls(baseline, rules, targets, actual_plan, cmake_director
             'windows98_integration_verified':False, 'tls_execution_verified':False}
 
 
+def decode_main_command_records(receipt):
+    """Independent bounded data reader; closed wire bytes are never rewritten."""
+    def need(condition, reason):
+        if not condition:
+            raise ValueError('main command columns: ' + reason)
+    need(isinstance(receipt, dict) and receipt.get('schema') == 'native-tls-sspi-guarded-build-6970-v1',
+         'main schema required')
+    need(receipt.get('command_records_encoding') == 'lossless-command-quiescence-columns-v1',
+         'unknown encoding')
+    need(receipt.get('command_records_retained') is True
+         and receipt.get('command_records_encoding_roundtrip_verified') is True, 'retention/roundtrip marker')
+    count = receipt.get('command_count')
+    need(isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 8192, 'row count bound/type')
+    columns, qcolumns = receipt.get('command_record_columns'), receipt.get('command_quiescence_columns')
+    for names in (columns, qcolumns):
+        need(isinstance(names, list) and len(names) <= 128, 'column list bound/type')
+        need(all(isinstance(name, str) and len(name.encode('utf-8')) <= 128 for name in names),
+             'column name type/UTF8 bound')
+        need(names == sorted(set(names)), 'column names must be sorted and unique')
+    need('quiescence' in columns and (count != 0 or columns == ['quiescence'] and qcolumns == []),
+         'quiescence/empty-array columns')
+    vectors = receipt.get('commands')
+    need(isinstance(vectors, list) and len(vectors) == count, 'vector array/count')
+    expected_bytes, expected_sha = (receipt.get('command_records_decoded_canonical_bytes'),
+                                    receipt.get('command_records_decoded_canonical_sha256'))
+    need(isinstance(expected_bytes, int) and not isinstance(expected_bytes, bool)
+         and 2 <= expected_bytes <= LIMIT, 'canonical byte bound/type')
+    need(isinstance(expected_sha, str) and re.fullmatch('[0-9a-f]{64}', expected_sha) is not None,
+         'canonical SHA256')
+    rows, observed, hasher, nonnull_q = [], 0, hashlib.sha256(), False
+    def consume(raw):
+        nonlocal observed
+        observed += len(raw)
+        need(observed <= LIMIT, 'incremental decoded canonical byte bound')
+        hasher.update(raw)
+    consume(b'[')
+    qindex = columns.index('quiescence')
+    encoder = json.JSONEncoder(sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False)
+    for index, vector in enumerate(vectors):
+        need(isinstance(vector, list) and len(vector) == len(columns), 'command vector dimensions')
+        row = dict(zip(columns, vector))
+        qvector = vector[qindex]
+        if qvector is not None:
+            nonnull_q = True
+            need(isinstance(qvector, list) and len(qvector) == len(qcolumns), 'quiescence vector dimensions/type')
+            row['quiescence'] = dict(zip(qcolumns, qvector))
+        if index:
+            consume(b',')
+        # Admission is incremental before retaining each reconstructed row.
+        for part in encoder.iterencode(row):
+            consume(part.encode('utf-8'))
+        rows.append(row)
+    consume(b']')
+    need(nonnull_q or qcolumns == [], 'all-null quiescence must have empty columns')
+    need(observed == expected_bytes and hasher.hexdigest() == expected_sha, 'canonical length/digest mismatch')
+    return rows
+
+
+def main_command_codec_controls(resources, guard):
+    """Hosted in-memory producer/independent-reader checks; no new command epoch."""
+    started = time.monotonic()
+    encoder = json.JSONEncoder(sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False)
+    def canonical(value):
+        raw = bytearray()
+        for part in encoder.iterencode(value):
+            if len(part) > LIMIT - len(raw) or time.monotonic() - started > 60:
+                raise ValueError('bounded main codec control data/time admission')
+            raw.extend(part.encode('ascii'))
+        return bytes(raw)
+    before = canonical(guard.commands)
+    pools = (len(guard.commands), guard.capture_bytes, guard.decoder_bytes)
+    strings, refs, actual = [], {}, []
+    for command in guard.commands:
+        row = {key:value for key,value in command.items() if key != 'argv'}
+        argv_refs = []
+        for argument in command['argv']:
+            if argument not in refs:
+                refs[argument] = len(strings)
+                strings.append(argument)
+            argv_refs.append(refs[argument])
+        row['argv_refs'] = argv_refs
+        actual.append(row)
+    if len(strings) > 8192 or sum(len(value.encode('utf-8')) for value in strings) > 256 * 1024:
+        raise ValueError('actual control argv table exceeds unchanged byte/count bounds')
+    cases = []
+    def fixture(rows):
+        return {'schema':'native-tls-sspi-guarded-build-6970-v1', 'command_count':len(rows),
+                'command_records_retained':True, **resources.encode_main_command_columns(rows)}
+    def positive(name, rows):
+        original = canonical(rows)
+        value = fixture(rows)
+        decoded = decode_main_command_records(value)
+        if canonical(decoded) != original or canonical(rows) != original:
+            raise ValueError('main codec positive failed or mutated input: ' + name)
+        cases.append({'name':name, 'expected':'accept', 'actual':'accept', 'result':'PASS',
+                      'decoded_bytes':len(original), 'decoded_sha256':digest(original)})
+        return value
+    positive('actual-parent-command-rows', actual)
+    positive('empty-command-array', [])
+    sample = positive('null-and-empty-quiescence-distinct', [
+        {'label':'null', 'quiescence':None, 'payload':{'boolean':True, 'float':1.25, 'integer':1234567890123456789, 'text':'시즈쿠'}},
+        {'label':'empty', 'quiescence':{}, 'payload':{'boolean':False, 'float':-0.0, 'integer':0, 'text':''}}])
+    positive('nested-observation-values', [{'label':'nested', 'quiescence':{
+        'failure':None, 'value':0.125, 'rows':[{'state':'T', 'identity':[1,2,3]}]}, 'payload':[False, '한글', 7]}])
+    def negative(name, mutate):
+        value = json.loads(canonical(sample))
+        mutate(value)
+        try:
+            decode_main_command_records(value)
+        except (ValueError, TypeError, UnicodeError):
+            cases.append({'name':name, 'expected':'reject', 'actual':'reject', 'result':'PASS'})
+        else:
+            raise ValueError('main codec malformed reader accepted: ' + name)
+    negative('unknown-encoding', lambda x:x.update(command_records_encoding='unknown'))
+    negative('wrong-main-schema', lambda x:x.update(schema='child'))
+    negative('false-roundtrip-marker', lambda x:x.update(command_records_encoding_roundtrip_verified=False))
+    negative('records-not-retained', lambda x:x.update(command_records_retained=False))
+    negative('boolean-count', lambda x:x.update(command_count=True))
+    negative('mismatched-count', lambda x:x.update(command_count=1))
+    negative('row-count-bound', lambda x:x.update(command_count=8193, commands=x['commands'][:1]*8193))
+    negative('duplicate-columns', lambda x:x['command_record_columns'].append(x['command_record_columns'][0]))
+    negative('unsorted-columns', lambda x:x['command_record_columns'].reverse())
+    negative('missing-quiescence-column', lambda x:x['command_record_columns'].remove('quiescence'))
+    negative('nonstring-column', lambda x:x['command_record_columns'].__setitem__(0, 1))
+    negative('oversized-UTF8-column', lambda x:x['command_record_columns'].__setitem__(0, '가'*43))
+    negative('wrong-command-dimensions', lambda x:x['commands'][0].pop())
+    qindex = sample['command_record_columns'].index('quiescence')
+    negative('dictionary-quiescence-wire', lambda x:x['commands'][1].__setitem__(qindex, {}))
+    negative('null-changed-to-empty-dictionary', lambda x:x['commands'][0].__setitem__(qindex, []))
+    negative('empty-dictionary-changed-to-null', lambda x:x['commands'][1].__setitem__(qindex, None))
+    negative('wrong-quiescence-dimensions', lambda x:x['commands'][1].__setitem__(qindex, [1]))
+    negative('canonical-byte-mismatch', lambda x:x.update(command_records_decoded_canonical_bytes=2))
+    negative('canonical-byte-boolean', lambda x:x.update(command_records_decoded_canonical_bytes=True))
+    negative('canonical-byte-bound', lambda x:x.update(command_records_decoded_canonical_bytes=LIMIT+1))
+    negative('canonical-digest-mismatch', lambda x:x.update(command_records_decoded_canonical_sha256='0'*64))
+    expansion_columns = sorted(['quiescence'] + ['k%03d'%i + 'x'*124 for i in range(127)])
+    expansion_vector = [None if key == 'quiescence' else 0 for key in expansion_columns]
+    expansion = {'schema':'native-tls-sspi-guarded-build-6970-v1', 'command_count':2200,
+        'command_records_retained':True, 'command_records_encoding_roundtrip_verified':True,
+        'command_records_encoding':'lossless-command-quiescence-columns-v1',
+        'command_record_columns':expansion_columns, 'command_quiescence_columns':[],
+        'commands':[expansion_vector]*2200, 'command_records_decoded_canonical_bytes':LIMIT,
+        'command_records_decoded_canonical_sha256':'0'*64}
+    try:
+        decode_main_command_records(expansion)
+    except ValueError as error:
+        if 'incremental decoded canonical byte bound' not in str(error):
+            raise ValueError('codec expansion did not reject at the incremental bound') from error
+        cases.append({'name':'incremental-canonical-expansion-bound', 'expected':'reject',
+                      'actual':'reject', 'result':'PASS'})
+    else:
+        raise ValueError('codec key expansion crossed the decoded canonical limit')
+    for name, malformed in (
+            ('producer-nonuniform-command-fields', [{'quiescence':None}, {'quiescence':None, 'extra':1}]),
+            ('producer-nonuniform-quiescence-fields', [{'quiescence':{}}, {'quiescence':{'extra':1}}])):
+        try:
+            resources.encode_main_command_columns(malformed)
+        except (ValueError, TypeError, resources.ResourceFailure):
+            cases.append({'name':name, 'expected':'reject', 'actual':'reject', 'result':'PASS'})
+        else:
+            raise ValueError('main codec malformed producer accepted: ' + name)
+    if (canonical(guard.commands) != before
+            or pools != (len(guard.commands), guard.capture_bytes, guard.decoder_bytes)):
+        raise ValueError('metadata codec controls mutated actual commands or capture pools')
+    elapsed = time.monotonic() - started
+    if elapsed > 60:
+        raise ValueError('metadata codec controls crossed the admitted time bound')
+    return {'schema':'native-tls-main-command-codec-controls-6970-v1',
+            'result':'PASS_LOSSLESS_METADATA_CODEC_CONTROLS_ONLY', 'completed':len(cases), 'failures':0,
+            'cases':cases, 'actual_parent_command_count':len(actual),
+            'actual_command_input_before_after_equal':True, 'parent_capture_pools_before_after_equal':True,
+            'new_processes_or_child_epochs':False, 'capture_bytes_charged_to_parent':0,
+            'decoder_bytes_charged_to_parent':0, 'physical_capture_or_runtime_execution_verified':False,
+            'native_execution_verified':False, 'windows98_integration_verified':False,
+            'tls_execution_verified':False, 'elapsed_seconds':elapsed}
+
+
 def compact_tu_headers(receipt):
     """The existing lossless header-index representation, for PASS and FAIL.
 
@@ -2195,6 +2372,7 @@ def build(output, prep, expected_preparation_sha):
             receipt['pidfd_controls']['fixture_build'])
         count_pins = require_count_epoch_controls(receipt['count_epoch_controls'], count_controls,
             guard, resources, source_pins, receipt['pidfd_controls']['fixture_build'], count_offsets)
+        receipt['main_command_codec_controls'] = main_command_codec_controls(resources, guard)
         # Original in-memory ISA methods run through the existing exact-byte loader.
         r = guard.run([python, '-B', '-c', bridge.I486_CONTROL_CHILD,
                        str(HERE / 'i486_gate.py'), PRODUCTION[gate_name][1],
@@ -2656,7 +2834,7 @@ def build(output, prep, expected_preparation_sha):
             except (ValueError,KeyError,TypeError) as error:
                 receipt['result']='FAIL'
                 receipt['TU_header_compaction_error']=str(error)[:2048]
-            closed=guard.close_receipt(receipt,output/'result.json')
+            closed=guard.close_receipt(receipt,output/'result.json',main_command_columns=True)
             print('Current TLS build receipt SHA256:',closed['sha256'])
             print(json.dumps({k:closed[k] for k in ('result','bytes')}))
             if closed['result']!='PASS_CURRENT_NATIVE_TLS_SSPI_BUILD_ONLY':

@@ -266,7 +266,7 @@ jobs:
           import hashlib,os,stat,sys,types
           from pathlib import Path
           root=Path.cwd().resolve()
-          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'bf1efcebed90d9a2524836a0e237b1923b2250d8f8d62fcc5b6949b5b048f16d', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': 'deeb26aa23d5724cad73be48ab20f7cf8b348eaa2bb32c13dfbc81657e8af0eb', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '46149184b734e221f267eed268711dbd94c754ee102256276cdd2cafe6a58071', 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py': '36282f2bdabf25c7cd970e426de1c3a835346c000888cc1761c33a952c012aae', 'ntwin32/secure_transport/native_tls_count_epoch_controls_6970.py': '3391ada5ad42a2e10554932a40240b3f8fe4ca9a77e6c0647f7f5c0f5598bc3e'}
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'b38039be4002bfb4f73833add64967fee470563575298e5402aeb0b22c281c14', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': 'bb5e965b991b88554cfa083ad09ee15b7d9e468e2031deff75ac680beb38ca6d', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '46149184b734e221f267eed268711dbd94c754ee102256276cdd2cafe6a58071', 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py': '36282f2bdabf25c7cd970e426de1c3a835346c000888cc1761c33a952c012aae', 'ntwin32/secure_transport/native_tls_count_epoch_controls_6970.py': '3391ada5ad42a2e10554932a40240b3f8fe4ca9a77e6c0647f7f5c0f5598bc3e'}
           before={}
           identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
           for relative,expected in pins.items():
@@ -306,28 +306,170 @@ jobs:
               print('Preparation did not reach the build. No PASS adopted.')
               raise SystemExit(0)
           proof=Path(value);path=proof/'result.json'
-          if not path.exists():
-              print('No counted build receipt. No PASS adopted.')
-              raise SystemExit(0)
-          identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
-          def read(path,maximum,expected=None):
-              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+          identity=lambda s:[s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+          proof_flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
+          assert proof.is_absolute() and '..' not in proof.parts and len(proof.parts)<=128
+          proof_uid=os.getuid();proof_chain=[];proof_chain_fds=[]
+          ancestor=os.open('/',proof_flags);proof_chain_fds.append(ancestor)
+          try:
+              for component in proof.parts[1:]:
+                  directory=os.open(component,proof_flags,dir_fd=ancestor)
+                  proof_chain_fds.append(directory)
+                  info=os.fstat(directory);named=os.stat(component,dir_fd=ancestor,follow_symlinks=False)
+                  assert stat.S_ISDIR(info.st_mode) and identity(info)==identity(named)
+                  proof_chain.append((ancestor,component,directory,(info.st_dev,info.st_ino)))
+                  ancestor=directory
+              assert proof_chain
+              proof_fd=ancestor;proof_info=os.fstat(proof_fd);proof_device=proof_info.st_dev
+              assert proof_info.st_uid==proof_uid and not proof_info.st_mode&0o022
+          except BaseException:
+              for directory in reversed(proof_chain_fds):os.close(directory)
+              raise
+
+          def held_proof_read(path,maximum):
+              assert path.is_absolute() and path.is_relative_to(proof)
+              relative=path.relative_to(proof);assert relative.parts and '..' not in relative.parts
+              opened=[];bindings=[];leaf=None
+              def bind(parent,name,fd,pin=None,owned=True):
+                  info=os.fstat(fd);named=os.stat(name,dir_fd=parent,follow_symlinks=False)
+                  assert stat.S_ISDIR(info.st_mode) and identity(info)==identity(named)
+                  if pin is not None:assert (info.st_dev,info.st_ino)==pin
+                  if owned:assert info.st_dev==proof_device and info.st_uid==proof_uid and not info.st_mode&0o022
+                  bindings.append((parent,name,fd,identity(info)))
               try:
-                  info=os.fstat(fd)
-                  assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=maximum
+                  for parent,name,fd,pin in proof_chain:bind(parent,name,fd,pin,owned=fd==proof_fd)
+                  directory=proof_fd
+                  for component in relative.parts[:-1]:
+                      child=os.open(component,proof_flags,dir_fd=directory);opened.append(child)
+                      bind(directory,component,child);directory=child
+                  leaf_name=relative.parts[-1]
+                  leaf=os.open(leaf_name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,dir_fd=directory)
+                  info=os.fstat(leaf)
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_dev==proof_device and info.st_uid==proof_uid and 0<=info.st_size<=maximum
+                  assert identity(info)==identity(os.stat(leaf_name,dir_fd=directory,follow_symlinks=False))
                   raw=bytearray()
                   while True:
-                      part=os.read(fd,65536)
+                      part=os.read(leaf,65536)
                       if not part:break
-                      raw.extend(part);assert len(raw)<=maximum
-                  assert identity(info)==identity(os.fstat(fd))==identity(path.lstat())
-                  if expected is not None:
-                      assert {'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),'identity':list(identity(info))}==expected
-                  return bytes(raw)
-              finally:os.close(fd)
-          raw=read(path,1048576);receipt=json.loads(raw)
+                      assert len(raw)+len(part)<=maximum;raw.extend(part)
+                  assert len(raw)==info.st_size and identity(info)==identity(os.fstat(leaf))==identity(os.stat(leaf_name,dir_fd=directory,follow_symlinks=False))
+                  for parent,name,fd,before in bindings:assert before==identity(os.fstat(fd))==identity(os.stat(name,dir_fd=parent,follow_symlinks=False))
+                  return bytes(raw),{'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),'identity':list(identity(info))}
+              finally:
+                  if leaf is not None:os.close(leaf)
+                  for directory in reversed(opened):os.close(directory)
+          def decode_main_commands(receipt):
+              assert isinstance(receipt,dict) and receipt.get('schema')=='native-tls-sspi-guarded-build-6970-v1'
+              if 'command_records_encoding' not in receipt:
+                  legacy_count=receipt.get('command_count');legacy_rows=receipt.get('commands')
+                  assert receipt.get('command_records_retained') is True and type(legacy_count) is int and legacy_count>=0
+                  assert isinstance(legacy_rows,list) and len(legacy_rows)==legacy_count and all(isinstance(row,dict) for row in legacy_rows)
+                  return receipt
+              assert receipt.get('command_records_encoding')=='lossless-command-quiescence-columns-v1'
+              assert receipt.get('command_records_encoding_roundtrip_verified') is True and receipt.get('command_records_retained') is True
+              count=receipt.get('command_count');wire=receipt.get('commands')
+              assert type(count) is int and 0<=count<=8192 and isinstance(wire,list) and len(wire)==count
+              def fields(value):
+                  assert isinstance(value,list) and len(value)<=128
+                  assert all(type(name) is str and len(name.encode('utf-8'))<=128 for name in value)
+                  assert value==sorted(value) and len(set(value))==len(value)
+                  return value
+              columns=fields(receipt.get('command_record_columns'));quiet_columns=fields(receipt.get('command_quiescence_columns'))
+              assert 'quiescence' in columns
+              if count==0:assert columns==['quiescence'] and quiet_columns==[]
+              measured=receipt.get('command_records_decoded_canonical_bytes');expected=receipt.get('command_records_decoded_canonical_sha256')
+              assert type(measured) is int and 2<=measured<=32*1024**2
+              assert type(expected) is str and len(expected)==64 and all(ch in '0123456789abcdef' for ch in expected)
+              q_index=columns.index('quiescence');decoded=[];seen_quiet=False
+              encoder=json.JSONEncoder(sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False)
+              digest=hashlib.sha256();canonical_bytes=0
+              def charge(part):
+                  nonlocal canonical_bytes
+                  assert len(part)<=32*1024**2-canonical_bytes
+                  encoded=part.encode('ascii')
+                  canonical_bytes+=len(encoded);digest.update(encoded)
+              charge('[')
+              for index,vector in enumerate(wire):
+                  assert isinstance(vector,list) and len(vector)==len(columns)
+                  quiet=vector[q_index]
+                  assert quiet is None or (isinstance(quiet,list) and len(quiet)==len(quiet_columns))
+                  row=dict(zip(columns,vector))
+                  if quiet is not None:
+                      seen_quiet=True;row['quiescence']=dict(zip(quiet_columns,quiet))
+                  if index:charge(',')
+                  # Stream this bounded row before retaining the reconstructed row list.
+                  # Nested JSON values are shared unchanged; no expansion is normalized.
+                  for part in encoder.iterencode(row):charge(part)
+                  decoded.append(row)
+              charge(']')
+              if not seen_quiet:assert quiet_columns==[]
+              assert measured==canonical_bytes and expected==digest.hexdigest()
+              result=dict(receipt);result['commands']=decoded
+              return result
+          def read(path,maximum,expected=None):
+              raw,pin=held_proof_read(path,maximum)
+              if expected is not None:assert pin==expected
+              return raw
+          try:
+              raw=read(path,1048576)
+          except FileNotFoundError:
+              print('No counted build receipt. No PASS adopted.')
+              raise SystemExit(0)
+          receipt=json.loads(raw)
           print('Current TLS actual receipt SHA256:',hashlib.sha256(raw).hexdigest())
           print(raw.decode(),end='')
+          if receipt.get('schema')=='native-tls-resource-invalid-receipt-v1' and receipt.get('result')=='FAIL':
+              # Current fixed-path custody only: the parent inventory was not retained.
+              # The same 512-KiB pool covers bodies and bounded inventory diagnostics.
+              retained_control_text=inventory_diagnostic_bytes=retained_body_bytes=recovered_count=unavailable_count=unretained_full_read_bytes=0
+              def diagnostic(value):
+                  global retained_control_text,inventory_diagnostic_bytes
+                  payload=json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False)
+                  size=len(payload.encode())+1
+                  assert inventory_diagnostic_bytes+size<=16384 and retained_control_text+size<=524288
+                  inventory_diagnostic_bytes+=size;retained_control_text+=size;print(payload)
+              diagnostic({'schema':'native-tls-current-child-recovery-inventory-6970-v1','phase':'INITIAL','main_receipt_schema':receipt['schema'],'main_receipt_result':'FAIL','current_read_custody_only':True,'parent_before_after_inventory_available':False,'aggregate_19_controls_PASS_verified':False,'budget_scope':'retained text bodies plus emitted inventory diagnostics; unretained reads are not logged bodies','diagnostic_reservation_within_shared_pool_bytes':16384})
+              known=[]
+              for index in range(10):
+                  known.extend(('quiescent',Path('tmp')/('quiescent-%02d'%index)/name) for name in (('result.json','control.stdout','control.stderr') if index<8 else ('result.json',)))
+              for index in range(5):known.extend(('pidfd',Path('tmp')/('pidfd-%02d'%index)/name) for name in ('result.json','control.stdout','control.stderr'))
+              known.extend(('pidfd',Path('tmp')/name) for name in ('pidfd-fixture.S','pidfd-fixture.map'))
+              for title in ('stale-order','count-epoch'):
+                  for index in range(2):known.extend((title,Path('tmp')/(title+'-%02d'%index)/name) for name in ('result.json','control.stdout','control.stderr'))
+              assert len(known)==55 and len({relative for _,relative in known})==55
+              for title,relative in known:
+                  data=None
+                  try:
+                      # Reserve the existing diagnostic ceiling INSIDE the
+                      # same shared pool so later refusal reports still fit.
+                      data=read(proof/relative,min(524288-16384-retained_body_bytes,524288-retained_control_text))
+                      rendered=data.decode('utf-8')
+                  except (OSError,AssertionError,UnicodeError) as error:
+                      unavailable_count+=1
+                      observed_bytes=None if data is None else len(data)
+                      observed_sha=None if data is None else hashlib.sha256(data).hexdigest()
+                      if data is not None:unretained_full_read_bytes+=len(data)
+                      status='UNRETAINED_NON_UTF8' if isinstance(error,UnicodeError) else 'MISSING_UNSAFE_OR_OVER_BUDGET'
+                      diagnostic({'relative_path':str(relative),'status':status,'error_class':type(error).__name__,'errno':getattr(error,'errno',None),'unretained_body_bytes':observed_bytes,'unretained_body_sha256':observed_sha})
+                      continue
+                  retained_control_text+=len(data);retained_body_bytes+=len(data);recovered_count+=1
+                  assert retained_body_bytes<=524288-16384 and retained_control_text<=524288
+                  print('Actual '+title+' retained file:',str(relative),'bytes='+str(len(data)),'sha256='+hashlib.sha256(data).hexdigest())
+                  print(rendered,end='')
+              footer={'schema':'native-tls-current-child-recovery-inventory-6970-v1','phase':'FINAL','known_path_count':55,'recovered_body_count':recovered_count,'missing_unsafe_or_over_budget_count':unavailable_count,'retained_body_bytes':retained_body_bytes,'unretained_full_read_bytes':unretained_full_read_bytes,'inventory_diagnostic_bytes':inventory_diagnostic_bytes,'shared_charged_bytes':retained_control_text,'parent_before_after_inventory_available':False,'aggregate_19_controls_PASS_verified':False}
+              for _ in range(32):
+                  size=len(json.dumps(footer,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode())+1
+                  final_diagnostic=inventory_diagnostic_bytes+size;final_charge=retained_control_text+size
+                  if (footer['inventory_diagnostic_bytes'],footer['shared_charged_bytes'])==(final_diagnostic,final_charge):break
+                  footer['inventory_diagnostic_bytes']=final_diagnostic;footer['shared_charged_bytes']=final_charge
+              else:raise AssertionError('bounded recovery footer did not converge')
+              diagnostic(footer)
+              assert footer['inventory_diagnostic_bytes']==inventory_diagnostic_bytes<=16384 and footer['shared_charged_bytes']==retained_control_text==retained_body_bytes+inventory_diagnostic_bytes<=524288
+              assert recovered_count+unavailable_count==55
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as stream:
+                  stream.write('Current native TLS/SSPI build: FAIL\n\nInvalid main receipt; current fixed-path child custody only. Parent inventory and aggregate nineteen-control PASS remain unavailable. Native Windows, TLS, applications and ISO stay unverified.\n')
+              raise SystemExit(0)
+          receipt=decode_main_commands(receipt)
           captured=0
           for p in sorted([*proof.glob('*.stdout'),*proof.glob('*.stderr')]):
               data=read(p,262144);captured+=len(data);assert captured<=262144
@@ -389,8 +531,110 @@ jobs:
           reserve,limit=20*1024**3,32*1024**2
           assert shutil.disk_usage(root).free>=reserve+limit
           identity=lambda s:[s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+          proof_flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
+          assert proof.is_absolute() and '..' not in proof.parts and len(proof.parts)<=128
+          proof_uid=os.getuid();proof_chain=[];proof_chain_fds=[]
+          ancestor=os.open('/',proof_flags);proof_chain_fds.append(ancestor)
+          try:
+              for component in proof.parts[1:]:
+                  directory=os.open(component,proof_flags,dir_fd=ancestor)
+                  proof_chain_fds.append(directory)
+                  info=os.fstat(directory);named=os.stat(component,dir_fd=ancestor,follow_symlinks=False)
+                  assert stat.S_ISDIR(info.st_mode) and identity(info)==identity(named)
+                  proof_chain.append((ancestor,component,directory,(info.st_dev,info.st_ino)))
+                  ancestor=directory
+              assert proof_chain
+              proof_fd=ancestor;proof_info=os.fstat(proof_fd);proof_device=proof_info.st_dev
+              assert proof_info.st_uid==proof_uid and not proof_info.st_mode&0o022
+          except BaseException:
+              for directory in reversed(proof_chain_fds):os.close(directory)
+              raise
+
+          def held_proof_read(path,maximum):
+              assert path.is_absolute() and path.is_relative_to(proof)
+              relative=path.relative_to(proof);assert relative.parts and '..' not in relative.parts
+              opened=[];bindings=[];leaf=None
+              def bind(parent,name,fd,pin=None,owned=True):
+                  info=os.fstat(fd);named=os.stat(name,dir_fd=parent,follow_symlinks=False)
+                  assert stat.S_ISDIR(info.st_mode) and identity(info)==identity(named)
+                  if pin is not None:assert (info.st_dev,info.st_ino)==pin
+                  if owned:assert info.st_dev==proof_device and info.st_uid==proof_uid and not info.st_mode&0o022
+                  bindings.append((parent,name,fd,identity(info)))
+              try:
+                  for parent,name,fd,pin in proof_chain:bind(parent,name,fd,pin,owned=fd==proof_fd)
+                  directory=proof_fd
+                  for component in relative.parts[:-1]:
+                      child=os.open(component,proof_flags,dir_fd=directory);opened.append(child)
+                      bind(directory,component,child);directory=child
+                  leaf_name=relative.parts[-1]
+                  leaf=os.open(leaf_name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,dir_fd=directory)
+                  info=os.fstat(leaf)
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_dev==proof_device and info.st_uid==proof_uid and 0<=info.st_size<=maximum
+                  assert identity(info)==identity(os.stat(leaf_name,dir_fd=directory,follow_symlinks=False))
+                  raw=bytearray()
+                  while True:
+                      part=os.read(leaf,65536)
+                      if not part:break
+                      assert len(raw)+len(part)<=maximum;raw.extend(part)
+                  assert len(raw)==info.st_size and identity(info)==identity(os.fstat(leaf))==identity(os.stat(leaf_name,dir_fd=directory,follow_symlinks=False))
+                  for parent,name,fd,before in bindings:assert before==identity(os.fstat(fd))==identity(os.stat(name,dir_fd=parent,follow_symlinks=False))
+                  return bytes(raw),{'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),'identity':list(identity(info))}
+              finally:
+                  if leaf is not None:os.close(leaf)
+                  for directory in reversed(opened):os.close(directory)
+          def decode_main_commands(receipt):
+              assert isinstance(receipt,dict) and receipt.get('schema')=='native-tls-sspi-guarded-build-6970-v1'
+              if 'command_records_encoding' not in receipt:
+                  legacy_count=receipt.get('command_count');legacy_rows=receipt.get('commands')
+                  assert receipt.get('command_records_retained') is True and type(legacy_count) is int and legacy_count>=0
+                  assert isinstance(legacy_rows,list) and len(legacy_rows)==legacy_count and all(isinstance(row,dict) for row in legacy_rows)
+                  return receipt
+              assert receipt.get('command_records_encoding')=='lossless-command-quiescence-columns-v1'
+              assert receipt.get('command_records_encoding_roundtrip_verified') is True and receipt.get('command_records_retained') is True
+              count=receipt.get('command_count');wire=receipt.get('commands')
+              assert type(count) is int and 0<=count<=8192 and isinstance(wire,list) and len(wire)==count
+              def fields(value):
+                  assert isinstance(value,list) and len(value)<=128
+                  assert all(type(name) is str and len(name.encode('utf-8'))<=128 for name in value)
+                  assert value==sorted(value) and len(set(value))==len(value)
+                  return value
+              columns=fields(receipt.get('command_record_columns'));quiet_columns=fields(receipt.get('command_quiescence_columns'))
+              assert 'quiescence' in columns
+              if count==0:assert columns==['quiescence'] and quiet_columns==[]
+              measured=receipt.get('command_records_decoded_canonical_bytes');expected=receipt.get('command_records_decoded_canonical_sha256')
+              assert type(measured) is int and 2<=measured<=32*1024**2
+              assert type(expected) is str and len(expected)==64 and all(ch in '0123456789abcdef' for ch in expected)
+              q_index=columns.index('quiescence');decoded=[];seen_quiet=False
+              encoder=json.JSONEncoder(sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False)
+              digest=hashlib.sha256();canonical_bytes=0
+              def charge(part):
+                  nonlocal canonical_bytes
+                  assert len(part)<=32*1024**2-canonical_bytes
+                  encoded=part.encode('ascii')
+                  canonical_bytes+=len(encoded);digest.update(encoded)
+              charge('[')
+              for index,vector in enumerate(wire):
+                  assert isinstance(vector,list) and len(vector)==len(columns)
+                  quiet=vector[q_index]
+                  assert quiet is None or (isinstance(quiet,list) and len(quiet)==len(quiet_columns))
+                  row=dict(zip(columns,vector))
+                  if quiet is not None:
+                      seen_quiet=True;row['quiescence']=dict(zip(quiet_columns,quiet))
+                  if index:charge(',')
+                  # Stream this bounded row before retaining the reconstructed row list.
+                  # Nested JSON values are shared unchanged; no expansion is normalized.
+                  for part in encoder.iterencode(row):charge(part)
+                  decoded.append(row)
+              charge(']')
+              if not seen_quiet:assert quiet_columns==[]
+              assert measured==canonical_bytes and expected==digest.hexdigest()
+              result=dict(receipt);result['commands']=decoded
+              return result
           def read(path,maximum,system_tool=False):
               assert shutil.disk_usage(root).free>=reserve+limit
+              if path.is_relative_to(proof):
+                  assert not system_tool
+                  return held_proof_read(path,maximum)
               assert path.is_absolute() and path.resolve(strict=True)==path
               for component in (path,*path.parents):
                   info=component.lstat();assert not stat.S_ISLNK(info.st_mode)
@@ -408,7 +652,7 @@ jobs:
                   assert identity(info)==identity(os.fstat(fd))==identity(path.lstat())
                   return bytes(raw),{'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),'identity':identity(info)}
               finally:os.close(fd)
-          raw,receipt_pin=read(proof/'result.json',1048576);x=json.loads(raw)
+          raw,receipt_pin=read(proof/'result.json',1048576);x=decode_main_commands(json.loads(raw))
           assert x['result']=='PASS_CURRENT_NATIVE_TLS_SSPI_BUILD_ONLY' and x['receipt_accounting_verified'] and x['resource_failure'] is None
           for key in ('native_execution_verified','windows98_integration_verified','credential_execution_verified','network_execution_verified','os_tls_provider_verified','os_registration_verified','kernel64_backend_verified','application_compatibility_verified','default_ROOT_chain_validation_verified','final_ISO_verified','TLS_execution_verified','TLS_negotiation_verified','real_tls_proven_by_this_test','native_guest_proven','native_ROOT_execution_proven'):assert x[key] is False
           selected={proof/'result.json':receipt_pin}
@@ -532,6 +776,29 @@ jobs:
               path=Path(item['path']);assert path==proof/item['relative_path'] and path not in selected
               pin={k:item[k] for k in ('bytes','sha256','identity')}
               assert read(path,524288)[1]==pin;selected[path]=pin
+          codec_names=('actual-parent-command-rows', 'empty-command-array', 'null-and-empty-quiescence-distinct', 'nested-observation-values', 'unknown-encoding', 'wrong-main-schema', 'false-roundtrip-marker', 'records-not-retained', 'boolean-count', 'mismatched-count', 'row-count-bound', 'duplicate-columns', 'unsorted-columns', 'missing-quiescence-column', 'nonstring-column', 'oversized-UTF8-column', 'wrong-command-dimensions', 'dictionary-quiescence-wire', 'null-changed-to-empty-dictionary', 'empty-dictionary-changed-to-null', 'wrong-quiescence-dimensions', 'canonical-byte-mismatch', 'canonical-byte-boolean', 'canonical-byte-bound', 'canonical-digest-mismatch', 'incremental-canonical-expansion-bound', 'producer-nonuniform-command-fields', 'producer-nonuniform-quiescence-fields')
+          codec=x['main_command_codec_controls']
+          assert codec['schema']=='native-tls-main-command-codec-controls-6970-v1' and codec['result']=='PASS_LOSSLESS_METADATA_CODEC_CONTROLS_ONLY'
+          assert type(codec['completed']) is type(codec['failures']) is int and codec['completed']==28 and codec['failures']==0
+          assert len(codec['cases'])==28 and tuple(case['name'] for case in codec['cases'])==codec_names and len(set(codec_names))==28
+          assert codec['actual_command_input_before_after_equal'] is True and codec['parent_capture_pools_before_after_equal'] is True
+          for key in ('new_processes_or_child_epochs','physical_capture_or_runtime_execution_verified','native_execution_verified','windows98_integration_verified','tls_execution_verified'):assert codec[key] is False
+          assert type(codec['capture_bytes_charged_to_parent']) is type(codec['decoder_bytes_charged_to_parent']) is int and codec['capture_bytes_charged_to_parent']==codec['decoder_bytes_charged_to_parent']==0
+          assert type(codec['actual_parent_command_count']) is int and codec['actual_parent_command_count']==count_epoch['parent_command_count_after']<=len(x['commands'])
+          assert type(codec['elapsed_seconds']) in (int,float) and 0<=codec['elapsed_seconds']<=60
+          def codec_canonical_pin(value):
+              size=0;digest=hashlib.sha256()
+              for part in json.JSONEncoder(sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).iterencode(value):
+                  assert len(part)<=limit-size
+                  raw=part.encode('ascii');size+=len(raw);digest.update(raw)
+              return size,digest.hexdigest()
+          for index,case in enumerate(codec['cases']):
+              expected='accept' if index<4 else 'reject'
+              assert case['result']=='PASS' and case['expected']==case['actual']==expected
+              if index<4:
+                  assert type(case['decoded_bytes']) is int and 2<=case['decoded_bytes']<=limit and type(case['decoded_sha256']) is str and len(case['decoded_sha256'])==64
+          assert (codec['cases'][0]['decoded_bytes'],codec['cases'][0]['decoded_sha256'])==codec_canonical_pin(x['commands'][:codec['actual_parent_command_count']])
+          assert (codec['cases'][1]['decoded_bytes'],codec['cases'][1]['decoded_sha256'])==codec_canonical_pin([])
           excluded_fixture_binaries={fixture_paths['object'],fixture_paths['elf']}
           assert not excluded_fixture_binaries&{proof/name for name in x['compiled_outputs']}
           for name,pin in x['compiled_outputs'].items():selected[proof/name]=pin

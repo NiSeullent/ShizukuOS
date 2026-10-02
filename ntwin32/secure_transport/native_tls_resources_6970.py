@@ -112,6 +112,121 @@ def _write_all(fd, data):
         view = view[n:]
 
 
+def _bounded_command_canonical(rows):
+    """Canonical JSON command array; retain at most the logical profile cap."""
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"),
+                               ensure_ascii=True, allow_nan=False)
+    data = bytearray()
+
+    def append(chunk):
+        # ensure_ascii makes character and encoded-byte lengths identical.
+        # Check before encoding/retaining another chunk, including each row.
+        if len(chunk) > LIMIT - len(data):
+            raise ResourceFailure("decoded command canonical bytes exceed 32 MiB")
+        data.extend(chunk.encode("ascii"))
+
+    def json_value(value):
+        kind = type(value)
+        if kind in (type(None), bool, int, float, str):
+            return
+        if kind is list:
+            for item in value:
+                json_value(item)
+            return
+        if kind is dict:
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ResourceFailure("command JSON object requires string keys")
+                json_value(item)
+            return
+        raise ResourceFailure("command nested value is not a JSON value")
+
+    try:
+        append("[")
+        for index, row in enumerate(rows):
+            if index:
+                append(",")
+            json_value(row)
+            for chunk in encoder.iterencode(row):
+                append(chunk)
+        append("]")
+    except (ValueError, TypeError, OverflowError, RecursionError, UnicodeError) as error:
+        raise ResourceFailure("command canonical encoding failed: " + str(error)[:2048]) from error
+    return data
+
+
+def encode_main_command_columns(rows):
+    """Lossless main-only columns from copied, argv-compacted command rows.
+
+    No input dictionary or nested observation is mutated. The original and
+    independently reconstructed arrays must have identical bounded canonical
+    bytes; dictionary equality alone would incorrectly equate bool and int.
+    """
+    if type(rows) is not list or len(rows) > 8192:
+        raise ResourceFailure("main command rows must be a list of at most 8192 rows")
+
+    def columns(value):
+        if type(value) is not dict or len(value) > 128:
+            raise ResourceFailure("main command column object/key count invalid")
+        try:
+            if any(type(key) is not str or len(key.encode("utf-8")) > 128
+                   for key in value):
+                raise ResourceFailure("main command column name/type/UTF-8 bound invalid")
+        except UnicodeError as error:
+            raise ResourceFailure("main command column UTF-8 encoding invalid") from error
+        return sorted(value)
+
+    command_columns = columns(rows[0]) if rows else ["quiescence"]
+    if "quiescence" not in command_columns:
+        raise ResourceFailure("main command quiescence column required")
+    quiescence_columns = None
+    for row in rows:
+        if columns(row) != command_columns:
+            raise ResourceFailure("main command outer key sets are not uniform")
+        observation = row["quiescence"]
+        if observation is not None:
+            current = columns(observation)
+            if quiescence_columns is None:
+                quiescence_columns = current
+            elif current != quiescence_columns:
+                raise ResourceFailure("main command quiescence key sets are not uniform")
+    if quiescence_columns is None:
+        quiescence_columns = []
+
+    original = _bounded_command_canonical(rows)
+    wire_rows = []
+
+    def reconstructed_rows():
+        for row in rows:
+            vector = []
+            for key in command_columns:
+                value = row[key]
+                if key == "quiescence" and value is not None:
+                    value = [value[name] for name in quiescence_columns]
+                vector.append(value)
+            wire_rows.append(vector)
+            if len(vector) != len(command_columns):
+                raise ResourceFailure("main command vector dimension changed")
+            decoded = dict(zip(command_columns, vector))
+            observation = decoded["quiescence"]
+            if observation is not None:
+                if type(observation) is not list or len(observation) != len(quiescence_columns):
+                    raise ResourceFailure("main command quiescence vector dimension invalid")
+                decoded["quiescence"] = dict(zip(quiescence_columns, observation))
+            yield decoded
+
+    reconstructed = _bounded_command_canonical(reconstructed_rows())
+    if len(wire_rows) != len(rows) or reconstructed != original:
+        raise ResourceFailure("main command canonical byte roundtrip failed")
+    return {"command_records_encoding": "lossless-command-quiescence-columns-v1",
+            "command_record_columns": command_columns,
+            "command_quiescence_columns": quiescence_columns,
+            "commands": wire_rows,
+            "command_records_decoded_canonical_bytes": len(original),
+            "command_records_decoded_canonical_sha256": hashlib.sha256(original).hexdigest(),
+            "command_records_encoding_roundtrip_verified": True}
+
+
 class _OwnedGroupObservation:
     """Linux observed stop scope; neither a writer census nor a kernel freeze.
 
@@ -1824,7 +1939,7 @@ class Guard:
         self.check()
         return subprocess.CompletedProcess(list(argv), rc, bytes(captured["stdout"]), bytes(captured["stderr"]))
 
-    def close_receipt(self, receipt, path):
+    def close_receipt(self, receipt, path, *, main_command_columns=False):
         """Stabilize this new owned receipt; never reopen a frozen receipt.
 
         A floor crossing permits only bounded FAIL evidence at this boundary,
@@ -1834,11 +1949,40 @@ class Guard:
         self._mutable()
         if self._running or not isinstance(receipt, dict):
             raise self._fail("closed command epoch and dictionary receipt required")
+        if (type(main_command_columns) is not bool
+                or (main_command_columns
+                    and receipt.get("schema") != "native-tls-sspi-guarded-build-6970-v1")):
+            raise self._fail("main command columns require the explicitly opted-in main receipt schema")
         parent, name, candidate = self._parent(path)
         fd = None
         desired = receipt.get("result", "FAIL")
         token = None
         data = b""
+        rejected_candidate = None
+        command_encoding_failure = None
+
+        def rejected(raw, base):
+            nonlocal rejected_candidate
+            if rejected_candidate is None:
+                final = base + len(raw)
+                rejected_candidate = {
+                    "schema": "native-tls-rejected-receipt-candidate-6970-v1",
+                    "serialized_bytes": len(raw),
+                    "serialized_sha256": hashlib.sha256(raw).hexdigest(),
+                    "output_bytes_before_receipt": base,
+                    "candidate_final_output_bytes": final,
+                    "receipt_limit_exceeded": len(raw) > RECEIPT_LIMIT,
+                    "output_limit_exceeded": final > LIMIT}
+
+        def minimal_receipt(error):
+            receipt.clear()
+            receipt.update(schema=INVALID_RECEIPT_SCHEMA, result="FAIL", evidence_complete=False,
+                           error=str(error)[:2048], native_execution_verified=False,
+                           windows98_integration_verified=False, tls_execution_verified=False)
+            if rejected_candidate is not None:
+                receipt["rejected_receipt_candidate"] = dict(rejected_candidate)
+            if command_encoding_failure is not None:
+                receipt["command_records_encoding_failure"] = dict(command_encoding_failure)
 
         def encoded(base):
             receipt.update(output_bytes_before_receipt=base, final_output_bytes=base)
@@ -1847,12 +1991,15 @@ class Guard:
                 final = base + len(raw)
                 if final == receipt["final_output_bytes"]:
                     if len(raw) > RECEIPT_LIMIT or final > LIMIT:
+                        rejected(raw, base)
                         raise ResourceFailure("self-inclusive receipt/32-MiB bound crossed")
                     return raw
                 receipt["final_output_bytes"] = final
+            rejected(raw, base)
             raise ResourceFailure("self-inclusive receipt length failed to converge")
 
         def metadata(verified):
+            nonlocal command_encoding_failure
             free = self._sample(failure_evidence=True)
             if free < RESERVE + LIMIT:
                 self._fail("fresh final-receipt admission blocked")
@@ -1880,10 +2027,20 @@ class Guard:
                         rows.append(row)
                 except (KeyError, TypeError, UnicodeError, ResourceFailure) as error:
                     self._fail(error)
-                    receipt.clear()
-                    receipt.update(schema=INVALID_RECEIPT_SCHEMA, result="FAIL", evidence_complete=False,
-                                   error=str(error)[:2048], native_execution_verified=False,
-                                   windows98_integration_verified=False, tls_execution_verified=False)
+                    minimal_receipt(error)
+                    minimal = True
+                    rows, strings, string_bytes = [], [], 0
+            column_metadata = None
+            if main_command_columns and not minimal:
+                try:
+                    column_metadata = encode_main_command_columns(rows)
+                    rows = column_metadata["commands"]
+                except (ValueError, TypeError, OverflowError, RecursionError, UnicodeError, ResourceFailure) as error:
+                    self._fail(error)
+                    command_encoding_failure = {
+                        "encoding": "lossless-command-quiescence-columns-v1",
+                        "reason": str(error)[:2048]}
+                    minimal_receipt(error)
                     minimal = True
                     rows, strings, string_bytes = [], [], 0
             receipt.update(result="FAIL" if self.failure else desired,
@@ -1926,20 +2083,22 @@ class Guard:
                                            "continuous_minimum_free_verified": False,
                                            "all_transient_or_unlinked_file_peaks_observed": False,
                                            "implicit_backend_runtime_attestation_verified": False})
+            if column_metadata is not None and not minimal:
+                receipt.update(column_metadata)
+
+        def encode_or_minimal(base):
+            try:
+                return encoded(base)
+            except (ValueError, TypeError, OverflowError, RecursionError, UnicodeError, ResourceFailure) as error:
+                self._fail(error)
+                minimal_receipt(error)
+                metadata(False)
+                return encoded(base)
 
         try:
             metadata(False)
             base = self.count(failure_evidence=True)
-            try:
-                data = encoded(base)
-            except (ValueError, TypeError, ResourceFailure) as error:
-                self._fail(error)
-                receipt.clear()
-                receipt.update(schema=INVALID_RECEIPT_SCHEMA, result="FAIL", evidence_complete=False,
-                               error=str(error)[:2048], native_execution_verified=False,
-                               windows98_integration_verified=False, tls_execution_verified=False)
-                metadata(False)
-                data = encoded(base)
+            data = encode_or_minimal(base)
             fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                          0o600, dir_fd=parent)
             token = _inode(os.fstat(fd))
@@ -1950,7 +2109,7 @@ class Guard:
                     raise ResourceFailure("new receipt held/named identity changed")
                 total = self.count(failure_evidence=True)
                 metadata(True)
-                replacement = encoded(total - os.fstat(fd).st_size)
+                replacement = encode_or_minimal(total - os.fstat(fd).st_size)
                 if replacement == data:
                     if total != receipt["final_output_bytes"]:
                         raise ResourceFailure("actual receipt logical accounting mismatch")
@@ -1994,7 +2153,7 @@ class Guard:
                     receipt.update(result="FAIL", resource_failure=self.failure,
                                    receipt_accounting_verified=False)
                     base = self.count(failure_evidence=True) - os.fstat(fd).st_size
-                    replacement = encoded(base)
+                    replacement = encode_or_minimal(base)
                     os.lseek(fd, 0, os.SEEK_SET)
                     os.ftruncate(fd, 0)
                     _write_all(fd, replacement)
