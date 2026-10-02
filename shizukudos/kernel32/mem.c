@@ -10,6 +10,7 @@
  * User address spaces live at 0x40000000 and above; kernel mappings are shared.
  */
 #include "k32.h"
+#include "../kcommon/pma_sync.h"
 
 #define HEAP_BASE 0x00200000u
 #define HEAP_SIZE 0x00200000u
@@ -21,42 +22,77 @@ static uint32_t pmm_first, pmm_pages, pmm_free_pages, pmm_hint;
 static uint32_t kernel_pd;
 static uint32_t ipc_lo, ipc_hi;
 
+/* Normal-context allocator ownership. Disable local IRQs before joining the
+ * existing ticket protocol; no NMI use, recursion, blocking/callback, nested
+ * PMM/heap ownership or context transfer is permitted. Page zeroing happens
+ * only after reserving unique ownership and releasing the PMM ticket. Paging
+ * mutation/root reclamation is not made concurrent by these allocator locks. */
+static pma_ticketlock_t pmm_lock __attribute__((aligned(64)));
+static pma_ticketlock_t heap_lock __attribute__((aligned(64)));
+typedef struct { uint32_t flags, ticket; } memory_guard_t;
+static memory_guard_t memory_enter(pma_ticketlock_t *lock)
+{
+    memory_guard_t g;
+    g.flags = irq_save();
+    g.ticket = pma_ticket_lock(lock);
+    return g;
+}
+static void memory_leave(pma_ticketlock_t *lock, memory_guard_t g)
+{
+    KASSERT(pma_ticket_unlock(lock, g.ticket));
+    irq_restore(g.flags);
+}
+
 static int bit_get(uint32_t i) { return page_map[i >> 3] & (1u << (i & 7)); }
 static void bit_set(uint32_t i) { page_map[i >> 3] |= (uint8_t)(1u << (i & 7)); }
 static void bit_clr(uint32_t i) { page_map[i >> 3] &= (uint8_t)~(1u << (i & 7)); }
 
 uint32_t pmm_alloc(void)
 {
-    uint32_t f = irq_save(), n, i;
+    memory_guard_t g = memory_enter(&pmm_lock);
+    uint32_t n, i;
     for (n = 0; n < pmm_pages; ++n) {
         i = (pmm_hint + n) % pmm_pages;
         if (!bit_get(i)) {
             bit_set(i);
             pmm_hint = i + 1;
             --pmm_free_pages;
-            irq_restore(f);
+            memory_leave(&pmm_lock, g);
             memset((void *)(PMM_BASE + i * PAGE_SIZE), 0, PAGE_SIZE);
             return PMM_BASE + i * PAGE_SIZE;
         }
     }
-    irq_restore(f);
+    memory_leave(&pmm_lock, g);
     return 0;
 }
 
 void pmm_free(uint32_t pa)
 {
-    uint32_t f = irq_save(), i;
+    memory_guard_t g = memory_enter(&pmm_lock);
+    uint32_t i;
     KASSERT(pa >= PMM_BASE && !(pa & 0xfff));
     i = (pa - PMM_BASE) / PAGE_SIZE;
     KASSERT(i < pmm_pages && bit_get(i));       /* double free or foreign page */
     bit_clr(i);
     ++pmm_free_pages;
-    irq_restore(f);
+    memory_leave(&pmm_lock, g);
 }
 
 uint32_t kernel_space(void) { return kernel_pd; }
-uint32_t pmm_free_count(void) { return pmm_free_pages; }
-uint32_t pmm_total_count(void) { return pmm_pages; }
+uint32_t pmm_free_count(void)
+{
+    memory_guard_t g = memory_enter(&pmm_lock);
+    uint32_t n = pmm_free_pages;
+    memory_leave(&pmm_lock, g);
+    return n;
+}
+uint32_t pmm_total_count(void)
+{
+    memory_guard_t g = memory_enter(&pmm_lock);
+    uint32_t n = pmm_pages;
+    memory_leave(&pmm_lock, g);
+    return n;
+}
 
 /* ---------------------------------------------------------------- paging */
 static uint32_t *pde_of(uint32_t pd, uint32_t va) { return (uint32_t *)pd + (va >> 22); }
@@ -146,9 +182,11 @@ static void heap_init(void)
 
 void *kmalloc(size_t n)
 {
-    uint32_t f = irq_save();
-    struct hblock *b;
+    if (!n || n > HEAP_SIZE - sizeof(struct hblock)) return 0;
     n = (n + 15) & ~(size_t)15;
+    if (n > HEAP_SIZE - sizeof(struct hblock)) return 0;
+    memory_guard_t g = memory_enter(&heap_lock);
+    struct hblock *b;
     for (b = heap_head; b; b = b->next) {
         KASSERT(b->magic == HMAGIC);
         if (!b->used && b->size >= n) {
@@ -163,21 +201,25 @@ void *kmalloc(size_t n)
             }
             b->used = 1;
             heap_used_bytes += b->size;
-            irq_restore(f);
+            memory_leave(&heap_lock, g);
             return b + 1;
         }
     }
-    irq_restore(f);
+    memory_leave(&heap_lock, g);
     return 0;
 }
 
 void kfree(void *p)
 {
-    uint32_t f = irq_save();
+    if (!p) return;
+    memory_guard_t g = memory_enter(&heap_lock);
     struct hblock *b, *n;
-    if (!p) { irq_restore(f); return; }
-    b = (struct hblock *)p - 1;
-    KASSERT(b->magic == HMAGIC && b->used);
+    const uintptr_t address = (uintptr_t)p;
+    KASSERT(address >= HEAP_BASE + sizeof(struct hblock) && address < HEAP_BASE + HEAP_SIZE);
+    /* Only a published block boundary owns an allocation. A forged header
+     * inside payload bytes must not release or alter real heap accounting. */
+    for (b = heap_head; b && (void *)(b + 1) != p; b = b->next) { }
+    KASSERT(b && b->magic == HMAGIC && b->used);
     b->used = 0;
     heap_used_bytes -= b->size;
     for (n = heap_head; n; n = n->next)                     /* coalesce forward */
@@ -185,10 +227,16 @@ void kfree(void *p)
             n->size += sizeof *n + n->next->size;
             n->next = n->next->next;
         }
-    irq_restore(f);
+    memory_leave(&heap_lock, g);
 }
 
-size_t kheap_used(void) { return heap_used_bytes; }
+size_t kheap_used(void)
+{
+    memory_guard_t g = memory_enter(&heap_lock);
+    size_t n = heap_used_bytes;
+    memory_leave(&heap_lock, g);
+    return n;
+}
 
 /* ---------------------------------------------------------------- init */
 void mem_init(const shz_bootinfo_t *bi)
@@ -197,6 +245,8 @@ void mem_init(const shz_bootinfo_t *bi)
     uint32_t off, i, pd;
     unsigned c;
 
+    pma_ticket_init(&pmm_lock);
+    pma_ticket_init(&heap_lock);
     KASSERT(ram > PMM_BASE + 0x100000 && ram <= MAX_PAGES * PAGE_SIZE);
     pmm_first = PMM_BASE;
     pmm_pages = (ram - PMM_BASE) / PAGE_SIZE;
