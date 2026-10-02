@@ -1,5 +1,13 @@
 > Local 6970 audit/planning draft preserved after cross-chat ownership discovery. Canonical docs/agents master files are owned by session163f in /root/Win98-Modern-pma-20261002. This draft does not reserve another session's files. See ../../status/6970-master.md for current scope.
 
+2026-10-02 checkpoint: canonical163f returned an actual content-verified
+native artifact adoption ACK (validation16708d6b), conditional on fresh
+native runtime and five prerequisites. Actual Windows/TLS acceptance stays
+false. Separate current native TLS/SSPI proof tools are being prepared in
+the [explicit32MiB profile](NATIVE_TLS_GUARDED_PROFILE.md), with unchanged
+20-file production union, original ISA oracle and existing owner packet.
+Static source/AST validation alone is not a compiler/control/runtime PASS.
+
 # PMA integration status
 
 Snapshot: 2026-10-01. This document separates source inspection, component execution and final Windows acceptance.

@@ -1,5 +1,16 @@
 > Local 6970 audit/planning draft preserved after cross-chat ownership discovery. Canonical docs/agents master files are owned by session163f in /root/Win98-Modern-pma-20261002. This draft does not reserve another session's files. See ../../status/6970-master.md for current scope.
 
+2026-10-02 current native TLS proof source: root owns new
+`secure_transport/build_native_tls_guarded_6970.py`, separate workflow,
+plans and cross-chat handoff; modern-app owns new `i486_stream_6970.py`;
+disk agent owns new `native_tls_resources_6970.py`. Coordination reviews
+source independently. All20 existing secure_transport production/recipe
+inputs remain7707-owned byte-identical; canonical163f/FADA own native
+DOS/VMM/K64 runtime and guest packet decisions. Old bridge8MiB/256KiB
+producer and every historical proof stay unchanged. New32MiB profile is
+explicit and hosted-only after review. Source syntax checks are not an
+executed control/build/TLS PASS. Main/site/ISO publisher retains its lane.
+
 # PMA integration ownership
 
 Observed orchestration date: 2026-10-01. 6970 isolated worktree: /root/Win98-Modern-theme-6970, branch codex/theme-integration-6970. Main publisher worktree: /root/Win98-Modern-main-integration-20261001. Audit findings must name the revision or file hashes read.

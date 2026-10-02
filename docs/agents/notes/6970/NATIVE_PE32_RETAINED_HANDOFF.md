@@ -89,6 +89,15 @@ GitHub artifact. This persistence does not change native execution scope.
 
 ## Consumer and runtime contract
 
+Actual canonical163f ACK independently confirms API/archive/all24 inner
+hashes and all16 committed blobs, and adopts the artifact as a prospective
+runtime test input. Its read-only validation is3,796B SHA256
+16708d6bc71feb85aa1bd78ecbb82461ef445888377d1547955f75b1be677331;
+ACK1,443B SHA256
+491b2fc9025399ac3e01e75f411ed5250f10261d12159f41ea20e6b6affc67fc.
+No extraction/execution, nativeWindows or five-prerequisite admission was
+claimed. Shared ACK is `ACK-163f-6970-FADA-NATIVE-PE32-HANDOFF-11199849976.md`.
+
 The native owner admits its own binary working space, verifies actual
 API source/run/artifact identity, whole archive SHA, exact24 paths and
 every inner size/SHA before adoption. Producer absolute paths/inodes

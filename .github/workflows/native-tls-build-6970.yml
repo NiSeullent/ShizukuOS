@@ -1,0 +1,463 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Current native TLS and SSPI guarded build
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-tls-build-6970-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-tls-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Prepare bounded tools on the isolated hosted runner
+        timeout-minutes: 5
+        run: |
+          python3 -B - <<'PYTHON'
+          import os, shutil, stat
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          assert shutil.disk_usage(root).free >= 20 * 1024**3 + 1024**3
+          # The ordinary runner retains writable namespace parents. Sudo may
+          # create only its private preparation child, never the shared build parent.
+          for parent in (root / 'build', root / 'build/native-tls-prep-6970',
+                         root / 'build/native-tls-proof-6970'):
+              for component in (parent, *parent.parents):
+                  assert not component.is_symlink()
+              parent.mkdir(mode=0o755, exist_ok=True)
+              info = parent.stat(follow_symlinks=False)
+              assert stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+              assert os.access(parent, os.W_OK | os.X_OK)
+          assert shutil.disk_usage(root).free >= 20 * 1024**3 + 1024**3
+          print('Runner-owned writable namespace parents prepared; no compiler or probe executed.')
+          PYTHON
+          sudo -n python3 -B - "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$(id -u)" "$(id -g)" <<'PYTHON'
+          import hashlib, json, os, resource, selectors, shutil, signal, stat
+          import subprocess, sys, time
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          run_id, attempt, runner_uid, runner_gid = sys.argv[1:]
+          assert run_id.isdigit() and attempt.isdigit() and os.geteuid() == 0
+          reserve, budget = 20 * 1024**3, 1024**3
+          initial = shutil.disk_usage(root).free
+          assert initial >= reserve + budget
+          prep = root / 'build/native-tls-prep-6970' / f'actions-{run_id}-{attempt}'
+          assert not prep.exists() and not prep.is_symlink()
+          for component in (prep, *prep.parents):
+              assert not component.is_symlink()
+          prep.mkdir(parents=True, mode=0o755)
+          assert runner_uid.isdigit() and runner_gid.isdigit()
+          os.chown(prep, int(runner_uid), int(runner_gid))
+          tmp, archives, pydeps = (prep / name for name in ('tmp', 'archives', 'pydeps'))
+          tmp.mkdir(mode=0o755)
+          archives.mkdir(mode=0o755)
+          minimum, captured, records = initial, 0, []
+          environment = os.environ.copy()
+          environment.update(TMPDIR=str(tmp), TMP=str(tmp), TEMP=str(tmp),
+                             PYTHONDONTWRITEBYTECODE='1', PIP_DISABLE_PIP_VERSION_CHECK='1',
+                             DEBIAN_FRONTEND='noninteractive')
+
+          def observe(pending=0):
+              global minimum
+              free = shutil.disk_usage(root).free
+              minimum = min(minimum, free)
+              if free < reserve + pending or initial - free + pending > budget:
+                  raise RuntimeError('Hosted prerequisite reserve or observed 1 GiB change budget crossed')
+              return free
+
+          def child_limits():
+              resource.setrlimit(resource.RLIMIT_FSIZE, (budget, budget))
+              resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+          def run(label, argv):
+              global captured
+              observe()
+              print('Hosted-only prerequisite:', label, argv, flush=True)
+              child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, env=environment,
+                                       start_new_session=True, preexec_fn=child_limits)
+              watch = selectors.DefaultSelector()
+              watch.register(child.stdout, selectors.EVENT_READ)
+              output, started = bytearray(), time.monotonic()
+              aborted = None
+              group_kill = 'NOT_REQUESTED'
+              try:
+                  while True:
+                      observe()
+                      if time.monotonic() - started > 120:
+                          raise RuntimeError('Hosted prerequisite command exceeded 120 seconds')
+                      status = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                      if status and status.si_pid == child.pid and not watch.get_map():
+                          break
+                      for key, _ in watch.select(0.05):
+                          block = os.read(key.fileobj.fileno(), 16384)
+                          if not block:
+                              watch.unregister(key.fileobj)
+                          else:
+                              remaining = 262144 - captured
+                              output.extend(block[:remaining])
+                              captured += min(len(block), remaining)
+                              if len(block) > remaining:
+                                  raise RuntimeError('Hosted prerequisite aggregate log exceeded 256 KiB')
+                  # Retain the WNOWAIT leader token while terminating any
+                  # silent descendants from this preparation launch only.
+                  try:
+                      os.killpg(child.pid, signal.SIGKILL)
+                      group_kill = 'SIGKILL_SENT_TO_OWNED_GROUP_BEFORE_REAP'
+                  except ProcessLookupError:
+                      group_kill = 'OWNED_GROUP_ALREADY_ABSENT_BEFORE_REAP'
+                  child.wait(timeout=5)
+              except BaseException as error:
+                  aborted = str(error)[:2048]
+                  try:
+                      os.killpg(child.pid, signal.SIGKILL)
+                      group_kill = 'SIGKILL_SENT_TO_OWNED_GROUP_BEFORE_REAP'
+                  except ProcessLookupError:
+                      group_kill = 'OWNED_GROUP_ALREADY_ABSENT_BEFORE_REAP'
+                  child.wait(timeout=5)
+                  raise
+              finally:
+                  watch.close()
+                  child.stdout.close()
+                  print(output.decode('utf-8', errors='replace'), end='')
+                  records.append({'label': label, 'argv': argv, 'exit_code': child.returncode,
+                                  'direct_child_reaped': child.returncode is not None,
+                                  'aborted': aborted, 'log_bytes': len(output),
+                                  'owned_group_kill_before_reap': group_kill,
+                                  'whole_process_group_reaped_verified': False,
+                                  'log_sha256': hashlib.sha256(output).hexdigest(),
+                                  'elapsed_seconds': time.monotonic() - started})
+              assert child.returncode == 0
+              observe()
+
+          result, error = 'FAIL', None
+          try:
+              # No update, upgrade, removal or cache cleanup is performed.
+              run('i686-win32-toolchain', [
+                  'apt-get', '-o', 'Acquire::Retries=0', '-o', 'DPkg::Lock::Timeout=10',
+                  '-o', 'Dir::Cache::archives=' + str(archives),
+                  '--no-install-recommends', '--no-upgrade', '--no-remove', '--yes',
+                  'install', 'gcc-mingw-w64-i686-win32', 'cmake', 'ninja-build',
+              ])
+              run('isolated-pe-parser', [sys.executable, '-B', '-m', 'pip', 'install',
+                  '--disable-pip-version-check', '--no-compile', '--no-cache-dir',
+                  '--target', str(pydeps), 'pefile==2024.8.26'])
+              run('actual-installed-package-versions', [
+                  'dpkg-query', '-W', '-f=${Package}\t${Version}\n',
+                  'gcc-mingw-w64-i686-win32', 'gcc-mingw-w64-i686-win32-runtime',
+                  'binutils-mingw-w64-i686', 'mingw-w64-i686-dev', 'mingw-w64-common',
+              ])
+              assert shutil.which('i686-w64-mingw32-gcc-win32')
+              assert shutil.which('i686-w64-mingw32-objdump')
+              assert (pydeps / 'pefile.py').is_file()
+              observe()
+              assert shutil.disk_usage(root).free >= reserve + 32 * 1024**2
+              result = 'PASS_HOSTED_PREREQUISITES_ONLY'
+          except BaseException as failure:
+              error = str(failure)[:2048]
+              raise
+          finally:
+              # This receipt describes observed disk changes, not a quota or full transient peak.
+              destination = prep / 'result.json'
+              closure_failure = None
+
+              def receipt_bytes():
+                  receipt = {'schema': 'native-tls-hosted-preparation-v1', 'result': result,
+                             'error': error, 'reserve_bytes': reserve,
+                             'observed_disk_change_budget_bytes': budget,
+                             'available_before_bytes': initial,
+                             'minimum_observed_free_bytes': minimum,
+                             'observed_consumption_upper_sample_bytes': max(0, initial-minimum),
+                             'commands': records, 'aggregate_log_bytes': captured,
+                             'native_execution_verified': False, 'windows98_integration_verified': False,
+                             'filesystem_quota_enforced': False, 'all_transient_peaks_measured': False}
+                  encoded = (json.dumps(receipt, indent=2) + '\n').encode()
+                  assert len(encoded) <= 65536
+                  return encoded
+
+              for closing_attempt in range(4):
+                  if result != 'FAIL':
+                      try:
+                          observe(pending=65536)
+                      except BaseException as failure:
+                          result, error = 'FAIL', str(failure)[:2048]
+                          closure_failure = failure
+                  data = receipt_bytes()
+                  with destination.open('xb' if closing_attempt == 0 else 'wb') as stream:
+                      stream.write(data)
+                  if result == 'FAIL':
+                      break
+                  recorded_minimum = minimum
+                  try:
+                      observe()
+                  except BaseException as failure:
+                      result, error = 'FAIL', str(failure)[:2048]
+                      closure_failure = failure
+                      # Replace our unfrozen candidate with bounded FAIL evidence.
+                      data = receipt_bytes()
+                      with destination.open('wb') as stream:
+                          stream.write(data)
+                      break
+                  if minimum == recorded_minimum:
+                      break
+              else:
+                  result, error = 'FAIL', 'Hosted preparation receipt minimum did not stabilize'
+                  closure_failure = RuntimeError(error)
+                  data = receipt_bytes()
+                  with destination.open('wb') as stream:
+                      stream.write(data)
+              print('Preparation receipt SHA256:', hashlib.sha256(data).hexdigest())
+              print(data.decode(), end='')
+              if closure_failure is not None:
+                  raise closure_failure
+          PYTHON
+
+
+      - name: Bind revision and isolated paths
+        run: |
+          python3 -B - <<'PYTHON'
+          import os,re,subprocess
+          from pathlib import Path
+          root=Path.cwd().resolve()
+          expected=os.environ['GITHUB_SHA']
+          actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert re.fullmatch(r'[0-9a-f]{40}',expected) and actual==expected
+          run_id,attempt=os.environ['GITHUB_RUN_ID'],os.environ['GITHUB_RUN_ATTEMPT']
+          assert run_id.isdigit() and attempt.isdigit()
+          prep=root/'build/native-tls-prep-6970'/f'actions-{run_id}-{attempt}'
+          proof=root/'build/native-tls-proof-6970'/f'actions-{run_id}-{attempt}'
+          assert not proof.exists() and (prep/'pydeps/pefile.py').is_file()
+          with open(os.environ['GITHUB_ENV'],'a') as stream:
+              stream.write(f'PMA_NATIVE_TLS_PREP={prep}\nPMA_NATIVE_TLS_PROOF={proof}\nPYTHONPATH={prep / "pydeps"}\n')
+          print('Exact source:',actual,'; fresh proof:',proof)
+          PYTHON
+
+      - name: Prepare pinned original upstream then build four native artifacts
+        run: |
+          python3 -B - <<'PYTHON'
+          import hashlib,os,stat,sys,types
+          from pathlib import Path
+          root=Path.cwd().resolve()
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'c3c2889e172e45aec41c91214edb24d1237c2319f3d27366653eaedad2e2aea4', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '1db8b3361a355f4cd6b07be85cac5ee006eac53bfeba3f39fb8056bb830bc64c'}
+          before={}
+          identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          for relative,expected in pins.items():
+              path=root/relative
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  info=os.fstat(fd)
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=204800
+                  raw=bytearray()
+                  while True:
+                      part=os.read(fd,65536)
+                      if not part:break
+                      raw.extend(part)
+                      assert len(raw)<=204800
+                  assert identity(info)==identity(os.fstat(fd))==identity(path.lstat())
+                  assert hashlib.sha256(raw).hexdigest()==expected
+                  before[relative]=(identity(info),bytes(raw))
+              finally:os.close(fd)
+          path=root/'ntwin32/secure_transport/build_native_tls_guarded_6970.py'
+          module=types.ModuleType('current_native_tls_bound_source');module.__file__=str(path)
+          exec(compile(before[str(path.relative_to(root))][1],str(path),'exec'),module.__dict__)
+          prep,proof=Path(os.environ['PMA_NATIVE_TLS_PREP']),Path(os.environ['PMA_NATIVE_TLS_PROOF'])
+          actual_prepared=module.prepare(prep)
+          module.build(proof,prep,actual_prepared['sha256'])
+          for relative,(info,raw) in before.items():
+              assert identity((root/relative).lstat())==info and (root/relative).read_bytes()==raw
+          PYTHON
+
+      - name: Record actual bounded receipt and captures
+        if: always()
+        run: |
+          python3 -B - <<'PYTHON'
+          import hashlib,json,os,stat
+          from pathlib import Path
+          value=os.environ.get('PMA_NATIVE_TLS_PROOF')
+          if not value:
+              print('Preparation did not reach the build. No PASS adopted.')
+              raise SystemExit(0)
+          proof=Path(value);path=proof/'result.json'
+          if not path.exists():
+              print('No counted build receipt. No PASS adopted.')
+              raise SystemExit(0)
+          identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+          def read(path,maximum):
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  info=os.fstat(fd)
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=maximum
+                  raw=bytearray()
+                  while True:
+                      part=os.read(fd,65536)
+                      if not part:break
+                      raw.extend(part);assert len(raw)<=maximum
+                  assert identity(info)==identity(os.fstat(fd))==identity(path.lstat())
+                  return bytes(raw)
+              finally:os.close(fd)
+          raw=read(path,1048576);receipt=json.loads(raw)
+          print('Current TLS actual receipt SHA256:',hashlib.sha256(raw).hexdigest())
+          print(raw.decode(),end='')
+          captured=0
+          for p in sorted([*proof.glob('*.stdout'),*proof.glob('*.stderr')]):
+              data=read(p,262144);captured+=len(data);assert captured<=262144
+              print('Actual capture:',p.name)
+              print(data.decode('utf-8',errors='replace'),end='')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as stream:
+              stream.write(f"Current native TLS/SSPI build: {receipt['result']}\n\nActual compile/import/ISA proof only; native Windows, credentials, TLS negotiation, default ROOT, sockets, OS/K64/applications and ISO stay unverified.\n")
+          PYTHON
+
+      - name: Verify and seal explicit current project proof paths
+        id: handoff
+        if: ${{ success() }}
+        run: |
+          python3 -B - <<'PYTHON'
+          import hashlib,json,os,stat,shutil,time
+          from pathlib import Path
+          root=Path.cwd().resolve();proof=Path(os.environ['PMA_NATIVE_TLS_PROOF']);prep=Path(os.environ['PMA_NATIVE_TLS_PREP'])
+          reserve,limit=20*1024**3,32*1024**2
+          assert shutil.disk_usage(root).free>=reserve+limit
+          identity=lambda s:[s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+          def read(path,maximum):
+              assert shutil.disk_usage(root).free>=reserve+limit
+              assert path.is_absolute() and path.resolve(strict=True)==path
+              for component in (path,*path.parents):assert not component.is_symlink()
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  info=os.fstat(fd)
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=maximum
+                  raw=bytearray();started=time.monotonic()
+                  while True:
+                      part=os.read(fd,65536)
+                      if not part:break
+                      raw.extend(part);assert len(raw)<=maximum and time.monotonic()-started<=60
+                  assert identity(info)==identity(os.fstat(fd))==identity(path.lstat())
+                  return bytes(raw),{'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),'identity':identity(info)}
+              finally:os.close(fd)
+          raw,receipt_pin=read(proof/'result.json',1048576);x=json.loads(raw)
+          assert x['result']=='PASS_CURRENT_NATIVE_TLS_SSPI_BUILD_ONLY' and x['receipt_accounting_verified'] and x['resource_failure'] is None
+          for key in ('native_execution_verified','windows98_integration_verified','credential_execution_verified','network_execution_verified','os_tls_provider_verified','os_registration_verified','kernel64_backend_verified','application_compatibility_verified','default_ROOT_chain_validation_verified','final_ISO_verified','TLS_execution_verified','TLS_negotiation_verified','real_tls_proven_by_this_test','native_guest_proven','native_ROOT_execution_proven'):assert x[key] is False
+          selected={proof/'result.json':receipt_pin}
+          for name,pin in x['compiled_outputs'].items():selected[proof/name]=pin
+          for item in x['PEs'].values():
+              for key in ('artifact','compressed_decode'):
+                  selected[Path(item[key]['path'])]={k:v for k,v in item[key].items() if k!='path'}
+          for unit in x['CMake_actual_TU_dependencies']+x['SSPI_actual_TU_dependencies']:
+              for key in ('before_M','actual_MD'):
+                  selected[Path(unit[key]['path'])]={k:v for k,v in unit[key].items() if k!='path'}
+          selected[proof/'cmake/compile_commands.json']=x['compile_commands']
+          selected[Path(x['direct_system_CMake_inputs']['path'])]=x['direct_system_CMake_inputs']['manifest']
+          for relative,pin in x['source_inputs_before'].items():selected[root/relative]=pin
+          for path,pin in x['source_copies_before'].items():selected[Path(path)]=pin
+          selected[root/'LICENSE']=read(root/'LICENSE',1048576)[1]
+          upstream=json.loads(read(prep/'upstream-preparation.json',2097152)[0])
+          selected[prep/'upstream-preparation.json']=read(prep/'upstream-preparation.json',2097152)[1]
+          tree=Path(upstream['tree'])
+          for relative,pin in upstream['files'].items():
+              name=Path(relative)
+              if name.name.upper().startswith(('LICENSE','COPYING','NOTICE')) or 'LICENSES' in name.parts:selected[tree/name]=pin
+          capture_total=0
+          for c in x['commands']:
+              for stream in ('stdout','stderr'):
+                  path=proof/(c['label']+'.'+stream);data,pin=read(path,262144)
+                  assert pin['sha256']==c['captured_sha256'][stream]
+                  capture_total+=len(data);selected[path]=pin
+          assert capture_total==x['captured_normal_bytes']<=262144
+          entries={}
+          for path,pin in sorted(selected.items()):
+              assert path.is_relative_to(root) and not any(c in str(path) for c in '\r\n')
+              data,current=read(path,8*1024**2);assert current==pin
+              entries[str(path.relative_to(root))]=current
+          assert len(entries)<=2048 and sum(e['bytes'] for e in entries.values())<=48*1024**2
+          def account():
+              total=0
+              for path in proof.rglob('*'):
+                  info=path.lstat();assert not path.is_symlink()
+                  if stat.S_ISREG(info.st_mode):assert info.st_nlink==1;total+=info.st_size
+                  else:assert stat.S_ISDIR(info.st_mode)
+              return total
+          before=account();assert before==x['final_output_bytes']
+          manifest={'schema':'native-tls-explicit-transfer-6970-v1','status':'PASS_TRANSFER_ONLY',
+              'source_commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],
+              'entries':entries,'entry_count':len(entries),'entry_payload_bytes':sum(e['bytes'] for e in entries.values()),
+              'closed_build_receipt':receipt_pin,'original_closed_output_bytes':before,
+              'proof_limit_bytes':limit,'maximum_new_manifest_bytes':524288,
+              'source_committed_blobs_independently_queried':False,
+              'native_execution_verified':False,'TLS_negotiation_verified':False,'NAS_binary_admission':False}
+          data=(json.dumps(manifest,sort_keys=True,separators=(',',':'))+'\n').encode();assert len(data)<=524288 and before+len(data)<=limit
+          destination=proof/'proof-transfer.json'
+          # Fresh admission immediately before this new side effect.
+          assert shutil.disk_usage(root).free>=reserve+limit
+          fd=os.open(destination,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          try:
+              view=memoryview(data)
+              while view:
+                  n=os.write(fd,view);assert n>0;view=view[n:]
+          finally:os.close(fd)
+          assert read(destination,524288)[0]==data and account()==before+len(data)<=limit
+          for relative,pin in entries.items():assert read(root/relative,8*1024**2)[1]==pin
+          assert shutil.disk_usage(root).free>=reserve+64*1024**2
+          paths=[str(root/relative) for relative in entries]+[str(destination)]
+          output=Path(os.environ['GITHUB_OUTPUT']);temporary=Path(os.environ['RUNNER_TEMP'])
+          assert output.is_absolute() and output.parent==temporary/'_runner_file_commands' and output.name.startswith('set_output_')
+          for component in (output,*output.parents):assert not component.is_symlink()
+          fd=os.open(output,os.O_WRONLY|os.O_APPEND|os.O_NOFOLLOW|os.O_NONBLOCK)
+          try:
+              info=os.fstat(fd);assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_uid==os.getuid()
+              assert (info.st_dev,info.st_ino) not in {(p['identity'][0],p['identity'][1]) for p in entries.values()}
+              payload=('paths<<CURRENT_NATIVE_TLS_6970_PATHS\n'+'\n'.join(paths)+'\nCURRENT_NATIVE_TLS_6970_PATHS\n').encode()
+              assert len(payload)<=1048576
+              view=memoryview(payload)
+              while view:
+                  n=os.write(fd,view);assert n>0;view=view[n:]
+              assert identity(os.fstat(fd))==identity(output.lstat())
+          finally:os.close(fd)
+          upload_before=shutil.disk_usage(root).free
+          assert upload_before>=reserve+64*1024**2
+          with open(os.environ['GITHUB_ENV'],'a') as stream:stream.write(f'PMA_NATIVE_TLS_UPLOAD_FREE={upload_before}\n')
+          assert shutil.disk_usage(root).free>=reserve+64*1024**2
+          print(json.dumps({'transfer_entries':len(entries)+1,'payload_bytes':manifest['entry_payload_bytes']+len(data),'manifest_bytes':len(data),'manifest_sha256':hashlib.sha256(data).hexdigest(),'postseal_proof_bytes':account(),'native_execution_verified':False}))
+          PYTHON
+
+      - name: Retain exact project source and actual compiler proof
+        id: retained
+        if: ${{ success() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-tls-sspi-6970-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.handoff.outputs.paths }}
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Observe separate upload boundary
+        if: ${{ success() }}
+        run: |
+          python3 -B - <<'PYTHON'
+          import json,os,shutil
+          from pathlib import Path
+          before=int(os.environ['PMA_NATIVE_TLS_UPLOAD_FREE']);after=shutil.disk_usage(Path.cwd()).free
+          growth=max(0,before-after)
+          assert after>=20*1024**3 and growth<=64*1024**2
+          print(json.dumps({'upload_observed_before_free':before,'upload_observed_after_free':after,'net_observed_growth':growth,'observed_growth_budget':64*1024**2,'continuous_floor_verified':False,'transient_peak_verified':False,'quota_verified':False,'cleanup_credit':0,'native_execution_verified':False}))
+          PYTHON
