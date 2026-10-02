@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import signal
 import stat
 import struct
 import sys
@@ -39,7 +40,8 @@ PRODUCTION = {'ntwin32/secure_transport/build.py': (19667, 'a9f96b6a4501104b1929
 SUPPORT = {'benchmarks/win98se-ko-oem-native-exports-v1.json': (1866608, '3854198a9b2bf9f54fe0383330d09ed2ea3d0d510c3d7ba24eb13426e37b4f0d'), 'ntwin32/secure_transport/i486_gate_test.py': (5194, '6e90e48f6f690efd29d2db7035478589bca4f140f3c28f05960c9bd0b5a4af69'), 'ntwin32/legacy_provider_bridge/pe_link_script_6970.py': (26070, '9a98336d9c5a0bc417ed816454d3188e79dc4cf326a52bfabad73df8c903b55b'), 'ntwin32/legacy_provider_bridge/build_native_pe32_guarded_6970.py': (76927, 'b7d627c71076b6cbdb1e65d896ab798e4fe3688067ef7b0a1774243d2c3010d9'), 'ntwin32/legacy_provider_bridge/test_native_sspi_6970.py': (41247, '1b52856e537b298ea253d564754afefc35eb340bd7f7090fc1b30786bfa4f44e')}
 NEW_HELPERS = ('native_tls_resources_6970.py', 'i486_stream_6970.py',
                'native_tls_quiescent_controls_6970.py', 'native_tls_pidfd_controls_6970.py',
-               'native_tls_stale_order_controls_6970.py')
+               'native_tls_stale_order_controls_6970.py',
+               'native_tls_count_epoch_controls_6970.py')
 FALSE_FLAGS = ('native_execution_verified', 'windows98_integration_verified',
                'network_execution_verified', 'credential_execution_verified',
                'os_tls_provider_verified', 'os_registration_verified',
@@ -917,6 +919,442 @@ def require_stale_order_controls(report, controls, guard, resources, source_pins
     return pins
 
 
+def require_count_epoch_controls(report, controls, guard, resources, source_pins, fixture, offsets):
+    """Read all six closed proofs; reconcile real native captures and actor IPC."""
+    def require(condition, message):
+        if not condition:
+            raise ValueError('count-epoch controls: '+message)
+
+    def natural(value):
+        return type(value) is int and value >= 0
+
+    def duration(value, limit):
+        return type(value) in (int,float) and 0 <= value <= limit
+
+    def canonical(value):
+        raw=json.dumps(value,sort_keys=True,separators=(',',':')).encode()
+        require(len(raw)<=16384,'bounded actual observation metadata required')
+        return raw
+
+    def token(row):
+        return [row[key] for key in ('pid','startticks','pgrp','session','uid')]
+
+    def snapshot(value, leader_pid=None, quiet=False, transitional=False):
+        require(isinstance(value,dict) and set(value)=={'leader','members','tasks','stable'}
+                and type(value.get('stable')) is bool and isinstance(value.get('leader'),dict)
+                and isinstance(value.get('members'),list) and len(value['members'])==2
+                and isinstance(value.get('tasks'),list) and len(value['tasks'])==2,
+                'complete actual two-process fixture snapshot required')
+        leader=value['leader']
+        members={item.get('pid'):item for item in value['members'] if isinstance(item,dict)}
+        require(len(members)==2 and leader.get('pid') in members and members[leader['pid']]==leader
+                and (leader_pid is None or leader['pid']==leader_pid), 'exact fixture leader row differs')
+        for row in members.values():
+            require(set(row)=={'pid','ppid','startticks','pgrp','session','uid','state'}
+                    and all(natural(row[key]) for key in ('pid','ppid','startticks','pgrp','session','uid'))
+                    and row['pid']>0 and row['pgrp']==row['session']==leader['pid']
+                    and row['uid']==os.getuid() and row['state'] in ('S','R','T','Z')
+                    and (not quiet or row['state'] in ('T','Z')), 'actual fixture process identity/state differs')
+        tasks={item.get('pid'):item for item in value['tasks'] if isinstance(item,dict)}
+        require(set(tasks)==set(members) and all(isinstance(row,dict)
+                and set(row)==set(members[pid])|{'tid'} and row.get('tid')==pid
+                and all(row.get(key)==item for key,item in members[pid].items()
+                        if not transitional or key!='state')
+                and (not transitional or row.get('state') in
+                     (('T',) if pid==leader['pid'] else ('S','R')))
+                for pid,row in tasks.items()), 'actual fixture task rows differ')
+        if quiet:
+            require(value['stable'] is True,'stable quiet snapshot required')
+        return members
+
+    names=('positive-count-epoch-actual-unknown-exit','negative-count-epoch-known-child-resumed')
+    require(isinstance(report,dict) and report.get('schema')=='native-tls-count-epoch-controls-6970-v1'
+            and report.get('result')=='PASS_COUNT_EPOCH_CONTROLS_ONLY'
+            and type(report.get('completed')) is int and report['completed']==2
+            and type(report.get('failures')) is int and report['failures']==0
+            and controls.CONTROL_NAMES==names, 'exact two completed cases required')
+    cases=report.get('cases')
+    require(isinstance(cases,list) and len(cases)==2 and tuple(row.get('name') for row in cases)==names,
+            'ordered case identities differ')
+    for key in ('resource_source_before_after_equal','control_source_before_after_equal',
+                'fixture_source_before_after_equal','fixture_before_after_equal','actual_controls_execution_verified',
+                'case_pool_charges_exclude_parent_prepare_commands'):
+        require(report.get(key) is True,'required envelope absent: '+key)
+    for key in ('parent_commands_added','original_production_and_support_sources_changed',
+                'expected_negative_commands_added_to_parent','host_elf_object_binary_transfer_authorized',
+                'tool_dynamic_runtime_closure_verified','escaped_writers_excluded_verified',
+                'continuous_group_stop_verified','filesystem_quota_verified','native_execution_verified',
+                'windows98_integration_verified','tls_execution_verified'):
+        require(report.get(key) is False,'unsupported scope claim: '+key)
+    require(report.get('resource_source')==source_pins['ntwin32/secure_transport/native_tls_resources_6970.py']
+            and report.get('control_source')==source_pins['ntwin32/secure_transport/native_tls_count_epoch_controls_6970.py']
+            and report.get('fixture_build')==fixture and report.get('source_input_count_delta')==1
+            and report.get('fixture_bytes_limit')==8*1024**2 and report.get('case_timeout_seconds')==5
+            and report.get('total_timeout_seconds')==60 and duration(report.get('elapsed_seconds'),60)
+            and report.get('parent_command_count_before')==report.get('parent_command_count_after')
+                ==len(guard.commands)==offsets['commands'], 'source/fixture/parent command limits differ')
+    paths=[guard.tmp/('count-epoch-%02d'%i)/name for i in range(2)
+           for name in ('result.json','control.stdout','control.stderr')]
+    records=report.get('proof_files')
+    require(isinstance(records,list) and len(records)==6
+            and [row.get('path') for row in records]==[str(path) for path in paths],
+            'six exact ordered closed text proof paths required')
+    pins,raws,inodes={},{},set()
+    for record,path in zip(records,paths):
+        require(set(record)=={'path','relative_path','bytes','sha256','identity'}
+                and record['relative_path']==str(path.relative_to(guard.output)), 'text proof envelope differs')
+        raw,pin=regular(path,resources.RECEIPT_LIMIT)
+        require(guard.pin(path,maximum=resources.RECEIPT_LIMIT)==pin
+                =={key:record[key] for key in ('bytes','sha256','identity')}
+                and tuple(pin['identity'][:2]) not in inodes, 'held text proof changed or inode duplicated')
+        inodes.add(tuple(pin['identity'][:2])); pins[str(path)]=pin; raws[str(path)]=raw
+    charged=native_total=ipc_total=0
+    for index,row in enumerate(cases):
+        positive=index==0
+        reason=None if positive else 'owned group changed or resumed during recursive observation'
+        epoch='PASS_CONTROL_CHILD' if positive else 'FAIL'
+        require(row.get('result')=='PASS' and row.get('executed') is True
+                and row.get('expected_child_epoch')==row.get('child_epoch')==epoch
+                and row.get('injected_fault') is (not positive) and row.get('stop_request_expected') is True
+                and row.get('expected_negative_reason')==reason
+                and row.get('expected_command_count')==row.get('command_count')==1
+                and duration(row.get('elapsed_seconds'),5), 'actual case classification/wall limit differs')
+        require(all(natural(row.get(key)) for key in
+                    ('capture_pool_offset','decoder_pool_offset','capture_pool_delta','decoder_pool_delta'))
+                and row['capture_pool_offset']==offsets['capture']+charged
+                and row['decoder_pool_offset']==offsets['decoder'] and row['decoder_pool_delta']==0,
+                'inherited pool continuity differs')
+        child_path=paths[index*3]; pin=pins[str(child_path)]
+        require(row.get('child_receipt_path')==str(child_path) and row.get('child_receipt_sha256')==pin['sha256']
+                and row.get('child_receipt_bytes')==pin['bytes'],'closed child receipt pin differs')
+        child=json.loads(raws[str(child_path)])
+        observed=row.get('observation')
+        require(isinstance(observed,dict) and child.get('actual_control_observation')==observed
+                and child.get('schema')=='native-tls-count-epoch-control-child-6970-v1'
+                and child.get('control')==names[index] and child.get('result')==epoch
+                and child.get('expected_negative') is (not positive) and child.get('injected_fault') is (not positive)
+                and child.get('stop_request_expected') is True and child.get('receipt_accounting_verified') is True
+                and child.get('command_count')==1 and child.get('observed_control_error') is None
+                and child.get('expected_fault_observed')==row.get('observed_error')
+                and child.get('fixture_elf_sha256')==fixture['elf']['sha256']
+                and child.get('inherited_parent_capture_bytes')==row['capture_pool_offset']
+                and child.get('inherited_parent_decoder_bytes')==row['decoder_pool_offset']
+                and child.get('reserve_bytes')==resources.RESERVE and child.get('output_limit_bytes')==resources.LIMIT
+                and child.get('receipt_limit_bytes')==resources.RECEIPT_LIMIT
+                and child.get('capture_limit_bytes_aggregate')==resources.CAPTURE_LIMIT
+                and child.get('command_records_retained') is True
+                and natural(child.get('minimum_observed_free_bytes')) and child['minimum_observed_free_bytes']>=resources.RESERVE
+                and natural(child.get('available_at_receipt_bytes')) and child['available_at_receipt_bytes']>=resources.RESERVE+resources.LIMIT
+                and child.get('final_output_bytes')==sum(pins[str(path)]['bytes'] for path in paths[index*3:index*3+3])
+                    <=resources.LIMIT
+                and child.get('output_bytes_before_receipt')==child['final_output_bytes']-pin['bytes']
+                and all(child.get(key) is False for key in
+                    ('native_execution_verified','windows98_integration_verified','tls_execution_verified')),
+                'closed child resources/identity/scope differ')
+        model=child.get('resource_model')
+        require(isinstance(model,dict) and model.get('profile_command_timeout_limit_seconds')==360
+                and model.get('group_stop_confirmation_limit_seconds')==1
+                and model.get('owned_group_quiescent_observations_required') is True
+                and model.get('command_wall_time_includes_group_pauses') is True
+                and all(model.get(key) is False for key in
+                    ('PPID_is_birth_token','outside_group_parents_signalled','numeric_PID_STOP_fallback',
+                     'continuous_group_stop_verified','unmanaged_or_escaped_writers_excluded_verified',
+                     'pending_asynchronous_kernel_writes_excluded_verified','filesystem_quota_verified',
+                     'continuous_minimum_free_verified','all_transient_or_unlinked_file_peaks_observed',
+                     'implicit_backend_runtime_attestation_verified')), 'unchanged resource model required')
+        strings=child.get('command_argv_string_table')
+        require(child.get('command_argv_encoding')=='lossless-string-table-v1' and isinstance(strings,list)
+                and len(strings)<=8192 and len(set(strings))==len(strings)
+                and all(isinstance(value,str) for value in strings) and sum(len(value.encode()) for value in strings)<=256*1024
+                and isinstance(child.get('commands'),list) and len(child['commands'])==1
+                and isinstance(row.get('commands'),list) and len(row['commands'])==1
+                and isinstance(row.get('capture_payloads'),list) and len(row['capture_payloads'])==1,
+                'bounded command argv envelope required')
+        actual,command,capture=child['commands'][0],row['commands'][0],row['capture_payloads'][0]
+        refs=actual.get('argv_refs')
+        require(isinstance(refs,list) and all(natural(ref) and ref<len(strings) for ref in refs),'invalid argv refs')
+        argv=[strings[ref] for ref in refs]
+        require(argv==[fixture['elf']['path'],'reap' if positive else 'reap-live']
+                and command.get('label')=='control' and command.get('argv_sha256')==digest(json.dumps(argv,separators=(',',':')).encode())
+                and all(actual.get(key)==value for key,value in command.items() if key!='argv_sha256')
+                and command.get('reaped') is True and command.get('raw_stdout_stream') is False,
+                'actual fixture invocation and owned cleanup differ')
+        q=command.get('quiescence')
+        require(isinstance(q,dict) and q.get('stop_signal_model')=='pidfd-process-parent-first-flags0-v1'
+                and q.get('observation_row_schema')=='owned-process-task-ppid-v2'
+                and q.get('pidfd_stop_requests',0)>0
+                and all(q.get(key) is False for key in
+                    ('escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified')),
+                'actual owned stop model differs')
+        require_count_epoch_numeric_evidence(observed,q,positive,command,child,canonical,snapshot,token,require)
+        physical=0
+        for stream in ('stdout','stderr'):
+            raw=raws[str(child_path.parent/('control.'+stream))]
+            require(raw==(b'REAP_OK\n' if positive and stream=='stdout' else b'')
+                    and capture.get(stream+'_hex')==raw.hex()
+                    and command.get('captured_sha256',{}).get(stream)==digest(raw)
+                    and command.get('full_'+stream+'_sha256')==digest(raw)
+                    and command.get('full_'+stream+'_bytes')==len(raw), 'complete physical native capture differs')
+            physical+=len(raw)
+        ipc=observed.get('auxiliary_ipc')
+        require(isinstance(ipc,list) and len(ipc)==2,'exact two actor IPC operations required')
+        for item,operation,data in zip(ipc,('read-ready','write-exit'),(b'R',b'E')):
+            require(isinstance(item,dict) and item.get('operation')==operation
+                    and item.get('bytes')==item.get('normal_pool_charge_bytes')==1
+                    and item.get('observed_hex' if operation=='read-ready' else 'delivered_hex')==data.hex()
+                    and item.get('sha256')==digest(data),'actual actor IPC byte evidence differs')
+        require(observed.get('auxiliary_ipc_bytes')==2
+                and physical==command.get('captured_bytes')
+                and physical+2==row['capture_pool_delta']==child.get('control_capture_pool_delta')
+                and child.get('control_decoder_pool_delta')==0
+                and child.get('captured_normal_bytes')==row['capture_pool_offset']+physical+2
+                and child.get('decoder_observed_bytes')==offsets['decoder'], 'native capture plus separately charged IPC differs')
+        charged+=physical+2; native_total+=physical; ipc_total+=2
+    require(charged==report.get('capture_bytes_charged_to_parent')==12
+            and native_total==report.get('capture_payload_bytes')==8
+            and ipc_total==report.get('auxiliary_ipc_bytes_charged_to_parent')==4
+            and report.get('raw_bytes_charged_to_parent')==0
+            and guard.capture_bytes==offsets['capture']+charged<=resources.CAPTURE_LIMIT
+            and guard.decoder_bytes==offsets['decoder']<=resources.DECODER_LIMIT
+            and sum(pin['bytes'] for pin in pins.values())<=8*1024**2,
+            'combined native/IPC/global pools differ')
+    return pins
+
+
+def require_count_epoch_numeric_evidence(observed, q, positive, command, child,
+                                         canonical, snapshot, token, require):
+    """Validate retained real rows, typed scan events and the one-count discard."""
+    def natural(value):
+        return type(value) is int and value>=0
+
+    def numeric(value):
+        return type(value) in (int,float)
+
+    def row_identity(row):
+        require(isinstance(row,dict) and set(row)=={'pid','ppid','startticks','pgrp','session','uid','state'}
+                and all(natural(row[key]) for key in ('pid','ppid','startticks','pgrp','session','uid'))
+                and row['pid']>0 and row['uid']==os.getuid(), 'actual auxiliary numeric row required')
+
+    actor=observed.get('auxiliary_actor')
+    require(isinstance(actor,dict) and actor.get('schema')=='native-tls-count-epoch-actor-6970-v1'
+            and natural(actor.get('pid')) and actor['pid']>0
+            and actor.get('controller_pid')==os.getpid() and actor.get('lifetime_seconds')==5,
+            'owned auxiliary actor identity/lifetime differs')
+    initial,ready=actor.get('initial_row'),actor.get('ready_row')
+    row_identity(initial); row_identity(ready)
+    require(initial['pid']==ready['pid']==actor['pid'] and initial['ppid']==ready['ppid']==actor['controller_pid']
+            and initial['startticks']==ready['startticks'] and ready['pgrp']==ready['session']==actor['pid']
+            and ready['state'] in ('S','R') and actor.get('birth_token')==token(ready)
+            and actor.get('pidfd_bound_before_ready') is True and actor.get('pidfd_flags')==0
+            and actor.get('pidfd_close_on_exec_verified') is True
+            and actor.get('ready_before_native_spawn') is True and actor.get('outside_group_verified') is True
+            and actor.get('lexical_before_owned_child') is True,
+            'actual held actor birth token/own-group/readiness differs')
+    spawned,deadline=actor.get('spawned_at_monotonic'),actor.get('deadline_monotonic')
+    require(numeric(spawned) and numeric(deadline) and spawned>=0 and 0<=deadline-spawned<=5,
+            'bounded actor absolute lifetime differs')
+    exited=actor.get('exit_observed'); cleanup=actor.get('cleanup')
+    require(isinstance(exited,dict) and exited.get('si_pid')==actor['pid']
+            and exited.get('si_code')==os.CLD_EXITED and exited.get('si_status')==0
+            and exited.get('nonreaped') is True and type(exited.get('options')) is int
+            and exited['options'] & os.WNOWAIT and exited['options'] & os.WEXITED
+            and isinstance(cleanup,dict) and cleanup.get('group_identity_checked_before_kill') is True
+            and cleanup.get('kill_before_reap') is True and cleanup.get('reaped') is True
+            and cleanup.get('waitpid_pid')==actor['pid'] and cleanup.get('waitpid_status')==0
+            and cleanup.get('waitpid_exitcode')==0 and cleanup.get('pipe_fds_closed') is True
+            and cleanup.get('pidfd_closed') is True
+            and ((cleanup.get('group_kill')=='REQUESTED_BEFORE_REAP' and cleanup.get('kill_errno') is None)
+                 or (cleanup.get('group_kill')=='NO_SUCH_GROUP_BEFORE_REAP' and cleanup.get('kill_errno')==3)),
+            'actual auxiliary WNOWAIT/owned kill-before-reap/fd cleanup differs')
+    reference=observed.get('reference_snapshot')
+    members=snapshot(reference,quiet=True); leader=reference['leader']
+    require(command.get('owned_pid')==leader['pid'] and leader['pid']!=actor['pid']
+            and actor['pid'] not in members,'auxiliary actor must be outside actual stopped group')
+    children=[row for pid,row in members.items() if pid!=leader['pid'] and row['ppid']==leader['pid']]
+    require(len(children)==1 and str(actor['pid'])<str(children[0]['pid']),
+            'actual lexicographic scanner actor/known-child ordering differs')
+    known_child=children[0]
+    ready_snapshot=observed.get('readiness_snapshot')
+    ready_members=snapshot(ready_snapshot,leader['pid'])
+    require(ready_snapshot['stable'] is True and all(row['state'] in ('S','R') for row in ready_members.values())
+            and observed.get('readiness_sha256')==digest(canonical(ready_snapshot))
+            and observed.get('observed_fork_ppid_ready') is True and observed.get('ready_before_any_stop') is True
+            and all(token(ready_members[pid])==token(row) and ready_members[pid]['ppid']==row['ppid']
+                    for pid,row in members.items()), 'actual pre-STOP fork readiness differs')
+    invalid=observed.get('invalidated_postcount_snapshot')
+    # The negative scan samples the intentionally resumed child more than
+    # once. Retain actual S/R values and exact non-state identity in each read.
+    changed=snapshot(invalid,leader['pid'],transitional=not positive)
+    require(invalid['stable'] is False and invalid['leader']==leader,
+            'actual unstable post-count leader/provenance differs')
+    metadata=observed.get('actual_scan_instability')
+    require(isinstance(metadata,dict),'complete typed actual scan metadata required')
+    events=metadata.get('events')
+    require(isinstance(events,list) and len(events)==1
+            and events[0].get('pid')==actor['pid']
+            and events[0].get('classification')=='before_group_classification_unknown'
+            and events[0].get('reason')=='numeric_process_or_task_disappeared'
+            and metadata.get('scope')=='last_actual_numeric_proc_scan' and metadata.get('total_events')==1
+            and metadata.get('events_truncated') is False
+            and metadata.get('classification_counts')=={'before_group_classification_unknown':1}
+            and (events[0].get('absence_exception_class'),events[0].get('absence_errno'))
+                in (('FileNotFoundError',2),('ProcessLookupError',3)),
+            'one actual unknown actor typed numeric disappearance required')
+    reads=observed.get('scanned_numeric_reads')
+    require(isinstance(reads,list) and 2<=len(reads)<=8
+            and all(isinstance(item,dict) and item.get('source')=='scanner'
+                    and natural(item.get('ordinal')) and natural(item.get('pid')) for item in reads),
+            'bounded actual scanner read chronology required')
+    actor_reads=[item for item in reads if item['pid']==actor['pid']]
+    child_reads=[item for item in reads if item['pid']==known_child['pid'] and item.get('after_fault') is True]
+    require(len(actor_reads)==1 and actor_reads[0].get('tasks') is False
+            and len(child_reads)>=1 and all(item['ordinal']>actor_reads[0]['ordinal']
+                and isinstance(item.get('row'),dict)
+                and ((item['row']==changed[known_child['pid']]) if positive else
+                     (all(item['row'].get(key)==value for key,value in changed[known_child['pid']].items()
+                          if key!='state') and item['row'].get('state') in ('S','R')))
+                for item in child_reads),
+            'actual child was not read after actor fault boundary')
+    require(observed.get('production_continue_requests_at_fault')==0
+            and observed.get('nested_traversals_at_fault')==0
+            and observed.get('early_production_CONT_requests')==0
+            and observed.get('actor_reaped_before_original_numeric_read') is True
+            and observed.get('known_child_scan_after_fault_verified') is True
+            and observed.get('fault_boundary_exercised') is True
+            and observed.get('unknown_actor_control_ownership_is_not_production_ownership_attestation') is True
+            and observed.get('count_epoch_recovery_is_not_production_exit_cause_attestation') is True
+            and all(observed.get(key) is False for key in
+                ('snapshot_or_row_fabricated','syscall_result_modified','resource_counter_modified',
+                 'whole_group_stayed_stopped_after_intentional_fault_verified')),
+            'no recursive fault admission or early production CONT allowed')
+    absence=observed.get('actual_actor_numeric_absence')
+    require(isinstance(absence,dict) and absence.get('pid')==actor['pid']
+            and absence.get('source')=='scanner' and absence.get('original_reader_forwarded') is True
+            and (absence.get('exception_class'),absence.get('errno'))
+                ==(events[0]['absence_exception_class'],events[0]['absence_errno']),
+            'original numeric reader actual exception binding differs')
+    if positive:
+        require(changed==members and invalid=={**reference,'stable':False}
+                and q.get('count_epoch_discarded_counts')==q.get('count_epoch_recounts_started')
+                    ==q.get('count_epoch_reconfirmed_pairs')==1
+                and q.get('count_epoch_unknown_pair_resets')==0
+                and command.get('returncode')==0 and command.get('aborted') is None
+                and child.get('resource_failure') is None
+                and observed.get('injected_fault_count')==0 and observed.get('fault_pidfd_CONT') is None
+                and observed.get('target_production_CONT_requests')==1
+                and natural(observed.get('pidfd_STOP_requests_at_fault'))
+                and observed['pidfd_STOP_requests_at_fault']>0
+                and observed['pidfd_STOP_requests_at_fault']==observed.get('pidfd_STOP_requests_at_recount')
+                    ==observed.get('pidfd_STOP_requests_at_accepted_postcount')
+                and q.get('continue_requests',0)>0 and q.get('verified_pauses',0)>0
+                and q.get('failure_stop_retained_until_owned_kill') is False
+                and q.get('failure_observation') is None,
+                'actual positive discard/full recount/continuation differs')
+        diag=q.get('last_count_epoch_discard')
+        require(isinstance(diag,dict) and diag.get('schema')=='owned-count-epoch-discard-6970-v1'
+                and natural(diag.get('discarded_count_value'))
+                and diag.get('discarded_count_value_returned') is False
+                and diag.get('actual_scan_instability')=={'matches_returned_snapshot':True,'metadata':metadata}
+                and diag.get('known_rows_exactly_equal') is True
+                and diag.get('unknown_process_ownership_verified') is False
+                and diag.get('diagnostic_row_limit')==8 and diag.get('diagnostic_byte_limit')==16384
+                and isinstance(diag.get('sampled_rows'),list) and len(diag['sampled_rows'])+len(events)<=8
+                and all(diag.get(key) is False for key in
+                    ('discarded_count_epoch_accepted','complete_reconfirmation_history_retained',
+                     'additional_STOP_sent_for_reconfirmation','CONT_sent_between_count_epochs',
+                     'unknown_PID_signalled_waited_or_reaped','minimum_free_or_peak_rolled_back',
+                     'producer_cause_verified','kernel_cause_verified','historical_escape_cause_verified',
+                     'continuous_group_stop_verified')),
+                'actual discarded-value typed diagnostic differs')
+        canonical(diag)
+        start,end,command_end,discarded_at=(diag.get(key) for key in
+            ('pause_started_at_monotonic','pause_deadline_monotonic','command_deadline_monotonic','discarded_at_monotonic'))
+        require(all(numeric(value) for value in (start,end,command_end,discarded_at))
+                and 0<=start<=discarded_at<=end<=command_end and end-start<=1,
+                'original absolute one-second discard deadline differs')
+        def summary(value):
+            return {'canonical_full_snapshot_sha256':digest(canonical(value)),
+                    'stable':value['stable'],
+                    'all_members_and_tasks_T_or_Z':all(item['state'] in ('T','Z')
+                        for item in value['members']+value['tasks']),
+                    'member_count':len(value['members']),'task_count':len(value['tasks'])}
+        require(diag.get('reference_snapshot')==summary(reference)
+                and diag.get('invalidated_postcount_snapshot')==summary(invalid)
+                and diag.get('accepted_postcount_snapshot')==summary(reference)
+                and diag.get('count_epoch_deadline_monotonic')==end
+                and natural(diag.get('pause_attempt')) and diag['pause_attempt']>0
+                and diag.get('unknown_pair_reset_count')==0,
+                'discard diagnostic full snapshot digests/counts differ')
+        reconfirmed=observed.get('reconfirmed_snapshots')
+        require(isinstance(reconfirmed,list) and len(reconfirmed)==2,
+                'two new actual stable T/Z reconfirmation snapshots required')
+        previous=discarded_at
+        for item in reconfirmed:
+            require(isinstance(item,dict) and item.get('snapshot')==reference
+                    and item.get('sha256')==digest(canonical(reference))
+                    and numeric(item.get('completed_at_monotonic'))
+                    and previous<=item['completed_at_monotonic']<=end,
+                    'new complete exact-reference reconfirmation differs')
+            snapshot(item['snapshot'],leader['pid'],quiet=True); previous=item['completed_at_monotonic']
+        pair=diag.get('reconfirmed_pair')
+        empty_scan={'matches_returned_snapshot':True,'metadata':{
+            'scope':'last_actual_numeric_proc_scan','total_events':0,'classification_counts':{},
+            'events':[],'events_truncated':False}}
+        require(isinstance(pair,list) and len(pair)==2 and all(isinstance(item,dict)
+                and item.get('snapshot')==summary(reference) and item.get('actual_scan_instability')==empty_scan
+                and numeric(item.get('completed_at_monotonic')) and discarded_at<=item['completed_at_monotonic']<=end
+                for item in pair) and pair[0]['completed_at_monotonic']<=pair[1]['completed_at_monotonic'],
+                'producer actual two complete stable reconfirmation observations differ')
+        accepted=observed.get('accepted_postcount_snapshot')
+        require(accepted==reference,'accepted recount post-check differs from two stable snapshots')
+        snapshot(accepted,leader['pid'],quiet=True)
+        recount_at,accepted_at=diag.get('recount_started_at_monotonic'),diag.get('accepted_postcount_at_monotonic')
+        require(numeric(recount_at) and numeric(accepted_at) and previous<=recount_at<=accepted_at<=end
+                and observed.get('production_continue_requests_at_recount')==0
+                and observed.get('actual_count_calls')==2
+                and natural(observed.get('discarded_count_value'))
+                and observed['discarded_count_value']==diag['discarded_count_value']
+                and natural(observed.get('accepted_count_value'))
+                and observed.get('counted_values')==[observed['discarded_count_value'],observed['accepted_count_value']]
+                and observed.get('target_pause_started_at_monotonic')==start
+                and observed.get('target_deadline_monotonic')==end,
+                'full second traversal and final deadline verification differ')
+    else:
+        live=changed[known_child['pid']]
+        fault=observed.get('fault_pidfd_CONT')
+        polls=observed.get('helper_poll_observations')
+        require(isinstance(fault,dict) and fault.get('pid')==known_child['pid']
+                and fault.get('birth_token')==token(known_child)
+                and fault.get('childbirth_token_before')==fault.get('childbirth_token_after')==token(known_child)
+                and fault.get('signal')==int(signal.SIGCONT) and fault.get('flags')==0
+                and fault.get('process_targeted') is True and fault.get('retained_pidfd_birth_verified') is True
+                and fault.get('accepted_actual_send') is True and fault.get('production_CONT') is False
+                and observed.get('injected_fault_count')==1 and observed.get('target_production_CONT_requests')==0
+                and isinstance(polls,list) and len(polls)==1 and polls[0].get('source')=='helper_poll',
+                'one declared held-birth child fault CONT required')
+        poll=polls[0]
+        require(isinstance(poll.get('leader_row'),dict) and isinstance(poll.get('child_row'),dict)
+                and token(poll['leader_row'])==token(leader) and poll['leader_row']['state']=='T'
+                and token(poll['child_row'])==token(known_child) and poll['child_row']['state'] in ('S','R')
+                and poll['child_row']['ppid']==leader['pid'], 'actual helper poll parentT/resumed child differs')
+        require(token(live)==token(known_child) and live['ppid']==known_child['ppid']
+                and live['state'] in ('S','R') and changed[leader['pid']]['state']=='T'
+                and q.get('count_epoch_discarded_counts')==q.get('count_epoch_recounts_started')
+                    ==q.get('count_epoch_reconfirmed_pairs')==q.get('count_epoch_unknown_pair_resets')==0
+                and q.get('last_count_epoch_discard') is None
+                and q.get('continue_requests')==0 and q.get('verified_pauses',0)>0
+                and q.get('failure_stop_retained_until_owned_kill') is True
+                and command.get('returncode')==-9 and command.get('group_kill')=='REQUESTED_BEFORE_REAP'
+                and isinstance(command.get('aborted'),str)
+                and 'owned group changed or resumed during recursive observation' in command['aborted']
+                and isinstance(child.get('resource_failure'),str)
+                and 'owned group changed or resumed during recursive observation' in child['resource_failure']
+                and observed.get('actual_count_calls')==1
+                and observed.get('reconfirmed_snapshots')==[]
+                and observed.get('accepted_postcount_snapshot') is None,
+                'known resumed child must fail without discard/recount/production CONT')
+
+
 def prepare(prep):
     """Bounded fresh publisher inputs, distinct from proof32MiB output."""
     components(prep)
@@ -1633,6 +2071,10 @@ def build(output, prep, expected_preparation_sha):
         stale_controls = load(ROOT / stale_name,
             (source_pins[stale_name]['bytes'], source_pins[stale_name]['sha256']),
             'native_tls_stale_order_controls_frozen', guard)
+        count_name = 'ntwin32/secure_transport/native_tls_count_epoch_controls_6970.py'
+        count_controls = load(ROOT / count_name,
+            (source_pins[count_name]['bytes'], source_pins[count_name]['sha256']),
+            'native_tls_count_epoch_controls_frozen', guard)
         guard.check()
         receipt['stream_controls'] = stream.run_controls(gate)
         receipt['resource_control_plan']=resources.hosted_control_plan()
@@ -1747,6 +2189,12 @@ def build(output, prep, expected_preparation_sha):
             receipt['pidfd_controls']['fixture_build'])
         stale_pins = require_stale_order_controls(receipt['stale_order_controls'], stale_controls,
             guard, resources, source_pins, receipt['pidfd_controls']['fixture_build'], stale_offsets)
+        count_offsets = {'commands':len(guard.commands), 'capture':guard.capture_bytes,
+                         'decoder':guard.decoder_bytes}
+        receipt['count_epoch_controls'] = count_controls.run_controls(guard, resources,
+            receipt['pidfd_controls']['fixture_build'])
+        count_pins = require_count_epoch_controls(receipt['count_epoch_controls'], count_controls,
+            guard, resources, source_pins, receipt['pidfd_controls']['fixture_build'], count_offsets)
         # Original in-memory ISA methods run through the existing exact-byte loader.
         r = guard.run([python, '-B', '-c', bridge.I486_CONTROL_CHILD,
                        str(HERE / 'i486_gate.py'), PRODUCTION[gate_name][1],
@@ -2173,6 +2621,10 @@ def build(output, prep, expected_preparation_sha):
             if guard.pin(Path(path),maximum=stale_controls.FIXTURE_BYTES_LIMIT)!=pin:
                 raise ValueError('actual closed stale-order text control proof changed during build')
         receipt['stale_order_control_proof_files_before_after_equal']=True
+        for path,pin in count_pins.items():
+            if guard.pin(Path(path),maximum=count_controls.FIXTURE_BYTES_LIMIT)!=pin:
+                raise ValueError('actual closed count-epoch text control proof changed during build')
+        receipt['count_epoch_control_proof_files_before_after_equal']=True
         for relative,pin in source_pins.items():
             if regular(ROOT/relative,2*1024**2)[1]!=pin:
                 raise ValueError('original source/helper changed')

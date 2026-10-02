@@ -48,6 +48,10 @@ class ResourceFailure(RuntimeError):
     """An observed failure remains latched for the whole new proof epoch."""
 
 
+class _CountEpochDiscard(Exception):
+    """Internal invalidation; never a cleared or retried ResourceFailure."""
+
+
 def identity(s):
     return [s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid,
             s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns]
@@ -142,6 +146,8 @@ class _OwnedGroupObservation:
         self.pause_stop_requests_start = 0
         self.pause_stage = "not_started"
         self.pause_candidate_snapshot = None
+        self._count_epoch_discard_pending = None
+        self._count_epoch_retry_active = False
         self.telemetry = {"pause_attempts": 0, "verified_pauses": 0,
                           "stop_requests": 0, "continue_requests": 0,
                           "stop_no_live_group_observations": 0,
@@ -166,6 +172,11 @@ class _OwnedGroupObservation:
                           "stale_schedule_live_refusals": 0,
                           "stale_schedule_birth_refusals": 0,
                           "last_stale_schedule_observation": None,
+                          "count_epoch_discarded_counts": 0,
+                          "count_epoch_recounts_started": 0,
+                          "count_epoch_reconfirmed_pairs": 0,
+                          "count_epoch_unknown_pair_resets": 0,
+                          "last_count_epoch_discard": None,
                           "filesystem_quota_verified": False}
         try:
             self.proc_fd = os.open("/proc", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -302,13 +313,17 @@ class _OwnedGroupObservation:
                        "total_events": 0, "classification_counts": {},
                        "events": [], "events_truncated": False}
 
-        def note_instability(pid, reason, classification):
+        def note_instability(pid, reason, classification, *, absence_error=None):
             instability["total_events"] += 1
             counts = instability["classification_counts"]
             counts[classification] = counts.get(classification, 0) + 1
             if len(instability["events"]) < GROUP_DIAGNOSTIC_ROW_LIMIT:
-                instability["events"].append({"pid": pid, "reason": reason,
-                                              "classification": classification})
+                event = {"pid": pid, "reason": reason,
+                         "classification": classification}
+                if absence_error is not None:
+                    event.update(absence_exception_class=type(absence_error).__name__,
+                                 absence_errno=absence_error.errno)
+                instability["events"].append(event)
             else:
                 instability["events_truncated"] = True
 
@@ -337,13 +352,14 @@ class _OwnedGroupObservation:
                 if not unchanged:
                     note_instability(pid, "owned_task_listing_or_process_token_changed",
                                      "after_owned_group_classification")
-            except (FileNotFoundError, ProcessLookupError):
+            except (FileNotFoundError, ProcessLookupError) as error:
                 if pid == self.proc.pid:
                     raise ResourceFailure("owned unreaped leader disappeared during observation")
                 stable = False
                 note_instability(pid, "numeric_process_or_task_disappeared",
                                  "after_owned_group_classification" if initially_classified_owned
-                                 else "before_group_classification_unknown")
+                                 else "before_group_classification_unknown",
+                                 absence_error=error)
                 continue
             if len(members) > GROUP_MEMBER_LIMIT or len(threads) > GROUP_TASK_LIMIT:
                 raise ResourceFailure("owned group member/task observation bound crossed")
@@ -648,6 +664,8 @@ class _OwnedGroupObservation:
     def pause(self):
         self.pause_started = time.monotonic()
         self.pause_deadline = min(self.deadline, self.pause_started + QUIESCENCE_TIMEOUT)
+        self._count_epoch_discard_pending = None
+        self._count_epoch_retry_active = False
         self.telemetry["pause_attempts"] += 1
         self.pause_iteration = 0
         self.pause_stop_requests_start = self.telemetry["stop_requests"]
@@ -820,15 +838,257 @@ class _OwnedGroupObservation:
                           "retry_or_acceptance_relaxation_applied": False}
         self.telemetry["failure_observation"] = diagnostic
 
-    def verify_paused(self):
+    def _count_epoch_scan_metadata(self, current):
+        """Only complete metadata from the actual scan returning this snapshot."""
+        provenance = self.last_validated_scan_instability
+        metadata = self.last_scan_instability
+        if (self.last_scan_snapshot != current or self.last_validated_snapshot != current
+                or not isinstance(provenance, dict)
+                or set(provenance) != {"matches_returned_snapshot", "metadata"}
+                or provenance["matches_returned_snapshot"] is not True
+                or provenance["metadata"] != metadata or not isinstance(metadata, dict)
+                or set(metadata) != {"scope", "total_events", "classification_counts",
+                                     "events", "events_truncated"}
+                or metadata["scope"] != "last_actual_numeric_proc_scan"
+                or not isinstance(metadata["total_events"], int)
+                or isinstance(metadata["total_events"], bool)
+                or not 0 <= metadata["total_events"] <= GROUP_DIAGNOSTIC_ROW_LIMIT
+                or not isinstance(metadata["classification_counts"], dict)
+                or any(not isinstance(key, str) or not isinstance(value, int)
+                       or isinstance(value, bool) or value <= 0
+                       for key, value in metadata["classification_counts"].items())
+                or sum(metadata["classification_counts"].values()) != metadata["total_events"]
+                or not isinstance(metadata["events"], list)
+                or len(metadata["events"]) != metadata["total_events"]
+                or metadata["events_truncated"] is not False):
+            return None
+        return metadata
+
+    def _count_epoch_same_known_rows(self, current):
+        reference = self.quiet_snapshot
+        return (reference is not None and current["leader"] == reference["leader"]
+                and current["members"] == reference["members"]
+                and current["tasks"] == reference["tasks"])
+
+    def _qualified_count_epoch_absence(self, current):
+        """Unknown ownership stays unknown; no unstable count is accepted."""
+        reference = self.quiet_snapshot
+        if (self.guard.failure is not None or reference is None or not self._quiet(reference)
+                or current["stable"] is not False or not self._count_epoch_same_known_rows(current)
+                or any(row["state"] not in ("T", "Z")
+                       for row in current["members"] + current["tasks"])):
+            return None
+        provenance = self.quiet_scan_instability
+        if (not isinstance(provenance, dict)
+                or set(provenance) != {"matches_returned_snapshot", "metadata"}
+                or provenance["matches_returned_snapshot"] is not True
+                or not isinstance(provenance["metadata"], dict)
+                or type(provenance["metadata"].get("total_events")) is not int
+                or provenance["metadata"] != {
+                    "scope": "last_actual_numeric_proc_scan", "total_events": 0,
+                    "classification_counts": {}, "events": [], "events_truncated": False}):
+            return None
+        metadata = self._count_epoch_scan_metadata(current)
+        classification = "before_group_classification_unknown"
+        if (metadata is None or metadata["total_events"] < 1
+                or metadata["classification_counts"] != {classification: metadata["total_events"]}):
+            return None
+        known_ids = {row["pid"] for row in reference["members"] + reference["tasks"]}
+        known_ids.update(row["tid"] for row in reference["tasks"])
+        seen = set()
+        for event in metadata["events"]:
+            if (not isinstance(event, dict)
+                    or set(event) != {"pid", "reason", "classification",
+                                      "absence_exception_class", "absence_errno"}
+                    or not isinstance(event["pid"], int) or isinstance(event["pid"], bool)
+                    or event["pid"] <= 0 or event["pid"] == self.proc.pid
+                    or event["pid"] in known_ids or event["pid"] in seen
+                    or event["reason"] != "numeric_process_or_task_disappeared"
+                    or event["classification"] != classification
+                    or not isinstance(event["absence_errno"], int)
+                    or isinstance(event["absence_errno"], bool)
+                    or (event["absence_exception_class"], event["absence_errno"])
+                        not in (("FileNotFoundError", 2), ("ProcessLookupError", 3))):
+                return None
+            seen.add(event["pid"])
+        return metadata
+
+    @staticmethod
+    def _count_epoch_snapshot_summary(snapshot):
+        raw = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
+        return {"canonical_full_snapshot_sha256": hashlib.sha256(raw).hexdigest(),
+                "stable": snapshot["stable"],
+                "all_members_and_tasks_T_or_Z": all(row["state"] in ("T", "Z")
+                    for row in snapshot["members"] + snapshot["tasks"]),
+                "member_count": len(snapshot["members"]),
+                "task_count": len(snapshot["tasks"])}
+
+    def _retain_count_epoch_diagnostic(self, diagnostic):
+        try:
+            event_count = len(diagnostic["actual_scan_instability"]["metadata"]["events"])
+            if event_count + len(diagnostic["sampled_rows"]) > GROUP_DIAGNOSTIC_ROW_LIMIT:
+                raise ResourceFailure("owned count epoch diagnostic row bound crossed")
+            raw = json.dumps(diagnostic, sort_keys=True, separators=(",", ":")).encode()
+            if len(raw) > GROUP_FAILURE_DIAGNOSTIC_LIMIT:
+                raise ResourceFailure("owned count epoch diagnostic byte bound crossed")
+            self.telemetry["last_count_epoch_discard"] = json.loads(raw)
+        except (KeyError, TypeError, ValueError, UnicodeError) as error:
+            raise ResourceFailure("owned count epoch diagnostic encoding refused") from error
+
+    def reconfirm_count_epoch(self, discarded_count_value):
+        """One fresh counted transaction inside the original absolute pause limit."""
+        pending = self._count_epoch_discard_pending
+        if (not self.paused or not self.verified or self._count_epoch_retry_active
+                or self.guard.failure is not None or pending is None
+                or not isinstance(discarded_count_value, int)
+                or isinstance(discarded_count_value, bool)
+                or not 0 <= discarded_count_value <= LIMIT or self.pause_started is None
+                or self.pause_deadline != min(self.deadline,
+                                              self.pause_started + QUIESCENCE_TIMEOUT)):
+            raise ResourceFailure("owned count epoch reconfirmation precondition refused")
+        self.pause_stage = "count_epoch_reconfirmation"
+        self.check_time()
+        invalidated = pending["snapshot"]
+        metadata = self._qualified_count_epoch_absence(invalidated)
+        if metadata is None or metadata != pending["metadata"]:
+            raise ResourceFailure("owned count epoch discard provenance changed")
+        samples = []
+        row_budget = GROUP_DIAGNOSTIC_ROW_LIMIT - len(metadata["events"])
+        for kind in ("members", "tasks"):
+            for row in self.quiet_snapshot[kind]:
+                if len(samples) < row_budget:
+                    samples.append({"kind": kind, "row": dict(row)})
+        diagnostic = {
+            "schema": "owned-count-epoch-discard-6970-v1",
+            "scope": "discarded_count_epoch_numeric_metadata_only",
+            "discarded_count_value": discarded_count_value,
+            "discarded_count_value_returned": False,
+            "discarded_count_epoch_accepted": False,
+            "reference_snapshot": self._count_epoch_snapshot_summary(self.quiet_snapshot),
+            "invalidated_postcount_snapshot": self._count_epoch_snapshot_summary(invalidated),
+            "actual_scan_instability": {"matches_returned_snapshot": True, "metadata": metadata},
+            "known_rows_exactly_equal": True,
+            "unknown_process_ownership_verified": False,
+            "sampled_rows": samples,
+            "sampled_row_total": len(self.quiet_snapshot["members"]) + len(self.quiet_snapshot["tasks"]),
+            "sampled_rows_truncated": len(self.quiet_snapshot["members"]) + len(self.quiet_snapshot["tasks"]) > len(samples),
+            "sampled_numeric_rows_and_instability_events_share_limit": True,
+            "diagnostic_row_limit": GROUP_DIAGNOSTIC_ROW_LIMIT,
+            "diagnostic_byte_limit": GROUP_FAILURE_DIAGNOSTIC_LIMIT,
+            "pause_started_at_monotonic": self.pause_started,
+            "count_epoch_deadline_monotonic": self.pause_deadline,
+            "pause_deadline_monotonic": self.pause_deadline,
+            "command_deadline_monotonic": self.deadline,
+            "pause_attempt": self.telemetry["pause_attempts"],
+            "discarded_at_monotonic": pending["completed_at_monotonic"],
+            "reconfirmed_pair": [], "unknown_pair_reset_count": 0,
+            "recount_started_at_monotonic": None,
+            "accepted_postcount_snapshot": None, "accepted_postcount_at_monotonic": None,
+            "complete_reconfirmation_history_retained": False,
+            "additional_STOP_sent_for_reconfirmation": False,
+            "CONT_sent_between_count_epochs": False,
+            "unknown_PID_signalled_waited_or_reaped": False,
+            "minimum_free_or_peak_rolled_back": False,
+            "producer_cause_verified": False, "kernel_cause_verified": False,
+            "historical_escape_cause_verified": False,
+            "continuous_group_stop_verified": False}
+        self._retain_count_epoch_diagnostic(diagnostic)
+        self.telemetry["count_epoch_discarded_counts"] += 1
+        self._count_epoch_discard_pending = None
+        self._count_epoch_retry_active = True
+        self.verified = False
+        self.pause_candidate_snapshot = None
+        previous = previous_record = None
+        resets_before = self.telemetry["count_epoch_unknown_pair_resets"]
+        while True:
+            self.pause_iteration += 1
+            self.pause_stage = "count_epoch_reconfirmation"
+            self.check_time()
+            current = self._snapshot()
+            self.check_time()
+            metadata = self._count_epoch_scan_metadata(current)
+            if (self._quiet(current) and self._count_epoch_same_known_rows(current)
+                    and metadata is not None and metadata["total_events"] == 0
+                    and metadata["classification_counts"] == {}):
+                record = {"snapshot": self._count_epoch_snapshot_summary(current),
+                          "completed_at_monotonic": self.last_validated_completed_at,
+                          "actual_scan_instability": {
+                              "matches_returned_snapshot": True, "metadata": metadata}}
+                if previous is not None and current == previous:
+                    diagnostic["reconfirmed_pair"] = [previous_record, record]
+                    diagnostic["unknown_pair_reset_count"] = (
+                        self.telemetry["count_epoch_unknown_pair_resets"] - resets_before)
+                    self._retain_count_epoch_diagnostic(diagnostic)
+                    self.check_time()
+                    self.quiet_snapshot = current
+                    self.quiet_scan_instability = {
+                        "matches_returned_snapshot": True, "metadata": metadata}
+                    self.verified = True
+                    self.telemetry["count_epoch_reconfirmed_pairs"] += 1
+                    self.pause_stage = "count_epoch_reconfirmed"
+                    # Keep pause_deadline active through recount and its final
+                    # verification. This does not start another pause scope.
+                    return
+                previous, previous_record = current, record
+                self.pause_candidate_snapshot = current
+            elif self._qualified_count_epoch_absence(current) is not None:
+                self.telemetry["count_epoch_unknown_pair_resets"] += 1
+                previous = previous_record = None
+                self.pause_candidate_snapshot = None
+            else:
+                self._record_failure_observation(current)
+                raise ResourceFailure("owned group changed or resumed during recursive observation")
+            time.sleep(0.001)
+
+    def _start_count_epoch_recount(self):
+        if (not self.paused or not self.verified or not self._count_epoch_retry_active
+                or self.guard.failure is not None):
+            raise ResourceFailure("owned count epoch recount lacks verified stop scope")
+        self.pause_stage = "count_epoch_recount"
+        self.check_time()
+        diagnostic = dict(self.telemetry["last_count_epoch_discard"])
+        if (diagnostic["pause_attempt"] != self.telemetry["pause_attempts"]
+                or len(diagnostic["reconfirmed_pair"]) != 2
+                or diagnostic["recount_started_at_monotonic"] is not None):
+            raise ResourceFailure("owned count epoch recount diagnostic precondition refused")
+        diagnostic["recount_started_at_monotonic"] = time.monotonic()
+        self._retain_count_epoch_diagnostic(diagnostic)
+        self.check_time()
+        self.telemetry["count_epoch_recounts_started"] += 1
+
+    def verify_paused(self, *, allow_count_epoch_discard=False):
         self.check_time()
         if not self.paused or not self.verified:
             raise ResourceFailure("recursive observation requires a verified owned stop scope")
+        if not isinstance(allow_count_epoch_discard, bool):
+            raise ResourceFailure("owned count epoch discard permission must be boolean")
+        self.pause_stage = "post_count_verification"
         current = self._snapshot()
-        if not self._quiet(current) or current != self.quiet_snapshot:
+        self.check_time()
+        metadata = self._count_epoch_scan_metadata(current) if self._count_epoch_retry_active else None
+        if (not self._quiet(current) or current != self.quiet_snapshot
+                or (self._count_epoch_retry_active and (metadata is None
+                    or metadata["total_events"] != 0 or metadata["classification_counts"] != {}))):
+            qualified = (self._qualified_count_epoch_absence(current)
+                         if allow_count_epoch_discard and not self._count_epoch_retry_active
+                            and self._count_epoch_discard_pending is None else None)
+            if qualified is not None:
+                self.pause_deadline = min(self.deadline, self.pause_started + QUIESCENCE_TIMEOUT)
+                self.check_time()
+                self._count_epoch_discard_pending = {
+                    "snapshot": current, "metadata": qualified,
+                    "completed_at_monotonic": self.last_validated_completed_at}
+                raise _CountEpochDiscard("discarded unstable count epoch; fresh recount required")
             self._record_failure_observation(current)
             raise ResourceFailure("owned group changed or resumed during recursive observation")
+        if self._count_epoch_retry_active:
+            diagnostic = dict(self.telemetry["last_count_epoch_discard"])
+            diagnostic["accepted_postcount_snapshot"] = self._count_epoch_snapshot_summary(current)
+            diagnostic["accepted_postcount_at_monotonic"] = self.last_validated_completed_at
+            self._retain_count_epoch_diagnostic(diagnostic)
+            self.check_time()
         raw = json.dumps(current, sort_keys=True, separators=(",", ":")).encode()
+        self.check_time()
         self.telemetry["verified_observation_sha256"] = hashlib.sha256(raw).hexdigest()
 
     def _record_failure_observation(self, current):
@@ -1081,7 +1341,17 @@ class Guard:
             group.pause()
             self._quiescence_depth = 1
             value = self._count_files(failure_evidence=failure_evidence)
-            group.verify_paused()
+            try:
+                group.verify_paused(allow_count_epoch_discard=failure_evidence is False)
+            except _CountEpochDiscard:
+                # Discard the completed value without returning it or clearing
+                # any failure. STOP and the original absolute deadline remain.
+                self._quiescence_depth = 0
+                group.reconfirm_count_epoch(value)
+                self._quiescence_depth = 1
+                group._start_count_epoch_recount()
+                value = self._count_files(failure_evidence=failure_evidence)
+                group.verify_paused(allow_count_epoch_discard=False)
             success = True
             return value
         except (OSError, ResourceFailure) as error:

@@ -266,7 +266,7 @@ jobs:
           import hashlib,os,stat,sys,types
           from pathlib import Path
           root=Path.cwd().resolve()
-          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': '54854637dd7b6b5643106657995ba4f5896d3897845206af851bdfdc298f3828', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': 'e1bb9d986a6300360437ed20e413dc291510b2d83820958e048330d0e1c4fa88', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '46149184b734e221f267eed268711dbd94c754ee102256276cdd2cafe6a58071', 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py': '36282f2bdabf25c7cd970e426de1c3a835346c000888cc1761c33a952c012aae'}
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'bf1efcebed90d9a2524836a0e237b1923b2250d8f8d62fcc5b6949b5b048f16d', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': 'deeb26aa23d5724cad73be48ab20f7cf8b348eaa2bb32c13dfbc81657e8af0eb', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '46149184b734e221f267eed268711dbd94c754ee102256276cdd2cafe6a58071', 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py': '36282f2bdabf25c7cd970e426de1c3a835346c000888cc1761c33a952c012aae', 'ntwin32/secure_transport/native_tls_count_epoch_controls_6970.py': '3391ada5ad42a2e10554932a40240b3f8fe4ca9a77e6c0647f7f5c0f5598bc3e'}
           before={}
           identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
           for relative,expected in pins.items():
@@ -334,7 +334,7 @@ jobs:
               print('Actual capture:',p.name)
               print(data.decode('utf-8',errors='replace'),end='')
           retained_control_text=0
-          for key,title in (('quiescent_controls','quiescent'),('pidfd_controls','pidfd'),('stale_order_controls','stale-order')):
+          for key,title in (('quiescent_controls','quiescent'),('pidfd_controls','pidfd'),('stale_order_controls','stale-order'),('count_epoch_controls','count-epoch')):
               group=receipt.get(key,{})
               fixture=group.get('fixture_build',{}) if key=='pidfd_controls' else {}
               fixture_text={fixture[name]['path'] for name in ('source','map') if name in fixture}
@@ -345,6 +345,9 @@ jobs:
               elif key=='stale_order_controls':
                   allowed={proof/'tmp'/('stale-order-%02d'%index)/name for index in range(2) for name in ('result.json','control.stdout','control.stderr')}
                   assert not fixture_text
+              elif key=='count_epoch_controls':
+                  allowed={proof/'tmp'/('count-epoch-%02d'%index)/name for index in range(2) for name in ('result.json','control.stdout','control.stderr')}
+                  assert not fixture_text
               else:
                   allowed={proof/'tmp'/('quiescent-%02d'%index)/name for index in range(10) for name in (('result.json','control.stdout','control.stderr') if index<8 else ('result.json',))}
               seen=set()
@@ -353,7 +356,7 @@ jobs:
                   assert not relative.is_absolute() and '..' not in relative.parts
                   assert p==proof/relative and p.is_relative_to(proof/'tmp') and not any(c in str(relative) for c in '\r\n')
                   child_text=p.name in ('result.json','control.stdout','control.stderr')
-                  if key in ('pidfd_controls','stale_order_controls'):
+                  if key in ('pidfd_controls','stale_order_controls','count_epoch_controls'):
                       assert child_text or str(p) in fixture_text
                       assert p.suffix not in ('.o','.ELF')
                   elif not child_text:continue
@@ -362,7 +365,7 @@ jobs:
                   data=read(p,524288,expected);retained_control_text+=len(data);assert retained_control_text<=524288
                   print('Actual '+title+' retained file:',str(relative),'bytes='+str(len(data)),'sha256='+hashlib.sha256(data).hexdigest())
                   print(data.decode('utf-8'),end='')
-              if group.get('result') in ('PASS_QUIESCENT_GUARD_CONTROLS_ONLY','PASS_PIDFD_VFORK_CONTROLS_ONLY','PASS_STALE_ORDER_CONTROLS_ONLY'):assert seen==allowed
+              if group.get('result') in ('PASS_QUIESCENT_GUARD_CONTROLS_ONLY','PASS_PIDFD_VFORK_CONTROLS_ONLY','PASS_STALE_ORDER_CONTROLS_ONLY','PASS_COUNT_EPOCH_CONTROLS_ONLY'):assert seen==allowed
           retained_ninja_text=0
           for name in ('build.ninja','CMakeFiles/rules.ninja'):
               p=proof/'cmake'/name
@@ -509,6 +512,26 @@ jobs:
               path=Path(item['path']);assert path==proof/item['relative_path'] and path not in selected
               pin={k:item[k] for k in ('bytes','sha256','identity')}
               assert read(path,524288)[1]==pin;selected[path]=pin
+          count_epoch=x['count_epoch_controls']
+          count_names=('positive-count-epoch-actual-unknown-exit','negative-count-epoch-known-child-resumed')
+          assert count_epoch['schema']=='native-tls-count-epoch-controls-6970-v1' and count_epoch['result']=='PASS_COUNT_EPOCH_CONTROLS_ONLY'
+          assert count_epoch['completed']==2 and count_epoch['failures']==0 and [case['name'] for case in count_epoch['cases']]==list(count_names)
+          assert count_epoch['case_timeout_seconds']==5 and count_epoch['total_timeout_seconds']==60 and 0<=count_epoch['elapsed_seconds']<=60
+          assert count_epoch['fixture_bytes_limit']==8*1024**2 and count_epoch['fixture_build']==fixture
+          for key in ('actual_controls_execution_verified','resource_source_before_after_equal','control_source_before_after_equal','fixture_source_before_after_equal','fixture_before_after_equal','case_pool_charges_exclude_parent_prepare_commands'):assert count_epoch[key] is True
+          for key in ('expected_negative_commands_added_to_parent','parent_commands_added','host_elf_object_binary_transfer_authorized','tool_dynamic_runtime_closure_verified','escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified','native_execution_verified','windows98_integration_verified','tls_execution_verified'):assert count_epoch[key] is False
+          assert count_epoch['source_input_count_delta']==1 and count_epoch['original_production_and_support_sources_changed'] is False
+          assert count_epoch['parent_command_count_before']==count_epoch['parent_command_count_after']==max(fixture['command_indexes'])+1
+          assert count_epoch['capture_charge_scope']=='native physical captures plus explicit parent-side auxiliary IPC'
+          for key in ('unknown_actor_control_ownership_is_not_production_ownership_attestation','count_epoch_recovery_is_not_production_exit_cause_attestation'):assert count_epoch[key] is True
+          assert count_epoch['capture_payload_bytes']==8 and count_epoch['auxiliary_ipc_bytes_charged_to_parent']==4 and count_epoch['capture_bytes_charged_to_parent']==12 and count_epoch['raw_bytes_charged_to_parent']==0
+          assert x['count_epoch_control_proof_files_before_after_equal'] is True
+          count_paths=[proof/'tmp'/('count-epoch-%02d'%index)/name for index in range(2) for name in ('result.json','control.stdout','control.stderr')]
+          assert len(count_epoch['proof_files'])==6 and [Path(item['path']) for item in count_epoch['proof_files']]==count_paths
+          for item in count_epoch['proof_files']:
+              path=Path(item['path']);assert path==proof/item['relative_path'] and path not in selected
+              pin={k:item[k] for k in ('bytes','sha256','identity')}
+              assert read(path,524288)[1]==pin;selected[path]=pin
           excluded_fixture_binaries={fixture_paths['object'],fixture_paths['elf']}
           assert not excluded_fixture_binaries&{proof/name for name in x['compiled_outputs']}
           for name,pin in x['compiled_outputs'].items():selected[proof/name]=pin
@@ -521,11 +544,13 @@ jobs:
           selected[proof/'cmake/compile_commands.json']=x['compile_commands']
           selected[Path(x['direct_system_CMake_inputs']['path'])]=x['direct_system_CMake_inputs']['manifest']
           for relative,pin in x['source_inputs_before'].items():selected[root/relative]=pin
-          assert len(x['source_inputs_before'])==31 and 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py' in x['source_inputs_before'] and 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py' in x['source_inputs_before']
+          assert len(x['source_inputs_before'])==32 and all('ntwin32/secure_transport/'+name in x['source_inputs_before'] for name in ('native_tls_pidfd_controls_6970.py','native_tls_stale_order_controls_6970.py','native_tls_count_epoch_controls_6970.py'))
           assert pidfd['resource_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_resources_6970.py']
           assert pidfd['control_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_pidfd_controls_6970.py']
           assert stale['resource_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_resources_6970.py']
           assert stale['control_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_stale_order_controls_6970.py']
+          assert count_epoch['resource_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_resources_6970.py']
+          assert count_epoch['control_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_count_epoch_controls_6970.py']
           for path,pin in x['source_copies_before'].items():selected[Path(path)]=pin
           selected[root/'LICENSE']=read(root/'LICENSE',1048576)[1]
           upstream=json.loads(read(prep/'upstream-preparation.json',2097152)[0])
@@ -540,8 +565,8 @@ jobs:
                   path=proof/(c['label']+'.'+stream);data,pin=read(path,262144)
                   assert pin['sha256']==c['captured_sha256'][stream]
                   capture_total+=len(data);selected[path]=pin
-          control_capture_total=control_raw_total=0
-          assert len(controls['cases'])==10 and len(pidfd['cases'])==5 and len(stale['cases'])==2
+          control_capture_total=control_raw_total=control_auxiliary_ipc_total=0
+          assert len(controls['cases'])==10 and len(pidfd['cases'])==5 and len(stale['cases'])==len(count_epoch['cases'])==2
           old_last=controls['cases'][-1]
           old_capture_end=old_last['capture_pool_offset']+old_last['capture_pool_delta']
           old_decoder_end=old_last['decoder_pool_offset']+old_last['decoder_pool_delta']
@@ -553,9 +578,153 @@ jobs:
           pidfd_last=pidfd['cases'][-1]
           assert stale['cases'][0]['capture_pool_offset']==pidfd_last['capture_pool_offset']+pidfd_last['capture_pool_delta']
           assert stale['cases'][0]['decoder_pool_offset']==pidfd_last['decoder_pool_offset']+pidfd_last['decoder_pool_delta']
-          for group in (controls,pidfd,stale):
+          stale_last=stale['cases'][-1]
+          assert count_epoch['cases'][0]['capture_pool_offset']==stale_last['capture_pool_offset']+stale_last['capture_pool_delta']
+          assert count_epoch['cases'][0]['decoder_pool_offset']==stale_last['decoder_pool_offset']+stale_last['decoder_pool_delta']
+          def count_canonical(value):
+              return json.dumps(value,sort_keys=True,separators=(',',':')).encode()
+          def count_digest(value):return hashlib.sha256(count_canonical(value)).hexdigest()
+          def count_row(row):
+              assert set(row)=={'pid','ppid','startticks','pgrp','session','uid','state'}
+              assert all(type(row[key]) is int and row[key]>=0 for key in ('pid','ppid','startticks','pgrp','session','uid'))
+              assert row['pid']>0 and row['uid']==os.getuid()
+          def count_token(row):return [row[key] for key in ('pid','startticks','pgrp','session','uid')]
+          def count_snapshot(value,states,stable,reference=None,transition=False):
+              assert set(value)=={'leader','members','tasks','stable'} and value['stable'] is stable
+              assert len(value['members'])==len(value['tasks'])==2
+              members={row['pid']:row for row in value['members']};tasks={row['pid']:row for row in value['tasks']}
+              assert len(members)==2 and set(tasks)==set(members) and value['leader']==members[value['leader']['pid']]
+              for row in members.values():
+                  count_row(row);assert row['pgrp']==row['session']==value['leader']['pid'] and row['state'] in states[row['pid']]
+                  if reference is not None:
+                      assert set(row)==set(reference[row['pid']])
+                      for key,expected in reference[row['pid']].items():
+                          if key!='state':assert row[key]==expected
+                  task=tasks[row['pid']];assert set(task)==set(row)|{'tid'} and task['tid']==row['pid'] and task['state'] in states[row['pid']]
+                  for key,expected in row.items():
+                      if key!='state' or not transition:assert task[key]==expected
+              return members
+          def count_summary(value):
+              return {'canonical_full_snapshot_sha256':count_digest(value),'stable':value['stable'],'all_members_and_tasks_T_or_Z':all(row['state'] in ('T','Z') for row in value['members']+value['tasks']),'member_count':len(value['members']),'task_count':len(value['tasks'])}
+          def seal_count_case(case,child,data,index,child_path):
+              positive=index==0;observation=case['observation'];command=child['commands'][0];q=command['quiescence']
+              assert child_path==proof/'tmp'/('count-epoch-%02d'%index)/'result.json' and child['schema']=='native-tls-count-epoch-control-child-6970-v1'
+              assert len(data)==case['child_receipt_bytes'] and child['actual_control_observation']==observation
+              assert child['reserve_bytes']==reserve and child['output_limit_bytes']==limit and child['receipt_limit_bytes']==1048576 and child['capture_limit_bytes_aggregate']==262144
+              assert child['minimum_observed_free_bytes']>=reserve and child['available_at_receipt_bytes']>=reserve+limit
+              assert child['final_output_bytes']==sum(selected[path]['bytes'] for path in count_paths if path.parent==child_path.parent)<=limit
+              assert child['output_bytes_before_receipt']==child['final_output_bytes']-len(data) and child['command_records_retained'] is True
+              assert child['control_capture_accounting_scope']=='inherited global normal pool: physical native captures plus explicit auxiliary IPC'
+              assert child['auxiliary_ipc_bytes']==case['auxiliary_ipc_bytes']==observation['auxiliary_ipc_bytes']==2
+              for key in ('native_execution_verified','windows98_integration_verified','tls_execution_verified'):assert child[key] is False
+              model=child['resource_model']
+              assert model['profile_command_timeout_limit_seconds']==360 and model['group_stop_confirmation_limit_seconds']==1
+              assert model['owned_group_quiescent_observations_required'] is True and model['command_wall_time_includes_group_pauses'] is True
+              for key in ('PPID_is_birth_token','outside_group_parents_signalled','numeric_PID_STOP_fallback','continuous_group_stop_verified','unmanaged_or_escaped_writers_excluded_verified','pending_asynchronous_kernel_writes_excluded_verified','filesystem_quota_verified','continuous_minimum_free_verified','all_transient_or_unlinked_file_peaks_observed','implicit_backend_runtime_attestation_verified'):assert model[key] is False
+              assert case['expected_command_count']==case['command_count']==1 and child['expected_negative'] is (not positive)
+              assert case['expected_child_epoch']==('PASS_CONTROL_CHILD' if positive else 'FAIL') and case['injected_fault'] is (not positive) and case['stop_request_expected'] is True
+              assert child['injected_fault'] is (not positive) and child['stop_request_expected'] is True and child['fixture_elf_sha256']==fixture['elf']['sha256']
+              assert child['observed_control_error'] is None and child['expected_fault_observed']==case['observed_error'] and child['source_flags_are_not_readiness_attestation'] is True and 0<=case['elapsed_seconds']<=5
+              assert observation['observed_fork_ppid_ready'] is True and observation['ready_before_any_stop'] is True
+              assert observation['fault_boundary_exercised'] is True and observation['actor_reaped_before_original_numeric_read'] is True and observation['known_child_scan_after_fault_verified'] is True
+              assert observation['early_production_CONT_requests']==observation['nested_traversals_at_fault']==observation['production_continue_requests_at_fault']==observation['production_CONT_at_fault']==0
+              for key in ('unknown_actor_control_ownership_is_not_production_ownership_attestation','count_epoch_recovery_is_not_production_exit_cause_attestation'):assert observation[key] is True
+              for key in ('snapshot_or_row_fabricated','syscall_result_modified','resource_counter_modified','whole_group_stayed_stopped_after_intentional_fault_verified'):assert observation[key] is False
+              ready=observation['readiness_snapshot'];leader=ready['leader'];leader_pid=leader['pid']
+              ready_members=count_snapshot(ready,{row['pid']:('S','R') for row in ready['members']},True)
+              assert count_digest(ready)==observation['readiness_sha256']
+              child_pid=next(pid for pid in ready_members if pid!=leader_pid);assert ready_members[child_pid]['ppid']==leader_pid
+              ref=observation['reference_snapshot'];members=count_snapshot(ref,{pid:('T','Z') for pid in ready_members},True,ready_members)
+              assert count_digest(ref)==observation['reference_sha256'] and command['owned_pid']==leader_pid
+              bad=observation['invalidated_postcount_snapshot'];changed=count_snapshot(bad,{leader_pid:('T','Z') if positive else ('T',),child_pid:('T','Z') if positive else ('S','R')},False,members,transition=not positive)
+              assert bad['leader']==ref['leader'] and count_digest(bad)==observation['invalidated_postcount_sha256']
+              actor=observation['auxiliary_actor'];assert actor['schema']=='native-tls-count-epoch-actor-6970-v1'
+              initial,actor_ready=actor['initial_row'],actor['ready_row'];count_row(initial);count_row(actor_ready)
+              assert actor['pid']==initial['pid']==actor_ready['pid'] and actor['controller_pid']==initial['ppid']==actor_ready['ppid']==leader['ppid']
+              assert all(initial[key]==actor_ready[key] for key in ('pid','ppid','startticks','uid'))
+              assert actor_ready['pgrp']==actor_ready['session']==actor['pid'] and actor_ready['state'] in ('S','R') and actor['birth_token']==count_token(actor_ready)
+              for key in ('pidfd_bound_before_ready','pidfd_close_on_exec_verified','ready_before_native_spawn','outside_group_verified','lexical_before_owned_child'):assert actor[key] is True
+              assert actor['pidfd_flags']==0 and actor['lifetime_seconds']==5 and 0<=actor['spawned_at_monotonic']<=actor['deadline_monotonic']<=actor['spawned_at_monotonic']+5
+              assert actor['pid'] not in members and actor_ready['pgrp']!=leader_pid and actor_ready['session']!=leader_pid and str(actor['pid'])<str(child_pid)
+              exited,cleanup=actor['exit_observed'],actor['cleanup']
+              assert exited=={'si_pid':actor['pid'],'si_code':os.CLD_EXITED,'si_status':0,'nonreaped':True,'options':os.WEXITED|os.WNOHANG|os.WNOWAIT,'option_names':['WEXITED','WNOHANG','WNOWAIT']}
+              for key in ('group_identity_checked_before_kill','kill_before_reap','reaped','pipe_fds_closed','pidfd_closed'):assert cleanup[key] is True
+              assert cleanup['pidfd_kill_requested'] is False and cleanup['waitpid_pid']==actor['pid'] and cleanup['waitpid_status']==cleanup['waitpid_exitcode']==0
+              assert (cleanup['group_kill'],cleanup['kill_errno']) in (('REQUESTED_BEFORE_REAP',None),('NO_SUCH_GROUP_BEFORE_REAP',3))
+              metadata=observation['actual_scan_instability'];events=metadata['events'];assert len(events)==1
+              event=events[0];assert set(event)=={'pid','reason','classification','absence_exception_class','absence_errno'}
+              assert event['pid']==actor['pid'] and event['reason']=='numeric_process_or_task_disappeared' and event['classification']=='before_group_classification_unknown'
+              assert type(event['absence_errno']) is int and (event['absence_exception_class'],event['absence_errno']) in (('FileNotFoundError',2),('ProcessLookupError',3))
+              assert metadata=={'scope':'last_actual_numeric_proc_scan','total_events':1,'classification_counts':{'before_group_classification_unknown':1},'events':[event],'events_truncated':False}
+              assert observation['actual_actor_numeric_absence']=={'pid':actor['pid'],'exception_class':event['absence_exception_class'],'errno':event['absence_errno'],'original_reader_forwarded':True,'source':'scanner'}
+              reads=observation['scanned_numeric_reads'];assert len(reads)==2
+              first,last=reads;assert first['source']==last['source']=='scanner' and type(first['ordinal']) is type(last['ordinal']) is int and 0<first['ordinal']<last['ordinal']
+              assert first=={'source':'scanner','ordinal':first['ordinal'],'pid':actor['pid'],'tasks':False,'after_fault':False,'actor_fault_boundary':True,'row':None}
+              assert set(last)=={'source','ordinal','pid','tasks','after_fault','actor_fault_boundary','row'} and last['pid']==child_pid and last['tasks'] is False and last['after_fault'] is True and last['actor_fault_boundary'] is False
+              count_row(last['row']);assert count_token(last['row'])==count_token(members[child_pid]) and last['row']['ppid']==leader_pid
+              if positive:assert last['row']==changed[child_pid]
+              else:assert last['row']['state'] in ('S','R')
+              assert q['stop_signal_model']=='pidfd-process-parent-first-flags0-v1' and q['observation_row_schema']=='owned-process-task-ppid-v2' and q['pidfd_stop_requests']>0 and q['verified_pauses']>0
+              for key in ('escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified'):assert q[key] is False
+              for key in ('count_epoch_discarded_counts','count_epoch_recounts_started','count_epoch_reconfirmed_pairs','count_epoch_unknown_pair_resets'):assert type(q[key]) is int and q[key]>=0
+              start,end=observation['target_pause_started_at_monotonic'],observation['target_deadline_monotonic']
+              assert 0<=start<=end<=start+1 and type(observation['target_pause_attempt']) is int and observation['target_pause_attempt']>0
+              assert actor['spawned_at_monotonic']<=start and observation['first_count_value']==observation['discarded_count_value'] and type(observation['discarded_count_value']) is int and observation['discarded_count_value']>=0
+              if positive:
+                  assert bad==dict(ref,stable=False) and observation['injected_fault_count']==0 and observation['fault_pidfd_CONT'] is None and observation['helper_poll_observations']==[]
+                  assert observation['target_completed_traversals']==observation['actual_count_calls']==2 and observation['target_production_CONT_requests']==1
+                  assert observation['production_CONT_at_recount_start']==observation['production_continue_requests_at_recount']==0
+                  assert type(observation['pidfd_STOP_requests_at_fault']) is int and observation['pidfd_STOP_requests_at_fault']>0
+                  assert observation['pidfd_STOP_requests_at_fault']==observation['pidfd_STOP_requests_at_recount']==observation['pidfd_STOP_requests_at_accepted_postcount']
+                  assert type(observation['accepted_count_value']) is int and observation['accepted_count_value']>=0 and observation['recount_value']==observation['accepted_count_value']
+                  assert observation['counted_values']==[observation['discarded_count_value'],observation['accepted_count_value']]
+                  assert q['count_epoch_discarded_counts']==q['count_epoch_recounts_started']==q['count_epoch_reconfirmed_pairs']==1 and q['count_epoch_unknown_pair_resets']==0
+                  assert q['continue_requests']>0 and q['failure_stop_retained_until_owned_kill'] is False and q['failure_observation'] is None and child['resource_failure'] is None
+                  assert case['expected_negative_reason'] is None and case['observed_error'] is None and command['returncode']==0 and command['aborted'] is None
+                  diag=q['last_count_epoch_discard'];assert diag['schema']=='owned-count-epoch-discard-6970-v1' and diag['scope']=='discarded_count_epoch_numeric_metadata_only'
+                  assert diag['discarded_count_value']==observation['discarded_count_value'] and diag['actual_scan_instability']=={'matches_returned_snapshot':True,'metadata':metadata}
+                  assert diag['known_rows_exactly_equal'] is True and diag['unknown_process_ownership_verified'] is False
+                  for key in ('discarded_count_value_returned','discarded_count_epoch_accepted','complete_reconfirmation_history_retained','additional_STOP_sent_for_reconfirmation','CONT_sent_between_count_epochs','unknown_PID_signalled_waited_or_reaped','minimum_free_or_peak_rolled_back','producer_cause_verified','kernel_cause_verified','historical_escape_cause_verified','continuous_group_stop_verified'):assert diag[key] is False
+                  assert diag['reference_snapshot']==count_summary(ref) and diag['invalidated_postcount_snapshot']==count_summary(bad)
+                  assert diag['diagnostic_row_limit']==8 and diag['diagnostic_byte_limit']==16384 and len(count_canonical(diag))<=16384
+                  sampled=[{'kind':kind,'row':row} for kind in ('members','tasks') for row in ref[kind]]
+                  assert diag['sampled_rows']==sampled and diag['sampled_row_total']==4 and diag['sampled_rows_truncated'] is False and len(sampled)+len(events)<=8
+                  assert diag['sampled_numeric_rows_and_instability_events_share_limit'] is True
+                  assert diag['pause_started_at_monotonic']==start and diag['pause_deadline_monotonic']==diag['count_epoch_deadline_monotonic']==end<=diag['command_deadline_monotonic']
+                  assert diag['pause_attempt']==observation['target_pause_attempt'] and start<=diag['discarded_at_monotonic']<=end and diag['unknown_pair_reset_count']==0
+                  pair=observation['reconfirmed_snapshots'];actual_pair=diag['reconfirmed_pair'];assert len(pair)==len(actual_pair)==2
+                  empty={'matches_returned_snapshot':True,'metadata':{'scope':'last_actual_numeric_proc_scan','total_events':0,'classification_counts':{},'events':[],'events_truncated':False}}
+                  previous=diag['discarded_at_monotonic']
+                  for item,actual_item in zip(pair,actual_pair):
+                      assert set(item)=={'snapshot','sha256','completed_at_monotonic'} and item['snapshot']==ref and item['sha256']==count_digest(ref)
+                      count_snapshot(item['snapshot'],{pid:('T','Z') for pid in members},True,members)
+                      assert previous<=item['completed_at_monotonic']<=actual_item['completed_at_monotonic']<=end
+                      assert actual_item['snapshot']==count_summary(ref) and actual_item['actual_scan_instability']==empty
+                      previous=actual_item['completed_at_monotonic']
+                  assert previous<=diag['recount_started_at_monotonic']<=diag['accepted_postcount_at_monotonic']<=end
+                  accepted=observation['accepted_postcount_snapshot'];assert accepted==ref and count_digest(accepted)==observation['accepted_postcount_sha256']
+                  count_snapshot(accepted,{pid:('T','Z') for pid in members},True,members);assert diag['accepted_postcount_snapshot']==count_summary(accepted)
+              else:
+                  reason='owned group changed or resumed during recursive observation'
+                  assert case['expected_negative_reason']==reason and reason in case['observed_error'] and reason in command['aborted'] and reason in child['resource_failure']
+                  assert command['returncode']==-9 and command['group_kill']=='REQUESTED_BEFORE_REAP' and q['failure_stop_retained_until_owned_kill'] is True
+                  assert q['continue_requests']==0 and q['last_count_epoch_discard'] is None and all(q[key]==0 for key in ('count_epoch_discarded_counts','count_epoch_recounts_started','count_epoch_reconfirmed_pairs','count_epoch_unknown_pair_resets'))
+                  assert observation['target_completed_traversals']==observation['actual_count_calls']==1 and observation['target_production_CONT_requests']==0 and observation['injected_fault_count']==1
+                  assert observation['recount_value'] is None and observation['accepted_count_value'] is None and observation['production_CONT_at_recount_start'] is None and observation['production_continue_requests_at_recount'] is None
+                  assert type(observation['pidfd_STOP_requests_at_fault']) is int and observation['pidfd_STOP_requests_at_fault']>0 and observation['pidfd_STOP_requests_at_recount'] is None and observation['pidfd_STOP_requests_at_accepted_postcount'] is None
+                  assert observation['counted_values']==[observation['discarded_count_value']] and observation['reconfirmed_snapshots']==[] and observation['accepted_postcount_snapshot'] is None and observation['accepted_postcount_sha256'] is None
+                  fault=observation['fault_pidfd_CONT'];assert fault=={'pid':child_pid,'birth_token':count_token(members[child_pid]),'childbirth_token_before':count_token(members[child_pid]),'childbirth_token_after':count_token(members[child_pid]),'signal':18,'flags':0,'process_targeted':True,'retained_pidfd_birth_verified':True,'accepted_actual_send':True,'production_CONT':False}
+                  polls=observation['helper_poll_observations'];assert len(polls)==1 and polls[0]['source']=='helper_poll'
+                  poll=polls[0];assert start<=poll['completed_at_monotonic']<=end
+                  for pid,row,task_rows,states in ((leader_pid,poll['leader_row'],poll['leader_tasks'],('T',)),(child_pid,poll['child_row'],poll['child_tasks'],('S','R'))):
+                      count_row(row);assert count_token(row)==count_token(members[pid]) and row['ppid']==members[pid]['ppid'] and row['state'] in states and len(task_rows)==1
+                      task=task_rows[0];assert set(task)==set(row)|{'tid'} and task['tid']==pid and task['state'] in states
+                      for key,value in row.items():
+                          if key!='state':assert task[key]==value
+              return observation
+          for group in (controls,pidfd,stale,count_epoch):
               previous_capture=previous_decoder=None
-              group_capture_total=group_raw_total=0
+              group_capture_total=group_raw_total=group_auxiliary_ipc_total=0
               for case_index,case in enumerate(group['cases']):
                   assert case['result']=='PASS' and case['executed'] is True
                   child_path=Path(case['child_receipt_path']);assert child_path in selected
@@ -673,6 +842,8 @@ jobs:
                           actual_child=next(row for row in actual_snapshot['members'] if row['pid']==child_pid)
                           assert actual_child['ppid']==leader['pid'] and actual_child['state'] in ('S','R')
                           assert returned_snapshot=={'leader':actual_snapshot['leader'],'members':[row for row in actual_snapshot['members'] if row['pid']!=child_pid],'tasks':[row for row in actual_snapshot['tasks'] if row['pid']!=child_pid],'stable':True}
+                  elif group is count_epoch:
+                      observation=seal_count_case(case,child,data,case_index,child_path)
                   assert child['inherited_parent_capture_bytes']==case['capture_pool_offset']
                   assert child['inherited_parent_decoder_bytes']==case['decoder_pool_offset']
                   if previous_capture is not None:assert case['capture_pool_offset']==previous_capture and case['decoder_pool_offset']==previous_decoder
@@ -773,6 +944,9 @@ jobs:
                               assert diagnostic['process_absence_observed'] is True and diagnostic['current_row'] is None
                               assert diagnostic['absence_exception_class'] in ('FileNotFoundError','ProcessLookupError') and type(diagnostic['absence_errno']) is int
                               assert diagnostic['absence_errno']=={'FileNotFoundError':2,'ProcessLookupError':3}[diagnostic['absence_exception_class']]
+                      elif group is count_epoch:
+                          assert argv==[str(fixture_paths['elf']),'reap' if case_index==0 else 'reap-live'] and actual['label']=='control' and actual['raw_stdout_stream'] is False
+                          assert bytes.fromhex(payload['stdout_hex'])==(b'REAP_OK\n' if case_index==0 else b'') and bytes.fromhex(payload['stderr_hex'])==b''
                       if case['expected_child_epoch']=='FAIL':
                           assert actual['returncode']==-9 and actual['reaped'] is True and actual['group_kill']=='REQUESTED_BEFORE_REAP' and actual['aborted']
                           q=actual['quiescence']
@@ -796,21 +970,35 @@ jobs:
                           assert len(value)==actual['full_stdout_bytes'] and hashlib.sha256(value).hexdigest()==actual['full_stdout_sha256']
                           assert case['stream_consumer_raised_before_delivery_commit'] is True and actual['stdout_delivered_to_consumer_bytes']==0
                           case_capture+=len(value);case_raw+=len(value)
+                  if group is count_epoch:
+                      ipc=observation['auxiliary_ipc']
+                      assert len(ipc)==2 and observation['auxiliary_ipc_bytes']==2
+                      for item,operation,key,value in zip(ipc,('read-ready','write-exit'),('observed_hex','delivered_hex'),(b'R',b'E')):
+                          assert set(item)=={'operation','bytes','sha256',key,'normal_pool_charge_bytes'}
+                          assert item['operation']==operation and item['bytes']==item['normal_pool_charge_bytes']==1 and item[key]==value.hex()
+                          assert item['sha256']==hashlib.sha256(value).hexdigest()
+                      # Auxiliary R-read/E-write are actual IPC charges, not
+                      # retained stdout or a second charge for the child E-read.
+                      assert case_capture==(8 if case_index==0 else 0)
+                      case_capture+=2;group_auxiliary_ipc_total+=2
                   assert case_capture==case['capture_pool_delta']==child['control_capture_pool_delta']
                   assert case_raw==case['decoder_pool_delta']==child['control_decoder_pool_delta']
                   previous_capture=case['capture_pool_offset']+case_capture
                   previous_decoder=case['decoder_pool_offset']+case_raw
                   assert previous_capture==child['captured_normal_bytes'] and previous_decoder==child['decoder_observed_bytes']
                   group_capture_total+=case_capture;group_raw_total+=case_raw
-              assert group_capture_total==group['capture_bytes_charged_to_parent']==group['capture_payload_bytes']<=4096
+              if group is count_epoch:
+                  assert group_capture_total==group['capture_bytes_charged_to_parent']==12<=4096
+                  assert group['capture_payload_bytes']==8 and group_auxiliary_ipc_total==group['auxiliary_ipc_bytes_charged_to_parent']==4
+              else:assert group_capture_total==group['capture_bytes_charged_to_parent']==group['capture_payload_bytes']<=4096
               assert group_raw_total==group['raw_bytes_charged_to_parent']<=4096
-              if group is pidfd or group is stale:assert group_raw_total==0
-              control_capture_total+=group_capture_total;control_raw_total+=group_raw_total
-          assert control_capture_total<=12288 and control_raw_total<=8192
+              if group is pidfd or group is stale or group is count_epoch:assert group_raw_total==0
+              control_capture_total+=group_capture_total;control_raw_total+=group_raw_total;control_auxiliary_ipc_total+=group_auxiliary_ipc_total
+          assert control_capture_total<=12288+12 and control_raw_total<=8192 and control_auxiliary_ipc_total==4
           assert capture_total+control_capture_total==x['captured_normal_bytes']<=262144
           assert not excluded_fixture_binaries&set(selected)
-          retained_child_paths={Path(item['path']) for group in (controls,pidfd,stale) for item in group['proof_files'] if Path(item['path']).name in ('result.json','control.stdout','control.stderr')}
-          assert len(retained_child_paths)==47
+          retained_child_paths={Path(item['path']) for group in (controls,pidfd,stale,count_epoch) for item in group['proof_files'] if Path(item['path']).name in ('result.json','control.stdout','control.stderr')}
+          assert len(retained_child_paths)==53
           assert sum(selected[path]['bytes'] for path in retained_child_paths|{fixture_paths['source'],fixture_paths['map']})<=524288
           entries={}
           for path,pin in sorted(selected.items()):
@@ -832,7 +1020,8 @@ jobs:
               'closed_build_receipt':receipt_pin,'original_closed_output_bytes':before,
               'proof_limit_bytes':limit,'maximum_new_manifest_bytes':524288,
               'host_control_compiled_outputs_excluded':sorted(str(path.relative_to(root)) for path in excluded_fixture_binaries),
-              'host_control_binary_transfer_authorized':False,'retained_child_text_count':47,'pidfd_fixture_text_count':2,
+              'host_control_binary_transfer_authorized':False,'retained_child_text_count':53,'pidfd_fixture_text_count':2,
+              'auxiliary_control_IPC_normal_charge_bytes':4,'auxiliary_control_IPC_is_native_stdout':False,
               'source_committed_blobs_independently_queried':False,
               'native_execution_verified':False,'TLS_negotiation_verified':False,'NAS_binary_admission':False}
           data=(json.dumps(manifest,sort_keys=True,separators=(',',':'))+'\n').encode();assert len(data)<=524288 and before+len(data)<=limit
