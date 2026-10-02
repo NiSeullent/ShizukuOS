@@ -182,7 +182,9 @@ def grant(report):
 
 def parse_flatview(text):
     """Complete bounded system FlatView; ECAM is observed, never guessed."""
-    need(type(text) is str and 0 < len(text.encode()) <= MAX_QMP and text.endswith('\n\n') and '\r' not in text, 'complete bounded FlatView required')
+    need(type(text) is str and 0 < len(text.encode()) <= MAX_QMP, 'bounded FlatView required')
+    text = text.replace('\r\n', '\n')
+    need(text.endswith('\n\n') and '\r' not in text, 'complete bounded FlatView required')
     sections, current = [], None
     for line in text.splitlines():
         if re.fullmatch(r'FlatView #[0-9]+', line):
@@ -200,14 +202,14 @@ def parse_flatview(text):
     need(len(selected) == 1 and selected[0]['spaces'].count(('memory', 'system')) == 1 and selected[0]['root'] == 'system', 'unique complete memory/system view required')
     rows = selected[0]['rows']; need(1 <= len(rows) <= 4096, 'FlatView row cap')
     entries, ram, ecam = [], [], []
-    pattern = r'  ([0-9a-f]{16})-([0-9a-f]{16}) \(prio (-?[0-9]+), ((?:nv-)?(?:ram|rom|ramd|romd|i/o))\): (.{1,256}?)(?: @([0-9a-f]{16}))?((?: (?:kvm|tcg))*)'
+    pattern = r'  ([0-9a-f]{16})-([0-9a-f]{16}) \(prio (-?[0-9]+), ((?:nv-)?(?:ram|rom|ramd|romd|i/o))\): (.{1,256}?)(?: @([0-9a-f]{16}))?((?: (?:kvm|tcg|KVM|TCG))*)'
     for line in rows:
         m = re.fullmatch(pattern, line); need(m is not None, 'unrecognized selected FlatView row')
         start, end = int(m[1], 16), int(m[2], 16) + 1
         need(start < end <= 1 << 64 and (not entries or start >= entries[-1][1]) and abs(int(m[3])) <= 1 << 31, 'unordered/overlapping FlatView range')
         kind, name = m[4], m[5]; entries.append((start, end, kind, name))
         if name == 'pc.ram': ram.append((start, end))
-        if name == 'pcie-mmcfg' and kind == 'i/o': ecam.append((start, end))
+        if name in ('pcie-mmcfg', 'pcie-mmcfg-mmio') and kind == 'i/o': ecam.append((start, end))
     need(ram and len(ecam) == 1 and ecam[0][0] % (1 << 20) == 0 and 1 << 20 <= ecam[0][1] - ecam[0][0] <= 256 << 20, 'observed bounded ECAM and RAM required')
     return {'entries': tuple(entries), 'ram': tuple(ram), 'ecam': ecam[0]}
 
