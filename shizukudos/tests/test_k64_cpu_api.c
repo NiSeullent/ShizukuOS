@@ -37,6 +37,8 @@ extern uint32_t sched_cpu_identity(void) __attribute__((weak));
 extern uint64_t sched_cpu_online_mask(void) __attribute__((weak));
 extern int sched_cpu_register(uint32_t) __attribute__((weak));
 #include "../kernel64/sched.c"
+#define ready (runqueues.cpu[0].ready)
+#define ready_count (runqueues.cpu[0].ready_count)
 /* Real provider executes CPUID against a private immutable-map fixture. Only
  * topology setup is modeled; no duplicate CPU-ID body or fake AP execution. */
 #include "../kernel64/smp_boot.c"
@@ -53,6 +55,8 @@ int ntdrv_gs_all;
 uint64_t kernel_pml4(void) {return 0x1000;}
 uint64_t proc_pml4(process_t *p) {(void)p;return 0x1000;}
 void tss_set_rsp0(uint64_t t) {(void)t;}
+int arch_sched_entry_bind(uint32_t cpu,uint64_t top) {(void)cpu;(void)top;return 0;}
+int arch_sched_entry_set_stack(uint32_t cpu,uint64_t top) {(void)cpu;(void)top;return 0;}
 void switch_stacks(uint64_t *s,uint64_t t) {
     (void)t;++switches_seen;thread_t *old=runqueues.cpu[0].outgoing;uint32_t ticket;
     int unlocked=pma_ticket_trylock(&runqueues.lock,&ticket);
