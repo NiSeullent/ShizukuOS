@@ -348,10 +348,10 @@ static DWORD policy_size(PROCESS_MITIGATION_POLICY p)
 
 K32API BOOL WINAPI GetProcessMitigationPolicy(HANDLE h, PROCESS_MITIGATION_POLICY policy, PVOID buf, SIZE_T len)
 {
-    ULONG v[6];
+    NTSTATUS st;
     const DWORD want = policy_size(policy);
     if (!buf || want == (DWORD)-1) return fail_err(ERROR_INVALID_PARAMETER);
-    if (!process_info(h, v)) return FALSE;
+    if ((st = NtShzQueryK32(K32Q_PROCESS_QUERY_ACCESS, h, 0, 0, 0))) return fail_st(st);
     if (policy == ProcessMitigationOptionsMask) {         /* the mitigation options this system can apply: none */
         if (len != 8 && len != 16) return fail_err(ERROR_INVALID_PARAMETER);
         memset(buf, 0, len);
@@ -653,25 +653,29 @@ K32API BOOL WINAPI Module32NextW(HANDLE h, LPMODULEENTRY32W me) { return module_
 /* ---------------------------------------------------------------- PSAPI */
 K32API DWORD WINAPI K32GetMappedFileNameW(HANDLE h, LPVOID addr, LPWSTR buf, DWORD size)
 {
-    ULONG v[6], count = 0, i;
-    k_mod *mods;
+    SHZ_K32_MAPPED_FILE_PATH mapping;
+    NTSTATUS st;
     WCHAR path[400];
-    DWORD n = 0;
+    DWORD n;
     if (!buf || !size) { shz_set_last_error(ERROR_INVALID_PARAMETER); return 0; }
-    if (!process_info(h, v)) return 0;
-    mods = query_list(K32Q_MODULE_LIST, (HANDLE)(ULONG_PTR)(v[2] == GetCurrentProcessId() ? 0 : v[2]), sizeof(k_mod), &count);
-    if (!mods) return 0;
-    for (i = 0; i < count; ++i)
-        if ((ULONG_PTR)addr >= mods[i].base && (ULONG_PTR)addr < mods[i].base + mods[i].size) break;
-    if (i < count && format_path(mods[i].path, 1, path, 400) > 0) {
+    memset(&mapping, 0, sizeof mapping);
+    mapping.address = (ULONG64)(ULONG_PTR)addr;
+    if ((st = NtShzQueryK32(K32Q_MAPPED_FILE_PATH, h, &mapping, sizeof mapping, 0))) {
+        shz_set_last_error(k32_nt_error(st)); return 0;
+    }
+    if (mapping.path[0] && format_path(mapping.path, 1, path, 400) > 0) {
         n = (DWORD)k32_wlen(path);
-        if (n >= size) n = size - 1;                      /* truncated, like Windows */
+        if (n >= size) {
+            memcpy(buf, path, (size - 1) * sizeof(WCHAR));
+            buf[size - 1] = 0;
+            shz_set_last_error(ERROR_INSUFFICIENT_BUFFER);
+            return size;
+        }
         memcpy(buf, path, n * sizeof(WCHAR));
         buf[n] = 0;
+        return n;
     }
-    RtlFreeHeap(ShzProcessHeap(), 0, mods);
-    if (i < count) return n;
-    if (v[2] == GetCurrentProcessId()) {
+    if (mapping.pid == GetCurrentProcessId()) {
         MEMORY_BASIC_INFORMATION mbi;
         /* no file is mapped there: free address space (STATUS_INVALID_ADDRESS) or private memory (STATUS_FILE_INVALID) */
         if (VirtualQuery(addr, &mbi, sizeof mbi) && mbi.State == MEM_FREE) { shz_set_last_error(ERROR_UNEXP_NET_ERR); return 0; }

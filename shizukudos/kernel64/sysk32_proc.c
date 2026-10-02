@@ -31,7 +31,8 @@ extern int ldr_module_at(process_t *p, unsigned index, uint64_t *base, uint64_t 
 /* query classes (NtShzQueryK32) and set classes (NtShzSetK32); the same numbers are in win64/include/nt.h */
 enum { K32Q_THREAD_TIMES = 1, K32Q_PROCESS_TIMES = 2, K32Q_PROCESS_INFO = 3, K32Q_PROCESS_LIST = 4, K32Q_MODULE_LIST = 5,
        K32Q_SYSTEM_PERF = 7, K32Q_PROCESS_MEMORY = 8, K32Q_WORKING_SET_EX = 9, K32Q_IMAGE_PATH = 10, K32Q_FIRMWARE = 11,
-       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13, K32Q_CPU_CLOCK = 14, K32Q_SAME_OBJECT = 15, K32Q_THREAD_NAME = 16 };
+       K32Q_THREAD_SETTINGS = 12, K32Q_PROCESS_SETTINGS = 13, K32Q_CPU_CLOCK = 14, K32Q_SAME_OBJECT = 15, K32Q_THREAD_NAME = 16,
+       K32Q_PROCESS_QUERY_ACCESS = 17, K32Q_MAPPED_FILE_PATH = 18 };
 enum { K32S_PRIORITY_CLASS = 1, K32S_THREAD_BOOST = 2, K32S_THREAD_MEM_PRIORITY = 3, K32S_DISCARD = 4, K32S_LOCK = 5,
        K32S_UNLOCK = 6, K32S_PREFETCH = 7, K32S_THREAD_POWER = 8, K32S_PROCESS_MEM_PRIORITY = 9, K32S_PROCESS_POWER = 10,
        K32S_SUSPEND_PROCESS = 11, K32S_RESUME_PROCESS = 12, K32S_THREAD_NAME = 13, K32S_PROCESS_AFFINITY = 14 };
@@ -394,6 +395,8 @@ static int32_t mem_op(process_t *p, uint32_t cls, uint64_t base, uint64_t size)
 /* ---------------------------------------------------------------- queries */
 struct proc_entry { uint32_t pid, ppid, threads, priority_class; char name[32]; };
 struct mod_entry { uint64_t base, size; char name[48]; char path[128]; };
+struct mapped_file_path { uint64_t address; uint32_t pid, reserved; char path[256]; };
+_Static_assert(sizeof(struct mapped_file_path) == 272, "mapped-file query packet ABI");
 
 static void copy_str(char *dst, const char *src, unsigned cap)
 {
@@ -446,6 +449,45 @@ static int32_t query_modules(process_t *cur, process_t *p, uint64_t buf, uint64_
         if (copy_to_user(cur, buf + (uint64_t)k++ * sizeof e, &e, sizeof e)) return STATUS_ACCESS_VIOLATION;
     }
     return STATUS_SUCCESS;
+}
+
+/* Loaded-image mappings only. Own the path bytes while the referenced process
+ * and its module list are protected by the UP interrupt guard. */
+static int32_t query_mapped_file_path(process_t *cur, uint64_t h, uint64_t buf, uint64_t len, uint64_t retlen)
+{
+    struct mapped_file_path v;
+    process_t *p;
+    kobject_t *o;
+    uint64_t f, base, size;
+    const char *name, *path;
+    unsigned i;
+    int32_t st = ref_query_object(cur, h, OB_PROCESS, PROCESS_QUERY_INFORMATION, &o);
+    if (st) return st;
+    memset(&v, 0, sizeof v);
+    if (len < sizeof v) {
+        ob_deref(o);
+        return put_out(cur, buf, len, retlen, &v, sizeof v);
+    }
+    if (copy_from_user(cur, &v.address, buf, sizeof v.address)) {
+        ob_deref(o); return STATUS_ACCESS_VIOLATION;
+    }
+    f = irq_save();
+    p = o->u.proc.p;
+    if (!p || !p->used || p->object != o) {
+        irq_restore(f); ob_deref(o); return STATUS_INVALID_HANDLE;
+    }
+    v.pid = (uint32_t)p->pid;
+    if (!p->terminated && !p->teardown) {
+        for (i = 0; ldr_module_at(p, i, &base, &size, &name, &path) == 0; ++i) {
+            if (v.address >= base && v.address - base < size) {
+                copy_str(v.path, path, sizeof v.path);
+                break;
+            }
+        }
+    }
+    irq_restore(f);
+    ob_deref(o);
+    return put_out(cur, buf, len, retlen, &v, sizeof v);
 }
 
 /* NtShzQueryK32(ULONG class, HANDLE handle, PVOID buffer, ULONG length, PULONG return_length) */
@@ -504,6 +546,27 @@ int32_t k32_query(process_t *cur, struct regs *r, uint64_t cls, uint64_t h, uint
         ob_deref(o);
         return put_out(cur, buf, len, retlen, v, sizeof v);
     }
+    case K32Q_PROCESS_QUERY_ACCESS: {                           /* strict QUERY gate, no payload */
+        kobject_t *o;
+        process_t *p;
+        uint64_t f;
+        int32_t st = ref_query_object(cur, h, OB_PROCESS, PROCESS_QUERY_INFORMATION, &o);
+        if (st) return st;
+        f = irq_save();
+        p = o->u.proc.p;
+        st = p && p->used && p->object == o ? STATUS_SUCCESS : STATUS_INVALID_HANDLE;
+        irq_restore(f);
+        ob_deref(o);
+        if (st) return st;
+        if (len) return STATUS_INFO_LENGTH_MISMATCH;
+        if (retlen) {
+            uint32_t zero = 0;
+            if (copy_to_user(cur, retlen, &zero, sizeof zero)) return STATUS_ACCESS_VIOLATION;
+        }
+        return STATUS_SUCCESS;
+    }
+    case K32Q_MAPPED_FILE_PATH:
+        return query_mapped_file_path(cur, h, buf, len, retlen);
     case K32Q_PROCESS_SETTINGS: {                               /* {memory priority, power throttling control, state} */
         process_t *p = proc_of_handle(cur, h);
         uint32_t v[3];

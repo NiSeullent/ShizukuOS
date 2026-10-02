@@ -1037,6 +1037,366 @@ cleanup:
           "all natural or failed-child fixture handles are released");
 }
 
+/* ---------------------------------------------------------------- strict QUERY and loaded-image snapshots
+ * Native class 0 is used only to locate a real child's PEB; it proves no
+ * access policy. Class 18 below is the private loaded-module subset, not a
+ * generic section-backed file provider or native Windows 98 acceptance. */
+LONG NTAPI NtQueryInformationProcess(HANDLE, ULONG, PVOID, ULONG, PULONG);
+LONG NTAPI NtShzQueryK32(ULONG, HANDLE, PVOID, ULONG, PULONG);
+typedef struct {
+    LONG64 exit_status;
+    ULONG64 peb, affinity;
+    LONG64 base_priority;
+    ULONG64 pid, parent_pid;
+} fq_process_basic;
+typedef struct { ULONG64 address; ULONG pid, reserved; char path[256]; } fq_mapped_packet;
+typedef union { PROCESS_MITIGATION_DEP_POLICY dep; ULONG64 options[2]; DWORD flags; } fq_policy_value;
+typedef struct { ULONG64 before; fq_policy_value value; ULONG64 after; } fq_policy_guard;
+typedef struct { ULONG64 before; WCHAR text[400]; ULONG64 after; } fq_name_guard;
+_Static_assert(sizeof(fq_process_basic) == 48, "the existing native process-basic packet is 48 bytes");
+_Static_assert(sizeof(fq_mapped_packet) == 272, "the private mapped-image packet is 272 bytes");
+_Static_assert(offsetof(fq_mapped_packet, path) == 16, "the path follows address, PID and reserved fields");
+#define FQ_SENTINEL 0x5a5a5a5a5a5a5a5aull
+#define FQ_POISON_ERROR 0x13579u
+static void test_strict_process_queries(void);
+
+static int fq_narrow_tail(const char *path, const char *tail)
+{
+    size_t n = 0, len = strlen(tail), i;
+    while (n < 256 && path[n]) ++n;
+    if (n == 256 || n < len) return 0;
+    for (i = 0; i < len; ++i) {
+        unsigned char a = (unsigned char)path[n - len + i], b = (unsigned char)tail[i];
+        if (a >= 'a' && a <= 'z') a -= 32;
+        if (b >= 'a' && b <= 'z') b -= 32;
+        if (a != b) return 0;
+    }
+    return 1;
+}
+
+static int fq_name_bounds(const fq_name_guard *name, DWORD written)
+{
+    fq_name_guard expected;
+    if (written > 400) return 0;
+    memset(&expected, 0x5a, sizeof expected);
+    memcpy(expected.text, name->text, written * sizeof(WCHAR));
+    return !memcmp(name, &expected, sizeof expected);
+}
+
+static void fq_policy_success(HANDLE process)
+{
+    static const PROCESS_MITIGATION_POLICY policies[4] = {
+        ProcessDEPPolicy, ProcessASLRPolicy, ProcessMitigationOptionsMask, ProcessMitigationOptionsMask
+    };
+    static const SIZE_T lengths[4] = {sizeof(PROCESS_MITIGATION_DEP_POLICY), sizeof(DWORD), 8, 16};
+    unsigned i;
+    for (i = 0; i < 4; ++i) {
+        fq_policy_guard out, expected;
+        BOOL ok;
+        memset(&out, 0x5a, sizeof out);
+        expected = out;
+        memset(&expected.value, 0, lengths[i]);
+        if (policies[i] == ProcessDEPPolicy) {
+            expected.value.dep.Enable = 1;
+            expected.value.dep.Permanent = TRUE;
+        }
+        ok = GetProcessMitigationPolicy(process, policies[i], &out.value, lengths[i]);
+        CHECK(ok, "full QUERY permits the existing DEP/ASLR/options reporting subset");
+        CHECK(!memcmp(&out, &expected, sizeof out),
+              "mitigation reporting writes only its exact size and preserves poisoned guards");
+    }
+}
+
+static void fq_policy_refusal(HANDLE process, DWORD error)
+{
+    static const PROCESS_MITIGATION_POLICY policies[4] = {
+        ProcessDEPPolicy, ProcessASLRPolicy, ProcessMitigationOptionsMask, ProcessMitigationOptionsMask
+    };
+    static const SIZE_T lengths[4] = {sizeof(PROCESS_MITIGATION_DEP_POLICY), sizeof(DWORD), 8, 16};
+    unsigned i;
+    for (i = 0; i < 4; ++i) {
+        fq_policy_guard out, original;
+        memset(&out, 0x5a, sizeof out); original = out;
+        SetLastError(FQ_POISON_ERROR);
+        CHECK(!GetProcessMitigationPolicy(process, policies[i], &out.value, lengths[i]) &&
+              GetLastError() == error && !memcmp(&out, &original, sizeof out),
+              "refused mitigation query reports its handle/right error without changing output");
+    }
+}
+
+static void fq_policy_bad_inputs(HANDLE process)
+{
+    static const PROCESS_MITIGATION_POLICY policies[4] = {
+        ProcessDEPPolicy, ProcessMitigationOptionsMask, ProcessMitigationOptionsMask, ProcessMitigationOptionsMask
+    };
+    static const SIZE_T lengths[4] = {sizeof(PROCESS_MITIGATION_DEP_POLICY) - 1, 7, 15, 17};
+    fq_policy_guard out, original;
+    unsigned i;
+    for (i = 0; i < 4; ++i) {
+        memset(&out, 0x5a, sizeof out); original = out;
+        SetLastError(FQ_POISON_ERROR);
+        CHECK(!GetProcessMitigationPolicy(process, policies[i], &out.value, lengths[i]) &&
+              GetLastError() == ERROR_INVALID_PARAMETER && !memcmp(&out, &original, sizeof out),
+              "wrong DEP/options lengths preserve the entire output");
+    }
+    memset(&out, 0x5a, sizeof out); original = out;
+    SetLastError(FQ_POISON_ERROR);
+    CHECK(!GetProcessMitigationPolicy(process, (PROCESS_MITIGATION_POLICY)-1, &out.value, 8) &&
+          GetLastError() == ERROR_INVALID_PARAMETER && !memcmp(&out, &original, sizeof out),
+          "an unknown mitigation policy refuses without manufacturing a capability");
+    SetLastError(FQ_POISON_ERROR);
+    CHECK(!GetProcessMitigationPolicy(process, ProcessDEPPolicy, NULL, sizeof(PROCESS_MITIGATION_DEP_POLICY)) &&
+          GetLastError() == ERROR_INVALID_PARAMETER, "a NULL mitigation output is refused on a valid QUERY handle");
+}
+
+static DWORD fq_name_success(HANDLE process, LPVOID address, const char *tail, const WCHAR *same, fq_name_guard *saved)
+{
+    fq_name_guard name;
+    DWORD n;
+    BOOL valid;
+    memset(&name, 0x5a, sizeof name);
+    n = K32GetMappedFileNameW(process, address, name.text, 400);
+    valid = n > 0 && n < 400 && name.text[n] == 0 && (DWORD)k32t_wlen(name.text) == n &&
+            wstarts(name.text, "\\Device\\HarddiskVolume") && wieq_tail(name.text, tail) &&
+            (!same || k32t_weq(name.text, same));
+    CHECK(valid, "an actual loaded-image address resolves to its complete native mapped name");
+    CHECK(fq_name_bounds(&name, n < 400 && n ? n + 1 : 0),
+          "mapped-name success preserves everything beyond the string and its NUL");
+    if (saved) *saved = name;
+    return valid ? n : 0;
+}
+
+static void fq_name_refusal(HANDLE process, LPVOID address, DWORD error)
+{
+    fq_name_guard name, original;
+    memset(&name, 0x5a, sizeof name); original = name;
+    SetLastError(FQ_POISON_ERROR);
+    CHECK(K32GetMappedFileNameW(process, address, name.text, 400) == 0 &&
+          GetLastError() == error && !memcmp(&name, &original, sizeof name),
+          "refused mapped-name query preserves the complete poisoned buffer");
+}
+
+static void fq_name_sizes(HANDLE process, LPVOID address, const fq_name_guard *full, DWORD n)
+{
+    DWORD sizes[3] = {1, n, n + 1}, i;
+    for (i = 0; i < 3; ++i) {
+        fq_name_guard name;
+        DWORD got, capacity = sizes[i], copied = capacity <= n ? capacity - 1 : n;
+        memset(&name, 0x5a, sizeof name);
+        SetLastError(FQ_POISON_ERROR);
+        got = K32GetMappedFileNameW(process, address, name.text, capacity);
+        CHECK(got == (capacity <= n ? capacity : n) &&
+              (capacity > n || GetLastError() == ERROR_INSUFFICIENT_BUFFER) &&
+              !memcmp(name.text, full->text, copied * sizeof(WCHAR)) && name.text[copied] == 0,
+              "size one, name length and name length plus NUL follow documented truncation rules");
+        CHECK(fq_name_bounds(&name, copied + 1), "truncation/exact-fit writes stay within the requested capacity");
+    }
+}
+
+static void fq_query_gate(HANDLE process, BOOL permitted)
+{
+    ULONG length = 0x5a5a5a5au;
+    LONG status = NtShzQueryK32(17, process, NULL, 0, &length);
+    CHECK(permitted ? status == 0 && length == 0 :
+          status == (LONG)0xc0000022u && length == 0x5a5a5a5au,
+          "the zero-payload private gate independently requires full QUERY");
+}
+
+static void fq_packet_success(HANDLE process, LPVOID address, DWORD pid, BOOL empty, const char *tail)
+{
+    struct { ULONG64 before; fq_mapped_packet value; ULONG64 after; } out;
+    ULONG length = 0x5a5a5a5au;
+    LONG status;
+    memset(&out, 0x5a, sizeof out); out.value.address = (ULONG64)(ULONG_PTR)address;
+    status = NtShzQueryK32(18, process, &out.value, sizeof out.value, &length);
+    CHECK(status == 0 && length == 272 && out.value.address == (ULONG64)(ULONG_PTR)address &&
+          out.value.pid == pid && out.value.reserved == 0 &&
+          (empty ? out.value.path[0] == 0 : fq_narrow_tail(out.value.path, tail)),
+          "private image snapshot returns exact size, captured identity and the supported path state");
+    CHECK(out.before == FQ_SENTINEL && out.after == FQ_SENTINEL,
+          "the fixed image snapshot preserves packet guards");
+}
+
+static void fq_packet_refusal(HANDLE process, LPVOID address)
+{
+    struct { ULONG64 before; fq_mapped_packet value; ULONG64 after; } out, original;
+    ULONG length = 0x5a5a5a5au;
+    memset(&out, 0x5a, sizeof out); out.value.address = (ULONG64)(ULONG_PTR)address; original = out;
+    CHECK(NtShzQueryK32(18, process, &out.value, sizeof out.value, &length) == (LONG)0xc0000022u &&
+          length == 0x5a5a5a5au && !memcmp(&out, &original, sizeof out),
+          "private image snapshot denies insufficient rights before modifying its packet");
+}
+
+static void fq_remote_child(void)
+{
+    static const WCHAR child_name[] = L"T_HELLO.EXE";
+    struct { ULONG64 before; WCHAR path[MAX_PATH]; ULONG64 after; } name;
+    struct { ULONG64 before; fq_process_basic value; ULONG64 after; } basic;
+    struct { ULONG64 before, address, after; } image;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    HANDLE query = NULL, limited = NULL;
+    DWORD n, at, i, original_count = 0, final_count = 0, pw = WAIT_FAILED, tw = WAIT_FAILED, pc = 0, tc = 0;
+    ULONG required = 0;
+    SIZE_T read = 0;
+    LONG status;
+    BOOL created, natural;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &original_count),
+          "capture the parent handle count before the remote fixture");
+    memset(&name, 0x5a, sizeof name);
+    n = GetModuleFileNameW(NULL, name.path, MAX_PATH);
+    CHECK(n > 0 && n < MAX_PATH && name.path[n] == 0 &&
+          name.before == FQ_SENTINEL && name.after == FQ_SENTINEL,
+          "capture the existing sibling directory within guarded bounds");
+    if (!n || n >= MAX_PATH || name.path[n] != 0) return;
+    at = n;
+    while (at && name.path[at - 1] != '\\' && name.path[at - 1] != '/') --at;
+    CHECK(at > 0 && at + sizeof child_name / sizeof child_name[0] <= MAX_PATH,
+          "the existing child filename including NUL fits the original directory");
+    if (!at || at + sizeof child_name / sizeof child_name[0] > MAX_PATH) return;
+    for (i = 0; i < sizeof child_name / sizeof child_name[0]; ++i) name.path[at + i] = child_name[i];
+    CHECK(name.before == FQ_SENTINEL && name.after == FQ_SENTINEL &&
+          name.path[at + sizeof child_name / sizeof child_name[0] - 1] == 0,
+          "child-path replacement stays bounded and terminated");
+    memset(&si, 0, sizeof si); si.cb = sizeof si;
+    memset(&pi, 0, sizeof pi);
+    created = CreateProcessW(name.path, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+    CHECK(created, "create the existing natural exit-seven child suspended for a real remote address");
+    if (!created) return;
+    query = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pi.dwProcessId);
+    CHECK(query != NULL, "hold a separate QUERY-only handle to the real child");
+    limited = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pi.dwProcessId);
+    CHECK(limited != NULL, "hold a separate LIMITED-only handle to the same child");
+    if (!query || !limited) goto cleanup;
+    /* This pre-existing class only locates the child PEB. Its access policy is
+     * outside this slice; the subsequent strict APIs use the separate handles. */
+    memset(&basic, 0x5a, sizeof basic);
+    status = NtQueryInformationProcess(pi.hProcess, 0, &basic.value, sizeof basic.value, &required);
+    CHECK(status == 0 && required == 48 && basic.before == FQ_SENTINEL && basic.after == FQ_SENTINEL &&
+          basic.value.pid == pi.dwProcessId && basic.value.peb != 0 &&
+          basic.value.peb <= (ULONG64)(ULONG_PTR)-1 - 0x10,
+          "the original full handle supplies the real child PEB through the exact 48-byte native query");
+    if (status || required != 48 || basic.value.pid != pi.dwProcessId || !basic.value.peb ||
+        basic.value.peb > (ULONG64)(ULONG_PTR)-1 - 0x10) goto cleanup;
+    memset(&image, 0x5a, sizeof image);
+    created = ReadProcessMemory(pi.hProcess, (LPCVOID)(ULONG_PTR)(basic.value.peb + 0x10),
+                                &image.address, sizeof image.address, &read);
+    CHECK(created && read == 8 && image.address != 0 && image.before == FQ_SENTINEL && image.after == FQ_SENTINEL,
+          "actual full-READ PEB readback supplies eight guarded bytes of the child image base");
+    if (!created || read != 8 || !image.address) goto cleanup;
+    fq_name_success(query, (LPVOID)(ULONG_PTR)image.address, "T_HELLO.EXE", NULL, NULL);
+    fq_packet_success(query, (LPVOID)(ULONG_PTR)image.address, pi.dwProcessId, FALSE, "T_HELLO.EXE");
+    fq_name_refusal(limited, (LPVOID)(ULONG_PTR)image.address, ERROR_ACCESS_DENIED);
+    fq_policy_success(query);
+    fq_policy_refusal(limited, ERROR_ACCESS_DENIED);
+    created = ResumeThread(pi.hThread) == 1;
+    CHECK(created, "resume the suspended mapped-image fixture exactly once");
+    if (!created) goto cleanup;
+    pw = WaitForSingleObject(pi.hProcess, 5000);
+    CHECK(pw == WAIT_OBJECT_0, "the real remote process finishes within its bounded wait");
+    tw = WaitForSingleObject(pi.hThread, 5000);
+    CHECK(tw == WAIT_OBJECT_0, "the real primary thread also finishes before retained image checks");
+    if (pw != WAIT_OBJECT_0 || tw != WAIT_OBJECT_0) goto cleanup;
+    created = GetExitCodeProcess(pi.hProcess, &pc) && pc == 7;
+    CHECK(created, "the remote process exits naturally with the existing fixture's result seven");
+    natural = GetExitCodeThread(pi.hThread, &tc) && tc == 7;
+    CHECK(natural, "the retained primary thread independently confirms natural exit seven");
+    if (!created || !natural) goto cleanup;
+    fq_packet_success(query, (LPVOID)(ULONG_PTR)image.address, pi.dwProcessId, TRUE, NULL);
+    fq_name_refusal(query, (LPVOID)(ULONG_PTR)image.address, ERROR_FILE_INVALID);
+    fq_policy_success(query);
+    fq_policy_refusal(limited, ERROR_ACCESS_DENIED);
+    fq_packet_refusal(limited, (LPVOID)(ULONG_PTR)image.address);
+cleanup:
+    /* Forced cleanup is never credited as a natural exit or a retained query. */
+    if (pw != WAIT_OBJECT_0 || tw != WAIT_OBJECT_0) {
+        CHECK(TerminateProcess(pi.hProcess, 99), "terminate only a failed remote fixture for cleanup");
+        CHECK(WaitForSingleObject(pi.hProcess, 2000) == WAIT_OBJECT_0, "failed remote process cleanup remains bounded");
+        CHECK(WaitForSingleObject(pi.hThread, 2000) == WAIT_OBJECT_0, "failed remote primary-thread cleanup remains bounded");
+    }
+    if (limited) CHECK(CloseHandle(limited), "close the child's independent LIMITED-only handle");
+    if (query) CHECK(CloseHandle(query), "close the child's independent QUERY-only handle");
+    CHECK(CloseHandle(pi.hThread), "close the original child primary-thread handle");
+    CHECK(CloseHandle(pi.hProcess), "close the original child full process handle");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &final_count) && final_count == original_count,
+          "remote fixture cleanup restores the exact parent handle count");
+}
+
+static void test_strict_process_queries(void)
+{
+    static const DWORD rights[5] = {PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+                                    PROCESS_SET_INFORMATION, PROCESS_VM_READ,
+                                    PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION};
+    HANDLE handles[5] = {NULL, NULL, NULL, NULL, NULL}, closed = NULL;
+    LPVOID image;
+    fq_name_guard full, name;
+    DWORD before = 0, count = 0, n, i;
+    BOOL closed_ok;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &before), "capture the handle count before strict-query checks");
+    for (i = 0; i < 5; ++i) {
+        handles[i] = OpenProcess(rights[i], FALSE, GetCurrentProcessId());
+        CHECK(handles[i] != NULL, "open the exact independent or combined process-query right");
+    }
+    if (!handles[0] || !handles[1] || !handles[2] || !handles[3] || !handles[4]) goto cleanup;
+    CHECK(GetProcessHandleCount(handles[1], &count) && count == before + 5,
+          "modern class 3 retains LIMITED-only success and counts the five real handles");
+    image = (LPVOID)GetModuleHandleW(NULL);
+    CHECK(image != NULL, "obtain the actual current executable image handle");
+    if (!image) goto cleanup;
+    fq_policy_success(handles[0]); fq_policy_success(handles[4]);
+    for (i = 1; i < 4; ++i) {
+        fq_policy_refusal(handles[i], ERROR_ACCESS_DENIED);
+        fq_name_refusal(handles[i], image, ERROR_ACCESS_DENIED);
+        fq_query_gate(handles[i], FALSE);
+        fq_packet_refusal(handles[i], image);
+    }
+    fq_query_gate(handles[0], TRUE); fq_query_gate(handles[4], TRUE);
+    fq_packet_success(handles[0], image, GetCurrentProcessId(), FALSE, "T_K32_PROC.EXE");
+    n = fq_name_success(handles[0], image, "T_K32_PROC.EXE", NULL, &full);
+    fq_name_success(handles[0], (LPVOID)(ULONG_PTR)&test_strict_process_queries,
+                    "T_K32_PROC.EXE", n ? full.text : NULL, NULL);
+    fq_name_success(handles[4], image, "T_K32_PROC.EXE", n ? full.text : NULL, NULL);
+    if (n) fq_name_sizes(handles[0], image, &full, n);
+    for (i = 0; i < 4; ++i) {
+        HANDLE tagged = (HANDLE)((ULONG_PTR)handles[0] | i);
+        fq_policy_success(tagged);
+        fq_name_success(tagged, image, "T_K32_PROC.EXE", n ? full.text : NULL, NULL);
+    }
+    fq_policy_refusal(GetCurrentThread(), ERROR_INVALID_HANDLE);
+    fq_name_refusal(GetCurrentThread(), image, ERROR_INVALID_HANDLE);
+    fq_policy_refusal((HANDLE)((ULONG_PTR)handles[0] | (1ull << 32)), ERROR_INVALID_HANDLE);
+    fq_name_refusal((HANDLE)((ULONG_PTR)handles[0] | (1ull << 32)), image, ERROR_INVALID_HANDLE);
+    fq_policy_refusal((HANDLE)(ULONG_PTR)0x7ffc, ERROR_INVALID_HANDLE);
+    fq_name_refusal((HANDLE)(ULONG_PTR)0x7ffc, image, ERROR_INVALID_HANDLE);
+    closed = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, GetCurrentProcessId());
+    CHECK(closed != NULL, "open a handle solely for immediate closed-handle refusal");
+    if (closed) {
+        closed_ok = CloseHandle(closed);
+        CHECK(closed_ok, "close the strict-query handle before any handle value can be reused");
+        if (closed_ok) {
+            fq_policy_refusal(closed, ERROR_INVALID_HANDLE);
+            fq_name_refusal(closed, image, ERROR_INVALID_HANDLE);
+            closed = NULL;
+        }
+    }
+    fq_policy_bad_inputs(handles[0]);
+    memset(&name, 0x5a, sizeof name);
+    SetLastError(FQ_POISON_ERROR);
+    CHECK(K32GetMappedFileNameW(handles[0], image, name.text, 0) == 0 &&
+          GetLastError() == ERROR_INVALID_PARAMETER && fq_name_bounds(&name, 0),
+          "zero mapped-name capacity refuses without changing output");
+    SetLastError(FQ_POISON_ERROR);
+    CHECK(K32GetMappedFileNameW(handles[0], image, NULL, 400) == 0 &&
+          GetLastError() == ERROR_INVALID_PARAMETER, "a NULL mapped-name buffer is refused on a valid QUERY handle");
+    fq_remote_child();
+cleanup:
+    if (closed) CHECK(CloseHandle(closed), "close the temporary handle after a failed closed-handle check");
+    for (i = 0; i < 5; ++i)
+        if (handles[i]) CHECK(CloseHandle(handles[i]), "close each independent strict-query test handle");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &count) && count == before,
+          "all strict-query and remote handles are closed with exact count restoration");
+}
+
 int main(void)
 {
     test_restart();
@@ -1053,5 +1413,6 @@ int main(void)
     test_packages_wer();
     test_heaps();
     test_query_rights_and_retained_times();
+    test_strict_process_queries();
     return k32t_finish("t_k32_proc");
 }
