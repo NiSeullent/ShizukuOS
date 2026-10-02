@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Explicit temporary RAM assembly; final storage retains its 17GiB reserve."""
+import ctypes
 import os
 from pathlib import Path
 import stat
+import sys
 
 RAM_FLOOR = (6 << 30) + (160 << 20)
 RAM_CAP = 1 << 30
@@ -23,19 +25,36 @@ def canonical(path):
     return path
 
 
+class _StatFS(ctypes.Structure):
+    # Linux LP64 libc statfs; type is absent from POSIX statvfs.
+    _fields_ = [('type', ctypes.c_long), ('bsize', ctypes.c_long),
+                *[(name, ctypes.c_ulong) for name in ('blocks', 'bfree', 'bavail', 'files', 'ffree')],
+                ('fsid', ctypes.c_int * 2), ('namelen', ctypes.c_long),
+                ('frsize', ctypes.c_long), ('flags', ctypes.c_long), ('spare', ctypes.c_long * 4)]
+
+
+_libc = ctypes.CDLL(None, use_errno=True)
+_libc.fstatfs.argtypes = (ctypes.c_int, ctypes.POINTER(_StatFS))
+_libc.fstatfs.restype = ctypes.c_int
+
+
+def tmpfs_fd(fd):
+    """Query the held file's actual filesystem, never a textual mount guess."""
+    need(sys.platform == 'linux' and ctypes.sizeof(ctypes.c_long) == 8 and
+         ctypes.sizeof(ctypes.c_void_p) == 8, 'Linux LP64 fstatfs ABI required')
+    info = _StatFS()
+    if _libc.fstatfs(fd, ctypes.byref(info)) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    return info.type == 0x01021994  # Linux TMPFS_MAGIC.
+
+
 def tmpfs(path):
-    """Use the actual containing mount, including nested non-tmpfs mounts."""
-    selected = None
-    for line in Path('/proc/self/mountinfo').read_text().splitlines():
-        before, after = line.split(' - ', 1)
-        raw = before.split()[4]
-        for escaped, value in (('\\040', ' '), ('\\011', '\t'), ('\\012', '\n'), ('\\134', '\\')):
-            raw = raw.replace(escaped, value)
-        mount = Path(raw)
-        if path == mount or mount in path.parents:
-            if selected is None or len(mount.parts) > selected[0]:
-                selected = (len(mount.parts), after.split()[0])
-    return selected is not None and selected[1] == 'tmpfs'
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        return tmpfs_fd(fd)
+    finally:
+        os.close(fd)
 
 
 class Placement:
@@ -83,7 +102,12 @@ class Placement:
     def check(self, pending=0):
         need(type(pending) is int and pending >= 0, 'bounded pending physical bytes required')
         for name, fd in self.fds.items():
-            row = self.plan[name]; named = canonical(row['path']).stat(); held = os.fstat(fd)
+            row = self.plan[name]; path = Path(row['path'])
+            # Admission already fixed the lexical canonical path. Recheck every
+            # ancestor for aliases without resolving it and parsing all mounts
+            # on each I/O; named/held inode checks still bind the directory.
+            need(not any(p.is_symlink() for p in (path, *path.parents)), 'canonical RAM/sink path required')
+            named = path.stat(); held = os.fstat(fd)
             need(stat.S_ISDIR(named.st_mode) and stat.S_ISDIR(held.st_mode) and
                  (named.st_dev, named.st_ino) == (held.st_dev, held.st_ino) == (row['dev'], row['ino']) and
                  named.st_uid == held.st_uid == os.getuid() and
@@ -92,7 +116,7 @@ class Placement:
             volume = os.fstatvfs(fd)
             need(volume.f_fsid == row['fsid'] and not volume.f_flag & os.ST_RDONLY, 'actual write filesystem changed')
         root = Path(self.plan['scratch']['path'])
-        need(tmpfs(root), 'scratch must remain actual tmpfs')
+        need(tmpfs_fd(self.fds['scratch']), 'scratch must remain actual tmpfs')
         names = os.listdir(self.fds['scratch'])
         need(set(names) <= {'esp-win98.img', 'ram-placement.json', 'disk-insertion-request.json', 'disk-insertion.json'},
              'foreign RAM workspace entry refused')

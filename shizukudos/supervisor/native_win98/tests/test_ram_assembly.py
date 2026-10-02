@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -66,6 +67,39 @@ class RAMAssemblyControls(unittest.TestCase):
                        {'commands': []}, scratch=scratch)
         self.assertFalse(scratch.exists())
         self.assertFalse((self.sink / 'esp-win98.img').exists())
+
+    def guard_module(self):
+        spec = importlib.util.spec_from_file_location('actual_RAM_guard', HERE.parent / 'ram_assembly.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_held_actual_tmpfs_query_does_not_require_mount_table_text(self):
+        guard = self.guard_module()
+        real = Path.read_text
+        def no_mount_table(path, *args, **kwargs):
+            if str(path) == '/proc/self/mountinfo':
+                raise OSError('mount table text deliberately unavailable')
+            return real(path, *args, **kwargs)
+        with mock.patch.object(Path, 'read_text', no_mount_table):
+            with guard.Placement.create(self.ram / 'assembly', self.sink) as placement:
+                started = time.monotonic()
+                for unused in range(1000):
+                    placement.check()
+                print(json.dumps({'actual_unmocked_RAM_NAS_guard_calls': 1000,
+                                  'elapsed_seconds': time.monotonic() - started}), flush=True)
+
+    def test_symlink_ancestor_alias_to_same_held_directory_is_refused(self):
+        guard = self.guard_module()
+        parent = self.ram / 'private-parent'; parent.mkdir(mode=0o700)
+        saved = self.ram / 'saved-private-parent'
+        with guard.Placement.create(parent / 'assembly', self.sink) as placement:
+            parent.rename(saved); parent.symlink_to(saved, target_is_directory=True)
+            try:
+                with self.assertRaisesRegex(ValueError, 'canonical'):
+                    placement.check()
+            finally:
+                parent.unlink(); saved.rename(parent)
 
     def replacement(self, destination):
         replacement = destination.parent / '.replacement-control.img'
