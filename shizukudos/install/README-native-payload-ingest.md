@@ -44,7 +44,12 @@ receipts and inputs through export and final full SHA checks. It reads every
 ESP byte and preserves its exact 2304 MiB LBA0 superfloppy geometry. Each source
 hash/FAT read checks its active original FD, canonical ancestors and the union
 SIGIO; all union identities are also checked at phase boundaries/finalization.
-Every admitted input still receives a final complete SHA pass.
+Every admitted input still receives a final complete SHA pass. ESP export uses
+the active original FD per IO and checks the entire input union at export,
+scan, copy and saved-readback boundaries. Each partial write checks its actual
+owned FD against the named inode and canonical ancestors; completed writer
+identity is frozen and checked around every independent saved-file read.
+The 17 GiB floor, owner/mode/link count and exact extent checks remain active.
 The saved
 sparse file is independently expanded and hashed through a bounded streaming
 reader. A fresh 0700 leaf and 0600 files use exclusive creation, fsync and
@@ -85,4 +90,8 @@ with explicitly modeled prior lineage; they do not repeat whole FAT validation.
 Only test geometry, modeled producer/HIMEMX bytes and fixture capacity are
 substituted; Linux descriptors, leases, FAT parsing, hashes and readback are
 real. Repository/source bytes are held before evaluation in bounded host units.
+An additional scaling control holds 273 actual tiny source read leases while
+comparing 1/8 MiB sparse exports. Source provenance is modeled; source FDs,
+full SHA, unrelated late path aliases, output substitution and partial IO are
+real. These host timings do not establish 2304 MiB NAS performance.
 No genuine Windows file, NAS media image or target disk is consumed by tests.

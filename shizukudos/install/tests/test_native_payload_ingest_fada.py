@@ -15,6 +15,7 @@ from pathlib import Path
 import stat
 import struct
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -327,6 +328,136 @@ class IngestionAPI(unittest.TestCase):
             try:
                 with self.assertRaises(ValueError):self.m.verify_sim(fd,len(mutated),self.fixture.esp,lambda:None)
             finally:os.close(fd)
+
+
+class ExportIOOptimization(unittest.TestCase):
+    """Synthetic sparse sources; actual 273-source Linux lease/IO guards."""
+    @classmethod
+    def setUpClass(cls):cls.m=load(PATH,'native_export_io_controls')
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.p=Path(self.temp.name);self.target=self.p/'ESP.SIM'
+    def source(self,size=2<<20):return save(self.p/'source.img',b'S'*size)
+    def export(self,entry,held,target=None):
+        with mock.patch.object(self.m,'capacity',lambda *args:None):
+            return self.m.export_sim(entry,held,target or self.target,16<<20)
+    def test_whole_union_check_cost_does_not_scale_with_ESP_MiB(self):
+        rows=[save(self.p/'originals'/str(i),('actual original '+str(i)).encode()) for i in range(273)]
+        small=save(self.p/'small.img',b'S'*(1<<20));large=save(self.p/'large.img',b'L'*(8<<20))
+        results=[]
+        with self.m.Union() as held:
+            for row in rows:held.add(row)
+            entries=[held.add(row) for row in (small,large)]
+            self.assertTrue(all(fcntl.fcntl(e['fd'],fcntl.F_GETLEASE)==fcntl.F_RDLCK for e in held.entries.values()))
+            original=held.check
+            for entry,label in zip(entries,('small','large')):
+                calls=[]
+                def count():calls.append(1);return original()
+                start=time.monotonic()
+                with mock.patch.object(held,'check',count):row,written=self.export(entry,held,self.p/(label+'.SIM'))
+                elapsed=time.monotonic()-start
+                fd=os.open(row['path'],os.O_RDONLY|os.O_NOFOLLOW)
+                try:self.m.verify_sim(fd,row['bytes'],entry['pin'],held.check)
+                finally:os.close(fd)
+                results.append({'logical_bytes':entry['pin']['bytes'],'whole_union_checks':len(calls),'seconds':elapsed})
+            held.finish()
+        print('ACTUAL_273_SOURCE_EXPORT_SCALING '+json.dumps(results),flush=True)
+        self.assertLessEqual(results[1]['whole_union_checks'],results[0]['whole_union_checks']+2,
+                             'eightfold source extent repeated input-wide checks during IO')
+        self.assertEqual([observed(Path(row['path'])) for row in rows],rows)
+    def test_late_unrelated_same_byte_path_alias_refused_before_export_returns(self):
+        source=self.source();unrelated=save(self.p/'inactive/source.dat',b'admitted unrelated original')
+        original=os.pread;swapped=[];returned=[];zero_reads=[]
+        with self.assertRaises(ValueError):
+            with self.m.Union() as held:
+                extra=held.add(unrelated);entry=held.add(source)
+                def late(fd,count,offset):
+                    raw=original(fd,count,offset)
+                    if fd==entry['fd'] and offset==0:
+                        zero_reads.append(1)
+                        if len(zero_reads)==2:
+                            p=Path(unrelated['path']);p.rename(p.with_suffix('.held'));save(p,b'admitted unrelated original')
+                            self.assertEqual(observed(p),unrelated)
+                            self.assertEqual(fcntl.fcntl(extra['fd'],fcntl.F_GETLEASE),fcntl.F_RDLCK)
+                            self.assertFalse(held.broken);swapped.append(True)
+                    return raw
+                with mock.patch.object(os,'pread',late):returned.append(self.export(entry,held))
+        self.assertTrue(swapped);self.assertFalse(returned)
+    def test_active_ESP_same_byte_path_drift_refused(self):
+        source=self.source();original=os.pread;swapped=[];returned=[]
+        with self.assertRaises(ValueError):
+            with self.m.Union() as held:
+                entry=held.add(source)
+                def drift(fd,count,offset):
+                    raw=original(fd,count,offset)
+                    if fd==entry['fd'] and offset==0 and not swapped:
+                        p=Path(source['path']);p.rename(p.with_suffix('.held'));save(p,original(fd,source['bytes'],0))
+                        self.assertEqual(observed(p),source);self.assertFalse(held.broken);swapped.append(True)
+                    return raw
+                with mock.patch.object(os,'pread',drift):returned.append(self.export(entry,held))
+        self.assertTrue(swapped);self.assertFalse(returned);self.assertFalse(self.target.exists())
+    def test_same_byte_output_substitution_during_saved_readback_refused(self):
+        source=self.source();original=os.pread;swapped=[];returned=[]
+        with self.assertRaises(ValueError):
+            with self.m.Union() as held:
+                entry=held.add(source)
+                def replace(fd,count,offset):
+                    raw=original(fd,count,offset)
+                    if fd!=entry['fd'] and offset==0 and self.target.exists() and not swapped:
+                        saved=original(fd,os.fstat(fd).st_size,0);self.target.rename(self.target.with_suffix('.written'));save(self.target,saved)
+                        self.assertEqual(sha(self.target.read_bytes()),sha(saved));swapped.append(True)
+                    return raw
+                with mock.patch.object(os,'pread',replace):returned.append(self.export(entry,held))
+        self.assertTrue(swapped);self.assertFalse(returned)
+    def test_same_inode_saved_output_timestamp_drift_refused(self):
+        source=self.source();original=os.pread;changed=[];returned=[]
+        with self.assertRaises(ValueError):
+            with self.m.Union() as held:
+                entry=held.add(source)
+                def drift(fd,count,offset):
+                    raw=original(fd,count,offset)
+                    if fd!=entry['fd'] and offset==0 and self.target.exists() and not changed:
+                        before=os.fstat(fd);os.utime(self.target,ns=(before.st_atime_ns,before.st_mtime_ns+1000000))
+                        self.assertEqual(os.fstat(fd).st_ino,before.st_ino);changed.append(True)
+                    return raw
+                with mock.patch.object(os,'pread',drift):returned.append(self.export(entry,held))
+        self.assertTrue(changed);self.assertFalse(returned)
+    def test_partial_writer_substitution_stops_before_next_write(self):
+        source=self.source();original=os.write;writes=[];returned=[]
+        with self.assertRaises(ValueError):
+            with self.m.Union() as held:
+                entry=held.add(source)
+                def replace(fd,raw):
+                    number=original(fd,raw);writes.append(number)
+                    if len(writes)==1:
+                        self.target.rename(self.target.with_suffix('.written'));save(self.target,raw[:number])
+                    return number
+                with mock.patch.object(os,'write',replace):returned.append(self.export(entry,held))
+        self.assertFalse(returned);self.assertEqual(writes,[64],'writer continued after its named inode was replaced')
+    def test_actual_partial_reads_and_writes_preserve_exact_saved_content(self):
+        source=self.source(16384);pread=os.pread;write=os.write
+        with self.m.Union() as held:
+            entry=held.add(source)
+            with mock.patch.object(os,'pread',lambda fd,n,at:pread(fd,min(n,997),at)),\
+                 mock.patch.object(os,'write',lambda fd,raw:write(fd,raw[:313])):
+                row,written=self.export(entry,held)
+                fd=os.open(row['path'],os.O_RDONLY|os.O_NOFOLLOW)
+                try:self.m.verify_sim(fd,row['bytes'],source,held.check)
+                finally:os.close(fd)
+            held.finish()
+    def test_actual_source_short_EOF_and_readback_EIO_refuse_export(self):
+        source=self.source(16384);pread=os.pread
+        for kind in ('source-EOF','readback-EIO'):
+            returned=[];target=self.p/(kind+'.SIM')
+            with self.assertRaises((ValueError,OSError)):
+                with self.m.Union() as held:
+                    entry=held.add(source)
+                    def fail(fd,n,at):
+                        if kind=='source-EOF' and fd==entry['fd']:return b'' if at>=4096 else pread(fd,min(n,997),at)
+                        if kind=='readback-EIO' and fd!=entry['fd']:raise OSError(errno.EIO,'actual saved-readback failure')
+                        return pread(fd,n,at)
+                    with mock.patch.object(os,'pread',fail):returned.append(self.export(entry,held,target))
+            self.assertFalse(returned)
 
 
 class CustodyRegression(unittest.TestCase):

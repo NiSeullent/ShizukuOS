@@ -413,44 +413,65 @@ def capacity(where, pending):
     need(shutil.disk_usage(where).free >= FLOOR+pending,'17GiB reserve plus declared export budget unavailable')
 
 
-def write_all(fd, raw):
+def write_all(fd, raw, checkpoint=lambda:None):
     at=0
     while at<len(raw):
+        checkpoint()
         count=os.write(fd,raw[at:]);need(count>0,'zero/failed output write');at+=count
+        checkpoint()
 
 
 def export_sim(entry, held, target, budget):
     size=entry['pin']['bytes'];need(size%BLOCK==0,'ESP.SIM complete blocks required')
-    runs=[];h=hashlib.sha256()
+    active=lambda:held.io_check(entry)
+    # All original inputs are admitted at phase boundaries. Each actual IO
+    # checks its source fd, canonical ancestors, global SIGIO and owned guards.
+    held.check();runs=[];h=hashlib.sha256()
     for at in range(0,size,1<<20):
-        data=read_exact(entry['fd'],min(1<<20,size-at),at,held.check);h.update(data)
+        data=read_exact(entry['fd'],min(1<<20,size-at),at,active);h.update(data)
         for pos in range(0,len(data),BLOCK):
             if data[pos:pos+BLOCK].count(0)!=BLOCK:
                 block=(at+pos)//BLOCK
                 if runs and runs[-1][0]+runs[-1][1]==block:runs[-1]=(runs[-1][0],runs[-1][1]+1)
                 else:runs.append((block,1))
         need(len(runs)<=1<<20,'bounded sparse chunk table required')
-    need(h.hexdigest()==entry['pin']['sha256'],'export source SHA differs')
+    held.check();need(h.hexdigest()==entry['pin']['sha256'],'export source SHA differs')
     table=b''.join(struct.pack('<QII',first,count,0) for first,count in runs)
     total=64+len(table)+sum(count*BLOCK for _,count in runs);need(total<=budget,'private export exceeds explicit budget')
     header=b'SHZSIMG1'+struct.pack('<IIIIQ',BLOCK,0,len(runs),0,size)+bytes.fromhex(entry['pin']['sha256'])
     fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
     try:
-        write_all(fd,header);write_all(fd,table)
+        owned=identity(os.fstat(fd))[:2];owner=os.geteuid()
+        def writer_check():
+            active();path(str(target));s=os.fstat(fd)
+            need(identity(s)==identity(target.stat()) and identity(s)[:2]==owned and
+                 owned!=entry['identity'][:2] and stat.S_ISREG(s.st_mode) and
+                 stat.S_IMODE(s.st_mode)==0o600 and s.st_uid==owner and s.st_nlink==1 and
+                 0<=s.st_size<=total and s.st_size==os.lseek(fd,0,os.SEEK_CUR),
+                 'owned ESP.SIM writer fd/path/extent changed')
+            capacity(target.parent,budget)
+        write_all(fd,header,writer_check);write_all(fd,table,writer_check)
         for first,count in runs:
             for at in range(first*BLOCK,(first+count)*BLOCK,1<<20):
-                held.check();capacity(target.parent,budget)
-                write_all(fd,read_exact(entry['fd'],min(1<<20,(first+count)*BLOCK-at),at,held.check))
-        need(os.fstat(fd).st_size==total,'ESP.SIM output extent differs');os.fsync(fd)
-        written=identity(os.fstat(fd))
+                writer_check()
+                write_all(fd,read_exact(entry['fd'],min(1<<20,(first+count)*BLOCK-at),at,writer_check),writer_check)
+        held.check();writer_check();need(os.fstat(fd).st_size==total,'ESP.SIM output extent differs')
+        os.fsync(fd);writer_check();written=identity(os.fstat(fd))
     finally:os.close(fd)
     readback=os.open(target,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
     try:
-        path(str(target))
-        need(identity(os.fstat(readback))==written==identity(target.stat()) and
-             written[:2]!=entry['identity'][:2], 'completed ESP.SIM writer identity changed during readback')
-        expected_sha=hash_fd(readback,total,held.check)
+        def readback_check():
+            active();path(str(target));s=os.fstat(readback)
+            need(identity(s)==written==identity(target.stat()) and
+                 stat.S_ISREG(s.st_mode) and stat.S_IMODE(s.st_mode)==0o600 and
+                 s.st_uid==owner and s.st_nlink==1 and s.st_size==total and
+                 written[:2]!=entry['identity'][:2],
+                 'completed ESP.SIM writer identity changed during readback')
+            capacity(target.parent,budget)
+        readback_check();expected_sha=hash_fd(readback,total,readback_check)
+        held.check();readback_check()
     finally:os.close(readback)
+    held.check()
     return {'path':str(target),'bytes':total,'sha256':expected_sha},written
 
 
