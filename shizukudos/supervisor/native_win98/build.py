@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Prepare a private opt-in installed-Win98 Supervisor ESP, without running a VM.
 
-Every disk/ROM/config/kernel input is explicit and SHA-pinned. This starts the
-disk's existing DOS: ShizukuDOS DOS-to-VMM replacement remains incomplete.
+Every disk/ROM/config/kernel input is explicit and SHA-pinned. The selected
+private disk's DOS and Windows boot must be verified in a separate actual run.
 """
 import argparse
 import contextlib
@@ -464,7 +464,9 @@ def assemble(out, copies, loader, receipt):
     return esp, identities
 
 
-def main(argv=None):
+def main(argv=None, *, receipt_sink=None):
+    if receipt_sink is not None and not callable(receipt_sink):
+        raise TypeError("receipt_sink must be callable")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--make-config", type=Path, help="create a new public 16-byte opt-in config and print its SHA")
     for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64-img"):
@@ -556,13 +558,15 @@ def main(argv=None):
         receipt.update(status="PASS_PRIVATE_WIN98_DOMAIN_ESP_PREPARED_NOT_RUN", sources_sha256=pins,
                        members=members, artifact={"path": esp.name, "bytes": esp.stat().st_size, "sha256": file_sha(esp)},
                        source_before_after_match=True, originals_before_after_match=True,
-                       boot_path="UEFI Supervisor -> explicit Win98 VMCS -> SeaBIOS -> owned disk's original DOS",
-                       next_gate="Actual isolated L1/VMX Windows boot, VMM channel, GUI and app verification; DOS replacement remains separate")
+                       boot_path="UEFI Supervisor -> explicit Win98 VMCS -> SeaBIOS -> selected private disk; guest boot unverified",
+                       next_gate="Actual isolated L1/VMX DOS and Windows boot, VMM channel, GUI, app and replacement verification")
     except BaseException as error:
         receipt["error"] = str(error)
         raise
     finally:
         (out / "result.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    if receipt_sink is not None:
+        receipt_sink((json.dumps(receipt, indent=2) + "\n").encode())
     print(json.dumps({"status": receipt["status"], "private_ESP": str(esp), "sha256": receipt["artifact"]["sha256"]}))
     return 0
 

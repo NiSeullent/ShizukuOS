@@ -49,7 +49,9 @@ def preparation_budget(inputs):
     return inputs["firmware_code"]["bytes"] + inputs["firmware_vars"]["bytes"] + (64 << 20)
 
 
-def main(argv=None):
+def main(argv=None, *, receipt_sink=None):
+    if receipt_sink is not None and not callable(receipt_sink):
+        raise TypeError("receipt_sink must be callable")
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("esp", "build-receipt", "firmware-code", "firmware-vars", "qemu"):
         parser.add_argument("--" + name, type=Path, required=True)
@@ -112,6 +114,8 @@ def main(argv=None):
         raise
     finally:
         (out / "vm-plan.json").write_text(json.dumps(result, indent=2) + "\n")
+    if receipt_sink is not None:
+        receipt_sink((json.dumps(result, indent=2) + "\n").encode())
     print(json.dumps({"status": result["status"], "private_plan": str(out / "vm-plan.json"), "VM_executed": False}))
     return 0
 
