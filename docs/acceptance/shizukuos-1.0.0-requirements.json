@@ -1,0 +1,1530 @@
+{
+  "schema": "shizukuos.requirements.v1",
+  "scope": "product-ShizukuOS-1.0.0",
+  "source_specs": [
+    {
+      "role": "win98_architecture",
+      "path": "docs/acceptance/specs/win98-architecture.txt",
+      "sha256": "0bb39e0f879ed033f35491e34233b2e49314f9e83793339f3fba46dc04ebb75d"
+    },
+    {
+      "role": "shizukudos10_integration",
+      "path": "docs/acceptance/specs/shizukudos10-integration.txt",
+      "sha256": "3ee94105f6a9e1890451f8a9ca8f8364983a0fd8e3bf4112ff00e52b34a60fb1"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "win98.original-components",
+      "category": "windows98_integration",
+      "description": "Actual Windows 98 is the final visible OS; VMM, USER, GDI, Win16/Win32 and Explorer execute.",
+      "gate": "windows98_boot",
+      "checks": [
+        "actual Windows 98 started on ShizukuDOS",
+        "genuine VMM USER GDI and Explorer identities observed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "dos.replacement-chain",
+      "category": "dos_foundation",
+      "description": "Source-built ShizukuDOS replaces original Microsoft DOS before WIN.COM/VMM.",
+      "gate": "windows98_boot",
+      "checks": [
+        "original Microsoft DOS absent from boot chain",
+        "replacement kernel boot entry and WIN.COM EXEC observed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "dos.resident-startup",
+      "category": "dos_foundation",
+      "description": "Real PSP/MCB/SDA/CDS/SFT and INT2F/DOSMGR startup and instance contracts preserve resident lifetime.",
+      "gate": "windows98_boot",
+      "checks": [
+        "actual DOS startup and resident structure contracts verified"
+      ],
+      "applications": []
+    },
+    {
+      "id": "vmm.windows-thread-owner",
+      "category": "vmm_authority",
+      "description": "Windows VMM owns Windows threads, VM contexts and Win16 lock; backend workers preserve those decisions.",
+      "gate": "windows98_vmm",
+      "checks": [
+        "VMM schedules Windows threads",
+        "Windows VM and Win16 scheduling authority preserved"
+      ],
+      "applications": []
+    },
+    {
+      "id": "vmm.pma-events",
+      "category": "windows98_integration",
+      "description": "Actual VxD caller-bound events signal/wait/timeout/cancel without lost wakeups.",
+      "gate": "windows98_vmm",
+      "checks": [
+        "actual asynchronous PMA wait and wake",
+        "manual auto-reset timeout cancel and lost-wakeup stress passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "dos.serialized-executor",
+      "category": "dos_foundation",
+      "description": "DOS services serialize in original DOS VM/InDOS/error-mode context.",
+      "gate": "windows98_vmm",
+      "checks": [
+        "actual DOS executor context",
+        "DOS services serialize without nonreentrant overlap"
+      ],
+      "applications": []
+    },
+    {
+      "id": "vmm.lifetimes",
+      "category": "failure_lifecycle",
+      "description": "Forced thread/process/VM death and VxD reload fence identities and preserve accepted terminal replies.",
+      "gate": "windows98_vmm",
+      "checks": [
+        "actual owner thread process VM and reload rundown passed",
+        "no stale completion or identity reuse across epochs"
+      ],
+      "applications": []
+    },
+    {
+      "id": "pma.preemption",
+      "category": "pma_scheduling_smp",
+      "description": "Actual runnable workers preempt, sleep, wake and obey priority and bounded deadlines.",
+      "gate": "native_smp",
+      "checks": [
+        "real backend preemption synchronization and deadlines passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "smp.native-workers",
+      "category": "pma_scheduling_smp",
+      "description": "Actual two and four CPU backend runs show concurrent independent work, not CPU flags.",
+      "gate": "native_smp",
+      "checks": [
+        "two or more native PMA CPUs execute work",
+        "concurrent work progresses on separate CPUs",
+        "VMM scheduling authority preserved",
+        "two and four CPU native execution passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "smp.cpu-local-state",
+      "category": "pma_scheduling_smp",
+      "description": "Per-CPU stacks/TSS/IRQ/current state, allocator/runqueue locks, reschedule and TLB IPIs are exercised.",
+      "gate": "native_smp",
+      "checks": [
+        "actual per-CPU stacks IRQ TSS runqueues and allocator protection passed",
+        "actual reschedule migration and TLB shootdown passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "smp.safe-fallback",
+      "category": "failure_lifecycle",
+      "description": "UP boot and AP-start failure preserve BSP progress and Windows compatibility.",
+      "gate": "native_smp",
+      "checks": [
+        "actual uniprocessor and failed-AP fallback passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "display.gop-frontend",
+      "category": "display_gop",
+      "description": "Native GOP pixels serve Windows USER/GDI and project shell without replacing Windows GUI.",
+      "gate": "windows98_boot",
+      "checks": [
+        "actual native GOP Windows frontend and input passed",
+        "GOP framebuffer bounds format pitch and mode fallback verified"
+      ],
+      "applications": []
+    },
+    {
+      "id": "display.shell",
+      "category": "display_gop",
+      "description": "High-resolution GOP shell, scaled glyphs, dirty updates and legacy-exit restoration work.",
+      "gate": "windows98_boot",
+      "checks": [
+        "GOP full-screen shell text scaling and restoration passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "display.legacy-devices",
+      "category": "display_gop",
+      "description": "On-demand per-session VGA/SVGA/VBE uses trapped compatibility state presented through GOP.",
+      "gate": "windows98_boot",
+      "checks": [
+        "normal DOS text VGA and supported SVGA applications render through GOP",
+        "legacy video state stays isolated and unsupported modes reject explicitly"
+      ],
+      "applications": []
+    },
+    {
+      "id": "io.durable-storage",
+      "category": "windows98_integration",
+      "description": "Windows storage/input use actual modern backend and persist file operations after cold boot.",
+      "gate": "windows98_boot",
+      "checks": [
+        "Windows file create flush reopen and independent disk readback passed",
+        "actual modern storage and input Windows frontend passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "legacy.win16-win32",
+      "category": "legacy_win16_win32",
+      "description": "Existing Win16/Win32 paths and Windows message, GDI and lifecycle semantics regressions pass.",
+      "gate": "windows98_vmm",
+      "checks": [
+        "actual legacy Win16 and Win32 applications passed",
+        "Windows GUI messages GDI and file IO remain stable"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.real-roundtrip",
+      "category": "nt_wrapper_compatibility",
+      "description": "A real Windows app calls NT compatibility API through Shizuku PMA worker and receives the result.",
+      "gate": "windows98_vmm",
+      "checks": [
+        "actual Windows application NT wrapper Shizuku worker result roundtrip passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.common-abi",
+      "category": "nt_wrapper_compatibility",
+      "description": "Versioned shared wrapper ABI handles valid/invalid calls, ownership, cleanup and explicit unsupported results.",
+      "gate": "windows98_vmm",
+      "checks": [
+        "versioned wrapper ABI symbol parameter error cleanup and concurrent tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntacpiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTACPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTACPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntadvapi32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTADVAPI32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTADVAPI32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntahciwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTAHCIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTAHCIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntapisetwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTAPISetWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTAPISetWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntatawrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTATAWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTATAWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntaudioendpointwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTAudioEndpointWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTAudioEndpointWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntaudiowrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTAudioWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTAudioWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntbcryptwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTBCRYPTWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTBCRYPTWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntbcryptprimitiveswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTBCryptPrimitivesWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTBCryptPrimitivesWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntcachewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTCACHEWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTCACHEWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntcdfswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTCDFSWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTCDFSWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntcdromwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTCDROMWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTCDROMWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntcombasewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTCOMBASEWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTCOMBASEWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntcomctl32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTCOMCTL32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTCOMCTL32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntcomdlg32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTCOMDLG32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTCOMDLG32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntcppstdruntimewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTCPPStdRuntimeWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTCPPStdRuntimeWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntcrypt32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTCRYPT32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTCRYPT32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntd2dwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTD2DWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTD2DWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntd3d10wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTD3D10Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTD3D10Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntd3d11wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTD3D11Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTD3D11Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntd3d9wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTD3D9Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTD3D9Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntd3dkmtwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTD3DKMTWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTD3DKMTWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdbghelpwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDBGHELPWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDBGHELPWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdcompwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDCompWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDCompWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdiskwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDISKWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDISKWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdllwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDLLWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDLLWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdmawrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDMAWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDMAWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdnsapiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDNSAPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDNSAPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdpapiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDPAPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDPAPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdpcwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDPCWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDPCWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdrvwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDRVWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDRVWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdwmapiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDWMAPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDWMAPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdwritewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDWRITEWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests. Original capitalization alias: NTDWriteWrapper9x.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDWRITEWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdxgiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDXGIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDXGIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdxgkrnlwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDXGKRNLWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDXGKRNLWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdirectshowwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDirectShowWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDirectShowWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntdirectsoundwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTDirectSoundWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTDirectSoundWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntehciwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTEHCIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTEHCIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntetwwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTETWWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTETWWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntfatwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTFATWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTFATWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntflswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTFLSWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTFLSWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntgameinputwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTGAMEINPUTWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTGAMEINPUTWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntgdi32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTGDI32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTGDI32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntgdipluswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTGDIPLUSWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTGDIPLUSWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.nthalwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTHALWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTHALWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.nthidwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTHIDWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTHIDWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.nthttpwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTHTTPWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTHTTPWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntimm32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTIMM32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTIMM32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntiowrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTIOWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTIOWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntiphlpaapiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTIPHLPAAPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTIPHLPAAPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntirpwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTIRPWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTIRPWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntkbdclasswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTKBDCLASSWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTKBDCLASSWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntkernel32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTKERNEL32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTKERNEL32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntkernelbasewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTKERNELBASEWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTKERNELBASEWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntkswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTKSWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTKSWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntmemwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTMEMWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTMEMWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntmmdevapiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTMMDEVAPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTMMDEVAPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntmouclasswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTMOUCLASSWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTMOUCLASSWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntmountmgrwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTMOUNTMGRWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTMOUNTMGRWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntmsvcrtwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTMSVCRTWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTMSVCRTWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntmanifestwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTManifestWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTManifestWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntmediafoundationwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTMediaFoundationWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTMediaFoundationWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntncryptwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTNCRYPTWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTNCRYPTWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntnetiowrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTNETIOWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTNETIOWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntnvmewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTNVMEWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTNVMEWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntobjwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTOBJWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTOBJWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntohciwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTOHCIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTOHCIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntole32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTOLE32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTOLE32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntoleaut32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTOLEAUT32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTOLEAUT32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntoskrnlwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTOSKRNLWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTOSKRNLWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntpciwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTPCIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTPCIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntpe32pluswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTPE32PlusWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTPE32PlusWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntpeloaderwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTPELoaderWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTPELoaderWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntpnpwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTPNPWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTPNPWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntpowerwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTPOWERWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTPOWERWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntpsapiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTPSAPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTPSAPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntportclswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTPortClsWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTPortClsWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntregwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTREGWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTREGWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntrpcrt4wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTRPCRT4Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTRPCRT4Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntrtlwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTRTLWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTRTLWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntscsiportwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSCSIPORTWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSCSIPORTWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntsecur32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSECUR32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSECUR32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntsecwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSECWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSECWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntsehwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSEHWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSEHWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntshcorewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSHCOREWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSHCOREWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntshell32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSHELL32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSHELL32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntsspiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSSPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSSPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntstorportwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSTORPORTWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSTORPORTWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntsyncwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSYNCWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSYNCWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntsxswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTSxSWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTSxSWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.nttcpipwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTTCPIPWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTTCPIPWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.nttebpebwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTTEBPEBWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTTEBPEBWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntthreadwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTTHREADWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTTHREADWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.nttimerwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTTIMERWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTTIMERWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.nttlswrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTTLSWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTTLSWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntucrtbasewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTUCRTBaseWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTUCRTBaseWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntuhciwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTUHCIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTUHCIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntusbhubwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTUSBHUBWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTUSBHUBWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntusbwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTUSBWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTUSBWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntuser32wrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTUSER32Wrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTUSER32Wrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntuxthemewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTUXTHEMEWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTUXTHEMEWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntunicodewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTUnicodeWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTUnicodeWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntvcruntimewrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTVCRuntimeWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTVCRuntimeWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntvolmgrwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTVOLMGRWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTVOLMGRWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntversionwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTVersionWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTVersionWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwasapiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWASAPIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWASAPIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwddmwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWDDMWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWDDMWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwicwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWICWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWICWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwin32uwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWIN32UWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWIN32UWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwinhttpwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWINHTTPWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWINHTTPWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwininetwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWININETWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWININETWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwinmmwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWINMMWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWINMMWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwintrustwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWINTRUSTWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWINTRUSTWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntwmiwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWMIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWMIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntworkitemwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTWORKITEMWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTWORKITEMWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntxhciwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTXHCIWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTXHCIWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "wrapper.ntxinputwrapper9x",
+      "category": "nt_wrapper_compatibility",
+      "description": "NTXInputWrapper9x preserves the common ABI and has real support/rejection, concurrent and lifetime tests.",
+      "gate": "full_goal",
+      "checks": [
+        "NTXInputWrapper9x actual supported and unsupported behavior tests passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "web.modern-runtime",
+      "category": "modern_web_features",
+      "description": "Requested modern web APIs execute through Windows compatibility layers with source-bound feature claims.",
+      "gate": "full_goal",
+      "checks": [
+        "actual modern web DOM CSS JavaScript TLS and required media paths passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "apps.requested-applications",
+      "category": "modern_applications",
+      "description": "Every application explicitly required by the project acceptance inventory runs in Windows 98; fixture passes alone are insufficient.",
+      "gate": "full_goal",
+      "checks": [
+        "requested application inventory and observed versions reviewed",
+        "all requested application native Windows paths passed"
+      ],
+      "applications": [
+        {
+          "name": "Chromium",
+          "version": "157.0.8080.0"
+        },
+        {
+          "name": "Supermium",
+          "version": "144.0.7559.256 R5"
+        },
+        {
+          "name": "VLC",
+          "version": "3.0.24"
+        },
+        {
+          "name": "Notepad++",
+          "version": "8.9.8.1"
+        },
+        {
+          "name": "Visual Studio Code",
+          "version": "1.140.0"
+        },
+        {
+          "name": "Legcord",
+          "version": "1.3.0"
+        },
+        {
+          "name": "LibreOffice",
+          "version": "26.8.0"
+        },
+        {
+          "name": "Steam",
+          "version": null
+        }
+      ]
+    },
+    {
+      "id": "regression.working-paths",
+      "category": "failure_lifecycle",
+      "description": "Existing BIOS/CSMWrap/original-DOS/GOP/K32/K64/Windows/NTWDDM baselines and historical evidence remain valid.",
+      "gate": "full_goal",
+      "checks": [
+        "existing working boot compatibility paths and evidence preserved"
+      ],
+      "applications": []
+    },
+    {
+      "id": "failure.boundaries",
+      "category": "failure_lifecycle",
+      "description": "Subsystem failure falls back or isolates the affected app without inventing support or crashing Windows.",
+      "gate": "full_goal",
+      "checks": [
+        "PMA GOP VGA VxD handshake failure boundaries passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "public.media-source",
+      "category": "distribution",
+      "description": "Public ISO includes project installer/source/licenses, with no Microsoft media, private images or secrets.",
+      "gate": "public_iso",
+      "checks": [
+        "no Microsoft media or secrets",
+        "project installer and corresponding source closure",
+        "builder artifact and source identities verified"
+      ],
+      "applications": []
+    },
+    {
+      "id": "iso.bios",
+      "category": "installer",
+      "description": "Exact final public ISO cold boots through BIOS.",
+      "gate": "iso_bios",
+      "checks": [
+        "exact public ISO boots through BIOS"
+      ],
+      "applications": []
+    },
+    {
+      "id": "iso.uefi",
+      "category": "installer",
+      "description": "Exact final public ISO cold boots through UEFI.",
+      "gate": "iso_uefi",
+      "checks": [
+        "exact public ISO boots through UEFI"
+      ],
+      "applications": []
+    },
+    {
+      "id": "installer.own-cancel",
+      "category": "installer",
+      "description": "Project installer executes; cancel leaves every target byte unchanged.",
+      "gate": "installation",
+      "checks": [
+        "project installer executes",
+        "cancel writes no target bytes"
+      ],
+      "applications": []
+    },
+    {
+      "id": "installer.cold-reboot",
+      "category": "installer",
+      "description": "Installed Windows 98 on ShizukuDOS cold boots and data persists.",
+      "gate": "installation",
+      "checks": [
+        "installed Windows 98 on ShizukuDOS cold boots",
+        "installed data persists after restart"
+      ],
+      "applications": []
+    },
+    {
+      "id": "release.official-nginx",
+      "category": "distribution",
+      "description": "Final1.0.0 ISO is served exclusively from m98.nyase.kr via nginx; normal-DNS HTTPS body/hash/HEAD/range and KO/EN metadata verified.",
+      "gate": "full_goal",
+      "checks": [
+        "official nginx normal-DNS HTTPS ISO hash HEAD range and bilingual metadata passed"
+      ],
+      "applications": []
+    },
+    {
+      "id": "goal.original-scope",
+      "category": "windows98_integration",
+      "description": "Review every original requirement against actual source and native execution; no component or model result substitutes for product completion.",
+      "gate": "full_goal",
+      "checks": [
+        "original specifications reviewed requirement by requirement against final evidence"
+      ],
+      "applications": []
+    }
+  ]
+}

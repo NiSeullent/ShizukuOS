@@ -32,10 +32,11 @@ class CompileSourceBindingTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "copied-source"
         # Copy public source only; no binaries, media, build outputs or .git.
         suffixes = {".c", ".h", ".asm", ".ld", ".py"}
-        sources = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi")
+        sources = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi", "shizukudos/boot_profile")
                    for p in (ROOT / folder).rglob("*") if p.is_file() and p.suffix in suffixes}
         sources.update(ROOT / p for p in (*GLYPHS, *AP_INPUTS, "shizukudos/tools/shzlib.py",
-                                         "shizukudos/kernel64/standalone/memholes.h"))
+                                         "shizukudos/kernel64/standalone/memholes.h",
+                                         "shizukudos/kernel32/service_policy.h"))
         for source in sources:
             copied = self.root / source.relative_to(ROOT)
             copied.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +133,8 @@ class CompileSourceBindingTests(unittest.TestCase):
         error, result = self.compile_control()
         self.assertIsNone(error)
         self.assertEqual(result["status"], "PASS_NATIVE_SUPERVISOR_COMPONENT_COMPILE_NOT_RUN")
+        self.assertIn("shizukudos/boot_profile/win98_foundation.h", result["sources_sha256"])
+
         self.assertTrue(result["source_before_after_match"])
         self.assertEqual(result["commands"], [["mock-build-boundary", "ap_trampoline"],
                                               ["mock-build-boundary", "payload"],
@@ -150,6 +153,12 @@ class CompileSourceBindingTests(unittest.TestCase):
 
     def test_existing_video_source_mutation_is_rejected(self):
         self.assert_mutation_fails("shizukudos/supervisor/src/video.c")
+
+    def test_foundation_policy_mutation_is_rejected(self):
+        self.assert_mutation_fails("shizukudos/boot_profile/win98_foundation.h")
+
+    def test_kernel32_service_policy_mutation_is_rejected(self):
+        self.assert_mutation_fails("shizukudos/kernel32/service_policy.h")
 
     def test_cp437_implementation_mutation_is_rejected(self):
         self.assert_mutation_fails(GLYPHS[0])

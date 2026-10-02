@@ -29,12 +29,14 @@ python3 shizukudos/supervisor/native_win98/build.py \
   --disk /absolute/owned-win98.raw --disk-sha256 DISK_SHA256 \
   --rom /absolute/seabios.bin --rom-sha256 ROM_SHA256 \
   --config /tmp/WIN98CFG.BIN --config-sha256 CONFIG_SHA256 \
+  --kernel32 /absolute/KERNEL32.BIN --kernel32-sha256 KERNEL32_SHA256 \
+  --kernel64 /absolute/KERNEL64.BIN --kernel64-sha256 KERNEL64_SHA256 \
   --validate-only
 ```
 
 확인한 해시 64자리를 각 placeholder에 넣습니다. 새 설정 파일 경로도 이미 존재하면 덮어쓰지 않습니다. 생성하려면 `--validate-only`를 `--out /absolute/new-private-output`으로 바꿉니다. 소스 저장소 안의 개인 출력은 Git ignored `build/` 아래만 허용합니다. 저장소 밖의 새 출력 폴더도 허용합니다. 17 GiB 여유 공간을 유지하면서 전체 2,304 MiB ESP, 원본의 실제 할당 블록과 128 MiB 메타데이터를 합산한 작업 예산을 요구합니다. 복제와 FAT 기록 중에도 남은 예산을 확인합니다. 심볼릭 링크, 장치/가상 파일 시스템, FIFO, 다른 writer가 열어 둔 입력은 거부합니다. Linux read lease가 제공되지 않는 파일 시스템에서는 생성을 거부하며 검사 강도를 낮추지 않습니다.
 
-선택 입력은 `--kernel32 ... --kernel32-sha256 ...`, `--kernel64 ... --kernel64-sha256 ...`, `--win64-img ... --win64-img-sha256 ...`입니다. K64에는 Supervisor용 **KERNEL64.BIN**을 사용합니다. 독립 부팅용 KERNEL64S.BIN은 이 입력이 아닙니다. WIN64.IMG는 K64 입력이 있어야 하며 현재 64 MiB K64 RAM/32 MiB archive 위치에 맞도록 최대 32 MiB로 제한합니다. 이 입력은 호출자가 별도로 빌드한 파일이며 builder가 K64 전체나 Win64 앱을 새로 컴파일했다고 주장하지 않습니다. Kernel32/64가 없으면 해당 도메인과 IPC 채널도 생성되지 않습니다.
+`--kernel32 ... --kernel32-sha256 ...`와 `--kernel64 ... --kernel64-sha256 ...`는 필수입니다. 실제 Win98 foundation 정책은 두 worker 도메인과 채널 0·2를 요구하므로, builder는 누락된 worker를 개인 파일을 읽기 전에 거부합니다. K64에는 Supervisor용 **KERNEL64.BIN**을 사용합니다. 독립 부팅용 KERNEL64S.BIN은 이 입력이 아닙니다. 선택 입력 `--win64-img ... --win64-img-sha256 ...`는 현재 64 MiB K64 RAM/32 MiB archive 위치에 맞도록 최대 32 MiB로 제한합니다. 이 입력은 호출자가 별도로 빌드한 파일이며 builder가 K64 전체나 Win64 앱을 새로 컴파일했다고 주장하지 않습니다.
 
 Builder는 원본을 read lease와 SHA로 읽어 새 사본을 만들고, 공개 소스 사본에서 Supervisor를 새로 컴파일합니다. `esp-win98.img`에 설치한 모든 파일을 전부 다시 읽어 크기와 SHA를 확인합니다. 결과 영수증은 `private: true`이며 원본 입력 해시와 소스/컴파일/ESP 파일 목록을 기록합니다. 실패한 출력과 오류 영수증은 보존합니다. ROM·Windows 디스크·ESP·validation 이미지·개인 영수증은 GitHub 공개 소스 또는 공개 다운로드 묶음에 넣지 않습니다.
 
@@ -48,4 +50,4 @@ Builder는 원본을 read lease와 SHA로 읽어 새 사본을 만들고, 공개
 
 MS-DOS 대체의 다음 구현 지점은 ShizukuDOS의 실제 Windows용 volume 부팅과 `WIN.COM` 실행, DOS→VMM의 INT2F/DOSMGR/resident-state 계약입니다. pinned FreeDOS의 WIN31SUPPORT에는 미구현 instance/MCB 경로와 지나친 지원 응답이 있어 플래그만 켜서 완성이라 할 수 없습니다. 기존 `iosys_uefi`의 원본 IO.SYS→MSLOAD 연결과 이번 기존 DOS 경로는 대조군이며 최종 대체 결과와 구분합니다.
 
-English quick start: run the public host tests and source-only component compile above. For a private ESP, pass your licensed installed 2 GiB raw disk, independently pinned 256 KiB SeaBIOS and freshly generated 16-byte config with all required SHA-256 values. `--validate-only` emits no media; `--out` prepares a private source-bound ESP and never launches a VM. This is a Windows-domain integration component for ShizukuDOS. Actual Windows boot, DOS replacement, VMM, GUI, acceleration and current apps remain unverified.
+English quick start: run the public host tests and source-only component compile above. For a private ESP, pass your licensed installed 2 GiB raw disk, independently pinned 256 KiB SeaBIOS, freshly generated 16-byte config and both Supervisor Kernel32/Kernel64 binaries with all required SHA-256 values. Both workers are mandatory for the native foundation channels. `--validate-only` emits no media; `--out` prepares a private source-bound ESP and never launches a VM. This is a Windows-domain integration component for ShizukuDOS. Actual Windows boot, DOS replacement, VMM, GUI, acceleration and current apps remain unverified.

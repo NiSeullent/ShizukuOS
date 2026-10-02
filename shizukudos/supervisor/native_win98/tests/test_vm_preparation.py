@@ -51,6 +51,7 @@ class VmPreparationTests(unittest.TestCase):
 
     def test_actual_distinct_copies_and_exact_no_launch_plan(self):
         output = self.root / "fresh"
+        returned_receipts = []
         before = {name: PREPARE.BUILDER.file_sha(path) for name, path in self.files.items()}
         # The old 3 GiB gate rejects this model; actual independent COW or
         # sparse fixture copies fit while retaining the full 17 GiB reserve.
@@ -58,7 +59,8 @@ class VmPreparationTests(unittest.TestCase):
         with mock.patch.object(PREPARE.BUILDER, "ESP_MIB", 4), \
              mock.patch.object(PREPARE.BUILDER.shutil, "disk_usage", return_value=usage), \
              contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(PREPARE.main(self.arguments(output)), 0)
+            self.assertEqual(PREPARE.main(self.arguments(output), receipt_sink=returned_receipts.append), 0)
+        self.assertEqual(returned_receipts, [(output / "vm-plan.json").read_bytes()])
         result = json.loads((output / "vm-plan.json").read_text())
         self.assertEqual(result["status"], "PASS_FRESH_PRIVATE_VM_INPUTS_PREPARED_NOT_RUN")
         self.assertEqual(result["retained_free_space_bytes"], 17 << 30)
@@ -94,12 +96,14 @@ class VmPreparationTests(unittest.TestCase):
         path = self.files["build-receipt"]
         for field, value in (("status", "FAIL_BUILD_PRESERVED"), ("VM_executed", True), ("private", False)):
             with self.subTest(field=field):
+                returned_receipts = []
                 changed = {**self.receipt, field: value}
                 path.write_text(json.dumps(changed))
                 output = self.root / ("refused-" + field)
                 with mock.patch.object(PREPARE.BUILDER, "ESP_MIB", 4), self.assertRaises(ValueError):
-                    PREPARE.main(self.arguments(output))
+                    PREPARE.main(self.arguments(output), receipt_sink=returned_receipts.append)
                 self.assertFalse(output.exists())
+                self.assertEqual(returned_receipts, [])
         changed = {**self.receipt, "artifact": {"bytes": 4 << 20, "sha256": "0" * 64}}
         path.write_text(json.dumps(changed))
         output = self.root / "refused-esp"

@@ -27,6 +27,26 @@ class InputTests(unittest.TestCase):
         self.data = b"owned real host fixture\r\n" * 100
         self.input.write_bytes(self.data)
         self.pin = hashlib.sha256(self.data).hexdigest()
+        if os.environ.get('SHZ_NATIVE_INPUT_TEST_ROOT'):
+            # Tiny host tmpfs has no 17 GiB production media capacity. Model
+            # that capacity only for this fixture; keep actual 6 GiB+160 MiB
+            # RAM/FS floors and production space() arithmetic unchanged.
+            real_space = BUILDER.space
+            def fixture_space(path, remaining=0):
+                stats = os.statvfs(self.root)
+                free = stats.f_bavail * stats.f_frsize
+                mem = int(next(row.split()[1] for row in Path('/proc/meminfo').read_text().splitlines() if row.startswith('MemAvailable:'))) * 1024
+                assert free >= (6 << 30) + (160 << 20) and mem >= (6 << 30) + (160 << 20)
+                assert self.root == Path(path).parent or self.root in Path(path).parents
+                usage = shutil._ntuple_diskusage(free + BUILDER.RESERVE, 0, free + BUILDER.RESERVE)
+                with mock.patch.object(BUILDER.shutil, 'disk_usage', return_value=usage):
+                    real_space(path, remaining)
+            capacity = mock.patch.object(BUILDER, 'space', fixture_space)
+            capacity.start();self.addCleanup(capacity.stop)
+            spec = importlib.util.spec_from_file_location('input_fixture_capacity', HERE/'test_input_lease_lifetime.py')
+            helper = importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+            child_capacity = mock.patch.object(BUILDER, 'command', helper.fixture_worker_capacity_command(BUILDER.command))
+            child_capacity.start();self.addCleanup(child_capacity.stop)
 
     def tearDown(self):
         self.folder.cleanup()
@@ -170,8 +190,12 @@ class InputTests(unittest.TestCase):
         config = self.root / "config"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(BUILDER.main(["--make-config", str(config)]), 0)
+        kernel32, kernel64 = self.root / "synthetic-kernel32", self.root / "synthetic-kernel64"
+        kernel32.write_bytes(b"synthetic Kernel32 input; not executable")
+        kernel64.write_bytes(b"synthetic Kernel64 input; not executable")
         args = []
-        for name, path in (("disk", disk), ("rom", rom), ("config", config)):
+        for name, path in (("disk", disk), ("rom", rom), ("config", config),
+                           ("kernel32", kernel32), ("kernel64", kernel64)):
             args += ["--" + name, str(path), "--" + name + "-sha256", BUILDER.file_sha(path)]
         output = io.StringIO()
         before = set(self.root.iterdir())
@@ -185,6 +209,21 @@ class InputTests(unittest.TestCase):
         with self.assertRaises(FileExistsError), contextlib.redirect_stdout(io.StringIO()):
             BUILDER.main(["--make-config", str(config)])
         self.assertEqual(config.read_bytes(), BUILDER.config_bytes())
+
+    def test_cli_missing_foundation_worker_refuses_before_private_reads(self):
+        # The actual publisher needs both real worker domains. A disk-only ESP
+        # must fail before media reads/copies, not later during native boot.
+        for absent in ('kernel32', 'kernel64'):
+            args = []
+            for name in ('disk', 'rom', 'config', 'kernel32', 'kernel64'):
+                if name != absent:
+                    args += ['--' + name, str(self.input), '--' + name + '-sha256', self.pin]
+            output = self.root / ('refused-' + absent)
+            with self.subTest(absent=absent), mock.patch.object(BUILDER, 'pinned_hash', side_effect=AssertionError('private read before required worker check')), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    BUILDER.main(args + ['--out', str(output), '--validate-only'])
+                self.assertEqual(error.exception.code, 2)
+                self.assertFalse(output.exists())
 
     def test_cli_missing_private_pins_refuses_without_output(self):
         output = self.root / "refused-output"
