@@ -95,3 +95,37 @@ successor, SSPWATCH/fullDWORD/log contract and native Win98 runtime.
 Default ROOT validation, sockets, OS/K64 routing and applications remain
 separate missing proof. No compiler binaries enter the6970 NAS evidence
 lane. Main/site/ISO publication stays with the designated publisher.
+
+## First actual hosted execution and input repair
+
+Selected dispatch36947241088 at447e7b09fbcd462799f018e1f652f3f73ac20571
+ran only the TLS job110652038901; the old provider job was skipped.
+Hosted tools preparation passed: three commands exited0 and were reaped,
+7,081B aggregate capture, minimum observed free91,767,164,928B and
+observed disk change607,264,768B. Original upstream preparation verified
+2,039 files/47,433,926B, minimum91,708,710,912B. Actual17 stream controls
+and15 script controls passed. The build failed while pinning gcc-win32
+before its first guarded command. Compiler/object/link/PE success is not
+claimed; transfer/upload were skipped and zero artifacts were retained.
+
+The composite rejection did not retain the compiler's stat identity, so
+its actual link count is unknown. The repair supports an explicit
+readonly system-input mode for selected resolved `/usr` tools/backends
+and queried system archives. Such an input and every held path ancestor
+must be root-owned and not group/other writable. Complete FD SHA and
+before/after named/held nine-field identity, including stable positive
+link count, remain required. Default input and all proof/output checks
+retain the single-link requirement. Project, parser, headers, generated
+files and compiled objects never use this mode. All final system-input
+repins use the same explicit selection. Rejection diagnostics include
+the actual bounded path/stat and failing predicates. This observes named
+inputs; it does not attest their runtime dependencies or alias activity
+between observations. Resource controls remain a14-case NOT_EXECUTED plan.
+
+Immutable failure evidence is held under
+`/dev/shm/win98-hosted-native-tls-6970-36947241088`: raw log78,853B
+SHA79e8e63088d070f70753877d4f6e49c7f096f036deb2e045e3a61275c37b4279;
+closed FAIL receipt15,903B
+SHA895952168ed4533c5c3ac05240e9c058aa0968418d32da8de63ad808cb763f39.
+Its actual command count is0, whole proof15,903B, and minimum observed
+free91,708,686,336B. It remains its own failed epoch.

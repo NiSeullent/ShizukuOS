@@ -366,23 +366,29 @@ def build(output, prep, expected_preparation_sha):
         bridge.require_script_controls(receipt['script_controls'], 15)
         guard.check()
         tools = {}
+        system_input_paths = set()
         def pin_tool(name):
             found = shutil.which(name, path='/usr/bin:/bin')
             if not found:
                 raise ValueError('required hosted tool absent: ' + name)
             path = Path(found).resolve(strict=True)
-            tools[str(path)] = guard.pin(path, maximum=256 * 1024**2)
+            tools[str(path)] = guard.pin(path, maximum=256 * 1024**2,
+                                        readonly_system_input=True)
+            system_input_paths.add(str(path))
             return str(path)
         cc = pin_tool('i686-w64-mingw32-gcc-win32')
         objdump = pin_tool('i686-w64-mingw32-objdump')
         cmake_tool, ninja = pin_tool('cmake'), pin_tool('ninja')
         ar, ranlib, windres = (pin_tool('i686-w64-mingw32-' + n) for n in ('ar', 'ranlib', 'windres'))
         python = str(Path(sys.executable).resolve(strict=True))
-        tools[python] = guard.pin(Path(python), maximum=256 * 1024**2)
+        tools[python] = guard.pin(Path(python), maximum=256 * 1024**2,
+                                  readonly_system_input=True)
+        system_input_paths.add(python)
         parser = Path(gate.pefile.__file__).resolve(strict=True)
         if parser != prep / 'pydeps/pefile.py':
             raise ValueError('actual PE parser differs from prepared isolated source')
-        tools[str(parser)] = guard.pin(parser, maximum=2 * 1024**2)
+        tools[str(parser)] = guard.pin(parser, maximum=2 * 1024**2,
+                                       readonly_system_input=False)
         versions = {}
         for name, tool in (('cc', cc), ('objdump', objdump), ('cmake', cmake_tool), ('ninja', ninja)):
             result = guard.run([tool, '--version'], 'version-' + name)
@@ -423,7 +429,9 @@ def build(output, prep, expected_preparation_sha):
                     return None
                 path = Path(value)
             path = path.resolve(strict=True)
-            tools[str(path)] = guard.pin(path, maximum=256 * 1024**2)
+            tools[str(path)] = guard.pin(path, maximum=256 * 1024**2,
+                                        readonly_system_input=True)
+            system_input_paths.add(str(path))
             return path
         linker = None
         for name in ('cc1', 'collect2', 'as', 'ld'):
@@ -440,6 +448,7 @@ def build(output, prep, expected_preparation_sha):
             if selected is not None:
                 system_libraries.add(selected)
         receipt['tool_inputs_before'] = tools.copy()
+        receipt['readonly_system_input_paths'] = sorted(system_input_paths)
         # Original in-memory ISA methods run through the existing exact-byte loader.
         r = guard.run([python, '-B', '-c', bridge.I486_CONTROL_CHILD,
                        str(HERE / 'i486_gate.py'), PRODUCTION[gate_name][1],
@@ -670,7 +679,8 @@ def build(output, prep, expected_preparation_sha):
                     if prepin is None or guard.pin(candidate,maximum=8*1024**2)!=prepin:
                         raise ValueError('actual LOAD object/archive absent from before-link pins')
                 paths.append(str(candidate))
-                linked[str(candidate)] = guard.pin(candidate,maximum=256*1024**2)
+                linked[str(candidate)] = guard.pin(candidate,maximum=256*1024**2,
+                    readonly_system_input=str(candidate) in system_input_paths)
             receipt.setdefault('maps',{})[str(p)]={**pin,'actual_LOAD_paths':paths}
         if map_total>8*1024**2:
             raise ValueError('combined map cap')
@@ -788,7 +798,8 @@ def build(output, prep, expected_preparation_sha):
             raise ValueError('direct system CMake module/template closure changed')
         receipt['direct_system_CMake_inputs_before_after_equal']=True
         for path,pin in linked.items():
-            if guard.pin(Path(path),maximum=256*1024**2)!=pin:
+            if guard.pin(Path(path),maximum=256*1024**2,
+                    readonly_system_input=path in system_input_paths)!=pin:
                 raise ValueError('actual LOAD linked input changed after audit')
         for path,pin in {**engine_link_inputs,**adapter_pre}.items():
             if guard.pin(Path(path),maximum=8*1024**2)!=pin:
@@ -797,7 +808,8 @@ def build(output, prep, expected_preparation_sha):
             if guard.pin(Path(path),maximum=8*1024**2)!=pin:
                 raise ValueError('bound retained engine object/archive changed during SSPI link')
         for path,pin in tools.items():
-            if guard.pin(Path(path),maximum=256*1024**2)!=pin:
+            if guard.pin(Path(path),maximum=256*1024**2,
+                    readonly_system_input=path in system_input_paths)!=pin:
                 raise ValueError('actual selected tool/library/parser changed')
         receipt['tool_inputs_before_after_equal']=True
         for relative,pin in source_pins.items():

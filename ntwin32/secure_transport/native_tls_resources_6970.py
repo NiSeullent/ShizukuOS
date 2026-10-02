@@ -67,17 +67,23 @@ def _directory(fd, *, device=None, owned=False):
     return s
 
 
-def _absolute_directory(path):
+def _absolute_directory(path, *, readonly_system_input=False):
     """Open every component without following symlinks; caller owns the FD."""
     path = _path(path)
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
+        if readonly_system_input:
+            initial = _directory(fd)
+            if initial.st_uid != 0 or initial.st_mode & 0o022:
+                raise ResourceFailure("system input ancestor must be root-owned and not writable by group/other")
         for name in path.parts[1:]:
             child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                             dir_fd=fd)
             os.close(fd)
             fd = child
-            _directory(fd)
+            current = _directory(fd)
+            if readonly_system_input and (current.st_uid != 0 or current.st_mode & 0o022):
+                raise ResourceFailure("system input ancestor must be root-owned and not writable by group/other")
         if _inode(os.fstat(fd)) != _inode(path.lstat()):
             raise ResourceFailure("absolute directory named identity changed")
         return fd
@@ -108,6 +114,7 @@ class Guard:
         self.peak = 0
         self.capture_bytes = 0
         self.decoder_bytes = 0
+        self.input_pin_failure_observation = None
         self.commands = []
         self.root_fd = None
         self._closed = False
@@ -363,19 +370,26 @@ class Guard:
                 os.close(fd)
             os.close(parent)
 
-    def pin(self, path, maximum=INPUT_LIMIT):
+    def pin(self, path, maximum=INPUT_LIMIT, *, readonly_system_input=False):
         """Actual whole named regular-file bytes, with a held NOFOLLOW FD."""
-        if not isinstance(maximum, int) or isinstance(maximum, bool) or not 0 < maximum <= INPUT_LIMIT:
-            raise self._fail("input pin maximum must be within 256 MiB")
-        path = _path(path)
-        parent = _absolute_directory(path.parent)
-        fd = None
+        parent = fd = before = None
         try:
+            if not isinstance(readonly_system_input, bool):
+                raise ResourceFailure("readonly_system_input must be an explicit boolean")
+            if not isinstance(maximum, int) or isinstance(maximum, bool) or not 0 < maximum <= INPUT_LIMIT:
+                raise ResourceFailure("input pin maximum must be within 256 MiB")
+            path = _path(path)
+            if readonly_system_input and (not path.is_relative_to(Path("/usr"))
+                                           or path.is_relative_to(self.output)):
+                raise ResourceFailure("readonly system input must be outside proof output and under /usr")
+            parent = _absolute_directory(path.parent, readonly_system_input=readonly_system_input)
             fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
             before = os.fstat(fd)
-            if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
-                    or before.st_size > maximum or identity(before) != identity(path.lstat())):
-                raise ResourceFailure("bounded regular singlelink input pin required")
+            valid_links = before.st_nlink >= 1 if readonly_system_input else before.st_nlink == 1
+            if (not stat.S_ISREG(before.st_mode) or not valid_links
+                    or not 0 <= before.st_size <= maximum or identity(before) != identity(path.lstat())
+                    or (readonly_system_input and (before.st_uid != 0 or before.st_mode & 0o022))):
+                raise ResourceFailure("bounded regular input pin link/owner/mode/size/identity precondition failed")
             h = hashlib.sha256()
             total = 0
             start = time.monotonic()
@@ -387,11 +401,14 @@ class Guard:
                 total += len(b)
                 if total > maximum or time.monotonic() - start > 60:
                     raise ResourceFailure("input full-hash byte/time bound crossed")
+                if (identity(os.fstat(fd)) != identity(before)
+                        or identity(path.lstat()) != identity(before)):
+                    raise ResourceFailure("input pin identity changed during held-FD hash")
                 self.check()
             if (total != before.st_size or identity(os.fstat(fd)) != identity(before)
                     or identity(path.lstat()) != identity(before)):
                 raise ResourceFailure("input pin changed during held-FD hash")
-            named_parent = _absolute_directory(path.parent)
+            named_parent = _absolute_directory(path.parent, readonly_system_input=readonly_system_input)
             try:
                 if _inode(os.fstat(named_parent)) != _inode(os.fstat(parent)):
                     raise ResourceFailure("input parent identity changed during hash")
@@ -399,11 +416,27 @@ class Guard:
                 os.close(named_parent)
             return {"sha256": h.hexdigest(), "bytes": total, "identity": identity(before)}
         except (OSError, ResourceFailure) as error:
+            if self.input_pin_failure_observation is None:
+                self.input_pin_failure_observation = {
+                    "path": str(path)[:4096],
+                    "identity": identity(before) if before is not None else None,
+                    "readonly_system_input": readonly_system_input is True,
+                    "maximum_bytes": maximum if (isinstance(maximum, int) and not isinstance(maximum, bool)
+                                                   and 0 < maximum <= INPUT_LIMIT) else None,
+                    "regular_file_observed": stat.S_ISREG(before.st_mode) if before is not None else None,
+                    "single_link_observed": before.st_nlink == 1 if before is not None else None,
+                    "positive_link_count_observed": before.st_nlink >= 1 if before is not None else None,
+                    "root_owned_observed": before.st_uid == 0 if before is not None else None,
+                    "no_group_other_write_observed": not bool(before.st_mode & 0o022) if before is not None else None,
+                    "error": str(error)[:2048],
+                    "historical_failed_input_identity_inferred": False,
+                }
             raise self._fail(error)
         finally:
             if fd is not None:
                 os.close(fd)
-            os.close(parent)
+            if parent is not None:
+                os.close(parent)
 
     def _environment(self):
         env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C", "LC_ALL": "C",
@@ -659,6 +692,7 @@ class Guard:
                            command_records_retained=not minimal,
                            command_count=len(self.commands), captured_normal_bytes=self.capture_bytes,
                            decoder_observed_bytes=self.decoder_bytes, resource_failure=self.failure,
+                           input_pin_failure_observation=self.input_pin_failure_observation,
                            minimum_observed_free_bytes=self.minimum_free,
                            peak_observed_output_bytes=self.peak, available_at_receipt_bytes=free,
                            receipt_accounting_verified=verified,

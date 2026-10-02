@@ -114,3 +114,16 @@ use a proven fullDWORD observer or separately build and gate it. Fresh
 runtime/media identity, complete NPVPRB.LOG and NPVEXIT.LOG are required
 for execution acceptance. Preserve the canonical owner's fresh ordinary
 DOS producer/boot-profile gates and current loader policy.
+
+
+A later actual163f five-provider content ACK is1,866B SHA256
+7b38e4c9b917440c2b3ce3823d09362ff0320646892b29b841213965290fede9.
+The linked validation is2,450B SHA256
+e99743e3d3fad8b9102ea0c8149fe0ee1c1e7f2d00726e75a9520532bfa7953e.
+Root and the independent collaboration reviewer read these exact records.
+They preserve163f's full-FD/current-content/basic-PE observation for the
+five historical DLLs, matching all offered sizes/hashes. They do not
+refresh their historical compiler/object/ISA or Win98 runtime epoch; no
+copy, installation, VM or SSPI/TLS execution occurred. Native loader
+providers remains disabled. The ACK also accepts the scope of the
+separate hosted TLS plan; a new guest/probe-pin successor is still required.
