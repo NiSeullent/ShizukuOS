@@ -344,7 +344,76 @@ def verify_esp_member(esp, name, expected, size, receipt, timeout=120):
     return {"bytes": count, "sha256": digest.hexdigest(), "method": "mtype-streaming-SHA256"}
 
 
-def assemble(out, copies, loader, receipt, *, scratch=None):
+def _stage_ram_source(fd, checkpoint, placement, expected, size):
+    """Stage one verified leased input before the unchanged worker deadline."""
+    expected = pin_format(expected)
+    before = stable(os.fstat(fd))
+    if before[2] != size or not 0 < size <= DISK_BYTES or fcntl.fcntl(fd, fcntl.F_GETLEASE) != fcntl.F_RDLCK:
+        raise ValueError("RAM source requires an exact leased original descriptor")
+    work = Path(placement.plan["scratch"]["path"])
+    name = "disk-source.img"
+    placement.check(min(size, os.fstat(fd).st_blocks * 512))
+    writer = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                     0o600, dir_fd=placement.fds["scratch"])
+    created = stable(os.fstat(writer))[:2]
+    def check(pending=0):
+        checkpoint(); placement.check(pending)
+        if stable(os.fstat(fd)) != before or fcntl.fcntl(fd, fcntl.F_GETLEASE) != fcntl.F_RDLCK:
+            raise ValueError("leased original changed during RAM source staging")
+        named = os.stat(name, dir_fd=placement.fds["scratch"], follow_symlinks=False)
+        if stable(os.fstat(writer))[:2] != created or stable(named)[:2] != created or not stat.S_ISREG(named.st_mode):
+            raise ValueError("RAM source copied writer identity changed")
+    try:
+        digest = hashlib.sha256()
+        offset = 0
+        zero = bytes(1 << 20)
+        while offset < size:
+            check()
+            block = os.pread(fd, min(1 << 20, size - offset), offset)
+            if not block:
+                raise ValueError("leased original EOF during RAM source staging")
+            check(); digest.update(block)
+            # Keep exactly the 4KiB zero classification; batch adjacent data.
+            at = 0
+            while at < len(block):
+                if block[at:at + 4096] == zero[:len(block[at:at + 4096])]:
+                    at += 4096
+                    continue
+                start = at
+                at += 4096
+                while at < len(block) and block[at:at + 4096] != zero[:len(block[at:at + 4096])]:
+                    at += 4096
+                run = block[start:at]
+                check(len(run))
+                if os.pwrite(writer, run, offset + start) != len(run):
+                    raise OSError("short guarded RAM source write")
+            offset += len(block)
+        if digest.hexdigest() != expected:
+            raise ValueError("original full SHA differs during RAM source staging")
+        check(); os.ftruncate(writer, size); os.fsync(writer); check()
+        readback = hashlib.sha256()
+        offset = 0
+        while offset < size:
+            check()
+            block = os.pread(writer, min(1 << 20, size - offset), offset)
+            if not block:
+                raise ValueError("RAM source readback EOF")
+            readback.update(block); offset += len(block)
+        check()
+        if readback.hexdigest() != expected or os.fstat(writer).st_size != size:
+            raise ValueError("RAM source full readback SHA/extent differs")
+        written = os.fstat(writer)
+        result = {"path": str(work / name), "bytes": size, "sha256": expected,
+                  "identity": list(stable(written)), "allocated_bytes": written.st_blocks * 512,
+                  "original_identity": list(before), "original_full_SHA": digest.hexdigest(),
+                  "actual_RAM_readback_full_SHA": readback.hexdigest(), "fsync_completed": True,
+                  "original_read_lease_preserved": True, "prepared_before_worker_deadline": True}
+    finally:
+        os.close(writer)
+    return result
+
+
+def assemble(out, copies, loader, receipt, *, scratch=None, original_disk=None):
     if scratch is None:
         return _assemble(out, copies, loader, receipt)
     guard_path = HERE / "ram_assembly.py"
@@ -371,7 +440,24 @@ def assemble(out, copies, loader, receipt, *, scratch=None):
                 os.close(fd)
             plan_sha = hashlib.sha256(raw).hexdigest()
             with read_leased(plan_path, plan_sha, len(raw), maximum=64 << 10):
-                esp, identities = _assemble(out, copies, loader, receipt, placement=placement,
+                prepared_copies = copies
+                staged = None
+                if "DISK.IMG" in copies:
+                    if original_disk is None:
+                        source = safe_path(copies["DISK.IMG"])
+                        size, pin = source.stat().st_size, file_sha(source)
+                        original_fd, original_check = artifacts.enter_context(read_leased(source, pin, size))
+                    else:
+                        original_fd, original_check, source, size, pin = original_disk
+                        source = safe_path(source)
+                    staged = _stage_ram_source(original_fd, original_check, placement, pin, size)
+                    staged["original_path"] = str(source)
+                    staged_fd, staged_check = artifacts.enter_context(read_leased(staged["path"], pin, size))
+                    if list(stable(os.fstat(staged_fd))) != staged["identity"]:
+                        raise ValueError("RAM source copied writer identity changed before lease")
+                    staged_check(); placement.check()
+                    prepared_copies = {**copies, "DISK.IMG": Path(staged["path"])}
+                esp, identities = _assemble(out, prepared_copies, loader, receipt, placement=placement,
                     ram_guard=(guard_fd, guard_size, guard_sha, guard_path, plan_path, plan_sha))
                 checkpoint(); placement.check()
                 produced = receipt.get("disk_insertion", {}).get("result", {}).get("esp")
@@ -394,6 +480,7 @@ def assemble(out, copies, loader, receipt, *, scratch=None):
                 receipt["ram_assembly"] = {"placement": placement.plan, "guard_source_sha256": guard_sha,
                     "temporary_ESP": str(esp), "final_copy": copied, "final_identity": copied["identity"],
                     "final_directory_fsync_completed": True, "worker_deadline_seconds": 120,
+                    "source_staging": staged,
                     "NAS_reserve_bytes": RESERVE, "independent_NAS_copy_full_SHA_verified": True}
             checkpoint(); placement.check()
         checkpoint()
@@ -679,13 +766,22 @@ def main(argv=None, *, receipt_sink=None):
                 if args.assembly_scratch is None:
                     esp, members = assemble(out, copies, loader, receipt)
                 else:
-                    esp, members = assemble(out, copies, loader, receipt, scratch=args.assembly_scratch)
+                    original = inputs["DISK.IMG"]
+                    esp, members = assemble(out, copies, loader, receipt, scratch=args.assembly_scratch,
+                        original_disk=(descriptors["DISK.IMG"], registry.check, original["path"], original["bytes"], original["sha256"]))
                     known = receipt["ram_assembly"]
                     final_fd, final_check = artifact_stack.enter_context(read_leased(esp, known["final_copy"]["sha256"],
                         known["final_copy"]["bytes"], maximum=ESP_MIB << 20, registry=artifact_registry))
                     if list(stable(os.fstat(final_fd))) != known["final_identity"]:
                         raise ValueError("final NAS ESP changed after assembly return")
                     final_check()
+                    staged = known.get("source_staging")
+                    if staged is not None:
+                        staged_fd, staged_check = artifact_stack.enter_context(read_leased(staged["path"],
+                            staged["sha256"], staged["bytes"], maximum=DISK_BYTES, registry=artifact_registry))
+                        if list(stable(os.fstat(staged_fd))) != staged["identity"]:
+                            raise ValueError("RAM source copied writer identity changed after assembly return")
+                        staged_check()
                 registry.check()
                 if pins != {str(p.relative_to(ROOT)): file_sha(p) for p in files}:
                     raise ValueError("public source changed during private preparation")

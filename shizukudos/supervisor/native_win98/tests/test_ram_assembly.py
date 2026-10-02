@@ -60,6 +60,47 @@ class RAMAssemblyControls(unittest.TestCase):
         self.assertEqual(subprocess.check_output(['mtype', '-i', str(esp),
                          '::/SHZDOS/DISK.IMG'], timeout=30), self.source.read_bytes())
 
+    def test_NAS_source_is_staged_before_deadline_worker(self):
+        original = self.sink / 'actual-small-NAS-source.img'
+        original.write_bytes(self.source.read_bytes())
+        pin = B.file_sha(original)
+        receipt = {'commands': []}
+        with mock.patch.object(B, 'ESP_MIB', 40):
+            esp, members = B.assemble(self.sink, {'DISK.IMG': original}, self.loader,
+                                      receipt, scratch=self.ram / 'assembly')
+        staged = self.ram / 'assembly' / 'disk-source.img'
+        self.assertEqual(receipt['disk_insertion']['result']['source']['path'], str(staged))
+        self.assertEqual(B.file_sha(original), pin)
+        self.assertEqual(B.file_sha(staged), pin)
+        self.assertEqual(receipt['ram_assembly']['source_staging']['sha256'], pin)
+        self.assertNotEqual((original.stat().st_dev, original.stat().st_ino),
+                            (staged.stat().st_dev, staged.stat().st_ino))
+        self.assertEqual(members['SHZDOS/DISK.IMG']['sha256'], pin)
+        self.assertEqual(receipt['ram_assembly']['worker_deadline_seconds'], 120)
+
+    def test_same_bytes_RAM_source_replacement_before_lease_is_refused(self):
+        if not hasattr(B, '_stage_ram_source'):
+            self.fail('RAM source copied-inode admission is missing')
+        real = B._stage_ram_source
+        entered = []
+        def replace(*args, **kwargs):
+            result = real(*args, **kwargs)
+            path = Path(result['path'])
+            replacement = path.parent / 'same-bytes-replacement.img'
+            replacement.write_bytes(path.read_bytes())
+            os.replace(replacement, path)
+            return result
+        def no_worker(*args, **kwargs):
+            entered.append(True)
+            self.fail('worker must not start with a replaced RAM source')
+        with mock.patch.object(B, 'ESP_MIB', 40), \
+             mock.patch.object(B, '_stage_ram_source', replace), \
+             mock.patch.object(B, '_assemble', no_worker):
+            with self.assertRaisesRegex(ValueError, 'copied.*identity'):
+                B.assemble(self.sink, {'DISK.IMG': self.source}, self.loader,
+                           {'commands': []}, scratch=self.ram / 'assembly')
+        self.assertFalse(entered)
+
     def test_non_tmpfs_scratch_refuses_before_creating_ESP(self):
         scratch = self.sink / 'invalid-RAM-scratch'
         with self.assertRaisesRegex(ValueError, 'tmpfs'):
