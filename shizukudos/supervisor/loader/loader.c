@@ -37,6 +37,7 @@
 #include "../src/caps.h"
 #include "images.h"
 #include "../native_win98/config.h"
+#include "ap_prepare.h"
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 /* A real absolute address keeps a base-relocation section in the PE image. */
@@ -1207,6 +1208,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     size_t i;
     unsigned native_win98 = 0;
     uint64_t native_config_base = 0, native_config_size = 0;
+    uint64_t ap_config_base = 0, ap_config_size = 0;
 
     if (!st || st->header.signature != EFI_SYSTEM_TABLE_SIGNATURE || !st->boot_services)
         return EFI_INVALID_PARAMETER;
@@ -1296,6 +1298,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
             return EFI_ERROR(status) ? status : EFI_INVALID_PARAMETER;
         }
         native_win98 = 1;
+    }
+    status = load_file(image, bs, "APCFG.BIN", &ap_config_base, &ap_config_size, sizeof(shz_ap_config_t));
+    if (status != EFI_NOT_FOUND) {
+        if (EFI_ERROR(status) || native_win98 || g_policy.mode != BOOT_MODE_SUPERVISOR ||
+            !shz_ap_config_valid((const shz_ap_config_t *)(uintptr_t)ap_config_base, ap_config_size)) {
+            say("REFUSED: malformed/component AP config; native Win98 remains CPU0.\n");
+            return EFI_ERROR(status) ? status : EFI_INVALID_PARAMETER;
+        }
     }
 
     /* 2. Display. */
@@ -1409,6 +1419,16 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         uint8_t *dst = (uint8_t *)(uintptr_t)SHZ_PAYLOAD_ENTRY;
         for (i = 0; i < sizeof payload_image; ++i)
             dst[i] = payload_image[i];
+    }
+    if (ap_config_base) {
+        status = shz_ap_prepare(bs, info->acpi_rsdp,
+                               (const shz_ap_config_t *)(uintptr_t)ap_config_base,
+                               &info->reserved_in[0], &info->reserved_in[1]);
+        if (EFI_ERROR(status)) {
+            say("REFUSED: AP ACPI topology/retained startup allocation unavailable.\n");
+            return status;
+        }
+        say("AP component: checked ACPI and retained loader-owned startup pages.\n");
     }
     say("Handing over to the Supervisor (ExitBootServices).\n");
 

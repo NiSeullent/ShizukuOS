@@ -27,7 +27,8 @@ OUT = BUILD / "supervisor"
 PAYLOAD_BASE = 0x04002000
 ESP_MIB = 96
 
-PAYLOAD_C = ["main.c", "platform.c", "console.c", "caps.c", "vmx.c", "ept.c", "devices.c", "video.c", "bios.c",
+PAYLOAD_C = ["main.c", "platform.c", "ap_start.c", "ap_contract.c", "../../kernel64/smp_acpi.c",
+             "console.c", "caps.c", "vmx.c", "ept.c", "devices.c", "video.c", "bios.c",
              "domain.c", "dos.c", "kdom.c", "pool.c", "lib.c",
              "../../csmwrap/video/cp437.c",
              "../native_win98/ata_pio.c", "../native_win98/string_pio.c", "../native_win98/win98.c"]
@@ -53,6 +54,20 @@ def build_vbios():
     assert len(data) == 0x10000 and data[0xfff0] == 0xea, "vBIOS must be 64 KiB with a far-jump reset vector"
     (OUT / "vbios_image.h").write_text(c_array("vbios_image", data))
     return data
+
+
+def build_ap_trampoline():
+    path = OUT / "ap-trampoline.bin"
+    command = ["nasm", "-f", "bin", "-w+all", "-o", path, SRC / "src" / "ap_trampoline.asm"]
+    run(command)
+    data = path.read_bytes()
+    assert len(data) == 4096 and data[:2] == b"\xeb\x3e", "AP page starts at real-mode offset 64"
+    assert struct.unpack_from("<HI", data, 16) == (31, 384), "AP GDTR patch ABI"
+    assert struct.unpack_from("<IH", data, 24) == (128, 8), "AP PM far target ABI"
+    assert struct.unpack_from("<IH", data, 32) == (256, 24), "AP LM far target ABI"
+    assert not any(data[0x800:]), "AP claim/parameter area initially virgin"
+    (OUT / "ap_trampoline_image.h").write_text(c_array("ap_trampoline_image", data, "static const unsigned char"))
+    return data, command
 
 
 def build_payload():
@@ -84,6 +99,9 @@ def build_payload():
     entry = int(re.search(r"Entry point address:\s+(0x[0-9a-f]+)",
                           run(["readelf", "-h", elf], capture=True).stdout).group(1), 16)
     assert entry == PAYLOAD_BASE, f"payload entry {entry:#x} != {PAYLOAD_BASE:#x}"
+    symbols = run(["nm", "-n", elf], capture=True).stdout
+    bss_end = int(re.search(r"^([0-9a-f]+)\s+\w\s+__bss_end$", symbols, re.M).group(1), 16)
+    assert bss_end <= 0x05000000, "all private AP resources must fit the loader-owned 16 MiB region"
     binary = OUT / "payload.bin"
     run(["objcopy", "-O", "binary", "--only-section=.text", "--only-section=.rodata", "--only-section=.data",
          elf, binary])
@@ -101,7 +119,8 @@ def build_loader(payload):
            "-Wl,--subsystem,10", "-Wl,--entry,efi_main", "-Wl,--image-base,0x10000000",
            "-Wl,--enable-reloc-section", "-Wl,--no-insert-timestamp", "-Wl,--strip-all",
            "-I", OUT, "-I", SRC / "loader", "-I", SRC / "src",
-           SRC / "loader" / "loader.c", SRC / "loader" / "bootini.c", SRC / "src" / "caps.c",
+           SRC / "loader" / "loader.c", SRC / "loader" / "bootini.c", SRC / "loader" / "ap_prepare.c",
+           SRC / "src" / "ap_contract.c", SHZ / "kernel64" / "smp_acpi.c", SRC / "src" / "caps.c",
            REPO / "shizukudos/uefi/boot.c",
            "-o", out]
     run(cmd)
@@ -151,6 +170,7 @@ def main():
         raise SystemExit("Run shizukudos/dos16/build.py first (normal DOS10 and conformance images are inputs)")
     OUT.mkdir(parents=True, exist_ok=True)
     vbios = build_vbios()
+    ap_trampoline, ap_command = build_ap_trampoline()
     payload, payload_cmds = build_payload()
     loader, loader_cmd = build_loader(payload)
     esp = build_esp(loader, disk)
@@ -159,6 +179,7 @@ def main():
                      [SHZ / "abi" / "shz_abi.h", SHZ / "abi" / "shz_ipc.h",
                       REPO / "shizukudos/uefi/boot.c", REPO / "shizukudos/uefi/boot.h",
                       REPO / "shizukudos/uefi/efi.h", SHZ / "kernel64/standalone/memholes.h"])
+    sources += [SHZ / "kernel64" / name for name in ("smp_acpi.c", "smp_acpi.h")]
     # The Supervisor shares the existing CP437 glyphs rather than maintaining a
     # second font implementation. Include their complete closure in the receipt.
     sources += [SHZ / "csmwrap/video" / name for name in ("cp437.c", "cp437.h", "font8x8_basic.h")]
@@ -171,12 +192,14 @@ def main():
         "payload_base": hex(PAYLOAD_BASE),
         "dos_boot_profile": "dos10-user-compatibility-bootstrap",
         "conformance_esp": "esp-conformance.img (explicit developer QA input, not the product boot image)",
-        "commands": {"payload": [[str(x) for x in c] for c in payload_cmds], "loader": [str(x) for x in loader_cmd]},
+        "commands": {"payload": [[str(x) for x in c] for c in payload_cmds], "loader": [str(x) for x in loader_cmd],
+                     "ap_trampoline": [str(x) for x in ap_command]},
         "artifacts": {
             "BOOTX64.EFI": {"sha256": sha256_file(loader), "bytes": loader.stat().st_size},
             "payload.bin": {"sha256": sha256_file(OUT / "payload.bin"), "bytes": len(payload)},
             "payload.elf": {"sha256": sha256_file(OUT / "payload.elf")},
             "vbios.bin": {"sha256": sha256_file(OUT / "vbios.bin"), "bytes": len(vbios)},
+            "ap-trampoline.bin": {"sha256": sha256_file(OUT / "ap-trampoline.bin"), "bytes": len(ap_trampoline)},
             "esp.img": {"sha256": sha256_file(esp), "bytes": esp.stat().st_size},
             "disk.img (input)": {"sha256": sha256_file(disk), "bytes": disk.stat().st_size},
             "esp-conformance.img": {"sha256": sha256_file(conformance_esp), "bytes": conformance_esp.stat().st_size},

@@ -101,7 +101,19 @@ def generate(source, out):
 """ + stage + "\n    return EFI_SUCCESS;\n}\n"
     functions = [function(source, name) for name in
                  ("zero", "k64_release", "k64_refuse", "k64_boot", "efi_main")]
-    (out / "gop_auto_production.inc").write_text("\n\n".join(functions[:-1]) +
+    ap_boundary = '''#include "shizukudos/supervisor/loader/ap_prepare.h"
+/* These no-VMX AUTO cases must never reach AP allocation/startup. Config
+ * validation links its actual production contract; only unused AP firmware
+ * preparation is replaced with an explicit unexpected-call failure. */
+EFI_STATUS shz_ap_prepare(EFI_BOOT_SERVICES *bs, uint64_t rsdp, const shz_ap_config_t *config,
+                           uint64_t *address, uint64_t *bytes)
+{
+    (void)bs; (void)rsdp; (void)config; (void)address; (void)bytes;
+    CHECK(0 && "unexpected AP preparation in no-VMX AUTO case");
+    return EFI_ABORTED;
+}
+'''
+    (out / "gop_auto_production.inc").write_text(ap_boundary + "\n\n".join(functions[:-1]) +
                                                "\n\n" + wrapper + "\n" + functions[-1] + "\n")
 
 
@@ -126,20 +138,22 @@ def main():
     if args.sanitize:
         flags += ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
     fixture = HERE / "gop_auto_host.c"
-    dependencies = subprocess.run([cc, *flags, "-MM", "-MT", "fixture", str(fixture)],
-                                  check=True, capture_output=True, text=True, timeout=60)
+    contract = REPO / "shizukudos/supervisor/src/ap_contract.c"
     paths = {LOADER, Path(__file__).resolve()}
-    paths.update(Path(token).resolve() for token in
-                 shlex.split(dependencies.stdout.replace("\\\n", " ").split(":", 1)[1]))
+    for unit in (fixture, contract):
+        dependencies = subprocess.run([cc, *flags, "-MM", "-MT", "fixture", str(unit)],
+                                      check=True, capture_output=True, text=True, timeout=60)
+        paths.update(Path(token).resolve() for token in
+                     shlex.split(dependencies.stdout.replace("\\\n", " ").split(":", 1)[1]))
     before = {str(p.relative_to(REPO)): digest(p) for p in sorted(paths)}
     if digest(LOADER) != loader_hash:
         raise SystemExit("Loader changed during extraction")
     compiler_hash = digest(Path(cc))
     binary = out / "gop-auto-host"
-    command = [cc, *flags, str(fixture), "-o", str(binary)]
+    command = [cc, *flags, str(fixture), str(contract), "-o", str(binary)]
     compiled = subprocess.run(command, text=True, capture_output=True, timeout=60)
     log = compiled.stdout + compiled.stderr
-    receipt = {"scope": "actual loader AUTO caller with EFI/selector/physical boot boundary mocks",
+    receipt = {"scope": "actual loader AUTO caller with EFI/selector/physical boot boundary mocks; real AP config contract, fail-fast unused AP preparation",
                "pass": False, "compiler": cc, "compiler_sha256": compiler_hash,
                "sanitize": args.sanitize, "compile_command": command,
                "compile_returncode": compiled.returncode, "sources_sha256": before}
