@@ -1,6 +1,6 @@
 # Uncommitted source recovered during branch consolidation
 
-These 27 explicitly selected text sources were missing from or differed from the canonical
+These 28 explicitly selected text sources were missing from or differed from the canonical
 `40fd4e6c2d9d80f020bbc5e9bdf9ac5d7ec8b707` tree. `manifest.json` records
 their original worktrees, paths, sizes and SHA256 hashes. Files retain their
 original relative layout within each cohort and were copied byte-for-byte.
@@ -18,6 +18,7 @@ They are preserved source candidates, not enabled production components.
 | dos-failure-plan | `docs/superpowers/plans` | Original plan for the live test-harness change described below. |
 | owner-review-usb | `tools` and `tools/tests` | Preserve three divergent USB/public-site helper sources; select the current owner-reviewed successor before applying. |
 | owner-review-smp | `shizukudos/tests` and `docs` | Preserve uncommitted SMP admission/concurrency fixtures and original status/plan; no AP activation follows from presence. |
+| superseded-k32 | Historical snapshot only | Older dirty `kernel32/main.c` boot policy. The canonical successor takes precedence; this snapshot must not replace it. |
 
 ## Live adoption in this commit
 
@@ -41,6 +42,12 @@ All 17 dirty entries in the persistent-AP worktree matched canonical bytes.
 16 of 17 native Kernel32 AP entries matched; its remaining `main.c` used an
 older boot-policy call and must not overwrite the canonical successor.
 All six untracked continuation-publication files matched canonical bytes.
+
+`dirty-source-audit.json` maps all 39 selected live text-source differences
+observed in 13 original worktrees to a snapshot, original-base delta, or the
+live DOS adoption. Another 67 selected dirty entries matched the observed
+integration tree. The 353 generated, historical-report or private entries
+excluded from this bounded source audit are not certified for deletion.
 
 Differences in the apps USB preparation/public verifier, old boot site's
 eight tracked files, and SMP memory admission/concurrency changes require

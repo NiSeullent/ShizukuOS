@@ -1,0 +1,9 @@
+Recovered orphan source proposals
+
+These two original Git blobs are preserved byte-for-byte inside deterministic gzip archives from the local Win98-Modern object store. They retain their original merge-conflict markers and are NOT apply-ready patches. They are not consumed by the production build. No execution/compatibility success is claimed. Preserve their original notices and check per-file license before new reuse. Do not replace newer runtime implementations with these older proposals.
+
+The diagnostics proposal retains unique autorun environment-control fragments (k64_autorun_env and env= parsing) absent from the reviewed integration snapshot. The runtime proposal also contains unadopted experimental fragments alongside functionality already implemented elsewhere. Any activation must isolate missing contracts, preserve present APIs and add meaningful behavior tests. Resolve conflicts and validate dependencies before applying code.
+
+The full pre-consolidation object store and all references were independently restored by the 8cf7 audit. This cohort is an inspectable source-level recovery for the remaining unique proposals, not a substitute for the integrated ISO or actual Windows 98 boot evidence. Decompress *.patch.gz to inspect the original proposal text. No Windows or app binaries, installation media, or credentials are included.
+
+manifest.json records the exact source objects, byte sizes, SHA256 values and affected paths.

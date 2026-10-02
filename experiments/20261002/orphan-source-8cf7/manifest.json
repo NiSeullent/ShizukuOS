@@ -1,0 +1,97 @@
+{
+  "reviewed_against": "40fd4e6c2d9d80f020bbc5e9bdf9ac5d7ec8b707",
+  "integration_snapshot": "a0af8073b1a88d785c3239b2eccd6ca97676aaf5",
+  "origin_repository": "https://github.com/NiSeullent/Win98-Modern",
+  "recovery_reason": "Original unreachable proposal blobs retain unadopted experimental fragments; source recovery avoids silently losing them during branch consolidation. Existing code also implements or supersedes substantial portions.",
+  "status": "Recovered historical source, not activated runtime implementation.",
+  "files": [
+    {
+      "original_git_blob": "04b20dc4c524a1a6cd2dffd34bbb9fc910b0d3a9",
+      "git_blob_recomputed": "04b20dc4c524a1a6cd2dffd34bbb9fc910b0d3a9",
+      "sha256": "10b5eee785ef290a558ffecfa401b5618e44dec000edab24518aaeee2574e60a",
+      "bytes": 19705,
+      "recovered_file": "e1-bringup-diagnostics.patch.gz",
+      "modified_paths": [
+        "shizukudos/kernel64/autorun.c",
+        "shizukudos/kernel64/ldr.c",
+        "shizukudos/kernel64/syscall.c",
+        "shizukudos/kernel64/sysfile.c",
+        "shizukudos/win64/kernel32/k32.h",
+        "shizukudos/win64/kernel32/k32_core.c",
+        "shizukudos/win64/kernel32/k32_ipc_io.c",
+        "shizukudos/win64/kernel32/k32_ipc_proc.c",
+        "shizukudos/win64/kernel32/k32_trace.c"
+      ],
+      "conflict_markers_preserved": true,
+      "active_build_input": false,
+      "runtime_verified": false,
+      "historical_path": "docs/shizukudos10/reports/e1-proposed/0002-diagnostics.patch",
+      "archive_sha256": "60686e842e6578848cd9384b9c7a245b79de9837c866e13958997bc46099dccd",
+      "archive_bytes": 5912,
+      "compression": "gzip; deterministic mtime=0; decompress before reviewing original conflict markers"
+    },
+    {
+      "original_git_blob": "de9af3f4cae4506b532170266b88939b1ad4b14e",
+      "git_blob_recomputed": "de9af3f4cae4506b532170266b88939b1ad4b14e",
+      "sha256": "cf292538eacf1e48135a7ff1550cd1213f96cc328e786b232a83b38c297ef32f",
+      "bytes": 59496,
+      "recovered_file": "e1-electron-node-runtime.patch.gz",
+      "modified_paths": [
+        "shizukudos/kernel64/fs.h",
+        "shizukudos/kernel64/sysfile.c",
+        "shizukudos/kernel64/sysk32.c",
+        "shizukudos/tests/e1_minapp/main.js",
+        "shizukudos/tests/run_k64_electron.py",
+        "shizukudos/win64/dlls/advapi32/rand.c",
+        "shizukudos/win64/dlls/ws2_32/ws2_32.c",
+        "shizukudos/win64/kernel32/k32_console.c",
+        "shizukudos/win64/kernel32/k32_core.c",
+        "shizukudos/win64/kernel32/k32_e1_gap.c",
+        "shizukudos/win64/kernel32/k32_fiber.c",
+        "shizukudos/win64/kernel32/k32_file.c",
+        "shizukudos/win64/kernel32/k32_ipc_io.c",
+        "shizukudos/win64/kernel32/k32_procinfo.c",
+        "shizukudos/win64/tests/t_k32_fiber.c",
+        "shizukudos/win64/ntdll/unwind.c"
+      ],
+      "conflict_markers_preserved": true,
+      "active_build_input": false,
+      "runtime_verified": false,
+      "historical_path": "docs/shizukudos10/reports/e1-proposed/0001-functional-electron-node-needs.patch",
+      "archive_sha256": "5664182b18088cc5c295272a2cc799c31ea0ca2e08645e8fe30d306c6d7084e5",
+      "archive_bytes": 18007,
+      "compression": "gzip; deterministic mtime=0; decompress before reviewing original conflict markers"
+    }
+  ],
+  "unattached_blob_inventory": {
+    "total": 116,
+    "tree_mapped": 101,
+    "tree_mapped_source": 63,
+    "tree_mapped_proposal_patch": 2,
+    "tree_mapped_document_or_evidence": 36,
+    "unmapped": 15,
+    "unmapped_source": 4,
+    "unmapped_document": 11,
+    "conflict_marker_objects": 96
+  },
+  "review_notes": [
+    "The 63 tree-mapped source blobs retain only non-conflict lines also present in reachable historical versions at the same paths.",
+    "Four unmapped source blobs are historical variants; the secure-transport checkpoint verifier is superseded by stricter checks.",
+    "The two proposal patches contain historical functionality plus distinct unadopted experiments. Their archive preserves intent; it does not activate functions.",
+    "Existing stream diagnostics, Steam fibers and growable unwind registrations must be preserved before any reuse.",
+    "The functional proposal largely predates present GetNameInfoW, console-fill, CancelSynchronousIo, ReOpenFile, Steam-fiber and growable-unwind implementations. This archive is not a claim those implementations satisfy every app contract; ReOpenFile retains an explicit unsupported case."
+  ],
+  "followup_contracts": [
+    "Review the 512-byte NUL-separated autorun env= proposal with existing process/environment ownership.",
+    "Review open/process-failure diagnostics against current systrace without duplicate logging.",
+    "Review console byte-count/error semantics separately from already superseded fiber/unwind code."
+  ],
+  "current_successor_paths": {
+    "network_api": "shizukudos/win64/dlls/ws2_32/ws2_32.c",
+    "console_api": "shizukudos/win64/kernel32/k32_console.c",
+    "kernel32_gap_api": "shizukudos/win64/kernel32/k32_e1_gap.c",
+    "fiber_api": "shizukudos/win64/kernel32/k32_steam_fiber.c",
+    "growable_unwind": "shizukudos/win64/ntdll/unwind.c",
+    "syscall_diagnostics": "shizukudos/kernel64/syscall.c"
+  }
+}

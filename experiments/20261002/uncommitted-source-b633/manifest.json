@@ -243,6 +243,15 @@
       "bytes": 5273,
       "sha256": "2bdc0ddba2d1c27b2d6c397af10bd01c1f8f2459d49393f301e99ed502465495",
       "activation": "pending original owner review; not applied"
+    },
+    {
+      "group": "superseded-k32",
+      "origin_worktree": "/root/Win98-Modern-k32-native-ap-163f-20261002",
+      "origin_path": "shizukudos/kernel32/main.c",
+      "preserved_path": "experiments/20261002/uncommitted-source-b633/superseded-k32/shizukudos/kernel32/main.c",
+      "bytes": 2969,
+      "sha256": "137e3565079a14bce14cf8fb33cbd357ad856ad0a7b19a23592198838c96b447",
+      "activation": "obsolete boot-policy variant; preserve only, do not apply"
     }
   ],
   "VM_executed": false,
