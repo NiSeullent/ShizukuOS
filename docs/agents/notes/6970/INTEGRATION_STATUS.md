@@ -158,3 +158,32 @@ per-file copy was stopped only through its owned worker (reaped exit143),
 with no success receipt, cleanup or inferred NAS error. The archive operation
 was reaped exit0; archive, manifest, receipt and containing directories were
 fsynced. No quota, compiler/media/VM write or full product completion is claimed.
+
+After the actual retained handoff, a new complete RAM gate independently
+matched166 files/12,574,319 B,50 immediate entries and47 directories.
+Gate44,417 B SHA256:
+4e52917be43af1c8df07c9acc3d3dc64bd8e83ad782ce3860e134b81eb26a784.
+Command16,379 B SHA256:
+182469ff004fcc579b785482383e331fe5115d525dd34d6c4ec741f097e3742b.
+Combined60,796 B fits64KiB. Recorded local availability6,059,466,752 B
+remains below conservative21,488,464,115 B admission, retaining BLOCKED.
+No cleanup credit or historical gate rewrite follows.
+
+Four compiler-binary exclusions total2,612,035 B: the original three ELF
+files and actual retained PE ZIP. All remain in the full RAM accounting.
+Only twelve new nonbinary proofs883,623 B were archived in
+`/mnt/shizukuos-native-workspace-fada-20261001/6970/incremental-native-handoff-20261001T235405Z`.
+Archive901,120 B SHA256:
+5fa1576ebe9e10ee5af414319946d379db712d38347d93f79a19f0f5b06a8eb5.
+Manifest7,865 B SHA256:
+0eb5a9a30af35f3d5da56fcb4e3ba07a98c4b6080997330f22058dad6327d902.
+Receipt1,405 B SHA256:
+e140432ec43d62c5735084d1886edee1a20c711c8763180f324f82d3cbb886e5.
+Root verified all166 RAM sources before/after; two independent reviewers
+verified every new member, strict USTAR/accounting and current source pins.
+Whole lane61 files/18 directories/12,920,687 logical B includes all earlier
+archive/failed partials. Conservative NAS admission21,488,918,127 B retained
+the stronger20GiB floor; minimum observed61,356,249,088 B. Files and
+containing directories were fsynced; owned worker927010 reaped exit0.
+`all_RAM_persisted=false`; no binary copy, old archive recopy, deletion,
+NAS administration or local compiler/VM execution occurred.

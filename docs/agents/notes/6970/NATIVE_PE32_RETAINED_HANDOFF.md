@@ -81,6 +81,12 @@ preparation2519 B SHA256
 The compiler-binary ZIP is excluded from the FADA6970 evidence-only NAS
 lane. Earlier immutable RAM gates and NAS archive stay historical.
 
+The new ten nonbinary handoff records plus new gate/command are now
+independently verified in the incremental NAS evidence archive; see the
+dated storage checkpoint in [integration status](INTEGRATION_STATUS.md).
+The executable ZIP remains RAM-only and accessible through the retained
+GitHub artifact. This persistence does not change native execution scope.
+
 ## Consumer and runtime contract
 
 The native owner admits its own binary working space, verifies actual
